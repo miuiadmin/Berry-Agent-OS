@@ -57,4 +57,8 @@ export type IpcMessageType =
   | 'checkpoint.evaluate.result'
   | 'turn.correction'
   | 'superior.review.request'
-  | 'superior.review.result';
+  | 'superior.review.result'
+  | 'bus.invoke'
+  | 'bus.invoke.result'
+  | 'bus.capabilities.request'
+  | 'bus.capabilities.response';

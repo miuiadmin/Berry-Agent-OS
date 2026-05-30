@@ -49,6 +49,8 @@ export function runMemoryMigrations(conn: Database.Database): void {
     addTaskTraceColumn(conn);
     addTaskRequeueColumn(conn);
     migrateCreateKnowledgeEmbeddings(conn);
+    migrateCreateBrainDecisionsTable(conn);
+    migrateCreateSystemInsightsTable(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -843,5 +845,58 @@ function migrateCreateKnowledgeEmbeddings(conn: Database.Database): void {
       dimensions INTEGER NOT NULL,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
+  `);
+}
+
+function migrateCreateBrainDecisionsTable(conn: Database.Database): void {
+  if (tableExists(conn, 'brain_decisions')) return;
+  conn.exec(`
+    CREATE TABLE brain_decisions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      decision_type TEXT NOT NULL
+        CHECK(decision_type IN ('route','review','permission','correction')),
+      input_summary TEXT NOT NULL,
+      output_json TEXT NOT NULL,
+      confidence REAL,
+      outcome TEXT CHECK(outcome IN ('good','bad','neutral')),
+      feedback_source TEXT
+        CHECK(feedback_source IS NULL OR feedback_source IN ('user_correction','metric_signal','evolution_engine')),
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX idx_brain_decisions_type_session
+      ON brain_decisions(decision_type, session_id);
+    CREATE INDEX idx_brain_decisions_outcome
+      ON brain_decisions(outcome) WHERE outcome IS NOT NULL;
+    CREATE INDEX idx_brain_decisions_created
+      ON brain_decisions(created_at);
+  `);
+}
+
+function migrateCreateSystemInsightsTable(conn: Database.Database): void {
+  if (tableExists(conn, 'system_insights')) return;
+  conn.exec(`
+    CREATE TABLE system_insights (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL
+        CHECK(category IN ('routing','review','permission','evolution','performance')),
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.5,
+      status TEXT NOT NULL DEFAULT 'tentative'
+        CHECK(status IN ('tentative','validated','expired')),
+      source_decisions TEXT,
+      adopted_count INTEGER NOT NULL DEFAULT 0,
+      last_adopted_at INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      expired_at INTEGER
+    );
+
+    CREATE INDEX idx_system_insights_status_category
+      ON system_insights(status, category);
+    CREATE INDEX idx_system_insights_active
+      ON system_insights(status) WHERE status != 'expired';
   `);
 }

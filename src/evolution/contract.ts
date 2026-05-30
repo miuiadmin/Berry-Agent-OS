@@ -1,5 +1,6 @@
 import type { EvolutionRunResult } from './types.js';
 import type { CapabilityRequestPayload } from '../contracts/capabilities.js';
+import type { EvolutionExtractionInput } from './unified-extractor.js';
 
 export interface IEvolutionEngine {
   runAfterConversation(params: {
@@ -7,6 +8,8 @@ export interface IEvolutionEngine {
     userMessage: string;
     assistantResponse: string;
   }): EvolutionRunResult;
+
+  runAfterConversationAsync?(params: EvolutionExtractionInput): Promise<EvolutionRunResult>;
 }
 
 export interface ICapabilityService {

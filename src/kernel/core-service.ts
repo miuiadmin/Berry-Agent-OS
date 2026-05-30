@@ -40,7 +40,7 @@ import { initTracer, createSqliteSink } from '../observability/tracer.js';
 import { CronScheduler } from '../cron/index.js';
 import { createLlmClient } from '../llm/client.js';
 import { McpManager } from '../mcp/index.js';
-import { ToolRegistry, registerTool } from '../tools/index.js';
+import { ToolRegistry, registerTool, getToolRegistry } from '../tools/index.js';
 import { createDelegationTools } from '../tools/delegation-tools.js';
 import { createTeamTools } from '../tools/team-tools.js';
 import { OrgTreeManager } from '../workspaces/org-tree-manager.js';
@@ -132,6 +132,7 @@ export class CoreService {
   private logLevelResetTimer: ReturnType<typeof setTimeout> | null = null;
   private terminalRenderer: TerminalRenderer | null = null;
   private messageBus: MessageBus;
+  private capabilityBus: any = null;
 
   constructor() {
     this.config = loadConfig();
@@ -296,6 +297,13 @@ export class CoreService {
     const builtinLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus });
     runtimeRegistry.register('builtin', new BuiltinDriver(builtinLlm));
 
+    // Wire LLM-driven evolution extractor
+    if (this.config.memory.evolutionEnabled) {
+      const { UnifiedEvolutionExtractor } = await import('../evolution/unified-extractor.js');
+      const extractor = new UnifiedEvolutionExtractor(builtinLlm, getDb());
+      evolutionEngine.setExtractor(extractor);
+    }
+
     if (this.messageRouter.daemonBridge) {
       runtimeRegistry.register('claude_code', new ExternalRuntimeDriver(
         this.messageRouter.daemonBridge, this.eventBus, this.taskManager, 'claude_code',
@@ -307,6 +315,31 @@ export class CoreService {
 
     this.runtimeRegistry = runtimeRegistry;
     this.messageRouter.setRuntimeRegistry(runtimeRegistry);
+
+    // Capability Bus: unified capability invocation
+    const { CapabilityBus, PermissionGate, BusAuditLogger, registerToolsAsBusCapabilities } = await import('../bus/index.js');
+    const capabilityBus = new CapabilityBus();
+    const permissionGate = new PermissionGate();
+    permissionGate.setBrainJudge({
+      requestJudge: async (input) => {
+        const result = await this.messageRouter!.requestPermissionJudge({
+          sessionId: input.sessionId,
+          agentName: input.agentName,
+          toolName: input.capabilityName,
+          toolInput: typeof input.input === 'string' ? input.input : JSON.stringify(input.input),
+          dangerLevel: input.dangerLevel as any,
+        });
+        return { allowed: result.allowed, reason: result.reason };
+      },
+    });
+    capabilityBus.setPermissionGate(permissionGate);
+    capabilityBus.setAuditLogger(new BusAuditLogger(getDb()));
+
+    // Register existing tools on Bus
+    const allTools = getToolRegistry();
+    registerToolsAsBusCapabilities(capabilityBus, allTools);
+
+    this.capabilityBus = capabilityBus;
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();

@@ -24,12 +24,23 @@ export const agentManifestSchema = z.object({
   roles: z.array(z.enum(AGENT_ROLES)).default([]),
 
   entry: z.string().default('entry.ts'),
-  ipcProtocol: z.enum(IPC_PROTOCOLS).default('module-agent'),
+  ipcProtocol: z.enum([...IPC_PROTOCOLS, 'generic-loop'] as const).default('module-agent'),
 
   requiresBrainReview: z.boolean().default(false),
 
   dependencies: z.array(z.string()).default([]),
   capabilities: z.record(z.string(), z.unknown()).default({}),
+
+  capabilitiesProvided: z.array(z.object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    dangerLevel: z.enum(['safe', 'moderate', 'dangerous']).default('safe'),
+  })).default([]),
+
+  capabilitiesRequired: z.array(z.string().min(1)).default([]),
+
+  modelTier: z.enum(['fast', 'default', 'high']).optional(),
+  maxTurns: z.number().int().positive().optional(),
 });
 
 export type AgentManifest = z.infer<typeof agentManifestSchema>;

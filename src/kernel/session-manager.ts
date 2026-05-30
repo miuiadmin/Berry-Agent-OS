@@ -152,6 +152,28 @@ export class SessionManager {
 
   queueCapabilityEvolution(sessionId: string, userMessage: string, assistantResponse: string): void {
     if (!this.config.memory.evolutionEnabled || !this.evolutionEngine) return;
+
+    if (this.evolutionEngine.hasExtractor() && this.config.llm.mode !== 'takeover') {
+      this.evolutionEngine.runAfterConversationAsync({ sessionId, userMessage, assistantResponse })
+        .then((result) => {
+          if (result.proposals.length > 0) {
+            this.skillLoader?.refresh();
+            logger.info({
+              sessionId,
+              proposals: result.proposals.map((proposal) => ({
+                id: proposal.id,
+                type: proposal.type,
+                status: proposal.status,
+              })),
+            }, '能力自进化检查完成（LLM 驱动）');
+          }
+        })
+        .catch((err) => {
+          logger.error({ err, sessionId }, '能力自进化 LLM 提取失败');
+        });
+      return;
+    }
+
     try {
       const result = this.evolutionEngine.runAfterConversation({ sessionId, userMessage, assistantResponse });
       if (result.proposals.length > 0) {

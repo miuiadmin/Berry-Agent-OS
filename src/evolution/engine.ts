@@ -5,17 +5,27 @@ import { detectLearningSignals } from './detector.js';
 import { EvolutionProposalStore } from './store.js';
 import type { IEvolutionEngine } from './contract.js';
 import type { EvolutionRunResult, LearningSignal } from './types.js';
+import type { UnifiedEvolutionExtractor, EvolutionExtractionInput } from './unified-extractor.js';
 import { genId } from '../utils/id.js';
 
 export class EvolutionEngine implements IEvolutionEngine {
   private readonly proposals: EvolutionProposalStore;
   private readonly skills: SkillsRegistry;
   private readonly plugins: PluginRegistry;
+  private extractor: UnifiedEvolutionExtractor | null = null;
 
   constructor(private readonly db: Database) {
     this.proposals = new EvolutionProposalStore(db);
     this.skills = new SkillsRegistry(db);
     this.plugins = new PluginRegistry(db);
+  }
+
+  setExtractor(extractor: UnifiedEvolutionExtractor): void {
+    this.extractor = extractor;
+  }
+
+  hasExtractor(): boolean {
+    return this.extractor !== null;
   }
 
   runAfterConversation(input: {
@@ -25,6 +35,47 @@ export class EvolutionEngine implements IEvolutionEngine {
   }): EvolutionRunResult {
     const signals = detectLearningSignals(input.userMessage, input.assistantResponse);
     return this.runSignals(input, signals);
+  }
+
+  async runAfterConversationAsync(input: EvolutionExtractionInput): Promise<EvolutionRunResult> {
+    if (!this.extractor) {
+      return this.runAfterConversation(input);
+    }
+
+    const extraction = await this.extractor.extract(input);
+
+    // Store user facts in knowledge table
+    this.storeUserFacts(input.sessionId, extraction.userFacts);
+
+    // Process capability gaps through existing signal flow
+    return this.runSignals(input, extraction.capabilityGaps);
+  }
+
+  private storeUserFacts(sessionId: string, facts: Array<{ type: string; summary: string; confidence: number }>): void {
+    if (facts.length === 0) return;
+    try {
+      for (const fact of facts) {
+        const existing = this.db.prepare(
+          `SELECT id FROM knowledge WHERE summary = ? AND owner_key = 'user:owner' LIMIT 1`,
+        ).get(fact.summary) as { id: string } | undefined;
+        if (existing) continue;
+
+        this.db.prepare(`
+          INSERT INTO knowledge (id, owner_key, type, summary, evidence_kind, source, confidence, created_at, updated_at, last_seen_at)
+          VALUES (?, 'user:owner', ?, ?, 'inferred', 'conversation', ?, ?, ?, ?)
+        `).run(
+          genId('kn'),
+          mapFactTypeToKnowledgeType(fact.type),
+          fact.summary,
+          fact.confidence,
+          Date.now(),
+          Date.now(),
+          Date.now(),
+        );
+      }
+    } catch {
+      // knowledge table schema may differ during migration
+    }
   }
 
   runSignals(input: {
@@ -147,4 +198,15 @@ function buildEvidence(signal: LearningSignal, userMessage: string): string[] {
     `用户原话: ${userMessage}`,
     ...signal.observations,
   ];
+}
+
+function mapFactTypeToKnowledgeType(factType: string): string {
+  const mapping: Record<string, string> = {
+    preference: 'preference',
+    knowledge: 'fact',
+    habit: 'habit',
+    constraint: 'constraint',
+    goal: 'goal',
+  };
+  return mapping[factType] ?? 'fact';
 }

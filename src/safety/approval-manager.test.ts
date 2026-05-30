@@ -228,15 +228,15 @@ describe('ApprovalManager', () => {
       expect(token).not.toBeNull();
     });
 
-    it('ask 模式高风险暂时自动批准', () => {
+    it('ask 模式高风险返回 null 以触发 Brain judge', () => {
       const { manager } = createManager('ask');
       const req = manager.createRequest({ ...baseParams, riskLevel: 'high' });
 
       const token = manager.autoDecide(req);
-      expect(token).not.toBeNull();
+      expect(token).toBeNull();
 
       const updated = manager.getRequest(req.id);
-      expect(updated!.reason).toContain('Phase 3');
+      expect(updated!.status).toBe('pending');
     });
   });
 

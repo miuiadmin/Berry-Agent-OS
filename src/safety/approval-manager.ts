@@ -220,12 +220,8 @@ export class ApprovalManager {
             reason: '低风险自动批准',
           });
         }
-        // Phase 3: moderate/dangerous 需用户交互确认，当前自动批准
-        return this.resolve(request.id, {
-          verdict: 'approved',
-          source: 'rule',
-          reason: 'ask 模式暂时自动批准（Phase 3 加交互确认）',
-        });
+        // moderate/high risk → return null to escalate to Brain permission judge
+        return null;
     }
   }
 
