@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
 import { uploadFile, type UploadResponse } from "@/lib/api";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export interface Attachment {
@@ -39,7 +40,8 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         });
       }
     } catch (err) {
-      console.error("Upload failed:", err);
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      toast.error(msg);
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";

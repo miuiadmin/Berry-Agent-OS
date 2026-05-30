@@ -356,7 +356,8 @@ function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.Comp
   );
 }
 
-function formatUptime(seconds: number): string {
+function formatUptime(seconds: number | undefined | null): string {
+  if (seconds == null || seconds < 0) return "—";
   if (seconds < 60) return `${Math.round(seconds)}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;

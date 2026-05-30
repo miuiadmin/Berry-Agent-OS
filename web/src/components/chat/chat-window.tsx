@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck } from "lucide-react";
 import { apiGet, uploadFile } from "@/lib/api";
+import { toast } from "sonner";
 
 interface HistoryMessage {
   role: "user" | "assistant";
@@ -231,7 +232,8 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
           url: result.url,
         });
       } catch (err) {
-        console.error("Dropped file upload failed:", err);
+        const msg = err instanceof Error ? err.message : "File upload failed";
+        toast.error(msg);
       }
     }
     if (newAttachments.length > 0) {
