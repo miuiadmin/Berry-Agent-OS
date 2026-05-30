@@ -376,6 +376,10 @@ export class CoreService {
     const { TimeIntelligence } = await import('./time-intelligence.js');
     const timeIntelligence = new TimeIntelligence(getDb());
 
+    // Wire Phase D modules into Will Loop
+    willLoop.setImaginationEngine(imagination);
+    willLoop.setTimeIntelligence(timeIntelligence);
+
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
     const checkpointMgr = new TaskCheckpointManager(getDb());

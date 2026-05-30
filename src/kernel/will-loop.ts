@@ -1,6 +1,8 @@
 import type { LlmClient } from '../llm/client.js';
 import type { WorldModelRuntime } from './world-model.js';
 import type { ICapabilityBus, InvokeContext } from '../bus/contract.js';
+import type { ImaginationEngine } from './imagination-engine.js';
+import type { TimeIntelligence } from './time-intelligence.js';
 import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
 import { metrics } from '../observability/metrics.js';
@@ -70,6 +72,8 @@ export class WillLoop {
   private config: WillLoopConfig;
   private actionsThisHour: number[] = [];
   private recentDecisions: Array<{ description: string; timestamp: number }> = [];
+  private imagination: ImaginationEngine | null = null;
+  private timeIntelligence: TimeIntelligence | null = null;
 
   private willIterations = metrics.counter('will_loop_iterations_total');
   private willActions = metrics.counter('will_loop_actions_total');
@@ -82,6 +86,14 @@ export class WillLoop {
     config?: Partial<WillLoopConfig>,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  setImaginationEngine(engine: ImaginationEngine): void {
+    this.imagination = engine;
+  }
+
+  setTimeIntelligence(ti: TimeIntelligence): void {
+    this.timeIntelligence = ti;
   }
 
   start(): void {
@@ -116,6 +128,9 @@ export class WillLoop {
       return null;
     }
 
+    // Process time-based plan steps
+    await this.processTimeSteps();
+
     const worldSummary = this.worldModel.getSummary();
     const snapshot = this.worldModel.getSnapshot();
 
@@ -134,11 +149,58 @@ export class WillLoop {
         return { ...decision, action: 'observe' };
       }
 
+      // Imagination Engine: simulate before executing
+      if (decision.action === 'execute' && this.imagination && decision.capability) {
+        const simulation = await this.imagination.simulateAutonomousAction(
+          decision.capability,
+          decision.input,
+          decision.reason,
+        );
+        if (!simulation.shouldProceed) {
+          logger.info({ decision: decision.description, simReason: simulation.reasoning }, 'Will Loop 行动被想象力引擎否决，降级为建议');
+          return { ...decision, action: 'suggest' };
+        }
+      }
+
       await this.executeDecision(decision);
       return decision;
     } catch (err) {
       logger.error({ err }, 'Will Loop tick 失败');
       return null;
+    }
+  }
+
+  private async processTimeSteps(): Promise<void> {
+    if (!this.timeIntelligence || !this.bus) return;
+
+    const readySteps = this.timeIntelligence.getReadySteps();
+    for (const step of readySteps) {
+      if (step.capability) {
+        const ctx: InvokeContext = {
+          callChain: ['will-loop', 'time-plan'],
+          callerAgent: 'brain',
+          sessionId: 'time-plan',
+          correlationId: genId('tplan'),
+          timeout: 30_000,
+        };
+        const result = await this.bus.invoke(step.capability, step.input ?? {}, ctx);
+        if (result.ok) {
+          this.timeIntelligence.completeStep(step.id, typeof result.data === 'string' ? result.data : JSON.stringify(result.data));
+          logger.info({ stepId: step.id, capability: step.capability }, 'Time plan step executed');
+        } else {
+          this.timeIntelligence.failStep(step.id, result.error ?? 'Unknown error');
+          logger.warn({ stepId: step.id, error: result.error }, 'Time plan step failed');
+        }
+      } else {
+        this.timeIntelligence.completeStep(step.id, 'no capability specified');
+      }
+    }
+
+    // Check expired deadlines
+    const expired = this.timeIntelligence.getExpiredDeadlines();
+    for (const step of expired) {
+      this.timeIntelligence.failStep(step.id, 'Deadline expired');
+      logger.info({ stepId: step.id, description: step.description }, 'Time plan deadline expired');
     }
   }
 

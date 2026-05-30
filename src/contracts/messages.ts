@@ -187,6 +187,7 @@ export type EventMap = {
   'template.used': { templateId: string; workspaceId: string };
   'plugin.scope_changed': { pluginId: string; oldScope: string; newScope: string };
   'permission.user_confirm_needed': { requestId: string; sessionId: string; agentName: string; toolName: string; toolInput: string; dangerLevel: string; brainReason: string };
+  'delegation.user_needed': { delegationId: string; sessionId: string; requestedBy: string; title: string; description: string; urgency: string; options: string[] };
 };
 
 export type EventMessageMap = {
