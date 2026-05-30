@@ -72,7 +72,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const trackingId = msg.correlationId ?? msg.id;
 
     const reviewContent = buildReviewInput(turn.level, turn);
-    const systemPrompt = turn.level === 'A' ? SYSTEM_PROMPT_A : SYSTEM_PROMPT_BC;
+    let systemPrompt = turn.level === 'A' ? SYSTEM_PROMPT_A : SYSTEM_PROMPT_BC;
+
+    // Inject validated system insights for review decisions
+    const reviewInsights = recallInsightsForDecision(db, 'review', 3);
+    if (reviewInsights.length > 0) {
+      systemPrompt += formatInsightsBlock(reviewInsights);
+    }
 
     const messages: ModelMessage[] = [
       { role: 'user', content: reviewContent },
@@ -168,7 +174,14 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const payload = msg.payload as PermissionJudgeRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
-    const systemPrompt = buildPermissionJudgeSystemPrompt();
+    let systemPrompt = buildPermissionJudgeSystemPrompt();
+
+    // Inject validated system insights for permission decisions
+    const permInsights = recallInsightsForDecision(db, 'permission', 3);
+    if (permInsights.length > 0) {
+      systemPrompt += formatInsightsBlock(permInsights);
+    }
+
     const userPrompt = buildPermissionJudgeUserPrompt(
       payload.toolName,
       payload.toolInput,
