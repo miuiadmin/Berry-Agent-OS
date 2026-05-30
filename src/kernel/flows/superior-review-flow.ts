@@ -8,6 +8,7 @@ import type { SuperiorReviewRequest, SuperiorReviewResult } from '../../contract
 import type { TurnRecord } from '../../contracts/review.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
+import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
 import type Database from 'better-sqlite3';
 
 const logger = getLogger('superior-review-flow');
@@ -191,6 +192,14 @@ export class SuperiorReviewFlow {
       logger.debug({ reviewCorrelationId }, 'Review result for unknown/expired review');
       return;
     }
+
+    // Record superior review decision for evolution
+    const recorder = new BrainDecisionRecorder(this.ctx.db);
+    recorder.recordReviewDecision(
+      pending.workspaceId,
+      `superior-review:${pending.currentSuperiorName} depth:${pending.chainDepth}`,
+      result as any,
+    );
 
     clearTimeout(pending.timeoutId);
     this.pendingReviews.delete(reviewCorrelationId);

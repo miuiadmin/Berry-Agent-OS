@@ -2,6 +2,8 @@ import type { CorrectionFlowDeps } from '../delegation-orchestrator.js';
 import { getEventBus } from '../event-bus.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
+import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
+import { getDb } from '../../memory/db.js';
 import type { IpcMessage, IpcMessageType } from '../types.js';
 import type {
   TurnCheckpointPayload,
@@ -22,11 +24,13 @@ interface AgentIpc {
 }
 
 export class CorrectionFlow {
-  private pendingCheckpoints = new Map<string, { correlationId: string; timeoutId: ReturnType<typeof setTimeout> }>();
+  private pendingCheckpoints = new Map<string, { correlationId: string; timeoutId: ReturnType<typeof setTimeout>; sessionId?: string }>();
   private ctx: CorrectionFlowDeps;
+  private recorder: BrainDecisionRecorder;
 
   constructor(ctx: CorrectionFlowDeps) {
     this.ctx = ctx;
+    this.recorder = new BrainDecisionRecorder(getDb());
   }
 
   setup(reviewerIpc: AgentIpc): void {
@@ -105,6 +109,16 @@ export class CorrectionFlow {
     }
 
     logger.info({ delegationId, action: correction.action }, 'Applying correction');
+
+    // Record correction decision for evolution feedback
+    const entry2 = this.ctx.delegationManager.get(delegationId);
+    this.recorder.record({
+      sessionId: entry2?.sessionId ?? 'unknown',
+      decisionType: 'correction',
+      inputSummary: `delegation:${delegationId} trigger:checkpoint`,
+      outputJson: { action: correction.action, delegationId },
+    });
+
     this.applyCorrection(delegationId, correction);
   }
 

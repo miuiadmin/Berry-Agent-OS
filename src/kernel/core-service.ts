@@ -572,6 +572,12 @@ export class CoreService {
       }
     }
 
+    // Re-sync Bus with any tools registered after initial Bus setup (delegation/team tools)
+    const lateTools = getToolRegistry().filter(t => !capabilityBus.has(t.name));
+    if (lateTools.length > 0) {
+      registerToolsAsBusCapabilities(capabilityBus, lateTools);
+    }
+
     const telegramConfig = this.config.channels.telegram;
     if (telegramConfig.enabled && telegramConfig.token) {
       this.channelManager = new ChannelManager();
