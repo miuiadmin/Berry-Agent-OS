@@ -12,6 +12,8 @@ export type {
   IPermissionGate,
   PermissionGateDecision,
   IBusAuditLogger,
+  Trigger,
+  TriggerEvent,
 } from './contract.js';
 export { MAX_CALL_DEPTH } from './contract.js';
 export { CapabilityBus } from './capability-bus.js';

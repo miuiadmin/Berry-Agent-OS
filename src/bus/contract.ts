@@ -54,6 +54,25 @@ export interface ICapabilityBus {
   invokeAll(calls: Array<{ name: string; input: unknown }>, ctx: InvokeContext): Promise<InvokeResult[]>;
   pipeline(input: unknown, steps: string[], ctx: InvokeContext): Promise<InvokeResult>;
   race(calls: Array<{ name: string; input: unknown }>, ctx: InvokeContext): Promise<InvokeResult>;
+
+  emit(event: string, data: unknown): void;
+  on(event: string, handler: (data: unknown) => void): () => void;
+  registerTrigger(trigger: Trigger): void;
+  unregisterTrigger(name: string): void;
+}
+
+export interface TriggerEvent {
+  source: string;
+  description: string;
+  dangerLevel: DangerLevel;
+  context: unknown;
+  timestamp: number;
+}
+
+export interface Trigger {
+  name: string;
+  start(onEvent: (event: TriggerEvent) => void): void;
+  stop(): void;
 }
 
 export type CapabilityExecutor = (input: unknown, ctx: InvokeContext) => Promise<unknown>;

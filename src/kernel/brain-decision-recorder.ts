@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
 import { evolutionMetrics } from '../observability/evolution-metrics.js';
 
-export type BrainDecisionType = 'route' | 'review' | 'permission' | 'correction';
+export type BrainDecisionType = 'route' | 'review' | 'permission' | 'correction' | 'aggregated_insight';
 
 export interface RecordBrainDecisionInput {
   sessionId: string;
@@ -81,6 +81,34 @@ export class BrainDecisionRecorder {
     });
 
     evolutionMetrics.permissionJudge.inc({ verdict: judgment.allowed ? 'allowed' : 'denied' });
+  }
+
+  recordAggregatedInsight(sessionId: string, insight: string, evidence: string[]): string | null {
+    return this.record({
+      sessionId,
+      decisionType: 'aggregated_insight',
+      inputSummary: evidence.slice(0, 3).join('; ').slice(0, 500),
+      outputJson: { insight, evidence },
+    });
+  }
+
+  updateLesson(decisionId: string, lesson: string): void {
+    try {
+      this.db.prepare(`UPDATE brain_decisions SET lesson = ?, resolved_at = ? WHERE id = ?`).run(lesson, Date.now(), decisionId);
+    } catch { /* best-effort */ }
+  }
+
+  recallForDecision(decisionType: string, limit = 5): Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }> {
+    try {
+      return this.db.prepare(`
+        SELECT input_summary AS inputSummary, output_json AS outputJson, outcome, lesson
+        FROM brain_decisions
+        WHERE decision_type = ?
+        ORDER BY created_at DESC LIMIT ?
+      `).all(decisionType, limit) as Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }>;
+    } catch {
+      return [];
+    }
   }
 }
 

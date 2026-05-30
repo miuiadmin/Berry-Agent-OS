@@ -53,6 +53,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateSystemInsightsTable(conn);
     migrateCreateWorldModelTable(conn);
     migrateCreateSelfModificationLog(conn);
+    migrateBrainDecisionsAddColumns(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -951,4 +952,11 @@ function migrateCreateSelfModificationLog(conn: Database.Database): void {
     CREATE INDEX idx_self_mod_target_version
       ON self_modification_log(target, version DESC);
   `);
+}
+
+function migrateBrainDecisionsAddColumns(conn: Database.Database): void {
+  if (!tableExists(conn, 'brain_decisions')) return;
+  const cols = getColumns(conn, 'brain_decisions');
+  addColumnIfMissing(conn, cols, 'brain_decisions', 'lesson', 'TEXT');
+  addColumnIfMissing(conn, cols, 'brain_decisions', 'resolved_at', 'INTEGER');
 }

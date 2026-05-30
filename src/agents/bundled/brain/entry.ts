@@ -26,6 +26,7 @@ import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../.
 import type { SuperiorReviewRequest } from '../../../contracts/superior-review.js';
 import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle.js';
+import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.js';
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 
 const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
@@ -88,6 +89,18 @@ function getWorldModelSummary(db: import('better-sqlite3').Database): string {
 startResidentAgent(({ name, ipc, llm, db }) => {
   // Initialize prompt versioning for self-modification support
   const promptVersioning = new PromptVersioning(db);
+  const decisionRecorder = new BrainDecisionRecorder(db);
+
+  function recallDecisionsBlock(decisionType: string): string {
+    const decisions = decisionRecorder.recallForDecision(decisionType, 5);
+    if (decisions.length === 0) return '';
+    const lines = decisions.map(d => {
+      const outcome = d.outcome ? ` [${d.outcome}]` : '';
+      const lesson = d.lesson ? ` 教训: ${d.lesson}` : '';
+      return `- ${d.inputSummary.slice(0, 80)}${outcome}${lesson}`;
+    });
+    return `\n\n## 历史决策参考\n\n${lines.join('\n')}\n`;
+  }
 
   function getReviewPrompt(level: 'A' | 'B' | 'C'): string {
     const key = level === 'A' ? 'brain.review.a' : 'brain.review.bc';
@@ -178,6 +191,9 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       systemPrompt += formatInsightsBlock(insights);
       markInsightAdoptedByDecision(db, 'route', insights.map(i => i.id));
     }
+
+    // Recall historical routing decisions for dynamic context (§3.3)
+    systemPrompt += recallDecisionsBlock('route');
 
     const userPrompt = buildRoutingUserPrompt(
       payload.message,

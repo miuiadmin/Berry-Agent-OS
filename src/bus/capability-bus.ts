@@ -10,6 +10,8 @@ import type {
   IPermissionGate,
   IBusAuditLogger,
   BusAuditEntry,
+  Trigger,
+  TriggerEvent,
 } from './contract.js';
 import { MAX_CALL_DEPTH } from './contract.js';
 
@@ -17,6 +19,8 @@ export class CapabilityBus implements ICapabilityBus {
   private registry = new Map<string, { descriptor: CapabilityDescriptor; executor: CapabilityExecutor }>();
   private permissionGate: IPermissionGate | null = null;
   private auditLogger: IBusAuditLogger | null = null;
+  private triggers = new Map<string, Trigger>();
+  private eventListeners = new Map<string, Set<(data: unknown) => void>>();
 
   private invokeCounter = metrics.counter('bus_invoke_total');
   private invokeErrorCounter = metrics.counter('bus_invoke_error_total');
@@ -183,6 +187,53 @@ export class CapabilityBus implements ICapabilityBus {
       createdAt: Date.now(),
     };
     this.auditLogger.record(entry);
+  }
+
+  // --- Event emitter (for Trigger events and inter-capability communication) ---
+
+  emit(event: string, data: unknown): void {
+    const listeners = this.eventListeners.get(event);
+    if (!listeners) return;
+    for (const handler of listeners) {
+      try { handler(data); } catch { /* listener errors don't propagate */ }
+    }
+  }
+
+  on(event: string, handler: (data: unknown) => void): () => void {
+    let set = this.eventListeners.get(event);
+    if (!set) {
+      set = new Set();
+      this.eventListeners.set(event, set);
+    }
+    set.add(handler);
+    return () => { set!.delete(handler); };
+  }
+
+  // --- Trigger management ---
+
+  registerTrigger(trigger: Trigger): void {
+    if (this.triggers.has(trigger.name)) {
+      throw new Error(`Trigger "${trigger.name}" already registered`);
+    }
+    this.triggers.set(trigger.name, trigger);
+    trigger.start((event) => {
+      this.emit('trigger', event);
+    });
+  }
+
+  unregisterTrigger(name: string): void {
+    const trigger = this.triggers.get(name);
+    if (trigger) {
+      trigger.stop();
+      this.triggers.delete(name);
+    }
+  }
+
+  stopAllTriggers(): void {
+    for (const trigger of this.triggers.values()) {
+      trigger.stop();
+    }
+    this.triggers.clear();
   }
 }
 
