@@ -357,6 +357,24 @@ export class CoreService {
       maxActionsPerHour: this.config.autonomy.maxActionsPerHour,
     });
     willLoop.start();
+    this.willLoop = willLoop;
+
+    // Imagination Engine + Self-Modification Capability (Phase D.4-D.5)
+    const { ImaginationEngine } = await import('./imagination-engine.js');
+    const { SelfModificationAudit } = await import('./self-modification-audit.js');
+    const { registerSelfModificationCapabilities } = await import('./self-mod-capability.js');
+    const imagination = new ImaginationEngine(builtinLlm, getDb());
+    const selfModAudit = new SelfModificationAudit(getDb());
+    registerSelfModificationCapabilities(capabilityBus, {
+      audit: selfModAudit,
+      imagination,
+      requireSimulation: true,
+      minSimulationScore: 0.6,
+    });
+
+    // Time Intelligence (Phase D.5)
+    const { TimeIntelligence } = await import('./time-intelligence.js');
+    const timeIntelligence = new TimeIntelligence(getDb());
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
