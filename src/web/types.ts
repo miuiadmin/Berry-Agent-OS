@@ -28,4 +28,5 @@ export interface WebServerDependencies {
   templateService?: ITemplateService | null;
   asyncDelegationService?: IAsyncDelegationService | null;
   teamBuilderService?: ITeamBuilderService | null;
+  humanDelegationManager?: { resolve(id: string, response: string | null, status?: string): boolean } | null;
 }

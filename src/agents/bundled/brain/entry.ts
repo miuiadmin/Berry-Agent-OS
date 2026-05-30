@@ -26,8 +26,9 @@ import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../.
 import type { SuperiorReviewRequest } from '../../../contracts/superior-review.js';
 import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle.js';
+import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 
-const SYSTEM_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
+const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
 You are given a SUMMARY of the conversation turn. Evaluate whether the draft response is appropriate.
 
 Respond with valid JSON only:
@@ -43,7 +44,7 @@ Rules:
 - "modify": minor issues, provide a corrected version
 - "reject": harmful or completely wrong, provide a safe alternative or set reRoute to redirect`;
 
-const SYSTEM_PROMPT_BC = `You are a Brain Agent performing a thorough safety and quality review.
+const DEFAULT_PROMPT_BC = `You are a Brain Agent performing a thorough safety and quality review.
 You are given the FULL conversation turn including tool calls and their results. Review carefully.
 
 Respond with valid JSON only:
@@ -65,7 +66,35 @@ Pay special attention to:
 - Whether sensitive data is being exposed in the response
 - Whether the response accurately reflects tool results`;
 
+function getWorldModelSummary(db: import('better-sqlite3').Database): string {
+  try {
+    const row = db.prepare(`SELECT snapshot_json FROM world_model WHERE id = 'current'`).get() as { snapshot_json: string } | undefined;
+    if (!row) return '';
+    const snapshot = JSON.parse(row.snapshot_json);
+    const parts: string[] = [];
+    if (snapshot.user?.currentActivity) parts.push(`活动: ${snapshot.user.currentActivity}`);
+    if (snapshot.user?.energyLevel && snapshot.user.energyLevel !== 'unknown') parts.push(`精力: ${snapshot.user.energyLevel}`);
+    if (snapshot.user?.frustrationSignals > 2) parts.push(`注意: 挫败感信号(${snapshot.user.frustrationSignals})`);
+    if (snapshot.temporal?.upcomingDeadlines?.length > 0) {
+      const d = snapshot.temporal.upcomingDeadlines[0];
+      parts.push(`deadline: ${d.description}`);
+    }
+    return parts.join(' | ');
+  } catch {
+    return '';
+  }
+}
+
 startResidentAgent(({ name, ipc, llm, db }) => {
+  // Initialize prompt versioning for self-modification support
+  const promptVersioning = new PromptVersioning(db);
+
+  function getReviewPrompt(level: 'A' | 'B' | 'C'): string {
+    const key = level === 'A' ? 'brain.review.a' : 'brain.review.bc';
+    const versioned = promptVersioning.getActiveVersion(key);
+    return versioned?.content ?? (level === 'A' ? DEFAULT_PROMPT_A : DEFAULT_PROMPT_BC);
+  }
+
   // --- Handler 1: review.request (existing, enhanced with reRoute) ---
 
   ipc.onMessage('review.request', async (msg: IpcMessage) => {
@@ -73,7 +102,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const trackingId = msg.correlationId ?? msg.id;
 
     const reviewContent = buildReviewInput(turn.level, turn);
-    let systemPrompt = turn.level === 'A' ? SYSTEM_PROMPT_A : SYSTEM_PROMPT_BC;
+    let systemPrompt = getReviewPrompt(turn.level);
+
+    // Inject World Model context for review decisions
+    const worldSummary = getWorldModelSummary(db);
+    if (worldSummary) {
+      systemPrompt += `\n\n[World State] ${worldSummary}`;
+    }
 
     // Inject validated system insights for review decisions
     const reviewInsights = recallInsightsForDecision(db, 'review', 3);

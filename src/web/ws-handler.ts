@@ -35,6 +35,20 @@ export function createWsHandler(deps: WebServerDependencies) {
 
     logger.debug({ sessionId }, 'WebSocket 连接');
 
+    // Forward delegation events to this client
+    const delegationListener = deps.eventBus.on('delegation.user_needed' as any, (payload: any) => {
+      if ((ws as unknown as { readyState: number }).readyState === 1) {
+        ws.send(JSON.stringify({ type: 'delegation.needed', ...payload }));
+      }
+    });
+
+    // Forward permission confirmation events
+    const permissionListener = deps.eventBus.on('permission.user_confirm_needed' as any, (payload: any) => {
+      if ((ws as unknown as { readyState: number }).readyState === 1) {
+        ws.send(JSON.stringify({ type: 'permission.confirm_needed', ...payload }));
+      }
+    });
+
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
@@ -46,6 +60,8 @@ export function createWsHandler(deps: WebServerDependencies) {
 
     ws.on('close', () => {
       logger.debug({ sessionId }, 'WebSocket 断开');
+      delegationListener();
+      permissionListener();
     });
 
     const pingInterval = setInterval(() => {
@@ -105,6 +121,16 @@ function handleWsMessage(
     case 'interrupt': {
       const reason = msg.reason as string | undefined;
       deps.handleInterrupt(sessionId, reason, ws);
+      break;
+    }
+    case 'delegation.respond': {
+      const delegationId = msg.delegationId as string;
+      const response = msg.response as string | null;
+      if (delegationId && deps.humanDelegationManager) {
+        const status = response ? 'approved' : 'denied';
+        deps.humanDelegationManager.resolve(delegationId, response, status as any);
+        ws.send(JSON.stringify({ type: 'delegation.resolved', delegationId, status }));
+      }
       break;
     }
     default:
