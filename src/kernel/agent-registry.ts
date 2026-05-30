@@ -4,6 +4,7 @@ import { agentManifestSchema, type AgentManifest, type RegisteredAgent } from '.
 import type { AgentRole } from '../contracts/agents.js';
 import { getAppHome } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
+import { parse as parseYaml } from 'yaml';
 
 const logger = getLogger('agent-registry');
 
@@ -26,10 +27,21 @@ export class AgentRegistry {
     }
 
     const manifestDir = dirname(manifestPath);
-    const rawEntry = resolve(manifestDir, manifest.entry);
-    const entryPath = rawEntry.endsWith('.ts') && !existsSync(rawEntry) && existsSync(rawEntry.replace(/\.ts$/, '.js'))
-      ? rawEntry.replace(/\.ts$/, '.js')
-      : rawEntry;
+    let entryPath: string;
+
+    if (manifest.ipcProtocol === 'generic-loop') {
+      // Dynamic agents use the generic-loop bootstrap entry
+      entryPath = resolve(dirname(new URL(import.meta.url).pathname), '../agents/generic-loop-entry.ts');
+      if (!existsSync(entryPath)) {
+        entryPath = entryPath.replace(/\.ts$/, '.js');
+      }
+    } else {
+      const rawEntry = resolve(manifestDir, manifest.entry);
+      entryPath = rawEntry.endsWith('.ts') && !existsSync(rawEntry) && existsSync(rawEntry.replace(/\.ts$/, '.js'))
+        ? rawEntry.replace(/\.ts$/, '.js')
+        : rawEntry;
+    }
+
     const homeDir = join(getAppHome(), 'agents', manifest.name);
 
     const registered: RegisteredAgent = { manifest, manifestPath, entryPath, homeDir };
@@ -192,8 +204,13 @@ export class AgentRegistry {
 
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const manifestPath = join(dir, entry.name, 'agent.json');
-      if (!existsSync(manifestPath)) continue;
+      const agentDir = join(dir, entry.name);
+
+      // Try agent.json first, then agent.yaml
+      const jsonPath = join(agentDir, 'agent.json');
+      const yamlPath = join(agentDir, 'agent.yaml');
+      const manifestPath = existsSync(jsonPath) ? jsonPath : existsSync(yamlPath) ? yamlPath : null;
+      if (!manifestPath) continue;
 
       try {
         const manifest = this.loadManifest(manifestPath);
@@ -205,7 +222,10 @@ export class AgentRegistry {
   }
 
   private loadManifest(path: string): AgentManifest {
-    const raw = JSON.parse(readFileSync(path, 'utf-8'));
+    const content = readFileSync(path, 'utf-8');
+    const raw = path.endsWith('.yaml') || path.endsWith('.yml')
+      ? parseYaml(content)
+      : JSON.parse(content);
     return agentManifestSchema.parse(raw);
   }
 }

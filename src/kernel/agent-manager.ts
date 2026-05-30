@@ -103,6 +103,9 @@ export class AgentManager {
     }
     const env: Record<string, string> = { AGENT_NAME: name };
     if (homePath) env.BERRY_AGENT_HOME = homePath;
+    if (registered?.manifest.ipcProtocol === 'generic-loop') {
+      env.GENERIC_AGENT_CONFIG = registered.manifestPath;
+    }
     const agent = forkAgent(name, scriptPath, env);
     this.agents.set(name, agent);
 
