@@ -1,7 +1,4 @@
-"use client";
-
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   MessageCircle,
@@ -13,7 +10,7 @@ import {
   Moon,
   Sun,
 } from "lucide-react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -33,7 +30,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onNavigate }: AppSidebarProps) {
-  const pathname = usePathname();
+  const pathname = useLocation().pathname;
   const { theme, setTheme } = useTheme();
 
   return (
@@ -49,7 +46,7 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
           return (
             <Link
               key={item.href}
-              href={item.href}
+              to={item.href}
               onClick={onNavigate}
               className={cn(
                 "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
@@ -67,7 +64,7 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
       <Separator />
       <div className="p-2 space-y-1">
         <Link
-          href="/settings"
+          to="/settings"
           onClick={onNavigate}
           className={cn(
             "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",

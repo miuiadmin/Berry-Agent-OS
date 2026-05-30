@@ -1,11 +1,10 @@
-"use client";
-
 import { useEffect, useState } from "react";
+import { Outlet } from "react-router-dom";
 import { AppSidebar } from "./app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 
-export function DashboardLayout({ children }: { children: React.ReactNode }) {
+export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -45,7 +44,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           <div className="size-5 rounded-md bg-brand" />
           <span className="text-sm font-semibold">Berry</span>
         </div>
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto"><Outlet /></main>
       </div>
     </div>
   );

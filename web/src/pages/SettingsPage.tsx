@@ -1,6 +1,6 @@
 
 import { Suspense, useState, useEffect, useMemo, useCallback } from "react";
-import { useSearchParams, useRouter } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";

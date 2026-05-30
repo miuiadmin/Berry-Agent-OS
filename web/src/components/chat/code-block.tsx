@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/theme";
 import { highlight } from "@/lib/highlighter";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";

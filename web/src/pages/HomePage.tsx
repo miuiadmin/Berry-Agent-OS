@@ -1,7 +1,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import Link from "react-router-dom";
+import { Link } from "react-router-dom";
 import { queries, type TaskStatsDay } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -241,7 +241,7 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Coins className="size-4" />
-              <Link href="/usage" className="hover:text-foreground transition-colors">Tokens</Link>
+              <Link to="/usage" className="hover:text-foreground transition-colors">Tokens</Link>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -292,7 +292,7 @@ export default function HomePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">Recent Activity</CardTitle>
-            <Link href="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
               View all
             </Link>
           </CardHeader>
@@ -347,7 +347,7 @@ export default function HomePage() {
 function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.ComponentType<{ className?: string }>; label: string }) {
   return (
     <Link
-      href={href}
+      to={href}
       className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm hover:bg-accent transition-colors"
     >
       <Icon className="size-4 text-muted-foreground" />

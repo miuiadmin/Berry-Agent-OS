@@ -1,9 +1,7 @@
-"use client";
-
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/lib/theme";
 import { queries, type SearchResult } from "@/lib/api";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { cn } from "@/lib/utils";
@@ -37,7 +35,7 @@ export function CommandPalette() {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
+  const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
   const clearMessages = useChatStore((s) => s.clearMessages);
   const setSessionId = useChatStore((s) => s.setSessionId);
@@ -71,20 +69,20 @@ export function CommandPalette() {
     }
   }, [open]);
 
-  const navigate = useCallback((href: string) => {
+  const navigateRoute = useCallback((href: string) => {
     setOpen(false);
-    router.push(href);
-  }, [router]);
+    navigate(href);
+  }, [navigate]);
 
   const navItems: CommandItem[] = useMemo(() => [
-    { id: "nav-home", label: "Home", icon: LayoutDashboard, action: () => navigate("/"), section: "Navigation" },
-    { id: "nav-chat", label: "Chat", icon: MessageCircle, action: () => navigate("/chat"), section: "Navigation" },
-    { id: "nav-agents", label: "Agents", icon: Bot, action: () => navigate("/agents"), section: "Navigation" },
-    { id: "nav-tasks", label: "Tasks", icon: ListTodo, action: () => navigate("/tasks"), section: "Navigation" },
-    { id: "nav-conversations", label: "Conversations", icon: MessagesSquare, action: () => navigate("/conversations"), section: "Navigation" },
-    { id: "nav-usage", label: "Usage", icon: BarChart3, action: () => navigate("/usage"), section: "Navigation" },
-    { id: "nav-settings", label: "Settings", icon: Settings, action: () => navigate("/settings"), section: "Navigation" },
-  ], [navigate]);
+    { id: "nav-home", label: "Home", icon: LayoutDashboard, action: () => navigateRoute("/"), section: "Navigation" },
+    { id: "nav-chat", label: "Chat", icon: MessageCircle, action: () => navigateRoute("/chat"), section: "Navigation" },
+    { id: "nav-agents", label: "Agents", icon: Bot, action: () => navigateRoute("/agents"), section: "Navigation" },
+    { id: "nav-tasks", label: "Tasks", icon: ListTodo, action: () => navigateRoute("/tasks"), section: "Navigation" },
+    { id: "nav-conversations", label: "Conversations", icon: MessagesSquare, action: () => navigateRoute("/conversations"), section: "Navigation" },
+    { id: "nav-usage", label: "Usage", icon: BarChart3, action: () => navigateRoute("/usage"), section: "Navigation" },
+    { id: "nav-settings", label: "Settings", icon: Settings, action: () => navigateRoute("/settings"), section: "Navigation" },
+  ], [navigateRoute]);
 
   const actionItems: CommandItem[] = useMemo(() => [
     {
@@ -99,7 +97,7 @@ export function CommandPalette() {
       id: "action-shortcuts", label: "Keyboard Shortcuts", icon: Keyboard, section: "Actions",
       action: () => { setOpen(false); document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" })); },
     },
-  ], [theme, setTheme, clearMessages, setSessionId, navigate]);
+  ], [theme, setTheme, clearMessages, setSessionId, navigateRoute]);
 
   const conversationItems: CommandItem[] = useMemo(() => {
     if (!conversations) return [];
@@ -111,7 +109,7 @@ export function CommandPalette() {
       section: "Recent Conversations",
       action: () => { clearMessages(); setSessionId(conv.sessionId); navigate("/chat"); },
     }));
-  }, [conversations, clearMessages, setSessionId, navigate]);
+  }, [conversations, clearMessages, setSessionId, navigateRoute]);
 
   const searchItems: CommandItem[] = useMemo(() => {
     if (!searchResults?.results?.length) return [];
@@ -123,7 +121,7 @@ export function CommandPalette() {
       section: "Search Results",
       action: () => { clearMessages(); setSessionId(r.sessionId); navigate("/chat"); },
     }));
-  }, [searchResults, clearMessages, setSessionId, navigate]);
+  }, [searchResults, clearMessages, setSessionId, navigateRoute]);
 
   const allItems = useMemo(() => {
     const q = query.toLowerCase().trim();
