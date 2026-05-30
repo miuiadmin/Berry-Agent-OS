@@ -318,7 +318,7 @@ export class CoreService {
     this.messageRouter.setRuntimeRegistry(runtimeRegistry);
 
     // Capability Bus: unified capability invocation
-    const { CapabilityBus, PermissionGate, BusAuditLogger, registerToolsAsBusCapabilities } = await import('../bus/index.js');
+    const { CapabilityBus, PermissionGate, BusAuditLogger, registerToolsAsBusCapabilities, registerPermissionCapabilities } = await import('../bus/index.js');
     const capabilityBus = new CapabilityBus();
     const permissionGate = new PermissionGate();
     permissionGate.setBrainJudge({
@@ -339,6 +339,15 @@ export class CoreService {
     // Register existing tools on Bus
     const allTools = getToolRegistry();
     registerToolsAsBusCapabilities(capabilityBus, allTools);
+
+    // Register permission system as Bus capability (orchestrator slimming)
+    registerPermissionCapabilities(capabilityBus, {
+      permissionCoordinator: this.permissionCoordinator!,
+      requestBrainJudge: async (input) => {
+        const result = await this.messageRouter!.requestPermissionJudge(input);
+        return { allowed: result.allowed, reason: result.reason };
+      },
+    });
 
     this.capabilityBus = capabilityBus;
     this.messageRouter.setCapabilityBus(capabilityBus);
