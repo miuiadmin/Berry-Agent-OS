@@ -157,8 +157,8 @@ export function loadConfig(): AppConfig {
       providers: {
         anthropic: {
           ...fileAnthropicProvider,
-          ...(!fileLlm.baseUrl && !fileAnthropicProvider.baseUrl && process.env.ANTHROPIC_BASE_URL && { baseUrl: process.env.ANTHROPIC_BASE_URL }),
-          ...(!fileLlm.apiKey && !fileAnthropicProvider.apiKey && process.env.ANTHROPIC_API_KEY && { apiKey: process.env.ANTHROPIC_API_KEY }),
+          ...(!process.env.LLM_BASE_URL && !fileLlm.baseUrl && !fileAnthropicProvider.baseUrl && process.env.ANTHROPIC_BASE_URL && { baseUrl: process.env.ANTHROPIC_BASE_URL }),
+          ...(!process.env.LLM_API_KEY && !fileLlm.apiKey && !fileAnthropicProvider.apiKey && process.env.ANTHROPIC_API_KEY && { apiKey: process.env.ANTHROPIC_API_KEY }),
         },
         openai: {
           ...fileOpenaiProvider,

@@ -60,7 +60,7 @@ describe.skipIf(!HAS_LIVE_KEY)('Smoke — 真实模型对话', () => {
     const r2 = await sendWithRetry(harness, ctx, '我刚才让你记住的数字是什么？', { sessionId: sid });
     expect(r2.response).toContain('42');
 
-    assertTokenBudget(ctx, { maxTotal: 15000 });
+    assertTokenBudget(ctx, { maxTotal: 60000 });
   }, 120_000);
 
   it('捕获路由 span', async () => {

@@ -203,7 +203,7 @@ export class LlmClient {
         );
 
         const response: ModelResponse = {
-          requestId,
+          requestId: request.id,
           content: result.text,
           contentBlocks,
           toolCalls,
@@ -214,7 +214,7 @@ export class LlmClient {
 
         // Log completion
         if (this.requestLogger) {
-          try { this.requestLogger.logCompleted(requestId, response); } catch (e) { logger.debug({ err: e }, 'request log completed failed'); }
+          try { this.requestLogger.logCompleted(request.id, response); } catch (e) { logger.debug({ err: e }, 'request log completed failed'); }
         }
 
         // Record budget
@@ -266,7 +266,7 @@ export class LlmClient {
 
         if (!this.isRetryable(err) || attempt === maxRetries) {
           if (this.requestLogger) {
-            try { this.requestLogger.logFailed(requestId, err instanceof Error ? err.message : String(err)); } catch (e) { logger.debug({ err: e }, 'request log failed failed'); }
+            try { this.requestLogger.logFailed(request.id, err instanceof Error ? err.message : String(err)); } catch (e) { logger.debug({ err: e }, 'request log failed failed'); }
           }
           metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'error' });
           metrics.histogram('llm_request_duration_ms').observe(Date.now() - t0, { agent: agentName });
@@ -471,7 +471,7 @@ export class LlmClient {
               }
 
               const response: ModelResponse = {
-                requestId,
+                requestId: request.id,
                 content: finalText,
                 contentBlocks,
                 toolCalls,
@@ -481,7 +481,7 @@ export class LlmClient {
               };
 
               if (this.requestLogger) {
-                try { this.requestLogger.logCompleted(requestId, response); } catch (e) { logger.debug({ err: e }, 'request log completed failed'); }
+                try { this.requestLogger.logCompleted(request.id, response); } catch (e) { logger.debug({ err: e }, 'request log completed failed'); }
               }
               if (this.budgetController) {
                 try {
@@ -528,7 +528,7 @@ export class LlmClient {
         if (hasYielded || !this.isRetryable(err) || attempt === maxRetries) {
           this.circuitBreaker.recordFailure();
           if (this.requestLogger) {
-            try { this.requestLogger.logFailed(requestId, err instanceof Error ? err.message : String(err)); } catch (e) { logger.debug({ err: e }, 'request log failed failed'); }
+            try { this.requestLogger.logFailed(request.id, err instanceof Error ? err.message : String(err)); } catch (e) { logger.debug({ err: e }, 'request log failed failed'); }
           }
           metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'error' });
           metrics.histogram('llm_request_duration_ms').observe(Date.now() - t0, { agent: agentName });
