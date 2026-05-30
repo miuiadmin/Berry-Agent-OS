@@ -251,6 +251,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.handleRouteFallback(correlationId);
         return;
       }
+
+      // Enrich routing context with World Model summary
+      if (this.worldModelRef) {
+        const worldSummary = this.worldModelRef.getSummary();
+        if (worldSummary) {
+          payload = {
+            ...payload,
+            sessionContext: payload.sessionContext
+              ? `${payload.sessionContext}\n\n[世界模型] ${worldSummary}`
+              : `[世界模型] ${worldSummary}`,
+          };
+        }
+      }
+
       brain.ipc.send('route.request', orchestratorName, payload, correlationId);
     });
   }
@@ -906,6 +920,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response);
       this.sessionManager.queueEvolution(sessionId, pending.userMessage, response);
       this.sessionManager.queueCapabilityEvolution(sessionId, pending.userMessage, response);
+      this.worldModelRef?.updateFromConversation({
+        userMessage: pending.userMessage,
+        assistantResponse: response,
+        sessionId,
+      });
 
       getEventBus().emit('message.responded', {
         sessionId,
@@ -935,6 +954,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, response);
     this.sessionManager.queueEvolution(pending.sessionId, pending.userMessage, response);
     this.sessionManager.queueCapabilityEvolution(pending.sessionId, pending.userMessage, response);
+    this.worldModelRef?.updateFromConversation({
+      userMessage: pending.userMessage,
+      assistantResponse: response,
+      sessionId: pending.sessionId,
+    });
     pending.resolve(response);
   }
 
