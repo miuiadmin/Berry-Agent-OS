@@ -24,6 +24,7 @@ import {
 import type { IpcMessage } from '../../../kernel/types.js';
 import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../../contracts/routing.js';
 import type { SuperiorReviewRequest } from '../../../contracts/superior-review.js';
+import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 
 const SYSTEM_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
 You are given a SUMMARY of the conversation turn. Evaluate whether the draft response is appropriate.
@@ -63,7 +64,7 @@ Pay special attention to:
 - Whether sensitive data is being exposed in the response
 - Whether the response accurately reflects tool results`;
 
-startResidentAgent(({ name, ipc, llm }) => {
+startResidentAgent(({ name, ipc, llm, db }) => {
   // --- Handler 1: review.request (existing, enhanced with reRoute) ---
 
   ipc.onMessage('review.request', async (msg: IpcMessage) => {
@@ -116,7 +117,14 @@ startResidentAgent(({ name, ipc, llm }) => {
     const payload = msg.payload as RouteRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
-    const systemPrompt = buildRoutingSystemPrompt();
+    let systemPrompt = buildRoutingSystemPrompt();
+
+    // Inject validated system insights for routing decisions
+    const insights = recallInsightsForDecision(db, 'route', 5);
+    if (insights.length > 0) {
+      systemPrompt += formatInsightsBlock(insights);
+    }
+
     const userPrompt = buildRoutingUserPrompt(
       payload.message,
       payload.availableAgents,
