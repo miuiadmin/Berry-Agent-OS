@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect } from "react";
-import { useChatStore } from "@/lib/stores/chat-store";
+import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
 
 export function useChatSocket() {
-  const { sessionId, addMessage, appendToLast, setLastStatus, setLastProgress, setStreaming } = useChatStore();
+  const {
+    sessionId, addMessage, appendToLast, setLastStatus, setLastProgress, setStreaming,
+    setPendingDelegation, setPendingPermission,
+  } = useChatStore();
   const { connect, send, onMessage, status } = useWsStore();
 
   useEffect(() => {
@@ -37,13 +40,21 @@ export function useChatSocket() {
           setStreaming(false);
           break;
         }
+        case "delegation.needed": {
+          setPendingDelegation(data as unknown as DelegationRequest);
+          break;
+        }
+        case "permission.confirm_needed": {
+          setPendingPermission(data as unknown as PermissionConfirmRequest);
+          break;
+        }
       }
     });
     return unsub;
-  }, [onMessage, appendToLast, setLastStatus, setLastProgress, setStreaming]);
+  }, [onMessage, appendToLast, setLastStatus, setLastProgress, setStreaming, setPendingDelegation, setPendingPermission]);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
       if (status !== "connected") {
         connect(sessionId ?? undefined);
       }
@@ -54,6 +65,7 @@ export function useChatSocket() {
         content: text,
         timestamp: Date.now(),
         status: "complete",
+        attachments,
       });
 
       addMessage({
@@ -65,7 +77,7 @@ export function useChatSocket() {
       });
 
       setStreaming(true);
-      send({ type: "message", text, sessionId });
+      send({ type: "message", text, sessionId, attachments });
     },
     [status, connect, sessionId, addMessage, setStreaming, send]
   );
@@ -96,5 +108,21 @@ export function useChatSocket() {
     [status, connect, sessionId, addMessage, setStreaming, send]
   );
 
-  return { sendMessage, cancelGeneration, resendMessage, connectionStatus: status };
+  const respondDelegation = useCallback(
+    (delegationId: string, response: string | null, approved: boolean) => {
+      send({ type: "delegation.respond", delegationId, response, status: approved ? "approved" : "denied" });
+      setPendingDelegation(null);
+    },
+    [send, setPendingDelegation]
+  );
+
+  const respondPermission = useCallback(
+    (requestId: string, approved: boolean) => {
+      send({ type: approved ? "permissions.approve" : "permissions.deny", requestId });
+      setPendingPermission(null);
+    },
+    [send, setPendingPermission]
+  );
+
+  return { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission, connectionStatus: status };
 }

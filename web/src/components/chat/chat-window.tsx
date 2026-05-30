@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useChatSocket } from "@/hooks/use-chat-socket";
-import { useChatStore } from "@/lib/stores/chat-store";
+import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { ConnectionStatus } from "@/components/ui/connection-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { PanelLeft, AlertCircle, RefreshCw } from "lucide-react";
+import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck } from "lucide-react";
 import { apiGet, uploadFile } from "@/lib/api";
 
 interface HistoryMessage {
@@ -57,17 +57,94 @@ function HistoryError({ error, onRetry }: { error: string; onRetry: () => void }
   );
 }
 
+function DelegationDialog({
+  request,
+  onRespond,
+}: {
+  request: DelegationRequest;
+  onRespond: (delegationId: string, response: string | null, approved: boolean) => void;
+}) {
+  return (
+    <div className="absolute inset-x-0 bottom-20 z-20 mx-auto max-w-md px-4">
+      <div className="rounded-xl border border-border bg-background shadow-lg p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <UserCheck className="size-4 text-warning" />
+          <h4 className="text-sm font-medium">{request.title}</h4>
+          {request.urgency === "high" && (
+            <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Urgent</span>
+          )}
+        </div>
+        {request.description && (
+          <p className="text-xs text-muted-foreground">{request.description}</p>
+        )}
+        <p className="text-[11px] text-muted-foreground/70">Requested by: {request.requestedBy}</p>
+        <div className="flex items-center gap-2 justify-end">
+          {request.options.includes("deny") && (
+            <Button variant="outline" size="sm" onClick={() => onRespond(request.delegationId, null, false)}>
+              Deny
+            </Button>
+          )}
+          {request.options.includes("approve") && (
+            <Button size="sm" onClick={() => onRespond(request.delegationId, "approved", true)}>
+              Approve
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionConfirmDialog({
+  request,
+  onRespond,
+}: {
+  request: PermissionConfirmRequest;
+  onRespond: (requestId: string, approved: boolean) => void;
+}) {
+  return (
+    <div className="absolute inset-x-0 bottom-20 z-20 mx-auto max-w-md px-4">
+      <div className="rounded-xl border border-destructive/30 bg-background shadow-lg p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="size-4 text-destructive" />
+          <h4 className="text-sm font-medium">Permission Required</h4>
+        </div>
+        <div className="space-y-1 text-xs">
+          <p><span className="text-muted-foreground">Agent:</span> {request.agentName}</p>
+          <p><span className="text-muted-foreground">Tool:</span> {request.toolName}</p>
+          {request.toolInput && (
+            <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-muted/50 p-2 text-[11px] font-mono">{request.toolInput}</pre>
+          )}
+          {request.brainReason && (
+            <p className="text-muted-foreground italic">Reason: {request.brainReason}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 justify-end">
+          <Button variant="outline" size="sm" onClick={() => onRespond(request.requestId, false)}>
+            Deny
+          </Button>
+          <Button size="sm" onClick={() => onRespond(request.requestId, true)}>
+            Approve
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ChatWindowProps {
   onToggleSidebar?: () => void;
 }
 
 export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
-  const { sendMessage, cancelGeneration, resendMessage } = useChatSocket();
+  const { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission } = useChatSocket();
   const sessionId = useChatStore((s) => s.sessionId);
   const messages = useChatStore((s) => s.messages);
   const addMessage = useChatStore((s) => s.addMessage);
   const removeMessage = useChatStore((s) => s.removeMessage);
   const removeMessagesAfter = useChatStore((s) => s.removeMessagesAfter);
+  const pendingDelegation = useChatStore((s) => s.pendingDelegation);
+  const pendingPermission = useChatStore((s) => s.pendingPermission);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -123,13 +200,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   }, [removeMessagesAfter, removeMessage, sendMessage]);
 
   const handleSend = useCallback((text: string, attachments?: Attachment[]) => {
-    if (attachments?.length) {
-      const attachmentText = attachments.map((a) => `[${a.filename}](${a.url})`).join("\n");
-      const fullText = text ? `${text}\n\n${attachmentText}` : attachmentText;
-      sendMessage(fullText);
-    } else {
-      sendMessage(text);
-    }
+    sendMessage(text, attachments);
     setDroppedAttachments([]);
   }, [sendMessage]);
 
@@ -196,6 +267,12 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         <ConnectionStatus />
       </div>
       {renderContent()}
+      {pendingDelegation && (
+        <DelegationDialog request={pendingDelegation} onRespond={respondDelegation} />
+      )}
+      {pendingPermission && (
+        <PermissionConfirmDialog request={pendingPermission} onRespond={respondPermission} />
+      )}
       <ChatInput
         onSend={(text, attachments) => {
           handleSend(text, attachments);
