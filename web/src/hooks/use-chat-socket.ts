@@ -65,7 +65,7 @@ export function useChatSocket() {
       });
 
       setStreaming(true);
-      send({ type: "message", text });
+      send({ type: "message", text, sessionId });
     },
     [status, connect, sessionId, addMessage, setStreaming, send]
   );
@@ -91,7 +91,7 @@ export function useChatSocket() {
       });
 
       setStreaming(true);
-      send({ type: "message", text });
+      send({ type: "message", text, sessionId });
     },
     [status, connect, sessionId, addMessage, setStreaming, send]
   );

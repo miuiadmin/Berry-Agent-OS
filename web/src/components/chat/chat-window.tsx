@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useChatSocket } from "@/hooks/use-chat-socket";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
@@ -10,7 +10,7 @@ import { ConnectionStatus } from "@/components/ui/connection-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { PanelLeft, AlertCircle, RefreshCw } from "lucide-react";
-import { apiGet } from "@/lib/api";
+import { apiGet, uploadFile } from "@/lib/api";
 
 interface HistoryMessage {
   role: "user" | "assistant";
@@ -71,11 +71,14 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [droppedAttachments, setDroppedAttachments] = useState<Attachment[]>([]);
+  const loadedSessionRef = useRef<string | null>(null);
 
   const loadHistory = useCallback(() => {
-    if (!sessionId) return;
+    if (!sessionId || loadedSessionRef.current === sessionId) return;
     setHistoryError(null);
     setLoadingHistory(true);
+    loadedSessionRef.current = sessionId;
     apiGet<HistoryMessage[]>(`/api/conversations/${sessionId}?limit=200`)
       .then((history) => {
         if (!history?.length) return;
@@ -90,6 +93,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         }
       })
       .catch((err) => {
+        loadedSessionRef.current = null;
         setHistoryError(err instanceof Error ? err.message : "Unknown error");
       })
       .finally(() => {
@@ -100,7 +104,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   useEffect(() => {
     if (!sessionId || messages.length > 0) return;
     loadHistory();
-  }, [sessionId]);
+  }, [sessionId, messages.length, loadHistory]);
 
   const handleRetry = useCallback((errorMsgId: string) => {
     const msgs = useChatStore.getState().messages;
@@ -126,6 +130,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     } else {
       sendMessage(text);
     }
+    setDroppedAttachments([]);
   }, [sendMessage]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -138,9 +143,29 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setDragOver(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    const files = e.dataTransfer.files;
+    if (!files?.length) return;
+    const newAttachments: Attachment[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const result = await uploadFile(file);
+        newAttachments.push({
+          fileId: result.fileId,
+          filename: result.filename,
+          mimeType: result.mimeType,
+          size: result.size,
+          url: result.url,
+        });
+      } catch (err) {
+        console.error("Dropped file upload failed:", err);
+      }
+    }
+    if (newAttachments.length > 0) {
+      setDroppedAttachments((prev) => [...prev, ...newAttachments]);
+    }
   }, []);
 
   const renderContent = () => {
@@ -171,7 +196,14 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         <ConnectionStatus />
       </div>
       {renderContent()}
-      <ChatInput onSend={handleSend} onCancel={cancelGeneration} />
+      <ChatInput
+        onSend={(text, attachments) => {
+          handleSend(text, attachments);
+          setDroppedAttachments([]);
+        }}
+        onCancel={cancelGeneration}
+        externalAttachments={droppedAttachments}
+      />
     </div>
   );
 }

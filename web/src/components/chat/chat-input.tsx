@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { SendHorizontal, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useChatStore } from "@/lib/stores/chat-store";
@@ -10,24 +10,30 @@ import { cn } from "@/lib/utils";
 interface ChatInputProps {
   onSend: (text: string, attachments?: Attachment[]) => void;
   onCancel?: () => void;
+  externalAttachments?: Attachment[];
 }
 
-export function ChatInput({ onSend, onCancel }: ChatInputProps) {
+export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = useChatStore((s) => s.isStreaming);
 
+  const allAttachments = useMemo(
+    () => [...attachments, ...(externalAttachments ?? [])],
+    [attachments, externalAttachments],
+  );
+
   const handleSubmit = useCallback(() => {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming) return;
-    onSend(trimmed, attachments.length > 0 ? attachments : undefined);
+    if ((!trimmed && allAttachments.length === 0) || isStreaming) return;
+    onSend(trimmed, allAttachments.length > 0 ? allAttachments : undefined);
     setText("");
     setAttachments([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [text, attachments, isStreaming, onSend]);
+  }, [text, allAttachments, isStreaming, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -55,7 +61,7 @@ export function ChatInput({ onSend, onCancel }: ChatInputProps) {
 
   return (
     <div className="border-t border-border bg-background pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
-      <AttachmentPreview attachments={attachments} onRemove={handleRemoveAttachment} />
+      <AttachmentPreview attachments={allAttachments} onRemove={handleRemoveAttachment} />
       <div className="p-3 sm:p-4 pt-2">
         <div className="mx-auto flex max-w-3xl items-end gap-2">
           <FileUploadButton onAttach={handleAttach} disabled={isStreaming} />
@@ -91,7 +97,7 @@ export function ChatInput({ onSend, onCancel }: ChatInputProps) {
             <Button
               size="icon"
               onClick={handleSubmit}
-              disabled={!text.trim() && attachments.length === 0}
+              disabled={!text.trim() && allAttachments.length === 0}
               className="shrink-0 size-10 sm:size-9"
             >
               <SendHorizontal className="size-4" />
