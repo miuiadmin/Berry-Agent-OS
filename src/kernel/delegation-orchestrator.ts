@@ -109,6 +109,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private brainDecisionRecorder: BrainDecisionRecorder | null = null;
   private capabilityBusRef: ICapabilityBus | null = null;
   private worldModelRef: any = null;
+  private suggestionQueueRef: any = null;
 
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
@@ -172,6 +173,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   setWorldModel(worldModel: any): void {
     this.worldModelRef = worldModel;
+  }
+
+  setSuggestionQueue(queue: any): void {
+    this.suggestionQueueRef = queue;
   }
 
   private get proxyDeps(): ProxyHandlersDeps {
@@ -261,6 +266,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             sessionContext: payload.sessionContext
               ? `${payload.sessionContext}\n\n[世界模型] ${worldSummary}`
               : `[世界模型] ${worldSummary}`,
+          };
+        }
+      }
+
+      // Inject pending suggestions from Will Loop
+      if (this.suggestionQueueRef) {
+        const suggestionsBlock = this.suggestionQueueRef.buildPromptBlock(payload.sessionId);
+        if (suggestionsBlock) {
+          payload = {
+            ...payload,
+            sessionContext: (payload.sessionContext ?? '') + suggestionsBlock,
           };
         }
       }

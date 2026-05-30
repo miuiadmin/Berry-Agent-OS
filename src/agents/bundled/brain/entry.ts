@@ -95,6 +95,16 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     return versioned?.content ?? (level === 'A' ? DEFAULT_PROMPT_A : DEFAULT_PROMPT_BC);
   }
 
+  function getRoutingPrompt(): string {
+    const versioned = promptVersioning.getActiveVersion('brain.routing');
+    return versioned?.content ?? buildRoutingSystemPrompt();
+  }
+
+  function getPermissionPrompt(): string {
+    const versioned = promptVersioning.getActiveVersion('brain.permission');
+    return versioned?.content ?? buildPermissionJudgeSystemPrompt();
+  }
+
   // --- Handler 1: review.request (existing, enhanced with reRoute) ---
 
   ipc.onMessage('review.request', async (msg: IpcMessage) => {
@@ -160,7 +170,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const payload = msg.payload as RouteRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
-    let systemPrompt = buildRoutingSystemPrompt();
+    let systemPrompt = getRoutingPrompt();
 
     // Inject validated system insights for routing decisions
     const insights = recallInsightsForDecision(db, 'route', 5);
@@ -217,7 +227,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const payload = msg.payload as PermissionJudgeRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
-    let systemPrompt = buildPermissionJudgeSystemPrompt();
+    let systemPrompt = getPermissionPrompt();
 
     // Inject validated system insights for permission decisions
     const permInsights = recallInsightsForDecision(db, 'permission', 3);

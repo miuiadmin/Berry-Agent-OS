@@ -389,6 +389,16 @@ export class CoreService {
     willLoop.setImaginationEngine(imagination);
     willLoop.setTimeIntelligence(timeIntelligence);
 
+    // Suggestion Queue: Will Loop stores suggestions, Brain delivers on next interaction
+    const { SuggestionQueue } = await import('./suggestion-queue.js');
+    const suggestionQueue = new SuggestionQueue(getDb());
+    willLoop.setSuggestionQueue(suggestionQueue);
+    this.messageRouter.setSuggestionQueue(suggestionQueue);
+
+    // Register Time Intelligence as Bus capabilities
+    const { registerTimeIntelligenceCapabilities } = await import('../bus/time-capability.js');
+    registerTimeIntelligenceCapabilities(capabilityBus, timeIntelligence);
+
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
     const checkpointMgr = new TaskCheckpointManager(getDb());

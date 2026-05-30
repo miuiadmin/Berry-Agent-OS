@@ -3,6 +3,7 @@ import type { WorldModelRuntime } from './world-model.js';
 import type { ICapabilityBus, InvokeContext } from '../bus/contract.js';
 import type { ImaginationEngine } from './imagination-engine.js';
 import type { TimeIntelligence } from './time-intelligence.js';
+import type { SuggestionQueue } from './suggestion-queue.js';
 import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
 import { metrics } from '../observability/metrics.js';
@@ -74,6 +75,7 @@ export class WillLoop {
   private recentDecisions: Array<{ description: string; timestamp: number }> = [];
   private imagination: ImaginationEngine | null = null;
   private timeIntelligence: TimeIntelligence | null = null;
+  private suggestionQueue: SuggestionQueue | null = null;
 
   private willIterations = metrics.counter('will_loop_iterations_total');
   private willActions = metrics.counter('will_loop_actions_total');
@@ -94,6 +96,10 @@ export class WillLoop {
 
   setTimeIntelligence(ti: TimeIntelligence): void {
     this.timeIntelligence = ti;
+  }
+
+  setSuggestionQueue(queue: SuggestionQueue): void {
+    this.suggestionQueue = queue;
   }
 
   start(): void {
@@ -310,6 +316,16 @@ export class WillLoop {
 
     if (decision.action === 'suggest' || decision.action === 'prepare') {
       logger.info({ action: decision.action, description: decision.description }, 'Will Loop 产生建议/方案');
+      if (this.suggestionQueue) {
+        this.suggestionQueue.push({
+          source: 'will_loop',
+          title: decision.description,
+          description: decision.reason,
+          capability: decision.capability,
+          input: decision.input,
+          urgency: decision.dangerLevel === 'dangerous' ? 'high' : 'normal',
+        });
+      }
     }
   }
 
