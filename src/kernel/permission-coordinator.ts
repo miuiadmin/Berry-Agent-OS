@@ -71,7 +71,8 @@ export class PermissionCoordinator {
     if (token) {
       return { allowed: true, tokenId: token.id };
     }
-    return { allowed: false, reason: '审批被拒绝' };
+    // autoDecide returned null → needs Brain judge or user confirmation
+    return { allowed: false, requiresReview: true, reason: '需要 Brain 审批', requestId: request.id };
   }
 
   checkAndIssueSimple(params: { agentName: string; sessionId: string; toolName: string; toolInput: string; dangerLevel: DangerLevel }): PermissionResultPayload {
