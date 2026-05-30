@@ -3,6 +3,7 @@ import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { detectLearningSignals, parseLearningSignalsFromText } from '../../../evolution/detector.js';
 import { checkEvolutionTriggers, type EvolutionTriggerSignal } from '../../../observability/evolution-metrics.js';
+import { runInsightsLifecycle } from '../../../kernel/insights-lifecycle.js';
 import { genId } from '../../../utils/id.js';
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
@@ -63,12 +64,15 @@ async function handleMetricAnalysis(
   payload: AgentTaskPayload,
   context: { llm: import('../../../llm/client.js').LlmClient },
 ): Promise<Record<string, unknown>> {
+  const db = getDb();
+
+  // Run insights lifecycle cleanup (validate promoted, expire stale)
+  let lifecycle = runInsightsLifecycle(db);
+
   const triggers = checkEvolutionTriggers();
   if (triggers.length === 0) {
-    return { kind: 'metric_analysis', insights: [], reason: 'no triggers fired' };
+    return { kind: 'metric_analysis', insights: [], lifecycle, reason: 'no triggers fired' };
   }
-
-  const db = getDb();
 
   // Gather recent brain decisions for context
   const recentDecisions = db.prepare(`
@@ -113,10 +117,14 @@ async function handleMetricAnalysis(
     }
   }
 
+  // Run lifecycle again after storing new insights
+  lifecycle = runInsightsLifecycle(db);
+
   return {
     kind: 'metric_analysis',
     triggersDetected: triggers.map(t => t.type),
     insights: insights.map(i => ({ category: i.category, insight: i.insight })),
+    lifecycle,
   };
 }
 
