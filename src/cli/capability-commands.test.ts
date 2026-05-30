@@ -135,9 +135,9 @@ async function runCli(args: string[]): Promise<void> {
 }
 
 function initTempDb(): void {
-  const dir = mkdtempSync(join(tmpdir(), 'berryagent-capability-cli-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'agent-test-capability-cli-test-'));
   tempDirs.push(dir);
   setAppHome(dir);
-  initDb(join(dir, 'data', 'berry.db'));
+  initDb(join(dir, 'data', 'agent.db'));
   closeDb();
 }

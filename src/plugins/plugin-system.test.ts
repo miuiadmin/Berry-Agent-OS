@@ -72,8 +72,8 @@ describe('plugin system', () => {
 });
 
 function initTempDb(): void {
-  const dir = mkdtempSync(join(tmpdir(), 'berryagent-plugin-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'agent-test-plugin-test-'));
   tempDirs.push(dir);
   setAppHome(dir);
-  initDb(join(dir, 'data', 'berry.db'));
+  initDb(join(dir, 'data', 'agent.db'));
 }

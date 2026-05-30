@@ -12,7 +12,7 @@ function loadDaemonConfig(): DaemonConfig {
     }
   }
 
-  const configPath = process.env.DAEMON_CONFIG_PATH ?? resolve(process.env.HOME ?? '', '.berryagent', 'daemon.json');
+  const configPath = process.env.DAEMON_CONFIG_PATH ?? resolve(process.env.HOME ?? '', '.agent-home', 'daemon.json');
 
   if (configPath && existsSync(configPath)) {
     try {
@@ -27,7 +27,7 @@ function loadDaemonConfig(): DaemonConfig {
 }
 
 function getSocketPath(): string {
-  return process.env.DAEMON_SOCKET_PATH ?? resolve(process.env.HOME ?? '', '.berryagent', 'run', 'berry.sock');
+  return process.env.DAEMON_SOCKET_PATH ?? resolve(process.env.HOME ?? '', '.agent-home', 'run', 'agent.sock');
 }
 
 async function main(): Promise<void> {

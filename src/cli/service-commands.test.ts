@@ -5,24 +5,24 @@ import { buildServiceEnv, applyServiceEnvToCurrentProcess } from './service-comm
 import { getAppHome, getSocketPath, setAppHome } from '../utils/paths.js';
 
 describe('service start options', () => {
-  const savedHome = process.env.BERRY_HOME;
-  const savedSocket = process.env.BERRY_SOCKET_PATH;
+  const savedHome = process.env.SERVICE_HOME;
+  const savedSocket = process.env.SERVICE_SOCKET_PATH;
   const savedMode = process.env.BERRY_LLM_MODE;
 
   afterEach(() => {
-    restoreEnv('BERRY_HOME', savedHome);
-    restoreEnv('BERRY_SOCKET_PATH', savedSocket);
+    restoreEnv('SERVICE_HOME', savedHome);
+    restoreEnv('SERVICE_SOCKET_PATH', savedSocket);
     restoreEnv('BERRY_LLM_MODE', savedMode);
-    setAppHome(savedHome ?? join(tmpdir(), 'berryagent-test-home-reset'));
+    setAppHome(savedHome ?? join(tmpdir(), 'agent-test-home-reset'));
   });
 
   it('测试模式默认使用 mock LLM 和临时数据目录', () => {
-    process.env.BERRY_HOME = '/existing/home';
+    process.env.SERVICE_HOME = '/existing/home';
 
     const env = buildServiceEnv({ test: true });
 
     expect(env.BERRY_LLM_MODE).toBe('mock');
-    expect(env.BERRY_HOME).toContain('berry-test-');
+    expect(env.SERVICE_HOME).toContain('agent-test-');
   });
 
   it('显式 data-dir 和 socket 会应用到当前前台进程', () => {

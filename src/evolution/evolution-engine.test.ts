@@ -159,8 +159,8 @@ describe('evolution engine', () => {
 });
 
 function initTempDb(): void {
-  const dir = mkdtempSync(join(tmpdir(), 'berryagent-evolution-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'agent-test-evolution-test-'));
   tempDirs.push(dir);
   setAppHome(dir);
-  initDb(join(dir, 'data', 'berry.db'));
+  initDb(join(dir, 'data', 'agent.db'));
 }

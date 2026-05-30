@@ -178,7 +178,7 @@ export function registerTestCommands(program: Command): void {
       if (opts.json) {
         renderer.json(info);
       } else {
-        renderer.info(`BERRY_HOME=${info.berryHome}`);
+        renderer.info(`SERVICE_HOME=${info.berryHome}`);
         renderer.info(`BERRY_LLM_MODE=${info.llmMode}`);
         renderer.info(`TZ=${info.tz}`);
         renderer.info(`LANG=${info.lang}`);

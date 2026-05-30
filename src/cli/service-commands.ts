@@ -16,7 +16,7 @@ export function registerServiceCommands(program: Command): void {
     .description('启动 Berry 服务')
     .option('--test', '测试模式（使用 mock LLM，临时数据目录）')
     .option('--foreground', '前台运行（不 detach）')
-    .option('--data-dir <path>', '覆盖 BERRY_HOME 数据目录')
+    .option('--data-dir <path>', '覆盖 SERVICE_HOME 数据目录')
     .option('--socket <path>', '覆盖 socket 路径')
     .option('--json', '以 JSON 格式输出启动信息')
     .action(async (opts: { test?: boolean; foreground?: boolean; dataDir?: string; socket?: string; json?: boolean }) => {
@@ -24,7 +24,7 @@ export function registerServiceCommands(program: Command): void {
       if (opts.json) renderer.setMode('json');
       const env = buildServiceEnv(opts);
       applyServiceEnvToCurrentProcess(env);
-      const appHome = env.BERRY_HOME ?? getAppHome();
+      const appHome = env.SERVICE_HOME ?? getAppHome();
 
       if (opts.test && !opts.json) {
         renderer.info(`测试模式: 数据目录 ${appHome}`);
@@ -44,7 +44,7 @@ export function registerServiceCommands(program: Command): void {
           mode: 'foreground',
           pid: process.pid,
           appHome,
-          socketPath: env.BERRY_SOCKET_PATH ?? getSocketPath(),
+          socketPath: env.SERVICE_SOCKET_PATH ?? getSocketPath(),
           test: opts.test === true,
         }, opts.json === true);
         return;
@@ -61,7 +61,7 @@ export function registerServiceCommands(program: Command): void {
             alreadyRunning: true,
             pid,
             appHome,
-            socketPath: env.BERRY_SOCKET_PATH ?? getSocketPath(),
+            socketPath: env.SERVICE_SOCKET_PATH ?? getSocketPath(),
             test: opts.test === true,
           }, opts.json === true);
           return;
@@ -91,7 +91,7 @@ export function registerServiceCommands(program: Command): void {
         mode: 'detached',
         pid: child.pid ?? null,
         appHome,
-        socketPath: env.BERRY_SOCKET_PATH ?? getSocketPath(),
+        socketPath: env.SERVICE_SOCKET_PATH ?? getSocketPath(),
         test: opts.test === true,
       }, opts.json === true);
     });
@@ -179,15 +179,15 @@ export function buildServiceEnv(opts: ServiceStartOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
 
   if (opts.dataDir) {
-    env.BERRY_HOME = opts.dataDir;
+    env.SERVICE_HOME = opts.dataDir;
   }
   if (opts.socket) {
-    env.BERRY_SOCKET_PATH = opts.socket;
+    env.SERVICE_SOCKET_PATH = opts.socket;
   }
   if (opts.test) {
     env.BERRY_LLM_MODE = 'mock';
     if (!opts.dataDir) {
-      env.BERRY_HOME = mkdtempSync(join(tmpdir(), 'berry-test-'));
+      env.SERVICE_HOME = mkdtempSync(join(tmpdir(), 'agent-test-'));
     }
   }
 
@@ -195,14 +195,14 @@ export function buildServiceEnv(opts: ServiceStartOptions): NodeJS.ProcessEnv {
 }
 
 export function applyServiceEnvToCurrentProcess(env: NodeJS.ProcessEnv): void {
-  if (env.BERRY_HOME) {
-    process.env.BERRY_HOME = env.BERRY_HOME;
-    setAppHome(env.BERRY_HOME);
+  if (env.SERVICE_HOME) {
+    process.env.SERVICE_HOME = env.SERVICE_HOME;
+    setAppHome(env.SERVICE_HOME);
   }
-  if (env.BERRY_SOCKET_PATH) {
-    process.env.BERRY_SOCKET_PATH = env.BERRY_SOCKET_PATH;
+  if (env.SERVICE_SOCKET_PATH) {
+    process.env.SERVICE_SOCKET_PATH = env.SERVICE_SOCKET_PATH;
   } else {
-    delete process.env.BERRY_SOCKET_PATH;
+    delete process.env.SERVICE_SOCKET_PATH;
   }
   if (env.BERRY_LLM_MODE) {
     process.env.BERRY_LLM_MODE = env.BERRY_LLM_MODE;

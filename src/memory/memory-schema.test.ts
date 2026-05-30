@@ -431,9 +431,9 @@ describe('memory schema', () => {
 });
 
 function makeDbPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'berryagent-memory-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'agent-test-memory-test-'));
   tempDirs.push(dir);
-  return join(dir, 'berryagent.db');
+  return join(dir, 'agent.db');
 }
 
 function tableColumns(db: Database.Database, table: string): string[] {

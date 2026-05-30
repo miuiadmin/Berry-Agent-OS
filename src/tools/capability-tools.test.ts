@@ -61,8 +61,8 @@ describe('capability tools', () => {
 });
 
 function initTempDb(): void {
-  const dir = mkdtempSync(join(tmpdir(), 'berryagent-capability-tools-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'agent-test-capability-tools-test-'));
   tempDirs.push(dir);
   setAppHome(dir);
-  initDb(join(dir, 'data', 'berry.db'));
+  initDb(join(dir, 'data', 'agent.db'));
 }

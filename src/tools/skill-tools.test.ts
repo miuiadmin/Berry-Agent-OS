@@ -14,7 +14,7 @@ let tools: ToolDefinition[];
 
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'berry-skill-tools-'));
-  process.env.BERRY_HOME = tempDir;
+  process.env.SERVICE_HOME = tempDir;
   const dbPath = join(tempDir, 'test.db');
   db = initDb(dbPath);
   const registry = new SkillsRegistry(db);
@@ -24,7 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   closeDb();
-  delete process.env.BERRY_HOME;
+  delete process.env.SERVICE_HOME;
   rmSync(tempDir, { recursive: true, force: true });
 });
 

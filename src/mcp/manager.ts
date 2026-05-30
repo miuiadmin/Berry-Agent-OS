@@ -171,7 +171,7 @@ export class McpManager implements IMcpManager {
       const { transport, type: transportType } = createTransport(config, oauthProvider);
 
       const client = new Client(
-        { name: 'berryagent', version: '1.0.0' },
+        { name: 'agent', version: '1.0.0' },
         { capabilities: { sampling: {}, roots: { listChanged: true } } },
       );
 

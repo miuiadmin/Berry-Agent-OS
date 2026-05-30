@@ -150,15 +150,15 @@ describe('RunContext', () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'obs-test-'));
-    savedHome = process.env.BERRY_HOME ?? '';
-    process.env.BERRY_HOME = tmpDir;
+    savedHome = process.env.SERVICE_HOME ?? '';
+    process.env.SERVICE_HOME = tmpDir;
     setAppHome(tmpDir);
   });
 
   afterEach(() => {
-    if (savedHome) process.env.BERRY_HOME = savedHome;
-    else delete process.env.BERRY_HOME;
-    setAppHome(savedHome || join(homedir(), '.berryagent'));
+    if (savedHome) process.env.SERVICE_HOME = savedHome;
+    else delete process.env.SERVICE_HOME;
+    setAppHome(savedHome || join(homedir(), '.agent-home'));
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

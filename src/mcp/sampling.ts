@@ -99,7 +99,7 @@ export class SamplingHandler {
   }
 }
 
-// ─── Message Conversion: MCP → berryagent ──────────────────────
+// ─── Message Conversion: MCP → agent ──────────────────────
 
 function convertSamplingMessages(messages: SamplingMessage[]): ModelMessage[] {
   return messages.map(msg => {
@@ -146,7 +146,7 @@ function extractToolResultText(content: unknown): string {
     .join('\n');
 }
 
-// ─── Result Conversion: berryagent → MCP ───────────────────────
+// ─── Result Conversion: agent → MCP ───────────────────────
 
 function convertToSamplingResult(
   contentBlocks: ModelContentBlock[],

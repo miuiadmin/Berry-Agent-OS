@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 
-let appHome = process.env.BERRY_HOME ?? join(homedir(), '.berryagent');
+let appHome = process.env.SERVICE_HOME ?? join(homedir(), '.agent-home');
 
 export function getAppHome(): string {
   return appHome;
@@ -13,7 +13,7 @@ export function setAppHome(path: string): void {
 }
 
 export function getSocketPath(): string {
-  return process.env.BERRY_SOCKET_PATH ?? join(getAppHome(), 'run', 'berry.sock');
+  return process.env.SERVICE_SOCKET_PATH ?? join(getAppHome(), 'run', 'agent.sock');
 }
 
 export function getPidPath(): string {
@@ -21,7 +21,7 @@ export function getPidPath(): string {
 }
 
 export function getDbPath(): string {
-  return join(getAppHome(), 'data', 'berry.db');
+  return join(getAppHome(), 'data', 'agent.db');
 }
 
 export function getLogDir(): string {

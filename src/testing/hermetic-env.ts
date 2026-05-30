@@ -44,12 +44,12 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
 
   const savedTz = process.env.TZ;
   const savedLang = process.env.LANG;
-  const savedBerryHome = process.env.BERRY_HOME;
+  const savedBerryHome = process.env.SERVICE_HOME;
   const savedLlmMode = process.env.BERRY_LLM_MODE;
 
   process.env.TZ = 'UTC';
   process.env.LANG = 'en_US.UTF-8';
-  process.env.BERRY_HOME = berryHome;
+  process.env.SERVICE_HOME = berryHome;
   process.env.BERRY_LLM_MODE = options?.llmMode ?? 'mock';
 
   setAppHome(berryHome);
@@ -67,10 +67,10 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
 
       if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
       if (savedLang === undefined) delete process.env.LANG; else process.env.LANG = savedLang;
-      if (savedBerryHome === undefined) delete process.env.BERRY_HOME; else process.env.BERRY_HOME = savedBerryHome;
+      if (savedBerryHome === undefined) delete process.env.SERVICE_HOME; else process.env.SERVICE_HOME = savedBerryHome;
       if (savedLlmMode === undefined) delete process.env.BERRY_LLM_MODE; else process.env.BERRY_LLM_MODE = savedLlmMode;
 
-      setAppHome(savedBerryHome ?? join(homedir(), '.berryagent'));
+      setAppHome(savedBerryHome ?? join(homedir(), '.agent-home'));
 
       try {
         rmSync(berryHome, { recursive: true, force: true });

@@ -76,7 +76,7 @@ export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealT
 
 export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
   const savedEnv: Record<string, string | undefined> = {
-    BERRY_HOME: process.env.BERRY_HOME,
+    SERVICE_HOME: process.env.SERVICE_HOME,
     BERRY_LLM_MODE: process.env.BERRY_LLM_MODE,
     LLM_BASE_URL: process.env.LLM_BASE_URL,
     LLM_API_KEY: process.env.LLM_API_KEY,
@@ -85,7 +85,7 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
     LANG: process.env.LANG,
   };
 
-  process.env.BERRY_HOME = config.berryHome;
+  process.env.SERVICE_HOME = config.berryHome;
   process.env.BERRY_LLM_MODE = 'live';
   process.env.LLM_BASE_URL = config.baseUrl;
   process.env.LLM_API_KEY = config.apiKey;
@@ -98,7 +98,7 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
     config,
     cleanup() {
       restoreEnv(savedEnv);
-      setAppHome(savedEnv.BERRY_HOME ?? join(homedir(), '.berryagent'));
+      setAppHome(savedEnv.SERVICE_HOME ?? join(homedir(), '.agent-home'));
       if (config.cleanupBerryHome) {
         try {
           rmSync(config.berryHome, { recursive: true, force: true });

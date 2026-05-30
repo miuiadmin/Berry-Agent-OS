@@ -89,7 +89,7 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     harness = new TestHarness({ timeoutMs: 60000, llmMode: 'mock' });
     await harness.start();
 
-    // 在 hermetic BERRY_HOME 下安装 file-editor agent
+    // 在 hermetic SERVICE_HOME 下安装 file-editor agent
     agentDir = join(getUserAgentsDir(), 'file-editor');
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(agentDir, 'agent.json'), JSON.stringify(FILE_EDITOR_MANIFEST, null, 2));
