@@ -108,6 +108,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private runtimeExecutor: RuntimeExecutor | null = null;
   private brainDecisionRecorder: BrainDecisionRecorder | null = null;
   private capabilityBusRef: ICapabilityBus | null = null;
+  private worldModelRef: any = null;
 
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
@@ -167,6 +168,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (primary) {
       setupBusHandlers(primary.ipc, primaryAgent.manifest.name, bus);
     }
+  }
+
+  setWorldModel(worldModel: any): void {
+    this.worldModelRef = worldModel;
   }
 
   private get proxyDeps(): ProxyHandlersDeps {

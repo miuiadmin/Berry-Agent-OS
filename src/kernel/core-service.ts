@@ -133,6 +133,7 @@ export class CoreService {
   private terminalRenderer: TerminalRenderer | null = null;
   private messageBus: MessageBus;
   private capabilityBus: any = null;
+  private willLoop: any = null;
 
   constructor() {
     this.config = loadConfig();
@@ -341,6 +342,20 @@ export class CoreService {
 
     this.capabilityBus = capabilityBus;
     this.messageRouter.setCapabilityBus(capabilityBus);
+
+    // World Model: continuous global state for Brain decisions
+    const { WorldModelRuntime } = await import('./world-model.js');
+    const worldModel = new WorldModelRuntime(getDb());
+
+    // Will Loop: Brain autonomous action cycle (Phase D)
+    const { WillLoop } = await import('./will-loop.js');
+    const willLoop = new WillLoop(builtinLlm, worldModel, capabilityBus, getDb(), {
+      enabled: this.config.autonomy.willLoopEnabled,
+      intervalMs: this.config.autonomy.willLoopIntervalMs,
+      maxAutoDangerLevel: this.config.autonomy.maxAutoDangerLevel,
+      maxActionsPerHour: this.config.autonomy.maxActionsPerHour,
+    });
+    willLoop.start();
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
