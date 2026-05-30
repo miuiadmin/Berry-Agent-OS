@@ -37,8 +37,8 @@ export const useWsStore = create<WsStore>((set, get) => ({
     const sid = sessionId ?? get().sessionId ?? `web-${Date.now()}`;
     set({ status: "connecting", sessionId: sid });
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://127.0.0.1:3888';
-    const socket = new WebSocket(`${wsUrl}?sessionId=${sid}`);
+    const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://127.0.0.1:3888";
+    const socket = new WebSocket(`${WS_URL}?sessionId=${sid}`);
 
     socket.onopen = () => {
       set({ status: "connected" });

@@ -15,16 +15,74 @@ BerryAgent 是一个双重自进化的通用个人助手：
 - 新增或调整架构设计时，优先更新 `设计文档/` 下的拆分文档，不要把 `docs/PLAN.md` 再写成大文件。
 - 修改开发约束、控制台输出规范或测试要求时，同步检查本文件和 `CLAUDE.md`。
 
+## Web 前端架构
+
+BerryAgent 采用后端 + 前端双进程架构，统一启动：
+
+- **后端 API**（`src/web/`）— 纯 API + WebSocket 服务，端口 `3888`，不提供静态文件
+- **Web 前端**（`web/`）— Next.js 15 App Router，端口 `3889`，通过 `next.config.ts` rewrites 代理 `/api/*` 到后端
+
+前端直连后端 WebSocket（`ws://127.0.0.1:3888`），不走 Next.js 代理。WebSocket URL 通过 `NEXT_PUBLIC_WS_URL` 环境变量配置。
+
+```
+用户浏览器 (:3889)  ──HTTP──>  Next.js  ──rewrite /api/*──>  后端 API (:3888)
+                  ──WS───>  直连后端 :3888（实时聊天/事件推送）
+```
+
+### 前端技术栈
+
+- Next.js 15 + React 19 + TypeScript
+- Tailwind CSS 4 + shadcn/ui 风格组件
+- Zustand（WebSocket/聊天状态） + React Query（服务端数据）
+- Shiki 代码高亮、react-markdown 富文本渲染
+- Lucide 图标、sonner 通知、react-resizable-panels 布局
+
+### 前端目录结构
+
+```
+web/
+├── app/                # App Router 页面路由
+│   ├── page.tsx        # Dashboard 首页（任务统计、活动、趋势）
+│   ├── chat/           # 聊天页面（WebSocket 实时流式输出）
+│   ├── agents/         # Agent 管理
+│   ├── tasks/          # 任务看板
+│   ├── conversations/  # 对话历史
+│   ├── settings/       # 设置
+│   └── usage/          # Token 用量统计
+├── components/         # UI 组件
+│   ├── ui/             # 基础组件（button、card、dialog 等）
+│   ├── chat/           # 聊天相关（输入框、消息列表、Markdown 渲染、代码块）
+│   ├── layout/         # 布局（侧边栏、Dashboard 框架）
+│   ├── charts/         # 图表（面积图、柱状图、迷你折线图）
+│   └── tasks/          # 任务卡片（移动端适配）
+├── hooks/              # 自定义 hooks
+│   ├── use-chat-socket.ts      # 聊天 WebSocket 连接 + 流式消息处理
+│   ├── use-realtime-events.ts   # 实时事件订阅（任务/Agent 状态变更）
+│   ├── use-keyboard-shortcuts.ts
+│   └── use-document-title.ts
+└── lib/                # 工具库
+    ├── api.ts          # API 客户端（apiGet/apiPost/apiPut/apiDelete + React Query 预定义）
+    ├── stores/         # Zustand stores
+    │   ├── ws-store.ts # WebSocket 连接管理（自动重连、事件订阅、消息收发）
+    │   └── chat-store.ts
+    ├── highlighter.ts  # Shiki 代码高亮初始化
+    └── utils.ts
+```
+
 ## 快速启动
 
 ```bash
-npm install
-berry service start           # 启动 Berry Service + 常驻 Agent
-berry service status --json   # 查看 Service/Agent 状态
-berry run "hi"                # 单次执行（连接 Berry Service）
-npx tsx src/index.ts run "hi" # 开发入口（可绕过全局安装）
-npm test                      # 全部测试
-npm run typecheck             # tsc --noEmit
+npm install                # 安装后端依赖
+cd web && npm install      # 安装前端依赖
+
+# 开发模式（选一）
+npm run dev                # 仅启动后端 (CLI + API :3888)
+npm run dev:web            # 仅启动前端 (Next.js :3889)
+npm run dev:full           # 同时启动后端 + 前端（推荐）
+
+# 生产模式
+npm run build:full         # 构建后端 + 前端
+tools/start.sh             # 一键启动后端 + 前端
 ```
 
 ## 架构
