@@ -17,16 +17,21 @@ BerryAgent 是一个双重自进化的通用个人助手：
 
 ## Web 前端架构
 
-BerryAgent 采用后端 + 前端双进程架构，统一启动：
+BerryAgent 采用 React + Vite SPA 嵌入后端的单端口架构：
 
-- **后端 API**（`src/web/`）— 纯 API + WebSocket 服务，端口 `3888`，不提供静态文件
-- **Web 前端**（`web/`）— React 19 + Vite SPA，端口 `3889`，通过 Vite 代理 `/api/*` 到后端
-
-前端直连后端 WebSocket（`ws://127.0.0.1:3888`）。WebSocket URL 通过 `VITE_WS_URL` 环境变量配置。
+- **后端**（`src/web/server.ts`）— HTTP API + WebSocket + 前端静态文件，单端口 `3888`
+- **Web 前端**（`web/`）— React 19 + Vite SPA，开发时在 `:3889`（Vite 代理），生产时构建到 `web/dist/` 由后端直接提供
 
 ```
-用户浏览器 (:3889)  ──HTTP──>  Vite Dev Server  ──proxy /api/*──>  后端 API (:3888)
-                  ──WS───>  直连后端 :3888（实时聊天/事件推送）
+生产模式（单端口 3888）:
+  用户浏览器 ──HTTP──>  后端 (:3888)
+                ├── /api/*      → API 路由
+                ├── /ws         → WebSocket（实时聊天/事件推送）
+                └── /*          → SPA 静态文件（web/dist/）
+
+开发模式（双端口）:
+  用户浏览器 (:3889) ──Vite proxy /api/*──> 后端 API (:3888)
+                    ──Vite proxy /ws───> 后端 WebSocket (:3888)
 ```
 
 ### 前端技术栈
@@ -85,9 +90,9 @@ npm run dev                # 仅启动后端 (CLI + API :3888)
 npm run dev:web            # 仅启动前端 (Vite :3889)
 npm run dev:full           # 同时启动后端 + 前端（推荐）
 
-# 生产模式
+# 生产模式（单端口 :3888）
 npm run build:full         # 构建后端 + 前端
-tools/start.sh             # 一键启动后端 + 前端
+berry service start        # 后端同时提供 API + 前端静态文件
 ```
 
 ## 架构
