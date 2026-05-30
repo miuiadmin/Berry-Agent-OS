@@ -46,7 +46,7 @@ export default function SettingsPage() {
 
 function SettingsContent() {
   useDocumentTitle("Settings");
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tabFromUrl = searchParams.get("tab");
   const activeTab: TabKey = tabFromUrl && VALID_TABS.has(tabFromUrl) ? (tabFromUrl as TabKey) : "llm";
