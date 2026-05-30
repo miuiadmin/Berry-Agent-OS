@@ -117,13 +117,13 @@ export default function HomePage() {
 
       completedByDay.push(
         completedTasks.filter((t) => {
-          const ts = new Date(t.completedAt ?? t.createdAt).getTime();
+          const ts = new Date(t.finishedAt ?? t.createdAt).getTime();
           return ts >= dateStart && ts < dateEnd;
         }).length,
       );
       failedByDay.push(
         failedTasks.filter((t) => {
-          const ts = new Date(t.completedAt ?? t.createdAt).getTime();
+          const ts = new Date(t.finishedAt ?? t.createdAt).getTime();
           return ts >= dateStart && ts < dateEnd;
         }).length,
       );

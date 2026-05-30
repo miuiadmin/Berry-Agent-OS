@@ -12,7 +12,7 @@ import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
 import { ListTodo, ChevronDown, ChevronRight, XCircle, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const STATUS_OPTIONS = ["all", "created", "running", "completed", "failed", "cancelled"] as const;
+const STATUS_OPTIONS = ["all", "created", "dispatched", "running", "completed", "failed", "cancelled", "timeout", "resumable"] as const;
 const PAGE_SIZE = 20;
 
 export default function TasksPage() {
@@ -232,7 +232,7 @@ function TaskRow({
           </Badge>
         </td>
         <td className="px-4 py-2.5 text-xs text-muted-foreground">
-          {formatDuration(task.startedAt, task.completedAt, task.status)}
+          {formatDuration(task.startedAt, task.finishedAt, task.status)}
         </td>
         <td className="px-4 py-2.5">
           {task.status === "running" && (
@@ -280,11 +280,11 @@ function TaskDetail({ task }: { task: TaskInfo }) {
         </div>
       </div>
 
-      {task.status === "failed" && task.errorMessage && (
+      {task.status === "failed" && task.error && (
         <div>
           <span className="font-medium text-destructive">Error</span>
           <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-3 text-[11px] text-destructive">
-            {task.errorMessage}
+            {task.error}
           </pre>
         </div>
       )}
@@ -310,10 +310,10 @@ function TaskDetail({ task }: { task: TaskInfo }) {
   );
 }
 
-function formatDuration(startedAt?: string, completedAt?: string, status?: string): string {
+function formatDuration(startedAt?: string, finishedAt?: string, status?: string): string {
   if (!startedAt) return "—";
   const start = new Date(startedAt).getTime();
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
   const seconds = Math.round((end - start) / 1000);
   if (seconds < 60) return `${seconds}s${status === "running" ? "..." : ""}`;
   const minutes = Math.floor(seconds / 60);

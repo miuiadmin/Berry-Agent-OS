@@ -65,10 +65,11 @@ export function createApiRouter(deps: WebServerDependencies) {
   }
 
   route('GET', '/health', (_req, res) => {
+    const agentStatuses = deps.agentManager.getStatus();
     json(res, {
       ok: true,
-      uptimeMs: Date.now() - deps.startTimeMs,
-      agents: deps.agentManager.getStatus(),
+      uptime: (Date.now() - deps.startTimeMs) / 1000,
+      agents: typeof agentStatuses === 'object' ? Object.keys(agentStatuses).length : 0,
     });
   });
 
@@ -145,6 +146,13 @@ export function createApiRouter(deps: WebServerDependencies) {
     const task = deps.taskManager.getTask(params.id);
     if (!task) { notFound(res); return; }
     json(res, camelKeys(task as unknown as Record<string, unknown>));
+  });
+
+  route('POST', '/tasks/:id/cancel', async (req, res, _url, params) => {
+    const body = await readBody(req).catch(() => ({}));
+    const reason = (body as Record<string, unknown>).reason as string | undefined ?? 'Cancelled via web dashboard';
+    deps.taskManager.cancel(params.id, reason);
+    json(res, { ok: true });
   });
 
   route('GET', '/conversations', (_req, res, url) => {

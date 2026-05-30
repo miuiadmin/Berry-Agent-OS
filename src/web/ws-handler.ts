@@ -17,7 +17,7 @@ export class WebSocketBridge {
 
   write(data: string): boolean {
     if ((this.ws as unknown as { readyState: number }).readyState === 1) {
-      this.ws.send(data);
+      this.ws.send(data.replace(/\n$/, ''));
       return true;
     }
     return false;

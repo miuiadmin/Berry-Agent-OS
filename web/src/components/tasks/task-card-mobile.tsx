@@ -42,7 +42,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
             <span>{task.targetAgent}</span>
             <span>·</span>
-            <span>{formatDuration(task.startedAt, task.completedAt, task.status)}</span>
+            <span>{formatDuration(task.startedAt, task.finishedAt, task.status)}</span>
           </div>
         </div>
         {task.status === "running" && (
@@ -75,11 +75,11 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             <span className="font-medium text-muted-foreground">Created</span>
             <p className="mt-0.5 text-[11px]">{new Date(task.createdAt).toLocaleString()}</p>
           </div>
-          {task.status === "failed" && task.errorMessage && (
+          {task.status === "failed" && task.error && (
             <div>
               <span className="font-medium text-destructive">Error</span>
               <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[10px] text-destructive whitespace-pre-wrap">
-                {task.errorMessage}
+                {task.error}
               </pre>
             </div>
           )}
@@ -105,10 +105,10 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
   );
 }
 
-function formatDuration(startedAt?: string, completedAt?: string, status?: string): string {
+function formatDuration(startedAt?: string, finishedAt?: string, status?: string): string {
   if (!startedAt) return "—";
   const start = new Date(startedAt).getTime();
-  const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
   const seconds = Math.round((end - start) / 1000);
   if (seconds < 60) return `${seconds}s${status === "running" ? "..." : ""}`;
   const minutes = Math.floor(seconds / 60);

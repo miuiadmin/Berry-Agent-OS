@@ -17,8 +17,8 @@ export function useChatSocket() {
           break;
         }
         case "progress": {
-          const message = (data as Record<string, unknown>).message as string | undefined;
-          if (message) setLastProgress(message);
+          const summary = (data as Record<string, unknown>).summary as string | undefined;
+          if (summary) setLastProgress(summary);
           break;
         }
         case "result": {
@@ -31,7 +31,8 @@ export function useChatSocket() {
           setStreaming(false);
           break;
         }
-        case "cancelled": {
+        case "cancelled":
+        case "interrupted": {
           setLastStatus("complete");
           setStreaming(false);
           break;
@@ -70,7 +71,7 @@ export function useChatSocket() {
   );
 
   const cancelGeneration = useCallback(() => {
-    send({ type: "cancel" });
+    send({ type: "interrupt" });
     setLastStatus("complete");
     setStreaming(false);
   }, [send, setLastStatus, setStreaming]);

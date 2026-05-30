@@ -39,7 +39,7 @@ export const useWsStore = create<WsStore>((set, get) => ({
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
-    const socket = new WebSocket(`${protocol}//${host}?sessionId=${sid}`);
+    const socket = new WebSocket(`${protocol}//${host}/ws?sessionId=${sid}`);
 
     socket.onopen = () => {
       set({ status: "connected" });

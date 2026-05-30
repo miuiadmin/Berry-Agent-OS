@@ -62,11 +62,11 @@ export interface TaskInfo {
   targetAgent: string;
   createdAt: string;
   startedAt?: string;
-  completedAt?: string;
+  finishedAt?: string;
   sessionId?: string;
   inputPayload?: string;
   outputPayload?: string;
-  errorMessage?: string;
+  error?: string;
 }
 
 export interface ConversationInfo {
