@@ -1,3 +1,8 @@
+/**
+ * @deprecated This module is a transitional facade. Its services will be
+ * migrated to Capability Bus providers (src/bus/) in a future iteration.
+ * New features should register as Bus capabilities, not intelligence services.
+ */
 export type {
   // Notification
   NotificationType,
