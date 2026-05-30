@@ -38,6 +38,7 @@ import { genId } from '../utils/id.js';
 import { getTracer } from '../observability/tracer.js';
 import { getEventBus } from './event-bus.js';
 import { withTrace, getCurrentTrace } from '../observability/trace-context.js';
+import { BrainDecisionRecorder } from './brain-decision-recorder.js';
 import type { IpcMessageType, IpcMessage } from './types.js';
 import type { SocketProgressEvent, SocketTextDeltaEvent } from '../contracts/socket-protocol.js';
 import type { RouteDecision, RouteResultPayload, RouteRequestPayload } from '../contracts/routing.js';
@@ -103,9 +104,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private superiorReviewFlow: SuperiorReviewFlow | null = null;
   private runtimeRegistry: RuntimeRegistry | null = null;
   private runtimeExecutor: RuntimeExecutor | null = null;
+  private brainDecisionRecorder: BrainDecisionRecorder | null = null;
 
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
+  private pendingJudgeInputs = new Map<string, { sessionId: string; toolName: string }>();
   private judgeTimestamps: number[] = [];
 
   constructor(deps: {
@@ -134,6 +137,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.memoryRuntime = deps.memoryRuntime;
     this.delegationManager = new DelegationManager(deps.taskManager);
     this.correctionFlow = new CorrectionFlow(this);
+    this.brainDecisionRecorder = new BrainDecisionRecorder(getDb());
   }
 
   get delegation(): DelegationManager { return this.delegationManager; }
@@ -308,6 +312,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(correlationId);
       if (pending) {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
+        this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as any);
         getEventBus().emit('message.routed', {
           sessionId: pending.sessionId,
           taskId: pending.taskId ?? correlationId,
@@ -808,6 +813,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const correlationId = msg.correlationId!;
       logger.info({ correlationId, verdict: review.verdict }, '大脑审核完成');
 
+      const pending = this.sessionManager.getPending(correlationId);
+      if (pending) {
+        this.brainDecisionRecorder?.recordReviewDecision(
+          pending.sessionId,
+          (pending.draftResponse ?? pending.userMessage).slice(0, 200),
+          review as any,
+        );
+      }
+
       const origin = this.pendingReviewOrigins.get(correlationId);
       this.pendingReviewOrigins.delete(correlationId);
 
@@ -966,6 +980,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     reviewerIpc.onMessage('permission.judge.result', (msg: IpcMessage) => {
       const result = msg.payload as PermissionJudgeResultPayload;
       const correlationId = msg.correlationId!;
+
+      // Record permission decision
+      const judgeInput = this.pendingJudgeInputs?.get(correlationId);
+      if (judgeInput) {
+        this.brainDecisionRecorder?.recordPermissionDecision(
+          judgeInput.sessionId,
+          judgeInput.toolName,
+          result as any,
+        );
+        this.pendingJudgeInputs?.delete(correlationId);
+      }
+
       const pending = this.pendingJudges.get(correlationId);
       if (pending) {
         pending(result);
@@ -997,6 +1023,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const correlationId = genId('pjudge');
       const timeout = setTimeout(() => {
         this.pendingJudges.delete(correlationId);
+        this.pendingJudgeInputs.delete(correlationId);
         resolve({ allowed: false, reason: '权限判断超时' });
       }, JUDGE_TIMEOUT_MS);
 
@@ -1004,6 +1031,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         clearTimeout(timeout);
         resolve(result);
       });
+
+      this.pendingJudgeInputs.set(correlationId, { sessionId: input.sessionId, toolName: input.toolName });
 
       const orchestratorAgent = this.registry.requireRole('orchestrator');
       const brain = this.agentManager.getAgent(orchestratorAgent.manifest.name);
