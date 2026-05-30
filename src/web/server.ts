@@ -70,6 +70,12 @@ export class WebServer {
     this.eventBridge = new WsEventBridge(this.wss, this.deps.eventBus);
 
     this.server.on('upgrade', (req, socket, head) => {
+      const url = req.url ?? '/';
+      if (!url.startsWith('/ws')) {
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+        return;
+      }
       if (this.deps.secret && !this.verifyWsAuth(req)) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();

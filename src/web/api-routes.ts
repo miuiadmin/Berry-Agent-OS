@@ -116,7 +116,7 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('POST', '/agents/:name/disable', async (req, res, _url, params) => {
-    const body = await readBody(req);
+    const body = await readBody(req).catch(() => ({}));
     deps.agentLifecycle.disable(params.name, (body as Record<string, unknown>).reason as string | undefined);
     json(res, { ok: true });
   });
@@ -125,20 +125,24 @@ export function createApiRouter(deps: WebServerDependencies) {
     const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
     const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
     const status = url.searchParams.get('status') ?? undefined;
+    const agent = url.searchParams.get('agent') ?? undefined;
     const db = getDb();
 
-    let whereClause = '';
-    const countParams: unknown[] = [];
-    const queryParams: unknown[] = [];
+    const conditions: string[] = [];
+    const filterParams: unknown[] = [];
 
     if (status) {
-      whereClause = 'WHERE status = ?';
-      countParams.push(status);
-      queryParams.push(status);
+      conditions.push('status = ?');
+      filterParams.push(status);
+    }
+    if (agent) {
+      conditions.push('target_agent = ?');
+      filterParams.push(agent);
     }
 
-    const total = (db.prepare(`SELECT COUNT(*) as cnt FROM agent_tasks ${whereClause}`).get(...countParams) as { cnt: number }).cnt;
-    const rows = db.prepare(`SELECT * FROM agent_tasks ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...queryParams, limit, offset);
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const total = (db.prepare(`SELECT COUNT(*) as cnt FROM agent_tasks ${whereClause}`).get(...filterParams) as { cnt: number }).cnt;
+    const rows = db.prepare(`SELECT * FROM agent_tasks ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...filterParams, limit, offset);
     json(res, { items: rows.map((r) => camelKeys(r as Record<string, unknown>)), total });
   });
 
@@ -200,7 +204,7 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Conversation rename ---
   route('PUT', '/conversations/:sid', async (req, res, _url, params) => {
-    const body = await readBody(req) as Record<string, unknown>;
+    const body = await readBody(req).catch(() => ({})) as Record<string, unknown>;
     const title = typeof body.title === 'string' ? body.title.trim() : null;
     if (!title) { json(res, { error: 'title is required' }, 400); return; }
     const db = getDb();

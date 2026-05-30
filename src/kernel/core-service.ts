@@ -64,6 +64,7 @@ import { WorkspaceContextService } from '../intelligence/workspace-context-servi
 import { PluginScopeService } from '../intelligence/plugin-scope-service.js';
 import { TemplateService } from '../intelligence/template-service.js';
 import { AsyncDelegationService } from '../intelligence/async-delegation-service.js';
+import { HumanDelegationManager } from './human-delegation.js';
 import { registerNotificationHooks } from '../intelligence/notification-hooks.js';
 import {
   handleMessage,
@@ -122,6 +123,7 @@ export class CoreService {
   private trustManager: TrustManager | null = null;
   private runtimeRegistry: RuntimeRegistry | null = null;
   private checkpointService: CheckpointService | null = null;
+  private humanDelegationManager: HumanDelegationManager | null = null;
   private webServer: WebServer | null = null;
   private notificationHooksCleanup: (() => void) | null = null;
   private permissionCoordinator: PermissionCoordinator | null = null;
@@ -471,6 +473,7 @@ export class CoreService {
       const pluginScopeService = new PluginScopeService(db);
       const templateService = new TemplateService(db);
       const asyncDelegationService = new AsyncDelegationService(db);
+      this.humanDelegationManager = new HumanDelegationManager(db);
 
       const cleanupHooks = registerNotificationHooks(getEventBus(), () => notificationService);
       this.notificationHooksCleanup = cleanupHooks;
@@ -499,6 +502,7 @@ export class CoreService {
           pluginScopeService,
           templateService,
           asyncDelegationService,
+          humanDelegationManager: this.humanDelegationManager,
         },
       });
       await this.webServer.start();
