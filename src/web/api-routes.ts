@@ -94,7 +94,7 @@ export function createApiRouter(deps: WebServerDependencies) {
       memory: { evolutionEnabled: true, consolidationInterval: 3600, maxResults: 10 },
       skills: { promptMode: 'hybrid', maxPromptChars: 4000, maxDescriptionChars: 200, shellInjection: false },
       observability: { level: 'info', captureOutput: true },
-      web: { enabled: true, port: 7860, host: '0.0.0.0' },
+      web: { enabled: true, port: 3888, host: '127.0.0.1' },
     });
   });
 

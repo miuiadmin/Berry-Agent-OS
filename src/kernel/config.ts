@@ -66,7 +66,7 @@ const StreamingSchema = z.object({
 
 const WebSchema = z.object({
   enabled: z.boolean().default(true),
-  port: z.number().default(7860),
+  port: z.number().default(3888),
   host: z.string().default('127.0.0.1'),
   secret: z.string().default(''),
 });

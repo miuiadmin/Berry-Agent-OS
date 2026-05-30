@@ -1,8 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { existsSync, createReadStream } from 'node:fs';
-import { stat } from 'node:fs';
-import { join, extname, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { createApiRouter } from './api-routes.js';
@@ -11,23 +7,6 @@ import { WsEventBridge } from './ws-event-bridge.js';
 import type { WebServerDependencies } from './types.js';
 
 const logger = getLogger('web-server');
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const STATIC_DIR = resolve(__dirname, '../../web/out');
-
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-};
 
 export interface WebServerOptions {
   port: number;
@@ -74,7 +53,7 @@ export class WebServer {
     return new Promise((resolve, reject) => {
       this.server!.on('error', reject);
       this.server!.listen(this.port, this.host, () => {
-        logger.info({ url: `http://${this.host}:${this.port}` }, 'Web Dashboard 已启动');
+        logger.info({ url: `http://${this.host}:${this.port}` }, 'API Server 已启动');
         resolve();
       });
     });
@@ -112,73 +91,8 @@ export class WebServer {
       return;
     }
 
-    this.serveStatic(pathname, res);
-  }
-
-  private serveStatic(pathname: string, res: ServerResponse): void {
-    if (!existsSync(STATIC_DIR)) {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end('<html><body><h1>Berry Dashboard</h1><p>前端未构建。请运行 <code>npm run build:web</code></p></body></html>');
-      return;
-    }
-
-    let filePath = resolve(STATIC_DIR, '.' + pathname);
-
-    if (!filePath.startsWith(STATIC_DIR)) {
-      res.writeHead(403, { 'content-type': 'text/plain' });
-      res.end('Forbidden');
-      return;
-    }
-
-    if (filePath.endsWith('/')) {
-      filePath = join(filePath, 'index.html');
-    }
-
-    stat(filePath, (err, stats) => {
-      if (!err && stats.isDirectory()) {
-        filePath = join(filePath, 'index.html');
-      }
-      this.streamFile(filePath, res);
-    });
-  }
-
-  private streamFile(filePath: string, res: ServerResponse): void {
-    stat(filePath, (err) => {
-      if (err) {
-        const htmlPath = filePath + '.html';
-        stat(htmlPath, (err2) => {
-          if (!err2) {
-            this.pipeFile(htmlPath, res);
-          } else {
-            const fallback = join(STATIC_DIR, '404.html');
-            stat(fallback, (err3) => {
-              if (!err3) {
-                this.pipeFile(fallback, res, 404);
-              } else {
-                res.writeHead(404, { 'content-type': 'text/plain' });
-                res.end('Not Found');
-              }
-            });
-          }
-        });
-        return;
-      }
-      this.pipeFile(filePath, res);
-    });
-  }
-
-  private pipeFile(filePath: string, res: ServerResponse, status = 200): void {
-    const ext = extname(filePath);
-    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
-    res.writeHead(status, { 'content-type': contentType });
-    const stream = createReadStream(filePath);
-    stream.pipe(res);
-    stream.on('error', () => {
-      if (!res.headersSent) {
-        res.writeHead(500, { 'content-type': 'text/plain' });
-      }
-      res.end('Internal Server Error');
-    });
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not Found' }));
   }
 
   private verifyHttpAuth(req: IncomingMessage): boolean {
