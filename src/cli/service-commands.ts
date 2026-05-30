@@ -24,10 +24,10 @@ export function registerServiceCommands(program: Command): void {
       if (opts.json) renderer.setMode('json');
       const env = buildServiceEnv(opts);
       applyServiceEnvToCurrentProcess(env);
-      const berryHome = env.BERRY_HOME ?? getAppHome();
+      const appHome = env.BERRY_HOME ?? getAppHome();
 
       if (opts.test && !opts.json) {
-        renderer.info(`测试模式: 数据目录 ${berryHome}`);
+        renderer.info(`测试模式: 数据目录 ${appHome}`);
       }
 
       if (opts.foreground) {
@@ -43,7 +43,7 @@ export function registerServiceCommands(program: Command): void {
           ok: true,
           mode: 'foreground',
           pid: process.pid,
-          berryHome,
+          appHome,
           socketPath: env.BERRY_SOCKET_PATH ?? getSocketPath(),
           test: opts.test === true,
         }, opts.json === true);
@@ -60,7 +60,7 @@ export function registerServiceCommands(program: Command): void {
             mode: 'detached',
             alreadyRunning: true,
             pid,
-            berryHome,
+            appHome,
             socketPath: env.BERRY_SOCKET_PATH ?? getSocketPath(),
             test: opts.test === true,
           }, opts.json === true);
@@ -90,7 +90,7 @@ export function registerServiceCommands(program: Command): void {
         ok: true,
         mode: 'detached',
         pid: child.pid ?? null,
-        berryHome,
+        appHome,
         socketPath: env.BERRY_SOCKET_PATH ?? getSocketPath(),
         test: opts.test === true,
       }, opts.json === true);
@@ -169,7 +169,7 @@ export interface ServiceStartResult {
   ok: boolean;
   mode: 'foreground' | 'detached';
   pid: number | null;
-  berryHome: string;
+  appHome: string;
   socketPath: string;
   test: boolean;
   alreadyRunning?: boolean;

@@ -40,19 +40,27 @@ export class PermissionGate implements IPermissionGate {
       return { allowed: false, reason: 'dangerous capability requires Brain judge but none configured', source: 'auto' };
     }
 
-    const judgment = await this.brainJudge.requestJudge({
-      sessionId: ctx.sessionId,
-      agentName: ctx.callerAgent ?? 'unknown',
-      capabilityName: capability.name,
-      dangerLevel: capability.dangerLevel,
-      input,
-      callChain: ctx.callChain,
-    });
+    try {
+      const judgment = await this.brainJudge.requestJudge({
+        sessionId: ctx.sessionId,
+        agentName: ctx.callerAgent ?? 'unknown',
+        capabilityName: capability.name,
+        dangerLevel: capability.dangerLevel,
+        input,
+        callChain: ctx.callChain,
+      });
 
-    return {
-      allowed: judgment.allowed,
-      reason: judgment.reason,
-      source: 'brain',
-    };
+      return {
+        allowed: judgment.allowed,
+        reason: judgment.reason,
+        source: 'brain',
+      };
+    } catch (err) {
+      return {
+        allowed: false,
+        reason: `Brain judge unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        source: 'auto',
+      };
+    }
   }
 }

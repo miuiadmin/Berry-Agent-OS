@@ -52,6 +52,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateBrainDecisionsTable(conn);
     migrateCreateSystemInsightsTable(conn);
     migrateCreateWorldModelTable(conn);
+    migrateCreateSelfModificationLog(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -924,5 +925,30 @@ function migrateCreateWorldModelTable(conn: Database.Database): void {
 
     CREATE INDEX idx_world_model_events_unhandled
       ON world_model_events(handled, received_at) WHERE handled = 0;
+  `);
+}
+
+function migrateCreateSelfModificationLog(conn: Database.Database): void {
+  if (tableExists(conn, 'self_modification_log')) return;
+  conn.exec(`
+    CREATE TABLE self_modification_log (
+      id TEXT PRIMARY KEY,
+      target TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('system','brain_self','user','learning_agent')),
+      status TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active','superseded','rolled_back')),
+      evidence_ids TEXT,
+      expected_improvement TEXT,
+      performance_score REAL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX idx_self_mod_target_active
+      ON self_modification_log(target, status) WHERE status = 'active';
+    CREATE INDEX idx_self_mod_target_version
+      ON self_modification_log(target, version DESC);
   `);
 }
