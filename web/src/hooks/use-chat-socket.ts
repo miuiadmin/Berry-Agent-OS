@@ -60,7 +60,7 @@ export function useChatSocket() {
       }
 
       addMessage({
-        id: `user-${Date.now()}`,
+        id: `user-${crypto.randomUUID().slice(0, 8)}`,
         role: "user",
         content: text,
         timestamp: Date.now(),
@@ -69,7 +69,7 @@ export function useChatSocket() {
       });
 
       addMessage({
-        id: `asst-${Date.now()}`,
+        id: `asst-${crypto.randomUUID().slice(0, 8)}`,
         role: "assistant",
         content: "",
         timestamp: Date.now(),
@@ -95,7 +95,7 @@ export function useChatSocket() {
       }
 
       addMessage({
-        id: `asst-${Date.now()}`,
+        id: `asst-${crypto.randomUUID().slice(0, 8)}`,
         role: "assistant",
         content: "",
         timestamp: Date.now(),

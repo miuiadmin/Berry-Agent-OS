@@ -57,10 +57,12 @@ function SettingsContent() {
   const [initialized, setInitialized] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  if (config && !initialized) {
-    setEditedConfig(config);
-    setInitialized(true);
-  }
+  useEffect(() => {
+    if (config && !initialized) {
+      setEditedConfig(config);
+      setInitialized(true);
+    }
+  }, [config, initialized]);
 
   const hasChanges = useMemo(() => {
     if (!config || !initialized) return false;

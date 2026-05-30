@@ -13,12 +13,12 @@ export default function UsagePage() {
   useDocumentTitle("Usage");
   const { data, isLoading } = useQuery(queries.usage(7));
 
-  const dailyChart = data?.daily.map((d) => ({
+  const dailyChart = (data?.daily ?? []).map((d) => ({
     label: new Date(d.date).toLocaleDateString([], { weekday: "short" }),
     value: d.totalTokens,
   })) ?? [];
 
-  const dailyOutputChart = data?.daily.map((d) => ({
+  const dailyOutputChart = (data?.daily ?? []).map((d) => ({
     label: new Date(d.date).toLocaleDateString([], { weekday: "short" }),
     value: d.outputTokens,
   })) ?? [];
@@ -42,8 +42,8 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-7 w-20" /> : (
               <>
-                <p className="text-2xl font-bold tabular-nums">{formatTokens(data!.today.totalTokens)}</p>
-                <p className="text-xs text-muted-foreground">${data!.today.costUsd.toFixed(4)} est.</p>
+                <p className="text-2xl font-bold tabular-nums">{formatTokens(data?.today.totalTokens ?? 0)}</p>
+                <p className="text-xs text-muted-foreground">${(data?.today.costUsd ?? 0).toFixed(4)} est.</p>
               </>
             )}
           </CardContent>
@@ -59,8 +59,8 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-7 w-20" /> : (
               <>
-                <p className="text-2xl font-bold tabular-nums">{formatTokens(data!.period.totalTokens)}</p>
-                <p className="text-xs text-muted-foreground">${data!.period.costUsd.toFixed(4)} est.</p>
+                <p className="text-2xl font-bold tabular-nums">{formatTokens(data?.period.totalTokens ?? 0)}</p>
+                <p className="text-xs text-muted-foreground">${(data?.period.costUsd ?? 0).toFixed(4)} est.</p>
               </>
             )}
           </CardContent>
@@ -77,7 +77,7 @@ export default function UsagePage() {
             {isLoading ? <Skeleton className="h-7 w-24" /> : (
               <>
                 <p className="text-lg font-bold tabular-nums">
-                  {formatTokens(data!.period.inputTokens)} / {formatTokens(data!.period.outputTokens)}
+                  {formatTokens(data?.period.inputTokens ?? 0)} / {formatTokens(data?.period.outputTokens ?? 0)}
                 </p>
                 <p className="text-xs text-muted-foreground">in / out (7d)</p>
               </>
@@ -138,7 +138,7 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
               <BarChart
-                data={(data!.byAgent ?? []).map((a, i) => ({
+                data={(data?.byAgent ?? []).map((a, i) => ({
                   label: a.agentName,
                   value: a.totalTokens,
                   color: `var(--chart-${(i % 5) + 1})`,
@@ -156,7 +156,7 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
               <BarChart
-                data={(data!.byModel ?? []).map((m, i) => ({
+                data={(data?.byModel ?? []).map((m, i) => ({
                   label: m.model,
                   value: m.totalTokens,
                   color: `var(--chart-${(i % 5) + 1})`,
@@ -174,7 +174,7 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
               <BarChart
-                data={data!.daily.map((d) => ({
+                data={(data?.daily ?? []).map((d) => ({
                   label: new Date(d.date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }),
                   value: d.costUsd,
                   color: "var(--chart-3)",

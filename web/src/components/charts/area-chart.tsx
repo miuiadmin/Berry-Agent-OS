@@ -89,6 +89,7 @@ export function AreaChart({
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
+      if (data.length < 2) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
       const step = chartWidth / (data.length - 1);
