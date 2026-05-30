@@ -31,7 +31,7 @@ if (!modules.auth.getById('default-user')) {
   }).run();
 }
 
-startServer(modules, 3721);
+startServer(modules, 3888);
 
-process.send?.({ type: 'ready', port: 3721 });
-console.log('Server listening on http://localhost:3721');
+process.send?.({ type: 'ready', port: 3888 });
+console.log('Server listening on http://localhost:3888');

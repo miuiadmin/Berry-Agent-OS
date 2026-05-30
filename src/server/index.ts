@@ -42,7 +42,7 @@ export function createServer(modules: ModuleContainer) {
   return app;
 }
 
-export function startServer(modules: ModuleContainer, port = 3721) {
+export function startServer(modules: ModuleContainer, port = 3888) {
   const app = createServer(modules);
   const server = serve({ fetch: app.fetch, port });
   return { app, server };
