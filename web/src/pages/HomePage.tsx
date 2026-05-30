@@ -1,8 +1,7 @@
-"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import Link from "next/link";
+import Link from "react-router-dom";
 import { queries, type TaskStatsDay } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";

@@ -1,4 +1,4 @@
-const BASE_URL = typeof window !== "undefined" ? "" : "http://127.0.0.1:3888";
+const BASE_URL = "";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;

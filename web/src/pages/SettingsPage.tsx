@@ -1,7 +1,6 @@
-"use client";
 
 import { Suspense, useState, useEffect, useMemo, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -48,7 +47,7 @@ export default function SettingsPage() {
 function SettingsContent() {
   useDocumentTitle("Settings");
   const searchParams = useSearchParams();
-  const router = useRouter();
+  const navigate = useNavigate();
   const tabFromUrl = searchParams.get("tab");
   const activeTab: TabKey = tabFromUrl && VALID_TABS.has(tabFromUrl) ? (tabFromUrl as TabKey) : "llm";
 
@@ -155,7 +154,7 @@ function SettingsContent() {
   const handleTabChange = (tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
-    router.replace(`/settings?${params.toString()}`);
+    navigate(`/settings?${params.toString()}`);
   };
 
   const errorCount = Object.keys(errors).length;

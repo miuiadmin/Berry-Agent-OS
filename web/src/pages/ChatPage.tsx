@@ -1,4 +1,3 @@
-"use client";
 
 import { useMemo, useState } from "react";
 import { ChatWindow } from "@/components/chat/chat-window";

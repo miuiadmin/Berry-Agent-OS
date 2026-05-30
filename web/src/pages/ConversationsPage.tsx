@@ -1,8 +1,7 @@
-"use client";
 
 import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter } from "react-router-dom";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { queries, apiDelete, exportConversation, type ConversationInfo } from "@/lib/api";
@@ -37,7 +36,7 @@ export default function ConversationsPage() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"recent" | "messages">("recent");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const router = useRouter();
+  const navigate = useNavigate();
   const setSessionId = useChatStore((s) => s.setSessionId);
   const clearMessages = useChatStore((s) => s.clearMessages);
 
@@ -63,7 +62,7 @@ export default function ConversationsPage() {
   const handleOpenChat = (sessionId: string) => {
     clearMessages();
     setSessionId(sessionId);
-    router.push("/chat");
+    navigate("/chat");
   };
 
   const handleExport = useCallback(async (conv: ConversationInfo) => {
@@ -207,7 +206,7 @@ export default function ConversationsPage() {
                 icon={search ? Search : MessageCircle}
                 title={search ? "No matching conversations" : "No conversations yet"}
                 description={search ? "Try a different search term" : "Start chatting to create your first conversation"}
-                action={search ? undefined : { label: "Start a conversation", onClick: () => router.push("/chat") }}
+                action={search ? undefined : { label: "Start a conversation", onClick: () => navigate("/chat") }}
               />
             )}
           </div>

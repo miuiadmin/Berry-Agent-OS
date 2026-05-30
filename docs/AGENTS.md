@@ -20,18 +20,19 @@ BerryAgent 是一个双重自进化的通用个人助手：
 BerryAgent 采用后端 + 前端双进程架构，统一启动：
 
 - **后端 API**（`src/web/`）— 纯 API + WebSocket 服务，端口 `3888`，不提供静态文件
-- **Web 前端**（`web/`）— Next.js 15 App Router，端口 `3889`，通过 `next.config.ts` rewrites 代理 `/api/*` 到后端
+- **Web 前端**（`web/`）— React 19 + Vite SPA，端口 `3889`，通过 Vite 代理 `/api/*` 到后端
 
-前端直连后端 WebSocket（`ws://127.0.0.1:3888`），不走 Next.js 代理。WebSocket URL 通过 `NEXT_PUBLIC_WS_URL` 环境变量配置。
+前端直连后端 WebSocket（`ws://127.0.0.1:3888`）。WebSocket URL 通过 `VITE_WS_URL` 环境变量配置。
 
 ```
-用户浏览器 (:3889)  ──HTTP──>  Next.js  ──rewrite /api/*──>  后端 API (:3888)
+用户浏览器 (:3889)  ──HTTP──>  Vite Dev Server  ──proxy /api/*──>  后端 API (:3888)
                   ──WS───>  直连后端 :3888（实时聊天/事件推送）
 ```
 
 ### 前端技术栈
 
-- Next.js 15 + React 19 + TypeScript
+- React 19 + Vite + TypeScript
+- React Router（客户端路由）
 - Tailwind CSS 4 + shadcn/ui 风格组件
 - Zustand（WebSocket/聊天状态） + React Query（服务端数据）
 - Shiki 代码高亮、react-markdown 富文本渲染
@@ -41,32 +42,36 @@ BerryAgent 采用后端 + 前端双进程架构，统一启动：
 
 ```
 web/
-├── app/                # App Router 页面路由
-│   ├── page.tsx        # Dashboard 首页（任务统计、活动、趋势）
-│   ├── chat/           # 聊天页面（WebSocket 实时流式输出）
-│   ├── agents/         # Agent 管理
-│   ├── tasks/          # 任务看板
-│   ├── conversations/  # 对话历史
-│   ├── settings/       # 设置
-│   └── usage/          # Token 用量统计
-├── components/         # UI 组件
-│   ├── ui/             # 基础组件（button、card、dialog 等）
-│   ├── chat/           # 聊天相关（输入框、消息列表、Markdown 渲染、代码块）
-│   ├── layout/         # 布局（侧边栏、Dashboard 框架）
-│   ├── charts/         # 图表（面积图、柱状图、迷你折线图）
-│   └── tasks/          # 任务卡片（移动端适配）
-├── hooks/              # 自定义 hooks
-│   ├── use-chat-socket.ts      # 聊天 WebSocket 连接 + 流式消息处理
-│   ├── use-realtime-events.ts   # 实时事件订阅（任务/Agent 状态变更）
-│   ├── use-keyboard-shortcuts.ts
-│   └── use-document-title.ts
-└── lib/                # 工具库
-    ├── api.ts          # API 客户端（apiGet/apiPost/apiPut/apiDelete + React Query 预定义）
-    ├── stores/         # Zustand stores
-    │   ├── ws-store.ts # WebSocket 连接管理（自动重连、事件订阅、消息收发）
-    │   └── chat-store.ts
-    ├── highlighter.ts  # Shiki 代码高亮初始化
-    └── utils.ts
+├── src/
+│   ├── components/         # UI 组件
+│   │   ├── ui/             # 基础组件（button、card、dialog 等）
+│   │   ├── chat/           # 聊天相关（输入框、消息列表、Markdown 渲染、代码块）
+│   │   ├── layout/         # 布局（侧边栏、Dashboard 框架）
+│   │   ├── charts/         # 图表（面积图、柱状图、迷你折线图）
+│   │   └── tasks/          # 任务卡片（移动端适配）
+│   ├── hooks/              # 自定义 hooks
+│   │   ├── use-chat-socket.ts      # 聊天 WebSocket 连接 + 流式消息处理
+│   │   ├── use-realtime-events.ts   # 实时事件订阅（任务/Agent 状态变更）
+│   │   ├── use-keyboard-shortcuts.ts
+│   │   └── use-document-title.ts
+│   ├── pages/              # 页面组件（SPA 路由）
+│   │   ├── Dashboard.tsx   # Dashboard 首页
+│   │   ├── Chat.tsx        # 聊天页面
+│   │   ├── Agents.tsx      # Agent 管理
+│   │   ├── Tasks.tsx       # 任务看板
+│   │   ├── Conversations.tsx # 对话历史
+│   │   ├── Settings.tsx    # 设置
+│   │   └── Usage.tsx       # Token 用量统计
+│   └── lib/                # 工具库
+│       ├── api.ts          # API 客户端（apiGet/apiPost/apiPut/apiDelete + React Query 预定义）
+│       ├── stores/         # Zustand stores
+│       │   ├── ws-store.ts # WebSocket 连接管理（自动重连、事件订阅、消息收发）
+│       │   └── chat-store.ts
+│       ├── highlighter.ts  # Shiki 代码高亮初始化
+│       └── utils.ts
+├── index.html              # SPA 入口
+├── vite.config.ts          # Vite 配置
+└── package.json
 ```
 
 ## 快速启动
@@ -77,7 +82,7 @@ cd web && npm install      # 安装前端依赖
 
 # 开发模式（选一）
 npm run dev                # 仅启动后端 (CLI + API :3888)
-npm run dev:web            # 仅启动前端 (Next.js :3889)
+npm run dev:web            # 仅启动前端 (Vite :3889)
 npm run dev:full           # 同时启动后端 + 前端（推荐）
 
 # 生产模式

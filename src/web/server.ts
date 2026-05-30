@@ -1,4 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { existsSync, createReadStream, statSync } from 'node:fs';
+import { join, extname, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { createApiRouter } from './api-routes.js';
@@ -7,6 +10,26 @@ import { WsEventBridge } from './ws-event-bridge.js';
 import type { WebServerDependencies } from './types.js';
 
 const logger = getLogger('web-server');
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const STATIC_DIR = resolve(__dirname, '../../web/dist');
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.map': 'application/json',
+};
 
 export interface WebServerOptions {
   port: number;
@@ -23,6 +46,7 @@ export class WebServer {
   private readonly deps: WebServerDependencies;
   private readonly apiRouter: ReturnType<typeof createApiRouter>;
   private readonly wsHandler: ReturnType<typeof createWsHandler>;
+  private readonly hasStaticDir: boolean;
 
   constructor(options: WebServerOptions) {
     this.port = options.port;
@@ -30,6 +54,12 @@ export class WebServer {
     this.deps = options.deps;
     this.apiRouter = createApiRouter(options.deps);
     this.wsHandler = createWsHandler(options.deps);
+    this.hasStaticDir = existsSync(STATIC_DIR);
+    if (this.hasStaticDir) {
+      logger.info({ dir: STATIC_DIR }, '前端静态文件目录已找到');
+    } else {
+      logger.info('前端静态文件目录未找到，仅提供 API 模式');
+    }
   }
 
   async start(): Promise<void> {
@@ -53,7 +83,7 @@ export class WebServer {
     return new Promise((resolve, reject) => {
       this.server!.on('error', reject);
       this.server!.listen(this.port, this.host, () => {
-        logger.info({ url: `http://${this.host}:${this.port}` }, 'API Server 已启动');
+        logger.info({ url: `http://${this.host}:${this.port}` }, 'Server 已启动');
         resolve();
       });
     });
@@ -79,8 +109,9 @@ export class WebServer {
 
   private handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    const pathname = url.pathname;
+    const pathname = decodeURIComponent(url.pathname);
 
+    // 1. API routes
     if (pathname.startsWith('/api/')) {
       if (this.deps.secret && !this.verifyHttpAuth(req)) {
         res.writeHead(401, { 'content-type': 'application/json' });
@@ -91,8 +122,65 @@ export class WebServer {
       return;
     }
 
+    // 2. Static files (SPA)
+    if (this.hasStaticDir && req.method === 'GET') {
+      this.serveStatic(pathname, res);
+      return;
+    }
+
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not Found' }));
+  }
+
+  private serveStatic(pathname: string, res: ServerResponse): void {
+    // Try exact file first, then fall back to index.html for SPA routing
+    const candidates = [
+      join(STATIC_DIR, pathname),
+      join(STATIC_DIR, pathname, 'index.html'),
+    ];
+
+    // If not a known asset extension, also try SPA fallback
+    const ext = extname(pathname);
+    if (!ext || ext === '.html') {
+      // SPA fallback: serve index.html for all non-file paths
+      candidates.push(join(STATIC_DIR, 'index.html'));
+    }
+
+    for (const filePath of candidates) {
+      // Security: prevent path traversal
+      const resolved = resolve(filePath);
+      if (!resolved.startsWith(STATIC_DIR)) continue;
+
+      if (existsSync(resolved) && statSync(resolved).isFile()) {
+        const fileExt = extname(resolved);
+        const contentType = MIME_TYPES[fileExt] ?? 'application/octet-stream';
+        const stat = statSync(resolved);
+
+        res.writeHead(200, {
+          'content-type': contentType,
+          'content-length': stat.size,
+          'cache-control': fileExt === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+        });
+        createReadStream(resolved).pipe(res);
+        return;
+      }
+    }
+
+    // Final SPA fallback: index.html for client-side routing
+    const indexPath = join(STATIC_DIR, 'index.html');
+    if (existsSync(indexPath)) {
+      const stat = statSync(indexPath);
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': stat.size,
+        'cache-control': 'no-cache',
+      });
+      createReadStream(indexPath).pipe(res);
+      return;
+    }
+
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('Not Found');
   }
 
   private verifyHttpAuth(req: IncomingMessage): boolean {
