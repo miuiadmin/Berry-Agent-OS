@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3';
 import { genId } from '../../utils/id.js';
+import { evolutionMetrics } from '../../observability/evolution-metrics.js';
 
 export interface SkillStatsRow {
   use_count: number;
@@ -34,6 +35,7 @@ export class SkillTelemetry {
     this.db.prepare(
       `UPDATE skills_meta SET use_count = use_count + 1, ${field} = ${field} + 1, last_used_at = ? WHERE name = ?`,
     ).run(Date.now(), name);
+    evolutionMetrics.skillInvocation.inc({ skill_name: name });
   }
 
   bumpPatch(name: string): void {

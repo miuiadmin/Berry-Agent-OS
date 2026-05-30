@@ -40,7 +40,7 @@ export class SelfModificationAudit {
   getCurrentVersion(target: PromptTarget): PromptVersion | null {
     try {
       const row = this.db.prepare(`
-        SELECT * FROM prompt_versions
+        SELECT * FROM self_modification_log
         WHERE target = ? AND status = 'active'
         ORDER BY version DESC LIMIT 1
       `).get(target) as Record<string, unknown> | undefined;
@@ -53,7 +53,7 @@ export class SelfModificationAudit {
   getVersionHistory(target: PromptTarget, limit = 10): PromptVersion[] {
     try {
       const rows = this.db.prepare(`
-        SELECT * FROM prompt_versions
+        SELECT * FROM self_modification_log
         WHERE target = ?
         ORDER BY version DESC LIMIT ?
       `).all(target, limit) as Array<Record<string, unknown>>;
@@ -70,7 +70,7 @@ export class SelfModificationAudit {
     const id = genId('pv');
     const now = Date.now();
     this.db.prepare(`
-      INSERT INTO prompt_versions (id, target, version, content, reason, source, status, created_at)
+      INSERT INTO self_modification_log (id, target, version, content, reason, source, status, created_at)
       VALUES (?, ?, 1, ?, 'initial system prompt', 'system', 'active', ?)
     `).run(id, target, content, now);
 
@@ -85,7 +85,7 @@ export class SelfModificationAudit {
       // Supersede current version
       if (current) {
         this.db.prepare(`
-          UPDATE prompt_versions SET status = 'superseded' WHERE id = ?
+          UPDATE self_modification_log SET status = 'superseded' WHERE id = ?
         `).run(current.id);
       }
 
@@ -93,7 +93,7 @@ export class SelfModificationAudit {
       const id = genId('pv');
       const now = Date.now();
       this.db.prepare(`
-        INSERT INTO prompt_versions (id, target, version, content, reason, source, status, evidence_ids, expected_improvement, created_at)
+        INSERT INTO self_modification_log (id, target, version, content, reason, source, status, evidence_ids, expected_improvement, created_at)
         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
       `).run(id, proposal.target, nextVersion, proposal.newContent, proposal.reason, source, JSON.stringify(proposal.evidenceIds), proposal.expectedImprovement, now);
 
@@ -117,11 +117,11 @@ export class SelfModificationAudit {
       let targetRow: Record<string, unknown> | undefined;
       if (toVersion !== undefined) {
         targetRow = this.db.prepare(`
-          SELECT * FROM prompt_versions WHERE target = ? AND version = ?
+          SELECT * FROM self_modification_log WHERE target = ? AND version = ?
         `).get(target, toVersion) as Record<string, unknown> | undefined;
       } else {
         targetRow = this.db.prepare(`
-          SELECT * FROM prompt_versions WHERE target = ? AND version < ? ORDER BY version DESC LIMIT 1
+          SELECT * FROM self_modification_log WHERE target = ? AND version < ? ORDER BY version DESC LIMIT 1
         `).get(target, current.version) as Record<string, unknown> | undefined;
       }
 
@@ -130,10 +130,10 @@ export class SelfModificationAudit {
       }
 
       // Mark current as rolled_back
-      this.db.prepare(`UPDATE prompt_versions SET status = 'rolled_back' WHERE id = ?`).run(current.id);
+      this.db.prepare(`UPDATE self_modification_log SET status = 'rolled_back' WHERE id = ?`).run(current.id);
 
       // Reactivate target version
-      this.db.prepare(`UPDATE prompt_versions SET status = 'active' WHERE id = ?`).run(targetRow.id as string);
+      this.db.prepare(`UPDATE self_modification_log SET status = 'active' WHERE id = ?`).run(targetRow.id as string);
 
       logger.info({ target, fromVersion: current.version, toVersion: targetRow.version }, 'Prompt rolled back');
       return { approved: true, versionId: targetRow.id as string, reason: `rolled back to v${targetRow.version}` };
@@ -145,7 +145,7 @@ export class SelfModificationAudit {
   recordPerformanceScore(versionId: string, score: number): void {
     try {
       this.db.prepare(`
-        UPDATE prompt_versions SET performance_score = ? WHERE id = ?
+        UPDATE self_modification_log SET performance_score = ? WHERE id = ?
       `).run(score, versionId);
     } catch {
       // best-effort
@@ -154,9 +154,9 @@ export class SelfModificationAudit {
 
   getModificationStats(target: PromptTarget): { totalVersions: number; rollbacks: number; avgScore: number | null } {
     try {
-      const total = (this.db.prepare(`SELECT COUNT(*) as c FROM prompt_versions WHERE target = ?`).get(target) as { c: number }).c;
-      const rollbacks = (this.db.prepare(`SELECT COUNT(*) as c FROM prompt_versions WHERE target = ? AND status = 'rolled_back'`).get(target) as { c: number }).c;
-      const avgRow = this.db.prepare(`SELECT AVG(performance_score) as avg FROM prompt_versions WHERE target = ? AND performance_score IS NOT NULL`).get(target) as { avg: number | null };
+      const total = (this.db.prepare(`SELECT COUNT(*) as c FROM self_modification_log WHERE target = ?`).get(target) as { c: number }).c;
+      const rollbacks = (this.db.prepare(`SELECT COUNT(*) as c FROM self_modification_log WHERE target = ? AND status = 'rolled_back'`).get(target) as { c: number }).c;
+      const avgRow = this.db.prepare(`SELECT AVG(performance_score) as avg FROM self_modification_log WHERE target = ? AND performance_score IS NOT NULL`).get(target) as { avg: number | null };
       return { totalVersions: total, rollbacks, avgScore: avgRow.avg };
     } catch {
       return { totalVersions: 0, rollbacks: 0, avgScore: null };
@@ -166,7 +166,7 @@ export class SelfModificationAudit {
   private ensureTable(): void {
     try {
       this.db.exec(`
-        CREATE TABLE IF NOT EXISTS prompt_versions (
+        CREATE TABLE IF NOT EXISTS self_modification_log (
           id TEXT PRIMARY KEY,
           target TEXT NOT NULL,
           version INTEGER NOT NULL,
@@ -180,10 +180,10 @@ export class SelfModificationAudit {
           created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_prompt_versions_target_active
-          ON prompt_versions(target, status) WHERE status = 'active';
-        CREATE INDEX IF NOT EXISTS idx_prompt_versions_target_version
-          ON prompt_versions(target, version DESC);
+        CREATE INDEX IF NOT EXISTS idx_self_mod_target_active
+          ON self_modification_log(target, status) WHERE status = 'active';
+        CREATE INDEX IF NOT EXISTS idx_self_mod_target_version
+          ON self_modification_log(target, version DESC);
       `);
     } catch {
       // already exists or migration issue

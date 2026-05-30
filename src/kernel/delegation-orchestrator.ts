@@ -242,6 +242,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.setupPermissionHandlers(agent.ipc, agentName, false);
     setupAuditHandler(agent.ipc, agentName, this.proxyDeps);
     setupTakeoverRouting(agent.ipc, agentName, this.proxyDeps);
+    if (this.capabilityBusRef) {
+      setupBusHandlers(agent.ipc, agentName, this.capabilityBusRef);
+    }
   }
 
   // ═══ PUBLIC API ═══════════════════════════════════

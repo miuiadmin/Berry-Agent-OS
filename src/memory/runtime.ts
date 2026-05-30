@@ -1,4 +1,5 @@
 import type { AppConfig } from '../contracts/config.js';
+import { evolutionMetrics } from '../observability/evolution-metrics.js';
 import type {
   AddKnowledgeInput,
   KnowledgeType,
@@ -59,11 +60,18 @@ export class MemoryRuntime {
     runId?: string,
   ): MemoryContextFrame | undefined {
     try {
-      return buildMemoryContext(sessionId, userMessage, recallSource, {
+      const frame = buildMemoryContext(sessionId, userMessage, recallSource, {
         maxRecords: this.config.maxResults,
         runId,
       });
+      if (frame && frame.records && frame.records.length > 0) {
+        evolutionMetrics.memoryRecallHit.inc();
+      } else {
+        evolutionMetrics.memoryRecallMiss.inc();
+      }
+      return frame;
     } catch {
+      evolutionMetrics.memoryRecallMiss.inc();
       return undefined;
     }
   }

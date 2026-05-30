@@ -357,6 +357,17 @@ export class CoreService {
     const worldModel = new WorldModelRuntime(getDb());
     this.messageRouter.setWorldModel(worldModel);
 
+    // Feed external events into World Model for contextual awareness
+    this.eventBus.on('daemon.task.failed', ({ taskId, runtime, error }) => {
+      worldModel.updateFromEvent({ type: 'task_failure', source: runtime, summary: `Task ${taskId} failed: ${error}`, severity: 'warning' });
+    });
+    this.eventBus.on('agent.crashed', ({ name, error }) => {
+      worldModel.updateFromEvent({ type: 'agent_crash', source: name, summary: error ?? `Agent ${name} crashed`, severity: 'critical' });
+    });
+    this.eventBus.on('mcp.failed', ({ serverName, error }) => {
+      worldModel.updateFromEvent({ type: 'mcp_failure', source: serverName, summary: error, severity: 'warning' });
+    });
+
     // Will Loop: Brain autonomous action cycle (Phase D)
     const { WillLoop } = await import('./will-loop.js');
     const willLoop = new WillLoop(builtinLlm, worldModel, capabilityBus, getDb(), {
@@ -398,6 +409,11 @@ export class CoreService {
     // Register Time Intelligence as Bus capabilities
     const { registerTimeIntelligenceCapabilities } = await import('../bus/time-capability.js');
     registerTimeIntelligenceCapabilities(capabilityBus, timeIntelligence);
+
+    // Schedule automatic insights lifecycle (validate/expire stale insights hourly)
+    const { runInsightsLifecycle } = await import('./insights-lifecycle.js');
+    runInsightsLifecycle(getDb());
+    setInterval(() => runInsightsLifecycle(getDb()), 3600_000);
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
@@ -807,6 +823,12 @@ export class CoreService {
 
   async stop(): Promise<void> {
     logger.info('正在停止 Berry 服务...');
+
+    // Stop autonomous systems first to prevent actions during shutdown
+    if (this.willLoop) {
+      this.willLoop.stop();
+      this.willLoop = null;
+    }
 
     if (this.terminalRenderer) {
       this.terminalRenderer.stop();
