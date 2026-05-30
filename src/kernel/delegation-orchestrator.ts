@@ -1241,6 +1241,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
               // Don't respond yet — wait for user to approve/deny via WebSocket
               // The response will be sent when permissions.approve/deny arrives
               this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId });
+              // Auto-expire after 5 minutes to prevent memory leak
+              setTimeout(() => {
+                if (this.pendingUserConfirms.has(requestId)) {
+                  this.pendingUserConfirms.delete(requestId);
+                  agentIpc.send('permission.result', agentName, {
+                    allowed: false,
+                    reason: '用户确认超时（5 分钟），自动拒绝',
+                  }, replyId);
+                }
+              }, 300_000);
               return;
             }
           }

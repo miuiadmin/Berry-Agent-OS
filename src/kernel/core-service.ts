@@ -136,6 +136,7 @@ export class CoreService {
   private messageBus: MessageBus;
   private capabilityBus: any = null;
   private willLoop: any = null;
+  private insightsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.config = loadConfig();
@@ -415,7 +416,7 @@ export class CoreService {
     // Schedule automatic insights lifecycle (validate/expire stale insights hourly)
     const { runInsightsLifecycle } = await import('./insights-lifecycle.js');
     runInsightsLifecycle(getDb());
-    setInterval(() => runInsightsLifecycle(getDb()), 3600_000);
+    this.insightsTimer = setInterval(() => runInsightsLifecycle(getDb()), 3600_000);
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
@@ -838,6 +839,10 @@ export class CoreService {
     if (this.willLoop) {
       this.willLoop.stop();
       this.willLoop = null;
+    }
+    if (this.insightsTimer) {
+      clearInterval(this.insightsTimer);
+      this.insightsTimer = null;
     }
 
     if (this.terminalRenderer) {

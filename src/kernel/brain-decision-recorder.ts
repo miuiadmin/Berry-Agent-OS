@@ -21,11 +21,12 @@ export class BrainDecisionRecorder {
     try {
       if (!this.insertStmt) {
         this.insertStmt = this.db.prepare(`
-          INSERT INTO brain_decisions (id, session_id, decision_type, input_summary, output_json, confidence, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO brain_decisions (id, session_id, decision_type, input_summary, output_json, confidence, outcome, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
       }
       const id = genId('bdec');
+      const outcome = deriveOutcome(input.decisionType, input.outputJson);
       this.insertStmt.run(
         id,
         input.sessionId,
@@ -33,6 +34,7 @@ export class BrainDecisionRecorder {
         input.inputSummary.slice(0, 500),
         JSON.stringify(input.outputJson),
         input.confidence ?? null,
+        outcome,
         Date.now(),
       );
 
@@ -79,5 +81,24 @@ export class BrainDecisionRecorder {
     });
 
     evolutionMetrics.permissionJudge.inc({ verdict: judgment.allowed ? 'allowed' : 'denied' });
+  }
+}
+
+function deriveOutcome(decisionType: BrainDecisionType, output: Record<string, unknown>): 'good' | 'bad' | 'neutral' | null {
+  switch (decisionType) {
+    case 'route':
+      return output.confidence && (output.confidence as number) >= 0.8 ? 'good' : 'neutral';
+    case 'review':
+      if (output.verdict === 'approve') return 'good';
+      if (output.verdict === 'reject') return 'bad';
+      return 'neutral';
+    case 'permission':
+      return output.allowed ? 'good' : 'neutral';
+    case 'correction':
+      if (output.action === 'continue') return 'good';
+      if (output.action === 'stop' || output.action === 'restart') return 'bad';
+      return 'neutral';
+    default:
+      return null;
   }
 }
