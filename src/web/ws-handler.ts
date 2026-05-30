@@ -58,12 +58,6 @@ export function createWsHandler(deps: WebServerDependencies) {
       }
     });
 
-    ws.on('close', () => {
-      logger.debug({ sessionId }, 'WebSocket 断开');
-      delegationListener();
-      permissionListener();
-    });
-
     const pingInterval = setInterval(() => {
       if ((ws as unknown as { readyState: number }).readyState === 1) {
         ws.ping();
@@ -72,7 +66,12 @@ export function createWsHandler(deps: WebServerDependencies) {
       }
     }, 30000);
 
-    ws.on('close', () => clearInterval(pingInterval));
+    ws.on('close', () => {
+      logger.debug({ sessionId }, 'WebSocket 断开');
+      delegationListener();
+      permissionListener();
+      clearInterval(pingInterval);
+    });
   };
 }
 

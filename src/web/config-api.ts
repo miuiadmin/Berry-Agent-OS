@@ -25,6 +25,7 @@ const ALLOWED_TOP_KEYS = new Set([
   'llm', 'heartbeatIntervalMs', 'heartbeatTimeoutMs', 'requestTimeoutMs',
   'permissionMode', 'toolLoop', 'memory', 'skills', 'observability',
   'budget', 'channels', 'streaming', 'web', 'cron', 'mcp',
+  'daemon', 'autonomy', 'plugins',
 ]);
 
 function filterKnownKeys(obj: Record<string, unknown>): Record<string, unknown> {

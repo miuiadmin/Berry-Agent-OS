@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../memory/db.js';
 import { getHistory } from '../memory/conversations.js';
@@ -122,8 +122,8 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('GET', '/tasks', (_req, res, url) => {
-    const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
-    const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+    const limit = safeInt(url.searchParams.get('limit'), 20, 1, 200);
+    const offset = safeInt(url.searchParams.get('offset'), 0);
     const status = url.searchParams.get('status') ?? undefined;
     const agent = url.searchParams.get('agent') ?? undefined;
     const db = getDb();
@@ -160,8 +160,8 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('GET', '/conversations', (_req, res, url) => {
-    const limit = parseInt(url.searchParams.get('limit') ?? '50', 10);
-    const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+    const limit = safeInt(url.searchParams.get('limit'), 50, 1, 200);
+    const offset = safeInt(url.searchParams.get('offset'), 0);
     const search = url.searchParams.get('search') ?? undefined;
     const sort = url.searchParams.get('sort') ?? 'recent';
     const db = getDb();
@@ -190,15 +190,18 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('GET', '/conversations/:sid', (_req, res, url, params) => {
-    const limit = parseInt(url.searchParams.get('limit') ?? '200', 10);
+    const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
     const messages = getHistory(params.sid, limit);
     json(res, messages);
   });
 
   route('DELETE', '/conversations/:sid', (_req, res, _url, params) => {
     const db = getDb();
-    db.prepare('DELETE FROM conversations WHERE session_id = ?').run(params.sid);
-    db.prepare('DELETE FROM conversation_meta WHERE session_id = ?').run(params.sid);
+    const deleteAll = db.transaction(() => {
+      db.prepare('DELETE FROM conversations WHERE session_id = ?').run(params.sid);
+      db.prepare('DELETE FROM conversation_meta WHERE session_id = ?').run(params.sid);
+    });
+    deleteAll();
     json(res, { ok: true });
   });
 
@@ -218,8 +221,8 @@ export function createApiRouter(deps: WebServerDependencies) {
   route('GET', '/search', (_req, res, url) => {
     const q = url.searchParams.get('q')?.trim();
     if (!q) { json(res, { results: [], total: 0 }); return; }
-    const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '20', 10), 100);
-    const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+    const limit = safeInt(url.searchParams.get('limit'), 20, 1, 100);
+    const offset = safeInt(url.searchParams.get('offset'), 0);
     const db = getDb();
 
     const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM conversations WHERE content LIKE ?`).get(`%${q}%`) as { cnt: number };
@@ -241,7 +244,7 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Task stats ---
   route('GET', '/tasks/stats', (_req, res, url) => {
-    const days = Math.min(parseInt(url.searchParams.get('days') ?? '7', 10), 90);
+    const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
     const db = getDb();
     const since = Date.now() - days * 86400000;
 
@@ -269,7 +272,7 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Token usage summary ---
   route('GET', '/usage/summary', (_req, res, url) => {
-    const days = Math.min(parseInt(url.searchParams.get('days') ?? '7', 10), 90);
+    const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
     const db = getDb();
     const now = Date.now();
     const todayStart = now - (now % 86400000);
@@ -344,7 +347,7 @@ export function createApiRouter(deps: WebServerDependencies) {
     let size = 0;
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
-      if (size > MAX_UPLOAD_SIZE) { json(res, { error: 'File too large (max 10MB)' }, 413); return; }
+      if (size > MAX_UPLOAD_SIZE) { req.destroy(); json(res, { error: 'File too large (max 10MB)' }, 413); return; }
       chunks.push(chunk as Buffer);
     }
     const buffer = Buffer.concat(chunks);
@@ -372,9 +375,9 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- File serve ---
   route('GET', '/files/:fileId', (_req, res, _url, params) => {
-    const uploadsDir = join(getAppHome(), 'data', 'uploads');
-    const filePath = join(uploadsDir, params.fileId);
-    if (!existsSync(filePath) || !filePath.startsWith(uploadsDir)) {
+    const uploadsDir = resolve(join(getAppHome(), 'data', 'uploads'));
+    const filePath = resolve(join(uploadsDir, params.fileId));
+    if (!filePath.startsWith(uploadsDir) || !existsSync(filePath)) {
       notFound(res);
       return;
     }
@@ -434,10 +437,13 @@ export function createApiRouter(deps: WebServerDependencies) {
       try {
         const result = r.handler(req, res, url, params);
         if (result instanceof Promise) {
-          result.catch((err) => serverError(res, err));
+          result.catch((err) => {
+            if (!res.headersSent) serverError(res, err);
+            else console.error('[api] Error after headers sent:', err);
+          });
         }
       } catch (err) {
-        serverError(res, err);
+        if (!res.headersSent) serverError(res, err);
       }
       return;
     }
@@ -479,6 +485,12 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
     });
     req.on('error', reject);
   });
+}
+
+function safeInt(raw: string | null, fallback: number, min = 0, max = Infinity): number {
+  const n = parseInt(raw ?? '', 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }
 
 function setCorsHeaders(res: ServerResponse): void {
