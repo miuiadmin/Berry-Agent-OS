@@ -7,7 +7,9 @@ import type { ToolAuditPayload } from '../../contracts/audit.js';
 import type { MemoryQueryPayload, MemoryAddPayload, MemoryDeletePayload } from '../../contracts/memory.js';
 import type { CapabilityRequestPayload, CapabilityResponsePayload } from '../../contracts/capabilities.js';
 import type { ModelTakeoverRequestPayload, ModelTakeoverRespondPayload } from '../../contracts/model.js';
+import type { ICapabilityBus, InvokeContext } from '../../bus/contract.js';
 import { getEventBus } from '../event-bus.js';
+import { genId } from '../../utils/id.js';
 
 interface AgentIpc {
   onMessage: (type: IpcMessageType, handler: (msg: IpcMessage) => void) => void;
@@ -104,5 +106,72 @@ export function setupTakeoverRouting(agentIpc: AgentIpc, agentName: string, deps
     deps.takeoverController.addRequest(payload, (respondPayload) => {
       agentIpc.send('model.takeover.respond', agentName, respondPayload, msg.id);
     });
+  });
+}
+
+export type BusHandlerDeps = {
+  capabilityBus: import('../../bus/index.js').ICapabilityBus | null;
+};
+
+export function setupBusInvokeHandler(agentIpc: AgentIpc, agentName: string, deps: BusHandlerDeps): void {
+  agentIpc.onMessage('bus.invoke' as IpcMessageType, async (msg: IpcMessage) => {
+    const { capabilityName, input, callerAgent, sessionId, correlationId } = msg.payload as {
+      capabilityName: string;
+      input: unknown;
+      callerAgent: string;
+      sessionId: string;
+      correlationId: string;
+    };
+
+    if (!deps.capabilityBus) {
+      agentIpc.send('bus.invoke.result' as IpcMessageType, agentName, {
+        ok: false,
+        error: 'Capability Bus not initialized',
+        auditId: '',
+        durationMs: 0,
+        provider: { type: 'builtin', name: 'error' },
+      }, msg.id);
+      return;
+    }
+
+    try {
+      const result = await deps.capabilityBus.invoke(capabilityName, input, {
+        callChain: [`${callerAgent}:${capabilityName}`],
+        callerAgent,
+        sessionId,
+        correlationId,
+      });
+      agentIpc.send('bus.invoke.result' as IpcMessageType, agentName, result, msg.id);
+    } catch (err) {
+      agentIpc.send('bus.invoke.result' as IpcMessageType, agentName, {
+        ok: false,
+        error: (err as Error).message,
+        auditId: '',
+        durationMs: 0,
+        provider: { type: 'builtin', name: 'error' },
+      }, msg.id);
+    }
+  });
+
+  agentIpc.onMessage('bus.capabilities.request' as IpcMessageType, (msg: IpcMessage) => {
+    const { required } = msg.payload as { agentName: string; required: string[] };
+
+    if (!deps.capabilityBus) {
+      agentIpc.send('bus.capabilities.response' as IpcMessageType, agentName, { tools: [] }, msg.id);
+      return;
+    }
+
+    const tools = required
+      .map((name: string) => deps.capabilityBus!.getDescriptor(name))
+      .filter(Boolean)
+      .map((desc: any) => ({
+        name: desc.name,
+        description: desc.description,
+        inputSchema: desc.inputSchema
+          ? (typeof desc.inputSchema.toJsonSchema === 'function' ? desc.inputSchema.toJsonSchema() : { type: 'object' })
+          : { type: 'object' },
+      }));
+
+    agentIpc.send('bus.capabilities.response' as IpcMessageType, agentName, { tools }, msg.id);
   });
 }
