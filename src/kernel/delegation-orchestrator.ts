@@ -112,6 +112,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
   private pendingJudgeInputs = new Map<string, { sessionId: string; toolName: string }>();
+  private pendingUserConfirms = new Map<string, { agentIpc: any; agentName: string; replyId: string }>();
   private judgeTimestamps: number[] = [];
 
   constructor(deps: {
@@ -270,6 +271,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     taskContext?: string;
   }): Promise<PermissionJudgeResultPayload> {
     return withTrace('router.requestPermissionJudge', () => this.requestJudgeInternal(input));
+  }
+
+  resolveUserPermissionConfirm(requestId: string, approved: boolean, reason?: string): boolean {
+    const pending = this.pendingUserConfirms.get(requestId);
+    if (!pending) return false;
+
+    this.pendingUserConfirms.delete(requestId);
+    pending.agentIpc.send('permission.result', pending.agentName, {
+      allowed: approved,
+      reason: reason ?? (approved ? '用户确认通过' : '用户拒绝'),
+    }, pending.replyId);
+
+    // Also resolve the approval request in DB
+    this.permissionCoordinator.resolve(requestId, {
+      verdict: approved ? 'approved' : 'denied',
+      source: 'user',
+      reason: reason ?? (approved ? '用户确认' : '用户拒绝'),
+    });
+
+    return true;
   }
 
   async dispatchModuleTask(input: {
@@ -1153,6 +1174,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
               if (Object.keys(constraints).length > 0) {
                 this.delegationManager.applyConstraints(taskId, constraints);
               }
+            }
+          }
+
+          // For dangerous-level: if Brain approved, still require user confirmation
+          if (judgment.allowed && dangerLevel === 'dangerous') {
+            const requestId = result.requestId;
+            if (requestId) {
+              getEventBus().emit('permission.user_confirm_needed', {
+                requestId,
+                sessionId,
+                agentName,
+                toolName,
+                toolInput: toolInput.slice(0, 500),
+                dangerLevel,
+                brainReason: judgment.reason,
+              });
+              // Don't respond yet — wait for user to approve/deny via WebSocket
+              // The response will be sent when permissions.approve/deny arrives
+              this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId });
+              return;
             }
           }
 

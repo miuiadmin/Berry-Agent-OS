@@ -28,4 +28,5 @@ export interface PermissionResultPayload {
   requiresReview?: boolean;
   reason?: string;
   tokenId?: string;
+  requestId?: string;
 }

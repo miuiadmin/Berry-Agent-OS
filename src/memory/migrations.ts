@@ -51,6 +51,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateKnowledgeEmbeddings(conn);
     migrateCreateBrainDecisionsTable(conn);
     migrateCreateSystemInsightsTable(conn);
+    migrateCreateWorldModelTable(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -898,5 +899,30 @@ function migrateCreateSystemInsightsTable(conn: Database.Database): void {
       ON system_insights(status, category);
     CREATE INDEX idx_system_insights_active
       ON system_insights(status) WHERE status != 'expired';
+  `);
+}
+
+function migrateCreateWorldModelTable(conn: Database.Database): void {
+  if (tableExists(conn, 'world_model')) return;
+  conn.exec(`
+    CREATE TABLE world_model (
+      id TEXT PRIMARY KEY,
+      snapshot_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS world_model_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      source TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'info'
+        CHECK(severity IN ('info','warning','critical')),
+      handled INTEGER NOT NULL DEFAULT 0,
+      received_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX idx_world_model_events_unhandled
+      ON world_model_events(handled, received_at) WHERE handled = 0;
   `);
 }
