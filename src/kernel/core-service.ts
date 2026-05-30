@@ -346,6 +346,7 @@ export class CoreService {
     // World Model: continuous global state for Brain decisions
     const { WorldModelRuntime } = await import('./world-model.js');
     const worldModel = new WorldModelRuntime(getDb());
+    this.messageRouter.setWorldModel(worldModel);
 
     // Will Loop: Brain autonomous action cycle (Phase D)
     const { WillLoop } = await import('./will-loop.js');
