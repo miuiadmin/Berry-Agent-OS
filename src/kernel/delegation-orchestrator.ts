@@ -27,6 +27,7 @@ import {
   setupCapabilityHandler,
   setupModelOverrideHandler,
   setupTakeoverRouting,
+  setupBusHandlers,
   type ProxyHandlersDeps,
 } from './flows/proxy-handlers.js';
 import { closeTaskWorkspace } from './task-workspace.js';
@@ -49,6 +50,7 @@ import type { PermissionRequestPayload, PermissionValidatePayload, PermissionCon
 import type { AgentTaskPayload, AgentTaskResultPayload, TaskAcknowledgePayload, TaskStartedPayload, TaskProgressPayload, TaskTelemetryPayload } from '../contracts/tasks.js';
 import type { CorrectionConstraints } from '../contracts/delegation.js';
 import type { DangerLevel } from '../utils/types.js';
+import type { ICapabilityBus } from '../bus/contract.js';
 
 const logger = getLogger('orchestrator');
 
@@ -105,6 +107,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private runtimeRegistry: RuntimeRegistry | null = null;
   private runtimeExecutor: RuntimeExecutor | null = null;
   private brainDecisionRecorder: BrainDecisionRecorder | null = null;
+  private capabilityBusRef: ICapabilityBus | null = null;
 
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
@@ -153,6 +156,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   setRuntimeExecutor(executor: RuntimeExecutor): void {
     this.runtimeExecutor = executor;
+  }
+
+  setCapabilityBus(bus: ICapabilityBus): void {
+    this.capabilityBusRef = bus;
+    // Wire Bus handlers to primary agent
+    const primaryAgent = this.registry.requireRole('primary');
+    const primary = this.agentManager.getAgent(primaryAgent.manifest.name);
+    if (primary) {
+      setupBusHandlers(primary.ipc, primaryAgent.manifest.name, bus);
+    }
   }
 
   private get proxyDeps(): ProxyHandlersDeps {

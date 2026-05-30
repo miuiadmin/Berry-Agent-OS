@@ -109,6 +109,71 @@ export function setupTakeoverRouting(agentIpc: AgentIpc, agentName: string, deps
   });
 }
 
+export function setupBusHandlers(agentIpc: AgentIpc, agentName: string, capabilityBus: ICapabilityBus | null): void {
+  agentIpc.onMessage('bus.invoke', (msg: IpcMessage) => {
+    if (!capabilityBus) {
+      agentIpc.send('bus.invoke.result', agentName, {
+        ok: false,
+        error: 'Capability Bus not initialized',
+        auditId: '',
+        durationMs: 0,
+        provider: { type: 'builtin', name: 'error' },
+      }, msg.correlationId ?? msg.id);
+      return;
+    }
+
+    const payload = msg.payload as {
+      invokeId?: string;
+      capabilityName: string;
+      input: unknown;
+      callerAgent: string;
+      sessionId: string;
+    };
+
+    const ctx: InvokeContext = {
+      callChain: [],
+      callerAgent: payload.callerAgent || agentName,
+      sessionId: payload.sessionId,
+      correlationId: msg.correlationId ?? genId('corr'),
+      timeout: 30_000,
+    };
+
+    capabilityBus.invoke(payload.capabilityName, payload.input, ctx).then((result) => {
+      agentIpc.send('bus.invoke.result', agentName, {
+        ...result,
+        invokeId: payload.invokeId,
+      }, msg.correlationId ?? msg.id);
+    });
+  });
+
+  agentIpc.onMessage('bus.capabilities.request', (msg: IpcMessage) => {
+    if (!capabilityBus) {
+      agentIpc.send('bus.capabilities.response', agentName, { tools: [] }, msg.id);
+      return;
+    }
+
+    const payload = msg.payload as { agentName: string; required: string[] };
+    const required = payload.required;
+
+    const tools = required.length > 0
+      ? required
+          .map((name) => capabilityBus.getDescriptor(name))
+          .filter(Boolean)
+          .map((cap) => ({
+            name: cap!.name,
+            description: cap!.description,
+            inputSchema: cap!.inputSchema ? {} : {},
+          }))
+      : capabilityBus.discover({ dangerLevel: 'safe' }).map((cap) => ({
+          name: cap.name,
+          description: cap.description,
+          inputSchema: {},
+        }));
+
+    agentIpc.send('bus.capabilities.response', agentName, { tools }, msg.id);
+  });
+}
+
 export type BusHandlerDeps = {
   capabilityBus: import('../../bus/index.js').ICapabilityBus | null;
 };

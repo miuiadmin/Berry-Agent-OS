@@ -340,6 +340,7 @@ export class CoreService {
     registerToolsAsBusCapabilities(capabilityBus, allTools);
 
     this.capabilityBus = capabilityBus;
+    this.messageRouter.setCapabilityBus(capabilityBus);
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();

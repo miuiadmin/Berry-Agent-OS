@@ -2,9 +2,18 @@ import { EvolutionEngine } from '../../../evolution/index.js';
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { detectLearningSignals, parseLearningSignalsFromText } from '../../../evolution/detector.js';
+import { checkEvolutionTriggers, type EvolutionTriggerSignal } from '../../../observability/evolution-metrics.js';
+import { genId } from '../../../utils/id.js';
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const input = payload.inputPayload;
+  const taskType = String(input.taskType ?? 'learning_review');
+
+  if (taskType === 'metric_analysis') {
+    return await handleMetricAnalysis(payload, context);
+  }
+
+  // Legacy learning review path
   const message = String(input.message ?? input.userMessage ?? '');
   const assistantResponse = String(input.assistantResponse ?? '');
   const engine = new EvolutionEngine(getDb());
@@ -50,8 +59,133 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   };
 });
 
+async function handleMetricAnalysis(
+  payload: AgentTaskPayload,
+  context: { llm: import('../../../llm/client.js').LlmClient },
+): Promise<Record<string, unknown>> {
+  const triggers = checkEvolutionTriggers();
+  if (triggers.length === 0) {
+    return { kind: 'metric_analysis', insights: [], reason: 'no triggers fired' };
+  }
+
+  const db = getDb();
+
+  // Gather recent brain decisions for context
+  const recentDecisions = db.prepare(`
+    SELECT decision_type, input_summary, output_json, outcome
+    FROM brain_decisions
+    WHERE created_at > ?
+    ORDER BY created_at DESC LIMIT 20
+  `).all(Date.now() - 3600_000) as Array<Record<string, unknown>>;
+
+  const llmResult = await context.llm.chat(
+    [{ role: 'user', content: buildMetricAnalysisPrompt(triggers, recentDecisions) }],
+    {
+      agent: 'learning',
+      purpose: 'learning_review',
+      sessionId: payload.sessionId,
+      taskId: payload.taskId,
+      maxTokens: 1500,
+      temperature: 0.3,
+    },
+  );
+
+  const insights = parseInsightsFromText(llmResult.content);
+
+  // Store insights in system_insights table
+  for (const insight of insights) {
+    try {
+      db.prepare(`
+        INSERT INTO system_insights (id, category, title, content, confidence, status, source_decisions, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'tentative', ?, ?, ?)
+      `).run(
+        genId('ins'),
+        insight.category,
+        insight.insight.slice(0, 100),
+        JSON.stringify({ insight: insight.insight, suggestion: insight.suggestion, evidence: insight.evidence }),
+        insight.confidence,
+        JSON.stringify(triggers.map(t => t.type)),
+        Date.now(),
+        Date.now(),
+      );
+    } catch {
+      // table may not exist during migration
+    }
+  }
+
+  return {
+    kind: 'metric_analysis',
+    triggersDetected: triggers.map(t => t.type),
+    insights: insights.map(i => ({ category: i.category, insight: i.insight })),
+  };
+}
+
+function buildMetricAnalysisPrompt(
+  triggers: EvolutionTriggerSignal[],
+  recentDecisions: Array<Record<string, unknown>>,
+): string {
+  const triggerSummary = triggers.map(t =>
+    `- ${t.type}: 当前值 ${(t.currentRate * 100).toFixed(1)}%, 阈值 ${(t.threshold * 100).toFixed(1)}%, 样本量 ${t.sampleSize}`,
+  ).join('\n');
+
+  const decisionSummary = recentDecisions.slice(0, 10).map(d =>
+    `[${d.decision_type}] ${(d.input_summary as string).slice(0, 80)} → outcome=${d.outcome ?? 'pending'}`,
+  ).join('\n');
+
+  return `你是系统进化的参谋。以下指标异常已触发分析：
+
+触发信号：
+${triggerSummary}
+
+近期 Brain 决策样本：
+${decisionSummary || '（无记录）'}
+
+请分析原因并提出改进建议。输出 JSON 数组：
+[
+  {
+    "category": "routing|review|permission|evolution|performance",
+    "insight": "简明发现描述（一句话）",
+    "evidence": ["支持此发现的证据"],
+    "confidence": 0.0-1.0,
+    "suggestion": "具体改进建议"
+  }
+]
+
+规则：
+- 只基于提供的数据分析，不编造数据。
+- 建议必须具体可执行（如"路由 prompt 应增加 X 情境"）。
+- confidence 低于 0.4 的不要输出。
+- 没有洞察时输出 []。`;
+}
+
+function parseInsightsFromText(text: string): Array<{
+  category: string;
+  insight: string;
+  evidence: string[];
+  confidence: number;
+  suggestion: string;
+}> {
+  try {
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    const parsed = JSON.parse(match[0]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item: any) => item.category && item.insight && item.confidence >= 0.4)
+      .map((item: any) => ({
+        category: item.category,
+        insight: String(item.insight).slice(0, 500),
+        evidence: Array.isArray(item.evidence) ? item.evidence.slice(0, 5) : [],
+        confidence: Math.min(1, Math.max(0, Number(item.confidence))),
+        suggestion: String(item.suggestion ?? '').slice(0, 500),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 function buildLearningPrompt(userMessage: string, assistantResponse: string): string {
-  return `你是 系统的 Learning Agent。请判断这轮对话是否值得沉淀为 Skill 或 Plugin。
+  return `你是系统的 Learning Agent。请判断这轮对话是否值得沉淀为 Skill 或 Plugin。
 
 规则：
 - Skill 适合长期偏好、输出格式、工作方式、提示词策略。
