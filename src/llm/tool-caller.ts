@@ -1,0 +1,352 @@
+import type { ChatResult, ChatOptions, LlmClient, ToolUseBlock } from './client.js';
+import type { ModelMessage, ModelToolDef, ModelContentBlock } from '../contracts/model.js';
+import type { TokenBudgetController, BudgetScope } from './token-budget.js';
+import type { StreamChunk } from './contract.js';
+import { LoopDetector } from '../utils/loop-detector.js';
+import { getToolByName } from '../tools/index.js';
+import type { DangerLevel, ToolResult } from '../tools/types.js';
+import { metrics } from '../observability/metrics.js';
+
+// === Stop Condition ===
+
+export type StopCondition =
+  | { type: 'step_count'; maxSteps: number }
+  | { type: 'tool_use' }
+  | { type: 'stop_sequence'; sequences: string[] };
+
+export const StopCondition = {
+  stepCountIs: (maxSteps: number): StopCondition => ({ type: 'step_count', maxSteps }),
+  toolUse: (): StopCondition => ({ type: 'tool_use' }),
+  stopSequences: (sequences: string[]): StopCondition => ({ type: 'stop_sequence', sequences }),
+} as const;
+
+export function evaluateStopCondition(
+  condition: StopCondition | undefined,
+  stepIndex: number,
+  stopReason: string,
+  stopSequences: string[],
+): boolean {
+  if (!condition) return false;
+  switch (condition.type) {
+    case 'step_count':
+      return stepIndex >= condition.maxSteps;
+    case 'tool_use':
+      return stopReason !== 'tool_use';
+    case 'stop_sequence':
+      return condition.sequences.some((seq) => stopSequences.includes(seq));
+  }
+}
+
+// === Tool Execution Mode ===
+
+export type ToolExecution = 'auto' | 'none';
+
+export interface ToolCallRecord {
+  name: string;
+  input: string;
+  permissionToken?: string;
+  result: string;
+  isError: boolean;
+  durationMs: number;
+  dangerLevel: DangerLevel;
+}
+
+export interface ToolLoopConfig {
+  maxCalls: number;
+  timeoutMs: number;
+  stopCondition?: StopCondition;
+  toolExecution?: ToolExecution;
+}
+
+export interface ToolLoopParams {
+  llm: LlmClient;
+  messages: ModelMessage[];
+  systemPrompt: string;
+  tools: ModelToolDef[];
+  config: ToolLoopConfig;
+  signal?: AbortSignal;
+  onChunk?: (text: string) => void;
+  onUsage?: (inputTokens: number, outputTokens: number) => void;
+  onToolResult?: (toolName: string, isError: boolean) => void;
+  onUncertainty?: (reason: string) => void;
+  chatContext?: Partial<ChatOptions>;
+  budgetController?: TokenBudgetController;
+  budgetScope?: { scope: BudgetScope; scopeId: string };
+  requestPermission: (toolName: string, toolInput: string, dangerLevel: DangerLevel) => Promise<{ allowed: boolean; reason?: string; tokenId?: string }>;
+  validatePermission: (tokenId: string, toolName: string, toolInput: string) => Promise<{ allowed: boolean; reason?: string }>;
+  consumePermission: (tokenId: string) => Promise<void>;
+  acquirePermission?: (toolName: string, toolInput: string, dangerLevel: DangerLevel) => Promise<{ allowed: boolean; reason?: string; tokenId?: string }>;
+  auditTool: (record: ToolCallRecord) => void;
+}
+
+export interface ToolLoopResult {
+  finalContent: string;
+  toolCalls: ToolCallRecord[];
+  messages: ModelMessage[];
+}
+
+export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResult> {
+  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onUsage, onToolResult, onUncertainty, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool } = params;
+  const detector = new LoopDetector(config.maxCalls);
+  const toolCalls: ToolCallRecord[] = [];
+  const workingMessages: ModelMessage[] = [...messages];
+  let stepIndex = 0;
+  let consecutivePermissionDenials = 0;
+  let uncertaintyFired = false;
+  const useStreaming = !!onChunk && llm.supportsStreaming();
+
+  while (true) {
+    if (signal?.aborted) {
+      return {
+        finalContent: '任务已取消',
+        toolCalls,
+        messages: workingMessages,
+      };
+    }
+
+    if (budgetController && budgetScope) {
+      const check = budgetController.checkBudget(budgetScope.scope, budgetScope.scopeId);
+      if (!check.allowed) {
+        return {
+          finalContent: check.alert?.message ?? 'Token 预算已超限，停止执行',
+          toolCalls,
+          messages: workingMessages,
+        };
+      }
+    }
+
+    const chatOpts: ChatOptions = {
+      ...chatContext,
+      system: systemPrompt,
+      tools,
+      maxTokens: 4096,
+    };
+
+    let result: ChatResult;
+    if (useStreaming) {
+      result = await consumeStream(llm, workingMessages, chatOpts, onChunk!);
+    } else {
+      result = await llm.chat(workingMessages, chatOpts);
+    }
+
+    if (onUsage) {
+      onUsage(result.inputTokens, result.outputTokens);
+    }
+
+    // Evaluate stop condition after each step
+    if (evaluateStopCondition(config.stopCondition, stepIndex, result.stopReason, result.content.split('\n'))) {
+      return { finalContent: result.content, toolCalls, messages: workingMessages };
+    }
+
+    stepIndex++;
+
+    if (result.stopReason !== 'tool_use') {
+      return { finalContent: result.content, toolCalls, messages: workingMessages };
+    }
+
+    workingMessages.push({ role: 'assistant', content: result.contentBlocks });
+
+    const toolUseBlocks = result.contentBlocks.filter(
+      (b): b is ToolUseBlock => b.type === 'tool_use',
+    );
+
+    const toolResults: ModelContentBlock[] = [];
+
+    for (const block of toolUseBlocks) {
+      const toolDef = getToolByName(block.name);
+      const dangerLevel: DangerLevel = toolDef?.dangerLevel ?? 'dangerous';
+      const inputStr = JSON.stringify(block.input);
+
+      const loopCheck = detector.check(block.name, inputStr, false);
+      if (loopCheck.loop) {
+        toolResults.push({
+          type: 'tool_result',
+          toolUseId: block.id,
+          content: `工具调用循环被中断: ${loopCheck.reason}`,
+          isError: true,
+        });
+        continue;
+      }
+
+      const permission = acquirePermission
+        ? await acquirePermission(block.name, inputStr, dangerLevel)
+        : await requestPermission(block.name, inputStr, dangerLevel);
+      if (!permission.allowed) {
+        consecutivePermissionDenials++;
+        if (onUncertainty && !uncertaintyFired && consecutivePermissionDenials >= 2) {
+          uncertaintyFired = true;
+          onUncertainty('consecutive permission denials');
+        }
+        const record: ToolCallRecord = {
+          name: block.name,
+          input: inputStr,
+          permissionToken: permission.tokenId,
+          result: `权限被拒绝: ${permission.reason}`,
+          isError: true,
+          durationMs: 0,
+          dangerLevel,
+        };
+        toolCalls.push(record);
+        auditTool(record);
+        toolResults.push({
+          type: 'tool_result',
+          toolUseId: block.id,
+          content: `权限被拒绝: ${permission.reason}`,
+          isError: true,
+        });
+        continue;
+      }
+
+      if (!permission.tokenId) {
+        const record: ToolCallRecord = {
+          name: block.name,
+          input: inputStr,
+          result: '权限被拒绝: 缺少 permission token',
+          isError: true,
+          durationMs: 0,
+          dangerLevel,
+        };
+        toolCalls.push(record);
+        auditTool(record);
+        toolResults.push({
+          type: 'tool_result',
+          toolUseId: block.id,
+          content: record.result,
+          isError: true,
+        });
+        continue;
+      }
+
+      if (typeof validatePermission !== 'function' || typeof consumePermission !== 'function') {
+        const record: ToolCallRecord = {
+          name: block.name,
+          input: inputStr,
+          permissionToken: permission.tokenId,
+          result: '权限被拒绝: 缺少 permission token 校验/消费器',
+          isError: true,
+          durationMs: 0,
+          dangerLevel,
+        };
+        toolCalls.push(record);
+        auditTool(record);
+        toolResults.push({
+          type: 'tool_result',
+          toolUseId: block.id,
+          content: record.result,
+          isError: true,
+        });
+        continue;
+      }
+
+      // Skip validate if acquirePermission already validated atomically
+      if (!acquirePermission) {
+        const validation = await validatePermission(permission.tokenId, block.name, inputStr);
+        if (!validation.allowed) {
+          const record: ToolCallRecord = {
+            name: block.name,
+            input: inputStr,
+            permissionToken: permission.tokenId,
+            result: `权限被拒绝: ${validation.reason}`,
+            isError: true,
+            durationMs: 0,
+            dangerLevel,
+          };
+          toolCalls.push(record);
+          auditTool(record);
+          toolResults.push({
+            type: 'tool_result',
+            toolUseId: block.id,
+            content: record.result,
+            isError: true,
+          });
+          continue;
+        }
+      }
+
+      let toolResult: ToolResult;
+      const start = Date.now();
+
+      if (!toolDef) {
+        toolResult = { content: `未知工具: ${block.name}`, isError: true };
+      } else {
+        try {
+          toolResult = await toolDef.execute(block.input);
+        } catch (err) {
+          toolResult = { content: `工具执行异常: ${(err as Error).message}`, isError: true };
+        }
+      }
+
+      const durationMs = Date.now() - start;
+      const status = toolResult.isError ? 'error' : 'ok';
+      metrics.counter('tool_calls_total').inc({ tool: block.name, agent: chatContext?.agent ?? '', status });
+      metrics.histogram('tool_duration_ms').observe(durationMs, { tool: block.name, agent: chatContext?.agent ?? '' });
+
+      const record: ToolCallRecord = {
+        name: block.name,
+        input: inputStr,
+        permissionToken: permission.tokenId,
+        result: toolResult.content,
+        isError: toolResult.isError ?? false,
+        durationMs,
+        dangerLevel,
+      };
+      toolCalls.push(record);
+      auditTool(record);
+      if (onToolResult) {
+        onToolResult(block.name, record.isError);
+      }
+      await consumePermission(permission.tokenId);
+      consecutivePermissionDenials = 0;
+
+      if (toolResult.isError) {
+        detector.check(block.name, inputStr, true);
+      }
+
+      toolResults.push({
+        type: 'tool_result',
+        toolUseId: block.id,
+        content: toolResult.content,
+        isError: toolResult.isError,
+      });
+    }
+
+    workingMessages.push({ role: 'user', content: toolResults });
+
+    if (detector.check('__iteration__', '', false).loop) {
+      const lastText = toolResults
+        .filter((r): r is Extract<ModelContentBlock, { type: 'tool_result' }> => r.type === 'tool_result')
+        .map((r) => r.content)
+        .join('\n');
+      return { finalContent: `工具调用已达上限。最后结果:\n${lastText}`, toolCalls, messages: workingMessages };
+    }
+  }
+}
+
+async function consumeStream(
+  llm: LlmClient,
+  messages: ModelMessage[],
+  options: ChatOptions,
+  onChunk: (text: string) => void,
+): Promise<ChatResult> {
+  let result: ChatResult | undefined;
+  for await (const chunk of llm.chatStream(messages, options)) {
+    if (chunk.type === 'text_delta') {
+      onChunk(chunk.text);
+    } else if (chunk.type === 'message_done') {
+      const r = chunk.response;
+      result = {
+        content: r.content,
+        contentBlocks: r.contentBlocks,
+        toolCalls: r.toolCalls,
+        stopReason: r.stopReason,
+        inputTokens: r.usage.inputTokens,
+        outputTokens: r.usage.outputTokens,
+        model: r.model,
+      };
+    }
+  }
+  if (!result) {
+    throw new Error('Stream ended without message_done');
+  }
+  return result;
+}

@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "skills",
+  "version": "0.1.0",
+  "description": "创建和维护 SKILL.md",
+  "level": 2,
+  "kind": "on-demand",
+  "taskTypes": ["skill_task"],
+  "roles": [],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "module-agent",
+  "requiresBrainReview": false
+}

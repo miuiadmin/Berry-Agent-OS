@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "conversation",
+  "version": "0.1.0",
+  "description": "直接与用户对话",
+  "level": 3,
+  "kind": "resident",
+  "taskTypes": ["conversation_turn"],
+  "roles": ["primary", "plugin-host"],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "custom",
+  "requiresBrainReview": true
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+~/.berryagent/
+参考源码/

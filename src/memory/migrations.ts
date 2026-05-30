@@ -1,0 +1,847 @@
+import type Database from 'better-sqlite3';
+
+export function runMemoryMigrations(conn: Database.Database): void {
+  const previousLegacyAlter = conn.pragma('legacy_alter_table', { simple: true }) as number;
+  conn.pragma('legacy_alter_table = ON');
+
+  try {
+    const knowledgeColumns = getColumns(conn, 'knowledge');
+    addColumnIfMissing(conn, knowledgeColumns, 'knowledge', 'owner_key', "TEXT NOT NULL DEFAULT 'user:owner'");
+    addColumnIfMissing(conn, knowledgeColumns, 'knowledge', 'source', "TEXT NOT NULL DEFAULT 'conversation'");
+    addColumnIfMissing(conn, knowledgeColumns, 'knowledge', 'last_seen_at', 'INTEGER');
+    addColumnIfMissing(conn, knowledgeColumns, 'knowledge', 'last_used_at', 'INTEGER');
+    addColumnIfMissing(conn, knowledgeColumns, 'knowledge', 'last_used_query', 'TEXT');
+    conn.prepare(
+      `UPDATE knowledge SET last_seen_at = COALESCE(last_seen_at, updated_at, created_at, ?) WHERE last_seen_at IS NULL`,
+    ).run(Date.now());
+    rebuildKnowledgeIfNeeded(conn);
+
+    const accessColumns = getColumns(conn, 'memory_access_log');
+    addColumnIfMissing(conn, accessColumns, 'memory_access_log', 'recall_source', "TEXT NOT NULL DEFAULT 'auto_recall'");
+    if (accessColumns.has('source')) {
+      conn.prepare(
+        `UPDATE memory_access_log SET recall_source = source WHERE source IS NOT NULL AND recall_source = 'auto_recall'`,
+      ).run();
+      rebuildMemoryAccessLog(conn);
+    }
+
+    rebuildConversationsIfNeeded(conn);
+    migrateReviewsToReviewRequests(conn);
+    rebuildRunArtifactsIfNeeded(conn);
+    rebuildToolCallsIfNeeded(conn);
+    addToolCallsAuditColumns(conn);
+    rebuildTokenUsageIfNeeded(conn);
+    addTokenUsageScopeColumns(conn);
+    addTaskLifecycleColumns(conn);
+    rebuildLogEventsIfNeeded(conn);
+    rebuildConsoleFramesIfNeeded(conn);
+    migrateCreateFileLocksTable(conn);
+    relaxAgentTasksConstraint(conn);
+    relaxModelRequestsPurpose(conn);
+    addModelTierColumn(conn);
+    addSkillsTelemetryColumns(conn);
+    addSkillsVisibilityColumns(conn);
+    migrateCreateAgentsMetaTables(conn);
+    migrateCreateSignalHistoryTable(conn);
+    migrateCreatePluginStorageTable(conn);
+    migrateCreateCodeAuditTables(conn);
+    migrateCreateSkillEventsTable(conn);
+    addTaskTraceColumn(conn);
+    addTaskRequeueColumn(conn);
+    migrateCreateKnowledgeEmbeddings(conn);
+  } finally {
+    conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
+  }
+}
+
+function rebuildKnowledgeIfNeeded(conn: Database.Database): void {
+  const schema = tableSql(conn, 'knowledge');
+  const hasEvidenceSystem = schema.includes("evidence_kind IN ('direct','inferred','manual','system')");
+  const hasSourceCheck = schema.includes("source IN ('conversation','manual','import','system','tool','plugin')");
+  const hasRequiredLastSeen = schema.includes('last_seen_at INTEGER NOT NULL');
+  if (hasEvidenceSystem && hasSourceCheck && hasRequiredLastSeen) return;
+
+  const now = Date.now();
+  conn.exec(`
+    DROP TRIGGER IF EXISTS knowledge_ai;
+    DROP TRIGGER IF EXISTS knowledge_ad;
+    DROP TRIGGER IF EXISTS knowledge_au;
+    DROP TABLE IF EXISTS knowledge_fts;
+    ALTER TABLE knowledge RENAME TO knowledge_old_migration;
+
+    CREATE TABLE knowledge (
+      id TEXT PRIMARY KEY,
+      owner_key TEXT NOT NULL DEFAULT 'user:owner',
+      type TEXT NOT NULL CHECK(type IN (
+        'identity','preference','goal','project','habit',
+        'decision','constraint','relationship','fact','reflection'
+      )),
+      summary TEXT NOT NULL,
+      detail TEXT,
+      scope TEXT NOT NULL DEFAULT 'active' CHECK(scope IN ('active','durable')),
+      evidence_kind TEXT NOT NULL DEFAULT 'inferred'
+        CHECK(evidence_kind IN ('direct','inferred','manual','system')),
+      source TEXT NOT NULL DEFAULT 'conversation'
+        CHECK(source IN ('conversation','manual','import','system','tool','plugin')),
+      confidence REAL NOT NULL DEFAULT 0.7,
+      importance REAL NOT NULL DEFAULT 0.5,
+      durability REAL NOT NULL DEFAULT 0.5,
+      evidence_count INTEGER NOT NULL DEFAULT 1,
+      provenance TEXT,
+      dismissed INTEGER NOT NULL DEFAULT 0,
+      superseded_by TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      last_seen_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      last_used_at INTEGER,
+      last_used_query TEXT
+    );
+  `);
+
+  conn.prepare(`
+    INSERT INTO knowledge (
+      id, owner_key, type, summary, detail, scope, evidence_kind, source,
+      confidence, importance, durability, evidence_count, provenance,
+      dismissed, superseded_by, created_at, updated_at,
+      last_seen_at, last_used_at, last_used_query
+    )
+    SELECT
+      id,
+      COALESCE(owner_key, 'user:owner'),
+      type,
+      summary,
+      detail,
+      scope,
+      CASE
+        WHEN evidence_kind IN ('direct','inferred','manual','system') THEN evidence_kind
+        ELSE 'inferred'
+      END,
+      CASE
+        WHEN source IN ('conversation','manual','import','system','tool','plugin') THEN source
+        ELSE 'conversation'
+      END,
+      confidence,
+      importance,
+      durability,
+      evidence_count,
+      provenance,
+      dismissed,
+      superseded_by,
+      created_at,
+      updated_at,
+      COALESCE(last_seen_at, updated_at, created_at, ?),
+      last_used_at,
+      last_used_query
+    FROM knowledge_old_migration
+  `).run(now);
+
+  conn.exec(`DROP TABLE knowledge_old_migration;`);
+}
+
+function rebuildMemoryAccessLog(conn: Database.Database): void {
+  conn.exec(`
+    ALTER TABLE memory_access_log RENAME TO memory_access_log_old_migration;
+
+    CREATE TABLE memory_access_log (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES run_artifacts(id),
+      session_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL DEFAULT 'conversation',
+      recall_source TEXT NOT NULL CHECK(recall_source IN ('auto_recall','tool_query','brain_requested')),
+      query TEXT NOT NULL,
+      result_ids TEXT NOT NULL,
+      scores TEXT,
+      context_chars INTEGER NOT NULL DEFAULT 0,
+      truncated INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    INSERT INTO memory_access_log (
+      id, run_id, session_id, agent_name, recall_source, query,
+      result_ids, scores, context_chars, truncated, created_at
+    )
+    SELECT
+      id,
+      run_id,
+      session_id,
+      agent_name,
+      CASE
+        WHEN recall_source IN ('auto_recall','tool_query','brain_requested') THEN recall_source
+        WHEN source IN ('auto_recall','tool_query','brain_requested') THEN source
+        ELSE 'auto_recall'
+      END,
+      query,
+      result_ids,
+      scores,
+      context_chars,
+      truncated,
+      created_at
+    FROM memory_access_log_old_migration;
+
+    DROP TABLE memory_access_log_old_migration;
+  `);
+}
+
+function rebuildConversationsIfNeeded(conn: Database.Database): void {
+  const columns = getColumns(conn, 'conversations');
+  const schema = tableSql(conn, 'conversations');
+  if (
+    columns.has('tool_name') &&
+    columns.has('tool_input') &&
+    columns.has('tool_result') &&
+    columns.has('token_count') &&
+    schema.includes("role IN ('user','assistant','system','tool')")
+  ) {
+    return;
+  }
+
+  conn.exec(`
+    ALTER TABLE conversations RENAME TO conversations_old_migration;
+
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
+      content TEXT NOT NULL,
+      tool_name TEXT,
+      tool_input TEXT,
+      tool_result TEXT,
+      token_count INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    INSERT INTO conversations (
+      id, session_id, role, content, tool_name, tool_input, tool_result, token_count, created_at
+    )
+    SELECT
+      id,
+      session_id,
+      CASE WHEN role IN ('user','assistant','system','tool') THEN role ELSE 'system' END,
+      content,
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      created_at
+    FROM conversations_old_migration;
+
+    DROP TABLE conversations_old_migration;
+  `);
+}
+
+function migrateReviewsToReviewRequests(conn: Database.Database): void {
+  if (!tableExists(conn, 'reviews')) return;
+
+  const rows = conn.prepare(`SELECT * FROM reviews`).all() as Record<string, unknown>[];
+  const insert = conn.prepare(`
+    INSERT OR IGNORE INTO review_requests (
+      id, session_id, level, draft_response, review_input,
+      verdict, final_response, reason, created_at, reviewed_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const migrate = conn.transaction(() => {
+    for (const row of rows) {
+      const verdict = normalizeReviewVerdict(row.verdict);
+      insert.run(
+        row.id,
+        row.session_id,
+        normalizeReviewLevel(row.level),
+        row.draft_response,
+        JSON.stringify({ user_message: row.user_message ?? '' }),
+        verdict,
+        row.final_response ?? null,
+        row.reason ?? null,
+        row.created_at ?? Date.now(),
+        verdict === 'pending' ? null : row.created_at ?? Date.now(),
+      );
+    }
+    conn.exec(`DROP TABLE reviews;`);
+  });
+  migrate();
+}
+
+function rebuildToolCallsIfNeeded(conn: Database.Database): void {
+  const columns = getColumns(conn, 'tool_calls');
+  if (!columns.has('tool_input') && columns.has('input') && columns.has('input_hash')) return;
+
+  conn.exec(`
+    ALTER TABLE tool_calls RENAME TO tool_calls_old_migration;
+
+    CREATE TABLE tool_calls (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES run_artifacts(id),
+      session_id TEXT NOT NULL,
+      task_id TEXT REFERENCES agent_tasks(id),
+      correlation_id TEXT,
+      agent_name TEXT NOT NULL DEFAULT 'conversation',
+      tool_name TEXT NOT NULL,
+      input TEXT NOT NULL,
+      input_hash TEXT NOT NULL,
+      permission_token TEXT,
+      permission_verdict TEXT CHECK(permission_verdict IN ('allow','deny','ask_user')),
+      danger_level TEXT,
+      result TEXT,
+      is_error INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      finished_at INTEGER,
+      duration_ms INTEGER
+    );
+
+    INSERT INTO tool_calls (
+      id, run_id, session_id, task_id, correlation_id, agent_name, tool_name,
+      input, input_hash, permission_token, permission_verdict, result,
+      is_error, started_at, finished_at
+    )
+    SELECT
+      id,
+      NULL,
+      session_id,
+      NULL,
+      NULL,
+      'conversation',
+      tool_name,
+      tool_input,
+      '',
+      NULL,
+      CASE
+        WHEN permission_mode = 'deny-all' THEN 'deny'
+        WHEN permission_mode IN ('ask','allow-all') THEN 'allow'
+        ELSE NULL
+      END,
+      tool_result,
+      COALESCE(is_error, 0),
+      COALESCE(created_at, unixepoch() * 1000),
+      CASE
+        WHEN duration_ms IS NULL THEN created_at
+        ELSE COALESCE(created_at, unixepoch() * 1000) + duration_ms
+      END
+    FROM tool_calls_old_migration;
+
+    DROP TABLE tool_calls_old_migration;
+  `);
+}
+
+function addToolCallsAuditColumns(conn: Database.Database): void {
+  const columns = getColumns(conn, 'tool_calls');
+  addColumnIfMissing(conn, columns, 'tool_calls', 'danger_level', 'TEXT');
+  addColumnIfMissing(conn, columns, 'tool_calls', 'duration_ms', 'INTEGER');
+}
+
+function rebuildTokenUsageIfNeeded(conn: Database.Database): void {
+  const columns = getColumns(conn, 'token_usage');
+  if (!columns.has('agent') && columns.has('session_id') && columns.has('cache_read_tokens')) return;
+
+  conn.exec(`
+    ALTER TABLE token_usage RENAME TO token_usage_old_migration;
+
+    CREATE TABLE token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL,
+      output_tokens INTEGER NOT NULL,
+      cache_read_tokens INTEGER DEFAULT 0,
+      cache_creation_tokens INTEGER DEFAULT 0,
+      model TEXT NOT NULL,
+      cost_usd REAL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    INSERT INTO token_usage (
+      session_id, input_tokens, output_tokens, cache_read_tokens,
+      cache_creation_tokens, model, cost_usd, created_at
+    )
+    SELECT
+      COALESCE(agent, 'legacy'),
+      input_tokens,
+      output_tokens,
+      0,
+      0,
+      model,
+      NULL,
+      created_at
+    FROM token_usage_old_migration;
+
+    DROP TABLE token_usage_old_migration;
+  `);
+}
+
+function addTokenUsageScopeColumns(conn: Database.Database): void {
+  const columns = getColumns(conn, 'token_usage');
+  addColumnIfMissing(conn, columns, 'token_usage', 'agent_name', 'TEXT');
+  addColumnIfMissing(conn, columns, 'token_usage', 'task_id', 'TEXT');
+}
+
+function addTaskLifecycleColumns(conn: Database.Database): void {
+  const columns = getColumns(conn, 'agent_tasks');
+  addColumnIfMissing(conn, columns, 'agent_tasks', 'visibility', "TEXT NOT NULL DEFAULT 'foreground'");
+  addColumnIfMissing(conn, columns, 'agent_tasks', 'notify_state', "TEXT NOT NULL DEFAULT 'none'");
+  addColumnIfMissing(conn, columns, 'agent_tasks', 'backgrounded_at', 'INTEGER');
+  addColumnIfMissing(conn, columns, 'agent_tasks', 'retrieved_at', 'INTEGER');
+  addColumnIfMissing(conn, columns, 'agent_tasks', 'notified_at', 'INTEGER');
+}
+
+function rebuildRunArtifactsIfNeeded(conn: Database.Database): void {
+  const columns = getColumns(conn, 'run_artifacts');
+  if (columns.has('kind') && columns.has('log_level') && columns.has('status') && !columns.has('exit_code')) return;
+
+  conn.exec(`
+    ALTER TABLE run_artifacts RENAME TO run_artifacts_old_migration;
+
+    CREATE TABLE run_artifacts (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK(kind IN ('cli','test','service','agent','plugin')),
+      session_id TEXT,
+      artifact_dir TEXT NOT NULL,
+      log_level TEXT NOT NULL CHECK(log_level IN ('error','warn','info','debug')),
+      command TEXT,
+      status TEXT NOT NULL DEFAULT 'running'
+        CHECK(status IN ('running','passed','failed','cancelled')),
+      started_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      finished_at INTEGER
+    );
+
+    INSERT INTO run_artifacts (
+      id, kind, session_id, artifact_dir, log_level, command, status, started_at, finished_at
+    )
+    SELECT
+      id,
+      'cli',
+      NULL,
+      artifact_dir,
+      'info',
+      command,
+      CASE
+        WHEN exit_code = 0 THEN 'passed'
+        WHEN exit_code IS NULL THEN 'running'
+        ELSE 'failed'
+      END,
+      started_at,
+      finished_at
+    FROM run_artifacts_old_migration;
+
+    DROP TABLE run_artifacts_old_migration;
+  `);
+}
+
+function rebuildLogEventsIfNeeded(conn: Database.Database): void {
+  const columns = getColumns(conn, 'log_events');
+  if (columns.has('message') && columns.has('payload') && columns.has('session_id') && !columns.has('msg')) return;
+
+  conn.exec(`
+    ALTER TABLE log_events RENAME TO log_events_old_migration;
+
+    CREATE TABLE log_events (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES run_artifacts(id),
+      session_id TEXT,
+      level TEXT NOT NULL CHECK(level IN ('error','warn','info','debug')),
+      module TEXT NOT NULL,
+      message TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      correlation_id TEXT,
+      span_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    INSERT INTO log_events (
+      id, run_id, session_id, level, module, message, payload, correlation_id, span_id, created_at
+    )
+    SELECT
+      CAST(id AS TEXT),
+      run_id,
+      NULL,
+      CASE WHEN level IN ('error','warn','info','debug') THEN level ELSE 'info' END,
+      module,
+      msg,
+      COALESCE(data, '{}'),
+      NULL,
+      NULL,
+      created_at
+    FROM log_events_old_migration;
+
+    DROP TABLE log_events_old_migration;
+  `);
+}
+
+function rebuildConsoleFramesIfNeeded(conn: Database.Database): void {
+  const columns = getColumns(conn, 'console_frames');
+  if (columns.has('seq') && columns.has('source') && columns.has('payload') && !tableSql(conn, 'console_frames').includes('id INTEGER')) {
+    return;
+  }
+
+  conn.exec(`
+    ALTER TABLE console_frames RENAME TO console_frames_old_migration;
+
+    CREATE TABLE console_frames (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES run_artifacts(id),
+      session_id TEXT,
+      seq INTEGER NOT NULL,
+      stream TEXT NOT NULL CHECK(stream IN ('stdin','stdout','stderr','system','jsonl')),
+      source TEXT NOT NULL,
+      level TEXT CHECK(level IN ('error','warn','info','debug')),
+      is_json INTEGER NOT NULL DEFAULT 0,
+      text TEXT,
+      payload TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    INSERT INTO console_frames (
+      id, run_id, session_id, seq, stream, source, level, is_json, text, payload, created_at
+    )
+    SELECT
+      CAST(id AS TEXT),
+      run_id,
+      NULL,
+      id,
+      CASE WHEN stream IN ('stdin','stdout','stderr','system','jsonl') THEN stream ELSE 'system' END,
+      'cli',
+      NULL,
+      0,
+      text,
+      NULL,
+      created_at
+    FROM console_frames_old_migration;
+
+    DROP TABLE console_frames_old_migration;
+  `);
+}
+
+function addColumnIfMissing(
+  conn: Database.Database,
+  columns: Set<string>,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  if (columns.has(column)) return;
+  conn.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  columns.add(column);
+}
+
+function tableExists(conn: Database.Database, table: string): boolean {
+  const row = conn.prepare(
+    `SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?`,
+  ).get(table) as { found: number } | undefined;
+  return Boolean(row);
+}
+
+function tableSql(conn: Database.Database, table: string): string {
+  const row = conn.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+  ).get(table) as { sql?: string } | undefined;
+  return row?.sql ?? '';
+}
+
+function getColumns(conn: Database.Database, table: string): Set<string> {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
+    throw new Error(`Invalid table identifier: ${table}`);
+  }
+  return new Set(conn.prepare(`PRAGMA table_info('${table}')`).all().map((col) => (col as { name: string }).name));
+}
+
+function normalizeReviewLevel(value: unknown): string {
+  return value === 'A' || value === 'B' || value === 'C' ? value : 'A';
+}
+
+function normalizeReviewVerdict(value: unknown): string {
+  return value === 'pending' ||
+    value === 'approve' ||
+    value === 'modify' ||
+    value === 'reject' ||
+    value === 'require_user_confirm'
+    ? value
+    : 'pending';
+}
+
+function migrateCreateFileLocksTable(conn: Database.Database): void {
+  if (tableExists(conn, 'file_locks')) return;
+
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS file_locks (
+      id TEXT PRIMARY KEY,
+      file_path TEXT NOT NULL,
+      workspace_dir TEXT NOT NULL,
+      task_id TEXT NOT NULL REFERENCES agent_tasks(id),
+      agent_name TEXT NOT NULL,
+      lock_type TEXT NOT NULL CHECK(lock_type IN ('read','write')),
+      file_hash TEXT,
+      acquired_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      expires_at INTEGER NOT NULL,
+      released_at INTEGER,
+      status TEXT NOT NULL DEFAULT 'held' CHECK(status IN ('held','released','expired'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_file_locks_active
+      ON file_locks(workspace_dir, file_path, status);
+  `);
+}
+
+function relaxAgentTasksConstraint(conn: Database.Database): void {
+  const schema = tableSql(conn, 'agent_tasks');
+  if (!schema.includes("task_type IN (")) return;
+
+  conn.exec(`
+    ALTER TABLE agent_tasks RENAME TO agent_tasks_old_migration;
+
+    CREATE TABLE agent_tasks (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES run_artifacts(id),
+      session_id TEXT NOT NULL,
+      correlation_id TEXT NOT NULL,
+      task_type TEXT NOT NULL,
+      requester TEXT NOT NULL,
+      target_agent TEXT NOT NULL,
+      foreground INTEGER NOT NULL DEFAULT 0,
+      visibility TEXT NOT NULL DEFAULT 'foreground'
+        CHECK(visibility IN ('foreground','backgrounded','retrieved')),
+      notify_state TEXT NOT NULL DEFAULT 'none'
+        CHECK(notify_state IN ('none','pending','notified','dismissed')),
+      priority INTEGER NOT NULL DEFAULT 0,
+      input_payload TEXT NOT NULL,
+      output_payload TEXT,
+      status TEXT NOT NULL DEFAULT 'created'
+        CHECK(status IN (
+          'created','persisted','dispatched','acknowledged','running',
+          'waiting_approval','completed','failed','timeout','cancelled'
+        )),
+      error TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      dispatched_at INTEGER,
+      acknowledged_at INTEGER,
+      started_at INTEGER,
+      finished_at INTEGER,
+      backgrounded_at INTEGER,
+      retrieved_at INTEGER,
+      notified_at INTEGER
+    );
+
+    INSERT INTO agent_tasks SELECT * FROM agent_tasks_old_migration;
+    DROP TABLE agent_tasks_old_migration;
+  `);
+}
+
+function relaxModelRequestsPurpose(conn: Database.Database): void {
+  const schema = tableSql(conn, 'model_requests');
+  if (!schema.includes("purpose IN (")) return;
+
+  conn.exec(`
+    ALTER TABLE model_requests RENAME TO model_requests_old_migration;
+
+    CREATE TABLE model_requests (
+      id TEXT PRIMARY KEY,
+      run_id TEXT REFERENCES run_artifacts(id),
+      session_id TEXT NOT NULL,
+      task_id TEXT REFERENCES agent_tasks(id),
+      correlation_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode IN ('live','mock','replay','takeover')),
+      api_kind TEXT NOT NULL DEFAULT 'standard' CHECK(api_kind IN ('standard','claude_agent_sdk')),
+      backend TEXT NOT NULL DEFAULT 'anthropic' CHECK(backend IN ('anthropic','ai_sdk','test','claude_agent_sdk')),
+      model_name TEXT,
+      protocol TEXT,
+      sdk_run_id TEXT,
+      step_index INTEGER NOT NULL DEFAULT 0,
+      prompt_hash TEXT NOT NULL,
+      tools_hash TEXT,
+      expected_schema TEXT,
+      request_payload TEXT NOT NULL,
+      response_payload TEXT,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','responded','replayed','failed','timeout')),
+      error TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      responded_at INTEGER
+    );
+
+    INSERT INTO model_requests SELECT * FROM model_requests_old_migration;
+    DROP TABLE model_requests_old_migration;
+  `);
+}
+
+function addSkillsTelemetryColumns(conn: Database.Database): void {
+  if (!tableExists(conn, 'skills_meta')) return;
+  const columns = getColumns(conn, 'skills_meta');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'view_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'patch_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'last_viewed_at', 'INTEGER');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'last_patched_at', 'INTEGER');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'created_by', "TEXT NOT NULL DEFAULT 'system'");
+  addColumnIfMissing(conn, columns, 'skills_meta', 'state', "TEXT NOT NULL DEFAULT 'active'");
+}
+
+function addModelTierColumn(conn: Database.Database): void {
+  const columns = getColumns(conn, 'model_requests');
+  if (columns.has('model_tier')) return;
+  conn.exec(`ALTER TABLE model_requests ADD COLUMN model_tier TEXT NOT NULL DEFAULT 'default' CHECK(model_tier IN ('fast','default','high'))`);
+}
+
+function addSkillsVisibilityColumns(conn: Database.Database): void {
+  if (!tableExists(conn, 'skills_meta')) return;
+  const columns = getColumns(conn, 'skills_meta');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'arguments_json', 'TEXT');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'when_to_use', 'TEXT');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'allowed_tools_json', 'TEXT');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'model_invocable', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing(conn, columns, 'skills_meta', 'description_hidden', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+function migrateCreateAgentsMetaTables(conn: Database.Database): void {
+  if (tableExists(conn, 'agents_meta')) return;
+
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS agents_meta (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      version TEXT NOT NULL DEFAULT '0.1.0',
+      description TEXT NOT NULL,
+      agent_dir TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'user'
+        CHECK(source IN ('bundled','user','generated','installed')),
+      kind TEXT NOT NULL CHECK(kind IN ('resident','on-demand')),
+      level INTEGER NOT NULL CHECK(level IN (1,2,3)),
+      status TEXT NOT NULL DEFAULT 'enabled'
+        CHECK(status IN ('pending_review','enabled','disabled','removed','failed','quarantined')),
+      roles_json TEXT NOT NULL DEFAULT '[]',
+      task_types_json TEXT NOT NULL DEFAULT '[]',
+      task_count INTEGER NOT NULL DEFAULT 0,
+      success_count INTEGER NOT NULL DEFAULT 0,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      installed_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      upgraded_at INTEGER,
+      removed_at INTEGER,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_lifecycle_events (
+      id TEXT PRIMARY KEY,
+      agent_name TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK(event_type IN (
+        'installed','removed','upgraded','enabled','disabled',
+        'started','stopped','crashed','review_requested','review_completed'
+      )),
+      from_version TEXT,
+      to_version TEXT,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agents_meta_status ON agents_meta(status);
+    CREATE INDEX IF NOT EXISTS idx_agents_meta_source ON agents_meta(source, status);
+    CREATE INDEX IF NOT EXISTS idx_agent_lifecycle_name ON agent_lifecycle_events(agent_name, created_at);
+  `);
+}
+
+function migrateCreateSignalHistoryTable(conn: Database.Database): void {
+  if (tableExists(conn, 'signal_history')) return;
+
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS signal_history (
+      id TEXT PRIMARY KEY,
+      signal_type TEXT NOT NULL,
+      target TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      source_turn_id TEXT,
+      outcome TEXT NOT NULL DEFAULT 'pending'
+        CHECK(outcome IN ('pending','accepted','rejected','deduped')),
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_signal_history_target ON signal_history(target);
+    CREATE INDEX IF NOT EXISTS idx_signal_history_outcome ON signal_history(outcome, created_at);
+  `);
+}
+
+function migrateCreatePluginStorageTable(conn: Database.Database): void {
+  if (tableExists(conn, 'plugin_storage')) return;
+
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_storage (
+      plugin_name TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      PRIMARY KEY (plugin_name, key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_plugin_storage_plugin ON plugin_storage(plugin_name);
+  `);
+}
+
+function migrateCreateSkillEventsTable(conn: Database.Database): void {
+  if (!tableExists(conn, 'skill_events')) {
+    conn.exec(`
+      CREATE TABLE skill_events (
+        id TEXT PRIMARY KEY,
+        skill_name TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX idx_skill_events_name ON skill_events(skill_name);
+      CREATE INDEX idx_skill_events_type ON skill_events(event_type);
+    `);
+  }
+}
+
+function migrateCreateCodeAuditTables(conn: Database.Database): void {
+  if (!tableExists(conn, 'code_file_changes')) {
+    conn.exec(`
+      CREATE TABLE code_file_changes (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('create','modify','delete','rename')),
+        before_content TEXT,
+        after_content TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+
+      CREATE INDEX idx_code_file_changes_task ON code_file_changes(task_id);
+    `);
+  }
+
+  if (!tableExists(conn, 'code_commands')) {
+    conn.exec(`
+      CREATE TABLE code_commands (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        command TEXT NOT NULL,
+        exit_code INTEGER NOT NULL,
+        stdout TEXT NOT NULL DEFAULT '',
+        stderr TEXT NOT NULL DEFAULT '',
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+
+      CREATE INDEX idx_code_commands_task ON code_commands(task_id);
+    `);
+  }
+}
+
+function addTaskTraceColumn(conn: Database.Database): void {
+  const cols = getColumns(conn, 'agent_tasks');
+  addColumnIfMissing(conn, cols, 'agent_tasks', 'trace_id', 'TEXT');
+}
+
+function addTaskRequeueColumn(conn: Database.Database): void {
+  const cols = getColumns(conn, 'agent_tasks');
+  addColumnIfMissing(conn, cols, 'agent_tasks', 'requeue_count', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+function migrateCreateKnowledgeEmbeddings(conn: Database.Database): void {
+  if (tableExists(conn, 'knowledge_embeddings')) return;
+  conn.exec(`
+    CREATE TABLE knowledge_embeddings (
+      knowledge_id TEXT PRIMARY KEY,
+      embedding BLOB NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+  `);
+}

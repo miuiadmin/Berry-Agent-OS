@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "plugin-builder",
+  "version": "0.1.0",
+  "description": "生成和修改独立插件包",
+  "level": 2,
+  "kind": "on-demand",
+  "taskTypes": ["plugin_task"],
+  "roles": [],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "module-agent",
+  "requiresBrainReview": false
+}

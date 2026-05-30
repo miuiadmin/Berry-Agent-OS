@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "brain",
+  "version": "0.2.0",
+  "description": "全局决策中枢 — 意图路由、回复审核、权限判断、追问审核",
+  "level": 1,
+  "kind": "resident",
+  "taskTypes": ["brain_review", "brain_routing", "brain_permission", "brain_ask_review"],
+  "roles": ["reviewer", "orchestrator"],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "custom",
+  "requiresBrainReview": false
+}

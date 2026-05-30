@@ -1,0 +1,525 @@
+import type Database from 'better-sqlite3';
+import type { Migration } from '../migration-runner.js';
+import { runMemoryMigrations } from '../migrations.js';
+
+const v0Baseline: Migration = {
+  version: 0,
+  name: 'legacy-baseline',
+  up: (db: Database.Database) => {
+    runMemoryMigrations(db);
+  },
+};
+
+const v1ExtendScheduledTasks: Migration = {
+  version: 1,
+  name: 'extend-scheduled-tasks',
+  up: (db: Database.Database) => {
+    const cols = db.pragma('table_info(scheduled_tasks)') as Array<{ name: string }>;
+    const existing = new Set(cols.map(c => c.name));
+    if (!existing.has('script')) db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
+    if (!existing.has('workdir')) db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN workdir TEXT`);
+    if (!existing.has('delivery_channel')) db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN delivery_channel TEXT`);
+    if (!existing.has('delivery_target')) db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN delivery_target TEXT`);
+  },
+};
+
+const v2UnifiedPluginSystem: Migration = {
+  version: 2,
+  name: 'unified-plugin-system',
+  up: (db: Database.Database) => {
+    db.exec(`
+      ALTER TABLE plugins_meta ADD COLUMN scope TEXT NOT NULL DEFAULT 'private';
+      ALTER TABLE plugins_meta ADD COLUMN has_prompt INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE plugins_meta ADD COLUMN has_tools INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE plugins_meta ADD COLUMN has_code INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE plugins_meta ADD COLUMN has_hooks INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE plugins_meta ADD COLUMN has_service INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE plugins_meta ADD COLUMN prompt_content TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN prompt_priority REAL DEFAULT 0.5;
+      ALTER TABLE plugins_meta ADD COLUMN prompt_activation_rules TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN manifest_json TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN evolution_json TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN importance REAL NOT NULL DEFAULT 0.6;
+      ALTER TABLE plugins_meta ADD COLUMN previous_versions TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN promoted_from_id TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN promoted_at INTEGER;
+      ALTER TABLE plugins_meta ADD COLUMN tags TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN owner_agent_id TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN workspace_id TEXT;
+      ALTER TABLE plugins_meta ADD COLUMN user_id TEXT;
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS plugin_hooks (
+        id TEXT PRIMARY KEY,
+        plugin_id TEXT NOT NULL,
+        event TEXT NOT NULL,
+        handler_path TEXT NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 50,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_hooks_unique ON plugin_hooks(plugin_id, event);
+      CREATE INDEX IF NOT EXISTS idx_plugin_hooks_event ON plugin_hooks(event, priority);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_plugin_bindings (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        plugin_id TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'self',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        config_json TEXT,
+        assigned_by TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_plugin_unique ON agent_plugin_bindings(agent_id, plugin_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_bindings_agent ON agent_plugin_bindings(agent_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_bindings_plugin ON agent_plugin_bindings(plugin_id);
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_plugins_scope ON plugins_meta(scope, status);
+      CREATE INDEX IF NOT EXISTS idx_plugins_workspace ON plugins_meta(workspace_id, scope);
+      CREATE INDEX IF NOT EXISTS idx_plugins_user ON plugins_meta(user_id, scope);
+    `);
+  },
+};
+
+const v3WorkspaceDelegation: Migration = {
+  version: 3,
+  name: 'workspace-delegation',
+  up: (db: Database.Database) => {
+    db.exec(`
+      CREATE TABLE workspace_agents (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE UNIQUE INDEX idx_workspace_agents_unique ON workspace_agents(workspace_id, agent_name);
+      CREATE INDEX idx_workspace_agents_ws ON workspace_agents(workspace_id, role);
+    `);
+
+    db.exec(`
+      CREATE TABLE delegation_history (
+        id TEXT PRIMARY KEY,
+        user_message_hash TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        intent TEXT,
+        success INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX idx_delegation_history_hash ON delegation_history(user_message_hash, created_at);
+    `);
+  },
+};
+
+const v4OrgTreeHierarchy: Migration = {
+  version: 4,
+  name: 'org-tree-hierarchy',
+  up: (db: Database.Database) => {
+    db.exec(`
+      CREATE TABLE org_nodes (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        parent_id TEXT,
+        name TEXT NOT NULL,
+        description TEXT,
+        node_type TEXT NOT NULL DEFAULT 'group',
+        path TEXT NOT NULL,
+        depth INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        metadata TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX idx_org_nodes_workspace ON org_nodes(workspace_id, path);
+      CREATE INDEX idx_org_nodes_parent ON org_nodes(parent_id, position);
+      CREATE UNIQUE INDEX idx_org_nodes_path ON org_nodes(path);
+    `);
+
+    db.exec(`
+      ALTER TABLE workspace_agents ADD COLUMN org_node_id TEXT;
+      ALTER TABLE workspace_agents ADD COLUMN superior_id TEXT;
+      ALTER TABLE workspace_agents ADD COLUMN description TEXT;
+      ALTER TABLE workspace_agents ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}';
+    `);
+  },
+};
+
+const v5TrustLevels: Migration = {
+  version: 5,
+  name: 'trust-levels',
+  up: (db: Database.Database) => {
+    db.exec(`
+      ALTER TABLE workspace_agents ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'probation';
+      ALTER TABLE workspace_agents ADD COLUMN consecutive_approvals INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE workspace_agents ADD COLUMN total_rejections INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE workspace_agents ADD COLUMN review_mode TEXT NOT NULL DEFAULT 'trust_based';
+    `);
+  },
+};
+
+const v6RuntimeProvider: Migration = {
+  version: 6,
+  name: 'runtime-provider',
+  up: (db: Database.Database) => {
+    db.exec(`
+      ALTER TABLE workspace_agents ADD COLUMN provider TEXT;
+      ALTER TABLE workspace_agents ADD COLUMN provider_config TEXT NOT NULL DEFAULT '{}';
+    `);
+  },
+};
+
+const v7CheckpointResume: Migration = {
+  version: 7,
+  name: 'checkpoint-resume',
+  up: (db: Database.Database) => {
+    const cols = db.pragma('table_info(agent_tasks)') as Array<{ name: string }>;
+    const existing = new Set(cols.map(c => c.name));
+    if (!existing.has('error_type')) db.exec(`ALTER TABLE agent_tasks ADD COLUMN error_type TEXT`);
+    if (!existing.has('resume_count')) db.exec(`ALTER TABLE agent_tasks ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`);
+    if (!existing.has('resumed_from')) db.exec(`ALTER TABLE agent_tasks ADD COLUMN resumed_from TEXT`);
+  },
+};
+
+const v8EngineEnhancements: Migration = {
+  version: 8,
+  name: 'engine-enhancements',
+  up: (db: Database.Database) => {
+    const agentCols = db.pragma('table_info(workspace_agents)') as Array<{ name: string }>;
+    const agentExisting = new Set(agentCols.map(c => c.name));
+    if (!agentExisting.has('prior_work_dir')) db.exec(`ALTER TABLE workspace_agents ADD COLUMN prior_work_dir TEXT`);
+    if (!agentExisting.has('prior_session_id')) db.exec(`ALTER TABLE workspace_agents ADD COLUMN prior_session_id TEXT`);
+    if (!agentExisting.has('thinking_level')) db.exec(`ALTER TABLE workspace_agents ADD COLUMN thinking_level TEXT NOT NULL DEFAULT 'default'`);
+
+    const taskCols = db.pragma('table_info(agent_tasks)') as Array<{ name: string }>;
+    const taskExisting = new Set(taskCols.map(c => c.name));
+    if (!taskExisting.has('version')) db.exec(`ALTER TABLE agent_tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1`);
+  },
+};
+
+const v9SchedulerSubsystem: Migration = {
+  version: 9,
+  name: 'scheduler-subsystem',
+  up: (db: Database.Database) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cron_jobs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        cron_expression TEXT,
+        interval_minutes INTEGER,
+        schedule_type TEXT NOT NULL CHECK(schedule_type IN ('cron','webhook','event')),
+        webhook_secret TEXT,
+        webhook_token TEXT,
+        event_filter TEXT,
+        concurrency_policy TEXT NOT NULL DEFAULT 'queue' CHECK(concurrency_policy IN ('queue','replace','forbid')),
+        execution_mode TEXT NOT NULL DEFAULT 'run_only' CHECK(execution_mode IN ('create_task','run_only')),
+        admission_gate INTEGER NOT NULL DEFAULT 1,
+        prompt TEXT NOT NULL,
+        chain_config TEXT,
+        fan_out_config TEXT,
+        session_mode TEXT NOT NULL DEFAULT 'new' CHECK(session_mode IN ('new','continue','pool')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        max_retries INTEGER NOT NULL DEFAULT 3,
+        retry_delay_ms INTEGER NOT NULL DEFAULT 5000,
+        last_triggered_at INTEGER,
+        next_trigger_at INTEGER,
+        pause_reason TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cron_jobs_workspace ON cron_jobs(workspace_id, enabled);
+      CREATE INDEX IF NOT EXISTS idx_cron_jobs_next ON cron_jobs(enabled, next_trigger_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_jobs_webhook_token ON cron_jobs(webhook_token);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS cron_executions (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        round_id TEXT,
+        trigger_source TEXT NOT NULL DEFAULT 'cron',
+        status TEXT NOT NULL CHECK(status IN ('running','completed','failed','skipped','timeout')),
+        total_agents INTEGER,
+        completed_count INTEGER NOT NULL DEFAULT 0,
+        failed_count INTEGER NOT NULL DEFAULT 0,
+        trace_id TEXT,
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        summary TEXT,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_cron_executions_job ON cron_executions(job_id, started_at);
+      CREATE INDEX IF NOT EXISTS idx_cron_executions_status ON cron_executions(status, started_at);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS job_queue (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        job_type TEXT NOT NULL,
+        source_id TEXT,
+        payload TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','claimed','running','completed','failed','skipped','timeout')),
+        priority INTEGER NOT NULL DEFAULT 0,
+        trace_id TEXT,
+        claimed_at INTEGER,
+        started_at INTEGER,
+        completed_at INTEGER,
+        error TEXT,
+        output TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        max_retries INTEGER NOT NULL DEFAULT 3,
+        timeout_ms INTEGER NOT NULL DEFAULT 300000,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_job_queue_pending ON job_queue(status, priority, created_at);
+      CREATE INDEX IF NOT EXISTS idx_job_queue_agent ON job_queue(agent_id, status);
+      CREATE INDEX IF NOT EXISTS idx_job_queue_source ON job_queue(source_id);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_reminders (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        name TEXT,
+        prompt TEXT NOT NULL,
+        trigger_at INTEGER NOT NULL,
+        recurring_cron TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_fired_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_reminders_due ON agent_reminders(enabled, trigger_at);
+      CREATE INDEX IF NOT EXISTS idx_reminders_agent ON agent_reminders(agent_id);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS webhook_audit_log (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        request_id TEXT,
+        source_ip TEXT,
+        payload_hash TEXT,
+        signature_valid INTEGER,
+        received_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_webhook_audit_job ON webhook_audit_log(job_id, received_at);
+    `);
+  },
+};
+
+const v10IntelligenceLayer: Migration = {
+  version: 10,
+  name: 'intelligence-layer',
+  up: (db: Database.Database) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        target_type TEXT NOT NULL CHECK(target_type IN ('user','agent')),
+        target_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('task_assigned','execution_done','execution_failed','review_needed','mention','system','cron_exception','delegation_completed')),
+        title TEXT NOT NULL,
+        body TEXT,
+        link TEXT,
+        priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('urgent','normal','low')),
+        read INTEGER NOT NULL DEFAULT 0,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_target ON notifications(target_type, target_id, read, created_at);
+      CREATE INDEX IF NOT EXISTS idx_notifications_workspace ON notifications(workspace_id, created_at);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS notification_preferences (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        preferences_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        UNIQUE(workspace_id, user_id)
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS task_subscribers (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        subscriber_type TEXT NOT NULL CHECK(subscriber_type IN ('user','agent')),
+        subscriber_id TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK(reason IN ('creator','assignee','commenter','mentioned','manual')),
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        UNIQUE(task_id, subscriber_type, subscriber_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_task_subscribers_task ON task_subscribers(task_id);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_memories_v2 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        workspace_id TEXT,
+        type TEXT NOT NULL CHECK(type IN ('knowledge','preference','feedback','context')),
+        content TEXT NOT NULL,
+        source TEXT,
+        importance REAL NOT NULL DEFAULT 0.5,
+        access_count INTEGER NOT NULL DEFAULT 0,
+        last_accessed_at INTEGER,
+        archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_memories_agent ON agent_memories_v2(agent_id, archived, type);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workspace_memories (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        owner_agent_id TEXT,
+        type TEXT NOT NULL CHECK(type IN ('knowledge','preference','feedback','context')),
+        content TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT 'evolved' CHECK(origin IN ('evolved','manual','imported','promoted')),
+        visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','workspace')),
+        importance REAL NOT NULL DEFAULT 0.5,
+        tags TEXT,
+        recall_count INTEGER NOT NULL DEFAULT 0,
+        verified_at INTEGER,
+        source_memory_id TEXT,
+        archived INTEGER NOT NULL DEFAULT 0,
+        last_recalled_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_workspace_memories_ws ON workspace_memories(workspace_id, archived, visibility);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS global_memories (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('knowledge','preference','feedback','context')),
+        content TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT 'evolved' CHECK(origin IN ('evolved','manual','promoted')),
+        source_workspace_id TEXT,
+        source_memory_id TEXT,
+        importance REAL NOT NULL DEFAULT 0.5,
+        tags TEXT,
+        recall_count INTEGER NOT NULL DEFAULT 0,
+        verified_at INTEGER,
+        archived INTEGER NOT NULL DEFAULT 0,
+        last_recalled_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_global_memories_user ON global_memories(user_id, archived);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_memory_bindings_v2 (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        memory_id TEXT NOT NULL,
+        memory_layer TEXT NOT NULL CHECK(memory_layer IN ('agent','workspace','global')),
+        source TEXT NOT NULL DEFAULT 'self',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        assigned_by TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        UNIQUE(agent_id, memory_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_bindings_agent ON agent_memory_bindings_v2(agent_id, enabled);
+    `);
+
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS agent_memories_fts USING fts5(content, content='agent_memories_v2', content_rowid='rowid');
+      CREATE VIRTUAL TABLE IF NOT EXISTS workspace_memories_fts USING fts5(content, content='workspace_memories', content_rowid='rowid');
+      CREATE VIRTUAL TABLE IF NOT EXISTS global_memories_fts USING fts5(content, content='global_memories', content_rowid='rowid');
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workspace_context_history (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        change_summary TEXT,
+        changed_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ws_context_history ON workspace_context_history(workspace_id, version);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS async_delegations (
+        id TEXT PRIMARY KEY,
+        source_session_id TEXT NOT NULL,
+        source_workspace_id TEXT,
+        target_workspace_id TEXT NOT NULL,
+        target_agent_id TEXT,
+        prompt TEXT NOT NULL,
+        context_snapshot TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','running','completed','failed','timeout','cancelled')),
+        priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('urgent','normal','low')),
+        timeout_ms INTEGER NOT NULL DEFAULT 7200000,
+        result TEXT,
+        error TEXT,
+        parent_delegation_id TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        accepted_at INTEGER,
+        completed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_delegations_session ON async_delegations(source_session_id, status);
+      CREATE INDEX IF NOT EXISTS idx_delegations_target ON async_delegations(target_workspace_id, status);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS team_templates (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL DEFAULT 'custom' CHECK(category IN ('content','dev','research','support','custom')),
+        org_structure TEXT NOT NULL,
+        agent_configs TEXT NOT NULL,
+        is_public INTEGER NOT NULL DEFAULT 0,
+        use_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+        updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+      CREATE INDEX IF NOT EXISTS idx_templates_owner ON team_templates(owner_id);
+      CREATE INDEX IF NOT EXISTS idx_templates_category ON team_templates(category, is_public);
+    `);
+
+    const wsCols = db.pragma('table_info(workspaces)') as Array<{ name: string }>;
+    const wsExisting = new Set(wsCols.map(c => c.name));
+    if (!wsExisting.has('context')) db.exec(`ALTER TABLE workspaces ADD COLUMN context TEXT`);
+  },
+};
+
+export const ALL_MIGRATIONS: Migration[] = [
+  v0Baseline,
+  v1ExtendScheduledTasks,
+  v2UnifiedPluginSystem,
+  v3WorkspaceDelegation,
+  v4OrgTreeHierarchy,
+  v5TrustLevels,
+  v6RuntimeProvider,
+  v7CheckpointResume,
+  v8EngineEnhancements,
+  v9SchedulerSubsystem,
+  v10IntelligenceLayer,
+];

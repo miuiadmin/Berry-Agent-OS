@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "learning",
+  "version": "0.1.0",
+  "description": "发现应该学习/沉淀的知识",
+  "level": 2,
+  "kind": "on-demand",
+  "taskTypes": ["learning_review"],
+  "roles": [],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "module-agent",
+  "requiresBrainReview": false
+}
