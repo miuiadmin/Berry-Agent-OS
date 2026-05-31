@@ -29,7 +29,7 @@ export default function ChatPage() {
         />
       )}
       <div className={cn(
-        "fixed inset-y-0 left-0 z-40 w-72 md:w-auto transform transition-transform duration-200 md:relative md:translate-x-0",
+        "fixed inset-y-0 left-0 z-40 w-72 transform transition-transform duration-200 md:relative md:w-64 md:translate-x-0 md:shrink-0",
         sidebarOpen ? "translate-x-0 animate-sidebar-in" : "-translate-x-full"
       )}>
         <ConversationSidebar onSelect={() => setSidebarOpen(false)} />
