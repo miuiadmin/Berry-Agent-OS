@@ -106,7 +106,7 @@ const TIER_CONFIG = [
 // ─── Shared select styling ───────────────────────────────────────
 
 const SELECT_BASE =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 appearance-none pr-8 disabled:opacity-50";
+  "w-full rounded-lg border border-input bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 appearance-none pr-8 disabled:opacity-50 transition-all focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30";
 
 function SelectChevron() {
   return (

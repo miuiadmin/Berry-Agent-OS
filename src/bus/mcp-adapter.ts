@@ -38,7 +38,7 @@ export function registerMcpToolsOnBus(
         description: `[MCP: ${tool.serverName}] ${tool.description}`,
         dangerLevel,
         provider: { type: 'builtin', name: `mcp-${tool.serverName}` },
-        inputSchema: tool.inputSchema as any,
+        inputSchema: tool.inputSchema as unknown as import('zod').ZodType,
       }, capExecutor);
       registered.push(capabilityName);
     } catch {
