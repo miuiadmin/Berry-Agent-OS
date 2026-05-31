@@ -34,7 +34,7 @@ export interface PhaseContext {
   workingDir: string;
   testCommand?: string;
   files?: string[];
-  workspace: CodeWorkspace;
+  workspace: CodeWorkspace | null;
   llm: LlmClient;
   ipc: IpcChildChannel;
   runtime: CodeRuntime;
@@ -263,6 +263,7 @@ async function runSynthesis(ctx: PhaseContext, researchMessages: ModelMessage[])
 
   try {
     const plan = planJson as { description: string; steps: Array<{ file: string; action: 'create' | 'edit' | 'delete'; description: string }> };
+    if (!ctx.workspace) throw new Error('Patch plan requires a git workspace');
     const patchPlan = buildPatchPlan(plan, ctx.workspace);
     const validation = validatePatchPlan(patchPlan, ctx.workspace);
 
@@ -324,7 +325,7 @@ async function runImplementation(
     for (const file of filesToLock) {
       ctx.lockManager.acquire({
         filePath: file,
-        workspaceDir: ctx.workspace.gitRoot,
+        workspaceDir: ctx.workspace?.gitRoot ?? ctx.workingDir,
         taskId: ctx.taskId,
         agentName: 'code',
         lockType: 'write',

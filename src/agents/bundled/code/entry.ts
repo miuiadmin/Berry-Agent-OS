@@ -15,14 +15,13 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const input = payload.inputPayload;
   const workingDir = (input.workingDir as string) ?? homedir();
   const workspace = await detectWorkspace(workingDir);
-  if (!workspace) throw new Error(`无法检测工作目录: ${workingDir}`);
 
   const result = await runTaskPhases({
     taskId: payload.taskId,
     sessionId: payload.sessionId,
     action: ((input.action as string) ?? 'full_task') as CodeAction,
     instruction: String(input.instruction ?? ''),
-    workingDir: workspace.gitRoot,
+    workingDir: workspace?.gitRoot ?? workingDir,
     testCommand: input.testCommand as string | undefined,
     files: input.files as string[] | undefined,
     workspace,
