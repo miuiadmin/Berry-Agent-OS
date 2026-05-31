@@ -458,8 +458,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // §2.8 Apply PermissionScope if provided
     if (decision.scope && this.capabilityBusRef) {
-      const { PermissionGate } = require('../bus/permission-gate.js');
-      const gate = (this.capabilityBusRef as any).permissionGate;
+      const gate = (this.capabilityBusRef as any).getPermissionGate?.();
       if (gate?.setScope) {
         gate.setScope(pending.sessionId, { ...decision.scope, issuedAt: Date.now() });
       }

@@ -170,7 +170,7 @@ export class SocketServer implements Transport {
           }
           queue.push(line);
         }
-        if (!processing) processQueue();
+        if (!processing) processQueue().catch(err => logger.error({ err }, 'Socket processQueue unhandled error'));
       });
 
       const processQueue = async () => {

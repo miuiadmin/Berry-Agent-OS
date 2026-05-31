@@ -30,6 +30,10 @@ export class CapabilityBus implements ICapabilityBus {
     this.permissionGate = gate;
   }
 
+  getPermissionGate(): IPermissionGate | null {
+    return this.permissionGate;
+  }
+
   setAuditLogger(logger: IBusAuditLogger): void {
     this.auditLogger = logger;
   }
