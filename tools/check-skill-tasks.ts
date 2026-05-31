@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import Database from 'better-sqlite3';
 
-const berryHome = join(homedir(), '.berryagent');
+const berryHome = join(homedir(), '.berry');
 const dbPath = join(berryHome, 'data', 'berry.db');
 const db = new Database(dbPath, { readonly: true });
 

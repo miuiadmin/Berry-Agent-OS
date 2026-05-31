@@ -137,7 +137,7 @@ Safety/Permission 暂时是规则模块，不调用 LLM。Conversation Agent 执
 
 ## Agent 工作目录
 
-- 每个 Agent 有独立 Agent Home：`~/.berryagent/agents/<agent-name>/`。
+- 每个 Agent 有独立 Agent Home：`~/.berry/agents/<agent-name>/`。
 - Agent Home 标准文件：`agent.yaml`、`AGENT.md`、`capabilities.json`、`state.db`、`runtime/`、`tasks/`、`cache/`、`logs/`。
 - `agent.yaml` 是机器配置，`AGENT.md` 是人类可编辑指令，`capabilities.json` 是 AppCore 路由能力声明。
 - `state.db` 只能保存本 Agent 局部状态和缓存，不是全局事实源，其他 Agent 不得读取。
@@ -239,7 +239,7 @@ llm:
 - 每个模块必须有 contract test；跨模块测试只能依赖公开 contract，不读取内部实现。
 - CI 必须运行 import 边界检查，禁止跨模块 import 内部文件。
 - 技能验证测试用 `tests/fixtures/` 中的样本
-- E2E 测试必须使用临时 `dataDir` / `socket`，不能读写 `~/.berryagent`
+- E2E 测试必须使用临时 `dataDir` / `socket`，不能读写 `~/.berry`
 - 测试必须捕获完整 stdout/stderr/console_frames，并在失败时输出 `run_id` 和 artifact 路径
 - LLM API 必须支持 `live` / `mock` / `replay` / `takeover` 四种模式；自动化测试默认不调用真实模型 API
 - `takeover` 是 LLM 接管模式：外部编码 Agent 或 CI 通过 `berry test requests --json` 获取模型请求，再用 `berry test respond <request_id>` 提供模型响应

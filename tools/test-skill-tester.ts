@@ -2,7 +2,7 @@ import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const socketPath = join(homedir(), '.berryagent', 'run', 'berry.sock');
+const socketPath = join(homedir(), '.berry', 'run', 'berry.sock');
 
 async function dispatch(taskType: string, inputPayload: Record<string, unknown>) {
   return new Promise<Record<string, unknown>>((resolve, reject) => {

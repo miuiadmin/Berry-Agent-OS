@@ -58,7 +58,7 @@ BerryAgent 是一个双重自进化的通用个人助手：
    多 Agent 保留独立进程和工作目录，但跨 Agent 通信只能走 AppCore。`agent_tasks` 是任务事实源，`agent_messages` 是 IPC 审计，`task_events` 是进度时间线。任务必须先落库再派发。
 
 4. **Agent 工作目录隔离**
-   每个 Agent 有独立 `~/.berryagent/agents/<agent-name>/`，长期配置放 Agent Home，每次任务放 `tasks/<task_id>/`。`state.db` 只存本 Agent 局部状态；`task.json` 只能由 AppCore 创建；目录文件只是配置、缓存、镜像和 artifact，不替代 SQLite 全局事实源。
+   每个 Agent 有独立 `~/.berry/agents/<agent-name>/`，长期配置放 Agent Home，每次任务放 `tasks/<task_id>/`。`state.db` 只存本 Agent 局部状态；`task.json` 只能由 AppCore 创建；目录文件只是配置、缓存、镜像和 artifact，不替代 SQLite 全局事实源。
 
 5. **权限硬闸门在 AppCore**
    Brain 可以判断风险和建议确认，但不能绕过 AppCore 的硬规则和 `permission token`。
