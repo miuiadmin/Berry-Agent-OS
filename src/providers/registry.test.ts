@@ -357,3 +357,25 @@ describe('normalizeBaseUrl', () => {
     expect(normalizeBaseUrl('', 'anthropic')).toBeUndefined();
   });
 });
+
+// ─── hasCredentials ────────────────────────────────────────────────
+
+import { hasCredentials } from './types.js';
+
+describe('hasCredentials', () => {
+  it('returns true for non-empty apiKey', () => {
+    expect(hasCredentials({ apiKey: 'sk-test' })).toBe(true);
+  });
+
+  it('returns false for empty string', () => {
+    expect(hasCredentials({ apiKey: '' })).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(hasCredentials({ apiKey: undefined })).toBe(false);
+  });
+
+  it('returns false for whitespace-only', () => {
+    expect(hasCredentials({ apiKey: '   ' })).toBe(false);
+  });
+});

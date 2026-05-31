@@ -80,6 +80,7 @@ interface TiersResponse {
 interface KindsResponse {
   ok: boolean;
   kinds: string[];
+  supported?: string[];
 }
 
 interface CatalogResponse {
