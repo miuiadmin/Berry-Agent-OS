@@ -4,7 +4,7 @@ import type {
   ExecutionTask,
   RuntimeCapabilities,
 } from '../../../contracts/agent-runtime.js';
-import type { LlmClient } from '../../../llm/client.js';
+import type { LlmClient } from '../../../llm/index.js';
 import { getLogger } from '../../../utils/logger.js';
 
 const logger = getLogger('builtin-driver');

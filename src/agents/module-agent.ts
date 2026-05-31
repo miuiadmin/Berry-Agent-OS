@@ -1,6 +1,6 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
-import { initDb, getDb, closeDb } from '../memory/db.js';
-import { createLlmClient } from '../llm/client.js';
+import { initDb, getDb, closeDb } from '../memory/index.js';
+import { createLlmClient } from '../llm/index.js';
 import type { IpcMessage } from '../kernel/types.js';
 import type {
   AgentTaskPayload,
@@ -12,7 +12,7 @@ import type { AgentAskUserPayload, AgentUserReplyPayload } from '../contracts/ro
 import type { AgentName } from '../contracts/agents.js';
 import type { TurnCorrectionPayload } from '../contracts/delegation.js';
 import { loadConfig } from '../kernel/config.js';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 
 export interface AskUserOptions {
   options?: string[];

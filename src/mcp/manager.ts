@@ -6,7 +6,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import type { EventBus } from '../contracts/infrastructure.js';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { ToolDefinition } from '../tools/types.js';
 import type { IToolRegistry } from '../tools/contract.js';
 import { metrics } from '../observability/metrics.js';

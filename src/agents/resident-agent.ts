@@ -1,9 +1,9 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
-import { initDb, getDb } from '../memory/db.js';
-import { createLlmClient } from '../llm/client.js';
+import { initDb, getDb } from '../memory/index.js';
+import { createLlmClient } from '../llm/index.js';
 import { loadConfig } from '../kernel/config.js';
 import type { AppConfig } from '../contracts/config.js';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { Database } from 'better-sqlite3';
 
 export interface ResidentAgentContext {

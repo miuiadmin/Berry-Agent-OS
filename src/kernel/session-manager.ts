@@ -2,7 +2,7 @@ import type { Socket } from 'node:net';
 import type { Database } from 'better-sqlite3';
 import type { ModelTier } from '../contracts/model.js';
 import type { MemoryContextFrame } from '../contracts/memory.js';
-import type { MemoryRuntime } from '../memory/runtime.js';
+import type { MemoryRuntime } from '../memory/index.js';
 import type { EvolutionEngine } from '../evolution/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { IPluginRuntimeV2, PromptInjectionContext } from '../contracts/plugins-v2.js';

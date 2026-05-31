@@ -11,7 +11,7 @@ import type { AgentProgress } from './agent-progress.js';
 import type { DaemonBridge } from './daemon-bridge.js';
 import type { DelegationManager } from './delegation-manager.js';
 import type { FallbackRouter } from './fallback-router.js';
-import type { MemoryRuntime } from '../memory/runtime.js';
+import type { MemoryRuntime } from '../memory/index.js';
 import type { CapabilityService } from '../evolution/index.js';
 import type { TakeoverController } from '../testing/model-takeover.js';
 import type { ChannelManager } from '../channels/manager.js';

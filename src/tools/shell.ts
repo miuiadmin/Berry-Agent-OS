@@ -1,7 +1,7 @@
 import { exec } from 'node:child_process';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
-import { checkBlocklist } from '../safety/blocklist.js';
+import { checkBlocklist } from '../safety/index.js';
 
 const MAX_OUTPUT = 10000;
 

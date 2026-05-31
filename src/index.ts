@@ -46,6 +46,14 @@ const args = process.argv.slice(2);
 const hasSubcommand = args.length > 0 && !args[0].startsWith('-');
 
 if (!hasSubcommand) {
+  // 解析全局选项：--debug / --log-level
+  const logLevelIdx = args.indexOf('--log-level');
+  const debugIdx = args.indexOf('--debug');
+  if (debugIdx !== -1) process.env.APP_CLI_LOG_LEVEL = 'debug';
+  else if (logLevelIdx !== -1 && args[logLevelIdx + 1]) {
+    process.env.APP_CLI_LOG_LEVEL = args[logLevelIdx + 1];
+  }
+
   (async () => {
     process.env.APP_TERMINAL_MODE = 'human';
     const renderer = getConsoleRenderer();

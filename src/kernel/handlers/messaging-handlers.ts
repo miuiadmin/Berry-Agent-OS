@@ -9,7 +9,7 @@ import { TokenIssuer } from '../../safety/token-issuer.js';
 import { ApprovalManager } from '../../safety/approval-manager.js';
 import { createTaskWorkspace } from '../task-workspace.js';
 import { getAgentHomePath } from '../agent-home.js';
-import { getDb } from '../../memory/db.js';
+import { getDb } from '../../memory/index.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import { getEventBus } from '../event-bus.js';

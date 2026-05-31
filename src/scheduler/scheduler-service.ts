@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { EventBus } from '../contracts/infrastructure.js';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { TaskManager } from '../kernel/task-manager.js';
 import type { ErrorClassifier } from '../kernel/error-classifier.js';

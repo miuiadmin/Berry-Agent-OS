@@ -22,7 +22,7 @@ import { buildAvailableAgentsList } from '../agent-registry.js';
 import { createTaskWorkspace } from '../task-workspace.js';
 import { getAgentHomePath } from '../agent-home.js';
 import { getUserAgentsDir } from '../../utils/paths.js';
-import { getDb } from '../../memory/db.js';
+import { getDb } from '../../memory/index.js';
 import { genId } from '../../utils/id.js';
 import { getEventBus } from '../event-bus.js';
 import { metrics } from '../../observability/metrics.js';

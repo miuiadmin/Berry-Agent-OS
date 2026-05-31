@@ -1,4 +1,4 @@
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { WorldModelRuntime } from './world-model.js';
 import type { ICapabilityBus, InvokeContext } from '../bus/contract.js';
 import type { ImaginationEngine } from './imagination-engine.js';

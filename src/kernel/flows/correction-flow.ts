@@ -3,7 +3,7 @@ import { getEventBus } from '../event-bus.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
-import { getDb } from '../../memory/db.js';
+import { getDb } from '../../memory/index.js';
 import type { IpcMessage, IpcMessageType } from '../types.js';
 import type {
   TurnCheckpointPayload,

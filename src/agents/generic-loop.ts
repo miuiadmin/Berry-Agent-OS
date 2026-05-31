@@ -1,6 +1,6 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
-import { initDb, getDb, closeDb } from '../memory/db.js';
-import { createLlmClient } from '../llm/client.js';
+import { initDb, getDb, closeDb } from '../memory/index.js';
+import { createLlmClient } from '../llm/index.js';
 import type { IpcMessage } from '../kernel/types.js';
 import type {
   AgentTaskPayload,
@@ -11,7 +11,7 @@ import type {
 import type { AgentName } from '../contracts/agents.js';
 import type { ModelTier } from '../contracts/model.js';
 import { loadConfig } from '../kernel/config.js';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { InvokeResult } from '../bus/contract.js';
 import { genId } from '../utils/id.js';
 

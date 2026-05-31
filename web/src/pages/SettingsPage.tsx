@@ -485,7 +485,7 @@ function ConfigSection({
                       field.type === "number" ? Number(e.target.value) : e.target.value
                     )
                   }
-                  className={cn("h-10 md:h-[unset]", fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30")}
+                  className={cn("h-10 md:h-8", fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30")}
                 />
               )}
               {fieldError && (

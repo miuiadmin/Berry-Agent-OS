@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { reqStr, optStr, optJson } from '../db/row-helpers.js';
 import { parse as parseYaml } from 'yaml';
 import { getSkillsDir } from '../utils/paths.js';
 import { genId } from '../utils/id.js';
@@ -356,18 +357,18 @@ function existingSkillId(db: Database, name: string): string | undefined {
 
 function rowToSkill(row: Record<string, unknown>): SkillManifest {
   return {
-    id: row.id as string,
-    name: row.name as string,
-    version: row.version as string,
-    description: row.description as string,
-    origin: row.origin as SkillManifest['origin'],
-    filePath: row.file_path as string,
+    id: reqStr(row, 'id'),
+    name: reqStr(row, 'name'),
+    version: reqStr(row, 'version'),
+    description: reqStr(row, 'description'),
+    origin: reqStr(row, 'origin') as SkillManifest['origin'],
+    filePath: reqStr(row, 'file_path'),
     disabled: row.disabled === 1,
-    createdBy: parseCreatedBy(row.created_by as string | null),
-    state: (row.state as SkillManifest['state']) ?? 'active',
-    arguments: row.arguments_json ? JSON.parse(row.arguments_json as string) : undefined,
-    whenToUse: (row.when_to_use as string) || undefined,
-    allowedTools: row.allowed_tools_json ? JSON.parse(row.allowed_tools_json as string) : undefined,
+    createdBy: parseCreatedBy(optStr(row, 'created_by')),
+    state: (optStr(row, 'state') ?? 'active') as SkillManifest['state'],
+    arguments: optJson<SkillManifest['arguments']>(row, 'arguments_json', undefined),
+    whenToUse: optStr(row, 'when_to_use') || undefined,
+    allowedTools: optJson<SkillManifest['allowedTools']>(row, 'allowed_tools_json', undefined),
     modelInvocable: row.model_invocable !== 0,
     descriptionHidden: row.description_hidden === 1,
   };

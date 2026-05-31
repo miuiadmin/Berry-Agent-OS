@@ -1,11 +1,11 @@
 import { exec } from 'node:child_process';
 import type Database from 'better-sqlite3';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import type { TaskManager } from '../kernel/task-manager.js';
 import type { CronJobRow, JobQueueRow, ExecutionMode } from './contracts.js';
-import { checkBlocklist } from '../safety/blocklist.js';
+import { checkBlocklist } from '../safety/index.js';
 import { getLogger } from '../utils/logger.js';
 import { metrics } from '../observability/metrics.js';
 import { genId } from '../utils/id.js';

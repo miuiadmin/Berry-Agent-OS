@@ -1,6 +1,6 @@
 import { createConnection } from 'node:net';
 import { existsSync } from 'node:fs';
-import { initDb, closeDb, getDb } from '../memory/db.js';
+import { initDb, closeDb, getDb } from '../memory/index.js';
 import { getDbPath } from '../utils/paths.js';
 import { getConsoleRenderer } from '../observability/console.js';
 

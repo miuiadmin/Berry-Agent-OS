@@ -5,7 +5,7 @@ import type {
   SamplingMessage,
 } from '@modelcontextprotocol/sdk/types.js';
 import { CreateMessageRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { LlmClient, ChatOptions } from '../llm/client.js';
+import type { LlmClient, ChatOptions } from '../llm/index.js';
 import type { ModelMessage, ModelContentBlock } from '../contracts/model.js';
 import type { McpSamplingConfig } from './contract.js';
 import type { EventBus } from '../contracts/infrastructure.js';

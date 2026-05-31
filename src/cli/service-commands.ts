@@ -20,10 +20,14 @@ export function registerServiceCommands(program: Command): void {
     .option('--socket <path>', '覆盖 socket 路径')
     .option('--log-level <level>', '日志级别 (error|warn|info|debug)', 'info')
     .option('--debug', 'debug 模式（等价于 --log-level debug）')
+    .option('--port <number>', '覆盖 Web API 端口（默认 3888）')
+    .option('--host <addr>', '覆盖 Web 绑定地址（默认 127.0.0.1）')
     .option('--json', '以 JSON 格式输出启动信息')
-    .action(async (opts: { test?: boolean; foreground?: boolean; dataDir?: string; socket?: string; logLevel?: string; debug?: boolean; json?: boolean }) => {
+    .action(async (opts: { test?: boolean; foreground?: boolean; dataDir?: string; socket?: string; logLevel?: string; debug?: boolean; port?: number; host?: string; json?: boolean }) => {
       const effectiveLogLevel = opts.debug ? 'debug' : (opts.logLevel ?? 'info');
       process.env.APP_CLI_LOG_LEVEL = effectiveLogLevel;
+      if (opts.port) process.env.APP_PORT = String(opts.port);
+      if (opts.host) process.env.APP_HOST = opts.host;
 
       const renderer = getConsoleRenderer();
       if (opts.json) renderer.setMode('json');

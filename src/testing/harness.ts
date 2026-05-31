@@ -6,7 +6,7 @@ import { CoreService } from '../kernel/core-service.js';
 import { TakeoverController } from './model-takeover.js';
 import { IpcCapture } from './ipc-capture.js';
 import type { TaskNotification } from '../contracts/infrastructure.js';
-import { getDb } from '../memory/db.js';
+import { getDb } from '../memory/index.js';
 import { getSocketPath } from '../utils/paths.js';
 import type Database from 'better-sqlite3';
 import type { StreamingChunk, StreamingResult } from './live-test-types.js';

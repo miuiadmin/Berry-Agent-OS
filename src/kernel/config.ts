@@ -129,6 +129,16 @@ export function loadConfig(): AppConfig {
   }
 
   const envOverrides: Record<string, unknown> = {};
+
+  // CLI 参数覆盖 port / host
+  if (process.env.APP_PORT || process.env.APP_HOST) {
+    envOverrides.web = {
+      ...(fileData.web as Record<string, unknown> ?? {}),
+      ...(process.env.APP_PORT && { port: parseInt(process.env.APP_PORT, 10) }),
+      ...(process.env.APP_HOST && { host: process.env.APP_HOST }),
+    };
+  }
+
   if (process.env.LLM_BASE_URL || process.env.LLM_API_KEY || process.env.LLM_MODEL || process.env.APP_LLM_MODE
     || process.env.LLM_MODEL_FAST || process.env.LLM_MODEL_DEFAULT || process.env.LLM_MODEL_HIGH
     || process.env.LLM_PROVIDER || process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL

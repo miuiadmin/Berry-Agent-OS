@@ -36,8 +36,8 @@ export function Tooltip({ content, side = "top", children }: TooltipProps) {
   return (
     <div
       className="relative inline-flex"
-      onMouseEnter={show}
-      onMouseLeave={hide}
+      onPointerEnter={show}
+      onPointerLeave={hide}
       onClick={toggle}
     >
       {children}

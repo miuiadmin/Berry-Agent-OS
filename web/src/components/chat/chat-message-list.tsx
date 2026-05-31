@@ -34,7 +34,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     <button
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
+        "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
         className
       )}
       aria-label="Copy"
@@ -237,14 +237,14 @@ function MessageBubble({
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="inline-flex items-center rounded-md p-1.5 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
+                  className="inline-flex items-center rounded-md p-2 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
                   aria-label="Edit message"
                 >
                   <Pencil className="size-3" />
                 </button>
                 <button
                   onClick={() => onDelete?.(message.id)}
-                  className="inline-flex items-center rounded-md p-1.5 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
+                  className="inline-flex items-center rounded-md p-2 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
                   aria-label="Delete message"
                 >
                   <Trash2 className="size-3" />

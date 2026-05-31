@@ -1,5 +1,5 @@
 import type { LearningSignal } from './types.js';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import { parseLearningSignalsFromText } from './detector-parser.js';
 import { genId } from '../utils/id.js';
 import type { Database } from 'better-sqlite3';

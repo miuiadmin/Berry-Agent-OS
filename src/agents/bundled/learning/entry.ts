@@ -62,7 +62,7 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
 
 async function handleMetricAnalysis(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: { llm: import('../../../llm/index.js').LlmClient },
 ): Promise<Record<string, unknown>> {
   const db = getDb();
 

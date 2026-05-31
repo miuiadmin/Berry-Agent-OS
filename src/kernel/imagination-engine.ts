@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('imagination');

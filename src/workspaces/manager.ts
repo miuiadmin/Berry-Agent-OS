@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import type { Workspace, WorkspaceCapability, WorkspaceCapabilityType, WorkspaceStatus } from '../contracts/workspaces.js';
 import type { EventBus } from '../contracts/infrastructure.js';
+import { reqStr, optStr, reqNum } from '../db/row-helpers.js';
 import type { CreateWorkspaceInput, UpdateWorkspaceInput, RegisterCapabilityInput, WorkspaceOverlay } from './types.js';
 import { genId } from '../utils/id.js';
 
@@ -123,27 +124,27 @@ export class WorkspaceManager {
 
   private rowToWorkspace(row: Record<string, unknown>): Workspace {
     return {
-      id: row.id as string,
-      slug: row.slug as string,
-      name: row.name as string,
-      workspaceDir: row.workspace_dir as string,
-      status: row.status as WorkspaceStatus,
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
+      id: reqStr(row, 'id'),
+      slug: reqStr(row, 'slug'),
+      name: reqStr(row, 'name'),
+      workspaceDir: reqStr(row, 'workspace_dir'),
+      status: reqStr(row, 'status') as WorkspaceStatus,
+      createdAt: reqNum(row, 'created_at'),
+      updatedAt: reqNum(row, 'updated_at'),
     };
   }
 
   private rowToCapability(row: Record<string, unknown>): WorkspaceCapability {
     return {
-      id: row.id as string,
-      workspaceId: row.workspace_id as string,
-      capabilityType: row.capability_type as WorkspaceCapabilityType,
-      capabilityId: row.capability_id as string,
+      id: reqStr(row, 'id'),
+      workspaceId: reqStr(row, 'workspace_id'),
+      capabilityType: reqStr(row, 'capability_type') as WorkspaceCapabilityType,
+      capabilityId: reqStr(row, 'capability_id'),
       enabled: Boolean(row.enabled),
-      configPath: (row.config_path as string) ?? null,
-      configHash: (row.config_hash as string) ?? null,
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
+      configPath: optStr(row, 'config_path'),
+      configHash: optStr(row, 'config_hash'),
+      createdAt: reqNum(row, 'created_at'),
+      updatedAt: reqNum(row, 'updated_at'),
     };
   }
 }

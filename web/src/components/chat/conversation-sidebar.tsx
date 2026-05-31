@@ -170,7 +170,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                         e.stopPropagation();
                         startEditing(conv);
                       }}
-                      className="rounded-md p-1.5 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent"
+                      className="rounded-md p-2 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent"
                     >
                       <Pencil className="size-3" />
                     </button>
@@ -179,7 +179,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);
                       }}
-                      className="rounded-md p-1.5 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10"
+                      className="rounded-md p-2 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10"
                     >
                       <Trash2 className="size-3" />
                     </button>

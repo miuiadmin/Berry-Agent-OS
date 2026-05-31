@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { AgentHierarchyInfo, ReviewChainEntry } from '../contracts/org-tree.js';
 import { getLogger } from '../utils/logger.js';
+import { reqStr, optStr } from '../db/row-helpers.js';
 
 const logger = getLogger('agent-hierarchy');
 
@@ -124,13 +125,13 @@ export class AgentHierarchy {
 
   private rowToInfo(row: Record<string, unknown>): AgentHierarchyInfo {
     return {
-      agentId: row.id as string,
-      agentName: row.agent_name as string,
-      workspaceId: row.workspace_id as string,
-      orgNodeId: (row.org_node_id as string) ?? null,
-      superiorId: (row.superior_id as string) ?? null,
-      role: row.role as 'lead' | 'member',
-      description: (row.description as string) ?? null,
+      agentId: reqStr(row, 'id'),
+      agentName: reqStr(row, 'agent_name'),
+      workspaceId: reqStr(row, 'workspace_id'),
+      orgNodeId: optStr(row, 'org_node_id'),
+      superiorId: optStr(row, 'superior_id'),
+      role: reqStr(row, 'role') as 'lead' | 'member',
+      description: optStr(row, 'description'),
     };
   }
 }

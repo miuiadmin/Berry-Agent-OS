@@ -1,4 +1,4 @@
-import { createLlmClient } from '../llm/client.js';
+import { createLlmClient } from '../llm/index.js';
 import { loadConfig } from '../kernel/config.js';
 import { addKnowledge, listKnowledge, updateKnowledge, supersedeKnowledge, promoteKnowledge, pruneKnowledge, type AddKnowledgeInput, type KnowledgeType, type EvidenceKind } from './knowledge.js';
 import { logEpisode } from './episodes.js';

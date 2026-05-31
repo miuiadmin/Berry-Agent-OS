@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getDb } from '../memory/db.js';
+import { getDb } from '../memory/index.js';
 import { getHistory } from '../memory/conversations.js';
 import { getAppHome, getConfigPath } from '../utils/paths.js';
 import { readConfig, writeConfig } from './config-api.js';

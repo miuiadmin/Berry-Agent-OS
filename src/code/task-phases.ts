@@ -1,4 +1,4 @@
-import type { LlmClient } from '../llm/client.js';
+import type { LlmClient } from '../llm/index.js';
 import type { IpcChildChannel } from '../contracts/infrastructure.js';
 import type { ToolCallRecord } from '../llm/tool-caller.js';
 import type { ModelMessage, ModelToolDef } from '../contracts/model.js';
