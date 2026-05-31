@@ -72,3 +72,82 @@ function summarizeToolResult(content: string): string {
 function md5(text: string): string {
   return createHash('md5').update(text).digest('hex').slice(0, 16);
 }
+
+// === Phase 2: Iterative LLM Summary ===
+
+const CAPACITY_THRESHOLD = 0.8;
+const SUMMARY_BUDGET_RATIO = 0.05;
+const MAX_SUMMARY_TOKENS = 12_000;
+
+export interface CompressionState {
+  previousSummary: string | null;
+  consecutiveLowSavings: number;
+}
+
+export function needsPhase2(messages: Message[], maxContextChars: number): boolean {
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  return totalChars > maxContextChars * CAPACITY_THRESHOLD;
+}
+
+export function buildSummaryPrompt(previousSummary: string | null, newMessages: Message[]): string {
+  const newContent = newMessages.map(m => `[${m.role}]: ${m.content.slice(0, 500)}`).join('\n');
+
+  if (previousSummary) {
+    return `Update this running summary with new information. Keep the structured format.
+
+Previous summary:
+${previousSummary}
+
+New messages since last summary:
+${newContent}
+
+Output updated summary in this format:
+- Active tasks: (what's currently being worked on)
+- Completed: (what was finished)
+- Decisions: (choices made)
+- Key context: (file paths, variables, constraints)
+- Blockers: (what's unresolved)`;
+  }
+
+  return `Summarize these messages into a structured running summary.
+
+Messages:
+${newContent}
+
+Output summary in this format:
+- Active tasks: (what's currently being worked on)
+- Completed: (what was finished)
+- Decisions: (choices made)
+- Key context: (file paths, variables, constraints)
+- Blockers: (what's unresolved)`;
+}
+
+export function applyPhase2(
+  messages: Message[],
+  summary: string,
+  protectedHeadCount: number,
+  protectedTailCount: number,
+): Message[] {
+  const head = messages.slice(0, protectedHeadCount);
+  const tail = messages.slice(-protectedTailCount);
+
+  return [
+    ...head,
+    { role: 'user', content: `[context compacted]\n\nRunning summary:\n${summary}` },
+    { role: 'assistant', content: '[context compacted, continue task]' },
+    ...tail,
+  ];
+}
+
+export function shouldSkipCompression(state: CompressionState, savedPercent: number): boolean {
+  if (savedPercent < 0.1) {
+    state.consecutiveLowSavings++;
+  } else {
+    state.consecutiveLowSavings = 0;
+  }
+  return state.consecutiveLowSavings >= 2;
+}
+
+export function getSummaryBudget(contextChars: number): number {
+  return Math.min(Math.floor(contextChars * SUMMARY_BUDGET_RATIO), MAX_SUMMARY_TOKENS * 4);
+}

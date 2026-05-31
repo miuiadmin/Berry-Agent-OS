@@ -253,8 +253,23 @@ async function runAgentLoop(
     messages.push({ role: 'user', content: toolResults.join('\n') });
   }
 
-  // Budget Grace Call: give LLM one last chance to summarize
-  return { response: 'Max turns reached', turns: maxTurns };
+  // §2.4 Budget Grace Call: give LLM one final turn to summarize progress
+  messages.push({ role: 'user', content: '[System: Max turns reached. Summarize your progress so far and return whatever partial result you have. Do not call any more tools.]' });
+  try {
+    const graceResult = await llm.chat(messages as any, {
+      system: config.systemPrompt,
+      maxTokens: 2048,
+      temperature: 0.2,
+      agent: agentName as AgentName,
+      purpose: 'conversation',
+      modelTier: config.modelTier ?? 'default',
+      sessionId: task.sessionId,
+      taskId: task.taskId,
+    });
+    return { response: graceResult.content, turns: maxTurns, graceCalled: true };
+  } catch {
+    return { response: 'Max turns reached (grace call failed)', turns: maxTurns };
+  }
 }
 
 function truncateWithHeadTail(content: string, maxLength: number): string {
