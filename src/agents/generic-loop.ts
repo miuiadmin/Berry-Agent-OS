@@ -173,7 +173,11 @@ async function runAgentLoop(
       inputSchema: t.inputSchema,
     }));
 
-    const result = await llm.chat(messages, {
+    // §8.11 Phase 1: compress old tool outputs before LLM call
+    const { compressToolOutputs } = await import('../llm/context-compression.js');
+    const compressedMessages = compressToolOutputs(messages) as any;
+
+    const result = await llm.chat(compressedMessages, {
       system: config.systemPrompt,
       maxTokens: 4096,
       temperature: config.temperature ?? 0.3,
