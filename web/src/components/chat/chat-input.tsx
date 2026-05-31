@@ -64,7 +64,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
     <div className="border-t border-border bg-background p-3 md:p-4">
       <div className="mx-auto max-w-3xl">
         {/* Single unified card */}
-        <div className="rounded-2xl border border-input bg-muted/50 overflow-hidden transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
+        <div className="rounded-2xl border border-input bg-muted/50 overflow-hidden transition-all duration-200 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30 focus-within:shadow-md">
           {/* Attachments */}
           {allAttachments.length > 0 && (
             <AttachmentPreview attachments={allAttachments} onRemove={handleRemoveAttachment} />
@@ -109,10 +109,10 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
               onClick={handleSubmit}
               disabled={!canSend || isStreaming}
               className={cn(
-                "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
+                "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
                 "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
                 canSend && !isStreaming
-                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80"
+                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97]"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >
@@ -145,7 +145,7 @@ function ToolbarButton({
       disabled={disabled}
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-colors min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0",
+        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-all duration-150 min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0 active:scale-90",
         variant === "destructive"
           ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
           : "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent",

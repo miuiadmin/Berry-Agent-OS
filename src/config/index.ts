@@ -6,3 +6,6 @@
 
 export type { IConfigService, ConfigChangeEvent, ConfigChangeListener } from './contract.js';
 export type { AppConfig } from './types.js';
+export { ConfigService } from './service.js';
+export { ConfigSchemaRegistry, createDefaultRegistry } from './schema-registry.js';
+export { resolveEnvOverrides } from './env-resolver.js';

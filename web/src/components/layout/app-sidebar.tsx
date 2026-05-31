@@ -49,13 +49,13 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
               to={item.href}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all",
+                "group flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all",
                 isActive
                   ? "nav-link-active bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent"
               )}
             >
-              <item.icon className={cn("size-4 transition-transform", isActive && "scale-110")} />
+              <item.icon className={cn("size-4 transition-transform duration-200", isActive ? "scale-110" : "group-hover:scale-110")} />
               {item.label}
             </Link>
           );
@@ -67,13 +67,13 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
           to="/settings"
           onClick={onNavigate}
           className={cn(
-            "flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all",
+            "group flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all",
             pathname.startsWith("/settings")
               ? "nav-link-active bg-sidebar-accent text-sidebar-accent-foreground font-medium"
               : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent"
           )}
         >
-          <Settings className={cn("size-4 transition-transform", pathname.startsWith("/settings") && "scale-110")} />
+          <Settings className={cn("size-4 transition-transform duration-200", pathname.startsWith("/settings") ? "scale-110" : "group-hover:scale-110")} />
           Settings
         </Link>
         <Button
