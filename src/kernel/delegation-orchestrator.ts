@@ -1490,9 +1490,19 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           } else {
             pending = this.sessionManager.findPendingByTaskId(payload.taskId);
           }
-          if (!pending?.streaming || !pending.socket || pending.socket.destroyed) return;
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
-          pending.socket.write(JSON.stringify(evt) + '\n');
+          // Primary path: write via pending's socket
+          if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
+            const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+            pending.socket.write(JSON.stringify(evt) + '\n');
+            break;
+          }
+          // Fallback: pending may have been deleted by final.response (race condition on short replies).
+          // Use the taskId → socket mapping that survives pending deletion.
+          const fallbackSocket = this.sessionManager.getSocketForTask(payload.taskId);
+          if (fallbackSocket && !fallbackSocket.destroyed) {
+            const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+            fallbackSocket.write(JSON.stringify(evt) + '\n');
+          }
           break;
         }
         case 'llm_completed': {

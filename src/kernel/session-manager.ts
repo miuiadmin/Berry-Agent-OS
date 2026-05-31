@@ -39,6 +39,8 @@ export class SessionManager {
   private sessionModelOverrides = new Map<string, ModelTier>();
   private pendingAsks = new Map<string, PendingAskState>();
   private sessionLastActivity = new Map<string, number>();
+  /** taskId → socket mapping for late-arriving text_delta after pending is deleted */
+  private taskSocketMap = new Map<string, { socket: Socket; expiresAt: number }>();
   private gcTimer: ReturnType<typeof setInterval> | null = null;
 
   private memoryRuntime: MemoryRuntime;
@@ -64,6 +66,10 @@ export class SessionManager {
   createPending(msgId: string, entry: PendingRequest): void {
     this.pendingRequests.set(msgId, entry);
     this.touchSession(entry.sessionId);
+    // Register taskId → socket for late-arriving text_delta after pending is deleted
+    if (entry.taskId && entry.socket) {
+      this.taskSocketMap.set(entry.taskId, { socket: entry.socket, expiresAt: Date.now() + 30_000 });
+    }
     const timeoutMs = this.config.requestTimeoutMs * 4;
     const timer = setTimeout(() => {
       const pending = this.pendingRequests.get(msgId);
@@ -81,9 +87,38 @@ export class SessionManager {
   }
 
   deletePending(msgId: string): void {
+    const pending = this.pendingRequests.get(msgId);
+    if (pending?.taskId) {
+      this.releaseTaskSocket(pending.taskId);
+    }
     const timer = this.requestTimers.get(msgId);
     if (timer) { clearTimeout(timer); this.requestTimers.delete(msgId); }
     this.pendingRequests.delete(msgId);
+  }
+
+  /**
+   * Get socket for a taskId — used as fallback when pending is already deleted
+   * by final.response but text_delta IPC hasn't been processed yet.
+   */
+  getSocketForTask(taskId: string): Socket | undefined {
+    const entry = this.taskSocketMap.get(taskId);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+      this.taskSocketMap.delete(taskId);
+      return undefined;
+    }
+    return entry.socket;
+  }
+
+  /**
+   * Delayed cleanup: keep socket available for 2s after final.response
+   * to catch any late-arriving text_delta messages.
+   */
+  private releaseTaskSocket(taskId: string): void {
+    if (!taskId) return;
+    setTimeout(() => {
+      this.taskSocketMap.delete(taskId);
+    }, 2000).unref();
   }
 
   entries(): IterableIterator<[string, PendingRequest]> {

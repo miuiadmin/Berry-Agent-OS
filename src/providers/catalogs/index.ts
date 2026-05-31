@@ -32,34 +32,20 @@ export function getBuiltinCatalog(kind: ProviderKind): ModelEntry[] {
  * Merge a channel's user-defined models with the built-in catalog.
  *
  * Strategy:
- * - If a user model's `id` matches a built-in entry → user entry wins (override)
- * - If the `id` is new → appended to the catalog
- * - If channel has no user models → returns the pure built-in catalog
+ * - If a channel defines its own models list → use ONLY user models (no catalog merge)
+ *   This prevents unwanted built-in models appearing for compatible proxies (e.g., MIMO)
+ * - If a channel has no user models → return the full built-in catalog
+ * - This way: user says exactly which models they want → they get exactly those
  */
 export function mergeCatalog(
   kind: ProviderKind,
   userModels?: ModelEntry[],
 ): ModelEntry[] {
-  const builtins = getBuiltinCatalog(kind);
-
-  if (!userModels || userModels.length === 0) {
-    return [...builtins];
+  // User explicitly listed their models → respect that, don't pollute with builtins
+  if (userModels && userModels.length > 0) {
+    return [...userModels];
   }
 
-  const userMap = new Map(userModels.map(m => [m.id, m]));
-  const merged: ModelEntry[] = [];
-
-  // Built-in entries — overridden if user provides same ID
-  for (const builtin of builtins) {
-    const override = userMap.get(builtin.id);
-    merged.push(override ?? builtin);
-    if (override) userMap.delete(builtin.id);
-  }
-
-  // User-only entries (new models not in built-in catalog)
-  for (const model of userMap.values()) {
-    merged.push(model);
-  }
-
-  return merged;
+  // No user models → fall back to built-in catalog for this kind
+  return [...getBuiltinCatalog(kind)];
 }

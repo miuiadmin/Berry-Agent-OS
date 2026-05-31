@@ -71,30 +71,26 @@ describe('mergeCatalog', () => {
     expect(merged).toEqual(builtins);
   });
 
-  it('appends user models', () => {
+  it('returns only user models when user defines models (no catalog merge)', () => {
     const userModels = [
+      { id: 'mimo-v2-pro', name: 'MiMo v2 Pro', contextWindow: 128000, defaultMaxTokens: 4096, supportsThinking: false, supportsAttachments: false },
+    ];
+    const merged = mergeCatalog('anthropic', userModels);
+    // Should ONLY contain user models, NOT built-in Anthropic catalog
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('mimo-v2-pro');
+  });
+
+  it('user models are returned as-is without builtin pollution', () => {
+    const userModels = [
+      { id: 'claude-haiku-4-5-20251001', name: 'My Haiku Override', contextWindow: 999999, defaultMaxTokens: 9999, supportsThinking: true, supportsAttachments: false },
       { id: 'my-custom-model', name: 'Custom', contextWindow: 32768, defaultMaxTokens: 2048, supportsThinking: false, supportsAttachments: false },
     ];
     const merged = mergeCatalog('anthropic', userModels);
-    const hasCustom = merged.some(m => m.id === 'my-custom-model');
-    expect(hasCustom).toBe(true);
-    // Builtins should still be present
-    const hasSonnet = merged.some(m => m.id.includes('sonnet'));
-    expect(hasSonnet).toBe(true);
-  });
-
-  it('user override wins over builtin', () => {
-    const builtins = getBuiltinCatalog('anthropic');
-    const original = builtins.find(m => m.id === 'claude-haiku-4-5-20251001');
-    expect(original).toBeDefined();
-
-    const userModels = [
-      { id: 'claude-haiku-4-5-20251001', name: 'My Haiku Override', contextWindow: 999999, defaultMaxTokens: 9999, supportsThinking: true, supportsAttachments: false },
-    ];
-    const merged = mergeCatalog('anthropic', userModels);
-    const overridden = merged.find(m => m.id === 'claude-haiku-4-5-20251001');
-    expect(overridden!.name).toBe('My Haiku Override');
-    expect(overridden!.contextWindow).toBe(999999);
+    expect(merged).toHaveLength(2);
+    expect(merged[0].id).toBe('claude-haiku-4-5-20251001');
+    expect(merged[0].name).toBe('My Haiku Override');
+    expect(merged[1].id).toBe('my-custom-model');
   });
 });
 

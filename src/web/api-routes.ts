@@ -144,6 +144,34 @@ export function createApiRouter(deps: WebServerDependencies) {
     json(res, { items: rows.map((r) => camelKeys(r as Record<string, unknown>)), total });
   });
 
+  // --- Task stats (must be registered BEFORE /tasks/:id to avoid route shadowing) ---
+  route('GET', '/tasks/stats', (_req, res, url) => {
+    const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
+    const db = getDb();
+    const since = Date.now() - days * MS_PER_DAY;
+
+    const rows = db.prepare(`
+      SELECT
+        CAST((created_at / ${MS_PER_DAY}) AS INTEGER) as day_bucket,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+      FROM agent_tasks
+      WHERE created_at >= ?
+      GROUP BY day_bucket
+      ORDER BY day_bucket ASC
+    `).all(since) as { day_bucket: number; completed: number; failed: number }[];
+
+    const result: { date: string; completed: number; failed: number }[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const dayMs = Date.now() - i * MS_PER_DAY;
+      const bucket = Math.floor(dayMs / MS_PER_DAY);
+      const row = rows.find((r) => r.day_bucket === bucket);
+      const date = new Date(bucket * MS_PER_DAY).toISOString().slice(0, 10);
+      result.push({ date, completed: row?.completed ?? 0, failed: row?.failed ?? 0 });
+    }
+    json(res, result);
+  });
+
   route('GET', '/tasks/:id', (_req, res, _url, params) => {
     const task = deps.taskManager.getTask(params.id);
     if (!task) { notFound(res); return; }
@@ -238,34 +266,6 @@ export function createApiRouter(deps: WebServerDependencies) {
       highlight: highlightSnippet(r.content as string, q),
     }));
     json(res, { results, total: countRow.cnt });
-  });
-
-  // --- Task stats ---
-  route('GET', '/tasks/stats', (_req, res, url) => {
-    const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
-    const db = getDb();
-    const since = Date.now() - days * MS_PER_DAY;
-
-    const rows = db.prepare(`
-      SELECT
-        CAST((created_at / ${MS_PER_DAY}) AS INTEGER) as day_bucket,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-      FROM agent_tasks
-      WHERE created_at >= ?
-      GROUP BY day_bucket
-      ORDER BY day_bucket ASC
-    `).all(since) as { day_bucket: number; completed: number; failed: number }[];
-
-    const result: { date: string; completed: number; failed: number }[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const dayMs = Date.now() - i * MS_PER_DAY;
-      const bucket = Math.floor(dayMs / MS_PER_DAY);
-      const row = rows.find((r) => r.day_bucket === bucket);
-      const date = new Date(bucket * MS_PER_DAY).toISOString().slice(0, 10);
-      result.push({ date, completed: row?.completed ?? 0, failed: row?.failed ?? 0 });
-    }
-    json(res, result);
   });
 
   // --- Token usage summary ---

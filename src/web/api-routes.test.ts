@@ -720,17 +720,10 @@ describe('createApiRouter', () => {
 
   // -----------------------------------------------------------------------
   // 16. GET /api/tasks/stats
-  // NOTE: /tasks/stats is registered AFTER /tasks/:id, so the :id pattern
-  // matches "stats" first. We test it via the full route table — this test
-  // verifies the stats logic works when the route is reached directly.
+  // /tasks/stats is registered BEFORE /tasks/:id to avoid route shadowing.
   // -----------------------------------------------------------------------
   describe('GET /api/tasks/stats', () => {
-    it('returns daily stats (tested by calling handler directly)', () => {
-      // Because /tasks/:id shadows /tasks/stats in route registration order,
-      // requesting /api/tasks/stats will match the :id pattern with id="stats".
-      // The taskManager.getTask("stats") returns undefined → 404.
-      // This is a known route ordering issue in the source. We verify the
-      // stats endpoint logic by inserting data and testing via the tasks route.
+    it('returns daily stats', () => {
       const now = Date.now();
       db.prepare(`
         INSERT INTO agent_tasks (id, session_id, correlation_id, task_type, requester, target_agent, input_payload, status, created_at)
@@ -741,10 +734,13 @@ describe('createApiRouter', () => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run('tsk_2', 'ses_2', 'cor_2', 'test', 'user', 'brain', '{}', 'failed', now);
 
-      // Request hits /tasks/:id with id="stats" → getTask returns undefined → 404
-      // This documents the route ordering issue
       const captured = dispatchSync('GET', '/api/tasks/stats');
-      expect(captured.statusCode).toBe(404);
+      expect(captured.statusCode).toBe(200);
+      const data = parseBody<{ date: string; completed: number; failed: number }[]>(captured);
+      expect(Array.isArray(data)).toBe(true);
+      // Should have at least today's entry
+      const today = data.find(d => d.completed === 1 && d.failed === 1);
+      expect(today).toBeDefined();
     });
   });
 
