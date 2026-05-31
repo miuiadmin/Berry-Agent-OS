@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import {
   Save,
-  Brain,
   Wallet,
   Database,
   Sparkles,
@@ -26,7 +25,6 @@ import {
 } from "lucide-react";
 
 const TABS = [
-  { key: "llm", label: "LLM", icon: Brain },
   { key: "providers", label: "Providers", icon: Server },
   { key: "budget", label: "Budget", icon: Wallet },
   { key: "memory", label: "Memory", icon: Database },
@@ -52,7 +50,7 @@ function SettingsContent() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tabFromUrl = searchParams.get("tab");
-  const activeTab: TabKey = tabFromUrl && VALID_TABS.has(tabFromUrl) ? (tabFromUrl as TabKey) : "llm";
+  const activeTab: TabKey = tabFromUrl && VALID_TABS.has(tabFromUrl) ? (tabFromUrl as TabKey) : "providers";
 
   const { data: config, isLoading } = useQuery(queries.config());
   const queryClient = useQueryClient();
@@ -275,23 +273,6 @@ function TabContent({
   errors: Record<string, string>;
 }) {
   switch (tab) {
-    case "llm":
-      return (
-        <ConfigSection
-          title="LLM Configuration"
-          description="Language model provider and credentials"
-          section="llm"
-          config={config}
-          onUpdate={onUpdate}
-          errors={errors}
-          fields={[
-            { key: "provider", label: "Provider", type: "text" },
-            { key: "model", label: "Model", type: "text" },
-            { key: "baseUrl", label: "Base URL", type: "text" },
-            { key: "apiKey", label: "API Key", type: "password" },
-          ]}
-        />
-      );
     case "providers":
       return <ProvidersTab />;
     case "budget":
