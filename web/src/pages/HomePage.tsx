@@ -150,7 +150,7 @@ export default function HomePage() {
       {/* Stats Grid */}
       <div className="mt-6 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         {/* Health */}
-        <Card>
+        <Card className="card-lift stagger-1">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Activity className="size-4" />
@@ -174,7 +174,7 @@ export default function HomePage() {
         </Card>
 
         {/* Agents */}
-        <Card>
+        <Card className="card-lift stagger-2">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Bot className="size-4" />
@@ -194,7 +194,7 @@ export default function HomePage() {
         </Card>
 
         {/* Running Tasks */}
-        <Card>
+        <Card className="card-lift stagger-3">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Zap className="size-4" />
@@ -208,7 +208,7 @@ export default function HomePage() {
         </Card>
 
         {/* Task Totals */}
-        <Card>
+        <Card className="card-lift stagger-4">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <ListTodo className="size-4" />
@@ -237,7 +237,7 @@ export default function HomePage() {
         </Card>
 
         {/* Token Usage */}
-        <Card>
+        <Card className="card-lift stagger-5">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Coins className="size-4" />
@@ -263,7 +263,7 @@ export default function HomePage() {
       {/* Bottom Section */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Task Activity Chart */}
-        <Card>
+        <Card className="stagger-6">
           <CardHeader>
             <CardTitle className="text-sm">Task Activity (7 days)</CardTitle>
           </CardHeader>
@@ -348,7 +348,7 @@ function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.Comp
   return (
     <Link
       to={href}
-      className="flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm hover:bg-accent active:bg-accent transition-colors"
+      className="flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm hover:bg-accent active:bg-accent active:scale-[0.97] transition-all"
     >
       <Icon className="size-4 text-muted-foreground" />
       {label}

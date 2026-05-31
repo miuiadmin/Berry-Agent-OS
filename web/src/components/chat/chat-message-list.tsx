@@ -321,15 +321,19 @@ export function ChatMessageList({
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-4">
-            {messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                onRetry={onRetry}
-                onEdit={onEdit}
-                onDelete={removeMessage}
-              />
-            ))}
+            {messages.map((msg, i) => {
+              const isLatest = i === messages.length - 1 && msg.status === "streaming";
+              return (
+                <div key={msg.id} className={isLatest ? "animate-msg-in" : undefined}>
+                  <MessageBubble
+                    message={msg}
+                    onRetry={onRetry}
+                    onEdit={onEdit}
+                    onDelete={removeMessage}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </ScrollArea>

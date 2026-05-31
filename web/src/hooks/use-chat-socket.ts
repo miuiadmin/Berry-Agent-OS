@@ -65,13 +65,13 @@ export function useChatSocket() {
         }
         case "delegation.needed": {
           if (typeof data === "object" && data !== null && "delegationId" in data) {
-            setPendingDelegation(data as DelegationRequest);
+            setPendingDelegation(data as unknown as DelegationRequest);
           }
           break;
         }
         case "permission.confirm_needed": {
           if (typeof data === "object" && data !== null && "requestId" in data) {
-            setPendingPermission(data as PermissionConfirmRequest);
+            setPendingPermission(data as unknown as PermissionConfirmRequest);
           }
           break;
         }
