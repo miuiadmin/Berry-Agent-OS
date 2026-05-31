@@ -101,7 +101,28 @@ export function useChatSocket() {
   }, [onMessage, appendToLast, setLastStatus, setLastProgress, setStreaming, setPendingDelegation, setPendingPermission]);
 
   const sendMessage = useCallback(
-    (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
+    async (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
+      // Quick check: is a model configured? If not, fail fast instead of waiting 30s
+      try {
+        const res = await fetch("/api/providers/channels");
+        if (res.ok) {
+          const data = await res.json();
+          const hasConfigured = data.channels?.some((ch: { configured?: boolean; modelCount?: number }) => ch.configured || ch.modelCount > 0);
+          if (!hasConfigured) {
+            addMessage({
+              id: `err-${crypto.randomUUID().slice(0, 8)}`,
+              role: "assistant",
+              content: "模型尚未配置。请先在设置页面添加 API 密钥和模型配置。",
+              timestamp: Date.now(),
+              status: "error",
+            });
+            return;
+          }
+        }
+      } catch {
+        // If check fails, proceed anyway — the timeout will catch it
+      }
+
       // Optimistic UI: add messages first
       const userId = `user-${crypto.randomUUID().slice(0, 8)}`;
       const asstId = `asst-${crypto.randomUUID().slice(0, 8)}`;
