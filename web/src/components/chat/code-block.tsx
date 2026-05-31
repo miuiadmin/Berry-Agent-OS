@@ -12,6 +12,8 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {
+      // clipboard access denied or insecure context
     });
   }, [text]);
 
@@ -50,6 +52,8 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
     const theme = resolvedTheme === "dark" ? "dark" : "light";
     highlight(code, lang, theme).then((html) => {
       if (!cancelled) setHighlightedHtml(html);
+    }).catch(() => {
+      // highlighter failed, fallback to plain rendering
     });
     return () => {
       cancelled = true;

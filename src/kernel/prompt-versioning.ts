@@ -40,7 +40,8 @@ export class PromptVersioning {
         ORDER BY version DESC LIMIT 1
       `).get(promptKey) as Record<string, unknown> | undefined;
       return row ? rowToVersion(row) : null;
-    } catch {
+    } catch (e) {
+      logger.debug({ err: e, promptKey }, 'getActiveVersion query failed');
       return null;
     }
   }
@@ -53,7 +54,8 @@ export class PromptVersioning {
         ORDER BY version DESC LIMIT ?
       `).all(promptKey, limit) as Array<Record<string, unknown>>;
       return rows.map(rowToVersion);
-    } catch {
+    } catch (e) {
+      logger.debug({ err: e, promptKey }, 'getVersionHistory query failed');
       return [];
     }
   }

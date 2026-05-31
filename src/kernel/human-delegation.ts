@@ -136,7 +136,8 @@ export class HumanDelegationManager {
         ? this.db.prepare(query).all(sessionId) as Array<Record<string, unknown>>
         : this.db.prepare(query).all() as Array<Record<string, unknown>>;
       return rows.map(rowToDelegation);
-    } catch {
+    } catch (e) {
+      logger.debug({ err: e, sessionId }, 'getPending query failed');
       return [];
     }
   }
@@ -147,7 +148,8 @@ export class HumanDelegationManager {
         SELECT * FROM human_delegations ORDER BY created_at DESC LIMIT ?
       `).all(limit) as Array<Record<string, unknown>>;
       return rows.map(rowToDelegation);
-    } catch {
+    } catch (e) {
+      logger.debug({ err: e }, 'getRecent query failed');
       return [];
     }
   }

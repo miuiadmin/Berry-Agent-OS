@@ -51,6 +51,8 @@ import type { AgentTaskPayload, AgentTaskResultPayload, TaskAcknowledgePayload, 
 import type { CorrectionConstraints } from '../contracts/delegation.js';
 import type { DangerLevel } from '../utils/types.js';
 import type { ICapabilityBus } from '../bus/contract.js';
+import type { WorldModelRuntime } from './world-model.js';
+import type { SuggestionQueue } from './suggestion-queue.js';
 
 const logger = getLogger('orchestrator');
 
@@ -108,8 +110,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private runtimeExecutor: RuntimeExecutor | null = null;
   private brainDecisionRecorder: BrainDecisionRecorder | null = null;
   private capabilityBusRef: ICapabilityBus | null = null;
-  private worldModelRef: any = null;
-  private suggestionQueueRef: any = null;
+  private worldModelRef: WorldModelRuntime | null = null;
+  private suggestionQueueRef: SuggestionQueue | null = null;
 
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
@@ -171,11 +173,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
   }
 
-  setWorldModel(worldModel: any): void {
+  setWorldModel(worldModel: WorldModelRuntime): void {
     this.worldModelRef = worldModel;
   }
 
-  setSuggestionQueue(queue: any): void {
+  setSuggestionQueue(queue: SuggestionQueue): void {
     this.suggestionQueueRef = queue;
   }
 

@@ -10,6 +10,9 @@ import type { ModelTakeoverRequestPayload, ModelTakeoverRespondPayload } from '.
 import type { ICapabilityBus, InvokeContext } from '../../bus/contract.js';
 import { getEventBus } from '../event-bus.js';
 import { genId } from '../../utils/id.js';
+import { getLogger } from '../../utils/logger.js';
+
+const logger = getLogger('proxy-handlers');
 
 interface AgentIpc {
   onMessage: (type: IpcMessageType, handler: (msg: IpcMessage) => void) => void;
@@ -141,6 +144,13 @@ export function setupBusHandlers(agentIpc: AgentIpc, agentName: string, capabili
     capabilityBus.invoke(payload.capabilityName, payload.input, ctx).then((result) => {
       agentIpc.send('bus.invoke.result', agentName, {
         ...result,
+        invokeId: payload.invokeId,
+      }, msg.correlationId ?? msg.id);
+    }).catch((err) => {
+      logger.debug({ err, capability: payload.capabilityName }, 'Bus invoke failed');
+      agentIpc.send('bus.invoke.result', agentName, {
+        isError: true,
+        content: err instanceof Error ? err.message : String(err),
         invokeId: payload.invokeId,
       }, msg.correlationId ?? msg.id);
     });

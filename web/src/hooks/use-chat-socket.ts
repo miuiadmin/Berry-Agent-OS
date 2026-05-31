@@ -64,11 +64,15 @@ export function useChatSocket() {
           break;
         }
         case "delegation.needed": {
-          setPendingDelegation(data as unknown as DelegationRequest);
+          if (typeof data === "object" && data !== null && "delegationId" in data) {
+            setPendingDelegation(data as DelegationRequest);
+          }
           break;
         }
         case "permission.confirm_needed": {
-          setPendingPermission(data as unknown as PermissionConfirmRequest);
+          if (typeof data === "object" && data !== null && "requestId" in data) {
+            setPendingPermission(data as PermissionConfirmRequest);
+          }
           break;
         }
       }
