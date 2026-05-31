@@ -35,7 +35,7 @@ export function DashboardLayout() {
 
       {/* Sidebar - hidden on mobile, shown as overlay when toggled */}
       <div className={`
-        fixed inset-y-0 left-0 z-50 w-full max-w-xs transform transition-transform duration-200 ease-in-out md:relative md:w-56 md:max-w-none md:translate-x-0 md:shrink-0
+        fixed inset-y-0 left-0 z-50 w-72 transform transition-transform duration-200 ease-in-out md:relative md:w-56 md:translate-x-0 md:shrink-0
         ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
       `}>
         <AppSidebar onNavigate={() => setMobileOpen(false)} />
