@@ -63,7 +63,8 @@ export function classifyLlmError(err: unknown): ClassifiedError {
 
 function extractStatus(err: unknown): number | null {
   if (err && typeof err === 'object') {
-    const status = (err as any).status ?? (err as any).statusCode ?? (err as any).code;
+    const obj = err as Record<string, unknown>;
+    const status = obj.status ?? obj.statusCode ?? obj.code;
     if (typeof status === 'number') return status;
   }
   return null;

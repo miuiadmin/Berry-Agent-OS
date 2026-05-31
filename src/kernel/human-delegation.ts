@@ -67,7 +67,7 @@ export class HumanDelegationManager {
     );
 
     // Emit event for frontend consumption
-    getEventBus().emit('delegation.user_needed' as any, {
+    getEventBus().emit('delegation.user_needed', {
       delegationId: id,
       sessionId: input.sessionId,
       requestedBy: input.requestedBy,

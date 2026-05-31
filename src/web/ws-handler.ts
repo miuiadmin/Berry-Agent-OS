@@ -57,12 +57,12 @@ export function createWsHandler(deps: WebServerDependencies) {
     logger.debug({ sessionId }, 'WebSocket 连接');
 
     // Forward delegation events to this client
-    const delegationListener = deps.eventBus.on('delegation.user_needed' as any, (payload: any) => {
+    const delegationListener = deps.eventBus.on('delegation.user_needed', (payload) => {
       wsReply(ws, { type: 'delegation.needed', ...payload });
     });
 
     // Forward permission confirmation events
-    const permissionListener = deps.eventBus.on('permission.user_confirm_needed' as any, (payload: any) => {
+    const permissionListener = deps.eventBus.on('permission.user_confirm_needed', (payload) => {
       wsReply(ws, { type: 'permission.confirm_needed', ...payload });
     });
 

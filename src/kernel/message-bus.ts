@@ -268,7 +268,7 @@ export class MessageBus {
   private isRetryable(err: unknown): boolean {
     if (err instanceof Error) {
       if (err.message.includes('timeout')) return true;
-      if ('retryable' in err && (err as any).retryable === true) return true;
+      if ('retryable' in err && (err as Record<string, unknown>).retryable === true) return true;
     }
     return false;
   }

@@ -68,7 +68,7 @@ export class UnifiedEvolutionExtractor {
           maxTokens: 512,
           temperature: 0.0,
           agent: 'brain',
-          purpose: 'evolution_extraction' as any,
+          purpose: 'evolution_extraction',
           modelTier: 'fast',
         },
       );

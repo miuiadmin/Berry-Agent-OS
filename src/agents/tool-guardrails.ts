@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getLogger } from '../utils/logger.js';
+import { extractToolPath } from '../contracts/tool-input.js';
 
 const logger = getLogger('tool-guardrails');
 
@@ -114,8 +115,7 @@ function hashInput(input: unknown): string {
 }
 
 function extractPath(input: unknown): string | null {
-  if (!input || typeof input !== 'object') return null;
-  return (input as any).path ?? (input as any).file_path ?? null;
+  return extractToolPath(input);
 }
 
 function hasPathOverlap(paths: string[]): boolean {

@@ -11,6 +11,12 @@ export const BUNDLED_MODEL_PURPOSES = [
   'skill_generation',
   'plugin_generation',
   'code_task',
+  'evolution_extraction',
+  'memory_judge',
+  'memory_recall',
+  'feedback_analysis',
+  'gap_detection',
+  'metrics_analysis',
 ] as const;
 
 export const MODEL_TIERS = ['fast', 'default', 'high'] as const;
@@ -47,6 +53,12 @@ export const PURPOSE_TIER_MAP: Record<BundledModelPurpose, ModelTier> = {
   skill_generation: 'default',
   plugin_generation: 'high',
   code_task: 'high',
+  evolution_extraction: 'fast',
+  memory_judge: 'fast',
+  memory_recall: 'fast',
+  feedback_analysis: 'fast',
+  gap_detection: 'fast',
+  metrics_analysis: 'fast',
 };
 
 export interface ModelToolDef {

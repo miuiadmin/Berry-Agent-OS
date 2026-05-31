@@ -1,4 +1,5 @@
 import type { DangerLevel } from './contract.js';
+import { extractToolPath } from '../contracts/tool-input.js';
 
 export interface PermissionScope {
   capabilities: string[];
@@ -46,7 +47,7 @@ export class ScopeChecker {
     }
 
     if (constraints.pathPattern && input) {
-      const path = (input as any)?.path ?? (input as any)?.file_path ?? '';
+      const path = extractToolPath(input) ?? '';
       if (path && !matchGlob(constraints.pathPattern, path)) {
         return { inScope: false, reason: `path "${path}" outside scope "${constraints.pathPattern}"` };
       }

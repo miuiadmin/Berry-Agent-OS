@@ -1,6 +1,7 @@
 import type { ICapabilityBus, InvokeContext } from './contract.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { extractToolPath } from '../contracts/tool-input.js';
 
 const logger = getLogger('bus:transaction');
 
@@ -118,7 +119,7 @@ export class TransactionManager {
 
   private async captureBeforeState(name: string, input: unknown, ctx: Partial<InvokeContext>): Promise<unknown> {
     if (name === 'write_file') {
-      const filePath = (input as any)?.path ?? (input as any)?.file_path;
+      const filePath = extractToolPath(input);
       if (!filePath) return null;
       try {
         const result = await this.bus.invoke('read_file', { path: filePath }, {
