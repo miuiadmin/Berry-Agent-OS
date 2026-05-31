@@ -37,16 +37,22 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
 }
 
 export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessProps) {
-  const [manualCollapse, setManualCollapse] = useState<boolean | null>(null);
+  const [expanded, setExpanded] = useState(isActive);
   const listRef = useRef<HTMLDivElement>(null);
+  const wasActive = useRef(isActive);
 
-  const collapsed = manualCollapse ?? !isActive;
-
+  // Auto-collapse when streaming completes
   useEffect(() => {
-    if (!collapsed && listRef.current) {
+    if (wasActive.current && !isActive) setExpanded(false);
+    wasActive.current = isActive;
+  }, [isActive]);
+
+  // Auto-scroll to bottom when new steps arrive
+  useEffect(() => {
+    if (expanded && listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [steps.length, collapsed]);
+  }, [steps.length, expanded]);
 
   if (steps.length === 0) return null;
 
@@ -54,15 +60,15 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
     <div className="mb-1.5">
       <button
         type="button"
-        onClick={() => setManualCollapse((v) => !(v ?? !isActive))}
+        onClick={() => setExpanded((v) => !v)}
         className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors py-0.5"
       >
-        <ChevronRight className={cn("size-3 transition-transform", !collapsed && "rotate-90")} />
+        <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <span>{isActive ? "Thinking" : "Thought process"}</span>
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
         {!isActive && <span className="ml-0.5 opacity-60">({steps.length})</span>}
       </button>
-      {!collapsed && (
+      {expanded && (
         <div
           ref={listRef}
           className="ml-3.5 mt-0.5 max-h-32 overflow-y-auto space-y-px border-l border-border/50 pl-2"

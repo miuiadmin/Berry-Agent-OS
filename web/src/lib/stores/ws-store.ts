@@ -23,7 +23,9 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
 let reconnectGeneration = 0;
 const MAX_RECONNECT_DELAY = 30000;
+// subscribe() targets: dispatched only for messages with type="event"
 const eventListeners = new Map<string, Set<EventCallback>>();
+// onMessage() targets: dispatched for ALL messages (including type="event")
 const messageHandlers = new Set<(data: Record<string, unknown>) => void>();
 const sendQueue: unknown[] = [];
 

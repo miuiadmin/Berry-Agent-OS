@@ -124,43 +124,29 @@ export const useChatStore = create<ChatState>()(
 
       restoreSession: (messages, activeTask) =>
         set((s) => {
-          if (s.messages.length > 0) {
-            if (!activeTask) return s;
-            const msgs = [...s.messages];
-            const last = msgs[msgs.length - 1];
-            if (last?.role === "assistant" && last.status === "streaming") {
-              msgs[msgs.length - 1] = { ...last, progress: activeTask.progress ?? undefined, thinkingSteps: activeTask.thinkingSteps };
-              return { messages: msgs, isStreaming: true };
-            }
-            msgs.push({
-              id: genMsgId("asst-recovering"),
-              role: "assistant",
-              content: "",
-              timestamp: Date.now(),
-              status: "streaming",
-              progress: activeTask.progress ?? undefined,
-              thinkingSteps: activeTask.thinkingSteps,
-            });
-            return { messages: msgs, isStreaming: true };
-          }
-          const restored: ChatMessage[] = messages.map((m) => ({
-            id: genMsgId("hist"),
-            ...m,
-            status: "complete" as const,
+          const hasLocal = s.messages.length > 0;
+          let msgs = hasLocal ? [...s.messages] : messages.map((m) => ({
+            id: genMsgId("hist"), ...m, status: "complete" as const,
           }));
-          if (activeTask) {
-            restored.push({
+
+          if (!activeTask) return hasLocal ? s : { messages: msgs };
+
+          // Append or update streaming placeholder
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "assistant" && last.status === "streaming") {
+            msgs[msgs.length - 1] = { ...last, progress: activeTask.progress ?? undefined, thinkingSteps: activeTask.thinkingSteps };
+          } else {
+            msgs = [...msgs, {
               id: genMsgId("asst-recovering"),
-              role: "assistant",
+              role: "assistant" as const,
               content: "",
               timestamp: Date.now(),
-              status: "streaming",
+              status: "streaming" as const,
               progress: activeTask.progress ?? undefined,
               thinkingSteps: activeTask.thinkingSteps,
-            });
-            return { messages: restored, isStreaming: true };
+            }];
           }
-          return { messages: restored };
+          return { messages: msgs, isStreaming: true };
         }),
     }),
     {
