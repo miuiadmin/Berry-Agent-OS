@@ -357,7 +357,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
             id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             role: msg.role,
             content: msg.content,
-            timestamp: new Date(msg.createdAt).getTime(),
+            timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
             status: "complete",
           });
         }

@@ -237,7 +237,7 @@ function MessageBubble({
           {formatTime(message.timestamp)}
         </span>
         {!isStreaming && message.content && (
-          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             <CopyButton text={message.content} />
             {isUser && (
               <>

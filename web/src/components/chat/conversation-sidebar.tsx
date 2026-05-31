@@ -164,7 +164,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     <span>{conv.messageCount} messages</span>
                     <span>{formatRelative(conv.lastActive)}</span>
                   </div>
-                  <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                  <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
                     <button
                       aria-label="Rename conversation"
                       onClick={(e) => {
