@@ -56,8 +56,10 @@ export function buildRoutingSystemPrompt(): string {
 ## 路由规则
 
 - 日常对话、问答、闲聊、情感表达 → intent=chat, targetAgent=conversation
-- 文件操作、目录浏览、运行命令、系统操作 → intent=code, targetAgent=code
-- 代码相关操作（写代码、调试、分析代码） → intent=code, targetAgent=code
+- 简单文件查询（列出目录、读取文件内容、查看文件信息）→ intent=chat, targetAgent=conversation
+- 简单命令执行（查看系统信息、运行一行命令）→ intent=chat, targetAgent=conversation
+- 代码修改任务（写代码、修 bug、重构、创建项目）→ intent=code, targetAgent=code
+- 复杂多步代码任务（需要研究→计划→修改→验证流程）→ intent=code, targetAgent=code
 - 技能验证请求 → intent=skill_test, targetAgent=skill-tester
 - 学习/知识沉淀相关 → intent=learning, targetAgent=learning
 - 插件相关操作 → intent=plugin, targetAgent=plugin-builder
@@ -65,7 +67,7 @@ export function buildRoutingSystemPrompt(): string {
 - 复合请求（同时包含多个不同类型的操作） → intent=multi
 - 明确指向某个工作区/团队的请求 → intent=workspace, targetWorkspaceId=<id>
 
-**关键区分**：chat 只用于纯对话（不需要操作文件系统或运行命令）；任何需要读写文件、执行命令、查看目录的请求都是 code。
+**关键区分**：conversation 有 list_directory、run_command、read_file 等工具，能处理简单的文件查询和命令执行。code 是结构化代码修改流水线（研究→计划→补丁→验证），只用于需要**修改代码文件**的任务。
 
 ## 工作区路由
 
