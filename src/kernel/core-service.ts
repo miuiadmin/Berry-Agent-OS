@@ -424,7 +424,10 @@ export class CoreService {
     // Schedule automatic insights lifecycle (validate/expire stale insights hourly)
     const { runInsightsLifecycle } = await import('./insights-lifecycle.js');
     runInsightsLifecycle(getDb());
-    this.insightsTimer = setInterval(() => runInsightsLifecycle(getDb()), 3600_000);
+    this.insightsTimer = setInterval(() => {
+      runInsightsLifecycle(getDb());
+      import('../evolution/stats-job.js').then(m => m.runStatsJob(getDb())).catch(() => {});
+    }, 3600_000);
 
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
