@@ -177,14 +177,16 @@ body {
 
   /* ─── Card hover lift ──────────────────────────── */
   .card-lift {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   }
   .card-lift:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 16px -4px oklch(0 0 0 / 12%);
+    border-color: color-mix(in oklch, var(--brand) 30%, transparent);
   }
   .card-lift:active {
     transform: translateY(0);
+    border-color: var(--border);
   }
 
   /* ─── Stagger entrance ─────────────────────────── */
@@ -432,6 +434,53 @@ code {
   }
   .typing-dot:nth-child(2) { animation-delay: 0.15s; }
   .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+}
+
+/* ─── Float (empty state logo) ─────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+
+/* ─── Slide-in from left (activity feed) ──────────── */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ─── Fade + scale (scroll button, pop-in) ────────── */
+@keyframes fade-scale-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ─── Bounce in (nav indicator, dots) ─────────────── */
+@keyframes bounce-in {
+  0%   { transform: scale(0); }
+  60%  { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+/* ─── Badge pop (status change) ───────────────────── */
+@keyframes badge-pop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* ─── Slide down (attachments, previews) ──────────── */
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@layer utilities {
+  .animate-float       { animation: float 3s ease-in-out infinite; }
+  .animate-slide-left  { animation: slide-in-left 0.25s ease-out both; }
+  .animate-fade-scale  { animation: fade-scale-in 0.2s ease-out both; }
+  .animate-bounce-in   { animation: bounce-in 0.3s ease-out both; }
+  .animate-badge-pop   { animation: badge-pop 0.3s ease-out both; }
+  .animate-slide-down  { animation: slide-down 0.2s ease-out both; }
 }
 
 /* Respect reduced motion preference globally */

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
+import { MS_PER_DAY } from '../lib/time-constants.js';
 import type {
   IMemoryLayerService,
   AgentMemoryRow,
@@ -352,7 +353,7 @@ export class MemoryLayerService implements IMemoryLayerService {
 
   applyTimeDecay(): number {
     const now = Date.now();
-    const threshold = now - 90 * 86400000; // 90 days
+    const threshold = now - 90 * MS_PER_DAY; // 90 days
     let total = 0;
     total += this.stmts.decayAgentKnowledge.run(now, threshold).changes;
     total += this.stmts.decayWorkspaceKnowledge.run(now, threshold).changes;
@@ -362,7 +363,7 @@ export class MemoryLayerService implements IMemoryLayerService {
 
   archiveStale(): number {
     const now = Date.now();
-    const threshold = now - 90 * 86400000;
+    const threshold = now - 90 * MS_PER_DAY;
     let total = 0;
     total += this.stmts.archiveStaleAgent.run(now, threshold).changes;
     total += this.stmts.archiveStaleWorkspace.run(now, threshold).changes;
@@ -449,7 +450,7 @@ export class MemoryLayerService implements IMemoryLayerService {
   private computeScore(rank: number, importance: number, lastTs: number, now: number, layerWeight: number): number {
     const bm25 = Math.abs(rank);
     const normalizedBm25 = Math.min(bm25 / 10, 1);
-    const daysSinceAccess = (now - lastTs) / 86400000;
+    const daysSinceAccess = (now - lastTs) / MS_PER_DAY;
     const recency = Math.max(0, 1 - daysSinceAccess / 365);
     return (normalizedBm25 * 0.6 + importance * 0.3 + recency * 0.1) * layerWeight;
   }

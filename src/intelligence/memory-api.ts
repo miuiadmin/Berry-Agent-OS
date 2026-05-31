@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { IMemoryLayerService, MemoryType, MemoryVisibility, MemoryLayer, MemoryOrigin } from './contracts.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('api:memory');
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
@@ -120,6 +123,7 @@ export function registerMemoryRoutes(
         json(res, { error: 'targetLayer must be workspace or global' }, 400);
       }
     } catch (err) {
+      logger.debug({ err }, 'Memory promotion failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });
@@ -192,6 +196,7 @@ export function registerMemoryRoutes(
       }
       json(res, { ok: true });
     } catch (err) {
+      logger.debug({ err }, 'Memory update failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });

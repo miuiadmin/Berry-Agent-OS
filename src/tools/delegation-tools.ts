@@ -5,7 +5,7 @@ import type { WorkspaceRouter } from '../kernel/workspace-router.js';
 import type { WorkspaceManager } from '../workspaces/manager.js';
 import type { DelegationOrchestrator } from '../kernel/delegation-orchestrator.js';
 
-export interface DelegationToolsDeps {
+interface DelegationToolsDeps {
   db: Database.Database;
   workspaceRouter: WorkspaceRouter;
   workspaceManager: WorkspaceManager;

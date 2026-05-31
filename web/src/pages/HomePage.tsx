@@ -5,11 +5,13 @@ import { Link } from "react-router-dom";
 import { queries, type TaskStatsDay } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useCountUp } from "@/hooks/use-count-up";
 import { ConnectionStatus } from "@/components/ui/connection-status";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/charts/sparkline";
 import { AreaChart } from "@/components/charts/area-chart";
+import { cn } from "@/lib/utils";
 import {
   Activity,
   Bot,
@@ -48,6 +50,19 @@ function TrendIndicator({ current, previous }: { current: number; previous: numb
   if (current > previous) return <TrendingUp className="size-3 text-success" />;
   if (current < previous) return <TrendingDown className="size-3 text-destructive" />;
   return <Minus className="size-3 text-muted-foreground" />;
+}
+
+/** Animated stat number — counts up from 0 on mount */
+function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
+  const animated = useCountUp(value);
+  const display = format ? format(animated) : String(animated);
+  return <span className="tabular-nums">{display}</span>;
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 export default function HomePage() {

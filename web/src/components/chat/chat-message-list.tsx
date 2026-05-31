@@ -124,14 +124,14 @@ function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
             key={att.fileId}
             src={att.url}
             alt={att.filename}
-            className="max-h-48 rounded-lg"
+            className="max-h-48 rounded-lg animate-slide-down"
           />
         ) : (
           <a
             key={att.fileId}
             href={att.url}
             download={att.filename}
-            className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs hover:bg-accent transition-colors"
+            className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs hover:bg-accent transition-colors animate-slide-down"
             onClick={(e) => e.stopPropagation()}
           >
             <FileText className="size-4 text-muted-foreground" />
@@ -312,7 +312,7 @@ export function ChatMessageList({
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
-              <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted">
+              <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted animate-float">
                 <StrawberryLogo className="size-6" />
               </div>
               <h2 className="text-lg font-semibold text-foreground">Start a conversation</h2>
@@ -338,15 +338,16 @@ export function ChatMessageList({
           </div>
         )}
       </ScrollArea>
-      {showScrollBtn && (
-        <button
-          onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 z-10 flex size-10 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-colors"
-          aria-label="Scroll to bottom"
-        >
-          <ChevronDown className="size-4 text-muted-foreground" />
-        </button>
-      )}
+      <button
+        onClick={scrollToBottom}
+        className={cn(
+          "absolute bottom-4 right-4 z-10 flex size-10 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
+          showScrollBtn ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none",
+        )}
+        aria-label="Scroll to bottom"
+      >
+        <ChevronDown className="size-4 text-muted-foreground" />
+      </button>
     </div>
   );
 }

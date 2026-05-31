@@ -82,7 +82,7 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
       {attachments.map((a) => (
         <div
           key={a.fileId}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs"
+          className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs animate-slide-down"
         >
           {a.mimeType.startsWith("image/") ? (
             <ImageIcon className="size-3 text-muted-foreground" />

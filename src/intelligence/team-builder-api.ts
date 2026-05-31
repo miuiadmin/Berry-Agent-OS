@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ITeamBuilderService } from './contracts.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('api:team-builder');
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
@@ -21,6 +24,7 @@ export function registerTeamBuilderRoutes(
       const session = await svc.startSession(userId, requirements);
       json(res, { ok: true, session });
     } catch (err) {
+      logger.debug({ err }, 'Team builder session start failed');
       json(res, { error: (err as Error).message }, 500);
     }
   });
@@ -35,6 +39,7 @@ export function registerTeamBuilderRoutes(
       const session = await svc.refineSession(params.sessionId, feedback);
       json(res, { ok: true, session });
     } catch (err) {
+      logger.debug({ err }, 'Team builder session refine failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });
@@ -54,6 +59,7 @@ export function registerTeamBuilderRoutes(
       const result = await svc.approvePlan(params.sessionId);
       json(res, { ok: true, ...result });
     } catch (err) {
+      logger.debug({ err }, 'Team builder plan approve failed');
       json(res, { error: (err as Error).message }, 500);
     }
   });

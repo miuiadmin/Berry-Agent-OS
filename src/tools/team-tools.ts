@@ -7,7 +7,7 @@ import type { WorkspaceRouter } from '../kernel/workspace-router.js';
 import type { WorkspaceManager } from '../workspaces/manager.js';
 import type { OrgNodeDefinition } from '../contracts/org-tree.js';
 
-export interface TeamToolsDeps {
+interface TeamToolsDeps {
   db: Database.Database;
   orgTreeManager: OrgTreeManager;
   agentHierarchy: AgentHierarchy;

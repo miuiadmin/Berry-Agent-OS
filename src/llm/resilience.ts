@@ -14,7 +14,7 @@ export interface RetryConfig {
 
 // === Circuit Breaker ===
 
-export interface CircuitBreakerConfig {
+interface CircuitBreakerConfig {
   failureThreshold: number;
   recoveryTimeMs: number;
   halfOpenMaxAttempts: number;
@@ -89,7 +89,7 @@ export class CircuitBreaker {
 
 // === Rate Limiter (Token Bucket) ===
 
-export interface RateLimiterConfig {
+interface RateLimiterConfig {
   requestsPerMinute: number;
 }
 

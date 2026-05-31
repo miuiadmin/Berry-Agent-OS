@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { IPluginScopeService } from './contracts.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('api:plugin-scope');
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
@@ -22,6 +25,7 @@ export function registerPluginScopeRoutes(
       svc.promote(params.id, targetScope);
       json(res, { ok: true });
     } catch (err) {
+      logger.debug({ err }, 'Plugin promote failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });
@@ -38,6 +42,7 @@ export function registerPluginScopeRoutes(
       svc.demote(params.id, targetScope);
       json(res, { ok: true });
     } catch (err) {
+      logger.debug({ err }, 'Plugin demote failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });

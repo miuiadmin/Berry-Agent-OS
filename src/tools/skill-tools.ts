@@ -9,7 +9,7 @@ import type { SkillView } from '../contracts/skills.js';
 import { validateSkillMarkdown } from '../skills/registry.js';
 import { genId } from '../utils/id.js';
 
-export interface SkillToolsOptions {
+interface SkillToolsOptions {
   onChange?: () => void;
   getSessionId?: () => string | undefined;
   shellInjection?: boolean;

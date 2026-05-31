@@ -1,6 +1,7 @@
 import type { PluginRecord } from '../../contracts/plugins-v2.js';
 import type { IsolatedPluginExecutor } from '../isolated-runtime.js';
 import { getLogger } from '../../utils/logger.js';
+import { MS_PER_SECOND, MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from '../../lib/time-constants.js';
 
 const logger = getLogger('service-facet');
 const MAX_CONCURRENT_SERVICES = 10;
@@ -143,7 +144,7 @@ export class ServiceFacet {
     if (!match) return 0;
     const value = parseInt(match[1], 10);
     const unit = match[2].toLowerCase();
-    const multipliers: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+    const multipliers: Record<string, number> = { s: MS_PER_SECOND, m: MS_PER_MINUTE, h: MS_PER_HOUR, d: MS_PER_DAY };
     return value * (multipliers[unit] ?? 0);
   }
 }

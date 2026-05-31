@@ -161,6 +161,7 @@ export function registerProviderRoutes(
       });
       json(res, { ok: true, channelId: body.id });
     } catch (err) {
+      logger.debug({ err }, 'Channel creation failed');
       json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });

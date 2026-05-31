@@ -248,7 +248,7 @@ export function createApiRouter(deps: WebServerDependencies) {
 
     const rows = db.prepare(`
       SELECT
-        CAST((created_at / MS_PER_DAY) AS INTEGER) as day_bucket,
+        CAST((created_at / ${MS_PER_DAY}) AS INTEGER) as day_bucket,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
       FROM agent_tasks
@@ -289,7 +289,7 @@ export function createApiRouter(deps: WebServerDependencies) {
     `).get(periodStart) as Record<string, number>;
 
     const dailyRows = db.prepare(`
-      SELECT CAST((created_at / MS_PER_DAY) AS INTEGER) as day_bucket,
+      SELECT CAST((created_at / ${MS_PER_DAY}) AS INTEGER) as day_bucket,
         COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens,
         COALESCE(SUM(input_tokens + output_tokens),0) as total_tokens, COALESCE(SUM(cost_usd),0) as cost_usd
       FROM token_usage WHERE created_at >= ?

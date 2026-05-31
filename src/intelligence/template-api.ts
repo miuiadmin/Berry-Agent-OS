@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ITemplateService, TemplateCategory } from './contracts.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('api:template');
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
@@ -53,6 +56,7 @@ export function registerTemplateRoutes(
       svc.update(params.id, body as Partial<import('./contracts.js').CreateTemplateInput>);
       json(res, { ok: true });
     } catch (err) {
+      logger.debug({ err }, 'Template update failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });
@@ -76,6 +80,7 @@ export function registerTemplateRoutes(
       const row = svc.saveFromWorkspace(workspaceId, name, ownerId, body.category as TemplateCategory | undefined);
       json(res, { ok: true, template: row });
     } catch (err) {
+      logger.debug({ err }, 'Template save from workspace failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });
@@ -90,6 +95,7 @@ export function registerTemplateRoutes(
       svc.applyToWorkspace(params.id, workspaceId);
       json(res, { ok: true });
     } catch (err) {
+      logger.debug({ err }, 'Template apply failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });

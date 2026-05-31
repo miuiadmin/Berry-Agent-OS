@@ -6,6 +6,7 @@ import type { TimeIntelligence } from './time-intelligence.js';
 import type { SuggestionQueue } from './suggestion-queue.js';
 import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
+import { MS_PER_HOUR } from '../lib/time-constants.js';
 import { metrics } from '../observability/metrics.js';
 import type Database from 'better-sqlite3';
 
@@ -281,7 +282,7 @@ export class WillLoop {
 
     // Dedup check
     const isDuplicate = this.recentDecisions.some(
-      d => d.description === decision.description && Date.now() - d.timestamp < 3600_000,
+      d => d.description === decision.description && Date.now() - d.timestamp < MS_PER_HOUR,
     );
     if (isDuplicate) return false;
 
@@ -348,7 +349,7 @@ export class WillLoop {
   }
 
   private pruneActionHistory(): void {
-    const oneHourAgo = Date.now() - 3600_000;
+    const oneHourAgo = Date.now() - MS_PER_HOUR;
     this.actionsThisHour = this.actionsThisHour.filter(t => t > oneHourAgo);
   }
 }

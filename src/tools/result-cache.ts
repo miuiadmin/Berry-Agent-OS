@@ -8,7 +8,7 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-export interface CacheConfig {
+interface CacheConfig {
   maxSize: number;
   defaultTtlMs: number;
 }

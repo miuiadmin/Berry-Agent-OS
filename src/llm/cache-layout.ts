@@ -18,7 +18,7 @@
  * backends that need manual breakpoint placement.
  */
 
-export interface CacheBreakpoint {
+interface CacheBreakpoint {
   index: number;
   type: 'system' | 'recent';
 }

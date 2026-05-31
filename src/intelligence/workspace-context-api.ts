@@ -1,5 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { IWorkspaceContextService } from './contracts.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('api:workspace-context');
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
@@ -55,6 +58,7 @@ export function registerWorkspaceContextRoutes(
       const newVersion = svc.rollbackToVersion(params.id, version, changedBy);
       json(res, { ok: true, version: newVersion });
     } catch (err) {
+      logger.debug({ err }, 'Workspace context rollback failed');
       json(res, { error: (err as Error).message }, 400);
     }
   });

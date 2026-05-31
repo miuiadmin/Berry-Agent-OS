@@ -6,6 +6,7 @@ import { getLogDir, getAppHome } from '../utils/paths.js';
 import { getSocketPath } from '../utils/paths.js';
 import { socketRequest } from './service-commands.js';
 import { getConsoleRenderer } from '../observability/console.js';
+import { MS_PER_SECOND, MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from '../lib/time-constants.js';
 
 export function registerLogsCommands(program: Command): void {
   const logs = program.command('logs').description('查看和管理日志');
@@ -157,7 +158,7 @@ function filterLogLines(lines: string[], opts: { level?: string; module?: string
   if (opts.since) {
     const match = opts.since.match(/^(\d+)(s|m|h|d)$/);
     if (match) {
-      const multipliers: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+      const multipliers: Record<string, number> = { s: MS_PER_SECOND, m: MS_PER_MINUTE, h: MS_PER_HOUR, d: MS_PER_DAY };
       sinceTs = Date.now() - parseInt(match[1], 10) * multipliers[match[2]];
     }
   }
