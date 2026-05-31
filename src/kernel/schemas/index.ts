@@ -1,8 +1,8 @@
 /**
- * Kernel schemas barrel export
+ * Kernel-level config schemas — barrel export
  *
- * Each kernel subsystem's config schema is co-located in this directory.
- * Module-level schemas (llm, cron, mcp) remain in their own packages.
+ * Each schema is co-located with its subsystem semantics.
+ * Module-level schemas (llm, cron, mcp) are imported from their own modules.
  */
 
 export { ToolLoopConfigSchema, type ToolLoopConfig } from './tool-loop.js';

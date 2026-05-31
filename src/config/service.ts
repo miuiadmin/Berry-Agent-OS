@@ -13,7 +13,7 @@ import { CONFIG_KEYS } from './schema.js';
 import { resolveConfig, readYamlFile, applyEnvOverrides } from './resolver.js';
 import { atomicWriteYaml, deepMerge } from './writer.js';
 import { ConfigFileWatcher } from './watcher.js';
-import { diagnoseConfig, formatDiagnostics } from './diagnostics.js';
+import { diagnoseConfig } from './diagnostics.js';
 import { AppConfigSchema } from './schema.js';
 
 const logger = getLogger('config-service');

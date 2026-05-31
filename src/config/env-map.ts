@@ -1,30 +1,29 @@
 /**
  * 声明式环境变量映射表
  *
- * 替代 env-resolver.ts 中的 if/else 链。
- * 添加新的环境变量只需在此表追加一条记录。
+ * 添加新的环境变量覆盖只需增加一行记录，无需编写 if/else 分支。
+ * 每条记录声明：哪个环境变量 → 映射到哪个配置路径 → 可选的值转换。
  */
 
 /** 单条环境变量映射 */
 export interface EnvMapping {
   /** 环境变量名 */
   env: string;
-  /** 配置对象中的点分路径，如 "web.port" */
+  /** 配置对象中的点分路径，如 "web.port"、"llm.models.fast" */
   path: string;
   /** 可选的值转换函数（如 parseInt） */
   transform?: (value: string) => unknown;
   /**
-   * 如果为 true，仅当目标路径尚未有值时才应用。
-   * 用于 provider-specific 环境变量的优先级降级。
+   * 仅作为兜底：当目标路径已有值时跳过。
+   * 用于 provider-specific 变量（ANTHROPIC_API_KEY 等），它们不应覆盖
+   * 更高优先级的通用变量（LLM_API_KEY）。
    */
   fallbackOnly?: boolean;
-  /** 可选条件谓词，仅当返回 true 时才应用 */
-  condition?: (fileData: Record<string, unknown>) => boolean;
 }
 
-// ─── 辅助函数 ─────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────
 
-/** 按点分路径读取嵌套属性 */
+/** 按点分路径读取嵌套对象值 */
 export function getNested(obj: Record<string, unknown>, path: string): unknown {
   const keys = path.split('.');
   let current: unknown = obj;
@@ -35,14 +34,13 @@ export function getNested(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
-/** 按点分路径设置嵌套属性（原地修改） */
+/** 按点分路径设置嵌套对象值（就地修改） */
 export function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split('.');
   let current: Record<string, unknown> = obj;
   for (let i = 0; i < keys.length - 1; i++) {
     const key = keys[i];
-    const next = current[key];
-    if (next === undefined || next === null || typeof next !== 'object') {
+    if (typeof current[key] !== 'object' || current[key] === null) {
       current[key] = {};
     }
     current = current[key] as Record<string, unknown>;
@@ -50,56 +48,32 @@ export function setNested(obj: Record<string, unknown>, path: string, value: unk
   current[keys[keys.length - 1]] = value;
 }
 
-// ─── 环境变量映射表 ──────────────────────────────────────────────────
+// ─── Mapping Table ────────────────────────────────────────────────
 
-/**
- * 环境变量 → 配置路径映射
- *
- * 优先级从低到高排列：provider-specific（带 fallbackOnly）排在前面，
- * 通用 LLM_* 变量排在后面（后写的覆盖先写的）。
- */
-export const ENV_MAPPINGS: EnvMapping[] = [
-  // ─── Web 配置 ─────────────────────────────────────────────
-  { env: 'APP_PORT', path: 'web.port', transform: (v) => parseInt(v, 10) },
+const int = (v: string) => parseInt(v, 10);
+
+export const ENV_MAPPINGS: readonly EnvMapping[] = [
+  // Web
+  { env: 'APP_PORT', path: 'web.port', transform: int },
   { env: 'APP_HOST', path: 'web.host' },
 
-  // ─── LLM 通用配置（先处理，设置顶级字段） ────────────────────
+  // LLM — 通用（最高优先级）
   { env: 'LLM_PROVIDER', path: 'llm.provider' },
   { env: 'LLM_BASE_URL', path: 'llm.baseUrl' },
   { env: 'LLM_API_KEY', path: 'llm.apiKey' },
   { env: 'LLM_MODEL', path: 'llm.model' },
   { env: 'APP_LLM_MODE', path: 'llm.mode' },
 
-  // ─── LLM 模型层级 ──────────────────────────────────────────
+  // LLM — 模型分级
   { env: 'LLM_MODEL_FAST', path: 'llm.models.fast' },
   { env: 'LLM_MODEL_DEFAULT', path: 'llm.models.default' },
   { env: 'LLM_MODEL_HIGH', path: 'llm.models.high' },
 
-  // ─── LLM provider-specific（低优先级，后处理） ──────────────
-  // 仅当顶级 llm.apiKey / llm.baseUrl 不存在时才生效
-  // 由于 LLM_* 在前面已处理，此时数据中已有 LLM_* 的值
-  {
-    env: 'ANTHROPIC_API_KEY', path: 'llm.providers.anthropic.apiKey',
-    condition: (d) => !getNested(d, 'llm.apiKey') && !getNested(d, 'llm.providers.anthropic.apiKey'),
-  },
-  {
-    env: 'ANTHROPIC_BASE_URL', path: 'llm.providers.anthropic.baseUrl',
-    condition: (d) => !getNested(d, 'llm.baseUrl') && !getNested(d, 'llm.providers.anthropic.baseUrl'),
-  },
-  {
-    env: 'OPENAI_API_KEY', path: 'llm.providers.openai.apiKey',
-    condition: (d) => !getNested(d, 'llm.apiKey') && !getNested(d, 'llm.providers.openai.apiKey'),
-  },
-  {
-    env: 'OPENAI_BASE_URL', path: 'llm.providers.openai.baseUrl',
-    condition: (d) => !getNested(d, 'llm.baseUrl') && !getNested(d, 'llm.providers.openai.baseUrl'),
-  },
-  {
-    env: 'OPENAI_COMPATIBLE_API_KEY', path: 'llm.providers.openai-compatible.apiKey',
-    condition: (d) => !getNested(d, 'llm.apiKey') && !getNested(d, 'llm.providers.openai-compatible.apiKey'),
-  },
-  {
-    env: 'OPENAI_COMPATIBLE_BASE_URL', path: 'llm.providers.openai-compatible.baseUrl',
-    condition: (d) => !getNested(d, 'llm.baseUrl') && !getNested(d, 'llm.providers.openai-compatible.baseUrl'),
-  },
+  // LLM — Provider-specific（兜底：仅当通用变量未设置且文件中也无值时生效）
+  { env: 'ANTHROPIC_API_KEY', path: 'llm.providers.anthropic.apiKey', fallbackOnly: true },
+  { env: 'ANTHROPIC_BASE_URL', path: 'llm.providers.anthropic.baseUrl', fallbackOnly: true },
+  { env: 'OPENAI_API_KEY', path: 'llm.providers.openai.apiKey', fallbackOnly: true },
+  { env: 'OPENAI_BASE_URL', path: 'llm.providers.openai.baseUrl', fallbackOnly: true },
+  { env: 'OPENAI_COMPATIBLE_API_KEY', path: 'llm.providers.openai-compatible.apiKey', fallbackOnly: true },
+  { env: 'OPENAI_COMPATIBLE_BASE_URL', path: 'llm.providers.openai-compatible.baseUrl', fallbackOnly: true },
 ];

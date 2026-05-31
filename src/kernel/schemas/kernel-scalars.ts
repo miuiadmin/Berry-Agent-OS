@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Scalar kernel config fields (not section objects) */
+/** Scalar config values that live at the top level of AppConfig */
 export const KernelScalarsSchema = z.object({
   heartbeatIntervalMs: z.number().default(5000),
   heartbeatTimeoutMs: z.number().default(30000),

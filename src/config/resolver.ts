@@ -1,63 +1,75 @@
 /**
  * 分层配置解析管线
  *
- * 每层是独立可测的纯函数：
- *   defaults (Zod) → file (YAML) → env vars → CLI args
+ * 纯函数组合：defaults → file → env → CLI
+ * 每层可独立单测，不依赖任何运行时状态。
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { AppConfigSchema, type AppConfig } from './schema.js';
-import { ENV_MAPPINGS, type EnvMapping } from './env-map.js';
+import { ENV_MAPPINGS, getNested, setNested, type EnvMapping } from './env-map.js';
+import { getLogger } from '../observability/logger.js';
 
-// ─── Layer 1: 读取 YAML 文件 ──────────────────────────────────────
+const logger = getLogger('config-resolver');
 
-/**
- * 读取原始 YAML 文件数据
- * 文件不存在或解析失败时返回空对象
- */
+// ─── Layer 1: File ────────────────────────────────────────────────
+
+/** 读取 YAML 文件原始数据，文件不存在或解析失败返回 {} */
 export function readYamlFile(configPath: string): Record<string, unknown> {
   if (!existsSync(configPath)) return {};
   try {
     const raw = readFileSync(configPath, 'utf-8');
     return (parseYaml(raw) as Record<string, unknown>) ?? {};
-  } catch {
+  } catch (err) {
+    logger.error({ err, configPath }, '配置文件解析失败，使用默认值');
     return {};
   }
 }
 
-// ─── Layer 2: 环境变量覆盖 ─────────────────────────────────────────
+// ─── Layer 2: Env ─────────────────────────────────────────────────
 
 /**
- * 将环境变量应用到配置数据上
- * 按映射表顺序迭代，后面的覆盖前面的
+ * 应用环境变量覆盖
+ *
+ * 遍历映射表，将环境变量值设置到配置数据的对应路径。
+ * fallbackOnly 类型的映射仅在目标路径无已有值时生效。
  */
 export function applyEnvOverrides(
-  fileData: Record<string, unknown>,
+  data: Record<string, unknown>,
   env: NodeJS.ProcessEnv,
-  mappings: EnvMapping[] = ENV_MAPPINGS,
+  mappings: readonly EnvMapping[] = ENV_MAPPINGS,
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = JSON.parse(JSON.stringify(fileData));
+  const result: Record<string, unknown> = structuredClone(data);
 
   for (const mapping of mappings) {
     const raw = env[mapping.env];
     if (raw === undefined || raw === '') continue;
 
+    // fallbackOnly：provider-specific 变量仅在通用值未设置时生效
     if (mapping.fallbackOnly) {
-      const existing = getNestedValue(result, mapping.path);
-      if (existing !== undefined) continue;
+      // 检查同语义层级（apiKey / baseUrl）的通用值是否已存在
+      // 通用值可来自：(1) 通用环境变量 LLM_API_KEY / LLM_BASE_URL
+      //            (2) 文件中的 llm.apiKey / llm.baseUrl
+      const hasGenericApiKey = (env.LLM_API_KEY !== undefined && env.LLM_API_KEY !== '')
+        || (getNested(result, 'llm.apiKey') !== undefined && getNested(result, 'llm.apiKey') !== '');
+      const hasGenericBaseUrl = (env.LLM_BASE_URL !== undefined && env.LLM_BASE_URL !== '')
+        || (getNested(result, 'llm.baseUrl') !== undefined && getNested(result, 'llm.baseUrl') !== '');
+
+      if (mapping.path.includes('.apiKey') && hasGenericApiKey) continue;
+      if (mapping.path.includes('.baseUrl') && hasGenericBaseUrl) continue;
     }
 
-    if (mapping.condition && !mapping.condition(result)) continue;
-
-    setNestedValue(result, mapping.path, mapping.transform ? mapping.transform(raw) : raw);
+    const value = mapping.transform ? mapping.transform(raw) : raw;
+    setNested(result, mapping.path, value);
   }
 
   return result;
 }
 
-// ─── Layer 3: CLI 参数覆盖（预留） ──────────────────────────────────
+// ─── Layer 3: CLI (reserved) ──────────────────────────────────────
 
+/** CLI 参数覆盖（预留，当前 passthrough） */
 export function applyCliOverrides(
   data: Record<string, unknown>,
   _cliArgs: Record<string, unknown>,
@@ -65,15 +77,9 @@ export function applyCliOverrides(
   return data;
 }
 
-// ─── 完整管线 ───────────────────────────────────────────────────────
+// ─── Full Pipeline ────────────────────────────────────────────────
 
-/**
- * 完整配置解析：file → env → cli → Zod 校验
- *
- * @param configPath 配置文件路径
- * @param env 环境变量（默认 process.env）
- * @returns 校验后的完整配置
- */
+/** 完整解析管线：file → env → CLI → schema parse */
 export function resolveConfig(
   configPath: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -82,30 +88,4 @@ export function resolveConfig(
   const withEnv = applyEnvOverrides(fileData, env);
   const withCli = applyCliOverrides(withEnv, {});
   return AppConfigSchema.parse(withCli) as AppConfig;
-}
-
-// ─── 内部辅助 ───────────────────────────────────────────────────────
-
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  const keys = path.split('.');
-  let current: unknown = obj;
-  for (const key of keys) {
-    if (current === null || current === undefined || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[key];
-  }
-  return current;
-}
-
-function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
-  const keys = path.split('.');
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const key = keys[i];
-    const next = current[key];
-    if (next === undefined || next === null || typeof next !== 'object') {
-      current[key] = {};
-    }
-    current = current[key] as Record<string, unknown>;
-  }
-  current[keys[keys.length - 1]] = value;
 }
