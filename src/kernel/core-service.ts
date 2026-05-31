@@ -13,7 +13,7 @@ import { TaskRouter } from './task-router.js';
 import { createCoreModuleRegistry, registerAgentModules, type ModuleRegistry } from './module-system.js';
 import { AgentLifecycle } from './agent-lifecycle.js';
 import { AgentWatcher } from './agent-watcher.js';
-import { ConfigWatcher } from './config-watcher.js';
+import { ConfigService, type IConfigService } from '../config/index.js';
 import { createTaskWorkspace } from './task-workspace.js';
 import { getAgentHomePath } from './agent-home.js';
 import { DelegationOrchestrator } from './delegation-orchestrator.js';
@@ -113,7 +113,7 @@ export class CoreService {
   private agentLifecycle: AgentLifecycle | null = null;
   private agentWatcher: AgentWatcher | null = null;
   private skillWatcher: SkillWatcher | null = null;
-  private configWatcher: ConfigWatcher | null = null;
+  private configService: ConfigService | null = null;
   private messageRouter: DelegationOrchestrator | null = null;
   private socketServer: SocketServer | null = null;
   private cronScheduler: CronScheduler | null = null;
@@ -140,7 +140,8 @@ export class CoreService {
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.config = loadConfig();
+    this.configService = new ConfigService();
+    this.config = this.configService.get();
     this.eventBus = initEventBus();
     this.messageBus = initMessageBus();
     this.messageBus.use(createMetricsMiddleware());
@@ -532,6 +533,7 @@ export class CoreService {
           agentLifecycle: this.agentLifecycle!,
           eventBus: getEventBus(),
           config: this.config,
+          configService: this.configService!,
           permissionCoordinator: this.permissionCoordinator!,
           handleMessage: (request, socket) => handleMessage(request, socket, msgCtx),
           handleInterrupt: (sessionId, reason, ws) => {
@@ -660,10 +662,9 @@ export class CoreService {
       logger.info('Telegram channel 已启动');
     }
 
-    this.configWatcher = new ConfigWatcher(this.eventBus, this.config);
-    this.configWatcher.start();
-    this.eventBus.on('config.reloaded', ({ fields }) => {
-      this.config = this.configWatcher!.getConfig();
+    this.configService!.startWatcher();
+    this.configService!.onChange(({ changedKeys: fields, config }) => {
+      this.config = config;
       this.currentLogLevel = this.config.observability.level as LogLevel;
       this.sessionManager?.clearPromptCache();
 
@@ -743,6 +744,7 @@ export class CoreService {
       teamBuilderService: null,
       channelManager: this.channelManager,
       config: this.config,
+      configService: this.configService!,
       getLogLevel: () => this.currentLogLevel,
       setLogLevel: (level) => { this.currentLogLevel = level; },
       setLogLevelResetTimer: (timer) => { this.logLevelResetTimer = timer; },

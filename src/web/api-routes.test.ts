@@ -115,6 +115,25 @@ function createMockDeps(overrides?: Partial<WebServerDependencies>): WebServerDe
       emit: vi.fn(),
     } as unknown as WebServerDependencies['eventBus'],
     config: {} as WebServerDependencies['config'],
+    configService: (() => {
+      let stored: Record<string, unknown> = { web: { port: 3888 }, observability: { level: 'info' } };
+      return {
+        get: vi.fn().mockImplementation(() => stored),
+        getSection: vi.fn(),
+        updateSection: vi.fn().mockImplementation((partial: Record<string, unknown>) => {
+          const knownKeys = new Set(['llm', 'web', 'observability', 'memory', 'skills', 'budget', 'cron', 'mcp', 'daemon', 'autonomy', 'plugins', 'channels', 'streaming', 'toolLoop', 'permissionMode', 'heartbeatIntervalMs', 'heartbeatTimeoutMs', 'requestTimeoutMs']);
+          const filtered = Object.keys(partial).filter(k => knownKeys.has(k));
+          if (filtered.length === 0) return { ok: false, error: 'No valid config keys provided' };
+          stored = { ...stored, ...partial };
+          return { ok: true };
+        }),
+        reload: vi.fn(),
+        dispose: vi.fn(),
+        onChange: vi.fn().mockReturnValue(() => {}),
+        getConfigPath: vi.fn().mockReturnValue('/tmp/test-config.yaml'),
+        getAppHome: vi.fn().mockReturnValue('/tmp/test-home'),
+      } as unknown as WebServerDependencies['configService'];
+    })(),
     permissionCoordinator: {} as WebServerDependencies['permissionCoordinator'],
     handleMessage: vi.fn(),
     handleInterrupt: vi.fn(),

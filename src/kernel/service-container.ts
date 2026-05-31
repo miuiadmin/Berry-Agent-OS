@@ -24,6 +24,7 @@ import type { CheckpointService } from './checkpoint-service.js';
 import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
 import type { AppConfig } from './config.js';
+import type { IConfigService } from '../config/contract.js';
 import type { LogLevel } from './observability.js';
 
 export interface ServiceContainer {
@@ -59,6 +60,7 @@ export interface ServiceContainer {
   asyncDelegationService: IAsyncDelegationService | null;
   teamBuilderService: ITeamBuilderService | null;
   config: AppConfig;
+  configService: IConfigService;
   getLogLevel: () => LogLevel;
   setLogLevel: (level: LogLevel) => void;
   setLogLevelResetTimer: (timer: ReturnType<typeof setTimeout> | null) => void;

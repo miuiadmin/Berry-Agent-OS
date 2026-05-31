@@ -3,6 +3,7 @@ import type { WebSocket } from 'ws';
 import type { TaskManager, SessionManager, AgentManager, AgentLifecycle, PermissionCoordinator } from '../contracts/kernel-services.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import type { AppConfig } from '../contracts/config.js';
+import type { IConfigService } from '../config/contract.js';
 import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
 import type { IProviderRegistry } from '../providers/contract.js';
@@ -16,6 +17,7 @@ export interface WebServerDependencies {
   agentLifecycle: AgentLifecycle;
   eventBus: EventBus;
   config: AppConfig;
+  configService: IConfigService;
   permissionCoordinator: PermissionCoordinator;
   handleMessage: MessageHandler;
   handleInterrupt: (sessionId: string, reason: string | undefined, ws: WebSocket) => void;

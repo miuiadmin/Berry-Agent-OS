@@ -3,10 +3,11 @@ import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from
 import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLogger } from '../utils/logger.js';
+import { MS_PER_DAY } from '../lib/time-constants.js';
 import { getDb } from '../memory/index.js';
 import { getHistory } from '../memory/conversations.js';
-import { getAppHome, getConfigPath } from '../utils/paths.js';
-import { readConfig, writeConfig } from './config-api.js';
+import { getAppHome } from '../utils/paths.js';
+import type { IConfigService } from '../config/contract.js';
 import { registerSchedulerRoutes } from '../scheduler/api-handlers.js';
 import { registerNotificationRoutes } from '../intelligence/notification-api.js';
 import { registerMemoryRoutes } from '../intelligence/memory-api.js';
@@ -67,13 +68,17 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('GET', '/config', (_req, res) => {
-    const config = readConfig(getConfigPath());
+    const config = deps.configService.get();
     json(res, config);
   });
 
   route('PUT', '/config', async (req, res) => {
     const body = await readBody(req);
-    const result = writeConfig(getConfigPath(), body);
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      json(res, { error: 'Request body must be a JSON object' }, 400);
+      return;
+    }
+    const result = deps.configService.updateSection(body as Partial<import('../config/types.js').AppConfig>);
     if (!result.ok) {
       json(res, { error: result.error }, 400);
       return;
@@ -239,11 +244,11 @@ export function createApiRouter(deps: WebServerDependencies) {
   route('GET', '/tasks/stats', (_req, res, url) => {
     const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
     const db = getDb();
-    const since = Date.now() - days * 86400000;
+    const since = Date.now() - days * MS_PER_DAY;
 
     const rows = db.prepare(`
       SELECT
-        CAST((created_at / 86400000) AS INTEGER) as day_bucket,
+        CAST((created_at / MS_PER_DAY) AS INTEGER) as day_bucket,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
       FROM agent_tasks
@@ -254,10 +259,10 @@ export function createApiRouter(deps: WebServerDependencies) {
 
     const result: { date: string; completed: number; failed: number }[] = [];
     for (let i = days - 1; i >= 0; i--) {
-      const dayMs = Date.now() - i * 86400000;
-      const bucket = Math.floor(dayMs / 86400000);
+      const dayMs = Date.now() - i * MS_PER_DAY;
+      const bucket = Math.floor(dayMs / MS_PER_DAY);
       const row = rows.find((r) => r.day_bucket === bucket);
-      const date = new Date(bucket * 86400000).toISOString().slice(0, 10);
+      const date = new Date(bucket * MS_PER_DAY).toISOString().slice(0, 10);
       result.push({ date, completed: row?.completed ?? 0, failed: row?.failed ?? 0 });
     }
     json(res, result);
@@ -268,8 +273,8 @@ export function createApiRouter(deps: WebServerDependencies) {
     const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
     const db = getDb();
     const now = Date.now();
-    const todayStart = now - (now % 86400000);
-    const periodStart = now - days * 86400000;
+    const todayStart = now - (now % MS_PER_DAY);
+    const periodStart = now - days * MS_PER_DAY;
 
     const todayRow = db.prepare(`
       SELECT COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens,
@@ -284,7 +289,7 @@ export function createApiRouter(deps: WebServerDependencies) {
     `).get(periodStart) as Record<string, number>;
 
     const dailyRows = db.prepare(`
-      SELECT CAST((created_at / 86400000) AS INTEGER) as day_bucket,
+      SELECT CAST((created_at / MS_PER_DAY) AS INTEGER) as day_bucket,
         COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens,
         COALESCE(SUM(input_tokens + output_tokens),0) as total_tokens, COALESCE(SUM(cost_usd),0) as cost_usd
       FROM token_usage WHERE created_at >= ?
@@ -293,11 +298,11 @@ export function createApiRouter(deps: WebServerDependencies) {
 
     const daily: { date: string; inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number }[] = [];
     for (let i = days - 1; i >= 0; i--) {
-      const dayMs = now - i * 86400000;
-      const bucket = Math.floor(dayMs / 86400000);
+      const dayMs = now - i * MS_PER_DAY;
+      const bucket = Math.floor(dayMs / MS_PER_DAY);
       const row = dailyRows.find((r) => r.day_bucket === bucket);
       daily.push({
-        date: new Date(bucket * 86400000).toISOString().slice(0, 10),
+        date: new Date(bucket * MS_PER_DAY).toISOString().slice(0, 10),
         inputTokens: row?.input_tokens ?? 0,
         outputTokens: row?.output_tokens ?? 0,
         totalTokens: row?.total_tokens ?? 0,
