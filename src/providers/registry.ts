@@ -18,7 +18,7 @@ import type { IProviderRegistry } from './contract.js';
 import type { ProviderChannel, ModelEntry, TierMapping, ResolvedModel, AnyProviderKind } from './types.js';
 import { hasCredentials } from './types.js';
 import { SUPPORTED_PROVIDER_KINDS } from './types.js';
-import { ChannelsConfigSchema } from './schemas.js';
+import { ChannelsConfigSchema, ChannelSchema } from './schemas.js';
 import { buildResolverState, resolveTier, resolveChannelModel, type ResolverState } from './resolver.js';
 import { getBuiltinCatalog, resolveChannelModels } from './catalogs/index.js';
 import { migrateLegacyConfig, isChannelsEmpty } from './migration.js';
@@ -90,8 +90,10 @@ export class ProviderRegistry implements IProviderRegistry {
     if (this.state.channels.has(channel.id)) {
       throw new Error(`Channel "${channel.id}" already exists`);
     }
-    this.state.channels.set(channel.id, channel);
-    this.rawChannels.push(channel);
+    // Validate through schema before accepting
+    const validated = ChannelSchema.parse(channel);
+    this.state.channels.set(validated.id, validated);
+    this.rawChannels.push(validated);
     this.onMutate?.(this.rawChannels, this.rawTiers);
   }
 
@@ -99,6 +101,10 @@ export class ProviderRegistry implements IProviderRegistry {
     const existing = this.state.channels.get(id);
     if (!existing) return false;
     const updated = { ...existing, ...updates, id };
+    // Trim whitespace-only apiKey to undefined
+    if (updated.apiKey !== undefined && updated.apiKey.trim() === '') {
+      updated.apiKey = undefined;
+    }
     this.state.channels.set(id, updated);
     const idx = this.rawChannels.findIndex(c => c.id === id);
     if (idx >= 0) this.rawChannels[idx] = updated;
@@ -108,17 +114,31 @@ export class ProviderRegistry implements IProviderRegistry {
 
   removeChannel(id: string): boolean {
     const existed = this.state.channels.has(id);
-    this.state.channels.delete(id);
-    this.rawChannels = this.rawChannels.filter(c => c.id !== id);
-    if (existed) this.onMutate?.(this.rawChannels, this.rawTiers);
+    if (existed) {
+      // Prevent deleting channels referenced by tier mapping
+      for (const [tier, target] of Object.entries(this.rawTiers)) {
+        if (target?.channel === id) {
+          throw new Error(`Cannot delete channel "${id}" — referenced by tier "${tier}"`);
+        }
+      }
+      this.state.channels.delete(id);
+      this.rawChannels = this.rawChannels.filter(c => c.id !== id);
+      this.onMutate?.(this.rawChannels, this.rawTiers);
+    }
     return existed;
   }
 
   setTierMapping(tiers: Partial<TierMapping>): void {
+    // Validate tier targets reference existing channels
+    for (const [tier, target] of Object.entries(tiers)) {
+      if (target && !this.state.channels.has(target.channel)) {
+        throw new Error(`Tier "${tier}" references non-existent channel "${target.channel}"`);
+      }
+    }
     if (tiers.fast) this.rawTiers.fast = tiers.fast;
     if (tiers.default) this.rawTiers.default = tiers.default;
     if (tiers.high) this.rawTiers.high = tiers.high;
-    this.state = buildResolverState(this.state.legacyConfig!, { channels: this.rawChannels, tiers: this.rawTiers });
+    this.state = buildResolverState(this.state.legacyConfig, { channels: this.rawChannels, tiers: this.rawTiers });
     this.onMutate?.(this.rawChannels, this.rawTiers);
   }
 

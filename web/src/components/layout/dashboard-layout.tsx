@@ -42,7 +42,7 @@ export function DashboardLayout() {
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 flex-col min-w-0 w-full">
+      <div className="flex flex-1 flex-col min-w-0">
         {/* Mobile header */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="active:scale-90 transition-transform">

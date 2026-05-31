@@ -24,10 +24,10 @@ export interface ResolverState {
 // ─── Build Resolver State ─────────────────────────────────────────
 
 export function buildResolverState(
-  llmConfig: LlmConfig,
+  llmConfig: LlmConfig | null,
   channelsConfig?: { channels?: ProviderChannel[]; tiers?: TierMapping } | null,
 ): ResolverState {
-  // Only use explicitly configured channels — no legacy migration
+  // Explicit channels configured — use them exclusively, no legacy fallback
   if (channelsConfig && !isChannelsEmpty(channelsConfig)) {
     const channelMap = new Map<string, ProviderChannel>();
     for (const ch of channelsConfig.channels ?? []) {
@@ -36,11 +36,11 @@ export function buildResolverState(
     return {
       channels: channelMap,
       tiers: channelsConfig.tiers ?? {},
-      legacyConfig: llmConfig,
+      legacyConfig: null,
     };
   }
 
-  // No channels configured — return empty state
+  // No channels configured — keep legacyConfig for fallback in resolveTier
   return {
     channels: new Map(),
     tiers: {},
