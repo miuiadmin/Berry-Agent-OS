@@ -253,7 +253,7 @@ function TaskRow({
       </tr>
       {expanded && (
         <tr className="border-b border-border last:border-0">
-          <td colSpan={7} className="bg-muted/10 px-6 py-4">
+          <td colSpan={7} className="bg-muted/10 px-3 md:px-6 py-3 md:py-4">
             <TaskDetail task={task} />
           </td>
         </tr>

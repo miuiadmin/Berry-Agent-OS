@@ -479,6 +479,7 @@ function ConfigSection({
                 <Input
                   id={`${section}-${field.key}`}
                   type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
+                  inputMode={field.type === "number" ? "numeric" : undefined}
                   value={(sectionData[field.key] as string | number) ?? ""}
                   onChange={(e) =>
                     onUpdate(

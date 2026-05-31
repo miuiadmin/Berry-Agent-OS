@@ -89,7 +89,7 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
           ) : (
             <FileText className="size-3 text-muted-foreground" />
           )}
-          <span className="max-w-[120px] truncate">{a.filename}</span>
+          <span className="max-w-[100px] sm:max-w-[120px] truncate">{a.filename}</span>
           <span className="text-muted-foreground/60">{formatSize(a.size)}</span>
           <button
             onClick={() => onRemove(a.fileId)}

@@ -104,7 +104,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   }, [editingId]);
 
   return (
-    <div className="flex h-full w-72 md:w-64 flex-col border-r bg-muted/30">
+    <div className="flex h-full w-72 md:w-64 max-w-[85vw] flex-col border-r bg-muted/30">
       <div className="border-b p-3 space-y-2">
         <button
           onClick={handleNewChat}
