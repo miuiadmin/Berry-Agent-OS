@@ -29,7 +29,16 @@ describe('AgentSdkBackend — session caching logic', () => {
 
   beforeEach(() => {
     backend = new AgentSdkBackend(
-      { baseUrl: 'https://api.anthropic.com', apiKey: 'test-key', model: 'claude-opus-4-6-20250514', models: {}, mode: 'live' },
+      {
+        provider: 'anthropic',
+        providers: { anthropic: { apiKey: '', models: {} }, openai: { apiKey: '', models: {} }, 'openai-compatible': { apiKey: '', models: {} } },
+        baseUrl: 'https://api.anthropic.com',
+        apiKey: 'test-key',
+        model: 'claude-opus-4-6-20250514',
+        models: {},
+        mode: 'live',
+        maxConcurrentRequests: 10,
+      },
       { environmentId: 'env_test', sessionTtlMs: 5000 },
     );
   });

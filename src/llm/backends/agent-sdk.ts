@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { LlmBackend } from '../contract.js';
 import type { LlmConfig } from '../types.js';
-import { resolveModel } from '../types.js';
+import { resolveModel, getProviderConfig } from '../types.js';
 import type {
   ModelRequest,
   ModelResponse,
@@ -35,9 +35,10 @@ export class AgentSdkBackend implements LlmBackend {
   private sessions = new Map<string, CachedSession>();
 
   constructor(config: LlmConfig, agentConfig?: Partial<AgentSdkConfig>) {
+    const pc = getProviderConfig(config);
     this.client = new Anthropic({
-      baseURL: config.baseUrl,
-      apiKey: config.apiKey,
+      baseURL: pc.baseUrl,
+      apiKey: pc.apiKey,
     });
     this.config = config;
     this.envId = agentConfig?.environmentId ?? '';

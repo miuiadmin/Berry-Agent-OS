@@ -162,13 +162,13 @@ export function loadConfig(): AppConfig {
         },
         openai: {
           ...fileOpenaiProvider,
-          ...(process.env.OPENAI_BASE_URL && { baseUrl: process.env.OPENAI_BASE_URL }),
-          ...(process.env.OPENAI_API_KEY && { apiKey: process.env.OPENAI_API_KEY }),
+          ...(!process.env.LLM_BASE_URL && !fileLlm.baseUrl && !fileOpenaiProvider.baseUrl && process.env.OPENAI_BASE_URL && { baseUrl: process.env.OPENAI_BASE_URL }),
+          ...(!process.env.LLM_API_KEY && !fileLlm.apiKey && !fileOpenaiProvider.apiKey && process.env.OPENAI_API_KEY && { apiKey: process.env.OPENAI_API_KEY }),
         },
         'openai-compatible': {
           ...fileCompatProvider,
-          ...(process.env.OPENAI_COMPATIBLE_BASE_URL && { baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL }),
-          ...(process.env.OPENAI_COMPATIBLE_API_KEY && { apiKey: process.env.OPENAI_COMPATIBLE_API_KEY }),
+          ...(!process.env.LLM_BASE_URL && !fileLlm.baseUrl && !fileCompatProvider.baseUrl && process.env.OPENAI_COMPATIBLE_BASE_URL && { baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL }),
+          ...(!process.env.LLM_API_KEY && !fileLlm.apiKey && !fileCompatProvider.apiKey && process.env.OPENAI_COMPATIBLE_API_KEY && { apiKey: process.env.OPENAI_COMPATIBLE_API_KEY }),
         },
       },
     };

@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3';
 import type { ModelRequest, ModelResponse } from '../contracts/model.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('request-logger');
 
 export class RequestLogger {
   private db: Database.Database;
@@ -35,7 +38,7 @@ export class RequestLogger {
   }
 
   logCompleted(requestId: string, response: ModelResponse): void {
-    this.db.prepare(`
+    const result = this.db.prepare(`
       UPDATE model_requests
       SET status = 'responded',
           model_name = ?,
@@ -54,13 +57,19 @@ export class RequestLogger {
       Date.now(),
       requestId,
     );
+    if (result.changes === 0) {
+      logger.warn({ requestId }, 'logCompleted: no model_requests row matched');
+    }
   }
 
   logFailed(requestId: string, error: string): void {
-    this.db.prepare(`
+    const result = this.db.prepare(`
       UPDATE model_requests
       SET status = 'failed', error = ?, responded_at = ?
       WHERE id = ?
     `).run(error, Date.now(), requestId);
+    if (result.changes === 0) {
+      logger.warn({ requestId }, 'logFailed: no model_requests row matched');
+    }
   }
 }

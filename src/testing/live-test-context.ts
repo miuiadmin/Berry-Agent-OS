@@ -68,8 +68,8 @@ export class LiveTestContext {
   // --- Model Request Inspector ---
 
   getModelRequests(filter?: ModelRequestFilter): ModelRequestRecord[] {
-    let sql = 'SELECT * FROM model_requests WHERE 1=1';
-    const params: unknown[] = [];
+    let sql = 'SELECT * FROM model_requests WHERE created_at >= ?';
+    const params: unknown[] = [this.startTime];
     if (filter?.agent) { sql += ' AND agent_name = ?'; params.push(filter.agent); }
     if (filter?.status) { sql += ' AND status = ?'; params.push(filter.status); }
     if (filter?.modelTier) { sql += ' AND model_tier = ?'; params.push(filter.modelTier); }
@@ -82,14 +82,14 @@ export class LiveTestContext {
 
   getLastRequest(): ModelRequestRecord | null {
     const row = this.db.prepare(
-      'SELECT * FROM model_requests ORDER BY created_at DESC LIMIT 1',
-    ).get() as Record<string, unknown> | undefined;
+      'SELECT * FROM model_requests WHERE created_at >= ? ORDER BY created_at DESC LIMIT 1',
+    ).get(this.startTime) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   countRequests(filter?: ModelRequestFilter): number {
-    let sql = 'SELECT COUNT(*) as cnt FROM model_requests WHERE 1=1';
-    const params: unknown[] = [];
+    let sql = 'SELECT COUNT(*) as cnt FROM model_requests WHERE created_at >= ?';
+    const params: unknown[] = [this.startTime];
     if (filter?.agent) { sql += ' AND agent_name = ?'; params.push(filter.agent); }
     if (filter?.status) { sql += ' AND status = ?'; params.push(filter.status); }
     if (filter?.modelTier) { sql += ' AND model_tier = ?'; params.push(filter.modelTier); }
@@ -162,8 +162,8 @@ export class LiveTestContext {
   // --- Agent Task Lifecycle ---
 
   getAgentTasks(filter?: TaskFilter): TaskRecord[] {
-    let sql = 'SELECT * FROM agent_tasks WHERE 1=1';
-    const params: unknown[] = [];
+    let sql = 'SELECT * FROM agent_tasks WHERE created_at >= ?';
+    const params: unknown[] = [this.startTime];
     if (filter?.sessionId) { sql += ' AND session_id = ?'; params.push(filter.sessionId); }
     if (filter?.targetAgent) { sql += ' AND target_agent = ?'; params.push(filter.targetAgent); }
     if (filter?.taskType) { sql += ' AND task_type = ?'; params.push(filter.taskType); }
@@ -186,8 +186,8 @@ export class LiveTestContext {
   // --- Tool Calls ---
 
   getToolCalls(filter?: ToolCallFilter): ToolCallRecord[] {
-    let sql = 'SELECT * FROM tool_calls WHERE 1=1';
-    const params: unknown[] = [];
+    let sql = 'SELECT * FROM tool_calls WHERE started_at >= ?';
+    const params: unknown[] = [this.startTime];
     if (filter?.sessionId) { sql += ' AND session_id = ?'; params.push(filter.sessionId); }
     if (filter?.taskId) { sql += ' AND task_id = ?'; params.push(filter.taskId); }
     if (filter?.toolName) { sql += ' AND tool_name = ?'; params.push(filter.toolName); }
@@ -199,8 +199,8 @@ export class LiveTestContext {
   }
 
   countToolCalls(filter?: ToolCallFilter): number {
-    let sql = 'SELECT COUNT(*) as cnt FROM tool_calls WHERE 1=1';
-    const params: unknown[] = [];
+    let sql = 'SELECT COUNT(*) as cnt FROM tool_calls WHERE started_at >= ?';
+    const params: unknown[] = [this.startTime];
     if (filter?.sessionId) { sql += ' AND session_id = ?'; params.push(filter.sessionId); }
     if (filter?.taskId) { sql += ' AND task_id = ?'; params.push(filter.taskId); }
     if (filter?.toolName) { sql += ' AND tool_name = ?'; params.push(filter.toolName); }
@@ -213,8 +213,8 @@ export class LiveTestContext {
   // --- Approval Requests ---
 
   getApprovalRequests(filter?: ApprovalFilter): ApprovalRecord[] {
-    let sql = 'SELECT * FROM approval_requests WHERE 1=1';
-    const params: unknown[] = [];
+    let sql = 'SELECT * FROM approval_requests WHERE created_at >= ?';
+    const params: unknown[] = [this.startTime];
     if (filter?.sessionId) { sql += ' AND session_id = ?'; params.push(filter.sessionId); }
     if (filter?.kind) { sql += ' AND kind = ?'; params.push(filter.kind); }
     if (filter?.status) { sql += ' AND status = ?'; params.push(filter.status); }
