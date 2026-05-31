@@ -137,7 +137,12 @@ export function useChatSocket() {
         setLastError("Response timed out (30s)");
       }, 30000);
 
-      send({ type: "message", text, sessionId });
+      try {
+        send({ type: "message", text, sessionId });
+      } catch {
+        setLastError("Failed to send message");
+        if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+      }
     },
     [sessionId, addMessage, setStreaming, send, setLastError]
   );
