@@ -51,7 +51,6 @@ export function DashboardLayout() {
               <X className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-0 opacity-100 scale-100" : "-rotate-90 opacity-0 scale-75")} />
             </div>
           </Button>
-          <div className="size-5 rounded-md bg-brand" />
           <span className="text-sm font-semibold">Berry</span>
         </div>
         <main className="relative flex-1">
