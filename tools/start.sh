@@ -59,9 +59,15 @@ fi
 
 BERRY="$PROJECT_DIR/dist/index.js"
 
+# 获取本机局域网 IP（macOS/Linux）
+LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+
 echo "🚀 Starting BerryAgent..."
 echo "   Backend API:  http://127.0.0.1:$BACKEND_PORT"
 echo "   Dashboard:    http://127.0.0.1:$FRONTEND_PORT"
+if [ -n "$LAN_IP" ]; then
+echo "   LAN Access:   http://$LAN_IP:$FRONTEND_PORT"
+fi
 echo ""
 
 cleanup() {

@@ -38,40 +38,68 @@ interface HandlerDefinition {
   handler: HandlerFn;
 }
 
+// --- Input validation helpers ---
+
+function requireString(request: Record<string, unknown>, field: string): string | undefined {
+  const val = request[field];
+  return typeof val === 'string' && val.length > 0 ? val : undefined;
+}
+
+function requireFields(ctx: MessageContext, request: Record<string, unknown>, fields: string[]): string[] | null {
+  const values: string[] = [];
+  for (const f of fields) {
+    const v = requireString(request, f);
+    if (!v) {
+      ctx.socket!.write(JSON.stringify({ ok: false, error: `缺少 ${f} 参数` }) + '\n');
+      return null;
+    }
+    values.push(v);
+  }
+  return values;
+}
+
+function reply(ctx: MessageContext, data: Record<string, unknown>): void {
+  ctx.socket!.write(JSON.stringify(data) + '\n');
+}
+
+function replyError(ctx: MessageContext, error: string): void {
+  ctx.socket!.write(JSON.stringify({ ok: false, error }) + '\n');
+}
+
 // === Observability Handlers ===
 
 const statusHandler: HandlerFn = (_, ctx, services) => {
   const status = services.agentManager.getStatus();
   const daemon = services.getDaemonStatus?.() ?? null;
-  ctx.socket!.write(JSON.stringify({ status, daemon }) + '\n');
+  reply(ctx, { status, daemon });
 };
 
 const healthHandler: HandlerFn = (_, ctx, services) => {
   const agentStatus = services.agentManager.getStatus();
   const metricsSnapshot = metrics.snapshot();
   const evolutionFailures = services.memoryRuntime.getEvolutionFailures();
-  ctx.socket!.write(JSON.stringify({
+  reply(ctx, {
     ok: true,
     uptimeMs: metricsSnapshot.uptimeMs,
     agents: agentStatus,
     evolutionFailures,
     metrics: metricsSnapshot,
-  }) + '\n');
+  });
 };
 
 const getLogLevelHandler: HandlerFn = (_, ctx, services) => {
-  ctx.socket!.write(JSON.stringify({ level: services.getLogLevel(), source: 'runtime' }) + '\n');
+  reply(ctx, { level: services.getLogLevel(), source: 'runtime' });
 };
 
 const setLogLevelHandler: HandlerFn = (request, ctx, services) => {
   const validLevels: LogLevel[] = ['error', 'warn', 'info', 'debug'];
-  const level = request.level as string;
-  if (!validLevels.includes(level as LogLevel)) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '无效的日志等级' }) + '\n');
+  const level = requireString(request, 'level') as LogLevel | undefined;
+  if (!level || !validLevels.includes(level)) {
+    replyError(ctx, '无效的日志等级');
     return;
   }
   const previousLevel = services.getLogLevel();
-  services.setLogLevel(level as LogLevel);
+  services.setLogLevel(level);
 
   const existingTimer = services.getLogLevelResetTimer();
   if (existingTimer) {
@@ -79,7 +107,7 @@ const setLogLevelHandler: HandlerFn = (request, ctx, services) => {
     services.setLogLevelResetTimer(null);
   }
 
-  const ttl = request.ttl as string | undefined;
+  const ttl = requireString(request, 'ttl');
   if (ttl) {
     const match = ttl.match(/^(\d+)(s|m|h)$/);
     if (match) {
@@ -93,58 +121,56 @@ const setLogLevelHandler: HandlerFn = (request, ctx, services) => {
   }
 
   logger.info({ from: previousLevel, to: services.getLogLevel(), ttl }, '日志等级已变更');
-  ctx.socket!.write(JSON.stringify({ ok: true, level: services.getLogLevel(), previous: previousLevel }) + '\n');
+  reply(ctx, { ok: true, level: services.getLogLevel(), previous: previousLevel });
 };
 
 // === Permission Handlers ===
 
 const listPermissionsHandler: HandlerFn = (request, ctx, services) => {
-  const sessionId = request.sessionId as string | undefined;
+  const sessionId = requireString(request, 'sessionId');
   const pending = services.permissionCoordinator.getPending(sessionId) ?? [];
-  ctx.socket!.write(JSON.stringify({ ok: true, pending }) + '\n');
+  reply(ctx, { ok: true, pending });
 };
 
 const resolvePermissionHandler: HandlerFn = (request, ctx, services) => {
-  const requestId = request.requestId as string;
-  const type = request.type as string;
-  if (!requestId) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 requestId' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['requestId']);
+  if (!vals) return;
+  const [requestId] = vals;
+  const type = requireString(request, 'type');
 
   if (type === 'permissions.cancel') {
     const cancelled = services.permissionCoordinator.cancel(requestId) ?? false;
-    ctx.socket!.write(JSON.stringify({ ok: cancelled }) + '\n');
+    reply(ctx, { ok: cancelled });
     return;
   }
 
   const token = services.permissionCoordinator.resolve(requestId, {
     verdict: type === 'permissions.approve' ? 'approved' : 'denied',
     source: 'user',
-    reason: request.reason as string | undefined,
+    reason: typeof request.reason === 'string' ? request.reason : undefined,
     tokenVerdict: request.allowSession ? 'allow_session' : 'allow_once',
   }) ?? null;
-  ctx.socket!.write(JSON.stringify({ ok: true, tokenId: token?.id ?? null }) + '\n');
+  reply(ctx, { ok: true, tokenId: token?.id ?? null });
 };
 
 // === Model Handlers ===
 
 const modelOverrideHandler: HandlerFn = (request, ctx, services) => {
-  const sessionId = (request.sessionId as string) ?? '';
-  const tier = request.tier as string;
+  const sessionId = requireString(request, 'sessionId') ?? '';
+  const tier = requireString(request, 'tier');
   if (!tier || !['fast', 'default', 'high'].includes(tier)) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '无效的模型层级，可选: fast / default / high' }) + '\n');
+    replyError(ctx, '无效的模型层级，可选: fast / default / high');
     return;
   }
   services.sessionManager.setModelOverride(sessionId, tier as ModelTier);
-  ctx.socket!.write(JSON.stringify({ ok: true, sessionId, tier }) + '\n');
+  reply(ctx, { ok: true, sessionId, tier });
 };
 
 const modelGetHandler: HandlerFn = (request, ctx, services) => {
-  const sessionId = (request.sessionId as string) ?? '';
+  const sessionId = requireString(request, 'sessionId') ?? '';
   const tier = services.sessionManager.getModelOverride(sessionId) ?? 'default';
   const models = services.config.llm.models;
-  ctx.socket!.write(JSON.stringify({
+  reply(ctx, {
     ok: true,
     sessionId,
     currentTier: tier,
@@ -153,121 +179,107 @@ const modelGetHandler: HandlerFn = (request, ctx, services) => {
       default: models.default ?? services.config.llm.model,
       high: models.high ?? services.config.llm.model,
     },
-  }) + '\n');
+  });
 };
 
 const evolutionDispatchHandler: HandlerFn = (request, ctx, services) => {
-  const taskType = request.taskType as string;
-  if (!taskType) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 taskType' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['taskType']);
+  if (!vals) return;
+  const [taskType] = vals;
   services.messageRouter.dispatchModuleTask({
-    sessionId: (request.sessionId as string) ?? genId('ses'),
+    sessionId: requireString(request, 'sessionId') ?? genId('ses'),
     taskType,
-    requester: (request.requester as string) ?? 'cli',
+    requester: requireString(request, 'requester') ?? 'cli',
     inputPayload: (request.inputPayload as Record<string, unknown>) ?? {},
   })
-    .then((result) => ctx.socket!.write(JSON.stringify({ ok: true, ...result }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+    .then((result) => reply(ctx, { ok: true, ...result }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 // === Agent Handlers ===
 
 const agentsListHandler: HandlerFn = (request, ctx, services) => {
   const rows = services.agentLifecycle.list({
-    source: request.source as string | undefined,
-    status: request.status as string | undefined,
+    source: requireString(request, 'source'),
+    status: requireString(request, 'status'),
   });
-  ctx.socket!.write(JSON.stringify({ ok: true, agents: rows }) + '\n');
+  reply(ctx, { ok: true, agents: rows });
 };
 
 const agentsInspectHandler: HandlerFn = (request, ctx, services) => {
-  const name = request.name as string;
-  if (!name) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 name 参数' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['name']);
+  if (!vals) return;
+  const [name] = vals;
   const detail = services.agentLifecycle.inspect(name);
   if (!detail) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: `智能体不存在: ${name}` }) + '\n');
+    replyError(ctx, `智能体不存在: ${name}`);
     return;
   }
-  ctx.socket!.write(JSON.stringify({ ok: true, agent: detail }) + '\n');
+  reply(ctx, { ok: true, agent: detail });
 };
 
 const agentsInstallHandler: HandlerFn = (request, ctx, services) => {
-  const dir = request.dir as string;
-  if (!dir) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 dir 参数' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['dir']);
+  if (!vals) return;
+  const [dir] = vals;
   services.agentLifecycle.install(dir)
-    .then((result) => ctx.socket!.write(JSON.stringify({ ok: true, ...result }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+    .then((result) => reply(ctx, { ok: true, ...result }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 const agentsRemoveHandler: HandlerFn = (request, ctx, services) => {
-  const name = request.name as string;
-  if (!name) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 name 参数' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['name']);
+  if (!vals) return;
+  const [name] = vals;
   services.agentLifecycle.remove(name, { force: request.force === true })
-    .then(() => ctx.socket!.write(JSON.stringify({ ok: true, name }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+    .then(() => reply(ctx, { ok: true, name }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 const agentsUpgradeHandler: HandlerFn = (request, ctx, services) => {
-  const name = request.name as string;
-  if (!name) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 name 参数' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['name']);
+  if (!vals) return;
+  const [name] = vals;
   services.agentLifecycle.upgrade(name)
-    .then((result) => ctx.socket!.write(JSON.stringify({ ok: true, name, ...result }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+    .then((result) => reply(ctx, { ok: true, name, ...result }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 const agentsEnableHandler: HandlerFn = (request, ctx, services) => {
-  const name = request.name as string;
-  if (!name) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 name 参数' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['name']);
+  if (!vals) return;
+  const [name] = vals;
   services.agentLifecycle.enable(name)
-    .then(() => ctx.socket!.write(JSON.stringify({ ok: true, name }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+    .then(() => reply(ctx, { ok: true, name }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 const agentsDisableHandler: HandlerFn = (request, ctx, services) => {
-  const name = request.name as string;
-  if (!name) {
-    ctx.socket!.write(JSON.stringify({ ok: false, error: '缺少 name 参数' }) + '\n');
-    return;
-  }
-  services.agentLifecycle.disable(name, request.reason as string | undefined)
-    .then(() => ctx.socket!.write(JSON.stringify({ ok: true, name }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+  const vals = requireFields(ctx, request, ['name']);
+  if (!vals) return;
+  const [name] = vals;
+  services.agentLifecycle.disable(name, typeof request.reason === 'string' ? request.reason : undefined)
+    .then(() => reply(ctx, { ok: true, name }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 const agentsReloadHandler: HandlerFn = (_, ctx, services) => {
   services.agentLifecycle.reload(getUserAgentsDir())
-    .then((result) => ctx.socket!.write(JSON.stringify({ ok: true, ...result }) + '\n'))
-    .catch((err) => ctx.socket!.write(JSON.stringify({ ok: false, error: (err as Error).message }) + '\n'));
+    .then((result) => reply(ctx, { ok: true, ...result }))
+    .catch((err) => replyError(ctx, (err as Error).message));
 };
 
 // === Messaging Handlers ===
 
 const messageHandler: HandlerFn = (request, ctx, services) => {
-  const message = request.message as string;
+  const message = requireString(request, 'message');
   const socket = ctx.socket!;
   if (!message) {
-    socket.write(JSON.stringify({ error: '缺少 message 字段' }) + '\n');
+    reply(ctx, { error: '缺少 message 字段' });
     return;
   }
 
-  const effectiveMode = (request.permissionMode && ['ask', 'allow-all', 'deny-all'].includes(request.permissionMode as string))
+  const effectiveMode = (requireString(request, 'permissionMode') && ['ask', 'allow-all', 'deny-all'].includes(request.permissionMode as string))
     ? request.permissionMode as 'ask' | 'allow-all' | 'deny-all'
     : services.config.permissionMode;
   const permissionEngine = new PermissionEngine(effectiveMode);
@@ -275,7 +287,7 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
   services.permissionCoordinator.updateEngine(permissionEngine);
   services.permissionCoordinator.updateApprovalManager(approvalManager);
 
-  const sessionId = (request.sessionId as string) ?? genId('ses');
+  const sessionId = requireString(request, 'sessionId') ?? genId('ses');
 
   if (services.sessionManager.hasPendingAsk(sessionId)) {
     services.messageRouter.sendUserReply({
@@ -363,14 +375,11 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
 };
 
 const interruptHandler: HandlerFn = (request, ctx, services) => {
-  const sessionId = request.sessionId as string;
-  const socket = ctx.socket!;
-  if (!sessionId) {
-    socket.write(JSON.stringify({ error: '缺少 sessionId 字段' }) + '\n');
-    return;
-  }
+  const vals = requireFields(ctx, request, ['sessionId']);
+  if (!vals) return;
+  const [sessionId] = vals;
 
-  const reason = request.reason as string | undefined;
+  const reason = typeof request.reason === 'string' ? request.reason : undefined;
   const result = services.messageRouter.interruptSession(sessionId, reason);
 
   const evt: SocketInterruptedEvent = {
@@ -379,7 +388,7 @@ const interruptHandler: HandlerFn = (request, ctx, services) => {
     taskId: result.taskId,
     partialResponse: result.partialResponse,
   };
-  socket.write(JSON.stringify(evt) + '\n');
+  reply(ctx, evt as unknown as Record<string, unknown>);
 };
 
 // === Daemon Handlers ===

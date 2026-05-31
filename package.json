@@ -10,6 +10,7 @@
     "dev": "tsx src/index.ts",
     "dev:web": "cd web && npm run dev",
     "dev:full": "concurrently -n backend,frontend -c blue,green \"tsx src/index.ts\" \"cd web && npm run dev\"",
+    "dev:debug": "APP_LOG_LEVEL=debug concurrently -n backend,frontend -c blue,green \"tsx src/index.ts\" \"cd web && npm run dev\"",
     "build": "tsc && npm run build:copy-assets",
     "build:copy-assets": "find src/agents/bundled -name 'agent.json' -exec sh -c 'dest=\"dist/${0#src/}\"; mkdir -p \"$(dirname \"$dest\")\"; cp \"$0\" \"$dest\"' {} \\;",
     "build:web": "cd web && npm install && npm run build",
@@ -17,7 +18,10 @@
     "typecheck": "tsc --noEmit",
     "lint:boundaries": "node tools/check-boundaries.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "format": "npx prettier --write \"src/**/*.ts\" \"web/src/**/*.{ts,tsx}\"",
+    "format:check": "npx prettier --check \"src/**/*.ts\" \"web/src/**/*.{ts,tsx}\"",
+    "lint:format": "npm run format:check"
   },
   "engines": {
     "node": ">=20"
@@ -51,6 +55,7 @@
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "prettier": "^3.5.0"
   }
 }

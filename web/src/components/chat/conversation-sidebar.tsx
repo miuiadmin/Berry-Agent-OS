@@ -104,7 +104,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   }, [editingId]);
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-muted/30">
+    <div className="flex h-full w-72 md:w-64 flex-col border-r bg-muted/30">
       <div className="border-b p-3 space-y-2">
         <button
           onClick={handleNewChat}
@@ -116,7 +116,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search..."
-            className="h-8 pl-8 text-xs"
+            className="h-9 md:h-8 pl-8 text-xs"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
         </div>
@@ -164,13 +164,13 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     <span>{conv.messageCount} messages</span>
                     <span>{formatRelative(conv.lastActive)}</span>
                   </div>
-                  <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                  <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         startEditing(conv);
                       }}
-                      className="rounded-md p-1 text-muted-foreground hover:text-foreground"
+                      className="rounded-md p-1.5 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent"
                     >
                       <Pencil className="size-3" />
                     </button>
@@ -179,7 +179,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);
                       }}
-                      className="rounded-md p-1 text-muted-foreground hover:text-destructive"
+                      className="rounded-md p-1.5 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10"
                     >
                       <Trash2 className="size-3" />
                     </button>

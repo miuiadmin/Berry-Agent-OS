@@ -20,7 +20,7 @@ BerryAgent 是一个双重自进化的通用个人助手：
 BerryAgent 采用 React + Vite SPA 嵌入后端的单端口架构：
 
 - **后端**（`src/web/server.ts`）— HTTP API + WebSocket + 前端静态文件，单端口 `3888`
-- **Web 前端**（`web/`）— React 19 + Vite SPA，开发时在 `:3889`（Vite 代理），生产时构建到 `web/dist/` 由后端直接提供
+- **Web 前端**（`web/`）— React 19 + Vite SPA，开发时在 `:3889`（Vite 代理，绑定 `0.0.0.0` 支持局域网访问），生产时构建到 `web/dist/` 由后端直接提供
 
 ```
 生产模式（单端口 3888）:

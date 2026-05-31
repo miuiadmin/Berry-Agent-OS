@@ -231,20 +231,20 @@ function MessageBubble({
           {formatTime(message.timestamp)}
         </span>
         {!isStreaming && message.content && (
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
             <CopyButton text={message.content} />
             {isUser && (
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="inline-flex items-center rounded-md px-1 py-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                  className="inline-flex items-center rounded-md p-1.5 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
                   aria-label="Edit message"
                 >
                   <Pencil className="size-3" />
                 </button>
                 <button
                   onClick={() => onDelete?.(message.id)}
-                  className="inline-flex items-center rounded-md px-1 py-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                  className="inline-flex items-center rounded-md p-1.5 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
                   aria-label="Delete message"
                 >
                   <Trash2 className="size-3" />
@@ -330,7 +330,7 @@ export function ChatMessageList({
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 z-10 flex size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent transition-colors"
+          className="absolute bottom-4 right-4 z-10 flex size-10 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-colors"
           aria-label="Scroll to bottom"
         >
           <ChevronDown className="size-4 text-muted-foreground" />

@@ -41,7 +41,7 @@ export function getPluginContract(): Record<string, unknown> {
     },
     manifestSchema: getPluginManifestJsonSchema(),
     entrypoint: {
-      import: '@berryagent/plugin-sdk',
+      import: '@agent/plugin-sdk',
       helper: 'definePlugin',
       rule: '插件只能通过 definePlugin 注册工具、受限 Hook 或命令；不得 import 核心系统 内部实现。',
     },

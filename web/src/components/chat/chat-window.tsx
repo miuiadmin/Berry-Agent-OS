@@ -66,7 +66,7 @@ function DelegationDialog({
   onRespond: (delegationId: string, response: string | null, approved: boolean) => void;
 }) {
   return (
-    <div className="absolute inset-x-0 bottom-20 z-20 mx-auto max-w-md px-4">
+    <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:pb-0">
       <div className="rounded-xl border border-border bg-background shadow-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <UserCheck className="size-4 text-warning" />

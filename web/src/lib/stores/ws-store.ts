@@ -1,5 +1,3 @@
-"use client";
-
 import { create } from "zustand";
 
 type WsStatus = "connected" | "connecting" | "disconnected";
@@ -23,18 +21,34 @@ type WsStore = WsState & WsActions;
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
+let reconnectGeneration = 0;
 const MAX_RECONNECT_DELAY = 30000;
 const eventListeners = new Map<string, Set<EventCallback>>();
 const messageHandlers = new Set<(data: Record<string, unknown>) => void>();
+
+function generateSessionId(): string {
+  try {
+    return `web-${crypto.randomUUID()}`;
+  } catch {
+    return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+}
 
 export const useWsStore = create<WsStore>((set, get) => ({
   status: "disconnected",
   sessionId: null,
 
   connect: (sessionId?: string) => {
+    // Prevent duplicate connections
     if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 
-    const sid = sessionId ?? get().sessionId ?? `web-${Date.now()}`;
+    // Cancel any pending reconnect
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    const sid = sessionId ?? get().sessionId ?? generateSessionId();
     set({ status: "connecting", sessionId: sid });
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -84,6 +98,8 @@ export const useWsStore = create<WsStore>((set, get) => ({
   },
 
   disconnect: () => {
+    // Increment generation to invalidate any pending reconnect attempts
+    reconnectGeneration++;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -121,9 +137,11 @@ export const useWsStore = create<WsStore>((set, get) => ({
 
 function scheduleReconnect(get: () => WsStore) {
   if (reconnectTimer) return;
+  const gen = reconnectGeneration;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    if (get().status === "disconnected") {
+    // Only reconnect if generation hasn't changed (no explicit disconnect)
+    if (gen === reconnectGeneration && get().status === "disconnected") {
       reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
       get().connect();
     }
