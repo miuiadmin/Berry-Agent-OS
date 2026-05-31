@@ -103,6 +103,17 @@ const TIER_CONFIG = [
   { key: "high" as const, label: "High", icon: Crown, color: "text-amber-500" },
 ];
 
+// ─── Shared select styling ───────────────────────────────────────
+
+const SELECT_BASE =
+  "w-full rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 appearance-none pr-8 disabled:opacity-50";
+
+function SelectChevron() {
+  return (
+    <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────
 
 export function ProvidersTab() {
@@ -420,47 +431,50 @@ export function ProvidersTab() {
                   <span className="text-sm font-medium">{label}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <select
-                    value={channel}
-                    onChange={(e) => {
-                      const ch = e.target.value;
-                      setSelectedTierChannel((prev) => ({
-                        ...prev,
-                        [key]: ch,
-                      }));
-                      setEditingTiers((prev) => ({
-                        ...prev,
-                        [key]: ch ? { channel: ch, model: "" } : undefined,
-                      }));
-                    }}
-                    className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
-                  >
-                    <option value="">Not configured</option>
-                    {channels.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.kind})
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={target?.model ?? ""}
-                    onChange={(e) => {
-                      const model = e.target.value;
-                      setEditingTiers((prev) => ({
-                        ...prev,
-                        [key]: channel ? { channel, model } : undefined,
-                      }));
-                    }}
-                    disabled={!channel || models.length === 0}
-                    className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 disabled:opacity-50"
-                  >
-                    <option value="">Select model...</option>
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={channel}
+                      onChange={(e) => {
+                        const ch = e.target.value;
+                        setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
+                        setEditingTiers((prev) => ({
+                          ...prev,
+                          [key]: ch ? { channel: ch, model: "" } : undefined,
+                        }));
+                      }}
+                      className={SELECT_BASE}
+                    >
+                      <option value="">Not configured</option>
+                      {channels.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.kind})
+                        </option>
+                      ))}
+                    </select>
+                    <SelectChevron />
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={target?.model ?? ""}
+                      onChange={(e) => {
+                        const model = e.target.value;
+                        setEditingTiers((prev) => ({
+                          ...prev,
+                          [key]: channel ? { channel, model } : undefined,
+                        }));
+                      }}
+                      disabled={!channel || models.length === 0}
+                      className={SELECT_BASE}
+                    >
+                      <option value="">Select model...</option>
+                      {models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <SelectChevron />
+                  </div>
                 </div>
               </div>
             );
@@ -572,28 +586,31 @@ function ChannelFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+        <form onSubmit={handleSubmit} className="space-y-5 mt-2">
           {/* Kind */}
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
               Provider Kind
             </label>
-            <select
-              value={formKind}
-              onChange={(e) => {
-                setFormKind(e.target.value);
-                if (!isEdit) setFormId("");
-              }}
-              disabled={isEdit}
-              className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 disabled:opacity-50"
-            >
-              <option value="">Select kind...</option>
-              {kinds.map((k) => (
-                <option key={k} value={k}>
-                  {PROVIDER_KIND_LABELS[k] ?? k}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={formKind}
+                onChange={(e) => {
+                  setFormKind(e.target.value);
+                  if (!isEdit) setFormId("");
+                }}
+                disabled={isEdit}
+                className={SELECT_BASE}
+              >
+                <option value="">Select kind...</option>
+                {kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {PROVIDER_KIND_LABELS[k] ?? k}
+                  </option>
+                ))}
+              </select>
+              <SelectChevron />
+            </div>
           </div>
 
           {/* ID */}
@@ -679,12 +696,12 @@ function ChannelFormDialog({
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <Button
               variant="outline"
               type="button"
               onClick={() => onOpenChange(false)}
-              className="min-h-[44px] md:min-h-0"
+              className="w-full sm:w-auto min-h-[44px] md:min-h-0"
             >
               Cancel
             </Button>
@@ -696,7 +713,7 @@ function ChannelFormDialog({
                 !formId ||
                 (!isEdit && !formApiKey)
               }
-              className="min-h-[44px] md:min-h-0"
+              className="w-full sm:w-auto min-h-[44px] md:min-h-0"
             >
               {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
             </Button>
@@ -726,62 +743,63 @@ function ChannelCard({
 
   return (
     <div className="rounded-lg border border-border">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 md:px-3 md:py-2">
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="shrink-0 p-1 rounded hover:bg-accent transition-colors size-8 md:size-7 flex items-center justify-center"
-        >
-          {expanded ? (
-            <ChevronDown className="size-4" />
-          ) : (
-            <ChevronRight className="size-4" />
-          )}
-        </button>
+      {/* Header — two rows on mobile, single row on desktop */}
+      <div className="px-3 py-2.5 md:py-2">
+        {/* Row 1: expand + status + name */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-8 md:size-7 flex items-center justify-center"
+          >
+            {expanded ? (
+              <ChevronDown className="size-4" />
+            ) : (
+              <ChevronRight className="size-4" />
+            )}
+          </button>
 
-        <div className="flex items-center gap-2 min-w-0 flex-1">
           {channel.enabled ? (
             <Wifi className="size-3.5 text-green-500 shrink-0" />
           ) : (
             <WifiOff className="size-3.5 text-muted-foreground shrink-0" />
           )}
-          <span className="text-sm font-medium truncate">{channel.name}</span>
+          <span className="text-sm font-medium truncate flex-1">{channel.name}</span>
           <span className="text-[11px] text-muted-foreground font-mono shrink-0 hidden sm:inline">
             {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
           </span>
+
+          {/* Desktop: actions inline */}
+          <span className="text-xs text-muted-foreground shrink-0 hidden md:inline">
+            {channel.modelCount} models
+          </span>
+          <div className="hidden md:flex items-center gap-0.5">
+            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-7" title="Edit">
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-7 text-muted-foreground" title="Delete">
+              <Trash2 className="size-3.5" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-7">
+              {isTesting ? "Testing..." : "Test"}
+            </Button>
+          </div>
         </div>
 
-        <span className="text-xs text-muted-foreground shrink-0">
-          {channel.modelCount} models
-        </span>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onEdit}
-          className="shrink-0 size-8 md:size-7"
-          title="Edit channel"
-        >
-          <Pencil className="size-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDelete}
-          className="shrink-0 size-8 md:size-7 text-muted-foreground"
-          title="Delete channel"
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onTest}
-          disabled={isTesting || !channel.configured}
-          className="shrink-0 text-xs h-8 md:h-7"
-        >
-          {isTesting ? "Testing..." : "Test"}
-        </Button>
+        {/* Mobile: actions row */}
+        <div className="flex items-center gap-1 mt-1.5 pl-10 md:hidden">
+          <span className="text-xs text-muted-foreground mr-auto">
+            {channel.modelCount} models · {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
+          </span>
+          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-8" title="Edit">
+            <Pencil className="size-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-8 text-muted-foreground" title="Delete">
+            <Trash2 className="size-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-8">
+            {isTesting ? "..." : "Test"}
+          </Button>
+        </div>
       </div>
 
       {/* Models list (expandable) */}
@@ -789,15 +807,9 @@ function ChannelCard({
         <div className="border-t border-border px-3 py-2 max-h-64 overflow-y-auto">
           <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 text-xs">
             <span className="font-medium text-muted-foreground">Model</span>
-            <span className="font-medium text-muted-foreground text-right">
-              Context
-            </span>
-            <span className="font-medium text-muted-foreground text-right">
-              Max Out
-            </span>
-            <span className="font-medium text-muted-foreground text-right">
-              Price (in/out)
-            </span>
+            <span className="font-medium text-muted-foreground text-right">Context</span>
+            <span className="font-medium text-muted-foreground text-right">Max Out</span>
+            <span className="font-medium text-muted-foreground text-right">Price (in/out)</span>
 
             {channel.models.map((m) => (
               <ModelRow key={m.id} model={m} />

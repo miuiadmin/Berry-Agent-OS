@@ -105,7 +105,7 @@ export function useChatSocket() {
       if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
       streamingTimerRef.current = setTimeout(() => {
         setLastError(STREAMING_TIMEOUT_MSG);
-      }, STREAMING_TIMEOUT);
+      }, STREAMING_TIMEOUT_MS);
 
       try {
         send({ type: "message", text, sessionId, attachments });
@@ -139,7 +139,7 @@ export function useChatSocket() {
       if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
       streamingTimerRef.current = setTimeout(() => {
         setLastError(STREAMING_TIMEOUT_RETRY_MSG);
-      }, STREAMING_TIMEOUT);
+      }, STREAMING_TIMEOUT_MS);
 
       try {
         send({ type: "message", text, sessionId });
