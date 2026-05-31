@@ -10,7 +10,7 @@
     "dev": "tsx src/index.ts",
     "dev:web": "cd web && npm run dev",
     "dev:full": "concurrently -n backend,frontend -c blue,green \"tsx src/index.ts\" \"cd web && npm run dev\"",
-    "dev:debug": "APP_LOG_LEVEL=debug concurrently -n backend,frontend -c blue,green \"tsx src/index.ts\" \"cd web && npm run dev\"",
+    "dev:debug": "APP_CLI_LOG_LEVEL=debug concurrently -n backend,frontend -c blue,green \"tsx src/index.ts\" \"cd web && npm run dev\"",
     "build": "tsc && npm run build:copy-assets",
     "build:copy-assets": "find src/agents/bundled -name 'agent.json' -exec sh -c 'dest=\"dist/${0#src/}\"; mkdir -p \"$(dirname \"$dest\")\"; cp \"$0\" \"$dest\"' {} \\;",
     "build:web": "cd web && npm install && npm run build",

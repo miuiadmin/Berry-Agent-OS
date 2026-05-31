@@ -116,7 +116,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search..."
-            className="h-9 md:h-8 pl-8 text-xs"
+            className="h-9 md:h-8 pl-8 text-[16px] md:text-xs"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
         </div>

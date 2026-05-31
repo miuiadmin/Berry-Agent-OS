@@ -156,9 +156,12 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     if (!sessionId || loadedSessionRef.current === sessionId) return;
     setHistoryError(null);
     setLoadingHistory(true);
-    loadedSessionRef.current = sessionId;
-    apiGet<HistoryMessage[]>(`/api/conversations/${sessionId}?limit=200`)
+    const targetSession = sessionId;
+    loadedSessionRef.current = targetSession;
+    apiGet<HistoryMessage[]>(`/api/conversations/${targetSession}?limit=200`)
       .then((history) => {
+        // Only apply history if session hasn't changed since request started
+        if (useChatStore.getState().sessionId !== targetSession) return;
         if (!history?.length) return;
         for (const msg of history) {
           addMessage({

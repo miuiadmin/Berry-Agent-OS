@@ -175,6 +175,10 @@ export interface ServiceStartOptions {
   foreground?: boolean;
   dataDir?: string;
   socket?: string;
+  logLevel?: string;
+  debug?: boolean;
+  port?: number;
+  host?: string;
   json?: boolean;
 }
 
@@ -202,6 +206,12 @@ export function buildServiceEnv(opts: ServiceStartOptions): NodeJS.ProcessEnv {
     if (!opts.dataDir) {
       env.SERVICE_HOME = mkdtempSync(join(tmpdir(), 'agent-test-'));
     }
+  }
+  if (opts.port) {
+    env.APP_PORT = String(opts.port);
+  }
+  if (opts.host) {
+    env.APP_HOST = opts.host;
   }
 
   return env;

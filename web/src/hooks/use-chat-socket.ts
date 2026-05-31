@@ -59,8 +59,12 @@ export function useChatSocket() {
         connect(sessionId ?? undefined);
       }
 
+      // Optimistic UI: add messages first
+      const userId = `user-${crypto.randomUUID().slice(0, 8)}`;
+      const asstId = `asst-${crypto.randomUUID().slice(0, 8)}`;
+
       addMessage({
-        id: `user-${crypto.randomUUID().slice(0, 8)}`,
+        id: userId,
         role: "user",
         content: text,
         timestamp: Date.now(),
@@ -69,7 +73,7 @@ export function useChatSocket() {
       });
 
       addMessage({
-        id: `asst-${crypto.randomUUID().slice(0, 8)}`,
+        id: asstId,
         role: "assistant",
         content: "",
         timestamp: Date.now(),
@@ -77,16 +81,24 @@ export function useChatSocket() {
       });
 
       setStreaming(true);
-      send({ type: "message", text, sessionId, attachments });
+      try {
+        send({ type: "message", text, sessionId, attachments });
+      } catch {
+        // If send fails, mark assistant message as error
+        setLastStatus("error");
+        setStreaming(false);
+      }
     },
-    [status, connect, sessionId, addMessage, setStreaming, send]
+    [status, connect, sessionId, addMessage, setStreaming, send, setLastStatus]
   );
 
   const cancelGeneration = useCallback(() => {
-    send({ type: "interrupt" });
+    if (status === "connected") {
+      send({ type: "interrupt" });
+    }
     setLastStatus("complete");
     setStreaming(false);
-  }, [send, setLastStatus, setStreaming]);
+  }, [send, status, setLastStatus, setStreaming]);
 
   const resendMessage = useCallback(
     (text: string) => {

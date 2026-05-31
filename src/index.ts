@@ -46,12 +46,22 @@ const args = process.argv.slice(2);
 const hasSubcommand = args.length > 0 && !args[0].startsWith('-');
 
 if (!hasSubcommand) {
-  // 解析全局选项：--debug / --log-level
-  const logLevelIdx = args.indexOf('--log-level');
-  const debugIdx = args.indexOf('--debug');
-  if (debugIdx !== -1) process.env.APP_CLI_LOG_LEVEL = 'debug';
-  else if (logLevelIdx !== -1 && args[logLevelIdx + 1]) {
-    process.env.APP_CLI_LOG_LEVEL = args[logLevelIdx + 1];
+  // 解析全局选项
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--debug') {
+      process.env.APP_CLI_LOG_LEVEL = 'debug';
+    } else if (arg === '--log-level' && args[i + 1] && !args[i + 1].startsWith('-')) {
+      process.env.APP_CLI_LOG_LEVEL = args[++i];
+    } else if (arg === '--port' && args[i + 1] && !args[i + 1].startsWith('-')) {
+      process.env.APP_PORT = args[++i];
+    } else if (arg.startsWith('--port=')) {
+      process.env.APP_PORT = arg.slice(7);
+    } else if (arg === '--host' && args[i + 1] && !args[i + 1].startsWith('-')) {
+      process.env.APP_HOST = args[++i];
+    } else if (arg.startsWith('--host=')) {
+      process.env.APP_HOST = arg.slice(7);
+    }
   }
 
   (async () => {

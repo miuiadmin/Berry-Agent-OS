@@ -888,8 +888,17 @@ export class CoreService {
     }
 
     if (this.daemonChild) {
-      this.daemonChild.kill('SIGTERM');
+      const child = this.daemonChild;
       this.daemonChild = null;
+      // Graceful shutdown with forced kill fallback
+      const killTimer = setTimeout(() => {
+        if (!child.killed) {
+          child.kill('SIGKILL');
+          logger.warn('Daemon process force-killed after SIGTERM timeout');
+        }
+      }, 5000);
+      child.on('exit', () => clearTimeout(killTimer));
+      child.kill('SIGTERM');
     }
     if (this.messageRouter?.daemonBridge) {
       this.messageRouter.daemonBridge.stop();

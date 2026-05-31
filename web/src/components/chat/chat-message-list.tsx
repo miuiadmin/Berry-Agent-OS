@@ -227,7 +227,7 @@ function MessageBubble({
         )}
       </div>
       <div className="flex items-center gap-1 mt-1 px-1">
-        <span className="text-[10px] text-muted-foreground/60">
+        <span className="text-[11px] text-muted-foreground/60">
           {formatTime(message.timestamp)}
         </span>
         {!isStreaming && message.content && (
@@ -255,7 +255,7 @@ function MessageBubble({
         )}
       </div>
       {message.progress && isStreaming && message.content !== "" && (
-        <span className="mt-0.5 text-[10px] text-muted-foreground/80 px-1">{message.progress}</span>
+        <span className="mt-0.5 text-[11px] text-muted-foreground/80 px-1">{message.progress}</span>
       )}
     </div>
   );

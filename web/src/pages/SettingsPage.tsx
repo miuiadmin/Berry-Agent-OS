@@ -118,6 +118,8 @@ function SettingsContent() {
     },
     onError: (err: Error) => {
       toast.error(err.message || "Failed to save configuration");
+      // Reset editedConfig to last known server state
+      queryClient.invalidateQueries({ queryKey: ["config"] });
     },
   });
 
@@ -164,7 +166,7 @@ function SettingsContent() {
   return (
     <div className="flex h-full flex-col md:flex-row md:overflow-hidden">
       {/* Left nav */}
-      <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4">
+      <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
         <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">Settings</h1>
         <div className="relative md:contents">
           <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">

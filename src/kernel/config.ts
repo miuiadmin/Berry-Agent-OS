@@ -124,8 +124,13 @@ export function loadConfig(): AppConfig {
   let fileData: Record<string, unknown> = {};
 
   if (existsSync(configPath)) {
-    const raw = readFileSync(configPath, 'utf-8');
-    fileData = parseYaml(raw) ?? {};
+    try {
+      const raw = readFileSync(configPath, 'utf-8');
+      fileData = parseYaml(raw) ?? {};
+    } catch (err) {
+      console.error(`[config] 配置文件解析失败 (${configPath}): ${(err as Error).message}，使用默认值`);
+      fileData = {};
+    }
   }
 
   const envOverrides: Record<string, unknown> = {};
