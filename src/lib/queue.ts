@@ -41,7 +41,7 @@ export class JobQueueService {
       agentId: params.agentId,
       jobType: params.jobType,
       sourceId: params.sourceId ?? null,
-      payload: params.payload as any,
+      payload: params.payload as Record<string, unknown>,
       status: 'pending',
       priority: params.priority ?? 0,
       retryCount: 0,

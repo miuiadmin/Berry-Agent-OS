@@ -153,7 +153,7 @@ function handleWsMessage(
       const response = typeof msg.response === 'string' ? msg.response : null;
       if (deps.humanDelegationManager) {
         const status = response ? 'approved' : 'denied';
-        deps.humanDelegationManager.resolve(delegationId, response, status as any);
+        deps.humanDelegationManager.resolve(delegationId, response, status as 'approved' | 'denied');
         wsReply(ws, { type: 'delegation.resolved', delegationId, status });
       }
       break;

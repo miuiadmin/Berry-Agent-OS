@@ -199,7 +199,7 @@ export class SuperiorReviewFlow {
     recorder.recordReviewDecision(
       pending.workspaceId,
       `superior-review:${pending.currentSuperiorName} depth:${pending.chainDepth}`,
-      result as any,
+      result as unknown as Record<string, unknown>,
     );
 
     clearTimeout(pending.timeoutId);

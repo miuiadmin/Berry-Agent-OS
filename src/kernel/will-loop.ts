@@ -261,7 +261,8 @@ export class WillLoop {
         dangerLevel: parsed.dangerLevel ?? 'safe',
         confidence: typeof parsed.confidence === 'number' ? Math.min(1, Math.max(0, parsed.confidence)) : 0.5,
       };
-    } catch {
+    } catch (err) {
+      logger.debug({ err, text }, 'Failed to parse will-loop decision JSON');
       return null;
     }
   }
@@ -341,8 +342,8 @@ export class WillLoop {
         decision.confidence,
         Date.now(),
       );
-    } catch {
-      // best-effort audit
+    } catch (err) {
+      logger.debug({ err }, 'Failed to record will action to audit log');
     }
   }
 

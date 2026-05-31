@@ -1,4 +1,7 @@
 import type { LearningSignal } from './types.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('evolution-detector');
 
 const SKILL_HINTS = [
   '以后', '每次', '长期', '我喜欢', '我希望', '偏好', '习惯', '规则', '请记住',
@@ -124,8 +127,8 @@ export function parseExtractionResult(text: string): EvolutionExtractionResult {
         }))
         .slice(0, 3);
     }
-  } catch {
-    // parse failure → return empty result
+  } catch (err) {
+    logger.debug({ err }, 'Failed to parse extraction result JSON');
   }
 
   return result;
@@ -238,7 +241,8 @@ function parseJsonArray(text: string): Array<Record<string, unknown>> | null {
     if (!match) return null;
     const parsed = JSON.parse(match[0]);
     return Array.isArray(parsed) ? parsed : null;
-  } catch {
+  } catch (err) {
+    logger.debug({ err }, 'Failed to parse learning signals JSON array');
     return null;
   }
 }

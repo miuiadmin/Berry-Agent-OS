@@ -73,7 +73,7 @@ export function registerNotificationRoutes(
     const userId = body.userId as string;
     if (!userId) { json(res, { error: 'userId required' }, 400); return; }
     const preferences = body.preferences as Record<string, string>;
-    svc.updatePreferences(params.workspaceId, userId, preferences as any);
+    svc.updatePreferences(params.workspaceId, userId, preferences as Partial<Record<import('./contracts.js').PreferenceCategory, 'enabled' | 'muted'>>);
     json(res, { ok: true });
   });
 
@@ -91,7 +91,7 @@ export function registerNotificationRoutes(
     const subscriberId = body.subscriberId as string;
     const reason = (body.reason as string) ?? 'manual';
     if (!subscriberId) { json(res, { error: 'subscriberId required' }, 400); return; }
-    svc.subscribe(params.id, subscriberType, subscriberId, reason as any);
+    svc.subscribe(params.id, subscriberType, subscriberId, reason as import('./contracts.js').SubscriptionReason);
     json(res, { ok: true });
   });
 

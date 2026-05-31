@@ -172,7 +172,7 @@ export function registerProviderRoutes(
     if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
 
     const body = await _readBody(req) as Record<string, unknown>;
-    const updated = registry.updateChannel(params.channelId, body as any);
+    const updated = registry.updateChannel(params.channelId, body as Partial<import('./types.js').ProviderChannel>);
     if (!updated) { json(res, { error: 'Channel not found' }, 404); return; }
     json(res, { ok: true });
   });
@@ -195,7 +195,7 @@ export function registerProviderRoutes(
     if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
 
     const body = await _readBody(req) as Record<string, unknown>;
-    registry.setTierMapping(body as any);
+    registry.setTierMapping(body as Partial<import('./types.js').TierMapping>);
     json(res, { ok: true, tiers: registry.getTierMapping() });
   });
 }

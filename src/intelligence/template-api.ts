@@ -50,7 +50,7 @@ export function registerTemplateRoutes(
     if (!svc) { json(res, { error: 'Template service not available' }, 503); return; }
     const body = await readBody(req) as Record<string, unknown>;
     try {
-      svc.update(params.id, body as any);
+      svc.update(params.id, body as Partial<import('./contracts.js').CreateTemplateInput>);
       json(res, { ok: true });
     } catch (err) {
       json(res, { error: (err as Error).message }, 400);

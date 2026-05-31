@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { IMemoryLayerService, MemoryType, MemoryVisibility, MemoryLayer } from './contracts.js';
+import type { IMemoryLayerService, MemoryType, MemoryVisibility, MemoryLayer, MemoryOrigin } from './contracts.js';
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
@@ -61,7 +61,7 @@ export function registerMemoryRoutes(
       ownerAgentId: body.ownerAgentId as string | undefined,
       type: (body.type as MemoryType) ?? 'knowledge',
       content,
-      origin: body.origin as any,
+      origin: body.origin as MemoryOrigin | undefined,
       visibility: body.visibility as MemoryVisibility | undefined,
       importance: body.importance as number | undefined,
       tags: body.tags as string[] | undefined,
@@ -91,7 +91,7 @@ export function registerMemoryRoutes(
       userId,
       type: (body.type as MemoryType) ?? 'knowledge',
       content,
-      origin: body.origin as any,
+      origin: body.origin as Exclude<MemoryOrigin, 'imported'> | undefined,
       sourceWorkspaceId: body.sourceWorkspaceId as string | undefined,
       sourceMemoryId: body.sourceMemoryId as string | undefined,
       importance: body.importance as number | undefined,
@@ -178,10 +178,16 @@ export function registerMemoryRoutes(
     const body = await readBody(req) as Record<string, unknown>;
     const layer = params.layer as MemoryLayer;
     try {
+      const updates = {
+        content: body.content as string | undefined,
+        importance: body.importance as number | undefined,
+        type: body.type as MemoryType | undefined,
+        visibility: body.visibility as MemoryVisibility | undefined,
+      };
       switch (layer) {
-        case 'agent': svc.updateAgentMemory(params.id, body as any); break;
-        case 'workspace': svc.updateWorkspaceMemory(params.id, body as any); break;
-        case 'global': svc.updateGlobalMemory(params.id, body as any); break;
+        case 'agent': svc.updateAgentMemory(params.id, updates); break;
+        case 'workspace': svc.updateWorkspaceMemory(params.id, updates); break;
+        case 'global': svc.updateGlobalMemory(params.id, updates); break;
         default: json(res, { error: 'invalid layer' }, 400); return;
       }
       json(res, { ok: true });

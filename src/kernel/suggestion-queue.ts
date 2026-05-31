@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('suggestion-queue');
 
 export interface PendingSuggestion {
   id: string;
@@ -55,7 +58,8 @@ export class SuggestionQueue {
         ? this.db.prepare(query).all(sessionId, limit) as Array<Record<string, unknown>>
         : this.db.prepare(query).all(limit) as Array<Record<string, unknown>>;
       return rows.map(rowToSuggestion);
-    } catch {
+    } catch (err) {
+      logger.debug({ err, sessionId }, 'Failed to get pending suggestions');
       return [];
     }
   }
@@ -84,7 +88,8 @@ export class SuggestionQueue {
     try {
       const result = this.db.prepare(`DELETE FROM suggestion_queue WHERE delivered_at IS NOT NULL AND delivered_at < ?`).run(cutoff);
       return result.changes;
-    } catch {
+    } catch (err) {
+      logger.debug({ err }, 'Failed to cleanup delivered suggestions');
       return 0;
     }
   }
@@ -106,8 +111,8 @@ export class SuggestionQueue {
         );
         CREATE INDEX IF NOT EXISTS idx_suggestion_pending ON suggestion_queue(delivered_at) WHERE delivered_at IS NULL;
       `);
-    } catch {
-      // table may exist
+    } catch (err) {
+      logger.debug({ err }, 'suggestion_queue table ensure failed (may already exist)');
     }
   }
 }

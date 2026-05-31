@@ -45,7 +45,8 @@ export class SelfModificationAudit {
         ORDER BY version DESC LIMIT 1
       `).get(target) as Record<string, unknown> | undefined;
       return row ? rowToVersion(row) : null;
-    } catch {
+    } catch (err) {
+      logger.debug({ err, target }, 'Failed to get current prompt version');
       return null;
     }
   }
@@ -58,7 +59,8 @@ export class SelfModificationAudit {
         ORDER BY version DESC LIMIT ?
       `).all(target, limit) as Array<Record<string, unknown>>;
       return rows.map(rowToVersion);
-    } catch {
+    } catch (err) {
+      logger.debug({ err, target }, 'Failed to get version history');
       return [];
     }
   }
@@ -138,6 +140,7 @@ export class SelfModificationAudit {
       logger.info({ target, fromVersion: current.version, toVersion: targetRow.version }, 'Prompt rolled back');
       return { approved: true, versionId: targetRow.id as string, reason: `rolled back to v${targetRow.version}` };
     } catch (err) {
+      logger.error({ err, target }, 'Failed to rollback prompt version');
       return { approved: false, versionId: null, reason: (err as Error).message };
     }
   }
@@ -147,8 +150,8 @@ export class SelfModificationAudit {
       this.db.prepare(`
         UPDATE self_modification_log SET performance_score = ? WHERE id = ?
       `).run(score, versionId);
-    } catch {
-      // best-effort
+    } catch (err) {
+      logger.debug({ err, versionId, score }, 'Failed to record performance score');
     }
   }
 
@@ -158,7 +161,8 @@ export class SelfModificationAudit {
       const rollbacks = (this.db.prepare(`SELECT COUNT(*) as c FROM self_modification_log WHERE target = ? AND status = 'rolled_back'`).get(target) as { c: number }).c;
       const avgRow = this.db.prepare(`SELECT AVG(performance_score) as avg FROM self_modification_log WHERE target = ? AND performance_score IS NOT NULL`).get(target) as { avg: number | null };
       return { totalVersions: total, rollbacks, avgScore: avgRow.avg };
-    } catch {
+    } catch (err) {
+      logger.debug({ err, target }, 'Failed to get modification stats');
       return { totalVersions: 0, rollbacks: 0, avgScore: null };
     }
   }
@@ -185,8 +189,8 @@ export class SelfModificationAudit {
         CREATE INDEX IF NOT EXISTS idx_self_mod_target_version
           ON self_modification_log(target, version DESC);
       `);
-    } catch {
-      // already exists or migration issue
+    } catch (err) {
+      logger.debug({ err }, 'self_modification_log table ensure failed (may already exist)');
     }
   }
 }

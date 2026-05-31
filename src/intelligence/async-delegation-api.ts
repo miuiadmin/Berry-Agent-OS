@@ -25,7 +25,7 @@ export function registerAsyncDelegationRoutes(
       sourceWorkspaceId: body.sourceWorkspaceId as string | undefined,
       targetAgentId: body.targetAgentId as string | undefined,
       contextSnapshot: body.contextSnapshot as string | undefined,
-      priority: body.priority as any,
+      priority: body.priority as import('./contracts.js').NotificationPriority | undefined,
       timeoutMs: body.timeoutMs as number | undefined,
       parentDelegationId: body.parentDelegationId as string | undefined,
     });

@@ -25,7 +25,7 @@ export function registerSessionSearchCapability(bus: CapabilityBus, db: Database
             JOIN conversations_fts f ON c.rowid = f.rowid
             WHERE conversations_fts MATCH ? AND c.session_id != ?
             ORDER BY rank LIMIT ?
-          `).all(ftsQuery, excludeSessionId, maxResults * 3) as any;
+          `).all(ftsQuery, excludeSessionId, maxResults * 3) as Array<{ session_id: string; role: string; content: string; rowid: number }>;
         } else {
           rows = db.prepare(`
             SELECT c.session_id, c.role, c.content, c.rowid
@@ -33,7 +33,7 @@ export function registerSessionSearchCapability(bus: CapabilityBus, db: Database
             JOIN conversations_fts f ON c.rowid = f.rowid
             WHERE conversations_fts MATCH ?
             ORDER BY rank LIMIT ?
-          `).all(ftsQuery, maxResults * 3) as any;
+          `).all(ftsQuery, maxResults * 3) as Array<{ session_id: string; role: string; content: string; rowid: number }>;
         }
 
         if (rows.length === 0) return { results: [] };

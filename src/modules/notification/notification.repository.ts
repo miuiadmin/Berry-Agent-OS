@@ -56,7 +56,7 @@ export class NotificationRepository {
     const existing = this.getPreferences(workspaceId, userId);
     if (existing) {
       this.db.update(notificationPreferences)
-        .set({ preferences: preferences as any, updatedAt: new Date() })
+        .set({ preferences: preferences as Record<string, unknown>, updatedAt: new Date() })
         .where(eq(notificationPreferences.id, existing.id))
         .run();
     } else {
@@ -64,7 +64,7 @@ export class NotificationRepository {
         id: newId,
         workspaceId,
         userId,
-        preferences: preferences as any,
+        preferences: preferences as Record<string, unknown>,
         updatedAt: new Date(),
       }).run();
     }
