@@ -255,8 +255,29 @@ export function createApiRouter(deps: WebServerDependencies) {
       };
     });
 
-    // Conversation messages
-    const messages = getHistory(sessionId, limit);
+    // Conversation messages with thinkingSteps from task_events
+    const rawMessages = getHistory(sessionId, limit);
+    const allTasks = db.prepare(`
+      SELECT id, created_at, finished_at FROM agent_tasks
+      WHERE session_id = ? AND task_type = 'conversation_turn'
+      ORDER BY created_at ASC
+    `).all(sessionId) as Array<{ id: string; created_at: number; finished_at: number | null }>;
+
+    const messages = rawMessages.map((msg) => {
+      if (msg.role !== 'assistant') return msg;
+      // Find the task that produced this message (closest task created before message)
+      const matchTask = allTasks.find((t) =>
+        t.created_at <= msg.createdAt && (!t.finished_at || t.finished_at >= msg.createdAt - 5000)
+      );
+      if (!matchTask) return msg;
+      const steps = db.prepare(`
+        SELECT message, created_at FROM task_events
+        WHERE task_id = ? AND event_type = 'progress'
+        ORDER BY created_at ASC
+      `).all(matchTask.id) as Array<{ message: string; created_at: number }>;
+      if (steps.length === 0) return msg;
+      return { ...msg, thinkingSteps: steps.map((s) => ({ text: s.message, ts: s.created_at })) };
+    });
 
     json(res, { sessionId, activeTasks: tasksWithProgress, messages });
   });

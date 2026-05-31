@@ -70,10 +70,11 @@ export function useChatSocket() {
       .then((data) => {
         if (!data || useChatStore.getState().sessionId !== sid) return;
         const activeTask = data.activeTasks?.[0];
-        const messages = (data.messages ?? []).map((m: { role: string; content: string; createdAt: string }) => ({
+        const messages = (data.messages ?? []).map((m: { role: string; content: string; createdAt: string; thinkingSteps?: Array<{ text: string; ts: number }> }) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
           timestamp: new Date(m.createdAt).getTime(),
+          thinkingSteps: m.thinkingSteps,
         }));
         useChatStore.getState().restoreSession(
           messages,
@@ -120,11 +121,14 @@ export function useChatSocket() {
           if (msg.summary) setLastProgress(msg.summary);
           resetTimer();
           break;
-        case "result":
+        case "result": {
+          const response = (msg as unknown as { response?: string }).response;
+          if (response) appendToLast(response);
           setLastStatus("complete");
           setStreaming(false);
           clearTimer();
           break;
+        }
         case "error":
           setLastError(msg.error ?? msg.message ?? "Unknown error");
           clearTimer();

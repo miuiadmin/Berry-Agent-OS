@@ -347,18 +347,18 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setLoadingHistory(true);
     const targetSession = sessionId;
     loadedSessionRef.current = targetSession;
-    apiGet<HistoryMessage[]>(`/api/conversations/${targetSession}?limit=200`)
-      .then((history) => {
-        // Only apply history if session hasn't changed since request started
+    apiGet<{ messages: Array<{ role: string; content: string; createdAt: string; thinkingSteps?: Array<{ text: string; ts: number }> }> }>(`/api/sessions/${targetSession}/state?limit=200`)
+      .then((data) => {
         if (useChatStore.getState().sessionId !== targetSession) return;
-        if (!history?.length) return;
-        for (const msg of history) {
+        if (!data?.messages?.length) return;
+        for (const msg of data.messages) {
           addMessage({
             id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            role: msg.role,
+            role: msg.role as "user" | "assistant",
             content: msg.content,
             timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
             status: "complete",
+            thinkingSteps: msg.thinkingSteps,
           });
         }
       })
