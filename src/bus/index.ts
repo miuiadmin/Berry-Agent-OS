@@ -33,3 +33,5 @@ export { ScopeChecker } from './permission-scope.js';
 export type { PermissionScope } from './permission-scope.js';
 export { scanCapabilityDescription, scanAgentYaml } from './security-scanner.js';
 export type { ScanResult } from './security-scanner.js';
+export { registerMcpToolsOnBus, unregisterMcpServerFromBus } from './mcp-adapter.js';
+export type { McpToolInfo, IMcpToolExecutor } from './mcp-adapter.js';

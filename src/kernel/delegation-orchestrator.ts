@@ -284,6 +284,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         }
       }
 
+      // §2.6 Discovery: inject available Bus capabilities so Brain can route to them
+      if (this.capabilityBusRef) {
+        const capabilities = this.capabilityBusRef.discover();
+        if (capabilities.length > 0) {
+          const capList = capabilities.slice(0, 30).map(c => `${c.name} (${c.dangerLevel})`).join(', ');
+          payload = {
+            ...payload,
+            sessionContext: (payload.sessionContext ?? '') + `\n\n[可用能力] ${capList}`,
+          };
+        }
+      }
+
       brain.ipc.send('route.request', orchestratorName, payload, correlationId);
     });
   }

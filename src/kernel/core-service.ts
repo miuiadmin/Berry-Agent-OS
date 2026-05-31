@@ -429,6 +429,19 @@ export class CoreService {
       import('../evolution/stats-job.js').then(m => m.runStatsJob(getDb())).catch(() => {});
     }, 3600_000);
 
+    // §3.1/§3.2 Lifecycle subscriptions: wire system events to agent tasks
+    const { LifecycleEventManager } = await import('../bus/lifecycle.js');
+    const lifecycleManager = new LifecycleEventManager();
+    lifecycleManager.on('permission.denied', (data) => {
+      this.messageRouter?.dispatchModuleTask({
+        sessionId: 'lifecycle', taskType: 'detect_gap', requester: 'lifecycle',
+        inputPayload: { taskType: 'detect_gap', recentPermissionDenials: [JSON.stringify(data)] },
+      }).catch(() => {});
+    });
+    this.eventBus.on('agent.crashed', () => {
+      lifecycleManager.emit('agent.task_completed', { status: 'crashed' });
+    });
+
     // Checkpoint + Resume: error classifier, checkpoint service, runtime executor
     const errorClassifier = new ErrorClassifier();
     const checkpointMgr = new TaskCheckpointManager(getDb());
