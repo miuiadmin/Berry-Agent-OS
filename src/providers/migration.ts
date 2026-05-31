@@ -57,13 +57,16 @@ export function migrateLegacyConfig(llmConfig: LlmConfig): {
     }
   }
 
-  // Also create channels for other providers that have credentials
+  // Only create channels for other providers that have REAL credentials
+  // (non-empty apiKey or non-empty baseUrl — schema defaults produce empty strings)
   const providerNames = ['anthropic', 'openai', 'openai-compatible'] as const;
   for (const name of providerNames) {
     if (name === activeProvider) continue; // Already handled above
 
     const cfg = llmConfig.providers[name];
-    if (cfg.apiKey || cfg.baseUrl) {
+    const hasApiKey = cfg.apiKey && cfg.apiKey.trim() !== '';
+    const hasBaseUrl = cfg.baseUrl && cfg.baseUrl.trim() !== '';
+    if (hasApiKey || hasBaseUrl) {
       channels.push({
         id: `${name}-default`,
         name: `${name} (migrated)`,

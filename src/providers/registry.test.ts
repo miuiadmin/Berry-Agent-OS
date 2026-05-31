@@ -136,6 +136,24 @@ describe('Legacy Config Migration', () => {
     // openai-compatible has no apiKey, should not be included
     expect(ids).not.toContain('openai-compatible-default');
   });
+
+  it('does not create channels for providers with whitespace-only credentials', () => {
+    const config = makeConfig({
+      provider: 'openai-compatible',
+      providers: {
+        anthropic: { apiKey: '   ', baseUrl: '  ', models: {} },
+        openai: { apiKey: '', baseUrl: '   ', models: {} },
+        'openai-compatible': { apiKey: 'sk-mimo-test', baseUrl: 'https://mimo.api', models: {} },
+      },
+    });
+    const result = migrateLegacyConfig(config);
+    const ids = result.channels.map(c => c.id);
+    // Only the active provider should have a channel
+    expect(ids).toEqual(['openai-compatible-default']);
+    // Whitespace-only credentials should not create channels
+    expect(ids).not.toContain('anthropic-default');
+    expect(ids).not.toContain('openai-default');
+  });
 });
 
 // ─── Resolver Tests ───────────────────────────────────────────────
