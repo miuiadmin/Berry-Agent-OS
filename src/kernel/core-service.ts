@@ -426,6 +426,16 @@ export class CoreService {
     willLoop.setSuggestionQueue(suggestionQueue);
     this.messageRouter.setSuggestionQueue(suggestionQueue);
 
+    // Schedule daily cleanup of old suggestions
+    setInterval(() => {
+      try {
+        const cleaned = suggestionQueue.cleanup();
+        if (cleaned > 0) logger.info({ cleaned }, 'Suggestion queue cleanup completed');
+      } catch (err) {
+        logger.error({ err }, 'Suggestion queue cleanup failed');
+      }
+    }, 86_400_000);
+
     // Register Time Intelligence as Bus capabilities
     const { registerTimeIntelligenceCapabilities } = await import('../bus/time-capability.js');
     registerTimeIntelligenceCapabilities(capabilityBus, timeIntelligence);

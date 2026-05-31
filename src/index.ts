@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+
+// ── 看护进程模式入口 ──
+// 由 CLI `service start` 通过 __WATCHDOG_MODE=1 激活
+// 跳过所有 CLI 解析，直接进入看护进程主循环
+if (process.env.__WATCHDOG_MODE === '1') {
+  (async () => {
+    const { Watchdog } = await import('./service/watchdog.js');
+    const watchdog = new Watchdog();
+    await watchdog.run(process.env);
+    process.exit(0);
+  })();
+}
+
 import { Command } from 'commander';
 import { registerServiceCommands, ensureServiceRunning } from './cli/service-commands.js';
 import { registerRunCommand } from './cli/run-command.js';
@@ -44,8 +57,9 @@ program
 
 const args = process.argv.slice(2);
 const hasSubcommand = args.length > 0 && !args[0].startsWith('-');
+const isWatchdog = process.env.__WATCHDOG_MODE === '1';
 
-if (!hasSubcommand) {
+if (!hasSubcommand && !isWatchdog) {
   // 解析全局选项
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -77,6 +91,6 @@ if (!hasSubcommand) {
     renderer.info('Berry 服务已启动');
     renderer.info('终端对话: berry chat');
   })();
-} else {
+} else if (hasSubcommand) {
   program.parse();
 }

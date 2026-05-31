@@ -20,6 +20,14 @@ export function getPidPath(): string {
   return join(getAppHome(), 'run', 'agent.pid');
 }
 
+export function getWatchdogPidPath(): string {
+  return join(getAppHome(), 'run', 'watchdog.pid');
+}
+
+export function getWatchdogStatePath(): string {
+  return join(getAppHome(), 'run', 'watchdog-state.json');
+}
+
 export function getDbPath(): string {
   return join(getAppHome(), 'data', 'agent.db');
 }

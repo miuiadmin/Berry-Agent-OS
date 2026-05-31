@@ -5,7 +5,7 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import type { Command } from 'commander';
-import { getAppHome, getPidPath, getSocketPath, setAppHome } from '../utils/paths.js';
+import { getAppHome, getPidPath, getSocketPath, getWatchdogPidPath, getWatchdogStatePath, setAppHome } from '../utils/paths.js';
 import { getConsoleRenderer } from '../observability/console.js';
 
 export function registerServiceCommands(program: Command): void {
@@ -63,6 +63,28 @@ export function registerServiceCommands(program: Command): void {
         return;
       }
 
+      // 检查是否已在运行（优先检查看护进程 PID）
+      const watchdogPidPath = getWatchdogPidPath();
+      if (existsSync(watchdogPidPath)) {
+        const wPid = parseInt(readFileSync(watchdogPidPath, 'utf-8').trim(), 10);
+        try {
+          process.kill(wPid, 0);
+          writeServiceStartResult(renderer, {
+            ok: true,
+            mode: 'detached',
+            alreadyRunning: true,
+            pid: wPid,
+            appHome,
+            socketPath: env.SERVICE_SOCKET_PATH ?? getSocketPath(),
+            test: opts.test === true,
+          }, opts.json === true);
+          return;
+        } catch {
+          unlinkSync(watchdogPidPath);
+        }
+      }
+
+      // 兼容：检查旧版（无看护进程）的 PID 文件
       const pidPath = getPidPath();
       if (existsSync(pidPath)) {
         const pid = parseInt(readFileSync(pidPath, 'utf-8').trim(), 10);
@@ -83,19 +105,24 @@ export function registerServiceCommands(program: Command): void {
         }
       }
 
+      // 启动看护进程（双重 detach）
       const currentFile = fileURLToPath(import.meta.url);
-      const ext = currentFile.endsWith('.ts') ? '.ts' : '.js';
-      const coreScript = resolve(dirname(currentFile), '..', 'kernel', `core-service${ext}`);
+      const entryScript = resolve(dirname(currentFile), '..', 'index.js');
 
-      const isTsx = ext === '.ts';
+      const isTsx = currentFile.endsWith('.ts');
       const execPath = isTsx
         ? resolve(dirname(currentFile), '..', '..', 'node_modules', '.bin', 'tsx')
         : 'node';
 
-      const child = spawn(execPath, [coreScript], {
+      const watchdogEnv = {
+        ...env,
+        __WATCHDOG_MODE: '1',
+      };
+
+      const child = spawn(execPath, [entryScript], {
         detached: true,
         stdio: 'ignore',
-        env,
+        env: watchdogEnv,
       });
 
       child.unref();
@@ -114,6 +141,35 @@ export function registerServiceCommands(program: Command): void {
     .description('停止 Berry 服务')
     .action(async () => {
       const renderer = getConsoleRenderer();
+
+      // 优先停止看护进程（它会转发 SIGTERM 给 CoreService）
+      const watchdogPidPath = getWatchdogPidPath();
+      if (existsSync(watchdogPidPath)) {
+        const wPid = parseInt(readFileSync(watchdogPidPath, 'utf-8').trim(), 10);
+        try {
+          process.kill(wPid, 'SIGTERM');
+          renderer.info(`正在停止看护进程 (PID: ${wPid})...`);
+          // 验证进程实际退出
+          let waited = 0;
+          while (waited < 10000) {
+            try {
+              process.kill(wPid, 0);
+              await new Promise(r => setTimeout(r, 200));
+              waited += 200;
+            } catch {
+              renderer.info('服务已停止');
+              return;
+            }
+          }
+          renderer.warn('看护进程未在超时内退出，可能需要手动清理');
+        } catch {
+          unlinkSync(watchdogPidPath);
+          renderer.info('看护进程未在运行（PID 文件已过期）');
+        }
+        return;
+      }
+
+      // 兼容旧版：直接停 CoreService
       const pidPath = getPidPath();
       if (!existsSync(pidPath)) {
         renderer.info('Berry 服务未在运行');
@@ -154,6 +210,17 @@ export function registerServiceCommands(program: Command): void {
           renderer.json({ running: true, ...response });
         } else {
           renderer.info('Berry 服务运行中');
+          // 显示看护进程信息
+          const statePath = getWatchdogStatePath();
+          if (existsSync(statePath)) {
+            try {
+              const state = JSON.parse(readFileSync(statePath, 'utf-8')) as { pid: number; childPid: number | null; restartCount: number; startedAt: string };
+              const uptime = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000);
+              const minutes = Math.floor(uptime / 60);
+              const seconds = uptime % 60;
+              renderer.info(`  看护进程: PID ${state.pid}，运行 ${minutes}m${seconds}s，重启 ${state.restartCount} 次`);
+            } catch { /* ignore */ }
+          }
           if (response.status) {
             for (const [name, info] of Object.entries(response.status as Record<string, { status: string; pid: number }>)) {
               renderer.info(`  ${name}: ${info.status} (PID: ${info.pid})`);
