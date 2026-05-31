@@ -1,3 +1,9 @@
+/**
+ * @deprecated Use src/agents/bundled/evolution/ instead.
+ * This agent is retained for backward compatibility during migration.
+ * The evolution agent provides the same capabilities with a cleaner interface
+ * per 6.0 §3.2 (Evolution Agent).
+ */
 import { EvolutionEngine } from '../../../evolution/index.js';
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';

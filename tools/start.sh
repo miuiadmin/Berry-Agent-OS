@@ -27,8 +27,8 @@ done
 # 支持 --port VALUE 格式（等号格式已在上面处理）
 _prev=""
 for arg in "$@"; do
-  if [ "$_prev" = "--port" ] && [ -z "$PARSE_PORT" ]; then PARSE_PORT="$arg"; fi
-  if [ "$_prev" = "--host" ] && [ -z "$PARSE_HOST" ]; then PARSE_HOST="$arg"; fi
+  if [ "$_prev" = "--port" ] && [ -z "$PARSE_PORT" ] && [[ "$arg" != -* ]]; then PARSE_PORT="$arg"; fi
+  if [ "$_prev" = "--host" ] && [ -z "$PARSE_HOST" ] && [[ "$arg" != -* ]]; then PARSE_HOST="$arg"; fi
   _prev="$arg"
 done
 BACKEND_PORT="${PARSE_PORT:-3888}"

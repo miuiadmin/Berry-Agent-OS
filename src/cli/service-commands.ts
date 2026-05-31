@@ -230,6 +230,12 @@ export function applyServiceEnvToCurrentProcess(env: NodeJS.ProcessEnv): void {
   if (env.APP_LLM_MODE) {
     process.env.APP_LLM_MODE = env.APP_LLM_MODE;
   }
+  if (env.APP_PORT) {
+    process.env.APP_PORT = env.APP_PORT;
+  }
+  if (env.APP_HOST) {
+    process.env.APP_HOST = env.APP_HOST;
+  }
 }
 
 function writeServiceStartResult(

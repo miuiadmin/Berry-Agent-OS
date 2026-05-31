@@ -87,12 +87,16 @@ cd web && npm install      # 安装前端依赖
 
 # 开发模式（选一）
 npm run dev                # 仅启动后端 (CLI + API :3888)
-npm run dev:web            # 仅启动前端 (Vite :3889)
+npm run dev:debug          # 后端 + debug 日志
+npm run dev:web            # 仅启动前端 (Vite :3889, 绑定 0.0.0.0)
 npm run dev:full           # 同时启动后端 + 前端（推荐）
 
 # 生产模式（单端口 :3888）
 npm run build:full         # 构建后端 + 前端
 berry service start        # 后端同时提供 API + 前端静态文件
+# 或使用脚本
+./tools/start.sh           # 一键启动（debug 模式，支持 --port/--host）
+./start.command            # macOS 双击启动
 ```
 
 ## 架构
