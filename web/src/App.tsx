@@ -17,7 +17,7 @@ export default function App() {
   useRealtimeEvents();
 
   return (
-    <Suspense fallback={<div className="flex h-screen items-center justify-center text-muted-foreground">加载中...</div>}>
+    <Suspense fallback={<div className="flex h-screen items-center justify-center"><div className="size-6 rounded-full border-2 border-muted-foreground/30 border-t-brand animate-spin" /></div>}>
       <Routes>
         <Route element={<DashboardLayout />}>
           <Route path="/" element={<HomePage />} />

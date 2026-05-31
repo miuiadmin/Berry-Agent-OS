@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "./app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 
 export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const location = useLocation();
+
+  // Close sidebar on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -21,7 +27,7 @@ export function DashboardLayout() {
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          className="fixed inset-0 z-40 bg-black/50 animate-overlay-in md:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
@@ -38,14 +44,17 @@ export function DashboardLayout() {
       <div className="flex flex-1 flex-col min-w-0">
         {/* Mobile header */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)}>
+          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="active:scale-90 transition-transform">
             {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
           </Button>
           <div className="size-5 rounded-md bg-brand" />
           <span className="text-sm font-semibold">Berry</span>
         </div>
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          {/* key by pathname to re-trigger animation on route change */}
+          <div key={location.pathname} className="animate-page-in">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

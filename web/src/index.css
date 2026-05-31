@@ -136,6 +136,46 @@ body {
   overflow-x: hidden;
 }
 
+/* ─── Page transition ─────────────────────────────── */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Dialog / overlay ───────────────────────────── */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Skeleton pulse ─────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ─── Fade-in utility ────────────────────────────── */
+@layer utilities {
+  .animate-page-in {
+    animation: page-in 0.25s ease-out both;
+  }
+  .animate-sheet-in {
+    animation: sheet-in 0.2s ease-out both;
+  }
+  .animate-overlay-in {
+    animation: overlay-in 0.15s ease-out both;
+  }
+  .animate-shimmer {
+    background: linear-gradient(90deg, var(--muted) 25%, var(--accent) 50%, var(--muted) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+}
+
 @keyframes blink-cursor {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }

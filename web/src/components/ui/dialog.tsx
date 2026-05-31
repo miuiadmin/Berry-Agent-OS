@@ -36,8 +36,8 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
         if (e.target === overlayRef.current) onOpenChange(false);
       }}
     >
-      <div className="fixed inset-0 bg-black/50 animate-in fade-in-0" />
-      <div className="relative z-50 w-[calc(100%-2rem)] sm:max-w-sm md:max-w-md md:mx-auto mx-4 animate-in fade-in-0 zoom-in-95">
+      <div className="fixed inset-0 bg-black/50 animate-overlay-in" />
+      <div className="relative z-50 w-[calc(100%-2rem)] sm:max-w-sm md:max-w-md md:mx-auto mx-4 animate-sheet-in">
         {children}
       </div>
     </div>
