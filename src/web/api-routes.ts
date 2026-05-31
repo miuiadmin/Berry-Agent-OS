@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { getLogger } from '../utils/logger.js';
 import { getDb } from '../memory/index.js';
 import { getHistory } from '../memory/conversations.js';
 import { getAppHome, getConfigPath } from '../utils/paths.js';
@@ -430,7 +431,7 @@ export function createApiRouter(deps: WebServerDependencies) {
         if (result instanceof Promise) {
           result.catch((err) => {
             if (!res.headersSent) serverError(res, err);
-            else console.error('[api] Error after headers sent:', err);
+            else getLogger('api').error({ err }, 'Error after headers sent');
           });
         }
       } catch (err) {

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { SocketClient } from './socket-client.js';
 import { ExecutorPool, type PoolTask } from './executor-pool.js';
 import { discoverRuntimes } from './runtime-discovery.js';
+import { getLogger } from '../utils/logger.js';
 import type { DaemonConfig } from './config.js';
 import type {
   DaemonRegisterMessage,
@@ -118,7 +119,7 @@ export class DaemonProcess {
         break;
       case 'daemon.task.notify':
         if (typeof msg.taskId !== 'string' || !msg.inputPayload) {
-          console.warn('[daemon] Invalid task.notify: missing taskId or inputPayload');
+          getLogger('daemon').warn('Invalid task.notify: missing taskId or inputPayload');
           return;
         }
         this.handleTaskNotify(msg as unknown as DaemonTaskNotifyMessage);
@@ -134,7 +135,7 @@ export class DaemonProcess {
         this.handleTaskCancel(msg as unknown as DaemonTaskCancelMessage);
         break;
       default:
-        console.warn(`[daemon] Unknown message type: ${type}`);
+        getLogger('daemon').warn({ type }, 'Unknown message type');
     }
   }
 
