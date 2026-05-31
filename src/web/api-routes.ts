@@ -415,7 +415,7 @@ export function createApiRouter(deps: WebServerDependencies) {
   registerTeamBuilderRoutes(route, () => deps.teamBuilderService, readBody, json);
 
   // --- Provider management routes ---
-  registerProviderRoutes(route, () => deps.providerRegistry, readBody, json);
+  registerProviderRoutes(route, () => deps.getProviderRegistry?.(), readBody, json, deps.configService);
 
   return function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): void {
     const method = req.method ?? 'GET';

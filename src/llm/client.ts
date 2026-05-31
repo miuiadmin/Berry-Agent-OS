@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { LlmBackend, StreamChunk } from './contract.js';
 import { isStreamingBackend } from './contract.js';
 import type { LlmConfig } from './types.js';
-import { resolveModel, detectThinkingCapability, buildThinkingBody } from './types.js';
+import { detectThinkingCapability, buildThinkingBody } from './types.js';
 import type {
   ModelRequest,
   ModelResponse,
@@ -18,8 +18,8 @@ import type { AgentName } from '../contracts/agents.js';
 import type { IpcChildChannel } from '../contracts/infrastructure.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import { generateText, streamText } from 'ai';
-import { createProviderModel } from './providers.js';
 import type { IProviderRegistry } from '../providers/contract.js';
+import { createProviderRegistry } from '../providers/registry.js';
 import { toAiMessages, toAiTools, mapFinishReason, mapUsage, mapToolCalls, buildContentBlocks, type AiSdkToolCall } from './message-adapter.js';
 import { TestBackend } from './backends/test.js';
 import { IpcTakeoverBackend } from './backends/ipc-takeover.js';
@@ -98,7 +98,7 @@ export class LlmClient {
   private legacyBackend: LlmBackend | null;
   private llmCompletedHook: LlmCompletedHook | null;
   // New: provider registry for multi-channel model resolution
-  private providerRegistry: IProviderRegistry | null;
+  private readonly providerRegistry: IProviderRegistry;
 
   constructor(config: LlmConfig, options: {
     defaultAgent?: string;
@@ -119,7 +119,7 @@ export class LlmClient {
     this.concurrencySemaphore = getSharedSemaphore(options.resilienceConfig?.concurrency);
     this.legacyBackend = options.legacyBackend ?? null;
     this.llmCompletedHook = options.llmCompletedHook ?? null;
-    this.providerRegistry = options.providerRegistry ?? null;
+    this.providerRegistry = options.providerRegistry ?? createProviderRegistry(config, config.channelsConfig);
   }
 
   async chat(messages: ModelMessage[], options: ChatOptions = {}): Promise<ChatResult> {
@@ -131,14 +131,12 @@ export class LlmClient {
       return this.chatViaLegacyBackend(messages, options, agentName);
     }
 
-    const resolved = this.providerRegistry?.resolve(tier);
-    const modelId = resolved?.model.id ?? resolveModel(this.config, tier);
-    const model = resolved
-      ? this.providerRegistry!.createModel(tier)
-      : createProviderModel(this.config, tier);
+    const resolved = this.providerRegistry.resolve(tier);
+    const modelId = resolved.model.id;
+    const model = this.providerRegistry.createModel(tier);
 
     // Build provider options (thinking, cacheControl) for Anthropic
-    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved?.providerKind);
+    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved.providerKind);
 
     // Resilience: circuit breaker + rate limiter + concurrency
     if (!this.circuitBreaker.canAttempt()) {
@@ -302,7 +300,7 @@ export class LlmClient {
 
   getModel(): string {
     if (this.legacyBackend) return this.legacyBackend.getModel();
-    return resolveModel(this.config, 'default');
+    return this.providerRegistry.resolve('default').model.id;
   }
 
   supportsStreaming(): boolean {
@@ -324,12 +322,10 @@ export class LlmClient {
       return;
     }
 
-    const resolved = this.providerRegistry?.resolve(tier);
-    const modelId = resolved?.model.id ?? resolveModel(this.config, tier);
-    const model = resolved
-      ? this.providerRegistry!.createModel(tier)
-      : createProviderModel(this.config, tier);
-    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved?.providerKind);
+    const resolved = this.providerRegistry.resolve(tier);
+    const modelId = resolved.model.id;
+    const model = this.providerRegistry.createModel(tier);
+    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved.providerKind);
 
     // Budget pre-check
     if (this.budgetController && options.sessionId) {
@@ -779,7 +775,7 @@ export function createLlmClient(config: LlmConfig, options?: CreateLlmClientOpti
     },
     legacyBackend,
     llmCompletedHook,
-    providerRegistry: options?.providerRegistry,
+    providerRegistry: options?.providerRegistry ?? createProviderRegistry(config, config.channelsConfig),
   });
 }
 
@@ -796,5 +792,5 @@ export function createTestLlmClient(backend: LlmBackend, defaultAgent?: string):
     mode: 'mock',
     maxConcurrentRequests: 10,
   };
-  return new LlmClient(config, { defaultAgent, legacyBackend: backend });
+  return new LlmClient(config, { defaultAgent, legacyBackend: backend, providerRegistry: createProviderRegistry(config, config.channelsConfig) });
 }

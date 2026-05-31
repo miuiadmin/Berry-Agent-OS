@@ -30,7 +30,18 @@ export function registerProviderRoutes(
   getRegistry: () => IProviderRegistry | null | undefined,
   _readBody: (req: IncomingMessage) => Promise<unknown>,
   json: (res: ServerResponse, data: unknown, status?: number) => void,
+  configService?: { updateSection(partial: Record<string, unknown>): { ok: boolean; error?: string } } | null,
 ): void {
+
+  // Helper: persist current registry state to config.yaml
+  const persist = () => {
+    if (!configService) return;
+    const r = getRegistry();
+    if (!r) return;
+    configService.updateSection({
+      llm: { channelsConfig: { channels: r.listChannels(), tiers: r.getTierMapping() } },
+    });
+  };
 
   // ─── List all channels with their models ──────────────────────────
 
@@ -174,6 +185,7 @@ export function registerProviderRoutes(
         enabled: body.enabled !== false,
         models: Array.isArray(body.models) ? body.models : undefined,
       });
+      persist();
       json(res, { ok: true, channelId: body.id });
     } catch (err) {
       logger.debug({ err }, 'Channel creation failed');
@@ -189,6 +201,9 @@ export function registerProviderRoutes(
 
     const body = await _readBody(req) as Record<string, unknown>;
     const updated = registry.updateChannel(params.channelId, body as Partial<import('./types.js').ProviderChannel>);
+    if (!updated) { json(res, { error: 'Channel not found' }, 404); return; }
+    persist();
+    json(res, { ok: true });
     if (!updated) { json(res, { error: 'Channel not found' }, 404); return; }
     json(res, { ok: true });
   });

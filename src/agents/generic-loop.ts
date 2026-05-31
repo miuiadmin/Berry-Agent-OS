@@ -45,7 +45,7 @@ export function startGenericAgent(config: GenericAgentConfig): void {
   initDb();
   const ipc = new IpcChildChannel(name);
   const providerRegistry = createProviderRegistry(appConfig.llm, appConfig.llm.channelsConfig);
-  const llm = createLlmClient(appConfig.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined });
+  const llm = createLlmClient(appConfig.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });

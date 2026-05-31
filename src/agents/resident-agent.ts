@@ -32,7 +32,7 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
   const ipc = new IpcChildChannel(name);
   const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
   const llm: LlmHolder = {
-    current: createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined }),
+    current: createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry }),
   };
 
   ipc.send('agent.register', 'core', { name, pid: process.pid });
@@ -45,7 +45,7 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
   ipc.onMessage('config.llm_update', (msg) => {
     const { llm: newLlmConfig } = msg.payload as { llm: LlmConfig };
     const newRegistry = createProviderRegistry(newLlmConfig, newLlmConfig.channelsConfig);
-    llm.current = createLlmClient(newLlmConfig, { db, ipc, defaultAgent: name, providerRegistry: newRegistry ?? undefined });
+    llm.current = createLlmClient(newLlmConfig, { db, ipc, defaultAgent: name, providerRegistry: newRegistry });
   });
 
   setup({ name, config, ipc, llm, db });

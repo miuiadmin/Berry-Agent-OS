@@ -139,6 +139,7 @@ export class CoreService {
   private capabilityBus: import('../bus/capability-bus.js').CapabilityBus | null = null;
   private willLoop: import('./will-loop.js').WillLoop | null = null;
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
+  private providerRegistryHolder: { current: ProviderRegistry } | null = null;
 
   constructor() {
     this.configService = new ConfigService();
@@ -304,11 +305,19 @@ export class CoreService {
     const providerRegistry = createProviderRegistry(
       this.config.llm,
       this.config.llm.channelsConfig,
+      // onMutate: persist channel/tier changes to config.yaml
+      (channels, tiers) => {
+        this.configService?.updateSection({
+          llm: { channelsConfig: { channels: channels as any, tiers } },
+        } as any);
+      },
     );
+    // Mutable holder — allows hot-rebuild when config.yaml changes
+    this.providerRegistryHolder = { current: providerRegistry };
     const builtinLlm = createLlmClient(this.config.llm, {
       db: getDb(),
       eventBus: this.eventBus,
-      providerRegistry: providerRegistry ?? undefined,
+      providerRegistry,
     });
     runtimeRegistry.register('builtin', new BuiltinDriver(builtinLlm));
 
@@ -550,7 +559,7 @@ export class CoreService {
           templateService,
           asyncDelegationService,
           humanDelegationManager: this.humanDelegationManager,
-          providerRegistry,
+          getProviderRegistry: () => this.providerRegistryHolder!.current,
         },
       });
       await this.webServer.start();
@@ -565,7 +574,7 @@ export class CoreService {
     this.skillWatcher.watch(getSkillsDir());
 
     if (this.config.cron.enabled) {
-      const cronLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus });
+      const cronLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus, providerRegistry: this.providerRegistryHolder!.current });
       this.cronScheduler = new CronScheduler(getDb(), cronLlm, this.skillService!, this.eventBus, this.config.cron);
       this.cronScheduler.start();
       await this.cronScheduler.catchUp();
@@ -573,7 +582,7 @@ export class CoreService {
     }
 
     if (this.config.mcp.servers.length > 0) {
-      const mcpLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus });
+      const mcpLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus, providerRegistry: this.providerRegistryHolder!.current });
       const mcpToolRegistry = new ToolRegistry();
       this.mcpManager = new McpManager(this.eventBus, mcpToolRegistry, mcpLlm);
       await this.mcpManager.start(this.config.mcp.servers);
@@ -993,17 +1002,22 @@ export class CoreService {
   }
 
   /**
-   * Propagate LLM config changes to all running agent child processes.
+   * Propagate LLM config changes to main-process registry and all running agent child processes.
    * Each child process will recreate its ProviderRegistry and LlmClient in-place.
    */
   private propagateLlmConfig(llmConfig: LlmConfig): void {
+    // Rebuild main-process registry so API routes serve fresh data
+    if (this.providerRegistryHolder) {
+      this.providerRegistryHolder.current = createProviderRegistry(llmConfig, llmConfig.channelsConfig);
+    }
+    // Propagate to child processes via IPC
     for (const agent of this.registry.listResident()) {
       const instance = this.agentManager.getAgent(agent.manifest.name);
       if (instance) {
         instance.ipc.send('config.llm_update', agent.manifest.name, { llm: llmConfig });
       }
     }
-    logger.info('LLM config propagated to agent child processes');
+    logger.info('LLM config propagated to all processes');
   }
 }
 

@@ -13,8 +13,14 @@ vi.mock('ai', () => ({
   streamText: vi.fn(),
 }));
 
-vi.mock('./providers.js', () => ({
-  createProviderModel: vi.fn(() => ({ modelId: 'mocked', provider: 'anthropic' })),
+// Mock provider registry — always resolves to a fixed model
+const mockResolved = { channel: { baseUrl: undefined, apiKey: 'key' }, model: { id: 'test-model', name: 'Test', contextWindow: 128000, defaultMaxTokens: 4096, supportsThinking: false, supportsAttachments: false }, providerKind: 'anthropic' as const };
+const mockModel = { modelId: 'test-model' };
+vi.mock('../providers/registry.js', () => ({
+  createProviderRegistry: vi.fn(() => ({
+    resolve: vi.fn(() => mockResolved),
+    createModel: vi.fn(() => mockModel),
+  })),
 }));
 
 import { LlmClient, createTestLlmClient } from './client.js';

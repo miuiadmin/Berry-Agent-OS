@@ -32,5 +32,5 @@ export interface WebServerDependencies {
   asyncDelegationService?: IAsyncDelegationService | null;
   teamBuilderService?: ITeamBuilderService | null;
   humanDelegationManager?: { resolve(id: string, response: string | null, status?: string): boolean } | null;
-  providerRegistry?: IProviderRegistry | null;
+  getProviderRegistry?: () => IProviderRegistry;
 }

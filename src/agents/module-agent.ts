@@ -40,7 +40,7 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
   initDb();
   const ipc = new IpcChildChannel(name);
   const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
-  const llm = createLlmClient(config.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined });
+  const llm = createLlmClient(config.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });

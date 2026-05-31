@@ -19,20 +19,33 @@ import type { ProviderChannel, ModelEntry, TierMapping, ResolvedModel, ProviderK
 import { ChannelsConfigSchema } from './schemas.js';
 import { buildResolverState, resolveTier, resolveChannelModel, type ResolverState } from './resolver.js';
 import { getBuiltinCatalog, mergeCatalog } from './catalogs/index.js';
+import { migrateLegacyConfig, isChannelsEmpty } from './migration.js';
 
 export class ProviderRegistry implements IProviderRegistry {
   private state: ResolverState;
   private rawChannels: ProviderChannel[];
   private rawTiers: TierMapping;
+  private readonly onMutate?: (channels: ProviderChannel[], tiers: TierMapping) => void;
 
-  constructor(llmConfig: LlmConfig, channelsConfig?: unknown) {
+  constructor(llmConfig: LlmConfig, channelsConfig?: unknown, onMutate?: (channels: ProviderChannel[], tiers: TierMapping) => void) {
     // Validate channels config through Zod
     const parsed = channelsConfig
       ? ChannelsConfigSchema.safeParse(channelsConfig)
       : null;
 
-    const validChannels = parsed?.success ? parsed.data : undefined;
+    let validChannels = parsed?.success ? parsed.data : undefined;
 
+    // If no explicit channels, migrate legacy config to synthetic channels
+    if (!validChannels || isChannelsEmpty(validChannels)) {
+      const migrated = migrateLegacyConfig(llmConfig);
+      if (migrated.channels.length > 0) {
+        // Validate migration output through Zod for consistent types
+        const migratedParsed = ChannelsConfigSchema.safeParse(migrated);
+        validChannels = migratedParsed.success ? migratedParsed.data : undefined;
+      }
+    }
+
+    this.onMutate = onMutate;
     this.state = buildResolverState(llmConfig, validChannels);
     this.rawChannels = validChannels?.channels ?? [];
     this.rawTiers = validChannels?.tiers ?? {};
@@ -90,6 +103,7 @@ export class ProviderRegistry implements IProviderRegistry {
     }
     this.state.channels.set(channel.id, channel);
     this.rawChannels.push(channel);
+    this.onMutate?.(this.rawChannels, this.rawTiers);
   }
 
   updateChannel(id: string, updates: Partial<ProviderChannel>): boolean {
@@ -99,6 +113,7 @@ export class ProviderRegistry implements IProviderRegistry {
     this.state.channels.set(id, updated);
     const idx = this.rawChannels.findIndex(c => c.id === id);
     if (idx >= 0) this.rawChannels[idx] = updated;
+    this.onMutate?.(this.rawChannels, this.rawTiers);
     return true;
   }
 
@@ -106,6 +121,7 @@ export class ProviderRegistry implements IProviderRegistry {
     const existed = this.state.channels.has(id);
     this.state.channels.delete(id);
     this.rawChannels = this.rawChannels.filter(c => c.id !== id);
+    if (existed) this.onMutate?.(this.rawChannels, this.rawTiers);
     return existed;
   }
 
@@ -114,6 +130,30 @@ export class ProviderRegistry implements IProviderRegistry {
     if (tiers.default) this.rawTiers.default = tiers.default;
     if (tiers.high) this.rawTiers.high = tiers.high;
     this.state = buildResolverState(this.state.legacyConfig!, { channels: this.rawChannels, tiers: this.rawTiers });
+    this.onMutate?.(this.rawChannels, this.rawTiers);
+  }
+
+  // ─── Hot-reload ──────────────────────────────────────────────────
+
+  /** Rebuild internal resolver state with updated config. */
+  rebuild(llmConfig: LlmConfig, channelsConfig?: unknown): void {
+    const parsed = channelsConfig
+      ? ChannelsConfigSchema.safeParse(channelsConfig)
+      : null;
+
+    let validChannels = parsed?.success ? parsed.data : undefined;
+
+    if (!validChannels || isChannelsEmpty(validChannels)) {
+      const migrated = migrateLegacyConfig(llmConfig);
+      if (migrated.channels.length > 0) {
+        const migratedParsed = ChannelsConfigSchema.safeParse(migrated);
+        validChannels = migratedParsed.success ? migratedParsed.data : undefined;
+      }
+    }
+
+    this.state = buildResolverState(llmConfig, validChannels);
+    this.rawChannels = validChannels?.channels ?? [];
+    this.rawTiers = validChannels?.tiers ?? {};
   }
 
   // ─── SDK Model Factory ──────────────────────────────────────────
@@ -172,24 +212,17 @@ export class ProviderRegistry implements IProviderRegistry {
 
 /**
  * Create a ProviderRegistry from the app config.
- * Returns null if no channels are configured AND legacy config is also empty
- * (i.e., no LLM configuration at all).
+ *
+ * Always returns a non-null registry. When no channelsConfig is provided,
+ * legacy config is automatically migrated to synthetic channels via
+ * migrateLegacyConfig(). When truly no LLM config exists at all, the
+ * registry will have empty channels — resolve() calls will fail with a
+ * clear error message.
  */
 export function createProviderRegistry(
   llmConfig: LlmConfig,
   channelsConfig?: unknown,
-): ProviderRegistry | null {
-  // If there's literally no config at all, return null
-  const hasAnyConfig =
-    llmConfig.apiKey ||
-    llmConfig.model ||
-    llmConfig.providers.anthropic.apiKey ||
-    llmConfig.providers.openai.apiKey ||
-    llmConfig.providers['openai-compatible'].apiKey;
-
-  if (!hasAnyConfig && !channelsConfig) {
-    return null;
-  }
-
-  return new ProviderRegistry(llmConfig, channelsConfig);
+  onMutate?: (channels: ProviderChannel[], tiers: TierMapping) => void,
+): ProviderRegistry {
+  return new ProviderRegistry(llmConfig, channelsConfig, onMutate);
 }
