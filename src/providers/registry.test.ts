@@ -164,23 +164,17 @@ describe('Tier Resolution', () => {
     expect(resolved.providerKind).toBe('anthropic');
   });
 
-  it('falls back to legacy config when no channels', () => {
+  it('returns empty state when no channels configured', () => {
     const config = makeConfig();
     const state = buildResolverState(config, null);
-    const resolved = resolveTier(state, 'default');
-    // Should resolve via legacy path — the default model from config
-    expect(resolved.model.id).toBeTruthy();
-    expect(resolved.channel.id).toBe('anthropic-default');
+    expect(state.channels.size).toBe(0);
+    expect(state.tiers).toEqual({});
   });
 
-  it('falls back to DEFAULT_TIER_MODELS via legacy', () => {
+  it('throws on tier resolution with no channels', () => {
     const config = makeConfig({ apiKey: '', model: '' });
-    config.providers.anthropic.apiKey = '';
     const state = buildResolverState(config, null);
-    // Even with no apiKey, the resolver should still produce a result
-    // (the actual API call would fail, but resolution should succeed)
-    const resolved = resolveTier(state, 'fast');
-    expect(resolved.model.id).toContain('claude');
+    expect(() => resolveTier(state, 'fast')).toThrow();
   });
 
   it('resolves cross-channel tiers', () => {
