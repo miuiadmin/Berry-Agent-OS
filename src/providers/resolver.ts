@@ -39,7 +39,7 @@ export function buildResolverState(
   llmConfig: LlmConfig,
   channelsConfig?: { channels?: ProviderChannel[]; tiers?: TierMapping } | null,
 ): ResolverState {
-  // Try new-format channels first
+  // Only use explicitly configured channels — no legacy migration
   if (channelsConfig && !isChannelsEmpty(channelsConfig)) {
     const channelMap = new Map<string, ProviderChannel>();
     for (const ch of channelsConfig.channels ?? []) {
@@ -52,15 +52,10 @@ export function buildResolverState(
     };
   }
 
-  // Fall back to legacy migration
-  const migrated = migrateLegacyConfig(llmConfig);
-  const channelMap = new Map<string, ProviderChannel>();
-  for (const ch of migrated.channels) {
-    channelMap.set(ch.id, ch);
-  }
+  // No channels configured — return empty state
   return {
-    channels: channelMap,
-    tiers: migrated.tiers,
+    channels: new Map(),
+    tiers: {},
     legacyConfig: llmConfig,
   };
 }
