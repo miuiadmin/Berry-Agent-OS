@@ -1,15 +1,31 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
 
 export function useChatSocket() {
   const {
-    sessionId, addMessage, appendToLast, setLastStatus, setLastProgress, setStreaming,
+    sessionId, addMessage, appendToLast, setLastStatus, setLastProgress, setLastError, setStreaming,
     setPendingDelegation, setPendingPermission,
   } = useChatStore();
-  const { connect, send, onMessage, status } = useWsStore();
+  const { connect, disconnect, send, onMessage, status } = useWsStore();
+
+  // Auto-connect on mount, disconnect on unmount
+  useEffect(() => {
+    connect(sessionId ?? undefined);
+    return () => { disconnect(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Streaming timeout — if no response within 30s, reset streaming state
+  const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     const unsub = onMessage((data) => {
@@ -27,17 +43,20 @@ export function useChatSocket() {
         case "result": {
           setLastStatus("complete");
           setStreaming(false);
+          if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
           break;
         }
         case "error": {
-          setLastStatus("error");
-          setStreaming(false);
+          const errMsg = (data as Record<string, unknown>).error as string || (data as Record<string, unknown>).message as string || "Unknown error";
+          setLastError(errMsg);
+          if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
           break;
         }
         case "cancelled":
         case "interrupted": {
           setLastStatus("complete");
           setStreaming(false);
+          if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
           break;
         }
         case "delegation.needed": {
@@ -55,10 +74,6 @@ export function useChatSocket() {
 
   const sendMessage = useCallback(
     (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
-      if (status !== "connected") {
-        connect(sessionId ?? undefined);
-      }
-
       // Optimistic UI: add messages first
       const userId = `user-${crypto.randomUUID().slice(0, 8)}`;
       const asstId = `asst-${crypto.randomUUID().slice(0, 8)}`;
@@ -81,31 +96,32 @@ export function useChatSocket() {
       });
 
       setStreaming(true);
+
+      // Safety timeout: reset streaming if no response within 30s
+      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+      streamingTimerRef.current = setTimeout(() => {
+        setLastError("Response timed out (30s) — backend may not have LLM configured. Check config.yaml and backend logs.");
+      }, 30000);
+
       try {
         send({ type: "message", text, sessionId, attachments });
       } catch {
-        // If send fails, mark assistant message as error
-        setLastStatus("error");
-        setStreaming(false);
+        setLastError("Failed to send message");
+        if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
       }
     },
-    [status, connect, sessionId, addMessage, setStreaming, send, setLastStatus]
+    [sessionId, addMessage, setStreaming, send, setLastError]
   );
 
   const cancelGeneration = useCallback(() => {
-    if (status === "connected") {
-      send({ type: "interrupt" });
-    }
+    send({ type: "interrupt" });
     setLastStatus("complete");
     setStreaming(false);
-  }, [send, status, setLastStatus, setStreaming]);
+    if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+  }, [send, setLastStatus, setStreaming]);
 
   const resendMessage = useCallback(
     (text: string) => {
-      if (status !== "connected") {
-        connect(sessionId ?? undefined);
-      }
-
       addMessage({
         id: `asst-${crypto.randomUUID().slice(0, 8)}`,
         role: "assistant",
@@ -115,9 +131,15 @@ export function useChatSocket() {
       });
 
       setStreaming(true);
+
+      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+      streamingTimerRef.current = setTimeout(() => {
+        setLastError("Response timed out (30s)");
+      }, 30000);
+
       send({ type: "message", text, sessionId });
     },
-    [status, connect, sessionId, addMessage, setStreaming, send]
+    [sessionId, addMessage, setStreaming, send, setLastError]
   );
 
   const respondDelegation = useCallback(

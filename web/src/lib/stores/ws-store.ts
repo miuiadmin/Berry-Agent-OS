@@ -25,6 +25,16 @@ let reconnectGeneration = 0;
 const MAX_RECONNECT_DELAY = 30000;
 const eventListeners = new Map<string, Set<EventCallback>>();
 const messageHandlers = new Set<(data: Record<string, unknown>) => void>();
+const sendQueue: unknown[] = [];
+
+function flushQueue() {
+  while (sendQueue.length > 0 && ws?.readyState === WebSocket.OPEN) {
+    const msg = sendQueue.shift();
+    if (msg !== undefined) {
+      ws.send(JSON.stringify(msg));
+    }
+  }
+}
 
 function generateSessionId(): string {
   try {
@@ -58,6 +68,8 @@ export const useWsStore = create<WsStore>((set, get) => ({
     socket.onopen = () => {
       set({ status: "connected" });
       reconnectDelay = 1000;
+      // Flush any messages queued while connecting
+      flushQueue();
     };
 
     socket.onmessage = (event) => {
@@ -106,6 +118,7 @@ export const useWsStore = create<WsStore>((set, get) => ({
     }
     ws?.close();
     ws = null;
+    sendQueue.length = 0;
     messageHandlers.clear();
     eventListeners.clear();
     set({ status: "disconnected" });
@@ -114,6 +127,9 @@ export const useWsStore = create<WsStore>((set, get) => ({
   send: (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(data));
+    } else {
+      // Queue — will be flushed when connection opens
+      sendQueue.push(data);
     }
   },
 

@@ -14,6 +14,7 @@ export interface ChatMessage {
   timestamp: number;
   status?: "streaming" | "complete" | "error";
   progress?: string;
+  error?: string;
   attachments?: ChatAttachment[];
 }
 
@@ -49,6 +50,7 @@ interface ChatState {
   appendToLast: (text: string) => void;
   setLastStatus: (status: ChatMessage["status"]) => void;
   setLastProgress: (progress: string) => void;
+  setLastError: (error: string) => void;
   setStreaming: (v: boolean) => void;
   setCurrentTaskId: (id: string | null) => void;
   clearMessages: () => void;
@@ -94,6 +96,15 @@ export const useChatStore = create<ChatState>((set) => ({
         msgs[msgs.length - 1] = { ...last, progress };
       }
       return { messages: msgs };
+    }),
+  setLastError: (error) =>
+    set((s) => {
+      const msgs = [...s.messages];
+      const last = msgs[msgs.length - 1];
+      if (last) {
+        msgs[msgs.length - 1] = { ...last, status: "error", error, progress: undefined };
+      }
+      return { messages: msgs, isStreaming: false };
     }),
   setStreaming: (v) => set({ isStreaming: v }),
   setCurrentTaskId: (id) => set({ currentTaskId: id }),

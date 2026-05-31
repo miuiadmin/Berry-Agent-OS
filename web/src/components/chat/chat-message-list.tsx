@@ -27,6 +27,8 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {
+      // clipboard access denied or insecure context
     });
   }, [text]);
 
@@ -210,16 +212,20 @@ function MessageBubble({
           </div>
         )}
         {isError && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
-            <AlertCircle className="size-3" />
-            <span>Failed to send</span>
-            <button
-              onClick={() => onRetry?.(message.id)}
-              className="ml-1 inline-flex items-center gap-0.5 underline hover:no-underline"
-            >
-              <RotateCcw className="size-2.5" />
-              Retry
-            </button>
+          <div className="mt-2 text-xs text-destructive space-y-1">
+            <div className="flex items-center gap-1.5">
+              <AlertCircle className="size-3 shrink-0" />
+              <span>{message.error || "Failed to send"}</span>
+            </div>
+            {onRetry && (
+              <button
+                onClick={() => onRetry(message.id)}
+                className="inline-flex items-center gap-0.5 underline hover:no-underline"
+              >
+                <RotateCcw className="size-2.5" />
+                Retry
+              </button>
+            )}
           </div>
         )}
         {message.attachments && message.attachments.length > 0 && (

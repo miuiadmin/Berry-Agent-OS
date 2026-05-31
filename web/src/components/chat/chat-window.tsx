@@ -9,9 +9,10 @@ import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { ConnectionStatus } from "@/components/ui/connection-status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck } from "lucide-react";
-import { apiGet, uploadFile } from "@/lib/api";
+import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck, ChevronDown } from "lucide-react";
+import { apiGet, apiPut, uploadFile, queries } from "@/lib/api";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface HistoryMessage {
   role: "user" | "assistant";
@@ -133,6 +134,194 @@ function PermissionConfirmDialog({
   );
 }
 
+// --- Model Selector ---
+
+interface ChannelModel {
+  id: string;
+  name: string;
+}
+
+interface ProviderChannel {
+  id: string;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  modelCount: number;
+  models: ChannelModel[];
+}
+
+function useModelConfig() {
+  const { data: config } = useQuery(queries.config());
+  const { data: channelsData } = useQuery({
+    queryKey: ["providers", "channels"],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/providers/channels");
+        if (!res.ok) return null;
+        return (await res.json()) as { ok: boolean; channels: ProviderChannel[] };
+      } catch { return null; }
+    },
+  });
+  const queryClient = useQueryClient();
+  const llm = config?.llm as Record<string, unknown> | undefined;
+  const currentModel = (llm?.model as string) || "not configured";
+
+  // Flatten all enabled channels' models into one list
+  const channels = channelsData?.channels?.filter(c => c.enabled) ?? [];
+  const allModels = channels.flatMap(ch =>
+    ch.models.map(m => ({ ...m, channelId: ch.id, channelName: ch.name, kind: ch.kind }))
+  );
+
+  const switchModel = useCallback(async (model: string, channelId?: string) => {
+    try {
+      const update: Record<string, unknown> = { ...llm, model };
+      // Update channel if provided
+      if (channelId) {
+        update.channel = channelId;
+      }
+      await apiPut("/api/config", { llm: update });
+      queryClient.invalidateQueries({ queryKey: ["config"] });
+      toast.success(`Switched to ${model}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to switch model");
+    }
+  }, [llm, queryClient]);
+
+  return { currentModel, channels, allModels, switchModel };
+}
+
+function ModelSelector() {
+  const { currentModel, channels, allModels, switchModel } = useModelConfig();
+  const [open, setOpen] = useState(false);
+  const [editModel, setEditModel] = useState("");
+  const [filter, setFilter] = useState("");
+
+  const handleOpen = () => {
+    setEditModel("");
+    setFilter("");
+    setOpen(true);
+  };
+
+  const handleSwitch = (model: string, channelId?: string) => {
+    switchModel(model, channelId);
+    setOpen(false);
+  };
+
+  const handleManualSwitch = () => {
+    const trimmed = editModel.trim();
+    if (!trimmed) return;
+    switchModel(trimmed);
+    setOpen(false);
+  };
+
+  const filtered = filter
+    ? allModels.filter(m =>
+        m.name.toLowerCase().includes(filter.toLowerCase()) ||
+        m.id.toLowerCase().includes(filter.toLowerCase())
+      )
+    : allModels;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={handleOpen}
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[36px] md:min-h-0"
+      >
+        <span className="max-w-[100px] md:max-w-[140px] truncate text-[11px] md:text-xs">{currentModel}</span>
+        <ChevronDown className="size-3" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} />
+          {/* Mobile: bottom sheet | Desktop: dropdown */}
+          <div className="fixed inset-x-0 bottom-0 z-50 md:absolute md:right-0 md:top-full md:bottom-auto md:inset-x-auto md:mt-1 md:w-80 rounded-t-2xl md:rounded-lg border border-border bg-background shadow-lg max-h-[70vh] md:max-h-[400px] flex flex-col">
+            {/* Mobile drag handle */}
+            <div className="flex justify-center pt-2 md:hidden">
+              <div className="w-8 h-1 rounded-full bg-muted-foreground/30" />
+            </div>
+            {/* Header */}
+            <div className="px-4 md:px-3 pt-2 md:pt-3 pb-1 shrink-0">
+              <div className="text-sm font-medium">Switch Model</div>
+              <div className="text-[11px] text-muted-foreground">Current: {currentModel}</div>
+            </div>
+            {/* Search */}
+            <div className="px-4 md:px-3 pb-2 shrink-0">
+              <input
+                type="text"
+                placeholder="Search models..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="w-full rounded-md border border-input bg-muted/50 px-3 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                autoFocus
+              />
+            </div>
+            {/* Model list */}
+            <div className="flex-1 overflow-y-auto px-2 md:px-1">
+              {channels.map(ch => {
+                const chModels = filtered.filter(m => m.channelId === ch.id);
+                if (chModels.length === 0) return null;
+                return (
+                  <div key={ch.id} className="mb-1">
+                    <div className="px-2 py-1 text-[11px] text-muted-foreground font-medium">{ch.name}</div>
+                    {chModels.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleSwitch(m.id, ch.id)}
+                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between min-h-[44px] md:min-h-0"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate">{m.name}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono truncate">{m.id}</div>
+                        </div>
+                        {m.id === currentModel && (
+                          <span className="size-1.5 rounded-full bg-brand shrink-0 ml-2" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+              {filtered.length === 0 && (
+                <div className="px-3 py-4 text-center text-xs text-muted-foreground">
+                  No models found
+                </div>
+              )}
+            </div>
+            {/* Manual input */}
+            <div className="border-t border-border px-4 md:px-3 py-2 shrink-0">
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="Or enter model ID..."
+                  value={editModel}
+                  onChange={(e) => setEditModel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleManualSwitch(); }}
+                  className="flex-1 rounded-md border border-input bg-muted/50 px-2.5 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                />
+                <button
+                  onClick={handleManualSwitch}
+                  disabled={!editModel.trim()}
+                  className="rounded-md px-3 py-2 md:px-2.5 md:py-1.5 text-xs font-medium bg-foreground text-background hover:bg-foreground/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[44px] md:min-h-0"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+            {/* Settings link */}
+            <div className="border-t border-border px-4 md:px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:pb-2 shrink-0">
+              <a href="/settings?tab=providers" className="text-[11px] text-brand hover:underline">
+                Configure providers & API keys → Settings
+              </a>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// --- Chat Window ---
+
 interface ChatWindowProps {
   onToggleSidebar?: () => void;
 }
@@ -252,24 +441,27 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
 
   return (
     <div
-      className="relative flex h-full flex-col"
+      className="relative flex h-full flex-col overflow-x-hidden"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <DragOverlay visible={dragOver} />
-      <div className="flex items-center justify-between border-b px-4 py-2 pt-[calc(0.5rem+env(safe-area-inset-top,0px))] md:pt-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between border-b px-4 py-2 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
           {onToggleSidebar && (
-            <Button variant="ghost" size="icon" className="md:hidden" onClick={onToggleSidebar}>
+            <Button variant="ghost" size="icon" className="md:hidden shrink-0" onClick={onToggleSidebar}>
               <PanelLeft className="size-4" />
             </Button>
           )}
-          <h3 className="text-sm font-medium text-foreground">
+          <h3 className="text-sm font-medium text-foreground truncate">
             {sessionId ? `Session: ${sessionId.slice(0, 12)}...` : "New Conversation"}
           </h3>
         </div>
-        <ConnectionStatus />
+        <div className="flex items-center gap-2">
+          <ModelSelector />
+          <ConnectionStatus />
+        </div>
       </div>
       {renderContent()}
       {pendingDelegation && (

@@ -1,11 +1,20 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import {
   Plus,
@@ -18,6 +27,8 @@ import {
   Zap,
   Brain,
   Crown,
+  Pencil,
+  Save,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -40,6 +51,7 @@ interface ProviderChannel {
   baseUrl?: string;
   apiKey?: string;
   enabled: boolean;
+  configured: boolean;
   modelCount: number;
   models: ModelEntry[];
 }
@@ -96,16 +108,15 @@ const TIER_CONFIG = [
 export function ProvidersTab() {
   const queryClient = useQueryClient();
 
+  // ── Queries ──
   const { data: channelsData, isLoading: channelsLoading } = useQuery({
     queryKey: ["providers", "channels"],
     queryFn: () => apiGet<ChannelsResponse>("/api/providers/channels"),
   });
-
   const { data: tiersData } = useQuery({
     queryKey: ["providers", "tiers"],
     queryFn: () => apiGet<TiersResponse>("/api/providers/tiers"),
   });
-
   const { data: kindsData } = useQuery({
     queryKey: ["providers", "kinds"],
     queryFn: () => apiGet<KindsResponse>("/api/providers/kinds"),
@@ -115,6 +126,56 @@ export function ProvidersTab() {
   const tiers = tiersData?.tiers ?? {};
   const kinds = kindsData?.kinds ?? [];
 
+  // ── Dialog state ──
+  const [channelDialog, setChannelDialog] = useState<"add" | "edit" | null>(null);
+  const [editingChannel, setEditingChannel] = useState<ProviderChannel | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // ── Form state ──
+  const [formKind, setFormKind] = useState("");
+  const [formId, setFormId] = useState("");
+  const [formName, setFormName] = useState("");
+  const [formBaseUrl, setFormBaseUrl] = useState("");
+  const [formApiKey, setFormApiKey] = useState("");
+  const [formEnabled, setFormEnabled] = useState(true);
+
+  // ── Catalog query (fetched when user picks a kind in add mode) ──
+  const { data: catalogData } = useQuery({
+    queryKey: ["providers", "catalogs", formKind],
+    queryFn: () => apiGet<CatalogResponse>(`/api/providers/catalogs/${formKind}`),
+    enabled: channelDialog === "add" && !!formKind,
+  });
+
+  // ── Tier editor state ──
+  const [editingTiers, setEditingTiers] = useState<TierMapping>({});
+  const [tiersInitialized, setTiersInitialized] = useState(false);
+  const [selectedTierChannel, setSelectedTierChannel] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (tiers && !tiersInitialized) {
+      setEditingTiers(tiers);
+      setSelectedTierChannel({
+        fast: tiers.fast?.channel ?? "",
+        default: tiers.default?.channel ?? "",
+        high: tiers.high?.channel ?? "",
+      });
+      setTiersInitialized(true);
+    }
+  }, [tiers, tiersInitialized]);
+
+  // Reset tier editor when server data changes after save
+  useEffect(() => {
+    if (tiersInitialized && tiers) {
+      setEditingTiers(tiers);
+      setSelectedTierChannel({
+        fast: tiers.fast?.channel ?? "",
+        default: tiers.default?.channel ?? "",
+        high: tiers.high?.channel ?? "",
+      });
+    }
+  }, [tiers]);
+
+  // ── Mutations ──
   const testMutation = useMutation({
     mutationFn: async (channelId: string) => {
       return apiPost<{ ok: boolean; message?: string; error?: string }>(
@@ -133,10 +194,132 @@ export function ProvidersTab() {
     },
   });
 
+  const createMutation = useMutation({
+    mutationFn: async (data: {
+      id: string;
+      name: string;
+      kind: string;
+      baseUrl?: string;
+      apiKey?: string;
+      enabled: boolean;
+    }) => {
+      return apiPost<{ ok: boolean; channelId: string }>("/api/providers/channels", data);
+    },
+    onSuccess: () => {
+      toast.success("Channel created");
+      refresh();
+      closeChannelDialog();
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({
+      channelId,
+      updates,
+    }: {
+      channelId: string;
+      updates: Record<string, unknown>;
+    }) => {
+      return apiPut<{ ok: boolean }>(`/api/providers/channels/${channelId}`, updates);
+    },
+    onSuccess: () => {
+      toast.success("Channel updated");
+      refresh();
+      closeChannelDialog();
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (channelId: string) => {
+      return apiDelete(`/api/providers/channels/${channelId}`);
+    },
+    onSuccess: () => {
+      toast.success("Channel deleted");
+      refresh();
+      setDeleteTarget(null);
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  const saveTiersMutation = useMutation({
+    mutationFn: async (t: TierMapping) => {
+      return apiPut<{ ok: boolean; tiers: TierMapping }>("/api/providers/tiers", t);
+    },
+    onSuccess: () => {
+      toast.success("Tier mapping saved");
+      refresh();
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+    },
+  });
+
+  // ── Helpers ──
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["providers"] });
   }, [queryClient]);
 
+  const closeChannelDialog = () => {
+    setChannelDialog(null);
+    setEditingChannel(null);
+    setFormKind("");
+    setFormId("");
+    setFormName("");
+    setFormBaseUrl("");
+    setFormApiKey("");
+    setFormEnabled(true);
+  };
+
+  const openAddDialog = () => {
+    closeChannelDialog();
+    setChannelDialog("add");
+  };
+
+  const openEditDialog = (ch: ProviderChannel) => {
+    closeChannelDialog();
+    setEditingChannel(ch);
+    setFormKind(ch.kind);
+    setFormId(ch.id);
+    setFormName(ch.name);
+    setFormBaseUrl(ch.baseUrl ?? "");
+    setFormApiKey(""); // always blank — server masks it
+    setFormEnabled(ch.enabled);
+    setChannelDialog("edit");
+  };
+
+  const handleChannelSubmit = () => {
+    if (channelDialog === "add") {
+      createMutation.mutate({
+        id: formId.trim(),
+        name: formName.trim() || formId.trim(),
+        kind: formKind,
+        baseUrl: formBaseUrl.trim() || undefined,
+        apiKey: formApiKey.trim() || undefined,
+        enabled: true,
+      });
+    } else if (channelDialog === "edit" && editingChannel) {
+      const updates: Record<string, unknown> = {};
+      if (formName.trim()) updates.name = formName.trim();
+      if (formBaseUrl.trim()) updates.baseUrl = formBaseUrl.trim();
+      if (formApiKey.trim()) updates.apiKey = formApiKey.trim();
+      updates.enabled = formEnabled;
+      updateMutation.mutate({ channelId: editingChannel.id, updates });
+    }
+  };
+
+  const deleteTargetChannel = deleteTarget
+    ? channels.find((c) => c.id === deleteTarget)
+    : null;
+
+  // ── Render ──
   if (channelsLoading) {
     return (
       <div className="space-y-3">
@@ -158,6 +341,15 @@ export function ProvidersTab() {
               Configure LLM providers with API keys and model catalogs
             </p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openAddDialog}
+            className="min-h-[44px] md:min-h-0"
+          >
+            <Plus className="size-4" />
+            Add Channel
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {channels.length === 0 ? (
@@ -166,9 +358,15 @@ export function ProvidersTab() {
               <p className="text-sm text-muted-foreground">
                 No provider channels configured yet.
               </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                Edit your config.yaml to add channels under <code className="font-mono">llm.channels</code>
-              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openAddDialog}
+                className="mt-3 min-h-[44px] md:min-h-0"
+              >
+                <Plus className="size-4" />
+                Add your first channel
+              </Button>
             </div>
           ) : (
             channels.map((ch) => (
@@ -177,6 +375,8 @@ export function ProvidersTab() {
                 channel={ch}
                 onTest={() => testMutation.mutate(ch.id)}
                 isTesting={testMutation.isPending}
+                onEdit={() => openEditDialog(ch)}
+                onDelete={() => setDeleteTarget(ch.id)}
               />
             ))
           )}
@@ -185,47 +385,325 @@ export function ProvidersTab() {
 
       {/* Tier Mapping */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Tier Mapping</CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            Map fast / default / high tiers to specific channel + model combos.
-            Edit in config.yaml under <code className="font-mono">llm.tiers</code>
-          </p>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+          <div>
+            <CardTitle className="text-base">Tier Mapping</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Map fast / default / high tiers to channel + model
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => saveTiersMutation.mutate(editingTiers)}
+            disabled={saveTiersMutation.isPending}
+            className="min-h-[44px] md:min-h-0"
+          >
+            <Save className="size-4" />
+            Save Tiers
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {TIER_CONFIG.map(({ key, label, icon: Icon, color }) => {
-            const target = tiers[key];
-            const channel = target
-              ? channels.find((c) => c.id === target.channel)
-              : null;
+            const channel = selectedTierChannel[key] ?? "";
+            const selectedCh = channels.find((c) => c.id === channel);
+            const models = selectedCh?.models ?? [];
+            const target = editingTiers[key];
 
             return (
               <div
                 key={key}
-                className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5 md:px-3 md:py-2"
+                className="rounded-lg border border-border px-3 py-3 space-y-2"
               >
-                <Icon className={cn("size-4 shrink-0", color)} />
-                <span className="text-sm font-medium w-16 md:w-20 shrink-0">
-                  {label}
-                </span>
-                {target ? (
-                  <div className="flex items-center gap-2 min-w-0 text-sm text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-0.5 text-xs font-mono">
-                      {target.channel}
-                    </span>
-                    <span className="truncate">{target.model}</span>
-                  </div>
-                ) : (
-                  <span className="text-sm text-muted-foreground/60 italic">
-                    Not configured — using defaults
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  <Icon className={cn("size-4 shrink-0", color)} />
+                  <span className="text-sm font-medium">{label}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <select
+                    value={channel}
+                    onChange={(e) => {
+                      const ch = e.target.value;
+                      setSelectedTierChannel((prev) => ({
+                        ...prev,
+                        [key]: ch,
+                      }));
+                      setEditingTiers((prev) => ({
+                        ...prev,
+                        [key]: ch ? { channel: ch, model: "" } : undefined,
+                      }));
+                    }}
+                    className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
+                  >
+                    <option value="">Not configured</option>
+                    {channels.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.kind})
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={target?.model ?? ""}
+                    onChange={(e) => {
+                      const model = e.target.value;
+                      setEditingTiers((prev) => ({
+                        ...prev,
+                        [key]: channel ? { channel, model } : undefined,
+                      }));
+                    }}
+                    disabled={!channel || models.length === 0}
+                    className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 disabled:opacity-50"
+                  >
+                    <option value="">Select model...</option>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             );
           })}
         </CardContent>
       </Card>
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        title="Delete channel"
+        description={`Are you sure you want to delete "${deleteTargetChannel?.name ?? deleteTarget}"? This cannot be undone.`}
+        actionLabel="Delete"
+        onAction={() => {
+          if (deleteTarget) deleteMutation.mutate(deleteTarget);
+        }}
+      />
+
+      {/* Add/Edit dialog */}
+      <ChannelFormDialog
+        mode={channelDialog === "edit" ? "edit" : "add"}
+        open={!!channelDialog}
+        onOpenChange={(open) => {
+          if (!open) closeChannelDialog();
+        }}
+        kinds={kinds}
+        formKind={formKind}
+        setFormKind={setFormKind}
+        formId={formId}
+        setFormId={setFormId}
+        formName={formName}
+        setFormName={setFormName}
+        formBaseUrl={formBaseUrl}
+        setFormBaseUrl={setFormBaseUrl}
+        formApiKey={formApiKey}
+        setFormApiKey={setFormApiKey}
+        formEnabled={formEnabled}
+        setFormEnabled={setFormEnabled}
+        catalogModels={catalogData?.models ?? []}
+        onSubmit={handleChannelSubmit}
+        isPending={createMutation.isPending || updateMutation.isPending}
+      />
     </div>
+  );
+}
+
+// ─── Channel Form Dialog ──────────────────────────────────────────
+
+function ChannelFormDialog({
+  mode,
+  open,
+  onOpenChange,
+  kinds,
+  formKind,
+  setFormKind,
+  formId,
+  setFormId,
+  formName,
+  setFormName,
+  formBaseUrl,
+  setFormBaseUrl,
+  formApiKey,
+  setFormApiKey,
+  formEnabled,
+  setFormEnabled,
+  catalogModels,
+  onSubmit,
+  isPending,
+}: {
+  mode: "add" | "edit";
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  kinds: string[];
+  formKind: string;
+  setFormKind: (v: string) => void;
+  formId: string;
+  setFormId: (v: string) => void;
+  formName: string;
+  setFormName: (v: string) => void;
+  formBaseUrl: string;
+  setFormBaseUrl: (v: string) => void;
+  formApiKey: string;
+  setFormApiKey: (v: string) => void;
+  formEnabled: boolean;
+  setFormEnabled: (v: boolean) => void;
+  catalogModels: ModelEntry[];
+  onSubmit: () => void;
+  isPending: boolean;
+}) {
+  const isEdit = mode === "edit";
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent onClose={() => onOpenChange(false)} className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Edit Channel" : "Add Channel"}</DialogTitle>
+          <DialogDescription>
+            {isEdit
+              ? "Update channel settings. Kind and ID cannot be changed."
+              : "Configure a new LLM provider channel."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+          {/* Kind */}
+          <div className="grid gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Provider Kind
+            </label>
+            <select
+              value={formKind}
+              onChange={(e) => {
+                setFormKind(e.target.value);
+                if (!isEdit) setFormId("");
+              }}
+              disabled={isEdit}
+              className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0 disabled:opacity-50"
+            >
+              <option value="">Select kind...</option>
+              {kinds.map((k) => (
+                <option key={k} value={k}>
+                  {PROVIDER_KIND_LABELS[k] ?? k}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ID */}
+          <div className="grid gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Channel ID
+            </label>
+            <Input
+              value={formId}
+              onChange={(e) => setFormId(e.target.value)}
+              disabled={isEdit}
+              placeholder="e.g. my-anthropic"
+              className="h-10 md:h-8 disabled:opacity-50"
+            />
+          </div>
+
+          {/* Name */}
+          <div className="grid gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Display Name
+            </label>
+            <Input
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="e.g. My Anthropic"
+              className="h-10 md:h-8"
+            />
+          </div>
+
+          {/* Base URL */}
+          <div className="grid gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Base URL (optional)
+            </label>
+            <Input
+              value={formBaseUrl}
+              onChange={(e) => setFormBaseUrl(e.target.value)}
+              placeholder="https://api.example.com/v1"
+              className="h-10 md:h-8"
+            />
+          </div>
+
+          {/* API Key */}
+          <div className="grid gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              API Key {isEdit && "(leave blank to keep current)"}
+            </label>
+            <Input
+              type="password"
+              value={formApiKey}
+              onChange={(e) => setFormApiKey(e.target.value)}
+              placeholder={isEdit ? "••••••••" : "sk-..."}
+              className="h-10 md:h-8"
+            />
+          </div>
+
+          {/* Enabled (edit only) */}
+          {isEdit && (
+            <div className="flex items-center gap-2">
+              <Switch checked={formEnabled} onCheckedChange={setFormEnabled} />
+              <span className="text-sm text-muted-foreground">
+                {formEnabled ? "Enabled" : "Disabled"}
+              </span>
+            </div>
+          )}
+
+          {/* Model catalog preview (add only) */}
+          {!isEdit && formKind && catalogModels.length > 0 && (
+            <div className="rounded-lg border border-border p-3 max-h-40 overflow-y-auto">
+              <p className="text-[11px] font-medium text-muted-foreground mb-2">
+                Built-in models for {PROVIDER_KIND_LABELS[formKind] ?? formKind}:
+              </p>
+              <div className="space-y-1">
+                {catalogModels.map((m) => (
+                  <div
+                    key={m.id}
+                    className="text-xs font-mono text-muted-foreground truncate"
+                  >
+                    {m.id}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="min-h-[44px] md:min-h-0"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                isPending ||
+                !formKind ||
+                !formId ||
+                (!isEdit && !formApiKey)
+              }
+              className="min-h-[44px] md:min-h-0"
+            >
+              {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -235,20 +713,24 @@ function ChannelCard({
   channel,
   onTest,
   isTesting,
+  onEdit,
+  onDelete,
 }: {
   channel: ProviderChannel;
   onTest: () => void;
   isTesting: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="rounded-lg border border-border">
       {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-2.5 md:px-3 md:py-2">
+      <div className="flex items-center gap-2 px-3 py-2.5 md:px-3 md:py-2">
         <button
           onClick={() => setExpanded(!expanded)}
-          className="shrink-0 p-1 rounded hover:bg-accent transition-colors"
+          className="shrink-0 p-1 rounded hover:bg-accent transition-colors size-8 md:size-7 flex items-center justify-center"
         >
           {expanded ? (
             <ChevronDown className="size-4" />
@@ -264,7 +746,7 @@ function ChannelCard({
             <WifiOff className="size-3.5 text-muted-foreground shrink-0" />
           )}
           <span className="text-sm font-medium truncate">{channel.name}</span>
-          <span className="text-[11px] text-muted-foreground font-mono shrink-0">
+          <span className="text-[11px] text-muted-foreground font-mono shrink-0 hidden sm:inline">
             {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
           </span>
         </div>
@@ -276,8 +758,26 @@ function ChannelCard({
         <Button
           variant="ghost"
           size="sm"
+          onClick={onEdit}
+          className="shrink-0 size-8 md:size-7"
+          title="Edit channel"
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDelete}
+          className="shrink-0 size-8 md:size-7 text-muted-foreground"
+          title="Delete channel"
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onTest}
-          disabled={isTesting || !channel.enabled}
+          disabled={isTesting || !channel.configured}
           className="shrink-0 text-xs h-8 md:h-7"
         >
           {isTesting ? "Testing..." : "Test"}
@@ -289,9 +789,15 @@ function ChannelCard({
         <div className="border-t border-border px-3 py-2 max-h-64 overflow-y-auto">
           <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 text-xs">
             <span className="font-medium text-muted-foreground">Model</span>
-            <span className="font-medium text-muted-foreground text-right">Context</span>
-            <span className="font-medium text-muted-foreground text-right">Max Out</span>
-            <span className="font-medium text-muted-foreground text-right">Price (in/out)</span>
+            <span className="font-medium text-muted-foreground text-right">
+              Context
+            </span>
+            <span className="font-medium text-muted-foreground text-right">
+              Max Out
+            </span>
+            <span className="font-medium text-muted-foreground text-right">
+              Price (in/out)
+            </span>
 
             {channel.models.map((m) => (
               <ModelRow key={m.id} model={m} />

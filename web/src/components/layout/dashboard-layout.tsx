@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { AppSidebar } from "./app-sidebar";
-import { MobileBottomNav } from "./mobile-bottom-nav";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 
@@ -45,11 +44,10 @@ export function DashboardLayout() {
           <div className="size-5 rounded-md bg-brand" />
           <span className="text-sm font-semibold">Berry</span>
         </div>
-        <main className="flex-1 overflow-auto pb-16 md:pb-0"><Outlet /></main>
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
       </div>
-
-      {/* Mobile bottom navigation */}
-      <MobileBottomNav onMore={() => setMobileOpen(true)} />
     </div>
   );
 }
