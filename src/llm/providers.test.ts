@@ -37,7 +37,7 @@ describe('createProviderModel', () => {
     createProviderModel(config, 'default');
 
     expect(createAnthropic).toHaveBeenCalledWith({
-      baseURL: 'https://custom.api.com',
+      baseURL: 'https://custom.api.com/v1',
       apiKey: 'sk-test-key',
     });
   });
@@ -58,7 +58,7 @@ describe('createProviderModel', () => {
     createProviderModel(config, 'default');
 
     expect(createOpenAI).toHaveBeenCalledWith({
-      baseURL: 'https://openai.custom.com',
+      baseURL: 'https://openai.custom.com/v1',
       apiKey: 'openai-key',
     });
   });
@@ -79,7 +79,7 @@ describe('createProviderModel', () => {
     createProviderModel(config, 'default');
 
     expect(createOpenAI).toHaveBeenCalledWith({
-      baseURL: 'https://api.deepseek.com',
+      baseURL: 'https://api.deepseek.com/v1',
       apiKey: 'ds-key',
       name: 'openai-compatible',
     });
