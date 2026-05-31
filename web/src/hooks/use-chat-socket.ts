@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef } from "react";
 import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
 
+const STREAMING_TIMEOUT_MS = 30_000;
+const STREAMING_TIMEOUT_MSG = "Response timed out (30s) — backend may not have LLM configured. Check config.yaml and backend logs.";
+const STREAMING_TIMEOUT_RETRY_MSG = "Response timed out (30s)";
+
 export function useChatSocket() {
   const {
     sessionId, addMessage, appendToLast, setLastStatus, setLastProgress, setLastError, setStreaming,
@@ -100,8 +104,8 @@ export function useChatSocket() {
       // Safety timeout: reset streaming if no response within 30s
       if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
       streamingTimerRef.current = setTimeout(() => {
-        setLastError("Response timed out (30s) — backend may not have LLM configured. Check config.yaml and backend logs.");
-      }, 30000);
+        setLastError(STREAMING_TIMEOUT_MSG);
+      }, STREAMING_TIMEOUT);
 
       try {
         send({ type: "message", text, sessionId, attachments });
@@ -134,8 +138,8 @@ export function useChatSocket() {
 
       if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
       streamingTimerRef.current = setTimeout(() => {
-        setLastError("Response timed out (30s)");
-      }, 30000);
+        setLastError(STREAMING_TIMEOUT_RETRY_MSG);
+      }, STREAMING_TIMEOUT);
 
       try {
         send({ type: "message", text, sessionId });

@@ -5,13 +5,14 @@ import type {
   InvokeContext,
 } from './contract.js';
 import { ScopeChecker, type PermissionScope } from './permission-scope.js';
+import type { DangerLevel } from '../utils/types.js';
 
 export interface BrainJudgeAdapter {
   requestJudge(input: {
     sessionId: string;
     agentName: string;
     capabilityName: string;
-    dangerLevel: string;
+    dangerLevel: DangerLevel;
     input: unknown;
     callChain: string[];
     taskContext?: string;

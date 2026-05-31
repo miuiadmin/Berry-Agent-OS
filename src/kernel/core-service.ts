@@ -340,7 +340,7 @@ export class CoreService {
           agentName: input.agentName,
           toolName: input.capabilityName,
           toolInput: typeof input.input === 'string' ? input.input : JSON.stringify(input.input),
-          dangerLevel: input.dangerLevel as any,
+          dangerLevel: input.dangerLevel,
         });
         return { allowed: result.allowed, reason: result.reason };
       },
