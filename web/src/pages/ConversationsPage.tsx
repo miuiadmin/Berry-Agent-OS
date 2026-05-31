@@ -185,6 +185,7 @@ export default function ConversationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label="Export conversation"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleExport(conv);
@@ -195,6 +196,7 @@ export default function ConversationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label="Delete conversation"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);

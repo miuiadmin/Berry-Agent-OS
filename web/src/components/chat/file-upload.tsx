@@ -52,6 +52,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
     <>
       <button
         type="button"
+        aria-label="Attach file"
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}
         className={cn(

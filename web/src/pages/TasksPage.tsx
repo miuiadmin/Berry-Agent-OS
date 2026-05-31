@@ -70,6 +70,7 @@ export default function TasksPage() {
         <select
           value={statusFilter}
           onChange={(e) => handleStatusChange(e.target.value)}
+          aria-label="Filter by status"
           className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
         >
           {STATUS_OPTIONS.map((s) => (
@@ -82,6 +83,7 @@ export default function TasksPage() {
           <select
             value={agentFilter}
             onChange={(e) => handleAgentChange(e.target.value)}
+            aria-label="Filter by agent"
             className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
           >
             <option value="all">All Agents</option>

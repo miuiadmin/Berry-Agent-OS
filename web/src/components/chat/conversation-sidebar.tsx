@@ -166,6 +166,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                   </div>
                   <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all">
                     <button
+                      aria-label="Rename conversation"
                       onClick={(e) => {
                         e.stopPropagation();
                         startEditing(conv);
@@ -175,6 +176,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                       <Pencil className="size-3" />
                     </button>
                     <button
+                      aria-label="Delete conversation"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);

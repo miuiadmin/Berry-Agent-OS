@@ -750,6 +750,8 @@ function ChannelCard({
         <div className="flex items-center gap-2">
           <button
             onClick={() => setExpanded(!expanded)}
+            aria-expanded={expanded}
+            aria-label="Toggle models list"
             className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-11 md:size-7 flex items-center justify-center"
           >
             <ChevronRight className={cn("size-4 transition-transform duration-200", expanded && "rotate-90")} />
@@ -770,10 +772,10 @@ function ChannelCard({
             {channel.modelCount} models
           </span>
           <div className="hidden md:flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-7" title="Edit">
+            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-7" aria-label="Edit channel">
               <Pencil className="size-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-7 text-muted-foreground" title="Delete">
+            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-7 text-muted-foreground" aria-label="Delete channel">
               <Trash2 className="size-3.5" />
             </Button>
             <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-7">
@@ -787,10 +789,10 @@ function ChannelCard({
           <span className="text-xs text-muted-foreground mr-auto">
             {channel.modelCount} models · {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
           </span>
-          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-8" title="Edit">
+          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-8" aria-label="Edit channel">
             <Pencil className="size-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-8 text-muted-foreground" title="Delete">
+          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-8 text-muted-foreground" aria-label="Delete channel">
             <Trash2 className="size-3.5" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-8">
