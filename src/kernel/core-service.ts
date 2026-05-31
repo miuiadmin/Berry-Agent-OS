@@ -135,8 +135,8 @@ export class CoreService {
   private logLevelResetTimer: ReturnType<typeof setTimeout> | null = null;
   private terminalRenderer: TerminalRenderer | null = null;
   private messageBus: MessageBus;
-  private capabilityBus: any = null;
-  private willLoop: any = null;
+  private capabilityBus: import('../bus/capability-bus.js').CapabilityBus | null = null;
+  private willLoop: import('./will-loop.js').WillLoop | null = null;
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
