@@ -332,7 +332,7 @@ export default function HomePage() {
                   const Icon = getEventIcon(ev.event);
                   const colorClass = getEventColor(ev.event);
                   return (
-                    <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs", i === 0 && "animate-slide-left")}>
+                    <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs min-w-0", i === 0 && "animate-slide-left")}>
                       <Icon className={`size-3.5 shrink-0 ${colorClass}`} />
                       <span className="text-muted-foreground shrink-0">
                         {new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}

@@ -155,7 +155,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                 </div>
               ) : (
                 <>
-                  <div className="truncate font-medium pr-12">
+                  <div className="truncate font-medium pr-20 md:pr-12">
                     {conv.title || (conv.firstMessage
                       ? conv.firstMessage.slice(0, 40) + (conv.firstMessage.length > 40 ? "..." : "")
                       : conv.sessionId.slice(0, 16))}
@@ -170,7 +170,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                         e.stopPropagation();
                         startEditing(conv);
                       }}
-                      className="rounded-md p-2 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent"
+                      className="rounded-md p-2 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent flex items-center justify-center"
                     >
                       <Pencil className="size-3" />
                     </button>
@@ -179,7 +179,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);
                       }}
-                      className="rounded-md p-2 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10"
+                      className="rounded-md p-2 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10 flex items-center justify-center"
                     >
                       <Trash2 className="size-3" />
                     </button>

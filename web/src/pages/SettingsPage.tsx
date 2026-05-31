@@ -170,7 +170,7 @@ function SettingsContent() {
       <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
         <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">Settings</h1>
         <div className="relative md:contents">
-          <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
+          <nav className="flex md:flex-col gap-2 md:gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.key;
