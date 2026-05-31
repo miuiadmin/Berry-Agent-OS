@@ -1,0 +1,41 @@
+apiVersion: berry.agent.v1
+name: evolution
+version: "0.1.0"
+description: "进化智能：决策反馈评估、Skill 生成/更新、能力缺口检测、指标分析、产出 insight"
+level: 3
+kind: on-demand
+source: bundled
+taskTypes:
+  - extract_feedback
+  - generate_skill
+  - detect_gap
+  - analyze_metrics
+  - produce_insight
+roles: []
+entry: entry.ts
+ipcProtocol: module-agent
+requiresBrainReview: false
+capabilitiesProvided:
+  - name: extract_feedback
+    description: "评估 Brain 本轮决策是否正确，写回 outcome"
+    dangerLevel: safe
+  - name: generate_skill
+    description: "从对话中提炼 Skill（patch/extend/create）"
+    dangerLevel: moderate
+  - name: detect_gap
+    description: "检测现有能力覆盖不了的缺口"
+    dangerLevel: safe
+  - name: analyze_metrics
+    description: "深度分析异常指标的根因"
+    dangerLevel: safe
+  - name: produce_insight
+    description: "向 brain_decisions 写入聚合经验"
+    dangerLevel: safe
+capabilitiesRequired:
+  - query_brain_decisions
+  - record_brain_decision
+  - get_metrics
+  - memory_read
+  - skill_manage
+modelTier: default
+maxTurns: 10
