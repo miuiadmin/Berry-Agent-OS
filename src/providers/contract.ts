@@ -47,4 +47,18 @@ export interface IProviderRegistry {
 
   /** Get the built-in model catalog for a provider kind */
   getBuiltinCatalog(kind: ProviderKind): ModelEntry[];
+
+  // ─── Mutations (runtime channel management) ─────────────────────
+
+  /** Add a new channel at runtime */
+  addChannel(channel: ProviderChannel): void;
+
+  /** Update an existing channel */
+  updateChannel(id: string, updates: Partial<ProviderChannel>): boolean;
+
+  /** Remove a channel */
+  removeChannel(id: string): boolean;
+
+  /** Update the tier mapping */
+  setTierMapping(tiers: Partial<TierMapping>): void;
 }

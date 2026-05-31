@@ -75,9 +75,15 @@ function md5(text: string): string {
 
 // === Phase 2: Iterative LLM Summary ===
 
+const DEFAULT_CONTEXT_WINDOW = 200_000;
 const CAPACITY_THRESHOLD = 0.8;
 const SUMMARY_BUDGET_RATIO = 0.05;
 const MAX_SUMMARY_TOKENS = 12_000;
+
+export interface CompressionConfig {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+}
 
 export interface CompressionState {
   previousSummary: string | null;

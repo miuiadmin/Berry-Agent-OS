@@ -138,4 +138,63 @@ export function registerProviderRoutes(
       });
     }
   });
+
+  // ─── Create channel ──────────────────────────────────────────────
+
+  route('POST', '/providers/channels', async (req, res) => {
+    const registry = getRegistry();
+    if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
+
+    const body = await _readBody(req) as Record<string, unknown>;
+    if (!body.id || !body.kind) { json(res, { error: 'Missing required fields: id, kind' }, 400); return; }
+
+    try {
+      registry.addChannel({
+        id: String(body.id),
+        name: String(body.name ?? body.id),
+        kind: body.kind as ProviderKind,
+        baseUrl: body.baseUrl ? String(body.baseUrl) : undefined,
+        apiKey: body.apiKey ? String(body.apiKey) : undefined,
+        enabled: body.enabled !== false,
+        models: Array.isArray(body.models) ? body.models : undefined,
+      });
+      json(res, { ok: true, channelId: body.id });
+    } catch (err) {
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // ─── Update channel ──────────────────────────────────────────────
+
+  route('PUT', '/providers/channels/:channelId', async (req, res, _url, params) => {
+    const registry = getRegistry();
+    if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
+
+    const body = await _readBody(req) as Record<string, unknown>;
+    const updated = registry.updateChannel(params.channelId, body as any);
+    if (!updated) { json(res, { error: 'Channel not found' }, 404); return; }
+    json(res, { ok: true });
+  });
+
+  // ─── Delete channel ──────────────────────────────────────────────
+
+  route('DELETE', '/providers/channels/:channelId', (_req, res, _url, params) => {
+    const registry = getRegistry();
+    if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
+
+    const removed = registry.removeChannel(params.channelId);
+    if (!removed) { json(res, { error: 'Channel not found' }, 404); return; }
+    json(res, { ok: true });
+  });
+
+  // ─── Update tier mapping ─────────────────────────────────────────
+
+  route('PUT', '/providers/tiers', async (req, res) => {
+    const registry = getRegistry();
+    if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
+
+    const body = await _readBody(req) as Record<string, unknown>;
+    registry.setTierMapping(body as any);
+    json(res, { ok: true, tiers: registry.getTierMapping() });
+  });
 }

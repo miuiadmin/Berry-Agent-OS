@@ -75,6 +75,40 @@ export class ProviderRegistry implements IProviderRegistry {
     return getBuiltinCatalog(kind);
   }
 
+  // ─── Mutations (runtime channel management) ─────────────────────
+
+  addChannel(channel: ProviderChannel): void {
+    if (this.state.channels.has(channel.id)) {
+      throw new Error(`Channel "${channel.id}" already exists`);
+    }
+    this.state.channels.set(channel.id, channel);
+    this.rawChannels.push(channel);
+  }
+
+  updateChannel(id: string, updates: Partial<ProviderChannel>): boolean {
+    const existing = this.state.channels.get(id);
+    if (!existing) return false;
+    const updated = { ...existing, ...updates, id };
+    this.state.channels.set(id, updated);
+    const idx = this.rawChannels.findIndex(c => c.id === id);
+    if (idx >= 0) this.rawChannels[idx] = updated;
+    return true;
+  }
+
+  removeChannel(id: string): boolean {
+    const existed = this.state.channels.has(id);
+    this.state.channels.delete(id);
+    this.rawChannels = this.rawChannels.filter(c => c.id !== id);
+    return existed;
+  }
+
+  setTierMapping(tiers: Partial<TierMapping>): void {
+    if (tiers.fast) this.rawTiers.fast = tiers.fast;
+    if (tiers.default) this.rawTiers.default = tiers.default;
+    if (tiers.high) this.rawTiers.high = tiers.high;
+    this.state = buildResolverState(this.state.legacyConfig!, { channels: this.rawChannels, tiers: this.rawTiers });
+  }
+
   // ─── SDK Model Factory ──────────────────────────────────────────
 
   private createSdkModel(resolved: ResolvedModel): LanguageModelV3 {
