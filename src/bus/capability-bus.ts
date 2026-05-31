@@ -39,10 +39,15 @@ export class CapabilityBus implements ICapabilityBus {
       throw new Error(`Capability "${capability.name}" already registered`);
     }
     this.registry.set(capability.name, { descriptor: capability, executor });
+    this.emit('capability.registered', { name: capability.name, provider: capability.provider });
   }
 
   unregister(name: string): void {
+    const had = this.registry.has(name);
     this.registry.delete(name);
+    if (had) {
+      this.emit('capability.unregistered', { name });
+    }
   }
 
   has(name: string): boolean {

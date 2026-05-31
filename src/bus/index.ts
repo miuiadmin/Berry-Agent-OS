@@ -31,3 +31,5 @@ export { LifecycleEventManager } from './lifecycle.js';
 export type { LifecycleEventType } from './lifecycle.js';
 export { ScopeChecker } from './permission-scope.js';
 export type { PermissionScope } from './permission-scope.js';
+export { scanCapabilityDescription, scanAgentYaml } from './security-scanner.js';
+export type { ScanResult } from './security-scanner.js';
