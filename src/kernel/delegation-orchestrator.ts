@@ -1482,19 +1482,22 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             logger.debug('text_delta dropped: no taskId');
             return;
           }
+          let pending: PendingRequest | null | undefined;
+          // Chat route: no delegation entry, look up pending by taskId directly
           const entry = this.delegationManager.get(payload.taskId);
-          if (!entry) {
-            logger.debug({ taskId: payload.taskId }, 'text_delta dropped: delegation entry not found');
-            return;
+          if (entry) {
+            this.delegationManager.recordOutput(payload.taskId, { delegationId: payload.taskId, kind: 'text_delta', data: { text: payload.text } });
+            pending = this.sessionManager.getPending(entry.correlationId);
+          } else {
+            // Fallback: find pending request that matches this taskId
+            pending = this.sessionManager.findPendingByTaskId(payload.taskId);
           }
-          this.delegationManager.recordOutput(payload.taskId, { delegationId: payload.taskId, kind: 'text_delta', data: { text: payload.text } });
-          const pending = this.sessionManager.getPending(entry.correlationId);
           if (!pending?.streaming) {
-            logger.debug({ correlationId: entry.correlationId }, 'text_delta dropped: pending not streaming');
+            logger.debug({ taskId: payload.taskId }, 'text_delta dropped: pending not streaming or not found');
             return;
           }
           if (!pending.socket || pending.socket.destroyed) {
-            logger.debug({ correlationId: entry.correlationId }, 'text_delta dropped: socket unavailable');
+            logger.debug({ taskId: payload.taskId }, 'text_delta dropped: socket unavailable');
             return;
           }
           const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };

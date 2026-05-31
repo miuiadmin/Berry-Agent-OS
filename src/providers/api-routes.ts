@@ -112,8 +112,13 @@ export function registerProviderRoutes(
     if (!channel) { json(res, { error: 'Channel not found' }, 404); return; }
 
     try {
-      const models = registry.getModels(channel.id);
-      const testModelId = models[0]?.id;
+      // Prefer the model actually configured in tiers for this channel;
+      // fall back to the first user-defined model, then first catalog model.
+      const tiers = registry.getTierMapping();
+      const tierEntry = Object.values(tiers).find(t => t.channel === channel.id);
+      const userModelIds = channel.models?.map(m => m.id) ?? [];
+      const catalogModels = registry.getModels(channel.id);
+      const testModelId = tierEntry?.model ?? userModelIds[0] ?? catalogModels[0]?.id;
       if (!testModelId) {
         json(res, { ok: false, error: 'No models available for testing' });
         return;
