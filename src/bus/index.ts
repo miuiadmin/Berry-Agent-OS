@@ -25,3 +25,9 @@ export { registerPluginToolsAsBusCapabilities, unregisterPluginFromBus } from '.
 export type { PluginToolInfo, IPluginInvoker } from './plugin-adapter.js';
 export { registerPermissionCapabilities } from './permission-capability.js';
 export type { PermissionCapabilityDeps } from './permission-capability.js';
+export { TransactionManager } from './transaction.js';
+export type { BusTransaction } from './transaction.js';
+export { LifecycleEventManager } from './lifecycle.js';
+export type { LifecycleEventType } from './lifecycle.js';
+export { ScopeChecker } from './permission-scope.js';
+export type { PermissionScope } from './permission-scope.js';

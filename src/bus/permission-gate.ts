@@ -4,6 +4,7 @@ import type {
   CapabilityDescriptor,
   InvokeContext,
 } from './contract.js';
+import { ScopeChecker, type PermissionScope } from './permission-scope.js';
 
 export interface BrainJudgeAdapter {
   requestJudge(input: {
@@ -19,9 +20,18 @@ export interface BrainJudgeAdapter {
 
 export class PermissionGate implements IPermissionGate {
   private brainJudge: BrainJudgeAdapter | null = null;
+  private activeScopeCheckers = new Map<string, ScopeChecker>();
 
   setBrainJudge(judge: BrainJudgeAdapter): void {
     this.brainJudge = judge;
+  }
+
+  setScope(sessionId: string, scope: PermissionScope): void {
+    this.activeScopeCheckers.set(sessionId, new ScopeChecker(scope));
+  }
+
+  clearScope(sessionId: string): void {
+    this.activeScopeCheckers.delete(sessionId);
   }
 
   async check(
@@ -31,6 +41,15 @@ export class PermissionGate implements IPermissionGate {
   ): Promise<PermissionGateDecision> {
     if (capability.dangerLevel === 'safe') {
       return { allowed: true, reason: 'safe capability', source: 'auto' };
+    }
+
+    // Check PermissionScope first — in-scope operations pass without Brain judge
+    const scopeChecker = this.activeScopeCheckers.get(ctx.sessionId);
+    if (scopeChecker) {
+      const scopeResult = scopeChecker.check(capability.name, capability.dangerLevel, input);
+      if (scopeResult.inScope) {
+        return { allowed: true, reason: `in scope: ${capability.name}`, source: 'auto' };
+      }
     }
 
     if (!this.brainJudge) {
