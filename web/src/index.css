@@ -170,7 +170,7 @@ body {
     animation: overlay-in 0.15s ease-out both;
   }
   .animate-shimmer {
-    background: linear-gradient(90deg, var(--muted) 25%, var(--accent) 50%, var(--muted) 75%);
+    background: linear-gradient(90deg, var(--muted) 25%, var(--border) 50%, var(--muted) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
   }

@@ -116,7 +116,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search..."
-            className="h-9 md:h-8 pl-8 text-[16px] md:text-xs"
+            className="h-11 md:h-8 pl-8 text-[16px] md:text-xs"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
         </div>
@@ -144,7 +144,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                       if (e.key === "Enter") submitRename();
                       if (e.key === "Escape") setEditingId(null);
                     }}
-                    className="flex-1 bg-background border rounded px-1.5 py-0.5 text-xs outline-none focus:ring-1 focus:ring-ring"
+                    className="flex-1 bg-background border rounded px-2 py-1.5 min-h-[44px] md:min-h-0 md:px-1.5 md:py-0.5 text-[16px] md:text-xs outline-none focus:ring-1 focus:ring-ring"
                   />
                   <button onClick={submitRename} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
                     <Check className="size-3" />

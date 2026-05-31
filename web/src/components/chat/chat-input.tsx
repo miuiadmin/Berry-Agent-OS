@@ -85,7 +85,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               placeholder="Type a message..."
               rows={1}
               className={cn(
-                "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed outline-none",
+                "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none",
                 "placeholder:text-muted-foreground"
               )}
             />

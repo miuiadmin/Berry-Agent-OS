@@ -256,7 +256,7 @@ function ModelSelector() {
               />
             </div>
             {/* Model list */}
-            <div className="flex-1 overflow-y-auto px-2 md:px-1">
+            <div className="flex-1 overflow-y-auto overscroll-contain px-2 md:px-1">
               {channels.map(ch => {
                 const chModels = filtered.filter(m => m.channelId === ch.id);
                 if (chModels.length === 0) return null;
@@ -375,6 +375,18 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     if (!sessionId || messages.length > 0) return;
     loadHistory();
   }, [sessionId, messages.length, loadHistory]);
+
+  // If no session after mount, restore the most recent conversation
+  useEffect(() => {
+    if (sessionId || messages.length > 0) return;
+    apiGet<Array<{ sessionId: string }>>("/api/conversations?limit=1")
+      .then((list) => {
+        if (list?.length && !useChatStore.getState().sessionId) {
+          useChatStore.getState().setSessionId(list[0].sessionId);
+        }
+      })
+      .catch(() => {});
+  }, [sessionId, messages.length]);
 
   const handleRetry = useCallback((errorMsgId: string) => {
     const msgs = useChatStore.getState().messages;
