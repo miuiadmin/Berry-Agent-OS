@@ -98,7 +98,7 @@ export default function AgentsPage() {
                           <Bot className="size-4 text-brand" />
                           <CardTitle>{agent.name}</CardTitle>
                         </div>
-                        <Badge variant={agent.status === "enabled" ? "success" : "secondary"}>
+                        <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">
                           {agent.status === "enabled" ? "Active" : "Disabled"}
                         </Badge>
                       </div>
@@ -207,7 +207,7 @@ function AgentDetailView({
   }, [agent.name, subscribe]);
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 animate-page-in">
       <Button variant="ghost" size="default" className="mb-4" onClick={onBack}>
         <ArrowLeft className="size-4" />
         Back to Agents
@@ -215,7 +215,7 @@ function AgentDetailView({
 
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-semibold">{agent.name}</h1>
-        <Badge variant={agent.status === "enabled" ? "success" : "secondary"}>
+        <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">
           {agent.status === "enabled" ? "Active" : "Disabled"}
         </Badge>
         <Button

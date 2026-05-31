@@ -2,12 +2,19 @@
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useCountUp } from "@/hooks/use-count-up";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AreaChart } from "@/components/charts/area-chart";
 import { BarChart } from "@/components/charts/bar-chart";
 import { Sparkline } from "@/components/charts/sparkline";
 import { Coins, TrendingUp, Cpu, Bot } from "lucide-react";
+
+function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
+  const animated = useCountUp(value);
+  const display = format ? format(animated) : String(animated);
+  return <span className="tabular-nums">{display}</span>;
+}
 
 export default function UsagePage() {
   useDocumentTitle("Usage");
@@ -42,7 +49,7 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-7 w-20" /> : (
               <>
-                <p className="text-2xl font-bold tabular-nums">{formatTokens(data?.today.totalTokens ?? 0)}</p>
+                <p className="text-2xl font-bold tabular-nums"><AnimatedStat value={data?.today.totalTokens ?? 0} format={formatTokens} /></p>
                 <p className="text-xs text-muted-foreground">${(data?.today.costUsd ?? 0).toFixed(4)} est.</p>
               </>
             )}
@@ -59,7 +66,7 @@ export default function UsagePage() {
           <CardContent>
             {isLoading ? <Skeleton className="h-7 w-20" /> : (
               <>
-                <p className="text-2xl font-bold tabular-nums">{formatTokens(data?.period.totalTokens ?? 0)}</p>
+                <p className="text-2xl font-bold tabular-nums"><AnimatedStat value={data?.period.totalTokens ?? 0} format={formatTokens} /></p>
                 <p className="text-xs text-muted-foreground">${(data?.period.costUsd ?? 0).toFixed(4)} est.</p>
               </>
             )}
@@ -77,7 +84,7 @@ export default function UsagePage() {
             {isLoading ? <Skeleton className="h-7 w-24" /> : (
               <>
                 <p className="text-base sm:text-lg font-bold tabular-nums">
-                  {formatTokens(data?.period.inputTokens ?? 0)} / {formatTokens(data?.period.outputTokens ?? 0)}
+                  <AnimatedStat value={data?.period.inputTokens ?? 0} format={formatTokens} /> / <AnimatedStat value={data?.period.outputTokens ?? 0} format={formatTokens} />
                 </p>
                 <p className="text-xs text-muted-foreground">in / out (7d)</p>
               </>

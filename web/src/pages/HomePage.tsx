@@ -201,7 +201,9 @@ export default function HomePage() {
               <Skeleton className="h-7 w-16" />
             ) : (
               <>
-                <p className="text-2xl font-bold">{activeAgents}/{totalAgents}</p>
+                <p className="text-2xl font-bold">
+                  <AnimatedStat value={activeAgents} />/<AnimatedStat value={totalAgents} />
+                </p>
                 <p className="text-xs text-muted-foreground">active / total</p>
               </>
             )}
@@ -217,7 +219,9 @@ export default function HomePage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{runningData?.total ?? 0}</p>
+            <p className="text-2xl font-bold">
+              <AnimatedStat value={runningData?.total ?? 0} />
+            </p>
             <p className="text-xs text-muted-foreground">tasks in progress</p>
           </CardContent>
         </Card>
@@ -234,11 +238,11 @@ export default function HomePage() {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1">
                 <CheckCircle className="size-3 text-success" />
-                <span className="text-sm font-medium">{completedData?.total ?? 0}</span>
+                <span className="text-sm font-medium"><AnimatedStat value={completedData?.total ?? 0} /></span>
               </div>
               <div className="flex items-center gap-1">
                 <XCircle className="size-3 text-destructive" />
-                <span className="text-sm font-medium">{failedData?.total ?? 0}</span>
+                <span className="text-sm font-medium"><AnimatedStat value={failedData?.total ?? 0} /></span>
               </div>
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -261,7 +265,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold tabular-nums">
-              {formatTokenCount(usageData?.today.totalTokens ?? 0)}
+              <AnimatedStat value={usageData?.today.totalTokens ?? 0} format={formatTokenCount} />
             </p>
             <p className="text-xs text-muted-foreground">
               today (${(usageData?.today.costUsd ?? 0).toFixed(3)})
@@ -328,7 +332,7 @@ export default function HomePage() {
                   const Icon = getEventIcon(ev.event);
                   const colorClass = getEventColor(ev.event);
                   return (
-                    <div key={i} className="flex items-center gap-2 text-xs">
+                    <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs", i === 0 && "animate-slide-left")}>
                       <Icon className={`size-3.5 shrink-0 ${colorClass}`} />
                       <span className="text-muted-foreground shrink-0">
                         {new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -363,7 +367,7 @@ function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.Comp
   return (
     <Link
       to={href}
-      className="flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm hover:bg-accent active:bg-accent active:scale-[0.97] transition-all"
+      className="flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm hover:-translate-y-0.5 hover:shadow-sm hover:border-ring/30 active:translate-y-0 active:scale-[0.97] transition-all duration-200"
     >
       <Icon className="size-4 text-muted-foreground" />
       {label}
@@ -381,10 +385,4 @@ function formatUptime(seconds: number | undefined | null): string {
   if (hours < 24) return `${hours}h ${remainMin}m`;
   const days = Math.floor(hours / 24);
   return `${days}d ${hours % 24}h`;
-}
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }

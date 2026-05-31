@@ -31,12 +31,13 @@ export function MobileBottomNav({ onMore }: MobileBottomNavProps) {
             key={item.href}
             to={item.href}
             className={cn(
-              "flex flex-col items-center gap-0.5 px-3 py-2 min-w-[44px] min-h-[44px] justify-center transition-colors",
+              "relative flex flex-col items-center gap-0.5 px-3 py-2 min-w-[44px] min-h-[44px] justify-center transition-colors",
               isActive ? "text-foreground" : "text-muted-foreground",
             )}
           >
             <item.icon className="size-5" />
-            <span className="text-[10px] leading-tight">{item.label}</span>
+            <span className="text-[11px] leading-tight">{item.label}</span>
+            {isActive && <span className="absolute bottom-1 h-1 w-1 rounded-full bg-foreground animate-bounce-in" />}
           </Link>
         );
       })}
@@ -45,7 +46,7 @@ export function MobileBottomNav({ onMore }: MobileBottomNavProps) {
         className="flex flex-col items-center gap-0.5 px-3 py-2 min-w-[44px] min-h-[44px] justify-center text-muted-foreground transition-colors"
       >
         <MoreHorizontal className="size-5" />
-        <span className="text-[10px] leading-tight">More</span>
+        <span className="text-[11px] leading-tight">More</span>
       </button>
     </nav>
   );
