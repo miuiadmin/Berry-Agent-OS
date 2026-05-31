@@ -5,6 +5,9 @@ import { getConfigPath } from '../utils/paths.js';
 import { LlmConfigSchema } from '../llm/types.js';
 import { CronConfigSchema } from '../cron/types.js';
 import { McpConfigSchema } from '../mcp/contract.js';
+import { getLogger } from '../observability/logger.js';
+
+const logger = getLogger('config');
 
 const ToolLoopSchema = z.object({
   maxCalls: z.number().default(20),
@@ -128,7 +131,7 @@ export function loadConfig(): AppConfig {
       const raw = readFileSync(configPath, 'utf-8');
       fileData = parseYaml(raw) ?? {};
     } catch (err) {
-      console.error(`[config] 配置文件解析失败 (${configPath}): ${err instanceof Error ? err.message : String(err)}，使用默认值`);
+      logger.error({ err, configPath }, '配置文件解析失败，使用默认值');
       fileData = {};
     }
   }

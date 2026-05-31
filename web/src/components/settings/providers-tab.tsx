@@ -749,13 +749,9 @@ function ChannelCard({
         <div className="flex items-center gap-2">
           <button
             onClick={() => setExpanded(!expanded)}
-            className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-8 md:size-7 flex items-center justify-center"
+            className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-11 md:size-7 flex items-center justify-center"
           >
-            {expanded ? (
-              <ChevronDown className="size-4" />
-            ) : (
-              <ChevronRight className="size-4" />
-            )}
+            <ChevronRight className={cn("size-4 transition-transform duration-200", expanded && "rotate-90")} />
           </button>
 
           {channel.enabled ? (

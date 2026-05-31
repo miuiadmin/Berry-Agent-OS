@@ -220,7 +220,7 @@ function SettingsContent() {
                   Save
                 </Button>
                 {hasChanges && (
-                  <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-amber-500" />
+                  <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-amber-500 animate-pulse-dot" />
                 )}
               </div>
             </div>
@@ -235,12 +235,14 @@ function SettingsContent() {
           {isLoading ? (
             <SettingsSkeleton />
           ) : (
-            <TabContent
-              tab={activeTab}
-              config={editedConfig}
-              onUpdate={updateField}
-              errors={errors}
-            />
+            <div key={activeTab} className="animate-fade-in">
+              <TabContent
+                tab={activeTab}
+                config={editedConfig}
+                onUpdate={updateField}
+                errors={errors}
+              />
+            </div>
           )}
         </div>
       </div>

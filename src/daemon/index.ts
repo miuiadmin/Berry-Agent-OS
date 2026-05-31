@@ -2,13 +2,16 @@ import { DaemonProcess } from './daemon-process.js';
 import { DEFAULT_DAEMON_CONFIG, type DaemonConfig } from './config.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { getLogger } from '../observability/logger.js';
+
+const logger = getLogger('daemon');
 
 function loadDaemonConfig(): DaemonConfig {
   if (process.env.DAEMON_CONFIG_JSON) {
     try {
       return { ...DEFAULT_DAEMON_CONFIG, ...JSON.parse(process.env.DAEMON_CONFIG_JSON) };
     } catch (err) {
-      console.warn(`[daemon] Failed to parse DAEMON_CONFIG_JSON: ${err instanceof Error ? err.message : err}`);
+      logger.warn({ err }, 'Failed to parse DAEMON_CONFIG_JSON');
     }
   }
 
@@ -19,7 +22,7 @@ function loadDaemonConfig(): DaemonConfig {
       const raw = readFileSync(configPath, 'utf-8');
       return { ...DEFAULT_DAEMON_CONFIG, ...JSON.parse(raw) };
     } catch (err) {
-      console.warn(`[daemon] Failed to load config from ${configPath}: ${err instanceof Error ? err.message : err}`);
+      logger.warn({ err, configPath }, 'Failed to load daemon config from file');
     }
   }
 

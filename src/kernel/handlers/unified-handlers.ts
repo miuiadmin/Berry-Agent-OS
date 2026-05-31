@@ -1,7 +1,7 @@
 import type { Socket } from 'node:net';
 import type { MessageBus } from '../message-bus.js';
 import type { ServiceContainer } from '../service-container.js';
-import type { SocketMessageType, MessageContext } from '../../contracts/messages.js';
+import type { SocketMessageType, MessageContext, MessageType } from '../../contracts/messages.js';
 import type {
   DaemonRegisterMessage,
   DaemonHeartbeatMessage,
@@ -511,7 +511,7 @@ export const daemonHandlers: HandlerDefinition[] = [
 export function registerAllHandlers(bus: MessageBus, services: ServiceContainer, includeDaemon: boolean): void {
   const all = includeDaemon ? [...socketHandlers, ...daemonHandlers] : socketHandlers;
   for (const { type, handler } of all) {
-    const prefixed = `socket:${type}` as any;
+    const prefixed = `socket:${type}` as SocketMessageType;
     bus.handle(prefixed, (payload: Record<string, unknown>, ctx: MessageContext) => {
       return handler(payload, ctx, services);
     });
