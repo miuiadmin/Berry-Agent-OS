@@ -1,7 +1,9 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
 import { initDb, getDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
-import { loadConfig } from '../kernel/config.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
+import { createProviderRegistry } from '../providers/registry.js';
 import type { AppConfig } from '../contracts/config.js';
 import type { LlmClient } from '../llm/index.js';
 import type { Database } from 'better-sqlite3';
@@ -18,11 +20,12 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
   const name = process.env.AGENT_NAME;
   if (!name) throw new Error('AGENT_NAME 环境变量未设置');
 
-  const config = loadConfig();
+  const config = resolveConfig(getConfigPath());
   initDb();
   const db = getDb();
   const ipc = new IpcChildChannel(name);
-  const llm = createLlmClient(config.llm, { db, ipc, defaultAgent: name });
+  const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
+  const llm = createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined });
 
   ipc.send('agent.register', 'core', { name, pid: process.pid });
 

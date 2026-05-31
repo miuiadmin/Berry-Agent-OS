@@ -23,7 +23,7 @@ import type { RuntimeRegistry } from './runtime/runtime-registry.js';
 import type { CheckpointService } from './checkpoint-service.js';
 import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
-import type { AppConfig } from './config.js';
+import type { AppConfig } from '../config/schema.js';
 import type { IConfigService } from '../config/contract.js';
 import type { LogLevel } from './observability.js';
 

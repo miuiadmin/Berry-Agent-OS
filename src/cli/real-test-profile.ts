@@ -1,7 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { loadConfig } from '../kernel/config.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
 import { setAppHome } from '../utils/paths.js';
 
 export type RealTestProfile = 'builtin' | 'override';
@@ -35,7 +36,7 @@ export interface AppliedRealTestEnv {
 
 export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealTestConfig {
   const profile = parseProfile(opts.profile);
-  const appConfig = loadConfig();
+  const appConfig = resolveConfig(getConfigPath());
   const appHome = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'agent-test-'));
   const cleanupAppHome = !opts.dataDir;
 

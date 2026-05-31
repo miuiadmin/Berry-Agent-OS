@@ -1,6 +1,7 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
 import { initDb, getDb, closeDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
+import { createProviderRegistry } from '../providers/registry.js';
 import type { IpcMessage } from '../kernel/types.js';
 import type {
   AgentTaskPayload,
@@ -11,7 +12,8 @@ import type {
 import type { AgentAskUserPayload, AgentUserReplyPayload } from '../contracts/routing.js';
 import type { AgentName } from '../contracts/agents.js';
 import type { TurnCorrectionPayload } from '../contracts/delegation.js';
-import { loadConfig } from '../kernel/config.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
 import type { LlmClient } from '../llm/index.js';
 
 export interface AskUserOptions {
@@ -34,10 +36,11 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
   const name = process.env.AGENT_NAME as AgentName | undefined;
   if (!name) throw new Error('AGENT_NAME 环境变量未设置');
 
-  const config = loadConfig();
+  const config = resolveConfig(getConfigPath());
   initDb();
   const ipc = new IpcChildChannel(name);
-  const llm = createLlmClient(config.llm, { db: getDb(), ipc, defaultAgent: name });
+  const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
+  const llm = createLlmClient(config.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });

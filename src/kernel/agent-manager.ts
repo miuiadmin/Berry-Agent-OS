@@ -2,7 +2,7 @@ import { forkAgent, type AgentProcess } from './agent-runner.js';
 import { ensureAgentHome } from './agent-home.js';
 import type { IpcMessage } from './types.js';
 import type { AgentName } from '../contracts/agents.js';
-import type { AppConfig } from './config.js';
+import type { AppConfig } from '../config/schema.js';
 import { getLogger } from '../utils/logger.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { EventBus } from './event-bus.js';

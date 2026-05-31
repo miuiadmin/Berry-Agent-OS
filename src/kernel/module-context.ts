@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { AppConfig } from './config.js';
+import type { AppConfig } from '../config/schema.js';
 import type { EventBus } from './event-bus.js';
 import type { ModuleRegistry } from './module-system.js';
 import { createModuleLogger } from '../utils/logger.js';

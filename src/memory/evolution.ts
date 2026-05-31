@@ -1,11 +1,12 @@
 import { createLlmClient } from '../llm/index.js';
-import { loadConfig } from '../kernel/config.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
 import { addKnowledge, listKnowledge, updateKnowledge, supersedeKnowledge, promoteKnowledge, pruneKnowledge, type AddKnowledgeInput, type KnowledgeType, type EvidenceKind } from './knowledge.js';
 import { logEpisode } from './episodes.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('evolution');
-const config = loadConfig();
+const config = resolveConfig(getConfigPath());
 const llm = createLlmClient(config.llm);
 
 const EXTRACTION_PROMPT = `你是一个记忆提取引擎。分析以下对话，提取可以长期记住的用户知识。

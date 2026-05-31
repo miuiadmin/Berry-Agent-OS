@@ -1,6 +1,7 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
 import { initDb, getDb, closeDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
+import { createProviderRegistry } from '../providers/registry.js';
 import type { IpcMessage } from '../kernel/types.js';
 import type {
   AgentTaskPayload,
@@ -10,7 +11,8 @@ import type {
 } from '../contracts/tasks.js';
 import type { AgentName } from '../contracts/agents.js';
 import type { ModelTier } from '../contracts/model.js';
-import { loadConfig } from '../kernel/config.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
 import type { LlmClient } from '../llm/index.js';
 import type { InvokeResult } from '../bus/contract.js';
 import { genId } from '../utils/id.js';
@@ -39,10 +41,11 @@ export function startGenericAgent(config: GenericAgentConfig): void {
   const name = (process.env.AGENT_NAME ?? config.name) as AgentName;
   if (!name) throw new Error('Agent name not configured');
 
-  const appConfig = loadConfig();
+  const appConfig = resolveConfig(getConfigPath());
   initDb();
   const ipc = new IpcChildChannel(name);
-  const llm = createLlmClient(appConfig.llm, { db: getDb(), ipc, defaultAgent: name });
+  const providerRegistry = createProviderRegistry(appConfig.llm, appConfig.llm.channelsConfig);
+  const llm = createLlmClient(appConfig.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });

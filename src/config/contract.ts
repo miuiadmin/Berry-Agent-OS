@@ -4,7 +4,7 @@
  * 统一配置管理的公共接口。其他模块只能依赖此文件。
  */
 
-import type { AppConfig } from './types.js';
+import type { AppConfig } from './schema.js';
 
 /** 配置变更事件 */
 export interface ConfigChangeEvent {
@@ -14,8 +14,17 @@ export interface ConfigChangeEvent {
   config: AppConfig;
 }
 
-/** 配置变更监听器 */
+/** 全局配置变更监听器 */
 export type ConfigChangeListener = (event: ConfigChangeEvent) => void;
+
+/** Section 级变更监听器：只在指定 key 变更时触发 */
+export type SectionChangeListener<K extends keyof AppConfig> = (newValue: AppConfig[K], config: AppConfig) => void;
+
+/** 校验诊断信息 */
+export interface ValidationDiagnostics {
+  valid: boolean;
+  issues: Array<{ path: string; message: string }>;
+}
 
 /** 配置服务接口 */
 export interface IConfigService {
@@ -37,12 +46,18 @@ export interface IConfigService {
   /** 释放资源（关闭文件监听等） */
   dispose(): void;
 
-  /** 注册配置变更监听器，返回取消函数 */
+  /** 注册全局配置变更监听器，返回取消函数 */
   onChange(listener: ConfigChangeListener): () => void;
+
+  /** 注册 section 级变更监听器，只在指定 key 变更时触发 */
+  onSectionChange<K extends keyof AppConfig>(key: K, listener: SectionChangeListener<K>): () => void;
 
   /** 获取配置文件路径 */
   getConfigPath(): string;
 
   /** 获取应用数据目录 */
   getAppHome(): string;
+
+  /** 获取当前配置的校验诊断 */
+  diagnostics(): ValidationDiagnostics;
 }

@@ -18,11 +18,12 @@ import { toModelTools } from '../tools/types.js';
 import { registerTool } from '../tools/index.js';
 import { runTestCommand, toTestResult } from './test-runner.js';
 import { buildPatchPlan, validatePatchPlan } from './patch-plan.js';
-import { loadConfig } from '../kernel/config.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
 import { genId } from '../utils/id.js';
 import { registerCodeTools } from '../tools/code-tools.js';
 
-const config = loadConfig();
+const config = resolveConfig(getConfigPath());
 const MAX_RETRIES = 2;
 
 export interface PhaseContext {

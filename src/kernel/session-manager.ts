@@ -6,7 +6,7 @@ import type { MemoryRuntime } from '../memory/index.js';
 import type { EvolutionEngine } from '../evolution/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { IPluginRuntimeV2, PromptInjectionContext } from '../contracts/plugins-v2.js';
-import type { AppConfig } from './config.js';
+import type { AppConfig } from '../config/schema.js';
 import { buildSystemPrompt } from '../llm/prompt-builder.js';
 import { getLogger } from '../utils/logger.js';
 

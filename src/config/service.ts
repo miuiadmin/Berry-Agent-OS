@@ -1,37 +1,35 @@
 /**
  * ConfigService 实现
  *
- * 统一配置管理：加载、校验、热重载、读写 API。
- * 组合 schema-registry + env-resolver + watcher。
+ * 瘦编排器：委托给纯函数（resolver、writer、diagnostics）。
+ * 不再持有 schema registry —— schema 是静态组合。
  */
 
-import { existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { getConfigPath, getAppHome as getAppHomePath } from '../utils/paths.js';
 import { getLogger } from '../observability/logger.js';
-import type { IConfigService, ConfigChangeEvent, ConfigChangeListener } from './contract.js';
-import type { AppConfig } from './types.js';
-import { createDefaultRegistry, type ConfigSchemaRegistry } from './schema-registry.js';
-import { resolveEnvOverrides } from './env-resolver.js';
+import { getConfigPath, getAppHome as getAppHomePath } from '../utils/paths.js';
+import type { IConfigService, ConfigChangeEvent, ConfigChangeListener, SectionChangeListener, ValidationDiagnostics } from './contract.js';
+import type { AppConfig } from './schema.js';
+import { CONFIG_KEYS } from './schema.js';
+import { resolveConfig, readYamlFile, applyEnvOverrides } from './resolver.js';
+import { atomicWriteYaml, deepMerge } from './writer.js';
+import { ConfigFileWatcher } from './watcher.js';
+import { diagnoseConfig, formatDiagnostics } from './diagnostics.js';
+import { AppConfigSchema } from './schema.js';
 
 const logger = getLogger('config-service');
 
 export class ConfigService implements IConfigService {
   private current: AppConfig;
-  private schema: ReturnType<ConfigSchemaRegistry['buildSchema']>;
-  private allowedKeys: Set<string>;
-  private listeners = new Set<ConfigChangeListener>();
-  private watcher: FSWatcher | null = null;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private globalListeners = new Set<ConfigChangeListener>();
+  private sectionListeners = new Map<keyof AppConfig, Set<SectionChangeListener<any>>>();
+  private watcher: ConfigFileWatcher | null = null;
   private disposed = false;
 
   constructor(
-    private registry: ConfigSchemaRegistry = createDefaultRegistry(),
+    private configPath: string = getConfigPath(),
     private env: NodeJS.ProcessEnv = process.env,
   ) {
-    this.schema = registry.buildSchema();
-    this.allowedKeys = registry.getKnownKeys();
-    this.current = this.loadAndParse();
+    this.current = resolveConfig(this.configPath, this.env);
   }
 
   // ─── IConfigService ──────────────────────────────────────────
@@ -50,22 +48,20 @@ export class ConfigService implements IConfigService {
       return { ok: false, error: 'No valid config keys provided' };
     }
 
-    const configPath = getConfigPath();
-    const currentRaw = this.readRaw(configPath);
+    const currentRaw = readYamlFile(this.configPath);
     const merged = deepMerge(currentRaw, filtered);
 
-    // Validate before writing
-    const mergedWithEnv = resolveEnvOverrides(merged, this.env);
-    const result = this.schema.safeParse(mergedWithEnv);
+    // 校验：合并 env overrides 后验证
+    const withEnv = applyEnvOverrides(merged, this.env);
+    const result = AppConfigSchema.safeParse(withEnv);
     if (!result.success) {
       const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
       return { ok: false, error: `Validation failed: ${issues}` };
     }
 
-    // Write
+    // 原子写入
     try {
-      writeFileSync(configPath, stringifyYaml(merged, { lineWidth: 120 }), 'utf-8');
-      // Reload will be triggered by the file watcher
+      atomicWriteYaml(this.configPath, merged);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: `Write failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -76,7 +72,7 @@ export class ConfigService implements IConfigService {
     if (this.disposed) return;
     try {
       const previous = this.current;
-      this.current = this.loadAndParse();
+      this.current = resolveConfig(this.configPath, this.env);
       const changedKeys = this.diffKeys(previous, this.current);
       this.notify({ changedKeys, config: this.current });
       logger.info({ changedKeys }, '配置已重载');
@@ -88,82 +84,63 @@ export class ConfigService implements IConfigService {
   dispose(): void {
     this.disposed = true;
     this.stopWatcher();
-    this.listeners.clear();
+    this.globalListeners.clear();
+    this.sectionListeners.clear();
   }
 
   onChange(listener: ConfigChangeListener): () => void {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    this.globalListeners.add(listener);
+    return () => { this.globalListeners.delete(listener); };
+  }
+
+  onSectionChange<K extends keyof AppConfig>(key: K, listener: SectionChangeListener<K>): () => void {
+    let set = this.sectionListeners.get(key);
+    if (!set) {
+      set = new Set();
+      this.sectionListeners.set(key, set);
+    }
+    set.add(listener);
+    return () => set!.delete(listener);
   }
 
   getConfigPath(): string {
-    return getConfigPath();
+    return this.configPath;
   }
 
   getAppHome(): string {
     return getAppHomePath();
   }
 
+  diagnostics(): ValidationDiagnostics {
+    const report = diagnoseConfig(this.configPath, this.env);
+    return {
+      valid: report.valid,
+      issues: report.issues.map(i => ({ path: i.path, message: i.message })),
+    };
+  }
+
   // ─── File Watcher ────────────────────────────────────────────
 
   /** 启动文件监听（由 CoreService 调用） */
   startWatcher(): void {
-    const configPath = getConfigPath();
-    if (!existsSync(configPath)) return;
     if (this.watcher) return;
-
-    this.watcher = watch(configPath, () => {
-      if (this.debounceTimer) clearTimeout(this.debounceTimer);
-      this.debounceTimer = setTimeout(() => this.reload(), 1000);
-    });
-    logger.info('已启动配置文件监视');
+    this.watcher = new ConfigFileWatcher(this.configPath, () => this.reload());
+    this.watcher.start();
   }
 
   private stopWatcher(): void {
     if (this.watcher) {
-      this.watcher.close();
+      this.watcher.stop();
       this.watcher = null;
-    }
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
     }
   }
 
   // ─── Internal ────────────────────────────────────────────────
 
-  private loadAndParse(): AppConfig {
-    const configPath = getConfigPath();
-    let fileData: Record<string, unknown> = {};
-
-    if (existsSync(configPath)) {
-      try {
-        const raw = readFileSync(configPath, 'utf-8');
-        fileData = parseYaml(raw) ?? {};
-      } catch (err) {
-        logger.error({ err, configPath }, '配置文件解析失败，使用默认值');
-        fileData = {};
-      }
-    }
-
-    const merged = resolveEnvOverrides(fileData, this.env);
-    return this.schema.parse(merged) as AppConfig;
-  }
-
-  private readRaw(configPath: string): Record<string, unknown> {
-    if (!existsSync(configPath)) return {};
-    try {
-      const raw = readFileSync(configPath, 'utf-8');
-      return (parseYaml(raw) as Record<string, unknown>) ?? {};
-    } catch {
-      return {};
-    }
-  }
-
   private filterKnownKeys(obj: Record<string, unknown>): Record<string, unknown> {
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(obj)) {
-      if (this.allowedKeys.has(key)) {
+      if (CONFIG_KEYS.has(key)) {
         result[key] = obj[key];
       }
     }
@@ -182,38 +159,26 @@ export class ConfigService implements IConfigService {
   }
 
   private notify(event: ConfigChangeEvent): void {
-    for (const listener of this.listeners) {
+    // 全局监听器
+    for (const listener of this.globalListeners) {
       try {
         listener(event);
       } catch (err) {
         logger.warn({ err }, 'ConfigChangeListener error');
       }
     }
-  }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────
-
-function deepMerge(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    const srcVal = source[key];
-    const tgtVal = target[key];
-    if (isObject(srcVal) && isObject(tgtVal)) {
-      result[key] = deepMerge(
-        tgtVal as Record<string, unknown>,
-        srcVal as Record<string, unknown>,
-      );
-    } else {
-      result[key] = srcVal;
+    // Section 级监听器
+    for (const key of event.changedKeys) {
+      const set = this.sectionListeners.get(key as keyof AppConfig);
+      if (set) {
+        for (const listener of set) {
+          try {
+            listener(event.config[key as keyof AppConfig], event.config);
+          } catch (err) {
+            logger.warn({ err }, 'SectionChangeListener error');
+          }
+        }
+      }
     }
   }
-  return result;
-}
-
-function isObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null && !Array.isArray(val);
 }

@@ -1,6 +1,4 @@
 // Kernel module — public API barrel export
-export { loadConfig } from './config.js';
-export type { AppConfig } from './config.js';
 export { IpcChannel, IpcChildChannel } from './ipc.js';
 export { EventBus, initEventBus, getEventBus } from './event-bus.js';
 export type { EventName, EventPayload } from './event-bus.js';
