@@ -274,6 +274,166 @@ code {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   Enhanced Animations & Micro-interactions
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Message bubble: directional slide-in ────────────── */
+@keyframes msg-slide-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes msg-slide-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@layer utilities {
+  .animate-msg-user {
+    animation: msg-slide-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-msg-assistant {
+    animation: msg-slide-left 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+/* ─── Input focus glow ────────────────────────────────── */
+@keyframes focus-glow {
+  0%   { box-shadow: 0 0 0 2px oklch(0.6 0.15 250 / 0.3); }
+  50%  { box-shadow: 0 0 0 4px oklch(0.6 0.15 250 / 0.15); }
+  100% { box-shadow: 0 0 0 2px oklch(0.6 0.15 250 / 0.3); }
+}
+.input-focus-glow:focus-within {
+  animation: focus-glow 2s ease-in-out infinite;
+  border-color: var(--brand);
+}
+
+/* ─── Sidebar slide transition ────────────────────────── */
+@keyframes sidebar-slide-in {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+@keyframes sidebar-slide-out {
+  from { transform: translateX(0); opacity: 1; }
+  to   { transform: translateX(-100%); opacity: 0; }
+}
+
+@layer utilities {
+  .animate-sidebar-in {
+    animation: sidebar-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-sidebar-out {
+    animation: sidebar-slide-out 0.2s ease-in both;
+  }
+}
+
+/* ─── Skeleton loading (message waiting) ──────────────── */
+@keyframes skeleton-pulse {
+  0%   { opacity: 0.4; }
+  50%  { opacity: 0.8; }
+  100% { opacity: 0.4; }
+}
+@layer utilities {
+  .animate-skeleton {
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+  .skeleton-line {
+    height: 12px;
+    border-radius: 6px;
+    background: var(--muted);
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+  }
+  .skeleton-line-short {
+    width: 60%;
+  }
+  .skeleton-line-medium {
+    width: 85%;
+  }
+}
+
+/* ─── Button hover scale + press feedback ─────────────── */
+@layer utilities {
+  .btn-press {
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+  }
+  .btn-press:hover {
+    transform: scale(1.02);
+  }
+  .btn-press:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ─── Toast slide-in from top ─────────────────────────── */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-16px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-8px) scale(0.97); }
+}
+@layer utilities {
+  .animate-toast-in {
+    animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-toast-out {
+    animation: toast-out 0.2s ease-in both;
+  }
+}
+
+/* ─── Conversation list item hover ────────────────────── */
+@layer utilities {
+  .conv-item {
+    transition: background-color 0.15s ease, transform 0.1s ease;
+  }
+  .conv-item:hover {
+    transform: translateX(2px);
+  }
+  .conv-item:active {
+    transform: translateX(0);
+  }
+}
+
+/* ─── Send button pulse on ready ──────────────────────── */
+@keyframes send-ready {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.6 0.15 250 / 0.4); }
+  50%      { box-shadow: 0 0 0 6px oklch(0.6 0.15 250 / 0); }
+}
+@layer utilities {
+  .animate-send-ready {
+    animation: send-ready 2s ease-in-out infinite;
+  }
+}
+
+/* ─── Tab switch content ──────────────────────────────── */
+@keyframes tab-content-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@layer utilities {
+  .animate-tab-in {
+    animation: tab-content-in 0.2s ease-out both;
+  }
+}
+
+/* ─── Typing indicator dots ───────────────────────────── */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+@layer utilities {
+  .typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted-foreground);
+    animation: typing-bounce 1.4s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+}
+
 /* Respect reduced motion preference globally */
 @media (prefers-reduced-motion: reduce) {
   *,

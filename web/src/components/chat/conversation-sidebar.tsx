@@ -127,7 +127,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
             <div
               key={conv.sessionId}
               className={cn(
-                "group relative w-full rounded-lg px-3 py-2 text-left text-sm transition-all cursor-pointer active:scale-[0.98]",
+                "group relative w-full rounded-lg px-3 py-2 text-left text-sm transition-all cursor-pointer active:scale-[0.98] conv-item",
                 conv.sessionId === sessionId
                   ? "nav-link-active bg-accent text-accent-foreground"
                   : "hover:bg-accent/50 text-muted-foreground"

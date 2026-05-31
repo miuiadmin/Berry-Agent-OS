@@ -322,9 +322,10 @@ export function ChatMessageList({
         ) : (
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.map((msg, i) => {
-              const isLatest = i === messages.length - 1 && msg.status === "streaming";
+              const isLatest = i === messages.length - 1;
+              const animClass = isLatest ? (msg.role === "user" ? "animate-msg-user" : "animate-msg-assistant") : undefined;
               return (
-                <div key={msg.id} className={isLatest ? "animate-msg-in" : undefined}>
+                <div key={msg.id} className={animClass}>
                   <MessageBubble
                     message={msg}
                     onRetry={onRetry}

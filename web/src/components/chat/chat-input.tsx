@@ -64,7 +64,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
     <div className="border-t border-border bg-background p-3 md:p-4">
       <div className="mx-auto max-w-3xl">
         {/* Single unified card */}
-        <div className="rounded-2xl border border-input bg-muted/50 overflow-hidden transition-all duration-200 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30 focus-within:shadow-md">
+        <div className="rounded-2xl border border-input bg-muted/50 overflow-hidden transition-all duration-200 input-focus-glow">
           {/* Attachments */}
           {allAttachments.length > 0 && (
             <AttachmentPreview attachments={allAttachments} onRemove={handleRemoveAttachment} />
@@ -109,7 +109,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
               onClick={handleSubmit}
               disabled={!canSend || isStreaming}
               className={cn(
-                "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200",
+                "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 btn-press",
                 "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
                 canSend && !isStreaming
                   ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97]"
