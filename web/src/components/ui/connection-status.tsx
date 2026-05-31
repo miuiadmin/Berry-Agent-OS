@@ -7,10 +7,10 @@ export function ConnectionStatus() {
   const status = useWsStore((s) => s.status);
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <div className="flex items-center gap-1.5 text-xs sm:text-[11px] text-muted-foreground">
       <span
         className={cn(
-          "size-2 rounded-full",
+          "size-2.5 sm:size-2 rounded-full shrink-0",
           status === "connected" && "bg-success",
           status === "connecting" && "bg-warning animate-pulse",
           status === "disconnected" && "bg-destructive"

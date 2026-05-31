@@ -37,7 +37,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       }}
     >
       <div className="fixed inset-0 bg-black/50 animate-in fade-in-0" />
-      <div className="relative z-50 w-full max-w-md mx-4 md:mx-auto animate-in fade-in-0 zoom-in-95">
+      <div className="relative z-50 w-[calc(100%-2rem)] sm:max-w-sm md:max-w-md md:mx-auto mx-4 animate-in fade-in-0 zoom-in-95">
         {children}
       </div>
     </div>
@@ -56,7 +56,7 @@ export function DialogContent({
   return (
     <div
       className={cn(
-        "relative rounded-xl border border-border bg-card p-6 shadow-lg",
+        "relative rounded-xl border border-border bg-card p-4 md:p-6 shadow-lg max-h-[90dvh] overflow-y-auto",
         className
       )}
     >

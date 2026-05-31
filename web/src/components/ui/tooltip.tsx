@@ -44,7 +44,7 @@ export function Tooltip({ content, side = "top", children }: TooltipProps) {
       {visible && (
         <div
           className={cn(
-            "absolute z-50 whitespace-nowrap rounded-md bg-popover px-2.5 py-1 text-xs text-popover-foreground shadow-md border border-border",
+            "absolute z-50 max-w-[200px] md:max-w-none md:whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 md:py-1 text-xs text-popover-foreground shadow-md border border-border text-center md:text-left",
             "animate-in fade-in-0 zoom-in-95",
             positionClasses[side]
           )}

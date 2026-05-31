@@ -31,7 +31,7 @@ export function BarChart({ data, className, formatValue = (v) => String(v) }: Ba
       {data.map((item, i) => (
         <div key={i} className="space-y-1">
           <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground truncate max-w-[60%]">{item.label}</span>
+            <span className="text-muted-foreground truncate max-w-[50%] md:max-w-[60%]">{item.label}</span>
             <span className="font-medium tabular-nums">{formatValue(item.value)}</span>
           </div>
           <div className="h-2 w-full rounded-full bg-muted">

@@ -34,12 +34,13 @@ export function AlertDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" size="default" className="md:size-sm" onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
           <Button
             variant={actionVariant}
-            size="sm"
+            size="default"
+            className="md:size-sm"
             onClick={() => {
               onAction();
               onOpenChange(false);
