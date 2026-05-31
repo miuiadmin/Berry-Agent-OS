@@ -35,14 +35,14 @@ export function DashboardLayout() {
 
       {/* Sidebar - hidden on mobile, shown as overlay when toggled */}
       <div className={`
-        fixed inset-y-0 left-0 z-50 w-full max-w-xs transform transition-transform duration-200 ease-in-out md:relative md:translate-x-0 md:max-w-none
+        fixed inset-y-0 left-0 z-50 w-full max-w-xs transform transition-transform duration-200 ease-in-out md:relative md:w-52 md:max-w-none md:translate-x-0
         ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
       `}>
         <AppSidebar onNavigate={() => setMobileOpen(false)} />
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 flex-col min-w-0">
+      <div className="flex flex-1 flex-col min-w-0 w-full">
         {/* Mobile header */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="active:scale-90 transition-transform">
