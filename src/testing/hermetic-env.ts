@@ -44,7 +44,7 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
 
   const savedTz = process.env.TZ;
   const savedLang = process.env.LANG;
-  const savedBerryHome = process.env.SERVICE_HOME;
+  const savedAppHome = process.env.SERVICE_HOME;
   const savedLlmMode = process.env.APP_LLM_MODE;
 
   process.env.TZ = 'UTC';
@@ -67,10 +67,10 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
 
       if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
       if (savedLang === undefined) delete process.env.LANG; else process.env.LANG = savedLang;
-      if (savedBerryHome === undefined) delete process.env.SERVICE_HOME; else process.env.SERVICE_HOME = savedBerryHome;
+      if (savedAppHome === undefined) delete process.env.SERVICE_HOME; else process.env.SERVICE_HOME = savedAppHome;
       if (savedLlmMode === undefined) delete process.env.APP_LLM_MODE; else process.env.APP_LLM_MODE = savedLlmMode;
 
-      setAppHome(savedBerryHome ?? join(homedir(), '.agent-home'));
+      setAppHome(savedAppHome ?? join(homedir(), '.agent-home'));
 
       try {
         rmSync(appHome, { recursive: true, force: true });

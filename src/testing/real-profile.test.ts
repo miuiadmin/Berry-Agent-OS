@@ -36,7 +36,7 @@ describe('real test profile config', () => {
     expect(config.profile).toBe('builtin');
     expect(config.baseUrl).not.toBe('https://override.example.com');
     expect(config.model).not.toBe('override-model');
-    expect(config.cleanupBerryHome).toBe(false);
+    expect(config.cleanupAppHome).toBe(false);
   });
 
   it('override profile 优先使用 CLI 参数，其次 APP_TEST_LIVE 环境变量', () => {

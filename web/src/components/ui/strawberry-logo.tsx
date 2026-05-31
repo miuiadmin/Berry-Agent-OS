@@ -25,7 +25,7 @@ export function StrawberryLogo({ className }: StrawberryLogoProps) {
       {/* Berry body - darker shade for depth */}
       <path
         d="M32 18c-8 0-15 5-17 12-2 7 0 14 5 19 3 3.5 7 6 12 6s9-2.5 12-6c5-5 7-12 5-19-2-7-9-12-17-12z"
-        fill="url(#berry-gradient)"
+        fill="url(#logo-gradient)"
       />
       {/* Highlight / shine */}
       <path
@@ -48,7 +48,7 @@ export function StrawberryLogo({ className }: StrawberryLogoProps) {
       <ellipse cx="35" cy="48" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(5 35 48)" />
       {/* Gradient definition */}
       <defs>
-        <radialGradient id="berry-gradient" cx="35%" cy="30%" r="65%">
+        <radialGradient id="logo-gradient" cx="35%" cy="30%" r="65%">
           <stop offset="0%" stopColor="#ff5252" stopOpacity="0.4" />
           <stop offset="100%" stopColor="#b71c1c" stopOpacity="0.3" />
         </radialGradient>

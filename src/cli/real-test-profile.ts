@@ -17,7 +17,7 @@ export interface ResolveRealTestConfigOptions {
 export interface RealTestConfig {
   profile: RealTestProfile;
   appHome: string;
-  cleanupBerryHome: boolean;
+  cleanupAppHome: boolean;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -37,13 +37,13 @@ export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealT
   const profile = parseProfile(opts.profile);
   const appConfig = loadConfig();
   const appHome = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'agent-test-'));
-  const cleanupBerryHome = !opts.dataDir;
+  const cleanupAppHome = !opts.dataDir;
 
   if (profile === 'builtin') {
     return {
       profile,
       appHome,
-      cleanupBerryHome,
+      cleanupAppHome,
       baseUrl: appConfig.llm.baseUrl,
       apiKey: appConfig.llm.apiKey,
       model: appConfig.llm.model,
@@ -62,7 +62,7 @@ export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealT
   return {
     profile,
     appHome,
-    cleanupBerryHome,
+    cleanupAppHome,
     baseUrl,
     apiKey,
     model,
@@ -99,7 +99,7 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
     cleanup() {
       restoreEnv(savedEnv);
       setAppHome(savedEnv.SERVICE_HOME ?? join(homedir(), '.agent-home'));
-      if (config.cleanupBerryHome) {
+      if (config.cleanupAppHome) {
         try {
           rmSync(config.appHome, { recursive: true, force: true });
         } catch {
