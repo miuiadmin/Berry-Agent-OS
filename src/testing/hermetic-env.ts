@@ -18,12 +18,12 @@ export interface HermeticEnvOptions {
 }
 
 export interface HermeticEnv {
-  berryHome: string;
+  appHome: string;
   cleanup: () => void;
 }
 
 export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
-  const berryHome = mkdtempSync(join(tmpdir(), 'berry-test-'));
+  const appHome = mkdtempSync(join(tmpdir(), 'agent-test-'));
 
   const savedEnv: Record<string, string | undefined> = {};
 
@@ -45,17 +45,17 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
   const savedTz = process.env.TZ;
   const savedLang = process.env.LANG;
   const savedBerryHome = process.env.SERVICE_HOME;
-  const savedLlmMode = process.env.BERRY_LLM_MODE;
+  const savedLlmMode = process.env.APP_LLM_MODE;
 
   process.env.TZ = 'UTC';
   process.env.LANG = 'en_US.UTF-8';
-  process.env.SERVICE_HOME = berryHome;
-  process.env.BERRY_LLM_MODE = options?.llmMode ?? 'mock';
+  process.env.SERVICE_HOME = appHome;
+  process.env.APP_LLM_MODE = options?.llmMode ?? 'mock';
 
-  setAppHome(berryHome);
+  setAppHome(appHome);
 
   return {
-    berryHome,
+    appHome,
     cleanup() {
       for (const [key, value] of Object.entries(savedEnv)) {
         if (value === undefined) {
@@ -68,12 +68,12 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
       if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
       if (savedLang === undefined) delete process.env.LANG; else process.env.LANG = savedLang;
       if (savedBerryHome === undefined) delete process.env.SERVICE_HOME; else process.env.SERVICE_HOME = savedBerryHome;
-      if (savedLlmMode === undefined) delete process.env.BERRY_LLM_MODE; else process.env.BERRY_LLM_MODE = savedLlmMode;
+      if (savedLlmMode === undefined) delete process.env.APP_LLM_MODE; else process.env.APP_LLM_MODE = savedLlmMode;
 
       setAppHome(savedBerryHome ?? join(homedir(), '.agent-home'));
 
       try {
-        rmSync(berryHome, { recursive: true, force: true });
+        rmSync(appHome, { recursive: true, force: true });
       } catch {
         // best effort
       }

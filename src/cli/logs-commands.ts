@@ -77,7 +77,7 @@ export function registerLogsCommands(program: Command): void {
 
       if (!newLevel) {
         if (!existsSync(socketPath)) {
-          const configLevel = process.env.BERRY_LOG_LEVEL ?? 'info';
+          const configLevel = process.env.APP_LOG_LEVEL ?? 'info';
           if (opts.json) {
             renderer.json({ level: configLevel, source: 'config' });
           } else {

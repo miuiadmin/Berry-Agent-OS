@@ -47,7 +47,7 @@ export class TestHarness {
     const configYaml = isLive
       ? 'heartbeatTimeoutMs: 120000\nrequestTimeoutMs: 120000\nweb:\n  enabled: false\n'
       : 'heartbeatTimeoutMs: 60000\nrequestTimeoutMs: 60000\nweb:\n  enabled: false\n';
-    writeFileSync(join(this.env.berryHome, 'config.yaml'), configYaml);
+    writeFileSync(join(this.env.appHome, 'config.yaml'), configYaml);
     this.service = new CoreService();
     await this.service.start();
     this.socketPath = getSocketPath();
@@ -207,7 +207,7 @@ export class TestHarness {
 
   getAppHome(): string {
     if (!this.env) throw new Error('Harness not started');
-    return this.env.berryHome;
+    return this.env.appHome;
   }
 
   getEventBus(): import('../kernel/event-bus.js').EventBus | null {

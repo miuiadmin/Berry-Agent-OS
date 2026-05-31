@@ -11,7 +11,7 @@ import {
 } from './live-test-helpers.js';
 
 const HAS_LIVE_KEY = !!(
-  process.env.BERRY_TEST_LIVE_API_KEY ||
+  process.env.APP_TEST_LIVE_API_KEY ||
   process.env.LLM_API_KEY
 );
 

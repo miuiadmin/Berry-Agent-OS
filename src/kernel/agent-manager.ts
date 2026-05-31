@@ -102,7 +102,7 @@ export class AgentManager {
       logger.error({ err, agent: name }, '创建 Agent Home 失败，使用默认路径');
     }
     const env: Record<string, string> = { AGENT_NAME: name };
-    if (homePath) env.BERRY_AGENT_HOME = homePath;
+    if (homePath) env.APP_AGENT_HOME = homePath;
     if (registered?.manifest.ipcProtocol === 'generic-loop') {
       env.GENERIC_AGENT_CONFIG = registered.manifestPath;
     }

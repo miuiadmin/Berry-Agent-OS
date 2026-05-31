@@ -46,15 +46,6 @@ interface Route {
 export function createApiRouter(deps: WebServerDependencies) {
   const routes: Route[] = [];
 
-  // Ensure conversation_meta table exists
-  const db = getDb();
-  db.exec(`CREATE TABLE IF NOT EXISTS conversation_meta (
-    session_id TEXT PRIMARY KEY,
-    title TEXT,
-    pinned INTEGER DEFAULT 0,
-    updated_at INTEGER DEFAULT (unixepoch() * 1000)
-  )`);
-
   function route(method: string, path: string, handler: RouteHandler): void {
     const paramNames: string[] = [];
     const pattern = path.replace(/:(\w+)/g, (_, name) => {

@@ -16,7 +16,7 @@ export interface ResolveRealTestConfigOptions {
 
 export interface RealTestConfig {
   profile: RealTestProfile;
-  berryHome: string;
+  appHome: string;
   cleanupBerryHome: boolean;
   baseUrl: string;
   apiKey: string;
@@ -36,13 +36,13 @@ export interface AppliedRealTestEnv {
 export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealTestConfig {
   const profile = parseProfile(opts.profile);
   const appConfig = loadConfig();
-  const berryHome = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'berry-real-test-'));
+  const appHome = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'agent-test-'));
   const cleanupBerryHome = !opts.dataDir;
 
   if (profile === 'builtin') {
     return {
       profile,
-      berryHome,
+      appHome,
       cleanupBerryHome,
       baseUrl: appConfig.llm.baseUrl,
       apiKey: appConfig.llm.apiKey,
@@ -55,21 +55,21 @@ export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealT
     };
   }
 
-  const baseUrl = firstDefined(opts.baseUrl, process.env.BERRY_TEST_LIVE_BASE_URL, process.env.LLM_BASE_URL, appConfig.llm.baseUrl);
-  const apiKey = firstDefined(opts.apiKey, process.env.BERRY_TEST_LIVE_API_KEY, process.env.LLM_API_KEY, appConfig.llm.apiKey);
-  const model = firstDefined(opts.model, process.env.BERRY_TEST_LIVE_MODEL, process.env.LLM_MODEL, appConfig.llm.model);
+  const baseUrl = firstDefined(opts.baseUrl, process.env.APP_TEST_LIVE_BASE_URL, process.env.LLM_BASE_URL, appConfig.llm.baseUrl);
+  const apiKey = firstDefined(opts.apiKey, process.env.APP_TEST_LIVE_API_KEY, process.env.LLM_API_KEY, appConfig.llm.apiKey);
+  const model = firstDefined(opts.model, process.env.APP_TEST_LIVE_MODEL, process.env.LLM_MODEL, appConfig.llm.model);
 
   return {
     profile,
-    berryHome,
+    appHome,
     cleanupBerryHome,
     baseUrl,
     apiKey,
     model,
     source: {
-      baseUrl: sourceOf('baseUrl', opts.baseUrl, process.env.BERRY_TEST_LIVE_BASE_URL, process.env.LLM_BASE_URL),
-      apiKey: sourceOf('apiKey', opts.apiKey, process.env.BERRY_TEST_LIVE_API_KEY, process.env.LLM_API_KEY),
-      model: sourceOf('model', opts.model, process.env.BERRY_TEST_LIVE_MODEL, process.env.LLM_MODEL),
+      baseUrl: sourceOf('baseUrl', opts.baseUrl, process.env.APP_TEST_LIVE_BASE_URL, process.env.LLM_BASE_URL),
+      apiKey: sourceOf('apiKey', opts.apiKey, process.env.APP_TEST_LIVE_API_KEY, process.env.LLM_API_KEY),
+      model: sourceOf('model', opts.model, process.env.APP_TEST_LIVE_MODEL, process.env.LLM_MODEL),
     },
   };
 }
@@ -77,7 +77,7 @@ export function resolveRealTestConfig(opts: ResolveRealTestConfigOptions): RealT
 export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
   const savedEnv: Record<string, string | undefined> = {
     SERVICE_HOME: process.env.SERVICE_HOME,
-    BERRY_LLM_MODE: process.env.BERRY_LLM_MODE,
+    APP_LLM_MODE: process.env.APP_LLM_MODE,
     LLM_BASE_URL: process.env.LLM_BASE_URL,
     LLM_API_KEY: process.env.LLM_API_KEY,
     LLM_MODEL: process.env.LLM_MODEL,
@@ -85,14 +85,14 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
     LANG: process.env.LANG,
   };
 
-  process.env.SERVICE_HOME = config.berryHome;
-  process.env.BERRY_LLM_MODE = 'live';
+  process.env.SERVICE_HOME = config.appHome;
+  process.env.APP_LLM_MODE = 'live';
   process.env.LLM_BASE_URL = config.baseUrl;
   process.env.LLM_API_KEY = config.apiKey;
   process.env.LLM_MODEL = config.model;
   process.env.TZ = 'UTC';
   process.env.LANG = 'zh_CN.UTF-8';
-  setAppHome(config.berryHome);
+  setAppHome(config.appHome);
 
   return {
     config,
@@ -101,7 +101,7 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
       setAppHome(savedEnv.SERVICE_HOME ?? join(homedir(), '.agent-home'));
       if (config.cleanupBerryHome) {
         try {
-          rmSync(config.berryHome, { recursive: true, force: true });
+          rmSync(config.appHome, { recursive: true, force: true });
         } catch {
           // best effort
         }
@@ -113,7 +113,7 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
 export function summarizeRealTestConfig(config: RealTestConfig): Record<string, unknown> {
   return {
     profile: config.profile,
-    berryHome: config.berryHome,
+    appHome: config.appHome,
     llm: {
       baseUrl: redactUrl(config.baseUrl),
       apiKey: redactSecret(config.apiKey),
@@ -137,7 +137,7 @@ function firstDefined(...values: Array<string | undefined>): string {
 
 function sourceOf(name: string, cli?: string, testEnv?: string, llmEnv?: string): string {
   if (cli) return `cli.${name}`;
-  if (testEnv) return `BERRY_TEST_LIVE_${envName(name)}`;
+  if (testEnv) return `APP_TEST_LIVE_${envName(name)}`;
   if (llmEnv) return `LLM_${envName(name)}`;
   return 'config/default';
 }

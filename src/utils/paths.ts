@@ -17,7 +17,7 @@ export function getSocketPath(): string {
 }
 
 export function getPidPath(): string {
-  return join(getAppHome(), 'run', 'berry.pid');
+  return join(getAppHome(), 'run', 'agent.pid');
 }
 
 export function getDbPath(): string {

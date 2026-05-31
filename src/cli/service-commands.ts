@@ -31,7 +31,7 @@ export function registerServiceCommands(program: Command): void {
       }
 
       if (opts.foreground) {
-        process.env.BERRY_TERMINAL_MODE = 'human';
+        process.env.APP_TERMINAL_MODE = 'human';
         const { CoreService } = await import('../kernel/core-service.js');
         const coreService = new CoreService();
 
@@ -185,7 +185,7 @@ export function buildServiceEnv(opts: ServiceStartOptions): NodeJS.ProcessEnv {
     env.SERVICE_SOCKET_PATH = opts.socket;
   }
   if (opts.test) {
-    env.BERRY_LLM_MODE = 'mock';
+    env.APP_LLM_MODE = 'mock';
     if (!opts.dataDir) {
       env.SERVICE_HOME = mkdtempSync(join(tmpdir(), 'agent-test-'));
     }
@@ -204,8 +204,8 @@ export function applyServiceEnvToCurrentProcess(env: NodeJS.ProcessEnv): void {
   } else {
     delete process.env.SERVICE_SOCKET_PATH;
   }
-  if (env.BERRY_LLM_MODE) {
-    process.env.BERRY_LLM_MODE = env.BERRY_LLM_MODE;
+  if (env.APP_LLM_MODE) {
+    process.env.APP_LLM_MODE = env.APP_LLM_MODE;
   }
 }
 

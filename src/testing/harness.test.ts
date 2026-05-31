@@ -60,6 +60,6 @@ describe('TestHarness E2E', () => {
 
   it('临时目录存在且隔离', () => {
     const home = harness.getAppHome();
-    expect(home).toContain('berry-test-');
+    expect(home).toContain('agent-test-');
   });
 });

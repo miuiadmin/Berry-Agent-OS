@@ -5,9 +5,9 @@ import { resolveRealTestConfig, summarizeRealTestConfig } from '../cli/real-test
 
 describe('real test profile config', () => {
   const saved = {
-    BERRY_TEST_LIVE_BASE_URL: process.env.BERRY_TEST_LIVE_BASE_URL,
-    BERRY_TEST_LIVE_API_KEY: process.env.BERRY_TEST_LIVE_API_KEY,
-    BERRY_TEST_LIVE_MODEL: process.env.BERRY_TEST_LIVE_MODEL,
+    APP_TEST_LIVE_BASE_URL: process.env.APP_TEST_LIVE_BASE_URL,
+    APP_TEST_LIVE_API_KEY: process.env.APP_TEST_LIVE_API_KEY,
+    APP_TEST_LIVE_MODEL: process.env.APP_TEST_LIVE_MODEL,
     LLM_BASE_URL: process.env.LLM_BASE_URL,
     LLM_API_KEY: process.env.LLM_API_KEY,
     LLM_MODEL: process.env.LLM_MODEL,
@@ -23,10 +23,10 @@ describe('real test profile config', () => {
     }
   });
 
-  it('builtin profile 使用配置默认值，不读取 BERRY_TEST_LIVE 覆盖', () => {
-    process.env.BERRY_TEST_LIVE_BASE_URL = 'https://override.example.com';
-    process.env.BERRY_TEST_LIVE_API_KEY = 'sk-override';
-    process.env.BERRY_TEST_LIVE_MODEL = 'override-model';
+  it('builtin profile 使用配置默认值，不读取 APP_TEST_LIVE 覆盖', () => {
+    process.env.APP_TEST_LIVE_BASE_URL = 'https://override.example.com';
+    process.env.APP_TEST_LIVE_API_KEY = 'sk-override';
+    process.env.APP_TEST_LIVE_MODEL = 'override-model';
 
     const config = resolveRealTestConfig({
       profile: 'builtin',
@@ -39,10 +39,10 @@ describe('real test profile config', () => {
     expect(config.cleanupBerryHome).toBe(false);
   });
 
-  it('override profile 优先使用 CLI 参数，其次 BERRY_TEST_LIVE 环境变量', () => {
-    process.env.BERRY_TEST_LIVE_BASE_URL = 'https://env.example.com';
-    process.env.BERRY_TEST_LIVE_API_KEY = 'sk-env';
-    process.env.BERRY_TEST_LIVE_MODEL = 'env-model';
+  it('override profile 优先使用 CLI 参数，其次 APP_TEST_LIVE 环境变量', () => {
+    process.env.APP_TEST_LIVE_BASE_URL = 'https://env.example.com';
+    process.env.APP_TEST_LIVE_API_KEY = 'sk-env';
+    process.env.APP_TEST_LIVE_MODEL = 'env-model';
 
     const config = resolveRealTestConfig({
       profile: 'override',
@@ -56,7 +56,7 @@ describe('real test profile config', () => {
     expect(config.model).toBe('env-model');
     expect(config.source.baseUrl).toBe('cli.baseUrl');
     expect(config.source.apiKey).toBe('cli.apiKey');
-    expect(config.source.model).toBe('BERRY_TEST_LIVE_MODEL');
+    expect(config.source.model).toBe('APP_TEST_LIVE_MODEL');
   });
 
   it('摘要输出会脱敏 API key', () => {

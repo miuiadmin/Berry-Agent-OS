@@ -9,6 +9,7 @@ import type { TurnRecord } from '../../contracts/review.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
+import { getToolByName } from '../../tools/index.js';
 import type Database from 'better-sqlite3';
 
 const logger = getLogger('superior-review-flow');
@@ -280,12 +281,8 @@ export class SuperiorReviewFlow {
   }
 
   private lookupToolDanger(toolName: string): 'safe' | 'moderate' | 'dangerous' {
-    // TODO: integrate with ToolRegistry for real danger levels
-    const dangerous = ['shell_exec', 'file_delete', 'run_code_tests'];
-    const moderate = ['file_write', 'edit_code', 'web_fetch', 'build_team'];
-    if (dangerous.includes(toolName)) return 'dangerous';
-    if (moderate.includes(toolName)) return 'moderate';
-    return 'safe';
+    const toolDef = getToolByName(toolName);
+    return toolDef?.dangerLevel ?? 'safe';
   }
 
   cancelPending(correlationId: string): void {

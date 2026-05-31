@@ -6,6 +6,5 @@ data/
 *.db-wal
 *.db-shm
 .env
-~/.berryagent/
 参考源码/
 web/.env.local

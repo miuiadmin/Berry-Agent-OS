@@ -7,12 +7,12 @@ import { getAppHome, getSocketPath, setAppHome } from '../utils/paths.js';
 describe('service start options', () => {
   const savedHome = process.env.SERVICE_HOME;
   const savedSocket = process.env.SERVICE_SOCKET_PATH;
-  const savedMode = process.env.BERRY_LLM_MODE;
+  const savedMode = process.env.APP_LLM_MODE;
 
   afterEach(() => {
     restoreEnv('SERVICE_HOME', savedHome);
     restoreEnv('SERVICE_SOCKET_PATH', savedSocket);
-    restoreEnv('BERRY_LLM_MODE', savedMode);
+    restoreEnv('APP_LLM_MODE', savedMode);
     setAppHome(savedHome ?? join(tmpdir(), 'agent-test-home-reset'));
   });
 
@@ -21,7 +21,7 @@ describe('service start options', () => {
 
     const env = buildServiceEnv({ test: true });
 
-    expect(env.BERRY_LLM_MODE).toBe('mock');
+    expect(env.APP_LLM_MODE).toBe('mock');
     expect(env.SERVICE_HOME).toContain('agent-test-');
   });
 
@@ -34,7 +34,7 @@ describe('service start options', () => {
 
     expect(getAppHome()).toBe(home);
     expect(getSocketPath()).toBe(socket);
-    expect(process.env.BERRY_LLM_MODE).toBe('mock');
+    expect(process.env.APP_LLM_MODE).toBe('mock');
   });
 });
 

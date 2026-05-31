@@ -129,7 +129,7 @@ export function loadConfig(): AppConfig {
   }
 
   const envOverrides: Record<string, unknown> = {};
-  if (process.env.LLM_BASE_URL || process.env.LLM_API_KEY || process.env.LLM_MODEL || process.env.BERRY_LLM_MODE
+  if (process.env.LLM_BASE_URL || process.env.LLM_API_KEY || process.env.LLM_MODEL || process.env.APP_LLM_MODE
     || process.env.LLM_MODEL_FAST || process.env.LLM_MODEL_DEFAULT || process.env.LLM_MODEL_HIGH
     || process.env.LLM_PROVIDER || process.env.OPENAI_API_KEY || process.env.OPENAI_BASE_URL
     || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_BASE_URL
@@ -147,7 +147,7 @@ export function loadConfig(): AppConfig {
       ...(process.env.LLM_BASE_URL && { baseUrl: process.env.LLM_BASE_URL }),
       ...(process.env.LLM_API_KEY && { apiKey: process.env.LLM_API_KEY }),
       ...(process.env.LLM_MODEL && { model: process.env.LLM_MODEL }),
-      ...(process.env.BERRY_LLM_MODE && { mode: process.env.BERRY_LLM_MODE }),
+      ...(process.env.APP_LLM_MODE && { mode: process.env.APP_LLM_MODE }),
       models: {
         ...fileModels,
         ...(process.env.LLM_MODEL_FAST && { fast: process.env.LLM_MODEL_FAST }),

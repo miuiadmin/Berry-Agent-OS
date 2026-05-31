@@ -17,8 +17,8 @@ const BLOCKED_ENV_PATTERNS = /key|secret|token|password|credential|auth/i;
 export function processTemplateVars(content: string, ctx: TemplateContext): string {
   let result = content;
 
-  result = result.replace(/\$\{BERRY_SKILL_DIR\}/g, ctx.skillDir);
-  result = result.replace(/\$\{BERRY_SESSION_ID\}/g, ctx.sessionId ?? '');
+  result = result.replace(/\$\{APP_SKILL_DIR\}/g, ctx.skillDir);
+  result = result.replace(/\$\{APP_SESSION_ID\}/g, ctx.sessionId ?? '');
   result = result.replace(/\$\{cwd\}/g, ctx.cwd ?? process.cwd());
 
   result = result.replace(/\$\{env\.([^}]+)\}/g, (_, key: string) => {

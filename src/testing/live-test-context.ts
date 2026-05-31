@@ -34,7 +34,7 @@ export class LiveTestContext {
   constructor(db: Database.Database, options?: LiveTestContextOptions) {
     this.db = db;
     this.startTime = Date.now();
-    this.debugOnFailure = options?.debugOnFailure ?? !!process.env.BERRY_TEST_DEBUG;
+    this.debugOnFailure = options?.debugOnFailure ?? !!process.env.APP_TEST_DEBUG;
     this.memorySink = new MemorySink();
     this.ipcCapture = new IpcCapture(db);
     getTracer().addSink(this.memorySink.sink);

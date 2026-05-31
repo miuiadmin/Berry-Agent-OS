@@ -878,6 +878,14 @@ export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_delegations_target ON async_delegations(target_workspace_id, status);
   CREATE INDEX IF NOT EXISTS idx_templates_owner ON team_templates(owner_id);
   CREATE INDEX IF NOT EXISTS idx_templates_category ON team_templates(category, is_public);
+
+  CREATE TABLE IF NOT EXISTS conversation_meta (
+    session_id TEXT PRIMARY KEY,
+    title TEXT,
+    pinned INTEGER DEFAULT 0,
+    updated_at INTEGER DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_conversation_meta_pinned ON conversation_meta(pinned, updated_at DESC);
 `;
 
 export const KNOWLEDGE_FTS_SQL = `

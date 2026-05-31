@@ -256,7 +256,7 @@ export class CoreService {
 
     logger.info('正在启动 Berry 服务...');
 
-    if (process.env.BERRY_TERMINAL_MODE === 'human') {
+    if (process.env.APP_TERMINAL_MODE === 'human') {
       this.terminalRenderer = new TerminalRenderer();
       this.terminalRenderer.start(this.eventBus);
       this.terminalRenderer.info('服务启动中...');

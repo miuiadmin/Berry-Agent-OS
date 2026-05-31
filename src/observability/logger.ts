@@ -10,7 +10,7 @@ let instanceLogDir: string | null = null;
 let runLogCallback: ((level: LogLevel, module: string, msg: string, data?: Record<string, unknown>) => void) | null = null;
 
 const isChildAgent = !!process.env.AGENT_NAME;
-const terminalMode = process.env.BERRY_TERMINAL_MODE ?? 'json';
+const terminalMode = process.env.APP_TERMINAL_MODE ?? 'json';
 const isVitest = !!process.env.VITEST;
 
 const PINO_LEVEL_MAP: Record<LogLevel, string> = {
@@ -22,10 +22,10 @@ const PINO_LEVEL_MAP: Record<LogLevel, string> = {
 
 export function resolveEffectiveLevel(): LogLevel {
   const levels: LogLevel[] = ['error', 'warn', 'info', 'debug'];
-  const cliLevel = process.env.BERRY_CLI_LOG_LEVEL;
-  const envLevel = process.env.BERRY_LOG_LEVEL ?? process.env.LOG_LEVEL;
-  const configLevel = process.env.BERRY_CONFIG_LOG_LEVEL;
-  const modeDefault = process.env.BERRY_TEST === '1' ? 'debug' : 'info';
+  const cliLevel = process.env.APP_CLI_LOG_LEVEL;
+  const envLevel = process.env.APP_LOG_LEVEL ?? process.env.LOG_LEVEL;
+  const configLevel = process.env.APP_CONFIG_LOG_LEVEL;
+  const modeDefault = process.env.APP_TEST === '1' ? 'debug' : 'info';
 
   for (const candidate of [cliLevel, envLevel, configLevel]) {
     if (candidate && levels.includes(candidate as LogLevel)) {

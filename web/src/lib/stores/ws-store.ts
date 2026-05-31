@@ -90,6 +90,8 @@ export const useWsStore = create<WsStore>((set, get) => ({
     }
     ws?.close();
     ws = null;
+    messageHandlers.clear();
+    eventListeners.clear();
     set({ status: "disconnected" });
   },
 

@@ -25,7 +25,7 @@ export function registerRunCommand(program: Command): void {
       const isJson = opts.json ?? false;
       const level = resolveLogLevel({
         cliLevel: opts.logLevel,
-        envLevel: process.env.BERRY_LOG_LEVEL,
+        envLevel: process.env.APP_LOG_LEVEL,
         modeDefault: opts.steps ? 'debug' : 'info',
       });
 

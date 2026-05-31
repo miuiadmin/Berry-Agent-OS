@@ -47,7 +47,7 @@ const hasSubcommand = args.length > 0 && !args[0].startsWith('-');
 
 if (!hasSubcommand) {
   (async () => {
-    process.env.BERRY_TERMINAL_MODE = 'human';
+    process.env.APP_TERMINAL_MODE = 'human';
     const renderer = getConsoleRenderer();
     const { CoreService } = await import('./kernel/core-service.js');
     const coreService = new CoreService();

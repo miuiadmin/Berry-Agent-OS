@@ -135,7 +135,7 @@ export function registerTestCommands(program: Command): void {
             sessionId: response.sessionId,
             taskId: response.taskId,
             llmMode: opts.llmMode,
-            berryHome: env.berryHome,
+            appHome: env.appHome,
           });
         } else {
           if (response.error) {
@@ -150,7 +150,7 @@ export function registerTestCommands(program: Command): void {
             ok: false,
             error: (err as Error).message,
             llmMode: opts.llmMode,
-            berryHome: env.berryHome,
+            appHome: env.appHome,
           });
         } else {
           renderer.error(`测试执行失败: ${(err as Error).message}`);
@@ -168,8 +168,8 @@ export function registerTestCommands(program: Command): void {
       const renderer = getConsoleRenderer();
       const env = createHermeticEnv();
       const info = {
-        berryHome: env.berryHome,
-        llmMode: process.env.BERRY_LLM_MODE,
+        appHome: env.appHome,
+        llmMode: process.env.APP_LLM_MODE,
         tz: process.env.TZ,
         lang: process.env.LANG,
       };
@@ -178,8 +178,8 @@ export function registerTestCommands(program: Command): void {
       if (opts.json) {
         renderer.json(info);
       } else {
-        renderer.info(`SERVICE_HOME=${info.berryHome}`);
-        renderer.info(`BERRY_LLM_MODE=${info.llmMode}`);
+        renderer.info(`SERVICE_HOME=${info.appHome}`);
+        renderer.info(`APP_LLM_MODE=${info.llmMode}`);
         renderer.info(`TZ=${info.tz}`);
         renderer.info(`LANG=${info.lang}`);
       }

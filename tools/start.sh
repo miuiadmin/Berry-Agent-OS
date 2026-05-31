@@ -7,8 +7,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BACKEND_PORT="${BERRY_PORT:-3888}"
-FRONTEND_PORT="${BERRY_WEB_PORT:-3889}"
+BACKEND_PORT="${APP_PORT:-3888}"
+FRONTEND_PORT="${APP_WEB_PORT:-3889}"
 
 # 检查 Node.js 版本
 if ! command -v node &>/dev/null; then
@@ -81,9 +81,9 @@ BACKEND_PID=$!
 # 等待后端就绪
 sleep 2
 
-# 启动前端
+# 启动前端（Vite 开发服务器）
 cd "$PROJECT_DIR/web"
-npx next start --port "$FRONTEND_PORT" &
+npx vite --port "$FRONTEND_PORT" --host &
 FRONTEND_PID=$!
 
 # 等待任意进程退出

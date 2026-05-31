@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { existsSync, createReadStream, statSync } from 'node:fs';
 import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { createApiRouter } from './api-routes.js';
@@ -52,6 +53,14 @@ export class WebServer {
     this.port = options.port;
     this.host = options.host;
     this.deps = options.deps;
+
+    // Auto-generate secret when binding to non-localhost without an explicit secret
+    const isLocalhost = ['127.0.0.1', '::1', 'localhost'].includes(options.host);
+    if (!isLocalhost && !this.deps.secret) {
+      const generated = randomBytes(32).toString('hex');
+      (this.deps as { secret: string }).secret = generated;
+      logger.warn('非本机绑定但未配置 web.secret，已自动生成随机 secret — 请在 config.yaml 中设置以保持稳定');
+    }
     this.apiRouter = createApiRouter(options.deps);
     this.wsHandler = createWsHandler(options.deps);
     this.hasStaticDir = existsSync(STATIC_DIR);
@@ -167,7 +176,11 @@ export class WebServer {
           'content-length': stat.size,
           'cache-control': fileExt === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
         });
-        createReadStream(resolved).pipe(res);
+        createReadStream(resolved).on('error', (err) => {
+          logger.error({ err, path: resolved }, 'Static file stream error');
+          if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
+          res.end('Internal Server Error');
+        }).pipe(res);
         return;
       }
     }
