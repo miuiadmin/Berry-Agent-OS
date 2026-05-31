@@ -56,7 +56,7 @@ export class PluginService {
       promptContent: input.promptContent ?? null,
       promptPriority: 0.5,
       promptActivationRules: null,
-      manifestJson: (input.manifestJson ?? null) as any,
+      manifestJson: (input.manifestJson as Record<string, unknown> | null) ?? null,
       permissionsJson: null,
       evolutionJson: null,
       importance: 0.6,
@@ -67,7 +67,7 @@ export class PluginService {
       previousVersions: null,
       promotedFromId: null,
       promotedAt: null,
-      tags: (input.tags ?? null) as any,
+      tags: input.tags ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -102,8 +102,8 @@ export class PluginService {
       toolName: input.toolName,
       title: input.title,
       description: input.description ?? null,
-      inputSchema: input.inputSchema as any,
-      outputSchema: (input.outputSchema ?? null) as any,
+      inputSchema: input.inputSchema as Record<string, unknown>,
+      outputSchema: (input.outputSchema as Record<string, unknown> | null) ?? null,
       permissionScope: input.permissionScope ?? 'readonly',
       createdAt: new Date(),
     };
@@ -144,6 +144,6 @@ export class PluginService {
     };
     if (success) updates.successCount = plugin.successCount + 1;
     else updates.failureCount = plugin.failureCount + 1;
-    this.repo.update(pluginId, updates as any);
+    this.repo.update(pluginId, updates);
   }
 }

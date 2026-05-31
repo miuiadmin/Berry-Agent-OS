@@ -11,6 +11,6 @@ export const orgNodes = sqliteTable('org_nodes', {
   path: text('path').notNull(),
   depth: integer('depth').notNull().default(0),
   position: integer('position').notNull().default(0),
-  metadata: text('metadata', { mode: 'json' }),
+  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });

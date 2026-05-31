@@ -2,27 +2,8 @@ import { genId } from '../../utils/id.js';
 import type { AppEvents } from '../../lib/event-bus.js';
 import type { ExecutionService } from '../execution/execution.service.js';
 import type { AgentService } from '../agent/agent.service.js';
-
-export type ReviewAction = 'approve' | 'modify' | 'reject' | 'reassign' | 'supplement' | 'suspend' | 'change_and_route';
-
-export interface ReviewDecision {
-  action: ReviewAction;
-  note?: string;
-  modifiedContent?: string;
-  guidance?: string;
-  suggestions?: string[];
-  reassignToAgentId?: string;
-  supplementInfo?: string;
-  taskChanges?: {
-    priority?: string;
-    dueDate?: number;
-    columnId?: string;
-    labelsAdd?: string[];
-    labelsRemove?: string[];
-    descriptionAppend?: string;
-  };
-  nextAction?: 'reject' | 'reassign' | 'suspend';
-}
+import type { ReviewAction, ReviewDecision } from '../../db/schema/executions.js';
+export type { ReviewAction, ReviewDecision };
 
 export class ReviewService {
   constructor(

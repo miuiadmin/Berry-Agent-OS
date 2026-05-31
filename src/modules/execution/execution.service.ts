@@ -160,7 +160,7 @@ export class ExecutionService {
   }
 
   updateProgress(executionId: string, progressData: unknown): void {
-    this.repo.update(executionId, { progressData: progressData as any });
+    this.repo.update(executionId, { progressData: progressData as Record<string, unknown> });
   }
 
   // Session management
@@ -192,7 +192,7 @@ export class ExecutionService {
       sessionId,
       role,
       content,
-      metadata: (metadata ?? null) as any,
+      metadata: (metadata as Record<string, unknown> | null) ?? null,
       createdAt: now,
     };
     this.repo.insertMessage(message);

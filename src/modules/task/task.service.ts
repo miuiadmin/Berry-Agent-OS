@@ -72,8 +72,8 @@ export class TaskService {
       position: 0,
       estimatedHours: input.estimatedHours ?? null,
       actualHours: null,
-      acceptanceCriteria: (input.acceptanceCriteria ?? null) as any,
-      metadata: (input.metadata ?? null) as any,
+      acceptanceCriteria: input.acceptanceCriteria ?? null,
+      metadata: input.metadata ?? null,
       startDate: null,
       dueDate: input.dueDate ?? null,
       startedAt: null,
@@ -150,14 +150,14 @@ export class TaskService {
 
     if (input.columnId !== undefined && input.columnId !== task.columnId) {
       data.columnId = input.columnId;
-      this.repo.update(id, data as any);
+      this.repo.update(id, data);
       this.events.emit('task.moved', { taskId: id, fromColumnId: task.columnId, toColumnId: input.columnId });
     } else {
-      this.repo.update(id, data as any);
+      this.repo.update(id, data);
     }
 
     if (input.assigneeType !== undefined && input.assigneeId !== undefined) {
-      this.repo.update(id, { assigneeType: input.assigneeType, assigneeId: input.assigneeId } as any);
+      this.repo.update(id, { assigneeType: input.assigneeType, assigneeId: input.assigneeId });
       this.events.emit('task.assigned', {
         taskId: id,
         assigneeType: input.assigneeType,

@@ -61,12 +61,12 @@ export class AgentService {
       avatar: input.avatar ?? null,
       roleDescription: input.roleDescription ?? null,
       provider: input.provider,
-      config: input.config as any,
+      config: input.config,
       thinkingLevel: input.thinkingLevel ?? null,
       customEnv: null,
       customArgs: null,
-      l2Capabilities: (input.l2Capabilities ?? ['learning', 'skills']) as any,
-      roles: (input.roles ?? null) as any,
+      l2Capabilities: input.l2Capabilities ?? ['learning', 'skills'],
+      roles: input.roles ?? null,
       workspacePath: input.workspacePath ?? null,
       status: 'idle',
       lastActiveAt: null,
@@ -122,7 +122,7 @@ export class AgentService {
     if (input.roles !== undefined) data.roles = input.roles;
     if (input.status !== undefined) data.status = input.status;
 
-    this.repo.update(id, data as any);
+    this.repo.update(id, data);
     this.events.emit('agent.updated', { agentId: id });
   }
 
@@ -162,7 +162,7 @@ export class AgentService {
       }
     }
 
-    this.repo.update(agentId, updates as any);
+    this.repo.update(agentId, updates);
   }
 
   recordRejection(agentId: string): void {

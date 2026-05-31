@@ -2,6 +2,27 @@ import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { workspaces } from './workspaces.js';
 import { agents } from './agents.js';
 
+export type ReviewAction = 'approve' | 'modify' | 'reject' | 'reassign' | 'supplement' | 'suspend' | 'change_and_route';
+
+export interface ReviewDecision {
+  action: ReviewAction;
+  note?: string;
+  modifiedContent?: string;
+  guidance?: string;
+  suggestions?: string[];
+  reassignToAgentId?: string;
+  supplementInfo?: string;
+  taskChanges?: {
+    priority?: string;
+    dueDate?: number;
+    columnId?: string;
+    labelsAdd?: string[];
+    labelsRemove?: string[];
+    descriptionAppend?: string;
+  };
+  nextAction?: 'reject' | 'reassign' | 'suspend';
+}
+
 export const agentExecutions = sqliteTable('agent_executions', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').references(() => workspaces.id),
@@ -20,13 +41,13 @@ export const agentExecutions = sqliteTable('agent_executions', {
   totalCost: real('total_cost'),
   toolCalls: integer('tool_calls').default(0),
   errorType: text('error_type'),
-  progressData: text('progress_data', { mode: 'json' }),
-  checkpoint: text('checkpoint', { mode: 'json' }),
+  progressData: text('progress_data', { mode: 'json' }).$type<Record<string, unknown> | null>(),
+  checkpoint: text('checkpoint', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   reviewStatus: text('review_status').notNull().default('pending'),
   reviewedBy: text('reviewed_by'),
   reviewNote: text('review_note'),
-  reviewGuidance: text('review_guidance', { mode: 'json' }),
-  reviewActionData: text('review_action_data', { mode: 'json' }),
+  reviewGuidance: text('review_guidance', { mode: 'json' }).$type<{ guidance?: string; suggestions?: string[] } | null>(),
+  reviewActionData: text('review_action_data', { mode: 'json' }).$type<ReviewDecision | null>(),
   reviewRetryCount: integer('review_retry_count').notNull().default(0),
   reviewEscalatedTo: text('review_escalated_to'),
   redoCount: integer('redo_count').notNull().default(0),
@@ -56,6 +77,6 @@ export const sessionMessages = sqliteTable('session_messages', {
   sessionId: text('session_id').notNull().references(() => agentSessions.id),
   role: text('role').notNull(),
   content: text('content').notNull(),
-  metadata: text('metadata', { mode: 'json' }),
+  metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });

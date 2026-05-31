@@ -20,7 +20,7 @@ export const notificationPreferences = sqliteTable('notification_preferences', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
   userId: text('user_id').notNull().references(() => users.id),
-  preferences: text('preferences', { mode: 'json' }).notNull(),
+  preferences: text('preferences', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 }, (table) => [
   unique().on(table.workspaceId, table.userId),
@@ -34,7 +34,7 @@ export const webhookDeliveries = sqliteTable('webhook_deliveries', {
   dedupeKey: text('dedupe_key'),
   signatureStatus: text('signature_status'),
   status: text('status').notNull(),
-  requestHeaders: text('request_headers', { mode: 'json' }),
+  requestHeaders: text('request_headers', { mode: 'json' }).$type<Record<string, string> | null>(),
   requestBody: text('request_body'),
   responseStatus: integer('response_status'),
   error: text('error'),

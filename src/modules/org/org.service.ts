@@ -55,7 +55,7 @@ export class OrgService {
       path,
       depth,
       position,
-      metadata: (input.metadata ?? null) as any,
+      metadata: (input.metadata as Record<string, unknown> | null) ?? null,
       createdAt: now,
     };
 

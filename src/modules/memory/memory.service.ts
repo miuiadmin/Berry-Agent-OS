@@ -73,7 +73,7 @@ export class MemoryService {
       origin: input.origin ?? 'evolved',
       visibility: input.visibility ?? 'private',
       importance: input.importance ?? 0.5,
-      tags: (input.tags ?? null) as any,
+      tags: input.tags ?? null,
       recallCount: 0,
       verifiedAt: null,
       sourceExecutionId: null,
@@ -99,7 +99,7 @@ export class MemoryService {
       sourceWorkspaceId: input.sourceWorkspaceId ?? null,
       sourceMemoryId: input.sourceMemoryId ?? null,
       importance: input.importance ?? 0.6,
-      tags: (input.tags ?? null) as any,
+      tags: input.tags ?? null,
       recallCount: 0,
       verifiedAt: null,
       archived: 0,
@@ -148,7 +148,7 @@ export class MemoryService {
 
     return this.createGlobalMemory({
       userId,
-      type: wsMemory.type as any,
+      type: wsMemory.type as "preference" | "knowledge" | "context" | "feedback",
       content: wsMemory.content,
       origin: 'promoted',
       sourceWorkspaceId: wsMemory.workspaceId,

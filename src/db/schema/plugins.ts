@@ -23,7 +23,7 @@ export const plugins = sqliteTable('plugins', {
   promptContent: text('prompt_content'),
   promptPriority: real('prompt_priority').default(0.5),
   promptActivationRules: text('prompt_activation_rules', { mode: 'json' }),
-  manifestJson: text('manifest_json', { mode: 'json' }),
+  manifestJson: text('manifest_json', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   permissionsJson: text('permissions_json', { mode: 'json' }),
   evolutionJson: text('evolution_json', { mode: 'json' }),
   importance: real('importance').notNull().default(0.6),
@@ -34,7 +34,7 @@ export const plugins = sqliteTable('plugins', {
   previousVersions: text('previous_versions', { mode: 'json' }),
   promotedFromId: text('promoted_from_id'),
   promotedAt: integer('promoted_at', { mode: 'timestamp' }),
-  tags: text('tags', { mode: 'json' }),
+  tags: text('tags', { mode: 'json' }).$type<string[] | null>(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
@@ -45,8 +45,8 @@ export const pluginTools = sqliteTable('plugin_tools', {
   toolName: text('tool_name').notNull(),
   title: text('title').notNull(),
   description: text('description'),
-  inputSchema: text('input_schema', { mode: 'json' }).notNull(),
-  outputSchema: text('output_schema', { mode: 'json' }),
+  inputSchema: text('input_schema', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  outputSchema: text('output_schema', { mode: 'json' }).$type<Record<string, unknown> | null>(),
   permissionScope: text('permission_scope').notNull().default('readonly'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 }, (table) => [
