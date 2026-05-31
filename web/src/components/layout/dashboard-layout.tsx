@@ -4,6 +4,9 @@ import { AppSidebar } from "./app-sidebar";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DebugCaptureButton } from "@/components/debug/debug-capture-button";
+import { DebugCaptureDialog } from "@/components/debug/debug-capture-dialog";
+import { UserMenu } from "./user-menu";
 
 export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -52,6 +55,15 @@ export function DashboardLayout() {
             </div>
           </Button>
           <span className="text-sm font-semibold">Berry</span>
+          <div className="ml-auto flex items-center gap-1">
+            <DebugCaptureButton />
+            <UserMenu />
+          </div>
+        </div>
+        {/* Desktop user menu + debug capture */}
+        <div className="fixed top-4 right-4 z-40 hidden md:flex items-center gap-1">
+          <DebugCaptureButton />
+          <UserMenu />
         </div>
         <main className="relative flex-1">
           {/* key by pathname to re-trigger animation on route change */}
@@ -60,6 +72,8 @@ export function DashboardLayout() {
           </div>
         </main>
       </div>
+
+      <DebugCaptureDialog />
     </div>
   );
 }
