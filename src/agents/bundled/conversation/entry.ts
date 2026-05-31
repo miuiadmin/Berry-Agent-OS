@@ -227,7 +227,10 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, input: tc.input, result: tc.result })),
       } satisfies DraftResponsePayload, trackingId);
     } catch (err) {
-      const errorMsg = `抱歉，处理过程中发生错误: ${(err as Error).message}`;
+      const isConfigError = (err as Error).name === 'ModelNotConfiguredError';
+      const errorMsg = isConfigError
+        ? (err as Error).message
+        : `抱歉，处理过程中发生错误: ${(err as Error).message}`;
       ipc.send('final.response', 'core', {
         sessionId,
         response: errorMsg,
