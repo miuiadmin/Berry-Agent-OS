@@ -2,7 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { getLogger } from '../utils/logger.js';
+import { getLogger, resolveEffectiveLevel } from '../utils/logger.js';
+import { registerCaptureRoutes } from '../observability/index.js';
 import { MS_PER_DAY } from '../lib/time-constants.js';
 import { getDb } from '../memory/index.js';
 import { getHistory } from '../memory/conversations.js';
@@ -60,10 +61,13 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   route('GET', '/health', (_req, res) => {
     const agentStatuses = deps.agentManager.getStatus();
+    const logLevel = resolveEffectiveLevel();
     json(res, {
       ok: true,
       uptime: (Date.now() - deps.startTimeMs) / 1000,
       agents: typeof agentStatuses === 'object' ? Object.keys(agentStatuses).length : 0,
+      logLevel,
+      debugMode: logLevel === 'debug',
     });
   });
 
@@ -219,6 +223,42 @@ export function createApiRouter(deps: WebServerDependencies) {
     const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
     const messages = getHistory(params.sid, limit);
     json(res, messages);
+  });
+
+  // --- Session state (for reconnection recovery) ---
+  route('GET', '/sessions/:sid/state', (_req, res, url, params) => {
+    const db = getDb();
+    const sessionId = params.sid;
+    const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
+
+    // Active (non-terminal) tasks for this session
+    const activeTasks = db.prepare(`
+      SELECT id, status, target_agent, created_at FROM agent_tasks
+      WHERE session_id = ? AND status NOT IN ('completed','failed','timeout','cancelled')
+      ORDER BY created_at DESC LIMIT 5
+    `).all(sessionId) as Array<{ id: string; status: string; target_agent: string; created_at: number }>;
+
+    // Get all progress events for each active task (for thinking steps recovery)
+    const tasksWithProgress = activeTasks.map((task) => {
+      const events = db.prepare(`
+        SELECT message, created_at FROM task_events
+        WHERE task_id = ? AND event_type = 'progress'
+        ORDER BY created_at ASC
+      `).all(task.id) as Array<{ message: string; created_at: number }>;
+      return {
+        taskId: task.id,
+        status: task.status,
+        targetAgent: task.target_agent,
+        createdAt: task.created_at,
+        progress: events.length > 0 ? events[events.length - 1].message : null,
+        thinkingSteps: events.map((e) => ({ text: e.message, ts: e.created_at })),
+      };
+    });
+
+    // Conversation messages
+    const messages = getHistory(sessionId, limit);
+
+    json(res, { sessionId, activeTasks: tasksWithProgress, messages });
   });
 
   route('DELETE', '/conversations/:sid', (_req, res, _url, params) => {
@@ -416,6 +456,9 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Provider management routes ---
   registerProviderRoutes(route, () => deps.getProviderRegistry?.(), readBody, json, deps.configService);
+
+  // --- Debug capture routes ---
+  registerCaptureRoutes(route, json);
 
   return function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): void {
     const method = req.method ?? 'GET';

@@ -16,6 +16,7 @@ function requireString(obj: Record<string, unknown>, field: string): string | un
 
 function wsReply(ws: WebSocket, data: Record<string, unknown>): void {
   if ((ws as unknown as { readyState: number }).readyState === 1) {
+    logger.debug(data, 'ws:out');
     ws.send(JSON.stringify(data));
   }
 }
@@ -36,6 +37,7 @@ export class WebSocketBridge {
 
   write(data: string): boolean {
     if ((this.ws as unknown as { readyState: number }).readyState === 1) {
+      logger.debug({ raw: data }, 'ws:stream');
       this.ws.send(data.replace(/\n$/, ''));
       return true;
     }
@@ -69,6 +71,7 @@ export function createWsHandler(deps: WebServerDependencies) {
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+        logger.debug(msg, 'ws:in');
         handleWsMessage(ws, msg, sessionId, deps);
       } catch (err) {
         wsError(ws, (err as Error).message);

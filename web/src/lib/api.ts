@@ -45,6 +45,8 @@ export interface HealthResponse {
   ok: boolean;
   uptime: number;
   agents: number;
+  logLevel: string;
+  debugMode: boolean;
 }
 
 export interface AgentInfo {
@@ -205,4 +207,37 @@ export async function renameConversation(sessionId: string, title: string): Prom
 
 export async function exportConversation(sessionId: string): Promise<{ role: string; content: string; createdAt: string }[]> {
   return apiGet<{ role: string; content: string; createdAt: string }[]>(`/api/conversations/${sessionId}?limit=9999`);
+}
+
+// --- Debug Capture ---
+
+export interface CaptureStartResponse {
+  captureId: string;
+  path: string;
+}
+
+export interface CaptureResult {
+  captureId: string;
+  path: string;
+  durationMs: number;
+  eventCount: number;
+  size: number;
+}
+
+export interface CaptureStatus {
+  active: boolean;
+  captureId?: string;
+  startedAt?: number;
+}
+
+export function startDebugCapture() {
+  return apiPost<CaptureStartResponse>("/api/debug/capture/start");
+}
+
+export function stopDebugCapture() {
+  return apiPost<CaptureResult>("/api/debug/capture/stop");
+}
+
+export function getDebugCaptureStatus() {
+  return apiGet<CaptureStatus>("/api/debug/capture/status");
 }

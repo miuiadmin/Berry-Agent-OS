@@ -1,1 +1,1 @@
-export { getLogger, createModuleLogger, resolveEffectiveLevel, setRunLogCallback } from '../observability/logger.js';
+export { getLogger, createModuleLogger, resolveEffectiveLevel, setRunLogCallback, addLogListener } from '../observability/logger.js';

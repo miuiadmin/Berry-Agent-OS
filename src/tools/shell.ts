@@ -1,4 +1,5 @@
 import { exec } from 'node:child_process';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
 import { checkBlocklist } from '../safety/index.js';
@@ -24,8 +25,10 @@ export const runCommandTool: ToolDefinition = {
       return { content: `命令被安全策略阻止: ${blockResult.reason}`, isError: true };
     }
 
+    const effectiveCwd = cwd || homedir();
+
     return new Promise((resolve) => {
-      exec(command, { timeout: timeoutMs, cwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      exec(command, { timeout: timeoutMs, cwd: effectiveCwd, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         const truncate = (s: string) => s.length > MAX_OUTPUT ? s.slice(0, MAX_OUTPUT) + '\n...(输出被截断)' : s;
 
         if (err && !stdout && !stderr) {

@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Check, Copy, AlertCircle, RotateCcw, ChevronDown, Pencil, Trash2, X, SendHorizontal, FileText, Download } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
+import { ThinkingProcess } from "./thinking-process";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 
@@ -197,9 +198,6 @@ function MessageBubble({
             <span className="size-1.5 animate-pulse rounded-full bg-current opacity-60" />
             <span className="size-1.5 animate-pulse rounded-full bg-current opacity-60 [animation-delay:150ms]" />
             <span className="size-1.5 animate-pulse rounded-full bg-current opacity-60 [animation-delay:300ms]" />
-            <span className="ml-1.5 text-xs text-muted-foreground animate-pulse">
-              {message.progress || "Thinking..."}
-            </span>
           </div>
         ) : isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
@@ -260,8 +258,10 @@ function MessageBubble({
           </div>
         )}
       </div>
-      {message.progress && isStreaming && message.content !== "" && (
-        <span className="mt-0.5 text-[11px] text-muted-foreground/80 px-1">{message.progress}</span>
+      {!isUser && message.thinkingSteps && message.thinkingSteps.length > 0 && (
+        <div className="max-w-[90%] sm:max-w-[80%] mt-1">
+          <ThinkingProcess steps={message.thinkingSteps} reasoning={message.reasoning} isActive={isStreaming} />
+        </div>
       )}
     </div>
   );

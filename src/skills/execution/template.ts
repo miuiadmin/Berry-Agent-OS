@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -19,7 +20,7 @@ export function processTemplateVars(content: string, ctx: TemplateContext): stri
 
   result = result.replace(/\$\{APP_SKILL_DIR\}/g, ctx.skillDir);
   result = result.replace(/\$\{APP_SESSION_ID\}/g, ctx.sessionId ?? '');
-  result = result.replace(/\$\{cwd\}/g, ctx.cwd ?? process.cwd());
+  result = result.replace(/\$\{cwd\}/g, ctx.cwd ?? homedir());
 
   result = result.replace(/\$\{env\.([^}]+)\}/g, (_, key: string) => {
     if (BLOCKED_ENV_PATTERNS.test(key)) return '';

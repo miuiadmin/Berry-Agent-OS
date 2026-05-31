@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { CodeRuntime } from '../../../code/index.js';
@@ -12,7 +13,7 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const lockManager = new LockManager(db);
 
   const input = payload.inputPayload;
-  const workingDir = (input.workingDir as string) ?? process.cwd();
+  const workingDir = (input.workingDir as string) ?? homedir();
   const workspace = await detectWorkspace(workingDir);
   if (!workspace) throw new Error(`无法检测工作目录: ${workingDir}`);
 

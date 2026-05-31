@@ -1,12 +1,25 @@
 import { readFile, writeFile, readdir, unlink, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
 
+function getUserRoot(): string {
+  return homedir();
+}
+
+function resolvePath(p: string): string {
+  if (p === '~' || p.startsWith('~/')) {
+    return resolve(getUserRoot(), p.slice(2) || '.');
+  }
+  if (p.startsWith('/')) return resolve(p);
+  return resolve(getUserRoot(), p);
+}
+
 function assertWithinBoundary(resolved: string): void {
-  const cwd = resolve('.');
-  if (!resolved.startsWith(cwd + '/') && resolved !== cwd) {
-    throw new Error(`路径越界: 不允许访问工作目录之外的路径`);
+  const root = getUserRoot();
+  if (!resolved.startsWith(root + '/') && resolved !== root) {
+    throw new Error(`路径越界: 不允许访问用户目录之外的路径`);
   }
 }
 
@@ -20,7 +33,7 @@ const writeFileSchema = z.object({
 });
 
 const listDirSchema = z.object({
-  path: z.string().default('.').describe('目录路径，默认当前目录'),
+  path: z.string().default('~').describe('目录路径，默认用户主目录'),
 });
 
 const deleteFileSchema = z.object({
@@ -35,7 +48,7 @@ export const readFileTool: ToolDefinition = {
   async execute(input: unknown): Promise<ToolResult> {
     const { path } = readFileSchema.parse(input);
     try {
-      const resolved = resolve(path);
+      const resolved = resolvePath(path);
       assertWithinBoundary(resolved);
       const content = await readFile(resolved, 'utf-8');
       return { content };
@@ -53,7 +66,7 @@ export const writeFileTool: ToolDefinition = {
   async execute(input: unknown): Promise<ToolResult> {
     const { path: filePath, content } = writeFileSchema.parse(input);
     try {
-      const resolved = resolve(filePath);
+      const resolved = resolvePath(filePath);
       assertWithinBoundary(resolved);
       await writeFile(resolved, content, 'utf-8');
       return { content: `已写入文件: ${filePath}` };
@@ -71,7 +84,7 @@ export const listDirectoryTool: ToolDefinition = {
   async execute(input: unknown): Promise<ToolResult> {
     const { path: dirPath } = listDirSchema.parse(input);
     try {
-      const resolved = resolve(dirPath);
+      const resolved = resolvePath(dirPath);
       assertWithinBoundary(resolved);
       const entries = await readdir(resolved, { withFileTypes: true });
       const lines = entries.map((e) => {
@@ -93,7 +106,7 @@ export const deleteFileTool: ToolDefinition = {
   async execute(input: unknown): Promise<ToolResult> {
     const { path: filePath } = deleteFileSchema.parse(input);
     try {
-      const resolved = resolve(filePath);
+      const resolved = resolvePath(filePath);
       assertWithinBoundary(resolved);
       const info = await stat(resolved);
       if (info.isDirectory()) {

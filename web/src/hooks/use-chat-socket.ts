@@ -1,224 +1,200 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
+import {
+  useChatStore, genMsgId,
+  appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning,
+  type DelegationRequest, type PermissionConfirmRequest,
+} from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
 import type { ServerMessage } from "@/lib/types/ws-messages";
 
-const STREAMING_TIMEOUT_MS = 30_000;
-const STREAMING_TIMEOUT_MSG = "Response timed out (30s) — backend may not have LLM configured. Check config.yaml and backend logs.";
-const STREAMING_TIMEOUT_RETRY_MSG = "Response timed out (30s)";
+const STREAMING_TIMEOUT_MS = 90_000;
+const STREAMING_TIMEOUT_MSG = "Response timed out — backend may be unresponsive. Check backend logs.";
+
+// --- Helpers ---
 
 function toDelegationRequest(msg: Extract<ServerMessage, { type: "delegation.needed" }>): DelegationRequest {
   return {
-    delegationId: msg.delegationId,
-    sessionId: msg.sessionId,
-    requestedBy: msg.requestedBy,
-    title: msg.title,
-    description: msg.description,
-    urgency: msg.urgency,
-    options: msg.options,
+    delegationId: msg.delegationId, sessionId: msg.sessionId,
+    requestedBy: msg.requestedBy, title: msg.title,
+    description: msg.description, urgency: msg.urgency, options: msg.options,
   };
 }
 
 function toPermissionRequest(msg: Extract<ServerMessage, { type: "permission.confirm_needed" }>): PermissionConfirmRequest {
   return {
-    requestId: msg.requestId,
-    sessionId: msg.sessionId,
-    agentName: msg.agentName,
-    toolName: msg.toolName,
-    toolInput: msg.toolInput,
-    dangerLevel: msg.dangerLevel,
-    brainReason: msg.brainReason,
+    requestId: msg.requestId, sessionId: msg.sessionId,
+    agentName: msg.agentName, toolName: msg.toolName,
+    toolInput: msg.toolInput, dangerLevel: msg.dangerLevel, brainReason: msg.brainReason,
   };
 }
 
-export function useChatSocket() {
-  const {
-    sessionId, addMessage, appendToLast, setLastStatus, setLastProgress, setLastError, setStreaming,
-    setPendingDelegation, setPendingPermission,
-  } = useChatStore();
-  const { connect, disconnect, send, onMessage, status } = useWsStore();
+// --- Hook ---
 
-  // Auto-connect on mount, disconnect on unmount
+export function useChatSocket() {
+  const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission } = useChatStore();
+  const { connect, disconnect, send, onMessage, status } = useWsStore();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recoveredRef = useRef(false);
+
+  // --- Timer management (single source of truth) ---
+  const resetTimer = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setLastError(STREAMING_TIMEOUT_MSG), STREAMING_TIMEOUT_MS);
+  }, []);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
+  // --- Connection lifecycle ---
   useEffect(() => {
     connect(sessionId ?? undefined);
     return () => { disconnect(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Streaming timeout — if no response within 30s, reset streaming state
-  const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { clearTimer(); }, [clearTimer]);
 
+  // --- Session recovery on connect ---
   useEffect(() => {
-    return () => {
-      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-    };
-  }, []);
+    if (status !== "connected") return;
+    const sid = useChatStore.getState().sessionId;
+    if (!sid || recoveredRef.current) return;
+    recoveredRef.current = true;
 
+    fetch(`/api/sessions/${sid}/state`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data || useChatStore.getState().sessionId !== sid) return;
+        const activeTask = data.activeTasks?.[0];
+        const messages = (data.messages ?? []).map((m: { role: string; content: string; createdAt: string }) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          timestamp: new Date(m.createdAt).getTime(),
+        }));
+        useChatStore.getState().restoreSession(
+          messages,
+          activeTask ? { progress: activeTask.progress, thinkingSteps: activeTask.thinkingSteps } : undefined,
+        );
+        if (activeTask) resetTimer();
+      })
+      .catch(() => {});
+  }, [status, resetTimer]);
+
+  // --- Message dispatch ---
   useEffect(() => {
     const unsub = onMessage((raw) => {
-      const msg = raw as unknown as ServerMessage;
+      const data = raw as Record<string, unknown>;
+
+      if (data.type === "event") {
+        const event = data.event as string;
+        if ((event === "task.failed" || event === "task.timeout") && useChatStore.getState().isStreaming) {
+          const payload = data.payload as { error?: string } | undefined;
+          setLastError(payload?.error ?? "Task failed");
+          clearTimer();
+        }
+        if ((event === "task.progress" || event === "daemon.task.progress") && useChatStore.getState().isStreaming) {
+          const payload = data.payload as { message?: string; from?: string } | undefined;
+          if (payload?.message) {
+            setLastProgress(payload.message);
+            resetTimer();
+          }
+        }
+        return;
+      }
+
+      const msg = data as unknown as ServerMessage;
       switch (msg.type) {
-        case "text_delta": {
+        case "text_delta":
           appendToLast(msg.text);
-          // Reset timeout — backend is actively streaming
-          if (streamingTimerRef.current) {
-            clearTimeout(streamingTimerRef.current);
-            streamingTimerRef.current = setTimeout(() => {
-              setLastError(STREAMING_TIMEOUT_MSG);
-            }, STREAMING_TIMEOUT_MS);
-          }
+          resetTimer();
           break;
-        }
-        case "progress": {
+        case "reasoning_delta":
+          appendReasoning((msg as unknown as { text: string }).text);
+          resetTimer();
+          break;
+        case "progress":
           if (msg.summary) setLastProgress(msg.summary);
-          // Reset timeout — backend is actively processing
-          if (streamingTimerRef.current) {
-            clearTimeout(streamingTimerRef.current);
-            streamingTimerRef.current = setTimeout(() => {
-              setLastError(STREAMING_TIMEOUT_MSG);
-            }, STREAMING_TIMEOUT_MS);
-          }
+          resetTimer();
           break;
-        }
-        case "result": {
+        case "result":
           setLastStatus("complete");
           setStreaming(false);
-          if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-          streamingTimerRef.current = null;
+          clearTimer();
           break;
-        }
-        case "error": {
-          const errMsg = msg.error ?? msg.message ?? "Unknown error";
-          setLastError(errMsg);
-          if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-          streamingTimerRef.current = null;
+        case "error":
+          setLastError(msg.error ?? msg.message ?? "Unknown error");
+          clearTimer();
           break;
-        }
         case "cancelled":
-        case "interrupted": {
+        case "interrupted":
           setLastStatus("complete");
           setStreaming(false);
-          if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-          streamingTimerRef.current = null;
+          clearTimer();
           break;
-        }
-        case "delegation.needed": {
+        case "delegation.needed":
           setPendingDelegation(toDelegationRequest(msg));
           break;
-        }
-        case "permission.confirm_needed": {
+        case "permission.confirm_needed":
           setPendingPermission(toPermissionRequest(msg));
           break;
-        }
       }
     });
     return unsub;
-  }, [onMessage, appendToLast, setLastStatus, setLastProgress, setLastError, setStreaming, setPendingDelegation, setPendingPermission]);
+  }, [onMessage, setStreaming, setPendingDelegation, setPendingPermission, resetTimer, clearTimer]);
+
+  // --- Send (unified for new + resend) ---
+  const sendInternal = useCallback((text: string, attachments?: unknown[]) => {
+    addMessage({ id: genMsgId("asst"), role: "assistant", content: "", timestamp: Date.now(), status: "streaming" });
+    setStreaming(true);
+    resetTimer();
+    try {
+      send({ type: "message", text, sessionId, attachments });
+    } catch {
+      setLastError("Failed to send message");
+      clearTimer();
+    }
+  }, [sessionId, addMessage, setStreaming, send, resetTimer, clearTimer]);
 
   const sendMessage = useCallback(
     async (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
-      // Quick check: is a model configured? If not, fail fast instead of waiting 30s
+      addMessage({ id: genMsgId("user"), role: "user", content: text, timestamp: Date.now(), status: "complete", attachments });
+
+      // Quick model check — fail fast if nothing configured
       try {
         const res = await fetch("/api/providers/channels");
         if (res.ok) {
-          const data = await res.json();
-          const hasConfigured = data.channels?.some((ch: { configured?: boolean; modelCount?: number }) => ch.configured || (ch.modelCount ?? 0) > 0);
-          if (!hasConfigured) {
-            addMessage({
-              id: `err-${crypto.randomUUID().slice(0, 8)}`,
-              role: "assistant",
-              content: "模型尚未配置。请先在设置页面添加 API 密钥和模型配置。",
-              timestamp: Date.now(),
-              status: "error",
-            });
+          const d = await res.json();
+          if (!d.channels?.some((ch: { configured?: boolean; modelCount?: number }) => ch.configured || (ch.modelCount ?? 0) > 0)) {
+            setLastError("模型尚未配置。请先在设置页面添加 API 密钥和模型配置。");
             return;
           }
         }
-      } catch {
-        // If check fails, proceed anyway — the timeout will catch it
-      }
+      } catch { /* proceed — timeout will catch */ }
 
-      // Optimistic UI: add messages first
-      const userId = `user-${crypto.randomUUID().slice(0, 8)}`;
-      const asstId = `asst-${crypto.randomUUID().slice(0, 8)}`;
-
-      addMessage({
-        id: userId,
-        role: "user",
-        content: text,
-        timestamp: Date.now(),
-        status: "complete",
-        attachments,
-      });
-
-      addMessage({
-        id: asstId,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-        status: "streaming",
-      });
-
-      setStreaming(true);
-
-      // Safety timeout: reset streaming if no response within 30s
-      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-      streamingTimerRef.current = setTimeout(() => {
-        setLastError(STREAMING_TIMEOUT_MSG);
-      }, STREAMING_TIMEOUT_MS);
-
-      try {
-        send({ type: "message", text, sessionId, attachments });
-      } catch {
-        setLastError("Failed to send message");
-        if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-      }
+      sendInternal(text, attachments);
     },
-    [sessionId, addMessage, setStreaming, send, setLastError]
+    [addMessage, sendInternal],
   );
+
+  const resendMessage = useCallback((text: string) => { sendInternal(text); }, [sendInternal]);
 
   const cancelGeneration = useCallback(() => {
     send({ type: "interrupt" });
     setLastStatus("complete");
     setStreaming(false);
-    if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-  }, [send, setLastStatus, setStreaming]);
-
-  const resendMessage = useCallback(
-    (text: string) => {
-      addMessage({
-        id: `asst-${crypto.randomUUID().slice(0, 8)}`,
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-        status: "streaming",
-      });
-
-      setStreaming(true);
-
-      if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-      streamingTimerRef.current = setTimeout(() => {
-        setLastError(STREAMING_TIMEOUT_RETRY_MSG);
-      }, STREAMING_TIMEOUT_MS);
-
-      try {
-        send({ type: "message", text, sessionId });
-      } catch {
-        setLastError("Failed to send message");
-        if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
-      }
-    },
-    [sessionId, addMessage, setStreaming, send, setLastError]
-  );
+    clearTimer();
+  }, [send, setStreaming, clearTimer]);
 
   const respondDelegation = useCallback(
     (delegationId: string, response: string | null, approved: boolean) => {
       send({ type: "delegation.respond", delegationId, response, status: approved ? "approved" : "denied" });
       setPendingDelegation(null);
     },
-    [send, setPendingDelegation]
+    [send, setPendingDelegation],
   );
 
   const respondPermission = useCallback(
@@ -226,7 +202,7 @@ export function useChatSocket() {
       send({ type: approved ? "permissions.approve" : "permissions.deny", requestId });
       setPendingPermission(null);
     },
-    [send, setPendingPermission]
+    [send, setPendingPermission],
   );
 
   return { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission, connectionStatus: status };

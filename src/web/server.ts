@@ -219,13 +219,20 @@ export class WebServer {
     const remote = req.socket.remoteAddress;
     if (!remote) return false;
     const ip = remote.startsWith('::ffff:') ? remote.slice(7) : remote;
-    if (ip === '127.0.0.1' || ip === '::1') return true;
-    // Private networks (RFC 1918) — LAN access doesn't need auth
-    if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
-    if (ip.startsWith('172.')) {
-      const second = parseInt(ip.split('.')[1], 10);
-      if (second >= 16 && second <= 31) return true;
-    }
-    return false;
+    return isPrivateNetwork(ip);
   }
+}
+
+function isPrivateNetwork(ip: string): boolean {
+  if (ip === '127.0.0.1' || ip === '::1') return true;
+  if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
+  if (ip.startsWith('172.')) {
+    const parts = ip.split('.');
+    if (parts.length >= 2) {
+      const second = parseInt(parts[1], 10);
+      if (!isNaN(second) && second >= 16 && second <= 31) return true;
+    }
+  }
+  if (ip.startsWith('fe80:')) return true;
+  return false;
 }

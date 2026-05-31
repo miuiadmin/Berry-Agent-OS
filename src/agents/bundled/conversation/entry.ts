@@ -149,6 +149,9 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
             ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId, text: scrubbed });
           }
         } : undefined,
+        onReasoning: streamingEnabled && taskId ? (text: string) => {
+          ipc.send('task.telemetry', 'core', { kind: 'reasoning_delta', taskId, text });
+        } : undefined,
         onToolResult: taskId ? (toolName: string, isError: boolean) => {
           ipc.send('task.telemetry', 'core', { kind: 'tool_result', taskId, toolName, isError });
         } : undefined,

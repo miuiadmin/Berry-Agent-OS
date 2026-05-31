@@ -420,6 +420,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (pending) {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
         this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>);
+        if (decision.reason) {
+          this.reportProgress(pending, 'routing', `🧠 → ${decision.targetAgent}: ${decision.reason}`);
+        }
         getEventBus().emit('message.routed', {
           sessionId: pending.sessionId,
           taskId: pending.taskId ?? correlationId,
@@ -1502,6 +1505,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           if (fallbackSocket && !fallbackSocket.destroyed) {
             const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
             fallbackSocket.write(JSON.stringify(evt) + '\n');
+          }
+          break;
+        }
+        case 'reasoning_delta': {
+          if (!payload.taskId) return;
+          const rEntry = this.delegationManager.get(payload.taskId);
+          const rPending = rEntry
+            ? this.sessionManager.getPending(rEntry.correlationId)
+            : this.sessionManager.findPendingByTaskId(payload.taskId);
+          const sock = rPending?.streaming && rPending.socket && !rPending.socket.destroyed
+            ? rPending.socket
+            : this.sessionManager.getSocketForTask(payload.taskId);
+          if (sock && !sock.destroyed) {
+            sock.write(JSON.stringify({ type: 'reasoning_delta', text: payload.text, taskId: payload.taskId }) + '\n');
           }
           break;
         }

@@ -27,6 +27,7 @@ export interface TaskProgressPayload {
 
 export type TaskTelemetryPayload =
   | { kind: 'text_delta'; taskId: string; text: string }
+  | { kind: 'reasoning_delta'; taskId: string; text: string }
   | { kind: 'llm_completed'; taskId: string; agentName: string; inputTokens: number; outputTokens: number; cacheRead?: number; cacheCreation?: number; durationMs: number }
   | { kind: 'tool_result'; taskId: string; toolName: string; isError: boolean }
   | { kind: 'uncertainty'; taskId: string; reason: string };

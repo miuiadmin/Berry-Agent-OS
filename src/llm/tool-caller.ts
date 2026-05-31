@@ -66,6 +66,7 @@ export interface ToolLoopParams {
   config: ToolLoopConfig;
   signal?: AbortSignal;
   onChunk?: (text: string) => void;
+  onReasoning?: (text: string) => void;
   onUsage?: (inputTokens: number, outputTokens: number) => void;
   onToolResult?: (toolName: string, isError: boolean) => void;
   onUncertainty?: (reason: string) => void;
@@ -86,7 +87,7 @@ export interface ToolLoopResult {
 }
 
 export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResult> {
-  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onUsage, onToolResult, onUncertainty, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool } = params;
+  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onReasoning, onUsage, onToolResult, onUncertainty, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool } = params;
   const detector = new LoopDetector(config.maxCalls);
   const toolCalls: ToolCallRecord[] = [];
   const workingMessages: ModelMessage[] = [...messages];
@@ -124,7 +125,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
     let result: ChatResult;
     if (useStreaming) {
-      result = await consumeStream(llm, workingMessages, chatOpts, onChunk!);
+      result = await consumeStream(llm, workingMessages, chatOpts, onChunk!, onReasoning);
     } else {
       result = await llm.chat(workingMessages, chatOpts);
     }
@@ -327,11 +328,14 @@ async function consumeStream(
   messages: ModelMessage[],
   options: ChatOptions,
   onChunk: (text: string) => void,
+  onReasoning?: (text: string) => void,
 ): Promise<ChatResult> {
   let result: ChatResult | undefined;
   for await (const chunk of llm.chatStream(messages, options)) {
     if (chunk.type === 'text_delta') {
       onChunk(chunk.text);
+    } else if (chunk.type === 'reasoning_delta' && onReasoning) {
+      onReasoning(chunk.text);
     } else if (chunk.type === 'message_done') {
       const r = chunk.response;
       result = {
