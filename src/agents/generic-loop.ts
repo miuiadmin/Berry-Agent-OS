@@ -175,7 +175,7 @@ async function runAgentLoop(
 
     // §8.11 Phase 1: compress old tool outputs before LLM call
     const { compressToolOutputs } = await import('../llm/context-compression.js');
-    const compressedMessages = compressToolOutputs(messages) as any;
+    const compressedMessages = compressToolOutputs(messages);
 
     const result = await llm.chat(compressedMessages, {
       system: config.systemPrompt,
@@ -256,7 +256,7 @@ async function runAgentLoop(
   // §2.4 Budget Grace Call: give LLM one final turn to summarize progress
   messages.push({ role: 'user', content: '[System: Max turns reached. Summarize your progress so far and return whatever partial result you have. Do not call any more tools.]' });
   try {
-    const graceResult = await llm.chat(messages as any, {
+    const graceResult = await llm.chat(messages, {
       system: config.systemPrompt,
       maxTokens: 2048,
       temperature: 0.2,

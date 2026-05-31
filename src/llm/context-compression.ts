@@ -4,16 +4,16 @@ const TOOL_RESULT_TRIM_THRESHOLD = 40_000;
 const RECENT_TURNS_PROTECTED = 2;
 
 interface Message {
-  role: string;
+  role: 'user' | 'assistant' | 'system' | string;
   content: string;
 }
 
-export function compressToolOutputs(messages: Message[]): Message[] {
+export function compressToolOutputs<T extends Message>(messages: T[]): T[] {
   if (messages.length <= RECENT_TURNS_PROTECTED * 2) return messages;
 
   const protectedStart = messages.length - RECENT_TURNS_PROTECTED * 2;
   const seenHashes = new Set<string>();
-  const compressed: Message[] = [];
+  const compressed: T[] = [];
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
@@ -27,13 +27,13 @@ export function compressToolOutputs(messages: Message[]): Message[] {
       const hash = md5(msg.content);
 
       if (seenHashes.has(hash)) {
-        compressed.push({ role: msg.role, content: '[duplicate tool output removed]' });
+        compressed.push({ ...msg, content: '[duplicate tool output removed]' });
         continue;
       }
       seenHashes.add(hash);
 
       if (msg.content.length > TOOL_RESULT_TRIM_THRESHOLD) {
-        compressed.push({ role: msg.role, content: summarizeToolResult(msg.content) });
+        compressed.push({ ...msg, content: summarizeToolResult(msg.content) });
         continue;
       }
     }

@@ -417,7 +417,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(correlationId);
       if (pending) {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
-        this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as any);
+        this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>);
         getEventBus().emit('message.routed', {
           sessionId: pending.sessionId,
           taskId: pending.taskId ?? correlationId,
@@ -458,7 +458,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // §2.8 Apply PermissionScope if provided
     if (decision.scope && this.capabilityBusRef) {
-      const gate = (this.capabilityBusRef as any).getPermissionGate?.();
+      const gate = this.capabilityBusRef.getPermissionGate() as any;
       if (gate?.setScope) {
         gate.setScope(pending.sessionId, { ...decision.scope, issuedAt: Date.now() });
       }
@@ -983,7 +983,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.brainDecisionRecorder?.recordReviewDecision(
           pending.sessionId,
           (pending.draftResponse ?? pending.userMessage).slice(0, 200),
-          review as any,
+          review as unknown as Record<string, unknown>,
         );
       }
 
@@ -1162,7 +1162,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.brainDecisionRecorder?.recordPermissionDecision(
           judgeInput.sessionId,
           judgeInput.toolName,
-          result as any,
+          result as unknown as Record<string, unknown>,
         );
         this.pendingJudgeInputs?.delete(correlationId);
       }

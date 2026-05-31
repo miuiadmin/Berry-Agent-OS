@@ -59,6 +59,7 @@ export interface ICapabilityBus {
   on(event: string, handler: (data: unknown) => void): () => void;
   registerTrigger(trigger: Trigger): void;
   unregisterTrigger(name: string): void;
+  getPermissionGate(): IPermissionGate | null;
 }
 
 export interface TriggerEvent {
