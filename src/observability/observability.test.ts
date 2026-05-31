@@ -158,7 +158,7 @@ describe('RunContext', () => {
   afterEach(() => {
     if (savedHome) process.env.SERVICE_HOME = savedHome;
     else delete process.env.SERVICE_HOME;
-    setAppHome(savedHome || join(homedir(), '.agent-home'));
+    setAppHome(savedHome || join(homedir(), '.berry'));
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

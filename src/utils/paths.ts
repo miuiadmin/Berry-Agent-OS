@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { mkdirSync } from 'node:fs';
 
-let appHome = process.env.SERVICE_HOME ?? join(homedir(), '.agent-home');
+let appHome = process.env.SERVICE_HOME ?? join(homedir(), '.berry');
 
 export function getAppHome(): string {
   return appHome;
