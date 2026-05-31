@@ -157,14 +157,14 @@ export default function ConversationsPage() {
       >
         {(conversations) => (
           <div className="mt-4 space-y-2">
-            {conversations.map((conv) => {
+            {conversations.map((conv, i) => {
               const displayTitle = conv.title || (conv.firstMessage
                 ? conv.firstMessage.slice(0, 80) + (conv.firstMessage.length > 80 ? "..." : "")
                 : conv.sessionId);
               return (
                 <div
                   key={conv.sessionId}
-                  className="flex items-center justify-between rounded-xl border border-border px-4 py-3 cursor-pointer hover:border-foreground/20 transition-colors"
+                  className={`flex items-center justify-between rounded-xl border border-border px-4 py-3 cursor-pointer hover:border-foreground/20 active:scale-[0.99] transition-all stagger-${Math.min(i + 1, 8)}`}
                   onClick={() => handleOpenChat(conv.sessionId)}
                 >
                   <div className="flex items-center gap-3 min-w-0">

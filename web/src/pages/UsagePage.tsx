@@ -32,7 +32,7 @@ export default function UsagePage() {
 
       {/* Summary cards */}
       <div className="mt-6 grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="card-lift stagger-1">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Coins className="size-4" />
@@ -49,7 +49,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="card-lift stagger-2">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <TrendingUp className="size-4" />
@@ -66,7 +66,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="card-lift stagger-3">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Cpu className="size-4" />
@@ -85,7 +85,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="card-lift stagger-4">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Bot className="size-4" />
@@ -102,7 +102,7 @@ export default function UsagePage() {
 
       {/* Charts */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="stagger-5">
           <CardHeader>
             <CardTitle className="text-sm">Daily Token Usage</CardTitle>
           </CardHeader>
@@ -131,7 +131,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="stagger-6">
           <CardHeader>
             <CardTitle className="text-sm">By Agent</CardTitle>
           </CardHeader>
@@ -149,7 +149,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="stagger-7">
           <CardHeader>
             <CardTitle className="text-sm">By Model</CardTitle>
           </CardHeader>
@@ -167,7 +167,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="stagger-8">
           <CardHeader>
             <CardTitle className="text-sm">Cost Breakdown (7d)</CardTitle>
           </CardHeader>

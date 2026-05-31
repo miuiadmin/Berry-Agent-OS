@@ -160,7 +160,7 @@ export default function TasksPage() {
       {/* Mobile card view */}
       <div className="mt-4 space-y-3 md:hidden">
         {isLoading && Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-16 w-full rounded-xl" />
+          <Skeleton key={i} className={`h-16 w-full rounded-xl stagger-${i + 1}`} />
         ))}
         {!isLoading && tasks.length === 0 && (
           <EmptyState
@@ -169,12 +169,13 @@ export default function TasksPage() {
             description="Tasks will appear here once agents start processing"
           />
         )}
-        {!isLoading && tasks.map((task) => (
-          <TaskCardMobile
-            key={task.id}
-            task={task}
-            onCancel={() => cancelTask.mutate(task.id)}
-          />
+        {!isLoading && tasks.map((task, i) => (
+          <div key={task.id} className={`stagger-${Math.min(i + 1, 8)}`}>
+            <TaskCardMobile
+              task={task}
+              onCancel={() => cancelTask.mutate(task.id)}
+            />
+          </div>
         ))}
       </div>
 
@@ -214,7 +215,7 @@ function TaskRow({
         onClick={onToggle}
       >
         <td className="px-2 text-muted-foreground">
-          {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          <ChevronRight className={cn("size-4 transition-transform duration-200", expanded && "rotate-90")} />
         </td>
         <td className="px-4 py-2.5 font-mono text-xs">{task.id.slice(0, 8)}</td>
         <td className="px-4 py-2.5">{task.taskType}</td>
