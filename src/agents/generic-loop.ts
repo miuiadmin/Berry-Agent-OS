@@ -191,6 +191,10 @@ async function runAgentLoop(
 
     // Tool Guardrails: check for deadloops before execution
     const toolResults: string[] = [];
+    let turnTotalChars = 0;
+    const PER_RESULT_LIMIT = 100_000;
+    const PER_TURN_LIMIT = 200_000;
+
     for (const toolCall of result.toolCalls) {
       const guardrailCheck = guardrails.check(toolCall.name, toolCall.input);
       if (guardrailCheck.action === 'block') {
@@ -202,9 +206,19 @@ async function runAgentLoop(
       }
 
       const invokeResult = await invokeBus(toolCall.name, toolCall.input);
-      const content = invokeResult.ok
+      let content = invokeResult.ok
         ? (typeof invokeResult.data === 'string' ? invokeResult.data : JSON.stringify(invokeResult.data))
         : `Error: ${invokeResult.error}`;
+
+      // §8.12 Tool output size limits: truncate oversized results
+      if (content.length > PER_RESULT_LIMIT) {
+        content = truncateWithHeadTail(content, PER_RESULT_LIMIT);
+      }
+      if (turnTotalChars + content.length > PER_TURN_LIMIT) {
+        content = truncateWithHeadTail(content, PER_TURN_LIMIT - turnTotalChars);
+      }
+      turnTotalChars += content.length;
+
       toolResults.push(`[${toolCall.id}] ${!invokeResult.ok ? 'ERROR: ' : ''}${content}`);
     }
 
@@ -214,4 +228,12 @@ async function runAgentLoop(
 
   // Budget Grace Call: give LLM one last chance to summarize
   return { response: 'Max turns reached', turns: maxTurns };
+}
+
+function truncateWithHeadTail(content: string, maxLength: number): string {
+  if (content.length <= maxLength || maxLength <= 0) return content;
+  const headSize = Math.floor(maxLength * 0.4);
+  const tailSize = Math.floor(maxLength * 0.1);
+  const trimmed = content.length - maxLength;
+  return `${content.slice(0, headSize)}\n[... truncated ${trimmed} chars ...]\n${content.slice(-tailSize)}`;
 }

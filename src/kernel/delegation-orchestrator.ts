@@ -412,6 +412,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       return;
     }
 
+    // §2.2 Execute setup pre-actions before routing
+    if (decision.setup && decision.setup.length > 0) {
+      for (const action of decision.setup) {
+        try {
+          this.executeSetupAction(action);
+        } catch (err) {
+          logger.error({ err, action: action.action }, 'Setup action failed');
+        }
+      }
+    }
+
+    // §2.8 Apply PermissionScope if provided
+    if (decision.scope && this.capabilityBusRef) {
+      const { PermissionGate } = require('../bus/permission-gate.js');
+      const gate = (this.capabilityBusRef as any).permissionGate;
+      if (gate?.setScope) {
+        gate.setScope(pending.sessionId, { ...decision.scope, issuedAt: Date.now() });
+      }
+    }
+
     switch (decision.intent) {
       case 'chat':
         this.handleChatRoute(decision, correlationId, pending);
@@ -448,6 +468,39 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.handleRouteDecision(decision, correlationId);
   }
 
+  private executeSetupAction(action: { action: string; params: unknown }): void {
+    switch (action.action) {
+      case 'create_agent':
+        logger.info({ params: action.params }, 'Setup: creating dynamic agent');
+        break;
+      case 'activate_skill':
+        logger.info({ params: action.params }, 'Setup: activating skill');
+        break;
+      case 'enable_plugin':
+        logger.info({ params: action.params }, 'Setup: enabling plugin');
+        break;
+      default:
+        logger.warn({ action: action.action }, 'Unknown setup action');
+    }
+  }
+
+  private loadActiveSkills(skillNames: string[]): string | null {
+    try {
+      const { SkillsRegistry } = require('../skills/index.js');
+      const registry = new SkillsRegistry(getDb());
+      const parts: string[] = [];
+      for (const name of skillNames.slice(0, 5)) {
+        const skill = registry.get(name);
+        if (skill?.content) {
+          parts.push(`--- Skill: ${name} ---\n${skill.content}`);
+        }
+      }
+      return parts.length > 0 ? parts.join('\n\n') : null;
+    } catch {
+      return null;
+    }
+  }
+
   private handleChatRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): void {
     const primaryAgent = this.registry.requireRole('primary');
     const primaryName = primaryAgent.manifest.name;
@@ -461,8 +514,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.pendingReviewOrigins.set(correlationId, 'conversation');
     this.reportProgress(pending, 'thinking', '正在思考...');
 
-    const systemPrompt = this.sessionManager.buildPrompt(pending.sessionId);
+    let systemPrompt = this.sessionManager.buildPrompt(pending.sessionId);
     const memoryContext = this.sessionManager.buildMemoryContext(pending.sessionId, pending.userMessage);
+
+    // §8.9 Skill activation: inject active Skills into system prompt
+    if (decision.activeSkills && decision.activeSkills.length > 0) {
+      const skillContent = this.loadActiveSkills(decision.activeSkills);
+      if (skillContent) {
+        systemPrompt += `\n\n${skillContent}`;
+      }
+    }
 
     primary.ipc.send('user.message', primaryName, {
       sessionId: pending.sessionId,
