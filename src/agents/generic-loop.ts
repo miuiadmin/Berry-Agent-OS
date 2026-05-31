@@ -155,6 +155,8 @@ async function runAgentLoop(
   agentName: string,
   invokeBus: (name: string, input: unknown) => Promise<InvokeResult>,
 ): Promise<Record<string, unknown>> {
+  const { ToolGuardrails } = await import('./tool-guardrails.js');
+  const guardrails = new ToolGuardrails();
   const maxTurns = config.maxTurns ?? 10;
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
@@ -187,9 +189,18 @@ async function runAgentLoop(
       return { response: result.content, turns: turn + 1 };
     }
 
-    // Execute tool calls via Bus
+    // Tool Guardrails: check for deadloops before execution
     const toolResults: string[] = [];
     for (const toolCall of result.toolCalls) {
+      const guardrailCheck = guardrails.check(toolCall.name, toolCall.input);
+      if (guardrailCheck.action === 'block') {
+        return { response: result.content || `Blocked: ${guardrailCheck.reason}`, turns: turn + 1, blocked: true, blockReason: guardrailCheck.reason };
+      }
+      if (guardrailCheck.action === 'warn') {
+        toolResults.push(`[${toolCall.id}] WARNING: ${guardrailCheck.reason}`);
+        continue;
+      }
+
       const invokeResult = await invokeBus(toolCall.name, toolCall.input);
       const content = invokeResult.ok
         ? (typeof invokeResult.data === 'string' ? invokeResult.data : JSON.stringify(invokeResult.data))
@@ -201,5 +212,6 @@ async function runAgentLoop(
     messages.push({ role: 'user', content: toolResults.join('\n') });
   }
 
+  // Budget Grace Call: give LLM one last chance to summarize
   return { response: 'Max turns reached', turns: maxTurns };
 }

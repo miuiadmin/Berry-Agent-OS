@@ -355,6 +355,14 @@ export class CoreService {
     this.capabilityBus = capabilityBus;
     this.messageRouter.setCapabilityBus(capabilityBus);
 
+    // Transaction Manager: atomic multi-step operations with revert (§2.1)
+    const { TransactionManager } = await import('../bus/transaction.js');
+    const transactionManager = new TransactionManager(capabilityBus);
+    capabilityBus.register(
+      { name: 'revert_last_transaction', description: 'Revert the most recent committed transaction (undo file changes)', dangerLevel: 'moderate', provider: { type: 'builtin', name: 'transaction' } },
+      async () => transactionManager.revertLastCommitted({ sessionId: 'user-undo' }),
+    );
+
     // World Model: continuous global state for Brain decisions
     const { WorldModelRuntime } = await import('./world-model.js');
     const worldModel = new WorldModelRuntime(getDb());
