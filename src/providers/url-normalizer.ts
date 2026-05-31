@@ -30,9 +30,9 @@ export function normalizeBaseUrl(url: string | undefined, kind: ProviderKind): s
   // Strip trailing slashes for consistency
   let normalized = url.replace(/\/+$/, '');
 
-  // Only anthropic / openai / openai-compatible need the /v1 path
-  if (kind === 'anthropic' || kind === 'openai' || kind === 'openai-compatible') {
-    // If URL already ends with /vN (any version digit), leave it alone
+  // Anthropic SDK internally appends /v1/messages — do NOT add /v1
+  // Only OpenAI-compatible SDKs need /v1 appended
+  if (kind === 'openai' || kind === 'openai-compatible') {
     if (!/\/v\d+$/.test(normalized)) {
       normalized += '/v1';
     }
