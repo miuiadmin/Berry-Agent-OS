@@ -85,7 +85,7 @@ export class WebServer {
         socket.destroy();
         return;
       }
-      if (this.deps.secret && !this.verifyWsAuth(req)) {
+      if (this.deps.secret && !this.isLocalRequest(req) && !this.verifyWsAuth(req)) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
@@ -128,7 +128,7 @@ export class WebServer {
 
     // 1. API routes
     if (pathname.startsWith('/api/')) {
-      if (this.deps.secret && !this.verifyHttpAuth(req)) {
+      if (this.deps.secret && !this.isLocalRequest(req) && !this.verifyHttpAuth(req)) {
         res.writeHead(401, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'Unauthorized' }));
         return;
@@ -213,5 +213,19 @@ export class WebServer {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const token = url.searchParams.get('token');
     return token === this.deps.secret;
+  }
+
+  private isLocalRequest(req: IncomingMessage): boolean {
+    const remote = req.socket.remoteAddress;
+    if (!remote) return false;
+    const ip = remote.startsWith('::ffff:') ? remote.slice(7) : remote;
+    if (ip === '127.0.0.1' || ip === '::1') return true;
+    // Private networks (RFC 1918) — LAN access doesn't need auth
+    if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
+    if (ip.startsWith('172.')) {
+      const second = parseInt(ip.split('.')[1], 10);
+      if (second >= 16 && second <= 31) return true;
+    }
+    return false;
   }
 }

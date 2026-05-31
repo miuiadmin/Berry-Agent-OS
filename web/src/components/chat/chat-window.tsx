@@ -327,7 +327,7 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
-  const { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission } = useChatSocket();
+  const { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission, connectionStatus } = useChatSocket();
   const sessionId = useChatStore((s) => s.sessionId);
   const messages = useChatStore((s) => s.messages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -477,6 +477,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         }}
         onCancel={cancelGeneration}
         externalAttachments={droppedAttachments}
+        disabled={connectionStatus !== "connected"}
       />
     </div>
   );

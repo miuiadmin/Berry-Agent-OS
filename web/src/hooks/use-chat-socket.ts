@@ -62,22 +62,38 @@ export function useChatSocket() {
       switch (msg.type) {
         case "text_delta": {
           appendToLast(msg.text);
+          // Reset timeout — backend is actively streaming
+          if (streamingTimerRef.current) {
+            clearTimeout(streamingTimerRef.current);
+            streamingTimerRef.current = setTimeout(() => {
+              setLastError(STREAMING_TIMEOUT_MSG);
+            }, STREAMING_TIMEOUT_MS);
+          }
           break;
         }
         case "progress": {
           if (msg.summary) setLastProgress(msg.summary);
+          // Reset timeout — backend is actively processing
+          if (streamingTimerRef.current) {
+            clearTimeout(streamingTimerRef.current);
+            streamingTimerRef.current = setTimeout(() => {
+              setLastError(STREAMING_TIMEOUT_MSG);
+            }, STREAMING_TIMEOUT_MS);
+          }
           break;
         }
         case "result": {
           setLastStatus("complete");
           setStreaming(false);
           if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+          streamingTimerRef.current = null;
           break;
         }
         case "error": {
           const errMsg = msg.error ?? msg.message ?? "Unknown error";
           setLastError(errMsg);
           if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+          streamingTimerRef.current = null;
           break;
         }
         case "cancelled":
@@ -85,6 +101,7 @@ export function useChatSocket() {
           setLastStatus("complete");
           setStreaming(false);
           if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
+          streamingTimerRef.current = null;
           break;
         }
         case "delegation.needed": {
@@ -98,7 +115,7 @@ export function useChatSocket() {
       }
     });
     return unsub;
-  }, [onMessage, appendToLast, setLastStatus, setLastProgress, setStreaming, setPendingDelegation, setPendingPermission]);
+  }, [onMessage, appendToLast, setLastStatus, setLastProgress, setLastError, setStreaming, setPendingDelegation, setPendingPermission]);
 
   const sendMessage = useCallback(
     async (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {

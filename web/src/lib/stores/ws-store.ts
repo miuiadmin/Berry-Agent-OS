@@ -62,17 +62,22 @@ export const useWsStore = create<WsStore>((set, get) => ({
     set({ status: "connecting", sessionId: sid });
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
+    // In dev mode (port 3889), connect WS directly to backend (port 3888)
+    // Vite proxy for WS is unreliable with connection state tracking
+    const host = window.location.port === "3889" ? window.location.hostname + ":3888" : window.location.host;
     const socket = new WebSocket(`${protocol}//${host}/ws?sessionId=${sid}`);
 
+    ws = socket;
+
     socket.onopen = () => {
+      if (ws !== socket) return; // stale socket
       set({ status: "connected" });
       reconnectDelay = 1000;
-      // Flush any messages queued while connecting
       flushQueue();
     };
 
     socket.onmessage = (event) => {
+      if (ws !== socket) return; // stale socket
       try {
         const data = JSON.parse(event.data) as Record<string, unknown>;
 
@@ -97,6 +102,7 @@ export const useWsStore = create<WsStore>((set, get) => ({
     };
 
     socket.onclose = () => {
+      if (ws !== socket) return; // stale socket — ignore
       set({ status: "disconnected" });
       ws = null;
       scheduleReconnect(get);
@@ -105,8 +111,6 @@ export const useWsStore = create<WsStore>((set, get) => ({
     socket.onerror = () => {
       socket.close();
     };
-
-    ws = socket;
   },
 
   disconnect: () => {
@@ -116,11 +120,10 @@ export const useWsStore = create<WsStore>((set, get) => ({
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
-    ws?.close();
+    const prev = ws;
     ws = null;
+    prev?.close();
     sendQueue.length = 0;
-    messageHandlers.clear();
-    eventListeners.clear();
     set({ status: "disconnected" });
   },
 

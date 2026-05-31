@@ -5,14 +5,16 @@ import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-r
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: Attachment[]) => void;
   onCancel?: () => void;
   externalAttachments?: Attachment[];
+  disabled?: boolean;
 }
 
-export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputProps) {
+export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -26,6 +28,10 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
   const canSend = text.trim().length > 0 || allAttachments.length > 0;
 
   const handleSubmit = useCallback(() => {
+    if (disabled) {
+      toast.error("未连接到服务器，请稍候...");
+      return;
+    }
     const trimmed = text.trim();
     if ((!trimmed && allAttachments.length === 0) || isStreaming) return;
     onSend(trimmed, allAttachments.length > 0 ? allAttachments : undefined);
@@ -34,7 +40,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [text, allAttachments, isStreaming, onSend]);
+  }, [text, allAttachments, isStreaming, onSend, disabled]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -107,11 +113,11 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
             </div>
             <button
               onClick={handleSubmit}
-              disabled={!canSend || isStreaming}
+              disabled={!canSend || isStreaming || disabled}
               className={cn(
                 "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 btn-press",
                 "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
-                canSend && !isStreaming
+                canSend && !isStreaming && !disabled
                   ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97] animate-send-ready"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}

@@ -159,8 +159,9 @@ export class ProviderRegistry implements IProviderRegistry {
 
     switch (providerKind) {
       case 'anthropic': {
+        const baseURL = normalizeBaseUrl(channel.baseUrl, providerKind);
         const factory = createAnthropic({
-          baseURL: normalizeBaseUrl(channel.baseUrl, providerKind),
+          baseURL,
           apiKey: channel.apiKey || undefined,
         });
         return factory(model.id);
