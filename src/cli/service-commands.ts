@@ -18,10 +18,19 @@ export function registerServiceCommands(program: Command): void {
     .option('--foreground', '前台运行（不 detach）')
     .option('--data-dir <path>', '覆盖 SERVICE_HOME 数据目录')
     .option('--socket <path>', '覆盖 socket 路径')
+    .option('--log-level <level>', '日志级别 (error|warn|info|debug)', 'info')
+    .option('--debug', 'debug 模式（等价于 --log-level debug）')
     .option('--json', '以 JSON 格式输出启动信息')
-    .action(async (opts: { test?: boolean; foreground?: boolean; dataDir?: string; socket?: string; json?: boolean }) => {
+    .action(async (opts: { test?: boolean; foreground?: boolean; dataDir?: string; socket?: string; logLevel?: string; debug?: boolean; json?: boolean }) => {
+      const effectiveLogLevel = opts.debug ? 'debug' : (opts.logLevel ?? 'info');
+      process.env.APP_CLI_LOG_LEVEL = effectiveLogLevel;
+
       const renderer = getConsoleRenderer();
       if (opts.json) renderer.setMode('json');
+
+      if (!opts.json) {
+        renderer.info(`日志级别: ${effectiveLogLevel}`);
+      }
       const env = buildServiceEnv(opts);
       applyServiceEnvToCurrentProcess(env);
       const appHome = env.SERVICE_HOME ?? getAppHome();

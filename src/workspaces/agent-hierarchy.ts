@@ -13,8 +13,13 @@ export class AgentHierarchy {
     if (superiorId && !this.validateNoCircularChain(agentId, superiorId)) {
       throw new Error('Circular chain detected');
     }
-    this.db.prepare('UPDATE workspace_agents SET superior_id = ? WHERE id = ?').run(superiorId, agentId);
-    logger.debug({ agentId, superiorId }, 'Superior set');
+    try {
+      this.db.prepare('UPDATE workspace_agents SET superior_id = ? WHERE id = ?').run(superiorId, agentId);
+      logger.debug({ agentId, superiorId }, 'Superior set');
+    } catch (err) {
+      logger.error({ err, agentId, superiorId }, 'Failed to set superior');
+      throw err;
+    }
   }
 
   getSuperior(agentId: string): AgentHierarchyInfo | null {
@@ -72,7 +77,12 @@ export class AgentHierarchy {
   }
 
   assignToNode(agentId: string, orgNodeId: string): void {
-    this.db.prepare('UPDATE workspace_agents SET org_node_id = ? WHERE id = ?').run(orgNodeId, agentId);
+    try {
+      this.db.prepare('UPDATE workspace_agents SET org_node_id = ? WHERE id = ?').run(orgNodeId, agentId);
+    } catch (err) {
+      logger.error({ err, agentId, orgNodeId }, 'Failed to assign agent to org node');
+      throw err;
+    }
   }
 
   getAgentsByNode(orgNodeId: string): AgentHierarchyInfo[] {

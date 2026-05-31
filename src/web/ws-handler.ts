@@ -7,6 +7,25 @@ import type { WebServerDependencies } from './types.js';
 
 const logger = getLogger('ws-handler');
 
+// --- Input validation helpers ---
+
+function requireString(obj: Record<string, unknown>, field: string): string | undefined {
+  const val = obj[field];
+  return typeof val === 'string' && val.length > 0 ? val : undefined;
+}
+
+function wsReply(ws: WebSocket, data: Record<string, unknown>): void {
+  if ((ws as unknown as { readyState: number }).readyState === 1) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
+function wsError(ws: WebSocket, error: string): void {
+  wsReply(ws, { type: 'error', error });
+}
+
+// --- WebSocket Bridge ---
+
 export class WebSocketBridge {
   destroyed = false;
 
@@ -28,6 +47,8 @@ export class WebSocketBridge {
   }
 }
 
+// --- Connection handler ---
+
 export function createWsHandler(deps: WebServerDependencies) {
   return function handleConnection(ws: WebSocket, req: IncomingMessage): void {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -37,16 +58,12 @@ export function createWsHandler(deps: WebServerDependencies) {
 
     // Forward delegation events to this client
     const delegationListener = deps.eventBus.on('delegation.user_needed' as any, (payload: any) => {
-      if ((ws as unknown as { readyState: number }).readyState === 1) {
-        ws.send(JSON.stringify({ type: 'delegation.needed', ...payload }));
-      }
+      wsReply(ws, { type: 'delegation.needed', ...payload });
     });
 
     // Forward permission confirmation events
     const permissionListener = deps.eventBus.on('permission.user_confirm_needed' as any, (payload: any) => {
-      if ((ws as unknown as { readyState: number }).readyState === 1) {
-        ws.send(JSON.stringify({ type: 'permission.confirm_needed', ...payload }));
-      }
+      wsReply(ws, { type: 'permission.confirm_needed', ...payload });
     });
 
     ws.on('message', (data) => {
@@ -54,7 +71,7 @@ export function createWsHandler(deps: WebServerDependencies) {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
         handleWsMessage(ws, msg, sessionId, deps);
       } catch (err) {
-        ws.send(JSON.stringify({ type: 'error', error: (err as Error).message }));
+        wsError(ws, (err as Error).message);
       }
     });
 
@@ -75,23 +92,29 @@ export function createWsHandler(deps: WebServerDependencies) {
   };
 }
 
+// --- Message dispatcher ---
+
 function handleWsMessage(
   ws: WebSocket,
   msg: Record<string, unknown>,
   sessionId: string,
   deps: WebServerDependencies,
 ): void {
-  const type = msg.type as string;
+  const type = requireString(msg, 'type');
+  if (!type) {
+    wsError(ws, '缺少 type 字段');
+    return;
+  }
 
   switch (type) {
     case 'message': {
-      const text = msg.text as string;
+      const text = requireString(msg, 'text');
       if (!text) {
-        ws.send(JSON.stringify({ type: 'error', error: '消息内容不能为空' }));
+        wsError(ws, '消息内容不能为空');
         return;
       }
       const attachments = Array.isArray(msg.attachments) ? msg.attachments : undefined;
-      const effectiveSessionId = (msg.sessionId as string) || sessionId;
+      const effectiveSessionId = requireString(msg, 'sessionId') || sessionId;
       const bridge = new WebSocketBridge(ws);
       deps.handleMessage(
         { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode: 'ask', attachments },
@@ -100,7 +123,8 @@ function handleWsMessage(
       break;
     }
     case 'permissions.approve': {
-      const requestId = msg.requestId as string;
+      const requestId = requireString(msg, 'requestId');
+      if (!requestId) { wsError(ws, '缺少 requestId'); return; }
       deps.permissionCoordinator.resolve(requestId, {
         verdict: 'approved',
         source: 'user',
@@ -109,30 +133,32 @@ function handleWsMessage(
       break;
     }
     case 'permissions.deny': {
-      const requestId = msg.requestId as string;
+      const requestId = requireString(msg, 'requestId');
+      if (!requestId) { wsError(ws, '缺少 requestId'); return; }
       deps.permissionCoordinator.resolve(requestId, {
         verdict: 'denied',
         source: 'user',
-        reason: (msg.reason as string) ?? 'user denied via web dashboard',
+        reason: typeof msg.reason === 'string' ? msg.reason : 'user denied via web dashboard',
       });
       break;
     }
     case 'interrupt': {
-      const reason = msg.reason as string | undefined;
+      const reason = typeof msg.reason === 'string' ? msg.reason : undefined;
       deps.handleInterrupt(sessionId, reason, ws);
       break;
     }
     case 'delegation.respond': {
-      const delegationId = msg.delegationId as string;
-      const response = msg.response as string | null;
-      if (delegationId && deps.humanDelegationManager) {
+      const delegationId = requireString(msg, 'delegationId');
+      if (!delegationId) { wsError(ws, '缺少 delegationId'); return; }
+      const response = typeof msg.response === 'string' ? msg.response : null;
+      if (deps.humanDelegationManager) {
         const status = response ? 'approved' : 'denied';
         deps.humanDelegationManager.resolve(delegationId, response, status as any);
-        ws.send(JSON.stringify({ type: 'delegation.resolved', delegationId, status }));
+        wsReply(ws, { type: 'delegation.resolved', delegationId, status });
       }
       break;
     }
     default:
-      ws.send(JSON.stringify({ type: 'error', error: `未知消息类型: ${type}` }));
+      wsError(ws, `未知消息类型: ${type}`);
   }
 }

@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/dashboard-layout";
+import { useRealtimeEvents } from "./hooks/use-realtime-events";
 
 // Lazy-load pages
 import { lazy, Suspense } from "react";
@@ -12,6 +13,9 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
 
 export default function App() {
+  // Subscribe to WS events for automatic query invalidation
+  useRealtimeEvents();
+
   return (
     <Suspense fallback={<div className="flex h-screen items-center justify-center text-muted-foreground">加载中...</div>}>
       <Routes>

@@ -16,6 +16,11 @@ import { getEventBus } from '../event-bus.js';
 
 const logger = getLogger('handlers:messaging');
 
+function requireString(obj: Record<string, unknown>, field: string): string | undefined {
+  const val = obj[field];
+  return typeof val === 'string' && val.length > 0 ? val : undefined;
+}
+
 export type MessagingHandlerContext = Pick<ServiceContainer,
   'agentManager' | 'registry' | 'taskManager' | 'taskRouter' |
   'sessionManager' | 'messageRouter' | 'permissionCoordinator' |
@@ -27,21 +32,22 @@ export function handleMessage(
   socket: Socket,
   ctx: MessagingHandlerContext,
 ): void {
-  const message = request.message as string;
+  const message = requireString(request, 'message');
   if (!message) {
     socket.write(JSON.stringify({ error: '缺少 message 字段' }) + '\n');
     return;
   }
 
-  const effectiveMode = (request.permissionMode && ['ask', 'allow-all', 'deny-all'].includes(request.permissionMode as string))
-    ? request.permissionMode as 'ask' | 'allow-all' | 'deny-all'
+  const permissionMode = requireString(request, 'permissionMode');
+  const effectiveMode = (permissionMode && ['ask', 'allow-all', 'deny-all'].includes(permissionMode))
+    ? permissionMode as 'ask' | 'allow-all' | 'deny-all'
     : ctx.config.permissionMode;
   const permissionEngine = new PermissionEngine(effectiveMode);
   const approvalManager = new ApprovalManager(getDb(), new TokenIssuer(getDb()), effectiveMode);
   ctx.permissionCoordinator.updateEngine(permissionEngine);
   ctx.permissionCoordinator.updateApprovalManager(approvalManager);
 
-  const sessionId = (request.sessionId as string) ?? genId('ses');
+  const sessionId = requireString(request, 'sessionId') ?? genId('ses');
 
   if (ctx.sessionManager.hasPendingAsk(sessionId)) {
     ctx.messageRouter.sendUserReply({
