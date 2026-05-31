@@ -6,6 +6,7 @@ import { AgentManager } from './agent-manager.js';
 import { AgentRegistry } from './agent-registry.js';
 import { EventBus, initEventBus, getEventBus } from './event-bus.js';
 import type { AppConfig } from '../config/schema.js';
+import type { LlmConfig } from '../llm/types.js';
 import { TaskManager } from './task-manager.js';
 import { TaskNotifier } from './task-notification.js';
 import { AgentProgress } from './agent-progress.js';
@@ -675,6 +676,9 @@ export class CoreService {
         this.skillService.refresh();
         logger.info('Skills reloaded after config change');
       }
+      if (fields.includes('llm')) {
+        this.propagateLlmConfig(config.llm);
+      }
 
       logger.info({ fields }, 'Config reloaded');
     });
@@ -986,6 +990,20 @@ export class CoreService {
     }
 
     logger.info('Berry 服务已停止');
+  }
+
+  /**
+   * Propagate LLM config changes to all running agent child processes.
+   * Each child process will recreate its ProviderRegistry and LlmClient in-place.
+   */
+  private propagateLlmConfig(llmConfig: LlmConfig): void {
+    for (const agent of this.registry.listResident()) {
+      const instance = this.agentManager.getAgent(agent.manifest.name);
+      if (instance) {
+        instance.ipc.send('config.llm_update', agent.manifest.name, { llm: llmConfig });
+      }
+    }
+    logger.info('LLM config propagated to agent child processes');
   }
 }
 

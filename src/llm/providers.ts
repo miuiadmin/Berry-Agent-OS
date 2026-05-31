@@ -4,6 +4,7 @@ import type { LanguageModelV3 } from '@ai-sdk/provider';
 import type { LlmConfig } from './types.js';
 import type { ModelTier } from '../contracts/model.js';
 import { getProviderConfig, resolveModel } from './types.js';
+import { normalizeBaseUrl } from '../providers/url-normalizer.js';
 
 export class ModelNotConfiguredError extends Error {
   constructor(provider: string) {
@@ -23,7 +24,7 @@ export function createProviderModel(config: LlmConfig, tier: ModelTier): Languag
   switch (pc.provider) {
     case 'anthropic': {
       const anthropic = createAnthropic({
-        baseURL: pc.baseUrl,
+        baseURL: normalizeBaseUrl(pc.baseUrl, 'anthropic'),
         apiKey: pc.apiKey,
       });
       return anthropic(modelId);
@@ -31,7 +32,7 @@ export function createProviderModel(config: LlmConfig, tier: ModelTier): Languag
 
     case 'openai': {
       const openai = createOpenAI({
-        baseURL: pc.baseUrl,
+        baseURL: normalizeBaseUrl(pc.baseUrl, 'openai'),
         apiKey: pc.apiKey,
       });
       return openai.chat(modelId);
@@ -39,7 +40,7 @@ export function createProviderModel(config: LlmConfig, tier: ModelTier): Languag
 
     case 'openai-compatible': {
       const openaiCompat = createOpenAI({
-        baseURL: pc.baseUrl,
+        baseURL: normalizeBaseUrl(pc.baseUrl, 'openai-compatible'),
         apiKey: pc.apiKey,
         name: 'openai-compatible',
       });

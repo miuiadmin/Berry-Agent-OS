@@ -1478,15 +1478,27 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const payload = msg.payload as TaskTelemetryPayload;
       switch (payload.kind) {
         case 'text_delta': {
-          if (!payload.taskId) return;
+          if (!payload.taskId) {
+            logger.debug('text_delta dropped: no taskId');
+            return;
+          }
           const entry = this.delegationManager.get(payload.taskId);
-          if (!entry) return;
+          if (!entry) {
+            logger.debug({ taskId: payload.taskId }, 'text_delta dropped: delegation entry not found');
+            return;
+          }
           this.delegationManager.recordOutput(payload.taskId, { delegationId: payload.taskId, kind: 'text_delta', data: { text: payload.text } });
           const pending = this.sessionManager.getPending(entry.correlationId);
-          if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
-            const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
-            pending.socket.write(JSON.stringify(evt) + '\n');
+          if (!pending?.streaming) {
+            logger.debug({ correlationId: entry.correlationId }, 'text_delta dropped: pending not streaming');
+            return;
           }
+          if (!pending.socket || pending.socket.destroyed) {
+            logger.debug({ correlationId: entry.correlationId }, 'text_delta dropped: socket unavailable');
+            return;
+          }
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+          pending.socket.write(JSON.stringify(evt) + '\n');
           break;
         }
         case 'llm_completed': {

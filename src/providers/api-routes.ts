@@ -119,24 +119,34 @@ export function registerProviderRoutes(
         return;
       }
 
-      // Attempt to create a model — this validates credentials & connectivity
+      // Create SDK model and send a minimal request to verify end-to-end connectivity
       const model = registry.createModelFor(channel.id, testModelId);
+      const { generateText } = await import('ai');
+      const startTime = Date.now();
+      const result = await generateText({
+        model,
+        prompt: 'Say "ok" and nothing else.',
+        maxOutputTokens: 10,
+      });
+      const latencyMs = Date.now() - startTime;
 
-      // We could try a minimal generateText call here, but that costs tokens.
-      // For now, just verify the SDK factory accepts the credentials.
       json(res, {
         ok: true,
-        message: `Channel "${channel.name}" validated (model: ${testModelId})`,
+        message: `Channel "${channel.name}" connected successfully`,
         channelId: channel.id,
         modelId: testModelId,
+        latencyMs,
+        responsePreview: result.text.slice(0, 50),
       });
     } catch (err) {
       logger.debug({ err, channelId: params.channelId }, 'Channel test failed');
+      const httpStatus = (err as any)?.statusCode ?? (err as any)?.status;
       json(res, {
         ok: false,
         error: err instanceof Error ? err.message : String(err),
         channelId: params.channelId,
-      });
+        httpStatus,
+      }, 400);
     }
   });
 

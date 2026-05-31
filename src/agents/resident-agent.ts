@@ -6,13 +6,19 @@ import { getConfigPath } from '../utils/paths.js';
 import { createProviderRegistry } from '../providers/registry.js';
 import type { AppConfig } from '../contracts/config.js';
 import type { LlmClient } from '../llm/index.js';
+import type { LlmConfig } from '../llm/types.js';
 import type { Database } from 'better-sqlite3';
+
+/** Mutable LLM client holder — allows hot-reload without restarting agent processes. */
+export interface LlmHolder {
+  current: LlmClient;
+}
 
 export interface ResidentAgentContext {
   name: string;
   config: AppConfig;
   ipc: IpcChildChannel;
-  llm: LlmClient;
+  llm: LlmHolder;
   db: Database;
 }
 
@@ -25,13 +31,22 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
   const db = getDb();
   const ipc = new IpcChildChannel(name);
   const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
-  const llm = createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined });
+  const llm: LlmHolder = {
+    current: createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry: providerRegistry ?? undefined }),
+  };
 
   ipc.send('agent.register', 'core', { name, pid: process.pid });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });
   }, config.heartbeatIntervalMs);
+
+  // Hot-reload LLM config when parent sends an update
+  ipc.onMessage('config.llm_update', (msg) => {
+    const { llm: newLlmConfig } = msg.payload as { llm: LlmConfig };
+    const newRegistry = createProviderRegistry(newLlmConfig, newLlmConfig.channelsConfig);
+    llm.current = createLlmClient(newLlmConfig, { db, ipc, defaultAgent: name, providerRegistry: newRegistry ?? undefined });
+  });
 
   setup({ name, config, ipc, llm, db });
 

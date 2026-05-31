@@ -148,7 +148,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     ];
 
     try {
-      const result = await llm.chat(messages, {
+      const result = await llm.current.chat(messages, {
         system: systemPrompt,
         maxTokens: turn.level === 'A' ? 1024 : 2048,
         temperature: 0.3,
@@ -209,7 +209,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     ];
 
     try {
-      const result = await llm.chat(messages, {
+      const result = await llm.current.chat(messages, {
         system: systemPrompt,
         maxTokens: 512,
         temperature: 0.1,
@@ -267,7 +267,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     ];
 
     try {
-      const result = await llm.chat(messages, {
+      const result = await llm.current.chat(messages, {
         system: systemPrompt,
         maxTokens: 256,
         temperature: 0.0,
@@ -302,7 +302,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     ];
 
     try {
-      const result = await llm.chat(messages, {
+      const result = await llm.current.chat(messages, {
         system: systemPrompt,
         maxTokens: 512,
         temperature: 0.1,
@@ -339,7 +339,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     ];
 
     try {
-      const result = await llm.chat(messages, {
+      const result = await llm.current.chat(messages, {
         system: systemPrompt,
         maxTokens: CORRECTION_LIMITS.maxCorrectionTokens,
         temperature: 0.1,
@@ -373,7 +373,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     ];
 
     try {
-      const result = await llm.chat(messages, {
+      const result = await llm.current.chat(messages, {
         system: systemPrompt,
         maxTokens: 1024,
         temperature: 0.1,

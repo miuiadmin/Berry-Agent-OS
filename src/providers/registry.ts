@@ -13,6 +13,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModelV3 } from '@ai-sdk/provider';
 import type { ModelTier } from '../contracts/model.js';
 import type { LlmConfig } from '../llm/types.js';
+import { normalizeBaseUrl } from './url-normalizer.js';
 import type { IProviderRegistry } from './contract.js';
 import type { ProviderChannel, ModelEntry, TierMapping, ResolvedModel, ProviderKind } from './types.js';
 import { ChannelsConfigSchema } from './schemas.js';
@@ -123,7 +124,7 @@ export class ProviderRegistry implements IProviderRegistry {
     switch (providerKind) {
       case 'anthropic': {
         const factory = createAnthropic({
-          baseURL: channel.baseUrl || undefined,
+          baseURL: normalizeBaseUrl(channel.baseUrl, providerKind),
           apiKey: channel.apiKey || undefined,
         });
         return factory(model.id);
@@ -131,7 +132,7 @@ export class ProviderRegistry implements IProviderRegistry {
 
       case 'openai': {
         const factory = createOpenAI({
-          baseURL: channel.baseUrl || undefined,
+          baseURL: normalizeBaseUrl(channel.baseUrl, providerKind),
           apiKey: channel.apiKey || undefined,
         });
         return factory.chat(model.id);
@@ -139,7 +140,7 @@ export class ProviderRegistry implements IProviderRegistry {
 
       case 'openai-compatible': {
         const factory = createOpenAI({
-          baseURL: channel.baseUrl || undefined,
+          baseURL: normalizeBaseUrl(channel.baseUrl, providerKind),
           apiKey: channel.apiKey || undefined,
           name: 'openai-compatible',
         });

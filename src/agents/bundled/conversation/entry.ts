@@ -119,7 +119,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
     let priorHistory = [...history];
 
     if (contextManager.needsCompression(priorHistory)) {
-      const compressed = await contextManager.compress(priorHistory, llm);
+      const compressed = await contextManager.compress(priorHistory, llm.current);
       sessionHistories.set(sessionId, compressed);
       priorHistory = [...compressed];
     }
@@ -138,7 +138,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       const { StreamingScrubber } = await import('../../../llm/streaming-scrubber.js');
       const scrubber = new StreamingScrubber();
       const result = await runToolLoop({
-        llm,
+        llm: llm.current,
         messages: [...priorHistory, { role: 'user', content: messageForModel }],
         systemPrompt: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         tools,

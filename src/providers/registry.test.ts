@@ -6,6 +6,7 @@ import { migrateLegacyConfig } from './migration.js';
 import { buildResolverState, resolveTier, resolveChannelModel } from './resolver.js';
 import { getBuiltinCatalog, mergeCatalog } from './catalogs/index.js';
 import { ChannelsConfigSchema } from './schemas.js';
+import { normalizeBaseUrl } from './url-normalizer.js';
 
 // ─── Helper: minimal LlmConfig ────────────────────────────────────
 
@@ -298,5 +299,47 @@ describe('ChannelsConfigSchema', () => {
       expect(ch.apiKey).toBe('');
       expect(ch.models).toEqual([]);
     }
+  });
+});
+
+// ─── normalizeBaseUrl ─────────────────────────────────────────────
+
+describe('normalizeBaseUrl', () => {
+  it('appends /v1 for anthropic when missing', () => {
+    expect(normalizeBaseUrl('https://proxy/anthropic', 'anthropic'))
+      .toBe('https://proxy/anthropic/v1');
+  });
+
+  it('appends /v1 for openai when missing', () => {
+    expect(normalizeBaseUrl('https://proxy/openai', 'openai'))
+      .toBe('https://proxy/openai/v1');
+  });
+
+  it('appends /v1 for openai-compatible when missing', () => {
+    expect(normalizeBaseUrl('https://proxy/api', 'openai-compatible'))
+      .toBe('https://proxy/api/v1');
+  });
+
+  it('does not double-append when /v1 already present', () => {
+    expect(normalizeBaseUrl('https://proxy/anthropic/v1', 'anthropic'))
+      .toBe('https://proxy/anthropic/v1');
+  });
+
+  it('preserves /v2 or other version paths', () => {
+    expect(normalizeBaseUrl('https://proxy/api/v2', 'openai'))
+      .toBe('https://proxy/api/v2');
+  });
+
+  it('strips trailing slashes before normalizing', () => {
+    expect(normalizeBaseUrl('https://proxy/anthropic/', 'anthropic'))
+      .toBe('https://proxy/anthropic/v1');
+  });
+
+  it('returns undefined for undefined input', () => {
+    expect(normalizeBaseUrl(undefined, 'anthropic')).toBeUndefined();
+  });
+
+  it('returns undefined for empty string input', () => {
+    expect(normalizeBaseUrl('', 'anthropic')).toBeUndefined();
   });
 });

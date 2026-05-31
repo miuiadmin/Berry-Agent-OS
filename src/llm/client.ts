@@ -138,7 +138,7 @@ export class LlmClient {
       : createProviderModel(this.config, tier);
 
     // Build provider options (thinking, cacheControl) for Anthropic
-    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled);
+    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved?.providerKind);
 
     // Resilience: circuit breaker + rate limiter + concurrency
     if (!this.circuitBreaker.canAttempt()) {
@@ -329,7 +329,7 @@ export class LlmClient {
     const model = resolved
       ? this.providerRegistry!.createModel(tier)
       : createProviderModel(this.config, tier);
-    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled);
+    const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved?.providerKind);
 
     // Budget pre-check
     if (this.budgetController && options.sessionId) {
@@ -568,8 +568,9 @@ export class LlmClient {
 
   // === Private helpers ===
 
-  private buildProviderOptions(modelId: string, thinkingEnabled?: boolean): Record<string, Record<string, any>> | undefined {
-    const provider = this.config.provider;
+  private buildProviderOptions(modelId: string, thinkingEnabled?: boolean, providerKind?: string): Record<string, Record<string, any>> | undefined {
+    // Use resolved provider kind from channel if available, otherwise fall back to legacy config
+    const provider = providerKind ?? this.config.provider;
     if (provider !== 'anthropic') return undefined;
 
     const thinkingCap = detectThinkingCapability(modelId);

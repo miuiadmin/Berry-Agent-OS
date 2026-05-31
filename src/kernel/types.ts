@@ -61,4 +61,5 @@ export type IpcMessageType =
   | 'bus.invoke'
   | 'bus.invoke.result'
   | 'bus.capabilities.request'
-  | 'bus.capabilities.response';
+  | 'bus.capabilities.response'
+  | 'config.llm_update';
