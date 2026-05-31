@@ -54,7 +54,13 @@ export class ProviderRegistry implements IProviderRegistry {
   getModels(channelId: string): ModelEntry[] {
     const channel = this.state.channels.get(channelId);
     if (!channel) return [];
+    if (!channel.apiKey || channel.apiKey.trim() === '') return [];
     return mergeCatalog(channel.kind, channel.models);
+  }
+
+  isChannelConfigured(channelId: string): boolean {
+    const channel = this.state.channels.get(channelId);
+    return !!(channel?.apiKey && channel.apiKey.trim() !== '');
   }
 
   getTierMapping(): TierMapping {

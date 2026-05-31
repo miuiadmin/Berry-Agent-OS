@@ -46,6 +46,7 @@ export function registerProviderRoutes(
       baseUrl: ch.baseUrl || undefined,
       apiKey: maskApiKey(ch.apiKey),
       enabled: ch.enabled,
+      configured: !!(ch.apiKey && ch.apiKey.trim() !== ''),
       modelCount: registry.getModels(ch.id).length,
       models: registry.getModels(ch.id),
     }));
