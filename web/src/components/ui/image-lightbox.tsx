@@ -44,7 +44,7 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
     >
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 z-10 flex size-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+        className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 z-10 flex size-11 md:size-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 active:bg-black/70 transition-colors"
         aria-label="Close"
       >
         <X className="size-5" />

@@ -19,7 +19,7 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
     <button
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors",
+        "inline-flex items-center gap-1 rounded-md px-2 py-1.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
         className,
       )}
       aria-label="Copy code"
@@ -69,12 +69,12 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
   return (
     <div className="group/code relative my-3 rounded-lg border border-border bg-muted/30 overflow-hidden">
       <div className="flex items-center justify-between border-b border-border px-3 py-1.5 bg-muted/50">
-        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+        <span className="text-[11px] md:text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
           {lang}
         </span>
         <div className="flex items-center gap-2">
           {lineCount > 10 && (
-            <span className="text-[10px] text-muted-foreground/60">
+            <span className="text-[11px] md:text-[10px] text-muted-foreground/60">
               {lineCount} lines
             </span>
           )}
@@ -83,12 +83,12 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
       </div>
       {highlightedHtml ? (
         <div
-          className="overflow-x-auto p-3 text-xs [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:!bg-transparent [&_code]:!text-xs [&_code]:!font-mono"
+          className="overflow-x-auto p-3 text-[13px] md:text-xs [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:!bg-transparent [&_code]:!text-[13px] md:[&_code]:!text-xs [&_code]:!font-mono"
           dangerouslySetInnerHTML={{ __html: highlightedHtml }}
         />
       ) : (
         <pre className="!m-0 !rounded-none !border-0 !bg-transparent p-3 overflow-x-auto">
-          <code className="text-xs font-mono">{children}</code>
+          <code className="text-[13px] md:text-xs font-mono">{children}</code>
         </pre>
       )}
     </div>

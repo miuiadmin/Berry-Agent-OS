@@ -87,8 +87,8 @@ export function AreaChart({
     });
   }, [maxVal, chartHeight, padding.top]);
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
       if (data.length < 2) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
@@ -126,8 +126,8 @@ export function AreaChart({
         preserveAspectRatio="xMidYMid meet"
         className="w-full"
         style={{ height }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setTooltip(null)}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={() => setTooltip(null)}
       >
         {yTicks.map((tick, i) => (
           <g key={i}>
@@ -144,7 +144,7 @@ export function AreaChart({
               x={padding.left - 6}
               y={tick.y + 3}
               textAnchor="end"
-              fontSize={9}
+              fontSize={10}
               fill="currentColor"
               opacity={0.4}
             >
@@ -162,7 +162,7 @@ export function AreaChart({
               x={x}
               y={height - 6}
               textAnchor="middle"
-              fontSize={9}
+              fontSize={10}
               fill="currentColor"
               opacity={0.4}
             >

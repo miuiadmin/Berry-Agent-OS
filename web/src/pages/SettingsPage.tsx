@@ -176,7 +176,7 @@ function SettingsContent() {
                   key={tab.key}
                   onClick={() => handleTabChange(tab.key)}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors",
+                    "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm whitespace-nowrap transition-colors active:bg-accent",
                     isActive
                       ? "bg-accent text-accent-foreground font-medium"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -207,12 +207,12 @@ function SettingsContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={handleReset}>
+              <Button variant="outline" size="default" onClick={handleReset}>
                 <RotateCcw className="size-4" />
                 Reset
               </Button>
               <div className="relative">
-                <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="sm">
+                <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="default">
                   <Save className="size-4" />
                   Save
                 </Button>
@@ -485,7 +485,7 @@ function ConfigSection({
                       field.type === "number" ? Number(e.target.value) : e.target.value
                     )
                   }
-                  className={cn(fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30")}
+                  className={cn("h-10 md:h-[unset]", fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30")}
                 />
               )}
               {fieldError && (

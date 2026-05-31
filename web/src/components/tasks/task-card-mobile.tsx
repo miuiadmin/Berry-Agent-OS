@@ -33,7 +33,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
                   : task.status === "running" ? "warning"
                   : "secondary"
               }
-              className="text-[10px]"
+              className="text-[11px]"
             >
               {task.status}
             </Badge>
@@ -49,7 +49,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           <Button
             variant="destructive"
             size="sm"
-            className="h-6 px-2 text-[10px] shrink-0"
+            className="h-8 md:h-6 px-3 md:px-2 text-xs md:text-[10px] shrink-0 min-w-[44px]"
             onClick={(e) => {
               e.stopPropagation();
               onCancel();
@@ -78,7 +78,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           {task.status === "failed" && task.error && (
             <div>
               <span className="font-medium text-destructive">Error</span>
-              <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[10px] text-destructive whitespace-pre-wrap">
+              <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[11px] text-destructive whitespace-pre-wrap">
                 {task.error}
               </pre>
             </div>
@@ -86,7 +86,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           {task.inputPayload && (
             <div>
               <span className="font-medium text-muted-foreground">Input</span>
-              <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[10px] whitespace-pre-wrap">
+              <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
                 {formatJson(task.inputPayload)}
               </pre>
             </div>
@@ -94,7 +94,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           {task.outputPayload && (
             <div>
               <span className="font-medium text-muted-foreground">Output</span>
-              <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[10px] whitespace-pre-wrap">
+              <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
                 {formatJson(task.outputPayload)}
               </pre>
             </div>

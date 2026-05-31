@@ -104,7 +104,7 @@ function PermissionConfirmDialog({
   onRespond: (requestId: string, approved: boolean) => void;
 }) {
   return (
-    <div className="absolute inset-x-0 bottom-20 z-20 mx-auto max-w-md px-4">
+    <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:pb-0">
       <div className="rounded-xl border border-destructive/30 bg-background shadow-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="size-4 text-destructive" />
@@ -255,10 +255,10 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
       onDrop={handleDrop}
     >
       <DragOverlay visible={dragOver} />
-      <div className="flex items-center justify-between border-b px-4 py-2">
+      <div className="flex items-center justify-between border-b px-4 py-2 pt-[calc(0.5rem+env(safe-area-inset-top,0px))] md:pt-2">
         <div className="flex items-center gap-2">
           {onToggleSidebar && (
-            <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={onToggleSidebar}>
+            <Button variant="ghost" size="icon" className="md:hidden" onClick={onToggleSidebar}>
               <PanelLeft className="size-4" />
             </Button>
           )}

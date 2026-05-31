@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface TooltipProps {
@@ -11,6 +11,20 @@ interface TooltipProps {
 
 export function Tooltip({ content, side = "top", children }: TooltipProps) {
   const [visible, setVisible] = useState(false);
+  let hideTimer: ReturnType<typeof setTimeout>;
+
+  const show = useCallback(() => {
+    clearTimeout(hideTimer);
+    setVisible(true);
+  }, []);
+
+  const hide = useCallback(() => {
+    hideTimer = setTimeout(() => setVisible(false), 150);
+  }, []);
+
+  const toggle = useCallback(() => {
+    setVisible((v) => !v);
+  }, []);
 
   const positionClasses = {
     top: "bottom-full left-1/2 -translate-x-1/2 mb-2",
@@ -22,8 +36,9 @@ export function Tooltip({ content, side = "top", children }: TooltipProps) {
   return (
     <div
       className="relative inline-flex"
-      onMouseEnter={() => setVisible(true)}
-      onMouseLeave={() => setVisible(false)}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onClick={toggle}
     >
       {children}
       {visible && (
@@ -33,6 +48,7 @@ export function Tooltip({ content, side = "top", children }: TooltipProps) {
             "animate-in fade-in-0 zoom-in-95",
             positionClasses[side]
           )}
+          onClick={(e) => e.stopPropagation()}
         >
           {content}
         </div>

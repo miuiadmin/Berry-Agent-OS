@@ -70,7 +70,7 @@ export default function TasksPage() {
         <select
           value={statusFilter}
           onChange={(e) => handleStatusChange(e.target.value)}
-          className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm"
         >
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
@@ -82,7 +82,7 @@ export default function TasksPage() {
           <select
             value={agentFilter}
             onChange={(e) => handleAgentChange(e.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+            className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm"
           >
             <option value="all">All Agents</option>
             {agents.map((a) => (
@@ -182,7 +182,7 @@ export default function TasksPage() {
         <div className="mt-4 flex justify-center">
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
           >
             Load More

@@ -122,7 +122,7 @@ export default function AgentsPage() {
                         </div>
                         <Button
                           variant="ghost"
-                          size="icon-sm"
+                          size="icon"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (agent.status === "enabled") {
@@ -208,7 +208,7 @@ function AgentDetailView({
 
   return (
     <div className="mt-4">
-      <Button variant="ghost" size="sm" className="mb-4" onClick={onBack}>
+      <Button variant="ghost" size="default" className="mb-4" onClick={onBack}>
         <ArrowLeft className="size-4" />
         Back to Agents
       </Button>

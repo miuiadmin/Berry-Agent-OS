@@ -37,7 +37,7 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       }}
     >
       <div className="fixed inset-0 bg-black/50 animate-in fade-in-0" />
-      <div className="relative z-50 w-full max-w-md animate-in fade-in-0 zoom-in-95">
+      <div className="relative z-50 w-full max-w-md mx-4 md:mx-auto animate-in fade-in-0 zoom-in-95">
         {children}
       </div>
     </div>
@@ -63,7 +63,7 @@ export function DialogContent({
       {onClose && (
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+          className="absolute right-4 top-4 rounded-md p-2 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent transition-colors"
         >
           <X className="size-4" />
         </button>

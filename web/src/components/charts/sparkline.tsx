@@ -77,7 +77,7 @@ export function Sparkline({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      className={cn("inline-block", className)}
+      className={cn("inline-block max-w-full", className)}
     >
       <path d={areaPath} fill={color} opacity={0.15} />
       <path d={path} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" />

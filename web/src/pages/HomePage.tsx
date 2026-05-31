@@ -148,7 +148,7 @@ export default function HomePage() {
       </div>
 
       {/* Stats Grid */}
-      <div className="mt-6 grid gap-4 grid-cols-2 lg:grid-cols-5">
+      <div className="mt-6 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         {/* Health */}
         <Card>
           <CardHeader className="pb-2">
@@ -275,7 +275,7 @@ export default function HomePage() {
               secondaryColor="var(--destructive)"
               height={160}
             />
-            <div className="mt-2 flex items-center gap-4 text-[10px] text-muted-foreground">
+            <div className="mt-2 flex items-center gap-4 text-[11px] md:text-[10px] text-muted-foreground">
               <span className="flex items-center gap-1">
                 <span className="inline-block size-2 rounded-full bg-success" />
                 Completed
@@ -348,7 +348,7 @@ function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.Comp
   return (
     <Link
       to={href}
-      className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm hover:bg-accent transition-colors"
+      className="flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm hover:bg-accent active:bg-accent transition-colors"
     >
       <Icon className="size-4 text-muted-foreground" />
       {label}

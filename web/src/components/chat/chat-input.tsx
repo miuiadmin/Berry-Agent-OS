@@ -89,7 +89,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
               size="icon"
               variant="destructive"
               onClick={onCancel}
-              className="shrink-0 size-10 sm:size-9"
+              className="shrink-0 size-11 md:size-9"
             >
               <Square className="size-3 fill-current" />
             </Button>
@@ -98,7 +98,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
               size="icon"
               onClick={handleSubmit}
               disabled={!text.trim() && allAttachments.length === 0}
-              className="shrink-0 size-10 sm:size-9"
+              className="shrink-0 size-11 md:size-9"
             >
               <SendHorizontal className="size-4" />
             </Button>

@@ -55,8 +55,8 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}
         className={cn(
-          "shrink-0 rounded-lg p-2 text-muted-foreground transition-colors",
-          "hover:bg-accent hover:text-foreground",
+          "shrink-0 rounded-lg p-2.5 md:p-2 text-muted-foreground transition-colors",
+          "hover:bg-accent hover:text-foreground active:bg-accent",
           "disabled:opacity-50 disabled:cursor-not-allowed"
         )}
       >

@@ -107,10 +107,12 @@ export default function ConversationsPage() {
 
   const debouncedSearch = useMemo(() => {
     let timer: ReturnType<typeof setTimeout>;
-    return (value: string) => {
+    const fn = (value: string) => {
       clearTimeout(timer);
       timer = setTimeout(() => setSearch(value), 300);
     };
+    fn.cancel = () => clearTimeout(timer);
+    return fn;
   }, []);
 
   return (
@@ -123,7 +125,7 @@ export default function ConversationsPage() {
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search sessions..."
-            className="pl-9"
+            className="pl-9 h-10 md:h-[unset]"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
         </div>
@@ -131,7 +133,7 @@ export default function ConversationsPage() {
           variant="outline"
           size="sm"
           onClick={() => setSort(sort === "recent" ? "messages" : "recent")}
-          className="gap-1.5"
+          className="gap-1.5 min-h-[44px] md:min-h-0"
         >
           <ArrowUpDown className="size-3.5" />
           <span className="hidden sm:inline">{sort === "recent" ? "Most Recent" : "Most Messages"}</span>
@@ -140,7 +142,7 @@ export default function ConversationsPage() {
           variant="outline"
           size="sm"
           onClick={handleExportAll}
-          className="gap-1.5"
+          className="gap-1.5 min-h-[44px] md:min-h-0"
           disabled={!conversationsQuery.data?.length}
         >
           <Download className="size-3.5" />
@@ -179,7 +181,7 @@ export default function ConversationsPage() {
                   <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
-                      size="icon-sm"
+                      size="icon"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleExport(conv);
@@ -189,7 +191,7 @@ export default function ConversationsPage() {
                     </Button>
                     <Button
                       variant="ghost"
-                      size="icon-sm"
+                      size="icon"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);

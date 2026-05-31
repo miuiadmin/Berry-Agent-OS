@@ -34,8 +34,8 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
   const { theme, setTheme } = useTheme();
 
   return (
-    <aside className="flex h-full w-56 flex-col border-r border-sidebar-border bg-sidebar">
-      <div className="flex h-12 items-center gap-2 px-4">
+    <aside className="flex h-full w-72 md:w-56 flex-col border-r border-sidebar-border bg-sidebar">
+      <div className="flex h-12 items-center gap-2 px-4 pt-[env(safe-area-inset-top,0px)] md:pt-0">
         <StrawberryLogo />
         <span className="text-sm font-semibold text-sidebar-foreground">Berry</span>
       </div>
@@ -49,10 +49,10 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
               to={item.href}
               onClick={onNavigate}
               className={cn(
-                "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+                "flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-colors",
                 isActive
                   ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent"
               )}
             >
               <item.icon className="size-4" />
@@ -67,10 +67,10 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
           to="/settings"
           onClick={onNavigate}
           className={cn(
-            "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+            "flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-colors",
             pathname.startsWith("/settings")
               ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent"
           )}
         >
           <Settings className="size-4" />
@@ -78,8 +78,8 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
         </Link>
         <Button
           variant="ghost"
-          size="sm"
-          className="w-full justify-start gap-2 text-sidebar-foreground/70"
+          size="default"
+          className="w-full justify-start gap-2 text-sidebar-foreground/70 min-h-[44px] md:min-h-0"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           <Sun className="size-4 rotate-0 scale-100 transition-transform dark:-rotate-90 dark:scale-0" />
