@@ -15,37 +15,27 @@ import type { ModelTier } from '../contracts/model.js';
 import type { LlmConfig } from '../llm/types.js';
 import { normalizeBaseUrl } from './url-normalizer.js';
 import type { IProviderRegistry } from './contract.js';
-import type { ProviderChannel, ModelEntry, TierMapping, ResolvedModel, ProviderKind } from './types.js';
+import type { ProviderChannel, ModelEntry, TierMapping, ResolvedModel, AnyProviderKind } from './types.js';
+import { hasCredentials } from './types.js';
+import { SUPPORTED_PROVIDER_KINDS } from './types.js';
 import { ChannelsConfigSchema } from './schemas.js';
 import { buildResolverState, resolveTier, resolveChannelModel, type ResolverState } from './resolver.js';
-import { getBuiltinCatalog, mergeCatalog } from './catalogs/index.js';
+import { getBuiltinCatalog, resolveChannelModels } from './catalogs/index.js';
 import { migrateLegacyConfig, isChannelsEmpty } from './migration.js';
 
 export class ProviderRegistry implements IProviderRegistry {
   private state: ResolverState;
   private rawChannels: ProviderChannel[];
   private rawTiers: TierMapping;
+  /**
+   * Optional callback invoked after any runtime mutation (add/update/remove/setTier).
+   * Used by CoreService to persist changes to config.yaml.
+   */
   private readonly onMutate?: (channels: ProviderChannel[], tiers: TierMapping) => void;
 
   constructor(llmConfig: LlmConfig, channelsConfig?: unknown, onMutate?: (channels: ProviderChannel[], tiers: TierMapping) => void) {
-    // Validate channels config through Zod
-    const parsed = channelsConfig
-      ? ChannelsConfigSchema.safeParse(channelsConfig)
-      : null;
-
-    let validChannels = parsed?.success ? parsed.data : undefined;
-
-    // If no explicit channels, migrate legacy config to synthetic channels
-    if (!validChannels || isChannelsEmpty(validChannels)) {
-      const migrated = migrateLegacyConfig(llmConfig);
-      if (migrated.channels.length > 0) {
-        // Validate migration output through Zod for consistent types
-        const migratedParsed = ChannelsConfigSchema.safeParse(migrated);
-        validChannels = migratedParsed.success ? migratedParsed.data : undefined;
-      }
-    }
-
     this.onMutate = onMutate;
+    const validChannels = this.parseAndMigrate(llmConfig, channelsConfig);
     this.state = buildResolverState(llmConfig, validChannels);
     this.rawChannels = validChannels?.channels ?? [];
     this.rawTiers = validChannels?.tiers ?? {};
@@ -67,14 +57,13 @@ export class ProviderRegistry implements IProviderRegistry {
 
   getModels(channelId: string): ModelEntry[] {
     const channel = this.state.channels.get(channelId);
-    if (!channel) return [];
-    if (!channel.apiKey || channel.apiKey.trim() === '') return [];
-    return mergeCatalog(channel.kind, channel.models);
+    if (!channel || !hasCredentials(channel)) return [];
+    return resolveChannelModels(channel.kind, channel.models);
   }
 
   isChannelConfigured(channelId: string): boolean {
     const channel = this.state.channels.get(channelId);
-    return !!(channel?.apiKey && channel.apiKey.trim() !== '');
+    return !!channel && hasCredentials(channel);
   }
 
   getTierMapping(): TierMapping {
@@ -91,7 +80,7 @@ export class ProviderRegistry implements IProviderRegistry {
     return this.createSdkModel(resolved);
   }
 
-  getBuiltinCatalog(kind: ProviderKind): ModelEntry[] {
+  getBuiltinCatalog(kind: AnyProviderKind): ModelEntry[] {
     return getBuiltinCatalog(kind);
   }
 
@@ -137,20 +126,7 @@ export class ProviderRegistry implements IProviderRegistry {
 
   /** Rebuild internal resolver state with updated config. */
   rebuild(llmConfig: LlmConfig, channelsConfig?: unknown): void {
-    const parsed = channelsConfig
-      ? ChannelsConfigSchema.safeParse(channelsConfig)
-      : null;
-
-    let validChannels = parsed?.success ? parsed.data : undefined;
-
-    if (!validChannels || isChannelsEmpty(validChannels)) {
-      const migrated = migrateLegacyConfig(llmConfig);
-      if (migrated.channels.length > 0) {
-        const migratedParsed = ChannelsConfigSchema.safeParse(migrated);
-        validChannels = migratedParsed.success ? migratedParsed.data : undefined;
-      }
-    }
-
+    const validChannels = this.parseAndMigrate(llmConfig, channelsConfig);
     this.state = buildResolverState(llmConfig, validChannels);
     this.rawChannels = validChannels?.channels ?? [];
     this.rawTiers = validChannels?.tiers ?? {};
@@ -187,24 +163,33 @@ export class ProviderRegistry implements IProviderRegistry {
         return factory.chat(model.id);
       }
 
-      case 'google-gemini': {
-        // Requires @ai-sdk/google — lazy import to avoid hard dependency
-        throw new Error(
-          'Google Gemini provider is not yet implemented. ' +
-          'Use "openai-compatible" kind with a Gemini-compatible proxy endpoint.',
-        );
-      }
-
-      case 'azure-openai':
-      case 'bedrock':
-        throw new Error(
-          `${providerKind} provider is not yet implemented. ` +
-          'Use "openai-compatible" or "anthropic" kind with appropriate baseUrl.',
-        );
-
       default:
-        throw new Error(`Unsupported provider kind: ${providerKind}`);
+        throw new Error(
+          `Provider kind "${providerKind}" is not supported. ` +
+          `Supported: ${SUPPORTED_PROVIDER_KINDS.join(', ')}.`,
+        );
     }
+  }
+
+  // ─── Internal ──────────────────────────────────────────────────
+
+  /** Parse + validate channels config, falling back to legacy migration */
+  private parseAndMigrate(llmConfig: LlmConfig, channelsConfig?: unknown) {
+    const parsed = channelsConfig
+      ? ChannelsConfigSchema.safeParse(channelsConfig)
+      : null;
+
+    let validChannels = parsed?.success ? parsed.data : undefined;
+
+    if (!validChannels || isChannelsEmpty(validChannels)) {
+      const migrated = migrateLegacyConfig(llmConfig);
+      if (migrated.channels.length > 0) {
+        const migratedParsed = ChannelsConfigSchema.safeParse(migrated);
+        validChannels = migratedParsed.success ? migratedParsed.data : undefined;
+      }
+    }
+
+    return validChannels;
   }
 }
 

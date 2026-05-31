@@ -219,6 +219,16 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       });
 
       const draft = result.finalContent;
+
+      // Flush any remaining buffered text from the scrubber (e.g. short replies
+      // that didn't exceed the <memory-context> tag length threshold during streaming).
+      if (streamingEnabled && taskId) {
+        const remaining = scrubber.flush();
+        if (remaining) {
+          ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId, text: remaining });
+        }
+      }
+
       pendingDrafts.set(trackingId, { sessionId, draft, toolCalls: result.toolCalls });
 
       ipc.send('draft.response', 'core', {

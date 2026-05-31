@@ -4,7 +4,7 @@ import type { ModelTier } from '../contracts/model.js';
 import type { ProviderChannel, TierMapping } from './types.js';
 import { migrateLegacyConfig } from './migration.js';
 import { buildResolverState, resolveTier, resolveChannelModel } from './resolver.js';
-import { getBuiltinCatalog, mergeCatalog } from './catalogs/index.js';
+import { getBuiltinCatalog, resolveChannelModels } from './catalogs/index.js';
 import { ChannelsConfigSchema } from './schemas.js';
 import { normalizeBaseUrl } from './url-normalizer.js';
 
@@ -64,21 +64,21 @@ describe('Built-in Catalogs', () => {
   });
 });
 
-describe('mergeCatalog', () => {
+describe('resolveChannelModels', () => {
   it('returns builtins when no user models', () => {
-    const merged = mergeCatalog('anthropic');
+    const resolved = resolveChannelModels('anthropic');
     const builtins = getBuiltinCatalog('anthropic');
-    expect(merged).toEqual(builtins);
+    expect(resolved).toEqual(builtins);
   });
 
   it('returns only user models when user defines models (no catalog merge)', () => {
     const userModels = [
       { id: 'mimo-v2-pro', name: 'MiMo v2 Pro', contextWindow: 128000, defaultMaxTokens: 4096, supportsThinking: false, supportsAttachments: false },
     ];
-    const merged = mergeCatalog('anthropic', userModels);
+    const resolved = resolveChannelModels('anthropic', userModels);
     // Should ONLY contain user models, NOT built-in Anthropic catalog
-    expect(merged).toHaveLength(1);
-    expect(merged[0].id).toBe('mimo-v2-pro');
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].id).toBe('mimo-v2-pro');
   });
 
   it('user models are returned as-is without builtin pollution', () => {
@@ -86,11 +86,11 @@ describe('mergeCatalog', () => {
       { id: 'claude-haiku-4-5-20251001', name: 'My Haiku Override', contextWindow: 999999, defaultMaxTokens: 9999, supportsThinking: true, supportsAttachments: false },
       { id: 'my-custom-model', name: 'Custom', contextWindow: 32768, defaultMaxTokens: 2048, supportsThinking: false, supportsAttachments: false },
     ];
-    const merged = mergeCatalog('anthropic', userModels);
-    expect(merged).toHaveLength(2);
-    expect(merged[0].id).toBe('claude-haiku-4-5-20251001');
-    expect(merged[0].name).toBe('My Haiku Override');
-    expect(merged[1].id).toBe('my-custom-model');
+    const resolved = resolveChannelModels('anthropic', userModels);
+    expect(resolved).toHaveLength(2);
+    expect(resolved[0].id).toBe('claude-haiku-4-5-20251001');
+    expect(resolved[0].name).toBe('My Haiku Override');
+    expect(resolved[1].id).toBe('my-custom-model');
   });
 });
 

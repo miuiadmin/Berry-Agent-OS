@@ -13,7 +13,7 @@ import type {
   ModelEntry,
   TierMapping,
   ResolvedModel,
-  ProviderKind,
+  AnyProviderKind,
 } from './types.js';
 
 /**
@@ -46,7 +46,10 @@ export interface IProviderRegistry {
   createModelFor(channelId: string, modelId: string): LanguageModelV3;
 
   /** Get the built-in model catalog for a provider kind */
-  getBuiltinCatalog(kind: ProviderKind): ModelEntry[];
+  getBuiltinCatalog(kind: AnyProviderKind): ModelEntry[];
+
+  /** Check whether a channel has valid credentials configured */
+  isChannelConfigured(channelId: string): boolean;
 
   // ─── Mutations (runtime channel management) ─────────────────────
 

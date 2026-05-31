@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ModelMode, ModelTier } from '../contracts/model.js';
+import { ChannelsConfigSchema } from '../providers/schemas.js';
 
 export const ModelsConfigSchema = z.prefault(z.object({
   fast: z.string().optional(),
@@ -28,32 +29,8 @@ const ProvidersSchema = z.object({
 export const LlmConfigSchema = z.object({
   provider: z.enum(LLM_PROVIDERS).default('anthropic'),
   providers: z.prefault(ProvidersSchema, {}),
-  // New: multi-channel provider config (see src/providers/)
-  channelsConfig: z.prefault(z.object({
-    channels: z.array(z.object({
-      id: z.string().min(1),
-      name: z.string().min(1),
-      kind: z.enum(['anthropic', 'openai', 'openai-compatible', 'google-gemini', 'azure-openai', 'bedrock']),
-      baseUrl: z.string().optional(),
-      apiKey: z.string().default(''),
-      enabled: z.boolean().default(true),
-      models: z.array(z.object({
-        id: z.string().min(1),
-        name: z.string().min(1),
-        contextWindow: z.number().int().positive().default(128_000),
-        defaultMaxTokens: z.number().int().positive().default(4_096),
-        supportsThinking: z.boolean().default(false),
-        supportsAttachments: z.boolean().default(false),
-        inputPricePer1M: z.number().nonnegative().optional(),
-        outputPricePer1M: z.number().nonnegative().optional(),
-      })).default([]),
-    })).default([]),
-    tiers: z.prefault(z.object({
-      fast: z.object({ channel: z.string().min(1), model: z.string().min(1) }).optional(),
-      default: z.object({ channel: z.string().min(1), model: z.string().min(1) }).optional(),
-      high: z.object({ channel: z.string().min(1), model: z.string().min(1) }).optional(),
-    }), {}),
-  }), {}),
+  // Multi-channel provider config (schema defined in providers/schemas.ts — single source of truth)
+  channelsConfig: z.prefault(ChannelsConfigSchema, {}),
   // Legacy fields — backward compat, maps to providers[provider]
   baseUrl: z.string().default(''),
   apiKey: z.string().default(''),

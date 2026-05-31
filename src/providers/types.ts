@@ -10,16 +10,26 @@ import type { ModelTier } from '../contracts/model.js';
 // ─── Provider Kind ────────────────────────────────────────────────
 // The SDK adapter type — determines which AI SDK factory creates the LanguageModelV3.
 
-export const PROVIDER_KINDS = [
+/** Provider kinds with working SDK adapters — can be used to create channels */
+export const SUPPORTED_PROVIDER_KINDS = [
   'anthropic',
   'openai',
   'openai-compatible',
+] as const;
+
+/** All provider kinds including unimplemented ones (for catalog browsing, UI display) */
+export const ALL_PROVIDER_KINDS = [
+  ...SUPPORTED_PROVIDER_KINDS,
   'google-gemini',
   'azure-openai',
   'bedrock',
 ] as const;
 
-export type ProviderKind = (typeof PROVIDER_KINDS)[number];
+/** @deprecated Use SUPPORTED_PROVIDER_KINDS or ALL_PROVIDER_KINDS */
+export const PROVIDER_KINDS = ALL_PROVIDER_KINDS;
+
+export type ProviderKind = (typeof SUPPORTED_PROVIDER_KINDS)[number];
+export type AnyProviderKind = (typeof ALL_PROVIDER_KINDS)[number];
 
 // ─── Model Entry ──────────────────────────────────────────────────
 // Full metadata for a single model, used in both built-in catalogs and user overrides.
@@ -99,4 +109,11 @@ export interface ChannelsConfig {
   channels: ProviderChannel[];
   /** Tier → channel + model mapping */
   tiers: TierMapping;
+}
+
+// ─── Credential Validation ────────────────────────────────────────
+
+/** Check if a channel has valid (non-empty) credentials */
+export function hasCredentials(channel: Pick<ProviderChannel, 'apiKey'>): boolean {
+  return !!channel.apiKey && channel.apiKey.trim() !== '';
 }

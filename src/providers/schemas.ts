@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod';
-import { PROVIDER_KINDS } from './types.js';
+import { SUPPORTED_PROVIDER_KINDS } from './types.js';
 
 // ─── Model Entry ──────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ export const ModelEntrySchema = z.object({
 export const ChannelSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  kind: z.enum(PROVIDER_KINDS),
+  kind: z.enum(SUPPORTED_PROVIDER_KINDS),
   baseUrl: z.string().optional(),
   apiKey: z.string().default(''),
   enabled: z.boolean().default(true),

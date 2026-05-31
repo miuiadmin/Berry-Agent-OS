@@ -10,20 +10,8 @@ import type { ModelTier } from '../contracts/model.js';
 import { resolveModel } from '../llm/types.js';
 import type { LlmConfig } from '../llm/types.js';
 import type { ProviderChannel, ModelEntry, TierMapping, ResolvedModel, ProviderKind } from './types.js';
-import { mergeCatalog } from './catalogs/index.js';
+import { resolveChannelModels } from './catalogs/index.js';
 import { migrateLegacyConfig, isChannelsEmpty } from './migration.js';
-
-// ─── Fallback Model Entry ─────────────────────────────────────────
-// Used when a model ID is referenced but not found in any catalog.
-
-const FALLBACK_MODEL: ModelEntry = {
-  id: 'unknown',
-  name: 'Unknown Model',
-  contextWindow: 128_000,
-  defaultMaxTokens: 4_096,
-  supportsThinking: false,
-  supportsAttachments: false,
-};
 
 // ─── Resolver State ───────────────────────────────────────────────
 
@@ -79,12 +67,14 @@ export function resolveTier(
   if (target) {
     const channel = state.channels.get(target.channel);
     if (channel) {
-      const models = mergeCatalog(channel.kind, channel.models);
-      const model = models.find(m => m.id === target.model) ?? {
-        ...FALLBACK_MODEL,
-        id: target.model,
-        name: target.model,
-      };
+      const models = resolveChannelModels(channel.kind, channel.models);
+      const model = models.find(m => m.id === target.model);
+      if (!model) {
+        throw new Error(
+          `Model "${target.model}" not found in channel "${target.channel}". ` +
+          `Available: ${models.map(m => m.id).join(', ')}.`,
+        );
+      }
       return { channel, model, providerKind: channel.kind };
     }
   }
@@ -95,12 +85,14 @@ export function resolveTier(
     const channel = state.channels.get(legacyChannelId);
     if (channel) {
       const modelId = resolveModel(state.legacyConfig, tier);
-      const models = mergeCatalog(channel.kind, channel.models);
-      const model = models.find(m => m.id === modelId) ?? {
-        ...FALLBACK_MODEL,
-        id: modelId,
-        name: modelId,
-      };
+      const models = resolveChannelModels(channel.kind, channel.models);
+      const model = models.find(m => m.id === modelId);
+      if (!model) {
+        throw new Error(
+          `Legacy model "${modelId}" not found in channel "${legacyChannelId}". ` +
+          `Available: ${models.map(m => m.id).join(', ')}.`,
+        );
+      }
       return { channel, model, providerKind: channel.kind };
     }
   }
@@ -125,12 +117,14 @@ export function resolveChannelModel(
     throw new Error(`Channel not found: "${channelId}"`);
   }
 
-  const models = mergeCatalog(channel.kind, channel.models);
-  const model = models.find(m => m.id === modelId) ?? {
-    ...FALLBACK_MODEL,
-    id: modelId,
-    name: modelId,
-  };
+  const models = resolveChannelModels(channel.kind, channel.models);
+  const model = models.find(m => m.id === modelId);
+  if (!model) {
+    throw new Error(
+      `Model "${modelId}" not found in channel "${channelId}". ` +
+      `Available: ${models.map(m => m.id).join(', ')}.`,
+    );
+  }
 
   return { channel, model, providerKind: channel.kind };
 }

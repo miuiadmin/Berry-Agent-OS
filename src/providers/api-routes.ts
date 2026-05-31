@@ -7,8 +7,8 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { IProviderRegistry } from './contract.js';
-import type { ProviderKind } from './types.js';
-import { PROVIDER_KINDS } from './types.js';
+import type { ProviderKind, AnyProviderKind } from './types.js';
+import { SUPPORTED_PROVIDER_KINDS, ALL_PROVIDER_KINDS } from './types.js';
 import { getBuiltinCatalog } from './catalogs/index.js';
 import { getLogger } from '../utils/logger.js';
 
@@ -16,9 +16,7 @@ const logger = getLogger('provider-api');
 
 type RouteRegistrar = (method: string, path: string, handler: (req: IncomingMessage, res: ServerResponse, url: URL, params: Record<string, string>) => void | Promise<void>) => void;
 
-/**
- * Mask an API key for safe display — show first 8 chars + "..."
- */
+/** Mask an API key for safe display — show first 8 chars + "..." */
 function maskApiKey(key?: string): string | undefined {
   if (!key) return undefined;
   if (key.length <= 8) return '***';
@@ -57,7 +55,7 @@ export function registerProviderRoutes(
       baseUrl: ch.baseUrl || undefined,
       apiKey: maskApiKey(ch.apiKey),
       enabled: ch.enabled,
-      configured: !!(ch.apiKey && ch.apiKey.trim() !== ''),
+      configured: registry.isChannelConfigured(ch.id),
       modelCount: registry.getModels(ch.id).length,
       models: registry.getModels(ch.id),
     }));
@@ -90,16 +88,15 @@ export function registerProviderRoutes(
     const registry = getRegistry();
     if (!registry) { json(res, { error: 'Provider registry not available' }, 503); return; }
 
-    const tiers = registry.getTierMapping();
-    json(res, { ok: true, tiers });
+    json(res, { ok: true, tiers: registry.getTierMapping() });
   });
 
   // ─── Get built-in model catalog for a provider kind ──────────────
 
   route('GET', '/providers/catalogs/:kind', (_req, res, _url, params) => {
-    const kind = params.kind as ProviderKind;
-    if (!PROVIDER_KINDS.includes(kind)) {
-      json(res, { error: `Unknown provider kind: ${kind}`, validKinds: PROVIDER_KINDS }, 400);
+    const kind = params.kind as AnyProviderKind;
+    if (!ALL_PROVIDER_KINDS.includes(kind)) {
+      json(res, { error: `Unknown provider kind: ${kind}`, validKinds: ALL_PROVIDER_KINDS }, 400);
       return;
     }
 
@@ -110,7 +107,7 @@ export function registerProviderRoutes(
   // ─── List all available provider kinds ───────────────────────────
 
   route('GET', '/providers/kinds', (_req, res) => {
-    json(res, { ok: true, kinds: PROVIDER_KINDS });
+    json(res, { ok: true, kinds: ALL_PROVIDER_KINDS, supported: SUPPORTED_PROVIDER_KINDS });
   });
 
   // ─── Test channel connection ─────────────────────────────────────
@@ -123,8 +120,6 @@ export function registerProviderRoutes(
     if (!channel) { json(res, { error: 'Channel not found' }, 404); return; }
 
     try {
-      // Prefer the model actually configured in tiers for this channel;
-      // fall back to the first user-defined model, then first catalog model.
       const tiers = registry.getTierMapping();
       const tierEntry = Object.values(tiers).find(t => t.channel === channel.id);
       const userModelIds = channel.models?.map(m => m.id) ?? [];
@@ -135,7 +130,6 @@ export function registerProviderRoutes(
         return;
       }
 
-      // Create SDK model and send a minimal request to verify end-to-end connectivity
       const model = registry.createModelFor(channel.id, testModelId);
       const { generateText } = await import('ai');
       const startTime = Date.now();
@@ -155,7 +149,7 @@ export function registerProviderRoutes(
         responsePreview: result.text.slice(0, 50),
       });
     } catch (err) {
-      logger.debug({ err, channelId: params.channelId }, 'Channel test failed');
+      logger.warn({ err, channelId: params.channelId }, 'Channel test failed');
       const httpStatus = (err as any)?.statusCode ?? (err as any)?.status;
       json(res, {
         ok: false,
@@ -175,6 +169,11 @@ export function registerProviderRoutes(
     const body = await _readBody(req) as Record<string, unknown>;
     if (!body.id || !body.kind) { json(res, { error: 'Missing required fields: id, kind' }, 400); return; }
 
+    if (!SUPPORTED_PROVIDER_KINDS.includes(body.kind as ProviderKind)) {
+      json(res, { error: `Unsupported provider kind: "${body.kind}". Supported: ${SUPPORTED_PROVIDER_KINDS.join(', ')}` }, 400);
+      return;
+    }
+
     try {
       registry.addChannel({
         id: String(body.id),
@@ -188,7 +187,7 @@ export function registerProviderRoutes(
       persist();
       json(res, { ok: true, channelId: body.id });
     } catch (err) {
-      logger.debug({ err }, 'Channel creation failed');
+      logger.warn({ err }, 'Channel creation failed');
       json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
@@ -204,8 +203,6 @@ export function registerProviderRoutes(
     if (!updated) { json(res, { error: 'Channel not found' }, 404); return; }
     persist();
     json(res, { ok: true });
-    if (!updated) { json(res, { error: 'Channel not found' }, 404); return; }
-    json(res, { ok: true });
   });
 
   // ─── Delete channel ──────────────────────────────────────────────
@@ -216,6 +213,7 @@ export function registerProviderRoutes(
 
     const removed = registry.removeChannel(params.channelId);
     if (!removed) { json(res, { error: 'Channel not found' }, 404); return; }
+    persist();
     json(res, { ok: true });
   });
 
@@ -227,6 +225,7 @@ export function registerProviderRoutes(
 
     const body = await _readBody(req) as Record<string, unknown>;
     registry.setTierMapping(body as Partial<import('./types.js').TierMapping>);
+    persist();
     json(res, { ok: true, tiers: registry.getTierMapping() });
   });
 }

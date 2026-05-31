@@ -10,6 +10,7 @@ export type { IProviderRegistry } from './contract.js';
 // Types — data structures
 export type {
   ProviderKind,
+  AnyProviderKind,
   ModelEntry,
   ProviderChannel,
   TierTarget,
@@ -18,8 +19,8 @@ export type {
   ChannelsConfig,
 } from './types.js';
 
-// Provider kinds constant (for dropdowns, validation)
-export { PROVIDER_KINDS } from './types.js';
+// Provider kinds constants (for dropdowns, validation)
+export { SUPPORTED_PROVIDER_KINDS, ALL_PROVIDER_KINDS, hasCredentials } from './types.js';
 
 // Registry — the main implementation
 export { ProviderRegistry, createProviderRegistry } from './registry.js';
@@ -33,7 +34,7 @@ export {
 } from './schemas.js';
 
 // Catalog — for browsing built-in models
-export { getBuiltinCatalog, mergeCatalog } from './catalogs/index.js';
+export { getBuiltinCatalog, resolveChannelModels } from './catalogs/index.js';
 
 // Resolver — for custom resolution pipelines
 export { buildResolverState, resolveTier, resolveChannelModel, type ResolverState } from './resolver.js';

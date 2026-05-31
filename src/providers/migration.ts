@@ -7,9 +7,9 @@
  */
 
 import { MODEL_TIERS } from '../contracts/model.js';
-import type { ModelTier } from '../contracts/model.js';
 import type { LlmConfig } from '../llm/types.js';
-import type { ProviderChannel, TierMapping, TierTarget, ProviderKind } from './types.js';
+import type { ProviderChannel, TierMapping, ProviderKind } from './types.js';
+import { hasCredentials } from './types.js';
 
 /**
  * Migrate a legacy LlmConfig into new-format channels + tier mapping.
@@ -64,9 +64,8 @@ export function migrateLegacyConfig(llmConfig: LlmConfig): {
     if (name === activeProvider) continue; // Already handled above
 
     const cfg = llmConfig.providers[name];
-    const hasApiKey = cfg.apiKey && cfg.apiKey.trim() !== '';
-    const hasBaseUrl = cfg.baseUrl && cfg.baseUrl.trim() !== '';
-    if (hasApiKey || hasBaseUrl) {
+    const hasRealCreds = hasCredentials(cfg) || (!!cfg.baseUrl && cfg.baseUrl.trim() !== '');
+    if (hasRealCreds) {
       channels.push({
         id: `${name}-default`,
         name: `${name} (migrated)`,
@@ -103,24 +102,4 @@ function mapLegacyProviderToKind(legacy: string): ProviderKind {
  */
 export function isChannelsEmpty(channelsConfig: { channels?: unknown[]; tiers?: unknown }): boolean {
   return !channelsConfig.channels || channelsConfig.channels.length === 0;
-}
-
-/**
- * Build a TierTarget for a given tier from legacy config, using the provided channel ID.
- */
-export function buildLegacyTierTarget(
-  llmConfig: LlmConfig,
-  tier: ModelTier,
-  channelId: string,
-): TierTarget | undefined {
-  const providerCfg = llmConfig.providers[llmConfig.provider];
-  const modelId =
-    providerCfg.models[tier] ??
-    llmConfig.models[tier] ??
-    providerCfg.defaultModel ??
-    llmConfig.model ??
-    undefined;
-
-  if (!modelId) return undefined;
-  return { channel: channelId, model: modelId };
 }
