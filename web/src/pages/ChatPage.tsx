@@ -21,7 +21,7 @@ export default function ChatPage() {
   useKeyboardShortcuts(shortcuts);
 
   return (
-    <div className="flex h-[calc(100dvh-48px)] md:h-dvh overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {sidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 animate-overlay-in md:hidden"
