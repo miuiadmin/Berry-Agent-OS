@@ -34,7 +34,7 @@ export default function ChatPage() {
       )}>
         <ConversationSidebar onSelect={() => setSidebarOpen(false)} />
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 h-full">
         <ChatWindow onToggleSidebar={() => setSidebarOpen((v) => !v)} />
       </div>
     </div>

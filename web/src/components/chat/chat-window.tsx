@@ -441,7 +441,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
 
   return (
     <div
-      className="relative flex h-full flex-col overflow-x-hidden"
+      className="relative grid h-full grid-rows-[auto_1fr_auto] overflow-x-hidden"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

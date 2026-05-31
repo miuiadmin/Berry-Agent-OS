@@ -307,19 +307,19 @@ export function ChatMessageList({
   }, [messages]);
 
   return (
-    <div className="relative flex-1">
-      <ScrollArea ref={scrollRef} className="h-full p-4" onScroll={handleScroll}>
-        {messages.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted animate-float">
-                <StrawberryLogo className="size-6" />
-              </div>
-              <h2 className="text-lg font-semibold text-foreground">Start a conversation</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Type a message to begin</p>
+    <div className="relative overflow-hidden h-full">
+      {messages.length === 0 ? (
+        <div className="flex h-full items-center justify-center p-4">
+          <div className="text-center">
+            <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted animate-float">
+              <StrawberryLogo className="size-6" />
             </div>
+            <h2 className="text-lg font-semibold text-foreground">Start a conversation</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Type a message to begin</p>
           </div>
-        ) : (
+        </div>
+      ) : (
+      <ScrollArea ref={scrollRef} className="h-full p-4" onScroll={handleScroll}>
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.map((msg, i) => {
               const isLatest = i === messages.length - 1;
@@ -336,8 +336,8 @@ export function ChatMessageList({
               );
             })}
           </div>
-        )}
       </ScrollArea>
+      )}
       <button
         onClick={scrollToBottom}
         className={cn(

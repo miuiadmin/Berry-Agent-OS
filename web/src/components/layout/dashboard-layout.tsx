@@ -54,9 +54,9 @@ export function DashboardLayout() {
           <div className="size-5 rounded-md bg-brand" />
           <span className="text-sm font-semibold">Berry</span>
         </div>
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-hidden">
           {/* key by pathname to re-trigger animation on route change */}
-          <div key={location.pathname} className="animate-page-in">
+          <div key={location.pathname} className="animate-page-in h-full">
             <Outlet />
           </div>
         </main>
