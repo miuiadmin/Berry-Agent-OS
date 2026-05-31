@@ -98,7 +98,7 @@ export function applyRealTestEnv(config: RealTestConfig): AppliedRealTestEnv {
     config,
     cleanup() {
       restoreEnv(savedEnv);
-      setAppHome(savedEnv.SERVICE_HOME ?? join(homedir(), '.agent-home'));
+      setAppHome(savedEnv.SERVICE_HOME ?? join(homedir(), '.berry'));
       if (config.cleanupAppHome) {
         try {
           rmSync(config.appHome, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface TooltipProps {
@@ -11,15 +11,21 @@ interface TooltipProps {
 
 export function Tooltip({ content, side = "top", children }: TooltipProps) {
   const [visible, setVisible] = useState(false);
-  let hideTimer: ReturnType<typeof setTimeout>;
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, []);
 
   const show = useCallback(() => {
-    clearTimeout(hideTimer);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     setVisible(true);
   }, []);
 
   const hide = useCallback(() => {
-    hideTimer = setTimeout(() => setVisible(false), 150);
+    hideTimerRef.current = setTimeout(() => setVisible(false), 150);
   }, []);
 
   const toggle = useCallback(() => {

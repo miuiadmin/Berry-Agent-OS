@@ -128,7 +128,7 @@ export function loadConfig(): AppConfig {
       const raw = readFileSync(configPath, 'utf-8');
       fileData = parseYaml(raw) ?? {};
     } catch (err) {
-      console.error(`[config] 配置文件解析失败 (${configPath}): ${(err as Error).message}，使用默认值`);
+      console.error(`[config] 配置文件解析失败 (${configPath}): ${err instanceof Error ? err.message : String(err)}，使用默认值`);
       fileData = {};
     }
   }

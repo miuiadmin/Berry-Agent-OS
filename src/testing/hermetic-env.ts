@@ -70,7 +70,7 @@ export function createHermeticEnv(options?: HermeticEnvOptions): HermeticEnv {
       if (savedAppHome === undefined) delete process.env.SERVICE_HOME; else process.env.SERVICE_HOME = savedAppHome;
       if (savedLlmMode === undefined) delete process.env.APP_LLM_MODE; else process.env.APP_LLM_MODE = savedLlmMode;
 
-      setAppHome(savedAppHome ?? join(homedir(), '.agent-home'));
+      setAppHome(savedAppHome ?? join(homedir(), '.berry'));
 
       try {
         rmSync(appHome, { recursive: true, force: true });
