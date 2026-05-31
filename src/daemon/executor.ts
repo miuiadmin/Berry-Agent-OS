@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import type { RuntimeAdapter } from './adapters/types.js';
 import type { NormalizedExternalEvent } from '../contracts/daemon-events.js';
 import type { DaemonTaskInput } from '../contracts/daemon-protocol.js';
+import { killProcessSafely } from '../lib/process-utils.js';
 
 export interface ExecutionResult {
   ok: boolean;
@@ -148,10 +149,10 @@ export class Executor {
   cancel(reason?: string): void {
     this.abortController.abort(reason);
     if (this.process && !this.process.killed) {
-      try { this.process.kill('SIGTERM'); } catch { /* process already exited */ }
+      killProcessSafely(this.process.pid!, 'SIGTERM');
       setTimeout(() => {
         if (this.process && !this.process.killed) {
-          try { this.process.kill('SIGKILL'); } catch { /* process already exited */ }
+          killProcessSafely(this.process.pid!, 'SIGKILL');
         }
       }, 5000);
     }

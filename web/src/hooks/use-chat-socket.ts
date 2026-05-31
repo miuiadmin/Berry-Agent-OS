@@ -3,10 +3,35 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
+import type { ServerMessage } from "@/lib/types/ws-messages";
 
 const STREAMING_TIMEOUT_MS = 30_000;
 const STREAMING_TIMEOUT_MSG = "Response timed out (30s) — backend may not have LLM configured. Check config.yaml and backend logs.";
 const STREAMING_TIMEOUT_RETRY_MSG = "Response timed out (30s)";
+
+function toDelegationRequest(msg: Extract<ServerMessage, { type: "delegation.needed" }>): DelegationRequest {
+  return {
+    delegationId: msg.delegationId,
+    sessionId: msg.sessionId,
+    requestedBy: msg.requestedBy,
+    title: msg.title,
+    description: msg.description,
+    urgency: msg.urgency,
+    options: msg.options,
+  };
+}
+
+function toPermissionRequest(msg: Extract<ServerMessage, { type: "permission.confirm_needed" }>): PermissionConfirmRequest {
+  return {
+    requestId: msg.requestId,
+    sessionId: msg.sessionId,
+    agentName: msg.agentName,
+    toolName: msg.toolName,
+    toolInput: msg.toolInput,
+    dangerLevel: msg.dangerLevel,
+    brainReason: msg.brainReason,
+  };
+}
 
 export function useChatSocket() {
   const {
@@ -32,16 +57,15 @@ export function useChatSocket() {
   }, []);
 
   useEffect(() => {
-    const unsub = onMessage((data) => {
-      const type = data.type as string;
-      switch (type) {
+    const unsub = onMessage((raw) => {
+      const msg = raw as unknown as ServerMessage;
+      switch (msg.type) {
         case "text_delta": {
-          appendToLast(data.text as string);
+          appendToLast(msg.text);
           break;
         }
         case "progress": {
-          const summary = (data as Record<string, unknown>).summary as string | undefined;
-          if (summary) setLastProgress(summary);
+          if (msg.summary) setLastProgress(msg.summary);
           break;
         }
         case "result": {
@@ -51,7 +75,7 @@ export function useChatSocket() {
           break;
         }
         case "error": {
-          const errMsg = (data as Record<string, unknown>).error as string || (data as Record<string, unknown>).message as string || "Unknown error";
+          const errMsg = msg.error ?? msg.message ?? "Unknown error";
           setLastError(errMsg);
           if (streamingTimerRef.current) clearTimeout(streamingTimerRef.current);
           break;
@@ -64,15 +88,11 @@ export function useChatSocket() {
           break;
         }
         case "delegation.needed": {
-          if (typeof data === "object" && data !== null && "delegationId" in data) {
-            setPendingDelegation(data as unknown as DelegationRequest);
-          }
+          setPendingDelegation(toDelegationRequest(msg));
           break;
         }
         case "permission.confirm_needed": {
-          if (typeof data === "object" && data !== null && "requestId" in data) {
-            setPendingPermission(data as unknown as PermissionConfirmRequest);
-          }
+          setPendingPermission(toPermissionRequest(msg));
           break;
         }
       }

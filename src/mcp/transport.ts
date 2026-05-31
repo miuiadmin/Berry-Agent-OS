@@ -7,6 +7,7 @@ import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.
 import type { McpServerConfig } from './contract.js';
 import { buildSafeEnv } from './security.js';
 import { getLogger } from '../utils/logger.js';
+import { killProcessSafely, isProcessAlive as checkAlive } from '../lib/process-utils.js';
 
 const logger = getLogger('mcp-transport');
 
@@ -91,14 +92,14 @@ export class ProcessManager {
       const allPids = [pid, ...descendants];
 
       for (const p of allPids) {
-        try { process.kill(p, 'SIGTERM'); } catch { /* already dead */ }
+        killProcessSafely(p, 'SIGTERM');
       }
 
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       for (const p of allPids) {
-        if (this.isAlive(p)) {
-          try { process.kill(p, 'SIGKILL'); } catch { /* ignore */ }
+        if (checkAlive(p)) {
+          killProcessSafely(p, 'SIGKILL');
           this.orphanPids.add(p);
         }
       }
@@ -112,7 +113,7 @@ export class ProcessManager {
     await Promise.all(names.map(name => this.cleanup(name)));
 
     for (const pid of this.orphanPids) {
-      try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+      killProcessSafely(pid, 'SIGKILL');
     }
     this.orphanPids.clear();
   }
@@ -126,12 +127,4 @@ export class ProcessManager {
     }
   }
 
-  private isAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
