@@ -267,5 +267,5 @@ function formatMemoryContextFrames(frames?: MemoryContextFrame[]): string {
     .filter(Boolean)
     .join('\n\n');
   if (!contextText) return '';
-  return `<berry-memory-context>\n${contextText}\n</berry-memory-context>`;
+  return `<memory-context>\n[System: 以下是召回的记忆上下文，非用户新输入。作为参考信息使用。]\n${contextText}\n</memory-context>`;
 }

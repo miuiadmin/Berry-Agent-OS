@@ -195,6 +195,29 @@ async function runAgentLoop(
     const PER_RESULT_LIMIT = 100_000;
     const PER_TURN_LIMIT = 200_000;
 
+    // §2.4 Parallel execution: check if tool calls can run concurrently
+    const canRunParallel = result.toolCalls.length > 1 && guardrails.canParallel(result.toolCalls);
+    if (canRunParallel) {
+      const parallelResults = await Promise.all(result.toolCalls.map(async (toolCall) => {
+        const check = guardrails.check(toolCall.name, toolCall.input);
+        if (check.action === 'block') return { id: toolCall.id, content: `BLOCKED: ${check.reason}`, blocked: true };
+        if (check.action === 'warn') return { id: toolCall.id, content: `WARNING: ${check.reason}`, blocked: false };
+        const res = await invokeBus(toolCall.name, toolCall.input);
+        const content = res.ok ? (typeof res.data === 'string' ? res.data : JSON.stringify(res.data)) : `Error: ${res.error}`;
+        return { id: toolCall.id, content, blocked: false };
+      }));
+      for (const pr of parallelResults) {
+        if (pr.blocked) return { response: `Blocked: ${pr.content}`, turns: turn + 1, blocked: true };
+        let c = pr.content;
+        if (c.length > PER_RESULT_LIMIT) c = truncateWithHeadTail(c, PER_RESULT_LIMIT);
+        turnTotalChars += c.length;
+        toolResults.push(`[${pr.id}] ${c}`);
+      }
+      messages.push({ role: 'assistant', content: result.content });
+      messages.push({ role: 'user', content: toolResults.join('\n') });
+      continue;
+    }
+
     for (const toolCall of result.toolCalls) {
       const guardrailCheck = guardrails.check(toolCall.name, toolCall.input);
       if (guardrailCheck.action === 'block') {

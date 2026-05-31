@@ -363,7 +363,7 @@ describe('memory schema', () => {
 
   it('keeps memory context outside the cached system prompt contract', () => {
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain('<berry-memory-context>');
+    expect(prompt).toContain('<memory-context>');
     expect(prompt).not.toContain('用户偏好中文控制台输出');
   });
 
