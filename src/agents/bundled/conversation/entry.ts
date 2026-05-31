@@ -135,6 +135,8 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
 
     try {
       const streamingEnabled = config.streaming?.enabled !== false;
+      const { StreamingScrubber } = await import('../../../llm/streaming-scrubber.js');
+      const scrubber = new StreamingScrubber();
       const result = await runToolLoop({
         llm,
         messages: [...priorHistory, { role: 'user', content: messageForModel }],
@@ -142,8 +144,9 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         tools,
         config: { maxCalls: Math.min(config.toolLoop.maxCalls, 10), timeoutMs: config.toolLoop.timeoutMs },
         onChunk: streamingEnabled ? (text: string) => {
-          if (taskId) {
-            ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId, text });
+          const scrubbed = scrubber.scrub(text);
+          if (scrubbed && taskId) {
+            ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId, text: scrubbed });
           }
         } : undefined,
         onToolResult: taskId ? (toolName: string, isError: boolean) => {

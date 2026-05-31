@@ -555,6 +555,19 @@ export class CoreService {
       this.mcpManager = new McpManager(this.eventBus, mcpToolRegistry, mcpLlm);
       await this.mcpManager.start(this.config.mcp.servers);
       logger.info({ serverCount: this.config.mcp.servers.length }, 'MCP 客户端已启动');
+
+      // §8.10: Register MCP tools on Bus for capability discovery
+      const { registerMcpToolsOnBus } = await import('../bus/mcp-adapter.js');
+      const mcpTools = mcpToolRegistry.getAll().map(t => ({
+        serverName: 'mcp', toolName: t.name, description: t.description,
+      }));
+      registerMcpToolsOnBus(capabilityBus, mcpTools, {
+        execute: async (_server, toolName, input) => {
+          const tool = mcpToolRegistry.get(toolName);
+          if (!tool) throw new Error(`MCP tool ${toolName} not found`);
+          return tool.execute(input);
+        },
+      });
     }
 
     this.workspaceManager = new WorkspaceManager(getDb(), this.eventBus);
@@ -606,6 +619,10 @@ export class CoreService {
     if (lateTools.length > 0) {
       registerToolsAsBusCapabilities(capabilityBus, lateTools);
     }
+
+    // §8.17: Register session_search as Bus capability
+    const { registerSessionSearchCapability } = await import('../memory/session-search.js');
+    registerSessionSearchCapability(capabilityBus, getDb());
 
     const telegramConfig = this.config.channels.telegram;
     if (telegramConfig.enabled && telegramConfig.token) {
@@ -867,6 +884,9 @@ export class CoreService {
     if (this.insightsTimer) {
       clearInterval(this.insightsTimer);
       this.insightsTimer = null;
+    }
+    if (this.capabilityBus?.stopAllTriggers) {
+      this.capabilityBus.stopAllTriggers();
     }
 
     if (this.terminalRenderer) {
