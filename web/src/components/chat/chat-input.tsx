@@ -112,7 +112,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments }: ChatInputPr
                 "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 btn-press",
                 "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
                 canSend && !isStreaming
-                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97]"
+                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97] animate-send-ready"
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >

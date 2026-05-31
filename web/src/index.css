@@ -366,24 +366,6 @@ code {
   }
 }
 
-/* ─── Toast slide-in from top ─────────────────────────── */
-@keyframes toast-in {
-  from { opacity: 0; transform: translateY(-16px) scale(0.95); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes toast-out {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to   { opacity: 0; transform: translateY(-8px) scale(0.97); }
-}
-@layer utilities {
-  .animate-toast-in {
-    animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .animate-toast-out {
-    animation: toast-out 0.2s ease-in both;
-  }
-}
-
 /* ─── Conversation list item hover ────────────────────── */
 @layer utilities {
   .conv-item {

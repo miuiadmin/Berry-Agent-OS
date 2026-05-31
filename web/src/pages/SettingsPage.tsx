@@ -235,7 +235,7 @@ function SettingsContent() {
           {isLoading ? (
             <SettingsSkeleton />
           ) : (
-            <div key={activeTab} className="animate-fade-in">
+            <div key={activeTab} className="animate-tab-in">
               <TabContent
                 tab={activeTab}
                 config={editedConfig}
