@@ -40,6 +40,8 @@ export interface TaskRow {
   started_at: number | null;
   finished_at: number | null;
   requeue_count: number;
+  resume_count: number;
+  error_type: string | null;
 }
 
 export interface TaskManagerConfig {
@@ -50,8 +52,13 @@ const DEFAULT_CONFIG: TaskManagerConfig = {
   defaultTimeoutMs: 120_000,
 };
 
-export class TaskManager {
-  private db: Database;
+/** Exposed for checkpoint-service DB access */
+export interface TaskManagerDb {
+  readonly db: Database;
+}
+
+export class TaskManager implements TaskManagerDb {
+  readonly db: Database;
   private eventBus: EventBus;
   private config: TaskManagerConfig;
   private timeouts = new Map<string, ReturnType<typeof setTimeout>>();

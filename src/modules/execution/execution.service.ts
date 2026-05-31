@@ -42,6 +42,11 @@ export class ExecutionService {
     private events: AppEvents,
   ) {}
 
+  /** Low-level update for service integrations (review, etc.) */
+  updateExecution(id: string, data: Parameters<ExecutionRepository['update']>[1]): void {
+    this.repo.update(id, data);
+  }
+
   start(input: StartExecutionInput): Execution {
     const id = genId();
     const now = new Date();

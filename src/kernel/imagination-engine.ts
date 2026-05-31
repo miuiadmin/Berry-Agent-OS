@@ -82,7 +82,7 @@ export class ImaginationEngine {
           maxTokens: 512,
           temperature: 0.1,
           agent: 'brain',
-          purpose: 'brain_routing' as any,
+          purpose: 'brain_routing',
           modelTier: 'fast',
           sessionId: 'imagination',
         },

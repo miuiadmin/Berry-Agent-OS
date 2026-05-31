@@ -35,7 +35,7 @@ async function handleMemoryJudge(
     [{ role: 'user', content: buildJudgePrompt(userMessage, assistantResponse) }],
     {
       agent: 'memory',
-      purpose: 'learning_review' as any,
+      purpose: 'learning_review',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
       maxTokens: 512,
@@ -87,7 +87,7 @@ async function handleMemoryRecall(
     [{ role: 'user', content: buildRecallPrompt(query, rows) }],
     {
       agent: 'memory',
-      purpose: 'learning_review' as any,
+      purpose: 'learning_review',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
       maxTokens: 256,

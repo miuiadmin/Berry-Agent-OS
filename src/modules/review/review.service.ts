@@ -36,8 +36,7 @@ export class ReviewService {
     const execution = this.executionService.getById(executionId);
     if (!execution) return;
 
-    const repo = (this.executionService as any).repo;
-    repo.update(executionId, { reviewedBy: reviewerId, reviewStatus: 'pending' });
+    this.executionService.updateExecution(executionId, { reviewedBy: reviewerId, reviewStatus: 'pending' });
 
     this.events.emit('review.requested', { executionId, reviewerId });
   }
@@ -46,68 +45,69 @@ export class ReviewService {
     const execution = this.executionService.getById(executionId);
     if (!execution) return;
 
-    const repo = (this.executionService as any).repo;
+    const update = (data: Parameters<typeof this.executionService.updateExecution>[1]) =>
+      this.executionService.updateExecution(executionId, data);
 
     switch (decision.action) {
       case 'approve':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'approved',
           reviewNote: decision.note ?? null,
-          reviewActionData: decision as any,
+          reviewActionData: decision,
         });
         this.agentService.recordApproval(execution.agentId);
         break;
 
       case 'modify':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'modified',
           output: decision.modifiedContent ?? execution.output,
           reviewNote: decision.note ?? null,
-          reviewActionData: decision as any,
+          reviewActionData: decision,
         });
         this.agentService.recordApproval(execution.agentId);
         break;
 
       case 'reject':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'rejected',
           reviewNote: decision.note ?? null,
-          reviewGuidance: { guidance: decision.guidance, suggestions: decision.suggestions } as any,
-          reviewActionData: decision as any,
+          reviewGuidance: { guidance: decision.guidance, suggestions: decision.suggestions },
+          reviewActionData: decision,
           redoCount: (execution.redoCount ?? 0) + 1,
         });
         this.agentService.recordRejection(execution.agentId);
         break;
 
       case 'reassign':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'reassigned',
           reviewNote: decision.note ?? null,
-          reviewActionData: decision as any,
+          reviewActionData: decision,
         });
         break;
 
       case 'supplement':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'supplemented',
           reviewNote: decision.note ?? null,
-          reviewActionData: decision as any,
+          reviewActionData: decision,
         });
         break;
 
       case 'suspend':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'suspended',
           reviewNote: decision.note ?? null,
-          reviewActionData: decision as any,
+          reviewActionData: decision,
         });
         break;
 
       case 'change_and_route':
-        repo.update(executionId, {
+        update({
           reviewStatus: 'approved',
           reviewNote: decision.note ?? null,
-          reviewActionData: decision as any,
+          reviewActionData: decision,
         });
         break;
     }

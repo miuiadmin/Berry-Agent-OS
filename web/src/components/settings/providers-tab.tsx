@@ -184,7 +184,7 @@ export function ProvidersTab() {
         high: tiers.high?.channel ?? "",
       });
     }
-  }, [tiers]);
+  }, [tiers, tiersInitialized]);
 
   // ── Mutations ──
   const testMutation = useMutation({

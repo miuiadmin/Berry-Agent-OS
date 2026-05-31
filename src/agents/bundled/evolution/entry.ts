@@ -39,7 +39,7 @@ async function handleExtractFeedback(
     [{ role: 'user', content: buildFeedbackPrompt(userMessage, assistantResponse) }],
     {
       agent: 'evolution',
-      purpose: 'learning_review' as any,
+      purpose: 'learning_review',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
       maxTokens: 256,
@@ -74,7 +74,7 @@ async function handleGenerateSkill(
     [{ role: 'user', content: buildSkillPrompt(signal, existingSkills ?? []) }],
     {
       agent: 'evolution',
-      purpose: 'skill_generation' as any,
+      purpose: 'skill_generation',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
       maxTokens: 2048,
@@ -103,7 +103,7 @@ async function handleDetectGap(
     [{ role: 'user', content: buildGapPrompt(recentToolFailures ?? [], recentPermissionDenials ?? []) }],
     {
       agent: 'evolution',
-      purpose: 'learning_review' as any,
+      purpose: 'learning_review',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
       maxTokens: 512,
@@ -133,7 +133,7 @@ async function handleAnalyzeMetrics(
     [{ role: 'user', content: buildMetricsPrompt(triggers, recentDecisions) }],
     {
       agent: 'evolution',
-      purpose: 'learning_review' as any,
+      purpose: 'learning_review',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
       maxTokens: 1024,

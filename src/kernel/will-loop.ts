@@ -234,7 +234,7 @@ export class WillLoop {
         maxTokens: 256,
         temperature: 0.2,
         agent: 'brain',
-        purpose: 'brain_routing' as any,
+        purpose: 'brain_routing',
         modelTier: 'fast',
         sessionId: 'will-loop',
       },

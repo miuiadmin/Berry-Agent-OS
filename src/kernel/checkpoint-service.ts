@@ -1,5 +1,6 @@
 import type { TaskCheckpointManager } from './task-checkpoint.js';
-import type { TaskManager } from './task-manager.js';
+import type { TaskManager, TaskManagerDb } from './task-manager.js';
+import type { TaskRow } from './task-manager.js';
 import type { EventBus } from './event-bus.js';
 import type {
   ExecutionCheckpoint,
@@ -59,7 +60,7 @@ export class CheckpointService {
       return;
     }
 
-    const db = (this.taskManager as any).db;
+    const db = (this.taskManager as TaskManagerDb).db;
     db.prepare(`
       UPDATE agent_tasks SET status = 'resumable', error = ?, error_type = ?, finished_at = ? WHERE id = ?
     `).run(error, errorType, Date.now(), taskId);
@@ -74,8 +75,8 @@ export class CheckpointService {
       return { strategy: 'restart', reason: 'task not found' };
     }
 
-    const resumeCount = (task as any).resume_count ?? 0;
-    const errorType = ((task as any).error_type ?? 'permanent') as ErrorType;
+    const resumeCount = task.resume_count ?? 0;
+    const errorType = (task.error_type ?? 'permanent') as ErrorType;
     const checkpoint = this.getLatestCheckpoint(taskId);
     const hasCheckpoint = checkpoint !== null;
 
@@ -106,7 +107,7 @@ export class CheckpointService {
 
     const strategy = request.strategy ?? this.determineResumeStrategy(request.taskId).strategy;
 
-    const db = (this.taskManager as any).db;
+    const db = (this.taskManager as TaskManagerDb).db;
 
     if (strategy === 'restart') {
       db.prepare(`UPDATE agent_tasks SET status = 'failed', finished_at = ? WHERE id = ?`).run(Date.now(), request.taskId);
@@ -134,8 +135,8 @@ export class CheckpointService {
       if (checkpoint && checkpoint.savedAt > Date.now() - CHECKPOINT_MAX_AGE_MS) {
         this.markResumable(task.id, 'transient', 'process restart');
         const decision = this.determineResumeStrategy(task.id);
-        if (this.errorClassifier.canAutoResume('transient', (task as any).resume_count ?? 0)) {
-          const db = (this.taskManager as any).db;
+        if (this.errorClassifier.canAutoResume('transient', task.resume_count ?? 0)) {
+          const db = (this.taskManager as TaskManagerDb).db;
           db.prepare(`UPDATE agent_tasks SET status = 'running', resume_count = resume_count + 1 WHERE id = ?`).run(task.id);
           this.eventBus.emit('task.resumed', { taskId: task.id, strategy: decision.strategy });
           resumed++;
