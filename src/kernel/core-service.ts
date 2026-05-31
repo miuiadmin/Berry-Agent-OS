@@ -445,7 +445,7 @@ export class CoreService {
     runInsightsLifecycle(getDb());
     this.insightsTimer = setInterval(() => {
       runInsightsLifecycle(getDb());
-      import('../evolution/stats-job.js').then(m => m.runStatsJob(getDb())).catch(() => {});
+      import('../evolution/stats-job.js').then(m => m.runStatsJob(getDb())).catch((e) => { logger.warn({ err: e }, 'Stats job failed'); });
     }, 3600_000);
 
     // §3.1/§3.2 Lifecycle subscriptions: wire system events to agent tasks
@@ -455,7 +455,7 @@ export class CoreService {
       this.messageRouter?.dispatchModuleTask({
         sessionId: 'lifecycle', taskType: 'detect_gap', requester: 'lifecycle',
         inputPayload: { taskType: 'detect_gap', recentPermissionDenials: [JSON.stringify(data)] },
-      }).catch(() => {});
+      }).catch((e) => { logger.debug({ err: e }, 'Gap detection dispatch failed'); });
     });
     this.eventBus.on('agent.crashed', () => {
       lifecycleManager.emit('agent.task_completed', { status: 'crashed' });

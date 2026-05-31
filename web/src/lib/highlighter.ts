@@ -51,7 +51,3 @@ export async function highlight(
     return "";
   }
 }
-
-export function clearHighlightCache() {
-  cache.clear();
-}

@@ -126,7 +126,7 @@ export class SocketServer implements Transport {
         onClose: () => {},
       };
       for (const handler of this.connectionHandlers) {
-        try { handler(conn); } catch {}
+        try { handler(conn); } catch (e) { logger.debug({ err: e }, 'Connection handler error'); }
       }
 
       let buffer = '';
@@ -139,7 +139,7 @@ export class SocketServer implements Transport {
         this.sequenceCounters.delete(connId);
         this.connectionMetadata.delete(connId);
         for (const handler of this.disconnectionHandlers) {
-          try { handler(connId, err.message); } catch {}
+          try { handler(connId, err.message); } catch (e) { logger.debug({ err: e }, 'Disconnection handler error'); }
         }
       });
 
@@ -148,7 +148,7 @@ export class SocketServer implements Transport {
         this.sequenceCounters.delete(connId);
         this.connectionMetadata.delete(connId);
         for (const handler of this.disconnectionHandlers) {
-          try { handler(connId); } catch {}
+          try { handler(connId); } catch (e) { logger.debug({ err: e }, 'Close handler error'); }
         }
       });
 

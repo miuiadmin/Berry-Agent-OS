@@ -101,7 +101,7 @@ export class Tracer {
     for (const sink of this.sinks) {
       try {
         sink(span);
-      } catch {}
+      } catch (e) { logger.debug({ err: e }, 'Trace sink error'); }
     }
   }
 }

@@ -256,7 +256,7 @@ export class LlmClient {
               cacheCreation: usage.cacheCreationTokens,
               durationMs: Date.now() - t0,
             });
-          } catch {}
+          } catch (e) { logger.debug({ err: e }, 'Metrics recording failed'); }
         }
 
         return {
@@ -428,7 +428,7 @@ export class LlmClient {
               const buf = toolInputBuffers.get(part.id);
               if (buf) {
                 let input: Record<string, unknown> = {};
-                try { input = JSON.parse(buf.json || '{}'); } catch {}
+                try { input = JSON.parse(buf.json || '{}'); } catch (e) { logger.debug({ err: e, toolId: buf.id }, 'Tool input JSON parse failed'); }
                 contentBlocks.push({ type: 'tool_use', id: buf.id, name: buf.name, input });
                 yield { type: 'tool_use_done', id: buf.id, input };
                 toolInputBuffers.delete(part.id);
@@ -523,7 +523,7 @@ export class LlmClient {
                     cacheCreation: usage.cacheCreationTokens,
                     durationMs: Date.now() - t0,
                   });
-                } catch {}
+                } catch (e) { logger.debug({ err: e }, 'Metrics recording failed'); }
               }
 
               yield { type: 'message_done', response };
@@ -694,7 +694,7 @@ export class LlmClient {
           outputTokens: response.usage.outputTokens,
           durationMs: Date.now() - t0,
         });
-      } catch {}
+      } catch (e) { logger.debug({ err: e }, 'Stream cleanup error'); }
     }
 
     return {

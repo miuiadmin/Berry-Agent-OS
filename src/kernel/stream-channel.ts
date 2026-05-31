@@ -56,7 +56,7 @@ export function createStreamChannel(options: StreamChannelOptions): StreamChanne
       if (wasBackpressured && buffer.length < maxBufferSize) {
         wasBackpressured = false;
         for (const handler of drainHandlers) {
-          try { handler(); } catch {}
+          try { handler(); } catch (e) { logger.debug({ err: e }, 'Drain handler error'); }
         }
       }
     }
@@ -113,7 +113,7 @@ export function createStreamChannel(options: StreamChannelOptions): StreamChanne
       }
       doFlush();
       for (const handler of closeHandlers) {
-        try { handler(); } catch {}
+        try { handler(); } catch (e) { logger.debug({ err: e }, 'Close handler error'); }
       }
     },
 

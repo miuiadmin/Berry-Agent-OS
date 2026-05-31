@@ -31,6 +31,10 @@ import { join } from 'node:path';
 
 const logger = getLogger('unified-handlers');
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 type HandlerFn = (request: Record<string, unknown>, ctx: MessageContext, services: ServiceContainer) => void | Promise<void>;
 
 interface HandlerDefinition {
@@ -193,7 +197,7 @@ const evolutionDispatchHandler: HandlerFn = (request, ctx, services) => {
     inputPayload: (request.inputPayload as Record<string, unknown>) ?? {},
   })
     .then((result) => reply(ctx, { ok: true, ...result }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 // === Agent Handlers ===
@@ -224,7 +228,7 @@ const agentsInstallHandler: HandlerFn = (request, ctx, services) => {
   const [dir] = vals;
   services.agentLifecycle.install(dir)
     .then((result) => reply(ctx, { ok: true, ...result }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 const agentsRemoveHandler: HandlerFn = (request, ctx, services) => {
@@ -233,7 +237,7 @@ const agentsRemoveHandler: HandlerFn = (request, ctx, services) => {
   const [name] = vals;
   services.agentLifecycle.remove(name, { force: request.force === true })
     .then(() => reply(ctx, { ok: true, name }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 const agentsUpgradeHandler: HandlerFn = (request, ctx, services) => {
@@ -242,7 +246,7 @@ const agentsUpgradeHandler: HandlerFn = (request, ctx, services) => {
   const [name] = vals;
   services.agentLifecycle.upgrade(name)
     .then((result) => reply(ctx, { ok: true, name, ...result }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 const agentsEnableHandler: HandlerFn = (request, ctx, services) => {
@@ -251,7 +255,7 @@ const agentsEnableHandler: HandlerFn = (request, ctx, services) => {
   const [name] = vals;
   services.agentLifecycle.enable(name)
     .then(() => reply(ctx, { ok: true, name }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 const agentsDisableHandler: HandlerFn = (request, ctx, services) => {
@@ -260,13 +264,13 @@ const agentsDisableHandler: HandlerFn = (request, ctx, services) => {
   const [name] = vals;
   services.agentLifecycle.disable(name, typeof request.reason === 'string' ? request.reason : undefined)
     .then(() => reply(ctx, { ok: true, name }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 const agentsReloadHandler: HandlerFn = (_, ctx, services) => {
   services.agentLifecycle.reload(getUserAgentsDir())
     .then((result) => reply(ctx, { ok: true, ...result }))
-    .catch((err) => replyError(ctx, (err as Error).message));
+    .catch((err) => replyError(ctx, getErrorMessage(err)));
 };
 
 // === Messaging Handlers ===
