@@ -140,6 +140,9 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       markInsightAdoptedByDecision(db, 'review', reviewInsights.map(i => i.id));
     }
 
+    // §5.2 ④: Recall historical review decisions for learning
+    systemPrompt += recallDecisionsBlock('review');
+
     const messages: ModelMessage[] = [
       { role: 'user', content: reviewContent },
     ];

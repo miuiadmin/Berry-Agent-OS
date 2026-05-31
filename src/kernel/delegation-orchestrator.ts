@@ -260,6 +260,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         return;
       }
 
+      // §5.2 ①: Inject memory recall for Brain routing personalization
+      const memoryFrame = this.sessionManager.buildMemoryContext(payload.sessionId, payload.message);
+      if (memoryFrame?.records && memoryFrame.records.length > 0) {
+        const memoryHints = memoryFrame.records.slice(0, 5).map((r: any) => r.summary ?? r.content).join('; ');
+        payload = {
+          ...payload,
+          sessionContext: (payload.sessionContext ?? '') + `\n\n[用户记忆] ${memoryHints}`,
+        };
+      }
+
       // Enrich routing context with World Model summary
       if (this.worldModelRef) {
         const worldSummary = this.worldModelRef.getSummary();
