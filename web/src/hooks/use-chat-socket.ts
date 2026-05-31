@@ -107,7 +107,7 @@ export function useChatSocket() {
         const res = await fetch("/api/providers/channels");
         if (res.ok) {
           const data = await res.json();
-          const hasConfigured = data.channels?.some((ch: { configured?: boolean; modelCount?: number }) => ch.configured || ch.modelCount > 0);
+          const hasConfigured = data.channels?.some((ch: { configured?: boolean; modelCount?: number }) => ch.configured || (ch.modelCount ?? 0) > 0);
           if (!hasConfigured) {
             addMessage({
               id: `err-${crypto.randomUUID().slice(0, 8)}`,
