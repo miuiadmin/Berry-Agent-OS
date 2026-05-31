@@ -19,6 +19,7 @@ import type { IpcChildChannel } from '../contracts/infrastructure.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import { generateText, streamText } from 'ai';
 import { createProviderModel } from './providers.js';
+import type { IProviderRegistry } from '../providers/contract.js';
 import { toAiMessages, toAiTools, mapFinishReason, mapUsage, mapToolCalls, buildContentBlocks, type AiSdkToolCall } from './message-adapter.js';
 import { TestBackend } from './backends/test.js';
 import { IpcTakeoverBackend } from './backends/ipc-takeover.js';
@@ -96,6 +97,8 @@ export class LlmClient {
   // Legacy backend for mock/takeover/agent-sdk modes
   private legacyBackend: LlmBackend | null;
   private llmCompletedHook: LlmCompletedHook | null;
+  // New: provider registry for multi-channel model resolution
+  private providerRegistry: IProviderRegistry | null;
 
   constructor(config: LlmConfig, options: {
     defaultAgent?: string;
@@ -104,6 +107,7 @@ export class LlmClient {
     resilienceConfig?: ResilienceConfig;
     legacyBackend?: LlmBackend;
     llmCompletedHook?: LlmCompletedHook;
+    providerRegistry?: IProviderRegistry;
   } = {}) {
     this.config = config;
     this.defaultAgent = options.defaultAgent ?? 'unknown';
@@ -115,6 +119,7 @@ export class LlmClient {
     this.concurrencySemaphore = getSharedSemaphore(options.resilienceConfig?.concurrency);
     this.legacyBackend = options.legacyBackend ?? null;
     this.llmCompletedHook = options.llmCompletedHook ?? null;
+    this.providerRegistry = options.providerRegistry ?? null;
   }
 
   async chat(messages: ModelMessage[], options: ChatOptions = {}): Promise<ChatResult> {
@@ -126,8 +131,11 @@ export class LlmClient {
       return this.chatViaLegacyBackend(messages, options, agentName);
     }
 
-    const modelId = resolveModel(this.config, tier);
-    const model = createProviderModel(this.config, tier);
+    const resolved = this.providerRegistry?.resolve(tier);
+    const modelId = resolved?.model.id ?? resolveModel(this.config, tier);
+    const model = resolved
+      ? this.providerRegistry!.createModel(tier)
+      : createProviderModel(this.config, tier);
 
     // Build provider options (thinking, cacheControl) for Anthropic
     const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled);
@@ -316,8 +324,11 @@ export class LlmClient {
       return;
     }
 
-    const modelId = resolveModel(this.config, tier);
-    const model = createProviderModel(this.config, tier);
+    const resolved = this.providerRegistry?.resolve(tier);
+    const modelId = resolved?.model.id ?? resolveModel(this.config, tier);
+    const model = resolved
+      ? this.providerRegistry!.createModel(tier)
+      : createProviderModel(this.config, tier);
     const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled);
 
     // Budget pre-check
@@ -718,6 +729,8 @@ export interface CreateLlmClientOptions {
   resilienceConfig?: ResilienceConfig;
   defaultAgent?: string;
   backendKind?: 'anthropic' | 'claude_agent_sdk';
+  /** Optional provider registry for multi-channel model resolution */
+  providerRegistry?: IProviderRegistry;
 }
 
 export function createLlmClient(config: LlmConfig, options?: CreateLlmClientOptions): LlmClient {
@@ -765,6 +778,7 @@ export function createLlmClient(config: LlmConfig, options?: CreateLlmClientOpti
     },
     legacyBackend,
     llmCompletedHook,
+    providerRegistry: options?.providerRegistry,
   });
 }
 
@@ -773,6 +787,7 @@ export function createTestLlmClient(backend: LlmBackend, defaultAgent?: string):
   const config: LlmConfig = {
     provider: 'anthropic',
     providers: { anthropic: { apiKey: '', models: {} }, openai: { apiKey: '', models: {} }, 'openai-compatible': { apiKey: '', models: {} } },
+    channelsConfig: { channels: [], tiers: {} },
     baseUrl: '',
     apiKey: '',
     model: 'test-model',

@@ -39,6 +39,7 @@ import type { LogLevel } from './observability.js';
 import { initTracer, createSqliteSink } from '../observability/tracer.js';
 import { CronScheduler } from '../cron/index.js';
 import { createLlmClient } from '../llm/index.js';
+import { createProviderRegistry, type ProviderRegistry } from '../providers/registry.js';
 import { McpManager } from '../mcp/index.js';
 import { ToolRegistry, registerTool, getToolRegistry } from '../tools/index.js';
 import { createDelegationTools } from '../tools/delegation-tools.js';
@@ -298,7 +299,15 @@ export class CoreService {
 
     // Runtime Registry: unified execution interface
     const runtimeRegistry = new RuntimeRegistry();
-    const builtinLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus });
+    const providerRegistry = createProviderRegistry(
+      this.config.llm,
+      this.config.llm.channelsConfig,
+    );
+    const builtinLlm = createLlmClient(this.config.llm, {
+      db: getDb(),
+      eventBus: this.eventBus,
+      providerRegistry: providerRegistry ?? undefined,
+    });
     runtimeRegistry.register('builtin', new BuiltinDriver(builtinLlm));
 
     // Wire LLM-driven evolution extractor
@@ -528,6 +537,7 @@ export class CoreService {
           templateService,
           asyncDelegationService,
           humanDelegationManager: this.humanDelegationManager,
+          providerRegistry,
         },
       });
       await this.webServer.start();

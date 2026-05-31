@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { ProvidersTab } from "@/components/settings/providers-tab";
 import {
   Save,
   Brain,
@@ -21,10 +22,12 @@ import {
   Activity,
   Globe,
   RotateCcw,
+  Server,
 } from "lucide-react";
 
 const TABS = [
   { key: "llm", label: "LLM", icon: Brain },
+  { key: "providers", label: "Providers", icon: Server },
   { key: "budget", label: "Budget", icon: Wallet },
   { key: "memory", label: "Memory", icon: Database },
   { key: "skills", label: "Skills", icon: Sparkles },
@@ -164,7 +167,7 @@ function SettingsContent() {
   const errorCount = Object.keys(errors).length;
 
   return (
-    <div className="flex h-full flex-col md:flex-row md:overflow-hidden">
+    <div className="flex flex-col md:h-full md:flex-row md:overflow-hidden">
       {/* Left nav */}
       <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
         <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">Settings</h1>
@@ -289,6 +292,8 @@ function TabContent({
           ]}
         />
       );
+    case "providers":
+      return <ProvidersTab />;
     case "budget":
       return (
         <ConfigSection

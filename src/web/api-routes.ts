@@ -15,6 +15,7 @@ import { registerPluginScopeRoutes } from '../intelligence/plugin-scope-api.js';
 import { registerTemplateRoutes } from '../intelligence/template-api.js';
 import { registerAsyncDelegationRoutes } from '../intelligence/async-delegation-api.js';
 import { registerTeamBuilderRoutes } from '../intelligence/team-builder-api.js';
+import { registerProviderRoutes } from '../providers/api-routes.js';
 import type { WebServerDependencies } from './types.js';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
@@ -407,6 +408,9 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Team builder routes ---
   registerTeamBuilderRoutes(route, () => deps.teamBuilderService, readBody, json);
+
+  // --- Provider management routes ---
+  registerProviderRoutes(route, () => deps.providerRegistry, readBody, json);
 
   return function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): void {
     const method = req.method ?? 'GET';

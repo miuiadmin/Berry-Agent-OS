@@ -5,6 +5,7 @@ import type { EventBus } from '../contracts/infrastructure.js';
 import type { AppConfig } from '../contracts/config.js';
 import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
+import type { IProviderRegistry } from '../providers/contract.js';
 
 export type MessageHandler = (request: Record<string, unknown>, socket: Socket) => void;
 
@@ -29,4 +30,5 @@ export interface WebServerDependencies {
   asyncDelegationService?: IAsyncDelegationService | null;
   teamBuilderService?: ITeamBuilderService | null;
   humanDelegationManager?: { resolve(id: string, response: string | null, status?: string): boolean } | null;
+  providerRegistry?: IProviderRegistry | null;
 }
