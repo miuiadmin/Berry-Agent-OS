@@ -100,12 +100,29 @@ export class BrainDecisionRecorder {
 
   recallForDecision(decisionType: string, limit = 5): Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }> {
     try {
-      return this.db.prepare(`
+      // §8.2: Prioritize entries with lessons (regardless of time), then recent
+      const withLessons = this.db.prepare(`
         SELECT input_summary AS inputSummary, output_json AS outputJson, outcome, lesson
         FROM brain_decisions
-        WHERE decision_type = ?
+        WHERE decision_type = ? AND lesson IS NOT NULL AND lesson != ''
         ORDER BY created_at DESC LIMIT ?
-      `).all(decisionType, limit) as Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }>;
+      `).all(decisionType, Math.min(limit, 3)) as Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }>;
+
+      const remaining = limit - withLessons.length;
+      if (remaining <= 0) return withLessons;
+
+      const lessonIds = withLessons.length > 0
+        ? withLessons.map(() => '?').join(',')
+        : null;
+
+      const recent = this.db.prepare(`
+        SELECT input_summary AS inputSummary, output_json AS outputJson, outcome, lesson
+        FROM brain_decisions
+        WHERE decision_type = ? AND (lesson IS NULL OR lesson = '')
+        ORDER BY created_at DESC LIMIT ?
+      `).all(decisionType, remaining) as Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }>;
+
+      return [...withLessons, ...recent];
     } catch {
       return [];
     }

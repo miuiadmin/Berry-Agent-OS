@@ -328,6 +328,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       reason: reason ?? (approved ? '用户确认' : '用户拒绝'),
     });
 
+    // §8.16: Record deny reason as lesson for Brain future decisions
+    if (!approved && reason) {
+      this.brainDecisionRecorder?.record({
+        sessionId: 'user_permission',
+        decisionType: 'permission',
+        inputSummary: `user denied: ${pending.agentName} requested permission`,
+        outputJson: { denied: true, userReason: reason, agent: pending.agentName },
+      });
+      this.brainDecisionRecorder?.updateLesson(requestId, reason);
+    }
+
     return true;
   }
 
