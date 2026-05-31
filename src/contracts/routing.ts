@@ -27,7 +27,7 @@ export interface RouteDecision {
   // 6.0 additions
   capability?: string;
   extraCapabilities?: string[];
-  scope?: { capabilities: string[]; constraints?: { pathPattern?: string; maxDangerLevel?: string; maxInvocations?: number; ttlMs?: number } };
+  scope?: { capabilities: string[]; constraints?: { pathPattern?: string; maxDangerLevel?: DangerLevel; maxInvocations?: number; ttlMs?: number } };
   setup?: Array<{ action: 'create_agent' | 'activate_skill' | 'enable_plugin'; params: unknown }>;
   modelTier?: 'fast' | 'default' | 'high';
   activeSkills?: string[];

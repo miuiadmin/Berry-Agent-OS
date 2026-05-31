@@ -108,6 +108,7 @@ export interface IPermissionGate {
     input: unknown,
     ctx: InvokeContext,
   ): Promise<PermissionGateDecision>;
+  setScope(sessionId: string, scope: import('./permission-scope.js').PermissionScope): void;
 }
 
 export interface IBusAuditLogger {

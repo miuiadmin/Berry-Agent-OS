@@ -116,7 +116,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // Permission judge state
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
   private pendingJudgeInputs = new Map<string, { sessionId: string; toolName: string }>();
-  private pendingUserConfirms = new Map<string, { agentIpc: any; agentName: string; replyId: string }>();
+  private pendingUserConfirms = new Map<string, { agentIpc: AgentIpc; agentName: string; replyId: string }>();
   private judgeTimestamps: number[] = [];
 
   constructor(deps: {
@@ -460,7 +460,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // §2.8 Apply PermissionScope if provided
     if (decision.scope && this.capabilityBusRef) {
-      const gate = this.capabilityBusRef.getPermissionGate() as any;
+      const gate = this.capabilityBusRef.getPermissionGate();
       if (gate?.setScope) {
         gate.setScope(pending.sessionId, { ...decision.scope, issuedAt: Date.now() });
       }
