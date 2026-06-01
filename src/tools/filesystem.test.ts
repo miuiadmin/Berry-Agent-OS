@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolve, join } from 'node:path';
+import { homedir } from 'node:os';
 
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),
@@ -76,7 +77,7 @@ describe('filesystem tools', () => {
       const result = await writeFileTool.execute({ path: 'out.txt', content: 'data' });
       expect(result.isError).toBeUndefined();
       expect(result.content).toContain('已写入');
-      expect(mockWriteFile).toHaveBeenCalledWith(resolve('out.txt'), 'data', 'utf-8');
+      expect(mockWriteFile).toHaveBeenCalledWith(resolve(homedir(), 'out.txt'), 'data', 'utf-8');
     });
 
     it('rejects paths outside boundary', async () => {
