@@ -185,7 +185,7 @@ function SettingsContent() {
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                   )}
                 >
-                  <Icon className="size-4 shrink-0" />
+                  <Icon className={cn("size-4 shrink-0 transition-transform duration-200", isActive && "scale-110")} />
                   <span className="hidden sm:inline md:inline">{tab.label}</span>
                   <span className="sm:hidden text-[11px]">{tab.label}</span>
                 </button>

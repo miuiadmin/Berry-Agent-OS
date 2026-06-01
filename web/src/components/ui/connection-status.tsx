@@ -16,10 +16,8 @@ export function ConnectionStatus() {
           status === "disconnected" && "bg-destructive"
         )}
       />
-      <span>
-        {status === "connected" && "Connected"}
-        {status === "connecting" && "Connecting..."}
-        {status === "disconnected" && "Disconnected"}
+      <span key={status} className="animate-fade-in">
+        {status === "connected" ? "Connected" : status === "connecting" ? "Connecting..." : "Disconnected"}
       </span>
     </div>
   );
