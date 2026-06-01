@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/dashboard-layout";
 import { useRealtimeEvents } from "./hooks/use-realtime-events";
 
@@ -29,6 +29,7 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/usage" element={<UsagePage />} />
           <Route path="/logs" element={<LogsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </Suspense>

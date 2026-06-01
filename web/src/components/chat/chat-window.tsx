@@ -363,10 +363,10 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setHistoryError(null);
     setLoadingHistory(true);
     const targetSession = sessionId;
-    loadedSessionRef.current = targetSession;
     apiGet<{ messages: Array<{ role: string; content: string; createdAt: string; thinkingSteps?: Array<{ text: string; ts: number }> }> }>(`/api/sessions/${targetSession}/state?limit=200`)
       .then((data) => {
         if (useChatStore.getState().sessionId !== targetSession) return;
+        loadedSessionRef.current = targetSession;
         if (!data?.messages?.length) return;
         for (const msg of data.messages) {
           addMessage({
@@ -380,7 +380,6 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         }
       })
       .catch((err) => {
-        loadedSessionRef.current = null;
         setHistoryError(err instanceof Error ? err.message : "Unknown error");
       })
       .finally(() => {

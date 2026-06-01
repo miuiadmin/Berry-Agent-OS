@@ -164,7 +164,7 @@ export const useChatStore = create<ChatState>()(
         }),
     }),
     {
-      name: "berry-chat",
+      name: "chat-storage",
       storage: createJSONStorage(() => {
         try { return localStorage; } catch { return sessionStorage; }
       }),
