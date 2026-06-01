@@ -1301,6 +1301,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         });
 
         if (result.requiresReview) {
+          // moderate-level: allow without Brain judge (personal assistant context)
+          if (dangerLevel !== 'dangerous') {
+            agentIpc.send('permission.result', agentName, { allowed: true, reason: 'auto-approved (moderate)' }, replyId);
+            return;
+          }
           const judgment = await this.requestJudgeInternal({
             sessionId,
             agentName,
