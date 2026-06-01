@@ -12,7 +12,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Bot, Power, PowerOff, ArrowLeft, Clock } from "lucide-react";
+import { Bot, Power, PowerOff, ArrowLeft, Clock, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function AgentsGridSkeleton() {
@@ -264,7 +264,7 @@ function AgentDetailView({
         </CardHeader>
         <CardContent>
           {recentTasks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No tasks found for this agent</p>
+            <EmptyState icon={ListTodo} title="No tasks found" description="Tasks for this agent will appear here" />
           ) : (
             <div className="space-y-2">
               {recentTasks.map((task: TaskInfo, i: number) => (
@@ -302,7 +302,7 @@ function AgentDetailView({
         </CardHeader>
         <CardContent>
           {events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No events yet — listening for changes...</p>
+            <EmptyState icon={Clock} title="No events yet" description="Listening for changes..." />
           ) : (
             <div className="space-y-1.5">
               {events.map((ev, i) => (

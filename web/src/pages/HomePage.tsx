@@ -317,15 +317,11 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             {events.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <Activity className="size-8 text-muted-foreground/30" />
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Listening for events...
-                </p>
-                <p className="text-xs text-muted-foreground/60">
-                  Activity will appear here in real-time
-                </p>
-              </div>
+              <EmptyState
+                icon={Activity}
+                title="Listening for events..."
+                description="Activity will appear here in real-time"
+              />
             ) : (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
                 {events.map((ev, i) => {
