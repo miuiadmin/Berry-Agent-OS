@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useChatStore, genMsgId,
   appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning, appendToolCall,
@@ -35,6 +36,7 @@ function toPermissionRequest(msg: Extract<ServerMessage, { type: "permission.con
 export function useChatSocket() {
   const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission } = useChatStore();
   const { connect, disconnect, send, onMessage, status } = useWsStore();
+  const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recoveredRef = useRef(false);
 
@@ -184,17 +186,12 @@ export function useChatSocket() {
     async (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
       addMessage({ id: genMsgId("user"), role: "user", content: text, timestamp: Date.now(), status: "complete", attachments });
 
-      // Quick model check — fail fast if nothing configured
-      try {
-        const res = await fetch("/api/providers/channels");
-        if (res.ok) {
-          const d = await res.json();
-          if (!d.channels?.some((ch: { configured?: boolean; modelCount?: number }) => ch.configured || (ch.modelCount ?? 0) > 0)) {
-            setLastError("模型尚未配置。请先在设置页面添加 API 密钥和模型配置。");
-            return;
-          }
-        }
-      } catch { /* proceed — timeout will catch */ }
+      // Quick model check — use cached React Query data instead of fetching every time
+      const cached = queryClient.getQueryData<{ channels?: Array<{ configured?: boolean; modelCount?: number }> }>(["providers", "channels"]);
+      if (cached?.channels && !cached.channels.some((ch) => ch.configured || (ch.modelCount ?? 0) > 0)) {
+        setLastError("模型尚未配置。请先在设置页面添加 API 密钥和模型配置。");
+        return;
+      }
 
       sendInternal(text, attachments);
     },
