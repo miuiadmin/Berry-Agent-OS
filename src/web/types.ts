@@ -21,6 +21,7 @@ export interface WebServerDependencies {
   permissionCoordinator: PermissionCoordinator;
   handleMessage: MessageHandler;
   handleInterrupt: (sessionId: string, reason: string | undefined, ws: WebSocket) => void;
+  resolvePermissionConfirm?: (requestId: string, approved: boolean, reason?: string) => boolean;
   startTimeMs: number;
   secret: string;
   schedulerService?: SchedulerService | null;

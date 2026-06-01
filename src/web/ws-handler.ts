@@ -133,6 +133,7 @@ function handleWsMessage(
         source: 'user',
         tokenVerdict: 'allow_once',
       });
+      deps.resolvePermissionConfirm?.(requestId, true);
       break;
     }
     case 'permissions.deny': {
@@ -143,6 +144,7 @@ function handleWsMessage(
         source: 'user',
         reason: typeof msg.reason === 'string' ? msg.reason : 'user denied via web dashboard',
       });
+      deps.resolvePermissionConfirm?.(requestId, false, typeof msg.reason === 'string' ? msg.reason : undefined);
       break;
     }
     case 'interrupt': {

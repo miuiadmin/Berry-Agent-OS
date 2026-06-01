@@ -550,6 +550,9 @@ export class CoreService {
             const result = this.messageRouter!.interruptSession(sessionId, reason);
             ws.send(JSON.stringify({ type: 'interrupted', sessionId, taskId: result.taskId ?? null }));
           },
+          resolvePermissionConfirm: (requestId, approved, reason) => {
+            return this.messageRouter!.resolveUserPermissionConfirm(requestId, approved, reason);
+          },
           startTimeMs: Date.now(),
           secret: this.config.web.secret,
           notificationService,
