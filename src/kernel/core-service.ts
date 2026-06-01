@@ -1,5 +1,5 @@
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { AgentManager } from './agent-manager.js';
@@ -7,17 +7,15 @@ import { AgentRegistry } from './agent-registry.js';
 import { EventBus, initEventBus, getEventBus } from './event-bus.js';
 import type { AppConfig } from '../config/schema.js';
 import type { LlmConfig } from '../llm/types.js';
-import { TaskManager } from './task-manager.js';
-import { TaskNotifier } from './task-notification.js';
-import { AgentProgress } from './agent-progress.js';
 import { initInfrastructure, initServices } from './bootstrap.js';
+import type { TaskManager } from './task-manager.js';
+import type { TaskNotifier } from './task-notification.js';
+import type { AgentProgress } from './agent-progress.js';
 import { TaskRouter } from './task-router.js';
 import { createCoreModuleRegistry, type ModuleRegistry } from './module-system.js';
 import { AgentLifecycle } from './agent-lifecycle.js';
 import { AgentWatcher } from './agent-watcher.js';
-import { ConfigService, type IConfigService } from '../config/index.js';
-import { createTaskWorkspace } from './task-workspace.js';
-import { getAgentHomePath } from './agent-home.js';
+import { ConfigService } from '../config/index.js';
 import { DelegationOrchestrator } from './delegation-orchestrator.js';
 import { WorkspaceRouter } from './workspace-router.js';
 import { SocketServer } from './socket-server.js';
@@ -29,9 +27,8 @@ import { MemoryRuntime } from '../memory/index.js';
 import { SkillService, SkillWatcher } from '../skills/index.js';
 import { PluginRuntime, PluginRuntimeV2 } from '../plugins/index.js';
 import { TakeoverController } from '../testing/model-takeover.js';
-import { ensureDirs, getSocketPath, getPidPath, getUserAgentsDir, getSkillsDir, getPluginsDir } from '../utils/paths.js';
+import { ensureDirs, getSocketPath, getPidPath, getUserAgentsDir, getSkillsDir } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
-import { genId } from '../utils/id.js';
 
 import type { LogLevel } from './observability.js';
 import { CronScheduler } from '../cron/index.js';
@@ -130,6 +127,7 @@ export class CoreService {
   private capabilityBus: import('../bus/capability-bus.js').CapabilityBus | null = null;
   private willLoop: import('./will-loop.js').WillLoop | null = null;
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
+  private suggestionCleanupTimer: ReturnType<typeof setInterval> | null = null;
   private providerRegistryHolder: { current: ProviderRegistry } | null = null;
 
   constructor() {
@@ -388,7 +386,7 @@ export class CoreService {
     this.messageRouter.setSuggestionQueue(suggestionQueue);
 
     // Schedule daily cleanup of old suggestions
-    setInterval(() => {
+    this.suggestionCleanupTimer = setInterval(() => {
       try {
         const cleaned = suggestionQueue.cleanup();
         if (cleaned > 0) logger.info({ cleaned }, 'Suggestion queue cleanup completed');
@@ -881,6 +879,10 @@ export class CoreService {
       clearInterval(this.insightsTimer);
       this.insightsTimer = null;
     }
+    if (this.suggestionCleanupTimer) {
+      clearInterval(this.suggestionCleanupTimer);
+      this.suggestionCleanupTimer = null;
+    }
     if (this.capabilityBus?.stopAllTriggers) {
       this.capabilityBus.stopAllTriggers();
       this.capabilityBus.stopIdleDetection();
@@ -956,7 +958,6 @@ export class CoreService {
 
     const pidPath = getPidPath();
     if (existsSync(pidPath)) {
-      const { unlinkSync } = await import('node:fs');
       unlinkSync(pidPath);
     }
 

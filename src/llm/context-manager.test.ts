@@ -40,7 +40,14 @@ describe('ContextManager', () => {
   });
 
   it('compresses old messages into a summary', async () => {
-    const cm = new ContextManager({ keepRecentMessages: 2 });
+    // Low maxTokenEstimate forces Phase 2 (LLM summarization)
+    // keepRecentTurns=1 → tailCount=2
+    const cm = new ContextManager({
+      keepRecentTurns: 1,
+      maxTokenEstimate: 10,
+      compressionThreshold: 0.1,
+      charsPerToken: 1,
+    });
     const llm = mockLlm('这是一段对话摘要');
 
     const messages: ModelMessage[] = [
@@ -48,22 +55,31 @@ describe('ContextManager', () => {
       { role: 'assistant', content: '回复1' },
       { role: 'user', content: '消息2' },
       { role: 'assistant', content: '回复2' },
+      { role: 'user', content: '消息3' },
+      { role: 'assistant', content: '回复3' },
       { role: 'user', content: '最近的消息' },
       { role: 'assistant', content: '最近的回复' },
     ];
 
     const compressed = await cm.compress(messages, llm);
 
-    expect(compressed.length).toBe(3); // 1 summary + 2 recent
-    expect(compressed[0].content).toContain('对话历史摘要');
-    expect(compressed[0].content).toContain('这是一段对话摘要');
-    expect(compressed[1].content).toBe('最近的消息');
-    expect(compressed[2].content).toBe('最近的回复');
+    // applyPhase2: 1 head + 2 summary + 2 tail = 5
+    expect(compressed.length).toBe(5);
+    // head: first message preserved
+    expect(compressed[0].content).toBe('消息1');
+    // summary pair injected by applyPhase2
+    expect(compressed[1].content).toContain('[context compacted]');
+    expect(compressed[1].content).toContain('这是一段对话摘要');
+    expect(compressed[2].content).toContain('[context compacted');
+    // tail: last turn preserved
+    expect(compressed[3].content).toBe('最近的消息');
+    expect(compressed[4].content).toBe('最近的回复');
     expect(llm.chat).toHaveBeenCalledOnce();
   });
 
-  it('returns messages as-is when count <= keepRecentMessages', async () => {
-    const cm = new ContextManager({ keepRecentMessages: 5 });
+  it('returns messages as-is when count <= tail threshold', async () => {
+    // keepRecentTurns=6 → tailCount=12, these 2 messages are well below
+    const cm = new ContextManager({ keepRecentTurns: 6 });
     const llm = mockLlm();
     const messages: ModelMessage[] = [
       { role: 'user', content: 'a' },
