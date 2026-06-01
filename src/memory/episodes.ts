@@ -1,5 +1,6 @@
 import { getDb } from './db.js';
 import { genId } from '../utils/id.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 
 export type EpisodeEventType = 'user_message' | 'assistant_response' | 'tool_call' | 'memory_extracted' | 'error';
 
@@ -36,7 +37,7 @@ function rowToEpisode(row: Record<string, unknown>): Episode {
     sessionId: row.session_id as string,
     eventType: row.event_type as EpisodeEventType,
     content: row.content as string,
-    metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+    metadata: row.metadata ? safeJsonParse<Record<string, unknown>>(row.metadata as string, {}) : undefined,
     createdAt: row.created_at as number,
   };
 }

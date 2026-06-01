@@ -3,6 +3,7 @@ import type { EventBus } from '../contracts/infrastructure.js';
 import type { ChainConfig, ChainStep, CronJobRow, CronExecutionRow } from './contracts.js';
 import type { TriggerDispatcher } from './trigger-dispatcher.js';
 import { genId } from '../utils/id.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('chain-executor');
@@ -60,7 +61,7 @@ export class ChainExecutor {
     const job = this.db.prepare('SELECT * FROM cron_jobs WHERE id = ?').get(execution.job_id) as CronJobRow | undefined;
     if (!job || !job.chain_config) return;
 
-    const config: ChainConfig = JSON.parse(job.chain_config);
+    const config: ChainConfig = safeJsonParse<ChainConfig>(job.chain_config, { steps: [] });
     const state = this.getState(execution);
 
     state.steps[stepId] = 'completed';
@@ -97,7 +98,7 @@ export class ChainExecutor {
     const job = this.db.prepare('SELECT * FROM cron_jobs WHERE id = ?').get(execution.job_id) as CronJobRow | undefined;
     if (!job || !job.chain_config) return;
 
-    const config: ChainConfig = JSON.parse(job.chain_config);
+    const config: ChainConfig = safeJsonParse<ChainConfig>(job.chain_config, { steps: [] });
     const state = this.getState(execution);
 
     if (state.steps[stepId] !== 'awaiting_approval') return;

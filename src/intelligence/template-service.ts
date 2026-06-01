@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 import type { ITemplateService, TeamTemplateRow, CreateTemplateInput, TemplateCategory } from './contracts.js';
 
 export class TemplateService implements ITemplateService {
@@ -89,8 +90,8 @@ export class TemplateService implements ITemplateService {
     const template = this.get(templateId);
     if (!template) throw new Error(`Template ${templateId} not found`);
 
-    const orgNodes = JSON.parse(template.org_structure) as Array<Record<string, unknown>>;
-    const agents = JSON.parse(template.agent_configs) as Array<Record<string, unknown>>;
+    const orgNodes = safeJsonParse<Array<Record<string, unknown>>>(template.org_structure, []);
+    const agents = safeJsonParse<Array<Record<string, unknown>>>(template.agent_configs, []);
     const now = Date.now();
 
     const insertOrg = this.db.prepare(`

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { IBusAuditLogger, BusAuditEntry } from './contract.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 
 export class BusAuditLogger implements IBusAuditLogger {
   private db: Database.Database;
@@ -94,9 +95,9 @@ function rowToEntry(row: Record<string, unknown>): BusAuditEntry {
     callerAgent: row.caller_agent as string | null,
     sessionId: row.session_id as string,
     correlationId: row.correlation_id as string,
-    callChain: JSON.parse(row.call_chain as string),
-    input: row.input_json ? JSON.parse(row.input_json as string) : null,
-    output: row.output_json ? JSON.parse(row.output_json as string) : null,
+    callChain: safeJsonParse<string[]>(row.call_chain as string, []),
+    input: row.input_json ? safeJsonParse<unknown>(row.input_json as string, null) : null,
+    output: row.output_json ? safeJsonParse<unknown>(row.output_json as string, null) : null,
     ok: row.ok === 1,
     error: row.error as string | null,
     durationMs: row.duration_ms as number,

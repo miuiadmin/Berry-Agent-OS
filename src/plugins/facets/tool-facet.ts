@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import type { PluginRecord } from '../../contracts/plugins-v2.js';
 import type { DangerLevel } from '../../utils/types.js';
+import { safeJsonParse } from '../../utils/safe-json.js';
 
 export interface RawToolDefinition {
   name: string;
@@ -47,7 +48,7 @@ export class ToolFacet {
           description: `[插件 ${plugin.name}] ${row.description as string}`,
           pluginName: plugin.name,
           toolName,
-          inputSchemaJson: row.input_schema ? JSON.parse(row.input_schema as string) : { type: 'object', properties: {} },
+          inputSchemaJson: row.input_schema ? safeJsonParse<Record<string, unknown>>(row.input_schema as string, { type: 'object', properties: {} }) : { type: 'object', properties: {} },
           dangerLevel,
         });
       }

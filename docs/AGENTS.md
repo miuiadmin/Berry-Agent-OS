@@ -234,14 +234,15 @@ llm:
 
 ## 测试
 
-- 单元测试用 `:memory:` SQLite
+三层测试架构：单元模块 → 1-to-1 → 真实测试（HTTP API）
+
+- 单元模块测试用 `:memory:` SQLite
 - Mock LLM API 用 `vitest.mock()`
 - 每个模块必须有 contract test；跨模块测试只能依赖公开 contract，不读取内部实现。
 - CI 必须运行 import 边界检查，禁止跨模块 import 内部文件。
-- 技能验证测试用 `tests/fixtures/` 中的样本
-- E2E 测试必须使用临时 `dataDir` / `socket`，不能读写 `~/.berry`
+- 1-to-1 测试验证单模块与真实依赖的协作，LLM 用 mock/takeover
 - 测试必须捕获完整 stdout/stderr/console_frames，并在失败时输出 `run_id` 和 artifact 路径
-- LLM API 必须支持 `live` / `mock` / `replay` / `takeover` 四种模式；自动化测试默认不调用真实模型 API
+- LLM API 必须支持 `live` / `mock` / `replay` / `takeover` 四种模式；1-to-1 测试不调用真实模型 API
 - `takeover` 是 LLM 接管模式：外部编码 Agent 或 CI 通过 `berry test requests --json` 获取模型请求，再用 `berry test respond <request_id>` 提供模型响应
 - 所有 Agent 的模型调用都必须经过 `src/llm/` 统一 LLM API，禁止在 Agent/Skill/Plugin 模块里直接调用模型 API
 - takeover 必须覆盖 Conversation、Brain、Learning、Skills、Plugin Builder、Code 的完整多 Agent 流程
@@ -249,7 +250,9 @@ llm:
 - replay/takeover fixture 必须支持 `expect` 校验，覆盖 agent、purpose、promptHash、toolNames、hasToolResultFor 等关键字段
 - 测试 harness 必须使用 hermetic environment：临时 `BERRY_HOME`、清理 credential env、固定 TZ/LANG/seed/clock，禁止读取真实用户配置
 - `berry test mock-server` 只用于测试 LLM API HTTP/SSE/错误码兼容性，不能替代 takeover 主流程
-- E2E 必须断言状态链路：`conversations`、`tool_calls`、`review_requests`、`model_requests`、pending 清空
+- 1-to-1 测试必须断言状态链路：`conversations`、`tool_calls`、`review_requests`、`model_requests`、pending 清空
+- **真实测试必须通过 HTTP CRUD API 交互**（像前端一样调用 `/api/conversations` 等端点），禁止使用 TestHarness 内部方法
+- 真实测试使用真实模型 API，验证从 HTTP 请求到响应的完整链路
 - 后台任务必须可关闭或等待空闲：`--no-background` / `berry test wait-idle`
 - 权限确认必须支持非交互模式：`--non-interactive` / `--permission-mode deny-all|allow-all|ask`
 - 自动化测试优先断言 `--json` 输出，不断言人类可读文本
