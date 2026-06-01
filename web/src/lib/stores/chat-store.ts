@@ -72,6 +72,7 @@ interface ChatState {
   currentTaskId: string | null;
   pendingDelegation: DelegationRequest | null;
   pendingPermission: PermissionConfirmRequest | null;
+  permissionMode: 'ask' | 'allow-all' | 'deny-all';
 
   setSessionId: (id: string | null) => void;
   addMessage: (msg: ChatMessage) => void;
@@ -84,6 +85,7 @@ interface ChatState {
   removeMessagesAfter: (id: string) => void;
   setPendingDelegation: (req: DelegationRequest | null) => void;
   setPendingPermission: (req: PermissionConfirmRequest | null) => void;
+  setPermissionMode: (mode: 'ask' | 'allow-all' | 'deny-all') => void;
   restoreSession: (messages: ChatMessage[], activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[] }) => void;
 }
 
@@ -96,6 +98,7 @@ export const useChatStore = create<ChatState>()(
       currentTaskId: null,
       pendingDelegation: null,
       pendingPermission: null,
+      permissionMode: 'ask',
 
       setSessionId: (id) => set({ sessionId: id }),
 
@@ -131,6 +134,7 @@ export const useChatStore = create<ChatState>()(
 
       setPendingDelegation: (req) => set({ pendingDelegation: req }),
       setPendingPermission: (req) => set({ pendingPermission: req }),
+      setPermissionMode: (mode) => set({ permissionMode: mode }),
 
       restoreSession: (messages, activeTask) =>
         set((s) => {

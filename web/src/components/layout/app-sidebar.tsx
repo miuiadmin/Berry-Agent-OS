@@ -6,6 +6,7 @@ import {
   ListTodo,
   MessagesSquare,
   BarChart3,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -18,6 +19,7 @@ const navItems = [
   { href: "/tasks", label: "Tasks", icon: ListTodo },
   { href: "/conversations", label: "Conversations", icon: MessagesSquare },
   { href: "/usage", label: "Usage", icon: BarChart3 },
+  { href: "/logs", label: "Logs", icon: ScrollText },
 ];
 
 interface AppSidebarProps {

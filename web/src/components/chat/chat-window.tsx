@@ -190,6 +190,23 @@ function useModelConfig() {
   return { currentModel, channels, allModels, switchModel };
 }
 
+function PermissionModeSelector() {
+  const mode = useChatStore((s) => s.permissionMode);
+  const setMode = useChatStore((s) => s.setPermissionMode);
+  return (
+    <select
+      value={mode}
+      onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all')}
+      className="h-7 rounded-md border border-input bg-background px-1.5 text-[11px] text-muted-foreground"
+      title="Permission mode"
+    >
+      <option value="ask">Ask</option>
+      <option value="allow-all">Auto</option>
+      <option value="deny-all">Deny</option>
+    </select>
+  );
+}
+
 function ModelSelector() {
   const { currentModel, channels, allModels, switchModel } = useModelConfig();
   const [open, setOpen] = useState(false);
@@ -471,6 +488,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
           </h3>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <PermissionModeSelector />
           <ModelSelector />
           <ConnectionStatus />
         </div>

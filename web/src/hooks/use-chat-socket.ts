@@ -173,7 +173,7 @@ export function useChatSocket() {
     setStreaming(true);
     resetTimer();
     try {
-      send({ type: "message", text, sessionId, attachments });
+      send({ type: "message", text, sessionId, attachments, permissionMode: useChatStore.getState().permissionMode });
     } catch {
       setLastError("Failed to send message");
       clearTimer();

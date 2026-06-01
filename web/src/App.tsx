@@ -11,6 +11,7 @@ const TasksPage = lazy(() => import("./pages/TasksPage"));
 const ConversationsPage = lazy(() => import("./pages/ConversationsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
+const LogsPage = lazy(() => import("./pages/LogsPage"));
 
 export default function App() {
   // Subscribe to WS events for automatic query invalidation
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/usage" element={<UsagePage />} />
+          <Route path="/logs" element={<LogsPage />} />
         </Route>
       </Routes>
     </Suspense>

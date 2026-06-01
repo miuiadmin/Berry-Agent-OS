@@ -117,9 +117,10 @@ function handleWsMessage(
       }
       const attachments = Array.isArray(msg.attachments) ? msg.attachments : undefined;
       const effectiveSessionId = requireString(msg, 'sessionId') || sessionId;
+      const permissionMode = requireString(msg, 'permissionMode') || 'ask';
       const bridge = new WebSocketBridge(ws);
       deps.handleMessage(
-        { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode: 'ask', attachments },
+        { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode, attachments },
         bridge as unknown as Socket,
       );
       break;

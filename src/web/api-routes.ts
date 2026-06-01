@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLogger, resolveEffectiveLevel } from '../utils/logger.js';
@@ -352,12 +352,13 @@ export function createApiRouter(deps: WebServerDependencies) {
     const dailyRows = db.prepare(`
       SELECT CAST((created_at / ${MS_PER_DAY}) AS INTEGER) as day_bucket,
         COALESCE(SUM(input_tokens),0) as input_tokens, COALESCE(SUM(output_tokens),0) as output_tokens,
-        COALESCE(SUM(input_tokens + output_tokens),0) as total_tokens, COALESCE(SUM(cost_usd),0) as cost_usd
+        COALESCE(SUM(input_tokens + output_tokens),0) as total_tokens, COALESCE(SUM(cost_usd),0) as cost_usd,
+        COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens, COALESCE(SUM(cache_creation_tokens),0) as cache_creation_tokens
       FROM token_usage WHERE created_at >= ?
       GROUP BY day_bucket ORDER BY day_bucket ASC
-    `).all(periodStart) as { day_bucket: number; input_tokens: number; output_tokens: number; total_tokens: number; cost_usd: number }[];
+    `).all(periodStart) as { day_bucket: number; input_tokens: number; output_tokens: number; total_tokens: number; cost_usd: number; cache_read_tokens: number; cache_creation_tokens: number }[];
 
-    const daily: { date: string; inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number }[] = [];
+    const daily: { date: string; inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; cacheReadTokens: number; cacheCreationTokens: number }[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const dayMs = now - i * MS_PER_DAY;
       const bucket = Math.floor(dayMs / MS_PER_DAY);
@@ -368,6 +369,8 @@ export function createApiRouter(deps: WebServerDependencies) {
         outputTokens: row?.output_tokens ?? 0,
         totalTokens: row?.total_tokens ?? 0,
         costUsd: row?.cost_usd ?? 0,
+        cacheReadTokens: row?.cache_read_tokens ?? 0,
+        cacheCreationTokens: row?.cache_creation_tokens ?? 0,
       });
     }
 
@@ -480,6 +483,33 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Debug capture routes ---
   registerCaptureRoutes(route, json);
+
+  // --- Logs viewer ---
+  route('GET', '/logs', (_req, res, url) => {
+    const count = safeInt(url.searchParams.get('lines'), 100, 10, 1000);
+    const level = url.searchParams.get('level') ?? undefined;
+    const module = url.searchParams.get('module') ?? undefined;
+    const logFile = join(getAppHome(), 'logs', 'berry.log');
+
+    if (!existsSync(logFile)) { json(res, { lines: [], total: 0 }); return; }
+
+    const content = readFileSync(logFile, 'utf-8');
+    const rawLines = content.split('\n').filter(Boolean).slice(-count * 3);
+    const levelMap: Record<string, number> = { error: 50, warn: 40, info: 30, debug: 20 };
+    const minLevel = level && level !== 'ALL' ? (levelMap[level.toLowerCase()] ?? 0) : 0;
+
+    const parsed: unknown[] = [];
+    for (const line of rawLines) {
+      try {
+        const obj = JSON.parse(line);
+        if (typeof obj.level === 'number' && obj.level < minLevel) continue;
+        if (module && obj.module !== module) continue;
+        parsed.push(obj);
+      } catch { /* skip */ }
+    }
+    const result = parsed.slice(-count);
+    json(res, { lines: result, total: result.length });
+  });
 
   return function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): void {
     const method = req.method ?? 'GET';

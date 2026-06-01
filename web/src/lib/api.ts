@@ -112,6 +112,8 @@ export interface UsageDaySummary {
 
 export interface UsageDailyPoint extends UsageDaySummary {
   date: string;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
 }
 
 export interface UsageSummary {
