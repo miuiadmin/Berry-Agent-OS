@@ -92,7 +92,7 @@ export default function AgentsPage() {
             <>
               <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {agents.map((agent, i) => (
-                  <Card key={agent.name} className={`cursor-pointer card-lift hover:border-ring/50 transition-all stagger-${Math.min(i + 1, 8)}`} onClick={() => setSelectedAgent(agent.name)}>
+                  <Card key={agent.name} className={`cursor-pointer card-lift hover:border-ring/50 active:border-ring/30 transition-all stagger-${Math.min(i + 1, 8)}`} onClick={() => setSelectedAgent(agent.name)}>
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">

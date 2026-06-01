@@ -157,7 +157,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                   <button onClick={submitRename} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
                     <Check className="size-3" />
                   </button>
-                  <button onClick={() => setEditingId(null)} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground">
+                  <button onClick={() => setEditingId(null)} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
                     <X className="size-3" />
                   </button>
                 </div>

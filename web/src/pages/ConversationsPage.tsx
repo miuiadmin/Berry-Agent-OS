@@ -165,7 +165,7 @@ export default function ConversationsPage() {
                 <div
                   key={conv.sessionId}
                   className={cn(
-                    "flex items-center justify-between rounded-xl border border-border px-4 py-3 cursor-pointer hover:border-foreground/20 active:scale-[0.99] transition-all conv-item",
+                    "flex items-center justify-between rounded-xl border border-border px-4 py-3 cursor-pointer hover:border-foreground/20 active:border-foreground/10 active:scale-[0.99] transition-all conv-item",
                     `stagger-${Math.min(i + 1, 8)}`,
                   )}
                   onClick={() => handleOpenChat(conv.sessionId)}

@@ -211,7 +211,7 @@ function TaskRow({
     <>
       <tr
         className={cn(
-          "border-b border-border cursor-pointer hover:bg-muted/30 transition-colors",
+          "border-b border-border cursor-pointer hover:bg-muted/30 active:bg-muted/40 transition-colors",
           expanded && "bg-muted/20"
         )}
         onClick={onToggle}
