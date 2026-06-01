@@ -56,8 +56,8 @@ Backend Adapter（Anthropic / TestBackend / IpcTakeover）
 
 | 模式 | 用途 | 行为 |
 |------|------|------|
-| `live` | 生产/Smoke 测试 | 真实调用模型 API |
-| `mock` | 单元/集成测试 | 预设响应队列，耗尽返回空 |
+| `live` | 生产/真实测试 | 真实调用模型 API |
+| `mock` | 单元模块/1-to-1 测试 | 预设响应队列，耗尽返回空 |
 | `replay` | 确定性回放 | 预设响应，耗尽抛错 |
 | `takeover` | 外部接管 | 请求排队等待外部响应 |
 

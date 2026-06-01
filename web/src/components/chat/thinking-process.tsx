@@ -26,7 +26,6 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
 
   const end = isLast && isActive ? now : (nextStep?.ts ?? step.ts);
   const elapsed = end - step.ts;
-  if (elapsed < 50) return null;
 
   return (
     <span className="ml-auto pl-2 text-[11px] tabular-nums text-muted-foreground/50 shrink-0">

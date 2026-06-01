@@ -3,6 +3,7 @@ import { ensureAgentHome } from './agent-home.js';
 import type { IpcMessage } from './types.js';
 import type { AgentName } from '../contracts/agents.js';
 import type { AppConfig } from '../config/schema.js';
+import { FAST_POLL_MS } from '../lib/time-constants.js';
 import { getLogger } from '../utils/logger.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { EventBus } from './event-bus.js';
@@ -189,7 +190,7 @@ export class AgentManager {
       if (agent?.status === 'crashed' || agent?.status === 'circuit_broken') {
         throw new AgentUnavailableError(`智能体启动失败: ${name}`, name);
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, FAST_POLL_MS));
     }
     throw new TimeoutError(`等待智能体就绪超时: ${name}`, name);
   }

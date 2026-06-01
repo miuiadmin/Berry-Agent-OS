@@ -3,6 +3,7 @@ import { SocketClient } from './socket-client.js';
 import { ExecutorPool, type PoolTask } from './executor-pool.js';
 import { discoverRuntimes } from './runtime-discovery.js';
 import { getLogger } from '../utils/logger.js';
+import { POLL_INTERVAL_MS, LONG_DRAIN_TIMEOUT_MS } from '../lib/time-constants.js';
 import type { DaemonConfig } from './config.js';
 import type {
   DaemonRegisterMessage,
@@ -77,11 +78,11 @@ export class DaemonProcess {
     const waitForDrain = new Promise<void>(resolve => {
       const check = () => {
         if (!this.pool || this.pool.runningCount === 0) { resolve(); return; }
-        setTimeout(check, 200);
+        setTimeout(check, POLL_INTERVAL_MS);
       };
       check();
     });
-    const timeout = new Promise<void>(resolve => setTimeout(resolve, 6000));
+    const timeout = new Promise<void>(resolve => setTimeout(resolve, LONG_DRAIN_TIMEOUT_MS));
     await Promise.race([waitForDrain, timeout]);
 
     this.client.destroy();

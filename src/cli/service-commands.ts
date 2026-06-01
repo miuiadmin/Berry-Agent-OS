@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import type { Command } from 'commander';
 import { getAppHome, getPidPath, getSocketPath, getWatchdogPidPath, getWatchdogStatePath, setAppHome } from '../utils/paths.js';
+import { POLL_INTERVAL_MS, DRAIN_TIMEOUT_MS } from '../lib/time-constants.js';
 import { getConsoleRenderer } from '../observability/console.js';
 
 export function registerServiceCommands(program: Command): void {
@@ -151,11 +152,11 @@ export function registerServiceCommands(program: Command): void {
           renderer.info(`正在停止看护进程 (PID: ${wPid})...`);
           // 验证进程实际退出
           let waited = 0;
-          while (waited < 10000) {
+          while (waited < 10_000) {
             try {
               process.kill(wPid, 0);
-              await new Promise(r => setTimeout(r, 200));
-              waited += 200;
+              await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+              waited += POLL_INTERVAL_MS;
             } catch {
               renderer.info('服务已停止');
               return;
@@ -180,7 +181,7 @@ export function registerServiceCommands(program: Command): void {
       try {
         process.kill(pid, 'SIGTERM');
         renderer.info(`正在停止 Berry 服务 (PID: ${pid})...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, DRAIN_TIMEOUT_MS));
         renderer.info('Berry 服务已停止');
       } catch {
         renderer.info('Berry 服务未在运行（PID 文件已过期）');

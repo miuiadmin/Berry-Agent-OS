@@ -3,6 +3,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
+import { MCP_RESTART_DELAY_MS } from '../lib/time-constants.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { McpServerConfig } from './contract.js';
 import { buildSafeEnv } from './security.js';
@@ -95,7 +96,7 @@ export class ProcessManager {
         killProcessSafely(p, 'SIGTERM');
       }
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, MCP_RESTART_DELAY_MS));
 
       for (const p of allPids) {
         if (checkAlive(p)) {

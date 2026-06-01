@@ -3,6 +3,7 @@ import { existsSync, unlinkSync } from 'node:fs';
 import type { SocketRequestType } from '../contracts/socket-protocol.js';
 import type { MessageBus } from './message-bus.js';
 import type { SocketMessageType, MessageContext } from '../contracts/messages.js';
+import { DRAIN_TIMEOUT_MS } from '../lib/time-constants.js';
 import type { Transport, TransportConnection } from './transport.js';
 import { createHandshakeResponse } from './protocol-version.js';
 import { authenticateConnection, type AuthConfig, type ConnectionAuthState, DEFAULT_AUTH_CONFIG } from './auth-middleware.js';
@@ -93,7 +94,7 @@ export class SocketServer implements Transport {
       if (!socket.destroyed && socket.writableLength > 0) {
         drainPromises.push(new Promise((resolve) => {
           socket.once('drain', resolve);
-          setTimeout(resolve, 2000);
+          setTimeout(resolve, DRAIN_TIMEOUT_MS);
         }));
       }
     }
