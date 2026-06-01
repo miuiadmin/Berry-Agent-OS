@@ -6,6 +6,7 @@ export type LifecycleEventType =
   | 'context.compressing'
   | 'session.ending'
   | 'agent.task_completed'
+  | 'agent.idle'
   | 'permission.denied'
   | 'capability.registered'
   | 'capability.unregistered';

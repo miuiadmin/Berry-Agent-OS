@@ -226,6 +226,14 @@ export class CoreService {
         db: getDb(),
         eventBus: this.eventBus,
         pluginsDir: this.config.plugins.pluginsDir || getPluginsDir(),
+        onPendingReview: (plugin) => {
+          this.messageRouter?.dispatchModuleTask({
+            sessionId: 'plugin_review',
+            taskType: 'plugin_review',
+            requester: 'plugin_runtime',
+            inputPayload: { taskType: 'plugin_review', pluginId: plugin.id, pluginName: plugin.name, manifest: plugin },
+          }).catch((e) => { logger.debug({ err: e, plugin: plugin.name }, 'Plugin review dispatch failed'); });
+        },
       });
       const enabledPlugins = registryV2.list({ status: 'enabled' });
       await this.pluginRuntimeV2.initialize(enabledPlugins);
@@ -374,7 +382,7 @@ export class CoreService {
 
     this.capabilityBus = capabilityBus;
     this.messageRouter.setCapabilityBus(capabilityBus);
-
+    capabilityBus.startIdleDetection();
     // Transaction Manager: atomic multi-step operations with revert (§2.1)
     const { TransactionManager } = await import('../bus/transaction.js');
     const transactionManager = new TransactionManager(capabilityBus);
@@ -470,6 +478,9 @@ export class CoreService {
     });
     capabilityBus.on('permission.denied', (data) => {
       lifecycleManager.emit('permission.denied', data);
+    });
+    capabilityBus.on('agent.idle', (data) => {
+      lifecycleManager.emit('agent.idle', data);
     });
     this.eventBus.on('agent.crashed', () => {
       lifecycleManager.emit('agent.task_completed', { status: 'crashed' });
@@ -928,6 +939,7 @@ export class CoreService {
     }
     if (this.capabilityBus?.stopAllTriggers) {
       this.capabilityBus.stopAllTriggers();
+      this.capabilityBus.stopIdleDetection();
     }
 
     if (this.terminalRenderer) {

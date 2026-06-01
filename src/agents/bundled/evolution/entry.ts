@@ -19,6 +19,8 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
       return await handleAnalyzeMetrics(payload, context, db);
     case 'produce_insight':
       return await handleProduceInsight(payload, context, db);
+    case 'plugin_review':
+      return await handlePluginReview(payload, context, db);
     default:
       return { kind: taskType, error: `Unknown evolution task type: ${taskType}` };
   }
@@ -236,4 +238,49 @@ function resolveLatestDecisionId(db: import('better-sqlite3').Database, sessionI
     ).get(sessionId) as { id: string } | undefined;
     return row?.id ?? null;
   } catch { return null; }
+}
+
+async function handlePluginReview(
+  payload: AgentTaskPayload,
+  context: { llm: import('../../../llm/client.js').LlmClient },
+  db: import('better-sqlite3').Database,
+): Promise<Record<string, unknown>> {
+  const { pluginId, pluginName, manifest } = payload.inputPayload as {
+    pluginId: string;
+    pluginName: string;
+    manifest: Record<string, unknown>;
+  };
+
+  const prompt = `审核新插件是否应该启用。输出 JSON: {"approved": true/false, "reason": "原因", "risk": "low"|"medium"|"high"}
+
+插件名: ${pluginName}
+ID: ${pluginId}
+功能: ${manifest.description ?? '无描述'}
+工具: ${manifest.hasTools ? '有' : '无'}
+代码: ${manifest.hasCode ? '有' : '无'}
+服务: ${manifest.hasService ? '有' : '无'}
+
+规则:
+- 无代码且无服务的纯提示插件 → 低风险，通常批准
+- 有代码执行能力 → 中风险，检查是否有破坏性操作
+- 有后台服务 → 高风险，需要更严格审查
+- 如果不确定 → 拒绝并说明原因`;
+
+  const result = await context.llm.chat(
+    [{ role: 'user', content: prompt }],
+    { agent: 'evolution', purpose: 'plugin_review', sessionId: payload.sessionId, taskId: payload.taskId, maxTokens: 256, temperature: 0.1 },
+  );
+
+  try {
+    const match = result.content.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON in LLM response');
+    const review = JSON.parse(match[0]);
+    const status = review.approved ? 'enabled' : 'failed';
+    db.prepare('UPDATE plugins_meta SET status = ?, updated_at = ? WHERE id = ?').run(status, Date.now(), pluginId);
+    return { kind: 'plugin_review', pluginName, approved: review.approved, reason: review.reason, risk: review.risk };
+  } catch (err) {
+    const { getLogger } = await import('../../../utils/logger.js');
+    getLogger('evolution').debug({ err, pluginName, raw: result.content.slice(0, 200) }, 'plugin review parse failed');
+    return { kind: 'plugin_review', pluginName, approved: false, reason: 'Review parse failed' };
+  }
 }

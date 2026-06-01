@@ -86,7 +86,25 @@ export function buildRoutingSystemPrompt(): string {
 
 - 当不确定时，默认路由到 conversation
 - 对于 conversation 路由，可以在 instruction 中提示上下文（如"用户在追问上一轮的代码问题"）
-- 如果是 multi 意图，需要提供 subDispatches 数组`;
+- 如果是 multi 意图，需要提供 subDispatches 数组
+
+## 范围授权（scope）
+
+当任务明确且需要多次工具调用时，可以在决策中添加 scope 字段来预授权一组操作，减少逐次审批：
+
+  "scope": {
+    "capabilities": ["read_file", "list_directory", "run_command"],
+    "constraints": {
+      "maxDangerLevel": "moderate",
+      "maxInvocations": 10,
+      "ttlMs": 300000
+    }
+  }
+
+- 仅对 code/skill_test/external 等需要多步操作的意图签发 scope
+- 日常 chat 不需要 scope
+- dangerous 工具不应包含在 scope 中
+- 不确定时不签发 scope（系统会逐次审批）`;
 }
 
 export function buildRoutingUserPrompt(

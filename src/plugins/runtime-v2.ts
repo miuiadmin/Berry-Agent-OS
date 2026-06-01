@@ -29,6 +29,7 @@ export interface PluginRuntimeV2Deps {
   eventBus?: EventBus;
   pluginsDir: string;
   allowedHosts?: string[];
+  onPendingReview?: (plugin: PluginRecord) => void;
 }
 
 export class PluginRuntimeV2 implements IPluginRuntimeV2 {
@@ -40,6 +41,7 @@ export class PluginRuntimeV2 implements IPluginRuntimeV2 {
   private readonly hookOrchestrator: HookOrchestrator;
   private readonly codeFacet: CodeFacet;
   private readonly serviceFacet: ServiceFacet;
+  private readonly onPendingReview?: (plugin: PluginRecord) => void;
   private readonly executor: IsolatedPluginExecutor;
   private plugins: PluginRecord[] = [];
 
@@ -65,6 +67,7 @@ export class PluginRuntimeV2 implements IPluginRuntimeV2 {
         try { this.registry.updateStatus(pluginId, 'quarantined'); } catch { /* already quarantined */ }
       },
     });
+    this.onPendingReview = deps.onPendingReview;
   }
 
   async initialize(plugins: PluginRecord[]): Promise<void> {
@@ -84,6 +87,15 @@ export class PluginRuntimeV2 implements IPluginRuntimeV2 {
     }
 
     logger.info({ count: plugins.length }, 'Plugin runtime v2 initialized');
+    this.triggerPendingReviews();
+  }
+
+  private triggerPendingReviews(): void {
+    if (!this.onPendingReview) return;
+    const pending = this.registry.list({ status: 'pending_review' as any });
+    for (const plugin of pending) {
+      this.onPendingReview(plugin);
+    }
   }
 
   async reload(): Promise<void> {

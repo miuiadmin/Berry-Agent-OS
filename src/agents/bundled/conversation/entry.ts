@@ -61,9 +61,17 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   }
 
   const sessionHistories = new Map<string, ModelMessage[]>();
-  const pendingDrafts = new Map<string, { sessionId: string; draft: string; toolCalls: ToolCallRecord[] }>();
+  const pendingDrafts = new Map<string, { sessionId: string; draft: string; toolCalls: ToolCallRecord[]; createdAt: number }>();
   const tools = toModelTools(getToolRegistry());
   const contextManager = new ContextManager();
+
+  const DRAFT_TTL_MS = 5 * 60_000;
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, entry] of pendingDrafts) {
+      if (now - entry.createdAt > DRAFT_TTL_MS) pendingDrafts.delete(id);
+    }
+  }, 60_000);
 
   ipc.onMessage('plugins.register_tools', (msg: IpcMessage) => {
     const pluginToolDefs = msg.payload as Array<{
@@ -247,7 +255,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         }
       }
 
-      pendingDrafts.set(trackingId, { sessionId, draft, toolCalls: result.toolCalls });
+      pendingDrafts.set(trackingId, { sessionId, draft, toolCalls: result.toolCalls, createdAt: Date.now() });
 
       ipc.send('draft.response', 'core', {
         sessionId,

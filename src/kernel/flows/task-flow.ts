@@ -1,0 +1,190 @@
+import type { IpcMessage, IpcMessageType } from '../types.js';
+import type { DelegationManager } from '../delegation-manager.js';
+import type { SessionManager, PendingRequest } from '../session-manager.js';
+import type { AgentProgress } from '../agent-progress.js';
+import type { TaskManager } from '../task-manager.js';
+import type {
+  TaskAcknowledgePayload,
+  TaskStartedPayload,
+  TaskProgressPayload,
+  TaskTelemetryPayload,
+  AgentTaskResultPayload,
+} from '../../contracts/tasks.js';
+import type { AgentAskUserPayload } from '../../contracts/routing.js';
+import type { AgentManager } from '../agent-manager.js';
+import type { AgentRegistry } from '../agent-registry.js';
+import type { SocketTextDeltaEvent } from '../../contracts/socket-protocol.js';
+import { getEventBus } from '../event-bus.js';
+
+interface AgentIpc {
+  onMessage: (type: IpcMessageType, handler: (msg: IpcMessage) => void) => void;
+  send: (type: IpcMessageType, to: string, payload: unknown, correlationId?: string) => boolean;
+}
+
+export interface TaskFlowDeps {
+  taskManager: TaskManager;
+  delegationManager: DelegationManager;
+  sessionManager: SessionManager;
+  agentProgress: AgentProgress | null;
+  registry: AgentRegistry;
+  agentManager: AgentManager;
+}
+
+export function setupTaskProgressHandler(agentIpc: AgentIpc, agentName: string, deps: TaskFlowDeps): void {
+  agentIpc.onMessage('task.progress', (msg: IpcMessage) => {
+    const { taskId, summary } = msg.payload as TaskProgressPayload;
+    const task = taskId ? deps.taskManager.getTask(taskId) : undefined;
+    if (task && deps.agentProgress) {
+      deps.agentProgress.report({
+        taskId,
+        sessionId: task.session_id,
+        source: msg.from,
+        message: summary,
+        payload: { from: msg.from },
+      });
+    }
+  });
+}
+
+export function setupTaskAcknowledgeHandlers(agentIpc: AgentIpc, deps: TaskFlowDeps): void {
+  agentIpc.onMessage('task.acknowledge', (msg: IpcMessage) => {
+    const { taskId } = msg.payload as TaskAcknowledgePayload;
+    if (taskId) deps.delegationManager.acknowledge(taskId);
+  });
+
+  agentIpc.onMessage('task.started', (msg: IpcMessage) => {
+    const { taskId } = msg.payload as TaskStartedPayload;
+    if (taskId) deps.delegationManager.acknowledge(taskId);
+  });
+}
+
+export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps): void {
+  agentIpc.onMessage('task.telemetry', (msg: IpcMessage) => {
+    const payload = msg.payload as TaskTelemetryPayload;
+    switch (payload.kind) {
+      case 'text_delta': {
+        if (!payload.taskId) return;
+        let pending: PendingRequest | null | undefined;
+        const entry = deps.delegationManager.get(payload.taskId);
+        if (entry) {
+          deps.delegationManager.recordOutput(payload.taskId, { delegationId: payload.taskId, kind: 'text_delta', data: { text: payload.text } });
+          pending = deps.sessionManager.getPending(entry.correlationId);
+        } else {
+          pending = deps.sessionManager.findPendingByTaskId(payload.taskId);
+        }
+        if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+          pending.socket.write(JSON.stringify(evt) + '\n');
+          break;
+        }
+        const fallbackSocket = deps.sessionManager.getSocketForTask(payload.taskId);
+        if (fallbackSocket && !fallbackSocket.destroyed) {
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+          fallbackSocket.write(JSON.stringify(evt) + '\n');
+        }
+        break;
+      }
+      case 'reasoning_delta': {
+        if (!payload.taskId) return;
+        const rEntry = deps.delegationManager.get(payload.taskId);
+        const rPending = rEntry
+          ? deps.sessionManager.getPending(rEntry.correlationId)
+          : deps.sessionManager.findPendingByTaskId(payload.taskId);
+        const sock = rPending?.streaming && rPending.socket && !rPending.socket.destroyed
+          ? rPending.socket
+          : deps.sessionManager.getSocketForTask(payload.taskId);
+        if (sock && !sock.destroyed) {
+          sock.write(JSON.stringify({ type: 'reasoning_delta', text: payload.text, taskId: payload.taskId }) + '\n');
+        }
+        break;
+      }
+      case 'llm_completed': {
+        if (payload.taskId) {
+          const entry = deps.delegationManager.get(payload.taskId);
+          if (entry) {
+            deps.delegationManager.recordOutput(payload.taskId, {
+              delegationId: payload.taskId,
+              kind: 'usage',
+              data: { inputTokens: payload.inputTokens, outputTokens: payload.outputTokens },
+            });
+          }
+        }
+        getEventBus().emit('llm.request.completed', {
+          taskId: payload.taskId,
+          agentName: payload.agentName,
+          inputTokens: payload.inputTokens,
+          outputTokens: payload.outputTokens,
+          cacheRead: payload.cacheRead,
+          cacheCreation: payload.cacheCreation,
+          durationMs: payload.durationMs,
+        });
+        break;
+      }
+      case 'tool_result': {
+        if (!payload.taskId) return;
+        const entry = deps.delegationManager.get(payload.taskId);
+        if (!entry) return;
+        deps.delegationManager.recordOutput(payload.taskId, {
+          delegationId: payload.taskId,
+          kind: payload.isError ? 'tool_error' : 'tool_result',
+          data: { toolName: payload.toolName },
+        });
+        break;
+      }
+      case 'tool_call': {
+        if (!payload.taskId) return;
+        const entry = deps.delegationManager.get(payload.taskId);
+        let pending: PendingRequest | null | undefined;
+        if (entry) {
+          pending = deps.sessionManager.getPending(entry.correlationId);
+        } else {
+          pending = deps.sessionManager.findPendingByTaskId(payload.taskId);
+        }
+        const socket = pending?.socket ?? deps.sessionManager.getSocketForTask(payload.taskId);
+        if (socket && !socket.destroyed) {
+          const evt = { type: 'tool_call', toolName: payload.toolName, input: payload.input, result: payload.result, isError: payload.isError, durationMs: payload.durationMs, taskId: payload.taskId };
+          socket.write(JSON.stringify(evt) + '\n');
+        }
+        break;
+      }
+      case 'uncertainty': {
+        if (!payload.taskId) return;
+        const entry = deps.delegationManager.get(payload.taskId);
+        if (!entry) return;
+        deps.delegationManager.reportUncertainty(payload.taskId, payload.reason);
+        break;
+      }
+    }
+  });
+}
+
+export function setupModuleTaskResultHandler(
+  agentIpc: AgentIpc,
+  agentName: string,
+  deps: TaskFlowDeps,
+  onForegroundResult: (result: AgentTaskResultPayload, entry: { correlationId: string; sessionId: string }, agent: string) => void,
+): void {
+  agentIpc.onMessage('agent.task.result', (msg: IpcMessage) => {
+    const result = msg.payload as AgentTaskResultPayload;
+
+    if (result.ok) {
+      deps.taskManager.complete(result.taskId, result.outputPayload ?? {});
+    } else {
+      deps.taskManager.fail(result.taskId, result.error ?? '任务失败');
+    }
+
+    const entry = deps.delegationManager.get(result.taskId);
+    if (entry) {
+      onForegroundResult(result, { correlationId: entry.correlationId, sessionId: entry.sessionId }, agentName);
+    }
+  });
+
+  agentIpc.onMessage('agent.ask_user', (msg: IpcMessage) => {
+    const payload = msg.payload as AgentAskUserPayload;
+    const orchestratorAgent = deps.registry.requireRole('orchestrator');
+    const brain = deps.agentManager.getAgent(orchestratorAgent.manifest.name);
+    if (brain) {
+      brain.ipc.send('agent.ask_user', orchestratorAgent.manifest.name, payload, msg.correlationId ?? msg.id);
+    }
+  });
+}

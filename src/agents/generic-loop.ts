@@ -166,6 +166,8 @@ async function runAgentLoop(
   let previousSummary: string | null = null;
   const maxContextChars = 600_000;
 
+  const effectiveModelTier = task.modelTier ?? config.modelTier ?? 'default';
+
   const taskInput = typeof task.inputPayload === 'string'
     ? task.inputPayload
     : JSON.stringify(task.inputPayload);
@@ -209,7 +211,7 @@ async function runAgentLoop(
         tools: modelTools.length > 0 ? modelTools : undefined,
         agent: agentName as AgentName,
         purpose: 'conversation',
-        modelTier: config.modelTier ?? 'default',
+        modelTier: effectiveModelTier,
         sessionId: task.sessionId,
         taskId: task.taskId,
       });
@@ -221,7 +223,7 @@ async function runAgentLoop(
           const forcedSummary = buildSummaryPrompt(previousSummary, messages.slice(0, -4));
           const summaryResult = await llm.chat(
             [{ role: 'user', content: forcedSummary }],
-            { maxTokens: 2048, temperature: 0.2, agent: agentName as AgentName, purpose: 'conversation', modelTier: config.modelTier ?? 'default', sessionId: task.sessionId, taskId: task.taskId },
+            { maxTokens: 2048, temperature: 0.2, agent: agentName as AgentName, purpose: 'conversation', modelTier: effectiveModelTier, sessionId: task.sessionId, taskId: task.taskId },
           );
           previousSummary = summaryResult.content;
           const recovered = applyPhase2(messages, previousSummary, 1, 4) as typeof messages;
@@ -232,7 +234,7 @@ async function runAgentLoop(
             tools: modelTools.length > 0 ? modelTools : undefined,
             agent: agentName as AgentName,
             purpose: 'conversation',
-            modelTier: config.modelTier ?? 'default',
+            modelTier: effectiveModelTier,
             sessionId: task.sessionId,
             taskId: task.taskId,
           });
@@ -317,7 +319,7 @@ async function runAgentLoop(
       temperature: 0.2,
       agent: agentName as AgentName,
       purpose: 'conversation',
-      modelTier: config.modelTier ?? 'default',
+      modelTier: effectiveModelTier,
       sessionId: task.sessionId,
       taskId: task.taskId,
     });

@@ -26,6 +26,7 @@ export interface InvokeContext {
   correlationId: string;
   timeout?: number;
   traceId?: string;
+  modelTier?: import('../contracts/model.js').ModelTier;
 }
 
 export interface InvokeResult<T = unknown> {

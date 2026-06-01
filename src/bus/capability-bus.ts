@@ -21,6 +21,9 @@ export class CapabilityBus implements ICapabilityBus {
   private auditLogger: IBusAuditLogger | null = null;
   private triggers = new Map<string, Trigger>();
   private eventListeners = new Map<string, Set<(data: unknown) => void>>();
+  private lastInvokeTime = Date.now();
+  private idleTimer: ReturnType<typeof setInterval> | null = null;
+  private idleThresholdMs = 5 * 60_000;
 
   private invokeCounter = metrics.counter('bus_invoke_total');
   private invokeErrorCounter = metrics.counter('bus_invoke_error_total');
@@ -122,6 +125,7 @@ export class CapabilityBus implements ICapabilityBus {
 
       this.invokeCounter.inc({ capability: name, status: 'ok' });
       this.invokeDuration.observe(durationMs, { capability: name });
+      this.lastInvokeTime = Date.now();
       this.recordAudit(auditId, name, descriptor, ctx, input, result, true, null, durationMs);
 
       return { ok: true, data: result, auditId, durationMs, provider: descriptor.provider };
@@ -236,6 +240,23 @@ export class CapabilityBus implements ICapabilityBus {
     if (trigger) {
       trigger.stop();
       this.triggers.delete(name);
+    }
+  }
+
+  startIdleDetection(thresholdMs?: number): void {
+    if (thresholdMs) this.idleThresholdMs = thresholdMs;
+    if (this.idleTimer) return;
+    this.idleTimer = setInterval(() => {
+      if (Date.now() - this.lastInvokeTime >= this.idleThresholdMs) {
+        this.emit('agent.idle', { idleSinceMs: Date.now() - this.lastInvokeTime });
+      }
+    }, 60_000);
+  }
+
+  stopIdleDetection(): void {
+    if (this.idleTimer) {
+      clearInterval(this.idleTimer);
+      this.idleTimer = null;
     }
   }
 

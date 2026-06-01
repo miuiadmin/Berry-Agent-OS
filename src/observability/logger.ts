@@ -44,14 +44,16 @@ export function resolveEffectiveLevel(): LogLevel {
   return modeDefault as LogLevel;
 }
 
+let exclusiveListener: LogCallback | null = null;
+
 export function setRunLogCallback(cb: LogCallback | null): void {
-  logListeners.clear();
+  if (exclusiveListener) logListeners.delete(exclusiveListener);
+  exclusiveListener = cb;
   if (cb) logListeners.add(cb);
 }
 
 export function getRunLogCallback(): LogCallback | null {
-  const [first] = logListeners;
-  return first ?? null;
+  return exclusiveListener;
 }
 
 export function addLogListener(cb: LogCallback): () => void {

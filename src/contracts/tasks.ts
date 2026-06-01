@@ -7,6 +7,7 @@ export interface AgentTaskPayload {
   sessionId: string;
   taskType: string;
   inputPayload: Record<string, unknown>;
+  modelTier?: import('./model.js').ModelTier;
 }
 
 export interface AgentTaskResultPayload {

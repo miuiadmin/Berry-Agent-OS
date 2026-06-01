@@ -88,8 +88,8 @@ export function runStatsJob(db: Database.Database): StatsJobResult {
 function writeInsight(db: Database.Database, category: string, summary: string, detail: string): void {
   try {
     db.prepare(`
-      INSERT INTO brain_decisions (id, session_id, decision_type, input_summary, output_json, outcome, created_at)
-      VALUES (?, 'system', 'aggregated_insight', ?, ?, 'good', ?)
-    `).run(genId('bdec'), `[${category}] ${summary}`, JSON.stringify({ insight: detail, source: 'stats_job' }), Date.now());
+      INSERT OR REPLACE INTO system_insights (id, category, title, content, confidence, status, adopted_count, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 0.7, 'tentative', 0, ?, ?)
+    `).run(genId('sins'), category, summary, JSON.stringify({ suggestion: detail, source: 'stats_job' }), Date.now(), Date.now());
   } catch { /* best-effort */ }
 }

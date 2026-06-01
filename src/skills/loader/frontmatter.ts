@@ -43,6 +43,7 @@ export const SkillFrontmatterSchema = z.object({
   when_to_use: z.string().optional(),
   fingerprint: z.string().optional(),
   disabled: z.boolean().default(false),
+  absorbed_into: z.string().optional(),
 });
 
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>;

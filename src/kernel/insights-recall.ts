@@ -15,10 +15,10 @@ export function recallInsightsForDecision(
 ): RecalledInsight[] {
   try {
     const categoryMapping: Record<string, string[]> = {
-      route: ['routing', 'performance'],
-      review: ['review', 'performance'],
-      permission: ['permission'],
-      correction: ['review', 'routing'],
+      route: ['routing', 'route', 'performance', 'evolution'],
+      review: ['review', 'performance', 'evolution'],
+      permission: ['permission', 'evolution'],
+      correction: ['review', 'routing', 'route'],
     };
 
     const categories = categoryMapping[decisionType] ?? [decisionType];

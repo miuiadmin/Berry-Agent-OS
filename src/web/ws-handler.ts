@@ -37,7 +37,6 @@ export class WebSocketBridge {
 
   write(data: string): boolean {
     if ((this.ws as unknown as { readyState: number }).readyState === 1) {
-      logger.debug({ raw: data }, 'ws:stream');
       this.ws.send(data.replace(/\n$/, ''));
       return true;
     }

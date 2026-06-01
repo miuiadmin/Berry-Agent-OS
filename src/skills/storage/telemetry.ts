@@ -1,6 +1,11 @@
 import type { Database } from 'better-sqlite3';
 import { genId } from '../../utils/id.js';
 import { evolutionMetrics } from '../../observability/evolution-metrics.js';
+import { getLogger } from '../../utils/logger.js';
+
+const logger = getLogger('skill-telemetry');
+
+const CONSECUTIVE_FAILURE_THRESHOLD = 5;
 
 export interface SkillStatsRow {
   use_count: number;
@@ -13,6 +18,8 @@ export interface SkillStatsRow {
 }
 
 export class SkillTelemetry {
+  private consecutiveFailures = new Map<string, number>();
+
   constructor(private readonly db: Database) {}
 
   ensureRow(name: string): void {
@@ -36,6 +43,23 @@ export class SkillTelemetry {
       `UPDATE skills_meta SET use_count = use_count + 1, ${field} = ${field} + 1, last_used_at = ? WHERE name = ?`,
     ).run(Date.now(), name);
     evolutionMetrics.skillInvocation.inc({ skill_name: name });
+
+    if (success) {
+      this.consecutiveFailures.delete(name);
+    } else {
+      const count = (this.consecutiveFailures.get(name) ?? 0) + 1;
+      this.consecutiveFailures.set(name, count);
+      if (count >= CONSECUTIVE_FAILURE_THRESHOLD) {
+        this.autoDisable(name, count);
+      }
+    }
+  }
+
+  private autoDisable(name: string, failures: number): void {
+    this.updateManifestRow(name, { disabled: true });
+    this.recordEvent(name, 'auto_disabled', { reason: `${failures} consecutive failures`, failures });
+    this.consecutiveFailures.delete(name);
+    logger.warn({ skill: name, failures }, 'Skill auto-disabled due to consecutive failures');
   }
 
   bumpPatch(name: string): void {
@@ -49,6 +73,12 @@ export class SkillTelemetry {
     return this.db.prepare(
       `SELECT use_count, view_count, success_count, failure_count, patch_count, last_used_at, last_viewed_at FROM skills_meta WHERE name = ?`,
     ).get(name) as SkillStatsRow | undefined;
+  }
+
+  getSuccessRate(name: string): number | null {
+    const stats = this.getStats(name);
+    if (!stats || stats.use_count === 0) return null;
+    return stats.success_count / stats.use_count;
   }
 
   recordEvent(skillName: string, eventType: string, payload?: Record<string, unknown>): void {

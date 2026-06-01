@@ -121,22 +121,24 @@ export function useChatSocket() {
           if (msg.summary) setLastProgress(msg.summary);
           resetTimer();
           break;
-        case "tool_call":
+        case "tool_call": {
+          const tc = msg as Extract<ServerMessage, { type: "tool_call" }>;
           appendToolCall({
-            toolName: (msg as unknown as { toolName: string }).toolName,
-            input: (msg as unknown as { input: string }).input,
-            result: (msg as unknown as { result: string }).result,
-            isError: (msg as unknown as { isError: boolean }).isError,
-            durationMs: (msg as unknown as { durationMs: number }).durationMs,
+            toolName: tc.toolName,
+            input: tc.input,
+            result: tc.result,
+            isError: tc.isError,
+            durationMs: tc.durationMs,
             ts: Date.now(),
           });
           resetTimer();
           break;
+        }
         case "result": {
           const response = (msg as unknown as { response?: string }).response;
           const current = useChatStore.getState().messages;
           const lastMsg = current[current.length - 1];
-          if (response && lastMsg && !lastMsg.content) {
+          if (response && lastMsg && !lastMsg.content.trim()) {
             appendToLast(response);
           }
           setLastStatus("complete");

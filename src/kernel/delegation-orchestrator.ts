@@ -21,6 +21,14 @@ import { DelegationManager } from './delegation-manager.js';
 import { FallbackRouter } from './fallback-router.js';
 import { CorrectionFlow } from './flows/correction-flow.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
+import { PermissionFlow } from './flows/permission-flow.js';
+import {
+  setupTaskProgressHandler,
+  setupTaskAcknowledgeHandlers,
+  setupTaskTelemetryHandler,
+  setupModuleTaskResultHandler,
+  type TaskFlowDeps,
+} from './flows/task-flow.js';
 import {
   setupAuditHandler,
   setupMemoryHandlers,
@@ -57,9 +65,6 @@ import type { SuggestionQueue } from './suggestion-queue.js';
 const logger = getLogger('orchestrator');
 
 const DISPATCH_RETRY_MS = 3000;
-const JUDGE_TIMEOUT_MS = 30_000;
-const JUDGE_MAX_PER_WINDOW = 5;
-const JUDGE_WINDOW_MS = 10_000;
 
 type ReviewOrigin = 'conversation' | 'task' | 'superior_chain';
 
@@ -114,10 +119,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private suggestionQueueRef: SuggestionQueue | null = null;
 
   // Permission judge state
-  private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
-  private pendingJudgeInputs = new Map<string, { sessionId: string; toolName: string }>();
-  private pendingUserConfirms = new Map<string, { agentIpc: AgentIpc; agentName: string; replyId: string }>();
-  private judgeTimestamps: number[] = [];
+  private permissionFlow: PermissionFlow;
 
   constructor(deps: {
     agentManager: AgentManager;
@@ -146,6 +148,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.delegationManager = new DelegationManager(deps.taskManager);
     this.correctionFlow = new CorrectionFlow(this);
     this.brainDecisionRecorder = new BrainDecisionRecorder(getDb());
+    this.permissionFlow = new PermissionFlow({
+      permissionCoordinator: deps.permissionCoordinator,
+      registry: deps.registry,
+      agentManager: deps.agentManager,
+      sessionManager: deps.sessionManager,
+      brainDecisionRecorder: this.brainDecisionRecorder,
+    });
   }
 
   get delegation(): DelegationManager { return this.delegationManager; }
@@ -191,6 +200,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     };
   }
 
+  private get taskFlowDeps(): TaskFlowDeps {
+    return {
+      taskManager: this.taskManager,
+      delegationManager: this.delegationManager,
+      sessionManager: this.sessionManager,
+      agentProgress: this.agentProgress,
+      registry: this.registry,
+      agentManager: this.agentManager,
+    };
+  }
+
   // ═══ LIFECYCLE ════════════════════════════════════
 
   setup(): void {
@@ -208,7 +228,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     this.setupReviewFlow(primary.ipc, reviewer.ipc, primaryName, reviewerName);
     this.setupRoutingFlow(reviewer.ipc);
-    this.setupPermissionJudgeHandler(reviewer.ipc);
+    this.permissionFlow.setupJudgeHandler(reviewer.ipc);
     this.correctionFlow.setup(reviewer.ipc);
     this.superiorReviewFlow?.setup(reviewer.ipc);
     this.superiorReviewFlow?.setCallbacks({
@@ -220,7 +240,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       },
     });
     this.setupAgentAskUserFlow(reviewer.ipc);
-    this.setupPermissionHandlers(primary.ipc, primaryName, true);
+    this.permissionFlow.setupHandlers(primary.ipc, primaryName, true);
     setupAuditHandler(primary.ipc, primaryName, this.proxyDeps);
     setupMemoryHandlers(primary.ipc, primaryName, this.proxyDeps);
     setupCapabilityHandler(primary.ipc, primaryName, this.proxyDeps);
@@ -241,7 +261,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.setupAgentIpcs.add(agent.ipc);
 
     this.setupTaskResultHandlers(agent.ipc, agentName);
-    this.setupPermissionHandlers(agent.ipc, agentName, false);
+    this.permissionFlow.setupHandlers(agent.ipc, agentName, false);
     setupAuditHandler(agent.ipc, agentName, this.proxyDeps);
     setupTakeoverRouting(agent.ipc, agentName, this.proxyDeps);
     if (this.capabilityBusRef) {
@@ -332,33 +352,25 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     dangerLevel: DangerLevel;
     taskContext?: string;
   }): Promise<PermissionJudgeResultPayload> {
-    return withTrace('router.requestPermissionJudge', () => this.requestJudgeInternal(input));
+    return withTrace('router.requestPermissionJudge', () => this.permissionFlow.requestJudge(input));
   }
 
   resolveUserPermissionConfirm(requestId: string, approved: boolean, reason?: string): boolean {
-    const pending = this.pendingUserConfirms.get(requestId);
-    if (!pending) return false;
+    const resolved = this.permissionFlow.resolveUserConfirm(requestId, approved, reason);
+    if (!resolved) return false;
 
-    this.pendingUserConfirms.delete(requestId);
-    pending.agentIpc.send('permission.result', pending.agentName, {
-      allowed: approved,
-      reason: reason ?? (approved ? '用户确认通过' : '用户拒绝'),
-    }, pending.replyId);
-
-    // Also resolve the approval request in DB
     this.permissionCoordinator.resolve(requestId, {
       verdict: approved ? 'approved' : 'denied',
       source: 'user',
       reason: reason ?? (approved ? '用户确认' : '用户拒绝'),
     });
 
-    // §8.16: Record deny reason as lesson for Brain future decisions
     if (!approved && reason) {
       this.brainDecisionRecorder?.record({
         sessionId: 'user_permission',
         decisionType: 'permission',
-        inputSummary: `user denied: ${pending.agentName} requested permission`,
-        outputJson: { denied: true, userReason: reason, agent: pending.agentName },
+        inputSummary: `user denied permission`,
+        outputJson: { denied: true, userReason: reason },
       });
       this.brainDecisionRecorder?.updateLesson(requestId, reason);
     }
@@ -570,6 +582,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       memoryContext,
       instruction: decision.instruction,
       intent: decision.intent,
+      modelTierOverride: decision.modelTier,
     }, correlationId);
   }
 
@@ -1169,198 +1182,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     reviewer.ipc.send('review.request', reviewerName, { turn }, fgEntry.correlationId);
   }
 
-  // ═══ PERMISSIONS ══════════════════════════════════
-
-  private setupPermissionJudgeHandler(reviewerIpc: AgentIpc): void {
-    reviewerIpc.onMessage('permission.judge.result', (msg: IpcMessage) => {
-      const result = msg.payload as PermissionJudgeResultPayload;
-      const correlationId = msg.correlationId!;
-
-      // Record permission decision
-      const judgeInput = this.pendingJudgeInputs?.get(correlationId);
-      if (judgeInput) {
-        this.brainDecisionRecorder?.recordPermissionDecision(
-          judgeInput.sessionId,
-          judgeInput.toolName,
-          result as unknown as Record<string, unknown>,
-        );
-        this.pendingJudgeInputs?.delete(correlationId);
-      }
-
-      const pending = this.pendingJudges.get(correlationId);
-      if (pending) {
-        pending(result);
-        this.pendingJudges.delete(correlationId);
-      }
-    });
-  }
-
-  private isJudgeRateLimited(): boolean {
-    const now = Date.now();
-    this.judgeTimestamps = this.judgeTimestamps.filter(t => now - t < JUDGE_WINDOW_MS);
-    return this.judgeTimestamps.length >= JUDGE_MAX_PER_WINDOW;
-  }
-
-  private requestJudgeInternal(input: {
-    sessionId: string;
-    agentName: string;
-    toolName: string;
-    toolInput: string;
-    dangerLevel: DangerLevel;
-    taskContext?: string;
-  }): Promise<PermissionJudgeResultPayload> {
-    if (this.isJudgeRateLimited()) {
-      return Promise.resolve({ allowed: false, reason: '权限判断请求过于频繁，已限流' });
-    }
-    this.judgeTimestamps.push(Date.now());
-
-    return new Promise((resolve) => {
-      const correlationId = genId('pjudge');
-      const timeout = setTimeout(() => {
-        this.pendingJudges.delete(correlationId);
-        this.pendingJudgeInputs.delete(correlationId);
-        resolve({ allowed: false, reason: '权限判断超时' });
-      }, JUDGE_TIMEOUT_MS);
-
-      this.pendingJudges.set(correlationId, (result) => {
-        clearTimeout(timeout);
-        resolve(result);
-      });
-
-      this.pendingJudgeInputs.set(correlationId, { sessionId: input.sessionId, toolName: input.toolName });
-
-      const orchestratorAgent = this.registry.requireRole('orchestrator');
-      const brain = this.agentManager.getAgent(orchestratorAgent.manifest.name);
-      if (!brain) {
-        clearTimeout(timeout);
-        this.pendingJudges.delete(correlationId);
-        resolve({ allowed: false, reason: 'Brain 不可用' });
-        return;
-      }
-
-      brain.ipc.send('permission.judge', orchestratorAgent.manifest.name, {
-        sessionId: input.sessionId,
-        agentName: input.agentName,
-        toolName: input.toolName,
-        toolInput: input.toolInput,
-        dangerLevel: input.dangerLevel,
-        taskContext: input.taskContext,
-      }, correlationId);
-    });
-  }
-
-  private setupPermissionHandlers(agentIpc: AgentIpc, agentName: string, isPrimary: boolean): void {
-    agentIpc.onMessage('permission.request', (msg: IpcMessage) => {
-      const { toolName, toolInput, dangerLevel, taskId } = msg.payload as PermissionRequestPayload;
-      const replyId = msg.id;
-
-      let sessionId: string;
-      if (isPrimary) {
-        const pendingReq = (taskId ? this.sessionManager.findPendingByTaskId(taskId) : undefined)
-          ?? this.sessionManager.findAnyPendingWithTaskId();
-        sessionId = pendingReq?.sessionId ?? 'unknown';
-
-        const result = this.permissionCoordinator.checkAndIssue({
-          agentName,
-          sessionId,
-          toolName,
-          toolInput,
-          dangerLevel: dangerLevel as DangerLevel,
-          taskId,
-          correlationId: msg.correlationId ?? replyId,
-        });
-        agentIpc.send('permission.result', agentName, result, replyId);
-      } else {
-        sessionId = taskId ?? agentName;
-        const result = this.permissionCoordinator.checkAndIssueSimple({
-          agentName,
-          sessionId,
-          toolName,
-          toolInput,
-          dangerLevel: dangerLevel as DangerLevel,
-        });
-        agentIpc.send('permission.result', agentName, result, replyId);
-      }
-    });
-
-    agentIpc.onMessage('permission.validate', (msg: IpcMessage) => {
-      const { tokenId, sessionId, toolName, toolInput } = msg.payload as PermissionValidatePayload;
-      const result = this.permissionCoordinator.validate({ tokenId, sessionId, agentName, toolName, toolInput });
-      agentIpc.send('permission.result', agentName, result, msg.id);
-    });
-
-    agentIpc.onMessage('permission.consume', (msg: IpcMessage) => {
-      const { tokenId } = msg.payload as PermissionConsumePayload;
-      const result = this.permissionCoordinator.consume(tokenId);
-      agentIpc.send('permission.result', agentName, result, msg.id);
-    });
-
-    agentIpc.onMessage('permission.acquire', async (msg: IpcMessage) => {
-      const { toolName, toolInput, dangerLevel, taskId } = msg.payload as PermissionAcquirePayload;
-      const replyId = msg.id;
-
-      let sessionId: string;
-      if (isPrimary) {
-        const pendingReq = (taskId ? this.sessionManager.findPendingByTaskId(taskId) : undefined)
-          ?? this.sessionManager.findAnyPendingWithTaskId();
-        sessionId = pendingReq?.sessionId ?? 'unknown';
-
-        const result = this.permissionCoordinator.acquire({
-          agentName,
-          sessionId,
-          toolName,
-          toolInput,
-          dangerLevel: dangerLevel as DangerLevel,
-          taskId,
-          correlationId: msg.correlationId ?? replyId,
-        });
-
-        if (result.requiresReview) {
-          // moderate-level: allow without Brain judge (personal assistant context)
-          if (dangerLevel !== 'dangerous') {
-            agentIpc.send('permission.result', agentName, { allowed: true, reason: 'auto-approved (moderate)' }, replyId);
-            return;
-          }
-
-          // dangerous-level: skip Brain judge (deadlock risk), go directly to user confirm
-          const requestId = result.requestId ?? genId('perm');
-          getEventBus().emit('permission.user_confirm_needed', {
-            requestId,
-            sessionId,
-            agentName,
-            toolName,
-            toolInput: toolInput.slice(0, 500),
-            dangerLevel,
-            brainReason: '危险操作，需要用户确认',
-          });
-          this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId });
-          setTimeout(() => {
-            if (this.pendingUserConfirms.has(requestId)) {
-              this.pendingUserConfirms.delete(requestId);
-              agentIpc.send('permission.result', agentName, {
-                allowed: false,
-                reason: '用户确认超时（5 分钟），自动拒绝',
-              }, replyId);
-            }
-          }, 300_000);
-          return;
-        } else {
-          agentIpc.send('permission.result', agentName, result, replyId);
-        }
-      } else {
-        sessionId = taskId ?? agentName;
-        const result = this.permissionCoordinator.checkAndIssueSimple({
-          agentName,
-          sessionId,
-          toolName,
-          toolInput,
-          dangerLevel: dangerLevel as DangerLevel,
-        });
-        agentIpc.send('permission.result', agentName, result, replyId);
-      }
-    });
-  }
-
   private setupAgentAskUserFlow(reviewerIpc: AgentIpc): void {
     reviewerIpc.onMessage('agent.ask_user', (msg: IpcMessage) => {
       const payload = msg.payload as AgentAskUserPayload & { _brainReview?: { approved: boolean; rewrittenQuestion?: string; autoAnswer?: string } };
@@ -1403,168 +1224,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // ═══ TASK HANDLERS ════════════════════════════════
 
   private setupTaskHandlers(agentIpc: AgentIpc, agentName: string): void {
-    this.setupCommonTaskHandlers(agentIpc, agentName);
-
-    agentIpc.onMessage('task.progress', (msg: IpcMessage) => {
-      const { taskId, summary } = msg.payload as TaskProgressPayload;
-      const task = taskId ? this.taskManager.getTask(taskId) : undefined;
-      if (task && this.agentProgress) {
-        this.agentProgress.report({
-          taskId,
-          sessionId: task.session_id,
-          source: msg.from,
-          message: summary,
-          payload: { from: msg.from },
-        });
-      }
-    });
+    setupTaskAcknowledgeHandlers(agentIpc, this.taskFlowDeps);
+    setupTaskTelemetryHandler(agentIpc, this.taskFlowDeps);
+    setupTaskProgressHandler(agentIpc, agentName, this.taskFlowDeps);
   }
 
   private setupTaskResultHandlers(agentIpc: AgentIpc, agentName: string): void {
-    this.setupCommonTaskHandlers(agentIpc, agentName);
-
-    agentIpc.onMessage('agent.task.result', (msg: IpcMessage) => {
-      const result = msg.payload as AgentTaskResultPayload;
-
-      if (result.ok) {
-        this.taskManager.complete(result.taskId, result.outputPayload ?? {});
-      } else {
-        this.taskManager.fail(result.taskId, result.error ?? '任务失败');
-      }
-
-      const entry = this.delegationManager.get(result.taskId);
-      if (entry) {
-        this.handleForegroundTaskResult(result, { correlationId: entry.correlationId, sessionId: entry.sessionId }, agentName);
-      }
-    });
-
-    agentIpc.onMessage('agent.ask_user', (msg: IpcMessage) => {
-      const payload = msg.payload as AgentAskUserPayload;
-      const orchestratorAgent = this.registry.requireRole('orchestrator');
-      const brain = this.agentManager.getAgent(orchestratorAgent.manifest.name);
-      if (brain) {
-        brain.ipc.send('agent.ask_user', orchestratorAgent.manifest.name, payload, msg.correlationId ?? msg.id);
-      }
-    });
-  }
-
-  private setupCommonTaskHandlers(agentIpc: AgentIpc, _agentName: string): void {
-    agentIpc.onMessage('task.acknowledge', (msg: IpcMessage) => {
-      const { taskId } = msg.payload as TaskAcknowledgePayload;
-      if (taskId) {
-        this.delegationManager.acknowledge(taskId);
-      }
-    });
-
-    agentIpc.onMessage('task.started', (msg: IpcMessage) => {
-      const { taskId } = msg.payload as TaskStartedPayload;
-      if (taskId) {
-        this.delegationManager.acknowledge(taskId);
-      }
-    });
-
-    agentIpc.onMessage('task.telemetry', (msg: IpcMessage) => {
-      const payload = msg.payload as TaskTelemetryPayload;
-      switch (payload.kind) {
-        case 'text_delta': {
-          if (!payload.taskId) return;
-          let pending: PendingRequest | null | undefined;
-          // Two resolution paths:
-          // 1. Delegated tasks (code, skill_test, etc.) have a delegation entry → use correlationId
-          // 2. Chat route (conversation) has no delegation entry → find pending by taskId directly
-          const entry = this.delegationManager.get(payload.taskId);
-          if (entry) {
-            this.delegationManager.recordOutput(payload.taskId, { delegationId: payload.taskId, kind: 'text_delta', data: { text: payload.text } });
-            pending = this.sessionManager.getPending(entry.correlationId);
-          } else {
-            pending = this.sessionManager.findPendingByTaskId(payload.taskId);
-          }
-          // Primary path: write via pending's socket
-          if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
-            const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
-            pending.socket.write(JSON.stringify(evt) + '\n');
-            break;
-          }
-          // Fallback: pending may have been deleted by final.response (race condition on short replies).
-          // Use the taskId → socket mapping that survives pending deletion.
-          const fallbackSocket = this.sessionManager.getSocketForTask(payload.taskId);
-          if (fallbackSocket && !fallbackSocket.destroyed) {
-            const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
-            fallbackSocket.write(JSON.stringify(evt) + '\n');
-          }
-          break;
-        }
-        case 'reasoning_delta': {
-          if (!payload.taskId) return;
-          const rEntry = this.delegationManager.get(payload.taskId);
-          const rPending = rEntry
-            ? this.sessionManager.getPending(rEntry.correlationId)
-            : this.sessionManager.findPendingByTaskId(payload.taskId);
-          const sock = rPending?.streaming && rPending.socket && !rPending.socket.destroyed
-            ? rPending.socket
-            : this.sessionManager.getSocketForTask(payload.taskId);
-          if (sock && !sock.destroyed) {
-            sock.write(JSON.stringify({ type: 'reasoning_delta', text: payload.text, taskId: payload.taskId }) + '\n');
-          }
-          break;
-        }
-        case 'llm_completed': {
-          if (payload.taskId) {
-            const entry = this.delegationManager.get(payload.taskId);
-            if (entry) {
-              this.delegationManager.recordOutput(payload.taskId, {
-                delegationId: payload.taskId,
-                kind: 'usage',
-                data: { inputTokens: payload.inputTokens, outputTokens: payload.outputTokens },
-              });
-            }
-          }
-          getEventBus().emit('llm.request.completed', {
-            taskId: payload.taskId,
-            agentName: payload.agentName,
-            inputTokens: payload.inputTokens,
-            outputTokens: payload.outputTokens,
-            cacheRead: payload.cacheRead,
-            cacheCreation: payload.cacheCreation,
-            durationMs: payload.durationMs,
-          });
-          break;
-        }
-        case 'tool_result': {
-          if (!payload.taskId) return;
-          const entry = this.delegationManager.get(payload.taskId);
-          if (!entry) return;
-          this.delegationManager.recordOutput(payload.taskId, {
-            delegationId: payload.taskId,
-            kind: payload.isError ? 'tool_error' : 'tool_result',
-            data: { toolName: payload.toolName },
-          });
-          break;
-        }
-        case 'tool_call': {
-          if (!payload.taskId) return;
-          const entry = this.delegationManager.get(payload.taskId);
-          let pending: PendingRequest | null | undefined;
-          if (entry) {
-            pending = this.sessionManager.getPending(entry.correlationId);
-          } else {
-            pending = this.sessionManager.findPendingByTaskId(payload.taskId);
-          }
-          const socket = pending?.socket ?? this.sessionManager.getSocketForTask(payload.taskId);
-          if (socket && !socket.destroyed) {
-            const evt = { type: 'tool_call', toolName: payload.toolName, input: payload.input, result: payload.result, isError: payload.isError, durationMs: payload.durationMs, taskId: payload.taskId };
-            socket.write(JSON.stringify(evt) + '\n');
-          }
-          break;
-        }
-        case 'uncertainty': {
-          if (!payload.taskId) return;
-          const entry = this.delegationManager.get(payload.taskId);
-          if (!entry) return;
-          this.delegationManager.reportUncertainty(payload.taskId, payload.reason);
-          break;
-        }
-      }
+    setupTaskAcknowledgeHandlers(agentIpc, this.taskFlowDeps);
+    setupTaskTelemetryHandler(agentIpc, this.taskFlowDeps);
+    setupModuleTaskResultHandler(agentIpc, agentName, this.taskFlowDeps, (result, entry, agent) => {
+      this.handleForegroundTaskResult(result, entry, agent);
     });
   }
 
