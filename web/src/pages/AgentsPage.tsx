@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bot, Power, PowerOff, ArrowLeft, Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 function AgentsGridSkeleton() {
   return (
@@ -266,8 +267,8 @@ function AgentDetailView({
             <p className="text-sm text-muted-foreground">No tasks found for this agent</p>
           ) : (
             <div className="space-y-2">
-              {recentTasks.map((task: TaskInfo) => (
-                <div key={task.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
+              {recentTasks.map((task: TaskInfo, i: number) => (
+                <div key={task.id} className={cn("flex items-center justify-between rounded-lg border px-3 py-2", `stagger-${Math.min(i + 1, 5)}`)}>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-muted-foreground">{task.id.slice(0, 8)}</span>
                     <span className="text-sm">{task.taskType}</span>
@@ -305,7 +306,7 @@ function AgentDetailView({
           ) : (
             <div className="space-y-1.5">
               {events.map((ev, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
+                <div key={i} className="flex items-center gap-2 text-xs animate-slide-left">
                   <Clock className="size-3 text-muted-foreground" />
                   <span className="text-muted-foreground">
                     {new Date(ev.ts).toLocaleTimeString()}

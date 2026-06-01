@@ -35,7 +35,7 @@ export function MobileBottomNav({ onMore }: MobileBottomNavProps) {
               isActive ? "text-foreground" : "text-muted-foreground",
             )}
           >
-            <item.icon className="size-5" />
+            <item.icon className={cn("size-5 transition-transform duration-200", isActive && "scale-110")} />
             <span className="text-[11px] leading-tight">{item.label}</span>
             {isActive && <span className="absolute bottom-1 h-1 w-1 rounded-full bg-foreground animate-bounce-in" />}
           </Link>

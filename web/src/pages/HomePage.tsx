@@ -332,7 +332,7 @@ export default function HomePage() {
                   const Icon = getEventIcon(ev.event);
                   const colorClass = getEventColor(ev.event);
                   return (
-                    <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs min-w-0", i === 0 && "animate-slide-left")}>
+                    <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs min-w-0 animate-slide-left")}>
                       <Icon className={`size-3.5 shrink-0 ${colorClass}`} />
                       <span className="text-muted-foreground shrink-0">
                         {new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
@@ -367,9 +367,9 @@ function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.Comp
   return (
     <Link
       to={href}
-      className="flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm hover:-translate-y-0.5 hover:shadow-sm hover:border-ring/30 active:translate-y-0 active:scale-[0.97] transition-all duration-200"
+      className="group flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm card-lift hover:border-ring/30 active:scale-[0.97] transition-all duration-200"
     >
-      <Icon className="size-4 text-muted-foreground" />
+      <Icon className="size-4 text-muted-foreground transition-transform duration-200 group-hover:scale-110" />
       {label}
     </Link>
   );

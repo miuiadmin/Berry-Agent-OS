@@ -173,13 +173,13 @@ export function AreaChart({
 
         {secondary && (
           <>
-            <path d={secondary.area} fill={secondaryColor} opacity={0.1} />
-            <path d={secondary.line} fill="none" stroke={secondaryColor} strokeWidth={1.5} strokeLinecap="round" />
+            <path d={secondary.area} fill={secondaryColor} opacity={0.1} className="chart-area-fade" />
+            <path d={secondary.line} fill="none" stroke={secondaryColor} strokeWidth={1.5} strokeLinecap="round" className="chart-line-draw" />
           </>
         )}
 
-        <path d={primary.area} fill={color} opacity={0.15} />
-        <path d={primary.line} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />
+        <path d={primary.area} fill={color} opacity={0.15} className="chart-area-fade" />
+        <path d={primary.line} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" className="chart-line-draw" />
 
         {tooltip && (
           <>
@@ -198,7 +198,7 @@ export function AreaChart({
       </svg>
       {tooltip && (
         <div
-          className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md"
+          className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md animate-fade-in"
           style={{
             left: `${(tooltip.x / svgWidth) * 100}%`,
             top: `${tooltip.y - 10}px`,
