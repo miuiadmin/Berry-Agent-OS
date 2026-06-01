@@ -263,7 +263,19 @@ async function runSynthesis(ctx: PhaseContext, researchMessages: ModelMessage[])
 
   try {
     const plan = planJson as { description: string; steps: Array<{ file: string; action: 'create' | 'edit' | 'delete'; description: string }> };
-    if (!ctx.workspace) throw new Error('Patch plan requires a git workspace');
+    if (!ctx.workspace) {
+      const artifactId = ctx.runtime.recordArtifact(ctx.taskId, 'patch_plan', { plan, validation: { valid: false, errorCount: 1 } });
+      artifacts.push(artifactId);
+      return {
+        phase: {
+          phase: 'synthesis',
+          success: ctx.action === 'analyze',
+          summary: plan.description ?? result.content,
+          toolCalls: [],
+          artifacts,
+        },
+      };
+    }
     const patchPlan = buildPatchPlan(plan, ctx.workspace);
     const validation = validatePatchPlan(patchPlan, ctx.workspace);
 

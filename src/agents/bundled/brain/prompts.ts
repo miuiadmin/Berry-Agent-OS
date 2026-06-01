@@ -204,9 +204,17 @@ const VALID_INTENTS: RoutingIntent[] = ['chat', 'code', 'skill_test', 'learning'
 
 export function parseRouteDecision(llmOutput: string): RouteDecision {
   try {
-    const jsonMatch = llmOutput.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found');
-    const parsed = JSON.parse(jsonMatch[0]);
+    // Try to extract JSON — handle markdown code blocks and raw JSON
+    let jsonStr: string | undefined;
+    const codeBlock = llmOutput.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (codeBlock) {
+      jsonStr = codeBlock[1].trim();
+    } else {
+      const jsonMatch = llmOutput.match(/\{[\s\S]*\}/);
+      if (jsonMatch) jsonStr = jsonMatch[0];
+    }
+    if (!jsonStr) throw new Error('No JSON found');
+    const parsed = JSON.parse(jsonStr);
 
     const intent: RoutingIntent = VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'chat';
     const targetAgent = typeof parsed.targetAgent === 'string' ? parsed.targetAgent : 'conversation';
