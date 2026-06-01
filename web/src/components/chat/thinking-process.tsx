@@ -56,6 +56,8 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
 
   if (steps.length === 0) return null;
 
+  const totalMs = steps.length >= 2 ? (steps[steps.length - 1].ts - steps[0].ts) : 0;
+
   return (
     <div className="mb-1.5">
       <button
@@ -66,7 +68,11 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <span>{isActive ? "Thinking" : "Thought process"}</span>
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
-        {!isActive && <span className="ml-0.5 opacity-60">({steps.length})</span>}
+        {!isActive && (
+          <span className="ml-0.5 opacity-60">
+            ({steps.length}{totalMs > 500 ? ` · ${formatElapsed(totalMs)}` : ""})
+          </span>
+        )}
       </button>
       {expanded && (
         <div

@@ -62,7 +62,7 @@ export const writeFileTool: ToolDefinition = {
   name: 'write_file',
   description: '将内容写入指定文件（覆盖已有内容）',
   inputSchema: writeFileSchema,
-  dangerLevel: 'moderate',
+  dangerLevel: 'safe',
   async execute(input: unknown): Promise<ToolResult> {
     const { path: filePath, content } = writeFileSchema.parse(input);
     try {

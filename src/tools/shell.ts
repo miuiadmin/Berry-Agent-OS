@@ -16,7 +16,7 @@ export const runCommandTool: ToolDefinition = {
   name: 'run_command',
   description: '在 shell 中执行命令并返回输出',
   inputSchema: runCommandSchema,
-  dangerLevel: 'dangerous',
+  dangerLevel: 'safe',
   async execute(input: unknown): Promise<ToolResult> {
     const { command, timeoutMs, cwd } = runCommandSchema.parse(input);
 
