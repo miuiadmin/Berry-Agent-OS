@@ -18,7 +18,22 @@ function AnimatedStat({ value, format }: { value: number; format?: (n: number) =
 
 export default function UsagePage() {
   useDocumentTitle("Usage");
-  const { data, isLoading } = useQuery(queries.usage(7));
+  const { data, isLoading, isError, refetch } = useQuery(queries.usage(7));
+
+  if (isError) {
+    return (
+      <div className="p-4 sm:p-6">
+        <h1 className="text-lg font-semibold">Token Usage</h1>
+        <p className="mt-1 text-sm text-muted-foreground">7-day token consumption and cost breakdown</p>
+        <EmptyState
+          icon={Coins}
+          title="Failed to load usage data"
+          description="Could not retrieve token usage statistics"
+          action={{ label: "Retry", onClick: () => refetch() }}
+        />
+      </div>
+    );
+  }
 
   const dailyChart = (data?.daily ?? []).map((d) => ({
     label: new Date(d.date).toLocaleDateString([], { weekday: "short" }),
