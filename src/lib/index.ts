@@ -1,5 +1,3 @@
-export { ModuleEventBus, createEventBus } from './event-bus.js';
-export type { AppEventMap, AppEvents } from './event-bus.js';
 export { JobQueueService } from './queue.js';
 export type { QueueJob, EnqueueParams } from './queue.js';
 export { encrypt, decrypt, generateKey } from './encryption.js';

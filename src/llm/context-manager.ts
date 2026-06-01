@@ -1,26 +1,32 @@
 import type { ModelMessage } from '../contracts/model.js';
 import type { LlmClient } from './client.js';
+import { compressToolOutputs, buildSummaryPrompt, applyPhase2, needsPhase2, type CompressionState } from './context-compression.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('context-manager');
 
 export interface ContextManagerConfig {
   maxTokenEstimate: number;
   compressionThreshold: number;
-  keepRecentMessages: number;
+  keepRecentTurns: number;
   charsPerToken: number;
 }
 
 const DEFAULT_CONFIG: ContextManagerConfig = {
   maxTokenEstimate: 100_000,
   compressionThreshold: 0.75,
-  keepRecentMessages: 10,
+  keepRecentTurns: 6,
   charsPerToken: 3.5,
 };
 
-const SUMMARY_SYSTEM_PROMPT = `你是一个对话摘要助手。将以下对话历史压缩为一段简洁的摘要。
-保留关键信息：用户意图、重要决策、工具调用结果、已建立的上下文。
-省略寒暄和重复信息。用中文输出。`;
+const SUMMARY_SYSTEM_PROMPT = `You are a conversation summarizer. Compress the given conversation into a structured running summary.
+Preserve: user intent, decisions made, key file paths/variables, tool results, established constraints.
+Omit: greetings, repetition, verbose tool outputs.
+Output in the structured format provided. Use the same language as the conversation.`;
 
 export class ContextManager {
   private config: ContextManagerConfig;
+  private state: CompressionState = { previousSummary: null, consecutiveLowSavings: 0 };
 
   constructor(config?: Partial<ContextManagerConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -48,46 +54,66 @@ export class ContextManager {
   }
 
   async compress(messages: ModelMessage[], llm: LlmClient): Promise<ModelMessage[]> {
-    if (messages.length <= this.config.keepRecentMessages) {
-      return messages;
+    const tailCount = this.config.keepRecentTurns * 2;
+    if (messages.length <= tailCount) return messages;
+
+    logger.debug({ msgCount: messages.length, estimatedTokens: this.estimateTokens(messages) }, 'compression:start');
+
+    // Phase 1: Prune large/duplicate tool outputs
+    const stringified = messages.map(m => ({
+      role: m.role as string,
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    }));
+    const pruned = compressToolOutputs(stringified);
+    const prunedTokens = Math.ceil(pruned.reduce((s, m) => s + m.content.length, 0) / this.config.charsPerToken);
+
+    // If pruning alone is enough, skip summarization
+    if (prunedTokens < this.config.maxTokenEstimate * this.config.compressionThreshold) {
+      logger.debug({ prunedTokens, saved: messages.length - pruned.length }, 'compression:pruning-sufficient');
+      return pruned.map(m => ({ role: m.role as ModelMessage['role'], content: m.content }));
     }
 
-    const splitAt = messages.length - this.config.keepRecentMessages;
-    const oldMessages = messages.slice(0, splitAt);
-    const recentMessages = messages.slice(splitAt);
+    // Phase 2: LLM-powered structured summarization
+    const headCount = 1;
+    const splitAt = pruned.length - tailCount;
+    const oldMessages = pruned.slice(headCount, splitAt);
 
-    const summary = await this.summarize(oldMessages, llm);
+    if (oldMessages.length === 0) return messages;
 
-    const summaryMessage: ModelMessage = {
-      role: 'user',
-      content: `[对话历史摘要]\n${summary}`,
-    };
+    const summaryPrompt = buildSummaryPrompt(this.state.previousSummary, oldMessages);
 
-    return [summaryMessage, ...recentMessages];
-  }
+    try {
+      const result = await llm.chat(
+        [{ role: 'user', content: summaryPrompt }],
+        {
+          system: SUMMARY_SYSTEM_PROMPT,
+          maxTokens: 2048,
+          temperature: 0.3,
+          purpose: 'context_compression',
+          modelTier: 'fast',
+        },
+      );
 
-  private async summarize(messages: ModelMessage[], llm: LlmClient): Promise<string> {
-    const transcript = messages.map((m) => {
-      const role = m.role === 'user' ? '用户' : '助手';
-      const content = typeof m.content === 'string'
-        ? m.content
-        : JSON.stringify(m.content).slice(0, 500);
-      return `${role}: ${content}`;
-    }).join('\n');
+      this.state.previousSummary = result.content;
 
-    const truncated = transcript.slice(0, 8000);
+      const compressed = applyPhase2(
+        pruned.map(m => ({ role: m.role, content: m.content })),
+        result.content,
+        headCount,
+        tailCount,
+      );
 
-    const result = await llm.chat(
-      [{ role: 'user', content: `请摘要以下对话：\n\n${truncated}` }],
-      {
-        system: SUMMARY_SYSTEM_PROMPT,
-        maxTokens: 1024,
-        temperature: 0.3,
-        purpose: 'context_compression',
-        modelTier: 'fast',
-      },
-    );
+      logger.debug({
+        before: messages.length,
+        after: compressed.length,
+        summaryLen: result.content.length,
+        hasPreviousSummary: !!this.state.previousSummary,
+      }, 'compression:complete');
 
-    return result.content;
+      return compressed.map(m => ({ role: m.role as ModelMessage['role'], content: m.content }));
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'compression:failed, falling back to pruned');
+      return pruned.map(m => ({ role: m.role as ModelMessage['role'], content: m.content }));
+    }
   }
 }
