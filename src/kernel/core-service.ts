@@ -10,8 +10,9 @@ import type { LlmConfig } from '../llm/types.js';
 import { TaskManager } from './task-manager.js';
 import { TaskNotifier } from './task-notification.js';
 import { AgentProgress } from './agent-progress.js';
+import { initInfrastructure, initServices } from './bootstrap.js';
 import { TaskRouter } from './task-router.js';
-import { createCoreModuleRegistry, registerAgentModules, type ModuleRegistry } from './module-system.js';
+import { createCoreModuleRegistry, type ModuleRegistry } from './module-system.js';
 import { AgentLifecycle } from './agent-lifecycle.js';
 import { AgentWatcher } from './agent-watcher.js';
 import { ConfigService, type IConfigService } from '../config/index.js';
@@ -25,16 +26,14 @@ import { AuditRecorder } from './audit-recorder.js';
 import { SessionManager } from './session-manager.js';
 import { initDb, closeDb, getDb } from '../memory/index.js';
 import { MemoryRuntime } from '../memory/index.js';
-import { CapabilityService, EvolutionEngine } from '../evolution/index.js';
 import { SkillService, SkillWatcher } from '../skills/index.js';
-import { PluginRegistry, PluginLoader, PluginRuntime, PluginRuntimeV2 } from '../plugins/index.js';
+import { PluginRuntime, PluginRuntimeV2 } from '../plugins/index.js';
 import { TakeoverController } from '../testing/model-takeover.js';
 import { ensureDirs, getSocketPath, getPidPath, getUserAgentsDir, getSkillsDir, getPluginsDir } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
-import { PermissionEngine, TokenIssuer, ApprovalManager } from '../safety/index.js';
+
 import type { LogLevel } from './observability.js';
-import { initTracer, createSqliteSink } from '../observability/tracer.js';
 import { CronScheduler } from '../cron/index.js';
 import { createLlmClient } from '../llm/index.js';
 import { createProviderRegistry, type ProviderRegistry } from '../providers/registry.js';
@@ -174,89 +173,40 @@ export class CoreService {
       bundled: getBundledAgentsDir(),
       user: getUserAgentsDir(),
     });
-    this.registry.validateSystemRoles();
 
-    registerAgentModules(this.registry, this.moduleRegistry);
-    this.moduleRegistry.persist(getDb());
-
-    this.agentLifecycle = new AgentLifecycle(
-      this.registry,
-      this.agentManager,
-      this.moduleRegistry,
-      this.eventBus,
-      getDb(),
+    // Phase 1: Infrastructure
+    const { agentLifecycle } = initInfrastructure(
+      this.config, this.registry, this.agentManager, this.eventBus, this.moduleRegistry,
     );
-    this.agentLifecycle.seedBundledAgents();
-    this.moduleRegistry.markStatus(getDb(), 'db', 'running');
-    this.moduleRegistry.markStatus(getDb(), 'config', 'running');
-    this.moduleRegistry.markStatus(getDb(), 'event-bus', 'running');
-    initTracer([createSqliteSink(getDb())]);
-    this.moduleRegistry.markStatus(getDb(), 'observability', 'running');
-    this.moduleRegistry.markStatus(getDb(), 'memory', 'running');
-    this.moduleRegistry.markStatus(getDb(), 'permissions', 'running');
-    this.moduleRegistry.markStatus(getDb(), 'llm', 'running');
-    this.moduleRegistry.markStatus(getDb(), 'agent-manager', 'starting');
+    this.agentLifecycle = agentLifecycle;
 
-    this.taskManager = new TaskManager(getDb(), this.eventBus);
-    this.taskNotifier = new TaskNotifier(getDb(), this.eventBus);
-    this.agentProgress = new AgentProgress(getDb(), this.eventBus);
-
-    const evolutionEngine = new EvolutionEngine(getDb());
-    const capabilityService = new CapabilityService(getDb());
-    this.skillService = new SkillService({ db: getDb() });
-    this.skillService.initialize();
-
-    const pluginRegistry = new PluginRegistry(getDb());
-    const pluginLoader = new PluginLoader();
-    this.pluginRuntime = new PluginRuntime(getDb(), pluginLoader);
-    await this.pluginRuntime.initialize(pluginRegistry.list());
-
-    if (this.config.plugins.unified) {
-      const { PluginRegistryV2 } = await import('../plugins/index.js');
-      const registryV2 = new PluginRegistryV2(getDb());
-      this.pluginRuntimeV2 = new PluginRuntimeV2({
-        db: getDb(),
-        eventBus: this.eventBus,
-        pluginsDir: this.config.plugins.pluginsDir || getPluginsDir(),
-        onPendingReview: (plugin) => {
-          this.messageRouter?.dispatchModuleTask({
-            sessionId: 'plugin_review',
-            taskType: 'plugin_review',
-            requester: 'plugin_runtime',
-            inputPayload: { taskType: 'plugin_review', pluginId: plugin.id, pluginName: plugin.name, manifest: plugin },
-          }).catch((e) => { logger.debug({ err: e, plugin: plugin.name }, 'Plugin review dispatch failed'); });
-        },
-      });
-      const enabledPlugins = registryV2.list({ status: 'enabled' });
-      await this.pluginRuntimeV2.initialize(enabledPlugins);
-      logger.info({ count: enabledPlugins.length }, 'Plugin runtime v2 initialized (unified mode)');
-    }
-
-    const permissionEngine = new PermissionEngine(this.config.permissionMode);
-    const tokenIssuer = new TokenIssuer(getDb());
-    const approvalManager = new ApprovalManager(getDb(), tokenIssuer, this.config.permissionMode);
-
-    this.permissionCoordinator = new PermissionCoordinator({
-      engine: permissionEngine,
-      tokenIssuer,
-      approvalManager,
-    });
-
-    this.sessionManager = new SessionManager({
-      memoryRuntime: this.memoryRuntime,
-      skillLoader: this.skillService,
-      evolutionEngine,
-      pluginRuntimeV2: this.pluginRuntimeV2,
-      config: this.config,
-    });
-
-    const auditRecorder = new AuditRecorder(getDb());
-    this.auditRecorder = auditRecorder;
-
-    const llmMode = this.config.llm.mode ?? 'live';
-    if (llmMode === 'takeover') {
-      this.takeoverController = new TakeoverController();
-    }
+    // Phase 2: Services
+    const svc = await initServices(
+      this.config,
+      this.eventBus,
+      this.memoryRuntime,
+      (plugin) => {
+        this.messageRouter?.dispatchModuleTask({
+          sessionId: 'plugin_review',
+          taskType: 'plugin_review',
+          requester: 'plugin_runtime',
+          inputPayload: { taskType: 'plugin_review', pluginId: plugin.id, pluginName: plugin.name, manifest: plugin },
+        }).catch((e) => { logger.debug({ err: e, plugin: plugin.name }, 'Plugin review dispatch failed'); });
+      },
+    );
+    this.taskManager = svc.taskManager;
+    this.taskNotifier = svc.taskNotifier;
+    this.agentProgress = svc.agentProgress;
+    const evolutionEngine = svc.evolutionEngine;
+    const capabilityService = svc.capabilityService;
+    this.skillService = svc.skillService;
+    this.pluginRuntime = svc.pluginRuntime;
+    this.pluginRuntimeV2 = svc.pluginRuntimeV2;
+    this.permissionCoordinator = svc.permissionCoordinator;
+    this.sessionManager = svc.sessionManager;
+    this.auditRecorder = svc.auditRecorder;
+    this.takeoverController = svc.takeoverController;
+    const auditRecorder = svc.auditRecorder;
 
     logger.info('正在启动 Berry 服务...');
 
