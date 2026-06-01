@@ -1,6 +1,6 @@
 import type { ModelMessage } from '../contracts/model.js';
 import type { LlmClient } from './client.js';
-import { compressToolOutputs, buildSummaryPrompt, applyPhase2, needsPhase2, type CompressionState } from './context-compression.js';
+import { compressToolOutputs, buildSummaryPrompt, applyPhase2, type CompressionState } from './context-compression.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('context-manager');

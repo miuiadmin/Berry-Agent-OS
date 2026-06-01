@@ -229,7 +229,9 @@ export class SkillService implements ISkillLoader {
 
     const skill = this.contentLoader.get(name);
     if (skill) {
-      this.executor.onComplete(skill, success).catch(() => {});
+      this.executor.onComplete(skill, success).catch((err) => {
+        logger.debug({ err, skill: name }, 'Skill onComplete callback failed');
+      });
     }
   }
 
