@@ -71,10 +71,11 @@ export function useChatSocket() {
       .then((data) => {
         if (!data || useChatStore.getState().sessionId !== sid) return;
         const activeTask = data.activeTasks?.[0];
-        const messages = (data.messages ?? []).map((m: { role: string; content: string; createdAt: string; thinkingSteps?: Array<{ text: string; ts: number }> }) => ({
+        const messages = (data.messages ?? []).map((m: { role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
           timestamp: new Date(m.createdAt).getTime(),
+          reasoning: m.reasoning,
           thinkingSteps: m.thinkingSteps,
         }));
         useChatStore.getState().restoreSession(

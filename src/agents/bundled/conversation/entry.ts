@@ -260,6 +260,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       ipc.send('draft.response', 'core', {
         sessionId,
         draft,
+        reasoning: result.reasoning,
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, input: tc.input, result: tc.result })),
       } satisfies DraftResponsePayload, trackingId);
     } catch (err) {

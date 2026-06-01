@@ -76,9 +76,9 @@ export class MemoryRuntime {
     }
   }
 
-  saveConversationTurn(sessionId: string, userMessage: string, assistantResponse: string): void {
+  saveConversationTurn(sessionId: string, userMessage: string, assistantResponse: string, reasoning?: string): void {
     saveMessage(sessionId, 'user', userMessage);
-    saveMessage(sessionId, 'assistant', assistantResponse);
+    saveMessage(sessionId, 'assistant', assistantResponse, reasoning);
   }
 
   getRecentTurns(sessionId: string, maxTurns = 5): Array<{ userMessage: string; response: string }> {

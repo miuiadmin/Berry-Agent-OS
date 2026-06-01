@@ -510,6 +510,18 @@ const v10IntelligenceLayer: Migration = {
   },
 };
 
+const v11ConversationReasoning: Migration = {
+  version: 11,
+  name: 'conversation-reasoning',
+  up: (db: Database.Database) => {
+    const cols = db.pragma('table_info(conversations)') as Array<{ name: string }>;
+    const existing = new Set(cols.map(c => c.name));
+    if (!existing.has('reasoning')) {
+      db.exec(`ALTER TABLE conversations ADD COLUMN reasoning TEXT`);
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -522,4 +534,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v8EngineEnhancements,
   v9SchedulerSubsystem,
   v10IntelligenceLayer,
+  v11ConversationReasoning,
 ];

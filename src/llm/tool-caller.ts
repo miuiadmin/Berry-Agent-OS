@@ -85,6 +85,7 @@ export interface ToolLoopParams {
 
 export interface ToolLoopResult {
   finalContent: string;
+  reasoning?: string;
   toolCalls: ToolCallRecord[];
   messages: ModelMessage[];
 }
@@ -94,6 +95,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
   const detector = new LoopDetector(config.maxCalls);
   const toolCalls: ToolCallRecord[] = [];
   const workingMessages: ModelMessage[] = [...messages];
+  let accumulatedReasoning = '';
   let stepIndex = 0;
   let consecutivePermissionDenials = 0;
   let uncertaintyFired = false;
@@ -103,6 +105,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
     if (signal?.aborted) {
       return {
         finalContent: '任务已取消',
+        reasoning: accumulatedReasoning || undefined,
         toolCalls,
         messages: workingMessages,
       };
@@ -113,6 +116,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       if (!check.allowed) {
         return {
           finalContent: check.alert?.message ?? 'Token 预算已超限，停止执行',
+          reasoning: accumulatedReasoning || undefined,
           toolCalls,
           messages: workingMessages,
         };
@@ -128,7 +132,9 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
     let result: ChatResult;
     if (useStreaming) {
-      result = await consumeStream(llm, workingMessages, chatOpts, onChunk!, onReasoning);
+      const streamResult = await consumeStream(llm, workingMessages, chatOpts, onChunk!, onReasoning);
+      result = streamResult;
+      if (streamResult.reasoning) accumulatedReasoning += streamResult.reasoning;
     } else {
       result = await llm.chat(workingMessages, chatOpts);
     }
@@ -141,13 +147,13 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
     // Evaluate stop condition after each step
     if (evaluateStopCondition(config.stopCondition, stepIndex, result.stopReason, result.content.split('\n'))) {
-      return { finalContent: result.content, toolCalls, messages: workingMessages };
+      return { finalContent: result.content, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
 
     stepIndex++;
 
     if (result.stopReason !== 'tool_use') {
-      return { finalContent: result.content, toolCalls, messages: workingMessages };
+      return { finalContent: result.content, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
 
     workingMessages.push({ role: 'assistant', content: result.contentBlocks });
@@ -326,7 +332,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
         .filter((r): r is Extract<ModelContentBlock, { type: 'tool_result' }> => r.type === 'tool_result')
         .map((r) => r.content)
         .join('\n');
-      return { finalContent: `工具调用已达上限。最后结果:\n${lastText}`, toolCalls, messages: workingMessages };
+      return { finalContent: `工具调用已达上限。最后结果:\n${lastText}`, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
   }
 }
@@ -337,13 +343,15 @@ async function consumeStream(
   options: ChatOptions,
   onChunk: (text: string) => void,
   onReasoning?: (text: string) => void,
-): Promise<ChatResult> {
+): Promise<ChatResult & { reasoning?: string }> {
   let result: ChatResult | undefined;
+  let reasoning = '';
   for await (const chunk of llm.chatStream(messages, options)) {
     if (chunk.type === 'text_delta') {
       onChunk(chunk.text);
-    } else if (chunk.type === 'reasoning_delta' && onReasoning) {
-      onReasoning(chunk.text);
+    } else if (chunk.type === 'reasoning_delta') {
+      reasoning += chunk.text;
+      if (onReasoning) onReasoning(chunk.text);
     } else if (chunk.type === 'message_done') {
       const r = chunk.response;
       result = {
@@ -360,5 +368,5 @@ async function consumeStream(
   if (!result) {
     throw new Error('Stream ended without message_done');
   }
-  return result;
+  return { ...result, reasoning: reasoning || undefined };
 }

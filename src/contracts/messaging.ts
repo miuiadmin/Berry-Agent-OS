@@ -15,6 +15,7 @@ export interface UserMessagePayload {
 export interface DraftResponsePayload {
   sessionId: string;
   draft: string;
+  reasoning?: string;
   toolCalls?: Array<{ name: string; input: string; result: string }>;
 }
 

@@ -953,7 +953,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   private setupReviewFlow(primaryIpc: AgentIpc, reviewerIpc: AgentIpc, primaryName: string, reviewerName: string): void {
     primaryIpc.onMessage('draft.response', (msg: IpcMessage) => {
-      const { sessionId, draft, toolCalls } = msg.payload as DraftResponsePayload;
+      const { sessionId, draft, reasoning, toolCalls } = msg.payload as DraftResponsePayload;
       const correlationId = msg.correlationId!;
       const pending = this.sessionManager.getPending(correlationId);
       if (!pending) return;
@@ -977,6 +977,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       pending.level = turn.level;
       pending.draftResponse = draft;
+      pending.reasoning = reasoning;
       pending.toolCalls = calls;
 
       const entry = this.delegationManager.getByCorrelation(correlationId);
@@ -1050,7 +1051,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         finalResponse: response,
       });
 
-      this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response);
+      this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
       this.sessionManager.queueEvolution(sessionId, pending.userMessage, response);
       this.sessionManager.queueCapabilityEvolution(sessionId, pending.userMessage, response);
       this.dispatchModuleTask({
@@ -1092,7 +1093,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
 
     this.sessionManager.deletePending(correlationId);
-    this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, response);
+    this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, response, pending.reasoning);
     this.sessionManager.queueEvolution(pending.sessionId, pending.userMessage, response);
     this.sessionManager.queueCapabilityEvolution(pending.sessionId, pending.userMessage, response);
     this.dispatchModuleTask({

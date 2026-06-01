@@ -259,7 +259,7 @@ function MessageBubble({
           </div>
         )}
       </div>
-      {!isUser && message.thinkingSteps && message.thinkingSteps.length > 0 && (
+      {!isUser && (message.thinkingSteps?.length > 0 || message.reasoning) && (
         <div className="max-w-[90%] sm:max-w-[80%] mt-1">
           <ThinkingProcess steps={message.thinkingSteps} reasoning={message.reasoning} isActive={isStreaming} />
         </div>

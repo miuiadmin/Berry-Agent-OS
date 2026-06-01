@@ -6,16 +6,17 @@ export interface ConversationMessage {
   sessionId: string;
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
   createdAt: number;
 }
 
-export function saveMessage(sessionId: string, role: 'user' | 'assistant', content: string): string {
+export function saveMessage(sessionId: string, role: 'user' | 'assistant', content: string, reasoning?: string): string {
   const db = getDb();
   const id = genId('msg');
   db.prepare(`
-    INSERT INTO conversations (id, session_id, role, content, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, sessionId, role, content, Date.now());
+    INSERT INTO conversations (id, session_id, role, content, reasoning, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, sessionId, role, content, reasoning ?? null, Date.now());
   return id;
 }
 
@@ -33,6 +34,7 @@ function rowToMessage(row: Record<string, unknown>): ConversationMessage {
     sessionId: row.session_id as string,
     role: row.role as 'user' | 'assistant',
     content: row.content as string,
+    reasoning: (row.reasoning as string) || undefined,
     createdAt: row.created_at as number,
   };
 }

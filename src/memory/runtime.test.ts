@@ -104,7 +104,14 @@ describe('MemoryRuntime', () => {
       const rt = makeRuntime();
       rt.saveConversationTurn('s1', 'hi', 'hello');
       expect(saveMessage).toHaveBeenCalledWith('s1', 'user', 'hi');
-      expect(saveMessage).toHaveBeenCalledWith('s1', 'assistant', 'hello');
+      expect(saveMessage).toHaveBeenCalledWith('s1', 'assistant', 'hello', undefined);
+    });
+
+    it('saves reasoning with assistant message', () => {
+      const rt = makeRuntime();
+      rt.saveConversationTurn('s1', 'hi', 'hello', 'thinking...');
+      expect(saveMessage).toHaveBeenCalledWith('s1', 'user', 'hi');
+      expect(saveMessage).toHaveBeenCalledWith('s1', 'assistant', 'hello', 'thinking...');
     });
   });
 

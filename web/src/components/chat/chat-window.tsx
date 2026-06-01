@@ -362,7 +362,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setHistoryError(null);
     setLoadingHistory(true);
     const targetSession = sessionId;
-    apiGet<{ messages: Array<{ role: string; content: string; createdAt: string; thinkingSteps?: Array<{ text: string; ts: number }> }> }>(`/api/sessions/${targetSession}/state?limit=200`)
+    apiGet<{ messages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }> }>(`/api/sessions/${targetSession}/state?limit=200`)
       .then((data) => {
         if (useChatStore.getState().sessionId !== targetSession) return;
         loadedSessionRef.current = targetSession;
@@ -374,6 +374,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
             content: msg.content,
             timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
             status: "complete",
+            reasoning: msg.reasoning,
             thinkingSteps: msg.thinkingSteps,
           });
         }

@@ -17,6 +17,7 @@ export interface PendingRequest {
   userMessage: string;
   taskId?: string;
   level?: string;
+  reasoning?: string;
   draftResponse?: string;
   toolCalls?: Array<{ name: string; input: string; result: string }>;
   streaming?: boolean;
@@ -227,8 +228,8 @@ export class SessionManager {
     }
   }
 
-  saveConversationTurn(sessionId: string, userMessage: string, response: string): void {
-    this.memoryRuntime.saveConversationTurn(sessionId, userMessage, response);
+  saveConversationTurn(sessionId: string, userMessage: string, response: string, reasoning?: string): void {
+    this.memoryRuntime.saveConversationTurn(sessionId, userMessage, response, reasoning);
   }
 
   async waitForEvolutionIdle(timeoutMs: number): Promise<boolean> {
