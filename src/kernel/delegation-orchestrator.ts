@@ -945,6 +945,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(correlationId);
       if (!pending) return;
 
+      logger.debug({ correlationId, draftLen: draft.length, toolCalls: (toolCalls ?? []).length, sessionId }, 'orchestrator:draft');
+
       const calls = toolCalls ?? [];
       const turn: TurnRecord = {
         sessionId,
@@ -1010,6 +1012,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     primaryIpc.onMessage('final.response', (msg: IpcMessage) => {
       const { sessionId, response, reviewVerdict } = msg.payload as FinalResponsePayload;
       const correlationId = msg.correlationId!;
+      logger.debug({ correlationId, responseLen: response.length, verdict: reviewVerdict, sessionId }, 'orchestrator:final');
       const pending = this.sessionManager.getPending(correlationId);
       if (!pending) return;
 
@@ -1306,63 +1309,29 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             agentIpc.send('permission.result', agentName, { allowed: true, reason: 'auto-approved (moderate)' }, replyId);
             return;
           }
-          const judgment = await this.requestJudgeInternal({
+
+          // dangerous-level: skip Brain judge (deadlock risk), go directly to user confirm
+          const requestId = result.requestId ?? genId('perm');
+          getEventBus().emit('permission.user_confirm_needed', {
+            requestId,
             sessionId,
             agentName,
             toolName,
-            toolInput,
-            dangerLevel: dangerLevel as DangerLevel,
-            taskContext: taskId,
+            toolInput: toolInput.slice(0, 500),
+            dangerLevel,
+            brainReason: '危险操作，需要用户确认',
           });
-
-          if (judgment.correction && taskId) {
-            const entry = this.delegationManager.get(taskId);
-            if (entry) {
-              const constraints: CorrectionConstraints = {};
-              if (judgment.correction.forbidTools?.length) {
-                constraints.forbiddenTools = judgment.correction.forbidTools;
-              }
-              if (Object.keys(constraints).length > 0) {
-                this.delegationManager.applyConstraints(taskId, constraints);
-              }
+          this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId });
+          setTimeout(() => {
+            if (this.pendingUserConfirms.has(requestId)) {
+              this.pendingUserConfirms.delete(requestId);
+              agentIpc.send('permission.result', agentName, {
+                allowed: false,
+                reason: '用户确认超时（5 分钟），自动拒绝',
+              }, replyId);
             }
-          }
-
-          // For dangerous-level: if Brain approved, still require user confirmation
-          if (judgment.allowed && dangerLevel === 'dangerous') {
-            const requestId = result.requestId;
-            if (requestId) {
-              getEventBus().emit('permission.user_confirm_needed', {
-                requestId,
-                sessionId,
-                agentName,
-                toolName,
-                toolInput: toolInput.slice(0, 500),
-                dangerLevel,
-                brainReason: judgment.reason,
-              });
-              // Don't respond yet — wait for user to approve/deny via WebSocket
-              // The response will be sent when permissions.approve/deny arrives
-              this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId });
-              // Auto-expire after 5 minutes to prevent memory leak
-              setTimeout(() => {
-                if (this.pendingUserConfirms.has(requestId)) {
-                  this.pendingUserConfirms.delete(requestId);
-                  agentIpc.send('permission.result', agentName, {
-                    allowed: false,
-                    reason: '用户确认超时（5 分钟），自动拒绝',
-                  }, replyId);
-                }
-              }, 300_000);
-              return;
-            }
-          }
-
-          agentIpc.send('permission.result', agentName, {
-            allowed: judgment.allowed,
-            reason: judgment.reason,
-            correction: judgment.correction,
-          }, replyId);
+          }, 300_000);
+          return;
         } else {
           agentIpc.send('permission.result', agentName, result, replyId);
         }
