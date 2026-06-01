@@ -40,9 +40,7 @@ import { createLlmClient } from '../llm/index.js';
 import { createProviderRegistry, type ProviderRegistry } from '../providers/registry.js';
 import { McpManager } from '../mcp/index.js';
 import { ToolRegistry, registerTool, getToolRegistry, createDelegationTools, createTeamTools } from '../tools/index.js';
-import { OrgTreeManager } from '../workspaces/org-tree-manager.js';
-import { AgentHierarchy } from '../workspaces/agent-hierarchy.js';
-import { TrustManager } from '../workspaces/trust-manager.js';
+import { OrgTreeManager, AgentHierarchy, TrustManager } from '../workspaces/index.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { RuntimeRegistry } from './runtime/runtime-registry.js';
 import { RuntimeExecutor } from './runtime/runtime-executor.js';
@@ -51,9 +49,8 @@ import { BuiltinDriver } from './runtime/drivers/builtin-driver.js';
 import { CheckpointService } from './checkpoint-service.js';
 import { ErrorClassifier } from './error-classifier.js';
 import { TaskCheckpointManager } from './task-checkpoint.js';
-import { ChannelManager } from '../channels/manager.js';
-import { TelegramChannel } from '../channels/telegram-channel.js';
-import { WorkspaceManager } from '../workspaces/manager.js';
+import { ChannelManager, TelegramChannel } from '../channels/index.js';
+import { WorkspaceManager } from '../workspaces/index.js';
 import { WebServer } from '../web/server.js';
 import { NotificationService } from '../intelligence/notification-service.js';
 import { MemoryLayerService } from '../intelligence/memory-layer-service.js';
@@ -800,6 +797,8 @@ export class CoreService {
   }
 
   private registerPluginTools(): void {
+    // v2 unified mode manages plugins through its own facet system — skip v1 registration
+    if (this.pluginRuntimeV2) return;
     if (!this.pluginRuntime) return;
     const pluginTools = this.pluginRuntime.getPluginTools();
     if (pluginTools.length === 0) return;

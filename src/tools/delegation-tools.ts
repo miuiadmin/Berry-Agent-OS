@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type Database from 'better-sqlite3';
 import type { ToolDefinition, ToolResult } from './types.js';
 import type { WorkspaceRouter } from '../kernel/workspace-router.js';
-import type { WorkspaceManager } from '../workspaces/manager.js';
+import type { WorkspaceManager } from '../workspaces/index.js';
 import type { DelegationOrchestrator } from '../kernel/delegation-orchestrator.js';
 
 interface DelegationToolsDeps {

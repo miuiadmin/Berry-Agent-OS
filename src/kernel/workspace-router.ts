@@ -1,9 +1,7 @@
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import type { WorkspaceRouteDecision, GlobalRoutingResult } from '../contracts/routing.js';
-import type { WorkspaceManager } from '../workspaces/manager.js';
-import type { OrgTreeManager } from '../workspaces/org-tree-manager.js';
-import type { AgentHierarchy } from '../workspaces/agent-hierarchy.js';
+import type { WorkspaceManager, OrgTreeManager, AgentHierarchy } from '../workspaces/index.js';
 import type { FallbackRouter } from './fallback-router.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';

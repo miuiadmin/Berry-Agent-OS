@@ -1,10 +1,8 @@
 import { z } from 'zod';
 import type Database from 'better-sqlite3';
 import type { ToolDefinition, ToolResult } from './types.js';
-import type { OrgTreeManager } from '../workspaces/org-tree-manager.js';
-import type { AgentHierarchy } from '../workspaces/agent-hierarchy.js';
+import type { OrgTreeManager, AgentHierarchy, WorkspaceManager } from '../workspaces/index.js';
 import type { WorkspaceRouter } from '../kernel/workspace-router.js';
-import type { WorkspaceManager } from '../workspaces/manager.js';
 import type { OrgNodeDefinition } from '../contracts/org-tree.js';
 
 interface TeamToolsDeps {
