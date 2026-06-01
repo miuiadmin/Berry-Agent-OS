@@ -772,10 +772,10 @@ function ChannelCard({
             {channel.modelCount} models
           </span>
           <div className="hidden md:flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-7" aria-label="Edit channel">
+            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7" aria-label="Edit channel">
               <Pencil className="size-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-7 text-muted-foreground" aria-label="Delete channel">
+            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7 text-muted-foreground" aria-label="Delete channel">
               <Trash2 className="size-3.5" />
             </Button>
             <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-7">
@@ -789,10 +789,10 @@ function ChannelCard({
           <span className="text-xs text-muted-foreground mr-auto">
             {channel.modelCount} models · {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
           </span>
-          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-8" aria-label="Edit channel">
+          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8" aria-label="Edit channel">
             <Pencil className="size-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-8 text-muted-foreground" aria-label="Delete channel">
+          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8 text-muted-foreground" aria-label="Delete channel">
             <Trash2 className="size-3.5" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-8">
