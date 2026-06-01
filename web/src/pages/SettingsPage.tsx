@@ -235,14 +235,12 @@ function SettingsContent() {
           {isLoading ? (
             <SettingsSkeleton />
           ) : (
-            <div key={activeTab} className="animate-tab-in">
-              <TabContent
-                tab={activeTab}
-                config={editedConfig}
-                onUpdate={updateField}
-                errors={errors}
-              />
-            </div>
+            <TabContent
+              tab={activeTab}
+              config={editedConfig}
+              onUpdate={updateField}
+              errors={errors}
+            />
           )}
         </div>
       </div>

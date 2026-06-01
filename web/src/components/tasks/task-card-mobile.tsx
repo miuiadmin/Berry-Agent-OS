@@ -59,48 +59,50 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           </Button>
         )}
       </button>
-      {expanded && (
-        <div className="border-t border-border bg-muted/10 p-3 space-y-2 text-xs">
-          <div>
-            <span className="font-medium text-muted-foreground">ID</span>
-            <p className="mt-0.5 font-mono break-all text-[11px]">{task.id}</p>
+      <div className="collapse-wrapper" data-open={expanded}>
+        <div className="collapse-inner">
+          <div className="border-t border-border bg-muted/10 p-3 space-y-2 text-xs">
+            <div>
+              <span className="font-medium text-muted-foreground">ID</span>
+              <p className="mt-0.5 font-mono break-all text-[11px]">{task.id}</p>
+            </div>
+            {task.sessionId && (
+              <div>
+                <span className="font-medium text-muted-foreground">Session</span>
+                <p className="mt-0.5 font-mono text-[11px]">{task.sessionId}</p>
+              </div>
+            )}
+            <div>
+              <span className="font-medium text-muted-foreground">Created</span>
+              <p className="mt-0.5 text-[11px]">{new Date(task.createdAt).toLocaleString()}</p>
+            </div>
+            {task.status === "failed" && task.error && (
+              <div>
+                <span className="font-medium text-destructive">Error</span>
+                <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[11px] text-destructive whitespace-pre-wrap">
+                  {task.error}
+                </pre>
+              </div>
+            )}
+            {task.inputPayload && (
+              <div>
+                <span className="font-medium text-muted-foreground">Input</span>
+                <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
+                  {formatJson(task.inputPayload)}
+                </pre>
+              </div>
+            )}
+            {task.outputPayload && (
+              <div>
+                <span className="font-medium text-muted-foreground">Output</span>
+                <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
+                  {formatJson(task.outputPayload)}
+                </pre>
+              </div>
+            )}
           </div>
-          {task.sessionId && (
-            <div>
-              <span className="font-medium text-muted-foreground">Session</span>
-              <p className="mt-0.5 font-mono text-[11px]">{task.sessionId}</p>
-            </div>
-          )}
-          <div>
-            <span className="font-medium text-muted-foreground">Created</span>
-            <p className="mt-0.5 text-[11px]">{new Date(task.createdAt).toLocaleString()}</p>
-          </div>
-          {task.status === "failed" && task.error && (
-            <div>
-              <span className="font-medium text-destructive">Error</span>
-              <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[11px] text-destructive whitespace-pre-wrap">
-                {task.error}
-              </pre>
-            </div>
-          )}
-          {task.inputPayload && (
-            <div>
-              <span className="font-medium text-muted-foreground">Input</span>
-              <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
-                {formatJson(task.inputPayload)}
-              </pre>
-            </div>
-          )}
-          {task.outputPayload && (
-            <div>
-              <span className="font-medium text-muted-foreground">Output</span>
-              <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
-                {formatJson(task.outputPayload)}
-              </pre>
-            </div>
-          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

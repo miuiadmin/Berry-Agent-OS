@@ -45,5 +45,5 @@ export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: Quer
     return <>{skeleton}</>;
   }
 
-  return <>{children(query.data)}</>;
+  return <div className="animate-fade-in">{children(query.data)}</div>;
 }

@@ -465,6 +465,51 @@ code {
   .animate-slide-down  { animation: slide-down 0.2s ease-out both; }
 }
 
+/* ─── Exit animations ─────────────────────────────────── */
+@keyframes overlay-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes sheet-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(16px) scale(0.97); }
+}
+@keyframes dropdown-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.95); }
+}
+@keyframes item-exit {
+  from { opacity: 1; transform: translateX(0); max-height: 80px; }
+  to   { opacity: 0; transform: translateX(-20px); max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
+@keyframes stream-border-pulse {
+  0%, 100% { border-color: oklch(0.6 0.15 250 / 0.15); }
+  50%      { border-color: oklch(0.6 0.15 250 / 0.35); }
+}
+
+@layer utilities {
+  .animate-overlay-out  { animation: overlay-out 0.15s ease-in both; }
+  .animate-sheet-out    { animation: sheet-out 0.15s ease-in both; }
+  .animate-dropdown-out { animation: dropdown-out 0.12s ease-in both; }
+  .animate-item-exit    { animation: item-exit 0.25s ease-in both; overflow: hidden; }
+  .animate-stream-pulse { border: 1px solid transparent; animation: stream-border-pulse 2s ease-in-out infinite; }
+}
+
+/* ─── Collapse height (grid trick) ─────────────────── */
+@layer utilities {
+  .collapse-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s ease;
+  }
+  .collapse-wrapper[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+  .collapse-inner {
+    overflow: hidden;
+  }
+}
+
 /* Respect reduced motion preference globally */
 @media (prefers-reduced-motion: reduce) {
   *,

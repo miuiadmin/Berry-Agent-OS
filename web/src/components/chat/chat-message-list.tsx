@@ -190,7 +190,8 @@ function MessageBubble({
             ? "bg-destructive/10 border border-destructive/30 text-foreground"
             : isUser
               ? "bg-brand text-brand-foreground"
-              : "bg-muted text-foreground"
+              : "bg-muted text-foreground",
+          isStreaming && !isUser && "animate-stream-pulse",
         )}
       >
         {isStreaming && message.content === "" ? (
@@ -342,7 +343,7 @@ export function ChatMessageList({
         onClick={scrollToBottom}
         className={cn(
           "absolute bottom-4 right-4 z-10 flex size-10 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
-          showScrollBtn ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2 pointer-events-none",
+          showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
         )}
         aria-label="Scroll to bottom"
       >

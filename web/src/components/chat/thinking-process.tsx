@@ -74,35 +74,37 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
           </span>
         )}
       </button>
-      {expanded && (
-        <div
-          ref={listRef}
-          className="ml-3.5 mt-0.5 max-h-32 overflow-y-auto space-y-px border-l border-border/50 pl-2"
-        >
-          {steps.map((step, i) => (
-            <div
-              key={i}
-              className={cn(
-                "flex items-center text-[11px] leading-snug",
-                i === steps.length - 1 && isActive
-                  ? "text-muted-foreground"
-                  : "text-muted-foreground/60",
-              )}
-            >
-              <span className="truncate">{step.text}</span>
-              <StepDuration
-                step={step}
-                nextStep={steps[i + 1]}
-                isLast={i === steps.length - 1}
-                isActive={isActive}
-              />
-            </div>
-          ))}
-          {reasoning && (
-            <ReasoningBlock text={reasoning} isActive={isActive} />
-          )}
+      <div className="collapse-wrapper" data-open={expanded}>
+        <div className="collapse-inner">
+          <div
+            ref={listRef}
+            className="ml-3.5 mt-0.5 max-h-32 overflow-y-auto space-y-px border-l border-border/50 pl-2"
+          >
+            {steps.map((step, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center text-[11px] leading-snug",
+                  i === steps.length - 1 && isActive
+                    ? "text-muted-foreground"
+                    : "text-muted-foreground/60",
+                )}
+              >
+                <span className="truncate">{step.text}</span>
+                <StepDuration
+                  step={step}
+                  nextStep={steps[i + 1]}
+                  isLast={i === steps.length - 1}
+                  isActive={isActive}
+                />
+              </div>
+            ))}
+            {reasoning && (
+              <ReasoningBlock text={reasoning} isActive={isActive} />
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

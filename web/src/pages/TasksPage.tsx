@@ -211,7 +211,7 @@ function TaskRow({
     <>
       <tr
         className={cn(
-          "border-b border-border last:border-0 cursor-pointer hover:bg-muted/30 transition-colors",
+          "border-b border-border cursor-pointer hover:bg-muted/30 transition-colors",
           expanded && "bg-muted/20"
         )}
         onClick={onToggle}
@@ -254,13 +254,17 @@ function TaskRow({
           )}
         </td>
       </tr>
-      {expanded && (
-        <tr className="border-b border-border last:border-0">
-          <td colSpan={7} className="bg-muted/10 px-3 md:px-6 py-3 md:py-4">
-            <TaskDetail task={task} />
-          </td>
-        </tr>
-      )}
+      <tr className={cn("border-b border-border last:border-0", !expanded && "border-0")}>
+        <td colSpan={7} className="p-0">
+          <div className="collapse-wrapper" data-open={expanded}>
+            <div className="collapse-inner">
+              <div className="bg-muted/10 px-3 md:px-6 py-3 md:py-4">
+                <TaskDetail task={task} />
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
     </>
   );
 }

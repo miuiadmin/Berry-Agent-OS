@@ -1,24 +1,39 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { CircleUser, Sun, Moon, Globe, LogOut, Settings } from "lucide-react";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 export function UserMenu() {
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
+  const prevOpenRef = useRef(open);
 
   useEffect(() => {
-    if (!open) return;
+    if (open) {
+      setClosing(false);
+    } else if (prevOpenRef.current && !open) {
+      setClosing(true);
+    }
+    prevOpenRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open && !closing) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [open]);
+  }, [open, closing]);
+
+  const isVisible = open || closing;
+  const isExiting = closing && !open;
 
   return (
     <div className="relative">
@@ -28,20 +43,25 @@ export function UserMenu() {
         onClick={() => setOpen(!open)}
         className="size-11 md:size-9 active:scale-90 transition-transform"
         aria-label="User menu"
+        aria-expanded={open}
       >
         <CircleUser className="size-5 md:size-4" />
       </Button>
 
-      {open && (
+      {isVisible && (
         <>
           {/* Backdrop */}
-          <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-50" onClick={() => { if (!isExiting) setOpen(false); }} />
 
           {/* Dropdown anchored to avatar */}
           <div
             role="menu"
             aria-label="User menu"
-            className="absolute right-0 top-full mt-1 w-52 z-50 rounded-lg border border-border bg-background shadow-lg animate-fade-in"
+            className={cn(
+              "absolute right-0 top-full mt-1 w-52 z-50 rounded-lg border border-border bg-background shadow-lg",
+              isExiting ? "animate-dropdown-out" : "animate-fade-in"
+            )}
+            onAnimationEnd={() => { if (isExiting) setClosing(false); }}
           >
             <div className="py-1">
               {/* Dark mode toggle */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -12,32 +12,52 @@ interface DialogProps {
 
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const [closing, setClosing] = useState(false);
+  const prevOpenRef = useRef(open);
 
   useEffect(() => {
-    if (!open) return;
+    if (open) {
+      setClosing(false);
+    } else if (prevOpenRef.current && !open) {
+      setClosing(true);
+    }
+    prevOpenRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open && !closing) return;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onOpenChange(false);
     };
     document.addEventListener("keydown", handleEsc);
-    document.body.style.overflow = "hidden";
+    if (open || closing) document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", handleEsc);
       document.body.style.overflow = "";
     };
-  }, [open, onOpenChange]);
+  }, [open, closing, onOpenChange]);
 
-  if (!open) return null;
+  if (!open && !closing) return null;
+
+  const isExiting = closing && !open;
 
   return (
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={(e) => {
+        if (isExiting) return;
         if (e.target === overlayRef.current) onOpenChange(false);
       }}
     >
-      <div className="fixed inset-0 bg-black/50 animate-overlay-in" />
-      <div className="relative z-50 w-[calc(100%-2rem)] sm:max-w-sm md:max-w-md md:mx-auto mx-4 animate-sheet-in">
+      <div className={cn("fixed inset-0 bg-black/50", isExiting ? "animate-overlay-out" : "animate-overlay-in")} />
+      <div
+        className={cn(
+          "relative z-50 w-[calc(100%-2rem)] sm:max-w-sm md:max-w-md md:mx-auto mx-4",
+          isExiting ? "animate-sheet-out" : "animate-sheet-in"
+        )}
+        onAnimationEnd={() => { if (isExiting) setClosing(false); }}
+      >
         {children}
       </div>
     </div>

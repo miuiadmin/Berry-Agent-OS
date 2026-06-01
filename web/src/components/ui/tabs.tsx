@@ -51,7 +51,7 @@ function TabsTrigger({ value, className, ...props }: React.ButtonHTMLAttributes<
 function TabsContent({ value, className, ...props }: React.HTMLAttributes<HTMLDivElement> & { value: string }) {
   const ctx = React.useContext(TabsContext);
   if (ctx.value !== value) return null;
-  return <div className={cn("mt-2", className)} {...props} />;
+  return <div key={value} className={cn("mt-2 animate-tab-in", className)} {...props} />;
 }
 
 export { Tabs, TabsList, TabsTrigger, TabsContent };

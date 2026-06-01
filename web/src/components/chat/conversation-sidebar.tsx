@@ -18,6 +18,7 @@ interface ConversationSidebarProps {
 export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const [search, setSearch] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -128,11 +129,18 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
               key={conv.sessionId}
               className={cn(
                 "group relative w-full rounded-lg px-3 py-2 text-left text-sm transition-all cursor-pointer active:scale-[0.98] conv-item",
+                conv.sessionId === removingId && "animate-item-exit",
                 conv.sessionId === sessionId
                   ? "nav-link-active bg-accent text-accent-foreground"
                   : "hover:bg-accent/50 text-muted-foreground"
               )}
-              onClick={() => handleSelect(conv.sessionId)}
+              onClick={() => { if (conv.sessionId !== removingId) handleSelect(conv.sessionId); }}
+              onAnimationEnd={() => {
+                if (conv.sessionId === removingId) {
+                  deleteConversation.mutate(removingId);
+                  setRemovingId(null);
+                }
+              }}
             >
               {editingId === conv.sessionId ? (
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -205,7 +213,11 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
         description="This will permanently delete the conversation and all its messages."
         actionLabel="Delete"
         onAction={() => {
-          if (deleteTarget) deleteConversation.mutate(deleteTarget);
+          if (deleteTarget) {
+            const sid = deleteTarget;
+            setDeleteTarget(null);
+            setRemovingId(sid);
+          }
         }}
       />
     </div>
