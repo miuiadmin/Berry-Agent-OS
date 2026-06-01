@@ -90,7 +90,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               )}
             />
             {charCount > 500 && (
-              <span className="absolute bottom-2 right-3 text-[10px] text-muted-foreground/60">
+              <span className="absolute bottom-2 right-3 text-[11px] text-muted-foreground/60">
                 {charCount}
               </span>
             )}

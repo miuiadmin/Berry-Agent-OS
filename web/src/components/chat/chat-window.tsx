@@ -73,7 +73,7 @@ function DelegationDialog({
           <UserCheck className="size-4 text-warning" />
           <h4 className="text-sm font-medium">{request.title}</h4>
           {request.urgency === "high" && (
-            <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">Urgent</span>
+            <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">Urgent</span>
           )}
         </div>
         {request.description && (
@@ -271,7 +271,7 @@ function ModelSelector() {
                       >
                         <div className="min-w-0">
                           <div className="truncate">{m.name}</div>
-                          <div className="text-[10px] text-muted-foreground font-mono truncate">{m.id}</div>
+                          <div className="text-[11px] text-muted-foreground font-mono truncate">{m.id}</div>
                         </div>
                         {m.id === currentModel && (
                           <span className="size-1.5 rounded-full bg-brand shrink-0 ml-2" />

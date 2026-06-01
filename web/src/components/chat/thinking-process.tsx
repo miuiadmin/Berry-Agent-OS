@@ -30,7 +30,7 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
   if (elapsed < 50) return null;
 
   return (
-    <span className="ml-auto pl-2 text-[10px] tabular-nums text-muted-foreground/50 shrink-0">
+    <span className="ml-auto pl-2 text-[11px] tabular-nums text-muted-foreground/50 shrink-0">
       {formatElapsed(elapsed)}
     </span>
   );
@@ -118,7 +118,7 @@ function ReasoningBlock({ text, isActive }: { text: string; isActive: boolean })
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
       >
         <ChevronRight className={cn("size-2.5 transition-transform", open && "rotate-90")} />
         <span className="truncate max-w-[200px]">{open ? "Reasoning" : preview}{isActive && !open && "..."}</span>

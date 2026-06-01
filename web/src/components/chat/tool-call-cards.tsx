@@ -27,7 +27,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
       >
         <ChevronRight className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")} />
         <code className="font-mono text-[11px]">{call.toolName}</code>
-        <span className="ml-auto flex items-center gap-1 shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
+        <span className="ml-auto flex items-center gap-1 shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
           {formatDuration(call.durationMs)}
           {call.isError
             ? <X className="size-3 text-red-500" />
@@ -38,13 +38,13 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
       {expanded && (
         <div className="mt-1 ml-4 space-y-1.5 text-[11px]">
           <div>
-            <span className="text-muted-foreground/60 text-[10px] uppercase tracking-wide">Input</span>
+            <span className="text-muted-foreground/60 text-[11px] uppercase tracking-wide">Input</span>
             <pre className="mt-0.5 rounded bg-muted/50 px-2 py-1.5 overflow-x-auto max-h-32 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all">
               {call.input}
             </pre>
           </div>
           <div>
-            <span className={cn("text-[10px] uppercase tracking-wide", call.isError ? "text-red-400" : "text-muted-foreground/60")}>
+            <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-red-400" : "text-muted-foreground/60")}>
               {call.isError ? "Error" : "Output"}
             </span>
             <pre className={cn(
