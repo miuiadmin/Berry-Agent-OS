@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-react";

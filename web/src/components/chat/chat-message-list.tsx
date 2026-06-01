@@ -1,4 +1,3 @@
-"use client";
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";

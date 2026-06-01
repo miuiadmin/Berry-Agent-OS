@@ -1,4 +1,3 @@
-"use client";
 
 import { type ComponentPropsWithoutRef } from "react";
 import type { Components } from "react-markdown";

@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useEffect, useRef } from "react";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";

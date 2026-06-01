@@ -1,4 +1,3 @@
-"use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useChatSocket } from "@/hooks/use-chat-socket";

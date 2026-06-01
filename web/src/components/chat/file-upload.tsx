@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useRef, useCallback } from "react";
 import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from "lucide-react";

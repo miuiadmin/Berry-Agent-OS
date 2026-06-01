@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useTheme } from "@/lib/theme";
