@@ -1058,7 +1058,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         taskType: 'extract_feedback',
         requester: 'brain_learning',
         inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: response },
-      }).catch(() => {});
+      }).catch((err) => {
+        logger.debug({ err, sessionId }, 'Feedback extraction dispatch failed');
+      });
       this.worldModelRef?.updateFromConversation({
         userMessage: pending.userMessage,
         assistantResponse: response,
@@ -1098,7 +1100,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       taskType: 'extract_feedback',
       requester: 'brain_learning',
       inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: response },
-    }).catch(() => {});
+    }).catch((err) => {
+      logger.debug({ err, sessionId: pending.sessionId }, 'Feedback extraction dispatch failed');
+    });
     this.worldModelRef?.updateFromConversation({
       userMessage: pending.userMessage,
       assistantResponse: response,
