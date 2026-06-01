@@ -1,4 +1,5 @@
 import { startResidentAgent } from '../../resident-agent.js';
+import { getLogger } from '../../../utils/logger.js';
 import type { ModelMessage } from '../../../contracts/model.js';
 import { runToolLoop, type ToolCallRecord } from '../../../llm/tool-caller.js';
 import { clearDynamicTools, getToolRegistry, registerTool } from '../../../tools/index.js';
@@ -44,6 +45,7 @@ const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的�
 const MAX_SESSIONS = 64;
 
 startResidentAgent(({ name, config, ipc, llm, db }) => {
+  const logger = getLogger('conversation');
   const memoryTools = createMemoryTools(ipc, config.requestTimeoutMs);
   const capabilityTools = createCapabilityTools(ipc, config.requestTimeoutMs);
   const currentSessionRef = { id: '' };
@@ -102,6 +104,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   ipc.onMessage('user.message', async (msg: IpcMessage) => {
     const { sessionId, message, taskId, systemPrompt, contextFrames, modelTierOverride, intent } = msg.payload as UserMessagePayload;
     const trackingId = msg.correlationId ?? msg.id;
+    logger.debug({ sessionId, taskId, intent, msgLen: message.length, toolCount: tools.length, modelTier: modelTierOverride }, 'conversation:start');
     currentSessionRef.id = sessionId;
 
     if (taskId) {
@@ -218,10 +221,22 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
             dangerLevel: record.dangerLevel,
             durationMs: record.durationMs,
           } satisfies ToolAuditPayload);
+          if (taskId) {
+            ipc.send('task.telemetry', 'core', {
+              kind: 'tool_call',
+              taskId,
+              toolName: record.name,
+              input: record.input.slice(0, 2000),
+              result: record.result.slice(0, 5000),
+              isError: record.isError,
+              durationMs: record.durationMs,
+            });
+          }
         },
       });
 
       const draft = result.finalContent;
+      logger.debug({ sessionId, draftLen: draft.length, toolCalls: result.toolCalls.length, tools: result.toolCalls.map(tc => tc.name) }, 'conversation:draft');
 
       // Flush any remaining buffered text from the scrubber (e.g. short replies
       // that didn't exceed the <memory-context> tag length threshold during streaming).

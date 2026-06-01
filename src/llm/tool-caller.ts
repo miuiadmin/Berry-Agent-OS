@@ -6,6 +6,9 @@ import { LoopDetector } from '../utils/loop-detector.js';
 import { getToolByName } from '../tools/index.js';
 import type { DangerLevel, ToolResult } from '../tools/types.js';
 import { metrics } from '../observability/metrics.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('tool-caller');
 
 // === Stop Condition ===
 
@@ -134,6 +137,8 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       onUsage(result.inputTokens, result.outputTokens);
     }
 
+    logger.debug({ step: stepIndex, stopReason: result.stopReason, contentLen: result.content.length, inputTokens: result.inputTokens, outputTokens: result.outputTokens }, 'tool-loop:llm-done');
+
     // Evaluate stop condition after each step
     if (evaluateStopCondition(config.stopCondition, stepIndex, result.stopReason, result.content.split('\n'))) {
       return { finalContent: result.content, toolCalls, messages: workingMessages };
@@ -160,6 +165,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
       const loopCheck = detector.check(block.name, inputStr, false);
       if (loopCheck.loop) {
+        logger.debug({ tool: block.name, reason: loopCheck.reason }, 'tool:loop-detected');
         toolResults.push({
           type: 'tool_result',
           toolUseId: block.id,
@@ -172,6 +178,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       const permission = acquirePermission
         ? await acquirePermission(block.name, inputStr, dangerLevel)
         : await requestPermission(block.name, inputStr, dangerLevel);
+      logger.debug({ tool: block.name, allowed: permission.allowed, reason: permission.reason?.slice(0, 100) }, 'tool:permission');
       if (!permission.allowed) {
         consecutivePermissionDenials++;
         if (onUncertainty && !uncertaintyFired && consecutivePermissionDenials >= 2) {
@@ -279,6 +286,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
       const durationMs = Date.now() - start;
       const status = toolResult.isError ? 'error' : 'ok';
+      logger.debug({ tool: block.name, input: inputStr.slice(0, 200), result: toolResult.content.slice(0, 500), durationMs, isError: toolResult.isError ?? false, dangerLevel }, 'tool:executed');
       metrics.counter('tool_calls_total').inc({ tool: block.name, agent: chatContext?.agent ?? '', status });
       metrics.histogram('tool_duration_ms').observe(durationMs, { tool: block.name, agent: chatContext?.agent ?? '' });
 

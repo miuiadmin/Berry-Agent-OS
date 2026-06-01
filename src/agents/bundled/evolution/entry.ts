@@ -50,10 +50,11 @@ async function handleExtractFeedback(
   const feedback = parseFeedback(result.content);
   if (!feedback) return { kind: 'extract_feedback', outcome: null };
 
-  if (brainDecisionId && feedback.outcome) {
+  const targetId = brainDecisionId ?? resolveLatestDecisionId(db, payload.sessionId);
+  if (targetId && feedback.outcome) {
     try {
       db.prepare(`UPDATE brain_decisions SET outcome = ?, resolved_at = ? WHERE id = ?`)
-        .run(feedback.outcome, Date.now(), brainDecisionId);
+        .run(feedback.outcome, Date.now(), targetId);
     } catch { /* table may not exist */ }
   }
 
@@ -226,4 +227,13 @@ function parseGaps(text: string): Array<{ gap: string; suggestion: string }> {
     if (!match) return [];
     return JSON.parse(match[0]).filter((g: any) => g.gap);
   } catch { return []; }
+}
+
+function resolveLatestDecisionId(db: import('better-sqlite3').Database, sessionId: string): string | null {
+  try {
+    const row = db.prepare(
+      `SELECT id FROM brain_decisions WHERE session_id = ? AND decision_type IN ('route','review','permission') ORDER BY created_at DESC LIMIT 1`,
+    ).get(sessionId) as { id: string } | undefined;
+    return row?.id ?? null;
+  } catch { return null; }
 }

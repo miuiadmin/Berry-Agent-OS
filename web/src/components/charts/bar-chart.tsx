@@ -36,7 +36,7 @@ export function BarChart({ data, className, formatValue = (v) => String(v) }: Ba
           </div>
           <div className="h-2 w-full rounded-full bg-muted">
             <div
-              className="h-full rounded-full transition-all duration-300"
+              className={`h-full rounded-full transition-all duration-500 stagger-${Math.min(i + 1, 8)}`}
               style={{
                 width: `${(item.value / maxVal) * 100}%`,
                 backgroundColor: item.color ?? "var(--chart-1)",

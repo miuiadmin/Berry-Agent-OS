@@ -29,6 +29,7 @@ import { TokenBudgetController } from './token-budget.js';
 import type { BudgetConfig } from './token-budget.js';
 import type { ResilienceConfig } from './resilience.js';
 import { CircuitBreaker, RateLimiter, ConcurrencySemaphore, getSharedSemaphore } from './resilience.js';
+import { classifyLlmError } from './error-classification.js';
 import { compileRequest } from './compiler.js';
 import { genId } from '../utils/id.js';
 import { metrics } from '../observability/metrics.js';
@@ -165,6 +166,7 @@ export class LlmClient {
     const t0 = Date.now();
     const aiMessages = toAiMessages(messages);
     const tools = options.tools?.length ? toAiTools(options.tools) : undefined;
+    logger.debug({ model: modelId, messageCount: messages.length, hasTools: !!tools, maxTokens: options.maxTokens ?? 4096, agent: agentName, purpose: options.purpose }, 'llm:request');
 
     // Default timeout when caller provides no signal
     const timeoutMs = this.resilienceConfig.defaultTimeoutMs;
@@ -242,6 +244,7 @@ export class LlmClient {
         metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'ok' });
         metrics.histogram('llm_request_duration_ms').observe(Date.now() - t0, { agent: agentName });
         metrics.histogram('llm_ttft_ms').observe(Date.now() - t0, { agent: agentName });
+        logger.debug({ model: modelId, stopReason, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheRead: usage.cacheReadTokens, durationMs: Date.now() - t0, agent: agentName }, 'llm:complete');
 
         if (this.llmCompletedHook) {
           try {
@@ -279,10 +282,8 @@ export class LlmClient {
           throw err;
         }
 
-        const baseDelay = this.resilienceConfig.retry?.baseDelayMs ?? 1000;
-        const maxDelay = this.resilienceConfig.retry?.maxDelayMs ?? 60000;
-        const delay = Math.min(baseDelay * 2 ** attempt * (0.5 + Math.random() * 0.5), maxDelay);
-        logger.info({ attempt: attempt + 1, delayMs: Math.round(delay) }, 'LLM request retrying');
+        const delay = this.getBackoffMs(err, attempt);
+        logger.info({ attempt: attempt + 1, delayMs: Math.round(delay), errorType: classifyLlmError(err).type }, 'LLM request retrying');
         await new Promise((r) => setTimeout(r, delay));
 
         if (!this.circuitBreaker.canAttempt()) {
@@ -351,6 +352,7 @@ export class LlmClient {
     const tools = options.tools?.length ? toAiTools(options.tools) : undefined;
 
     const t0 = Date.now();
+    logger.debug({ model: modelId, messageCount: messages.length, hasTools: !!tools, maxTokens: options.maxTokens ?? 4096, agent: agentName, purpose: options.purpose, streaming: true }, 'llm:request');
     const maxRetries = this.resilienceConfig.retry?.streamMaxRetries ?? this.resilienceConfig.retry?.maxRetries ?? STREAM_MAX_RETRIES;
     let lastError: unknown;
 
@@ -507,6 +509,7 @@ export class LlmClient {
 
               metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'ok' });
               metrics.histogram('llm_request_duration_ms').observe(Date.now() - t0, { agent: agentName });
+              logger.debug({ model: modelId, stopReason, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheRead: usage.cacheReadTokens, durationMs: Date.now() - t0, agent: agentName, streaming: true, toolCalls: toolCalls.length }, 'llm:complete');
 
               if (this.llmCompletedHook) {
                 try {
@@ -543,10 +546,8 @@ export class LlmClient {
         }
 
         this.circuitBreaker.recordFailure();
-        const baseDelay = this.resilienceConfig.retry?.baseDelayMs ?? 1000;
-        const maxDelay = this.resilienceConfig.retry?.maxDelayMs ?? 60000;
-        const delay = Math.min(baseDelay * 2 ** attempt * (0.5 + Math.random() * 0.5), maxDelay);
-        logger.info({ attempt: attempt + 1, delayMs: Math.round(delay) }, 'LLM stream retrying');
+        const delay = this.getBackoffMs(err, attempt);
+        logger.info({ attempt: attempt + 1, delayMs: Math.round(delay), errorType: classifyLlmError(err).type }, 'LLM stream retrying');
         await new Promise((r) => setTimeout(r, delay));
 
         if (!this.circuitBreaker.canAttempt()) {
@@ -706,13 +707,18 @@ export class LlmClient {
   }
 
   private isRetryable(err: unknown): boolean {
-    if (!err || typeof err !== 'object') return false;
-    const e = err as Record<string, unknown>;
-    const status = (e.status ?? (e as { error?: { status?: number } }).error?.status) as number | undefined;
-    const retryableStatuses = this.resilienceConfig.retry?.retryableStatuses ?? [429, 500, 502, 503, 529];
-    if (status && retryableStatuses.includes(status)) return true;
-    const message = ((e.message ?? '') as string);
-    return message.includes('ECONNRESET') || message.includes('ETIMEDOUT') || message.includes('socket hang up');
+    const classified = classifyLlmError(err);
+    return classified.retryable;
+  }
+
+  private getBackoffMs(err: unknown, attempt: number): number {
+    const classified = classifyLlmError(err);
+    if (classified.backoffMs > 0) {
+      return Math.min(classified.backoffMs * 2 ** attempt * (0.5 + Math.random() * 0.5), 60000);
+    }
+    const baseDelay = this.resilienceConfig.retry?.baseDelayMs ?? 1000;
+    const maxDelay = this.resilienceConfig.retry?.maxDelayMs ?? 60000;
+    return Math.min(baseDelay * 2 ** attempt * (0.5 + Math.random() * 0.5), maxDelay);
   }
 }
 

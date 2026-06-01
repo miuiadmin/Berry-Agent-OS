@@ -54,6 +54,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateWorldModelTable(conn);
     migrateCreateSelfModificationLog(conn);
     migrateBrainDecisionsAddColumns(conn);
+    migrateBrainDecisionsExpandTypes(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -858,7 +859,7 @@ function migrateCreateBrainDecisionsTable(conn: Database.Database): void {
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
       decision_type TEXT NOT NULL
-        CHECK(decision_type IN ('route','review','permission','correction')),
+        CHECK(decision_type IN ('route','review','permission','correction','aggregated_insight','will_action')),
       input_summary TEXT NOT NULL,
       output_json TEXT NOT NULL,
       confidence REAL,
@@ -959,4 +960,33 @@ function migrateBrainDecisionsAddColumns(conn: Database.Database): void {
   const cols = getColumns(conn, 'brain_decisions');
   addColumnIfMissing(conn, cols, 'brain_decisions', 'lesson', 'TEXT');
   addColumnIfMissing(conn, cols, 'brain_decisions', 'resolved_at', 'INTEGER');
+}
+
+function migrateBrainDecisionsExpandTypes(conn: Database.Database): void {
+  if (!tableExists(conn, 'brain_decisions')) return;
+  const sql = tableSql(conn, 'brain_decisions');
+  if (!sql || sql.includes('aggregated_insight')) return;
+  conn.exec(`
+    CREATE TABLE brain_decisions_new (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      decision_type TEXT NOT NULL
+        CHECK(decision_type IN ('route','review','permission','correction','aggregated_insight','will_action')),
+      input_summary TEXT NOT NULL,
+      output_json TEXT NOT NULL,
+      confidence REAL,
+      outcome TEXT CHECK(outcome IN ('good','bad','neutral')),
+      feedback_source TEXT
+        CHECK(feedback_source IS NULL OR feedback_source IN ('user_correction','metric_signal','evolution_engine')),
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      lesson TEXT,
+      resolved_at INTEGER
+    );
+    INSERT INTO brain_decisions_new SELECT id, session_id, decision_type, input_summary, output_json, confidence, outcome, feedback_source, created_at, lesson, resolved_at FROM brain_decisions;
+    DROP TABLE brain_decisions;
+    ALTER TABLE brain_decisions_new RENAME TO brain_decisions;
+    CREATE INDEX idx_brain_decisions_type_session ON brain_decisions(decision_type, session_id);
+    CREATE INDEX idx_brain_decisions_outcome ON brain_decisions(outcome) WHERE outcome IS NOT NULL;
+    CREATE INDEX idx_brain_decisions_created ON brain_decisions(created_at);
+  `);
 }

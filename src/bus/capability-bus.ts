@@ -105,6 +105,7 @@ export class CapabilityBus implements ICapabilityBus {
         const durationMs = Date.now() - start;
         this.invokeErrorCounter.inc({ capability: name, reason: 'permission_denied' });
         this.recordAudit(auditId, name, descriptor, ctx, input, null, false, decision.reason, durationMs);
+        this.emit('permission.denied', { capability: name, reason: decision.reason, callerAgent: ctx.callerAgent, sessionId: ctx.sessionId });
         return { ok: false, error: `Permission denied: ${decision.reason}`, auditId, durationMs, provider: descriptor.provider };
       }
     }

@@ -421,7 +421,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
         this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>);
         if (decision.reason) {
-          this.reportProgress(pending, 'routing', `🧠 → ${decision.targetAgent}: ${decision.reason}`);
+          this.reportProgress(pending, 'routing', `brain → ${decision.targetAgent}: ${decision.reason}`);
         }
         getEventBus().emit('message.routed', {
           sessionId: pending.sessionId,
@@ -1040,6 +1040,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response);
       this.sessionManager.queueEvolution(sessionId, pending.userMessage, response);
       this.sessionManager.queueCapabilityEvolution(sessionId, pending.userMessage, response);
+      this.dispatchModuleTask({
+        sessionId,
+        taskType: 'extract_feedback',
+        requester: 'brain_learning',
+        inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: response },
+      }).catch(() => {});
       this.worldModelRef?.updateFromConversation({
         userMessage: pending.userMessage,
         assistantResponse: response,
@@ -1074,6 +1080,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, response);
     this.sessionManager.queueEvolution(pending.sessionId, pending.userMessage, response);
     this.sessionManager.queueCapabilityEvolution(pending.sessionId, pending.userMessage, response);
+    this.dispatchModuleTask({
+      sessionId: pending.sessionId,
+      taskType: 'extract_feedback',
+      requester: 'brain_learning',
+      inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: response },
+    }).catch(() => {});
     this.worldModelRef?.updateFromConversation({
       userMessage: pending.userMessage,
       assistantResponse: response,
@@ -1527,6 +1539,22 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             kind: payload.isError ? 'tool_error' : 'tool_result',
             data: { toolName: payload.toolName },
           });
+          break;
+        }
+        case 'tool_call': {
+          if (!payload.taskId) return;
+          const entry = this.delegationManager.get(payload.taskId);
+          let pending: PendingRequest | null | undefined;
+          if (entry) {
+            pending = this.sessionManager.getPending(entry.correlationId);
+          } else {
+            pending = this.sessionManager.findPendingByTaskId(payload.taskId);
+          }
+          const socket = pending?.socket ?? this.sessionManager.getSocketForTask(payload.taskId);
+          if (socket && !socket.destroyed) {
+            const evt = { type: 'tool_call', toolName: payload.toolName, input: payload.input, result: payload.result, isError: payload.isError, durationMs: payload.durationMs, taskId: payload.taskId };
+            socket.write(JSON.stringify(evt) + '\n');
+          }
           break;
         }
         case 'uncertainty': {

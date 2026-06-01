@@ -478,7 +478,7 @@ function ConfigSection({
                 />
               )}
               {fieldError && (
-                <p className="text-[11px] text-destructive">{fieldError}</p>
+                <p className="text-[11px] text-destructive animate-slide-down">{fieldError}</p>
               )}
             </div>
           );

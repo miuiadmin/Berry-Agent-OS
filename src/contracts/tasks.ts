@@ -30,4 +30,5 @@ export type TaskTelemetryPayload =
   | { kind: 'reasoning_delta'; taskId: string; text: string }
   | { kind: 'llm_completed'; taskId: string; agentName: string; inputTokens: number; outputTokens: number; cacheRead?: number; cacheCreation?: number; durationMs: number }
   | { kind: 'tool_result'; taskId: string; toolName: string; isError: boolean }
+  | { kind: 'tool_call'; taskId: string; toolName: string; input: string; result: string; isError: boolean; durationMs: number }
   | { kind: 'uncertainty'; taskId: string; reason: string };

@@ -159,9 +159,12 @@ async function runAgentLoop(
   invokeBus: (name: string, input: unknown) => Promise<InvokeResult>,
 ): Promise<Record<string, unknown>> {
   const { ToolGuardrails } = await import('./tool-guardrails.js');
+  const { compressToolOutputs, needsPhase2, buildSummaryPrompt, applyPhase2 } = await import('../llm/context-compression.js');
   const guardrails = new ToolGuardrails();
   const maxTurns = config.maxTurns ?? 10;
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  let previousSummary: string | null = null;
+  const maxContextChars = 600_000;
 
   const taskInput = typeof task.inputPayload === 'string'
     ? task.inputPayload
@@ -177,20 +180,69 @@ async function runAgentLoop(
     }));
 
     // §8.11 Phase 1: compress old tool outputs before LLM call
-    const { compressToolOutputs } = await import('../llm/context-compression.js');
     const compressedMessages = compressToolOutputs(messages);
 
-    const result = await llm.chat(compressedMessages, {
-      system: config.systemPrompt,
-      maxTokens: 4096,
-      temperature: config.temperature ?? 0.3,
-      tools: modelTools.length > 0 ? modelTools : undefined,
-      agent: agentName as AgentName,
-      purpose: 'conversation',
-      modelTier: config.modelTier ?? 'default',
-      sessionId: task.sessionId,
-      taskId: task.taskId,
-    });
+    // §8.12 Phase 2: iterative LLM summarization when context too large
+    let finalMessages = compressedMessages;
+    if (needsPhase2(compressedMessages, maxContextChars)) {
+      const recentCount = Math.min(4, compressedMessages.length);
+      const oldMessages = compressedMessages.slice(0, compressedMessages.length - recentCount);
+      const summaryPrompt = buildSummaryPrompt(previousSummary, oldMessages);
+      try {
+        const summaryResult = await llm.chat(
+          [{ role: 'user', content: summaryPrompt }],
+          { maxTokens: 2048, temperature: 0.2, agent: agentName as AgentName, purpose: 'conversation', modelTier: 'fast', sessionId: task.sessionId, taskId: task.taskId },
+        );
+        previousSummary = summaryResult.content;
+        finalMessages = applyPhase2(compressedMessages, previousSummary, 1, recentCount) as typeof messages;
+      } catch {
+        finalMessages = compressedMessages;
+      }
+    }
+
+    let result;
+    try {
+      result = await llm.chat(finalMessages, {
+        system: config.systemPrompt,
+        maxTokens: 4096,
+        temperature: config.temperature ?? 0.3,
+        tools: modelTools.length > 0 ? modelTools : undefined,
+        agent: agentName as AgentName,
+        purpose: 'conversation',
+        modelTier: config.modelTier ?? 'default',
+        sessionId: task.sessionId,
+        taskId: task.taskId,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = (err as Record<string, unknown>)?.code ?? ((err as Record<string, { code?: string }>)?.error)?.code;
+      if (msg.includes('context length') || msg.includes('too many tokens') || msg.includes('maximum context') || code === 'context_length_exceeded') {
+        try {
+          const forcedSummary = buildSummaryPrompt(previousSummary, messages.slice(0, -4));
+          const summaryResult = await llm.chat(
+            [{ role: 'user', content: forcedSummary }],
+            { maxTokens: 2048, temperature: 0.2, agent: agentName as AgentName, purpose: 'conversation', modelTier: config.modelTier ?? 'default', sessionId: task.sessionId, taskId: task.taskId },
+          );
+          previousSummary = summaryResult.content;
+          const recovered = applyPhase2(messages, previousSummary, 1, 4) as typeof messages;
+          result = await llm.chat(recovered, {
+            system: config.systemPrompt,
+            maxTokens: 4096,
+            temperature: config.temperature ?? 0.3,
+            tools: modelTools.length > 0 ? modelTools : undefined,
+            agent: agentName as AgentName,
+            purpose: 'conversation',
+            modelTier: config.modelTier ?? 'default',
+            sessionId: task.sessionId,
+            taskId: task.taskId,
+          });
+        } catch {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
 
     if (result.toolCalls.length === 0) {
       return { response: result.content, turns: turn + 1 };

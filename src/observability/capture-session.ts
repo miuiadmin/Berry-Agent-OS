@@ -147,13 +147,19 @@ class CaptureSession {
   private extractFullLog(): void {
     const logFile = join(getLogDir(), 'berry.log');
     const outputFile = join(this.captureDir, 'full.log');
+    const MAX_EXTRACT = 50 * 1024 * 1024; // 50MB cap
     try {
       const currentSize = statSync(logFile).size;
-      const length = currentSize - this.logFileOffset;
+      let offset = this.logFileOffset;
+      let length = currentSize - offset;
       if (length <= 0) { writeFileSync(outputFile, ''); return; }
+      if (length > MAX_EXTRACT) {
+        offset = currentSize - MAX_EXTRACT;
+        length = MAX_EXTRACT;
+      }
       const buffer = Buffer.alloc(length);
       const fd = openSync(logFile, 'r');
-      readSync(fd, buffer, 0, length, this.logFileOffset);
+      readSync(fd, buffer, 0, length, offset);
       closeSync(fd);
       writeFileSync(outputFile, buffer);
     } catch {

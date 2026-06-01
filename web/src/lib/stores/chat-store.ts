@@ -13,6 +13,15 @@ export interface ThinkingStep {
   ts: number;
 }
 
+export interface ToolCallEvent {
+  toolName: string;
+  input: string;
+  result: string;
+  isError: boolean;
+  durationMs: number;
+  ts: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -21,6 +30,7 @@ export interface ChatMessage {
   status?: "streaming" | "complete" | "error";
   progress?: string;
   thinkingSteps?: ThinkingStep[];
+  toolCalls?: ToolCallEvent[];
   reasoning?: string;
   error?: string;
   attachments?: ChatAttachment[];
@@ -190,4 +200,7 @@ export function setLastError(error: string) {
 }
 export function appendReasoning(text: string) {
   useChatStore.getState().updateLastMessage((m) => ({ reasoning: (m.reasoning ?? "") + text }));
+}
+export function appendToolCall(event: ToolCallEvent) {
+  useChatStore.getState().updateLastMessage((m) => ({ toolCalls: [...(m.toolCalls ?? []), event] }));
 }

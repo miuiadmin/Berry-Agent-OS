@@ -1,4 +1,5 @@
 import { Bug } from "lucide-react";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
 import { cn } from "@/lib/utils";
@@ -7,9 +8,11 @@ import { queries } from "@/lib/api";
 
 export function DebugCaptureButton({ className }: { className?: string }) {
   const { data: health } = useQuery(queries.health());
-  const { isCapturing, loading, start, stop } = useDebugCaptureStore();
+  const { isCapturing, loading, start, stop, sync } = useDebugCaptureStore();
 
   const isDebugMode = health?.debugMode || import.meta.env.DEV;
+
+  useEffect(() => { if (isDebugMode) sync(); }, [isDebugMode, sync]);
 
   if (!isDebugMode) return null;
 

@@ -3,6 +3,9 @@ import type { RouteDecision, RoutingIntent } from '../../../contracts/routing.js
 import type { DangerLevel } from '../../../utils/types.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload, CorrectionAction } from '../../../contracts/delegation.js';
 import type { SuperiorReviewRequest, SuperiorReviewResult, SuperiorReviewVerdict } from '../../../contracts/superior-review.js';
+import { getLogger } from '../../../utils/logger.js';
+
+const logger = getLogger('brain-prompts');
 
 export interface AvailableAgent {
   name: string;
@@ -203,6 +206,7 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
       reason: parsed.reason || '路由决策',
     };
   } catch {
+    logger.warn({ rawOutput: llmOutput.slice(0, 500) }, 'brain:route-parse-failed');
     return {
       intent: 'chat' as RoutingIntent,
       targetAgent: 'conversation',
@@ -234,6 +238,7 @@ export function parsePermissionJudge(llmOutput: string): { allowed: boolean; rea
       correction,
     };
   } catch {
+    logger.warn({ rawOutput: llmOutput.slice(0, 500) }, 'brain:permission-parse-failed');
     return { allowed: false, reason: 'LLM 输出解析失败，默认拒绝' };
   }
 }

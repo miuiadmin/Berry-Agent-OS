@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
   useChatStore, genMsgId,
-  appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning,
+  appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning, appendToolCall,
   type DelegationRequest, type PermissionConfirmRequest,
 } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
@@ -121,9 +121,24 @@ export function useChatSocket() {
           if (msg.summary) setLastProgress(msg.summary);
           resetTimer();
           break;
+        case "tool_call":
+          appendToolCall({
+            toolName: (msg as unknown as { toolName: string }).toolName,
+            input: (msg as unknown as { input: string }).input,
+            result: (msg as unknown as { result: string }).result,
+            isError: (msg as unknown as { isError: boolean }).isError,
+            durationMs: (msg as unknown as { durationMs: number }).durationMs,
+            ts: Date.now(),
+          });
+          resetTimer();
+          break;
         case "result": {
           const response = (msg as unknown as { response?: string }).response;
-          if (response) appendToLast(response);
+          const current = useChatStore.getState().messages;
+          const lastMsg = current[current.length - 1];
+          if (response && lastMsg && !lastMsg.content) {
+            appendToLast(response);
+          }
           setLastStatus("complete");
           setStreaming(false);
           clearTimer();

@@ -1,4 +1,5 @@
 import { startResidentAgent } from '../../resident-agent.js';
+import { getLogger } from '../../../utils/logger.js';
 import type { ModelMessage } from '../../../contracts/model.js';
 import type { ReviewResult } from '../../../contracts/review.js';
 import type { RouteResultPayload, PermissionJudgeResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
@@ -87,6 +88,7 @@ function getWorldModelSummary(db: import('better-sqlite3').Database): string {
 }
 
 startResidentAgent(({ name, ipc, llm, db }) => {
+  const logger = getLogger('brain');
   // Initialize prompt versioning for self-modification support
   const promptVersioning = new PromptVersioning(db);
   const decisionRecorder = new BrainDecisionRecorder(db);
@@ -171,6 +173,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         reviewResult = { verdict: 'approve', reason: 'Failed to parse review, approving by default' };
       }
 
+      logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: reviewResult.reason?.slice(0, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
       ipc.send('review.result', 'core', reviewResult, trackingId);
     } catch (err) {
       ipc.send('review.result', 'core', {
@@ -220,6 +223,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       });
 
       const decision = parseRouteDecision(result.content);
+      logger.debug({ intent: decision.intent, target: decision.targetAgent, reason: decision.reason?.slice(0, 200), agents: payload.availableAgents.map((a: { name: string }) => a.name) }, 'brain:route');
       const routeResult: RouteResultPayload = { decision };
       ipc.send('route.result', 'core', routeResult, trackingId);
 
@@ -254,6 +258,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       systemPrompt += formatInsightsBlock(permInsights);
       markInsightAdoptedByDecision(db, 'permission', permInsights.map(i => i.id));
     }
+    systemPrompt += recallDecisionsBlock('permission');
 
     const userPrompt = buildPermissionJudgeUserPrompt(
       payload.toolName,
@@ -278,6 +283,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       });
 
       const judgment = parsePermissionJudge(result.content);
+      logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: judgment.reason?.slice(0, 200), dangerLevel: payload.dangerLevel }, 'brain:permission');
       const judgeResult: PermissionJudgeResultPayload = judgment;
       ipc.send('permission.judge.result', 'core', judgeResult, trackingId);
     } catch (err) {

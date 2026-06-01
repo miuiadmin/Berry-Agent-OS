@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Check, Copy, AlertCircle, RotateCcw, ChevronDown, Pencil, Trash2, X, SendHorizontal, FileText, Download } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
 import { ThinkingProcess } from "./thinking-process";
+import { ToolCallCards } from "./tool-call-cards";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 
@@ -262,6 +263,11 @@ function MessageBubble({
       {!isUser && message.thinkingSteps && message.thinkingSteps.length > 0 && (
         <div className="max-w-[90%] sm:max-w-[80%] mt-1">
           <ThinkingProcess steps={message.thinkingSteps} reasoning={message.reasoning} isActive={isStreaming} />
+        </div>
+      )}
+      {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+        <div className="max-w-[90%] sm:max-w-[80%] mt-1">
+          <ToolCallCards calls={message.toolCalls} isActive={isStreaming} />
         </div>
       )}
     </div>

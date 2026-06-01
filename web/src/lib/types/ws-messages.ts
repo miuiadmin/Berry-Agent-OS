@@ -57,6 +57,16 @@ export interface PermissionConfirmNeededMessage {
   brainReason: string;
 }
 
+export interface ToolCallMessage {
+  type: "tool_call";
+  toolName: string;
+  input: string;
+  result: string;
+  isError: boolean;
+  durationMs: number;
+  taskId: string;
+}
+
 /** Union of all server → client WebSocket messages */
 export type ServerMessage =
   | TextDeltaMessage
@@ -66,7 +76,8 @@ export type ServerMessage =
   | CancelledMessage
   | InterruptedMessage
   | DelegationNeededMessage
-  | PermissionConfirmNeededMessage;
+  | PermissionConfirmNeededMessage
+  | ToolCallMessage;
 
 // ─── Client → Server messages ─────────────────────────────────────
 

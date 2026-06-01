@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   startDebugCapture,
   stopDebugCapture,
+  getDebugCaptureStatus,
   type CaptureResult,
 } from "@/lib/api";
 
@@ -17,6 +18,7 @@ interface DebugCaptureState {
 interface DebugCaptureActions {
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  sync: () => Promise<void>;
   dismissDialog: () => void;
 }
 
@@ -54,6 +56,15 @@ export const useDebugCaptureStore = create<DebugCaptureState & DebugCaptureActio
       set({ loading: false });
       toast.error(err instanceof Error ? err.message : "Failed to stop capture");
     }
+  },
+
+  sync: async () => {
+    try {
+      const status = await getDebugCaptureStatus();
+      if (status.active) {
+        set({ isCapturing: true, captureId: status.captureId ?? null });
+      }
+    } catch {}
   },
 
   dismissDialog: () => {

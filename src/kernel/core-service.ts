@@ -468,6 +468,9 @@ export class CoreService {
         inputPayload: { taskType: 'detect_gap', recentPermissionDenials: [JSON.stringify(data)] },
       }).catch((e) => { logger.debug({ err: e }, 'Gap detection dispatch failed'); });
     });
+    capabilityBus.on('permission.denied', (data) => {
+      lifecycleManager.emit('permission.denied', data);
+    });
     this.eventBus.on('agent.crashed', () => {
       lifecycleManager.emit('agent.task_completed', { status: 'crashed' });
     });
