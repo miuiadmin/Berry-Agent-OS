@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+html {
+  scroll-behavior: smooth;
+}
+
 @theme inline {
   --font-sans: system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
@@ -229,7 +233,12 @@ body {
     width: 3px;
     border-radius: 2px;
     background: var(--brand);
-    animation: page-in 0.2s ease-out both;
+    animation: indicator-in 0.2s ease-out both;
+    transform-origin: left;
+  }
+  @keyframes indicator-in {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
   }
 
   /* ─── Pulse dot for unsaved / live states ──────── */

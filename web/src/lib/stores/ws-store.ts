@@ -74,9 +74,11 @@ export const useWsStore = create<WsStore>((set, get) => ({
 
     socket.onopen = () => {
       if (ws !== socket) return; // stale socket
+      const prev = get().status;
       set({ status: "connected" });
       reconnectDelay = 1000;
       flushQueue();
+      if (prev !== "connected") toast.success("Connected");
     };
 
     socket.onmessage = (event) => {

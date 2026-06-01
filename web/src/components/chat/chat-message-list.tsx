@@ -43,7 +43,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
       )}
       aria-label="Copy"
     >
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
     </button>
   );
 }

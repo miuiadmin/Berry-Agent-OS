@@ -13,6 +13,7 @@ interface ImageLightboxProps {
 
 export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
   const [error, setError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -58,9 +59,13 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
         <img
           src={src}
           alt={alt || ""}
-          className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
+          className={cn(
+            "max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-opacity duration-300",
+            loaded ? "opacity-100" : "opacity-0"
+          )}
           onClick={(e) => e.stopPropagation()}
           onError={() => setError(true)}
+          onLoad={() => setLoaded(true)}
         />
       )}
     </div>
@@ -78,6 +83,7 @@ export function ClickableImage({
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   if (!src) return null;
 
@@ -95,9 +101,14 @@ export function ClickableImage({
       <img
         src={src}
         alt={alt || ""}
-        className={cn("rounded-lg max-w-full max-h-80 cursor-pointer hover:opacity-90 transition-opacity my-2", className)}
+        className={cn(
+          "rounded-lg max-w-full max-h-80 cursor-pointer hover:opacity-90 transition-all duration-300 my-2",
+          loaded ? "opacity-100" : "opacity-0",
+          className
+        )}
         onClick={() => setOpen(true)}
         onError={() => setError(true)}
+        onLoad={() => setLoaded(true)}
       />
       <ImageLightbox src={src} alt={alt} open={open} onClose={() => setOpen(false)} />
     </>
