@@ -105,7 +105,8 @@ export function registerSessionSearchCapability(bus: CapabilityBus, db: Database
         RESULT_CACHE.set(cacheKey, { data: response, expiresAt: Date.now() + CACHE_TTL_MS });
 
         return response;
-      } catch {
+      } catch (err) {
+        logger.debug({ err, query }, 'FTS search failed');
         return { results: [], total: 0, error: 'FTS search failed (index may not exist)' };
       }
     },

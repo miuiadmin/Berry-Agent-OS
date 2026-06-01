@@ -28,7 +28,7 @@ export class PermissionFlow {
   private deps: PermissionFlowDeps;
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
   private pendingJudgeInputs = new Map<string, { sessionId: string; toolName: string }>();
-  private pendingUserConfirms = new Map<string, { agentIpc: AgentIpc; agentName: string; replyId: string }>();
+  private pendingUserConfirms = new Map<string, { agentIpc: AgentIpc; agentName: string; replyId: string; timer: ReturnType<typeof setTimeout> }>();
   private judgeTimestamps: number[] = [];
 
   constructor(deps: PermissionFlowDeps) {
@@ -188,8 +188,7 @@ export class PermissionFlow {
             dangerLevel,
             brainReason: '危险操作，需要用户确认',
           });
-          this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId });
-          setTimeout(() => {
+          const timer = setTimeout(() => {
             if (this.pendingUserConfirms.has(requestId)) {
               this.pendingUserConfirms.delete(requestId);
               agentIpc.send('permission.result', agentName, {
@@ -198,6 +197,7 @@ export class PermissionFlow {
               }, replyId);
             }
           }, 300_000);
+          this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId, timer });
           return;
         } else {
           agentIpc.send('permission.result', agentName, result, replyId);
@@ -219,6 +219,7 @@ export class PermissionFlow {
   resolveUserConfirm(requestId: string, allowed: boolean, reason?: string): boolean {
     const pending = this.pendingUserConfirms.get(requestId);
     if (!pending) return false;
+    clearTimeout(pending.timer);
     this.pendingUserConfirms.delete(requestId);
     pending.agentIpc.send('permission.result', pending.agentName, { allowed, reason: reason ?? (allowed ? '用户已确认' : '用户已拒绝') }, pending.replyId);
     return true;
