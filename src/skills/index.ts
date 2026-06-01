@@ -46,3 +46,6 @@ export type { PromptBuildOptions, PromptTier } from './prompt/index.js';
 
 // Contract
 export type { ISkillService } from './contract.js';
+
+// Watcher
+export { SkillWatcher } from './watcher.js';

@@ -514,7 +514,7 @@ export function createApiRouter(deps: WebServerDependencies) {
   return function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): void {
     const method = req.method ?? 'GET';
 
-    setCorsHeaders(res);
+    setCorsHeaders(res, req);
     if (method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -588,8 +588,14 @@ function safeInt(raw: string | null, fallback: number, min = 0, max = Infinity):
   return Math.max(min, Math.min(max, n));
 }
 
-function setCorsHeaders(res: ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function setCorsHeaders(res: ServerResponse, req?: IncomingMessage): void {
+  const origin = req?.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3889');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Access-Control-Max-Age', '3600');

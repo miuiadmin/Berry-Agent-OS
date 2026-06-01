@@ -751,7 +751,8 @@ describe('createApiRouter', () => {
     it('sets CORS headers on all responses', () => {
       const captured = dispatchSync('GET', '/api/health');
 
-      expect(captured.headers['Access-Control-Allow-Origin']).toBe('*');
+      // No Origin header → fallback to localhost default
+      expect(captured.headers['Access-Control-Allow-Origin']).toBe('http://localhost:3889');
       expect(captured.headers['Access-Control-Allow-Methods']).toContain('GET');
       expect(captured.headers['Access-Control-Allow-Methods']).toContain('POST');
       expect(captured.headers['Access-Control-Allow-Headers']).toContain('Content-Type');

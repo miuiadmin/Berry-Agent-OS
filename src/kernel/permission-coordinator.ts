@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PermissionEngine } from '../safety/permissions.js';
-import type { TokenIssuer } from '../safety/token-issuer.js';
-import type { ApprovalManager, RiskLevel } from '../safety/approval-manager.js';
+import type { PermissionEngine, TokenIssuer, ApprovalManager, RiskLevel } from '../safety/index.js';
 import type { PermissionResultPayload } from '../contracts/permissions.js';
 import type { DangerLevel } from '../utils/types.js';
 

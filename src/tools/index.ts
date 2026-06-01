@@ -60,3 +60,6 @@ export function registerTool(tool: ToolDefinition): void {
 export function clearDynamicTools(names: string[]): void {
   defaultRegistry.clearNames(names);
 }
+
+export { createDelegationTools } from './delegation-tools.js';
+export { createTeamTools } from './team-tools.js';
