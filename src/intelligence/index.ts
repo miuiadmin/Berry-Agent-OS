@@ -1,7 +1,8 @@
 /**
- * @deprecated This module is a transitional facade. Its services will be
- * migrated to Capability Bus providers (src/bus/) in a future iteration.
- * New features should register as Bus capabilities, not intelligence services.
+ * Intelligence Layer — notification, memory, workspace context, async delegation,
+ * plugin scope, team builder, and template services.
+ *
+ * Consumers import types from this barrel; concrete classes are in individual files.
  */
 export type {
   // Notification
