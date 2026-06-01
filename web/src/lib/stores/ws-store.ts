@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "sonner";
 
 type WsStatus = "connected" | "connecting" | "disconnected";
 type EventCallback = (payload: unknown) => void;
@@ -105,7 +106,9 @@ export const useWsStore = create<WsStore>((set, get) => ({
 
     socket.onclose = () => {
       if (ws !== socket) return; // stale socket — ignore
+      const prev = get().status;
       set({ status: "disconnected" });
+      if (prev === "connected") toast.warning("Connection lost — reconnecting...");
       ws = null;
       scheduleReconnect(get);
     };
