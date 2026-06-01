@@ -9,6 +9,7 @@ import { checkBlocklist } from '../safety/index.js';
 import { getLogger } from '../utils/logger.js';
 import { metrics } from '../observability/metrics.js';
 import { genId } from '../utils/id.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 
 const logger = getLogger('job-executor');
 
@@ -78,7 +79,7 @@ export class JobExecutor {
         prompt: job.prompt,
         jobId: job.id,
         queueItemId: queueItem.id,
-        payload: JSON.parse(queueItem.payload || '{}'),
+        payload: safeJsonParse<Record<string, unknown>>(queueItem.payload || '{}', {}),
       },
     });
 

@@ -3,6 +3,7 @@ import type { EventBus } from '../contracts/infrastructure.js';
 import type { LlmClient } from '../llm/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { TaskManager } from '../kernel/task-manager.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 import type { ErrorClassifier } from '../kernel/error-classifier.js';
 import type {
   CronJobRow, CronExecutionRow, JobQueueRow, CreateJobInput,
@@ -291,7 +292,7 @@ export class SchedulerService implements ISchedulerService {
   }
 
   private processQueueItem(item: JobQueueRow): void {
-    const payload = JSON.parse(item.payload || '{}') as Record<string, unknown>;
+    const payload = safeJsonParse<Record<string, unknown>>(item.payload || '{}', {});
     const jobId = payload.jobId as string | undefined;
 
     const job = jobId

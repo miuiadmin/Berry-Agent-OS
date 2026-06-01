@@ -1,6 +1,7 @@
 import type { PatchPlan } from './types.js';
 import type { CodeWorkspace, ValidationResult } from './workspace.js';
 import { validateFilePath } from './workspace.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 
 export interface PatchStep {
   file: string;
@@ -178,9 +179,14 @@ export function serializePlan(plan: PatchPlanV2): string {
 }
 
 export function deserializePlan(json: string): PatchPlanV2 {
-  const parsed = JSON.parse(json);
-  if (parsed.version !== 2) {
-    throw new Error(`不支持的 PatchPlan 版本: ${parsed.version}`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error('PatchPlan JSON 解析失败');
+  }
+  if (typeof parsed !== 'object' || parsed === null || (parsed as Record<string, unknown>).version !== 2) {
+    throw new Error(`不支持的 PatchPlan 版本: ${(parsed as Record<string, unknown>)?.version ?? 'missing'}`);
   }
   return parsed as PatchPlanV2;
 }

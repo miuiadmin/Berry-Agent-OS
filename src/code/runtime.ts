@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3';
 import { genId } from '../utils/id.js';
+import { safeJsonParse } from '../utils/safe-json.js';
 import type { ArtifactType } from './types.js';
 
 export interface FileChangeRecord {
@@ -63,7 +64,7 @@ export class CodeRuntime {
       type: r.artifact_type as ArtifactType,
       filePath: r.file_path,
       command: r.command,
-      payload: JSON.parse(r.payload),
+      payload: safeJsonParse<Record<string, unknown>>(r.payload, {}),
       createdAt: r.created_at,
     }));
   }
