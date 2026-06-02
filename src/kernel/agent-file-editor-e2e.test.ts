@@ -95,8 +95,8 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     writeFileSync(join(agentDir, 'agent.json'), JSON.stringify(FILE_EDITOR_MANIFEST, null, 2));
     writeFileSync(join(agentDir, 'entry.ts'), makeFileEditorEntry());
 
-    // 安装 agent
-    const installResult = await socketRequest(harness, {
+    // 安装 agent（使用 harness.socketRequest 确保正确的 socket 路径和超时）
+    const installResult = await harness.socketRequest({
       type: 'agents.install',
       dir: agentDir,
     });
@@ -108,13 +108,11 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     workDir = join(harness.getAppHome(), 'test-workspace');
     mkdirSync(workDir, { recursive: true });
 
-    // 预热 agent: 触发一次 replace 操作确保子进程已启动
+    // 预热 agent: 触发一次 create 操作确保子进程已启动
     const warmupFile = join(workDir, '_warmup.txt');
-    const warmup = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const warmup = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'warmup',
-      requester: 'test',
       inputPayload: { filePath: warmupFile, action: 'create', content: 'warmup' },
     });
     if (warmup.ok) await harness.waitIdle();
@@ -127,11 +125,9 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
   it('create 操作 — 创建新文件', async () => {
     const targetFile = join(workDir, 'created.txt');
 
-    const dispatched = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const dispatched = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-create',
-      requester: 'test',
       inputPayload: {
         filePath: targetFile,
         action: 'create',
@@ -164,11 +160,9 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     const targetFile = join(workDir, 'append-target.txt');
     writeFileSync(targetFile, '原始内容\n');
 
-    const dispatched = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const dispatched = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-append',
-      requester: 'test',
       inputPayload: {
         filePath: targetFile,
         action: 'append',
@@ -195,11 +189,9 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     const targetFile = join(workDir, 'prepend-target.txt');
     writeFileSync(targetFile, 'body content\n');
 
-    const dispatched = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const dispatched = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-prepend',
-      requester: 'test',
       inputPayload: {
         filePath: targetFile,
         action: 'prepend',
@@ -218,11 +210,9 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     const targetFile = join(workDir, 'replace-target.txt');
     writeFileSync(targetFile, '旧的内容，将被完全替换\n很长的旧内容\n');
 
-    const dispatched = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const dispatched = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-replace',
-      requester: 'test',
       inputPayload: {
         filePath: targetFile,
         action: 'replace',
@@ -247,11 +237,9 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     const targetFile = join(workDir, 'existing.txt');
     writeFileSync(targetFile, '已存在');
 
-    const dispatched = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const dispatched = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-error',
-      requester: 'test',
       inputPayload: {
         filePath: targetFile,
         action: 'create',
@@ -277,31 +265,25 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     const targetFile = join(workDir, 'multi-ops.txt');
 
     // 第 1 步：创建
-    const d1 = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const d1 = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-multi-1',
-      requester: 'test',
       inputPayload: { filePath: targetFile, action: 'create', content: 'line1\n' },
     });
     await harness.waitIdle();
 
     // 第 2 步：追加
-    const d2 = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const d2 = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-multi-2',
-      requester: 'test',
       inputPayload: { filePath: targetFile, action: 'append', content: 'line2\n' },
     });
     await harness.waitIdle();
 
     // 第 3 步：再追加
-    const d3 = await socketRequest(harness, {
-      type: 'evolution.dispatch',
+    const d3 = await harness.dispatchEvolutionTask({
       taskType: 'file_edit',
       sessionId: 'fe-multi-3',
-      requester: 'test',
       inputPayload: { filePath: targetFile, action: 'append', content: 'line3\n' },
     });
     await harness.waitIdle();
@@ -319,45 +301,3 @@ describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, ()
     }
   });
 });
-
-async function socketRequest(harness: TestHarness, data: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const { createConnection } = await import('node:net');
-  const { getSocketPath } = await import('../utils/paths.js');
-  const socketPath = getSocketPath();
-
-  return new Promise((resolve, reject) => {
-    const socket = createConnection(socketPath);
-    let buffer = '';
-
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error('Socket request timeout'));
-    }, 15000);
-
-    socket.on('connect', () => {
-      socket.write(JSON.stringify(data) + '\n');
-    });
-
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      for (const line of lines) {
-        if (line.trim()) {
-          clearTimeout(timer);
-          socket.end();
-          try {
-            resolve(JSON.parse(line));
-          } catch (e) {
-            reject(e);
-          }
-          return;
-        }
-      }
-    });
-
-    socket.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
-}

@@ -160,15 +160,16 @@ export class TestHarness {
   }
 
   async dispatchEvolutionTask(input: {
-    taskType: 'learning_review' | 'skill_task' | 'plugin_task' | 'code_task';
+    taskType: string;
     sessionId?: string;
+    requester?: string;
     inputPayload?: Record<string, unknown>;
   }): Promise<Record<string, unknown>> {
     return this.socketRequest({
       type: 'evolution.dispatch',
       taskType: input.taskType,
       sessionId: input.sessionId,
-      requester: 'test',
+      requester: input.requester ?? 'test',
       inputPayload: input.inputPayload ?? {},
     });
   }
@@ -249,7 +250,7 @@ export class TestHarness {
     throw new Error('waitReady timeout: agents not ready');
   }
 
-  private socketRequest(data: unknown): Promise<Record<string, unknown>> {
+  socketRequest(data: unknown): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const socket: Socket = createConnection(this.socketPath);
       let buffer = '';
