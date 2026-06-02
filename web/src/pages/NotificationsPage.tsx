@@ -180,6 +180,7 @@ export default function NotificationsPage() {
                         size="icon"
                         className="size-11 md:size-8"
                         title="Mark read"
+                        aria-label="Mark read"
                         onClick={() => readMut.mutate(item.id)}
                       >
                         <Check className="size-3.5" />
@@ -191,6 +192,7 @@ export default function NotificationsPage() {
                         size="icon"
                         className="size-11 md:size-8"
                         title="Archive"
+                        aria-label="Archive"
                         onClick={() => archiveMut.mutate(item.id)}
                       >
                         <Archive className="size-3.5" />

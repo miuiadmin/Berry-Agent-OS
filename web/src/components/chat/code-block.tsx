@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { useTheme } from "@/lib/theme";
 import { highlight } from "@/lib/highlighter";
 import { Check, Copy } from "lucide-react";
@@ -7,10 +7,12 @@ import { cn } from "@/lib/utils";
 
 function CopyBtn({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
     }).catch(() => {
       // clipboard access denied or insecure context
     });

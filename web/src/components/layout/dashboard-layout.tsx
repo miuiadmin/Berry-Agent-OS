@@ -49,7 +49,7 @@ export function DashboardLayout() {
       <div className="flex flex-1 flex-col min-w-0">
         {/* Mobile header */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="active:scale-90 transition-transform">
+          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="size-11 md:size-auto active:scale-90 transition-transform" aria-label={mobileOpen ? "Close menu" : "Open menu"}>
             <div className="relative size-5">
               <Menu className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-90 opacity-0 scale-75" : "rotate-0 opacity-100 scale-100")} />
               <X className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-0 opacity-100 scale-100" : "-rotate-90 opacity-0 scale-75")} />

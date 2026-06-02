@@ -16,7 +16,6 @@ import { toast } from "sonner";
 import {
   schedulerApi,
   type SchedulerJob,
-  type SchedulerExecution,
   type SchedulerQueue,
 } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -352,6 +351,7 @@ export default function SchedulerPage() {
                             size="icon"
                             className="size-11 md:size-8"
                             title="Pause"
+                            aria-label="Pause"
                             onClick={() => pauseMut.mutate(job.id)}
                           >
                             <Pause className="size-3.5" />
@@ -363,6 +363,7 @@ export default function SchedulerPage() {
                             size="icon"
                             className="size-11 md:size-8"
                             title="Resume"
+                            aria-label="Resume"
                             onClick={() => resumeMut.mutate(job.id)}
                           >
                             <Play className="size-3.5" />
@@ -373,6 +374,7 @@ export default function SchedulerPage() {
                           size="icon"
                           className="size-11 md:size-8"
                           title="Trigger now"
+                          aria-label="Trigger now"
                           onClick={() => triggerMut.mutate(job.id)}
                         >
                           <RotateCw className="size-3.5" />
@@ -382,6 +384,7 @@ export default function SchedulerPage() {
                           size="icon"
                           className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
                           title="Delete"
+                          aria-label="Delete"
                           onClick={() => {
                             if (confirm(`Delete job "${job.name}"?`)) {
                               deleteMut.mutate(job.id);

@@ -162,7 +162,7 @@ export default function TasksPage() {
       {/* Mobile card view */}
       <div className="mt-4 space-y-3 md:hidden">
         {isLoading && Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className={`h-16 w-full rounded-xl stagger-${i + 1}`} />
+          <Skeleton key={i} className={`h-16 w-full rounded-xl stagger-${Math.min(i + 1, 8)}`} />
         ))}
         {!isLoading && tasks.length === 0 && (
           <EmptyState

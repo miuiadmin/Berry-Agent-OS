@@ -259,6 +259,7 @@ export default function MemoryPage() {
                         size="icon"
                         className="size-11 md:size-8"
                         title="Verify"
+                        aria-label="Verify"
                         onClick={() => verifyMut.mutate(entry.id)}
                       >
                         <RefreshCw className="size-3.5" />
@@ -268,6 +269,7 @@ export default function MemoryPage() {
                         size="icon"
                         className="size-11 md:size-8"
                         title="Promote"
+                        aria-label="Promote"
                         onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
                       >
                         <ArrowUpRight className="size-3.5" />
@@ -277,6 +279,7 @@ export default function MemoryPage() {
                         size="icon"
                         className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
                         title="Delete"
+                        aria-label="Delete"
                         onClick={() => {
                           if (confirm("Delete this memory?")) {
                             deleteMut.mutate({ entryLayer: entry.layer, id: entry.id });

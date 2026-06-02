@@ -55,7 +55,7 @@ export default function LogsPage() {
       <div className="shrink-0 border-b px-4 py-3 flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-semibold mr-auto">Logs</h1>
 
-        <select
+        <select aria-label="Log level"
           value={level}
           onChange={(e) => setLevel(e.target.value)}
           className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
@@ -69,13 +69,14 @@ export default function LogsPage() {
 
         <input
           type="text"
+          aria-label="Filter by module"
           placeholder="Module..."
           value={module}
           onChange={(e) => setModule(e.target.value)}
-          className="h-8 w-28 rounded-md border border-input bg-background px-2 text-xs"
+          className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         />
 
-        <select
+        <select aria-label="Number of lines"
           value={lines}
           onChange={(e) => setLines(Number(e.target.value))}
           className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
@@ -88,9 +89,9 @@ export default function LogsPage() {
 
         <Button
           variant="ghost"
-          size="icon-sm"
+          aria-label="Refresh logs"
           onClick={() => refetch()}
-          className={cn(isFetching && "animate-spin")}
+          className={cn("size-11 md:size-8", isFetching && "animate-spin")}
         >
           <RefreshCw className="size-3.5" />
         </Button>

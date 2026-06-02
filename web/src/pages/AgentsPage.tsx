@@ -124,6 +124,8 @@ export default function AgentsPage() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="size-11 md:size-8"
+                          aria-label={agent.status === "enabled" ? "Disable agent" : "Enable agent"}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (agent.status === "enabled") {
@@ -268,7 +270,7 @@ function AgentDetailView({
           ) : (
             <div className="space-y-2">
               {recentTasks.map((task: TaskInfo, i: number) => (
-                <div key={task.id} className={cn("flex items-center justify-between rounded-lg border px-3 py-2", `stagger-${Math.min(i + 1, 5)}`)}>
+                <div key={task.id} className={cn("flex items-center justify-between rounded-lg border px-3 py-2", `stagger-${Math.min(i + 1, 8)}`)}>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-muted-foreground">{task.id.slice(0, 8)}</span>
                     <span className="text-sm">{task.taskType}</span>
