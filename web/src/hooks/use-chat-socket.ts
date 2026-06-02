@@ -115,10 +115,12 @@ export function useChatSocket() {
           appendToLast(msg.text);
           resetTimer();
           break;
-        case "reasoning_delta":
-          appendReasoning((msg as unknown as { text: string }).text);
+        case "reasoning_delta": {
+          const rd = msg as Extract<ServerMessage, { type: "reasoning_delta" }>;
+          appendReasoning(rd.text);
           resetTimer();
           break;
+        }
         case "progress":
           if (msg.summary) setLastProgress(msg.summary);
           resetTimer();

@@ -67,6 +67,11 @@ export interface ToolCallMessage {
   taskId: string;
 }
 
+export interface ReasoningDeltaMessage {
+  type: "reasoning_delta";
+  text: string;
+}
+
 /** Union of all server → client WebSocket messages */
 export type ServerMessage =
   | TextDeltaMessage
@@ -77,7 +82,8 @@ export type ServerMessage =
   | InterruptedMessage
   | DelegationNeededMessage
   | PermissionConfirmNeededMessage
-  | ToolCallMessage;
+  | ToolCallMessage
+  | ReasoningDeltaMessage;
 
 // ─── Client → Server messages ─────────────────────────────────────
 

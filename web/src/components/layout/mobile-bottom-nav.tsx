@@ -4,7 +4,8 @@ import {
   MessageCircle,
   Bot,
   ListTodo,
-  MoreHorizontal,
+  Brain,
+  Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ const navItems = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageCircle },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/memory", label: "Memory", icon: Brain },
   { href: "/agents", label: "Agents", icon: Bot },
 ];
 
@@ -45,7 +47,7 @@ export function MobileBottomNav({ onMore }: MobileBottomNavProps) {
         onClick={onMore}
         className="flex flex-col items-center gap-0.5 px-3 py-2 min-w-[44px] min-h-[44px] justify-center text-muted-foreground transition-colors"
       >
-        <MoreHorizontal className="size-5" />
+        <Menu className="size-5" />
         <span className="text-[11px] leading-tight">More</span>
       </button>
     </nav>

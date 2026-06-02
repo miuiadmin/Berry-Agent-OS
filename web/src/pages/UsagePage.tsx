@@ -9,6 +9,7 @@ import { AreaChart } from "@/components/charts/area-chart";
 import { BarChart } from "@/components/charts/bar-chart";
 import { Sparkline } from "@/components/charts/sparkline";
 import { Coins, TrendingUp, Cpu, Bot } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 
 function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
   const animated = useCountUp(value);

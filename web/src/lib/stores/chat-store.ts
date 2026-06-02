@@ -140,7 +140,7 @@ export const useChatStore = create<ChatState>()(
         set((s) => {
           const hasLocal = s.messages.length > 0;
           let msgs = hasLocal ? [...s.messages] : messages.map((m) => ({
-            id: genMsgId("hist"), ...m, status: "complete" as const,
+            ...m, id: genMsgId("hist"), status: "complete" as const,
           }));
 
           if (!activeTask) return hasLocal ? s : { messages: msgs };
@@ -171,7 +171,7 @@ export const useChatStore = create<ChatState>()(
       partialize: (state) => ({
         sessionId: state.sessionId,
         messages: state.messages
-          .filter((m) => m.content.length > 0 || m.role === "user")
+          .filter((m) => m.content.length > 0 || m.role === "user" || !!m.reasoning || (m.toolCalls && m.toolCalls.length > 0))
           .map((m) =>
             m.status === "streaming"
               ? { ...m, status: "complete" as const, progress: undefined }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "./app-sidebar";
+import { MobileBottomNav } from "./mobile-bottom-nav";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,11 +68,14 @@ export function DashboardLayout() {
         </div>
         <main className="relative flex-1">
           {/* key by pathname to re-trigger animation on route change */}
-          <div key={location.pathname} className="animate-page-in absolute inset-0 overflow-y-auto">
+          <div key={location.pathname} className="animate-page-in absolute inset-0 overflow-y-auto pb-16 md:pb-0">
             <Outlet />
           </div>
         </main>
       </div>
+
+      {/* Mobile bottom navigation */}
+      <MobileBottomNav onMore={() => setMobileOpen(true)} />
 
       <DebugCaptureDialog />
     </div>

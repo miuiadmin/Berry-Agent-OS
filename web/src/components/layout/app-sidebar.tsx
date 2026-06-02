@@ -7,6 +7,9 @@ import {
   MessagesSquare,
   BarChart3,
   ScrollText,
+  Brain,
+  Bell,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -17,6 +20,9 @@ const navItems = [
   { href: "/chat", label: "Chat", icon: MessageCircle },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/memory", label: "Memory", icon: Brain },
+  { href: "/notifications", label: "Notifications", icon: Bell },
+  { href: "/scheduler", label: "Scheduler", icon: Clock },
   { href: "/conversations", label: "Conversations", icon: MessagesSquare },
   { href: "/usage", label: "Usage", icon: BarChart3 },
   { href: "/logs", label: "Logs", icon: ScrollText },
@@ -45,7 +51,7 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
               to={item.href}
               onClick={onNavigate}
               className={cn(
-                "group flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all",
+                "group flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all min-h-[44px] md:min-h-0",
                 isActive
                   ? "nav-link-active bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent"

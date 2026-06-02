@@ -61,7 +61,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors py-0.5"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <span>{isActive ? "Thinking" : "Thought process"}</span>
@@ -108,26 +108,12 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
 }
 
 function ReasoningBlock({ text, isActive }: { text: string; isActive: boolean }) {
-  const [open, setOpen] = useState(false);
-  const preview = text.slice(0, 60).replace(/\n/g, ' ');
-
   return (
     <div className="mt-1 pt-1 border-t border-border/30">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
-      >
-        <ChevronRight className={cn("size-2.5 transition-transform", open && "rotate-90")} />
-        <span className="truncate max-w-[200px]">{open ? "Reasoning" : preview}{isActive && !open && "..."}</span>
-        {isActive && <Loader2 className="size-2 animate-spin" />}
-      </button>
-      {open && (
-        <div className="mt-0.5 text-[11px] text-muted-foreground/70 whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed pl-3">
-          {text}
-          {isActive && <span className="animate-pulse">▋</span>}
-        </div>
-      )}
+      <div className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+        {text}
+        {isActive && <span className="animate-pulse">▋</span>}
+      </div>
     </div>
   );
 }
