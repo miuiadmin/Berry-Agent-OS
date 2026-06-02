@@ -9,12 +9,14 @@ import { DebugCaptureDialog } from "@/components/debug/debug-capture-dialog";
 import { UserMenu } from "./user-menu";
 import { ConnectionStatus } from "@/components/ui/connection-status";
 import { useWsStore } from "@/lib/stores/ws-store";
+import { useT } from "@/lib/i18n";
 
 export function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const connect = useWsStore((s) => s.connect);
   const disconnect = useWsStore((s) => s.disconnect);
+  const t = useT();
 
   // 全局 WebSocket 连接：进入 DashboardLayout 就连接，离开就断开
   useEffect(() => {
@@ -60,7 +62,7 @@ export function DashboardLayout() {
       <div className="flex flex-1 flex-col min-w-0">
         {/* 移动端顶栏：hamburger + 标题 + 连接状态 + 用户菜单 */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="size-11 md:size-auto active:scale-90 transition-transform" aria-label={mobileOpen ? "Close menu" : "Open menu"}>
+          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="size-11 md:size-auto active:scale-90 transition-transform" aria-label={mobileOpen ? t("userMenu.closeMenu") : t("userMenu.openMenu")}>
             <div className="relative size-5">
               <Menu className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-90 opacity-0 scale-75" : "rotate-0 opacity-100 scale-100")} />
               <X className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-0 opacity-100 scale-100" : "-rotate-90 opacity-0 scale-75")} />

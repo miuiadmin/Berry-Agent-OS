@@ -4,10 +4,12 @@ import { useTheme } from "@/lib/theme";
 import { highlight } from "@/lib/highlighter";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 function CopyBtn({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const t = useT();
   useEffect(() => { return () => { clearTimeout(timerRef.current); }; }, []);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {
@@ -26,7 +28,7 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
         "inline-flex items-center gap-1 rounded-md px-2 py-2.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
         className,
       )}
-      aria-label="Copy code"
+      aria-label={t("chat.copy")}
     >
       {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
     </button>

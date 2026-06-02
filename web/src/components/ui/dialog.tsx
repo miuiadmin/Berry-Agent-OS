@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 interface DialogProps {
   open: boolean;
@@ -73,6 +74,7 @@ export function DialogContent({
   className?: string;
   onClose?: () => void;
 }) {
+  const t = useT();
   return (
     <div
       className={cn(
@@ -83,7 +85,7 @@ export function DialogContent({
       {onClose && (
         <button
           onClick={onClose}
-          aria-label="Close dialog"
+          aria-label={t("common.close")}
           className="absolute right-3 top-3 rounded-md p-2.5 md:p-1 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center text-muted-foreground hover:text-foreground active:bg-accent transition-colors"
         >
           <X className="size-4" />

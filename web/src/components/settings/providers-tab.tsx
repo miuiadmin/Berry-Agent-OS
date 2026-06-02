@@ -90,19 +90,19 @@ interface CatalogResponse {
   models: ModelEntry[];
 }
 
-const PROVIDER_KIND_LABELS: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  "openai-compatible": "OpenAI Compatible",
-  "google-gemini": "Google Gemini",
-  "azure-openai": "Azure OpenAI",
-  bedrock: "AWS Bedrock",
+const PROVIDER_KIND_LABEL_KEYS: Record<string, string> = {
+  anthropic: "providers.anthropic",
+  openai: "providers.openai",
+  "openai-compatible": "providers.openaiCompatible",
+  "google-gemini": "providers.googleGemini",
+  "azure-openai": "providers.azureOpenai",
+  bedrock: "providers.awsBedrock",
 };
 
 const TIER_CONFIG = [
-  { key: "fast" as const, label: "Fast", icon: Zap, color: "text-green-500" },
-  { key: "default" as const, label: "Default", icon: Brain, color: "text-blue-500" },
-  { key: "high" as const, label: "High", icon: Crown, color: "text-amber-500" },
+  { key: "fast" as const, labelKey: "providers.tierFast", icon: Zap, color: "text-green-500" },
+  { key: "default" as const, labelKey: "providers.tierDefault", icon: Brain, color: "text-blue-500" },
+  { key: "high" as const, labelKey: "providers.tierHigh", icon: Crown, color: "text-amber-500" },
 ];
 
 // ─── Shared select styling ───────────────────────────────────────
@@ -198,9 +198,9 @@ export function ProvidersTab() {
     },
     onSuccess: (data) => {
       if (data.ok) {
-        toast.success(data.message ?? "Connection successful");
+        toast.success(data.message ?? t("providers.connectionSuccessful"));
       } else {
-        toast.error(data.error ?? "Connection failed");
+        toast.error(data.error ?? t("providers.connectionFailed"));
       }
     },
     onError: (err: Error) => {
@@ -350,9 +350,9 @@ export function ProvidersTab() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div>
-            <CardTitle className="text-base">Provider Channels</CardTitle>
+            <CardTitle className="text-base">{t("providers.providerChannels")}</CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              Configure LLM providers with API keys and model catalogs
+              {t("providers.providerChannelsDesc")}
             </p>
           </div>
           <Button
@@ -362,7 +362,7 @@ export function ProvidersTab() {
             className="min-h-[44px] md:min-h-0"
           >
             <Plus className="size-4" />
-            Add Channel
+            {t("providers.addChannel")}
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -370,7 +370,7 @@ export function ProvidersTab() {
             <div className="rounded-lg border border-dashed border-border p-6 text-center">
               <Server className="size-8 text-muted-foreground/40 mx-auto mb-2" />
               <p className="text-sm text-muted-foreground">
-                No provider channels configured yet.
+                {t("providers.noChannels")}
               </p>
               <Button
                 variant="outline"
@@ -379,7 +379,7 @@ export function ProvidersTab() {
                 className="mt-3 min-h-[44px] md:min-h-0"
               >
                 <Plus className="size-4" />
-                Add your first channel
+                {t("providers.addFirstChannel")}
               </Button>
             </div>
           ) : (
@@ -401,9 +401,9 @@ export function ProvidersTab() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div>
-            <CardTitle className="text-base">Tier Mapping</CardTitle>
+            <CardTitle className="text-base">{t("providers.tierMapping")}</CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              Map fast / default / high tiers to channel + model
+              {t("providers.tierMappingDesc")}
             </p>
           </div>
           <Button
@@ -414,11 +414,11 @@ export function ProvidersTab() {
             className="min-h-[44px] md:min-h-0"
           >
             <Save className="size-4" />
-            Save Tiers
+            {t("providers.saveTiers")}
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          {TIER_CONFIG.map(({ key, label, icon: Icon, color }) => {
+          {TIER_CONFIG.map(({ key, labelKey, icon: Icon, color }) => {
             const channel = selectedTierChannel[key] ?? "";
             const selectedCh = channels.find((c) => c.id === channel);
             const models = selectedCh?.models ?? [];
@@ -431,7 +431,7 @@ export function ProvidersTab() {
               >
                 <div className="flex items-center gap-2">
                   <Icon className={cn("size-4 shrink-0", color)} />
-                  <span className="text-sm font-medium">{label}</span>
+                  <span className="text-sm font-medium">{t(labelKey)}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div className="relative">
@@ -447,7 +447,7 @@ export function ProvidersTab() {
                       }}
                       className={SELECT_BASE}
                     >
-                      <option value="">Not configured</option>
+                      <option value="">{t("chat.notConfigured")}</option>
                       {channels.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name} ({c.kind})
@@ -469,7 +469,7 @@ export function ProvidersTab() {
                       disabled={!channel || models.length === 0}
                       className={SELECT_BASE}
                     >
-                      <option value="">Select model...</option>
+                      <option value="">{t("providers.selectModel")}</option>
                       {models.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.name}
@@ -491,8 +491,8 @@ export function ProvidersTab() {
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
-        title="Delete channel"
-        description={`Are you sure you want to delete "${deleteTargetChannel?.name ?? deleteTarget}"? This cannot be undone.`}
+        title={t("providers.deleteChannel")}
+        description={t("providers.deleteChannelConfirm", { name: deleteTargetChannel?.name ?? (deleteTarget as string) })}
         actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) deleteMutation.mutate(deleteTarget);
@@ -571,6 +571,7 @@ function ChannelFormDialog({
   isPending: boolean;
 }) {
   const isEdit = mode === "edit";
+  const t = useT();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -581,11 +582,11 @@ function ChannelFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent onClose={() => onOpenChange(false)} className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Channel" : "Add Channel"}</DialogTitle>
+          <DialogTitle>{isEdit ? t("providers.editChannel") : t("providers.addChannelTitle")}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update channel settings. Kind and ID cannot be changed."
-              : "Configure a new LLM provider channel."}
+              ? t("providers.editChannelDesc")
+              : t("providers.addChannelDesc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -593,7 +594,7 @@ function ChannelFormDialog({
           {/* Kind */}
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              Provider Kind
+              {t("providers.providerKind")}
             </label>
             <div className="relative">
               <select
@@ -605,10 +606,10 @@ function ChannelFormDialog({
                 disabled={isEdit}
                 className={SELECT_BASE}
               >
-                <option value="">Select kind...</option>
+                <option value="">{t("providers.selectKind")}</option>
                 {kinds.map((k) => (
                   <option key={k} value={k}>
-                    {PROVIDER_KIND_LABELS[k] ?? k}
+                    {t(PROVIDER_KIND_LABEL_KEYS[k] ?? k)}
                   </option>
                 ))}
               </select>
@@ -619,13 +620,13 @@ function ChannelFormDialog({
           {/* ID */}
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              Channel ID
+              {t("providers.channelId")}
             </label>
             <Input
               value={formId}
               onChange={(e) => setFormId(e.target.value)}
               disabled={isEdit}
-              placeholder="e.g. my-anthropic"
+              placeholder={t("providers.channelIdPlaceholder")}
               className="h-10 md:h-8 disabled:opacity-50"
             />
           </div>
@@ -633,12 +634,12 @@ function ChannelFormDialog({
           {/* Name */}
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              Display Name
+              {t("providers.displayName")}
             </label>
             <Input
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
-              placeholder="e.g. My Anthropic"
+              placeholder={t("providers.displayNamePlaceholder")}
               className="h-10 md:h-8"
             />
           </div>
@@ -646,12 +647,12 @@ function ChannelFormDialog({
           {/* Base URL */}
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              Base URL (optional)
+              {t("providers.baseUrl")}
             </label>
             <Input
               value={formBaseUrl}
               onChange={(e) => setFormBaseUrl(e.target.value)}
-              placeholder="https://api.example.com/v1"
+              placeholder={t("providers.baseUrlPlaceholder")}
               className="h-10 md:h-8"
             />
           </div>
@@ -659,7 +660,7 @@ function ChannelFormDialog({
           {/* API Key */}
           <div className="grid gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              API Key {isEdit && "(leave blank to keep current)"}
+              {t("providers.apiKey")} {isEdit && t("providers.apiKeyKeepCurrent")}
             </label>
             <Input
               type="password"
@@ -675,7 +676,7 @@ function ChannelFormDialog({
             <div className="flex items-center gap-2">
               <Switch checked={formEnabled} onCheckedChange={setFormEnabled} />
               <span className="text-sm text-muted-foreground">
-                {formEnabled ? "Enabled" : "Disabled"}
+                {formEnabled ? t("common.enabled") : t("common.disabled")}
               </span>
             </div>
           )}
@@ -684,7 +685,7 @@ function ChannelFormDialog({
           {!isEdit && formKind && catalogModels.length > 0 && (
             <div className="rounded-lg border border-border p-3 max-h-40 overflow-y-auto">
               <p className="text-[11px] font-medium text-muted-foreground mb-2">
-                Built-in models for {PROVIDER_KIND_LABELS[formKind] ?? formKind}:
+                {t("providers.builtinModels", { kind: t(PROVIDER_KIND_LABEL_KEYS[formKind] ?? formKind) })}:
               </p>
               <div className="space-y-1">
                 {catalogModels.map((m) => (
@@ -706,7 +707,7 @@ function ChannelFormDialog({
               onClick={() => onOpenChange(false)}
               className="w-full sm:w-auto min-h-[44px] md:min-h-0"
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="submit"
@@ -718,7 +719,7 @@ function ChannelFormDialog({
               }
               className="w-full sm:w-auto min-h-[44px] md:min-h-0"
             >
-              {isPending ? "Saving..." : isEdit ? "Update" : "Create"}
+              {isPending ? t("common.saving") : isEdit ? t("common.update") : t("common.create")}
             </Button>
           </DialogFooter>
         </form>
@@ -767,22 +768,22 @@ function ChannelCard({
           )}
           <span className="text-sm font-medium truncate flex-1">{channel.name}</span>
           <span className="text-[11px] text-muted-foreground font-mono shrink-0 hidden sm:inline">
-            {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
+            {t(PROVIDER_KIND_LABEL_KEYS[channel.kind] ?? channel.kind)}
           </span>
 
           {/* Desktop: actions inline */}
           <span className="text-xs text-muted-foreground shrink-0 hidden md:inline">
-            {channel.modelCount} models
+            {t("providers.modelsCount", { count: String(channel.modelCount) })}
           </span>
           <div className="hidden md:flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7" aria-label="Edit channel">
+            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7" aria-label={t("providers.editChannel")}>
               <Pencil className="size-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7 text-muted-foreground" aria-label="Delete channel">
+            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7 text-muted-foreground" aria-label={t("providers.deleteChannel")}>
               <Trash2 className="size-3.5" />
             </Button>
             <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-7">
-              {isTesting ? "Testing..." : "Test"}
+              {isTesting ? t("providers.testChannelRunning") : t("providers.testChannel")}
             </Button>
           </div>
         </div>
@@ -790,16 +791,16 @@ function ChannelCard({
         {/* Mobile: actions row */}
         <div className="flex items-center gap-1 mt-1.5 pl-10 md:hidden">
           <span className="text-xs text-muted-foreground mr-auto">
-            {channel.modelCount} models · {PROVIDER_KIND_LABELS[channel.kind] ?? channel.kind}
+            {t("providers.modelsCount", { count: String(channel.modelCount) })} · {t(PROVIDER_KIND_LABEL_KEYS[channel.kind] ?? channel.kind)}
           </span>
-          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8" aria-label="Edit channel">
+          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8" aria-label={t("providers.editChannel")}>
             <Pencil className="size-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8 text-muted-foreground" aria-label="Delete channel">
+          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8 text-muted-foreground" aria-label={t("providers.deleteChannel")}>
             <Trash2 className="size-3.5" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-8">
-            {isTesting ? "..." : "Test"}
+            {isTesting ? "..." : t("providers.testChannel")}
           </Button>
         </div>
       </div>
@@ -808,10 +809,10 @@ function ChannelCard({
       {expanded && channel.models.length > 0 && (
         <div className="border-t border-border px-3 py-2 max-h-64 overflow-y-auto">
           <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 text-xs">
-            <span className="font-medium text-muted-foreground">Model</span>
-            <span className="font-medium text-muted-foreground text-right">Context</span>
-            <span className="font-medium text-muted-foreground text-right">Max Out</span>
-            <span className="font-medium text-muted-foreground text-right">Price (in/out)</span>
+            <span className="font-medium text-muted-foreground">{t("providers.model")}</span>
+            <span className="font-medium text-muted-foreground text-right">{t("providers.context")}</span>
+            <span className="font-medium text-muted-foreground text-right">{t("providers.maxOut")}</span>
+            <span className="font-medium text-muted-foreground text-right">{t("providers.priceInOut")}</span>
 
             {channel.models.map((m) => (
               <ModelRow key={m.id} model={m} />
@@ -822,7 +823,7 @@ function ChannelCard({
 
       {expanded && channel.models.length === 0 && (
         <div className="border-t border-border px-3 py-3 text-xs text-muted-foreground text-center">
-          No models configured for this channel
+          {t("providers.noModelsForChannel")}
         </div>
       )}
     </div>

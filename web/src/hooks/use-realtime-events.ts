@@ -3,10 +3,12 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWsStore } from "@/lib/stores/ws-store";
+import { useT } from "@/lib/i18n";
 
 export function useRealtimeEvents() {
   const queryClient = useQueryClient();
   const subscribe = useWsStore((s) => s.subscribe);
+  const t = useT();
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -25,7 +27,7 @@ export function useRealtimeEvents() {
       subscribe("task.failed", (payload) => {
         queryClient.invalidateQueries({ queryKey: ["tasks"] });
         const p = payload as { targetAgent?: string; error?: string };
-        toast.error(`Task failed${p.targetAgent ? ` (${p.targetAgent})` : ""}`, {
+        toast.error(p.targetAgent ? t("events.taskFailedAgent", { agent: p.targetAgent }) : t("events.taskFailed"), {
           description: p.error,
         });
       })
@@ -54,7 +56,7 @@ export function useRealtimeEvents() {
       subscribe("agent.crashed", (payload) => {
         queryClient.invalidateQueries({ queryKey: ["agents"] });
         const p = payload as { name?: string; error?: string };
-        toast.error(`Agent crashed: ${p.name ?? "unknown"}`, {
+        toast.error(t("events.agentCrashed", { name: p.name ?? "unknown" }), {
           description: p.error,
         });
       })
@@ -95,7 +97,7 @@ export function useRealtimeEvents() {
         queryClient.invalidateQueries({ queryKey: ["scheduler-jobs"] });
         queryClient.invalidateQueries({ queryKey: ["scheduler-queue"] });
         const p = payload as { name?: string; error?: string };
-        toast.error(`Scheduled job failed: ${p.name ?? "unknown"}`, {
+        toast.error(t("events.jobFailed", { name: p.name ?? "unknown" }), {
           description: p.error,
         });
       })
@@ -103,8 +105,8 @@ export function useRealtimeEvents() {
     unsubs.push(
       subscribe("scheduler.chain_approval_pending", () => {
         queryClient.invalidateQueries({ queryKey: ["scheduler-jobs"] });
-        toast.info("Chain approval pending", {
-          description: "A scheduled chain step requires your approval.",
+        toast.info(t("events.chainApproval"), {
+          description: t("events.chainApprovalDesc"),
         });
       })
     );
@@ -123,7 +125,7 @@ export function useRealtimeEvents() {
     unsubs.push(
       subscribe("mcp.failed", (payload) => {
         const p = payload as { serverId?: string; error?: string };
-        toast.error(`MCP server failed: ${p.serverId ?? "unknown"}`, {
+        toast.error(t("events.mcpServerFailed", { serverId: p.serverId ?? "unknown" }), {
           description: p.error,
         });
       })
@@ -137,5 +139,5 @@ export function useRealtimeEvents() {
     return () => {
       for (const unsub of unsubs) unsub();
     };
-  }, [subscribe, queryClient]);
+  }, [subscribe, queryClient, t]);
 }

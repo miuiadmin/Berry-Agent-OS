@@ -3,6 +3,7 @@
 import { useEffect, useCallback, useState } from "react";
 import { X, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 interface ImageLightboxProps {
   src: string;
@@ -14,6 +15,7 @@ interface ImageLightboxProps {
 export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const t = useT();
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -46,14 +48,14 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
       <button
         onClick={onClose}
         className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 z-10 flex size-11 md:size-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 active:bg-black/70 transition-colors"
-        aria-label="Close"
+        aria-label={t("common.close")}
       >
         <X className="size-5" />
       </button>
       {error ? (
         <div className="flex flex-col items-center gap-3 text-white/60">
           <ImageOff className="size-12" />
-          <span className="text-sm">Failed to load image</span>
+          <span className="text-sm">{t("lightbox.failedToLoad")}</span>
         </div>
       ) : (
         <img
@@ -84,6 +86,7 @@ export function ClickableImage({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const t = useT();
 
   if (!src) return null;
 
@@ -91,7 +94,7 @@ export function ClickableImage({
     return (
       <div className={cn("flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground", className)}>
         <ImageOff className="size-4" />
-        <span>{alt || "Image failed to load"}</span>
+        <span>{alt || t("lightbox.imageFailedToLoad")}</span>
       </div>
     );
   }

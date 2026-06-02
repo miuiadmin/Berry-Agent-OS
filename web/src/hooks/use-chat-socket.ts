@@ -8,11 +8,10 @@ import {
 } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
 import type { ServerMessage } from "@/lib/types/ws-messages";
+import { useT } from "@/lib/i18n";
 
 /** 流式响应超时时间（毫秒） */
 const STREAMING_TIMEOUT_MS = 90_000;
-/** 超时提示文案 */
-const STREAMING_TIMEOUT_MSG = "Response timed out — backend may be unresponsive. Check backend logs.";
 
 // ─── 辅助函数 ─────────────────────────────────────────────────
 
@@ -50,6 +49,7 @@ export function useChatSocket() {
   const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission } = useChatStore();
   const { send, onMessage, status } = useWsStore();
   const queryClient = useQueryClient();
+  const t = useT();
 
   /** 流式响应超时定时器 */
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>( null);
@@ -61,8 +61,8 @@ export function useChatSocket() {
   /** 重置超时定时器（每次收到数据后调用） */
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setLastError(STREAMING_TIMEOUT_MSG), STREAMING_TIMEOUT_MS);
-  }, []);
+    timerRef.current = setTimeout(() => setLastError(t("chat.responseTimeout")), STREAMING_TIMEOUT_MS);
+  }, [t]);
 
   /** 清除超时定时器（响应完成/失败时调用） */
   const clearTimer = useCallback(() => {
@@ -132,7 +132,7 @@ export function useChatSocket() {
         const event = data.event as string;
         if ((event === "task.failed" || event === "task.timeout") && useChatStore.getState().isStreaming) {
           const payload = data.payload as { error?: string } | undefined;
-          setLastError(payload?.error ?? "Task failed");
+          setLastError(payload?.error ?? t("chat.taskFailed"));
           clearTimer();
         }
         if ((event === "task.progress" || event === "daemon.task.progress") && useChatStore.getState().isStreaming) {
@@ -191,7 +191,7 @@ export function useChatSocket() {
           break;
         case "agent_handoff": {
           const hm = msg as unknown as { from: string; to: string; intent: string };
-          setLastProgress(`交由 ${hm.to} 处理`);
+          setLastProgress(t("chat.delegatedTo", { agent: hm.to }));
           resetTimer();
           break;
         }
@@ -232,7 +232,7 @@ export function useChatSocket() {
           break;
         }
         case "error":
-          setLastError(msg.error ?? msg.message ?? "Unknown error");
+          setLastError(msg.error ?? msg.message ?? t("chat.unknownError"));
           clearTimer();
           break;
         case "cancelled":
@@ -262,7 +262,7 @@ export function useChatSocket() {
     try {
       send({ type: "message", text, sessionId, attachments, permissionMode: useChatStore.getState().permissionMode });
     } catch {
-      setLastError("Failed to send message");
+      setLastError(t("chat.failedToSendMessage"));
       clearTimer();
     }
   }, [sessionId, addMessage, setStreaming, send, resetTimer, clearTimer]);
@@ -275,7 +275,7 @@ export function useChatSocket() {
       // 快速模型配置检查：使用 React Query 缓存，避免每次都请求
       const cached = queryClient.getQueryData<{ channels?: Array<{ configured?: boolean; modelCount?: number }> }>(["providers", "channels"]);
       if (cached?.channels && !cached.channels.some((ch) => ch.configured || (ch.modelCount ?? 0) > 0)) {
-        setLastError("模型尚未配置。请先在设置页面添加 API 密钥和模型配置。");
+        setLastError(t("chat.modelNotConfigured"));
         return;
       }
 

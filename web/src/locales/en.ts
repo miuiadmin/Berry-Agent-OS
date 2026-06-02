@@ -502,6 +502,26 @@ const en: Record<string, string> = {
   // ===== Task Card (Mobile) =====
   "taskCard.cancelTask": "Cancel task",
   "taskCard.session": "Session",
+
+  // ===== Chat WS hook =====
+  "chat.responseTimeout": "Response timed out — backend may be unresponsive. Check backend logs.",
+  "chat.taskFailed": "Task failed",
+  "chat.delegatedTo": "Delegated to {agent}",
+  "chat.modelNotConfigured": "Model not configured. Please add an API key and model in Settings.",
+  "chat.failedToSendMessage": "Failed to send message",
+
+  // ===== Realtime events hook =====
+  "events.taskFailed": "Task failed",
+  "events.taskFailedAgent": "Task failed ({agent})",
+  "events.agentCrashed": "Agent crashed: {name}",
+  "events.jobFailed": "Scheduled job failed: {name}",
+  "events.chainApproval": "Chain approval pending",
+  "events.chainApprovalDesc": "A scheduled chain step requires your approval.",
+  "events.mcpServerFailed": "MCP server failed: {serverId}",
+
+  // ===== Image lightbox =====
+  "lightbox.failedToLoad": "Failed to load image",
+  "lightbox.imageFailedToLoad": "Image failed to load",
 };
 
 export default en;

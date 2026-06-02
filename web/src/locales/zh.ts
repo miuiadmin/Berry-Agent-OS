@@ -502,6 +502,26 @@ const zh: Record<string, string> = {
   // ===== 任务卡片（移动端） =====
   "taskCard.cancelTask": "取消任务",
   "taskCard.session": "会话",
+
+  // ===== 对话 WS hook =====
+  "chat.responseTimeout": "响应超时 — 后端可能无响应，请检查后端日志",
+  "chat.taskFailed": "任务失败",
+  "chat.delegatedTo": "交由 {agent} 处理",
+  "chat.modelNotConfigured": "模型尚未配置。请先在设置页面添加 API 密钥和模型配置。",
+  "chat.failedToSendMessage": "发送消息失败",
+
+  // ===== 实时事件 hook =====
+  "events.taskFailed": "任务失败",
+  "events.taskFailedAgent": "任务失败（{agent}）",
+  "events.agentCrashed": "智能体崩溃：{name}",
+  "events.jobFailed": "定时任务失败：{name}",
+  "events.chainApproval": "链式审批待处理",
+  "events.chainApprovalDesc": "一个计划中的链式步骤需要您的审批。",
+  "events.mcpServerFailed": "MCP 服务器失败：{serverId}",
+
+  // ===== 图片灯箱 =====
+  "lightbox.failedToLoad": "图片加载失败",
+  "lightbox.imageFailedToLoad": "图片加载失败",
 };
 
 export default zh;
