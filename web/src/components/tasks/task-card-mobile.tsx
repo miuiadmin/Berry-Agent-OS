@@ -48,7 +48,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           <Button
             variant="destructive"
             size="sm"
-            className="h-8 md:h-6 px-3 md:px-2 text-xs md:text-[10px] shrink-0 min-w-[44px]"
+            className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0 min-h-[44px] md:min-h-0 min-w-[44px]"
             onClick={(e) => {
               e.stopPropagation();
               onCancel();

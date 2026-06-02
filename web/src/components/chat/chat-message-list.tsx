@@ -37,7 +37,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     <button
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
+        "inline-flex items-center gap-1 rounded-md px-2.5 py-2.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
         className
       )}
       aria-label="Copy"
@@ -95,7 +95,7 @@ function EditableMessage({
       <div className="flex items-center gap-2 justify-end">
         <button
           onClick={onCancel}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+          className="inline-flex items-center gap-1 rounded-md px-3 py-2 md:px-2 md:py-1 text-xs text-muted-foreground hover:bg-accent transition-colors min-h-[44px] md:min-h-0"
         >
           <X className="size-3" />
           Cancel
@@ -106,7 +106,7 @@ function EditableMessage({
             if (trimmed) onSubmit(trimmed);
           }}
           disabled={!text.trim()}
-          className="inline-flex items-center gap-1 rounded-md bg-brand px-2 py-1 text-xs text-brand-foreground hover:bg-brand/90 transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md bg-brand px-3 py-2 md:px-2 md:py-1 text-xs text-brand-foreground hover:bg-brand/90 transition-colors disabled:opacity-50 min-h-[44px] md:min-h-0"
         >
           <SendHorizontal className="size-3" />
           Send
@@ -242,14 +242,14 @@ function MessageBubble({
               <>
                 <button
                   onClick={() => setEditing(true)}
-                  className="inline-flex items-center rounded-md p-2 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
+                  className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
                   aria-label="Edit message"
                 >
                   <Pencil className="size-3" />
                 </button>
                 <button
                   onClick={() => onDelete?.(message.id)}
-                  className="inline-flex items-center rounded-md p-2 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
+                  className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
                   aria-label="Delete message"
                 >
                   <Trash2 className="size-3" />
@@ -259,9 +259,9 @@ function MessageBubble({
           </div>
         )}
       </div>
-      {!isUser && (message.thinkingSteps?.length > 0 || message.reasoning) && (
+      {!isUser && ((message.thinkingSteps && message.thinkingSteps.length > 0) || message.reasoning) && (
         <div className="max-w-[90%] sm:max-w-[80%] mt-1">
-          <ThinkingProcess steps={message.thinkingSteps} reasoning={message.reasoning} isActive={isStreaming} />
+          <ThinkingProcess steps={message.thinkingSteps ?? []} reasoning={message.reasoning} isActive={isStreaming} />
         </div>
       )}
       {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
@@ -347,7 +347,7 @@ export function ChatMessageList({
       <button
         onClick={scrollToBottom}
         className={cn(
-          "absolute bottom-4 right-4 z-10 flex size-10 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
+          "absolute bottom-4 right-4 z-10 flex size-11 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
           showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
         )}
         aria-label="Scroll to bottom"

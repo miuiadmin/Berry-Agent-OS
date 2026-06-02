@@ -69,7 +69,6 @@ interface ChatState {
   sessionId: string | null;
   messages: ChatMessage[];
   isStreaming: boolean;
-  currentTaskId: string | null;
   pendingDelegation: DelegationRequest | null;
   pendingPermission: PermissionConfirmRequest | null;
   permissionMode: 'ask' | 'allow-all' | 'deny-all';
@@ -78,10 +77,8 @@ interface ChatState {
   addMessage: (msg: ChatMessage) => void;
   updateLastMessage: (updater: (msg: ChatMessage) => Partial<ChatMessage>) => void;
   setStreaming: (v: boolean) => void;
-  setCurrentTaskId: (id: string | null) => void;
   clearMessages: () => void;
   removeMessage: (id: string) => void;
-  editMessage: (id: string, content: string) => void;
   removeMessagesAfter: (id: string) => void;
   setPendingDelegation: (req: DelegationRequest | null) => void;
   setPendingPermission: (req: PermissionConfirmRequest | null) => void;
@@ -95,7 +92,6 @@ export const useChatStore = create<ChatState>()(
       sessionId: null,
       messages: [],
       isStreaming: false,
-      currentTaskId: null,
       pendingDelegation: null,
       pendingPermission: null,
       permissionMode: 'ask',
@@ -117,14 +113,9 @@ export const useChatStore = create<ChatState>()(
         }),
 
       setStreaming: (v) => set({ isStreaming: v }),
-      setCurrentTaskId: (id) => set({ currentTaskId: id }),
       clearMessages: () => set({ messages: [], isStreaming: false, pendingDelegation: null, pendingPermission: null }),
 
       removeMessage: (id) => set((s) => ({ messages: s.messages.filter((m) => m.id !== id) })),
-      editMessage: (id, content) =>
-        set((s) => ({
-          messages: s.messages.map((m) => (m.id === id ? { ...m, content } : m)),
-        })),
       removeMessagesAfter: (id) =>
         set((s) => {
           const idx = s.messages.findIndex((m) => m.id === id);

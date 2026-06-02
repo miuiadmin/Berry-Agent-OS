@@ -58,7 +58,7 @@ export default function LogsPage() {
         <select
           value={level}
           onChange={(e) => setLevel(e.target.value)}
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
         >
           <option value="ALL">ALL</option>
           <option value="DEBUG">DEBUG</option>
@@ -78,7 +78,7 @@ export default function LogsPage() {
         <select
           value={lines}
           onChange={(e) => setLines(Number(e.target.value))}
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
         >
           <option value={50}>50</option>
           <option value={100}>100</option>

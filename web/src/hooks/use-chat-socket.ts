@@ -33,7 +33,7 @@ function toPermissionRequest(msg: Extract<ServerMessage, { type: "permission.con
 // --- Hook ---
 
 export function useChatSocket() {
-  const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission } = useChatStore();
+  const { sessionId, setStreaming, setPendingDelegation, setPendingPermission } = useChatStore();
   const { connect, disconnect, send, onMessage, status } = useWsStore();
   const queryClient = useQueryClient();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,7 +139,8 @@ export function useChatSocket() {
           break;
         }
         case "result": {
-          const response = (msg as unknown as { response?: string }).response;
+          const resultMsg = msg as Extract<ServerMessage, { type: "result" }>;
+          const response = resultMsg.content;
           const current = useChatStore.getState().messages;
           const lastMsg = current[current.length - 1];
           if (response && lastMsg && !lastMsg.content.trim()) {

@@ -196,7 +196,7 @@ function PermissionModeSelector() {
     <select
       value={mode}
       onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all')}
-      className="h-7 rounded-md border border-input bg-background px-1.5 text-[11px] text-muted-foreground"
+      className="h-11 md:h-7 rounded-md border border-input bg-background px-1.5 text-[11px] text-muted-foreground min-h-[44px] md:min-h-0"
       title="Permission mode"
     >
       <option value="ask">Ask</option>
@@ -241,7 +241,7 @@ function ModelSelector() {
     <div className="relative">
       <button
         onClick={handleOpen}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[36px] md:min-h-0"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <span className="max-w-[100px] md:max-w-[140px] truncate text-[11px] md:text-xs">{currentModel}</span>
         <ChevronDown className="size-3" />

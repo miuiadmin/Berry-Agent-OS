@@ -50,6 +50,7 @@ export default function NotificationsPage() {
       qc.invalidateQueries({ queryKey: ["notifications"] });
       qc.invalidateQueries({ queryKey: ["notification-count"] });
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   // Mark all read

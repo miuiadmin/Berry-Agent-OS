@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
-import { ListTodo, ChevronDown, ChevronRight, XCircle, Filter } from "lucide-react";
+import { ListTodo, ChevronRight, XCircle, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STATUS_OPTIONS = ["all", "created", "dispatched", "running", "completed", "failed", "cancelled", "timeout", "resumable"] as const;

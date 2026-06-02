@@ -150,7 +150,7 @@ function ToolbarButton({
       disabled={disabled}
       aria-label={ariaLabel}
       className={cn(
-        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-all duration-150 min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0 active:scale-90",
+        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-all duration-150 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 active:scale-90",
         variant === "destructive"
           ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
           : "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent",

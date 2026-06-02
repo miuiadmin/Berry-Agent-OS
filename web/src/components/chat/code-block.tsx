@@ -20,7 +20,7 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
     <button
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
+        "inline-flex items-center gap-1 rounded-md px-2 py-2.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
         className,
       )}
       aria-label="Copy code"

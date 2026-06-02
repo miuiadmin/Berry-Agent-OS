@@ -211,6 +211,7 @@ export default function SchedulerPage() {
       toast.success("Job paused");
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const resumeMut = useMutation({
@@ -219,6 +220,7 @@ export default function SchedulerPage() {
       toast.success("Job resumed");
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const triggerMut = useMutation({
@@ -228,6 +230,7 @@ export default function SchedulerPage() {
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
       qc.invalidateQueries({ queryKey: ["scheduler-queue"] });
     },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const jobs: SchedulerJob[] = jobsQuery.data ?? [];
