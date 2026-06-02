@@ -37,6 +37,7 @@ export function DebugCaptureButton({ className }: { className?: string }) {
         className,
       )}
       title={isCapturing ? "Stop capturing logs" : "Start capturing logs"}
+      aria-label={isCapturing ? "Stop capturing logs" : "Start capturing logs"}
     >
       <Bug className={cn("size-5 md:size-4", isCapturing && "animate-pulse")} />
     </Button>
