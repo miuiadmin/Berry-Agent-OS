@@ -24,7 +24,7 @@ function formatTime(ts: number): string {
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { return () => { clearTimeout(timerRef.current); }; }, []);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {

@@ -29,7 +29,7 @@ function formatSize(bytes: number): string {
 export function DebugCaptureDialog() {
   const { showResultDialog, lastResult, dismissDialog } = useDebugCaptureStore();
   const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
