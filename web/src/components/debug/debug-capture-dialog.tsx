@@ -1,5 +1,5 @@
 import { Copy, Check } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +29,11 @@ function formatSize(bytes: number): string {
 export function DebugCaptureDialog() {
   const { showResultDialog, lastResult, dismissDialog } = useDebugCaptureStore();
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
 
   if (!lastResult) return null;
 
@@ -37,7 +42,8 @@ export function DebugCaptureDialog() {
       await navigator.clipboard.writeText(lastResult.path);
       setCopied(true);
       toast.success("Path copied to clipboard");
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error("Failed to copy");
     }

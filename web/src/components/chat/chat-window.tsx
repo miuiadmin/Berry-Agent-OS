@@ -196,7 +196,7 @@ function PermissionModeSelector() {
     <select
       value={mode}
       onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all')}
-      className="h-11 md:h-7 rounded-md border border-input bg-background px-1.5 text-[11px] text-muted-foreground min-h-[44px] md:min-h-0"
+      className="h-11 md:h-7 rounded-md border border-input bg-background px-1.5 text-[16px] md:text-[11px] text-muted-foreground min-h-[44px] md:min-h-0"
       title="Permission mode"
     >
       <option value="ask">Ask</option>
@@ -431,7 +431,8 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
-    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    const related = e.relatedTarget as Node | null;
+    if (related && e.currentTarget.contains(related)) return;
     setDragOver(false);
   }, []);
 

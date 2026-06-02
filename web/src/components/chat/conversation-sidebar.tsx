@@ -108,7 +108,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
       <div className="border-b p-3 space-y-2">
         <button
           onClick={handleNewChat}
-          className="w-full rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
+          className="w-full rounded-lg border border-dashed border-border px-3 py-2.5 md:py-2 text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
         >
           + New Conversation
         </button>
@@ -153,10 +153,10 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     }}
                     className="flex-1 bg-background border rounded px-2 py-1.5 min-h-[44px] md:min-h-0 md:px-1.5 md:py-0.5 text-[16px] md:text-xs outline-none focus:ring-1 focus:ring-ring"
                   />
-                  <button onClick={submitRename} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
+                  <button onClick={submitRename} aria-label="Save rename" className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
                     <Check className="size-3" />
                   </button>
-                  <button onClick={() => setEditingId(null)} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
+                  <button onClick={() => setEditingId(null)} aria-label="Cancel rename" className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
                     <X className="size-3" />
                   </button>
                 </div>

@@ -60,7 +60,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
     <div className="mb-1.5">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
