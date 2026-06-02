@@ -10,14 +10,20 @@ vi.mock('node:fs/promises', () => ({
   stat: vi.fn(),
 }));
 
+vi.mock('./read-tracker.js', () => ({
+  markFileRead: vi.fn(),
+}));
+
 import { readFile, writeFile, readdir, unlink, stat } from 'node:fs/promises';
 import { readFileTool, writeFileTool, listDirectoryTool, deleteFileTool } from './filesystem.js';
+import { markFileRead } from './read-tracker.js';
 
 const mockReadFile = vi.mocked(readFile);
 const mockWriteFile = vi.mocked(writeFile);
 const mockReaddir = vi.mocked(readdir);
 const mockUnlink = vi.mocked(unlink);
 const mockStat = vi.mocked(stat);
+const mockMarkFileRead = vi.mocked(markFileRead);
 
 describe('filesystem tools', () => {
   beforeEach(() => {
@@ -26,13 +32,11 @@ describe('filesystem tools', () => {
 
   describe('assertWithinBoundary (via readFileTool)', () => {
     it('allows paths within cwd', async () => {
-      const cwd = resolve('.');
-      const target = join(cwd, 'foo.txt');
       mockReadFile.mockResolvedValue('hello');
 
       const result = await readFileTool.execute({ path: 'foo.txt' });
       expect(result.isError).toBeUndefined();
-      expect(result.content).toBe('hello');
+      expect(result.content).toContain('1\thello');
     });
 
     it('rejects paths outside cwd via ../', async () => {
@@ -56,11 +60,47 @@ describe('filesystem tools', () => {
   });
 
   describe('readFileTool', () => {
-    it('returns file content on success', async () => {
-      mockReadFile.mockResolvedValue('content here');
+    it('returns file content with line numbers', async () => {
+      mockReadFile.mockResolvedValue('line one\nline two\nline three');
       const result = await readFileTool.execute({ path: 'test.txt' });
-      expect(result.content).toBe('content here');
+      expect(result.content).toContain('1\tline one');
+      expect(result.content).toContain('2\tline two');
+      expect(result.content).toContain('3\tline three');
       expect(result.isError).toBeUndefined();
+    });
+
+    it('marks file as read in tracker', async () => {
+      mockReadFile.mockResolvedValue('hello');
+      await readFileTool.execute({ path: 'test.txt' });
+      expect(mockMarkFileRead).toHaveBeenCalled();
+    });
+
+    it('supports startLine and endLine pagination', async () => {
+      const lines = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join('\n');
+      mockReadFile.mockResolvedValue(lines);
+      const result = await readFileTool.execute({ path: 'test.txt', startLine: 3, endLine: 5 });
+      expect(result.content).toContain('3\tline 3');
+      expect(result.content).toContain('5\tline 5');
+      expect(result.content).not.toContain('2\tline 2');
+      expect(result.content).not.toContain('6\tline 6');
+    });
+
+    it('supports limit parameter', async () => {
+      const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`).join('\n');
+      mockReadFile.mockResolvedValue(lines);
+      const result = await readFileTool.execute({ path: 'test.txt', limit: 5 });
+      expect(result.content).toContain('1\tline 1');
+      expect(result.content).toContain('5\tline 5');
+      expect(result.content).not.toContain('6\tline 6');
+    });
+
+    it('truncates large files and shows hint', async () => {
+      const lines = Array.from({ length: 3000 }, (_, i) => `line ${i + 1}`).join('\n');
+      mockReadFile.mockResolvedValue(lines);
+      const result = await readFileTool.execute({ path: 'big.txt' });
+      expect(result.content).toContain('共 3000 行');
+      expect(result.content).toContain('已显示前 2000 行');
+      expect(result.content).not.toContain('2001\t');
     });
 
     it('returns error for missing file', async () => {

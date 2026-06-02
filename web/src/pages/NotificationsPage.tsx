@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 type Filter = "unread" | "all" | "archived";
 
@@ -21,7 +22,9 @@ const FILTER_CONFIG: Record<Filter, { label: string; archived?: boolean }> = {
 };
 
 export default function NotificationsPage() {
-  useDocumentTitle("Notifications");
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
+  useDocumentTitle(t("notifications.title"));
   const qc = useQueryClient();
 
   const [filter, setFilter] = useState<Filter>("unread");
@@ -57,7 +60,7 @@ export default function NotificationsPage() {
   const readAllMut = useMutation({
     mutationFn: () => notificationsApi.markAllRead(),
     onSuccess: () => {
-      toast.success("All notifications marked as read");
+      toast.success(t("notifications.allMarkedRead"));
       qc.invalidateQueries({ queryKey: ["notifications"] });
       qc.invalidateQueries({ queryKey: ["notification-count"] });
     },
@@ -68,7 +71,7 @@ export default function NotificationsPage() {
   const archiveMut = useMutation({
     mutationFn: (id: string) => notificationsApi.archive(id),
     onSuccess: () => {
-      toast.success("Notification archived");
+      toast.success(t("notifications.notificationArchived"));
       qc.invalidateQueries({ queryKey: ["notifications"] });
       qc.invalidateQueries({ queryKey: ["notification-count"] });
     },
@@ -85,7 +88,7 @@ export default function NotificationsPage() {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             <Bell className="size-5 text-brand" />
-            Notifications
+            {t("notifications.title")}
             {unread > 0 && (
               <Badge variant="destructive" className="text-[11px]">
                 {unread}
@@ -93,7 +96,7 @@ export default function NotificationsPage() {
             )}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Stay updated on tasks, agents, and system events
+            {t("notifications.subtitle")}
           </p>
         </div>
         {unread > 0 && (
@@ -105,7 +108,7 @@ export default function NotificationsPage() {
             className="h-11 md:h-9"
           >
             <Check className="mr-1 size-4" />
-            Mark all read
+            {t("notifications.markAllRead")}
           </Button>
         )}
       </div>
@@ -114,10 +117,10 @@ export default function NotificationsPage() {
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
         <TabsList>
           <TabsTrigger value="unread">
-            Unread{unread > 0 ? ` (${unread})` : ""}
+            {t("notifications.unread")}{unread > 0 ? ` (${unread})` : ""}
           </TabsTrigger>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="archived">Archived</TabsTrigger>
+          <TabsTrigger value="all">{t("common.all")}</TabsTrigger>
+          <TabsTrigger value="archived">{t("notifications.archived")}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -129,13 +132,13 @@ export default function NotificationsPage() {
         {(notifications) => notifications.length === 0 ? (
           <EmptyState
             icon={Bell}
-            title="No notifications"
+            title={t("notifications.noNotifications")}
             description={
               filter === "unread"
-                ? "You're all caught up!"
+                ? t("notifications.allCaughtUp")
                 : filter === "archived"
-                  ? "No archived notifications."
-                  : "No notifications yet."
+                  ? t("notifications.noArchived")
+                  : t("notifications.noNotificationsDesc")
             }
           />
         ) : (
@@ -171,7 +174,7 @@ export default function NotificationsPage() {
                       </p>
                     )}
                     <p className="text-[11px] text-muted-foreground/70">
-                      {new Date(item.createdAt).toLocaleString()}
+                      {fmtDT(new Date(item.createdAt))}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
@@ -180,8 +183,8 @@ export default function NotificationsPage() {
                         variant="ghost"
                         size="icon"
                         className="size-11 md:size-8"
-                        title="Mark read"
-                        aria-label="Mark read"
+                        title={t("notifications.markRead")}
+                        aria-label={t("notifications.markRead")}
                         onClick={() => readMut.mutate(item.id)}
                       >
                         <Check className="size-3.5" />
@@ -192,8 +195,8 @@ export default function NotificationsPage() {
                         variant="ghost"
                         size="icon"
                         className="size-11 md:size-8"
-                        title="Archive"
-                        aria-label="Archive"
+                        title={t("notifications.archive")}
+                        aria-label={t("notifications.archive")}
                         onClick={() => archiveMut.mutate(item.id)}
                       >
                         <Archive className="size-3.5" />

@@ -10,8 +10,14 @@ vi.mock('node:child_process', () => ({
   exec: vi.fn(),
 }));
 
+vi.mock('./read-tracker.js', () => ({
+  markFileRead: vi.fn(),
+  hasFileBeenRead: vi.fn().mockReturnValue(true),
+}));
+
 import { readFile, writeFile } from 'node:fs/promises';
 import { exec } from 'node:child_process';
+import { hasFileBeenRead } from './read-tracker.js';
 
 const tools = registerCodeTools();
 const inspectCode = tools.find(t => t.name === 'inspect_code')!;
@@ -63,7 +69,7 @@ describe('inspect_code', () => {
 describe('edit_code', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('replaces text and writes file', async () => {
+  it('replaces unique text and writes file', async () => {
     (readFile as any).mockResolvedValue('const x = 1;');
     (writeFile as any).mockResolvedValue(undefined);
 
@@ -80,12 +86,32 @@ describe('edit_code', () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 
-  it('replaces all occurrences', async () => {
+  it('rejects non-unique match when replaceAll is false (default)', async () => {
+    (readFile as any).mockResolvedValue('a b a c a');
+    const result = await editCode.execute({ path: 'f.ts', oldText: 'a', newText: 'X' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('3 处匹配');
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('replaces all occurrences when replaceAll is true', async () => {
     (readFile as any).mockResolvedValue('a b a c a');
     (writeFile as any).mockResolvedValue(undefined);
 
-    await editCode.execute({ path: 'f.ts', oldText: 'a', newText: 'X' });
+    await editCode.execute({ path: 'f.ts', oldText: 'a', newText: 'X', replaceAll: true });
     expect(writeFile).toHaveBeenCalledWith(expect.any(String), 'X b X c X', 'utf-8');
+  });
+
+  it('rejects edit when file has not been read', async () => {
+    vi.mocked(hasFileBeenRead).mockReturnValue(false);
+    (readFile as any).mockResolvedValue('hello');
+
+    const result = await editCode.execute({ path: 'f.ts', oldText: 'hello', newText: 'world' });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain('请先使用 read_file 或 inspect_code');
+    expect(writeFile).not.toHaveBeenCalled();
+
+    vi.mocked(hasFileBeenRead).mockReturnValue(true);
   });
 });
 

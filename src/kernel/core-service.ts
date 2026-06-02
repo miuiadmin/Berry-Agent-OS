@@ -440,6 +440,9 @@ export class CoreService {
     // Recover resumable tasks from previous run
     checkpointService.recoverOnStartup();
 
+    // §9.0 M8: Start task sweep for stale dispatched/running tasks
+    this.taskManager!.startSweep();
+
     this.eventBus.on('agent.crashed', ({ name }) => {
       this.taskManager!.failByAgent(name, `智能体 ${name} 崩溃`);
       this.messageRouter?.failDelegationsByAgent(name, `智能体 ${name} 崩溃`);
@@ -858,6 +861,7 @@ export class CoreService {
       this.takeoverController = null;
     }
     if (this.taskManager) {
+      this.taskManager.stopSweep();
       this.taskManager.dispose();
       this.taskManager = null;
     }

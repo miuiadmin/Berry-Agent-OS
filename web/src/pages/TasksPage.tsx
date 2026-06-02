@@ -11,12 +11,15 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
 import { ListTodo, ChevronRight, XCircle, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 const STATUS_OPTIONS = ["all", "created", "dispatched", "running", "completed", "failed", "cancelled", "timeout", "resumable"] as const;
 const PAGE_SIZE = 20;
 
 export default function TasksPage() {
-  useDocumentTitle("Tasks");
+  const t = useT();
+  const { formatDateTime } = useDateFormat();
+  useDocumentTitle(t("tasks.title"));
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [offset, setOffset] = useState(0);
@@ -42,10 +45,10 @@ export default function TasksPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      toast.success("Task cancelled");
+      toast.success(t("tasks.taskCancelled"));
     },
     onError: (err: Error) => {
-      toast.error(err.message || "Failed to cancel task");
+      toast.error(err.message || t("tasks.failedToCancel"));
     },
   });
 
@@ -63,19 +66,19 @@ export default function TasksPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-lg font-semibold">Tasks</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Agent task history</p>
+      <h1 className="text-lg font-semibold">{t("tasks.title")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("tasks.subtitle")}</p>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">
         <select
           value={statusFilter}
           onChange={(e) => handleStatusChange(e.target.value)}
-          aria-label="Filter by status"
+          aria-label={t("tasks.filterByStatus")}
           className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
         >
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
-              {s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
+              {s === "all" ? t("tasks.allStatuses") : s.charAt(0).toUpperCase() + s.slice(1)}
             </option>
           ))}
         </select>
@@ -83,10 +86,10 @@ export default function TasksPage() {
           <select
             value={agentFilter}
             onChange={(e) => handleAgentChange(e.target.value)}
-            aria-label="Filter by agent"
+            aria-label={t("tasks.filterByAgent")}
             className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
           >
-            <option value="all">All Agents</option>
+            <option value="all">{t("tasks.allAgents")}</option>
             {agents.map((a) => (
               <option key={a.name} value={a.name}>{a.name}</option>
             ))}
@@ -100,12 +103,12 @@ export default function TasksPage() {
             onClick={() => { setStatusFilter("all"); setAgentFilter("all"); setOffset(0); }}
           >
             <Filter className="size-3 mr-1" />
-            Clear filters
+            {t("tasks.clearFilters")}
           </Button>
         )}
         {total > 0 && (
           <span className="text-xs text-muted-foreground ml-auto">
-            {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+            {t("tasks.ofTotal", { range: `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)}`, total: String(total) })}
           </span>
         )}
       </div>
@@ -115,12 +118,12 @@ export default function TasksPage() {
           <thead>
             <tr className="border-b border-border bg-muted/50">
               <th className="w-8 px-2" />
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">ID</th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Type</th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Agent</th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Status</th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Duration</th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">Actions</th>
+              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">{t("tasks.id")}</th>
+              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">{t("tasks.type")}</th>
+              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">{t("tasks.agent")}</th>
+              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">{t("tasks.status")}</th>
+              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">{t("tasks.duration")}</th>
+              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">{t("tasks.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -149,8 +152,8 @@ export default function TasksPage() {
                 <td colSpan={7}>
                   <EmptyState
                     icon={ListTodo}
-                    title="No tasks found"
-                    description="Tasks will appear here once agents start processing"
+                    title={t("tasks.noTasks")}
+                    description={t("tasks.noTasksDesc")}
                   />
                 </td>
               </tr>
@@ -167,8 +170,8 @@ export default function TasksPage() {
         {!isLoading && tasks.length === 0 && (
           <EmptyState
             icon={ListTodo}
-            title="No tasks found"
-            description="Tasks will appear here once agents start processing"
+            title={t("tasks.noTasks")}
+            description={t("tasks.noTasksDesc")}
           />
         )}
         {!isLoading && tasks.map((task, i) => (
@@ -188,7 +191,7 @@ export default function TasksPage() {
             size="default"
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
           >
-            Load More
+            {t("tasks.loadMore")}
           </Button>
         </div>
       )}
@@ -207,6 +210,7 @@ function TaskRow({
   onToggle: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   return (
     <>
       <tr
@@ -249,7 +253,7 @@ function TaskRow({
               }}
             >
               <XCircle className="size-3" />
-              Cancel
+              {t("tasks.cancel")}
             </Button>
           )}
         </td>
@@ -270,26 +274,28 @@ function TaskRow({
 }
 
 function TaskDetail({ task }: { task: TaskInfo }) {
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
   return (
     <div className="space-y-3 text-xs">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <div>
-          <span className="font-medium text-muted-foreground">Full ID</span>
+          <span className="font-medium text-muted-foreground">{t("tasks.fullId")}</span>
           <p className="mt-0.5 font-mono break-all">{task.id}</p>
         </div>
         <div>
-          <span className="font-medium text-muted-foreground">Session</span>
+          <span className="font-medium text-muted-foreground">{t("tasks.session")}</span>
           <p className="mt-0.5 font-mono">{task.sessionId ?? "—"}</p>
         </div>
         <div>
-          <span className="font-medium text-muted-foreground">Created</span>
-          <p className="mt-0.5">{new Date(task.createdAt).toLocaleString()}</p>
+          <span className="font-medium text-muted-foreground">{t("tasks.created")}</span>
+          <p className="mt-0.5">{fmtDT(new Date(task.createdAt))}</p>
         </div>
       </div>
 
       {task.status === "failed" && task.error && (
         <div>
-          <span className="font-medium text-destructive">Error</span>
+          <span className="font-medium text-destructive">{t("common.error")}</span>
           <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-3 text-[11px] text-destructive">
             {task.error}
           </pre>
@@ -298,7 +304,7 @@ function TaskDetail({ task }: { task: TaskInfo }) {
 
       {task.inputPayload && (
         <div>
-          <span className="font-medium text-muted-foreground">Input</span>
+          <span className="font-medium text-muted-foreground">{t("tools.input")}</span>
           <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-background border p-3 text-[11px]">
             {formatJson(task.inputPayload)}
           </pre>
@@ -307,7 +313,7 @@ function TaskDetail({ task }: { task: TaskInfo }) {
 
       {task.outputPayload && (
         <div>
-          <span className="font-medium text-muted-foreground">Output</span>
+          <span className="font-medium text-muted-foreground">{t("tools.output")}</span>
           <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-background border p-3 text-[11px]">
             {formatJson(task.outputPayload)}
           </pre>

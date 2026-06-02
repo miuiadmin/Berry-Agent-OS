@@ -30,7 +30,7 @@ describe('ContextManager', () => {
   });
 
   it('reports needsCompression when over threshold', () => {
-    const cm = new ContextManager({ maxTokenEstimate: 100, compressionThreshold: 0.5, charsPerToken: 1 });
+    const cm = new ContextManager({ maxTokenEstimate: 100, compressionThreshold: 0.5, charsPerToken: 1, reserved: 0 });
     const shortMsgs: ModelMessage[] = [{ role: 'user', content: 'hi' }];
     expect(cm.needsCompression(shortMsgs)).toBe(false);
 
@@ -47,6 +47,8 @@ describe('ContextManager', () => {
       maxTokenEstimate: 10,
       compressionThreshold: 0.1,
       charsPerToken: 1,
+      reserved: 0,
+      preserveRecentTokens: 0,
     });
     const llm = mockLlm('这是一段对话摘要');
 

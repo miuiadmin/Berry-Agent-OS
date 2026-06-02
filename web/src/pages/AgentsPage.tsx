@@ -14,6 +14,7 @@ import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bot, Power, PowerOff, ArrowLeft, Clock, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 function AgentsGridSkeleton() {
   return (
@@ -37,7 +38,8 @@ function AgentsGridSkeleton() {
 }
 
 export default function AgentsPage() {
-  useDocumentTitle("Agents");
+  const t = useT();
+  useDocumentTitle(t("agents.title"));
   const agentsQuery = useQuery(queries.agents());
   const queryClient = useQueryClient();
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
@@ -49,22 +51,22 @@ export default function AgentsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
-      toast.success("Agent status updated");
+      toast.success(t("agents.statusUpdated"));
     },
     onError: (err: Error) => {
-      toast.error(err.message || "Failed to update agent");
+      toast.error(err.message || t("agents.failedToUpdate"));
     },
   });
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-lg font-semibold">Agents</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Manage your intelligent agents</p>
+      <h1 className="text-lg font-semibold">{t("agents.title")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("agents.subtitle")}</p>
 
       <QueryBoundary
         query={agentsQuery}
         skeleton={<AgentsGridSkeleton />}
-        errorTitle="Failed to load agents"
+        errorTitle={t("agents.failedToLoad")}
       >
         {(agents) => {
           if (selectedAgent) {
@@ -100,7 +102,7 @@ export default function AgentsPage() {
                           <CardTitle>{agent.name}</CardTitle>
                         </div>
                         <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">
-                          {agent.status === "enabled" ? "Active" : "Disabled"}
+                          {agent.status === "enabled" ? t("status.active") : t("status.disabled")}
                         </Badge>
                       </div>
                       {agent.description && (
@@ -125,7 +127,7 @@ export default function AgentsPage() {
                           variant="ghost"
                           size="icon"
                           className="size-11 md:size-8"
-                          aria-label={agent.status === "enabled" ? "Disable agent" : "Enable agent"}
+                          aria-label={agent.status === "enabled" ? t("agents.disableAgent") : t("agents.enableAgent")}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (agent.status === "enabled") {
@@ -145,8 +147,8 @@ export default function AgentsPage() {
               {agents.length === 0 && (
                 <EmptyState
                   icon={Bot}
-                  title="No agents registered"
-                  description="Agents will appear here once the service is running"
+                  title={t("agents.noAgents")}
+                  description={t("agents.noAgentsDesc")}
                 />
               )}
             </>
@@ -157,9 +159,9 @@ export default function AgentsPage() {
       <AlertDialog
         open={!!disableTarget}
         onOpenChange={(open) => { if (!open) setDisableTarget(null); }}
-        title="Disable agent"
-        description={`Are you sure you want to disable "${disableTarget}"? The agent will stop processing tasks.`}
-        actionLabel="Disable"
+        title={t("agents.disableConfirmTitle")}
+        description={t("agents.disableConfirmDesc", { name: disableTarget ?? "" })}
+        actionLabel={t("agents.disableAgent")}
         onAction={() => {
           if (disableTarget) toggleAgent.mutate({ name: disableTarget, enable: false });
         }}
@@ -177,6 +179,8 @@ function AgentDetailView({
   onBack: () => void;
   onToggle: (enable: boolean) => void;
 }) {
+  const t = useT();
+  const { formatDate, formatTime } = useDateFormat();
   const { data: tasksData } = useQuery(queries.tasks({ limit: 50 }));
   const [events, setEvents] = useState<Array<{ event: string; ts: number }>>([]);
   const subscribe = useWsStore((s) => s.subscribe);
@@ -213,13 +217,13 @@ function AgentDetailView({
     <div className="mt-4 animate-page-in">
       <Button variant="ghost" size="default" className="mb-4" onClick={onBack}>
         <ArrowLeft className="size-4" />
-        Back to Agents
+        {t("agents.backToAgents")}
       </Button>
 
       <div className="flex items-center gap-3">
         <h1 className="text-lg font-semibold">{agent.name}</h1>
         <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">
-          {agent.status === "enabled" ? "Active" : "Disabled"}
+          {agent.status === "enabled" ? t("status.active") : t("status.disabled")}
         </Badge>
         <Button
           variant="outline"
@@ -227,9 +231,9 @@ function AgentDetailView({
           onClick={() => onToggle(agent.status !== "enabled")}
         >
           {agent.status === "enabled" ? (
-            <><PowerOff className="size-3.5" /> Disable</>
+            <><PowerOff className="size-3.5" /> {t("agents.disableAgent")}</>
           ) : (
-            <><Power className="size-3.5" /> Enable</>
+            <><Power className="size-3.5" /> {t("agents.enableAgent")}</>
           )}
         </Button>
       </div>
@@ -240,20 +244,20 @@ function AgentDetailView({
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Details</CardTitle>
+          <CardTitle>{t("common.details")}</CardTitle>
         </CardHeader>
         <CardContent>
           <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
             <div>
-              <dt className="font-medium text-muted-foreground">Status</dt>
+              <dt className="font-medium text-muted-foreground">{t("common.status")}</dt>
               <dd className="mt-0.5">{agent.status}</dd>
             </div>
             <div>
-              <dt className="font-medium text-muted-foreground">Kind</dt>
+              <dt className="font-medium text-muted-foreground">{t("agents.kind")}</dt>
               <dd className="mt-0.5">{agent.kind ?? "—"}</dd>
             </div>
             <div>
-              <dt className="font-medium text-muted-foreground">Version</dt>
+              <dt className="font-medium text-muted-foreground">{t("agents.version")}</dt>
               <dd className="mt-0.5">{agent.version ? `v${agent.version}` : "—"}</dd>
             </div>
           </dl>
@@ -262,11 +266,11 @@ function AgentDetailView({
 
       <Card className="mt-4">
         <CardHeader>
-          <CardTitle>Recent Tasks</CardTitle>
+          <CardTitle>{t("agents.recentTasks")}</CardTitle>
         </CardHeader>
         <CardContent>
           {recentTasks.length === 0 ? (
-            <EmptyState icon={ListTodo} title="No tasks found" description="Tasks for this agent will appear here" />
+            <EmptyState icon={ListTodo} title={t("agents.noTasksForAgent")} description={t("agents.noTasksForAgent")} />
           ) : (
             <div className="space-y-2">
               {recentTasks.map((task: TaskInfo, i: number) => (
@@ -287,7 +291,7 @@ function AgentDetailView({
                       {task.status}
                     </Badge>
                     <span className="text-[11px] text-muted-foreground">
-                      {new Date(task.createdAt).toLocaleDateString()}
+                      {formatDate(new Date(task.createdAt))}
                     </span>
                   </div>
                 </div>
@@ -299,19 +303,19 @@ function AgentDetailView({
 
       <Card className="mt-4">
         <CardHeader>
-          <CardTitle>Live Events</CardTitle>
-          <CardDescription>Events since this page was opened</CardDescription>
+          <CardTitle>{t("agents.liveEvents")}</CardTitle>
+          <CardDescription>{t("agents.eventsSinceOpened")}</CardDescription>
         </CardHeader>
         <CardContent>
           {events.length === 0 ? (
-            <EmptyState icon={Clock} title="No events yet" description="Listening for changes..." />
+            <EmptyState icon={Clock} title={t("agents.noEvents")} description={t("agents.listening")} />
           ) : (
             <div className="space-y-1.5">
               {events.map((ev, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs animate-slide-left">
                   <Clock className="size-3 text-muted-foreground" />
                   <span className="text-muted-foreground">
-                    {new Date(ev.ts).toLocaleTimeString()}
+                    {formatTime(new Date(ev.ts))}
                   </span>
                   <Badge
                     variant={

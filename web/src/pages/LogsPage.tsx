@@ -4,6 +4,7 @@ import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 interface LogLine {
   time?: number;
@@ -21,12 +22,9 @@ const LEVEL_COLORS: Record<number, string> = {
   50: "text-red-500",
 };
 
-function formatTime(ts?: number): string {
-  if (!ts) return "??:??:??";
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
 export default function LogsPage() {
+  const t = useT();
+  const { formatTime: fmtTime } = useDateFormat();
   const [level, setLevel] = useState("ALL");
   const [module, setModule] = useState("");
   const [lines, setLines] = useState(100);
@@ -53,30 +51,30 @@ export default function LogsPage() {
   return (
     <div className="flex flex-col h-full">
       <div className="shrink-0 border-b px-4 py-3 flex flex-wrap items-center gap-2">
-        <h1 className="text-lg font-semibold mr-auto">Logs</h1>
+        <h1 className="text-lg font-semibold mr-auto">{t("logs.title")}</h1>
 
-        <select aria-label="Log level"
+        <select aria-label={t("logs.logLevel")}
           value={level}
           onChange={(e) => setLevel(e.target.value)}
           className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
         >
-          <option value="ALL">ALL</option>
-          <option value="DEBUG">DEBUG</option>
-          <option value="INFO">INFO</option>
-          <option value="WARN">WARN</option>
-          <option value="ERROR">ERROR</option>
+          <option value="ALL">{t("logs.all")}</option>
+          <option value="DEBUG">{t("logs.debug")}</option>
+          <option value="INFO">{t("logs.info")}</option>
+          <option value="WARN">{t("logs.warn")}</option>
+          <option value="ERROR">{t("logs.error")}</option>
         </select>
 
         <input
           type="text"
-          aria-label="Filter by module"
-          placeholder="Module..."
+          aria-label={t("logs.filterByModule")}
+          placeholder={t("logs.modulePlaceholder")}
           value={module}
           onChange={(e) => setModule(e.target.value)}
           className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         />
 
-        <select aria-label="Number of lines"
+        <select aria-label={t("logs.numberOfLines")}
           value={lines}
           onChange={(e) => setLines(Number(e.target.value))}
           className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
@@ -89,7 +87,7 @@ export default function LogsPage() {
 
         <Button
           variant="ghost"
-          aria-label="Refresh logs"
+          aria-label={t("logs.refreshLogs")}
           onClick={() => refetch()}
           className={cn("size-11 md:size-8", isFetching && "animate-spin")}
         >
@@ -103,21 +101,21 @@ export default function LogsPage() {
             onChange={(e) => setAutoRefresh(e.target.checked)}
             className="size-3"
           />
-          Auto
+          {t("logs.auto")}
         </label>
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
         {data?.lines.map((line, i) => (
           <div key={i} className={cn("py-0.5 flex gap-2", LEVEL_COLORS[line.level ?? 30])}>
-            <span className="shrink-0 text-muted-foreground/40 w-16">{formatTime(line.time)}</span>
+            <span className="shrink-0 text-muted-foreground/40 w-16">{line.time ? fmtTime(new Date(line.time), { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "??:??:??"}</span>
             <span className="shrink-0 w-7">{LEVEL_NAMES[line.level ?? 30] ?? "?"}</span>
             <span className="shrink-0 text-muted-foreground/60 w-24 truncate">{line.module ?? ""}</span>
             <span className="break-all">{line.msg}</span>
           </div>
         ))}
         {!data?.lines.length && (
-          <div className="text-center text-muted-foreground py-8">No logs found</div>
+          <div className="text-center text-muted-foreground py-8">{t("logs.noLogs")}</div>
         )}
       </div>
     </div>

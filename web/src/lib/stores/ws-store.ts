@@ -1,14 +1,28 @@
 import { create } from "zustand";
 import { toast } from "sonner";
+import zh from "@/locales/zh";
+import en from "@/locales/en";
 
+/** Store 内部翻译辅助（非 hook 环境，直接查翻译表） */
+function t(key: string): string {
+  const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
+  const translations = locale === "en" ? en : zh;
+  return translations[key] ?? key;
+}
+
+/** WebSocket 连接状态 */
 type WsStatus = "connected" | "connecting" | "disconnected";
+
+/** 事件回调函数类型 */
 type EventCallback = (payload: unknown) => void;
 
+/** Zustand store 状态：连接状态 + 会话 ID */
 interface WsState {
   status: WsStatus;
   sessionId: string | null;
 }
 
+/** Zustand store 操作：连接/断开/发送/订阅 */
 interface WsActions {
   connect: (sessionId?: string) => void;
   disconnect: () => void;
@@ -19,17 +33,59 @@ interface WsActions {
 
 type WsStore = WsState & WsActions;
 
+// ─── 模块级状态 ───────────────────────────────────────────────
+
+/** 当前 WebSocket 实例 */
 let ws: WebSocket | null = null;
+
+/** 重连定时器 */
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 当前重连延迟（指数退避），初始 1 秒 */
 let reconnectDelay = 1000;
+
+/**
+ * 重连代数（generation）。
+ * 每次 disconnect() 递增，用于让旧的 scheduleReconnect 回调失效，
+ * 避免 disconnect 后仍然触发重连。
+ */
 let reconnectGeneration = 0;
+
+/** 重连延迟上限：30 秒 */
 const MAX_RECONNECT_DELAY = 30000;
-// subscribe() targets: dispatched only for messages with type="event"
+
+/**
+ * 是否曾经成功连接过。
+ * 用于区分「首次连接」和「断线重连」：
+ * - 首次连接：静默，不弹 toast
+ * - 断线重连：弹 "Reconnected" toast 提示用户
+ * - 手动 disconnect 后重置为 false
+ */
+let hasConnectedBefore = false;
+
+/**
+ * 事件监听器映射表。
+ * subscribe() 注册的回调，仅对 type="event" 的消息派发。
+ * key = 事件名（如 "task.progress"），value = 回调集合。
+ */
 const eventListeners = new Map<string, Set<EventCallback>>();
-// onMessage() targets: dispatched for ALL messages (including type="event")
+
+/**
+ * 消息处理器集合。
+ * onMessage() 注册的回调，对所有消息（包括 type="event"）都派发。
+ */
 const messageHandlers = new Set<(data: Record<string, unknown>) => void>();
+
+/**
+ * 发送队列。
+ * WebSocket 未连接时，send() 将消息暂存于此；
+ * 连接成功后 onopen 里调用 flushQueue() 一次性发出。
+ */
 const sendQueue: unknown[] = [];
 
+// ─── 辅助函数 ─────────────────────────────────────────────────
+
+/** 将发送队列中所有消息依次发出（连接成功后调用） */
 function flushQueue() {
   while (sendQueue.length > 0 && ws?.readyState === WebSocket.OPEN) {
     const msg = sendQueue.shift();
@@ -39,6 +95,7 @@ function flushQueue() {
   }
 }
 
+/** 生成唯一会话 ID，格式为 "web-{uuid}" */
 function generateSessionId(): string {
   try {
     return `web-${crypto.randomUUID()}`;
@@ -47,81 +104,101 @@ function generateSessionId(): string {
   }
 }
 
+// ─── Zustand Store ────────────────────────────────────────────
+
 export const useWsStore = create<WsStore>((set, get) => ({
   status: "disconnected",
   sessionId: null,
 
+  /**
+   * 建立 WebSocket 连接。
+   * 如果已有活跃连接或正在连接中，直接跳过。
+   * @param sessionId 可选的会话 ID，不提供则自动生成或复用已有的
+   */
   connect: (sessionId?: string) => {
-    // Prevent duplicate connections
+    // 防止重复连接
     if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 
-    // Cancel any pending reconnect
+    // 取消可能存在的重连定时器
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
 
+    // 确定会话 ID：传入 > store 中已有的 > 新生成
     const sid = sessionId ?? get().sessionId ?? generateSessionId();
     set({ status: "connecting", sessionId: sid });
 
+    // 根据页面协议选择 ws/wss
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // In dev mode (port 3889), connect WS directly to backend (port 3888)
-    // Vite proxy for WS is unreliable with connection state tracking
+    // 开发模式（端口 3889）直连后端 3888，绕过 Vite 代理（Vite WS 代理不可靠）
     const host = window.location.port === "3889" ? window.location.hostname + ":3888" : window.location.host;
     const socket = new WebSocket(`${protocol}//${host}/ws?sessionId=${sid}`);
 
     ws = socket;
 
+    /** 连接成功：更新状态、发送队列、按需弹 toast */
     socket.onopen = () => {
-      if (ws !== socket) return; // stale socket
-      const prev = get().status;
+      if (ws !== socket) return; // 过时的 socket 实例，忽略
       set({ status: "connected" });
-      reconnectDelay = 1000;
-      flushQueue();
-      if (prev !== "connected") toast.success("Connected");
+      reconnectDelay = 1000; // 重置退避延迟
+      flushQueue();          // 发送积压消息
+      // 只在断线重连时弹 toast，首次连接静默
+      if (hasConnectedBefore) toast.success(t("connection.connected"));
+      hasConnectedBefore = true;
     };
 
+    /** 收到消息：派发到事件监听器和消息处理器 */
     socket.onmessage = (event) => {
-      if (ws !== socket) return; // stale socket
+      if (ws !== socket) return; // 过时的 socket 实例，忽略
       try {
         const data = JSON.parse(event.data) as Record<string, unknown>;
 
+        // 对 type="event" 的消息，派发到 subscribe() 注册的监听器
         if (data.type === "event") {
           const eventName = data.event as string;
           const callbacks = eventListeners.get(eventName);
           if (callbacks) {
             for (const cb of callbacks) cb(data.payload);
           }
+          // 通配符 "*" 监听器收到完整 data（含 type + event + payload）
           const wildcardCbs = eventListeners.get("*");
           if (wildcardCbs) {
             for (const cb of wildcardCbs) cb(data);
           }
         }
 
+        // 所有消息都派发到 onMessage() 注册的处理器
         for (const handler of messageHandlers) {
           handler(data);
         }
       } catch {
-        // ignore non-JSON frames
+        // 忽略非 JSON 帧
       }
     };
 
+    /** 连接关闭：如果之前处于 connected 状态，提示用户并触发重连 */
     socket.onclose = () => {
-      if (ws !== socket) return; // stale socket — ignore
+      if (ws !== socket) return; // 过时的 socket 实例，忽略
       const prev = get().status;
       set({ status: "disconnected" });
-      if (prev === "connected") toast.warning("Connection lost — reconnecting...");
+      // 只有从 connected 状态掉线才提示（connecting 阶段关闭不提示，避免首次连接失败就弹）
+      if (prev === "connected") toast.warning(t("connection.connecting"));
       ws = null;
       scheduleReconnect(get);
     };
 
+    /** 连接错误：直接关闭，让 onclose 统一处理重连逻辑 */
     socket.onerror = () => {
       socket.close();
     };
   },
 
+  /**
+   * 主动断开连接。
+   * 递增 generation 使旧的重连回调失效，清空发送队列，重置状态。
+   */
   disconnect: () => {
-    // Increment generation to invalidate any pending reconnect attempts
     reconnectGeneration++;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -131,18 +208,29 @@ export const useWsStore = create<WsStore>((set, get) => ({
     ws = null;
     prev?.close();
     sendQueue.length = 0;
+    hasConnectedBefore = false; // 重置，下次连接视为首次
     set({ status: "disconnected" });
   },
 
+  /**
+   * 发送数据。如果 WebSocket 未连接，暂存到发送队列。
+   * @param data 要发送的数据（会被 JSON.stringify）
+   */
   send: (data: unknown) => {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(data));
     } else {
-      // Queue — will be flushed when connection opens
+      // 未连接 → 暂存，等 onopen 后 flushQueue() 发出
       sendQueue.push(data);
     }
   },
 
+  /**
+   * 订阅指定事件。仅对 type="event" 的消息生效。
+   * @param event 事件名（如 "task.progress"），或 "*" 监听所有事件
+   * @param cb 事件回调
+   * @returns 取消订阅函数
+   */
   subscribe: (event: string, cb: EventCallback) => {
     if (!eventListeners.has(event)) {
       eventListeners.set(event, new Set());
@@ -153,6 +241,11 @@ export const useWsStore = create<WsStore>((set, get) => ({
     };
   },
 
+  /**
+   * 注册消息处理器。对所有消息（包括 type="event"）都触发。
+   * @param handler 消息处理函数
+   * @returns 取消注册函数
+   */
   onMessage: (handler: (data: Record<string, unknown>) => void) => {
     messageHandlers.add(handler);
     return () => {
@@ -161,14 +254,18 @@ export const useWsStore = create<WsStore>((set, get) => ({
   },
 }));
 
+/**
+ * 调度重连。使用指数退避策略，延迟从 1s → 2s → 4s → ... → 最大 30s。
+ * 通过 generation 机制确保 disconnect() 后不会误触发重连。
+ */
 function scheduleReconnect(get: () => WsStore) {
-  if (reconnectTimer) return;
-  const gen = reconnectGeneration;
+  if (reconnectTimer) return; // 已有重连在等待，不重复调度
+  const gen = reconnectGeneration; // 快照当前代数
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    // Only reconnect if generation hasn't changed (no explicit disconnect)
+    // 只有代数未变且仍处于 disconnected 状态才重连（排除 disconnect() 后的情况）
     if (gen === reconnectGeneration && get().status === "disconnected") {
-      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY); // 指数退避
       get().connect();
     }
   }, reconnectDelay);

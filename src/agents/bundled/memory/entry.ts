@@ -90,7 +90,7 @@ async function handleMemoryRecall(
       purpose: 'learning_review',
       sessionId: payload.sessionId,
       taskId: payload.taskId,
-      maxTokens: 256,
+      maxTokens: 512,
       temperature: 0.0,
     },
   );

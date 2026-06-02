@@ -231,12 +231,12 @@ export function createApiRouter(deps: WebServerDependencies) {
     const sessionId = params.sid;
     const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
 
-    // Active (non-terminal) tasks for this session
+    // Active (non-terminal) tasks for this session（含 output_payload 用于恢复流式内容）
     const activeTasks = db.prepare(`
-      SELECT id, status, target_agent, created_at FROM agent_tasks
+      SELECT id, status, target_agent, created_at, output_payload FROM agent_tasks
       WHERE session_id = ? AND status NOT IN ('completed','failed','timeout','cancelled')
       ORDER BY created_at DESC LIMIT 5
-    `).all(sessionId) as Array<{ id: string; status: string; target_agent: string; created_at: number }>;
+    `).all(sessionId) as Array<{ id: string; status: string; target_agent: string; created_at: number; output_payload: string | null }>;
 
     // Get all progress events for each active task (for thinking steps recovery)
     const tasksWithProgress = activeTasks.map((task) => {
@@ -245,6 +245,18 @@ export function createApiRouter(deps: WebServerDependencies) {
         WHERE task_id = ? AND event_type = 'progress'
         ORDER BY created_at ASC
       `).all(task.id) as Array<{ message: string; created_at: number }>;
+
+      // 解析流式内容（StreamingFlusher 定期写入的中间文本）
+      let streamingContent: string | null = null;
+      let streamingReasoning: string | null = null;
+      if (task.output_payload) {
+        try {
+          const parsed = JSON.parse(task.output_payload);
+          if (parsed.streamingContent) streamingContent = parsed.streamingContent;
+          if (parsed.reasoning) streamingReasoning = parsed.reasoning;
+        } catch { /* 非 JSON 或格式不符，忽略 */ }
+      }
+
       return {
         taskId: task.id,
         status: task.status,
@@ -252,6 +264,8 @@ export function createApiRouter(deps: WebServerDependencies) {
         createdAt: task.created_at,
         progress: events.length > 0 ? events[events.length - 1].message : null,
         thinkingSteps: events.map((e) => ({ text: e.message, ts: e.created_at })),
+        streamingContent,
+        streamingReasoning,
       };
     });
 

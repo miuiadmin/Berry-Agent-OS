@@ -1,6 +1,6 @@
 import type { ModelMessage } from '../contracts/model.js';
 import type { LlmClient } from './client.js';
-import { compressToolOutputs, buildSummaryPrompt, applyPhase2, type CompressionState } from './context-compression.js';
+import { compressToolOutputs, buildSummaryPrompt, applyPhase2, type CompressionState, setToolOutputMaxBytes } from './context-compression.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('context-manager');
@@ -9,6 +9,8 @@ export interface ContextManagerConfig {
   maxTokenEstimate: number;
   compressionThreshold: number;
   keepRecentTurns: number;
+  preserveRecentTokens: number;
+  reserved: number;
   charsPerToken: number;
 }
 
@@ -16,6 +18,8 @@ const DEFAULT_CONFIG: ContextManagerConfig = {
   maxTokenEstimate: 100_000,
   compressionThreshold: 0.75,
   keepRecentTurns: 6,
+  preserveRecentTokens: 20_000,
+  reserved: 10_000,
   charsPerToken: 3.5,
 };
 
@@ -28,8 +32,11 @@ export class ContextManager {
   private config: ContextManagerConfig;
   private state: CompressionState = { previousSummary: null, consecutiveLowSavings: 0 };
 
-  constructor(config?: Partial<ContextManagerConfig>) {
+  constructor(config?: Partial<ContextManagerConfig> & { toolOutputMaxBytes?: number }) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    if (config?.toolOutputMaxBytes) {
+      setToolOutputMaxBytes(config.toolOutputMaxBytes);
+    }
   }
 
   estimateTokens(messages: ModelMessage[]): number {
@@ -50,11 +57,21 @@ export class ContextManager {
 
   needsCompression(messages: ModelMessage[]): boolean {
     const tokens = this.estimateTokens(messages);
-    return tokens > this.config.maxTokenEstimate * this.config.compressionThreshold;
+    return tokens > (this.config.maxTokenEstimate - this.config.reserved) * this.config.compressionThreshold;
   }
 
   async compress(messages: ModelMessage[], llm: LlmClient): Promise<ModelMessage[]> {
-    const tailCount = this.config.keepRecentTurns * 2;
+    // Determine tail count: use preserveRecentTokens if it results in more protection than keepRecentTurns
+    let tailCount = this.config.keepRecentTurns * 2;
+    if (this.config.preserveRecentTokens > 0) {
+      let tailTokens = 0;
+      for (let i = messages.length - 1; i >= 0 && tailTokens < this.config.preserveRecentTokens; i--) {
+        const msg = messages[i];
+        const chars = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content).length;
+        tailTokens += Math.ceil(chars / this.config.charsPerToken);
+        tailCount = Math.max(tailCount, messages.length - i);
+      }
+    }
     if (messages.length <= tailCount) return messages;
 
     logger.debug({ msgCount: messages.length, estimatedTokens: this.estimateTokens(messages) }, 'compression:start');

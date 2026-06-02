@@ -3,6 +3,7 @@ import { exec } from 'node:child_process';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
+import { markFileRead, hasFileBeenRead } from './read-tracker.js';
 
 const MAX_OUTPUT = 20000;
 
@@ -17,6 +18,7 @@ const EditCodeSchema = z.object({
   path: z.string().describe('文件路径'),
   oldText: z.string().describe('要替换的原始文本（精确匹配）'),
   newText: z.string().describe('替换后的文本'),
+  replaceAll: z.boolean().default(false).describe('true=替换所有匹配；false=要求唯一匹配（默认）'),
 });
 
 const RunTestsSchema = z.object({
@@ -37,7 +39,9 @@ const inspectCodeTool: ToolDefinition = {
   async execute(input: unknown): Promise<ToolResult> {
     const { path, startLine, endLine, grep } = InspectCodeSchema.parse(input);
     try {
-      const content = await readFile(resolve(path), 'utf-8');
+      const filePath = resolve(path);
+      const content = await readFile(filePath, 'utf-8');
+      markFileRead(filePath);
       const lines = content.split('\n');
 
       if (grep) {
@@ -63,18 +67,35 @@ const inspectCodeTool: ToolDefinition = {
 
 const editCodeTool: ToolDefinition = {
   name: 'edit_code',
-  description: '对文件做精确字符串替换',
+  description: '对文件做精确字符串替换。默认要求 oldText 在文件中唯一匹配；设置 replaceAll=true 替换所有匹配。',
   inputSchema: EditCodeSchema,
   dangerLevel: 'moderate',
   async execute(input: unknown): Promise<ToolResult> {
-    const { path, oldText, newText } = EditCodeSchema.parse(input);
+    const { path, oldText, newText, replaceAll } = EditCodeSchema.parse(input);
     try {
       const filePath = resolve(path);
+
+      if (!hasFileBeenRead(filePath)) {
+        return { content: `编辑被拒绝: 请先使用 read_file 或 inspect_code 读取该文件。`, isError: true };
+      }
+
       const content = await readFile(filePath, 'utf-8');
       if (!content.includes(oldText)) {
         return { content: `未找到匹配文本，文件未修改。`, isError: true };
       }
-      const updated = content.replaceAll(oldText, newText);
+
+      if (!replaceAll) {
+        let count = 0;
+        let idx = -1;
+        while ((idx = content.indexOf(oldText, idx + 1)) !== -1) count++;
+        if (count > 1) {
+          return { content: `找到 ${count} 处匹配，请提供更多上下文使 oldText 唯一，或设置 replaceAll=true。`, isError: true };
+        }
+      }
+
+      const updated = replaceAll
+        ? content.replaceAll(oldText, newText)
+        : content.replace(oldText, newText);
       await writeFile(filePath, updated, 'utf-8');
       return { content: `已修改文件: ${path}` };
     } catch (err) {

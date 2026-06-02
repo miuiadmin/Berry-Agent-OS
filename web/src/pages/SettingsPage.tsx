@@ -4,6 +4,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useT } from "@/lib/i18n";
 import { queries, apiPut, apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,17 +26,17 @@ import {
 } from "lucide-react";
 
 const TABS = [
-  { key: "providers", label: "Providers", icon: Server },
-  { key: "budget", label: "Budget", icon: Wallet },
-  { key: "memory", label: "Memory", icon: Database },
-  { key: "skills", label: "Skills", icon: Sparkles },
-  { key: "channels", label: "Channels", icon: Radio },
-  { key: "observability", label: "Observability", icon: Activity },
-  { key: "web", label: "Web", icon: Globe },
+  { key: "providers", labelKey: "settings.tabs.providers", icon: Server },
+  { key: "budget", labelKey: "settings.tabs.budget", icon: Wallet },
+  { key: "memory", labelKey: "settings.tabs.memory", icon: Database },
+  { key: "skills", labelKey: "settings.tabs.skills", icon: Sparkles },
+  { key: "channels", labelKey: "settings.tabs.channels", icon: Radio },
+  { key: "observability", labelKey: "settings.tabs.observability", icon: Activity },
+  { key: "web", labelKey: "settings.tabs.web", icon: Globe },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
-const VALID_TABS = new Set<string>(TABS.map((t) => t.key));
+const VALID_TABS = new Set<string>(TABS.map((tabItem) => tabItem.key));
 
 export default function SettingsPage() {
   return (
@@ -46,7 +47,8 @@ export default function SettingsPage() {
 }
 
 function SettingsContent() {
-  useDocumentTitle("Settings");
+  const t = useT();
+  useDocumentTitle(t("settings.title"));
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const tabFromUrl = searchParams.get("tab");
@@ -86,7 +88,7 @@ function SettingsContent() {
     if (web) {
       const port = Number(web.port);
       if (web.port !== "" && (isNaN(port) || port < 1 || port > 65535)) {
-        errs["web.port"] = "Port must be 1-65535";
+        errs["web.port"] = t("settings.portRange");
       }
     }
     const budget = cfg.budget as Record<string, unknown> | undefined;
@@ -94,7 +96,7 @@ function SettingsContent() {
       for (const key of ["sessionLimit", "agentLimit", "taskLimit", "dailyLimit"]) {
         const val = Number(budget[key]);
         if (budget[key] !== "" && !isNaN(val) && val < 0) {
-          errs[`budget.${key}`] = "Must be non-negative";
+          errs[`budget.${key}`] = t("settings.mustBeNonNegative");
         }
       }
     }
@@ -103,7 +105,7 @@ function SettingsContent() {
       for (const key of ["consolidationInterval", "maxResults"]) {
         const val = Number(memory[key]);
         if (memory[key] !== "" && !isNaN(val) && val < 0) {
-          errs[`memory.${key}`] = "Must be non-negative";
+          errs[`memory.${key}`] = t("settings.mustBeNonNegative");
         }
       }
     }
@@ -116,10 +118,10 @@ function SettingsContent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["config"] });
-      toast.success("Configuration saved");
+      toast.success(t("settings.saved"));
     },
     onError: (err: Error) => {
-      toast.error(err.message || "Failed to save configuration");
+      toast.error(err.message || t("settings.failedToSave"));
       // Reset editedConfig to last known server state
       queryClient.invalidateQueries({ queryKey: ["config"] });
     },
@@ -140,7 +142,7 @@ function SettingsContent() {
     const errs = validate(editedConfig);
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
-      toast.error(`Fix ${Object.keys(errs).length} validation error(s) before saving`);
+      toast.error(t("settings.validationErrors", { count: Object.keys(errs).length }));
       return;
     }
     saveConfig.mutate(editedConfig);
@@ -151,9 +153,9 @@ function SettingsContent() {
       const defaults = await apiGet<Record<string, unknown>>("/api/config/defaults");
       setEditedConfig(defaults);
       setErrors({});
-      toast.info("Reset to default values — click Save to apply");
+      toast.info(t("settings.resetToDefaults"));
     } catch {
-      toast.error("Failed to load defaults");
+      toast.error(t("settings.failedToLoadDefaults"));
     }
   };
 
@@ -169,7 +171,7 @@ function SettingsContent() {
     <div className="flex flex-col md:h-full md:flex-row md:overflow-hidden">
       {/* Left nav */}
       <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
-        <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">Settings</h1>
+        <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">{t("settings.title")}</h1>
         <div className="relative md:contents">
           <nav className="flex md:flex-col gap-2 md:gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
             {TABS.map((tab) => {
@@ -187,8 +189,8 @@ function SettingsContent() {
                   )}
                 >
                   <Icon className={cn("size-4 shrink-0 transition-transform duration-200", isActive && "scale-110")} />
-                  <span className="hidden sm:inline md:inline">{tab.label}</span>
-                  <span className="sm:hidden text-[11px]">{tab.label}</span>
+                  <span className="hidden sm:inline md:inline">{t(tab.labelKey)}</span>
+                  <span className="sm:hidden text-[11px]">{t(tab.labelKey)}</span>
                 </button>
               );
             })}
@@ -202,23 +204,23 @@ function SettingsContent() {
         <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-lg font-semibold md:hidden">Settings</h2>
+              <h2 className="text-lg font-semibold md:hidden">{t("settings.title")}</h2>
               <p className="text-sm text-muted-foreground">
-                Edit config.yaml directly
+                {t("settings.subtitle")}
                 {hasChanges && (
-                  <span className="ml-2 text-amber-500 font-medium">Unsaved changes</span>
+                  <span className="ml-2 text-amber-500 font-medium">{t("settings.unsavedChanges")}</span>
                 )}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="default" onClick={handleReset}>
                 <RotateCcw className="size-4" />
-                Reset
+                {t("settings.reset")}
               </Button>
               <div className="relative">
                 <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="default">
                   <Save className="size-4" />
-                  Save
+                  {t("settings.save")}
                 </Button>
                 {hasChanges && (
                   <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-amber-500 animate-pulse-dot" />
@@ -229,7 +231,7 @@ function SettingsContent() {
 
           {errorCount > 0 && (
             <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              {errorCount} validation error{errorCount > 1 ? "s" : ""} — fix before saving
+              {t("settings.validationBanner", { count: errorCount })}
             </div>
           )}
 
@@ -273,56 +275,57 @@ function TabContent({
   onUpdate: (section: string, key: string, value: unknown) => void;
   errors: Record<string, string>;
 }) {
+  const t = useT();
   switch (tab) {
     case "providers":
       return <ProvidersTab />;
     case "budget":
       return (
         <ConfigSection
-          title="Budget Limits"
-          description="Token usage limits per scope"
+          title={t("settings.budgetLimits")}
+          description={t("settings.budgetLimitsDesc")}
           section="budget"
           config={config}
           onUpdate={onUpdate}
           errors={errors}
           fields={[
-            { key: "sessionLimit", label: "Session Limit (tokens)", type: "number" },
-            { key: "agentLimit", label: "Agent Limit (tokens)", type: "number" },
-            { key: "taskLimit", label: "Task Limit (tokens)", type: "number" },
-            { key: "dailyLimit", label: "Daily Limit (tokens)", type: "number" },
+            { key: "sessionLimit", label: t("settings.sessionLimit"), type: "number" },
+            { key: "agentLimit", label: t("settings.agentLimit"), type: "number" },
+            { key: "taskLimit", label: t("settings.taskLimit"), type: "number" },
+            { key: "dailyLimit", label: t("settings.dailyLimit"), type: "number" },
           ]}
         />
       );
     case "memory":
       return (
         <ConfigSection
-          title="Memory Settings"
-          description="Knowledge extraction and retrieval"
+          title={t("settings.memorySettings")}
+          description={t("settings.memorySettingsDesc")}
           section="memory"
           config={config}
           onUpdate={onUpdate}
           errors={errors}
           fields={[
-            { key: "evolutionEnabled", label: "Evolution Enabled", type: "boolean" },
-            { key: "consolidationInterval", label: "Consolidation Interval", type: "number" },
-            { key: "maxResults", label: "Max Results", type: "number" },
+            { key: "evolutionEnabled", label: t("settings.evolutionEnabled"), type: "boolean" },
+            { key: "consolidationInterval", label: t("settings.consolidationInterval"), type: "number" },
+            { key: "maxResults", label: t("settings.maxResults"), type: "number" },
           ]}
         />
       );
     case "skills":
       return (
         <ConfigSection
-          title="Skills Settings"
-          description="Skill prompt injection and limits"
+          title={t("settings.skillsSettings")}
+          description={t("settings.skillsSettingsDesc")}
           section="skills"
           config={config}
           onUpdate={onUpdate}
           errors={errors}
           fields={[
-            { key: "promptMode", label: "Prompt Mode (summary/full/hybrid)", type: "text" },
-            { key: "maxPromptChars", label: "Max Prompt Chars", type: "number" },
-            { key: "maxDescriptionChars", label: "Max Description Chars", type: "number" },
-            { key: "shellInjection", label: "Shell Injection", type: "boolean" },
+            { key: "promptMode", label: t("settings.promptMode"), type: "text" },
+            { key: "maxPromptChars", label: t("settings.maxPromptChars"), type: "number" },
+            { key: "maxDescriptionChars", label: t("settings.maxDescriptionChars"), type: "number" },
+            { key: "shellInjection", label: t("settings.shellInjection"), type: "boolean" },
           ]}
         />
       );
@@ -330,19 +333,19 @@ function TabContent({
       return (
         <Card>
           <CardHeader>
-            <CardTitle>Channel Settings</CardTitle>
+            <CardTitle>{t("settings.channelSettings")}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Message channels for receiving and sending messages
+              {t("settings.channelSettingsDesc")}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-lg border border-border p-4">
               <div className="flex items-center gap-2">
                 <Radio className="size-4 text-info" />
-                <h4 className="text-sm font-medium">Telegram</h4>
+                <h4 className="text-sm font-medium">{t("settings.telegram")}</h4>
               </div>
               <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                To enable Telegram integration, configure the following in your config.yaml:
+                {t("settings.telegramInstructions")}
               </p>
               <pre className="mt-2 rounded-md bg-muted/50 p-3 text-[11px] font-mono text-muted-foreground overflow-x-auto">
 {`channels:
@@ -354,22 +357,22 @@ function TabContent({
               {(config.channels as Record<string, unknown> | undefined)?.telegram ? (
                 <div className="mt-3 flex items-center gap-2">
                   <span className="inline-flex size-2 rounded-full bg-success" />
-                  <span className="text-xs text-success font-medium">Configured</span>
+                  <span className="text-xs text-success font-medium">{t("settings.configured")}</span>
                 </div>
               ) : (
                 <div className="mt-3 flex items-center gap-2">
                   <span className="inline-flex size-2 rounded-full bg-muted-foreground/30" />
-                  <span className="text-xs text-muted-foreground">Not configured</span>
+                  <span className="text-xs text-muted-foreground">{t("common.notConfigured")}</span>
                 </div>
               )}
             </div>
             <div className="rounded-lg border border-dashed border-border p-4">
               <div className="flex items-center gap-2">
                 <Globe className="size-4 text-muted-foreground" />
-                <h4 className="text-sm font-medium text-muted-foreground">More channels</h4>
+                <h4 className="text-sm font-medium text-muted-foreground">{t("settings.moreChannels")}</h4>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Additional channels (Discord, Slack, etc.) will be available in future versions
+                {t("settings.moreChannelsDesc")}
               </p>
             </div>
           </CardContent>
@@ -378,31 +381,31 @@ function TabContent({
     case "observability":
       return (
         <ConfigSection
-          title="Observability"
-          description="Logging and output capture"
+          title={t("settings.observability")}
+          description={t("settings.observabilityDesc")}
           section="observability"
           config={config}
           onUpdate={onUpdate}
           errors={errors}
           fields={[
-            { key: "level", label: "Log Level (error/warn/info/debug)", type: "text" },
-            { key: "captureOutput", label: "Capture Output", type: "boolean" },
+            { key: "level", label: t("settings.logLevel"), type: "text" },
+            { key: "captureOutput", label: t("settings.captureOutput"), type: "boolean" },
           ]}
         />
       );
     case "web":
       return (
         <ConfigSection
-          title="Web Server"
-          description="Dashboard HTTP server settings"
+          title={t("settings.webServer")}
+          description={t("settings.webServerDesc")}
           section="web"
           config={config}
           onUpdate={onUpdate}
           errors={errors}
           fields={[
-            { key: "enabled", label: "Enabled", type: "boolean" },
-            { key: "port", label: "Port", type: "number" },
-            { key: "host", label: "Host", type: "text" },
+            { key: "enabled", label: t("settings.enabled"), type: "boolean" },
+            { key: "port", label: t("settings.port"), type: "number" },
+            { key: "host", label: t("settings.host"), type: "text" },
           ]}
         />
       );
@@ -432,6 +435,7 @@ function ConfigSection({
   errors: Record<string, string>;
   fields: FieldDef[];
 }) {
+  const t = useT();
   const sectionData = (config[section] as Record<string, unknown>) ?? {};
 
   return (
@@ -459,7 +463,7 @@ function ConfigSection({
                     onCheckedChange={(v) => onUpdate(section, field.key, v)}
                   />
                   <span className="text-sm text-muted-foreground">
-                    {sectionData[field.key] ? "Enabled" : "Disabled"}
+                    {sectionData[field.key] ? t("common.enabled") : t("common.disabled")}
                   </span>
                 </div>
               ) : (

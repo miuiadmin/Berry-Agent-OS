@@ -12,20 +12,22 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import { Separator } from "@/components/ui/separator";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 
+/** 导航项定义（label 用 i18n key） */
 const navItems = [
-  { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/chat", label: "Chat", icon: MessageCircle },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-  { href: "/memory", label: "Memory", icon: Brain },
-  { href: "/notifications", label: "Notifications", icon: Bell },
-  { href: "/scheduler", label: "Scheduler", icon: Clock },
-  { href: "/conversations", label: "Conversations", icon: MessagesSquare },
-  { href: "/usage", label: "Usage", icon: BarChart3 },
-  { href: "/logs", label: "Logs", icon: ScrollText },
+  { href: "/", labelKey: "sidebar.home", icon: LayoutDashboard },
+  { href: "/chat", labelKey: "sidebar.chat", icon: MessageCircle },
+  { href: "/agents", labelKey: "sidebar.agents", icon: Bot },
+  { href: "/tasks", labelKey: "sidebar.tasks", icon: ListTodo },
+  { href: "/memory", labelKey: "sidebar.memory", icon: Brain },
+  { href: "/notifications", labelKey: "sidebar.notifications", icon: Bell },
+  { href: "/scheduler", labelKey: "sidebar.scheduler", icon: Clock },
+  { href: "/conversations", labelKey: "sidebar.conversations", icon: MessagesSquare },
+  { href: "/usage", labelKey: "sidebar.usage", icon: BarChart3 },
+  { href: "/logs", labelKey: "sidebar.logs", icon: ScrollText },
 ];
 
 interface AppSidebarProps {
@@ -34,6 +36,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ onNavigate }: AppSidebarProps) {
   const pathname = useLocation().pathname;
+  const t = useT();
 
   return (
     <aside className="flex h-full w-72 md:w-56 flex-col border-r border-sidebar-border bg-sidebar">
@@ -58,7 +61,7 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
               )}
             >
               <item.icon className={cn("size-4 transition-transform duration-200", isActive ? "scale-110" : "group-hover:scale-110")} />
-              {item.label}
+              {t(item.labelKey)}
             </Link>
           );
         })}

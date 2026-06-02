@@ -205,6 +205,12 @@ async function runResearch(ctx: PhaseContext, allTools: ToolDefinition[]): Promi
       sessionId: ctx.sessionId,
       taskId: ctx.taskId,
     },
+    onChunk: (text) => {
+      ctx.ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId: ctx.taskId, text });
+    },
+    onReasoning: (text) => {
+      ctx.ipc.send('task.telemetry', 'core', { kind: 'reasoning_delta', taskId: ctx.taskId, text });
+    },
     onToolResult: (toolName, isError) => {
       ctx.ipc.send('task.telemetry', 'core', { kind: 'tool_result', taskId: ctx.taskId, toolName, isError });
     },
@@ -374,6 +380,12 @@ async function runImplementation(
         purpose: 'code_task',
         sessionId: ctx.sessionId,
         taskId: ctx.taskId,
+      },
+      onChunk: (text) => {
+        ctx.ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId: ctx.taskId, text });
+      },
+      onReasoning: (text) => {
+        ctx.ipc.send('task.telemetry', 'core', { kind: 'reasoning_delta', taskId: ctx.taskId, text });
       },
       onToolResult: (toolName, isError) => {
         ctx.ipc.send('task.telemetry', 'core', { kind: 'tool_result', taskId: ctx.taskId, toolName, isError });

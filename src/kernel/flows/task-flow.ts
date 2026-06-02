@@ -28,6 +28,7 @@ export interface TaskFlowDeps {
   agentProgress: AgentProgress | null;
   registry: AgentRegistry;
   agentManager: AgentManager;
+  streamingFlusher?: import('../streaming-flusher.js').StreamingFlusher;
 }
 
 export function setupTaskProgressHandler(agentIpc: AgentIpc, agentName: string, deps: TaskFlowDeps): void {
@@ -72,6 +73,12 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         } else {
           pending = deps.sessionManager.findPendingByTaskId(payload.taskId);
         }
+        // 实时同步到 pending，重连时可从中恢复已积累的文本
+        if (pending) {
+          pending.draftResponse = (pending.draftResponse ?? '') + payload.text;
+          // 通知 flusher 定期持久化到 SQLite（前端断连恢复用）
+          deps.streamingFlusher?.onTextAccumulated(payload.taskId, pending.draftResponse, pending.reasoning);
+        }
         if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
           const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
           pending.socket.write(JSON.stringify(evt) + '\n');
@@ -90,6 +97,9 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         const rPending = rEntry
           ? deps.sessionManager.getPending(rEntry.correlationId)
           : deps.sessionManager.findPendingByTaskId(payload.taskId);
+        if (rPending) {
+          rPending.reasoning = (rPending.reasoning ?? '') + payload.text;
+        }
         const sock = rPending?.streaming && rPending.socket && !rPending.socket.destroyed
           ? rPending.socket
           : deps.sessionManager.getSocketForTask(payload.taskId);

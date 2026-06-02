@@ -16,7 +16,7 @@ import { buildAvailableAgentsList } from '../agent-registry.js';
 
 const logger = getLogger('correction-flow');
 
-const CORRECTION_TIMEOUT_MS = 15_000;
+const CORRECTION_TIMEOUT_MS = 45_000;
 
 interface AgentIpc {
   onMessage: (type: IpcMessageType, handler: (msg: IpcMessage) => void) => void;

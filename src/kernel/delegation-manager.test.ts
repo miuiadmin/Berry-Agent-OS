@@ -120,10 +120,10 @@ describe('DelegationManager', () => {
   });
 
   describe('invalid transitions', () => {
-    it('acknowledge from non-delegated state returns false', () => {
+    it('acknowledge from active state is idempotent (returns true)', () => {
       const id = dm.create(defaultParams());
       dm.acknowledge(id);
-      expect(dm.acknowledge(id)).toBe(false);
+      expect(dm.acknowledge(id)).toBe(true);
     });
 
     it('submitForReview from delegated state succeeds (graceful for late acknowledge)', () => {

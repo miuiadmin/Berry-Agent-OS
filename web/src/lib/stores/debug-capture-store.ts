@@ -6,6 +6,15 @@ import {
   getDebugCaptureStatus,
   type CaptureResult,
 } from "@/lib/api";
+import zh from "@/locales/zh";
+import en from "@/locales/en";
+
+/** Store 内部翻译辅助（非 hook 环境，直接查翻译表） */
+function t(key: string): string {
+  const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
+  const translations = locale === "en" ? en : zh;
+  return translations[key] ?? key;
+}
 
 interface DebugCaptureState {
   isCapturing: boolean;
@@ -34,10 +43,10 @@ export const useDebugCaptureStore = create<DebugCaptureState & DebugCaptureActio
     try {
       const res = await startDebugCapture();
       set({ isCapturing: true, captureId: res.captureId, loading: false });
-      toast.success("Capture started");
+      toast.success(t("debug.startCapturing"));
     } catch (err) {
       set({ loading: false });
-      toast.error(err instanceof Error ? err.message : "Failed to start capture");
+      toast.error(err instanceof Error ? err.message : t("debug.startCapturing"));
     }
   },
 
@@ -54,7 +63,7 @@ export const useDebugCaptureStore = create<DebugCaptureState & DebugCaptureActio
       });
     } catch (err) {
       set({ loading: false });
-      toast.error(err instanceof Error ? err.message : "Failed to stop capture");
+      toast.error(err instanceof Error ? err.message : t("debug.stopCapturing"));
     }
   },
 

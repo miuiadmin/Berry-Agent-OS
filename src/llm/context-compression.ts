@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 
-const TOOL_RESULT_TRIM_THRESHOLD = 40_000;
+let TOOL_RESULT_TRIM_THRESHOLD = 40_000;
 const RECENT_TURNS_PROTECTED = 2;
+
+export function setToolOutputMaxBytes(maxBytes: number): void {
+  TOOL_RESULT_TRIM_THRESHOLD = maxBytes;
+}
 
 interface Message {
   role: 'user' | 'assistant' | 'system' | string;
@@ -98,34 +102,43 @@ export function needsPhase2(messages: Message[], maxContextChars: number): boole
 export function buildSummaryPrompt(previousSummary: string | null, newMessages: Message[]): string {
   const newContent = newMessages.map(m => `[${m.role}]: ${m.content.slice(0, 500)}`).join('\n');
 
-  if (previousSummary) {
-    return `Update this running summary with new information. Keep the structured format.
+  const template = `## 目标
+（用户本次会话要达成什么）
 
-Previous summary:
+## 已完成
+（已经做完的步骤，含关键文件路径/命令）
+
+## 决策记录
+（做出的选择及原因）
+
+## 关键上下文
+（文件路径、变量名、配置值、错误信息等硬事实）
+
+## 待处理
+（尚未完成的任务/阻塞项）
+
+如果某类别为空，写"无"。`;
+
+  if (previousSummary) {
+    return `将以下对话压缩为结构化摘要。基于已有摘要更新，严格按模板输出。
+
+已有摘要:
 ${previousSummary}
 
-New messages since last summary:
+新增对话:
 ${newContent}
 
-Output updated summary in this format:
-- Active tasks: (what's currently being worked on)
-- Completed: (what was finished)
-- Decisions: (choices made)
-- Key context: (file paths, variables, constraints)
-- Blockers: (what's unresolved)`;
+输出模板:
+${template}`;
   }
 
-  return `Summarize these messages into a structured running summary.
+  return `将以下对话压缩为结构化摘要。严格按模板输出，不遗漏任何类别。
 
-Messages:
+对话内容:
 ${newContent}
 
-Output summary in this format:
-- Active tasks: (what's currently being worked on)
-- Completed: (what was finished)
-- Decisions: (choices made)
-- Key context: (file paths, variables, constraints)
-- Blockers: (what's unresolved)`;
+输出模板:
+${template}`;
 }
 
 export function applyPhase2(

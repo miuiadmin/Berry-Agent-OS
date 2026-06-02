@@ -47,10 +47,14 @@ export interface ModelEntry {
   supportsThinking: boolean;
   /** Whether the model supports image/file attachments */
   supportsAttachments: boolean;
+  /** Whether the model supports tool/function calling */
+  supportsTools?: boolean;
   /** USD per 1M input tokens (optional) */
   inputPricePer1M?: number;
   /** USD per 1M output tokens (optional) */
   outputPricePer1M?: number;
+  /** USD per 1M cache read tokens (optional) */
+  cacheReadPricePer1M?: number;
 }
 
 // ─── Provider Channel ─────────────────────────────────────────────

@@ -8,7 +8,15 @@ export type ToolCategory = 'idempotent' | 'mutating' | 'never_parallel';
 
 const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   read_file: 'idempotent',
+  inspect_code: 'idempotent',
   list_directory: 'idempotent',
+  search_files: 'idempotent',
+  grep_files: 'idempotent',
+  web_search: 'idempotent',
+  web_fetch: 'idempotent',
+  search_history: 'idempotent',
+  monitor_status: 'idempotent',
+  cron_list: 'idempotent',
   memory_read: 'idempotent',
   memory_search: 'idempotent',
   session_search: 'idempotent',

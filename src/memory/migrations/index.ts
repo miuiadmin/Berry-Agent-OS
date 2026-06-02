@@ -522,6 +522,34 @@ const v11ConversationReasoning: Migration = {
   },
 };
 
+const v12ConversationsFts: Migration = {
+  version: 12,
+  name: 'conversations-fts5',
+  up: (db: Database.Database) => {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='conversations_fts'`).get();
+    if (!tables) {
+      db.exec(`
+        CREATE VIRTUAL TABLE conversations_fts USING fts5(
+          content,
+          content='conversations',
+          content_rowid='rowid',
+          tokenize='trigram'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS conversations_fts_insert AFTER INSERT ON conversations BEGIN
+          INSERT INTO conversations_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS conversations_fts_delete AFTER DELETE ON conversations BEGIN
+          INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        END;
+
+        INSERT INTO conversations_fts(conversations_fts) VALUES('rebuild');
+      `);
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -535,4 +563,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v9SchedulerSubsystem,
   v10IntelligenceLayer,
   v11ConversationReasoning,
+  v12ConversationsFts,
 ];

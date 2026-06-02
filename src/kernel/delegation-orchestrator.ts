@@ -22,6 +22,7 @@ import { FallbackRouter } from './fallback-router.js';
 import { CorrectionFlow } from './flows/correction-flow.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { PermissionFlow } from './flows/permission-flow.js';
+import { StreamingFlusher } from './streaming-flusher.js';
 import {
   setupTaskProgressHandler,
   setupTaskAcknowledgeHandlers,
@@ -120,6 +121,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   // Permission judge state
   private permissionFlow: PermissionFlow;
+  /** 流式内容定时刷写器（将 text_delta 累积内容持久化到 SQLite 供断连恢复） */
+  private streamingFlusher: StreamingFlusher;
 
   constructor(deps: {
     agentManager: AgentManager;
@@ -155,6 +158,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       sessionManager: deps.sessionManager,
       brainDecisionRecorder: this.brainDecisionRecorder,
     });
+    this.streamingFlusher = new StreamingFlusher(deps.taskManager);
   }
 
   get delegation(): DelegationManager { return this.delegationManager; }
@@ -208,6 +212,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       agentProgress: this.agentProgress,
       registry: this.registry,
       agentManager: this.agentManager,
+      streamingFlusher: this.streamingFlusher,
     };
   }
 
@@ -271,65 +276,94 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   // ═══ PUBLIC API ═══════════════════════════════════
 
+  // Track speculative execution state (conversation started before Brain routing confirms)
+  private speculativeCorrelations = new Set<string>();
+  private pendingHandoffs = new Map<string, RouteDecision>();
+
   sendRouteRequest(payload: RouteRequestPayload, correlationId: string): void {
     withTrace('router.sendRouteRequest', () => {
+      // In test/takeover mode, use synchronous Brain routing (preserves test expectations)
+      if (this.takeoverController) {
+        this.sendRouteRequestSync(payload, correlationId);
+        return;
+      }
+
+      // §9.0 Rule-first routing: try FallbackRouter before Brain LLM
+      const ruleDecision = this.fallbackRouter.route(payload.message);
+      if (ruleDecision.intent !== 'chat') {
+        // High confidence rule match (code/skill/plugin) → dispatch directly, skip Brain
+        logger.info({ intent: ruleDecision.intent, target: ruleDecision.targetAgent }, '规则路由命中，跳过 Brain');
+        const pending = this.sessionManager.getPending(correlationId);
+        if (pending) {
+          this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, { ...ruleDecision, source: 'rule' } as unknown as Record<string, unknown>);
+          getEventBus().emit('message.routed', { sessionId: pending.sessionId, taskId: pending.taskId ?? correlationId, targetAgent: ruleDecision.targetAgent, intent: ruleDecision.intent });
+        }
+        this.handleRouteDecision(ruleDecision, correlationId);
+        return;
+      }
+
+      // No rule match → speculative execution: start conversation immediately
+      const pending = this.sessionManager.getPending(correlationId);
+      if (pending) {
+        this.speculativeCorrelations.add(correlationId);
+        const chatDecision: RouteDecision = { intent: 'chat', targetAgent: 'conversation', priority: 'normal', reason: 'speculative: conversation started while Brain routing' };
+        this.handleChatRoute(chatDecision, correlationId, pending);
+      }
+
+      // Send Brain routing in parallel (for learning + possible handoff)
       const orchestratorAgent = this.registry.requireRole('orchestrator');
       const orchestratorName = orchestratorAgent.manifest.name;
       const brain = this.agentManager.getAgent(orchestratorName);
       if (!brain) {
-        logger.error('Brain agent not available for routing');
-        this.handleRouteFallback(correlationId);
+        // Brain not available → speculative execution continues as-is
+        this.speculativeCorrelations.delete(correlationId);
         return;
       }
 
-      // §5.2 ①: Inject memory recall for Brain routing personalization
-      const memoryFrame = this.sessionManager.buildMemoryContext(payload.sessionId, payload.message);
+      // Enrich context for Brain (memory, world model, suggestions, capabilities)
+      let enrichedPayload = { ...payload };
+
+      const memoryFrame = this.sessionManager.buildMemoryContext(enrichedPayload.sessionId, enrichedPayload.message);
       if (memoryFrame?.records && memoryFrame.records.length > 0) {
         const memoryHints = memoryFrame.records.slice(0, 5).map((r: any) => r.summary ?? r.content).join('; ');
-        payload = {
-          ...payload,
-          sessionContext: (payload.sessionContext ?? '') + `\n\n[用户记忆] ${memoryHints}`,
-        };
+        enrichedPayload = { ...enrichedPayload, sessionContext: (enrichedPayload.sessionContext ?? '') + `\n\n[用户记忆] ${memoryHints}` };
       }
 
-      // Enrich routing context with World Model summary
       if (this.worldModelRef) {
         const worldSummary = this.worldModelRef.getSummary();
         if (worldSummary) {
-          payload = {
-            ...payload,
-            sessionContext: payload.sessionContext
-              ? `${payload.sessionContext}\n\n[世界模型] ${worldSummary}`
-              : `[世界模型] ${worldSummary}`,
-          };
+          enrichedPayload = { ...enrichedPayload, sessionContext: enrichedPayload.sessionContext ? `${enrichedPayload.sessionContext}\n\n[世界模型] ${worldSummary}` : `[世界模型] ${worldSummary}` };
         }
       }
 
-      // Inject pending suggestions from Will Loop
       if (this.suggestionQueueRef) {
-        const suggestionsBlock = this.suggestionQueueRef.buildPromptBlock(payload.sessionId);
+        const suggestionsBlock = this.suggestionQueueRef.buildPromptBlock(enrichedPayload.sessionId);
         if (suggestionsBlock) {
-          payload = {
-            ...payload,
-            sessionContext: (payload.sessionContext ?? '') + suggestionsBlock,
-          };
+          enrichedPayload = { ...enrichedPayload, sessionContext: (enrichedPayload.sessionContext ?? '') + suggestionsBlock };
         }
       }
 
-      // §2.6 Discovery: inject available Bus capabilities so Brain can route to them
       if (this.capabilityBusRef) {
         const capabilities = this.capabilityBusRef.discover();
         if (capabilities.length > 0) {
           const capList = capabilities.slice(0, 30).map(c => `${c.name} (${c.dangerLevel})`).join(', ');
-          payload = {
-            ...payload,
-            sessionContext: (payload.sessionContext ?? '') + `\n\n[可用能力] ${capList}`,
-          };
+          enrichedPayload = { ...enrichedPayload, sessionContext: (enrichedPayload.sessionContext ?? '') + `\n\n[可用能力] ${capList}` };
         }
       }
 
-      brain.ipc.send('route.request', orchestratorName, payload, correlationId);
+      brain.ipc.send('route.request', orchestratorName, enrichedPayload, correlationId);
     });
+  }
+
+  private sendRouteRequestSync(payload: RouteRequestPayload, correlationId: string): void {
+    const orchestratorAgent = this.registry.requireRole('orchestrator');
+    const orchestratorName = orchestratorAgent.manifest.name;
+    const brain = this.agentManager.getAgent(orchestratorName);
+    if (!brain) {
+      this.handleRouteFallback(correlationId);
+      return;
+    }
+    brain.ipc.send('route.request', orchestratorName, payload, correlationId);
   }
 
   sendUserReply(payload: AgentUserReplyPayload, correlationId: string): void {
@@ -400,10 +434,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const primary = activeEntries[0];
     const pending = this.sessionManager.getPending(primary.correlationId);
     if (pending) {
+      this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
       const partialResponse = pending.draftResponse ?? primary.finalResponse;
       this.sessionManager.deletePending(primary.correlationId);
       pending.resolve(partialResponse ?? '[已停止]');
     }
+
+    // 清理投机执行状态，防止 memory leak 和 stale handoff
+    this.speculativeCorrelations.delete(primary.correlationId);
+    this.pendingHandoffs.delete(primary.correlationId);
 
     return {
       interrupted: true,
@@ -441,6 +480,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           targetAgent: decision.targetAgent,
           intent: decision.intent,
         });
+      }
+
+      // §9.0 Speculative execution: conversation already started
+      if (this.speculativeCorrelations.has(correlationId)) {
+        this.speculativeCorrelations.delete(correlationId);
+        if (decision.intent === 'chat' || decision.targetAgent === 'conversation') {
+          logger.debug({ correlationId }, 'speculative execution confirmed: conversation');
+          return;
+        }
+        // Brain says different agent → store handoff for when conversation finishes
+        this.pendingHandoffs.set(correlationId, decision);
+        logger.info({ correlationId, handoffTo: decision.targetAgent }, 'speculative handoff queued');
+        return;
+      }
+
+      // If pending is gone and no speculative marker, the conversation already finished
+      // (late Brain response) — ignore to avoid stale routing
+      if (!pending) {
+        logger.debug({ correlationId, intent: decision.intent }, 'late route.result after conversation finished, ignored');
+        return;
       }
 
       this.handleRouteDecision(decision, correlationId);
@@ -536,11 +595,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private loadActiveSkills(skillNames: string[]): string | null {
     try {
       const { SkillsRegistry } = require('../skills/index.js');
+      const { scanContextFile } = require('../safety/context-file-scanner.js');
       const registry = new SkillsRegistry(getDb());
       const parts: string[] = [];
       for (const name of skillNames.slice(0, 5)) {
         const skill = registry.get(name);
         if (skill?.content) {
+          const scan = scanContextFile(skill.content);
+          if (!scan.safe) {
+            logger.warn({ skill: name, threats: scan.threats }, 'Skill content blocked: injection detected');
+            continue;
+          }
           parts.push(`--- Skill: ${name} ---\n${skill.content}`);
         }
       }
@@ -598,6 +663,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.reportProgress(pending, 'dispatching', `正在分发给 ${decision.targetAgent}...`);
 
     try {
+      const { getLastCwd } = await import('../tools/shell.js');
       const { taskId } = await this.dispatchModuleTaskInternal({
         sessionId: pending.sessionId,
         taskType,
@@ -606,6 +672,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           message: pending.userMessage,
           instruction: decision.instruction,
           contextHints: decision.contextHints,
+          workingDir: getLastCwd(),
         },
         foreground: true,
         correlationId,
@@ -653,6 +720,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       },
       foreground: true,
     });
+
+    // 记录委托 task ID，供 flusher 清理使用
+    pending.delegationTaskId = taskId;
 
     const dispatched = await this.daemonBridge.dispatch(taskId, {
       prompt: pending.userMessage,
@@ -730,6 +800,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       foreground: true,
     });
 
+    // 记录委托 task ID 到 pending，供后续所有清理路径使用
+    pending.delegationTaskId = delegationId;
     let textAccumulator = '';
 
     try {
@@ -742,6 +814,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           case 'text_delta': {
             const text = event.data.text as string;
             textAccumulator += text;
+            // 实时同步到 pending，重连时可从中恢复已积累的文本
+            pending.draftResponse = textAccumulator;
+            // 定期持久化到 SQLite，前端断连/刷新后可恢复
+            this.streamingFlusher.onTextAccumulated(delegationId, textAccumulator, pending.reasoning);
             if (pending.streaming && pending.socket && !pending.socket.destroyed) {
               const socketEvent: SocketTextDeltaEvent = { type: 'text_delta', text, taskId: delegationId };
               pending.socket.write(JSON.stringify(socketEvent) + '\n');
@@ -751,6 +827,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           case 'execution_completed': {
             const finalText = textAccumulator || (event.data.content as string) || '';
             pending.draftResponse = finalText;
+            this.streamingFlusher.remove(delegationId);
             if (workspaceId && task.workspacePath) {
               getDb().prepare(
                 'UPDATE workspace_agents SET prior_work_dir = ?, prior_session_id = ? WHERE workspace_id = ? AND agent_name = ?',
@@ -766,6 +843,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           case 'execution_failed': {
             const error = (event.data.error as string) || '执行失败';
             const resumable = event.data.resumable as boolean | undefined;
+            this.streamingFlusher.remove(delegationId);
             if (resumable) {
               logger.info({ correlationId, error }, 'Execution failed but resumable');
               this.delegationManager.fail(delegationId, `[resumable] ${error}`);
@@ -779,6 +857,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             return;
           }
           case 'execution_cancelled': {
+            this.streamingFlusher.remove(delegationId);
             this.delegationManager.fail(delegationId, 'Cancelled');
             this.sessionManager.deletePending(correlationId);
             pending.resolve(`[${runtime.name}] 执行已取消`);
@@ -798,6 +877,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           textAccumulator,
         );
       } else {
+        this.streamingFlusher.remove(delegationId);
         this.delegationManager.fail(delegationId, 'No output produced');
         this.sessionManager.deletePending(correlationId);
         pending.resolve(`[${runtime.name}] 未产出任何输出`);
@@ -805,6 +885,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error({ correlationId, err }, 'Runtime execution error');
+      this.streamingFlusher.remove(delegationId);
       this.delegationManager.fail(delegationId, message);
       this.sessionManager.deletePending(correlationId);
       pending.resolve(`[${runtime.name}] 执行异常: ${message}`);
@@ -980,6 +1061,23 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       pending.reasoning = reasoning;
       pending.toolCalls = calls;
 
+      // §9.0 M15.3: Skip sync review — auto-approve immediately
+      // Brain reviews asynchronously in background for learning/correction
+      if (!this.takeoverController) {
+        // Production mode: auto-approve, dispatch async post-review
+        primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+
+        // Async post-review for learning (fire-and-forget)
+        this.dispatchModuleTask({
+          sessionId,
+          taskType: 'extract_feedback',
+          requester: 'post_review',
+          inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
+        }).catch(() => {});
+        return;
+      }
+
+      // Test/takeover mode: preserve sync Brain review
       const entry = this.delegationManager.getByCorrelation(correlationId);
       const wsId = entry?.workspaceId;
       if (this.superiorReviewFlow?.interceptForSuperiorReview(correlationId, entry?.targetAgent ?? '', wsId, turn, entry?.id)) {
@@ -991,7 +1089,29 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.pendingReviewOrigins.set(correlationId, 'conversation');
       this.reportProgress(pending, 'reviewing', '正在审核...');
 
-      reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+      const sent = reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+      if (!sent) {
+        // IPC 发送失败 → 自动 approve
+        logger.warn({ correlationId }, 'review.request (conversation) IPC 发送失败，自动 approve');
+        this.pendingReviewOrigins.delete(correlationId);
+        const dEntry = this.delegationManager.getByCorrelation(correlationId);
+        if (dEntry) this.delegationManager.complete(dEntry.id, draft);
+        this.sessionManager.deletePending(correlationId);
+        pending.resolve(draft);
+        return;
+      }
+
+      // 审核超时保护（防止 Brain LLM 挂死）
+      setTimeout(() => {
+        const stillPending = this.sessionManager.getPending(correlationId);
+        if (!stillPending) return;
+        logger.warn({ correlationId }, '对话审核超时，自动 approve');
+        this.pendingReviewOrigins.delete(correlationId);
+        const dEntry = this.delegationManager.getByCorrelation(correlationId);
+        if (dEntry) this.delegationManager.complete(dEntry.id, draft);
+        this.sessionManager.deletePending(correlationId);
+        stillPending.resolve(draft);
+      }, 30_000);
     });
 
     reviewerIpc.onMessage('review.result', (msg: IpcMessage) => {
@@ -1030,6 +1150,45 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(correlationId);
       if (!pending) return;
 
+      // §10.0 Stream Merge: 检查是否有待执行的 handoff（Brain 判定需要另一个 agent）
+      const handoff = this.pendingHandoffs.get(correlationId);
+      if (handoff) {
+        this.pendingHandoffs.delete(correlationId);
+        logger.info({ correlationId, handoffTo: handoff.targetAgent, intent: handoff.intent }, '投机执行完成，流式追加委派');
+
+        // 结束 conversation 的 flusher，但保持 pending 存活
+        this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
+
+        // 完成 conversation 任务（它的部分已做完）
+        if (pending.taskId) {
+          this.taskManager.complete(pending.taskId, { response, reviewVerdict, handoffTo: handoff.targetAgent });
+        }
+
+        // 保存 conversation 的回复到对话历史
+        this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
+
+        // 向前端发送 handoff 分隔事件（同一个气泡内）
+        if (pending.socket && !pending.socket.destroyed) {
+          try {
+            const handoffEvent = JSON.stringify({ type: 'agent_handoff', from: 'conversation', to: handoff.targetAgent, intent: handoff.intent }) + '\n';
+            pending.socket.write(handoffEvent);
+          } catch { /* socket may be closed */ }
+        }
+
+        // 清除旧 taskId，handoff agent 会分配新的
+        pending.taskId = undefined;
+        pending.delegationTaskId = undefined;
+        pending.draftResponse = '';
+        pending.reasoning = undefined;
+        pending.toolCalls = undefined;
+
+        // 直接用现有 pending 分发 handoff（不重建 pending）
+        this.handleRouteDecision(handoff, correlationId);
+        return;
+      }
+
+      // 无 handoff — 正常关闭路径
+      this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
       this.sessionManager.deletePending(correlationId);
 
       if (pending.taskId) {
@@ -1076,12 +1235,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       });
 
       pending.resolve(response);
+
+      // §9.0 Cleanup speculative state for this correlation
+      this.speculativeCorrelations.delete(correlationId);
     });
   }
 
   private handleTaskReviewResult(review: ReviewResult, correlationId: string): void {
     const pending = this.sessionManager.getPending(correlationId);
     if (!pending) return;
+
+    if (pending.taskId) this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId);
 
     const response = review.verdict === 'modify' && review.finalResponse
       ? review.finalResponse
@@ -1139,6 +1303,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const pending = this.sessionManager.getPending(correlationId);
     if (!pending) return;
 
+    if (pending.taskId) this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId);
     this.pendingReviewOrigins.delete(correlationId);
     const entry = this.delegationManager.getByCorrelation(correlationId);
     if (entry) {
@@ -1150,6 +1315,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   }
 
   private sendTaskResultForReview(fgEntry: { correlationId: string; sessionId: string }, pending: PendingRequest, draftResponse: string): void {
+    // 流式阶段结束，清理 flusher（complete() 会写最终 output_payload）
+    this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
     const entry = this.delegationManager.getByCorrelation(fgEntry.correlationId);
     if (entry) {
       this.delegationManager.submitForReview(entry.id, { delegationId: entry.id, response: draftResponse });
@@ -1159,7 +1326,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const reviewerName = reviewerAgent.manifest.name;
     const reviewer = this.agentManager.getAgent(reviewerName);
 
-    if (!reviewer) {
+    // reviewer 不可用（进程崩溃/未启动）→ 直接 approve，不挂死
+    if (!reviewer || !reviewer.child.connected) {
+      logger.warn({ correlationId: fgEntry.correlationId }, 'Reviewer 不可用，自动 approve');
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
       this.sessionManager.deletePending(fgEntry.correlationId);
       pending.resolve(draftResponse);
@@ -1182,9 +1351,32 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
 
     this.pendingReviewOrigins.set(fgEntry.correlationId, 'task');
-    this.reportProgress(pending, 'reviewing', '正在审核任务结果...');
+    this.reportProgress(pending, 'reviewing', '正在审核...');
 
-    reviewer.ipc.send('review.request', reviewerName, { turn }, fgEntry.correlationId);
+    // 发送审核请求，检查返回值
+    const sent = reviewer.ipc.send('review.request', reviewerName, { turn }, fgEntry.correlationId);
+    if (!sent) {
+      // IPC 发送失败（进程已断连）→ 自动 approve
+      logger.warn({ correlationId: fgEntry.correlationId }, 'review.request IPC 发送失败，自动 approve');
+      this.pendingReviewOrigins.delete(fgEntry.correlationId);
+      if (entry) this.delegationManager.complete(entry.id, draftResponse);
+      this.sessionManager.deletePending(fgEntry.correlationId);
+      pending.resolve(draftResponse);
+      return;
+    }
+
+    // 审核阶段超时保护：30 秒无响应则自动 approve（防止 Brain LLM 调用挂死）
+    const reviewTimeoutMs = 30_000;
+    setTimeout(() => {
+      // 如果 pending 仍存在（说明 review.result 没有回来），自动放行
+      const stillPending = this.sessionManager.getPending(fgEntry.correlationId);
+      if (!stillPending) return;
+      logger.warn({ correlationId: fgEntry.correlationId, timeoutMs: reviewTimeoutMs }, '审核超时，自动 approve');
+      this.pendingReviewOrigins.delete(fgEntry.correlationId);
+      if (entry) this.delegationManager.complete(entry.id, draftResponse);
+      this.sessionManager.deletePending(fgEntry.correlationId);
+      stillPending.resolve(draftResponse);
+    }, reviewTimeoutMs);
   }
 
   private setupAgentAskUserFlow(reviewerIpc: AgentIpc): void {
@@ -1219,8 +1411,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (entry) {
         this.delegationManager.markAskingUser(payload.taskId, question);
         const pending = this.sessionManager.getPending(entry.correlationId);
-        if (pending) {
-          this.reportProgress(pending, 'asking', question);
+        if (pending && pending.socket && !pending.socket.destroyed) {
+          // 发送结构化的 ask_user 事件，前端可以渲染回复输入框
+          try {
+            const askEvent = JSON.stringify({
+              type: 'ask_user',
+              question,
+              options: payload.options,
+              sessionId: payload.sessionId,
+              taskId: payload.taskId,
+            }) + '\n';
+            pending.socket.write(askEvent);
+          } catch { /* socket closed */ }
         }
       }
     });
@@ -1264,6 +1466,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (!pending) return;
 
     if (!result.ok) {
+      this.streamingFlusher.remove(result.taskId);
       this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
       const errorResponse = `[${agentName}] 任务失败: ${result.error ?? '未知错误'}`;
       this.sessionManager.deletePending(fgEntry.correlationId);
@@ -1301,11 +1504,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
       const pending = this.sessionManager.getPending(entry.correlationId);
-      if (!pending?.streaming || !pending.socket || pending.socket.destroyed) return;
+      if (!pending?.streaming) return;
 
       if (event.kind === 'text' && event.data.kind === 'text') {
-        const evt: SocketTextDeltaEvent = { type: 'text_delta', text: event.data.text, taskId };
-        pending.socket.write(JSON.stringify(evt) + '\n');
+        // 无条件积累文本（与 socket 状态无关，后端任务独立于前端连接）
+        pending.draftResponse = (pending.draftResponse ?? '') + event.data.text;
+        // 定时持久化到 SQLite（断连/刷新恢复用）
+        this.streamingFlusher.onTextAccumulated(taskId, pending.draftResponse, pending.reasoning);
+        // 有可用 socket 时才实时推送
+        if (pending.socket && !pending.socket.destroyed) {
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: event.data.text, taskId };
+          pending.socket.write(JSON.stringify(evt) + '\n');
+        }
       }
     });
 

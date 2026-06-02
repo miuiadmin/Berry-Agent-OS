@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { useT, useDateFormat } from "@/lib/i18n";
 import { MessagesSquare, Trash2, Search, ArrowUpDown, MessageCircle, Download } from "lucide-react";
 
 function ConversationsSkeleton() {
@@ -32,7 +33,9 @@ function ConversationsSkeleton() {
 }
 
 export default function ConversationsPage() {
-  useDocumentTitle("Conversations");
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
+  useDocumentTitle(t("conversations.title"));
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"recent" | "messages">("recent");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -52,10 +55,10 @@ export default function ConversationsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      toast.success("Conversation deleted");
+      toast.success(t("conversations.conversationDeleted"));
     },
     onError: (err: Error) => {
-      toast.error(err.message || "Failed to delete conversation");
+      toast.error(err.message || t("conversations.failedToDelete"));
     },
   });
 
@@ -76,9 +79,9 @@ export default function ConversationsPage() {
       a.download = `conversation-${conv.sessionId.slice(0, 8)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success("Exported conversation");
+      toast.success(t("conversations.exportedConversation"));
     } catch {
-      toast.error("Failed to export conversation");
+      toast.error(t("conversations.failedToExport"));
     }
   }, []);
 
@@ -99,9 +102,9 @@ export default function ConversationsPage() {
       a.download = `conversations-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(`Exported ${all.length} conversations`);
+      toast.success(t("conversations.exportedCount", { count: all.length }));
     } catch {
-      toast.error("Failed to export conversations");
+      toast.error(t("conversations.failedToExportAll"));
     }
   }, [conversationsQuery.data]);
 
@@ -117,14 +120,14 @@ export default function ConversationsPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-lg font-semibold">Conversations</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Session history</p>
+      <h1 className="text-lg font-semibold">{t("conversations.title")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("conversations.subtitle")}</p>
 
       <div className="mt-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search sessions..."
+            placeholder={t("conversations.searchPlaceholder")}
             className="pl-9 h-10 md:h-[unset]"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
@@ -136,7 +139,7 @@ export default function ConversationsPage() {
           className="gap-1.5 min-h-[44px] md:min-h-0"
         >
           <ArrowUpDown className="size-3.5" />
-          <span className="hidden sm:inline">{sort === "recent" ? "Most Recent" : "Most Messages"}</span>
+          <span className="hidden sm:inline">{sort === "recent" ? t("conversations.mostRecent") : t("conversations.mostMessages")}</span>
         </Button>
         <Button
           variant="outline"
@@ -146,14 +149,14 @@ export default function ConversationsPage() {
           disabled={!conversationsQuery.data?.length}
         >
           <Download className="size-3.5" />
-          <span className="hidden sm:inline">Export All</span>
+          <span className="hidden sm:inline">{t("conversations.exportAll")}</span>
         </Button>
       </div>
 
       <QueryBoundary
         query={conversationsQuery}
         skeleton={<ConversationsSkeleton />}
-        errorTitle="Failed to load conversations"
+        errorTitle={t("conversations.failedToLoad")}
       >
         {(conversations) => (
           <div className="mt-4 space-y-2">
@@ -177,7 +180,7 @@ export default function ConversationsPage() {
                         {displayTitle}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {conv.messageCount} messages · {new Date(conv.lastActive).toLocaleString()}
+                        {t("conversations.messagesCount", { count: conv.messageCount })} · {fmtDT(new Date(conv.lastActive))}
                       </p>
                     </div>
                   </div>
@@ -185,7 +188,7 @@ export default function ConversationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Export conversation"
+                      aria-label={t("conversations.exportConversation")}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleExport(conv);
@@ -196,7 +199,7 @@ export default function ConversationsPage() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Delete conversation"
+                      aria-label={t("conversations.deleteConversation")}
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);
@@ -211,9 +214,9 @@ export default function ConversationsPage() {
             {conversations.length === 0 && (
               <EmptyState
                 icon={search ? Search : MessageCircle}
-                title={search ? "No matching conversations" : "No conversations yet"}
-                description={search ? "Try a different search term" : "Start chatting to create your first conversation"}
-                action={search ? undefined : { label: "Start a conversation", onClick: () => navigate("/chat") }}
+                title={search ? t("conversations.noMatchingConversations") : t("conversations.noConversations")}
+                description={search ? t("conversations.tryDifferentSearch") : t("conversations.startChatting")}
+                action={search ? undefined : { label: t("conversations.startConversation"), onClick: () => navigate("/chat") }}
               />
             )}
           </div>
@@ -223,9 +226,9 @@ export default function ConversationsPage() {
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
-        title="Delete conversation"
-        description="This action cannot be undone. The entire conversation history will be permanently deleted."
-        actionLabel="Delete"
+        title={t("conversations.deleteConfirmTitle")}
+        description={t("conversations.deleteConfirmDesc")}
+        actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) deleteConversation.mutate(deleteTarget);
         }}

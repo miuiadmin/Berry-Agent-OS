@@ -8,6 +8,9 @@ const HomePage = lazy(() => import("./pages/HomePage"));
 const ChatPage = lazy(() => import("./pages/ChatPage"));
 const AgentsPage = lazy(() => import("./pages/AgentsPage"));
 const TasksPage = lazy(() => import("./pages/TasksPage"));
+const MemoryPage = lazy(() => import("./pages/MemoryPage"));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const SchedulerPage = lazy(() => import("./pages/SchedulerPage"));
 const ConversationsPage = lazy(() => import("./pages/ConversationsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
@@ -25,6 +28,9 @@ export default function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/memory" element={<MemoryPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/scheduler" element={<SchedulerPage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/usage" element={<UsagePage />} />

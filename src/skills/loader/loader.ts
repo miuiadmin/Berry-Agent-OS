@@ -3,6 +3,10 @@ import { join } from 'node:path';
 import type { DiscoveredSkill } from '../discovery/sources.js';
 import type { SkillFrontmatter } from './frontmatter.js';
 import { parseFrontmatter, stripFrontmatter } from './frontmatter.js';
+import { scanContextFile } from '../../safety/context-file-scanner.js';
+import { getLogger } from '../../utils/logger.js';
+
+const logger = getLogger('skill-loader');
 
 export interface SkillLinkedFiles {
   references: string[];
@@ -42,6 +46,13 @@ export class SkillContentLoader {
       const content = readFileSync(discovered.filePath, 'utf-8');
       const fm = parseFrontmatter(content);
       if (!fm) return null;
+
+      // §9.0 M11: Scan for prompt injection before loading
+      const scan = scanContextFile(content);
+      if (!scan.safe) {
+        logger.warn({ skill: fm.name ?? discovered.name, threats: scan.threats, path: discovered.filePath }, 'Skill blocked: injection patterns detected');
+        return null;
+      }
 
       const name = fm.name || discovered.name;
       const rawContent = stripFrontmatter(content);

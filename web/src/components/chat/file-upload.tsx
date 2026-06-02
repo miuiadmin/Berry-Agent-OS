@@ -4,6 +4,7 @@ import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from "lucide-reac
 import { uploadFile, type UploadResponse } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 export interface Attachment {
   fileId: string;
@@ -23,6 +24,7 @@ interface FileUploadProps {
 export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachment) => void; disabled?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const t = useT();
 
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -39,7 +41,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         });
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
+      const msg = err instanceof Error ? err.message : t("fileUpload.uploadFailed");
       toast.error(msg);
     } finally {
       setUploading(false);
@@ -51,7 +53,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
     <>
       <button
         type="button"
-        aria-label="Attach file"
+        aria-label={t("fileUpload.attach")}
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}
         className={cn(
@@ -105,12 +107,13 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
 }
 
 export function DragOverlay({ visible }: { visible: boolean }) {
+  const t = useT();
   if (!visible) return null;
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm border-2 border-dashed border-ring rounded-lg">
       <div className="text-center">
         <Paperclip className="mx-auto size-8 text-muted-foreground" />
-        <p className="mt-2 text-sm font-medium">Drop files here</p>
+        <p className="mt-2 text-sm font-medium">{t("fileUpload.dropHere")}</p>
       </div>
     </div>
   );

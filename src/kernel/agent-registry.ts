@@ -214,6 +214,10 @@ export class AgentRegistry {
 
       try {
         const manifest = this.loadManifest(manifestPath);
+        if (this.agents.has(manifest.name)) {
+          logger.debug({ name: manifest.name, path: manifestPath }, '跳过重复 Agent（已由内置注册）');
+          continue;
+        }
         this.register(manifest, manifestPath);
       } catch (err) {
         logger.error({ err, path: manifestPath }, `加载 Agent manifest 失败: ${manifestPath}`);

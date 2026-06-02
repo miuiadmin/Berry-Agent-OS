@@ -5,8 +5,10 @@ import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
+import { useT } from "@/lib/i18n";
 
 export function DebugCaptureButton({ className }: { className?: string }) {
+  const t = useT();
   const { data: health } = useQuery(queries.health());
   const { isCapturing, loading, start, stop, sync } = useDebugCaptureStore();
 
@@ -36,8 +38,8 @@ export function DebugCaptureButton({ className }: { className?: string }) {
         isCapturing && "text-red-500",
         className,
       )}
-      title={isCapturing ? "Stop capturing logs" : "Start capturing logs"}
-      aria-label={isCapturing ? "Stop capturing logs" : "Start capturing logs"}
+      title={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}
+      aria-label={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}
     >
       <Bug className={cn("size-5 md:size-4", isCapturing && "animate-pulse")} />
     </Button>

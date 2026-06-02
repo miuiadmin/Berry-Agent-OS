@@ -18,6 +18,27 @@ const BRIDGED_EVENTS: EventName[] = [
   'daemon.task.progress',
   'daemon.task.completed',
   'daemon.task.failed',
+  // Notification events
+  'notification.created',
+  'notification.read',
+  // Scheduler events
+  'scheduler.job_enqueued',
+  'scheduler.job_claimed',
+  'scheduler.job_completed',
+  'scheduler.job_failed',
+  'scheduler.chain_step_completed',
+  'scheduler.chain_approval_pending',
+  'scheduler.reminder_fired',
+  'scheduler.webhook_received',
+  // MCP events
+  'mcp.connected',
+  'mcp.disconnected',
+  'mcp.failed',
+  'mcp.tools_changed',
+  // Cron events
+  'cron.fired',
+  'cron.completed',
+  'cron.failed',
 ];
 
 export class WsEventBridge {

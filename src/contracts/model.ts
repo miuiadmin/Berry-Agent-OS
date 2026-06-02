@@ -157,6 +157,7 @@ export interface ModelResponse {
   stopReason: ModelStopReason;
   usage: ModelUsage;
   model: string;
+  reasoning?: string;
 }
 
 export type ModelEvent =

@@ -9,6 +9,8 @@ import { createMemoryTools } from '../../../tools/memory-tools.js';
 import { createCapabilityTools } from '../../../tools/capability-tools.js';
 import { createSkillTools } from '../../../tools/skill-tools.js';
 import { createModelTools } from '../../../tools/model-tools.js';
+import { setCronToolsDb } from '../../../tools/cron-tools.js';
+import { setSessionToolsDb } from '../../../tools/session-tools.js';
 import { ContextManager } from '../../../llm/context-manager.js';
 import { z } from 'zod';
 import type { IpcMessage } from '../../../kernel/types.js';
@@ -34,11 +36,23 @@ const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的�
 
 ## 工具使用
 
-你可以使用工具读取/写入文件、运行命令、发起网络请求。
+你可以使用以下工具：
+- **文件系统**：read_file（带行号分页）、write_file、list_directory、delete_file
+- **代码搜索**：search_files（glob 模式）、grep_files（正则跨文件搜索）
+- **代码编辑**：edit_code（精确替换，需先读后写）
+- **Shell**：run_command（持久工作目录，支持后台执行）
+- **网络**：http_fetch、web_search（搜索互联网）、web_fetch（抓取网页为可读文本）
+- **交互**：ask_user（结构化追问）、push_notification（通知用户）
+- **监控**：monitor_start/stop/status（后台流式观察命令输出）
+- **定时**：cron_create/delete/list（创建/管理定时任务）
+- **历史**：search_history（搜索过往对话）
+- **记忆**：memory_query/add/delete（跨会话记忆）
+
 **严格规则**：
 - 日常聊天、问候、闲聊、情感表达 → 直接文字回复，禁止调用工具
-- 只有用户明确请求文件操作、命令执行、信息查询时才使用工具
-- 不确定时，优先用文字回复询问用户意图
+- 只有用户明确请求操作时才使用工具
+- 不确定时用 ask_user 询问，而非猜测
+- edit_code 前必须先 read_file 同一文件
 
 始终使用用户正在使用的语言回答。`;
 
@@ -46,6 +60,8 @@ const MAX_SESSIONS = 64;
 
 startResidentAgent(({ name, config, ipc, llm, db }) => {
   const logger = getLogger('conversation');
+  setCronToolsDb(db);
+  setSessionToolsDb(db);
   const memoryTools = createMemoryTools(ipc, config.requestTimeoutMs);
   const capabilityTools = createCapabilityTools(ipc, config.requestTimeoutMs);
   const currentSessionRef = { id: '' };
@@ -244,7 +260,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       });
 
       const draft = result.finalContent;
-      logger.debug({ sessionId, draftLen: draft.length, toolCalls: result.toolCalls.length, tools: result.toolCalls.map(tc => tc.name) }, 'conversation:draft');
+      logger.debug({ sessionId, draftLen: draft.length, reasoningLen: result.reasoning?.length ?? 0, toolCalls: result.toolCalls.length, tools: result.toolCalls.map(tc => tc.name) }, 'conversation:draft');
 
       // Flush any remaining buffered text from the scrubber (e.g. short replies
       // that didn't exceed the <memory-context> tag length threshold during streaming).

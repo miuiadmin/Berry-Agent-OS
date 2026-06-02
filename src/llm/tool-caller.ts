@@ -98,6 +98,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
   let accumulatedReasoning = '';
   let stepIndex = 0;
   let consecutivePermissionDenials = 0;
+  let consecutiveToolErrors = 0;
   let uncertaintyFired = false;
   const useStreaming = !!onChunk && llm.supportsStreaming();
 
@@ -315,6 +316,13 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
       if (toolResult.isError) {
         detector.check(block.name, inputStr, true);
+        consecutiveToolErrors++;
+        if (consecutiveToolErrors >= 3 && onUncertainty && !uncertaintyFired) {
+          uncertaintyFired = true;
+          onUncertainty('consecutive tool errors: ' + consecutiveToolErrors);
+        }
+      } else {
+        consecutiveToolErrors = 0;
       }
 
       toolResults.push({

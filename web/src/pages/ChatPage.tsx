@@ -5,14 +5,16 @@ import { ConversationSidebar } from "@/components/chat/conversation-sidebar";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const clearMessages = useChatStore((s) => s.clearMessages);
   const setSessionId = useChatStore((s) => s.setSessionId);
+  const t = useT();
 
-  useDocumentTitle("Chat");
+  useDocumentTitle(t("chat.title"));
 
   const shortcuts = useMemo(() => [
     { key: "n", meta: true, handler: () => { clearMessages(); setSessionId(null); } },

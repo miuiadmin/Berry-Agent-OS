@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import {
   Plus,
   Server,
@@ -118,6 +119,7 @@ function SelectChevron() {
 // ─── Main Component ───────────────────────────────────────────────
 
 export function ProvidersTab() {
+  const t = useT();
   const queryClient = useQueryClient();
 
   // ── Queries ──
@@ -218,7 +220,7 @@ export function ProvidersTab() {
       return apiPost<{ ok: boolean; channelId: string }>("/api/providers/channels", data);
     },
     onSuccess: () => {
-      toast.success("Channel created");
+      toast.success(t("providers.channelCreated"));
       refresh();
       closeChannelDialog();
     },
@@ -238,7 +240,7 @@ export function ProvidersTab() {
       return apiPut<{ ok: boolean }>(`/api/providers/channels/${channelId}`, updates);
     },
     onSuccess: () => {
-      toast.success("Channel updated");
+      toast.success(t("providers.channelUpdated"));
       refresh();
       closeChannelDialog();
     },
@@ -252,7 +254,7 @@ export function ProvidersTab() {
       return apiDelete(`/api/providers/channels/${channelId}`);
     },
     onSuccess: () => {
-      toast.success("Channel deleted");
+      toast.success(t("providers.channelDeleted"));
       refresh();
       setDeleteTarget(null);
     },
@@ -266,7 +268,7 @@ export function ProvidersTab() {
       return apiPut<{ ok: boolean; tiers: TierMapping }>("/api/providers/tiers", t);
     },
     onSuccess: () => {
-      toast.success("Tier mapping saved");
+      toast.success(t("providers.tierMappingSaved"));
       refresh();
     },
     onError: (err: Error) => {
@@ -491,7 +493,7 @@ export function ProvidersTab() {
         }}
         title="Delete channel"
         description={`Are you sure you want to delete "${deleteTargetChannel?.name ?? deleteTarget}"? This cannot be undone.`}
-        actionLabel="Delete"
+        actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) deleteMutation.mutate(deleteTarget);
         }}
@@ -741,6 +743,7 @@ function ChannelCard({
   onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const t = useT();
 
   return (
     <div className="rounded-lg border border-border">
@@ -751,7 +754,7 @@ function ChannelCard({
           <button
             onClick={() => setExpanded(!expanded)}
             aria-expanded={expanded}
-            aria-label="Toggle models list"
+            aria-label={t("providers.toggleModels")}
             className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-11 md:size-7 flex items-center justify-center"
           >
             <ChevronRight className={cn("size-4 transition-transform duration-200", expanded && "rotate-90")} />

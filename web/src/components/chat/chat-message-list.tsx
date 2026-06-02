@@ -10,20 +10,27 @@ import { ThinkingProcess } from "./thinking-process";
 import { ToolCallCards } from "./tool-call-cards";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
+import { useT, useLocale } from "@/lib/i18n";
 
-function formatTime(ts: number): string {
+/**
+ * 格式化消息时间戳
+ * @param ts 时间戳（毫秒）
+ * @param localeTag 用于 Intl API 的 locale 标签（如 "zh-CN" 或 "en-US"）
+ */
+function formatTime(ts: number, localeTag: string): string {
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
   if (isToday) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
   }
-  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " +
-    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString(localeTag, { month: "short", day: "numeric" }) + " " +
+    d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
 }
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const t = useT();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { return () => { clearTimeout(timerRef.current); }; }, []);
   const handleCopy = useCallback(() => {
@@ -43,7 +50,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
         "inline-flex items-center gap-1 rounded-md px-2.5 py-2.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors",
         className
       )}
-      aria-label="Copy"
+      aria-label={t("chat.copy")}
     >
       {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
     </button>
@@ -61,6 +68,7 @@ function EditableMessage({
 }) {
   const [text, setText] = useState(message.content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const t = useT();
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -101,7 +109,7 @@ function EditableMessage({
           className="inline-flex items-center gap-1 rounded-md px-3 py-2 md:px-2 md:py-1 text-xs text-muted-foreground hover:bg-accent transition-colors min-h-[44px] md:min-h-0"
         >
           <X className="size-3" />
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           onClick={() => {
@@ -112,7 +120,7 @@ function EditableMessage({
           className="inline-flex items-center gap-1 rounded-md bg-brand px-3 py-2 md:px-2 md:py-1 text-xs text-brand-foreground hover:bg-brand/90 transition-colors disabled:opacity-50 min-h-[44px] md:min-h-0"
         >
           <SendHorizontal className="size-3" />
-          Send
+          {t("chat.send")}
         </button>
       </div>
     </div>
@@ -163,6 +171,8 @@ function MessageBubble({
   const isError = message.status === "error";
   const isStreaming = message.status === "streaming";
   const [editing, setEditing] = useState(false);
+  const t = useT();
+  const { locale } = useLocale();
 
   const markdownComponents = useMemo(
     () => createMarkdownComponents(isStreaming),
@@ -217,7 +227,7 @@ function MessageBubble({
           <div className="mt-2 text-xs text-destructive space-y-1">
             <div className="flex items-center gap-1.5">
               <AlertCircle className="size-3 shrink-0" />
-              <span>{message.error || "Failed to send"}</span>
+              <span>{message.error || t("chat.failedToSend")}</span>
             </div>
             {onRetry && (
               <button
@@ -225,7 +235,7 @@ function MessageBubble({
                 className="inline-flex items-center gap-0.5 underline hover:no-underline"
               >
                 <RotateCcw className="size-2.5" />
-                Retry
+                {t("common.retry")}
               </button>
             )}
           </div>
@@ -236,7 +246,7 @@ function MessageBubble({
       </div>
       <div className="flex items-center gap-1 mt-1 px-1">
         <span className="text-[11px] text-muted-foreground/60">
-          {formatTime(message.timestamp)}
+          {formatTime(message.timestamp, locale === "zh" ? "zh-CN" : "en-US")}
         </span>
         {!isStreaming && message.content && (
           <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
@@ -246,14 +256,14 @@ function MessageBubble({
                 <button
                   onClick={() => setEditing(true)}
                   className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
-                  aria-label="Edit message"
+                  aria-label={t("chat.editMessage")}
                 >
                   <Pencil className="size-3" />
                 </button>
                 <button
                   onClick={() => onDelete?.(message.id)}
                   className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
-                  aria-label="Delete message"
+                  aria-label={t("chat.deleteMessage")}
                 >
                   <Trash2 className="size-3" />
                 </button>
@@ -286,6 +296,7 @@ export function ChatMessageList({
   const messages = useChatStore((s) => s.messages);
   const removeMessage = useChatStore((s) => s.removeMessage);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const t = useT();
   const isNearBottom = useRef(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const prevMsgCountRef = useRef(messages.length);
@@ -323,8 +334,8 @@ export function ChatMessageList({
             <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-muted animate-float">
               <StrawberryLogo className="size-6" />
             </div>
-            <h2 className="text-lg font-semibold text-foreground">Start a conversation</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Type a message to begin</p>
+            <h2 className="text-lg font-semibold text-foreground">{t("chat.startConversation")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("chat.typeToBegin")}</p>
           </div>
         </div>
       ) : (
@@ -353,7 +364,7 @@ export function ChatMessageList({
           "absolute bottom-4 right-4 z-10 flex size-11 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
           showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
         )}
-        aria-label="Scroll to bottom"
+        aria-label={t("chat.scrollToBottom")}
       >
         <ChevronDown className="size-4 text-muted-foreground" />
       </button>

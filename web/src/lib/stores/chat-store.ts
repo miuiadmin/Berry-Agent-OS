@@ -83,7 +83,7 @@ interface ChatState {
   setPendingDelegation: (req: DelegationRequest | null) => void;
   setPendingPermission: (req: PermissionConfirmRequest | null) => void;
   setPermissionMode: (mode: 'ask' | 'allow-all' | 'deny-all') => void;
-  restoreSession: (messages: ChatMessage[], activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[] }) => void;
+  restoreSession: (messages: ChatMessage[], activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[]; streamingContent?: string | null; streamingReasoning?: string | null }) => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -134,19 +134,51 @@ export const useChatStore = create<ChatState>()(
             ...m, id: genMsgId("hist"), status: "complete" as const,
           }));
 
-          if (!activeTask) return hasLocal ? s : { messages: msgs };
+          // 无活跃任务：如果有本地状态则检查是否有空的流式占位符需要从服务端补全
+          if (!activeTask) {
+            if (hasLocal) {
+              // 检查最后一条消息：如果是空的流式占位符（断连遗留），用服务端数据补全
+              const last = msgs[msgs.length - 1];
+              if (last?.role === "assistant" && (!last.content || last.status === "streaming")) {
+                const serverLast = messages[messages.length - 1];
+                if (serverLast?.role === "assistant" && serverLast.content) {
+                  msgs = [...msgs];
+                  msgs[msgs.length - 1] = { ...last, content: serverLast.content, status: "complete" };
+                  return { messages: msgs, isStreaming: false };
+                }
+              }
+              return s;
+            }
+            return { messages: msgs };
+          }
 
-          // Append or update streaming placeholder
+          // 有活跃任务：更新或创建流式占位符
+          // streamingContent 来自 SQLite（最多 2s 延迟），本地内容可能来自 reconnect_recovery（更新）
+          const streamingText = activeTask.streamingContent ?? "";
+          const streamingReasoning = activeTask.streamingReasoning ?? undefined;
           const last = msgs[msgs.length - 1];
           if (last?.role === "assistant" && last.status === "streaming") {
-            msgs[msgs.length - 1] = { ...last, progress: activeTask.progress ?? undefined, thinkingSteps: activeTask.thinkingSteps };
+            // 取本地和服务端中更长的内容（更长 = 更新，因为内容只会追加）
+            const restoredContent = (last.content && last.content.length >= streamingText.length)
+              ? last.content
+              : (streamingText || last.content);
+            msgs[msgs.length - 1] = {
+              ...last,
+              content: restoredContent,
+              reasoning: streamingReasoning && (!last.reasoning || streamingReasoning.length > last.reasoning.length)
+                ? streamingReasoning : last.reasoning,
+              progress: activeTask.progress ?? undefined,
+              thinkingSteps: activeTask.thinkingSteps ?? last.thinkingSteps,
+            };
           } else {
+            // 服务端有活跃任务但本地无流式占位符：新建
             msgs = [...msgs, {
               id: genMsgId("asst-recovering"),
               role: "assistant" as const,
-              content: "",
+              content: streamingText,
               timestamp: Date.now(),
               status: "streaming" as const,
+              reasoning: streamingReasoning,
               progress: activeTask.progress ?? undefined,
               thinkingSteps: activeTask.thinkingSteps,
             }];
@@ -161,13 +193,13 @@ export const useChatStore = create<ChatState>()(
       }),
       partialize: (state) => ({
         sessionId: state.sessionId,
-        messages: state.messages
-          .filter((m) => m.content.length > 0 || m.role === "user" || !!m.reasoning || (m.toolCalls && m.toolCalls.length > 0))
-          .map((m) =>
-            m.status === "streaming"
-              ? { ...m, status: "complete" as const, progress: undefined }
-              : m
-          ),
+        // 持久化时保留所有 user/assistant 消息（不过滤空 content 的 assistant 占位符），
+        // 但将流式状态标记为 complete 以避免还原后误判为仍在流式中
+        messages: state.messages.map((m) =>
+          m.status === "streaming"
+            ? { ...m, status: "complete" as const, progress: undefined }
+            : m
+        ),
       }),
     },
   ),

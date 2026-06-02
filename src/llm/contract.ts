@@ -9,7 +9,9 @@ export interface LlmBackend {
 
 export type StreamChunk =
   | { type: 'text_delta'; text: string }
+  | { type: 'reasoning_start' }
   | { type: 'reasoning_delta'; text: string }
+  | { type: 'reasoning_end' }
   | { type: 'tool_use_start'; id: string; name: string }
   | { type: 'tool_use_delta'; id: string; partialJson: string }
   | { type: 'tool_use_done'; id: string; input: Record<string, unknown> }

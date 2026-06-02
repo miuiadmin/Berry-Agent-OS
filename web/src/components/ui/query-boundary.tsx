@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "./button";
+import zh from "@/locales/zh";
+import en from "@/locales/en";
 
 interface QueryBoundaryProps<T> {
   query: UseQueryResult<T>;
@@ -13,19 +15,26 @@ interface QueryBoundaryProps<T> {
 }
 
 export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: QueryBoundaryProps<T>) {
+  /** 直接查翻译表（非 hook 组件模式，与 ErrorBoundary 一致） */
+  const t = (key: string) => {
+    const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
+    const translations = locale === "en" ? en : zh;
+    return translations[key] ?? key;
+  };
+
   if (query.isLoading) {
     return <>{skeleton}</>;
   }
 
   if (query.isError) {
-    const message = query.error instanceof Error ? query.error.message : "An error occurred";
+    const message = query.error instanceof Error ? query.error.message : t("queryBoundary.errorOccurred");
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
           <AlertCircle className="size-5 text-destructive" />
         </div>
         <h3 className="mt-3 text-sm font-medium text-foreground">
-          {errorTitle ?? "Failed to load"}
+          {errorTitle ?? t("queryBoundary.failedToLoad")}
         </h3>
         <p className="mt-1 max-w-sm text-xs text-muted-foreground">{message}</p>
         <Button
@@ -35,7 +44,7 @@ export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: Quer
           onClick={() => query.refetch()}
         >
           <RefreshCw className="mr-1.5 size-3" />
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );

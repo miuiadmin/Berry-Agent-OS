@@ -35,12 +35,6 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
     current: createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry }),
   };
 
-  ipc.send('agent.register', 'core', { name, pid: process.pid });
-
-  const heartbeatInterval = setInterval(() => {
-    ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });
-  }, config.heartbeatIntervalMs);
-
   // Hot-reload LLM config when parent sends an update
   ipc.onMessage('config.llm_update', (msg) => {
     const { llm: newLlmConfig } = msg.payload as { llm: LlmConfig };
@@ -48,7 +42,14 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
     llm.current = createLlmClient(newLlmConfig, { db, ipc, defaultAgent: name, providerRegistry: newRegistry });
   });
 
+  // 先注册所有 handler，再通知父进程 agent 已就绪（防止 IPC 启动竞态丢消息）
   setup({ name, config, ipc, llm, db });
+
+  ipc.send('agent.register', 'core', { name, pid: process.pid });
+
+  const heartbeatInterval = setInterval(() => {
+    ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });
+  }, config.heartbeatIntervalMs);
 
   const cleanup = () => {
     clearInterval(heartbeatInterval);

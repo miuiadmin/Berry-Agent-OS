@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
 
 interface ToolCallCardsProps {
@@ -16,6 +17,7 @@ function formatDuration(ms: number): string {
 
 function ToolCallDetail({ call }: { call: ToolCallEvent }) {
   const [expanded, setExpanded] = useState(false);
+  const t = useT();
 
   return (
     <div className="py-1">
@@ -38,14 +40,14 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
       {expanded && (
         <div className="mt-1 ml-4 space-y-1.5 text-[11px]">
           <div>
-            <span className="text-muted-foreground/60 text-[11px] uppercase tracking-wide">Input</span>
+            <span className="text-muted-foreground/60 text-[11px] uppercase tracking-wide">{t("tools.input")}</span>
             <pre className="mt-0.5 rounded bg-muted/50 px-2 py-1.5 overflow-x-auto max-h-32 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all">
               {call.input}
             </pre>
           </div>
           <div>
             <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-red-400" : "text-muted-foreground/60")}>
-              {call.isError ? "Error" : "Output"}
+              {t(call.isError ? "tools.error" : "tools.output")}
             </span>
             <pre className={cn(
               "mt-0.5 rounded px-2 py-1.5 overflow-x-auto max-h-40 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all",
@@ -63,6 +65,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
 export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
   const [expanded, setExpanded] = useState(isActive);
   const wasActive = useRef(isActive);
+  const t = useT();
 
   useEffect(() => {
     if (wasActive.current && !isActive) setExpanded(false);
@@ -83,12 +86,12 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />
-        <span>Tools ({calls.length})</span>
+        <span>{t("tools.header", { count: calls.length })}</span>
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
         {!isActive && (
           <span className="ml-0.5 opacity-60">
             {totalMs > 0 ? `· ${formatDuration(totalMs)}` : ""}
-            {hasErrors ? " · has errors" : ""}
+            {hasErrors ? t("thinking.hasErrors") : ""}
           </span>
         )}
       </button>

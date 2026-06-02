@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
+import { markFileRead } from './read-tracker.js';
 
 function getUserRoot(): string {
   return homedir();
@@ -23,8 +24,13 @@ function assertWithinBoundary(resolved: string): void {
   }
 }
 
+const DEFAULT_LINE_LIMIT = 2000;
+
 const readFileSchema = z.object({
   path: z.string().describe('文件的绝对或相对路径'),
+  startLine: z.number().optional().describe('起始行号（1-based）'),
+  endLine: z.number().optional().describe('结束行号（1-based，包含）'),
+  limit: z.number().optional().describe('最多返回行数（默认 2000）'),
 });
 
 const writeFileSchema = z.object({
@@ -42,16 +48,36 @@ const deleteFileSchema = z.object({
 
 export const readFileTool: ToolDefinition = {
   name: 'read_file',
-  description: '读取文件内容并返回文本',
+  description: '读取文件内容，返回带行号的文本。支持行范围分页。大文件（>2000行）未指定范围时只返回前 2000 行。',
   inputSchema: readFileSchema,
   dangerLevel: 'safe',
   async execute(input: unknown): Promise<ToolResult> {
-    const { path } = readFileSchema.parse(input);
+    const { path, startLine, endLine, limit } = readFileSchema.parse(input);
     try {
       const resolved = resolvePath(path);
       assertWithinBoundary(resolved);
       const content = await readFile(resolved, 'utf-8');
-      return { content };
+      markFileRead(resolved);
+
+      const lines = content.split('\n');
+      const totalLines = lines.length;
+
+      const start = (startLine ?? 1) - 1;
+      const maxLines = limit ?? DEFAULT_LINE_LIMIT;
+      const end = endLine ? Math.min(endLine, totalLines) : Math.min(start + maxLines, totalLines);
+
+      const slice = lines.slice(start, end);
+      const numbered = slice.map((line, i) => `${start + i + 1}\t${line}`).join('\n');
+
+      if (!startLine && !endLine && !limit && totalLines > DEFAULT_LINE_LIMIT) {
+        return { content: `${numbered}\n\n... (共 ${totalLines} 行，已显示前 ${DEFAULT_LINE_LIMIT} 行。使用 startLine/endLine 查看更多)` };
+      }
+
+      if (endLine && endLine < totalLines) {
+        return { content: `${numbered}\n\n(共 ${totalLines} 行，当前显示 ${start + 1}-${end} 行)` };
+      }
+
+      return { content: numbered };
     } catch (err) {
       return { content: `读取文件失败: ${(err as Error).message}`, isError: true };
     }

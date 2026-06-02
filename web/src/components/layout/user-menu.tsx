@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { CircleUser, Sun, Moon, Globe, LogOut, Settings } from "lucide-react";
 import { useTheme } from "@/lib/theme";
+import { useLocale, useT } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
@@ -11,6 +12,8 @@ export function UserMenu() {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const { theme, setTheme } = useTheme();
+  const { locale, setLocale } = useLocale();
+  const t = useT();
   const navigate = useNavigate();
   const prevOpenRef = useRef(open);
 
@@ -74,22 +77,22 @@ export function UserMenu() {
                   <Sun className="size-4 absolute inset-0 rotate-0 scale-100 transition-transform dark:-rotate-90 dark:scale-0" />
                   <Moon className="size-4 absolute inset-0 rotate-90 scale-0 transition-transform dark:rotate-0 dark:scale-100" />
                 </div>
-                <span className="flex-1">深色模式</span>
+                <span className="flex-1">{t("userMenu.darkMode")}</span>
                 <Switch checked={theme === "dark"} onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")} />
               </button>
 
               <Separator />
 
-              {/* Language (placeholder) */}
+              {/* 语言切换 */}
               <button
                 role="menuitem"
-                disabled
-                className="w-full flex items-center gap-3 px-3 py-2.5 md:py-2 text-sm text-left min-h-[44px] md:min-h-0 opacity-50 cursor-not-allowed"
+                onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
+                className="w-full flex items-center gap-3 px-3 py-2.5 md:py-2 text-sm text-left min-h-[44px] md:min-h-0 hover:bg-accent active:bg-accent transition-colors"
               >
                 <Globe className="size-4 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div>Language</div>
-                  <div className="text-[11px] text-muted-foreground">Coming soon</div>
+                  <div>{t("userMenu.language")}</div>
+                  <div className="text-[11px] text-muted-foreground">{locale === "zh" ? "中文" : "English"}</div>
                 </div>
               </button>
 
@@ -102,7 +105,7 @@ export function UserMenu() {
                 className="w-full flex items-center gap-3 px-3 py-2.5 md:py-2 text-sm text-left min-h-[44px] md:min-h-0 hover:bg-accent active:bg-accent transition-colors"
               >
                 <Settings className="size-4 shrink-0" />
-                <span className="flex-1">系统设置</span>
+                <span className="flex-1">{t("userMenu.settings")}</span>
               </button>
 
               <Separator />
@@ -115,8 +118,8 @@ export function UserMenu() {
               >
                 <LogOut className="size-4 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div>退出登录</div>
-                  <div className="text-[11px] text-muted-foreground">暂未配置</div>
+                  <div>{t("userMenu.logout")}</div>
+                  <div className="text-[11px] text-muted-foreground">{t("userMenu.logoutHint")}</div>
                 </div>
               </button>
             </div>

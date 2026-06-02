@@ -11,6 +11,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
+import { useT } from "@/lib/i18n";
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -27,6 +28,7 @@ function formatSize(bytes: number): string {
 }
 
 export function DebugCaptureDialog() {
+  const t = useT();
   const { showResultDialog, lastResult, dismissDialog } = useDebugCaptureStore();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,11 +43,11 @@ export function DebugCaptureDialog() {
     try {
       await navigator.clipboard.writeText(lastResult.path);
       setCopied(true);
-      toast.success("Path copied to clipboard");
+      toast.success(t("debug.pathCopied"));
       clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Failed to copy");
+      toast.error(t("debug.failedToCopy"));
     }
   };
 
@@ -53,15 +55,18 @@ export function DebugCaptureDialog() {
     <Dialog open={showResultDialog} onOpenChange={(open) => { if (!open) dismissDialog(); }}>
       <DialogContent onClose={dismissDialog}>
         <DialogHeader>
-          <DialogTitle>Capture Saved</DialogTitle>
+          <DialogTitle>{t("debug.captureSaved")}</DialogTitle>
           <DialogDescription>
-            Captured {lastResult.eventCount.toLocaleString()} events
-            in {formatDuration(lastResult.durationMs)} ({formatSize(lastResult.size)})
+            {t("debug.captureDesc", {
+              count: lastResult.eventCount.toLocaleString(),
+              duration: formatDuration(lastResult.durationMs),
+              size: formatSize(lastResult.size),
+            })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="mt-4 space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">Log Path</label>
+          <label className="text-xs font-medium text-muted-foreground">{t("debug.logPath")}</label>
           <div className="flex items-center gap-2">
             <code className="flex-1 rounded-md bg-muted px-3 py-2.5 md:py-2 text-xs break-all select-all">
               {lastResult.path}
@@ -79,7 +84,7 @@ export function DebugCaptureDialog() {
 
         <DialogFooter>
           <Button variant="outline" onClick={dismissDialog} className="min-h-[44px] md:min-h-0">
-            Close
+            {t("common.close")}
           </Button>
         </DialogFooter>
       </DialogContent>

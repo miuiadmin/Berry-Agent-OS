@@ -12,13 +12,14 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 type Layer = "agent" | "workspace" | "global";
 
-const LAYER_CONFIG: Record<Layer, { label: string; placeholder: string }> = {
-  agent: { label: "Agent", placeholder: "Enter agent name…" },
-  workspace: { label: "Workspace", placeholder: "Enter workspace ID…" },
-  global: { label: "Global", placeholder: "Enter user ID (default: default)" },
+const LAYER_CONFIG: Record<Layer, { labelKey: string; placeholderKey: string }> = {
+  agent: { labelKey: "memory.agent", placeholderKey: "memory.enterAgentName" },
+  workspace: { labelKey: "memory.workspace", placeholderKey: "memory.enterWorkspaceId" },
+  global: { labelKey: "memory.global", placeholderKey: "memory.enterUserId" },
 };
 
 function MemorySkeleton() {
@@ -39,7 +40,9 @@ function MemorySkeleton() {
 }
 
 export default function MemoryPage() {
-  useDocumentTitle("Memory");
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
+  useDocumentTitle(t("memory.title"));
   const qc = useQueryClient();
 
   const [layer, setLayer] = useState<Layer>("global");
@@ -75,7 +78,7 @@ export default function MemoryPage() {
       return memoryApi.createGlobal({ userId: scopeId, ...data });
     },
     onSuccess: () => {
-      toast.success("Memory created");
+      toast.success(t("memory.memoryCreated"));
       qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
       setShowCreate(false);
       setNewKey("");
@@ -89,7 +92,7 @@ export default function MemoryPage() {
     mutationFn: ({ entryLayer, id }: { entryLayer: string; id: string }) =>
       memoryApi.delete(entryLayer, id),
     onSuccess: () => {
-      toast.success("Memory deleted");
+      toast.success(t("memory.memoryDeleted"));
       qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -100,7 +103,7 @@ export default function MemoryPage() {
     mutationFn: ({ id, target }: { id: string; target: string }) =>
       memoryApi.promote(id, target),
     onSuccess: () => {
-      toast.success("Memory promoted");
+      toast.success(t("memory.memoryPromoted"));
       qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -110,7 +113,7 @@ export default function MemoryPage() {
   const verifyMut = useMutation({
     mutationFn: (id: string) => memoryApi.verify(id),
     onSuccess: () => {
-      toast.success("Memory verified");
+      toast.success(t("memory.memoryVerified"));
       qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -123,10 +126,10 @@ export default function MemoryPage() {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             <Brain className="size-5 text-brand" />
-            Memory
+            {t("memory.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Manage agent knowledge and user memories across layers
+            {t("memory.subtitle")}
           </p>
         </div>
         <Button
@@ -135,7 +138,7 @@ export default function MemoryPage() {
           className="h-11 md:h-9"
         >
           <Plus className="mr-1 size-4" />
-          Add Memory
+          {t("memory.addMemory")}
         </Button>
       </div>
 
@@ -143,14 +146,14 @@ export default function MemoryPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
         <Tabs value={layer} onValueChange={(v) => setLayer(v as Layer)}>
           <TabsList>
-            <TabsTrigger value="global">Global</TabsTrigger>
-            <TabsTrigger value="agent">Agent</TabsTrigger>
-            <TabsTrigger value="workspace">Workspace</TabsTrigger>
+            <TabsTrigger value="global">{t("memory.global")}</TabsTrigger>
+            <TabsTrigger value="agent">{t("memory.agent")}</TabsTrigger>
+            <TabsTrigger value="workspace">{t("memory.workspace")}</TabsTrigger>
           </TabsList>
         </Tabs>
         {layer !== "global" && (
           <Input
-            placeholder={LAYER_CONFIG[layer].placeholder}
+            placeholder={t(LAYER_CONFIG[layer].placeholderKey)}
             value={scopeId}
             onChange={(e) => setScopeId(e.target.value)}
             className="max-w-xs h-11 md:h-8"
@@ -162,17 +165,17 @@ export default function MemoryPage() {
       {showCreate && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">New Memory</CardTitle>
+            <CardTitle className="text-sm">{t("memory.newMemory")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <Input
-              placeholder="Key (e.g. user.preference.theme)"
+              placeholder={t("memory.keyPlaceholder")}
               value={newKey}
               onChange={(e) => setNewKey(e.target.value)}
               className="h-11 md:h-8"
             />
             <textarea
-              placeholder="Value"
+              placeholder={t("memory.valuePlaceholder")}
               value={newValue}
               onChange={(e) => setNewValue(e.target.value)}
               rows={3}
@@ -184,10 +187,10 @@ export default function MemoryPage() {
                 disabled={!newKey.trim() || !newValue.trim()}
                 onClick={() => createMut.mutate({ key: newKey, value: newValue })}
               >
-                Create
+                {t("common.create")}
               </Button>
               <Button size="sm" variant="outline" onClick={() => setShowCreate(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           </CardContent>
@@ -198,7 +201,7 @@ export default function MemoryPage() {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          placeholder="Search memories…"
+          placeholder={t("memory.searchPlaceholder")}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-9 h-11 md:h-8"
@@ -216,15 +219,15 @@ export default function MemoryPage() {
           return entries.length === 0 ? (
             <EmptyState
               icon={Brain}
-              title="No memories"
+              title={t("memory.noMemories")}
               description={
                 searchQuery.trim()
-                  ? "No memories match your search."
-                  : "Create a memory to get started."
+                  ? t("memory.noMemoriesSearch")
+                  : t("memory.noMemoriesDesc")
               }
               action={
                 !searchQuery.trim()
-                  ? { label: "Add Memory", onClick: () => setShowCreate(true) }
+                  ? { label: t("memory.addMemory"), onClick: () => setShowCreate(true) }
                   : undefined
               }
             />
@@ -241,7 +244,7 @@ export default function MemoryPage() {
                         </Badge>
                         {entry.verified && (
                           <Badge variant="secondary" className="shrink-0 text-[11px]">
-                            verified
+                            {t("memory.verified")}
                           </Badge>
                         )}
                       </div>
@@ -249,7 +252,7 @@ export default function MemoryPage() {
                         {entry.value}
                       </p>
                       <p className="text-[11px] text-muted-foreground/70">
-                        {new Date(entry.createdAt).toLocaleString()}
+                        {fmtDT(new Date(entry.createdAt))}
                         {entry.source ? ` · ${entry.source}` : ""}
                       </p>
                     </div>
@@ -258,8 +261,8 @@ export default function MemoryPage() {
                         variant="ghost"
                         size="icon"
                         className="size-11 md:size-8"
-                        title="Verify"
-                        aria-label="Verify"
+                        title={t("memory.verify")}
+                        aria-label={t("memory.verify")}
                         onClick={() => verifyMut.mutate(entry.id)}
                       >
                         <RefreshCw className="size-3.5" />
@@ -268,8 +271,8 @@ export default function MemoryPage() {
                         variant="ghost"
                         size="icon"
                         className="size-11 md:size-8"
-                        title="Promote"
-                        aria-label="Promote"
+                        title={t("memory.promote")}
+                        aria-label={t("memory.promote")}
                         onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
                       >
                         <ArrowUpRight className="size-3.5" />
@@ -278,10 +281,10 @@ export default function MemoryPage() {
                         variant="ghost"
                         size="icon"
                         className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
-                        title="Delete"
-                        aria-label="Delete"
+                        title={t("common.delete")}
+                        aria-label={t("common.delete")}
                         onClick={() => {
-                          if (confirm("Delete this memory?")) {
+                          if (confirm(t("memory.deleteThisMemory"))) {
                             deleteMut.mutate({ entryLayer: entry.layer, id: entry.id });
                           }
                         }}

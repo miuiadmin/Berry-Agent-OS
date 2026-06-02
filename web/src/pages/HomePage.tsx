@@ -5,8 +5,8 @@ import { Link } from "react-router-dom";
 import { queries } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useT, useDateFormat } from "@/lib/i18n";
 import { useCountUp } from "@/hooks/use-count-up";
-import { ConnectionStatus } from "@/components/ui/connection-status";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/charts/sparkline";
@@ -67,7 +67,9 @@ function formatTokenCount(n: number): string {
 }
 
 export default function HomePage() {
-  useDocumentTitle("Home");
+  const t = useT();
+  const { formatDate, formatTime, formatNumber } = useDateFormat();
+  useDocumentTitle(t("sidebar.home"));
   const { data: health, isLoading: healthLoading } = useQuery(queries.health());
   const { data: agents, isLoading: agentsLoading } = useQuery(queries.agents());
   const { data: runningData } = useQuery(queries.tasks({ status: "running", limit: 1 }));
@@ -102,7 +104,7 @@ export default function HomePage() {
       const failedByDay = statsData.map((d) => d.failed);
       const labels = statsData.map((d) => {
         const date = new Date(d.date);
-        return date.toLocaleDateString([], { weekday: "short" });
+        return formatDate(date, { weekday: "short" });
       });
       return {
         completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
@@ -125,7 +127,7 @@ export default function HomePage() {
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(now);
       date.setDate(date.getDate() - i);
-      const dayStr = date.toLocaleDateString([], { weekday: "short" });
+      const dayStr = formatDate(date, { weekday: "short" });
       labels.push(dayStr);
 
       const dateStart = new Date(date.setHours(0, 0, 0, 0)).getTime();
@@ -157,10 +159,9 @@ export default function HomePage() {
     <div className="p-4 sm:p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">Dashboard</h1>
-          <p className="mt-1 text-sm text-muted-foreground">System overview</p>
+          <h1 className="text-lg font-semibold">{t("home.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("home.subtitle")}</p>
         </div>
-        <ConnectionStatus />
       </div>
 
       {/* Stats Grid */}
@@ -170,7 +171,7 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Activity className="size-4" />
-              System
+              {t("home.system")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -179,10 +180,10 @@ export default function HomePage() {
             ) : (
               <>
                 <p className="text-2xl font-bold">
-                  {health?.ok ? "Healthy" : "Down"}
+                  {health?.ok ? t("home.healthy") : t("home.down")}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Uptime: {health ? formatUptime(health.uptime) : "—"}
+                  {t("home.uptime")}: {health ? formatUptime(health.uptime) : "—"}
                 </p>
               </>
             )}
@@ -194,7 +195,7 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Bot className="size-4" />
-              Agents
+              {t("home.agents")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -205,7 +206,7 @@ export default function HomePage() {
                 <p className="text-2xl font-bold">
                   <AnimatedStat value={activeAgents} />/<AnimatedStat value={totalAgents} />
                 </p>
-                <p className="text-xs text-muted-foreground">active / total</p>
+                <p className="text-xs text-muted-foreground">{t("home.activeTotal")}</p>
               </>
             )}
           </CardContent>
@@ -216,14 +217,14 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Zap className="size-4" />
-              Running
+              {t("home.running")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
               <AnimatedStat value={runningData?.total ?? 0} />
             </p>
-            <p className="text-xs text-muted-foreground">tasks in progress</p>
+            <p className="text-xs text-muted-foreground">{t("home.tasksInProgress")}</p>
           </CardContent>
         </Card>
 
@@ -232,7 +233,7 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <ListTodo className="size-4" />
-              Tasks
+              {t("home.tasks")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -261,7 +262,7 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Coins className="size-4" />
-              <Link to="/usage" className="hover:text-foreground transition-colors">Tokens</Link>
+              <Link to="/usage" className="hover:text-foreground transition-colors">{t("home.tokens")}</Link>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -269,7 +270,7 @@ export default function HomePage() {
               <AnimatedStat value={usageData?.today.totalTokens ?? 0} format={formatTokenCount} />
             </p>
             <p className="text-xs text-muted-foreground">
-              today (${(usageData?.today.costUsd ?? 0).toFixed(3)})
+              {t("home.today")} (${(usageData?.today.costUsd ?? 0).toFixed(3)})
             </p>
             {usageData && usageData.daily.length > 1 && (
               <div className="mt-2">
@@ -285,7 +286,7 @@ export default function HomePage() {
         {/* Task Activity Chart */}
         <Card className="stagger-6">
           <CardHeader>
-            <CardTitle className="text-sm">Task Activity (7 days)</CardTitle>
+            <CardTitle className="text-sm">{t("home.taskActivity")}</CardTitle>
           </CardHeader>
           <CardContent>
             <AreaChart
@@ -298,11 +299,11 @@ export default function HomePage() {
             <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1">
                 <span className="inline-block size-2 rounded-full bg-success" />
-                Completed
+                {t("home.completed")}
               </span>
               <span className="flex items-center gap-1">
                 <span className="inline-block size-2 rounded-full bg-destructive" />
-                Failed
+                {t("home.failed")}
               </span>
             </div>
           </CardContent>
@@ -311,17 +312,17 @@ export default function HomePage() {
         {/* Recent Activity */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-sm">Recent Activity</CardTitle>
+            <CardTitle className="text-sm">{t("home.recentActivity")}</CardTitle>
             <Link to="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-              View all
+              {t("home.viewAll")}
             </Link>
           </CardHeader>
           <CardContent>
             {events.length === 0 ? (
               <EmptyState
                 icon={Activity}
-                title="Listening for events..."
-                description="Activity will appear here in real-time"
+                title={t("home.listening")}
+                description={t("home.activityHint")}
               />
             ) : (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
@@ -332,7 +333,7 @@ export default function HomePage() {
                     <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs min-w-0 animate-slide-left")}>
                       <Icon className={`size-3.5 shrink-0 ${colorClass}`} />
                       <span className="text-muted-foreground shrink-0">
-                        {new Date(ev.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                        {formatTime(new Date(ev.ts), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
                       <span className="font-medium truncate">{ev.event}</span>
                       {typeof ev.payload.name === "string" && (
@@ -351,10 +352,10 @@ export default function HomePage() {
 
       {/* Quick Navigation */}
       <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <QuickLink href="/chat" icon={MessageCircle} label="Chat" />
-        <QuickLink href="/agents" icon={Bot} label="Agents" />
-        <QuickLink href="/tasks" icon={ListTodo} label="Tasks" />
-        <QuickLink href="/conversations" icon={Activity} label="History" />
+        <QuickLink href="/chat" icon={MessageCircle} label={t("home.quickChat")} />
+        <QuickLink href="/agents" icon={Bot} label={t("home.agents")} />
+        <QuickLink href="/tasks" icon={ListTodo} label={t("home.tasks")} />
+        <QuickLink href="/conversations" icon={Activity} label={t("home.quickHistory")} />
       </div>
     </div>
   );

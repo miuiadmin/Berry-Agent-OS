@@ -7,7 +7,7 @@ import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('evolution');
 const config = resolveConfig(getConfigPath());
-const llm = createLlmClient(config.llm);
+const llm = createLlmClient(config.llm, { defaultAgent: 'evolution' });
 
 const EXTRACTION_PROMPT = `你是一个记忆提取引擎。分析以下对话，提取可以长期记住的用户知识。
 
@@ -171,7 +171,7 @@ async function callAndParse(
 ): Promise<Record<string, unknown>[] | null> {
   const result = await llm.chat(
     [{ role: 'user', content: prompt }],
-    { maxTokens: opts.maxTokens ?? 1024, temperature: opts.temperature ?? 0.3 },
+    { maxTokens: opts.maxTokens ?? 2048, temperature: opts.temperature ?? 0.3 },
   );
   return parseJsonArray(result.content);
 }

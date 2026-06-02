@@ -5,6 +5,7 @@ import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useT } from "@/lib/i18n";
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: Attachment[]) => void;
@@ -18,6 +19,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = useChatStore((s) => s.isStreaming);
+  const t = useT();
 
   const allAttachments = useMemo(
     () => [...attachments, ...(externalAttachments ?? [])],
@@ -28,7 +30,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
 
   const handleSubmit = useCallback(() => {
     if (disabled) {
-      toast.error("未连接到服务器，请稍候...");
+      toast.error(t("chat.notConnected"));
       return;
     }
     const trimmed = text.trim();
@@ -81,7 +83,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               value={text}
               onChange={handleInput}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
+              placeholder={t("chat.typePlaceholder")}
               rows={1}
               className={cn(
                 "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none",
@@ -98,14 +100,14 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
           <div className="flex items-center justify-between px-2 pb-2 pt-1">
             <div className="flex items-center gap-0.5">
               <FileUploadButton onAttach={handleAttach} disabled={isStreaming} />
-              <ToolbarButton disabled={isStreaming} aria-label="Upload image">
+              <ToolbarButton disabled={isStreaming} aria-label={t("chat.uploadImage")}>
                 <ImagePlus className="size-4" />
               </ToolbarButton>
-              <ToolbarButton disabled={isStreaming} aria-label="Settings">
+              <ToolbarButton disabled={isStreaming} aria-label={t("chat.settings")}>
                 <Settings className="size-4" />
               </ToolbarButton>
               {isStreaming && (
-                <ToolbarButton onClick={onCancel} variant="destructive" aria-label="Stop generation">
+                <ToolbarButton onClick={onCancel} variant="destructive" aria-label={t("chat.stopGeneration")}>
                   <Square className="size-3.5 fill-current" />
                 </ToolbarButton>
               )}
@@ -121,7 +123,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
                   : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >
-              Send
+              {t("chat.send")}
             </button>
           </div>
         </div>

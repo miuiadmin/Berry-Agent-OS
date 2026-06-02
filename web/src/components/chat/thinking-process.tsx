@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import type { ThinkingStep } from "@/lib/stores/chat-store";
 
 interface ThinkingProcessProps {
@@ -38,6 +39,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
   const [expanded, setExpanded] = useState(isActive);
   const listRef = useRef<HTMLDivElement>(null);
   const wasActive = useRef(isActive);
+  const t = useT();
 
   // Auto-collapse when streaming completes
   useEffect(() => {
@@ -64,7 +66,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
         className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
-        <span>{isActive ? "Thinking" : "Thought process"}</span>
+        <span>{isActive ? t("thinking.active") : t("thinking.inactive")}</span>
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
         {!isActive && steps.length > 0 && (
           <span className="ml-0.5 opacity-60">

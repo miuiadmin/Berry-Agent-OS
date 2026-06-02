@@ -214,7 +214,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     try {
       const result = await llm.current.chat(messages, {
         system: systemPrompt,
-        maxTokens: 512,
+        maxTokens: 1024,
         temperature: 0.1,
         agent: name,
         purpose: 'brain_routing',
@@ -274,7 +274,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     try {
       const result = await llm.current.chat(messages, {
         system: systemPrompt,
-        maxTokens: 256,
+        maxTokens: 1024,
         temperature: 0.0,
         agent: name,
         purpose: 'brain_permission',
@@ -310,7 +310,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     try {
       const result = await llm.current.chat(messages, {
         system: systemPrompt,
-        maxTokens: 512,
+        maxTokens: 1024,
         temperature: 0.1,
         agent: name,
         purpose: 'brain_ask_review',

@@ -2,7 +2,12 @@ import type { ToolDefinition } from './types.js';
 import type { IToolRegistry } from './contract.js';
 import { readFileTool, writeFileTool, listDirectoryTool, deleteFileTool } from './filesystem.js';
 import { runCommandTool } from './shell.js';
-import { httpFetchTool } from './web.js';
+import { httpFetchTool, webSearchTool, webFetchTool } from './web.js';
+import { searchFilesTool, grepFilesTool } from './search.js';
+import { askUserTool, pushNotificationTool } from './interaction-tools.js';
+import { monitorStartTool, monitorStopTool, monitorStatusTool } from './monitor-tools.js';
+import { cronCreateTool, cronDeleteTool, cronListTool } from './cron-tools.js';
+import { searchHistoryTool } from './session-tools.js';
 
 const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -11,6 +16,19 @@ const builtinTools: ToolDefinition[] = [
   deleteFileTool,
   runCommandTool,
   httpFetchTool,
+  searchFilesTool,
+  grepFilesTool,
+  webSearchTool,
+  webFetchTool,
+  askUserTool,
+  pushNotificationTool,
+  monitorStartTool,
+  monitorStopTool,
+  monitorStatusTool,
+  cronCreateTool,
+  cronDeleteTool,
+  cronListTool,
+  searchHistoryTool,
 ];
 
 export class ToolRegistry implements IToolRegistry {

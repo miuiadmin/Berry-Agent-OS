@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useT, useDateFormat } from "@/lib/i18n";
 import { useCountUp } from "@/hooks/use-count-up";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,31 +19,33 @@ function AnimatedStat({ value, format }: { value: number; format?: (n: number) =
 }
 
 export default function UsagePage() {
-  useDocumentTitle("Usage");
+  const t = useT();
+  const { formatDate } = useDateFormat();
+  useDocumentTitle(t("usage.title"));
   const { data, isLoading, isError, refetch } = useQuery(queries.usage(7));
 
   if (isError) {
     return (
       <div className="p-4 sm:p-6">
-        <h1 className="text-lg font-semibold">Token Usage</h1>
-        <p className="mt-1 text-sm text-muted-foreground">7-day token consumption and cost breakdown</p>
+        <h1 className="text-lg font-semibold">{t("usage.title")}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t("usage.subtitle")}</p>
         <EmptyState
           icon={Coins}
-          title="Failed to load usage data"
-          description="Could not retrieve token usage statistics"
-          action={{ label: "Retry", onClick: () => refetch() }}
+          title={t("usage.failedToLoad")}
+          description={t("usage.failedToLoadDesc")}
+          action={{ label: t("common.retry"), onClick: () => refetch() }}
         />
       </div>
     );
   }
 
   const dailyChart = (data?.daily ?? []).map((d) => ({
-    label: new Date(d.date).toLocaleDateString([], { weekday: "short" }),
+    label: formatDate(new Date(d.date), { weekday: "short" }),
     value: d.totalTokens,
   })) ?? [];
 
   const dailyOutputChart = (data?.daily ?? []).map((d) => ({
-    label: new Date(d.date).toLocaleDateString([], { weekday: "short" }),
+    label: formatDate(new Date(d.date), { weekday: "short" }),
     value: d.outputTokens,
   })) ?? [];
 
@@ -50,8 +53,8 @@ export default function UsagePage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-lg font-semibold">Token Usage</h1>
-      <p className="mt-1 text-sm text-muted-foreground">7-day token consumption and cost breakdown</p>
+      <h1 className="text-lg font-semibold">{t("usage.title")}</h1>
+      <p className="mt-1 text-sm text-muted-foreground">{t("usage.subtitle")}</p>
 
       {/* Summary cards */}
       <div className="mt-6 grid gap-4 grid-cols-2 lg:grid-cols-4">
@@ -59,14 +62,14 @@ export default function UsagePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Coins className="size-4" />
-              Today
+              {t("usage.today")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? <Skeleton className="h-7 w-20" /> : (
               <>
                 <p className="text-2xl font-bold tabular-nums"><AnimatedStat value={data?.today.totalTokens ?? 0} format={formatTokens} /></p>
-                <p className="text-xs text-muted-foreground">${(data?.today.costUsd ?? 0).toFixed(4)} est.</p>
+                <p className="text-xs text-muted-foreground">${(data?.today.costUsd ?? 0).toFixed(4)} {t("usage.est")}</p>
               </>
             )}
           </CardContent>
@@ -76,14 +79,14 @@ export default function UsagePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <TrendingUp className="size-4" />
-              7-Day Total
+              {t("usage.sevenDayTotal")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? <Skeleton className="h-7 w-20" /> : (
               <>
                 <p className="text-2xl font-bold tabular-nums"><AnimatedStat value={data?.period.totalTokens ?? 0} format={formatTokens} /></p>
-                <p className="text-xs text-muted-foreground">${(data?.period.costUsd ?? 0).toFixed(4)} est.</p>
+                <p className="text-xs text-muted-foreground">${(data?.period.costUsd ?? 0).toFixed(4)} {t("usage.est")}</p>
               </>
             )}
           </CardContent>
@@ -93,7 +96,7 @@ export default function UsagePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Cpu className="size-4" />
-              Input / Output
+              {t("usage.inputOutput")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -102,7 +105,7 @@ export default function UsagePage() {
                 <p className="text-base sm:text-lg font-bold tabular-nums">
                   <AnimatedStat value={data?.period.inputTokens ?? 0} format={formatTokens} /> / <AnimatedStat value={data?.period.outputTokens ?? 0} format={formatTokens} />
                 </p>
-                <p className="text-xs text-muted-foreground">in / out (7d)</p>
+                <p className="text-xs text-muted-foreground">{t("usage.inOut7d")}</p>
               </>
             )}
           </CardContent>
@@ -112,7 +115,7 @@ export default function UsagePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Bot className="size-4" />
-              Trend
+              {t("usage.trend")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -127,7 +130,7 @@ export default function UsagePage() {
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card className="stagger-5">
           <CardHeader>
-            <CardTitle className="text-sm">Daily Token Usage</CardTitle>
+            <CardTitle className="text-sm">{t("usage.dailyTokenUsage")}</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
@@ -142,11 +145,11 @@ export default function UsagePage() {
                 <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
                   <span className="flex items-center gap-1">
                     <span className="inline-block size-2 rounded-full" style={{ background: "var(--chart-1)" }} />
-                    Total
+                    {t("usage.total")}
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="inline-block size-2 rounded-full" style={{ background: "var(--chart-2)" }} />
-                    Output
+                    {t("usage.output")}
                   </span>
                 </div>
               </>
@@ -156,7 +159,7 @@ export default function UsagePage() {
 
         <Card className="stagger-6">
           <CardHeader>
-            <CardTitle className="text-sm">By Agent</CardTitle>
+            <CardTitle className="text-sm">{t("usage.byAgent")}</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
@@ -174,7 +177,7 @@ export default function UsagePage() {
 
         <Card className="stagger-7">
           <CardHeader>
-            <CardTitle className="text-sm">By Model</CardTitle>
+            <CardTitle className="text-sm">{t("usage.byModel")}</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
@@ -192,13 +195,13 @@ export default function UsagePage() {
 
         <Card className="stagger-8">
           <CardHeader>
-            <CardTitle className="text-sm">Cost Breakdown (7d)</CardTitle>
+            <CardTitle className="text-sm">{t("usage.costBreakdown")}</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? <Skeleton className="h-40 w-full" /> : (
               <BarChart
                 data={(data?.daily ?? []).map((d) => ({
-                  label: new Date(d.date).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }),
+                  label: formatDate(new Date(d.date), { weekday: "short", month: "short", day: "numeric" }),
                   value: d.costUsd,
                   color: "var(--chart-3)",
                 }))}

@@ -26,6 +26,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 // ─── Status badge helper ───────────────────────────────────────────────────
 
@@ -46,6 +47,8 @@ function JobStatusBadge({ status }: { status: string }) {
 // ─── Executions panel (inline expand) ──────────────────────────────────────
 
 function JobExecutions({ jobId }: { jobId: string }) {
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
   const [show, setShow] = useState(false);
   const execQuery = useQuery({
     queryKey: ["scheduler-executions", jobId],
@@ -61,13 +64,13 @@ function JobExecutions({ jobId }: { jobId: string }) {
       >
         {show ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <History className="size-3" />
-        Execution history
+        {t("scheduler.executionHistory")}
       </button>
       {show && (
         <div className="mt-2 space-y-1 pl-4">
-          <QueryBoundary query={execQuery} skeleton={<p className="text-[11px] text-muted-foreground">Loading…</p>}>
+          <QueryBoundary query={execQuery} skeleton={<p className="text-[11px] text-muted-foreground">{t("common.loading")}</p>}>
             {(execs) => execs.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">No executions yet.</p>
+              <p className="text-[11px] text-muted-foreground">{t("scheduler.noExecutions")}</p>
             ) : (
               execs.map((ex) => (
                 <div
@@ -81,7 +84,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
                     {ex.status}
                   </Badge>
                   <span className="text-muted-foreground">
-                    {new Date(ex.startedAt).toLocaleString()}
+                    {fmtDT(new Date(ex.startedAt))}
                   </span>
                   {ex.finishedAt && (
                     <span className="text-muted-foreground/70">
@@ -113,27 +116,28 @@ function CreateJobCard({
   const [name, setName] = useState("");
   const [cron, setCron] = useState("");
   const [prompt, setPrompt] = useState("");
+  const t = useT();
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm">New Scheduled Job</CardTitle>
+        <CardTitle className="text-sm">{t("scheduler.newScheduledJob")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <Input
-          placeholder="Job name"
+          placeholder={t("scheduler.jobName")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="h-11 md:h-8"
         />
         <Input
-          placeholder="Cron expression (e.g. 0 9 * * 1-5)"
+          placeholder={t("scheduler.cronPlaceholder")}
           value={cron}
           onChange={(e) => setCron(e.target.value)}
           className="h-11 md:h-8 font-mono text-sm"
         />
         <textarea
-          placeholder="Prompt to execute on each run"
+          placeholder={t("scheduler.promptPlaceholder")}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={3}
@@ -145,10 +149,10 @@ function CreateJobCard({
             disabled={!name.trim() || !cron.trim() || !prompt.trim()}
             onClick={() => onCreate({ name, cron, prompt })}
           >
-            Create
+            {t("common.create")}
           </Button>
           <Button size="sm" variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </CardContent>
@@ -159,7 +163,9 @@ function CreateJobCard({
 // ─── Main page ─────────────────────────────────────────────────────────────
 
 export default function SchedulerPage() {
-  useDocumentTitle("Scheduler");
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
+  useDocumentTitle(t("scheduler.title"));
   const qc = useQueryClient();
 
   const [showCreate, setShowCreate] = useState(false);
@@ -188,7 +194,7 @@ export default function SchedulerPage() {
   const createMut = useMutation({
     mutationFn: schedulerApi.createJob,
     onSuccess: () => {
-      toast.success("Job created");
+      toast.success(t("scheduler.jobCreated"));
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
       setShowCreate(false);
     },
@@ -198,7 +204,7 @@ export default function SchedulerPage() {
   const deleteMut = useMutation({
     mutationFn: schedulerApi.deleteJob,
     onSuccess: () => {
-      toast.success("Job deleted");
+      toast.success(t("scheduler.jobDeleted"));
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -207,7 +213,7 @@ export default function SchedulerPage() {
   const pauseMut = useMutation({
     mutationFn: schedulerApi.pauseJob,
     onSuccess: () => {
-      toast.success("Job paused");
+      toast.success(t("scheduler.jobPaused"));
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -216,7 +222,7 @@ export default function SchedulerPage() {
   const resumeMut = useMutation({
     mutationFn: schedulerApi.resumeJob,
     onSuccess: () => {
-      toast.success("Job resumed");
+      toast.success(t("scheduler.jobResumed"));
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -225,7 +231,7 @@ export default function SchedulerPage() {
   const triggerMut = useMutation({
     mutationFn: schedulerApi.triggerJob,
     onSuccess: () => {
-      toast.success("Job triggered");
+      toast.success(t("scheduler.jobTriggered"));
       qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
       qc.invalidateQueries({ queryKey: ["scheduler-queue"] });
     },
@@ -242,10 +248,10 @@ export default function SchedulerPage() {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             <Clock className="size-5 text-brand" />
-            Scheduler
+            {t("scheduler.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Manage scheduled jobs, cron tasks, and webhooks
+            {t("scheduler.subtitle")}
           </p>
         </div>
         <Button
@@ -254,7 +260,7 @@ export default function SchedulerPage() {
           className="h-11 md:h-9"
         >
           <Plus className="mr-1 size-4" />
-          New Job
+          {t("scheduler.newJob")}
         </Button>
       </div>
 
@@ -262,31 +268,31 @@ export default function SchedulerPage() {
       {queue && (
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>
-            Queue: <strong className="text-foreground">{queue.running}</strong> running
+            {t("scheduler.queueRunning", { count: String(queue.running) })}
           </span>
           <span>
-            <strong className="text-foreground">{queue.pending}</strong> pending
+            {t("scheduler.queuePending", { count: String(queue.pending) })}
           </span>
           <span>
-            Max concurrency: <strong className="text-foreground">{queue.maxConcurrency}</strong>
+            {t("scheduler.queueMaxConcurrency", { count: String(queue.maxConcurrency) })}
           </span>
         </div>
       )}
 
       {/* Tab switcher */}
       <div className="flex gap-1 border-b">
-        {(["jobs", "queue", "webhooks"] as const).map((t) => (
+        {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
             className={cn(
               "px-3 py-2 text-sm font-medium capitalize transition-colors min-h-[44px] md:min-h-0",
-              tab === t
+              tab === tabKey
                 ? "border-b-2 border-brand text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {t}
+            {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : tabKey}
           </button>
         ))}
       </div>
@@ -305,9 +311,9 @@ export default function SchedulerPage() {
           {(jobs) => jobs.length === 0 ? (
             <EmptyState
               icon={Clock}
-              title="No scheduled jobs"
-              description="Create a cron job to run tasks on a schedule."
-              action={{ label: "New Job", onClick: () => setShowCreate(true) }}
+              title={t("scheduler.noJobs")}
+              description={t("scheduler.noJobsDesc")}
+              action={{ label: t("scheduler.newJob"), onClick: () => setShowCreate(true) }}
             />
           ) : (
             <div className="space-y-2">
@@ -321,7 +327,7 @@ export default function SchedulerPage() {
                           <JobStatusBadge status={job.status} />
                           {!job.enabled && (
                             <Badge variant="secondary" className="text-[11px]">
-                              disabled
+                              {t("common.disabled")}
                             </Badge>
                           )}
                         </div>
@@ -334,12 +340,12 @@ export default function SchedulerPage() {
                         <div className="flex gap-3 text-[11px] text-muted-foreground/70">
                           {job.lastRunAt && (
                             <span>
-                              Last: {new Date(job.lastRunAt).toLocaleString()}
+                              {t("scheduler.last", { time: fmtDT(new Date(job.lastRunAt)) })}
                             </span>
                           )}
                           {job.nextRunAt && (
                             <span>
-                              Next: {new Date(job.nextRunAt).toLocaleString()}
+                              {t("scheduler.next", { time: fmtDT(new Date(job.nextRunAt)) })}
                             </span>
                           )}
                         </div>
@@ -350,8 +356,8 @@ export default function SchedulerPage() {
                             variant="ghost"
                             size="icon"
                             className="size-11 md:size-8"
-                            title="Pause"
-                            aria-label="Pause"
+                            title={t("common.pause")}
+                            aria-label={t("common.pause")}
                             onClick={() => pauseMut.mutate(job.id)}
                           >
                             <Pause className="size-3.5" />
@@ -362,8 +368,8 @@ export default function SchedulerPage() {
                             variant="ghost"
                             size="icon"
                             className="size-11 md:size-8"
-                            title="Resume"
-                            aria-label="Resume"
+                            title={t("common.resume")}
+                            aria-label={t("common.resume")}
                             onClick={() => resumeMut.mutate(job.id)}
                           >
                             <Play className="size-3.5" />
@@ -373,8 +379,8 @@ export default function SchedulerPage() {
                           variant="ghost"
                           size="icon"
                           className="size-11 md:size-8"
-                          title="Trigger now"
-                          aria-label="Trigger now"
+                          title={t("scheduler.triggerNow")}
+                          aria-label={t("scheduler.triggerNow")}
                           onClick={() => triggerMut.mutate(job.id)}
                         >
                           <RotateCw className="size-3.5" />
@@ -383,10 +389,10 @@ export default function SchedulerPage() {
                           variant="ghost"
                           size="icon"
                           className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
-                          title="Delete"
-                          aria-label="Delete"
+                          title={t("common.delete")}
+                          aria-label={t("common.delete")}
                           onClick={() => {
-                            if (confirm(`Delete job "${job.name}"?`)) {
+                            if (confirm(t("scheduler.deleteJobConfirm", { name: job.name }))) {
                               deleteMut.mutate(job.id);
                             }
                           }}
@@ -412,24 +418,24 @@ export default function SchedulerPage() {
               <Card>
                 <CardContent className="py-4 text-center">
                   <p className="text-2xl font-bold">{queue.running}</p>
-                  <p className="text-sm text-muted-foreground">Running</p>
+                  <p className="text-sm text-muted-foreground">{t("scheduler.running")}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="py-4 text-center">
                   <p className="text-2xl font-bold">{queue.pending}</p>
-                  <p className="text-sm text-muted-foreground">Pending</p>
+                  <p className="text-sm text-muted-foreground">{t("scheduler.pending")}</p>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="py-4 text-center">
                   <p className="text-2xl font-bold">{queue.maxConcurrency}</p>
-                  <p className="text-sm text-muted-foreground">Max Concurrency</p>
+                  <p className="text-sm text-muted-foreground">{t("scheduler.maxConcurrency")}</p>
                 </CardContent>
               </Card>
             </div>
           ) : (
-            <EmptyState icon={Clock} title="Queue status unavailable" description="Connect to the backend to see queue status." />
+            <EmptyState icon={Clock} title={t("scheduler.queueStatusUnavailable")} description={t("scheduler.queueStatusUnavailableDesc")} />
           )}
         </QueryBoundary>
       )}
@@ -440,8 +446,8 @@ export default function SchedulerPage() {
           {(webhooks) => webhooks.length === 0 ? (
             <EmptyState
               icon={Webhook}
-              title="No webhook deliveries"
-              description="Webhook audit entries will appear here."
+              title={t("scheduler.noWebhookDeliveries")}
+              description={t("scheduler.webhookHint")}
             />
           ) : (
             <div className="space-y-2">
@@ -454,7 +460,7 @@ export default function SchedulerPage() {
                       </Badge>
                       <span className="text-muted-foreground">{entry.result}</span>
                       <span className="ml-auto text-[11px] text-muted-foreground/70">
-                        {new Date(entry.createdAt).toLocaleString()}
+                        {fmtDT(new Date(entry.createdAt))}
                       </span>
                     </div>
                   </CardContent>

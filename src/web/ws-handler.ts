@@ -57,6 +57,14 @@ export function createWsHandler(deps: WebServerDependencies) {
 
     logger.debug({ sessionId }, 'WebSocket 连接');
 
+    // 重连恢复：如果该 session 有正在运行的流式任务，重绑定 socket 并补发已积累的文本
+    const bridge = new WebSocketBridge(ws);
+    const rebindResult = deps.sessionManager.rebindSocket(sessionId, bridge as unknown as Socket);
+    if (rebindResult && rebindResult.accumulated) {
+      // 推送已积累的完整文本让客户端补上断连期间的内容
+      wsReply(ws, { type: 'reconnect_recovery', content: rebindResult.accumulated, taskId: rebindResult.taskId });
+    }
+
     // Forward delegation events to this client
     const delegationListener = deps.eventBus.on('delegation.user_needed', (payload) => {
       wsReply(ws, { type: 'delegation.needed', ...payload });

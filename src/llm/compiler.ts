@@ -16,6 +16,7 @@ import type { AgentName } from '../contracts/agents.js';
 import { genId } from '../utils/id.js';
 
 export interface CompileRequestInput {
+  id?: string;
   agent: AgentName;
   purpose: ModelPurpose;
   modelTier?: ModelTier;
@@ -51,7 +52,7 @@ export function compileRequest(input: CompileRequestInput): ModelRequest {
   const modelTier = input.modelTier ?? deriveTierFromPurpose(input.purpose);
 
   return {
-    id: genId('req'),
+    id: input.id ?? genId('req'),
     agent: input.agent,
     purpose: input.purpose,
     modelTier,

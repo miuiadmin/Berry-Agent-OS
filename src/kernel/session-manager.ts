@@ -16,6 +16,8 @@ export interface PendingRequest {
   sessionId: string;
   userMessage: string;
   taskId?: string;
+  /** 委托任务 ID（delegation 创建的子 task）。flusher 注册用此 key。 */
+  delegationTaskId?: string;
   level?: string;
   reasoning?: string;
   draftResponse?: string;
@@ -132,6 +134,22 @@ export class SessionManager {
 
   findAnyPendingWithTaskId(): PendingRequest | undefined {
     return [...this.pendingRequests.values()].find((p) => p.taskId);
+  }
+
+  /**
+   * 重绑定 socket：当客户端 WebSocket 重连时，将新 socket 关联到该 session 正在运行的 pending request。
+   * 返回已积累的流式文本（用于客户端补显示断连期间的输出），无活跃请求时返回 null。
+   */
+  rebindSocket(sessionId: string, newSocket: Socket): { accumulated: string; taskId: string } | null {
+    for (const pending of this.pendingRequests.values()) {
+      if (pending.sessionId === sessionId && pending.streaming && pending.taskId) {
+        pending.socket = newSocket;
+        // 同时更新 taskSocketMap 中的引用
+        this.taskSocketMap.set(pending.taskId, { socket: newSocket, expiresAt: Date.now() + 300_000 });
+        return { accumulated: pending.draftResponse ?? '', taskId: pending.taskId };
+      }
+    }
+    return null;
   }
 
   getModelOverride(sessionId: string): ModelTier | undefined {

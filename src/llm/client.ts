@@ -72,6 +72,7 @@ export interface ChatResult {
   inputTokens: number;
   outputTokens: number;
   model: string;
+  reasoning?: string;
 }
 
 export interface LlmCompletedInfo {
@@ -164,9 +165,60 @@ export class LlmClient {
     }
 
     const t0 = Date.now();
+    logger.debug({ model: modelId, messageCount: messages.length, hasTools: !!options.tools?.length, maxTokens: options.maxTokens ?? 4096, agent: agentName, purpose: options.purpose }, 'llm:request');
+
+    // Native path for openai/openai-compatible (supports reasoning_content)
+    if (resolved.providerKind === 'openai-compatible' || resolved.providerKind === 'openai') {
+      const { chatOpenAICompatible } = await import('./openai-sse-stream.js');
+      const maxRetries = this.resilienceConfig.retry?.maxRetries ?? DEFAULT_MAX_RETRIES;
+      let lastError: unknown;
+      try {
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            const response = await chatOpenAICompatible({
+              baseUrl: resolved.channel.baseUrl ?? '',
+              apiKey: resolved.channel.apiKey ?? '',
+              model: modelId,
+              messages: messages.map(m => ({
+                role: m.role,
+                content: typeof m.content === 'string' ? m.content : m.content as unknown as Array<Record<string, unknown>>,
+              })),
+              system: options.system,
+              tools: options.tools?.length ? options.tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })) : undefined,
+              maxTokens: options.maxTokens,
+              temperature: options.temperature,
+              stopSequences: options.stopSequences,
+              signal: options.signal,
+            });
+            response.requestId = requestId;
+            this.circuitBreaker.recordSuccess();
+            metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'ok' });
+            metrics.histogram('llm_request_duration_ms').observe(Date.now() - t0, { agent: agentName });
+            logger.debug({ model: modelId, stopReason: response.stopReason, inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, durationMs: Date.now() - t0, agent: agentName, hasReasoning: !!response.reasoning }, 'llm:complete');
+            if (this.requestLogger) { try { this.requestLogger.logCompleted(requestId, response); } catch {} }
+            if (this.budgetController) { try { this.budgetController.recordUsage({ sessionId: options.sessionId ?? '', agentName, taskId: options.taskId, inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, cacheReadTokens: response.usage.cacheReadTokens, cacheCreationTokens: 0, model: modelId }); } catch {} }
+            if (this.llmCompletedHook) { try { this.llmCompletedHook({ taskId: options.taskId ?? '', agentName, inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, cacheRead: response.usage.cacheReadTokens, durationMs: Date.now() - t0 }); } catch {} }
+            return { content: response.content, contentBlocks: response.contentBlocks, toolCalls: response.toolCalls, stopReason: response.stopReason, inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, model: modelId, reasoning: response.reasoning };
+          } catch (err) {
+            lastError = err;
+            const classified = classifyLlmError(err);
+            if (!classified.retryable || attempt >= maxRetries) throw err;
+            logger.debug({ attempt, error: (err as Error).message }, 'llm:retry');
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+          }
+        }
+        throw lastError;
+      } catch (err) {
+        this.circuitBreaker.recordFailure();
+        metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'error' });
+        throw err;
+      } finally {
+        this.concurrencySemaphore.release();
+      }
+    }
+
     const aiMessages = toAiMessages(messages);
     const tools = options.tools?.length ? toAiTools(options.tools) : undefined;
-    logger.debug({ model: modelId, messageCount: messages.length, hasTools: !!tools, maxTokens: options.maxTokens ?? 4096, agent: agentName, purpose: options.purpose }, 'llm:request');
 
     // Default timeout when caller provides no signal
     const timeoutMs = this.resilienceConfig.defaultTimeoutMs;
@@ -325,7 +377,6 @@ export class LlmClient {
 
     const resolved = this.providerRegistry.resolve(tier);
     const modelId = resolved.model.id;
-    const model = this.providerRegistry.createModel(tier);
     const providerOptions = this.buildProviderOptions(modelId, options.thinkingEnabled, resolved.providerKind);
 
     // Budget pre-check
@@ -348,11 +399,95 @@ export class LlmClient {
       try { this.requestLogger.logPending(request); } catch (e) { logger.debug({ err: e }, 'request log pending failed'); }
     }
 
+    const t0 = Date.now();
+    logger.debug({ model: modelId, messageCount: messages.length, hasTools: !!options.tools?.length, maxTokens: options.maxTokens ?? 4096, agent: agentName, purpose: options.purpose, streaming: true }, 'llm:request');
+
+    // Native SSE stream for openai-compatible (supports reasoning_content natively)
+    if (resolved.providerKind === 'openai-compatible' || resolved.providerKind === 'openai') {
+      const { streamOpenAICompatible } = await import('./openai-sse-stream.js');
+      const timeoutMs = this.resilienceConfig.defaultTimeoutMs;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let signal = options.signal;
+      if (!signal && timeoutMs) {
+        const ctrl = new AbortController();
+        signal = ctrl.signal;
+        timeoutId = setTimeout(() => ctrl.abort(`Request timeout after ${timeoutMs}ms`), timeoutMs);
+      }
+      const maxRetries = this.resilienceConfig.retry?.streamMaxRetries ?? this.resilienceConfig.retry?.maxRetries ?? STREAM_MAX_RETRIES;
+      let lastError: unknown;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (signal?.aborted) throw new Error('Request aborted');
+        try {
+        let lastResponse: import('../contracts/model.js').ModelResponse | undefined;
+        for await (const chunk of streamOpenAICompatible({
+          baseUrl: resolved.channel.baseUrl ?? '',
+          apiKey: resolved.channel.apiKey ?? '',
+          model: modelId,
+          messages: messages.map(m => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content : m.content.map(block => {
+              if (block.type === 'text') return { type: 'text', text: (block as { text: string }).text };
+              if (block.type === 'tool_use') return { type: 'tool_use', id: (block as { id: string }).id, name: (block as { name: string }).name, input: (block as { input: unknown }).input };
+              if (block.type === 'tool_result') return { type: 'tool_result', tool_use_id: (block as { toolUseId: string }).toolUseId, content: (block as { content: string }).content };
+              return block as unknown as Record<string, unknown>;
+            }),
+          })) as Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+          system: options.system,
+          tools: options.tools?.length ? options.tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })) : undefined,
+          maxTokens: options.maxTokens,
+          temperature: options.temperature,
+          stopSequences: options.stopSequences,
+          signal,
+        })) {
+          if (chunk.type === 'message_done') {
+            lastResponse = chunk.response;
+            lastResponse.requestId = requestId;
+          }
+          yield chunk;
+        }
+        this.circuitBreaker.recordSuccess();
+        if (lastResponse) {
+          const u = lastResponse.usage;
+          metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'ok' });
+          metrics.histogram('llm_request_duration_ms').observe(Date.now() - t0, { agent: agentName });
+          logger.debug({ model: modelId, stopReason: lastResponse.stopReason, inputTokens: u.inputTokens, outputTokens: u.outputTokens, durationMs: Date.now() - t0, agent: agentName, streaming: true }, 'llm:complete');
+          if (this.requestLogger) {
+            try { this.requestLogger.logCompleted(requestId, lastResponse); } catch (e) { logger.debug({ err: e }, 'request log completed failed'); }
+          }
+          if (this.budgetController) {
+            try { this.budgetController.recordUsage({ sessionId: options.sessionId ?? '', agentName, taskId: options.taskId, inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheCreationTokens: 0, model: modelId }); } catch {}
+          }
+          if (this.llmCompletedHook) {
+            try { this.llmCompletedHook({ taskId: options.taskId ?? '', agentName, inputTokens: u.inputTokens, outputTokens: u.outputTokens, durationMs: Date.now() - t0 }); } catch {}
+          }
+        }
+        // Success — exit retry loop
+        if (timeoutId) clearTimeout(timeoutId);
+        this.concurrencySemaphore.release();
+        return;
+        } catch (err) {
+          lastError = err;
+          const classified = classifyLlmError(err);
+          if (!classified.retryable || attempt >= maxRetries) {
+            this.circuitBreaker.recordFailure();
+            metrics.counter('llm_requests_total').inc({ agent: agentName, status: 'error' });
+            if (timeoutId) clearTimeout(timeoutId);
+            this.concurrencySemaphore.release();
+            throw err;
+          }
+          logger.debug({ attempt, error: (err as Error).message, nextIn: 1000 * (attempt + 1) }, 'llm:retry');
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+      // All retries exhausted
+      if (timeoutId) clearTimeout(timeoutId);
+      this.concurrencySemaphore.release();
+      throw lastError;
+    }
+
+    const model = this.providerRegistry.createModel(tier);
     const aiMessages = toAiMessages(messages);
     const tools = options.tools?.length ? toAiTools(options.tools) : undefined;
-
-    const t0 = Date.now();
-    logger.debug({ model: modelId, messageCount: messages.length, hasTools: !!tools, maxTokens: options.maxTokens ?? 4096, agent: agentName, purpose: options.purpose, streaming: true }, 'llm:request');
     const maxRetries = this.resilienceConfig.retry?.streamMaxRetries ?? this.resilienceConfig.retry?.maxRetries ?? STREAM_MAX_RETRIES;
     let lastError: unknown;
 
@@ -388,27 +523,32 @@ export class LlmClient {
         const contentBlocks: ModelContentBlock[] = [];
         const toolInputBuffers = new Map<string, { id: string; name: string; json: string }>();
         let reasoningText = '';
+        let reasoningActive = false;
         let firstChunkAt: number | undefined;
 
         for await (const part of result.fullStream) {
           if (signal?.aborted) break;
 
           switch (part.type) {
-            case 'text-delta':
+            case 'text-delta': {
               if (!firstChunkAt) firstChunkAt = Date.now();
               hasYielded = true;
+              if (reasoningActive) { reasoningActive = false; yield { type: 'reasoning_end' }; }
               yield { type: 'text_delta', text: part.text };
               break;
+            }
 
             case 'reasoning-delta':
               if (!firstChunkAt) firstChunkAt = Date.now();
               hasYielded = true;
+              if (!reasoningActive) { reasoningActive = true; yield { type: 'reasoning_start' }; }
               reasoningText += part.text;
               yield { type: 'reasoning_delta', text: part.text };
               break;
 
             case 'tool-input-start':
               hasYielded = true;
+              if (reasoningActive) { reasoningActive = false; yield { type: 'reasoning_end' }; }
               toolInputBuffers.set(part.id, { id: part.id, name: part.toolName, json: '' });
               yield { type: 'tool_use_start', id: part.id, name: part.toolName };
               break;
@@ -454,6 +594,7 @@ export class LlmClient {
               throw new Error(part.reason ?? 'Stream aborted');
 
             case 'finish': {
+              if (reasoningActive) { reasoningActive = false; yield { type: 'reasoning_end' }; }
               this.circuitBreaker.recordSuccess();
               if (firstChunkAt) {
                 metrics.histogram('llm_ttft_ms').observe(firstChunkAt - t0, { agent: agentName });
@@ -593,6 +734,7 @@ export class LlmClient {
   ): ModelRequest {
     if (options.agent) {
       return compileRequest({
+        id: requestId,
         agent: agentName,
         purpose: options.purpose ?? agentName,
         modelTier: tier,
@@ -777,6 +919,8 @@ export function createLlmClient(config: LlmConfig, options?: CreateLlmClientOpti
     budgetController,
     resilienceConfig: {
       ...options?.resilienceConfig,
+      // 强制设置请求超时：防止 LLM 调用永远挂死（provider 半死不活/网络断流等场景）
+      defaultTimeoutMs: options?.resilienceConfig?.defaultTimeoutMs ?? 60_000,
       concurrency: options?.resilienceConfig?.concurrency ?? { maxConcurrent: config.maxConcurrentRequests ?? 10 },
     },
     legacyBackend,

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import type { TaskInfo } from "@/lib/api";
+import { useT, useDateFormat } from "@/lib/i18n";
 
 interface TaskCardMobileProps {
   task: TaskInfo;
@@ -13,6 +14,8 @@ interface TaskCardMobileProps {
 
 export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
   const [expanded, setExpanded] = useState(false);
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
@@ -48,7 +51,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           <Button
             variant="destructive"
             size="sm"
-            aria-label="Cancel task"
+            aria-label={t("taskCard.cancelTask")}
             className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0 min-h-[44px] md:min-h-0 min-w-[44px]"
             onClick={(e) => {
               e.stopPropagation();
@@ -63,22 +66,22 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
         <div className="collapse-inner">
           <div className="border-t border-border bg-muted/10 p-3 space-y-2 text-xs">
             <div>
-              <span className="font-medium text-muted-foreground">ID</span>
+              <span className="font-medium text-muted-foreground">{t("tasks.id")}</span>
               <p className="mt-0.5 font-mono break-all text-[11px]">{task.id}</p>
             </div>
             {task.sessionId && (
               <div>
-                <span className="font-medium text-muted-foreground">Session</span>
+                <span className="font-medium text-muted-foreground">{t("taskCard.session")}</span>
                 <p className="mt-0.5 font-mono text-[11px]">{task.sessionId}</p>
               </div>
             )}
             <div>
-              <span className="font-medium text-muted-foreground">Created</span>
-              <p className="mt-0.5 text-[11px]">{new Date(task.createdAt).toLocaleString()}</p>
+              <span className="font-medium text-muted-foreground">{t("tasks.created")}</span>
+              <p className="mt-0.5 text-[11px]">{fmtDT(new Date(task.createdAt))}</p>
             </div>
             {task.status === "failed" && task.error && (
               <div>
-                <span className="font-medium text-destructive">Error</span>
+                <span className="font-medium text-destructive">{t("common.error")}</span>
                 <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[11px] text-destructive whitespace-pre-wrap">
                   {task.error}
                 </pre>
@@ -86,7 +89,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             )}
             {task.inputPayload && (
               <div>
-                <span className="font-medium text-muted-foreground">Input</span>
+                <span className="font-medium text-muted-foreground">{t("tools.input")}</span>
                 <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
                   {formatJson(task.inputPayload)}
                 </pre>
@@ -94,7 +97,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             )}
             {task.outputPayload && (
               <div>
-                <span className="font-medium text-muted-foreground">Output</span>
+                <span className="font-medium text-muted-foreground">{t("tools.output")}</span>
                 <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
                   {formatJson(task.outputPayload)}
                 </pre>

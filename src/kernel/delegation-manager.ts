@@ -39,7 +39,7 @@ function emptyMetrics(): DelegationMetrics {
 const VALID_TRANSITIONS: Record<DelegationState, DelegationState[]> = {
   routing: ['delegated', 'failed'],
   delegated: ['active', 'failed'],
-  active: ['awaiting_user', 'reviewing', 'failed'],
+  active: ['active', 'awaiting_user', 'reviewing', 'failed'],
   awaiting_user: ['active', 'failed'],
   reviewing: ['completed', 'failed'],
   completed: [],

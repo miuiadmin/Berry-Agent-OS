@@ -191,6 +191,16 @@ export class TaskManager implements TaskManagerDb {
     return true;
   }
 
+  /**
+   * 将流式累积文本刷写到 output_payload，用于断连/刷新后的恢复。
+   * 只在 running/acknowledged 状态时写入；任务已完成则 no-op（complete() 会覆盖最终内容）。
+   */
+  flushStreamingContent(taskId: string, content: string, reasoning?: string): void {
+    this.db.prepare(
+      `UPDATE agent_tasks SET output_payload = ? WHERE id = ? AND status IN ('running','acknowledged')`,
+    ).run(JSON.stringify({ streamingContent: content, reasoning: reasoning ?? null, flushedAt: Date.now() }), taskId);
+  }
+
   fail(taskId: string, error: string): boolean {
     const now = Date.now();
     const task = this.getTask(taskId);
@@ -341,6 +351,7 @@ export class TaskManager implements TaskManagerDb {
   }
 
   dispose(): void {
+    this.stopSweep();
     for (const timer of this.timeouts.values()) {
       clearTimeout(timer);
     }
@@ -432,6 +443,49 @@ export class TaskManager implements TaskManagerDb {
       );
     } catch (err) {
       logger.error({ err, taskId, eventType }, '写入任务事件失败');
+    }
+  }
+
+  // §9.0 M8: Sweep stale tasks that are stuck in intermediate states
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  startSweep(): void {
+    if (this.sweepTimer) return;
+    this.sweepTimer = setInterval(() => this.sweepStaleTasks(), 60_000);
+  }
+
+  stopSweep(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  private sweepStaleTasks(): void {
+    const now = Date.now();
+    const DISPATCH_TIMEOUT = 5 * 60_000;
+    const RUNNING_TIMEOUT = 30 * 60_000;
+
+    try {
+      const staleDispatched = this.db.prepare(
+        `SELECT id FROM agent_tasks WHERE status = 'dispatched' AND dispatched_at < ?`,
+      ).all(now - DISPATCH_TIMEOUT) as Array<{ id: string }>;
+
+      for (const { id } of staleDispatched) {
+        this.fail(id, 'dispatch timeout (5 min)');
+        logger.warn({ taskId: id }, 'Task swept: dispatch timeout');
+      }
+
+      const staleRunning = this.db.prepare(
+        `SELECT id FROM agent_tasks WHERE status = 'running' AND started_at < ?`,
+      ).all(now - RUNNING_TIMEOUT) as Array<{ id: string }>;
+
+      for (const { id } of staleRunning) {
+        this.fail(id, 'execution timeout (30 min)');
+        logger.warn({ taskId: id }, 'Task swept: execution timeout');
+      }
+    } catch (err) {
+      logger.debug({ err }, 'Task sweep failed');
     }
   }
 }
