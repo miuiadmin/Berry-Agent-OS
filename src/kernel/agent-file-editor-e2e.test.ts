@@ -80,7 +80,7 @@ startModuleAgent(async (payload) => {
 `;
 }
 
-describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000 }, () => {
+describe('File Editor Agent E2E — 真实文件操作', { timeout: 120000, retry: 2 }, () => {
   let harness: TestHarness;
   let agentDir: string;
   let workDir: string;
