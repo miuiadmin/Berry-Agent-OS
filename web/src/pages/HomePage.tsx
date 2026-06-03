@@ -335,7 +335,7 @@ export default function HomePage() {
                       <span className="text-muted-foreground shrink-0">
                         {formatTime(new Date(ev.ts), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
-                      <span className="font-medium truncate">{ev.event}</span>
+                      <span className="font-medium truncate">{t(`status.${ev.event.split('.').pop()}`) ?? ev.event}</span>
                       {typeof ev.payload.name === "string" && (
                         <span className="text-muted-foreground truncate">
                           {ev.payload.name}
