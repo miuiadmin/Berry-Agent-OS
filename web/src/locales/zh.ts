@@ -8,31 +8,22 @@ const zh: Record<string, string> = {
   // ===== 公共 =====
   "common.cancel": "取消",
   "common.delete": "删除",
-  "common.save": "保存",
   "common.create": "创建",
   "common.retry": "重试",
   "common.close": "关闭",
-  "common.search": "搜索",
-  "common.reset": "重置",
   "common.apply": "应用",
   "common.enabled": "已启用",
   "common.disabled": "已禁用",
   "common.noData": "暂无数据",
   "common.loading": "加载中…",
   "common.error": "错误",
-  "common.or": "或",
-  "common.test": "测试",
-  "common.testing": "测试中…",
   "common.saving": "保存中…",
   "common.update": "更新",
-  "common.edit": "编辑",
   "common.pause": "暂停",
   "common.resume": "恢复",
   "common.all": "全部",
-  "common.back": "返回",
   "common.details": "详情",
   "common.notConfigured": "暂未配置",
-  "common.copy": "复制",
   "common.status": "状态",
 
   // ===== 状态映射 =====
@@ -83,9 +74,6 @@ const zh: Record<string, string> = {
   "userMenu.closeMenu": "关闭菜单",
   "userMenu.openMenu": "打开菜单",
 
-  // ===== 布局 =====
-  "layout.toggleSidebar": "切换侧边栏",
-
   // ===== 连接状态 =====
   "connection.connected": "已连接",
   "connection.connecting": "连接中…",
@@ -118,10 +106,7 @@ const zh: Record<string, string> = {
   "home.listening": "等待事件…",
   "home.activityHint": "活动将实时显示在这里",
   "home.quickChat": "对话",
-  "home.quickAgents": "智能体",
-  "home.quickTasks": "任务",
   "home.quickHistory": "历史",
-  "home.estimated": "预估",
 
   // ===== 对话页 =====
   "chat.title": "对话",
@@ -220,7 +205,6 @@ const zh: Record<string, string> = {
   "tasks.cancel": "取消",
   "tasks.taskCancelled": "任务已取消",
   "tasks.failedToCancel": "取消任务失败",
-  "tasks.cancelTask": "取消任务",
   "tasks.ofTotal": "{range} / 共 {total}",
 
   // ===== 智能体页 =====
@@ -285,7 +269,6 @@ const zh: Record<string, string> = {
   "notifications.noNotificationsDesc": "暂无通知。",
   "notifications.markRead": "标为已读",
   "notifications.archive": "归档",
-  "notifications.unreadCount": "未读（{count}）",
   "notifications.type.task": "任务",
   "notifications.type.agent": "智能体",
   "notifications.type.system": "系统",

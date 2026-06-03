@@ -8,31 +8,22 @@ const en: Record<string, string> = {
   // ===== Common =====
   "common.cancel": "Cancel",
   "common.delete": "Delete",
-  "common.save": "Save",
   "common.create": "Create",
   "common.retry": "Retry",
   "common.close": "Close",
-  "common.search": "Search",
-  "common.reset": "Reset",
   "common.apply": "Apply",
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
   "common.noData": "No data",
   "common.loading": "Loading…",
   "common.error": "Error",
-  "common.or": "or",
-  "common.test": "Test",
-  "common.testing": "Testing…",
   "common.saving": "Saving…",
   "common.update": "Update",
-  "common.edit": "Edit",
   "common.pause": "Pause",
   "common.resume": "Resume",
   "common.all": "All",
-  "common.back": "Back",
   "common.details": "Details",
   "common.notConfigured": "Not configured",
-  "common.copy": "Copy",
   "common.status": "Status",
 
   // ===== Status =====
@@ -83,9 +74,6 @@ const en: Record<string, string> = {
   "userMenu.closeMenu": "Close menu",
   "userMenu.openMenu": "Open menu",
 
-  // ===== Layout =====
-  "layout.toggleSidebar": "Toggle sidebar",
-
   // ===== Connection Status =====
   "connection.connected": "Connected",
   "connection.connecting": "Connecting…",
@@ -118,10 +106,7 @@ const en: Record<string, string> = {
   "home.listening": "Listening for events…",
   "home.activityHint": "Activity will appear here in real-time",
   "home.quickChat": "Chat",
-  "home.quickAgents": "Agents",
-  "home.quickTasks": "Tasks",
   "home.quickHistory": "History",
-  "home.estimated": "est.",
 
   // ===== Chat =====
   "chat.title": "Chat",
@@ -220,7 +205,6 @@ const en: Record<string, string> = {
   "tasks.cancel": "Cancel",
   "tasks.taskCancelled": "Task cancelled",
   "tasks.failedToCancel": "Failed to cancel task",
-  "tasks.cancelTask": "Cancel task",
   "tasks.ofTotal": "{range} of {total}",
 
   // ===== Agents =====
@@ -285,7 +269,6 @@ const en: Record<string, string> = {
   "notifications.noNotificationsDesc": "No notifications yet.",
   "notifications.markRead": "Mark read",
   "notifications.archive": "Archive",
-  "notifications.unreadCount": "Unread ({count})",
   "notifications.type.task": "Task",
   "notifications.type.agent": "Agent",
   "notifications.type.system": "System",
