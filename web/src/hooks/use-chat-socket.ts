@@ -61,7 +61,11 @@ export function useChatSocket() {
   /** 重置超时定时器（每次收到数据后调用） */
   const resetTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setLastError(t("chat.responseTimeout")), STREAMING_TIMEOUT_MS);
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      setLastError(t("chat.responseTimeout"));
+      setStreaming(false);
+    }, STREAMING_TIMEOUT_MS);
   }, [t]);
 
   /** 清除超时定时器（响应完成/失败时调用） */
@@ -174,6 +178,17 @@ export function useChatSocket() {
 
       // 对话消息类型（text_delta / reasoning / tool_call / result 等）
       const msg = data as unknown as ServerMessage;
+
+      // 防护：如果收到流式消息但还没有 assistant 占位消息，先创建一个
+      if (msg.type === "text_delta" || msg.type === "reasoning_delta" || msg.type === "tool_call" || msg.type === "progress" || msg.type === "agent_handoff" || msg.type === "ask_user") {
+        const state = useChatStore.getState();
+        const last = state.messages[state.messages.length - 1];
+        if (!last || last.role !== "assistant") {
+          addMessage({ id: genMsgId("asst"), role: "assistant", content: "", timestamp: Date.now(), status: "streaming" });
+          setStreaming(true);
+        }
+      }
+
       switch (msg.type) {
         case "text_delta":
           appendToLast(msg.text);
@@ -219,14 +234,16 @@ export function useChatSocket() {
           const response = resultMsg.content;
           const current = useChatStore.getState().messages;
           const lastMsg = current[current.length - 1];
-          // result 到达时，如果最后一条助手消息内容为空或仍在流式中，用完整结果替换
-          if (response && lastMsg && lastMsg.role === "assistant" && (!lastMsg.content.trim() || lastMsg.status === "streaming")) {
-            // 如果已有部分流式内容且 result 与之不同，使用 result 作为最终完整内容
-            if (!lastMsg.content.trim()) {
+          if (lastMsg && lastMsg.role === "assistant") {
+            // result 到达时，如果最后一条助手消息内容为空，用完整结果填充
+            if (response && !lastMsg.content.trim()) {
               appendToLast(response);
             }
+            setLastStatus("complete");
+          } else if (response) {
+            // 没有 assistant 占位消息（服务端直接返回 result，无 text_delta 前导）
+            addMessage({ id: genMsgId("asst"), role: "assistant", content: response, timestamp: Date.now(), status: "complete" });
           }
-          setLastStatus("complete");
           setStreaming(false);
           clearTimer();
           break;
@@ -247,6 +264,10 @@ export function useChatSocket() {
         case "permission.confirm_needed":
           setPendingPermission(toPermissionRequest(msg));
           break;
+        default:
+          if (import.meta.env.DEV) {
+            console.debug("[ws] unhandled message type:", (msg as { type: string }).type, msg);
+          }
       }
     });
     return unsub;
@@ -270,8 +291,6 @@ export function useChatSocket() {
   /** 发送用户消息（附带模型配置检查） */
   const sendMessage = useCallback(
     async (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
-      addMessage({ id: genMsgId("user"), role: "user", content: text, timestamp: Date.now(), status: "complete", attachments });
-
       // 快速模型配置检查：使用 React Query 缓存，避免每次都请求
       const cached = queryClient.getQueryData<{ channels?: Array<{ configured?: boolean; modelCount?: number }> }>(["providers", "channels"]);
       if (cached?.channels && !cached.channels.some((ch) => ch.configured || (ch.modelCount ?? 0) > 0)) {
@@ -279,6 +298,7 @@ export function useChatSocket() {
         return;
       }
 
+      addMessage({ id: genMsgId("user"), role: "user", content: text, timestamp: Date.now(), status: "complete", attachments });
       sendInternal(text, attachments);
     },
     [addMessage, sendInternal],

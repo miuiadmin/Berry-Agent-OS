@@ -18,6 +18,7 @@ import type { RuntimeRegistry } from './runtime/runtime-registry.js';
 import type { AgentRuntime, AgentEvent, ExecutionTask } from '../contracts/agent-runtime.js';
 import type { RuntimeExecutor } from './runtime/runtime-executor.js';
 import { DelegationManager } from './delegation-manager.js';
+import { DialogueRouter } from './dialogue-router.js';
 import { FallbackRouter } from './fallback-router.js';
 import { CorrectionFlow } from './flows/correction-flow.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
@@ -118,6 +119,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private capabilityBusRef: ICapabilityBus | null = null;
   private worldModelRef: WorldModelRuntime | null = null;
   private suggestionQueueRef: SuggestionQueue | null = null;
+  /** 智能体间对话路由器（11.0） */
+  dialogueRouter: DialogueRouter | null = null;
 
   // Permission judge state
   private permissionFlow: PermissionFlow;
@@ -253,10 +256,130 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.setupTaskHandlers(primary.ipc, primaryName);
     setupTakeoverRouting(primary.ipc, primaryName, this.proxyDeps);
     setupTakeoverRouting(reviewer.ipc, reviewerName, this.proxyDeps);
+
+    // ─── 11.0 dialogue 路由 ───
+    this.dialogueRouter = new DialogueRouter({
+      db: getDb(),
+      sessionManager: this.sessionManager,
+      getAgentIpc: (agentName: string) => {
+        const agent = this.agentManager.getAgent(agentName);
+        return agent?.ipc ?? undefined;
+      },
+      getBrainIpc: () => reviewer?.ipc ?? undefined,
+    });
+    this.dialogueRouter.startSweep();
+    this.setupDialogueHandlers(primary.ipc, primaryName);
+
+    // 11.0: Brain 通过 dialogue.observe 监听后可能发 turn.correction 纠偏
+    // 转发给 Conversation Agent 处理（Brain → Core → Conversation）
+    reviewer.ipc.onMessage('turn.correction', (msg: IpcMessage) => {
+      const payload = msg.payload as { delegationId: string; action: string; instruction: string };
+      // 对于 dialogue 模式的纠偏，转发给 Conversation Agent
+      primary.ipc.send('turn.correction', primaryName, payload, msg.correlationId);
+      logger.debug({ dialogueId: payload.delegationId, action: payload.action }, 'dialogue:brain correction forwarded');
+    });
   }
 
   setupDaemonEvents(): void {
     this.setupDaemonTaskResultHandlers();
+  }
+
+  /**
+   * 11.0: 注册 dialogue.send / dialogue.reply 的 IPC 处理器。
+   * - dialogue.send 来自 Conversation Agent，需要路由到目标 Agent
+   * - dialogue.reply 来自目标 Agent，需要转发回 Conversation Agent
+   */
+  private setupDialogueHandlers(primaryIpc: AgentIpc, primaryName: string): void {
+    if (!this.dialogueRouter) return;
+    const router = this.dialogueRouter;
+
+    // Conversation 发来 dialogue.send → 确保目标 agent 已启动 → 路由
+    primaryIpc.onMessage('dialogue.send', async (msg: IpcMessage) => {
+      const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
+
+      // 首次对话：在 DialogueRouter 中注册对话状态
+      let state = router.getDialogue(payload.dialogueId);
+      if (!state) {
+        const pending = [...this.sessionManager.entries()].find(([, p]) => p.sessionId)?.[1];
+        state = router.registerDialogue(payload.dialogueId, {
+          sessionId: pending?.sessionId ?? 'unknown',
+          correlationId: msg.correlationId ?? msg.id,
+          initiator: payload.from,
+          target: payload.to,
+        });
+      }
+
+      // 确保目标 agent 已启动（on-demand agents 需要 ensureAgent）
+      await this.agentManager.ensureAgent(payload.to);
+
+      // 获取 pending socket 用于 streaming
+      const pending = [...this.sessionManager.entries()].find(([, p]) => p.sessionId === state!.sessionId)?.[1];
+
+      // 推送前端事件：对话开始/新一轮
+      if (pending?.socket && !(pending.socket as { destroyed?: boolean }).destroyed) {
+        const statusEvent = JSON.stringify({
+          type: 'dialogue_status',
+          dialogueId: payload.dialogueId,
+          status: state!.currentRound === 0 ? 'started' : 'round_complete',
+          from: payload.from,
+          to: payload.to,
+          round: state!.currentRound,
+        });
+        pending.socket.write(statusEvent + '\n');
+      }
+
+      try {
+        // sendMessage 会注册 ephemeral taskId、持久化、推 brain、路由到目标
+        const reply = await router.sendMessage(payload, pending?.socket);
+        // 转发 reply 给 Conversation
+        primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
+      } catch (err) {
+        // 超时或错误 → 构造错误 reply 返回给 Conversation
+        const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
+          dialogueId: payload.dialogueId,
+          sequenceNumber: payload.sequenceNumber + 1,
+          from: payload.to,
+          to: payload.from,
+          content: `[对话错误] ${(err as Error).message}`,
+          metadata: { isFinal: true },
+        };
+        primaryIpc.send('dialogue.reply', primaryName, errorReply, payload.dialogueId);
+
+        // 推送前端：对话结束（错误）
+        if (pending?.socket && !(pending.socket as { destroyed?: boolean }).destroyed) {
+          pending.socket.write(JSON.stringify({
+            type: 'dialogue_status',
+            dialogueId: payload.dialogueId,
+            status: 'ended',
+            from: payload.from,
+            to: payload.to,
+            round: state!.currentRound,
+          }) + '\n');
+        }
+      }
+    });
+
+    // Conversation 主动结束对话
+    primaryIpc.onMessage('dialogue.end', (msg: IpcMessage) => {
+      const payload = msg.payload as import('../contracts/dialogue.js').DialogueEndPayload;
+      if (this.dialogueRouter) {
+        this.dialogueRouter.closeDialogue(payload.dialogueId, payload.reason ?? 'completed');
+      }
+    });
+
+    // 权限确认期间暂停 dialogue 超时（防止用户决策期间误超时）
+    // 不需要显式恢复：dialogue.reply 到达时 handleReply 会 clearReplyTimer，
+    // 权限拒绝/超时后 Code Agent 也会立即发回 reply
+    if (this.dialogueRouter) {
+      const router = this.dialogueRouter;
+      getEventBus().on('permission.user_confirm_needed', ({ sessionId }) => {
+        for (const d of router.getActiveDialoguesForSession(sessionId)) {
+          router.pauseTimeout(d.dialogueId);
+        }
+      });
+    }
+
+    // dialogue.reply 的接收在 setupModuleAgent 中注册（每个 on-demand agent 启动时）
   }
 
   setupModuleAgent(agentName: string): void {
@@ -271,6 +394,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     setupTakeoverRouting(agent.ipc, agentName, this.proxyDeps);
     if (this.capabilityBusRef) {
       setupBusHandlers(agent.ipc, agentName, this.capabilityBusRef);
+    }
+    // 11.0: 注册 dialogue.reply handler（module agent 回复对话消息时触发）
+    if (this.dialogueRouter) {
+      const router = this.dialogueRouter;
+      agent.ipc.onMessage('dialogue.reply', (msg: IpcMessage) => {
+        const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
+        router.handleReply(payload);
+      });
     }
   }
 

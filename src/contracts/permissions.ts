@@ -3,6 +3,8 @@ export interface PermissionRequestPayload {
   toolInput: string;
   dangerLevel: string;
   taskId?: string;
+  /** dialogue 模式下显式传递 sessionId，避免通过 findPending 反查导致跨会话污染 */
+  sessionId?: string;
 }
 
 export interface PermissionValidatePayload {

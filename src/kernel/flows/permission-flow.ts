@@ -108,15 +108,22 @@ export class PermissionFlow {
 
   setupHandlers(agentIpc: AgentIpc, agentName: string, isPrimary: boolean): void {
     agentIpc.onMessage('permission.request', (msg: IpcMessage) => {
-      const { toolName, toolInput, dangerLevel, taskId } = msg.payload as PermissionRequestPayload;
+      const { toolName, toolInput, dangerLevel, taskId, sessionId: explicitSessionId } = msg.payload as PermissionRequestPayload;
       const replyId = msg.id;
 
       let sessionId: string;
-      if (isPrimary) {
+      if (explicitSessionId) {
+        // dialogue 模式：payload 显式携带 sessionId，跳过 findPending 反查
+        sessionId = explicitSessionId;
+      } else if (isPrimary) {
         const pendingReq = (taskId ? this.deps.sessionManager.findPendingByTaskId(taskId) : undefined)
           ?? this.deps.sessionManager.findAnyPendingWithTaskId();
         sessionId = pendingReq?.sessionId ?? 'unknown';
+      } else {
+        sessionId = taskId ?? agentName;
+      }
 
+      if (isPrimary || explicitSessionId) {
         const result = this.deps.permissionCoordinator.checkAndIssue({
           agentName,
           sessionId,

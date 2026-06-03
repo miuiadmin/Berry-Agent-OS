@@ -15,8 +15,8 @@ describe('ask_user', () => {
       ],
     });
     expect(result.content).toContain('tabs 还是 spaces');
-    expect(result.content).toContain('1. Tabs');
-    expect(result.content).toContain('2. Spaces');
+    expect(result.content).toContain('**Tabs**');
+    expect(result.content).toContain('**Spaces**');
     expect(result.content).toContain('用制表符缩进');
     expect(result.isError).toBeUndefined();
   });
@@ -24,7 +24,7 @@ describe('ask_user', () => {
   it('formats question without options', async () => {
     const result = await askUserTool.execute({ question: '你的项目名称是什么？' });
     expect(result.content).toContain('项目名称');
-    expect(result.content).not.toContain('选项');
+    expect(result.content).toContain('[STOP]');
   });
 });
 

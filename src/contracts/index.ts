@@ -26,3 +26,4 @@ export * from './daemon-protocol.js';
 export * from './message-schemas.js';
 export * from './kernel-services.js';
 export * from './capabilities.js';
+export * from './dialogue.js';

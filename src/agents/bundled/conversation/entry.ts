@@ -9,6 +9,7 @@ import { createMemoryTools } from '../../../tools/memory-tools.js';
 import { createCapabilityTools } from '../../../tools/capability-tools.js';
 import { createSkillTools } from '../../../tools/skill-tools.js';
 import { createModelTools } from '../../../tools/model-tools.js';
+import { createDialogueTools } from '../../../tools/dialogue-tools.js';
 import { setCronToolsDb } from '../../../tools/cron-tools.js';
 import { setSessionToolsDb } from '../../../tools/session-tools.js';
 import { ContextManager } from '../../../llm/context-manager.js';
@@ -47,6 +48,28 @@ const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的�
 - **定时**：cron_create/delete/list（创建/管理定时任务）
 - **历史**：search_history（搜索过往对话）
 - **记忆**：memory_query/add/delete（跨会话记忆）
+- **协作**：dialogue（与代码智能体等进行多轮对话式协作）
+
+## dialogue 工具使用指南
+
+\`dialogue\` 工具让你与其他智能体进行多轮对话。你是协调者——发指令、收结果、决定下一步。
+
+**何时用 dialogue**：
+- 用户要求编码/重构/修复 bug 等需要多步推理的任务
+- 任务模糊，需要先了解现状再决策
+- 需要分步执行并根据中间结果调整方向
+
+**何时不用 dialogue**：
+- 简单的文件读写、搜索、运行命令 → 直接用对应工具
+- 纯对话/问答 → 直接回复
+- 用户没有请求任何操作
+
+**使用要点**：
+1. 首次调用不传 dialogueId，后续追问传入返回的 dialogueId
+2. 消息要包含足够上下文（目标智能体无状态，不记得之前说过什么）
+3. 收到 needsClarification 时，判断自己能否回答；不确定就 ask_user
+4. 不要无限追问——5 轮内解决大多数任务。如果超过 5 轮还没进展，总结现状回复用户
+5. 多个不相关子任务可以分别开新 dialogue
 
 **严格规则**：
 - 日常聊天、问候、闲聊、情感表达 → 直接文字回复，禁止调用工具
@@ -71,8 +94,13 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
     shellInjection: config.skills?.shellInjection ?? false,
   });
   const modelTools = createModelTools(ipc, currentSessionRef, config.requestTimeoutMs);
-  clearDynamicTools([...memoryTools, ...capabilityTools, ...skillTools, ...modelTools].map((tool) => tool.name));
-  for (const tool of [...memoryTools, ...capabilityTools, ...skillTools, ...modelTools]) {
+
+  /** 当前 session 的 AbortSignal — dialogue 工具通过闭包获取，用户中断时自动取消 */
+  let currentSignal: AbortSignal | undefined;
+  const dialogueTools = createDialogueTools(ipc, () => currentSignal);
+
+  clearDynamicTools([...memoryTools, ...capabilityTools, ...skillTools, ...modelTools, ...dialogueTools].map((tool) => tool.name));
+  for (const tool of [...memoryTools, ...capabilityTools, ...skillTools, ...modelTools, ...dialogueTools]) {
     registerTool(tool);
   }
 
@@ -80,6 +108,9 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   const pendingDrafts = new Map<string, { sessionId: string; draft: string; toolCalls: ToolCallRecord[]; createdAt: number }>();
   const tools = toModelTools(getToolRegistry());
   const contextManager = new ContextManager();
+
+  /** per-session 互斥：新消息到达时 abort 旧 signal，tool loop 和 dialogue 自然终止 */
+  const sessionLocks = new Map<string, { controller: AbortController; promise: Promise<void> }>();
 
   const DRAFT_TTL_MS = 5 * 60_000;
   setInterval(() => {
@@ -131,6 +162,17 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
     logger.debug({ sessionId, taskId, intent, msgLen: message.length, toolCount: tools.length, modelTier: modelTierOverride }, 'conversation:start');
     currentSessionRef.id = sessionId;
 
+    // 互斥：abort 旧 session 的 tool loop（signal 传播到 dialogue 工具自然取消等待）
+    const existing = sessionLocks.get(sessionId);
+    if (existing) {
+      existing.controller.abort();
+      await existing.promise.catch(() => {});
+    }
+    const controller = new AbortController();
+    currentSignal = controller.signal;
+
+    const run = (async () => {
+
     if (taskId) {
       ipc.send('task.acknowledge', 'core', { taskId } satisfies TaskAcknowledgePayload);
     }
@@ -169,6 +211,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         messages: [...priorHistory, { role: 'user', content: messageForModel }],
         systemPrompt: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         tools,
+        signal: controller.signal,
         config: { maxCalls: Math.min(config.toolLoop.maxCalls, 10), timeoutMs: config.toolLoop.timeoutMs },
         onChunk: streamingEnabled ? (text: string) => {
           const scrubbed = scrubber.scrub(text);
@@ -289,6 +332,23 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         response: errorMsg,
         reviewVerdict: 'approve',
       } satisfies FinalResponsePayload, trackingId);
+    }
+
+    })(); // end run IIFE
+    sessionLocks.set(sessionId, { controller, promise: run });
+
+    try {
+      await run;
+    } catch (err) {
+      logger.error({ err, sessionId }, 'conversation:unexpected rejection');
+    } finally {
+      const current = sessionLocks.get(sessionId);
+      if (current?.controller === controller) {
+        sessionLocks.delete(sessionId);
+      }
+      if (currentSignal === controller.signal) {
+        currentSignal = undefined;
+      }
     }
   });
 

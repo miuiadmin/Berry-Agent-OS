@@ -14,27 +14,24 @@ const askUserSchema = z.object({
 
 export const askUserTool: ToolDefinition = {
   name: 'ask_user',
-  description: '向用户提问以澄清需求或获取确认。可选提供 2-4 个选项供用户选择。仅在无法从代码或请求中自行决策时调用。',
+  description: '向用户提问以澄清需求或获取确认。调用后必须停止当前操作，将问题直接呈现给用户，等待用户在下一条消息中回复。',
   inputSchema: askUserSchema,
   dangerLevel: 'safe',
   async execute(input: unknown): Promise<ToolResult> {
     const { question, options } = askUserSchema.parse(input);
 
-    // Format the question for display
-    let formatted = `❓ ${question}`;
+    let formatted = question;
     if (options && options.length > 0) {
-      formatted += '\n\n选项:';
+      formatted += '\n\n';
       options.forEach((opt, i) => {
-        formatted += `\n  ${i + 1}. ${opt.label}`;
+        formatted += `${i + 1}. **${opt.label}**`;
         if (opt.description) formatted += ` — ${opt.description}`;
+        formatted += '\n';
       });
-      formatted += '\n\n(请回复选项编号或自定义答案)';
     }
 
-    // In the current architecture, this returns the formatted question.
-    // The conversation agent will display it and wait for user's next message.
-    // The actual user response comes back as the next user message in the conversation.
-    return { content: formatted };
+    // 返回指令：告知 LLM 必须停止并等待用户回复
+    return { content: `[STOP] 已向用户提问，请将以下问题作为你的回复直接发送给用户，不要继续执行其他操作：\n\n${formatted}` };
   },
 };
 

@@ -1,5 +1,20 @@
 const BASE_URL = "";
 
+/** API 层翻译辅助（非 hook 环境） */
+import zh from "@/locales/zh";
+import en from "@/locales/en";
+function t(key: string, params?: Record<string, string | number>): string {
+  const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
+  const translations = locale === "en" ? en : zh;
+  let value = translations[key] ?? key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      value = value.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+    }
+  }
+  return value;
+}
+
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -7,8 +22,8 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       headers: { "Content-Type": "application/json", ...options?.headers },
       ...options,
     });
-  } catch (err) {
-    throw new Error("Network error — check your connection");
+  } catch {
+    throw new Error(t("api.networkError"));
   }
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -198,7 +213,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   const res = await fetch(`${BASE_URL}/api/upload`, { method: "POST", body: formData });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as Record<string, string>).error || `Upload failed: ${res.status}`);
+    throw new Error((body as Record<string, string>).error || t("api.uploadFailed", { status: String(res.status) }));
   }
   return res.json();
 }

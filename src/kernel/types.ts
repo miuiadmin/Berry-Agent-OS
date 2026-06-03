@@ -62,4 +62,9 @@ export type IpcMessageType =
   | 'bus.invoke.result'
   | 'bus.capabilities.request'
   | 'bus.capabilities.response'
-  | 'config.llm_update';
+  | 'config.llm_update'
+  // 11.0 智能体间对话协议
+  | 'dialogue.send'
+  | 'dialogue.reply'
+  | 'dialogue.end'
+  | 'dialogue.observe';

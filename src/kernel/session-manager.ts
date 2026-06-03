@@ -114,6 +114,17 @@ export class SessionManager {
   }
 
   /**
+   * 注册临时 taskId → socket 映射。
+   * 用于 dialogue 模式：Code Agent 执行时推送的 text_delta 需要通过 ephemeral taskId 找到用户 socket。
+   * @param taskId 临时任务 ID（不持久化到 agent_tasks 表）
+   * @param socket 用户的 WebSocket 连接
+   * @param ttlMs 映射存活时间（默认 90s，覆盖一轮 dialogue reply 超时）
+   */
+  registerTaskSocket(taskId: string, socket: Socket, ttlMs = 90_000): void {
+    this.taskSocketMap.set(taskId, { socket, expiresAt: Date.now() + ttlMs });
+  }
+
+  /**
    * Delayed cleanup: keep socket available for 2s after final.response
    * to catch any late-arriving text_delta messages.
    */
@@ -142,11 +153,12 @@ export class SessionManager {
    */
   rebindSocket(sessionId: string, newSocket: Socket): { accumulated: string; taskId: string } | null {
     for (const pending of this.pendingRequests.values()) {
-      if (pending.sessionId === sessionId && pending.streaming && pending.taskId) {
+      if (pending.sessionId === sessionId && pending.streaming) {
         pending.socket = newSocket;
-        // 同时更新 taskSocketMap 中的引用
-        this.taskSocketMap.set(pending.taskId, { socket: newSocket, expiresAt: Date.now() + 300_000 });
-        return { accumulated: pending.draftResponse ?? '', taskId: pending.taskId };
+        if (pending.taskId) {
+          this.taskSocketMap.set(pending.taskId, { socket: newSocket, expiresAt: Date.now() + 300_000 });
+        }
+        return { accumulated: pending.draftResponse ?? '', taskId: pending.taskId ?? '' };
       }
     }
     return null;

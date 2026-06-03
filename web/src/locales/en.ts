@@ -43,6 +43,7 @@ const en: Record<string, string> = {
   "status.cancelled": "Cancelled",
   "status.pending": "Pending",
   "status.active": "Active",
+  "status.disabled": "Disabled",
   "status.healthy": "Healthy",
   "status.down": "Down",
   "status.connected": "Connected",
@@ -337,6 +338,7 @@ const en: Record<string, string> = {
   "conversations.messagesCount": "{count} messages",
   "conversations.deleteConfirmTitle": "Delete conversation",
   "conversations.deleteConfirmDesc": "This action cannot be undone. The entire conversation history will be permanently deleted.",
+  "conversations.deleteConversation": "Delete conversation",
 
   // ===== Settings =====
   "settings.title": "Settings",
@@ -525,6 +527,10 @@ const en: Record<string, string> = {
   // ===== Image lightbox =====
   "lightbox.failedToLoad": "Failed to load image",
   "lightbox.imageFailedToLoad": "Image failed to load",
+
+  // ===== API errors =====
+  "api.networkError": "Network error — check your connection",
+  "api.uploadFailed": "Upload failed (status {status})",
 };
 
 export default en;

@@ -170,7 +170,11 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       const dangerLevel: DangerLevel = toolDef?.dangerLevel ?? 'dangerous';
       const inputStr = JSON.stringify(block.input);
 
-      const loopCheck = detector.check(block.name, inputStr, false);
+      // dialogue 工具不计入 maxCalls（多轮对话可能需要大量交互，不应提前撞顶）
+      const isDialogueTool = block.name === 'dialogue' || block.name === 'send_dialogue';
+      const loopCheck = isDialogueTool
+        ? { loop: false }
+        : detector.check(block.name, inputStr, false);
       if (loopCheck.loop) {
         logger.debug({ tool: block.name, reason: loopCheck.reason }, 'tool:loop-detected');
         toolResults.push({

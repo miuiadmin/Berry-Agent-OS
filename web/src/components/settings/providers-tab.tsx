@@ -198,7 +198,7 @@ export function ProvidersTab() {
     },
     onSuccess: (data) => {
       if (data.ok) {
-        toast.success(data.message ?? t("providers.connectionSuccessful"));
+        toast.success(t("providers.connectionSuccessful"));
       } else {
         toast.error(data.error ?? t("providers.connectionFailed"));
       }

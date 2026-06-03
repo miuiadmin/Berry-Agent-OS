@@ -43,6 +43,7 @@ const zh: Record<string, string> = {
   "status.cancelled": "已取消",
   "status.pending": "等待中",
   "status.active": "活跃",
+  "status.disabled": "已禁用",
   "status.healthy": "正常",
   "status.down": "离线",
   "status.connected": "已连接",
@@ -337,6 +338,7 @@ const zh: Record<string, string> = {
   "conversations.messagesCount": "{count} 条消息",
   "conversations.deleteConfirmTitle": "删除会话",
   "conversations.deleteConfirmDesc": "此操作不可撤销。整个会话历史将被永久删除。",
+  "conversations.deleteConversation": "删除会话",
 
   // ===== 设置页 =====
   "settings.title": "系统设置",
@@ -525,6 +527,10 @@ const zh: Record<string, string> = {
   // ===== 图片灯箱 =====
   "lightbox.failedToLoad": "图片加载失败",
   "lightbox.imageFailedToLoad": "图片加载失败",
+
+  // ===== API 层错误 =====
+  "api.networkError": "网络错误 — 请检查网络连接",
+  "api.uploadFailed": "上传失败（状态码 {status}）",
 };
 
 export default zh;

@@ -403,4 +403,71 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       }, trackingId);
     }
   });
+
+  // ─── 11.0: dialogue.observe — 异步监听智能体间对话 ───
+  const dialogueBuffers = new Map<string, { messages: Array<{ from: string; content: string; round: number }>; lastActivity: number }>();
+
+  ipc.onMessage('dialogue.observe', async (msg: IpcMessage) => {
+    const payload = msg.payload as import('../../../contracts/dialogue.js').DialogueObservePayload;
+    const { message, currentRound, sessionId } = payload;
+    const dialogueId = message.dialogueId;
+
+    // 累积对话消息（保留最近 10 条）
+    if (!dialogueBuffers.has(dialogueId)) {
+      dialogueBuffers.set(dialogueId, { messages: [], lastActivity: Date.now() });
+    }
+    const buffer = dialogueBuffers.get(dialogueId)!;
+    buffer.messages.push({ from: message.from, content: message.content.slice(0, 500), round: currentRound });
+    if (buffer.messages.length > 10) buffer.messages.shift();
+    buffer.lastActivity = Date.now();
+
+    // 规则式干预判断（不调 LLM，保持低成本）
+    let intervention: { instruction: string; reason: string } | null = null;
+
+    // 规则 1：对话轮次过多且无进展
+    if (currentRound >= 8) {
+      const recentContents = buffer.messages.slice(-4).map(m => m.content);
+      const hasRepetition = recentContents.some((c, i) =>
+        i > 0 && recentContents[i - 1].slice(0, 100) === c.slice(0, 100),
+      );
+      if (hasRepetition) {
+        intervention = {
+          instruction: '对话陷入循环。请总结已有信息，做出决策或直接回复用户。不要继续追问。',
+          reason: 'dialogue_loop_detected',
+        };
+      }
+    }
+
+    // 规则 2：连续 3 次 needsClarification
+    if (!intervention && buffer.messages.length >= 6) {
+      const lastThreeReplies = buffer.messages.filter(m => m.from !== 'conversation').slice(-3);
+      // 无法直接看到 metadata，但可以检查内容中是否有"不确定"/"需要确认"等模式
+      const uncertainCount = lastThreeReplies.filter(m =>
+        m.content.includes('需要确认') || m.content.includes('不确定') || m.content.includes('请提供更多'),
+      ).length;
+      if (uncertainCount >= 3) {
+        intervention = {
+          instruction: '目标智能体连续表示不确定。考虑直接询问用户获取必要信息，或基于现有信息做出最佳判断。',
+          reason: 'repeated_uncertainty',
+        };
+      }
+    }
+
+    // 发送纠偏（直接通过 IPC 发 turn.correction 给 Conversation，action='adjust' + instruction）
+    if (intervention) {
+      logger.info({ dialogueId, reason: intervention.reason, round: currentRound }, 'brain:dialogue intervention');
+      ipc.send('turn.correction', 'core', {
+        delegationId: dialogueId, // 用 dialogueId 作为关联标识
+        action: 'adjust' as const,
+        instruction: intervention.instruction,
+      } satisfies TurnCorrectionPayload, msg.correlationId ?? msg.id);
+    }
+
+    // 定期清理过期 buffer（5 分钟无活动）
+    for (const [id, buf] of dialogueBuffers) {
+      if (Date.now() - buf.lastActivity > 5 * 60_000) {
+        dialogueBuffers.delete(id);
+      }
+    }
+  });
 });

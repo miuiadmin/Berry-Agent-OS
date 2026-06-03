@@ -35,11 +35,13 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocale] = useState<Locale>(() => {
     if (typeof window === "undefined") return "zh";
     const stored = localStorage.getItem("locale") as Locale | null;
-    if (stored === "zh" || stored === "en") return stored;
-    return "zh"; // 默认中文
+    const resolved: Locale = (stored === "zh" || stored === "en") ? stored : "zh";
+    // 初始化时同步设置 html lang 属性，不等到 useEffect
+    document.documentElement.setAttribute("lang", resolved === "zh" ? "zh-CN" : "en");
+    return resolved;
   });
 
-  /* 同步 localStorage 和 document.documentElement.lang */
+  /* locale 变化时同步 localStorage 和 document.documentElement.lang */
   useEffect(() => {
     localStorage.setItem("locale", locale);
     document.documentElement.setAttribute("lang", locale === "zh" ? "zh-CN" : "en");

@@ -886,6 +886,24 @@ export const CORE_INDEX_SQL = `
     updated_at INTEGER DEFAULT (unixepoch() * 1000)
   );
   CREATE INDEX IF NOT EXISTS idx_conversation_meta_pinned ON conversation_meta(pinned, updated_at DESC);
+
+  -- 11.0 智能体间对话消息镜像（DialogueRouter 持久化层）
+  CREATE TABLE IF NOT EXISTS dialogue_messages (
+    id TEXT PRIMARY KEY,
+    dialogue_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    sequence_number INTEGER NOT NULL,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT NOT NULL,
+    content TEXT NOT NULL,
+    context_json TEXT,
+    metadata_json TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE(dialogue_id, sequence_number)
+  );
+  CREATE INDEX IF NOT EXISTS idx_dialogue_session ON dialogue_messages(session_id);
+  CREATE INDEX IF NOT EXISTS idx_dialogue_correlation ON dialogue_messages(correlation_id);
 `;
 
 export const KNOWLEDGE_FTS_SQL = `
