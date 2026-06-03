@@ -436,7 +436,7 @@ const zh: Record<string, string> = {
   "providers.noChannels": "尚未配置提供商渠道。",
   "providers.addFirstChannel": "添加第一个渠道",
   "providers.tierMapping": "层级映射",
-  "providers.tierMappingDesc": "将快速/默认/高层级映射到渠道和模型",
+  "providers.tierMappingDesc": "将 Fast/Default/High 层级映射到渠道和模型",
   "providers.saveTiers": "保存层级",
   "providers.selectModel": "选择模型…",
   "providers.deleteChannel": "删除渠道",

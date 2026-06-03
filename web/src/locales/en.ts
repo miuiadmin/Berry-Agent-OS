@@ -225,7 +225,7 @@ const en: Record<string, string> = {
 
   // ===== Agents =====
   "agents.title": "Agents",
-  "agents.subtitle": "Manage your intelligent agents",
+  "agents.subtitle": "Manage your agents",
   "agents.statusUpdated": "Agent status updated",
   "agents.failedToUpdate": "Failed to update agent",
   "agents.failedToLoad": "Failed to load agents",
@@ -330,8 +330,8 @@ const en: Record<string, string> = {
 
   // ===== Conversations =====
   "conversations.title": "Conversations",
-  "conversations.subtitle": "Session history",
-  "conversations.searchPlaceholder": "Search sessions...",
+  "conversations.subtitle": "Conversation history",
+  "conversations.searchPlaceholder": "Search conversations…",
   "conversations.mostRecent": "Most Recent",
   "conversations.mostMessages": "Most Messages",
   "conversations.exportAll": "Export All",
@@ -389,7 +389,7 @@ const en: Record<string, string> = {
   "settings.maxResults": "Max Results",
   // Skills
   "settings.skillsSettings": "Skills Settings",
-  "settings.skillsSettingsDesc": "Skill prompt injection and limits",
+  "settings.skillsSettingsDesc": "Skill prompt management and limits",
   "settings.promptMode": "Prompt Mode",
   "settings.maxPromptChars": "Max Prompt Chars",
   "settings.maxDescriptionChars": "Max Description Chars",
@@ -436,7 +436,7 @@ const en: Record<string, string> = {
   "providers.noChannels": "No provider channels configured yet.",
   "providers.addFirstChannel": "Add your first channel",
   "providers.tierMapping": "Tier Mapping",
-  "providers.tierMappingDesc": "Map fast / default / high tiers to channel + model",
+  "providers.tierMappingDesc": "Map Fast / Default / High tiers to channel + model",
   "providers.saveTiers": "Save Tiers",
   "providers.selectModel": "Select model…",
   "providers.deleteChannel": "Delete channel",
@@ -465,7 +465,7 @@ const en: Record<string, string> = {
   "providers.noModelsForChannel": "No models configured for this channel",
   "providers.model": "Model",
   "providers.context": "Context",
-  "providers.maxOut": "Max Out",
+  "providers.maxOut": "Max Output",
   "providers.priceInOut": "Price (in/out)",
 
   // ===== Usage =====
