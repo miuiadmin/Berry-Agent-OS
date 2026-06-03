@@ -45,7 +45,7 @@ export function UserMenu() {
         size="icon"
         onClick={() => setOpen(!open)}
         className="size-11 md:size-9 active:scale-90 transition-transform"
-        aria-label="User menu"
+        aria-label={t("userMenu.openMenu")}
         aria-expanded={open}
       >
         <CircleUser className="size-5 md:size-4" />
@@ -59,7 +59,7 @@ export function UserMenu() {
           {/* Dropdown anchored to avatar */}
           <div
             role="menu"
-            aria-label="User menu"
+            aria-label={t("userMenu.openMenu")}
             className={cn(
               "absolute right-0 top-full mt-1 w-52 z-50 rounded-lg border border-border bg-background shadow-lg",
               isExiting ? "animate-dropdown-out" : "animate-fade-in"

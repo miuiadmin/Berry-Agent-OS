@@ -1,6 +1,7 @@
 
 import { useMemo, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 interface DataPoint {
   label: string;
@@ -24,6 +25,7 @@ export function AreaChart({
   height = 160,
   className,
 }: AreaChartProps) {
+  const t = useT();
   const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string; value: number; secondary?: number } | null>(null);
 
   const allValues = useMemo(() => {
@@ -113,7 +115,7 @@ export function AreaChart({
   if (data.length < 2) {
     return (
       <div className={cn("flex items-center justify-center text-sm text-muted-foreground", className)} style={{ height }}>
-        Not enough data
+        {t("common.noData")}
       </div>
     );
   }

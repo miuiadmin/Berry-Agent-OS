@@ -503,6 +503,9 @@ const en: Record<string, string> = {
   "taskCard.cancelTask": "Cancel task",
   "taskCard.session": "Session",
 
+  // ===== Code Block =====
+  "codeBlock.lineCount": "{count} lines",
+
   // ===== Chat WS hook =====
   "chat.responseTimeout": "Response timed out — backend may be unresponsive. Check backend logs.",
   "chat.taskFailed": "Task failed",

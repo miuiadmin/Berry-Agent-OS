@@ -15,12 +15,6 @@ import { useT, useDateFormat } from "@/lib/i18n";
 
 type Filter = "unread" | "all" | "archived";
 
-const FILTER_CONFIG: Record<Filter, { label: string; archived?: boolean }> = {
-  unread: { label: "Unread" },
-  all: { label: "All" },
-  archived: { label: "Archived", archived: true },
-};
-
 export default function NotificationsPage() {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();

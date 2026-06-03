@@ -42,6 +42,7 @@ interface CodeBlockProps {
 }
 
 export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
+  const t = useT();
   const code = String(children).replace(/\n$/, "");
   const { resolvedTheme } = useTheme();
   const [highlightedHtml, setHighlightedHtml] = useState<string>("");
@@ -83,7 +84,7 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
         <div className="flex items-center gap-2">
           {lineCount > 10 && (
             <span className="text-[11px] md:text-[10px] text-muted-foreground/60">
-              {lineCount} lines
+              {t("codeBlock.lineCount", { count: lineCount })}
             </span>
           )}
           <CopyBtn text={code} />

@@ -1,6 +1,7 @@
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 interface BarItem {
   label: string;
@@ -15,12 +16,13 @@ interface BarChartProps {
 }
 
 export function BarChart({ data, className, formatValue = (v) => String(v) }: BarChartProps) {
+  const t = useT();
   const maxVal = useMemo(() => Math.max(...data.map((d) => d.value), 1), [data]);
 
   if (data.length === 0) {
     return (
       <div className={cn("flex items-center justify-center text-sm text-muted-foreground py-4", className)}>
-        No data
+        {t("common.noData")}
       </div>
     );
   }

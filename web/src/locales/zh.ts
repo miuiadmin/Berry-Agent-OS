@@ -503,6 +503,9 @@ const zh: Record<string, string> = {
   "taskCard.cancelTask": "取消任务",
   "taskCard.session": "会话",
 
+  // ===== 代码块 =====
+  "codeBlock.lineCount": "{count} 行",
+
   // ===== 对话 WS hook =====
   "chat.responseTimeout": "响应超时 — 后端可能无响应，请检查后端日志",
   "chat.taskFailed": "任务失败",
