@@ -63,7 +63,6 @@ const en: Record<string, string> = {
   "sidebar.conversations": "Conversations",
   "sidebar.usage": "Usage",
   "sidebar.logs": "Logs",
-  "sidebar.settings": "Settings",
 
   // ===== User Menu =====
   "userMenu.darkMode": "Dark mode",
@@ -292,10 +291,7 @@ const en: Record<string, string> = {
   "scheduler.noJobsDesc": "Create a cron job to run tasks on a schedule.",
   "scheduler.last": "Last: {time}",
   "scheduler.next": "Next: {time}",
-  "scheduler.pause": "Pause",
-  "scheduler.resume": "Resume",
   "scheduler.triggerNow": "Trigger now",
-  "scheduler.deleteJob": "Delete job",
   "scheduler.deleteJobConfirm": 'Delete job "{name}"?',
   "scheduler.executionHistory": "Execution history",
   "scheduler.noExecutions": "No executions yet.",

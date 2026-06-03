@@ -63,7 +63,6 @@ const zh: Record<string, string> = {
   "sidebar.conversations": "会话",
   "sidebar.usage": "用量",
   "sidebar.logs": "日志",
-  "sidebar.settings": "系统设置",
 
   // ===== 用户菜单 =====
   "userMenu.darkMode": "深色模式",
@@ -292,10 +291,7 @@ const zh: Record<string, string> = {
   "scheduler.noJobsDesc": "创建一个 Cron 任务来定时执行。",
   "scheduler.last": "上次：{time}",
   "scheduler.next": "下次：{time}",
-  "scheduler.pause": "暂停",
-  "scheduler.resume": "恢复",
   "scheduler.triggerNow": "立即触发",
-  "scheduler.deleteJob": "删除任务",
   "scheduler.deleteJobConfirm": "确定要删除任务「{name}」吗？",
   "scheduler.executionHistory": "执行历史",
   "scheduler.noExecutions": "暂无执行记录",
