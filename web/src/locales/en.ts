@@ -390,13 +390,13 @@ const en: Record<string, string> = {
   // Skills
   "settings.skillsSettings": "Skills Settings",
   "settings.skillsSettingsDesc": "Skill prompt injection and limits",
-  "settings.promptMode": "Prompt Mode (summary/full/hybrid)",
+  "settings.promptMode": "Prompt Mode",
   "settings.maxPromptChars": "Max Prompt Chars",
   "settings.maxDescriptionChars": "Max Description Chars",
   "settings.shellInjection": "Shell Injection",
   // Channels
   "settings.channelSettings": "Channel Settings",
-  "settings.channelSettingsDesc": "Message channels for receiving and sending messages",
+  "settings.channelSettingsDesc": "Message channels",
   "settings.telegram": "Telegram",
   "settings.telegramInstructions": "To enable Telegram integration, configure the following in your config.yaml:",
   "settings.configured": "Configured",
@@ -405,7 +405,7 @@ const en: Record<string, string> = {
   // Observability
   "settings.observability": "Observability",
   "settings.observabilityDesc": "Logging and output capture",
-  "settings.logLevel": "Log Level (error/warn/info/debug)",
+  "settings.logLevel": "Log Level",
   "settings.captureOutput": "Capture Output",
   // Web
   "settings.webServer": "Web Server",
