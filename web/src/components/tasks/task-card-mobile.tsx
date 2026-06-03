@@ -37,7 +37,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
               }
               className="text-[11px]"
             >
-              {task.status}
+              {t(`status.${task.status}`) ?? task.status}
             </Badge>
             <span className="text-xs font-medium truncate">{task.taskType}</span>
           </div>

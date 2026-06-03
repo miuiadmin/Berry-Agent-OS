@@ -666,7 +666,7 @@ function ChannelFormDialog({
               type="password"
               value={formApiKey}
               onChange={(e) => setFormApiKey(e.target.value)}
-              placeholder={isEdit ? "••••••••" : "sk-..."}
+              placeholder={isEdit ? t("providers.apiKeyEditPlaceholder") : t("providers.apiKeyPlaceholder")}
               className="h-10 md:h-8"
             />
           </div>

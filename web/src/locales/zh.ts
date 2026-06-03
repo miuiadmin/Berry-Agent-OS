@@ -50,6 +50,13 @@ const zh: Record<string, string> = {
   "status.connecting": "连接中…",
   "status.disconnected": "已断开",
 
+  "status.dispatched": "已派发",
+  "status.timeout": "已超时",
+  "status.resumable": "可恢复",
+  "status.enabled": "已启用",
+  "status.crashed": "已崩溃",
+  "status.paused": "已暂停",
+
   // ===== 品牌 =====
   "brand.name": "Berry",
   "brand.dashboard": "Berry 仪表盘",
@@ -279,6 +286,11 @@ const zh: Record<string, string> = {
   "notifications.markRead": "标为已读",
   "notifications.archive": "归档",
   "notifications.unreadCount": "未读（{count}）",
+  "notifications.type.task": "任务",
+  "notifications.type.agent": "智能体",
+  "notifications.type.system": "系统",
+  "notifications.type.security": "安全",
+  "notifications.type.info": "信息",
 
   // ===== 调度器页 =====
   "scheduler.title": "调度器",
@@ -314,6 +326,7 @@ const zh: Record<string, string> = {
   "scheduler.maxConcurrency": "最大并发",
   "scheduler.noWebhookDeliveries": "暂无 Webhook 投递记录",
   "scheduler.webhookHint": "Webhook 审计记录将显示在这里。",
+  "scheduler.webhooks": "Webhook",
 
   // ===== 会话页 =====
   "conversations.title": "会话",

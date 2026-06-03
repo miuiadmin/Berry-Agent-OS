@@ -78,7 +78,7 @@ export default function TasksPage() {
         >
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
-              {s === "all" ? t("tasks.allStatuses") : s.charAt(0).toUpperCase() + s.slice(1)}
+              {s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s}
             </option>
           ))}
         </select>
@@ -235,7 +235,7 @@ function TaskRow({
                 : "secondary"
             }
           >
-            {task.status}
+            {t(`status.${task.status}`) ?? task.status}
           </Badge>
         </td>
         <td className="px-4 py-2.5 text-xs text-muted-foreground">

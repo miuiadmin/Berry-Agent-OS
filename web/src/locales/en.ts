@@ -50,6 +50,13 @@ const en: Record<string, string> = {
   "status.connecting": "Connecting…",
   "status.disconnected": "Disconnected",
 
+  "status.dispatched": "Dispatched",
+  "status.timeout": "Timed out",
+  "status.resumable": "Resumable",
+  "status.enabled": "Enabled",
+  "status.crashed": "Crashed",
+  "status.paused": "Paused",
+
   // ===== Brand =====
   "brand.name": "Berry",
   "brand.dashboard": "Berry Dashboard",
@@ -279,6 +286,11 @@ const en: Record<string, string> = {
   "notifications.markRead": "Mark read",
   "notifications.archive": "Archive",
   "notifications.unreadCount": "Unread ({count})",
+  "notifications.type.task": "Task",
+  "notifications.type.agent": "Agent",
+  "notifications.type.system": "System",
+  "notifications.type.security": "Security",
+  "notifications.type.info": "Info",
 
   // ===== Scheduler =====
   "scheduler.title": "Scheduler",
@@ -314,6 +326,7 @@ const en: Record<string, string> = {
   "scheduler.maxConcurrency": "Max Concurrency",
   "scheduler.noWebhookDeliveries": "No webhook deliveries",
   "scheduler.webhookHint": "Webhook audit entries will appear here.",
+  "scheduler.webhooks": "Webhooks",
 
   // ===== Conversations =====
   "conversations.title": "Conversations",

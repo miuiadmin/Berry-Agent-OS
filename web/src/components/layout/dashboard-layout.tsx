@@ -68,7 +68,7 @@ export function DashboardLayout() {
               <X className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-0 opacity-100 scale-100" : "-rotate-90 opacity-0 scale-75")} />
             </div>
           </Button>
-          <span className="text-sm font-semibold">Berry</span>
+          <span className="text-sm font-semibold">{t("brand.name")}</span>
           <div className="ml-auto flex items-center gap-2">
             <ConnectionStatus />
             <DebugCaptureButton />

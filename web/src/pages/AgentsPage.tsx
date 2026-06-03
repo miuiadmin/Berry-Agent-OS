@@ -250,7 +250,7 @@ function AgentDetailView({
           <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
             <div>
               <dt className="font-medium text-muted-foreground">{t("common.status")}</dt>
-              <dd className="mt-0.5">{agent.status}</dd>
+              <dd className="mt-0.5">{t(`status.${agent.status}`) ?? agent.status}</dd>
             </div>
             <div>
               <dt className="font-medium text-muted-foreground">{t("agents.kind")}</dt>
@@ -288,7 +288,7 @@ function AgentDetailView({
                           : "secondary"
                       }
                     >
-                      {task.status}
+                      {t(`status.${task.status}`) ?? task.status}
                     </Badge>
                     <span className="text-[11px] text-muted-foreground">
                       {formatDate(new Date(task.createdAt))}
@@ -324,7 +324,7 @@ function AgentDetailView({
                         : "secondary"
                     }
                   >
-                    {ev.event}
+                    {t(`status.${ev.event}`) ?? ev.event}
                   </Badge>
                 </div>
               ))}

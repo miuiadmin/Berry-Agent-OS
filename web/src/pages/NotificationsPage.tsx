@@ -159,7 +159,7 @@ export default function NotificationsPage() {
                         {item.title}
                       </span>
                       <Badge variant="outline" className="shrink-0 text-[11px]">
-                        {item.type}
+                        {t(`notifications.type.${item.type}`) ?? item.type}
                       </Badge>
                     </div>
                     {item.body && (

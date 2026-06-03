@@ -42,7 +42,7 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
     <aside className="flex h-full w-72 md:w-56 flex-col border-r border-sidebar-border bg-sidebar">
       <div className="flex h-12 items-center gap-2 px-4 pt-[env(safe-area-inset-top,0px)] md:pt-0">
         <StrawberryLogo />
-        <span className="text-sm font-semibold text-sidebar-foreground">Berry</span>
+        <span className="text-sm font-semibold text-sidebar-foreground">{t("brand.name")}</span>
       </div>
       <Separator />
       <nav className="flex-1 space-y-1 p-2">

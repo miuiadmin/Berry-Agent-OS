@@ -30,7 +30,9 @@ import { useT, useDateFormat } from "@/lib/i18n";
 
 // ─── Status badge helper ───────────────────────────────────────────────────
 
+/** JobStatusBadge — 翻译 job 状态显示 */
 function JobStatusBadge({ status }: { status: string }) {
+  const t = useT();
   const variant =
     status === "paused"
       ? "secondary"
@@ -38,8 +40,8 @@ function JobStatusBadge({ status }: { status: string }) {
         ? "default"
         : "outline";
   return (
-    <Badge variant={variant} className="text-[11px] capitalize">
-      {status}
+    <Badge variant={variant} className="text-[11px]">
+      {t(`status.${status}`) ?? status}
     </Badge>
   );
 }
@@ -81,7 +83,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
                     variant={ex.status === "completed" ? "outline" : "destructive"}
                     className="text-[11px]"
                   >
-                    {ex.status}
+                    {t(`status.${ex.status}`) ?? ex.status}
                   </Badge>
                   <span className="text-muted-foreground">
                     {fmtDT(new Date(ex.startedAt))}
@@ -292,7 +294,7 @@ export default function SchedulerPage() {
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : tabKey}
+            {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : t("scheduler.webhooks")}
           </button>
         ))}
       </div>

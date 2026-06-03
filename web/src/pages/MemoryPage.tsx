@@ -240,7 +240,7 @@ export default function MemoryPage() {
                       <div className="flex items-center gap-2">
                         <span className="truncate text-sm font-medium">{entry.key}</span>
                         <Badge variant="outline" className="shrink-0 text-[11px]">
-                          {entry.layer}
+                          {t(`memory.${entry.layer}`) ?? entry.layer}
                         </Badge>
                         {entry.verified && (
                           <Badge variant="secondary" className="shrink-0 text-[11px]">
