@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, stat, readdir } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import { resolve } from 'node:path';
 import { z } from 'zod';
@@ -33,13 +33,26 @@ const SummarizeChangesSchema = z.object({
 
 const inspectCodeTool: ToolDefinition = {
   name: 'inspect_code',
-  description: '读取文件内容，支持行范围和正则搜索',
+  description: '读取文件内容（支持行范围、正则搜索）或列出目录内容',
   inputSchema: InspectCodeSchema,
   dangerLevel: 'safe',
   async execute(input: unknown): Promise<ToolResult> {
     const { path, startLine, endLine, grep } = InspectCodeSchema.parse(input);
     try {
       const filePath = resolve(path);
+
+      /** 先判断路径类型：目录则列出内容，文件则读取 */
+      const fileStat = await stat(filePath);
+      if (fileStat.isDirectory()) {
+        const entries = await readdir(filePath, { withFileTypes: true });
+        const listing = entries
+          .slice(0, 100)
+          .map(e => `${e.isDirectory() ? '📁' : '📄'} ${e.name}`)
+          .join('\n');
+        const suffix = entries.length > 100 ? `\n...（共 ${entries.length} 项，仅显示前 100）` : '';
+        return { content: `[目录] ${filePath}（${entries.length} 项）\n${listing}${suffix}\n提示: 请提供具体文件路径以读取内容。` };
+      }
+
       const content = await readFile(filePath, 'utf-8');
       markFileRead(filePath);
       const lines = content.split('\n');

@@ -4,6 +4,9 @@ import { registerCodeTools } from './code-tools.js';
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
+  /** stat 默认返回文件类型（isFile: true），测试目录场景时 override */
+  stat: vi.fn().mockResolvedValue({ isDirectory: () => false, isFile: () => true }),
+  readdir: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('node:child_process', () => ({
@@ -15,7 +18,7 @@ vi.mock('./read-tracker.js', () => ({
   hasFileBeenRead: vi.fn().mockReturnValue(true),
 }));
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, stat, readdir } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import { hasFileBeenRead } from './read-tracker.js';
 
@@ -63,6 +66,20 @@ describe('inspect_code', () => {
     (readFile as any).mockResolvedValue('hello world');
     const result = await inspectCode.execute({ path: 'f.ts', grep: 'notfound' });
     expect(result.content).toContain('未找到匹配');
+  });
+
+  it('lists directory contents when path is a directory', async () => {
+    (stat as any).mockResolvedValue({ isDirectory: () => true, isFile: () => false });
+    (readdir as any).mockResolvedValue([
+      { name: 'src', isDirectory: () => true, isFile: () => false },
+      { name: 'index.ts', isDirectory: () => false, isFile: () => true },
+    ]);
+    const result = await inspectCode.execute({ path: '/project' });
+    expect(result.content).toContain('[目录]');
+    expect(result.content).toContain('📁 src');
+    expect(result.content).toContain('📄 index.ts');
+    expect(result.content).toContain('请提供具体文件路径');
+    expect(result.isError).toBeFalsy();
   });
 });
 

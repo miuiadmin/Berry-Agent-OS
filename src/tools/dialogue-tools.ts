@@ -23,10 +23,12 @@ const logger = getLogger('dialogue-tools');
  *
  * @param ipc Conversation Agent 的 IPC 通道
  * @param getSignal 获取当前 session 的 AbortSignal（由 conversation entry 通过闭包提供）
+ * @param getCorrelationId 获取当前请求的 correlationId（让 Kernel 能通过它找到 pending socket）
  */
 export function createDialogueTools(
   ipc: IpcChildChannel,
   getSignal: () => AbortSignal | undefined,
+  getCorrelationId: () => string | undefined,
 ): ToolDefinition[] {
   /** 等待 dialogue.reply 的 pending（dialogueId → resolve/reject），闭包作用域内，非全局 */
   const pendingReplies = new Map<string, {
@@ -46,8 +48,9 @@ export function createDialogueTools(
 
   const dialogueTool: ToolDefinition = {
     name: 'dialogue',
-    description: '与其他智能体进行对话式协作。发送一条消息给目标智能体并等待回复。用于需要多轮交互的复杂任务（如编码、分析）。简单的一次性任务不需要此工具。',
+    description: '与其他智能体进行对话式协作。发送一条消息给目标智能体并等待回复。用于需要多轮交互的复杂任务（如编码、分析）。可在同一轮调用多次以并行询问不同目标 agent。',
     dangerLevel: 'safe',
+    parallelizable: true,
     inputSchema: z.object({
       target: z.string().describe('目标智能体名称。可用：code（编码）、learning（记忆学习）'),
       message: z.string().describe('要发送的消息内容。应包含足够的上下文让目标智能体理解任务。'),
@@ -69,7 +72,8 @@ export function createDialogueTools(
           context,
         };
 
-        ipc.send('dialogue.send', 'core', msg, dialogueId);
+        // 用请求的 correlationId 作为 IPC correlationId，使 Kernel 能找到对应的 pending socket
+        ipc.send('dialogue.send', 'core', msg, getCorrelationId() ?? dialogueId);
 
         const reply = await waitForReply(dialogueId, signal, pendingReplies);
 
@@ -91,7 +95,12 @@ export function createDialogueTools(
           return { content: `[dialogue:${target}] 对话被中断`, isError: true };
         }
         logger.error({ err, dialogueId, target }, 'dialogue:tool error');
-        return { content: `[dialogue:${target}] 错误: ${error.message}`, isError: true };
+        // 超时错误给出可操作建议，让 LLM 能自主决策而不是卡死
+        const isTimeout = error.message.includes('timeout') || error.message.includes('closed');
+        const hint = isTimeout
+          ? `目标智能体 ${target} 响应超时。建议：直接用现有信息回复用户，或尝试用其他工具（如 write_file）自行完成任务。`
+          : error.message;
+        return { content: `[dialogue:${target}] 错误: ${hint}`, isError: true };
       }
     },
   };
