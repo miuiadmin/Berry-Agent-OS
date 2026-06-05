@@ -13,7 +13,10 @@ import { getLogger } from '../utils/logger.js';
 const logger = getLogger('session-manager');
 
 export interface PendingRequest {
+  /** 对话 sessionId（来自消息体，标识当前对话） */
   sessionId: string;
+  /** WS 客户端标识（来自 WS URL 的 clientId），用于重连时按客户端查找 pending request */
+  clientId?: string;
   userMessage: string;
   taskId?: string;
   /** 委托任务 ID（delegation 创建的子 task）。flusher 注册用此 key。 */
@@ -25,6 +28,8 @@ export interface PendingRequest {
   streaming?: boolean;
   socket?: Socket;
   resolve: (response: string) => void;
+  /** 12.0: Brain 路由时产出的用户意图锚点（漂移检测基准） */
+  intentAnchor?: import('../contracts/intent.js').IntentAnchor;
 }
 
 export interface PendingAskState {
@@ -44,6 +49,8 @@ export class SessionManager {
   private sessionLastActivity = new Map<string, number>();
   /** taskId → socket mapping for late-arriving text_delta after pending is deleted */
   private taskSocketMap = new Map<string, { socket: Socket; expiresAt: number }>();
+  /** clientId → msgId 集合的索引，用于 rebindSocket 按 WS 客户端查找所有 pending request */
+  private clientPendingIndex = new Map<string, Set<string>>();
   private gcTimer: ReturnType<typeof setInterval> | null = null;
 
   private memoryRuntime: MemoryRuntime;
@@ -69,6 +76,12 @@ export class SessionManager {
   createPending(msgId: string, entry: PendingRequest): void {
     this.pendingRequests.set(msgId, entry);
     this.touchSession(entry.sessionId);
+    // 维护 clientId → msgId 索引，用于 rebindSocket 按客户端查找
+    if (entry.clientId) {
+      const set = this.clientPendingIndex.get(entry.clientId);
+      if (set) { set.add(msgId); }
+      else { this.clientPendingIndex.set(entry.clientId, new Set([msgId])); }
+    }
     // Register taskId → socket for late-arriving text_delta after pending is deleted
     if (entry.taskId && entry.socket) {
       this.taskSocketMap.set(entry.taskId, { socket: entry.socket, expiresAt: Date.now() + 30_000 });
@@ -76,10 +89,32 @@ export class SessionManager {
     const timeoutMs = this.config.requestTimeoutMs * 4;
     const timer = setTimeout(() => {
       const pending = this.pendingRequests.get(msgId);
+      // 调试日志：pending 请求超时，定位对话中断
+      logger.info({
+        msgId,
+        sessionId: entry.sessionId,
+        timeoutMs,
+        hasDraft: !!(pending?.draftResponse),
+        draftLen: pending?.draftResponse?.length ?? 0,
+        hasTaskId: !!pending?.taskId,
+        streamingActive: !!pending?.streaming,
+      }, 'pending 请求超时（120s）');
       if (pending) {
+        // 11.0 修复：超时时保存已有的部分内容到对话历史，防止刷新后空白气泡
+        const partialContent = pending.draftResponse ?? '';
+        if (partialContent && pending.userMessage) {
+          this.saveConversationTurn(
+            entry.sessionId,
+            pending.userMessage,
+            partialContent + '\n\n*[回复超时，内容可能不完整]*',
+            pending.reasoning,
+          );
+          logger.info({ msgId, sessionId: entry.sessionId, partialLen: partialContent.length }, '请求超时，已保存部分内容');
+        } else {
+          logger.warn({ msgId, sessionId: entry.sessionId }, '请求超时，无部分内容可保存');
+        }
         this.deletePending(msgId);
         pending.resolve('[超时] 请求处理超时，请重试');
-        logger.warn({ msgId, sessionId: entry.sessionId }, '请求超时');
       }
     }, timeoutMs);
     this.requestTimers.set(msgId, timer);
@@ -91,8 +126,18 @@ export class SessionManager {
 
   deletePending(msgId: string): void {
     const pending = this.pendingRequests.get(msgId);
-    if (pending?.taskId) {
-      this.releaseTaskSocket(pending.taskId);
+    if (pending) {
+      // 清理 clientId 索引
+      if (pending.clientId) {
+        const set = this.clientPendingIndex.get(pending.clientId);
+        if (set) {
+          set.delete(msgId);
+          if (set.size === 0) this.clientPendingIndex.delete(pending.clientId);
+        }
+      }
+      if (pending.taskId) {
+        this.releaseTaskSocket(pending.taskId);
+      }
     }
     const timer = this.requestTimers.get(msgId);
     if (timer) { clearTimeout(timer); this.requestTimers.delete(msgId); }
@@ -148,20 +193,38 @@ export class SessionManager {
   }
 
   /**
-   * 重绑定 socket：当客户端 WebSocket 重连时，将新 socket 关联到该 session 正在运行的 pending request。
-   * 返回已积累的流式文本（用于客户端补显示断连期间的输出），无活跃请求时返回 null。
+   * 按 WS 客户端 ID 重绑定 socket：当客户端 WebSocket 重连时，
+   * 将新 socket 关联到该客户端所有正在流式输出的 pending request。
+   * 返回每个活跃任务的已积累流式文本，用于客户端补显示断连期间的输出。
    */
-  rebindSocket(sessionId: string, newSocket: Socket): { accumulated: string; taskId: string } | null {
-    for (const pending of this.pendingRequests.values()) {
-      if (pending.sessionId === sessionId && pending.streaming) {
+  rebindSocket(clientId: string, newSocket: Socket): Array<{ accumulated: string; taskId: string }> {
+    const results: Array<{ accumulated: string; taskId: string }> = [];
+    const msgIds = this.clientPendingIndex.get(clientId);
+    if (!msgIds) return results;
+    for (const msgId of msgIds) {
+      const pending = this.pendingRequests.get(msgId);
+      if (pending && pending.streaming) {
         pending.socket = newSocket;
         if (pending.taskId) {
           this.taskSocketMap.set(pending.taskId, { socket: newSocket, expiresAt: Date.now() + 300_000 });
         }
-        return { accumulated: pending.draftResponse ?? '', taskId: pending.taskId ?? '' };
+        results.push({ accumulated: pending.draftResponse ?? '', taskId: pending.taskId ?? '' });
       }
     }
-    return null;
+    return results;
+  }
+
+  /**
+   * 检查指定客户端是否有正在流式输出的 pending request（用于日志和状态查询）。
+   */
+  getPendingForClient(clientId: string): boolean {
+    const set = this.clientPendingIndex.get(clientId);
+    if (!set || set.size === 0) return false;
+    for (const msgId of set) {
+      const pending = this.pendingRequests.get(msgId);
+      if (pending?.streaming) return true;
+    }
+    return false;
   }
 
   getModelOverride(sessionId: string): ModelTier | undefined {

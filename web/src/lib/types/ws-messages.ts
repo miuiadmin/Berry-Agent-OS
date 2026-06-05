@@ -18,6 +18,9 @@ export interface ProgressMessage {
 
 export interface ResultMessage {
   type: "result";
+  /** 后端 SocketResultEvent.response 字段 */
+  response?: string;
+  /** 兼容旧版 content 字段 */
   content?: string;
 }
 
@@ -72,6 +75,40 @@ export interface ReasoningDeltaMessage {
   text: string;
 }
 
+/** Agent 间对话状态事件（11.0 dialogue 协议，Kernel → 前端） */
+export interface DialogueStatusMessage {
+  type: "dialogue_status";
+  /** 对话 ID */
+  dialogueId: string;
+  /** 对话阶段：started=开始, round_complete=一轮完成, ended=对话结束 */
+  status: "started" | "round_complete" | "ended";
+  /** 发起方 Agent 名 */
+  from: string;
+  /** 目标 Agent 名 */
+  to: string;
+  /** 当前轮次 */
+  round: number;
+  /** Conversation 决定暴露的对话概要 */
+  summary?: string;
+}
+
+/** Agent 委派/交接事件（Kernel → 前端） */
+export interface AgentHandoffMessage {
+  type: "agent_handoff";
+  from: string;
+  to: string;
+  intent: string;
+}
+
+/** Agent 向用户提问事件（Kernel → 前端） */
+export interface AskUserMessage {
+  type: "ask_user";
+  question: string;
+  options?: string[];
+  sessionId: string;
+  taskId: string;
+}
+
 /** Union of all server → client WebSocket messages */
 export type ServerMessage =
   | TextDeltaMessage
@@ -83,7 +120,10 @@ export type ServerMessage =
   | DelegationNeededMessage
   | PermissionConfirmNeededMessage
   | ToolCallMessage
-  | ReasoningDeltaMessage;
+  | ReasoningDeltaMessage
+  | DialogueStatusMessage
+  | AgentHandoffMessage
+  | AskUserMessage;
 
 // ─── Client → Server messages ─────────────────────────────────────
 
@@ -94,8 +134,10 @@ export interface ClientChatMessage {
   attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>;
 }
 
+/** 中断当前生成，sessionId 标识要中断的对话（从消息体取，与 WS clientId 无关） */
 export interface ClientInterruptMessage {
   type: "interrupt";
+  sessionId: string;
 }
 
 export interface ClientDelegationResponseMessage {

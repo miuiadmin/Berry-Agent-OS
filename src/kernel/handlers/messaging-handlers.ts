@@ -76,6 +76,7 @@ export function handleMessage(
 
   ctx.sessionManager.createPending(msgId, {
     sessionId,
+    clientId: requireString(request, 'clientId'),
     userMessage: message,
     taskId,
     streaming: isStreaming,

@@ -42,6 +42,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const sessionId = useChatStore((s) => s.sessionId);
   const setSessionId = useChatStore((s) => s.setSessionId);
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const setSkipAutoRestore = useChatStore((s) => s.setSkipAutoRestore);
 
   const deleteConversation = useMutation({
     mutationFn: async (sid: string) => {
@@ -53,6 +54,8 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
       if (sid === sessionId) {
         clearMessages();
         setSessionId(null);
+        // 标记跳过自动恢复，防止 effect 立刻拉回最近对话
+        setSkipAutoRestore(true);
       }
     },
     onError: (err: Error) => {

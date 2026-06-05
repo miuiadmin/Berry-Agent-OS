@@ -399,8 +399,10 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   }, [sessionId, messages.length, loadHistory]);
 
   // If no session after mount, restore the most recent conversation
+  // 跳过条件：用户刚删除对话（skipAutoRestore=true）时不要自动拉回
   useEffect(() => {
     if (sessionId || messages.length > 0) return;
+    if (useChatStore.getState().skipAutoRestore) return;
     apiGet<Array<{ sessionId: string }>>("/api/conversations?limit=1")
       .then((list) => {
         if (list?.length && !useChatStore.getState().sessionId) {

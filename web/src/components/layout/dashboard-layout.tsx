@@ -18,7 +18,8 @@ export function DashboardLayout() {
   const disconnect = useWsStore((s) => s.disconnect);
   const t = useT();
 
-  // 全局 WebSocket 连接：进入 DashboardLayout 就连接，离开就断开
+  // 全局 WebSocket 连接：进入 DashboardLayout 就连接，离开就断开。
+  // WS 使用持久化的 clientId 标识客户端，与对话 sessionId 完全解耦。
   useEffect(() => {
     connect();
     return () => { disconnect(); };

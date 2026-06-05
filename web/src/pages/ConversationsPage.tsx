@@ -40,8 +40,10 @@ export default function ConversationsPage() {
   const [sort, setSort] = useState<"recent" | "messages">("recent");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const navigate = useNavigate();
+  const sessionId = useChatStore((s) => s.sessionId);
   const setSessionId = useChatStore((s) => s.setSessionId);
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const setSkipAutoRestore = useChatStore((s) => s.setSkipAutoRestore);
 
   const conversationsQuery = useQuery({
     ...queries.conversations({ search: search || undefined, sort }),
@@ -50,12 +52,18 @@ export default function ConversationsPage() {
 
   const queryClient = useQueryClient();
   const deleteConversation = useMutation({
-    mutationFn: async (sessionId: string) => {
-      await apiDelete(`/api/conversations/${sessionId}`);
+    mutationFn: async (sid: string) => {
+      await apiDelete(`/api/conversations/${sid}`);
     },
-    onSuccess: () => {
+    onSuccess: (_data, sid) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success(t("conversations.conversationDeleted"));
+      // 如果删除的是当前活跃对话，清理状态并阻止自动恢复
+      if (sid === sessionId) {
+        clearMessages();
+        setSessionId(null);
+        setSkipAutoRestore(true);
+      }
     },
     onError: (err: Error) => {
       toast.error(err.message || t("conversations.failedToDelete"));

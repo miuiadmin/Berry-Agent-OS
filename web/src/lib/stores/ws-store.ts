@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { toast } from "sonner";
 import zh from "@/locales/zh";
 import en from "@/locales/en";
@@ -16,15 +17,17 @@ type WsStatus = "connected" | "connecting" | "disconnected";
 /** 事件回调函数类型 */
 type EventCallback = (payload: unknown) => void;
 
-/** Zustand store 状态：连接状态 + 会话 ID */
+/** Zustand store 状态：连接状态 + 稳定的客户端 ID */
 interface WsState {
   status: WsStatus;
-  sessionId: string | null;
+  /** 稳定的客户端标识，持久化到 localStorage，跨刷新不变。
+   *  WS 连接用此 ID 标识客户端，与对话 sessionId 完全解耦。 */
+  clientId: string | null;
 }
 
 /** Zustand store 操作：连接/断开/发送/订阅 */
 interface WsActions {
-  connect: (sessionId?: string) => void;
+  connect: () => void;
   disconnect: () => void;
   send: (data: unknown) => void;
   subscribe: (event: string, cb: EventCallback) => () => void;
@@ -95,164 +98,184 @@ function flushQueue() {
   }
 }
 
-/** 生成唯一会话 ID，格式为 "web-{uuid}" */
-function generateSessionId(): string {
+/** 生成稳定的客户端 ID，格式为 "client-{uuid}"，持久化后跨刷新不变 */
+function generateClientId(): string {
   try {
-    return `web-${crypto.randomUUID()}`;
+    return `client-${crypto.randomUUID()}`;
   } catch {
-    return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 }
 
 // ─── Zustand Store ────────────────────────────────────────────
 
-export const useWsStore = create<WsStore>((set, get) => ({
-  status: "disconnected",
-  sessionId: null,
+export const useWsStore = create<WsStore>()(
+  persist(
+    (set, get) => ({
+      status: "disconnected",
+      clientId: null,
 
-  /**
-   * 建立 WebSocket 连接。
-   * 如果已有活跃连接或正在连接中，直接跳过。
-   * @param sessionId 可选的会话 ID，不提供则自动生成或复用已有的
-   */
-  connect: (sessionId?: string) => {
-    // 防止重复连接
-    if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+      /**
+       * 建立 WebSocket 连接。
+       * 使用持久化的 clientId 标识客户端，与对话无关。
+       * 如果已有活跃连接或正在连接中，直接跳过。
+       */
+      connect: () => {
+        // 防止重复连接
+        if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
 
-    // 取消可能存在的重连定时器
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-
-    // 确定会话 ID：传入 > store 中已有的 > 新生成
-    const sid = sessionId ?? get().sessionId ?? generateSessionId();
-    set({ status: "connecting", sessionId: sid });
-
-    // 根据页面协议选择 ws/wss
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    // 开发模式（端口 3889）直连后端 3888，绕过 Vite 代理（Vite WS 代理不可靠）
-    const host = window.location.port === "3889" ? window.location.hostname + ":3888" : window.location.host;
-    const socket = new WebSocket(`${protocol}//${host}/ws?sessionId=${sid}`);
-
-    ws = socket;
-
-    /** 连接成功：更新状态、发送队列、按需弹 toast */
-    socket.onopen = () => {
-      if (ws !== socket) return; // 过时的 socket 实例，忽略
-      set({ status: "connected" });
-      reconnectDelay = 1000; // 重置退避延迟
-      flushQueue();          // 发送积压消息
-      // 只在断线重连时弹 toast，首次连接静默
-      if (hasConnectedBefore) toast.success(t("connection.connected"));
-      hasConnectedBefore = true;
-    };
-
-    /** 收到消息：派发到事件监听器和消息处理器 */
-    socket.onmessage = (event) => {
-      if (ws !== socket) return; // 过时的 socket 实例，忽略
-      try {
-        const data = JSON.parse(event.data) as Record<string, unknown>;
-
-        // 对 type="event" 的消息，派发到 subscribe() 注册的监听器
-        if (data.type === "event") {
-          const eventName = data.event as string;
-          const callbacks = eventListeners.get(eventName);
-          if (callbacks) {
-            for (const cb of callbacks) cb(data.payload);
-          }
-          // 通配符 "*" 监听器收到完整 data（含 type + event + payload）
-          const wildcardCbs = eventListeners.get("*");
-          if (wildcardCbs) {
-            for (const cb of wildcardCbs) cb(data);
-          }
+        // 取消可能存在的重连定时器
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
         }
 
-        // 所有消息都派发到 onMessage() 注册的处理器
-        for (const handler of messageHandlers) {
-          handler(data);
+        // 确保 clientId 存在（首次访问时生成并持久化）
+        let cid = get().clientId;
+        if (!cid) {
+          cid = generateClientId();
+          set({ clientId: cid });
         }
-      } catch {
-        // 忽略非 JSON 帧
-      }
-    };
 
-    /** 连接关闭：如果之前处于 connected 状态，提示用户并触发重连 */
-    socket.onclose = () => {
-      if (ws !== socket) return; // 过时的 socket 实例，忽略
-      const prev = get().status;
-      set({ status: "disconnected" });
-      // 只有从 connected 状态掉线才提示（connecting 阶段关闭不提示，避免首次连接失败就弹）
-      if (prev === "connected") toast.warning(t("connection.connecting"));
-      ws = null;
-      scheduleReconnect(get);
-    };
+        set({ status: "connecting" });
 
-    /** 连接错误：直接关闭，让 onclose 统一处理重连逻辑 */
-    socket.onerror = () => {
-      socket.close();
-    };
-  },
+        // 根据页面协议选择 ws/wss
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        // 开发模式（端口 3889）直连后端 3888，绕过 Vite 代理（Vite WS 代理不可靠）
+        const host = window.location.port === "3889" ? window.location.hostname + ":3888" : window.location.host;
+        // WS 连接用 clientId 标识客户端，与对话 sessionId 完全解耦
+        const socket = new WebSocket(`${protocol}//${host}/ws?clientId=${cid}`);
 
-  /**
-   * 主动断开连接。
-   * 递增 generation 使旧的重连回调失效，清空发送队列，重置状态。
-   */
-  disconnect: () => {
-    reconnectGeneration++;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    const prev = ws;
-    ws = null;
-    prev?.close();
-    sendQueue.length = 0;
-    hasConnectedBefore = false; // 重置，下次连接视为首次
-    set({ status: "disconnected" });
-  },
+        ws = socket;
 
-  /**
-   * 发送数据。如果 WebSocket 未连接，暂存到发送队列。
-   * @param data 要发送的数据（会被 JSON.stringify）
-   */
-  send: (data: unknown) => {
-    if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(data));
-    } else {
-      // 未连接 → 暂存，等 onopen 后 flushQueue() 发出
-      sendQueue.push(data);
-    }
-  },
+        /** 连接成功：更新状态、发送队列、按需弹 toast */
+        socket.onopen = () => {
+          if (ws !== socket) return; // 过时的 socket 实例，忽略
+          set({ status: "connected" });
+          reconnectDelay = 1000; // 重置退避延迟
+          flushQueue();          // 发送积压消息
+          // 只在断线重连时弹 toast，首次连接静默
+          if (hasConnectedBefore) toast.success(t("connection.connected"));
+          hasConnectedBefore = true;
+        };
 
-  /**
-   * 订阅指定事件。仅对 type="event" 的消息生效。
-   * @param event 事件名（如 "task.progress"），或 "*" 监听所有事件
-   * @param cb 事件回调
-   * @returns 取消订阅函数
-   */
-  subscribe: (event: string, cb: EventCallback) => {
-    if (!eventListeners.has(event)) {
-      eventListeners.set(event, new Set());
-    }
-    eventListeners.get(event)!.add(cb);
-    return () => {
-      eventListeners.get(event)?.delete(cb);
-    };
-  },
+        /** 收到消息：派发到事件监听器和消息处理器 */
+        socket.onmessage = (event) => {
+          if (ws !== socket) return; // 过时的 socket 实例，忽略
+          try {
+            const data = JSON.parse(event.data) as Record<string, unknown>;
 
-  /**
-   * 注册消息处理器。对所有消息（包括 type="event"）都触发。
-   * @param handler 消息处理函数
-   * @returns 取消注册函数
-   */
-  onMessage: (handler: (data: Record<string, unknown>) => void) => {
-    messageHandlers.add(handler);
-    return () => {
-      messageHandlers.delete(handler);
-    };
-  },
-}));
+            // 对 type="event" 的消息，派发到 subscribe() 注册的监听器
+            if (data.type === "event") {
+              const eventName = data.event as string;
+              const callbacks = eventListeners.get(eventName);
+              if (callbacks) {
+                for (const cb of callbacks) cb(data.payload);
+              }
+              // 通配符 "*" 监听器收到完整 data（含 type + event + payload）
+              const wildcardCbs = eventListeners.get("*");
+              if (wildcardCbs) {
+                for (const cb of wildcardCbs) cb(data);
+              }
+            }
+
+            // 所有消息都派发到 onMessage() 注册的处理器
+            for (const handler of messageHandlers) {
+              handler(data);
+            }
+          } catch {
+            // 忽略非 JSON 帧
+          }
+        };
+
+        /** 连接关闭：如果之前处于 connected 状态，提示用户并触发重连 */
+        socket.onclose = () => {
+          if (ws !== socket) return; // 过时的 socket 实例，忽略
+          const prev = get().status;
+          set({ status: "disconnected" });
+          // 只有从 connected 状态掉线才提示（connecting 阶段关闭不提示，避免首次连接失败就弹）
+          if (prev === "connected") toast.warning(t("connection.connecting"));
+          ws = null;
+          scheduleReconnect(get);
+        };
+
+        /** 连接错误：直接关闭，让 onclose 统一处理重连逻辑 */
+        socket.onerror = () => {
+          socket.close();
+        };
+      },
+
+      /**
+       * 主动断开连接。
+       * 递增 generation 使旧的重连回调失效，清空发送队列，重置状态。
+       */
+      disconnect: () => {
+        reconnectGeneration++;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        const prev = ws;
+        ws = null;
+        prev?.close();
+        sendQueue.length = 0;
+        hasConnectedBefore = false; // 重置，下次连接视为首次
+        set({ status: "disconnected" });
+      },
+
+      /**
+       * 发送数据。如果 WebSocket 未连接，暂存到发送队列。
+       * @param data 要发送的数据（会被 JSON.stringify）
+       */
+      send: (data: unknown) => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(data));
+        } else {
+          // 未连接 → 暂存，等 onopen 后 flushQueue() 发出
+          sendQueue.push(data);
+        }
+      },
+
+      /**
+       * 订阅指定事件。仅对 type="event" 的消息生效。
+       * @param event 事件名（如 "task.progress"），或 "*" 监听所有事件
+       * @param cb 事件回调
+       * @returns 取消订阅函数
+       */
+      subscribe: (event: string, cb: EventCallback) => {
+        if (!eventListeners.has(event)) {
+          eventListeners.set(event, new Set());
+        }
+        eventListeners.get(event)!.add(cb);
+        return () => {
+          eventListeners.get(event)?.delete(cb);
+        };
+      },
+
+      /**
+       * 注册消息处理器。对所有消息（包括 type="event"）都触发。
+       * @param handler 消息处理函数
+       * @returns 取消注册函数
+       */
+      onMessage: (handler: (data: Record<string, unknown>) => void) => {
+        messageHandlers.add(handler);
+        return () => {
+          messageHandlers.delete(handler);
+        };
+      },
+    }),
+    {
+      name: "ws-storage",
+      // 用 sessionStorage 而非 localStorage：同标签页刷新保持 clientId（rebind 正常），
+      // 但不同标签页各自独立（避免多标签共享 clientId 导致 rebind 跨标签内容污染）
+      storage: createJSONStorage(() => {
+        try { return sessionStorage; } catch { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; }
+      }),
+      // 只持久化 clientId，status 等运行时状态不持久化
+      partialize: (state) => ({ clientId: state.clientId }),
+    },
+  ),
+);
 
 /**
  * 调度重连。使用指数退避策略，延迟从 1s → 2s → 4s → ... → 最大 30s。

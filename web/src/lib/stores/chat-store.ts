@@ -72,6 +72,8 @@ interface ChatState {
   pendingDelegation: DelegationRequest | null;
   pendingPermission: PermissionConfirmRequest | null;
   permissionMode: 'ask' | 'allow-all' | 'deny-all';
+  /** 用户主动清空对话（删除/新建）后为 true，阻止自动恢复 effect 拉取最近对话 */
+  skipAutoRestore: boolean;
 
   setSessionId: (id: string | null) => void;
   addMessage: (msg: ChatMessage) => void;
@@ -83,6 +85,8 @@ interface ChatState {
   setPendingDelegation: (req: DelegationRequest | null) => void;
   setPendingPermission: (req: PermissionConfirmRequest | null) => void;
   setPermissionMode: (mode: 'ask' | 'allow-all' | 'deny-all') => void;
+  /** 标记跳过自动恢复（删除对话后调用） */
+  setSkipAutoRestore: (v: boolean) => void;
   restoreSession: (messages: ChatMessage[], activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[]; streamingContent?: string | null; streamingReasoning?: string | null }) => void;
 }
 
@@ -95,8 +99,13 @@ export const useChatStore = create<ChatState>()(
       pendingDelegation: null,
       pendingPermission: null,
       permissionMode: 'ask',
+      skipAutoRestore: false,
 
-      setSessionId: (id) => set({ sessionId: id }),
+      setSessionId: (id) => set((s) => {
+        // 设定新会话时重置跳过标志（用户主动选择了对话，后续可以自动恢复）
+        if (id) return { sessionId: id, skipAutoRestore: false };
+        return { sessionId: id };
+      }),
 
       addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
 
@@ -126,6 +135,8 @@ export const useChatStore = create<ChatState>()(
       setPendingDelegation: (req) => set({ pendingDelegation: req }),
       setPendingPermission: (req) => set({ pendingPermission: req }),
       setPermissionMode: (mode) => set({ permissionMode: mode }),
+      /** 设置是否跳过自动恢复（删除对话后设为 true） */
+      setSkipAutoRestore: (v) => set({ skipAutoRestore: v }),
 
       restoreSession: (messages, activeTask) =>
         set((s) => {

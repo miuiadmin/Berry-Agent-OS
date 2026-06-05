@@ -180,7 +180,7 @@ export function useChatSocket() {
       const msg = data as unknown as ServerMessage;
 
       // 防护：如果收到流式消息但还没有 assistant 占位消息，先创建一个
-      if (msg.type === "text_delta" || msg.type === "reasoning_delta" || msg.type === "tool_call" || msg.type === "progress" || msg.type === "agent_handoff" || msg.type === "ask_user") {
+      if (msg.type === "text_delta" || msg.type === "reasoning_delta" || msg.type === "tool_call" || msg.type === "progress" || msg.type === "agent_handoff" || msg.type === "ask_user" || msg.type === "dialogue_status") {
         const state = useChatStore.getState();
         const last = state.messages[state.messages.length - 1];
         if (!last || last.role !== "assistant") {
@@ -204,15 +204,24 @@ export function useChatSocket() {
           if (msg.summary) setLastProgress(msg.summary);
           resetTimer();
           break;
-        case "agent_handoff": {
-          const hm = msg as unknown as { from: string; to: string; intent: string };
-          setLastProgress(t("chat.delegatedTo", { agent: hm.to }));
+        case "agent_handoff":
+          setLastProgress(t("chat.delegatedTo", { agent: msg.to }));
           resetTimer();
           break;
-        }
-        case "ask_user": {
-          const askMsg = msg as unknown as { question: string; options?: string[] };
-          setLastProgress(`❓ ${askMsg.question}`);
+        case "ask_user":
+          setLastProgress(`❓ ${msg.question}`);
+          resetTimer();
+          break;
+        case "dialogue_status": {
+          // 11.0 对话协议：展示 Agent 间协作状态
+          if (msg.status === "started") {
+            setLastProgress(t("chat.dialogueStarted", { agent: msg.to }));
+          } else if (msg.status === "round_complete") {
+            const suffix = msg.summary ? ` — ${msg.summary}` : "";
+            setLastProgress(t("chat.dialogueRoundComplete", { round: msg.round, summary: suffix }));
+          } else if (msg.status === "ended") {
+            setLastProgress(t("chat.dialogueEnded"));
+          }
           resetTimer();
           break;
         }
@@ -231,7 +240,8 @@ export function useChatSocket() {
         }
         case "result": {
           const resultMsg = msg as Extract<ServerMessage, { type: "result" }>;
-          const response = resultMsg.content;
+          // 后端 SocketResultEvent 用 response 字段，兼容旧版 content 字段
+          const response = resultMsg.response ?? resultMsg.content;
           const current = useChatStore.getState().messages;
           const lastMsg = current[current.length - 1];
           if (lastMsg && lastMsg.role === "assistant") {
@@ -309,11 +319,11 @@ export function useChatSocket() {
 
   /** 取消当前生成 */
   const cancelGeneration = useCallback(() => {
-    send({ type: "interrupt" });
+    send({ type: "interrupt", sessionId });
     setLastStatus("complete");
     setStreaming(false);
     clearTimer();
-  }, [send, setStreaming, clearTimer]);
+  }, [send, sessionId, setStreaming, clearTimer]);
 
   /** 响应委托请求 */
   const respondDelegation = useCallback(

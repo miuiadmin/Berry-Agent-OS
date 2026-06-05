@@ -53,16 +53,19 @@ export class WebSocketBridge {
 export function createWsHandler(deps: WebServerDependencies) {
   return function handleConnection(ws: WebSocket, req: IncomingMessage): void {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    const sessionId = url.searchParams.get('sessionId') ?? genId('ses');
+    // WS 连接用 clientId 标识客户端（每个浏览器标签页独立，存在 sessionStorage）
+    const clientId = url.searchParams.get('clientId') ?? genId('client');
 
-    logger.debug({ sessionId }, 'WebSocket 连接');
+    logger.debug({ clientId }, 'WebSocket 连接');
 
-    // 重连恢复：如果该 session 有正在运行的流式任务，重绑定 socket 并补发已积累的文本
+    // 重连恢复：按 clientId 找到该客户端所有正在流式输出的 pending request，重绑定 socket
     const bridge = new WebSocketBridge(ws);
-    const rebindResult = deps.sessionManager.rebindSocket(sessionId, bridge as unknown as Socket);
-    if (rebindResult && rebindResult.accumulated) {
-      // 推送已积累的完整文本让客户端补上断连期间的内容
-      wsReply(ws, { type: 'reconnect_recovery', content: rebindResult.accumulated, taskId: rebindResult.taskId });
+    const rebindResults = deps.sessionManager.rebindSocket(clientId, bridge as unknown as Socket);
+    for (const item of rebindResults) {
+      if (item.accumulated) {
+        // 推送已积累的完整文本让客户端补上断连期间的内容
+        wsReply(ws, { type: 'reconnect_recovery', content: item.accumulated, taskId: item.taskId });
+      }
     }
 
     // Forward delegation events to this client
@@ -79,7 +82,7 @@ export function createWsHandler(deps: WebServerDependencies) {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
         logger.debug(msg, 'ws:in');
-        handleWsMessage(ws, msg, sessionId, deps);
+        handleWsMessage(ws, msg, clientId, deps);
       } catch (err) {
         wsError(ws, (err as Error).message);
       }
@@ -93,8 +96,14 @@ export function createWsHandler(deps: WebServerDependencies) {
       }
     }, 30000);
 
-    ws.on('close', () => {
-      logger.debug({ sessionId }, 'WebSocket 断开');
+    ws.on('close', (code, reason) => {
+      // 调试日志：定位 WS 断连原因（code 1001=浏览器关闭/刷新，1006=异常断开，1000=正常关闭）
+      logger.info({
+        clientId,
+        code,
+        reason: reason.toString() || '无',
+        wasStreaming: deps.sessionManager.getPendingForClient(clientId),
+      }, 'WebSocket 断开');
       delegationListener();
       permissionListener();
       clearInterval(pingInterval);
@@ -104,10 +113,14 @@ export function createWsHandler(deps: WebServerDependencies) {
 
 // --- Message dispatcher ---
 
+/**
+ * 处理 WS 消息。clientId 是 WS 传输层标识，用于关联 pending request。
+ * 对话 sessionId 完全由消息体携带。
+ */
 function handleWsMessage(
   ws: WebSocket,
   msg: Record<string, unknown>,
-  sessionId: string,
+  clientId: string,
   deps: WebServerDependencies,
 ): void {
   const type = requireString(msg, 'type');
@@ -124,11 +137,13 @@ function handleWsMessage(
         return;
       }
       const attachments = Array.isArray(msg.attachments) ? msg.attachments : undefined;
-      const effectiveSessionId = requireString(msg, 'sessionId') || sessionId;
+      // 对话 sessionId 来自消息体，不再依赖 WS URL 参数
+      const effectiveSessionId = requireString(msg, 'sessionId') || genId('ses');
       const permissionMode = requireString(msg, 'permissionMode') || 'ask';
       const bridge = new WebSocketBridge(ws);
+      // 传递 clientId 以便 session-manager 按 WS 客户端索引 pending request
       deps.handleMessage(
-        { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode, attachments },
+        { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode, attachments, clientId },
         bridge as unknown as Socket,
       );
       break;
@@ -156,8 +171,11 @@ function handleWsMessage(
       break;
     }
     case 'interrupt': {
+      // 中断目标由消息体的 sessionId 指定（对话级别），与 WS 客户端标识无关
+      const interruptSessionId = requireString(msg, 'sessionId');
+      if (!interruptSessionId) { wsError(ws, '缺少 sessionId'); return; }
       const reason = typeof msg.reason === 'string' ? msg.reason : undefined;
-      deps.handleInterrupt(sessionId, reason, ws);
+      deps.handleInterrupt(interruptSessionId, reason, ws);
       break;
     }
     case 'delegation.respond': {
