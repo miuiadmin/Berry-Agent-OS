@@ -66,6 +66,8 @@ const CODE_SYSTEM_PROMPT = `你是 代码智能体，专门处理代码阅读、
 3. 只修改用户明确要求的部分，不做额外重构
 4. 输出简洁的中文摘要说明做了什么`;
 
+const DIRECT_ACTION_PROMPT = `\n\n直接执行用户的任务。你可以读取文件、创建文件、修改文件、运行命令。按需使用工具完成任务，完成后输出简洁的中文摘要。`;
+
 const RESEARCH_SUFFIX = `\n\n你当前处于 research 阶段。只能使用 inspect_code 和 summarize_changes 工具阅读代码，不能修改任何文件。
 请充分理解代码结构，收集需要修改的信息。`;
 
@@ -108,6 +110,33 @@ export async function runTaskPhases(ctx: PhaseContext): Promise<TaskPhasesResult
       success: verifyResult.phase.success,
       summary: verifyResult.phase.summary,
       filesChanged: [],
+      testResult,
+      totalToolCalls,
+    };
+  }
+
+  // full_task：跳过 research/synthesis 阶段，直接给所有工具一步到位
+  // 原因：非 Claude/GPT 级别的模型无法理解"先研究再计划再执行"的分阶段指令，
+  // 会在 research 阶段就想写代码但被 prompt 禁止，导致卡死或回复"不能写代码"
+  if (ctx.action === 'full_task') {
+    const directResult = await runDirectAction(ctx, allTools);
+    phases.push(directResult);
+    totalToolCalls += directResult.toolCalls.length;
+    filesChanged = extractFilesChanged(directResult.toolCalls);
+
+    const shouldVerify = ctx.testCommand;
+    if (shouldVerify && directResult.success) {
+      const verifyResult = await runVerification(ctx);
+      phases.push(verifyResult.phase);
+      totalToolCalls += verifyResult.phase.toolCalls.length;
+      testResult = verifyResult.testResult;
+    }
+
+    return {
+      phases,
+      success: directResult.success,
+      summary: directResult.summary,
+      filesChanged,
       testResult,
       totalToolCalls,
     };
@@ -157,7 +186,7 @@ export async function runTaskPhases(ctx: PhaseContext): Promise<TaskPhasesResult
 
     if (!implResult.success) break;
 
-    const shouldVerify = ctx.action === 'full_task' || ctx.testCommand;
+    const shouldVerify = ctx.testCommand;
     if (!shouldVerify) break;
 
     const verifyResult = await runVerification(ctx);
@@ -180,6 +209,70 @@ export async function runTaskPhases(ctx: PhaseContext): Promise<TaskPhasesResult
     filesChanged,
     testResult,
     totalToolCalls,
+  };
+}
+
+/**
+ * 直接执行模式（跳过 research/synthesis）。
+ * 给模型所有工具（inspect_code + edit_code + write_file），一步到位完成任务。
+ * 适用于 full_task（创建文件等简单直接的任务）。
+ */
+async function runDirectAction(ctx: PhaseContext, allTools: ToolDefinition[]): Promise<PhaseResult> {
+  const modelTools = toModelTools(allTools);
+  const artifacts: string[] = [];
+
+  const messages: ModelMessage[] = [{
+    role: 'user',
+    content: buildTaskPrompt(ctx),
+  }];
+
+  const result = await runToolLoop({
+    llm: ctx.llm,
+    messages,
+    systemPrompt: CODE_SYSTEM_PROMPT + DIRECT_ACTION_PROMPT,
+    tools: modelTools,
+    config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },
+    chatContext: {
+      agent: 'code',
+      purpose: 'code_task',
+      sessionId: ctx.sessionId,
+      taskId: ctx.taskId,
+    },
+    onChunk: (text) => {
+      ctx.ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId: ctx.taskId, text });
+    },
+    onReasoning: (text) => {
+      ctx.ipc.send('task.telemetry', 'core', { kind: 'reasoning_delta', taskId: ctx.taskId, text });
+    },
+    onToolResult: (toolName, isError) => {
+      ctx.ipc.send('task.telemetry', 'core', { kind: 'tool_result', taskId: ctx.taskId, toolName, isError });
+    },
+    onUncertainty: (reason) => {
+      ctx.ipc.send('task.telemetry', 'core', { kind: 'uncertainty', taskId: ctx.taskId, reason });
+    },
+    requestPermission: buildPermissionFn(ctx),
+    validatePermission: buildValidateFn(ctx),
+    consumePermission: buildConsumeFn(ctx),
+    auditTool: buildAuditFn(ctx),
+  });
+
+  // 记录文件变更 artifact
+  for (const tc of result.toolCalls) {
+    if ((tc.name === 'edit_code' || tc.name === 'write_file') && !tc.isError) {
+      const artifactId = ctx.runtime.recordArtifact(ctx.taskId, 'file_change', {
+        toolInput: tc.input,
+        result: tc.result,
+      }, { filePath: extractPath(tc.input) });
+      artifacts.push(artifactId);
+    }
+  }
+
+  return {
+    phase: 'implementation',
+    success: true,
+    summary: result.finalContent,
+    toolCalls: result.toolCalls,
+    artifacts,
   };
 }
 
