@@ -30,7 +30,7 @@ import { TakeoverController } from '../testing/model-takeover.js';
 import { ensureDirs, getSocketPath, getPidPath, getUserAgentsDir, getSkillsDir } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
 
-import type { LogLevel } from './observability.js';
+import type { LogLevel } from '../observability/types.js';
 import { CronScheduler } from '../cron/index.js';
 import { createLlmClient } from '../llm/index.js';
 import { createProviderRegistry, type ProviderRegistry } from '../providers/registry.js';
@@ -129,6 +129,8 @@ export class CoreService {
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
   private suggestionCleanupTimer: ReturnType<typeof setInterval> | null = null;
   private providerRegistryHolder: { current: ProviderRegistry } | null = null;
+  /** 主进程 LLM 客户端 holder（支持配置热重载时替换） */
+  private builtinLlmHolder: { current: import('../llm/index.js').LlmClient } | null = null;
 
   constructor() {
     this.configService = new ConfigService();
@@ -157,6 +159,14 @@ export class CoreService {
   async start(): Promise<void> {
     ensureDirs();
     initDb();
+
+    // 初始化 IPC journal（可靠投递 + 崩溃重放）
+    const { IpcJournal } = await import('./ipc-journal.js');
+    const ipcJournal = new IpcJournal(getDb());
+    this.agentManager.setJournal(ipcJournal);
+    // 定时清理已投递的 journal 记录（1 小时保留）
+    const journalCleanupTimer = setInterval(() => ipcJournal.cleanup(), 60 * 60 * 1000);
+    journalCleanupTimer.unref();
 
     try {
       await this.startInternal();
@@ -236,6 +246,12 @@ export class CoreService {
     });
     this.messageRouter.setup();
     this.messageRouter.pluginRuntimeV2 = this.pluginRuntimeV2;
+
+    // 12.0: 初始化漂移检测器
+    if (this.config.drift?.enabled !== false) {
+      const { DriftDetector } = await import('./drift-detector.js');
+      this.messageRouter.driftDetector = new DriftDetector(getDb(), this.config.drift?.thresholds);
+    }
     this.registerSkillChangedHandler();
     this.registerPluginTools();
 
@@ -266,8 +282,10 @@ export class CoreService {
       db: getDb(),
       eventBus: this.eventBus,
       providerRegistry,
+      budgetConfig: this.config.budget,
     });
-    runtimeRegistry.register('builtin', new BuiltinDriver(builtinLlm));
+    this.builtinLlmHolder = { current: builtinLlm };
+    runtimeRegistry.register('builtin', new BuiltinDriver(this.builtinLlmHolder));
 
     // Wire LLM-driven evolution extractor
     if (this.config.memory.evolutionEnabled) {
@@ -534,7 +552,7 @@ export class CoreService {
     this.skillWatcher.watch(getSkillsDir());
 
     if (this.config.cron.enabled) {
-      const cronLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus, providerRegistry: this.providerRegistryHolder!.current });
+      const cronLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus, providerRegistry: this.providerRegistryHolder!.current, budgetConfig: this.config.budget });
       this.cronScheduler = new CronScheduler(getDb(), cronLlm, this.skillService!, this.eventBus, this.config.cron);
       this.cronScheduler.start();
       await this.cronScheduler.catchUp();
@@ -542,7 +560,7 @@ export class CoreService {
     }
 
     if (this.config.mcp.servers.length > 0) {
-      const mcpLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus, providerRegistry: this.providerRegistryHolder!.current });
+      const mcpLlm = createLlmClient(this.config.llm, { db: getDb(), eventBus: this.eventBus, providerRegistry: this.providerRegistryHolder!.current, budgetConfig: this.config.budget });
       const mcpToolRegistry = new ToolRegistry();
       this.mcpManager = new McpManager(this.eventBus, mcpToolRegistry, mcpLlm);
       await this.mcpManager.start(this.config.mcp.servers);
@@ -707,6 +725,7 @@ export class CoreService {
       trustManager: this.trustManager,
       runtimeRegistry: this.runtimeRegistry,
       checkpointService: this.checkpointService,
+      driftDetector: this.messageRouter!.driftDetector,
       schedulerService: null,
       notificationService: null,
       memoryLayerService: null,
@@ -853,7 +872,7 @@ export class CoreService {
       this.notificationHooksCleanup = null;
     }
     if (this.webServer) {
-      this.webServer.stop();
+      await this.webServer.stop();
       this.webServer = null;
     }
     if (this.takeoverController) {
@@ -927,7 +946,7 @@ export class CoreService {
     }
 
     if (this.webServer) {
-      this.webServer.stop();
+      await this.webServer.stop();
     }
 
     if (this.mcpManager) {
@@ -976,6 +995,15 @@ export class CoreService {
     // Rebuild main-process registry so API routes serve fresh data
     if (this.providerRegistryHolder) {
       this.providerRegistryHolder.current = createProviderRegistry(llmConfig, llmConfig.channelsConfig);
+    }
+    // 重建主进程 LLM 客户端（BuiltinDriver 等通过 holder 间接引用，自动生效）
+    if (this.builtinLlmHolder) {
+      this.builtinLlmHolder.current = createLlmClient(llmConfig, {
+        db: getDb(),
+        eventBus: this.eventBus,
+        providerRegistry: this.providerRegistryHolder!.current,
+        budgetConfig: this.config.budget,
+      });
     }
     // Propagate to child processes via IPC
     for (const agent of this.registry.listResident()) {
