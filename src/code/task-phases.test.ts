@@ -107,25 +107,31 @@ describe('task-phases', () => {
       expect(result.phases[0].success).toBe(true);
     });
 
-    it('full_task 走直接执行路径（跳过 research/synthesis）', async () => {
+    it('full_task 执行完整四阶段', async () => {
       backend.setMockResponses([
-        // 直接执行：读取文件
+        // research: reads a file
         { content: '', toolCalls: [{ id: 'tu_1', name: 'inspect_code', input: { path: 'src/index.ts' } }] },
-        // 直接执行：写入文件
+        // research: done
+        { content: '已读取 src/index.ts' },
+        // synthesis: returns patch plan
+        { content: '```json\n{"description":"添加导出","steps":[{"file":"src/index.ts","action":"edit","description":"添加新导出"}]}\n```' },
+        // implementation: edits file
         { content: '', toolCalls: [{ id: 'tu_2', name: 'edit_code', input: { path: 'src/index.ts', oldText: 'old', newText: 'new' } }] },
-        // 直接执行：完成
+        // implementation: done
         { content: '修改完成' },
       ]);
 
       const result = await runTaskPhases(buildCtx({
         action: 'full_task',
+        testCommand: 'echo "Tests: 1 passed (1)"',
       }));
 
-      // full_task 走直接执行路径，只有 1 个 implementation phase（无 research/synthesis）
-      expect(result.phases.length).toBeGreaterThanOrEqual(1);
-      expect(result.phases[0].phase).toBe('implementation');
-      expect(result.phases.map(p => p.phase)).not.toContain('research');
-      expect(result.phases.map(p => p.phase)).not.toContain('synthesis');
+      expect(result.phases.length).toBeGreaterThanOrEqual(3);
+      const phaseNames = result.phases.map(p => p.phase);
+      expect(phaseNames).toContain('research');
+      expect(phaseNames).toContain('synthesis');
+      expect(phaseNames).toContain('implementation');
+      expect(phaseNames).toContain('verification');
     });
   });
 
@@ -236,40 +242,57 @@ describe('task-phases', () => {
       expect(result.testResult?.passed).toBe(false);
     });
 
-    it('full_task 带 testCommand 直接执行后走验证', async () => {
+    it('full_task 测试失败触发重试（最多 2 次）', async () => {
       backend.setMockResponses([
-        // 直接执行：完成
+        // research
+        { content: '已理解代码' },
+        // synthesis
+        { content: '```json\n{"description":"fix","steps":[{"file":"src/a.ts","action":"edit","description":"fix bug"}]}\n```' },
+        // implementation (first attempt)
         { content: '修改完成' },
+        // implementation (retry 1)
+        { content: '第二次修改完成' },
+        // implementation (retry 2)
+        { content: '第三次修改完成' },
       ]);
 
       const ctx = buildCtx({
         action: 'full_task',
-        testCommand: 'echo "Tests  1 passed (1)"',
+        testCommand: 'exit 1',
       });
       const result = await runTaskPhases(ctx);
 
-      // 直接执行 + 验证
-      expect(result.phases.length).toBeGreaterThanOrEqual(2);
-      expect(result.phases[0].phase).toBe('implementation');
+      // Should have: research + synthesis + impl + verify + impl + verify + impl + verify
       const verifyPhases = result.phases.filter(p => p.phase === 'verification');
-      expect(verifyPhases.length).toBeGreaterThanOrEqual(1);
-      expect(result.success).toBe(true);
+      expect(verifyPhases.length).toBe(3); // 1 initial + 2 retries
+      expect(result.success).toBe(false);
     });
 
-    it('full_task 无 testCommand 跳过验证', async () => {
+    it('重试后测试通过则成功', async () => {
+      let testCallCount = 0;
       backend.setMockResponses([
-        // 直接执行：完成
+        // research
+        { content: '已理解代码' },
+        // synthesis
+        { content: '```json\n{"description":"fix","steps":[{"file":"src/a.ts","action":"edit","description":"fix"}]}\n```' },
+        // implementation (first attempt)
         { content: '修改完成' },
+        // implementation (retry)
+        { content: '修复完成' },
       ]);
 
+      // Use a command that fails first time, succeeds second
+      const marker = join(tempDir, 'test_counter');
       const ctx = buildCtx({
         action: 'full_task',
+        testCommand: `sh -c 'if [ -f "${marker}" ]; then echo "Tests  1 passed (1)"; else touch "${marker}"; exit 1; fi'`,
       });
       const result = await runTaskPhases(ctx);
 
-      // 只有 implementation，没有 verification
-      expect(result.phases.length).toBe(1);
-      expect(result.phases[0].phase).toBe('implementation');
+      const verifyPhases = result.phases.filter(p => p.phase === 'verification');
+      expect(verifyPhases.length).toBe(2);
+      expect(verifyPhases[0].success).toBe(false);
+      expect(verifyPhases[1].success).toBe(true);
       expect(result.success).toBe(true);
     });
   });
