@@ -170,26 +170,6 @@ export function createWsHandler(deps: WebServerDependencies) {
       delegationListener();
       permissionListener();
       clearInterval(pingInterval);
-
-      // P0-2 修复：清理该 clientId 关联的 pending request 的 channel 引用
-      // 对话继续运行不中断（保证稳定性），仅清除死 channel 引用避免 resolve 闭包写入已断连连接
-      let cleanedCount = 0;
-      for (const [msgId, pending] of deps.sessionManager.entries()) {
-        if (pending.clientId === clientId) {
-          // 清除 channel 引用 — WebSocketBridge.write() 已有安全检查，但显式清除更明确
-          pending.channel = undefined;
-          cleanedCount++;
-          logger.debug({
-            clientId,
-            msgId,
-            sessionId: pending.sessionId,
-            hasTaskId: !!pending.taskId,
-          }, 'WS 断连：清理 pending request channel 引用，对话继续运行');
-          }
-      }
-      if (cleanedCount > 0) {
-        logger.info({ clientId, cleanedCount }, 'WS 断连：已清理关联的 pending request，对话继续运行等待重连恢复');
-      }
     });
   };
 }

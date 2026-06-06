@@ -334,7 +334,6 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
     userMessage: message,
     taskId,
     streaming: isStreaming,
-    channel: isStreaming ? channel : undefined,
     resolve: (response) => {
       if (isStreaming) {
         const evt: SocketResultEvent = { type: 'result', response, sessionId, taskId };
