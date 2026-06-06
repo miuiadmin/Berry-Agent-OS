@@ -1,4 +1,5 @@
 import type { MessageChannel, MessageHandler, IncomingMessage, OutgoingMessage } from './contract.js';
+import type { EventBus } from '../kernel/event-bus.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('channel-manager');
@@ -6,6 +7,8 @@ const logger = getLogger('channel-manager');
 export class ChannelManager {
   private channels = new Map<string, MessageChannel>();
   private handlers: MessageHandler[] = [];
+  /** EventBus conversation.result 订阅取消函数 */
+  private eventUnsubscribe: (() => void) | null = null;
 
   register(channel: MessageChannel): void {
     if (this.channels.has(channel.type)) {
@@ -52,6 +55,30 @@ export class ChannelManager {
 
   getChannel<T extends MessageChannel>(type: string): T | undefined {
     return this.channels.get(type) as T | undefined;
+  }
+
+  /**
+   * 订阅 EventBus 的 conversation.result 事件，将结果分发到对应 channel。
+   * sessionId 格式为 channel-{channelType}-{userId}（非 channel 前缀的忽略，
+   * WS 由 WsEventBridge 独立处理）。
+   */
+  initEventBridge(eventBus: EventBus): void {
+    this.eventUnsubscribe = eventBus.on('conversation.result', (payload) => {
+      const match = payload.sessionId.match(/^channel-(\w+)-(.+)$/);
+      if (!match) return; // 非 channel 前缀的 sessionId（如 WS 的 ses-xxx），忽略
+      const [, channelType, userId] = match;
+      this.send(channelType, userId, { text: payload.response }).catch((err) => {
+        logger.error({ channelType, userId, err: (err as Error).message }, 'conversation.result → channel 分发失败');
+      });
+    });
+  }
+
+  /** 取消 EventBus 订阅（服务关闭时调用） */
+  disposeEventBridge(): void {
+    if (this.eventUnsubscribe) {
+      this.eventUnsubscribe();
+      this.eventUnsubscribe = null;
+    }
   }
 
   private dispatch(msg: IncomingMessage): void {

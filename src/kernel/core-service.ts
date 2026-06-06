@@ -699,6 +699,9 @@ export class CoreService {
       handleChannelMessage(msg.userId, msg.text, msg.channelType, this.buildServiceContainer());
     });
     await this.channelManager.startAll();
+    // 订阅 EventBus conversation.result 事件，将结果分发到对应 channel。
+    // WS 由 WsEventBridge 独立处理，此处仅覆盖 channel-cli-* / channel-telegram-* 等
+    this.channelManager.initEventBridge(this.eventBus);
 
     const telegramConfig = this.config.channels.telegram;
     if (telegramConfig.enabled && telegramConfig.token) {
@@ -922,6 +925,7 @@ export class CoreService {
       this.mcpManager = null;
     }
     if (this.channelManager) {
+      this.channelManager.disposeEventBridge();
       await this.channelManager.stopAll();
       this.channelManager = null;
     }

@@ -208,10 +208,10 @@ export function handleChannelMessage(
     userMessage: message,
     taskId,
     streaming: false,
+    // 与 WS 路径统一：resolve 仅发射 EventBus 事件。
+    // ChannelManager 订阅 conversation.result 并按 sessionId 前缀分发到对应 channel。
     resolve: (response) => {
-      ctx.channelManager?.send(channelType, userId, { text: response }).catch((err) => {
-        logger.error({ channelType, userId, err: (err as Error).message }, 'Channel 响应发送失败');
-      });
+      getEventBus().emit('conversation.result', { sessionId, taskId, response });
     },
   });
 
