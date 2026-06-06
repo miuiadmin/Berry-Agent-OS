@@ -329,8 +329,20 @@ export class SessionManager {
     const now = Date.now();
     let cleaned = 0;
 
+    // 收集有活跃 pending request 的 session，GC 时跳过这些 session
+    // 防止长任务的 promptCache/modelOverrides 被误清理导致重建
+    const activeSessions = new Set<string>();
+    for (const pending of this.pendingRequests.values()) {
+      activeSessions.add(pending.sessionId);
+    }
+
     for (const [sessionId, lastActive] of this.sessionLastActivity) {
       if (now - lastActive > maxInactiveMs) {
+        // 跳过有活跃 pending request 的 session，并刷新其活跃时间
+        if (activeSessions.has(sessionId)) {
+          this.touchSession(sessionId);
+          continue;
+        }
         this.sessionPromptCache.delete(sessionId);
         this.sessionModelOverrides.delete(sessionId);
         this.sessionLastActivity.delete(sessionId);
