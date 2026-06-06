@@ -67,4 +67,15 @@ export type IpcMessageType =
   | 'dialogue.send'
   | 'dialogue.reply'
   | 'dialogue.end'
-  | 'dialogue.observe';
+  | 'dialogue.observe'
+  // 12.0 语义漂移防护
+  | 'drift.check.request'
+  | 'drift.check.result'
+  | 'verify.request'
+  | 'verify.result';
+
+// === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
+declare global {
+  // eslint-disable-next-line no-var
+  var __berry_orphanReconciler: import('./orphan-reconciler.js').OrphanReconciler | undefined;
+}

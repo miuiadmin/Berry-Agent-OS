@@ -468,8 +468,18 @@ export class CoreService {
         if (!pending.taskId) continue;
         const task = this.taskManager!.getTask(pending.taskId);
         if (task?.target_agent === name && task.status === 'failed') {
+          // R4-P0-1：agent.crashed 兜底：partial draftResponse + error 入库，避免 user 消息孤儿
+          const errorResponse = `[错误] 智能体 ${name} 崩溃，请重试`;
+          try {
+            const partialContent = pending.draftResponse
+              ? `${pending.draftResponse}\n\n${errorResponse}`
+              : errorResponse;
+            this.sessionManager!.saveConversationTurn(pending.sessionId, pending.userMessage, partialContent, pending.reasoning);
+          } catch (saveErr) {
+            logger.error({ err: saveErr, msgId }, 'agent.crashed 兜底 saveConversationTurn 失败');
+          }
           this.sessionManager!.deletePending(msgId);
-          pending.resolve(`[错误] 智能体 ${name} 崩溃，请重试`);
+          pending.resolve(errorResponse);
         }
       }
     });

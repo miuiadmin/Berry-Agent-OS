@@ -570,6 +570,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (pending) {
       this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
       const partialResponse = pending.draftResponse ?? primary.finalResponse;
+      // R4-P1：中断场景下 partial text 入库，避免用户刷新丢失 partial
+      // 标记 [已停止] 让用户知道回复未完成
+      const stopMarker = '[已停止]';
+      const assistantContent = partialResponse
+        ? `${partialResponse}\n\n${stopMarker}`
+        : stopMarker;
+      try {
+        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, assistantContent, pending.reasoning);
+      } catch (err) {
+        logger.error({ err, sessionId, correlationId: primary.correlationId }, 'interruptSession partial 入库失败');
+      }
       this.sessionManager.deletePending(primary.correlationId);
       pending.resolve(partialResponse ?? '[已停止]');
     }
@@ -1042,6 +1053,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       logger.error({ correlationId, err }, 'Runtime execution error');
       this.streamingFlusher.remove(delegationId);
       this.delegationManager.fail(delegationId, message);
+      // R4-P0-1：Runtime exception 兜底：partial draftResponse + error 入库，避免 user 消息孤儿
+      const errorResponse = `抱歉，处理过程中发生错误: ${message}`;
+      try {
+        const partialContent = pending.draftResponse
+          ? `${pending.draftResponse}\n\n[错误: ${message}]`
+          : errorResponse;
+        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, partialContent, pending.reasoning);
+      } catch (saveErr) {
+        logger.error({ err: saveErr, correlationId }, 'Runtime exception 兜底 saveConversationTurn 失败');
+      }
       this.sessionManager.deletePending(correlationId);
       // P1-4: 通知前端 user 消息没有回复
       getEventBus().emit('conversation.no_response', {
@@ -1679,6 +1700,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.streamingFlusher.remove(result.taskId);
       this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
       const errorResponse = `[${agentName}] 任务失败: ${result.error ?? '未知错误'}`;
+      // R4-P0-1：foreground 任务失败路径必须把错误回复入库，避免 user 消息孤儿
+      try {
+        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, errorResponse, pending.reasoning);
+      } catch (err) {
+        logger.error({ err, correlationId: fgEntry.correlationId }, 'foreground 任务失败兜底 saveConversationTurn 失败');
+      }
       this.sessionManager.deletePending(fgEntry.correlationId);
       pending.resolve(errorResponse);
       return;
@@ -1754,12 +1781,39 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     });
 
     eventBus.on('task.timeout', ({ taskId, targetAgent }) => {
-      if (targetAgent !== '__daemon__') return;
+      if (targetAgent === '__daemon__') {
+        // daemon 外部智能体超时走 foreground 路径
+        const entry = this.delegationManager.get(taskId);
+        if (!entry) return;
+        const result: AgentTaskResultPayload = { taskId, ok: false, error: '外部智能体执行超时' };
+        this.handleForegroundTaskResult(result, { correlationId: entry.correlationId, sessionId: entry.sessionId }, '__daemon__');
+        return;
+      }
+
+      // R4-P0-3：普通 task.timeout（无 final.response 到达）兜底：partial draftResponse + timeout 提示入库
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
-
-      const result: AgentTaskResultPayload = { taskId, ok: false, error: '外部智能体执行超时' };
-      this.handleForegroundTaskResult(result, { correlationId: entry.correlationId, sessionId: entry.sessionId }, '__daemon__');
+      const pending = this.sessionManager.getPending(entry.correlationId);
+      if (!pending) return;
+      const timeoutResponse = `任务执行超时（${targetAgent}）`;
+      const partialContent = pending.draftResponse
+        ? `${pending.draftResponse}\n\n[${timeoutResponse}]`
+        : timeoutResponse;
+      try {
+        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, partialContent, pending.reasoning);
+      } catch (err) {
+        logger.error({ err, taskId, correlationId: entry.correlationId }, 'task.timeout 兜底 saveConversationTurn 失败');
+      }
+      // emit no_response 事件让前端感知
+      getEventBus().emit('conversation.no_response', {
+        sessionId: pending.sessionId,
+        taskId: pending.taskId,
+        reason: `task_timeout: ${targetAgent}`,
+        correlationId: entry.correlationId,
+      });
+      this.streamingFlusher.remove(taskId);
+      this.sessionManager.deletePending(entry.correlationId);
+      pending.resolve(timeoutResponse);
     });
   }
 

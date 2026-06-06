@@ -12,6 +12,7 @@ import { AgentManager } from './agent-manager.js';
 import { AgentRegistry } from './agent-registry.js';
 import type { EventBus } from './event-bus.js';
 import { initStreamDispatcher } from './stream-dispatcher.js';
+import { OrphanReconciler } from './orphan-reconciler.js';
 import type { AppConfig } from '../config/schema.js';
 import { createCoreModuleRegistry, registerAgentModules, type ModuleRegistry } from './module-system.js';
 import { initTracer, createSqliteSink } from '../observability/tracer.js';
@@ -85,6 +86,11 @@ export function initInfrastructure(
   // H1/H2: 初始化 StreamDispatcher（订阅 EventBus 的 4 个 stream/dialogue 事件并 fan-out 给 transport 订阅者）
   // 必须在 EventBus 就绪后、其他业务模块 emit 事件前调用
   initStreamDispatcher();
+  // R4-P0-4：启动 orphan user row reconciler，定期扫"user 后 60s 内无 assistant"的孤儿对
+  // 兜底写入 [系统] 提示行，让用户刷新后至少能看到 assistant 占位说明
+  const orphanReconciler = new OrphanReconciler(eventBus);
+  orphanReconciler.start();
+  globalThis.__berry_orphanReconciler = orphanReconciler;
   initTracer([createSqliteSink(db)]);
   moduleRegistry.markStatus(db, 'observability', 'running');
   moduleRegistry.markStatus(db, 'memory', 'running');

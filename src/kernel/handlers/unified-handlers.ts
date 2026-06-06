@@ -317,6 +317,14 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
 
   const isStreaming = request.streaming !== false;
 
+  // R4-P0-2：CLI / socket-server 路径的 user 消息也要在入口入库，避免孤儿
+  try {
+    const clientMsgId = genId('umsg');
+    services.sessionManager.saveUserMessage(sessionId, message, { clientMsgId });
+  } catch (err) {
+    logger.warn({ err, sessionId, msgId }, 'unified-handlers 入口入库 user 消息失败');
+  }
+
   services.sessionManager.createPending(msgId, {
     sessionId,
     userMessage: message,
