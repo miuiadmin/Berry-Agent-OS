@@ -90,11 +90,6 @@ export class EventBus {
     }
   }
 
-  listenerCount(event: EventName): number {
-    if (this.messageBus) {
-      const busType = `event:${event}` as EventMessageType;
-      return this.messageBus.listenerCount(busType);
-    }
-    return this.localListeners.get(event)?.size ?? 0;
-  }
+  // R6-7: 删除 listenerCount() 探测孔（dead code — 无 caller）。
+  // 取消订阅 / 添加订阅由 Set.add / Set.delete 自然处理。
 }

@@ -174,10 +174,8 @@ export class StreamDispatcher {
     this.allSubscribers.delete(subscriberId);
   }
 
-  /** 获取指定 taskId 当前订阅者数量（用于测试/调试） */
-  subscriberCount(taskId: string): number {
-    return this.byTask.get(taskId)?.size ?? 0;
-  }
+  // R6-7: 删除 subscriberCount() 探测孔（dead code — 无 caller）。
+  // 取消订阅 / 添加订阅由 Set.add / Set.delete 自然处理，无需查询接口。
 
   /**
    * 内部：按 taskId 扇出 stream 事件给所有 subscriber。

@@ -251,9 +251,7 @@ export class MessageBus {
     return this.handlers.has(type);
   }
 
-  listenerCount(type: MessageType): number {
-    return this.listeners.get(type)?.size ?? 0;
-  }
+  // R6-7: 删除 listenerCount() 探测孔（dead code — 无 caller）。
 
   removeAll(): void {
     this.handlers.clear();
