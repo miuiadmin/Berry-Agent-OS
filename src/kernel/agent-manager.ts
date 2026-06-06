@@ -120,6 +120,9 @@ export class AgentManager {
     if (registered?.manifest.ipcProtocol === 'generic-loop') {
       env.GENERIC_AGENT_CONFIG = registered.manifestPath;
     }
+    // C1 修复（中间步骤）：传递所有 agent 名称给子进程，用于文件路径隔离校验
+    // 完整方案（DB 代理层）留作后续架构目标
+    env.AGENT_NAMES = this.registry.getAgentNames().join(',');
     // W4 修复：传递 agent kind 给 forkAgent，让 StallWatchdog 仅对 resident agent 创建
     const agent = forkAgent(
       name,

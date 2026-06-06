@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
 import { markFileRead } from './read-tracker.js';
+import { canAgentAccessPath } from '../kernel/agent-home.js';
 
 function getUserRoot(): string {
   return homedir();
@@ -21,6 +22,26 @@ function assertWithinBoundary(resolved: string): void {
   const root = getUserRoot();
   if (!resolved.startsWith(root + '/') && resolved !== root) {
     throw new Error(`路径越界: 不允许访问用户目录之外的路径`);
+  }
+}
+
+/**
+ * C1 修复（中间步骤）：Agent 文件路径隔离校验
+ * 当运行在 agent 子进程上下文时（AGENT_NAME 环境变量存在），
+ * 阻止 agent 访问其他 agent 的私有工作目录
+ *
+ * 完整架构目标：实现 DB 代理层 + per-agent stateDb + IPC 协议级别隔离
+ * 当前的中间方案仅在文件系统工具层做路径级检查
+ */
+function assertAgentPathAccess(resolved: string): void {
+  const agentName = process.env.AGENT_NAME;
+  if (!agentName) return; // 非 agent 上下文（如 core 进程）跳过
+
+  const allNames = (process.env.AGENT_NAMES ?? '').split(',').filter(Boolean);
+  if (!canAgentAccessPath(agentName, resolved, allNames)) {
+    throw new Error(
+      `Agent ${agentName} 禁止访问路径: ${resolved}（跨 Agent 工作目录隔离）`
+    );
   }
 }
 
@@ -56,6 +77,7 @@ export const readFileTool: ToolDefinition = {
     try {
       const resolved = resolvePath(path);
       assertWithinBoundary(resolved);
+      assertAgentPathAccess(resolved);
       const content = await readFile(resolved, 'utf-8');
       markFileRead(resolved);
 
@@ -94,6 +116,7 @@ export const writeFileTool: ToolDefinition = {
     try {
       const resolved = resolvePath(filePath);
       assertWithinBoundary(resolved);
+      assertAgentPathAccess(resolved);
       await writeFile(resolved, content, 'utf-8');
       return { content: `已写入文件: ${filePath}` };
     } catch (err) {
@@ -112,6 +135,7 @@ export const listDirectoryTool: ToolDefinition = {
     try {
       const resolved = resolvePath(dirPath);
       assertWithinBoundary(resolved);
+      assertAgentPathAccess(resolved);
       const entries = await readdir(resolved, { withFileTypes: true });
       const lines = entries.map((e) => {
         const type = e.isDirectory() ? '[目录]' : '[文件]';
@@ -134,6 +158,7 @@ export const deleteFileTool: ToolDefinition = {
     try {
       const resolved = resolvePath(filePath);
       assertWithinBoundary(resolved);
+      assertAgentPathAccess(resolved);
       const info = await stat(resolved);
       if (info.isDirectory()) {
         return { content: '不能使用此工具删除目录', isError: true };
