@@ -65,7 +65,7 @@ export function handleMessage(
 
   // 防止同一会话并发投递 — 多标签页 / outbox 重放防护
   if (ctx.sessionManager.hasActivePendingForSession(sessionId)) {
-    channel.write(JSON.stringify({ error: '该对话正在处理中，请等待完成' }) + '\n');
+    channel.write(JSON.stringify({ type: 'error', error: '该对话正在处理中，请等待完成', sessionId }) + '\n');
     return;
   }
 
@@ -183,6 +183,12 @@ export function handleChannelMessage(
       taskId: ctx.sessionManager.getPendingAsk(sessionId)!.taskId,
       reply: message,
     }, genId('reply'));
+    return;
+  }
+
+  // P1: 与 WS 路径对齐，防止 channel 入口（Telegram 等）并发投递
+  if (ctx.sessionManager.hasActivePendingForSession(sessionId)) {
+    ctx.channelManager?.send(channelType, userId, { text: '该对话正在处理中，请等待完成' }).catch(() => {});
     return;
   }
 
