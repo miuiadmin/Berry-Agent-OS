@@ -173,14 +173,26 @@ function SettingsContent() {
       <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
         <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">{t("settings.title")}</h1>
         <div className="relative md:contents">
-          <nav className="flex md:flex-col gap-2 md:gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
+          <nav role="tablist" aria-label={t("settings.title")} className="flex md:flex-col gap-2 md:gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.key;
               return (
                 <button
                   key={tab.key}
+                  role="tab"
+                  aria-selected={isActive}
                   onClick={() => handleTabChange(tab.key)}
+                  onKeyDown={(e) => {
+                    const idx = TABS.findIndex(t => t.key === tab.key);
+                    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                      e.preventDefault();
+                      handleTabChange(TABS[(idx + 1) % TABS.length].key);
+                    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                      e.preventDefault();
+                      handleTabChange(TABS[(idx - 1 + TABS.length) % TABS.length].key);
+                    }
+                  }}
                   className={cn(
                     "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm whitespace-nowrap transition-colors active:bg-accent",
                     isActive
@@ -200,7 +212,7 @@ function SettingsContent() {
       </div>
 
       {/* Right content */}
-      <div className="flex-1 min-w-0 md:overflow-y-auto">
+      <div role="tabpanel" className="flex-1 min-w-0 md:overflow-y-auto">
         <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
           <div className="flex items-center justify-between mb-6">
             <div>

@@ -11,6 +11,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 
@@ -51,6 +52,8 @@ export default function MemoryPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
+  /** 删除确认对话框状态 */
+  const [deleteTarget, setDeleteTarget] = useState<{ layer: string; id: string } | null>(null);
 
   // List memories for current scope
   const listQuery = useQuery({
@@ -283,11 +286,7 @@ export default function MemoryPage() {
                         className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
                         title={t("common.delete")}
                         aria-label={t("common.delete")}
-                        onClick={() => {
-                          if (confirm(t("memory.deleteThisMemory"))) {
-                            deleteMut.mutate({ entryLayer: entry.layer, id: entry.id });
-                          }
-                        }}
+                        onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
                       >
                         <Trash2 className="size-3.5" />
                       </Button>
@@ -299,6 +298,20 @@ export default function MemoryPage() {
           );
         }}
       </QueryBoundary>
+
+      {/* 删除确认对话框 */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title={t("memory.deleteThisMemory")}
+        description={t("memory.deleteConfirmDesc")}
+        onAction={() => {
+          if (deleteTarget) {
+            deleteMut.mutate({ entryLayer: deleteTarget.layer, id: deleteTarget.id });
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }

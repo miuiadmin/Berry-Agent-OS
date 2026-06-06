@@ -112,7 +112,9 @@ export function useChatSocket() {
         streamingSessionRef.current = sid;
         resetTimer();
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      if (import.meta.env.DEV) console.warn("[ws] sharedSessionRestore failed:", err);
+    });
   }, [status, sessionId, sharedSessionRestore, resetTimer]);
 
   // ─── 消息分发（核心：将 WS 消息派发到 chat store） ────────────

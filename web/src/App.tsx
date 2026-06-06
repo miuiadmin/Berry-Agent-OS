@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/dashboard-layout";
 import { useRealtimeEvents } from "./hooks/use-realtime-events";
 import { ErrorBoundary } from "./components/error-boundary";
+import { useT } from "./lib/i18n";
 
 // Lazy-load pages
 import { lazy, Suspense } from "react";
@@ -26,9 +27,17 @@ function LoadingSpinner() {
 export default function App() {
   // Subscribe to WS events for automatic query invalidation
   useRealtimeEvents();
+  const t = useT();
 
   return (
     <ErrorBoundary>
+      {/* 键盘无障碍：跳转到主内容的快捷链接（Tab 一次即可看到） */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:shadow-lg focus:border focus:border-ring"
+      >
+        {t("common.skipToContent")}
+      </a>
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
           <Route element={<DashboardLayout />}>

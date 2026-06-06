@@ -11,6 +11,7 @@ const zh: Record<string, string> = {
   "common.create": "创建",
   "common.retry": "重试",
   "common.close": "关闭",
+  "common.skipToContent": "跳到主要内容",
   "common.apply": "应用",
   "common.enabled": "已启用",
   "common.disabled": "已禁用",
@@ -250,6 +251,7 @@ const zh: Record<string, string> = {
   "memory.verify": "验证",
   "memory.promote": "提升",
   "memory.deleteThisMemory": "删除此记忆？",
+  "memory.deleteConfirmDesc": "删除后无法恢复，确定要继续吗？",
   "memory.memoryCreated": "记忆已创建",
   "memory.memoryDeleted": "记忆已删除",
   "memory.memoryPromoted": "记忆已提升",
@@ -294,6 +296,7 @@ const zh: Record<string, string> = {
   "scheduler.next": "下次：{time}",
   "scheduler.triggerNow": "立即触发",
   "scheduler.deleteJobConfirm": "确定要删除任务「{name}」吗？",
+  "scheduler.deleteConfirmDesc": "删除后无法恢复，确定要继续吗？",
   "scheduler.executionHistory": "执行历史",
   "scheduler.noExecutions": "暂无执行记录",
   "scheduler.queueRunning": "{count} 运行中",
@@ -529,6 +532,23 @@ const zh: Record<string, string> = {
   // ===== API 层错误 =====
   "api.networkError": "网络错误 — 请检查网络连接",
   "api.uploadFailed": "上传失败（状态码 {status}）",
+
+  // ===== 漂移指标 =====
+  "drift.title": "语义漂移",
+  "drift.metricsTitle": "语义漂移指标",
+  "drift.overview": "7 天意图对齐概览",
+  "drift.failedToLoad": "加载失败",
+  "drift.unavailable": "漂移指标暂不可用",
+  "drift.avgAlignment": "平均对齐度",
+  "drift.allCheckpoints": "所有检查点",
+  "drift.finalResponse": "最终响应",
+  "drift.userFacingReplies": "面向用户的回复",
+  "drift.interventionRate": "干预率",
+  "drift.signalsTriggeredCorrection": "的信号触发了纠正",
+  "drift.totalSignals": "总信号数",
+  "drift.driftChecksIn7Days": "7 天内的漂移检查",
+  "drift.recentSignals": "最近漂移信号",
+  "drift.noSignals": "暂无漂移信号记录。",
 };
 
 export default zh;

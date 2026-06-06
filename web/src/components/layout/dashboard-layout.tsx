@@ -48,6 +48,7 @@ export function DashboardLayout() {
         <div
           className="fixed inset-0 z-40 bg-black/50 animate-overlay-in md:hidden"
           onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
         />
       )}
 
@@ -59,8 +60,8 @@ export function DashboardLayout() {
         <AppSidebar onNavigate={() => setMobileOpen(false)} />
       </div>
 
-      {/* 主内容区 */}
-      <div className="flex flex-1 flex-col min-w-0">
+      {/* 主内容区 — 移动端侧边栏打开时对屏幕阅读器隐藏 */}
+      <div className="flex flex-1 flex-col min-w-0" aria-hidden={mobileOpen || undefined}>
         {/* 移动端顶栏：hamburger + 标题 + 连接状态 + 用户菜单 */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="size-11 md:size-auto active:scale-90 transition-transform" aria-label={mobileOpen ? t("userMenu.closeMenu") : t("userMenu.openMenu")}>
@@ -82,7 +83,7 @@ export function DashboardLayout() {
           <DebugCaptureButton />
           <UserMenu />
         </div>
-        <main className="relative flex-1">
+        <main id="main-content" className="relative flex-1">
           {/* key by pathname 切换路由时触发动画 */}
           <div key={location.pathname} className="animate-page-in absolute inset-0 overflow-y-auto">
             <Outlet />

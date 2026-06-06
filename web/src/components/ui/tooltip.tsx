@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, type ReactNode } from "react";
+import { useState, useCallback, useRef, useEffect, useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface TooltipProps {
@@ -9,9 +9,20 @@ interface TooltipProps {
   children: ReactNode;
 }
 
+/**
+ * Tooltip 组件。
+ *
+ * 功能：
+ * - 指针 hover 显示 / 离开隐藏（150ms 延迟防闪烁）
+ * - 点击切换（触控支持）
+ * - 焦点显示 / 失焦隐藏（键盘无障碍）
+ * - ARIA: role="tooltip" + aria-describedby 关联触发器
+ */
 export function Tooltip({ content, side = "top", children }: TooltipProps) {
   const [visible, setVisible] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 为 tooltip 内容生成唯一 ID，用于 aria-describedby */
+  const tooltipId = useId();
 
   useEffect(() => {
     return () => {
@@ -45,10 +56,15 @@ export function Tooltip({ content, side = "top", children }: TooltipProps) {
       onPointerEnter={show}
       onPointerLeave={hide}
       onClick={toggle}
+      onFocus={show}
+      onBlur={hide}
+      aria-describedby={visible ? tooltipId : undefined}
     >
       {children}
       {visible && (
         <div
+          id={tooltipId}
+          role="tooltip"
           className={cn(
             "absolute z-50 max-w-[200px] md:max-w-none md:whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 md:py-1 text-xs text-popover-foreground shadow-md border border-border text-center md:text-left animate-fade-in",
             "animate-in fade-in-0 zoom-in-95",

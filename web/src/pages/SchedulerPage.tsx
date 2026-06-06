@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 
@@ -172,6 +173,8 @@ export default function SchedulerPage() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [tab, setTab] = useState<"jobs" | "queue" | "webhooks">("jobs");
+  /** 删除确认对话框状态 */
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   // Jobs list
   const jobsQuery = useQuery({
@@ -281,12 +284,25 @@ export default function SchedulerPage() {
         </div>
       )}
 
-      {/* Tab switcher */}
-      <div className="flex gap-1 border-b">
+      {/* Tab switcher — ARIA tablist 模式 */}
+      <div className="flex gap-1 border-b" role="tablist" aria-label={t("scheduler.title")}>
         {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
           <button
             key={tabKey}
+            role="tab"
+            aria-selected={tab === tabKey}
             onClick={() => setTab(tabKey)}
+            onKeyDown={(e) => {
+              const tabs = ["jobs", "queue", "webhooks"] as const;
+              const idx = tabs.indexOf(tabKey);
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                setTab(tabs[(idx + 1) % tabs.length]);
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setTab(tabs[(idx - 1 + tabs.length) % tabs.length]);
+              }
+            }}
             className={cn(
               "px-3 py-2 text-sm font-medium capitalize transition-colors min-h-[44px] md:min-h-0",
               tab === tabKey
@@ -309,6 +325,7 @@ export default function SchedulerPage() {
 
       {/* Jobs tab */}
       {tab === "jobs" && (
+        <div role="tabpanel">
         <QueryBoundary query={jobsQuery} skeleton={<div className="space-y-2">{Array.from({ length: 2 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="space-y-2"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /><div className="h-3 w-2/3 animate-pulse rounded bg-muted" /></div></CardContent></Card>)}</div>}>
           {(jobs) => jobs.length === 0 ? (
             <EmptyState
@@ -393,11 +410,7 @@ export default function SchedulerPage() {
                           className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
                           title={t("common.delete")}
                           aria-label={t("common.delete")}
-                          onClick={() => {
-                            if (confirm(t("scheduler.deleteJobConfirm", { name: job.name }))) {
-                              deleteMut.mutate(job.id);
-                            }
-                          }}
+                          onClick={() => setDeleteTarget(job.id)}
                         >
                           <Trash2 className="size-3.5" />
                         </Button>
@@ -410,10 +423,12 @@ export default function SchedulerPage() {
             </div>
           )}
         </QueryBoundary>
+        </div>
       )}
 
       {/* Queue tab */}
       {tab === "queue" && (
+        <div role="tabpanel">
         <QueryBoundary query={queueQuery} skeleton={<div className="grid gap-4 md:grid-cols-3">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-4 text-center"><div className="mx-auto h-8 w-16 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}>
           {(queue) => queue ? (
             <div className="grid gap-4 md:grid-cols-3">
@@ -440,10 +455,12 @@ export default function SchedulerPage() {
             <EmptyState icon={Clock} title={t("scheduler.queueStatusUnavailable")} description={t("scheduler.queueStatusUnavailableDesc")} />
           )}
         </QueryBoundary>
+        </div>
       )}
 
       {/* Webhooks tab */}
       {tab === "webhooks" && (
+        <div role="tabpanel">
         <QueryBoundary query={webhookQuery} skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}>
           {(webhooks) => webhooks.length === 0 ? (
             <EmptyState
@@ -471,7 +488,21 @@ export default function SchedulerPage() {
             </div>
           )}
         </QueryBoundary>
+        </div>
       )}
+      {/* 删除确认对话框 */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title={t("scheduler.deleteJobConfirm", { name: t("scheduler.job") })}
+        description={t("scheduler.deleteConfirmDesc")}
+        onAction={() => {
+          if (deleteTarget) {
+            deleteMut.mutate(deleteTarget);
+            setDeleteTarget(null);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -11,6 +11,7 @@ const en: Record<string, string> = {
   "common.create": "Create",
   "common.retry": "Retry",
   "common.close": "Close",
+  "common.skipToContent": "Skip to main content",
   "common.apply": "Apply",
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
@@ -250,6 +251,7 @@ const en: Record<string, string> = {
   "memory.verify": "Verify",
   "memory.promote": "Promote",
   "memory.deleteThisMemory": "Delete this memory?",
+  "memory.deleteConfirmDesc": "This action cannot be undone. Are you sure?",
   "memory.memoryCreated": "Memory created",
   "memory.memoryDeleted": "Memory deleted",
   "memory.memoryPromoted": "Memory promoted",
@@ -294,6 +296,7 @@ const en: Record<string, string> = {
   "scheduler.next": "Next: {time}",
   "scheduler.triggerNow": "Trigger now",
   "scheduler.deleteJobConfirm": 'Delete job "{name}"?',
+  "scheduler.deleteConfirmDesc": "This action cannot be undone. Are you sure?",
   "scheduler.executionHistory": "Execution history",
   "scheduler.noExecutions": "No executions yet.",
   "scheduler.queueRunning": "{count} running",
@@ -529,6 +532,23 @@ const en: Record<string, string> = {
   // ===== API errors =====
   "api.networkError": "Network error — check your connection",
   "api.uploadFailed": "Upload failed (status {status})",
+
+  // ===== Drift Metrics =====
+  "drift.title": "Semantic Drift",
+  "drift.metricsTitle": "Semantic Drift Metrics",
+  "drift.overview": "7-day intent alignment overview",
+  "drift.failedToLoad": "Failed to load",
+  "drift.unavailable": "Drift metrics are unavailable",
+  "drift.avgAlignment": "Avg Alignment",
+  "drift.allCheckpoints": "All checkpoints",
+  "drift.finalResponse": "Final Response",
+  "drift.userFacingReplies": "User-facing replies",
+  "drift.interventionRate": "Intervention Rate",
+  "drift.signalsTriggeredCorrection": "of signals triggered correction",
+  "drift.totalSignals": "Total Signals",
+  "drift.driftChecksIn7Days": "drift checks in 7 days",
+  "drift.recentSignals": "Recent Drift Signals",
+  "drift.noSignals": "No drift signals recorded yet.",
 };
 
 export default en;

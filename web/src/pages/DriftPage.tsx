@@ -24,18 +24,18 @@ function ScoreBar({ score, label }: { score: number; label: string }) {
 
 export default function DriftPage() {
   const t = useT();
-  useDocumentTitle("Drift Metrics");
+  useDocumentTitle(t("drift.title"));
   const { data, isLoading, isError, refetch } = useQuery(queries.drift(7));
   const { data: signalsData } = useQuery(queries.driftSignals());
 
   if (isError) {
     return (
       <div className="p-4 sm:p-6">
-        <h1 className="text-lg font-semibold">Semantic Drift</h1>
+        <h1 className="text-lg font-semibold">{t("drift.title")}</h1>
         <EmptyState
           icon={Shield}
-          title="Failed to load"
-          description="Drift metrics are unavailable"
+          title={t("drift.failedToLoad")}
+          description={t("drift.unavailable")}
           action={{ label: t("common.retry"), onClick: () => refetch() }}
         />
       </div>
@@ -45,7 +45,7 @@ export default function DriftPage() {
   if (isLoading) {
     return (
       <div className="p-4 sm:p-6 space-y-4">
-        <h1 className="text-lg font-semibold">Semantic Drift</h1>
+        <h1 className="text-lg font-semibold">{t("drift.title")}</h1>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-28" />)}
         </div>
@@ -59,8 +59,8 @@ export default function DriftPage() {
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <div>
-        <h1 className="text-lg font-semibold">Semantic Drift Metrics</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">7-day intent alignment overview</p>
+        <h1 className="text-lg font-semibold">{t("drift.metricsTitle")}</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">{t("drift.overview")}</p>
       </div>
 
       {/* 指标卡片 */}
@@ -69,12 +69,12 @@ export default function DriftPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <TrendingUp className="size-4" />
-              Avg Alignment
+              {t("drift.avgAlignment")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{(metrics.avgAlignmentScore * 100).toFixed(1)}%</div>
-            <ScoreBar score={metrics.avgAlignmentScore} label="All checkpoints" />
+            <ScoreBar score={metrics.avgAlignmentScore} label={t("drift.allCheckpoints")} />
           </CardContent>
         </Card>
 
@@ -82,12 +82,12 @@ export default function DriftPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <CheckCircle className="size-4" />
-              Final Response
+              {t("drift.finalResponse")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{(metrics.finalResponseAlignment * 100).toFixed(1)}%</div>
-            <ScoreBar score={metrics.finalResponseAlignment} label="User-facing replies" />
+            <ScoreBar score={metrics.finalResponseAlignment} label={t("drift.userFacingReplies")} />
           </CardContent>
         </Card>
 
@@ -95,12 +95,12 @@ export default function DriftPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <AlertTriangle className="size-4" />
-              Intervention Rate
+              {t("drift.interventionRate")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{(metrics.interventionRate * 100).toFixed(1)}%</div>
-            <p className="text-xs text-muted-foreground mt-1">of signals triggered correction</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("drift.signalsTriggeredCorrection")}</p>
           </CardContent>
         </Card>
 
@@ -108,12 +108,12 @@ export default function DriftPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Shield className="size-4" />
-              Total Signals
+              {t("drift.totalSignals")}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{metrics.totalSignals}</div>
-            <p className="text-xs text-muted-foreground mt-1">drift checks in 7 days</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("drift.driftChecksIn7Days")}</p>
           </CardContent>
         </Card>
       </div>
@@ -121,11 +121,11 @@ export default function DriftPage() {
       {/* 最近漂移事件 */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium">Recent Drift Signals</CardTitle>
+          <CardTitle className="text-sm font-medium">{t("drift.recentSignals")}</CardTitle>
         </CardHeader>
         <CardContent>
           {signals.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No drift signals recorded yet.</p>
+            <p className="text-sm text-muted-foreground">{t("drift.noSignals")}</p>
           ) : (
             <div className="space-y-2">
               {signals.slice(0, 20).map(sig => (
