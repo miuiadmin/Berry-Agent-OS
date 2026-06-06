@@ -94,12 +94,12 @@ export default function LogsPage() {
           <RefreshCw className="size-3.5" />
         </Button>
 
-        <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">
           <input
             type="checkbox"
             checked={autoRefresh}
             onChange={(e) => setAutoRefresh(e.target.checked)}
-            className="size-3"
+            className="size-5 md:size-3"
           />
           {t("logs.auto")}
         </label>

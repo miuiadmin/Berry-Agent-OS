@@ -28,11 +28,19 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
 
   const debouncedSearch = useMemo(() => {
     let timer: ReturnType<typeof setTimeout>;
-    return (value: string) => {
+    const debounced = (value: string) => {
       clearTimeout(timer);
       timer = setTimeout(() => setSearch(value), 300);
     };
+    /** 组件卸载时清除待处理的防抖定时器 */
+    debounced.cancel = () => clearTimeout(timer);
+    return debounced;
   }, []);
+
+  // 卸载时清理防抖定时器
+  useEffect(() => {
+    return () => { debouncedSearch.cancel(); };
+  }, [debouncedSearch]);
 
   const { data: conversations } = useQuery({
     ...queries.conversations({ search: search || undefined }),

@@ -24,7 +24,7 @@ function TabsList({ className, ...props }: React.HTMLAttributes<HTMLDivElement>)
   return (
     <div
       role="tablist"
-      className={cn("inline-flex h-9 items-center gap-1 rounded-lg bg-muted p-1", className)}
+      className={cn("inline-flex h-11 md:h-9 items-center gap-1 rounded-lg bg-muted p-1", className)}
       {...props}
     />
   );
@@ -39,7 +39,7 @@ function TabsTrigger({ value, className, ...props }: React.ButtonHTMLAttributes<
       aria-selected={isActive}
       onClick={() => ctx.onValueChange(value)}
       className={cn(
-        "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-medium transition-colors",
+        "inline-flex items-center justify-center rounded-md px-3 py-2 md:py-1 text-sm font-medium transition-colors min-h-[44px] md:min-h-0",
         isActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
         className
       )}

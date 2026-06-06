@@ -21,9 +21,10 @@ export function ConnectionStatus() {
     : t("connection.disconnected");
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <div role="status" aria-live="polite" className="flex items-center gap-1.5 text-xs text-muted-foreground">
       {/* 状态圆点：移动端和桌面端都显示 */}
       <span
+        aria-label={statusLabel}
         className={cn(
           "size-2.5 rounded-full shrink-0 transition-colors md:size-2",
           status === "connected" && "bg-success animate-pulse-dot",

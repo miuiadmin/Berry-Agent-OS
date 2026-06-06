@@ -62,7 +62,7 @@ function DelegationDialog({
 }) {
   const t = useT();
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
+    <div role="alertdialog" aria-modal="true" aria-label={request.title} className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
       <div className="rounded-xl border border-border bg-background shadow-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <UserCheck className="size-4 text-warning" />
@@ -101,7 +101,7 @@ function PermissionConfirmDialog({
 }) {
   const t = useT();
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
+    <div role="alertdialog" aria-modal="true" aria-label={t("chat.permissionRequired")} className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
       <div className="rounded-xl border border-destructive/30 bg-background shadow-lg p-4 space-y-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="size-4 text-destructive" />
@@ -171,7 +171,10 @@ function useModelConfig() {
 
   const switchModel = useCallback(async (model: string, channelId?: string) => {
     try {
-      const update: Record<string, unknown> = { ...llm, model };
+      // 从查询缓存读取最新 llm 配置，避免闭包捕获过期快照覆盖服务端变更
+      const currentConfig = queryClient.getQueryData<Record<string, unknown>>(["config"]);
+      const currentLlm = (currentConfig?.llm ?? llm) as Record<string, unknown>;
+      const update: Record<string, unknown> = { ...currentLlm, model };
       if (channelId) {
         update.channel = channelId;
       }
@@ -247,7 +250,7 @@ function ModelSelector() {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} aria-hidden="true" />
           {/* Mobile: bottom sheet | Desktop: dropdown */}
           <div className="fixed inset-x-0 bottom-0 z-50 md:absolute md:right-0 md:top-full md:bottom-auto md:inset-x-auto md:mt-1 md:w-80 rounded-t-2xl md:rounded-lg border border-border bg-background shadow-lg max-h-[70vh] md:max-h-[400px] flex flex-col">
             {/* Mobile drag handle */}
@@ -264,6 +267,7 @@ function ModelSelector() {
               <input
                 type="text"
                 placeholder={t("chat.searchModels")}
+                aria-label={t("chat.searchModels")}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 className="w-full rounded-md border border-input bg-muted/50 px-3 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
@@ -344,7 +348,7 @@ interface ChatWindowProps {
 export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission } = useChatSocket();
   const sessionId = useChatStore((s) => s.sessionId);
-  const messages = useChatStore((s) => s.messages);
+  const messagesLength = useChatStore((s) => s.messages.length);
   const addMessage = useChatStore((s) => s.addMessage);
   const removeMessage = useChatStore((s) => s.removeMessage);
   const removeMessagesAfter = useChatStore((s) => s.removeMessagesAfter);
@@ -406,17 +410,17 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
       .finally(() => {
         setLoadingHistory(false);
       });
-  }, [sessionId]);
+  }, [sessionId, t]);
 
   useEffect(() => {
-    if (!sessionId || messages.length > 0) return;
+    if (!sessionId || messagesLength > 0) return;
     loadHistory();
-  }, [sessionId, messages.length, loadHistory]);
+  }, [sessionId, messagesLength, loadHistory]);
 
   // If no session after mount, restore the most recent conversation
   // 跳过条件：用户刚删除对话（skipAutoRestore=true）时不要自动拉回
   useEffect(() => {
-    if (sessionId || messages.length > 0) return;
+    if (sessionId || messagesLength > 0) return;
     if (useChatStore.getState().skipAutoRestore) return;
     apiGet<Array<{ sessionId: string }>>("/api/conversations?limit=1")
       .then((list) => {
@@ -424,17 +428,22 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
           useChatStore.getState().setSessionId(list[0].sessionId);
         }
       })
-      .catch(() => {});
-  }, [sessionId, messages.length]);
+      .catch((err) => {
+        if (import.meta.env.DEV) console.warn("[chat] auto-restore failed:", err);
+      });
+  }, [sessionId, messagesLength]);
 
   const handleRetry = useCallback((errorMsgId: string) => {
     const msgs = useChatStore.getState().messages;
     const errorIdx = msgs.findIndex((m) => m.id === errorMsgId);
     if (errorIdx < 0) return;
     const userMsg = msgs[errorIdx - 1];
-    if (!userMsg || userMsg.role !== "user") return;
+    // 先移除错误助手消息和原始失败的用户消息，避免重发后出现重复
+    if (userMsg?.role === "user") {
+      removeMessage(userMsg.id);
+    }
     removeMessage(errorMsgId);
-    resendMessage(userMsg.content);
+    resendMessage(userMsg?.content ?? "");
   }, [removeMessage, resendMessage]);
 
   const handleEdit = useCallback((messageId: string, content: string) => {
@@ -483,7 +492,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     if (newAttachments.length > 0) {
       setDroppedAttachments((prev) => [...prev, ...newAttachments]);
     }
-  }, []);
+  }, [t]);
 
   const renderContent = () => {
     if (loadingHistory) return <ChatSkeleton />;

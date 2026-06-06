@@ -84,6 +84,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder={t("chat.typePlaceholder")}
+              aria-label={t("chat.typePlaceholder")}
               rows={1}
               className={cn(
                 "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none",
@@ -100,10 +101,10 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
           <div className="flex items-center justify-between px-2 pb-2 pt-1">
             <div className="flex items-center gap-0.5">
               <FileUploadButton onAttach={handleAttach} disabled={isStreaming} />
-              <ToolbarButton disabled={isStreaming} aria-label={t("chat.uploadImage")}>
+              <ToolbarButton disabled aria-disabled="true" aria-label={t("chat.uploadImage")}>
                 <ImagePlus className="size-4" />
               </ToolbarButton>
-              <ToolbarButton disabled={isStreaming} aria-label={t("chat.settings")}>
+              <ToolbarButton disabled aria-disabled="true" aria-label={t("chat.settings")}>
                 <Settings className="size-4" />
               </ToolbarButton>
               {isStreaming && (

@@ -47,7 +47,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
     }
-  }, [onAttach]);
+  }, [onAttach, t]);
 
   return (
     <>

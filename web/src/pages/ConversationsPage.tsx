@@ -197,6 +197,7 @@ export default function ConversationsPage() {
                       variant="ghost"
                       size="icon"
                       aria-label={t("conversations.exportConversation")}
+                      className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleExport(conv);
@@ -208,6 +209,7 @@ export default function ConversationsPage() {
                       variant="ghost"
                       size="icon"
                       aria-label={t("conversations.deleteConversation")}
+                      className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);

@@ -468,6 +468,10 @@ export function appendToLast(text: string) {
 }
 export function setLastStatus(status: ChatMessage["status"]) {
   useChatStore.getState().updateLastMessage(() => ({ status, progress: undefined }));
+  // 流式结束时清除 pendingStreamMessageId，避免下次响应重用旧消息
+  if (status === "complete" || status === "error") {
+    useChatStore.setState({ pendingStreamMessageId: null });
+  }
 }
 export function setLastProgress(progress: string) {
   useChatStore.getState().updateLastMessage((m) => {
@@ -480,6 +484,8 @@ export function setLastProgress(progress: string) {
 }
 export function setLastError(error: string) {
   useChatStore.getState().updateLastMessage(() => ({ status: "error" as const, error, progress: undefined }));
+  // 错误时清除 pendingStreamMessageId，避免下次响应重用旧消息
+  useChatStore.setState({ pendingStreamMessageId: null });
 }
 export function appendReasoning(text: string) {
   useChatStore.getState().updateLastMessage((m) => ({ reasoning: (m.reasoning ?? "") + text }));

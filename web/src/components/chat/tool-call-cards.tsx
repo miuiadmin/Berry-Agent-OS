@@ -82,7 +82,7 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors py-0.5"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors py-0.5 min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />

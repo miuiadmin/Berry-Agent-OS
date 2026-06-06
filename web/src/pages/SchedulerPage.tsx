@@ -143,7 +143,7 @@ function CreateJobCard({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={3}
-          className="flex w-full rounded-md border bg-transparent px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         <div className="flex gap-2">
           <Button

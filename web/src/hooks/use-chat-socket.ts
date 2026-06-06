@@ -55,6 +55,9 @@ export function useChatSocket() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>( null);
   /** 发送消息时记录的 sessionId，用于全局事件（task.failed/progress）的按对话过滤 */
   const streamingSessionRef = useRef<string | null>(null);
+  /** 组件是否仍挂载的守卫，防止卸载后异步回调设置孤立定时器 */
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // ─── 定时器管理 ───────────────────────────────────────────────
 
@@ -101,6 +104,8 @@ export function useChatSocket() {
     if (!sid) return;
     // 直接调共享入口，store 内部加锁 + 原子写入
     sharedSessionRestore(sid).then((msgs) => {
+      // 组件已卸载，不设置定时器
+      if (!mountedRef.current) return;
       // 恢复完后，如果最后一条是 streaming 占位，需要重置超时计时器
       const last = msgs[msgs.length - 1];
       if (last?.status === "streaming") {
@@ -254,9 +259,9 @@ export function useChatSocket() {
           const current = useChatStore.getState().messages;
           const lastMsg = current[current.length - 1];
           if (lastMsg && lastMsg.role === "assistant") {
-            // result 到达时，如果最后一条助手消息内容为空，用完整结果填充
-            if (response && !lastMsg.content.trim()) {
-              appendToLast(response);
+            // 用 result 的权威完整响应替换流式部分内容，确保与服务端一致
+            if (response) {
+              useChatStore.getState().updateLastMessage(() => ({ content: response }));
             }
             setLastStatus("complete");
             // H5 修复：result 到达 = user 消息已被服务端接收，把 user 消息从 'sending' 升级为 'complete'
@@ -303,7 +308,7 @@ export function useChatSocket() {
       }
     });
     return unsub;
-  }, [onMessage, setStreaming, setPendingDelegation, setPendingPermission, resetTimer, clearTimer, createStreamingPlaceholder, addMessage]);
+  }, [onMessage, setStreaming, setPendingDelegation, setPendingPermission, resetTimer, clearTimer, createStreamingPlaceholder, addMessage, t]);
 
   // ─── 发送消息 ─────────────────────────────────────────────────
 
