@@ -21,15 +21,20 @@ export function forkAgent(name: AgentName, scriptPath: string, env?: Record<stri
   const needsTsx = isTsx || scriptPath.endsWith('.ts');
   const execArgv = needsTsx ? ['--import', 'tsx'] : [];
 
+  // W5 修复：通过 NODE_OPTIONS 设置 V8 堆上限 256MB
+  // child_process.fork 的 ForkOptions 类型不包含 resourceLimits（那是 worker_threads 的 API）
+  // 使用 --max-old-space-size 是 Node.js 标准的内存限制方式
+  const existingNodeOptions = process.env.NODE_OPTIONS ?? '';
+  const memoryFlag = `--max-old-space-size=256`;
+  const nodeOptions = existingNodeOptions.includes('max-old-space-size')
+    ? existingNodeOptions
+    : `${existingNodeOptions} ${memoryFlag}`.trim();
+
   const child = fork(scriptPath, [], {
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execArgv,
-    env: { ...process.env, AGENT_NAME: name, ...env },
-    // W5 修复：为 agent 进程设置资源上限，防止有 bug 的 agent 占用过多内存
-    // 参考 isolated-runtime.ts 的 maxOldGenerationSizeMb: 128 模式，agent 分配 256MB
-    // TypeScript ForkOptions 类型未声明此字段（Node.js 运行时支持），需要类型断言
-    ...({ resourceLimits: { maxOldGenerationSizeMb: 256 } } as Record<string, unknown>),
-  } as Parameters<typeof fork>[2]);
+    env: { ...process.env, AGENT_NAME: name, ...env, NODE_OPTIONS: nodeOptions },
+  });
 
   const ipc = new IpcChannel(child, 'core', { journal });
 
