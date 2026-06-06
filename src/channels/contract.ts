@@ -24,7 +24,7 @@ export interface OutgoingMessage {
   replyTo?: string;
 }
 
-export type ChannelType = 'cli' | 'telegram' | 'discord' | 'http';
+export type ChannelType = 'cli' | 'telegram' | 'discord' | 'http' | 'ws';
 
 export type MessageHandler = (msg: IncomingMessage) => void;
 

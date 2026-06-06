@@ -148,7 +148,17 @@ export const useChatStore = create<ChatState>()(
 
       setSessionId: (id) => set((s) => {
         // 设定新会话时重置跳过标志（用户主动选择了对话，后续可以自动恢复）
-        if (id) return { sessionId: id, skipAutoRestore: false };
+        if (id) {
+          // P2-11: 切换对话时发送 subscribe 消息给 WS，声明关注的新 sessionId
+          // 服务端 WsEventBridge 按此过滤流式事件，减少多标签冗余传输
+          try {
+            const { ws } = require('./ws-store.js') as typeof import('./ws-store.js');
+            // useWsStore 模块级 ws 变量无法直接访问，通过 send 方法发送
+            const wsSend = (await import('./ws-store.js')).useWsStore.getState().send;
+            wsSend({ type: 'subscribe', sessionId: id });
+          } catch { /* ws-store 未初始化时忽略 */ }
+          return { sessionId: id, skipAutoRestore: false };
+        }
         return { sessionId: id };
       }),
 

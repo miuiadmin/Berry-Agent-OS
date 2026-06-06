@@ -3,7 +3,7 @@ import type { EventBus, EventName } from '../contracts/infrastructure.js';
 import type { EventMap } from '../contracts/messages.js';
 
 /**
- * WebSocket Event Bridge - 将 EventBus 事件桥接到所有 WS 客户端
+ * WebSocket Event Bridge - 将 EventBus 事件桥接到 WS 客户端
  *
  * 两类事件，两种序列化格式：
  * 1. 全局事件（task.created / task.failed / scheduler.* / mcp.* 等）：
@@ -11,8 +11,11 @@ import type { EventMap } from '../contracts/messages.js';
  * 2. 流式事件（stream.* / dialogue.status / conversation.*）：
  *    顶层格式（payload 平铺到顶层 + ts），前端 onMessage 直接按 msg.type 分支
  *
- * 设计原则：业务 emit EventBus，bridge 负责序列化与扇出，kernel 业务路径不持 user-side ws.Socket。
- * sessionId 过滤由前端按 useChatStore.sessionId 在 onMessage 中处理（ws client 不固定绑定 sessionId）。
+ * P2-11: per-client sessionId 过滤
+ * - WS 客户端发送 { type: 'subscribe', sessionId } 声明关注的对话
+ * - 流式事件按 sessionId 过滤，只推送给订阅了该 sessionId 的客户端
+ * - 全局事件（task.* / agent.* / scheduler.* / mcp.* / cron.*）仍广播给所有客户端
+ * - 未订阅任何 sessionId 的客户端收到所有事件（兼容旧行为）
  */
 const BRIDGED_EVENTS: EventName[] = [
   'task.created',
@@ -79,8 +82,37 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
 export class WsEventBridge {
   private unsubscribes: Array<() => void> = [];
 
+  /**
+   * P2-11: per-client sessionId 订阅映射。
+   * key = WebSocket 实例，value = 该客户端订阅的 sessionId 集合。
+   * 未订阅（集合为空）的客户端收到所有事件（兼容旧行为）。
+   * 客户端断连后自动清理。
+   */
+  private clientSubscriptions = new WeakMap<WebSocket, Set<string>>();
+
   constructor(private wss: WebSocketServer, eventBus: EventBus) {
-    // 1. 全局事件：包装格式
+    // P2-11: 监听新 WS 连接，注册 subscribe 消息处理和断连清理
+    this.wss.on('connection', (ws) => {
+      this.clientSubscriptions.set(ws, new Set());
+      ws.on('message', (raw) => {
+        try {
+          const msg = JSON.parse(raw.toString()) as Record<string, unknown>;
+          // 客户端发送 { type: 'subscribe', sessionId } 注册关注的对话
+          if (msg.type === 'subscribe' && typeof msg.sessionId === 'string') {
+            this.clientSubscriptions.get(ws)?.add(msg.sessionId);
+          }
+          // 客户端发送 { type: 'unsubscribe', sessionId } 取消关注
+          if (msg.type === 'unsubscribe' && typeof msg.sessionId === 'string') {
+            this.clientSubscriptions.get(ws)?.delete(msg.sessionId);
+          }
+        } catch { /* 非 JSON 消息忽略 */ }
+      });
+      ws.on('close', () => {
+        this.clientSubscriptions.delete(ws);
+      });
+    });
+
+    // 1. 全局事件：包装格式 — 广播给所有客户端（这些事件不绑定 sessionId）
     for (const event of BRIDGED_EVENTS) {
       const unsub = eventBus.on(event, (payload) => {
         const msg = JSON.stringify({ type: 'event', event, payload, ts: Date.now() });
@@ -89,11 +121,14 @@ export class WsEventBridge {
       this.unsubscribes.push(unsub);
     }
 
-    // 2. 流式事件：顶层格式（payload 平铺到顶层 + ts）
+    // 2. 流式事件：顶层格式 + 按 sessionId 过滤
     for (const [eventName, wsType] of Object.entries(STREAM_EVENT_MAPPING)) {
       const unsub = eventBus.on(eventName as EventName, (payload: unknown) => {
-        const msg = JSON.stringify({ type: wsType, ...(payload as Record<string, unknown>), ts: Date.now() });
-        this.broadcast(msg);
+        const p = payload as Record<string, unknown>;
+        const msg = JSON.stringify({ type: wsType, ...p, ts: Date.now() });
+        const sessionId = p.sessionId as string | undefined;
+        // 流式事件按 sessionId 过滤：只发给订阅了该 sessionId 的客户端
+        this.broadcastFiltered(msg, sessionId);
       });
       this.unsubscribes.push(unsub);
     }
@@ -103,6 +138,27 @@ export class WsEventBridge {
   private broadcast(msg: string): void {
     for (const client of this.wss.clients) {
       if ((client as unknown as { readyState: number }).readyState === 1) {
+        (client as WebSocket).send(msg);
+      }
+    }
+  }
+
+  /**
+   * P2-11: 按 sessionId 过滤广播。
+   * - 有 sessionId 的事件：只发给订阅了该 sessionId 的客户端，以及未订阅任何 session 的客户端（兼容旧版）
+   * - 无 sessionId 的事件：广播给所有客户端
+   */
+  private broadcastFiltered(msg: string, sessionId: string | undefined): void {
+    for (const client of this.wss.clients) {
+      if ((client as unknown as { readyState: number }).readyState !== 1) continue;
+      const subs = this.clientSubscriptions.get(client as WebSocket);
+      // 未注册订阅信息（连接建立前的老连接）或订阅集合为空 → 接收所有
+      if (!subs || subs.size === 0) {
+        (client as WebSocket).send(msg);
+        continue;
+      }
+      // 有订阅 → 只接收匹配 sessionId 的事件
+      if (sessionId && subs.has(sessionId)) {
         (client as WebSocket).send(msg);
       }
     }

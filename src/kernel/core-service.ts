@@ -11,6 +11,7 @@ import { initInfrastructure, initServices } from './bootstrap.js';
 import type { TaskManager } from './task-manager.js';
 import type { TaskNotifier } from './task-notification.js';
 import type { AgentProgress } from './agent-progress.js';
+import type { RouteRequestPayload } from '../contracts/routing.js';
 import { TaskRouter } from './task-router.js';
 import { createCoreModuleRegistry, type ModuleRegistry } from './module-system.js';
 import { AgentLifecycle } from './agent-lifecycle.js';
@@ -45,7 +46,7 @@ import { BuiltinDriver } from './runtime/drivers/builtin-driver.js';
 import { CheckpointService } from './checkpoint-service.js';
 import { ErrorClassifier } from './error-classifier.js';
 import { TaskCheckpointManager } from './task-checkpoint.js';
-import { ChannelManager, TelegramChannel } from '../channels/index.js';
+import { ChannelManager, TelegramChannel, WsChannel } from '../channels/index.js';
 import { WorkspaceManager } from '../workspaces/index.js';
 import { WebServer } from '../web/server.js';
 import { NotificationService } from '../intelligence/notification-service.js';
@@ -463,7 +464,27 @@ export class CoreService {
     this.taskManager!.recoverOnStartup();
     this.taskManager!.startSweep();
 
+    // P2-13: agent.crashed 期间的消息缓冲队列
+    // crash handler 执行期间新消息可能被路由到正在重启的 agent，导致消息丢失。
+    // 解决方案：crash handler 运行时缓冲消息，agent waitForReady 完成后才释放。
+    const crashedAgents = new Set<string>();
+    const messageBuffer: Array<{ payload: RouteRequestPayload; correlationId: string }> = [];
+    let crashBufferTimer: ReturnType<typeof setTimeout> | null = null;
+
     this.eventBus.on('agent.crashed', ({ name }) => {
+      // 标记 agent 正在崩溃处理中，缓冲后续消息
+      crashedAgents.add(name);
+      if (crashBufferTimer) clearTimeout(crashBufferTimer);
+      // 安全网：10s 后自动释放缓冲（防 crash handler 卡死）
+      crashBufferTimer = setTimeout(() => {
+        crashedAgents.delete(name);
+        // 释放缓冲消息
+        while (messageBuffer.length > 0) {
+          const { payload, correlationId } = messageBuffer.shift()!;
+          this.messageRouter?.sendRouteRequest(payload, correlationId);
+        }
+      }, 10_000);
+
       this.taskManager!.failByAgent(name, `智能体 ${name} 崩溃`);
       this.messageRouter?.failDelegationsByAgent(name, `智能体 ${name} 崩溃`);
       for (const [msgId, pending] of this.sessionManager!.entries()) {
@@ -483,6 +504,13 @@ export class CoreService {
           this.sessionManager!.deletePending(msgId);
           pending.resolve(errorResponse);
         }
+      }
+      // crash handler 完成，清除崩溃标记和释放缓冲
+      crashedAgents.delete(name);
+      if (crashBufferTimer) { clearTimeout(crashBufferTimer); crashBufferTimer = null; }
+      while (messageBuffer.length > 0) {
+        const { payload, correlationId } = messageBuffer.shift()!;
+        this.messageRouter?.sendRouteRequest(payload, correlationId);
       }
     });
 
@@ -655,19 +683,24 @@ export class CoreService {
     const { registerSessionSearchCapability } = await import('../memory/session-search.js');
     registerSessionSearchCapability(capabilityBus, getDb());
 
+    // P2-12: 始终创建 ChannelManager，WS 作为统一 channel 接入
+    this.channelManager = new ChannelManager();
+    const wsChannel = new WsChannel();
+    this.channelManager.register(wsChannel);
+    this.channelManager.onMessage((msg) => {
+      handleChannelMessage(msg.userId, msg.text, msg.channelType, this.buildServiceContainer());
+    });
+    await this.channelManager.startAll();
+
     const telegramConfig = this.config.channels.telegram;
     if (telegramConfig.enabled && telegramConfig.token) {
-      this.channelManager = new ChannelManager();
       const tgChannel = new TelegramChannel({
         token: telegramConfig.token,
         pollingInterval: telegramConfig.pollingInterval,
         allowedUserIds: telegramConfig.allowedUserIds.length > 0 ? telegramConfig.allowedUserIds : undefined,
       });
       this.channelManager.register(tgChannel);
-      this.channelManager.onMessage((msg) => {
-        handleChannelMessage(msg.userId, msg.text, msg.channelType, this.buildServiceContainer());
-      });
-      await this.channelManager.startAll();
+      await tgChannel.start();
       logger.info('Telegram channel 已启动');
     }
 

@@ -253,6 +253,14 @@ export const useWsStore = create<WsStore>()(
           }
 
           flushQueue();          // 发送积压消息
+
+          // P2-11: 连接成功后发送 subscribe 消息，声明当前关注的 sessionId
+          // 服务端 WsEventBridge 按订阅过滤流式事件，减少多标签冗余传输
+          const chatState = (await import('./chat-store.js')).useChatStore.getState();
+          if (chatState.sessionId) {
+            ws?.send(JSON.stringify({ type: 'subscribe', sessionId: chatState.sessionId }));
+          }
+
           // 只在断线重连时弹 toast，首次连接静默
           if (hasConnectedBefore) toast.success(t("connection.connected"));
           hasConnectedBefore = true;
