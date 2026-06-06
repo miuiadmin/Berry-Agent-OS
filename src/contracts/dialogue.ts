@@ -6,6 +6,8 @@
  * 所有消息经 Kernel 中转（审计、镜像、Brain 异步监听）。
  */
 
+import type { IntentAnchor } from './intent.js';
+
 // ─────────────────────────────────────────────────────────────────
 // 核心消息载荷
 // ─────────────────────────────────────────────────────────────────
@@ -52,6 +54,8 @@ export interface DialogueObservePayload {
   currentRound: number;
   /** 该对话关联的 sessionId */
   sessionId: string;
+  /** 12.0: 意图锚点（供 Brain 语义漂移检测用） */
+  intentAnchor?: IntentAnchor;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -73,6 +77,8 @@ export interface DialogueState {
   status: 'active' | 'completed' | 'timeout' | 'interrupted';
   /** 本轮 ephemeral taskId（Code 用于推送 telemetry） */
   ephemeralTaskId?: string;
+  /** 累计字符数（send+reply 的 content.length 之和，用于预算守护） */
+  totalChars: number;
 }
 
 /** DialogueRouter 创建对话的参数 */
@@ -97,6 +103,8 @@ export const DIALOGUE_DEFAULTS = {
   replyTimeoutMs: 60_000,
   /** dialogue.reply 内容的最大字符数（超过则截断） */
   maxReplyChars: 20_000,
+  /** 单个对话的总字符数上限（发+收，粗略 token 估算基于 1 token ≈ 3.5 字符） */
+  maxTotalChars: 280_000,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────

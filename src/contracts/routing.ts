@@ -1,4 +1,5 @@
 import type { DangerLevel } from '../utils/types.js';
+import type { IntentAnchor } from './intent.js';
 
 // === Routing Intent ===
 
@@ -31,6 +32,8 @@ export interface RouteDecision {
   setup?: Array<{ action: 'create_agent' | 'activate_skill' | 'enable_plugin'; params: unknown }>;
   modelTier?: 'fast' | 'default' | 'high';
   activeSkills?: string[];
+  /** 12.0: Brain 路由时产出的用户意图结构化描述（供漂移检测用） */
+  intentAnchor?: IntentAnchor;
 }
 
 export interface RouteResultPayload {

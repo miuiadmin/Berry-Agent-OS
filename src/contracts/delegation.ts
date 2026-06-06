@@ -119,7 +119,8 @@ export type CheckpointTrigger =
   | 'same_tool_repeat'
   | 'budget_warning'
   | 'agent_uncertainty'
-  | 'user_interrupt';
+  | 'user_interrupt'
+  | 'semantic_drift';
 
 export interface CorrectionContext {
   userMessage: string;

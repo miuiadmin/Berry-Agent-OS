@@ -17,6 +17,7 @@ export const BUNDLED_MODEL_PURPOSES = [
   'feedback_analysis',
   'gap_detection',
   'metrics_analysis',
+  'drift_detection',
 ] as const;
 
 export const MODEL_TIERS = ['fast', 'default', 'high'] as const;
@@ -59,6 +60,7 @@ export const PURPOSE_TIER_MAP: Record<BundledModelPurpose, ModelTier> = {
   feedback_analysis: 'fast',
   gap_detection: 'fast',
   metrics_analysis: 'fast',
+  drift_detection: 'fast',
 };
 
 export interface ModelToolDef {
