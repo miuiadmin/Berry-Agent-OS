@@ -44,7 +44,8 @@ export function forkAgent(name: AgentName, scriptPath: string, env?: Record<stri
     label: `agent:${name}`,
     timeoutMs: 30_000,
     onStall: ({ idleMs }) => {
-      if (agent.status === 'running') {
+      // W9 修复：统一使用 'ready' 状态值，与 agent-manager.ts 保持一致
+      if (agent.status === 'ready') {
         agent.status = 'stalled';
       }
     },
@@ -55,12 +56,13 @@ export function forkAgent(name: AgentName, scriptPath: string, env?: Record<stri
     agent.lastHeartbeat = Date.now();
     watchdog.touch();
     if (agent.status === 'stalled') {
-      agent.status = 'running';
+      agent.status = 'ready';
     }
   });
 
   ipc.onMessage('agent.register', () => {
-    agent.status = 'running';
+    // W9 修复：agent 注册后进入 'ready' 状态（与 agent-manager.ts 一致）
+    agent.status = 'ready';
     watchdog.touch();
   });
 
