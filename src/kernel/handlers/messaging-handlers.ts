@@ -96,9 +96,12 @@ export function handleMessage(
   // sendRouteRequest 之前立刻落 user 行 —— 这是消除「user 消息
   // 在中断时全丢」双层漏洞的第一道闸门。失败时仅 warn 不阻塞
   // 路由（fail-open），下游 conversation agent 仍有兜底机会。
-  // 使用 clientMsgId（来自请求体）做幂等键；若缺失则退化为 msgId
-  // 自身（同一连接内 msgId 唯一）。
-  const clientMsgId = requireString(request, 'clientId') ?? msgId;
+  // 注意：clientMsgId 必须是 per-message 唯一（用作 saveUserMessage
+  // 的去重键），不能用 request.clientId（WS 标签页级标识、不变）。
+  // 因此后端每次自生 genId('umsg')，与前端 store 里的 userMsgId 解耦：
+  // 前端 userMsgId 用于本地 outbox 幂等，后端 umsgId 用于 conversations
+  // 表去重。
+  const clientMsgId = genId('umsg');
   try {
     ctx.sessionManager.saveUserMessage(sessionId, message, { clientMsgId });
   } catch (err) {

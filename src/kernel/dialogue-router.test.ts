@@ -32,7 +32,6 @@ describe('DialogueRouter', () => {
     router = new DialogueRouter({
       db,
       sessionManager: {
-        registerTaskSocket: vi.fn(),
         // 12.0 notifyBrain 需要从 pending 读 intentAnchor；mock 给空函数即可
         getPending: vi.fn(() => undefined),
       } as any,

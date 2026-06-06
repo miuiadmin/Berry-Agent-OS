@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useChatStore, genMsgId,
-  appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning, appendToolCall,
+  appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning, appendToolCall, updateLastToolCallResult,
   type DelegationRequest, type PermissionConfirmRequest,
 } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
@@ -155,34 +155,7 @@ export function useChatSocket() {
             resetTimer();
           }
         }
-        return;
-      }
-
-      // 重连恢复消息：服务端推送断连期间已积累的完整文本
-      if (data.type === "reconnect_recovery") {
-        const content = data.content as string;
-        if (content) {
-          const state = useChatStore.getState();
-          // H6 修复：不再直接 addMessage，而是复用 createStreamingPlaceholder 统一占位创建
-          const placeholderId = createStreamingPlaceholder();
-          // 把恢复的 content 写回占位（用 updateLastMessage 等价方式：通过 id 找到对应消息并更新）
-          // 为简化：直接在 messages 里替换对应 id 的内容
-          const msgs = state.messages;
-          const idx = msgs.findIndex((m) => m.id === placeholderId);
-          if (idx >= 0) {
-            // 只在恢复内容比本地更长时才覆盖（更长 = 更新，因为内容只会追加）
-            if (content.length > (msgs[idx].content?.length ?? 0)) {
-              useChatStore.getState().updateLastMessage(() => ({ content, status: "streaming" as const }));
-            }
-          } else {
-            useChatStore.getState().updateLastMessage(() => ({ content, status: "streaming" as const }));
-          }
-          setStreaming(true);
-          // 记录恢复的 sessionId，用于后续全局事件过滤
-          streamingSessionRef.current = state.sessionId;
-          resetTimer();
-        }
-        return;
+      return;
       }
 
       // 对话消息类型（text_delta / reasoning / tool_call / result 等）
@@ -250,6 +223,45 @@ export function useChatSocket() {
             ts: Date.now(),
           });
           resetTimer();
+          break;
+        }
+        case "tool_result": {
+          // 流式契约补全：tool_call 之后到达的独立 tool_result（结果稍后才到）
+          const tr = msg as Extract<ServerMessage, { type: "tool_result" }>;
+          // 把 tool_result 追加到对应的 tool_call 卡片（按 toolName 匹配最新未填 result 的卡片）
+          updateLastToolCallResult(tr.toolName, {
+            isError: tr.isError ?? false,
+            durationMs: tr.durationMs,
+          });
+          resetTimer();
+          break;
+        }
+        case "uncertainty": {
+          // 模型自报 confidence 低：展示提示但不打断流
+          const u = msg as Extract<ServerMessage, { type: "uncertainty" }>;
+          setLastProgress(`⚠️ ${u.reason}`);
+          resetTimer();
+          break;
+        }
+        case "no_response": {
+          // P1-4: Brain 路由失败 / Runtime 异常 — 找到当前 streaming 的 user 消息标 failed
+          const nr = msg as Extract<ServerMessage, { type: "no_response" }>;
+          const current = useChatStore.getState().messages;
+          // 找最后一条 sending 的 user 消息
+          for (let i = current.length - 1; i >= 0; i--) {
+            const m = current[i];
+            if (m.role === "user" && m.status === "sending") {
+              useChatStore.setState((s) => {
+                const msgs = [...s.messages];
+                msgs[i] = { ...msgs[i], status: "failed" };
+                return { messages: msgs };
+              });
+              setLastError(`对话未收到回复: ${nr.reason}`);
+              break;
+            }
+          }
+          setStreaming(false);
+          clearTimer();
           break;
         }
         case "result": {

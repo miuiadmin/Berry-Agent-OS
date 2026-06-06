@@ -123,6 +123,32 @@ export interface AskUserMessage {
   taskId: string;
 }
 
+/** 工具执行结果（独立于 tool_call 的 result 字段）— 流式契约补全 */
+export interface ToolResultMessage {
+  type: "tool_result";
+  toolName: string;
+  isError?: boolean;
+  durationMs?: number;
+  sessionId?: string;
+  taskId?: string;
+}
+
+/** 模型不确定信号（Kernel → 前端）— agent 自报 confidence 低 */
+export interface UncertaintyMessage {
+  type: "uncertainty";
+  reason: string;
+  sessionId?: string;
+  taskId?: string;
+}
+
+/** 对话无回复（Kernel → 前端）— Brain 路由失败 / Runtime 异常 / 超时 */
+export interface NoResponseMessage {
+  type: "no_response";
+  reason: string;
+  sessionId?: string;
+  taskId?: string;
+}
+
 /** Union of all server → client WebSocket messages */
 export type ServerMessage =
   | TextDeltaMessage
@@ -134,10 +160,13 @@ export type ServerMessage =
   | DelegationNeededMessage
   | PermissionConfirmNeededMessage
   | ToolCallMessage
+  | ToolResultMessage
   | ReasoningDeltaMessage
   | DialogueStatusMessage
   | AgentHandoffMessage
-  | AskUserMessage;
+  | AskUserMessage
+  | UncertaintyMessage
+  | NoResponseMessage;
 
 // ─── Client → Server messages ─────────────────────────────────────
 

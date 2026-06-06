@@ -493,3 +493,20 @@ export function appendReasoning(text: string) {
 export function appendToolCall(event: ToolCallEvent) {
   useChatStore.getState().updateLastMessage((m) => ({ toolCalls: [...(m.toolCalls ?? []), event] }));
 }
+
+/**
+ * 补全最近一条尚未填 result 的 toolCall 卡片（按 toolName 匹配）
+ * 用于 tool_call 与 tool_result 分开发送的场景
+ */
+export function updateLastToolCallResult(toolName: string, patch: { isError?: boolean; durationMs?: number }) {
+  useChatStore.getState().updateLastMessage((m) => {
+    const calls = [...(m.toolCalls ?? [])];
+    for (let i = calls.length - 1; i >= 0; i--) {
+      if (calls[i].toolName === toolName) {
+        calls[i] = { ...calls[i], ...patch };
+        break;
+      }
+    }
+    return { toolCalls: calls };
+  });
+}
