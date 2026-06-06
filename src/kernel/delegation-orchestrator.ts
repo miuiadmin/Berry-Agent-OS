@@ -1276,6 +1276,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.pendingReviewOrigins.delete(correlationId);
         const dEntry = this.delegationManager.getByCorrelation(correlationId);
         if (dEntry) this.delegationManager.complete(dEntry.id, draft);
+        // P0 兜底：审核失败路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
+        try {
+          this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, draft, pending.reasoning);
+        } catch (err) {
+          logger.error({ err, correlationId }, '审核失败兜底 saveConversationTurn 失败');
+        }
         this.sessionManager.deletePending(correlationId);
         pending.resolve(draft);
         return;
@@ -1289,6 +1295,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.pendingReviewOrigins.delete(correlationId);
         const dEntry = this.delegationManager.getByCorrelation(correlationId);
         if (dEntry) this.delegationManager.complete(dEntry.id, draft);
+        // P0 兜底：审核超时路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
+        try {
+          this.sessionManager.saveConversationTurn(stillPending.sessionId, stillPending.userMessage, draft, stillPending.reasoning);
+        } catch (err) {
+          logger.error({ err, correlationId }, '审核超时兜底 saveConversationTurn 失败');
+        }
         this.sessionManager.deletePending(correlationId);
         stillPending.resolve(draft);
       }, 30_000);

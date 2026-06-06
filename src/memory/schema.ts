@@ -44,8 +44,11 @@ export const CORE_SCHEMA_SQL = `
     tool_input TEXT,
     tool_result TEXT,
     token_count INTEGER,
+    -- 客户端消息 ID（per-message 唯一），用作 user 消息精确幂等键
+    client_msg_id TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
+  -- client_msg_id UNIQUE 索引由 addConversationsClientMsgIdColumn migration 创建（避免 legacy schema 与新列冲突）
 
   CREATE TABLE IF NOT EXISTS agent_tasks (
     id TEXT PRIMARY KEY,

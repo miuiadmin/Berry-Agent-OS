@@ -11,7 +11,7 @@ import type {
   DaemonTaskResultMessage,
   DaemonDisconnectMessage,
 } from '../../contracts/daemon-protocol.js';
-import type { SocketProgressEvent, SocketResultEvent, SocketInterruptedEvent } from '../../contracts/socket-protocol.js';
+import type { SocketResultEvent, SocketInterruptedEvent } from '../../contracts/socket-protocol.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
 import type { ModelTier } from '../../contracts/model.js';
 import type { LogLevel } from '../../observability/types.js';
@@ -350,10 +350,13 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
   getEventBus().emit('message.received', { sessionId, message, taskId });
 
   const pending = services.sessionManager.getPending(msgId)!;
-  if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-    const event: SocketProgressEvent = { type: 'progress', status: 'routing', summary: '正在分析意图...', taskId, sessionId };
-    pending.socket.write(JSON.stringify(event) + '\n');
-  }
+  // P0-B 整改：routing 进度走 EventBus，不再直写 socket
+  getEventBus().emit('conversation.progress', {
+    sessionId,
+    taskId,
+    status: 'routing',
+    summary: '正在分析意图...',
+  });
 
   logger.info({ sessionId, taskId }, '正在处理用户消息 → Brain 路由');
 

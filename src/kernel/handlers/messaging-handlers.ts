@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { Socket } from 'node:net';
 import type { ServiceContainer } from '../service-container.js';
-import type { SocketProgressEvent, SocketResultEvent } from '../../contracts/socket-protocol.js';
+import type { SocketResultEvent } from '../../contracts/socket-protocol.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
 import { buildAvailableAgentsList } from '../agent-registry.js';
 import { PermissionEngine } from '../../safety/permissions.js';
@@ -130,10 +130,13 @@ export function handleMessage(
 
   const pending = ctx.sessionManager.getPending(msgId)!;
 
-  if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-    const event: SocketProgressEvent = { type: 'progress', status: 'routing', summary: '正在分析意图...', taskId, sessionId };
-    pending.socket.write(JSON.stringify(event) + '\n');
-  }
+  // P0-B 整改：routing 进度走 EventBus，不再直写 socket
+  getEventBus().emit('conversation.progress', {
+    sessionId,
+    taskId,
+    status: 'routing',
+    summary: '正在分析意图...',
+  });
 
   logger.info({ sessionId, taskId }, '正在处理用户消息 → Brain 路由');
 

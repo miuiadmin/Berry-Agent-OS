@@ -59,11 +59,21 @@ export function saveUserMessage(
 ): { id: string; deduplicated: boolean } {
   const db = getDb();
 
-  // 幂等：先按 (session_id, content, role) 查重 —— 同一会话内
-  // 内容完全相同的最新 user 消息在去重时间窗口内被视为同一消息。
-  // 这在重试场景下足够区分「同一 user 消息的多次重试」和「新 user 消息」。
-  // 5 秒窗口保证正常连续对话不会被误合并（用户连续输入两遍同一句话时差通常 > 5s）。
+  // 幂等：优先按 (session_id, client_msg_id) 精确去重（UNIQUE 索引保证）
+  // 同一会话内同 clientMsgId 的多次重试入库只会保留一行。
+  // 没有 clientMsgId 时退化为 (session_id, content) + 5s 窗口（兼容旧调用方）。
   if (options.clientMsgId) {
+    const existing = db
+      .prepare(
+        `SELECT id FROM conversations
+         WHERE session_id = ? AND client_msg_id = ? AND role = 'user' LIMIT 1`,
+      )
+      .get(sessionId, options.clientMsgId) as { id: string } | undefined;
+    if (existing) {
+      return { id: existing.id, deduplicated: true };
+    }
+  } else {
+    // 无 clientMsgId 兜底：5s 窗口 + content 匹配（避免重写破坏向后兼容）
     const dedupeWindowMs = 5_000;
     const cutoff = Date.now() - dedupeWindowMs;
     const existing = db
@@ -79,10 +89,26 @@ export function saveUserMessage(
   }
 
   const id = genId('msg');
-  db.prepare(`
-    INSERT INTO conversations (id, session_id, role, content, reasoning, created_at)
-    VALUES (?, ?, 'user', ?, NULL, ?)
-  `).run(id, sessionId, content, Date.now());
+  try {
+    db.prepare(`
+      INSERT INTO conversations (id, session_id, role, content, reasoning, client_msg_id, created_at)
+      VALUES (?, ?, 'user', ?, NULL, ?, ?)
+    `).run(id, sessionId, content, options.clientMsgId ?? null, Date.now());
+  } catch (err) {
+    // UNIQUE 约束并发冲突：另一线程已插入同 clientMsgId 行 → 复用其 id
+    if (options.clientMsgId && (err as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      const existing = db
+        .prepare(
+          `SELECT id FROM conversations
+           WHERE session_id = ? AND client_msg_id = ? AND role = 'user' LIMIT 1`,
+        )
+        .get(sessionId, options.clientMsgId) as { id: string } | undefined;
+      if (existing) {
+        return { id: existing.id, deduplicated: true };
+      }
+    }
+    throw err;
+  }
   return { id, deduplicated: false };
 }
 

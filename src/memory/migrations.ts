@@ -56,6 +56,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateBrainDecisionsAddColumns(conn);
     migrateBrainDecisionsExpandTypes(conn);
     migrateReviewRequestsExpandVerdicts(conn);
+    addConversationsClientMsgIdColumn(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -838,6 +839,22 @@ function addTaskTraceColumn(conn: Database.Database): void {
 function addTaskRequeueColumn(conn: Database.Database): void {
   const cols = getColumns(conn, 'agent_tasks');
   addColumnIfMissing(conn, cols, 'agent_tasks', 'requeue_count', 'INTEGER NOT NULL DEFAULT 0');
+}
+
+/**
+ * 给 conversations 表加 client_msg_id 列 + UNIQUE 索引。
+ * 12.0 起 user 消息改用 clientMsgId 精确去重（同 session 内同 clientMsgId 只入库一次），
+ * 替换旧的 5s 窗口 + content 匹配（边界 bug：用户连续相同消息 > 5s 会被重复入库）。
+ */
+function addConversationsClientMsgIdColumn(conn: Database.Database): void {
+  const cols = getColumns(conn, 'conversations');
+  addColumnIfMissing(conn, cols, 'conversations', 'client_msg_id', 'TEXT');
+  // UNIQUE 索引（条件索引：仅对 client_msg_id 非空行生效，允许老数据无 clientMsgId 仍可入）
+  conn.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_conv_client_msg_id
+     ON conversations(session_id, client_msg_id)
+     WHERE client_msg_id IS NOT NULL`,
+  );
 }
 
 function migrateCreateKnowledgeEmbeddings(conn: Database.Database): void {

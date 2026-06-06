@@ -9,6 +9,10 @@ interface FlushEntry {
   lastFlushedLength: number;
   /** 上次的 reasoning 长度 */
   lastReasoningLength: number;
+  /** 最近一次累积的完整文本（dispose 兜底用） */
+  pendingText: string;
+  /** 最近一次累积的完整 reasoning */
+  pendingReasoning: string;
   /** 延迟刷写定时器 */
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -54,9 +58,13 @@ export class StreamingFlusher {
 
     let entry = this.entries.get(taskId);
     if (!entry) {
-      entry = { lastFlushedLength: 0, lastReasoningLength: 0, timer: null };
+      entry = { lastFlushedLength: 0, lastReasoningLength: 0, pendingText: '', pendingReasoning: '', timer: null };
       this.entries.set(taskId, entry);
     }
+
+    // 持续记录最近一次的累积内容（dispose 时用来兜底 flush）
+    entry.pendingText = fullText;
+    if (reasoning !== undefined) entry.pendingReasoning = reasoning;
 
     // 检查文本变化量是否达到阈值
     const textDelta = fullText.length - entry.lastFlushedLength;
@@ -95,10 +103,23 @@ export class StreamingFlusher {
     this.entries.delete(taskId);
   }
 
-  /** 清理所有 timer（进程退出时调用） */
+  /**
+   * 清理所有 timer，**并同步 flush 所有未 flush 的累积文本到 DB**。
+   * 用于进程退出 / SIGTERM 路径防止 < 2s partial 文本丢失。
+   * flush 同步执行（better-sqlite3）保证 SIGKILL 之外都能落库。
+   */
   dispose(): void {
-    for (const entry of this.entries.values()) {
+    for (const [taskId, entry] of this.entries) {
       if (entry.timer) clearTimeout(entry.timer);
+      // 同步 flush 未落库的累积内容（仅在 lastFlushedLength < pendingText.length 时）
+      if (entry.pendingText.length > entry.lastFlushedLength) {
+        try {
+          this.taskManager.flushStreamingContent(taskId, entry.pendingText, entry.pendingReasoning);
+          logger.info({ taskId, chars: entry.pendingText.length - entry.lastFlushedLength }, 'dispose() 兜底 flush 流式内容');
+        } catch (err) {
+          logger.warn({ err, taskId }, 'dispose() 兜底 flush 失败（任务可能已结束）');
+        }
+      }
     }
     this.entries.clear();
   }
