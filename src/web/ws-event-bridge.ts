@@ -77,6 +77,10 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'conversation.interrupted': 'interrupted',
   /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，resolve 不再直写 channel */
   'conversation.result': 'result',
+  /** P3: 权限确认请求 — 全局广播替代 per-connection listener，断连期间新请求不丢失 */
+  'permission.user_confirm_needed': 'permission.confirm_needed',
+  /** P3: 人工委托请求 — 全局广播替代 per-connection listener，断连期间新请求不丢失 */
+  'delegation.user_needed': 'delegation.needed',
 };
 
 export class WsEventBridge {

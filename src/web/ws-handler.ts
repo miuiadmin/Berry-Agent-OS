@@ -127,19 +127,12 @@ export function createWsHandler(deps: WebServerDependencies) {
 
     logger.debug({ clientId }, 'WebSocket 连接');
 
-    // P0-C 修复：删除 rebindSocket 调用 — 重连恢复由前端 sharedSessionRestore 走 HTTP 拉历史 + 续接 WS live tail 解决
-    const delegationListener = deps.eventBus.on('delegation.user_needed', (payload) => {
-      wsReply(ws, { type: 'delegation.needed', ...payload });
-    });
+    // P3: permission/delegation 事件已迁移到 WsEventBridge 全局广播，
+    // 不再需要 per-connection EventBus listener
 
-    // Forward permission confirmation events
-    const permissionListener = deps.eventBus.on('permission.user_confirm_needed', (payload) => {
-      wsReply(ws, { type: 'permission.confirm_needed', ...payload });
-    });
-
-    // P2-10 修复：WS 连接（含重连）时重放未决的 delegation 和 permission 请求
-    // 这些请求在 WS 断连期间被推送到 EventBus，但 per-connection 监听器已清理
-    // 重连后从 SQLite 查询 pending 状态的请求并重新推送给客户端
+    // P2-10: WS 重连安全网 — 即使事件现在通过 WsEventBridge 全局广播，
+    // 重放从 SQLite 查询的 pending 状态请求仍作为幂等兜底（防止事件在
+    // WS 断连窗口期被广播但该客户端未订阅到）。
     replayPendingRequests(ws, deps);
 
     ws.on('message', (data) => {
@@ -167,8 +160,6 @@ export function createWsHandler(deps: WebServerDependencies) {
         code,
         reason: reason.toString() || '无',
       }, 'WebSocket 断开');
-      delegationListener();
-      permissionListener();
       clearInterval(pingInterval);
     });
   };
