@@ -162,6 +162,35 @@ export class HumanDelegationManager {
     this.pendingCallbacks.clear();
   }
 
+  /**
+   * P2-10: 启动时清理残留的 pending 委托。
+   *
+   * 进程重启后 pendingCallbacks 和 timeouts 丢失，但 SQLite 中仍有 pending 状态的委托。
+   * 这些委托的等待 Promise 已无法 resolve（agent 进程也已丢失），
+   * 直接标记为 timeout 避免永远卡在 pending 状态。
+   */
+  recoverOnStartup(): { timedOut: number } {
+    const now = Date.now();
+    const stale = this.db.prepare(
+      `SELECT id, session_id, timeout_ms, created_at FROM human_delegations WHERE status = 'pending'`,
+    ).all() as Array<{ id: string; session_id: string; timeout_ms: number; created_at: number }>;
+
+    let timedOut = 0;
+    for (const row of stale) {
+      const error = `委托因服务重启被标记超时（已等待 ${Math.round((now - row.created_at) / 1000)}s）`;
+      this.db.prepare(
+        `UPDATE human_delegations SET status = 'timeout', user_response = NULL, resolved_at = ? WHERE id = ? AND status = 'pending'`,
+      ).run(now, row.id);
+      logger.info({ delegationId: row.id, sessionId: row.session_id }, '启动恢复: 残留委托已标记超时');
+      timedOut++;
+    }
+
+    if (timedOut > 0) {
+      logger.info({ timedOut }, '启动恢复: 残留委托清理完成');
+    }
+    return { timedOut };
+  }
+
   private ensureTable(): void {
     try {
       this.db.exec(`

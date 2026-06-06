@@ -33,6 +33,10 @@ export interface WebServerDependencies {
   templateService?: ITemplateService | null;
   asyncDelegationService?: IAsyncDelegationService | null;
   teamBuilderService?: ITeamBuilderService | null;
-  humanDelegationManager?: { resolve(id: string, response: string | null, status?: string): boolean } | null;
+  /** P2-10: 拓宽类型，增加 getPending() 用于 WS 重连时重放未决委托 */
+  humanDelegationManager?: {
+    resolve(id: string, response: string | null, status?: string): boolean;
+    getPending(sessionId?: string): Array<{ id: string; sessionId: string; requestedBy: string; title: string; description: string; urgency: string; options: string[]; status: string; timeoutMs: number; createdAt: number }>;
+  } | null;
   getProviderRegistry?: () => IProviderRegistry;
 }

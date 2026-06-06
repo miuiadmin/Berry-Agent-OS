@@ -520,6 +520,9 @@ export class CoreService {
       const cleanupHooks = registerNotificationHooks(getEventBus(), () => notificationService);
       this.notificationHooksCleanup = cleanupHooks;
 
+      // P2-10: 启动时清理残留的 pending 委托（重启后 in-memory callback/timeout 丢失）
+      this.humanDelegationManager.recoverOnStartup();
+
       this.webServer = new WebServer({
         port: this.config.web.port,
         host: this.config.web.host,

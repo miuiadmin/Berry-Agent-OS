@@ -53,6 +53,70 @@ export class WebSocketBridge implements WritableChannel {
   }
 }
 
+// --- P2-10: Reconnect replay ---
+
+/**
+ * WS 连接（含重连）时重放未决的 delegation 和 permission 请求。
+ *
+ * 当 WS 断连期间触发 delegation.user_needed / permission.user_confirm_needed 时，
+ * per-connection 监听器已清理，消息被静默丢弃。重连后从 SQLite 查询 pending 状态的请求，
+ * 重新推送给客户端，避免用户错失操作提示（默认 5 分钟超时自动拒绝）。
+ */
+function replayPendingRequests(ws: WebSocket, deps: WebServerDependencies): void {
+  try {
+    // 1. 重放未决的委托请求（human_delegations 表）
+    if (deps.humanDelegationManager) {
+      const pendingDelegations = deps.humanDelegationManager.getPending();
+      for (const d of pendingDelegations) {
+        // 检查是否已超时（创建时间 + timeoutMs < 当前时间）
+        if (d.createdAt + d.timeoutMs < Date.now()) continue;
+        wsReply(ws, {
+          type: 'delegation.needed',
+          delegationId: d.id,
+          sessionId: d.sessionId,
+          requestedBy: d.requestedBy,
+          title: d.title,
+          description: d.description,
+          urgency: d.urgency,
+          options: d.options,
+        });
+        logger.debug({ delegationId: d.id, clientId: ws.url }, 'WS 重连重放未决委托');
+      }
+    }
+
+    // 2. 重放未决的权限确认请求（approval_requests 表）
+    // permissionCoordinator.getPending() 返回 status='pending' 的 ApprovalRequest[]
+    // 只重放高风险的（dangerous 级别才触发 permission.user_confirm_needed）
+    const pendingPermissions = deps.permissionCoordinator.getPending();
+    for (const p of pendingPermissions) {
+      // 只重放高风险且未过期的请求
+      if (p.riskLevel !== 'high') continue;
+      if (p.expiresAt && p.expiresAt < Date.now()) continue;
+      // 从 requestPayload 提取工具信息
+      let toolName = '';
+      let toolInput = '';
+      try {
+        const payload = p.requestPayload;
+        toolName = (payload?.toolName ?? payload?.tool ?? '') as string;
+        toolInput = typeof payload?.toolInput === 'string' ? payload.toolInput as string : JSON.stringify(payload?.toolInput ?? '');
+      } catch { /* 解析失败用空值 */ }
+      wsReply(ws, {
+        type: 'permission.confirm_needed',
+        requestId: p.id,
+        sessionId: p.sessionId,
+        agentName: p.requester,
+        toolName,
+        toolInput: toolInput.slice(0, 500),
+        dangerLevel: p.riskLevel,
+        brainReason: '危险操作，需要用户确认（重连恢复）',
+      });
+      logger.debug({ requestId: p.id }, 'WS 重连重放未决权限确认');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'WS 重连重放未决请求失败');
+  }
+}
+
 // --- Connection handler ---
 
 export function createWsHandler(deps: WebServerDependencies) {
@@ -72,6 +136,11 @@ export function createWsHandler(deps: WebServerDependencies) {
     const permissionListener = deps.eventBus.on('permission.user_confirm_needed', (payload) => {
       wsReply(ws, { type: 'permission.confirm_needed', ...payload });
     });
+
+    // P2-10 修复：WS 连接（含重连）时重放未决的 delegation 和 permission 请求
+    // 这些请求在 WS 断连期间被推送到 EventBus，但 per-connection 监听器已清理
+    // 重连后从 SQLite 查询 pending 状态的请求并重新推送给客户端
+    replayPendingRequests(ws, deps);
 
     ws.on('message', (data) => {
       try {
