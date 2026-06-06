@@ -181,8 +181,14 @@ export class IpcJournal {
 
   cleanup(): number {
     const cutoff = Date.now() - this.retentionMs;
-    const result = this.db.prepare(`DELETE FROM ipc_journal WHERE status = 'delivered' AND delivered_at < ?`)
-      .run(cutoff);
+    // W7 修复：扩展 cleanup 范围，删除过期的 failed 和 pending 记录
+    // 之前只清理 delivered，导致永久失败或悬挂的记录无限累积
+    const result = this.db.prepare(`
+      DELETE FROM ipc_journal
+      WHERE (status = 'delivered' AND delivered_at < ?)
+         OR (status = 'failed' AND created_at < ?)
+         OR (status = 'pending' AND created_at < ?)
+    `).run(cutoff, cutoff, cutoff);
     if (result.changes > 0) {
       logger.debug({ cleaned: result.changes }, 'IPC journal 清理完成');
     }

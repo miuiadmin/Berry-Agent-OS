@@ -140,7 +140,8 @@ export class IpcChannel {
         payload,
         timestamp: Date.now(),
       };
-      this.child.send(msg);
+      // C3 修复：走 journal 记录路径，确保 request 消息可被崩溃后重放
+      this.writeOrFail(msg, type, (m) => this.child.send(m as unknown as IpcMessage));
     });
   }
 
@@ -275,7 +276,23 @@ export class IpcChildChannel {
         payload,
         timestamp: Date.now(),
       };
-      process.send!(msg);
+      // C3 修复：与 send() 一致，先 journal.record 再 process.send，失败时 markFailed
+      if (this.journal?.shouldJournal(type)) {
+        this.journal.record(msg);
+      }
+      try {
+        const ok = process.send ? process.send(msg) : false;
+        if (ok && this.journal?.shouldJournal(type)) {
+          this.journal.markSent(msg.id);
+        } else if (!ok && this.journal?.shouldJournal(type)) {
+          this.journal.markFailed(msg.id);
+        }
+      } catch (err) {
+        if (this.journal?.shouldJournal(type)) {
+          try { this.journal.markFailed(msg.id); } catch { /* 二次失败吞掉 */ }
+        }
+        throw err;
+      }
     });
   }
 

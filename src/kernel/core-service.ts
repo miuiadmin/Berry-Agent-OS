@@ -467,6 +467,8 @@ export class CoreService {
     // P2-9: 启动时立即清理残留任务（重启后 AbortController/timeout 丢失）
     this.taskManager!.recoverOnStartup();
     this.taskManager!.startSweep();
+    // W8 修复：恢复 waiting_approval 状态的残留任务（taskManager 不处理此状态）
+    this.sessionManager!.recoverSessions(getDb());
 
     // P2-13: agent.crashed 期间的消息缓冲队列
     // crash handler 执行期间新消息可能被路由到正在重启的 agent，导致消息丢失。
