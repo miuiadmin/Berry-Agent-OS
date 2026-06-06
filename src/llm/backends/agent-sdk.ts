@@ -261,7 +261,7 @@ export class AgentSdkBackend implements LlmBackend {
     const session = this.sessions.get(cacheKey);
     if (session) {
       this.sessions.delete(cacheKey);
-      this.archiveAgent(session.agentId).catch(() => {});
+      this.archiveAgent(session.agentId).catch((err) => { logger.debug({ err }, 'archiveAgent cleanup failed'); });
     }
   }
 
@@ -278,7 +278,7 @@ export class AgentSdkBackend implements LlmBackend {
     for (const [key, session] of this.sessions) {
       if (session.lastUsedAt < cutoff) {
         this.sessions.delete(key);
-        this.archiveAgent(session.agentId).catch(() => {});
+        this.archiveAgent(session.agentId).catch((err) => { logger.debug({ err }, 'archiveAgent cleanup failed'); });
         logger.debug({ key }, '回收过期 Agent SDK 会话');
       }
     }

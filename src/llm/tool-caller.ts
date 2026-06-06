@@ -165,126 +165,43 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
     const toolResults: ModelContentBlock[] = [];
 
-    for (const block of toolUseBlocks) {
+    // --- 提取单工具执行逻辑为内部函数 ---
+    async function executeToolBlock(block: ToolUseBlock): Promise<{ record: ToolCallRecord; resultBlock: ModelContentBlock }> {
       const toolDef = getToolByName(block.name);
       const dangerLevel: DangerLevel = toolDef?.dangerLevel ?? 'dangerous';
       const inputStr = JSON.stringify(block.input);
 
-      // dialogue 工具不计入 maxCalls（多轮对话可能需要大量交互，不应提前撞顶）
-      const isDialogueTool = block.name === 'dialogue' || block.name === 'send_dialogue';
-      const loopCheck = isDialogueTool
-        ? { loop: false }
-        : detector.check(block.name, inputStr, false);
-      if (loopCheck.loop) {
-        logger.debug({ tool: block.name, reason: loopCheck.reason }, 'tool:loop-detected');
-        toolResults.push({
-          type: 'tool_result',
-          toolUseId: block.id,
-          content: `工具调用循环被中断: ${loopCheck.reason}`,
-          isError: true,
-        });
-        continue;
-      }
-
+      // 权限获取
       const permission = acquirePermission
         ? await acquirePermission(block.name, inputStr, dangerLevel)
         : await requestPermission(block.name, inputStr, dangerLevel);
       logger.debug({ tool: block.name, allowed: permission.allowed, reason: permission.reason?.slice(0, 100) }, 'tool:permission');
+
       if (!permission.allowed) {
-        consecutivePermissionDenials++;
-        if (onUncertainty && !uncertaintyFired && consecutivePermissionDenials >= 2) {
-          uncertaintyFired = true;
-          onUncertainty('consecutive permission denials');
-        }
-        const record: ToolCallRecord = {
-          name: block.name,
-          input: inputStr,
-          permissionToken: permission.tokenId,
-          result: `权限被拒绝: ${permission.reason}`,
-          isError: true,
-          durationMs: 0,
-          dangerLevel,
-        };
-        toolCalls.push(record);
-        auditTool(record);
-        toolResults.push({
-          type: 'tool_result',
-          toolUseId: block.id,
-          content: `权限被拒绝: ${permission.reason}`,
-          isError: true,
-        });
-        continue;
+        const record: ToolCallRecord = { name: block.name, input: inputStr, permissionToken: permission.tokenId, result: `权限被拒绝: ${permission.reason}`, isError: true, durationMs: 0, dangerLevel };
+        return { record, resultBlock: { type: 'tool_result', toolUseId: block.id, content: record.result, isError: true } };
       }
-
       if (!permission.tokenId) {
-        const record: ToolCallRecord = {
-          name: block.name,
-          input: inputStr,
-          result: '权限被拒绝: 缺少 permission token',
-          isError: true,
-          durationMs: 0,
-          dangerLevel,
-        };
-        toolCalls.push(record);
-        auditTool(record);
-        toolResults.push({
-          type: 'tool_result',
-          toolUseId: block.id,
-          content: record.result,
-          isError: true,
-        });
-        continue;
+        const record: ToolCallRecord = { name: block.name, input: inputStr, result: '权限被拒绝: 缺少 permission token', isError: true, durationMs: 0, dangerLevel };
+        return { record, resultBlock: { type: 'tool_result', toolUseId: block.id, content: record.result, isError: true } };
       }
-
       if (typeof validatePermission !== 'function' || typeof consumePermission !== 'function') {
-        const record: ToolCallRecord = {
-          name: block.name,
-          input: inputStr,
-          permissionToken: permission.tokenId,
-          result: '权限被拒绝: 缺少 permission token 校验/消费器',
-          isError: true,
-          durationMs: 0,
-          dangerLevel,
-        };
-        toolCalls.push(record);
-        auditTool(record);
-        toolResults.push({
-          type: 'tool_result',
-          toolUseId: block.id,
-          content: record.result,
-          isError: true,
-        });
-        continue;
+        const record: ToolCallRecord = { name: block.name, input: inputStr, permissionToken: permission.tokenId, result: '权限被拒绝: 缺少 permission token 校验/消费器', isError: true, durationMs: 0, dangerLevel };
+        return { record, resultBlock: { type: 'tool_result', toolUseId: block.id, content: record.result, isError: true } };
       }
 
-      // Skip validate if acquirePermission already validated atomically
+      // 权限校验（acquirePermission 模式跳过）
       if (!acquirePermission) {
         const validation = await validatePermission(permission.tokenId, block.name, inputStr);
         if (!validation.allowed) {
-          const record: ToolCallRecord = {
-            name: block.name,
-            input: inputStr,
-            permissionToken: permission.tokenId,
-            result: `权限被拒绝: ${validation.reason}`,
-            isError: true,
-            durationMs: 0,
-            dangerLevel,
-          };
-          toolCalls.push(record);
-          auditTool(record);
-          toolResults.push({
-            type: 'tool_result',
-            toolUseId: block.id,
-            content: record.result,
-            isError: true,
-          });
-          continue;
+          const record: ToolCallRecord = { name: block.name, input: inputStr, permissionToken: permission.tokenId, result: `权限被拒绝: ${validation.reason}`, isError: true, durationMs: 0, dangerLevel };
+          return { record, resultBlock: { type: 'tool_result', toolUseId: block.id, content: record.result, isError: true } };
         }
       }
 
+      // 执行
       let toolResult: ToolResult;
       const start = Date.now();
-
       if (!toolDef) {
         toolResult = { content: `未知工具: ${block.name}`, isError: true };
       } else {
@@ -294,47 +211,120 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
           toolResult = { content: `工具执行异常: ${(err as Error).message}`, isError: true };
         }
       }
-
       const durationMs = Date.now() - start;
+
+      // 消费 token
+      await consumePermission(permission.tokenId);
+
       const status = toolResult.isError ? 'error' : 'ok';
       logger.debug({ tool: block.name, input: inputStr.slice(0, 200), result: toolResult.content.slice(0, 500), durationMs, isError: toolResult.isError ?? false, dangerLevel }, 'tool:executed');
       metrics.counter('tool_calls_total').inc({ tool: block.name, agent: chatContext?.agent ?? '', status });
       metrics.histogram('tool_duration_ms').observe(durationMs, { tool: block.name, agent: chatContext?.agent ?? '' });
 
-      const record: ToolCallRecord = {
-        name: block.name,
-        input: inputStr,
-        permissionToken: permission.tokenId,
-        result: toolResult.content,
-        isError: toolResult.isError ?? false,
-        durationMs,
-        dangerLevel,
-      };
-      toolCalls.push(record);
-      auditTool(record);
-      if (onToolResult) {
-        onToolResult(block.name, record.isError);
-      }
-      await consumePermission(permission.tokenId);
-      consecutivePermissionDenials = 0;
+      const record: ToolCallRecord = { name: block.name, input: inputStr, permissionToken: permission.tokenId, result: toolResult.content, isError: toolResult.isError ?? false, durationMs, dangerLevel };
+      return { record, resultBlock: { type: 'tool_result', toolUseId: block.id, content: toolResult.content, isError: toolResult.isError } };
+    }
 
-      if (toolResult.isError) {
-        detector.check(block.name, inputStr, true);
-        consecutiveToolErrors++;
-        if (consecutiveToolErrors >= 3 && onUncertainty && !uncertaintyFired) {
-          uncertaintyFired = true;
-          onUncertainty('consecutive tool errors: ' + consecutiveToolErrors);
+    // --- 将 toolUseBlocks 分为批次：连续的 parallelizable 工具合为一个并行批 ---
+    type Batch = { blocks: ToolUseBlock[]; parallel: boolean };
+    const batches: Batch[] = [];
+    for (const block of toolUseBlocks) {
+      const toolDef = getToolByName(block.name);
+      const isParallel = toolDef?.parallelizable === true;
+      const last = batches[batches.length - 1];
+      if (last && last.parallel && isParallel) {
+        last.blocks.push(block);
+      } else {
+        batches.push({ blocks: [block], parallel: isParallel });
+      }
+    }
+
+    // --- 按批次执行 ---
+    for (const batch of batches) {
+      if (batch.parallel && batch.blocks.length > 1) {
+        // 并行批：先过 loop check，再并发执行
+        const eligible: ToolUseBlock[] = [];
+        for (const block of batch.blocks) {
+          const isDialogueTool = block.name === 'dialogue' || block.name === 'send_dialogue';
+          const inputStr = JSON.stringify(block.input);
+          const loopCheck = isDialogueTool ? { loop: false } : detector.check(block.name, inputStr, false);
+          if (loopCheck.loop) {
+            toolResults.push({ type: 'tool_result', toolUseId: block.id, content: `工具调用循环被中断: ${loopCheck.reason}`, isError: true });
+          } else {
+            eligible.push(block);
+          }
+        }
+
+        // 并发执行
+        const results = await Promise.all(eligible.map(b => executeToolBlock(b)));
+
+        // 按原始顺序收集结果
+        for (let i = 0; i < results.length; i++) {
+          const { record, resultBlock } = results[i];
+          toolCalls.push(record);
+          auditTool(record);
+          if (onToolResult) onToolResult(record.name, record.isError);
+          if (record.isError) {
+            if (record.result.startsWith('权限被拒绝')) {
+              consecutivePermissionDenials++;
+              if (onUncertainty && !uncertaintyFired && consecutivePermissionDenials >= 2) {
+                uncertaintyFired = true;
+                onUncertainty('consecutive permission denials');
+              }
+            } else {
+              detector.check(record.name, record.input, true);
+              consecutiveToolErrors++;
+              if (consecutiveToolErrors >= 3 && onUncertainty && !uncertaintyFired) {
+                uncertaintyFired = true;
+                onUncertainty('consecutive tool errors: ' + consecutiveToolErrors);
+              }
+            }
+          } else {
+            consecutivePermissionDenials = 0;
+            consecutiveToolErrors = 0;
+          }
+          toolResults.push(resultBlock);
         }
       } else {
-        consecutiveToolErrors = 0;
-      }
+        // 串行执行（单个工具或非 parallelizable 工具）
+        for (const block of batch.blocks) {
+          const isDialogueTool = block.name === 'dialogue' || block.name === 'send_dialogue';
+          const inputStr = JSON.stringify(block.input);
+          const loopCheck = isDialogueTool ? { loop: false } : detector.check(block.name, inputStr, false);
+          if (loopCheck.loop) {
+            logger.debug({ tool: block.name, reason: loopCheck.reason }, 'tool:loop-detected');
+            toolResults.push({ type: 'tool_result', toolUseId: block.id, content: `工具调用循环被中断: ${loopCheck.reason}`, isError: true });
+            continue;
+          }
 
-      toolResults.push({
-        type: 'tool_result',
-        toolUseId: block.id,
-        content: toolResult.content,
-        isError: toolResult.isError,
-      });
+          const { record, resultBlock } = await executeToolBlock(block);
+          toolCalls.push(record);
+          auditTool(record);
+          if (onToolResult) onToolResult(record.name, record.isError);
+
+          if (!record.isError) {
+            consecutivePermissionDenials = 0;
+            consecutiveToolErrors = 0;
+          } else {
+            if (record.result.startsWith('权限被拒绝')) {
+              consecutivePermissionDenials++;
+              if (onUncertainty && !uncertaintyFired && consecutivePermissionDenials >= 2) {
+                uncertaintyFired = true;
+                onUncertainty('consecutive permission denials');
+              }
+            } else {
+              detector.check(block.name, inputStr, true);
+              consecutiveToolErrors++;
+              if (consecutiveToolErrors >= 3 && onUncertainty && !uncertaintyFired) {
+                uncertaintyFired = true;
+                onUncertainty('consecutive tool errors: ' + consecutiveToolErrors);
+              }
+            }
+          }
+
+          toolResults.push(resultBlock);
+        }
+      }
     }
 
     workingMessages.push({ role: 'user', content: toolResults });

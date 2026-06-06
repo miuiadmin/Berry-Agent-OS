@@ -15,6 +15,8 @@ export interface ToolDefinition {
   inputSchema: z.ZodType;
   dangerLevel: DangerLevel;
   execute: (input: unknown) => Promise<ToolResult>;
+  /** 标记工具可与同批次其他 parallelizable 工具并发执行（如 dialogue） */
+  parallelizable?: boolean;
 }
 
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {

@@ -203,3 +203,162 @@ describe('runToolLoop streaming', () => {
     expect(result.finalContent).toBe('non-streamed response');
   });
 });
+
+describe('parallel tool execution', () => {
+  it('多个 parallelizable 工具并发执行（总时间 < 串行时间）', async () => {
+    // 注册两个 parallelizable 工具，各自 sleep 50ms
+    registerTool({
+      name: 'parallel_a',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      parallelizable: true,
+      async execute() {
+        await new Promise(r => setTimeout(r, 50));
+        return { content: 'result_a' };
+      },
+    });
+    registerTool({
+      name: 'parallel_b',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      parallelizable: true,
+      async execute() {
+        await new Promise(r => setTimeout(r, 50));
+        return { content: 'result_b' };
+      },
+    });
+
+    const backend = new TestBackend('mock');
+    backend.setMockResponses([
+      { content: '', toolCalls: [
+        { id: 'tu_a', name: 'parallel_a', input: {} },
+        { id: 'tu_b', name: 'parallel_b', input: {} },
+      ] },
+      { content: 'done' },
+    ]);
+
+    const records: ToolCallRecord[] = [];
+    const start = Date.now();
+    const result = await runToolLoop({
+      llm: createTestLlmClient(backend),
+      messages: [{ role: 'user', content: 'run' }],
+      systemPrompt: 'test',
+      tools: [],
+      config: { maxCalls: 5, timeoutMs: 5000 },
+      requestPermission: async () => ({ allowed: true, tokenId: 'ptk' }),
+      validatePermission: async () => ({ allowed: true }),
+      consumePermission: async () => {},
+      auditTool: (record) => records.push(record),
+    });
+    const elapsed = Date.now() - start;
+
+    expect(result.finalContent).toBe('done');
+    expect(records).toHaveLength(2);
+    expect(records[0].result).toBe('result_a');
+    expect(records[1].result).toBe('result_b');
+    // 并行执行：两个 50ms 工具应在 ~50-80ms 完成，串行则 ~100ms+
+    expect(elapsed).toBeLessThan(95);
+  });
+
+  it('混合 parallel 和 serial 工具正确分 batch', async () => {
+    registerTool({
+      name: 'par_1',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      parallelizable: true,
+      async execute() { return { content: 'p1' }; },
+    });
+    registerTool({
+      name: 'par_2',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      parallelizable: true,
+      async execute() { return { content: 'p2' }; },
+    });
+    registerTool({
+      name: 'serial_1',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      async execute() { return { content: 's1' }; },
+    });
+
+    const backend = new TestBackend('mock');
+    backend.setMockResponses([
+      { content: '', toolCalls: [
+        { id: 'tu_1', name: 'par_1', input: {} },
+        { id: 'tu_2', name: 'par_2', input: {} },
+        { id: 'tu_3', name: 'serial_1', input: {} },
+      ] },
+      { content: 'final' },
+    ]);
+
+    const records: ToolCallRecord[] = [];
+    const result = await runToolLoop({
+      llm: createTestLlmClient(backend),
+      messages: [{ role: 'user', content: 'run' }],
+      systemPrompt: 'test',
+      tools: [],
+      config: { maxCalls: 10, timeoutMs: 5000 },
+      requestPermission: async () => ({ allowed: true, tokenId: 'ptk' }),
+      validatePermission: async () => ({ allowed: true }),
+      consumePermission: async () => {},
+      auditTool: (record) => records.push(record),
+    });
+
+    expect(result.finalContent).toBe('final');
+    // 按原始顺序：par_1, par_2, serial_1
+    expect(records.map(r => r.result)).toEqual(['p1', 'p2', 's1']);
+  });
+
+  it('并行批中一个失败不影响其他', async () => {
+    registerTool({
+      name: 'par_ok',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      parallelizable: true,
+      async execute() { return { content: 'ok' }; },
+    });
+    registerTool({
+      name: 'par_fail',
+      description: 'test',
+      inputSchema: z.object({}).passthrough(),
+      dangerLevel: 'safe',
+      parallelizable: true,
+      async execute() { throw new Error('boom'); },
+    });
+
+    const backend = new TestBackend('mock');
+    backend.setMockResponses([
+      { content: '', toolCalls: [
+        { id: 'tu_ok', name: 'par_ok', input: {} },
+        { id: 'tu_fail', name: 'par_fail', input: {} },
+      ] },
+      { content: 'done' },
+    ]);
+
+    const records: ToolCallRecord[] = [];
+    const result = await runToolLoop({
+      llm: createTestLlmClient(backend),
+      messages: [{ role: 'user', content: 'run' }],
+      systemPrompt: 'test',
+      tools: [],
+      config: { maxCalls: 5, timeoutMs: 5000 },
+      requestPermission: async () => ({ allowed: true, tokenId: 'ptk' }),
+      validatePermission: async () => ({ allowed: true }),
+      consumePermission: async () => {},
+      auditTool: (record) => records.push(record),
+    });
+
+    expect(result.finalContent).toBe('done');
+    expect(records[0].result).toBe('ok');
+    expect(records[0].isError).toBe(false);
+    expect(records[1].result).toContain('boom');
+    expect(records[1].isError).toBe(true);
+  });
+});

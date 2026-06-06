@@ -455,7 +455,14 @@ export class LlmClient {
             try { this.requestLogger.logCompleted(requestId, lastResponse); } catch (e) { logger.debug({ err: e }, 'request log completed failed'); }
           }
           if (this.budgetController) {
-            try { this.budgetController.recordUsage({ sessionId: options.sessionId ?? '', agentName, taskId: options.taskId, inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheCreationTokens: 0, model: modelId }); } catch {}
+            try {
+              const budgetAlert = this.budgetController.checkPostResponse(
+                { sessionId: options.sessionId ?? '', agentName, taskId: options.taskId, inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheCreationTokens: 0, model: modelId },
+              );
+              if (budgetAlert && budgetAlert.tier === 'exceeded') {
+                logger.info({ sessionId: options.sessionId, tier: budgetAlert.tier }, 'budget:exceeded after stream');
+              }
+            } catch {}
           }
           if (this.llmCompletedHook) {
             try { this.llmCompletedHook({ taskId: options.taskId ?? '', agentName, inputTokens: u.inputTokens, outputTokens: u.outputTokens, durationMs: Date.now() - t0 }); } catch {}
@@ -635,7 +642,7 @@ export class LlmClient {
               }
               if (this.budgetController) {
                 try {
-                  this.budgetController.recordUsage({
+                  this.budgetController.checkPostResponse({
                     sessionId: options.sessionId ?? '',
                     agentName,
                     taskId: options.taskId,
