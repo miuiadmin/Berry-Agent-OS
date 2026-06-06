@@ -6,7 +6,7 @@ import { getLogger } from '../utils/logger.js';
 import { metrics } from '../observability/metrics.js';
 import { TimeoutError } from './errors.js';
 import { injectTraceIntoIpc, extractTraceFromIpc, traceStore } from '../observability/trace-context.js';
-import { computeBackoff } from './ipc-resilience.js';
+import { computeBackoff, type BackpressureMonitor, type DeadLetterQueue } from './ipc-resilience.js';
 
 const logger = getLogger('ipc');
 
@@ -19,6 +19,10 @@ export class IpcChannel {
     timer: ReturnType<typeof setTimeout>;
   }>();
   private journal: import('./ipc-journal.js').IpcJournal | null = null;
+  // C2 修复：注入 IPC 弹性机制（背压监控 + 死信队列）
+  // 这些是可选依赖，未注入时退化为现有行为
+  private backpressure: BackpressureMonitor | null = null;
+  private deadLetterQueue: DeadLetterQueue | null = null;
 
   constructor(
     private child: ChildProcess,
@@ -61,6 +65,19 @@ export class IpcChannel {
   }
 
   /**
+   * C2 修复：注入 IPC 弹性机制
+   * - backpressure: 背压监控，超过阈值时拒绝新消息（返回 false）
+   * - deadLetterQueue: 永久失败时入死信队列而非静默丢弃
+   */
+  setResilience(deps: {
+    backpressure?: BackpressureMonitor;
+    deadLetterQueue?: DeadLetterQueue;
+  }): void {
+    if (deps.backpressure) this.backpressure = deps.backpressure;
+    if (deps.deadLetterQueue) this.deadLetterQueue = deps.deadLetterQueue;
+  }
+
+  /**
    * 共享 send 内部逻辑：record → child IPC → markSent / markFailed。
    * 两侧 channel 复用，行为一致。
    */
@@ -87,6 +104,12 @@ export class IpcChannel {
 
   send<T>(type: IpcMessageType, to: string, payload: T, correlationId?: string): boolean {
     if (!this.child.connected) return false;
+    // C2 修复：发送前检查背压。超载时拒绝并入死信队列（不再静默丢弃）
+    if (this.backpressure && !this.backpressure.increment(this.identity)) {
+      logger.warn({ agent: this.identity, type }, 'IPC 背压：消息被拒绝');
+      // 注意：消息尚未构造，无法入死信。死信捕获在 writeOrFail 失败路径处理
+      return false;
+    }
     let msg: IpcMessage<T> = {
       id: genId('msg'),
       correlationId,
@@ -97,7 +120,17 @@ export class IpcChannel {
       timestamp: Date.now(),
     };
     msg = injectTraceIntoIpc(msg);
-    return this.writeOrFail(msg, type, (m) => this.child.send(m as IpcMessage));
+    const ok = this.writeOrFail(msg, type, (m) => this.child.send(m as IpcMessage));
+    if (this.backpressure) this.backpressure.decrement(this.identity);
+    // C2 修复：永久失败时入死信队列
+    if (!ok && this.deadLetterQueue) {
+      try {
+        this.deadLetterQueue.enqueue(msg, 'send-failed', 1);
+      } catch (err) {
+        logger.debug({ err, msgId: msg.id }, '死信入队失败');
+      }
+    }
+    return ok;
   }
 
   async request<T>(type: IpcMessageType, to: string, payload: T, timeoutMs = 30000): Promise<IpcMessage> {

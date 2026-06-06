@@ -9,6 +9,8 @@ import type { AgentRegistry } from './agent-registry.js';
 import type { EventBus } from './event-bus.js';
 import { AgentUnavailableError, TimeoutError } from './errors.js';
 import { metrics } from '../observability/metrics.js';
+import { BackpressureMonitor, DeadLetterQueue } from './ipc-resilience.js';
+import { getDb } from '../memory/index.js';
 
 const logger = getLogger('agent-manager');
 
@@ -28,6 +30,9 @@ export class AgentManager {
   private eventBus: EventBus | null;
   /** IPC journal 用于可靠投递和崩溃重放 */
   private journal: import('./ipc-journal.js').IpcJournal | null = null;
+  // C2 修复：IPC 弹性机制（背压监控 + 死信队列）
+  private backpressure: BackpressureMonitor = new BackpressureMonitor();
+  private deadLetterQueue: DeadLetterQueue | null = null;
 
   constructor(config: AppConfig, registry: AgentRegistry, eventBus?: EventBus) {
     this.config = config;
@@ -38,6 +43,12 @@ export class AgentManager {
   /** 设置 IPC journal（在 core-service setup 后调用） */
   setJournal(journal: import('./ipc-journal.js').IpcJournal): void {
     this.journal = journal;
+    // C2 修复：journal 准备好时同时创建死信队列（共享同一个 DB）
+    try {
+      this.deadLetterQueue = new DeadLetterQueue(getDb());
+    } catch (err) {
+      logger.warn({ err }, '死信队列初始化失败，将降级为静默丢弃');
+    }
   }
 
   async startAll(): Promise<void> {
@@ -131,6 +142,11 @@ export class AgentManager {
       this.journal ?? undefined,
       registered?.manifest.kind as 'resident' | 'on-demand' | undefined,
     );
+    // C2 修复：注入弹性机制到 IpcChannel
+    agent.ipc.setResilience({
+      backpressure: this.backpressure,
+      deadLetterQueue: this.deadLetterQueue ?? undefined,
+    });
     this.agents.set(name, agent);
 
     agent.ipc.onMessage('agent.register', () => {
