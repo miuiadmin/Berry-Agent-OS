@@ -499,8 +499,8 @@ export function createApiRouter(deps: WebServerDependencies) {
   route('GET', '/drift/metrics', (_req, res, url) => {
     const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
     try {
-      const { DriftMetricsService } = require('../kernel/drift-metrics.js') as typeof import('../kernel/drift-metrics.js');
-      const service = new DriftMetricsService(getDb());
+      const service = deps.getDriftMetrics?.();
+      if (!service) { json(res, { error: 'drift metrics unavailable' }, 503); return; }
       const metrics = service.aggregate(days);
       json(res, metrics);
     } catch (err) {
@@ -513,8 +513,8 @@ export function createApiRouter(deps: WebServerDependencies) {
     const limit = safeInt(url.searchParams.get('limit'), 50, 1, 200);
     const offset = safeInt(url.searchParams.get('offset'), 0);
     try {
-      const { DriftMetricsService } = require('../kernel/drift-metrics.js') as typeof import('../kernel/drift-metrics.js');
-      const service = new DriftMetricsService(getDb());
+      const service = deps.getDriftMetrics?.();
+      if (!service) { json(res, { error: 'drift signals unavailable' }, 503); return; }
       const signals = service.listSignals({ sessionId, limit, offset });
       json(res, { signals, total: signals.length });
     } catch (err) {

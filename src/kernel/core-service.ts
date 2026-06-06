@@ -23,6 +23,7 @@ import { SocketServer } from './socket-server.js';
 import { PermissionCoordinator } from './permission-coordinator.js';
 import { AuditRecorder } from './audit-recorder.js';
 import { SessionManager } from './session-manager.js';
+import { DriftMetricsService } from './drift-metrics.js';
 import { initDb, closeDb, getDb } from '../memory/index.js';
 import { MemoryRuntime } from '../memory/index.js';
 import { SkillService, SkillWatcher } from '../skills/index.js';
@@ -590,6 +591,8 @@ export class CoreService {
           asyncDelegationService,
           humanDelegationManager: this.humanDelegationManager,
           getProviderRegistry: () => this.providerRegistryHolder!.current,
+          // W7 修复：Drift metrics 工厂，替代 api-routes.ts 中的 require() 动态加载
+          getDriftMetrics: () => new DriftMetricsService(getDb()),
         },
       });
       await this.webServer.start();

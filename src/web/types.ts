@@ -39,4 +39,6 @@ export interface WebServerDependencies {
     getPending(sessionId?: string): Array<{ id: string; sessionId: string; requestedBy: string; title: string; description: string; urgency: string; options: string[]; status: string; timeoutMs: number; createdAt: number }>;
   } | null;
   getProviderRegistry?: () => IProviderRegistry;
+  /** W7 修复：Drift metrics 工厂（替代 inline require） */
+  getDriftMetrics?: () => { aggregate(days: number): unknown; listSignals(opts: { sessionId?: string; limit: number; offset: number }): unknown[] };
 }
