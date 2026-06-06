@@ -38,9 +38,10 @@ function makeMockEventBus(): EventBus & { emitAny: (event: string, payload: unkn
   } as unknown as EventBus & { emitAny: (event: string, payload: unknown) => void };
 }
 
-/** mock 一个最小可用的 WebSocketServer */
+/** mock 一个最小可用的 WebSocketServer（支持 connection 事件） */
 function makeMockWss() {
-  const clients: Array<{ readyState: number; sent: string[]; send: (msg: string) => void }> = [];
+  const clients: Array<{ readyState: number; sent: string[]; send: (msg: string) => void; on: (event: string, handler: (data: unknown) => void) => void }> = [];
+  const connectionHandlers: Array<(ws: unknown) => void> = [];
   return {
     clients: {
       [Symbol.iterator]: function* () {
@@ -52,13 +53,33 @@ function makeMockWss() {
       // 直接暴露数组便于测试断言
       _list: clients,
     } as never,
+    /** P2-11: WsEventBridge 构造时注册 connection 监听器 */
+    on: vi.fn((event: string, handler: (ws: unknown) => void) => {
+      if (event === 'connection') connectionHandlers.push(handler);
+    }),
     addClient: (readyState: number) => {
+      const messageHandlers: Array<(data: unknown) => void> = [];
+      const closeHandlers: Array<() => void> = [];
       const client = {
         readyState,
         sent: [] as string[],
         send: function (msg: string) { this.sent.push(msg); },
+        on: function (event: string, handler: (data: unknown) => void) {
+          if (event === 'message') messageHandlers.push(handler);
+          if (event === 'close') closeHandlers.push(handler);
+        },
+        // 测试 helper：模拟客户端发送 subscribe 消息
+        _simulateMessage: (data: unknown) => {
+          for (const h of messageHandlers) h(data);
+        },
+        // 测试 helper：模拟客户端断连
+        _simulateClose: () => {
+          for (const h of closeHandlers) h();
+        },
       };
       clients.push(client);
+      // 触发 WsEventBridge 注册的 connection handler
+      for (const h of connectionHandlers) h(client);
       return client;
     },
   };
@@ -171,5 +192,65 @@ describe('WsEventBridge', () => {
     bridge.dispose();
     mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's', text: 'after dispose' });
     expect(client.sent).toHaveLength(0);
+  });
+
+  // P2-11: per-client sessionId 过滤测试
+
+  it('未订阅任何 session 的客户端收到所有流式事件', () => {
+    const client = mockWss.addClient(1);
+    mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's-1', text: 'hello' });
+    expect(client.sent).toHaveLength(1);
+  });
+
+  it('订阅了特定 sessionId 的客户端只收到该 session 的流式事件', () => {
+    const c1 = mockWss.addClient(1);
+    const c2 = mockWss.addClient(1);
+    // c1 订阅 s-1，c2 订阅 s-2
+    c1._simulateMessage(Buffer.from(JSON.stringify({ type: 'subscribe', sessionId: 's-1' })));
+    c2._simulateMessage(Buffer.from(JSON.stringify({ type: 'subscribe', sessionId: 's-2' })));
+    // 发送 s-1 的事件
+    mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's-1', text: 'for s-1' });
+    expect(c1.sent).toHaveLength(1);
+    expect(c2.sent).toHaveLength(0);
+    // 发送 s-2 的事件
+    mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's-2', text: 'for s-2' });
+    expect(c1.sent).toHaveLength(1); // 不再收到
+    expect(c2.sent).toHaveLength(1);
+  });
+
+  it('全局事件（task.*）不受 sessionId 过滤影响，广播给所有客户端', () => {
+    const c1 = mockWss.addClient(1);
+    const c2 = mockWss.addClient(1);
+    c1._simulateMessage(Buffer.from(JSON.stringify({ type: 'subscribe', sessionId: 's-1' })));
+    // task.completed 不带 sessionId 过滤
+    mockBus.emitAny('task.completed', { taskId: 't', targetAgent: 'brain' });
+    expect(c1.sent).toHaveLength(1);
+    expect(c2.sent).toHaveLength(1);
+  });
+
+  it('客户端断连后自动清理订阅', () => {
+    const c1 = mockWss.addClient(1);
+    c1._simulateMessage(Buffer.from(JSON.stringify({ type: 'subscribe', sessionId: 's-1' })));
+    // 断连
+    c1.readyState = 3; // CLOSED
+    c1._simulateClose();
+    // 新客户端订阅同一 session
+    const c2 = mockWss.addClient(1);
+    c2._simulateMessage(Buffer.from(JSON.stringify({ type: 'subscribe', sessionId: 's-1' })));
+    mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's-1', text: 'after close' });
+    expect(c1.sent).toHaveLength(0); // 已断连，不再收到
+    expect(c2.sent).toHaveLength(1);
+  });
+
+  it('unsubscribe 取消特定 session 订阅', () => {
+    const client = mockWss.addClient(1);
+    client._simulateMessage(Buffer.from(JSON.stringify({ type: 'subscribe', sessionId: 's-1' })));
+    mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's-1', text: 'before unsub' });
+    expect(client.sent).toHaveLength(1);
+    // 取消订阅
+    client._simulateMessage(Buffer.from(JSON.stringify({ type: 'unsubscribe', sessionId: 's-1' })));
+    // 订阅集合为空 → 收到所有事件（兼容旧行为）
+    mockBus.emitAny('stream.text_delta', { taskId: 't', sessionId: 's-2', text: 'after unsub' });
+    expect(client.sent).toHaveLength(2); // 取消订阅后回到广播模式
   });
 });

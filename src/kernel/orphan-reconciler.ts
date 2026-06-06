@@ -97,22 +97,21 @@ export function scanOrphanUserRows(): { reconciled: number; scanned: number } {
  * OrphanReconciler 定期扫描器。
  * daemon 启动后启动；外部 signal（graceful shutdown）时停止。
  */
+/**
+ * OrphanReconciler - daemon 启动时一次性的孤儿 user row 兜底扫描器。
+ *
+ * R6 重构：原方案用 setInterval 60s 持续扫（"补丁式"扫，
+ * 暴露了 in-memory pendingRequests 状态脆弱的事实源问题）。
+ * 新方案：daemon 启动时一次性扫描——在已有架构（conversations 表 +
+ * saveMessage）内自然处理；in-memory pending 的脆弱性由 taskManager /
+ * streamingFlusher / saveConversationTurn 多层兜底共同覆盖。
+ *
+ * 类保留供未来扩展（如 emit 'orphan.reconciled' 事件给前端通知）。
+ * 实际启动序列：bootstrap.startupRecovery() 调 runOnce() 一次。
+ */
 export class OrphanReconciler {
-  private timer: ReturnType<typeof setInterval> | null = null;
-
   // EventBus 参数保留供未来 emit 事件用（如 'orphan.reconciled'），当前实现不需要
   constructor(_eventBus: EventBus) {}
-
-  /** 启动定期扫描：daemon 启动后立即跑首次 + 每 60s 一次 */
-  start(): void {
-    if (this.timer) return;
-    // 启动后延迟 5s 跑首次扫描（避免与 daemon 启动竞争）
-    setTimeout(() => {
-      this.runOnce();
-    }, 5_000);
-    this.timer = setInterval(() => this.runOnce(), SCAN_INTERVAL_MS);
-    logger.info({ intervalMs: SCAN_INTERVAL_MS, orphanWindowMs: ORPHAN_WINDOW_MS }, 'orphan reconciler 启动');
-  }
 
   /** 单次扫描 + 写入兜底 */
   runOnce(): { reconciled: number; scanned: number } {
@@ -121,14 +120,6 @@ export class OrphanReconciler {
     } catch (err) {
       logger.error({ err }, 'orphan reconciler 扫描失败');
       return { reconciled: 0, scanned: 0 };
-    }
-  }
-
-  /** 停止扫描 */
-  stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
     }
   }
 }
