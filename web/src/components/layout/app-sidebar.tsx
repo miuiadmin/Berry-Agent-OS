@@ -10,6 +10,7 @@ import {
   Brain,
   Bell,
   Clock,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -27,6 +28,7 @@ const navItems = [
   { href: "/scheduler", labelKey: "sidebar.scheduler", icon: Clock },
   { href: "/conversations", labelKey: "sidebar.conversations", icon: MessagesSquare },
   { href: "/usage", labelKey: "sidebar.usage", icon: BarChart3 },
+  { href: "/drift", labelKey: "sidebar.drift", icon: Shield },
   { href: "/logs", labelKey: "sidebar.logs", icon: ScrollText },
 ];
 

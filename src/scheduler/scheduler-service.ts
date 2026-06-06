@@ -106,10 +106,24 @@ export class SchedulerService implements ISchedulerService {
     this.queueTimer = setInterval(() => void this.queueTick(), this.config.queuePollIntervalMs);
     this.eventTrigger.start();
 
+    // 每小时清理已完成的 job_queue 记录（保留 7 天）
+    const purgeTimer = setInterval(() => {
+      this.jobQueue.purgeCompleted(7 * 24 * 60 * 60 * 1000);
+    }, 60 * 60 * 1000);
+    purgeTimer.unref();
+
     logger.info({
       cronInterval: this.config.cronTickIntervalMs,
       queueInterval: this.config.queuePollIntervalMs,
     }, 'Scheduler service started');
+
+    // 启动时回收因进程崩溃遗留的 stale running 状态
+    const staleRecovered = this.db.prepare(
+      `UPDATE cron_executions SET status = 'failed', error = '服务重启: stale recovery' WHERE status = 'running'`,
+    ).run();
+    if (staleRecovered.changes > 0) {
+      logger.info({ count: staleRecovered.changes }, 'scheduler:recovered stale cron executions');
+    }
   }
 
   stop(): void {

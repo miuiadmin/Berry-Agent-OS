@@ -47,37 +47,42 @@ export class TriggerDispatcher implements ITriggerDispatcher {
       this.concurrencyGuard.markExecutionDone(concurrency.killExecutionId, 'failed', 'Replaced by new trigger');
     }
 
-    const executionId = this.recordExecution(job, source, 'running');
+    // 事务保护：recordExecution + enqueue + updateLastTriggered 原子执行
+    // 防止部分写入后崩溃导致 cron_executions 状态 stale
     const traceId = getCurrentTrace()?.traceId ?? null;
+    const result = this.db.transaction(() => {
+      const executionId = this.recordExecution(job, source, 'running');
 
-    const queueItemId = this.jobQueue.enqueue({
-      workspaceId: job.workspace_id,
-      agentId: job.session_mode === 'pool' ? '__pool__' : job.agent_id,
-      jobType: 'scheduled_job',
-      sourceId: executionId,
-      payload: {
-        jobId: job.id,
-        executionId,
-        prompt: job.prompt,
-        triggerSource: source.type,
-        ...(payload ? { triggerPayload: payload } : {}),
-      },
-      priority: 0,
-      traceId: traceId ?? undefined,
-      maxRetries: job.max_retries,
-      timeoutMs: undefined,
-    });
+      const queueItemId = this.jobQueue.enqueue({
+        workspaceId: job.workspace_id,
+        agentId: job.session_mode === 'pool' ? '__pool__' : job.agent_id,
+        jobType: 'scheduled_job',
+        sourceId: executionId,
+        payload: {
+          jobId: job.id,
+          executionId,
+          prompt: job.prompt,
+          triggerSource: source.type,
+          ...(payload ? { triggerPayload: payload } : {}),
+        },
+        priority: 0,
+        traceId: traceId ?? undefined,
+        maxRetries: job.max_retries,
+        timeoutMs: undefined,
+      });
 
-    this.updateLastTriggered(job.id);
+      this.updateLastTriggered(job.id);
+      return { executionId, queueItemId };
+    })();
 
     this.eventBus.emit('scheduler.job_enqueued', {
       jobId: job.id,
-      queueItemId,
+      queueItemId: result.queueItemId,
       triggerSource: source.type,
     });
 
-    logger.debug({ jobId, executionId, queueItemId, source: source.type }, 'Job triggered');
-    return { ok: true, queueItemId, executionId };
+    logger.debug({ jobId, executionId: result.executionId, queueItemId: result.queueItemId, source: source.type }, 'Job triggered');
+    return { ok: true, queueItemId: result.queueItemId, executionId: result.executionId };
   }
 
   private recordExecution(job: CronJobRow, source: TriggerSource, status: string, error?: string): string {

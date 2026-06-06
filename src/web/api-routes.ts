@@ -495,6 +495,33 @@ export function createApiRouter(deps: WebServerDependencies) {
   // --- Provider management routes ---
   registerProviderRoutes(route, () => deps.getProviderRegistry?.(), readBody, json, deps.configService);
 
+  // --- 12.0 Drift metrics routes ---
+  route('GET', '/drift/metrics', (_req, res, url) => {
+    const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
+    try {
+      const { DriftMetricsService } = require('../kernel/drift-metrics.js') as typeof import('../kernel/drift-metrics.js');
+      const service = new DriftMetricsService(getDb());
+      const metrics = service.aggregate(days);
+      json(res, metrics);
+    } catch (err) {
+      json(res, { error: 'drift metrics unavailable' }, 500);
+    }
+  });
+
+  route('GET', '/drift/signals', (_req, res, url) => {
+    const sessionId = url.searchParams.get('sessionId') ?? undefined;
+    const limit = safeInt(url.searchParams.get('limit'), 50, 1, 200);
+    const offset = safeInt(url.searchParams.get('offset'), 0);
+    try {
+      const { DriftMetricsService } = require('../kernel/drift-metrics.js') as typeof import('../kernel/drift-metrics.js');
+      const service = new DriftMetricsService(getDb());
+      const signals = service.listSignals({ sessionId, limit, offset });
+      json(res, { signals, total: signals.length });
+    } catch (err) {
+      json(res, { error: 'drift signals unavailable' }, 500);
+    }
+  });
+
   // --- Debug capture routes ---
   registerCaptureRoutes(route, json);
 

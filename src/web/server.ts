@@ -104,7 +104,7 @@ export class WebServer {
     });
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.eventBridge) {
       this.eventBridge.dispose();
       this.eventBridge = null;
@@ -117,8 +117,20 @@ export class WebServer {
       this.wss = null;
     }
     if (this.server) {
-      this.server.close();
+      // 优雅关闭：等待已有连接处理完（最多 3 秒）
+      const server = this.server;
       this.server = null;
+      await new Promise<void>((resolve) => {
+        const forceTimer = setTimeout(() => {
+          server.closeAllConnections?.();
+          resolve();
+        }, 3000);
+        forceTimer.unref();
+        server.close(() => {
+          clearTimeout(forceTimer);
+          resolve();
+        });
+      });
     }
   }
 

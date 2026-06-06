@@ -22,6 +22,7 @@ import {
   DaemonConfigSchema,
   AutonomyConfigSchema,
   KernelScalarsSchema,
+  DriftConfigSchema,
 } from '../kernel/schemas/index.js';
 
 /** 组合后的完整应用配置 schema */
@@ -43,6 +44,7 @@ export const AppConfigSchema = z.object({
   streaming: z.prefault(StreamingConfigSchema, {}),
   web: z.prefault(WebConfigSchema, {}),
   daemon: z.prefault(DaemonConfigSchema, {}),
+  drift: z.prefault(DriftConfigSchema, {}),
   autonomy: AutonomyConfigSchema,
 });
 

@@ -24,60 +24,64 @@ export function addKnowledge(input: AddKnowledgeInput): KnowledgeEntry {
   const confidence = input.confidence ?? 0.7;
 
   const ownerKey = input.ownerKey ?? 'user:owner';
-  const existing = db.prepare(
-    `SELECT id, evidence_count, confidence FROM knowledge WHERE owner_key = ? AND type = ? AND summary = ? AND dismissed = 0 ORDER BY updated_at DESC LIMIT 1`,
-  ).get(ownerKey, input.type, input.summary) as { id: string; evidence_count: number; confidence: number } | undefined;
 
-  if (existing) {
-    const newConfidence = Math.min(1, (existing.confidence + confidence) / 2 + 0.05);
-    const sets = ['confidence = ?', 'evidence_count = evidence_count + 1', 'updated_at = ?', 'last_seen_at = ?'];
-    const values: unknown[] = [newConfidence, now, now];
+  // 事务保护：防止 SELECT→INSERT/UPDATE 竞态 + 确保 FTS 触发器一致
+  return db.transaction(() => {
+    const existing = db.prepare(
+      `SELECT id, evidence_count, confidence FROM knowledge WHERE owner_key = ? AND type = ? AND summary = ? AND dismissed = 0 ORDER BY updated_at DESC LIMIT 1`,
+    ).get(ownerKey, input.type, input.summary) as { id: string; evidence_count: number; confidence: number } | undefined;
 
-    if (input.detail) {
-      sets.push('detail = ?');
-      values.push(input.detail);
+    if (existing) {
+      const newConfidence = Math.min(1, (existing.confidence + confidence) / 2 + 0.05);
+      const sets = ['confidence = ?', 'evidence_count = evidence_count + 1', 'updated_at = ?', 'last_seen_at = ?'];
+      const values: unknown[] = [newConfidence, now, now];
+
+      if (input.detail) {
+        sets.push('detail = ?');
+        values.push(input.detail);
+      }
+      if (input.evidenceKind === 'direct') {
+        sets.push("evidence_kind = 'direct'");
+      }
+      if (input.source) {
+        sets.push('source = ?');
+        values.push(input.source);
+      }
+      if (input.provenance) {
+        sets.push('provenance = ?');
+        values.push(input.provenance);
+      }
+
+      values.push(existing.id);
+      db.prepare(`UPDATE knowledge SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+      return getKnowledge(existing.id)!;
     }
-    if (input.evidenceKind === 'direct') {
-      sets.push("evidence_kind = 'direct'");
-    }
-    if (input.source) {
-      sets.push('source = ?');
-      values.push(input.source);
-    }
-    if (input.provenance) {
-      sets.push('provenance = ?');
-      values.push(input.provenance);
-    }
 
-    values.push(existing.id);
-    db.prepare(`UPDATE knowledge SET ${sets.join(', ')} WHERE id = ?`).run(...values);
-    return getKnowledge(existing.id)!;
-  }
+    const id = genId('kn');
+    db.prepare(`
+      INSERT INTO knowledge (
+        id, owner_key, type, summary, detail, scope, evidence_kind, source,
+        confidence, importance, durability, evidence_count, provenance,
+        dismissed, created_at, updated_at, last_seen_at, last_used_at, last_used_query
+      )
+      VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?, NULL, NULL)
+    `).run(
+      id,
+      ownerKey,
+      input.type,
+      input.summary,
+      input.detail ?? null,
+      input.evidenceKind ?? 'inferred',
+      input.source ?? 'conversation',
+      confidence,
+      input.importance ?? 0.5,
+      input.durability ?? 0.5,
+      input.provenance ?? null,
+      now, now, now,
+    );
 
-  const id = genId('kn');
-  db.prepare(`
-    INSERT INTO knowledge (
-      id, owner_key, type, summary, detail, scope, evidence_kind, source,
-      confidence, importance, durability, evidence_count, provenance,
-      dismissed, created_at, updated_at, last_seen_at, last_used_at, last_used_query
-    )
-    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?, NULL, NULL)
-  `).run(
-    id,
-    ownerKey,
-    input.type,
-    input.summary,
-    input.detail ?? null,
-    input.evidenceKind ?? 'inferred',
-    input.source ?? 'conversation',
-    confidence,
-    input.importance ?? 0.5,
-    input.durability ?? 0.5,
-    input.provenance ?? null,
-    now, now, now,
-  );
-
-  return getKnowledge(id)!;
+    return getKnowledge(id)!;
+  })();
 }
 
 export function getKnowledge(id: string): KnowledgeEntry | undefined {
