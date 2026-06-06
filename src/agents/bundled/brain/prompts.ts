@@ -1,5 +1,6 @@
 import type { ReviewLevel, TurnRecord } from '../../../contracts/review.js';
 import type { RouteDecision, RoutingIntent } from '../../../contracts/routing.js';
+import type { IntentAnchor, IntentOutputType } from '../../../contracts/intent.js';
 import type { DangerLevel } from '../../../utils/types.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload, CorrectionAction } from '../../../contracts/delegation.js';
 import type { SuperiorReviewRequest, SuperiorReviewResult, SuperiorReviewVerdict } from '../../../contracts/superior-review.js';
@@ -53,7 +54,13 @@ export function buildRoutingSystemPrompt(): string {
   "confidence": <0-1 的置信度（可选）>,
   "priority": "<low|normal|high>",
   "instruction": "<给目标智能体的结构化指令（可选）>",
-  "reason": "<一句话说明路由原因>"
+  "reason": "<一句话说明路由原因>",
+  "intentAnchor": {
+    "goal": "<用户想达成的目标（一句话概括）>",
+    "constraints": ["<约束条件，如不改测试文件、用某种语言等>"],
+    "outputType": "<code_change|explanation|analysis|creation|other>",
+    "entities": ["<涉及的核心实体：文件名、模块名、概念等>"]
+  }
 }
 
 ## 路由规则
@@ -201,6 +208,27 @@ export function buildAskUserReviewSystemPrompt(): string {
 }
 
 const VALID_INTENTS: RoutingIntent[] = ['chat', 'code', 'skill_test', 'learning', 'plugin', 'multi', 'workspace'];
+const VALID_OUTPUT_TYPES: IntentOutputType[] = ['code_change', 'explanation', 'analysis', 'creation', 'other'];
+
+/** 从 Brain 路由 LLM 输出中解析 intentAnchor（容错：字段缺失返回 undefined） */
+function parseIntentAnchor(raw: unknown): IntentAnchor | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  const goal = typeof obj.goal === 'string' && obj.goal.length > 0 ? obj.goal : undefined;
+  if (!goal) return undefined;
+  return {
+    goal,
+    constraints: Array.isArray(obj.constraints)
+      ? obj.constraints.filter((c): c is string => typeof c === 'string')
+      : [],
+    outputType: VALID_OUTPUT_TYPES.includes(obj.outputType as IntentOutputType)
+      ? (obj.outputType as IntentOutputType)
+      : 'other',
+    entities: Array.isArray(obj.entities)
+      ? obj.entities.filter((e): e is string => typeof e === 'string')
+      : [],
+  };
+}
 
 export function parseRouteDecision(llmOutput: string): RouteDecision {
   try {
@@ -230,6 +258,7 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
       subDispatches: parsed.subDispatches || undefined,
       contextHints: parsed.contextHints || undefined,
       reason: parsed.reason || '路由决策',
+      intentAnchor: parseIntentAnchor(parsed.intentAnchor),
     };
   } catch {
     logger.warn({ rawOutput: llmOutput.slice(0, 500) }, 'brain:route-parse-failed');

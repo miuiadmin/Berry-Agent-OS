@@ -1,4 +1,6 @@
 import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { CodeRuntime } from '../../../code/index.js';
@@ -6,11 +8,106 @@ import { LockManager } from '../../../code/file-locks.js';
 import { detectWorkspace } from '../../../code/workspace.js';
 import { runTaskPhases } from '../../../code/task-phases.js';
 import type { CodeAction } from '../../../contracts/code.js';
+import { registerTool } from '../../../tools/index.js';
+import { hasFileBeenRead, markFileRead } from '../../../tools/read-tracker.js';
+import { z } from 'zod';
+import type { ToolResult } from '../../../tools/types.js';
+
+/**
+ * 注册带文件锁保护的工具版本（覆盖 builtin）。
+ * 在 Code Agent 进程中，write_file / edit_code 会通过 LockManager 获取写锁，
+ * 确保 dialogue 模式和 agent.task 模式的文件写入互斥。
+ */
+function registerLockedTools(lockManager: LockManager, workspaceDir: string, agentName: string): void {
+  registerTool({
+    name: 'write_file',
+    description: '将内容写入指定文件（覆盖已有内容）。写入前自动获取文件锁。',
+    inputSchema: z.object({
+      path: z.string().describe('文件的绝对或相对路径'),
+      content: z.string().describe('要写入的内容'),
+    }),
+    dangerLevel: 'safe',
+    async execute(input: unknown): Promise<ToolResult> {
+      const { path: filePath, content } = (input as { path: string; content: string });
+      const resolved = resolve(filePath);
+      const taskId = `lock-${Date.now()}`;
+      let lockId: string | undefined;
+      try {
+        const lock = lockManager.acquire({ filePath: resolved, workspaceDir, taskId, agentName, lockType: 'write' });
+        lockId = lock.id;
+        await writeFile(resolved, content, 'utf-8');
+        return { content: `已写入文件: ${filePath}` };
+      } catch (err) {
+        return { content: `写入文件失败: ${(err as Error).message}`, isError: true };
+      } finally {
+        if (lockId) lockManager.release(lockId);
+      }
+    },
+  });
+
+  registerTool({
+    name: 'edit_code',
+    description: '对文件做精确字符串替换。写入前自动获取文件锁。',
+    inputSchema: z.object({
+      path: z.string().describe('文件路径'),
+      oldText: z.string().describe('要替换的原始文本（精确匹配）'),
+      newText: z.string().describe('替换后的文本'),
+      replaceAll: z.boolean().default(false).describe('true=替换所有匹配；false=要求唯一匹配'),
+    }),
+    dangerLevel: 'moderate',
+    async execute(input: unknown): Promise<ToolResult> {
+      const { path, oldText, newText, replaceAll } = (input as { path: string; oldText: string; newText: string; replaceAll: boolean });
+      const filePath = resolve(path);
+      const taskId = `lock-${Date.now()}`;
+      let lockId: string | undefined;
+      try {
+        if (!hasFileBeenRead(filePath)) {
+          return { content: `编辑被拒绝: 请先使用 read_file 或 inspect_code 读取该文件。`, isError: true };
+        }
+        const lock = lockManager.acquire({ filePath, workspaceDir, taskId, agentName, lockType: 'write' });
+        lockId = lock.id;
+        const content = await readFile(filePath, 'utf-8');
+        if (!content.includes(oldText)) {
+          return { content: `未找到匹配文本，文件未修改。`, isError: true };
+        }
+        if (!replaceAll) {
+          let count = 0; let idx = -1;
+          while ((idx = content.indexOf(oldText, idx + 1)) !== -1) count++;
+          if (count > 1) {
+            return { content: `找到 ${count} 处匹配，请提供更多上下文使 oldText 唯一，或设置 replaceAll=true。`, isError: true };
+          }
+        }
+        const updated = replaceAll ? content.replaceAll(oldText, newText) : content.replace(oldText, newText);
+        await writeFile(filePath, updated, 'utf-8');
+        markFileRead(filePath);
+        return { content: `已修改文件: ${path}` };
+      } catch (err) {
+        return { content: `编辑失败: ${(err as Error).message}`, isError: true };
+      } finally {
+        if (lockId) lockManager.release(lockId);
+      }
+    },
+  });
+}
+
+/** 确保只注册一次 locked tools（首次 agent.task 或 dialogue.send 触发时） */
+let lockedToolsRegistered = false;
+function ensureLockedTools(): LockManager {
+  const db = getDb();
+  const lockManager = new LockManager(db);
+  if (!lockedToolsRegistered) {
+    lockedToolsRegistered = true;
+    const workspaceDir = process.env.WORKSPACE_DIR ?? homedir();
+    const agentName = process.env.AGENT_NAME ?? 'code';
+    registerLockedTools(lockManager, workspaceDir, agentName);
+  }
+  return lockManager;
+}
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const db = getDb();
   const runtime = new CodeRuntime(db);
-  const lockManager = new LockManager(db);
+  const lockManager = ensureLockedTools();
 
   const input = payload.inputPayload;
   const workingDir = (input.workingDir as string) ?? homedir();
@@ -20,7 +117,8 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
     taskId: payload.taskId,
     sessionId: payload.sessionId,
     action: ((input.action as string) ?? 'full_task') as CodeAction,
-    instruction: String(input.instruction ?? ''),
+    // instruction 来自 orchestrator 委派的 message 或 instruction 字段
+    instruction: String(input.instruction ?? input.message ?? ''),
     workingDir: workspace?.gitRoot ?? workingDir,
     testCommand: input.testCommand as string | undefined,
     files: input.files as string[] | undefined,

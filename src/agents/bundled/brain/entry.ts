@@ -54,19 +54,21 @@ Respond with valid JSON only:
   "verdict": "approve" | "modify" | "reject",
   "finalResponse": "corrected version if verdict is modify/reject",
   "reason": "detailed explanation",
+  "intentAlignment": "aligned" | "partial" | "misaligned",
   "reRoute": null
 }
 
 Rules:
-- "approve": response is appropriate, tool usage is safe, no harmful patterns
+- "approve": response is appropriate, tool usage is safe, no harmful patterns, intent aligned
 - "modify": issues found but fixable — provide the corrected version
-- "reject": harmful actions, data leaks, or dangerous tool misuse — provide a safe alternative
+- "reject": harmful actions, data leaks, dangerous tool misuse, or completely misaligned intent — provide a safe alternative
 - If rejecting because the wrong agent handled it, set "reRoute" to a RouteDecision object
 
 Pay special attention to:
 - Whether tool calls were necessary and appropriate
 - Whether sensitive data is being exposed in the response
-- Whether the response accurately reflects tool results`;
+- Whether the response accurately reflects tool results
+- **Intent alignment**: Does the response directly answer the user's question? If it drifts from the user's intent (even if content is technically correct), mark intentAlignment as "partial" or "misaligned"`;
 
 function getWorldModelSummary(db: import('better-sqlite3').Database): string {
   try {
@@ -457,10 +459,36 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     if (intervention) {
       logger.info({ dialogueId, reason: intervention.reason, round: currentRound }, 'brain:dialogue intervention');
       ipc.send('turn.correction', 'core', {
-        delegationId: dialogueId, // 用 dialogueId 作为关联标识
+        delegationId: dialogueId,
         action: 'adjust' as const,
         instruction: intervention.instruction,
       } satisfies TurnCorrectionPayload, msg.correlationId ?? msg.id);
+    }
+
+    // 12.0: 每 3 轮做语义对齐检测（仅当有 intentAnchor 且无规则式干预时）
+    if (!intervention && currentRound > 0 && currentRound % 3 === 0 && payload.intentAnchor) {
+      try {
+        const { buildDriftCheckPrompt, parseDriftCheckResult } = await import('../../../kernel/drift-detector.js');
+        const recentContent = buffer.messages.slice(-3).map(m => `[${m.from}]: ${m.content}`).join('\n');
+        const prompt = buildDriftCheckPrompt(payload.intentAnchor, recentContent, 'dialogue');
+
+        const result = await llm.current.chat(
+          [{ role: 'user', content: prompt }],
+          { system: '你是语义对齐检测器。只输出 JSON。', maxTokens: 200, temperature: 0, agent: name, purpose: 'drift_detection' },
+        );
+
+        const signal = parseDriftCheckResult(result.content, 'dialogue');
+        if (signal.needsIntervention && signal.alignmentScore < 0.5) {
+          logger.info({ dialogueId, score: signal.alignmentScore, desc: signal.driftDescription?.slice(0, 100) }, 'brain:dialogue semantic drift');
+          ipc.send('turn.correction', 'core', {
+            delegationId: dialogueId,
+            action: 'adjust' as const,
+            instruction: `对话可能偏离了用户原始意图。用户的目标是："${payload.intentAnchor.goal}"。${signal.driftDescription ? `当前问题：${signal.driftDescription}。` : ''}请重新对齐用户意图后继续。`,
+          } satisfies TurnCorrectionPayload, msg.correlationId ?? msg.id);
+        }
+      } catch (err) {
+        logger.debug({ err, dialogueId }, 'dialogue semantic drift check failed, skipping');
+      }
     }
 
     // 定期清理过期 buffer（5 分钟无活动）
@@ -468,6 +496,98 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       if (Date.now() - buf.lastActivity > 5 * 60_000) {
         dialogueBuffers.delete(id);
       }
+    }
+  });
+
+  // ─── 12.0: drift.check.request — 漂移检测 LLM 调用 ───
+  ipc.onMessage('drift.check.request', async (msg: IpcMessage) => {
+    const { anchor, content, checkpointType } = msg.payload as import('../../../kernel/drift-detector.js').DriftCheckRequestPayload;
+    const trackingId = msg.correlationId ?? msg.id;
+
+    try {
+      const { buildDriftCheckPrompt, parseDriftCheckResult } = await import('../../../kernel/drift-detector.js');
+      const prompt = buildDriftCheckPrompt(anchor, content, checkpointType);
+
+      const result = await llm.current.chat(
+        [{ role: 'user', content: prompt }],
+        {
+          system: '你是语义对齐检测器。只输出 JSON，不要有任何其他文本。',
+          maxTokens: 200,
+          temperature: 0,
+          agent: name,
+          purpose: 'drift_detection',
+          sessionId: undefined,
+          correlationId: trackingId,
+        },
+      );
+
+      const signal = parseDriftCheckResult(result.content, checkpointType);
+      logger.debug({ checkpointType, alignmentScore: signal.alignmentScore, needsIntervention: signal.needsIntervention }, 'brain:drift-check');
+      ipc.send('drift.check.result', 'core', { signal }, trackingId);
+    } catch (err) {
+      logger.error({ err, checkpointType }, 'drift.check.request failed');
+      // 失败时返回"不干预"默认值
+      const fallbackSignal = { alignmentScore: 1, needsIntervention: false, checkpointType };
+      ipc.send('drift.check.result', 'core', { signal: fallbackSignal }, trackingId);
+    }
+  });
+
+  // ─── 12.0: verify.request — 独立意图验证（Verify Gate） ───
+  ipc.onMessage('verify.request', async (msg: IpcMessage) => {
+    const { anchor, draftResponse } = msg.payload as { anchor: import('../../../contracts/intent.js').IntentAnchor; draftResponse: string };
+    const trackingId = msg.correlationId ?? msg.id;
+
+    try {
+      const verifyPrompt = `你是一个独立的意图验证器。你的任务是判断最终回复是否真正解决了用户的问题。
+
+## 用户原始意图
+目标：${anchor.goal}
+约束：${anchor.constraints.length > 0 ? anchor.constraints.join('；') : '无'}
+预期产出类型：${anchor.outputType}
+
+## 待验证的回复
+${draftResponse.slice(0, 5000)}
+
+## 验证标准
+1. 回复是否直接回答了用户的问题/完成了用户的请求？
+2. 是否违反了用户的约束条件？
+3. 是否有"答非所问"的情况（看似在回答但偏了方向）？
+
+只输出 JSON：{"pass": true/false, "reason": "<一句话判决理由>", "correction": "<修正指导或null>"}`;
+
+      const result = await llm.current.chat(
+        [{ role: 'user', content: verifyPrompt }],
+        {
+          system: '你是独立意图验证器，以对抗性视角审视回复是否真正解决了用户问题。只输出 JSON。',
+          maxTokens: 300,
+          temperature: 0,
+          agent: name,
+          purpose: 'brain_review',
+          modelTier: 'default',
+          sessionId: undefined,
+          correlationId: trackingId,
+        },
+      );
+
+      // 解析验证结果
+      let verdict = { pass: true, reason: '验证通过', correction: undefined as string | undefined };
+      try {
+        const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          verdict = {
+            pass: Boolean(parsed.pass),
+            reason: typeof parsed.reason === 'string' ? parsed.reason : '未知',
+            correction: typeof parsed.correction === 'string' ? parsed.correction : undefined,
+          };
+        }
+      } catch { /* 解析失败默认通过 */ }
+
+      logger.debug({ pass: verdict.pass, reason: verdict.reason?.slice(0, 100) }, 'brain:verify');
+      ipc.send('verify.result', 'core', { verdict }, trackingId);
+    } catch (err) {
+      logger.error({ err }, 'verify.request failed');
+      ipc.send('verify.result', 'core', { verdict: { pass: true, reason: '验证服务异常，默认通过' } }, trackingId);
     }
   });
 });
