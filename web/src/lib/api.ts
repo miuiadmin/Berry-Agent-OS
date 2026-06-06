@@ -205,12 +205,34 @@ export const queries = {
       }
     },
   }),
+  drift: (days = 7) => ({
+    queryKey: ["drift", days],
+    queryFn: async () => {
+      try {
+        return await apiGet<{ avgAlignmentScore: number; interventionRate: number; recoveryRate: number; finalResponseAlignment: number; totalSignals: number; hotspotPairs: Array<{ from: string; to: string; avgScore: number }> }>(`/api/drift/metrics?days=${days}`);
+      } catch {
+        return { avgAlignmentScore: 1, interventionRate: 0, recoveryRate: 0, finalResponseAlignment: 1, totalSignals: 0, hotspotPairs: [] };
+      }
+    },
+  }),
+  driftSignals: (sessionId?: string) => ({
+    queryKey: ["driftSignals", sessionId],
+    queryFn: async () => {
+      const params = sessionId ? `?sessionId=${sessionId}&limit=50` : '?limit=50';
+      try {
+        return await apiGet<{ signals: Array<{ id: string; checkpointType: string; alignmentScore: number; needsIntervention: boolean; driftDescription: string | null; suggestedAction: string | null; createdAt: number }>; total: number }>(`/api/drift/signals${params}`);
+      } catch {
+        return { signals: [], total: 0 };
+      }
+    },
+  }),
 };
 
-export async function uploadFile(file: File): Promise<UploadResponse> {
+/** 上传文件，支持可选的 AbortSignal 用于取消上传 */
+export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${BASE_URL}/api/upload`, { method: "POST", body: formData });
+  const res = await fetch(`${BASE_URL}/api/upload`, { method: "POST", body: formData, signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as Record<string, string>).error || t("api.uploadFailed", { status: String(res.status) }));

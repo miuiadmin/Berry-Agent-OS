@@ -360,6 +360,8 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const [dragOver, setDragOver] = useState(false);
   const [droppedAttachments, setDroppedAttachments] = useState<Attachment[]>([]);
   const loadedSessionRef = useRef<string | null>(null);
+  /** 文件拖放上传的 AbortController，卸载时中止所有进行中的上传 */
+  const uploadAbortRef = useRef<AbortController | null>(null);
   const t = useT();
 
   // 是否已配置至少一个可用的 provider/model channel
@@ -385,31 +387,36 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
    */
   const canSend = !isStreaming && isModelConfigured;
 
-  const loadHistory = useCallback(() => {
+  /**
+   * 统一的历史恢复入口。
+   *
+   * 合并了原先的 loadHistory（chat-window 独立 effect）和 sharedSessionRestore
+   * （use-chat-socket 的 status effect）两条路径，消除了两条路径并发触发时的竞态。
+   *
+   * 触发条件：sessionId 变化且当前无消息。
+   * sharedSessionRestore 内部有 restoringSessionId 锁，即使 use-chat-socket 的
+   * status effect 也同时触发，也不会重复拉取。
+   */
+  const loadHistory = useCallback(async () => {
     if (!sessionId || loadedSessionRef.current === sessionId) return;
+    if (useChatStore.getState().messages.length > 0) {
+      loadedSessionRef.current = sessionId;
+      return;
+    }
     setHistoryError(null);
     setLoadingHistory(true);
-    const targetSession = sessionId;
-    apiGet<{
-      messages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }>;
-      activeTasks?: Array<{ progress?: string; thinkingSteps?: Array<{ text: string; ts: number }>; streamingContent?: string; streamingReasoning?: string }>;
-    }>(`/api/sessions/${targetSession}/state?limit=200`)
-      .then((data) => {
-        if (useChatStore.getState().sessionId !== targetSession) return;
-        loadedSessionRef.current = targetSession;
-        if (!data?.messages?.length) return;
-        // 原子性加载历史 + activeTask，避免 onMessage 竞态创建重复占位符
-        useChatStore.getState().loadHistoryAndRestore(
-          data.messages,
-          data.activeTasks?.[0],
-        );
-      })
-      .catch((err) => {
-        setHistoryError(err instanceof Error ? err.message : t("chat.unknownError"));
-      })
-      .finally(() => {
-        setLoadingHistory(false);
-      });
+    try {
+      const msgs = await useChatStore.getState().sharedSessionRestore(sessionId);
+      loadedSessionRef.current = sessionId;
+      // sharedSessionRestore 在 sessionId 已切换时返回旧消息，忽略
+      if (useChatStore.getState().sessionId !== sessionId) return;
+      // 没有消息也是正常情况（新对话）
+      if (!msgs?.length) return;
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : t("chat.unknownError"));
+    } finally {
+      setLoadingHistory(false);
+    }
   }, [sessionId, t]);
 
   useEffect(() => {
@@ -473,10 +480,15 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setDragOver(false);
     const files = e.dataTransfer.files;
     if (!files?.length) return;
+    // 每次拖放创建新的 AbortController，旧的自动失效
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
     const newAttachments: Attachment[] = [];
     for (const file of Array.from(files)) {
+      // 检查是否已被中止（如组件卸载）
+      if (controller.signal.aborted) break;
       try {
-        const result = await uploadFile(file);
+        const result = await uploadFile(file, controller.signal);
         newAttachments.push({
           fileId: result.fileId,
           filename: result.filename,
@@ -485,6 +497,8 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
           url: result.url,
         });
       } catch (err) {
+        // 中止导致的中断不算错误，不提示
+        if (controller.signal.aborted) break;
         const msg = err instanceof Error ? err.message : t("chat.fileUploadFailed");
         toast.error(msg);
       }
