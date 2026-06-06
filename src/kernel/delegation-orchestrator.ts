@@ -582,16 +582,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // R4-P1：中断场景下 partial text 入库，避免用户刷新丢失 partial
       // 标记 [已停止] 让用户知道回复未完成
       const stopMarker = '[已停止]';
-      const assistantContent = partialResponse
+      const resolvedResponse = partialResponse ?? stopMarker;
+      const persistContent = partialResponse
         ? `${partialResponse}\n\n${stopMarker}`
         : stopMarker;
-      try {
-        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, assistantContent, pending.reasoning);
-      } catch (err) {
-        logger.error({ err, sessionId, correlationId: primary.correlationId }, 'interruptSession partial 入库失败');
-      }
-      this.sessionManager.deletePending(primary.correlationId);
-      pending.resolve(partialResponse ?? '[已停止]');
+      this.sessionManager.resolvePending(primary.correlationId, resolvedResponse, { contentOverride: persistContent });
     }
 
     // 清理投机执行状态，防止 memory leak 和 stale handoff
@@ -782,8 +777,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const primaryName = primaryAgent.manifest.name;
     const primary = this.agentManager.getAgent(primaryName);
     if (!primary) {
-      pending.resolve('[系统错误] 对话智能体不可用');
-      this.sessionManager.deletePending(correlationId);
+      this.sessionManager.resolvePending(correlationId, '[系统错误] 对话智能体不可用');
       return;
     }
 
@@ -1022,20 +1016,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             if (resumable) {
               logger.info({ correlationId, error }, 'Execution failed but resumable');
               this.delegationManager.fail(delegationId, `[resumable] ${error}`);
-              this.sessionManager.deletePending(correlationId);
-              pending.resolve(`[${runtime.name}] 执行中断（可恢复）: ${error}`);
+              this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行中断（可恢复）: ${error}`);
             } else {
               this.delegationManager.fail(delegationId, error);
-              this.sessionManager.deletePending(correlationId);
-              pending.resolve(`[${runtime.name}] 执行失败: ${error}`);
+              this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行失败: ${error}`);
             }
             return;
           }
           case 'execution_cancelled': {
             this.streamingFlusher.remove(delegationId);
             this.delegationManager.fail(delegationId, 'Cancelled');
-            this.sessionManager.deletePending(correlationId);
-            pending.resolve(`[${runtime.name}] 执行已取消`);
+            this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行已取消`);
             return;
           }
           default:
@@ -1054,8 +1045,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       } else {
         this.streamingFlusher.remove(delegationId);
         this.delegationManager.fail(delegationId, 'No output produced');
-        this.sessionManager.deletePending(correlationId);
-        pending.resolve(`[${runtime.name}] 未产出任何输出`);
+        this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 未产出任何输出`);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1064,15 +1054,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.fail(delegationId, message);
       // R4-P0-1：Runtime exception 兜底：partial draftResponse + error 入库，避免 user 消息孤儿
       const errorResponse = `抱歉，处理过程中发生错误: ${message}`;
-      try {
-        const partialContent = pending.draftResponse
-          ? `${pending.draftResponse}\n\n[错误: ${message}]`
-          : errorResponse;
-        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, partialContent, pending.reasoning);
-      } catch (saveErr) {
-        logger.error({ err: saveErr, correlationId }, 'Runtime exception 兜底 saveConversationTurn 失败');
-      }
-      this.sessionManager.deletePending(correlationId);
+      const partialContent = pending.draftResponse
+        ? `${pending.draftResponse}\n\n[错误: ${message}]`
+        : errorResponse;
       // P1-4: 通知前端 user 消息没有回复
       getEventBus().emit('conversation.no_response', {
         sessionId: pending.sessionId,
@@ -1080,7 +1064,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         reason: `runtime_error: ${message}`,
         correlationId,
       });
-      pending.resolve(`[${runtime.name}] 执行异常: ${message}`);
+      this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行异常: ${message}`, { contentOverride: partialContent });
     }
   }
 
@@ -1307,13 +1291,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         const dEntry = this.delegationManager.getByCorrelation(correlationId);
         if (dEntry) this.delegationManager.complete(dEntry.id, draft);
         // P0 兜底：审核失败路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
-        try {
-          this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, draft, pending.reasoning);
-        } catch (err) {
-          logger.error({ err, correlationId }, '审核失败兜底 saveConversationTurn 失败');
-        }
-        this.sessionManager.deletePending(correlationId);
-        pending.resolve(draft);
+        this.sessionManager.resolvePending(correlationId, draft);
         return;
       }
 
@@ -1326,13 +1304,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         const dEntry = this.delegationManager.getByCorrelation(correlationId);
         if (dEntry) this.delegationManager.complete(dEntry.id, draft);
         // P0 兜底：审核超时路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
-        try {
-          this.sessionManager.saveConversationTurn(stillPending.sessionId, stillPending.userMessage, draft, stillPending.reasoning);
-        } catch (err) {
-          logger.error({ err, correlationId }, '审核超时兜底 saveConversationTurn 失败');
-        }
-        this.sessionManager.deletePending(correlationId);
-        stillPending.resolve(draft);
+        this.sessionManager.resolvePending(correlationId, draft);
       }, 30_000);
     });
 
@@ -1545,8 +1517,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.fail(entry.id, `Superior rejected: ${reason}`);
     }
 
-    this.sessionManager.deletePending(correlationId);
-    pending.resolve(`[上级审核退回] ${reason}`);
+    this.sessionManager.resolvePending(correlationId, `[上级审核退回] ${reason}`);
   }
 
   private sendTaskResultForReview(fgEntry: { correlationId: string; sessionId: string }, pending: PendingRequest, draftResponse: string): void {
@@ -1565,8 +1536,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (!reviewer || !reviewer.child.connected) {
       logger.warn({ correlationId: fgEntry.correlationId }, 'Reviewer 不可用，自动 approve');
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
-      this.sessionManager.deletePending(fgEntry.correlationId);
-      pending.resolve(draftResponse);
+      this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
       return;
     }
 
@@ -1595,8 +1565,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       logger.warn({ correlationId: fgEntry.correlationId }, 'review.request IPC 发送失败，自动 approve');
       this.pendingReviewOrigins.delete(fgEntry.correlationId);
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
-      this.sessionManager.deletePending(fgEntry.correlationId);
-      pending.resolve(draftResponse);
+      this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
       return;
     }
 
@@ -1609,8 +1578,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       logger.warn({ correlationId: fgEntry.correlationId, timeoutMs: reviewTimeoutMs }, '审核超时，自动 approve');
       this.pendingReviewOrigins.delete(fgEntry.correlationId);
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
-      this.sessionManager.deletePending(fgEntry.correlationId);
-      stillPending.resolve(draftResponse);
+      this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
     }, reviewTimeoutMs);
   }
 
@@ -1710,13 +1678,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
       const errorResponse = `[${agentName}] 任务失败: ${result.error ?? '未知错误'}`;
       // R4-P0-1：foreground 任务失败路径必须把错误回复入库，避免 user 消息孤儿
-      try {
-        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, errorResponse, pending.reasoning);
-      } catch (err) {
-        logger.error({ err, correlationId: fgEntry.correlationId }, 'foreground 任务失败兜底 saveConversationTurn 失败');
-      }
-      this.sessionManager.deletePending(fgEntry.correlationId);
-      pending.resolve(errorResponse);
+      this.sessionManager.resolvePending(fgEntry.correlationId, errorResponse);
       return;
     }
 
@@ -1808,11 +1770,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const partialContent = pending.draftResponse
         ? `${pending.draftResponse}\n\n[${timeoutResponse}]`
         : timeoutResponse;
-      try {
-        this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, partialContent, pending.reasoning);
-      } catch (err) {
-        logger.error({ err, taskId, correlationId: entry.correlationId }, 'task.timeout 兜底 saveConversationTurn 失败');
-      }
       // emit no_response 事件让前端感知
       getEventBus().emit('conversation.no_response', {
         sessionId: pending.sessionId,
@@ -1821,8 +1778,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         correlationId: entry.correlationId,
       });
       this.streamingFlusher.remove(taskId);
-      this.sessionManager.deletePending(entry.correlationId);
-      pending.resolve(timeoutResponse);
+      this.sessionManager.resolvePending(entry.correlationId, timeoutResponse, { contentOverride: partialContent });
     });
   }
 

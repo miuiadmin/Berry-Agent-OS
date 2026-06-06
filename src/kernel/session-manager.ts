@@ -114,6 +114,45 @@ export class SessionManager {
     this.pendingRequests.delete(msgId);
   }
 
+  /**
+   * 统一收尾 pending request：保存对话轮次 → 删除 pending → resolve 闭包。
+   * 消除 delegation-orchestrator 等处重复的
+   * try/saveTurn/catch + deletePending + resolve 三步补丁。
+   *
+   * @param msgId pending request 的 ID
+   * @param response 传给 resolve() 的回复文本
+   * @param options.saveTurn 是否保存对话轮次，默认 true
+   * @param options.contentOverride 入库时覆盖 response 的内容
+   *   （如追加 [已停止] 等标记），不影响 resolve 传给前端的原始文本
+   * @returns true=找到并处理了 pending，false=无此 pending
+   */
+  resolvePending(msgId: string, response: string, options?: {
+    saveTurn?: boolean;
+    contentOverride?: string;
+  }): boolean {
+    const pending = this.pendingRequests.get(msgId);
+    if (!pending) return false;
+
+    // 默认保存对话轮次
+    if (options?.saveTurn !== false && pending.userMessage) {
+      try {
+        const persistContent = options?.contentOverride ?? response;
+        this.saveConversationTurn(
+          pending.sessionId,
+          pending.userMessage,
+          persistContent,
+          pending.reasoning,
+        );
+      } catch (err) {
+        logger.error({ err, msgId, sessionId: pending.sessionId }, 'resolvePending saveConversationTurn 失败');
+      }
+    }
+
+    this.deletePending(msgId);
+    pending.resolve(response);
+    return true;
+  }
+
   entries(): IterableIterator<[string, PendingRequest]> {
     return this.pendingRequests.entries();
   }
