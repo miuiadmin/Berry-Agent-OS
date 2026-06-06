@@ -14,9 +14,13 @@ const logger = getLogger('agent-manager');
 
 const CIRCUIT_WINDOW_MS = 60_000;
 const CIRCUIT_THRESHOLD = 3;
+/** W6 修复：熔断后 5 分钟自动尝试恢复（half-open 状态） */
+const CIRCUIT_RECOVERY_MS = 5 * 60 * 1000;
 
 export class AgentManager {
   private agents = new Map<string, AgentProcess>();
+  /** W6: 熔断器自动恢复定时器 */
+  private circuitRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private heartbeatCheckers = new Map<string, ReturnType<typeof setInterval>>();
   private crashTimestamps = new Map<string, number[]>();
   private config: AppConfig;
@@ -116,7 +120,14 @@ export class AgentManager {
     if (registered?.manifest.ipcProtocol === 'generic-loop') {
       env.GENERIC_AGENT_CONFIG = registered.manifestPath;
     }
-    const agent = forkAgent(name, scriptPath, env, this.journal ?? undefined);
+    // W4 修复：传递 agent kind 给 forkAgent，让 StallWatchdog 仅对 resident agent 创建
+    const agent = forkAgent(
+      name,
+      scriptPath,
+      env,
+      this.journal ?? undefined,
+      registered?.manifest.kind as 'resident' | 'on-demand' | undefined,
+    );
     this.agents.set(name, agent);
 
     agent.ipc.onMessage('agent.register', () => {
@@ -184,6 +195,25 @@ export class AgentManager {
     metrics.counter('agent_crashes_total').inc({ agent: name });
     if (recent.length >= CIRCUIT_THRESHOLD) {
       metrics.counter('agent_circuit_breaks_total').inc({ agent: name });
+      // W6 修复：熔断触发后启动自动恢复定时器，5 分钟后尝试重置并重启
+      const existingTimer = this.circuitRecoveryTimers.get(name);
+      if (existingTimer) clearTimeout(existingTimer);
+      const timer = setTimeout(() => {
+        this.circuitRecoveryTimers.delete(name);
+        logger.info({ agent: name }, '熔断器冷却完成，自动恢复尝试');
+        this.resetCircuit(name);
+        // 尝试重启 agent
+        const registered = this.registry.get(name);
+        if (registered) {
+          try {
+            this.startAgent(name, registered.entryPath);
+          } catch (err) {
+            logger.error({ err, agent: name }, '熔断恢复重启失败');
+          }
+        }
+      }, CIRCUIT_RECOVERY_MS);
+      timer.unref(); // 不阻止进程退出
+      this.circuitRecoveryTimers.set(name, timer);
     }
   }
 
