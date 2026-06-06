@@ -22,11 +22,18 @@ export class AgentManager {
   private config: AppConfig;
   private registry: AgentRegistry;
   private eventBus: EventBus | null;
+  /** IPC journal 用于可靠投递和崩溃重放 */
+  private journal: import('./ipc-journal.js').IpcJournal | null = null;
 
   constructor(config: AppConfig, registry: AgentRegistry, eventBus?: EventBus) {
     this.config = config;
     this.registry = registry;
     this.eventBus = eventBus ?? null;
+  }
+
+  /** 设置 IPC journal（在 core-service setup 后调用） */
+  setJournal(journal: import('./ipc-journal.js').IpcJournal): void {
+    this.journal = journal;
   }
 
   async startAll(): Promise<void> {
@@ -107,7 +114,7 @@ export class AgentManager {
     if (registered?.manifest.ipcProtocol === 'generic-loop') {
       env.GENERIC_AGENT_CONFIG = registered.manifestPath;
     }
-    const agent = forkAgent(name, scriptPath, env);
+    const agent = forkAgent(name, scriptPath, env, this.journal ?? undefined);
     this.agents.set(name, agent);
 
     agent.ipc.onMessage('agent.register', () => {
@@ -115,6 +122,11 @@ export class AgentManager {
       agent.lastHeartbeat = Date.now();
       logger.info({ agent: name, pid: agent.pid }, `智能体已注册: ${name}`);
       this.eventBus?.emit('agent.registered', { name, pid: agent.pid });
+      // 重放崩溃前未完成的消息（IPC journal at-least-once 投递）
+      if (this.journal) {
+        const replayed = this.journal.replay(name, (msg) => agent.ipc.send(msg.type, msg.to, msg.payload, msg.correlationId));
+        if (replayed > 0) logger.info({ agent: name, replayed }, 'IPC journal replay 完成');
+      }
     });
 
     agent.ipc.onMessage('agent.heartbeat', () => {

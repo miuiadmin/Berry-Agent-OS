@@ -55,7 +55,9 @@ export class PermissionCoordinator {
 
     const request = this.approvalManager.createRequest({
       sessionId: params.sessionId,
-      taskId: params.taskId,
+      // ephemeral taskId（dtask_xxx）是 dialogue 模式下的临时 ID，不存在于 agent_tasks 表，
+      // 传入会触发 FK 约束失败，因此过滤掉
+      taskId: params.taskId?.startsWith('dtask_') ? undefined : params.taskId,
       correlationId: params.correlationId ?? params.sessionId,
       kind: 'tool',
       requester: params.agentName,

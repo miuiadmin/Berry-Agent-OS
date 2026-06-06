@@ -9,11 +9,19 @@ import { getLogger } from '../../../utils/logger.js';
 
 const logger = getLogger('builtin-driver');
 
+/** 可变 LLM 客户端引用，支持热重载时替换 */
+export interface LlmClientHolder {
+  current: LlmClient;
+}
+
 export class BuiltinDriver implements AgentRuntime {
   readonly name = 'Builtin';
   readonly provider = 'builtin' as const;
 
-  constructor(private readonly llmClient: LlmClient) {}
+  constructor(private readonly llmHolder: LlmClientHolder) {}
+
+  /** 获取当前活跃的 LLM 客户端（热重载后自动指向新实例） */
+  private get llmClient(): LlmClient { return this.llmHolder.current; }
 
   getCapabilities(): RuntimeCapabilities {
     return {

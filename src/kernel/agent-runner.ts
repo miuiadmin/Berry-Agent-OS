@@ -1,5 +1,6 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { IpcChannel } from './ipc.js';
+import type { IpcJournal } from './ipc-journal.js';
 import { createStallWatchdog, type StallWatchdog } from './stall-watchdog.js';
 import type { AgentName, AgentStatus } from '../contracts/agents.js';
 
@@ -16,7 +17,7 @@ export interface AgentProcess {
 
 const isTsx = process.argv[0]?.includes('tsx') || process.execArgv.some((a) => a.includes('tsx'));
 
-export function forkAgent(name: AgentName, scriptPath: string, env?: Record<string, string>): AgentProcess {
+export function forkAgent(name: AgentName, scriptPath: string, env?: Record<string, string>, journal?: IpcJournal): AgentProcess {
   const needsTsx = isTsx || scriptPath.endsWith('.ts');
   const execArgv = needsTsx ? ['--import', 'tsx'] : [];
 
@@ -26,7 +27,7 @@ export function forkAgent(name: AgentName, scriptPath: string, env?: Record<stri
     env: { ...process.env, AGENT_NAME: name, ...env },
   });
 
-  const ipc = new IpcChannel(child, 'core');
+  const ipc = new IpcChannel(child, 'core', { journal });
 
   const agent: AgentProcess = {
     name,

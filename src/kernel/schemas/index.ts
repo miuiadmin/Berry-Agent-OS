@@ -16,4 +16,5 @@ export { StreamingConfigSchema, type StreamingConfig } from './streaming.js';
 export { WebConfigSchema, type WebConfig } from './web.js';
 export { DaemonConfigSchema, type DaemonConfig } from './daemon.js';
 export { AutonomyConfigSchema, type AutonomyConfig } from './autonomy.js';
+export { DriftConfigSchema } from './drift.js';
 export { KernelScalarsSchema } from './kernel-scalars.js';

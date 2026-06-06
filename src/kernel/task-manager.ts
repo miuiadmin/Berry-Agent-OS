@@ -382,7 +382,14 @@ export class TaskManager implements TaskManagerDb {
       this.writeEvent(taskId, task.session_id, 'core', 'timeout', 'error', '执行超时');
       this.eventBus.emit('task.timeout', { taskId, targetAgent: task.target_agent });
       this.timeouts.delete(taskId);
-      logger.warn({ taskId }, '任务超时');
+      logger.warn({
+        taskId,
+        targetAgent: task.target_agent,
+        sessionId: task.session_id,
+        taskType: task.task_type,
+        elapsed: now - task.created_at,
+        status: task.status,
+      }, '任务超时');
     }, this.config.defaultTimeoutMs);
 
     this.timeouts.set(taskId, timer);
@@ -404,7 +411,14 @@ export class TaskManager implements TaskManagerDb {
       this.writeEvent(taskId, task.session_id, 'core', 'timeout', 'error', '执行超时');
       this.eventBus.emit('task.timeout', { taskId, targetAgent: task.target_agent });
       this.timeouts.delete(taskId);
-      logger.warn({ taskId }, '任务超时');
+      logger.warn({
+        taskId,
+        targetAgent: task.target_agent,
+        sessionId: task.session_id,
+        taskType: task.task_type,
+        elapsed: now - task.created_at,
+        status: task.status,
+      }, '任务超时');
     }, newTimeoutMs);
     this.timeouts.set(taskId, timer);
   }
