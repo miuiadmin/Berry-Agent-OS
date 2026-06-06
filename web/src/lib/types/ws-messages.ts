@@ -1,6 +1,9 @@
 /**
  * Typed WebSocket message contracts between backend and frontend.
  * Each interface corresponds to a `type` field value from the server.
+ *
+ * 所有流式消息都携带可选的 sessionId 字段（由后端注入），
+ * 前端 onMessage 用它按对话过滤，防止跨对话内容污染。
  */
 
 // ─── Server → Client messages ─────────────────────────────────────
@@ -8,12 +11,15 @@
 export interface TextDeltaMessage {
   type: "text_delta";
   text: string;
+  /** 对话 sessionId，前端按对话过滤用 */
+  sessionId?: string;
 }
 
 export interface ProgressMessage {
   type: "progress";
   summary?: string;
   pct?: number;
+  sessionId?: string;
 }
 
 export interface ResultMessage {
@@ -22,20 +28,24 @@ export interface ResultMessage {
   response?: string;
   /** 兼容旧版 content 字段 */
   content?: string;
+  sessionId?: string;
 }
 
 export interface ErrorMessage {
   type: "error";
   error?: string;
   message?: string;
+  sessionId?: string;
 }
 
 export interface CancelledMessage {
   type: "cancelled";
+  sessionId?: string;
 }
 
 export interface InterruptedMessage {
   type: "interrupted";
+  sessionId?: string;
 }
 
 export interface DelegationNeededMessage {
@@ -68,11 +78,13 @@ export interface ToolCallMessage {
   isError: boolean;
   durationMs: number;
   taskId: string;
+  sessionId?: string;
 }
 
 export interface ReasoningDeltaMessage {
   type: "reasoning_delta";
   text: string;
+  sessionId?: string;
 }
 
 /** Agent 间对话状态事件（11.0 dialogue 协议，Kernel → 前端） */
@@ -90,6 +102,7 @@ export interface DialogueStatusMessage {
   round: number;
   /** Conversation 决定暴露的对话概要 */
   summary?: string;
+  sessionId?: string;
 }
 
 /** Agent 委派/交接事件（Kernel → 前端） */
@@ -98,6 +111,7 @@ export interface AgentHandoffMessage {
   from: string;
   to: string;
   intent: string;
+  sessionId?: string;
 }
 
 /** Agent 向用户提问事件（Kernel → 前端） */

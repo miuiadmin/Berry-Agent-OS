@@ -88,6 +88,15 @@ interface ChatState {
   /** 标记跳过自动恢复（删除对话后调用） */
   setSkipAutoRestore: (v: boolean) => void;
   restoreSession: (messages: ChatMessage[], activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[]; streamingContent?: string | null; streamingReasoning?: string | null }) => void;
+  /**
+   * 原子性加载历史消息 + 恢复活跃任务。
+   * 在一次 set 中完成所有消息添加和 streaming 占位符创建，
+   * 避免 onMessage 在中间状态穿插创建重复占位符。
+   */
+  loadHistoryAndRestore: (
+    historyMessages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: ThinkingStep[] }>,
+    activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[]; streamingContent?: string | null; streamingReasoning?: string | null } | undefined,
+  ) => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -137,6 +146,65 @@ export const useChatStore = create<ChatState>()(
       setPermissionMode: (mode) => set({ permissionMode: mode }),
       /** 设置是否跳过自动恢复（删除对话后设为 true） */
       setSkipAutoRestore: (v) => set({ skipAutoRestore: v }),
+
+      /**
+       * 原子性加载历史消息 + 恢复活跃任务。
+       * 在一次 zustand set 中完成：所有历史消息添加 + activeTask streaming 占位符创建。
+       * 避免 loadHistory 和 onMessage 的竞态条件（onMessage 在 loadHistory 完成
+       * 之前创建重复占位符）。
+       */
+      loadHistoryAndRestore: (historyMessages, activeTask) =>
+        set((s) => {
+          // 如果已有消息（recoveredRef effect 先跑了），跳过
+          if (s.messages.length > 0) return s;
+
+          const msgs: ChatMessage[] = historyMessages.map((m) => ({
+            id: genMsgId("hist"),
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
+            // 如果有 activeTask 且这是最后一条 assistant 消息，先不标记 complete
+            // 让下面的 activeTask 逻辑决定 status
+            status: "complete" as const,
+            reasoning: m.reasoning,
+            thinkingSteps: m.thinkingSteps,
+          }));
+
+          // 有活跃任务：在最后一条 assistant 消息后追加 streaming 占位符
+          if (activeTask) {
+            const streamingText = activeTask.streamingContent ?? "";
+            const streamingReasoning = activeTask.streamingReasoning ?? undefined;
+            // 如果最后一条历史消息是 assistant 且有 streamingContent，
+            // 用 streamingContent 更新它并标记为 streaming
+            const lastMsg = msgs[msgs.length - 1];
+            if (lastMsg?.role === "assistant" && streamingText && streamingText.length > (lastMsg.content?.length ?? 0)) {
+              msgs[msgs.length - 1] = {
+                ...lastMsg,
+                content: streamingText,
+                reasoning: streamingReasoning && (!lastMsg.reasoning || streamingReasoning.length > lastMsg.reasoning.length)
+                  ? streamingReasoning : lastMsg.reasoning,
+                status: "streaming",
+                progress: activeTask.progress ?? undefined,
+                thinkingSteps: activeTask.thinkingSteps ?? lastMsg.thinkingSteps,
+              };
+            } else {
+              // 历史消息不包含 streaming 内容，追加新占位符
+              msgs.push({
+                id: genMsgId("asst-recovering"),
+                role: "assistant",
+                content: streamingText,
+                timestamp: Date.now(),
+                status: "streaming",
+                reasoning: streamingReasoning,
+                progress: activeTask.progress ?? undefined,
+                thinkingSteps: activeTask.thinkingSteps,
+              });
+            }
+            return { messages: msgs, isStreaming: true };
+          }
+
+          return { messages: msgs };
+        }),
 
       restoreSession: (messages, activeTask) =>
         set((s) => {

@@ -13,12 +13,6 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useT } from "@/lib/i18n";
 
-interface HistoryMessage {
-  role: "user" | "assistant";
-  content: string;
-  createdAt: string;
-}
-
 function ChatSkeleton() {
   return (
     <div className="flex-1 p-4">
@@ -368,7 +362,6 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setHistoryError(null);
     setLoadingHistory(true);
     const targetSession = sessionId;
-    // 同一个 endpoint，返回 messages + activeTasks
     apiGet<{
       messages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }>;
       activeTasks?: Array<{ progress?: string; thinkingSteps?: Array<{ text: string; ts: number }>; streamingContent?: string; streamingReasoning?: string }>;
@@ -377,30 +370,11 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         if (useChatStore.getState().sessionId !== targetSession) return;
         loadedSessionRef.current = targetSession;
         if (!data?.messages?.length) return;
-        for (const msg of data.messages) {
-          addMessage({
-            id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            role: msg.role as "user" | "assistant",
-            content: msg.content,
-            timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
-            status: "complete",
-            reasoning: msg.reasoning,
-            thinkingSteps: msg.thinkingSteps,
-          });
-        }
-        // 恢复活跃任务（如果有）：用 restoreSession 补上 streaming 占位符
-        const activeTask = data.activeTasks?.[0];
-        if (activeTask) {
-          useChatStore.getState().restoreSession(
-            [], // 消息已加载，不需要再替换
-            {
-              progress: activeTask.progress,
-              thinkingSteps: activeTask.thinkingSteps,
-              streamingContent: activeTask.streamingContent,
-              streamingReasoning: activeTask.streamingReasoning,
-            },
-          );
-        }
+        // 原子性加载历史 + activeTask，避免 onMessage 竞态创建重复占位符
+        useChatStore.getState().loadHistoryAndRestore(
+          data.messages,
+          data.activeTasks?.[0],
+        );
       })
       .catch((err) => {
         setHistoryError(err instanceof Error ? err.message : t("chat.unknownError"));
@@ -408,7 +382,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
       .finally(() => {
         setLoadingHistory(false);
       });
-  }, [sessionId, addMessage]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId || messages.length > 0) return;
