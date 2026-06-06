@@ -2,6 +2,7 @@ import type { Socket } from 'node:net';
 import type { MessageBus } from '../message-bus.js';
 import type { ServiceContainer } from '../service-container.js';
 import type { SocketMessageType, MessageContext, MessageType } from '../../contracts/messages.js';
+import { SocketChannel } from '../../contracts/transport.js';
 import type {
   DaemonRegisterMessage,
   DaemonHeartbeatMessage,
@@ -317,6 +318,9 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
 
   const isStreaming = request.streaming !== false;
 
+  // P1-4: 将 Socket 包装为 WritableChannel 接口，统一 WS 和 CLI 传输层类型
+  const channel = new SocketChannel(socket);
+
   // R4-P0-2：CLI / socket-server 路径的 user 消息也要在入口入库，避免孤儿
   try {
     const clientMsgId = genId('umsg');
@@ -330,14 +334,14 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
     userMessage: message,
     taskId,
     streaming: isStreaming,
-    socket: isStreaming ? socket : undefined,
+    channel: isStreaming ? channel : undefined,
     resolve: (response) => {
       if (isStreaming) {
         const evt: SocketResultEvent = { type: 'result', response, sessionId, taskId };
-        socket.write(JSON.stringify(evt) + '\n');
-        socket.end();
+        channel.write(JSON.stringify(evt) + '\n');
+        channel.end();
       } else {
-        socket.write(JSON.stringify({ response, sessionId, taskId }) + '\n');
+        channel.write(JSON.stringify({ response, sessionId, taskId }) + '\n');
       }
     },
   });

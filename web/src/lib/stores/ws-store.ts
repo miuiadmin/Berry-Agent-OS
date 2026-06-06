@@ -214,6 +214,21 @@ export const useWsStore = create<WsStore>()(
 
         ws = socket;
 
+        // P1-6: 心跳超时检测 — 追踪最后收到消息的时间戳
+        // 静默断连场景（WiFi 切换、休眠恢复）下 readyState 仍为 OPEN，
+        // 但消息实际无法送达。通过定时检查 lastActivityTs 检测此类断连
+        let lastActivityTs = Date.now();
+
+        /** P1-6: 心跳超时定时器 — 每 35s 检查一次，60s 无消息则判定连接已死 */
+        const heartbeatCheck = setInterval(() => {
+          if (ws !== socket) { clearInterval(heartbeatCheck); return; } // 过时实例，停止检查
+          if (Date.now() - lastActivityTs > 60_000) {
+            // 60 秒未收到任何消息（含 ping/pong），视为静默断连
+            clearInterval(heartbeatCheck);
+            socket.close(4000, "heartbeat timeout");
+          }
+        }, 35_000);
+
         /** 连接成功：更新状态、发送队列、按需弹 toast */
         socket.onopen = () => {
           if (ws !== socket) return; // 过时的 socket 实例，忽略
@@ -246,6 +261,7 @@ export const useWsStore = create<WsStore>()(
         /** 收到消息：派发到事件监听器和消息处理器 */
         socket.onmessage = (event) => {
           if (ws !== socket) return; // 过时的 socket 实例，忽略
+          lastActivityTs = Date.now(); // P1-6: 收到消息即刷新心跳时间戳
           try {
             const data = JSON.parse(event.data) as Record<string, unknown>;
 
@@ -275,6 +291,7 @@ export const useWsStore = create<WsStore>()(
         /** 连接关闭：如果之前处于 connected 状态，提示用户并触发重连 */
         socket.onclose = () => {
           if (ws !== socket) return; // 过时的 socket 实例，忽略
+          clearInterval(heartbeatCheck); // P1-6: 清理心跳检查定时器
           const prev = get().status;
           set({ status: "disconnected" });
           // 只有从 connected 状态掉线才提示（connecting 阶段关闭不提示，避免首次连接失败就弹）

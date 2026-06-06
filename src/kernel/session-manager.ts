@@ -1,7 +1,7 @@
-import type { Socket } from 'node:net';
 import type { Database } from 'better-sqlite3';
 import type { ModelTier } from '../contracts/model.js';
 import type { MemoryContextFrame } from '../contracts/memory.js';
+import type { WritableChannel } from '../contracts/transport.js';
 import type { MemoryRuntime } from '../memory/index.js';
 import type { EvolutionEngine } from '../evolution/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
@@ -26,7 +26,8 @@ export interface PendingRequest {
   draftResponse?: string;
   toolCalls?: Array<{ name: string; input: string; result: string }>;
   streaming?: boolean;
-  socket?: Socket;
+  /** P1-4 修复：传输层写入通道（WS 为 WebSocketBridge，CLI 为 SocketChannel） */
+  channel?: WritableChannel;
   resolve: (response: string) => void;
   /** 12.0: Brain 路由时产出的用户意图锚点（漂移检测基准） */
   intentAnchor?: import('../contracts/intent.js').IntentAnchor;

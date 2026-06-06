@@ -1,7 +1,6 @@
 import { join } from 'node:path';
-import type { Socket } from 'node:net';
+import type { WritableChannel } from '../../contracts/transport.js';
 import type { ServiceContainer } from '../service-container.js';
-import type { SocketResultEvent } from '../../contracts/socket-protocol.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
 import { buildAvailableAgentsList } from '../agent-registry.js';
 import { PermissionEngine } from '../../safety/permissions.js';
@@ -27,14 +26,19 @@ export type MessagingHandlerContext = Pick<ServiceContainer,
   'channelManager' | 'daemonBridge' | 'config'
 >;
 
+/**
+ * 处理 WS 路径的用户消息。
+ * P1-4 修复：channel 参数类型从 Socket 改为 WritableChannel，
+ * WebSocketBridge 实现此接口，不再需要 unsafe cast。
+ */
 export function handleMessage(
   request: Record<string, unknown>,
-  socket: Socket,
+  channel: WritableChannel,
   ctx: MessagingHandlerContext,
 ): void {
   const message = requireString(request, 'message');
   if (!message) {
-    socket.write(JSON.stringify({ error: '缺少 message 字段' }) + '\n');
+    channel.write(JSON.stringify({ error: '缺少 message 字段' }) + '\n');
     return;
   }
 
@@ -55,7 +59,7 @@ export function handleMessage(
       taskId: ctx.sessionManager.getPendingAsk(sessionId)!.taskId,
       reply: message,
     }, genId('reply'));
-    socket.write(JSON.stringify({ ok: true, type: 'reply', sessionId }) + '\n');
+    channel.write(JSON.stringify({ ok: true, type: 'reply', sessionId }) + '\n');
     return;
   }
 
@@ -80,15 +84,12 @@ export function handleMessage(
     userMessage: message,
     taskId,
     streaming: isStreaming,
-    socket: isStreaming ? socket : undefined,
+    // P1-5 修复：WS 路径不再在 resolve 中直写 channel
+    // 最终结果通过 EventBus conversation.result 事件投递，WsEventBridge 统一转发
+    // channel 字段保留用于未来重连恢复，resolve 闭包不再引用它
     resolve: (response) => {
-      if (isStreaming) {
-        const evt: SocketResultEvent = { type: 'result', response, sessionId, taskId };
-        socket.write(JSON.stringify(evt) + '\n');
-        socket.end();
-      } else {
-        socket.write(JSON.stringify({ response, sessionId, taskId }) + '\n');
-      }
+      // 仅发射事件，不做任何 I/O — WS 传输层与对话引擎完全解耦
+      getEventBus().emit('conversation.result', { sessionId, taskId, response });
     },
   });
 

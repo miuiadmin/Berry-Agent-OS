@@ -72,6 +72,8 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'conversation.no_response': 'no_response',
   /** P0-3: 对话中断通知 — 通过 EventBus 投递，不再直写 ws */
   'conversation.interrupted': 'interrupted',
+  /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，resolve 不再直写 channel */
+  'conversation.result': 'result',
 };
 
 export class WsEventBridge {

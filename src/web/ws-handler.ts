@@ -1,9 +1,9 @@
 import type { IncomingMessage } from 'node:http';
-import type { Socket } from 'node:net';
 import type { WebSocket } from 'ws';
 import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
 import type { WebServerDependencies } from './types.js';
+import type { WritableChannel } from '../contracts/transport.js';
 
 const logger = getLogger('ws-handler');
 
@@ -27,7 +27,12 @@ function wsError(ws: WebSocket, error: string): void {
 
 // --- WebSocket Bridge ---
 
-export class WebSocketBridge {
+/**
+ * WebSocket → WritableChannel 桥接器
+ * 将 ws.WebSocket 适配为统一的 WritableChannel 接口，
+ * 消除 kernel 层对 WS 传输层具体类型的依赖。
+ */
+export class WebSocketBridge implements WritableChannel {
   destroyed = false;
 
   constructor(private ws: WebSocket) {
@@ -97,21 +102,21 @@ export function createWsHandler(deps: WebServerDependencies) {
       permissionListener();
       clearInterval(pingInterval);
 
-      // P0-2 修复：清理该 clientId 关联的 pending request 的 socket 引用
-      // 对话继续运行不中断（保证稳定性），仅清除死 socket 引用避免 resolve 闭包写入已断连连接
+      // P0-2 修复：清理该 clientId 关联的 pending request 的 channel 引用
+      // 对话继续运行不中断（保证稳定性），仅清除死 channel 引用避免 resolve 闭包写入已断连连接
       let cleanedCount = 0;
       for (const [msgId, pending] of deps.sessionManager.entries()) {
         if (pending.clientId === clientId) {
-          // 清除 socket 引用 — WebSocketBridge.write() 已有安全检查，但显式清除更明确
-          pending.socket = undefined;
+          // 清除 channel 引用 — WebSocketBridge.write() 已有安全检查，但显式清除更明确
+          pending.channel = undefined;
           cleanedCount++;
           logger.debug({
             clientId,
             msgId,
             sessionId: pending.sessionId,
             hasTaskId: !!pending.taskId,
-          }, 'WS 断连：清理 pending request socket 引用，对话继续运行');
-        }
+          }, 'WS 断连：清理 pending request channel 引用，对话继续运行');
+          }
       }
       if (cleanedCount > 0) {
         logger.info({ clientId, cleanedCount }, 'WS 断连：已清理关联的 pending request，对话继续运行等待重连恢复');
@@ -150,10 +155,11 @@ function handleWsMessage(
       const effectiveSessionId = requireString(msg, 'sessionId') || genId('ses');
       const permissionMode = requireString(msg, 'permissionMode') || 'ask';
       const bridge = new WebSocketBridge(ws);
+      // P1-4 修复：WebSocketBridge 实现 WritableChannel，不再需要 unsafe cast
       // 传递 clientId 以便 session-manager 按 WS 客户端索引 pending request
       deps.handleMessage(
         { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode, attachments, clientId },
-        bridge as unknown as Socket,
+        bridge,
       );
       break;
     }

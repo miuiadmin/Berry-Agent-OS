@@ -205,6 +205,8 @@ export type EventMap = {
   'conversation.no_response': { sessionId: string; reason: string; taskId?: string; clientMsgId?: string; correlationId?: string };
   /** P0-3: 对话被中断 — 通过 EventBus 投递，WsEventBridge 转发到前端 */
   'conversation.interrupted': { sessionId: string; taskId: string | null; reason: string };
+  /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，不再 resolve 直写 channel */
+  'conversation.result': { sessionId: string; taskId: string; response: string };
 };
 
 export type EventMessageMap = {
