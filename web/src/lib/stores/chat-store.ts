@@ -424,6 +424,50 @@ export const useChatStore = create<ChatState>()(
             }
           }
 
+          // P2-7/P2-8 修复：在写入前与本地流式内容做 merge
+          // 场景：WS 重连后 sharedSessionRestore 拉取服务端历史，同时 onMessage 已在接收 text_delta
+          // 如果服务端 StreamingFlusher 刷新延迟（最多 2s），服务端内容可能比本地短
+          // 全量覆盖会导致用户看到内容倒退（文本突然变短）或丢失 onMessage 已追加的流式增量
+          const localMessages = get().messages;
+          const localStreamingIdx = localMessages.findLastIndex(
+            (m) => m.role === "assistant" && m.status === "streaming"
+          );
+
+          if (localStreamingIdx >= 0) {
+            const localStreaming = localMessages[localStreamingIdx];
+            const serverStreamingIdx = historyMsgs.findLastIndex(
+              (m) => m.role === "assistant" && (m.status === "streaming" || m.status === "complete")
+            );
+
+            if (serverStreamingIdx >= 0) {
+              const serverStreaming = historyMsgs[serverStreamingIdx];
+              // P2-7: 取本地和服务端更长的内容（更长 = 更新，因为内容只会追加不会缩短）
+              const localContent = localStreaming.content ?? "";
+              const serverContent = serverStreaming.content ?? "";
+              if (localContent.length > serverContent.length) {
+                historyMsgs[serverStreamingIdx] = {
+                  ...serverStreaming,
+                  content: localContent,
+                  status: "streaming",
+                  // reasoning 同理取更长的
+                  reasoning: localStreaming.reasoning && (!serverStreaming.reasoning || localStreaming.reasoning.length > serverStreaming.reasoning.length)
+                    ? localStreaming.reasoning : serverStreaming.reasoning,
+                };
+                // 如果本地有 streaming 占位 ID，保留以便后续 text_delta 追加到正确位置
+                if (!pendingStreamId) {
+                  pendingStreamId = serverStreaming.id;
+                }
+              }
+            } else if (localStreaming.content) {
+              // P2-8: 本地有流式内容但服务端历史中没有对应消息（fetch 期间 text_delta 到达）
+              // 保留本地的流式消息，追加到服务端历史末尾
+              historyMsgs.push({ ...localStreaming });
+              if (!pendingStreamId) {
+                pendingStreamId = localStreaming.id;
+              }
+            }
+          }
+
           set({
             messages: historyMsgs,
             pendingStreamMessageId: pendingStreamId,

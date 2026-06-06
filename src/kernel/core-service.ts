@@ -459,6 +459,8 @@ export class CoreService {
     checkpointService.recoverOnStartup();
 
     // §9.0 M8: Start task sweep for stale dispatched/running tasks
+    // P2-9: 启动时立即清理残留任务（重启后 AbortController/timeout 丢失）
+    this.taskManager!.recoverOnStartup();
     this.taskManager!.startSweep();
 
     this.eventBus.on('agent.crashed', ({ name }) => {

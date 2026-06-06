@@ -70,6 +70,53 @@ export class TaskManager implements TaskManagerDb {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  /**
+   * P2-9: 启动时扫描残留任务并重建 AbortController / 超时定时器。
+   *
+   * 进程重启后 AbortController 和 timeout timers 丢失，但 SQLite 中仍有
+   * running/dispatched/acknowledged 状态的任务。这些任务：
+   * 1. 无法被 abort（AbortController 丢失）
+   * 2. 不会超时（timer 丢失）
+   * 3. 需要等 sweep 定时器（60s 间隔）发现并标记，最长 30 分钟窗口
+   *
+   * 策略：对残留任务立即 fail + 发事件，让上层（checkpoint-service 等）决定是否重试。
+   * 不尝试重建 AbortController（重启后 agent 进程也已丢失，无法继续执行）。
+   */
+  recoverOnStartup(): { failed: number } {
+    const now = Date.now();
+    const staleStatuses: TaskStatus[] = ['dispatched', 'running', 'acknowledged'];
+
+    let failed = 0;
+    for (const status of staleStatuses) {
+      const tasks = this.db.prepare(
+        `SELECT id, session_id, target_agent, created_at, dispatched_at, started_at FROM agent_tasks WHERE status = ?`,
+      ).all(status) as Array<{ id: string; session_id: string; target_agent: string; created_at: number; dispatched_at: number | null; started_at: number | null }>;
+
+      for (const task of tasks) {
+        const elapsed = now - task.created_at;
+        const error = `任务因服务重启被标记失败（原状态: ${status}，已耗时 ${Math.round(elapsed / 1000)}s）`;
+
+        this.db.prepare(
+          `UPDATE agent_tasks SET status = 'failed', error = ?, finished_at = ? WHERE id = ?`,
+        ).run(error, now, task.id);
+
+        this.writeEvent(task.id, task.session_id, 'core', 'failed', 'warn', error);
+        this.eventBus.emit('task.failed', {
+          taskId: task.id,
+          targetAgent: task.target_agent as AgentName,
+          error,
+        });
+        failed++;
+        logger.info({ taskId: task.id, session_id: task.session_id, originalStatus: status }, '启动恢复: 残留任务已标记失败');
+      }
+    }
+
+    if (failed > 0) {
+      logger.info({ failed }, '启动恢复: 残留任务清理完成');
+    }
+    return { failed };
+  }
+
   create(input: CreateTaskInput): string {
     const id = genId('tsk');
     const now = Date.now();
