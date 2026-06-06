@@ -63,6 +63,12 @@ export function handleMessage(
     return;
   }
 
+  // 防止同一会话并发投递 — 多标签页 / outbox 重放防护
+  if (ctx.sessionManager.hasActivePendingForSession(sessionId)) {
+    channel.write(JSON.stringify({ error: '该对话正在处理中，请等待完成' }) + '\n');
+    return;
+  }
+
   const msgId = genId('msg');
 
   const route = ctx.taskRouter.route({ taskType: 'conversation_turn', requester: 'user' });

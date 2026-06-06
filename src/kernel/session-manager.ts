@@ -126,6 +126,17 @@ export class SessionManager {
     return [...this.pendingRequests.values()].find((p) => p.taskId);
   }
 
+  /**
+   * 检查指定 session 是否有活跃的 pending request。
+   * 用于防止同一会话并发消息投递（多标签页 / outbox 重放防护）。
+   */
+  hasActivePendingForSession(sessionId: string): boolean {
+    for (const pending of this.pendingRequests.values()) {
+      if (pending.sessionId === sessionId) return true;
+    }
+    return false;
+  }
+
   getModelOverride(sessionId: string): ModelTier | undefined {
     return this.sessionModelOverrides.get(sessionId);
   }
