@@ -14,7 +14,7 @@ import type {
 import type { SocketProgressEvent, SocketResultEvent, SocketInterruptedEvent } from '../../contracts/socket-protocol.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
 import type { ModelTier } from '../../contracts/model.js';
-import type { LogLevel } from '../observability.js';
+import type { LogLevel } from '../../observability/types.js';
 import { PermissionEngine } from '../../safety/permissions.js';
 import { TokenIssuer } from '../../safety/token-issuer.js';
 import { ApprovalManager } from '../../safety/approval-manager.js';
@@ -351,7 +351,7 @@ const messageHandler: HandlerFn = (request, ctx, services) => {
 
   const pending = services.sessionManager.getPending(msgId)!;
   if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-    const event: SocketProgressEvent = { type: 'progress', status: 'routing', summary: '正在分析意图...', taskId };
+    const event: SocketProgressEvent = { type: 'progress', status: 'routing', summary: '正在分析意图...', taskId, sessionId };
     pending.socket.write(JSON.stringify(event) + '\n');
   }
 

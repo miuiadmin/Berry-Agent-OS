@@ -110,7 +110,7 @@ export function handleMessage(
   const pending = ctx.sessionManager.getPending(msgId)!;
 
   if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-    const event: SocketProgressEvent = { type: 'progress', status: 'routing', summary: '正在分析意图...', taskId };
+    const event: SocketProgressEvent = { type: 'progress', status: 'routing', summary: '正在分析意图...', taskId, sessionId };
     pending.socket.write(JSON.stringify(event) + '\n');
   }
 

@@ -368,7 +368,11 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
     setHistoryError(null);
     setLoadingHistory(true);
     const targetSession = sessionId;
-    apiGet<{ messages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }> }>(`/api/sessions/${targetSession}/state?limit=200`)
+    // 同一个 endpoint，返回 messages + activeTasks
+    apiGet<{
+      messages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }>;
+      activeTasks?: Array<{ progress?: string; thinkingSteps?: Array<{ text: string; ts: number }>; streamingContent?: string; streamingReasoning?: string }>;
+    }>(`/api/sessions/${targetSession}/state?limit=200`)
       .then((data) => {
         if (useChatStore.getState().sessionId !== targetSession) return;
         loadedSessionRef.current = targetSession;
@@ -383,6 +387,19 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
             reasoning: msg.reasoning,
             thinkingSteps: msg.thinkingSteps,
           });
+        }
+        // 恢复活跃任务（如果有）：用 restoreSession 补上 streaming 占位符
+        const activeTask = data.activeTasks?.[0];
+        if (activeTask) {
+          useChatStore.getState().restoreSession(
+            [], // 消息已加载，不需要再替换
+            {
+              progress: activeTask.progress,
+              thinkingSteps: activeTask.thinkingSteps,
+              streamingContent: activeTask.streamingContent,
+              streamingReasoning: activeTask.streamingReasoning,
+            },
+          );
         }
       })
       .catch((err) => {

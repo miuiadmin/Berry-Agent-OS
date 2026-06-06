@@ -121,6 +121,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private suggestionQueueRef: SuggestionQueue | null = null;
   /** 智能体间对话路由器（11.0） */
   dialogueRouter: DialogueRouter | null = null;
+  /** 12.0 漂移检测器 */
+  driftDetector: import('./drift-detector.js').DriftDetector | null = null;
 
   // Permission judge state
   private permissionFlow: PermissionFlow;
@@ -300,10 +302,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 首次对话：在 DialogueRouter 中注册对话状态
       let state = router.getDialogue(payload.dialogueId);
       if (!state) {
-        const pending = [...this.sessionManager.entries()].find(([, p]) => p.sessionId)?.[1];
+        // 通过 correlationId 找到当前请求的 pending（精确匹配，非 O(n) 遍历）
+        const correlationId = msg.correlationId ?? msg.id;
+        const pending = this.sessionManager.getPending(correlationId);
         state = router.registerDialogue(payload.dialogueId, {
           sessionId: pending?.sessionId ?? 'unknown',
-          correlationId: msg.correlationId ?? msg.id,
+          correlationId,
           initiator: payload.from,
           target: payload.to,
         });
@@ -311,9 +315,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       // 确保目标 agent 已启动（on-demand agents 需要 ensureAgent）
       await this.agentManager.ensureAgent(payload.to);
+      // 11.0 关键：注册 kernel 侧的 IPC handler（dialogue.reply、permission 等）
+      // 否则目标 Agent 的 reply 无人接收，导致 60s 超时
+      this.setupModuleAgent(payload.to);
 
-      // 获取 pending socket 用于 streaming
-      const pending = [...this.sessionManager.entries()].find(([, p]) => p.sessionId === state!.sessionId)?.[1];
+      // 获取 pending socket 用于 streaming（通过 correlationId 精确查找）
+      const pending = this.sessionManager.getPending(state!.correlationId);
 
       // 推送前端事件：对话开始/新一轮
       if (pending?.socket && !(pending.socket as { destroyed?: boolean }).destroyed) {
@@ -324,6 +331,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           from: payload.from,
           to: payload.to,
           round: state!.currentRound,
+          sessionId: pending.sessionId,
         });
         pending.socket.write(statusEvent + '\n');
       }
@@ -354,6 +362,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             from: payload.from,
             to: payload.to,
             round: state!.currentRound,
+            sessionId: pending.sessionId,
           }) + '\n');
         }
       }
@@ -602,6 +611,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (pending) {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
         this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>);
+        // 12.0: 填充意图锚点到 pending（漂移检测基准）并持久化
+        if (decision.intentAnchor) {
+          pending.intentAnchor = decision.intentAnchor;
+          this.driftDetector?.recordAnchor(
+            decision.intentAnchor, pending.userMessage,
+            pending.sessionId, correlationId, decision.reason,
+          );
+        }
         if (decision.reason) {
           this.reportProgress(pending, 'routing', `brain → ${decision.targetAgent}: ${decision.reason}`);
         }
@@ -762,6 +779,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     let systemPrompt = this.sessionManager.buildPrompt(pending.sessionId);
     const memoryContext = this.sessionManager.buildMemoryContext(pending.sessionId, pending.userMessage);
 
+    // 崩溃恢复：注入未完成对话的摘要（Conversation 重启后不丢失上下文）
+    if (this.dialogueRouter) {
+      const recovery = this.dialogueRouter.getRecentUnfinishedSummary(pending.sessionId);
+      if (recovery) {
+        systemPrompt += `\n\n## 上次未完成的智能体对话\n\n${recovery}\n\n如果用户希望继续，可以通过 dialogue 工具恢复协作。`;
+      }
+    }
+
     // §8.9 Skill activation: inject active Skills into system prompt
     if (decision.activeSkills && decision.activeSkills.length > 0) {
       const skillContent = this.loadActiveSkills(decision.activeSkills);
@@ -808,6 +833,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         foreground: true,
         correlationId,
       });
+      // 关联新 taskId 到 pending（供 flusher/rebind 使用）
+      pending.delegationTaskId = taskId;
       if (pending.taskId) {
         this.taskManager.complete(pending.taskId, { delegatedTo: taskId });
       }
@@ -950,7 +977,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             // 定期持久化到 SQLite，前端断连/刷新后可恢复
             this.streamingFlusher.onTextAccumulated(delegationId, textAccumulator, pending.reasoning);
             if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-              const socketEvent: SocketTextDeltaEvent = { type: 'text_delta', text, taskId: delegationId };
+              const socketEvent: SocketTextDeltaEvent = { type: 'text_delta', text, taskId: delegationId, sessionId: pending.sessionId };
               pending.socket.write(JSON.stringify(socketEvent) + '\n');
             }
             break;
@@ -1192,19 +1219,25 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       pending.reasoning = reasoning;
       pending.toolCalls = calls;
 
-      // §9.0 M15.3: Skip sync review — auto-approve immediately
-      // Brain reviews asynchronously in background for learning/correction
+      // §9.0 M15.3 + §12.0: 生产模式分级审核
       if (!this.takeoverController) {
-        // Production mode: auto-approve, dispatch async post-review
-        primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+        // A 级简短回复：直接 auto-approve（不做漂移检测）
+        if (turn.level === 'A' || !pending.intentAnchor) {
+          primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+          this.dispatchModuleTask({
+            sessionId,
+            taskType: 'extract_feedback',
+            requester: 'post_review',
+            inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
+          }).catch(() => {});
+          return;
+        }
 
-        // Async post-review for learning (fire-and-forget)
-        this.dispatchModuleTask({
-          sessionId,
-          taskType: 'extract_feedback',
-          requester: 'post_review',
-          inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
-        }).catch(() => {});
+        // B/C 级回复 + 有 intentAnchor：异步漂移检测后再决定
+        this.performDriftCheckAndApprove(
+          pending, primaryIpc, primaryName, reviewerIpc, reviewerName,
+          correlationId, sessionId, draft, turn,
+        );
         return;
       }
 
@@ -1285,37 +1318,48 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const handoff = this.pendingHandoffs.get(correlationId);
       if (handoff) {
         this.pendingHandoffs.delete(correlationId);
-        logger.info({ correlationId, handoffTo: handoff.targetAgent, intent: handoff.intent }, '投机执行完成，流式追加委派');
 
-        // 结束 conversation 的 flusher，但保持 pending 存活
-        this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
+        // 11.0: 如果 Conversation 在本回合已通过 dialogue 与目标 agent 交互过，
+        // 跳过 handoff（dialogue 已完成协作，handoff 是冗余的）
+        const hadDialogue = this.dialogueRouter
+          ? this.dialogueRouter.hasDialogueForTarget(correlationId, handoff.targetAgent)
+          : false;
+        if (hadDialogue) {
+          logger.info({ correlationId, handoffTo: handoff.targetAgent }, 'handoff 跳过：dialogue 已覆盖目标 agent');
+          // 不执行 handoff，直接走正常关闭路径
+        } else {
+          logger.info({ correlationId, handoffTo: handoff.targetAgent, intent: handoff.intent }, '投机执行完成，流式追加委派');
 
-        // 完成 conversation 任务（它的部分已做完）
-        if (pending.taskId) {
-          this.taskManager.complete(pending.taskId, { response, reviewVerdict, handoffTo: handoff.targetAgent });
+          // 结束 conversation 的 flusher，但保持 pending 存活
+          this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
+
+          // 完成 conversation 任务（它的部分已做完）
+          if (pending.taskId) {
+            this.taskManager.complete(pending.taskId, { response, reviewVerdict, handoffTo: handoff.targetAgent });
+          }
+
+          // 保存 conversation 的回复到对话历史
+          this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
+
+          // 向前端发送 handoff 分隔事件（同一个气泡内）
+          if (pending.socket && !pending.socket.destroyed) {
+            try {
+              const handoffEvent = JSON.stringify({ type: 'agent_handoff', from: 'conversation', to: handoff.targetAgent, intent: handoff.intent, sessionId: pending.sessionId }) + '\n';
+              pending.socket.write(handoffEvent);
+            } catch { /* socket may be closed */ }
+          }
+
+          // 清除旧 taskId，handoff agent 会分配新的
+          pending.taskId = undefined;
+          pending.delegationTaskId = undefined;
+          pending.draftResponse = '';
+          pending.reasoning = undefined;
+          pending.toolCalls = undefined;
+
+          // 直接用现有 pending 分发 handoff（不重建 pending）
+          this.handleRouteDecision(handoff, correlationId);
+          return;
         }
-
-        // 保存 conversation 的回复到对话历史
-        this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
-
-        // 向前端发送 handoff 分隔事件（同一个气泡内）
-        if (pending.socket && !pending.socket.destroyed) {
-          try {
-            const handoffEvent = JSON.stringify({ type: 'agent_handoff', from: 'conversation', to: handoff.targetAgent, intent: handoff.intent }) + '\n';
-            pending.socket.write(handoffEvent);
-          } catch { /* socket may be closed */ }
-        }
-
-        // 清除旧 taskId，handoff agent 会分配新的
-        pending.taskId = undefined;
-        pending.delegationTaskId = undefined;
-        pending.draftResponse = '';
-        pending.reasoning = undefined;
-        pending.toolCalls = undefined;
-
-        // 直接用现有 pending 分发 handoff（不重建 pending）
-        this.handleRouteDecision(handoff, correlationId);
-        return;
       }
 
       // 无 handoff — 正常关闭路径
@@ -1580,6 +1624,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     fgEntry: { correlationId: string; sessionId: string },
     agentName: string,
   ): void {
+    // 调试日志：定位对话中断原因
+    logger.info({
+      taskId: result.taskId,
+      correlationId: fgEntry.correlationId,
+      sessionId: fgEntry.sessionId,
+      agent: agentName,
+      ok: result.ok,
+      error: result.error,
+      hasPending: !!this.sessionManager.getPending(fgEntry.correlationId),
+    }, 'handleForegroundTaskResult: 任务结果到达');
     const groupInfo = this.delegationManager.getGroupByChild(result.taskId);
     if (groupInfo) {
       const responseText = result.ok ? this.formatAgentResult(agentName, result.outputPayload ?? {}) : '';
@@ -1644,7 +1698,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.streamingFlusher.onTextAccumulated(taskId, pending.draftResponse, pending.reasoning);
         // 有可用 socket 时才实时推送
         if (pending.socket && !pending.socket.destroyed) {
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: event.data.text, taskId };
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: event.data.text, taskId, sessionId: pending.sessionId };
           pending.socket.write(JSON.stringify(evt) + '\n');
         }
       }
@@ -1686,7 +1740,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   private reportProgress(pending: PendingRequest, status: SocketProgressEvent['status'], summary: string): void {
     if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-      const event: SocketProgressEvent = { type: 'progress', status, summary, taskId: pending.taskId };
+      const event: SocketProgressEvent = { type: 'progress', status, summary, taskId: pending.taskId, sessionId: pending.sessionId };
       pending.socket.write(JSON.stringify(event) + '\n');
     }
 
@@ -1699,6 +1753,105 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         payload: { status },
       });
     }
+  }
+
+  // ═══ 12.0 DRIFT DETECTION ═════════════════════════════
+
+  /**
+   * B/C 级回复的漂移检测：通过 Brain IPC 做轻量检测，根据结果决定：
+   * - 正常：auto-approve
+   * - 中偏离（correct）：触发 CorrectionFlow
+   * - 高偏离（verify）：走同步 Brain review
+   */
+  private performDriftCheckAndApprove(
+    pending: PendingRequest,
+    primaryIpc: AgentIpc,
+    primaryName: string,
+    reviewerIpc: AgentIpc,
+    reviewerName: string,
+    correlationId: string,
+    sessionId: string,
+    draft: string,
+    turn: import('../contracts/review.js').TurnRecord,
+  ): void {
+    const brainAgent = this.agentManager.getAgent(this.registry.requireRole('reviewer').manifest.name);
+    if (!brainAgent || !pending.intentAnchor) {
+      // Brain 不可用或无 anchor → 降级为直接 approve
+      primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+      return;
+    }
+
+    // 发 drift.check.request 给 Brain
+    const driftCorrelationId = genId('drift');
+    brainAgent.ipc.send('drift.check.request', 'brain', {
+      anchor: pending.intentAnchor,
+      content: draft.slice(0, 3000),
+      checkpointType: 'final_response',
+    }, driftCorrelationId);
+
+    // 设置超时：2s 内未收到结果 → 降级 approve
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      logger.debug({ correlationId }, 'drift check timeout, auto-approve');
+      primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+      this.dispatchModuleTask({
+        sessionId,
+        taskType: 'extract_feedback',
+        requester: 'post_review',
+        inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
+      }).catch(() => {});
+    }, 2000);
+
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+    };
+
+    const handler = (msg: IpcMessage) => {
+      if (msg.correlationId !== driftCorrelationId) return;
+      cleanup();
+
+      const { signal } = msg.payload as { signal: import('../contracts/intent.js').DriftSignal };
+      const evaluated = this.driftDetector?.evaluate(signal) ?? signal;
+
+      // 记录漂移信号
+      this.driftDetector?.recordSignal(evaluated, sessionId, correlationId);
+
+      if (evaluated.suggestedAction === 'verify') {
+        // 高偏离 → 走同步 Brain review（现有 review 流程）
+        logger.info({ correlationId, score: evaluated.alignmentScore }, 'drift:high → sync review');
+        this.pendingReviewOrigins.set(correlationId, 'conversation');
+        this.reportProgress(pending, 'reviewing', '检测到可能偏离，正在深度审核...');
+        reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+        return;
+      }
+
+      if (evaluated.suggestedAction === 'correct') {
+        // 中偏离 → 触发 CorrectionFlow
+        logger.info({ correlationId, score: evaluated.alignmentScore }, 'drift:medium → correction');
+        const entry = this.delegationManager.getByCorrelation(correlationId);
+        if (entry) {
+          getEventBus().emit('delegation.checkpoint_needed', {
+            delegationId: entry.id,
+            trigger: 'semantic_drift' as import('../contracts/delegation.js').CheckpointTrigger,
+          });
+        } else {
+          // 无 delegation entry → 降级 approve
+          primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+        }
+        return;
+      }
+
+      // 正常对齐 → approve
+      primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
+      this.dispatchModuleTask({
+        sessionId,
+        taskType: 'extract_feedback',
+        requester: 'post_review',
+        inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
+      }).catch(() => {});
+    };
+
+    brainAgent.ipc.onMessage('drift.check.result', handler);
   }
 
   private formatAgentResult(agentName: string, outputPayload: Record<string, unknown>): string {

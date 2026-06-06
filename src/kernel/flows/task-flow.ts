@@ -68,6 +68,8 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         let pending: PendingRequest | null | undefined;
         const entry = deps.delegationManager.get(payload.taskId);
         if (entry) {
+          // 跳过已完成 delegation 的迟到 text_delta（handoff 后旧 agent 的残留消息）
+          if (entry.state === 'completed' || entry.state === 'failed') break;
           deps.delegationManager.recordOutput(payload.taskId, { delegationId: payload.taskId, kind: 'text_delta', data: { text: payload.text } });
           pending = deps.sessionManager.getPending(entry.correlationId);
         } else {
@@ -80,13 +82,15 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           deps.streamingFlusher?.onTextAccumulated(payload.taskId, pending.draftResponse, pending.reasoning);
         }
         if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId, sessionId: pending.sessionId };
           pending.socket.write(JSON.stringify(evt) + '\n');
           break;
         }
+        // fallback：pending 已被删除但 taskSocketMap 还有映射（text_delta 迟到于 final response）
         const fallbackSocket = deps.sessionManager.getSocketForTask(payload.taskId);
         if (fallbackSocket && !fallbackSocket.destroyed) {
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId };
+          const sid = pending?.sessionId ?? entry?.sessionId;
+          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId, sessionId: sid };
           fallbackSocket.write(JSON.stringify(evt) + '\n');
         }
         break;
@@ -104,7 +108,7 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           ? rPending.socket
           : deps.sessionManager.getSocketForTask(payload.taskId);
         if (sock && !sock.destroyed) {
-          sock.write(JSON.stringify({ type: 'reasoning_delta', text: payload.text, taskId: payload.taskId }) + '\n');
+          sock.write(JSON.stringify({ type: 'reasoning_delta', text: payload.text, taskId: payload.taskId, sessionId: rPending?.sessionId ?? rEntry?.sessionId }) + '\n');
         }
         break;
       }
@@ -152,7 +156,7 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         }
         const socket = pending?.socket ?? deps.sessionManager.getSocketForTask(payload.taskId);
         if (socket && !socket.destroyed) {
-          const evt = { type: 'tool_call', toolName: payload.toolName, input: payload.input, result: payload.result, isError: payload.isError, durationMs: payload.durationMs, taskId: payload.taskId };
+          const evt = { type: 'tool_call', toolName: payload.toolName, input: payload.input, result: payload.result, isError: payload.isError, durationMs: payload.durationMs, taskId: payload.taskId, sessionId: pending?.sessionId };
           socket.write(JSON.stringify(evt) + '\n');
         }
         break;

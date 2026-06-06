@@ -1,18 +1,47 @@
 export type ProgressStatus = 'thinking' | 'using_tool' | 'reviewing' | 'routing' | 'dispatching' | 'asking' | 'streaming' | 'done';
 
+/** 流式进度事件 */
 export interface SocketProgressEvent {
   type: 'progress';
   status: ProgressStatus;
   summary: string;
   taskId?: string;
+  /** 对话 sessionId，前端用于按对话过滤 WS 消息 */
+  sessionId?: string;
 }
 
+/** 流式文本增量事件 */
 export interface SocketTextDeltaEvent {
   type: 'text_delta';
   text: string;
   taskId?: string;
+  /** 对话 sessionId，前端用于按对话过滤 WS 消息 */
+  sessionId?: string;
 }
 
+/** 推理增量事件 */
+export interface SocketReasoningDeltaEvent {
+  type: 'reasoning_delta';
+  text: string;
+  taskId?: string;
+  /** 对话 sessionId，前端用于按对话过滤 WS 消息 */
+  sessionId?: string;
+}
+
+/** 工具调用事件 */
+export interface SocketToolCallEvent {
+  type: 'tool_call';
+  toolName: string;
+  input: string;
+  result: string;
+  isError: boolean;
+  durationMs: number;
+  taskId?: string;
+  /** 对话 sessionId，前端用于按对话过滤 WS 消息 */
+  sessionId?: string;
+}
+
+/** 最终结果事件（已有 sessionId） */
 export interface SocketResultEvent {
   type: 'result';
   response: string;
@@ -20,10 +49,13 @@ export interface SocketResultEvent {
   taskId: string;
 }
 
+/** 错误事件 */
 export interface SocketErrorEvent {
   type: 'error';
   error: string;
   code?: string;
+  /** 对话 sessionId，前端用于按对话过滤 WS 消息 */
+  sessionId?: string;
 }
 
 export interface PermissionListEvent {

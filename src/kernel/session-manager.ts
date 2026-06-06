@@ -197,8 +197,8 @@ export class SessionManager {
    * 将新 socket 关联到该客户端所有正在流式输出的 pending request。
    * 返回每个活跃任务的已积累流式文本，用于客户端补显示断连期间的输出。
    */
-  rebindSocket(clientId: string, newSocket: Socket): Array<{ accumulated: string; taskId: string }> {
-    const results: Array<{ accumulated: string; taskId: string }> = [];
+  rebindSocket(clientId: string, newSocket: Socket): Array<{ accumulated: string; taskId: string; sessionId: string }> {
+    const results: Array<{ accumulated: string; taskId: string; sessionId: string }> = [];
     const msgIds = this.clientPendingIndex.get(clientId);
     if (!msgIds) return results;
     for (const msgId of msgIds) {
@@ -208,7 +208,7 @@ export class SessionManager {
         if (pending.taskId) {
           this.taskSocketMap.set(pending.taskId, { socket: newSocket, expiresAt: Date.now() + 300_000 });
         }
-        results.push({ accumulated: pending.draftResponse ?? '', taskId: pending.taskId ?? '' });
+        results.push({ accumulated: pending.draftResponse ?? '', taskId: pending.taskId ?? '', sessionId: pending.sessionId });
       }
     }
     return results;

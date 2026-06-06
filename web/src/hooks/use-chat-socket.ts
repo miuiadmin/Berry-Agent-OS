@@ -55,6 +55,8 @@ export function useChatSocket() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>( null);
   /** 已恢复过会话的 sessionId（防止同一会话重复恢复，切换会话时自动重置） */
   const recoveredRef = useRef<string | null>(null);
+  /** 发送消息时记录的 sessionId，用于全局事件（task.failed/progress）的按对话过滤 */
+  const streamingSessionRef = useRef<string | null>(null);
 
   // ─── 定时器管理 ───────────────────────────────────────────────
 
@@ -72,6 +74,8 @@ export function useChatSocket() {
   const clearTimer = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
+    // 流式结束，清除 streaming session 标记
+    streamingSessionRef.current = null;
   }, []);
 
   // 卸载时清理定时器
@@ -90,13 +94,19 @@ export function useChatSocket() {
     }
   }, [status, clearTimer, resetTimer]);
 
-  // ─── 会话恢复（连接成功后拉取历史消息） ────────────────────────
+  // ─── 会话恢复（WS 重连后恢复活跃任务） ──────────────────────────
+  // 注意：chat-window 的 loadHistory 已负责首次加载历史 + activeTask 恢复。
+  // 此 effect 仅在 WS 重连（status 变化）时补充恢复，且跳过已有历史的 session（避免重复）。
 
   useEffect(() => {
     if (status !== "connected") return;
     const sid = useChatStore.getState().sessionId;
-    // 按 sessionId 区分：同一会话只恢复一次，切换会话则重新恢复
     if (!sid || recoveredRef.current === sid) return;
+    // 如果 chat-store 已有消息（loadHistory 已完成），跳过重复 fetch
+    if (useChatStore.getState().messages.length > 0) {
+      recoveredRef.current = sid; // 标记已处理，避免后续重跑
+      return;
+    }
     recoveredRef.current = sid;
 
     fetch(`/api/sessions/${sid}/state`)
@@ -123,7 +133,7 @@ export function useChatSocket() {
         if (activeTask) resetTimer();
       })
       .catch(() => {});
-  }, [status, resetTimer]);
+  }, [status, sessionId, resetTimer]);
 
   // ─── 消息分发（核心：将 WS 消息派发到 chat store） ────────────
 
@@ -131,18 +141,37 @@ export function useChatSocket() {
     const unsub = onMessage((raw) => {
       const data = raw as Record<string, unknown>;
 
+      // ── 按 sessionId 过滤：只处理当前对话的消息 ──
+      // 后端流式事件（text_delta / progress / tool_call / reconnect_recovery 等）都携带 sessionId。
+      // 如果消息的 sessionId 与当前活跃对话不匹配，直接丢弃，防止跨对话内容污染。
+      if (data.sessionId && data.sessionId !== useChatStore.getState().sessionId) {
+        return;
+      }
+
       // 事件类型消息（task.progress / task.failed 等）
+      // 全局事件（ws-event-bridge 广播）不带顶层 sessionId，但 payload 里可能有。
+      // 用 streamingSessionRef 确保只处理当前对话发起的流式任务的事件。
       if (data.type === "event") {
         const event = data.event as string;
+        const payload = data.payload as Record<string, unknown> | undefined;
+        // 全局事件的 payload 可能有 sessionId，如果有则按对话过滤
+        if (payload?.sessionId && payload.sessionId !== useChatStore.getState().sessionId) {
+          return;
+        }
+        // task.failed/timeout：只有当前对话发起的 streaming 才处理
         if ((event === "task.failed" || event === "task.timeout") && useChatStore.getState().isStreaming) {
-          const payload = data.payload as { error?: string } | undefined;
-          setLastError(payload?.error ?? t("chat.taskFailed"));
+          if (streamingSessionRef.current && streamingSessionRef.current !== useChatStore.getState().sessionId) {
+            return; // 不是当前对话的任务，跳过
+          }
+          setLastError((payload as { error?: string })?.error ?? t("chat.taskFailed"));
           clearTimer();
         }
         if ((event === "task.progress" || event === "daemon.task.progress") && useChatStore.getState().isStreaming) {
-          const payload = data.payload as { message?: string; from?: string } | undefined;
-          if (payload?.message) {
-            setLastProgress(payload.message);
+          if (streamingSessionRef.current && streamingSessionRef.current !== useChatStore.getState().sessionId) {
+            return;
+          }
+          if ((payload as { message?: string })?.message) {
+            setLastProgress((payload as { message?: string }).message!);
             resetTimer();
           }
         }
@@ -171,6 +200,8 @@ export function useChatSocket() {
             addMessage({ id: genMsgId("asst"), role: "assistant", content, timestamp: Date.now(), status: "streaming" });
           }
           setStreaming(true);
+          // 记录恢复的 sessionId，用于后续全局事件过滤
+          streamingSessionRef.current = state.sessionId;
           resetTimer();
         }
         return;
@@ -289,6 +320,8 @@ export function useChatSocket() {
   const sendInternal = useCallback((text: string, attachments?: unknown[]) => {
     addMessage({ id: genMsgId("asst"), role: "assistant", content: "", timestamp: Date.now(), status: "streaming" });
     setStreaming(true);
+    // 记录发起流式时的 sessionId，用于后续全局事件过滤
+    streamingSessionRef.current = sessionId;
     resetTimer();
     try {
       send({ type: "message", text, sessionId, attachments, permissionMode: useChatStore.getState().permissionMode });

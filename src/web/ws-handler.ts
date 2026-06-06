@@ -64,7 +64,7 @@ export function createWsHandler(deps: WebServerDependencies) {
     for (const item of rebindResults) {
       if (item.accumulated) {
         // 推送已积累的完整文本让客户端补上断连期间的内容
-        wsReply(ws, { type: 'reconnect_recovery', content: item.accumulated, taskId: item.taskId });
+        wsReply(ws, { type: 'reconnect_recovery', content: item.accumulated, taskId: item.taskId, sessionId: item.sessionId });
       }
     }
 
