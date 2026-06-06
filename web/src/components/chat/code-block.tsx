@@ -10,11 +10,11 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const t = useT();
-  useEffect(() => { return () => { clearTimeout(timerRef.current); }; }, []);
+  useEffect(() => { return () => { if (timerRef.current) clearTimeout(timerRef.current); }; }, []);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
-      clearTimeout(timerRef.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
     }).catch(() => {
       // clipboard access denied or insecure context

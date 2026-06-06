@@ -39,6 +39,7 @@ export const CORE_SCHEMA_SQL = `
     session_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
     content TEXT NOT NULL,
+    -- 以下 4 列为历史遗留，从不写入。工具调用数据已迁移到 tool_calls 表。保留以兼容已有数据库。
     tool_name TEXT,
     tool_input TEXT,
     tool_result TEXT,
@@ -146,7 +147,8 @@ export const CORE_SCHEMA_SQL = `
     draft_response TEXT NOT NULL,
     review_input TEXT NOT NULL,
     verdict TEXT NOT NULL CHECK(verdict IN (
-      'pending','approve','modify','reject','require_user_confirm'
+      'pending','approve','modify','reject','require_user_confirm',
+      'auto_approve_A_level','auto_approve_no_intent'
     )),
     final_response TEXT,
     reason TEXT,
@@ -904,6 +906,38 @@ export const CORE_INDEX_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_dialogue_session ON dialogue_messages(session_id);
   CREATE INDEX IF NOT EXISTS idx_dialogue_correlation ON dialogue_messages(correlation_id);
+
+  -- 12.0 意图锚点（Brain 路由时产出，漂移检测基准）
+  CREATE TABLE IF NOT EXISTS intent_anchors (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    raw_message TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    constraints_json TEXT,
+    output_type TEXT NOT NULL,
+    entities_json TEXT,
+    route_reason TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_anchor_session ON intent_anchors(session_id);
+
+  -- 12.0 漂移检测信号记录
+  CREATE TABLE IF NOT EXISTS drift_signals (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    checkpoint_type TEXT NOT NULL,
+    alignment_score REAL NOT NULL,
+    needs_intervention INTEGER NOT NULL DEFAULT 0,
+    drift_description TEXT,
+    suggested_action TEXT,
+    actual_action TEXT,
+    intent_anchor_id TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_drift_session ON drift_signals(session_id);
+  CREATE INDEX IF NOT EXISTS idx_drift_time ON drift_signals(created_at);
 `;
 
 export const KNOWLEDGE_FTS_SQL = `
@@ -920,8 +954,8 @@ export const KNOWLEDGE_FTS_SQL = `
   END;
 
   CREATE TRIGGER IF NOT EXISTS knowledge_au AFTER UPDATE ON knowledge
-    WHEN old.summary != new.summary OR old.detail != new.detail BEGIN
-    INSERT INTO knowledge_fts(knowledge_fts, rowid, summary, detail) VALUES ('delete', old.rowid, old.summary, old.detail);
-    INSERT INTO knowledge_fts(rowid, summary, detail) VALUES (new.rowid, new.summary, new.detail);
+    WHEN old.summary IS NOT new.summary OR old.detail IS NOT new.detail BEGIN
+    INSERT INTO knowledge_fts(knowledge_fts, rowid, summary, detail) VALUES ('delete', old.rowid, COALESCE(old.summary, ''), COALESCE(old.detail, ''));
+    INSERT INTO knowledge_fts(rowid, summary, detail) VALUES (new.rowid, COALESCE(new.summary, ''), COALESCE(new.detail, ''));
   END;
 `;

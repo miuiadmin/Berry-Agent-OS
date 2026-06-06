@@ -1,4 +1,5 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
+import { IpcJournal } from '../kernel/ipc-journal.js';
 import { initDb, getDb, closeDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
 import { createProviderRegistry } from '../providers/registry.js';
@@ -40,9 +41,13 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
 
   const config = resolveConfig(getConfigPath());
   initDb();
+  const db = getDb();
   const ipc = new IpcChildChannel(name);
+  // 注入 IPC journal：让 agent→core 方向的关键业务消息也能被 journal
+  // 并支持崩溃后由 core 端重放
+  ipc.setJournal(new IpcJournal(db));
   const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
-  const llm = createLlmClient(config.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry });
+  const llm = createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });
@@ -125,29 +130,20 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
   });
 
   // ─── dialogue.send handler：接收来自 Conversation Agent 的对话消息 ───
-  // 提前缓存工具列表（避免每次 dialogue.send 到达时重复 zod→JSON schema 转换）
-  let cachedDialogueTools: import('../contracts/model.js').ModelToolDef[] | null = null;
-  async function getDialogueTools() {
-    if (cachedDialogueTools) return cachedDialogueTools;
-    const { getToolRegistry } = await import('../tools/index.js');
-    const { toModelTools } = await import('../tools/types.js');
-    cachedDialogueTools = toModelTools(getToolRegistry());
-    return cachedDialogueTools;
-  }
-
   ipc.onMessage('dialogue.send', async (msg: IpcMessage) => {
     const payload = msg.payload as DialogueMessagePayload;
     const ephemeralTaskId = (payload.context as Record<string, unknown>)?._taskId as string | undefined;
     const sessionId = (payload.context as Record<string, unknown>)?._sessionId as string | undefined;
 
     try {
-      // 构造单轮 LLM 调用的 messages（不保留对话历史，Conversation 负责上下文）
       const userContent = payload.content;
       const messages = [{ role: 'user' as const, content: userContent }];
 
-      // 执行 LLM 调用（含工具使用），推送 streaming telemetry
       const { runToolLoop: runLoop } = await import('../llm/tool-caller.js');
-      const agentTools = await getDialogueTools();
+      const { getToolRegistry } = await import('../tools/index.js');
+      const { toModelTools } = await import('../tools/types.js');
+      // 每次读取最新 registry（Code Agent 的 locked tools 可能在首次 agent.task 后才注册）
+      const agentTools = toModelTools(getToolRegistry());
 
       const result = await runLoop({
         llm,
@@ -198,6 +194,19 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
             permissionToken: record.permissionToken,
             toolResult: record.result,
           });
+          // 11.0: 推送 tool_call 到前端（与 conversation/entry.ts 对齐），
+          // 让用户能在前端看到 code agent 的工具调用过程
+          if (ephemeralTaskId) {
+            ipc.send('task.telemetry', 'core', {
+              kind: 'tool_call',
+              taskId: ephemeralTaskId,
+              toolName: record.name,
+              input: record.input.slice(0, 2000),
+              result: record.result.slice(0, 5000),
+              isError: record.isError,
+              durationMs: record.durationMs,
+            });
+          }
         },
       });
 

@@ -44,7 +44,7 @@ export function DebugCaptureDialog() {
       await navigator.clipboard.writeText(lastResult.path);
       setCopied(true);
       toast.success(t("debug.pathCopied"));
-      clearTimeout(timerRef.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error(t("debug.failedToCopy"));

@@ -325,6 +325,23 @@ export class SessionManager {
     this.memoryRuntime.saveConversationTurn(sessionId, userMessage, response, reasoning);
   }
 
+  /**
+   * 在 kernel 入口（handleMessage）创建 pending 之后立即落 user 行。
+   * 这是修复「user 消息从不持久化」双层漏洞的关键。
+   *
+   * 失败时仅记 warn，不阻塞后续路由（fail-open：路由优先，
+   * user 消息至少经过一次尝试；中断场景下仍能在 conversation agent
+   * 内部二次尝试时落盘）。
+   */
+  saveUserMessage(sessionId: string, content: string, options: { clientMsgId?: string } = {}): { id: string; deduplicated: boolean } {
+    try {
+      return this.memoryRuntime.saveUserMessage(sessionId, content, options);
+    } catch (err) {
+      logger.warn({ err, sessionId, clientMsgId: options.clientMsgId }, 'user 消息入口入库失败，将依赖下游 conversation agent 兜底');
+      return { id: '', deduplicated: false };
+    }
+  }
+
   async waitForEvolutionIdle(timeoutMs: number): Promise<boolean> {
     return this.memoryRuntime.waitForEvolutionIdle(timeoutMs);
   }

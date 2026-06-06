@@ -1,7 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { IpcMessage, IpcMessageType } from './types.js';
 import type { MessageBus } from './message-bus.js';
-import type { IpcBusMessageType } from '../contracts/messages.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import { metrics } from '../observability/metrics.js';
@@ -19,12 +18,14 @@ export class IpcChannel {
     resolve: (msg: IpcMessage) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
-  private messageBus: MessageBus | null = null;
+  private journal: import('./ipc-journal.js').IpcJournal | null = null;
 
   constructor(
     private child: ChildProcess,
     private identity: string,
+    options?: { journal?: import('./ipc-journal.js').IpcJournal },
   ) {
+    if (options?.journal) this.journal = options.journal;
     child.on('message', (raw: unknown) => {
       const msg = raw as IpcMessage;
       const pending = this.pendingRequests.get(msg.correlationId ?? '');
@@ -41,7 +42,6 @@ export class IpcChannel {
         if (list) {
           for (const handler of list) handler(msg);
         }
-        this.forwardToBus(msg);
       };
 
       if (traceCtx) {
@@ -52,15 +52,36 @@ export class IpcChannel {
     });
   }
 
-  setMessageBus(bus: MessageBus): void {
-    this.messageBus = bus;
+  /**
+   * 注入 journal（用于 agent 重启后由 AgentManager 注入）。
+   * 主要给 IpcChildChannel 路径使用（agent 侧没有构造时拿到 journal）。
+   */
+  setJournal(journal: import('./ipc-journal.js').IpcJournal): void {
+    this.journal = journal;
   }
 
-  private forwardToBus(msg: IpcMessage): void {
-    if (!this.messageBus) return;
-    const busType = `ipc:${msg.type}` as IpcBusMessageType;
-    if (this.messageBus.listenerCount(busType) > 0) {
-      this.messageBus.emit(busType, msg.payload as any);
+  /**
+   * 共享 send 内部逻辑：record → child IPC → markSent / markFailed。
+   * 两侧 channel 复用，行为一致。
+   */
+  private writeOrFail<T>(msg: IpcMessage<T>, type: IpcMessageType, sender: (m: IpcMessage<T>) => boolean): boolean {
+    if (this.journal?.shouldJournal(type)) {
+      this.journal.record(msg as unknown as IpcMessage);
+    }
+    try {
+      const ok = sender(msg);
+      if (ok && this.journal?.shouldJournal(type)) {
+        this.journal.markSent(msg.id);
+      } else if (!ok && this.journal?.shouldJournal(type)) {
+        this.journal.markFailed(msg.id);
+      }
+      return ok;
+    } catch (err) {
+      if (this.journal?.shouldJournal(type)) {
+        try { this.journal.markFailed(msg.id); } catch {}
+      }
+      logger.debug({ err, msgId: msg.id, type }, 'IPC send 失败');
+      return false;
     }
   }
 
@@ -76,12 +97,7 @@ export class IpcChannel {
       timestamp: Date.now(),
     };
     msg = injectTraceIntoIpc(msg);
-    try {
-      this.child.send(msg);
-      return true;
-    } catch {
-      return false;
-    }
+    return this.writeOrFail(msg, type, (m) => this.child.send(m as IpcMessage));
   }
 
   async request<T>(type: IpcMessageType, to: string, payload: T, timeoutMs = 30000): Promise<IpcMessage> {
@@ -150,8 +166,17 @@ export class IpcChildChannel {
     resolve: (msg: IpcMessage) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
+  /**
+   * IPC journal（agent 侧）。Agent 进程启动时由 ResidentAgent / ModuleAgent
+   * 通过 setJournal 注入；为空时等同于未启用 journal（普通 send 走 process.send）。
+   */
+  private journal: import('./ipc-journal.js').IpcJournal | null = null;
 
-  constructor(private identity: string) {
+  constructor(
+    private identity: string,
+    options?: { journal?: import('./ipc-journal.js').IpcJournal },
+  ) {
+    if (options?.journal) this.journal = options.journal;
     process.on('message', (raw: unknown) => {
       const msg = raw as IpcMessage;
       const pending = this.pendingRequests.get(msg.correlationId ?? '');
@@ -174,6 +199,13 @@ export class IpcChildChannel {
     });
   }
 
+  /**
+   * 注入 journal（agent 启动时由宿主调用）。agent 侧在 db 已初始化后调用。
+   */
+  setJournal(journal: import('./ipc-journal.js').IpcJournal): void {
+    this.journal = journal;
+  }
+
   send<T>(type: IpcMessageType, to: string, payload: T, correlationId?: string): void {
     let msg: IpcMessage<T> = {
       id: genId('msg'),
@@ -185,7 +217,22 @@ export class IpcChildChannel {
       timestamp: Date.now(),
     };
     msg = injectTraceIntoIpc(msg);
-    process.send!(msg);
+    // agent→core 方向也必须 journal：保证 agent 崩溃后未投递的消息能由 core 端 replay
+    if (this.journal?.shouldJournal(type)) {
+      this.journal.record(msg as unknown as IpcMessage);
+    }
+    try {
+      // process.send 返回 boolean（false 表示 channel 已关闭）
+      const ok = process.send ? process.send(msg) : false;
+      if (ok) {
+        this.journal?.markSent(msg.id);
+      } else {
+        this.journal?.markFailed(msg.id);
+      }
+    } catch (err) {
+      logger.debug({ err, msgId: msg.id, type }, 'IpcChildChannel.send 失败');
+      this.journal?.markFailed(msg.id);
+    }
   }
 
   async request<T>(type: IpcMessageType, to: string, payload: T, timeoutMs = 30000): Promise<IpcMessage> {

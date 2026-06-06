@@ -1,4 +1,5 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
+import { IpcJournal } from '../kernel/ipc-journal.js';
 import { initDb, getDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
 import { resolveConfig } from '../config/resolver.js';
@@ -30,16 +31,19 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
   initDb();
   const db = getDb();
   const ipc = new IpcChildChannel(name);
+  // 注入 IPC journal：让 agent→core 方向的关键业务消息也能被 journal
+  // 并支持崩溃后由 core 端重放
+  ipc.setJournal(new IpcJournal(db));
   const providerRegistry = createProviderRegistry(config.llm, config.llm.channelsConfig);
   const llm: LlmHolder = {
-    current: createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry }),
+    current: createLlmClient(config.llm, { db, ipc, defaultAgent: name, providerRegistry, budgetConfig: config.budget }),
   };
 
   // Hot-reload LLM config when parent sends an update
   ipc.onMessage('config.llm_update', (msg) => {
     const { llm: newLlmConfig } = msg.payload as { llm: LlmConfig };
     const newRegistry = createProviderRegistry(newLlmConfig, newLlmConfig.channelsConfig);
-    llm.current = createLlmClient(newLlmConfig, { db, ipc, defaultAgent: name, providerRegistry: newRegistry });
+    llm.current = createLlmClient(newLlmConfig, { db, ipc, defaultAgent: name, providerRegistry: newRegistry, budgetConfig: config.budget });
   });
 
   // 先注册所有 handler，再通知父进程 agent 已就绪（防止 IPC 启动竞态丢消息）

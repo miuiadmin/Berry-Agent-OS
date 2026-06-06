@@ -27,7 +27,15 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
-  status?: "streaming" | "complete" | "error";
+  /**
+   * 消息状态：
+   * - 'sending'：user 消息已 addMessage 但服务端还没确认（H5 新增）
+   * - 'streaming'：assistant 消息正在接收流式内容
+   * - 'complete'：消息已完成
+   * - 'error'：消息出错
+   * - 'failed'：user 消息发送失败（send 同步抛错时设置，H5 新增）
+   */
+  status?: "sending" | "streaming" | "complete" | "error" | "failed";
   progress?: string;
   thinkingSteps?: ThinkingStep[];
   toolCalls?: ToolCallEvent[];
@@ -69,11 +77,16 @@ interface ChatState {
   sessionId: string | null;
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** 当前正在流入的 assistant 消息 ID（流式占位，不一定已 push 到 messages 末尾）。
+   *  使用独立字段而非总是 messages[length-1]，避免 onMessage 抢先插入 user 消息时位置错位。 */
+  pendingStreamMessageId: string | null;
   pendingDelegation: DelegationRequest | null;
   pendingPermission: PermissionConfirmRequest | null;
   permissionMode: 'ask' | 'allow-all' | 'deny-all';
   /** 用户主动清空对话（删除/新建）后为 true，阻止自动恢复 effect 拉取最近对话 */
   skipAutoRestore: boolean;
+  /** 该 sessionId 正在执行 sharedSessionRestore（防止 onMessage 与 effect 并发触发） */
+  restoringSessionId: string | null;
 
   setSessionId: (id: string | null) => void;
   addMessage: (msg: ChatMessage) => void;
@@ -97,18 +110,41 @@ interface ChatState {
     historyMessages: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: ThinkingStep[] }>,
     activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[]; streamingContent?: string | null; streamingReasoning?: string | null } | undefined,
   ) => void;
+
+  /**
+   * 共享会话恢复（H6 修复）。
+   * 统一所有"从服务端拉历史 + 恢复活跃任务"的入口：
+   * 1. 内部加锁（restoringSessionId）防止 onMessage 与 effect 并发触发
+   * 2. 原子性 set：一次写入 messages + activeTask + isStreaming
+   * 3. 返回 messages 数组
+   *
+   * 调用方：chat-window 的 loadHistory effect、use-chat-socket 的 status/sessionId effect
+   */
+  sharedSessionRestore: (sessionId: string) => Promise<ChatMessage[]>;
+
+  /**
+   * 创建流式占位 assistant 消息。
+   * 不会重复创建：如果当前 pendingStreamMessageId 已存在则直接返回其 ID。
+   * 返回创建的（或已存在的）消息 ID。
+   */
+  createStreamingPlaceholder: () => string;
+
+  /** 标记最后一条消息的发送状态（user 消息用 'sending' / 'failed' / 'complete'） */
+  markLastMessageStatus: (status: "sending" | "failed" | "complete") => void;
 }
 
 export const useChatStore = create<ChatState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       sessionId: null,
       messages: [],
       isStreaming: false,
+      pendingStreamMessageId: null,
       pendingDelegation: null,
       pendingPermission: null,
       permissionMode: 'ask',
       skipAutoRestore: false,
+      restoringSessionId: null,
 
       setSessionId: (id) => set((s) => {
         // 设定新会话时重置跳过标志（用户主动选择了对话，后续可以自动恢复）
@@ -131,7 +167,7 @@ export const useChatStore = create<ChatState>()(
         }),
 
       setStreaming: (v) => set({ isStreaming: v }),
-      clearMessages: () => set({ messages: [], isStreaming: false, pendingDelegation: null, pendingPermission: null }),
+      clearMessages: () => set({ messages: [], isStreaming: false, pendingStreamMessageId: null, pendingDelegation: null, pendingPermission: null }),
 
       removeMessage: (id) => set((s) => ({ messages: s.messages.filter((m) => m.id !== id) })),
       removeMessagesAfter: (id) =>
@@ -264,6 +300,145 @@ export const useChatStore = create<ChatState>()(
           }
           return { messages: msgs, isStreaming: true };
         }),
+
+      /**
+       * 创建流式占位 assistant 消息（H6 修复）。
+       * - 如果当前已有 pendingStreamMessageId（且对应消息在 messages 中），直接返回其 ID
+       * - 否则追加一条空的 assistant streaming 消息，记录到 pendingStreamMessageId
+       * - 返回该消息 ID
+       *
+       * 这是 onMessage 收到第一个流式事件时（text_delta / reasoning_delta / tool_call / progress / agent_handoff / ask_user / dialogue_status）调用的唯一入口。
+       */
+      createStreamingPlaceholder: () => {
+        const state = get();
+        // 已存在 pending 占位
+        if (state.pendingStreamMessageId) {
+          const exists = state.messages.some((m) => m.id === state.pendingStreamMessageId);
+          if (exists) return state.pendingStreamMessageId;
+        }
+        // 最后一条已经是 assistant 且处于 streaming 状态：复用
+        const last = state.messages[state.messages.length - 1];
+        if (last && last.role === "assistant" && last.status === "streaming") {
+          set({ pendingStreamMessageId: last.id });
+          return last.id;
+        }
+        const id = genMsgId("asst");
+        set((s) => ({
+          messages: [...s.messages, { id, role: "assistant", content: "", timestamp: Date.now(), status: "streaming" }],
+          pendingStreamMessageId: id,
+          isStreaming: true,
+        }));
+        return id;
+      },
+
+      /**
+       * 标记最后一条消息的状态（H5 修复）。
+       * user 消息发送中 → 'sending'；send 失败 → 'failed'；发送成功（result 到达）→ 'complete'。
+       */
+      markLastMessageStatus: (status) =>
+        set((s) => {
+          if (s.messages.length === 0) return s;
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          const patch: Partial<ChatMessage> = { status };
+          if (status === "failed") {
+            patch.error = "send_failed";
+            patch.progress = undefined;
+          }
+          msgs[msgs.length - 1] = { ...last, ...patch };
+          return { messages: msgs };
+        }),
+
+      /**
+       * 共享会话恢复（H6 修复）。
+       *
+       * 合并了原先 chat-window.loadHistory + use-chat-socket.onMessage status effect +
+       * useEffect [sessionId, messages.length] 三套占位创建路径，作为唯一的恢复入口。
+       *
+       * 行为：
+       * 1. 加锁 restoringSessionId：同一 session 并发时直接返回当前 messages
+       * 2. 调 fetch /api/sessions/{sid}/state
+       * 3. 原子性 set：messages + pendingStreamMessageId + isStreaming 一次写入
+       * 4. 返回最终的 messages 数组
+       *
+       * 与 loadHistoryAndRestore 的区别：本函数自带 fetch + 锁，是完整闭环；
+       * loadHistoryAndRestore 仍保留作为兼容包装（chat-window.loadHistory 在本地已经有部分消息时会用它做无锁合并）。
+       */
+      sharedSessionRestore: async (sessionId) => {
+        if (!sessionId) return get().messages;
+        // 加锁：避免同一 session 多个 effect 并发拉取
+        if (get().restoringSessionId === sessionId) return get().messages;
+        set({ restoringSessionId: sessionId });
+        try {
+          const res = await fetch(`/api/sessions/${sessionId}/state?limit=200`);
+          if (!res.ok) return get().messages;
+          const data = await res.json() as {
+            messages?: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: ThinkingStep[] }>;
+            activeTasks?: Array<{ progress?: string; thinkingSteps?: ThinkingStep[]; streamingContent?: string; streamingReasoning?: string }>;
+          };
+          // 拉取过程中用户可能已经切换 session
+          if (get().sessionId !== sessionId) return get().messages;
+
+          const activeTask = data.activeTasks?.[0];
+          const historyMsgs: ChatMessage[] = (data.messages ?? []).map((m) => ({
+            id: genMsgId("hist"),
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
+            status: "complete" as const,
+            reasoning: m.reasoning,
+            thinkingSteps: m.thinkingSteps,
+          }));
+
+          let pendingStreamId: string | null = null;
+          if (activeTask) {
+            const streamingText = activeTask.streamingContent ?? "";
+            const streamingReasoning = activeTask.streamingReasoning ?? undefined;
+            const last = historyMsgs[historyMsgs.length - 1];
+            if (last?.role === "assistant" && streamingText && streamingText.length > (last.content?.length ?? 0)) {
+              // 复用最后一条 assistant：升级为 streaming
+              historyMsgs[historyMsgs.length - 1] = {
+                ...last,
+                content: streamingText,
+                reasoning: streamingReasoning && (!last.reasoning || streamingReasoning.length > last.reasoning.length)
+                  ? streamingReasoning : last.reasoning,
+                status: "streaming",
+                progress: activeTask.progress ?? undefined,
+                thinkingSteps: activeTask.thinkingSteps ?? last.thinkingSteps,
+              };
+              pendingStreamId = last.id;
+            } else {
+              // 追加 streaming 占位
+              const id = genMsgId("asst-recovering");
+              historyMsgs.push({
+                id,
+                role: "assistant",
+                content: streamingText,
+                timestamp: Date.now(),
+                status: "streaming",
+                reasoning: streamingReasoning,
+                progress: activeTask.progress ?? undefined,
+                thinkingSteps: activeTask.thinkingSteps,
+              });
+              pendingStreamId = id;
+            }
+          }
+
+          set({
+            messages: historyMsgs,
+            pendingStreamMessageId: pendingStreamId,
+            isStreaming: !!activeTask,
+          });
+          return historyMsgs;
+        } catch {
+          return get().messages;
+        } finally {
+          // 只有 sessionId 仍然是当前会话才清锁（防止 race）
+          if (get().restoringSessionId === sessionId) {
+            set({ restoringSessionId: null });
+          }
+        }
+      },
     }),
     {
       name: "chat-storage",
@@ -279,6 +454,8 @@ export const useChatStore = create<ChatState>()(
             ? { ...m, status: "complete" as const, progress: undefined }
             : m
         ),
+        // 持久化 pendingStreamMessageId，让刷新后仍能识别流式占位（业务层会在 status===connected 时调 sharedSessionRestore 重新校验）
+        pendingStreamMessageId: state.pendingStreamMessageId,
       }),
     },
   ),

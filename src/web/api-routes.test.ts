@@ -185,6 +185,7 @@ vi.mock('../memory/conversations.js', () => ({
     }));
   },
   saveMessage: vi.fn(),
+  saveUserMessage: vi.fn(() => ({ id: 'mock-user-id', deduplicated: false })),
 }));
 
 // Mock scheduler/intelligence route registrations — they just register routes

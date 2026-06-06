@@ -188,6 +188,13 @@ export type EventMap = {
   'plugin.scope_changed': { pluginId: string; oldScope: string; newScope: string };
   'permission.user_confirm_needed': { requestId: string; sessionId: string; agentName: string; toolName: string; toolInput: string; dangerLevel: string; brainReason: string };
   'delegation.user_needed': { delegationId: string; sessionId: string; requestedBy: string; title: string; description: string; urgency: string; options: string[] };
+  // Stream / dialogue transport 事件（H2 kernel EventBus 化）
+  // kernel 业务层 emit 出去，由 StreamDispatcher fan-out 给各 transport 订阅者（WS / CLI / 重连补发等）
+  // 不再让 kernel 业务路径直接持 user-side ws.Socket
+  'stream.text_delta': { taskId: string; sessionId: string; text: string; correlationId?: string };
+  'stream.reasoning_delta': { taskId: string; sessionId: string; text: string; correlationId?: string };
+  'stream.tool_call': { taskId: string; sessionId: string; toolName: string; input: unknown; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
+  'dialogue.status': { dialogueId: string; sessionId: string; status: 'started' | 'round_complete' | 'ended'; from: string; to: string; round: number };
 };
 
 export type EventMessageMap = {

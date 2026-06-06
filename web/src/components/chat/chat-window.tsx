@@ -342,7 +342,7 @@ interface ChatWindowProps {
 }
 
 export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
-  const { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission, connectionStatus } = useChatSocket();
+  const { sendMessage, cancelGeneration, resendMessage, respondDelegation, respondPermission } = useChatSocket();
   const sessionId = useChatStore((s) => s.sessionId);
   const messages = useChatStore((s) => s.messages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -350,12 +350,36 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const removeMessagesAfter = useChatStore((s) => s.removeMessagesAfter);
   const pendingDelegation = useChatStore((s) => s.pendingDelegation);
   const pendingPermission = useChatStore((s) => s.pendingPermission);
+  const isStreaming = useChatStore((s) => s.isStreaming);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [droppedAttachments, setDroppedAttachments] = useState<Attachment[]>([]);
   const loadedSessionRef = useRef<string | null>(null);
   const t = useT();
+
+  // 是否已配置至少一个可用的 provider/model channel
+  // 用 React Query 缓存（与 sendMessage 中的快查保持一致）
+  const channelsQuery = useQuery({
+    queryKey: ["providers", "channels"],
+    queryFn: async () => {
+      const res = await fetch("/api/providers/channels");
+      if (!res.ok) return { channels: [] as Array<{ configured?: boolean; modelCount?: number }> };
+      return res.json() as Promise<{ channels?: Array<{ configured?: boolean; modelCount?: number }> }>;
+    },
+    staleTime: 30_000,
+  });
+  const isModelConfigured = !!channelsQuery.data?.channels?.some(
+    (ch) => ch.configured || (ch.modelCount ?? 0) > 0,
+  );
+
+  /**
+   * 输入框可用条件（H4 修复）：
+   * - 不在流式中（避免重入）
+   * - 模型已配置（否则根本发不出去）
+   * 不再硬绑 connectionStatus：断线时输入框仍可输入，send 走 ws-store.sendQueue 暂存
+   */
+  const canSend = !isStreaming && isModelConfigured;
 
   const loadHistory = useCallback(() => {
     if (!sessionId || loadedSessionRef.current === sessionId) return;
@@ -505,7 +529,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         }}
         onCancel={cancelGeneration}
         externalAttachments={droppedAttachments}
-        disabled={connectionStatus !== "connected"}
+        disabled={!canSend}
       />
     </div>
   );

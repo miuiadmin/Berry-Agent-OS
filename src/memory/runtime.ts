@@ -12,7 +12,7 @@ import type {
 import { addKnowledge, dismissKnowledge } from './knowledge.js';
 import { searchKnowledge } from './search.js';
 import { buildMemoryContext } from './context-builder.js';
-import { saveMessage, getHistory } from './conversations.js';
+import { saveMessage, saveUserMessage, getHistory } from './conversations.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('memory-runtime');
@@ -77,8 +77,25 @@ export class MemoryRuntime {
   }
 
   saveConversationTurn(sessionId: string, userMessage: string, assistantResponse: string, reasoning?: string): void {
-    saveMessage(sessionId, 'user', userMessage);
+    // 修复 C2/H8/H9：user 行改用幂等的 saveUserMessage 写入，
+    // 配合 kernel 入口的预写入，重复调用不会产生重复行。
+    // assistant 行始终是新增（同一 final 不会重复落库）。
+    saveUserMessage(sessionId, userMessage);
     saveMessage(sessionId, 'assistant', assistantResponse, reasoning);
+  }
+
+  /**
+   * 单独持久化一条 user 消息，专供 kernel 入口在 createPending 之后
+   * 立即调用。幂等性由 clientMsgId 触发，参见 conversations.saveUserMessage。
+   *
+   * 为什么不复用 saveConversationTurn？
+   *   saveConversationTurn 合并写 user+assistant，而 assistant 行
+   *   可能在数秒/数分钟后才到达 final.response 路径。把 user 行与
+   *   assistant 行解耦后，user 消息在入口处就落盘，避免 agent 崩溃 /
+   *   路由失败 / 超时等任何中断下 user 消息全丢。
+   */
+  saveUserMessage(sessionId: string, content: string, options: { clientMsgId?: string } = {}): { id: string; deduplicated: boolean } {
+    return saveUserMessage(sessionId, content, options);
   }
 
   getRecentTurns(sessionId: string, maxTurns = 5): Array<{ userMessage: string; response: string }> {

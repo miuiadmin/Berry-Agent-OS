@@ -62,6 +62,7 @@ const zh: Record<string, string> = {
   "sidebar.scheduler": "调度器",
   "sidebar.conversations": "会话",
   "sidebar.usage": "用量",
+  "sidebar.drift": "漂移",
   "sidebar.logs": "日志",
 
   // ===== 用户菜单 =====
@@ -504,8 +505,13 @@ const zh: Record<string, string> = {
   "chat.responseTimeout": "响应超时 — 后端可能无响应，请检查后端日志",
   "chat.taskFailed": "任务失败",
   "chat.delegatedTo": "交由 {agent} 处理",
+  "chat.dialogueStarted": "正在与 {agent} 智能体协作…",
+  "chat.dialogueRoundComplete": "协作进行中（第 {round} 轮）{summary}",
+  "chat.dialogueEnded": "协作完成",
   "chat.modelNotConfigured": "模型尚未配置。请先在设置页面添加 API Key 和模型配置。",
   "chat.failedToSendMessage": "发送消息失败",
+  "chat.messageQueued": "已暂存（等待连接恢复后自动发送）",
+  "chat.queuedForRetry": "已暂存，待重连后自动重发",
 
   // ===== 实时事件 hook =====
   "events.taskFailed": "任务失败",

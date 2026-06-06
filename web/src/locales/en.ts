@@ -62,6 +62,7 @@ const en: Record<string, string> = {
   "sidebar.scheduler": "Scheduler",
   "sidebar.conversations": "Conversations",
   "sidebar.usage": "Usage",
+  "sidebar.drift": "Drift",
   "sidebar.logs": "Logs",
 
   // ===== User Menu =====
@@ -504,8 +505,13 @@ const en: Record<string, string> = {
   "chat.responseTimeout": "Response timed out — backend may be unresponsive. Check backend logs.",
   "chat.taskFailed": "Task failed",
   "chat.delegatedTo": "Delegated to {agent}",
+  "chat.dialogueStarted": "Collaborating with {agent} agent…",
+  "chat.dialogueRoundComplete": "Collaboration in progress (round {round}){summary}",
+  "chat.dialogueEnded": "Collaboration complete",
   "chat.modelNotConfigured": "Model not configured. Please add an API key and model in Settings.",
   "chat.failedToSendMessage": "Failed to send message",
+  "chat.messageQueued": "Queued (will send after reconnection)",
+  "chat.queuedForRetry": "Queued for retry after reconnection",
 
   // ===== Realtime events hook =====
   "events.taskFailed": "Task failed",

@@ -13,6 +13,7 @@ import { createDialogueTools } from '../../../tools/dialogue-tools.js';
 import { setCronToolsDb } from '../../../tools/cron-tools.js';
 import { setSessionToolsDb } from '../../../tools/session-tools.js';
 import { ContextManager } from '../../../llm/context-manager.js';
+import { saveUserMessage as persistUserMessage, getHistory as loadHistoryFromDb } from '../../../memory/conversations.js';
 import { z } from 'zod';
 import type { IpcMessage } from '../../../kernel/types.js';
 import type { UserMessagePayload, DraftResponsePayload, FinalResponsePayload } from '../../../contracts/messaging.js';
@@ -95,9 +96,13 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   });
   const modelTools = createModelTools(ipc, currentSessionRef, config.requestTimeoutMs);
 
-  /** 当前 session 的 AbortSignal — dialogue 工具通过闭包获取，用户中断时自动取消 */
-  let currentSignal: AbortSignal | undefined;
-  const dialogueTools = createDialogueTools(ipc, () => currentSignal);
+  /** per-session 的运行时状态（signal + correlationId），dialogue 工具通过 currentSessionRef.id 路由到正确 session */
+  const sessionRunState = new Map<string, { signal: AbortSignal; correlationId: string }>();
+  const dialogueTools = createDialogueTools(
+    ipc,
+    () => sessionRunState.get(currentSessionRef.id)?.signal,
+    () => sessionRunState.get(currentSessionRef.id)?.correlationId,
+  );
 
   clearDynamicTools([...memoryTools, ...capabilityTools, ...skillTools, ...modelTools, ...dialogueTools].map((tool) => tool.name));
   for (const tool of [...memoryTools, ...capabilityTools, ...skillTools, ...modelTools, ...dialogueTools]) {
@@ -157,7 +162,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   });
 
   ipc.onMessage('user.message', async (msg: IpcMessage) => {
-    const { sessionId, message, taskId, systemPrompt, contextFrames, modelTierOverride, intent } = msg.payload as UserMessagePayload;
+    const { sessionId, message, taskId, systemPrompt, contextFrames, modelTierOverride, intent, clientMsgId } = msg.payload as UserMessagePayload;
     const trackingId = msg.correlationId ?? msg.id;
     logger.debug({ sessionId, taskId, intent, msgLen: message.length, toolCount: tools.length, modelTier: modelTierOverride }, 'conversation:start');
     currentSessionRef.id = sessionId;
@@ -169,7 +174,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       await existing.promise.catch(() => {});
     }
     const controller = new AbortController();
-    currentSignal = controller.signal;
+    sessionRunState.set(sessionId, { signal: controller.signal, correlationId: trackingId });
 
     const run = (async () => {
 
@@ -182,13 +187,23 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         const oldest = sessionHistories.keys().next().value!;
         sessionHistories.delete(oldest);
       }
-      sessionHistories.set(sessionId, []);
+      // 11.0 启动预热：从 SQLite 加载该 session 的历史对话，注入 sessionHistories
+      // 避免重启后丢失上下文；同时修复重启后第一条消息 history 为空导致的工具调用幻觉。
+      const persistedHistory = loadHistoryFromDb(sessionId, 50);
+      const initialHistory: ModelMessage[] = persistedHistory
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({ role: m.role, content: m.content }));
+      sessionHistories.set(sessionId, initialHistory);
     }
     const history = sessionHistories.get(sessionId)!;
     let priorHistory = [...history];
 
     if (contextManager.needsCompression(priorHistory)) {
       const compressed = await contextManager.compress(priorHistory, llm.current);
+      // 11.0 修复：压缩后将「被替换的旧消息」持久化到 conversations 表
+      // （通过 insert new + 不删旧行实现，依赖 getHistory 的时间序读取），
+      // 这里仅替换内存中的 history，不动 DB —— 因为旧消息已经在
+      // conversations 表里，压缩只是把它们从 LLM context 中挤出。
       sessionHistories.set(sessionId, compressed);
       priorHistory = [...compressed];
     }
@@ -196,6 +211,24 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
     const memoryContext = formatMemoryContextFrames(contextFrames);
     const messageForModel = memoryContext ? `${memoryContext}\n\n${message}` : message;
     history.push({ role: 'user', content: message });
+
+    // 修复 C2/H8/H9：conversation agent 内部的第二道兜底闸门。
+    // 即使 kernel 入口（handleMessage）已经落过 user 行，幂等的
+    // saveUserMessage 会返回 deduplicated: true 并跳过真正的 INSERT。
+    // 只有当 kernel 入口失败 / 网络丢包 / 重连时，这一行才真正写入。
+    // 与 final.response 路径解耦 —— final 路径只补写 assistant 行。
+    try {
+      const result = persistUserMessage(sessionId, message, { clientMsgId });
+      if (result.deduplicated) {
+        logger.debug({ sessionId, clientMsgId, msgId: result.id }, 'conversation: user 消息已存在（kernel 入口已落盘）');
+      } else {
+        logger.debug({ sessionId, clientMsgId, msgId: result.id }, 'conversation: 兜底写入 user 消息');
+      }
+    } catch (err) {
+      // 失败仅 warn，不阻塞 LLM 调用 —— 至少 history 还在内存里，
+      // 重启时由 11.0 启动预热从 SQLite 加载回来。
+      logger.warn({ err, sessionId, clientMsgId }, 'conversation: 兜底写入 user 消息失败');
+    }
 
     if (taskId) {
       ipc.send('task.started', 'core', { taskId } satisfies TaskStartedPayload);
@@ -209,10 +242,10 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       const result = await runToolLoop({
         llm: llm.current,
         messages: [...priorHistory, { role: 'user', content: messageForModel }],
-        systemPrompt: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+        systemPrompt: systemPrompt ? `${systemPrompt}\n\n${DEFAULT_SYSTEM_PROMPT}` : DEFAULT_SYSTEM_PROMPT,
         tools,
         signal: controller.signal,
-        config: { maxCalls: Math.min(config.toolLoop.maxCalls, 10), timeoutMs: config.toolLoop.timeoutMs },
+        config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },
         onChunk: streamingEnabled ? (text: string) => {
           const scrubbed = scrubber.scrub(text);
           if (scrubbed && taskId) {
@@ -346,8 +379,8 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       if (current?.controller === controller) {
         sessionLocks.delete(sessionId);
       }
-      if (currentSignal === controller.signal) {
-        currentSignal = undefined;
+      if (sessionRunState.get(sessionId)?.signal === controller.signal) {
+        sessionRunState.delete(sessionId);
       }
     }
   });

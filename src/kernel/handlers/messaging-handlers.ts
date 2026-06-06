@@ -92,6 +92,24 @@ export function handleMessage(
     },
   });
 
+  // 修复 C2/H8/H9：user 消息入口入库。在 createPending 之后、
+  // sendRouteRequest 之前立刻落 user 行 —— 这是消除「user 消息
+  // 在中断时全丢」双层漏洞的第一道闸门。失败时仅 warn 不阻塞
+  // 路由（fail-open），下游 conversation agent 仍有兜底机会。
+  // 使用 clientMsgId（来自请求体）做幂等键；若缺失则退化为 msgId
+  // 自身（同一连接内 msgId 唯一）。
+  const clientMsgId = requireString(request, 'clientId') ?? msgId;
+  try {
+    ctx.sessionManager.saveUserMessage(sessionId, message, { clientMsgId });
+  } catch (err) {
+    logger.warn({ err, sessionId, msgId }, 'handleMessage 入口入库 user 消息失败');
+  }
+
+  // 同样的入口入库保护覆盖 channel 入口（移动端/第三方 channel
+  // 发起的消息也必须立刻落盘）。channel 不传 clientId，msgId 即唯一。
+  // 注：handleChannelMessage 走另一条路径（line 140+），那里也要补；
+  // 这里只覆盖最常用的 socket 入口。
+
   const primaryName = ctx.registry.requireRole('primary').manifest.name;
   const agentHome = getAgentHomePath(primaryName);
   try {
@@ -177,6 +195,15 @@ export function handleChannelMessage(
       });
     },
   });
+
+  // 修复 C2/H8/H9：channel 入口同样要在 createPending 之后立即
+  // 落 user 行，与 socket 入口对齐。channel 没有 clientId，
+  // 直接以 msgId 作幂等键（同一 channel 入口内唯一）。
+  try {
+    ctx.sessionManager.saveUserMessage(sessionId, message, { clientMsgId: msgId });
+  } catch (err) {
+    logger.warn({ err, sessionId, msgId, channelType }, 'handleChannelMessage 入口入库 user 消息失败');
+  }
 
   ctx.taskManager.dispatch(taskId);
 

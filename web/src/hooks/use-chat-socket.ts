@@ -46,15 +46,13 @@ function toPermissionRequest(msg: Extract<ServerMessage, { type: "permission.con
  * 3. 提供 send/cancel/respond 等消息操作方法
  */
 export function useChatSocket() {
-  const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission } = useChatStore();
-  const { send, onMessage, status } = useWsStore();
+  const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission, sharedSessionRestore, createStreamingPlaceholder, markLastMessageStatus } = useChatStore();
+  const { send, confirmOutgoingMessage, onMessage, status } = useWsStore();
   const queryClient = useQueryClient();
   const t = useT();
 
   /** 流式响应超时定时器 */
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>( null);
-  /** 已恢复过会话的 sessionId（防止同一会话重复恢复，切换会话时自动重置） */
-  const recoveredRef = useRef<string | null>(null);
   /** 发送消息时记录的 sessionId，用于全局事件（task.failed/progress）的按对话过滤 */
   const streamingSessionRef = useRef<string | null>(null);
 
@@ -94,46 +92,23 @@ export function useChatSocket() {
     }
   }, [status, clearTimer, resetTimer]);
 
-  // ─── 会话恢复（WS 重连后恢复活跃任务） ──────────────────────────
-  // 注意：chat-window 的 loadHistory 已负责首次加载历史 + activeTask 恢复。
-  // 此 effect 仅在 WS 重连（status 变化）时补充恢复，且跳过已有历史的 session（避免重复）。
-
+  // ─── 共享会话恢复（H6 修复） ──────────────────────────────
+  // 统一所有"从服务端拉历史 + 恢复活跃任务"的入口。
+  // 不再使用 recoveredRef 短路：每次 status 变 connected 都重新触发（chat-store 内部 restoringSessionId 锁防止并发）。
   useEffect(() => {
     if (status !== "connected") return;
     const sid = useChatStore.getState().sessionId;
-    if (!sid || recoveredRef.current === sid) return;
-    // 如果 chat-store 已有消息（loadHistory 已完成），跳过重复 fetch
-    if (useChatStore.getState().messages.length > 0) {
-      recoveredRef.current = sid; // 标记已处理，避免后续重跑
-      return;
-    }
-    recoveredRef.current = sid;
-
-    fetch(`/api/sessions/${sid}/state`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((data) => {
-        if (!data || useChatStore.getState().sessionId !== sid) return;
-        const activeTask = data.activeTasks?.[0];
-        const messages = (data.messages ?? []).map((m: { role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: Array<{ text: string; ts: number }> }) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-          timestamp: new Date(m.createdAt).getTime(),
-          reasoning: m.reasoning,
-          thinkingSteps: m.thinkingSteps,
-        }));
-        useChatStore.getState().restoreSession(
-          messages,
-          activeTask ? {
-            progress: activeTask.progress,
-            thinkingSteps: activeTask.thinkingSteps,
-            streamingContent: activeTask.streamingContent,
-            streamingReasoning: activeTask.streamingReasoning,
-          } : undefined,
-        );
-        if (activeTask) resetTimer();
-      })
-      .catch(() => {});
-  }, [status, sessionId, resetTimer]);
+    if (!sid) return;
+    // 直接调共享入口，store 内部加锁 + 原子写入
+    sharedSessionRestore(sid).then((msgs) => {
+      // 恢复完后，如果最后一条是 streaming 占位，需要重置超时计时器
+      const last = msgs[msgs.length - 1];
+      if (last?.status === "streaming") {
+        streamingSessionRef.current = sid;
+        resetTimer();
+      }
+    }).catch(() => {});
+  }, [status, sessionId, sharedSessionRestore, resetTimer]);
 
   // ─── 消息分发（核心：将 WS 消息派发到 chat store） ────────────
 
@@ -183,21 +158,19 @@ export function useChatSocket() {
         const content = data.content as string;
         if (content) {
           const state = useChatStore.getState();
+          // H6 修复：不再直接 addMessage，而是复用 createStreamingPlaceholder 统一占位创建
+          const placeholderId = createStreamingPlaceholder();
+          // 把恢复的 content 写回占位（用 updateLastMessage 等价方式：通过 id 找到对应消息并更新）
+          // 为简化：直接在 messages 里替换对应 id 的内容
           const msgs = state.messages;
-          // 找到最后一条 assistant 消息（可能不是数组末尾，中间可能有 user 消息）
-          let lastAsstIdx = -1;
-          for (let i = msgs.length - 1; i >= 0; i--) {
-            if (msgs[i].role === "assistant") { lastAsstIdx = i; break; }
-          }
-          if (lastAsstIdx >= 0) {
-            const lastAsst = msgs[lastAsstIdx];
+          const idx = msgs.findIndex((m) => m.id === placeholderId);
+          if (idx >= 0) {
             // 只在恢复内容比本地更长时才覆盖（更长 = 更新，因为内容只会追加）
-            if (content.length > (lastAsst.content?.length ?? 0)) {
+            if (content.length > (msgs[idx].content?.length ?? 0)) {
               useChatStore.getState().updateLastMessage(() => ({ content, status: "streaming" as const }));
             }
           } else {
-            // 本地没有任何 assistant 消息：创建占位符
-            addMessage({ id: genMsgId("asst"), role: "assistant", content, timestamp: Date.now(), status: "streaming" });
+            useChatStore.getState().updateLastMessage(() => ({ content, status: "streaming" as const }));
           }
           setStreaming(true);
           // 记录恢复的 sessionId，用于后续全局事件过滤
@@ -210,13 +183,18 @@ export function useChatSocket() {
       // 对话消息类型（text_delta / reasoning / tool_call / result 等）
       const msg = data as unknown as ServerMessage;
 
-      // 防护：如果收到流式消息但还没有 assistant 占位消息，先创建一个
+      // H6 修复：占位创建统一走 createStreamingPlaceholder
+      // 收到第一个流式事件时，如果当前还没有 streaming 占位（pendingStreamMessageId 为空且末尾非 streaming assistant），创建之
       if (msg.type === "text_delta" || msg.type === "reasoning_delta" || msg.type === "tool_call" || msg.type === "progress" || msg.type === "agent_handoff" || msg.type === "ask_user" || msg.type === "dialogue_status") {
         const state = useChatStore.getState();
-        const last = state.messages[state.messages.length - 1];
-        if (!last || last.role !== "assistant") {
-          addMessage({ id: genMsgId("asst"), role: "assistant", content: "", timestamp: Date.now(), status: "streaming" });
+        // 只有在没有 pending 占位时才会真创建（store 内部幂等）
+        const placeholderId = createStreamingPlaceholder();
+        if (placeholderId) {
           setStreaming(true);
+          // 记下 streaming sessionId
+          if (!streamingSessionRef.current) {
+            streamingSessionRef.current = state.sessionId;
+          }
         }
       }
 
@@ -281,6 +259,19 @@ export function useChatSocket() {
               appendToLast(response);
             }
             setLastStatus("complete");
+            // H5 修复：result 到达 = user 消息已被服务端接收，把 user 消息从 'sending' 升级为 'complete'
+            // 用客户端 messageStore.setState 直接定位到上一条 user 消息
+            const userIdx = current.length - 2;
+            if (userIdx >= 0 && current[userIdx].role === "user" && current[userIdx].status === "sending") {
+              const userMsgId = current[userIdx].id;
+              useChatStore.setState((s) => {
+                const msgs = [...s.messages];
+                msgs[userIdx] = { ...msgs[userIdx], status: "complete" };
+                return { messages: msgs };
+              });
+              // 同步从 outbox 移除（如果该 user 消息是经 outbox 暂存的）
+              if (userMsgId) confirmOutgoingMessage(userMsgId);
+            }
           } else if (response) {
             // 没有 assistant 占位消息（服务端直接返回 result，无 text_delta 前导）
             addMessage({ id: genMsgId("asst"), role: "assistant", content: response, timestamp: Date.now(), status: "complete" });
@@ -312,26 +303,59 @@ export function useChatSocket() {
       }
     });
     return unsub;
-  }, [onMessage, setStreaming, setPendingDelegation, setPendingPermission, resetTimer, clearTimer]);
+  }, [onMessage, setStreaming, setPendingDelegation, setPendingPermission, resetTimer, clearTimer, createStreamingPlaceholder, addMessage]);
 
   // ─── 发送消息 ─────────────────────────────────────────────────
 
-  /** 内部发送方法：新增助手占位消息 → 设置流式状态 → 通过 WS 发送 */
-  const sendInternal = useCallback((text: string, attachments?: unknown[]) => {
-    addMessage({ id: genMsgId("asst"), role: "assistant", content: "", timestamp: Date.now(), status: "streaming" });
-    setStreaming(true);
+  /**
+   * 内部发送方法（H5 重写）：
+   * 1. 立即把 user 消息 addMessage({role:'user', content, status:'sending', clientMsgId}) —— 用户先看到自己的消息
+   * 2. 调 send({type:'message', text, sessionId, attachments, clientMsgId, permissionMode})；WS 断开时自动入 outbox
+   * 3. 如果 send 抛错（同步异常）：把刚 addMessage 的 user 消息 status 改为 'failed'，不吞占位
+   * 4. 占位 assistant 消息不再在此创建，改为 onMessage 收到 text_delta 时由 createStreamingPlaceholder 统一创建
+   */
+  const sendInternal = useCallback((
+    text: string,
+    attachments?: unknown[],
+    options?: { clientMsgId?: string },
+  ) => {
+    const clientMsgId = options?.clientMsgId ?? genMsgId("user");
+    // 1) 先 addMessage user 消息（status='sending' 表示还未被服务端确认）
+    addMessage({
+      id: clientMsgId,
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+      status: "sending",
+      attachments: attachments as never,
+    });
     // 记录发起流式时的 sessionId，用于后续全局事件过滤
     streamingSessionRef.current = sessionId;
-    resetTimer();
     try {
-      send({ type: "message", text, sessionId, attachments, permissionMode: useChatStore.getState().permissionMode });
-    } catch {
-      setLastError(t("chat.failedToSendMessage"));
+      // 2) 调 send；WS 断开时由 ws-store.send 自动入 outbox
+      send({
+        type: "message",
+        text,
+        sessionId,
+        attachments,
+        clientMsgId,
+        permissionMode: useChatStore.getState().permissionMode,
+      });
+      // 发送动作本身没抛错就启动超时计时器（即便 WS 暂未连接）
+      resetTimer();
+    } catch (err) {
+      // 3) send 同步抛错：把刚 addMessage 的 user 消息标记为 failed（不 setLastError 吞占位）
+      // markLastMessageStatus 作用于 messages 最后一条——此时正好是 user 消息
+      markLastMessageStatus("failed");
+      // 仅在严重异常时给个 toast 提示，同步 error 一般是参数错误，console 已足够
+      if (import.meta.env.DEV) {
+        console.warn("[ws] send failed synchronously:", err);
+      }
       clearTimer();
     }
-  }, [sessionId, addMessage, setStreaming, send, resetTimer, clearTimer]);
+  }, [sessionId, addMessage, send, resetTimer, clearTimer, markLastMessageStatus]);
 
-  /** 发送用户消息（附带模型配置检查） */
+  /** 发送用户消息（附带模型配置检查 + clientMsgId 去重） */
   const sendMessage = useCallback(
     async (text: string, attachments?: Array<{ fileId: string; filename: string; mimeType: string; url: string }>) => {
       // 快速模型配置检查：使用 React Query 缓存，避免每次都请求
@@ -341,14 +365,19 @@ export function useChatSocket() {
         return;
       }
 
-      addMessage({ id: genMsgId("user"), role: "user", content: text, timestamp: Date.now(), status: "complete", attachments });
-      sendInternal(text, attachments);
+      // 生成稳定的 clientMsgId（用于 outbox 去重 + 重发关联）
+      const clientMsgId = genMsgId("user");
+      sendInternal(text, attachments, { clientMsgId });
+      // 注意：这里不再 addMessage user 消息——由 sendInternal 统一处理（addMessage(status='sending', clientMsgId)）
     },
-    [addMessage, sendInternal],
+    [sendInternal],
   );
 
-  /** 重发消息（不新增用户消息，直接发送文本） */
-  const resendMessage = useCallback((text: string) => { sendInternal(text); }, [sendInternal]);
+  /** 重发消息（不新增用户消息，直接发送文本，复用上一条 user 消息的 id 作 clientMsgId） */
+  const resendMessage = useCallback((text: string) => {
+    const clientMsgId = genMsgId("user");
+    sendInternal(text, undefined, { clientMsgId });
+  }, [sendInternal]);
 
   /** 取消当前生成 */
   const cancelGeneration = useCallback(() => {

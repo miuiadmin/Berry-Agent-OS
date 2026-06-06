@@ -11,7 +11,6 @@
  */
 
 import type { Database } from 'better-sqlite3';
-import type { Socket } from 'node:net';
 import type {
   DialogueMessagePayload,
   DialogueEndPayload,
@@ -48,15 +47,17 @@ export class DialogueRouter {
   }>();
   /** 权限确认期间暂停的对话 */
   private pausedTimeouts = new Set<string>();
+  /** correlationId → 该请求已开启的对话数（预算守护） */
+  private dialogueCountByCorrelation = new Map<string, number>();
 
   private deps: DialogueRouterDeps;
   private insertStmt: import('better-sqlite3').Statement;
 
   constructor(deps: DialogueRouterDeps) {
     this.deps = deps;
-    // dialogue_messages 表已在 schema.ts 中定义，这里只准备 insert 语句
+    // INSERT OR REPLACE：retry 场景（同 dialogueId + 同 sequenceNumber）时覆盖旧记录
     this.insertStmt = deps.db.prepare(`
-      INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, context_json, metadata_json, created_at)
+      INSERT OR REPLACE INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, context_json, metadata_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     // 启动 sweepStale 定时器
@@ -67,24 +68,6 @@ export class DialogueRouter {
   // 对话生命周期
   // ─────────────────────────────────────────────────────────────
 
-  /** 创建新对话，返回 dialogueId */
-  createDialogue(params: CreateDialogueParams): string {
-    const dialogueId = genId('dlg');
-    const state: DialogueState = {
-      dialogueId,
-      sessionId: params.sessionId,
-      correlationId: params.correlationId,
-      initiator: params.initiator,
-      target: params.target,
-      currentRound: 0,
-      createdAt: Date.now(),
-      status: 'active',
-    };
-    this.dialogues.set(dialogueId, state);
-    logger.info({ dialogueId, initiator: params.initiator, target: params.target }, 'dialogue:created');
-    return dialogueId;
-  }
-
   /** 获取对话状态 */
   getDialogue(dialogueId: string): DialogueState | undefined {
     return this.dialogues.get(dialogueId);
@@ -92,6 +75,13 @@ export class DialogueRouter {
 
   /** 注册外部已生成 dialogueId 的对话状态（Conversation 侧已生成 ID 时使用） */
   registerDialogue(dialogueId: string, params: CreateDialogueParams): DialogueState {
+    // 预算守护：单次请求内对话数量限制
+    const count = this.dialogueCountByCorrelation.get(params.correlationId) ?? 0;
+    if (count >= DIALOGUE_DEFAULTS.maxDialoguesPerRequest) {
+      throw new Error(`exceeded max dialogues per request (${DIALOGUE_DEFAULTS.maxDialoguesPerRequest})`);
+    }
+    this.dialogueCountByCorrelation.set(params.correlationId, count + 1);
+
     const state: DialogueState = {
       dialogueId,
       sessionId: params.sessionId,
@@ -101,9 +91,10 @@ export class DialogueRouter {
       currentRound: 0,
       createdAt: Date.now(),
       status: 'active',
+      totalChars: 0,
     };
     this.dialogues.set(dialogueId, state);
-    logger.info({ dialogueId, initiator: params.initiator, target: params.target }, 'dialogue:registered');
+    logger.info({ dialogueId, initiator: params.initiator, target: params.target, dialogueCount: count + 1 }, 'dialogue:registered');
     return state;
   }
 
@@ -132,6 +123,13 @@ export class DialogueRouter {
     return [...this.dialogues.values()].filter(d => d.sessionId === sessionId && d.status === 'active');
   }
 
+  /** 检查指定 correlationId 是否存在与目标 agent 的对话（包括已完成/超时的） */
+  hasDialogueForTarget(correlationId: string, targetAgent: string): boolean {
+    return [...this.dialogues.values()].some(
+      d => d.correlationId === correlationId && d.target === targetAgent,
+    );
+  }
+
   // ─────────────────────────────────────────────────────────────
   // 消息路由
   // ─────────────────────────────────────────────────────────────
@@ -139,8 +137,11 @@ export class DialogueRouter {
   /**
    * 发送对话消息到目标 Agent（Conversation → Target）。
    * 返回一个 Promise，resolve 时收到 dialogue.reply。
+   *
+   * H1/H2: 不再接受 socket 参数。流式推送由 kernel 业务路径 emit 到 EventBus，
+   * StreamDispatcher 会按 ephemeralTaskId 派发给已订阅的 transport（WS / CLI 等）。
    */
-  async sendMessage(msg: DialogueMessagePayload, socket?: Socket): Promise<DialogueMessagePayload> {
+  async sendMessage(msg: DialogueMessagePayload): Promise<DialogueMessagePayload> {
     const state = this.dialogues.get(msg.dialogueId);
     if (!state) throw new Error(`dialogue not found: ${msg.dialogueId}`);
     if (state.status !== 'active') throw new Error(`dialogue not active: ${msg.dialogueId} (${state.status})`);
@@ -156,15 +157,22 @@ export class DialogueRouter {
       throw new Error(`dialogue exceeded max rounds (${DIALOGUE_DEFAULTS.maxRounds})`);
     }
 
+    // 检查总字符数预算
+    if (state.totalChars >= DIALOGUE_DEFAULTS.maxTotalChars) {
+      this.closeDialogue(msg.dialogueId, 'budget_exceeded');
+      throw new Error(`dialogue exceeded max total chars (${DIALOGUE_DEFAULTS.maxTotalChars})`);
+    }
+
+    // 累计 send 消息的字符数
+    state.totalChars += msg.content.length;
+
     // 修正 sequenceNumber：Conversation 侧不维护精确序号，由 Kernel 统一分配
     msg.sequenceNumber = state.currentRound * 2;
 
     // 生成 ephemeral taskId 用于 streaming
     const ephemeralTaskId = genId('dtask');
     state.ephemeralTaskId = ephemeralTaskId;
-    if (socket) {
-      this.deps.sessionManager.registerTaskSocket(ephemeralTaskId, socket);
-    }
+    // H1/H2: 不再注册 taskSocket 映射。transport 订阅者通过 StreamDispatcher.subscribe(ephemeralTaskId, ...) 接入。
 
     // 注入 context（ephemeralTaskId + sessionId 供 Code Agent 用）
     msg.context = {
@@ -212,6 +220,9 @@ export class DialogueRouter {
 
     // 推送 Brain
     this.notifyBrain(msg, state);
+
+    // 累计 reply 消息的字符数
+    state.totalChars += msg.content.length;
 
     // 递增轮次
     state.currentRound++;
@@ -291,10 +302,13 @@ export class DialogueRouter {
   private notifyBrain(msg: DialogueMessagePayload, state: DialogueState): void {
     const brainIpc = this.deps.getBrainIpc();
     if (!brainIpc) return;
+    // 12.0: 从 pending 中获取 intentAnchor 供 Brain 做语义漂移检测
+    const pending = this.deps.sessionManager.getPending(state.correlationId);
     const observe: DialogueObservePayload = {
       message: msg,
       currentRound: state.currentRound,
       sessionId: state.sessionId,
+      intentAnchor: pending?.intentAnchor,
     };
     brainIpc.send('dialogue.observe', 'brain', observe, msg.dialogueId);
   }
@@ -326,13 +340,58 @@ export class DialogueRouter {
     }));
   }
 
+  /**
+   * 获取 session 下最近未完成的对话摘要（崩溃恢复用）。
+   * "未完成" = 最后一条消息在 5 分钟内且序列号为偶数（send 后没有 reply）。
+   */
+  getRecentUnfinishedSummary(sessionId: string): string | null {
+    const cutoff = Date.now() - 5 * 60_000;
+    const rows = this.deps.db.prepare(`
+      SELECT dialogue_id, from_agent, to_agent, content, sequence_number
+      FROM dialogue_messages
+      WHERE session_id = ? AND created_at > ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all(sessionId, cutoff) as Array<{
+      dialogue_id: string;
+      from_agent: string;
+      to_agent: string;
+      content: string;
+      sequence_number: number;
+    }>;
+
+    if (rows.length === 0) return null;
+
+    // 按 dialogue 分组，取最新的一个
+    const latestDialogueId = rows[0].dialogue_id;
+    const dialogueRows = rows.filter(r => r.dialogue_id === latestDialogueId).reverse();
+
+    // 如果最后一条是 reply（奇数序号），对话已正常结束
+    const lastSeq = dialogueRows[dialogueRows.length - 1].sequence_number;
+    if (lastSeq % 2 === 1) return null;
+
+    // 构造摘要
+    const lines = dialogueRows.map(r => {
+      const role = r.from_agent === 'conversation' ? '你' : r.to_agent;
+      return `[${role}] ${r.content.slice(0, 200)}`;
+    });
+    return `[未完成的对话 (target: ${dialogueRows[0].to_agent})]\n${lines.join('\n')}`;
+  }
+
   /** 清理过期对话（7 天保留） */
   sweepStale(): number {
     const threshold = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    // 清理内存中已终态的对话
+    // 清理内存中已终态的对话及关联的计数器
     for (const [id, state] of this.dialogues) {
       if (state.status !== 'active' && state.createdAt < threshold) {
         this.dialogues.delete(id);
+      }
+    }
+    // 清理不再有活跃对话的 correlation 计数器
+    const activeCorrelations = new Set([...this.dialogues.values()].filter(d => d.status === 'active').map(d => d.correlationId));
+    for (const corrId of this.dialogueCountByCorrelation.keys()) {
+      if (!activeCorrelations.has(corrId)) {
+        this.dialogueCountByCorrelation.delete(corrId);
       }
     }
     // 清理数据库

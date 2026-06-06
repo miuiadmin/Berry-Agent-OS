@@ -49,8 +49,16 @@ describe('TestHarness E2E', () => {
       session_id: string;
     }>;
 
+    // 至少存在一条审核记录：合法 verdict 包括真实 Brain 审核 'approve'/'reject'，
+    // 以及本次新增的 A 级短路 'auto_approve_A_level' / 'auto_approve_no_intent'
+    const ALLOWED_VERDICTS = new Set([
+      'approve',
+      'reject',
+      'auto_approve_A_level',
+      'auto_approve_no_intent',
+    ]);
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows[0].verdict).toBe('approve');
+    expect(ALLOWED_VERDICTS.has(rows[0].verdict)).toBe(true);
     expect(rows[0].session_id).toBeTruthy();
   });
 

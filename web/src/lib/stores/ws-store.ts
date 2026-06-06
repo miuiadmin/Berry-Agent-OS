@@ -30,6 +30,10 @@ interface WsActions {
   connect: () => void;
   disconnect: () => void;
   send: (data: unknown) => void;
+  /** 显式把带 clientMsgId 的消息入 outbox（用于跨刷新恢复） */
+  queueOutgoingMessage: (clientMsgId: string, payload: unknown) => void;
+  /** 消息已被服务端确认后从 outbox 移除（按 clientMsgId） */
+  confirmOutgoingMessage: (clientMsgId: string) => void;
   subscribe: (event: string, cb: EventCallback) => () => void;
   onMessage: (handler: (data: Record<string, unknown>) => void) => () => void;
 }
@@ -85,6 +89,68 @@ const messageHandlers = new Set<(data: Record<string, unknown>) => void>();
  * 连接成功后 onopen 里调用 flushQueue() 一次性发出。
  */
 const sendQueue: unknown[] = [];
+
+/**
+ * 持久化 outgoing 队列的 localStorage key。
+ * 即使浏览器刷新/标签关闭，重启后未送达的 user 消息仍能恢复并按 clientMsgId 去重发送。
+ */
+const OUTBOX_STORAGE_KEY = "berry:ws-outbox:v1";
+
+/** 持久化队列条目（只存少量字段，clientMsgId 用于去重） */
+interface OutboxEntry {
+  clientMsgId: string;
+  type: string;
+  payload: unknown;
+  queuedAt: number;
+}
+
+/**
+ * 加载持久化 outbox。
+ * 读取失败的/反序列化异常的条目一律丢弃，避免阻塞后续恢复。
+ */
+function loadOutbox(): OutboxEntry[] {
+  try {
+    const raw = localStorage.getItem(OUTBOX_STORAGE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((e): e is OutboxEntry =>
+      !!e && typeof (e as OutboxEntry).clientMsgId === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 覆盖写 outbox 到 localStorage。
+ * try/catch 吞掉容量超限异常（QuotaExceededError），避免影响主流程。
+ */
+function saveOutbox(entries: OutboxEntry[]) {
+  try {
+    localStorage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // 容量超限或 storage 不可用：放弃持久化，内存队列仍保留
+  }
+}
+
+/**
+ * 从 outbox 中按 clientMsgId 去重添加。
+ * 同 clientMsgId 重复添加会被静默忽略（幂等）。
+ */
+function enqueueOutbox(entry: OutboxEntry) {
+  const cur = loadOutbox();
+  if (cur.some((e) => e.clientMsgId === entry.clientMsgId)) return;
+  cur.push(entry);
+  saveOutbox(cur);
+}
+
+/** 从 outbox 中按 clientMsgId 移除（成功发送后调用） */
+function removeFromOutbox(clientMsgId: string) {
+  const cur = loadOutbox();
+  const next = cur.filter((e) => e.clientMsgId !== clientMsgId);
+  if (next.length !== cur.length) saveOutbox(next);
+}
 
 // ─── 辅助函数 ─────────────────────────────────────────────────
 
@@ -153,6 +219,24 @@ export const useWsStore = create<WsStore>()(
           if (ws !== socket) return; // 过时的 socket 实例，忽略
           set({ status: "connected" });
           reconnectDelay = 1000; // 重置退避延迟
+
+          // 先把持久化 outbox 中跨刷新残留的 user 消息灌入内存队列（按时间顺序）
+          // 然后 flushQueue 一次性发出。这样刷新页面后未送达的消息仍能恢复。
+          try {
+            const persisted = loadOutbox();
+            for (const entry of persisted) {
+              // 用 clientMsgId 去重：如果内存队列里已经有同 id 的就不重复灌
+              if (!sendQueue.some((m) => {
+                const mm = m as { clientMsgId?: string };
+                return mm?.clientMsgId === entry.clientMsgId;
+              })) {
+                sendQueue.push(entry.payload);
+              }
+            }
+          } catch {
+            // outbox 恢复失败不影响主流程
+          }
+
           flushQueue();          // 发送积压消息
           // 只在断线重连时弹 toast，首次连接静默
           if (hasConnectedBefore) toast.success(t("connection.connected"));
@@ -233,7 +317,44 @@ export const useWsStore = create<WsStore>()(
         } else {
           // 未连接 → 暂存，等 onopen 后 flushQueue() 发出
           sendQueue.push(data);
+          // 如果是 user 消息且带 clientMsgId，额外持久化到 outbox 用于跨刷新恢复
+          const maybe = data as { type?: string; clientMsgId?: string };
+          if (maybe?.type === "message" && typeof maybe.clientMsgId === "string") {
+            enqueueOutbox({
+              clientMsgId: maybe.clientMsgId,
+              type: maybe.type,
+              payload: data,
+              queuedAt: Date.now(),
+            });
+          }
         }
+      },
+
+      /**
+       * 显式入队 outbox（带 clientMsgId 的 user 消息）。
+       * 用于调用方已经知道 WS 断开、希望保证可恢复时主动调用。
+       * 同 clientMsgId 重复入队会被幂等忽略。
+       */
+      queueOutgoingMessage: (clientMsgId: string, payload: unknown) => {
+        if (!clientMsgId) return;
+        const maybe = payload as { type?: string };
+        enqueueOutbox({
+          clientMsgId,
+          type: typeof maybe?.type === "string" ? maybe.type : "message",
+          payload,
+          queuedAt: Date.now(),
+        });
+        // 同时入内存队列，等连接恢复
+        sendQueue.push(payload);
+      },
+
+      /**
+       * 消息成功发送后从 outbox 移除（按 clientMsgId）。
+       * 避免重连后重复发送已被服务端确认的消息。
+       */
+      confirmOutgoingMessage: (clientMsgId: string) => {
+        if (!clientMsgId) return;
+        removeFromOutbox(clientMsgId);
       },
 
       /**

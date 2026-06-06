@@ -15,6 +15,7 @@ vi.mock('./context-builder.js', () => ({
 
 vi.mock('./conversations.js', () => ({
   saveMessage: vi.fn(),
+  saveUserMessage: vi.fn(() => ({ id: 'mock-user-id', deduplicated: false })),
   getHistory: vi.fn(() => []),
 }));
 
@@ -28,7 +29,7 @@ import { MemoryRuntime } from './runtime.js';
 import { addKnowledge, dismissKnowledge } from './knowledge.js';
 import { searchKnowledge } from './search.js';
 import { buildMemoryContext } from './context-builder.js';
-import { saveMessage, getHistory } from './conversations.js';
+import { saveMessage, saveUserMessage, getHistory } from './conversations.js';
 
 function makeRuntime(overrides = {}) {
   return new MemoryRuntime({
@@ -103,14 +104,15 @@ describe('MemoryRuntime', () => {
     it('saves both user and assistant messages', () => {
       const rt = makeRuntime();
       rt.saveConversationTurn('s1', 'hi', 'hello');
-      expect(saveMessage).toHaveBeenCalledWith('s1', 'user', 'hi');
+      // 修复 C2/H8/H9：user 行改用幂等的 saveUserMessage，配合 kernel 入口预写入
+      expect(saveUserMessage).toHaveBeenCalledWith('s1', 'hi');
       expect(saveMessage).toHaveBeenCalledWith('s1', 'assistant', 'hello', undefined);
     });
 
     it('saves reasoning with assistant message', () => {
       const rt = makeRuntime();
       rt.saveConversationTurn('s1', 'hi', 'hello', 'thinking...');
-      expect(saveMessage).toHaveBeenCalledWith('s1', 'user', 'hi');
+      expect(saveUserMessage).toHaveBeenCalledWith('s1', 'hi');
       expect(saveMessage).toHaveBeenCalledWith('s1', 'assistant', 'hello', 'thinking...');
     });
   });

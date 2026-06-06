@@ -1,4 +1,5 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
+import { IpcJournal } from '../kernel/ipc-journal.js';
 import { initDb, getDb, closeDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
 import { createProviderRegistry } from '../providers/registry.js';
@@ -43,9 +44,13 @@ export function startGenericAgent(config: GenericAgentConfig): void {
 
   const appConfig = resolveConfig(getConfigPath());
   initDb();
+  const db = getDb();
   const ipc = new IpcChildChannel(name);
+  // 注入 IPC journal：让 agent→core 方向的关键业务消息也能被 journal
+  // 并支持崩溃后由 core 端重放
+  ipc.setJournal(new IpcJournal(db));
   const providerRegistry = createProviderRegistry(appConfig.llm, appConfig.llm.channelsConfig);
-  const llm = createLlmClient(appConfig.llm, { db: getDb(), ipc, defaultAgent: name, providerRegistry });
+  const llm = createLlmClient(appConfig.llm, { db, ipc, defaultAgent: name, providerRegistry });
 
   const heartbeatInterval = setInterval(() => {
     ipc.send('agent.heartbeat', 'core', { name, uptime: process.uptime() });

@@ -55,6 +55,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateSelfModificationLog(conn);
     migrateBrainDecisionsAddColumns(conn);
     migrateBrainDecisionsExpandTypes(conn);
+    migrateReviewRequestsExpandVerdicts(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -988,5 +989,42 @@ function migrateBrainDecisionsExpandTypes(conn: Database.Database): void {
     CREATE INDEX idx_brain_decisions_type_session ON brain_decisions(decision_type, session_id);
     CREATE INDEX idx_brain_decisions_outcome ON brain_decisions(outcome) WHERE outcome IS NOT NULL;
     CREATE INDEX idx_brain_decisions_created ON brain_decisions(created_at);
+  `);
+}
+
+/**
+ * review_requests.verdict 扩展：将 auto-approve 类的两个新枚举值加入 CHECK 约束。
+ * 旧的 CHECK 只允许 pending/approve/modify/reject/require_user_confirm，
+ * 12.0 起 A 级短路与无 intent_anchor 的兜底分支也必须落库，需要 'auto_approve_A_level'、
+ * 'auto_approve_no_intent' 两个额外 verdict。
+ * 使用 rebuild 模式（与 migrateBrainDecisionsExpandTypes 同思路）确保线上库平滑升级。
+ */
+function migrateReviewRequestsExpandVerdicts(conn: Database.Database): void {
+  if (!tableExists(conn, 'review_requests')) return;
+  const sql = tableSql(conn, 'review_requests');
+  if (!sql || sql.includes('auto_approve_A_level')) return;
+  conn.exec(`
+    CREATE TABLE review_requests_new (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      level TEXT NOT NULL CHECK(level IN ('A','B','C')),
+      draft_response TEXT NOT NULL,
+      review_input TEXT NOT NULL,
+      verdict TEXT NOT NULL CHECK(verdict IN (
+        'pending','approve','modify','reject','require_user_confirm',
+        'auto_approve_A_level','auto_approve_no_intent'
+      )),
+      final_response TEXT,
+      reason TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      reviewed_at INTEGER
+    );
+    INSERT INTO review_requests_new
+      SELECT id, session_id, level, draft_response, review_input, verdict,
+             final_response, reason, created_at, reviewed_at
+      FROM review_requests;
+    DROP TABLE review_requests;
+    ALTER TABLE review_requests_new RENAME TO review_requests;
+    CREATE INDEX IF NOT EXISTS idx_review_session ON review_requests(session_id, created_at);
   `);
 }

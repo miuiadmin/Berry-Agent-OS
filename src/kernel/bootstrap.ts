@@ -11,6 +11,7 @@ import { AgentLifecycle } from './agent-lifecycle.js';
 import { AgentManager } from './agent-manager.js';
 import { AgentRegistry } from './agent-registry.js';
 import type { EventBus } from './event-bus.js';
+import { initStreamDispatcher } from './stream-dispatcher.js';
 import type { AppConfig } from '../config/schema.js';
 import { createCoreModuleRegistry, registerAgentModules, type ModuleRegistry } from './module-system.js';
 import { initTracer, createSqliteSink } from '../observability/tracer.js';
@@ -81,6 +82,9 @@ export function initInfrastructure(
   moduleRegistry.markStatus(db, 'db', 'running');
   moduleRegistry.markStatus(db, 'config', 'running');
   moduleRegistry.markStatus(db, 'event-bus', 'running');
+  // H1/H2: 初始化 StreamDispatcher（订阅 EventBus 的 4 个 stream/dialogue 事件并 fan-out 给 transport 订阅者）
+  // 必须在 EventBus 就绪后、其他业务模块 emit 事件前调用
+  initStreamDispatcher();
   initTracer([createSqliteSink(db)]);
   moduleRegistry.markStatus(db, 'observability', 'running');
   moduleRegistry.markStatus(db, 'memory', 'running');

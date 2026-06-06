@@ -13,7 +13,6 @@ import type {
 import type { AgentAskUserPayload } from '../../contracts/routing.js';
 import type { AgentManager } from '../agent-manager.js';
 import type { AgentRegistry } from '../agent-registry.js';
-import type { SocketTextDeltaEvent } from '../../contracts/socket-protocol.js';
 import { getEventBus } from '../event-bus.js';
 
 interface AgentIpc {
@@ -81,18 +80,14 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           // 通知 flusher 定期持久化到 SQLite（前端断连恢复用）
           deps.streamingFlusher?.onTextAccumulated(payload.taskId, pending.draftResponse, pending.reasoning);
         }
-        if (pending?.streaming && pending.socket && !pending.socket.destroyed) {
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId, sessionId: pending.sessionId };
-          pending.socket.write(JSON.stringify(evt) + '\n');
-          break;
-        }
-        // fallback：pending 已被删除但 taskSocketMap 还有映射（text_delta 迟到于 final response）
-        const fallbackSocket = deps.sessionManager.getSocketForTask(payload.taskId);
-        if (fallbackSocket && !fallbackSocket.destroyed) {
-          const sid = pending?.sessionId ?? entry?.sessionId;
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: payload.text, taskId: payload.taskId, sessionId: sid };
-          fallbackSocket.write(JSON.stringify(evt) + '\n');
-        }
+        // H1/H2/H3: 不再直写 socket。改为 emit 到 EventBus，由 StreamDispatcher 派发给所有 transport 订阅者。
+        // 没有 pending 也照样 emit（可能用于其它 transport / 重连补发 / 持久化 logger）。
+        getEventBus().emit('stream.text_delta', {
+          taskId: payload.taskId,
+          sessionId: pending?.sessionId ?? entry?.sessionId ?? '',
+          text: payload.text,
+          correlationId: entry?.correlationId,
+        });
         break;
       }
       case 'reasoning_delta': {
@@ -104,12 +99,21 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         if (rPending) {
           rPending.reasoning = (rPending.reasoning ?? '') + payload.text;
         }
-        const sock = rPending?.streaming && rPending.socket && !rPending.socket.destroyed
-          ? rPending.socket
-          : deps.sessionManager.getSocketForTask(payload.taskId);
-        if (sock && !sock.destroyed) {
-          sock.write(JSON.stringify({ type: 'reasoning_delta', text: payload.text, taskId: payload.taskId, sessionId: rPending?.sessionId ?? rEntry?.sessionId }) + '\n');
+        // H1/H2: 兜底断连恢复 —— reasoning 累加到 pending 后，写入 flusher（事实源）
+        if (rPending) {
+          deps.streamingFlusher?.onTextAccumulated(
+            payload.taskId,
+            rPending.draftResponse ?? '',
+            rPending.reasoning ?? '',
+          );
         }
+        // 改为 emit，由 StreamDispatcher fan-out 到所有 transport 订阅者
+        getEventBus().emit('stream.reasoning_delta', {
+          taskId: payload.taskId,
+          sessionId: rPending?.sessionId ?? rEntry?.sessionId ?? '',
+          text: payload.text,
+          correlationId: rEntry?.correlationId,
+        });
         break;
       }
       case 'llm_completed': {
@@ -154,11 +158,17 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         } else {
           pending = deps.sessionManager.findPendingByTaskId(payload.taskId);
         }
-        const socket = pending?.socket ?? deps.sessionManager.getSocketForTask(payload.taskId);
-        if (socket && !socket.destroyed) {
-          const evt = { type: 'tool_call', toolName: payload.toolName, input: payload.input, result: payload.result, isError: payload.isError, durationMs: payload.durationMs, taskId: payload.taskId, sessionId: pending?.sessionId };
-          socket.write(JSON.stringify(evt) + '\n');
-        }
+        // H1/H2: 不再直写 socket。改为 emit，由 StreamDispatcher 派发到 transport 订阅者。
+        getEventBus().emit('stream.tool_call', {
+          taskId: payload.taskId,
+          sessionId: pending?.sessionId ?? entry?.sessionId ?? '',
+          toolName: payload.toolName,
+          input: payload.input,
+          result: payload.result,
+          isError: payload.isError,
+          durationMs: payload.durationMs,
+          correlationId: entry?.correlationId,
+        });
         break;
       }
       case 'uncertainty': {

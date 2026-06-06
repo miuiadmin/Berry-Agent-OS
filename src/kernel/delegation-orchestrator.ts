@@ -319,26 +319,23 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 否则目标 Agent 的 reply 无人接收，导致 60s 超时
       this.setupModuleAgent(payload.to);
 
-      // 获取 pending socket 用于 streaming（通过 correlationId 精确查找）
+      // 获取 pending（仅用于从 correlationId 读 sessionId；不再用于 socket 直写）
       const pending = this.sessionManager.getPending(state!.correlationId);
 
       // 推送前端事件：对话开始/新一轮
-      if (pending?.socket && !(pending.socket as { destroyed?: boolean }).destroyed) {
-        const statusEvent = JSON.stringify({
-          type: 'dialogue_status',
-          dialogueId: payload.dialogueId,
-          status: state!.currentRound === 0 ? 'started' : 'round_complete',
-          from: payload.from,
-          to: payload.to,
-          round: state!.currentRound,
-          sessionId: pending.sessionId,
-        });
-        pending.socket.write(statusEvent + '\n');
-      }
+      // H1/H2: 改为 emit，由 StreamDispatcher 派发给 transport 订阅者
+      getEventBus().emit('dialogue.status', {
+        dialogueId: payload.dialogueId,
+        sessionId: pending?.sessionId ?? state!.sessionId,
+        status: state!.currentRound === 0 ? 'started' : 'round_complete',
+        from: payload.from,
+        to: payload.to,
+        round: state!.currentRound,
+      });
 
       try {
-        // sendMessage 会注册 ephemeral taskId、持久化、推 brain、路由到目标
-        const reply = await router.sendMessage(payload, pending?.socket);
+        // sendMessage：H1/H2 后不再接受 socket 参数；流式推送走 EventBus → StreamDispatcher
+        const reply = await router.sendMessage(payload);
         // 转发 reply 给 Conversation
         primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
       } catch (err) {
@@ -353,18 +350,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         };
         primaryIpc.send('dialogue.reply', primaryName, errorReply, payload.dialogueId);
 
-        // 推送前端：对话结束（错误）
-        if (pending?.socket && !(pending.socket as { destroyed?: boolean }).destroyed) {
-          pending.socket.write(JSON.stringify({
-            type: 'dialogue_status',
-            dialogueId: payload.dialogueId,
-            status: 'ended',
-            from: payload.from,
-            to: payload.to,
-            round: state!.currentRound,
-            sessionId: pending.sessionId,
-          }) + '\n');
-        }
+        // 推送前端：对话结束（错误）— 同样走 EventBus
+        getEventBus().emit('dialogue.status', {
+          dialogueId: payload.dialogueId,
+          sessionId: pending?.sessionId ?? state!.sessionId,
+          status: 'ended',
+          from: payload.from,
+          to: payload.to,
+          round: state!.currentRound,
+        });
       }
     });
 
@@ -1221,8 +1215,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       // §9.0 M15.3 + §12.0: 生产模式分级审核
       if (!this.takeoverController) {
-        // A 级简短回复：直接 auto-approve（不做漂移检测）
+        // A 级简短回复 / 无 intent_anchor：直接 auto-approve（不做漂移检测）
+        // 12.0 审计修复：auto-approve 也必须显式落库，避免 review_requests 表 99% 缺失。
+        // audit-before-approve 顺序：先写审计行，再发 verdict，确保审计行先于 verdict 落库。
+        // 失败处理：audit 失败不阻塞 verdict（fail-open）— recordAutoApprove 内部 try/catch
+        // 只 log.error 不会抛，所以这里不需要 try/catch 包裹。
         if (turn.level === 'A' || !pending.intentAnchor) {
+          this.auditRecorder.recordAutoApprove({
+            sessionId,
+            level: turn.level === 'A' ? 'A' : 'no_intent_anchor',
+            draft,
+            userMessage: pending.userMessage,
+            toolCalls: calls,
+            taskId: pending.taskId,
+          });
           primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
           this.dispatchModuleTask({
             sessionId,
