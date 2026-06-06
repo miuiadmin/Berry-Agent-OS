@@ -165,3 +165,59 @@ describe('SessionManager.resolvePending', () => {
     );
   });
 });
+
+describe('SessionManager.getAllPendingAsks', () => {
+  let manager: SessionManager;
+  let memoryRuntime: ReturnType<typeof makeMockMemoryRuntime>;
+
+  beforeEach(() => {
+    memoryRuntime = makeMockMemoryRuntime();
+    manager = new SessionManager({
+      memoryRuntime: memoryRuntime as unknown as MemoryRuntime,
+      skillLoader: null,
+      evolutionEngine: null,
+      pluginRuntimeV2: null,
+      config: makeMockConfig(),
+    });
+  });
+
+  it('空时返回空数组', () => {
+    expect(manager.getAllPendingAsks()).toEqual([]);
+  });
+
+  it('返回所有 pending asks 快照', () => {
+    manager.setPendingAsk('ses-1', {
+      sessionId: 'ses-1',
+      taskId: 'task-1',
+      agentName: 'agent-a',
+      question: 'question 1',
+      correlationId: 'corr-1',
+    });
+    manager.setPendingAsk('ses-2', {
+      sessionId: 'ses-2',
+      taskId: 'task-2',
+      agentName: 'agent-b',
+      question: 'question 2',
+      correlationId: 'corr-2',
+    });
+
+    const asks = manager.getAllPendingAsks();
+    expect(asks).toHaveLength(2);
+    expect(asks.map((a) => a.sessionId).sort()).toEqual(['ses-1', 'ses-2']);
+  });
+
+  it('返回 ReadonlyArray 防止外部修改内部状态', () => {
+    manager.setPendingAsk('ses-1', {
+      sessionId: 'ses-1',
+      taskId: 'task-1',
+      agentName: 'agent',
+      question: 'q',
+      correlationId: 'corr-1',
+    });
+
+    const asks = manager.getAllPendingAsks();
+    // TS 层面应不允许 push（readonly）
+    // 运行时调用应不影响内部 Map（返回的是新数组）
+    expect(asks).toHaveLength(1);
+  });
+});

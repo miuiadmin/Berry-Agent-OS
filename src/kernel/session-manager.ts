@@ -313,6 +313,14 @@ export class SessionManager {
     return this.pendingAsks.has(sessionId);
   }
 
+  /**
+   * 获取所有 pendingAsks 条目（WS 重连重放用）。
+   * 返回快照数组，避免调用方遍历期间 map 被修改的风险。
+   */
+  getAllPendingAsks(): ReadonlyArray<PendingAskState> {
+    return [...this.pendingAsks.values()];
+  }
+
   // --- Session Context (for Brain routing) ---
 
   getSessionContext(sessionId: string, maxTurns = 5): string | undefined {

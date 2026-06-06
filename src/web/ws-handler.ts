@@ -112,6 +112,23 @@ function replayPendingRequests(ws: WebSocket, deps: WebServerDependencies): void
       });
       logger.debug({ requestId: p.id }, 'WS 重连重放未决权限确认');
     }
+
+    // 3. 重放未决的 ask_user 请求（pendingAsks — 纯内存 Map，
+    // WS 断连期间发出的 ask_user 消息被静默丢弃，需要重连时回放给客户端）。
+    // 消息格式与 WsEventBridge 的 STREAM_EVENT_MAPPING 中
+    // conversation.ask_user → ask_user 一致，前端可复用同一处理逻辑。
+    const pendingAsks = deps.sessionManager.getAllPendingAsks();
+    for (const ask of pendingAsks) {
+      wsReply(ws, {
+        type: 'ask_user',
+        sessionId: ask.sessionId,
+        taskId: ask.taskId,
+        agent: ask.agentName,
+        question: ask.question,
+        correlationId: ask.correlationId,
+      });
+      logger.debug({ sessionId: ask.sessionId, correlationId: ask.correlationId }, 'WS 重连重放未决 ask_user');
+    }
   } catch (err) {
     logger.warn({ err }, 'WS 重连重放未决请求失败');
   }
