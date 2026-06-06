@@ -51,7 +51,7 @@ import { getEventBus } from './event-bus.js';
 import { withTrace, getCurrentTrace } from '../observability/trace-context.js';
 import { BrainDecisionRecorder } from './brain-decision-recorder.js';
 import type { IpcMessageType, IpcMessage } from './types.js';
-import type { SocketProgressEvent, SocketTextDeltaEvent } from '../contracts/socket-protocol.js';
+import type { SocketProgressEvent } from '../contracts/socket-protocol.js';
 import type { RouteDecision, RouteResultPayload, RouteRequestPayload } from '../contracts/routing.js';
 import type { PermissionJudgeResultPayload, AgentAskUserPayload, AgentUserReplyPayload } from '../contracts/routing.js';
 import type { DraftResponsePayload, FinalResponsePayload } from '../contracts/messaging.js';
@@ -970,10 +970,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             pending.draftResponse = textAccumulator;
             // 定期持久化到 SQLite，前端断连/刷新后可恢复
             this.streamingFlusher.onTextAccumulated(delegationId, textAccumulator, pending.reasoning);
-            if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-              const socketEvent: SocketTextDeltaEvent = { type: 'text_delta', text, taskId: delegationId, sessionId: pending.sessionId };
-              pending.socket.write(JSON.stringify(socketEvent) + '\n');
-            }
+            // H1 修复：业务路径不再直写 socket，改为 emit，由 WsEventBridge 桥接
+            getEventBus().emit('stream.text_delta', {
+              taskId: delegationId,
+              sessionId: pending.sessionId,
+              text,
+              correlationId,
+            });
             break;
           }
           case 'execution_completed': {
@@ -1040,6 +1043,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.streamingFlusher.remove(delegationId);
       this.delegationManager.fail(delegationId, message);
       this.sessionManager.deletePending(correlationId);
+      // P1-4: 通知前端 user 消息没有回复
+      getEventBus().emit('conversation.no_response', {
+        sessionId: pending.sessionId,
+        taskId: pending.taskId,
+        reason: `runtime_error: ${message}`,
+        correlationId,
+      });
       pending.resolve(`[${runtime.name}] 执行异常: ${message}`);
     }
   }
@@ -1348,12 +1358,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
 
           // 向前端发送 handoff 分隔事件（同一个气泡内）
-          if (pending.socket && !pending.socket.destroyed) {
-            try {
-              const handoffEvent = JSON.stringify({ type: 'agent_handoff', from: 'conversation', to: handoff.targetAgent, intent: handoff.intent, sessionId: pending.sessionId }) + '\n';
-              pending.socket.write(handoffEvent);
-            } catch { /* socket may be closed */ }
-          }
+          // P0-B 修复：业务路径不再直写 socket，改为 emit
+          getEventBus().emit('conversation.handoff', {
+            sessionId: pending.sessionId,
+            from: 'conversation',
+            to: handoff.targetAgent,
+            intent: handoff.intent,
+            correlationId,
+          });
 
           // 清除旧 taskId，handoff agent 会分配新的
           pending.taskId = undefined;
@@ -1591,20 +1603,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const entry = this.delegationManager.get(payload.taskId);
       if (entry) {
         this.delegationManager.markAskingUser(payload.taskId, question);
-        const pending = this.sessionManager.getPending(entry.correlationId);
-        if (pending && pending.socket && !pending.socket.destroyed) {
-          // 发送结构化的 ask_user 事件，前端可以渲染回复输入框
-          try {
-            const askEvent = JSON.stringify({
-              type: 'ask_user',
-              question,
-              options: payload.options,
-              sessionId: payload.sessionId,
-              taskId: payload.taskId,
-            }) + '\n';
-            pending.socket.write(askEvent);
-          } catch { /* socket closed */ }
-        }
+        // P0-B 修复：业务路径不再直写 socket，改为 emit
+        getEventBus().emit('conversation.ask_user', {
+          sessionId: payload.sessionId,
+          taskId: payload.taskId,
+          agent: msg.from,
+          question,
+          options: payload.options,
+          correlationId,
+        });
       }
     });
   }
@@ -1698,15 +1705,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (!pending?.streaming) return;
 
       if (event.kind === 'text' && event.data.kind === 'text') {
-        // 无条件积累文本（与 socket 状态无关，后端任务独立于前端连接）
+        // 无条件积累文本（业务与传输层解耦，daemon 后端任务独立于前端连接）
         pending.draftResponse = (pending.draftResponse ?? '') + event.data.text;
         // 定时持久化到 SQLite（断连/刷新恢复用）
         this.streamingFlusher.onTextAccumulated(taskId, pending.draftResponse, pending.reasoning);
-        // 有可用 socket 时才实时推送
-        if (pending.socket && !pending.socket.destroyed) {
-          const evt: SocketTextDeltaEvent = { type: 'text_delta', text: event.data.text, taskId, sessionId: pending.sessionId };
-          pending.socket.write(JSON.stringify(evt) + '\n');
-        }
+        // P0-B 修复：业务路径不再直写 socket，改为 emit
+        getEventBus().emit('stream.text_delta', {
+          taskId,
+          sessionId: pending.sessionId,
+          text: event.data.text,
+          correlationId: entry.correlationId,
+        });
       }
     });
 
@@ -1745,9 +1754,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // ═══ UTILITY ══════════════════════════════════════
 
   private reportProgress(pending: PendingRequest, status: SocketProgressEvent['status'], summary: string): void {
-    if (pending.streaming && pending.socket && !pending.socket.destroyed) {
-      const event: SocketProgressEvent = { type: 'progress', status, summary, taskId: pending.taskId, sessionId: pending.sessionId };
-      pending.socket.write(JSON.stringify(event) + '\n');
+    // P0-B 修复：业务路径不再直写 socket，改为 emit
+    if (pending.sessionId) {
+      getEventBus().emit('conversation.progress', {
+        sessionId: pending.sessionId,
+        taskId: pending.taskId,
+        status,
+        summary,
+      });
     }
 
     if (pending.taskId && pending.sessionId && this.agentProgress) {

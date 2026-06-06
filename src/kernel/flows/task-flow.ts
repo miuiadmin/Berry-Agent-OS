@@ -147,6 +147,14 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           kind: payload.isError ? 'tool_error' : 'tool_result',
           data: { toolName: payload.toolName },
         });
+        // P1-1: 流式契约补全 — tool_result 也通过 EventBus 推送给前端
+        getEventBus().emit('stream.tool_result', {
+          taskId: payload.taskId,
+          sessionId: entry.sessionId,
+          toolName: payload.toolName,
+          isError: payload.isError,
+          correlationId: entry.correlationId,
+        });
         break;
       }
       case 'tool_call': {
@@ -176,6 +184,13 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         const entry = deps.delegationManager.get(payload.taskId);
         if (!entry) return;
         deps.delegationManager.reportUncertainty(payload.taskId, payload.reason);
+        // P1-1: 流式契约补全 — uncertainty 也通过 EventBus 推送
+        getEventBus().emit('stream.uncertainty', {
+          taskId: payload.taskId,
+          sessionId: entry.sessionId,
+          reason: payload.reason,
+          correlationId: entry.correlationId,
+        });
         break;
       }
     }

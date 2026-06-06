@@ -58,17 +58,7 @@ export function createWsHandler(deps: WebServerDependencies) {
 
     logger.debug({ clientId }, 'WebSocket 连接');
 
-    // 重连恢复：按 clientId 找到该客户端所有正在流式输出的 pending request，重绑定 socket
-    const bridge = new WebSocketBridge(ws);
-    const rebindResults = deps.sessionManager.rebindSocket(clientId, bridge as unknown as Socket);
-    for (const item of rebindResults) {
-      if (item.accumulated) {
-        // 推送已积累的完整文本让客户端补上断连期间的内容
-        wsReply(ws, { type: 'reconnect_recovery', content: item.accumulated, taskId: item.taskId, sessionId: item.sessionId });
-      }
-    }
-
-    // Forward delegation events to this client
+    // P0-C 修复：删除 rebindSocket 调用 — 重连恢复由前端 sharedSessionRestore 走 HTTP 拉历史 + 续接 WS live tail 解决
     const delegationListener = deps.eventBus.on('delegation.user_needed', (payload) => {
       wsReply(ws, { type: 'delegation.needed', ...payload });
     });
@@ -102,7 +92,6 @@ export function createWsHandler(deps: WebServerDependencies) {
         clientId,
         code,
         reason: reason.toString() || '无',
-        wasStreaming: deps.sessionManager.getPendingForClient(clientId),
       }, 'WebSocket 断开');
       delegationListener();
       permissionListener();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { X, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -17,6 +17,10 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
   const [loaded, setLoaded] = useState(false);
   const t = useT();
 
+  /** 打开前记录焦点元素，关闭时恢复 */
+  const previousFocusRef = useState(() => null as HTMLElement | null)[0];
+  const prevFocusRef = useRef<HTMLElement | null>(null);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -26,11 +30,18 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
 
   useEffect(() => {
     if (!open) return;
+    // 保存当前焦点
+    prevFocusRef.current = document.activeElement as HTMLElement;
     document.addEventListener("keydown", handleKeyDown);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
+      // 关闭时恢复焦点
+      if (prevFocusRef.current) {
+        prevFocusRef.current.focus();
+        prevFocusRef.current = null;
+      }
     };
   }, [open, handleKeyDown]);
 
@@ -42,6 +53,9 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt || t("lightbox.image")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >

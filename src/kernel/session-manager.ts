@@ -47,10 +47,6 @@ export class SessionManager {
   private sessionModelOverrides = new Map<string, ModelTier>();
   private pendingAsks = new Map<string, PendingAskState>();
   private sessionLastActivity = new Map<string, number>();
-  /** taskId → socket mapping for late-arriving text_delta after pending is deleted */
-  private taskSocketMap = new Map<string, { socket: Socket; expiresAt: number }>();
-  /** clientId → msgId 集合的索引，用于 rebindSocket 按 WS 客户端查找所有 pending request */
-  private clientPendingIndex = new Map<string, Set<string>>();
   private gcTimer: ReturnType<typeof setInterval> | null = null;
 
   private memoryRuntime: MemoryRuntime;
@@ -76,16 +72,6 @@ export class SessionManager {
   createPending(msgId: string, entry: PendingRequest): void {
     this.pendingRequests.set(msgId, entry);
     this.touchSession(entry.sessionId);
-    // 维护 clientId → msgId 索引，用于 rebindSocket 按客户端查找
-    if (entry.clientId) {
-      const set = this.clientPendingIndex.get(entry.clientId);
-      if (set) { set.add(msgId); }
-      else { this.clientPendingIndex.set(entry.clientId, new Set([msgId])); }
-    }
-    // Register taskId → socket for late-arriving text_delta after pending is deleted
-    if (entry.taskId && entry.socket) {
-      this.taskSocketMap.set(entry.taskId, { socket: entry.socket, expiresAt: Date.now() + 30_000 });
-    }
     const timeoutMs = this.config.requestTimeoutMs * 4;
     const timer = setTimeout(() => {
       const pending = this.pendingRequests.get(msgId);
@@ -125,59 +111,9 @@ export class SessionManager {
   }
 
   deletePending(msgId: string): void {
-    const pending = this.pendingRequests.get(msgId);
-    if (pending) {
-      // 清理 clientId 索引
-      if (pending.clientId) {
-        const set = this.clientPendingIndex.get(pending.clientId);
-        if (set) {
-          set.delete(msgId);
-          if (set.size === 0) this.clientPendingIndex.delete(pending.clientId);
-        }
-      }
-      if (pending.taskId) {
-        this.releaseTaskSocket(pending.taskId);
-      }
-    }
     const timer = this.requestTimers.get(msgId);
     if (timer) { clearTimeout(timer); this.requestTimers.delete(msgId); }
     this.pendingRequests.delete(msgId);
-  }
-
-  /**
-   * Get socket for a taskId — used as fallback when pending is already deleted
-   * by final.response but text_delta IPC hasn't been processed yet.
-   */
-  getSocketForTask(taskId: string): Socket | undefined {
-    const entry = this.taskSocketMap.get(taskId);
-    if (!entry) return undefined;
-    if (Date.now() > entry.expiresAt) {
-      this.taskSocketMap.delete(taskId);
-      return undefined;
-    }
-    return entry.socket;
-  }
-
-  /**
-   * 注册临时 taskId → socket 映射。
-   * 用于 dialogue 模式：Code Agent 执行时推送的 text_delta 需要通过 ephemeral taskId 找到用户 socket。
-   * @param taskId 临时任务 ID（不持久化到 agent_tasks 表）
-   * @param socket 用户的 WebSocket 连接
-   * @param ttlMs 映射存活时间（默认 90s，覆盖一轮 dialogue reply 超时）
-   */
-  registerTaskSocket(taskId: string, socket: Socket, ttlMs = 90_000): void {
-    this.taskSocketMap.set(taskId, { socket, expiresAt: Date.now() + ttlMs });
-  }
-
-  /**
-   * Delayed cleanup: keep socket available for 2s after final.response
-   * to catch any late-arriving text_delta messages.
-   */
-  private releaseTaskSocket(taskId: string): void {
-    if (!taskId) return;
-    setTimeout(() => {
-      this.taskSocketMap.delete(taskId);
-    }, 2000).unref();
   }
 
   entries(): IterableIterator<[string, PendingRequest]> {
@@ -190,41 +126,6 @@ export class SessionManager {
 
   findAnyPendingWithTaskId(): PendingRequest | undefined {
     return [...this.pendingRequests.values()].find((p) => p.taskId);
-  }
-
-  /**
-   * 按 WS 客户端 ID 重绑定 socket：当客户端 WebSocket 重连时，
-   * 将新 socket 关联到该客户端所有正在流式输出的 pending request。
-   * 返回每个活跃任务的已积累流式文本，用于客户端补显示断连期间的输出。
-   */
-  rebindSocket(clientId: string, newSocket: Socket): Array<{ accumulated: string; taskId: string; sessionId: string }> {
-    const results: Array<{ accumulated: string; taskId: string; sessionId: string }> = [];
-    const msgIds = this.clientPendingIndex.get(clientId);
-    if (!msgIds) return results;
-    for (const msgId of msgIds) {
-      const pending = this.pendingRequests.get(msgId);
-      if (pending && pending.streaming) {
-        pending.socket = newSocket;
-        if (pending.taskId) {
-          this.taskSocketMap.set(pending.taskId, { socket: newSocket, expiresAt: Date.now() + 300_000 });
-        }
-        results.push({ accumulated: pending.draftResponse ?? '', taskId: pending.taskId ?? '', sessionId: pending.sessionId });
-      }
-    }
-    return results;
-  }
-
-  /**
-   * 检查指定客户端是否有正在流式输出的 pending request（用于日志和状态查询）。
-   */
-  getPendingForClient(clientId: string): boolean {
-    const set = this.clientPendingIndex.get(clientId);
-    if (!set || set.size === 0) return false;
-    for (const msgId of set) {
-      const pending = this.pendingRequests.get(msgId);
-      if (pending?.streaming) return true;
-    }
-    return false;
   }
 
   getModelOverride(sessionId: string): ModelTier | undefined {

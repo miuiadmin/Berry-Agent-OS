@@ -194,7 +194,15 @@ export type EventMap = {
   'stream.text_delta': { taskId: string; sessionId: string; text: string; correlationId?: string };
   'stream.reasoning_delta': { taskId: string; sessionId: string; text: string; correlationId?: string };
   'stream.tool_call': { taskId: string; sessionId: string; toolName: string; input: unknown; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
+  'stream.tool_result': { taskId: string; sessionId: string; toolName: string; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
+  'stream.uncertainty': { taskId: string; sessionId: string; reason: string; correlationId?: string };
   'dialogue.status': { dialogueId: string; sessionId: string; status: 'started' | 'round_complete' | 'ended'; from: string; to: string; round: number };
+
+  // delegation-orchestrator 内部 emit 的事件（多端共享流式会话状态）
+  'conversation.handoff': { sessionId: string; from: string; to: string; intent?: string; correlationId?: string };
+  'conversation.ask_user': { sessionId: string; taskId?: string; agent: string; question: string; options?: unknown[]; correlationId?: string };
+  'conversation.progress': { sessionId: string; taskId?: string; status: string; summary: string };
+  'conversation.no_response': { sessionId: string; reason: string; taskId?: string; clientMsgId?: string; correlationId?: string };
 };
 
 export type EventMessageMap = {
