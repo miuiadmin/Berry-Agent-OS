@@ -443,17 +443,29 @@ export const useChatStore = create<ChatState>()(
     {
       name: "chat-storage",
       storage: createJSONStorage(() => {
-        try { return localStorage; } catch { return sessionStorage; }
+        try {
+          const storage = localStorage;
+          // 包装 setItem 捕获 QuotaExceededError，避免长对话导致控制台大量报错
+          return {
+            getItem: storage.getItem.bind(storage),
+            setItem: (key: string, value: string) => {
+              try { storage.setItem(key, value); } catch { /* 配额溢出静默丢弃，内存状态不受影响 */ }
+            },
+            removeItem: storage.removeItem.bind(storage),
+          };
+        } catch { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; }
       }),
       partialize: (state) => ({
         sessionId: state.sessionId,
-        // 持久化时保留所有 user/assistant 消息（不过滤空 content 的 assistant 占位符），
-        // 但将流式状态标记为 complete 以避免还原后误判为仍在流式中
-        messages: state.messages.map((m) =>
-          m.status === "streaming"
-            ? { ...m, status: "complete" as const, progress: undefined }
-            : m
-        ),
+        // 持久化时截断为最近 50 条消息，避免 localStorage 配额溢出
+        // 将流式状态标记为 complete 以避免还原后误判为仍在流式中
+        messages: state.messages.slice(-50).map((m) => ({
+          ...m,
+          status: m.status === "streaming" ? "complete" as const : m.status,
+          progress: m.status === "streaming" ? undefined : m.progress,
+          // 截断工具调用结果，减少序列化体积
+          toolCalls: m.toolCalls?.slice(-5).map(tc => ({ ...tc, result: tc.result?.slice(0, 500) })),
+        })),
         // 持久化 pendingStreamMessageId，让刷新后仍能识别流式占位（业务层会在 status===connected 时调 sharedSessionRestore 重新校验）
         pendingStreamMessageId: state.pendingStreamMessageId,
       }),

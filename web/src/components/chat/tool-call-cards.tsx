@@ -98,8 +98,8 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
           <div className="ml-3.5 mt-0.5 border-l border-border/50 pl-2 divide-y divide-border/30">
-            {calls.map((call, i) => (
-              <ToolCallDetail key={i} call={call} />
+            {calls.map((call) => (
+              <ToolCallDetail key={`${call.toolName}-${call.ts}`} call={call} />
             ))}
           </div>
         </div>

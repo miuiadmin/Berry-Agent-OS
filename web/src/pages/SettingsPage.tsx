@@ -110,7 +110,7 @@ function SettingsContent() {
       }
     }
     return errs;
-  }, []);
+  }, [t]);
 
   const saveConfig = useMutation({
     mutationFn: async (updates: Record<string, unknown>) => {

@@ -311,8 +311,8 @@ function AgentDetailView({
             <EmptyState icon={Clock} title={t("agents.noEvents")} description={t("agents.listening")} />
           ) : (
             <div className="space-y-1.5">
-              {events.map((ev, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs animate-slide-left">
+              {events.map((ev) => (
+                <div key={ev.ts} className="flex items-center gap-2 text-xs animate-slide-left">
                   <Clock className="size-3 text-muted-foreground" />
                   <span className="text-muted-foreground">
                     {formatTime(new Date(ev.ts))}

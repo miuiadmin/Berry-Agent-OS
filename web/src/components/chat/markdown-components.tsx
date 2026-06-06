@@ -67,10 +67,12 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
       );
     },
     a({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
-      const isExternal = href?.startsWith("http");
+      // 安全过滤：仅允许安全协议，防止 LLM 幻觉输出注入 javascript:/data: URI
+      const safeHref = href && /^(https?:|mailto:|\/|#)/i.test(href) ? href : undefined;
+      const isExternal = safeHref?.startsWith("http");
       return (
         <a
-          href={href}
+          href={safeHref}
           target={isExternal ? "_blank" : undefined}
           rel={isExternal ? "noopener noreferrer" : undefined}
           className="inline-flex items-center gap-0.5 text-brand underline underline-offset-2 hover:text-brand/80 transition-colors"

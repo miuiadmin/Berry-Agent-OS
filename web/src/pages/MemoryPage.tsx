@@ -187,7 +187,7 @@ export default function MemoryPage() {
             <div className="flex gap-2">
               <Button
                 size="sm"
-                disabled={!newKey.trim() || !newValue.trim()}
+                disabled={!newKey.trim() || !newValue.trim() || createMut.isPending}
                 onClick={() => createMut.mutate({ key: newKey, value: newValue })}
               >
                 {t("common.create")}
@@ -266,6 +266,7 @@ export default function MemoryPage() {
                         className="size-11 md:size-8"
                         title={t("memory.verify")}
                         aria-label={t("memory.verify")}
+                        disabled={verifyMut.isPending}
                         onClick={() => verifyMut.mutate(entry.id)}
                       >
                         <RefreshCw className="size-3.5" />
@@ -276,6 +277,7 @@ export default function MemoryPage() {
                         className="size-11 md:size-8"
                         title={t("memory.promote")}
                         aria-label={t("memory.promote")}
+                        disabled={promoteMut.isPending}
                         onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
                       >
                         <ArrowUpRight className="size-3.5" />

@@ -1,5 +1,5 @@
 
-import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChatStore, type ChatMessage, type ChatAttachment } from "@/lib/stores/chat-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -156,7 +156,8 @@ function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
   );
 }
 
-function MessageBubble({
+/** 消息气泡组件 — 用 memo 包裹，避免流式传输时已完成消息不必要重渲染 */
+const MessageBubble = memo(function MessageBubble({
   message,
   onRetry,
   onEdit,
@@ -284,7 +285,7 @@ function MessageBubble({
       )}
     </div>
   );
-}
+});
 
 export function ChatMessageList({
   onRetry,
@@ -295,6 +296,8 @@ export function ChatMessageList({
 }) {
   const messages = useChatStore((s) => s.messages);
   const removeMessage = useChatStore((s) => s.removeMessage);
+  /** 稳定引用，避免每次渲染创建新函数导致 memo 失效 */
+  const stableRemoveMessage = useCallback((id: string) => removeMessage(id), [removeMessage]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = useT();
   const isNearBottom = useRef(true);
@@ -350,7 +353,7 @@ export function ChatMessageList({
                     message={msg}
                     onRetry={onRetry}
                     onEdit={onEdit}
-                    onDelete={removeMessage}
+                    onDelete={stableRemoveMessage}
                   />
                 </div>
               );

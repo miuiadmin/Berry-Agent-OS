@@ -78,7 +78,7 @@ export function DashboardLayout() {
           </div>
         </div>
         {/* 桌面端右上角：连接状态 + debug + 用户菜单 */}
-        <div className="fixed top-4 right-4 z-40 hidden md:flex items-center gap-2">
+        <div className="fixed top-[calc(1rem+env(safe-area-inset-top,0px))] right-[calc(1rem+env(safe-area-inset-right,0px))] z-40 hidden md:flex items-center gap-2">
           <ConnectionStatus />
           <DebugCaptureButton />
           <UserMenu />

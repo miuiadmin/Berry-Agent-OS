@@ -1,7 +1,19 @@
 import { createHighlighter, type Highlighter } from "shiki";
 
 let highlighterPromise: Promise<Highlighter> | null = null;
+
+/** LRU 缓存限制，避免长会话中无限增长 */
+const MAX_CACHE = 200;
 const cache = new Map<string, string>();
+
+/** 设置缓存条目，超出上限时淘汰最早的条目 */
+function setCache(key: string, value: string): void {
+  if (cache.size >= MAX_CACHE) {
+    const first = cache.keys().next().value;
+    if (first !== undefined) cache.delete(first);
+  }
+  cache.set(key, value);
+}
 
 const PRELOADED_LANGS = [
   "typescript",
@@ -45,7 +57,7 @@ export async function highlight(
     const effectiveLang = supported.includes(lang as never) ? lang : "text";
 
     const html = h.codeToHtml(code, { lang: effectiveLang, theme: themeName });
-    cache.set(key, html);
+    setCache(key, html);
     return html;
   } catch {
     return "";

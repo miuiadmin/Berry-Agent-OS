@@ -377,6 +377,7 @@ export default function SchedulerPage() {
                             className="size-11 md:size-8"
                             title={t("common.pause")}
                             aria-label={t("common.pause")}
+                            disabled={pauseMut.isPending}
                             onClick={() => pauseMut.mutate(job.id)}
                           >
                             <Pause className="size-3.5" />
@@ -389,6 +390,7 @@ export default function SchedulerPage() {
                             className="size-11 md:size-8"
                             title={t("common.resume")}
                             aria-label={t("common.resume")}
+                            disabled={resumeMut.isPending}
                             onClick={() => resumeMut.mutate(job.id)}
                           >
                             <Play className="size-3.5" />
@@ -400,6 +402,7 @@ export default function SchedulerPage() {
                           className="size-11 md:size-8"
                           title={t("scheduler.triggerNow")}
                           aria-label={t("scheduler.triggerNow")}
+                          disabled={triggerMut.isPending}
                           onClick={() => triggerMut.mutate(job.id)}
                         >
                           <RotateCw className="size-3.5" />

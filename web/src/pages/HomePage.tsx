@@ -272,9 +272,9 @@ export default function HomePage() {
             <p className="text-xs text-muted-foreground">
               {t("home.today")} (${(usageData?.today.costUsd ?? 0).toFixed(3)})
             </p>
-            {usageData && usageData.daily.length > 1 && (
+            {usageData && usageData?.daily?.length > 1 && (
               <div className="mt-2">
-                <Sparkline values={usageData.daily.map((d) => d.totalTokens)} color="var(--chart-1)" width={60} height={20} />
+                <Sparkline values={usageData.daily?.map((d) => d.totalTokens) ?? []} color="var(--chart-1)" width={60} height={20} />
               </div>
             )}
           </CardContent>
@@ -330,7 +330,7 @@ export default function HomePage() {
                   const Icon = getEventIcon(ev.event);
                   const colorClass = getEventColor(ev.event);
                   return (
-                    <div key={`${ev.ts}-${i}`} className={cn("flex items-center gap-2 text-xs min-w-0 animate-slide-left")}>
+                    <div key={ev.ts} className={cn("flex items-center gap-2 text-xs min-w-0 animate-slide-left")}>
                       <Icon className={`size-3.5 shrink-0 ${colorClass}`} />
                       <span className="text-muted-foreground shrink-0">
                         {formatTime(new Date(ev.ts), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
