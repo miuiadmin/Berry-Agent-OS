@@ -248,6 +248,12 @@ export class CoreService {
     this.messageRouter.setup();
     this.messageRouter.pluginRuntimeV2 = this.pluginRuntimeV2;
 
+    // 启动 session 垃圾回收（5 分钟间隔，30 分钟无活动清理缓存与 pendingAsks）
+    this.sessionManager.startGc();
+
+    // 启动 session 缓存 GC（5 分钟间隔，清理 30 分钟不活跃的 session 数据）
+    this.sessionManager.startGc();
+
     // 12.0: 初始化漂移检测器
     if (this.config.drift?.enabled !== false) {
       const { DriftDetector } = await import('./drift-detector.js');
@@ -933,6 +939,9 @@ export class CoreService {
       this.takeoverController.dispose();
       this.takeoverController = null;
     }
+    // P0: 先停止 GC + 刷写流式内容，再关 taskManager（flusher 依赖它）
+    this.sessionManager?.stopGc();
+    this.messageRouter?.dispose();
     if (this.taskManager) {
       this.taskManager.stopSweep();
       this.taskManager.dispose();
@@ -982,6 +991,9 @@ export class CoreService {
     if (this.takeoverController) {
       this.takeoverController.dispose();
     }
+    // P0: 先停止 GC + 刷写流式内容，再关 taskManager（flusher 依赖它）
+    this.sessionManager?.stopGc();
+    this.messageRouter?.dispose();
     if (this.taskManager) {
       this.taskManager.dispose();
     }

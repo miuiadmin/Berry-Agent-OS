@@ -199,6 +199,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.suggestionQueueRef = queue;
   }
 
+  /**
+   * 关闭清理：同步刷写未持久化的流式内容到 SQLite，防止进程退出丢失数据。
+   * 必须在 taskManager.dispose() 之前调用（flusher 依赖 taskManager.flushStreamingContent）。
+   */
+  dispose(): void {
+    this.streamingFlusher.dispose();
+    this.pendingReviewOrigins.clear();
+  }
+
   private get proxyDeps(): ProxyHandlersDeps {
     return {
       auditRecorder: this.auditRecorder,
