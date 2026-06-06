@@ -240,22 +240,20 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
     }
   });
 
-  ipc.onMessage('agent.shutdown', () => {
+  // W1 修复：补齐 SIGINT 处理
+  const agentCleanup = () => {
     clearInterval(heartbeatInterval);
     ipc.destroy();
     closeDb();
     process.exit(0);
-  });
+  };
+
+  ipc.onMessage('agent.shutdown', agentCleanup);
+  process.on('SIGTERM', agentCleanup);
+  process.on('SIGINT', agentCleanup);
 
   // Register AFTER all message handlers are set up to avoid race condition
   ipc.send('agent.register', 'core', { name, pid: process.pid });
-
-  process.on('SIGTERM', () => {
-    clearInterval(heartbeatInterval);
-    ipc.destroy();
-    closeDb();
-    process.exit(0);
-  });
 }
 
 export { getDb };

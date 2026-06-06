@@ -1,6 +1,6 @@
 import { IpcChildChannel } from '../kernel/ipc.js';
 import { IpcJournal } from '../kernel/ipc-journal.js';
-import { initDb, getDb } from '../memory/index.js';
+import { initDb, getDb, closeDb } from '../memory/index.js';
 import { createLlmClient } from '../llm/index.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
@@ -58,11 +58,14 @@ export function startResidentAgent(setup: (ctx: ResidentAgentContext) => void): 
   const cleanup = () => {
     clearInterval(heartbeatInterval);
     ipc.destroy();
+    closeDb();
     process.exit(0);
   };
 
   ipc.onMessage('agent.shutdown', cleanup);
+  // W1 修复：补齐 SIGINT 处理（开发模式 Ctrl+C 优雅退出）
   process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
 
   process.on('uncaughtException', (err) => {
     process.stderr.write(`[${name}] uncaughtException: ${err?.message ?? err}\n`);

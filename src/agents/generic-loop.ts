@@ -138,21 +138,18 @@ export function startGenericAgent(config: GenericAgentConfig): void {
     }
   });
 
-  ipc.onMessage('agent.shutdown', () => {
+  // W1 修复：提取公共清理函数，SIGTERM/SIGINT/agent.shutdown 共用
+  const agentCleanup = () => {
     clearInterval(heartbeatInterval);
     ipc.destroy();
     closeDb();
     process.exit(0);
-  });
+  };
 
+  ipc.onMessage('agent.shutdown', agentCleanup);
   ipc.send('agent.register', 'core', { name, pid: process.pid });
-
-  process.on('SIGTERM', () => {
-    clearInterval(heartbeatInterval);
-    ipc.destroy();
-    closeDb();
-    process.exit(0);
-  });
+  process.on('SIGTERM', agentCleanup);
+  process.on('SIGINT', agentCleanup);
 }
 
 async function runAgentLoop(

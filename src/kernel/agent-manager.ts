@@ -66,13 +66,15 @@ export class AgentManager {
     const agent = this.agents.get(name);
     if (!agent) return;
     logger.info({ agent: name }, `正在停止智能体: ${name}`);
+    // W2 修复：先移除 forkAgent/startAgent 注册的 exit listener，防止累积泄漏
+    agent.child.removeAllListeners('exit');
     agent.ipc.send('agent.shutdown', name, {});
     await new Promise<void>(resolve => {
       const timer = setTimeout(() => {
         agent.child.kill('SIGKILL');
         resolve();
       }, 5000);
-      agent.child.on('exit', () => {
+      agent.child.once('exit', () => {
         clearTimeout(timer);
         resolve();
       });
@@ -215,6 +217,9 @@ export class AgentManager {
     metrics.counter('agent_restarts_total').inc({ agent: name });
     const existing = this.agents.get(name);
     if (existing) {
+      // W3 修复：移除旧进程 exit listener，防止旧进程退出时触发 recordCrash
+      // 导致误判为新崩溃，影响熔断器计数
+      existing.child.removeAllListeners('exit');
       existing.ipc.destroy();
       existing.child.kill('SIGTERM');
     }

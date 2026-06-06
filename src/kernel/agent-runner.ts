@@ -25,7 +25,11 @@ export function forkAgent(name: AgentName, scriptPath: string, env?: Record<stri
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     execArgv,
     env: { ...process.env, AGENT_NAME: name, ...env },
-  });
+    // W5 修复：为 agent 进程设置资源上限，防止有 bug 的 agent 占用过多内存
+    // 参考 isolated-runtime.ts 的 maxOldGenerationSizeMb: 128 模式，agent 分配 256MB
+    // TypeScript ForkOptions 类型未声明此字段（Node.js 运行时支持），需要类型断言
+    ...({ resourceLimits: { maxOldGenerationSizeMb: 256 } } as Record<string, unknown>),
+  } as Parameters<typeof fork>[2]);
 
   const ipc = new IpcChannel(child, 'core', { journal });
 
