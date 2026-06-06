@@ -189,7 +189,7 @@ export type EventMap = {
   'permission.user_confirm_needed': { requestId: string; sessionId: string; agentName: string; toolName: string; toolInput: string; dangerLevel: string; brainReason: string };
   'delegation.user_needed': { delegationId: string; sessionId: string; requestedBy: string; title: string; description: string; urgency: string; options: string[] };
   // Stream / dialogue transport 事件（H2 kernel EventBus 化）
-  // kernel 业务层 emit 出去，由 StreamDispatcher fan-out 给各 transport 订阅者（WS / CLI / 重连补发等）
+  // kernel 业务层 emit 出去，由 WsEventBridge（src/web/）订阅 EventBus 并转发到 WS 客户端
   // 不再让 kernel 业务路径直接持 user-side ws.Socket
   'stream.text_delta': { taskId: string; sessionId: string; text: string; correlationId?: string };
   'stream.reasoning_delta': { taskId: string; sessionId: string; text: string; correlationId?: string };

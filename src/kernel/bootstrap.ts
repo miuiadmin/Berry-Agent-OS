@@ -11,7 +11,6 @@ import { AgentLifecycle } from './agent-lifecycle.js';
 import { AgentManager } from './agent-manager.js';
 import { AgentRegistry } from './agent-registry.js';
 import type { EventBus } from './event-bus.js';
-import { initStreamDispatcher } from './stream-dispatcher.js';
 import { OrphanReconciler } from './orphan-reconciler.js';
 import type { AppConfig } from '../config/schema.js';
 import { createCoreModuleRegistry, registerAgentModules, type ModuleRegistry } from './module-system.js';
@@ -83,9 +82,8 @@ export function initInfrastructure(
   moduleRegistry.markStatus(db, 'db', 'running');
   moduleRegistry.markStatus(db, 'config', 'running');
   moduleRegistry.markStatus(db, 'event-bus', 'running');
-  // H1/H2: 初始化 StreamDispatcher（订阅 EventBus 的 4 个 stream/dialogue 事件并 fan-out 给 transport 订阅者）
-  // 必须在 EventBus 就绪后、其他业务模块 emit 事件前调用
-  initStreamDispatcher();
+  // 注意：stream.* / dialogue.status / conversation.* 事件由 src/web/ws-event-bridge.ts
+  // 直接订阅 EventBus 并转发到 WS 客户端（kernel 不再持有 ws.Socket 引用）。
   // R4-P0-4：启动 orphan user row reconciler，定期扫"user 后 60s 内无 assistant"的孤儿对
   // 兜底写入 [系统] 提示行，让用户刷新后至少能看到 assistant 占位说明
   // R6 重构：原 R4-P0-4 启动时用 setInterval 60s 持续扫（"补丁式"扫，

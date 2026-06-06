@@ -139,7 +139,7 @@ export class DialogueRouter {
    * 返回一个 Promise，resolve 时收到 dialogue.reply。
    *
    * H1/H2: 不再接受 socket 参数。流式推送由 kernel 业务路径 emit 到 EventBus，
-   * StreamDispatcher 会按 ephemeralTaskId 派发给已订阅的 transport（WS / CLI 等）。
+   * 由 WsEventBridge（src/web/）订阅 EventBus 并转发到 WS 客户端。
    */
   async sendMessage(msg: DialogueMessagePayload): Promise<DialogueMessagePayload> {
     const state = this.dialogues.get(msg.dialogueId);
@@ -172,7 +172,7 @@ export class DialogueRouter {
     // 生成 ephemeral taskId 用于 streaming
     const ephemeralTaskId = genId('dtask');
     state.ephemeralTaskId = ephemeralTaskId;
-    // H1/H2: 不再注册 taskSocket 映射。transport 订阅者通过 StreamDispatcher.subscribe(ephemeralTaskId, ...) 接入。
+    // H1/H2: 不再注册 taskSocket 映射。流式推送由 WsEventBridge 订阅 EventBus 转发。
 
     // 注入 context（ephemeralTaskId + sessionId 供 Code Agent 用）
     msg.context = {

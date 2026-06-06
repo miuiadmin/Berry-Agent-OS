@@ -332,7 +332,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(state!.correlationId);
 
       // 推送前端事件：对话开始/新一轮
-      // H1/H2: 改为 emit，由 StreamDispatcher 派发给 transport 订阅者
+      // H1/H2: 改为 emit，由 WsEventBridge 订阅 EventBus 并转发到 WS 客户端
       getEventBus().emit('dialogue.status', {
         dialogueId: payload.dialogueId,
         sessionId: pending?.sessionId ?? state!.sessionId,
@@ -343,7 +343,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       });
 
       try {
-        // sendMessage：H1/H2 后不再接受 socket 参数；流式推送走 EventBus → StreamDispatcher
+        // sendMessage：H1/H2 后不再接受 socket 参数；流式推送走 EventBus → WsEventBridge
         const reply = await router.sendMessage(payload);
         // 转发 reply 给 Conversation
         primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
