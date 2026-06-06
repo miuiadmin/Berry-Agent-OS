@@ -203,6 +203,8 @@ export type EventMap = {
   'conversation.ask_user': { sessionId: string; taskId?: string; agent: string; question: string; options?: unknown[]; correlationId?: string };
   'conversation.progress': { sessionId: string; taskId?: string; status: string; summary: string };
   'conversation.no_response': { sessionId: string; reason: string; taskId?: string; clientMsgId?: string; correlationId?: string };
+  /** P0-3: 对话被中断 — 通过 EventBus 投递，WsEventBridge 转发到前端 */
+  'conversation.interrupted': { sessionId: string; taskId: string | null; reason: string };
 };
 
 export type EventMessageMap = {

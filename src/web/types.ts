@@ -1,5 +1,4 @@
 import type { Socket } from 'node:net';
-import type { WebSocket } from 'ws';
 import type { TaskManager, SessionManager, AgentManager, AgentLifecycle, PermissionCoordinator } from '../contracts/kernel-services.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import type { AppConfig } from '../contracts/config.js';
@@ -20,7 +19,8 @@ export interface WebServerDependencies {
   configService: IConfigService;
   permissionCoordinator: PermissionCoordinator;
   handleMessage: MessageHandler;
-  handleInterrupt: (sessionId: string, reason: string | undefined, ws: WebSocket) => void;
+  /** P0-3 修复：移除 ws 参数，中断通知通过 EventBus → WsEventBridge 投递 */
+  handleInterrupt: (sessionId: string, reason: string | undefined) => void;
   resolvePermissionConfirm?: (requestId: string, approved: boolean, reason?: string) => boolean;
   startTimeMs: number;
   secret: string;

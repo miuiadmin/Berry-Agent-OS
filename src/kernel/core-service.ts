@@ -507,7 +507,7 @@ export class CoreService {
     if (this.config.web.enabled) {
       const msgCtx = this.buildServiceContainer();
       const db = getDb();
-      const notificationService = new NotificationService(db);
+      const notificationService = new NotificationService(db, getEventBus());
       const memoryLayerService = new MemoryLayerService(db);
       const workspaceContextService = new WorkspaceContextService(db);
       const pluginScopeService = new PluginScopeService(db);
@@ -531,9 +531,15 @@ export class CoreService {
           configService: this.configService!,
           permissionCoordinator: this.permissionCoordinator!,
           handleMessage: (request, socket) => handleMessage(request, socket, msgCtx),
-          handleInterrupt: (sessionId, reason, ws) => {
+          // P0-3 修复：handleInterrupt 通过 EventBus 投递，不再直写 ws
+          // 符合设计原则'kernel 业务路径不持 user-side ws.Socket'
+          handleInterrupt: (sessionId, reason) => {
             const result = this.messageRouter!.interruptSession(sessionId, reason);
-            ws.send(JSON.stringify({ type: 'interrupted', sessionId, taskId: result.taskId ?? null }));
+            getEventBus().emit('conversation.interrupted', {
+              sessionId,
+              taskId: result.taskId ?? null,
+              reason: reason ?? 'user_interrupt',
+            });
           },
           resolvePermissionConfirm: (requestId, approved, reason) => {
             return this.messageRouter!.resolveUserPermissionConfirm(requestId, approved, reason);

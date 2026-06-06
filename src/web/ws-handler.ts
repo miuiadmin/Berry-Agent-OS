@@ -96,6 +96,26 @@ export function createWsHandler(deps: WebServerDependencies) {
       delegationListener();
       permissionListener();
       clearInterval(pingInterval);
+
+      // P0-2 修复：清理该 clientId 关联的 pending request 的 socket 引用
+      // 对话继续运行不中断（保证稳定性），仅清除死 socket 引用避免 resolve 闭包写入已断连连接
+      let cleanedCount = 0;
+      for (const [msgId, pending] of deps.sessionManager.entries()) {
+        if (pending.clientId === clientId) {
+          // 清除 socket 引用 — WebSocketBridge.write() 已有安全检查，但显式清除更明确
+          pending.socket = undefined;
+          cleanedCount++;
+          logger.debug({
+            clientId,
+            msgId,
+            sessionId: pending.sessionId,
+            hasTaskId: !!pending.taskId,
+          }, 'WS 断连：清理 pending request socket 引用，对话继续运行');
+        }
+      }
+      if (cleanedCount > 0) {
+        logger.info({ clientId, cleanedCount }, 'WS 断连：已清理关联的 pending request，对话继续运行等待重连恢复');
+      }
     });
   };
 }
@@ -164,7 +184,8 @@ function handleWsMessage(
       const interruptSessionId = requireString(msg, 'sessionId');
       if (!interruptSessionId) { wsError(ws, '缺少 sessionId'); return; }
       const reason = typeof msg.reason === 'string' ? msg.reason : undefined;
-      deps.handleInterrupt(interruptSessionId, reason, ws);
+      // P0-3 修复：handleInterrupt 不再需要 ws 参数，中断通知通过 EventBus 投递
+      deps.handleInterrupt(interruptSessionId, reason);
       break;
     }
     case 'delegation.respond': {

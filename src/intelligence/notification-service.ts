@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
+import type { EventBus } from '../contracts/infrastructure.js';
 import type {
   INotificationService,
   NotificationRow,
@@ -29,10 +30,15 @@ const TYPE_TO_CATEGORY: Record<string, PreferenceCategory> = {
   delegation_completed: 'assignments',
 };
 
+/** 通知服务 — 管理通知 CRUD、偏好设置和订阅关系 */
 export class NotificationService implements INotificationService {
   private stmts: ReturnType<typeof this.prepareStatements>;
 
-  constructor(private db: Database.Database) {
+  /**
+   * @param db SQLite 数据库实例
+   * @param eventBus 可选事件总线，传入后 send() 会发射 notification.created 事件
+   */
+  constructor(private db: Database.Database, private eventBus?: EventBus) {
     this.stmts = this.prepareStatements();
   }
 
@@ -110,6 +116,18 @@ export class NotificationService implements INotificationService {
     const now = Date.now();
     const priority: NotificationPriority = input.priority ?? 'normal';
     this.stmts.insert.run(id, input.workspaceId, input.targetType, input.targetId, input.type, input.title, input.body ?? null, input.link ?? null, priority, now);
+
+    // P0-1 修复：INSERT 成功后发射 notification.created 事件
+    // WsEventBridge 订阅此事件并推送到前端，实现通知实时推送
+    if (this.eventBus) {
+      this.eventBus.emit('notification.created', {
+        notificationId: id,
+        workspaceId: input.workspaceId,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        type: input.type,
+      });
+    }
 
     return {
       id,
