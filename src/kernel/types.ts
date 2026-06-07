@@ -75,7 +75,10 @@ export type IpcMessageType =
   | 'verify.result';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
+// R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。
+// OrphanReconciler 之前是 "启动时 5s 一次性扫 conversations" 的兜底机制，
+// 现在被 SessionManager.recoverSessions 替代（在写入点直接写 [系统] 行）。
 declare global {
+  // 保留 declare global 以供未来新增 kernel-owned 单例挂载
   // eslint-disable-next-line no-var
-  var __berry_orphanReconciler: import('./orphan-reconciler.js').OrphanReconciler | undefined;
 }

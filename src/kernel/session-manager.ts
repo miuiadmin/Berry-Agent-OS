@@ -3,6 +3,7 @@ import type { ModelTier } from '../contracts/model.js';
 import type { MemoryContextFrame } from '../contracts/memory.js';
 import type { MemoryRuntime } from '../memory/index.js';
 import { getDb } from '../memory/index.js';
+import { saveMessage } from '../memory/conversations.js';
 import type { EvolutionEngine } from '../evolution/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { IPluginRuntimeV2, PromptInjectionContext } from '../contracts/plugins-v2.js';
@@ -525,10 +526,13 @@ export class SessionManager {
     let timedOut = 0;
     let denied = 0;
 
+    // R14-2：原 SQL 漏取 session_id，导致 stale task 标记后无法定位 conversations 表的 user 行。
+    // 现在需要：标记 stale task + 写 [系统] 行到对应 session 的 conversations 表
+    // （替代 OrphanReconciler 后台扫表的兜底职责）
     const staleTasks = db.prepare(`
-      SELECT id, status, target_agent FROM agent_tasks
+      SELECT id, status, target_agent, session_id FROM agent_tasks
       WHERE status IN ('running', 'dispatched', 'acknowledged', 'waiting_approval')
-    `).all() as Array<{ id: string; status: string; target_agent: string }>;
+    `).all() as Array<{ id: string; status: string; target_agent: string; session_id: string }>;
 
     if (staleTasks.length === 0) return { timedOut, denied };
 
@@ -537,15 +541,27 @@ export class SessionManager {
       if (task.status === 'waiting_approval') {
         db.prepare(`UPDATE agent_tasks SET status = 'failed', error = ?, finished_at = ? WHERE id = ?`)
           .run('权限请求因服务重启被自动拒绝', now, task.id);
+        // R14-2：直接在写入点兜底写 [系统] 行，消解 OrphanReconciler 周期性扫表
+        try {
+          saveMessage(task.session_id, 'assistant', '[系统] 上次权限请求因服务重启被自动拒绝，请重新发起');
+        } catch (err) {
+          logger.warn({ err, taskId: task.id }, 'recoverSessions 写 [系统] 行失败（不影响任务状态）');
+        }
         denied++;
       } else {
         db.prepare(`UPDATE agent_tasks SET status = 'timeout', error = ?, finished_at = ? WHERE id = ?`)
           .run('任务因服务重启被标记为超时', now, task.id);
+        // R14-2：写入点兜底——标记 stale task 同时 [系统] 行落 conversations
+        try {
+          saveMessage(task.session_id, 'assistant', '[系统] 上次回复因服务重启未完成，请重新提问');
+        } catch (err) {
+          logger.warn({ err, taskId: task.id }, 'recoverSessions 写 [系统] 行失败（不影响任务状态）');
+        }
         timedOut++;
       }
     }
 
-    logger.info({ timedOut, denied, total: staleTasks.length }, '会话恢复: 清理残留任务');
+    logger.info({ timedOut, denied, total: staleTasks.length }, '会话恢复: 清理残留任务 + 写 [系统] 行');
     return { timedOut, denied };
   }
 
