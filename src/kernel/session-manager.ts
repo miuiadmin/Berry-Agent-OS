@@ -77,20 +77,43 @@ export class SessionManager {
   createPending(msgId: string, entry: PendingRequest): void {
     this.pendingRequests.set(msgId, entry);
     this.touchSession(entry.sessionId);
-    const timeoutMs = this.config.requestTimeoutMs * 4;
-    const timer = setTimeout(() => {
-      const pending = this.pendingRequests.get(msgId);
-      // 调试日志：pending 请求超时，定位对话中断
-      logger.info({
-        msgId,
-        sessionId: entry.sessionId,
-        timeoutMs,
-        hasDraft: !!(pending?.draftResponse),
-        draftLen: pending?.draftResponse?.length ?? 0,
-        hasTaskId: !!pending?.taskId,
-        streamingActive: !!pending?.streaming,
-      }, 'pending 请求超时（120s）');
-      if (pending) {
+    // 超时计时器：基础值 requestTimeoutMs * 4（默认 120s）
+    // 如果 streaming 仍然活跃（有 text_delta 持续到达），自动续期一次，
+    // 避免长耗时 code_task（LLM 慢 + 多步工具调用）在干活中被误杀
+    const baseTimeoutMs = this.config.requestTimeoutMs * 4;
+    let timeoutExtensions = 1; // 最多续期 1 次（额外 120s）
+    let lastDraftLen = 0;
+    // scheduleTimeout 返回定时器引用，供 requestTimers 管理
+    const scheduleTimeout = (): ReturnType<typeof setTimeout> => {
+      const timer = setTimeout(() => {
+        const pending = this.pendingRequests.get(msgId);
+        // 续期条件：streaming 活跃 + draft 内容有增长 + 还有续期次数
+        const currentDraftLen = pending?.draftResponse?.length ?? 0;
+        const isStreaming = !!pending?.streaming;
+        const hasProgress = currentDraftLen > lastDraftLen;
+        lastDraftLen = currentDraftLen;
+        if (isStreaming && hasProgress && timeoutExtensions > 0) {
+          timeoutExtensions--;
+          logger.info({
+            msgId,
+            sessionId: entry.sessionId,
+            draftLen: currentDraftLen,
+            extensionsLeft: timeoutExtensions,
+          }, 'pending 请求超时续期（streaming 仍在活跃）');
+          this.requestTimers.set(msgId, scheduleTimeout());
+          return;
+        }
+        // 调试日志：pending 请求超时，定位对话中断
+        logger.info({
+          msgId,
+          sessionId: entry.sessionId,
+          timeoutMs: baseTimeoutMs,
+          hasDraft: !!(pending?.draftResponse),
+          draftLen: pending?.draftResponse?.length ?? 0,
+          hasTaskId: !!pending?.taskId,
+          streamingActive: !!pending?.streaming,
+        }, 'pending 请求超时');
+        if (pending) {
         // 11.0 修复：超时时保存已有的部分内容到对话历史，防止刷新后空白气泡
         const partialContent = pending.draftResponse ?? '';
         if (partialContent && pending.userMessage) {
@@ -114,8 +137,11 @@ export class SessionManager {
         this.deletePending(msgId);
         pending.resolve('[超时] 请求处理超时，请重试');
       }
-    }, timeoutMs);
+    }, baseTimeoutMs);
+    // 记录 timer 以便 complete 时清理
     this.requestTimers.set(msgId, timer);
+    return timer;
+  };
   }
 
   getPending(msgId: string): PendingRequest | undefined {

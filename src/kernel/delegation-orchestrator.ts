@@ -513,6 +513,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         logger.info({ intent: ruleDecision.intent, target: ruleDecision.targetAgent }, '规则路由命中，跳过 Brain');
         const pending = this.sessionManager.getPending(correlationId);
         if (pending) {
+          // 规则路由虽然没有走 Brain LLM，但前端仍需要 progress 事件展示思考过程
+          this.reportProgress(pending, 'thinking', '正在分析意图...');
           this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, { ...ruleDecision, source: 'rule' } as unknown as Record<string, unknown>);
           getEventBus().emit('message.routed', { sessionId: pending.sessionId, taskId: pending.taskId ?? correlationId, targetAgent: ruleDecision.targetAgent, intent: ruleDecision.intent });
         }
