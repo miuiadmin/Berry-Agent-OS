@@ -134,6 +134,37 @@ interface ChatState {
   markLastMessageStatus: (status: "sending" | "failed" | "complete") => void;
 }
 
+/**
+ * 持久化数据提取函数。
+ * 截断为最近 50 条消息，将流式状态标记为 complete，截断工具调用结果。
+ * 独立为函数以便防抖写入时复用。
+ */
+function partializeForPersist(state: ChatState) {
+  return {
+    sessionId: state.sessionId,
+    messages: state.messages.slice(-50).map((m) => ({
+      ...m,
+      status: m.status === "streaming" ? "complete" as const : m.status,
+      progress: m.status === "streaming" ? undefined : m.progress,
+      toolCalls: m.toolCalls?.slice(-5).map(tc => ({ ...tc, result: tc.result?.slice(0, 500) })),
+    })),
+    pendingStreamMessageId: state.pendingStreamMessageId,
+  };
+}
+
+/**
+ * 流式结束后强制刷入 localStorage。
+ * 由 setLastStatus/setLastError 在流结束时调用。
+ * 确保最终的完整消息状态被持久化（而非中间的流式片段）。
+ */
+export function flushPersist() {
+  try {
+    const state = useChatStore.getState();
+    const partial = partializeForPersist(state);
+    localStorage.setItem("chat-storage", JSON.stringify(partial));
+  } catch { /* 配额溢出或存储不可用，静默丢弃 */ }
+}
+
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
@@ -499,30 +530,61 @@ export const useChatStore = create<ChatState>()(
       storage: createJSONStorage(() => {
         try {
           const storage = localStorage;
-          // 包装 setItem 捕获 QuotaExceededError，避免长对话导致控制台大量报错
+          /**
+           * 防抖写入：将 localStorage.setItem 延迟到空闲时执行。
+           * 解决流式传输期间每个 text_delta 都触发同步 localStorage 写入
+           * 导致主线程阻塞（手机端卡死）的问题。
+           *
+           * 策略：
+           * - 流式中（isStreaming=true）：只记录 dirty 标记，不立即写入
+           * - 流结束后或空闲时：一次性刷入最新状态
+           * - 页面隐藏/卸载时：立即刷入
+           */
+          let writeTimer: ReturnType<typeof setTimeout> | null = null;
+          const flushWrite = (key: string, value: string) => {
+            writeTimer = null;
+            try { storage.setItem(key, value); } catch { /* 配额溢出静默丢弃 */ }
+          };
+          // 页面隐藏/卸载时立即刷入脏数据
+          if (typeof document !== 'undefined') {
+            const flushIfNeeded = () => {
+              if (writeTimer !== null) {
+                clearTimeout(writeTimer);
+                // 使用当前 store 状态重新序列化（避免写入过期数据）
+                try {
+                  const state = useChatStore.getState();
+                  const partial = partializeForPersist(state);
+                  storage.setItem("chat-storage", JSON.stringify(partial));
+                } catch {}
+                writeTimer = null;
+              }
+            };
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'hidden') flushIfNeeded();
+            });
+            // beforeunload 兜底
+            window.addEventListener('beforeunload', flushIfNeeded);
+          }
           return {
             getItem: storage.getItem.bind(storage),
             setItem: (key: string, value: string) => {
-              try { storage.setItem(key, value); } catch { /* 配额溢出静默丢弃，内存状态不受影响 */ }
+              // 如果正在流式传输，延迟写入（每个 delta 不阻塞主线程）
+              if (useChatStore.getState().isStreaming) {
+                if (writeTimer) clearTimeout(writeTimer);
+                // 流式期间最多 2 秒写一次（或流结束后 flushPersist 立即写入）
+                writeTimer = setTimeout(() => flushWrite(key, value), 2000);
+                return;
+              }
+              // 非流式：取消任何待处理的延迟写入，立即写入
+              if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+              try { storage.setItem(key, value); } catch { /* 配额溢出静默丢弃 */ }
             },
             removeItem: storage.removeItem.bind(storage),
           };
         } catch { return { getItem: () => null, setItem: () => {}, removeItem: () => {} }; }
       }),
-      partialize: (state) => ({
-        sessionId: state.sessionId,
-        // 持久化时截断为最近 50 条消息，避免 localStorage 配额溢出
-        // 将流式状态标记为 complete 以避免还原后误判为仍在流式中
-        messages: state.messages.slice(-50).map((m) => ({
-          ...m,
-          status: m.status === "streaming" ? "complete" as const : m.status,
-          progress: m.status === "streaming" ? undefined : m.progress,
-          // 截断工具调用结果，减少序列化体积
-          toolCalls: m.toolCalls?.slice(-5).map(tc => ({ ...tc, result: tc.result?.slice(0, 500) })),
-        })),
-        // 持久化 pendingStreamMessageId，让刷新后仍能识别流式占位（业务层会在 status===connected 时调 sharedSessionRestore 重新校验）
-        pendingStreamMessageId: state.pendingStreamMessageId,
-      }),
+      /** 流式传输期间的 partialize，跳过写入（由防抖 setItem 控制） */
+      partialize: (state) => partializeForPersist(state),
     },
   ),
 );
@@ -537,6 +599,8 @@ export function setLastStatus(status: ChatMessage["status"]) {
   // 流式结束时清除 pendingStreamMessageId，避免下次响应重用旧消息
   if (status === "complete" || status === "error") {
     useChatStore.setState({ pendingStreamMessageId: null });
+    // 流结束后立即刷入 localStorage，确保完整消息被持久化
+    flushPersist();
   }
 }
 export function setLastProgress(progress: string) {
@@ -552,6 +616,8 @@ export function setLastError(error: string) {
   useChatStore.getState().updateLastMessage(() => ({ status: "error" as const, error, progress: undefined }));
   // 错误时清除 pendingStreamMessageId，避免下次响应重用旧消息
   useChatStore.setState({ pendingStreamMessageId: null });
+  // 错误也是流结束，立即刷入 localStorage
+  flushPersist();
 }
 export function appendReasoning(text: string) {
   useChatStore.getState().updateLastMessage((m) => ({ reasoning: (m.reasoning ?? "") + text }));
