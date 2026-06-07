@@ -1,4 +1,5 @@
 import type { Socket } from 'node:net';
+import type { WritableChannel } from './transport.js';
 import type { AgentName, TaskType } from './agents.js';
 import type { RouteRequestPayload, RouteDecision, PermissionJudgeResultPayload, AgentUserReplyPayload, AgentAskUserPayload } from './routing.js';
 import type { ReviewResult, TurnRecord } from './review.js';
@@ -234,7 +235,10 @@ export type MessageListener<T extends MessageType> = (
 ) => void;
 
 export interface MessageContext {
+  /** 原始 Socket（仅 daemon IPC 等需要 raw socket 的场景使用） */
   socket?: Socket;
+  /** 传输层写入通道（socket-server/harness 路径通过此字段回写响应） */
+  channel?: WritableChannel;
   correlationId?: string;
   from?: string;
   traceId?: string;

@@ -5,6 +5,7 @@ import type {
   ExecutionTask,
   RuntimeCapabilities,
   ProviderConfig,
+  WsClientConnection,
 } from '../../../contracts/agent-runtime.js';
 import { getLogger } from '../../../utils/logger.js';
 
@@ -18,6 +19,9 @@ export class CustomDriver implements AgentRuntime {
   private readonly protocol: 'http' | 'ws';
   private readonly apiKey: string | undefined;
   private readonly headers: Record<string, string>;
+  /** 注入的 WebSocket 客户端工厂，避免 kernel 直接依赖 ws 模块 */
+  private readonly wsClientFactory: ProviderConfig['wsClientFactory'];
+  /** 活跃执行任务及其 AbortController，用于取消和清理 */
   private activeExecutions = new Map<string, AbortController>();
 
   constructor(config: ProviderConfig) {
@@ -29,6 +33,8 @@ export class CustomDriver implements AgentRuntime {
     this.apiKey = config.apiKey;
     this.headers = {};
     this.name = `Custom (${this.endpoint})`;
+    // 接收注入的 ws 工厂，若未提供则使用内置的懒加载实现
+    this.wsClientFactory = config.wsClientFactory;
   }
 
   getCapabilities(): RuntimeCapabilities {
@@ -125,6 +131,10 @@ export class CustomDriver implements AgentRuntime {
     }
   }
 
+  /**
+   * 通过 WebSocket 协议执行任务。
+   * 使用注入的 wsClientFactory 创建连接，避免 kernel 直接 import('ws')。
+   */
   private async *executeViaWebSocket(task: ExecutionTask): AsyncGenerator<AgentEvent> {
     const { executionId } = task;
 
@@ -138,10 +148,10 @@ export class CustomDriver implements AgentRuntime {
     const wsUrl = this.endpoint.replace(/^http/, 'ws') + '/execute';
 
     try {
-      const { WebSocket } = await import('ws');
-      const ws = new WebSocket(wsUrl, {
-        headers: this.buildHeaders(),
-      });
+      // 通过注入的工厂创建 WS 连接，而非直接 import('ws')
+      const ws: WsClientConnection = this.wsClientFactory
+        ? await this.wsClientFactory(wsUrl, this.buildHeaders())
+        : await this.createFallbackConnection(wsUrl);
 
       const abortController = new AbortController();
       this.activeExecutions.set(executionId, abortController);
@@ -154,14 +164,16 @@ export class CustomDriver implements AgentRuntime {
         ws.send(JSON.stringify(task));
       });
 
+      /** 累积的事件队列，用于 AsyncGenerator yield */
       const events: AgentEvent[] = [];
       let done = false;
       let wsError: string | null = null;
       let resolveWait: (() => void) | null = null;
 
-      ws.on('message', (data) => {
+      ws.on('message', (data: unknown) => {
         try {
-          const parsed = JSON.parse(data.toString());
+          const raw = typeof data === 'string' ? data : (data as { toString(): string }).toString();
+          const parsed = JSON.parse(raw);
           const event: AgentEvent = {
             kind: parsed.kind,
             executionId,
@@ -180,12 +192,13 @@ export class CustomDriver implements AgentRuntime {
         resolveWait?.();
       });
 
-      ws.on('error', (err) => {
+      ws.on('error', (err: unknown) => {
         wsError = err instanceof Error ? err.message : String(err);
         done = true;
         resolveWait?.();
       });
 
+      // 事件循环：优先 yield 已累积的事件，等待新事件或连接关闭
       while (true) {
         if (events.length > 0) {
           yield events.shift()!;
@@ -205,6 +218,16 @@ export class CustomDriver implements AgentRuntime {
       yield { kind: 'execution_failed', executionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err) } };
       this.activeExecutions.delete(executionId);
     }
+  }
+
+  /**
+   * 后备方案：当未注入 wsClientFactory 时，动态加载默认实现。
+   * 默认实现在 src/lib/ws-client-factory.ts（不属于 kernel 目录），
+   * 仅在此处按需引用，保持 kernel 对 ws 模块的零直接依赖。
+   */
+  private async createFallbackConnection(url: string): Promise<WsClientConnection> {
+    const { createWsConnection } = await import('../../../lib/ws-client-factory.js');
+    return createWsConnection(url, this.buildHeaders());
   }
 
   private async *consumeSSEStream(

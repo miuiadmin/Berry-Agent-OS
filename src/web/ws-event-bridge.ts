@@ -142,7 +142,11 @@ export class WsEventBridge {
   private broadcast(msg: string): void {
     for (const client of this.wss.clients) {
       if ((client as unknown as { readyState: number }).readyState === 1) {
-        (client as WebSocket).send(msg);
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // TOCTOU 竞争窗口：readyState 检查后、send() 前客户端可能断连，忽略
+        }
       }
     }
   }
@@ -158,12 +162,20 @@ export class WsEventBridge {
       const subs = this.clientSubscriptions.get(client as WebSocket);
       // 未注册订阅信息（连接建立前的老连接）或订阅集合为空 → 接收所有
       if (!subs || subs.size === 0) {
-        (client as WebSocket).send(msg);
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // 客户端在 readyState 检查后断连，忽略
+        }
         continue;
       }
       // 有订阅 → 只接收匹配 sessionId 的事件
       if (sessionId && subs.has(sessionId)) {
-        (client as WebSocket).send(msg);
+        try {
+          (client as WebSocket).send(msg);
+        } catch {
+          // 客户端在 readyState 检查后断连，忽略
+        }
       }
     }
   }

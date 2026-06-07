@@ -61,6 +61,26 @@ export interface AgentRuntime {
   healthCheck(): Promise<{ ok: boolean; error?: string }>;
 }
 
+/**
+ * WebSocket 客户端连接抽象接口。
+ * 用于外部 runtime driver（如 CustomDriver）连接外部 AI 服务端点，
+ * 使 kernel 不直接依赖 ws 模块。
+ */
+export interface WsClientConnection {
+  /** 发送文本数据 */
+  send(data: string): void;
+  /** 关闭连接 */
+  close(code?: number, reason?: string): void;
+  /**
+   * 注册事件处理器。
+   * event 类型：open / close（无参数）、message（data 负载）、error（Error 对象）
+   */
+  on(event: 'open' | 'close' | 'message' | 'error', handler: (...args: unknown[]) => void): void;
+}
+
+/** WebSocket 客户端工厂函数：根据 URL 和 headers 创建连接 */
+export type WsClientFactory = (url: string, headers: Record<string, string>) => Promise<WsClientConnection>;
+
 export interface ProviderConfig {
   endpoint?: string;
   protocol?: 'http' | 'ws';
@@ -70,4 +90,6 @@ export interface ProviderConfig {
   env?: Record<string, string>;
   args?: string[];
   timeout?: number;
+  /** 注入的 WebSocket 客户端工厂，避免 kernel 直接 import('ws') */
+  wsClientFactory?: WsClientFactory;
 }

@@ -1,8 +1,7 @@
-import type { Socket } from 'node:net';
 import type { MessageBus } from '../message-bus.js';
 import type { ServiceContainer } from '../service-container.js';
 import type { SocketMessageType, MessageContext, MessageType } from '../../contracts/messages.js';
-import { SocketChannel, type WritableChannel } from '../../contracts/transport.js';
+import type { WritableChannel } from '../../contracts/transport.js';
 import type {
   DaemonRegisterMessage,
   DaemonHeartbeatMessage,
@@ -55,7 +54,7 @@ function requireFields(ctx: MessageContext, request: Record<string, unknown>, fi
   for (const f of fields) {
     const v = requireString(request, f);
     if (!v) {
-      ctx.socket!.write(JSON.stringify({ ok: false, error: `缺少 ${f} 参数` }) + '\n');
+      ctx.channel!.write(JSON.stringify({ ok: false, error: `缺少 ${f} 参数` }) + '\n');
       return null;
     }
     values.push(v);
@@ -64,11 +63,11 @@ function requireFields(ctx: MessageContext, request: Record<string, unknown>, fi
 }
 
 function reply(ctx: MessageContext, data: Record<string, unknown>): void {
-  ctx.socket!.write(JSON.stringify(data) + '\n');
+  ctx.channel!.write(JSON.stringify(data) + '\n');
 }
 
 function replyError(ctx: MessageContext, error: string): void {
-  ctx.socket!.write(JSON.stringify({ ok: false, error }) + '\n');
+  ctx.channel!.write(JSON.stringify({ ok: false, error }) + '\n');
 }
 
 // === Observability Handlers ===
@@ -425,7 +424,7 @@ function routeUserMessage(
 
 /** handler helper 接收的 context（与 ws-handler.ts 调用契约匹配） */
 interface MessageBusHandlerContext {
-  socket?: Socket;
+  channel?: WritableChannel;
   // 兼容 ws-handler 调用时的最小形状
   [key: string]: unknown;
 }
@@ -618,7 +617,8 @@ const socketServerMessageHandler: HandlerFn = (request, ctx, services) => {
     reply(ctx, { error: '缺少 message 字段' });
     return;
   }
-  const channel = new SocketChannel(ctx.socket!);
+  // channel 已由 socket-server.ts 通过 MessageContext.channel 注入（WritableChannel）
+  const channel = ctx.channel!;
   const sessionId = requireString(request, 'sessionId') ?? genId('ses');
   routeUserMessage(message, ctx as unknown as ServiceContainer, services, {
     sessionId,

@@ -9,13 +9,14 @@ import type { IPluginRuntimeV2, PromptInjectionContext } from '../contracts/plug
 import type { AppConfig } from '../config/schema.js';
 import { buildSystemPrompt } from '../llm/prompt-builder.js';
 import { getLogger } from '../utils/logger.js';
+import { getEventBus } from './event-bus.js';
 
 const logger = getLogger('session-manager');
 
 export interface PendingRequest {
   /** 对话 sessionId（来自消息体，标识当前对话） */
   sessionId: string;
-  /** WS 客户端标识（来自 WS URL 的 clientId），用于重连时按客户端查找 pending request */
+  /** 客户端标识（用于重连时按客户端查找 pending request） */
   clientId?: string;
   userMessage: string;
   taskId?: string;
@@ -98,6 +99,13 @@ export class SessionManager {
         } else {
           logger.warn({ msgId, sessionId: entry.sessionId }, '请求超时，无部分内容可保存');
         }
+        // 通知前端请求超时（与其他错误路径保持一致，前端 WS 客户端可实时感知）
+        getEventBus().emit('conversation.no_response', {
+          sessionId: entry.sessionId,
+          reason: 'request_timeout',
+          taskId: pending.taskId,
+          correlationId: msgId,
+        });
         this.deletePending(msgId);
         pending.resolve('[超时] 请求处理超时，请重试');
       }
@@ -470,6 +478,26 @@ export class SessionManager {
       clearInterval(this.gcTimer);
       this.gcTimer = null;
     }
+  }
+
+  /**
+   * 服务关闭时收尾所有未完成的 pending requests。
+   * 清理 timer、resolve 一个服务关闭提示，防止 setTimeout 回调
+   * 在 DB 关闭后触发 saveConversationTurn 失败。
+   *
+   * @param reason resolve 传给前端的关闭原因
+   */
+  disposeAllPending(reason: string): void {
+    for (const [msgId, pending] of this.pendingRequests) {
+      // 清理 timer
+      const timer = this.requestTimers.get(msgId);
+      if (timer) { clearTimeout(timer); this.requestTimers.delete(msgId); }
+      // 不保存对话轮次（服务关闭，DB 可能即将关闭）
+      // 直接 resolve 让前端知道
+      try { pending.resolve(reason); } catch { /* 忽略 resolve 失败 */ }
+    }
+    this.pendingRequests.clear();
+    this.requestTimers.clear();
   }
 
   runGc(maxInactiveMs = 1800000): { cleaned: number } {

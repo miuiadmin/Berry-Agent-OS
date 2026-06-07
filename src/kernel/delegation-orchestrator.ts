@@ -1288,6 +1288,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         // IPC 发送失败 → 自动 approve
         logger.warn({ correlationId }, 'review.request (conversation) IPC 发送失败，自动 approve');
         this.pendingReviewOrigins.delete(correlationId);
+        // 通知前端审核降级（与其他错误路径保持一致）
+        getEventBus().emit('conversation.no_response', { sessionId: pending.sessionId, reason: 'review_ipc_send_failed', taskId: pending.taskId, correlationId });
         const dEntry = this.delegationManager.getByCorrelation(correlationId);
         if (dEntry) this.delegationManager.complete(dEntry.id, draft);
         // P0 兜底：审核失败路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
@@ -1301,6 +1303,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         if (!stillPending) return;
         logger.warn({ correlationId }, '对话审核超时，自动 approve');
         this.pendingReviewOrigins.delete(correlationId);
+        // 通知前端审核超时降级
+        getEventBus().emit('conversation.no_response', { sessionId: pending.sessionId, reason: 'review_timeout', taskId: pending.taskId, correlationId });
         const dEntry = this.delegationManager.getByCorrelation(correlationId);
         if (dEntry) this.delegationManager.complete(dEntry.id, draft);
         // P0 兜底：审核超时路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
@@ -1540,6 +1544,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // reviewer 不可用（进程崩溃/未启动）→ 直接 approve，不挂死
     if (!reviewer || !reviewer.child.connected) {
       logger.warn({ correlationId: fgEntry.correlationId }, 'Reviewer 不可用，自动 approve');
+      // 通知前端审核降级（与其他错误路径保持一致）
+      getEventBus().emit('conversation.no_response', { sessionId: fgEntry.sessionId, reason: 'reviewer_unavailable', taskId: pending.taskId, correlationId: fgEntry.correlationId });
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
       this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
       return;
@@ -1569,6 +1575,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // IPC 发送失败（进程已断连）→ 自动 approve
       logger.warn({ correlationId: fgEntry.correlationId }, 'review.request IPC 发送失败，自动 approve');
       this.pendingReviewOrigins.delete(fgEntry.correlationId);
+      // 通知前端审核降级
+      getEventBus().emit('conversation.no_response', { sessionId: fgEntry.sessionId, reason: 'review_ipc_send_failed', taskId: pending.taskId, correlationId: fgEntry.correlationId });
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
       this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
       return;
@@ -1582,6 +1590,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (!stillPending) return;
       logger.warn({ correlationId: fgEntry.correlationId, timeoutMs: reviewTimeoutMs }, '审核超时，自动 approve');
       this.pendingReviewOrigins.delete(fgEntry.correlationId);
+      // 通知前端审核超时降级
+      getEventBus().emit('conversation.no_response', { sessionId: fgEntry.sessionId, reason: 'review_timeout', taskId: pending.taskId, correlationId: fgEntry.correlationId });
       if (entry) this.delegationManager.complete(entry.id, draftResponse);
       this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
     }, reviewTimeoutMs);
