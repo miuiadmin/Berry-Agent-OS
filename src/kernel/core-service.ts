@@ -49,6 +49,7 @@ import { ErrorClassifier } from './error-classifier.js';
 import { TaskCheckpointManager } from './task-checkpoint.js';
 import { ChannelManager, TelegramChannel, WsChannel } from '../channels/index.js';
 import { WorkspaceManager } from '../workspaces/index.js';
+// web 层模块：kernel 通过结构化类型（start/stop）引用，不依赖具体类定义
 import { WebServer } from '../web/server.js';
 import { NotificationService } from '../intelligence/notification-service.js';
 import { MemoryLayerService } from '../intelligence/memory-layer-service.js';
@@ -116,7 +117,7 @@ export class CoreService {
   private runtimeRegistry: RuntimeRegistry | null = null;
   private checkpointService: CheckpointService | null = null;
   private humanDelegationManager: HumanDelegationManager | null = null;
-  private webServer: WebServer | null = null;
+  private webServer: { start(): Promise<void>; stop(): Promise<void> } | null = null;
   private notificationHooksCleanup: (() => void) | null = null;
   private permissionCoordinator: PermissionCoordinator | null = null;
   private sessionManager: SessionManager | null = null;
