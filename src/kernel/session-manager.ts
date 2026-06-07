@@ -17,7 +17,11 @@ const logger = getLogger('session-manager');
 export interface PendingRequest {
   /** 对话 sessionId（来自消息体，标识当前对话） */
   sessionId: string;
-  /** 客户端标识（用于重连时按客户端查找 pending request） */
+  /**
+   * 客户端标识（预留字段，当前所有路径均传 undefined）
+   * R15 审计：此字段设计用于 WS 重连时按客户端索引 pending request，
+   * 但目前尚未实现。如未来不需要此功能可移除。
+   */
   clientId?: string;
   userMessage: string;
   taskId?: string;
@@ -119,37 +123,24 @@ export class SessionManager {
   }
 
   /**
-   * R14-1：任务终结统一入口
+   * 任务失败统一入口
    *
-   * 之前 8 个失败源（agent.crashed / Runtime exception / foreground fail /
-   * task.timeout / interrupt / unavailable / cancelled / no_output）各自
-   * 拼错误文案 + saveConversationTurn + deletePending + resolvePending +
-   * emit no_response。R13 审计标记为 5 个"补丁式重复"——同一根本缺陷
-   * （任务不再产出更多内容）的多个表现。
+   * R14-1 + R15：之前 8 个失败源各自拼错误文案 + saveConversationTurn + resolvePending。
+   * R14-1 统一为 finalizeTask，R15 重命名 fail 使语义更清晰。
    *
-   * finalizeTask 把这 5 步统一到 1 个 helper，调用方只传 outcome：
-   *   - crash: agent 进程崩溃（agent.crashed 路径）
+   * 调用方只传 outcome：
+   *   - crash: agent 进程崩溃
    *   - failed: agent 任务失败返回 !result.ok
    *   - timeout: task 达到 timeout
    *   - cancelled: user/cancel 中断
    *   - terminated: user interruptSession
    *   - unavailable: primary agent 不可用
+   *   - runtime_error: Runtime 执行异常
    *
-   * 错误文案模板：[${outcomeLabel}] ${errorContext}
-   * - crash: [错误] 智能体 {name} 崩溃
-   * - failed: [{agentName}] 任务失败
-   * - timeout: [任务执行超时]
-   * - cancelled: [{agentName}] 执行已取消
-   * - terminated: [已停止]
-   * - unavailable: [系统错误] 对话智能体不可用
-   *
-   * 持久化策略：
-   * - partial draftResponse 存在 → contentOverride = `${partial}\n\n${errorLabel}`
-   * - 无 partial → errorLabel 单独入库
-   * - saveConversationTurn 失败 silent log（runtime 内部已 try/catch）
-   * - emit conversation.no_response 让前端感知
+   * 持久化策略：partial draftResponse 存在 → 追加错误标签；否则仅入库错误标签。
+   * 前端通知：emit conversation.no_response。
    */
-  finalizeTask(
+  fail(
     correlationId: string,
     outcome: {
       kind: 'crash' | 'failed' | 'timeout' | 'cancelled' | 'terminated' | 'unavailable' | 'runtime_error';
@@ -176,7 +167,15 @@ export class SessionManager {
     const response = partial ? partial : label;
     const persistContent = partial ? `${partial}\n\n${label}` : label;
 
-    this.resolvePending(correlationId, response, { contentOverride: persistContent });
+    // 通知前端任务终结（所有走 fail 的路径都应有前端通知）
+    getEventBus().emit('conversation.no_response', {
+      sessionId: pending.sessionId,
+      reason: outcome.kind,
+      taskId: pending.taskId,
+      correlationId,
+    });
+
+    this.complete(correlationId, response, { contentOverride: persistContent });
   }
 
   deletePending(msgId: string): void {
@@ -187,20 +186,23 @@ export class SessionManager {
 
   /**
    * 统一收尾 pending request：保存对话轮次 → 删除 pending → resolve 闭包。
-   * 消除 delegation-orchestrator 等处重复的
-   * try/saveTurn/catch + deletePending + resolve 三步补丁。
+   *
+   * R15 重命名：resolvePending → complete，语义更清晰。
+   * 覆盖 finalizePending 场景：设置 skipResolve=true 时不调 resolve，
+   * 返回 pending 引用供调用方后续手动 resolve。
    *
    * @param msgId pending request 的 ID
    * @param response 传给 resolve() 的回复文本
    * @param options.saveTurn 是否保存对话轮次，默认 true
    * @param options.contentOverride 入库时覆盖 response 的内容
-   *   （如追加 [已停止] 等标记），不影响 resolve 传给前端的原始文本
-   * @returns true=找到并处理了 pending，false=无此 pending
+   * @param options.skipResolve 不调 resolve，返回 pending 引用。默认 false
+   * @returns true=找到并处理了 pending（skipResolve 时返回 pending 引用），false=无此 pending
    */
-  resolvePending(msgId: string, response: string, options?: {
+  complete(msgId: string, response: string, options?: {
     saveTurn?: boolean;
     contentOverride?: string;
-  }): boolean {
+    skipResolve?: boolean;
+  }): boolean | PendingRequest {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return false;
 
@@ -215,48 +217,20 @@ export class SessionManager {
           pending.reasoning,
         );
       } catch (err) {
-        logger.error({ err, msgId, sessionId: pending.sessionId }, 'resolvePending saveConversationTurn 失败');
+        logger.error({ err, msgId, sessionId: pending.sessionId }, 'complete saveConversationTurn 失败');
       }
     }
 
     this.deletePending(msgId);
+
+    if (options?.skipResolve) {
+      // 半收尾模式：返回 pending 引用，由调用方手动 resolve
+      return pending;
+    }
+
     pending.resolve(response);
     return true;
-  }
-
-  /**
-   * 半收尾 pending request：保存对话轮次 → 删除 pending → 返回 pending 快照。
-   * 不调用 resolve，留由调用方执行额外操作（如 evolution、audit、task complete）
-   * 后再手动 pending.resolve(response)。
-   *
-   * 适用于正常完成路径（final.response / handleTaskReviewResult），
-   * 这些路径在 resolve 前后还有 evolution/audit 等需要 pending 数据的操作。
-   *
-   * @param msgId pending request 的 ID
-   * @param response 入库的回复文本
-   * @returns pending 快照（含 resolve 闭包），或 null（无此 pending）
-   */
-  finalizePending(msgId: string, response: string): PendingRequest | null {
-    const pending = this.pendingRequests.get(msgId);
-    if (!pending) return null;
-
-    // 保存对话轮次
-    if (pending.userMessage) {
-      try {
-        this.saveConversationTurn(
-          pending.sessionId,
-          pending.userMessage,
-          response,
-          pending.reasoning,
-        );
-      } catch (err) {
-        logger.error({ err, msgId, sessionId: pending.sessionId }, 'finalizePending saveConversationTurn 失败');
-      }
-    }
-
-    // 删除 pending（含 clearTimeout），但保留引用供调用方 resolve
-    this.deletePending(msgId);
-    return pending;
+    return true;
   }
 
   entries(): IterableIterator<[string, PendingRequest]> {

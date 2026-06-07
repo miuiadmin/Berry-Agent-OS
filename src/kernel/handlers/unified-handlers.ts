@@ -276,39 +276,85 @@ const agentsReloadHandler: HandlerFn = (_, ctx, services) => {
 // === Messaging Handlers ===
 
 /**
- * 路由用户消息的私有 helper。
+ * R15 解耦审计：统一 resolve 策略接口
+ *
+ * 将 routeUserMessage 中 channelOverride 分支和 WS 路径的 resolve 行为
+ * 封装为一个 CompletionStrategy 接口。调用方传入策略对象，
+ * routeUserMessage 不再感知传输层差异。
+ *
+ * - EventBusStrategy（默认）：emit conversation.result 事件，WS/前端订阅
+ * - ChannelWriteStrategy：同步直写 WritableChannel（socket-server/harness）
+ */
+export interface CompletionStrategy {
+  /**
+   * 对话完成时调用
+   * @param response 助手回复文本
+   * @param context 完成上下文（sessionId, taskId, isStreaming）
+   */
+  onComplete(response: string, context: {
+    sessionId: string;
+    taskId: string;
+    isStreaming: boolean;
+  }): void;
+}
+
+/** EventBus 策略：emit conversation.result，由 WsEventBridge 订阅后转发 */
+export class EventBusStrategy implements CompletionStrategy {
+  onComplete(response: string, context: { sessionId: string; taskId: string; isStreaming: boolean }): void {
+    getEventBus().emit('conversation.result', {
+      sessionId: context.sessionId,
+      taskId: context.taskId,
+      response,
+    });
+  }
+}
+
+/** Channel 直写策略：同步写入 WritableChannel（socket-server / harness 路径） */
+export class ChannelWriteStrategy implements CompletionStrategy {
+  constructor(private channel: WritableChannel) {}
+
+  onComplete(response: string, context: { sessionId: string; taskId: string; isStreaming: boolean }): void {
+    if (context.isStreaming) {
+      const evt: SocketResultEvent = { type: 'result', response, sessionId: context.sessionId, taskId: context.taskId };
+      this.channel.write(JSON.stringify(evt) + '\n');
+      this.channel.end();
+    } else {
+      this.channel.write(JSON.stringify({ response, sessionId: context.sessionId, taskId: context.taskId }) + '\n');
+    }
+  }
+}
+
+/**
+ * 路由用户消息的统一入口
+ *
  * R8-1：把 messaging-handlers.ts 的 handleMessage / handleChannelMessage
  * 合并到 unified-handlers.ts，消除两份 85% 同构实现。
+ * R15：用 CompletionStrategy 替代 channelOverride + skipConcurrentCheck + onChannelBusy。
  *
- * 统一语义：
- * - 必传 WritableChannel 抽象，传输层（WS / CLI / Channel）解耦
+ * 核心流程：
  * - saveUserMessage 入口入库（先入库再 createPending，失败 warn 继续路由 fail-open）
- * - 并发防护 hasActivePendingForSession 两条路径都强制
+ * - 并发防护 hasActivePendingForSession
  * - createTaskWorkspace 显式覆盖（channel 路径不创建，避免 channel-only 副作用）
- * - resolve 仅 emit 'conversation.result' 事件，传输层订阅 EventBus 派发
+ * - resolve 通过 CompletionStrategy 策略对象派发，不感知传输层差异
  */
 function routeUserMessage(
   message: string,
-  ctx: ServiceContainer | MessageBusHandlerContext,
   services: ServiceContainer,
   options: {
     sessionId: string;
     isStreaming: boolean;
     clientMsgId: string;
     createWorkspace: boolean;
-    /** channel 路径下没有 clientId，传 false 跳过 hasActivePendingForSession 检查 */
-    skipConcurrentCheck?: boolean;
     /** 入口标记（仅用于日志） */
     entry: 'ws' | 'socket' | 'channel';
-    /** channel 路径专用：channel 入口并发错误时回写通道 */
-    onChannelBusy?: () => void;
     /**
-     * R8-1 fix：resolve 行为 override
-     * - 不传（WS 路径）：emit 'conversation.result' 事件，WsEventBridge 订阅后转发
-     * - 传 channel（socket-server / harness 路径）：resolve 同步直写 channel.write
-     *   保持 R5 行为 — harness 不订阅 EventBus，等 'type: result' 消息必须直写
+     * R15 统一完成策略：
+     * - 不传（默认 EventBusStrategy）：emit conversation.result 事件，WS/前端订阅
+     * - ChannelWriteStrategy：同步直写 WritableChannel（socket-server/harness）
      */
-    channelOverride?: WritableChannel;
+    strategy?: CompletionStrategy;
+    /** 并发防护回调：session 有 pending 任务时的处理 */
+    onBusy?: () => void;
   },
 ): void {
   const { sessionId, isStreaming, clientMsgId, createWorkspace, entry } = options;
@@ -326,13 +372,13 @@ function routeUserMessage(
       taskId: services.sessionManager.getPendingAsk(sessionId)!.taskId,
       reply: message,
     }, genId('reply'));
-    if (options.onChannelBusy) options.onChannelBusy();
+    options.onBusy?.();
     return;
   }
 
-  if (!options.skipConcurrentCheck && services.sessionManager.hasActivePendingForSession(sessionId)) {
-    if (options.onChannelBusy) {
-      options.onChannelBusy();
+  if (services.sessionManager.hasActivePendingForSession(sessionId)) {
+    if (options.onBusy) {
+      options.onBusy();
     } else {
       logger.warn({ sessionId, entry }, '同一对话已有 pending 任务，跳过投递');
     }
@@ -351,6 +397,8 @@ function routeUserMessage(
     inputPayload: { message, routeReason: route.reason },
   });
 
+  // R15: 使用 CompletionStrategy 替代 channelOverride 分支
+  const strategy = options.strategy ?? new EventBusStrategy();
   services.sessionManager.createPending(msgId, {
     sessionId,
     clientId: undefined,
@@ -358,19 +406,7 @@ function routeUserMessage(
     taskId,
     streaming: isStreaming,
     resolve: (response) => {
-      if (options.channelOverride) {
-        // R5 行为：socket-server / harness 路径同步直写 channel
-        if (isStreaming) {
-          const evt: SocketResultEvent = { type: 'result', response, sessionId, taskId };
-          options.channelOverride.write(JSON.stringify(evt) + '\n');
-          options.channelOverride.end();
-        } else {
-          options.channelOverride.write(JSON.stringify({ response, sessionId, taskId }) + '\n');
-        }
-      } else {
-        // 解耦形态：emit 'conversation.result' 事件，由 WsEventBridge 订阅后转发 WS 客户端
-        getEventBus().emit('conversation.result', { sessionId, taskId, response });
-      }
+      strategy.onComplete(response, { sessionId, taskId, isStreaming });
     },
   });
 
@@ -422,13 +458,6 @@ function routeUserMessage(
   services.messageRouter.sendRouteRequest(routePayload, msgId);
 }
 
-/** handler helper 接收的 context（与 ws-handler.ts 调用契约匹配） */
-interface MessageBusHandlerContext {
-  channel?: WritableChannel;
-  // 兼容 ws-handler 调用时的最小形状
-  [key: string]: unknown;
-}
-
 /**
  * 处理 WS 路径的用户消息。
  * R8-1：从 messaging-handlers.ts 迁入。
@@ -458,15 +487,15 @@ export function handleMessage(
   const sessionId = requireString(request, 'sessionId') ?? genId('ses');
   const clientMsgId = genId('umsg');
 
-  // WS 路径：channel 路径不调用，所以 options.createWorkspace = true
+  // WS 路径：默认 EventBusStrategy（不传 strategy），createWorkspace = true
   // 并发检查走通用分支，命中时通过 channel 写 error
-  routeUserMessage(message, services as unknown as MessageBusHandlerContext, services, {
+  routeUserMessage(message, services, {
     sessionId,
     isStreaming: request.streaming !== false,
     clientMsgId,
     createWorkspace: true,
     entry: 'ws',
-    onChannelBusy: () => {
+    onBusy: () => {
       channel.write(JSON.stringify({ type: 'error', error: '该对话正在处理中，请等待完成', sessionId }) + '\n');
     },
   });
@@ -490,15 +519,14 @@ export async function handleChannelMessage(
   const sessionId = `channel-${channelType}-${userId}`;
   const clientMsgId = genId('ch');
 
-  // channel 入口并发错误回写到 channel 而不是 socket
-  routeUserMessage(message, services as unknown as MessageBusHandlerContext, services, {
+  // channel 入口：默认 EventBusStrategy，并发错误回写到 channel
+  routeUserMessage(message, services, {
     sessionId,
     isStreaming: false,
     clientMsgId,
     createWorkspace: false,
     entry: 'channel',
-    skipConcurrentCheck: false,
-    onChannelBusy: () => {
+    onBusy: () => {
       services.channelManager?.send(channelType, userId, { text: '该对话正在处理中，请等待完成' })
         .catch((err) => logger.warn({ err, channelType, userId }, 'channel 并发回写失败'));
     },
@@ -604,12 +632,12 @@ const daemonDisconnectHandler: HandlerFn = (request, _ctx, services) => {
 /**
  * socket-server 路径的 message handler（必须在 socketHandlers 数组之前定义以避免 TDZ）。
  *
- * R8-1 fix：socket-server 是 CLI / harness 的传输层。harness 不订阅 EventBus，
- * 等的是 'type: result' 消息（harness.ts:130）。所以 resolve 走 channelOverride
- * 同步直写 channel，保持 R5 行为。
+ * R15：socket-server 是 CLI / harness 的传输层。harness 不订阅 EventBus，
+ * 等的是 'type: result' 消息（harness.ts:130）。所以 resolve 走
+ * ChannelWriteStrategy 同步直写 channel，保持 R5 行为。
  *
  * WS 路径由 WsEventBridge 订阅 'conversation.result' 事件后转发给 ws.send，
- * 真正的解耦形态。两条路径的"写响应"职责分别由对应 transport 承担。
+ * 真正的解耦形态。两条路径的"写响应"职责分别由对应 CompletionStrategy 承担。
  */
 const socketServerMessageHandler: HandlerFn = (request, ctx, services) => {
   const message = requireString(request, 'message');
@@ -620,14 +648,14 @@ const socketServerMessageHandler: HandlerFn = (request, ctx, services) => {
   // channel 已由 socket-server.ts 通过 MessageContext.channel 注入（WritableChannel）
   const channel = ctx.channel!;
   const sessionId = requireString(request, 'sessionId') ?? genId('ses');
-  routeUserMessage(message, ctx as unknown as ServiceContainer, services, {
+  routeUserMessage(message, services, {
     sessionId,
     isStreaming: request.streaming !== false,
     clientMsgId: genId('umsg'),
     createWorkspace: true,
     entry: 'socket',
-    channelOverride: channel, // 同步直写 channel（harness/CLI 期待）
-    onChannelBusy: () => {
+    strategy: new ChannelWriteStrategy(channel), // 同步直写 channel（harness/CLI 期待）
+    onBusy: () => {
       channel.write(JSON.stringify({ type: 'error', error: '该对话正在处理中，请等待完成', sessionId }) + '\n');
     },
   });

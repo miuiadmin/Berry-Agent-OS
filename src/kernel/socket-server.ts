@@ -3,7 +3,7 @@ import { existsSync, unlinkSync } from 'node:fs';
 import type { SocketRequestType } from '../contracts/socket-protocol.js';
 import type { MessageBus } from './message-bus.js';
 import type { SocketMessageType, MessageContext } from '../contracts/messages.js';
-import { SocketChannel } from '../contracts/transport.js';
+import { SocketChannel } from '../channels/socket-channel.js';
 import { DRAIN_TIMEOUT_MS } from '../lib/time-constants.js';
 import type { Transport, TransportConnection } from './transport.js';
 import { createHandshakeResponse } from './protocol-version.js';

@@ -1,5 +1,5 @@
 /**
- * SessionManager.resolvePending 单元测试
+ * SessionManager.complete 单元测试
  *
  * 覆盖:
  * 1. 完整三步：保存对话轮次 → 删除 pending → resolve 闭包
@@ -7,9 +7,10 @@
  * 3. pending 不存在返回 false
  * 4. saveConversationTurn 抛错时不影响 delete + resolve
  * 5. contentOverride 入库覆盖但 resolve 原始 response
+ * 6. skipResolve 时不调 resolve，返回 pending 引用
  *
- * 背景：PR-3 消除 delegation-orchestrator 中 7 处重复的
- * try/saveTurn/catch + deletePending + pending.resolve 三步补丁。
+ * 背景：R15 将 resolvePending/finalizePending 统一为 complete，
+ * 用 skipResolve 选项覆盖原 finalizePending 的半收尾场景。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SessionManager } from './session-manager.js';
@@ -37,7 +38,7 @@ function makeMockConfig(): AppConfig {
   } as unknown as AppConfig;
 }
 
-describe('SessionManager.resolvePending', () => {
+describe('SessionManager.complete', () => {
   let manager: SessionManager;
   let memoryRuntime: ReturnType<typeof makeMockMemoryRuntime>;
 
@@ -61,7 +62,7 @@ describe('SessionManager.resolvePending', () => {
       resolve: (r) => { resolveCalled = true; resolveArg = r; },
     });
 
-    const result = manager.resolvePending('msg-1', 'world');
+    const result = manager.complete('msg-1', 'world');
 
     expect(result).toBe(true);
     expect(memoryRuntime.saveConversationTurn).toHaveBeenCalledWith('ses-1', 'hello', 'world', undefined);
@@ -78,7 +79,7 @@ describe('SessionManager.resolvePending', () => {
       resolve: () => {},
     });
 
-    const result = manager.resolvePending('msg-1', 'response', { saveTurn: false });
+    const result = manager.complete('msg-1', 'response', { saveTurn: false });
 
     expect(result).toBe(true);
     expect(memoryRuntime.saveConversationTurn).not.toHaveBeenCalled();
@@ -86,7 +87,7 @@ describe('SessionManager.resolvePending', () => {
   });
 
   it('pending 不存在返回 false', () => {
-    const result = manager.resolvePending('non-existent', 'response');
+    const result = manager.complete('non-existent', 'response');
     expect(result).toBe(false);
     expect(memoryRuntime.saveConversationTurn).not.toHaveBeenCalled();
   });
@@ -102,7 +103,7 @@ describe('SessionManager.resolvePending', () => {
     (memoryRuntime.saveConversationTurn as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('DB write fail'));
 
     // 不应抛错
-    const result = manager.resolvePending('msg-1', 'response');
+    const result = manager.complete('msg-1', 'response');
 
     expect(result).toBe(true);
     expect(manager.getPending('msg-1')).toBeUndefined();
@@ -117,7 +118,7 @@ describe('SessionManager.resolvePending', () => {
       resolve: (r) => { resolveArg = r; },
     });
 
-    manager.resolvePending('msg-1', 'partial response', {
+    manager.complete('msg-1', 'partial response', {
       contentOverride: 'partial response\n\n[已停止]',
     });
 
@@ -132,7 +133,7 @@ describe('SessionManager.resolvePending', () => {
     expect(resolveArg).toBe('partial response');
   });
 
-  it('finalizePending 保存 + 删除但不 resolve', async () => {
+  it('skipResolve 保存 + 删除但不 resolve，返回 pending 引用', async () => {
     let resolveCalled = false;
     manager.createPending('msg-1', {
       sessionId: 'ses-1',
@@ -140,11 +141,14 @@ describe('SessionManager.resolvePending', () => {
       resolve: () => { resolveCalled = true; },
     });
 
-    const result = manager.finalizePending('msg-1', 'response');
+    const result = manager.complete('msg-1', 'response', { skipResolve: true });
 
-    // 返回 pending 快照
-    expect(result).not.toBeNull();
-    expect(result!.sessionId).toBe('ses-1');
+    // 返回 pending 引用（不是 boolean true）
+    expect(result).not.toBe(true);
+    expect(result).not.toBe(false);
+    if (typeof result === 'object' && result !== null) {
+      expect(result.sessionId).toBe('ses-1');
+    }
     // 保存了对话轮次
     expect(memoryRuntime.saveConversationTurn).toHaveBeenCalledWith('ses-1', 'hello', 'response', undefined);
     // 删除了 pending
@@ -152,15 +156,18 @@ describe('SessionManager.resolvePending', () => {
     // 但没有自动 resolve
     expect(resolveCalled).toBe(false);
     // 手动 resolve 后才触发
-    result!.resolve('response');
-    expect(resolveCalled).toBe(true);
+    if (typeof result === 'object' && result !== null && 'resolve' in result) {
+      (result as any).resolve('response');
+      expect(resolveCalled).toBe(true);
+    }
   });
 
-  it('finalizePending 不存在时返回 null', () => {
-    expect(manager.finalizePending('non-existent', 'response')).toBeNull();
+  it('skipResolve 不存在时返回 false', () => {
+    const result = manager.complete('non-existent', 'response', { skipResolve: true });
+    expect(result).toBe(false);
   });
 
-  it('finalizePending saveConversationTurn 抛错时仍返回 pending', async () => {
+  it('skipResolve saveConversationTurn 抛错时仍返回 pending', async () => {
     manager.createPending('msg-1', {
       sessionId: 'ses-1',
       userMessage: 'hello',
@@ -168,10 +175,11 @@ describe('SessionManager.resolvePending', () => {
     });
     (memoryRuntime.saveConversationTurn as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('DB fail'));
 
-    const result = manager.finalizePending('msg-1', 'response');
+    const result = manager.complete('msg-1', 'response', { skipResolve: true });
 
     // 仍返回 pending（不抛错）
-    expect(result).not.toBeNull();
+    expect(result).not.toBe(false);
+    expect(result).not.toBe(true);
     expect(manager.getPending('msg-1')).toBeUndefined();
   });
 
@@ -182,7 +190,7 @@ describe('SessionManager.resolvePending', () => {
       resolve: () => {},
     });
 
-    manager.resolvePending('msg-1', 'response', {
+    manager.complete('msg-1', 'response', {
       contentOverride: 'should not be saved',
       saveTurn: false,
     });
@@ -198,7 +206,7 @@ describe('SessionManager.resolvePending', () => {
       resolve: () => {},
     });
 
-    manager.resolvePending('msg-1', 'response');
+    manager.complete('msg-1', 'response');
 
     expect(memoryRuntime.saveConversationTurn).toHaveBeenCalledWith(
       'ses-1',

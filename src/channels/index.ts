@@ -9,5 +9,5 @@ export type {
 export { CliChannel } from './cli-channel.js';
 export { TelegramChannel } from './telegram-channel.js';
 export type { TelegramChannelConfig } from './telegram-channel.js';
+export { SocketChannel } from './socket-channel.js';
 export { ChannelManager } from './manager.js';
-export { WsChannel } from './ws-channel.js';

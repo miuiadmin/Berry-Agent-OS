@@ -109,9 +109,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   readonly delegationManager: DelegationManager;
   private correctionFlow: CorrectionFlow;
   private fallbackRouter = new FallbackRouter();
-  daemonBridge: DaemonBridge | null = null;
-  pluginRuntimeV2: IPluginRuntimeV2 | null = null;
-  workspaceRouter: WorkspaceRouter | null = null;
+  /** R15: 后构造依赖——由 init() 统一注入，替代 setter + 公共字段赋值 */
+  private _daemonBridge: DaemonBridge | null = null;
+  private _pluginRuntimeV2: IPluginRuntimeV2 | null = null;
+  private _workspaceRouter: WorkspaceRouter | null = null;
   private superiorReviewFlow: SuperiorReviewFlow | null = null;
   private runtimeRegistry: RuntimeRegistry | null = null;
   private runtimeExecutor: RuntimeExecutor | null = null;
@@ -122,7 +123,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   /** 智能体间对话路由器（11.0） */
   dialogueRouter: DialogueRouter | null = null;
   /** 12.0 漂移检测器 */
-  driftDetector: import('./drift-detector.js').DriftDetector | null = null;
+  private _driftDetector: import('./drift-detector.js').DriftDetector | null = null;
 
   // Permission judge state
   private permissionFlow: PermissionFlow;
@@ -169,34 +170,52 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   get delegation(): DelegationManager { return this.delegationManager; }
   get fallback(): FallbackRouter { return this.fallbackRouter; }
 
-  setSuperiorReviewFlow(flow: SuperiorReviewFlow): void {
-    this.superiorReviewFlow = flow;
-  }
+  // ─── 公共属性访问器（R15: 替代直接字段赋值） ──────
 
-  setRuntimeRegistry(registry: RuntimeRegistry): void {
-    this.runtimeRegistry = registry;
-  }
+  get daemonBridge(): DaemonBridge | null { return this._daemonBridge; }
+  get pluginRuntimeV2(): IPluginRuntimeV2 | null { return this._pluginRuntimeV2; }
+  get driftDetector(): import('./drift-detector.js').DriftDetector | null { return this._driftDetector; }
+  get workspaceRouter(): WorkspaceRouter | null { return this._workspaceRouter; }
 
-  setRuntimeExecutor(executor: RuntimeExecutor): void {
-    this.runtimeExecutor = executor;
-  }
-
-  setCapabilityBus(bus: ICapabilityBus): void {
-    this.capabilityBusRef = bus;
-    // Wire Bus handlers to primary agent
-    const primaryAgent = this.registry.requireRole('primary');
-    const primary = this.agentManager.getAgent(primaryAgent.manifest.name);
-    if (primary) {
-      setupBusHandlers(primary.ipc, primaryAgent.manifest.name, bus);
+  /**
+   * R15: 后构造依赖统一初始化入口
+   *
+   * 替代 6 个 setXxx 方法和 4 个公共字段直接赋值。
+   * 所有运行时创建的依赖集中通过 init() 注入，
+   * 消除 setter 补丁模式和公共字段暴露。
+   *
+   * @param deps 后构造依赖（全部可选，按需传入）
+   */
+  init(deps: {
+    daemonBridge?: DaemonBridge | null;
+    pluginRuntimeV2?: IPluginRuntimeV2 | null;
+    driftDetector?: import('./drift-detector.js').DriftDetector | null;
+    workspaceRouter?: WorkspaceRouter | null;
+    superiorReviewFlow?: SuperiorReviewFlow | null;
+    runtimeRegistry?: RuntimeRegistry | null;
+    runtimeExecutor?: RuntimeExecutor | null;
+    capabilityBus?: ICapabilityBus | null;
+    worldModel?: WorldModelRuntime | null;
+    suggestionQueue?: SuggestionQueue | null;
+  }): void {
+    if (deps.daemonBridge !== undefined) this._daemonBridge = deps.daemonBridge;
+    if (deps.pluginRuntimeV2 !== undefined) this._pluginRuntimeV2 = deps.pluginRuntimeV2;
+    if (deps.driftDetector !== undefined) this._driftDetector = deps.driftDetector;
+    if (deps.workspaceRouter !== undefined) this._workspaceRouter = deps.workspaceRouter;
+    if (deps.superiorReviewFlow !== undefined) this.superiorReviewFlow = deps.superiorReviewFlow;
+    if (deps.runtimeRegistry !== undefined) this.runtimeRegistry = deps.runtimeRegistry;
+    if (deps.runtimeExecutor !== undefined) this.runtimeExecutor = deps.runtimeExecutor;
+    if (deps.capabilityBus !== undefined) {
+      this.capabilityBusRef = deps.capabilityBus;
+      // Wire Bus handlers to primary agent
+      const primaryAgent = this.registry.requireRole('primary');
+      const primary = this.agentManager.getAgent(primaryAgent.manifest.name);
+      if (primary) {
+        setupBusHandlers(primary.ipc, primaryAgent.manifest.name, deps.capabilityBus);
+      }
     }
-  }
-
-  setWorldModel(worldModel: WorldModelRuntime): void {
-    this.worldModelRef = worldModel;
-  }
-
-  setSuggestionQueue(queue: SuggestionQueue): void {
-    this.suggestionQueueRef = queue;
+    if (deps.worldModel !== undefined) this.worldModelRef = deps.worldModel;
+    if (deps.suggestionQueue !== undefined) this.suggestionQueueRef = deps.suggestionQueue;
   }
 
   /**
@@ -206,6 +225,62 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   dispose(): void {
     this.streamingFlusher.dispose();
     this.pendingReviewOrigins.clear();
+  }
+
+  // ═══ POST-COMPLETION HELPERS ═════════════════════════════════════
+
+  /**
+   * 对话完成后统一的「后完成学习」序列
+   *
+   * R15 解耦审计：final.response handler 和 handleTaskReviewResult 中
+   * queueEvolution + queueCapabilityEvolution + extract_feedback + worldModel
+   * 4 步几乎逐行重复。提取为统一 helper，消除补丁式复制粘贴。
+   *
+   * @param sessionId 对话 session
+   * @param userMessage 用户原始消息
+   * @param assistantResponse 最终回复内容
+   */
+  private onConversationCompleted(
+    sessionId: string,
+    userMessage: string,
+    assistantResponse: string,
+  ): void {
+    this.sessionManager.queueEvolution(sessionId, userMessage, assistantResponse);
+    this.sessionManager.queueCapabilityEvolution(sessionId, userMessage, assistantResponse);
+    this.dispatchFeedbackExtraction(sessionId, userMessage, assistantResponse, 'brain_learning');
+    this.worldModelRef?.updateFromConversation({
+      userMessage,
+      assistantResponse,
+      sessionId,
+    });
+  }
+
+  /**
+   * 统一的 feedback extraction dispatch helper
+   *
+   * R15 解耦审计：extract_feedback 的 dispatchModuleTask 调用在 orchestrator 中
+   * 出现 5 处（auto-approve / drift-timeout / drift-approve / final.response /
+   * handleTaskReviewResult），参数结构完全相同。提取为一行调用。
+   *
+   * @param sessionId 对话 session
+   * @param userMessage 用户原始消息
+   * @param assistantResponse 助手回复内容
+   * @param requester 请求来源（'brain_learning' 或 'post_review'）
+   */
+  private dispatchFeedbackExtraction(
+    sessionId: string,
+    userMessage: string,
+    assistantResponse: string,
+    requester: 'brain_learning' | 'post_review',
+  ): void {
+    this.dispatchModuleTask({
+      sessionId,
+      taskType: 'extract_feedback',
+      requester,
+      inputPayload: { taskType: 'extract_feedback', userMessage, assistantResponse },
+    }).catch((err) => {
+      logger.debug({ err, sessionId }, 'Feedback extraction dispatch failed');
+    });
   }
 
   private get proxyDeps(): ProxyHandlersDeps {
@@ -579,7 +654,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (pending) {
       this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
       // R14-1：中断场景也走 finalizeTask 统一入口
-      this.sessionManager.finalizeTask(primary.correlationId, { kind: 'terminated' });
+      this.sessionManager.fail(primary.correlationId, { kind: 'terminated' });
     }
 
     // 清理投机执行状态，防止 memory leak 和 stale handoff
@@ -771,7 +846,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const primary = this.agentManager.getAgent(primaryName);
     if (!primary) {
       // R14-1：unavailable 失败源走 finalizeTask 统一入口
-      this.sessionManager.finalizeTask(correlationId, { kind: 'unavailable' });
+      this.sessionManager.fail(correlationId, { kind: 'unavailable' });
       return;
     }
 
@@ -1007,20 +1082,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             const error = (event.data.error as string) || '执行失败';
             const resumable = event.data.resumable as boolean | undefined;
             this.streamingFlusher.remove(delegationId);
-            if (resumable) {
-              logger.info({ correlationId, error }, 'Execution failed but resumable');
-              this.delegationManager.fail(delegationId, `[resumable] ${error}`);
-              this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行中断（可恢复）: ${error}`);
-            } else {
-              this.delegationManager.fail(delegationId, error);
-              this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行失败: ${error}`);
-            }
+            this.delegationManager.fail(delegationId, resumable ? `[resumable] ${error}` : error);
+            this.sessionManager.fail(correlationId, {
+              kind: resumable ? 'cancelled' : 'failed',
+              agentName: runtime.name,
+              error: resumable ? `执行中断（可恢复）: ${error}` : error,
+            });
             return;
           }
           case 'execution_cancelled': {
             this.streamingFlusher.remove(delegationId);
             this.delegationManager.fail(delegationId, 'Cancelled');
-            this.sessionManager.resolvePending(correlationId, `[${runtime.name}] 执行已取消`);
+            this.sessionManager.fail(correlationId, { kind: 'cancelled', agentName: runtime.name });
             return;
           }
           default:
@@ -1040,22 +1113,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.streamingFlusher.remove(delegationId);
         this.delegationManager.fail(delegationId, 'No output produced');
         // R14-1：未产出输出 走 finalizeTask 统一入口
-        this.sessionManager.finalizeTask(correlationId, { kind: 'failed', agentName: runtime.name, error: '未产出任何输出' });
+        this.sessionManager.fail(correlationId, { kind: 'failed', agentName: runtime.name, error: '未产出任何输出' });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error({ correlationId, err }, 'Runtime execution error');
       this.streamingFlusher.remove(delegationId);
       this.delegationManager.fail(delegationId, message);
-      // R14-1：Runtime exception 兜底走 finalizeTask 统一入口
-      // P1-4: 通知前端 user 消息没有回复
-      getEventBus().emit('conversation.no_response', {
-        sessionId: pending.sessionId,
-        taskId: pending.taskId,
-        reason: `runtime_error: ${message}`,
-        correlationId,
-      });
-      this.sessionManager.finalizeTask(correlationId, { kind: 'runtime_error', agentName: runtime.name, error: message });
+      // R14-1：Runtime exception 兜底走 finalizeTask 统一入口（含 no_response 通知）
+      this.sessionManager.fail(correlationId, { kind: 'runtime_error', agentName: runtime.name, error: message });
     }
   }
 
@@ -1250,12 +1316,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             reason: !pending.intentAnchor ? 'auto_approve: no_intent_anchor' : 'auto_approve: level_A',
           });
           primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-          this.dispatchModuleTask({
-            sessionId,
-            taskType: 'extract_feedback',
-            requester: 'post_review',
-            inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
-          }).catch(() => {});
+          this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
           return;
         }
 
@@ -1284,12 +1345,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         // IPC 发送失败 → 自动 approve
         logger.warn({ correlationId }, 'review.request (conversation) IPC 发送失败，自动 approve');
         this.pendingReviewOrigins.delete(correlationId);
-        // 通知前端审核降级（与其他错误路径保持一致）
-        getEventBus().emit('conversation.no_response', { sessionId: pending.sessionId, reason: 'review_ipc_send_failed', taskId: pending.taskId, correlationId });
-        const dEntry = this.delegationManager.getByCorrelation(correlationId);
-        if (dEntry) this.delegationManager.complete(dEntry.id, draft);
-        // P0 兜底：审核失败路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
-        this.sessionManager.resolvePending(correlationId, draft);
+        this.approveReviewDegraded(correlationId, draft, 'review_ipc_send_failed', pending.sessionId);
         return;
       }
 
@@ -1299,12 +1355,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         if (!stillPending) return;
         logger.warn({ correlationId }, '对话审核超时，自动 approve');
         this.pendingReviewOrigins.delete(correlationId);
-        // 通知前端审核超时降级
-        getEventBus().emit('conversation.no_response', { sessionId: pending.sessionId, reason: 'review_timeout', taskId: pending.taskId, correlationId });
-        const dEntry = this.delegationManager.getByCorrelation(correlationId);
-        if (dEntry) this.delegationManager.complete(dEntry.id, draft);
-        // P0 兜底：审核超时路径必须把 assistant 回复入库，否则刷新后只看到 user 消息
-        this.sessionManager.resolvePending(correlationId, draft);
+        this.approveReviewDegraded(correlationId, draft, 'review_timeout', pending.sessionId);
       }, 30_000);
     });
 
@@ -1397,8 +1448,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 无 handoff — 正常关闭路径
       this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
       // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
-      const finalized = this.sessionManager.finalizePending(correlationId, response);
-      if (!finalized) return;
+      const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
+      if (!finalized || finalized === true) return;
 
       if (pending.taskId) {
         this.taskManager.complete(pending.taskId, { response, reviewVerdict });
@@ -1419,21 +1470,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         finalResponse: response,
       });
 
-      this.sessionManager.queueEvolution(sessionId, pending.userMessage, response);
-      this.sessionManager.queueCapabilityEvolution(sessionId, pending.userMessage, response);
-      this.dispatchModuleTask({
-        sessionId,
-        taskType: 'extract_feedback',
-        requester: 'brain_learning',
-        inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: response },
-      }).catch((err) => {
-        logger.debug({ err, sessionId }, 'Feedback extraction dispatch failed');
-      });
-      this.worldModelRef?.updateFromConversation({
-        userMessage: pending.userMessage,
-        assistantResponse: response,
-        sessionId,
-      });
+      this.onConversationCompleted(sessionId, pending.userMessage, response);
 
       getEventBus().emit('message.responded', {
         sessionId,
@@ -1466,24 +1503,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
 
     // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
-    const finalized = this.sessionManager.finalizePending(correlationId, response);
-    if (!finalized) return;
+    const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
+    if (!finalized || finalized === true) return;
 
-    this.sessionManager.queueEvolution(pending.sessionId, pending.userMessage, response);
-    this.sessionManager.queueCapabilityEvolution(pending.sessionId, pending.userMessage, response);
-    this.dispatchModuleTask({
-      sessionId: pending.sessionId,
-      taskType: 'extract_feedback',
-      requester: 'brain_learning',
-      inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: response },
-    }).catch((err) => {
-      logger.debug({ err, sessionId: pending.sessionId }, 'Feedback extraction dispatch failed');
-    });
-    this.worldModelRef?.updateFromConversation({
-      userMessage: pending.userMessage,
-      assistantResponse: response,
-      sessionId: pending.sessionId,
-    });
+    this.onConversationCompleted(pending.sessionId, pending.userMessage, response);
     // 所有后续操作完成后再 resolve
     finalized.resolve(response);
   }
@@ -1511,6 +1534,36 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
   }
 
+  /**
+   * 审核降级统一收尾。
+   *
+   * 当 reviewer 不可用 / IPC 发送失败 / 审核超时时，草稿回复仍有效（不是错误），
+   * 直接 approve 落库。封装 emit no_response → delegationManager.complete → sessionManager.complete
+   * 三步序列，消除 5 处手写重复。
+   *
+   * @param correlationId pending request 的 ID
+   * @param draft 有效的草稿回复（直接 approve）
+   * @param reason 降级原因（用于前端通知和日志）
+   * @param sessionId 对话 sessionId
+   */
+  private approveReviewDegraded(
+    correlationId: string,
+    draft: string,
+    reason: string,
+    sessionId: string,
+  ): void {
+    const pending = this.sessionManager.getPending(correlationId);
+    getEventBus().emit('conversation.no_response', {
+      sessionId,
+      reason,
+      taskId: pending?.taskId,
+      correlationId,
+    });
+    const entry = this.delegationManager.getByCorrelation(correlationId);
+    if (entry) this.delegationManager.complete(entry.id, draft);
+    this.sessionManager.complete(correlationId, draft);
+  }
+
   private onSuperiorChainRejected(correlationId: string, reason: string): void {
     const pending = this.sessionManager.getPending(correlationId);
     if (!pending) return;
@@ -1518,11 +1571,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (pending.taskId) this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId);
     this.pendingReviewOrigins.delete(correlationId);
     const entry = this.delegationManager.getByCorrelation(correlationId);
-    if (entry) {
-      this.delegationManager.fail(entry.id, `Superior rejected: ${reason}`);
-    }
-
-    this.sessionManager.resolvePending(correlationId, `[上级审核退回] ${reason}`);
+    if (entry) this.delegationManager.fail(entry.id, `Superior rejected: ${reason}`);
+    this.sessionManager.fail(correlationId, { kind: 'failed', error: `上级审核退回: ${reason}` });
   }
 
   private sendTaskResultForReview(fgEntry: { correlationId: string; sessionId: string }, pending: PendingRequest, draftResponse: string): void {
@@ -1540,10 +1590,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // reviewer 不可用（进程崩溃/未启动）→ 直接 approve，不挂死
     if (!reviewer || !reviewer.child.connected) {
       logger.warn({ correlationId: fgEntry.correlationId }, 'Reviewer 不可用，自动 approve');
-      // 通知前端审核降级（与其他错误路径保持一致）
-      getEventBus().emit('conversation.no_response', { sessionId: fgEntry.sessionId, reason: 'reviewer_unavailable', taskId: pending.taskId, correlationId: fgEntry.correlationId });
-      if (entry) this.delegationManager.complete(entry.id, draftResponse);
-      this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
+      this.approveReviewDegraded(fgEntry.correlationId, draftResponse, 'reviewer_unavailable', fgEntry.sessionId);
       return;
     }
 
@@ -1571,10 +1618,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // IPC 发送失败（进程已断连）→ 自动 approve
       logger.warn({ correlationId: fgEntry.correlationId }, 'review.request IPC 发送失败，自动 approve');
       this.pendingReviewOrigins.delete(fgEntry.correlationId);
-      // 通知前端审核降级
-      getEventBus().emit('conversation.no_response', { sessionId: fgEntry.sessionId, reason: 'review_ipc_send_failed', taskId: pending.taskId, correlationId: fgEntry.correlationId });
-      if (entry) this.delegationManager.complete(entry.id, draftResponse);
-      this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
+      this.approveReviewDegraded(fgEntry.correlationId, draftResponse, 'review_ipc_send_failed', fgEntry.sessionId);
       return;
     }
 
@@ -1586,10 +1630,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (!stillPending) return;
       logger.warn({ correlationId: fgEntry.correlationId, timeoutMs: reviewTimeoutMs }, '审核超时，自动 approve');
       this.pendingReviewOrigins.delete(fgEntry.correlationId);
-      // 通知前端审核超时降级
-      getEventBus().emit('conversation.no_response', { sessionId: fgEntry.sessionId, reason: 'review_timeout', taskId: pending.taskId, correlationId: fgEntry.correlationId });
-      if (entry) this.delegationManager.complete(entry.id, draftResponse);
-      this.sessionManager.resolvePending(fgEntry.correlationId, draftResponse);
+      this.approveReviewDegraded(fgEntry.correlationId, draftResponse, 'review_timeout', fgEntry.sessionId);
     }, reviewTimeoutMs);
   }
 
@@ -1688,7 +1729,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.streamingFlusher.remove(result.taskId);
       this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
       // R14-1：foreground 任务失败走 finalizeTask 统一入口
-      this.sessionManager.finalizeTask(fgEntry.correlationId, { kind: 'failed', agentName, error: result.error });
+      this.sessionManager.fail(fgEntry.correlationId, { kind: 'failed', agentName, error: result.error });
       return;
     }
 
@@ -1771,19 +1812,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         return;
       }
 
-      // R14-1：task.timeout 走 finalizeTask 统一入口
+      // R14-1：task.timeout 走 finalizeTask 统一入口（含 no_response 通知）
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
       const pending = this.sessionManager.getPending(entry.correlationId);
       if (!pending) return;
-      getEventBus().emit('conversation.no_response', {
-        sessionId: pending.sessionId,
-        taskId: pending.taskId,
-        reason: `task_timeout: ${targetAgent}`,
-        correlationId: entry.correlationId,
-      });
       this.streamingFlusher.remove(taskId);
-      this.sessionManager.finalizeTask(entry.correlationId, { kind: 'timeout', agentName: targetAgent, error: `任务执行超时（${targetAgent}）` });
+      this.sessionManager.fail(entry.correlationId, { kind: 'timeout', agentName: targetAgent, error: `任务执行超时（${targetAgent}）` });
     });
   }
 
@@ -1850,12 +1885,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       cleanup();
       logger.debug({ correlationId }, 'drift check timeout, auto-approve');
       primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-      this.dispatchModuleTask({
-        sessionId,
-        taskType: 'extract_feedback',
-        requester: 'post_review',
-        inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
-      }).catch(() => {});
+      this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
     }, 2000);
 
     const cleanup = () => {
@@ -1899,12 +1929,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       // 正常对齐 → approve
       primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-      this.dispatchModuleTask({
-        sessionId,
-        taskType: 'extract_feedback',
-        requester: 'post_review',
-        inputPayload: { taskType: 'extract_feedback', userMessage: pending.userMessage, assistantResponse: draft },
-      }).catch(() => {});
+      this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
     };
 
     brainAgent.ipc.onMessage('drift.check.result', handler);

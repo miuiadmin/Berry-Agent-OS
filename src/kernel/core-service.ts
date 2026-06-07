@@ -47,18 +47,10 @@ import { BuiltinDriver } from './runtime/drivers/builtin-driver.js';
 import { CheckpointService } from './checkpoint-service.js';
 import { ErrorClassifier } from './error-classifier.js';
 import { TaskCheckpointManager } from './task-checkpoint.js';
-import { ChannelManager, TelegramChannel, WsChannel } from '../channels/index.js';
+import { ChannelManager, TelegramChannel } from '../channels/index.js';
 import { WorkspaceManager } from '../workspaces/index.js';
-// web 层模块：kernel 通过结构化类型（start/stop）引用，不依赖具体类定义
-import { WebServer } from '../web/server.js';
-import { NotificationService } from '../intelligence/notification-service.js';
-import { MemoryLayerService } from '../intelligence/memory-layer-service.js';
-import { WorkspaceContextService } from '../intelligence/workspace-context-service.js';
-import { PluginScopeService } from '../intelligence/plugin-scope-service.js';
-import { TemplateService } from '../intelligence/template-service.js';
-import { AsyncDelegationService } from '../intelligence/async-delegation-service.js';
-import { HumanDelegationManager } from './human-delegation.js';
-import { registerNotificationHooks } from '../intelligence/notification-hooks.js';
+// R15: WebServer / intelligence 模块改为动态 import（initWebServer 内），消除 kernel→web 编译期依赖
+import type { HumanDelegationManager } from './human-delegation.js';
 import {
   handleMessage,
   handleChannelMessage,
@@ -248,7 +240,7 @@ export class CoreService {
       memoryRuntime: this.memoryRuntime,
     });
     this.messageRouter.setup();
-    this.messageRouter.pluginRuntimeV2 = this.pluginRuntimeV2;
+    this.messageRouter.init({ pluginRuntimeV2: this.pluginRuntimeV2 });
 
     // 启动 session 垃圾回收（5 分钟间隔，30 分钟无活动清理缓存与 pendingAsks）
     this.sessionManager.startGc();
@@ -256,7 +248,7 @@ export class CoreService {
     // 12.0: 初始化漂移检测器
     if (this.config.drift?.enabled !== false) {
       const { DriftDetector } = await import('./drift-detector.js');
-      this.messageRouter.driftDetector = new DriftDetector(getDb(), this.config.drift?.thresholds);
+      this.messageRouter.init({ driftDetector: new DriftDetector(getDb(), this.config.drift?.thresholds) });
     }
     this.registerSkillChangedHandler();
     this.registerPluginTools();
@@ -266,7 +258,7 @@ export class CoreService {
         heartbeatTimeoutMs: this.config.daemon.heartbeatTimeoutMs,
         taskTimeoutMs: this.config.daemon.taskTimeoutMs,
       });
-      this.messageRouter.daemonBridge = daemonBridge;
+      this.messageRouter.init({ daemonBridge });
       this.messageRouter.setupDaemonEvents();
     }
 
@@ -310,7 +302,7 @@ export class CoreService {
     }
 
     this.runtimeRegistry = runtimeRegistry;
-    this.messageRouter.setRuntimeRegistry(runtimeRegistry);
+    this.messageRouter.init({ runtimeRegistry });
 
     // Capability Bus: unified capability invocation
     const { CapabilityBus, PermissionGate, BusAuditLogger, registerToolsAsBusCapabilities, registerPermissionCapabilities } = await import('../bus/index.js');
@@ -345,7 +337,7 @@ export class CoreService {
     });
 
     this.capabilityBus = capabilityBus;
-    this.messageRouter.setCapabilityBus(capabilityBus);
+    this.messageRouter.init({ capabilityBus });
     capabilityBus.startIdleDetection();
     // Transaction Manager: atomic multi-step operations with revert (§2.1)
     const { TransactionManager } = await import('../bus/transaction.js');
@@ -358,7 +350,7 @@ export class CoreService {
     // World Model: continuous global state for Brain decisions
     const { WorldModelRuntime } = await import('./world-model.js');
     const worldModel = new WorldModelRuntime(getDb());
-    this.messageRouter.setWorldModel(worldModel);
+    this.messageRouter.init({ worldModel });
 
     // Feed external events into World Model for contextual awareness
     this.eventBus.on('daemon.task.failed', ({ taskId, runtime, error }) => {
@@ -407,7 +399,7 @@ export class CoreService {
     const { SuggestionQueue } = await import('./suggestion-queue.js');
     const suggestionQueue = new SuggestionQueue(getDb());
     willLoop.setSuggestionQueue(suggestionQueue);
-    this.messageRouter.setSuggestionQueue(suggestionQueue);
+    this.messageRouter.init({ suggestionQueue });
 
     // Schedule daily cleanup of old suggestions
     this.suggestionCleanupTimer = setInterval(() => {
@@ -459,7 +451,7 @@ export class CoreService {
     this.checkpointService = checkpointService;
 
     const runtimeExecutor = new RuntimeExecutor(checkpointService, errorClassifier);
-    this.messageRouter.setRuntimeExecutor(runtimeExecutor);
+    this.messageRouter.init({ runtimeExecutor });
 
     // Recover resumable tasks from previous run
     checkpointService.recoverOnStartup();
@@ -473,47 +465,32 @@ export class CoreService {
     // 恢复崩溃前未完成的 ask_user 状态（进程崩溃后内存 Map 丢失，从 SQLite 恢复）
     this.sessionManager!.recoverPendingAsks(getDb());
 
-    // P2-13: agent.crashed 期间的消息缓冲队列
+    // P2-13 + R15: agent.crashed 期间的消息缓冲队列
     // crash handler 执行期间新消息可能被路由到正在重启的 agent，导致消息丢失。
-    // 解决方案：crash handler 运行时缓冲消息，agent waitForReady 完成后才释放。
-    const crashedAgents = new Set<string>();
-    const messageBuffer: Array<{ payload: RouteRequestPayload; correlationId: string }> = [];
-    let crashBufferTimer: ReturnType<typeof setTimeout> | null = null;
+    // R15 提取为独立 CrashBufferManager，消除内联并发控制和重复 drain 逻辑。
+    const { CrashBufferManager } = await import('./crash-buffer-manager.js');
+    const crashBuffer = new CrashBufferManager();
 
     this.eventBus.on('agent.crashed', ({ name }) => {
       // 标记 agent 正在崩溃处理中，缓冲后续消息
-      crashedAgents.add(name);
-      if (crashBufferTimer) clearTimeout(crashBufferTimer);
-      // 安全网：10s 后自动释放缓冲（防 crash handler 卡死）
-      crashBufferTimer = setTimeout(() => {
-        crashedAgents.delete(name);
-        // 释放缓冲消息
-        while (messageBuffer.length > 0) {
-          const { payload, correlationId } = messageBuffer.shift()!;
-          this.messageRouter?.sendRouteRequest(payload, correlationId);
-        }
-      }, 10_000);
+      crashBuffer.markCrashed(name);
+      crashBuffer.setSafetyTimer(name, this.messageRouter!);
 
       this.taskManager!.failByAgent(name, `智能体 ${name} 崩溃`);
       this.messageRouter?.failDelegationsByAgent(name, `智能体 ${name} 崩溃`);
-      // R14-1：5 兜底合一。agent.crashed 失败源统一调 sessionManager.finalizeTask，
-      // 不再自己拼 partialContent + contentOverride + resolvePending。
+      // R14-1：5 兜底合一。agent.crashed 失败源统一调 sessionManager.fail，
+      // 不再自己拼 partialContent + contentOverride + complete。
       // taskManager.failByAgent 已 emit 'task.failed'，但本路径还需要清理
-      // pending state（in-memory 仍持有），所以显式调 finalizeTask。
+      // pending state（in-memory 仍持有），所以显式调 fail。
       for (const [msgId, pending] of this.sessionManager!.entries()) {
         if (!pending.taskId) continue;
         const task = this.taskManager!.getTask(pending.taskId);
         if (task?.target_agent === name && task.status === 'failed') {
-          this.sessionManager!.finalizeTask(msgId, { kind: 'crash', agentName: name });
+          this.sessionManager!.fail(msgId, { kind: 'crash', agentName: name });
         }
       }
-      // crash handler 完成，清除崩溃标记和释放缓冲
-      crashedAgents.delete(name);
-      if (crashBufferTimer) { clearTimeout(crashBufferTimer); crashBufferTimer = null; }
-      while (messageBuffer.length > 0) {
-        const { payload, correlationId } = messageBuffer.shift()!;
-        this.messageRouter?.sendRouteRequest(payload, correlationId);
-      }
+      // crash handler 完成，释放缓冲
+      crashBuffer.release(name, this.messageRouter!);
     });
 
     this.eventBus.on('budget.alert', ({ scope, scopeId, tier, usedPercent, message }) => {
@@ -536,65 +513,8 @@ export class CoreService {
       this.spawnDaemonProcess();
     }
 
-    if (this.config.web.enabled) {
-      const msgCtx = this.buildServiceContainer();
-      const db = getDb();
-      const notificationService = new NotificationService(db, getEventBus());
-      const memoryLayerService = new MemoryLayerService(db);
-      const workspaceContextService = new WorkspaceContextService(db);
-      const pluginScopeService = new PluginScopeService(db);
-      const templateService = new TemplateService(db);
-      const asyncDelegationService = new AsyncDelegationService(db);
-      this.humanDelegationManager = new HumanDelegationManager(db);
-
-      const cleanupHooks = registerNotificationHooks(getEventBus(), () => notificationService);
-      this.notificationHooksCleanup = cleanupHooks;
-
-      // P2-10: 启动时清理残留的 pending 委托（重启后 in-memory callback/timeout 丢失）
-      this.humanDelegationManager.recoverOnStartup();
-
-      this.webServer = new WebServer({
-        port: this.config.web.port,
-        host: this.config.web.host,
-        deps: {
-          taskManager: this.taskManager!,
-          sessionManager: this.sessionManager!,
-          agentManager: this.agentManager,
-          agentLifecycle: this.agentLifecycle!,
-          eventBus: getEventBus(),
-          config: this.config,
-          configService: this.configService!,
-          permissionCoordinator: this.permissionCoordinator!,
-          handleMessage: (request, socket) => handleMessage(request, socket, msgCtx),
-          // P0-3 修复：handleInterrupt 通过 EventBus 投递，不再直写 ws
-          // 符合设计原则'kernel 业务路径不持 user-side ws.Socket'
-          handleInterrupt: (sessionId, reason) => {
-            const result = this.messageRouter!.interruptSession(sessionId, reason);
-            getEventBus().emit('conversation.interrupted', {
-              sessionId,
-              taskId: result.taskId ?? null,
-              reason: reason ?? 'user_interrupt',
-            });
-          },
-          resolvePermissionConfirm: (requestId, approved, reason) => {
-            return this.messageRouter!.resolveUserPermissionConfirm(requestId, approved, reason);
-          },
-          startTimeMs: Date.now(),
-          secret: this.config.web.secret,
-          notificationService,
-          memoryLayerService,
-          workspaceContextService,
-          pluginScopeService,
-          templateService,
-          asyncDelegationService,
-          humanDelegationManager: this.humanDelegationManager,
-          getProviderRegistry: () => this.providerRegistryHolder!.current,
-          // W7 修复：Drift metrics 工厂，替代 api-routes.ts 中的 require() 动态加载
-          getDriftMetrics: () => new DriftMetricsService(getDb()),
-        },
-      });
-      await this.webServer.start();
-    }
+    // R15: WebServer 初始化提取为独立方法（+ 动态 import 消除 kernel→web 编译期依赖）
+    await this.initWebServer();
 
     this.agentWatcher = new AgentWatcher(this.agentLifecycle!, this.registry);
     this.agentWatcher.watch(getUserAgentsDir());
@@ -637,7 +557,7 @@ export class CoreService {
 
     if (this.messageRouter && this.workspaceManager) {
       const wsRouter = new WorkspaceRouter(getDb(), this.workspaceManager, this.messageRouter.fallback);
-      this.messageRouter.workspaceRouter = wsRouter;
+      this.messageRouter.init({ workspaceRouter: wsRouter });
 
       const delegationTools = createDelegationTools({
         db: getDb(),
@@ -663,7 +583,7 @@ export class CoreService {
         agentHierarchy,
         trustManager,
       });
-      this.messageRouter.setSuperiorReviewFlow(superiorReviewFlow);
+      this.messageRouter.init({ superiorReviewFlow });
 
       const teamTools = createTeamTools({
         db: getDb(),
@@ -687,10 +607,9 @@ export class CoreService {
     const { registerSessionSearchCapability } = await import('../memory/session-search.js');
     registerSessionSearchCapability(capabilityBus, getDb());
 
-    // P2-12: 始终创建 ChannelManager，WS 作为统一 channel 接入
+    // P2-12: 始终创建 ChannelManager，Telegram/CLI 等非 WS channel 统一管理
+    // WS 的 inbound 走 ws-handler.ts，outbound 走 WsEventBridge，不经过 ChannelManager
     this.channelManager = new ChannelManager();
-    const wsChannel = new WsChannel();
-    this.channelManager.register(wsChannel);
     this.channelManager.onMessage((msg) => {
       handleChannelMessage(msg.userId, msg.text, msg.channelType, this.buildServiceContainer());
     });
@@ -885,6 +804,87 @@ export class CoreService {
     });
 
     logger.info({ pid: this.daemonChild.pid }, 'Daemon process spawned');
+  }
+
+  /**
+   * 初始化 Web 服务器（HTTP API + WebSocket + 嵌入式 SPA）
+   *
+   * R15 解耦审计：从 startInternal 提取为独立方法 + 动态 import，
+   * 消除 kernel → src/web/server.ts 的编译期依赖（M2+M3）。
+   * kernel 通过结构化类型 { start(); stop() } 引用 WebServer，
+   * 不持有具体类引用。
+   */
+  private async initWebServer(): Promise<void> {
+    if (!this.config.web.enabled) return;
+
+    // R15: 动态 import 消除 kernel → web 编译期依赖
+    const { WebServer } = await import('../web/server.js');
+    const { NotificationService } = await import('../intelligence/notification-service.js');
+    const { MemoryLayerService } = await import('../intelligence/memory-layer-service.js');
+    const { WorkspaceContextService } = await import('../intelligence/workspace-context-service.js');
+    const { PluginScopeService } = await import('../intelligence/plugin-scope-service.js');
+    const { TemplateService } = await import('../intelligence/template-service.js');
+    const { AsyncDelegationService } = await import('../intelligence/async-delegation-service.js');
+    const { HumanDelegationManager } = await import('./human-delegation.js');
+    const { registerNotificationHooks } = await import('../intelligence/notification-hooks.js');
+
+    const msgCtx = this.buildServiceContainer();
+    const db = getDb();
+    const notificationService = new NotificationService(db, getEventBus());
+    const memoryLayerService = new MemoryLayerService(db);
+    const workspaceContextService = new WorkspaceContextService(db);
+    const pluginScopeService = new PluginScopeService(db);
+    const templateService = new TemplateService(db);
+    const asyncDelegationService = new AsyncDelegationService(db);
+    this.humanDelegationManager = new HumanDelegationManager(db);
+
+    const cleanupHooks = registerNotificationHooks(getEventBus(), () => notificationService);
+    this.notificationHooksCleanup = cleanupHooks;
+
+    // P2-10: 启动时清理残留的 pending 委托（重启后 in-memory callback/timeout 丢失）
+    this.humanDelegationManager.recoverOnStartup();
+
+    this.webServer = new WebServer({
+      port: this.config.web.port,
+      host: this.config.web.host,
+      deps: {
+        taskManager: this.taskManager!,
+        sessionManager: this.sessionManager!,
+        agentManager: this.agentManager,
+        agentLifecycle: this.agentLifecycle!,
+        eventBus: getEventBus(),
+        config: this.config,
+        configService: this.configService!,
+        permissionCoordinator: this.permissionCoordinator!,
+        handleMessage: (request, socket) => handleMessage(request, socket, msgCtx),
+        // P0-3 修复：handleInterrupt 通过 EventBus 投递，不再直写 ws
+        // 符合设计原则'kernel 业务路径不持 user-side ws.Socket'
+        handleInterrupt: (sessionId, reason) => {
+          const result = this.messageRouter!.interruptSession(sessionId, reason);
+          getEventBus().emit('conversation.interrupted', {
+            sessionId,
+            taskId: result.taskId ?? null,
+            reason: reason ?? 'user_interrupt',
+          });
+        },
+        resolvePermissionConfirm: (requestId, approved, reason) => {
+          return this.messageRouter!.resolveUserPermissionConfirm(requestId, approved, reason);
+        },
+        startTimeMs: Date.now(),
+        secret: this.config.web.secret,
+        notificationService,
+        memoryLayerService,
+        workspaceContextService,
+        pluginScopeService,
+        templateService,
+        asyncDelegationService,
+        humanDelegationManager: this.humanDelegationManager,
+        getProviderRegistry: () => this.providerRegistryHolder!.current,
+        // W7 修复：Drift metrics 工厂，替代 api-routes.ts 中的 require() 动态加载
+        getDriftMetrics: () => new DriftMetricsService(getDb()),
+      },
+    });
+    await this.webServer.start();
   }
 
   getTakeoverController(): TakeoverController | null {
