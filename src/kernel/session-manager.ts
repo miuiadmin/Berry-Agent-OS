@@ -153,6 +153,41 @@ export class SessionManager {
     return true;
   }
 
+  /**
+   * 半收尾 pending request：保存对话轮次 → 删除 pending → 返回 pending 快照。
+   * 不调用 resolve，留由调用方执行额外操作（如 evolution、audit、task complete）
+   * 后再手动 pending.resolve(response)。
+   *
+   * 适用于正常完成路径（final.response / handleTaskReviewResult），
+   * 这些路径在 resolve 前后还有 evolution/audit 等需要 pending 数据的操作。
+   *
+   * @param msgId pending request 的 ID
+   * @param response 入库的回复文本
+   * @returns pending 快照（含 resolve 闭包），或 null（无此 pending）
+   */
+  finalizePending(msgId: string, response: string): PendingRequest | null {
+    const pending = this.pendingRequests.get(msgId);
+    if (!pending) return null;
+
+    // 保存对话轮次
+    if (pending.userMessage) {
+      try {
+        this.saveConversationTurn(
+          pending.sessionId,
+          pending.userMessage,
+          response,
+          pending.reasoning,
+        );
+      } catch (err) {
+        logger.error({ err, msgId, sessionId: pending.sessionId }, 'finalizePending saveConversationTurn 失败');
+      }
+    }
+
+    // 删除 pending（含 clearTimeout），但保留引用供调用方 resolve
+    this.deletePending(msgId);
+    return pending;
+  }
+
   entries(): IterableIterator<[string, PendingRequest]> {
     return this.pendingRequests.entries();
   }

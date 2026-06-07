@@ -132,6 +132,49 @@ describe('SessionManager.resolvePending', () => {
     expect(resolveArg).toBe('partial response');
   });
 
+  it('finalizePending 保存 + 删除但不 resolve', async () => {
+    let resolveCalled = false;
+    manager.createPending('msg-1', {
+      sessionId: 'ses-1',
+      userMessage: 'hello',
+      resolve: () => { resolveCalled = true; },
+    });
+
+    const result = manager.finalizePending('msg-1', 'response');
+
+    // 返回 pending 快照
+    expect(result).not.toBeNull();
+    expect(result!.sessionId).toBe('ses-1');
+    // 保存了对话轮次
+    expect(memoryRuntime.saveConversationTurn).toHaveBeenCalledWith('ses-1', 'hello', 'response', undefined);
+    // 删除了 pending
+    expect(manager.getPending('msg-1')).toBeUndefined();
+    // 但没有自动 resolve
+    expect(resolveCalled).toBe(false);
+    // 手动 resolve 后才触发
+    result!.resolve('response');
+    expect(resolveCalled).toBe(true);
+  });
+
+  it('finalizePending 不存在时返回 null', () => {
+    expect(manager.finalizePending('non-existent', 'response')).toBeNull();
+  });
+
+  it('finalizePending saveConversationTurn 抛错时仍返回 pending', async () => {
+    manager.createPending('msg-1', {
+      sessionId: 'ses-1',
+      userMessage: 'hello',
+      resolve: () => {},
+    });
+    (memoryRuntime.saveConversationTurn as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('DB fail'));
+
+    const result = manager.finalizePending('msg-1', 'response');
+
+    // 仍返回 pending（不抛错）
+    expect(result).not.toBeNull();
+    expect(manager.getPending('msg-1')).toBeUndefined();
+  });
+
   it('同时支持 contentOverride 和 saveTurn: false', () => {
     manager.createPending('msg-1', {
       sessionId: 'ses-1',

@@ -1396,7 +1396,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       // 无 handoff — 正常关闭路径
       this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
-      this.sessionManager.deletePending(correlationId);
+      // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
+      const finalized = this.sessionManager.finalizePending(correlationId, response);
+      if (!finalized) return;
 
       if (pending.taskId) {
         this.taskManager.complete(pending.taskId, { response, reviewVerdict });
@@ -1417,7 +1419,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         finalResponse: response,
       });
 
-      this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
       this.sessionManager.queueEvolution(sessionId, pending.userMessage, response);
       this.sessionManager.queueCapabilityEvolution(sessionId, pending.userMessage, response);
       this.dispatchModuleTask({
@@ -1441,7 +1442,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         verdict: reviewVerdict,
       });
 
-      pending.resolve(response);
+      // 所有后续操作完成后再 resolve
+      finalized.resolve(response);
 
       // §9.0 Cleanup speculative state for this correlation
       this.speculativeCorrelations.delete(correlationId);
@@ -1463,8 +1465,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.complete(entry.id, response);
     }
 
-    this.sessionManager.deletePending(correlationId);
-    this.sessionManager.saveConversationTurn(pending.sessionId, pending.userMessage, response, pending.reasoning);
+    // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
+    const finalized = this.sessionManager.finalizePending(correlationId, response);
+    if (!finalized) return;
+
     this.sessionManager.queueEvolution(pending.sessionId, pending.userMessage, response);
     this.sessionManager.queueCapabilityEvolution(pending.sessionId, pending.userMessage, response);
     this.dispatchModuleTask({
@@ -1480,7 +1484,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       assistantResponse: response,
       sessionId: pending.sessionId,
     });
-    pending.resolve(response);
+    // 所有后续操作完成后再 resolve
+    finalized.resolve(response);
   }
 
   private onSuperiorChainCompleted(correlationId: string, modifiedResponse: string | undefined, reviewerIpc: AgentIpc, reviewerName: string): void {
