@@ -62,21 +62,29 @@ export class TelegramChannel implements MessageChannel {
     this.handlers.push(handler);
   }
 
+  /** poll 失败时的退避延迟（毫秒），指数退避策略 */
+  private pollBackoff = 0;
+
   private poll(): void {
     if (!this.running) return;
 
     this.getUpdates()
       .then((updates) => {
+        this.pollBackoff = 0; // 成功后重置退避
         for (const update of updates) {
           this.handleUpdate(update);
         }
       })
       .catch((err) => {
-        logger.warn({ err: (err as Error).message }, 'Telegram polling 失败');
+        // 指数退避：1s → 2s → 4s → ... 最大 30s
+        this.pollBackoff = Math.min((this.pollBackoff || 1000) * 2, 30000);
+        logger.warn({ err: (err as Error).message, backoffMs: this.pollBackoff }, 'Telegram polling 失败，退避');
       })
       .finally(() => {
         if (this.running) {
-          this.pollTimer = setTimeout(() => this.poll(), this.pollingInterval);
+          // 有退避时用退避延迟，否则用正常轮询间隔
+          const delay = this.pollBackoff || this.pollingInterval;
+          this.pollTimer = setTimeout(() => this.poll(), delay);
         }
       });
   }
@@ -147,18 +155,33 @@ export class TelegramChannel implements MessageChannel {
   }
 
   private async apiCall<T = unknown>(method: string, body?: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${this.apiBase}/${method}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    // 简易限流重试：遇到 429 Too Many Requests 时提取 retry-after 并等待
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const response = await fetch(`${this.apiBase}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Telegram API ${method} failed: ${response.status} ${text}`);
+      if (response.status === 429) {
+        // Telegram API 429：解析 retry_after 参数，等待后重试
+        const retryAfter = response.headers.get('retry-after');
+        const waitMs = retryAfter ? parseFloat(retryAfter) * 1000 : (attempt + 1) * 2000;
+        logger.warn({ method, attempt, waitMs }, 'Telegram API 429 限流，等待重试');
+        await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 10000)));
+        continue;
+      }
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Telegram API ${method} failed: ${response.status} ${text}`);
+      }
+
+      return response.json() as Promise<T>;
     }
 
-    return response.json() as Promise<T>;
+    throw new Error(`Telegram API ${method} 429 限流重试耗尽`);
   }
 }
 

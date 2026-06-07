@@ -171,6 +171,8 @@ const MessageBubble = memo(function MessageBubble({
   const isUser = message.role === "user";
   const isError = message.status === "error";
   const isStreaming = message.status === "streaming";
+  const isSending = isUser && message.status === "sending";
+  const isUserFailed = isUser && message.status === "failed";
   const [editing, setEditing] = useState(false);
   const t = useT();
   const { locale } = useLocale();
@@ -202,9 +204,12 @@ const MessageBubble = memo(function MessageBubble({
           "relative max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-sm leading-relaxed",
           isError
             ? "bg-destructive/10 border border-destructive/30 text-foreground"
-            : isUser
-              ? "bg-brand text-brand-foreground"
-              : "bg-muted text-foreground",
+            : isUserFailed
+              ? "bg-brand/60 border border-yellow-500/40 text-brand-foreground"
+              : isUser
+                ? "bg-brand text-brand-foreground"
+                : "bg-muted text-foreground",
+          isSending && "opacity-70",
           isStreaming && !isUser && "animate-stream-pulse",
         )}
       >
@@ -239,6 +244,30 @@ const MessageBubble = memo(function MessageBubble({
                 {t("common.retry")}
               </button>
             )}
+          </div>
+        )}
+        {/* 用户消息发送失败提示 + 重试 */}
+        {isUserFailed && (
+          <div className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 space-y-1">
+            <div className="flex items-center gap-1.5">
+              <AlertCircle className="size-3 shrink-0" />
+              <span>{t("chat.failedToSend")}</span>
+            </div>
+            {onRetry && (
+              <button
+                onClick={() => onRetry(message.id)}
+                className="inline-flex items-center gap-0.5 underline hover:no-underline"
+              >
+                <RotateCcw className="size-2.5" />
+                {t("common.retry")}
+              </button>
+            )}
+          </div>
+        )}
+        {/* 用户消息发送中指示 */}
+        {isSending && (
+          <div className="mt-1 text-[11px] text-brand-foreground/50 flex items-center gap-1">
+            <span className="size-1 animate-pulse rounded-full bg-current" />
           </div>
         )}
         {message.attachments && message.attachments.length > 0 && (

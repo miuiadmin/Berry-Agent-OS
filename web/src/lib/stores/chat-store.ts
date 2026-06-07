@@ -576,3 +576,47 @@ export function updateLastToolCallResult(toolName: string, patch: { isError?: bo
     return { toolCalls: calls };
   });
 }
+
+// ─── 跨标签页 localStorage 同步 ────────────────────────────────
+// 多标签页共享 "chat-storage" key，zustand persist 后写者覆盖前者。
+// 通过 storage event 监听其他标签页的写入，将消息列表合并（按 id 去重取并集），
+// 避免 Tab B 的写入丢失 Tab A 已有的消息。
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    // 只关心 chat-storage key 的变更
+    if (e.key !== "chat-storage" || !e.newValue) return;
+
+    try {
+      const incoming = JSON.parse(e.newValue) as {
+        state?: { messages?: ChatMessage[]; sessionId?: string | null };
+      };
+      if (!incoming.state?.messages) return;
+
+      const localState = useChatStore.getState();
+      const localMsgs = localState.messages;
+      const remoteMsgs = incoming.state.messages;
+
+      // 按 id 去重：取并集，相同 id 保留 content 更长的（streaming 内容更丰富）
+      const mergedMap = new Map<string, ChatMessage>();
+      for (const m of localMsgs) mergedMap.set(m.id, m);
+      for (const m of remoteMsgs) {
+        const existing = mergedMap.get(m.id);
+        // 不存在则添加；已存在则保留内容更长的版本
+        if (!existing || m.content.length > existing.content.length) {
+          mergedMap.set(m.id, m);
+        }
+      }
+
+      // 排序：按 timestamp 稳定排列
+      const merged = [...mergedMap.values()].sort((a, b) => a.timestamp - b.timestamp);
+
+      // 仅当合并结果与本地不同时才更新（避免无限循环）
+      if (merged.length !== localMsgs.length) {
+        useChatStore.setState({ messages: merged });
+      }
+    } catch {
+      // 解析失败静默忽略，不影响本地状态
+    }
+  });
+}

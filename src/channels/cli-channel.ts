@@ -23,6 +23,8 @@ export class CliChannel implements MessageChannel {
   send(userId: string, message: OutgoingMessage): Promise<void> {
     const socket = this.activeSockets.get(userId);
     if (!socket || socket.destroyed) {
+      // 清理已断连的 ghost 条目，防止长期运行累积
+      if (socket?.destroyed) this.activeSockets.delete(userId);
       logger.debug({ userId }, 'CLI send: socket 不可用');
       return Promise.resolve();
     }
@@ -42,6 +44,10 @@ export class CliChannel implements MessageChannel {
   handleSocketMessage(text: string, socket: Socket, sessionId?: string): void {
     const userId = sessionId ?? genId('cli');
     this.activeSockets.set(userId, socket);
+
+    // 注册 close/error 回调自动清理 ghost 条目，防止长期运行累积
+    socket.on('close', () => { this.activeSockets.delete(userId); });
+    socket.on('error', () => { this.activeSockets.delete(userId); });
 
     const incoming: IncomingMessage = {
       channelId: genId('msg'),

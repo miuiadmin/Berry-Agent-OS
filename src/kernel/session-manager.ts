@@ -370,6 +370,32 @@ export class SessionManager {
   }
 
   /**
+   * 从 SQLite 直接查询所有 pending asks（WS 重连重放用）。
+   * 与 getAllPendingAsks（内存 Map）不同，此方法直接查 SQLite，
+   * 与 replayPendingRequests 的其他两类（delegation/permissions 直接查 DB）保持一致。
+   * 进程内状态和 DB 始终同步（setPendingAsk 写入后立即 persistAskToDb），
+   * 所以两者结果等价，但此方法更严格地遵循"replay 从 DB 读"原则。
+   */
+  getAllPendingAsksFromDb(): ReadonlyArray<PendingAskState> {
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        'SELECT session_id, task_id, agent_name, question, correlation_id FROM pending_asks',
+      ).all() as Array<{ session_id: string; task_id: string; agent_name: string; question: string; correlation_id: string }>;
+      return rows.map((row) => ({
+        sessionId: row.session_id,
+        taskId: row.task_id,
+        agentName: row.agent_name,
+        question: row.question,
+        correlationId: row.correlation_id,
+      }));
+    } catch (err) {
+      logger.error({ err }, 'getAllPendingAsksFromDb 查询失败，回退到内存');
+      return [...this.pendingAsks.values()];
+    }
+  }
+
+  /**
    * 从 SQLite 恢复 pending asks（服务启动时调用）。
    * 与 recoverSessions 类似，在 start() 阶段调用。
    * 进程崩溃后 pending asks 仍然有效——用户重连后可以继续回答。

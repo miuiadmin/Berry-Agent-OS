@@ -98,20 +98,22 @@ export function scanOrphanUserRows(): { reconciled: number; scanned: number } {
  * daemon 启动后启动；外部 signal（graceful shutdown）时停止。
  */
 /**
- * OrphanReconciler - daemon 启动时一次性的孤儿 user row 兜底扫描器。
+ * OrphanReconciler - 孤儿 user row 兜底扫描器。
  *
- * R6 重构：原方案用 setInterval 60s 持续扫（"补丁式"扫，
- * 暴露了 in-memory pendingRequests 状态脆弱的事实源问题）。
- * 新方案：daemon 启动时一次性扫描——在已有架构（conversations 表 +
- * saveMessage）内自然处理；in-memory pending 的脆弱性由 taskManager /
- * streamingFlusher / saveConversationTurn 多层兜底共同覆盖。
+ * 提供两种运行模式：
+ * 1. 启动时一次性扫描（runOnce）— 覆盖上次运行遗留的孤儿
+ * 2. 周期性扫描（start/stop）— 覆盖运行期间产生的短期孤儿
+ *    （如进程内对话超时但未被其他兜底机制捕获的场景）
  *
- * 类保留供未来扩展（如 emit 'orphan.reconciled' 事件给前端通知）。
- * 实际启动序列：bootstrap.startupRecovery() 调 runOnce() 一次。
+ * 周期扫描间隔默认 120s，大于 ORPHAN_WINDOW_MS（60s），
+ * 确保孤儿有足够时间被正常机制处理后再被兜底。
  */
 export class OrphanReconciler {
   // EventBus 参数保留供未来 emit 事件用（如 'orphan.reconciled'），当前实现不需要
   constructor(_eventBus: EventBus) {}
+
+  /** 周期扫描定时器 */
+  private timer: ReturnType<typeof setInterval> | null = null;
 
   /** 单次扫描 + 写入兜底 */
   runOnce(): { reconciled: number; scanned: number } {
@@ -120,6 +122,31 @@ export class OrphanReconciler {
     } catch (err) {
       logger.error({ err }, 'orphan reconciler 扫描失败');
       return { reconciled: 0, scanned: 0 };
+    }
+  }
+
+  /**
+   * 启动周期性扫描（120s 间隔）。
+   * 通常在 bootstrap.startupRecovery() 调用 runOnce() 后调用。
+   */
+  start(intervalMs = 120_000): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => {
+      const result = this.runOnce();
+      if (result.reconciled > 0) {
+        logger.info(result, '周期性孤儿扫描完成');
+      }
+    }, intervalMs);
+    this.timer.unref();
+    logger.debug({ intervalMs }, 'OrphanReconciler 周期扫描已启动');
+  }
+
+  /** 停止周期性扫描 */
+  stop(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+      logger.debug('OrphanReconciler 周期扫描已停止');
     }
   }
 }
