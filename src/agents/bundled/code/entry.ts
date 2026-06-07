@@ -104,6 +104,36 @@ function ensureLockedTools(): LockManager {
   return lockManager;
 }
 
+/**
+ * 从 code agent 任务结果中构建用户友好的回复文本。
+ * 优先使用 implementation phase 的 LLM 输出（自然语言描述），
+ * 而非 lastPhase.summary（可能是 "测试失败: ..." 等 terse 文本）。
+ *
+ * @param result runTaskPhases 返回的完整结果
+ * @returns 用户可见的自然语言回复
+ */
+function buildUserResponse(result: { phases: Array<{ phase: string; success: boolean; summary: string }>; success: boolean; summary: string; filesChanged?: string[]; testResult?: { passed: boolean } }): string {
+  const parts: string[] = [];
+  const filesChanged = result.filesChanged ?? [];
+
+  // 优先找 implementation phase 的 summary（LLM 的完整自然语言输出）
+  const implPhase = result.phases.find(p => p.phase === 'implementation');
+  const mainText = implPhase?.summary || result.summary;
+  if (mainText) parts.push(mainText);
+
+  // 追加文件变更列表
+  if (filesChanged.length > 0) {
+    parts.push(`\n变更的文件：${filesChanged.join(', ')}`);
+  }
+
+  // 如果测试失败但文件已创建，标注测试状态（不覆盖正文）
+  if (!result.success && result.testResult && !result.testResult.passed && filesChanged.length > 0) {
+    parts.push('\n⚠️ 自动测试未通过，但文件已成功创建。');
+  }
+
+  return parts.join('\n');
+}
+
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const db = getDb();
   const runtime = new CodeRuntime(db);
@@ -137,5 +167,7 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
     toolCallCount: result.totalToolCalls,
     filesChanged: result.filesChanged,
     testResult: result.testResult,
+    // 用户友好的回复文本，formatAgentResult 会优先读取此字段
+    response: buildUserResponse(result),
   };
 });

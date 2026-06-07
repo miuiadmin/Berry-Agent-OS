@@ -16,6 +16,8 @@ export interface CodeTaskOutput {
   toolCallCount: number;
   filesChanged?: string[];
   testResult?: TestResult;
+  /** 用户友好的自然语言回复。formatAgentResult 优先使用此字段。 */
+  response?: string;
 }
 
 export interface PatchPlan {

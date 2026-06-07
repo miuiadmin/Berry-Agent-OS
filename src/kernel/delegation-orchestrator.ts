@@ -1938,6 +1938,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private formatAgentResult(agentName: string, outputPayload: Record<string, unknown>): string {
     if (typeof outputPayload.response === 'string') return outputPayload.response;
     if (typeof outputPayload.result === 'string') return outputPayload.result;
+    // 防御性兜底：部分 agent（如 code_task）返回 summary 而非 response
+    if (typeof outputPayload.summary === 'string') return outputPayload.summary;
     return `[${agentName}] 任务完成:\n${JSON.stringify(outputPayload, null, 2)}`;
   }
 }

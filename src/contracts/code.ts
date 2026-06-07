@@ -78,6 +78,8 @@ export const CodeTaskOutputSchema = z.object({
   toolCallCount: z.number().int().min(0),
   filesChanged: z.array(z.string()).optional(),
   testResult: TestResultSchema.optional(),
+  /** 用户友好的自然语言回复。formatAgentResult 优先使用此字段。 */
+  response: z.string().optional(),
 });
 
 export const TestCommandSchema = z.object({
