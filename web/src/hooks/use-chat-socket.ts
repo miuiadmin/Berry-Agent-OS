@@ -123,11 +123,30 @@ export function useChatSocket() {
     const unsub = onMessage((raw) => {
       const data = raw as Record<string, unknown>;
 
+      // R15: 处理后端返回的 session_created 消息（新对话时前端 sessionId=null）
+      // 后端生成了新 sessionId 并回传，前端需要更新以匹配后续的流式事件
+      if (data.type === "session_created" && typeof data.sessionId === "string") {
+        const currentSessionId = useChatStore.getState().sessionId;
+        if (!currentSessionId) {
+          useChatStore.getState().setSessionId(data.sessionId);
+          streamingSessionRef.current = data.sessionId;
+        }
+        return;
+      }
+
       // ── 按 sessionId 过滤：只处理当前对话的消息 ──
       // 后端流式事件（text_delta / progress / tool_call / reconnect_recovery 等）都携带 sessionId。
       // 如果消息的 sessionId 与当前活跃对话不匹配，直接丢弃，防止跨对话内容污染。
+      // R15: 如果当前 sessionId 为 null（新对话第一条响应），自动采纳消息的 sessionId
       if (data.sessionId && data.sessionId !== useChatStore.getState().sessionId) {
-        return;
+        const currentSessionId = useChatStore.getState().sessionId;
+        if (!currentSessionId) {
+          // 新对话场景：后端生成了 sessionId，前端还没更新，自动采纳
+          useChatStore.getState().setSessionId(data.sessionId as string);
+          streamingSessionRef.current = data.sessionId as string;
+        } else {
+          return;
+        }
       }
 
       // 事件类型消息（task.progress / task.failed 等）

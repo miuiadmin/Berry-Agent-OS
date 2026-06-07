@@ -233,6 +233,10 @@ function handleWsMessage(
       const bridge = new WebSocketBridge(ws);
       // P1-4 修复：WebSocketBridge 实现 WritableChannel，不再需要 unsafe cast
       // 传递 clientId 以便 session-manager 按 WS 客户端索引 pending request
+      // R15: 回写 sessionId 让前端知道后端使用的 sessionId（新对话时前端传 null）
+      if (!requireString(msg, 'sessionId')) {
+        wsReply(ws, { type: 'session_created', sessionId: effectiveSessionId });
+      }
       deps.handleMessage(
         { message: text, sessionId: effectiveSessionId, streaming: true, permissionMode, attachments, clientId },
         bridge,

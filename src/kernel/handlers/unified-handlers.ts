@@ -435,6 +435,15 @@ function routeUserMessage(
     summary: '正在分析意图...',
   });
 
+  // R15: 持久化初始路由进度到 task_events，刷新后可恢复
+  services.agentProgress?.report({
+    taskId,
+    sessionId,
+    source: 'core',
+    message: '正在分析意图...',
+    payload: { status: 'routing' },
+  });
+
   logger.info({ sessionId, taskId, entry }, '正在处理用户消息 → Brain 路由');
 
   const availableAgents = buildAvailableAgentsList(services.registry);
