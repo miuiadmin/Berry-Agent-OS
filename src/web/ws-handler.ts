@@ -285,6 +285,11 @@ function handleWsMessage(
       }
       break;
     }
+    // subscribe/unsubscribe 由 WsEventBridge 处理（ws-event-bridge.ts），
+    // 此处静默忽略，避免走到 default 返回多余错误
+    case 'subscribe':
+    case 'unsubscribe':
+      break;
     default:
       wsError(ws, `未知消息类型: ${type}`);
   }

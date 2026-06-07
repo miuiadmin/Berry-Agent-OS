@@ -131,13 +131,26 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       maxTokens: 4096,
     };
 
+    // LLM 调用可能因超时、网络故障、模型端错误而抛异常；
+    // 捕获后返回有意义的错误信息，而非让异常崩溃整个任务
     let result: ChatResult;
-    if (useStreaming) {
-      const streamResult = await consumeStream(llm, workingMessages, chatOpts, onChunk!, onReasoning);
-      result = streamResult;
-      if (streamResult.reasoning) accumulatedReasoning += streamResult.reasoning;
-    } else {
-      result = await llm.chat(workingMessages, chatOpts);
+    try {
+      if (useStreaming) {
+        const streamResult = await consumeStream(llm, workingMessages, chatOpts, onChunk!, onReasoning);
+        result = streamResult;
+        if (streamResult.reasoning) accumulatedReasoning += streamResult.reasoning;
+      } else {
+        result = await llm.chat(workingMessages, chatOpts);
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn({ step: stepIndex, err: errMsg }, 'tool-loop: LLM 调用失败，提前终止');
+      return {
+        finalContent: `LLM 调用失败（步骤 ${stepIndex}）：${errMsg}。已执行 ${toolCalls.length} 次工具调用。`,
+        reasoning: accumulatedReasoning || undefined,
+        toolCalls,
+        messages: workingMessages,
+      };
     }
 
     if (onUsage) {
