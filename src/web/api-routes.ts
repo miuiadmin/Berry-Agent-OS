@@ -344,6 +344,38 @@ export function createApiRouter(deps: WebServerDependencies) {
     json(res, { results, total: countRow.cnt });
   });
 
+  // R12-P3：审计查询端点
+  // GET /api/audit/tool-calls?sessionId=...&limit=50
+  // GET /api/audit/reviews?sessionId=...&limit=50
+  route('GET', '/audit/tool-calls', (_req, res, url) => {
+    const sessionId = url.searchParams.get('sessionId');
+    const limit = safeInt(url.searchParams.get('limit'), 50, 1, 200);
+    const db = getDb();
+    const where = sessionId ? 'WHERE session_id = ?' : '';
+    const params: unknown[] = sessionId ? [sessionId] : [];
+    const rows = db.prepare(`
+      SELECT id, session_id, agent_name, tool_name, input_json, output_json,
+             status, danger_level, started_at, completed_at
+      FROM tool_calls ${where}
+      ORDER BY started_at DESC LIMIT ?
+    `).all(...params, limit) as Array<Record<string, unknown>>;
+    json(res, { rows, total: rows.length });
+  });
+
+  route('GET', '/audit/reviews', (_req, res, url) => {
+    const sessionId = url.searchParams.get('sessionId');
+    const limit = safeInt(url.searchParams.get('limit'), 50, 1, 200);
+    const db = getDb();
+    const where = sessionId ? 'WHERE session_id = ?' : '';
+    const params: unknown[] = sessionId ? [sessionId] : [];
+    const rows = db.prepare(`
+      SELECT id, session_id, level, verdict, reason, created_at
+      FROM review_requests ${where}
+      ORDER BY created_at DESC LIMIT ?
+    `).all(...params, limit) as Array<Record<string, unknown>>;
+    json(res, { rows, total: rows.length });
+  });
+
   // --- Token usage summary ---
   route('GET', '/usage/summary', (_req, res, url) => {
     const days = safeInt(url.searchParams.get('days'), 7, 1, 90);
