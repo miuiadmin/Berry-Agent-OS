@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { toast } from "sonner";
+import { useChatStore } from "./chat-store";
 import zh from "@/locales/zh";
 import en from "@/locales/en";
 
@@ -256,9 +257,10 @@ export const useWsStore = create<WsStore>()(
 
           // P2-11: 连接成功后发送 subscribe 消息，声明当前关注的 sessionId
           // 服务端 WsEventBridge 按订阅过滤流式事件，减少多标签冗余传输
-          const chatState = (await import('./chat-store.js')).useChatStore.getState();
+          // 改用静态 import：避免在 socket.onopen 同步闭包里用 await
+          const chatState = useChatStore.getState();
           if (chatState.sessionId) {
-            ws?.send(JSON.stringify({ type: 'subscribe', sessionId: chatState.sessionId }));
+            socket.send(JSON.stringify({ type: 'subscribe', sessionId: chatState.sessionId }));
           }
 
           // 只在断线重连时弹 toast，首次连接静默

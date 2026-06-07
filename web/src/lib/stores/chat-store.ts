@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { useWsStore } from "./ws-store";
 
 export interface ChatAttachment {
   fileId: string;
@@ -151,10 +152,9 @@ export const useChatStore = create<ChatState>()(
         if (id) {
           // P2-11: 切换对话时发送 subscribe 消息给 WS，声明关注的新 sessionId
           // 服务端 WsEventBridge 按此过滤流式事件，减少多标签冗余传输
+          // 直接从 useWsStore.getState() 取（动态 import 在同步 set 闭包中不可用）
           try {
-            const { ws } = require('./ws-store.js') as typeof import('./ws-store.js');
-            // useWsStore 模块级 ws 变量无法直接访问，通过 send 方法发送
-            const wsSend = (await import('./ws-store.js')).useWsStore.getState().send;
+            const wsSend = useWsStore.getState().send;
             wsSend({ type: 'subscribe', sessionId: id });
           } catch { /* ws-store 未初始化时忽略 */ }
           return { sessionId: id, skipAutoRestore: false };
