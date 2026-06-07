@@ -469,6 +469,8 @@ export class CoreService {
     this.taskManager!.startSweep();
     // W8 修复：恢复 waiting_approval 状态的残留任务（taskManager 不处理此状态）
     this.sessionManager!.recoverSessions(getDb());
+    // 恢复崩溃前未完成的 ask_user 状态（进程崩溃后内存 Map 丢失，从 SQLite 恢复）
+    this.sessionManager!.recoverPendingAsks(getDb());
 
     // P2-13: agent.crashed 期间的消息缓冲队列
     // crash handler 执行期间新消息可能被路由到正在重启的 agent，导致消息丢失。

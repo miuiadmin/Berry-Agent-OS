@@ -550,6 +550,28 @@ const v12ConversationsFts: Migration = {
   },
 };
 
+/** v13: pending_asks 表 — 持久化 agent ask_user 状态，进程崩溃后可恢复 */
+const v13PendingAsks: Migration = {
+  version: 13,
+  name: 'pending-asks',
+  up: (db: Database.Database) => {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='pending_asks'`).get();
+    if (!tables) {
+      db.exec(`
+        CREATE TABLE pending_asks (
+          session_id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL,
+          agent_name TEXT NOT NULL,
+          question TEXT NOT NULL,
+          correlation_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        );
+        CREATE INDEX idx_pending_asks_corr ON pending_asks(correlation_id);
+      `);
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -564,4 +586,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v10IntelligenceLayer,
   v11ConversationReasoning,
   v12ConversationsFts,
+  v13PendingAsks,
 ];

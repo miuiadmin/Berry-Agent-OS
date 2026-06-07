@@ -2,6 +2,7 @@ import type { Database } from 'better-sqlite3';
 import type { ModelTier } from '../contracts/model.js';
 import type { MemoryContextFrame } from '../contracts/memory.js';
 import type { MemoryRuntime } from '../memory/index.js';
+import { getDb } from '../memory/index.js';
 import type { EvolutionEngine } from '../evolution/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { IPluginRuntimeV2, PromptInjectionContext } from '../contracts/plugins-v2.js';
@@ -334,6 +335,8 @@ export class SessionManager {
 
   setPendingAsk(sessionId: string, state: PendingAskState): void {
     this.pendingAsks.set(sessionId, state);
+    // 持久化到 SQLite（进程崩溃后可通过 recoverPendingAsks 恢复）
+    this.persistAskToDb(state);
   }
 
   getPendingAsk(sessionId: string): PendingAskState | undefined {
@@ -342,6 +345,8 @@ export class SessionManager {
 
   clearPendingAsk(sessionId: string): void {
     this.pendingAsks.delete(sessionId);
+    // 从 SQLite 删除
+    this.deleteAskFromDb(sessionId);
   }
 
   hasPendingAsk(sessionId: string): boolean {
@@ -354,6 +359,58 @@ export class SessionManager {
    */
   getAllPendingAsks(): ReadonlyArray<PendingAskState> {
     return [...this.pendingAsks.values()];
+  }
+
+  /**
+   * 从 SQLite 恢复 pending asks（服务启动时调用）。
+   * 与 recoverSessions 类似，在 start() 阶段调用。
+   * 进程崩溃后 pending asks 仍然有效——用户重连后可以继续回答。
+   */
+  recoverPendingAsks(db: Database): { recovered: number } {
+    const rows = db.prepare(
+      'SELECT session_id, task_id, agent_name, question, correlation_id FROM pending_asks',
+    ).all() as Array<{ session_id: string; task_id: string; agent_name: string; question: string; correlation_id: string }>;
+    for (const row of rows) {
+      // 仅恢复不在内存中的（避免覆盖已有的）
+      if (!this.pendingAsks.has(row.session_id)) {
+        this.pendingAsks.set(row.session_id, {
+          sessionId: row.session_id,
+          taskId: row.task_id,
+          agentName: row.agent_name,
+          question: row.question,
+          correlationId: row.correlation_id,
+        });
+      }
+    }
+    return { recovered: rows.length };
+  }
+
+  /** 持久化单个 pending ask 到 SQLite（upsert） */
+  private persistAskToDb(state: PendingAskState): void {
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO pending_asks (session_id, task_id, agent_name, question, correlation_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          task_id = excluded.task_id,
+          agent_name = excluded.agent_name,
+          question = excluded.question,
+          correlation_id = excluded.correlation_id
+      `).run(state.sessionId, state.taskId, state.agentName, state.question, state.correlationId);
+    } catch (err) {
+      logger.error({ err, sessionId: state.sessionId }, 'persistAskToDb 失败');
+    }
+  }
+
+  /** 从 SQLite 删除单个 pending ask */
+  private deleteAskFromDb(sessionId: string): void {
+    try {
+      const db = getDb();
+      db.prepare('DELETE FROM pending_asks WHERE session_id = ?').run(sessionId);
+    } catch (err) {
+      logger.error({ err, sessionId }, 'deleteAskFromDb 失败');
+    }
   }
 
   // --- Session Context (for Brain routing) ---
@@ -437,7 +494,7 @@ export class SessionManager {
         this.sessionModelOverrides.delete(sessionId);
         this.sessionLastActivity.delete(sessionId);
         if (this.pendingAsks.has(sessionId)) {
-          this.pendingAsks.delete(sessionId);
+          this.clearPendingAsk(sessionId); // 同时删除 SQLite 行
         }
         cleaned++;
       }
