@@ -496,16 +496,15 @@ export class CoreService {
 
       this.taskManager!.failByAgent(name, `智能体 ${name} 崩溃`);
       this.messageRouter?.failDelegationsByAgent(name, `智能体 ${name} 崩溃`);
+      // R14-1：5 兜底合一。agent.crashed 失败源统一调 sessionManager.finalizeTask，
+      // 不再自己拼 partialContent + contentOverride + resolvePending。
+      // taskManager.failByAgent 已 emit 'task.failed'，但本路径还需要清理
+      // pending state（in-memory 仍持有），所以显式调 finalizeTask。
       for (const [msgId, pending] of this.sessionManager!.entries()) {
         if (!pending.taskId) continue;
         const task = this.taskManager!.getTask(pending.taskId);
         if (task?.target_agent === name && task.status === 'failed') {
-          // R4-P0-1：agent.crashed 兜底：partial draftResponse + error 入库，避免 user 消息孤儿
-          const errorResponse = `[错误] 智能体 ${name} 崩溃，请重试`;
-          const partialContent = pending.draftResponse
-            ? `${pending.draftResponse}\n\n${errorResponse}`
-            : errorResponse;
-          this.sessionManager!.resolvePending(msgId, errorResponse, { contentOverride: partialContent });
+          this.sessionManager!.finalizeTask(msgId, { kind: 'crash', agentName: name });
         }
       }
       // crash handler 完成，清除崩溃标记和释放缓冲
@@ -996,7 +995,14 @@ export class CoreService {
     }
     // P0: 先停止 GC + 刷写流式内容，再关 taskManager（flusher 依赖它）
     this.sessionManager?.stopGc();
+    // 收尾所有未完成的 pending requests（清理 timer + resolve '服务关闭'）
+    this.sessionManager?.disposeAllPending('服务正在关闭');
     this.messageRouter?.dispose();
+    // 停止 channelManager 的 EventBus 订阅和所有 channel（与 cleanup() 保持一致）
+    if (this.channelManager) {
+      this.channelManager.disposeEventBridge();
+      await this.channelManager.stopAll();
+    }
     if (this.taskManager) {
       this.taskManager.dispose();
     }

@@ -117,6 +117,67 @@ export class SessionManager {
     return this.pendingRequests.get(msgId);
   }
 
+  /**
+   * R14-1：任务终结统一入口
+   *
+   * 之前 8 个失败源（agent.crashed / Runtime exception / foreground fail /
+   * task.timeout / interrupt / unavailable / cancelled / no_output）各自
+   * 拼错误文案 + saveConversationTurn + deletePending + resolvePending +
+   * emit no_response。R13 审计标记为 5 个"补丁式重复"——同一根本缺陷
+   * （任务不再产出更多内容）的多个表现。
+   *
+   * finalizeTask 把这 5 步统一到 1 个 helper，调用方只传 outcome：
+   *   - crash: agent 进程崩溃（agent.crashed 路径）
+   *   - failed: agent 任务失败返回 !result.ok
+   *   - timeout: task 达到 timeout
+   *   - cancelled: user/cancel 中断
+   *   - terminated: user interruptSession
+   *   - unavailable: primary agent 不可用
+   *
+   * 错误文案模板：[${outcomeLabel}] ${errorContext}
+   * - crash: [错误] 智能体 {name} 崩溃
+   * - failed: [{agentName}] 任务失败
+   * - timeout: [任务执行超时]
+   * - cancelled: [{agentName}] 执行已取消
+   * - terminated: [已停止]
+   * - unavailable: [系统错误] 对话智能体不可用
+   *
+   * 持久化策略：
+   * - partial draftResponse 存在 → contentOverride = `${partial}\n\n${errorLabel}`
+   * - 无 partial → errorLabel 单独入库
+   * - saveConversationTurn 失败 silent log（runtime 内部已 try/catch）
+   * - emit conversation.no_response 让前端感知
+   */
+  finalizeTask(
+    correlationId: string,
+    outcome: {
+      kind: 'crash' | 'failed' | 'timeout' | 'cancelled' | 'terminated' | 'unavailable' | 'runtime_error';
+      agentName?: string;
+      error?: string;
+    },
+  ): void {
+    const pending = this.pendingRequests.get(correlationId);
+    if (!pending) return;
+
+    const label = (() => {
+      switch (outcome.kind) {
+        case 'crash': return `[错误] 智能体 ${outcome.agentName ?? '?'} 崩溃`;
+        case 'failed': return `[${outcome.agentName ?? '系统'}] 任务失败: ${outcome.error ?? '未知错误'}`;
+        case 'timeout': return `[任务执行超时] ${outcome.error ?? ''}`.trim();
+        case 'cancelled': return `[${outcome.agentName ?? '系统'}] 执行已取消`;
+        case 'terminated': return '[已停止]';
+        case 'unavailable': return '[系统错误] 对话智能体不可用';
+        case 'runtime_error': return `[${outcome.agentName ?? '系统'}] 执行异常: ${outcome.error ?? '未知错误'}`;
+      }
+    })();
+
+    const partial = pending.draftResponse ?? '';
+    const response = partial ? partial : label;
+    const persistContent = partial ? `${partial}\n\n${label}` : label;
+
+    this.resolvePending(correlationId, response, { contentOverride: persistContent });
+  }
+
   deletePending(msgId: string): void {
     const timer = this.requestTimers.get(msgId);
     if (timer) { clearTimeout(timer); this.requestTimers.delete(msgId); }

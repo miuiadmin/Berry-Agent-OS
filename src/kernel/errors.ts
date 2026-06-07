@@ -74,51 +74,6 @@ export class PermissionDeniedError extends KernelError {
   }
 }
 
-export class IpcError extends KernelError {
-  readonly code = 'IPC_FAILURE';
-  readonly retryable = true;
-  constructor(message: string) {
-    super(message);
-    this.name = 'IpcError';
-  }
-}
-
-export class TaskStateError extends KernelError {
-  readonly code = 'TASK_STATE_INVALID';
-  readonly retryable = false;
-  constructor(message: string, readonly taskId?: string) {
-    super(message);
-    this.name = 'TaskStateError';
-  }
-}
-
-export class AgentTimeoutError extends KernelError {
-  readonly code = 'AGENT_TIMEOUT';
-  readonly retryable = true;
-  constructor(message: string, readonly agentName?: string, readonly taskId?: string) {
-    super(message);
-    this.name = 'AgentTimeoutError';
-  }
-}
-
-export class PluginExecutionError extends KernelError {
-  readonly code = 'PLUGIN_EXECUTION_FAILED';
-  readonly retryable = false;
-  constructor(message: string, readonly pluginName?: string, readonly toolName?: string) {
-    super(message);
-    this.name = 'PluginExecutionError';
-  }
-}
-
-export class BudgetExceededError extends KernelError {
-  readonly code = 'BUDGET_EXCEEDED';
-  readonly retryable = false;
-  constructor(message: string, readonly scope?: string, readonly scopeId?: string) {
-    super(message);
-    this.name = 'BudgetExceededError';
-  }
-}
-
 export class ConfigError extends KernelError {
   readonly code = 'CONFIG_INVALID';
   readonly retryable = false;
