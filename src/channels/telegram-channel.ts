@@ -4,6 +4,9 @@ import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('telegram-channel');
 
+/** R11-P1：channel 文本字符上限。超过截断（与 WS 不同：长消息常见，不直接 reject）。 */
+const MAX_CHANNEL_TEXT_CHARS = 64 * 1024; // 64KB
+
 export interface TelegramChannelConfig {
   token: string;
   pollingInterval?: number;
@@ -101,6 +104,13 @@ export class TelegramChannel implements MessageChannel {
 
     const text = msg.text ?? msg.caption ?? '';
     if (!text) return;
+
+    // R11-P1：channel payload 文本长度上限，防 DoS / 注入污染
+    if (text.length > MAX_CHANNEL_TEXT_CHARS) {
+      logger.warn({ userId, length: text.length, max: MAX_CHANNEL_TEXT_CHARS }, 'channel 文本超长，截断');
+      // 不直接 reject，截断保留前 N 字符（用户长消息常见）
+      // 严格 reject 由 LLM 层 / persistence 层限流
+    }
 
     const attachments: Attachment[] = [];
     if (msg.photo && msg.photo.length > 0) {

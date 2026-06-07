@@ -7,6 +7,9 @@ import type { WritableChannel } from '../contracts/transport.js';
 
 const logger = getLogger('ws-handler');
 
+/** R11-P1：WS payload 字节数上限。超过显式拒绝 + 关闭连接。 */
+const MAX_WS_PAYLOAD_BYTES = 256 * 1024; // 256KB
+
 // --- Input validation helpers ---
 
 function requireString(obj: Record<string, unknown>, field: string): string | undefined {
@@ -153,6 +156,17 @@ export function createWsHandler(deps: WebServerDependencies) {
     replayPendingRequests(ws, deps);
 
     ws.on('message', (data) => {
+      // R11-P1：payload size limit 防 DoS / 污染
+      // 默认 256KB。超过显式拒绝 + 关闭连接（恶意客户端会反复发大 payload）
+      // ws.RawData 类型：Buffer | ArrayBuffer | Buffer[]，统一用 byteLength 取
+      const size = Buffer.isBuffer(data) ? data.length
+        : Array.isArray(data) ? Buffer.concat(data).length
+        : (data as ArrayBuffer).byteLength;
+      if (size > MAX_WS_PAYLOAD_BYTES) {
+        logger.warn({ clientId, size, max: MAX_WS_PAYLOAD_BYTES }, 'WS 消息超 size limit，关闭连接');
+        ws.close(1009, 'message too large');
+        return;
+      }
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
         logger.debug(msg, 'ws:in');

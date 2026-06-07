@@ -4,6 +4,7 @@ import { join, extname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getLogger, resolveEffectiveLevel } from '../utils/logger.js';
 import { registerCaptureRoutes } from '../observability/index.js';
+import { metrics } from '../observability/metrics.js';
 import { MS_PER_DAY } from '../lib/time-constants.js';
 import { getDb } from '../memory/index.js';
 import { getHistory } from '../memory/conversations.js';
@@ -531,7 +532,6 @@ export function createApiRouter(deps: WebServerDependencies) {
     const level = url.searchParams.get('level') ?? undefined;
     const module = url.searchParams.get('module') ?? undefined;
     const logFile = join(getAppHome(), 'logs', 'berry.log');
-
     if (!existsSync(logFile)) { json(res, { lines: [], total: 0 }); return; }
 
     const content = readFileSync(logFile, 'utf-8');
@@ -550,6 +550,16 @@ export function createApiRouter(deps: WebServerDependencies) {
     }
     const result = parsed.slice(-count);
     json(res, { lines: result, total: result.length });
+  });
+
+  /**
+   * R12-P1：暴露 Prometheus / 内部可观测性指标快照
+   * 返回结构：
+   *   { counters: [{ name, labels, value }], histograms: [{ name, labels, count, p50/p95/p99 }], uptimeMs, timestamp }
+   * 可被外部采集系统（Prometheus scraper / 内部 dashboard）轮询。
+   */
+  route('GET', '/metrics', (_req, res) => {
+    json(res, metrics.snapshot());
   });
 
   return function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): void {
