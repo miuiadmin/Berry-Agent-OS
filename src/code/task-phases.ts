@@ -157,7 +157,9 @@ export async function runTaskPhases(ctx: PhaseContext): Promise<TaskPhasesResult
 
     if (!implResult.success) break;
 
-    const shouldVerify = ctx.action === 'full_task' || ctx.testCommand;
+    // 只有显式提供 testCommand 时才运行 verification。
+    // 不再因 action === 'full_task' 隐式执行 npm test —— 非 Node 项目必然失败。
+    const shouldVerify = !!ctx.testCommand;
     if (!shouldVerify) break;
 
     const verifyResult = await runVerification(ctx);
@@ -400,7 +402,8 @@ async function runImplementation(
     });
 
     for (const tc of result.toolCalls) {
-      if (tc.name === 'edit_code' && !tc.isError) {
+      // 追踪所有文件变更工具（edit_code 修改、write_file 新建）
+      if ((tc.name === 'edit_code' || tc.name === 'write_file') && !tc.isError) {
         const artifactId = ctx.runtime.recordArtifact(ctx.taskId, 'file_change', {
           toolInput: tc.input,
           result: tc.result,
@@ -508,7 +511,8 @@ function extractJsonFromResponse(content: string): Record<string, unknown> | nul
 function extractFilesChanged(toolCalls: ToolCallRecord[]): string[] {
   const files = new Set<string>();
   for (const tc of toolCalls) {
-    if (tc.name === 'edit_code' && !tc.isError) {
+    // 追踪 edit_code（修改文件）和 write_file（新建文件）两种工具
+    if ((tc.name === 'edit_code' || tc.name === 'write_file') && !tc.isError) {
       const path = extractPath(tc.input);
       if (path) files.add(path);
     }
