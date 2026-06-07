@@ -272,24 +272,34 @@ export function createApiRouter(deps: WebServerDependencies) {
 
     // Conversation messages with thinkingSteps from task_events
     const rawMessages = getHistory(sessionId, limit);
+    // 查询该 session 所有任务（不限 task_type），按时间正序排列。
+    // 不使用 finished_at 时间窗口：conversation_turn 可能几百毫秒就结束，
+    // 但 assistant 消息要等委派任务（如 code_task）跑完后才写入，时间差可达数十秒。
     const allTasks = db.prepare(`
-      SELECT id, created_at, finished_at FROM agent_tasks
-      WHERE session_id = ? AND task_type = 'conversation_turn'
+      SELECT id, created_at FROM agent_tasks
+      WHERE session_id = ?
       ORDER BY created_at ASC
-    `).all(sessionId) as Array<{ id: string; created_at: number; finished_at: number | null }>;
+    `).all(sessionId) as Array<{ id: string; created_at: number }>;
 
-    const messages = rawMessages.map((msg) => {
+    const messages = rawMessages.map((msg, idx) => {
       if (msg.role !== 'assistant') return msg;
-      // Find the task that produced this message (closest task created before message)
-      const matchTask = allTasks.find((t) =>
-        t.created_at <= msg.createdAt && (!t.finished_at || t.finished_at >= msg.createdAt - 5000)
-      );
-      if (!matchTask) return msg;
+      // 确定这轮对话的时间范围：前一条 assistant 消息之后 ~ 当前 assistant 消息。
+      // 避免用 user 消息做下界：某些流程会插入重复的 user 消息，导致时间窗口错乱。
+      let prevAssistantTime = 0;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (rawMessages[i].role === 'assistant') {
+          prevAssistantTime = rawMessages[i].createdAt;
+          break;
+        }
+      }
+      const taskIds = allTasks.filter((t) => t.created_at > prevAssistantTime && t.created_at <= msg.createdAt).map((t) => t.id);
+      if (taskIds.length === 0) return msg;
+      const placeholders = taskIds.map(() => '?').join(',');
       const steps = db.prepare(`
         SELECT message, created_at FROM task_events
-        WHERE task_id = ? AND event_type = 'progress'
+        WHERE task_id IN (${placeholders}) AND event_type = 'progress'
         ORDER BY created_at ASC
-      `).all(matchTask.id) as Array<{ message: string; created_at: number }>;
+      `).all(...taskIds) as Array<{ message: string; created_at: number }>;
       if (steps.length === 0) return msg;
       return { ...msg, thinkingSteps: steps.map((s) => ({ text: s.message, ts: s.created_at })) };
     });
