@@ -149,9 +149,12 @@ export const CORE_SCHEMA_SQL = `
     level TEXT NOT NULL CHECK(level IN ('A','B','C')),
     draft_response TEXT NOT NULL,
     review_input TEXT NOT NULL,
+    -- R14-4：12.0 加的 'auto_approve_A_level' / 'auto_approve_no_intent' 两个 verdict
+    -- 在生产代码中无任何调用方（audit-recorder.recordAutoApprove 是死代码），
+    -- 撤回以保持字段语义单一：verdict 字段只表达"审核结论"，不混"业务短路标记"。
+    -- 真实 A 级 / no_intent_anchor 兜底如果需要审计，level='A' 字段已能区分。
     verdict TEXT NOT NULL CHECK(verdict IN (
-      'pending','approve','modify','reject','require_user_confirm',
-      'auto_approve_A_level','auto_approve_no_intent'
+      'pending','approve','modify','reject','require_user_confirm'
     )),
     final_response TEXT,
     reason TEXT,

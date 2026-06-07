@@ -1236,13 +1236,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         // 失败处理：audit 失败不阻塞 verdict（fail-open）— recordAutoApprove 内部 try/catch
         // 只 log.error 不会抛，所以这里不需要 try/catch 包裹。
         if (turn.level === 'A' || !pending.intentAnchor) {
-          this.auditRecorder.recordAutoApprove({
+          // R14-4：auto-approve 走 recordReview 通用路径，不再有 recordAutoApprove 独立方法。
+          // 区分依据：verdict='approve' + level='A' + reason 标注 'auto_approve'，
+          // 真实 Brain 审核的 verdict='approve' 不会带 reason='auto_approve'。
+          this.auditRecorder.recordReview({
             sessionId,
-            level: turn.level === 'A' ? 'A' : 'no_intent_anchor',
+            level: 'A',
             draft,
             userMessage: pending.userMessage,
             toolCalls: calls,
-            taskId: pending.taskId,
+            verdict: 'approve',
+            finalResponse: draft,
+            reason: !pending.intentAnchor ? 'auto_approve: no_intent_anchor' : 'auto_approve: level_A',
           });
           primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
           this.dispatchModuleTask({

@@ -1010,38 +1010,14 @@ function migrateBrainDecisionsExpandTypes(conn: Database.Database): void {
 }
 
 /**
- * review_requests.verdict 扩展：将 auto-approve 类的两个新枚举值加入 CHECK 约束。
- * 旧的 CHECK 只允许 pending/approve/modify/reject/require_user_confirm，
- * 12.0 起 A 级短路与无 intent_anchor 的兜底分支也必须落库，需要 'auto_approve_A_level'、
- * 'auto_approve_no_intent' 两个额外 verdict。
- * 使用 rebuild 模式（与 migrateBrainDecisionsExpandTypes 同思路）确保线上库平滑升级。
+ * R14-4 撤销：原 12.0 加的 migrateReviewRequestsExpandVerdicts 因生产代码中
+ * 无任何调用方（recordAutoApprove 是死代码），撤回以保持 verdict 字段语义单一。
+ * schema.ts 已把 verdict CHECK 约束恢复为原始 5 个枚举值。
+ * 本函数保留空壳以兼容 migrate() 调用链（不再做任何操作）。
  */
 function migrateReviewRequestsExpandVerdicts(conn: Database.Database): void {
-  if (!tableExists(conn, 'review_requests')) return;
-  const sql = tableSql(conn, 'review_requests');
-  if (!sql || sql.includes('auto_approve_A_level')) return;
-  conn.exec(`
-    CREATE TABLE review_requests_new (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      level TEXT NOT NULL CHECK(level IN ('A','B','C')),
-      draft_response TEXT NOT NULL,
-      review_input TEXT NOT NULL,
-      verdict TEXT NOT NULL CHECK(verdict IN (
-        'pending','approve','modify','reject','require_user_confirm',
-        'auto_approve_A_level','auto_approve_no_intent'
-      )),
-      final_response TEXT,
-      reason TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      reviewed_at INTEGER
-    );
-    INSERT INTO review_requests_new
-      SELECT id, session_id, level, draft_response, review_input, verdict,
-             final_response, reason, created_at, reviewed_at
-      FROM review_requests;
-    DROP TABLE review_requests;
-    ALTER TABLE review_requests_new RENAME TO review_requests;
-    CREATE INDEX IF NOT EXISTS idx_review_session ON review_requests(session_id, created_at);
-  `);
+  // R14-4：no-op（schema 已撤销扩展）。保留函数签名避免调用链破坏。
+  // 旧库已存在 'auto_approve_*' 行的：下次落库遇到 CHECK 约束冲突会写入失败，
+  // 但 recordAutoApprove 在生产代码无调用方，理论上不会有新行写入。
+  void conn;
 }
