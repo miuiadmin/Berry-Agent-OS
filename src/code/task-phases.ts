@@ -579,6 +579,7 @@ function buildConsumeFn(ctx: PhaseContext) {
 
 function buildAuditFn(ctx: PhaseContext) {
   return (record: ToolCallRecord) => {
+    // 审计日志（供 SQLite 写入审计表）
     ctx.ipc.send('tool.audit', 'core', {
       sessionId: ctx.sessionId,
       taskId: ctx.taskId,
@@ -590,5 +591,17 @@ function buildAuditFn(ctx: PhaseContext) {
       dangerLevel: record.dangerLevel,
       durationMs: record.durationMs,
     } satisfies ToolAuditPayload);
+    // 流式推送工具调用到前端（与 conversation agent 对齐）。
+    // 不发这条的话，code_task 执行期间前端看不到任何工具调用卡片，
+    // 只有最终结果一次性返回。
+    ctx.ipc.send('task.telemetry', 'core', {
+      kind: 'tool_call',
+      taskId: ctx.taskId,
+      toolName: record.name,
+      input: record.input.slice(0, 2000),
+      result: record.result.slice(0, 5000),
+      isError: record.isError,
+      durationMs: record.durationMs,
+    });
   };
 }
