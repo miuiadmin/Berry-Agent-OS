@@ -24,6 +24,7 @@ import { CorrectionFlow } from './flows/correction-flow.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { StreamingFlusher } from './streaming-flusher.js';
+import { setupPortHandlers } from './flows/port-handlers.js';
 import {
   setupTaskProgressHandler,
   setupTaskAcknowledgeHandlers,
@@ -355,6 +356,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     });
     this.dialogueRouter.startSweep();
     this.setupDialogueHandlers(primary.ipc, primaryName);
+
+    // 13.0: 注册 AgentPort IPC handlers（discover / ask_user / use_tool 等）
+    setupPortHandlers({
+      agentManager: this.agentManager,
+      registry: this.registry,
+      primaryIpc: primary.ipc,
+      primaryName,
+      reviewerIpc: reviewer.ipc,
+    });
 
     // 11.0: Brain 通过 dialogue.observe 监听后可能发 turn.correction 纠偏
     // 转发给 Conversation Agent 处理（Brain → Core → Conversation）
