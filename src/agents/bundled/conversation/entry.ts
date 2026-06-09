@@ -23,9 +23,6 @@ import type { ToolAuditPayload } from '../../../contracts/audit.js';
 import type { MemoryContextFrame } from '../../../contracts/memory.js';
 import type { TaskAcknowledgePayload, TaskStartedPayload } from '../../../contracts/tasks.js';
 import type { DangerLevel } from '../../../tools/types.js';
-// 13.0: AgentPort 6 原语抽象（薄封装，6 原语 → 底层 IPC）
-import { createAgentPort } from '../../../kernel/agent-port.js';
-import type { AgentPort } from '../../../contracts/agent-port.js';
 
 const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的个人 AI 助手。回答要简洁、友好、准确。
 
@@ -89,19 +86,6 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   const logger = getLogger('conversation');
   setCronToolsDb(db);
   setSessionToolsDb(db);
-
-  // 13.0: 实例化 AgentPort（6 原语抽象）
-  // Phase 1 验证：启动时调一次 port.discover() 验证 wiring 通
-  // 后续 Phase 把 port 注入到 tool factory
-  const port: AgentPort = createAgentPort(ipc, { agentName: name });
-  void port.discover()
-    .then((agents) => {
-      logger.info({ count: agents.length, agents: agents.map((a) => a.name) }, 'AgentPort 启动验证：discover 成功');
-    })
-    .catch((err) => {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'AgentPort 启动验证失败（discover）');
-    });
-
   const memoryTools = createMemoryTools(ipc, config.requestTimeoutMs);
   const capabilityTools = createCapabilityTools(ipc, config.requestTimeoutMs);
   const currentSessionRef = { id: '' };

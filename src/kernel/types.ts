@@ -72,17 +72,7 @@ export type IpcMessageType =
   | 'drift.check.request'
   | 'drift.check.result'
   | 'verify.request'
-  | 'verify.result'
-  // 13.0 AgentPort 抽象层（薄封装 — 翻译 6 原语到底层 IPC）
-  | 'port.discover'
-  | 'port.directory_changed'
-  | 'port.ask_user'
-  | 'port.ask_user_reply'
-  | 'port.use_tool'
-  | 'port.use_tool_result'
-  | 'port.request'
-  | 'port.request_reply'
-  | 'port.notify';
+  | 'verify.result';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
 // R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。
