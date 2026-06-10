@@ -17,11 +17,13 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 
 import { join } from 'node:path';
 import { getAppHome } from '../utils/paths.js';
 import { genId } from '../utils/id.js';
+import { getLogger } from '../utils/logger.js';
 import type {
   Plan, MissionTask, MissionMeta, Decision, SquadFile, Squad, SquadMember,
-  TaskStatus, Signal, SignalType, Handoff, PlanUpdate,
+  TaskStatus, Signal, SignalType, Handoff, PlanUpdate, MissionContext,
 } from '../contracts/mission.js';
-import { MAX_SQUAD_DEPTH } from '../contracts/mission.js';
+import { MAX_SQUAD_DEPTH, SquadFileSchema, renderMissionContext } from '../contracts/mission.js';
+import type { HandoffContext } from '../contracts/delegation.js';
 import type { EventBus } from './event-bus.js';
 
 // ─────────────────────────────────────────────────────────────────
@@ -196,6 +198,8 @@ const BUILTIN_TEMPLATES: Array<{
 // ─────────────────────────────────────────────────────────────────
 // MissionManager
 // ─────────────────────────────────────────────────────────────────
+
+const logger = getLogger('mission-manager');
 
 /**
  * Mission 管理器 — 管理 mission 目录、plan.json 和 squad.json 的生命周期。
@@ -400,12 +404,6 @@ export class MissionManager {
     if (updates.task_id && updates.status === 'done') {
       const task = plan.tasks.find(t => t.id === updates.task_id);
       if (task && task.who === 'skills' && task.result) {
-        this.emitEvent('mission.task_updated', {
-          missionId,
-          taskId: task.id,
-          status: 'done',
-          who: 'skills',
-        });
         /** 能力进化事件 — evolution 系统订阅后可自动创建新技能 */
         this.emitEvent('capability.evolution.request', {
           missionId,
@@ -433,10 +431,19 @@ export class MissionManager {
   }
 
   /**
-   * 读取 squad.json。
+   * 读取 squad.json（带 runtime schema 验证）。
+   * 如果文件内容不符合 SquadFileSchema，返回 null 并记录警告。
    */
   readSquad(missionId: string): SquadFile | null {
-    return readJsonFile<SquadFile>(getSquadPath(missionId));
+    try {
+      const raw = readJsonFile<unknown>(getSquadPath(missionId));
+      if (!raw) return null;
+      /** P1-3 修复：runtime 验证防止 malformed JSON 导致下游崩溃 */
+      return SquadFileSchema.parse(raw);
+    } catch (err) {
+      logger.warn({ err, missionId }, 'readSquad: squad.json 格式非法');
+      return null;
+    }
   }
 
   /**
@@ -608,6 +615,9 @@ export class MissionManager {
 
   /**
    * 执行交接（from squad → to squad）。
+   *
+   * 如果调用方传入了 sourceContext（HandoffContext），把它一并写到 handoff.content
+   * 让接班的 Agent 在 entry 处读取并拼接到 system prompt。
    */
   executeHandoff(
     missionId: string,
@@ -615,9 +625,16 @@ export class MissionManager {
     toSquad: string,
     what: string,
     content?: string,
+    sourceContext?: HandoffContext,
   ): SquadFile | null {
     const squadFile = this.readSquad(missionId);
     if (!squadFile) return null;
+
+    // handoff.content 优先使用 sourceContext 的 JSON 序列化（结构化上下文），
+    // 回退到原始 content 字符串。
+    const handoffContent = sourceContext
+      ? JSON.stringify(sourceContext)
+      : (content ?? what);
 
     // 查找或创建 handoff 条目
     let handoff = squadFile.handoffs.find(
@@ -626,14 +643,14 @@ export class MissionManager {
 
     if (handoff) {
       handoff.status = 'delivered';
-      handoff.content = content ?? what;
+      handoff.content = handoffContent;
     } else {
       handoff = {
         from: fromSquad,
         to: toSquad,
         what,
         status: 'delivered',
-        content,
+        content: handoffContent,
       };
       squadFile.handoffs.push(handoff);
     }
@@ -648,6 +665,242 @@ export class MissionManager {
     });
 
     return squadFile;
+  }
+
+  /**
+   * 读取最近一次 from→to 的 handoff，并尝试反序列化为 HandoffContext。
+   * 接班的 Agent 在 entry 处调用此方法，把结构化上下文注入到 system prompt。
+   *
+   * @returns HandoffContext 或 null（没有 handoff / JSON 解析失败）
+   */
+  readLatestHandoffContext(missionId: string, fromSquad: string, toSquad: string): HandoffContext | null {
+    const squadFile = this.readSquad(missionId);
+    if (!squadFile) return null;
+
+    // 找到最新的 from→to handoff
+    const candidates = squadFile.handoffs.filter(
+      h => h.from === fromSquad && h.to === toSquad,
+    );
+    if (candidates.length === 0) return null;
+
+    const latest = candidates[candidates.length - 1];
+    if (!latest.content) return null;
+
+    try {
+      return JSON.parse(latest.content) as HandoffContext;
+    } catch {
+      // 内容不是 JSON，回退到字符串透传
+      return {
+        originalInstruction: latest.content,
+        filesRead: [],
+        filesModified: [],
+        agentConversations: [],
+        currentProgress: latest.what,
+        blockers: [],
+        handoffAt: new Date(latest.content ?? '').getTime?.() ?? Date.now(),
+        fromAgent: fromSquad,
+      };
+    }
+  }
+
+  /**
+   * 把 HandoffContext 渲染为一段 system prompt 文本（便于 Agent 直接拼到 prompt）。
+   */
+  renderHandoffContext(ctx: HandoffContext): string {
+    const lines: string[] = [];
+    lines.push(`## 交接上下文（来自 ${ctx.fromAgent}）`);
+    lines.push(`原始指令: ${ctx.originalInstruction}`);
+    lines.push(`当前进度: ${ctx.currentProgress}`);
+
+    if (ctx.intentAnchor) {
+      lines.push(`意图锚: ${ctx.intentAnchor.goal}`);
+      if (ctx.intentAnchor.successCriteria.length > 0) {
+        lines.push(`成功标准: ${ctx.intentAnchor.successCriteria.join('; ')}`);
+      }
+    }
+
+    if (ctx.filesRead.length > 0) {
+      lines.push(`已读文件（避免重复读）:`);
+      for (const f of ctx.filesRead) lines.push(`  - ${f}`);
+    }
+    if (ctx.filesModified.length > 0) {
+      lines.push(`已改文件:`);
+      for (const f of ctx.filesModified) lines.push(`  - ${f.path}${f.diffHash ? ` (${f.diffHash})` : ''}`);
+    }
+
+    if (ctx.agentConversations.length > 0) {
+      lines.push(`与其他 Agent 的对话（最近 ${ctx.agentConversations.length} 条）:`);
+      for (const c of ctx.agentConversations) {
+        lines.push(`  - ${c.with}: ${c.summary}`);
+      }
+    }
+
+    if (ctx.blockers.length > 0) {
+      lines.push(`已知阻塞:`);
+      for (const b of ctx.blockers) {
+        lines.push(`  - ${b.reason}（${b.raisedBy}）`);
+      }
+    }
+
+    if (ctx.scopeSnapshot) {
+      if (ctx.scopeSnapshot.blockPaths.length > 0) {
+        lines.push(`不可访问路径: ${ctx.scopeSnapshot.blockPaths.join(', ')}`);
+      }
+      if (ctx.scopeSnapshot.blockTools.length > 0) {
+        lines.push(`不可用工具: ${ctx.scopeSnapshot.blockTools.join(', ')}`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * §12.3/§12.6: 为指定 (mission, task, agent) 组装 MissionContext —
+   * 用于注入到 Agent 的 system prompt。
+   *
+   * 数据流：
+   *   1. 读 plan.json 拿到 mission 目标和任务列表
+   *   2. 读 squad.json 找到 agentName 所在的 squad 和 role
+   *   3. 抽取队友（不含自己）、已完成任务、进行中任务、未解决信号
+   *   4. 返回 MissionContext 或 null（如果 mission/task/agent 任一找不到）
+   *
+   * @param missionId - Mission ID
+   * @param planTaskId - 当前 plan task ID（t-1, t-2...）
+   * @param agentName - 当前 Agent 类型名（code/learning/skills...）
+   * @returns MissionContext 或 null
+   */
+  readContext(missionId: string, planTaskId: string, agentName: string): MissionContext | null {
+    const plan = this.readPlan(missionId);
+    if (!plan) return null;
+
+    const task = plan.tasks.find(t => t.id === planTaskId);
+    if (!task) return null;
+
+    const squadFile = this.readSquad(missionId);
+
+    // 查找当前 Agent 所在的 squad 和 member
+    let member: SquadMember | null = null;
+    let parentSquad: Squad | null = null;
+    if (squadFile) {
+      const found = this.findSquadAndMember(squadFile.org.squads, agentName);
+      if (found) {
+        member = found.member;
+        parentSquad = found.squad;
+      }
+    }
+
+    // 如果 agent 不在任何 squad 中，给一个默认 work 角色（plan-only 模式）
+    const role: 'lead' | 'work' | 'check' = member?.role ?? 'work';
+    const on = member?.on ?? task.what;
+    const squadGoal = parentSquad?.goal ?? plan.mission.goal;
+
+    // 抽取队友（不含自己）
+    const squadTeammates: MissionContext['squadTeammates'] = [];
+    if (parentSquad) {
+      // members 不含 leader；统一展示
+      for (const m of parentSquad.members) {
+        if (m.agent === agentName) continue;
+        squadTeammates.push({
+          agent: m.agent,
+          role: m.role,
+          on: m.on,
+          status: m.status,
+        });
+      }
+      // 也加上 leader（如果不是自己，且没在 members 里出现过）
+      if (parentSquad.leader !== agentName && !parentSquad.members.some(m => m.agent === parentSquad.leader)) {
+        squadTeammates.push({
+          agent: parentSquad.leader,
+          role: 'lead',
+          on: parentSquad.goal,
+          status: parentSquad.status === 'working' ? 'working' : 'idle',
+        });
+      }
+    }
+
+    // 已完成的前置任务
+    const completedTasks: MissionContext['completedTasks'] = plan.tasks
+      .filter(t => t.status === 'done' && t.id !== planTaskId)
+      .map(t => ({ id: t.id, what: t.what, result: t.result }));
+
+    // 同期进行中的任务
+    const inProgressTasks: MissionContext['inProgressTasks'] = plan.tasks
+      .filter(t => t.status === 'working' && t.id !== planTaskId)
+      .map(t => ({ id: t.id, what: t.what, who: t.who, progress: t.progress }));
+
+    // 未解决信号（blocker / question）
+    const unresolvedSignals: MissionContext['unresolvedSignals'] = [];
+    if (squadFile) {
+      for (const sig of squadFile.signals) {
+        if (sig.resolved) continue;
+        if (sig.type === 'blocker' || sig.type === 'question') {
+          unresolvedSignals.push({
+            from: sig.from,
+            type: sig.type,
+            msg: sig.msg,
+            at: sig.at,
+          });
+        }
+      }
+    }
+
+    return {
+      missionId,
+      goal: plan.mission.goal,
+      currentTaskId: task.id,
+      currentTaskWhat: task.what,
+      squadRole: role,
+      squadOn: on,
+      squadGoal,
+      squadTeammates,
+      completedTasks,
+      inProgressTasks,
+      unresolvedSignals,
+    };
+  }
+
+  /**
+   * 渲染 MissionContext 为 system prompt 文本（便利方法，等价于 renderMissionContext）。
+   * 返回 null 表示 missionId/planTaskId/agentName 至少有一个找不到。
+   */
+  renderContext(missionId: string, planTaskId: string, agentName: string): string | null {
+    const ctx = this.readContext(missionId, planTaskId, agentName);
+    if (!ctx) return null;
+    return renderMissionContext(ctx);
+  }
+
+  /**
+   * 递归查找 agentName 所在的 squad 和 member 记录。
+   * 注意：squad.leader 不在 members 数组里，所以这里也匹配 leader。
+   * 如果 agentName 是 leader，返回一个合成的 {role: 'lead'} member。
+   */
+  private findSquadAndMember(
+    squads: Squad[],
+    agentName: string,
+  ): { squad: Squad; member: SquadMember } | null {
+    for (const squad of squads) {
+      // ① 匹配 leader（leader 不在 members 数组里）
+      if (squad.leader === agentName) {
+        return {
+          squad,
+          member: {
+            agent: agentName,
+            role: 'lead',
+            on: squad.goal,
+            status: squad.status === 'working' ? 'working' : 'idle',
+          },
+        };
+      }
+      // ② 匹配 members 列表
+      const member = squad.members.find(m => m.agent === agentName);
+      if (member) return { squad, member };
+      // ③ 递归子 squad
+      if (squad.squads) {
+        const nested = this.findSquadAndMember(squad.squads, agentName);
+        if (nested) return nested;
+      }
+    }
+    return null;
   }
 
   /**

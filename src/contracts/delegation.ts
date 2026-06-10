@@ -41,6 +41,42 @@ export const DEFAULT_EXTERNAL_BUDGET: DelegationBudget = {
   maxReRouteDepth: 2,
 };
 
+/**
+ * 13.0 §5.3.11: 任务交接上下文 — handoff 时把当前 Agent 的工作状态结构化传给接班 Agent。
+ *
+ * 接班的 Agent 在 entry 处读取 HandoffContext 并拼接到 system prompt，
+ * 避免「无状态 Agent 不知道之前干了什么」导致的重复劳动或上下文丢失。
+ */
+export interface HandoffContext {
+  /** 原始用户指令（这一串工作最初的诉求） */
+  originalInstruction: string;
+  /** 意图锚（12.0 Intent Anchor，限定任务语义边界） */
+  intentAnchor?: {
+    goal: string;
+    successCriteria: string[];
+    scope: { include?: string[]; exclude?: string[] };
+  };
+  /** 接班的 Agent 已经读过的文件路径（避免重复读） */
+  filesRead: string[];
+  /** 接班的 Agent 已经修改过的文件路径（含 diff hash 让接班者理解改了什么） */
+  filesModified: Array<{ path: string; diffHash?: string }>;
+  /** 接班的 Agent 与其他 agent 的对话历史（最近 N 条，给接班者体感） */
+  agentConversations: Array<{ with: string; summary: string; at: number }>;
+  /** 当前进度（自然语言描述） */
+  currentProgress: string;
+  /** 已知阻塞（blocker 列表，Brain/leader 可读） */
+  blockers: Array<{ reason: string; raisedAt: number; raisedBy: string }>;
+  /** 当前 scope 快照（active blockPaths/blockTools） */
+  scopeSnapshot?: {
+    blockPaths: string[];
+    blockTools: string[];
+  };
+  /** handoff 时间 */
+  handoffAt: number;
+  /** 交接发起方 */
+  fromAgent: string;
+}
+
 export interface TurnOutputPayload {
   delegationId: string;
   kind: 'text_delta' | 'progress' | 'tool_result' | 'tool_error' | 'usage' | 'llm_completed';
@@ -53,6 +89,8 @@ export interface TurnFinalPayload {
   toolCalls?: Array<{ id: string; name: string; input: unknown; result?: string }>;
   totalUsage?: { inputTokens: number; outputTokens: number };
   metadata?: Record<string, unknown>;
+  /** 13.0 §5.3.11: handoff 时携带的结构化上下文（下一棒 agent 接手时读取） */
+  handoffContext?: HandoffContext;
 }
 
 export type ReviewOrigin = 'conversation' | 'task' | 'superior_chain';
@@ -83,6 +121,12 @@ export interface DelegationEntry {
   missionId?: string;
   /** 13.0 多智能体协作：关联的 plan task ID（plan.json 中的任务编号） */
   planTaskId?: string;
+  /** 13.0 §11: 当前 squad ID（用于 squad 上下文注入） */
+  squadId?: string;
+  /** 13.0 §11: 当前 squad role（lead / work / check） */
+  squadRole?: 'lead' | 'work' | 'check';
+  /** 13.0 §5.3.11: handoff 时附带的结构化上下文 */
+  handoffContext?: HandoffContext;
 }
 
 export interface DelegationGroup {

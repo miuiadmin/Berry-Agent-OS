@@ -225,3 +225,182 @@ describe('MissionManager — Squad 操作', () => {
     expect(after.handoffs[0].what).toBe('交接内容');
   });
 });
+
+describe('MissionManager — HandoffContext 结构化（§5.3.11）', () => {
+  it('executeHandoff 接受 sourceContext 并 JSON 序列化到 content', () => {
+    const plan = mgr.createMission('目标', 'ctx', [], 'brain');
+    mgr.createSquad(plan.mission.id, { name: 'A', goal: 'g', leader: 'a' });
+    mgr.createSquad(plan.mission.id, { name: 'B', goal: 'g', leader: 'b' });
+    const squad = mgr.readSquad(plan.mission.id)!;
+
+    const sourceContext = {
+      originalInstruction: '重构 auth 模块',
+      filesRead: ['src/auth.ts'],
+      filesModified: [{ path: 'src/auth.ts' }],
+      agentConversations: [{ with: 'learning', summary: '讨论方案', at: Date.now() }],
+      currentProgress: '已完成 50%',
+      blockers: [],
+      handoffAt: Date.now(),
+      fromAgent: 'a',
+    };
+
+    mgr.executeHandoff(
+      plan.mission.id,
+      squad.org.squads[0].id,
+      squad.org.squads[1].id,
+      '接力重构',
+      undefined,
+      sourceContext,
+    );
+
+    const after = mgr.readSquad(plan.mission.id)!;
+    expect(after.handoffs[0].content).toBeDefined();
+    // content 应该是 JSON 序列化结果
+    const parsed = JSON.parse(after.handoffs[0].content!);
+    expect(parsed.originalInstruction).toBe('重构 auth 模块');
+    expect(parsed.filesRead).toContain('src/auth.ts');
+  });
+
+  it('readLatestHandoffContext 反序列化 JSON content', () => {
+    const plan = mgr.createMission('目标', 'ctx', [], 'brain');
+    mgr.createSquad(plan.mission.id, { name: 'A', goal: 'g', leader: 'a' });
+    mgr.createSquad(plan.mission.id, { name: 'B', goal: 'g', leader: 'b' });
+    const squad = mgr.readSquad(plan.mission.id)!;
+
+    mgr.executeHandoff(
+      plan.mission.id,
+      squad.org.squads[0].id,
+      squad.org.squads[1].id,
+      '接力',
+      undefined,
+      {
+        originalInstruction: 'inst',
+        filesRead: ['x.ts'],
+        filesModified: [],
+        agentConversations: [],
+        currentProgress: 'p',
+        blockers: [],
+        handoffAt: Date.now(),
+        fromAgent: 'a',
+      },
+    );
+
+    const ctx = mgr.readLatestHandoffContext(
+      plan.mission.id,
+      squad.org.squads[0].id,
+      squad.org.squads[1].id,
+    );
+    expect(ctx).not.toBeNull();
+    expect(ctx!.originalInstruction).toBe('inst');
+    expect(ctx!.filesRead).toContain('x.ts');
+  });
+
+  it('readLatestHandoffContext 在无 handoff 时返回 null', () => {
+    const plan = mgr.createMission('目标', 'ctx', [], 'brain');
+    const ctx = mgr.readLatestHandoffContext(plan.mission.id, 'x', 'y');
+    expect(ctx).toBeNull();
+  });
+
+  it('renderHandoffContext 输出含关键字段', () => {
+    const ctx = {
+      originalInstruction: '重构 auth',
+      intentAnchor: { goal: '加固', successCriteria: ['测试通过'] },
+      filesRead: ['src/auth.ts', 'src/jwt.ts'],
+      filesModified: [{ path: 'src/auth.ts' }],
+      agentConversations: [{ with: 'learning', summary: '讨论', at: Date.now() }],
+      currentProgress: '改了一半',
+      blockers: [{ reason: '等权限', raisedAt: Date.now(), raisedBy: 'a' }],
+      scopeSnapshot: { blockPaths: ['/etc'], blockTools: ['shell'] },
+      handoffAt: Date.now(),
+      fromAgent: 'a',
+    };
+    const text = mgr.renderHandoffContext(ctx);
+    expect(text).toContain('重构 auth');
+    expect(text).toContain('src/auth.ts');
+    expect(text).toContain('等权限');
+    expect(text).toContain('不可访问路径');
+    expect(text).toContain('不可用工具');
+  });
+});
+
+describe('MissionManager — readContext 系统提示注入（§12.3/§12.6）', () => {
+  it('readContext 返回结构化 MissionContext（含队友、前置任务、信号）', () => {
+    const plan = mgr.createMission('重构 auth 模块', '用户要求...', [
+      { what: '分析 auth', who: 'code' },
+      { what: '修改 auth', who: 'code', depends_on: ['t-1'] },
+      { what: '测试', who: 'code', depends_on: ['t-2'] },
+    ], 'brain');
+
+    // 先完成第一个任务
+    mgr.updatePlan(plan.mission.id, { task_id: 't-1', status: 'done', result: '分析完毕' });
+    mgr.updatePlan(plan.mission.id, { task_id: 't-2', status: 'working', progress: '正在改 auth.ts' });
+
+    // 创建 squad
+    mgr.createSquad(plan.mission.id, {
+      name: '重构组',
+      goal: '重构 auth',
+      leader: 'code',
+      members: [{ agent: 'learning', role: 'work', on: '查文档' }],
+    });
+
+    // 给 squad 加个 blocker 信号
+    const squad = mgr.readSquad(plan.mission.id)!;
+    mgr.sendSignal(plan.mission.id, squad.org.squads[0].id, 'learning', 'blocker', '文档找不到');
+
+    // code agent 查 t-2 的上下文
+    const ctx = mgr.readContext(plan.mission.id, 't-2', 'code');
+    expect(ctx).not.toBeNull();
+    expect(ctx!.missionId).toBe(plan.mission.id);
+    expect(ctx!.goal).toBe('重构 auth 模块');
+    expect(ctx!.currentTaskId).toBe('t-2');
+    expect(ctx!.currentTaskWhat).toBe('修改 auth');
+    expect(ctx!.squadGoal).toBe('重构 auth');
+    expect(ctx!.squadTeammates.length).toBeGreaterThan(0);
+    expect(ctx!.squadTeammates.some(t => t.agent === 'learning')).toBe(true);
+    expect(ctx!.completedTasks.some(t => t.id === 't-1' && t.result === '分析完毕')).toBe(true);
+    expect(ctx!.inProgressTasks.some(t => t.id === 't-2')).toBe(false); // 自己不算
+    expect(ctx!.unresolvedSignals.some(s => s.msg === '文档找不到')).toBe(true);
+  });
+
+  it('readContext 在 agent 不在 squad 中时给默认 work 角色', () => {
+    const plan = mgr.createMission('目标', 'ctx', [
+      { what: 'T1', who: 'code' },
+    ], 'brain');
+
+    // 不创建 squad
+    const ctx = mgr.readContext(plan.mission.id, 't-1', 'code');
+    expect(ctx).not.toBeNull();
+    expect(ctx!.squadRole).toBe('work');
+    expect(ctx!.squadGoal).toBe(plan.mission.goal);
+    expect(ctx!.squadTeammates).toHaveLength(0);
+  });
+
+  it('readContext 在 missionId 不存在时返回 null', () => {
+    const ctx = mgr.readContext('m_nonexistent', 't-1', 'code');
+    expect(ctx).toBeNull();
+  });
+
+  it('readContext 在 planTaskId 不存在时返回 null', () => {
+    const plan = mgr.createMission('目标', 'ctx', [{ what: 'T1', who: 'code' }], 'brain');
+    const ctx = mgr.readContext(plan.mission.id, 't-99', 'code');
+    expect(ctx).toBeNull();
+  });
+
+  it('renderContext 返回包含 mission 目标和队友的文本', () => {
+    const plan = mgr.createMission('重构 auth', 'ctx', [
+      { what: 'T1', who: 'code' },
+    ], 'brain');
+    mgr.createSquad(plan.mission.id, {
+      name: '重构组',
+      goal: '完成重构',
+      leader: 'code',
+      members: [{ agent: 'learning', role: 'work', on: '查文档' }],
+    });
+
+    const text = mgr.renderContext(plan.mission.id, 't-1', 'code');
+    expect(text).not.toBeNull();
+    expect(text!).toContain('Mission 目标: 重构 auth');
+    expect(text!).toContain('@learning');
+    expect(text!).toContain('当前任务上下文');
+  });
+});

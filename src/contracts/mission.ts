@@ -307,3 +307,96 @@ export interface MissionEvents {
   /** 交接完成 */
   'mission.handoff': { missionId: string; from: string; to: string; what: string };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// §12.3/§12.6: 系统提示注入上下文（mission/squad/plan 一站式）
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Mission/Squad 上下文 — Agent 启动或接收 turn 时，Kernel 把这个结构体注入到 system prompt。
+ *
+ * 13.0 §12.3 要求：执行 Agent 必须知道自己在哪个 plan/squad/role 下干活，
+ * 否则会出现「不知道有队友」「不知道有前置任务」「不知道为啥被叫来」的事故。
+ *
+ * 注入点：Agent 的 system prompt 拼接（在冻结的基础 prompt 之后、动态消息之前）。
+ */
+export interface MissionContext {
+  /** Mission ID */
+  missionId: string;
+  /** Mission 总体目标（一句话） */
+  goal: string;
+  /** 当前任务的 plan task ID（t-1, t-2...） */
+  currentTaskId: string;
+  /** 当前任务的 what 描述 */
+  currentTaskWhat: string;
+  /** 当前 Agent 在 squad 中的角色（lead / work / check） */
+  squadRole: 'lead' | 'work' | 'check';
+  /** 当前 Agent 负责的具体事项 */
+  squadOn: string;
+  /** 当前 squad 的目标 */
+  squadGoal: string;
+  /** 当前 squad 的队友（不含自己） */
+  squadTeammates: Array<{ agent: string; role: 'lead' | 'work' | 'check'; on: string; status: 'idle' | 'working' | 'done' | 'failed' }>;
+  /** 同一 mission 中已完成的任务摘要（让 Agent 知道前置工作） */
+  completedTasks: Array<{ id: string; what: string; result?: string }>;
+  /** 同一 mission 中还在进行的任务 */
+  inProgressTasks: Array<{ id: string; what: string; who: string; progress?: string }>;
+  /** 已发出的 unresolved 信号（blocker / question） */
+  unresolvedSignals: Array<{ from: string; type: SignalType; msg: string; at: string }>;
+}
+
+/**
+ * 把 MissionContext 渲染成一段 system prompt 文本。
+ *
+ * 渲染策略：
+ * - 紧凑 + 列表化，避免 token 爆炸
+ * - 段落顺序：身份（你在哪个 squad/role）→ 任务（你的活是什么）→ 前置（已完成什么）→ 上下文（队友 + 信号）
+ */
+export function renderMissionContext(ctx: MissionContext): string {
+  const lines: string[] = [];
+
+  lines.push(`## 当前任务上下文（自动注入）`);
+  lines.push(`Mission ID: ${ctx.missionId}`);
+  lines.push(`Mission 目标: ${ctx.goal}`);
+  lines.push(`你的当前任务 (${ctx.currentTaskId}): ${ctx.currentTaskWhat}`);
+  lines.push(`你的 squad 角色: ${ctx.squadRole}`);
+  lines.push(`你负责: ${ctx.squadOn}`);
+  lines.push(`你的 squad 目标: ${ctx.squadGoal}`);
+
+  if (ctx.squadTeammates.length > 0) {
+    lines.push(`队友:`);
+    for (const t of ctx.squadTeammates) {
+      lines.push(`  - @${t.agent} (${t.role}, ${t.status}): ${t.on}`);
+    }
+  }
+
+  if (ctx.completedTasks.length > 0) {
+    lines.push(`已完成的前置任务:`);
+    for (const t of ctx.completedTasks) {
+      const result = t.result ? ` → ${t.result}` : '';
+      lines.push(`  - ${t.id}: ${t.what}${result}`);
+    }
+  }
+
+  if (ctx.inProgressTasks.length > 0) {
+    lines.push(`同期进行中的任务（仅供参考，不要冲突）:`);
+    for (const t of ctx.inProgressTasks) {
+      const progress = t.progress ? ` [${t.progress}]` : '';
+      lines.push(`  - ${t.id} (@${t.who}): ${t.what}${progress}`);
+    }
+  }
+
+  if (ctx.unresolvedSignals.length > 0) {
+    lines.push(`未解决的信号（请关注）:`);
+    for (const s of ctx.unresolvedSignals) {
+      lines.push(`  - [${s.type}] ${s.from}: ${s.msg}`);
+    }
+  }
+
+  lines.push(`## 调用方式`);
+  lines.push(`- 用 plan 工具读取/更新当前任务进度（plan tool: action=read/update）`);
+  lines.push(`- 用 squad 工具给队友发信号（squad tool: action=signal）`);
+  lines.push(`- 任务完成后调 plan 工具标记 status='done' 并写 result`);
+
+  return lines.join('\n');
+}
