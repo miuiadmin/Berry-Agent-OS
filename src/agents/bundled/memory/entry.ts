@@ -1,7 +1,26 @@
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
+// 13.0: 注册 memory 工具，使 dialogue handler 的 runToolLoop 能使用 memory_query 等
+import { createMemoryTools } from '../../../tools/memory-tools.js';
+import { registerTool } from '../../../tools/index.js';
+
+/** 确保只注册一次 memory dialogue 工具 */
+let memoryToolsRegistered = false;
+function ensureMemoryDialogueTools(
+  ipc: import('../../../kernel/ipc.js').IpcChildChannel,
+): void {
+  if (memoryToolsRegistered) return;
+  memoryToolsRegistered = true;
+  const memoryTools = createMemoryTools(ipc as any, 30_000);
+  for (const tool of memoryTools) {
+    registerTool(tool);
+  }
+}
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
+  // 13.0: 注册 memory 工具，使 dialogue 场景下 LLM 可使用 memory_query 等
+  ensureMemoryDialogueTools(context.ipc);
+
   const input = payload.inputPayload;
   const taskType = String(input.taskType ?? 'memory_judge');
   const db = getDb();

@@ -12,6 +12,8 @@ import { registerTool } from '../../../tools/index.js';
 import { hasFileBeenRead, markFileRead } from '../../../tools/read-tracker.js';
 import { z } from 'zod';
 import type { ToolResult } from '../../../tools/types.js';
+// 13.0 AgentPort: Code Agent 可通过 AgentPort 向其他 Agent 提问
+import { createAgentPort } from '../../agent-port.js';
 
 /**
  * 注册带文件锁保护的工具版本（覆盖 builtin）。
@@ -134,10 +136,55 @@ function buildUserResponse(result: { phases: Array<{ phase: string; success: boo
   return parts.join('\n');
 }
 
+/** 确保只注册一次 AgentPort 工具（首次 agent.task 或 dialogue.send 触发时） */
+let agentPortRegistered = false;
+
+/**
+ * 注册 13.0 AgentPort 相关工具（ask_agent）。
+ * AgentPort 允许 Code Agent 向其他 Agent（如 memory）提问获取信息。
+ */
+function ensureAgentPortTools(
+  ipc: import('../../../kernel/ipc.js').IpcChildChannel,
+  askUser: (question: string, opts?: import('../../module-agent.js').AskUserOptions) => Promise<string>,
+): void {
+  if (agentPortRegistered) return;
+  agentPortRegistered = true;
+
+  const port = createAgentPort({ ipc, agentName: 'code', askUser });
+
+  registerTool({
+    name: 'ask_agent',
+    description: '向另一个 Agent 提问获取信息。例如向 memory 查询用户偏好、向 learning 获取学习结果。适合需要跨 Agent 知识协作的场景。',
+    dangerLevel: 'safe',
+    inputSchema: z.object({
+      target: z.string().describe('目标 Agent 名称，如 "memory"（查询用户知识库）、"learning"（查询学习结果）'),
+      message: z.string().describe('要发送给目标 Agent 的消息，应包含足够的上下文'),
+      context: z.record(z.string(), z.unknown()).optional().describe('可选：附加上下文信息'),
+    }),
+    async execute(input: unknown): Promise<ToolResult> {
+      const { target, message, context: ctx } = input as { target: string; message: string; context?: Record<string, unknown> };
+      try {
+        const reply = await port.request({ to: target, content: message, context: ctx });
+        return { content: `[${reply.from}] ${reply.content}` };
+      } catch (err) {
+        const errorMsg = (err as Error).message;
+        // 超时或不可用时给出可操作建议，让 LLM 能自主决策
+        const isTimeout = errorMsg.includes('timeout') || errorMsg.includes('不可用');
+        const hint = isTimeout
+          ? `${errorMsg}。建议：用现有信息继续完成任务，或使用其他工具自行获取信息。`
+          : errorMsg;
+        return { content: `ask_agent 失败: ${hint}`, isError: true };
+      }
+    },
+  });
+}
+
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const db = getDb();
   const runtime = new CodeRuntime(db);
   const lockManager = ensureLockedTools();
+  // 13.0: 注册 AgentPort 工具，让 Code Agent 可通过 ask_agent 向其他 Agent 提问
+  ensureAgentPortTools(context.ipc, context.askUser);
 
   const input = payload.inputPayload;
   const workingDir = (input.workingDir as string) ?? homedir();

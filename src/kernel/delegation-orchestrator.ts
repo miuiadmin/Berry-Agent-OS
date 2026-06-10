@@ -485,9 +485,113 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // 11.0: 注册 dialogue.reply handler（module agent 回复对话消息时触发）
     if (this.dialogueRouter) {
       const router = this.dialogueRouter;
+
       agent.ipc.onMessage('dialogue.reply', (msg: IpcMessage) => {
         const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
         router.handleReply(payload);
+      });
+
+      // 13.0 AgentPort: 任意 module agent 发起的 dialogue.send 路由
+      // 让非 Conversation 的 agent 也能通过 AgentPort 向其他 agent 发起对话
+      agent.ipc.onMessage('dialogue.send', async (msg: IpcMessage) => {
+        const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
+
+        // 安全门禁：拒绝 to='brain' 和 self-messaging
+        if (payload.to === 'brain') {
+          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
+            dialogueId: payload.dialogueId,
+            sequenceNumber: payload.sequenceNumber + 1,
+            from: 'core',
+            to: payload.from,
+            content: '[对话错误] 不允许直接向 Brain 发送消息',
+            metadata: { isFinal: true },
+          };
+          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
+          return;
+        }
+
+        // 防递归：不允许 self-messaging
+        if (payload.to === agentName) {
+          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
+            dialogueId: payload.dialogueId,
+            sequenceNumber: payload.sequenceNumber + 1,
+            from: 'core',
+            to: payload.from,
+            content: `[对话错误] 不允许自己向自己发消息 (${agentName})`,
+            metadata: { isFinal: true },
+          };
+          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
+          return;
+        }
+
+        // 注册对话状态（如未注册）
+        let state = router.getDialogue(payload.dialogueId);
+        if (!state) {
+          const correlationId = msg.correlationId ?? msg.id;
+          state = router.registerDialogue(payload.dialogueId, {
+            sessionId: (payload.context as Record<string, unknown>)?._sessionId as string ?? 'agent-port',
+            correlationId,
+            initiator: payload.from,
+            target: payload.to,
+          });
+        }
+
+        // 确保目标 agent 已启动并注册 kernel 侧 handlers
+        try {
+          await this.agentManager.ensureAgent(payload.to);
+          this.setupModuleAgent(payload.to);
+        } catch (err) {
+          // 目标 agent 不可用 → 返回错误 reply
+          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
+            dialogueId: payload.dialogueId,
+            sequenceNumber: payload.sequenceNumber + 1,
+            from: payload.to,
+            to: payload.from,
+            content: `[对话错误] 目标 Agent "${payload.to}" 不可用: ${(err as Error).message}`,
+            metadata: { isFinal: true },
+          };
+          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
+          return;
+        }
+
+        // 推送前端事件
+        const pending = this.sessionManager.getPending(state!.correlationId);
+        getEventBus().emit('dialogue.status', {
+          dialogueId: payload.dialogueId,
+          sessionId: pending?.sessionId ?? state!.sessionId,
+          status: state!.currentRound === 0 ? 'started' : 'round_complete',
+          from: payload.from,
+          to: payload.to,
+          round: state!.currentRound,
+        });
+
+        try {
+          // 路由到目标 Agent（复用 DialogueRouter 的全部守卫）
+          const reply = await router.sendMessage(payload);
+          // 将 reply 转发回发起方 Agent
+          agent.ipc.send('dialogue.reply', agentName, reply, payload.dialogueId);
+        } catch (err) {
+          // 超时或错误 → 构造错误 reply 返回给发起方
+          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
+            dialogueId: payload.dialogueId,
+            sequenceNumber: payload.sequenceNumber + 1,
+            from: payload.to,
+            to: payload.from,
+            content: `[对话错误] ${(err as Error).message}`,
+            metadata: { isFinal: true },
+          };
+          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
+
+          // 推送前端：对话结束（错误）
+          getEventBus().emit('dialogue.status', {
+            dialogueId: payload.dialogueId,
+            sessionId: pending?.sessionId ?? state!.sessionId,
+            status: 'ended',
+            from: payload.from,
+            to: payload.to,
+            round: state!.currentRound,
+          });
+        }
       });
     }
   }

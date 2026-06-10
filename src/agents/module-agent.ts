@@ -148,7 +148,7 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
       const result = await runLoop({
         llm,
         messages,
-        systemPrompt: `你是一个专业的代码智能体。收到指令后执行任务，给出简洁的结果摘要。不要闲聊。`,
+        systemPrompt: getDialogueSystemPrompt(name!),
         tools: agentTools,
         config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },
         onChunk: ephemeralTaskId ? (text: string) => {
@@ -257,3 +257,19 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
 }
 
 export { getDb };
+
+/**
+ * 13.0: 根据当前 Agent 名称返回 dialogue 场景下的 systemPrompt。
+ * 不同 Agent 在被其他 Agent 通过 AgentPort 提问时，需要使用不同的角色提示。
+ */
+function getDialogueSystemPrompt(agentName: string): string {
+  const prompts: Record<string, string> = {
+    memory: '你是一个记忆管理智能体。你的职责是查询和管理用户的知识库。根据收到的指令查询或操作记忆，给出简洁准确的结果。不要闲聊。',
+    learning: '你是一个学习智能体。你的职责是从对话中提取用户偏好和知识。根据收到的指令执行学习任务，给出简洁的结果摘要。不要闲聊。',
+    evolution: '你是一个能力进化引擎。你的职责是检测系统能力缺口并生成改进提案。根据收到的指令分析并给出建议。不要闲聊。',
+    code: '你是一个专业的代码智能体。收到指令后执行任务，给出简洁的结果摘要。不要闲聊。',
+    skills: '你是一个技能管理智能体。你的职责是发现、加载和执行技能。根据收到的指令操作技能，给出简洁的结果。不要闲聊。',
+    'plugin-builder': '你是一个插件构建智能体。你的职责是根据需求生成插件包。根据收到的指令构建插件，给出简洁的结果。不要闲聊。',
+  };
+  return prompts[agentName] ?? `你是一个专业的智能体。收到指令后执行任务，给出简洁的结果摘要。不要闲聊。`;
+}
