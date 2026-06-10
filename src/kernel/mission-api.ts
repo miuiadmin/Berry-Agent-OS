@@ -237,7 +237,12 @@ export function registerMissionRoutes(
     }
 
     try {
-      mgr.sendSignal(missionId, squadId, from, type as any, msg);
+      const validTypes = ['progress', 'done', 'blocker', 'question'] as const;
+      if (!validTypes.includes(type as typeof validTypes[number])) {
+        json(res, { error: `Invalid signal type: ${type}. Must be one of: ${validTypes.join(', ')}` }, 400);
+        return;
+      }
+      mgr.sendSignal(missionId, squadId, from, type as typeof validTypes[number], msg);
       json(res, { ok: true });
     } catch (err: any) {
       json(res, { error: err.message ?? 'Failed to send signal' }, 400);

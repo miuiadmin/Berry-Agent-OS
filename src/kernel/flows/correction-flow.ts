@@ -134,7 +134,7 @@ export class CorrectionFlow {
       const result = entry
         ? escalation.evaluate(entry.targetAgent, delegationId, baseSeverityFromCorrection(correction))
         : null;
-      getEventBus().emit('brain.correction' as any, {
+      getEventBus().emit('brain.correction', {
         sessionId: entry?.sessionId ?? 'unknown',
         taskId: delegationId,
         agentName: entry?.targetAgent ?? 'unknown',
@@ -282,7 +282,7 @@ export class CorrectionFlow {
       }, 'applyRestart: reRoute 达上限，降级为 askUser');
 
       // 13.0 §8.7: emit task.reject 让 Brain observe
-      getEventBus().emit('task.reject' as any, {
+      getEventBus().emit('task.reject', {
         taskId: delegationId,
         agentName: entry.targetAgent,
         reason: correction.instruction ?? 'Brain 多次 reRoute 失败',

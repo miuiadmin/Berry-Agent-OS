@@ -288,7 +288,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
 
     // 发 EventBus 事件（kernel 可订阅后路由 turn.correction 给 worker）
-    getEventBus().emit('brain.signal_intervention' as any, {
+    getEventBus().emit('brain.signal_intervention', {
       missionId,
       from: signal.from,
       signalType: signal.type,
@@ -516,7 +516,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       // Kernel 订阅后调 ensureAgent(checker.agent) 启动它，然后转交 review.request 给 checker
       // 这里不阻塞主 review.result（避免 checker 卡住导致 worker 主任务挂起）
       const checkerCorrelationId = genId('check');
-      getEventBus().emit('brain.checker.dispatch' as any, {
+      getEventBus().emit('brain.checker.dispatch', {
         missionId,
         planTaskId,
         sessionId: turn.sessionId,
