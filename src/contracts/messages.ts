@@ -99,6 +99,18 @@ export interface IpcMessageMap {
   'ipc:checkpoint.evaluate': { request: TurnCheckpointPayload; response: void };
   'ipc:checkpoint.evaluate.result': { request: { delegationId: string; action: string; instruction?: string; constraints?: unknown }; response: void };
   'ipc:turn.correction': { request: TurnCorrectionPayload; response: void };
+  /** 13.0 §8.6: Brain 自我审核反馈 — 用户/Evolution 反馈 Brain 修改后的 lesson 写入 */
+  'ipc:brain.review.feedback': {
+    request: {
+      decisionId: string;
+      /** 反馈类型：'user_explicit' | 'evolution_derived' | 'auto_evolution' */
+      feedbackType: 'user_explicit' | 'evolution_derived' | 'auto_evolution';
+      lesson: string;
+      /** 可选：outcome（good/bad/neutral） */
+      outcome?: 'good' | 'bad' | 'neutral';
+    };
+    response: { ok: boolean; id?: string; reason?: string };
+  };
   /** 13.0 §5.3.7: Agent 或 Evolution Engine 写用户偏好（跨 session 持久化） */
   'ipc:user.remember_preference': {
     request: {

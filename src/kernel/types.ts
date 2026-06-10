@@ -58,6 +58,8 @@ export type IpcMessageType =
   | 'turn.correction'
   | 'superior.review.request'
   | 'conversation.restore'
+  | 'brain.review.feedback'
+  | 'brain.review.feedback.result'
   | 'superior.review.result'
   | 'bus.invoke'
   | 'bus.invoke.result'

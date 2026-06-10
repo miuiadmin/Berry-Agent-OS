@@ -16,6 +16,8 @@ export interface RecordBrainDecisionInput {
   confidence?: number;
   /** 13.0 §12.6 + §3.7: 关联的 task ID（plan task / agent_task / session 任务） */
   taskId?: string;
+  /** outcome 显式覆盖（默认按 decisionType + outputJson 推导） */
+  outcome?: 'good' | 'bad' | 'neutral' | null;
 }
 
 export class BrainDecisionRecorder {
@@ -32,7 +34,7 @@ export class BrainDecisionRecorder {
         `);
       }
       const id = genId('bdec');
-      const outcome = deriveOutcome(input.decisionType, input.outputJson);
+      const outcome = input.outcome ?? deriveOutcome(input.decisionType, input.outputJson);
       this.insertStmt.run(
         id,
         input.sessionId,

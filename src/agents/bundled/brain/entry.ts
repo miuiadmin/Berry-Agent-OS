@@ -336,8 +336,6 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   ipc.onMessage('review.request', async (msg: IpcMessage) => {
     const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string } };
     const trackingId = msg.correlationId ?? msg.id;
-
-    const reviewContent = buildReviewInput(turn.level, turn);
     let systemPrompt = getReviewPrompt(turn.level);
 
     // Inject World Model context for review decisions
@@ -379,6 +377,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     // §5.2 ④: Recall historical review decisions for learning
     systemPrompt += recallDecisionsBlock('review');
 
+    const reviewContent = buildReviewInput(turn.level, turn);
     const messages: ModelMessage[] = [
       { role: 'user', content: reviewContent },
     ];
@@ -450,6 +449,38 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         verdict: 'approve',
         reason: `Review error: ${(err as Error).message}, approving by default`,
       } satisfies ReviewResult, trackingId);
+    }
+  });
+
+  // 13.0 §8.6: 自我审核反馈 IPC — 让前端 / Evolution Engine 把 lesson 写回 brain_decisions
+  // 之前 BrainDecisionRecorder.updateLesson 是私有方法，没法通过 IPC 调用
+  ipc.onMessage('brain.review.feedback', (msg: IpcMessage) => {
+    const payload = msg.payload as { decisionId?: string; feedbackType?: string; lesson?: string; outcome?: 'good' | 'bad' | 'neutral' };
+    if (!payload?.decisionId || !payload.lesson) {
+      ipc.send('brain.review.feedback.result', 'core', { ok: false, reason: 'Missing decisionId or lesson' }, msg.correlationId ?? msg.id);
+      return;
+    }
+    try {
+      decisionRecorder.updateLesson(payload.decisionId, payload.lesson);
+      // 同时记录一条新的 decision（outcome 字段记录用户反馈）
+      if (payload.outcome) {
+        decisionRecorder.record({
+          sessionId: 'feedback:' + payload.decisionId,
+          decisionType: 'review',
+          inputSummary: `feedback_type=${payload.feedbackType ?? 'unknown'}`,
+          outputJson: { decisionId: payload.decisionId, feedbackType: payload.feedbackType },
+          outcome: payload.outcome,
+        });
+      }
+      logger.info({
+        decisionId: payload.decisionId,
+        feedbackType: payload.feedbackType,
+        lessonLen: payload.lesson.length,
+      }, 'brain:self-review feedback recorded');
+      ipc.send('brain.review.feedback.result', 'core', { ok: true, id: payload.decisionId }, msg.correlationId ?? msg.id);
+    } catch (err) {
+      logger.warn({ err, decisionId: payload.decisionId }, 'brain:self-review feedback failed');
+      ipc.send('brain.review.feedback.result', 'core', { ok: false, reason: (err as Error).message }, msg.correlationId ?? msg.id);
     }
   });
 
