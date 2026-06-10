@@ -22,10 +22,11 @@ import { BrainDecisionRecorder } from './brain-decision-recorder.js';
 
 let db: Database.Database;
 let recorder: BrainDecisionRecorder;
+let testDir: string;
 
 beforeEach(() => {
   // 使用临时文件（避免污染用户 ~/.berry）
-  const testDir = mkdtempSync(join(tmpdir(), 'brain-decision-test-'));
+  testDir = mkdtempSync(join(tmpdir(), 'brain-decision-test-'));
   db = new Database(join(testDir, 'test.db'));
   db.pragma('journal_mode = WAL');
 
@@ -52,6 +53,9 @@ beforeEach(() => {
 
 afterEach(() => {
   db.close();
+  if (testDir) {
+    rmSync(testDir, { recursive: true, force: true});
+  }
 });
 
 describe('BrainDecisionRecorder 10 场景 A-J（§3.5/§3.6/§8.6）', () => {
@@ -156,9 +160,9 @@ describe('BrainDecisionRecorder 10 场景 A-J（§3.5/§3.6/§8.6）', () => {
     recorder.recordReviewDecision('s', 'rev-reject', { verdict: 'reject' });
     recorder.recordReviewDecision('s', 'rev-modify', { verdict: 'modify' });
 
-    // permission: allowed→good; 默认→neutral
-    recorder.recordPermissionDecision('s', 'tool', { allowed: true });
-    recorder.recordPermissionDecision('s', 'tool', {});
+    // permission: allowed→good; allowed undefined→neutral（用不同 toolName 避免 byType.set 覆盖）
+    recorder.recordPermissionDecision('s', 'safe_tool', { allowed: true });
+    recorder.recordPermissionDecision('s', 'unknown_tool', {});
 
     // correction: continue→good; stop/restart→bad
     recorder.record({ sessionId: 's', decisionType: 'correction', inputSummary: 'corr-continue', outputJson: { action: 'continue' } });
@@ -175,9 +179,9 @@ describe('BrainDecisionRecorder 10 场景 A-J（§3.5/§3.6/§8.6）', () => {
     expect(byType.get('review:rev-approve')).toBe('good');
     expect(byType.get('review:rev-reject')).toBe('bad');
     expect(byType.get('review:rev-modify')).toBe('neutral');
-    // permission: 两条（allowed=true 和 allowed undefined）— 第二条覆盖第一条
-    // inputSummary 是 'tool: ${toolName}' = 'tool: tool'
-    expect(byType.get('permission:tool: tool')).toBe('good');
+    // permission: inputSummary 是 'tool: ${toolName}'
+    expect(byType.get('permission:tool: safe_tool')).toBe('good');
+    expect(byType.get('permission:tool: unknown_tool')).toBe('neutral');
     expect(byType.get('correction:corr-continue')).toBe('good');
     expect(byType.get('correction:corr-stop')).toBe('bad');
     expect(byType.get('correction:corr-restart')).toBe('bad');
