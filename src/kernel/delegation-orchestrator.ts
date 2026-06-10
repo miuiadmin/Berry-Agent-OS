@@ -1435,6 +1435,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         originalDraft,
       });
 
+      // 13.0 灵魂版 M5：review 完成后排空观察队列（5s 延迟清除，允许迟到 INTERVENE 仍能读取）
+      if (pending.taskId) {
+        this.observationRecorder.markDraining(sessionId, pending.taskId);
+      }
+
       // §9.0 Cleanup speculative state for this correlation
       this.speculativeCorrelations.delete(correlationId);
     });
