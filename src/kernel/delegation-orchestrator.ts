@@ -262,6 +262,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // §4.4.2: 将 stateCache 注入 KernelRouter，启用跨 agent 预算检查
     this.kernelRouter.setStateCache(this.stateCache);
 
+    // §3.8 第二层: 将 stateCache 注入 PermissionCoordinator，启用 active_scope 硬约束拦截
+    if (this.permissionCoordinator) {
+      this.permissionCoordinator.setStateCache(this.stateCache);
+    }
+
     /**
      * P5: 订阅 mission.task_ready 事件 — 依赖满足时自动派发下游任务。
      *
@@ -286,6 +291,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         logger.warn({ err, missionId: payload.missionId, taskId: payload.taskId }, '13.0: task_ready 派发失败');
       });
     });
+
+    // 13.0 §3.8 第二层: delegation 结束时清理 active_scope（避免 stale 约束泄漏到下一个 task）
+    const cleanupScope = (delegationId: string) => {
+      if (this.permissionCoordinator) {
+        this.permissionCoordinator.clearActiveScope(delegationId);
+      }
+    };
+    getEventBus().on('delegation.completed', ({ delegationId }: { delegationId: string }) => cleanupScope(delegationId));
+    getEventBus().on('delegation.failed', ({ delegationId }: { delegationId: string }) => cleanupScope(delegationId));
   }
 
   /** 获取 MissionManager 实例（13.0 多智能体协作） */
