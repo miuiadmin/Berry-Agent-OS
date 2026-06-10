@@ -112,7 +112,35 @@ export function buildRoutingSystemPrompt(): string {
 - 仅对 code/skill_test/external 等需要多步操作的意图签发 scope
 - 日常 chat 不需要 scope
 - dangerous 工具不应包含在 scope 中
-- 不确定时不签发 scope（系统会逐次审批）`;
+- 不确定时不签发 scope（系统会逐次审批）
+
+## 多智能体协作（13.0）
+
+当用户请求涉及 **2+ 个子目标** 或需要 **2+ 个智能体协作** 时，你可以在路由决策中携带 missionId：
+
+  "missionId": "<mission_id>"
+
+missionId 由系统在路由决策被消费时自动创建（如果提供了 missionSpec）：
+
+  "missionSpec": {
+    "goal": "总体目标",
+    "context": "为什么需要多 agent 协作",
+    "tasks": [
+      { "what": "子任务描述", "who": "agent名", "depends_on": [] },
+      { "what": "子任务描述", "who": "agent名", "depends_on": ["t-1"] }
+    ]
+  }
+
+**何时创建 mission**：
+- 用户说"重构整个模块并写测试并更新文档" → 多个子目标
+- 用户说"做一个完整的电商网站" → 需要多 agent 协作
+- 用户说"分析代码库，然后生成 API 文档，再部署" → 多步骤链式任务
+
+**何时不创建 mission**：
+- 单一任务（如"改一个 bug"、"解释一段代码"）
+- 单个 agent 即可完成的任务
+
+**mission 创建后**：系统会自动派发任务给各 agent，每个 agent 通过 plan 工具了解自己的任务和进度。你作为 Brain 只需在 missionSpec 中规划好任务分解和依赖关系。`;
 }
 
 export function buildRoutingUserPrompt(
@@ -486,4 +514,48 @@ export function parseSuperiorReviewResult(llmOutput: string, delegationId: strin
   } catch {
     return { delegationId, correlationId, superiorId, verdict: 'approve', reason: 'LLM 输出解析失败，默认通过' };
   }
+}
+
+// --- P10: Checker 角色系统提示 ---
+
+/**
+ * P10: 构造 checker 角色的系统提示。
+ *
+ * Checker 是 squad 中的独立验证角色，负责审查 worker 的输出质量。
+ * 不直接修改代码，通过 squad tool signal 报告问题。
+ *
+ * @param squadGoal - Squad 的目标描述
+ * @param memberOn - Checker 负责验证的内容描述
+ * @param leaderAgent - Leader agent 的名称
+ * @returns checker 角色的 system prompt 片段
+ */
+export function buildCheckerSystemPrompt(squadGoal: string, memberOn: string, leaderAgent: string): string {
+  return `## Checker 角色指令
+
+你是 Squad 中的 **Checker（验证者）** 角色。你的职责是独立验证 worker 的产出质量。
+
+### Squad 目标
+${squadGoal}
+
+### 你负责验证
+${memberOn}
+
+### Leader
+@${leaderAgent} 是你的 Leader。你向他汇报验证结果。
+
+### 验证原则
+1. **独立性**：不依赖 worker 的自我评价，独立验证产出
+2. **关注点**：
+   - 正确性：逻辑是否正确，边界情况是否处理
+   - 完整性：是否覆盖所有要求的场景
+   - 安全性：是否有安全隐患（注入、数据泄露等）
+   - 一致性：是否与 plan 中的任务目标一致
+3. **不直接修改**：发现问题时通过 squad tool 的 signal 操作报告，不做直接修改
+4. **建设性**：给出具体的问题描述和修复建议，不说空话
+
+### 报告方式
+- 通过 \`squad\` 工具的 \`signal\` 操作发送信号
+- 通过问题: \`signal(type='question', msg='...')\`
+- 通过阻塞: \`signal(type='blocker', msg='...')\`
+- 验证通过: \`signal(type='done', msg='验证通过: ...')\``;
 }

@@ -19,6 +19,7 @@ import { registerTemplateRoutes } from '../intelligence/template-api.js';
 import { registerAsyncDelegationRoutes } from '../intelligence/async-delegation-api.js';
 import { registerTeamBuilderRoutes } from '../intelligence/team-builder-api.js';
 import { registerProviderRoutes } from '../providers/api-routes.js';
+import { registerMissionRoutes } from '../kernel/mission-api.js';
 import type { WebServerDependencies } from './types.js';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
@@ -537,6 +538,9 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Provider management routes ---
   registerProviderRoutes(route, () => deps.getProviderRegistry?.(), readBody, json, deps.configService);
+
+  // --- 13.0 Mission / Plan / Squad routes ---
+  registerMissionRoutes(route, () => deps.orchestrator?.mission ?? null, readBody, json);
 
   // --- 12.0 Drift metrics routes ---
   route('GET', '/drift/metrics', (_req, res, url) => {

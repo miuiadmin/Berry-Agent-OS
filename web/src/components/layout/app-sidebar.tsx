@@ -11,6 +11,7 @@ import {
   Bell,
   Clock,
   Shield,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -29,6 +30,7 @@ const navItems = [
   { href: "/conversations", labelKey: "sidebar.conversations", icon: MessagesSquare },
   { href: "/usage", labelKey: "sidebar.usage", icon: BarChart3 },
   { href: "/drift", labelKey: "sidebar.drift", icon: Shield },
+  { href: "/missions", labelKey: "sidebar.missions", icon: Target },
   { href: "/logs", labelKey: "sidebar.logs", icon: ScrollText },
 ];
 

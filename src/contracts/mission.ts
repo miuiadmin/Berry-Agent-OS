@@ -149,6 +149,8 @@ export const SignalSchema = z.object({
   type: SignalType,
   /** 信号消息 */
   msg: z.string(),
+  /** 是否已处理（Brain/leader 处理后标记） */
+  resolved: z.boolean().optional(),
 });
 export type Signal = z.infer<typeof SignalSchema>;
 

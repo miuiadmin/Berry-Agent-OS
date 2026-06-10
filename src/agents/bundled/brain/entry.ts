@@ -35,6 +35,7 @@ import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle
 import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.js';
 import { ObservationRecorder, type RecordObservationInput, type ObservationType } from '../../../kernel/observation-recorder.js';
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
+import { MissionManager } from '../../../kernel/mission-manager.js';
 
 const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
 You are given a SUMMARY of the conversation turn. Evaluate whether the draft response is appropriate.
@@ -102,6 +103,19 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   const decisionRecorder = new BrainDecisionRecorder(db);
   // 13.0 灵魂版：Brain 观察队列（OBSERVE 阶段零 LLM 持久化所有 Agent 间通信）
   const observationRecorder = new ObservationRecorder(db);
+  // 13.0 多智能体协作：Mission / Plan / Squad 生命周期管理
+  // OBSERVE 阶段定期读取 plan 监控进度，零 LLM（规则化判断）
+  const missionManager = new MissionManager();
+
+  /**
+   * session 级观察计数器，用于定期触发 plan 进度检查
+   * key = sessionId, value = 自上次 plan check 以来的观察次数
+   */
+  const observationCounter = new Map<string, number>();
+  /** 每 N 次观察触发一次 plan check（§12.5） */
+  const PLAN_CHECK_INTERVAL = 5;
+  /** 任务 working 状态超过该毫秒数视为"卡住" */
+  const TASK_STALLED_MS = 5 * 60 * 1000;
 
   /** brain.observe IPC handler 载荷（Kernel 转发来的观察事件） */
   interface BrainObservePayload {
@@ -119,6 +133,10 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    * 13.0 灵魂版 brain.observe handler：零 LLM 持久化观察。
    * Brain 三段式工作模型（OBSERVE / INTERVENE / REVIEW）的 OBSERVE 阶段入口。
    * 现有 IPC 推送（dialogue.observe）继续生效，此 handler 是新增的持久化路径。
+   *
+   * §12.5: 每 PLAN_CHECK_INTERVAL 次观察后触发一次 plan 进度检查（零 LLM）。
+   * 如果发现 working 状态的任务长时间未更新（updated_at 超过 TASK_STALLED_MS），
+   * 记录一条 agent_event 类型观察"plan_stalled: task X"——后续 C 级审核时 LLM 可见。
    */
   ipc.onMessage('brain.observe', (msg: IpcMessage) => {
     const payload = msg.payload as BrainObservePayload;
@@ -138,7 +156,83 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       // 观察记录失败不应阻塞其他业务
       logger.warn({ err, sessionId: payload.sessionId, taskId: payload.taskId }, 'brain.observe:record failed');
     }
+
+    // §12.5 定期 plan 进度检查（零 LLM，规则化）
+    try {
+      const count = (observationCounter.get(payload.sessionId) ?? 0) + 1;
+      observationCounter.set(payload.sessionId, count);
+      if (count >= PLAN_CHECK_INTERVAL) {
+        observationCounter.set(payload.sessionId, 0);
+        checkPlanProgress(payload.sessionId, payload.taskId);
+      }
+    } catch (err) {
+      logger.warn({ err, sessionId: payload.sessionId }, 'brain.observe:plan-check failed');
+    }
   });
+
+  /**
+   * 检查指定 session 的活跃 mission 进度，识别卡住的任务。
+   * 规则：working 状态的 task 如果 updated_at 超过 TASK_STALLED_MS，视为卡住。
+   * 该信号以 agent_event 类型观察形式记录，不消耗 LLM——LLM 只在 C 级审核时看到。
+   *
+   * @param sessionId 触发检查的 session
+   * @param taskId 触发检查的 task（仅用于上下文标记，不影响匹配逻辑）
+   */
+  function checkPlanProgress(sessionId: string, taskId: string): void {
+    const missions = missionManager.listMissions();
+    if (missions.length === 0) return;
+
+    const now = Date.now();
+    for (const m of missions) {
+      // 只检查 in_progress 的 mission
+      if (m.status !== 'in_progress') continue;
+      const plan = missionManager.readPlan(m.id);
+      if (!plan) continue;
+
+      for (const task of plan.tasks) {
+        if (task.status !== 'working') continue;
+        // updated_at 在 schema 中是 optional，没设过则视为新任务不卡住
+        if (!task.updated_at) continue;
+        const updated = new Date(task.updated_at).getTime();
+        const elapsed = now - updated;
+        if (elapsed < TASK_STALLED_MS) continue;
+
+        // 任务卡住 → 记录 stall 观察（供后续 C 级审核 LLM 参考）
+        const signal = `plan_stalled: task ${task.id} (${task.what}) working for ${Math.round(elapsed / 1000)}s`;
+        observationRecorder.record({
+          sessionId,
+          taskId,
+          observationType: 'agent_event',
+          fromAgent: 'brain',
+          toAgent: task.who,
+          content: signal,
+          priority: 0, // critical — 不被滚动窗口丢弃
+        });
+        logger.info({ sessionId, missionId: m.id, taskId: task.id, elapsedMs: elapsed }, 'brain:plan_stalled');
+      }
+
+      // P9: 检查 squad 信号 — blocker / question 触发干预
+      const squad = missionManager.readSquad(m.id);
+      if (squad) {
+        const unresolvedSignals = squad.signals.filter(s =>
+          (s.type === 'blocker' || s.type === 'question') && !s.resolved,
+        );
+        for (const sig of unresolvedSignals.slice(0, 3)) {
+          const content = `squad_signal: [${sig.type}] ${sig.from}: ${sig.msg}`;
+          observationRecorder.record({
+            sessionId,
+            taskId,
+            observationType: 'agent_event',
+            fromAgent: 'brain',
+            toAgent: sig.from,
+            content,
+            priority: 0, // critical — blocker/question 必须被看到
+          });
+          logger.info({ sessionId, missionId: m.id, signalType: sig.type, from: sig.from }, 'brain:squad_signal_observed');
+        }
+      }
+    }
+  }
 
   function recallDecisionsBlock(decisionType: string): string {
     const decisions = decisionRecorder.recallForDecision(decisionType, 5);

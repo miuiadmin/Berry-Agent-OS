@@ -64,6 +64,7 @@ const zh: Record<string, string> = {
   "sidebar.conversations": "会话",
   "sidebar.usage": "用量",
   "sidebar.drift": "漂移",
+  "sidebar.missions": "任务协作",
   "sidebar.logs": "日志",
 
   // ===== 用户菜单 =====

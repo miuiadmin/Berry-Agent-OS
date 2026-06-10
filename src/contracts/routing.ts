@@ -36,6 +36,12 @@ export interface RouteDecision {
   intentAnchor?: IntentAnchor;
   /** 13.0: Brain 判断任务复杂时创建的 mission ID（多 agent 协作） */
   missionId?: string;
+  /** 13.0: Brain 路由时指定的任务分解方案（kernel 据此创建 mission） */
+  missionSpec?: {
+    goal: string;
+    context: string;
+    tasks: Array<{ what: string; who: string; depends_on?: string[] }>;
+  };
 }
 
 export interface RouteResultPayload {

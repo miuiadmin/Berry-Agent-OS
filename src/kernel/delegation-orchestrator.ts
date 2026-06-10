@@ -256,6 +256,31 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.missionManager = missionManager;
     this.stateCache = new StateCache();
     this.agentRequestQueue = new AgentRequestQueue();
+
+    /**
+     * P5: 订阅 mission.task_ready 事件 — 依赖满足时自动派发下游任务。
+     *
+     * 当 MissionManager 检测到某个 waiting 任务的 depends_on 全部完成时，
+     * 发出 mission.task_ready 事件。此处订阅并自动派发给负责的 agent。
+     */
+    getEventBus().on('mission.task_ready', (payload: { missionId: string; taskId: string; who: string; what: string }) => {
+      logger.info({ missionId: payload.missionId, taskId: payload.taskId, who: payload.who }, '13.0: mission.task_ready — 自动派发');
+
+      /** 派发任务给负责的 agent */
+      this.dispatchModuleTask({
+        sessionId: payload.missionId, // missionId 作为 session 的关联标识
+        taskType: 'chat',
+        requester: 'brain-mission',
+        inputPayload: {
+          userMessage: payload.what,
+          missionId: payload.missionId,
+          planTaskId: payload.taskId,
+        },
+        foreground: true,
+      }).catch(err => {
+        logger.warn({ err, missionId: payload.missionId, taskId: payload.taskId }, '13.0: task_ready 派发失败');
+      });
+    });
   }
 
   /** 获取 MissionManager 实例（13.0 多智能体协作） */
@@ -734,6 +759,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       }
     }
 
+    // 13.0 多智能体协作：如果 Brain 指定了 missionSpec，创建 mission
+    if (decision.missionSpec && this.missionManager) {
+      try {
+        const plan = this.missionManager.createMission(
+          decision.missionSpec.goal,
+          decision.missionSpec.context,
+          decision.missionSpec.tasks,
+          'brain',
+        );
+        // 将 missionId 注入 decision，后续 dispatch 时会透传
+        decision.missionId = plan.mission.id;
+        logger.info({ missionId: plan.mission.id, taskCount: plan.tasks.length }, '13.0 mission created from route decision');
+
+        // P7: 自动生成 squad 结构 — 基于 plan 中 agent 分配的分组
+        this.autoGenerateSquad(decision.missionId, plan);
+      } catch (err) {
+        logger.error({ err }, '13.0 mission creation failed, continuing without mission');
+      }
+    }
+
     switch (decision.intent) {
       case 'chat':
         this.handleChatRoute(decision, correlationId, pending);
@@ -816,6 +861,86 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
   }
 
+  /**
+   * 13.0 多智能体协作：构造 mission + squad context 文本，注入到 system prompt。
+   * 让 agent 知道自己属于哪个 mission、目标是什么、有哪些任务、当前状态、squad 角色。
+   *
+   * @param missionId mission ID
+   * @returns 格式化的 mission context 字符串（用于 system prompt 注入）
+   */
+  private buildMissionContextPrompt(missionId: string): string | null {
+    if (!this.missionManager) return null;
+    try {
+      // readSummary 返回格式化字符串（mission goal + tasks 状态概览）
+      const summary = this.missionManager.readSummary(missionId);
+      if (!summary) return null;
+
+      /** P8: 追加 squad 角色上下文（如果存在 squad 结构） */
+      let squadContext = '';
+      const squad = this.missionManager.readSquad(missionId);
+      if (squad && squad.org.squads.length > 0) {
+        squadContext = '\n\n## Squad 组织\n\n你是以下团队的一员：\n';
+        for (const s of squad.org.squads) {
+          const memberInfo = s.members.length > 0
+            ? s.members.map(m => `@${m.agent}[${m.role}]`).join(', ')
+            : '无额外成员';
+          squadContext += `- ${s.name} (Leader: @${s.leader}, 成员: ${memberInfo})\n`;
+        }
+        squadContext += '\n使用 squad 工具（read）查看完整组织结构，signal 发送信号，update_member 更新自己的状态。';
+      }
+
+      return `## Mission Context\n\n${summary}${squadContext}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。`;
+    } catch (err) {
+      logger.warn({ err, missionId }, 'buildMissionContextPrompt 失败');
+      return null;
+    }
+  }
+
+  /**
+   * P7: 自动生成 squad 结构 — 基于 plan 中 agent 分配的分组。
+   *
+   * 规则化方法（零 LLM）：提取 plan 中所有 task 的 who 字段去重，
+   * 每个 unique agent 创建一个 squad，agent 既是 leader 也是执行者。
+   * 适用于 P1 阶段单实例模型。
+   *
+   * @param missionId Mission ID
+   * @param plan 已创建的 plan 对象
+   */
+  private autoGenerateSquad(missionId: string, plan: import('../contracts/mission.js').Plan): void {
+    if (!this.missionManager) return;
+
+    /** 提取去重的 agent 列表 */
+    const agentGroups = new Map<string, import('../contracts/mission.js').MissionTask[]>();
+    for (const task of plan.tasks) {
+      if (!agentGroups.has(task.who)) {
+        agentGroups.set(task.who, []);
+      }
+      agentGroups.get(task.who)!.push(task);
+    }
+
+    /** 只有 1 个 agent 时不创建 squad（无需组织） */
+    if (agentGroups.size < 2) return;
+
+    try {
+      const firstAgent = agentGroups.keys().next().value!;
+      this.missionManager.initSquad(missionId, []);
+
+      for (const [agent, tasks] of agentGroups) {
+        const goal = tasks.map(t => t.what).join(', ');
+        this.missionManager.createSquad(missionId, {
+          name: `${agent} 组`,
+          goal,
+          leader: agent,
+          members: [],
+        });
+      }
+
+      logger.info({ missionId, squadCount: agentGroups.size }, 'P7: auto-generated squad structure');
+    } catch (err) {
+      logger.warn({ err, missionId }, 'P7: auto-generate squad failed (non-critical)');
+    }
+  }
+
   private handleChatRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): void {
     const primaryAgent = this.registry.requireRole('primary');
     const primaryName = primaryAgent.manifest.name;
@@ -828,7 +953,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     this.pendingReviewOrigins.set(correlationId, 'conversation');
     this.reportProgress(pending, 'thinking', '正在思考...');
-
     let systemPrompt = this.sessionManager.buildPrompt(pending.sessionId);
     const memoryContext = this.sessionManager.buildMemoryContext(pending.sessionId, pending.userMessage);
 
@@ -845,6 +969,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const skillContent = this.loadActiveSkills(decision.activeSkills);
       if (skillContent) {
         systemPrompt += `\n\n${skillContent}`;
+      }
+    }
+
+    // 13.0 多智能体协作：注入 mission context（让 agent 知道自己的 mission 目标）
+    if (decision.missionId) {
+      const missionContext = this.buildMissionContextPrompt(decision.missionId);
+      if (missionContext) {
+        systemPrompt += `\n\n${missionContext}`;
       }
     }
 
@@ -882,6 +1014,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           instruction: decision.instruction,
           contextHints: decision.contextHints,
           workingDir: getLastCwd(),
+          // 13.0 多智能体协作：透传 missionId，让 Agent 知道自己属于哪个 mission
+          ...(decision.missionId ? { missionId: decision.missionId } : {}),
         },
         foreground: true,
         correlationId,
@@ -1209,11 +1343,19 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     let agent = await this.agentManager.ensureAgent(route.targetAgent);
     this.setupModuleAgent(route.targetAgent);
+
+    // 13.0 多智能体协作：从 inputPayload 透传 missionId 和 planTaskId
+    const missionId = input.inputPayload.missionId as string | undefined;
+    const planTaskId = input.inputPayload.planTaskId as string | undefined;
+
     const taskPayload = {
       taskId,
       sessionId: input.sessionId,
       taskType: input.taskType,
       inputPayload: input.inputPayload,
+      // 13.0：透传 mission 上下文，让 Agent 知道自己属于哪个 mission
+      ...(missionId ? { missionId } : {}),
+      ...(planTaskId ? { planTaskId } : {}),
     } satisfies AgentTaskPayload;
 
     const sent = agent.ipc.send('agent.task', route.targetAgent, taskPayload);

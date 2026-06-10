@@ -64,6 +64,7 @@ const en: Record<string, string> = {
   "sidebar.conversations": "Conversations",
   "sidebar.usage": "Usage",
   "sidebar.drift": "Drift",
+  "sidebar.missions": "Missions",
   "sidebar.logs": "Logs",
 
   // ===== User Menu =====

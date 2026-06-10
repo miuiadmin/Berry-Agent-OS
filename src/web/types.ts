@@ -6,6 +6,7 @@ import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
 import type { IProviderRegistry } from '../providers/contract.js';
 import type { WritableChannel } from '../contracts/transport.js';
+import type { DelegationOrchestrator } from '../kernel/delegation-orchestrator.js';
 
 /** P1-4 修复：MessageHandler 接受 WritableChannel 而非 Socket，消除 unsafe cast */
 export type MessageHandler = (request: Record<string, unknown>, channel: WritableChannel) => void;
@@ -41,4 +42,6 @@ export interface WebServerDependencies {
   getProviderRegistry?: () => IProviderRegistry;
   /** W7 修复：Drift metrics 工厂（替代 inline require） */
   getDriftMetrics?: () => { aggregate(days: number): unknown; listSignals(opts: { sessionId?: string; limit: number; offset: number }): unknown[] };
+  /** 13.0 多智能体协作：Orchestrator 引用（用于 MissionManager 访问） */
+  orchestrator?: { mission: import('../kernel/mission-manager.js').MissionManager | null } | null;
 }
