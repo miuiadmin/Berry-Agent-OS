@@ -12,6 +12,7 @@ import { getEventBus } from '../event-bus.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import type { ObservationRecorder } from '../observation-recorder.js';
+import { getDb } from '../../memory/index.js';
 
 const logger = getLogger('proxy-handlers');
 
@@ -65,6 +66,38 @@ export function setupAuditHandler(agentIpc: AgentIpc, agentName: string, deps: P
         logger.debug({ err, toolName: audit.toolName }, '观察队列 tool_call/tool_result 写入失败（不影响主流程）');
       }
     }
+
+    // ③ 13.0 §5.1.2: 写入 agent_tool_calls 审计表 — per-agent 工具调用记录
+    // 该表存储每个 agent 的工具调用详情，包括审批来源（auto/scope/brain/user）
+    // 供 Brain C 级审核和前端 agent-chat 面板使用
+    if (audit.sessionId) {
+      try {
+        const db = getDb();
+        if (db) {
+          const insertStmt = db.prepare(`
+            INSERT INTO agent_tool_calls (id, session_id, task_id, agent_name, tool_name, input_summary, success, duration_ms, approved_by, error_message, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          insertStmt.run(
+            genId('atc'),
+            audit.sessionId,
+            audit.taskId ?? '',
+            agentName,
+            audit.toolName,
+            typeof audit.toolInput === 'string' ? audit.toolInput.slice(0, 500) : JSON.stringify(audit.toolInput).slice(0, 500),
+            audit.isError ? 0 : 1,
+            audit.durationMs ?? null,
+            'auto', // 默认 auto 审批；如果经过 scope 预授权则由 scope 层更新为 'scope'
+            audit.isError ? (typeof audit.toolResult === 'string' ? audit.toolResult.slice(0, 500) : null) : null,
+            Date.now(),
+          );
+        }
+      } catch (err) {
+        // 表可能不存在（迁移未执行）— 静默忽略
+        logger.debug({ err, toolName: audit.toolName }, 'agent_tool_calls 写入跳过（表不存在或非关键）');
+      }
+    }
+
     getEventBus().emit('tool.executed', {
       agentName,
       toolName: audit.toolName,

@@ -348,8 +348,50 @@ export class DialogueRouter {
         msg.metadata ? JSON.stringify(msg.metadata) : null,
         Date.now(),
       );
+
+      // 13.0 §5.1.2: 并行写入 agent_chat_messages 审计表
+      // 该表供前端 agent-chat 面板展示 Agent 间对话记录，与 dialogue_messages 不同维度
+      // direction 判断：sequenceNumber 偶数 = request（send），奇数 = response（reply）
+      this.persistAgentChatMessage(msg, sessionId, correlationId);
     } catch (err) {
       logger.error({ err, dialogueId: msg.dialogueId }, 'dialogue:persist failed');
+    }
+  }
+
+  /**
+   * 13.0 §5.1.2: 写入 agent_chat_messages 审计表。
+   *
+   * 专门记录 Agent 间的对话内容（request/response），供 Brain 审核和前端 agent-chat 面板使用。
+   * 与 dialogue_messages 表的区别：该表关注"谁和谁说了什么"，dialogue_messages 关注完整对话状态。
+   *
+   * @param msg - 对话消息 payload
+   * @param sessionId - session ID
+   * @param correlationId - 关联 ID
+   */
+  private persistAgentChatMessage(msg: DialogueMessagePayload, sessionId: string, correlationId: string): void {
+    try {
+      // sequenceNumber 偶数 = send（request），奇数 = reply（response）
+      const direction = msg.sequenceNumber % 2 === 0 ? 'request' : 'response';
+      const msgType = msg.context?.type as string ?? (direction === 'request' ? 'agent.question' : 'agent.answer');
+
+      this.deps.db.prepare(`
+        INSERT INTO agent_chat_messages (id, session_id, task_id, from_agent, to_agent, direction, message_type, content, correlation_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        genId('acm'),
+        sessionId,
+        msg.context?._taskId as string ?? '',
+        msg.from,
+        msg.to,
+        direction,
+        msgType,
+        typeof msg.content === 'string' ? msg.content.slice(0, 5000) : JSON.stringify(msg.content).slice(0, 5000),
+        correlationId,
+        Date.now(),
+      );
+    } catch (err) {
+      // 表可能不存在（迁移未执行）— 静默忽略，不影响主流程
+      logger.debug({ err, dialogueId: msg.dialogueId }, 'agent_chat_messages 写入跳过（表不存在或非关键）');
     }
   }
 

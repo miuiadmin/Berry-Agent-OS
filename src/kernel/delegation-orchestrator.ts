@@ -297,6 +297,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   dispose(): void {
     this.streamingFlusher.dispose();
     this.pendingReviewOrigins.clear();
+    // 13.0: 清理 StateCache 中所有状态
+    if (this.stateCache) {
+      this.stateCache.clear();
+    }
+    // 13.0: 清理 AgentRequestQueue 中所有排队请求
+    if (this.agentRequestQueue) {
+      this.agentRequestQueue.clearAll('orchestrator dispose');
+    }
   }
 
   // ═══ POST-COMPLETION HELPERS ═════════════════════════════════════
@@ -759,8 +767,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       }
     }
 
+    // 13.0 §8.3: 存储 IntentAnchor 到 StateCache — 供 Brain 审核时读取"用户原始意图"
+    if (decision.intentAnchor && this.stateCache) {
+      this.stateCache.set('intent_anchor', pending.sessionId, {
+        goal: decision.intentAnchor.goal,
+        constraints: decision.intentAnchor.constraints,
+        outputType: decision.intentAnchor.outputType,
+        entities: decision.intentAnchor.entities,
+        storedAt: Date.now(),
+      });
+    }
+
     // 13.0 多智能体协作：如果 Brain 指定了 missionSpec，创建 mission
-    if (decision.missionSpec && this.missionManager) {
+    // §12.2 意图守卫：chat 意图是简单对话，不需要创建 mission
+    if (decision.missionSpec && this.missionManager && decision.intent !== 'chat') {
       try {
         const plan = this.missionManager.createMission(
           decision.missionSpec.goal,
@@ -875,21 +895,57 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const summary = this.missionManager.readSummary(missionId);
       if (!summary) return null;
 
-      /** P8: 追加 squad 角色上下文（如果存在 squad 结构） */
+      /** §3.8/§5.3.1: 注入 StateCache 中的纠偏指令和行为笔记 */
+      const stateInjections: string[] = [];
+
+      if (this.stateCache) {
+        // 注入纠偏指令（correction namespace，key={sessionId}:{taskId}）
+        // 当前上下文没有明确的 taskId，所以遍历所有 correction keys
+        const correctionKeys = this.stateCache.keys('correction');
+        for (const key of correctionKeys) {
+          const correction = this.stateCache.get<import('./state-cache.js').CorrectionEntry>('correction', key);
+          if (correction) {
+            const severityIcon = correction.severity === 'high' ? '🔴' : correction.severity === 'medium' ? '🟡' : '🟢';
+            stateInjections.push(`${severityIcon} 纠偏指令: ${correction.instruction}`);
+          }
+        }
+
+        // 注入行为笔记（behavior_note namespace）
+        const behaviorKeys = this.stateCache.keys('behavior_note');
+        for (const key of behaviorKeys) {
+          const note = this.stateCache.get<import('./state-cache.js').BehaviorNote>('behavior_note', key);
+          if (note) {
+            stateInjections.push(`📌 行为提醒: ${note.instruction}`);
+          }
+        }
+      }
+
+      let stateContext = '';
+      if (stateInjections.length > 0) {
+        stateContext = '\n\n## Brain 指令（来自监督系统）\n\n' + stateInjections.join('\n');
+      }
+
+      /** P8+P10: 追加 squad 角色上下文（如果存在 squad 结构） */
       let squadContext = '';
       const squad = this.missionManager.readSquad(missionId);
       if (squad && squad.org.squads.length > 0) {
         squadContext = '\n\n## Squad 组织\n\n你是以下团队的一员：\n';
         for (const s of squad.org.squads) {
           const memberInfo = s.members.length > 0
-            ? s.members.map(m => `@${m.agent}[${m.role}]`).join(', ')
+            ? s.members.map(m => `@${m.agent}[${m.role}]: ${m.on}`).join(', ')
             : '无额外成员';
-          squadContext += `- ${s.name} (Leader: @${s.leader}, 成员: ${memberInfo})\n`;
+          squadContext += `- ${s.name} (Leader: @${s.leader}, 成员: ${memberInfo}) [${s.status}]\n`;
         }
         squadContext += '\n使用 squad 工具（read）查看完整组织结构，signal 发送信号，update_member 更新自己的状态。';
+
+        /** P10: 如果 squad 中有 check 角色，注入 checker 角色指引 */
+        const hasChecker = squad.org.squads.some(s => s.members.some(m => m.role === 'check'));
+        if (hasChecker) {
+          squadContext += '\n\n### Checker 角色指引\n如果你是 Squad 中的 Checker（验证者）：独立审查 worker 的产出，关注正确性/完整性/安全性/一致性。发现问题通过 squad tool signal(blocker/question) 报告，不直接修改。验证通过用 signal(done)。';
+        }
       }
 
-      return `## Mission Context\n\n${summary}${squadContext}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。`;
+      return `## Mission Context\n\n${summary}${squadContext}${stateContext}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。`;
     } catch (err) {
       logger.warn({ err, missionId }, 'buildMissionContextPrompt 失败');
       return null;
@@ -921,23 +977,81 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     /** 只有 1 个 agent 时不创建 squad（无需组织） */
     if (agentGroups.size < 2) return;
 
+    /** 收集可用的 agent 名列表（用于 P10 checker 分配） */
+    const agentNames = [...agentGroups.keys()];
+
     try {
-      const firstAgent = agentGroups.keys().next().value!;
       this.missionManager.initSquad(missionId, []);
 
-      for (const [agent, tasks] of agentGroups) {
+      for (let i = 0; i < agentNames.length; i++) {
+        const agent = agentNames[i];
+        const tasks = agentGroups.get(agent)!;
         const goal = tasks.map(t => t.what).join(', ');
+
+        /** P10: 为每个 squad 分配一个 checker（从其他 agent 中轮询选择） */
+        const checkerIdx = (i + 1) % agentNames.length;
+        const checkerAgent = agentNames[checkerIdx];
+
         this.missionManager.createSquad(missionId, {
           name: `${agent} 组`,
           goal,
           leader: agent,
-          members: [],
+          members: [{
+            agent: checkerAgent,
+            role: 'check',
+            on: `验证 ${agent} 的产出质量`,
+          }],
         });
       }
 
-      logger.info({ missionId, squadCount: agentGroups.size }, 'P7: auto-generated squad structure');
+      logger.info({ missionId, squadCount: agentNames.length }, 'P7+P10: auto-generated squad with checkers');
     } catch (err) {
       logger.warn({ err, missionId }, 'P7: auto-generate squad failed (non-critical)');
+    }
+  }
+
+  /**
+   * 13.0 多智能体协作：任务完成/失败时同步更新 plan.json 中对应任务的状态。
+   *
+   * §12.6 审核集成 — agent 完成任务后，plan 中对应任务的状态应该自动更新。
+   * 这样 Brain 和其他 agent 通过 plan tool 读取时能看到最新进度。
+   *
+   * @param taskId - agent task ID
+   * @param status - 目标状态 ('done' | 'failed')
+   * @param result - 任务结果文本（可选，成功时填输出摘要，失败时填错误信息）
+   */
+  private updatePlanTaskStatus(taskId: string, status: 'done' | 'failed', result?: string): void {
+    if (!this.missionManager) return;
+    try {
+      const task = this.taskManager?.getTask(taskId);
+      if (!task) return;
+
+      /** 从 agent_task 的 input_payload 中提取 missionId 和 planTaskId */
+      let inputPayload: Record<string, unknown> = {};
+      try {
+        const raw = (task as any).inputPayload ?? (task as any).input_payload;
+        inputPayload = typeof raw === 'string'
+          ? JSON.parse(raw)
+          : raw ?? {};
+      } catch { return; }
+
+      const missionId = inputPayload.missionId as string | undefined;
+      const planTaskId = inputPayload.planTaskId as string | undefined;
+      if (!missionId || !planTaskId) return;
+
+      /** 截断结果文本，避免 plan.json 膨胀 */
+      const truncatedResult = result ? result.slice(0, 500) : undefined;
+
+      this.missionManager.updatePlan(missionId, {
+        task_id: planTaskId,
+        status,
+        result: truncatedResult,
+      });
+
+      logger.info({ missionId, planTaskId, status }, '13.0: plan task status synced on agent completion');
+    } catch (err) {
+      /** plan 更新失败不应影响主流程 — 非关键操作 */
+      logger.warn({ err, taskId, status }, '13.0: plan task status sync failed (non-critical)');
     }
   }
 
@@ -1062,6 +1176,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         message: pending.userMessage,
         instruction: decision.instruction,
         contextHints: decision.contextHints,
+        // 13.0：透传 missionId，让外部 agent 知道自己属于哪个 mission
+        ...(decision.missionId ? { missionId: decision.missionId } : {}),
       },
       foreground: true,
     });
@@ -1252,7 +1368,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           sessionId: pending.sessionId,
           taskType: sub.taskType,
           requester: 'brain-route-multi',
-          inputPayload: sub.inputPayload,
+          inputPayload: {
+            ...sub.inputPayload,
+            // 13.0：透传 missionId 到子任务
+            ...(decision.missionId ? { missionId: decision.missionId } : {}),
+          },
           foreground: true,
           correlationId: genId('sub'),
         });
@@ -1295,6 +1415,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           instruction: decision.instruction,
           workspaceId: decision.targetWorkspaceId,
           delegationType: 'workspace',
+          // 13.0：透传 missionId 到工作区路由
+          ...(decision.missionId ? { missionId: decision.missionId } : {}),
         },
         foreground: true,
         correlationId,
@@ -1859,12 +1981,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (!result.ok) {
       this.streamingFlusher.remove(result.taskId);
       this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
+
+      // 13.0 多智能体协作：任务失败时同步更新 plan.json 中对应任务的状态
+      this.updatePlanTaskStatus(result.taskId, 'failed', result.error);
+
       // R14-1：foreground 任务失败走 finalizeTask 统一入口
       this.sessionManager.fail(fgEntry.correlationId, { kind: 'failed', agentName, error: result.error });
       return;
     }
 
-    const draftResponse = this.formatAgentResult(agentName, result.outputPayload ?? {});
+    // 13.0 多智能体协作：任务成功完成时同步更新 plan.json 中对应任务的状态
+    const agentOutput = this.formatAgentResult(agentName, result.outputPayload ?? {});
+    this.updatePlanTaskStatus(result.taskId, 'done', agentOutput);
+
+    const draftResponse = agentOutput;
     pending.draftResponse = draftResponse;
 
     this.sendTaskResultForReview(fgEntry, pending, draftResponse);
