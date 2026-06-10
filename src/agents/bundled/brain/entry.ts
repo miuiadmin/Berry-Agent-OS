@@ -36,6 +36,7 @@ import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.j
 import { ObservationRecorder, type RecordObservationInput, type ObservationType } from '../../../kernel/observation-recorder.js';
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 import { MissionManager } from '../../../kernel/mission-manager.js';
+import { getEventBus } from '../../../kernel/event-bus.js';
 
 const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
 You are given a SUMMARY of the conversation turn. Evaluate whether the draft response is appropriate.
@@ -230,9 +231,76 @@ startResidentAgent(({ name, ipc, llm, db }) => {
             priority: 0, // critical — blocker/question 必须被看到
           });
           logger.info({ sessionId, missionId: m.id, signalType: sig.type, from: sig.from }, 'brain:squad_signal_observed');
+
+          // P9 §12.5: 触发 INTERVENE — 找到 sig.from 所在 squad 的 worker，
+          // 通过 EventBus 发 brain.signal_intervention 事件，附带软纠偏 instruction
+          triggerSignalIntervention(m.id, sig, sessionId);
         }
       }
     }
+  }
+
+  /**
+   * P9: 根据 blocker/question signal 触发 INTERVENE（规则化、零 LLM）。
+   *
+   * 冷却机制：同 (missionId, signal.from, signal.msg) 在 5 分钟内只触发一次，
+   * 避免重复干预造成 worker 分心。
+   *
+   * 事件订阅者可以做后续动作（如：kernel 路由 turn.correction 给 worker，
+   * 或 evolution 引擎把常见 blocker 沉淀为 SKILL.md）。
+   */
+  const signalInterventionCooldown = new Map<string, number>();
+  const SIGNAL_INTERVENTION_COOLDOWN_MS = 5 * 60_000;
+
+  function triggerSignalIntervention(
+    missionId: string,
+    signal: { from: string; type: string; msg: string; at: string },
+    sessionIdRef: string,
+  ): void {
+    const cooldownKey = `${missionId}:${signal.from}:${signal.msg}`;
+    const now = Date.now();
+    const lastAt = signalInterventionCooldown.get(cooldownKey) ?? 0;
+    if (now - lastAt < SIGNAL_INTERVENTION_COOLDOWN_MS) return;
+    signalInterventionCooldown.set(cooldownKey, now);
+
+    // 模板化 instruction：告诉 worker 当前信号是什么 + 建议行动
+    const instruction = signal.type === 'blocker'
+      ? `检测到 blocker 信号（来自 ${signal.from}）：${signal.msg.slice(0, 300)}。请评估是否需要调整方案、回报用户，或请 leader 协助。`
+      : `检测到 question 信号（来自 ${signal.from}）：${signal.msg.slice(0, 300)}。请尽快回应，避免阻塞下游 squad。`;
+
+    // 记录决策（供审计和 evolution 学习）
+    try {
+      decisionRecorder.record({
+        sessionId: sessionIdRef,
+        decisionType: 'correction',
+        inputSummary: `squad_signal:[${signal.type}] ${signal.from} in ${missionId}`,
+        outputJson: {
+          action: 'adjust',
+          reason: `p9_signal_intervention:${signal.type}`,
+          instruction: instruction.slice(0, 500),
+          target: signal.from,
+          missionId,
+        },
+      });
+    } catch (err) {
+      logger.warn({ err, missionId, signalType: signal.type }, 'brain: signal intervention decision record failed');
+    }
+
+    // 发 EventBus 事件（kernel 可订阅后路由 turn.correction 给 worker）
+    getEventBus().emit('brain.signal_intervention' as any, {
+      missionId,
+      from: signal.from,
+      signalType: signal.type,
+      signalMsg: signal.msg,
+      instruction,
+      severity: signal.type === 'blocker' ? 'high' : 'medium',
+      createdAt: now,
+    });
+    logger.info({
+      missionId,
+      from: signal.from,
+      signalType: signal.type,
+    }, 'brain:signal_intervention triggered');
   }
 
   function recallDecisionsBlock(decisionType: string): string {

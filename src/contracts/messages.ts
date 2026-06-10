@@ -231,6 +231,18 @@ export type EventMap = {
   'mission.handoff': { missionId: string; from: string; to: string; what: string };
   /** 13.0 P5: plan 中 who:"skills" 的 task 完成后触发技能创建 */
   'capability.evolution.request': { missionId: string; taskId: string; skillDescription: string };
+  /** 13.0 P9: Brain 观察 blocker/question signal 后触发的 INTERVENE 事件 */
+  'brain.signal_intervention': {
+    missionId: string;
+    from: string;
+    signalType: string;
+    signalMsg: string;
+    instruction: string;
+    severity: 'low' | 'medium' | 'high';
+    createdAt: number;
+  };
+  /** 13.0 §5.3.10: Agent 目录变更推送 */
+  'directory.changed': { added: Array<{ name: string; description: string; capabilities: string[]; status: 'online' | 'offline' }>; removed: string[] };
 };
 
 export type EventMessageMap = {
