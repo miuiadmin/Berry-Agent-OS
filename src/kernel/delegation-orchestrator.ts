@@ -1755,6 +1755,33 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.complete(entry.id, response);
     }
 
+    // 13.0 §12.6: Brain 审核完成后同步更新 plan.json 中对应任务的状态
+    // approve → 任务完成（结果用 Brain 审核后的最终回复）
+    // modify → 任务完成（结果用 Brain 修改后的回复）
+    // reject → 任务失败（结果用 Brain 的拒绝原因）
+    if (this.missionManager && entry) {
+      try {
+        const raw = (entry as any).inputPayload ?? (entry as any).input_payload;
+        const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const missionId = payload?.missionId as string | undefined;
+        const planTaskId = payload?.planTaskId as string | undefined;
+        if (missionId && planTaskId) {
+          const planStatus = review.verdict === 'reject' ? 'failed' as const : 'done' as const;
+          const planResult = review.verdict === 'reject'
+            ? `Brain 审核拒绝: ${review.reason ?? '未通过审核'}`
+            : (response ?? '').slice(0, 500);
+          this.missionManager.updatePlan(missionId, {
+            task_id: planTaskId,
+            status: planStatus,
+            result: planResult,
+          });
+          logger.info({ missionId, planTaskId, verdict: review.verdict }, '13.0: plan task updated after Brain review');
+        }
+      } catch (err) {
+        logger.warn({ err, correlationId }, '13.0: plan update after Brain review failed (non-critical)');
+      }
+    }
+
     // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
     const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
     if (!finalized || finalized === true) return;
@@ -1847,12 +1874,41 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       return;
     }
 
+    // 13.0 §12.6: 构造审核记录，包含 mission 上下文
+    // 从 delegation entry 的 inputPayload 中提取 missionId 和 planTaskId
+    let missionId: string | undefined;
+    let planTaskId: string | undefined;
+    let taskDescription: string | undefined;
+    if (entry) {
+      try {
+        const raw = (entry as any).inputPayload ?? (entry as any).input_payload;
+        const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        missionId = payload?.missionId;
+        planTaskId = payload?.planTaskId;
+        taskDescription = payload?.message ?? payload?.userMessage;
+      } catch { /* 非关键 */ }
+    }
+
+    // 使用 pending 中已记录的 toolCalls（如果有）
+    const toolCalls = pending.toolCalls ?? [];
+
     const turn: TurnRecord = {
       sessionId: fgEntry.sessionId,
       userMessage: pending.userMessage,
       draftResponse,
-      toolCalls: [],
-      level: 'A',
+      toolCalls,
+      level: classifyLevel({
+        sessionId: fgEntry.sessionId,
+        userMessage: pending.userMessage,
+        draftResponse,
+        toolCalls,
+        level: 'A',
+        missionId,
+      }),
+      // 13.0 §12.6: 注入 mission 上下文，让 Brain 审核时知道"分配的任务是什么"
+      missionId,
+      planTaskId,
+      taskDescription,
     };
 
     const wsId = entry?.workspaceId;

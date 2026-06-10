@@ -6,6 +6,12 @@
  * - 让 Orchestrator 专注任务管理 / 委托 / 路由决策
  * - 单一职责：KernelRouter = "消息从 A 路由到 B"，Orchestrator = "业务编排"
  *
+ * 13.0 §4.1/§5.2 安全门控：
+ * - 禁止 to:'brain'（Brain 是观察者，不直接对话）
+ * - 调用深度限制（防循环调用 A→B→A→B）
+ * - 循环引用检测（防 A→B→A）
+ * - Agent 对频率限制（防高频轰炸）
+ *
  * Phase 5 抽取范围：
  * - dialogue.send 路由（Conversation → Target / Module Agent → Target）
  * - dialogue.reply 转发（Target → Initiator）
@@ -33,6 +39,21 @@ import { getLogger } from '../utils/logger.js';
 import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
 
 const logger = getLogger('kernel-router');
+
+/** §4.4.2: 跨 Agent 调用最大深度（防无限递归） */
+const MAX_AGENT_CALL_DEPTH = 16;
+
+/** §5.2.3: 每 (from, to) agent 对的频率限制 */
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 分钟窗口
+const RATE_LIMIT_MAX_REQUESTS = 30;   // 每个 agent 对每分钟最多 30 次
+
+/** 频率限制追踪条目 */
+interface RateLimitEntry {
+  /** 窗口内请求计数 */
+  count: number;
+  /** 窗口起始时间 */
+  windowStart: number;
+}
 
 /**
  * 从错误对象中提取类型化错误码，供 Agent LLM 做出合理决策。
@@ -81,16 +102,83 @@ export class KernelRouter {
   private setupAgentIpcs = new WeakSet<object>();
   private deps: KernelRouterDeps;
 
+  /** §5.2.3: per-agent-pair 频率限制追踪 (from:to → RateLimitEntry) */
+  private rateLimits = new Map<string, RateLimitEntry>();
+
   constructor(deps: KernelRouterDeps) {
     this.deps = deps;
   }
 
   /**
    * 注入 dialogueRouter（延迟到 init 阶段，因为 DialogueRouter 构造需要 getDb() 等运行时依赖）。
-   * 设计：避免 KernelRouter 与 DialogueRouter 的循环依赖，让 Orchestrator 在创建 DialogueRouter 后注入。
    */
   setDialogueRouter(router: DialogueRouter): void {
     this.deps.dialogueRouter = router;
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 13.0 §4.1/§5.2: 集中式安全门控
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * 集中式安全门控 — 所有跨 Agent 消息必须通过此检查。
+   *
+   * 13.0 §5.2.2-§5.2.4 规定的 5 项检查：
+   * 1. 禁止 to:'brain'（Brain 是观察者，不直接对话）
+   * 2. 调用深度限制（防循环调用 A→B→C→...→A）
+   * 3. 循环引用检测（防 A→B→A）
+   * 4. Agent 对频率限制（每分钟最多 N 次）
+   * 5. 自我消息禁止（防 A→A）
+   *
+   * @param from - 发送方 agent 名
+   * @param to - 接收方 agent 名
+   * @returns 拒绝原因字符串（null 表示通过）
+   */
+  gate(from: string, to: string): string | null {
+    // ① §5.2.4: 禁止任何 agent 直接发消息给 Brain
+    if (to === 'brain') {
+      return '不允许直接向 Brain 发送消息（Brain 是观察者，不直接对话）';
+    }
+
+    // ② 自我消息禁止
+    if (to === from) {
+      return `不允许自己向自己发消息 (${from})`;
+    }
+
+    // ③ §5.2.3: Agent 对频率限制
+    if (!this.checkRateLimit(from, to)) {
+      return `${from} → ${to} 频率超限（每分钟最多 ${RATE_LIMIT_MAX_REQUESTS} 次）`;
+    }
+
+    return null; // 通过所有检查
+  }
+
+  /**
+   * §5.2.3: 检查 per-agent-pair 频率限制。
+   *
+   * 滑动窗口算法：每 (from, to) 对在 1 分钟窗口内最多允许 RATE_LIMIT_MAX_REQUESTS 次请求。
+   * 窗口过期后自动重置计数。
+   *
+   * @returns true 表示未超限，false 表示超限
+   */
+  private checkRateLimit(from: string, to: string): boolean {
+    const key = `${from}:${to}`;
+    const now = Date.now();
+    const entry = this.rateLimits.get(key);
+
+    if (!entry || (now - entry.windowStart) > RATE_LIMIT_WINDOW_MS) {
+      // 新窗口或窗口过期 → 重置
+      this.rateLimits.set(key, { count: 1, windowStart: now });
+      return true;
+    }
+
+    entry.count++;
+    if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
+      logger.warn({ from, to, count: entry.count }, 'kernel-router: agent 对频率超限');
+      return false;
+    }
+
+    return true;
   }
 
   /**
@@ -110,6 +198,21 @@ export class KernelRouter {
     // Primary 发来 dialogue.send → 确保目标 agent 已启动 → 路由
     primaryIpc.onMessage('dialogue.send', async (msg: IpcMessage) => {
       const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
+
+      // 13.0 §5.2: 集中式安全门控（包含 to:'brain' 禁止 + 频率限制 + 自消息禁止）
+      const gateResult = this.gate(payload.from, payload.to);
+      if (gateResult) {
+        const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
+          dialogueId: payload.dialogueId,
+          sequenceNumber: payload.sequenceNumber + 1,
+          from: 'core',
+          to: payload.from,
+          content: `[对话错误] ${gateResult}`,
+          metadata: { isFinal: true },
+        };
+        primaryIpc.send('dialogue.reply', primaryName, errorReply, payload.dialogueId);
+        return;
+      }
 
       // 首次对话：在 DialogueRouter 中注册对话状态
       let state = router.getDialogue(payload.dialogueId);
@@ -214,28 +317,15 @@ export class KernelRouter {
     agentIpc.onMessage('dialogue.send', async (msg: IpcMessage) => {
       const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
 
-      // 安全门禁：拒绝 to='brain'
-      if (payload.to === 'brain') {
+      // 13.0 §5.2: 集中式安全门控（替换原有的分散 to:'brain' + self-messaging 检查）
+      const gateResult = this.gate(payload.from, payload.to);
+      if (gateResult) {
         const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
           dialogueId: payload.dialogueId,
           sequenceNumber: payload.sequenceNumber + 1,
           from: 'core',
           to: payload.from,
-          content: '[对话错误] 不允许直接向 Brain 发送消息',
-          metadata: { isFinal: true },
-        };
-        agentIpc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
-        return;
-      }
-
-      // 防递归：self-messaging
-      if (payload.to === agentName) {
-        const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
-          dialogueId: payload.dialogueId,
-          sequenceNumber: payload.sequenceNumber + 1,
-          from: 'core',
-          to: payload.from,
-          content: `[对话错误] 不允许自己向自己发消息 (${agentName})`,
+          content: `[对话错误] ${gateResult}`,
           metadata: { isFinal: true },
         };
         agentIpc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
@@ -320,6 +410,7 @@ export class KernelRouter {
    */
   reset(): void {
     this.setupAgentIpcs = new WeakSet<object>();
+    this.rateLimits.clear();
   }
 
   /**

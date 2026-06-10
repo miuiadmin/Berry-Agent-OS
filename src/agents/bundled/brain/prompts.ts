@@ -20,6 +20,14 @@ export function buildReviewInput(level: ReviewLevel, turn: TurnRecord): string {
 
   let input = `User: ${turn.userMessage}\n\nDraft: ${turn.draftResponse}`;
 
+  // 13.0 §12.6: 注入 mission 任务上下文 — 让 Brain 审核时知道"分配的任务是什么"
+  if (turn.missionId && turn.taskDescription) {
+    input += `\n\nAssigned task: ${turn.taskDescription}`;
+    if (turn.planTaskId) {
+      input += ` (task ID: ${turn.planTaskId}, mission: ${turn.missionId})`;
+    }
+  }
+
   if (turn.toolCalls.length > 0) {
     if (level === 'A') {
       const toolSummary = turn.toolCalls
@@ -288,6 +296,17 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
       contextHints: parsed.contextHints || undefined,
       reason: parsed.reason || '路由决策',
       intentAnchor: parseIntentAnchor(parsed.intentAnchor),
+      // 13.0 多智能体协作：提取 missionId 和 missionSpec（Brain LLM 决定创建 mission 时设置）
+      missionId: typeof parsed.missionId === 'string' ? parsed.missionId : undefined,
+      missionSpec: parsed.missionSpec && typeof parsed.missionSpec === 'object' ? {
+        goal: String(parsed.missionSpec.goal ?? ''),
+        context: String(parsed.missionSpec.context ?? ''),
+        tasks: Array.isArray(parsed.missionSpec.tasks) ? parsed.missionSpec.tasks.map((t: any) => ({
+          what: String(t.what ?? ''),
+          who: String(t.who ?? 'code'),
+          depends_on: Array.isArray(t.depends_on) ? t.depends_on.map(String) : [],
+        })) : [],
+      } : undefined,
     };
   } catch {
     logger.warn({ rawOutput: safeSlice(llmOutput, 500) }, 'brain:route-parse-failed');
