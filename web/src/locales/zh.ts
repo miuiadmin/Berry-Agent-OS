@@ -529,6 +529,55 @@ const zh: Record<string, string> = {
   "events.chainApprovalDesc": "一个计划中的链式步骤需要您的审批。",
   "events.mcpServerFailed": "MCP 服务器失败：{serverId}",
 
+  // ===== 13.0 多智能体协作事件 =====
+  "events.missionCreated": "新任务计划：{goal}",
+  "events.missionCreatedDesc": "包含 {count} 个子任务",
+  "events.missionCompleted": "任务已完成",
+  "events.missionAllDone": "所有任务已完成",
+
+  // ===== 13.0 Agent 协作面板 =====
+  "agentChat.title": "Agent 协作",
+  "agentChat.empty": "暂无 Agent 间对话",
+
+  // ===== 13.0 Brain 审核 =====
+  "brain.reviewTitle": "Brain 审核",
+  "brain.approved": "已通过",
+  "brain.modified": "已修改",
+  "brain.rejected": "已拦截",
+  "brain.reason": "审核理由",
+  "brain.diffToggle": "查看修改对比",
+  "brain.original": "原始回复",
+  "brain.modifiedLabel": "Brain 修改后",
+  "brain.rejectedContent": "被拦截的回复",
+  "brain.restore": "还原修改",
+  "brain.restoreSuccess": "已还原",
+  "brain.feedback": "反馈问题",
+  "brain.feedbackPlaceholder": "描述你觉得 Brain 修改有什么问题…",
+  "brain.submitFeedback": "提交反馈",
+
+  // ===== 13.0 AskUser 交互 =====
+  "askUser.noResponse": "用户未回复",
+  "askUser.responded": "已回复: {answer}",
+  "askUser.respondedLabel": "已回复 Agent 提问",
+  "askUser.customPlaceholder": "或输入自定义回复…",
+
+  // ===== 13.0 Squad 可视化 =====
+  "squad.empty": "尚未创建 Squad 组织结构",
+  "squad.globalSignals": "全局信号",
+  "squad.handoffs": "交接契约",
+
+  // ===== 13.0 Missions 页面扩展 =====
+  "missions.signals": "信号流",
+  "missions.squadTab": "Squad 组织",
+  "missions.tasksTab": "任务列表",
+  "missions.noActiveMissions": "暂无活跃任务计划",
+  "missions.missionGoal": "目标",
+  "missions.taskProgress": "进度",
+  "missions.taskWaiting": "等待中",
+  "missions.taskWorking": "执行中",
+  "missions.taskDone": "已完成",
+  "missions.taskFailed": "失败",
+
   // ===== 图片灯箱 =====
   "lightbox.failedToLoad": "图片加载失败",
   "lightbox.imageFailedToLoad": "图片加载失败",

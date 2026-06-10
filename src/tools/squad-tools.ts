@@ -232,6 +232,10 @@ function handleSignal(manager: ReturnType<typeof getManager>, parsed: z.infer<ty
 
 /**
  * handoff — 执行交接。
+ *
+ * 13.0 §5.3.11: handoff 时构建结构化的 HandoffContext。
+ * 从 plan.json 的已完成任务结果和 squad signals 中提取上下文信息，
+ * 让接班的 Agent 获得完整的工作状态快照，避免重复劳动。
  */
 function handleHandoff(manager: ReturnType<typeof getManager>, parsed: z.infer<typeof SquadToolInputSchema>): ToolResult {
   if (!parsed.handoff_data) {
@@ -239,13 +243,107 @@ function handleHandoff(manager: ReturnType<typeof getManager>, parsed: z.infer<t
   }
 
   const { from_squad, to_squad, what, content } = parsed.handoff_data;
-  const squadFile = manager.executeHandoff(parsed.mission_id, from_squad, to_squad, what, content);
 
-  if (!squadFile) {
+  // ─── 构建 HandoffContext（§5.3.11） ───
+  const plan = manager.readPlan(parsed.mission_id);
+
+  /** 从 plan 的已完成任务中提取文件操作记录 */
+  const filesRead: string[] = [];
+  const filesModified: Array<{ path: string; diffHash?: string }> = [];
+  const agentConversations: Array<{ with: string; summary: string; at: number }> = [];
+
+  if (plan) {
+    for (const task of plan.tasks) {
+      // 收集所有已完成任务中相关 agent 的结果
+      if (task.status === 'done' && task.result) {
+        // 从 result 文本中提取文件路径（简单模式匹配）
+        const filePathPattern = /(?:read|reading|读取|查看了?)\s+[`"']?([^\s`"']+\.(?:ts|js|json|md|yaml|yml|py|tsx|jsx|css|html|sql))["`']?/gi;
+        let match: RegExpExecArray | null;
+        while ((match = filePathPattern.exec(task.result)) !== null) {
+          if (!filesRead.includes(match[1])) filesRead.push(match[1]);
+        }
+
+        const modifiedPattern = /(?:modified|修改|changed|wrote|写入|编辑)\s+[`"']?([^\s`"']+\.(?:ts|js|json|md|yaml|yml|py|tsx|jsx|css|html|sql))["`']?/gi;
+        while ((match = modifiedPattern.exec(task.result)) !== null) {
+          const path = match[1];
+          if (!filesModified.some(f => f.path === path)) {
+            filesModified.push({ path });
+          }
+        }
+      }
+
+      // 记录各 agent 的任务执行作为 "对话摘要"
+      if (task.status !== 'waiting' && task.who) {
+        agentConversations.push({
+          with: task.who,
+          summary: task.status === 'done'
+            ? `完成了 "${task.what}" → ${task.result?.slice(0, 200) ?? '(无结果)'}`
+            : `正在执行 "${task.what}" (状态: ${task.status})`,
+          at: task.updated_at ? new Date(task.updated_at).getTime() : Date.now(),
+        });
+      }
+    }
+  }
+
+  // 从 squad signals 中提取 blockers
+  const blockers: Array<{ reason: string; raisedAt: number; raisedBy: string }> = [];
+  const squadFile = manager.readSquad(parsed.mission_id);
+  if (squadFile) {
+    const fromSquadObj = findSquadById(squadFile, from_squad);
+    if (fromSquadObj?.signals) {
+      for (const sig of fromSquadObj.signals) {
+        if (sig.type === 'blocker') {
+          blockers.push({
+            reason: sig.msg,
+            raisedAt: sig.at ? new Date(sig.at).getTime() : Date.now(),
+            raisedBy: sig.from,
+          });
+        }
+      }
+    }
+  }
+
+  const handoffContext: import('../contracts/delegation.js').HandoffContext = {
+    originalInstruction: plan?.mission?.context ?? what,
+    intentAnchor: plan ? {
+      goal: plan.mission?.goal ?? what,
+      successCriteria: [],
+      scope: {},
+    } : undefined,
+    filesRead,
+    filesModified,
+    agentConversations: agentConversations.slice(-10), // 保留最近 10 条
+    currentProgress: content ?? what,
+    blockers,
+    handoffAt: Date.now(),
+    fromAgent: from_squad,
+  };
+
+  const result = manager.executeHandoff(parsed.mission_id, from_squad, to_squad, what, content, handoffContext);
+
+  if (!result) {
     return { content: '交接失败（squad 不存在）', isError: true };
   }
 
   return {
-    content: `✅ 交接完成: ${from_squad} → ${to_squad}\n  内容: ${what}`,
+    content: `✅ 交接完成: ${from_squad} → ${to_squad}\n  内容: ${what}\n  上下文: 已读 ${filesRead.length} 文件, 已改 ${filesModified.length} 文件, ${blockers.length} 个阻塞`,
   };
+}
+
+/**
+ * 在 squad.json 中按 ID 递归查找 squad（含子 squad）。
+ */
+function findSquadById(squadFile: import('../contracts/mission.js').SquadFile, squadId: string): import('../contracts/mission.js').Squad | null {
+  if (!squadFile.org?.squads) return null;
+  for (const s of squadFile.org.squads) {
+    if (s.id === squadId) return s;
+    // 递归搜索子 squad
+    const subSquads = (s as unknown as { squads?: import('../contracts/mission.js').Squad[] }).squads;
+    if (subSquads) {
+      for (const sub of subSquads) {
+        if (sub.id === squadId) return sub;
+      }
+    }
+  }
+  return null;
 }

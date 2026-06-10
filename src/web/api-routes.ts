@@ -539,8 +539,13 @@ export function createApiRouter(deps: WebServerDependencies) {
   // --- Provider management routes ---
   registerProviderRoutes(route, () => deps.getProviderRegistry?.(), readBody, json, deps.configService);
 
-  // --- 13.0 Mission / Plan / Squad routes ---
-  registerMissionRoutes(route, () => deps.orchestrator?.mission ?? null, readBody, json);
+  // --- 13.0 Mission / Plan / Squad / Brain / Agent-Chat routes ---
+  registerMissionRoutes(route, {
+    getManager: () => deps.orchestrator?.mission ?? null,
+    getEventBus: () => deps.eventBus ?? null,
+    getDb: () => getDb(),
+    getBrainDecisionRecorder: () => (deps.orchestrator as any)?.brainDecisionRecorder ?? null,
+  }, readBody, json);
 
   // --- 12.0 Drift metrics routes ---
   route('GET', '/drift/metrics', (_req, res, url) => {

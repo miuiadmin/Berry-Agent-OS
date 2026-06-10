@@ -54,6 +54,8 @@ export interface Squad {
   leader: string;
   members: SquadMember[];
   squads?: Squad[];
+  /** Squad 内部信号 */
+  signals?: MissionSignal[];
   status: "waiting" | "working" | "done" | "failed";
 }
 

@@ -529,6 +529,55 @@ const en: Record<string, string> = {
   "events.chainApprovalDesc": "A scheduled chain step requires your approval.",
   "events.mcpServerFailed": "MCP server failed: {serverId}",
 
+  // ===== 13.0 Multi-agent collaboration events =====
+  "events.missionCreated": "New mission: {goal}",
+  "events.missionCreatedDesc": "Contains {count} tasks",
+  "events.missionCompleted": "Mission completed",
+  "events.missionAllDone": "All missions completed",
+
+  // ===== 13.0 Agent Chat Panel =====
+  "agentChat.title": "Agent Collaboration",
+  "agentChat.empty": "No inter-agent dialogues yet",
+
+  // ===== 13.0 Brain Review =====
+  "brain.reviewTitle": "Brain Review",
+  "brain.approved": "Approved",
+  "brain.modified": "Modified",
+  "brain.rejected": "Rejected",
+  "brain.reason": "Review reason",
+  "brain.diffToggle": "View changes",
+  "brain.original": "Original response",
+  "brain.modifiedLabel": "After Brain modification",
+  "brain.rejectedContent": "Rejected response",
+  "brain.restore": "Restore original",
+  "brain.restoreSuccess": "Restored",
+  "brain.feedback": "Report issue",
+  "brain.feedbackPlaceholder": "Describe what's wrong with Brain's modification…",
+  "brain.submitFeedback": "Submit feedback",
+
+  // ===== 13.0 AskUser Interactive =====
+  "askUser.noResponse": "No response from user",
+  "askUser.responded": "Responded: {answer}",
+  "askUser.respondedLabel": "Responded to agent question",
+  "askUser.customPlaceholder": "Or type a custom answer…",
+
+  // ===== 13.0 Squad Visualization =====
+  "squad.empty": "No squad organization created yet",
+  "squad.globalSignals": "Global signals",
+  "squad.handoffs": "Handoffs",
+
+  // ===== 13.0 Missions Page Extended =====
+  "missions.signals": "Signals",
+  "missions.squadTab": "Squad",
+  "missions.tasksTab": "Tasks",
+  "missions.noActiveMissions": "No active missions",
+  "missions.missionGoal": "Goal",
+  "missions.taskProgress": "Progress",
+  "missions.taskWaiting": "Waiting",
+  "missions.taskWorking": "Working",
+  "missions.taskDone": "Done",
+  "missions.taskFailed": "Failed",
+
   // ===== Image lightbox =====
   "lightbox.failedToLoad": "Failed to load image",
   "lightbox.imageFailedToLoad": "Image failed to load",

@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto';
 import type { PermissionEngine, TokenIssuer, ApprovalManager, RiskLevel } from '../safety/index.js';
 import type { PermissionResultPayload } from '../contracts/permissions.js';
 import type { DangerLevel } from '../utils/types.js';
+import type { StateCache } from './state-cache.js';
+
+/** 13.0 §3.8 第二层: 硬约束 scope（Brain 纠偏时写入，permission 检查时强制） */
+export interface ActiveScope {
+  /** 禁止访问的路径模式（glob / 精确路径前缀） */
+  blockPaths?: string[];
+  /** 禁止使用的工具 */
+  blockTools?: string[];
+}
 
 export interface CheckAndIssueParams {
   agentName: string;
@@ -17,26 +26,100 @@ export class PermissionCoordinator {
   private engine: PermissionEngine;
   private tokenIssuer: TokenIssuer;
   private approvalManager: ApprovalManager;
+  /** 13.0 §3.8 第二层: StateCache 注入，用于读取 active_scope */
+  private stateCache: StateCache | null = null;
 
   constructor(deps: {
     engine: PermissionEngine;
     tokenIssuer: TokenIssuer;
     approvalManager: ApprovalManager;
+    /** 可选：注入 StateCache 以支持硬约束 scope 拦截（§3.8 第二层） */
+    stateCache?: StateCache;
   }) {
     this.engine = deps.engine;
     this.tokenIssuer = deps.tokenIssuer;
     this.approvalManager = deps.approvalManager;
+    this.stateCache = deps.stateCache ?? null;
   }
 
+  /**
+   * 注入 StateCache（延迟注入，兼容 bootstrap 顺序）。
+   * 13.0 §3.8 第二层：Brain 纠偏写入 active_scope 后，permission 检查必须强制拦截。
+   */
+  setStateCache(stateCache: StateCache): void {
+    this.stateCache = stateCache;
+  }
+
+  /** 引擎热更新（permission mode 切换时调用） */
   updateEngine(engine: PermissionEngine): void {
     this.engine = engine;
   }
 
+  /** 审批管理器热更新（admin 改 approval policy 时调用） */
   updateApprovalManager(approvalManager: ApprovalManager): void {
     this.approvalManager = approvalManager;
   }
 
+  /**
+   * 13.0 §3.8 第二层: 检查 active_scope 是否禁止当前 toolName / path。
+   *
+   * @param taskId - delegation / agent_task ID（active_scope 的 key）
+   * @param toolName - 当前要执行的工具名
+   * @param toolInput - 工具输入（用于检查 blockPaths）
+   * @returns null 表示通过；否则返回拒绝原因
+   */
+  checkActiveScope(taskId: string | undefined, toolName: string, toolInput: string): string | null {
+    if (!this.stateCache || !taskId) return null;
+    const scope = this.stateCache.get<ActiveScope>('active_scope', taskId);
+    if (!scope) return null;
+
+    // ① blockTools 命中
+    if (scope.blockTools && scope.blockTools.length > 0) {
+      if (scope.blockTools.includes(toolName)) {
+        return `active_scope 禁止工具: ${toolName}`;
+      }
+    }
+
+    // ② blockPaths 命中（从 toolInput 里抓所有 path 类字符串字段粗略匹配）
+    if (scope.blockPaths && scope.blockPaths.length > 0) {
+      const inputStr = toolInput ?? '';
+      for (const blockPath of scope.blockPaths) {
+        if (inputStr.includes(blockPath)) {
+          return `active_scope 禁止访问路径: ${blockPath}`;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 写入 active_scope（由 CorrectionFlow 调用）。
+   * 13.0 §3.8 第二层：Brain 纠偏的 scopeUpdate 强制生效。
+   *
+   * @param taskId - delegation ID（与 checkActiveScope 的 key 对应）
+   * @param scope - 硬约束 scope
+   */
+  setActiveScope(taskId: string, scope: ActiveScope): void {
+    if (!this.stateCache) return;
+    this.stateCache.set('active_scope', taskId, scope);
+  }
+
+  /**
+   * 清除 task 的 active_scope（task 结束 / 重置时调用）。
+   */
+  clearActiveScope(taskId: string): void {
+    if (!this.stateCache) return;
+    this.stateCache.delete('active_scope', taskId);
+  }
+
   checkAndIssue(params: CheckAndIssueParams): PermissionResultPayload {
+    // 13.0 §3.8 第二层: 先做 active_scope 硬拦截（在 engine.checkPermission 之前，fail-closed）
+    const scopeBlock = this.checkActiveScope(params.taskId, params.toolName, params.toolInput);
+    if (scopeBlock) {
+      return { allowed: false, reason: scopeBlock };
+    }
+
     const blockResult = this.engine.checkPermission(
       params.toolName,
       params.toolInput,

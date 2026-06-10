@@ -55,6 +55,17 @@ const BRIDGED_EVENTS: EventName[] = [
   'cron.fired',
   'cron.completed',
   'cron.failed',
+  // 13.0 多智能体协作：任务生命周期事件（全局广播，前端实时更新任务进度）
+  'mission.created',
+  'mission.status_changed',
+  'mission.task_updated',
+  'mission.task_ready',
+  'mission.completed',
+  'mission.squad_created',
+  'mission.signal',
+  'mission.handoff',
+  // 13.0 自进化触发（Brain 在 plan 中发现需要新技能时）
+  'capability.evolution.request',
 ];
 
 /**

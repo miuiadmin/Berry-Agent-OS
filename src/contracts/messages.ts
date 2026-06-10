@@ -218,7 +218,7 @@ export type EventMap = {
   /** 13.0: Mission 状态变更 */
   'mission.status_changed': { missionId: string; oldStatus: string; newStatus: string };
   /** 13.0: 任务状态变更 */
-  'mission.task_updated': { missionId: string; taskId: string; status: string; who: string };
+  'mission.task_updated': { missionId: string; taskId: string; status: import('./mission.js').TaskStatus; who: string };
   /** 13.0: 任务依赖满足，可以开始执行 */
   'mission.task_ready': { missionId: string; taskId: string; who: string; what: string };
   /** 13.0: Mission 完成（所有 tasks done） */
@@ -226,9 +226,11 @@ export type EventMap = {
   /** 13.0: Squad 被创建（裂变） */
   'mission.squad_created': { missionId: string; squadId: string; parentSquadId?: string };
   /** 13.0: 信号发出 */
-  'mission.signal': { missionId: string; squadId: string; type: string; msg: string };
+  'mission.signal': { missionId: string; squadId: string; type: import('./mission.js').SignalType; msg: string };
   /** 13.0: 交接完成 */
   'mission.handoff': { missionId: string; from: string; to: string; what: string };
+  /** 13.0 P5: plan 中 who:"skills" 的 task 完成后触发技能创建 */
+  'capability.evolution.request': { missionId: string; taskId: string; skillDescription: string };
 };
 
 export type EventMessageMap = {

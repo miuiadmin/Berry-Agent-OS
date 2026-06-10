@@ -89,6 +89,8 @@ export interface CorrectionFlowDeps {
   readonly delegationManager: DelegationManager;
   readonly sessionManager: SessionManager;
   readonly daemonBridge: DaemonBridge | null;
+  /** 13.0 §3.8 第二层: 写入 active_scope 用于硬约束拦截 */
+  readonly permissionCoordinator?: import('./permission-coordinator.js').PermissionCoordinator | null;
   sendRouteRequest(payload: RouteRequestPayload, correlationId: string): void;
 }
 
@@ -102,7 +104,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   readonly registry: AgentRegistry;
   private taskManager: TaskManager;
   private taskRouter: TaskRouter;
-  private permissionCoordinator: PermissionCoordinator;
+  readonly permissionCoordinator: PermissionCoordinator;
   private auditRecorder: AuditRecorder;
   readonly sessionManager: SessionManager;
   private agentProgress: AgentProgress | null;
@@ -256,6 +258,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.missionManager = missionManager;
     this.stateCache = new StateCache();
     this.agentRequestQueue = new AgentRequestQueue();
+
+    // §4.4.2: 将 stateCache 注入 KernelRouter，启用跨 agent 预算检查
+    this.kernelRouter.setStateCache(this.stateCache);
 
     /**
      * P5: 订阅 mission.task_ready 事件 — 依赖满足时自动派发下游任务。

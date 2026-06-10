@@ -34,6 +34,8 @@ import type { IpcMessage } from './types.js';
 import type { DialogueRouter } from './dialogue-router.js';
 import type { AgentManager } from './agent-manager.js';
 import type { SessionManager } from './session-manager.js';
+import type { StateCache } from './state-cache.js';
+import type { InterAgentBudget } from './state-cache.js';
 import { getEventBus } from './event-bus.js';
 import { getLogger } from '../utils/logger.js';
 import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
@@ -46,6 +48,71 @@ const MAX_AGENT_CALL_DEPTH = 16;
 /** §5.2.3: 每 (from, to) agent 对的频率限制 */
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 分钟窗口
 const RATE_LIMIT_MAX_REQUESTS = 30;   // 每个 agent 对每分钟最多 30 次
+
+/** §4.4.2: 单个 session 内的跨 agent request 总次数上限 */
+const MAX_INTER_AGENT_REQUESTS_PER_SESSION = 30;
+
+/**
+ * §5.2.2: Agent 消息类型白名单。
+ *
+ * 限制每个 Agent 可以发送/接收的消息类型。
+ * 不在白名单中的消息类型会被 gate 拒绝。
+ * '*' 通配符表示允许所有类型（向后兼容未明确配置的 agent）。
+ */
+interface AgentMessagePermission {
+  canSend: string[];
+  canReceive: string[];
+}
+
+const AGENT_MESSAGE_WHITELIST: Record<string, AgentMessagePermission> = {
+  code: {
+    canSend: ['agent.question', 'agent.delegate', 'agent.notify', 'tool.*', 'turn.*', 'stream.*', 'task.handoff', 'task.reject', 'user.ask'],
+    canReceive: ['turn.start', 'agent.question', 'agent.delegate', 'turn.correction', 'user.message', 'user.interrupt', 'state.query'],
+  },
+  learning: {
+    canSend: ['agent.answer', 'agent.result', 'turn.final', 'stream.*'],
+    canReceive: ['agent.question', 'agent.delegate', 'state.query'],
+  },
+  memory: {
+    canSend: ['agent.answer', 'agent.result', 'turn.final', 'stream.*'],
+    canReceive: ['agent.question', 'agent.delegate', 'state.query'],
+  },
+  skills: {
+    canSend: ['agent.answer', 'agent.result', 'turn.final', 'stream.*', 'task.handoff'],
+    canReceive: ['turn.start', 'agent.question', 'agent.delegate', 'turn.correction', 'state.query'],
+  },
+  conversation: {
+    canSend: ['dialogue.*', 'agent.question', 'agent.delegate', 'turn.*', 'stream.*', 'draft.response', 'final.response'],
+    canReceive: ['user.message', 'review.result', 'turn.correction', 'dialogue.reply'],
+  },
+  brain: {
+    canSend: ['route.result', 'review.result', 'permission.judge.result', 'checkpoint.result', 'brain.correction'],
+    canReceive: ['route.request', 'review.request', 'permission.judge', 'brain.observe', 'dialogue.observe', 'checkpoint.evaluate', 'drift.check.request'],
+  },
+  evolution: {
+    canSend: ['agent.answer', 'agent.result', 'turn.final', 'stream.*'],
+    canReceive: ['agent.question', 'agent.delegate', 'state.query'],
+  },
+};
+
+/**
+ * §5.2.2: 检查消息类型是否匹配白名单模式。
+ *
+ * 支持通配符：'tool.*' 匹配 'tool.call'、'tool.result' 等。
+ * '*' 单独使用表示匹配所有类型。
+ */
+function isMessageTypeAllowed(messageType: string, patterns: string[]): boolean {
+  if (patterns.includes('*')) return true;
+  for (const pattern of patterns) {
+    if (pattern.endsWith('.*')) {
+      const prefix = pattern.slice(0, -2);
+      if (messageType.startsWith(prefix + '.')) return true;
+    } else if (messageType === pattern) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /** 频率限制追踪条目 */
 interface RateLimitEntry {
@@ -85,6 +152,11 @@ export interface KernelRouterDeps {
   agentManager: AgentManager;
   /** 会话管理器（通过 correlationId 查找 pending） */
   sessionManager: SessionManager;
+  /**
+   * 13.0 §4.4.2: 统一状态缓存（跨 agent 预算等）。
+   * 可选——未注入时跳过预算检查（向后兼容）。
+   */
+  stateCache?: StateCache;
 }
 
 /**
@@ -116,6 +188,14 @@ export class KernelRouter {
     this.deps.dialogueRouter = router;
   }
 
+  /**
+   * §4.4.2: 注入 stateCache（延迟到 initMissionSystem 阶段）。
+   * 注入后启用跨 agent 预算检查和记录。
+   */
+  setStateCache(cache: StateCache): void {
+    this.deps.stateCache = cache;
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // 13.0 §4.1/§5.2: 集中式安全门控
   // ═══════════════════════════════════════════════════════════════
@@ -123,18 +203,22 @@ export class KernelRouter {
   /**
    * 集中式安全门控 — 所有跨 Agent 消息必须通过此检查。
    *
-   * 13.0 §5.2.2-§5.2.4 规定的 5 项检查：
+   * 13.0 §5.2.2-§5.2.4 规定的检查：
    * 1. 禁止 to:'brain'（Brain 是观察者，不直接对话）
    * 2. 调用深度限制（防循环调用 A→B→C→...→A）
    * 3. 循环引用检测（防 A→B→A）
    * 4. Agent 对频率限制（每分钟最多 N 次）
    * 5. 自我消息禁止（防 A→A）
+   * 6. 跨 Agent 预算检查（session 级总次数上限）
    *
    * @param from - 发送方 agent 名
    * @param to - 接收方 agent 名
+   * @param sessionId - 可选的 session ID，用于预算检查
+   * @param messageType - 可选的消息类型，用于白名单检查
+   * @param callDepth - 可选的当前调用深度，用于防无限递归
    * @returns 拒绝原因字符串（null 表示通过）
    */
-  gate(from: string, to: string): string | null {
+  gate(from: string, to: string, sessionId?: string, messageType?: string, callDepth?: number): string | null {
     // ① §5.2.4: 禁止任何 agent 直接发消息给 Brain
     if (to === 'brain') {
       return '不允许直接向 Brain 发送消息（Brain 是观察者，不直接对话）';
@@ -145,12 +229,53 @@ export class KernelRouter {
       return `不允许自己向自己发消息 (${from})`;
     }
 
-    // ③ §5.2.3: Agent 对频率限制
+    // ③ §4.4.1: 调用深度限制（防无限递归 A→B→C→...→A）
+    if (callDepth !== undefined && callDepth >= MAX_AGENT_CALL_DEPTH) {
+      return `调用深度超限 (${callDepth}/${MAX_AGENT_CALL_DEPTH})，可能存在循环调用`;
+    }
+
+    // ④ §5.2.3: Agent 对频率限制
     if (!this.checkRateLimit(from, to)) {
       return `${from} → ${to} 频率超限（每分钟最多 ${RATE_LIMIT_MAX_REQUESTS} 次）`;
     }
 
+    // ⑤ §5.2.2: 消息类型白名单
+    if (messageType) {
+      const fromWhitelist = AGENT_MESSAGE_WHITELIST[from];
+      if (fromWhitelist && !isMessageTypeAllowed(messageType, fromWhitelist.canSend)) {
+        return `${from} 不允许发送消息类型 "${messageType}"`;
+      }
+    }
+
+    // ⑥ §4.4.2: 跨 Agent 预算检查（session 级总次数上限）
+    if (sessionId && this.deps.stateCache) {
+      const budget = this.deps.stateCache.get<InterAgentBudget>('inter_agent_budget', sessionId);
+      if (budget && budget.requestCount >= MAX_INTER_AGENT_REQUESTS_PER_SESSION) {
+        return `session ${sessionId} 跨 agent 通信次数已耗尽（${budget.requestCount}/${MAX_INTER_AGENT_REQUESTS_PER_SESSION}）`;
+      }
+    }
+
     return null; // 通过所有检查
+  }
+
+  /**
+   * §4.4.2: 记录一次跨 agent 通信，更新预算计数。
+   *
+   * 在 dialogue 成功建立后调用（gate 通过 + sendMessage 完成）。
+   *
+   * @param sessionId - session ID
+   * @param tokensUsed - 本次通信消耗的 token 数（估算，后续可精确化）
+   */
+  recordInterAgentRequest(sessionId: string, tokensUsed?: number): void {
+    if (!this.deps.stateCache) return;
+    const budget = this.deps.stateCache.get<InterAgentBudget>('inter_agent_budget', sessionId) ?? {
+      tokensUsed: 0,
+      requestCount: 0,
+      totalBudget: 0,
+    };
+    budget.requestCount++;
+    if (tokensUsed) budget.tokensUsed += tokensUsed;
+    this.deps.stateCache.set('inter_agent_budget', sessionId, budget);
   }
 
   /**
@@ -248,6 +373,11 @@ export class KernelRouter {
       try {
         const reply = await router.sendMessage(payload);
         primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
+
+        // §4.4.2: 记录一次成功的跨 agent 通信（更新预算计数）
+        if (pending?.sessionId) {
+          this.recordInterAgentRequest(pending.sessionId);
+        }
       } catch (err) {
         // 使用类型化错误码，让 Agent LLM 能区分超时/崩溃/不可用
         const { code, message } = errorToCode(err);
@@ -378,6 +508,12 @@ export class KernelRouter {
       try {
         const reply = await router.sendMessage(payload);
         agentIpc.send('dialogue.reply', agentName, reply, payload.dialogueId);
+
+        // §4.4.2: 记录一次成功的跨 agent 通信（更新预算计数）
+        const budgetSessionId = (payload.context as Record<string, unknown>)?._sessionId as string | undefined;
+        if (budgetSessionId) {
+          this.recordInterAgentRequest(budgetSessionId);
+        }
       } catch (err) {
         // 使用类型化错误码，让 Agent LLM 能区分超时/崩溃/不可用
         const { code, message } = errorToCode(err);

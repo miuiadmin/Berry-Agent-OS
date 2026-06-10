@@ -23,6 +23,7 @@ import type { ToolAuditPayload } from '../../../contracts/audit.js';
 import type { MemoryContextFrame } from '../../../contracts/memory.js';
 import type { TaskAcknowledgePayload, TaskStartedPayload } from '../../../contracts/tasks.js';
 import type { DangerLevel } from '../../../tools/types.js';
+import type { TurnCorrectionPayload } from '../../../contracts/delegation.js';
 
 const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的个人 AI 助手。回答要简洁、友好、准确。
 
@@ -113,6 +114,43 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
   const pendingDrafts = new Map<string, { sessionId: string; draft: string; toolCalls: ToolCallRecord[]; createdAt: number }>();
   const tools = toModelTools(getToolRegistry());
   const contextManager = new ContextManager();
+
+  /**
+   * 13.0 §3.10: Brain 纠偏消费基础设施。
+   *
+   * startResidentAgent 不像 startModuleAgent 内置纠偏消费，
+   * 需要手动维护 pendingCorrection 状态和 IPC handler。
+   *
+   * Brain 通过 dialogue.observe / checkpoint.evaluate 检测问题后，
+   * 发送 turn.correction IPC 消息到 Conversation Agent，
+   * 存入此变量，由 getPendingCorrection 回调供 runToolLoop 每轮消费。
+   */
+  let pendingCorrection: TurnCorrectionPayload | null = null;
+  let pendingCorrectionId: string | null = null;
+
+  /** CAS 原子消费纠偏，供 runToolLoop 每轮调用 */
+  const consumeCorrection = (): TurnCorrectionPayload | null => {
+    const c = pendingCorrection;
+    const id = pendingCorrectionId;
+    pendingCorrection = null;
+    pendingCorrectionId = null;
+    if (c) {
+      return { ...c, _correctionId: id, _consumedAt: Date.now() };
+    }
+    return null;
+  };
+
+  /**
+   * 13.0 §3.10: 注册 turn.correction IPC handler。
+   * Brain 的纠偏指令通过 orchestrator 转发到此 handler。
+   * 纠偏存入 pendingCorrection 变量，等 runToolLoop 下一轮检查。
+   */
+  ipc.onMessage('turn.correction', (msg: IpcMessage) => {
+    const correction = msg.payload as TurnCorrectionPayload;
+    pendingCorrection = correction;
+    pendingCorrectionId = msg.correlationId ?? msg.id ?? null;
+    logger.info({ action: correction.action, instruction: correction.instruction?.slice(0, 100) }, 'conversation: 收到 Brain 纠偏');
+  });
 
   /** per-session 互斥：新消息到达时 abort 旧 signal，tool loop 和 dialogue 自然终止 */
   const sessionLocks = new Map<string, { controller: AbortController; promise: Promise<void> }>();
@@ -246,6 +284,14 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         tools,
         signal: controller.signal,
         config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },
+        /**
+         * 13.0 §3.10: Brain 纠偏消费回调。
+         * 让 tool loop 每轮检查 Brain 是否发了纠偏指令。
+         * - action='adjust' + instruction → 注入 system message
+         * - action='adjust' + forbiddenTools → 从工具列表移除
+         * - action='stop' → 立即终止 tool loop
+         */
+        getPendingCorrection: consumeCorrection,
         onChunk: streamingEnabled ? (text: string) => {
           const scrubbed = scrubber.scrub(text);
           if (scrubbed && taskId) {

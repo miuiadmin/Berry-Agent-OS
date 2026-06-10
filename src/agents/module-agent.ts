@@ -238,6 +238,27 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         systemPrompt: getDialogueSystemPrompt(name!),
         tools: agentTools,
         config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },
+        /**
+         * 13.0 §3.10: dialogue 场景下的 Brain 纠偏消费。
+         * Module Agent 在处理 dialogue.send 时也可能收到 Brain 纠偏
+         * （如对话轮数过多、语义漂移等），通过 getPendingCorrection
+         * 回调让 tool loop 每轮检查并应用。
+         */
+        getPendingCorrection: () => {
+          const c = pendingCorrection;
+          const id = pendingCorrectionId;
+          pendingCorrection = null;
+          pendingCorrectionId = null;
+          if (c) {
+            const consumed = { ...c, _correctionId: id, _consumedAt: Date.now() };
+            correctionHistory.push(consumed);
+            if (correctionHistory.length > CORRECTION_HISTORY_MAX) {
+              correctionHistory.shift();
+            }
+            return consumed;
+          }
+          return null;
+        },
         onChunk: ephemeralTaskId ? (text: string) => {
           ipc.send('task.telemetry', 'core', { kind: 'text_delta', taskId: ephemeralTaskId, text });
         } : undefined,

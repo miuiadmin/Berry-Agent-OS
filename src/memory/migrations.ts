@@ -58,6 +58,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateReviewRequestsExpandVerdicts(conn);
     addConversationsClientMsgIdColumn(conn);
     migrateCreateBrainObservationsTable(conn);
+    migrateCreateAgentAuditTables(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -932,6 +933,67 @@ function migrateCreateBrainObservationsTable(conn: Database.Database): void {
     CREATE INDEX idx_brain_obs_priority
       ON brain_observations(priority, created_at DESC);
   `);
+}
+
+/**
+ * 13.0 Agent 间对话审计表 + Agent 工具调用审计表。
+ * - agent_chat_messages：记录所有 Agent 间 request/response 对话，前端 agent-chat 面板读取
+ * - agent_tool_calls：记录每个 Agent 的工具调用详情，Brain 审核读取工具上下文
+ * - 与 tool_calls 表互补：tool_calls 记录 LLM 层工具调用，agent_tool_calls 按 agent 维度索引
+ */
+function migrateCreateAgentAuditTables(conn: Database.Database): void {
+  if (!tableExists(conn, 'agent_chat_messages')) {
+    conn.exec(`
+      CREATE TABLE agent_chat_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        from_agent TEXT NOT NULL,
+        to_agent TEXT NOT NULL,
+        direction TEXT NOT NULL CHECK(direction IN ('request', 'response', 'notify')),
+        message_type TEXT NOT NULL DEFAULT 'agent.question',
+        content TEXT NOT NULL,
+        correlation_id TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+
+      CREATE INDEX idx_agent_chat_session
+        ON agent_chat_messages(session_id, created_at DESC);
+      CREATE INDEX idx_agent_chat_task
+        ON agent_chat_messages(task_id, created_at DESC);
+      CREATE INDEX idx_agent_chat_agents
+        ON agent_chat_messages(from_agent, to_agent, created_at DESC);
+      CREATE INDEX idx_agent_chat_correlation
+        ON agent_chat_messages(correlation_id);
+    `);
+  }
+
+  if (!tableExists(conn, 'agent_tool_calls')) {
+    conn.exec(`
+      CREATE TABLE agent_tool_calls (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        input_summary TEXT,
+        success INTEGER NOT NULL DEFAULT 1,
+        duration_ms INTEGER,
+        approved_by TEXT CHECK(approved_by IN ('auto', 'scope', 'brain', 'user')),
+        error_message TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+
+      CREATE INDEX idx_agent_tool_session
+        ON agent_tool_calls(session_id, created_at DESC);
+      CREATE INDEX idx_agent_tool_task
+        ON agent_tool_calls(task_id, created_at DESC);
+      CREATE INDEX idx_agent_tool_agent
+        ON agent_tool_calls(agent_name, created_at DESC);
+      CREATE INDEX idx_agent_tool_name
+        ON agent_tool_calls(tool_name, success, created_at DESC);
+    `);
+  }
 }
 
 function migrateCreateSystemInsightsTable(conn: Database.Database): void {

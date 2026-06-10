@@ -242,6 +242,37 @@ export class CoreService {
     this.messageRouter.setup();
     this.messageRouter.init({ pluginRuntimeV2: this.pluginRuntimeV2 });
 
+    // 13.0 多智能体协作：初始化 Mission 系统（共享 MissionManager 实例 + plan/squad 工具）
+    const { MissionManager } = await import('./mission-manager.js');
+    const missionManager = new MissionManager(getEventBus());
+    this.messageRouter.initMissionSystem(missionManager);
+    // 注入同一个 MissionManager 到 plan/squad 工具（让 agent 的 useTool('plan'/'squad') 可用）
+    const { initMissionTools } = await import('../tools/plan-tools.js');
+    initMissionTools(missionManager);
+
+    // 13.0 P5: 订阅 self-evolution 信号 — who:"skills" 的 task 完成后触发技能创建
+    getEventBus().on('capability.evolution.request' as any, (payload: any) => {
+      try {
+        const { missionId, taskId, skillDescription } = payload;
+        if (!skillDescription) return;
+        // 委派给 evolution agent 执行技能创建（通过 orchestrator dispatch）
+        this.messageRouter?.dispatchModuleTask({
+          sessionId: `mission-${missionId}`,
+          taskType: 'evolution',
+          requester: 'mission-system',
+          inputPayload: {
+            taskType: 'create_skill',
+            userMessage: skillDescription,
+            source: `mission:${missionId}:task:${taskId}`,
+          },
+          foreground: false,
+        }).catch((err: any) => {
+          const logger = getLogger('core-service');
+          logger.warn({ err, missionId, taskId }, '13.0 evolution dispatch failed');
+        });
+      } catch { /* evolution 失败不阻塞 */ }
+    });
+
     // 启动 session 垃圾回收（5 分钟间隔，30 分钟无活动清理缓存与 pendingAsks）
     this.sessionManager.startGc();
 
@@ -478,6 +509,14 @@ export class CoreService {
 
       this.taskManager!.failByAgent(name, `智能体 ${name} 崩溃`);
       this.messageRouter?.failDelegationsByAgent(name, `智能体 ${name} 崩溃`);
+
+      // ─── 13.0 §4.4.1: 清理 AgentRequestQueue 中该 agent 的所有排队请求 ───
+      // Agent 崩溃后，排队等待该 agent 的请求全部拒绝（发送 agent_unavailable 错误）
+      const queue = this.messageRouter?.requestQueue;
+      if (queue) {
+        queue.clearForAgent(name, `智能体 ${name} 崩溃`);
+        logger.info({ agent: name }, 'agent.crashed: 已清理请求队列');
+      }
 
       // VF-3: 立即拒绝所有等待该 Agent 回复的 pending dialogue（不等 60s 超时）
       // 发起方的 LLM 收到 AgentCrashError 后能做出合理决策（不重试，换路径）

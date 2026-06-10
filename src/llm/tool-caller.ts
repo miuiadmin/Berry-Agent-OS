@@ -2,6 +2,7 @@ import type { ChatResult, ChatOptions, LlmClient, ToolUseBlock } from './client.
 import type { ModelMessage, ModelToolDef, ModelContentBlock } from '../contracts/model.js';
 import type { TokenBudgetController, BudgetScope } from './token-budget.js';
 import type { StreamChunk } from './contract.js';
+import type { TurnCorrectionPayload } from '../contracts/delegation.js';
 import { LoopDetector } from '../utils/loop-detector.js';
 import { getToolByName } from '../tools/index.js';
 import type { DangerLevel, ToolResult } from '../tools/types.js';
@@ -89,6 +90,22 @@ export interface ToolLoopParams {
   chatContext?: Partial<ChatOptions>;
   budgetController?: TokenBudgetController;
   budgetScope?: { scope: BudgetScope; scopeId: string };
+  /**
+   * 13.0 §3.10: Brain 纠偏消费回调。
+   *
+   * Agent 的 module-agent 维护 pendingCorrection 变量（通过 turn.correction IPC 写入），
+   * tool loop 每轮调用此回调检查是否有新纠偏到达。
+   *
+   * 返回 TurnCorrectionPayload 表示有纠偏（已被 CAS 消费，回调内会 null out），
+   * 返回 null 表示无纠偏。
+   *
+   * 消费行为：
+   * - action='stop' → tool loop 立即终止
+   * - action='adjust' + instruction → 注入到 system message
+   * - action='adjust' + newConstraints.forbiddenTools → 从 tools 列表中移除
+   * - action='restart' → 由调用方处理（tool loop 本身不负责重启）
+   */
+  getPendingCorrection?: () => TurnCorrectionPayload | null;
   requestPermission: (toolName: string, toolInput: string, dangerLevel: DangerLevel) => Promise<{ allowed: boolean; reason?: string; tokenId?: string }>;
   validatePermission: (tokenId: string, toolName: string, toolInput: string) => Promise<{ allowed: boolean; reason?: string }>;
   consumePermission: (tokenId: string) => Promise<void>;
@@ -104,7 +121,7 @@ export interface ToolLoopResult {
 }
 
 export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResult> {
-  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onReasoning, onUsage, onToolResult, onUncertainty, onStop, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool } = params;
+  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onReasoning, onUsage, onToolResult, onUncertainty, onStop, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool, getPendingCorrection } = params;
   const detector = new LoopDetector(config.maxCalls);
   const toolCalls: ToolCallRecord[] = [];
   const workingMessages: ModelMessage[] = [...messages];
@@ -114,6 +131,19 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
   let consecutiveToolErrors = 0;
   let uncertaintyFired = false;
   const useStreaming = !!onChunk && llm.supportsStreaming();
+
+  /**
+   * 13.0 §3.10: 动态 system prompt — Brain 纠偏可能追加指令。
+   * 初始值为传入的 systemPrompt，纠偏时追加 Brain instruction。
+   * 不修改原始 systemPrompt（冻结快照模式），而是构造动态版本。
+   */
+  let dynamicSystemPrompt = systemPrompt;
+
+  /**
+   * 13.0 §3.10: 动态工具列表 — Brain 纠偏的 forbiddenTools 需要实时移除。
+   * 每次纠偏后重新过滤，已执行的中间结果仍保留在 workingMessages。
+   */
+  let activeTools = tools;
 
   /** 安全触发 onStop 回调，不阻塞返回路径 */
   const fireOnStop = async (reason: Parameters<NonNullable<typeof onStop>>[0]): Promise<void> => {
@@ -135,6 +165,66 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       };
     }
 
+    // ─── 13.0 §3.10: 检查 Brain 纠偏 ───
+    if (getPendingCorrection) {
+      const correction = getPendingCorrection();
+      if (correction) {
+        logger.info({ action: correction.action, instruction: correction.instruction?.slice(0, 100), hasConstraints: !!correction.newConstraints }, 'tool-loop: 收到 Brain 纠偏');
+
+        // action='stop': 立即终止工具循环
+        if (correction.action === 'stop') {
+          logger.info({ instruction: correction.instruction }, 'tool-loop: Brain 下令停止');
+          await fireOnStop('aborted');
+          return {
+            finalContent: correction.instruction ?? '监督系统要求停止当前任务',
+            reasoning: accumulatedReasoning || undefined,
+            toolCalls,
+            messages: workingMessages,
+          };
+        }
+
+        // action='adjust': 注入 instruction 到 system message
+        if (correction.action === 'adjust') {
+          // 软注入：追加 Brain instruction 到 system prompt
+          if (correction.instruction) {
+            dynamicSystemPrompt = `${dynamicSystemPrompt}\n\n⚠️ 监督系统指令：${correction.instruction}`;
+            logger.debug({ instruction: correction.instruction.slice(0, 200) }, 'tool-loop: Brain instruction 已注入 system message');
+          }
+
+          // 硬注入：从工具列表中移除 forbiddenTools
+          if (correction.newConstraints?.forbiddenTools && correction.newConstraints.forbiddenTools.length > 0) {
+            const forbidden = new Set(correction.newConstraints.forbiddenTools);
+            const before = activeTools.length;
+            activeTools = activeTools.filter(t => !forbidden.has(t.name));
+            logger.debug({ forbidden: [...forbidden], removed: before - activeTools.length }, 'tool-loop: forbiddenTools 已从工具列表移除');
+          }
+
+          // 注入 requiredApproach 到 system prompt
+          if (correction.newConstraints?.requiredApproach) {
+            dynamicSystemPrompt = `${dynamicSystemPrompt}\n\n⚠️ 必须使用以下方法：${correction.newConstraints.requiredApproach}`;
+          }
+
+          // 硬注入：缩短剩余 token 预算
+          if (correction.newConstraints?.maxRemainingTokens) {
+            dynamicSystemPrompt = `${dynamicSystemPrompt}\n\n⚠️ 剩余 token 预算已缩减为 ${correction.newConstraints.maxRemainingTokens}，请尽快结束任务。`;
+          }
+        }
+
+        // action='restart': 不在 tool loop 内处理，由调用方处理
+        // 但需要先终止当前循环
+        if (correction.action === 'restart') {
+          logger.info({ instruction: correction.instruction }, 'tool-loop: Brain 要求重启任务');
+          // restart 不走 onStop，直接返回特殊标记让调用方处理
+          return {
+            finalContent: `[RESTART_REQUIRED]${correction.instruction ?? '任务需要重新执行'}`,
+            reasoning: accumulatedReasoning || undefined,
+            toolCalls,
+            messages: workingMessages,
+          };
+        }
+      }
+    }
+
     if (budgetController && budgetScope) {
       const check = budgetController.checkBudget(budgetScope.scope, budgetScope.scopeId);
       if (!check.allowed) {
@@ -150,8 +240,8 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
     const chatOpts: ChatOptions = {
       ...chatContext,
-      system: systemPrompt,
-      tools,
+      system: dynamicSystemPrompt, // 13.0: 使用动态 system prompt（可能包含 Brain 纠偏注入）
+      tools: activeTools,           // 13.0: 使用动态工具列表（Brain 可能移除了 forbiddenTools）
       maxTokens: 4096,
     };
 

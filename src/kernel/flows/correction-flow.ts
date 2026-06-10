@@ -149,6 +149,22 @@ export class CorrectionFlow {
     const entry = this.ctx.delegationManager.get(delegationId);
     if (!entry) return;
 
+    // 13.0 §3.8 第二层: 把 Brain 的 forbiddenTools/blockPaths 写入 active_scope 硬约束
+    // PermissionCoordinator 在所有 tool 执行前都会强制检查 active_scope
+    if (correction.newConstraints?.forbiddenTools && correction.newConstraints.forbiddenTools.length > 0) {
+      const existing = this.ctx.permissionCoordinator?.checkActiveScope(delegationId, '__dummy__', '')
+        ?? null;
+      // 直接调用 setActiveScope 覆盖（含之前的 blockPaths）
+      this.ctx.permissionCoordinator?.setActiveScope(delegationId, {
+        blockTools: correction.newConstraints.forbiddenTools,
+        // 保留之前的 blockPaths（如果有）
+        blockPaths: existing && typeof existing === 'object' && 'blockPaths' in existing
+          ? (existing as { blockPaths?: string[] }).blockPaths
+          : undefined,
+      });
+      logger.debug({ delegationId, forbiddenTools: correction.newConstraints.forbiddenTools }, 'applyAdjust: set active_scope.blockTools');
+    }
+
     if (entry.targetKind === 'daemon') {
       if (this.ctx.daemonBridge?.isAvailable) {
         this.ctx.daemonBridge.deliverCorrection(

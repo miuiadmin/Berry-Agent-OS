@@ -4,6 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useT } from "@/lib/i18n";
+import { useMissionStore } from "@/lib/stores/mission-store";
+import { useAgentChatStore } from "@/lib/stores/agent-chat-store";
 
 export function useRealtimeEvents() {
   const queryClient = useQueryClient();
@@ -133,6 +135,87 @@ export function useRealtimeEvents() {
     unsubs.push(
       subscribe("mcp.tools_changed", () => {
         queryClient.invalidateQueries({ queryKey: ["mcp-status"] });
+      })
+    );
+
+    // ─── 13.0 Mission 实时更新（§5.1.1 前端实时信息流） ─────────────────
+    const missionStore = useMissionStore.getState();
+
+    /** mission.created → 添加新 mission 到列表 */
+    unsubs.push(
+      subscribe("mission.created", (payload) => {
+        const p = payload as { missionId: string; goal: string; taskCount: number };
+        queryClient.invalidateQueries({ queryKey: ["missions"] });
+        toast.info(t("events.missionCreated", { goal: p.goal ?? "" }), {
+          description: t("events.missionCreatedDesc", { count: p.taskCount ?? 0 }),
+        });
+      })
+    );
+
+    /** mission.status_changed → 更新 mission 状态 */
+    unsubs.push(
+      subscribe("mission.status_changed", (payload) => {
+        const p = payload as { missionId: string; oldStatus: string; newStatus: string };
+        missionStore.updateMission(p.missionId, { status: p.newStatus as any });
+        queryClient.invalidateQueries({ queryKey: ["missions"] });
+        if (p.newStatus === "completed") {
+          toast.success(t("events.missionCompleted"));
+        }
+      })
+    );
+
+    /** mission.task_updated → 更新任务进度 */
+    unsubs.push(
+      subscribe("mission.task_updated", (payload) => {
+        const p = payload as { missionId: string; taskId: string; status: string; who: string };
+        missionStore.updateTask(p.missionId, p.taskId, { status: p.status as any });
+        queryClient.invalidateQueries({ queryKey: ["missions"] });
+      })
+    );
+
+    /** mission.completed → 整个 mission 完成 */
+    unsubs.push(
+      subscribe("mission.completed", (payload) => {
+        const p = payload as { missionId: string; goal: string };
+        missionStore.updateMission(p.missionId, { status: "completed", progressPercent: 100 });
+        queryClient.invalidateQueries({ queryKey: ["missions"] });
+        toast.success(t("events.missionAllDone"));
+      })
+    );
+
+    /** mission.squad_created / mission.signal / mission.handoff → 刷新列表 */
+    for (const evt of ["mission.squad_created", "mission.signal", "mission.handoff", "mission.task_ready"] as const) {
+      unsubs.push(
+        subscribe(evt, () => {
+          queryClient.invalidateQueries({ queryKey: ["missions"] });
+        })
+      );
+    }
+
+    // ─── 13.0 Agent 间对话实时推送（§5.1.1 agent_chat WS 事件） ───────
+    const agentChatStore = useAgentChatStore.getState();
+
+    unsubs.push(
+      subscribe("agent_dialogue" as any, (payload) => {
+        const p = payload as {
+          id?: string; sessionId?: string; taskId?: string;
+          from?: string; to?: string; direction?: string;
+          messageType?: string; content?: string; correlationId?: string;
+        };
+        if (p.id) {
+          agentChatStore.addMessage({
+            id: p.id,
+            sessionId: p.sessionId ?? "",
+            taskId: p.taskId,
+            fromAgent: p.from ?? "",
+            toAgent: p.to ?? "",
+            direction: (p.direction as any) ?? "request",
+            messageType: p.messageType ?? "agent.question",
+            content: p.content ?? "",
+            correlationId: p.correlationId,
+            timestamp: Date.now(),
+          });
+        }
       })
     );
 
