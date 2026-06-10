@@ -52,6 +52,37 @@ export interface SocketInterruptedEvent {
   partialResponse?: string;
 }
 
+/**
+ * 13.0 灵魂版：Agent 间对话事件（推送至前端对话面板）。
+ *
+ * 触发时机：任何 module agent 通过 AgentPort.request() 发起的 dialogue.send / dialogue.reply
+ * 都会被 Kernel 通过 EventBus 'agent.dialogue' 事件广播，WsEventBridge 转发为 WS 消息。
+ *
+ * 设计：与 dialogue.status 互补 — status 关注生命周期（started/round_complete/ended），
+ * 本事件关注每条消息内容（让前端能展示 Agent 间真实对话流）。
+ */
+export interface AgentDialogueEvent {
+  type: 'agent_dialogue';
+  /** 对话 ID（与 DialogueState.dialogueId 对齐） */
+  dialogueId: string;
+  /** 发送方 Agent */
+  from: string;
+  /** 接收方 Agent */
+  to: string;
+  /** 消息内容 */
+  content: string;
+  /** 当前轮次（0-based） */
+  round: number;
+  /** 事件类型：send（发起）/ reply（回复）/ end（结束） */
+  phase: 'send' | 'reply' | 'end';
+  /** 关联 sessionId，前端用于按 session 过滤 */
+  sessionId?: string;
+  /** 关联 taskId */
+  taskId?: string;
+  /** 时间戳（毫秒） */
+  timestamp: number;
+}
+
 // --- Socket request/response type map ---
 
 export interface AgentsListRequest {

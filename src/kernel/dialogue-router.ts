@@ -24,6 +24,7 @@ import type { IpcChannel } from './ipc.js';
 import type { ObservationRecorder } from './observation-recorder.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { getEventBus } from './event-bus.js';
 
 const logger = getLogger('dialogue-router');
 
@@ -319,6 +320,24 @@ export class DialogueRouter {
       } catch (err) {
         logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:observation record failed');
       }
+    }
+
+    // 13.0: 推送 agent.dialogue 事件至 EventBus，WsEventBridge 转发到前端对话面板
+    // phase: send（首轮）/ reply（回复）
+    try {
+      getEventBus().emit('agent.dialogue', {
+        dialogueId: msg.dialogueId,
+        sessionId: state.sessionId,
+        taskId: state.correlationId,
+        from: msg.from,
+        to: msg.to,
+        content: msg.content.slice(0, 2000),
+        round: state.currentRound,
+        phase: state.currentRound === 0 ? 'send' : 'reply',
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:agent.dialogue emit failed');
     }
 
     // 保留现有的 IPC 推送（Brain 实时监听，仍是主路径）

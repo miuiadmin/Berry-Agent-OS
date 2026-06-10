@@ -68,6 +68,8 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'stream.tool_result': 'tool_result',
   'stream.uncertainty': 'uncertainty',
   'dialogue.status': 'dialogue_status',
+  /** 13.0 灵魂版：Agent 间对话每条消息推送（与 dialogue.status 互补） */
+  'agent.dialogue': 'agent_dialogue',
   // delegation-orchestrator 内部事件：保持类型名稳定，前端按 sessionId 过滤
   'conversation.handoff': 'agent_handoff',
   'conversation.ask_user': 'ask_user',

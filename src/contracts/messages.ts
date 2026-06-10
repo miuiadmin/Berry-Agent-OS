@@ -198,6 +198,8 @@ export type EventMap = {
   'stream.tool_result': { taskId: string; sessionId: string; toolName: string; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
   'stream.uncertainty': { taskId: string; sessionId: string; reason: string; correlationId?: string };
   'dialogue.status': { dialogueId: string; sessionId: string; status: 'started' | 'round_complete' | 'ended'; from: string; to: string; round: number };
+  /** 13.0 灵魂版：Agent 间对话每条消息推送至前端对话面板 */
+  'agent.dialogue': { dialogueId: string; sessionId?: string; taskId?: string; from: string; to: string; content: string; round: number; phase: 'send' | 'reply' | 'end'; timestamp: number };
 
   // delegation-orchestrator 内部 emit 的事件（多端共享流式会话状态）
   'conversation.handoff': { sessionId: string; from: string; to: string; intent?: string; correlationId?: string };
