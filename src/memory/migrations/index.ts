@@ -572,6 +572,44 @@ const v13PendingAsks: Migration = {
   },
 };
 
+/**
+ * v14: 13.0 灵魂版 Brain 观察队列表。
+ * 持久化所有 Agent 间通信、工具调用、用户交互供 Brain OBSERVE 阶段使用。
+ * 全新安装时 CORE_SCHEMA_SQL 已包含此表，此迁移确保已有数据库也能创建。
+ * 设计：2D 隔离 (session_id, task_id)、优先级 (0=critical 1=normal 2=verbose)、滚动窗口 500 条
+ */
+const v14BrainObservations: Migration = {
+  version: 14,
+  name: 'brain-observations',
+  up: (db: Database.Database) => {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='brain_observations'`).get();
+    if (!tables) {
+      db.exec(`
+        CREATE TABLE brain_observations (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          seq INTEGER NOT NULL,
+          observation_type TEXT NOT NULL CHECK(observation_type IN (
+            'dialogue_send', 'dialogue_reply', 'tool_call', 'tool_result',
+            'agent_event', 'drift_signal', 'user_interaction', 'permission_judgment'
+          )),
+          from_agent TEXT NOT NULL,
+          to_agent TEXT,
+          content TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 1,
+          metadata_json TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          UNIQUE(session_id, task_id, seq)
+        );
+        CREATE INDEX idx_brain_obs_session ON brain_observations(session_id, created_at DESC);
+        CREATE INDEX idx_brain_obs_type ON brain_observations(observation_type, created_at DESC);
+        CREATE INDEX idx_brain_obs_priority ON brain_observations(priority, created_at DESC);
+      `);
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -587,4 +625,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v11ConversationReasoning,
   v12ConversationsFts,
   v13PendingAsks,
+  v14BrainObservations,
 ];

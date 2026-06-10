@@ -28,6 +28,7 @@ import type { SuperiorReviewRequest } from '../../../contracts/superior-review.j
 import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle.js';
 import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.js';
+import { ObservationRecorder, type RecordObservationInput, type ObservationType } from '../../../kernel/observation-recorder.js';
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 
 const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
@@ -94,6 +95,45 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   // Initialize prompt versioning for self-modification support
   const promptVersioning = new PromptVersioning(db);
   const decisionRecorder = new BrainDecisionRecorder(db);
+  // 13.0 灵魂版：Brain 观察队列（OBSERVE 阶段零 LLM 持久化所有 Agent 间通信）
+  const observationRecorder = new ObservationRecorder(db);
+
+  /** brain.observe IPC handler 载荷（Kernel 转发来的观察事件） */
+  interface BrainObservePayload {
+    sessionId: string;
+    taskId: string;
+    observationType: ObservationType;
+    fromAgent: string;
+    toAgent?: string;
+    content: string;
+    priority?: 0 | 1 | 2;
+    metadata?: Record<string, unknown>;
+  }
+
+  /**
+   * 13.0 灵魂版 brain.observe handler：零 LLM 持久化观察。
+   * Brain 三段式工作模型（OBSERVE / INTERVENE / REVIEW）的 OBSERVE 阶段入口。
+   * 现有 IPC 推送（dialogue.observe）继续生效，此 handler 是新增的持久化路径。
+   */
+  ipc.onMessage('brain.observe', (msg: IpcMessage) => {
+    const payload = msg.payload as BrainObservePayload;
+    try {
+      const recordInput: RecordObservationInput = {
+        sessionId: payload.sessionId,
+        taskId: payload.taskId,
+        observationType: payload.observationType,
+        fromAgent: payload.fromAgent,
+        toAgent: payload.toAgent,
+        content: payload.content.slice(0, 2000),
+        priority: payload.priority ?? 1,
+        metadata: payload.metadata,
+      };
+      observationRecorder.record(recordInput);
+    } catch (err) {
+      // 观察记录失败不应阻塞其他业务
+      logger.warn({ err, sessionId: payload.sessionId, taskId: payload.taskId }, 'brain.observe:record failed');
+    }
+  });
 
   function recallDecisionsBlock(decisionType: string): string {
     const decisions = decisionRecorder.recallForDecision(decisionType, 5);

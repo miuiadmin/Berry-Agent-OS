@@ -1,4 +1,4 @@
-export type RuntimeProvider = 'builtin' | 'claude_code' | 'opencode' | 'hermes' | 'custom';
+export type RuntimeProvider = 'builtin' | 'claude_code' | 'opencode' | 'custom';
 
 export type AgentEventKind =
   | 'text_delta'

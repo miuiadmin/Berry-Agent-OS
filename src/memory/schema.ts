@@ -944,6 +944,30 @@ export const CORE_INDEX_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_drift_session ON drift_signals(session_id);
   CREATE INDEX IF NOT EXISTS idx_drift_time ON drift_signals(created_at);
+
+  -- 13.0 灵魂版：Brain 观察队列（持久化所有 Agent 间通信 + 工具调用 + 用户交互）
+  -- Brain 三段式工作模型：OBSERVE 阶段零 LLM 写入此表，INTERVENE/REVIEW 按需读取
+  -- 设计：2D 隔离 (session_id, task_id)、优先级 (0=critical 1=normal 2=verbose)、滚动窗口 500 条
+  CREATE TABLE IF NOT EXISTS brain_observations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    observation_type TEXT NOT NULL CHECK(observation_type IN (
+      'dialogue_send', 'dialogue_reply', 'tool_call', 'tool_result',
+      'agent_event', 'drift_signal', 'user_interaction', 'permission_judgment'
+    )),
+    from_agent TEXT NOT NULL,
+    to_agent TEXT,
+    content TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    UNIQUE(session_id, task_id, seq)
+  );
+  CREATE INDEX IF NOT EXISTS idx_brain_obs_session ON brain_observations(session_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_brain_obs_type ON brain_observations(observation_type, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_brain_obs_priority ON brain_observations(priority, created_at DESC);
 `;
 
 export const KNOWLEDGE_FTS_SQL = `

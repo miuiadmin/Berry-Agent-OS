@@ -57,6 +57,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateBrainDecisionsExpandTypes(conn);
     migrateReviewRequestsExpandVerdicts(conn);
     addConversationsClientMsgIdColumn(conn);
+    migrateCreateBrainObservationsTable(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -893,6 +894,43 @@ function migrateCreateBrainDecisionsTable(conn: Database.Database): void {
       ON brain_decisions(outcome) WHERE outcome IS NOT NULL;
     CREATE INDEX idx_brain_decisions_created
       ON brain_decisions(created_at);
+  `);
+}
+
+/**
+ * 13.0 灵魂版：Brain 观察队列表。
+ * - 持久化所有 Agent 间通信 + 工具调用 + 用户交互
+ * - Brain 重启可从 SQLite 恢复完整上下文
+ * - 按 (session_id, task_id) 二维隔离，按 seq 单调递增
+ * - 滚动窗口 500 条，超出后按 (priority DESC, timestamp ASC) 裁剪
+ */
+function migrateCreateBrainObservationsTable(conn: Database.Database): void {
+  if (tableExists(conn, 'brain_observations')) return;
+  conn.exec(`
+    CREATE TABLE brain_observations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      observation_type TEXT NOT NULL CHECK(observation_type IN (
+        'dialogue_send', 'dialogue_reply', 'tool_call', 'tool_result',
+        'agent_event', 'drift_signal', 'user_interaction', 'permission_judgment'
+      )),
+      from_agent TEXT NOT NULL,
+      to_agent TEXT,
+      content TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 1,
+      metadata_json TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      UNIQUE(session_id, task_id, seq)
+    );
+
+    CREATE INDEX idx_brain_obs_session
+      ON brain_observations(session_id, created_at DESC);
+    CREATE INDEX idx_brain_obs_type
+      ON brain_observations(observation_type, created_at DESC);
+    CREATE INDEX idx_brain_obs_priority
+      ON brain_observations(priority, created_at DESC);
   `);
 }
 

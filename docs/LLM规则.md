@@ -7,7 +7,7 @@ Agent 代码（agents/skills/plugins）
         ↓ 只能调用
 src/llm/ 统一 API（ModelRequest → ModelResponse）
         ↓ 内部实现
-Backend Adapter（Anthropic / TestBackend / IpcTakeover）
+Backend Adapter（claude-adapter / opencode-adapter）+ Provider Catalogs（anthropic/openai/openai-compat/gemini）
         ↓
 外部 API
 ```

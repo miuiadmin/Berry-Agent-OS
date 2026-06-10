@@ -21,6 +21,7 @@ import type {
 import { DIALOGUE_DEFAULTS } from '../contracts/dialogue.js';
 import type { SessionManager } from './session-manager.js';
 import type { IpcChannel } from './ipc.js';
+import type { ObservationRecorder } from './observation-recorder.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 
@@ -33,6 +34,8 @@ export interface DialogueRouterDeps {
   getAgentIpc: (agentName: string) => IpcChannel | undefined;
   /** 获取 Brain agent 的 IPC 通道 */
   getBrainIpc: () => IpcChannel | undefined;
+  /** 13.0 观察队列记录器（可选；提供时 dialogue.send/reply 会持久化到 brain_observations） */
+  observationRecorder?: ObservationRecorder;
 }
 
 export class DialogueRouter {
@@ -300,6 +303,25 @@ export class DialogueRouter {
   }
 
   private notifyBrain(msg: DialogueMessagePayload, state: DialogueState): void {
+    // 13.0: 先持久化到观察队列（fire-and-forget，不阻塞消息投递）
+    if (this.deps.observationRecorder) {
+      try {
+        this.deps.observationRecorder.record({
+          sessionId: state.sessionId,
+          taskId: state.correlationId,
+          observationType: state.currentRound === 0 ? 'dialogue_send' : 'dialogue_reply',
+          fromAgent: msg.from,
+          toAgent: msg.to,
+          content: msg.content.slice(0, 2000), // 截断以控制存储
+          priority: msg.metadata?.confidence !== undefined && msg.metadata.confidence < 0.5 ? 2 : 1,
+          metadata: { round: state.currentRound, dialogueId: msg.dialogueId, sequenceNumber: msg.sequenceNumber },
+        });
+      } catch (err) {
+        logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:observation record failed');
+      }
+    }
+
+    // 保留现有的 IPC 推送（Brain 实时监听，仍是主路径）
     const brainIpc = this.deps.getBrainIpc();
     if (!brainIpc) return;
     // 12.0: 从 pending 中获取 intentAnchor 供 Brain 做语义漂移检测

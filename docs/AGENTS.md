@@ -103,31 +103,41 @@ berry service start        # 后端同时提供 API + 前端静态文件
 
 ```
 src/
-├── contracts/       # 跨模块公共契约、schema、事件名、错误码
-├── kernel/          # Berry Service、AppCore、Agent Manager、IPC、事件总线、配置、循环检测
-├── agents/          # brain/conversation/learning/skills/plugin-builder/code 子进程入口
+├── agents/          # Agent 子进程入口（bundled/ 下 9 个 Agent）
 ├── llm/             # LLM API（统一模型契约、backend adapter、Claude Agent SDK runner、测试接管）
-├── memory/          # SQLite 记忆系统（better-sqlite3 + FTS5）
+│   └── backends/    # claude-adapter、opencode-adapter、registry
+├── providers/       # LLM 提供商目录（catalogs: anthropic/openai/openai-compat/gemini）
+├── memory/          # SQLite 记忆系统（better-sqlite3 + FTS5 + 向量存储）
 │   └── evolution.ts # 记忆提取（代码模块，非 Agent）
-├── skills/          # 技能系统（SKILL.md 格式）
-├── plugins/         # 独立插件系统（manifest + entry.ts + typed SDK）
-├── tools/           # LLM 可调用的工具
-├── cli/             # REPL 界面 + 斜杠命令
-├── observability/   # 日志、控制台 I/O、run artifact、运行时调级
-├── channels/        # Message Channel（CLI、未来 Telegram 等）
-├── safety/          # 权限 + 安全扫描
-└── utils/           # paths、id
+├── skills/          # 技能系统（SKILL.md 格式 + 发现/加载/执行/存储/激活）
+├── plugins/         # 独立插件系统（manifest + entry.ts + typed SDK + v2 runtime）
+├── tools/           # LLM 可调用的工具（filesystem, shell, code-tools, delegation 等）
+├── cli/             # REPL 界面 + 斜杠命令 + service/test/evolution 子命令
+├── web/             # HTTP API 服务器 + WebSocket 桥接 + 嵌入式 SPA 静态文件（:3888）
+├── observability/   # 日志、控制台 I/O、run artifact、运行时调级、trace、metrics
+├── channels/        # Message Channel（CLI socket、Telegram，统一 manager）
+├── safety/          # 权限管理 + 安全扫描（注入检测、审批、blocklist、token 签发）
+├── bus/             # 事件/能力总线（capability-bus、permission-gate、transaction）
+├── code/            # Code Agent 运行时（文件编辑、补丁计划、测试运行）
+├── evolution/       # 能力进化引擎（信号检测、提案生成、统一提取器）
+├── intelligence/    # 智能服务层（记忆、通知、插件范围、异步委托、模板、团队构建）
+├── config/          # 配置管理（schema、env 映射、resolver、watcher）
+├── mcp/             # Model Context Protocol 集成（manager、OAuth、安全、tool-bridge）
+├── scheduler/       # 任务调度器（准入控制、并发守卫、链式执行、定时提醒）
+├── testing/         # 测试基建（harness、hermetic 环境、model-takeover、parallel-harness）
+├── workspaces/      # 工作区管理（目录、信任、组织树、Watcher）
+└── utils/           # paths、id、logger、loop-detector
 ```
 
 ## 三级智能体架构
 
 - **Level 1 Brain Agent** — 必经同步审核，每轮回复发出前必须通过
-- **Level 2 Module Agents** — Learning/Skills/Plugin Builder/Code 按需 Agent；Safety/Permission 是规则模块
+- **Level 2 Module Agents** — Learning/Skills/Plugin Builder/Code/Evolution/Memory/Skill Tester 按需 Agent；Safety/Permission 是规则模块
 - **Level 3 Conversation Agent** — 直接与用户对话
 
-第一版就是多进程后台服务：`brain-agent` 和 `conversation-agent` 常驻，`learning-agent`、`skills-agent`、`plugin-builder-agent` 和 `code-agent` 按需拉起。
-`learning-agent` 负责发现应该学习/沉淀什么；`skills-agent` 负责创建和维护 `SKILL.md`；`plugin-builder-agent` 负责生成和修改独立插件包；`code-agent` 负责普通代码库的阅读、修改、测试、重构和补丁说明。
-当前设计目标中 Level 2 智能体共 4 个，Level 3 智能体共 1 个。
+当前 `src/agents/bundled/` 下共 9 个 Agent：`brain` 和 `conversation` 常驻；`learning`、`skills`、`plugin-builder`、`code`、`evolution`、`memory`、`skill-tester` 按需拉起。
+`learning-agent` 负责发现应该学习/沉淀什么；`skills-agent` 负责创建和维护 `SKILL.md`；`plugin-builder-agent` 负责生成和修改独立插件包；`code-agent` 负责普通代码库的阅读、修改、测试、重构和补丁说明；`evolution-agent` 负责能力进化提案与执行；`memory-agent` 负责深度记忆检索与整理；`skill-tester-agent` 负责验证技能质量。
+当前设计目标中 Level 2 智能体共 7 个（learning, skills, plugin-builder, code, evolution, memory, skill-tester），Level 3 智能体共 1 个。
 Berry Service 是对外启动的后台常驻服务；AppCore 是服务内的核心运行时，不是 Agent，负责组合 Agent Manager、IPC 路由、权限 token 和审计落库。
 Agent Manager 是 AppCore 内部模块，专门负责 Agent 生命周期：启动、停止、重启、心跳、工作目录和状态查询。
 记忆提取暂时是代码模块（`src/memory/evolution.ts`），未来可升级为 Memory Agent。
@@ -150,7 +160,7 @@ Safety/Permission 暂时是规则模块，不调用 LLM。Conversation Agent 执
 ## LLM API 与 SDK 分层
 
 - 所有普通模型调用只能走 `src/llm/` 的 BerryAgent 自有契约：`ModelRequest` / `ModelEvent` / `ModelResponse`。
-- 默认 live backend 是 Anthropic 兼容接口；未来 AI SDK backend 只能作为内部 adapter，用来支持 OpenAI / Anthropic / OpenAI-compatible。
+- 默认 live backend 是 Anthropic 兼容接口（通过 `src/llm/backends/claude-adapter` 实现）；`src/providers/` 提供多提供商目录（anthropic/openai/openai-compat/gemini catalogs），backend adapter 通过 provider registry 动态选择。
 - `code-agent` 的编码执行必须通过 `CodeAgentRunner -> Claude Agent SDK runner`，不能改成普通聊天模型循环。
 - Claude Agent SDK、Anthropic SDK、AI SDK、OpenAI SDK 都不能被 `agents/`、`skills/`、`plugins/` 直接 import。
 - SDK 或 backend 产生的 tool call 必须先归一化为 BerryAgent `tool_call` / `approval_request`，再经 AppCore permission token 执行。
