@@ -155,6 +155,14 @@ export type EventMap = {
   'cron.fired': { taskId: string; description: string };
   'cron.completed': { taskId: string; output: string };
   'cron.failed': { taskId: string; error: string; attempt: number };
+  /** 13.0 §13.9: Cron 任务结果通过 cron.review 事件携带 description 作为 Brain 审核基准 */
+  'cron.review': {
+    taskId: string;
+    description: string;
+    output: string;
+    /** 触发 review 的时间戳（Brain 可用此判断延迟） */
+    createdAt: number;
+  };
   'mcp.connected': { serverName: string; toolCount: number; capabilities: string[] };
   'mcp.disconnected': { serverName: string; reason?: string };
   'mcp.failed': { serverName: string; error: string; circuitBroken?: boolean };

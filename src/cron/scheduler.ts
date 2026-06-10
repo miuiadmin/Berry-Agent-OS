@@ -94,6 +94,14 @@ export class CronScheduler implements ICronScheduler {
         entry.attempt = attempt;
         const output = await this.runJobOnce(task, abort.signal);
         this.eventBus.emit('cron.completed', { taskId: task.id, output });
+        // 13.0 §13.9: 任务完成后发 cron.review（带 description 作为审核基准）
+        // Brain / 其他 review 服务可订阅此事件对 cron 输出做独立审核
+        this.eventBus.emit('cron.review', {
+          taskId: task.id,
+          description: task.description ?? '',
+          output,
+          createdAt: Date.now(),
+        });
         metrics.counter('cron_executions_total').inc({ status: 'completed' });
         metrics.histogram('cron_duration_ms').observe(Date.now() - entry.startedAt, { task_id: task.id });
         await this.deliver(task, output);

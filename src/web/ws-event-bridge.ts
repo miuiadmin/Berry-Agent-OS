@@ -66,6 +66,8 @@ const BRIDGED_EVENTS: EventName[] = [
   'mission.handoff',
   // 13.0 自进化触发（Brain 在 plan 中发现需要新技能时）
   'capability.evolution.request',
+  // 13.0 §13.9: cron 任务完成后的 review 触发（Brain 订阅后可独立审核 cron 输出）
+  'cron.review',
   // 13.0 §5.1.3: Brain 纠偏事件（全局广播，前端 UI 可显示纠偏时间线）
   'brain.correction',
   // 13.0 §11.5: 跨 squad 交接（结构化 handoff 通知）
