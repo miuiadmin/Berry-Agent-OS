@@ -184,6 +184,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
 
     // 13.0 灵魂版：C 级审核注入观察队列上下文，提供完整 Agent 行为时间线
     // 设计依据：§20.7 后置审核增强 — C 级使用完整 observation queue
+    // M1 保真度：若观察队列被截断（窗口裁剪），追加警告降低审核置信度
     if (turn.level === 'C' && turn.sessionId) {
       const observations = observationRecorder.queryByType(
         turn.sessionId,
@@ -195,6 +196,12 @@ startResidentAgent(({ name, ipc, llm, db }) => {
           .map(o => `[${o.observationType}] ${o.fromAgent}${o.toAgent ? '→' + o.toAgent : ''}: ${safeSlice(o.content, 200)}`)
           .join('\n');
         systemPrompt += `\n\n## 近期 Agent 行为观察（供 C 级审核参考）\n${observationContext}`;
+
+        // M1 截断降级：若第一条观察记录的 taskId 存在，检查截断状态
+        const sampleTaskId = observations[0]?.taskId;
+        if (sampleTaskId && observationRecorder.isTruncated(turn.sessionId, sampleTaskId)) {
+          systemPrompt += `\n\n⚠️ **观察队列被截断**（部分历史记录因窗口限制被裁剪）。你看到的行为记录可能不完整，审核结论请保守判定，对不确定的问题标注 "低置信度"。`;
+        }
       }
     }
 
