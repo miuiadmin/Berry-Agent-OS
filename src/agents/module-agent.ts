@@ -17,7 +17,10 @@ import type { AgentName } from '../contracts/agents.js';
 import type { TurnCorrectionPayload } from '../contracts/delegation.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
+import { getLogger } from '../utils/logger.js';
 import type { LlmClient } from '../llm/index.js';
+
+const logger = getLogger('module-agent');
 
 export interface AskUserOptions {
   options?: string[];
@@ -71,10 +74,12 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
 
   const processedTasks = new Set<string>();
 
-  ipc.onMessage('agent.task', async (msg: IpcMessage) => {
-    const payload = msg.payload as AgentTaskPayload;
-    if (processedTasks.has(payload.taskId)) return;
-    processedTasks.add(payload.taskId);
+  // 13.0 VF-1: 串行化任务队列 — 防止并发 agent.task 耗尽资源或竞争共享状态
+  // 设计：每个任务追加到 taskQueue 末尾，前一个完成后才执行（Promise chain）
+  let taskQueue: Promise<void> = Promise.resolve();
+
+  /** 实际执行一个 agent.task，错误时上报后 swallow（让队列继续） */
+  async function runAgentTask(payload: AgentTaskPayload, msg: IpcMessage): Promise<void> {
     ipc.send('task.acknowledge', 'core', { taskId: payload.taskId } satisfies TaskAcknowledgePayload);
     ipc.send('task.started', 'core', { taskId: payload.taskId } satisfies TaskStartedPayload);
 
@@ -127,6 +132,18 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         error: (err as Error).message,
       } satisfies AgentTaskResultPayload, msg.correlationId ?? msg.id);
     }
+  }
+
+  ipc.onMessage('agent.task', (msg: IpcMessage) => {
+    const payload = msg.payload as AgentTaskPayload;
+    if (processedTasks.has(payload.taskId)) return;
+    processedTasks.add(payload.taskId);
+
+    // 串行化执行：新任务追加到队列末尾，等待前一个完成后才开始
+    taskQueue = taskQueue.then(() => runAgentTask(payload, msg)).catch((err: Error) => {
+      // 错误已在 runAgentTask 内部捕获并上报 agent.task.result，这里只 log 防止队列断裂
+      logger.warn({ err, taskId: payload.taskId, agentName: name }, 'module-agent: queued task failed');
+    });
   });
 
   // ─── dialogue.send handler：接收来自 Conversation Agent 的对话消息 ───

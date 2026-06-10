@@ -23,6 +23,7 @@ import { DialogueRouter } from './dialogue-router.js';
 import { FallbackRouter } from './fallback-router.js';
 import { CorrectionFlow } from './flows/correction-flow.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
+import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import {
@@ -485,6 +486,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       }
 
       brain.ipc.send('route.request', orchestratorName, enrichedPayload, correlationId);
+
+      // 13.0 VF-2: route.request 超时回退 — Brain LLM 30s 无响应则降级到 FallbackRouter
+      // 防止 LLM 全局故障时用户消息无限期挂起
+      setTimeout(() => {
+        const pending = this.sessionManager.getPending(correlationId);
+        if (pending && !this.speculativeCorrelations.has(correlationId)) {
+          // pending 还在等 routing → 触发降级
+          metrics.counter('routing_llm_fallback_total').inc({ reason: 'timeout' });
+          logger.warn({ correlationId, timeoutMs: 30_000, sessionId: pending.sessionId }, 'routing: Brain LLM 30s 无响应，降级到 FallbackRouter');
+          this.handleRouteFallback(correlationId);
+        }
+      }, 30_000).unref();
     });
   }
 
@@ -711,8 +724,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (!pending) return;
 
     const message = userMessage ?? pending.userMessage;
+    // 13.0 VF-2: 记录 LLM 全局故障的回退路径，让监控和前端能感知
+    // 设计依据：设计文档 §23 漏洞 #2 — LLM global failure no fallback strategy
+    // 当前策略：fail-soft（用规则 fallback）但记录指标 + 事件，便于：
+    // 1. 运维发现 LLM 异常时及时干预
+    // 2. 前端可显示「Brain 暂时不可用」提示
+    metrics.counter('routing_llm_fallback_total').inc({ reason: 'brain_unavailable' });
+    logger.warn({ correlationId, intent: 'chat', sessionId: pending.sessionId }, 'routing: Brain LLM 不可用，降级到 FallbackRouter（规则路由）');
+
     const decision = this.fallbackRouter.route(message);
-    logger.info({ correlationId, intent: decision.intent }, '降级路由生效');
     this.handleRouteDecision(decision, correlationId);
   }
 
