@@ -36,6 +36,12 @@ export interface PendingRequest {
   resolve: (response: string, review?: { verdict: import('../contracts/review.js').ReviewVerdict; reason?: string; originalDraft?: string }) => void;
   /** 12.0: Brain 路由时产出的用户意图锚点（漂移检测基准） */
   intentAnchor?: import('../contracts/intent.js').IntentAnchor;
+  /** 13.0 §12.6: 关联的 mission ID（Brain 创建 mission 后注入，审核时传给 Brain） */
+  missionId?: string;
+  /** 13.0 §12.6: 关联的 plan 任务 ID（审核后由 Brain 自动 mark done/failed） */
+  planTaskId?: string;
+  /** 13.0 §12.6: 分配给 agent 的任务描述（审核时判断目标是否达成） */
+  taskDescription?: string;
 }
 
 export interface PendingAskState {

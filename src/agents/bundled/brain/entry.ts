@@ -105,6 +105,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   const observationRecorder = new ObservationRecorder(db);
   // 13.0 多智能体协作：Mission / Plan / Squad 生命周期管理
   // OBSERVE 阶段定期读取 plan 监控进度，零 LLM（规则化判断）
+  // 13.0 §12.6: Brain 用这个 MissionManager 实例在审核后自动 mark plan done/failed
   const missionManager = new MissionManager();
 
   /**
@@ -264,7 +265,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   // --- Handler 1: review.request (existing, enhanced with reRoute) ---
 
   ipc.onMessage('review.request', async (msg: IpcMessage) => {
-    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; level: 'A' | 'B' | 'C' } };
+    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string } };
     const trackingId = msg.correlationId ?? msg.id;
 
     const reviewContent = buildReviewInput(turn.level, turn);
@@ -339,6 +340,35 @@ startResidentAgent(({ name, ipc, llm, db }) => {
 
       logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: safeSlice(reviewResult.reason, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
       ipc.send('review.result', 'core', reviewResult, trackingId);
+
+      // 13.0 §12.6: 审核完成后自动 mark plan task done/failed（不阻塞审核主流程）
+      // approve → done；modify → done（带修改后的结果）；reject → failed
+      if (turn.planTaskId && turn.missionId) {
+        try {
+          const isApprove = reviewResult.verdict === 'approve';
+          const isModify = reviewResult.verdict === 'modify';
+          const isReject = reviewResult.verdict === 'reject';
+          if (isApprove || isModify) {
+            const resultText = reviewResult.finalResponse ?? reviewResult.reason ?? '审核通过';
+            missionManager.updatePlan(turn.missionId, {
+              task_id: turn.planTaskId,
+              status: 'done',
+              result: resultText.slice(0, 2000),
+            });
+            logger.debug({ missionId: turn.missionId, planTaskId: turn.planTaskId, verdict: reviewResult.verdict }, 'brain:review auto-marked plan task done');
+          } else if (isReject) {
+            missionManager.updatePlan(turn.missionId, {
+              task_id: turn.planTaskId,
+              status: 'failed',
+              result: (reviewResult.reason ?? '审核拒绝').slice(0, 2000),
+            });
+            logger.debug({ missionId: turn.missionId, planTaskId: turn.planTaskId, verdict: reviewResult.verdict }, 'brain:review auto-marked plan task failed');
+          }
+        } catch (planErr) {
+          // plan 更新失败不阻塞审核主流程 — 记录 warn 让运维追查
+          logger.warn({ err: planErr, missionId: turn.missionId, planTaskId: turn.planTaskId }, 'brain:review plan auto-update failed');
+        }
+      }
     } catch (err) {
       ipc.send('review.result', 'core', {
         verdict: 'approve',

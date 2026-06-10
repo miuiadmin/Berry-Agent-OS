@@ -698,6 +698,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             pending.sessionId, correlationId, decision.reason,
           );
         }
+        // 13.0 §12.6: 填充 missionId / planTaskId / taskDescription 到 pending（审核时传给 Brain）
+        if (decision.missionId) pending.missionId = decision.missionId;
+        if (decision.planTaskId) pending.planTaskId = decision.planTaskId;
+        if (decision.missionSpec?.tasks?.length && decision.planTaskId) {
+          // missionSpec.tasks 没有 id 字段，按 planTaskId 解析（如 t-1 → index 0）
+          const m = /^t-(\d+)$/.exec(decision.planTaskId);
+          if (m) {
+            const idx = parseInt(m[1], 10) - 1;
+            const taskSpec = decision.missionSpec.tasks[idx];
+            if (taskSpec) pending.taskDescription = taskSpec.what;
+          }
+        }
         if (decision.reason) {
           this.reportProgress(pending, 'routing', `brain → ${decision.targetAgent}: ${decision.reason}`);
         }
@@ -1465,6 +1477,39 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       correlationId,
     });
 
+    // ─── 13.0 §4.4.1: AgentRequestQueue 并发控制 ───
+    // 每个 module agent 同时只处理一个请求，其他排队等待。
+    // 队列深度上限 3，等待上限 30s，超出自动拒绝。
+    if (this.agentRequestQueue) {
+      try {
+        await this.agentRequestQueue.enqueue(route.targetAgent, {
+          fromAgent: input.requester,
+          requestId: correlationId,
+        });
+        // resolve: 轮到该请求处理，继续正常分发
+      } catch (err) {
+        // reject: 队列满或等待超时，记录并向上层返回错误
+        logger.warn({ targetAgent: route.targetAgent, err: (err as Error).message }, 'task.dispatch: agent 队列拒绝');
+        span.setAttributes({ error: (err as Error).message });
+        span.end();
+        // 创建一个 failed delegation 记录，让上层能看到失败原因
+        const taskId = this.delegationManager.create({
+          sessionId: input.sessionId,
+          correlationId,
+          targetAgent: route.targetAgent,
+          targetKind: 'internal',
+          userMessage: (input.inputPayload.message as string) ?? '',
+          taskType: input.taskType,
+          requester: input.requester,
+          inputPayload: { ...input.inputPayload, routeReason: route.reason },
+          foreground: input.foreground ?? false,
+        });
+        this.delegationManager.fail(taskId, (err as Error).message);
+        this.updatePlanTaskStatus(taskId, 'failed', (err as Error).message);
+        return { taskId, targetAgent: route.targetAgent };
+      }
+    }
+
     const taskId = this.delegationManager.create({
       sessionId: input.sessionId,
       correlationId,
@@ -1541,6 +1586,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           toolCalls: calls,
           level: 'A',
         }),
+        // 13.0 §12.6: 透传 mission 上下文（审核后 Brain 会自动 mark plan done）
+        missionId: pending.missionId,
+        planTaskId: pending.planTaskId,
+        taskDescription: pending.taskDescription,
       };
 
       pending.level = turn.level;
@@ -2022,6 +2071,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     fgEntry: { correlationId: string; sessionId: string },
     agentName: string,
   ): void {
+    // ─── 13.0 §4.4.1: 释放 AgentRequestQueue 槽位 ───
+    // 任务完成后释放该 agent 的并发槽位，让队列中的下一个请求开始处理
+    if (this.agentRequestQueue) {
+      this.agentRequestQueue.complete(agentName);
+    }
+
     // 调试日志：定位对话中断原因
     logger.info({
       taskId: result.taskId,

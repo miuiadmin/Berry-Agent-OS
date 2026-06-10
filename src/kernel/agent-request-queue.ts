@@ -29,6 +29,17 @@ export interface QueuedRequest {
   timerId?: ReturnType<typeof setTimeout>;
 }
 
+/**
+ * 入队请求的业务参数（调用者传入）。
+ * resolve/reject 由 enqueue() 内部管理，调用者只需传业务字段。
+ */
+export interface EnqueueRequest {
+  /** 请求发起方 agent */
+  fromAgent: string;
+  /** 请求的唯一标识 */
+  requestId: string;
+}
+
 /** 队列配置 */
 export interface AgentQueueConfig {
   /** 每个 agent 的最大排队深度（默认 3） */
@@ -67,11 +78,13 @@ export class AgentRequestQueue {
   /**
    * 将请求加入目标 agent 的队列。
    *
+   * @param targetAgent - 目标 agent 名称
+   * @param request - 请求业务参数（fromAgent + requestId）
    * @returns Promise<void> — resolve 表示轮到该请求处理，reject 表示被拒绝
    * @throws agent_busy — 队列已满
    * @throws agent_timeout — 等待超时
    */
-  enqueue(targetAgent: string, request: Omit<QueuedRequest, 'enqueuedAt' | 'timerId'>): Promise<void> {
+  enqueue(targetAgent: string, request: EnqueueRequest): Promise<void> {
     return new Promise((resolve, reject) => {
       const queue = this.queues.get(targetAgent) || [];
 
