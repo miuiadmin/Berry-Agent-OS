@@ -304,6 +304,19 @@ export function registerMissionRoutes(
       });
     }
 
+    // 13.0 §5.3.12 + §13.20: 触发 Evolution Engine — 从 restore 推导用户偏好
+    // 关键学习信号：用户拒绝 Brain 修改 → Brain 后续类似场景更保守
+    if (bus) {
+      bus.emit('capability.evolution.request', {
+        source: 'brain.restore_original',
+        sessionId,
+        taskId,
+        originalResponseSnippet: originalResponse.slice(0, 500),
+        createdAt: Date.now(),
+      } as any);
+      logger.info({ sessionId, taskId }, 'restore-original: evolution triggered');
+    }
+
     json(res, { ok: true, restored: originalResponse });
   });
 
@@ -364,6 +377,22 @@ export function registerMissionRoutes(
         modifiedResponse,
         userComment,
       });
+
+      // 13.0 §5.3.4 + §13.20: 触发 Evolution Engine 提取用户偏好
+      // 让 Evolution 从 user feedback 自动推导「Brain 后续类似场景应该 X」
+      if (feedbackType === 'brain_modify_wrong' || feedbackType === 'brain_review_wrong') {
+        bus.emit('capability.evolution.request', {
+          source: 'brain.feedback',
+          feedbackType,
+          sessionId,
+          taskId,
+          userComment,
+          originalResponseSnippet: (originalResponse ?? '').slice(0, 500),
+          modifiedResponseSnippet: (modifiedResponse ?? '').slice(0, 500),
+          createdAt: Date.now(),
+        } as any);
+        logger.info({ sessionId, taskId, feedbackType }, 'brain.feedback: evolution triggered');
+      }
     }
 
     json(res, { ok: true, recorded: true });
