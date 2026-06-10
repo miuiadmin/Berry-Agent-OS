@@ -461,4 +461,68 @@ export function registerMissionRoutes(
 
     json(res, { ok: true });
   });
+
+  // ─── 13.0 §5.3.7: User preferences CRUD（跨 session 持久化） ───
+  // GET    /api/preferences?userId=&keyPrefix=  — 列出偏好
+  // POST   /api/preferences                       — 设置/更新偏好
+  // DELETE /api/preferences/:key?userId=         — 删除单个偏好
+
+  route('GET', '/preferences', async (_req, res, url) => {
+    try {
+      const { getUserPreferences } = await import('../memory/user-preferences.js');
+      const userId = url?.searchParams.get('userId') ?? 'default';
+      const keyPrefix = url?.searchParams.get('keyPrefix') ?? undefined;
+      const prefs = getUserPreferences().list(userId, keyPrefix);
+      json(res, { ok: true, preferences: prefs });
+    } catch (err) {
+      logger.warn({ err }, 'preferences: list failed');
+      json(res, { ok: false, reason: (err as Error).message }, 500);
+    }
+  });
+
+  route('POST', '/preferences', async (req, res) => {
+    try {
+      const body = await readBody(req) as Record<string, unknown>;
+      const { getUserPreferences } = await import('../memory/user-preferences.js');
+      const prefKey = body.prefKey as string;
+      const prefValue = body.prefValue as string;
+      if (!prefKey || prefValue === undefined) {
+        json(res, { ok: false, reason: 'Missing prefKey or prefValue' }, 400);
+        return;
+      }
+      const result = getUserPreferences().set({
+        userId: body.userId as string | undefined,
+        prefKey,
+        prefValue,
+        source: (body.source as 'evolution_engine' | 'brain_decision' | 'user_explicit' | 'restore_original' | undefined) ?? 'brain_decision',
+        confidence: body.confidence as number | undefined,
+        expiresAt: body.expiresAt as number | null | undefined,
+      });
+      if (!result) {
+        json(res, { ok: false, reason: 'set failed' }, 500);
+        return;
+      }
+      json(res, { ok: true, id: result.id });
+    } catch (err) {
+      logger.warn({ err }, 'preferences: set failed');
+      json(res, { ok: false, reason: (err as Error).message }, 500);
+    }
+  });
+
+  route('DELETE', '/preferences/:key', async (_req, res, _url, params) => {
+    try {
+      const { getUserPreferences } = await import('../memory/user-preferences.js');
+      const userId = new URL(_req.url ?? '', 'http://x').searchParams.get('userId') ?? 'default';
+      const key = params?.key;
+      if (!key) {
+        json(res, { ok: false, reason: 'Missing key' }, 400);
+        return;
+      }
+      const ok = getUserPreferences().delete(userId, key);
+      json(res, { ok });
+    } catch (err) {
+      logger.warn({ err }, 'preferences: delete failed');
+      json(res, { ok: false, reason: (err as Error).message }, 500);
+    }
+  });
 }

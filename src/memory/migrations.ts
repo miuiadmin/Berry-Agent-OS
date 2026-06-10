@@ -61,6 +61,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateAgentAuditTables(conn);
     migrateCreateBrainCorrectionsTable(conn);
     migrateBrainDecisionsAddTaskId(conn);
+    migrateCreateUserPreferencesTable(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -1035,6 +1036,43 @@ function migrateCreateBrainCorrectionsTable(conn: Database.Database): void {
       ON brain_corrections(severity, created_at DESC);
     CREATE INDEX idx_brain_corrections_session
       ON brain_corrections(session_id, created_at DESC);
+  `);
+}
+
+/**
+ * 13.0 §5.3.7 + §8.8: user_preferences 表 — 跨 session 持久化的用户偏好。
+ *
+ * 触发来源：
+ * - BrainDecisionRecorder 的 behavior_note 升级（severity=high → 永久化）
+ * - Evolution Engine 从 user.feedback / restore-original / brain_modify_wrong 中提取偏好
+ * - 用户手动编辑（未来 UI）
+ *
+ * 字段：
+ * - key: 偏好 key（点号分隔，如 'response.style.concise'）
+ * - value: JSON 值
+ * - source: 'evolution_engine' | 'brain_decision' | 'user_explicit'
+ * - confidence: 0-1（evolution 推导的可信度）
+ * - expires_at: 90 天后自动清理（高频更新型偏好；常驻型设 NULL）
+ */
+function migrateCreateUserPreferencesTable(conn: Database.Database): void {
+  if (tableExists(conn, 'user_preferences')) return;
+  conn.exec(`
+    CREATE TABLE user_preferences (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT 'default',
+      pref_key TEXT NOT NULL,
+      pref_value TEXT NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('evolution_engine', 'brain_decision', 'user_explicit', 'restore_original')),
+      confidence REAL DEFAULT 1.0,
+      expires_at INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      UNIQUE(user_id, pref_key)
+    );
+    CREATE INDEX idx_user_preferences_user_key
+      ON user_preferences(user_id, pref_key);
+    CREATE INDEX idx_user_preferences_expires
+      ON user_preferences(expires_at) WHERE expires_at IS NOT NULL;
   `);
 }
 

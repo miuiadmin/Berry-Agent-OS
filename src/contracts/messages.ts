@@ -99,6 +99,23 @@ export interface IpcMessageMap {
   'ipc:checkpoint.evaluate': { request: TurnCheckpointPayload; response: void };
   'ipc:checkpoint.evaluate.result': { request: { delegationId: string; action: string; instruction?: string; constraints?: unknown }; response: void };
   'ipc:turn.correction': { request: TurnCorrectionPayload; response: void };
+  /** 13.0 §5.3.7: Agent 或 Evolution Engine 写用户偏好（跨 session 持久化） */
+  'ipc:user.remember_preference': {
+    request: {
+      userId?: string;
+      prefKey: string;
+      prefValue: string;
+      source?: 'evolution_engine' | 'brain_decision' | 'user_explicit' | 'restore_original';
+      confidence?: number;
+      expiresAt?: number | null;
+    };
+    response: { ok: boolean; id?: string; reason?: string };
+  };
+  /** 13.0 §5.3.7: 读用户偏好 */
+  'ipc:user.get_preferences': {
+    request: { userId?: string; keyPrefix?: string };
+    response: { ok: boolean; preferences?: Array<{ key: string; value: string; source: string; confidence: number }>; reason?: string };
+  };
 }
 
 // === Event Messages (broadcast, pub/sub) — single source of truth for event types ===
