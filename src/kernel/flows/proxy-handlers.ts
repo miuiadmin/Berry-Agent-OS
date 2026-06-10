@@ -11,6 +11,7 @@ import type { ICapabilityBus, InvokeContext } from '../../bus/contract.js';
 import { getEventBus } from '../event-bus.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
+import type { ObservationRecorder } from '../observation-recorder.js';
 
 const logger = getLogger('proxy-handlers');
 
@@ -19,12 +20,51 @@ interface AgentIpc {
   send: (type: IpcMessageType, to: string, payload: unknown, correlationId?: string) => boolean;
 }
 
-export type ProxyHandlersDeps = Pick<ServiceContainer, 'auditRecorder' | 'sessionManager' | 'capabilityService' | 'takeoverController' | 'memoryRuntime'>;
+/** proxy-handlers 的依赖集合；observationRecorder 可选，提供时 tool.audit 会同时写入观察队列 */
+export type ProxyHandlersDeps = Pick<ServiceContainer, 'auditRecorder' | 'sessionManager' | 'capabilityService' | 'takeoverController' | 'memoryRuntime'> & {
+  /** 13.0 灵魂版：观察队列记录器（可选；提供时 tool_call/tool_result 会持久化到 brain_observations） */
+  observationRecorder?: ObservationRecorder;
+};
 
+/**
+ * 注册 tool.audit IPC handler。
+ *
+ * 每次工具调用完成后 agent 发送 tool.audit，这里做两件事：
+ * 1. 写入审计表（auditRecorder.recordToolCall）— 永久记录
+ * 2. 写入观察队列（observationRecorder.record）— Brain C 级审核上下文（13.0 灵魂版）
+ */
 export function setupAuditHandler(agentIpc: AgentIpc, agentName: string, deps: ProxyHandlersDeps): void {
   agentIpc.onMessage('tool.audit', (msg: IpcMessage) => {
     const audit = msg.payload as ToolAuditPayload;
+    // ① 写入审计表（永久记录）
     deps.auditRecorder.recordToolCall({ ...audit, agentName });
+    // ② 13.0 灵魂版：写入观察队列，供 Brain C 级审核读取完整工具调用上下文
+    if (deps.observationRecorder && audit.sessionId) {
+      // 13.0 灵魂版：taskId 可能缺失（非 task 上下文中的工具调用），用 sessionId 兜底
+      const obsTaskId = audit.taskId ?? `inline_${audit.sessionId}`;
+      try {
+        // 工具调用记录（tool_call）
+        deps.observationRecorder.record({
+          sessionId: audit.sessionId,
+          taskId: obsTaskId,
+          observationType: 'tool_call',
+          fromAgent: agentName,
+          content: JSON.stringify({ toolName: audit.toolName, input: typeof audit.toolInput === 'string' ? audit.toolInput.slice(0, 500) : JSON.stringify(audit.toolInput).slice(0, 500) }),
+          priority: 1,
+        });
+        // 工具结果记录（tool_result）
+        deps.observationRecorder.record({
+          sessionId: audit.sessionId,
+          taskId: obsTaskId,
+          observationType: 'tool_result',
+          fromAgent: agentName,
+          content: JSON.stringify({ toolName: audit.toolName, success: !audit.isError, result: typeof audit.toolResult === 'string' ? audit.toolResult.slice(0, 500) : JSON.stringify(audit.toolResult).slice(0, 500), durationMs: audit.durationMs }),
+          priority: audit.isError ? 0 : 1, // 错误结果优先级 critical（永不丢弃）
+        });
+      } catch (err) {
+        logger.debug({ err, toolName: audit.toolName }, '观察队列 tool_call/tool_result 写入失败（不影响主流程）');
+      }
+    }
     getEventBus().emit('tool.executed', {
       agentName,
       toolName: audit.toolName,

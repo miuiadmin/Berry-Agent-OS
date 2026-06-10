@@ -26,6 +26,7 @@ import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { StreamingFlusher } from './streaming-flusher.js';
+import { ObservationRecorder } from './observation-recorder.js';
 import {
   setupTaskProgressHandler,
   setupTaskAcknowledgeHandlers,
@@ -134,6 +135,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private permissionFlow: PermissionFlow;
   /** 流式内容定时刷写器（将 text_delta 累积内容持久化到 SQLite 供断连恢复） */
   private streamingFlusher: StreamingFlusher;
+  /** 13.0 灵魂版：观察队列记录器（工具调用、对话、用户交互等事件的持久化） */
+  private observationRecorder: ObservationRecorder;
 
   constructor(deps: {
     agentManager: AgentManager;
@@ -176,6 +179,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       brainDecisionRecorder: this.brainDecisionRecorder,
     });
     this.streamingFlusher = new StreamingFlusher(deps.taskManager);
+    // 13.0 灵魂版：观察队列记录器，用同一个 db 实例确保跨模块共享
+    this.observationRecorder = new ObservationRecorder(getDb());
   }
 
   get delegation(): DelegationManager { return this.delegationManager; }
@@ -301,6 +306,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       capabilityService: this.capabilityService,
       takeoverController: this.takeoverController,
       memoryRuntime: this.memoryRuntime,
+      // 13.0 灵魂版：将观察队列记录器传给 proxy-handlers，使 tool.audit 同时写入观察队列
+      observationRecorder: this.observationRecorder,
     };
   }
 
@@ -363,6 +370,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         return agent?.ipc ?? undefined;
       },
       getBrainIpc: () => reviewer?.ipc ?? undefined,
+      // 13.0 灵魂版：将观察队列记录器注入 DialogueRouter，使 dialogue.send/reply 自动写入 brain_observations
+      observationRecorder: this.observationRecorder,
     });
     this.dialogueRouter.startSweep();
     // 13.0 灵魂版：委托 KernelRouter 设置 primary agent 的 dialogue 路由
