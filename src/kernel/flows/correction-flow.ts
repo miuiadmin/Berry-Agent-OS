@@ -126,6 +126,34 @@ export class CorrectionFlow {
   }
 
   private applyCorrection(delegationId: string, correction: TurnCorrectionPayload): void {
+    // 13.0 §5.1.3: 发出 brain.correction EventBus 事件（前端 WS 订阅后可实时显示纠偏原因）
+    // 这与 turn.correction IPC（agent 端消费）互补——前者给人看，后者给机器消费
+    try {
+      const entry = this.ctx.delegationManager.get(delegationId);
+      const escalation = getCorrectionEscalationDetector();
+      const result = entry
+        ? escalation.evaluate(entry.targetAgent, delegationId, baseSeverityFromCorrection(correction))
+        : null;
+      getEventBus().emit('brain.correction' as any, {
+        sessionId: entry?.sessionId ?? 'unknown',
+        taskId: delegationId,
+        agentName: entry?.targetAgent ?? 'unknown',
+        action: correction.action,
+        severity: result?.suggestedSeverity ?? baseSeverityFromCorrection(correction),
+        instruction: correction.instruction,
+        newConstraints: correction.newConstraints
+          ? {
+              forbiddenTools: correction.newConstraints.forbiddenTools,
+              maxRemainingTokens: correction.newConstraints.maxRemainingTokens,
+              requiredApproach: correction.newConstraints.requiredApproach,
+            }
+          : undefined,
+        createdAt: Date.now(),
+      });
+    } catch (err) {
+      logger.warn({ err, delegationId }, 'brain.correction event emit failed');
+    }
+
     switch (correction.action) {
       case 'continue':
         break;
@@ -356,4 +384,14 @@ export class CorrectionFlow {
     }
     return undefined;
   }
+}
+
+/**
+ * 从 correction payload 推导基础 severity（Brain LLM 给的 instruction 自身暗示）。
+ * 与 escalation detector 配合：先算 base，再让 detector 决定是否升级。
+ */
+function baseSeverityFromCorrection(correction: TurnCorrectionPayload): 'low' | 'medium' | 'high' {
+  if (correction.action === 'stop' || correction.action === 'restart') return 'high';
+  if (correction.newConstraints?.forbiddenTools?.length) return 'medium';
+  return 'low';
 }

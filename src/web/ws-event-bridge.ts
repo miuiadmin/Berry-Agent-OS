@@ -66,6 +66,18 @@ const BRIDGED_EVENTS: EventName[] = [
   'mission.handoff',
   // 13.0 自进化触发（Brain 在 plan 中发现需要新技能时）
   'capability.evolution.request',
+  // 13.0 §5.1.3: Brain 纠偏事件（全局广播，前端 UI 可显示纠偏时间线）
+  'brain.correction',
+  // 13.0 §11.5: 跨 squad 交接（结构化 handoff 通知）
+  'brain.handoff',
+  // 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送）
+  'brain.budget.alert',
+  // 13.0 P9: Brain 观察 blocker/question signal 后触发的 INTERVENE 事件
+  'brain.signal_intervention',
+  // 13.0 §5.3.10: Agent 目录变更推送
+  'directory.changed',
+  // 13.0 P10: Brain 派发 checker 独立审核事件
+  'brain.checker.dispatch',
 ];
 
 /**
@@ -96,6 +108,8 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'permission.user_confirm_needed': 'permission.confirm_needed',
   /** P3: 人工委托请求 — 全局广播替代 per-connection listener，断连期间新请求不丢失 */
   'delegation.user_needed': 'delegation.needed',
+  // 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送 — 顶层格式 + sessionId 过滤）
+  'brain.budget.alert': 'budget_alert',
 };
 
 export class WsEventBridge {

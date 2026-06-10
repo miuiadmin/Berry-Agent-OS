@@ -243,6 +243,36 @@ export type EventMap = {
   };
   /** 13.0 §5.3.10: Agent 目录变更推送 */
   'directory.changed': { added: Array<{ name: string; description: string; capabilities: string[]; status: 'online' | 'offline' }>; removed: string[] };
+  /** 13.0 §5.1.3: Brain 发出纠偏（前端订阅后可显示纠偏原因/历史） */
+  'brain.correction': {
+    sessionId: string;
+    taskId?: string;
+    agentName: string;
+    action: 'continue' | 'adjust' | 'stop' | 'restart';
+    severity: 'low' | 'medium' | 'high';
+    instruction?: string;
+    newConstraints?: { forbiddenTools?: string[]; maxRemainingTokens?: number; requiredApproach?: string };
+    createdAt: number;
+  };
+  /** 13.0 §11.5: 跨 squad 交接（与 mission.handoff 互补，提供更结构化 payload） */
+  'brain.handoff': {
+    missionId: string;
+    fromSquad: string;
+    toSquad: string;
+    what: string;
+    content?: string;
+    createdAt: number;
+  };
+  /** 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送） */
+  'brain.budget.alert': {
+    sessionId?: string;
+    agentName: string;
+    scope: string;
+    usedPercent: number;
+    tier: 'warning' | 'critical' | 'exceeded';
+    message: string;
+    createdAt: number;
+  };
   /** 13.0 P10: Brain 派发 checker 独立审核事件（kernel 订阅后路由给 checker agent） */
   'brain.checker.dispatch': {
     missionId: string;
