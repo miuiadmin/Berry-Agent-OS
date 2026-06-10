@@ -57,6 +57,7 @@ export type IpcMessageType =
   | 'checkpoint.evaluate.result'
   | 'turn.correction'
   | 'superior.review.request'
+  | 'conversation.restore'
   | 'superior.review.result'
   | 'bus.invoke'
   | 'bus.invoke.result'
@@ -77,7 +78,9 @@ export type IpcMessageType =
   | 'brain.observe'
   // L5: Agent 目录实时查询
   | 'agent.discover'
-  | 'agent.discover.reply';
+  | 'agent.discover.reply'
+  /** 13.0 §5.3.14: Agent 拒绝任务，建议重路由到其他 Agent */
+  | 'task.reject';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
 // R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。

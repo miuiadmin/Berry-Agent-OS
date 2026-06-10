@@ -545,6 +545,7 @@ export function createApiRouter(deps: WebServerDependencies) {
     getEventBus: () => deps.eventBus ?? null,
     getDb: () => getDb(),
     getBrainDecisionRecorder: () => (deps.orchestrator as any)?.brainDecisionRecorder ?? null,
+    getConversationIpc: () => (deps.orchestrator as any)?.agentManager?.getAgent?.('conversation')?.ipc ?? null,
   }, readBody, json);
 
   // --- 12.0 Drift metrics routes ---

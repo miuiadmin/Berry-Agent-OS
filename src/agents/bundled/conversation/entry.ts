@@ -462,6 +462,37 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       originalDraft: isModified ? pending.draft : undefined,
     } satisfies FinalResponsePayload, correlationId);
   });
+
+  // 13.0 §5.3.12: 用户还原 Brain 修改时更新会话历史（in-memory + DB）
+  // Kernel 端 /api/brain/restore-original 路由会发 conversation.restore IPC
+  // 同时也持久化到 conversations 表，让重启后 history 加载也是原始版本
+  ipc.onMessage('conversation.restore', async (msg: IpcMessage) => {
+    const { sessionId: restoreSessionId, taskId: restoreTaskId, originalResponse } = msg.payload as {
+      sessionId: string;
+      taskId: string;
+      originalResponse: string;
+    };
+    if (!restoreSessionId || !originalResponse) return;
+
+    // ① 更新 in-memory history（替换最后一条 assistant 消息）
+    const history = sessionHistories.get(restoreSessionId);
+    if (history && history.length > 0) {
+      const lastIdx = history.length - 1;
+      const last = history[lastIdx];
+      if (last.role === 'assistant') {
+        history[lastIdx] = { role: 'assistant', content: originalResponse };
+        logger.debug({ sessionId: restoreSessionId, taskId: restoreTaskId }, 'conversation: history updated with original response');
+      }
+    }
+
+    // ② 持久化到 conversations 表（让 11.0 启动预热加载的也是原始版本）
+    try {
+      const { updateAssistantMessage } = await import('../../../memory/conversations.js');
+      updateAssistantMessage(restoreSessionId, restoreTaskId, originalResponse);
+    } catch (err) {
+      logger.warn({ err, sessionId: restoreSessionId, taskId: restoreTaskId }, 'conversation: persist original response failed');
+    }
+  });
 });
 
 function formatMemoryContextFrames(frames?: MemoryContextFrame[]): string {

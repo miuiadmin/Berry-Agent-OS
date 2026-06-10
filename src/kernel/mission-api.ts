@@ -20,6 +20,9 @@
 import type { MissionManager } from '../kernel/mission-manager.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import type { Database as DatabaseType } from 'better-sqlite3';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('mission-api');
 
 /** 路由注册函数类型（与 api-routes.ts 的 route 函数签名一致） */
 type RouteFn = (method: string, path: string, handler: (req: any, res: any, url?: URL, params?: Record<string, string>) => void) => void;
@@ -36,6 +39,8 @@ interface MissionApiDeps {
   getDb: () => DatabaseType | null;
   /** BrainDecisionRecorder（延迟求值），用于记录用户反馈 */
   getBrainDecisionRecorder: () => { record: (input: any) => string | null } | null;
+  /** Conversation Agent 的 IPC 通道（延迟求值），用于 restore-original 时同步 in-memory history */
+  getConversationIpc?: () => { send: (type: string, to: string, payload: unknown, correlationId?: string) => boolean } | null;
 }
 
 /**
@@ -252,6 +257,7 @@ export function registerMissionRoutes(
   route('POST', '/brain/restore-original', async (req, res) => {
     const bus = resolvedDeps.getEventBus();
     const recorder = resolvedDeps.getBrainDecisionRecorder();
+    const conversationIpc = resolvedDeps.getConversationIpc?.();
 
     const body = await readBody(req) as Record<string, unknown>;
     const sessionId = body.sessionId as string;
@@ -272,6 +278,17 @@ export function registerMissionRoutes(
         verdict: 'restored' as any,
         reviewReason: '用户还原了 Brain 的修改',
       });
+    }
+
+    // 13.0 §5.3.12: 发 IPC 给 conversation agent，让它同步更新 in-memory history + DB
+    // 避免下次 user 消息进来时 history 里仍是 Brain 修改版
+    if (conversationIpc) {
+      try {
+        conversationIpc.send('conversation.restore', 'core', { sessionId, taskId, originalResponse });
+        logger.info({ sessionId, taskId, len: originalResponse.length }, 'restore-original: IPC sent to conversation');
+      } catch (err) {
+        logger.warn({ err, sessionId, taskId }, 'restore-original: IPC send failed');
+      }
     }
 
     // 记录用户覆盖 Brain 决策（供 Brain 后续学习 + 进化系统）

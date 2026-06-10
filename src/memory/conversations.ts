@@ -36,6 +36,32 @@ export function saveMessage(sessionId: string, role: 'user' | 'assistant', conte
 }
 
 /**
+ * 13.0 §5.3.12: 替换已落库的 assistant 消息为用户还原后的原始版本。
+ *
+ * 用户点击「还原 Brain 的修改」时调用 — 同一 taskId 范围内的 assistant 行被覆盖。
+ * 配套 in-memory history 更新（conversation agent 同步）。
+ *
+ * @returns 更新的行数（0 表示没找到对应消息）
+ */
+export function updateAssistantMessage(
+  sessionId: string,
+  taskId: string,
+  newContent: string,
+): number {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE conversations
+    SET content = ?
+    WHERE session_id = ?
+      AND role = 'assistant'
+      AND (id = ? OR (task_id IS NOT NULL AND task_id = ?))
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).run(newContent, sessionId, taskId, taskId);
+  return result.changes;
+}
+
+/**
  * 专门为「user 消息入口入库」设计的幂等保存 API。
  *
  * 设计动机：
