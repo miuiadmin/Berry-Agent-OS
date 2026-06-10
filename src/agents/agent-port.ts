@@ -30,6 +30,22 @@ import { getToolByName } from '../tools/index.js';
 
 const logger = getLogger('agent-port');
 
+/** 13.0 §5.3.10: discover() 本地缓存 TTL（30s — 平衡实时性和 IPC 开销） */
+const DIRECTORY_CACHE_TTL_MS = 30_000;
+
+/** 缓存结构：entries + 拉取时间戳 */
+let directoryCache: { entries: AgentInfo[]; fetchedAt: number } | null = null;
+
+/** 测试辅助：清空缓存 */
+export function clearAgentPortDirectoryCache(): void {
+  directoryCache = null;
+}
+
+/** 测试辅助：读取当前缓存状态 */
+export function getAgentPortDirectoryCache(): { entries: AgentInfo[]; fetchedAt: number } | null {
+  return directoryCache;
+}
+
 /** createAgentPort 的依赖参数 */
 export interface AgentPortDeps {
   /** 当前 Agent 的 IPC 通道 */
@@ -156,9 +172,16 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
     },
 
     async discover(): Promise<AgentInfo[]> {
+      // 13.0 §5.3.10: 本地 30s 缓存 + 订阅 directory.changed 失效
+      // 减少频繁 IPC 查询开销（discover() 通常被工具/逻辑高频调用）
+      const now = Date.now();
+      if (directoryCache && (now - directoryCache.fetchedAt) < DIRECTORY_CACHE_TTL_MS) {
+        logger.debug({ ageMs: now - directoryCache.fetchedAt, count: directoryCache.entries.length }, 'AgentPort: discover cache hit');
+        return directoryCache.entries;
+      }
+
       // L5: 通过 IPC 查询 Kernel 的 Agent 注册表，返回实时在线状态
-      // 不再硬编码列表，Agent 启停变化立即可见
-      return new Promise((resolve) => {
+      const entries = await new Promise<AgentInfo[]>((resolve) => {
         const timer = setTimeout(() => {
           // 超时时回退到空列表（不阻塞调用方）
           resolve([]);
@@ -174,6 +197,10 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
         // 发送查询请求到 Kernel
         ipc.send('agent.discover', 'core', {});
       });
+
+      directoryCache = { entries, fetchedAt: now };
+      logger.debug({ count: entries.length }, 'AgentPort: discover cache refreshed');
+      return entries;
     },
 
     async askUser(question: string, opts?: PortAskUserOptions): Promise<string> {
