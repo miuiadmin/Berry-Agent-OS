@@ -82,6 +82,17 @@ export const PlanSchema = z.object({
   decisions: z.array(DecisionSchema).default([]),
   /** 备注和提示（任何 Agent 都可添加） */
   notes: z.array(z.string()).default([]),
+  /** 13.0 P11: 可选 squads 模板（FS plan.json 里可直接放 squads，createFromTemplate 会传播） */
+  squads: z.array(z.object({
+    name: z.string(),
+    goal: z.string(),
+    leader: z.string(),
+    members: z.array(z.object({
+      agent: z.string(),
+      role: z.enum(['work', 'check']),
+      on: z.string(),
+    })).optional(),
+  })).optional(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
