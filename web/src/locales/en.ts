@@ -126,6 +126,9 @@ const en: Record<string, string> = {
   "chat.reason": "Reason",
   "chat.approve": "Approve",
   "chat.deny": "Deny",
+  /** 13.0 灵魂版：Brain review badge labels */
+  "chat.brainModified": "Brain modified",
+  "chat.brainRejected": "Brain rejected",
   "chat.urgent": "Urgent",
   "chat.requestedBy": "Requested by",
   "chat.switchModel": "Switch Model",

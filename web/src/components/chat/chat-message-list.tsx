@@ -273,6 +273,28 @@ const MessageBubble = memo(function MessageBubble({
         {message.attachments && message.attachments.length > 0 && (
           <AttachmentList attachments={message.attachments} />
         )}
+        {/* 13.0 灵魂版：Brain 审核标注（modify/reject 时展示） */}
+        {!isUser && message.reviewVerdict && message.reviewVerdict !== "approve" && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+            {message.reviewVerdict === "modify" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-blue-600 dark:text-blue-400">
+                <Pencil className="size-2.5" />
+                {t("chat.brainModified")}
+              </span>
+            )}
+            {message.reviewVerdict === "reject" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                <AlertCircle className="size-2.5" />
+                {t("chat.brainRejected")}
+              </span>
+            )}
+            {message.reviewReason && (
+              <span className="truncate max-w-[200px] text-muted-foreground/70" title={message.reviewReason}>
+                {message.reviewReason}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-1 mt-1 px-1">
         <span className="text-[11px] text-muted-foreground/60">

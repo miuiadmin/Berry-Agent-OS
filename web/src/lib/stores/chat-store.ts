@@ -43,6 +43,17 @@ export interface ChatMessage {
   reasoning?: string;
   error?: string;
   attachments?: ChatAttachment[];
+  /**
+   * 13.0 灵魂版：Brain 审核裁决（modify/reject 时前端展示徽章）
+   * - 'modify'：Brain 修改了初稿，显示 "Brain 已修改" 蓝色标签
+   * - 'reject'：Brain 拦截了回复，显示 "Brain 已拦截" 琥珀色标签
+   * - undefined / 'approve'：不显示任何标签
+   */
+  reviewVerdict?: "approve" | "modify" | "reject";
+  /** Brain 审核理由 */
+  reviewReason?: string;
+  /** Brain 修改前的原始初稿（用于 diff 展示或一键还原） */
+  originalDraft?: string;
 }
 
 export interface DelegationRequest {

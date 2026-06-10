@@ -126,6 +126,9 @@ const zh: Record<string, string> = {
   "chat.reason": "原因",
   "chat.approve": "批准",
   "chat.deny": "拒绝",
+  /** 13.0 灵魂版：Brain 审核徽章文案 */
+  "chat.brainModified": "Brain 已修改",
+  "chat.brainRejected": "Brain 已拦截",
   "chat.urgent": "紧急",
   "chat.requestedBy": "请求者",
   "chat.switchModel": "切换模型",

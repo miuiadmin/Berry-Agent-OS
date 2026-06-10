@@ -334,6 +334,27 @@ export function useChatSocket() {
         case "permission.confirm_needed":
           setPendingPermission(toPermissionRequest(msg));
           break;
+        /**
+         * 13.0 灵魂版：Brain 审核信息 — 在 result 事件之后到达
+         * 将 verdict/reason/originalDraft 写入最后一条 assistant 消息，
+         * 用于前端展示 "Brain 已修改/已拦截" 徽章
+         */
+        case "review_info": {
+          const reviewMsg = msg as Extract<ServerMessage, { type: "review_info" }>;
+          // 仅在 modify/reject 时更新消息（approve 不需要展示）
+          if (reviewMsg.verdict && reviewMsg.verdict !== "approve") {
+            const current = useChatStore.getState().messages;
+            const lastMsg = current[current.length - 1];
+            if (lastMsg && lastMsg.role === "assistant") {
+              useChatStore.getState().updateLastMessage(() => ({
+                reviewVerdict: reviewMsg.verdict,
+                reviewReason: reviewMsg.reviewReason,
+                originalDraft: reviewMsg.originalDraft,
+              }));
+            }
+          }
+          break;
+        }
         default:
           if (import.meta.env.DEV) {
             console.debug("[ws] unhandled message type:", (msg as { type: string }).type, msg);

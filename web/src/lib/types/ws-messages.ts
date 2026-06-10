@@ -31,6 +31,23 @@ export interface ResultMessage {
   sessionId?: string;
 }
 
+/**
+ * 13.0 灵魂版：Brain 审核信息（message.responded 事件）
+ * 在 result 事件之后到达，携带 Brain 的审核裁决、理由和原始初稿。
+ */
+export interface ReviewInfoMessage {
+  type: "review_info";
+  sessionId: string;
+  taskId: string;
+  response: string;
+  /** Brain 审核裁决：approve=通过, modify=已修改, reject=已拦截 */
+  verdict?: "approve" | "modify" | "reject";
+  /** Brain 审核理由（modify/reject 时非空） */
+  reviewReason?: string;
+  /** Brain 修改前的原始初稿（modify/reject 时非空，前端可展示 diff） */
+  originalDraft?: string;
+}
+
 export interface ErrorMessage {
   type: "error";
   error?: string;
@@ -166,7 +183,8 @@ export type ServerMessage =
   | AgentHandoffMessage
   | AskUserMessage
   | UncertaintyMessage
-  | NoResponseMessage;
+  | NoResponseMessage
+  | ReviewInfoMessage;
 
 // ─── Client → Server messages ─────────────────────────────────────
 
