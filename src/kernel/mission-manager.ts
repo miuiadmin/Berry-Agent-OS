@@ -869,7 +869,7 @@ export class MissionManager {
     return renderMissionContext(ctx);
   }
 
-  /**
+    /**
    * 递归查找 agentName 所在的 squad 和 member 记录。
    * 注意：squad.leader 不在 members 数组里，所以这里也匹配 leader。
    * 如果 agentName 是 leader，返回一个合成的 {role: 'lead'} member。
@@ -901,6 +901,51 @@ export class MissionManager {
       }
     }
     return null;
+  }
+
+  /**
+   * P10: 找到 plan task 所在 squad 的 checker 成员。
+   *
+   * 流程：
+   *   1. 读 plan.json 找 task 关联的 planTask
+   *   2. 读 squad.json 找 task.who 所在的 squad
+   *   3. 在该 squad 的 members 中找 role='check' 的成员
+   *
+   * @returns checker 成员信息（含 agent/on/role），没有就返回 null
+   */
+  getCheckerForPlanTask(missionId: string, planTaskId: string): SquadMember | null {
+    const plan = this.readPlan(missionId);
+    if (!plan) return null;
+    const task = plan.tasks.find(t => t.id === planTaskId);
+    if (!task) return null;
+
+    const squadFile = this.readSquad(missionId);
+    if (!squadFile) return null;
+
+    // 找到 task.who 所在的 squad
+    const found = this.findSquadAndMember(squadFile.org.squads, task.who);
+    if (!found) return null;
+
+    // 在该 squad 的 members（含 leader 合成）里找 check 角色
+    const candidates: SquadMember[] = [...found.squad.members];
+    if (found.squad.leader === task.who) {
+      // task 执行者是 leader — 仍然可以派给 squad 内的 check member
+    } else {
+      // task 执行者就是某 member — 该 member 自己不该再被 check（self-check 没意义）
+    }
+    const checker = candidates.find(m => m.role === 'check');
+    return checker ?? null;
+  }
+
+  /**
+   * P10: 列出 squad 内所有 check 角色成员（用于 brain 在 review 时决定派给谁）。
+   */
+  listCheckersForSquad(missionId: string, squadId: string): SquadMember[] {
+    const squadFile = this.readSquad(missionId);
+    if (!squadFile) return [];
+    const found = this.findSquad(squadFile.org.squads, squadId);
+    if (!found) return [];
+    return found.members.filter(m => m.role === 'check');
   }
 
   /**

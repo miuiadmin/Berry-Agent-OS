@@ -37,6 +37,7 @@ import { ObservationRecorder, type RecordObservationInput, type ObservationType 
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 import { MissionManager } from '../../../kernel/mission-manager.js';
 import { getEventBus } from '../../../kernel/event-bus.js';
+import { genId } from '../../../utils/id.js';
 
 const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
 You are given a SUMMARY of the conversation turn. Evaluate whether the draft response is appropriate.
@@ -407,6 +408,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       }
 
       logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: safeSlice(reviewResult.reason, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
+
+      // 13.0 P10: 派发独立 checker 审核（仅当 squad 里有 check 角色成员时）
+      // 不阻塞主 review.result — checker 的 verdict 通过 brain.signal_intervention 事件异步影响后续 plan
+      if (turn.planTaskId && turn.missionId) {
+        dispatchCheckerReview(turn.missionId, turn.planTaskId, turn, reviewResult, trackingId);
+      }
+
       ipc.send('review.result', 'core', reviewResult, trackingId);
 
       // 13.0 §12.6: 审核完成后自动 mark plan task done/failed（不阻塞审核主流程）
@@ -444,6 +452,80 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       } satisfies ReviewResult, trackingId);
     }
   });
+
+  /**
+   * 13.0 P10: 派发独立 checker 审核。
+   *
+   * 工作流：
+   *   1. 通过 MissionManager.getCheckerForPlanTask 找到 squad 内 check 角色成员
+   *   2. 如果存在，给 checker agent 发 IPC 消息请它独立审查 worker 的产出
+   *   3. checker 的审查结果通过 brain.signal_intervention 事件回传（processCheckResult 中处理）
+   *
+   * 注意：checker 的 verdict 不会阻塞 review.result；它作为异步信号影响 plan 后续迭代。
+   * 这避免了「checker 卡住 → 主任务挂起」的级联失败。
+   *
+   * @param missionId Mission ID
+   * @param planTaskId 当前 worker 完成的 plan 任务
+   * @param turn 完整 turn 记录（checker 需要的上下文）
+   * @param brainReviewResult 主 Brain 的审核结果（checker 用于对比）
+   * @param parentCorrelationId 父 review 的 correlationId
+   */
+  function dispatchCheckerReview(
+    missionId: string,
+    planTaskId: string,
+    turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; taskDescription?: string },
+    brainReviewResult: ReviewResult,
+    parentCorrelationId: string,
+  ): void {
+    try {
+      const checker = missionManager.getCheckerForPlanTask(missionId, planTaskId);
+      if (!checker) return; // 没有 checker 就不派发
+
+      // 13.0 §11.4: 通过 EventBus 发 brain.checker.dispatch 事件
+      // Kernel 订阅后调 ensureAgent(checker.agent) 启动它，然后转交 review.request 给 checker
+      // 这里不阻塞主 review.result（避免 checker 卡住导致 worker 主任务挂起）
+      const checkerCorrelationId = genId('check');
+      getEventBus().emit('brain.checker.dispatch' as any, {
+        missionId,
+        planTaskId,
+        sessionId: turn.sessionId,
+        checkerAgent: checker.agent,
+        checkerOn: checker.on,
+        checkerCorrelationId,
+        parentCorrelationId,
+        workerOutput: turn.draftResponse,
+        workerTask: turn.taskDescription ?? planTaskId,
+        brainVerdict: brainReviewResult.verdict,
+        brainReason: brainReviewResult.reason ?? '',
+      });
+
+      // 记录决策（审计 + 后续 evolution 学习）
+      decisionRecorder.record({
+        sessionId: turn.sessionId,
+        decisionType: 'review',
+        inputSummary: `dispatched checker review for planTaskId=${planTaskId}`,
+        outputJson: {
+          action: 'dispatch_checker',
+          checkerAgent: checker.agent,
+          parentCorrelationId,
+          checkerCorrelationId,
+          brainVerdict: brainReviewResult.verdict,
+          missionId,
+          planTaskId,
+        },
+      });
+
+      logger.info({
+        missionId,
+        planTaskId,
+        checkerAgent: checker.agent,
+        checkerCorrelationId,
+        brainVerdict: brainReviewResult.verdict,
+      }, 'brain:p10 checker review dispatched');
+    } catch (err) {
+      logger.warn({ err, missionId, planTaskId }, 'brain:p10 dispatchCheckerReview failed');
+    }
+  }
 
   // --- Handler 2: route.request (NEW — intent analysis + routing) ---
 

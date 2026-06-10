@@ -243,6 +243,20 @@ export type EventMap = {
   };
   /** 13.0 §5.3.10: Agent 目录变更推送 */
   'directory.changed': { added: Array<{ name: string; description: string; capabilities: string[]; status: 'online' | 'offline' }>; removed: string[] };
+  /** 13.0 P10: Brain 派发 checker 独立审核事件（kernel 订阅后路由给 checker agent） */
+  'brain.checker.dispatch': {
+    missionId: string;
+    planTaskId: string;
+    sessionId: string;
+    checkerAgent: string;
+    checkerOn: string;
+    checkerCorrelationId: string;
+    parentCorrelationId: string;
+    workerOutput: string;
+    workerTask: string;
+    brainVerdict: string;
+    brainReason: string;
+  };
 };
 
 export type EventMessageMap = {
