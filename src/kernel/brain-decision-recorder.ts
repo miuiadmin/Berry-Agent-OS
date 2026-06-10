@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
 import { evolutionMetrics } from '../observability/evolution-metrics.js';
 import { getLogger } from '../utils/logger.js';
+import { redactSensitiveData } from './sensitive-redactor.js';
 
 const logger = getLogger('brain-decision-recorder');
 
@@ -68,11 +69,30 @@ export class BrainDecisionRecorder {
   }
 
   recordReviewDecision(sessionId: string, draftSummary: string, verdict: Record<string, unknown>, taskId?: string): void {
+    // 13.0 §3.6 场景 E: 审核时对 verdict 中的字符串字段做敏感数据脱敏
+    // 防止 Learning Agent 间接泄露的 token / 邮箱 / 身份证等被持久化到 brain_decisions
+    const redaction = redactSensitiveData(JSON.stringify(verdict));
+    let sanitizedVerdict = verdict;
+    if (redaction.totalReplacements > 0) {
+      try {
+        sanitizedVerdict = JSON.parse(redaction.redacted);
+        logger.warn({
+          sessionId,
+          taskId,
+          detectedTypes: redaction.detectedTypes,
+          count: redaction.totalReplacements,
+        }, 'brain-decision: review verdict contained sensitive data, redacted before persist');
+      } catch {
+        // 解析失败时回退到原 verdict（fail-open）
+        sanitizedVerdict = verdict;
+      }
+    }
+
     this.record({
       sessionId,
       decisionType: 'review',
       inputSummary: draftSummary,
-      outputJson: verdict,
+      outputJson: sanitizedVerdict,
       taskId,
     });
 
