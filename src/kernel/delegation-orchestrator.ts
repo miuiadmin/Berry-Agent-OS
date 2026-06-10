@@ -91,6 +91,8 @@ export interface CorrectionFlowDeps {
   readonly daemonBridge: DaemonBridge | null;
   /** 13.0 §3.8 第二层: 写入 active_scope 用于硬约束拦截 */
   readonly permissionCoordinator?: import('./permission-coordinator.js').PermissionCoordinator | null;
+  /** 13.0 §3.9: 统一状态缓存，用于写入 correction/behavior_note 命名空间 */
+  readonly stateCache?: StateCache | null;
   sendRouteRequest(payload: RouteRequestPayload, correlationId: string): void;
 }
 
@@ -144,8 +146,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private observationRecorder: ObservationRecorder;
   /** 13.0 多智能体协作：Mission 生命周期管理器（plan.json + squad.json） */
   private missionManager: MissionManager | null = null;
-  /** 13.0 多智能体协作：统一状态缓存（纠偏、预算、行为笔记等） */
-  private stateCache: StateCache | null = null;
+  /** 13.0 多智能体协作：统一状态缓存（纠偏、预算、行为笔记等，通过 getter 暴露给 CorrectionFlowDeps） */
+  private _stateCache: StateCache | null = null;
   /** 13.0 多智能体协作：Agent 请求队列（per-agent FIFO 并发控制） */
   private agentRequestQueue: AgentRequestQueue | null = null;
 
@@ -256,15 +258,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
    */
   initMissionSystem(missionManager: MissionManager): void {
     this.missionManager = missionManager;
-    this.stateCache = new StateCache();
+    // 创建 StateCache 实例（纠偏/预算/行为笔记的统一内存存储）
+    if (!this._stateCache) {
+      this._stateCache = new StateCache();
+    }
     this.agentRequestQueue = new AgentRequestQueue();
 
     // §4.4.2: 将 stateCache 注入 KernelRouter，启用跨 agent 预算检查
-    this.kernelRouter.setStateCache(this.stateCache);
+    this.kernelRouter.setStateCache(this._stateCache);
 
     // §3.8 第二层: 将 stateCache 注入 PermissionCoordinator，启用 active_scope 硬约束拦截
     if (this.permissionCoordinator) {
-      this.permissionCoordinator.setStateCache(this.stateCache);
+      this.permissionCoordinator.setStateCache(this._stateCache);
     }
 
     /**
@@ -304,8 +309,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   /** 获取 MissionManager 实例（13.0 多智能体协作） */
   get mission(): MissionManager | null { return this.missionManager; }
-  /** 获取 StateCache 实例（13.0 纠偏/预算/行为笔记） */
-  get cache(): StateCache | null { return this.stateCache; }
+  /** 获取 StateCache 实例（13.0 纠偏/预算/行为笔记；CorrectionFlowDeps 接口要求） */
+  get stateCache(): StateCache | null { return this._stateCache; }
   /** 获取 AgentRequestQueue 实例（13.0 per-agent 并发控制） */
   get requestQueue(): AgentRequestQueue | null { return this.agentRequestQueue; }
 
@@ -493,6 +498,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (this.capabilityBusRef) {
       setupBusHandlers(agent.ipc, agentName, this.capabilityBusRef);
     }
+
+    // ─── 13.0 §5.3.14: task.reject 处理 — Agent 拒绝任务的回退路径 ───
+    // 当 Agent 判断自己不适合执行某个任务时，可以拒绝并建议其他 Agent。
+    // 最多重路由 2 次，超过则降级为 chat 模式。
+    agent.ipc.onMessage('task.reject', (msg: IpcMessage) => {
+      this.handleTaskReject(agentName, msg);
+    });
 
     // 13.0 灵魂版：dialogue 路由已抽取至 KernelRouter，统一管理所有跨 Agent 消息
     // KernelRouter.setupDialogueRoutingForAgent 内置防重复注册（WeakSet）
@@ -2083,6 +2095,105 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     setupModuleTaskResultHandler(agentIpc, agentName, this.taskFlowDeps, (result, entry, agent) => {
       this.handleForegroundTaskResult(result, entry, agent);
     });
+  }
+
+  /**
+   * 13.0 §5.3.14: 处理 Agent 的 task.reject — Agent 拒绝任务并建议其他 Agent。
+   *
+   * 回退策略：
+   * 1. 检查 reRouteDepth（≤ 2 次重路由）
+   * 2. 如果 suggestAgent 合理且有该 Agent → 重路由
+   * 3. 如果超过 2 次或无合理建议 → 降级让用户决定
+   *
+   * @param agentName - 拒绝任务的 Agent 名
+   * @param msg - task.reject IPC 消息
+   */
+  private handleTaskReject(agentName: string, msg: IpcMessage): void {
+    const { taskId, reason, suggestAgent } = (msg.payload ?? {}) as {
+      taskId: string;
+      reason: string;
+      suggestAgent?: string;
+    };
+
+    if (!taskId) {
+      logger.warn({ agentName }, 'task.reject: 缺少 taskId，忽略');
+      return;
+    }
+
+    // 释放 AgentRequestQueue 槽位
+    if (this.agentRequestQueue) {
+      this.agentRequestQueue.complete(agentName);
+    }
+
+    const entry = this.delegationManager.get(taskId);
+    if (!entry) {
+      logger.warn({ taskId, agentName }, 'task.reject: 任务不存在');
+      return;
+    }
+
+    // 检查 reRouteDepth
+    const currentDepth = entry.reRouteDepth ?? 0;
+    const MAX_RE_ROUTE_DEPTH = 2;
+
+    logger.info({ taskId, agentName, reason: reason?.slice(0, 200), suggestAgent, reRouteDepth: currentDepth }, 'task.reject: Agent 拒绝任务');
+
+    // 同步更新 plan task 状态为 failed
+    this.updatePlanTaskStatus(taskId, 'failed', `Agent ${agentName} 拒绝: ${reason}`);
+
+    if (currentDepth >= MAX_RE_ROUTE_DEPTH) {
+      // 超过 2 次重路由 → 降级处理，通知用户
+      logger.info({ taskId, reRouteDepth: currentDepth }, 'task.reject: 重路由次数耗尽，降级');
+
+      this.delegationManager.fail(taskId, `任务被多个 Agent 拒绝。${agentName} 的理由: ${reason}`);
+
+      const pending = this.sessionManager.getPending(entry.correlationId);
+      if (pending) {
+        // 让 Conversation 告诉用户情况
+        this.sessionManager.complete(entry.correlationId,
+          `抱歉，这个任务 ${agentName} 和之前的 Agent 都无法处理。\n理由: ${reason}\n请提供更多信息或尝试换个方式描述。`,
+        );
+      }
+      return;
+    }
+
+    // 尝试重路由到 suggestAgent
+    if (suggestAgent && suggestAgent !== agentName) {
+      const newDepth = currentDepth + 1;
+      // 标记当前任务失败
+      this.delegationManager.fail(taskId, `Agent ${agentName} 拒绝，建议路由给 ${suggestAgent}。理由: ${reason}`);
+
+      // 用新的 reRouteDepth 重新派发
+      const pending = this.sessionManager.getPending(entry.correlationId);
+      if (pending) {
+        logger.info({ taskId, from: agentName, to: suggestAgent, newDepth }, 'task.reject: 重路由到建议 Agent');
+
+        this.dispatchModuleTaskInternal({
+          sessionId: entry.sessionId,
+          taskType: 'chat',
+          requester: agentName,
+          inputPayload: {
+            message: pending.userMessage ?? entry.userMessage,
+            reRouteDepth: newDepth,
+            _rejectReason: reason,
+            _rejectedBy: agentName,
+          },
+          correlationId: entry.correlationId,
+          foreground: true,
+        }).catch(err => {
+          logger.warn({ err, taskId }, 'task.reject: 重路由派发失败');
+          this.sessionManager.fail(entry.correlationId, { kind: 'failed', agentName, error: `重路由失败: ${(err as Error).message}` });
+        });
+      }
+    } else {
+      // 无 suggestAgent → 降级为 chat
+      this.delegationManager.fail(taskId, `Agent ${agentName} 拒绝任务且无建议: ${reason}`);
+      const pending = this.sessionManager.getPending(entry.correlationId);
+      if (pending) {
+        this.sessionManager.complete(entry.correlationId,
+          `Agent ${agentName} 表示无法处理这个任务。\n理由: ${reason}\n请尝试更具体地描述你的需求。`,
+        );
+      }
+    }
   }
 
   private handleForegroundTaskResult(

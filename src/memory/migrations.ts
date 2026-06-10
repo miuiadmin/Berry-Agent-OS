@@ -59,6 +59,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     addConversationsClientMsgIdColumn(conn);
     migrateCreateBrainObservationsTable(conn);
     migrateCreateAgentAuditTables(conn);
+    migrateCreateBrainCorrectionsTable(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -994,6 +995,41 @@ function migrateCreateAgentAuditTables(conn: Database.Database): void {
         ON agent_tool_calls(tool_name, success, created_at DESC);
     `);
   }
+}
+
+/**
+ * 13.0 §13.20: brain_corrections 表 — 追踪 Brain 纠偏频次，Evolution 引擎据此触发学习闭环。
+ *
+ * 触发规则（§3.7 升级式纠偏）：
+ * - 同 agent 30 分钟内 high 严重度纠偏 >= 3 次 → capability.evolution.request
+ * - 同 agent 60 分钟内所有纠偏 >= 8 次 → capability.evolution.request
+ *
+ * 与 brain_decisions 表的区别：
+ * - brain_decisions 是完整决策历史（route/review/permission/correction/...）
+ * - brain_corrections 仅追踪纠偏，专门用于频次检测
+ */
+function migrateCreateBrainCorrectionsTable(conn: Database.Database): void {
+  if (tableExists(conn, 'brain_corrections')) return;
+  conn.exec(`
+    CREATE TABLE brain_corrections (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      task_id TEXT,
+      agent_name TEXT NOT NULL,
+      severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high')),
+      action TEXT NOT NULL CHECK(action IN ('continue', 'adjust', 'stop', 'restart')),
+      instruction TEXT NOT NULL,
+      block_tools_json TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE INDEX idx_brain_corrections_agent_time
+      ON brain_corrections(agent_name, created_at DESC);
+    CREATE INDEX idx_brain_corrections_severity_time
+      ON brain_corrections(severity, created_at DESC);
+    CREATE INDEX idx_brain_corrections_session
+      ON brain_corrections(session_id, created_at DESC);
+  `);
 }
 
 function migrateCreateSystemInsightsTable(conn: Database.Database): void {

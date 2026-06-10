@@ -1009,6 +1009,27 @@ export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_agent_tool_name ON agent_tool_calls(tool_name, success, created_at DESC);
 `;
 
+// 13.0 §13.20: brain_corrections 表 — 追踪 Brain 纠偏频次
+export const BRAIN_CORRECTIONS_SQL = `
+  CREATE TABLE IF NOT EXISTS brain_corrections (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    task_id TEXT,
+    agent_name TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK(severity IN ('low', 'medium', 'high')),
+    action TEXT NOT NULL CHECK(action IN ('continue', 'adjust', 'stop', 'restart')),
+    instruction TEXT NOT NULL,
+    block_tools_json TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_brain_corrections_agent_time
+    ON brain_corrections(agent_name, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_brain_corrections_severity_time
+    ON brain_corrections(severity, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_brain_corrections_session
+    ON brain_corrections(session_id, created_at DESC);
+`;
+
 export const KNOWLEDGE_FTS_SQL = `
   CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
     summary, detail, content=knowledge, content_rowid=rowid, tokenize='trigram'

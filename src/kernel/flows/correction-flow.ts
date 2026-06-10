@@ -4,6 +4,7 @@ import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
 import { getDb } from '../../memory/index.js';
+import { getCorrectionFrequencyDetector } from '../correction-frequency-detector.js';
 import type { IpcMessage, IpcMessageType } from '../types.js';
 import type {
   TurnCheckpointPayload,
@@ -13,6 +14,7 @@ import type {
 import { isDelegationTerminal, CORRECTION_LIMITS } from '../../contracts/delegation.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
 import { buildAvailableAgentsList } from '../agent-registry.js';
+import type { CorrectionEntry, BehaviorNote } from '../state-cache.js';
 
 const logger = getLogger('correction-flow');
 
@@ -165,6 +167,38 @@ export class CorrectionFlow {
       logger.debug({ delegationId, forbiddenTools: correction.newConstraints.forbiddenTools }, 'applyAdjust: set active_scope.blockTools');
     }
 
+    // 13.0 §13.20: 记录到 frequency detector，Evolution 学习闭环的触发器
+    this.recordCorrection(entry.sessionId, entry.targetAgent, entry.id, 'adjust', correction);
+
+    // ─── 13.0 §3.9: 将纠偏指令写入 StateCache ───
+    // correction 命名空间：供 buildMissionContextPrompt() 注入到后续任务的 system prompt
+    // behavior_note 命名空间：跨 task 的行为习惯纠偏（§5.3.8）
+    if (correction.instruction && this.ctx.stateCache) {
+      // 写入 correction 命名空间（按 sessionId:taskId 隔离，§5.3.1）
+      const correctionKey = `${entry.sessionId}:${delegationId}`;
+      const correctionEntry: CorrectionEntry = {
+        instruction: correction.instruction,
+        severity: 'medium', // checkpoint 触发的纠偏默认 medium
+        scopeUpdate: correction.newConstraints ? {
+          blockPaths: correction.newConstraints.maxRemainingTokens ? undefined : undefined,
+          blockTools: correction.newConstraints.forbiddenTools,
+          constraints: [],
+        } : undefined,
+        createdAt: Date.now(),
+      };
+      this.ctx.stateCache.set('correction', correctionKey, correctionEntry);
+
+      // 写入 behavior_note 命名空间（跨 task 持久，§8.4）
+      const behaviorNote: BehaviorNote = {
+        instruction: correction.instruction,
+        createdAt: Date.now(),
+      };
+      this.ctx.stateCache.set('behavior_note', entry.sessionId, behaviorNote);
+
+      logger.debug({ delegationId, sessionId: entry.sessionId, instruction: correction.instruction.slice(0, 100) },
+        'applyAdjust: 纠偏已写入 StateCache (correction + behavior_note)');
+    }
+
     if (entry.targetKind === 'daemon') {
       if (this.ctx.daemonBridge?.isAvailable) {
         this.ctx.daemonBridge.deliverCorrection(
@@ -201,6 +235,9 @@ export class CorrectionFlow {
       delegationId,
       response: partialResponse,
     });
+
+    // 13.0 §13.20: 记录到 frequency detector
+    this.recordCorrection(entry.sessionId, entry.targetAgent, delegationId, 'stop', correction);
   }
 
   private applyRestart(delegationId: string, correction: TurnCorrectionPayload): void {
@@ -228,6 +265,9 @@ export class CorrectionFlow {
       this.ctx.sendRouteRequest(routePayload, entry.correlationId);
       logger.info({ delegationId, correlationId: entry.correlationId }, 'Re-routing after restart correction');
     }
+
+    // 13.0 §13.20: 记录到 frequency detector
+    this.recordCorrection(entry.sessionId, entry.targetAgent, delegationId, 'restart', correction);
   }
 
   private buildPartialResponse(entry: { outputs: Array<{ kind: string; data: unknown }> }): string {
@@ -239,6 +279,39 @@ export class CorrectionFlow {
       }
     }
     return textParts.join('') || '[任务已被纠偏系统终止]';
+  }
+
+  /**
+   * 13.0 §13.20: 把纠偏事件喂给 frequency detector，Evolution 学习的触发器。
+   *
+   * 失败仅 warn — 不阻塞纠偏主流程（detector 自身的 record 内部也 try/catch）。
+   */
+  private recordCorrection(
+    sessionId: string,
+    agentName: string,
+    taskId: string,
+    action: 'continue' | 'adjust' | 'stop' | 'restart',
+    correction: TurnCorrectionPayload,
+  ): void {
+    try {
+      const detector = getCorrectionFrequencyDetector();
+      // severity 由调用方通过 instruction 自带（Brain LLM 输出），这里默认 medium
+      // 真实场景下 severity 应从 correction 的入参推导 — 这里保守用 medium
+      const severity: 'low' | 'medium' | 'high' = correction.newConstraints?.forbiddenTools?.length
+        ? 'medium'
+        : 'low';
+      detector.record({
+        sessionId,
+        taskId,
+        agentName,
+        severity,
+        action,
+        instruction: correction.instruction ?? `${action} correction`,
+        blockTools: correction.newConstraints?.forbiddenTools,
+      });
+    } catch (err) {
+      logger.warn({ err, agentName, action }, 'correction-flow: failed to record correction for frequency detection');
+    }
   }
 
   private cancelPending(delegationId: string): void {
