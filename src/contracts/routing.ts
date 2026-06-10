@@ -36,11 +36,15 @@ export interface RouteDecision {
   intentAnchor?: IntentAnchor;
   /** 13.0: Brain 判断任务复杂时创建的 mission ID（多 agent 协作） */
   missionId?: string;
-  /** 13.0: Brain 路由时指定的任务分解方案（kernel 据此创建 mission） */
+  /** 13.0: Brain 路由时指定的当前 plan task ID（如 t-1, t-2）— 用于注入 squad role/context */
+  planTaskId?: string;
+  /** 13.0: Brain 路由时指定的 mission 分解方案（kernel 据此创建 mission） */
   missionSpec?: {
     goal: string;
     context: string;
     tasks: Array<{ what: string; who: string; depends_on?: string[] }>;
+    /** 13.0: 任务对应的 squad role（让 agent 知道自己在这个 squad 里干什么） */
+    squadRole?: 'lead' | 'work' | 'check';
   };
 }
 

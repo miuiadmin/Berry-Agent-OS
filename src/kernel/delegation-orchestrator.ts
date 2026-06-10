@@ -885,15 +885,38 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
    * 13.0 多智能体协作：构造 mission + squad context 文本，注入到 system prompt。
    * 让 agent 知道自己属于哪个 mission、目标是什么、有哪些任务、当前状态、squad 角色。
    *
+   * 注入策略（§12.3/§12.6）：
+   * - 优先用 renderContext() 输出 squad 队友 + 未解决信号 + 任务进度（planTaskId + targetAgent 已知时）
+   * - 回退到 readSummary() + squad 列表（仅 missionId 已知时）
+   * - 始终叠加 StateCache 的纠偏/行为笔记
+   *
    * @param missionId mission ID
+   * @param planTaskId 当前 plan task ID（可选；提供时输出 squad 上下文）
+   * @param targetAgent 目标 agent 名（可选；提供时定位 squad 角色）
    * @returns 格式化的 mission context 字符串（用于 system prompt 注入）
    */
-  private buildMissionContextPrompt(missionId: string): string | null {
+  private buildMissionContextPrompt(
+    missionId: string,
+    planTaskId?: string,
+    targetAgent?: string,
+  ): string | null {
     if (!this.missionManager) return null;
     try {
-      // readSummary 返回格式化字符串（mission goal + tasks 状态概览）
-      const summary = this.missionManager.readSummary(missionId);
-      if (!summary) return null;
+      // ① 优先：使用 renderContext 输出 squad 队友/角色/信号
+      let contextBlock = '';
+      if (planTaskId && targetAgent) {
+        const richContext = this.missionManager.renderContext(missionId, planTaskId, targetAgent);
+        if (richContext) {
+          contextBlock = `## Mission Context\n\n${richContext}`;
+        }
+      }
+
+      // ② 回退：仅 missionId 时输出 readSummary
+      if (!contextBlock) {
+        const summary = this.missionManager.readSummary(missionId);
+        if (!summary) return null;
+        contextBlock = `## Mission Context\n\n${summary}`;
+      }
 
       /** §3.8/§5.3.1: 注入 StateCache 中的纠偏指令和行为笔记 */
       const stateInjections: string[] = [];
@@ -925,27 +948,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         stateContext = '\n\n## Brain 指令（来自监督系统）\n\n' + stateInjections.join('\n');
       }
 
-      /** P8+P10: 追加 squad 角色上下文（如果存在 squad 结构） */
-      let squadContext = '';
+      /** P10: squad checker 角色提示（仅在 squad 中有 checker 角色时追加） */
+      let checkerHint = '';
       const squad = this.missionManager.readSquad(missionId);
-      if (squad && squad.org.squads.length > 0) {
-        squadContext = '\n\n## Squad 组织\n\n你是以下团队的一员：\n';
-        for (const s of squad.org.squads) {
-          const memberInfo = s.members.length > 0
-            ? s.members.map(m => `@${m.agent}[${m.role}]: ${m.on}`).join(', ')
-            : '无额外成员';
-          squadContext += `- ${s.name} (Leader: @${s.leader}, 成员: ${memberInfo}) [${s.status}]\n`;
-        }
-        squadContext += '\n使用 squad 工具（read）查看完整组织结构，signal 发送信号，update_member 更新自己的状态。';
-
-        /** P10: 如果 squad 中有 check 角色，注入 checker 角色指引 */
-        const hasChecker = squad.org.squads.some(s => s.members.some(m => m.role === 'check'));
-        if (hasChecker) {
-          squadContext += '\n\n### Checker 角色指引\n如果你是 Squad 中的 Checker（验证者）：独立审查 worker 的产出，关注正确性/完整性/安全性/一致性。发现问题通过 squad tool signal(blocker/question) 报告，不直接修改。验证通过用 signal(done)。';
-        }
+      if (squad && squad.org.squads.some(s => s.members.some(m => m.role === 'check'))) {
+        checkerHint = '\n\n### Checker 角色指引\n如果你是 Squad 中的 Checker（验证者）：独立审查 worker 的产出，关注正确性/完整性/安全性/一致性。发现问题通过 squad tool signal(blocker/question) 报告，不直接修改。验证通过用 signal(done)。';
       }
 
-      return `## Mission Context\n\n${summary}${squadContext}${stateContext}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。`;
+      return `${contextBlock}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。使用 squad 工具管理团队（read/handoff/signal/update_member）。${checkerHint}${stateContext}`;
     } catch (err) {
       logger.warn({ err, missionId }, 'buildMissionContextPrompt 失败');
       return null;
@@ -1086,9 +1096,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       }
     }
 
-    // 13.0 多智能体协作：注入 mission context（让 agent 知道自己的 mission 目标）
+    // 13.0 多智能体协作：注入 mission context（让 agent 知道自己的 mission 目标 + squad 角色）
     if (decision.missionId) {
-      const missionContext = this.buildMissionContextPrompt(decision.missionId);
+      const missionContext = this.buildMissionContextPrompt(
+        decision.missionId,
+        decision.planTaskId,
+        decision.targetAgent,
+      );
       if (missionContext) {
         systemPrompt += `\n\n${missionContext}`;
       }

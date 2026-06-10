@@ -296,8 +296,9 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
       contextHints: parsed.contextHints || undefined,
       reason: parsed.reason || '路由决策',
       intentAnchor: parseIntentAnchor(parsed.intentAnchor),
-      // 13.0 多智能体协作：提取 missionId 和 missionSpec（Brain LLM 决定创建 mission 时设置）
+      // 13.0 多智能体协作：提取 missionId、planTaskId、missionSpec
       missionId: typeof parsed.missionId === 'string' ? parsed.missionId : undefined,
+      planTaskId: typeof parsed.planTaskId === 'string' ? parsed.planTaskId : undefined,
       missionSpec: parsed.missionSpec && typeof parsed.missionSpec === 'object' ? {
         goal: String(parsed.missionSpec.goal ?? ''),
         context: String(parsed.missionSpec.context ?? ''),
@@ -306,6 +307,9 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
           who: String(t.who ?? 'code'),
           depends_on: Array.isArray(t.depends_on) ? t.depends_on.map(String) : [],
         })) : [],
+        squadRole: parsed.missionSpec.squadRole === 'lead' || parsed.missionSpec.squadRole === 'work' || parsed.missionSpec.squadRole === 'check'
+          ? parsed.missionSpec.squadRole
+          : undefined,
       } : undefined,
     };
   } catch {
