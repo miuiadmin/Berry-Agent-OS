@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, writeFile, copyFile } from 'node:fs/promises';
+import { existsSync, constants as fsConstants } from 'node:fs';
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { CodeRuntime } from '../../../code/index.js';
@@ -41,12 +41,25 @@ function registerLockedTools(lockManager: LockManager, workspaceDir: string, age
    * 1. 读取当前文件内容（如文件不存在则为 null）
    * 2. 写入新内容
    * 3. 在 Saga 中注册补偿（回滚到旧内容或删除新建文件）
+   * 4. 13.0 §13.7: 同时生成 .bak 备份（用户手动回滚用）
    *
    * @returns 旧内容（供调用方记录）
    */
   async function safeWriteFile(filePath: string, content: string, sessionId: string): Promise<string | null> {
     const resolved = resolve(filePath);
     const oldContent = existsSync(resolved) ? await readFile(resolved, 'utf-8') : null;
+
+    // 13.0 §13.7: 写 .bak 备份（用户手动回滚用，绕过 Saga 流程）
+    if (oldContent !== null) {
+      try {
+        const bakPath = `${resolved}.bak`;
+        await copyFile(resolved, bakPath, fsConstants.COPYFILE_FICLONE);
+        logger.debug({ path: resolved, bakPath }, 'code-entry: .bak backup created');
+      } catch (bakErr) {
+        // .bak 失败不阻塞主写入 — Saga 补偿仍能回滚
+        logger.warn({ err: bakErr, path: resolved }, 'code-entry: .bak backup failed (non-fatal)');
+      }
+    }
 
     // 写入新内容
     await writeFile(resolved, content, 'utf-8');

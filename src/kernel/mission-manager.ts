@@ -1006,20 +1006,80 @@ export class MissionManager {
     templateName: string,
     goal: string,
     context: string,
-    overrides?: { createdBy?: string },
+    overrides?: {
+      createdBy?: string;
+      /** 13.0 P11: 手动覆盖 squads；不传时使用 BUILTIN_TEMPLATES 内置 squads */
+      squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+    },
   ): Plan | null {
     /** 先尝试文件系统模板，再尝试内置模板 */
     const fsTemplates = this.loadTemplates();
-    const template = fsTemplates.find(t => t.name === templateName)
-      ?? BUILTIN_TEMPLATES.find(t => t.name === templateName);
+    const fsTemplate = fsTemplates.find(t => t.name === templateName);
+    const builtinTemplate = !fsTemplate ? BUILTIN_TEMPLATES.find(t => t.name === templateName) : undefined;
+    const template = fsTemplate ?? builtinTemplate;
     if (!template) return null;
 
     // 基于模板创建 mission
-    return this.createMission(goal, context, template.plan.tasks.map(t => ({
+    const plan = this.createMission(goal, context, template.plan.tasks.map(t => ({
       what: t.what,
       who: t.who,
       depends_on: t.depends_on,
     })), overrides?.createdBy);
+
+    if (!plan) return null;
+
+    // 13.0 P11: 传播 squads（FS 模板需要 squads 字段；builtin 模板内置 squads）
+    let squadsToApply = overrides?.squads;
+    if (!squadsToApply && builtinTemplate?.squads) {
+      squadsToApply = builtinTemplate.squads;
+    }
+    // FS 模板的 plan 字段可能不带 squads — 如果是 Plan 类型，从 schema 提取
+    const fsPlanAny = fsTemplate?.plan as unknown as { squads?: typeof squadsToApply };
+    if (!squadsToApply && fsPlanAny?.squads) {
+      squadsToApply = fsPlanAny.squads;
+    }
+    if (squadsToApply && squadsToApply.length > 0) {
+      this.initSquadFromTemplate(plan.mission.id, squadsToApply);
+    }
+
+    return plan;
+  }
+
+  /**
+   * 13.0 P11: 从模板 squads 字段初始化 squad.json（适配 BUILTIN 简格式 → Squad 完整格式）。
+   *
+   * BUILTIN 模板 squads 缺 id/depth/status/signals — 这里自动分配 id + 设 depth=1 + status='waiting'。
+   * 子 squad（嵌套）按 s-1a, s-1b 命名规则生成。
+   */
+  private initSquadFromTemplate(
+    missionId: string,
+    rawSquads: Array<{
+      name: string;
+      goal: string;
+      leader: string;
+      members?: Array<{ agent: string; role: 'work' | 'check'; on: string }>;
+      squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+    }>,
+  ): SquadFile | null {
+    const squads: Squad[] = rawSquads.map((raw, idx) => {
+      const squadId = `s-${idx + 1}`;
+      return {
+        id: squadId,
+        name: raw.name,
+        depth: 1,
+        goal: raw.goal,
+        leader: raw.leader,
+        members: (raw.members ?? []).map(m => ({
+          agent: m.agent,
+          role: m.role,
+          on: m.on,
+          status: 'idle' as const,
+        })),
+        status: 'waiting',
+        signals: [],
+      };
+    });
+    return this.initSquad(missionId, squads);
   }
 
   /**
