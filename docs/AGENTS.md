@@ -135,7 +135,23 @@ src/
 - **Level 2 Module Agents** — Learning/Skills/Plugin Builder/Code/Evolution/Memory/Skill Tester 按需 Agent；Safety/Permission 是规则模块
 - **Level 3 Conversation Agent** — 直接与用户对话
 
-当前 `src/agents/bundled/` 下共 9 个 Agent：`brain` 和 `conversation` 常驻；`learning`、`skills`、`plugin-builder`、`code`、`evolution`、`memory`、`skill-tester` 按需拉起。
+### 消息路由路径（实际实现）
+
+用户消息进入系统后（统一汇入 `routeUserMessage()`），路由分三层：
+
+1. **规则路由（FallbackRouter）**：先跑确定性规则匹配。高置信度命中 `code`/`skill`/`plugin` 意图时，直接派发到目标 Agent，跳过 Brain LLM 调用。这是确定性的意图匹配，不涉及语义判断。
+2. **投机执行（Conversation 先跑）**：规则未命中（默认 `chat`）时，Conversation Agent 立刻开始生成回复，不等 Brain。Brain 同时并行思考路由决策。
+3. **Brain 路由（并行 LLM）**：Brain 收到 `route.request`，用 LLM 做语义路由。30 秒超时 fallback 到 Conversation。如果 Brain 回来发现应该交给 Code/Skills 等，在 Conversation 完成后通过 handoff 机制切换 Agent。
+
+```
+用户消息 → routeUserMessage()
+  ├── 规则命中？→ 直接派发（跳过 Brain LLM）
+  └── 规则未命中？
+       ├── Conversation 立刻开始（投机执行）
+       └── Brain 并行思考路由 → 可能 handoff
+```
+
+### Agent 清单
 `learning-agent` 负责发现应该学习/沉淀什么；`skills-agent` 负责创建和维护 `SKILL.md`；`plugin-builder-agent` 负责生成和修改独立插件包；`code-agent` 负责普通代码库的阅读、修改、测试、重构和补丁说明；`evolution-agent` 负责能力进化提案与执行；`memory-agent` 负责深度记忆检索与整理；`skill-tester-agent` 负责验证技能质量。
 当前设计目标中 Level 2 智能体共 7 个（learning, skills, plugin-builder, code, evolution, memory, skill-tester），Level 3 智能体共 1 个。
 Berry Service 是对外启动的后台常驻服务；AppCore 是服务内的核心运行时，不是 Agent，负责组合 Agent Manager、IPC 路由、权限 token 和审计落库。

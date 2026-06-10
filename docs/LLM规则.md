@@ -36,10 +36,21 @@ Backend Adapter（claude-adapter / opencode-adapter）+ Provider Catalogs（anth
 | Purpose | Tier | 说明 |
 |---------|------|------|
 | brain_review, learning_review | fast | 快速审核，低延迟优先 |
+| brain_routing | fast | Brain 路由决策（route.request），短文本快速分类 |
+| brain_checkpoint | default | Brain 中途干预（checkpoint.evaluate），判断是否需要纠偏 |
+| brain_drift_check | fast | Brain 漂移检测（drift.check.request），意图对齐评分 |
 | conversation, skill_generation | default | 标准对话 |
 | code_task, plugin_generation | high | 复杂推理，质量优先 |
 
 配置中可为每个 tier 指定不同模型：`config.llm.models.fast/default/high`
+
+### Brain 三段式 LLM 消耗模型
+
+| 阶段 | LLM 消耗 | 说明 |
+|------|---------|------|
+| **OBSERVE**（观察） | 零 | 所有 Agent 消息自动抄送 Brain 观察队列，只写 SQLite，不调 LLM |
+| **INTERVENE**（干预） | 条件性 | checkpoint.evaluate 每次触发都调 LLM（判断 continue/adjust/stop）；dialogue.observe 走纯规则（无 LLM），仅每 3 轮可选调 LLM 做语义漂移检测 |
+| **REVIEW**（审核） | 必须 | 每轮回复必经 Brain 审核，A 级用 fast、B/C 级用 default |
 
 ## Token 预算
 
