@@ -177,6 +177,22 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       systemPrompt += `\n\n[World State] ${worldSummary}`;
     }
 
+    // 13.0 灵魂版：C 级审核注入观察队列上下文，提供完整 Agent 行为时间线
+    // 设计依据：§20.7 后置审核增强 — C 级使用完整 observation queue
+    if (turn.level === 'C' && turn.sessionId) {
+      const observations = observationRecorder.queryByType(
+        turn.sessionId,
+        ['dialogue_send', 'dialogue_reply', 'tool_call', 'tool_result', 'drift_signal'],
+        20,
+      );
+      if (observations.length > 0) {
+        const observationContext = observations
+          .map(o => `[${o.observationType}] ${o.fromAgent}${o.toAgent ? '→' + o.toAgent : ''}: ${o.content.slice(0, 200)}`)
+          .join('\n');
+        systemPrompt += `\n\n## 近期 Agent 行为观察（供 C 级审核参考）\n${observationContext}`;
+      }
+    }
+
     // Inject validated system insights for review decisions
     const reviewInsights = recallInsightsForDecision(db, 'review', 3);
     if (reviewInsights.length > 0) {
