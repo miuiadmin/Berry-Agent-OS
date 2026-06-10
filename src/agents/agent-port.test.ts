@@ -24,6 +24,8 @@ interface MockIpc {
   ipc: IpcChildChannel;
   sent: Array<{ type: string; to: string; payload: unknown }>;
   simulateReply: (dialogueId: string, content: string, metadata?: Record<string, unknown>) => void;
+  /** L5: 模拟 Kernel 回复任意 IPC 消息 */
+  simulateMessage: (type: string, payload: unknown) => void;
 }
 
 function createMockIpc(): MockIpc {
@@ -63,10 +65,25 @@ function createMockIpc(): MockIpc {
     for (const h of replyHandlers) h(msg as unknown as IpcMessage);
   }
 
+  /** L5: 模拟 Kernel 回复任意类型的 IPC 消息 */
+  function simulateMessage(type: string, payload: unknown) {
+    const typeHandlers = handlers.get(type) ?? [];
+    const msg = {
+      id: `msg-${type}`,
+      type: type as IpcMessage['type'],
+      from: 'core',
+      to: 'code',
+      payload,
+      timestamp: Date.now(),
+    };
+    for (const h of typeHandlers) h(msg as unknown as IpcMessage);
+  }
+
   return {
     ipc,
     sent,
     simulateReply,
+    simulateMessage,
   };
 }
 
@@ -187,16 +204,27 @@ describe('AgentPort', () => {
   });
 
   describe('discover()', () => {
-    it('返回硬编码 Agent 列表（排除 brain）', async () => {
+    it('通过 IPC 查询 Kernel Agent 注册表（L5 实时目录）', async () => {
       const port = createAgentPort({ ipc: mockIpc.ipc, agentName: 'code', askUser });
 
-      const agents = await port.discover();
+      // 模拟 Kernel 回复 discover 结果
+      const discoverPromise = port.discover();
 
+      // 捕获 IPC 发出的 agent.discover 消息
+      const discoverMsg = mockIpc.sent.find(m => m.type === 'agent.discover');
+      expect(discoverMsg).toBeDefined();
+
+      // 模拟 Kernel 回复
+      const mockAgents = [
+        { name: 'memory', description: '记忆管理', capabilities: ['query'], status: 'online' },
+        { name: 'learning', description: '学习', capabilities: ['extract'], status: 'online' },
+      ];
+      mockIpc.simulateMessage('agent.discover.reply', mockAgents);
+
+      const agents = await discoverPromise;
       expect(agents.length).toBeGreaterThan(0);
-      expect(agents.find(a => a.name === 'brain')).toBeUndefined();
+      // L5: 不再硬编码排除 brain，而是 Kernel 端过滤
       expect(agents.find(a => a.name === 'memory')).toBeDefined();
-      expect(agents.find(a => a.name === 'code')).toBeDefined();
-      expect(agents.find(a => a.name === 'conversation')).toBeDefined();
     });
   });
 
