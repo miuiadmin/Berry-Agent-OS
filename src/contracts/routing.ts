@@ -34,6 +34,8 @@ export interface RouteDecision {
   activeSkills?: string[];
   /** 12.0: Brain 路由时产出的用户意图结构化描述（供漂移检测用） */
   intentAnchor?: IntentAnchor;
+  /** 13.0: Brain 判断任务复杂时创建的 mission ID（多 agent 协作） */
+  missionId?: string;
 }
 
 export interface RouteResultPayload {

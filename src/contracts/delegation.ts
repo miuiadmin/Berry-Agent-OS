@@ -79,6 +79,10 @@ export interface DelegationEntry {
   forbiddenTools?: string[];
   workspaceId?: string;
   delegationType?: 'agent' | 'workspace';
+  /** 13.0 多智能体协作：关联的 mission ID（Brain 路由时设置） */
+  missionId?: string;
+  /** 13.0 多智能体协作：关联的 plan task ID（plan.json 中的任务编号） */
+  planTaskId?: string;
 }
 
 export interface DelegationGroup {

@@ -211,6 +211,24 @@ export type EventMap = {
   /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，不再 resolve 直写 channel
    *  13.0 灵魂版：携带 Brain 审核信息，前端可展示"已审核/已修改"徽章 */
   'conversation.result': { sessionId: string; taskId: string; response: string; reviewVerdict?: ReviewVerdict; reviewReason?: string; originalDraft?: string };
+
+  // ─── 13.0 多智能体协作 — Mission 事件 ───
+  /** 13.0: Mission 被创建 */
+  'mission.created': { missionId: string; goal: string; taskCount: number };
+  /** 13.0: Mission 状态变更 */
+  'mission.status_changed': { missionId: string; oldStatus: string; newStatus: string };
+  /** 13.0: 任务状态变更 */
+  'mission.task_updated': { missionId: string; taskId: string; status: string; who: string };
+  /** 13.0: 任务依赖满足，可以开始执行 */
+  'mission.task_ready': { missionId: string; taskId: string; who: string; what: string };
+  /** 13.0: Mission 完成（所有 tasks done） */
+  'mission.completed': { missionId: string; goal: string };
+  /** 13.0: Squad 被创建（裂变） */
+  'mission.squad_created': { missionId: string; squadId: string; parentSquadId?: string };
+  /** 13.0: 信号发出 */
+  'mission.signal': { missionId: string; squadId: string; type: string; msg: string };
+  /** 13.0: 交接完成 */
+  'mission.handoff': { missionId: string; from: string; to: string; what: string };
 };
 
 export type EventMessageMap = {

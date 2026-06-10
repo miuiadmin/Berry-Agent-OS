@@ -8,6 +8,8 @@ import { askUserTool, pushNotificationTool } from './interaction-tools.js';
 import { monitorStartTool, monitorStopTool, monitorStatusTool } from './monitor-tools.js';
 import { cronCreateTool, cronDeleteTool, cronListTool } from './cron-tools.js';
 import { searchHistoryTool } from './session-tools.js';
+import { planTool } from './plan-tools.js';
+import { squadTool } from './squad-tools.js';
 
 const builtinTools: ToolDefinition[] = [
   readFileTool,
@@ -29,6 +31,8 @@ const builtinTools: ToolDefinition[] = [
   cronDeleteTool,
   cronListTool,
   searchHistoryTool,
+  planTool,
+  squadTool,
 ];
 
 export class ToolRegistry implements IToolRegistry {
@@ -81,3 +85,5 @@ export function clearDynamicTools(names: string[]): void {
 
 export { createDelegationTools } from './delegation-tools.js';
 export { createTeamTools } from './team-tools.js';
+export { planTool, initMissionTools, getManager } from './plan-tools.js';
+export { squadTool } from './squad-tools.js';

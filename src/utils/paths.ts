@@ -60,6 +60,11 @@ export function getConfigPath(): string {
   return join(getAppHome(), 'config.yaml');
 }
 
+/** 获取 missions 目录（~/.berry/missions/），存放 plan.json 和 squad.json */
+export function getMissionsDir(): string {
+  return join(getAppHome(), 'missions');
+}
+
 export function ensureDirs(): void {
   mkdirSync(join(getAppHome(), 'run'), { recursive: true });
   mkdirSync(join(getAppHome(), 'data'), { recursive: true });
@@ -69,4 +74,5 @@ export function ensureDirs(): void {
   mkdirSync(getPluginsDir(), { recursive: true });
   mkdirSync(getEvolutionDir(), { recursive: true });
   mkdirSync(getUserAgentsDir(), { recursive: true });
+  mkdirSync(getMissionsDir(), { recursive: true });
 }

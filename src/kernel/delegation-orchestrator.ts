@@ -67,6 +67,9 @@ import type { DangerLevel } from '../utils/types.js';
 import type { ICapabilityBus } from '../bus/contract.js';
 import type { WorldModelRuntime } from './world-model.js';
 import type { SuggestionQueue } from './suggestion-queue.js';
+import { MissionManager } from './mission-manager.js';
+import { StateCache } from './state-cache.js';
+import { AgentRequestQueue } from './agent-request-queue.js';
 
 const logger = getLogger('orchestrator');
 
@@ -137,6 +140,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private streamingFlusher: StreamingFlusher;
   /** 13.0 灵魂版：观察队列记录器（工具调用、对话、用户交互等事件的持久化） */
   private observationRecorder: ObservationRecorder;
+  /** 13.0 多智能体协作：Mission 生命周期管理器（plan.json + squad.json） */
+  private missionManager: MissionManager | null = null;
+  /** 13.0 多智能体协作：统一状态缓存（纠偏、预算、行为笔记等） */
+  private stateCache: StateCache | null = null;
+  /** 13.0 多智能体协作：Agent 请求队列（per-agent FIFO 并发控制） */
+  private agentRequestQueue: AgentRequestQueue | null = null;
 
   constructor(deps: {
     agentManager: AgentManager;
@@ -233,6 +242,28 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (deps.worldModel !== undefined) this.worldModelRef = deps.worldModel;
     if (deps.suggestionQueue !== undefined) this.suggestionQueueRef = deps.suggestionQueue;
   }
+
+  /**
+   * 13.0 多智能体协作：初始化 Mission 系统。
+   *
+   * 单独的初始化方法，在 init() 之后调用。
+   * MissionManager 由外部创建并传入（避免循环依赖），
+   * 同时初始化 StateCache 和 AgentRequestQueue。
+   *
+   * @param missionManager - Mission 生命周期管理器实例
+   */
+  initMissionSystem(missionManager: MissionManager): void {
+    this.missionManager = missionManager;
+    this.stateCache = new StateCache();
+    this.agentRequestQueue = new AgentRequestQueue();
+  }
+
+  /** 获取 MissionManager 实例（13.0 多智能体协作） */
+  get mission(): MissionManager | null { return this.missionManager; }
+  /** 获取 StateCache 实例（13.0 纠偏/预算/行为笔记） */
+  get cache(): StateCache | null { return this.stateCache; }
+  /** 获取 AgentRequestQueue 实例（13.0 per-agent 并发控制） */
+  get requestQueue(): AgentRequestQueue | null { return this.agentRequestQueue; }
 
   /**
    * 关闭清理：同步刷写未持久化的流式内容到 SQLite，防止进程退出丢失数据。
