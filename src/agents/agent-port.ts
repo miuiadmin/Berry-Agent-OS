@@ -171,6 +171,111 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
       logger.debug({ dialogueId, from: agentName, to: msg.to }, 'AgentPort: send (fire-and-forget)');
     },
 
+    async *requestStreaming(msg: PortMessage, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): AsyncGenerator<PortReply, void, undefined> {
+      // 13.0 §4.4.6: 流式请求 v2
+      // 当前实现：先发 dialogue.send 注册 stream，然后持续接收同 dialogueId 的 dialogue.reply
+      // 直到 isFinal=true 或整体超时
+      validateTarget(msg.to);
+
+      const dialogueId = genId('dlg');
+      const payload: DialogueMessagePayload = {
+        dialogueId,
+        sequenceNumber: -1,
+        from: agentName,
+        to: msg.to,
+        content: msg.content,
+        context: msg.context,
+      };
+
+      // 用一个本地缓冲队列接收同 dialogueId 的 reply
+      const buffer: PortReply[] = [];
+      const waiters: Array<(value: PortReply | null) => void> = [];
+      let closed = false;
+      let error: Error | null = null;
+
+      // 13.0 note: IpcChildChannel.onMessage 返回 void（无 unsubscribe）— 用 closed flag 自我停止
+      ipc.onMessage('dialogue.reply', (replyMsg: IpcMessage) => {
+        if (closed) return;
+        const reply = replyMsg.payload as DialogueMessagePayload;
+        if (reply.dialogueId !== dialogueId) return;
+
+        const portReply: PortReply = {
+          from: reply.from,
+          content: reply.content,
+          metadata: reply.metadata,
+        };
+
+        // isFinal → 关闭流
+        if (reply.metadata?.isFinal) {
+          closed = true;
+        }
+
+        // 推 buffer 或唤醒 waiter
+        if (waiters.length > 0) {
+          const w = waiters.shift()!;
+          w(portReply);
+        } else {
+          buffer.push(portReply);
+        }
+      });
+
+      try {
+        // 发送 dialogue.send 启动流
+        ipc.send('dialogue.send', 'core', payload, dialogueId);
+        logger.debug({ dialogueId, from: agentName, to: msg.to, timeoutMs }, 'AgentPort: requestStreaming started');
+
+        // 整体超时
+        const startTime = Date.now();
+        while (true) {
+          // 检查整体超时
+          const elapsed = Date.now() - startTime;
+          if (elapsed >= timeoutMs) {
+            logger.warn({ dialogueId, elapsedMs: elapsed }, 'AgentPort: requestStreaming overall timeout');
+            error = new Error(`streaming timeout: overall ${timeoutMs}ms exceeded`);
+            break;
+          }
+
+          // 从 buffer 取一个 chunk 或等下一个
+          let chunk: PortReply | null;
+          if (buffer.length > 0) {
+            chunk = buffer.shift()!;
+          } else if (closed) {
+            // 流已关闭且 buffer 空 → 结束
+            break;
+          } else {
+            // 等下一个 chunk（带超时保护）
+            const remainingMs = timeoutMs - elapsed;
+            chunk = await new Promise<PortReply | null>((resolve) => {
+              const timer = setTimeout(() => resolve(null), Math.min(remainingMs, 5_000));
+              waiters.push((value) => {
+                clearTimeout(timer);
+                resolve(value);
+              });
+            });
+            if (chunk === null) {
+              // 5s 内没有 chunk 但流未关闭 — 继续等（不视为超时）
+              continue;
+            }
+          }
+
+          yield chunk;
+
+          // chunk 带 isFinal 立即结束
+          if (chunk.metadata?.isFinal) {
+            break;
+          }
+        }
+      } finally {
+        // closed flag 让后续 reply 被丢弃；不再注册新 waiter
+        closed = true;
+        // 唤醒所有等待中的 waiter（防止内存泄漏）
+        for (const w of waiters) w(null);
+        waiters.length = 0;
+      }
+
+      if (error) throw error;
+    },
+
     async discover(): Promise<AgentInfo[]> {
       // 13.0 §5.3.10: 本地 30s 缓存 + 订阅 directory.changed 失效
       // 减少频繁 IPC 查询开销（discover() 通常被工具/逻辑高频调用）

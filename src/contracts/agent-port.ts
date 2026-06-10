@@ -118,6 +118,25 @@ export interface AgentPort {
   request(msg: PortMessage, timeoutMs?: number): Promise<PortReply>;
 
   /**
+   * 13.0 §4.4.6: 流式请求 — 发送消息并以 AsyncGenerator 形式逐 chunk 接收目标 Agent 输出。
+   * 内部封装 dialogue.send + 持续接收 dialogue.reply（同 dialogueId）。
+   * isFinal=true 时 generator 完成。
+   *
+   * 用途：
+   *   - Code Agent 通过 Claude SDK 流式输出工具调用 + 推理
+   *   - Conversation Agent 流式生成回复（前端 SSE 推送）
+   *   - 长任务实时进度反馈
+   *
+   * 注意：当前 Kernel IPC 协议基于 request/reply（一次性），流式实现需要
+   * Kernel 端先把流式 chunk 通过 EventBus → ws-event-bridge 推给调用方。
+   * 本接口作为 v2 契约，运行时如目标 agent 不支持流式会降级为单次 request。
+   *
+   * @param msg 消息载荷
+   * @param timeoutMs 整体超时（含所有 chunks）
+   */
+  requestStreaming(msg: PortMessage, timeoutMs?: number): AsyncGenerator<PortReply, void, undefined>;
+
+  /**
    * 即发即弃通知。不等待回复，不抛超时错误。
    * 适用于日志、状态推送等场景。
    *
