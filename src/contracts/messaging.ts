@@ -29,4 +29,8 @@ export interface FinalResponsePayload {
   sessionId: string;
   response: string;
   reviewVerdict: ReviewVerdict;
+  /** 13.0 灵魂版：Brain 审核 reason（modify/reject 时填充，前端展示） */
+  reviewReason?: string;
+  /** 13.0 灵魂版：Brain 修改前的原始初稿（modify/reject 时填充，前端可展示 diff） */
+  originalDraft?: string;
 }

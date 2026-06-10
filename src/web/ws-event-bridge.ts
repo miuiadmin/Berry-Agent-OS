@@ -79,6 +79,8 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'conversation.interrupted': 'interrupted',
   /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，resolve 不再直写 channel */
   'conversation.result': 'result',
+  /** 13.0 灵魂版：对话完成后附带 Brain 审核裁决（verdict/reason/originalDraft） */
+  'message.responded': 'review_info',
   /** P3: 权限确认请求 — 全局广播替代 per-connection listener，断连期间新请求不丢失 */
   'permission.user_confirm_needed': 'permission.confirm_needed',
   /** P3: 人工委托请求 — 全局广播替代 per-connection listener，断连期间新请求不丢失 */

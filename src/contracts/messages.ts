@@ -2,7 +2,7 @@ import type { Socket } from 'node:net';
 import type { WritableChannel } from './transport.js';
 import type { AgentName, TaskType } from './agents.js';
 import type { RouteRequestPayload, RouteDecision, PermissionJudgeResultPayload, AgentUserReplyPayload, AgentAskUserPayload } from './routing.js';
-import type { ReviewResult, TurnRecord } from './review.js';
+import type { ReviewResult, ReviewVerdict, TurnRecord } from './review.js';
 import type { PermissionRequestPayload, PermissionResultPayload, PermissionValidatePayload, PermissionConsumePayload, PermissionAcquirePayload } from './permissions.js';
 import type { DelegationEntry, TurnOutputPayload, TurnFinalPayload, TurnCheckpointPayload, TurnCorrectionPayload } from './delegation.js';
 import type { UserMessagePayload, DraftResponsePayload, FinalResponsePayload } from './messaging.js';
@@ -157,7 +157,7 @@ export type EventMap = {
   'delegation.checkpoint_needed': { delegationId: string; trigger: string };
   'message.received': { sessionId: string; message: string; taskId: string };
   'message.routed': { sessionId: string; taskId: string; targetAgent: string; intent?: string };
-  'message.responded': { sessionId: string; taskId: string; response: string; verdict?: string };
+  'message.responded': { sessionId: string; taskId: string; response: string; verdict?: string; /** 13.0 灵魂版：Brain 审核理由（modify/reject 时非空） */ reviewReason?: string; /** 13.0 灵魂版：Brain 修改前的原始初稿 */ originalDraft?: string };
   'tool.executed': { agentName: string; toolName: string; durationMs: number; isError: boolean; taskId?: string };
   'llm.request.completed': { taskId?: string; agentName: string; inputTokens: number; outputTokens: number; cacheRead?: number; cacheCreation?: number; durationMs: number };
   'scheduler.job_enqueued': { jobId: string; queueItemId: string; triggerSource: string };
@@ -208,8 +208,9 @@ export type EventMap = {
   'conversation.no_response': { sessionId: string; reason: string; taskId?: string; clientMsgId?: string; correlationId?: string };
   /** P0-3: 对话被中断 — 通过 EventBus 投递，WsEventBridge 转发到前端 */
   'conversation.interrupted': { sessionId: string; taskId: string | null; reason: string };
-  /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，不再 resolve 直写 channel */
-  'conversation.result': { sessionId: string; taskId: string; response: string };
+  /** P1-5: 对话最终结果 — WS 路径通过 EventBus 投递，不再 resolve 直写 channel
+   *  13.0 灵魂版：携带 Brain 审核信息，前端可展示"已审核/已修改"徽章 */
+  'conversation.result': { sessionId: string; taskId: string; response: string; reviewVerdict?: ReviewVerdict; reviewReason?: string; originalDraft?: string };
 };
 
 export type EventMessageMap = {

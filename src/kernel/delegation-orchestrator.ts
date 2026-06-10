@@ -1334,7 +1334,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     });
 
     primaryIpc.onMessage('final.response', (msg: IpcMessage) => {
-      const { sessionId, response, reviewVerdict } = msg.payload as FinalResponsePayload;
+      const { sessionId, response, reviewVerdict, reviewReason, originalDraft } = msg.payload as FinalResponsePayload;
       const correlationId = msg.correlationId!;
       logger.debug({ correlationId, responseLen: response.length, verdict: reviewVerdict, sessionId }, 'orchestrator:final');
       const pending = this.sessionManager.getPending(correlationId);
@@ -1422,10 +1422,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         taskId: pending.taskId ?? '',
         response,
         verdict: reviewVerdict,
+        // 13.0 灵魂版：将 Brain 审核详情传递到前端（通过 WS bridge）
+        reviewReason,
+        originalDraft,
       });
 
-      // 所有后续操作完成后再 resolve
-      finalized.resolve(response);
+      // 13.0 灵魂版：将 Brain 审核信息透传给 CompletionStrategy，
+      // 最终由 EventBusStrategy emit 到 conversation.result，前端可消费
+      finalized.resolve(response, {
+        verdict: reviewVerdict,
+        reason: reviewReason,
+        originalDraft,
+      });
 
       // §9.0 Cleanup speculative state for this correlation
       this.speculativeCorrelations.delete(correlationId);

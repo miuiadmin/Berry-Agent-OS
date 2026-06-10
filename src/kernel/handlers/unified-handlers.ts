@@ -13,6 +13,7 @@ import type {
 } from '../../contracts/daemon-protocol.js';
 import type { SocketResultEvent, SocketInterruptedEvent } from '../../contracts/socket-protocol.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
+import type { ReviewVerdict } from '../../contracts/review.js';
 import type { ModelTier } from '../../contracts/model.js';
 import type { LogLevel } from '../../observability/types.js';
 import { PermissionEngine } from '../../safety/permissions.js';
@@ -289,22 +290,27 @@ export interface CompletionStrategy {
   /**
    * 对话完成时调用
    * @param response 助手回复文本
-   * @param context 完成上下文（sessionId, taskId, isStreaming）
+   * @param context 完成上下文（sessionId, taskId, isStreaming, review?）
    */
   onComplete(response: string, context: {
     sessionId: string;
     taskId: string;
     isStreaming: boolean;
+    /** 13.0 灵魂版：Brain 审核信息（可选；modify/reject 时填充） */
+    review?: { verdict: ReviewVerdict; reason?: string; originalDraft?: string };
   }): void;
 }
 
 /** EventBus 策略：emit conversation.result，由 WsEventBridge 订阅后转发 */
 export class EventBusStrategy implements CompletionStrategy {
-  onComplete(response: string, context: { sessionId: string; taskId: string; isStreaming: boolean }): void {
+  onComplete(response: string, context: { sessionId: string; taskId: string; isStreaming: boolean; review?: { verdict: ReviewVerdict; reason?: string; originalDraft?: string } }): void {
     getEventBus().emit('conversation.result', {
       sessionId: context.sessionId,
       taskId: context.taskId,
       response,
+      reviewVerdict: context.review?.verdict,
+      reviewReason: context.review?.reason,
+      originalDraft: context.review?.originalDraft,
     });
   }
 }
@@ -313,9 +319,18 @@ export class EventBusStrategy implements CompletionStrategy {
 export class ChannelWriteStrategy implements CompletionStrategy {
   constructor(private channel: WritableChannel) {}
 
-  onComplete(response: string, context: { sessionId: string; taskId: string; isStreaming: boolean }): void {
+  onComplete(response: string, context: { sessionId: string; taskId: string; isStreaming: boolean; review?: { verdict: ReviewVerdict; reason?: string; originalDraft?: string } }): void {
     if (context.isStreaming) {
-      const evt: SocketResultEvent = { type: 'result', response, sessionId: context.sessionId, taskId: context.taskId };
+      // 13.0 灵魂版：Socket 路径也透传 review 元数据，前端可消费
+      const evt: SocketResultEvent & { reviewVerdict?: string; reviewReason?: string; originalDraft?: string } = {
+        type: 'result',
+        response,
+        sessionId: context.sessionId,
+        taskId: context.taskId,
+        reviewVerdict: context.review?.verdict,
+        reviewReason: context.review?.reason,
+        originalDraft: context.review?.originalDraft,
+      };
       this.channel.write(JSON.stringify(evt) + '\n');
       this.channel.end();
     } else {
@@ -405,8 +420,10 @@ function routeUserMessage(
     userMessage: message,
     taskId,
     streaming: isStreaming,
-    resolve: (response) => {
-      strategy.onComplete(response, { sessionId, taskId, isStreaming });
+    // 13.0 灵魂版：resolve 接收 review 元数据并透传给 CompletionStrategy，
+    // 最终 emit 到 conversation.result 事件，前端可展示 Brain 审核徽章
+    resolve: (response, review) => {
+      strategy.onComplete(response, { sessionId, taskId, isStreaming, review });
     },
   });
 

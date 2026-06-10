@@ -33,7 +33,7 @@ export interface PendingRequest {
   draftResponse?: string;
   toolCalls?: Array<{ name: string; input: string; result: string }>;
   streaming?: boolean;
-  resolve: (response: string) => void;
+  resolve: (response: string, review?: { verdict: import('../contracts/review.js').ReviewVerdict; reason?: string; originalDraft?: string }) => void;
   /** 12.0: Brain 路由时产出的用户意图锚点（漂移检测基准） */
   intentAnchor?: import('../contracts/intent.js').IntentAnchor;
 }

@@ -405,10 +405,15 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       history.push({ role: 'assistant', content: finalResponse });
     }
 
+    // 13.0 灵魂版：将审核 reason 和原始初稿（modify/reject 时）一并传递，
+    // 前端可展示"由 Brain 修改"徽章和 diff 还原
+    const isModified = review.verdict !== 'approve';
     ipc.send('final.response', 'core', {
       sessionId: pending.sessionId,
       response: finalResponse,
       reviewVerdict: review.verdict,
+      reviewReason: review.reason,
+      originalDraft: isModified ? pending.draft : undefined,
     } satisfies FinalResponsePayload, correlationId);
   });
 });
