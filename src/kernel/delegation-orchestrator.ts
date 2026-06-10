@@ -8,6 +8,7 @@ import type { PermissionCoordinator } from './permission-coordinator.js';
 import type { AuditRecorder } from './audit-recorder.js';
 import type { SessionManager, PendingRequest } from './session-manager.js';
 import type { TakeoverController } from '../testing/model-takeover.js';
+import { KernelRouter, type AgentIpcLike } from './kernel-router.js';
 import type { CapabilityService } from '../evolution/index.js';
 import type { DaemonBridge } from './daemon-bridge.js';
 import type { MemoryRuntime } from '../memory/index.js';
@@ -107,6 +108,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private setupAgentIpcs = new WeakSet<object>();
   private pendingReviewOrigins = new Map<string, ReviewOrigin>();
   readonly delegationManager: DelegationManager;
+  /** 13.0 灵魂版：KernelRouter 封装 dialogue 路由逻辑 */
+  private kernelRouter: KernelRouter;
   private correctionFlow: CorrectionFlow;
   private fallbackRouter = new FallbackRouter();
   /** R15: 后构造依赖——由 init() 统一注入，替代 setter + 公共字段赋值 */
@@ -156,6 +159,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.memoryRuntime = deps.memoryRuntime;
     this.delegationManager = new DelegationManager(deps.taskManager);
     this.correctionFlow = new CorrectionFlow(this);
+    // 13.0 灵魂版：KernelRouter 封装 dialogue 路由，构造时初始化（dialogueRouter 在 init() 注入）
+    this.kernelRouter = new KernelRouter({
+      dialogueRouter: null, // init() 中赋值
+      agentManager: deps.agentManager,
+      sessionManager: deps.sessionManager,
+    });
     this.brainDecisionRecorder = new BrainDecisionRecorder(getDb());
     this.permissionFlow = new PermissionFlow({
       permissionCoordinator: deps.permissionCoordinator,
@@ -354,7 +363,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       getBrainIpc: () => reviewer?.ipc ?? undefined,
     });
     this.dialogueRouter.startSweep();
-    this.setupDialogueHandlers(primary.ipc, primaryName);
+    // 13.0 灵魂版：委托 KernelRouter 设置 primary agent 的 dialogue 路由
+    this.kernelRouter.setDialogueRouter(this.dialogueRouter);
+    this.kernelRouter.setupDialogueRouting(primary.ipc as AgentIpcLike, primaryName);
 
     // 11.0: Brain 通过 dialogue.observe 监听后可能发 turn.correction 纠偏
     // 转发给 Conversation Agent 处理（Brain → Core → Conversation）
@@ -370,104 +381,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.setupDaemonTaskResultHandlers();
   }
 
-  /**
-   * 11.0: 注册 dialogue.send / dialogue.reply 的 IPC 处理器。
-   * - dialogue.send 来自 Conversation Agent，需要路由到目标 Agent
-   * - dialogue.reply 来自目标 Agent，需要转发回 Conversation Agent
-   */
-  private setupDialogueHandlers(primaryIpc: AgentIpc, primaryName: string): void {
-    if (!this.dialogueRouter) return;
-    const router = this.dialogueRouter;
-
-    // Conversation 发来 dialogue.send → 确保目标 agent 已启动 → 路由
-    primaryIpc.onMessage('dialogue.send', async (msg: IpcMessage) => {
-      const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
-
-      // 首次对话：在 DialogueRouter 中注册对话状态
-      let state = router.getDialogue(payload.dialogueId);
-      if (!state) {
-        // 通过 correlationId 找到当前请求的 pending（精确匹配，非 O(n) 遍历）
-        const correlationId = msg.correlationId ?? msg.id;
-        const pending = this.sessionManager.getPending(correlationId);
-        state = router.registerDialogue(payload.dialogueId, {
-          sessionId: pending?.sessionId ?? 'unknown',
-          correlationId,
-          initiator: payload.from,
-          target: payload.to,
-        });
-      }
-
-      // 确保目标 agent 已启动（on-demand agents 需要 ensureAgent）
-      await this.agentManager.ensureAgent(payload.to);
-      // 11.0 关键：注册 kernel 侧的 IPC handler（dialogue.reply、permission 等）
-      // 否则目标 Agent 的 reply 无人接收，导致 60s 超时
-      this.setupModuleAgent(payload.to);
-
-      // 获取 pending（仅用于从 correlationId 读 sessionId；不再用于 socket 直写）
-      const pending = this.sessionManager.getPending(state!.correlationId);
-
-      // 推送前端事件：对话开始/新一轮
-      // H1/H2: 改为 emit，由 WsEventBridge 订阅 EventBus 并转发到 WS 客户端
-      getEventBus().emit('dialogue.status', {
-        dialogueId: payload.dialogueId,
-        sessionId: pending?.sessionId ?? state!.sessionId,
-        status: state!.currentRound === 0 ? 'started' : 'round_complete',
-        from: payload.from,
-        to: payload.to,
-        round: state!.currentRound,
-      });
-
-      try {
-        // sendMessage：H1/H2 后不再接受 socket 参数；流式推送走 EventBus → WsEventBridge
-        const reply = await router.sendMessage(payload);
-        // 转发 reply 给 Conversation
-        primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
-      } catch (err) {
-        // 超时或错误 → 构造错误 reply 返回给 Conversation
-        const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
-          dialogueId: payload.dialogueId,
-          sequenceNumber: payload.sequenceNumber + 1,
-          from: payload.to,
-          to: payload.from,
-          content: `[对话错误] ${(err as Error).message}`,
-          metadata: { isFinal: true },
-        };
-        primaryIpc.send('dialogue.reply', primaryName, errorReply, payload.dialogueId);
-
-        // 推送前端：对话结束（错误）— 同样走 EventBus
-        getEventBus().emit('dialogue.status', {
-          dialogueId: payload.dialogueId,
-          sessionId: pending?.sessionId ?? state!.sessionId,
-          status: 'ended',
-          from: payload.from,
-          to: payload.to,
-          round: state!.currentRound,
-        });
-      }
-    });
-
-    // Conversation 主动结束对话
-    primaryIpc.onMessage('dialogue.end', (msg: IpcMessage) => {
-      const payload = msg.payload as import('../contracts/dialogue.js').DialogueEndPayload;
-      if (this.dialogueRouter) {
-        this.dialogueRouter.closeDialogue(payload.dialogueId, payload.reason ?? 'completed');
-      }
-    });
-
-    // 权限确认期间暂停 dialogue 超时（防止用户决策期间误超时）
-    // 不需要显式恢复：dialogue.reply 到达时 handleReply 会 clearReplyTimer，
-    // 权限拒绝/超时后 Code Agent 也会立即发回 reply
-    if (this.dialogueRouter) {
-      const router = this.dialogueRouter;
-      getEventBus().on('permission.user_confirm_needed', ({ sessionId }) => {
-        for (const d of router.getActiveDialoguesForSession(sessionId)) {
-          router.pauseTimeout(d.dialogueId);
-        }
-      });
-    }
-
-    // dialogue.reply 的接收在 setupModuleAgent 中注册（每个 on-demand agent 启动时）
-  }
+  // 13.0 灵魂版：dialogue 路由已抽取至 KernelRouter
+  // - setupDialogueRouting：Primary Agent 的 dialogue 路由（由 KernelRouter.setupDialogueRouting 处理）
+  // - setupModuleAgent 中 dialogue 部分：已抽取至 KernelRouter.setupDialogueRoutingForAgent
+  // 详见 src/kernel/kernel-router.ts
 
   setupModuleAgent(agentName: string): void {
     const agent = this.agentManager.getAgent(agentName);
@@ -482,118 +399,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (this.capabilityBusRef) {
       setupBusHandlers(agent.ipc, agentName, this.capabilityBusRef);
     }
-    // 11.0: 注册 dialogue.reply handler（module agent 回复对话消息时触发）
-    if (this.dialogueRouter) {
-      const router = this.dialogueRouter;
 
-      agent.ipc.onMessage('dialogue.reply', (msg: IpcMessage) => {
-        const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
-        router.handleReply(payload);
-      });
-
-      // 13.0 AgentPort: 任意 module agent 发起的 dialogue.send 路由
-      // 让非 Conversation 的 agent 也能通过 AgentPort 向其他 agent 发起对话
-      agent.ipc.onMessage('dialogue.send', async (msg: IpcMessage) => {
-        const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
-
-        // 安全门禁：拒绝 to='brain' 和 self-messaging
-        if (payload.to === 'brain') {
-          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
-            dialogueId: payload.dialogueId,
-            sequenceNumber: payload.sequenceNumber + 1,
-            from: 'core',
-            to: payload.from,
-            content: '[对话错误] 不允许直接向 Brain 发送消息',
-            metadata: { isFinal: true },
-          };
-          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
-          return;
-        }
-
-        // 防递归：不允许 self-messaging
-        if (payload.to === agentName) {
-          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
-            dialogueId: payload.dialogueId,
-            sequenceNumber: payload.sequenceNumber + 1,
-            from: 'core',
-            to: payload.from,
-            content: `[对话错误] 不允许自己向自己发消息 (${agentName})`,
-            metadata: { isFinal: true },
-          };
-          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
-          return;
-        }
-
-        // 注册对话状态（如未注册）
-        let state = router.getDialogue(payload.dialogueId);
-        if (!state) {
-          const correlationId = msg.correlationId ?? msg.id;
-          state = router.registerDialogue(payload.dialogueId, {
-            sessionId: (payload.context as Record<string, unknown>)?._sessionId as string ?? 'agent-port',
-            correlationId,
-            initiator: payload.from,
-            target: payload.to,
-          });
-        }
-
-        // 确保目标 agent 已启动并注册 kernel 侧 handlers
-        try {
-          await this.agentManager.ensureAgent(payload.to);
-          this.setupModuleAgent(payload.to);
-        } catch (err) {
-          // 目标 agent 不可用 → 返回错误 reply
-          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
-            dialogueId: payload.dialogueId,
-            sequenceNumber: payload.sequenceNumber + 1,
-            from: payload.to,
-            to: payload.from,
-            content: `[对话错误] 目标 Agent "${payload.to}" 不可用: ${(err as Error).message}`,
-            metadata: { isFinal: true },
-          };
-          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
-          return;
-        }
-
-        // 推送前端事件
-        const pending = this.sessionManager.getPending(state!.correlationId);
-        getEventBus().emit('dialogue.status', {
-          dialogueId: payload.dialogueId,
-          sessionId: pending?.sessionId ?? state!.sessionId,
-          status: state!.currentRound === 0 ? 'started' : 'round_complete',
-          from: payload.from,
-          to: payload.to,
-          round: state!.currentRound,
-        });
-
-        try {
-          // 路由到目标 Agent（复用 DialogueRouter 的全部守卫）
-          const reply = await router.sendMessage(payload);
-          // 将 reply 转发回发起方 Agent
-          agent.ipc.send('dialogue.reply', agentName, reply, payload.dialogueId);
-        } catch (err) {
-          // 超时或错误 → 构造错误 reply 返回给发起方
-          const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
-            dialogueId: payload.dialogueId,
-            sequenceNumber: payload.sequenceNumber + 1,
-            from: payload.to,
-            to: payload.from,
-            content: `[对话错误] ${(err as Error).message}`,
-            metadata: { isFinal: true },
-          };
-          agent.ipc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
-
-          // 推送前端：对话结束（错误）
-          getEventBus().emit('dialogue.status', {
-            dialogueId: payload.dialogueId,
-            sessionId: pending?.sessionId ?? state!.sessionId,
-            status: 'ended',
-            from: payload.from,
-            to: payload.to,
-            round: state!.currentRound,
-          });
-        }
-      });
-    }
+    // 13.0 灵魂版：dialogue 路由已抽取至 KernelRouter，统一管理所有跨 Agent 消息
+    // KernelRouter.setupDialogueRoutingForAgent 内置防重复注册（WeakSet）
+    this.kernelRouter.setupDialogueRoutingForAgent(agent.ipc as AgentIpcLike, agentName);
   }
 
   // ═══ PUBLIC API ═══════════════════════════════════
