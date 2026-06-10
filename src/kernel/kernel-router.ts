@@ -30,8 +30,25 @@ import type { AgentManager } from './agent-manager.js';
 import type { SessionManager } from './session-manager.js';
 import { getEventBus } from './event-bus.js';
 import { getLogger } from '../utils/logger.js';
+import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
 
 const logger = getLogger('kernel-router');
+
+/**
+ * 从错误对象中提取类型化错误码，供 Agent LLM 做出合理决策。
+ *
+ * 错误码对照：
+ * - AGENT_TIMEOUT → Agent 还活着但卡住/处理慢，可安全重试
+ * - AGENT_CRASHED → Agent 进程已崩溃，不应重试
+ * - AGENT_UNAVAILABLE → Agent 未注册或离线，不应重试
+ * - UNKNOWN → 通用错误
+ */
+function errorToCode(err: unknown): { code: string; message: string } {
+  if (err instanceof AgentTimeoutError) return { code: 'AGENT_TIMEOUT', message: err.message };
+  if (err instanceof AgentCrashError) return { code: 'AGENT_CRASHED', message: err.message };
+  if (err instanceof AgentUnavailableError) return { code: 'AGENT_UNAVAILABLE', message: err.message };
+  return { code: 'UNKNOWN', message: (err as Error).message };
+}
 
 /** Agent IPC 接口的最小子集（KernelRouter 只需要 onMessage + send） */
 export interface AgentIpcLike {
@@ -129,14 +146,15 @@ export class KernelRouter {
         const reply = await router.sendMessage(payload);
         primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
       } catch (err) {
-        // 超时或错误 → 构造错误 reply
+        // 使用类型化错误码，让 Agent LLM 能区分超时/崩溃/不可用
+        const { code, message } = errorToCode(err);
         const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
           dialogueId: payload.dialogueId,
           sequenceNumber: payload.sequenceNumber + 1,
           from: payload.to,
           to: payload.from,
-          content: `[对话错误] ${(err as Error).message}`,
-          metadata: { isFinal: true },
+          content: `[对话错误:${code}] ${message}`,
+          metadata: { isFinal: true, errorCode: code },
         };
         primaryIpc.send('dialogue.reply', primaryName, errorReply, payload.dialogueId);
 
@@ -246,8 +264,8 @@ export class KernelRouter {
           sequenceNumber: payload.sequenceNumber + 1,
           from: payload.to,
           to: payload.from,
-          content: `[对话错误] 目标 Agent "${payload.to}" 不可用: ${(err as Error).message}`,
-          metadata: { isFinal: true },
+          content: `[对话错误:AGENT_UNAVAILABLE] 目标 Agent "${payload.to}" 不可用: ${(err as Error).message}`,
+          metadata: { isFinal: true, errorCode: 'AGENT_UNAVAILABLE' },
         };
         agentIpc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
         return;
@@ -268,13 +286,15 @@ export class KernelRouter {
         const reply = await router.sendMessage(payload);
         agentIpc.send('dialogue.reply', agentName, reply, payload.dialogueId);
       } catch (err) {
+        // 使用类型化错误码，让 Agent LLM 能区分超时/崩溃/不可用
+        const { code, message } = errorToCode(err);
         const errorReply: import('../contracts/dialogue.js').DialogueMessagePayload = {
           dialogueId: payload.dialogueId,
           sequenceNumber: payload.sequenceNumber + 1,
           from: payload.to,
           to: payload.from,
-          content: `[对话错误] ${(err as Error).message}`,
-          metadata: { isFinal: true },
+          content: `[对话错误:${code}] ${message}`,
+          metadata: { isFinal: true, errorCode: code },
         };
         agentIpc.send('dialogue.reply', agentName, errorReply, payload.dialogueId);
 

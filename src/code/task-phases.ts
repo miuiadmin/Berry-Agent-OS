@@ -39,6 +39,11 @@ export interface PhaseContext {
   ipc: IpcChildChannel;
   runtime: CodeRuntime;
   lockManager: LockManager;
+  /**
+   * VF-4: 工具循环终止时的回调（Saga 补偿 / 资源清理）。
+   * 传递给 runToolLoop 的 onStop 参数。
+   */
+  onStop?: (reason: 'aborted' | 'completed' | 'budget_exceeded' | 'error' | 'limit_reached') => Promise<void>;
 }
 
 export interface PhaseResult {
@@ -223,6 +228,8 @@ async function runResearch(ctx: PhaseContext, allTools: ToolDefinition[]): Promi
     validatePermission: safeValidate,
     consumePermission: safeConsume,
     auditTool: buildAuditFn(ctx),
+    // VF-4: 研究（只读）阶段不需要补偿，但仍然传递 onStop 以处理 abort 等场景
+    onStop: ctx.onStop,
   });
 
   return {
@@ -399,6 +406,8 @@ async function runImplementation(
       validatePermission: buildValidateFn(ctx),
       consumePermission: buildConsumeFn(ctx),
       auditTool: buildAuditFn(ctx),
+      // VF-4: 实现阶段是写入文件的核心阶段，onStop 触发 Saga 补偿回滚
+      onStop: ctx.onStop,
     });
 
     for (const tc of result.toolCalls) {

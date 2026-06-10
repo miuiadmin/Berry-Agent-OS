@@ -83,6 +83,36 @@ export class ConfigError extends KernelError {
   }
 }
 
+/**
+ * Agent 超时错误 — 目标 Agent 在指定时间内未回复。
+ *
+ * 含义：Agent 还活着（进程未崩溃），但处理慢或卡住了。
+ * 调用方可安全重试，或尝试替代路径（如自己查 SQLite）。
+ */
+export class AgentTimeoutError extends KernelError {
+  readonly code = 'AGENT_TIMEOUT';
+  readonly retryable = true;
+  constructor(message: string, readonly target?: string, readonly timeoutMs?: number) {
+    super(message);
+    this.name = 'AgentTimeoutError';
+  }
+}
+
+/**
+ * Agent 崩溃错误 — 目标 Agent 进程已终止（非正常退出）。
+ *
+ * 含义：Agent 进程已经不存在了，重试无意义。
+ * 调用方应换其他路径（自己处理 / 问其他 Agent / 告知用户）。
+ */
+export class AgentCrashError extends KernelError {
+  readonly code = 'AGENT_CRASHED';
+  readonly retryable = false;
+  constructor(message: string, readonly target?: string) {
+    super(message);
+    this.name = 'AgentCrashError';
+  }
+}
+
 export class BackpressureError extends KernelError {
   readonly code = 'BACKPRESSURE';
   readonly retryable = true;

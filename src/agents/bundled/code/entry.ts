@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { CodeRuntime } from '../../../code/index.js';
@@ -14,16 +15,69 @@ import { z } from 'zod';
 import type { ToolResult } from '../../../tools/types.js';
 // 13.0 AgentPort: Code Agent 可通过 AgentPort 向其他 Agent 提问
 import { createAgentPort } from '../../agent-port.js';
+// VF-4: Saga 补偿集成
+import { SagaOrchestrator } from '../../../kernel/saga.js';
+import { getLogger } from '../../../utils/logger.js';
+
+const logger = getLogger('code-entry');
 
 /**
  * 注册带文件锁保护的工具版本（覆盖 builtin）。
- * 在 Code Agent 进程中，write_file / edit_code 会通过 LockManager 获取写锁，
- * 确保 dialogue 模式和 agent.task 模式的文件写入互斥。
+ *
+ * VF-4 增强：所有文件写入操作通过 safeWriteFile 包装，
+ * 自动在 Saga 中注册补偿动作（回滚到旧内容）。
+ * 当任务被取消/中断时，onStop 回调触发 Saga 补偿。
+ *
+ * @param lockManager 文件锁管理器
+ * @param workspaceDir 工作区目录
+ * @param agentName 当前 Agent 名称
+ * @param saga VF-4 Saga 编排器（可选；不传则跳过补偿注册）
  */
-function registerLockedTools(lockManager: LockManager, workspaceDir: string, agentName: string): void {
+function registerLockedTools(lockManager: LockManager, workspaceDir: string, agentName: string, saga?: SagaOrchestrator): void {
+  /**
+   * 安全写入文件：写入前保存旧内容，自动注册 Saga 补偿。
+   *
+   * 流程：
+   * 1. 读取当前文件内容（如文件不存在则为 null）
+   * 2. 写入新内容
+   * 3. 在 Saga 中注册补偿（回滚到旧内容或删除新建文件）
+   *
+   * @returns 旧内容（供调用方记录）
+   */
+  async function safeWriteFile(filePath: string, content: string, sessionId: string): Promise<string | null> {
+    const resolved = resolve(filePath);
+    const oldContent = existsSync(resolved) ? await readFile(resolved, 'utf-8') : null;
+
+    // 写入新内容
+    await writeFile(resolved, content, 'utf-8');
+
+    // 注册 Saga 补偿（写入成功后才注册，写入失败则不需要回滚）
+    if (saga && sessionId) {
+      const sagaId = getOrCreateTaskSaga(sessionId);
+      if (sagaId) {
+        const stepName = oldContent !== null
+          ? `restore_${resolved}`
+          : `delete_new_${resolved}`;
+        saga.addCompensation(sagaId, stepName, async () => {
+          if (oldContent !== null) {
+            await writeFile(resolved, oldContent, 'utf-8');
+            logger.debug({ path: resolved }, 'saga:compensation restored file');
+          } else {
+            // 新建的文件 → 删除
+            const { unlink } = await import('node:fs/promises');
+            await unlink(resolved).catch(() => {});
+            logger.debug({ path: resolved }, 'saga:compensation deleted new file');
+          }
+        });
+      }
+    }
+
+    return oldContent;
+  }
+
   registerTool({
     name: 'write_file',
-    description: '将内容写入指定文件（覆盖已有内容）。写入前自动获取文件锁。',
+    description: '将内容写入指定文件（覆盖已有内容）。写入前自动获取文件锁。支持 Saga 自动补偿。',
     inputSchema: z.object({
       path: z.string().describe('文件的绝对或相对路径'),
       content: z.string().describe('要写入的内容'),
@@ -37,7 +91,7 @@ function registerLockedTools(lockManager: LockManager, workspaceDir: string, age
       try {
         const lock = lockManager.acquire({ filePath: resolved, workspaceDir, taskId, agentName, lockType: 'write' });
         lockId = lock.id;
-        await writeFile(resolved, content, 'utf-8');
+        await safeWriteFile(resolved, content, currentSessionId);
         return { content: `已写入文件: ${filePath}` };
       } catch (err) {
         return { content: `写入文件失败: ${(err as Error).message}`, isError: true };
@@ -49,7 +103,7 @@ function registerLockedTools(lockManager: LockManager, workspaceDir: string, age
 
   registerTool({
     name: 'edit_code',
-    description: '对文件做精确字符串替换。写入前自动获取文件锁。',
+    description: '对文件做精确字符串替换。写入前自动获取文件锁。支持 Saga 自动补偿。',
     inputSchema: z.object({
       path: z.string().describe('文件路径'),
       oldText: z.string().describe('要替换的原始文本（精确匹配）'),
@@ -80,7 +134,8 @@ function registerLockedTools(lockManager: LockManager, workspaceDir: string, age
           }
         }
         const updated = replaceAll ? content.replaceAll(oldText, newText) : content.replace(oldText, newText);
-        await writeFile(filePath, updated, 'utf-8');
+        // edit_code 通过 safeWriteFile 写入，保留旧内容用于补偿
+        await safeWriteFile(filePath, updated, currentSessionId);
         markFileRead(filePath);
         return { content: `已修改文件: ${path}` };
       } catch (err) {
@@ -94,6 +149,50 @@ function registerLockedTools(lockManager: LockManager, workspaceDir: string, age
 
 /** 确保只注册一次 locked tools（首次 agent.task 或 dialogue.send 触发时） */
 let lockedToolsRegistered = false;
+
+/** VF-4: 当前任务的 sessionId（每次 agent.task 时更新） */
+let currentSessionId = '';
+
+/** VF-4: 当前任务的 saga ID（每次 agent.task 时创建/重置） */
+let currentSagaId: string | null = null;
+
+/** VF-4: Saga 编排器实例（进程级别，复用同一个 SQLite 连接） */
+let sagaInstance: SagaOrchestrator | null = null;
+
+/**
+ * VF-4: 获取或创建当前任务的 saga。
+ * 每次新任务开始时调用 resetTaskSaga() 重置。
+ */
+function getOrCreateTaskSaga(sessionId: string): string | null {
+  if (!sagaInstance || !sessionId) return null;
+  if (!currentSagaId) {
+    currentSagaId = sagaInstance.createSaga(sessionId, 'code_write_compensation');
+    sagaInstance.ensureCompensationList(currentSagaId);
+  }
+  return currentSagaId;
+}
+
+/** VF-4: 重置任务级 saga 状态（新任务开始时调用） */
+function resetTaskSaga(): void {
+  currentSagaId = null;
+}
+
+/** VF-4: 获取当前的 onStop 回调，供 runToolLoop 使用 */
+function getOnStopCallback(): ((reason: 'aborted' | 'completed' | 'budget_exceeded' | 'error' | 'limit_reached') => Promise<void>) | undefined {
+  if (!sagaInstance || !currentSagaId) return undefined;
+  return async (reason) => {
+    // 只有异常终止才触发补偿（正常完成不需要回滚）
+    if (reason === 'aborted' || reason === 'error' || reason === 'budget_exceeded') {
+      logger.info({ sagaId: currentSagaId, reason }, 'VF-4: triggering saga compensation');
+      await sagaInstance!.compensateSaga(currentSagaId!);
+    } else {
+      // 正常完成 → 关闭 saga（不需要补偿）
+      sagaInstance!.completeSaga(currentSagaId!);
+    }
+    currentSagaId = null;
+  };
+}
+
 function ensureLockedTools(): LockManager {
   const db = getDb();
   const lockManager = new LockManager(db);
@@ -101,7 +200,9 @@ function ensureLockedTools(): LockManager {
     lockedToolsRegistered = true;
     const workspaceDir = process.env.WORKSPACE_DIR ?? homedir();
     const agentName = process.env.AGENT_NAME ?? 'code';
-    registerLockedTools(lockManager, workspaceDir, agentName);
+    // VF-4: 初始化 Saga 编排器
+    sagaInstance = new SagaOrchestrator(db);
+    registerLockedTools(lockManager, workspaceDir, agentName, sagaInstance);
   }
   return lockManager;
 }
@@ -186,6 +287,10 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   // 13.0: 注册 AgentPort 工具，让 Code Agent 可通过 ask_agent 向其他 Agent 提问
   ensureAgentPortTools(context.ipc, context.askUser);
 
+  // VF-4: 设置当前任务的 saga 上下文（sessionId 供 safeWriteFile 使用）
+  currentSessionId = payload.sessionId;
+  resetTaskSaga();
+
   const input = payload.inputPayload;
   const workingDir = (input.workingDir as string) ?? homedir();
   const workspace = await detectWorkspace(workingDir);
@@ -204,7 +309,15 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
     ipc: context.ipc,
     runtime,
     lockManager,
+    // VF-4: 注入 onStop 回调，任务异常终止时触发 Saga 补偿
+    onStop: getOnStopCallback() ?? undefined,
   });
+
+  // VF-4: 正常完成后关闭 saga（不补偿）
+  if (currentSagaId && sagaInstance) {
+    sagaInstance.completeSaga(currentSagaId);
+    currentSagaId = null;
+  }
 
   return {
     kind: 'code_task',

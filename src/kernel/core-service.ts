@@ -478,6 +478,15 @@ export class CoreService {
 
       this.taskManager!.failByAgent(name, `智能体 ${name} 崩溃`);
       this.messageRouter?.failDelegationsByAgent(name, `智能体 ${name} 崩溃`);
+
+      // VF-3: 立即拒绝所有等待该 Agent 回复的 pending dialogue（不等 60s 超时）
+      // 发起方的 LLM 收到 AgentCrashError 后能做出合理决策（不重试，换路径）
+      if (this.messageRouter?.dialogueRouter) {
+        const rejected = this.messageRouter.dialogueRouter.rejectAllForAgent(name);
+        if (rejected > 0) {
+          logger.info({ agent: name, rejectedDialogues: rejected }, 'agent.crashed: rejected pending dialogues');
+        }
+      }
       // R14-1：5 兜底合一。agent.crashed 失败源统一调 sessionManager.fail，
       // 不再自己拼 partialContent + contentOverride + complete。
       // taskManager.failByAgent 已 emit 'task.failed'，但本路径还需要清理

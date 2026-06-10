@@ -73,6 +73,19 @@ export interface ToolLoopParams {
   onUsage?: (inputTokens: number, outputTokens: number) => void;
   onToolResult?: (toolName: string, isError: boolean) => void;
   onUncertainty?: (reason: string) => void;
+  /**
+   * VF-4: 工具循环终止时的生命周期回调。
+   *
+   * 触发场景：
+   * - 'aborted': signal.aborted 或任务被取消
+   * - 'completed': LLM 输出 end_turn（正常完成）
+   * - 'budget_exceeded': token 预算超限
+   * - 'error': LLM 调用失败
+   * - 'limit_reached': 工具调用次数或循环上限
+   *
+   * 用途：Saga 补偿（回滚已写入的文件）、资源清理等。
+   */
+  onStop?: (reason: 'aborted' | 'completed' | 'budget_exceeded' | 'error' | 'limit_reached') => Promise<void>;
   chatContext?: Partial<ChatOptions>;
   budgetController?: TokenBudgetController;
   budgetScope?: { scope: BudgetScope; scopeId: string };
@@ -91,7 +104,7 @@ export interface ToolLoopResult {
 }
 
 export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResult> {
-  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onReasoning, onUsage, onToolResult, onUncertainty, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool } = params;
+  const { llm, messages, systemPrompt, tools, config, signal, onChunk, onReasoning, onUsage, onToolResult, onUncertainty, onStop, chatContext, budgetController, budgetScope, requestPermission, validatePermission, consumePermission, acquirePermission, auditTool } = params;
   const detector = new LoopDetector(config.maxCalls);
   const toolCalls: ToolCallRecord[] = [];
   const workingMessages: ModelMessage[] = [...messages];
@@ -102,8 +115,18 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
   let uncertaintyFired = false;
   const useStreaming = !!onChunk && llm.supportsStreaming();
 
+  /** 安全触发 onStop 回调，不阻塞返回路径 */
+  const fireOnStop = async (reason: Parameters<NonNullable<typeof onStop>>[0]): Promise<void> => {
+    if (onStop) {
+      try { await onStop(reason); } catch (e) {
+        logger.warn({ reason, err: (e as Error).message }, 'tool-loop:onStop callback error');
+      }
+    }
+  };
+
   while (true) {
     if (signal?.aborted) {
+      await fireOnStop('aborted');
       return {
         finalContent: '任务已取消',
         reasoning: accumulatedReasoning || undefined,
@@ -115,6 +138,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
     if (budgetController && budgetScope) {
       const check = budgetController.checkBudget(budgetScope.scope, budgetScope.scopeId);
       if (!check.allowed) {
+        await fireOnStop('budget_exceeded');
         return {
           finalContent: check.alert?.message ?? 'Token 预算已超限，停止执行',
           reasoning: accumulatedReasoning || undefined,
@@ -145,6 +169,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       logger.warn({ step: stepIndex, err: errMsg }, 'tool-loop: LLM 调用失败，提前终止');
+      await fireOnStop('error');
       return {
         finalContent: `LLM 调用失败（步骤 ${stepIndex}）：${errMsg}。已执行 ${toolCalls.length} 次工具调用。`,
         reasoning: accumulatedReasoning || undefined,
@@ -161,12 +186,14 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
 
     // Evaluate stop condition after each step
     if (evaluateStopCondition(config.stopCondition, stepIndex, result.stopReason, result.content.split('\n'))) {
+      await fireOnStop('completed');
       return { finalContent: result.content, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
 
     stepIndex++;
 
     if (result.stopReason !== 'tool_use') {
+      await fireOnStop('completed');
       return { finalContent: result.content, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
 
@@ -347,6 +374,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
         .filter((r): r is Extract<ModelContentBlock, { type: 'tool_result' }> => r.type === 'tool_result')
         .map((r) => r.content)
         .join('\n');
+      await fireOnStop('limit_reached');
       return { finalContent: `工具调用已达上限。最后结果:\n${lastText}`, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
   }

@@ -52,6 +52,20 @@ export class DelegationManager {
   private correlationIndex = new Map<string, string>();
   private childToGroupIndex = new Map<string, string>();
 
+  /**
+   * M6: 每个目标 Agent 的活跃委托计数 + 平均完成时间。
+   * 用于计算排队 ETA 和实现公平调度。
+   */
+  private agentQueueStats = new Map<string, {
+    /** 当前活跃（非终态）的委托数量 */
+    activeCount: number;
+    /** 最近 N 次完成耗时（毫秒），用于估算 ETA */
+    recentDurations: number[];
+  }>();
+
+  /** M6: 保留最近几次完成的时长用于 ETA 计算 */
+  private static readonly ETA_WINDOW_SIZE = 5;
+
   constructor(
     private taskManager: TaskManager,
   ) {}
@@ -92,13 +106,20 @@ export class DelegationManager {
     this.entries.set(taskId, entry);
     this.correlationIndex.set(params.correlationId, taskId);
 
+    // M6: 更新 Agent 队列统计 + 计算 ETA
+    const queueInfo = this.updateQueueOnCreate(params.targetAgent);
+    const eta = this.estimateWaitMs(params.targetAgent);
+
     getEventBus().emit('delegation.created', {
       delegationId: taskId,
       sessionId: params.sessionId,
       targetAgent: params.targetAgent,
+      // M6: 排队信息（前端可展示 "预计等待 X 秒"）
+      queuePosition: queueInfo.activeCount,
+      expectedWaitMs: eta,
     });
 
-    logger.debug({ delegationId: taskId, target: params.targetAgent }, 'Delegation created');
+    logger.debug({ delegationId: taskId, target: params.targetAgent, queuePosition: queueInfo.activeCount, etaMs: eta }, 'Delegation created');
     return taskId;
   }
 
@@ -210,6 +231,10 @@ export class DelegationManager {
     this.taskManager.complete(id, { response });
 
     const durationMs = Date.now() - entry.createdAt;
+
+    // M6: 记录完成耗时，更新 Agent 队列统计（用于后续 ETA 计算）
+    this.updateQueueOnComplete(entry.targetAgent, durationMs);
+
     getEventBus().emit('delegation.completed', {
       delegationId: id,
       targetAgent: entry.targetAgent,
@@ -227,6 +252,9 @@ export class DelegationManager {
     entry.state = 'failed';
 
     this.taskManager.fail(id, error);
+
+    // M6: 更新队列统计（减少活跃计数）
+    this.updateQueueOnComplete(entry.targetAgent);
 
     getEventBus().emit('delegation.failed', {
       delegationId: id,
@@ -529,5 +557,94 @@ export class DelegationManager {
     }
 
     return { type: 'none' };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // M6: 多用户排队 & ETA 管理
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * M6: 新委托创建时更新 Agent 队列统计。
+   * @returns 更新后的队列信息
+   */
+  private updateQueueOnCreate(targetAgent: string): { activeCount: number } {
+    const stats = this.getOrCreateStats(targetAgent);
+    stats.activeCount++;
+
+    // 重新扫描确认计数准确（防止 drift）
+    this.recountActive(targetAgent, stats);
+
+    return { activeCount: stats.activeCount };
+  }
+
+  /**
+   * M6: 委托完成/失败时更新 Agent 队列统计 + 记录耗时。
+   * @param durationMs 完成耗时（失败时传 undefined）
+   */
+  private updateQueueOnComplete(targetAgent: string, durationMs?: number): void {
+    const stats = this.getOrCreateStats(targetAgent);
+    stats.activeCount = Math.max(0, stats.activeCount - 1);
+
+    if (durationMs !== undefined) {
+      stats.recentDurations.push(durationMs);
+      if (stats.recentDurations.length > DelegationManager.ETA_WINDOW_SIZE) {
+        stats.recentDurations.shift();
+      }
+    }
+  }
+
+  /**
+   * M6: 估算目标 Agent 的排队等待时间（毫秒）。
+   *
+   * 算法：活跃数 × 最近 N 次的平均耗时。
+   * 无历史数据时返回保守估计（30 秒 / 个）。
+   */
+  estimateWaitMs(targetAgent: string): number {
+    const stats = this.agentQueueStats.get(targetAgent);
+    if (!stats || stats.activeCount <= 1) return 0;
+
+    const queueDepth = stats.activeCount - 1; // 第一个正在处理，其余在排队
+    if (queueDepth <= 0) return 0;
+
+    // 有历史数据时用平均值
+    if (stats.recentDurations.length > 0) {
+      const avg = stats.recentDurations.reduce((a, b) => a + b, 0) / stats.recentDurations.length;
+      return Math.round(queueDepth * avg);
+    }
+
+    // 无历史数据：保守估计 30 秒 / 个
+    return queueDepth * 30_000;
+  }
+
+  /**
+   * M6: 获取目标 Agent 的队列状态（供外部查询）。
+   */
+  getQueueStatus(targetAgent: string): { activeCount: number; expectedWaitMs: number } {
+    const stats = this.agentQueueStats.get(targetAgent);
+    return {
+      activeCount: stats?.activeCount ?? 0,
+      expectedWaitMs: this.estimateWaitMs(targetAgent),
+    };
+  }
+
+  /** 获取或创建 Agent 的队列统计 */
+  private getOrCreateStats(targetAgent: string): { activeCount: number; recentDurations: number[] } {
+    let stats = this.agentQueueStats.get(targetAgent);
+    if (!stats) {
+      stats = { activeCount: 0, recentDurations: [] };
+      this.agentQueueStats.set(targetAgent, stats);
+    }
+    return stats;
+  }
+
+  /** 重新扫描确认活跃计数准确（防止 drift） */
+  private recountActive(targetAgent: string, stats: { activeCount: number; recentDurations: number[] }): void {
+    let count = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.targetAgent === targetAgent && !isDelegationTerminal(entry.state)) {
+        count++;
+      }
+    }
+    stats.activeCount = count;
   }
 }

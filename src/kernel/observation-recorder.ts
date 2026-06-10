@@ -68,6 +68,23 @@ export interface ObservationRow {
   createdAt: number;
 }
 
+/**
+ * M1: 查询结果 + 截断元信息。
+ *
+ * C 级审核检测到 truncated=true 时应降级为 B 级 + 警告，
+ * 因为 Brain 以为看了全部，其实有一部分被裁剪了。
+ */
+export interface ObservationQueryResult {
+  /** 查询到的观察记录 */
+  rows: ObservationRow[];
+  /** 该 (session, task) 是否发生过裁剪（低优先级记录被删除） */
+  truncated: boolean;
+  /** 裁剪前历史峰值（用于判断丢失了多少数据） */
+  peakCount: number;
+  /** 当前窗口大小 */
+  windowSize: number;
+}
+
 /** 默认滚动窗口大小（每个 task 最多保留多少条观察） */
 export const DEFAULT_OBSERVATION_WINDOW = 500;
 
@@ -76,6 +93,13 @@ export class ObservationRecorder {
   private nextSeqStmt: Database.Statement;
   private db: Database.Database;
   private windowSize: number;
+
+  /**
+   * M1: 截断跟踪器。
+   * key = `${sessionId}:${taskId}`，value = { peakCount, truncated }。
+   * 当 prune 删除记录时标记 truncated=true 并更新 peakCount。
+   */
+  private truncationTracker = new Map<string, { peakCount: number; truncated: boolean }>();
 
   constructor(db: Database.Database, windowSize: number = DEFAULT_OBSERVATION_WINDOW) {
     this.db = db;
@@ -191,6 +215,8 @@ export class ObservationRecorder {
   /**
    * 滚动窗口裁剪：保留优先级最高 + 时间最新的 N 条，删除其余。
    * 使用 DELETE 限定行数避免长事务。
+   *
+   * M1: 裁剪时更新截断跟踪器，供 C 级审核检测保真度降级。
    */
   prune(sessionId: string, taskId: string): number {
     const count = (this.db.prepare(`
@@ -199,6 +225,13 @@ export class ObservationRecorder {
     `).get(sessionId, taskId) as { cnt: number }).cnt;
 
     if (count <= this.windowSize) return 0;
+
+    // M1: 更新截断跟踪器（记录峰值和截断标志）
+    const trackerKey = `${sessionId}:${taskId}`;
+    const tracker = this.truncationTracker.get(trackerKey) ?? { peakCount: 0, truncated: false };
+    tracker.peakCount = Math.max(tracker.peakCount, count);
+    tracker.truncated = true;
+    this.truncationTracker.set(trackerKey, tracker);
 
     const toDelete = count - this.windowSize;
     // 优先删除 priority 最低（verbose=2）且最旧的记录
@@ -214,7 +247,7 @@ export class ObservationRecorder {
     `).run(sessionId, taskId, toDelete);
 
     if (result.changes > 0) {
-      logger.debug({ sessionId, taskId, deleted: result.changes, window: this.windowSize }, 'observation:pruned');
+      logger.debug({ sessionId, taskId, deleted: result.changes, window: this.windowSize, peak: tracker.peakCount }, 'observation:pruned');
     }
     return result.changes;
   }
@@ -227,6 +260,36 @@ export class ObservationRecorder {
       'SELECT COUNT(*) AS cnt FROM brain_observations WHERE session_id = ?',
     ).get(sessionId) as { cnt: number };
     return row.cnt;
+  }
+
+  /**
+   * M1: 查询指定 task 的全部观察，附带截断信息。
+   *
+   * C 级审核使用此方法：如果 truncated=true，说明观察队列被裁剪过，
+   * Brain 以为看了全部其实没有，应降级为 B 级 + 警告。
+   *
+   * @param taskId 任务 ID
+   * @param sessionId 会话 ID（可选，用于缩小查询范围）
+   * @returns 观察记录 + 截断元信息
+   */
+  queryWithTruncationInfo(taskId: string, sessionId?: string): ObservationQueryResult {
+    const rows = this.queryByTask(taskId, sessionId);
+    const key = sessionId ? `${sessionId}:${taskId}` : '';
+    const tracker = key ? this.truncationTracker.get(key) : undefined;
+
+    return {
+      rows,
+      truncated: tracker?.truncated ?? false,
+      peakCount: tracker?.peakCount ?? rows.length,
+      windowSize: this.windowSize,
+    };
+  }
+
+  /**
+   * M1: 检查指定 (session, task) 是否发生过截断。
+   */
+  isTruncated(sessionId: string, taskId: string): boolean {
+    return this.truncationTracker.get(`${sessionId}:${taskId}`)?.truncated ?? false;
   }
 
   private toRow = (raw: Record<string, unknown>): ObservationRow => ({

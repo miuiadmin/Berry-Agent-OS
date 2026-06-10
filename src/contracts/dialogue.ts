@@ -20,6 +20,13 @@ export interface DialogueMetadata {
   needsClarification?: boolean;
   /** 置信度（0-1），低于阈值 Conversation 可能追问 */
   confidence?: number;
+  /**
+   * VF-3: 类型化错误码，供 Agent LLM 做出合理决策。
+   * - AGENT_TIMEOUT: Agent 还活着但卡住，可安全重试
+   * - AGENT_CRASHED: Agent 进程已崩溃，不应重试
+   * - AGENT_UNAVAILABLE: Agent 未注册或离线
+   */
+  errorCode?: string;
 }
 
 /** dialogue.send / dialogue.reply 共用的消息载荷 */
@@ -43,7 +50,7 @@ export interface DialogueMessagePayload {
 /** dialogue.end 载荷 */
 export interface DialogueEndPayload {
   dialogueId: string;
-  reason: 'completed' | 'timeout' | 'interrupted' | 'budget_exceeded';
+  reason: 'completed' | 'timeout' | 'interrupted' | 'budget_exceeded' | 'agent_crashed';
 }
 
 /** dialogue.observe 载荷（Kernel → Brain 的消息副本） */

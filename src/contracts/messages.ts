@@ -150,7 +150,7 @@ export type EventMap = {
   'daemon.task.progress': { taskId: string; event: NormalizedExternalEvent };
   'daemon.task.completed': { taskId: string; runtime: string; durationMs: number };
   'daemon.task.failed': { taskId: string; runtime: string; error: string };
-  'delegation.created': { delegationId: string; sessionId: string; targetAgent: string };
+  'delegation.created': { delegationId: string; sessionId: string; targetAgent: string; queuePosition?: number; expectedWaitMs?: number };
   'delegation.acknowledged': { delegationId: string; targetAgent: string };
   'delegation.completed': { delegationId: string; targetAgent: string; durationMs: number };
   'delegation.failed': { delegationId: string; targetAgent: string; error: string };

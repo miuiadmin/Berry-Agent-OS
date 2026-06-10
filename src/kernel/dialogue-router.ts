@@ -25,6 +25,7 @@ import type { ObservationRecorder } from './observation-recorder.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import { getEventBus } from './event-bus.js';
+import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
 
 const logger = getLogger('dialogue-router');
 
@@ -102,7 +103,7 @@ export class DialogueRouter {
     return state;
   }
 
-  /** 关闭对话 */
+  /** 关闭对话，根据原因 reject pending request 并使用类型化错误 */
   closeDialogue(dialogueId: string, reason: DialogueEndPayload['reason']): void {
     const state = this.dialogues.get(dialogueId);
     if (!state) return;
@@ -110,8 +111,23 @@ export class DialogueRouter {
     this.clearReplyTimer(dialogueId);
     const pending = this.pendingReplies.get(dialogueId);
     if (pending) {
-      pending.reject(new Error(`dialogue closed: ${reason}`));
       this.pendingReplies.delete(dialogueId);
+      // 根据关闭原因使用不同的错误类型，让调用方的 LLM 能做出合理决策
+      if (reason === 'timeout') {
+        pending.reject(new AgentTimeoutError(
+          `dialogue timeout: ${state.target} did not reply within ${DIALOGUE_DEFAULTS.replyTimeoutMs}ms`,
+          state.target,
+          DIALOGUE_DEFAULTS.replyTimeoutMs,
+        ));
+      } else if (reason === 'agent_crashed') {
+        pending.reject(new AgentCrashError(
+          `dialogue aborted: ${state.target} process terminated`,
+          state.target,
+        ));
+      } else {
+        // 其他原因（interrupted / completed / budget_exceeded）用通用错误
+        pending.reject(new Error(`dialogue closed: ${reason}`));
+      }
     }
     // 通知 Brain 对话已结束
     const brainIpc = this.deps.getBrainIpc();
@@ -125,6 +141,39 @@ export class DialogueRouter {
   /** 获取 session 下所有活跃对话 */
   getActiveDialoguesForSession(sessionId: string): DialogueState[] {
     return [...this.dialogues.values()].filter(d => d.sessionId === sessionId && d.status === 'active');
+  }
+
+  /**
+   * Agent 崩溃时拒绝所有等待该 Agent 回复的 pending request。
+   *
+   * 关键行为：不等 60s 超时，立即通知所有发起方该 Agent 已崩溃。
+   * 发起方的 LLM 看到 AgentCrashError 后能做出合理决策（不重试，换路径）。
+   *
+   * @param agentName 崩溃的 Agent 名称
+   * @returns 被拒绝的对话数量
+   */
+  rejectAllForAgent(agentName: string): number {
+    let count = 0;
+    for (const [dialogueId, state] of this.dialogues) {
+      // 只处理该 agent 作为 target 且仍在活跃状态的对话
+      if (state.target !== agentName || state.status !== 'active') continue;
+
+      const pending = this.pendingReplies.get(dialogueId);
+      if (pending) {
+        this.pendingReplies.delete(dialogueId);
+        this.clearReplyTimer(dialogueId);
+        pending.reject(new AgentCrashError(
+          `dialogue aborted: ${agentName} process terminated`,
+          agentName,
+        ));
+        count++;
+      }
+      // 标记对话为 terminated 状态（不触发二次 reject）
+      state.status = 'interrupted';
+
+      logger.info({ dialogueId, target: agentName }, 'dialogue:rejected due to agent crash');
+    }
+    return count;
   }
 
   /** 检查指定 correlationId 是否存在与目标 agent 的对话（包括已完成/超时的） */
@@ -194,7 +243,7 @@ export class DialogueRouter {
     // 路由到目标 Agent
     const targetIpc = this.deps.getAgentIpc(state.target);
     if (!targetIpc) {
-      throw new Error(`target agent not available: ${state.target}`);
+      throw new AgentUnavailableError(`target agent not available: ${state.target}`, state.target);
     }
     targetIpc.send('dialogue.send', state.target, msg, msg.dialogueId);
 
@@ -303,27 +352,50 @@ export class DialogueRouter {
     }
   }
 
+  /**
+   * M4: 将观察记录、EventBus 事件、Brain IPC 推送完全解耦。
+   *
+   * 三个独立的 fire-and-forget 操作，任何一个失败都不影响其他。
+   * 观察记录直接写 SQLite，不经过 deliver / IPC 路径。
+   */
   private notifyBrain(msg: DialogueMessagePayload, state: DialogueState): void {
-    // 13.0: 先持久化到观察队列（fire-and-forget，不阻塞消息投递）
-    if (this.deps.observationRecorder) {
-      try {
-        this.deps.observationRecorder.record({
-          sessionId: state.sessionId,
-          taskId: state.correlationId,
-          observationType: state.currentRound === 0 ? 'dialogue_send' : 'dialogue_reply',
-          fromAgent: msg.from,
-          toAgent: msg.to,
-          content: msg.content.slice(0, 2000), // 截断以控制存储
-          priority: msg.metadata?.confidence !== undefined && msg.metadata.confidence < 0.5 ? 2 : 1,
-          metadata: { round: state.currentRound, dialogueId: msg.dialogueId, sequenceNumber: msg.sequenceNumber },
-        });
-      } catch (err) {
-        logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:observation record failed');
-      }
-    }
+    // ── 1. 持久化到观察队列（直接写 SQLite，完全独立） ──
+    this.recordObservation(msg, state);
 
-    // 13.0: 推送 agent.dialogue 事件至 EventBus，WsEventBridge 转发到前端对话面板
-    // phase: send（首轮）/ reply（回复）
+    // ── 2. 推送前端事件（EventBus，独立） ──
+    this.emitDialogueEvent(msg, state);
+
+    // ── 3. Brain IPC 实时推送（保留现有路径） ──
+    this.pushToBrainIpc(msg, state);
+  }
+
+  /**
+   * M4: 观察记录 — 直接写 SQLite，失败不影响消息投递。
+   * 与 deliver / IPC 完全无关，纯数据库 INSERT。
+   */
+  private recordObservation(msg: DialogueMessagePayload, state: DialogueState): void {
+    if (!this.deps.observationRecorder) return;
+    try {
+      this.deps.observationRecorder.record({
+        sessionId: state.sessionId,
+        taskId: state.correlationId,
+        observationType: state.currentRound === 0 ? 'dialogue_send' : 'dialogue_reply',
+        fromAgent: msg.from,
+        toAgent: msg.to,
+        content: msg.content.slice(0, 2000), // 截断以控制存储
+        priority: msg.metadata?.confidence !== undefined && msg.metadata.confidence < 0.5 ? 2 : 1,
+        metadata: { round: state.currentRound, dialogueId: msg.dialogueId, sequenceNumber: msg.sequenceNumber },
+      });
+    } catch (err) {
+      // M4: 观察写入失败仅记录，绝不向上抛出（不污染发送方）
+      logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:observation record failed (isolated)');
+    }
+  }
+
+  /**
+   * M4: 推送 agent.dialogue 事件至 EventBus（前端对话面板）。
+   */
+  private emitDialogueEvent(msg: DialogueMessagePayload, state: DialogueState): void {
     try {
       getEventBus().emit('agent.dialogue', {
         dialogueId: msg.dialogueId,
@@ -337,10 +409,15 @@ export class DialogueRouter {
         timestamp: Date.now(),
       });
     } catch (err) {
-      logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:agent.dialogue emit failed');
+      logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:agent.dialogue emit failed (isolated)');
     }
+  }
 
-    // 保留现有的 IPC 推送（Brain 实时监听，仍是主路径）
+  /**
+   * M4: Brain IPC 实时推送（dialogue.observe）。
+   * Brain 离线时静默跳过。
+   */
+  private pushToBrainIpc(msg: DialogueMessagePayload, state: DialogueState): void {
     const brainIpc = this.deps.getBrainIpc();
     if (!brainIpc) return;
     // 12.0: 从 pending 中获取 intentAnchor 供 Brain 做语义漂移检测
@@ -351,7 +428,11 @@ export class DialogueRouter {
       sessionId: state.sessionId,
       intentAnchor: pending?.intentAnchor,
     };
-    brainIpc.send('dialogue.observe', 'brain', observe, msg.dialogueId);
+    try {
+      brainIpc.send('dialogue.observe', 'brain', observe, msg.dialogueId);
+    } catch (err) {
+      logger.warn({ err, dialogueId: msg.dialogueId }, 'dialogue:brain IPC push failed (isolated)');
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
