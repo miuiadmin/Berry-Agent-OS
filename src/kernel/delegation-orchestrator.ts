@@ -297,14 +297,49 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       });
     });
 
-    // 13.0 §3.8 第二层: delegation 结束时清理 active_scope（避免 stale 约束泄漏到下一个 task）
-    const cleanupScope = (delegationId: string) => {
+    // 13.0 §3.8 第二层 + §8.4: delegation 结束时清理 task 级状态缓存
+    // 避免 stale 约束/纠偏/行为笔记泄漏到下一个 task
+    // （active_scope 用 delegationId，correction/behavior_note 用 sessionId:taskId 复合 key）
+    const cleanupTaskState = (delegationId: string, sessionId?: string, taskId?: string) => {
       if (this.permissionCoordinator) {
         this.permissionCoordinator.clearActiveScope(delegationId);
       }
+      // 清理 StateCache 中所有与该 task 相关的命名空间条目
+      if (this._stateCache) {
+        if (taskId) {
+          // correction / behavior_note 等用 sessionId:taskId 复合 key
+          const compositeKey = sessionId ? `${sessionId}:${taskId}` : taskId;
+          this._stateCache.delete('correction', compositeKey);
+          this._stateCache.delete('behavior_note', compositeKey);
+          // active_scope 用 taskId 作为 key
+          this._stateCache.delete('active_scope', taskId);
+          // intent_anchor 按 sessionId 索引；task 结束不主动清（跨 task 复用）
+        }
+        if (sessionId) {
+          // mission_context 按 sessionId 索引；task 结束不主动清（跨 task 复用）
+        }
+      }
     };
-    getEventBus().on('delegation.completed', ({ delegationId }: { delegationId: string }) => cleanupScope(delegationId));
-    getEventBus().on('delegation.failed', ({ delegationId }: { delegationId: string }) => cleanupScope(delegationId));
+
+    // 单一入口：completed / failed / timeout / cancel 都走同一个清理函数
+    const onTermination = (payload: { delegationId: string; sessionId?: string; targetAgent?: string }) => {
+      // 从 delegationEntry 反查 sessionId/taskId
+      const entry = this.delegationManager.get(payload.delegationId);
+      const resolvedTaskId = (entry as unknown as { taskId?: string } | undefined)?.taskId ?? payload.delegationId;
+      cleanupTaskState(
+        payload.delegationId,
+        payload.sessionId ?? entry?.sessionId,
+        resolvedTaskId,
+      );
+      logger.debug({
+        delegationId: payload.delegationId,
+        sessionId: payload.sessionId ?? entry?.sessionId,
+        targetAgent: payload.targetAgent,
+      }, 'orchestrator: cleanup task state on delegation end');
+    };
+
+    getEventBus().on('delegation.completed', onTermination);
+    getEventBus().on('delegation.failed', onTermination);
   }
 
   /** 获取 MissionManager 实例（13.0 多智能体协作） */
