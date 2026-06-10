@@ -138,6 +138,15 @@ export type EventMap = {
   'task.resumed': { taskId: string; strategy?: string };
   'task.resumable': { taskId: string; errorType: string; error: string };
   'task.resume.restart': { taskId: string };
+  /** 13.0 §8.7 + §5.3.14: Agent 拒绝任务时发 task.reject（Brain observe 触发纠偏或降级为 askUser） */
+  'task.reject': {
+    taskId: string;
+    agentName: string;
+    reason: string;
+    /** Agent 自报的 capability gap（Brain 可基于此重路由） */
+    capabilityGap?: string;
+    timestamp: number;
+  };
   'checkpoint.saved': { taskId: string; stepIndex: number };
   'task.force_updated': { taskId: string; status: string; reason: string };
   'agent.registered': { name: AgentName; pid: number };

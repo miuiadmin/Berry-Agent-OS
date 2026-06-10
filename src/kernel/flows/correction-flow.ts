@@ -273,9 +273,39 @@ export class CorrectionFlow {
     const entry = this.ctx.delegationManager.get(delegationId);
     if (!entry) return;
 
+    // 13.0 §5.3.14: reRouteDepth 达上限 → 降级为 askUser（不再盲目 stop）
     if (entry.reRouteDepth >= entry.budget.maxReRouteDepth) {
-      logger.warn({ delegationId, depth: entry.reRouteDepth }, 'Max re-route depth reached, stopping instead');
-      this.applyStop(delegationId, correction);
+      logger.warn({
+        delegationId,
+        depth: entry.reRouteDepth,
+        maxReRoute: entry.budget.maxReRouteDepth,
+      }, 'applyRestart: reRoute 达上限，降级为 askUser');
+
+      // 13.0 §8.7: emit task.reject 让 Brain observe
+      getEventBus().emit('task.reject' as any, {
+        taskId: delegationId,
+        agentName: entry.targetAgent,
+        reason: correction.instruction ?? 'Brain 多次 reRoute 失败',
+        capabilityGap: correction.instruction,
+        timestamp: Date.now(),
+      });
+
+      // askUser：让 Conversation agent 把问题暴露给真实用户
+      const pending = this.ctx.sessionManager.getPending(entry.correlationId);
+      if (pending) {
+        const questionText = correction.instruction
+          ?? `我尝试了多种方案处理你的请求但都失败了。能否提供更多细节？`;
+        // 直接 resolve pending（让 conversation 把 askUser 转给真实用户）
+        const finalized = this.ctx.sessionManager.complete(entry.correlationId, questionText, { skipResolve: false });
+        if (finalized && typeof finalized !== 'boolean') {
+          finalized.resolve(questionText, {
+            verdict: 'modify',
+            reason: 'Brain 多次 reRoute 失败 — 降级为 askUser',
+            originalDraft: pending.draftResponse ?? pending.userMessage,
+          });
+        }
+        logger.info({ delegationId, correlationId: entry.correlationId }, 'applyRestart: 降级为 askUser 完成');
+      }
       return;
     }
 
