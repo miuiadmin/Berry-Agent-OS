@@ -1,6 +1,9 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
 import { evolutionMetrics } from '../observability/evolution-metrics.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('brain-decision-recorder');
 
 export type BrainDecisionType = 'route' | 'review' | 'permission' | 'correction' | 'aggregated_insight';
 
@@ -40,7 +43,8 @@ export class BrainDecisionRecorder {
 
       evolutionMetrics.brainDecisionRecorded.inc({ decision_type: input.decisionType });
       return id;
-    } catch {
+    } catch (err) {
+      logger.warn({ err, decisionType: input.decisionType, sessionId: input.sessionId }, 'brain-decision: insert failed');
       return null;
     }
   }
@@ -95,7 +99,9 @@ export class BrainDecisionRecorder {
   updateLesson(decisionId: string, lesson: string): void {
     try {
       this.db.prepare(`UPDATE brain_decisions SET lesson = ?, resolved_at = ? WHERE id = ?`).run(lesson, Date.now(), decisionId);
-    } catch { /* best-effort */ }
+    } catch (err) {
+      logger.debug({ err, decisionId }, 'brain-decision: updateLesson skipped');
+    }
   }
 
   recallForDecision(decisionType: string, limit = 5): Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }> {
@@ -123,7 +129,8 @@ export class BrainDecisionRecorder {
       `).all(decisionType, remaining) as Array<{ inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null }>;
 
       return [...withLessons, ...recent];
-    } catch {
+    } catch (err) {
+      logger.warn({ err, decisionType }, 'brain-decision: recall failed, returning empty');
       return [];
     }
   }

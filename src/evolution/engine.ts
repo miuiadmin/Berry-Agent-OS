@@ -6,6 +6,9 @@ import { EvolutionProposalStore } from './store.js';
 import type { IEvolutionEngine } from './contract.js';
 import type { EvolutionRunResult, LearningSignal } from './types.js';
 import type { UnifiedEvolutionExtractor, EvolutionExtractionInput } from './unified-extractor.js';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('evolution-engine');
 import { genId } from '../utils/id.js';
 
 export class EvolutionEngine implements IEvolutionEngine {
@@ -73,8 +76,9 @@ export class EvolutionEngine implements IEvolutionEngine {
           Date.now(),
         );
       }
-    } catch {
+    } catch (err) {
       // knowledge table schema may differ during migration
+      logger.debug({ err, factCount: facts.length, sessionId }, 'evolution: knowledge insert skipped (schema mismatch)');
     }
   }
 
@@ -187,8 +191,9 @@ export class EvolutionEngine implements IEvolutionEngine {
         outcome,
         Date.now(),
       );
-    } catch {
+    } catch (err) {
       // table may not exist yet during initial migration
+      logger.debug({ err, signalKind: signal.kind, target: signal.targetName, outcome }, 'evolution: signal_history insert skipped (table not ready)');
     }
   }
 }

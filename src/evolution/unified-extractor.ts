@@ -3,6 +3,9 @@ import type { LlmClient } from '../llm/index.js';
 import { parseLearningSignalsFromText } from './detector-parser.js';
 import { genId } from '../utils/id.js';
 import type { Database } from 'better-sqlite3';
+import { getLogger } from '../utils/logger.js';
+
+const logger = getLogger('unified-evolution-extractor');
 
 export interface EvolutionExtractionInput {
   sessionId: string;
@@ -78,7 +81,8 @@ export class UnifiedEvolutionExtractor {
         this.recordBrainDecision(input.sessionId, input.userMessage, parsed);
       }
       return parsed ?? { userFacts: [], decisionFeedback: [], capabilityGaps: [] };
-    } catch {
+    } catch (err) {
+      logger.debug({ err }, 'evolution: JSON parse failed, returning empty result');
       return { userFacts: [], decisionFeedback: [], capabilityGaps: [] };
     }
   }
@@ -119,7 +123,8 @@ export class UnifiedEvolutionExtractor {
       );
 
       return { userFacts, decisionFeedback, capabilityGaps };
-    } catch {
+    } catch (err) {
+      logger.debug({ err }, 'evolution: extraction failed, returning null');
       return null;
     }
   }
@@ -143,8 +148,8 @@ export class UnifiedEvolutionExtractor {
           Date.now(),
         );
       }
-    } catch {
-      // table may not exist during migration
+    } catch (err) {
+      logger.debug({ err }, 'evolution: knowledge insert skipped (table not ready during migration)');
     }
   }
 }
