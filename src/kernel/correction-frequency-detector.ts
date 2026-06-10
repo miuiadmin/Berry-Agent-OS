@@ -136,6 +136,8 @@ export class CorrectionFrequencyDetector {
 
   /**
    * 查询 agent 在两个窗口内的纠偏统计。
+   * - highCount: 高严重度窗口（30min）内的高 severity 计数
+   * - totalCount: 总窗口（60min）内的总 severity 计数
    */
   private queryFrequencyStats(agentName: string, now: number): {
     highCount: number;
@@ -146,30 +148,40 @@ export class CorrectionFrequencyDetector {
     const highWindowStart = now - this.thresholds.highWindowMs;
     const totalWindowStart = now - this.thresholds.totalWindowMs;
 
-    // 全部窗口内的纠偏
-    const rows = db.prepare(`
+    // 13.0 §3.7: highCount 必须按高严重度窗口（30min）过滤，不是总窗口
+    const highRows = db.prepare(`
+      SELECT severity, COUNT(*) AS cnt
+      FROM brain_corrections
+      WHERE agent_name = ?
+        AND severity = 'high'
+        AND created_at >= ?
+      GROUP BY severity
+    `).get(agentName, highWindowStart) as { cnt: number } | undefined;
+    const highCount = highRows?.cnt ?? 0;
+
+    // totalCount: 总窗口（60min）内的总记录数
+    const totalRow = db.prepare(`
+      SELECT COUNT(*) AS cnt
+      FROM brain_corrections
+      WHERE agent_name = ?
+        AND created_at >= ?
+    `).get(agentName, totalWindowStart) as { cnt: number } | undefined;
+    const totalCount = totalRow?.cnt ?? 0;
+
+    // samples: 取最近的 5 条（用于 Evolution 引擎分析时展示上下文）
+    const sampleRows = db.prepare(`
       SELECT severity, action, instruction
       FROM brain_corrections
       WHERE agent_name = ?
         AND created_at >= ?
       ORDER BY created_at DESC
+      LIMIT 5
     `).all(agentName, totalWindowStart) as Array<{ severity: CorrectionRecord['severity']; action: CorrectionRecord['action']; instruction: string }>;
-
-    const totalCount = rows.length;
-    const highCount = rows.filter(r =>
-      r.severity === 'high'
-      // 高严重度窗口更短；粗略按总数过滤，调用方判断 high 阈值时再筛时间窗口
-      && true
-    ).length;
-
-    // 高严重度窗口内的实际 high 计数（用 totalWindowStart 查可能略多，
-    // 但因为 highCount 阈值是 ≥3，实际多查 30 分钟不影响判断方向，保守即可）
-    const _ = highWindowStart; // 保留字段供未来精确窗口查询
 
     return {
       highCount,
       totalCount,
-      samples: rows.slice(0, 5),
+      samples: sampleRows,
     };
   }
 
