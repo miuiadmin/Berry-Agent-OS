@@ -369,7 +369,7 @@ export function registerMissionRoutes(
 
     // 通过 EventBus 发出 brain.feedback 事件（进化系统可订阅学习）
     if (bus) {
-      bus.emit('brain.feedback' as any, {
+      bus.emit('brain.feedback', {
         sessionId,
         taskId,
         feedbackType,
@@ -480,11 +480,11 @@ export function registerMissionRoutes(
 
     // 通过 EventBus 发出回复事件
     if (bus) {
-      bus.emit('user.ask_response' as any, {
+      bus.emit('user.ask_response', {
         sessionId,
         taskId,
         correlationId,
-        answer,
+        response: answer,
       });
     }
 

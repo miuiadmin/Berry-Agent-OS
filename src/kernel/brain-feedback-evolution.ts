@@ -126,7 +126,7 @@ export function processBrainFeedback(payload: BrainFeedbackPayload): number {
  */
 export function startBrainFeedbackEvolutionListener(): () => void {
   const bus = getEventBus();
-  const unsub = bus.on('brain.feedback' as any, (payload: BrainFeedbackPayload) => {
+  const unsub = bus.on('brain.feedback', (payload: BrainFeedbackPayload) => {
     try {
       processBrainFeedback(payload);
     } catch (err) {

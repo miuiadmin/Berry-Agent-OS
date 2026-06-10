@@ -114,7 +114,7 @@ export class CorrectionFrequencyDetector {
     }, 'correction-frequency: evolution trigger');
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    getEventBus().emit('capability.evolution.request' as any, {
+    getEventBus().emit('capability.evolution.request', {
       agentName: record.agentName,
       sessionId: record.sessionId,
       taskId: record.taskId ?? '',
@@ -129,6 +129,7 @@ export class CorrectionFrequencyDetector {
         action: s.action,
         instruction: s.instruction.slice(0, 200),
       })),
+      createdAt: now,
     });
 
     return true;

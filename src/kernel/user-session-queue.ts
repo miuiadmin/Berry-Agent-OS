@@ -84,7 +84,7 @@ export class UserSessionQueue {
     this.queues.set(userId, queue);
 
     // 通知前端
-    getEventBus().emit('user.session.queued' as any, {
+    getEventBus().emit('user.session.queued', {
       userId,
       correlationId,
       position: queue.length - 1,
@@ -111,7 +111,7 @@ export class UserSessionQueue {
     logger.info({ userId, correlationId: head.correlationId, queuedMs: Date.now() - head.enqueuedAt }, 'user-session-queue: session dequeued');
 
     // 通知前端可以启动
-    getEventBus().emit('user.session.dequeued' as any, {
+    getEventBus().emit('user.session.dequeued', {
       userId,
       correlationId: head.correlationId,
       waitedMs: Date.now() - head.enqueuedAt,

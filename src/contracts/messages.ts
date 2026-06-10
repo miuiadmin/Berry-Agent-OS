@@ -277,8 +277,6 @@ export type EventMap = {
   'mission.signal': { missionId: string; squadId: string; type: import('./mission.js').SignalType; msg: string };
   /** 13.0: 交接完成 */
   'mission.handoff': { missionId: string; from: string; to: string; what: string };
-  /** 13.0 P5: plan 中 who:"skills" 的 task 完成后触发技能创建 */
-  'capability.evolution.request': { missionId: string; taskId: string; skillDescription: string };
   /** 13.0 P9: Brain 观察 blocker/question signal 后触发的 INTERVENE 事件 */
   'brain.signal_intervention': {
     missionId: string;
@@ -334,6 +332,50 @@ export type EventMap = {
     workerTask: string;
     brainVerdict: string;
     brainReason: string;
+  };
+  /** 13.0 §5.3.4: 用户点击「反馈 Brain 修改有问题」时 mission-api 路由发的事件 */
+  'brain.feedback': {
+    sessionId: string;
+    taskId: string;
+    feedbackType: string;
+    userComment?: string;
+    originalResponse?: string;
+    modifiedResponse?: string;
+  };
+  /** 13.0 §13.5: 用户级 session 队列通知（前端显示「等待中」提示） */
+  'user.session.queued': {
+    userId: string;
+    correlationId: string;
+    position: number;
+    enqueuedAt: number;
+  };
+  /** 13.0 §13.5: 用户级 session 出队通知 */
+  'user.session.dequeued': {
+    userId: string;
+    correlationId: string;
+    waitedMs: number;
+  };
+  /** 13.0 §13.5: 用户回复 ask_user（agent 等的真实用户回复） */
+  'user.ask_response': {
+    sessionId: string;
+    taskId?: string;
+    correlationId: string;
+    response: string;
+  };
+  /** 13.0 §13.20: Evolution Engine 触发（频率/反馈/learning 三类 source） */
+  'capability.evolution.request': {
+    agentName: string;
+    sessionId: string;
+    taskId: string;
+    reason: string;
+    windowStats?: { highCount: number; totalCount: number; windowMs: number };
+    samples?: Array<{ severity: string; action: string; instruction: string }>;
+    source?: string;
+    feedbackType?: string;
+    userComment?: string;
+    originalResponseSnippet?: string;
+    modifiedResponseSnippet?: string;
+    createdAt: number;
   };
 };
 
