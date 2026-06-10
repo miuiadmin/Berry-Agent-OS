@@ -13,6 +13,8 @@ export interface RecordBrainDecisionInput {
   inputSummary: string;
   outputJson: Record<string, unknown>;
   confidence?: number;
+  /** 13.0 §12.6 + §3.7: 关联的 task ID（plan task / agent_task / session 任务） */
+  taskId?: string;
 }
 
 export class BrainDecisionRecorder {
@@ -24,8 +26,8 @@ export class BrainDecisionRecorder {
     try {
       if (!this.insertStmt) {
         this.insertStmt = this.db.prepare(`
-          INSERT INTO brain_decisions (id, session_id, decision_type, input_summary, output_json, confidence, outcome, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO brain_decisions (id, session_id, decision_type, input_summary, output_json, confidence, outcome, task_id, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
       }
       const id = genId('bdec');
@@ -38,6 +40,7 @@ export class BrainDecisionRecorder {
         JSON.stringify(input.outputJson),
         input.confidence ?? null,
         outcome,
+        input.taskId ?? null,
         Date.now(),
       );
 
@@ -49,13 +52,14 @@ export class BrainDecisionRecorder {
     }
   }
 
-  recordRouteDecision(sessionId: string, userMessage: string, decision: Record<string, unknown>): void {
+  recordRouteDecision(sessionId: string, userMessage: string, decision: Record<string, unknown>, taskId?: string): void {
     this.record({
       sessionId,
       decisionType: 'route',
       inputSummary: userMessage,
       outputJson: decision,
       confidence: typeof decision.confidence === 'number' ? decision.confidence : undefined,
+      taskId,
     });
 
     if (decision.intent === 'chat' && !decision.targetAgent) {
@@ -63,12 +67,13 @@ export class BrainDecisionRecorder {
     }
   }
 
-  recordReviewDecision(sessionId: string, draftSummary: string, verdict: Record<string, unknown>): void {
+  recordReviewDecision(sessionId: string, draftSummary: string, verdict: Record<string, unknown>, taskId?: string): void {
     this.record({
       sessionId,
       decisionType: 'review',
       inputSummary: draftSummary,
       outputJson: verdict,
+      taskId,
     });
 
     if (verdict.verdict === 'reject' || verdict.verdict === 'modify') {
@@ -76,15 +81,48 @@ export class BrainDecisionRecorder {
     }
   }
 
-  recordPermissionDecision(sessionId: string, toolName: string, judgment: Record<string, unknown>): void {
+  recordPermissionDecision(sessionId: string, toolName: string, judgment: Record<string, unknown>, taskId?: string): void {
     this.record({
       sessionId,
       decisionType: 'permission',
       inputSummary: `tool: ${toolName}`,
       outputJson: judgment,
+      taskId,
     });
 
     evolutionMetrics.permissionJudge.inc({ verdict: judgment.allowed ? 'allowed' : 'denied' });
+  }
+
+  /**
+   * 13.0 §3.7: 查询指定 task 的所有 Brain 决策（用于升级式纠偏 + 用户还原回查）。
+   */
+  recallForTask(taskId: string, decisionType?: BrainDecisionType): Array<{
+    id: string;
+    inputSummary: string;
+    outputJson: string;
+    outcome: string | null;
+    lesson: string | null;
+    createdAt: number;
+  }> {
+    if (!taskId) return [];
+    try {
+      const sql = decisionType
+        ? `SELECT id, input_summary AS inputSummary, output_json AS outputJson, outcome, lesson, created_at AS createdAt
+           FROM brain_decisions
+           WHERE task_id = ? AND decision_type = ?
+           ORDER BY created_at DESC LIMIT 50`
+        : `SELECT id, input_summary AS inputSummary, output_json AS outputJson, outcome, lesson, created_at AS createdAt
+           FROM brain_decisions
+           WHERE task_id = ?
+           ORDER BY created_at DESC LIMIT 50`;
+      const params = decisionType ? [taskId, decisionType] : [taskId];
+      return this.db.prepare(sql).all(...params) as Array<{
+        id: string; inputSummary: string; outputJson: string; outcome: string | null; lesson: string | null; createdAt: number;
+      }>;
+    } catch (err) {
+      logger.warn({ err, taskId }, 'brain-decision: recallForTask failed');
+      return [];
+    }
   }
 
   recordAggregatedInsight(sessionId: string, insight: string, evidence: string[]): string | null {

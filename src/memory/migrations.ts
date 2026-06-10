@@ -60,6 +60,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateBrainObservationsTable(conn);
     migrateCreateAgentAuditTables(conn);
     migrateCreateBrainCorrectionsTable(conn);
+    migrateBrainDecisionsAddTaskId(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -537,6 +538,11 @@ function tableExists(conn: Database.Database, table: string): boolean {
     `SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?`,
   ).get(table) as { found: number } | undefined;
   return Boolean(row);
+}
+
+function columnExists(conn: Database.Database, table: string, column: string): boolean {
+  const rows = conn.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some(r => r.name === column);
 }
 
 function tableSql(conn: Database.Database, table: string): string {
@@ -1029,6 +1035,22 @@ function migrateCreateBrainCorrectionsTable(conn: Database.Database): void {
       ON brain_corrections(severity, created_at DESC);
     CREATE INDEX idx_brain_corrections_session
       ON brain_corrections(session_id, created_at DESC);
+  `);
+}
+
+/**
+ * 13.0 §12.6 + §3.7: 给 brain_decisions 加 task_id 列（让 decision 能按 task 聚合查询）。
+ * 用于：
+ *   - C.13 升级式纠偏：同 (agent, task) 的纠偏 severity 升级追踪
+ *   - 用户点击 restore-original 时反查该 task 的所有 Brain 决策
+ *   - Plan auto-mark-done 后回写所有相关 decision 的 task_id 关联
+ */
+function migrateBrainDecisionsAddTaskId(conn: Database.Database): void {
+  if (columnExists(conn, 'brain_decisions', 'task_id')) return;
+  conn.exec(`
+    ALTER TABLE brain_decisions ADD COLUMN task_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_brain_decisions_task
+      ON brain_decisions(task_id, created_at DESC) WHERE task_id IS NOT NULL;
   `);
 }
 

@@ -534,7 +534,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         if (pending) {
           // 规则路由虽然没有走 Brain LLM，但前端仍需要 progress 事件展示思考过程
           this.reportProgress(pending, 'thinking', '正在分析意图...');
-          this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, { ...ruleDecision, source: 'rule' } as unknown as Record<string, unknown>);
+          this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, { ...ruleDecision, source: 'rule' } as unknown as Record<string, unknown>, pending.taskId);
           getEventBus().emit('message.routed', { sessionId: pending.sessionId, taskId: pending.taskId ?? correlationId, targetAgent: ruleDecision.targetAgent, intent: ruleDecision.intent });
         }
         this.handleRouteDecision(ruleDecision, correlationId);
@@ -720,7 +720,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(correlationId);
       if (pending) {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
-        this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>);
+        this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>, pending.taskId);
         // 12.0: 填充意图锚点到 pending（漂移检测基准）并持久化
         if (decision.intentAnchor) {
           pending.intentAnchor = decision.intentAnchor;
@@ -1556,6 +1556,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     let agent = await this.agentManager.ensureAgent(route.targetAgent);
     this.setupModuleAgent(route.targetAgent);
 
+    // ─── 13.0 §8.5: scope 预授权 ───
+    // 任务派发时将 session 级的 PermissionGate scope 复制到 task 级的 active_scope。
+    // 这样即使 Brain 纠偏还没来得及触发，第一轮工具执行也受 scope 约束。
+    // 如果 inputPayload 中有 forbiddenTools（来自 Brain 路由或纠偏），直接设置。
+    if (this.permissionCoordinator && this._stateCache) {
+      const forbiddenTools = input.inputPayload.forbiddenTools as string[] | undefined;
+      if (forbiddenTools && forbiddenTools.length > 0) {
+        this.permissionCoordinator.setActiveScope(taskId, {
+          blockTools: forbiddenTools,
+        });
+        logger.debug({ taskId, forbiddenTools }, 'task.dispatch: 预授权 scope (forbiddenTools)');
+      }
+    }
+
     // 13.0 多智能体协作：从 inputPayload 透传 missionId 和 planTaskId
     const missionId = input.inputPayload.missionId as string | undefined;
     const planTaskId = input.inputPayload.planTaskId as string | undefined;
@@ -1704,6 +1718,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           pending.sessionId,
           safeSlice(pending.draftResponse ?? pending.userMessage, 200),
           review as unknown as Record<string, unknown>,
+          pending.taskId,
         );
       }
 
