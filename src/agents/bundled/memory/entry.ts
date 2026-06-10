@@ -1,5 +1,6 @@
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
+import { safeSlice } from '../../../utils/safe-slice.js';
 // 13.0: 注册 memory 工具，使 dialogue handler 的 runToolLoop 能使用 memory_query 等
 import { createMemoryTools } from '../../../tools/memory-tools.js';
 import { registerTool } from '../../../tools/index.js';
@@ -163,8 +164,8 @@ function buildJudgePrompt(userMessage: string, assistantResponse: string): strin
 
 type 可选: identity, preference, goal, habit, constraint, fact
 
-用户: ${userMessage.slice(0, 300)}
-助手: ${assistantResponse.slice(0, 300)}`;
+用户: ${safeSlice(userMessage, 300)}
+助手: ${safeSlice(assistantResponse, 300)}`;
 }
 
 function buildRecallPrompt(query: string, rows: Array<{ id: string; summary: string }>): string {
@@ -185,7 +186,7 @@ function parseMemoryFacts(text: string): Array<{ type: string; summary: string; 
     if (!Array.isArray(arr)) return [];
     return arr.filter((f: any) => f.type && f.summary).map((f: any) => ({
       type: f.type,
-      summary: String(f.summary).slice(0, 200),
+      summary: safeSlice(String(f.summary), 200),
       confidence: typeof f.confidence === 'number' ? f.confidence : 0.7,
     }));
   } catch { return []; }

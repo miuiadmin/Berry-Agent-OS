@@ -131,6 +131,10 @@ export class AgentManager {
     if (registered?.manifest.ipcProtocol === 'generic-loop') {
       env.GENERIC_AGENT_CONFIG = registered.manifestPath;
     }
+    // L3: 将 dialogueObserve.maxRounds 传递给 Agent 子进程
+    if (registered?.manifest.dialogueObserve?.maxRounds) {
+      env.AGENT_OBSERVE_MAX_ROUNDS = String(registered.manifest.dialogueObserve.maxRounds);
+    }
     // C1 修复（中间步骤）：传递所有 agent 名称给子进程，用于文件路径隔离校验
     // 完整方案（DB 代理层）留作后续架构目标
     env.AGENT_NAMES = this.registry.getAgentNames().join(',');
@@ -296,6 +300,25 @@ export class AgentManager {
         pid: agent.pid,
         uptime: Date.now() - agent.startedAt,
       };
+    }
+    return result;
+  }
+
+  /**
+   * L5: 返回所有当前在线（已注册且 status=ready）的 Agent 信息列表。
+   * 供 KernelRouter 的 agent.discover handler 使用，实现动态目录查询。
+   */
+  listAliveAgents(): Array<{ name: string; description?: string; capabilities?: string[] }> {
+    const result: Array<{ name: string; description?: string; capabilities?: string[] }> = [];
+    for (const [name, agent] of this.agents) {
+      if (agent.status === 'ready') {
+        const registered = this.registry.get(name);
+        result.push({
+          name,
+          description: registered?.manifest.description,
+          capabilities: registered?.manifest.capabilities ? Object.keys(registered.manifest.capabilities) : [],
+        });
+      }
     }
     return result;
   }

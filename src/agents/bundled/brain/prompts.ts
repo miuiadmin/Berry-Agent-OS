@@ -5,6 +5,7 @@ import type { DangerLevel } from '../../../utils/types.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload, CorrectionAction } from '../../../contracts/delegation.js';
 import type { SuperiorReviewRequest, SuperiorReviewResult, SuperiorReviewVerdict } from '../../../contracts/superior-review.js';
 import { getLogger } from '../../../utils/logger.js';
+import { safeSlice, safeSliceWithEllipsis } from '../../../utils/safe-slice.js';
 
 const logger = getLogger('brain-prompts');
 
@@ -34,7 +35,7 @@ export function buildReviewInput(level: ReviewLevel, turn: TurnRecord): string {
   }
 
   if (input.length > maxChars) {
-    input = input.slice(0, maxChars - 3) + '...';
+    input = safeSliceWithEllipsis(input, maxChars);
   }
 
   return input;
@@ -261,7 +262,7 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
       intentAnchor: parseIntentAnchor(parsed.intentAnchor),
     };
   } catch {
-    logger.warn({ rawOutput: llmOutput.slice(0, 500) }, 'brain:route-parse-failed');
+    logger.warn({ rawOutput: safeSlice(llmOutput, 500) }, 'brain:route-parse-failed');
     return {
       intent: 'chat' as RoutingIntent,
       targetAgent: 'conversation',
@@ -293,7 +294,7 @@ export function parsePermissionJudge(llmOutput: string): { allowed: boolean; rea
       correction,
     };
   } catch {
-    logger.warn({ rawOutput: llmOutput.slice(0, 500) }, 'brain:permission-parse-failed');
+    logger.warn({ rawOutput: safeSlice(llmOutput, 500) }, 'brain:permission-parse-failed');
     return { allowed: false, reason: 'LLM 输出解析失败，默认拒绝' };
   }
 }
@@ -457,7 +458,7 @@ export function buildSuperiorReviewUserPrompt(request: SuperiorReviewRequest): s
   if (request.toolCalls.length > 0) {
     prompt += `\n## 工具调用记录\n\n`;
     for (const tc of request.toolCalls) {
-      prompt += `- [${tc.name}] 输入: ${tc.input.slice(0, 200)}\n  结果: ${tc.result.slice(0, 200)}\n`;
+      prompt += `- [${tc.name}] 输入: ${safeSlice(tc.input, 200)}\n  结果: ${safeSlice(tc.result, 200)}\n`;
     }
   }
 

@@ -74,7 +74,10 @@ export type IpcMessageType =
   | 'verify.request'
   | 'verify.result'
   // 13.0 灵魂版：Brain 观察队列（OBSERVE 阶段零 LLM 持久化）
-  | 'brain.observe';
+  | 'brain.observe'
+  // L5: Agent 目录实时查询
+  | 'agent.discover'
+  | 'agent.discover.reply';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
 // R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。

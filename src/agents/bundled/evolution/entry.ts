@@ -2,6 +2,7 @@ import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import { checkEvolutionTriggers } from '../../../observability/evolution-metrics.js';
 import { genId } from '../../../utils/id.js';
+import { safeSlice } from '../../../utils/safe-slice.js';
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const input = payload.inputPayload;
@@ -158,7 +159,7 @@ async function handleProduceInsight(
     db.prepare(`
       INSERT INTO brain_decisions (id, session_id, decision_type, input_summary, output_json, outcome, created_at)
       VALUES (?, ?, 'aggregated_insight', ?, ?, 'good', ?)
-    `).run(genId('bdec'), payload.sessionId, evidence.join('; ').slice(0, 500), JSON.stringify({ insight, evidence }), Date.now());
+    `).run(genId('bdec'), payload.sessionId, safeSlice(evidence.join('; '), 500), JSON.stringify({ insight, evidence }), Date.now());
   } catch { /* table may not exist */ }
 
   return { kind: 'produce_insight', stored: true, insight };
@@ -172,8 +173,8 @@ function buildFeedbackPrompt(userMessage: string, response: string): string {
 明显错误但用户没说 → failure
 无法判断 → null
 
-用户: ${userMessage.slice(0, 200)}
-回复: ${response.slice(0, 200)}`;
+用户: ${safeSlice(userMessage, 200)}
+回复: ${safeSlice(response, 200)}`;
 }
 
 function buildSkillPrompt(signal: { type: string; description: string; evidence: string[] }, existing: string[]): string {
@@ -202,7 +203,7 @@ function buildGapPrompt(failures: string[], denials: string[]): string {
 
 function buildMetricsPrompt(triggers: Array<{ type: string; currentRate: number; threshold: number }>, decisions: Array<Record<string, unknown>>): string {
   const triggerLines = triggers.map(t => `${t.type}: ${(t.currentRate * 100).toFixed(0)}% (阈值 ${(t.threshold * 100).toFixed(0)}%)`).join('\n');
-  const decisionLines = decisions.slice(0, 10).map(d => `[${d.decision_type}] ${(d.input_summary as string).slice(0, 60)}`).join('\n');
+  const decisionLines = decisions.slice(0, 10).map(d => `[${d.decision_type}] ${safeSlice(d.input_summary as string, 60)}`).join('\n');
   return `指标异常分析。\n\n触发: \n${triggerLines}\n\n近期决策:\n${decisionLines}\n\n输出分析和建议。`;
 }
 
@@ -280,7 +281,7 @@ ID: ${pluginId}
     return { kind: 'plugin_review', pluginName, approved: review.approved, reason: review.reason, risk: review.risk };
   } catch (err) {
     const { getLogger } = await import('../../../utils/logger.js');
-    getLogger('evolution').debug({ err, pluginName, raw: result.content.slice(0, 200) }, 'plugin review parse failed');
+    getLogger('evolution').debug({ err, pluginName, raw: safeSlice(result.content, 200) }, 'plugin review parse failed');
     return { kind: 'plugin_review', pluginName, approved: false, reason: 'Review parse failed' };
   }
 }

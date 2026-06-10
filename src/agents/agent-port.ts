@@ -156,16 +156,24 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
     },
 
     async discover(): Promise<AgentInfo[]> {
-      // Phase 1: 硬编码已知 Agent 列表（排除 brain）
-      // Phase 4: 改为通过 IPC 查询 Kernel 的 Agent 注册表
-      return [
-        { name: 'memory', description: '记忆管理 — 查询和管理用户的知识库、偏好', capabilities: ['query', 'add', 'delete'] },
-        { name: 'code', description: '代码智能体 — 编码、重构、修复 bug、运行测试', capabilities: ['read', 'write', 'edit', 'test', 'shell'] },
-        { name: 'conversation', description: '对话协调 — 与用户交互、协调其他 Agent', capabilities: ['chat', 'delegate', 'dialogue'] },
-        { name: 'learning', description: '学习智能体 — 从对话中提取用户偏好和知识', capabilities: ['extract', 'learn'] },
-        { name: 'evolution', description: '进化引擎 — 检测能力缺口、生成提案', capabilities: ['analyze', 'propose'] },
-        { name: 'skills', description: '技能管理 — 发现、加载、执行技能', capabilities: ['discover', 'execute'] },
-      ];
+      // L5: 通过 IPC 查询 Kernel 的 Agent 注册表，返回实时在线状态
+      // 不再硬编码列表，Agent 启停变化立即可见
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          // 超时时回退到空列表（不阻塞调用方）
+          resolve([]);
+        }, 3000);
+        if (typeof timer.unref === 'function') timer.unref();
+
+        // 注册一次性 handler 接收 Kernel 回复
+        ipc.onMessage('agent.discover.reply', (replyMsg: IpcMessage) => {
+          clearTimeout(timer);
+          resolve((replyMsg.payload as AgentInfo[]) ?? []);
+        });
+
+        // 发送查询请求到 Kernel
+        ipc.send('agent.discover', 'core', {});
+      });
     },
 
     async askUser(question: string, opts?: PortAskUserOptions): Promise<string> {

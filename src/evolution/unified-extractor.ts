@@ -4,6 +4,7 @@ import { parseLearningSignalsFromText } from './detector-parser.js';
 import { genId } from '../utils/id.js';
 import type { Database } from 'better-sqlite3';
 import { getLogger } from '../utils/logger.js';
+import { safeSlice } from '../utils/safe-slice.js';
 
 const logger = getLogger('unified-evolution-extractor');
 
@@ -88,7 +89,7 @@ export class UnifiedEvolutionExtractor {
   }
 
   private buildUserPrompt(input: EvolutionExtractionInput): string {
-    let prompt = `用户消息: ${input.userMessage.slice(0, 500)}\n助手回复: ${input.assistantResponse.slice(0, 500)}`;
+    let prompt = `用户消息: ${safeSlice(input.userMessage, 500)}\n助手回复: ${safeSlice(input.assistantResponse, 500)}`;
     if (input.toolCalls && input.toolCalls.length > 0) {
       const tools = input.toolCalls.slice(0, 5).map(t => t.name).join(', ');
       prompt += `\n调用工具: ${tools}`;
@@ -106,7 +107,7 @@ export class UnifiedEvolutionExtractor {
         .filter((f: any) => f && f.type && f.summary)
         .map((f: any) => ({
           type: f.type,
-          summary: String(f.summary).slice(0, 200),
+          summary: safeSlice(String(f.summary), 200),
           confidence: typeof f.confidence === 'number' ? Math.min(1, Math.max(0, f.confidence)) : 0.5,
         }));
 
@@ -114,7 +115,7 @@ export class UnifiedEvolutionExtractor {
         .filter((d: any) => d && d.decision_type && d.observation)
         .map((d: any) => ({
           decisionType: d.decision_type,
-          observation: String(d.observation).slice(0, 200),
+          observation: safeSlice(String(d.observation), 200),
           sentiment: d.sentiment ?? 'neutral',
         }));
 
@@ -140,7 +141,7 @@ export class UnifiedEvolutionExtractor {
           genId('bdec'),
           sessionId,
           feedback.decisionType,
-          userMessage.slice(0, 200),
+          safeSlice(userMessage, 200),
           JSON.stringify(feedback),
           null,
           feedback.sentiment === 'negative' ? 'bad' : feedback.sentiment === 'positive' ? 'good' : 'neutral',

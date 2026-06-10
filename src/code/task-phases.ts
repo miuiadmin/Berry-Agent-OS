@@ -21,6 +21,7 @@ import { buildPatchPlan, validatePatchPlan } from './patch-plan.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 import { genId } from '../utils/id.js';
+import { safeSlice } from '../utils/safe-slice.js';
 import { registerCodeTools } from '../tools/code-tools.js';
 
 const config = resolveConfig(getConfigPath());
@@ -607,8 +608,8 @@ function buildAuditFn(ctx: PhaseContext) {
       kind: 'tool_call',
       taskId: ctx.taskId,
       toolName: record.name,
-      input: record.input.slice(0, 2000),
-      result: record.result.slice(0, 5000),
+      input: safeSlice(record.input, 2000),
+      result: safeSlice(record.result, 5000),
       isError: record.isError,
       durationMs: record.durationMs,
     });

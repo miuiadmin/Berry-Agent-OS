@@ -152,6 +152,10 @@ export interface TurnCorrectionPayload {
   action: CorrectionAction;
   instruction?: string;
   newConstraints?: CorrectionConstraints;
+  /** L2: CAS 消费 ID，防止崩溃后重复注入 */
+  _correctionId?: string | null;
+  /** L2: 消费时间戳，调用方可做幂等判断 */
+  _consumedAt?: number;
 }
 
 export const CORRECTION_LIMITS = {

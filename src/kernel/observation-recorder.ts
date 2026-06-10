@@ -101,6 +101,16 @@ export class ObservationRecorder {
    */
   private truncationTracker = new Map<string, { peakCount: number; truncated: boolean }>();
 
+  /**
+   * M5: 排空跟踪器。
+   * key = `${sessionId}:${taskId}`，value = { drainingSince, timer }。
+   * 当 task 处于 draining 状态时，prune 跳过该 task，且 queryByTask 返回空。
+   * 默认 5 秒后真正清除（cancelDraining 可取消）。
+   */
+  private drainingTasks = new Map<string, { drainingSince: number; timer: ReturnType<typeof setTimeout> }>();
+  /** M5: draining 状态延迟删除时间（毫秒） */
+  private static readonly DRAINING_DELAY_MS = 5000;
+
   constructor(db: Database.Database, windowSize: number = DEFAULT_OBSERVATION_WINDOW) {
     this.db = db;
     this.windowSize = windowSize;
@@ -217,8 +227,14 @@ export class ObservationRecorder {
    * 使用 DELETE 限定行数避免长事务。
    *
    * M1: 裁剪时更新截断跟踪器，供 C 级审核检测保真度降级。
+   * M5: 跳过正在 draining 的 task（让 INTERVENE 仍能读到观察）。
    */
   prune(sessionId: string, taskId: string): number {
+    if (this.isDraining(sessionId, taskId)) {
+      logger.debug({ sessionId, taskId }, 'observation:prune skipped (draining)');
+      return 0;
+    }
+
     const count = (this.db.prepare(`
       SELECT COUNT(*) AS cnt FROM brain_observations
       WHERE session_id = ? AND task_id = ?
@@ -290,6 +306,73 @@ export class ObservationRecorder {
    */
   isTruncated(sessionId: string, taskId: string): boolean {
     return this.truncationTracker.get(`${sessionId}:${taskId}`)?.truncated ?? false;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // M5: Draining 状态（延迟清除，避免迟到 INTERVENE 读到空队列）
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * M5: 标记 (sessionId, taskId) 进入 draining 状态。
+   *
+   * 触发场景：Brain REVIEW 完成后调用。在 5 秒延迟内，迟到 INTERVENE
+   * 仍能读到观察数据；5 秒后真正从 SQLite 删除。
+   *
+   * @param sessionId 会话 ID
+   * @param taskId 任务 ID
+   * @param delayMs 延迟毫秒（默认 5000）
+   */
+  markDraining(sessionId: string, taskId: string, delayMs: number = ObservationRecorder.DRAINING_DELAY_MS): void {
+    const key = `${sessionId}:${taskId}`;
+    if (this.drainingTasks.has(key)) return; // 已经在 draining 中
+
+    const timer = setTimeout(() => {
+      // 真正清除：删除该 task 的全部观察
+      try {
+        const result = this.db.prepare(
+          'DELETE FROM brain_observations WHERE session_id = ? AND task_id = ?',
+        ).run(sessionId, taskId);
+        logger.info({ sessionId, taskId, deleted: result.changes }, 'observation:drain completed (cleared)');
+      } catch (err) {
+        logger.warn({ err, sessionId, taskId }, 'observation:drain delete failed');
+      } finally {
+        this.drainingTasks.delete(key);
+        this.truncationTracker.delete(key);
+      }
+    }, delayMs);
+    if (typeof timer.unref === 'function') timer.unref();
+
+    this.drainingTasks.set(key, { drainingSince: Date.now(), timer });
+    logger.info({ sessionId, taskId, delayMs }, 'observation:drain started (delayed clear)');
+  }
+
+  /**
+   * M5: 取消 draining 状态（如果 INTERVENE 又有动作了）。
+   */
+  cancelDraining(sessionId: string, taskId: string): void {
+    const key = `${sessionId}:${taskId}`;
+    const entry = this.drainingTasks.get(key);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    this.drainingTasks.delete(key);
+    logger.debug({ sessionId, taskId }, 'observation:drain cancelled');
+  }
+
+  /**
+   * M5: 检查 task 是否正在 draining。
+   */
+  isDraining(sessionId: string, taskId: string): boolean {
+    return this.drainingTasks.has(`${sessionId}:${taskId}`);
+  }
+
+  /**
+   * M5: 获取 draining 元信息。
+   */
+  getDrainingInfo(sessionId: string, taskId: string): { drainingSince: number; remainingMs: number } | null {
+    const entry = this.drainingTasks.get(`${sessionId}:${taskId}`);
+    if (!entry) return null;
+    const elapsed = Date.now() - entry.drainingSince;
+    return { drainingSince: entry.drainingSince, remainingMs: Math.max(0, ObservationRecorder.DRAINING_DELAY_MS - elapsed) };
   }
 
   private toRow = (raw: Record<string, unknown>): ObservationRow => ({

@@ -18,6 +18,7 @@ import type { TurnCorrectionPayload } from '../contracts/delegation.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
+import { safeSlice } from '../utils/safe-slice.js';
 import type { LlmClient } from '../llm/index.js';
 
 const logger = getLogger('module-agent');
@@ -57,10 +58,67 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
   }, config.heartbeatIntervalMs);
 
   const pendingAskCallbacks = new Map<string, (reply: string) => void>();
+
+  /**
+   * L2: CAS 原子纠偏消费。
+   *
+   * 问题：read + null 是两步操作，Agent 崩溃后 IPC journal replay 会重复注入。
+   * 修复：引入 correctionId 做 CAS 语义，每次消费记录 consumedAt 时间戳，
+   * 调用方可通过 _correctionId 判断是否已被消费。
+   */
   let pendingCorrection: TurnCorrectionPayload | null = null;
+  let pendingCorrectionId: string | null = null;
+
+  /**
+   * M3: 纠偏历史记录（最近 5 条），用于冲突检测。
+   * 当多条纠偏累积时，检查是否存在矛盾指令（如 "自主" vs "每次都问用户"）。
+   */
+  const correctionHistory: Array<TurnCorrectionPayload> = [];
+  const CORRECTION_HISTORY_MAX = 5;
+
+  /** M3: 矛盾关键词对（互斥指令） */
+  const CONTRADICTION_PAIRS: Array<[string[], string[]]> = [
+    [['自主', '独立决定', '不需要确认'], ['问用户', '确认', '必须询问', '请示']],
+    [['简洁', '简短', '精简'], ['详细', '全面', '完整解释', '展开']],
+    [['快速', '尽快', '优先速度'], ['仔细', '谨慎', '逐步', '确认']],
+  ];
+
+  /**
+   * M3: 检查新纠偏是否与历史中的已有纠偏矛盾。
+   * 返回检测到的矛盾描述，无矛盾返回 null。
+   */
+  function detectConflict(newInstruction: string): string | null {
+    for (const [groupA, groupB] of CONTRADICTION_PAIRS) {
+      const matchesA = (keywords: string[]) => keywords.some(k => newInstruction.includes(k));
+      const newIsA = matchesA(groupA);
+      const newIsB = matchesA(groupB);
+      if (!newIsA && !newIsB) continue;
+
+      for (const hist of correctionHistory) {
+        const histInstruction = hist.instruction ?? '';
+        const histIsA = matchesA(groupA);
+        const histIsB = matchesA(groupB);
+        // 矛盾：新指令在 A 组，历史在 B 组（或反之）
+        if ((newIsA && histIsB) || (newIsB && histIsA)) {
+          return `矛盾检测: 新指令 "${safeSlice(newInstruction, 60)}" 与历史 "${safeSlice(histInstruction, 60)}" 冲突`;
+        }
+      }
+    }
+    return null;
+  }
 
   ipc.onMessage('turn.correction', (msg: IpcMessage) => {
-    pendingCorrection = msg.payload as TurnCorrectionPayload;
+    const correction = msg.payload as TurnCorrectionPayload;
+    pendingCorrection = correction;
+    pendingCorrectionId = msg.correlationId ?? msg.id ?? null;
+
+    // M3: 新纠偏到达时检查冲突并记录日志
+    if (correction.instruction) {
+      const conflict = detectConflict(correction.instruction);
+      if (conflict) {
+        getLogger('module-agent').warn({ conflict, correctionId: pendingCorrectionId }, 'M3: 纠偏冲突检测');
+      }
+    }
   });
 
   ipc.onMessage('agent.user_reply', (msg: IpcMessage) => {
@@ -113,8 +171,20 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         askUser,
         getPendingCorrection: () => {
           const c = pendingCorrection;
+          const id = pendingCorrectionId;
           pendingCorrection = null;
-          return c;
+          pendingCorrectionId = null;
+          // L2: 附带 correctionId 和 consumedAt，调用方可做幂等判断
+          if (c) {
+            const consumed = { ...c, _correctionId: id, _consumedAt: Date.now() };
+            // M3: 记录到纠偏历史（供冲突检测）
+            correctionHistory.push(consumed);
+            if (correctionHistory.length > CORRECTION_HISTORY_MAX) {
+              correctionHistory.shift();
+            }
+            return consumed;
+          }
+          return null;
         },
         reportUncertainty: (reason: string) => {
           ipc.send('task.telemetry', 'core', { kind: 'uncertainty', taskId: payload.taskId, reason });
@@ -218,8 +288,8 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
               kind: 'tool_call',
               taskId: ephemeralTaskId,
               toolName: record.name,
-              input: record.input.slice(0, 2000),
-              result: record.result.slice(0, 5000),
+              input: safeSlice(record.input, 2000),
+              result: safeSlice(record.result, 5000),
               isError: record.isError,
               durationMs: record.durationMs,
             });

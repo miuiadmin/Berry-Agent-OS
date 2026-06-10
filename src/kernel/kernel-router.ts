@@ -207,6 +207,9 @@ export class KernelRouter {
       router.handleReply(payload);
     });
 
+    // L5: 注册 agent.discover handler（返回实时在线 Agent 列表）
+    this.setupDiscoverHandler(agentIpc, agentName);
+
     // 13.0 AgentPort: Module Agent 主动发起的 dialogue.send 路由
     agentIpc.onMessage('dialogue.send', async (msg: IpcMessage) => {
       const payload = msg.payload as import('../contracts/dialogue.js').DialogueMessagePayload;
@@ -317,5 +320,35 @@ export class KernelRouter {
    */
   reset(): void {
     this.setupAgentIpcs = new WeakSet<object>();
+  }
+
+  /**
+   * L5: 处理 agent.discover IPC — 返回 Kernel Agent 注册表中的实时在线列表。
+   *
+   * Agent 调用 port.discover() 时发 IPC 到 Kernel，Kernel 从 AgentRegistry 查询
+   * 当前已注册的 Agent 并附带在线状态（通过 AgentManager.isAlive 判断）。
+   *
+   * @param agentIpc 发起查询的 Agent IPC 通道
+   * @param agentName 发起查询的 Agent 名称
+   */
+  setupDiscoverHandler(agentIpc: AgentIpcLike, agentName: string): void {
+    agentIpc.onMessage('agent.discover', (msg: IpcMessage) => {
+      try {
+        // 从 AgentManager 获取当前在线的 agent 列表
+        const agents = this.deps.agentManager.listAliveAgents();
+        const result = agents
+          .filter(a => a.name !== agentName && a.name !== 'brain') // 排除自己和 Brain
+          .map(a => ({
+            name: a.name,
+            description: a.description ?? '',
+            capabilities: a.capabilities ?? [],
+            status: 'online' as const,
+          }));
+        agentIpc.send('agent.discover.reply', agentName, result, msg.correlationId);
+      } catch (err) {
+        logger.warn({ err, agentName }, 'agent.discover handler failed');
+        agentIpc.send('agent.discover.reply', agentName, [], msg.correlationId);
+      }
+    });
   }
 }

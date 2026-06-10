@@ -41,6 +41,16 @@ export const agentManifestSchema = z.object({
 
   modelTier: z.enum(['fast', 'default', 'high']).optional(),
   maxTurns: z.number().int().positive().optional(),
+
+  /**
+   * L3: dialogue.observe 观察轮次上限（Brain 用，控制何时触发漂移/终止检测）。
+   * 不同 Agent 可能需要不同的观察深度（code 需要 12 轮，memory 只需 6 轮）。
+   * 默认 8 轮（与旧版硬编码行为一致）。
+   */
+  dialogueObserve: z.object({
+    /** 单次观察对话的最大轮次，超出后 Brain 触发终止评估 */
+    maxRounds: z.number().int().positive().default(8),
+  }).default({ maxRounds: 8 }).optional(),
 });
 
 export type AgentManifest = z.infer<typeof agentManifestSchema>;

@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import { safeSlice } from '../utils/safe-slice.js';
 import type { ModelTier } from '../contracts/model.js';
 import type { MemoryContextFrame } from '../contracts/memory.js';
 import type { MemoryRuntime } from '../memory/index.js';
@@ -77,6 +78,8 @@ export class SessionManager {
   createPending(msgId: string, entry: PendingRequest): void {
     this.pendingRequests.set(msgId, entry);
     this.touchSession(entry.sessionId);
+    // M2: 持久化关键字段到 SQLite（Kernel 重启后可恢复 intent_anchor 等状态）
+    this.persistRequestState(msgId, entry);
     // 超时计时器：基础值 requestTimeoutMs * 4（默认 120s）
     // 如果 streaming 仍然活跃（有 text_delta 持续到达），自动续期一次，
     // 避免长耗时 code_task（LLM 慢 + 多步工具调用）在干活中被误杀
@@ -208,6 +211,8 @@ export class SessionManager {
     const timer = this.requestTimers.get(msgId);
     if (timer) { clearTimeout(timer); this.requestTimers.delete(msgId); }
     this.pendingRequests.delete(msgId);
+    // M2: 同时从 SQLite 删除持久化状态
+    this.deleteRequestState(msgId);
   }
 
   /**
@@ -506,6 +511,76 @@ export class SessionManager {
       db.prepare('DELETE FROM pending_asks WHERE session_id = ?').run(sessionId);
     } catch (err) {
       logger.error({ err, sessionId }, 'deleteAskFromDb 失败');
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // M2: PendingRequest 关键字段持久化（Kernel 重启后状态恢复）
+  // ─────────────────────────────────────────────────────────────
+
+  /** 持久化 pending request 关键字段到 SQLite */
+  private persistRequestState(msgId: string, entry: PendingRequest): void {
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT OR REPLACE INTO pending_request_state
+          (msg_id, session_id, task_id, intent_anchor_json, level, reasoning, draft_preview, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        msgId,
+        entry.sessionId,
+        entry.taskId ?? null,
+        entry.intentAnchor ? JSON.stringify(entry.intentAnchor) : null,
+        entry.level ?? null,
+        entry.reasoning ?? null,
+        entry.draftResponse ? safeSlice(entry.draftResponse, 500) : null,
+        Date.now(),
+      );
+    } catch (err) {
+      // 表可能还未迁移（兼容旧版）—— 静默失败，不影响主流程
+      logger.debug({ err, msgId }, 'persistRequestState 失败（表可能不存在）');
+    }
+  }
+
+  /** 从 SQLite 删除 pending request 状态 */
+  private deleteRequestState(msgId: string): void {
+    try {
+      const db = getDb();
+      db.prepare('DELETE FROM pending_request_state WHERE msg_id = ?').run(msgId);
+    } catch (err) {
+      logger.debug({ err, msgId }, 'deleteRequestState 失败（表可能不存在）');
+    }
+  }
+
+  /**
+   * M2: 启动时恢复 pending request 关键状态。
+   * 仅恢复 intent_anchor 和 task_id 等持久化字段，不恢复闭包（resolve）。
+   * 调用方应根据恢复的 metadata 决定是否重新触发对话。
+   */
+  recoverRequestStates(db: Database): { recovered: number } {
+    try {
+      const rows = db.prepare(
+        'SELECT msg_id, session_id, task_id, intent_anchor_json, level, reasoning FROM pending_request_state',
+      ).all() as Array<{
+        msg_id: string; session_id: string; task_id: string | null;
+        intent_anchor_json: string | null; level: string | null; reasoning: string | null;
+      }>;
+      let recovered = 0;
+      for (const row of rows) {
+        // 仅记录恢复日志（闭包无法恢复，留待调用方处理）
+        logger.info({
+          msgId: row.msg_id,
+          sessionId: row.session_id,
+          taskId: row.task_id,
+          hasAnchor: !!row.intent_anchor_json,
+        }, 'M2: 恢复 pending request 状态（仅 metadata）');
+        recovered++;
+      }
+      return { recovered };
+    } catch (err) {
+      // 表不存在时静默返回
+      logger.debug({ err }, 'recoverRequestStates 失败（表可能不存在）');
+      return { recovered: 0 };
     }
   }
 

@@ -1,5 +1,10 @@
 import { startResidentAgent } from '../../resident-agent.js';
 import { getLogger } from '../../../utils/logger.js';
+import { safeSlice } from '../../../utils/safe-slice.js';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { AgentManifest } from '../../manifest.js';
 import type { ModelMessage } from '../../../contracts/model.js';
 import type { ReviewResult } from '../../../contracts/review.js';
 import type { RouteResultPayload, PermissionJudgeResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
@@ -124,7 +129,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         observationType: payload.observationType,
         fromAgent: payload.fromAgent,
         toAgent: payload.toAgent,
-        content: payload.content.slice(0, 2000),
+        content: safeSlice(payload.content, 2000),
         priority: payload.priority ?? 1,
         metadata: payload.metadata,
       };
@@ -141,7 +146,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const lines = decisions.map(d => {
       const outcome = d.outcome ? ` [${d.outcome}]` : '';
       const lesson = d.lesson ? ` 教训: ${d.lesson}` : '';
-      return `- ${d.inputSummary.slice(0, 80)}${outcome}${lesson}`;
+      return `- ${safeSlice(d.inputSummary, 80)}${outcome}${lesson}`;
     });
     return `\n\n## 历史决策参考\n\n${lines.join('\n')}\n`;
   }
@@ -187,7 +192,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       );
       if (observations.length > 0) {
         const observationContext = observations
-          .map(o => `[${o.observationType}] ${o.fromAgent}${o.toAgent ? '→' + o.toAgent : ''}: ${o.content.slice(0, 200)}`)
+          .map(o => `[${o.observationType}] ${o.fromAgent}${o.toAgent ? '→' + o.toAgent : ''}: ${safeSlice(o.content, 200)}`)
           .join('\n');
         systemPrompt += `\n\n## 近期 Agent 行为观察（供 C 级审核参考）\n${observationContext}`;
       }
@@ -231,7 +236,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         reviewResult = { verdict: 'approve', reason: 'Failed to parse review, approving by default' };
       }
 
-      logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: reviewResult.reason?.slice(0, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
+      logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: safeSlice(reviewResult.reason, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
       ipc.send('review.result', 'core', reviewResult, trackingId);
     } catch (err) {
       ipc.send('review.result', 'core', {
@@ -281,7 +286,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       });
 
       const decision = parseRouteDecision(result.content);
-      logger.debug({ intent: decision.intent, target: decision.targetAgent, reason: decision.reason?.slice(0, 200), agents: payload.availableAgents.map((a: { name: string }) => a.name) }, 'brain:route');
+      logger.debug({ intent: decision.intent, target: decision.targetAgent, reason: safeSlice(decision.reason, 200), agents: payload.availableAgents.map((a: { name: string }) => a.name) }, 'brain:route');
       const routeResult: RouteResultPayload = { decision };
       ipc.send('route.result', 'core', routeResult, trackingId);
 
@@ -341,7 +346,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       });
 
       const judgment = parsePermissionJudge(result.content);
-      logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: judgment.reason?.slice(0, 200), dangerLevel: payload.dangerLevel }, 'brain:permission');
+      logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: safeSlice(judgment.reason, 200), dangerLevel: payload.dangerLevel }, 'brain:permission');
       const judgeResult: PermissionJudgeResultPayload = judgment;
       ipc.send('permission.judge.result', 'core', judgeResult, trackingId);
     } catch (err) {
@@ -475,7 +480,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       dialogueBuffers.set(dialogueId, { messages: [], lastActivity: Date.now() });
     }
     const buffer = dialogueBuffers.get(dialogueId)!;
-    buffer.messages.push({ from: message.from, content: message.content.slice(0, 500), round: currentRound });
+    buffer.messages.push({ from: message.from, content: safeSlice(message.content, 500), round: currentRound });
     if (buffer.messages.length > 10) buffer.messages.shift();
     buffer.lastActivity = Date.now();
 
@@ -483,7 +488,9 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     let intervention: { instruction: string; reason: string } | null = null;
 
     // 规则 1：对话轮次过多且无进展
-    if (currentRound >= 8) {
+    // L3: 可配置化，从 agent.json manifest 经 env var 传入
+    const maxObserveRounds = parseInt(process.env.AGENT_OBSERVE_MAX_ROUNDS ?? '8', 10);
+    if (currentRound >= maxObserveRounds) {
       const recentContents = buffer.messages.slice(-4).map(m => m.content);
       const hasRepetition = recentContents.some((c, i) =>
         i > 0 && recentContents[i - 1].slice(0, 100) === c.slice(0, 100),
@@ -535,7 +542,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
 
         const signal = parseDriftCheckResult(result.content, 'dialogue');
         if (signal.needsIntervention && signal.alignmentScore < 0.5) {
-          logger.info({ dialogueId, score: signal.alignmentScore, desc: signal.driftDescription?.slice(0, 100) }, 'brain:dialogue semantic drift');
+          logger.info({ dialogueId, score: signal.alignmentScore, desc: safeSlice(signal.driftDescription, 100) }, 'brain:dialogue semantic drift');
           ipc.send('turn.correction', 'core', {
             delegationId: dialogueId,
             action: 'adjust' as const,
@@ -602,7 +609,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
 预期产出类型：${anchor.outputType}
 
 ## 待验证的回复
-${draftResponse.slice(0, 5000)}
+${safeSlice(draftResponse, 5000)}
 
 ## 验证标准
 1. 回复是否直接回答了用户的问题/完成了用户的请求？
@@ -639,7 +646,7 @@ ${draftResponse.slice(0, 5000)}
         }
       } catch { /* 解析失败默认通过 */ }
 
-      logger.debug({ pass: verdict.pass, reason: verdict.reason?.slice(0, 100) }, 'brain:verify');
+      logger.debug({ pass: verdict.pass, reason: safeSlice(verdict.reason ?? '', 100) }, 'brain:verify');
       ipc.send('verify.result', 'core', { verdict }, trackingId);
     } catch (err) {
       logger.error({ err }, 'verify.request failed');

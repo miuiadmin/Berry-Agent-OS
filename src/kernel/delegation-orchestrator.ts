@@ -47,6 +47,7 @@ import { getAgentHomePath } from './agent-home.js';
 import { classifyLevel } from '../contracts/review.js';
 import { buildAvailableAgentsList } from './agent-registry.js';
 import { getLogger } from '../utils/logger.js';
+import { safeSlice } from '../utils/safe-slice.js';
 import { genId } from '../utils/id.js';
 import { getTracer } from '../observability/tracer.js';
 import { getEventBus } from './event-bus.js';
@@ -1303,7 +1304,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (pending) {
         this.brainDecisionRecorder?.recordReviewDecision(
           pending.sessionId,
-          (pending.draftResponse ?? pending.userMessage).slice(0, 200),
+          safeSlice(pending.draftResponse ?? pending.userMessage, 200),
           review as unknown as Record<string, unknown>,
         );
       }
@@ -1811,7 +1812,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const driftCorrelationId = genId('drift');
     brainAgent.ipc.send('drift.check.request', 'brain', {
       anchor: pending.intentAnchor,
-      content: draft.slice(0, 3000),
+      content: safeSlice(draft, 3000),
       checkpointType: 'final_response',
     }, driftCorrelationId);
 

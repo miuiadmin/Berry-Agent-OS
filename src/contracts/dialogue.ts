@@ -61,6 +61,12 @@ export interface DialogueObservePayload {
   currentRound: number;
   /** 该对话关联的 sessionId */
   sessionId: string;
+  /**
+   * L1: 该对话关联的 taskId（correlationId 解析后）。
+   * 供 Brain 漂移检测按 (sessionId, taskId) 隔离 IntentAnchor，
+   * 防止同 session 多 task 串台。
+   */
+  taskId?: string;
   /** 12.0: 意图锚点（供 Brain 语义漂移检测用） */
   intentAnchor?: IntentAnchor;
 }

@@ -10,6 +10,7 @@ import type { IntentAnchor, DriftSignal, DriftCheckpointType, DriftThresholds } 
 import { DEFAULT_DRIFT_THRESHOLDS } from '../contracts/intent.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { safeSlice } from '../utils/safe-slice.js';
 
 const logger = getLogger('drift-detector');
 
@@ -41,7 +42,7 @@ ${constraintsList}
 核心实体：${anchor.entities.join('、') || '未指定'}
 
 ## 当前产出（${checkpointType}）
-${content.slice(0, 3000)}
+${safeSlice(content, 3000)}
 
 ## 判断
 请评估当前产出与用户目标的对齐程度。只输出 JSON：
@@ -69,7 +70,7 @@ export function parseDriftCheckResult(llmOutput: string, checkpointType: DriftCh
       checkpointType,
     };
   } catch {
-    logger.debug({ output: llmOutput.slice(0, 200) }, 'drift check parse failed, defaulting to aligned');
+    logger.debug({ output: safeSlice(llmOutput, 200) }, 'drift check parse failed, defaulting to aligned');
     return {
       alignmentScore: 1,
       needsIntervention: false,
@@ -129,12 +130,12 @@ export class DriftDetector {
         id,
         sessionId,
         correlationId,
-        rawMessage.slice(0, 2000),
-        anchor.goal.slice(0, 500),
+        safeSlice(rawMessage, 2000),
+        safeSlice(anchor.goal, 500),
         JSON.stringify(anchor.constraints),
         anchor.outputType,
         JSON.stringify(anchor.entities),
-        routeReason?.slice(0, 500) ?? null,
+        routeReason ? safeSlice(routeReason, 500) : null,
         Date.now(),
       );
       return id;

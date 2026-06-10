@@ -10,5 +10,6 @@
   "source": "bundled",
   "entry": "entry.ts",
   "ipcProtocol": "custom",
-  "requiresBrainReview": false
+  "requiresBrainReview": false,
+  "dialogueObserve": { "maxRounds": 8 }
 }

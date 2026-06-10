@@ -66,6 +66,14 @@ export interface AgentInfo {
   description: string;
   /** 该 Agent 支持的能力标签 */
   capabilities: string[];
+  /**
+   * L5: Agent 运行时状态。
+   * - 'online': 进程已注册到 AgentManager 且 ready
+   * - 'offline': 已安装但未启动 / 启动失败
+   *
+   * 不传时默认为 'online'（向后兼容）。
+   */
+  status?: 'online' | 'offline';
 }
 
 // ─────────────────────────────────────────────────────────────────

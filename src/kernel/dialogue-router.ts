@@ -26,6 +26,7 @@ import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import { getEventBus } from './event-bus.js';
 import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
+import { safeSlice } from '../utils/safe-slice.js';
 
 const logger = getLogger('dialogue-router');
 
@@ -382,7 +383,7 @@ export class DialogueRouter {
         observationType: state.currentRound === 0 ? 'dialogue_send' : 'dialogue_reply',
         fromAgent: msg.from,
         toAgent: msg.to,
-        content: msg.content.slice(0, 2000), // 截断以控制存储
+        content: safeSlice(msg.content, 2000), // 截断以控制存储（grapheme-safe）
         priority: msg.metadata?.confidence !== undefined && msg.metadata.confidence < 0.5 ? 2 : 1,
         metadata: { round: state.currentRound, dialogueId: msg.dialogueId, sequenceNumber: msg.sequenceNumber },
       });
@@ -403,7 +404,7 @@ export class DialogueRouter {
         taskId: state.correlationId,
         from: msg.from,
         to: msg.to,
-        content: msg.content.slice(0, 2000),
+        content: safeSlice(msg.content, 2000),
         round: state.currentRound,
         phase: state.currentRound === 0 ? 'send' : 'reply',
         timestamp: Date.now(),
@@ -416,6 +417,8 @@ export class DialogueRouter {
   /**
    * M4: Brain IPC 实时推送（dialogue.observe）。
    * Brain 离线时静默跳过。
+   *
+   * L1: 同时携带 taskId 让 Brain 按 (sessionId, taskId) 隔离 IntentAnchor。
    */
   private pushToBrainIpc(msg: DialogueMessagePayload, state: DialogueState): void {
     const brainIpc = this.deps.getBrainIpc();
@@ -426,6 +429,7 @@ export class DialogueRouter {
       message: msg,
       currentRound: state.currentRound,
       sessionId: state.sessionId,
+      taskId: state.correlationId, // L1: 携带 taskId 供 Brain 按任务隔离 anchor
       intentAnchor: pending?.intentAnchor,
     };
     try {
@@ -495,7 +499,7 @@ export class DialogueRouter {
     // 构造摘要
     const lines = dialogueRows.map(r => {
       const role = r.from_agent === 'conversation' ? '你' : r.to_agent;
-      return `[${role}] ${r.content.slice(0, 200)}`;
+      return `[${role}] ${safeSlice(r.content, 200)}`;
     });
     return `[未完成的对话 (target: ${dialogueRows[0].to_agent})]\n${lines.join('\n')}`;
   }
