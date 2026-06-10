@@ -5,6 +5,7 @@ import { getLogger } from '../../utils/logger.js';
 import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
 import { getDb } from '../../memory/index.js';
 import { getCorrectionFrequencyDetector } from '../correction-frequency-detector.js';
+import { getCorrectionEscalationDetector } from '../correction-escalation-detector.js';
 import type { IpcMessage, IpcMessageType } from '../types.js';
 import type {
   TurnCheckpointPayload,
@@ -294,21 +295,46 @@ export class CorrectionFlow {
     correction: TurnCorrectionPayload,
   ): void {
     try {
-      const detector = getCorrectionFrequencyDetector();
-      // severity 由调用方通过 instruction 自带（Brain LLM 输出），这里默认 medium
-      // 真实场景下 severity 应从 correction 的入参推导 — 这里保守用 medium
-      const severity: 'low' | 'medium' | 'high' = correction.newConstraints?.forbiddenTools?.length
-        ? 'medium'
-        : 'low';
-      detector.record({
+      const frequencyDetector = getCorrectionFrequencyDetector();
+      const escalationDetector = getCorrectionEscalationDetector();
+
+      // ① 基础 severity：按 Brain LLM 给出的 instruction 内容粗略判断
+      // forbiddenTools 出现 → 至少 medium（限制工具是高风险）
+      // action=stop/restart → high
+      // 默认 low
+      let baseSeverity: 'low' | 'medium' | 'high' = 'low';
+      if (action === 'stop' || action === 'restart') {
+        baseSeverity = 'high';
+      } else if (correction.newConstraints?.forbiddenTools?.length) {
+        baseSeverity = 'medium';
+      }
+
+      // ② §3.7 升级式纠偏：查 (agent, task) 窗口内历史纠偏次数，必要时升级
+      const escalation = escalationDetector.evaluate(agentName, taskId, baseSeverity);
+      const finalSeverity = escalation.suggestedSeverity;
+
+      // ③ 写入 brain_corrections（供 frequency detector + escalation detector 联合使用）
+      frequencyDetector.record({
         sessionId,
         taskId,
         agentName,
-        severity,
+        severity: finalSeverity,
         action,
         instruction: correction.instruction ?? `${action} correction`,
         blockTools: correction.newConstraints?.forbiddenTools,
       });
+
+      // ④ 升级时打 warn（让运维看到「这个 agent 在反复被纠偏」）
+      if (escalation.upgradeReason) {
+        logger.warn({
+          agentName,
+          taskId,
+          baseSeverity,
+          suggestedSeverity: finalSeverity,
+          reason: escalation.upgradeReason,
+          stats: escalation.stats,
+        }, 'correction-flow: severity escalated');
+      }
     } catch (err) {
       logger.warn({ err, agentName, action }, 'correction-flow: failed to record correction for frequency detection');
     }
