@@ -126,6 +126,8 @@ export type EventMap = {
   'task.acknowledged': { taskId: string; targetAgent: AgentName };
   'task.started': { taskId: string; targetAgent: AgentName };
   'task.progress': { taskId: string; message: string; payload?: Record<string, unknown> };
+  /** 13.0 §13.10: 任务进度心跳 — 长时间无 tool_call 时的存活信号 */
+  'task.heartbeat': { taskId: string; agentName: string; elapsedMs: number; lastActivity: string; timestamp: number };
   'task.completed': { taskId: string; targetAgent: AgentName; outputPayload: Record<string, unknown> };
   'task.failed': { taskId: string; targetAgent: AgentName; error: string };
   'task.timeout': { taskId: string; targetAgent: AgentName };
