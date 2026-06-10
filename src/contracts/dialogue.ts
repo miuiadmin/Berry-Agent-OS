@@ -112,6 +112,8 @@ export const DIALOGUE_DEFAULTS = {
   maxRounds: 10,
   /** 单次用户请求内最多开启的对话数 */
   maxDialoguesPerRequest: 3,
+  /** 13.0 §13.3: 同 target agent 同时进行的对话数上限（避免被多 worker 同时轰炸） */
+  maxDialoguesPerTarget: 2,
   /** 单轮回复超时（ms） */
   replyTimeoutMs: 60_000,
   /** dialogue.reply 内容的最大字符数（超过则截断） */

@@ -55,6 +55,8 @@ export class DialogueRouter {
   private pausedTimeouts = new Set<string>();
   /** correlationId → 该请求已开启的对话数（预算守护） */
   private dialogueCountByCorrelation = new Map<string, number>();
+  /** 13.0 §13.3: target agent → 活跃 dialogueId 集合（per-target 并发上限） */
+  private activeDialoguesByTarget = new Map<string, Set<string>>();
 
   private deps: DialogueRouterDeps;
   private insertStmt: import('better-sqlite3').Statement;
@@ -88,6 +90,16 @@ export class DialogueRouter {
     }
     this.dialogueCountByCorrelation.set(params.correlationId, count + 1);
 
+    // 13.0 §13.3: per-target agent 并发上限（避免一个 agent 被多 worker 同时轰炸）
+    const targetSet = this.activeDialoguesByTarget.get(params.target) ?? new Set<string>();
+    if (targetSet.size >= DIALOGUE_DEFAULTS.maxDialoguesPerTarget) {
+      throw new Error(
+        `exceeded max dialogues per target agent (${params.target}: ${targetSet.size}/${DIALOGUE_DEFAULTS.maxDialoguesPerTarget})`,
+      );
+    }
+    targetSet.add(dialogueId);
+    this.activeDialoguesByTarget.set(params.target, targetSet);
+
     const state: DialogueState = {
       dialogueId,
       sessionId: params.sessionId,
@@ -100,7 +112,13 @@ export class DialogueRouter {
       totalChars: 0,
     };
     this.dialogues.set(dialogueId, state);
-    logger.info({ dialogueId, initiator: params.initiator, target: params.target, dialogueCount: count + 1 }, 'dialogue:registered');
+    logger.info({
+      dialogueId,
+      initiator: params.initiator,
+      target: params.target,
+      dialogueCount: count + 1,
+      targetActiveCount: targetSet.size,
+    }, 'dialogue:registered');
     return state;
   }
 
@@ -110,6 +128,14 @@ export class DialogueRouter {
     if (!state) return;
     state.status = reason === 'completed' ? 'completed' : reason === 'timeout' ? 'timeout' : 'interrupted';
     this.clearReplyTimer(dialogueId);
+
+    // 13.0 §13.3: 释放 per-target 并发槽位
+    const targetSet = this.activeDialoguesByTarget.get(state.target);
+    if (targetSet) {
+      targetSet.delete(dialogueId);
+      if (targetSet.size === 0) this.activeDialoguesByTarget.delete(state.target);
+    }
+
     const pending = this.pendingReplies.get(dialogueId);
     if (pending) {
       this.pendingReplies.delete(dialogueId);
