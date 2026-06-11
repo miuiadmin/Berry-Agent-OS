@@ -2784,13 +2784,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       checkpointType: 'final_response',
     }, driftCorrelationId);
 
-    // 设置超时：2s 内未收到结果 → 降级 approve
+    // 超时设置：drift check 涉及 IPC + fast tier LLM，2s 过短易误判。
+    // 超时不再 auto-approve（绕过审核违反硬规则），而是降级为同步 Brain review 深度审核。
+    let settled = false;  // drift check 是否已出结果（正常返回或超时），保证二者只有一个生效
     const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      logger.debug({ correlationId }, 'drift check timeout, auto-approve');
-      primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-      this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
-    }, 2000);
+      logger.warn({ correlationId }, 'drift check timeout, falling back to sync Brain review (not auto-approve)');
+      this.pendingReviewOrigins.set(correlationId, 'conversation');
+      this.reportProgress(pending, 'reviewing', '漂移检测超时，降级为完整审核...');
+      reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+    }, 5000);
 
     const cleanup = () => {
       clearTimeout(timeoutId);
@@ -2798,6 +2803,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     const handler = async (msg: IpcMessage) => {
       if (msg.correlationId !== driftCorrelationId) return;
+      if (settled) return;  // 已超时降级，忽略迟到的 drift 结果（避免重复处理）
+      settled = true;
       cleanup();
 
       const { signal } = msg.payload as { signal: import('../contracts/intent.js').DriftSignal };
