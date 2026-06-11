@@ -361,6 +361,32 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       });
     });
 
+    // 13.0 §11.7/§12.5: Brain 观察 blocker/question signal → 发 brain.signal_intervention。
+    // 修复缺口：此事件此前零订阅者，Brain 的干预意图无人执行。
+    // 消费方式：找到 mission 中活跃的 worker delegation，发 turn.correction 注入软纠偏。
+    getEventBus().on('brain.signal_intervention', (payload: {
+      missionId: string; from: string; signalType: string; signalMsg: string;
+      instruction: string; severity: 'low' | 'medium' | 'high'; createdAt: number;
+    }) => {
+      // 用 missionId 当 sessionId 查活跃 worker delegation
+      const active = this.delegationManager.getActiveForSession(payload.missionId);
+      const worker = active.find(e => e.targetAgent === payload.from) ?? active[0];
+      if (!worker) {
+        logger.debug({ missionId: payload.missionId, from: payload.from }, '13.0: signal_intervention 无活跃 worker，跳过');
+        return;
+      }
+      const agent = this.agentManager.getAgent(worker.targetAgent);
+      if (!agent) return;
+      // 发 turn.correction（软纠偏：instruction 注入 worker 下一轮 system message）
+      agent.ipc.send('turn.correction', worker.targetAgent, {
+        delegationId: worker.id,
+        action: 'adjust',
+        instruction: payload.instruction,
+        newConstraints: payload.severity === 'high' ? { forbiddenTools: [] } : undefined,
+      } as import('../contracts/delegation.js').TurnCorrectionPayload, genId('sigint'));
+      logger.info({ missionId: payload.missionId, targetAgent: worker.targetAgent, signalType: payload.signalType }, '13.0: signal_intervention → turn.correction 已派发');
+    });
+
     // 13.0 §3.8 第二层 + §8.4: delegation 结束时清理 task 级状态缓存
     // 避免 stale 约束/纠偏/行为笔记泄漏到下一个 task
     // （active_scope 用 delegationId，correction/behavior_note 用 sessionId:taskId 复合 key）
