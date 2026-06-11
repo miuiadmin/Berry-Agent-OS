@@ -31,6 +31,8 @@ import { PluginRuntime, PluginRuntimeV2 } from '../plugins/index.js';
 import { TakeoverController } from '../testing/model-takeover.js';
 import { ensureDirs, getSocketPath, getPidPath, getUserAgentsDir, getSkillsDir } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
+/** 13.0 §13.5: 用户会话排队（并发消息串行化） */
+import { getUserSessionQueue } from './user-session-queue.js';
 
 import type { LogLevel } from '../observability/types.js';
 import { CronScheduler } from '../cron/index.js';
@@ -257,15 +259,14 @@ export class CoreService {
 
     // 13.0 §13.5: 对话完成后自动 dequeue 排队的 user session
     // conversation.result 触发后检查 UserSessionQueue，如有排队项则取出并重新派发给 channel
-    getEventBus().on('conversation.result' as any, (payload: any) => {
+    getEventBus().on('conversation.result', (payload) => {
       try {
-        const sessionId: string | undefined = payload?.sessionId;
+        const { sessionId } = payload;
         if (!sessionId) return;
         // 从 sessionId 反推 userId（channel 路径格式: channel-{type}-{userId}）
         const channelMatch = sessionId.match(/^channel-(\w+)-(.+)$/);
         if (!channelMatch) return;
         const userId = channelMatch[2];
-        const { getUserSessionQueue } = require('./user-session-queue.js') as typeof import('./user-session-queue.js');
         const queued = getUserSessionQueue().dequeue(userId);
         if (queued) {
           logger.info({ userId, correlationId: queued.correlationId }, '13.0 UserSessionQueue: auto-dequeue after conversation.result');
@@ -274,7 +275,7 @@ export class CoreService {
     });
 
     // 13.0 P5: 订阅 self-evolution 信号 — who:"skills" 的 task 完成后触发技能创建
-    getEventBus().on('capability.evolution.request' as any, (payload: any) => {
+    getEventBus().on('capability.evolution.request', (payload) => {
       try {
         const { missionId, taskId, skillDescription } = payload;
         if (!skillDescription) return;

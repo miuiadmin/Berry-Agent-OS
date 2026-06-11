@@ -27,6 +27,8 @@ import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
+/** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
+import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
 import {
   setupTaskProgressHandler,
   setupTaskAcknowledgeHandlers,
@@ -344,12 +346,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 13.0 §13.16: 启动 TaskHeartbeatManager — 长任务（>1min 无活动）自动发心跳
     // 前端通过 task.heartbeat WS 事件显示「还在工作中」提示
-    const { getTaskHeartbeatManager } = require('./task-heartbeat-manager.js') as typeof import('./task-heartbeat-manager.js');
+    // getTaskHeartbeatManager 已在文件顶部 import
     const heartbeatMgr = getTaskHeartbeatManager(getEventBus());
     // HeartbeatSource 适配器：把 DelegationManager 的 entries 映射为 HeartbeatEntry
     heartbeatMgr.setSource({
       getActiveDelegations: () => {
-        const entries: Array<import('./task-heartbeat-manager.js').HeartbeatEntry> = [];
+        const entries: Array<HeartbeatEntry> = [];
         for (const entry of this.delegationManager.getAll()) {
           if (isDelegationTerminal(entry.state)) continue;
           entries.push({
@@ -365,7 +367,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       },
       markHeartbeat: (delegationId: string) => {
         // 心跳标记写入 delegation entry（更新 lastCheckpointAt 避免重复心跳）
-        const entry = this.delegationManager.get(delegationId) as (DelegationEntry & { lastCheckpointAt?: number }) | undefined;
+        const entry = this.delegationManager.get(delegationId);
         if (entry) {
           entry.lastCheckpointAt = Date.now();
         }
@@ -390,7 +392,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.pendingReviewOrigins.clear();
     // 13.0 §13.16: 停止 TaskHeartbeatManager
     try {
-      const { getTaskHeartbeatManager } = require('./task-heartbeat-manager.js') as typeof import('./task-heartbeat-manager.js');
+      // getTaskHeartbeatManager 已在文件顶部 import
       getTaskHeartbeatManager(getEventBus()).stop();
     } catch { /* 首次 dispose 前未初始化则忽略 */ }
     // 13.0: 清理 StateCache 中所有状态

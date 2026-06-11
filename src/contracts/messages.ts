@@ -375,6 +375,10 @@ export type EventMap = {
     userComment?: string;
     originalResponseSnippet?: string;
     modifiedResponseSnippet?: string;
+    /** 13.0 P5: 触发技能创建时附带的 mission ID */
+    missionId?: string;
+    /** 13.0 P5: 技能描述（who:"skills" 的 task 完成后的 result） */
+    skillDescription?: string;
     createdAt: number;
   };
 };

@@ -13,6 +13,8 @@ import type {
 } from '../../contracts/daemon-protocol.js';
 import type { SocketResultEvent, SocketInterruptedEvent } from '../../contracts/socket-protocol.js';
 import type { RouteRequestPayload } from '../../contracts/routing.js';
+/** 13.0 §13.5: 用户会话排队（并发消息串行化） */
+import { getUserSessionQueue } from '../user-session-queue.js';
 import type { ReviewVerdict } from '../../contracts/review.js';
 import type { ModelTier } from '../../contracts/model.js';
 import type { LogLevel } from '../../observability/types.js';
@@ -552,7 +554,6 @@ export async function handleChannelMessage(
   // 13.0 §13.5: 如果该 userId 已有活跃 session → 排队等待
   if (services.sessionManager.hasActivePendingForSession(sessionId)) {
     try {
-      const { getUserSessionQueue } = await import('../user-session-queue.js');
       const queue = getUserSessionQueue();
       const correlationId = clientMsgId;
       const position = queue.enqueue(userId, correlationId);
