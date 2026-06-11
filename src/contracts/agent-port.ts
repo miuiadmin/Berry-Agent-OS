@@ -16,6 +16,16 @@ import { FORBIDDEN_TARGETS, DEFAULT_REQUEST_TIMEOUT_MS } from './agent-port-cons
 // 消息类型
 // ─────────────────────────────────────────────────────────────────
 
+/** 13.0 §2.3: 跨 agent 调用链条目 — 用于追踪多级串联调用的路径 */
+export interface CallChainEntry {
+  /** 发起方 agent */
+  from: string;
+  /** 接收方 agent */
+  to: string;
+  /** 调用时间戳 */
+  ts: number;
+}
+
 /** Agent 间通信的消息载荷 */
 export interface PortMessage {
   /** 目标 Agent 名称（禁止 'brain'，见 FORBIDDEN_TARGETS） */
@@ -24,6 +34,8 @@ export interface PortMessage {
   content: string;
   /** 附加上下文（文件路径、查询参数等） */
   context?: Record<string, unknown>;
+  /** 13.0 §2.3: 跨 agent 调用链 — 由调用方传入，KernelRouter 用于循环检测 */
+  callChain?: CallChainEntry[];
 }
 
 /** PortMessage 顶层元数据 */
@@ -42,6 +54,8 @@ export interface PortReply {
   content: string;
   /** 回复方附加的元数据（对应 dialogue.reply 的 DialogueMetadata） */
   metadata?: PortReplyMetadata;
+  /** 13.0 §2.3: 回复携带的调用链（调用方可用于调试和决策） */
+  callChain?: CallChainEntry[];
 }
 
 /** 回复方附加的元数据 */
@@ -120,6 +134,8 @@ export interface PortEvent {
   sessionId?: string;
   /** 所属任务 ID */
   taskId?: string;
+  /** 13.0 §2.3: 跨 agent 调用链 */
+  callChain?: CallChainEntry[];
 }
 
 // ─────────────────────────────────────────────────────────────────

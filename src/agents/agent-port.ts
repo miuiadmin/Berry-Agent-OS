@@ -21,6 +21,7 @@ import type {
   PortEvent,
   AgentInfo,
   PortAskUserOptions,
+  CallChainEntry,
 } from '../contracts/agent-port.js';
 import { FORBIDDEN_TARGETS, DEFAULT_REQUEST_TIMEOUT_MS } from '../contracts/agent-port-constants.js';
 import type { ToolResult } from '../tools/types.js';
@@ -488,11 +489,66 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
     },
 
     async useTool(name: string, input: unknown): Promise<ToolResult> {
-      // 复用当前进程的 ToolRegistry
+      // 13.0 §5.3.6: useTool 内部自动走权限流程
+      // 对 dangerous/moderate 工具，通过 IPC 向 Kernel 请求权限，
+      // Kernel 侧走 PermissionCoordinator → ApprovalManager → user.confirm 全链路。
+      // safe 工具直接执行（零 IPC 开销）。
       const tool = getToolByName(name);
       if (!tool) {
         return { content: `工具 "${name}" 不存在`, isError: true };
       }
+
+      /** 需要权限检查的危险等级 */
+      const needsPermission = tool.dangerLevel === 'dangerous' || tool.dangerLevel === 'moderate';
+
+      if (needsPermission) {
+        try {
+          // 步骤 1: 请求权限（IPC → Kernel → PermissionCoordinator → 可能触发 user.confirm）
+          const permResponse = await ipc.request('permission.request', 'core', {
+            toolName: name,
+            toolInput: JSON.stringify(input),
+            dangerLevel: tool.dangerLevel,
+          });
+          const permResult = permResponse.payload as { allowed: boolean; reason?: string; tokenId?: string };
+
+          if (!permResult.allowed) {
+            logger.debug({ toolName: name, dangerLevel: tool.dangerLevel, reason: permResult.reason }, 'AgentPort: useTool permission denied');
+            return { content: `权限被拒绝: ${permResult.reason ?? '未授权'}`, isError: true };
+          }
+
+          // 步骤 2: 验证权限 token（防伪造）
+          if (permResult.tokenId) {
+            const validateResponse = await ipc.request('permission.validate', 'core', {
+              tokenId: permResult.tokenId,
+              toolName: name,
+              toolInput: JSON.stringify(input),
+            });
+            const validateResult = validateResponse.payload as { allowed: boolean; reason?: string };
+            if (!validateResult.allowed) {
+              return { content: `权限验证失败: ${validateResult.reason ?? '无效 token'}`, isError: true };
+            }
+          }
+
+          // 步骤 3: 执行工具
+          const result = await tool.execute(input);
+
+          // 步骤 4: 消费权限 token（一次性）
+          if (permResult.tokenId) {
+            try {
+              await ipc.request('permission.consume', 'core', { tokenId: permResult.tokenId });
+            } catch {
+              // 消费失败不阻塞结果返回（token 过期/已消费）
+              logger.debug({ tokenId: permResult.tokenId }, 'AgentPort: useTool permission token consume failed (non-critical)');
+            }
+          }
+
+          return result;
+        } catch (err) {
+          return { content: `工具权限流程失败: ${(err as Error).message}`, isError: true };
+        }
+      }
+
+      // safe 工具直接执行（零 IPC 开销）
       try {
         return await tool.execute(input);
       } catch (err) {
