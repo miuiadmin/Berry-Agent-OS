@@ -177,8 +177,62 @@ export class KernelRouter {
   /** §5.2.3: per-agent-pair 频率限制追踪 (from:to → RateLimitEntry) */
   private rateLimits = new Map<string, RateLimitEntry>();
 
+  /**
+   * §5.3.10: Agent 目录本地缓存。
+   * Kernel 维护实时目录，agent.discover 直接从缓存读取（零 IPC）。
+   * agent register/crashed 时增量推送 directory.changed 事件更新缓存。
+   */
+  private directoryCache: Array<{ name: string; description: string; capabilities: string[]; status: 'online' | 'offline' }> = [];
+  /** 缓存是否已初始化 */
+  private directoryInitialized = false;
+
   constructor(deps: KernelRouterDeps) {
     this.deps = deps;
+
+    // §5.3.10: 订阅 agent 生命周期事件，维护目录缓存
+    this.setupDirectoryCache();
+  }
+
+  /**
+   * §5.3.10: 初始化目录缓存并订阅增量更新。
+   * agent register/crashed 事件触发缓存重建 + 推送 directory.changed。
+   */
+  private setupDirectoryCache(): void {
+    // 首次查询时懒加载（因为构造时 agentManager 可能还没有 agent）
+    getEventBus().on('agent.registered', () => {
+      this.refreshDirectoryCache();
+    });
+    // agent 崩溃也触发更新
+    getEventBus().on('agent.crashed', () => {
+      this.refreshDirectoryCache();
+    });
+  }
+
+  /**
+   * §5.3.10: 从 AgentManager 刷新目录缓存。
+   * 更新内存缓存后推 directory.changed 事件让已注册的 agent 知道。
+   */
+  private refreshDirectoryCache(): void {
+    try {
+      const agents = this.deps.agentManager.listAliveAgents();
+      this.directoryCache = agents
+        .filter(a => a.name !== 'brain')
+        .map(a => ({
+          name: a.name,
+          description: a.description ?? '',
+          capabilities: a.capabilities ?? [],
+          status: 'online' as const,
+        }));
+      this.directoryInitialized = true;
+
+      // 推送 directory.changed 事件（EventBus 广播，已注册的 agent 可订阅）
+      getEventBus().emit('directory.changed', {
+        added: this.directoryCache,
+        removed: [],
+      });
+    } catch (err) {
+      logger.warn({ err }, 'refreshDirectoryCache failed');
+    }
   }
 
   /**
