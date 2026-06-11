@@ -2794,7 +2794,23 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       logger.warn({ correlationId }, 'drift check timeout, falling back to sync Brain review (not auto-approve)');
       this.pendingReviewOrigins.set(correlationId, 'conversation');
       this.reportProgress(pending, 'reviewing', '漂移检测超时，降级为完整审核...');
-      reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+      // 补齐 sent 检查 + 30s 审核超时保护，与正常审核路径（2030-2037 行）保持一致。
+      // 防止 drift 降级发 review.request 后 Brain LLM 挂死导致审核永久挂起——
+      // 否则只能靠 240s pending 超时兜底，用户等待过久。
+      const sent = reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+      if (!sent) {
+        logger.warn({ correlationId }, 'drift 降级 review.request IPC 发送失败，自动 approve');
+        this.pendingReviewOrigins.delete(correlationId);
+        this.approveReviewDegraded(correlationId, draft, 'review_ipc_send_failed', pending.sessionId);
+        return;
+      }
+      setTimeout(() => {
+        const stillPending = this.sessionManager.getPending(correlationId);
+        if (!stillPending) return;
+        logger.warn({ correlationId }, 'drift 降级审核超时，自动 approve');
+        this.pendingReviewOrigins.delete(correlationId);
+        this.approveReviewDegraded(correlationId, draft, 'review_timeout', pending.sessionId);
+      }, 30_000);
     }, 5000);
 
     const cleanup = () => {
@@ -2845,7 +2861,22 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         }
         this.pendingReviewOrigins.set(correlationId, 'conversation');
         this.reportProgress(pending, 'reviewing', '检测到可能偏离，正在深度审核...');
-        reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+        // 补齐 sent 检查 + 30s 审核超时保护，与正常审核路径保持一致（同 drift 超时降级路径）。
+        // verify 通过后走完整 review，同样需要超时保护防止 Brain LLM 挂死。
+        const sent = reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
+        if (!sent) {
+          logger.warn({ correlationId }, 'drift verify 降级 review.request IPC 发送失败，自动 approve');
+          this.pendingReviewOrigins.delete(correlationId);
+          this.approveReviewDegraded(correlationId, draft, 'review_ipc_send_failed', pending.sessionId);
+          return;
+        }
+        setTimeout(() => {
+          const stillPending = this.sessionManager.getPending(correlationId);
+          if (!stillPending) return;
+          logger.warn({ correlationId }, 'drift verify 审核超时，自动 approve');
+          this.pendingReviewOrigins.delete(correlationId);
+          this.approveReviewDegraded(correlationId, draft, 'review_timeout', pending.sessionId);
+        }, 30_000);
         return;
       }
 
