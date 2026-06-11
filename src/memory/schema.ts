@@ -1007,6 +1007,52 @@ export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_agent_tool_task ON agent_tool_calls(task_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_agent_tool_agent ON agent_tool_calls(agent_name, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_agent_tool_name ON agent_tool_calls(tool_name, success, created_at DESC);
+
+  -- 13.0 灵魂版：Brain 决策历史表（路由/审核/权限/纠偏/聚合洞察/意愿行动）
+  -- 与 migrations.ts 中的 migrateCreateBrainDecisionsTable 保持同步（IF NOT EXISTS 幂等）
+  CREATE TABLE IF NOT EXISTS brain_decisions (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    decision_type TEXT NOT NULL
+      CHECK(decision_type IN ('route','review','permission','correction','aggregated_insight','will_action')),
+    input_summary TEXT NOT NULL,
+    output_json TEXT NOT NULL,
+    confidence REAL,
+    outcome TEXT CHECK(outcome IN ('good','bad','neutral')),
+    feedback_source TEXT
+      CHECK(feedback_source IS NULL OR feedback_source IN ('user_correction','metric_signal','evolution_engine')),
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    lesson TEXT,
+    resolved_at INTEGER,
+    task_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_brain_decisions_type_session
+    ON brain_decisions(decision_type, session_id);
+  CREATE INDEX IF NOT EXISTS idx_brain_decisions_outcome
+    ON brain_decisions(outcome) WHERE outcome IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_brain_decisions_created
+    ON brain_decisions(created_at);
+  CREATE INDEX IF NOT EXISTS idx_brain_decisions_task
+    ON brain_decisions(task_id) WHERE task_id IS NOT NULL;
+
+  -- 13.0 §5.3.8 + §8.8: 用户偏好持久化表（跨 session 行为偏好 + 90 天自动过期）
+  -- 与 migrations.ts 中的 migrateCreateUserPreferencesTable 保持同步（IF NOT EXISTS 幂等）
+  CREATE TABLE IF NOT EXISTS user_preferences (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT 'default',
+    pref_key TEXT NOT NULL,
+    pref_value TEXT NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('evolution_engine', 'brain_decision', 'user_explicit', 'restore_original')),
+    confidence REAL DEFAULT 1.0,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    UNIQUE(user_id, pref_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_preferences_user_key
+    ON user_preferences(user_id, pref_key);
+  CREATE INDEX IF NOT EXISTS idx_user_preferences_expires
+    ON user_preferences(expires_at) WHERE expires_at IS NOT NULL;
 `;
 
 // 13.0 §13.20: brain_corrections 表 — 追踪 Brain 纠偏频次

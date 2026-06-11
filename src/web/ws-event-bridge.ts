@@ -80,6 +80,15 @@ const BRIDGED_EVENTS: EventName[] = [
   'directory.changed',
   // 13.0 P10: Brain 派发 checker 独立审核事件
   'brain.checker.dispatch',
+  // 13.0 §13.16: 长任务心跳（前端显示「还在工作中」提示）
+  'task.heartbeat',
+  // 13.0 §5.3.4: 用户反馈 Brain 审核问题（前端可据此更新 UI 状态）
+  'brain.feedback',
+  // 13.0 §13.5: 用户会话排队/出队（前端显示「你的消息已排队，请等待」提示）
+  'user.session.queued',
+  'user.session.dequeued',
+  // 13.0 §8.7: Agent 拒绝任务（前端显示任务被拒绝及原因）
+  'task.reject',
 ];
 
 /**
