@@ -51,24 +51,58 @@ export class WorldModelRuntime {
   }): void {
     const now = Date.now();
 
+    // 会话起始时间：首轮交互时锚定，后续轮保持不变（用于正确计算累计会话时长）
+    if (this.snapshot.user.lastInteractionAt === null) {
+      this.snapshot.temporal.sessionStartedAt = now;
+    }
     this.snapshot.user.lastInteractionAt = now;
     this.snapshot.temporal.turnsInSession++;
-    this.snapshot.temporal.sessionDurationMs = now - (this.snapshot.user.lastInteractionAt ?? now);
+    // 修正旧版 bug：旧版先设 lastInteractionAt=now 再用它算 duration，导致恒为 0
+    this.snapshot.temporal.sessionDurationMs =
+      now - (this.snapshot.temporal.sessionStartedAt ?? now);
     this.snapshot.updatedAt = now;
 
-    // Detect frustration signals
+    // Detect frustration signals（挫败感信号累积）
     const frustrationPatterns = ['不对', '错了', '不是这个', '又', '为什么', '还是不行'];
     if (frustrationPatterns.some(p => input.userMessage.includes(p))) {
       this.snapshot.user.frustrationSignals++;
     }
 
-    // Track recent topics (simple keyword extraction)
+    // Track recent topics（简单关键词提取）
     const topic = input.userMessage.slice(0, 50).replace(/[?？！!。.]/g, '').trim();
     if (topic.length > 3) {
       this.snapshot.user.recentTopics = [
         topic,
         ...this.snapshot.user.recentTopics.filter(t => t !== topic),
       ].slice(0, 10);
+    }
+
+    // 推断 energyLevel：基于挫败信号 + 近期交互密度（旧版恒为 unknown）
+    // 挫败信号多 → frustrated；交互频繁（近 10 轮内） → focused；否则保持 unknown
+    if (this.snapshot.user.frustrationSignals >= 3) {
+      this.snapshot.user.energyLevel = 'frustrated';
+    } else if (this.snapshot.temporal.turnsInSession > 0 && this.snapshot.user.frustrationSignals === 0) {
+      this.snapshot.user.energyLevel = 'focused';
+    }
+
+    // 推断 currentActivity：取最近一个有意义的 topic 作为用户当前关注点
+    if (this.snapshot.user.recentTopics.length > 0) {
+      this.snapshot.user.currentActivity = this.snapshot.user.recentTopics[0];
+    }
+
+    // 从工具调用推断活跃目标（activeGoals）—— 代码/技能/记忆等高频工具揭示用户意图
+    if (input.toolCalls && input.toolCalls.length > 0) {
+      const goalMap: Record<string, string> = {
+        edit_code: '代码修改', write_file: '文件创建', run_command: '命令执行',
+        search_files: '代码搜索', grep_files: '内容检索', inspect_code: '代码分析',
+        plan: '任务规划', squad: '团队协作', ask_user: '澄清需求',
+      };
+      for (const tc of input.toolCalls) {
+        const goal = goalMap[tc.name];
+        if (goal && !this.snapshot.user.activeGoals.includes(goal)) {
+          this.snapshot.user.activeGoals = [...this.snapshot.user.activeGoals, goal].slice(-5);
+        }
+      }
     }
 
     this.updateTemporal();
@@ -92,7 +126,10 @@ export class WorldModelRuntime {
   resetSession(): void {
     this.snapshot.temporal.turnsInSession = 0;
     this.snapshot.temporal.sessionDurationMs = 0;
+    this.snapshot.temporal.sessionStartedAt = null;
     this.snapshot.user.frustrationSignals = 0;
+    // session 重置时 energyLevel 回到 unknown，等待新一轮推断
+    this.snapshot.user.energyLevel = 'unknown';
     this.snapshot.updatedAt = Date.now();
     this.persist();
   }
@@ -152,6 +189,7 @@ function createDefaultSnapshot(): WorldModelSnapshot {
       timeOfDay: 'morning',
       dayOfWeek: new Date().getDay(),
       sessionDurationMs: 0,
+      sessionStartedAt: null,
       turnsInSession: 0,
       lastBreakAt: null,
       upcomingDeadlines: [],

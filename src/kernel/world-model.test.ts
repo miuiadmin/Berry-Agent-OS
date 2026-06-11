@@ -116,4 +116,78 @@ describe('WorldModelRuntime', () => {
     expect(snapshot.temporal.turnsInSession).toBe(0);
     expect(snapshot.user.frustrationSignals).toBe(0);
   });
+
+  /**
+   * 13.0 §3.1 修复：sessionDurationMs 计算逻辑 bug。
+   * 旧版先设 lastInteractionAt=now 再用它算 duration，导致恒为 0。
+   */
+  it('sessionDurationMs 正确累计（非零）— 修复旧版恒为 0 的 bug', async () => {
+    const wm = new WorldModelRuntime(db);
+    wm.updateFromConversation({ userMessage: '第一条', assistantResponse: 'ok', sessionId: 's' });
+
+    // 模拟时间流逝
+    const start = wm.getSnapshot().temporal.sessionStartedAt!;
+    expect(start).not.toBeNull();
+
+    await new Promise((r) => setTimeout(r, 50));
+    wm.updateFromConversation({ userMessage: '第二条', assistantResponse: 'ok', sessionId: 's' });
+
+    const duration = wm.getSnapshot().temporal.sessionDurationMs;
+    // duration 应 > 0（修复前恒为 0）
+    expect(duration).toBeGreaterThan(0);
+    // sessionStartedAt 在首轮锚定后保持不变
+    expect(wm.getSnapshot().temporal.sessionStartedAt).toBe(start);
+  });
+
+  /**
+   * 13.0 §3.1 新增：energyLevel 推断（旧版恒为 unknown）。
+   */
+  it('energyLevel 推断：挫败信号多 → frustrated，正常交互 → focused', () => {
+    const wm = new WorldModelRuntime(db);
+
+    // 正常交互 → focused
+    wm.updateFromConversation({ userMessage: '帮我看看这个功能', assistantResponse: '好的', sessionId: 's' });
+    expect(wm.getSnapshot().user.energyLevel).toBe('focused');
+
+    // 累积挫败信号 → frustrated
+    wm.updateFromConversation({ userMessage: '不对', assistantResponse: 'ok', sessionId: 's' });
+    wm.updateFromConversation({ userMessage: '又错了', assistantResponse: 'ok', sessionId: 's' });
+    wm.updateFromConversation({ userMessage: '还是不行', assistantResponse: 'ok', sessionId: 's' });
+
+    expect(wm.getSnapshot().user.frustrationSignals).toBeGreaterThanOrEqual(3);
+    expect(wm.getSnapshot().user.energyLevel).toBe('frustrated');
+  });
+
+  /**
+   * 13.0 §3.1 新增：activeGoals 从工具调用推断（旧版恒为空）。
+   */
+  it('activeGoals 从工具调用推断', () => {
+    const wm = new WorldModelRuntime(db);
+    wm.updateFromConversation({
+      userMessage: '帮我改代码',
+      assistantResponse: 'ok',
+      sessionId: 's',
+      toolCalls: [{ name: 'edit_code' }, { name: 'run_command' }, { name: 'inspect_code' }],
+    });
+
+    const goals = wm.getSnapshot().user.activeGoals;
+    expect(goals).toContain('代码修改');
+    expect(goals).toContain('命令执行');
+    expect(goals).toContain('代码分析');
+  });
+
+  /**
+   * 13.0 §3.1 新增：currentActivity 取最近 topic（旧版恒为 null）。
+   */
+  it('currentActivity 取最近有意义 topic', () => {
+    const wm = new WorldModelRuntime(db);
+    wm.updateFromConversation({
+      userMessage: '帮我重构认证模块',
+      assistantResponse: 'ok',
+      sessionId: 's',
+    });
+
+    expect(wm.getSnapshot().user.currentActivity).not.toBeNull();
+    expect(wm.getSnapshot().user.currentActivity).toContain('重构认证');
+  });
 });

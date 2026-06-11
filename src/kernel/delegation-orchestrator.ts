@@ -427,11 +427,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
    * @param sessionId 对话 session
    * @param userMessage 用户原始消息
    * @param assistantResponse 最终回复内容
+   * @param toolCalls 本轮工具调用（可选）— 传给 World Model 推断 activeGoals
    */
   private onConversationCompleted(
     sessionId: string,
     userMessage: string,
     assistantResponse: string,
+    toolCalls?: Array<{ name: string }>,
   ): void {
     this.sessionManager.queueEvolution(sessionId, userMessage, assistantResponse);
     this.sessionManager.queueCapabilityEvolution(sessionId, userMessage, assistantResponse);
@@ -439,6 +441,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.worldModelRef?.updateFromConversation({
       userMessage,
       assistantResponse,
+      toolCalls,
       sessionId,
     });
   }
@@ -1951,7 +1954,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         finalResponse: response,
       });
 
-      this.onConversationCompleted(sessionId, pending.userMessage, response);
+      this.onConversationCompleted(sessionId, pending.userMessage, response, pending.toolCalls);
 
       getEventBus().emit('message.responded', {
         sessionId,
@@ -2027,7 +2030,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
     if (!finalized || finalized === true) return;
 
-    this.onConversationCompleted(pending.sessionId, pending.userMessage, response);
+    this.onConversationCompleted(pending.sessionId, pending.userMessage, response, pending.toolCalls);
     // 所有后续操作完成后再 resolve
     finalized.resolve(response);
   }

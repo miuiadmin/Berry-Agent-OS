@@ -8,10 +8,15 @@ export interface WorldModelSnapshot {
 
 export interface UserState {
   currentActivity: string | null;
-  energyLevel: 'high' | 'medium' | 'low' | 'unknown';
+  /** 用户精力状态 — 基于挫败信号和交互密度推断 */
+  energyLevel: 'high' | 'medium' | 'low' | 'frustrated' | 'focused' | 'unknown';
+  /** 最近讨论的话题（去重，最多 10 条） */
   recentTopics: string[];
+  /** 从工具调用推断的活跃目标（最多 5 条） */
   activeGoals: string[];
+  /** 累积挫败信号计数（每 session 重置） */
   frustrationSignals: number;
+  /** 最近一次交互时间戳（毫秒） */
   lastInteractionAt: number | null;
 }
 
@@ -45,7 +50,11 @@ export interface ExternalEvent {
 export interface TemporalState {
   timeOfDay: 'morning' | 'afternoon' | 'evening' | 'night';
   dayOfWeek: number;
+  /** 当前会话持续时间（毫秒）— 基于 sessionStartedAt 计算 */
   sessionDurationMs: number;
+  /** 会话开始时间戳（毫秒）— 首轮交互时锚定，用于正确计算 sessionDurationMs */
+  sessionStartedAt: number | null;
+  /** 当前会话内的交互轮数 */
   turnsInSession: number;
   lastBreakAt: number | null;
   upcomingDeadlines: Array<{ description: string; dueAt: number }>;
