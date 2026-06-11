@@ -380,6 +380,7 @@ export function buildCheckpointSystemPrompt(): string {
   "newConstraints": {
     "maxRemainingTokens": <数字，可选>,
     "forbiddenTools": ["工具名", ...],
+    "blockPaths": ["禁止访问的路径模式（glob 或路径前缀），如 \".env\"、\"src/secrets/**\""],
     "requiredApproach": "<建议方法>",
     "reducedTimeout": <毫秒数，可选>
   }
@@ -452,6 +453,7 @@ export function parseCheckpointResult(llmOutput: string, delegationId: string): 
         ? {
             maxRemainingTokens: typeof parsed.newConstraints.maxRemainingTokens === 'number' ? parsed.newConstraints.maxRemainingTokens : undefined,
             forbiddenTools: Array.isArray(parsed.newConstraints.forbiddenTools) ? parsed.newConstraints.forbiddenTools : undefined,
+            blockPaths: Array.isArray(parsed.newConstraints.blockPaths) ? parsed.newConstraints.blockPaths.filter((p: unknown) => typeof p === 'string') : undefined,
             requiredApproach: typeof parsed.newConstraints.requiredApproach === 'string' ? parsed.newConstraints.requiredApproach : undefined,
             reducedTimeout: typeof parsed.newConstraints.reducedTimeout === 'number' ? parsed.newConstraints.reducedTimeout : undefined,
           }

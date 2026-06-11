@@ -191,6 +191,11 @@ export type CorrectionAction = 'continue' | 'adjust' | 'stop' | 'restart';
 export interface CorrectionConstraints {
   maxRemainingTokens?: number;
   forbiddenTools?: string[];
+  /**
+   * 13.0 §3.8 硬注入：禁止访问的路径模式（glob / 精确路径前缀）。
+   * Brain 高严重度纠偏时可指定，PermissionCoordinator 会在 tool 执行前强制拦截。
+   */
+  blockPaths?: string[];
   requiredApproach?: string;
   reducedTimeout?: number;
 }

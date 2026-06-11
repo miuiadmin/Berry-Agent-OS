@@ -182,18 +182,21 @@ export class CorrectionFlow {
 
     // 13.0 §3.8 第二层: 把 Brain 的 forbiddenTools/blockPaths 写入 active_scope 硬约束
     // PermissionCoordinator 在所有 tool 执行前都会强制检查 active_scope
-    if (correction.newConstraints?.forbiddenTools && correction.newConstraints.forbiddenTools.length > 0) {
+    const corrBlockPaths = correction.newConstraints?.blockPaths;
+    const corrForbiddenTools = correction.newConstraints?.forbiddenTools;
+    if ((corrForbiddenTools && corrForbiddenTools.length > 0) || (corrBlockPaths && corrBlockPaths.length > 0)) {
       const existing = this.ctx.permissionCoordinator?.checkActiveScope(delegationId, '__dummy__', '')
         ?? null;
-      // 直接调用 setActiveScope 覆盖（含之前的 blockPaths）
+      const prevBlockPaths = existing && typeof existing === 'object' && 'blockPaths' in existing
+        ? (existing as { blockPaths?: string[] }).blockPaths
+        : undefined;
+      // 合并：既有 blockPaths（来自之前纠偏）∪ 本次纠偏新增 blockPaths，去重
+      const mergedBlockPaths = [...new Set([...(prevBlockPaths ?? []), ...(corrBlockPaths ?? [])])];
       this.ctx.permissionCoordinator?.setActiveScope(delegationId, {
-        blockTools: correction.newConstraints.forbiddenTools,
-        // 保留之前的 blockPaths（如果有）
-        blockPaths: existing && typeof existing === 'object' && 'blockPaths' in existing
-          ? (existing as { blockPaths?: string[] }).blockPaths
-          : undefined,
+        blockTools: corrForbiddenTools,
+        blockPaths: mergedBlockPaths.length > 0 ? mergedBlockPaths : undefined,
       });
-      logger.debug({ delegationId, forbiddenTools: correction.newConstraints.forbiddenTools }, 'applyAdjust: set active_scope.blockTools');
+      logger.debug({ delegationId, forbiddenTools: corrForbiddenTools, blockPaths: corrBlockPaths }, 'applyAdjust: set active_scope (blockTools + blockPaths)');
     }
 
     // 13.0 §13.20: 记录到 frequency detector，Evolution 学习闭环的触发器
@@ -209,9 +212,10 @@ export class CorrectionFlow {
         instruction: correction.instruction,
         severity: 'medium', // checkpoint 触发的纠偏默认 medium
         scopeUpdate: correction.newConstraints ? {
-          blockPaths: correction.newConstraints.maxRemainingTokens ? undefined : undefined,
+          // §3.8 硬注入：blockPaths 从 Brain 纠偏的 newConstraints.blockPaths 提取（修复旧版死代码三元）
+          blockPaths: correction.newConstraints.blockPaths,
           blockTools: correction.newConstraints.forbiddenTools,
-          constraints: [],
+          constraints: correction.newConstraints.requiredApproach ? [correction.newConstraints.requiredApproach] : [],
         } : undefined,
         createdAt: Date.now(),
       };
