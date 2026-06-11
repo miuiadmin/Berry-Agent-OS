@@ -142,6 +142,7 @@ export class PermissionFlow {
           toolName,
           toolInput,
           dangerLevel: dangerLevel as DangerLevel,
+          taskId, // 13.0 §3.8: 传入 taskId 用于 active_scope 硬拦截
         });
         agentIpc.send('permission.result', agentName, result, replyId);
       }
@@ -217,6 +218,7 @@ export class PermissionFlow {
           toolName,
           toolInput,
           dangerLevel: dangerLevel as DangerLevel,
+          taskId, // 13.0 §3.8: 传入 taskId 用于 active_scope 硬拦截
         });
         agentIpc.send('permission.result', agentName, result, replyId);
       }

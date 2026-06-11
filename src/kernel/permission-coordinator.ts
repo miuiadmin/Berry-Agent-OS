@@ -158,7 +158,27 @@ export class PermissionCoordinator {
     return { allowed: false, requiresReview: true, reason: '需要 Brain 审批', requestId: request.id };
   }
 
-  checkAndIssueSimple(params: { agentName: string; sessionId: string; toolName: string; toolInput: string; dangerLevel: DangerLevel }): PermissionResultPayload {
+  /**
+   * 简化版权限检查（模块 Agent 用）。
+   *
+   * 13.0 修复：与 checkAndIssue() 对齐，增加 active_scope 硬拦截。
+   * 之前 checkAndIssueSimple() 跳过了 checkActiveScope()，导致 Brain 纠偏
+   * 设置的 forbiddenTools 对模块 Agent 的工具调用没有硬强制。
+   *
+   * @param params.agentName Agent 名称
+   * @param params.sessionId 会话 ID
+   * @param params.toolName 工具名称
+   * @param params.toolInput 工具输入
+   * @param params.dangerLevel 危险等级
+   * @param params.taskId 可选任务 ID（用于 active_scope 检查，§3.8 第二层）
+   */
+  checkAndIssueSimple(params: { agentName: string; sessionId: string; toolName: string; toolInput: string; dangerLevel: DangerLevel; taskId?: string }): PermissionResultPayload {
+    // 13.0 §3.8 第二层: active_scope 硬拦截（与 checkAndIssue 对齐，fail-closed）
+    const scopeBlock = this.checkActiveScope(params.taskId, params.toolName, params.toolInput);
+    if (scopeBlock) {
+      return { allowed: false, reason: scopeBlock };
+    }
+
     const blockResult = this.engine.checkPermission(
       params.toolName,
       params.toolInput,
