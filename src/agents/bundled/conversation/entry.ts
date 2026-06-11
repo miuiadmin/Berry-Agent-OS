@@ -51,6 +51,7 @@ const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的�
 - **历史**：search_history（搜索过往对话）
 - **记忆**：memory_query/add/delete（跨会话记忆）
 - **协作**：dialogue（与代码智能体等进行多轮对话式协作）
+- **13.0 任务协调**：plan（读写共享任务计划）、squad（管理团队组织）
 
 ## dialogue 工具使用指南
 
@@ -72,6 +73,22 @@ const DEFAULT_SYSTEM_PROMPT = `你是 Berry，一个有记忆和学习能力的�
 3. 收到 needsClarification 时，判断自己能否回答；不确定就 ask_user
 4. 不要无限追问——5 轮内解决大多数任务。如果超过 5 轮还没进展，总结现状回复用户
 5. 多个不相关子任务可以分别开新 dialogue
+
+## 13.0 Mission 协作指南
+
+当系统提示中包含「当前 Mission 上下文」时，说明你正在参与一个多 Agent 协作的 mission。
+
+**你的角色**：
+- **协调者**：将 mission 任务委派给对应 Agent，收集结果，汇总给用户
+- **汇报者**：使用 plan 工具查看 mission 进度，向用户报告已完成和进行中的任务
+- **沟通者**：将用户的补充说明和修正传达给正在工作的 Agent
+
+**mission 场景下的行为**：
+1. 优先使用 plan 工具查看任务列表和依赖关系
+2. 将具体工作委派给对应 Agent（code → 代码、learning → 学习、skills → 技能）
+3. 收到 Agent 结果后，检查 plan 是否有后续依赖任务需要触发
+4. 所有任务完成后，汇总结果给用户
+5. 如果用户对某个任务不满意，可以重新委派或调整 plan
 
 **严格规则**：
 - 日常聊天、问候、闲聊、情感表达 → 直接文字回复，禁止调用工具
@@ -277,10 +294,33 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       const streamingEnabled = config.streaming?.enabled !== false;
       const { StreamingScrubber } = await import('../../../llm/streaming-scrubber.js');
       const scrubber = new StreamingScrubber();
+
+      // 13.0 §12.3: 如果当前会话有活跃 mission，注入 mission 上下文到 system prompt
+      // 让 Conversation Agent 能感知 mission 进度、使用 plan/squad 工具协调任务
+      let effectiveSystemPrompt = systemPrompt ? `${systemPrompt}\n\n${DEFAULT_SYSTEM_PROMPT}` : DEFAULT_SYSTEM_PROMPT;
+      if (intent === 'mission' || message.includes('mission') || message.includes('任务进度') || message.includes('计划')) {
+        try {
+          const { MissionManager } = await import('../../../kernel/mission-manager.js');
+          const missionManager = new MissionManager();
+          // 列出所有活跃 mission，注入最新一个的上下文
+          const missions = missionManager.listMissions();
+          const activeMission = missions.find(m => m.status === 'in_progress' || m.status === 'created');
+          if (activeMission) {
+            const missionPrompt = missionManager.renderContext(activeMission.id, '', 'conversation');
+            if (missionPrompt) {
+              effectiveSystemPrompt += `\n\n## 当前活跃 Mission\n\n${missionPrompt}`;
+              logger.debug({ missionId: activeMission.id, sessionId }, 'conversation: active mission context injected');
+            }
+          }
+        } catch (err) {
+          logger.warn({ err, sessionId }, 'conversation: mission context injection failed');
+        }
+      }
+
       const result = await runToolLoop({
         llm: llm.current,
         messages: [...priorHistory, { role: 'user', content: messageForModel }],
-        systemPrompt: systemPrompt ? `${systemPrompt}\n\n${DEFAULT_SYSTEM_PROMPT}` : DEFAULT_SYSTEM_PROMPT,
+        systemPrompt: effectiveSystemPrompt,
         tools,
         signal: controller.signal,
         config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },

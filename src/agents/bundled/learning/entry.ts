@@ -12,6 +12,16 @@ import { checkEvolutionTriggers, type EvolutionTriggerSignal } from '../../../ob
 import { runInsightsLifecycle } from '../../../kernel/insights-lifecycle.js';
 import { genId } from '../../../utils/id.js';
 
+/**
+ * 13.0 §12.3: 构建 mission 上下文前缀。
+ * 当 agent 在 mission 框架下工作时，将 mission 目标注入 LLM prompt，
+ * 让 LLM 知道自己的工作在更大的任务中的位置。
+ */
+function buildMissionPrefix(missionPrompt?: string): string {
+  if (!missionPrompt) return '';
+  return `## 当前 Mission 上下文\n\n${missionPrompt}\n\n---\n\n`;
+}
+
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const input = payload.inputPayload;
   const taskType = String(input.taskType ?? 'learning_review');
@@ -33,8 +43,10 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   let signals = detectLearningSignals(message, assistantResponse);
   let llmUsed = false;
   if (useLlm) {
+    // 13.0: 注入 mission 上下文到 learning LLM prompt
+    const missionPrefix = buildMissionPrefix(context.missionPrompt);
     const llmResult = await context.llm.chat(
-      [{ role: 'user', content: buildLearningPrompt(message, assistantResponse) }],
+      [{ role: 'user', content: missionPrefix + buildLearningPrompt(message, assistantResponse) }],
       {
         agent: 'learning',
         purpose: 'learning_review',
@@ -68,7 +80,7 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
 
 async function handleMetricAnalysis(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/index.js').LlmClient },
+  context: { llm: import('../../../llm/index.js').LlmClient; missionPrompt?: string },
 ): Promise<Record<string, unknown>> {
   const db = getDb();
 
@@ -88,8 +100,10 @@ async function handleMetricAnalysis(
     ORDER BY created_at DESC LIMIT 20
   `).all(Date.now() - 3600_000) as Array<Record<string, unknown>>;
 
+  // 13.0: 注入 mission 上下文到 metric analysis prompt
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const llmResult = await context.llm.chat(
-    [{ role: 'user', content: buildMetricAnalysisPrompt(triggers, recentDecisions) }],
+    [{ role: 'user', content: missionPrefix + buildMetricAnalysisPrompt(triggers, recentDecisions) }],
     {
       agent: 'learning',
       purpose: 'learning_review',

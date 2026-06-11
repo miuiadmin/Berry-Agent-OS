@@ -552,6 +552,79 @@ export function parseSuperiorReviewResult(llmOutput: string, delegationId: strin
  * @param leaderAgent - Leader agent 的名称
  * @returns checker 角色的 system prompt 片段
  */
+/**
+ * 13.0 §13.8: cron 任务 LLM 审核 system prompt
+ * Brain 使用 cron task 的 description 作为"用户意图"基准，
+ * 审核 cron 输出是否安全、合理、是否偏离原始描述。
+ */
+export function buildCronReviewSystemPrompt(): string {
+  return `你是 Brain Agent，正在对 cron 定时任务的执行输出进行独立审核。
+
+## 任务
+你收到一条 cron 任务的描述（用户设定的意图）和它的实际输出。
+请判断输出是否安全、合理、是否偏离了任务描述。
+
+## 输出格式
+只输出一个 JSON 对象，不要有任何其他文本：
+{
+  "verdict": "approve" | "modify" | "reject",
+  "reason": "简短说明",
+  "correctedOutput": "如果 verdict 为 modify，提供修正后的输出摘要",
+  "confidence": 0.0-1.0
+}
+
+## 判定标准
+- **approve**: 输出安全、与任务描述一致、无问题
+- **modify**: 输出有小问题（措辞不当、多余信息），但核心正确 → 提供修正摘要
+- **reject**: 输出有严重问题（安全风险、完全偏离任务、敏感数据泄露）
+
+## 关注点
+1. 输出是否包含敏感信息（密码、token、个人信息）
+2. 输出是否与任务描述的目的一致
+3. 输出是否可能对用户造成困扰或误导
+4. 如果输出太长，关注前 2000 字即可`;
+}
+
+/**
+ * 13.0 §13.8: cron 任务 LLM 审核 user prompt
+ * @param description - cron 任务描述（用户意图）
+ * @param output - cron 任务实际输出
+ */
+export function buildCronReviewUserPrompt(description: string, output: string): string {
+  return `## Cron 任务审核
+
+### 任务描述（用户意图）
+${safeSlice(description, 1000)}
+
+### 任务输出
+${safeSliceWithEllipsis(output, 4000)}
+
+请审核此输出是否安全、合理、与任务描述一致。`;
+
+}
+
+/**
+ * 13.0 §13.8: 解析 cron review LLM 输出
+ */
+export function parseCronReviewResult(llmOutput: string): {
+  verdict: 'approve' | 'modify' | 'reject';
+  reason: string;
+  correctedOutput?: string;
+  confidence: number;
+} {
+  try {
+    const parsed = JSON.parse(llmOutput);
+    return {
+      verdict: parsed.verdict ?? 'approve',
+      reason: parsed.reason ?? '',
+      correctedOutput: parsed.correctedOutput,
+      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.7,
+    };
+  } catch {
+    return { verdict: 'approve', reason: '解析失败，默认通过', confidence: 0.5 };
+  }
+}
+
 export function buildCheckerSystemPrompt(squadGoal: string, memberOn: string, leaderAgent: string): string {
   return `## Checker 角色指令
 

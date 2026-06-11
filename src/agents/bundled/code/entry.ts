@@ -308,12 +308,20 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const workingDir = (input.workingDir as string) ?? homedir();
   const workspace = await detectWorkspace(workingDir);
 
+  // 13.0 §12.3: 将 mission 上下文注入 instruction
+  // 当 Code Agent 执行 mission 任务时，LLM 能看到 plan 目标、当前 task、squad 角色等信息
+  let instruction = String(input.instruction ?? input.message ?? '');
+  if (context.missionPrompt) {
+    instruction = `${instruction}\n\n## 当前 Mission 上下文\n\n${context.missionPrompt}`;
+    logger.debug({ missionId: context.missionId, planTaskId: context.planTaskId }, 'code-entry: mission context injected into instruction');
+  }
+
   const result = await runTaskPhases({
     taskId: payload.taskId,
     sessionId: payload.sessionId,
     action: ((input.action as string) ?? 'full_task') as CodeAction,
     // instruction 来自 orchestrator 委派的 message 或 instruction 字段
-    instruction: String(input.instruction ?? input.message ?? ''),
+    instruction,
     workingDir: workspace?.gitRoot ?? workingDir,
     testCommand: input.testCommand as string | undefined,
     files: input.files as string[] | undefined,

@@ -82,6 +82,8 @@ const BRIDGED_EVENTS: EventName[] = [
   'task.heartbeat',
   // 13.0 §5.3.4: 用户反馈 Brain 审核问题（前端可据此更新 UI 状态）
   'brain.feedback',
+  // 13.0 §13.8: cron 任务 LLM 审核标记（前端展示 cron 输出审核警告）
+  'brain.cron_review_flagged',
   // 13.0 §13.5: 用户会话排队/出队（前端显示「你的消息已排队，请等待」提示）
   'user.session.queued',
   'user.session.dequeued',

@@ -1,5 +1,6 @@
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
+import type { ModuleAgentContext } from '../../module-agent.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
 // 13.0: 注册 memory 工具，使 dialogue handler 的 runToolLoop 能使用 memory_query 等
 import { createMemoryTools } from '../../../tools/memory-tools.js';
@@ -16,6 +17,15 @@ function ensureMemoryDialogueTools(
   for (const tool of memoryTools) {
     registerTool(tool);
   }
+}
+
+/**
+ * 13.0 §12.3: 构建 mission 上下文前缀。
+ * 当 memory agent 在 mission 框架下工作时，注入 mission 目标到 LLM prompt。
+ */
+function buildMissionPrefix(missionPrompt?: string): string {
+  if (!missionPrompt) return '';
+  return `## 当前 Mission 上下文\n\n${missionPrompt}\n\n---\n\n`;
 }
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
@@ -42,7 +52,7 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
 
 async function handleMemoryJudge(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { userMessage, assistantResponse, sessionId } = payload.inputPayload as {
@@ -51,8 +61,10 @@ async function handleMemoryJudge(
     sessionId: string;
   };
 
+  // 13.0: 注入 mission 上下文到 memory judge prompt
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: buildJudgePrompt(userMessage, assistantResponse) }],
+    [{ role: 'user', content: missionPrefix + buildJudgePrompt(userMessage, assistantResponse) }],
     {
       agent: 'memory',
       purpose: 'learning_review',
@@ -90,7 +102,7 @@ async function handleMemoryJudge(
 
 async function handleMemoryRecall(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { query, sessionId } = payload.inputPayload as { query: string; sessionId: string };
@@ -103,8 +115,10 @@ async function handleMemoryRecall(
 
   if (rows.length === 0) return { kind: 'memory_recall', results: [] };
 
+  // 13.0: 注入 mission 上下文到 memory recall prompt
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: buildRecallPrompt(query, rows) }],
+    [{ role: 'user', content: missionPrefix + buildRecallPrompt(query, rows) }],
     {
       agent: 'memory',
       purpose: 'learning_review',
@@ -130,7 +144,7 @@ async function handleMemoryCleanup(db: import('better-sqlite3').Database): Promi
 
 async function handleMemoryOrganize(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const duplicates = db.prepare(`

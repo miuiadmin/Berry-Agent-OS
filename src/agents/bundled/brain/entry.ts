@@ -26,6 +26,9 @@ import {
   parseAskUserReview,
   parseCheckpointResult,
   parseSuperiorReviewResult,
+  buildCronReviewSystemPrompt,
+  buildCronReviewUserPrompt,
+  parseCronReviewResult,
 } from './prompts.js';
 import type { IpcMessage } from '../../../kernel/types.js';
 import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../../contracts/routing.js';
@@ -491,10 +494,17 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // 13.0 §8.6: 自我审核反馈 IPC — 让前端 / Evolution Engine 把 lesson 写回 brain_decisions
-  // 之前 BrainDecisionRecorder.updateLesson 是私有方法，没法通过 IPC 调用
+  // ─── 13.0 §8.6 + §3.1 提示能力: 自我审核反馈 IPC + prompt 自修改闭环 ───
+  // 让前端 / Evolution Engine 把 lesson 写回 brain_decisions，
+  // 并在 lessons 累积到阈值时自动通过 PromptVersioning.propose() 生成新 prompt 版本。
+  // 设计依据：
+  //   - §3.1 "提示"能力：给 agent 建议和引导，让它们越做越好
+  //   - §8.8: Brain 高 severity 纠偏升级为跨 session 偏好
+  //   - §3.9: 软纠偏通过 StateCache 行为注释跨 task 持久
+  const PROMPT_SELF_MOD_LESSON_THRESHOLD = 3; // 同一 promptKey 累积 3 条 lesson 后触发自修改
+
   ipc.onMessage('brain.review.feedback', (msg: IpcMessage) => {
-    const payload = msg.payload as { decisionId?: string; feedbackType?: string; lesson?: string; outcome?: 'good' | 'bad' | 'neutral' };
+    const payload = msg.payload as { decisionId?: string; feedbackType?: string; lesson?: string; outcome?: 'good' | 'bad' | 'neutral'; promptKey?: string };
     if (!payload?.decisionId || !payload.lesson) {
       ipc.send('brain.review.feedback.result', 'core', { ok: false, reason: 'Missing decisionId or lesson' }, msg.correlationId ?? msg.id);
       return;
@@ -516,12 +526,132 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         feedbackType: payload.feedbackType,
         lessonLen: payload.lesson.length,
       }, 'brain:self-review feedback recorded');
+
+      // ── §3.1 提示能力: 检查是否触发 prompt 自修改 ──
+      // 根据反馈类型推断应该修改哪个 prompt key
+      const promptKey = payload.promptKey ?? inferPromptKeyFromFeedback(payload.feedbackType);
+      if (promptKey) {
+        tryTriggerPromptSelfMod(promptKey, payload.lesson);
+      }
+
       ipc.send('brain.review.feedback.result', 'core', { ok: true, id: payload.decisionId }, msg.correlationId ?? msg.id);
     } catch (err) {
       logger.warn({ err, decisionId: payload.decisionId }, 'brain:self-review feedback failed');
       ipc.send('brain.review.feedback.result', 'core', { ok: false, reason: (err as Error).message }, msg.correlationId ?? msg.id);
     }
   });
+
+  /**
+   * §3.1 提示能力: 根据反馈类型推断应该修改哪个 prompt key。
+   * 映射关系：
+   *   - 路由反馈 → brain.routing
+   *   - 审核反馈 → brain.review.a 或 brain.review.bc
+   *   - 权限反馈 → brain.permission
+   *   - 默认 → null（不触发自修改）
+   */
+  function inferPromptKeyFromFeedback(feedbackType?: string): string | null {
+    if (!feedbackType) return null;
+    if (feedbackType.includes('route') || feedbackType.includes('routing')) return 'brain.routing';
+    if (feedbackType.includes('review_a') || feedbackType.includes('review_a')) return 'brain.review.a';
+    if (feedbackType.includes('review') || feedbackType.includes('modify') || feedbackType.includes('reject')) return 'brain.review.bc';
+    if (feedbackType.includes('permission') || feedbackType.includes('tool')) return 'brain.permission';
+    return null;
+  }
+
+  /**
+   * §3.1 提示能力: 检查该 promptKey 下的 lessons 是否达到阈值，触发 prompt 自修改。
+   *
+   * 机制：
+   *   1. 从 brain_decisions 查询该 promptKey 相关的、带 lesson 的决策
+   *   2. 如果未处理的 lessons 数量 >= PROMPT_SELF_MOD_LESSON_THRESHOLD (3)
+   *   3. 把这些 lessons 合并为一条 "prompt 增补指令"，追加到当前 prompt 末尾
+   *   4. 调用 PromptVersioning.propose() 创建新版本
+   *   5. 下次 Brain 使用该 prompt 时自动读取新版本（getReviewPrompt 等）
+   *
+   * 安全边界：
+   *   - 新版本的内容 = 当前 active prompt + lessons 合并的增补段
+   *   - 不删除原有内容，只追加 "## 自动学习的教训" 段落
+   *   - 可通过 PromptVersioning.rollback() 回滚
+   */
+  function tryTriggerPromptSelfMod(promptKey: string, newLesson: string): void {
+    try {
+      // 查询该 promptKey 相关的、带 lesson 的决策
+      const lessonsWithFeedback = db.prepare(`
+        SELECT lesson FROM brain_decisions
+        WHERE decision_type = 'review'
+          AND lesson IS NOT NULL AND lesson != ''
+          AND input_summary LIKE '%' || ? || '%'
+        ORDER BY created_at DESC LIMIT ?
+      `).all(promptKey, PROMPT_SELF_MOD_LESSON_THRESHOLD + 2) as Array<{ lesson: string }>;
+
+      // 如果带 lesson 的决策不够，尝试更宽泛的查询
+      const allLessons = lessonsWithFeedback.length >= PROMPT_SELF_MOD_LESSON_THRESHOLD
+        ? lessonsWithFeedback
+        : (db.prepare(`
+            SELECT lesson FROM brain_decisions
+            WHERE lesson IS NOT NULL AND lesson != ''
+            ORDER BY created_at DESC LIMIT ?
+          `).all(PROMPT_SELF_MOD_LESSON_THRESHOLD) as Array<{ lesson: string }>);
+
+      if (allLessons.length < PROMPT_SELF_MOD_LESSON_THRESHOLD) {
+        logger.debug({
+          promptKey,
+          lessonCount: allLessons.length,
+          threshold: PROMPT_SELF_MOD_LESSON_THRESHOLD,
+        }, 'brain:prompt-self-mod not triggered (lessons below threshold)');
+        return;
+      }
+
+      // 获取当前 active prompt
+      const current = promptVersioning.getActiveVersion(promptKey);
+      const baseContent = current?.content ?? getDefaultPromptContent(promptKey);
+
+      // 构建增补段：合并 lessons 为简洁的指导原则
+      const lessonLines = allLessons
+        .slice(0, PROMPT_SELF_MOD_LESSON_THRESHOLD)
+        .map((l, i) => `${i + 1}. ${l.lesson.slice(0, 200)}`);
+
+      const supplement = `\n\n## 自动学习的教训（基于 ${allLessons.length} 条反馈，${new Date().toISOString().slice(0, 10)} 更新）\n${lessonLines.join('\n')}`;
+
+      // 检查是否已包含同样的增补内容（防止重复追加）
+      if (baseContent.includes(supplement.slice(0, 50))) {
+        logger.debug({ promptKey }, 'brain:prompt-self-mod skipped (supplement already present)');
+        return;
+      }
+
+      // 追加到当前 prompt 末尾
+      const newContent = baseContent + supplement;
+
+      // 创建新版本
+      const version = promptVersioning.propose({
+        promptKey,
+        newContent,
+        changeReason: `自动学习：基于 ${allLessons.length} 条审核反馈教训`,
+        changeSource: 'brain',
+        currentMetrics: { lessonCount: allLessons.length },
+      });
+
+      logger.info({
+        promptKey,
+        version: version.version,
+        lessonCount: allLessons.length,
+      }, 'brain:prompt-self-mod triggered — new prompt version created');
+    } catch (err) {
+      // prompt 自修改失败不应阻塞反馈流程
+      logger.warn({ err, promptKey }, 'brain:prompt-self-mod failed (non-critical)');
+    }
+  }
+
+  /** 获取 promptKey 的默认内容（当没有 active version 时） */
+  function getDefaultPromptContent(promptKey: string): string {
+    switch (promptKey) {
+      case 'brain.review.a': return DEFAULT_PROMPT_A;
+      case 'brain.review.bc': return DEFAULT_PROMPT_BC;
+      case 'brain.routing': return buildRoutingSystemPrompt();
+      case 'brain.permission': return buildPermissionJudgeSystemPrompt();
+      default: return '';
+    }
+  }
 
   /**
    * 13.0 P10: 派发独立 checker 审核。
@@ -1005,25 +1135,112 @@ ${safeSlice(draftResponse, 5000)}
     }
   });
 
-  // ─── 13.0 §13.8/§13.19: cron 任务审核 ───
+  // ─── 13.0 §13.8: cron 任务审核（LLM + 规则双路径） ───
   // cron.review 事件由 CronScheduler 在任务执行成功后发出，
   // Brain 订阅后使用 cron.description 作为"用户意图"进行审核判定。
+  // 策略：输出短/简单 → 规则化快速通过；输出长/复杂 → LLM 审核
   // 由于 Brain 是 resident agent，通过 EventBus 订阅（非 IPC）。
   const eventBus = getEventBus();
-  eventBus.on('cron.review', (payload) => {
+  eventBus.on('cron.review', async (payload) => {
     const { taskId, description, output } = payload as { taskId: string; description: string; output: string; createdAt: number };
-    logger.info({ taskId, descriptionLen: description.length, outputLen: output.length }, 'brain:cron.review received');
+    const outputLen = output?.length ?? 0;
+    const descLen = description?.length ?? 0;
+    logger.info({ taskId, descriptionLen: descLen, outputLen }, 'brain:cron.review received');
 
-    // 记录审核决策（描述作为意图基准，输出作为待审内容）
-    decisionRecorder.record({
-      sessionId: `cron:${taskId}`,
-      decisionType: 'cron_review',
-      inputSummary: safeSlice(description, 500),
-      outputJson: { output: safeSlice(output, 2000), autoApproved: true },
-      confidence: 0.7, // 自动审核置信度较低（无 LLM 调用，规则化判定）
-      taskId,
-    });
+    /** 判断是否需要 LLM 审核（基于输出复杂度和长度） */
+    const needsLlmReview = outputLen > 2000 || descLen > 100;
+    /** 快速判定：输出短且无描述时直接规则化通过 */
+    const quickApprove = !needsLlmReview && outputLen <= 500;
 
-    logger.debug({ taskId }, 'brain:cron.review auto-approved (rule-based)');
+    if (quickApprove) {
+      // ── 快速规则化通过（零 LLM） ──
+      decisionRecorder.record({
+        sessionId: `cron:${taskId}`,
+        decisionType: 'cron_review',
+        inputSummary: safeSlice(description, 500),
+        outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'rule_quick' },
+        confidence: 0.9,
+        taskId,
+      });
+      logger.debug({ taskId, outputLen }, 'brain:cron.review quick-approved (rule-based, short output)');
+      return;
+    }
+
+    if (!needsLlmReview) {
+      // ── 中等输出，规则化通过但置信度较低 ──
+      decisionRecorder.record({
+        sessionId: `cron:${taskId}`,
+        decisionType: 'cron_review',
+        inputSummary: safeSlice(description, 500),
+        outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'rule_medium' },
+        confidence: 0.7,
+        taskId,
+      });
+      logger.debug({ taskId, outputLen }, 'brain:cron.review auto-approved (rule-based, medium output)');
+      return;
+    }
+
+    // ── 复杂/长输出：调用 LLM 审核 ──
+    try {
+      const cronSystemPrompt = buildCronReviewSystemPrompt();
+      const cronUserPrompt = buildCronReviewUserPrompt(description ?? '', output);
+      const messages: ModelMessage[] = [
+        { role: 'user', content: cronUserPrompt },
+      ];
+
+      const result = await llm.current.chat(messages, {
+        system: cronSystemPrompt,
+        maxTokens: 1024,
+        temperature: 0.2,
+        agent: name,
+        purpose: 'brain_cron_review',
+        sessionId: `cron:${taskId}`,
+      });
+
+      const cronResult = parseCronReviewResult(result.content);
+      logger.info({
+        taskId,
+        verdict: cronResult.verdict,
+        confidence: cronResult.confidence,
+        reason: safeSlice(cronResult.reason, 200),
+      }, 'brain:cron.review LLM verdict');
+
+      decisionRecorder.record({
+        sessionId: `cron:${taskId}`,
+        decisionType: 'cron_review',
+        inputSummary: safeSlice(description, 500),
+        outputJson: {
+          output: safeSlice(output, 2000),
+          autoApproved: cronResult.verdict === 'approve',
+          llmVerdict: cronResult.verdict,
+          llmReason: safeSlice(cronResult.reason, 500),
+          correctedOutput: cronResult.correctedOutput ? safeSlice(cronResult.correctedOutput, 1000) : undefined,
+          path: 'llm',
+        },
+        confidence: cronResult.confidence,
+        taskId,
+      });
+
+      // 如果审核发现问题，通过 EventBus 广播（前端可展示警告）
+      if (cronResult.verdict !== 'approve') {
+        eventBus.emit('brain.cron_review_flagged', {
+          taskId,
+          verdict: cronResult.verdict,
+          reason: cronResult.reason,
+          correctedOutput: cronResult.correctedOutput,
+        });
+      }
+    } catch (err) {
+      // LLM 失败时降级为规则化通过（不阻塞 cron 流程）
+      logger.warn({ err: (err as Error).message, taskId }, 'brain:cron.review LLM failed, falling back to rule-based');
+      decisionRecorder.record({
+        sessionId: `cron:${taskId}`,
+        decisionType: 'cron_review',
+        inputSummary: safeSlice(description, 500),
+        outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'fallback' },
+        confidence: 0.5,
+        taskId,
+      });
+    }
   });
 });

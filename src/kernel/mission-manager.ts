@@ -90,8 +90,13 @@ const BUILTIN_TEMPLATES: Array<{
   name: string;
   description: string;
   plan: { tasks: Array<{ what: string; who: string; depends_on: string[] }> };
-  /** P11: squad 模板（可选） */
-  squads?: Array<{ name: string; goal: string; leader: string; members: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+  /** P11: squad 模板（可选）。§11.4 支持 squads 内嵌套子 squad（最多 3 层） */
+  squads?: Array<{
+    name: string; goal: string; leader: string;
+    members?: Array<{ agent: string; role: 'work' | 'check'; on: string }>;
+    /** §11.4 嵌套子 squad */
+    squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+  }>;
 }> = [
   {
     name: 'code-refactor',
@@ -178,12 +183,21 @@ const BUILTIN_TEMPLATES: Array<{
         goal: '项目搭建和功能实现',
         leader: 'code',
         members: [{ agent: 'code', role: 'check', on: '代码审查和测试验证' }],
-      },
-      {
-        name: '测试组',
-        goal: '全面测试和回归',
-        leader: 'code',
-        members: [],
+        /** §11.4 二级嵌套：开发组内部分为前端和后端子团队 */
+        squads: [
+          {
+            name: '核心开发小组',
+            goal: '搭建基础框架和核心功能',
+            leader: 'code',
+            members: [{ agent: 'code', role: 'work', on: '实现核心业务逻辑' }],
+          },
+          {
+            name: '测试小组',
+            goal: '全面测试和回归',
+            leader: 'code',
+            members: [{ agent: 'code', role: 'check', on: '验证测试覆盖率和回归' }],
+          },
+        ],
       },
       {
         name: '文档组',
@@ -1040,8 +1054,13 @@ export class MissionManager {
     context: string,
     overrides?: {
       createdBy?: string;
-      /** 13.0 P11: 手动覆盖 squads；不传时使用 BUILTIN_TEMPLATES 内置 squads */
-      squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+      /** 13.0 P11: 手动覆盖 squads；不传时使用 BUILTIN_TEMPLATES 内置 squads。支持嵌套（§11.4 裂变） */
+      squads?: Array<{
+        name: string; goal: string; leader: string;
+        members?: Array<{ agent: string; role: 'work' | 'check'; on: string }>;
+        /** §11.4 嵌套子 squad（最多 3 层） */
+        squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+      }>;
     },
   ): Plan | null {
     /** 先尝试文件系统模板，再尝试内置模板 */
@@ -1080,8 +1099,9 @@ export class MissionManager {
   /**
    * 13.0 P11: 从模板 squads 字段初始化 squad.json（适配 BUILTIN 简格式 → Squad 完整格式）。
    *
-   * BUILTIN 模板 squads 缺 id/depth/status/signals — 这里自动分配 id + 设 depth=1 + status='waiting'。
-   * 子 squad（嵌套）按 s-1a, s-1b 命名规则生成。
+   * BUILTIN 模板 squads 缺 id/depth/status/signals — 这里自动分配 id + 设 depth + status='waiting'。
+   * 支持嵌套 squad 结构（§11.4 裂变规则）：子 squad depth = parent.depth + 1，最大 MAX_SQUAD_DEPTH。
+   * 子 squad 命名按 s-{parentIdx}{字母序号}（如 s-2a, s-2b）。
    */
   private initSquadFromTemplate(
     missionId: string,
@@ -1090,27 +1110,65 @@ export class MissionManager {
       goal: string;
       leader: string;
       members?: Array<{ agent: string; role: 'work' | 'check'; on: string }>;
+      /** §11.4 嵌套子 squad — 递归处理，depth 自动递增 */
       squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
     }>,
   ): SquadFile | null {
-    const squads: Squad[] = rawSquads.map((raw, idx) => {
-      const squadId = `s-${idx + 1}`;
-      return {
-        id: squadId,
-        name: raw.name,
-        depth: 1,
-        goal: raw.goal,
-        leader: raw.leader,
-        members: (raw.members ?? []).map(m => ({
-          agent: m.agent,
-          role: m.role,
-          on: m.on,
-          status: 'idle' as const,
-        })),
-        status: 'waiting',
-        signals: [],
-      };
-    });
+    /** 递归转换 raw squad → 完整 Squad 对象 */
+    const convertSquads = (
+      raws: Array<{
+        name: string;
+        goal: string;
+        leader: string;
+        members?: Array<{ agent: string; role: 'work' | 'check'; on: string }>;
+        squads?: Array<{ name: string; goal: string; leader: string; members?: Array<{ agent: string; role: 'work' | 'check'; on: string }> }>;
+      }>,
+      parentDepth: number,
+      parentId: string,
+    ): Squad[] => {
+      return raws.map((raw, idx) => {
+        /** 根据层级生成 squad ID：顶级 s-1, s-2；子级 s-1a, s-1b */
+        const squadId = parentDepth === 0
+          ? `s-${idx + 1}`
+          : `${parentId}${String.fromCharCode(97 + idx)}`;
+        /** 当前 squad 深度 */
+        const depth = parentDepth + 1;
+
+        const squad: Squad = {
+          id: squadId,
+          name: raw.name,
+          depth,
+          goal: raw.goal,
+          leader: raw.leader,
+          members: (raw.members ?? []).map(m => ({
+            agent: m.agent,
+            role: m.role,
+            on: m.on,
+            status: 'idle' as const,
+          })),
+          status: 'waiting',
+          signals: [],
+        };
+
+        /** §11.4: 递归处理嵌套子 squad（depth 不超过 MAX_SQUAD_DEPTH） */
+        if (raw.squads && raw.squads.length > 0 && depth < MAX_SQUAD_DEPTH) {
+          squad.squads = convertSquads(raw.squads, depth, squadId);
+        } else if (raw.squads && raw.squads.length > 0 && depth >= MAX_SQUAD_DEPTH) {
+          /** 超过深度限制时记录警告，忽略子 squad（§11.4 扁平化规则） */
+          logger.warn({
+            missionId,
+            parentSquadId: squadId,
+            parentDepth: depth,
+            childCount: raw.squads.length,
+            maxDepth: MAX_SQUAD_DEPTH,
+          }, 'initSquadFromTemplate: nested squads exceed depth limit, flattening');
+        }
+
+        return squad;
+      });
+    };
+
+    const squads = convertSquads(rawSquads, 0, '');
     return this.initSquad(missionId, squads);
   }
 

@@ -342,6 +342,13 @@ export type EventMap = {
     originalResponse?: string;
     modifiedResponse?: string;
   };
+  /** 13.0 §13.8: cron 任务 LLM 审核发现问题（verdict 非 approve）时广播 */
+  'brain.cron_review_flagged': {
+    taskId: string;
+    verdict: 'modify' | 'reject';
+    reason: string;
+    correctedOutput?: string;
+  };
   /** 13.0 §13.5: 用户级 session 队列通知（前端显示「等待中」提示） */
   'user.session.queued': {
     userId: string;

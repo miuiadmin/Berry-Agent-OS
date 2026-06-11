@@ -1,8 +1,18 @@
 import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
+import type { ModuleAgentContext } from '../../module-agent.js';
 import { checkEvolutionTriggers } from '../../../observability/evolution-metrics.js';
 import { genId } from '../../../utils/id.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
+
+/**
+ * 13.0 §12.3: 构建 mission 上下文前缀。
+ * Evolution Agent 在 mission 框架下工作时，注入目标到 LLM prompt。
+ */
+function buildMissionPrefix(missionPrompt?: string): string {
+  if (!missionPrompt) return '';
+  return `## 当前 Mission 上下文\n\n${missionPrompt}\n\n---\n\n`;
+}
 
 startModuleAgent(async (payload: AgentTaskPayload, context) => {
   const input = payload.inputPayload;
@@ -29,7 +39,7 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
 
 async function handleExtractFeedback(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { brainDecisionId, userMessage, assistantResponse } = payload.inputPayload as {
@@ -38,8 +48,10 @@ async function handleExtractFeedback(
     assistantResponse: string;
   };
 
+  // 13.0: 注入 mission 上下文
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: buildFeedbackPrompt(userMessage, assistantResponse) }],
+    [{ role: 'user', content: missionPrefix + buildFeedbackPrompt(userMessage, assistantResponse) }],
     {
       agent: 'evolution',
       purpose: 'learning_review',
@@ -66,7 +78,7 @@ async function handleExtractFeedback(
 
 async function handleGenerateSkill(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { signal, existingSkills } = payload.inputPayload as {
@@ -74,8 +86,10 @@ async function handleGenerateSkill(
     existingSkills?: string[];
   };
 
+  // 13.0: 注入 mission 上下文
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: buildSkillPrompt(signal, existingSkills ?? []) }],
+    [{ role: 'user', content: missionPrefix + buildSkillPrompt(signal, existingSkills ?? []) }],
     {
       agent: 'evolution',
       purpose: 'skill_generation',
@@ -91,7 +105,7 @@ async function handleGenerateSkill(
 
 async function handleDetectGap(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { recentToolFailures, recentPermissionDenials } = payload.inputPayload as {
@@ -103,8 +117,10 @@ async function handleDetectGap(
     return { kind: 'detect_gap', gaps: [] };
   }
 
+  // 13.0: 注入 mission 上下文
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: buildGapPrompt(recentToolFailures ?? [], recentPermissionDenials ?? []) }],
+    [{ role: 'user', content: missionPrefix + buildGapPrompt(recentToolFailures ?? [], recentPermissionDenials ?? []) }],
     {
       agent: 'evolution',
       purpose: 'learning_review',
@@ -120,7 +136,7 @@ async function handleDetectGap(
 
 async function handleAnalyzeMetrics(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const triggers = checkEvolutionTriggers();
@@ -133,8 +149,10 @@ async function handleAnalyzeMetrics(
     FROM brain_decisions WHERE created_at > ? ORDER BY created_at DESC LIMIT 20
   `).all(Date.now() - 3600_000) as Array<Record<string, unknown>>;
 
+  // 13.0: 注入 mission 上下文
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: buildMetricsPrompt(triggers, recentDecisions) }],
+    [{ role: 'user', content: missionPrefix + buildMetricsPrompt(triggers, recentDecisions) }],
     {
       agent: 'evolution',
       purpose: 'learning_review',
@@ -150,7 +168,7 @@ async function handleAnalyzeMetrics(
 
 async function handleProduceInsight(
   payload: AgentTaskPayload,
-  _context: { llm: import('../../../llm/client.js').LlmClient },
+  _context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { insight, evidence } = payload.inputPayload as { insight: string; evidence: string[] };
@@ -243,7 +261,7 @@ function resolveLatestDecisionId(db: import('better-sqlite3').Database, sessionI
 
 async function handlePluginReview(
   payload: AgentTaskPayload,
-  context: { llm: import('../../../llm/client.js').LlmClient },
+  context: ModuleAgentContext,
   db: import('better-sqlite3').Database,
 ): Promise<Record<string, unknown>> {
   const { pluginId, pluginName, manifest } = payload.inputPayload as {
@@ -267,8 +285,10 @@ ID: ${pluginId}
 - 有后台服务 → 高风险，需要更严格审查
 - 如果不确定 → 拒绝并说明原因`;
 
+  // 13.0: 注入 mission 上下文
+  const missionPrefix = buildMissionPrefix(context.missionPrompt);
   const result = await context.llm.chat(
-    [{ role: 'user', content: prompt }],
+    [{ role: 'user', content: missionPrefix + prompt }],
     { agent: 'evolution', purpose: 'plugin_review', sessionId: payload.sessionId, taskId: payload.taskId, maxTokens: 256, temperature: 0.1 },
   );
 

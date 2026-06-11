@@ -39,6 +39,12 @@ export interface ModuleAgentContext {
   missionId?: string;
   /** 13.0 §12.2: 当前任务关联的 plan task ID（如 t-1、t-2） */
   planTaskId?: string;
+  /**
+   * 13.0 §12.3: 渲染后的 mission 上下文文本，可直接注入 agent 的 system prompt。
+   * 包含：mission goal、当前 task 描述、squad 角色、依赖任务状态等。
+   * 当 missionId 存在时由基础设施自动渲染，agent 无需自行调用 MissionManager。
+   */
+  missionPrompt?: string;
 }
 
 export type ModuleTaskHandler = (payload: AgentTaskPayload, context: ModuleAgentContext) => Promise<Record<string, unknown>>;
@@ -169,6 +175,32 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
     };
 
     try {
+      // 13.0 §12.3: 在 agent.task 路径渲染 mission 上下文（与 dialogue.send 路径对齐）
+      // 当 Brain 通过 dispatchModuleTaskInternal 派发带 missionId 的任务时，
+      // 基础设施自动渲染 MissionContext 摘要，agent 只需读取 context.missionPrompt 注入到 LLM prompt
+      let missionPrompt: string | undefined;
+      if (payload.missionId) {
+        try {
+          const { MissionManager } = await import('../kernel/mission-manager.js');
+          const missionManager = new MissionManager();
+          missionPrompt = missionManager.renderContext(
+            payload.missionId,
+            payload.planTaskId ?? '',
+            name!,
+          ) || undefined;
+          // 发送 progress 通知前端：agent 已感知到 mission 任务
+          ipc.send('task.progress', 'core', {
+            taskId: payload.taskId,
+            summary: missionPrompt
+              ? `开始执行 mission 任务: ${missionPrompt.split('\n')[0]?.slice(0, 80) ?? payload.planTaskId ?? payload.missionId}`
+              : `开始执行任务 (mission: ${payload.missionId})`,
+          });
+          logger.debug({ missionId: payload.missionId, planTaskId: payload.planTaskId, agent: name }, 'module-agent: mission context rendered for agent.task');
+        } catch (err) {
+          logger.warn({ err, missionId: payload.missionId }, 'module-agent: mission context rendering failed for agent.task');
+        }
+      }
+
       const outputPayload = await handler(payload, {
         llm,
         ipc,
@@ -176,6 +208,7 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         // 13.0 §12.2: 透传 mission 上下文到 agent handler
         missionId: payload.missionId,
         planTaskId: payload.planTaskId,
+        missionPrompt,
         getPendingCorrection: () => {
           const c = pendingCorrection;
           const id = pendingCorrectionId;
@@ -197,12 +230,30 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
           ipc.send('task.telemetry', 'core', { kind: 'uncertainty', taskId: payload.taskId, reason });
         },
       });
+
+      // 13.0: 任务完成后发送 progress（让前端知道 agent 已完成，等待 Brain 审核）
+      if (payload.missionId) {
+        const summary = outputPayload?.summary ?? outputPayload?.response ?? '任务完成';
+        ipc.send('task.progress', 'core', {
+          taskId: payload.taskId,
+          summary: `Mission 任务完成: ${String(summary).slice(0, 100)}`,
+        });
+      }
+
       ipc.send('agent.task.result', 'core', {
         taskId: payload.taskId,
         ok: true,
         outputPayload,
       } satisfies AgentTaskResultPayload, msg.correlationId ?? msg.id);
     } catch (err) {
+      // 13.0: 任务失败时也通知 mission 进度
+      if (payload.missionId) {
+        ipc.send('task.progress', 'core', {
+          taskId: payload.taskId,
+          summary: `Mission 任务失败: ${(err as Error).message?.slice(0, 100)}`,
+        });
+      }
+
       ipc.send('agent.task.result', 'core', {
         taskId: payload.taskId,
         ok: false,
