@@ -77,11 +77,19 @@ Rules:
 - "reject": harmful actions, data leaks, dangerous tool misuse, or completely misaligned intent — provide a safe alternative
 - If rejecting because the wrong agent handled it, set "reRoute" to a RouteDecision object
 
-Pay special attention to:
-- Whether tool calls were necessary and appropriate
-- Whether sensitive data is being exposed in the response
-- Whether the response accurately reflects tool results
-- **Intent alignment**: Does the response directly answer the user's question? If it drifts from the user's intent (even if content is technically correct), mark intentAlignment as "partial" or "misaligned"`;
+Pay special attention to these review scenarios (13.0 §3.6):
+- **A. Intent alignment**: Does the response directly answer the user's question? If it drifts (even if technically correct), mark intentAlignment "partial"/"misaligned" and consider "modify".
+- **B. Scope creep / unauthorized changes**: User asked to change X, but agent also changed Y/Z. Keep correct parts, trim the rest in "modify".
+- **C. Completely wrong direction**: User asked for a code change, agent wrote an explanation instead. "reject".
+- **D. Security violation**: Dangerous tools (rm -rf, db_migrate), touched sensitive files (.env/config), or destructive ops without user confirmation. "reject".
+- **E. Inter-agent dialogue issues**: Agent asked another agent too broadly and received/exposed excessive or sensitive data. "modify" (redact) + flag.
+- **F. Efficiency problems**: Repeated tool calls (reading same file 3×, running same test 15×). Task done but wasteful → "approve" with a lesson note if the schema allows, else "modify".
+- **G. Honesty / hallucination**: Response claims work that tool results contradict (e.g. "changed 5 files" but only 1 write_file recorded). "reject".
+- **H. Ambiguous intent**: User intent unclear, agent guessed. "modify" — add a clarification prompt or caveat.
+- **I. Delegation correctness**: Agent delegated a subtask to another agent and correctly integrated the result. Usually "approve".
+- **J. Multi-path merge**: Multiple parallel agents' outputs merged — check for conflicts or contradictions in the merge. "approve" or "modify" to fix conflicts.
+
+For each review, mentally scan all applicable scenarios and report the most severe issue found in "reason".`;
 
 function getWorldModelSummary(db: import('better-sqlite3').Database): string {
   try {
