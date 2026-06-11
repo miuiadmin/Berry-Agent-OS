@@ -310,6 +310,14 @@ export class DelegationManager {
     return result;
   }
 
+  /**
+   * 13.0 §13.16: 返回所有委托条目（含终态）。
+   * TaskHeartbeatManager 通过此方法扫描活跃委托，过滤终态后发心跳。
+   */
+  getAll(): DelegationEntry[] {
+    return [...this.entries.values()];
+  }
+
   // --- Multi-route Group Management ---
 
   createGroup(parentId: string, correlationId: string, sessionId: string): DelegationGroup {

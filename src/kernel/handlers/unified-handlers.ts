@@ -535,6 +535,10 @@ export function handleMessage(
  * 处理 Channel 路径的用户消息（Telegram / CLI / 未来 channel）。
  * R8-1：从 messaging-handlers.ts 迁入。
  * 与 WS 路径共用 routeUserMessage helper，唯一差异：channel 路径不创建 task workspace。
+ *
+ * 13.0 §13.5: 集成 UserSessionQueue — 同 user 并发时排队而非拒绝。
+ * 当 userId 已有活跃 pending 时，新消息进入 UserSessionQueue 等待，
+ * conversation.result 事件触发后自动 dequeue 并重新派发。
  */
 export async function handleChannelMessage(
   userId: string,
@@ -544,6 +548,32 @@ export async function handleChannelMessage(
 ): Promise<void> {
   const sessionId = `channel-${channelType}-${userId}`;
   const clientMsgId = genId('ch');
+
+  // 13.0 §13.5: 如果该 userId 已有活跃 session → 排队等待
+  if (services.sessionManager.hasActivePendingForSession(sessionId)) {
+    try {
+      const { getUserSessionQueue } = await import('../user-session-queue.js');
+      const queue = getUserSessionQueue();
+      const correlationId = clientMsgId;
+      const position = queue.enqueue(userId, correlationId);
+      if (position >= 0) {
+        logger.info({ userId, correlationId, position }, '13.0 UserSessionQueue: 并发消息已排队');
+        services.channelManager?.send(channelType, userId, {
+          text: `正在处理中，你的消息已排队（位置 ${position}），请等待...`,
+        }).catch(() => { /* 非关键 */ });
+      } else {
+        // 队列满 → 回退为简单拒绝提示
+        services.channelManager?.send(channelType, userId, {
+          text: '处理队列已满，请稍后再试',
+        }).catch(() => { /* 非关键 */ });
+      }
+    } catch {
+      // UserSessionQueue 失败 → 回退到原有 onBusy 行为
+      services.channelManager?.send(channelType, userId, { text: '该对话正在处理中，请等待完成' })
+        .catch(() => { /* 非关键 */ });
+    }
+    return;
+  }
 
   // channel 入口：默认 EventBusStrategy，并发错误回写到 channel
   routeUserMessage(message, services, {

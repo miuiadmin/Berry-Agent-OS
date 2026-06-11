@@ -54,6 +54,7 @@ import { getTracer } from '../observability/tracer.js';
 import { getEventBus } from './event-bus.js';
 import { withTrace, getCurrentTrace } from '../observability/trace-context.js';
 import { BrainDecisionRecorder } from './brain-decision-recorder.js';
+import { isDelegationTerminal, type DelegationEntry } from '../contracts/delegation.js';
 import type { IpcMessageType, IpcMessage } from './types.js';
 import type { SocketProgressEvent } from '../contracts/socket-protocol.js';
 import type { RouteDecision, RouteResultPayload, RouteRequestPayload } from '../contracts/routing.js';
@@ -340,6 +341,37 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     getEventBus().on('delegation.completed', onTermination);
     getEventBus().on('delegation.failed', onTermination);
+
+    // 13.0 §13.16: 启动 TaskHeartbeatManager — 长任务（>1min 无活动）自动发心跳
+    // 前端通过 task.heartbeat WS 事件显示「还在工作中」提示
+    const { getTaskHeartbeatManager } = require('./task-heartbeat-manager.js') as typeof import('./task-heartbeat-manager.js');
+    const heartbeatMgr = getTaskHeartbeatManager(getEventBus());
+    // HeartbeatSource 适配器：把 DelegationManager 的 entries 映射为 HeartbeatEntry
+    heartbeatMgr.setSource({
+      getActiveDelegations: () => {
+        const entries: Array<import('./task-heartbeat-manager.js').HeartbeatEntry> = [];
+        for (const entry of this.delegationManager.getAll()) {
+          if (isDelegationTerminal(entry.state)) continue;
+          entries.push({
+            delegationId: entry.id,
+            taskId: entry.id,
+            agentName: entry.targetAgent,
+            startedAt: entry.createdAt,
+            lastActivityAt: entry.lastCheckpointAt ?? entry.createdAt,
+            lastActivityType: entry.lastCheckpointAt ? 'checkpoint' : 'created',
+          });
+        }
+        return entries;
+      },
+      markHeartbeat: (delegationId: string) => {
+        // 心跳标记写入 delegation entry（更新 lastCheckpointAt 避免重复心跳）
+        const entry = this.delegationManager.get(delegationId) as (DelegationEntry & { lastCheckpointAt?: number }) | undefined;
+        if (entry) {
+          entry.lastCheckpointAt = Date.now();
+        }
+      },
+    });
+    heartbeatMgr.start();
   }
 
   /** 获取 MissionManager 实例（13.0 多智能体协作） */
@@ -356,6 +388,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   dispose(): void {
     this.streamingFlusher.dispose();
     this.pendingReviewOrigins.clear();
+    // 13.0 §13.16: 停止 TaskHeartbeatManager
+    try {
+      const { getTaskHeartbeatManager } = require('./task-heartbeat-manager.js') as typeof import('./task-heartbeat-manager.js');
+      getTaskHeartbeatManager(getEventBus()).stop();
+    } catch { /* 首次 dispose 前未初始化则忽略 */ }
     // 13.0: 清理 StateCache 中所有状态
     if (this.stateCache) {
       this.stateCache.clear();

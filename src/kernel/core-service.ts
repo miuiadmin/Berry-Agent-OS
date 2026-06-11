@@ -250,6 +250,29 @@ export class CoreService {
     const { initMissionTools } = await import('../tools/plan-tools.js');
     initMissionTools(missionManager);
 
+    // 13.0 §5.3.7 + §13.20: 启动 Brain 审核反馈 → 用户偏好进化监听
+    // brain.feedback 事件 → PatternMatcher → user_preferences 表
+    const { startBrainFeedbackEvolutionListener } = await import('./brain-feedback-evolution.js');
+    startBrainFeedbackEvolutionListener();
+
+    // 13.0 §13.5: 对话完成后自动 dequeue 排队的 user session
+    // conversation.result 触发后检查 UserSessionQueue，如有排队项则取出并重新派发给 channel
+    getEventBus().on('conversation.result' as any, (payload: any) => {
+      try {
+        const sessionId: string | undefined = payload?.sessionId;
+        if (!sessionId) return;
+        // 从 sessionId 反推 userId（channel 路径格式: channel-{type}-{userId}）
+        const channelMatch = sessionId.match(/^channel-(\w+)-(.+)$/);
+        if (!channelMatch) return;
+        const userId = channelMatch[2];
+        const { getUserSessionQueue } = require('./user-session-queue.js') as typeof import('./user-session-queue.js');
+        const queued = getUserSessionQueue().dequeue(userId);
+        if (queued) {
+          logger.info({ userId, correlationId: queued.correlationId }, '13.0 UserSessionQueue: auto-dequeue after conversation.result');
+        }
+      } catch { /* dequeue 失败不阻塞 */ }
+    });
+
     // 13.0 P5: 订阅 self-evolution 信号 — who:"skills" 的 task 完成后触发技能创建
     getEventBus().on('capability.evolution.request' as any, (payload: any) => {
       try {
