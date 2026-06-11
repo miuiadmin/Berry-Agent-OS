@@ -291,6 +291,10 @@ export class MissionManager {
       taskCount: tasks.length,
     });
 
+    // §12.5/§13.21: 创建后立即派发无依赖的根任务（plan 第一个任务）。
+    // 旧版缺此调用 → task_ready 永不为根任务发出 → 整个编排卡死在 t=0。
+    this.checkAndEmitReadyTasks(missionId, plan);
+
     return plan;
   }
 
@@ -1255,9 +1259,20 @@ export class MissionManager {
   private checkAndEmitReadyTasks(missionId: string, plan: Plan): void {
     for (const task of plan.tasks) {
       if (task.status !== 'waiting') continue;
-      if (task.depends_on.length === 0) continue;
 
-      // 检查所有依赖是否都已完成
+      // 无依赖的根任务 → 立即可执行（创建 mission 时即派发）。
+      // 旧版 continue 跳过这类任务，导致 plan 的第一个任务永不派发，整个编排卡死。
+      if (task.depends_on.length === 0) {
+        this.emitEvent('mission.task_ready', {
+          missionId,
+          taskId: task.id,
+          who: task.who,
+          what: task.what,
+        });
+        continue;
+      }
+
+      // 有依赖：所有依赖 done 后才 ready
       const allDepsDone = task.depends_on.every(depId => {
         const dep = plan.tasks.find(t => t.id === depId);
         return dep?.status === 'done';
