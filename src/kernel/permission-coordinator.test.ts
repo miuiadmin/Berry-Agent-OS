@@ -160,3 +160,75 @@ describe('PermissionCoordinator.checkAndIssue 集成 active_scope', () => {
     expect(result.reason).toContain('active_scope');
   });
 });
+
+/**
+ * 13.0 §3.8 精确路径匹配测试 — 验证修正旧版子串匹配的误判。
+ *
+ * 旧版 `inputStr.includes(blockPath)` 的问题：
+ * - blockPath='src' 误命中 'src-old/abc'（子串匹配）
+ * - blockPath='auth.ts' 误命中 'auth.ts.bak'（子串匹配）
+ *
+ * 新版：精确路径前缀 + glob，只命中真实的路径层级关系。
+ */
+describe('PermissionCoordinator.checkActiveScope 精确路径匹配（§3.8 修正版）', () => {
+  let coordinator: PermissionCoordinator;
+  let stateCache: StateCache;
+
+  beforeEach(() => {
+    stateCache = new StateCache();
+    coordinator = new PermissionCoordinator({
+      engine: new MockEngine() as any,
+      tokenIssuer: { issue: (() => ({ id: 't-1' })) as any, validate: (() => ({ valid: true })) as any, consume: (() => true) as any } as any,
+      approvalManager: { createRequest: () => ({ id: 'req-mock' }), autoDecide: () => null } as any,
+      stateCache,
+    });
+  });
+
+  it('目录前缀：blockPath="src" 命中 src/auth.ts 但不命中 src-old/auth.ts', () => {
+    coordinator.setActiveScope('task-1', { blockPaths: ['src'] });
+    // ✅ 应命中：src/auth.ts 以 src/ 开头
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"src/auth.ts"}')).toContain('src');
+    // ❌ 不应命中：src-old/auth.ts 不以 src/ 开头
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"src-old/auth.ts"}')).toBeNull();
+  });
+
+  it('精确文件匹配：blockPath="auth.ts" 只命中同名文件', () => {
+    coordinator.setActiveScope('task-1', { blockPaths: ['auth.ts'] });
+    // ✅ 精确匹配
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"auth.ts"}')).toContain('auth.ts');
+    // ❌ 不匹配 .bak 文件
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"auth.ts.bak"}')).toBeNull();
+    // ❌ 不匹配含 auth.ts 的长路径（不是精确匹配也不是目录前缀）
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"new-auth.ts"}')).toBeNull();
+  });
+
+  it('glob 模式：blockPath="*.env" 匹配所有 .env 文件', () => {
+    coordinator.setActiveScope('task-1', { blockPaths: ['*.env'] });
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":".env"}')).toContain('*.env');
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"production.env"}')).toContain('*.env');
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"src/config.json"}')).toBeNull();
+  });
+
+  it('glob 跨目录：blockPath="src/**" 匹配 src 下所有文件', () => {
+    coordinator.setActiveScope('task-1', { blockPaths: ['src/**'] });
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"src/auth.ts"}')).toContain('src/**');
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"src/deep/nested/file.ts"}')).toContain('src/**');
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '{"path":"other/auth.ts"}')).toBeNull();
+  });
+
+  it('原始路径字符串（非 JSON）：以 / 开头的路径直接匹配', () => {
+    coordinator.setActiveScope('task-1', { blockPaths: ['/etc'] });
+    // 原始路径字符串 /etc/passwd → 目录前缀匹配
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '/etc/passwd')).toContain('/etc');
+    // /tmp/ok 不命中
+    expect(coordinator.checkActiveScope('task-1', 'read_file', '/tmp/ok')).toBeNull();
+  });
+
+  it('非路径字符串不误判：ls / x 等命令不触发 blockPaths', () => {
+    coordinator.setActiveScope('task-1', { blockPaths: ['/etc'] });
+    // 'ls' 不是路径 → 不误判
+    expect(coordinator.checkActiveScope('task-1', 'run_command', 'ls')).toBeNull();
+    // 'x' 不是路径 → 不误判
+    expect(coordinator.checkActiveScope('task-1', 'run_command', 'x')).toBeNull();
+  });
+});

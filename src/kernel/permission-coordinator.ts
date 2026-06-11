@@ -12,6 +12,130 @@ export interface ActiveScope {
   blockTools?: string[];
 }
 
+/**
+ * 13.0 §3.8: 规范化路径 — 统一正斜杠、合并重复斜杠、去尾部斜杠。
+ * 保证比较双方处于同一规范形式，避免 './src/../src' 与 'src' 判定不一致。
+ */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+}
+
+/**
+ * 13.0 §3.8: 将 glob 模式编译为正则（不引入外部依赖）。
+ *
+ * 支持的 glob 语法（覆盖安全约束常见场景）：
+ * - `**`  跨目录层级通配（含 `/`），如 `src/**` 匹配 src 下所有文件
+ * - `*`   单层通配（不含 `/`），如 `*.env` 匹配根级 .env
+ * - `?`   单字符通配（不含 `/`）
+ * - 其他字符按字面量匹配（正则元字符自动转义）
+ *
+ * @param pattern glob 模式（已规范化）
+ * @returns 编译后的正则表达式
+ */
+function compileGlob(pattern: string): RegExp {
+  let regex = '';
+  let i = 0;
+  while (i < pattern.length) {
+    const c = pattern[i];
+    if (c === '*') {
+      if (pattern[i + 1] === '*') {
+        // `**` 匹配任意层级（含路径分隔符）
+        regex += '.*';
+        i += 2;
+        // 吞掉 `**/` 末尾的斜杠，让 `src/**` 同时匹配 `src` 本身和 `src/a/b`
+        if (pattern[i] === '/') i++;
+        continue;
+      }
+      // `*` 匹配单层（不含 `/`）
+      regex += '[^/]*';
+    } else if (c === '?') {
+      regex += '[^/]';
+    } else if ('.+^${}()|[]\\'.includes(c)) {
+      regex += '\\' + c;
+    } else {
+      regex += c;
+    }
+    i++;
+  }
+  return new RegExp('^' + regex + '$');
+}
+
+/**
+ * 13.0 §3.8: 精确判定单个文件路径是否被某个 blockPath 模式命中。
+ *
+ * 三种匹配语义（按优先级）：
+ * 1. **glob 模式**（blockPath 含 `*` 或 `?`）→ glob 正则匹配
+ * 2. **精确文件匹配**（规范化后完全相等）
+ * 3. **目录前缀匹配**（blockPath 是 filePath 的祖先目录）：
+ *    `src` 命中 `src/auth.ts`，但不命中 `src-old/auth.ts`（修正旧版子串匹配的误判）
+ *
+ * @param filePath 待检查的文件路径（规范化后）
+ * @param blockPath Brain 纠偏设定的禁止模式（规范化后）
+ * @returns true 表示命中（应拦截）
+ */
+function isPathBlocked(filePath: string, blockPath: string): boolean {
+  // ① glob 模式
+  if (blockPath.includes('*') || blockPath.includes('?')) {
+    return compileGlob(blockPath).test(filePath);
+  }
+  // ② 精确匹配
+  if (filePath === blockPath) return true;
+  // ③ 目录前缀：blockPath 必须是 filePath 的某个祖先目录（以 `blockPath/` 开头）
+  //    这避免了 'src' 子串误命中 'src-old' —— 'src-old'.startsWith('src/') 为 false
+  if (filePath.startsWith(blockPath + '/')) return true;
+  return false;
+}
+
+/**
+ * 13.0 §3.8: 从工具输入中提取所有路径字段。
+ *
+ * 旧版直接对整个 JSON 字符串做 `includes(blockPath)` 子串匹配，
+ * 会在无关字段（如 description、content）上误命中。
+ * 本函数解析 JSON 后只取语义为路径的字段，做精确匹配。
+ *
+ * 支持的输入格式：
+ * 1. JSON 对象 → 提取 path/file/filePath 等字段的值
+ * 2. 原始路径字符串（以 / 或 ./ 开头，或含 / 和常见文件扩展名）→ 整体作为一个路径
+ * 3. 非路径字符串（如 'ls'、'x'）→ 返回空数组（不误判）
+ *
+ * @param toolInput 工具输入（JSON 字符串或序列化值）
+ * @returns 提取出的路径数组（已规范化）
+ */
+function extractPathsFromInput(toolInput: string): string[] {
+  const FIELD_NAMES = new Set([
+    'path', 'file', 'filepath', 'filename', 'dirpath', 'directory', 'cwd', 'destination', 'target', 'dest',
+  ]);
+  const paths: string[] = [];
+
+  // ① 尝试解析为 JSON 对象，提取路径字段
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
+      for (const [key, value] of Object.entries(obj)) {
+        if (FIELD_NAMES.has(key.toLowerCase()) && typeof value === 'string' && value.length > 0) {
+          paths.push(normalizePath(value));
+        }
+      }
+      return paths;
+    }
+  } catch {
+    // JSON 解析失败，继续到下面的原始字符串判断
+  }
+
+  // ② 原始路径字符串：看起来像文件路径（以 / ./ ../ 开头，或含 / 和扩展名）
+  //    避免 'ls'、'x' 等非路径字符串被误判为路径
+  if (toolInput.length > 0) {
+    const looksLikePath = /^(?:\/|\.\.?\/)/.test(toolInput)
+      || (toolInput.includes('/') && /\.\w{1,10}$/.test(toolInput));
+    if (looksLikePath) {
+      paths.push(normalizePath(toolInput));
+    }
+  }
+
+  return paths;
+}
+
 export interface CheckAndIssueParams {
   agentName: string;
   sessionId: string;
@@ -80,12 +204,17 @@ export class PermissionCoordinator {
       }
     }
 
-    // ② blockPaths 命中（从 toolInput 里抓所有 path 类字符串字段粗略匹配）
+    // ② blockPaths 命中（精确路径匹配 + glob，修正旧版子串匹配的误判）
+    // 旧版 `inputStr.includes(blockPath)` 会误判：blockPath='src' 命中 'src-old'，
+    // blockPath='auth.ts' 命中 'auth.ts.bak'。新版按路径字段精确匹配。
     if (scope.blockPaths && scope.blockPaths.length > 0) {
-      const inputStr = toolInput ?? '';
-      for (const blockPath of scope.blockPaths) {
-        if (inputStr.includes(blockPath)) {
-          return `active_scope 禁止访问路径: ${blockPath}`;
+      const inputPaths = extractPathsFromInput(toolInput);
+      const normalizedBlocks = scope.blockPaths.map(normalizePath);
+      for (const inputPath of inputPaths) {
+        for (const blockPath of normalizedBlocks) {
+          if (isPathBlocked(inputPath, blockPath)) {
+            return `active_scope 禁止访问路径: ${blockPath}（命中 ${inputPath}）`;
+          }
         }
       }
     }
