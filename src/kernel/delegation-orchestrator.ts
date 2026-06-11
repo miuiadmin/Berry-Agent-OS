@@ -715,6 +715,25 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     this.delegationManager.resumeFromUserReply(askState.taskId);
     this.sessionManager.clearPendingAsk(payload.sessionId);
+
+    // 13.0 §3.2/§5.3.3: 将用户回复写入 Brain 观察队列（priority=0，critical，永不丢弃）
+    // Brain 审核时需要知道用户对 agent 提问的真实回复，以判断 agent 是否正确使用了用户输入。
+    // 这补全了观察队列的 user_interaction 类型覆盖（与 tool_call/tool_result 并列）。
+    if (payload.sessionId && this.observationRecorder) {
+      this.observationRecorder.record({
+        sessionId: payload.sessionId,
+        taskId: payload.taskId ?? askState.taskId ?? '',
+        observationType: 'user_interaction',
+        fromAgent: askState.agentName,
+        content: JSON.stringify({
+          direction: 'user_reply',
+          question: askState.question,
+          reply: payload.reply?.slice(0, 500),
+        }),
+        priority: 0, // §5.3.3: user_interaction = priority 0（critical，永不丢弃）
+      });
+    }
+
     agent.ipc.send('agent.user_reply', askState.agentName, payload, correlationId);
 
     // 13.0 §13.5: 发出 user.ask_response 事件 — WS bridge 订阅后转发 user_reply 给前端
@@ -2197,6 +2216,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         question,
         correlationId,
       });
+
+      // 13.0 §3.2/§5.3.3: 将 agent 提问写入 Brain 观察队列（priority=0，critical，永不丢弃）
+      // Brain 审核时需要知道 agent 主动问了用户什么，以判断：
+      // 1. 提问是否合理（该问用户还是自己做决策？）
+      // 2. 提问措辞是否安全（有没有泄露敏感信息？）
+      // 3. 提问频率是否过高（§3.6 场景 H：意图模糊时应先问用户）
+      if (payload.sessionId && this.observationRecorder) {
+        this.observationRecorder.record({
+          sessionId: payload.sessionId,
+          taskId: payload.taskId ?? '',
+          observationType: 'user_interaction',
+          fromAgent: msg.from,
+          content: JSON.stringify({
+            direction: 'agent_ask',
+            question,
+            options: payload.options,
+          }),
+          priority: 0, // §5.3.3: user_interaction = priority 0（critical，永不丢弃）
+        });
+      }
 
       const entry = this.delegationManager.get(payload.taskId);
       if (entry) {
