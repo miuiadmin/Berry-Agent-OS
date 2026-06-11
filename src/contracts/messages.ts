@@ -206,7 +206,7 @@ export type EventMap = {
   'delegation.checkpoint_needed': { delegationId: string; trigger: string };
   'message.received': { sessionId: string; message: string; taskId: string };
   'message.routed': { sessionId: string; taskId: string; targetAgent: string; intent?: string };
-  'message.responded': { sessionId: string; taskId: string; response: string; verdict?: string; /** 13.0 灵魂版：Brain 审核理由（modify/reject 时非空） */ reviewReason?: string; /** 13.0 灵魂版：Brain 修改前的原始初稿 */ originalDraft?: string };
+  'message.responded': { sessionId: string; taskId: string; response: string; /** Brain 审核裁决（approve/modify/reject），或 'restored'（用户还原了 Brain 的修改） */ verdict?: string; /** 13.0 灵魂版：Brain 审核理由（modify/reject 时非空） */ reviewReason?: string; /** 13.0 灵魂版：Brain 修改前的原始初稿 */ originalDraft?: string };
   'tool.executed': { agentName: string; toolName: string; durationMs: number; isError: boolean; taskId?: string };
   'llm.request.completed': { taskId?: string; agentName: string; inputTokens: number; outputTokens: number; cacheRead?: number; cacheCreation?: number; durationMs: number };
   'scheduler.job_enqueued': { jobId: string; queueItemId: string; triggerSource: string };
@@ -385,9 +385,10 @@ export type EventMap = {
     modifiedResponseSnippet?: string;
     /** 13.0 P5: 触发技能创建时附带的 mission ID */
     missionId?: string;
+    /** §5.3.4: 触发时间戳 */
+    createdAt?: number;
     /** 13.0 P5: 技能描述（who:"skills" 的 task 完成后的 result） */
     skillDescription?: string;
-    createdAt: number;
   };
   /** 13.0 §13.18: v2 插件工具注册到全局 ToolRegistry 后广播变更 */
   'tools.updated': { added: string[] };

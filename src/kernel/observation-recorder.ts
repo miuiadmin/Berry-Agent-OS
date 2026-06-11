@@ -28,7 +28,8 @@ export type ObservationType =
   | 'agent_event'
   | 'drift_signal'
   | 'user_interaction'
-  | 'permission_judgment';
+  | 'permission_judgment'
+  | 'task_reject';      // §8.7: Agent 拒绝任务时写入（Brain 审核拒绝理由）
 
 /** 优先级：0=critical 永不裁剪；1=normal 默认；2=verbose 优先裁剪 */
 export type ObservationPriority = 0 | 1 | 2;

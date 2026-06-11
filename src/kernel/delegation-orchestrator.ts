@@ -2252,7 +2252,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.observationRecorder.record({
         sessionId: entry.sessionId,
         taskId,
-        observationType: 'task_reject' as any,
+        observationType: 'task_reject',
         fromAgent: agentName,
         content: JSON.stringify({ reason, suggestAgent }),
         priority: 0, // task.reject 是 critical 事件，永不丢弃

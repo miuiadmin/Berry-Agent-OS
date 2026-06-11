@@ -112,6 +112,8 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   // delegation-orchestrator 内部事件：保持类型名稳定，前端按 sessionId 过滤
   'conversation.handoff': 'agent_handoff',
   'conversation.ask_user': 'ask_user',
+  /** §5.1.3: 用户回复 ask_user 的确认事件 — 前端可据此关闭等待 UI */
+  'user.ask_response': 'user_reply',
   'conversation.progress': 'progress',
   'conversation.no_response': 'no_response',
   /** P0-3: 对话中断通知 — 通过 EventBus 投递，不再直写 ws */

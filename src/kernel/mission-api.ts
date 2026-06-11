@@ -280,7 +280,7 @@ export function registerMissionRoutes(
         sessionId,
         taskId,
         response: originalResponse,
-        verdict: 'restored' as any,
+        verdict: 'restored',
         reviewReason: '用户还原了 Brain 的修改',
       });
     }
@@ -313,12 +313,14 @@ export function registerMissionRoutes(
     // 关键学习信号：用户拒绝 Brain 修改 → Brain 后续类似场景更保守
     if (bus) {
       bus.emit('capability.evolution.request', {
+        agentName: 'brain',
+        reason: '用户还原 Brain 修改',
         source: 'brain.restore_original',
         sessionId,
         taskId,
         originalResponseSnippet: originalResponse.slice(0, 500),
         createdAt: Date.now(),
-      } as any);
+      });
       logger.info({ sessionId, taskId }, 'restore-original: evolution triggered');
     }
 
@@ -387,6 +389,8 @@ export function registerMissionRoutes(
       // 让 Evolution 从 user feedback 自动推导「Brain 后续类似场景应该 X」
       if (feedbackType === 'brain_modify_wrong' || feedbackType === 'brain_review_wrong') {
         bus.emit('capability.evolution.request', {
+          agentName: 'brain',
+          reason: `用户反馈 Brain 审核问题: ${feedbackType}`,
           source: 'brain.feedback',
           feedbackType,
           sessionId,
@@ -395,7 +399,7 @@ export function registerMissionRoutes(
           originalResponseSnippet: (originalResponse ?? '').slice(0, 500),
           modifiedResponseSnippet: (modifiedResponse ?? '').slice(0, 500),
           createdAt: Date.now(),
-        } as any);
+        });
         logger.info({ sessionId, taskId, feedbackType }, 'brain.feedback: evolution triggered');
       }
     }
@@ -446,7 +450,7 @@ export function registerMissionRoutes(
 
       const total = (db.prepare(
         `SELECT COUNT(*) as cnt FROM agent_chat_messages ${where}`
-      ).get(...args) as any)?.cnt ?? 0;
+      ).get(...args) as { cnt: number } | undefined)?.cnt ?? 0;
 
       const messages = db.prepare(
         `SELECT * FROM agent_chat_messages ${where}
