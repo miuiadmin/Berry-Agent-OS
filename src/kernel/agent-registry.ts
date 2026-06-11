@@ -230,7 +230,13 @@ export class AgentRegistry {
     const raw = path.endsWith('.yaml') || path.endsWith('.yml')
       ? parseYaml(content)
       : JSON.parse(content);
-    return agentManifestSchema.parse(raw);
+    const manifest = agentManifestSchema.parse(raw);
+    // 13.0 §5.2.4: 启动期静态校验 — manifest 不得声明 canTalkTo:['brain']（纵深防御）。
+    // 运行时 gate 也会拦截 to==='brain'，但启动即拒绝能更早暴露错误 manifest。
+    if (manifest.canTalkTo?.includes('brain')) {
+      throw new Error(`manifest 校验失败: agent "${manifest.name}" 的 canTalkTo 不得包含 'brain'（Brain 是观察者，不直接对话）`);
+    }
+    return manifest;
   }
 }
 

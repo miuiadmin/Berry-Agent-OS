@@ -28,6 +28,13 @@ export const agentManifestSchema = z.object({
 
   requiresBrainReview: z.boolean().default(false),
 
+  /**
+   * 13.0 §5.2.4: 该 agent 允许直接对话的目标 agent 列表。
+   * Kernel 启动时校验：不得包含 'brain'（Brain 是观察者，不直接对话）。
+   * 运行时 gate 也会拦截 to==='brain'（纵深防御）。
+   */
+  canTalkTo: z.array(z.string().min(1)).default([]),
+
   dependencies: z.array(z.string()).default([]),
   capabilities: z.record(z.string(), z.unknown()).default({}),
 
