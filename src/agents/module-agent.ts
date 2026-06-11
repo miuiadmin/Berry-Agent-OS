@@ -35,6 +35,10 @@ export interface ModuleAgentContext {
   askUser: (question: string, opts?: AskUserOptions) => Promise<string>;
   getPendingCorrection: () => TurnCorrectionPayload | null;
   reportUncertainty: (reason: string) => void;
+  /** 13.0 §12.2: 当前任务关联的 mission ID（Brain 路由或 task_ready 派发时设置） */
+  missionId?: string;
+  /** 13.0 §12.2: 当前任务关联的 plan task ID（如 t-1、t-2） */
+  planTaskId?: string;
 }
 
 export type ModuleTaskHandler = (payload: AgentTaskPayload, context: ModuleAgentContext) => Promise<Record<string, unknown>>;
@@ -169,6 +173,9 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         llm,
         ipc,
         askUser,
+        // 13.0 §12.2: 透传 mission 上下文到 agent handler
+        missionId: payload.missionId,
+        planTaskId: payload.planTaskId,
         getPendingCorrection: () => {
           const c = pendingCorrection;
           const id = pendingCorrectionId;
@@ -222,6 +229,11 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
     const ephemeralTaskId = (payload.context as Record<string, unknown>)?._taskId as string | undefined;
     const sessionId = (payload.context as Record<string, unknown>)?._sessionId as string | undefined;
 
+    // 13.0 §12.3: 从 dialogue context 读取 mission 信息，注入 MissionContext 摘要到 system prompt
+    // Conversation Agent 在委派时会把当前 task 的 missionId/planTaskId 附带到 dialogue context
+    const missionId = (payload.context as Record<string, unknown>)?.missionId as string | undefined;
+    const planTaskId = (payload.context as Record<string, unknown>)?.planTaskId as string | undefined;
+
     try {
       const userContent = payload.content;
       const messages = [{ role: 'user' as const, content: userContent }];
@@ -232,10 +244,26 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
       // 每次读取最新 registry（Code Agent 的 locked tools 可能在首次 agent.task 后才注册）
       const agentTools = toModelTools(getToolRegistry());
 
+      // 13.0 §12.3: 构建 system prompt 时注入 mission context（如果有活跃 mission）
+      let systemPrompt = getDialogueSystemPrompt(name!);
+      if (missionId) {
+        try {
+          const { MissionManager } = await import('../kernel/mission-manager.js');
+          const missionManager = new MissionManager();
+          const missionPrompt = missionManager.renderContext(missionId, planTaskId ?? '', name!);
+          if (missionPrompt) {
+            systemPrompt += `\n\n## 当前任务上下文\n\n${missionPrompt}`;
+            logger.debug({ missionId, planTaskId, agent: name }, 'module-agent: mission context injected into system prompt');
+          }
+        } catch (err) {
+          logger.warn({ err, missionId }, 'module-agent: mission context injection failed');
+        }
+      }
+
       const result = await runLoop({
         llm,
         messages,
-        systemPrompt: getDialogueSystemPrompt(name!),
+        systemPrompt,
         tools: agentTools,
         config: { maxCalls: config.toolLoop.maxCalls, timeoutMs: config.toolLoop.timeoutMs },
         /**
