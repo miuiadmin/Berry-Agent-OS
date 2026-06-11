@@ -20,7 +20,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
   const t = useT();
 
   return (
-    <div className="py-1">
+    <div>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -77,12 +77,14 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
   const totalMs = calls.reduce((sum, c) => sum + c.durationMs, 0);
   const hasErrors = calls.some((c) => c.isError);
 
+  // 外层容器不加 margin，与"思考过程"块紧邻；块间剩余视觉间距来自文本 line-height（行盒留白）而非 margin
+  // （详见 thinking-process.tsx 注释），此处同样保留默认行高以保证 11px 小字可读性。
   return (
-    <div className="mb-1.5">
+    <div>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors py-0.5 min-h-[44px] md:min-h-0"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />

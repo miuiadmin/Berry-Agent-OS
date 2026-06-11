@@ -47,7 +47,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     <button
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2.5 py-2.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
+        "inline-flex items-center gap-1 rounded-md px-2 py-1.5 md:px-1.5 md:py-0 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
         className
       )}
       aria-label={t("chat.copy")}
@@ -296,7 +296,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         )}
       </div>
-      <div className="flex items-center gap-1 mt-1 px-1">
+      <div className="flex items-center gap-1 mt-px px-1">
         <span className="text-[11px] text-muted-foreground/60">
           {formatTime(message.timestamp, locale === "zh" ? "zh-CN" : "en-US")}
         </span>
@@ -324,13 +324,16 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         )}
       </div>
+      {/* 思考过程 / 工具调用块：外层包裹不加 mt，与上方"时间戳行"紧邻。
+          块与块之间剩余的视觉间距来自文本 line-height（行盒留白），并非 margin；
+          这是 11px 小字的正常排印行为，详见 thinking-process.tsx 注释。 */}
       {!isUser && ((message.thinkingSteps && message.thinkingSteps.length > 0) || message.reasoning) && (
-        <div className="max-w-[90%] sm:max-w-[80%] mt-1">
+        <div className="max-w-[90%] sm:max-w-[80%]">
           <ThinkingProcess steps={message.thinkingSteps ?? []} reasoning={message.reasoning} isActive={isStreaming} />
         </div>
       )}
       {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
-        <div className="max-w-[90%] sm:max-w-[80%] mt-1">
+        <div className="max-w-[90%] sm:max-w-[80%]">
           <ToolCallCards calls={message.toolCalls} isActive={isStreaming} />
         </div>
       )}

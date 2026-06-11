@@ -58,8 +58,14 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
 
   const totalMs = steps.length >= 2 ? (steps[steps.length - 1].ts - steps[0].ts) : 0;
 
+  // 外层容器故意不加 margin：与上方"时间戳行"、下方"工具调用块"的外层包裹（chat-message-list.tsx）
+  // 一起把块间 margin 压到最小。但注意 —— 即使相邻块 margin 全为 0，视觉上仍会保留约 2~4px 空隙：
+  // 这来自 CSS line-height（行高 leading），而非 margin/padding。
+  // text-[11px] 默认 normal 行高约 1.2，行盒高度 ~17px，而字符字身实际占高仅 ~11px，
+  // 行盒上下各留 ~3px leading 半距；两行行盒紧贴时，这上下半距叠加即形成可见间距。
+  // 这是正常排印行为。要彻底消除需 leading-none（强制行高=字号），但 11px 小字会明显降低可读性，故不采用。
   return (
-    <div className="mb-1.5">
+    <div>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
