@@ -397,8 +397,9 @@ export class KernelRouter {
    * @param originalType - 原始消息类型（dialogue_send / dialogue_reply / tool_call / tool_result）
    * @param payload - 观察内容摘要（已截断）
    * @param sessionId - 可选 session ID
+   * @param taskId - 可选真实 task ID（用于按 task 聚合观察队列；缺失时回退到 sessionId 兜底）
    */
-  private observeToBrain(from: string, to: string, originalType: string, payload: Record<string, unknown>, sessionId?: string): void {
+  private observeToBrain(from: string, to: string, originalType: string, payload: Record<string, unknown>, sessionId?: string, taskId?: string): void {
     // Brain 不观察自己的消息和内核内部消息
     if (from === 'brain' || to === 'brain' || from === 'core') return;
 
@@ -406,9 +407,15 @@ export class KernelRouter {
       const brainAgent = this.deps.agentManager.getAgent('brain');
       if (!brainAgent?.ipc) return; // Brain 未启动则静默跳过
 
+      // 13.0 §4.1 数据完整性：taskId 必须是真实 task ID，
+      // 不能用 sessionId 替代——否则 Brain 的 plan 进度检查（checkPlanProgress）
+      // 和观察队列按 task 聚合会拿到错误的 key。
+      // 优先用真实 taskId；缺失时回退到 sessionId（保证有值，不丢观察）。
+      const effectiveTaskId = taskId ?? (sessionId ?? 'unknown');
+
       brainAgent.ipc.send('brain.observe', 'brain', {
         sessionId: sessionId ?? 'unknown',
-        taskId: sessionId ?? 'unknown',
+        taskId: effectiveTaskId,
         observationType: originalType,
         fromAgent: from,
         toAgent: to,
@@ -542,7 +549,7 @@ export class KernelRouter {
         from: payload.from,
         to: payload.to,
         contentSummary: safeSlice(payload.content, 200),
-      }, pending?.sessionId);
+      }, pending?.sessionId, pending?.taskId);
 
       try {
         const reply = await router.sendMessage(payload);
@@ -561,7 +568,7 @@ export class KernelRouter {
           from: payload.from,
           to: payload.to,
           contentSummary: safeSlice(reply.content, 200),
-        }, pending?.sessionId);
+        }, pending?.sessionId, pending?.taskId);
 
         // §5.2.3: 对话完成，清除方向追踪
         this.untrackDialogueDirection(payload.from, payload.to, payload.dialogueId);
