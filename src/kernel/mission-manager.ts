@@ -228,6 +228,17 @@ const logger = getLogger('mission-manager');
 export class MissionManager {
   private eventBus: EventBus | null;
 
+  /**
+   * §12.5: 已发出 task_ready 的任务 ID 集合（防重复派发）。
+   *
+   * 问题：updatePlan 每次调用都会跑 checkAndEmitReadyTasks，对「waiting 且依赖已满足」
+   * 的任务发 task_ready。但 agent ack 前任务 status 仍是 waiting，下一次 updatePlan
+   *（由其他任务完成触发）会再次发 task_ready → 同一任务被重复 dispatch。
+   * 用此集合记录已发信号的任务，避免重复。
+   * key = `${missionId}:${taskId}`，mission 完成时按 missionId 清理。
+   */
+  private signaledTasks = new Set<string>();
+
   constructor(eventBus?: EventBus) {
     this.eventBus = eventBus ?? null;
   }
@@ -438,10 +449,12 @@ export class MissionManager {
       if (allDone) {
         plan.mission.status = 'completed';
         writeJsonFile(getPlanPath(missionId), plan);
+        this.cleanupSignaledTasks(missionId);
         this.emitEvent('mission.completed', { missionId, goal: plan.mission.goal });
       } else if (anyFailed && plan.tasks.every(t => t.status === 'done' || t.status === 'failed')) {
         plan.mission.status = 'failed';
         writeJsonFile(getPlanPath(missionId), plan);
+        this.cleanupSignaledTasks(missionId);
       }
     }
 
@@ -1260,25 +1273,18 @@ export class MissionManager {
     for (const task of plan.tasks) {
       if (task.status !== 'waiting') continue;
 
-      // 无依赖的根任务 → 立即可执行（创建 mission 时即派发）。
-      // 旧版 continue 跳过这类任务，导致 plan 的第一个任务永不派发，整个编排卡死。
-      if (task.depends_on.length === 0) {
-        this.emitEvent('mission.task_ready', {
-          missionId,
-          taskId: task.id,
-          who: task.who,
-          what: task.what,
+      // §12.5: 已发过信号的跳过（防重复派发，见 signaledTasks 注释）
+      const signalKey = `${missionId}:${task.id}`;
+      if (this.signaledTasks.has(signalKey)) continue;
+
+      const isReady = task.depends_on.length === 0
+        || task.depends_on.every(depId => {
+          const dep = plan.tasks.find(t => t.id === depId);
+          return dep?.status === 'done';
         });
-        continue;
-      }
 
-      // 有依赖：所有依赖 done 后才 ready
-      const allDepsDone = task.depends_on.every(depId => {
-        const dep = plan.tasks.find(t => t.id === depId);
-        return dep?.status === 'done';
-      });
-
-      if (allDepsDone) {
+      if (isReady) {
+        this.signaledTasks.add(signalKey);
         this.emitEvent('mission.task_ready', {
           missionId,
           taskId: task.id,
@@ -1286,6 +1292,16 @@ export class MissionManager {
           what: task.what,
         });
       }
+    }
+  }
+
+  /**
+   * §12.5: 清理某 mission 已发出的 task_ready 信号记录（mission 终态时调用，防内存泄漏）。
+   */
+  private cleanupSignaledTasks(missionId: string): void {
+    const prefix = `${missionId}:`;
+    for (const key of this.signaledTasks) {
+      if (key.startsWith(prefix)) this.signaledTasks.delete(key);
     }
   }
 
