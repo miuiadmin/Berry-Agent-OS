@@ -72,6 +72,8 @@ import type { WorldModelRuntime } from './world-model.js';
 import type { SuggestionQueue } from './suggestion-queue.js';
 import { MissionManager } from './mission-manager.js';
 import { StateCache } from './state-cache.js';
+/** 12.0/13.0 VerifyGate — 独立对抗性意图验证（高漂移时触发） */
+import { VerifyGate } from './verify-gate.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
 
 const logger = getLogger('orchestrator');
@@ -140,6 +142,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   dialogueRouter: DialogueRouter | null = null;
   /** 12.0 漂移检测器 */
   private _driftDetector: import('./drift-detector.js').DriftDetector | null = null;
+  /** 12.0/13.0 VerifyGate — 高漂移时的独立对抗性意图验证 */
+  private readonly verifyGate = new VerifyGate();
 
   // Permission judge state
   private permissionFlow: PermissionFlow;
@@ -2552,7 +2556,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       clearTimeout(timeoutId);
     };
 
-    const handler = (msg: IpcMessage) => {
+    const handler = async (msg: IpcMessage) => {
       if (msg.correlationId !== driftCorrelationId) return;
       cleanup();
 
@@ -2563,8 +2567,35 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.driftDetector?.recordSignal(evaluated, sessionId, correlationId);
 
       if (evaluated.suggestedAction === 'verify') {
-        // 高偏离 → 走同步 Brain review（现有 review 流程）
-        logger.info({ correlationId, score: evaluated.alignmentScore }, 'drift:high → sync review');
+        // 高偏离 → 先运行 VerifyGate 独立对抗性验证
+        // VerifyGate 用 Brain 的 default tier 模型以对抗性视角快速判断回复是否有根本性错误
+        // 如果 VerifyGate 确认失败（pass=false）→ 直接 reject，无需完整 review
+        // 如果 VerifyGate 无法确认（pass=true）→ 走同步 Brain review 深度审核
+        logger.info({ correlationId, score: evaluated.alignmentScore }, 'drift:high → verify gate + sync review');
+        if (pending.intentAnchor) {
+          try {
+            const verdict = await this.verifyGate.verify(
+              brainAgent.ipc as any,
+              pending.intentAnchor,
+              draft,
+            );
+            if (!verdict.pass) {
+              // VerifyGate 确认回复有根本性错误 → 直接 reject（节省一次完整 review LLM 调用）
+              logger.info({ correlationId, reason: verdict.reason?.slice(0, 200) }, 'verify:gate REJECT');
+              primaryIpc.send('review.result', primaryName, {
+                verdict: 'reject',
+                reason: `独立验证未通过: ${verdict.reason ?? '回复与用户意图不匹配'}`,
+              } as ReviewResult, correlationId);
+              this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
+              return;
+            }
+            // VerifyGate 通过但仍高漂移 → 走完整 Brain review
+            logger.debug({ correlationId }, 'verify:gate pass, proceeding to full review');
+          } catch (err) {
+            // VerifyGate 异常 → 不阻断，继续走完整 review
+            logger.warn({ err, correlationId }, 'verify:gate error, falling back to full review');
+          }
+        }
         this.pendingReviewOrigins.set(correlationId, 'conversation');
         this.reportProgress(pending, 'reviewing', '检测到可能偏离，正在深度审核...');
         reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
