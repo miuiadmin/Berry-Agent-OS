@@ -331,18 +331,25 @@ function handleHandoff(manager: ReturnType<typeof getManager>, parsed: z.infer<t
 }
 
 /**
- * 在 squad.json 中按 ID 递归查找 squad（含子 squad）。
+ * 在 squad.json 中按 ID 递归查找 squad（含任意层级子 squad）。
+ *
+ * 修复：旧版只遍历 2 层（顶层 + 1 层 sub-squad），depth=3 的最深 squad 找不到。
+ * 现在改为真正的递归，与 MissionManager.findSquad() 行为一致。
  */
 function findSquadById(squadFile: import('../contracts/mission.js').SquadFile, squadId: string): import('../contracts/mission.js').Squad | null {
   if (!squadFile.org?.squads) return null;
-  for (const s of squadFile.org.squads) {
-    if (s.id === squadId) return s;
-    // 递归搜索子 squad
-    const subSquads = (s as unknown as { squads?: import('../contracts/mission.js').Squad[] }).squads;
-    if (subSquads) {
-      for (const sub of subSquads) {
-        if (sub.id === squadId) return sub;
-      }
+  return findSquadInList(squadFile.org.squads, squadId);
+}
+
+/** 递归辅助：在 squad 列表中（含各自子 squad）查找目标 ID */
+function findSquadInList(squads: import('../contracts/mission.js').Squad[], squadId: string): import('../contracts/mission.js').Squad | null {
+  for (const squad of squads) {
+    if (squad.id === squadId) return squad;
+    // 递归进入子 squad（任意深度）
+    const subSquads = (squad as unknown as { squads?: import('../contracts/mission.js').Squad[] }).squads;
+    if (subSquads && subSquads.length > 0) {
+      const found = findSquadInList(subSquads, squadId);
+      if (found) return found;
     }
   }
   return null;

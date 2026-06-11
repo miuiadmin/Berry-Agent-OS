@@ -209,8 +209,9 @@ export function registerMissionRoutes(
     const mgr = requireManager(res);
     if (!mgr) return;
 
-    const templates = mgr.loadTemplates();
-    json(res, { items: templates.map(t => ({ name: t.name, taskCount: t.plan.tasks.length })) });
+    // 13.0 §10.6: 合并 FS 模板 + BUILTIN_TEMPLATES（修复旧版只返回 FS 模板的问题）
+    const templates = mgr.listAllTemplates();
+    json(res, { items: templates.map(t => ({ name: t.name, description: t.description, taskCount: t.taskCount })) });
   });
 
   // ─── POST /api/missions/:id/signal — 手动发送信号 ───
