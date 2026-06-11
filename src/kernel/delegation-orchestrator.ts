@@ -1136,7 +1136,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 13.0 多智能体协作：如果 Brain 指定了 missionSpec，创建 mission
     // §12.2 意图守卫：chat 意图是简单对话，不需要创建 mission
-    if (decision.missionSpec && this.missionManager && decision.intent !== 'chat') {
+    // 防重复：Brain 子进程可能已通过 MissionManager 创建了 mission 并回传 missionId，
+    // 此时 Core 不应再创建（否则同一条路由请求产生两个 mission）
+    if (decision.missionSpec && !decision.missionId && this.missionManager && decision.intent !== 'chat') {
       try {
         const plan = this.missionManager.createMission(
           decision.missionSpec.goal,
