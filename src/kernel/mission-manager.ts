@@ -392,6 +392,13 @@ export class MissionManager {
             who: task.who,
           });
         }
+
+        // §13.21 失败级联：任务 → failed 时，传递依赖它的任务全部级联失败。
+        // 否则下游任务永留 waiting（依赖是 failed 而非 done，永不 ready），
+        // 且 mission 无法到达终态（allDone=false，anyFailed 但存在 waiting）→ 永久挂起。
+        if (updates.status === 'failed' && oldStatus !== 'failed') {
+          this.cascadeFailDependents(missionId, plan, task.id, now);
+        }
       }
     }
 
@@ -1292,6 +1299,51 @@ export class MissionManager {
           what: task.what,
         });
       }
+    }
+  }
+
+  /**
+   * §13.21: 失败级联 — 把传递依赖 failedTaskId 的所有 waiting 任务标记为 failed。
+   *
+   * 触发：某任务 → failed。下游 depends_on 包含它的任务永不可能 ready，
+   * 必须级联失败，否则 mission 永不达终态。
+   * 迭代实现：从 failedTaskId 出发，反复扫描所有直接依赖它（且仍 waiting）的任务，
+   * 标记 failed 并加入下一轮源头，直到无新增。
+   *
+   * @param missionId mission ID
+   * @param plan 当前 plan（就地修改）
+   * @param failedTaskId 刚失败的任务 ID
+   * @param now 时间戳
+   */
+  private cascadeFailDependents(missionId: string, plan: Plan, failedTaskId: string, now: string): void {
+    /** 已失败的任务集合（含级联产生的） */
+    const failedSet = new Set<string>([failedTaskId]);
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+      for (const t of plan.tasks) {
+        if (t.status !== 'waiting') continue;
+        // 任一依赖已失败 → 此任务级联失败
+        const blockedByFailed = t.depends_on.some(depId => failedSet.has(depId));
+        if (blockedByFailed) {
+          t.status = 'failed';
+          t.updated_at = now;
+          failedSet.add(t.id);
+          changed = true;
+          this.emitEvent('mission.task_updated', {
+            missionId,
+            taskId: t.id,
+            status: 'failed',
+            who: t.who,
+          });
+        }
+      }
+    }
+
+    if (failedSet.size > 1) {
+      // 级联产生了额外失败（除原始 failedTaskId 外）
+      logger.info({ missionId, source: failedTaskId, cascaded: failedSet.size - 1 }, 'mission: 失败级联');
     }
   }
 
