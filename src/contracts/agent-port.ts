@@ -86,8 +86,40 @@ export interface PortAskUserOptions {
   options?: string[];
   /** 附加上下文（帮助用户理解为什么被问） */
   context?: string;
-  /** 超时时间（毫秒），默认 120000 */
+  /** 超时时间（毫秒），默认 300000（§5.3.5 独立于 request 的 5 分钟超时） */
   timeoutMs?: number;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// port.on() 事件类型
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * port.on() 接收到的事件载荷。
+ *
+ * 13.0 §2.1 AgentMessage 的简化版 — 去掉 Agent 记录的生命周期字段
+ * （persistedAt / dispatchedAt 等），只保留事件核心属性。
+ * 与 IpcMessage 字段对应，但 type 为自由 string（支持通配符匹配）。
+ */
+export interface PortEvent {
+  /** 消息唯一 ID */
+  id: string;
+  /** 发送方 agent */
+  from: string;
+  /** 接收方 agent */
+  to: string;
+  /** 消息类型（如 'brain.observe', 'turn.correction'） */
+  type: string;
+  /** 消息内容 */
+  payload: unknown;
+  /** 消息时间戳 */
+  timestamp: number;
+  /** 关联 ID（串联 request ↔ response） */
+  correlationId?: string;
+  /** 所属会话 ID */
+  sessionId?: string;
+  /** 所属任务 ID */
+  taskId?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -100,9 +132,10 @@ export interface PortAskUserOptions {
  * 核心通信（3 个）：
  * - request: 请求-响应，等待回复（封装 dialogue.send → dialogue.reply）
  * - send: 即发即弃通知
- * - discover: 发现可用 Agent（不暴露 brain）
+ * - on: 注册事件处理器，支持通配符（如 'tool.*'）
  *
  * 便捷封装（3 个）：
+ * - discover: 发现可用 Agent（不暴露 brain）
  * - askUser: 向用户提问（委托 ModuleAgentContext.askUser）
  * - useTool: 使用已注册工具（走 ToolRegistry）
  */
@@ -143,6 +176,21 @@ export interface AgentPort {
    * @param msg 消息载荷（to 禁止为 'brain'）
    */
   send(msg: PortMessage): void;
+
+  /**
+   * 13.0 §2.1 核心原语之一：注册事件处理器。
+   *
+   * 支持通配符模式（如 'tool.*' 匹配 'tool.audit'、'tool.started' 等）。
+   * 返回取消注册函数 — 调用即移除该处理器。
+   *
+   * 实现层：对具体 type 直接注册 ipc.onMessage()；
+   * 对通配符模式，注册所有匹配的已知 IPC 消息类型的分发器。
+   *
+   * @param type 消息类型或通配符模式（如 'brain.observe', 'tool.*', '*'）
+   * @param handler 事件处理器
+   * @returns 取消注册函数
+   */
+  on(type: string, handler: (msg: PortEvent) => Promise<void> | void): () => void;
 
   /**
    * 发现可用 Agent 列表。

@@ -82,7 +82,9 @@ export type IpcMessageType =
   | 'agent.discover'
   | 'agent.discover.reply'
   /** 13.0 §5.3.14: Agent 拒绝任务，建议重路由到其他 Agent */
-  | 'task.reject';
+  | 'task.reject'
+  /** 13.0 §5.3.10: Kernel → Agent 目录变更推送（agent register/crashed 触发） */
+  | 'directory.changed';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
 // R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。

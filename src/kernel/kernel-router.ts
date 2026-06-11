@@ -178,6 +178,16 @@ export class KernelRouter {
   private rateLimits = new Map<string, RateLimitEntry>();
 
   /**
+   * §5.2.3: 活跃对话方向追踪（防 A→B→A 循环引用）。
+   *
+   * key = `${from}→${to}`，value = 该方向的活跃对话 ID 集合。
+   * 当 dialogue.send 建立对话时 add，dialogue 完成/结束时 delete。
+   * gate() 检查反向 key `${to}→${from}` 是否存在 — 存在说明 B→A 已在活跃，
+   * A→B 请求构成循环引用。
+   */
+  private activeDialogueDirections = new Map<string, Set<string>>();
+
+  /**
    * §5.3.10: Agent 目录本地缓存。
    * Kernel 维护实时目录，agent.discover 直接从缓存读取（零 IPC）。
    * agent register/crashed 时增量推送 directory.changed 事件更新缓存。
@@ -283,7 +293,14 @@ export class KernelRouter {
       return `不允许自己向自己发消息 (${from})`;
     }
 
-    // ③ §4.4.1: 调用深度限制（防无限递归 A→B→C→...→A）
+    // ③ §5.2.3: 循环引用检测 — 检查反向方向是否有活跃对话（防 A→B→A）
+    const reverseKey = `${to}→${from}`;
+    const reverseDialogues = this.activeDialogueDirections.get(reverseKey);
+    if (reverseDialogues && reverseDialogues.size > 0) {
+      return `循环引用检测: ${to}→${from} 已有 ${reverseDialogues.size} 个活跃对话，拒绝 ${from}→${to} 防止 A→B→A 循环`;
+    }
+
+    // ④ §4.4.1: 调用深度限制（防无限递归 A→B→C→...→A）
     if (callDepth !== undefined && callDepth >= MAX_AGENT_CALL_DEPTH) {
       return `调用深度超限 (${callDepth}/${MAX_AGENT_CALL_DEPTH})，可能存在循环调用`;
     }
@@ -310,6 +327,49 @@ export class KernelRouter {
     }
 
     return null; // 通过所有检查
+  }
+
+  /**
+   * §5.2.3: 追踪活跃对话方向（用于循环引用检测）。
+   *
+   * 在 dialogue 注册成功后调用。将 dialogueId 加入 `from→to` 方向的活跃集合。
+   * gate() 会检查反向 `to→from` 是否存在活跃对话来判定循环引用。
+   *
+   * @param from 发送方 agent
+   * @param to 接收方 agent
+   * @param dialogueId 对话 ID
+   */
+  private trackDialogueDirection(from: string, to: string, dialogueId: string): void {
+    const key = `${from}→${to}`;
+    let set = this.activeDialogueDirections.get(key);
+    if (!set) {
+      set = new Set();
+      this.activeDialogueDirections.set(key, set);
+    }
+    set.add(dialogueId);
+    logger.debug({ from, to, dialogueId, activeCount: set.size }, 'KernelRouter: tracked dialogue direction');
+  }
+
+  /**
+   * §5.2.3: 清除对话方向追踪。
+   *
+   * 在 dialogue 完成（成功或失败）后调用。从 `from→to` 方向集合中移除 dialogueId。
+   * 集合为空时自动清理 Map entry，避免内存泄漏。
+   *
+   * @param from 发送方 agent
+   * @param to 接收方 agent
+   * @param dialogueId 对话 ID
+   */
+  private untrackDialogueDirection(from: string, to: string, dialogueId: string): void {
+    const key = `${from}→${to}`;
+    const set = this.activeDialogueDirections.get(key);
+    if (set) {
+      set.delete(dialogueId);
+      if (set.size === 0) {
+        this.activeDialogueDirections.delete(key);
+      }
+      logger.debug({ from, to, dialogueId, remainingCount: set.size }, 'KernelRouter: untracked dialogue direction');
+    }
   }
 
   /**
@@ -404,6 +464,9 @@ export class KernelRouter {
           initiator: payload.from,
           target: payload.to,
         });
+
+        // §5.2.3: 追踪活跃对话方向（用于循环引用检测）
+        this.trackDialogueDirection(payload.from, payload.to, payload.dialogueId);
       }
 
       // 确保目标 agent 已启动 + 注册其 dialogue routing
@@ -432,6 +495,9 @@ export class KernelRouter {
         if (pending?.sessionId) {
           this.recordInterAgentRequest(pending.sessionId);
         }
+
+        // §5.2.3: 对话完成，清除方向追踪
+        this.untrackDialogueDirection(payload.from, payload.to, payload.dialogueId);
       } catch (err) {
         // 使用类型化错误码，让 Agent LLM 能区分超时/崩溃/不可用
         const { code, message } = errorToCode(err);
@@ -453,6 +519,9 @@ export class KernelRouter {
           to: payload.to,
           round: state!.currentRound,
         });
+
+        // §5.2.3: 对话失败，也要清除方向追踪
+        this.untrackDialogueDirection(payload.from, payload.to, payload.dialogueId);
       }
     });
 
@@ -629,6 +698,17 @@ export class KernelRouter {
       } catch (err) {
         logger.warn({ err, agentName }, 'agent.discover handler failed');
         agentIpc.send('agent.discover.reply', agentName, [], msg.correlationId);
+      }
+    });
+
+    // §5.3.10: 订阅 EventBus 的 directory.changed 事件，转发给 agent 进程
+    // agent 端 port.on('directory.changed', ...) 或 discover() 缓存可收到实时更新
+    getEventBus().on('directory.changed', (payload: { added: Array<{ name: string; description: string; capabilities: string[]; status: 'online' | 'offline' }>; removed: string[] }) => {
+      try {
+        agentIpc.send('directory.changed' as import('../kernel/types.js').IpcMessageType, agentName, payload);
+      } catch (err) {
+        // Agent 可能已关闭，忽略发送失败
+        logger.debug({ err: (err as Error).message, agentName }, 'directory.changed push to agent failed (likely closed)');
       }
     });
   }

@@ -39,6 +39,10 @@ const PATTERNS: Array<{ type: string; re: RegExp }> = [
   { type: 'password', re: /\b(?:password|passwd|pwd)\s*[=:]\s*['"]?([^\s'",;}{]+)['"]?/gi },
   // JWT token（xxx.yyy.zzz 三段）
   { type: 'jwt', re: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g },
+  // §5.3.6 补全: 数据库连接串（mysql/postgres/mongodb/redis/sqlserver 协议）
+  { type: 'db_connection', re: /\b(?:mysql|postgres|postgresql|mongodb|redis|rediss|mssql|sqlserver):\/\/[^\s'"<>]{10,}/gi },
+  // §5.3.6 补全: IPv4 地址（排除 127.x.x.x 回环和 0.0.0.0，避免误报 localhost）
+  { type: 'ip_address', re: /\b(?!(?:127\.|0\.0\.0\.))\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g },
 ];
 
 export interface RedactionResult {

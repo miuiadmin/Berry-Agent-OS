@@ -18,6 +18,7 @@ import type {
   PortMessage,
   PortReply,
   PortReplyMetadata,
+  PortEvent,
   AgentInfo,
   PortAskUserOptions,
 } from '../contracts/agent-port.js';
@@ -84,6 +85,42 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
     }
   });
 
+  // ─── §5.3.10: 订阅 Kernel 推送的 directory.changed 事件 ───
+  // Kernel 在 agent register/crashed 时主动推送目录变更，
+  // agent 端收到后立即更新本地缓存（discover() 下次调用返回最新数据）
+  ipc.onMessage('directory.changed' as IpcMessage['type'], (msg: IpcMessage) => {
+    const payload = msg.payload as { added?: AgentInfo[]; removed?: Array<{ name: string }> };
+    if (!directoryCache || !payload) return;
+
+    // 从缓存中移除已下线的 agent
+    if (payload.removed && payload.removed.length > 0) {
+      const removedNames = new Set(payload.removed.map(r => r.name));
+      directoryCache.entries = directoryCache.entries.filter(e => !removedNames.has(e.name));
+    }
+
+    // 合并新增的 agent（去重：如果已存在则更新）
+    if (payload.added && payload.added.length > 0) {
+      const existingNames = new Set(directoryCache.entries.map(e => e.name));
+      for (const agent of payload.added) {
+        if (existingNames.has(agent.name)) {
+          // 更新已有条目
+          const idx = directoryCache.entries.findIndex(e => e.name === agent.name);
+          if (idx >= 0) directoryCache.entries[idx] = agent;
+        } else {
+          directoryCache.entries.push(agent);
+        }
+      }
+    }
+
+    // 刷新缓存时间戳（但不清空数据）
+    directoryCache.fetchedAt = Date.now();
+    logger.debug({
+      addedCount: payload.added?.length ?? 0,
+      removedCount: payload.removed?.length ?? 0,
+      totalEntries: directoryCache.entries.length,
+    }, 'AgentPort: directory cache updated via push');
+  });
+
   /** 安全门禁：拒绝非法目标 */
   function validateTarget(target: string): void {
     if (FORBIDDEN_TARGETS.has(target)) {
@@ -122,6 +159,98 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
   }
 
   // ─── 6 原语实现 ───
+
+  /**
+   * 13.0 §2.1 on() 原语内部实现：
+   *
+   * - 具体类型（如 'brain.observe'）→ 直接注册 ipc.onMessage()
+   * - 通配符模式（如 'tool.*'）→ 查找所有匹配的已知 IPC 类型，逐一注册
+   * - 每个 handler 被包装为 IpcMessage → PortEvent 转换器
+   * - 返回 unsubscribe 函数：从注册表移除 handler，后续 IPC 消息不再触发
+   *
+   * 注意：dialogue.reply 由 port 内部的 request() 独占管理，
+   * 不应通过 on('dialogue.reply', ...) 覆盖。
+   */
+
+  /** on() 处理器注册表：pattern → { handler, registered } */
+  const onRegistry = new Map<number, {
+    pattern: string;
+    handler: (msg: PortEvent) => Promise<void> | void;
+    /** 是否仍活跃（unsubscribe 后标记 false，包装器检查后跳过） */
+    active: boolean;
+  }>();
+
+  /** 自增 ID 用于注册表键 */
+  let onRegistryNextId = 0;
+
+  /**
+   * 通配符匹配：支持 '*' 后缀和全匹配 '*'。
+   * - 'tool.*' 匹配 'tool.audit', 'tool.started' 等
+   * - '*' 匹配所有类型
+   * - 精确匹配：'brain.observe' 只匹配 'brain.observe'
+   */
+  function matchWildcard(pattern: string, type: string): boolean {
+    if (pattern === '*') return true;
+    if (pattern === type) return true;
+    if (pattern.endsWith('.*')) {
+      const prefix = pattern.slice(0, -1); // 保留末尾的 '.'
+      return type.startsWith(prefix);
+    }
+    return false;
+  }
+
+  /** 将 IpcMessage 转换为 PortEvent（§2.3 AgentMessage 的简化版） */
+  function toPortEvent(msg: IpcMessage): PortEvent {
+    return {
+      id: msg.id,
+      from: msg.from,
+      to: msg.to,
+      type: msg.type as string,
+      payload: msg.payload,
+      timestamp: msg.timestamp,
+      correlationId: msg.correlationId,
+      // IpcMessage 没有 sessionId/taskId 字段，从 payload 中提取（如有）
+      sessionId: (msg.payload as Record<string, unknown>)?.sessionId as string | undefined,
+      taskId: (msg.payload as Record<string, unknown>)?.taskId as string | undefined,
+    };
+  }
+
+  /**
+   * 所有已知 IPC 消息类型（运行时常量）。
+   * 用于通配符展开：当 on('tool.*', handler) 时，
+   * 遍历此数组找到所有 'tool.' 前缀的类型并逐一注册。
+   */
+  const ALL_IPC_TYPES: readonly string[] = [
+    'agent.register', 'agent.heartbeat', 'user.message', 'draft.response',
+    'review.request', 'review.result', 'final.response', 'agent.shutdown',
+    'permission.request', 'permission.result', 'permission.validate',
+    'permission.consume', 'permission.acquire', 'permission.judge',
+    'permission.judge.result', 'tool.audit', 'memory.query', 'memory.add',
+    'memory.delete', 'capability.request', 'capability.response',
+    'task.acknowledge', 'agent.task', 'agent.task.result', 'task.started',
+    'task.progress', 'route.request', 'route.result', 'agent.ask_user',
+    'agent.user_reply', 'model.takeover.request', 'model.takeover.respond',
+    'model.override', 'plugins.register_tools', 'plugin.execute',
+    'plugin.execute.result', 'skill.changed', 'task.cancel', 'task.telemetry',
+    'checkpoint.evaluate', 'checkpoint.evaluate.result', 'turn.correction',
+    'superior.review.request', 'conversation.restore', 'brain.review.feedback',
+    'brain.review.feedback.result', 'superior.review.result', 'bus.invoke',
+    'bus.invoke.result', 'bus.capabilities.request', 'bus.capabilities.response',
+    'config.llm_update', 'dialogue.send', 'dialogue.reply', 'dialogue.end',
+    'dialogue.observe', 'drift.check.request', 'drift.check.result',
+    'verify.request', 'verify.result', 'brain.observe', 'agent.discover',
+    'agent.discover.reply', 'task.reject',
+  ];
+
+  /**
+   * 为通配符模式找到所有匹配的具体 IPC 类型。
+   * 例如 'tool.*' → ['tool.audit']
+   *      'task.*' → ['task.acknowledge', 'task.started', ...]
+   */
+  function expandWildcard(pattern: string): string[] {
+    if (!pattern.includes('*')) return [pattern];
+    return ALL_IPC_TYPES.filter(t => matchWildcard(pattern, t));
+  }
 
   const port: AgentPort = {
     async request(msg: PortMessage, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<PortReply> {
@@ -169,6 +298,47 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
 
       ipc.send('dialogue.send', 'core', payload, dialogueId);
       logger.debug({ dialogueId, from: agentName, to: msg.to }, 'AgentPort: send (fire-and-forget)');
+    },
+
+    on(typePattern: string, handler: (msg: PortEvent) => Promise<void> | void): () => void {
+      const entryId = onRegistryNextId++;
+      const entry = { pattern: typePattern, handler, active: true };
+      onRegistry.set(entryId, entry);
+
+      /** IPC 消息包装器：将 IpcMessage 转为 PortEvent 并检查 handler 仍活跃 */
+      const ipcWrapper = (msg: IpcMessage) => {
+        if (!entry.active) return;
+        try {
+          const result = handler(toPortEvent(msg));
+          // handler 可能返回 Promise，异步错误不阻塞消息处理
+          if (result instanceof Promise) {
+            result.catch((err: Error) => {
+              logger.warn({ typePattern, err: err.message }, 'AgentPort: on() handler async error');
+            });
+          }
+        } catch (err) {
+          logger.warn({ typePattern, err: (err as Error).message }, 'AgentPort: on() handler sync error');
+        }
+      };
+
+      // 展开通配符为具体类型，逐一注册 IPC handler
+      const concreteTypes = expandWildcard(typePattern);
+      for (const ipcType of concreteTypes) {
+        ipc.onMessage(ipcType as IpcMessage['type'], ipcWrapper);
+      }
+
+      logger.debug({
+        typePattern,
+        expandedCount: concreteTypes.length,
+        types: concreteTypes,
+      }, 'AgentPort: on() registered');
+
+      // 返回取消注册函数
+      return () => {
+        entry.active = false;
+        onRegistry.delete(entryId);
+        logger.debug({ typePattern, entryId }, 'AgentPort: on() unsubscribed');
+      };
     },
 
     async *requestStreaming(msg: PortMessage, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): AsyncGenerator<PortReply, void, undefined> {

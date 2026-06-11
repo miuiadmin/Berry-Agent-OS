@@ -147,7 +147,7 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
 
     const askUser = (question: string, opts?: AskUserOptions): Promise<string> => {
       return new Promise((resolve, reject) => {
-        const timeoutMs = opts?.timeoutMs ?? 120000;
+        const timeoutMs = opts?.timeoutMs ?? 300000; // §5.3.5: 5 分钟独立超时
         const timeout = setTimeout(() => {
           pendingAskCallbacks.delete(payload.taskId);
           reject(new Error('用户回复超时'));
