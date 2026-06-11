@@ -1072,7 +1072,21 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         checkerHint = '\n\n### Checker 角色指引\n如果你是 Squad 中的 Checker（验证者）：独立审查 worker 的产出，关注正确性/完整性/安全性/一致性。发现问题通过 squad tool signal(blocker/question) 报告，不直接修改。验证通过用 signal(done)。';
       }
 
-      return `${contextBlock}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。使用 squad 工具管理团队（read/handoff/signal/update_member）。${checkerHint}${stateContext}`;
+      /**
+       * §5.3.11: 注入 HandoffContext（如果存在最近一次交接上下文）。
+       * 接收方 agent 需要看到前任 agent 的工作进展、已读文件、阻塞等信息，
+       * 才能无缝接手任务，而不是从零开始。
+       */
+      let handoffContext = '';
+      if (planTaskId) {
+        const handoffCtx = this.missionManager.readLatestHandoffContextAny(missionId);
+        if (handoffCtx) {
+          const renderedHandoff = this.missionManager.renderHandoffContext(handoffCtx);
+          handoffContext = '\n\n## 任务交接上下文\n\n你是从另一个 Agent 接手的任务。以下是前任的工作状态：\n\n' + renderedHandoff;
+        }
+      }
+
+      return `${contextBlock}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。使用 squad 工具管理团队（read/handoff/signal/update_member）。${checkerHint}${handoffContext}${stateContext}`;
     } catch (err) {
       logger.warn({ err, missionId }, 'buildMissionContextPrompt 失败');
       return null;
@@ -1704,6 +1718,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           draftResponse: draft,
           toolCalls: calls,
           level: 'A',
+          agentDialogCount: this.dialogueRouter?.getDialogueCountByCorrelation(correlationId),
         }),
         // 13.0 §12.6: 透传 mission 上下文（审核后 Brain 会自动 mark plan done）
         missionId: pending.missionId,
@@ -1992,6 +2007,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       draftResponse: pending.draftResponse ?? '',
       toolCalls: pending.toolCalls ?? [],
       level: pending.level as 'A' | 'B' | 'C' ?? 'A',
+      missionId: pending.missionId,
+      planTaskId: pending.planTaskId,
+      taskDescription: pending.taskDescription,
+      agentDialogCount: this.dialogueRouter?.getDialogueCountByCorrelation(correlationId),
     };
 
     reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
@@ -2087,6 +2106,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         toolCalls,
         level: 'A',
         missionId,
+        agentDialogCount: this.dialogueRouter?.getDialogueCountByCorrelation(fgEntry.correlationId),
       }),
       // 13.0 §12.6: 注入 mission 上下文，让 Brain 审核时知道"分配的任务是什么"
       missionId,

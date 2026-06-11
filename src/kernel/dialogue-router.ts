@@ -81,6 +81,17 @@ export class DialogueRouter {
     return this.dialogues.get(dialogueId);
   }
 
+  /**
+   * §5.2.5: 查询指定 correlation 关联的跨 agent 对话次数。
+   * 用于 classifyLevel() 判定审核级别（> 5 次对话升级为 C 级审核）。
+   *
+   * @param correlationId 关联 ID（通常是 delegation entry 的 correlationId）
+   * @returns 该关联的对话次数
+   */
+  getDialogueCountByCorrelation(correlationId: string): number {
+    return this.dialogueCountByCorrelation.get(correlationId) ?? 0;
+  }
+
   /** 注册外部已生成 dialogueId 的对话状态（Conversation 侧已生成 ID 时使用） */
   registerDialogue(dialogueId: string, params: CreateDialogueParams): DialogueState {
     // 预算守护：单次请求内对话数量限制

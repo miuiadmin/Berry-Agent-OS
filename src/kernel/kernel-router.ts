@@ -47,7 +47,7 @@ const MAX_AGENT_CALL_DEPTH = 16;
 
 /** §5.2.3: 每 (from, to) agent 对的频率限制 */
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 分钟窗口
-const RATE_LIMIT_MAX_REQUESTS = 30;   // 每个 agent 对每分钟最多 30 次
+const RATE_LIMIT_MAX_REQUESTS = 10;   // §4.4.2: 每 agent 对每分钟最多 10 次
 
 /** §4.4.2: 单个 session 内的跨 agent request 总次数上限 */
 const MAX_INTER_AGENT_REQUESTS_PER_SESSION = 30;

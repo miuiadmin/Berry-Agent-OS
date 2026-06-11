@@ -704,6 +704,38 @@ export class MissionManager {
   }
 
   /**
+   * §5.3.11: 读取 mission 中最近一次任意 handoff 的上下文。
+   *
+   * 不限定 fromSquad/toSquad — 用于 buildMissionContextPrompt 注入交接信息，
+   * 接收方 agent 只需要看到最新的交接内容即可。
+   *
+   * @param missionId Mission ID
+   * @returns 最近一次 handoff 的 HandoffContext，或 null
+   */
+  readLatestHandoffContextAny(missionId: string): HandoffContext | null {
+    const squadFile = this.readSquad(missionId);
+    if (!squadFile || squadFile.handoffs.length === 0) return null;
+
+    const latest = squadFile.handoffs[squadFile.handoffs.length - 1];
+    if (!latest.content) return null;
+
+    try {
+      return JSON.parse(latest.content) as HandoffContext;
+    } catch {
+      return {
+        originalInstruction: latest.content,
+        filesRead: [],
+        filesModified: [],
+        agentConversations: [],
+        currentProgress: latest.what,
+        blockers: [],
+        handoffAt: Date.now(),
+        fromAgent: latest.from,
+      };
+    }
+  }
+
+  /**
    * 把 HandoffContext 渲染为一段 system prompt 文本（便于 Agent 直接拼到 prompt）。
    */
   renderHandoffContext(ctx: HandoffContext): string {

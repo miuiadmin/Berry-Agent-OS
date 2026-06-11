@@ -72,8 +72,6 @@ const BRIDGED_EVENTS: EventName[] = [
   'brain.correction',
   // 13.0 §11.5: 跨 squad 交接（结构化 handoff 通知）
   'brain.handoff',
-  // 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送）
-  'brain.budget.alert',
   // 13.0 P9: Brain 观察 blocker/question signal 后触发的 INTERVENE 事件
   'brain.signal_intervention',
   // 13.0 §5.3.10: Agent 目录变更推送
