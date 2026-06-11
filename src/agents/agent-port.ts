@@ -150,12 +150,15 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
     });
   }
 
-  /** 将 DialogueMessagePayload 转换为 PortReply */
+  /** 将 DialogueMessagePayload 转换为 PortReply（提取 callChain） */
   function toPortReply(payload: DialogueMessagePayload): PortReply {
+    /** 从 context 中提取调用链（Kernel 侧维护并回传） */
+    const callChain = payload.context?.callChain as CallChainEntry[] | undefined;
     return {
       from: payload.from,
       content: payload.content,
       metadata: payload.metadata as PortReplyMetadata | undefined,
+      callChain,
     };
   }
 
@@ -202,6 +205,9 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
 
   /** 将 IpcMessage 转换为 PortEvent（§2.3 AgentMessage 的简化版） */
   function toPortEvent(msg: IpcMessage): PortEvent {
+    /** 从 payload 中提取调用链 */
+    const payload = msg.payload as Record<string, unknown> | undefined;
+    const callChain = payload?.callChain as CallChainEntry[] | undefined;
     return {
       id: msg.id,
       from: msg.from,
@@ -211,8 +217,9 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
       timestamp: msg.timestamp,
       correlationId: msg.correlationId,
       // IpcMessage 没有 sessionId/taskId 字段，从 payload 中提取（如有）
-      sessionId: (msg.payload as Record<string, unknown>)?.sessionId as string | undefined,
-      taskId: (msg.payload as Record<string, unknown>)?.taskId as string | undefined,
+      sessionId: payload?.sessionId as string | undefined,
+      taskId: payload?.taskId as string | undefined,
+      callChain,
     };
   }
 
@@ -259,13 +266,19 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
       validateTarget(msg.to);
 
       const dialogueId = genId('dlg');
+
+      /** 13.0 §2.3: 构建调用链条目（当前 agent → 目标 agent） */
+      const newChainEntry: CallChainEntry = { from: agentName, to: msg.to, ts: Date.now() };
+      /** 合并传入的 callChain（如果有）并追加当前跳 */
+      const callChain = [...(msg.callChain ?? []), newChainEntry];
+
       const payload: DialogueMessagePayload = {
         dialogueId,
         sequenceNumber: -1, // Kernel 统一分配
         from: agentName,
         to: msg.to,
         content: msg.content,
-        context: msg.context,
+        context: { ...msg.context, callChain },
       };
 
       // 发送 dialogue.send IPC 到 Kernel，由 Kernel 路由到目标 Agent
@@ -288,13 +301,18 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
       validateTarget(msg.to);
 
       const dialogueId = genId('dlg');
+
+      /** 13.0 §2.3: 构建调用链（fire-and-forget 也追踪） */
+      const newChainEntry: CallChainEntry = { from: agentName, to: msg.to, ts: Date.now() };
+      const callChain = [...(msg.callChain ?? []), newChainEntry];
+
       const payload: DialogueMessagePayload = {
         dialogueId,
         sequenceNumber: -1,
         from: agentName,
         to: msg.to,
         content: msg.content,
-        context: msg.context,
+        context: { ...msg.context, callChain },
       };
 
       ipc.send('dialogue.send', 'core', payload, dialogueId);
@@ -349,13 +367,18 @@ export function createAgentPort(deps: AgentPortDeps): AgentPort {
       validateTarget(msg.to);
 
       const dialogueId = genId('dlg');
+
+      /** 13.0 §2.3: 流式请求也构建调用链 */
+      const newChainEntry: CallChainEntry = { from: agentName, to: msg.to, ts: Date.now() };
+      const callChain = [...(msg.callChain ?? []), newChainEntry];
+
       const payload: DialogueMessagePayload = {
         dialogueId,
         sequenceNumber: -1,
         from: agentName,
         to: msg.to,
         content: msg.content,
-        context: msg.context,
+        context: { ...msg.context, callChain },
       };
 
       // 用一个本地缓冲队列接收同 dialogueId 的 reply

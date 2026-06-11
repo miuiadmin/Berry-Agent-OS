@@ -36,6 +36,7 @@ import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.j
 import { ObservationRecorder, type RecordObservationInput, type ObservationType } from '../../../kernel/observation-recorder.js';
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 import { MissionManager } from '../../../kernel/mission-manager.js';
+import { FallbackReviewer, type FallbackReviewInput } from '../../../kernel/fallback-reviewer.js';
 import { getEventBus } from '../../../kernel/event-bus.js';
 import { genId } from '../../../utils/id.js';
 
@@ -109,6 +110,10 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   // OBSERVE 阶段定期读取 plan 监控进度，零 LLM（规则化判断）
   // 13.0 §12.6: Brain 用这个 MissionManager 实例在审核后自动 mark plan done/failed
   const missionManager = new MissionManager();
+  // 13.0 §5.2.5: Brain 不可用/LLM 超时时的规则化降级审核器
+  // 当 Brain LLM 调用失败时，FallbackReviewer 通过确定性规则（危险命令模式匹配、
+  // 工具风险分类）提供最低限度安全审查，避免"LLM 挂了就全部自动批准"的风险
+  const fallbackReviewer = new FallbackReviewer();
 
   /**
    * session 级观察计数器，用于定期触发 plan 进度检查
@@ -445,9 +450,43 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         }
       }
     } catch (err) {
+      // 13.0 §5.2.5 失败降级：Brain LLM 不可用时用 FallbackReviewer 做规则化审查
+      // 不再"批准一切"——用确定性规则（危险命令模式、工具风险分类）兜底
+      logger.warn({ err: (err as Error).message }, 'brain:review LLM call failed, falling back to FallbackReviewer');
+
+      const fallbackInput: FallbackReviewInput = {
+        responseText: turn.draftResponse,
+        hasToolCalls: turn.toolCalls.length > 0,
+        toolNames: turn.toolCalls.map(tc => tc.name),
+        agentName: name,
+      };
+      const fallbackResult = fallbackReviewer.review(fallbackInput);
+
+      // 映射 FallbackReviewer 三态到 ReviewResult
+      let verdict: ReviewResult['verdict'];
+      let reason: string;
+      switch (fallbackResult.verdict) {
+        case 'deny':
+          // 检测到危险内容 → 拒绝（安全优先）
+          verdict = 'reject';
+          reason = `Brain LLM 不可用，规则审核拒绝: ${fallbackResult.reason}`;
+          break;
+        case 'hold':
+          // 风险不确定 → 修改回复添加警告标记
+          verdict = 'modify';
+          reason = `Brain LLM 不可用，规则审核标记需人工确认: ${fallbackResult.reason}`;
+          break;
+        case 'approve':
+        default:
+          // 规则审核通过（简单文本、无风险模式）
+          verdict = 'approve';
+          reason = `Brain LLM 不可用，规则审核批准: ${fallbackResult.reason}`;
+          break;
+      }
+
       ipc.send('review.result', 'core', {
-        verdict: 'approve',
-        reason: `Review error: ${(err as Error).message}, approving by default`,
+        verdict,
+        reason,
       } satisfies ReviewResult, trackingId);
     }
   });

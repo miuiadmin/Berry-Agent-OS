@@ -381,6 +381,8 @@ export type EventMap = {
     skillDescription?: string;
     createdAt: number;
   };
+  /** 13.0 §13.18: v2 插件工具注册到全局 ToolRegistry 后广播变更 */
+  'tools.updated': { added: string[] };
 };
 
 export type EventMessageMap = {

@@ -819,8 +819,26 @@ export class CoreService {
   }
 
   private registerPluginTools(): void {
-    // v2 unified mode manages plugins through its own facet system — skip v1 registration
-    if (this.pluginRuntimeV2) return;
+    // 13.0 §13.18: v2 插件工具统一注册到全局 ToolRegistry
+    // v2 unified mode 管理插件通过自己的 facet 系统，工具定义注册到 ToolRegistry
+    // 后 LLM 和 AgentPort.useTool() 都能透明发现和调用插件工具
+    if (this.pluginRuntimeV2) {
+      const v2Tools = this.pluginRuntimeV2.getToolDefinitions();
+      if (v2Tools.length > 0) {
+        for (const tool of v2Tools) {
+          registerTool(tool);
+        }
+        logger.info({ count: v2Tools.length }, 'v2 plugin tools registered to global ToolRegistry');
+
+        // 通过 EventBus 广播工具变更，让已启动的 agent 感知新工具
+        // agent 端收到后重新获取 tool list（LLM 下次 turn 可用新工具）
+        const eventBus = getEventBus();
+        eventBus.emit('tools.updated', { added: v2Tools.map(t => t.name) });
+      }
+      return;
+    }
+
+    // v1 路径：通过 plugin-host agent 代理执行
     if (!this.pluginRuntime) return;
     const pluginTools = this.pluginRuntime.getPluginTools();
     if (pluginTools.length === 0) return;

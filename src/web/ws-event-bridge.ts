@@ -90,6 +90,8 @@ const BRIDGED_EVENTS: EventName[] = [
   // 13.0: 委托生命周期（前端实时显示任务完成/失败状态）
   'delegation.completed',
   'delegation.failed',
+  // 13.0 §13.18: 插件工具变更广播（前端可据此刷新工具面板）
+  'tools.updated',
 ];
 
 /**
