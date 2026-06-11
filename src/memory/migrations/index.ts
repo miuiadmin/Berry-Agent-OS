@@ -610,6 +610,44 @@ const v14BrainObservations: Migration = {
   },
 };
 
+/** v15: 给 brain_decisions 补 task_id 列（v0 baseline 的 runMemoryMigrations 已有此逻辑，但已跑过 v0 的老库跳过不会再执行） */
+const v15BrainDecisionsTaskId: Migration = {
+  version: 15,
+  name: 'brain-decisions-task-id',
+  up: (db: Database.Database) => {
+    const cols = db.pragma('table_info(brain_decisions)') as Array<{ name: string }>;
+    const existing = new Set(cols.map(c => c.name));
+    if (!existing.has('task_id')) {
+      db.exec(`ALTER TABLE brain_decisions ADD COLUMN task_id TEXT`);
+    }
+  },
+};
+
+/** v16: pending_request_state 表 — SessionManager 持久化 PendingRequest 关键字段，进程重启后可恢复 metadata。
+ *  schema 与 session-manager.ts 的 persistRequestState/recoverRequestStates 读写列保持一致。 */
+const v16PendingRequestState: Migration = {
+  version: 16,
+  name: 'pending-request-state',
+  up: (db: Database.Database) => {
+    const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='pending_request_state'`).get();
+    if (!tables) {
+      db.exec(`
+        CREATE TABLE pending_request_state (
+          msg_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT,
+          intent_anchor_json TEXT,
+          level TEXT,
+          reasoning TEXT,
+          draft_preview TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_request_state_session ON pending_request_state(session_id, created_at);
+      `);
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -626,4 +664,6 @@ export const ALL_MIGRATIONS: Migration[] = [
   v12ConversationsFts,
   v13PendingAsks,
   v14BrainObservations,
+  v15BrainDecisionsTaskId,
+  v16PendingRequestState,
 ];

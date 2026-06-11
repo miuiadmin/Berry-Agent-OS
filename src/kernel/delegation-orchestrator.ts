@@ -9,6 +9,8 @@ import type { AuditRecorder } from './audit-recorder.js';
 import type { SessionManager, PendingRequest } from './session-manager.js';
 import type { TakeoverController } from '../testing/model-takeover.js';
 import { KernelRouter, type AgentIpcLike } from './kernel-router.js';
+import { IpcChannel } from './ipc.js';
+import type { EventPayload } from './event-bus.js';
 import type { CapabilityService } from '../evolution/index.js';
 import type { DaemonBridge } from './daemon-bridge.js';
 import type { MemoryRuntime } from '../memory/index.js';
@@ -144,6 +146,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   // ─── Internal state ───────────────────────────────
   private setupAgentIpcs = new WeakSet<object>();
+  /** 去重：已挂载 Brain 事件中继的 IPC 引用（brain 重启后新 IPC 会被重新挂载） */
+  private brainRelayIpcs = new WeakSet<object>();
   private pendingReviewOrigins = new Map<string, ReviewOrigin>();
   readonly delegationManager: DelegationManager;
   /** 13.0 灵魂版：KernelRouter 封装 dialogue 路由逻辑 */
@@ -696,6 +700,59 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 对于 dialogue 模式的纠偏，转发给 Conversation Agent
       primary.ipc.send('turn.correction', primaryName, payload, msg.correlationId);
       logger.debug({ dialogueId: payload.delegationId, action: payload.action }, 'dialogue:brain correction forwarded');
+    });
+
+    // 13.0 §13.8/§11.4/§11.7: Brain 子进程的跨进程事件中继。
+    // Brain 是独立子进程，进程内 EventBus 发不到 core；这些事件必须经 IPC 边界中继：
+    //   - brain → core（inbound）：brain 用 ipc.send 发来 → core re-emit 到 EventBus，供既有订阅者消费
+    //     （delegation-orchestrator 订阅 brain.signal_intervention / brain.checker.dispatch；
+    //      ws-event-bridge 订阅 brain.cron_review_flagged 转发给前端）
+    //   - core → brain（outbound）：CronScheduler 在 core 发 cron.review → core 转发 IPC 给 brain 审核
+    // 用 WeakSet 去重，Brain 崩溃重启后新 IPC 引用会重新挂载（见 onBrainRegistered）。
+    this.reattachBrainRelay(reviewer.ipc);
+  }
+
+  /**
+   * Brain（reviewer）注册成功后由 AgentManager 调用——崩溃重启会创建新 IPC 引用，
+   * 需重新挂载中继 handler，否则旧引用失效后 Brain 的事件再也无法到达 core。
+   * 仅对 brain/reviewer agent 有效，幂等（同一 IPC 不会重复挂载）。
+   */
+  onBrainRegistered(): void {
+    const reviewer = this.registry.requireRole('reviewer');
+    const agent = this.agentManager.getAgent(reviewer.manifest.name);
+    if (agent?.ipc) {
+      this.reattachBrainRelay(agent.ipc);
+    }
+  }
+
+  /** 挂载 Brain 子进程 ↔ core EventBus 的双向事件中继（幂等：同一 ipc 不重复挂载） */
+  private reattachBrainRelay(brainIpc: IpcChannel): void {
+    if (this.brainRelayIpcs.has(brainIpc)) return;
+    this.brainRelayIpcs.add(brainIpc);
+    const bus = getEventBus();
+
+    // ── inbound：Brain → core（brain 用 ipc.send 发来，core re-emit 到 EventBus） ──
+    // brain.signal_intervention：delegation-orchestrator 订阅后注入 turn.correction 软纠偏
+    brainIpc.onMessage('brain.signal_intervention', (msg) => {
+      bus.emit('brain.signal_intervention', msg.payload as EventPayload<'brain.signal_intervention'>);
+    });
+    // brain.checker.dispatch：delegation-orchestrator 订阅后派发 checker 独立审核
+    brainIpc.onMessage('brain.checker.dispatch', (msg) => {
+      bus.emit('brain.checker.dispatch', msg.payload as EventPayload<'brain.checker.dispatch'>);
+    });
+    // brain.cron_review_flagged：ws-event-bridge 订阅后转发前端展示警告
+    brainIpc.onMessage('brain.cron_review_flagged', (msg) => {
+      bus.emit('brain.cron_review_flagged', msg.payload as EventPayload<'brain.cron_review_flagged'>);
+    });
+
+    // ── outbound：core → Brain（CronScheduler 在 core 发 cron.review，转发 IPC 给 Brain 审核） ──
+    const brainName = this.registry.requireRole('reviewer').manifest.name;
+    bus.on('cron.review', (payload) => {
+      // 发送失败（Brain 未就绪/已退出）静默跳过——cron 审核是 best-effort，不阻塞 cron 流程
+      const sent = brainIpc.send('cron.review', brainName, payload);
+      if (!sent) {
+        logger.debug({ taskId: payload.taskId }, 'cron.review → brain IPC 发送失败（brain 可能未就绪），跳过审核');
+      }
     });
   }
 

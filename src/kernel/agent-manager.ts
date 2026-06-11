@@ -33,6 +33,8 @@ export class AgentManager {
   // C2 修复：IPC 弹性机制（背压监控 + 死信队列）
   private backpressure: BackpressureMonitor = new BackpressureMonitor();
   private deadLetterQueue: DeadLetterQueue | null = null;
+  /** Agent 注册成功回调（当前仅 brain 使用——重新挂载跨进程事件中继）。由 core-service 注入。 */
+  onAgentRegistered: ((name: string) => void) | null = null;
 
   constructor(config: AppConfig, registry: AgentRegistry, eventBus?: EventBus) {
     this.config = config;
@@ -158,6 +160,15 @@ export class AgentManager {
       agent.lastHeartbeat = Date.now();
       logger.info({ agent: name, pid: agent.pid }, `智能体已注册: ${name}`);
       this.eventBus?.emit('agent.registered', { name, pid: agent.pid });
+      // 13.0 §13.8: Brain 崩溃重启后创建新 IPC 引用，需重新挂载 cron.review/signal_intervention 等
+      // 跨进程事件中继（delegation-orchestrator 缓存的旧引用已失效）。每次 brain 注册都触发，幂等。
+      if (name === 'brain' && this.onAgentRegistered) {
+        try {
+          this.onAgentRegistered(name);
+        } catch (err) {
+          logger.warn({ err, agent: name }, 'onAgentRegistered 回调失败（非致命）');
+        }
+      }
       // 重放崩溃前未完成的消息（IPC journal at-least-once 投递）
       if (this.journal) {
         const replayed = this.journal.replay(name, (msg) => agent.ipc.send(msg.type, msg.to, msg.payload, msg.correlationId));

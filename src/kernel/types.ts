@@ -86,7 +86,17 @@ export type IpcMessageType =
   /** 13.0 §5.3.14: Agent 拒绝任务，建议重路由到其他 Agent */
   | 'task.reject'
   /** 13.0 §5.3.10: Kernel → Agent 目录变更推送（agent register/crashed 触发） */
-  | 'directory.changed';
+  | 'directory.changed'
+  // 13.0 §13.8/§11.4/§11.7: Brain 子进程 ↔ core 跨进程事件中继（EventBus 是进程内的，
+  // brain 作为独立子进程发不到 core，故这四个事件改走 IPC 边界，由 delegation-orchestrator 中继）
+  /** core → brain：CronScheduler 发的 cron.review，中继给 Brain 审核 */
+  | 'cron.review'
+  /** brain → core：Brain 观察到 blocker/question，请求注入软纠偏 */
+  | 'brain.signal_intervention'
+  /** brain → core：Brain 派发 checker 独立二次审核 */
+  | 'brain.checker.dispatch'
+  /** brain → core：cron 审核发现问题，前端展示警告 */
+  | 'brain.cron_review_flagged';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
 // R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。

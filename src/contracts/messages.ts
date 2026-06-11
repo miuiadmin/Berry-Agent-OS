@@ -128,6 +128,24 @@ export interface IpcMessageMap {
     request: { userId?: string; keyPrefix?: string };
     response: { ok: boolean; preferences?: Array<{ key: string; value: string; source: string; confidence: number }>; reason?: string };
   };
+  // 13.0 §13.8/§11.4/§11.7: Brain 子进程 ↔ core 跨进程事件中继
+  //（EventBus 是进程内的，brain 作为独立子进程发不到 core，故改走 IPC 边界）
+  'ipc:cron.review': {
+    request: { taskId: string; description: string; output: string; createdAt: number };
+    response: void;
+  };
+  'ipc:brain.signal_intervention': {
+    request: { missionId: string; from: string; signalType: string; signalMsg: string; instruction: string; severity: 'low' | 'medium' | 'high'; createdAt: number };
+    response: void;
+  };
+  'ipc:brain.checker.dispatch': {
+    request: { missionId: string; planTaskId: string; sessionId: string; checkerAgent: string; checkerOn: string; checkerCorrelationId: string; parentCorrelationId: string; workerOutput: string; workerTask: string; brainVerdict: string; brainReason: string };
+    response: void;
+  };
+  'ipc:brain.cron_review_flagged': {
+    request: { taskId: string; verdict: string; reason: string; correctedOutput?: string };
+    response: void;
+  };
 }
 
 // === Event Messages (broadcast, pub/sub) — single source of truth for event types ===

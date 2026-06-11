@@ -40,7 +40,6 @@ import { ObservationRecorder, type RecordObservationInput, type ObservationType 
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
 import { MissionManager } from '../../../kernel/mission-manager.js';
 import { FallbackReviewer, type FallbackReviewInput } from '../../../kernel/fallback-reviewer.js';
-import { getEventBus } from '../../../kernel/event-bus.js';
 import { genId } from '../../../utils/id.js';
 
 const DEFAULT_PROMPT_A = `You are a Brain Agent performing a quick quality check on an AI assistant response.
@@ -303,8 +302,10 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       logger.warn({ err, missionId, signalType: signal.type }, 'brain: signal intervention decision record failed');
     }
 
-    // 发 EventBus 事件（kernel 可订阅后路由 turn.correction 给 worker）
-    getEventBus().emit('brain.signal_intervention', {
+    // 通过 IPC 发 brain.signal_intervention 给 core（core 侧 re-emit 到 EventBus，
+    // 由 delegation-orchestrator 订阅后注入 turn.correction 软纠偏）。
+    // 注意：Brain 是独立子进程，不能用进程内 EventBus——事件发不到 core 进程。
+    ipc.send('brain.signal_intervention', 'core', {
       missionId,
       from: signal.from,
       signalType: signal.type,
@@ -783,11 +784,12 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       const checker = missionManager.getCheckerForPlanTask(missionId, planTaskId);
       if (!checker) return; // 没有 checker 就不派发
 
-      // 13.0 §11.4: 通过 EventBus 发 brain.checker.dispatch 事件
+      // 13.0 §11.4: 通过 IPC 发 brain.checker.dispatch 给 core（core 侧 re-emit 到 EventBus）
       // Kernel 订阅后调 ensureAgent(checker.agent) 启动它，然后转交 review.request 给 checker
       // 这里不阻塞主 review.result（避免 checker 卡住导致 worker 主任务挂起）
+      // 注意：Brain 是独立子进程，不能用进程内 EventBus——改走 IPC 边界中继。
       const checkerCorrelationId = genId('check');
-      getEventBus().emit('brain.checker.dispatch', {
+      ipc.send('brain.checker.dispatch', 'core', {
         missionId,
         planTaskId,
         sessionId: turn.sessionId,
@@ -1291,13 +1293,13 @@ ${safeSlice(draftResponse, 5000)}
   });
 
   // ─── 13.0 §13.8: cron 任务审核（LLM + 规则双路径） ───
-  // cron.review 事件由 CronScheduler 在任务执行成功后发出，
-  // Brain 订阅后使用 cron.description 作为"用户意图"进行审核判定。
+  // cron.review 由 CronScheduler 在 core 进程发出，经 IPC 边界中继到 Brain 子进程。
   // 策略：输出短/简单 → 规则化快速通过；输出长/复杂 → LLM 审核
-  // 由于 Brain 是 resident agent，通过 EventBus 订阅（非 IPC）。
-  const eventBus = getEventBus();
-  eventBus.on('cron.review', async (payload) => {
-    const { taskId, description, output } = payload as { taskId: string; description: string; output: string; createdAt: number };
+  // 注意：Brain 是独立子进程，EventBus 是进程内的——必须用 ipc.onMessage 接收，
+  // 而非 getEventBus().on()（后者会因 EventBus 未初始化直接崩，且跨进程也收不到）。
+  ipc.onMessage('cron.review', async (msg: IpcMessage) => {
+    const payload = msg.payload as { taskId: string; description: string; output: string; createdAt: number };
+    const { taskId, description, output } = payload;
     const outputLen = output?.length ?? 0;
     const descLen = description?.length ?? 0;
     logger.info({ taskId, descriptionLen: descLen, outputLen }, 'brain:cron.review received');
@@ -1376,9 +1378,9 @@ ${safeSlice(draftResponse, 5000)}
         taskId,
       });
 
-      // 如果审核发现问题，通过 EventBus 广播（前端可展示警告）
+      // 如果审核发现问题，通过 IPC 回传给 core（core 侧 re-emit 到 EventBus 供前端展示警告）
       if (cronResult.verdict !== 'approve') {
-        eventBus.emit('brain.cron_review_flagged', {
+        ipc.send('brain.cron_review_flagged', 'core', {
           taskId,
           verdict: cronResult.verdict,
           reason: cronResult.reason,

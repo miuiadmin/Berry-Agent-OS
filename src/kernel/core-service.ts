@@ -244,6 +244,14 @@ export class CoreService {
     this.messageRouter.setup();
     this.messageRouter.init({ pluginRuntimeV2: this.pluginRuntimeV2 });
 
+    // 13.0 §13.8: Brain 崩溃重启后需重新挂载跨进程事件中继（cron.review/signal_intervention/checker.dispatch）。
+    // 注入回调：agent-manager 检测到 brain 注册 → 调 orchestrator.onBrainRegistered() 刷新 relay。
+    this.agentManager.onAgentRegistered = (name: string) => {
+      if (name === 'brain') {
+        this.messageRouter?.onBrainRegistered();
+      }
+    };
+
     // 13.0 多智能体协作：初始化 Mission 系统（共享 MissionManager 实例 + plan/squad 工具）
     const { MissionManager } = await import('./mission-manager.js');
     const missionManager = new MissionManager(getEventBus());
