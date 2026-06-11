@@ -165,7 +165,7 @@ export class CorrectionFlow {
         break;
 
       case 'stop':
-        this.applyStop(delegationId, correction);
+        await this.applyStop(delegationId, correction);
         break;
 
       case 'restart':

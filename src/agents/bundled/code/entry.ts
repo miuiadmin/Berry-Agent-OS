@@ -17,6 +17,8 @@ import type { ToolResult } from '../../../tools/types.js';
 import { createAgentPort } from '../../agent-port.js';
 // VF-4: Saga 补偿集成
 import { SagaOrchestrator } from '../../../kernel/saga.js';
+// 13.0 §13.7: 跨进程文件备份/回滚（Brain stop 时 kernel 侧 rollbackTask 读取）
+import { setCurrentTask, commitTask } from '../../../kernel/file-edit-rollback.js';
 import { getLogger } from '../../../utils/logger.js';
 
 const logger = getLogger('code-entry');
@@ -303,6 +305,9 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
   // VF-4: 设置当前任务的 saga 上下文（sessionId 供 safeWriteFile 使用）
   currentSessionId = payload.sessionId;
   resetTaskSaga();
+  // 13.0 §13.7: 设置当前 task 上下文，让 write_file/edit_code 的 recordMutation 生效
+  // （缺失此项则备份目录恒空，Brain stop 时 rollbackTask 恢复 0 文件）
+  await setCurrentTask(payload.taskId);
 
   const input = payload.inputPayload;
   const workingDir = (input.workingDir as string) ?? homedir();
@@ -343,6 +348,9 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
     sagaInstance.completeSaga(currentSagaId);
     currentSagaId = null;
   }
+  // 13.0 §13.7: 任务成功完成 → 提交并清理备份（提交点，区别于回滚点）。
+  // commitTask 同时 clearCurrentTask，避免下一 task 串台。
+  await commitTask(payload.taskId);
 
   return {
     kind: 'code_task',

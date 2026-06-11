@@ -328,6 +328,28 @@ export function registerMissionRoutes(
     json(res, { ok: true, restored: originalResponse });
   });
 
+  // ─── POST /api/tasks/:id/rollback — 用户拒绝后按 task 回滚文件修改（§13.7） ───
+  //
+  // 用户拒绝任务结果（"不行，回退"）时调用。
+  // 读取该 task 的文件修改备份，按写入倒序恢复旧内容（最后写的最先回滚）。
+  // 文件系统备份跨进程安全：Code Agent 子进程写入，Kernel 主进程回滚。
+  route('POST', '/tasks/:id/rollback', async (req, res, _url, params) => {
+    const taskId = params?.id;
+    if (!taskId) {
+      json(res, { error: 'Missing task ID' }, 400);
+      return;
+    }
+    try {
+      const { rollbackTask } = await import('./file-edit-rollback.js');
+      const result = await rollbackTask(taskId);
+      logger.info({ taskId, ...result }, 'rollback: §13.7 file rollback completed');
+      json(res, { ok: true, taskId, ...result });
+    } catch (err) {
+      logger.warn({ err, taskId }, 'rollback: failed');
+      json(res, { ok: false, error: (err as Error).message }, 500);
+    }
+  });
+
   // ─── POST /api/brain/feedback — 用户反馈 Brain 审核问题（§5.3.4）
   //
   // 用户点击"反馈 Brain 修改有问题"时调用。
