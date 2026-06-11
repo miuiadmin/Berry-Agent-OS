@@ -410,6 +410,34 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         logger.debug({ err: (err as Error).message, missionId: payload.missionId }, 'mission.handoff 通知失败（非致命）');
       }
     });
+
+    // 13.0 P10 §11.3: checker 派发 — Brain 派出 checker 二次审核但事件零订阅者，checker 从未真正运行。
+    // 订阅 brain.checker.dispatch，把 checker 当作一个独立 review 委派给目标 agent。
+    getEventBus().on('brain.checker.dispatch', (payload: {
+      missionId: string; planTaskId: string; sessionId: string;
+      checkerAgent: string; checkerOn: string; checkerCorrelationId: string;
+      workerOutput: string; workerTask: string; brainVerdict: string; brainReason: string;
+    }) => {
+      // 把 checker 审核作为一次 foreground 委派发给 checker agent，输出回流供 Brain 观察
+      this.dispatchModuleTask({
+        sessionId: payload.missionId,
+        taskType: taskTypeForAgent(payload.checkerAgent) ?? 'review',
+        requester: 'brain-checker',
+        inputPayload: {
+          userMessage: `请审核以下 worker 产出（你是 checker，负责质量验证）。\n任务: ${payload.workerTask}\n审核重点: ${payload.checkerOn}\n产出: ${payload.workerOutput}\n主 Brain verdict: ${payload.brainVerdict}`,
+          missionId: payload.missionId,
+          planTaskId: payload.planTaskId,
+          isCheckerReview: true,
+          checkerCorrelationId: payload.checkerCorrelationId,
+        },
+        foreground: true,
+        correlationId: payload.checkerCorrelationId,
+      }).then(({ targetAgent }) => {
+        logger.info({ missionId: payload.missionId, planTaskId: payload.planTaskId, checkerAgent: targetAgent }, '13.0: brain.checker.dispatch → checker 委派已发出');
+      }).catch(err => {
+        logger.warn({ err, missionId: payload.missionId, planTaskId: payload.planTaskId }, '13.0: checker 委派失败');
+      });
+    });
     // 避免 stale 约束/纠偏/行为笔记泄漏到下一个 task
     // （active_scope 用 delegationId，correction/behavior_note 用 sessionId:taskId 复合 key）
     const cleanupTaskState = (delegationId: string, sessionId?: string, taskId?: string) => {
