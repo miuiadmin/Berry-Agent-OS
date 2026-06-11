@@ -576,6 +576,18 @@ export class CoreService {
         if (!pending.taskId) continue;
         const task = this.taskManager!.getTask(pending.taskId);
         if (task?.target_agent === name && task.status === 'failed') {
+          // 13.0 §13.21: agent 崩溃的 plan task 标记 failed，触发级联 + mission 收敛
+          if (pending.missionId && pending.planTaskId) {
+            try {
+              missionManager.updatePlan(pending.missionId, {
+                task_id: pending.planTaskId,
+                status: 'failed',
+                result: `Agent ${name} 崩溃`,
+              });
+            } catch (planErr) {
+              logger.debug({ err: planErr, missionId: pending.missionId }, 'agent.crashed: plan task 标记失败（非致命）');
+            }
+          }
           this.sessionManager!.fail(msgId, { kind: 'crash', agentName: name });
         }
       }
