@@ -13,6 +13,7 @@ import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import type { ObservationRecorder } from '../observation-recorder.js';
 import { getDb } from '../../memory/index.js';
+import { getUserPreferences } from '../../memory/user-preferences.js';
 
 const logger = getLogger('proxy-handlers');
 
@@ -161,6 +162,43 @@ export function setupMemoryHandlers(agentIpc: AgentIpc, agentName: string, deps:
       agentIpc.send('memory.delete', agentName, { success: true }, msg.id);
     } catch (err) {
       agentIpc.send('memory.delete', agentName, { success: false, error: (err as Error).message }, msg.id);
+    }
+  });
+
+  // 13.0 §5.3.8: Agent 显式请求升级/写入永久用户偏好（如 user.remember_preference）。
+  // 之前 messages.ts 定义了此 IPC 但全代码库无 handler，Agent 无法通过 IPC 触发偏好升级。
+  agentIpc.onMessage('user.remember_preference', (msg: IpcMessage) => {
+    const req = msg.payload as {
+      userId?: string; prefKey: string; prefValue: string;
+      source?: 'evolution_engine' | 'brain_decision' | 'user_explicit' | 'restore_original';
+      confidence?: number; expiresAt?: number | null;
+    };
+    try {
+      const entry = getUserPreferences().set({
+        userId: req.userId ?? 'default',
+        prefKey: req.prefKey,
+        prefValue: req.prefValue,
+        source: req.source ?? 'brain_decision',
+        confidence: req.confidence ?? 0.8,
+        expiresAt: req.expiresAt ?? null,
+      });
+      agentIpc.send('user.remember_preference', agentName, { ok: true, id: entry?.id ?? req.prefKey }, msg.id);
+    } catch (err) {
+      agentIpc.send('user.remember_preference', agentName, { ok: false, reason: (err as Error).message }, msg.id);
+    }
+  });
+
+  // 13.0 §5.3.7: Agent 读取用户偏好（供 system prompt 注入偏好上下文）。
+  agentIpc.onMessage('user.get_preferences', (msg: IpcMessage) => {
+    const req = msg.payload as { userId?: string; keyPrefix?: string };
+    try {
+      const prefs = getUserPreferences().list(req.userId ?? 'default', req.keyPrefix);
+      agentIpc.send('user.get_preferences', agentName, {
+        ok: true,
+        preferences: prefs.map(p => ({ key: p.prefKey, value: p.prefValue, source: p.source, confidence: p.confidence })),
+      }, msg.id);
+    } catch (err) {
+      agentIpc.send('user.get_preferences', agentName, { ok: false, reason: (err as Error).message }, msg.id);
     }
   });
 }

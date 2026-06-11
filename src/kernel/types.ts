@@ -33,6 +33,8 @@ export type IpcMessageType =
   | 'memory.query'
   | 'memory.add'
   | 'memory.delete'
+  | 'user.remember_preference'
+  | 'user.get_preferences'
   | 'capability.request'
   | 'capability.response'
   | 'task.acknowledge'
