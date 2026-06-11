@@ -20,6 +20,11 @@ import { getConfigPath } from '../utils/paths.js';
 import { getLogger } from '../utils/logger.js';
 import { safeSlice } from '../utils/safe-slice.js';
 import type { LlmClient } from '../llm/index.js';
+// 13.0: AgentPort — 所有 module agent 均可通过 ask_agent 向其他 agent 提问
+import { createAgentPort } from './agent-port.js';
+import { z } from 'zod';
+import type { ToolResult } from '../tools/types.js';
+import { registerTool } from '../tools/index.js';
 
 const logger = getLogger('module-agent');
 
@@ -45,6 +50,15 @@ export interface ModuleAgentContext {
    * 当 missionId 存在时由基础设施自动渲染，agent 无需自行调用 MissionManager。
    */
   missionPrompt?: string;
+  /**
+   * 13.0 §5.3.14: 拒绝当前任务并建议替代 agent。
+   * Kernel 会检查 reRoute 深度（最大 2 次），超过则降级为 askUser 让用户决定。
+   * Agent 在 handler 中调用此函数后会 throw 终止当前任务执行。
+   *
+   * @param suggestedAgent 建议接手的 agent 名称（如 'code'、'skills'）
+   * @param reason 拒绝原因（自然语言，供 Brain 观察队列记录）
+   */
+  rejectTask: (suggestedAgent: string, reason: string) => never;
 }
 
 export type ModuleTaskHandler = (payload: AgentTaskPayload, context: ModuleAgentContext) => Promise<Record<string, unknown>>;
@@ -201,6 +215,18 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         }
       }
 
+      // 13.0 §5.3.14: rejectTask — Agent 拒绝任务并建议替代 agent。
+      // 调用后直接 throw，终止当前 handler 执行。
+      // Kernel 侧 handleTaskReject 会检查 reRoute 深度（最大 2 次），超过则降级为 askUser。
+      const rejectTask = (suggestedAgent: string, reason: string): never => {
+        ipc.send('task.reject', 'core', {
+          taskId: payload.taskId,
+          reason,
+          suggestAgent: suggestedAgent,
+        });
+        throw new Error(`task_rejected: ${reason} (建议: ${suggestedAgent})`);
+      };
+
       const outputPayload = await handler(payload, {
         llm,
         ipc,
@@ -209,6 +235,7 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
         missionId: payload.missionId,
         planTaskId: payload.planTaskId,
         missionPrompt,
+        rejectTask,
         getPendingCorrection: () => {
           const c = pendingCorrection;
           const id = pendingCorrectionId;
@@ -274,6 +301,67 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
     });
   });
 
+  // ─── 13.0 AgentPort: 所有 module agent 共享的 ask_agent 工具 ───
+  // 允许任何 module agent 在 dialogue 场景下通过 LLM tool loop 向其他 agent 提问。
+  // Code Agent 有自己的 ensureAgentPortTools()（带 saga、file lock 等额外逻辑），
+  // 其他 agent 通过此共享注册获得基础跨 agent 通信能力。
+  let sharedAgentPortRegistered = false;
+  function ensureSharedAgentPort(): void {
+    if (sharedAgentPortRegistered) return;
+    sharedAgentPortRegistered = true;
+    /** 创建共享 AgentPort（用于 ask_agent 工具） */
+    const port = createAgentPort({
+      ipc: ipc as any,
+      agentName: name!,
+      askUser: async (question: string, opts?: AskUserOptions) => {
+        // 默认 5 分钟独立超时（§5.3.5）
+        return new Promise((resolve, reject) => {
+          const timeoutMs = opts?.timeoutMs ?? 300_000;
+          const timeout = setTimeout(() => {
+            reject(new Error('用户回复超时'));
+          }, timeoutMs);
+          // askUser 通过临时 taskId 注册回调
+          const tempTaskId = `ask-${Date.now()}`;
+          pendingAskCallbacks.set(tempTaskId, (reply) => {
+            clearTimeout(timeout);
+            resolve(reply);
+          });
+          ipc.send('agent.ask_user', 'core', {
+            sessionId: 'agent-port',
+            taskId: tempTaskId,
+            question,
+            options: opts?.options,
+            context: opts?.context,
+          } satisfies AgentAskUserPayload);
+        });
+      },
+    });
+    registerTool({
+      name: 'ask_agent',
+      description: '向另一个 Agent 提问获取信息。例如向 memory 查询用户偏好、向 learning 获取学习结果。适合需要跨 Agent 知识协作的场景。',
+      dangerLevel: 'safe',
+      inputSchema: z.object({
+        target: z.string().describe('目标 Agent 名称，如 "memory"（查询用户知识库）、"learning"（查询学习结果）'),
+        message: z.string().describe('要发送给目标 Agent 的消息，应包含足够的上下文'),
+        context: z.record(z.string(), z.unknown()).optional().describe('可选：附加上下文信息'),
+      }),
+      async execute(input: unknown): Promise<ToolResult> {
+        const { target, message, context: ctx } = input as { target: string; message: string; context?: Record<string, unknown> };
+        try {
+          const reply = await port.request({ to: target, content: message, context: ctx });
+          return { content: `[${reply.from}] ${reply.content}` };
+        } catch (err) {
+          const errorMsg = (err as Error).message;
+          const isTimeout = errorMsg.includes('timeout') || errorMsg.includes('不可用');
+          const hint = isTimeout
+            ? `${errorMsg}。建议：用现有信息继续完成任务，或使用其他工具自行获取信息。`
+            : errorMsg;
+          return { content: `ask_agent 失败: ${hint}`, isError: true };
+        }
+      },
+    });
+  }
+
   // ─── dialogue.send handler：接收来自 Conversation Agent 的对话消息 ───
   ipc.onMessage('dialogue.send', async (msg: IpcMessage) => {
     const payload = msg.payload as DialogueMessagePayload;
@@ -286,6 +374,9 @@ export function startModuleAgent(handler: ModuleTaskHandler): void {
     const planTaskId = (payload.context as Record<string, unknown>)?.planTaskId as string | undefined;
 
     try {
+      // 13.0: 注册共享 AgentPort 工具（ask_agent），让 dialogue 场景下的 LLM 可向其他 agent 提问
+      ensureSharedAgentPort();
+
       const userContent = payload.content;
       const messages = [{ role: 'user' as const, content: userContent }];
 
