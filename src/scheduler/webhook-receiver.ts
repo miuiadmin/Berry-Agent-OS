@@ -4,6 +4,7 @@ import type { CronJobRow, WebhookResult, IWebhookReceiver } from './contracts.js
 import type { TriggerDispatcher } from './trigger-dispatcher.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { getEventBus } from '../kernel/event-bus.js';
 
 const logger = getLogger('webhook-receiver');
 
@@ -41,6 +42,16 @@ export class WebhookReceiver implements IWebhookReceiver {
     }
 
     this.recordAudit(job.id, requestId, sourceIp, payloadStr, signatureValid ?? true);
+
+    // §5.3.7: 补全 scheduler.webhook_received emit（此前仅声明未发，前端通道静默失效）
+    try {
+      getEventBus().emit('scheduler.webhook_received', {
+        jobId: job.id, requestId,
+        verified: signatureValid ?? true,
+      });
+    } catch {
+      // EventBus 未初始化时静默（webhook 主流程已通过 dispatcher.trigger 落地）
+    }
 
     const result = this.dispatcher.trigger(job.id, { type: 'webhook', requestId }, payload);
 
