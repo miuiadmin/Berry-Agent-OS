@@ -13,6 +13,7 @@ import type {
   PermissionConsumePayload,
 } from '../contracts/permissions.js';
 import type { ToolAuditPayload } from '../contracts/audit.js';
+import type { TurnCorrectionPayload } from '../contracts/delegation.js';
 import { runToolLoop } from '../llm/tool-caller.js';
 import { toModelTools } from '../tools/types.js';
 import { registerTool } from '../tools/index.js';
@@ -45,6 +46,22 @@ export interface PhaseContext {
    * 传递给 runToolLoop 的 onStop 参数。
    */
   onStop?: (reason: 'aborted' | 'completed' | 'budget_exceeded' | 'error' | 'limit_reached') => Promise<void>;
+  /**
+   * 13.0 §3.10: Brain 纠偏消费回调。
+   *
+   * Code Agent 的 agent.task 路径（runResearch / runImplementation）通过此回调
+   * 检查 Brain 发来的实时纠偏（adjust/stop/restart + forbiddenTools/requiredApproach）。
+   *
+   * 来源：module-agent.ts 的 ipc.onMessage('turn.correction') → CAS 原子消费。
+   * 返回 null 表示无纠偏；返回 TurnCorrectionPayload 表示有待消费的纠偏指令。
+   *
+   * 消费行为（在 tool-caller.ts runToolLoop 中实现）：
+   * - action='stop' → tool loop 立即终止
+   * - action='adjust' + instruction → 软注入到 system message
+   * - action='adjust' + forbiddenTools → 从 tools 列表中移除（硬注入）
+   * - action='restart' → 由调用方处理
+   */
+  getPendingCorrection?: () => TurnCorrectionPayload | null;
 }
 
 export interface PhaseResult {
@@ -231,6 +248,8 @@ async function runResearch(ctx: PhaseContext, allTools: ToolDefinition[]): Promi
     auditTool: buildAuditFn(ctx),
     // VF-4: 研究（只读）阶段不需要补偿，但仍然传递 onStop 以处理 abort 等场景
     onStop: ctx.onStop,
+    // 13.0 §3.10: 研究阶段也接入 Brain 纠偏（如 Brain 发现研究方向错误，可中途 adjust/stop）
+    getPendingCorrection: ctx.getPendingCorrection,
   });
 
   return {
@@ -409,6 +428,9 @@ async function runImplementation(
       auditTool: buildAuditFn(ctx),
       // VF-4: 实现阶段是写入文件的核心阶段，onStop 触发 Saga 补偿回滚
       onStop: ctx.onStop,
+      // 13.0 §3.10: 实现阶段接入 Brain 纠偏 — Brain 可在写入过程中
+      // adjust（注入 instruction + 移除 forbiddenTools）或 stop（立即终止 + Saga 回滚）
+      getPendingCorrection: ctx.getPendingCorrection,
     });
 
     for (const tc of result.toolCalls) {

@@ -1014,7 +1014,7 @@ export const CORE_INDEX_SQL = `
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     decision_type TEXT NOT NULL
-      CHECK(decision_type IN ('route','review','permission','correction','aggregated_insight','will_action')),
+      CHECK(decision_type IN ('route','review','permission','correction','aggregated_insight','will_action','cron_review')),
     input_summary TEXT NOT NULL,
     output_json TEXT NOT NULL,
     confidence REAL,

@@ -21,7 +21,7 @@ function setupFullDb(): Database.Database {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE world_model (id TEXT PRIMARY KEY, snapshot_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
-    CREATE TABLE brain_decisions (id TEXT PRIMARY KEY, session_id TEXT, decision_type TEXT, input_summary TEXT, output_json TEXT, confidence REAL, outcome TEXT, feedback_source TEXT, created_at INTEGER);
+    CREATE TABLE brain_decisions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, decision_type TEXT NOT NULL, input_summary TEXT NOT NULL, output_json TEXT NOT NULL, confidence REAL, outcome TEXT, feedback_source TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), lesson TEXT, resolved_at INTEGER, task_id TEXT);
     CREATE TABLE system_insights (id TEXT PRIMARY KEY, category TEXT, title TEXT, content TEXT, confidence REAL, status TEXT DEFAULT 'tentative', source_decisions TEXT, adopted_count INTEGER DEFAULT 0, last_adopted_at INTEGER, created_at INTEGER, updated_at INTEGER, expired_at INTEGER);
     CREATE TABLE approval_requests (id TEXT PRIMARY KEY, run_id TEXT, session_id TEXT, task_id TEXT, correlation_id TEXT, kind TEXT, requester TEXT, risk_level TEXT, request_payload TEXT, binding_payload TEXT, status TEXT DEFAULT 'pending', decision_source TEXT, reason TEXT, expires_at INTEGER, created_at INTEGER, resolved_at INTEGER);
     CREATE TABLE permission_tokens (id TEXT PRIMARY KEY, approval_id TEXT, session_id TEXT, agent_name TEXT, tool_name TEXT, input_hash TEXT, cwd TEXT, verdict TEXT, expires_at INTEGER, consumed INTEGER DEFAULT 0, created_at INTEGER);

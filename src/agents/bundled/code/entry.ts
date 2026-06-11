@@ -332,6 +332,10 @@ startModuleAgent(async (payload: AgentTaskPayload, context) => {
     lockManager,
     // VF-4: 注入 onStop 回调，任务异常终止时触发 Saga 补偿
     onStop: getOnStopCallback() ?? undefined,
+    // 13.0 §3.10: 从 module-agent 透传 Brain 纠偏消费回调。
+    // Brain 通过 IPC turn.correction 发送纠偏指令 → module-agent CAS 消费
+    // → task-phases runToolLoop 每轮检查 → adjust(注入 instruction) / stop(终止) / restart(重试)
+    getPendingCorrection: context.getPendingCorrection,
   });
 
   // VF-4: 正常完成后关闭 saga（不补偿）
