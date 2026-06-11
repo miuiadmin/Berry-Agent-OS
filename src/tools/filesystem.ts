@@ -1,4 +1,5 @@
 import { readFile, writeFile, readdir, unlink, stat } from 'node:fs/promises';
+import { recordMutation } from '../kernel/file-edit-rollback.js';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
@@ -117,6 +118,8 @@ export const writeFileTool: ToolDefinition = {
       const resolved = resolvePath(filePath);
       assertWithinBoundary(resolved);
       assertAgentPathAccess(resolved);
+      // 13.0 §13.7: 写入前记录旧内容，供用户拒绝后按 task 回滚
+      await recordMutation(resolved);
       await writeFile(resolved, content, 'utf-8');
       return { content: `已写入文件: ${filePath}` };
     } catch (err) {

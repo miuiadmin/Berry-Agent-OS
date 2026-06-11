@@ -298,6 +298,19 @@ export class TokenBudgetController {
     };
 
     this.eventBus?.emit('budget.alert', alert);
+
+    // 13.0 §4.4.2: 同时发出 brain.budget.alert（per-agent 跨 agent 实时推送）。
+    // 修复缺口：此事件契约 + ws-bridge 映射早已就绪，但从未被 emit，
+    // 导致前端 budget_alert 通道静默失效。从 scope/scopeId 推导 agentName/sessionId。
+    this.eventBus?.emit('brain.budget.alert', {
+      sessionId: scope === 'session' ? scopeId : undefined,
+      agentName: scope === 'agent' ? scopeId : (scopeId || scope),
+      scope,
+      usedPercent,
+      tier: tier === 'info' ? 'warning' : tier,
+      message: alert.message,
+      createdAt: Date.now(),
+    });
     return alert;
   }
 

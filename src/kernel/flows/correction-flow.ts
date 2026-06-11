@@ -122,10 +122,12 @@ export class CorrectionFlow {
       outputJson: { action: correction.action, delegationId },
     });
 
-    this.applyCorrection(delegationId, correction);
+    this.applyCorrection(delegationId, correction).catch((err: unknown) => {
+      logger.error({ err, delegationId }, 'applyCorrection async failed');
+    });
   }
 
-  private applyCorrection(delegationId: string, correction: TurnCorrectionPayload): void {
+  private async applyCorrection(delegationId: string, correction: TurnCorrectionPayload): Promise<void> {
     // 13.0 §5.1.3: 发出 brain.correction EventBus 事件（前端 WS 订阅后可实时显示纠偏原因）
     // 这与 turn.correction IPC（agent 端消费）互补——前者给人看，后者给机器消费
     try {
@@ -252,12 +254,25 @@ export class CorrectionFlow {
     }
   }
 
-  private applyStop(delegationId: string, correction: TurnCorrectionPayload): void {
+  private async applyStop(delegationId: string, correction: TurnCorrectionPayload): Promise<void> {
     const entry = this.ctx.delegationManager.get(delegationId);
     if (!entry) return;
 
     if (entry.targetKind === 'daemon' && this.ctx.daemonBridge?.isAvailable) {
       this.ctx.daemonBridge.deliverCorrection(delegationId, 'stop', correction.instruction);
+    }
+
+    // 13.0 §13.7: 用户拒绝 / Brain stop 触发回滚 — 按 task 倒序恢复所有文件修改。
+    // 文件系统备份跨进程安全：Code Agent 子进程写入的文件，Kernel 主进程可直接回滚。
+    // 回滚失败不阻塞 stop 主流程（文件可能已被其他途径修改），仅记录 warn。
+    try {
+      const { rollbackTask } = await import('../file-edit-rollback.js');
+      const result = await rollbackTask(delegationId);
+      if (result.restored > 0 || result.failed > 0) {
+        logger.info({ delegationId, restored: result.restored, failed: result.failed }, 'applyStop: §13.7 文件回滚已执行');
+      }
+    } catch (err) {
+      logger.warn({ err, delegationId }, 'applyStop: §13.7 文件回滚失败（非致命）');
     }
 
     const partialResponse = correction.instruction

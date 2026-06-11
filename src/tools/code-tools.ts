@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolResult } from './types.js';
 import { markFileRead, hasFileBeenRead } from './read-tracker.js';
+import { recordMutation } from '../kernel/file-edit-rollback.js';
 
 const MAX_OUTPUT = 20000;
 
@@ -109,6 +110,8 @@ const editCodeTool: ToolDefinition = {
       const updated = replaceAll
         ? content.replaceAll(oldText, newText)
         : content.replace(oldText, newText);
+      // 13.0 §13.7: 写入前记录旧内容（已读取的 content 即为旧内容），供用户拒绝后按 task 回滚
+      await recordMutation(filePath);
       await writeFile(filePath, updated, 'utf-8');
       return { content: `已修改文件: ${path}` };
     } catch (err) {
