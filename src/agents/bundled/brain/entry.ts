@@ -126,6 +126,33 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   const fallbackReviewer = new FallbackReviewer();
 
   /**
+   * 用 FallbackReviewer 做规则化降级审核，映射到 ReviewResult。
+   * LLM 调用失败 / 响应解析失败时统一走此路径，避免默认批准（违反"所有回复必须经 Brain 审核"硬规则）。
+   *
+   * @param turn 待审核的对话轮次（需要 draftResponse 和 toolCalls）
+   * @param cause 降级原因（用于 reason 字段和日志追踪）
+   */
+  function buildFallbackReviewResult(
+    turn: { draftResponse?: string; toolCalls: Array<{ name: string }> },
+    cause: string,
+  ): ReviewResult {
+    const fallbackResult = fallbackReviewer.review({
+      responseText: turn.draftResponse ?? '',
+      hasToolCalls: turn.toolCalls.length > 0,
+      toolNames: turn.toolCalls.map(tc => tc.name),
+      agentName: name,
+    });
+    switch (fallbackResult.verdict) {
+      case 'deny':
+        return { verdict: 'reject', reason: `${cause}，规则审核拒绝: ${fallbackResult.reason}` };
+      case 'hold':
+        return { verdict: 'modify', reason: `${cause}，规则审核标记需人工确认: ${fallbackResult.reason}` };
+      default:
+        return { verdict: 'approve', reason: `${cause}，规则审核批准: ${fallbackResult.reason}` };
+    }
+  }
+
+  /**
    * session 级观察计数器，用于定期触发 plan 进度检查
    * key = sessionId, value = 自上次 plan check 以来的观察次数
    */
@@ -471,15 +498,25 @@ startResidentAgent(({ name, ipc, llm, db }) => {
 
       let reviewResult: ReviewResult;
       try {
-        const parsed = JSON.parse(result.content);
+        // 容错提取：LLM（尤其 fast tier 的 glm-5.1）可能用 ```json 包裹或前后附加文字，
+        // 直接 JSON.parse 会失败。先用正则提取首个 JSON 对象。
+        const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error('No JSON object found in review response');
+        const parsed = JSON.parse(jsonMatch[0]);
+        // 校验 verdict 合法性，非法值回退为 reject（保守策略，避免无效 verdict 溜过审核）
+        const validVerdicts = ['approve', 'modify', 'reject'] as const;
+        const verdict = validVerdicts.includes(parsed.verdict) ? parsed.verdict : 'reject';
         reviewResult = {
-          verdict: parsed.verdict ?? 'approve',
+          verdict,
           finalResponse: parsed.finalResponse,
           reason: parsed.reason,
           reRoute: parsed.reRoute || undefined,
         };
-      } catch {
-        reviewResult = { verdict: 'approve', reason: 'Failed to parse review, approving by default' };
+      } catch (parseErr) {
+        // 解析失败 = 审核未成功 = 禁止默认批准（违反"所有回复必须经 Brain 审核"硬规则）
+        // 走 FallbackReviewer 规则化降级（与 LLM 调用失败路径一致）
+        logger.warn({ err: (parseErr as Error).message, contentLen: result.content?.length }, 'brain:review response parse failed, falling back to FallbackReviewer');
+        reviewResult = buildFallbackReviewResult(turn, 'Brain review 响应解析失败');
       }
 
       logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: safeSlice(reviewResult.reason, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
@@ -534,37 +571,9 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       // 不再"批准一切"——用确定性规则（危险命令模式、工具风险分类）兜底
       logger.warn({ err: (err as Error).message }, 'brain:review LLM call failed, falling back to FallbackReviewer');
 
-      const fallbackInput: FallbackReviewInput = {
-        responseText: turn.draftResponse,
-        hasToolCalls: turn.toolCalls.length > 0,
-        toolNames: turn.toolCalls.map(tc => tc.name),
-        agentName: name,
-      };
-      const fallbackResult = fallbackReviewer.review(fallbackInput);
-
-      // 映射 FallbackReviewer 三态到 ReviewResult
-      let verdict: ReviewResult['verdict'];
-      let reason: string;
-      switch (fallbackResult.verdict) {
-        case 'deny':
-          // 检测到危险内容 → 拒绝（安全优先）
-          verdict = 'reject';
-          reason = `Brain LLM 不可用，规则审核拒绝: ${fallbackResult.reason}`;
-          break;
-        case 'hold':
-          // 风险不确定 → 修改回复添加警告标记
-          verdict = 'modify';
-          reason = `Brain LLM 不可用，规则审核标记需人工确认: ${fallbackResult.reason}`;
-          break;
-        case 'approve':
-        default:
-          // 规则审核通过（简单文本、无风险模式）
-          verdict = 'approve';
-          reason = `Brain LLM 不可用，规则审核批准: ${fallbackResult.reason}`;
-          break;
-      }
-
-      const fallbackReviewResult: ReviewResult = { verdict, reason };
+      const fallbackReviewResult = buildFallbackReviewResult(turn, 'Brain LLM 不可用');
+      const verdict = fallbackReviewResult.verdict;
+      const reason = fallbackReviewResult.reason;
       ipc.send('review.result', 'core', fallbackReviewResult, trackingId);
 
       // 13.0 §12.6 + §13.21: 降级审核也必须标记 plan task，否则 LLM 不可用时
