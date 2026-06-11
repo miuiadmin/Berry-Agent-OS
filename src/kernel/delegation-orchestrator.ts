@@ -286,6 +286,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // §4.4.2: 将 stateCache 注入 KernelRouter，启用跨 agent 预算检查
     this.kernelRouter.setStateCache(this._stateCache);
 
+    // §4.4.1: 将 AgentRequestQueue 注入 KernelRouter，启用 dialogue 路径的 per-target 串行化
+    this.kernelRouter.setAgentRequestQueue(this.agentRequestQueue);
+
     // §3.8 第二层: 将 stateCache 注入 PermissionCoordinator，启用 active_scope 硬约束拦截
     if (this.permissionCoordinator) {
       this.permissionCoordinator.setStateCache(this._stateCache);

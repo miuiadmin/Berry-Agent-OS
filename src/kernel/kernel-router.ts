@@ -36,6 +36,7 @@ import type { AgentManager } from './agent-manager.js';
 import type { SessionManager } from './session-manager.js';
 import type { StateCache } from './state-cache.js';
 import type { InterAgentBudget } from './state-cache.js';
+import type { AgentRequestQueue } from './agent-request-queue.js';
 import { getEventBus } from './event-bus.js';
 import { getLogger } from '../utils/logger.js';
 import { safeSlice } from '../utils/safe-slice.js';
@@ -164,6 +165,12 @@ export interface KernelRouterDeps {
    * 未注入时回退到默认值 500_000（与 BudgetConfigSchema.sessionLimit 默认值一致）。
    */
   sessionBudgetLimit?: number;
+  /**
+   * 13.0 §4.4.1: 目标 agent 并发控制队列（FIFO、深度上限 3、30s 超时）。
+   * 注入后 dialogue 路径的 sendMessage 会按 target 串行化，防止多 agent 同时
+   * 向同一单 LLM 上下文目标发消息导致并发争抢。未注入时跳过（向后兼容）。
+   */
+  agentRequestQueue?: AgentRequestQueue;
 }
 
 /**
@@ -265,6 +272,14 @@ export class KernelRouter {
    */
   setStateCache(cache: StateCache): void {
     this.deps.stateCache = cache;
+  }
+
+  /**
+   * §4.4.1: 注入 AgentRequestQueue（延迟到 init 阶段）。
+   * 注入后 dialogue 路径的 sendMessage 按 target agent 串行化。
+   */
+  setAgentRequestQueue(queue: AgentRequestQueue): void {
+    this.deps.agentRequestQueue = queue;
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -561,23 +576,36 @@ export class KernelRouter {
       }, pending?.sessionId, pending?.taskId);
 
       try {
-        const reply = await router.sendMessage(payload);
-        primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
-
-        // §4.4.2: 记录一次成功的跨 agent 通信（更新预算计数）
-        if (pending?.sessionId) {
-          this.recordInterAgentRequest(pending.sessionId);
+        // §4.4.1: 按 target agent 串行化 dialogue — 单 LLM 上下文目标不能并发处理多请求。
+        // enqueue 返回 agent_busy（队列满 3）/ agent_timeout（等待 30s 超时）错误。
+        if (this.deps.agentRequestQueue) {
+          await this.deps.agentRequestQueue.enqueue(payload.to, {
+            fromAgent: payload.from,
+            requestId: payload.dialogueId,
+          });
         }
+        try {
+          const reply = await router.sendMessage(payload);
+          primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
 
-        // §4.1 §3.2 OBSERVE: 异步转发副本给 Brain（不阻塞原消息投递）
-        // Brain 的 brain.observe handler 接收后持久化到 brain_observations 表
-        // 这是 OBSERVE 阶段的实时 IPC 推送路径（补充 SQLite 间接读取）
-        this.observeToBrain(payload.from, payload.to, 'dialogue_reply', {
-          dialogueId: payload.dialogueId,
-          from: payload.from,
-          to: payload.to,
-          contentSummary: safeSlice(reply.content, 200),
-        }, pending?.sessionId, pending?.taskId);
+          // §4.4.2: 记录一次成功的跨 agent 通信（更新预算计数）
+          if (pending?.sessionId) {
+            this.recordInterAgentRequest(pending.sessionId);
+          }
+
+          // §4.1 §3.2 OBSERVE: 异步转发副本给 Brain（不阻塞原消息投递）
+          // Brain 的 brain.observe handler 接收后持久化到 brain_observations 表
+          // 这是 OBSERVE 阶段的实时 IPC 推送路径（补充 SQLite 间接读取）
+          this.observeToBrain(payload.from, payload.to, 'dialogue_reply', {
+            dialogueId: payload.dialogueId,
+            from: payload.from,
+            to: payload.to,
+            contentSummary: safeSlice(reply.content, 200),
+          }, pending?.sessionId, pending?.taskId);
+        } finally {
+          // §4.4.1: 释放 target 的串行化槽位，唤醒下一个排队请求
+          this.deps.agentRequestQueue?.complete(payload.to);
+        }
 
         // §5.2.3: 对话完成，清除方向追踪
         this.untrackDialogueDirection(payload.from, payload.to, payload.dialogueId);
@@ -712,13 +740,25 @@ export class KernelRouter {
       });
 
       try {
-        const reply = await router.sendMessage(payload);
-        agentIpc.send('dialogue.reply', agentName, reply, payload.dialogueId);
+        // §4.4.1: 按 target agent 串行化 dialogue（与 primary 路径一致）
+        if (this.deps.agentRequestQueue) {
+          await this.deps.agentRequestQueue.enqueue(payload.to, {
+            fromAgent: payload.from,
+            requestId: payload.dialogueId,
+          });
+        }
+        try {
+          const reply = await router.sendMessage(payload);
+          agentIpc.send('dialogue.reply', agentName, reply, payload.dialogueId);
 
-        // §4.4.2: 记录一次成功的跨 agent 通信（更新预算计数）
-        const budgetSessionId = (payload.context as Record<string, unknown>)?._sessionId as string | undefined;
-        if (budgetSessionId) {
-          this.recordInterAgentRequest(budgetSessionId);
+          // §4.4.2: 记录一次成功的跨 agent 通信（更新预算计数）
+          const budgetSessionId = (payload.context as Record<string, unknown>)?._sessionId as string | undefined;
+          if (budgetSessionId) {
+            this.recordInterAgentRequest(budgetSessionId);
+          }
+        } finally {
+          // §4.4.1: 释放 target 槽位
+          this.deps.agentRequestQueue?.complete(payload.to);
         }
       } catch (err) {
         // 使用类型化错误码，让 Agent LLM 能区分超时/崩溃/不可用
