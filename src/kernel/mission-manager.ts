@@ -1200,6 +1200,21 @@ export class MissionManager {
   // ─── 内部方法 ───
 
   /**
+   * 13.0 §11.6: 解析指定 squad 的 leader agent 名（供 handoff 通知目标 squad）。
+   * @returns leader agent 名；squad 或文件不存在返回 null
+   */
+  resolveSquadLeader(missionId: string, squadId: string): string | null {
+    try {
+      const squadFile = readJsonFile<unknown>(getSquadPath(missionId)) as SquadFile | null;
+      if (!squadFile) return null;
+      const squad = this.findSquad(squadFile.org.squads, squadId);
+      return squad?.leader ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * 递归查找 squad 树中的指定 squad。
    */
   private findSquad(squads: Squad[], squadId: string): Squad | null {

@@ -387,7 +387,29 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       logger.info({ missionId: payload.missionId, targetAgent: worker.targetAgent, signalType: payload.signalType }, '13.0: signal_intervention → turn.correction 已派发');
     });
 
-    // 13.0 §3.8 第二层 + §8.4: delegation 结束时清理 task 级状态缓存
+    // 13.0 §11.6: handoff 完成 → 目标 squad 的 leader 收到主动通知（修复死事件）。
+    // 之前 handoff 上下文只写入 squad.json，目标 agent 需轮询才能感知。
+    getEventBus().on('mission.handoff', (payload: { missionId: string; from: string; to: string; what: string }) => {
+      // 读 squad.json 找到目标 squad 的 leader，把 handoff 摘要推给它的活跃 delegation
+      try {
+        const leaderAgent = this.missionManager?.resolveSquadLeader?.(payload.missionId, payload.to);
+        const target = leaderAgent ?? 'conversation';
+        const active = this.delegationManager.getActiveForSession(payload.missionId);
+        const worker = active.find(e => e.targetAgent === target);
+        if (worker) {
+          const agent = this.agentManager.getAgent(worker.targetAgent);
+          agent?.ipc.send('task.progress', worker.targetAgent, {
+            taskId: worker.id,
+            summary: `[Mission handoff] ${payload.from} → ${payload.to}: ${payload.what}`,
+            kind: 'mission_handoff',
+            missionId: payload.missionId,
+          });
+        }
+        logger.info({ missionId: payload.missionId, to: payload.to, target }, '13.0: mission.handoff 已通知目标 squad');
+      } catch (err) {
+        logger.debug({ err: (err as Error).message, missionId: payload.missionId }, 'mission.handoff 通知失败（非致命）');
+      }
+    });
     // 避免 stale 约束/纠偏/行为笔记泄漏到下一个 task
     // （active_scope 用 delegationId，correction/behavior_note 用 sessionId:taskId 复合 key）
     const cleanupTaskState = (delegationId: string, sessionId?: string, taskId?: string) => {
