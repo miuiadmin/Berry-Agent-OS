@@ -10,7 +10,8 @@ export type TriggerSource =
   | { type: 'cron' }
   | { type: 'webhook'; requestId: string }
   | { type: 'event'; eventName: string }
-  | { type: 'manual' };
+  | { type: 'manual' }
+  | { type: 'reminder'; agentId: string };
 
 // === Row Types ===
 

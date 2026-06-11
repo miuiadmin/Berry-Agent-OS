@@ -12,6 +12,7 @@ export class ReminderService {
   constructor(
     private readonly db: Database.Database,
     private readonly eventBus: EventBus,
+    private readonly dispatcher?: TriggerDispatcher,
   ) {}
 
   create(input: CreateReminderInput): string {
@@ -60,6 +61,18 @@ export class ReminderService {
         reminderId: reminder.id,
         agentId: reminder.agent_id,
       });
+
+      // 13.0 §13.8: reminder 到点应真正派发任务给 agent（修复断尾）。
+      // 之前只 emit + 更新 DB，提醒到点什么都不发生。
+      // reminder.prompt 是要执行的提示，agent_id 是目标 agent。
+      if (this.dispatcher && reminder.prompt) {
+        try {
+          this.dispatcher.trigger(`reminder:${reminder.id}`, { type: 'reminder', agentId: reminder.agent_id }, reminder.prompt);
+          logger.info({ reminderId: reminder.id, agentId: reminder.agent_id }, 'Reminder dispatched to agent');
+        } catch (err) {
+          logger.warn({ err, reminderId: reminder.id }, 'Reminder dispatch failed');
+        }
+      }
 
       if (reminder.recurring_cron) {
         const nextTrigger = computeNextRun(reminder.recurring_cron, now);

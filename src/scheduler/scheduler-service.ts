@@ -86,7 +86,7 @@ export class SchedulerService implements ISchedulerService {
     this.eventTrigger = new EventTrigger(deps.db, deps.eventBus, this.dispatcher);
     this.chainExecutor = new ChainExecutor(deps.db, deps.eventBus, this.dispatcher);
     this.poolClaimer = new PoolClaimer(deps.db);
-    this.reminderService = new ReminderService(deps.db, deps.eventBus);
+    this.reminderService = new ReminderService(deps.db, deps.eventBus, this.dispatcher);
     this.autoPauseMonitor = new AutoPauseMonitor(deps.db, deps.eventBus, {
       enabled: this.config.autoPauseEnabled,
       threshold: this.config.autoPauseThreshold,
