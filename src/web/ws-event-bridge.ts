@@ -89,6 +89,9 @@ const BRIDGED_EVENTS: EventName[] = [
   'user.session.dequeued',
   // 13.0 §8.7: Agent 拒绝任务（前端显示任务被拒绝及原因）
   'task.reject',
+  // 13.0: 委托生命周期（前端实时显示任务完成/失败状态）
+  'delegation.completed',
+  'delegation.failed',
 ];
 
 /**
