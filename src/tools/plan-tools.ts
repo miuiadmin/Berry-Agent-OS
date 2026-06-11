@@ -35,9 +35,18 @@ export function initMissionTools(manager: MissionManager): void {
   managerRef = manager;
 }
 
-/** 获取 MissionManager 实例（squad-tools 也通过此函数获取） */
+/**
+ * 获取 MissionManager 实例（squad-tools 也通过此函数获取）。
+ *
+ * 懒加载：MissionManager 是无状态、基于文件（~/.berry/missions/<id>/plan.json）的，
+ * 进程无关，任何进程都能安全实例化。这样 Agent 子进程（conversation/code/brain 等
+ * 经 fork 启动）无需 kernel 主进程显式 initMissionTools，第一次调用时自动建实例，
+ * 避免"Mission tools not initialized"错误。
+ * brain/entry.ts、module-agent.ts、conversation/entry.ts 已是同样的 per-process
+ * new MissionManager() 模式，此处与之对齐。
+ */
 export function getManager(): MissionManager {
-  if (!managerRef) throw new Error('Mission tools not initialized — call initMissionTools first');
+  if (!managerRef) managerRef = new MissionManager();
   return managerRef;
 }
 
