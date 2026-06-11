@@ -25,6 +25,10 @@ interface AgentIpc {
 export type ProxyHandlersDeps = Pick<ServiceContainer, 'auditRecorder' | 'sessionManager' | 'capabilityService' | 'takeoverController' | 'memoryRuntime'> & {
   /** 13.0 灵魂版：观察队列记录器（可选；提供时 tool_call/tool_result 会持久化到 brain_observations） */
   observationRecorder?: ObservationRecorder;
+  /** 13.0 灵魂版：Brain IPC 通道（可选；提供时 tool.audit 会同时向 Brain 进程转发 brain.observe IPC，
+   *  让 Brain 进程内的观察队列保持同步。Brain 进程有独立的 SQLite 连接，
+   *  内核侧的 ObservationRecorder 写入内核的 SQLite，brain.observe IPC 写入 Brain 的 SQLite。 */
+  brainIpc?: AgentIpc;
 };
 
 /**
@@ -64,6 +68,27 @@ export function setupAuditHandler(agentIpc: AgentIpc, agentName: string, deps: P
         });
       } catch (err) {
         logger.debug({ err, toolName: audit.toolName }, '观察队列 tool_call/tool_result 写入失败（不影响主流程）');
+      }
+
+      // ③ 13.0 §3.2 OBSERVE: 转发 brain.observe IPC 给 Brain 进程
+      // Brain 进程有独立的 SQLite 连接，内核侧的 ObservationRecorder 写入内核的 SQLite，
+      // Brain 进程需要通过 IPC 接收观察才能写入自己的 SQLite。
+      // 这使得 Brain 的 OBSERVE 三段式能正常工作（INTERVENE/REVIEW 从自己的 SQLite 读取）。
+      if (deps.brainIpc && audit.sessionId) {
+        try {
+          const obsTaskId = audit.taskId ?? `inline_${audit.sessionId}`;
+          deps.brainIpc.send('brain.observe' as IpcMessageType, 'brain', {
+            sessionId: audit.sessionId,
+            taskId: obsTaskId,
+            observationType: 'tool_call',
+            fromAgent: agentName,
+            content: JSON.stringify({ toolName: audit.toolName, input: typeof audit.toolInput === 'string' ? audit.toolInput.slice(0, 500) : JSON.stringify(audit.toolInput).slice(0, 500) }),
+            priority: audit.isError ? 0 : 1,
+          }, genId('obs'));
+        } catch (err) {
+          // Brain 可能未启动或 IPC 发送失败——观察已在内核 SQLite 中，非致命
+          logger.debug({ err: (err as Error).message, toolName: audit.toolName }, 'brain.observe IPC 转发失败（非致命）');
+        }
       }
     }
 

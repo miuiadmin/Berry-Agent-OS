@@ -38,6 +38,7 @@ import type { StateCache } from './state-cache.js';
 import type { InterAgentBudget } from './state-cache.js';
 import { getEventBus } from './event-bus.js';
 import { getLogger } from '../utils/logger.js';
+import { safeSlice } from '../utils/safe-slice.js';
 import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
 
 const logger = getLogger('kernel-router');
@@ -381,6 +382,46 @@ export class KernelRouter {
   }
 
   /**
+   * §4.1 §3.2 OBSERVE: 异步转发观察副本给 Brain Agent。
+   *
+   * 设计文档要求 KernelRouter.route() 的第四步：所有跨 agent 消息经 Kernel 中转时，
+   * 异步转发一份副本给 Brain 的 brain.observe handler，实现 OBSERVE 阶段的实时 IPC 推送。
+   *
+   * Brain 的 handler 会将观察持久化到 brain_observations 表（SQLite），
+   * 并定期触发 plan 进度检查（每 PLAN_CHECK_INTERVAL 次观察后）。
+   *
+   * 此方法是 fire-and-forget（异步不阻塞），发送失败仅记 debug 日志不影响原消息投递。
+   *
+   * @param from - 发送方 agent
+   * @param to - 接收方 agent
+   * @param originalType - 原始消息类型（dialogue_send / dialogue_reply / tool_call / tool_result）
+   * @param payload - 观察内容摘要（已截断）
+   * @param sessionId - 可选 session ID
+   */
+  private observeToBrain(from: string, to: string, originalType: string, payload: Record<string, unknown>, sessionId?: string): void {
+    // Brain 不观察自己的消息和内核内部消息
+    if (from === 'brain' || to === 'brain' || from === 'core') return;
+
+    try {
+      const brainAgent = this.deps.agentManager.getAgent('brain');
+      if (!brainAgent?.ipc) return; // Brain 未启动则静默跳过
+
+      brainAgent.ipc.send('brain.observe', 'brain', {
+        sessionId: sessionId ?? 'unknown',
+        taskId: sessionId ?? 'unknown',
+        observationType: originalType,
+        fromAgent: from,
+        toAgent: to,
+        content: JSON.stringify(payload),
+        priority: 1, // normal 优先级
+      });
+    } catch (err) {
+      // 观察 IPC 发送失败不应影响正常消息路由
+      logger.debug({ err, from, to, originalType }, 'KernelRouter: observeToBrain send failed (non-critical)');
+    }
+  }
+
+  /**
    * §4.4.2: 记录一次跨 agent 通信，更新预算计数。
    *
    * 在 dialogue 成功建立后调用（gate 通过 + sendMessage 完成）。
@@ -495,6 +536,14 @@ export class KernelRouter {
         round: state!.currentRound,
       });
 
+      // §4.1 §3.2 OBSERVE: 异步转发发送方向给 Brain（setupDialogueRouting 路径）
+      this.observeToBrain(payload.from, payload.to, 'dialogue_send', {
+        dialogueId: payload.dialogueId,
+        from: payload.from,
+        to: payload.to,
+        contentSummary: safeSlice(payload.content, 200),
+      }, pending?.sessionId);
+
       try {
         const reply = await router.sendMessage(payload);
         primaryIpc.send('dialogue.reply', primaryName, reply, payload.dialogueId);
@@ -503,6 +552,16 @@ export class KernelRouter {
         if (pending?.sessionId) {
           this.recordInterAgentRequest(pending.sessionId);
         }
+
+        // §4.1 §3.2 OBSERVE: 异步转发副本给 Brain（不阻塞原消息投递）
+        // Brain 的 brain.observe handler 接收后持久化到 brain_observations 表
+        // 这是 OBSERVE 阶段的实时 IPC 推送路径（补充 SQLite 间接读取）
+        this.observeToBrain(payload.from, payload.to, 'dialogue_reply', {
+          dialogueId: payload.dialogueId,
+          from: payload.from,
+          to: payload.to,
+          contentSummary: safeSlice(reply.content, 200),
+        }, pending?.sessionId);
 
         // §5.2.3: 对话完成，清除方向追踪
         this.untrackDialogueDirection(payload.from, payload.to, payload.dialogueId);

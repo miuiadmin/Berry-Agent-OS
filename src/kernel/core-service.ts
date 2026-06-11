@@ -297,6 +297,24 @@ export class CoreService {
       } catch { /* evolution 失败不阻塞 */ }
     });
 
+    // 13.0 §5.3.5: 订阅 user.ask_response — HTTP API 路径（POST /conversation/ask-user-response）发出的回复事件
+    // HTTP 路径通过 EventBus 投递，此处桥接到 sendUserReply() → IPC 到 agent
+    // （WS 路径由 unified-handlers.ts 直接调用 sendUserReply，不走此桥）
+    getEventBus().on('user.ask_response', (payload) => {
+      try {
+        const { sessionId, correlationId, response } = payload;
+        const taskId = payload.taskId ?? '';
+        if (!sessionId || !correlationId || !response) return;
+        this.messageRouter?.sendUserReply(
+          { sessionId, taskId, reply: response },
+          correlationId,
+        );
+        logger.debug({ sessionId, correlationId }, '13.0 user.ask_response → sendUserReply bridge');
+      } catch (err) {
+        logger.warn({ err }, '13.0 user.ask_response bridge failed');
+      }
+    });
+
     // 启动 session 垃圾回收（5 分钟间隔，30 分钟无活动清理缓存与 pendingAsks）
     this.sessionManager.startGc();
 

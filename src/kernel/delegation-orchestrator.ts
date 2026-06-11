@@ -153,6 +153,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private _stateCache: StateCache | null = null;
   /** 13.0 多智能体协作：Agent 请求队列（per-agent FIFO 并发控制） */
   private agentRequestQueue: AgentRequestQueue | null = null;
+  /** 13.0 灵魂版：Brain (reviewer) IPC 通道引用 — setup() 中赋值，供 proxyDeps 转发 brain.observe */
+  private _brainIpc: AgentIpc | null = null;
 
   constructor(deps: {
     agentManager: AgentManager;
@@ -474,6 +476,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       memoryRuntime: this.memoryRuntime,
       // 13.0 灵魂版：将观察队列记录器传给 proxy-handlers，使 tool.audit 同时写入观察队列
       observationRecorder: this.observationRecorder,
+      // 13.0 §3.2: Brain IPC — tool.audit 转发 brain.observe 给 Brain 进程
+      brainIpc: this._brainIpc ?? undefined,
     };
   }
 
@@ -503,6 +507,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (!primary || !reviewer) {
       throw new Error('必要智能体启动失败');
     }
+
+    // 13.0 灵魂版：缓存 Brain IPC 引用，供 proxyDeps 转发 brain.observe IPC
+    this._brainIpc = reviewer.ipc;
 
     this.setupReviewFlow(primary.ipc, reviewer.ipc, primaryName, reviewerName);
     this.setupRoutingFlow(reviewer.ipc);
@@ -705,6 +712,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.delegationManager.resumeFromUserReply(askState.taskId);
     this.sessionManager.clearPendingAsk(payload.sessionId);
     agent.ipc.send('agent.user_reply', askState.agentName, payload, correlationId);
+
+    // 13.0 §13.5: 发出 user.ask_response 事件 — WS bridge 订阅后转发 user_reply 给前端
+    // 前端可据此关闭「等待用户回复」的 UI 状态（§5.3.5 独立超时闭环）
+    getEventBus().emit('user.ask_response', {
+      sessionId: payload.sessionId,
+      taskId: payload.taskId,
+      correlationId,
+      response: payload.reply,
+    });
   }
 
   requestPermissionJudge(input: {
