@@ -433,6 +433,25 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     // §5.2 ④: Recall historical review decisions for learning
     systemPrompt += recallDecisionsBlock('review');
 
+    // 13.0 §12.3 + §12.6: 注入 mission 任务上下文 — Brain 审核时知道该 agent 被分配的具体任务
+    // 让 Brain 能判断"回复是否满足 plan 中分配的任务目标"，而不仅看回复本身质量
+    if (turn.missionId && turn.planTaskId) {
+      try {
+        const plan = missionManager.readPlan(turn.missionId);
+        const assignedTask = plan?.tasks.find(t => t.id === turn.planTaskId);
+        if (assignedTask) {
+          systemPrompt += `\n\n## 任务上下文（该 agent 被分配的任务）\n` +
+            `- 任务 ID: ${assignedTask.id}\n` +
+            `- 任务目标: ${assignedTask.what}\n` +
+            `- 负责人: ${assignedTask.who}\n` +
+            `- 状态: ${assignedTask.status}\n` +
+            `审核时请判断回复是否真正完成了上述任务目标，而不仅是回复本身是否合理。`;
+        }
+      } catch (missionErr) {
+        logger.debug({ err: missionErr, missionId: turn.missionId }, 'brain:review mission context injection skipped');
+      }
+    }
+
     const reviewContent = buildReviewInput(turn.level, turn);
     const messages: ModelMessage[] = [
       { role: 'user', content: reviewContent },
@@ -471,6 +490,15 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       }
 
       ipc.send('review.result', 'core', reviewResult, trackingId);
+
+      // 13.0 §12: 记录审核决策到 BrainDecisionRecorder（供后续进化反馈 + lesson 学习）
+      // 自动对 verdict 做敏感数据脱敏（§3.6 场景 E）
+      decisionRecorder.recordReviewDecision(
+        turn.sessionId,
+        turn.draftResponse ?? turn.userMessage,
+        reviewResult as unknown as Record<string, unknown>,
+        turn.planTaskId ?? trackingId,
+      );
 
       // 13.0 §12.6: 审核完成后自动 mark plan task done/failed（不阻塞审核主流程）
       // approve → done；modify → done（带修改后的结果）；reject → failed
@@ -797,6 +825,22 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     // Recall historical routing decisions for dynamic context (§3.3)
     systemPrompt += recallDecisionsBlock('route');
 
+    // 13.0 §12.3: 注入活跃 mission 摘要 — Brain 作为中枢需了解全局协作进展
+    // 让 Brain 在路由新消息时能判断是否与某个进行中的 mission 相关，避免重复创建或脱节
+    try {
+      const activeMissions = missionManager.listMissions()
+        .filter(m => m.status === 'in_progress')
+        .slice(0, 3); // 最多 3 个，控制 token 消耗
+      if (activeMissions.length > 0) {
+        const missionSummary = activeMissions.map(m =>
+          `- ${m.id}（${m.goal}）进度: ${m.taskCount} 个任务`
+        ).join('\n');
+        systemPrompt += `\n\n## 当前活跃 Mission（供路由参考，新消息若与某个相关请在 missionSpec 中复用）\n${missionSummary}`;
+      }
+    } catch (missionErr) {
+      logger.debug({ err: missionErr }, 'brain:route active mission context injection skipped');
+    }
+
     const userPrompt = buildRoutingUserPrompt(
       payload.message,
       payload.availableAgents,
@@ -820,8 +864,38 @@ startResidentAgent(({ name, ipc, llm, db }) => {
 
       const decision = parseRouteDecision(result.content);
       logger.debug({ intent: decision.intent, target: decision.targetAgent, reason: safeSlice(decision.reason, 200), agents: payload.availableAgents.map((a: { name: string }) => a.name) }, 'brain:route');
+
+      // 13.0 §12.2: Brain 判断任务复杂（missionSpec 非空）→ 自动创建 mission
+      // LLM 在路由决策中输出 missionSpec（goal + tasks），此处消费并写入 plan.json
+      // 创建后的 missionId 写回 decision 供 kernel 的 dispatch 路径携带
+      if (decision.missionSpec && decision.missionSpec.goal && decision.missionSpec.tasks.length > 0) {
+        try {
+          const plan = missionManager.createMission(
+            decision.missionSpec.goal,
+            decision.missionSpec.context ?? payload.message,
+            decision.missionSpec.tasks,
+          );
+          decision.missionId = plan.mission.id;
+          logger.info({
+            missionId: plan.mission.id,
+            goal: decision.missionSpec.goal,
+            taskCount: decision.missionSpec.tasks.length,
+          }, 'brain:route mission created from missionSpec');
+        } catch (missionErr) {
+          logger.warn({ err: missionErr, goal: decision.missionSpec.goal }, 'brain:route mission creation failed, routing without mission');
+        }
+      }
+
       const routeResult: RouteResultPayload = { decision };
       ipc.send('route.result', 'core', routeResult, trackingId);
+
+      // 13.0 §12: 记录路由决策到 BrainDecisionRecorder（供后续审核/进化反馈）
+      decisionRecorder.recordRouteDecision(
+        payload.sessionId,
+        payload.message,
+        { ...decision, missionId: decision.missionId },
+        payload.taskId,
+      );
 
       // Mark recalled insights as adopted on successful routing
       if (insights.length > 0) {
@@ -882,6 +956,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: safeSlice(judgment.reason, 200), dangerLevel: payload.dangerLevel }, 'brain:permission');
       const judgeResult: PermissionJudgeResultPayload = judgment;
       ipc.send('permission.judge.result', 'core', judgeResult, trackingId);
+
+      // 13.0 §12: 记录权限决策到 BrainDecisionRecorder
+      decisionRecorder.recordPermissionDecision(
+        payload.sessionId,
+        payload.toolName,
+        judgment as unknown as Record<string, unknown>,
+      );
     } catch (err) {
       ipc.send('permission.judge.result', 'core', {
         allowed: false,

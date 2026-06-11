@@ -82,6 +82,27 @@ const logger = getLogger('orchestrator');
 
 const DISPATCH_RETRY_MS = 3000;
 
+/**
+ * 13.0 §12.5: plan.json 的 who 字段（agent 名）→ 该 agent 的主 taskType 映射。
+ * 用于 task_ready 派发时按 who 路由到真正负责的 agent（而非写死 chat）。
+ * 与各 agent manifest 的 taskTypes 声明一致；未命中返回 null（调用方回退 chat）。
+ */
+const AGENT_TASK_TYPE: Record<string, string> = {
+  conversation: 'conversation_turn',
+  code: 'code_task',
+  skills: 'skill_task',
+  'plugin-builder': 'plugin_task',
+  'skill-tester': 'skill_test',
+  learning: 'learning_review',
+  evolution: 'extract_feedback',
+  memory: 'memory_judge',
+};
+
+/** §12.5: 按 agent 名查主 taskType；未知 agent 返回 null */
+function taskTypeForAgent(agentName: string): string | null {
+  return AGENT_TASK_TYPE[agentName] ?? null;
+}
+
 type ReviewOrigin = 'conversation' | 'task' | 'superior_chain';
 
 interface AgentIpc {
@@ -303,10 +324,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     getEventBus().on('mission.task_ready', (payload: { missionId: string; taskId: string; who: string; what: string }) => {
       logger.info({ missionId: payload.missionId, taskId: payload.taskId, who: payload.who }, '13.0: mission.task_ready — 自动派发');
 
-      /** 派发任务给负责的 agent */
+      // §12.5: 用 plan 的 who 字段路由到真正负责的 agent（而非写死 chat）。
+      // who 是 agent 名，需映射到该 agent 的主 taskType 供 taskRouter 路由。
+      const taskType = taskTypeForAgent(payload.who) ?? 'chat';
       this.dispatchModuleTask({
         sessionId: payload.missionId, // missionId 作为 session 的关联标识
-        taskType: 'chat',
+        taskType,
         requester: 'brain-mission',
         inputPayload: {
           userMessage: payload.what,
@@ -315,7 +338,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         },
         foreground: true,
       }).catch(err => {
-        logger.warn({ err, missionId: payload.missionId, taskId: payload.taskId }, '13.0: task_ready 派发失败');
+        logger.warn({ err, missionId: payload.missionId, taskId: payload.taskId, who: payload.who }, '13.0: task_ready 派发失败');
+      });
+    });
+
+    // 13.0 §12.8: mission 全部完成 → 派发汇总任务给 Conversation agent。
+    // 修复缺口：mission.completed 事件此前仅推送前端，后端零订阅者，Conversation 不汇总。
+    getEventBus().on('mission.completed', (payload: { missionId: string; goal: string }) => {
+      logger.info({ missionId: payload.missionId, goal: payload.goal }, '13.0: mission.completed — 派发汇总');
+      this.dispatchModuleTask({
+        sessionId: payload.missionId,
+        taskType: 'conversation_turn', // Conversation agent 负责 mission 汇总（§12.8）
+        requester: 'brain-mission',
+        inputPayload: {
+          userMessage: `Mission「${payload.goal}」的全部任务已完成，请汇总各任务结果给用户。`,
+          missionId: payload.missionId,
+          isMissionSummary: true,
+        },
+        foreground: true,
+      }).catch(err => {
+        logger.warn({ err, missionId: payload.missionId }, '13.0: mission.completed 汇总派发失败');
       });
     });
 
