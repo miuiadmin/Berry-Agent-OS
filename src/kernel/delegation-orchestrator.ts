@@ -949,14 +949,19 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   }
 
   resolveUserPermissionConfirm(requestId: string, approved: boolean, reason?: string): boolean {
-    const resolved = this.permissionFlow.resolveUserConfirm(requestId, approved, reason);
-    if (!resolved) return false;
-
-    this.permissionCoordinator.resolve(requestId, {
+    // 1. 先签发 token（批准时返回 PermissionToken，拒绝时返回 null）。
+    //    必须在通知 tool-caller 之前完成：resolveUserConfirm 发给 tool-caller 的 permission.result
+    //    需要携带 tokenId，否则 tool-caller 判定"缺少 permission token"拒绝执行（即使已批准）。
+    const token = this.permissionCoordinator.resolve(requestId, {
       verdict: approved ? 'approved' : 'denied',
       source: 'user',
+      tokenVerdict: approved ? 'allow_once' : undefined,
       reason: reason ?? (approved ? '用户确认' : '用户拒绝'),
     });
+
+    // 2. 再通知 tool-caller（带 tokenId）。token?.id 在拒绝时为 undefined，符合预期。
+    const resolved = this.permissionFlow.resolveUserConfirm(requestId, approved, reason, token?.id);
+    if (!resolved) return false;
 
     if (!approved && reason) {
       this.brainDecisionRecorder?.record({

@@ -6,6 +6,9 @@ import type { BrainDecisionRecorder } from '../brain-decision-recorder.js';
 import type { IpcMessageType, IpcMessage } from '../types.js';
 import type { PermissionJudgeResultPayload } from '../../contracts/routing.js';
 import type { PermissionRequestPayload, PermissionValidatePayload, PermissionConsumePayload, PermissionAcquirePayload } from '../../contracts/permissions.js';
+import { getLogger } from '../../utils/logger.js';
+
+const logger = getLogger('permission-flow');
 import type { DangerLevel } from '../../bus/contract.js';
 import { genId } from '../../utils/id.js';
 import { getEventBus } from '../event-bus.js';
@@ -163,7 +166,9 @@ export class PermissionFlow {
     agentIpc.onMessage('permission.acquire', async (msg: IpcMessage) => {
       const { toolName, toolInput, dangerLevel, taskId } = msg.payload as PermissionAcquirePayload;
       const replyId = msg.id;
+      logger.debug({ agentName, toolName, dangerLevel, isPrimary, replyId }, 'permission.acquire: 收到请求（DEBUG）');
 
+      try {
       let sessionId: string;
       if (isPrimary) {
         const pendingReq = (taskId ? this.deps.sessionManager.findPendingByTaskId(taskId) : undefined)
@@ -181,8 +186,20 @@ export class PermissionFlow {
         });
 
         if (result.requiresReview) {
-          if (dangerLevel !== 'dangerous') {
-            agentIpc.send('permission.result', agentName, { allowed: true, reason: 'auto-approved (moderate)' }, replyId);
+          if (dangerLevel !== 'dangerous' && result.requestId) {
+            // moderate 工具免用户确认放行，但必须签发 permission token——
+            // tool-caller 执行层强制要求 tokenId（无 token 会报"缺少 permission token"导致工具无法执行）。
+            // 这里 resolve 已创建的 approval request → 由 tokenIssuer 签发 allow_once token。
+            const token = this.deps.permissionCoordinator.resolve(result.requestId, {
+              verdict: 'approved',
+              source: 'rule',
+              reason: 'auto-approved (moderate)',
+            });
+            agentIpc.send('permission.result', agentName,
+              token
+                ? { allowed: true, reason: 'auto-approved (moderate)', tokenId: token.id }
+                : { allowed: false, reason: 'auto-approved 失败：approval request 已被处理，无法签发 token' },
+              replyId);
             return;
           }
 
@@ -222,15 +239,24 @@ export class PermissionFlow {
         });
         agentIpc.send('permission.result', agentName, result, replyId);
       }
+      } catch (err) {
+        // DEBUG: 捕获 acquire handler 内的所有异常，确保一定能回复（否则 IPC request 超时）
+        logger.error({ err, agentName, toolName, replyId }, 'permission.acquire: handler 异常（DEBUG）');
+        agentIpc.send('permission.result', agentName, { allowed: false, reason: `权限处理异常: ${(err as Error).message}` }, replyId);
+      }
     });
   }
 
-  resolveUserConfirm(requestId: string, allowed: boolean, reason?: string): boolean {
+  resolveUserConfirm(requestId: string, allowed: boolean, reason?: string, tokenId?: string): boolean {
     const pending = this.pendingUserConfirms.get(requestId);
     if (!pending) return false;
     clearTimeout(pending.timer);
     this.pendingUserConfirms.delete(requestId);
-    pending.agentIpc.send('permission.result', pending.agentName, { allowed, reason: reason ?? (allowed ? '用户已确认' : '用户已拒绝') }, pending.replyId);
+    // 批准时必须携带 tokenId：tool-caller 执行层强制要求 tokenId，
+    // 无 token 则判定"缺少 permission token"拒绝执行（即使 allowed=true）。
+    pending.agentIpc.send('permission.result', pending.agentName,
+      { allowed, reason: reason ?? (allowed ? '用户已确认' : '用户已拒绝'), ...(tokenId ? { tokenId } : {}) },
+      pending.replyId);
     return true;
   }
 

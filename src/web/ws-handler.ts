@@ -246,22 +246,14 @@ function handleWsMessage(
     case 'permissions.approve': {
       const requestId = requireString(msg, 'requestId');
       if (!requestId) { wsError(ws, '缺少 requestId'); return; }
-      deps.permissionCoordinator.resolve(requestId, {
-        verdict: 'approved',
-        source: 'user',
-        tokenVerdict: 'allow_once',
-      });
+      // WS 仅转发用户决策；签发 token + 通知 tool-caller 由 delegation-orchestrator 统一处理，
+      // 避免 WS 层与 orchestrator 双重 resolve 导致 token 签发顺序错乱、tokenId 丢失。
       deps.resolvePermissionConfirm?.(requestId, true);
       break;
     }
     case 'permissions.deny': {
       const requestId = requireString(msg, 'requestId');
       if (!requestId) { wsError(ws, '缺少 requestId'); return; }
-      deps.permissionCoordinator.resolve(requestId, {
-        verdict: 'denied',
-        source: 'user',
-        reason: typeof msg.reason === 'string' ? msg.reason : 'user denied via web dashboard',
-      });
       deps.resolvePermissionConfirm?.(requestId, false, typeof msg.reason === 'string' ? msg.reason : undefined);
       break;
     }

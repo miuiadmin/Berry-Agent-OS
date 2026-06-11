@@ -213,14 +213,18 @@ export class ApprovalManager {
         return null;
 
       case 'ask':
-        if (request.riskLevel === 'low') {
+        if (request.riskLevel === 'low' || request.riskLevel === 'medium') {
+          // 低/中风险（safe/moderate 工具）自动批准并签发 token——
+          // 工具执行层强制要求 tokenId，必须走 resolve() 让 tokenIssuer 签发，
+          // 而非在外面 hack 一个无 token 的 allowed:true（会导致"缺少 permission token"）。
+          // 仅 high 风险（dangerous）才 escalate 到 Brain/用户确认。
           return this.resolve(request.id, {
             verdict: 'approved',
             source: 'rule',
-            reason: '低风险自动批准',
+            reason: '低/中风险自动批准',
           });
         }
-        // moderate/high risk → return null to escalate to Brain permission judge
+        // high risk → return null to escalate to Brain permission judge / 用户确认
         return null;
     }
   }
