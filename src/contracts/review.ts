@@ -88,6 +88,7 @@ export function classifyLevel(turn: TurnRecord): ReviewLevel {
  * 此处用数组（而非 import Set）避免循环依赖和运行时开销。
  */
 const DANGEROUS_TOOLS: readonly string[] = [
+  // 已实现的实际工具
   'run_command',       // shell 执行
   'write_file',        // 文件覆盖（不可逆）
   'edit_code',         // 代码修改（不可逆）
@@ -97,6 +98,12 @@ const DANGEROUS_TOOLS: readonly string[] = [
   'send_notification', // 给用户发消息
   'cron_create',       // 创建定时任务（持久化副作用）
   'plugin_execute',    // 插件调用（沙箱外执行）
+  // §5.3.6 规范定义的抽象类别（前向兼容）
+  'http_request',      // 外部 API 调用
+  'send_email',        // 发送邮件
+  'send_message',      // 发送消息到外部渠道
+  'db_migrate',        // 数据库迁移
+  'db_write',          // 数据库写入
 ];
 
 /** 检查工具调用列表中是否包含危险工具 */

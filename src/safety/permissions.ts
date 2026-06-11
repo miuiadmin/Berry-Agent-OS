@@ -10,7 +10,20 @@ export type PermissionMode = 'ask' | 'allow-all' | 'deny-all';
  * fail-closed：列出在集合内的工具即使 dangerLevel='safe' 也走 user_confirm 流程。
  * AgentPort.useTool() 在执行前会通过 PermissionCoordinator 检查此集合。
  */
+/**
+ * 13.0 §5.3.6: 危险工具集合 — 使用这些工具必须先经用户确认（user_confirm）。
+ *
+ * fail-closed：列出在集合内的工具即使 dangerLevel='safe' 也走 user_confirm 流程。
+ * AgentPort.useTool() 在执行前会通过 PermissionCoordinator 检查此集合。
+ *
+ * 集合构成：
+ * 1. 已实现的实际工具名（run_command / write_file / edit_code / ...）
+ * 2. §5.3.6 规范定义的抽象类别（http_request / send_email / send_message / db_migrate / db_write）
+ *    —— 这些是 spec 规划中的工具类别，当前可能未实现，但加入集合可前向兼容：
+ *    未来新增对应工具时自动获得危险分类，无需再改此处。
+ */
 export const DANGEROUS_TOOL_CATEGORIES = new Set<string>([
+  // ─── 已实现的实际工具 ───
   'run_command',     // shell 执行（已有 blocklist，但 user_confirm 是另一道闸）
   'write_file',      // 文件覆盖（不可逆）
   'edit_code',       // 代码修改（不可逆）
@@ -20,6 +33,12 @@ export const DANGEROUS_TOOL_CATEGORIES = new Set<string>([
   'send_notification', // 给用户发消息（可能被滥用）
   'cron_create',     // 创建定时任务（持久化副作用）
   'plugin_execute',  // 插件调用（沙箱外执行）
+  // ─── §5.3.6 规范定义的抽象类别（前向兼容：未来工具自动归类） ───
+  'http_request',    // 外部 API 调用（spec §5.3.6：白名单域名 + user.confirm）
+  'send_email',      // 发送邮件（spec §5.3.6：必 user.confirm）
+  'send_message',    // 发送消息到外部渠道（spec §5.3.6：必 user.confirm）
+  'db_migrate',      // 数据库迁移（spec §5.3.6：必 user.confirm + 干跑模式）
+  'db_write',        // 数据库写入（spec §5.3.6：必 user.confirm + 干跑模式）
 ]);
 
 export interface PermissionResult {
