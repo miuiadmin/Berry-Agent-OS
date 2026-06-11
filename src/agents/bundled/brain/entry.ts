@@ -563,10 +563,32 @@ startResidentAgent(({ name, ipc, llm, db }) => {
           break;
       }
 
-      ipc.send('review.result', 'core', {
-        verdict,
-        reason,
-      } satisfies ReviewResult, trackingId);
+      const fallbackReviewResult: ReviewResult = { verdict, reason };
+      ipc.send('review.result', 'core', fallbackReviewResult, trackingId);
+
+      // 13.0 §12.6 + §13.21: 降级审核也必须标记 plan task，否则 LLM 不可用时
+      // plan task 永不 done/failed → 级联失效 → mission 挂起（与主审核路径一致）
+      if (turn.planTaskId && turn.missionId) {
+        try {
+          const isApprove = verdict === 'approve';
+          const isModify = verdict === 'modify';
+          if (isApprove || isModify) {
+            missionManager.updatePlan(turn.missionId, {
+              task_id: turn.planTaskId,
+              status: 'done',
+              result: (reason ?? '降级审核通过').slice(0, 2000),
+            });
+          } else {
+            missionManager.updatePlan(turn.missionId, {
+              task_id: turn.planTaskId,
+              status: 'failed',
+              result: (reason ?? '降级审核拒绝').slice(0, 2000),
+            });
+          }
+        } catch (planErr) {
+          logger.warn({ err: planErr, missionId: turn.missionId, planTaskId: turn.planTaskId }, 'brain:fallback review plan auto-update failed');
+        }
+      }
     }
     } finally {
       // §5.2.5: 释放审核 slot，唤醒下一个排队者
