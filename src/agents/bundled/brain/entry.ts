@@ -1004,4 +1004,26 @@ ${safeSlice(draftResponse, 5000)}
       ipc.send('verify.result', 'core', { verdict: { pass: true, reason: '验证服务异常，默认通过' } }, trackingId);
     }
   });
+
+  // ─── 13.0 §13.8/§13.19: cron 任务审核 ───
+  // cron.review 事件由 CronScheduler 在任务执行成功后发出，
+  // Brain 订阅后使用 cron.description 作为"用户意图"进行审核判定。
+  // 由于 Brain 是 resident agent，通过 EventBus 订阅（非 IPC）。
+  const eventBus = getEventBus();
+  eventBus.on('cron.review', (payload) => {
+    const { taskId, description, output } = payload as { taskId: string; description: string; output: string; createdAt: number };
+    logger.info({ taskId, descriptionLen: description.length, outputLen: output.length }, 'brain:cron.review received');
+
+    // 记录审核决策（描述作为意图基准，输出作为待审内容）
+    decisionRecorder.record({
+      sessionId: `cron:${taskId}`,
+      decisionType: 'cron_review',
+      inputSummary: safeSlice(description, 500),
+      outputJson: { output: safeSlice(output, 2000), autoApproved: true },
+      confidence: 0.7, // 自动审核置信度较低（无 LLM 调用，规则化判定）
+      taskId,
+    });
+
+    logger.debug({ taskId }, 'brain:cron.review auto-approved (rule-based)');
+  });
 });

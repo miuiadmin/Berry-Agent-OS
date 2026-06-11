@@ -130,7 +130,13 @@ describe('AgentPort', () => {
       });
 
       const payload = mockIpc.sent[0].payload as DialogueMessagePayload;
-      expect(payload.context).toEqual({ userId: 'u1', topic: 'preferences' });
+      // 13.0 §2.3: context 包含原始字段 + 自动构建的 callChain
+      expect(payload.context).toMatchObject({ userId: 'u1', topic: 'preferences' });
+      expect(payload.context?.callChain).toBeDefined();
+      expect(payload.context?.callChain).toHaveLength(1);
+      expect(payload.context?.callChain[0]).toEqual(
+        expect.objectContaining({ from: 'code', to: 'memory' }),
+      );
 
       mockIpc.simulateReply(payload.dialogueId, 'OK');
       await replyPromise;

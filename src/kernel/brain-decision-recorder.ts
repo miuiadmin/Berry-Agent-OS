@@ -6,7 +6,8 @@ import { redactSensitiveData } from './sensitive-redactor.js';
 
 const logger = getLogger('brain-decision-recorder');
 
-export type BrainDecisionType = 'route' | 'review' | 'permission' | 'correction' | 'aggregated_insight';
+/** Brain 决策类型 — cron_review 用于 §13.8 cron 任务自动审核记录 */
+export type BrainDecisionType = 'route' | 'review' | 'permission' | 'correction' | 'aggregated_insight' | 'cron_review';
 
 export interface RecordBrainDecisionInput {
   sessionId: string;
