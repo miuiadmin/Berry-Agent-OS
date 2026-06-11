@@ -142,7 +142,8 @@ export type EventMap = {
   'task.heartbeat': { taskId: string; agentName: string; elapsedMs: number; lastActivity: string; timestamp: number };
   'task.completed': { taskId: string; targetAgent: AgentName; outputPayload: Record<string, unknown> };
   'task.failed': { taskId: string; targetAgent: AgentName; error: string };
-  'task.timeout': { taskId: string; targetAgent: AgentName };
+  /** §13.16: 任务超时自动终止（TaskHeartbeatManager 检测到 maxTaskDuration 超限） */
+  'task.timeout': { taskId: string; targetAgent: AgentName; delegationId?: string; elapsedMs?: number; reason?: string };
   'task.cancelled': { taskId: string; reason?: string };
   'task.notification': { taskId: string; notification: Record<string, unknown> };
   'task.backgrounded': { taskId: string };

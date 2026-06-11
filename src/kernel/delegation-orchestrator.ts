@@ -372,6 +372,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           entry.lastCheckpointAt = Date.now();
         }
       },
+      /** §13.16: 通过 DelegationManager.fail() 终止超时 delegation */
+      timeoutDelegation: (delegationId: string, reason: string): boolean => {
+        return this.delegationManager.fail(delegationId, reason);
+      },
     });
     heartbeatMgr.start();
   }
@@ -2238,6 +2242,21 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     if (!entry) {
       logger.warn({ taskId, agentName }, 'task.reject: 任务不存在');
       return;
+    }
+
+    // ── 13.0 §8.7: 将 task.reject 写入 Brain 观察队列 ──
+    // Brain 通过观察队列看到 agent 拒绝任务，可以审核拒绝理由和 suggestAgent 是否合理。
+    // 如果 Brain 不认同 reject（比如觉得 agent 应该能做），可以发纠偏。
+    // 如果 Brain 同意 reject → 接受，拒绝后由 Kernel 决定下一步（重路由或降级，见 §5.3.14）
+    if (entry.sessionId && this.observationRecorder) {
+      this.observationRecorder.record({
+        sessionId: entry.sessionId,
+        taskId,
+        observationType: 'task_reject' as any,
+        fromAgent: agentName,
+        content: JSON.stringify({ reason, suggestAgent }),
+        priority: 0, // task.reject 是 critical 事件，永不丢弃
+      });
     }
 
     // 检查 reRouteDepth

@@ -318,11 +318,19 @@ export class KernelRouter {
       }
     }
 
-    // ⑥ §4.4.2: 跨 Agent 预算检查（session 级总次数上限）
+    // ⑥ §4.4.2: 跨 Agent 预算检查（session 级总次数上限 + 30% 预算占比）
     if (sessionId && this.deps.stateCache) {
       const budget = this.deps.stateCache.get<InterAgentBudget>('inter_agent_budget', sessionId);
-      if (budget && budget.requestCount >= MAX_INTER_AGENT_REQUESTS_PER_SESSION) {
-        return `session ${sessionId} 跨 agent 通信次数已耗尽（${budget.requestCount}/${MAX_INTER_AGENT_REQUESTS_PER_SESSION}）`;
+      if (budget) {
+        // ⑥a: 硬上限 — 单 session 最多 30 次跨 agent 通信
+        if (budget.requestCount >= MAX_INTER_AGENT_REQUESTS_PER_SESSION) {
+          return `session ${sessionId} 跨 agent 通信次数已耗尽（${budget.requestCount}/${MAX_INTER_AGENT_REQUESTS_PER_SESSION}）`;
+        }
+        // ⑥b: §4.4.2 软上限 — 跨 agent 通信消耗不超过 session 总预算的 30%
+        // 防止 agent 间互相问答消耗过多 token，保证至少 70% 用于主 task
+        if (budget.totalBudget > 0 && budget.tokensUsed >= budget.totalBudget * 0.3) {
+          return `session ${sessionId} 跨 agent 预算占比超限（${Math.round(budget.tokensUsed / budget.totalBudget * 100)}% >= 30%）`;
+        }
       }
     }
 

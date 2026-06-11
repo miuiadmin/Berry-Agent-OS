@@ -339,9 +339,49 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     return versioned?.content ?? buildPermissionJudgeSystemPrompt();
   }
 
-  // --- Handler 1: review.request (existing, enhanced with reRoute) ---
+  // ─── §5.2.5: Brain 并发审核准入控制 ───
+  // 限制同时进行的 LLM 审核数量（默认 5），防止：
+  //   1. Brain LLM 不可用时 FallbackReviewer 被雷群效应压垮
+  //   2. 多个 review 同时争抢 LLM token 配额
+  //   3. 内存暴涨（每个审核都构建完整 context）
+  const MAX_CONCURRENT_REVIEWS = 5;
+  /** 当前正在执行的审核数 */
+  let activeReviewCount = 0;
+  /** 等待审核的队列（先进先出） */
+  const reviewQueue: Array<{ msg: IpcMessage; resolve: () => void }> = [];
+
+  /** 获取审核许可（排队等待） */
+  function acquireReviewSlot(): Promise<void> {
+    if (activeReviewCount < MAX_CONCURRENT_REVIEWS) {
+      activeReviewCount++;
+      return Promise.resolve();
+    }
+    // 超出并发上限，排队等待
+    return new Promise<void>((resolve) => {
+      reviewQueue.push({ msg: null as unknown as IpcMessage, resolve });
+      logger.debug({
+        activeCount: activeReviewCount,
+        queueLength: reviewQueue.length,
+      }, 'brain:review queued (concurrency limit)');
+    });
+  }
+
+  /** 释放审核许可（唤醒下一个排队的） */
+  function releaseReviewSlot(): void {
+    activeReviewCount = Math.max(0, activeReviewCount - 1);
+    if (reviewQueue.length > 0) {
+      const next = reviewQueue.shift()!;
+      activeReviewCount++;
+      next.resolve();
+    }
+  }
+
+  // --- Handler 1: review.request (existing, enhanced with reRoute + concurrency control) ---
 
   ipc.onMessage('review.request', async (msg: IpcMessage) => {
+    // §5.2.5: 并发审核准入控制 — 等待获取审核 slot
+    await acquireReviewSlot();
+    try {
     const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string } };
     const trackingId = msg.correlationId ?? msg.id;
     let systemPrompt = getReviewPrompt(turn.level);
@@ -491,6 +531,10 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         verdict,
         reason,
       } satisfies ReviewResult, trackingId);
+    }
+    } finally {
+      // §5.2.5: 释放审核 slot，唤醒下一个排队者
+      releaseReviewSlot();
     }
   });
 
