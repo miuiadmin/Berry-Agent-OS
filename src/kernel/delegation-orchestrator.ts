@@ -2655,6 +2655,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const pending = this.sessionManager.getPending(entry.correlationId);
       if (!pending) return;
       this.streamingFlusher.remove(taskId);
+      // 13.0 §13.21: 超时的 plan task 必须标记 failed，否则永留 working →
+      // 级联失效依赖它的任务 → mission 永不终态（与 1804 失败路径一致）
+      this.updatePlanTaskStatus(taskId, 'failed', `任务执行超时（${targetAgent}）`);
       this.sessionManager.fail(entry.correlationId, { kind: 'timeout', agentName: targetAgent, error: `任务执行超时（${targetAgent}）` });
     });
   }
