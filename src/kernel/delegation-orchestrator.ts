@@ -75,6 +75,8 @@ import { StateCache } from './state-cache.js';
 /** 12.0/13.0 VerifyGate — 独立对抗性意图验证（高漂移时触发） */
 import { VerifyGate } from './verify-gate.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
+import { resolveConfig } from '../config/resolver.js';
+import { getConfigPath } from '../utils/paths.js';
 
 const logger = getLogger('orchestrator');
 
@@ -187,10 +189,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.delegationManager = new DelegationManager(deps.taskManager);
     this.correctionFlow = new CorrectionFlow(this);
     // 13.0 灵魂版：KernelRouter 封装 dialogue 路由，构造时初始化（dialogueRouter 在 init() 注入）
+    // §4.4.2: 注入 session 总预算上限，使 inter_agent_budget.totalBudget 真实初始化（修复旧版恒为 0 死代码）
+    let sessionBudgetLimit: number | undefined;
+    try {
+      sessionBudgetLimit = resolveConfig(getConfigPath()).budget.sessionLimit;
+    } catch {
+      // 配置解析失败时使用 KernelRouter 内置默认值
+    }
     this.kernelRouter = new KernelRouter({
       dialogueRouter: null, // init() 中赋值
       agentManager: deps.agentManager,
       sessionManager: deps.sessionManager,
+      sessionBudgetLimit,
     });
     this.brainDecisionRecorder = new BrainDecisionRecorder(getDb());
     this.permissionFlow = new PermissionFlow({

@@ -158,6 +158,12 @@ export interface KernelRouterDeps {
    * 可选——未注入时跳过预算检查（向后兼容）。
    */
   stateCache?: StateCache;
+  /**
+   * 13.0 §4.4.2: session 级总 token 预算上限（来自 BudgetConfigSchema.sessionLimit）。
+   * 用于初始化 inter_agent_budget.totalBudget，使 30% 软上限检查真实生效。
+   * 未注入时回退到默认值 500_000（与 BudgetConfigSchema.sessionLimit 默认值一致）。
+   */
+  sessionBudgetLimit?: number;
 }
 
 /**
@@ -438,10 +444,13 @@ export class KernelRouter {
    */
   recordInterAgentRequest(sessionId: string, tokensUsed?: number): void {
     if (!this.deps.stateCache) return;
+    const SESSION_BUDGET_DEFAULT = 500_000; // 与 BudgetConfigSchema.sessionLimit 默认值一致
     const budget = this.deps.stateCache.get<InterAgentBudget>('inter_agent_budget', sessionId) ?? {
       tokensUsed: 0,
       requestCount: 0,
-      totalBudget: 0,
+      // 13.0 §4.4.2: totalBudget 从配置初始化（修复旧版恒为 0 的死代码，
+      // 使 gate ⑥b 的 30% 软上限检查真实生效）
+      totalBudget: this.deps.sessionBudgetLimit ?? SESSION_BUDGET_DEFAULT,
     };
     budget.requestCount++;
     if (tokensUsed) budget.tokensUsed += tokensUsed;
