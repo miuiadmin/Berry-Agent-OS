@@ -8,3 +8,4 @@ data/
 .env
 参考源码/
 web/.env.local
+tmp-*.jpeg
