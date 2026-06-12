@@ -1,5 +1,13 @@
-"use client";
-
+/**
+ * 开关 — 封装 HeroUI Switch。
+ *
+ * 保持原有 export 接口：
+ * - checked → isSelected
+ * - onCheckedChange → onValueChange
+ * - disabled → isDisabled
+ * 移动端触控目标 44px 通过 className 覆盖保证。
+ */
+import { Switch as HeroUISwitch } from "@heroui/react";
 import { cn } from "@/lib/utils";
 
 interface SwitchProps {
@@ -12,26 +20,13 @@ interface SwitchProps {
 
 export function Switch({ checked, onCheckedChange, disabled, className, id }: SwitchProps) {
   return (
-    <button
+    <HeroUISwitch
       id={id}
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onCheckedChange(!checked)}
-      className={cn(
-        "inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "bg-brand" : "bg-input",
-        className
-      )}
-    >
-      <span
-        className={cn(
-          "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-all duration-200",
-          checked ? "translate-x-4" : "translate-x-0"
-        )}
-      />
-    </button>
+      isSelected={checked}
+      onValueChange={onCheckedChange}
+      isDisabled={disabled}
+      /* 移动端触控目标 44px（CLAUDE.md 硬规则），桌面端恢复默认 */
+      className={cn("min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0", className)}
+    />
   );
 }

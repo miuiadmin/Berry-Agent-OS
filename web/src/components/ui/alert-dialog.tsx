@@ -1,5 +1,9 @@
-"use client";
-
+/**
+ * 确认对话框 — 封装基于 HeroUI Modal 的 AlertDialog。
+ *
+ * 保持原有 export 接口（open/onOpenChange/title/description/labels/onAction），
+ * 内部通过 Dialog（已封装 HeroUI Modal）+ Button 渲染。
+ */
 import type { ReactNode } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./dialog";
 import { Button } from "./button";

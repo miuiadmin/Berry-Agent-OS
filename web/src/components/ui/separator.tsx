@@ -1,15 +1,21 @@
-import * as React from "react";
+/**
+ * 分隔线 — 封装 HeroUI Separator。
+ *
+ * 保持原有 export 接口（orientation, className），
+ * 内部委托 HeroUI Separator 组件。
+ */
+import { Separator as HeroUISeparator } from "@heroui/react";
 import { cn } from "@/lib/utils";
 
-function Separator({ className, orientation = "horizontal", ...props }: React.HTMLAttributes<HTMLDivElement> & { orientation?: "horizontal" | "vertical" }) {
+function Separator({
+  className,
+  orientation = "horizontal",
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { orientation?: "horizontal" | "vertical" }) {
   return (
-    <div
-      role="separator"
-      className={cn(
-        "shrink-0 bg-border",
-        orientation === "horizontal" ? "h-px w-full" : "h-full w-px",
-        className
-      )}
+    <HeroUISeparator
+      orientation={orientation}
+      className={cn(className)}
       {...props}
     />
   );
