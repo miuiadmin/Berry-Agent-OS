@@ -438,6 +438,12 @@ export function buildCheckpointSystemPrompt(): string {
 （15.0 机制 D）。典型场景：发现风险 → command auditor inspect 复查；任务需另一 Agent
 协助 → command execute。**不需要时省略 command 字段**，不要无意义派发。
 
+## 拿不准时升级（uncertain，可选）
+
+仅当任务严重卡住、你无法判断该 continue/adjust/stop/restart 且误判代价高时，额外返回
+"uncertain": true 与 "escalationQuestion"（要问用户的问题，如「任务似乎卡在 X，要继续还是放弃？」），
+系统会把问题转给用户而非你强行裁决。能判断就正常给 action，不要滥用。
+
 ## 判断原则
 
 1. Agent 自主性优先 — 大部分情况选 continue
@@ -490,6 +496,16 @@ export function parseCheckpointResult(llmOutput: string, delegationId: string): 
 
     const action: CorrectionAction = VALID_ACTIONS.includes(parsed.action) ? parsed.action : 'continue';
 
+    // 15.0 机制 B：checkpoint 阶段 Brain 拿不准任务走向时升级问用户（uncertain，source=checkpoint）
+    let escalation: import('../../../contracts/brain.js').BrainEscalation | undefined;
+    if (Boolean(parsed.uncertain) && typeof parsed.escalationQuestion === 'string' && parsed.escalationQuestion.trim()) {
+      escalation = {
+        source: 'checkpoint',
+        reason: typeof parsed.reason === 'string' ? parsed.reason : 'Brain 无法判定任务走向',
+        questionToUser: parsed.escalationQuestion.trim(),
+      };
+    }
+
     // 15.0 机制 D：checkpoint 阶段 Brain 可顺带发号施令（command 伴随字段）
     let command: import('../../../contracts/brain.js').BrainCommand | undefined;
     if (parsed.command && typeof parsed.command === 'object' && typeof parsed.command.target === 'string') {
@@ -516,6 +532,7 @@ export function parseCheckpointResult(llmOutput: string, delegationId: string): 
           }
         : undefined,
       command,
+      escalation,
     };
   } catch {
     return { delegationId, action: 'continue' };

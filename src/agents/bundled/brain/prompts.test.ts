@@ -107,3 +107,31 @@ describe('parseCheckpointResult (15.0 机制 D command 伴随字段)', () => {
     expect(out.command!.type).toBe('report');
   });
 });
+
+describe('parseCheckpointResult (15.0 机制 B checkpoint uncertain 升级)', () => {
+  it('uncertain=true + escalationQuestion → 产出 escalation（source=checkpoint）', () => {
+    const raw = '{"action":"continue","reason":"任务卡住","uncertain":true,"escalationQuestion":"任务似乎卡在依赖安装，要继续还是放弃？"}';
+    const out = parseCheckpointResult(raw, 'dlg1');
+    expect(out.escalation).toBeDefined();
+    expect(out.escalation!.source).toBe('checkpoint');
+    expect(out.escalation!.questionToUser).toContain('继续还是放弃');
+  });
+
+  it('无 uncertain → 无 escalation', () => {
+    const out = parseCheckpointResult('{"action":"adjust","instruction":"x"}', 'dlg1');
+    expect(out.escalation).toBeUndefined();
+  });
+
+  it('uncertain 但无 escalationQuestion → 无 escalation', () => {
+    const out = parseCheckpointResult('{"action":"continue","uncertain":true}', 'dlg1');
+    expect(out.escalation).toBeUndefined();
+  });
+
+  it('command 与 escalation 可并存', () => {
+    const raw = '{"action":"continue","uncertain":true,"escalationQuestion":"要继续吗？","command":{"target":"code","type":"inspect"}}';
+    const out = parseCheckpointResult(raw, 'dlg1');
+    expect(out.escalation).toBeDefined();
+    expect(out.command).toBeDefined();
+    expect(out.command!.target).toBe('code');
+  });
+});

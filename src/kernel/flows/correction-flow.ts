@@ -113,6 +113,18 @@ export class CorrectionFlow {
 
     logger.info({ delegationId, action: correction.action }, 'Applying correction');
 
+    // 15.0 机制 B：checkpoint 拿不准任务走向 → 升级问用户，不 apply action（continue/adjust/stop/restart）
+    if (correction.escalation) {
+      getEventBus().emit('conversation.ask_user', {
+        sessionId: entry.sessionId,
+        taskId: delegationId,
+        agent: 'brain',
+        question: correction.escalation.questionToUser,
+      });
+      logger.info({ delegationId, question: correction.escalation.questionToUser.slice(0, 100) }, 'checkpoint 升级问用户（机制 B）');
+      return;
+    }
+
     // Record correction decision for evolution feedback
     const entry2 = this.ctx.delegationManager.get(delegationId);
     this.recorder.record({

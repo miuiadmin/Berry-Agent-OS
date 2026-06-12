@@ -19,8 +19,8 @@
  * Conversation 用 askUser 提问 → askUser 再经 Brain ask_user 审核（闭环）。
  */
 export interface BrainEscalation {
-  /** 触发升级的 Brain 职责 */
-  source: 'review' | 'approval' | 'decision' | 'answer';
+  /** 触发升级的 Brain 职责（checkpoint 对应 §3.3 的 checkpoint.evaluate.result 触发点） */
+  source: 'review' | 'approval' | 'decision' | 'answer' | 'checkpoint';
   /** Brain 决定不了的原因（内部审计用） */
   reason: string;
   /** 要问用户的自然语言问题（已格式化，可直接展示给用户） */
