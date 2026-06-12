@@ -45,7 +45,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <div className="flex h-full items-center justify-center p-8">
           <div className="text-center max-w-sm">
-            <AlertCircle className="mx-auto size-10 text-danger opacity-70" />
+            <AlertCircle className="mx-auto size-10 text-destructive opacity-70" />
             <h2 className="mt-4 text-lg font-semibold">{this.t("errorBoundary.title")}</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               {this.state.error?.message || this.t("errorBoundary.description")}

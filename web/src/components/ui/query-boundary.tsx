@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { AlertCircle, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "./button";
 import zh from "@/locales/zh";
 import en from "@/locales/en";
 
@@ -30,8 +30,8 @@ export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: Quer
     const message = query.error instanceof Error ? query.error.message : t("queryBoundary.errorOccurred");
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <div className="flex size-10 items-center justify-center rounded-full bg-danger/10">
-          <AlertCircle className="size-5 text-danger" />
+        <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
+          <AlertCircle className="size-5 text-destructive" />
         </div>
         <h3 className="mt-3 text-sm font-medium text-foreground">
           {errorTitle ?? t("queryBoundary.failedToLoad")}

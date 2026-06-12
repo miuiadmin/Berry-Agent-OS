@@ -21,7 +21,7 @@ export function AreaChart({
   data,
   color = "var(--chart-1)",
   secondaryData,
-  secondaryColor = "var(--danger)",
+  secondaryColor = "var(--destructive)",
   height = 160,
   className,
 }: AreaChartProps) {
@@ -199,7 +199,7 @@ export function AreaChart({
       </svg>
       {tooltip && (
         <div
-          className="absolute pointer-events-none z-10 rounded-lg border border-border bg-overlay px-2.5 py-1.5 text-xs shadow-md animate-fade-in"
+          className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md animate-fade-in"
           style={{
             left: `${(tooltip.x / svgWidth) * 100}%`,
             top: `${tooltip.y - 10}px`,

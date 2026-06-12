@@ -7,10 +7,6 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck, ChevronDown } from "lucide-react";
 import { apiGet, apiPut, uploadFile, queries } from "@/lib/api";
 import { toast } from "sonner";
@@ -43,8 +39,8 @@ function HistoryError({ error, onRetry }: { error: string; onRetry: () => void }
   return (
     <div className="flex-1 flex items-center justify-center p-4">
       <div className="text-center">
-        <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-danger/10">
-          <AlertCircle className="size-5 text-danger" />
+        <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-destructive/10">
+          <AlertCircle className="size-5 text-destructive" />
         </div>
         <h3 className="mt-3 text-sm font-medium">{t("chat.failedToLoadHistory")}</h3>
         <p className="mt-1 text-xs text-muted-foreground max-w-xs">{error}</p>
@@ -57,7 +53,6 @@ function HistoryError({ error, onRetry }: { error: string; onRetry: () => void }
   );
 }
 
-/** 委派请求对话框 — 使用 Dialog adapter 自动处理遮罩/ESC/聚焦陷阱 */
 function DelegationDialog({
   request,
   onRespond,
@@ -67,24 +62,20 @@ function DelegationDialog({
 }) {
   const t = useT();
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onRespond(request.delegationId, null, false); }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UserCheck className="size-4 text-warning" />
-            {request.title}
-            {request.urgency === "high" && (
-              <Badge variant="danger" className="text-[11px]">{t("chat.urgent")}</Badge>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2 px-6 pb-2">
-          {request.description && (
-            <p className="text-xs text-muted-foreground">{request.description}</p>
+    <div role="alertdialog" aria-modal="true" aria-label={request.title} className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
+      <div className="rounded-xl border border-border bg-background shadow-lg p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <UserCheck className="size-4 text-warning" />
+          <h4 className="text-sm font-medium">{request.title}</h4>
+          {request.urgency === "high" && (
+            <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">{t("chat.urgent")}</span>
           )}
-          <p className="text-[11px] text-muted-foreground/70">{t("chat.requestedBy")}: {request.requestedBy}</p>
         </div>
-        <DialogFooter>
+        {request.description && (
+          <p className="text-xs text-muted-foreground">{request.description}</p>
+        )}
+        <p className="text-[11px] text-muted-foreground/70">{t("chat.requestedBy")}: {request.requestedBy}</p>
+        <div className="flex items-center gap-2 justify-end">
           {request.options.includes("deny") && (
             <Button variant="outline" size="sm" onClick={() => onRespond(request.delegationId, null, false)}>
               {t("chat.deny")}
@@ -95,13 +86,12 @@ function DelegationDialog({
               {t("chat.approve")}
             </Button>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>
   );
 }
 
-/** 权限确认对话框 — 使用 Dialog adapter 自动处理遮罩/ESC/聚焦陷阱 */
 function PermissionConfirmDialog({
   request,
   onRespond,
@@ -111,15 +101,13 @@ function PermissionConfirmDialog({
 }) {
   const t = useT();
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onRespond(request.requestId, false); }}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ShieldAlert className="size-4 text-danger" />
-            {t("chat.permissionRequired")}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-1 text-xs px-6 pb-2">
+    <div role="alertdialog" aria-modal="true" aria-label={t("chat.permissionRequired")} className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
+      <div className="rounded-xl border border-destructive/30 bg-background shadow-lg p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="size-4 text-destructive" />
+          <h4 className="text-sm font-medium">{t("chat.permissionRequired")}</h4>
+        </div>
+        <div className="space-y-1 text-xs">
           <p><span className="text-muted-foreground">{t("chat.agent")}:</span> {request.agentName}</p>
           <p><span className="text-muted-foreground">{t("chat.tool")}:</span> {request.toolName}</p>
           {request.toolInput && (
@@ -129,16 +117,16 @@ function PermissionConfirmDialog({
             <p className="text-muted-foreground italic">{t("chat.reason")}: {request.brainReason}</p>
           )}
         </div>
-        <DialogFooter>
+        <div className="flex items-center gap-2 justify-end">
           <Button variant="outline" size="sm" onClick={() => onRespond(request.requestId, false)}>
             {t("chat.deny")}
           </Button>
           <Button size="sm" onClick={() => onRespond(request.requestId, true)}>
             {t("chat.approve")}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -206,17 +194,16 @@ function PermissionModeSelector() {
   const mode = useChatStore((s) => s.permissionMode);
   const setMode = useChatStore((s) => s.setPermissionMode);
   return (
-    <Select
+    <select
       value={mode}
-      onValueChange={(v) => setMode(v as 'ask' | 'allow-all' | 'deny-all')}
-      ariaLabel={t("chat.permissionMode")}
-      options={[
-        { key: "ask", label: t("chat.permissionAsk") },
-        { key: "allow-all", label: t("chat.permissionAuto") },
-        { key: "deny-all", label: t("chat.permissionDeny") },
-      ]}
-      className="w-auto"
-    />
+      onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all')}
+      className="h-11 md:h-7 rounded-md border border-input bg-background px-1.5 text-[16px] md:text-[11px] text-muted-foreground min-h-[44px] md:min-h-0"
+      title={t("chat.permissionMode")}
+    >
+      <option value="ask">{t("chat.permissionAsk")}</option>
+      <option value="allow-all">{t("chat.permissionAuto")}</option>
+      <option value="deny-all">{t("chat.permissionDeny")}</option>
+    </select>
   );
 }
 
@@ -254,15 +241,13 @@ function ModelSelector() {
 
   return (
     <div className="relative">
-      <Button
-        variant="ghost"
-        type="button"
+      <button
         onClick={handleOpen}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors h-auto"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <span className="max-w-[100px] md:max-w-[140px] truncate text-[11px] md:text-xs">{currentModel}</span>
         <ChevronDown className="size-3" />
-      </Button>
+      </button>
       {open && (
         <>
           <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} aria-hidden="true" />
@@ -279,13 +264,13 @@ function ModelSelector() {
             </div>
             {/* Search */}
             <div className="px-4 md:px-3 pb-2 shrink-0">
-              <Input
+              <input
                 type="text"
                 placeholder={t("chat.searchModels")}
                 aria-label={t("chat.searchModels")}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="text-[16px] md:text-xs"
+                className="w-full rounded-md border border-input bg-muted/50 px-3 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
                 autoFocus
               />
             </div>
@@ -298,21 +283,19 @@ function ModelSelector() {
                   <div key={ch.id} className="mb-1">
                     <div className="px-2 py-1 text-[11px] text-muted-foreground font-medium">{ch.name}</div>
                     {chModels.map(m => (
-                      <Button
+                      <button
                         key={m.id}
-                        variant="ghost"
-                        type="button"
                         onClick={() => handleSwitch(m.id, ch.id)}
-                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between h-auto"
+                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between min-h-[44px] md:min-h-0"
                       >
                         <div className="min-w-0">
                           <div className="truncate">{m.name}</div>
                           <div className="text-[11px] text-muted-foreground font-mono truncate">{m.id}</div>
                         </div>
                         {m.id === currentModel && (
-                          <span className="size-1.5 rounded-full bg-accent shrink-0 ml-2" />
+                          <span className="size-1.5 rounded-full bg-brand shrink-0 ml-2" />
                         )}
-                      </Button>
+                      </button>
                     ))}
                   </div>
                 );
@@ -326,28 +309,26 @@ function ModelSelector() {
             {/* Manual input */}
             <div className="border-t border-border px-4 md:px-3 py-2 shrink-0">
               <div className="flex gap-1.5">
-                <Input
+                <input
                   type="text"
                   placeholder={t("chat.orEnterModelId")}
                   value={editModel}
                   onChange={(e) => setEditModel(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") handleManualSwitch(); }}
-                  className="flex-1 text-[16px] md:text-xs"
+                  className="flex-1 rounded-md border border-input bg-muted/50 px-2.5 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
                 />
-                <Button
-                  variant="primary"
-                  size="sm"
-                  type="button"
+                <button
                   onClick={handleManualSwitch}
                   disabled={!editModel.trim()}
+                  className="rounded-md px-3 py-2 md:px-2.5 md:py-1.5 text-xs font-medium bg-foreground text-background hover:bg-foreground/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[44px] md:min-h-0"
                 >
                   {t("common.apply")}
-                </Button>
+                </button>
               </div>
             </div>
             {/* Settings link */}
             <div className="border-t border-border px-4 md:px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:pb-2 shrink-0">
-              <a href="/settings?tab=providers" className="text-[11px] text-accent hover:underline">
+              <a href="/settings?tab=providers" className="text-[11px] text-brand hover:underline">
                 {t("chat.configureProviders")}
               </a>
             </div>

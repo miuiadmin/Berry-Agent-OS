@@ -6,8 +6,7 @@ import { queries } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT, useDateFormat } from "@/lib/i18n";
-import { AnimatedStat } from "@/components/shared/animated-stat";
-import { formatTokens } from "@/lib/format";
+import { useCountUp } from "@/hooks/use-count-up";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/charts/sparkline";
@@ -41,7 +40,7 @@ function getEventIcon(event: string) {
 }
 
 function getEventColor(event: string) {
-  if (event.includes("failed") || event.includes("crashed")) return "text-danger";
+  if (event.includes("failed") || event.includes("crashed")) return "text-destructive";
   if (event.includes("completed") || event.includes("enabled")) return "text-success";
   if (event.includes("running") || event.includes("started")) return "text-warning";
   return "text-muted-foreground";
@@ -50,8 +49,21 @@ function getEventColor(event: string) {
 function TrendIndicator({ current, previous }: { current: number; previous: number }) {
   if (previous === 0 && current === 0) return <Minus className="size-3 text-muted-foreground" />;
   if (current > previous) return <TrendingUp className="size-3 text-success" />;
-  if (current < previous) return <TrendingDown className="size-3 text-danger" />;
+  if (current < previous) return <TrendingDown className="size-3 text-destructive" />;
   return <Minus className="size-3 text-muted-foreground" />;
+}
+
+/** Animated stat number — counts up from 0 on mount */
+function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
+  const animated = useCountUp(value);
+  const display = format ? format(animated) : String(animated);
+  return <span className="tabular-nums">{display}</span>;
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }
 
 export default function HomePage() {
@@ -231,7 +243,7 @@ export default function HomePage() {
                 <span className="text-sm font-medium"><AnimatedStat value={completedData?.total ?? 0} /></span>
               </div>
               <div className="flex items-center gap-1">
-                <XCircle className="size-3 text-danger" />
+                <XCircle className="size-3 text-destructive" />
                 <span className="text-sm font-medium"><AnimatedStat value={failedData?.total ?? 0} /></span>
               </div>
             </div>
@@ -255,7 +267,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold tabular-nums">
-              <AnimatedStat value={usageData?.today.totalTokens ?? 0} format={formatTokens} />
+              <AnimatedStat value={usageData?.today.totalTokens ?? 0} format={formatTokenCount} />
             </p>
             <p className="text-xs text-muted-foreground">
               {t("home.today")} (${(usageData?.today.costUsd ?? 0).toFixed(3)})
@@ -281,7 +293,7 @@ export default function HomePage() {
               data={chartData.completed}
               color="var(--success)"
               secondaryData={chartData.failed}
-              secondaryColor="var(--danger)"
+              secondaryColor="var(--destructive)"
               height={160}
             />
             <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
@@ -290,7 +302,7 @@ export default function HomePage() {
                 {t("home.completed")}
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block size-2 rounded-full bg-danger" />
+                <span className="inline-block size-2 rounded-full bg-destructive" />
                 {t("home.failed")}
               </span>
             </div>

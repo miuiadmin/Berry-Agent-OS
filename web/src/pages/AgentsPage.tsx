@@ -10,8 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Avatar } from "@/components/ui/avatar";
-import { QueryBoundary } from "@/components/shared/query-boundary";
+import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bot, Power, PowerOff, ArrowLeft, Clock, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -99,7 +98,7 @@ export default function AgentsPage() {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Avatar name={agent.name} size="sm" fallback={<Bot className="size-3" />} className="text-accent" />
+                          <Bot className="size-4 text-brand" />
                           <CardTitle>{agent.name}</CardTitle>
                         </div>
                         <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">
@@ -216,7 +215,7 @@ function AgentDetailView({
 
   return (
     <div className="mt-4 animate-page-in">
-      <Button variant="ghost" size="sm" className="mb-4" onClick={onBack}>
+      <Button variant="ghost" size="default" className="mb-4" onClick={onBack}>
         <ArrowLeft className="size-4" />
         {t("agents.backToAgents")}
       </Button>
@@ -284,7 +283,7 @@ function AgentDetailView({
                     <Badge
                       variant={
                         task.status === "completed" ? "success"
-                          : task.status === "failed" ? "danger"
+                          : task.status === "failed" ? "destructive"
                           : task.status === "running" ? "warning"
                           : "secondary"
                       }
@@ -321,7 +320,7 @@ function AgentDetailView({
                   <Badge
                     variant={
                       ev.event === "enabled" ? "success"
-                        : ev.event === "crashed" ? "danger"
+                        : ev.event === "crashed" ? "destructive"
                         : "secondary"
                     }
                   >

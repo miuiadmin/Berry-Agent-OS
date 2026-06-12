@@ -7,7 +7,6 @@ import { queries, apiDelete, renameConversation, type ConversationInfo } from "@
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Search, Trash2, Pencil, Check, X } from "lucide-react";
 import { useT, useDateFormat } from "@/lib/i18n";
@@ -121,14 +120,12 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   return (
     <div className="flex h-full w-72 md:w-64 max-w-[85vw] flex-col border-r bg-background md:bg-muted/30">
       <div className="border-b p-3 space-y-2">
-        <Button
-          variant="outline"
-          size="sm"
+        <button
           onClick={handleNewChat}
-          className="w-full border-dashed"
+          className="w-full rounded-lg border border-dashed border-border px-3 py-2.5 md:py-2 text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
         >
           {t("chat.newConversationBtn")}
-        </Button>
+        </button>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -160,7 +157,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
             >
               {editingId === conv.sessionId ? (
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <Input
+                  <input
                     ref={editInputRef}
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
@@ -168,14 +165,14 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                       if (e.key === "Enter") submitRename();
                       if (e.key === "Escape") setEditingId(null);
                     }}
-                    className="flex-1"
+                    className="flex-1 bg-background border rounded px-2 py-1.5 min-h-[44px] md:min-h-0 md:px-1.5 md:py-0.5 text-[16px] md:text-xs outline-none focus:ring-1 focus:ring-ring"
                   />
-                  <Button variant="ghost" size="icon-sm" onClick={submitRename} aria-label={t("chat.saveRename")} className="text-success hover:text-success/80">
+                  <button onClick={submitRename} aria-label={t("chat.saveRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
                     <Check className="size-3" />
-                  </Button>
-                  <Button variant="ghost" size="icon-sm" onClick={() => setEditingId(null)} aria-label={t("chat.cancelRename")} className="text-muted-foreground hover:text-foreground active:text-foreground">
+                  </button>
+                  <button onClick={() => setEditingId(null)} aria-label={t("chat.cancelRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
                     <X className="size-3" />
-                  </Button>
+                  </button>
                 </div>
               ) : (
                 <>
@@ -189,29 +186,26 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     <span>{fmtRelative(conv.lastActive)}</span>
                   </div>
                   <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
+                    <button
                       aria-label={t("chat.renameConversation")}
                       onClick={(e) => {
                         e.stopPropagation();
                         startEditing(conv);
                       }}
+                      className="rounded-md p-2 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent flex items-center justify-center"
                     >
                       <Pencil className="size-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
+                    </button>
+                    <button
                       aria-label={t("chat.deleteConversation")}
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);
                       }}
-                      className="text-muted-foreground hover:text-danger"
+                      className="rounded-md p-2 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10 flex items-center justify-center"
                     >
                       <Trash2 className="size-3" />
-                    </Button>
+                    </button>
                   </div>
                 </>
               )}

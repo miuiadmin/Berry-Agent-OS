@@ -1,10 +1,7 @@
 
 import { useState, useEffect, useRef } from "react";
-import { ChevronRight, Wrench, Check, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
+import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
 
@@ -13,28 +10,33 @@ interface ToolCallCardsProps {
   isActive: boolean;
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 function ToolCallDetail({ call }: { call: ToolCallEvent }) {
   const [expanded, setExpanded] = useState(false);
   const t = useT();
 
   return (
     <div>
-      <Button
-        variant="ghost"
+      <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 w-full text-left text-[11px] hover:text-foreground transition-colors h-auto"
+        aria-expanded={expanded}
+        className="flex items-center gap-1.5 w-full text-left text-[11px] hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")} />
         <code className="font-mono text-[11px]">{call.toolName}</code>
         <span className="ml-auto flex items-center gap-1 shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
-          {formatDurationMs(call.durationMs)}
+          {formatDuration(call.durationMs)}
           {call.isError
-            ? <X className="size-3 text-danger" />
-            : <Check className="size-3 text-success" />
+            ? <X className="size-3 text-red-500" />
+            : <Check className="size-3 text-green-500" />
           }
         </span>
-      </Button>
+      </button>
       {expanded && (
         <div className="mt-1 ml-4 space-y-1.5 text-[11px]">
           <div>
@@ -44,12 +46,12 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
             </pre>
           </div>
           <div>
-            <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-danger" : "text-muted-foreground/60")}>
+            <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-red-400" : "text-muted-foreground/60")}>
               {t(call.isError ? "tools.error" : "tools.output")}
             </span>
             <pre className={cn(
               "mt-0.5 rounded px-2 py-1.5 overflow-x-auto max-h-40 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all",
-              call.isError ? "bg-danger/5" : "bg-muted/50",
+              call.isError ? "bg-red-500/5" : "bg-muted/50",
             )}>
               {call.result}
             </pre>
@@ -79,23 +81,22 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
   // （详见 thinking-process.tsx 注释），此处同样保留默认行高以保证 11px 小字可读性。
   return (
     <div>
-      <Button
-        variant="ghost"
+      <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors h-auto"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />
         <span>{t("tools.header", { count: calls.length })}</span>
-        {isActive && <Spinner size="sm" className="ml-0.5 [&>svg]:size-2.5" />}
+        {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
         {!isActive && (
           <span className="ml-0.5 opacity-60">
-            {totalMs > 0 ? `· ${formatDurationMs(totalMs)}` : ""}
+            {totalMs > 0 ? `· ${formatDuration(totalMs)}` : ""}
             {hasErrors ? t("thinking.hasErrors") : ""}
           </span>
         )}
-      </Button>
+      </button>
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
           <div className="ml-3.5 mt-0.5 border-l border-border/50 pl-2 divide-y divide-border/30">

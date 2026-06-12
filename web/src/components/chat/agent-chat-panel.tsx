@@ -10,9 +10,6 @@
 import { useEffect, useRef } from "react";
 import { useAgentChatStore, type AgentChatMessage } from "@/lib/stores/agent-chat-store";
 import { useT } from "@/lib/i18n";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Avatar } from "@/components/ui/avatar";
 import {
   Bot,
   ChevronDown,
@@ -22,48 +19,48 @@ import {
   X,
 } from "lucide-react";
 
-/** Agent 名称 → 显示颜色映射（全部走语义 token，明暗自适应） */
+/** Agent 名称 → 显示颜色映射 */
 const AGENT_COLORS: Record<string, string> = {
-  code: "text-info",
-  learning: "text-success",
-  memory: "text-chart-3",
-  skills: "text-chart-5",
-  conversation: "text-chart-4",
-  brain: "text-danger",
-  plugin_builder: "text-chart-1",
-  skill_tester: "text-warning",
-  evolution: "text-chart-2",
+  code: "text-blue-400",
+  learning: "text-green-400",
+  memory: "text-emerald-400",
+  skills: "text-purple-400",
+  conversation: "text-orange-400",
+  brain: "text-red-400",
+  plugin_builder: "text-pink-400",
+  skill_tester: "text-yellow-400",
+  evolution: "text-cyan-400",
 };
 
-/** Agent 名称 → 图标背景色（/10 透明度浅底，明暗自适应） */
+/** Agent 名称 → 图标背景色 */
 const AGENT_BG: Record<string, string> = {
-  code: "bg-info/10",
-  learning: "bg-success/10",
-  memory: "bg-chart-3/10",
-  skills: "bg-chart-5/10",
-  conversation: "bg-chart-4/10",
-  brain: "bg-danger/10",
+  code: "bg-blue-500/10",
+  learning: "bg-green-500/10",
+  memory: "bg-emerald-500/10",
+  skills: "bg-purple-500/10",
+  conversation: "bg-orange-500/10",
+  brain: "bg-red-500/10",
 };
 
 /** 获取 agent 显示颜色 */
 function getAgentColor(agent: string): string {
-  return AGENT_COLORS[agent] ?? "text-muted-foreground";
+  return AGENT_COLORS[agent] ?? "text-zinc-400";
 }
 
 /** 获取 agent 图标背景色 */
 function getAgentBg(agent: string): string {
-  return AGENT_BG[agent] ?? "bg-accent/10";
+  return AGENT_BG[agent] ?? "bg-zinc-500/10";
 }
 
 /** 方向箭头样式 */
 function DirectionArrow({ direction }: { direction: AgentChatMessage["direction"] }) {
   if (direction === "request") {
-    return <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />;
+    return <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0" />;
   }
   if (direction === "response") {
-    return <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0 rotate-180" />;
+    return <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0 rotate-180" />;
   }
-  return <MessageSquare className="w-3 h-3 text-muted-foreground flex-shrink-0" />;
+  return <MessageSquare className="w-3 h-3 text-zinc-500 flex-shrink-0" />;
 }
 
 /** 单条对话消息渲染 */
@@ -72,8 +69,10 @@ function AgentChatBubble({ msg }: { msg: AgentChatMessage }) {
 
   return (
     <div className={`flex items-start gap-1.5 px-2 py-1 text-[13px] ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
-      {/* Agent 图标 — 使用 Avatar adapter 统一样式 */}
-      <Avatar name={msg.fromAgent} size="sm" className={`flex-shrink-0 ${getAgentColor(msg.fromAgent)}`} fallback={<Bot className="w-3 h-3" />} />
+      {/* Agent 图标 */}
+      <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${getAgentBg(msg.fromAgent)}`}>
+        <Bot className={`w-3 h-3 ${getAgentColor(msg.fromAgent)}`} />
+      </div>
 
       {/* 消息内容 */}
       <div className={`flex items-center gap-1.5 max-w-[85%] ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
@@ -87,7 +86,7 @@ function AgentChatBubble({ msg }: { msg: AgentChatMessage }) {
       </div>
 
       {/* 消息正文 */}
-      <div className={`text-foreground text-[12px] leading-relaxed break-all ${isRequest ? "text-left" : "text-right"}`}>
+      <div className={`text-zinc-300 text-[12px] leading-relaxed break-all ${isRequest ? "text-left" : "text-right"}`}>
         {msg.content.length > 200
           ? msg.content.slice(0, 200) + "…"
           : msg.content}
@@ -123,43 +122,42 @@ export function AgentChatPanel() {
   const count = messages.length;
 
   return (
-    <div className="border-t border-border bg-muted/50">
-      {/* 头部（点击折叠/展开）— toggle Button + close Button 为兄弟关系，避免嵌套 button */}
-      <div className="flex items-center">
-        <Button
-          variant="ghost"
-          type="button"
-          onClick={toggleOpen}
-          className="flex-1 flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors h-auto"
-        >
-          <div className="flex items-center gap-2">
-            <MessageSquare className="w-4 h-4 text-muted-foreground" />
-            <span className="text-[13px] font-medium text-foreground">
-              {t("agentChat.title")}
+    <div className="border-t border-zinc-800 bg-zinc-900/50">
+      {/* 头部（点击折叠/展开） */}
+      <button
+        onClick={toggleOpen}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <MessageSquare className="w-4 h-4 text-zinc-400" />
+          <span className="text-[13px] font-medium text-zinc-300">
+            {t("agentChat.title")}
+          </span>
+          {count > 0 && (
+            <span className="text-[11px] bg-zinc-700 text-zinc-300 rounded-full px-1.5 py-0.5">
+              {count}
             </span>
-            {count > 0 && (
-              <Badge variant="secondary" className="text-[11px]">
-                {count}
-              </Badge>
-            )}
-          </div>
-          {isOpen ? (
-            <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          ) : (
-            <ChevronUp className="w-4 h-4 text-muted-foreground" />
           )}
-        </Button>
-        {isOpen && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setOpen(false)}
-            className="size-6 mr-2"
-          >
-            <X className="w-3 h-3 text-muted-foreground" />
-          </Button>
-        )}
-      </div>
+        </div>
+        <div className="flex items-center gap-1">
+          {isOpen && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+              }}
+              className="p-1 hover:bg-zinc-700 rounded"
+            >
+              <X className="w-3 h-3 text-zinc-500" />
+            </button>
+          )}
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-zinc-500" />
+          ) : (
+            <ChevronUp className="w-4 h-4 text-zinc-500" />
+          )}
+        </div>
+      </button>
 
       {/* 消息列表（折叠时隐藏） */}
       {isOpen && (
@@ -168,11 +166,11 @@ export function AgentChatPanel() {
           className="max-h-[300px] overflow-y-auto overscroll-contain scrollbar-thin"
         >
           {messages.length === 0 ? (
-            <div className="text-center text-muted-foreground text-[12px] py-4">
+            <div className="text-center text-zinc-600 text-[12px] py-4">
               {t("agentChat.empty")}
             </div>
           ) : (
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-zinc-800/50">
               {messages.map((msg) => (
                 <AgentChatBubble key={msg.id} msg={msg} />
               ))}

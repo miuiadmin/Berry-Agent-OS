@@ -11,22 +11,19 @@ import { apiGet } from "@/lib/api";
 import { useMissionStore, type Mission, type MissionTask } from "@/lib/stores/mission-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
 import {
   Target,
   CheckCircle2,
   Clock,
   AlertTriangle,
+  Loader2,
   GitBranch,
   Users,
   Radio,
 } from "lucide-react";
-import { Spinner } from "@/components/ui/spinner";
 
 // ─── API 响应类型 ───
 
@@ -55,15 +52,15 @@ interface PlanResponse {
 // ─── 状态徽章 ───
 
 function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "danger"; icon: React.ReactNode }> = {
+  const variants: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "destructive"; icon: React.ReactNode }> = {
     pending: { variant: "secondary", icon: <Clock className="size-3" /> },
-    in_progress: { variant: "warning", icon: <Spinner size="sm" className="[&>svg]:size-3" /> },
+    in_progress: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
     completed: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
-    failed: { variant: "danger", icon: <AlertTriangle className="size-3" /> },
+    failed: { variant: "destructive", icon: <AlertTriangle className="size-3" /> },
     cancelled: { variant: "secondary", icon: <Clock className="size-3" /> },
     // task-level statuses
     waiting: { variant: "secondary", icon: <Clock className="size-3" /> },
-    working: { variant: "warning", icon: <Spinner size="sm" className="[&>svg]:size-3" /> },
+    working: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
     done: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
   };
   const config = variants[status] ?? { variant: "secondary" as const, icon: null };
@@ -93,7 +90,7 @@ function TaskCard({ task }: { task: MissionTask }) {
           <p className="mt-1 text-xs text-muted-foreground">📊 {task.progress}</p>
         )}
         {task.result && (
-          <p className="mt-1 text-xs text-success dark:text-success">✅ {task.result}</p>
+          <p className="mt-1 text-xs text-green-600 dark:text-green-400">✅ {task.result}</p>
         )}
         {task.depends_on.length > 0 && (
           <p className="mt-1 text-xs text-muted-foreground">
@@ -152,8 +149,13 @@ function MissionDetail({ missionId }: { missionId: string }) {
         </div>
       </div>
 
-      {/* 进度条 — HeroUI ProgressBar 适配器，自动处理 ARIA */}
-      <Progress value={progressPercent} max={100} color="success" />
+      {/* 进度条 */}
+      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-green-500 transition-all duration-500"
+          style={{ width: `${progressPercent}%` }}
+        />
+      </div>
 
       {/* 任务列表 */}
       <Tabs value="tasks" onValueChange={() => {}}>
@@ -270,14 +272,11 @@ function MissionListItem({
   onClick: () => void;
 }) {
   return (
-    <Button
-      variant="ghost"
-      type="button"
+    <button
       onClick={onClick}
-      className={cn(
-        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 h-auto",
-        isSelected && "border-accent bg-accent/5",
-      )}
+      className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 ${
+        isSelected ? "border-primary bg-primary/5" : ""
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -289,7 +288,7 @@ function MissionListItem({
         </div>
         <Target className="size-4 shrink-0 text-muted-foreground" />
       </div>
-    </Button>
+    </button>
   );
 }
 

@@ -59,7 +59,7 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
     blockquote({ children, ...props }: ComponentPropsWithoutRef<"blockquote">) {
       return (
         <blockquote
-          className="my-3 border-l-3 border-accent/50 bg-muted/30 py-2 pl-4 pr-3 text-sm text-muted-foreground italic rounded-r-lg"
+          className="my-3 border-l-3 border-brand/50 bg-muted/30 py-2 pl-4 pr-3 text-sm text-muted-foreground italic rounded-r-lg"
           {...props}
         >
           {children}
@@ -75,7 +75,7 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
           href={safeHref}
           target={isExternal ? "_blank" : undefined}
           rel={isExternal ? "noopener noreferrer" : undefined}
-          className="inline-flex items-center gap-0.5 text-accent underline underline-offset-2 hover:text-accent/80 transition-colors"
+          className="inline-flex items-center gap-0.5 text-brand underline underline-offset-2 hover:text-brand/80 transition-colors"
           {...props}
         >
           {children}

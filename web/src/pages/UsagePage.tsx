@@ -3,8 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT, useDateFormat } from "@/lib/i18n";
-import { AnimatedStat } from "@/components/shared/animated-stat";
-import { formatTokens } from "@/lib/format";
+import { useCountUp } from "@/hooks/use-count-up";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AreaChart } from "@/components/charts/area-chart";
@@ -12,6 +11,12 @@ import { BarChart } from "@/components/charts/bar-chart";
 import { Sparkline } from "@/components/charts/sparkline";
 import { Coins, TrendingUp, Cpu, Bot } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+
+function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
+  const animated = useCountUp(value);
+  const display = format ? format(animated) : String(animated);
+  return <span className="tabular-nums">{display}</span>;
+}
 
 export default function UsagePage() {
   const t = useT();
@@ -208,4 +213,10 @@ export default function UsagePage() {
       </div>
     </div>
   );
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
 }

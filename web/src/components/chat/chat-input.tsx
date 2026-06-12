@@ -3,8 +3,6 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-react";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
@@ -19,7 +17,6 @@ interface ChatInputProps {
 export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  /** textarea ref，用于控制自动高度调整 */
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const t = useT();
@@ -55,7 +52,6 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    /** 自动调整高度：先重置，再按 scrollHeight 设置，上限 300px */
     const el = e.target;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 300) + "px";
@@ -80,9 +76,9 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
           {allAttachments.length > 0 && (
             <AttachmentPreview attachments={allAttachments} onRemove={handleRemoveAttachment} />
           )}
-          {/* Text input — HeroUI TextArea adapter，自动调整高度 */}
+          {/* Text input */}
           <div className="relative">
-            <Textarea
+            <textarea
               ref={textareaRef}
               value={text}
               onChange={handleInput}
@@ -90,7 +86,10 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               placeholder={t("chat.typePlaceholder")}
               aria-label={t("chat.typePlaceholder")}
               rows={1}
-              className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none border-0"
+              className={cn(
+                "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none",
+                "placeholder:text-muted-foreground"
+              )}
             />
             {charCount > 500 && (
               <span className="absolute bottom-2 right-3 text-[11px] text-muted-foreground/60">
@@ -109,23 +108,24 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
                 <Settings className="size-4" />
               </ToolbarButton>
               {isStreaming && (
-                <ToolbarButton onClick={onCancel} variant="danger" aria-label={t("chat.stopGeneration")}>
+                <ToolbarButton onClick={onCancel} variant="destructive" aria-label={t("chat.stopGeneration")}>
                   <Square className="size-3.5 fill-current" />
                 </ToolbarButton>
               )}
             </div>
-            <Button
-              variant="primary"
-              size="sm"
+            <button
               onClick={handleSubmit}
               disabled={!canSend || isStreaming || disabled}
               className={cn(
-                "btn-press",
-                canSend && !isStreaming && !disabled && "animate-send-ready"
+                "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 btn-press",
+                "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
+                canSend && !isStreaming && !disabled
+                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97] animate-send-ready"
+                  : "bg-muted text-muted-foreground cursor-not-allowed"
               )}
             >
               {t("chat.send")}
-            </Button>
+            </button>
           </div>
         </div>
       </div>
@@ -143,19 +143,24 @@ function ToolbarButton({
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  variant?: "default" | "danger";
+  variant?: "default" | "destructive";
   "aria-label"?: string;
 }) {
   return (
-    <Button
+    <button
       type="button"
-      variant={variant === "danger" ? "danger" : "ghost"}
-      size="icon-sm"
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
+      className={cn(
+        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-all duration-150 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 active:scale-90",
+        variant === "destructive"
+          ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent",
+        "disabled:opacity-40 disabled:pointer-events-none"
+      )}
     >
       {children}
-    </Button>
+    </button>
   );
 }

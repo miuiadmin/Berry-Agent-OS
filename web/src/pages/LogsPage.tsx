@@ -4,10 +4,6 @@ import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Spinner } from "@/components/ui/spinner";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 interface LogLine {
@@ -22,8 +18,8 @@ const LEVEL_NAMES: Record<number, string> = { 20: "DBG", 30: "INF", 40: "WRN", 5
 const LEVEL_COLORS: Record<number, string> = {
   20: "text-muted-foreground/50",
   30: "text-foreground",
-  40: "text-warning",
-  50: "text-danger",
+  40: "text-orange-500",
+  50: "text-red-500",
 };
 
 export default function LogsPage() {
@@ -57,56 +53,53 @@ export default function LogsPage() {
       <div className="shrink-0 border-b px-4 py-3 flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-semibold mr-auto">{t("logs.title")}</h1>
 
-        <Select
+        <select aria-label={t("logs.logLevel")}
           value={level}
-          onValueChange={setLevel}
-          ariaLabel={t("logs.logLevel")}
-          options={[
-            { key: "ALL", label: t("logs.all") },
-            { key: "DEBUG", label: t("logs.debug") },
-            { key: "INFO", label: t("logs.info") },
-            { key: "WARN", label: t("logs.warn") },
-            { key: "ERROR", label: t("logs.error") },
-          ]}
-          className="w-auto"
-        />
+          onChange={(e) => setLevel(e.target.value)}
+          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
+        >
+          <option value="ALL">{t("logs.all")}</option>
+          <option value="DEBUG">{t("logs.debug")}</option>
+          <option value="INFO">{t("logs.info")}</option>
+          <option value="WARN">{t("logs.warn")}</option>
+          <option value="ERROR">{t("logs.error")}</option>
+        </select>
 
-        <Input
+        <input
           type="text"
           aria-label={t("logs.filterByModule")}
           placeholder={t("logs.modulePlaceholder")}
           value={module}
           onChange={(e) => setModule(e.target.value)}
-          className="w-28"
+          className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         />
 
-        <Select
-          value={String(lines)}
-          onValueChange={(v) => setLines(Number(v))}
-          ariaLabel={t("logs.numberOfLines")}
-          options={[
-            { key: "50", label: "50" },
-            { key: "100", label: "100" },
-            { key: "200", label: "200" },
-            { key: "500", label: "500" },
-          ]}
-          className="w-auto"
-        />
+        <select aria-label={t("logs.numberOfLines")}
+          value={lines}
+          onChange={(e) => setLines(Number(e.target.value))}
+          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
+        >
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+          <option value={200}>200</option>
+          <option value={500}>500</option>
+        </select>
 
         <Button
           variant="ghost"
           aria-label={t("logs.refreshLogs")}
           onClick={() => refetch()}
-          className="size-11 md:size-8"
+          className={cn("size-11 md:size-8", isFetching && "animate-spin")}
         >
-          {isFetching ? <Spinner size="sm" /> : <RefreshCw className="size-3.5" />}
+          <RefreshCw className="size-3.5" />
         </Button>
 
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-          <Switch
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">
+          <input
+            type="checkbox"
             checked={autoRefresh}
-            onCheckedChange={setAutoRefresh}
-            aria-label={t("logs.auto")}
+            onChange={(e) => setAutoRefresh(e.target.checked)}
+            className="size-5 md:size-3"
           />
           {t("logs.auto")}
         </label>

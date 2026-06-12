@@ -1,11 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { X, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 
 interface ImageLightboxProps {
   src: string;
@@ -14,62 +12,82 @@ interface ImageLightboxProps {
   onClose: () => void;
 }
 
-/**
- * 图片灯箱 — 用 Dialog 适配器（HeroUI Modal）承载。
- *
- * ESC 关闭、遮罩点击关闭、焦点陷阱、焦点恢复、body 滚动锁定全部由
- * Dialog（react-aria Modal）内置提供，不再手写 keydown/overflow/focus 逻辑。
- */
 export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const t = useT();
 
+  /** 打开前记录焦点元素，关闭时恢复 */
+  const previousFocusRef = useState(() => null as HTMLElement | null)[0];
+  const prevFocusRef = useRef<HTMLElement | null>(null);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    },
+    [onClose],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    // 保存当前焦点
+    prevFocusRef.current = document.activeElement as HTMLElement;
+    document.addEventListener("keydown", handleKeyDown);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+      // 关闭时恢复焦点
+      if (prevFocusRef.current) {
+        prevFocusRef.current.focus();
+        prevFocusRef.current = null;
+      }
+    };
+  }, [open, handleKeyDown]);
+
+  useEffect(() => {
+    setError(false);
+  }, [src]);
+
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      {/* 全屏暗色遮罩容器，覆盖默认 DialogContent 的卡片样式 */}
-      <DialogContent
-        onClose={onClose}
-        aria-label={alt || t("lightbox.image")}
-        className="bg-black/80 backdrop-blur-sm border-none shadow-none p-0 w-screen h-screen max-w-none max-h-none mx-0 rounded-none flex items-center justify-center"
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt || t("lightbox.image")}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 z-10 flex size-11 md:size-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 active:bg-black/70 transition-colors"
+        aria-label={t("common.close")}
       >
-        {/* 关闭按钮放左上（避开图片） */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onClose}
-          aria-label={t("common.close")}
-          className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 z-10 text-white hover:bg-white/10 hover:text-white"
-        >
-          <X className="size-5" />
-        </Button>
-        {error ? (
-          <div className="flex flex-col items-center gap-3 text-white/60">
-            <ImageOff className="size-12" />
-            <span className="text-sm">{t("lightbox.failedToLoad")}</span>
-          </div>
-        ) : (
-          <img
-            src={src}
-            alt={alt || ""}
-            className={cn(
-              "max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-opacity duration-300",
-              loaded ? "opacity-100" : "opacity-0",
-            )}
-            onClick={(e) => e.stopPropagation()}
-            onError={() => setError(true)}
-            onLoad={() => setLoaded(true)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+        <X className="size-5" />
+      </button>
+      {error ? (
+        <div className="flex flex-col items-center gap-3 text-white/60">
+          <ImageOff className="size-12" />
+          <span className="text-sm">{t("lightbox.failedToLoad")}</span>
+        </div>
+      ) : (
+        <img
+          src={src}
+          alt={alt || ""}
+          className={cn(
+            "max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-opacity duration-300",
+            loaded ? "opacity-100" : "opacity-0"
+          )}
+          onClick={(e) => e.stopPropagation()}
+          onError={() => setError(true)}
+          onLoad={() => setLoaded(true)}
+        />
+      )}
+    </div>
   );
 }
 
-/**
- * 可点击图片 — 内联渲染缩略图，点击弹出全屏 ImageLightbox。
- * 加载失败时显示降级的图文提示。
- */
 export function ClickableImage({
   src,
   alt,
@@ -103,7 +121,7 @@ export function ClickableImage({
         className={cn(
           "rounded-lg max-w-full max-h-80 cursor-pointer hover:opacity-90 transition-all duration-300 my-2",
           loaded ? "opacity-100" : "opacity-0",
-          className,
+          className
         )}
         onClick={() => setOpen(true)}
         onError={() => setError(true)}

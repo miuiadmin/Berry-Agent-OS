@@ -6,13 +6,11 @@ import { queries, apiPost, type TaskInfo } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
 import { ListTodo, ChevronRight, XCircle, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDuration, formatJson } from "@/lib/format";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 const STATUS_OPTIONS = ["all", "created", "dispatched", "running", "completed", "failed", "cancelled", "timeout", "resumable"] as const;
@@ -72,33 +70,36 @@ export default function TasksPage() {
       <p className="mt-1 text-sm text-muted-foreground">{t("tasks.subtitle")}</p>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">
-        <Select
+        <select
           value={statusFilter}
-          onValueChange={handleStatusChange}
-          ariaLabel={t("tasks.filterByStatus")}
-          options={STATUS_OPTIONS.map((s) => ({
-            key: s,
-            label: s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s,
-          }))}
-          className="w-auto"
-        />
+          onChange={(e) => handleStatusChange(e.target.value)}
+          aria-label={t("tasks.filterByStatus")}
+          className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
+        >
+          {STATUS_OPTIONS.map((s) => (
+            <option key={s} value={s}>
+              {s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s}
+            </option>
+          ))}
+        </select>
         {agents && agents.length > 0 && (
-          <Select
+          <select
             value={agentFilter}
-            onValueChange={handleAgentChange}
-            ariaLabel={t("tasks.filterByAgent")}
-            options={[
-              { key: "all", label: t("tasks.allAgents") },
-              ...agents.map((a) => ({ key: a.name, label: a.name })),
-            ]}
-            className="w-auto"
-          />
+            onChange={(e) => handleAgentChange(e.target.value)}
+            aria-label={t("tasks.filterByAgent")}
+            className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
+          >
+            <option value="all">{t("tasks.allAgents")}</option>
+            {agents.map((a) => (
+              <option key={a.name} value={a.name}>{a.name}</option>
+            ))}
+          </select>
         )}
         {hasFilters && (
           <Button
             variant="ghost"
             size="sm"
-            className="text-xs text-muted-foreground"
+            className="text-xs text-muted-foreground min-h-[44px] md:min-h-0"
             onClick={() => { setStatusFilter("all"); setAgentFilter("all"); setOffset(0); }}
           >
             <Filter className="size-3 mr-1" />
@@ -187,7 +188,7 @@ export default function TasksPage() {
         <div className="mt-4 flex justify-center">
           <Button
             variant="outline"
-            size="sm"
+            size="default"
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
           >
             {t("tasks.loadMore")}
@@ -229,7 +230,7 @@ function TaskRow({
           <Badge
             variant={
               task.status === "completed" ? "success"
-                : task.status === "failed" ? "danger"
+                : task.status === "failed" ? "destructive"
                 : task.status === "running" ? "warning"
                 : "secondary"
             }
@@ -243,7 +244,7 @@ function TaskRow({
         <td className="px-4 py-2.5">
           {task.status === "running" && (
             <Button
-              variant="danger"
+              variant="destructive"
               size="sm"
               className="h-6 px-2 text-xs"
               onClick={(e) => {
@@ -294,8 +295,8 @@ function TaskDetail({ task }: { task: TaskInfo }) {
 
       {task.status === "failed" && task.error && (
         <div>
-          <span className="font-medium text-danger">{t("common.error")}</span>
-          <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-danger/5 border border-danger/20 p-3 text-[11px] text-danger">
+          <span className="font-medium text-destructive">{t("common.error")}</span>
+          <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-3 text-[11px] text-destructive">
             {task.error}
           </pre>
         </div>
@@ -320,4 +321,23 @@ function TaskDetail({ task }: { task: TaskInfo }) {
       )}
     </div>
   );
+}
+
+function formatDuration(startedAt?: string, finishedAt?: string, status?: string): string {
+  if (!startedAt) return "—";
+  const start = new Date(startedAt).getTime();
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
+  const seconds = Math.round((end - start) / 1000);
+  if (seconds < 60) return `${seconds}s${status === "running" ? "..." : ""}`;
+  const minutes = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return `${minutes}m ${rem}s${status === "running" ? "..." : ""}`;
+}
+
+function formatJson(str: string): string {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2);
+  } catch {
+    return str;
+  }
 }

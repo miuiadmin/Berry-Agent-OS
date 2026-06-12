@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { QueryBoundary } from "@/components/shared/query-boundary";
+import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
@@ -144,7 +144,7 @@ export default function ConversationsPage() {
           variant="outline"
           size="sm"
           onClick={() => setSort(sort === "recent" ? "messages" : "recent")}
-          className="gap-1.5"
+          className="gap-1.5 min-h-[44px] md:min-h-0"
         >
           <ArrowUpDown className="size-3.5" />
           <span className="hidden sm:inline">{sort === "recent" ? t("conversations.mostRecent") : t("conversations.mostMessages")}</span>
@@ -153,7 +153,7 @@ export default function ConversationsPage() {
           variant="outline"
           size="sm"
           onClick={handleExportAll}
-          className="gap-1.5"
+          className="gap-1.5 min-h-[44px] md:min-h-0"
           disabled={!conversationsQuery.data?.length}
         >
           <Download className="size-3.5" />
@@ -197,7 +197,7 @@ export default function ConversationsPage() {
                       variant="ghost"
                       size="icon"
                       aria-label={t("conversations.exportConversation")}
-                      className=""
+                      className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleExport(conv);
@@ -209,13 +209,13 @@ export default function ConversationsPage() {
                       variant="ghost"
                       size="icon"
                       aria-label={t("conversations.deleteConversation")}
-                      className=""
+                      className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);
                       }}
                     >
-                      <Trash2 className="size-4 text-danger" />
+                      <Trash2 className="size-4 text-destructive" />
                     </Button>
                   </div>
                 </div>

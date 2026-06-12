@@ -4,21 +4,20 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT } from "@/lib/i18n";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
 import { Shield, TrendingUp, AlertTriangle, CheckCircle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 
-/** 分数进度条 — 使用 HeroUI Progress adapter 渲染，自动处理 ARIA */
 function ScoreBar({ score, label }: { score: number; label: string }) {
-  /** 根据分数段选择语义色：≥0.7 成功、≥0.5 警告、<0.5 危险 */
-  const color = score >= 0.7 ? "success" as const : score >= 0.5 ? "warning" as const : "danger" as const;
+  const color = score >= 0.7 ? "bg-green-500" : score >= 0.5 ? "bg-yellow-500" : "bg-red-500";
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-muted-foreground">
         <span>{label}</span>
         <span className="tabular-nums">{(score * 100).toFixed(1)}%</span>
       </div>
-      <Progress value={score * 100} max={100} color={color} aria-label={label} />
+      <div className="h-2 rounded-full bg-muted overflow-hidden">
+        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${score * 100}%` }} />
+      </div>
     </div>
   );
 }
@@ -132,7 +131,7 @@ export default function DriftPage() {
               {signals.slice(0, 20).map(sig => (
                 <div key={sig.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm border-b last:border-0 pb-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`size-2 rounded-full shrink-0 ${sig.alignmentScore >= 0.7 ? 'bg-success' : sig.alignmentScore >= 0.5 ? 'bg-warning' : 'bg-danger'}`} />
+                    <span className={`size-2 rounded-full shrink-0 ${sig.alignmentScore >= 0.7 ? 'bg-green-500' : sig.alignmentScore >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`} />
                     <span className="text-muted-foreground shrink-0">{sig.checkpointType}</span>
                     {sig.driftDescription && (
                       <span className="text-xs truncate max-w-[120px] sm:max-w-[200px] md:max-w-[400px]">{sig.driftDescription}</span>

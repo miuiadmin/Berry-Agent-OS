@@ -1,44 +1,37 @@
-/**
- * 开关 — 封装 HeroUI Switch。
- *
- * 保持原有 export 接口：
- * - checked       → isSelected（react-aria Switch 受控选中态）
- * - onCheckedChange → onChange（react-aria 的 onChange 回调，参数为 boolean）
- * - disabled      → isDisabled（react-aria 的禁用态）
- *
- * HeroUI v3 的 Switch 是 react-aria-components 的 Switch：
- * - 受控用 isSelected + onChange（onChange 参数直接是 boolean）
- * - data-selected / data-disabled 等 data 属性由 react-aria 自动注入
- * 移动端触控目标 44px 通过 className 覆盖保证（CLAUDE.md 硬规则）。
- */
-import { Switch as HeroUISwitch } from "@heroui/react";
+"use client";
+
 import { cn } from "@/lib/utils";
 
 interface SwitchProps {
-  /** 受控选中态 */
   checked: boolean;
-  /** 选中态变化回调，参数为新的选中值 */
   onCheckedChange: (checked: boolean) => void;
-  /** 是否禁用 */
   disabled?: boolean;
-  /** 透传 className */
   className?: string;
-  /** 透传 id（用于表单关联） */
   id?: string;
 }
 
 export function Switch({ checked, onCheckedChange, disabled, className, id }: SwitchProps) {
   return (
-    <HeroUISwitch
+    <button
       id={id}
-      /* 受控选中态 */
-      isSelected={checked}
-      /* react-aria Switch 的 onChange 直接返回 boolean */
-      onChange={onCheckedChange}
-      /* 禁用态 */
-      isDisabled={disabled}
-      /* 移动端触控目标 44px（CLAUDE.md 硬规则），桌面端恢复默认 */
-      className={cn("min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0", className)}
-    />
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onCheckedChange(!checked)}
+      className={cn(
+        "inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        checked ? "bg-brand" : "bg-input",
+        className
+      )}
+    >
+      <span
+        className={cn(
+          "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-all duration-200",
+          checked ? "translate-x-4" : "translate-x-0"
+        )}
+      />
+    </button>
   );
 }

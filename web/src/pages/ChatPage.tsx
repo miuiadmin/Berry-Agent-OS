@@ -5,8 +5,8 @@ import { ConversationSidebar } from "@/components/chat/conversation-sidebar";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { Drawer } from "@/components/ui/drawer";
 import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -24,12 +24,16 @@ export default function ChatPage() {
 
   return (
     <div className="relative flex h-full overflow-hidden">
-      {/* 移动端：Drawer adapter 自动处理遮罩、滑入/滑出动画、ESC 关闭、聚焦陷阱 */}
-      <Drawer open={sidebarOpen} onOpenChange={setSidebarOpen} placement="left">
-        <ConversationSidebar onSelect={() => setSidebarOpen(false)} />
-      </Drawer>
-      {/* 桌面端：侧边栏始终可见 */}
-      <div className="hidden md:block md:w-64 md:shrink-0">
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 animate-overlay-in md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <div className={cn(
+        "fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] transform transition-transform duration-200 md:relative md:w-64 md:max-w-none md:translate-x-0 md:shrink-0",
+        sidebarOpen ? "translate-x-0 animate-sidebar-in" : "-translate-x-full"
+      )}>
         <ConversationSidebar onSelect={() => setSidebarOpen(false)} />
       </div>
       <div className="flex-1 min-w-0 h-full">

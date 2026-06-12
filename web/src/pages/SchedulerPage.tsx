@@ -18,20 +18,15 @@ import {
   type SchedulerJob,
   type SchedulerQueue,
 } from "@/lib/api";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { QueryBoundary } from "@/components/shared/query-boundary";
+import { QueryBoundary } from "@/components/ui/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/components/shared/page-header";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 // ─── Status badge helper ───────────────────────────────────────────────────
@@ -66,16 +61,14 @@ function JobExecutions({ jobId }: { jobId: string }) {
 
   return (
     <div>
-      <Button
-        variant="ghost"
-        size="sm"
+      <button
         onClick={() => setShow(!show)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground min-h-0 h-auto"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
       >
         {show ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <History className="size-3" />
         {t("scheduler.executionHistory")}
-      </Button>
+      </button>
       {show && (
         <div className="mt-2 space-y-1 pl-4">
           <QueryBoundary query={execQuery} skeleton={<p className="text-[11px] text-muted-foreground">{t("common.loading")}</p>}>
@@ -88,7 +81,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
                   className="flex items-center gap-2 rounded border px-2 py-1.5 text-[11px]"
                 >
                   <Badge
-                    variant={ex.status === "completed" ? "outline" : "danger"}
+                    variant={ex.status === "completed" ? "outline" : "destructive"}
                     className="text-[11px]"
                   >
                     {t(`status.${ex.status}`) ?? ex.status}
@@ -102,7 +95,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
                     </span>
                   )}
                   {ex.error && (
-                    <span className="truncate text-danger">{ex.error}</span>
+                    <span className="truncate text-destructive">{ex.error}</span>
                   )}
                 </div>
               ))
@@ -146,11 +139,12 @@ function CreateJobCard({
           onChange={(e) => setCron(e.target.value)}
           className="h-11 md:h-8 font-mono text-sm"
         />
-        <Textarea
+        <textarea
           placeholder={t("scheduler.promptPlaceholder")}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={3}
+          className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
         <div className="flex gap-2">
           <Button
@@ -255,21 +249,25 @@ export default function SchedulerPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <PageHeader
-        icon={Clock}
-        title={t("scheduler.title")}
-        subtitle={t("scheduler.subtitle")}
-        action={
-          <Button
-            onClick={() => setShowCreate(!showCreate)}
-            size="sm"
-            className="h-11 md:h-9"
-          >
-            <Plus className="mr-1 size-4" />
-            {t("scheduler.newJob")}
-          </Button>
-        }
-      />
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <Clock className="size-5 text-brand" />
+            {t("scheduler.title")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t("scheduler.subtitle")}
+          </p>
+        </div>
+        <Button
+          onClick={() => setShowCreate(!showCreate)}
+          size="sm"
+          className="h-11 md:h-9"
+        >
+          <Plus className="mr-1 size-4" />
+          {t("scheduler.newJob")}
+        </Button>
+      </div>
 
       {/* Queue status mini-bar */}
       {queue && (
@@ -286,20 +284,36 @@ export default function SchedulerPage() {
         </div>
       )}
 
-      {/* Tab switcher — HeroUI Tabs 适配器（自动处理 ARIA 与键盘导航） */}
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "jobs" | "queue" | "webhooks")} className="w-full">
-        <TabsList className="h-auto bg-transparent p-0 gap-1 border-b rounded-none w-full justify-start">
-          {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
-            <TabsTrigger
-              key={tabKey}
-              value={tabKey}
-              className="capitalize rounded-none border-b-2 border-transparent data-[selected]:border-accent data-[selected]:bg-transparent data-[selected]:shadow-none"
-            >
-              {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : t("scheduler.webhooks")}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {/* Tab switcher — ARIA tablist 模式 */}
+      <div className="flex gap-1 border-b" role="tablist" aria-label={t("scheduler.title")}>
+        {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
+          <button
+            key={tabKey}
+            role="tab"
+            aria-selected={tab === tabKey}
+            onClick={() => setTab(tabKey)}
+            onKeyDown={(e) => {
+              const tabs = ["jobs", "queue", "webhooks"] as const;
+              const idx = tabs.indexOf(tabKey);
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                setTab(tabs[(idx + 1) % tabs.length]);
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setTab(tabs[(idx - 1 + tabs.length) % tabs.length]);
+              }
+            }}
+            className={cn(
+              "px-3 py-2 text-sm font-medium capitalize transition-colors min-h-[44px] md:min-h-0",
+              tab === tabKey
+                ? "border-b-2 border-brand text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : t("scheduler.webhooks")}
+          </button>
+        ))}
+      </div>
 
       {/* Create job form */}
       {showCreate && tab === "jobs" && (
@@ -312,7 +326,7 @@ export default function SchedulerPage() {
       {/* Jobs tab */}
       {tab === "jobs" && (
         <div role="tabpanel">
-        <QueryBoundary query={jobsQuery} skeleton={<div className="space-y-2">{Array.from({ length: 2 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="space-y-2"><Skeleton className="h-4 w-1/3" /><Skeleton className="h-3 w-2/3" /></div></CardContent></Card>)}</div>}>
+        <QueryBoundary query={jobsQuery} skeleton={<div className="space-y-2">{Array.from({ length: 2 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="space-y-2"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /><div className="h-3 w-2/3 animate-pulse rounded bg-muted" /></div></CardContent></Card>)}</div>}>
           {(jobs) => jobs.length === 0 ? (
             <EmptyState
               icon={Clock}
@@ -357,56 +371,52 @@ export default function SchedulerPage() {
                       </div>
                       <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         {job.status !== "paused" && job.enabled && (
-                          <Tooltip content={t("common.pause")}>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-11 md:size-8"
-                              aria-label={t("common.pause")}
-                              disabled={pauseMut.isPending}
-                              onClick={() => pauseMut.mutate(job.id)}
-                            >
-                              <Pause className="size-3.5" />
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {job.status === "paused" && (
-                          <Tooltip content={t("common.resume")}>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-11 md:size-8"
-                              aria-label={t("common.resume")}
-                              disabled={resumeMut.isPending}
-                              onClick={() => resumeMut.mutate(job.id)}
-                            >
-                              <Play className="size-3.5" />
-                            </Button>
-                          </Tooltip>
-                        )}
-                        <Tooltip content={t("scheduler.triggerNow")}>
                           <Button
                             variant="ghost"
                             size="icon"
                             className="size-11 md:size-8"
-                            aria-label={t("scheduler.triggerNow")}
-                            disabled={triggerMut.isPending}
-                            onClick={() => triggerMut.mutate(job.id)}
+                            title={t("common.pause")}
+                            aria-label={t("common.pause")}
+                            disabled={pauseMut.isPending}
+                            onClick={() => pauseMut.mutate(job.id)}
                           >
-                            <RotateCw className="size-3.5" />
+                            <Pause className="size-3.5" />
                           </Button>
-                        </Tooltip>
-                        <Tooltip content={t("common.delete")}>
+                        )}
+                        {job.status === "paused" && (
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={cn("size-11 md:size-8 text-danger hover:text-danger")}
-                            aria-label={t("common.delete")}
-                            onClick={() => setDeleteTarget(job.id)}
+                            className="size-11 md:size-8"
+                            title={t("common.resume")}
+                            aria-label={t("common.resume")}
+                            disabled={resumeMut.isPending}
+                            onClick={() => resumeMut.mutate(job.id)}
                           >
-                            <Trash2 className="size-3.5" />
+                            <Play className="size-3.5" />
                           </Button>
-                        </Tooltip>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 md:size-8"
+                          title={t("scheduler.triggerNow")}
+                          aria-label={t("scheduler.triggerNow")}
+                          disabled={triggerMut.isPending}
+                          onClick={() => triggerMut.mutate(job.id)}
+                        >
+                          <RotateCw className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
+                          title={t("common.delete")}
+                          aria-label={t("common.delete")}
+                          onClick={() => setDeleteTarget(job.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
                       </div>
                     </div>
                     <JobExecutions jobId={job.id} />
@@ -422,7 +432,7 @@ export default function SchedulerPage() {
       {/* Queue tab */}
       {tab === "queue" && (
         <div role="tabpanel">
-        <QueryBoundary query={queueQuery} skeleton={<div className="grid gap-4 md:grid-cols-3">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-4 text-center"><Skeleton className="mx-auto h-8 w-16" /></CardContent></Card>)}</div>}>
+        <QueryBoundary query={queueQuery} skeleton={<div className="grid gap-4 md:grid-cols-3">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-4 text-center"><div className="mx-auto h-8 w-16 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}>
           {(queue) => queue ? (
             <div className="grid gap-4 md:grid-cols-3">
               <Card>
@@ -454,7 +464,7 @@ export default function SchedulerPage() {
       {/* Webhooks tab */}
       {tab === "webhooks" && (
         <div role="tabpanel">
-        <QueryBoundary query={webhookQuery} skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><Skeleton className="h-4 w-1/3" /></CardContent></Card>)}</div>}>
+        <QueryBoundary query={webhookQuery} skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}>
           {(webhooks) => webhooks.length === 0 ? (
             <EmptyState
               icon={Webhook}

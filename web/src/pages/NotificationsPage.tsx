@@ -4,16 +4,13 @@ import { Bell, Check, Archive } from "lucide-react";
 import { toast } from "sonner";
 import { notificationsApi, type NotificationItem } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { QueryBoundary } from "@/components/shared/query-boundary";
+import { QueryBoundary } from "@/components/ui/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Skeleton } from "@/components/ui/skeleton";
-import { PageHeader } from "@/components/shared/page-header";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 type Filter = "unread" | "all" | "archived";
@@ -81,20 +78,22 @@ export default function NotificationsPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <PageHeader
-        icon={Bell}
-        title={
-          <>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <Bell className="size-5 text-brand" />
             {t("notifications.title")}
             {unread > 0 && (
-              <Badge variant="danger" className="text-[11px]">
+              <Badge variant="destructive" className="text-[11px]">
                 {unread}
               </Badge>
             )}
-          </>
-        }
-        subtitle={t("notifications.subtitle")}
-        action={unread > 0 && (
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t("notifications.subtitle")}
+          </p>
+        </div>
+        {unread > 0 && (
           <Button
             variant="outline"
             size="sm"
@@ -106,7 +105,7 @@ export default function NotificationsPage() {
             {t("notifications.markAllRead")}
           </Button>
         )}
-      />
+      </div>
 
       {/* Filter tabs */}
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
@@ -122,7 +121,7 @@ export default function NotificationsPage() {
       {/* Notification list */}
       <QueryBoundary
         query={listQuery}
-        skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><Skeleton className="h-4 w-1/3" /></CardContent></Card>)}</div>}
+        skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}
       >
         {(notifications) => notifications.length === 0 ? (
           <EmptyState
@@ -149,7 +148,7 @@ export default function NotificationsPage() {
                 <CardContent className="flex items-start gap-3 py-3">
                   <div className="mt-0.5 shrink-0">
                     {!item.read ? (
-                      <div className="size-2 rounded-full bg-accent" />
+                      <div className="size-2 rounded-full bg-brand" />
                     ) : (
                       <div className="size-2 rounded-full bg-muted-foreground/30" />
                     )}
@@ -174,30 +173,28 @@ export default function NotificationsPage() {
                   </div>
                   <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     {!item.read && (
-                      <Tooltip content={t("notifications.markRead")}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-11 md:size-8"
-                          aria-label={t("notifications.markRead")}
-                          onClick={() => readMut.mutate(item.id)}
-                        >
-                          <Check className="size-3.5" />
-                        </Button>
-                      </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11 md:size-8"
+                        title={t("notifications.markRead")}
+                        aria-label={t("notifications.markRead")}
+                        onClick={() => readMut.mutate(item.id)}
+                      >
+                        <Check className="size-3.5" />
+                      </Button>
                     )}
                     {!item.archived && (
-                      <Tooltip content={t("notifications.archive")}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-11 md:size-8"
-                          aria-label={t("notifications.archive")}
-                          onClick={() => archiveMut.mutate(item.id)}
-                        >
-                          <Archive className="size-3.5" />
-                        </Button>
-                      </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11 md:size-8"
+                        title={t("notifications.archive")}
+                        aria-label={t("notifications.archive")}
+                        onClick={() => archiveMut.mutate(item.id)}
+                      >
+                        <Archive className="size-3.5" />
+                      </Button>
                     )}
                   </div>
                 </CardContent>

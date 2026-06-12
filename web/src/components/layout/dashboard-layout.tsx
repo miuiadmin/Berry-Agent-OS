@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "./app-sidebar";
 import { Button } from "@/components/ui/button";
-import { Drawer } from "@/components/ui/drawer";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DebugCaptureButton } from "@/components/debug/debug-capture-button";
@@ -13,7 +12,6 @@ import { useWsStore } from "@/lib/stores/ws-store";
 import { useT } from "@/lib/i18n";
 
 export function DashboardLayout() {
-  /** 移动端抽屉开关（桌面端侧边栏常驻，不受此状态影响） */
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const connect = useWsStore((s) => s.connect);
@@ -28,34 +26,45 @@ export function DashboardLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 路由切换时关闭移动端抽屉（HeroUI Drawer 的 ESC / 遮罩点击关闭由其原生处理）
+  // 路由切换时关闭移动端侧边栏
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  // ESC 关闭移动端侧边栏
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [mobileOpen]);
+
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* 桌面端常驻侧边栏（移动端隐藏，由下方 Drawer 接管） */}
-      <aside className="hidden md:block md:w-56 md:shrink-0">
-        <AppSidebar />
-      </aside>
+      {/* 移动端遮罩层 */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 animate-overlay-in md:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
 
-      {/* 移动端抽屉侧边栏（HeroUI Drawer 原生处理遮罩/ESC/滑入动画/聚焦陷阱） */}
-      <Drawer open={mobileOpen} onOpenChange={setMobileOpen} placement="left">
+      {/* 侧边栏：移动端 overlay 抽屉，桌面端常驻 */}
+      <div className={`
+        fixed inset-y-0 left-0 z-50 w-72 transform transition-transform duration-200 ease-in-out md:relative md:w-56 md:translate-x-0 md:shrink-0
+        ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+      `}>
         <AppSidebar onNavigate={() => setMobileOpen(false)} />
-      </Drawer>
+      </div>
 
-      {/* 主内容区 */}
-      <div className="flex flex-1 flex-col min-w-0">
+      {/* 主内容区 — 移动端侧边栏打开时对屏幕阅读器隐藏 */}
+      <div className="flex flex-1 flex-col min-w-0" aria-hidden={mobileOpen || undefined}>
         {/* 移动端顶栏：hamburger + 标题 + 连接状态 + 用户菜单 */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="size-11 md:size-auto active:scale-90 transition-transform"
-            aria-label={mobileOpen ? t("userMenu.closeMenu") : t("userMenu.openMenu")}
-          >
+          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)} className="size-11 md:size-auto active:scale-90 transition-transform" aria-label={mobileOpen ? t("userMenu.closeMenu") : t("userMenu.openMenu")}>
             <div className="relative size-5">
               <Menu className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-90 opacity-0 scale-75" : "rotate-0 opacity-100 scale-100")} />
               <X className={cn("size-5 absolute inset-0 transition-all duration-200", mobileOpen ? "rotate-0 opacity-100 scale-100" : "-rotate-90 opacity-0 scale-75")} />

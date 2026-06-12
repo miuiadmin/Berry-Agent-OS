@@ -4,7 +4,7 @@ import { Brain, Plus, Search, Trash2, ArrowUpRight, RefreshCw } from "lucide-rea
 import { toast } from "sonner";
 import { memoryApi, type MemoryEntry } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { QueryBoundary } from "@/components/shared/query-boundary";
+import { QueryBoundary } from "@/components/ui/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -13,10 +13,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/components/shared/page-header";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip } from "@/components/ui/tooltip";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 type Layer = "agent" | "workspace" | "global";
@@ -34,8 +30,8 @@ function MemorySkeleton() {
         <Card key={i}>
           <CardContent className="py-3">
             <div className="space-y-2">
-              <Skeleton className="h-4 w-1/3" />
-              <Skeleton className="h-3 w-2/3" />
+              <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
+              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
             </div>
           </CardContent>
         </Card>
@@ -129,21 +125,25 @@ export default function MemoryPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <PageHeader
-        icon={Brain}
-        title={t("memory.title")}
-        subtitle={t("memory.subtitle")}
-        action={
-          <Button
-            onClick={() => setShowCreate(!showCreate)}
-            size="sm"
-            className="h-11 md:h-9"
-          >
-            <Plus className="mr-1 size-4" />
-            {t("memory.addMemory")}
-          </Button>
-        }
-      />
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <Brain className="size-5 text-brand" />
+            {t("memory.title")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {t("memory.subtitle")}
+          </p>
+        </div>
+        <Button
+          onClick={() => setShowCreate(!showCreate)}
+          size="sm"
+          className="h-11 md:h-9"
+        >
+          <Plus className="mr-1 size-4" />
+          {t("memory.addMemory")}
+        </Button>
+      </div>
 
       {/* Layer tabs + scope selector */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
@@ -177,11 +177,12 @@ export default function MemoryPage() {
               onChange={(e) => setNewKey(e.target.value)}
               className="h-11 md:h-8"
             />
-            <Textarea
+            <textarea
               placeholder={t("memory.valuePlaceholder")}
               value={newValue}
               onChange={(e) => setNewValue(e.target.value)}
               rows={3}
+              className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <div className="flex gap-2">
               <Button
@@ -259,41 +260,38 @@ export default function MemoryPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                      <Tooltip content={t("memory.verify")}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-11 md:size-8"
-                          aria-label={t("memory.verify")}
-                          disabled={verifyMut.isPending}
-                          onClick={() => verifyMut.mutate(entry.id)}
-                        >
-                          <RefreshCw className="size-3.5" />
-                        </Button>
-                      </Tooltip>
-                      <Tooltip content={t("memory.promote")}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-11 md:size-8"
-                          aria-label={t("memory.promote")}
-                          disabled={promoteMut.isPending}
-                          onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
-                        >
-                          <ArrowUpRight className="size-3.5" />
-                        </Button>
-                      </Tooltip>
-                      <Tooltip content={t("common.delete")}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className={cn("size-11 md:size-8 text-danger hover:text-danger")}
-                          aria-label={t("common.delete")}
-                          onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </Tooltip>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11 md:size-8"
+                        title={t("memory.verify")}
+                        aria-label={t("memory.verify")}
+                        disabled={verifyMut.isPending}
+                        onClick={() => verifyMut.mutate(entry.id)}
+                      >
+                        <RefreshCw className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11 md:size-8"
+                        title={t("memory.promote")}
+                        aria-label={t("memory.promote")}
+                        disabled={promoteMut.isPending}
+                        onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
+                      >
+                        <ArrowUpRight className="size-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
+                        title={t("common.delete")}
+                        aria-label={t("common.delete")}
+                        onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
