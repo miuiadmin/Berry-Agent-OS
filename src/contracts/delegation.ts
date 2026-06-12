@@ -205,6 +205,9 @@ export interface TurnCorrectionPayload {
   action: CorrectionAction;
   instruction?: string;
   newConstraints?: CorrectionConstraints;
+  /** 15.0 机制 D：checkpoint 阶段 Brain 可顺带发号施令（指挥任意 Agent execute/inspect/report）。
+   * 伴随字段，不动 action 语义（correction-flow 无感）；checkpoint handler 检测到时额外发 brain.command */
+  command?: import('./brain.js').BrainCommand;
   /** L2: CAS 消费 ID，防止崩溃后重复注入 */
   _correctionId?: string | null;
   /** L2: 消费时间戳，调用方可做幂等判断 */

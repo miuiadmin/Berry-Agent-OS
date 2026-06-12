@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePermissionJudge, parseRouteDecision } from './prompts.js';
+import { parsePermissionJudge, parseRouteDecision, parseCheckpointResult } from './prompts.js';
 
 /**
  * 15.0 机制 B：parsePermissionJudge 的 uncertain/escalation 解析测试。
@@ -77,5 +77,33 @@ describe('parseRouteDecision (15.0 机制 B route uncertain 解析)', () => {
     const out = parseRouteDecision('not json');
     expect(out.targetAgent).toBe('conversation');
     expect(out.escalation).toBeUndefined();
+  });
+});
+
+describe('parseCheckpointResult (15.0 机制 D command 伴随字段)', () => {
+  it('无 command 字段 → command undefined', () => {
+    const out = parseCheckpointResult('{"action":"continue"}', 'dlg1');
+    expect(out.action).toBe('continue');
+    expect(out.command).toBeUndefined();
+  });
+
+  it('含 command → 解析为 BrainCommand（默认 report/priority normal）', () => {
+    const raw = '{"action":"adjust","instruction":"x","command":{"target":"auditor","type":"inspect","payload":{"scope":"audit"},"priority":"high"}}';
+    const out = parseCheckpointResult(raw, 'dlg1');
+    expect(out.command).toBeDefined();
+    expect(out.command!.target).toBe('auditor');
+    expect(out.command!.type).toBe('inspect');
+    expect(out.command!.priority).toBe('high');
+  });
+
+  it('command 缺 target → 不解析（无效 command）', () => {
+    const out = parseCheckpointResult('{"action":"continue","command":{"type":"report"}}', 'dlg1');
+    expect(out.command).toBeUndefined();
+  });
+
+  it('command 非法 type → 回退 report', () => {
+    const out = parseCheckpointResult('{"action":"continue","command":{"target":"code","type":"bogus"}}', 'dlg1');
+    expect(out.command).toBeDefined();
+    expect(out.command!.type).toBe('report');
   });
 });

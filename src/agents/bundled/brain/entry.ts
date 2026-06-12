@@ -1086,6 +1086,11 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       });
 
       const correction = parseCheckpointResult(result.content, payload.delegationId);
+      // 15.0 机制 D：checkpoint 阶段 Brain 顺带发号施令（command 伴随字段）。
+      // ipc.send 触发 core 侧 setupBrainCommandHandler 注册的拦截 handler（与 route.result 同机制）。
+      if (correction.command) {
+        ipc.send('brain.command', 'core', correction.command, trackingId);
+      }
       ipc.send('checkpoint.evaluate.result', 'core', correction, trackingId);
     } catch (err) {
       ipc.send('checkpoint.evaluate.result', 'core', {

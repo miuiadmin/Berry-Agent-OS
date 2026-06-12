@@ -416,6 +416,12 @@ export function buildCheckpointSystemPrompt(): string {
     "blockPaths": ["禁止访问的路径模式（glob 或路径前缀），如 \".env\"、\"src/secrets/**\""],
     "requiredApproach": "<建议方法>",
     "reducedTimeout": <毫秒数，可选>
+  },
+  "command": {
+    "target": "<目标 Agent 名（可选，顺带给任意 Agent 派指令）>",
+    "type": "execute" | "inspect" | "report",
+    "payload": { "<随 type 而异：execute=任务 / inspect=检查维度 / report=查询>" },
+    "priority": "low" | "normal" | "high" | "critical"
   }
 }
 
@@ -425,6 +431,12 @@ export function buildCheckpointSystemPrompt(): string {
 - **adjust**: 方向有偏差，给出调整指令让 Agent 修正方向（不重启）
 - **stop**: 无法完成或不应继续，终止并回复用户当前状态
 - **restart**: 完全走错方向，需要换个方法或 Agent 重来
+
+## 发号施令（command，可选）
+
+除 action 干预外，你还可顺带通过 command 给任意 Agent 派 execute/inspect/report 指令
+（15.0 机制 D）。典型场景：发现风险 → command auditor inspect 复查；任务需另一 Agent
+协助 → command execute。**不需要时省略 command 字段**，不要无意义派发。
 
 ## 判断原则
 
@@ -478,6 +490,18 @@ export function parseCheckpointResult(llmOutput: string, delegationId: string): 
 
     const action: CorrectionAction = VALID_ACTIONS.includes(parsed.action) ? parsed.action : 'continue';
 
+    // 15.0 机制 D：checkpoint 阶段 Brain 可顺带发号施令（command 伴随字段）
+    let command: import('../../../contracts/brain.js').BrainCommand | undefined;
+    if (parsed.command && typeof parsed.command === 'object' && typeof parsed.command.target === 'string') {
+      const cmdType = ['execute', 'inspect', 'report'].includes(parsed.command.type) ? parsed.command.type : 'report';
+      command = {
+        target: parsed.command.target,
+        type: cmdType as 'execute' | 'inspect' | 'report',
+        payload: parsed.command.payload && typeof parsed.command.payload === 'object' ? parsed.command.payload : {},
+        priority: ['low', 'normal', 'high', 'critical'].includes(parsed.command.priority) ? parsed.command.priority : 'normal',
+      };
+    }
+
     return {
       delegationId,
       action,
@@ -491,6 +515,7 @@ export function parseCheckpointResult(llmOutput: string, delegationId: string): 
             reducedTimeout: typeof parsed.newConstraints.reducedTimeout === 'number' ? parsed.newConstraints.reducedTimeout : undefined,
           }
         : undefined,
+      command,
     };
   } catch {
     return { delegationId, action: 'continue' };
