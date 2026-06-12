@@ -11,7 +11,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 
@@ -302,11 +302,12 @@ export default function MemoryPage() {
       </QueryBoundary>
 
       {/* 删除确认对话框 */}
-      <AlertDialog
+      <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t("memory.deleteThisMemory")}
         description={t("memory.deleteConfirmDesc")}
+        actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) {
             deleteMut.mutate({ entryLayer: deleteTarget.layer, id: deleteTarget.id });

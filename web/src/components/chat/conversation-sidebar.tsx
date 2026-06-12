@@ -7,7 +7,7 @@ import { queries, apiDelete, renameConversation, type ConversationInfo } from "@
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Search, Trash2, Pencil, Check, X } from "lucide-react";
 import { useT, useDateFormat } from "@/lib/i18n";
 
@@ -219,7 +219,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
         </div>
       </ScrollArea>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t("chat.deleteConfirmTitle")}

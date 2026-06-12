@@ -1036,11 +1036,24 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   private setupRoutingFlow(reviewerIpc: AgentIpc): void {
     reviewerIpc.onMessage('route.result', (msg: IpcMessage) => {
-      const { decision } = msg.payload as RouteResultPayload;
+      const { decision, escalation } = msg.payload as RouteResultPayload;
       const correlationId = msg.correlationId!;
-      logger.info({ correlationId, intent: decision.intent, target: decision.targetAgent }, '路由决策到达');
+      logger.info({ correlationId, intent: decision.intent, target: decision.targetAgent, hasEscalation: !!escalation }, '路由决策到达');
 
       const pending = this.sessionManager.getPending(correlationId);
+
+      // 15.0 机制 B：Brain 路由拿不准意图 → 升级问用户（优于 FallbackRouter 猜测），不继续路由
+      if (escalation && pending) {
+        logger.info({ correlationId, question: safeSlice(escalation.questionToUser, 100) }, 'route 升级问用户（机制 B）');
+        getEventBus().emit('conversation.ask_user', {
+          sessionId: pending.sessionId,
+          taskId: pending.taskId ?? correlationId,
+          agent: 'brain',
+          question: escalation.questionToUser,
+        });
+        return;
+      }
+
       if (pending) {
         this.fallbackRouter.recordBrainDecision(pending.userMessage, decision);
         this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, decision as unknown as Record<string, unknown>, pending.taskId);

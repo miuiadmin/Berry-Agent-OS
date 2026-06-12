@@ -276,7 +276,7 @@ function parseIntentAnchor(raw: unknown): IntentAnchor | undefined {
   };
 }
 
-export function parseRouteDecision(llmOutput: string): RouteDecision {
+export function parseRouteDecision(llmOutput: string): RouteDecision & { escalation?: import('../../../contracts/brain.js').BrainEscalation } {
   try {
     // Try to extract JSON — handle markdown code blocks and raw JSON
     let jsonStr: string | undefined;
@@ -289,6 +289,16 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
     }
     if (!jsonStr) throw new Error('No JSON found');
     const parsed = JSON.parse(jsonStr);
+
+    // 15.0 机制 B：Brain 路由拿不准意图时升级问用户（uncertain），优于 FallbackRouter 猜测
+    let escalation: import('../../../contracts/brain.js').BrainEscalation | undefined;
+    if (Boolean(parsed.uncertain) && typeof parsed.escalationQuestion === 'string' && parsed.escalationQuestion.trim()) {
+      escalation = {
+        source: 'decision',
+        reason: typeof parsed.reason === 'string' ? parsed.reason : 'Brain 无法判定用户意图/目标 Agent',
+        questionToUser: parsed.escalationQuestion.trim(),
+      };
+    }
 
     const intent: RoutingIntent = VALID_INTENTS.includes(parsed.intent) ? parsed.intent : 'chat';
     const targetAgent = typeof parsed.targetAgent === 'string' ? parsed.targetAgent : 'conversation';
@@ -320,6 +330,7 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
           ? parsed.missionSpec.squadRole
           : undefined,
       } : undefined,
+      escalation,
     };
   } catch {
     logger.warn({ rawOutput: safeSlice(llmOutput, 500) }, 'brain:route-parse-failed');

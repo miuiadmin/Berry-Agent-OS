@@ -8,7 +8,7 @@ import { queries, apiDelete, exportConversation, type ConversationInfo } from "@
 import { useChatStore } from "@/lib/stores/chat-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -233,7 +233,7 @@ export default function ConversationsPage() {
         )}
       </QueryBoundary>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t("conversations.deleteConfirmTitle")}

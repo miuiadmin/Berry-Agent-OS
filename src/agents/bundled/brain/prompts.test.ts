@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePermissionJudge } from './prompts.js';
+import { parsePermissionJudge, parseRouteDecision } from './prompts.js';
 
 /**
  * 15.0 机制 B：parsePermissionJudge 的 uncertain/escalation 解析测试。
@@ -49,5 +49,33 @@ describe('parsePermissionJudge (15.0 机制 B uncertain 解析)', () => {
     const out = parsePermissionJudge(raw);
     expect(out.correction?.instruction).toBe('用 read_file');
     expect(out.uncertain).toBe(false);
+  });
+});
+
+describe('parseRouteDecision (15.0 机制 B route uncertain 解析)', () => {
+  it('正常路由：无 escalation', () => {
+    const out = parseRouteDecision('{"intent":"code","targetAgent":"code","reason":"改代码"}');
+    expect(out.targetAgent).toBe('code');
+    expect(out.escalation).toBeUndefined();
+  });
+
+  it('uncertain=true + escalationQuestion → 产出 escalation（source=decision）', () => {
+    const raw = '{"intent":"chat","targetAgent":"conversation","reason":"意图歧义","uncertain":true,"escalationQuestion":"你是想改代码还是查资料？"}';
+    const out = parseRouteDecision(raw);
+    expect(out.escalation).toBeDefined();
+    expect(out.escalation!.source).toBe('decision');
+    expect(out.escalation!.questionToUser).toContain('改代码');
+  });
+
+  it('uncertain=true 但无 escalationQuestion → 无 escalation（回退正常路由）', () => {
+    const out = parseRouteDecision('{"intent":"chat","targetAgent":"conversation","uncertain":true}');
+    expect(out.escalation).toBeUndefined();
+    expect(out.targetAgent).toBe('conversation');
+  });
+
+  it('解析失败 → 默认路由 conversation，无 escalation', () => {
+    const out = parseRouteDecision('not json');
+    expect(out.targetAgent).toBe('conversation');
+    expect(out.escalation).toBeUndefined();
   });
 });

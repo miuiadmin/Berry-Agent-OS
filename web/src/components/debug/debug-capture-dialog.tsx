@@ -53,7 +53,7 @@ export function DebugCaptureDialog() {
 
   return (
     <Dialog open={showResultDialog} onOpenChange={(open) => { if (!open) dismissDialog(); }}>
-      <DialogContent onClose={dismissDialog}>
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("debug.captureSaved")}</DialogTitle>
           <DialogDescription>

@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -156,7 +156,7 @@ export default function AgentsPage() {
         }}
       </QueryBoundary>
 
-      <AlertDialog
+      <ConfirmDialog
         open={!!disableTarget}
         onOpenChange={(open) => { if (!open) setDisableTarget(null); }}
         title={t("agents.disableConfirmTitle")}

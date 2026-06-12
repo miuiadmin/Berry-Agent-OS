@@ -50,6 +50,8 @@ export interface RouteDecision {
 
 export interface RouteResultPayload {
   decision: RouteDecision;
+  /** 15.0 机制 B：Brain 路由拿不准意图/目标 Agent 时升级问用户（uncertain） */
+  escalation?: import('./brain.js').BrainEscalation;
 }
 
 // === Permission Judge (Brain LLM) ===

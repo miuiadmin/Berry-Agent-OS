@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 
@@ -494,11 +494,12 @@ export default function SchedulerPage() {
         </div>
       )}
       {/* 删除确认对话框 */}
-      <AlertDialog
+      <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t("scheduler.deleteJobConfirm", { name: t("scheduler.job") })}
         description={t("scheduler.deleteConfirmDesc")}
+        actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) {
             deleteMut.mutate(deleteTarget);

@@ -889,6 +889,11 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       logger.debug({ err: missionErr }, 'brain:route active mission context injection skipped');
     }
 
+    // 15.0 机制 B：路由 uncertain 升级指令（保守，仅意图严重歧义时用）
+    systemPrompt += `\n\n## 拿不准时升级（uncertain）\n绝大多数情况你能明确判断 intent + targetAgent。仅当用户意图严重歧义、` +
+      `多个 Agent 都看似相关且误路由代价高时，额外返回 "uncertain": true 与 "escalationQuestion"（要问用户的澄清问题，如「你是想改代码还是查资料？」），` +
+      `系统会把问题转给用户而非猜测路由。能判断就正常输出 intent/targetAgent，不要滥用。`;
+
     const userPrompt = buildRoutingUserPrompt(
       payload.message,
       payload.availableAgents,
@@ -934,7 +939,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         }
       }
 
-      const routeResult: RouteResultPayload = { decision };
+      const routeResult: RouteResultPayload = { decision, escalation: decision.escalation };
       ipc.send('route.result', 'core', routeResult, trackingId);
 
       // 13.0 §12: 记录路由决策到 BrainDecisionRecorder（供后续审核/进化反馈）
