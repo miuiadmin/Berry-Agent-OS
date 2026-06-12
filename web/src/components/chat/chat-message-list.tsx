@@ -205,7 +205,7 @@ const MessageBubble = memo(function MessageBubble({
           isError
             ? "bg-destructive/10 border border-destructive/30 text-foreground"
             : isUserFailed
-              ? "bg-brand/60 border border-yellow-500/40 text-brand-foreground"
+              ? "bg-brand/60 border border-warning/40 text-brand-foreground"
               : isUser
                 ? "bg-brand text-brand-foreground"
                 : "bg-muted text-foreground",
@@ -248,7 +248,7 @@ const MessageBubble = memo(function MessageBubble({
         )}
         {/* 用户消息发送失败提示 + 重试 */}
         {isUserFailed && (
-          <div className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 space-y-1">
+          <div className="mt-2 text-xs text-warning dark:text-warning space-y-1">
             <div className="flex items-center gap-1.5">
               <AlertCircle className="size-3 shrink-0" />
               <span>{t("chat.failedToSend")}</span>
@@ -277,13 +277,13 @@ const MessageBubble = memo(function MessageBubble({
         {!isUser && message.reviewVerdict && message.reviewVerdict !== "approve" && (
           <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
             {message.reviewVerdict === "modify" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-blue-600 dark:text-blue-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-info dark:text-info">
                 <Pencil className="size-2.5" />
                 {t("chat.brainModified")}
               </span>
             )}
             {message.reviewVerdict === "reject" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+              <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-warning dark:text-warning">
                 <AlertCircle className="size-2.5" />
                 {t("chat.brainRejected")}
               </span>

@@ -116,9 +116,9 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
 
   if (responded) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 border border-green-500/20 rounded-lg mx-3 my-2">
-        <HelpCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-        <span className="text-[13px] text-green-300">
+      <div className="flex items-center gap-2 px-3 py-2 bg-success/5 border border-success/20 rounded-lg mx-3 my-2">
+        <HelpCircle className="w-4 h-4 text-success flex-shrink-0" />
+        <span className="text-[13px] text-success">
           {t("askUser.respondedLabel")}
         </span>
       </div>
@@ -129,7 +129,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
     <div className="mx-3 my-2 bg-zinc-800/50 border border-zinc-700 rounded-lg overflow-hidden">
       {/* 问题 */}
       <div className="flex items-start gap-2 px-3 py-2 border-b border-zinc-700/50">
-        <HelpCircle className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+        <HelpCircle className="w-4 h-4 text-info flex-shrink-0 mt-0.5" />
         <div className="flex-1">
           <p className="text-[13px] text-zinc-200">{payload.question}</p>
           <div className="flex items-center gap-1 mt-1">
@@ -151,7 +151,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
               disabled={isSubmitting}
               className={`px-3 py-1.5 text-[13px] rounded-md border transition-colors min-h-[44px] md:min-h-0
                 ${selectedOption === option
-                  ? "bg-blue-600 border-blue-500 text-white"
+                  ? "bg-info border-info text-white"
                   : "bg-zinc-800 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-500"
                 }
                 disabled:opacity-50
@@ -173,12 +173,12 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
             if (e.key === "Enter") handleSubmitCustom();
           }}
           placeholder={t("askUser.customPlaceholder")}
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[13px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[44px] md:min-h-0"
+          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[13px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-info min-h-[44px] md:min-h-0"
         />
         <button
           onClick={handleSubmitCustom}
           disabled={isSubmitting || !customAnswer.trim()}
-          className="p-2 bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-50 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
+          className="p-2 bg-info rounded hover:bg-info disabled:opacity-50 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
         >
           <Send className="w-4 h-4 text-white" />
         </button>

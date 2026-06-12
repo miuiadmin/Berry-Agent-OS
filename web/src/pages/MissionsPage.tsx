@@ -90,7 +90,7 @@ function TaskCard({ task }: { task: MissionTask }) {
           <p className="mt-1 text-xs text-muted-foreground">📊 {task.progress}</p>
         )}
         {task.result && (
-          <p className="mt-1 text-xs text-green-600 dark:text-green-400">✅ {task.result}</p>
+          <p className="mt-1 text-xs text-success dark:text-success">✅ {task.result}</p>
         )}
         {task.depends_on.length > 0 && (
           <p className="mt-1 text-xs text-muted-foreground">
@@ -152,7 +152,7 @@ function MissionDetail({ missionId }: { missionId: string }) {
       {/* 进度条 */}
       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-green-500 transition-all duration-500"
+          className="h-full rounded-full bg-success transition-all duration-500"
           style={{ width: `${progressPercent}%` }}
         />
       </div>

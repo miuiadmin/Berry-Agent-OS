@@ -49,12 +49,12 @@ interface BrainReviewModalProps {
 /** 裁决 → 图标 + 颜色 */
 function VerdictIcon({ verdict }: { verdict: Verdict }) {
   if (verdict === "approve") {
-    return <ShieldCheck className="w-5 h-5 text-green-400" />;
+    return <ShieldCheck className="w-5 h-5 text-success" />;
   }
   if (verdict === "modify") {
-    return <Shield className="w-5 h-5 text-yellow-400" />;
+    return <Shield className="w-5 h-5 text-warning" />;
   }
-  return <ShieldAlert className="w-5 h-5 text-red-400" />;
+  return <ShieldAlert className="w-5 h-5 text-danger" />;
 }
 
 /** 裁决 → 标签文本 */
@@ -138,9 +138,9 @@ export function BrainReviewModal({
               {t("brain.reviewTitle")}
             </span>
             <span className={`text-[12px] px-2 py-0.5 rounded-full ${
-              verdict === "approve" ? "bg-green-500/10 text-green-400" :
-              verdict === "modify" ? "bg-yellow-500/10 text-yellow-400" :
-              "bg-red-500/10 text-red-400"
+              verdict === "approve" ? "bg-success/10 text-success" :
+              verdict === "modify" ? "bg-warning/10 text-warning" :
+              "bg-danger/10 text-danger"
             }`}>
               {verdictLabel(verdict, t)}
             </span>
@@ -183,7 +183,7 @@ export function BrainReviewModal({
                   <p className="text-[11px] text-zinc-600 mb-1">
                     {t("brain.original")}
                   </p>
-                  <div className="bg-red-500/5 border border-red-500/20 rounded p-2 text-[12px] text-zinc-400 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
+                  <div className="bg-danger/5 border border-danger/20 rounded p-2 text-[12px] text-zinc-400 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
                     {originalDraft}
                   </div>
                 </div>
@@ -192,7 +192,7 @@ export function BrainReviewModal({
                   <p className="text-[11px] text-zinc-600 mb-1">
                     {t("brain.modified")}
                   </p>
-                  <div className="bg-green-500/5 border border-green-500/20 rounded p-2 text-[12px] text-zinc-400 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
+                  <div className="bg-success/5 border border-success/20 rounded p-2 text-[12px] text-zinc-400 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
                     {finalResponse}
                   </div>
                 </div>
@@ -207,7 +207,7 @@ export function BrainReviewModal({
             <p className="text-[12px] text-zinc-500 mb-1">
               {t("brain.rejectedContent")}
             </p>
-            <div className="bg-red-500/5 border border-red-500/20 rounded p-2 text-[12px] text-zinc-400 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
+            <div className="bg-danger/5 border border-danger/20 rounded p-2 text-[12px] text-zinc-400 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
               {originalDraft ?? finalResponse}
             </div>
           </div>
@@ -220,7 +220,7 @@ export function BrainReviewModal({
               value={feedbackComment}
               onChange={(e) => setFeedbackComment(e.target.value)}
               placeholder={t("brain.feedbackPlaceholder")}
-              className="w-full h-20 bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-[13px] text-zinc-300 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full h-20 bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-[13px] text-zinc-300 resize-none focus:outline-none focus:ring-1 focus:ring-info"
             />
             <div className="flex justify-end gap-2 mt-2">
               <button
@@ -232,7 +232,7 @@ export function BrainReviewModal({
               <button
                 onClick={handleSubmitFeedback}
                 disabled={isSubmittingFeedback}
-                className="px-3 py-1.5 text-[12px] bg-blue-600 text-white rounded hover:bg-blue-500 disabled:opacity-50"
+                className="px-3 py-1.5 text-[12px] bg-info text-white rounded hover:bg-info disabled:opacity-50"
               >
                 {isSubmittingFeedback ? "…" : t("brain.submitFeedback")}
               </button>
@@ -259,14 +259,14 @@ export function BrainReviewModal({
               <button
                 onClick={handleRestore}
                 disabled={isRestoring}
-                className="flex items-center gap-1 px-3 py-1.5 text-[12px] bg-yellow-600/20 text-yellow-400 rounded hover:bg-yellow-600/30 disabled:opacity-50"
+                className="flex items-center gap-1 px-3 py-1.5 text-[12px] bg-warning/20 text-warning rounded hover:bg-warning/30 disabled:opacity-50"
               >
                 <RotateCcw className="w-3 h-3" />
                 {isRestoring ? "…" : t("brain.restore")}
               </button>
             )}
             {restoreSuccess && (
-              <span className="text-[12px] text-green-400">
+              <span className="text-[12px] text-success">
                 {t("brain.restoreSuccess")}
               </span>
             )}

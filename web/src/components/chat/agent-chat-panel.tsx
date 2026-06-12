@@ -21,25 +21,25 @@ import {
 
 /** Agent 名称 → 显示颜色映射 */
 const AGENT_COLORS: Record<string, string> = {
-  code: "text-blue-400",
-  learning: "text-green-400",
+  code: "text-info",
+  learning: "text-success",
   memory: "text-emerald-400",
   skills: "text-purple-400",
   conversation: "text-orange-400",
-  brain: "text-red-400",
+  brain: "text-danger",
   plugin_builder: "text-pink-400",
-  skill_tester: "text-yellow-400",
+  skill_tester: "text-warning",
   evolution: "text-cyan-400",
 };
 
 /** Agent 名称 → 图标背景色 */
 const AGENT_BG: Record<string, string> = {
-  code: "bg-blue-500/10",
-  learning: "bg-green-500/10",
+  code: "bg-info/10",
+  learning: "bg-success/10",
   memory: "bg-emerald-500/10",
   skills: "bg-purple-500/10",
   conversation: "bg-orange-500/10",
-  brain: "bg-red-500/10",
+  brain: "bg-danger/10",
 };
 
 /** 获取 agent 显示颜色 */

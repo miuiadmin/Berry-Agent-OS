@@ -220,7 +220,7 @@ function SettingsContent() {
               <p className="text-sm text-muted-foreground">
                 {t("settings.subtitle")}
                 {hasChanges && (
-                  <span className="ml-2 text-amber-500 font-medium">{t("settings.unsavedChanges")}</span>
+                  <span className="ml-2 text-warning font-medium">{t("settings.unsavedChanges")}</span>
                 )}
               </p>
             </div>
@@ -235,7 +235,7 @@ function SettingsContent() {
                   {t("settings.save")}
                 </Button>
                 {hasChanges && (
-                  <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-amber-500 animate-pulse-dot" />
+                  <span className="absolute -top-1 -right-1 size-2.5 rounded-full bg-warning animate-pulse-dot" />
                 )}
               </div>
             </div>

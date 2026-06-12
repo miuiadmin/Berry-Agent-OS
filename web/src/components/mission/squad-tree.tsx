@@ -26,17 +26,17 @@ import {
 
 /** 角色样式映射 */
 const ROLE_STYLES: Record<string, { color: string; bg: string; icon: typeof Users }> = {
-  lead:  { color: "text-blue-400", bg: "bg-blue-500/10 border-blue-500/30", icon: UserCog },
-  work:  { color: "text-green-400", bg: "bg-green-500/10 border-green-500/30", icon: Wrench },
-  check: { color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/30", icon: UserCheck },
+  lead:  { color: "text-info", bg: "bg-info/10 border-info/30", icon: UserCog },
+  work:  { color: "text-success", bg: "bg-success/10 border-success/30", icon: Wrench },
+  check: { color: "text-warning", bg: "bg-warning/10 border-warning/30", icon: UserCheck },
 };
 
 /** 信号类型 → 图标 + 样式 */
 const SIGNAL_STYLES: Record<string, { color: string; icon: typeof Users }> = {
-  progress: { color: "text-blue-400", icon: CheckCircle2 },
-  blocker:  { color: "text-red-400", icon: AlertTriangle },
-  done:     { color: "text-green-400", icon: CheckCircle2 },
-  question: { color: "text-yellow-400", icon: HelpCircle },
+  progress: { color: "text-info", icon: CheckCircle2 },
+  blocker:  { color: "text-danger", icon: AlertTriangle },
+  done:     { color: "text-success", icon: CheckCircle2 },
+  question: { color: "text-warning", icon: HelpCircle },
 };
 
 /** 单个成员卡片 */
@@ -47,9 +47,9 @@ function MemberCard({ member }: { member: SquadMember }) {
 
   /** 状态指示灯 */
   const statusDot =
-    member.status === "working" ? "bg-green-400 animate-pulse" :
+    member.status === "working" ? "bg-success animate-pulse" :
     member.status === "done"     ? "bg-zinc-500" :
-    member.status === "failed"   ? "bg-red-400" :
+    member.status === "failed"   ? "bg-danger" :
     "bg-zinc-600";
 
   return (
@@ -106,14 +106,14 @@ function SquadTreeNode({ squad, depth = 1 }: { squad: Squad; depth?: number }) {
             L{squad.depth}
           </span>
           {squad.leader && (
-            <span className="text-[11px] text-blue-400">
+            <span className="text-[11px] text-info">
               🎯 {squad.leader}
             </span>
           )}
           <span className={`text-[11px] ${
-            squad.status === "working" ? "text-blue-400" :
-            squad.status === "done" ? "text-green-400" :
-            squad.status === "failed" ? "text-red-400" :
+            squad.status === "working" ? "text-info" :
+            squad.status === "done" ? "text-success" :
+            squad.status === "failed" ? "text-danger" :
             "text-zinc-500"
           }`}>
             {squad.status}
@@ -158,11 +158,11 @@ function HandoffList({ handoffs }: { handoffs: Array<{ from: string; to: string;
       </h4>
       {handoffs.map((h, idx) => (
         <div key={idx} className="flex items-center gap-2 text-[12px] bg-zinc-800/50 rounded px-2 py-1.5">
-          <span className="text-blue-400">{h.from}</span>
+          <span className="text-info">{h.from}</span>
           <ArrowRightLeft className="w-3 h-3 text-zinc-600" />
-          <span className="text-green-400">{h.to}</span>
+          <span className="text-success">{h.to}</span>
           <span className="text-zinc-400 flex-1 truncate">{h.what}</span>
-          <span className={`text-[11px] ${h.status === "completed" ? "text-green-400" : "text-zinc-500"}`}>
+          <span className={`text-[11px] ${h.status === "completed" ? "text-success" : "text-zinc-500"}`}>
             {h.status ?? "pending"}
           </span>
         </div>

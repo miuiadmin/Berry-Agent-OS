@@ -35,7 +35,7 @@ export function DebugCaptureButton({ className }: { className?: string }) {
       disabled={loading}
       className={cn(
         "size-11 md:size-9 transition-colors",
-        isCapturing && "text-red-500",
+        isCapturing && "text-danger",
         className,
       )}
       title={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}

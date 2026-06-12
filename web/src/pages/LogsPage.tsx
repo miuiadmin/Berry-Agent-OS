@@ -19,8 +19,8 @@ const LEVEL_NAMES: Record<number, string> = { 20: "DBG", 30: "INF", 40: "WRN", 5
 const LEVEL_COLORS: Record<number, string> = {
   20: "text-muted-foreground/50",
   30: "text-foreground",
-  40: "text-orange-500",
-  50: "text-red-500",
+  40: "text-warning",
+  50: "text-danger",
 };
 
 export default function LogsPage() {
