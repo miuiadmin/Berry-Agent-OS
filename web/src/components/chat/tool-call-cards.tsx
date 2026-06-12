@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -62,7 +62,11 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
   );
 }
 
-export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
+/**
+ * 工具调用折叠面板 — memo 包装，已完成消息不会因其他消息流式更新而重渲染。
+ * 流式活跃消息（calls 数组引用每次变化）仍正常重渲染。
+ */
+export const ToolCallCards = memo(function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
   const [expanded, setExpanded] = useState(isActive);
   const wasActive = useRef(isActive);
   const t = useT();
@@ -108,4 +112,4 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
       </div>
     </div>
   );
-}
+});

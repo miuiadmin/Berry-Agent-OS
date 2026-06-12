@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -35,7 +35,11 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
   );
 }
 
-export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessProps) {
+/**
+ * 思考过程折叠面板 — memo 包装，已完成消息不会因其他消息流式更新而重渲染。
+ * 流式活跃消息（steps 数组引用每次变化）仍正常重渲染。
+ */
+export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessProps) {
   const [expanded, setExpanded] = useState(isActive);
   const listRef = useRef<HTMLDivElement>(null);
   const wasActive = useRef(isActive);
@@ -113,7 +117,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
       </div>
     </div>
   );
-}
+});
 
 function ReasoningBlock({ text, isActive }: { text: string; isActive: boolean }) {
   return (
