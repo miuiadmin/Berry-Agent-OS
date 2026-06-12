@@ -5,6 +5,10 @@
  * 可折叠面板，嵌入 ChatWindow 右侧或底部。
  *
  * §5.1.1 前端实时信息流：Agent 间对话实时可见
+ *
+ * 注意：本组件当前未被任何页面引用（暂未启用），待 13.0 多智能体协作前端完善后接入。
+ * 内部硬编码 zinc-* 色板为暂定暗色样式，接入时应收口到语义 token（与 chat-window 的
+ * bg-background / bg-muted 保持一致）。
  */
 
 import { useEffect, useRef } from "react";

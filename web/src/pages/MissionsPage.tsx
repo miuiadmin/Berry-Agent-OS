@@ -49,6 +49,34 @@ interface PlanResponse {
   tasks: MissionTask[];
 }
 
+// ─── Squad API 响应类型 ───
+
+/** Squad 组织单元（可嵌套） */
+interface SquadNode {
+  id: string;
+  name: string;
+  status: string;
+  goal: string;
+  leader: string;
+  members?: SquadMember[];
+  squads?: SquadNode[];
+}
+
+/** Squad 成员 */
+interface SquadMember {
+  agent: string;
+  role: string;
+  status: string;
+  on: string;
+}
+
+/** Squad 间信号 */
+interface SquadSignal {
+  type: string;
+  from: string;
+  msg: string;
+}
+
 // ─── 状态徽章 ───
 
 function StatusBadge({ status }: { status: string }) {
@@ -187,7 +215,7 @@ function MissionDetail({ missionId }: { missionId: string }) {
 function SquadTab({ missionId }: { missionId: string }) {
   const { data: squad, isLoading } = useQuery({
     queryKey: ["mission", missionId, "squad"],
-    queryFn: () => apiGet<any>(`/api/missions/${missionId}/squad`).catch(() => null),
+    queryFn: () => apiGet<{ org?: { squads: SquadNode[] }; signals: SquadSignal[] } | null>(`/api/missions/${missionId}/squad`).catch(() => null),
   });
 
   if (isLoading) return <Skeleton className="h-20 w-full" />;
@@ -205,7 +233,7 @@ function SquadTab({ missionId }: { missionId: string }) {
 
   return (
     <div className="space-y-3">
-      {squad.org?.squads?.map((s: any) => (
+      {squad.org?.squads?.map((s: SquadNode) => (
         <SquadCard key={s.id} squad={s} depth={0} />
       ))}
       {/* Signals */}
@@ -214,7 +242,7 @@ function SquadTab({ missionId }: { missionId: string }) {
           <h4 className="mb-2 flex items-center gap-1 text-sm font-medium">
             <Radio className="size-3" /> Recent Signals
           </h4>
-          {squad.signals.slice(-5).map((sig: any, i: number) => (
+          {squad.signals.slice(-5).map((sig: SquadSignal, i: number) => (
             <div key={i} className="flex items-center gap-2 py-1 text-xs">
               <span className="text-muted-foreground">{sig.type === "blocker" ? "🚫" : sig.type === "done" ? "✅" : sig.type === "question" ? "❓" : "📊"}</span>
               <span className="font-medium">{sig.from}:</span>
@@ -227,7 +255,7 @@ function SquadTab({ missionId }: { missionId: string }) {
   );
 }
 
-function SquadCard({ squad, depth }: { squad: any; depth: number }) {
+function SquadCard({ squad, depth }: { squad: SquadNode; depth: number }) {
   const indent = depth * 16;
   return (
     <div style={{ marginLeft: indent }}>
@@ -243,7 +271,7 @@ function SquadCard({ squad, depth }: { squad: any; depth: number }) {
           <p className="text-xs text-muted-foreground">Leader: @{squad.leader}</p>
         </CardHeader>
         <CardContent>
-          {squad.members?.map((m: any) => (
+          {squad.members?.map((m: SquadMember) => (
             <div key={m.agent} className="flex items-center gap-2 py-0.5 text-xs">
               <span>{m.role === "check" ? "🔍" : m.role === "lead" ? "🧠" : "🔧"}</span>
               <span className="font-medium">@{m.agent}</span>
@@ -253,7 +281,7 @@ function SquadCard({ squad, depth }: { squad: any; depth: number }) {
           ))}
         </CardContent>
       </Card>
-      {squad.squads?.map((sub: any) => (
+      {squad.squads?.map((sub: SquadNode) => (
         <SquadCard key={sub.id} squad={sub} depth={depth + 1} />
       ))}
     </div>
