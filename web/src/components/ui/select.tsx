@@ -13,6 +13,7 @@
 import * as React from "react";
 import {
   Select as HeroUISelect,
+  ListBox,
   ListBoxItem,
   type SelectVariants,
 } from "@heroui/react";
@@ -91,24 +92,26 @@ export const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
             "data-[entering]:animate-fade-in data-[exiting]:animate-dropdown-out"
           )}
         >
-          {placeholder && (
-            <ListBoxItem
-              id=""
-              className="flex items-center px-3 py-2 text-sm min-h-[44px] md:min-h-9 rounded-md hover:bg-accent focus:bg-accent transition-colors outline-none cursor-pointer"
-            >
-              {placeholder}
-            </ListBoxItem>
-          )}
-          {options.map((opt) => (
-            <ListBoxItem
-              key={opt.key}
-              id={opt.key}
-              isDisabled={opt.disabled}
-              className="flex items-center px-3 py-2 text-sm min-h-[44px] md:min-h-9 rounded-md hover:bg-accent focus:bg-accent selection:bg-accent selection:text-foreground transition-colors outline-none cursor-pointer"
-            >
-              {opt.label}
-            </ListBoxItem>
-          ))}
+          <ListBox className="py-1">
+            {placeholder && (
+              <ListBoxItem
+                id=""
+                className="flex items-center px-3 py-2 text-sm min-h-[44px] md:min-h-9 rounded-md hover:bg-accent focus:bg-accent transition-colors outline-none cursor-pointer"
+              >
+                {placeholder}
+              </ListBoxItem>
+            )}
+            {options.map((opt) => (
+              <ListBoxItem
+                key={opt.key}
+                id={opt.key}
+                isDisabled={opt.disabled}
+                className="flex items-center px-3 py-2 text-sm min-h-[44px] md:min-h-9 rounded-md hover:bg-accent focus:bg-accent selection:bg-accent selection:text-foreground transition-colors outline-none cursor-pointer"
+              >
+                {opt.label}
+              </ListBoxItem>
+            ))}
+          </ListBox>
         </HeroUISelect.Popover>
       </HeroUISelect>
     );

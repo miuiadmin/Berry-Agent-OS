@@ -14,7 +14,6 @@ import { useNavigate } from "react-router-dom";
 import { CircleUser, Sun, Moon, Globe, LogOut, Settings } from "lucide-react";
 import { useTheme } from "@/lib/theme";
 import { useLocale, useT } from "@/lib/i18n";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -36,14 +35,14 @@ export function UserMenu() {
   return (
     <Dropdown
       trigger={
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-11 md:size-9 active:scale-90 transition-transform"
+        /* 用 span 而非 adapter Button：Dropdown.Trigger 已渲染 <button>，
+           再嵌套 Button（也是 button）会导致 button-in-button 非法 HTML */
+        <span
+          className="inline-flex items-center justify-center rounded-md size-11 md:size-9 text-muted-foreground hover:bg-accent hover:text-foreground active:scale-90 transition-transform cursor-pointer"
           aria-label={t("userMenu.openMenu")}
         >
           <CircleUser className="size-5 md:size-4" />
-        </Button>
+        </span>
       }
     >
       <DropdownMenu className="py-1 min-w-[200px]" aria-label={t("userMenu.openMenu")}>
