@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env.local
+tmp-light.jpeg
+tmp-dark.jpeg

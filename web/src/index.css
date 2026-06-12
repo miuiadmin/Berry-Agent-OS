@@ -1,12 +1,25 @@
 @import "@heroui/styles";
 
+/* ════════════════════════════════════════════════════════════════
+   全局基础
+   ════════════════════════════════════════════════════════════════ */
+
 html {
   scroll-behavior: smooth;
 }
 
+/* ════════════════════════════════════════════════════════════════
+   Tailwind v4 主题 token 注册
+   把 CSS 自定义属性注册为 Tailwind 工具类可用 token（如 bg-card）
+   ════════════════════════════════════════════════════════════════ */
+
 @theme inline {
-  --font-sans: system-ui, -apple-system, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    monospace;
+
+  /* 颜色 token → 指向下方 :root/.dark 中定义的 CSS 变量 */
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -43,6 +56,8 @@ html {
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+
+  /* 圆角梯度（基于 --radius 派生） */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -50,44 +65,49 @@ html {
   --radius-2xl: calc(var(--radius) * 1.8);
 }
 
+/* ════════════════════════════════════════════════════════════════
+   配色方案：暖中性 + 青蓝品牌色（hue 220）
+   浅色模式 — 暖白底、纯白卡片、青蓝主色
+   ════════════════════════════════════════════════════════════════ */
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --background: oklch(0.99 0.002 75); /* 暖白底 */
+  --foreground: oklch(0.16 0.008 50); /* 暖深灰文字 */
+  --card: oklch(1 0 0); /* 纯白卡片 */
+  --card-foreground: oklch(0.16 0.008 50);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
-  --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
-  --chart-1: oklch(0.55 0.16 255);
-  --chart-2: oklch(0.66 0.13 255);
-  --chart-3: oklch(0.76 0.10 255);
-  --chart-4: oklch(0.85 0.06 255);
-  --chart-5: oklch(0.92 0.03 255);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
-  --sidebar-primary: oklch(0.21 0.006 285.885);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.95 0.002 286.375);
-  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
-  --sidebar-ring: oklch(0.705 0.015 286.067);
-  --brand: oklch(0.55 0.16 255);
-  --brand-foreground: oklch(0.985 0 0);
-  --success: oklch(0.55 0.16 145);
-  --warning: oklch(0.75 0.16 85);
-  --info: oklch(0.55 0.18 250);
+  --popover-foreground: oklch(0.16 0.008 50);
+  --primary: oklch(0.55 0.15 220); /* 青蓝主色（= 品牌色） */
+  --primary-foreground: oklch(0.99 0.002 75);
+  --secondary: oklch(0.96 0.004 75); /* 暖浅灰表面 */
+  --secondary-foreground: oklch(0.20 0.008 50);
+  --muted: oklch(0.96 0.004 75);
+  --muted-foreground: oklch(0.52 0.012 60); /* 暖中灰辅助文字 */
+  --accent: oklch(0.94 0.025 220); /* 青蓝浅 tint（hover/selected） */
+  --accent-foreground: oklch(0.30 0.08 220);
+  --destructive: oklch(0.58 0.22 25); /* 暖红 */
+  --border: oklch(0.90 0.005 75); /* 暖灰边框 */
+  --input: oklch(0.90 0.005 75);
+  --ring: oklch(0.55 0.15 220); /* 青蓝聚焦环 */
+  --chart-1: oklch(0.55 0.15 220); /* 青蓝主图表色 */
+  --chart-2: oklch(0.64 0.12 200); /* 青 */
+  --chart-3: oklch(0.70 0.13 180); /* 青绿 */
+  --chart-4: oklch(0.72 0.10 250); /* 蓝 */
+  --chart-5: oklch(0.78 0.08 280); /* 紫 */
+  --radius: 0.5rem; /* 8px，比原来 10px 更利落 */
+  --sidebar: oklch(0.975 0.002 75);
+  --sidebar-foreground: oklch(0.16 0.008 50);
+  --sidebar-primary: oklch(0.55 0.15 220);
+  --sidebar-primary-foreground: oklch(0.99 0.002 75);
+  --sidebar-accent: oklch(0.94 0.025 220);
+  --sidebar-accent-foreground: oklch(0.30 0.08 220);
+  --sidebar-border: oklch(0.90 0.005 75);
+  --sidebar-ring: oklch(0.55 0.15 220);
+  --brand: oklch(0.55 0.15 220);
+  --brand-foreground: oklch(0.99 0.002 75);
+  --success: oklch(0.55 0.14 160); /* 翠绿 */
+  --warning: oklch(0.75 0.16 70); /* 琥珀 */
+  --info: oklch(0.55 0.14 230);
 
   /* HeroUI 语义变量映射（本块无 @layer，优先级高于 HeroUI 的 @layer theme 定义）
      让 HeroUI 组件（Modal/Card/Input/Button 等）读取到我们的配色 */
@@ -101,43 +121,47 @@ html {
   --field-placeholder: var(--muted-foreground);
 }
 
+/* ════════════════════════════════════════════════════════════════
+   深色模式 — 暖黑底、抬起卡片层、亮青蓝主色
+   ════════════════════════════════════════════════════════════════ */
+
 .dark {
-  --background: oklch(0.18 0.005 285.823);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.21 0.006 285.885);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
-  --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
-  --chart-1: oklch(0.72 0.16 255);
-  --chart-2: oklch(0.62 0.13 255);
-  --chart-3: oklch(0.52 0.10 255);
-  --chart-4: oklch(0.42 0.06 255);
-  --chart-5: oklch(0.32 0.03 255);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.552 0.016 285.938);
-  --brand: oklch(0.65 0.16 255);
-  --brand-foreground: oklch(0.985 0 0);
-  --success: oklch(0.65 0.15 145);
-  --warning: oklch(0.70 0.16 85);
-  --info: oklch(0.65 0.18 250);
+  --background: oklch(0.145 0.004 50); /* 暖黑底 */
+  --foreground: oklch(0.95 0.004 75); /* 暖白文字 */
+  --card: oklch(0.18 0.005 50); /* 抬起的卡片层 */
+  --card-foreground: oklch(0.95 0.004 75);
+  --popover: oklch(0.18 0.005 50);
+  --popover-foreground: oklch(0.95 0.004 75);
+  --primary: oklch(0.58 0.15 220); /* 青蓝（暗色下微调） */
+  --primary-foreground: oklch(0.99 0.002 75);
+  --secondary: oklch(0.24 0.006 50);
+  --secondary-foreground: oklch(0.95 0.004 75);
+  --muted: oklch(0.24 0.006 50);
+  --muted-foreground: oklch(0.66 0.010 60);
+  --accent: oklch(0.26 0.03 220); /* 青蓝暗 tint */
+  --accent-foreground: oklch(0.85 0.04 220);
+  --destructive: oklch(0.65 0.20 25);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.58 0.15 220);
+  --chart-1: oklch(0.62 0.14 220);
+  --chart-2: oklch(0.66 0.12 200);
+  --chart-3: oklch(0.70 0.12 180);
+  --chart-4: oklch(0.68 0.10 250);
+  --chart-5: oklch(0.72 0.09 280);
+  --sidebar: oklch(0.16 0.004 50);
+  --sidebar-foreground: oklch(0.95 0.004 75);
+  --sidebar-primary: oklch(0.58 0.15 220);
+  --sidebar-primary-foreground: oklch(0.99 0.002 75);
+  --sidebar-accent: oklch(0.26 0.03 220);
+  --sidebar-accent-foreground: oklch(0.85 0.04 220);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.58 0.15 220);
+  --brand: oklch(0.58 0.15 220);
+  --brand-foreground: oklch(0.99 0.002 75);
+  --success: oklch(0.62 0.13 160);
+  --warning: oklch(0.72 0.15 70);
+  --info: oklch(0.62 0.13 230);
 
   /* HeroUI 暗色语义变量映射 */
   --surface: var(--card);
@@ -150,6 +174,7 @@ html {
   --field-placeholder: var(--muted-foreground);
 }
 
+/* 全局边框回退色（未显式指定 border-color 时统一用暖灰） */
 * {
   border-color: var(--border);
 }
@@ -158,169 +183,198 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  /* 字体渲染优化（抗锯齿） */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
 }
 
-/* ─── Page transition ─────────────────────────────── */
+/* 选中文本配色（青蓝） */
+::selection {
+  background: color-mix(in oklch, var(--brand) 25%, transparent);
+}
+
+/* 自定义滚动条（细、暖灰、青蓝 hover） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent)
+    transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--muted-foreground) 25%, transparent);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--brand) 40%, transparent);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   动效体系（丰富生动 — 保留全部微交互，按功能分区组织）
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* ═══ 1. 页面与路由转场 ═══ */
 @keyframes page-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-
-/* ─── Dialog / overlay ───────────────────────────── */
-@keyframes overlay-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-@keyframes sheet-in {
-  from { opacity: 0; transform: translateY(16px) scale(0.97); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-/* ─── Skeleton pulse ─────────────────────────────── */
-@keyframes shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-/* ─── Fade-in utility ────────────────────────────── */
 @layer utilities {
   .animate-page-in {
     animation: page-in 0.25s ease-out both;
   }
-  .animate-sheet-in {
-    animation: sheet-in 0.2s ease-out both;
-  }
-  .animate-overlay-in {
-    animation: overlay-in 0.15s ease-out both;
-  }
-  .animate-shimmer {
-    background: linear-gradient(90deg, var(--muted) 25%, var(--border) 50%, var(--muted) 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
-  /* ─── Card hover lift ──────────────────────────── */
-  .card-lift {
-    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-  }
-  .card-lift:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px -4px oklch(0 0 0 / 12%);
-    border-color: color-mix(in oklch, var(--brand) 30%, transparent);
-  }
-  .card-lift:active {
-    transform: translateY(0);
-    border-color: var(--border);
-  }
-
-  /* ─── Stagger entrance ─────────────────────────── */
-  .stagger-1 { animation: page-in 0.3s ease-out 0.05s both; }
-  .stagger-2 { animation: page-in 0.3s ease-out 0.10s both; }
-  .stagger-3 { animation: page-in 0.3s ease-out 0.15s both; }
-  .stagger-4 { animation: page-in 0.3s ease-out 0.20s both; }
-  .stagger-5 { animation: page-in 0.3s ease-out 0.25s both; }
-  .stagger-6 { animation: page-in 0.3s ease-out 0.30s both; }
-  .stagger-7 { animation: page-in 0.3s ease-out 0.35s both; }
-  .stagger-8 { animation: page-in 0.3s ease-out 0.40s both; }
-
-  /* ─── Message bubble entrance ──────────────────── */
-  @keyframes msg-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .animate-msg-in {
-    animation: msg-in 0.25s ease-out both;
-  }
-
-  /* ─── Subtle icon spin on expand ────────────────── */
-  .chevron-spin {
-    transition: transform 0.2s ease;
-  }
-  .chevron-spin[data-open="true"] {
-    transform: rotate(90deg);
-  }
-
-  /* ─── Sidebar active indicator ─────────────────── */
-  .nav-link-active {
-    position: relative;
-  }
-  .nav-link-active::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 25%;
-    bottom: 25%;
-    width: 3px;
-    border-radius: 2px;
-    background: var(--brand);
-    animation: indicator-in 0.2s ease-out both;
-    transform-origin: left;
-  }
-  @keyframes indicator-in {
-    from { transform: scaleX(0); }
-    to   { transform: scaleX(1); }
-  }
-
-  /* ─── Pulse dot for unsaved / live states ──────── */
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.5; transform: scale(1.4); }
-  }
-  .animate-pulse-dot {
-    animation: pulse-dot 1.5s ease-in-out infinite;
-  }
-
-  /* ─── Content fade-in on tab switch ─────────────── */
   .animate-fade-in {
     animation: page-in 0.2s ease-out both;
   }
+  .animate-slide-down {
+    animation: slide-down 0.2s ease-out both;
+  }
+  .animate-slide-left {
+    animation: slide-in-left 0.25s ease-out both;
+  }
 }
 
-@keyframes blink-cursor {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
+/* ═══ 2. 弹窗 / 抽屉 / 浮层 ═══ */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
-
-.streaming-cursor > *:last-child::after {
-  content: "▋";
-  animation: blink-cursor 1s infinite;
-  color: var(--brand);
-  margin-left: 1px;
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
-
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes sheet-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+}
+@keyframes dropdown-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+@keyframes fade-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 @layer utilities {
-  .scrollbar-none {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+  .animate-overlay-in {
+    animation: overlay-in 0.15s ease-out both;
   }
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
+  .animate-overlay-out {
+    animation: overlay-out 0.15s ease-in both;
+  }
+  .animate-sheet-in {
+    animation: sheet-in 0.2s ease-out both;
+  }
+  .animate-sheet-out {
+    animation: sheet-out 0.15s ease-in both;
+  }
+  .animate-dropdown-out {
+    animation: dropdown-out 0.12s ease-in both;
+  }
+  .animate-fade-scale {
+    animation: fade-scale-in 0.2s ease-out both;
   }
 }
 
-/* Prevent iOS Safari back-swipe when scrolling code blocks horizontally */
-pre,
-code {
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
+/* ═══ 3. 聊天消息 ═══ */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-
-/* ═══════════════════════════════════════════════════════════
-   Enhanced Animations & Micro-interactions
-   ═══════════════════════════════════════════════════════════ */
-
-/* ─── Message bubble: directional slide-in ────────────── */
 @keyframes msg-slide-right {
-  from { opacity: 0; transform: translateX(12px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 @keyframes msg-slide-left {
-  from { opacity: 0; transform: translateX(-12px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
-
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
 @layer utilities {
+  .animate-msg-in {
+    animation: msg-in 0.25s ease-out both;
+  }
   .animate-msg-user {
     animation: msg-slide-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
@@ -329,43 +383,37 @@ code {
   }
 }
 
-/* ─── Input focus glow ────────────────────────────────── */
-@keyframes focus-glow {
-  0%   { box-shadow: 0 0 0 2px oklch(0.6 0.15 250 / 0.3); }
-  50%  { box-shadow: 0 0 0 4px oklch(0.6 0.15 250 / 0.15); }
-  100% { box-shadow: 0 0 0 2px oklch(0.6 0.15 250 / 0.3); }
-}
-.input-focus-glow:focus-within {
-  animation: focus-glow 2s ease-in-out infinite;
-  border-color: var(--brand);
-}
-
-/* ─── Sidebar slide transition ────────────────────────── */
-@keyframes sidebar-slide-in {
-  from { transform: translateX(-100%); opacity: 0; }
-  to   { transform: translateX(0); opacity: 1; }
-}
-@keyframes sidebar-slide-out {
-  from { transform: translateX(0); opacity: 1; }
-  to   { transform: translateX(-100%); opacity: 0; }
-}
-
-@layer utilities {
-  .animate-sidebar-in {
-    animation: sidebar-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+/* ═══ 4. 骨架加载 ═══ */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
   }
-  .animate-sidebar-out {
-    animation: sidebar-slide-out 0.2s ease-in both;
+  100% {
+    background-position: 200% 0;
   }
 }
-
-/* ─── Skeleton loading (message waiting) ──────────────── */
 @keyframes skeleton-pulse {
-  0%   { opacity: 0.4; }
-  50%  { opacity: 0.8; }
-  100% { opacity: 0.4; }
+  0% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.4;
+  }
 }
 @layer utilities {
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--muted) 25%,
+      var(--border) 50%,
+      var(--muted) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
   .animate-skeleton {
     animation: skeleton-pulse 1.5s ease-in-out infinite;
   }
@@ -383,21 +431,124 @@ code {
   }
 }
 
-/* ─── Button hover scale + press feedback ─────────────── */
-@layer utilities {
-  .btn-press {
-    transition: transform 0.1s ease, box-shadow 0.15s ease;
+/* ═══ 5. 状态指示 ═══ */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
   }
-  .btn-press:hover {
-    transform: scale(1.02);
-  }
-  .btn-press:active {
-    transform: scale(0.97);
+  50% {
+    opacity: 0.5;
+    transform: scale(1.4);
   }
 }
-
-/* ─── Conversation list item hover ────────────────────── */
+@keyframes send-ready {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklch, var(--brand) 0%, transparent);
+  }
+}
+@keyframes stream-border-pulse {
+  0%,
+  100% {
+    border-color: color-mix(in oklch, var(--brand) 15%, transparent);
+  }
+  50% {
+    border-color: color-mix(in oklch, var(--brand) 35%, transparent);
+  }
+}
+@keyframes blink-cursor {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
 @layer utilities {
+  .animate-pulse-dot {
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+  .animate-send-ready {
+    animation: send-ready 2s ease-in-out infinite;
+  }
+  .animate-stream-pulse {
+    border: 1px solid transparent;
+    animation: stream-border-pulse 2s ease-in-out infinite;
+  }
+}
+.streaming-cursor > *:last-child::after {
+  content: "▋";
+  animation: blink-cursor 1s infinite;
+  color: var(--brand);
+  margin-left: 1px;
+}
+
+/* ═══ 6. 列表项交互 ═══ */
+@keyframes item-exit {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+    max-height: 80px;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-20px);
+    max-height: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+@layer utilities {
+  /* 卡片悬浮抬升（青蓝边框高亮 + 阴影） */
+  .card-lift {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  }
+  .card-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px -4px oklch(0 0 0 / 12%);
+    border-color: color-mix(in oklch, var(--brand) 30%, transparent);
+  }
+  .card-lift:active {
+    transform: translateY(0);
+    border-color: var(--border);
+  }
+
+  /* 交错入场延迟（列表项逐个浮现） */
+  .stagger-1 {
+    animation: page-in 0.3s ease-out 0.05s both;
+  }
+  .stagger-2 {
+    animation: page-in 0.3s ease-out 0.1s both;
+  }
+  .stagger-3 {
+    animation: page-in 0.3s ease-out 0.15s both;
+  }
+  .stagger-4 {
+    animation: page-in 0.3s ease-out 0.2s both;
+  }
+  .stagger-5 {
+    animation: page-in 0.3s ease-out 0.25s both;
+  }
+  .stagger-6 {
+    animation: page-in 0.3s ease-out 0.3s both;
+  }
+  .stagger-7 {
+    animation: page-in 0.3s ease-out 0.35s both;
+  }
+  .stagger-8 {
+    animation: page-in 0.3s ease-out 0.4s both;
+  }
+
+  /* 会话列表项 hover 横移 */
   .conv-item {
     transition: background-color 0.15s ease, transform 0.1s ease;
   }
@@ -407,126 +558,26 @@ code {
   .conv-item:active {
     transform: translateX(0);
   }
-}
 
-/* ─── Send button pulse on ready ──────────────────────── */
-@keyframes send-ready {
-  0%, 100% { box-shadow: 0 0 0 0 oklch(0.6 0.15 250 / 0.4); }
-  50%      { box-shadow: 0 0 0 6px oklch(0.6 0.15 250 / 0); }
-}
-@layer utilities {
-  .animate-send-ready {
-    animation: send-ready 2s ease-in-out infinite;
+  .animate-item-exit {
+    animation: item-exit 0.25s ease-in both;
+    overflow: hidden;
   }
 }
 
-/* ─── Tab switch content ──────────────────────────────── */
+/* ═══ 7. 卡片与布局（collapse、chevron、tab） ═══ */
 @keyframes tab-content-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@layer utilities {
-  .animate-tab-in {
-    animation: tab-content-in 0.2s ease-out both;
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
-
-/* ─── Typing indicator dots ───────────────────────────── */
-@keyframes typing-bounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-4px); }
-}
 @layer utilities {
-  .typing-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--muted-foreground);
-    animation: typing-bounce 1.4s ease-in-out infinite;
-  }
-  .typing-dot:nth-child(2) { animation-delay: 0.15s; }
-  .typing-dot:nth-child(3) { animation-delay: 0.3s; }
-}
-
-/* ─── Float (empty state logo) ─────────────────────── */
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-6px); }
-}
-
-/* ─── Slide-in from left (activity feed) ──────────── */
-@keyframes slide-in-left {
-  from { opacity: 0; transform: translateX(-12px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-/* ─── Fade + scale (scroll button, pop-in) ────────── */
-@keyframes fade-scale-in {
-  from { opacity: 0; transform: scale(0.8); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-/* ─── Bounce in (nav indicator, dots) ─────────────── */
-@keyframes bounce-in {
-  0%   { transform: scale(0); }
-  60%  { transform: scale(1.2); }
-  100% { transform: scale(1); }
-}
-
-/* ─── Badge pop (status change) ───────────────────── */
-@keyframes badge-pop {
-  0%   { transform: scale(1); }
-  50%  { transform: scale(1.12); }
-  100% { transform: scale(1); }
-}
-
-/* ─── Slide down (attachments, previews) ──────────── */
-@keyframes slide-down {
-  from { opacity: 0; transform: translateY(-8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-@layer utilities {
-  .animate-float       { animation: float 3s ease-in-out infinite; }
-  .animate-slide-left  { animation: slide-in-left 0.25s ease-out both; }
-  .animate-fade-scale  { animation: fade-scale-in 0.2s ease-out both; }
-  .animate-bounce-in   { animation: bounce-in 0.3s ease-out both; }
-  .animate-badge-pop   { animation: badge-pop 0.3s ease-out both; }
-  .animate-slide-down  { animation: slide-down 0.2s ease-out both; }
-}
-
-/* ─── Exit animations ─────────────────────────────────── */
-@keyframes overlay-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-@keyframes sheet-out {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to   { opacity: 0; transform: translateY(16px) scale(0.97); }
-}
-@keyframes dropdown-out {
-  from { opacity: 1; transform: scale(1); }
-  to   { opacity: 0; transform: scale(0.95); }
-}
-@keyframes item-exit {
-  from { opacity: 1; transform: translateX(0); max-height: 80px; }
-  to   { opacity: 0; transform: translateX(-20px); max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
-}
-@keyframes stream-border-pulse {
-  0%, 100% { border-color: oklch(0.6 0.15 250 / 0.15); }
-  50%      { border-color: oklch(0.6 0.15 250 / 0.35); }
-}
-
-@layer utilities {
-  .animate-overlay-out  { animation: overlay-out 0.15s ease-in both; }
-  .animate-sheet-out    { animation: sheet-out 0.15s ease-in both; }
-  .animate-dropdown-out { animation: dropdown-out 0.12s ease-in both; }
-  .animate-item-exit    { animation: item-exit 0.25s ease-in both; overflow: hidden; }
-  .animate-stream-pulse { border: 1px solid transparent; animation: stream-border-pulse 2s ease-in-out infinite; }
-}
-
-/* ─── Collapse height (grid trick) ─────────────────── */
-@layer utilities {
+  /* 网格 trick 实现高度自适应折叠动画 */
   .collapse-wrapper {
     display: grid;
     grid-template-rows: 0fr;
@@ -538,9 +589,32 @@ code {
   .collapse-inner {
     overflow: hidden;
   }
+
+  /* 展开图标旋转 */
+  .chevron-spin {
+    transition: transform 0.2s ease;
+  }
+  .chevron-spin[data-open="true"] {
+    transform: rotate(90deg);
+  }
+
+  /* tab 内容切换淡入 */
+  .animate-tab-in {
+    animation: tab-content-in 0.2s ease-out both;
+  }
 }
 
-/* ─── Chart SVG path drawing ───────────────────────── */
+/* ═══ 8. 图表绘制 ═══ */
+@keyframes chart-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes chart-area-in {
+  to {
+    opacity: 1;
+  }
+}
 @layer utilities {
   .chart-line-draw {
     stroke-dasharray: 2000;
@@ -552,14 +626,177 @@ code {
     animation: chart-area-in 0.6s ease-out 0.3s forwards;
   }
 }
-@keyframes chart-draw {
-  to { stroke-dashoffset: 0; }
+
+/* ═══ 9. 侧边栏 ═══ */
+@keyframes sidebar-slide-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
-@keyframes chart-area-in {
-  to { opacity: 1; }
+@keyframes sidebar-slide-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+@keyframes indicator-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@layer utilities {
+  .animate-sidebar-in {
+    animation: sidebar-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-sidebar-out {
+    animation: sidebar-slide-out 0.2s ease-in both;
+  }
+  /* 侧边栏选中项左侧青蓝指示条 */
+  .nav-link-active {
+    position: relative;
+  }
+  .nav-link-active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 25%;
+    bottom: 25%;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--brand);
+    animation: indicator-in 0.2s ease-out both;
+    transform-origin: left;
+  }
 }
 
-/* Respect reduced motion preference globally */
+/* ═══ 10. 杂项微交互 ═══ */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes bounce-in {
+  0% {
+    transform: scale(0);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes badge-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes focus-glow {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--brand) 15%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 30%, transparent);
+  }
+}
+@layer utilities {
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+  .animate-bounce-in {
+    animation: bounce-in 0.3s ease-out both;
+  }
+  .animate-badge-pop {
+    animation: badge-pop 0.3s ease-out both;
+  }
+  /* 输入框聚焦发光（青蓝） */
+  .input-focus-glow:focus-within {
+    animation: focus-glow 2s ease-in-out infinite;
+    border-color: var(--brand);
+  }
+  /* 打字指示点 */
+  .typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted-foreground);
+    animation: typing-bounce 1.4s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  /* 按钮按压反馈 */
+  .btn-press {
+    transition: transform 0.1s ease, box-shadow 0.15s ease;
+  }
+  .btn-press:hover {
+    transform: scale(1.02);
+  }
+  .btn-press:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   实用工具类
+   ════════════════════════════════════════════════════════════════ */
+@layer utilities {
+  /* 隐藏滚动条（保留滚动） */
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* 阻止 iOS Safari 横向滚动代码块时的返回滑动手势 */
+pre,
+code {
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 尊重用户的减少动画偏好 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
