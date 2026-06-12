@@ -153,7 +153,6 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
               size="sm"
               onClick={() => handleRespond(option)}
               disabled={isSubmitting}
-              className="min-h-[44px] md:min-h-0"
             >
               {option}
             </Button>
@@ -178,7 +177,6 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
           disabled={isSubmitting || !customAnswer.trim()}
           onClick={handleSubmitCustom}
           aria-label={t("chat.send")}
-          className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0"
         >
           <Send className="w-4 h-4" />
         </Button>

@@ -97,7 +97,7 @@ export default function TasksPage() {
           <Button
             variant="ghost"
             size="sm"
-            className="text-xs text-muted-foreground min-h-[44px] md:min-h-0"
+            className="text-xs text-muted-foreground"
             onClick={() => { setStatusFilter("all"); setAgentFilter("all"); setOffset(0); }}
           >
             <Filter className="size-3 mr-1" />

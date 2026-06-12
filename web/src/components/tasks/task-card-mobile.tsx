@@ -30,7 +30,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             setExpanded(!expanded);
           }
         }}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors cursor-pointer min-h-[44px] md:min-h-0"
+        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors cursor-pointer"
       >
         <div className="text-muted-foreground">
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -61,7 +61,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             variant="danger"
             size="sm"
             aria-label={t("taskCard.cancelTask")}
-            className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0 min-h-[44px] md:min-h-0 min-w-[44px]"
+            className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0"
             onClick={(e) => {
               e.stopPropagation();
               onCancel();

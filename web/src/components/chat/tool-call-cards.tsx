@@ -27,7 +27,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
         variant="ghost"
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 w-full text-left text-[11px] hover:text-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
+        className="flex items-center gap-1.5 w-full text-left text-[11px] hover:text-foreground transition-colors h-auto"
       >
         <ChevronRight className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")} />
         <code className="font-mono text-[11px]">{call.toolName}</code>
@@ -87,7 +87,7 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
         variant="ghost"
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors h-auto"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />

@@ -258,7 +258,7 @@ function ModelSelector() {
         variant="ghost"
         type="button"
         onClick={handleOpen}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors h-auto"
       >
         <span className="max-w-[100px] md:max-w-[140px] truncate text-[11px] md:text-xs">{currentModel}</span>
         <ChevronDown className="size-3" />
@@ -303,7 +303,7 @@ function ModelSelector() {
                         variant="ghost"
                         type="button"
                         onClick={() => handleSwitch(m.id, ch.id)}
-                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between min-h-[44px] md:min-h-0 h-auto"
+                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between h-auto"
                       >
                         <div className="min-w-0">
                           <div className="truncate">{m.name}</div>
@@ -340,7 +340,6 @@ function ModelSelector() {
                   type="button"
                   onClick={handleManualSwitch}
                   disabled={!editModel.trim()}
-                  className="min-h-[44px] md:min-h-0"
                 >
                   {t("common.apply")}
                 </Button>

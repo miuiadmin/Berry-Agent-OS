@@ -144,7 +144,7 @@ export default function ConversationsPage() {
           variant="outline"
           size="sm"
           onClick={() => setSort(sort === "recent" ? "messages" : "recent")}
-          className="gap-1.5 min-h-[44px] md:min-h-0"
+          className="gap-1.5"
         >
           <ArrowUpDown className="size-3.5" />
           <span className="hidden sm:inline">{sort === "recent" ? t("conversations.mostRecent") : t("conversations.mostMessages")}</span>
@@ -153,7 +153,7 @@ export default function ConversationsPage() {
           variant="outline"
           size="sm"
           onClick={handleExportAll}
-          className="gap-1.5 min-h-[44px] md:min-h-0"
+          className="gap-1.5"
           disabled={!conversationsQuery.data?.length}
         >
           <Download className="size-3.5" />
@@ -197,7 +197,7 @@ export default function ConversationsPage() {
                       variant="ghost"
                       size="icon"
                       aria-label={t("conversations.exportConversation")}
-                      className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
+                      className=""
                       onClick={(e) => {
                         e.stopPropagation();
                         handleExport(conv);
@@ -209,7 +209,7 @@ export default function ConversationsPage() {
                       variant="ghost"
                       size="icon"
                       aria-label={t("conversations.deleteConversation")}
-                      className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
+                      className=""
                       onClick={(e) => {
                         e.stopPropagation();
                         setDeleteTarget(conv.sessionId);

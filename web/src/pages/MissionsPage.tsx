@@ -275,7 +275,7 @@ function MissionListItem({
       type="button"
       onClick={onClick}
       className={cn(
-        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 h-auto min-h-[44px] md:min-h-0",
+        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 h-auto",
         isSelected && "border-accent bg-accent/5",
       )}
     >
