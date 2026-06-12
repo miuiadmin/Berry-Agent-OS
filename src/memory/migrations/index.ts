@@ -652,6 +652,57 @@ const v16PendingRequestState: Migration = {
   },
 };
 
+/**
+ * v17: 15.0 存储层加固 — 历史数据 secret 清洗（一次性 backfill）。
+ *
+ * 增量落盘清洗（conversations.ts / dialogue-router.ts）只覆盖「清洗逻辑上线后」的
+ * 新写入；本迁移负责把「上线前」已落库的明文 secret（API key / token / 私钥）
+ * 一次性替换为 [REDACTED:name]。
+ *
+ * 幂等性：redactSecrets 对已清洗的内容（[REDACTED:xxx]）不会再匹配任何 secret 模式，
+ * 因此重复执行零副作用（redacted === content 时跳过 UPDATE）。
+ *
+ * 边界：只清洗 content 字段，**不动** context_json / metadata_json —— 后者可能含
+ * 结构化语义信息，且体积大、模式匹配误伤风险高。
+ */
+const v17RedactHistoryScan: Migration = {
+  version: 17,
+  name: 'redact-history-scan',
+  up: (db: Database.Database) => {
+    // 三张对话/审计表，统一用隐式 rowid 作主键定位行（FTS 触发器也是按 rowid 同步）
+    const targets: Array<{ table: string; contentCol: string }> = [
+      { table: 'conversations', contentCol: 'content' },
+      { table: 'dialogue_messages', contentCol: 'content' },
+      { table: 'agent_chat_messages', contentCol: 'content' },
+    ];
+
+    for (const { table, contentCol } of targets) {
+      // 表可能不存在（极端旧库未跑过对应建表迁移）—— 用 sqlite_master 探测后跳过
+      const exists = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .get(table);
+      if (!exists) continue;
+
+      const rows = db
+        .prepare(`SELECT rowid AS rid, ${contentCol} AS content FROM ${table} WHERE ${contentCol} IS NOT NULL`)
+        .all() as Array<{ rid: number; content: string }>;
+
+      const update = db.prepare(`UPDATE ${table} SET ${contentCol} = ? WHERE rowid = ?`);
+      let cleaned = 0;
+      for (const row of rows) {
+        const redacted = redactSecrets(row.content);
+        if (redacted !== row.content) {
+          update.run(redacted, row.rid);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        logger.info({ table, cleaned }, '15.0 redact 历史扫描：清洗明文 secret');
+      }
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -670,4 +721,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v14BrainObservations,
   v15BrainDecisionsTaskId,
   v16PendingRequestState,
+  v17RedactHistoryScan,
 ];
