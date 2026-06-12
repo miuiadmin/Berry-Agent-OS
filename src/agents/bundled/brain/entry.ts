@@ -480,6 +480,11 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       }
     }
 
+    // 15.0 机制 B：审核 uncertain 升级指令（保守，不要滥用）
+    systemPrompt += `\n\n## 拿不准时升级（uncertain）\n绝大多数情况你能明确 approve/modify/reject。仅当信息严重不足、` +
+      `无法判断回复质量且误判代价高时，额外返回 "uncertain": true 与 "escalationQuestion"（要问用户的自然语言问题），` +
+      `系统会把问题转给用户而非你强行裁决。能判断就正常给 verdict，不要滥用。`;
+
     const reviewContent = buildReviewInput(turn.level, turn);
     const messages: ModelMessage[] = [
       { role: 'user', content: reviewContent },
@@ -506,11 +511,21 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         // 校验 verdict 合法性，非法值回退为 reject（保守策略，避免无效 verdict 溜过审核）
         const validVerdicts = ['approve', 'modify', 'reject'] as const;
         const verdict = validVerdicts.includes(parsed.verdict) ? parsed.verdict : 'reject';
+        // 15.0 机制 B：解析 uncertain 升级（Brain 审核拿不准质量时）
+        let escalation: import('../../../contracts/brain.js').BrainEscalation | undefined;
+        if (Boolean(parsed.uncertain) && typeof parsed.escalationQuestion === 'string' && parsed.escalationQuestion.trim()) {
+          escalation = {
+            source: 'review',
+            reason: typeof parsed.reason === 'string' ? parsed.reason : 'Brain 审核不确定回复质量',
+            questionToUser: parsed.escalationQuestion.trim(),
+          };
+        }
         reviewResult = {
           verdict,
           finalResponse: parsed.finalResponse,
           reason: parsed.reason,
           reRoute: parsed.reRoute || undefined,
+          escalation,
         };
       } catch (parseErr) {
         // 解析失败 = 审核未成功 = 禁止默认批准（违反"所有回复必须经 Brain 审核"硬规则）

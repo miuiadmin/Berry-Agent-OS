@@ -38,6 +38,8 @@ export interface ReviewResult {
   finalResponse?: string;
   reason?: string;
   reRoute?: RouteDecision;
+  /** 15.0 机制 B：Brain 审核拿不准质量时升级问用户（uncertain），orchestrator 据此走 conversation.ask_user */
+  escalation?: import('./brain.js').BrainEscalation;
 }
 
 /**

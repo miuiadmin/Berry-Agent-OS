@@ -2058,6 +2058,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const origin = this.pendingReviewOrigins.get(correlationId);
       this.pendingReviewOrigins.delete(correlationId);
 
+      // 15.0 机制 B：Brain 审核拿不准质量 → 升级问用户，跳过正常 verdict/reRoute 分支
+      if (review.escalation && pending) {
+        logger.info({ correlationId, question: safeSlice(review.escalation.questionToUser, 100) }, 'review 升级问用户（机制 B）');
+        getEventBus().emit('conversation.ask_user', {
+          sessionId: pending.sessionId,
+          taskId: pending.taskId ?? correlationId,
+          agent: 'brain',
+          question: review.escalation.questionToUser,
+        });
+        return;
+      }
+
       if (review.verdict === 'reject' && review.reRoute) {
         this.handleRouteDecision(review.reRoute, correlationId);
         return;
