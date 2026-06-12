@@ -127,7 +127,11 @@ export function searchKnowledge(query: string, options?: SearchOptions): SearchR
   return results;
 }
 
-function sanitizeFtsQuery(query: string): string {
+/**
+ * FTS5 查询清洗器（CJK 感知）。15.0 起导出，供 dialogue-search 等其它 FTS 查询复用：
+ * 对中文段落按 3 字滑窗切片，保证 trigram tokenizer 下短语可召回。
+ */
+export function sanitizeFtsQuery(query: string): string {
   const cleaned = query.replace(/[^\p{L}\p{N}\s]/gu, ' ').trim();
   if (!cleaned) return '""';
 

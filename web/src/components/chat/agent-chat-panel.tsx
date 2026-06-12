@@ -154,7 +154,7 @@ export function AgentChatPanel() {
             variant="ghost"
             size="icon-sm"
             onClick={() => setOpen(false)}
-            className="min-w-0 min-h-0 size-6"
+            className="size-6 mr-2"
           >
             <X className="w-3 h-3 text-muted-foreground" />
           </Button>
