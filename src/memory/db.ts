@@ -31,7 +31,14 @@ export function initDb(path?: string): Database.Database {
   db.exec(CORE_INDEX_SQL);
   runMigrations(db, ALL_MIGRATIONS);
   db.exec(KNOWLEDGE_FTS_SQL);
-  db.prepare(`INSERT INTO knowledge_fts(knowledge_fts) VALUES ('rebuild')`).run();
+  // knowledge_fts 由 KNOWLEDGE_FTS_SQL 的 insert/delete/update 触发器在运行时维护，
+  // 仅当 FTS 行数与源表不一致（触发器遗漏 / 刚创建 / 损坏）时才 rebuild。
+  // 修复前每次启动都全量 rebuild（O(n)），对大知识库是冗余启动开销。FTS5 COUNT(*) 是 O(1)。
+  const ftsCount = db.prepare(`SELECT COUNT(*) AS c FROM knowledge_fts`).get() as { c: number };
+  const srcCount = db.prepare(`SELECT COUNT(*) AS c FROM knowledge`).get() as { c: number };
+  if (ftsCount.c !== srcCount.c) {
+    db.prepare(`INSERT INTO knowledge_fts(knowledge_fts) VALUES ('rebuild')`).run();
+  }
 
   return db;
 }
