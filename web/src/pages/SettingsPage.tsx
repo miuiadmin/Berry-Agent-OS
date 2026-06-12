@@ -13,6 +13,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { ProvidersTab } from "@/components/settings/providers-tab";
+import { ConfigSection, type FieldDef } from "./settings-config-section";
 import {
   Save,
   Wallet,
@@ -422,85 +423,4 @@ function TabContent({
         />
       );
   }
-}
-
-interface FieldDef {
-  key: string;
-  label: string;
-  type: "text" | "number" | "password" | "boolean";
-}
-
-function ConfigSection({
-  title,
-  description,
-  section,
-  config,
-  onUpdate,
-  errors,
-  fields,
-}: {
-  title: string;
-  description?: string;
-  section: string;
-  config: Record<string, unknown>;
-  onUpdate: (section: string, key: string, value: unknown) => void;
-  errors: Record<string, string>;
-  fields: FieldDef[];
-}) {
-  const t = useT();
-  const sectionData = (config[section] as Record<string, unknown>) ?? {};
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {description && (
-          <p className="text-sm text-muted-foreground">{description}</p>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {fields.map((field) => {
-          const errorKey = `${section}.${field.key}`;
-          const fieldError = errors[errorKey];
-          return (
-            <div key={field.key} className="grid gap-1.5">
-              <label htmlFor={`${section}-${field.key}`} className="text-xs font-medium text-muted-foreground">
-                {field.label}
-              </label>
-              {field.type === "boolean" ? (
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id={`${section}-${field.key}`}
-                    checked={!!sectionData[field.key]}
-                    onCheckedChange={(v) => onUpdate(section, field.key, v)}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    {sectionData[field.key] ? t("common.enabled") : t("common.disabled")}
-                  </span>
-                </div>
-              ) : (
-                <Input
-                  id={`${section}-${field.key}`}
-                  type={field.type === "password" ? "password" : field.type === "number" ? "number" : "text"}
-                  inputMode={field.type === "number" ? "numeric" : undefined}
-                  value={(sectionData[field.key] as string | number) ?? ""}
-                  onChange={(e) =>
-                    onUpdate(
-                      section,
-                      field.key,
-                      field.type === "number" ? Number(e.target.value) : e.target.value
-                    )
-                  }
-                  className={cn("h-10 md:h-8", fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30")}
-                />
-              )}
-              {fieldError && (
-                <p className="text-[11px] text-destructive animate-slide-down">{fieldError}</p>
-              )}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
 }
