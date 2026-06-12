@@ -124,50 +124,41 @@ export function AgentChatPanel() {
 
   return (
     <div className="border-t border-border bg-muted/50">
-      {/* 头部（点击折叠/展开）— 外层用 div 承载点击，内部关闭按钮独立，避免嵌套 button */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={toggleOpen}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            toggleOpen();
-          }
-        }}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer min-h-[44px] md:min-h-0"
-      >
-        <div className="flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-muted-foreground" />
-          <span className="text-[13px] font-medium text-foreground">
-            {t("agentChat.title")}
-          </span>
-          {count > 0 && (
-            <Badge variant="secondary" className="text-[11px]">
-              {count}
-            </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {isOpen && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-              }}
-              className="min-w-0 min-h-0 size-6"
-            >
-              <X className="w-3 h-3 text-muted-foreground" />
-            </Button>
-          )}
+      {/* 头部（点击折叠/展开）— toggle Button + close Button 为兄弟关系，避免嵌套 button */}
+      <div className="flex items-center">
+        <Button
+          variant="ghost"
+          type="button"
+          onClick={toggleOpen}
+          className="flex-1 flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors h-auto"
+        >
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-muted-foreground" />
+            <span className="text-[13px] font-medium text-foreground">
+              {t("agentChat.title")}
+            </span>
+            {count > 0 && (
+              <Badge variant="secondary" className="text-[11px]">
+                {count}
+              </Badge>
+            )}
+          </div>
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
           ) : (
             <ChevronUp className="w-4 h-4 text-muted-foreground" />
           )}
-        </div>
+        </Button>
+        {isOpen && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setOpen(false)}
+            className="min-w-0 min-h-0 size-6"
+          >
+            <X className="w-3 h-3 text-muted-foreground" />
+          </Button>
+        )}
       </div>
 
       {/* 消息列表（折叠时隐藏） */}

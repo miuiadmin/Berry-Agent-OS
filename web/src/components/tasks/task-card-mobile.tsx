@@ -19,53 +19,46 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
-      {/* 卡片头部 — div 承载点击，内部取消按钮独立，避免嵌套 button */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setExpanded(!expanded)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setExpanded(!expanded);
-          }
-        }}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors cursor-pointer"
-      >
-        <div className="text-muted-foreground">
-          {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={
-                task.status === "completed" ? "success"
-                  : task.status === "failed" ? "danger"
-                  : task.status === "running" ? "warning"
-                  : "secondary"
-              }
-              className="text-[11px]"
-            >
-              {t(`status.${task.status}`) ?? task.status}
-            </Badge>
-            <span className="text-xs font-medium truncate">{task.taskType}</span>
+      {/* 卡片头部 — toggle Button + cancel Button 为兄弟关系，避免嵌套 button */}
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 flex items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors h-auto"
+        >
+          <div className="text-muted-foreground">
+            {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span>{task.targetAgent}</span>
-            <span>·</span>
-            <span>{formatDuration(task.startedAt, task.finishedAt, task.status)}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={
+                  task.status === "completed" ? "success"
+                    : task.status === "failed" ? "danger"
+                    : task.status === "running" ? "warning"
+                    : "secondary"
+                }
+                className="text-[11px]"
+              >
+                {t(`status.${task.status}`) ?? task.status}
+              </Badge>
+              <span className="text-xs font-medium truncate">{task.taskType}</span>
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>{task.targetAgent}</span>
+              <span>·</span>
+              <span>{formatDuration(task.startedAt, task.finishedAt, task.status)}</span>
+            </div>
           </div>
-        </div>
+        </Button>
         {task.status === "running" && (
           <Button
             variant="danger"
             size="sm"
             aria-label={t("taskCard.cancelTask")}
             className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCancel();
-            }}
+            onClick={onCancel}
           >
             <XCircle className="size-3" />
           </Button>

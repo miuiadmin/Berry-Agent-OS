@@ -83,7 +83,7 @@ export function DebugCaptureDialog() {
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={dismissDialog} className="min-h-[44px] md:min-h-0">
+          <Button variant="outline" onClick={dismissDialog} className="">
             {t("common.close")}
           </Button>
         </DialogFooter>
