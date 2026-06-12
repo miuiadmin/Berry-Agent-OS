@@ -16,6 +16,7 @@ import { useT } from "@/lib/i18n";
 import { HelpCircle, Send, Clock } from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { setLastProgress } from "@/lib/stores/chat-store";
+import { Button } from "@/components/ui/button";
 
 /** AskUser 事件 payload */
 export interface AskUserPayload {
@@ -126,15 +127,15 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
   }
 
   return (
-    <div className="mx-3 my-2 bg-zinc-800/50 border border-zinc-700 rounded-lg overflow-hidden">
+    <div className="mx-3 my-2 bg-muted/50 border border-border rounded-lg overflow-hidden">
       {/* 问题 */}
-      <div className="flex items-start gap-2 px-3 py-2 border-b border-zinc-700/50">
+      <div className="flex items-start gap-2 px-3 py-2 border-b border-border">
         <HelpCircle className="w-4 h-4 text-info flex-shrink-0 mt-0.5" />
         <div className="flex-1">
-          <p className="text-[13px] text-zinc-200">{payload.question}</p>
+          <p className="text-[13px] text-foreground">{payload.question}</p>
           <div className="flex items-center gap-1 mt-1">
-            <Clock className="w-3 h-3 text-zinc-500" />
-            <span className="text-[11px] text-zinc-500">
+            <Clock className="w-3 h-3 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground">
               {formatTime(remainingSeconds)}
             </span>
           </div>
@@ -145,26 +146,22 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
       {payload.options && payload.options.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 py-2">
           {payload.options.map((option, idx) => (
-            <button
+            <Button
               key={idx}
-              onClick={() => handleRespond(option)}
-              disabled={isSubmitting}
-              className={`px-3 py-1.5 text-[13px] rounded-md border transition-colors min-h-[44px] md:min-h-0
-                ${selectedOption === option
-                  ? "bg-info border-info text-white"
-                  : "bg-zinc-800 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-500"
-                }
-                disabled:opacity-50
-              `}
+              variant={selectedOption === option ? "primary" : "outline"}
+              size="sm"
+              onPress={() => handleRespond(option)}
+              isDisabled={isSubmitting}
+              className="min-h-[44px] md:min-h-0"
             >
               {option}
-            </button>
+            </Button>
           ))}
         </div>
       )}
 
       {/* 自由文本输入 */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-zinc-700/50">
+      <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
         <input
           type="text"
           value={customAnswer}
@@ -173,15 +170,17 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
             if (e.key === "Enter") handleSubmitCustom();
           }}
           placeholder={t("askUser.customPlaceholder")}
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[13px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-info min-h-[44px] md:min-h-0"
+          className="flex-1 bg-background border border-input rounded px-2 py-1.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring min-h-[44px] md:min-h-0"
         />
-        <button
-          onClick={handleSubmitCustom}
-          disabled={isSubmitting || !customAnswer.trim()}
-          className="p-2 bg-info rounded hover:bg-info disabled:opacity-50 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
+        <Button
+          variant="primary"
+          isIconOnly
+          isDisabled={isSubmitting || !customAnswer.trim()}
+          onPress={handleSubmitCustom}
+          className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0"
         >
-          <Send className="w-4 h-4 text-white" />
-        </button>
+          <Send className="w-4 h-4" />
+        </Button>
       </div>
     </div>
   );
