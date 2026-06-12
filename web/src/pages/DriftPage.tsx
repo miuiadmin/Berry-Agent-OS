@@ -8,7 +8,8 @@ import { Shield, TrendingUp, AlertTriangle, CheckCircle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 
 function ScoreBar({ score, label }: { score: number; label: string }) {
-  const color = score >= 0.7 ? "bg-green-500" : score >= 0.5 ? "bg-yellow-500" : "bg-red-500";
+  /** 对齐分数 → 语义色（高=success / 中=warning / 低=destructive） */
+  const color = score >= 0.7 ? "bg-success" : score >= 0.5 ? "bg-warning" : "bg-destructive";
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-muted-foreground">
@@ -131,7 +132,7 @@ export default function DriftPage() {
               {signals.slice(0, 20).map(sig => (
                 <div key={sig.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm border-b last:border-0 pb-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`size-2 rounded-full shrink-0 ${sig.alignmentScore >= 0.7 ? 'bg-green-500' : sig.alignmentScore >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`} />
+                    <span className={`size-2 shrink-0 rounded-full ${sig.alignmentScore >= 0.7 ? 'bg-success' : sig.alignmentScore >= 0.5 ? 'bg-warning' : 'bg-destructive'}`} />
                     <span className="text-muted-foreground shrink-0">{sig.checkpointType}</span>
                     {sig.driftDescription && (
                       <span className="text-xs truncate max-w-[120px] sm:max-w-[200px] md:max-w-[400px]">{sig.driftDescription}</span>
