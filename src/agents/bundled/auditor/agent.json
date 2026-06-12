@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "auditor",
+  "version": "0.1.0",
+  "description": "15.0 机制 C：被动事后审计 Agent。扫描历史数据（工具调用/审批/Brain决策/漂移）给 Brain 出 AuditReport。on-demand，不在关键路径。",
+  "level": 2,
+  "kind": "on-demand",
+  "taskTypes": ["audit_scan"],
+  "roles": ["auditor"],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "module-agent",
+  "requiresBrainReview": false
+}
