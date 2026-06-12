@@ -316,11 +316,13 @@ code {
   }
 }
 
-/* ─── Input focus glow ────────────────────────────────── */
+/* ─── Input focus glow ──────────────────────────────────
+   焦点光晕跟随品牌色（color-mix 取 --brand 不同透明度），
+   与 .card-lift:hover 的 brand 描边保持同一套语义 token */
 @keyframes focus-glow {
-  0%   { box-shadow: 0 0 0 2px oklch(0.6 0.15 250 / 0.3); }
-  50%  { box-shadow: 0 0 0 4px oklch(0.6 0.15 250 / 0.15); }
-  100% { box-shadow: 0 0 0 2px oklch(0.6 0.15 250 / 0.3); }
+  0%   { box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 30%, transparent); }
+  50%  { box-shadow: 0 0 0 4px color-mix(in oklch, var(--brand) 15%, transparent); }
+  100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 30%, transparent); }
 }
 .input-focus-glow:focus-within {
   animation: focus-glow 2s ease-in-out infinite;
@@ -396,10 +398,10 @@ code {
   }
 }
 
-/* ─── Send button pulse on ready ──────────────────────── */
+/* ─── Send button pulse on ready（brand 色脉冲，50% 处淡出至透明） ── */
 @keyframes send-ready {
-  0%, 100% { box-shadow: 0 0 0 0 oklch(0.6 0.15 250 / 0.4); }
-  50%      { box-shadow: 0 0 0 6px oklch(0.6 0.15 250 / 0); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 40%, transparent); }
+  50%      { box-shadow: 0 0 0 6px transparent; }
 }
 @layer utilities {
   .animate-send-ready {
@@ -499,9 +501,10 @@ code {
   from { opacity: 1; transform: translateX(0); max-height: 80px; }
   to   { opacity: 0; transform: translateX(-20px); max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
 }
+/* 流式响应边框脉冲（brand 色透明度往返） */
 @keyframes stream-border-pulse {
-  0%, 100% { border-color: oklch(0.6 0.15 250 / 0.15); }
-  50%      { border-color: oklch(0.6 0.15 250 / 0.35); }
+  0%, 100% { border-color: color-mix(in oklch, var(--brand) 15%, transparent); }
+  50%      { border-color: color-mix(in oklch, var(--brand) 35%, transparent); }
 }
 
 @layer utilities {
