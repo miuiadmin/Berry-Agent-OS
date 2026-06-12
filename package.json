@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "lint:boundaries": "node tools/check-boundaries.js",
     "tail": "tsx tools/transcript-tail.ts",
+    "verify:15.0": "tsx tools/verify-15.0.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "npx prettier --write \"src/**/*.ts\" \"web/src/**/*.{ts,tsx}\"",
