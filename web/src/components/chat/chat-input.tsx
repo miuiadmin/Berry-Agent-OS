@@ -4,6 +4,7 @@ import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-r
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
@@ -18,6 +19,7 @@ interface ChatInputProps {
 export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /** textarea ref，用于控制自动高度调整 */
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const t = useT();
@@ -53,6 +55,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
+    /** 自动调整高度：先重置，再按 scrollHeight 设置，上限 300px */
     const el = e.target;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 300) + "px";
@@ -77,9 +80,9 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
           {allAttachments.length > 0 && (
             <AttachmentPreview attachments={allAttachments} onRemove={handleRemoveAttachment} />
           )}
-          {/* Text input */}
+          {/* Text input — HeroUI TextArea adapter，自动调整高度 */}
           <div className="relative">
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={text}
               onChange={handleInput}
@@ -87,10 +90,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               placeholder={t("chat.typePlaceholder")}
               aria-label={t("chat.typePlaceholder")}
               rows={1}
-              className={cn(
-                "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none",
-                "placeholder:text-muted-foreground"
-              )}
+              className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none border-0 focus:border-0 focus:ring-0"
             />
             {charCount > 500 && (
               <span className="absolute bottom-2 right-3 text-[11px] text-muted-foreground/60">

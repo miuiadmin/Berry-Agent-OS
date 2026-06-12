@@ -11,6 +11,7 @@ import { useEffect, useRef } from "react";
 import { useAgentChatStore, type AgentChatMessage } from "@/lib/stores/agent-chat-store";
 import { useT } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Bot,
   ChevronDown,
@@ -124,7 +125,7 @@ export function AgentChatPanel() {
 
   return (
     <div className="border-t border-border bg-muted/50">
-      {/* 头部（点击折叠/展开）— 用 div 承载点击避免与内部关闭按钮形成嵌套 button */}
+      {/* 头部（点击折叠/展开）— 外层用 div 承载点击，内部关闭按钮独立，避免嵌套 button */}
       <div
         role="button"
         tabIndex={0}
@@ -135,7 +136,7 @@ export function AgentChatPanel() {
             toggleOpen();
           }
         }}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer"
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer min-h-[44px] md:min-h-0"
       >
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-muted-foreground" />
@@ -143,9 +144,9 @@ export function AgentChatPanel() {
             {t("agentChat.title")}
           </span>
           {count > 0 && (
-            <span className="text-[11px] bg-muted text-foreground rounded-full px-1.5 py-0.5">
+            <Badge variant="secondary" className="text-[11px]">
               {count}
-            </span>
+            </Badge>
           )}
         </div>
         <div className="flex items-center gap-1">

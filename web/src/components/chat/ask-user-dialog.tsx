@@ -17,6 +17,7 @@ import { HelpCircle, Send, Clock } from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { setLastProgress } from "@/lib/stores/chat-store";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /** AskUser 事件 payload */
 export interface AskUserPayload {
@@ -162,7 +163,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
 
       {/* 自由文本输入 */}
       <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
-        <input
+        <Input
           type="text"
           value={customAnswer}
           onChange={(e) => setCustomAnswer(e.target.value)}
@@ -170,7 +171,6 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
             if (e.key === "Enter") handleSubmitCustom();
           }}
           placeholder={t("askUser.customPlaceholder")}
-          className="flex-1 bg-background border border-input rounded px-2 py-1.5 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-ring min-h-[44px] md:min-h-0"
         />
         <Button
           variant="primary"

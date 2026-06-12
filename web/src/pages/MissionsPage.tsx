@@ -11,7 +11,9 @@ import { apiGet } from "@/lib/api";
 import { useMissionStore, type Mission, type MissionTask } from "@/lib/stores/mission-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
@@ -268,11 +270,14 @@ function MissionListItem({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
+      variant="ghost"
+      type="button"
       onClick={onClick}
-      className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 ${
-        isSelected ? "border-primary bg-primary/5" : ""
-      }`}
+      className={cn(
+        "w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 h-auto min-h-[44px] md:min-h-0",
+        isSelected && "border-primary bg-primary/5",
+      )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
@@ -284,7 +289,7 @@ function MissionListItem({
         </div>
         <Target className="size-4 shrink-0 text-muted-foreground" />
       </div>
-    </button>
+    </Button>
   );
 }
 

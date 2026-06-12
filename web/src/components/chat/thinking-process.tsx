@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { ThinkingStep } from "@/lib/stores/chat-store";
@@ -66,10 +67,11 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
   // 这是正常排印行为。要彻底消除需 leading-none（强制行高=字号），但 11px 小字会明显降低可读性，故不采用。
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
         type="button"
-        onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <span>{isActive ? t("thinking.active") : t("thinking.inactive")}</span>
@@ -79,7 +81,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
             ({steps.length}{totalMs > 500 ? ` · ${formatElapsed(totalMs)}` : ""})
           </span>
         )}
-      </button>
+      </Button>
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
           <div

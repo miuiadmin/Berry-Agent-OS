@@ -26,6 +26,8 @@ import {
 import { apiPost } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 /** Brain 审核裁决类型 */
@@ -144,9 +146,9 @@ export function BrainReviewModal({
           <DialogTitle className="flex items-center gap-2">
             <VerdictIcon verdict={verdict} />
             <span>{t("brain.reviewTitle")}</span>
-            <span className={cn("text-xs px-2 py-0.5 rounded-full", verdictBadgeClass(verdict))}>
+            <Badge variant={verdict === "approve" ? "success" : verdict === "modify" ? "warning" : "danger"}>
               {verdictLabel(verdict, t)}
-            </span>
+            </Badge>
           </DialogTitle>
         </DialogHeader>
 
@@ -197,11 +199,11 @@ export function BrainReviewModal({
           {/* 反馈区域 */}
           {showFeedback && (
             <div className="py-3 border-b border-border">
-              <textarea
+              <Textarea
                 value={feedbackComment}
                 onChange={(e) => setFeedbackComment(e.target.value)}
                 placeholder={t("brain.feedbackPlaceholder")}
-                className="w-full h-20 rounded-md border border-input bg-background p-2 text-sm resize-none focus:outline-none focus:border-ring"
+                className="h-20"
               />
               <div className="flex justify-end gap-2 mt-2">
                 <Button variant="ghost" size="sm" onClick={() => setShowFeedback(false)}>

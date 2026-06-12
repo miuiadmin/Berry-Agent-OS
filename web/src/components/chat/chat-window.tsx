@@ -7,6 +7,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck, ChevronDown } from "lucide-react";
 import { apiGet, apiPut, uploadFile, queries } from "@/lib/api";
@@ -243,13 +244,15 @@ function ModelSelector() {
 
   return (
     <div className="relative">
-      <button
+      <Button
+        variant="ghost"
+        type="button"
         onClick={handleOpen}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
       >
         <span className="max-w-[100px] md:max-w-[140px] truncate text-[11px] md:text-xs">{currentModel}</span>
         <ChevronDown className="size-3" />
-      </button>
+      </Button>
       {open && (
         <>
           <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} aria-hidden="true" />
@@ -266,13 +269,13 @@ function ModelSelector() {
             </div>
             {/* Search */}
             <div className="px-4 md:px-3 pb-2 shrink-0">
-              <input
+              <Input
                 type="text"
                 placeholder={t("chat.searchModels")}
                 aria-label={t("chat.searchModels")}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="w-full rounded-md border border-input bg-muted/50 px-3 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                className="text-[16px] md:text-xs"
                 autoFocus
               />
             </div>
@@ -285,10 +288,12 @@ function ModelSelector() {
                   <div key={ch.id} className="mb-1">
                     <div className="px-2 py-1 text-[11px] text-muted-foreground font-medium">{ch.name}</div>
                     {chModels.map(m => (
-                      <button
+                      <Button
                         key={m.id}
+                        variant="ghost"
+                        type="button"
                         onClick={() => handleSwitch(m.id, ch.id)}
-                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between min-h-[44px] md:min-h-0"
+                        className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between min-h-[44px] md:min-h-0 h-auto"
                       >
                         <div className="min-w-0">
                           <div className="truncate">{m.name}</div>
@@ -297,7 +302,7 @@ function ModelSelector() {
                         {m.id === currentModel && (
                           <span className="size-1.5 rounded-full bg-brand shrink-0 ml-2" />
                         )}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 );
@@ -311,21 +316,24 @@ function ModelSelector() {
             {/* Manual input */}
             <div className="border-t border-border px-4 md:px-3 py-2 shrink-0">
               <div className="flex gap-1.5">
-                <input
+                <Input
                   type="text"
                   placeholder={t("chat.orEnterModelId")}
                   value={editModel}
                   onChange={(e) => setEditModel(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") handleManualSwitch(); }}
-                  className="flex-1 rounded-md border border-input bg-muted/50 px-2.5 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
+                  className="flex-1 text-[16px] md:text-xs"
                 />
-                <button
+                <Button
+                  variant="primary"
+                  size="sm"
+                  type="button"
                   onClick={handleManualSwitch}
                   disabled={!editModel.trim()}
-                  className="rounded-md px-3 py-2 md:px-2.5 md:py-1.5 text-xs font-medium bg-foreground text-background hover:bg-foreground/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[44px] md:min-h-0"
+                  className="min-h-[44px] md:min-h-0"
                 >
                   {t("common.apply")}
-                </button>
+                </Button>
               </div>
             </div>
             {/* Settings link */}

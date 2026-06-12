@@ -13,6 +13,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 type Layer = "agent" | "workspace" | "global";
@@ -30,8 +32,8 @@ function MemorySkeleton() {
         <Card key={i}>
           <CardContent className="py-3">
             <div className="space-y-2">
-              <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="h-3 w-2/3" />
             </div>
           </CardContent>
         </Card>
@@ -177,12 +179,11 @@ export default function MemoryPage() {
               onChange={(e) => setNewKey(e.target.value)}
               className="h-11 md:h-8"
             />
-            <textarea
+            <Textarea
               placeholder={t("memory.valuePlaceholder")}
               value={newValue}
               onChange={(e) => setNewValue(e.target.value)}
               rows={3}
-              className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <div className="flex gap-2">
               <Button

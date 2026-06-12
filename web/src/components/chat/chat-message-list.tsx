@@ -4,6 +4,8 @@ import ReactMarkdown from "react-markdown";
 import { useChatStore, type ChatMessage, type ChatAttachment } from "@/lib/stores/chat-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { Check, Copy, AlertCircle, RotateCcw, ChevronDown, Pencil, Trash2, X, SendHorizontal, FileText, Download } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
@@ -67,6 +69,7 @@ function EditableMessage({
   onCancel: () => void;
 }) {
   const [text, setText] = useState(message.content);
+  /** textarea ref，用于初始化聚焦和自动高度 */
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const t = useT();
 
@@ -91,16 +94,17 @@ function EditableMessage({
 
   return (
     <div className="flex flex-col gap-2 max-w-[90%] sm:max-w-[80%]">
-      <textarea
+      <Textarea
         ref={textareaRef}
         value={text}
         onChange={(e) => {
           setText(e.target.value);
+          /** 自动调整高度：先重置，再按 scrollHeight 设置 */
           e.target.style.height = "auto";
           e.target.style.height = e.target.scrollHeight + "px";
         }}
         onKeyDown={handleKeyDown}
-        className="resize-none rounded-xl border border-input bg-muted/50 px-4 py-2.5 text-sm leading-relaxed outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+        className="resize-none rounded-xl border border-input bg-muted/50 px-4 py-2.5 text-sm leading-relaxed outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 border-0 focus:border-0 focus:ring-0"
         rows={1}
       />
       <div className="flex items-center gap-2 justify-end">
@@ -283,16 +287,16 @@ const MessageBubble = memo(function MessageBubble({
         {!isUser && message.reviewVerdict && message.reviewVerdict !== "approve" && (
           <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
             {message.reviewVerdict === "modify" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-info dark:text-info">
+              <Badge variant="secondary" className="gap-1 text-[11px]">
                 <Pencil className="size-2.5" />
                 {t("chat.brainModified")}
-              </span>
+              </Badge>
             )}
             {message.reviewVerdict === "reject" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-warning dark:text-warning">
+              <Badge variant="warning" className="gap-1 text-[11px]">
                 <AlertCircle className="size-2.5" />
                 {t("chat.brainRejected")}
-              </span>
+              </Badge>
             )}
             {message.reviewReason && (
               <span className="truncate max-w-[200px] text-muted-foreground/70" title={message.reviewReason}>

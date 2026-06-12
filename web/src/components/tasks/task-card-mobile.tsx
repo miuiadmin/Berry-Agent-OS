@@ -19,9 +19,18 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
-      <button
+      {/* 卡片头部 — div 承载点击，内部取消按钮独立，避免嵌套 button */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setExpanded(!expanded);
+          }
+        }}
+        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors cursor-pointer min-h-[44px] md:min-h-0"
       >
         <div className="text-muted-foreground">
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -61,7 +70,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             <XCircle className="size-3" />
           </Button>
         )}
-      </button>
+      </div>
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
           <div className="border-t border-border bg-muted/10 p-3 space-y-2 text-xs">

@@ -160,7 +160,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
             >
               {editingId === conv.sessionId ? (
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <input
+                  <Input
                     ref={editInputRef}
                     value={editValue}
                     onChange={(e) => setEditValue(e.target.value)}
@@ -168,7 +168,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                       if (e.key === "Enter") submitRename();
                       if (e.key === "Escape") setEditingId(null);
                     }}
-                    className="flex-1 bg-background border rounded px-2 py-1.5 min-h-[44px] md:min-h-0 md:px-1.5 md:py-0.5 text-[16px] md:text-xs outline-none focus:ring-1 focus:ring-ring"
+                    className="flex-1"
                   />
                   <Button variant="ghost" size="icon-sm" onClick={submitRename} aria-label={t("chat.saveRename")} className="text-success hover:text-success/80">
                     <Check className="size-3" />

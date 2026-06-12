@@ -4,7 +4,9 @@ import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 interface LogLine {
@@ -68,13 +70,13 @@ export default function LogsPage() {
           className="w-auto"
         />
 
-        <input
+        <Input
           type="text"
           aria-label={t("logs.filterByModule")}
           placeholder={t("logs.modulePlaceholder")}
           value={module}
           onChange={(e) => setModule(e.target.value)}
-          className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
+          className="w-28"
         />
 
         <Select
@@ -99,12 +101,11 @@ export default function LogsPage() {
           <RefreshCw className="size-3.5" />
         </Button>
 
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">
-          <input
-            type="checkbox"
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+          <Switch
             checked={autoRefresh}
-            onChange={(e) => setAutoRefresh(e.target.checked)}
-            className="size-5 md:size-3"
+            onCheckedChange={setAutoRefresh}
+            aria-label={t("logs.auto")}
           />
           {t("logs.auto")}
         </label>

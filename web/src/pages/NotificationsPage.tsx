@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 type Filter = "unread" | "all" | "archived";
@@ -121,7 +122,7 @@ export default function NotificationsPage() {
       {/* Notification list */}
       <QueryBoundary
         query={listQuery}
-        skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}
+        skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><Skeleton className="h-4 w-1/3" /></CardContent></Card>)}</div>}
       >
         {(notifications) => notifications.length === 0 ? (
           <EmptyState

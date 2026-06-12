@@ -3,6 +3,7 @@ import { DashboardLayout } from "./components/layout/dashboard-layout";
 import { useRealtimeEvents } from "./hooks/use-realtime-events";
 import { ErrorBoundary } from "./components/error-boundary";
 import { useT } from "./lib/i18n";
+import { Spinner } from "./components/ui/spinner";
 
 // Lazy-load pages
 import { lazy, Suspense } from "react";
@@ -22,7 +23,7 @@ const MissionsPage = lazy(() => import("./pages/MissionsPage"));
 
 /** 全局 Suspense 加载指示器 */
 function LoadingSpinner() {
-  return <div className="flex h-screen items-center justify-center"><div className="size-6 rounded-full border-2 border-muted-foreground/30 border-t-brand animate-spin" /></div>;
+  return <div className="flex h-screen items-center justify-center"><Spinner className="size-6" /></div>;
 }
 
 export default function App() {

@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
@@ -21,11 +22,11 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className="flex items-center gap-1.5 w-full text-left text-[11px] hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
+        className="flex items-center gap-1.5 w-full text-left text-[11px] hover:text-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
       >
         <ChevronRight className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")} />
         <code className="font-mono text-[11px]">{call.toolName}</code>
@@ -36,7 +37,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
             : <Check className="size-3 text-success" />
           }
         </span>
-      </button>
+      </Button>
       {expanded && (
         <div className="mt-1 ml-4 space-y-1.5 text-[11px]">
           <div>
@@ -81,10 +82,11 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
   // （详见 thinking-process.tsx 注释），此处同样保留默认行高以保证 11px 小字可读性。
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground/70 hover:text-muted-foreground transition-colors min-h-[44px] md:min-h-0 h-auto"
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />
@@ -96,7 +98,7 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
             {hasErrors ? t("thinking.hasErrors") : ""}
           </span>
         )}
-      </button>
+      </Button>
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
           <div className="ml-3.5 mt-0.5 border-l border-border/50 pl-2 divide-y divide-border/30">
