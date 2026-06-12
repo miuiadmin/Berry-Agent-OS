@@ -84,7 +84,7 @@ export default function NotificationsPage() {
             <Bell className="size-5 text-brand" />
             {t("notifications.title")}
             {unread > 0 && (
-              <Badge variant="destructive" className="text-[11px]">
+              <Badge variant="danger" className="text-[11px]">
                 {unread}
               </Badge>
             )}

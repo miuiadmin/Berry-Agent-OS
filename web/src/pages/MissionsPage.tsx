@@ -52,11 +52,11 @@ interface PlanResponse {
 // ─── 状态徽章 ───
 
 function StatusBadge({ status }: { status: string }) {
-  const variants: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "destructive"; icon: React.ReactNode }> = {
+  const variants: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "danger"; icon: React.ReactNode }> = {
     pending: { variant: "secondary", icon: <Clock className="size-3" /> },
     in_progress: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
     completed: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
-    failed: { variant: "destructive", icon: <AlertTriangle className="size-3" /> },
+    failed: { variant: "danger", icon: <AlertTriangle className="size-3" /> },
     cancelled: { variant: "secondary", icon: <Clock className="size-3" /> },
     // task-level statuses
     waiting: { variant: "secondary", icon: <Clock className="size-3" /> },

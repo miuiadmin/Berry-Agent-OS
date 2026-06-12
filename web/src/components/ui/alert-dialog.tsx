@@ -19,7 +19,7 @@ interface AlertDialogProps {
   cancelLabel?: string;
   /** 确认按钮文本，默认"继续" */
   actionLabel?: string;
-  actionVariant?: "default" | "destructive";
+  actionVariant?: "primary" | "danger";
   onAction: () => void;
   children?: ReactNode;
 }
@@ -38,7 +38,7 @@ export function AlertDialog({
   description,
   cancelLabel,
   actionLabel,
-  actionVariant = "destructive",
+  actionVariant = "danger",
   onAction,
 }: AlertDialogProps) {
   return (
@@ -49,12 +49,12 @@ export function AlertDialog({
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" size="default" className="min-h-[44px] md:min-h-0" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" size="sm" className="min-h-[44px] md:min-h-0" onClick={() => onOpenChange(false)}>
             {cancelLabel ?? t("common.cancel")}
           </Button>
           <Button
             variant={actionVariant}
-            size="default"
+            size="sm"
             className="min-h-[44px] md:min-h-0"
             onClick={() => {
               onAction();

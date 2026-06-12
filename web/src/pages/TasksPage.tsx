@@ -188,7 +188,7 @@ export default function TasksPage() {
         <div className="mt-4 flex justify-center">
           <Button
             variant="outline"
-            size="default"
+            size="sm"
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
           >
             {t("tasks.loadMore")}
@@ -230,7 +230,7 @@ function TaskRow({
           <Badge
             variant={
               task.status === "completed" ? "success"
-                : task.status === "failed" ? "destructive"
+                : task.status === "failed" ? "danger"
                 : task.status === "running" ? "warning"
                 : "secondary"
             }
@@ -244,7 +244,7 @@ function TaskRow({
         <td className="px-4 py-2.5">
           {task.status === "running" && (
             <Button
-              variant="destructive"
+              variant="danger"
               size="sm"
               className="h-6 px-2 text-xs"
               onClick={(e) => {

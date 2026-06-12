@@ -225,12 +225,12 @@ function SettingsContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="default" onClick={handleReset}>
+              <Button variant="outline" size="sm" onClick={handleReset}>
                 <RotateCcw className="size-4" />
                 {t("settings.reset")}
               </Button>
               <div className="relative">
-                <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="default">
+                <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="sm">
                   <Save className="size-4" />
                   {t("settings.save")}
                 </Button>

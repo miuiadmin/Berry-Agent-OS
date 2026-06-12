@@ -31,7 +31,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             <Badge
               variant={
                 task.status === "completed" ? "success"
-                  : task.status === "failed" ? "destructive"
+                  : task.status === "failed" ? "danger"
                   : task.status === "running" ? "warning"
                   : "secondary"
               }
@@ -49,7 +49,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
         </div>
         {task.status === "running" && (
           <Button
-            variant="destructive"
+            variant="danger"
             size="sm"
             aria-label={t("taskCard.cancelTask")}
             className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0 min-h-[44px] md:min-h-0 min-w-[44px]"

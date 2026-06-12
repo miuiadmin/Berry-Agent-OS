@@ -81,7 +81,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
                   className="flex items-center gap-2 rounded border px-2 py-1.5 text-[11px]"
                 >
                   <Badge
-                    variant={ex.status === "completed" ? "outline" : "destructive"}
+                    variant={ex.status === "completed" ? "outline" : "danger"}
                     className="text-[11px]"
                   >
                     {t(`status.${ex.status}`) ?? ex.status}

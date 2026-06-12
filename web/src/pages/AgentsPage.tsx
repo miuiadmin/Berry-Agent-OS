@@ -215,7 +215,7 @@ function AgentDetailView({
 
   return (
     <div className="mt-4 animate-page-in">
-      <Button variant="ghost" size="default" className="mb-4" onClick={onBack}>
+      <Button variant="ghost" size="sm" className="mb-4" onClick={onBack}>
         <ArrowLeft className="size-4" />
         {t("agents.backToAgents")}
       </Button>
@@ -283,7 +283,7 @@ function AgentDetailView({
                     <Badge
                       variant={
                         task.status === "completed" ? "success"
-                          : task.status === "failed" ? "destructive"
+                          : task.status === "failed" ? "danger"
                           : task.status === "running" ? "warning"
                           : "secondary"
                       }
@@ -320,7 +320,7 @@ function AgentDetailView({
                   <Badge
                     variant={
                       ev.event === "enabled" ? "success"
-                        : ev.event === "crashed" ? "destructive"
+                        : ev.event === "crashed" ? "danger"
                         : "secondary"
                     }
                   >
