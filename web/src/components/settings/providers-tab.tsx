@@ -100,9 +100,9 @@ const PROVIDER_KIND_LABEL_KEYS: Record<string, string> = {
 };
 
 const TIER_CONFIG = [
-  { key: "fast" as const, labelKey: "providers.tierFast", icon: Zap, color: "text-green-500" },
-  { key: "default" as const, labelKey: "providers.tierDefault", icon: Brain, color: "text-blue-500" },
-  { key: "high" as const, labelKey: "providers.tierHigh", icon: Crown, color: "text-amber-500" },
+  { key: "fast" as const, labelKey: "providers.tierFast", icon: Zap, color: "text-success" },
+  { key: "default" as const, labelKey: "providers.tierDefault", icon: Brain, color: "text-info" },
+  { key: "high" as const, labelKey: "providers.tierHigh", icon: Crown, color: "text-warning" },
 ];
 
 // ─── Shared select styling ───────────────────────────────────────
@@ -762,7 +762,7 @@ function ChannelCard({
           </button>
 
           {channel.enabled ? (
-            <Wifi className="size-3.5 text-green-500 shrink-0" />
+            <Wifi className="size-3.5 shrink-0 text-success" />
           ) : (
             <WifiOff className="size-3.5 text-muted-foreground shrink-0" />
           )}

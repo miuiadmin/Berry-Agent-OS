@@ -7,8 +7,8 @@
  * §5.1.1 前端实时信息流：Agent 间对话实时可见
  *
  * 注意：本组件当前未被任何页面引用（暂未启用），待 13.0 多智能体协作前端完善后接入。
- * 内部硬编码 zinc-* 色板为暂定暗色样式，接入时应收口到语义 token（与 chat-window 的
- * bg-background / bg-muted 保持一致）。
+ * Agent 颜色使用语义 token（info/success/destructive/warning），有明确语义的 Agent
+ * 映射到对应 token，其余使用 muted-foreground 作为中性色，待 13.0 激活时补充分类色板。
  */
 
 import { useEffect, useRef } from "react";
@@ -23,48 +23,49 @@ import {
   X,
 } from "lucide-react";
 
-/** Agent 名称 → 显示颜色映射 */
+/**
+ * Agent 名称 → 语义颜色映射。
+ * 有明确语义的 Agent 收口到主题 token：
+ *   - code（编码/信息）→ info
+ *   - learning（学习/正向）→ success
+ *   - brain（审核/拦截）→ destructive
+ *   - skill_tester（测试/警示）→ warning
+ * 其余 Agent 暂用 muted-foreground 中性色，待 13.0 激活时补充分类色板。
+ */
 const AGENT_COLORS: Record<string, string> = {
-  code: "text-blue-400",
-  learning: "text-green-400",
-  memory: "text-emerald-400",
-  skills: "text-purple-400",
-  conversation: "text-orange-400",
-  brain: "text-red-400",
-  plugin_builder: "text-pink-400",
-  skill_tester: "text-yellow-400",
-  evolution: "text-cyan-400",
+  code: "text-info",
+  learning: "text-success",
+  brain: "text-destructive",
+  skill_tester: "text-warning",
 };
 
-/** Agent 名称 → 图标背景色 */
+/** Agent 名称 → 图标背景色（与 AGENT_COLORS 的语义 token 对应，统一 /10 透明度） */
 const AGENT_BG: Record<string, string> = {
-  code: "bg-blue-500/10",
-  learning: "bg-green-500/10",
-  memory: "bg-emerald-500/10",
-  skills: "bg-purple-500/10",
-  conversation: "bg-orange-500/10",
-  brain: "bg-red-500/10",
+  code: "bg-info/10",
+  learning: "bg-success/10",
+  brain: "bg-destructive/10",
+  skill_tester: "bg-warning/10",
 };
 
-/** 获取 agent 显示颜色 */
+/** 获取 agent 显示颜色（未命中映射时回退到中性色） */
 function getAgentColor(agent: string): string {
-  return AGENT_COLORS[agent] ?? "text-zinc-400";
+  return AGENT_COLORS[agent] ?? "text-muted-foreground";
 }
 
-/** 获取 agent 图标背景色 */
+/** 获取 agent 图标背景色（未命中映射时回退到中性色） */
 function getAgentBg(agent: string): string {
-  return AGENT_BG[agent] ?? "bg-zinc-500/10";
+  return AGENT_BG[agent] ?? "bg-muted";
 }
 
 /** 方向箭头样式 */
 function DirectionArrow({ direction }: { direction: AgentChatMessage["direction"] }) {
   if (direction === "request") {
-    return <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0" />;
+    return <ArrowRight className="size-3 shrink-0 text-muted-foreground" />;
   }
   if (direction === "response") {
-    return <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0 rotate-180" />;
+    return <ArrowRight className="size-3 shrink-0 rotate-180 text-muted-foreground" />;
   }
-  return <MessageSquare className="w-3 h-3 text-zinc-500 flex-shrink-0" />;
+  return <MessageSquare className="size-3 shrink-0 text-muted-foreground" />;
 }
 
 /** 单条对话消息渲染 */
@@ -74,23 +75,23 @@ function AgentChatBubble({ msg }: { msg: AgentChatMessage }) {
   return (
     <div className={`flex items-start gap-1.5 px-2 py-1 text-[13px] ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
       {/* Agent 图标 */}
-      <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${getAgentBg(msg.fromAgent)}`}>
-        <Bot className={`w-3 h-3 ${getAgentColor(msg.fromAgent)}`} />
+      <div className={`flex size-5 shrink-0 items-center justify-center rounded-full ${getAgentBg(msg.fromAgent)}`}>
+        <Bot className={`size-3 ${getAgentColor(msg.fromAgent)}`} />
       </div>
 
       {/* 消息内容 */}
-      <div className={`flex items-center gap-1.5 max-w-[85%] ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
-        <span className={`font-medium text-[11px] ${getAgentColor(msg.fromAgent)}`}>
+      <div className={`flex max-w-[85%] items-center gap-1.5 ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
+        <span className={`text-[11px] font-medium ${getAgentColor(msg.fromAgent)}`}>
           {msg.fromAgent}
         </span>
         <DirectionArrow direction={msg.direction} />
-        <span className={`font-medium text-[11px] ${getAgentColor(msg.toAgent)}`}>
+        <span className={`text-[11px] font-medium ${getAgentColor(msg.toAgent)}`}>
           {msg.toAgent}
         </span>
       </div>
 
       {/* 消息正文 */}
-      <div className={`text-zinc-300 text-[12px] leading-relaxed break-all ${isRequest ? "text-left" : "text-right"}`}>
+      <div className={`break-all text-[12px] leading-relaxed text-foreground ${isRequest ? "text-left" : "text-right"}`}>
         {msg.content.length > 200
           ? msg.content.slice(0, 200) + "…"
           : msg.content}
@@ -126,19 +127,20 @@ export function AgentChatPanel() {
   const count = messages.length;
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-900/50">
+    <div className="border-t border-border bg-muted/30">
       {/* 头部（点击折叠/展开） */}
       <button
+        type="button"
         onClick={toggleOpen}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-800/50 transition-colors"
+        className="flex w-full items-center justify-between px-3 py-2 transition-colors hover:bg-muted/60"
       >
         <div className="flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-zinc-400" />
-          <span className="text-[13px] font-medium text-zinc-300">
+          <MessageSquare className="size-4 text-muted-foreground" />
+          <span className="text-[13px] font-medium text-foreground">
             {t("agentChat.title")}
           </span>
           {count > 0 && (
-            <span className="text-[11px] bg-zinc-700 text-zinc-300 rounded-full px-1.5 py-0.5">
+            <span className="rounded-full bg-muted-foreground/15 px-1.5 py-0.5 text-[11px] text-foreground">
               {count}
             </span>
           )}
@@ -146,19 +148,21 @@ export function AgentChatPanel() {
         <div className="flex items-center gap-1">
           {isOpen && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
               }}
-              className="p-1 hover:bg-zinc-700 rounded"
+              className="min-h-[44px] min-w-[44px] rounded p-1 hover:bg-muted md:min-h-0 md:min-w-0"
+              aria-label={t("common.close")}
             >
-              <X className="w-3 h-3 text-zinc-500" />
+              <X className="size-3 text-muted-foreground" />
             </button>
           )}
           {isOpen ? (
-            <ChevronDown className="w-4 h-4 text-zinc-500" />
+            <ChevronDown className="size-4 text-muted-foreground" />
           ) : (
-            <ChevronUp className="w-4 h-4 text-zinc-500" />
+            <ChevronUp className="size-4 text-muted-foreground" />
           )}
         </div>
       </button>
@@ -170,11 +174,11 @@ export function AgentChatPanel() {
           className="max-h-[300px] overflow-y-auto overscroll-contain scrollbar-thin"
         >
           {messages.length === 0 ? (
-            <div className="text-center text-zinc-600 text-[12px] py-4">
+            <div className="py-4 text-center text-[12px] text-muted-foreground">
               {t("agentChat.empty")}
             </div>
           ) : (
-            <div className="divide-y divide-zinc-800/50">
+            <div className="divide-y divide-border/50">
               {messages.map((msg) => (
                 <AgentChatBubble key={msg.id} msg={msg} />
               ))}

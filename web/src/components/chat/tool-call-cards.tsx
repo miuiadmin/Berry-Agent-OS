@@ -32,8 +32,8 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
         <span className="ml-auto flex items-center gap-1 shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
           {formatDuration(call.durationMs)}
           {call.isError
-            ? <X className="size-3 text-red-500" />
-            : <Check className="size-3 text-green-500" />
+            ? <X className="size-3 text-destructive" />
+            : <Check className="size-3 text-success" />
           }
         </span>
       </button>
@@ -46,12 +46,12 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
             </pre>
           </div>
           <div>
-            <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-red-400" : "text-muted-foreground/60")}>
+            <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-destructive" : "text-muted-foreground/60")}>
               {t(call.isError ? "tools.error" : "tools.output")}
             </span>
             <pre className={cn(
               "mt-0.5 rounded px-2 py-1.5 overflow-x-auto max-h-40 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all",
-              call.isError ? "bg-red-500/5" : "bg-muted/50",
+              call.isError ? "bg-destructive/5" : "bg-muted/50",
             )}>
               {call.result}
             </pre>

@@ -16,6 +16,8 @@ import { useT } from "@/lib/i18n";
 import { HelpCircle, Send, Clock } from "lucide-react";
 import { apiPost } from "@/lib/api";
 import { setLastProgress } from "@/lib/stores/chat-store";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 /** AskUser 事件 payload */
 export interface AskUserPayload {
@@ -116,9 +118,9 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
 
   if (responded) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 border border-green-500/20 rounded-lg mx-3 my-2">
-        <HelpCircle className="w-4 h-4 text-green-400 flex-shrink-0" />
-        <span className="text-[13px] text-green-300">
+      <div className="mx-3 my-2 flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-2">
+        <HelpCircle className="size-4 shrink-0 text-success" />
+        <span className="text-[13px] text-success">
           {t("askUser.respondedLabel")}
         </span>
       </div>
@@ -126,15 +128,15 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
   }
 
   return (
-    <div className="mx-3 my-2 bg-zinc-800/50 border border-zinc-700 rounded-lg overflow-hidden">
+    <div className="mx-3 my-2 overflow-hidden rounded-lg border border-border bg-muted/50">
       {/* 问题 */}
-      <div className="flex items-start gap-2 px-3 py-2 border-b border-zinc-700/50">
-        <HelpCircle className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+      <div className="flex items-start gap-2 border-b border-border px-3 py-2">
+        <HelpCircle className="size-4 mt-0.5 shrink-0 text-info" />
         <div className="flex-1">
-          <p className="text-[13px] text-zinc-200">{payload.question}</p>
-          <div className="flex items-center gap-1 mt-1">
-            <Clock className="w-3 h-3 text-zinc-500" />
-            <span className="text-[11px] text-zinc-500">
+          <p className="text-[13px] text-foreground">{payload.question}</p>
+          <div className="mt-1 flex items-center gap-1">
+            <Clock className="size-3 text-muted-foreground" />
+            <span className="text-[11px] text-muted-foreground">
               {formatTime(remainingSeconds)}
             </span>
           </div>
@@ -145,27 +147,23 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
       {payload.options && payload.options.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 py-2">
           {payload.options.map((option, idx) => (
-            <button
+            <Button
               key={idx}
+              variant={selectedOption === option ? "default" : "outline"}
+              size="sm"
               onClick={() => handleRespond(option)}
               disabled={isSubmitting}
-              className={`px-3 py-1.5 text-[13px] rounded-md border transition-colors min-h-[44px] md:min-h-0
-                ${selectedOption === option
-                  ? "bg-blue-600 border-blue-500 text-white"
-                  : "bg-zinc-800 border-zinc-600 text-zinc-300 hover:bg-zinc-700 hover:border-zinc-500"
-                }
-                disabled:opacity-50
-              `}
+              className="min-h-[44px] md:min-h-0"
             >
               {option}
-            </button>
+            </Button>
           ))}
         </div>
       )}
 
       {/* 自由文本输入 */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-zinc-700/50">
-        <input
+      <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+        <Input
           type="text"
           value={customAnswer}
           onChange={(e) => setCustomAnswer(e.target.value)}
@@ -173,15 +171,17 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
             if (e.key === "Enter") handleSubmitCustom();
           }}
           placeholder={t("askUser.customPlaceholder")}
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[13px] text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500 min-h-[44px] md:min-h-0"
         />
-        <button
+        <Button
+          variant="default"
+          size="icon"
           onClick={handleSubmitCustom}
           disabled={isSubmitting || !customAnswer.trim()}
-          className="p-2 bg-blue-600 rounded hover:bg-blue-500 disabled:opacity-50 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center"
+          className="size-11 md:size-8"
+          aria-label={t("askUser.customPlaceholder")}
         >
-          <Send className="w-4 h-4 text-white" />
-        </button>
+          <Send className="size-4" />
+        </Button>
       </div>
     </div>
   );
