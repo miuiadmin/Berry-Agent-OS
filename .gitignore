@@ -8,4 +8,6 @@ data/
 .env
 参考源码/
 web/.env.local
+# 临时截图（浏览器验证用）
+*.tmp.jpeg
 tmp-*.jpeg
