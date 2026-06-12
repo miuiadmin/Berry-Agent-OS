@@ -1,5 +1,6 @@
 import { getDb } from './db.js';
 import { genId } from '../utils/id.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 export interface ConversationMessage {
   id: string;
@@ -28,10 +29,13 @@ export interface ConversationMessage {
 export function saveMessage(sessionId: string, role: 'user' | 'assistant', content: string, reasoning?: string): string {
   const db = getDb();
   const id = genId('msg');
+  // 15.0 存储层加固：落盘前清洗 content / reasoning 中的 secret（API key / token / 私钥）
+  const safeContent = redactSecrets(content);
+  const safeReasoning = reasoning ? redactSecrets(reasoning) : null;
   db.prepare(`
     INSERT INTO conversations (id, session_id, role, content, reasoning, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, sessionId, role, content, reasoning ?? null, Date.now());
+  `).run(id, sessionId, role, safeContent, safeReasoning, Date.now());
   return id;
 }
 
@@ -49,6 +53,8 @@ export function updateAssistantMessage(
   newContent: string,
 ): number {
   const db = getDb();
+  // 15.0 存储层加固：还原后的内容同样清洗 secret（防止历史里残留明文 key）
+  const safeContent = redactSecrets(newContent);
   const result = db.prepare(`
     UPDATE conversations
     SET content = ?
@@ -57,7 +63,7 @@ export function updateAssistantMessage(
       AND (id = ? OR (task_id IS NOT NULL AND task_id = ?))
     ORDER BY created_at DESC
     LIMIT 1
-  `).run(newContent, sessionId, taskId, taskId);
+  `).run(safeContent, sessionId, taskId, taskId);
   return result.changes;
 }
 
@@ -84,6 +90,9 @@ export function saveUserMessage(
   options: { clientMsgId?: string } = {},
 ): { id: string; deduplicated: boolean } {
   const db = getDb();
+  // 15.0 存储层加固：在入口处清洗 secret。查询（WHERE content = ?）与 INSERT
+  // 都使用这份清洗后内容，保证幂等去重逻辑一致——同一原文不论重试几次落库结果相同。
+  content = redactSecrets(content);
 
   // 幂等：优先按 (session_id, client_msg_id) 精确去重（UNIQUE 索引保证）
   // 同一会话内同 clientMsgId 的多次重试入库只会保留一行。
