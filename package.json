@@ -17,6 +17,7 @@
     "build:full": "npm run build && npm run build:web",
     "typecheck": "tsc --noEmit",
     "lint:boundaries": "node tools/check-boundaries.js",
+    "tail": "tsx tools/transcript-tail.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "npx prettier --write \"src/**/*.ts\" \"web/src/**/*.{ts,tsx}\"",
