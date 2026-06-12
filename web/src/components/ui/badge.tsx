@@ -64,7 +64,14 @@ const variantToChip: Record<
   outline: { color: "default", chipVariant: "tertiary" },
 };
 
-function Badge({ className, variant, ...props }: BadgeProps) {
+/**
+ * Badge 渲染。
+ *
+ * 注意：不使用 `{...props}` 扩展传播——BadgeProps 继承自 HTMLAttributes，
+ * 其中的 `color: string` 与 HeroUI Chip 的严格联合类型冲突（TS2322）。
+ * 因此显式只透传 className 和 children。
+ */
+function Badge({ className, variant, children }: BadgeProps) {
   const mapping = variantToChip[variant ?? "default"] ?? variantToChip.default;
 
   return (
@@ -73,8 +80,9 @@ function Badge({ className, variant, ...props }: BadgeProps) {
       color={mapping.color}
       size="sm"
       className={cn(className)}
-      {...props}
-    />
+    >
+      {children}
+    </Chip>
   );
 }
 
