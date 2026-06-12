@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useT, useDateFormat } from "@/lib/i18n";
@@ -174,28 +175,30 @@ export default function NotificationsPage() {
                   </div>
                   <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     {!item.read && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
-                        title={t("notifications.markRead")}
-                        aria-label={t("notifications.markRead")}
-                        onClick={() => readMut.mutate(item.id)}
-                      >
-                        <Check className="size-3.5" />
-                      </Button>
+                      <Tooltip content={t("notifications.markRead")}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 md:size-8"
+                          aria-label={t("notifications.markRead")}
+                          onClick={() => readMut.mutate(item.id)}
+                        >
+                          <Check className="size-3.5" />
+                        </Button>
+                      </Tooltip>
                     )}
                     {!item.archived && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
-                        title={t("notifications.archive")}
-                        aria-label={t("notifications.archive")}
-                        onClick={() => archiveMut.mutate(item.id)}
-                      >
-                        <Archive className="size-3.5" />
-                      </Button>
+                      <Tooltip content={t("notifications.archive")}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 md:size-8"
+                          aria-label={t("notifications.archive")}
+                          onClick={() => archiveMut.mutate(item.id)}
+                        >
+                          <Archive className="size-3.5" />
+                        </Button>
+                      </Tooltip>
                     )}
                   </div>
                 </CardContent>

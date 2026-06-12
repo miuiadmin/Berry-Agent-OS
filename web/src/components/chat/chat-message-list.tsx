@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Check, Copy, AlertCircle, RotateCcw, ChevronDown, Pencil, Trash2, X, SendHorizontal, FileText, Download } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
@@ -428,18 +429,20 @@ export function ChatMessageList({
           </div>
       </ScrollArea>
       )}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={scrollToBottom}
-        className={cn(
-          "absolute bottom-4 right-4 z-10 rounded-full border border-border bg-background shadow-md",
-          showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
-        )}
-        aria-label={t("chat.scrollToBottom")}
-      >
-        <ChevronDown className="size-4 text-muted-foreground" />
-      </Button>
+      <Tooltip content={t("chat.scrollToBottom")}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={scrollToBottom}
+          className={cn(
+            "absolute bottom-4 right-4 z-10 rounded-full border border-border bg-background shadow-md",
+            showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
+          )}
+          aria-label={t("chat.scrollToBottom")}
+        >
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </Button>
+      </Tooltip>
     </div>
   );
 }

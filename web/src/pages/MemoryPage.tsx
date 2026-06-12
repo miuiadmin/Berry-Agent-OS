@@ -15,6 +15,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 type Layer = "agent" | "workspace" | "global";
@@ -261,38 +262,41 @@ export default function MemoryPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
-                        title={t("memory.verify")}
-                        aria-label={t("memory.verify")}
-                        disabled={verifyMut.isPending}
-                        onClick={() => verifyMut.mutate(entry.id)}
-                      >
-                        <RefreshCw className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
-                        title={t("memory.promote")}
-                        aria-label={t("memory.promote")}
-                        disabled={promoteMut.isPending}
-                        onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
-                      >
-                        <ArrowUpRight className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
-                        title={t("common.delete")}
-                        aria-label={t("common.delete")}
-                        onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
+                      <Tooltip content={t("memory.verify")}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 md:size-8"
+                          aria-label={t("memory.verify")}
+                          disabled={verifyMut.isPending}
+                          onClick={() => verifyMut.mutate(entry.id)}
+                        >
+                          <RefreshCw className="size-3.5" />
+                        </Button>
+                      </Tooltip>
+                      <Tooltip content={t("memory.promote")}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-11 md:size-8"
+                          aria-label={t("memory.promote")}
+                          disabled={promoteMut.isPending}
+                          onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
+                        >
+                          <ArrowUpRight className="size-3.5" />
+                        </Button>
+                      </Tooltip>
+                      <Tooltip content={t("common.delete")}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
+                          aria-label={t("common.delete")}
+                          onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </Tooltip>
                     </div>
                   </CardContent>
                 </Card>

@@ -1,6 +1,7 @@
 import { Bug } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -28,20 +29,21 @@ export function DebugCaptureButton({ className }: { className?: string }) {
   };
 
   return (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={handleClick}
-      disabled={loading}
-      className={cn(
-        "size-11 md:size-9 transition-colors",
-        isCapturing && "text-danger",
-        className,
-      )}
-      title={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}
-      aria-label={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}
-    >
-      <Bug className={cn("size-5 md:size-4", isCapturing && "animate-pulse")} />
-    </Button>
+    <Tooltip content={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={handleClick}
+        disabled={loading}
+        className={cn(
+          "size-11 md:size-9 transition-colors",
+          isCapturing && "text-danger",
+          className,
+        )}
+        aria-label={isCapturing ? t("debug.stopCapturing") : t("debug.startCapturing")}
+      >
+        <Bug className={cn("size-5 md:size-4", isCapturing && "animate-pulse")} />
+      </Button>
+    </Tooltip>
   );
 }

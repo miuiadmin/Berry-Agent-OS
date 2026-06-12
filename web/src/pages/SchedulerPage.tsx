@@ -29,6 +29,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 
@@ -359,52 +360,56 @@ export default function SchedulerPage() {
                       </div>
                       <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                         {job.status !== "paused" && job.enabled && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-11 md:size-8"
-                            title={t("common.pause")}
-                            aria-label={t("common.pause")}
-                            disabled={pauseMut.isPending}
-                            onClick={() => pauseMut.mutate(job.id)}
-                          >
-                            <Pause className="size-3.5" />
-                          </Button>
+                          <Tooltip content={t("common.pause")}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-11 md:size-8"
+                              aria-label={t("common.pause")}
+                              disabled={pauseMut.isPending}
+                              onClick={() => pauseMut.mutate(job.id)}
+                            >
+                              <Pause className="size-3.5" />
+                            </Button>
+                          </Tooltip>
                         )}
                         {job.status === "paused" && (
+                          <Tooltip content={t("common.resume")}>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-11 md:size-8"
+                              aria-label={t("common.resume")}
+                              disabled={resumeMut.isPending}
+                              onClick={() => resumeMut.mutate(job.id)}
+                            >
+                              <Play className="size-3.5" />
+                            </Button>
+                          </Tooltip>
+                        )}
+                        <Tooltip content={t("scheduler.triggerNow")}>
                           <Button
                             variant="ghost"
                             size="icon"
                             className="size-11 md:size-8"
-                            title={t("common.resume")}
-                            aria-label={t("common.resume")}
-                            disabled={resumeMut.isPending}
-                            onClick={() => resumeMut.mutate(job.id)}
+                            aria-label={t("scheduler.triggerNow")}
+                            disabled={triggerMut.isPending}
+                            onClick={() => triggerMut.mutate(job.id)}
                           >
-                            <Play className="size-3.5" />
+                            <RotateCw className="size-3.5" />
                           </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-11 md:size-8"
-                          title={t("scheduler.triggerNow")}
-                          aria-label={t("scheduler.triggerNow")}
-                          disabled={triggerMut.isPending}
-                          onClick={() => triggerMut.mutate(job.id)}
-                        >
-                          <RotateCw className="size-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
-                          title={t("common.delete")}
-                          aria-label={t("common.delete")}
-                          onClick={() => setDeleteTarget(job.id)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
+                        </Tooltip>
+                        <Tooltip content={t("common.delete")}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
+                            aria-label={t("common.delete")}
+                            onClick={() => setDeleteTarget(job.id)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </Tooltip>
                       </div>
                     </div>
                     <JobExecutions jobId={job.id} />
