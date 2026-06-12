@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Avatar } from "@/components/ui/avatar";
 import { QueryBoundary } from "@/components/shared/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bot, Power, PowerOff, ArrowLeft, Clock, ListTodo } from "lucide-react";
@@ -98,7 +99,7 @@ export default function AgentsPage() {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Bot className="size-4 text-brand" />
+                          <Avatar name={agent.name} size="sm" fallback={<Bot className="size-3" />} className="text-brand" />
                           <CardTitle>{agent.name}</CardTitle>
                         </div>
                         <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">

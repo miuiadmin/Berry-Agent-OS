@@ -12,6 +12,7 @@ import { useAgentChatStore, type AgentChatMessage } from "@/lib/stores/agent-cha
 import { useT } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar } from "@/components/ui/avatar";
 import {
   Bot,
   ChevronDown,
@@ -71,10 +72,8 @@ function AgentChatBubble({ msg }: { msg: AgentChatMessage }) {
 
   return (
     <div className={`flex items-start gap-1.5 px-2 py-1 text-[13px] ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
-      {/* Agent 图标 */}
-      <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${getAgentBg(msg.fromAgent)}`}>
-        <Bot className={`w-3 h-3 ${getAgentColor(msg.fromAgent)}`} />
-      </div>
+      {/* Agent 图标 — 使用 Avatar adapter 统一样式 */}
+      <Avatar name={msg.fromAgent} size="sm" className={`flex-shrink-0 ${getAgentColor(msg.fromAgent)}`} fallback={<Bot className="w-3 h-3" />} />
 
       {/* 消息内容 */}
       <div className={`flex items-center gap-1.5 max-w-[85%] ${isRequest ? "flex-row" : "flex-row-reverse"}`}>
