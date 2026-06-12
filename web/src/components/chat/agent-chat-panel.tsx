@@ -44,23 +44,23 @@ const AGENT_BG: Record<string, string> = {
 
 /** 获取 agent 显示颜色 */
 function getAgentColor(agent: string): string {
-  return AGENT_COLORS[agent] ?? "text-zinc-400";
+  return AGENT_COLORS[agent] ?? "text-muted-foreground";
 }
 
 /** 获取 agent 图标背景色 */
 function getAgentBg(agent: string): string {
-  return AGENT_BG[agent] ?? "bg-zinc-500/10";
+  return AGENT_BG[agent] ?? "bg-accent/10";
 }
 
 /** 方向箭头样式 */
 function DirectionArrow({ direction }: { direction: AgentChatMessage["direction"] }) {
   if (direction === "request") {
-    return <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0" />;
+    return <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />;
   }
   if (direction === "response") {
-    return <ArrowRight className="w-3 h-3 text-zinc-500 flex-shrink-0 rotate-180" />;
+    return <ArrowRight className="w-3 h-3 text-muted-foreground flex-shrink-0 rotate-180" />;
   }
-  return <MessageSquare className="w-3 h-3 text-zinc-500 flex-shrink-0" />;
+  return <MessageSquare className="w-3 h-3 text-muted-foreground flex-shrink-0" />;
 }
 
 /** 单条对话消息渲染 */
@@ -86,7 +86,7 @@ function AgentChatBubble({ msg }: { msg: AgentChatMessage }) {
       </div>
 
       {/* 消息正文 */}
-      <div className={`text-zinc-300 text-[12px] leading-relaxed break-all ${isRequest ? "text-left" : "text-right"}`}>
+      <div className={`text-foreground text-[12px] leading-relaxed break-all ${isRequest ? "text-left" : "text-right"}`}>
         {msg.content.length > 200
           ? msg.content.slice(0, 200) + "…"
           : msg.content}
@@ -122,19 +122,19 @@ export function AgentChatPanel() {
   const count = messages.length;
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-900/50">
+    <div className="border-t border-border bg-muted/50">
       {/* 头部（点击折叠/展开） */}
       <button
         onClick={toggleOpen}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-zinc-800/50 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-zinc-400" />
-          <span className="text-[13px] font-medium text-zinc-300">
+          <MessageSquare className="w-4 h-4 text-muted-foreground" />
+          <span className="text-[13px] font-medium text-foreground">
             {t("agentChat.title")}
           </span>
           {count > 0 && (
-            <span className="text-[11px] bg-zinc-700 text-zinc-300 rounded-full px-1.5 py-0.5">
+            <span className="text-[11px] bg-muted text-foreground rounded-full px-1.5 py-0.5">
               {count}
             </span>
           )}
@@ -146,15 +146,15 @@ export function AgentChatPanel() {
                 e.stopPropagation();
                 setOpen(false);
               }}
-              className="p-1 hover:bg-zinc-700 rounded"
+              className="p-1 hover:bg-muted rounded"
             >
-              <X className="w-3 h-3 text-zinc-500" />
+              <X className="w-3 h-3 text-muted-foreground" />
             </button>
           )}
           {isOpen ? (
-            <ChevronDown className="w-4 h-4 text-zinc-500" />
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
           ) : (
-            <ChevronUp className="w-4 h-4 text-zinc-500" />
+            <ChevronUp className="w-4 h-4 text-muted-foreground" />
           )}
         </div>
       </button>
@@ -166,11 +166,11 @@ export function AgentChatPanel() {
           className="max-h-[300px] overflow-y-auto overscroll-contain scrollbar-thin"
         >
           {messages.length === 0 ? (
-            <div className="text-center text-zinc-600 text-[12px] py-4">
+            <div className="text-center text-muted-foreground text-[12px] py-4">
               {t("agentChat.empty")}
             </div>
           ) : (
-            <div className="divide-y divide-zinc-800/50">
+            <div className="divide-y divide-border">
               {messages.map((msg) => (
                 <AgentChatBubble key={msg.id} msg={msg} />
               ))}

@@ -48,16 +48,16 @@ function MemberCard({ member }: { member: SquadMember }) {
   /** 状态指示灯 */
   const statusDot =
     member.status === "working" ? "bg-success animate-pulse" :
-    member.status === "done"     ? "bg-zinc-500" :
+    member.status === "done"     ? "bg-accent" :
     member.status === "failed"   ? "bg-danger" :
-    "bg-zinc-600";
+    "bg-accent";
 
   return (
     <div className={`flex items-center gap-2 px-2 py-1 rounded border ${style.bg}`}>
       <Icon className={`w-3.5 h-3.5 ${style.color} flex-shrink-0`} />
-      <span className="text-[12px] text-zinc-300 font-medium">{member.agent}</span>
-      <span className="text-[11px] text-zinc-500">{role}</span>
-      <span className="flex-1 text-[11px] text-zinc-500 truncate">{member.on}</span>
+      <span className="text-[12px] text-foreground font-medium">{member.agent}</span>
+      <span className="text-[11px] text-muted-foreground">{role}</span>
+      <span className="flex-1 text-[11px] text-muted-foreground truncate">{member.on}</span>
       <span className={`w-2 h-2 rounded-full ${statusDot} flex-shrink-0`} />
     </div>
   );
@@ -75,10 +75,10 @@ function SignalFeed({ signals }: { signals: MissionSignal[] }) {
         return (
           <div key={idx} className="flex items-center gap-1.5 text-[11px]">
             <Icon className={`w-3 h-3 ${style.color} flex-shrink-0`} />
-            <span className="text-zinc-500">{signal.from}</span>
-            <span className="text-zinc-600">:</span>
-            <span className="text-zinc-400 truncate max-w-[200px]">{signal.msg}</span>
-            <span className="text-zinc-600 ml-auto flex-shrink-0">{signal.at}</span>
+            <span className="text-muted-foreground">{signal.from}</span>
+            <span className="text-muted-foreground">:</span>
+            <span className="text-muted-foreground truncate max-w-[200px]">{signal.msg}</span>
+            <span className="text-muted-foreground ml-auto flex-shrink-0">{signal.at}</span>
           </div>
         );
       })}
@@ -93,16 +93,16 @@ function SquadTreeNode({ squad, depth = 1 }: { squad: Squad; depth?: number }) {
     squad.status === "working" ? "border-l-blue-500" :
     squad.status === "done"    ? "border-l-green-500" :
     squad.status === "failed"  ? "border-l-red-500" :
-    "border-l-zinc-600";
+    "border-l-border";
 
   return (
     <div className={`${depth > 1 ? "ml-4" : ""}`}>
       <div className={`border-l-2 ${statusColor} pl-3 py-1.5`}>
         {/* Squad 标题 */}
         <div className="flex items-center gap-2 mb-1">
-          <Users className="w-4 h-4 text-zinc-400 flex-shrink-0" />
-          <span className="text-[13px] font-medium text-zinc-200">{squad.name}</span>
-          <span className="text-[11px] text-zinc-500 bg-zinc-800 rounded px-1.5">
+          <Users className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <span className="text-[13px] font-medium text-foreground">{squad.name}</span>
+          <span className="text-[11px] text-muted-foreground bg-muted rounded px-1.5">
             L{squad.depth}
           </span>
           {squad.leader && (
@@ -114,14 +114,14 @@ function SquadTreeNode({ squad, depth = 1 }: { squad: Squad; depth?: number }) {
             squad.status === "working" ? "text-info" :
             squad.status === "done" ? "text-success" :
             squad.status === "failed" ? "text-danger" :
-            "text-zinc-500"
+            "text-muted-foreground"
           }`}>
             {squad.status}
           </span>
         </div>
 
         {/* Squad 目标 */}
-        <p className="text-[12px] text-zinc-400 mb-1.5">{squad.goal}</p>
+        <p className="text-[12px] text-muted-foreground mb-1.5">{squad.goal}</p>
 
         {/* 成员列表 */}
         {squad.members && squad.members.length > 0 && (
@@ -152,17 +152,17 @@ function HandoffList({ handoffs }: { handoffs: Array<{ from: string; to: string;
 
   return (
     <div className="space-y-1.5 mt-3">
-      <h4 className="text-[12px] text-zinc-500 font-medium flex items-center gap-1.5">
+      <h4 className="text-[12px] text-muted-foreground font-medium flex items-center gap-1.5">
         <ArrowRightLeft className="w-3.5 h-3.5" />
         交接契约
       </h4>
       {handoffs.map((h, idx) => (
-        <div key={idx} className="flex items-center gap-2 text-[12px] bg-zinc-800/50 rounded px-2 py-1.5">
+        <div key={idx} className="flex items-center gap-2 text-[12px] bg-muted/50 rounded px-2 py-1.5">
           <span className="text-info">{h.from}</span>
-          <ArrowRightLeft className="w-3 h-3 text-zinc-600" />
+          <ArrowRightLeft className="w-3 h-3 text-muted-foreground" />
           <span className="text-success">{h.to}</span>
-          <span className="text-zinc-400 flex-1 truncate">{h.what}</span>
-          <span className={`text-[11px] ${h.status === "completed" ? "text-success" : "text-zinc-500"}`}>
+          <span className="text-muted-foreground flex-1 truncate">{h.what}</span>
+          <span className={`text-[11px] ${h.status === "completed" ? "text-success" : "text-muted-foreground"}`}>
             {h.status ?? "pending"}
           </span>
         </div>
@@ -191,7 +191,7 @@ export function SquadTree({ squadFile }: SquadTreeProps) {
 
   if (!squadFile?.org?.squads?.length) {
     return (
-      <div className="text-center text-zinc-600 text-[13px] py-8">
+      <div className="text-center text-muted-foreground text-[13px] py-8">
         {t("squad.empty")}
       </div>
     );
@@ -202,7 +202,7 @@ export function SquadTree({ squadFile }: SquadTreeProps) {
       {/* 全局 Signals */}
       {squadFile.signals && squadFile.signals.length > 0 && (
         <div>
-          <h4 className="text-[12px] text-zinc-500 font-medium mb-1 flex items-center gap-1.5">
+          <h4 className="text-[12px] text-muted-foreground font-medium mb-1 flex items-center gap-1.5">
             <Shield className="w-3.5 h-3.5" />
             {t("squad.globalSignals")}
           </h4>
