@@ -24,8 +24,12 @@ export function initDb(path?: string): Database.Database {
   db.pragma('wal_autocheckpoint = 500');
 
   db.exec(CORE_SCHEMA_SQL);
-  runMigrations(db, ALL_MIGRATIONS);
+  // 15.0 修复：CORE_INDEX_SQL（含 dialogue_messages/agent_chat_messages/brain_observations/
+  // agent_tool_calls/intent_anchors 等表）必须在 runMigrations 之前执行——否则 v17(redact
+  // 历史扫描)/v18(FTS 触发器)/v19(redact 扩展扫描) 在迁移期间引用这些表会「表不存在」
+  // （v18 直接崩溃；v17/v19 静默跳过大部分目标表，redact 实际只清洗了 conversations）。
   db.exec(CORE_INDEX_SQL);
+  runMigrations(db, ALL_MIGRATIONS);
   db.exec(KNOWLEDGE_FTS_SQL);
   db.prepare(`INSERT INTO knowledge_fts(knowledge_fts) VALUES ('rebuild')`).run();
 
