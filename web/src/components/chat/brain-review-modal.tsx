@@ -145,7 +145,7 @@ export function BrainReviewModal({
               {verdictLabel(verdict, t)}
             </span>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded">
+          <button onClick={onClose} className="p-2.5 md:p-1 hover:bg-zinc-800 rounded min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 inline-flex items-center justify-center">
             <X className="w-4 h-4 text-zinc-500" />
           </button>
         </div>

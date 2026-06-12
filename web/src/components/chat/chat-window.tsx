@@ -77,12 +77,12 @@ function DelegationDialog({
         <p className="text-[11px] text-muted-foreground/70">{t("chat.requestedBy")}: {request.requestedBy}</p>
         <div className="flex items-center gap-2 justify-end">
           {request.options.includes("deny") && (
-            <Button variant="outline" size="sm" onClick={() => onRespond(request.delegationId, null, false)}>
+            <Button variant="outline" size="sm" className="h-11 md:h-7 px-4 md:px-2.5" onClick={() => onRespond(request.delegationId, null, false)}>
               {t("chat.deny")}
             </Button>
           )}
           {request.options.includes("approve") && (
-            <Button size="sm" onClick={() => onRespond(request.delegationId, "approved", true)}>
+            <Button size="sm" className="h-11 md:h-7 px-4 md:px-2.5" onClick={() => onRespond(request.delegationId, "approved", true)}>
               {t("chat.approve")}
             </Button>
           )}
@@ -118,10 +118,10 @@ function PermissionConfirmDialog({
           )}
         </div>
         <div className="flex items-center gap-2 justify-end">
-          <Button variant="outline" size="sm" onClick={() => onRespond(request.requestId, false)}>
+          <Button variant="outline" size="sm" className="h-11 md:h-7 px-4 md:px-2.5" onClick={() => onRespond(request.requestId, false)}>
             {t("chat.deny")}
           </Button>
-          <Button size="sm" onClick={() => onRespond(request.requestId, true)}>
+          <Button size="sm" className="h-11 md:h-7 px-4 md:px-2.5" onClick={() => onRespond(request.requestId, true)}>
             {t("chat.approve")}
           </Button>
         </div>
