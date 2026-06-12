@@ -26,7 +26,7 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
   ({ className, children, ...props }, ref) => (
     <HeroUICard
       ref={ref}
-      className={cn("border border-border bg-card text-card-foreground", className)}
+      className={cn("border border-border bg-surface text-surface-foreground", className)}
       /**
        * HeroUI CardRootProps.children 为必填项，
        * 但 HTMLAttributes.children 是可选的，故显式透传 children 并对剩余 props 断言。

@@ -65,7 +65,7 @@ export function AlertDialog({
       <HeroUIAlertDialog.Container className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <HeroUIAlertDialog.Dialog
           className={cn(
-            "w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl",
+            "w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-xl",
             "data-[entering]:animate-sheet-in data-[exiting]:animate-sheet-out"
           )}
         >

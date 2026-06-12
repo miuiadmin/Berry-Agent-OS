@@ -30,8 +30,8 @@ export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: Quer
     const message = query.error instanceof Error ? query.error.message : t("queryBoundary.errorOccurred");
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
-        <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
-          <AlertCircle className="size-5 text-destructive" />
+        <div className="flex size-10 items-center justify-center rounded-full bg-danger/10">
+          <AlertCircle className="size-5 text-danger" />
         </div>
         <h3 className="mt-3 text-sm font-medium text-foreground">
           {errorTitle ?? t("queryBoundary.failedToLoad")}

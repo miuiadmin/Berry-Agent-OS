@@ -21,7 +21,7 @@ export function AreaChart({
   data,
   color = "var(--chart-1)",
   secondaryData,
-  secondaryColor = "var(--destructive)",
+  secondaryColor = "var(--danger)",
   height = 160,
   className,
 }: AreaChartProps) {

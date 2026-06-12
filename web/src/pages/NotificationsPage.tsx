@@ -83,7 +83,7 @@ export default function NotificationsPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Bell className="size-5 text-brand" />
+            <Bell className="size-5 text-accent" />
             {t("notifications.title")}
             {unread > 0 && (
               <Badge variant="danger" className="text-[11px]">
@@ -150,7 +150,7 @@ export default function NotificationsPage() {
                 <CardContent className="flex items-start gap-3 py-3">
                   <div className="mt-0.5 shrink-0">
                     {!item.read ? (
-                      <div className="size-2 rounded-full bg-brand" />
+                      <div className="size-2 rounded-full bg-accent" />
                     ) : (
                       <div className="size-2 rounded-full bg-muted-foreground/30" />
                     )}

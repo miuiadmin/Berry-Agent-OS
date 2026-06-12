@@ -233,7 +233,7 @@ function SettingsContent() {
           </div>
 
           {errorCount > 0 && (
-            <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="mb-4 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger">
               {t("settings.validationBanner", { count: errorCount })}
             </div>
           )}
@@ -482,11 +482,11 @@ function ConfigSection({
                       field.type === "number" ? Number(e.target.value) : e.target.value
                     )
                   }
-                  className={cn("h-10 md:h-8", fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30")}
+                  className={cn("h-10 md:h-8", fieldError && "border-danger focus:border-danger focus:ring-danger/30")}
                 />
               )}
               {fieldError && (
-                <p className="text-[11px] text-destructive animate-slide-down">{fieldError}</p>
+                <p className="text-[11px] text-danger animate-slide-down">{fieldError}</p>
               )}
             </div>
           );

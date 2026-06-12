@@ -90,8 +90,8 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
             </div>
             {task.status === "failed" && task.error && (
               <div>
-                <span className="font-medium text-destructive">{t("common.error")}</span>
-                <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[11px] text-destructive whitespace-pre-wrap">
+                <span className="font-medium text-danger">{t("common.error")}</span>
+                <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-danger/5 border border-danger/20 p-2 text-[11px] text-danger whitespace-pre-wrap">
                   {task.error}
                 </pre>
               </div>

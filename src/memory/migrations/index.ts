@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 import type { Migration } from '../migration-runner.js';
 import { runMemoryMigrations } from '../migrations.js';
+import { redactSecrets } from '../../observability/redaction.js';
+import { getLogger } from '../../utils/logger.js';
+
+const logger = getLogger('memory-migrations');
 
 const v0Baseline: Migration = {
   version: 0,

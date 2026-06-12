@@ -80,7 +80,7 @@ export function DialogContent({
     <Modal.Dialog
       className={cn(
         /* 视觉样式：圆角、边框、卡片背景、内边距、阴影、最大高度 + 滚动 */
-        "relative rounded-xl border border-border bg-card p-4 md:p-6 shadow-lg max-h-[90dvh] overflow-y-auto outline-none",
+        "relative rounded-xl border border-border bg-surface p-4 md:p-6 shadow-lg max-h-[90dvh] overflow-y-auto outline-none",
         /* 宽度：移动端占满（留 1rem 边距），桌面端居中固定宽度 */
         "w-[calc(100%-2rem)] sm:max-w-sm md:max-w-md md:mx-auto mx-4",
         className

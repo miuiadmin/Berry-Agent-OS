@@ -29,7 +29,7 @@ export function ConnectionStatus() {
           "size-2.5 rounded-full shrink-0 transition-colors md:size-2",
           status === "connected" && "bg-success animate-pulse-dot",
           status === "connecting" && "bg-warning animate-pulse",
-          status === "disconnected" && "bg-destructive"
+          status === "disconnected" && "bg-danger"
         )}
       />
       {/* 文字标签：仅桌面端显示，移动端隐藏以节省空间 */}

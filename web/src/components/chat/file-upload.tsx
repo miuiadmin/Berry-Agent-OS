@@ -97,7 +97,7 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
             size="icon-sm"
             onClick={() => onRemove(a.fileId)}
             aria-label={t("fileUpload.remove", { filename: a.filename })}
-            className="text-muted-foreground hover:text-destructive"
+            className="text-muted-foreground hover:text-danger"
           >
             <X className="size-3" />
           </Button>

@@ -215,7 +215,7 @@ export default function ConversationsPage() {
                         setDeleteTarget(conv.sessionId);
                       }}
                     >
-                      <Trash2 className="size-4 text-destructive" />
+                      <Trash2 className="size-4 text-danger" />
                     </Button>
                   </div>
                 </div>

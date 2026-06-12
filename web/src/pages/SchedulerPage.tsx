@@ -101,7 +101,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
                     </span>
                   )}
                   {ex.error && (
-                    <span className="truncate text-destructive">{ex.error}</span>
+                    <span className="truncate text-danger">{ex.error}</span>
                   )}
                 </div>
               ))
@@ -257,7 +257,7 @@ export default function SchedulerPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Clock className="size-5 text-brand" />
+            <Clock className="size-5 text-accent" />
             {t("scheduler.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -296,7 +296,7 @@ export default function SchedulerPage() {
             <TabsTrigger
               key={tabKey}
               value={tabKey}
-              className="capitalize rounded-none border-b-2 border-transparent data-[selected]:border-brand data-[selected]:bg-transparent data-[selected]:shadow-none"
+              className="capitalize rounded-none border-b-2 border-transparent data-[selected]:border-accent data-[selected]:bg-transparent data-[selected]:shadow-none"
             >
               {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : t("scheduler.webhooks")}
             </TabsTrigger>
@@ -403,7 +403,7 @@ export default function SchedulerPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
+                            className={cn("size-11 md:size-8 text-danger hover:text-danger")}
                             aria-label={t("common.delete")}
                             onClick={() => setDeleteTarget(job.id)}
                           >

@@ -99,7 +99,7 @@ export default function AgentsPage() {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Avatar name={agent.name} size="sm" fallback={<Bot className="size-3" />} className="text-brand" />
+                          <Avatar name={agent.name} size="sm" fallback={<Bot className="size-3" />} className="text-accent" />
                           <CardTitle>{agent.name}</CardTitle>
                         </div>
                         <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">

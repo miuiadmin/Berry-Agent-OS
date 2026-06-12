@@ -40,7 +40,7 @@ function getEventIcon(event: string) {
 }
 
 function getEventColor(event: string) {
-  if (event.includes("failed") || event.includes("crashed")) return "text-destructive";
+  if (event.includes("failed") || event.includes("crashed")) return "text-danger";
   if (event.includes("completed") || event.includes("enabled")) return "text-success";
   if (event.includes("running") || event.includes("started")) return "text-warning";
   return "text-muted-foreground";
@@ -49,7 +49,7 @@ function getEventColor(event: string) {
 function TrendIndicator({ current, previous }: { current: number; previous: number }) {
   if (previous === 0 && current === 0) return <Minus className="size-3 text-muted-foreground" />;
   if (current > previous) return <TrendingUp className="size-3 text-success" />;
-  if (current < previous) return <TrendingDown className="size-3 text-destructive" />;
+  if (current < previous) return <TrendingDown className="size-3 text-danger" />;
   return <Minus className="size-3 text-muted-foreground" />;
 }
 
@@ -243,7 +243,7 @@ export default function HomePage() {
                 <span className="text-sm font-medium"><AnimatedStat value={completedData?.total ?? 0} /></span>
               </div>
               <div className="flex items-center gap-1">
-                <XCircle className="size-3 text-destructive" />
+                <XCircle className="size-3 text-danger" />
                 <span className="text-sm font-medium"><AnimatedStat value={failedData?.total ?? 0} /></span>
               </div>
             </div>
@@ -293,7 +293,7 @@ export default function HomePage() {
               data={chartData.completed}
               color="var(--success)"
               secondaryData={chartData.failed}
-              secondaryColor="var(--destructive)"
+              secondaryColor="var(--danger)"
               height={160}
             />
             <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
@@ -302,7 +302,7 @@ export default function HomePage() {
                 {t("home.completed")}
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block size-2 rounded-full bg-destructive" />
+                <span className="inline-block size-2 rounded-full bg-danger" />
                 {t("home.failed")}
               </span>
             </div>

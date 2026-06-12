@@ -105,7 +105,7 @@ function EditableMessage({
           e.target.style.height = e.target.scrollHeight + "px";
         }}
         onKeyDown={handleKeyDown}
-        className="resize-none rounded-xl border border-input bg-muted/50 px-4 py-2.5 text-sm leading-relaxed outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 border-0 focus:border-0 focus:ring-0"
+        className="resize-none rounded-xl bg-muted/50 px-4 py-2.5 text-sm leading-relaxed outline-none border-0"
         rows={1}
       />
       <div className="flex items-center gap-2 justify-end">
@@ -210,11 +210,11 @@ const MessageBubble = memo(function MessageBubble({
         className={cn(
           "relative max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-sm leading-relaxed",
           isError
-            ? "bg-destructive/10 border border-destructive/30 text-foreground"
+            ? "bg-danger/10 border border-danger/30 text-foreground"
             : isUserFailed
-              ? "bg-brand/60 border border-warning/40 text-brand-foreground"
+              ? "bg-accent/60 border border-warning/40 text-accent-foreground"
               : isUser
-                ? "bg-brand text-brand-foreground"
+                ? "bg-accent text-accent-foreground"
                 : "bg-muted text-foreground",
           isSending && "opacity-70",
           isStreaming && !isUser && "animate-stream-pulse",
@@ -237,7 +237,7 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         )}
         {isError && (
-          <div className="mt-2 text-xs text-destructive space-y-1">
+          <div className="mt-2 text-xs text-danger space-y-1">
             <div className="flex items-center gap-1.5">
               <AlertCircle className="size-3 shrink-0" />
               <span>{message.error || t("chat.failedToSend")}</span>
@@ -277,7 +277,7 @@ const MessageBubble = memo(function MessageBubble({
         )}
         {/* 用户消息发送中指示 */}
         {isSending && (
-          <div className="mt-1 text-[11px] text-brand-foreground/50 flex items-center gap-1">
+          <div className="mt-1 text-[11px] text-accent-foreground/50 flex items-center gap-1">
             <span className="size-1 animate-pulse rounded-full bg-current" />
           </div>
         )}
@@ -328,7 +328,7 @@ const MessageBubble = memo(function MessageBubble({
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => onDelete?.(message.id)}
-                  className="text-muted-foreground hover:text-destructive"
+                  className="text-muted-foreground hover:text-danger"
                   aria-label={t("chat.deleteMessage")}
                 >
                   <Trash2 className="size-3" />

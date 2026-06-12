@@ -27,6 +27,7 @@ import { getLogger } from '../utils/logger.js';
 import { getEventBus } from './event-bus.js';
 import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
 import { safeSlice } from '../utils/safe-slice.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 const logger = getLogger('dialogue-router');
 
@@ -372,6 +373,12 @@ export class DialogueRouter {
 
   private persistMessage(msg: DialogueMessagePayload, sessionId: string, correlationId: string): void {
     try {
+      // 15.0 存储层加固：落盘前清洗 content 中的 secret（API key / token / 私钥）。
+      // content 可能是 string 或对象：仅 string 走子串清洗，对象（结构化负载）原样保留，
+      // 由消费方各自负责。一次清洗后同时用于 dialogue_messages 与 agent_chat_messages 两张表，
+      // 保证 Agent 间对话审计里也不残留明文 key。
+      const safeContent = typeof msg.content === 'string' ? redactSecrets(msg.content) : msg.content;
+
       this.insertStmt.run(
         genId('dmsg'),
         msg.dialogueId,
@@ -380,7 +387,7 @@ export class DialogueRouter {
         msg.sequenceNumber,
         msg.from,
         msg.to,
-        msg.content,
+        safeContent,
         msg.context ? JSON.stringify(msg.context) : null,
         msg.metadata ? JSON.stringify(msg.metadata) : null,
         Date.now(),
@@ -389,7 +396,8 @@ export class DialogueRouter {
       // 13.0 §5.1.2: 并行写入 agent_chat_messages 审计表
       // 该表供前端 agent-chat 面板展示 Agent 间对话记录，与 dialogue_messages 不同维度
       // direction 判断：sequenceNumber 偶数 = request（send），奇数 = response（reply）
-      this.persistAgentChatMessage(msg, sessionId, correlationId);
+      // 传入已清洗的 content，避免 agent_chat_messages 残留明文 secret
+      this.persistAgentChatMessage({ ...msg, content: safeContent }, sessionId, correlationId);
     } catch (err) {
       logger.error({ err, dialogueId: msg.dialogueId }, 'dialogue:persist failed');
     }

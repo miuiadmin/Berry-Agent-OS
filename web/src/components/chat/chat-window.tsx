@@ -43,8 +43,8 @@ function HistoryError({ error, onRetry }: { error: string; onRetry: () => void }
   return (
     <div className="flex-1 flex items-center justify-center p-4">
       <div className="text-center">
-        <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-destructive/10">
-          <AlertCircle className="size-5 text-destructive" />
+        <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-danger/10">
+          <AlertCircle className="size-5 text-danger" />
         </div>
         <h3 className="mt-3 text-sm font-medium">{t("chat.failedToLoadHistory")}</h3>
         <p className="mt-1 text-xs text-muted-foreground max-w-xs">{error}</p>
@@ -115,7 +115,7 @@ function PermissionConfirmDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShieldAlert className="size-4 text-destructive" />
+            <ShieldAlert className="size-4 text-danger" />
             {t("chat.permissionRequired")}
           </DialogTitle>
         </DialogHeader>
@@ -310,7 +310,7 @@ function ModelSelector() {
                           <div className="text-[11px] text-muted-foreground font-mono truncate">{m.id}</div>
                         </div>
                         {m.id === currentModel && (
-                          <span className="size-1.5 rounded-full bg-brand shrink-0 ml-2" />
+                          <span className="size-1.5 rounded-full bg-accent shrink-0 ml-2" />
                         )}
                       </Button>
                     ))}
@@ -348,7 +348,7 @@ function ModelSelector() {
             </div>
             {/* Settings link */}
             <div className="border-t border-border px-4 md:px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:pb-2 shrink-0">
-              <a href="/settings?tab=providers" className="text-[11px] text-brand hover:underline">
+              <a href="/settings?tab=providers" className="text-[11px] text-accent hover:underline">
                 {t("chat.configureProviders")}
               </a>
             </div>

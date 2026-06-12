@@ -90,7 +90,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
               placeholder={t("chat.typePlaceholder")}
               aria-label={t("chat.typePlaceholder")}
               rows={1}
-              className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none border-0 focus:border-0 focus:ring-0"
+              className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none border-0"
             />
             {charCount > 500 && (
               <span className="absolute bottom-2 right-3 text-[11px] text-muted-foreground/60">
@@ -109,7 +109,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
                 <Settings className="size-4" />
               </ToolbarButton>
               {isStreaming && (
-                <ToolbarButton onClick={onCancel} variant="destructive" aria-label={t("chat.stopGeneration")}>
+                <ToolbarButton onClick={onCancel} variant="danger" aria-label={t("chat.stopGeneration")}>
                   <Square className="size-3.5 fill-current" />
                 </ToolbarButton>
               )}
@@ -143,13 +143,13 @@ function ToolbarButton({
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  variant?: "default" | "destructive";
+  variant?: "default" | "danger";
   "aria-label"?: string;
 }) {
   return (
     <Button
       type="button"
-      variant={variant === "destructive" ? "danger" : "ghost"}
+      variant={variant === "danger" ? "danger" : "ghost"}
       size="icon-sm"
       onClick={onClick}
       disabled={disabled}

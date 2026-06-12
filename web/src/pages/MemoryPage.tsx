@@ -131,7 +131,7 @@ export default function MemoryPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Brain className="size-5 text-brand" />
+            <Brain className="size-5 text-accent" />
             {t("memory.title")}
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -290,7 +290,7 @@ export default function MemoryPage() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
+                          className={cn("size-11 md:size-8 text-danger hover:text-danger")}
                           aria-label={t("common.delete")}
                           onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
                         >

@@ -293,8 +293,8 @@ function TaskDetail({ task }: { task: TaskInfo }) {
 
       {task.status === "failed" && task.error && (
         <div>
-          <span className="font-medium text-destructive">{t("common.error")}</span>
-          <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-3 text-[11px] text-destructive">
+          <span className="font-medium text-danger">{t("common.error")}</span>
+          <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-danger/5 border border-danger/20 p-3 text-[11px] text-danger">
             {task.error}
           </pre>
         </div>

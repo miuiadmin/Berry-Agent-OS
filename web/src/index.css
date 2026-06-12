@@ -21,27 +21,18 @@ html {
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
     monospace;
 
-  /* ── 颜色 token：shadcn 工具类名 → HeroUI 原生变量 ── */
+  /* ── 颜色 token：项目语义工具类名 → HeroUI 原生变量 ── */
 
   /* 基础层：页面背景与全局文字 */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
-  /* 表面层：卡片、面板等非浮层组件 */
+  /* 表面层：卡片、面板等非浮层组件（由 HeroUI Card 原生处理，保留桥接供 adapter 兼容） */
   --color-card: var(--surface);
   --color-card-foreground: var(--surface-foreground);
 
   /* 浮层：Tooltip / Popover / Modal / Menu */
   --color-popover: var(--overlay);
-  --color-popover-foreground: var(--overlay-foreground);
-
-  /* 主色（品牌色）→ HeroUI accent（靛蓝 hue 254） */
-  --color-primary: var(--accent);
-  --color-primary-foreground: var(--accent-foreground);
-
-  /* 次要色 → HeroUI default（中性灰） */
-  --color-secondary: var(--default);
-  --color-secondary-foreground: var(--default-foreground);
 
   /* 柔和/灰底：default 用于背景，muted 用于辅助文字 */
   --color-muted: var(--default);
@@ -50,13 +41,6 @@ html {
   /* 强调色（hover / selected 底色）→ accent-soft（靛蓝浅 tint） */
   --color-accent: var(--accent-soft);
   --color-accent-foreground: var(--accent-soft-foreground);
-
-  /* 危险色 → HeroUI danger */
-  --color-destructive: var(--danger);
-
-  /* 品牌色 = 主色（保留旧工具类名 bg-brand / text-brand 的语义） */
-  --color-brand: var(--accent);
-  --color-brand-foreground: var(--accent-foreground);
 
   /* 状态色 → HeroUI 原生 success / warning */
   --color-success: var(--success);
