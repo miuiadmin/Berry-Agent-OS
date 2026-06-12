@@ -69,7 +69,7 @@ export default function MemoryPage() {
   // Recall (search) query
   const recallQuery = useQuery({
     queryKey: ["memory-recall", searchQuery],
-    queryFn: () => memoryApi.recall(searchQuery, { limit: 50 }),
+    queryFn: (ctx) => memoryApi.recall(searchQuery, { limit: 50 }, ctx.signal),
     enabled: searchQuery.trim().length > 0,
   });
 

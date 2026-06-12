@@ -39,7 +39,7 @@ export default function LogsPage() {
 
   const { data, refetch, isFetching } = useQuery({
     queryKey: ["logs", level, module, lines],
-    queryFn: () => apiGet<{ lines: LogLine[]; total: number }>(`/api/logs?${params.toString()}`),
+    queryFn: (ctx) => apiGet<{ lines: LogLine[]; total: number }>(`/api/logs?${params.toString()}`, ctx.signal),
     refetchInterval: autoRefresh ? 5000 : false,
   });
 

@@ -135,7 +135,7 @@ function TaskCard({ task }: { task: MissionTask }) {
 function MissionDetail({ missionId }: { missionId: string }) {
   const { data: plan, isLoading } = useQuery({
     queryKey: ["mission", missionId],
-    queryFn: () => apiGet<PlanResponse>(`/api/missions/${missionId}`),
+    queryFn: (ctx) => apiGet<PlanResponse>(`/api/missions/${missionId}`, ctx.signal),
   });
 
   if (isLoading) {
@@ -215,7 +215,7 @@ function MissionDetail({ missionId }: { missionId: string }) {
 function SquadTab({ missionId }: { missionId: string }) {
   const { data: squad, isLoading } = useQuery({
     queryKey: ["mission", missionId, "squad"],
-    queryFn: () => apiGet<{ org?: { squads: SquadNode[] }; signals: SquadSignal[] } | null>(`/api/missions/${missionId}/squad`).catch(() => null),
+    queryFn: (ctx) => apiGet<{ org?: { squads: SquadNode[] }; signals: SquadSignal[] } | null>(`/api/missions/${missionId}/squad`, ctx.signal).catch(() => null),
   });
 
   if (isLoading) return <Skeleton className="h-20 w-full" />;
@@ -327,7 +327,7 @@ export default function MissionsPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["missions"],
-    queryFn: () => apiGet<MissionsListResponse>("/api/missions"),
+    queryFn: (ctx) => apiGet<MissionsListResponse>("/api/missions", ctx.signal),
     refetchInterval: 10_000, // 每 10 秒刷新一次（mission 状态可能实时变化）
   });
 
