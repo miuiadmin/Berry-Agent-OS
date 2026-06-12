@@ -350,12 +350,33 @@ export function createApiRouter(deps: WebServerDependencies) {
     const offset = safeInt(url.searchParams.get('offset'), 0);
     const db = getDb();
 
-    const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM conversations WHERE content LIKE ?`).get(`%${q}%`) as { cnt: number };
-    const rows = db.prepare(`
-      SELECT id, session_id, role, content, created_at FROM conversations
-      WHERE content LIKE ?
-      ORDER BY created_at DESC LIMIT ? OFFSET ?
-    `).all(`%${q}%`, limit, offset) as Record<string, unknown>[];
+    // 15.0 FTS5：优先 conversations_fts 全文匹配（CJK 友好、rank 排序）；短 query 或索引未建时回退 LIKE
+    const ftsQuery = sanitizeFtsQuery(q);
+    const hasFts = ftsQuery && ftsQuery !== '""';
+    let total: number;
+    let rows: Record<string, unknown>[];
+    try {
+      if (!hasFts) throw new Error('query too short for FTS');
+      total = (db.prepare(`
+        SELECT COUNT(*) as cnt FROM conversations c
+        JOIN conversations_fts f ON c.rowid = f.rowid
+        WHERE conversations_fts MATCH ?
+      `).get(ftsQuery) as { cnt: number }).cnt;
+      rows = db.prepare(`
+        SELECT c.id, c.session_id, c.role, c.content, c.created_at FROM conversations c
+        JOIN conversations_fts f ON c.rowid = f.rowid
+        WHERE conversations_fts MATCH ?
+        ORDER BY rank, c.created_at DESC LIMIT ? OFFSET ?
+      `).all(ftsQuery, limit, offset) as Record<string, unknown>[];
+    } catch {
+      // FTS 不可用（索引未建 / query 过短）→ 回退 LIKE 全表扫描
+      total = (db.prepare(`SELECT COUNT(*) as cnt FROM conversations WHERE content LIKE ?`).get(`%${q}%`) as { cnt: number }).cnt;
+      rows = db.prepare(`
+        SELECT id, session_id, role, content, created_at FROM conversations
+        WHERE content LIKE ?
+        ORDER BY created_at DESC LIMIT ? OFFSET ?
+      `).all(`%${q}%`, limit, offset) as Record<string, unknown>[];
+    }
 
     const results = rows.map((r) => ({
       sessionId: r.session_id,
@@ -364,7 +385,7 @@ export function createApiRouter(deps: WebServerDependencies) {
       createdAt: r.created_at,
       highlight: highlightSnippet(r.content as string, q),
     }));
-    json(res, { results, total: countRow.cnt });
+    json(res, { results, total });
   });
 
   // R12-P3：审计查询端点
