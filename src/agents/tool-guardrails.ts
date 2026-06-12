@@ -20,6 +20,7 @@ const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   memory_read: 'idempotent',
   memory_search: 'idempotent',
   session_search: 'idempotent',
+  dialogue_search: 'idempotent',
   query_brain_decisions: 'idempotent',
   get_metrics: 'idempotent',
   write_file: 'mutating',

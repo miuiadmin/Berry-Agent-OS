@@ -717,6 +717,10 @@ export class CoreService {
     const { registerSessionSearchCapability } = await import('../memory/session-search.js');
     registerSessionSearchCapability(capabilityBus, getDb());
 
+    // 15.0 FTS5: 注册 dialogue_search 能力（检索 Agent 间对话/审计历史）
+    const { registerDialogueSearchCapability } = await import('../memory/dialogue-search.js');
+    registerDialogueSearchCapability(capabilityBus, getDb());
+
     // P2-12: 始终创建 ChannelManager，Telegram/CLI 等非 WS channel 统一管理
     // WS 的 inbound 走 ws-handler.ts，outbound 走 WsEventBridge，不经过 ChannelManager
     this.channelManager = new ChannelManager();

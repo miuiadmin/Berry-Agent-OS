@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { sanitizeFtsQuery } from './search.js';
+import type { CapabilityBus } from '../bus/capability-bus.js';
 
 /** dialogue_messages 全文检索命中项（v18 建立的 dialogue_messages_fts） */
 export interface DialogueSearchHit {
@@ -126,4 +127,50 @@ export function searchAgentChatMessages(
     `,
     )
     .all(...params) as AgentChatSearchHit[];
+}
+
+export interface DialogueSearchCapabilityInput {
+  query: string;
+  /** 检索范围：dialogue（Agent 间对话状态表）/ agent_chat（request/response 审计表），默认 dialogue */
+  scope?: 'dialogue' | 'agent_chat';
+  sessionId?: string;
+  limit?: number;
+}
+
+/**
+ * 注册 dialogue_search 能力到 CapabilityBus（15.0 FTS5 接线）。
+ *
+ * 让 Brain / 工具可全文检索 Agent 间历史对话（dialogue_messages）与审计日志
+ * （agent_chat_messages）。注册模式参照 session_search（session-search.ts）。
+ * 没有这个接线，searchDialogueMessages/searchAgentChatMessages 是无调用方的死代码。
+ *
+ * @param bus  能力总线
+ * @param db   数据库连接
+ */
+export function registerDialogueSearchCapability(bus: CapabilityBus, db: Database.Database): void {
+  bus.register(
+    {
+      name: 'dialogue_search',
+      description:
+        'Full-text search across inter-agent dialogue history (dialogue_messages) and audit log (agent_chat_messages). Pass scope to pick table; optional sessionId to limit range.',
+      dangerLevel: 'safe',
+      provider: { type: 'builtin', name: 'memory' },
+    },
+    async (input) => {
+      const { query, scope = 'dialogue', sessionId, limit } = input as DialogueSearchCapabilityInput;
+      if (!query || query.trim().length < 2) {
+        return { results: [], total: 0, reason: 'query too short' };
+      }
+      try {
+        const hits =
+          scope === 'agent_chat'
+            ? searchAgentChatMessages(db, query, { sessionId, limit })
+            : searchDialogueMessages(db, query, { sessionId, limit });
+        return { results: hits, total: hits.length, scope };
+      } catch {
+        // FTS 索引可能尚未建（v18 未跑）—— 不抛错，返回空
+        return { results: [], total: 0, error: 'dialogue search failed (FTS index may not exist)' };
+      }
+    },
+  );
 }
