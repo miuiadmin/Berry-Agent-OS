@@ -24,32 +24,44 @@ const logger = getLogger('brain-command');
 /** inspect 默认回看目标 Agent 最近的工具调用条数 */
 const INSPECT_DEFAULT_LIMIT = 20;
 
+/** execute 委派回调：复用 orchestrator 的 dispatchModuleTask（支持 targetAgentOverride 定向派发） */
+export type DispatchExecuteFn = (input: {
+  sessionId: string;
+  taskType: string;
+  requester: string;
+  inputPayload: Record<string, unknown>;
+  foreground?: boolean;
+  targetAgentOverride?: string;
+}) => Promise<{ taskId: string; targetAgent: string }>;
+
 export interface BrainCommandHandlerDeps {
   agentManager: AgentManager;
   db: Database.Database;
+  /** 15.0 机制 D execute：真实委派到目标 Agent（orchestrator 注入 dispatchModuleTask） */
+  dispatchExecute?: DispatchExecuteFn;
 }
 
 /**
  * 在 Brain 的 IPC 上注册 brain.command handler。
  *
  * @param brainIpc  Brain（reviewer）的 IPC 通道
- * @param deps      agentManager（查 Agent 状态/委托）+ db（inspect 查询）
+ * @param deps      agentManager + db + dispatchExecute（execute 真实委派）
  */
 export function setupBrainCommandHandler(
   brainIpc: IpcChannel,
   deps: BrainCommandHandlerDeps,
 ): void {
-  brainIpc.onMessage('brain.command', (msg: IpcMessage) => {
+  brainIpc.onMessage('brain.command', async (msg: IpcMessage) => {
     const cmd = msg.payload as BrainCommand;
     const correlationId = msg.correlationId ?? msg.id;
-    const result = dispatchBrainCommand(cmd, deps);
+    const result = await dispatchBrainCommand(cmd, deps);
     logger.debug({ target: cmd.target, type: cmd.type, success: result.success }, 'brain.command 已处理');
     brainIpc.send('brain.command.result', 'brain', result, correlationId);
   });
 }
 
 /** 按 type 分发 brain.command，返回结果（不抛错，异常 → success:false） */
-function dispatchBrainCommand(cmd: BrainCommand, deps: BrainCommandHandlerDeps): BrainCommandResult {
+async function dispatchBrainCommand(cmd: BrainCommand, deps: BrainCommandHandlerDeps): Promise<BrainCommandResult> {
   try {
     switch (cmd.type) {
       case 'report':
@@ -57,7 +69,7 @@ function dispatchBrainCommand(cmd: BrainCommand, deps: BrainCommandHandlerDeps):
       case 'inspect':
         return inspectAgent(cmd, deps);
       case 'execute':
-        return executeAgent(cmd, deps);
+        return await executeAgent(cmd, deps);
       default:
         return { success: false, error: `未知 brain.command 类型: ${String(cmd.type)}` };
     }
@@ -112,19 +124,36 @@ function inspectAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): BrainCo
 }
 
 /**
- * execute：委托目标 Agent 执行新任务。
+ * execute：真实委派目标 Agent 执行新任务（机制 D 核心，非 stub）。
  *
- * 完整实现需要 mission/delegation 上下文（sessionId / correlationId / requester），
- * 当前返回结构化确认并记日志，确保通道可用；delegation 接线随 mission 上下文接入。
+ * 通过 orchestrator 注入的 dispatchExecute（dispatchModuleTask + targetAgentOverride）
+ * 创建 foreground/background 委派到 cmd.target，返回 taskId。任务结果经正常 delegation
+ * 生命周期异步回传（brain.command.result 此处只回派发回执 = taskId）。
+ *
+ * 不再返回「待接线」假确认 —— 那是补丁，违反「彻底不打补丁」。
  */
-function executeAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): BrainCommandResult {
+async function executeAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): Promise<BrainCommandResult> {
+  if (!deps.dispatchExecute) {
+    return { success: false, error: 'execute 委派未接线（orchestrator 未注入 dispatchExecute）' };
+  }
   const agent = deps.agentManager.getAgent(cmd.target);
   if (!agent) {
     return { success: false, error: `目标 Agent 不存在或未加载: ${cmd.target}` };
   }
-  logger.info({ target: cmd.target, priority: cmd.priority, payload: cmd.payload }, 'brain.command execute：待 delegation 上下文接线');
-  return {
-    success: true,
-    data: { name: cmd.target, acknowledged: true, note: 'execute 需 mission/delegation 上下文，当前已确认接收，待接线' },
-  };
+  const sessionId = typeof cmd.payload.sessionId === 'string' ? cmd.payload.sessionId : 'brain-command';
+  const taskType = typeof cmd.payload.taskType === 'string' ? cmd.payload.taskType : 'brain_command';
+  try {
+    const { taskId, targetAgent } = await deps.dispatchExecute({
+      sessionId,
+      taskType,
+      requester: 'brain',
+      inputPayload: cmd.payload,
+      foreground: cmd.payload.foreground !== false, // 默认 foreground（Brain 通常要结果）
+      targetAgentOverride: cmd.target,
+    });
+    logger.info({ target: cmd.target, taskId, taskType, priority: cmd.priority }, 'brain.command execute：委派已派发');
+    return { success: true, data: { taskId, targetAgent, taskType } };
+  } catch (err) {
+    return { success: false, error: `委派派发失败: ${(err as Error).message}` };
+  }
 }

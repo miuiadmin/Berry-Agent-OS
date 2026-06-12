@@ -13,7 +13,7 @@ import type { AgentManager } from '../agent-manager.js';
  * 三种指令的分发、目标不存在 fail-closed、异常不抛。
  */
 
-/** 最小 mock IPC：记录 handler，捕获 send 的结果 */
+/** 最小 mock IPC：记录 handler，捕获 send 的结果。emit 为 async 以适配 brain.command 的 async handler */
 function makeMockIpc() {
   const handlers = new Map<string, (msg: IpcMessage) => void>();
   const sent: Array<{ type: string; payload: unknown; correlationId?: string }> = [];
@@ -25,7 +25,10 @@ function makeMockIpc() {
       sent.push({ type, payload, correlationId });
       return true;
     },
-    emit: (msg: IpcMessage) => handlers.get(msg.type)?.(msg),
+    emit: async (msg: IpcMessage) => {
+      const h = handlers.get(msg.type);
+      if (h) await h(msg);
+    },
   };
   return { ipc: ipc as unknown as IpcChannel, sent };
 }
@@ -63,10 +66,10 @@ describe('brain.command handler (15.0 机制 D)', () => {
     ).run('1', 's', 't', 'code', 'write_file', 1, 'brain', 100);
   });
 
-  it('report：目标在线 → 返回 ready 状态', () => {
+  it('report：目标在线 → 返回 ready 状态', async () => {
     const { ipc, sent } = makeMockIpc();
     setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set(['code'])), db });
-    ipc.emit({ type: 'brain.command', payload: cmd('code', 'report'), correlationId: 'c1' } as IpcMessage);
+    await ipc.emit({ type: 'brain.command', payload: cmd('code', 'report'), correlationId: 'c1' } as IpcMessage);
     expect(sent).toHaveLength(1);
     expect(sent[0].type).toBe('brain.command.result');
     const result = sent[0].payload as BrainCommandResult;
@@ -74,19 +77,19 @@ describe('brain.command handler (15.0 机制 D)', () => {
     expect((result.data as { ready: boolean }).ready).toBe(true);
   });
 
-  it('report：目标不存在 → success:false（fail-closed）', () => {
+  it('report：目标不存在 → success:false（fail-closed）', async () => {
     const { ipc, sent } = makeMockIpc();
     setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set()), db });
-    ipc.emit({ type: 'brain.command', payload: cmd('ghost', 'report'), correlationId: 'c2' } as IpcMessage);
+    await ipc.emit({ type: 'brain.command', payload: cmd('ghost', 'report'), correlationId: 'c2' } as IpcMessage);
     const result = sent[0].payload as BrainCommandResult;
     expect(result.success).toBe(false);
     expect(result.error).toContain('不存在');
   });
 
-  it('inspect：返回目标 Agent 最近工具调用', () => {
+  it('inspect：返回目标 Agent 最近工具调用', async () => {
     const { ipc, sent } = makeMockIpc();
     setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set(['code'])), db });
-    ipc.emit({ type: 'brain.command', payload: cmd('code', 'inspect', { limit: 5 }), correlationId: 'c3' } as IpcMessage);
+    await ipc.emit({ type: 'brain.command', payload: cmd('code', 'inspect', { limit: 5 }), correlationId: 'c3' } as IpcMessage);
     const result = sent[0].payload as BrainCommandResult;
     expect(result.success).toBe(true);
     const data = result.data as { recentToolCalls: Array<{ tool_name: string }> };
@@ -94,32 +97,59 @@ describe('brain.command handler (15.0 机制 D)', () => {
     expect(data.recentToolCalls[0].tool_name).toBe('write_file');
   });
 
-  it('execute：返回结构化确认（acknowledged）', () => {
+  it('execute：真实委派目标 Agent，返回 taskId（非 stub）', async () => {
     const { ipc, sent } = makeMockIpc();
-    setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set(['code'])), db });
-    ipc.emit({ type: 'brain.command', payload: cmd('code', 'execute', { task: 'do something' }, 'high'), correlationId: 'c4' } as IpcMessage);
+    let dispatched: Record<string, unknown> | undefined;
+    setupBrainCommandHandler(ipc, {
+      agentManager: makeMockAgentManager(new Set(['code'])),
+      db,
+      dispatchExecute: async (input) => {
+        dispatched = input;
+        return { taskId: 'task_123', targetAgent: input.targetAgentOverride! };
+      },
+    });
+    await ipc.emit({
+      type: 'brain.command',
+      payload: cmd('code', 'execute', { taskType: 'code_edit', message: 'do something', sessionId: 's1' }, 'high'),
+      correlationId: 'c4',
+    } as IpcMessage);
     const result = sent[0].payload as BrainCommandResult;
     expect(result.success).toBe(true);
-    expect((result.data as { acknowledged: boolean }).acknowledged).toBe(true);
+    const data = result.data as { taskId: string; targetAgent: string; taskType: string };
+    expect(data.taskId).toBe('task_123');
+    expect(data.targetAgent).toBe('code');
+    // 验证 dispatchExecute 收到了 targetAgentOverride 定向 + brain requester
+    expect(dispatched).toBeDefined();
+    expect((dispatched as { targetAgentOverride?: string }).targetAgentOverride).toBe('code');
+    expect((dispatched as { requester: string }).requester).toBe('brain');
   });
 
-  it('未知 type → success:false', () => {
+  it('execute：未注入 dispatchExecute → success:false（不静默成功）', async () => {
     const { ipc, sent } = makeMockIpc();
     setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set(['code'])), db });
-    ipc.emit({ type: 'brain.command', payload: cmd('code', 'bogus' as BrainCommand['type']), correlationId: 'c5' } as IpcMessage);
+    await ipc.emit({ type: 'brain.command', payload: cmd('code', 'execute', { message: 'x' }), correlationId: 'c4b' } as IpcMessage);
+    const result = sent[0].payload as BrainCommandResult;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('未接线');
+  });
+
+  it('未知 type → success:false', async () => {
+    const { ipc, sent } = makeMockIpc();
+    setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set(['code'])), db });
+    await ipc.emit({ type: 'brain.command', payload: cmd('code', 'bogus' as BrainCommand['type']), correlationId: 'c5' } as IpcMessage);
     const result = sent[0].payload as BrainCommandResult;
     expect(result.success).toBe(false);
     expect(result.error).toContain('未知');
   });
 
-  it('回复带原 correlationId（IPC 配对）', () => {
+  it('回复带原 correlationId（IPC 配对）', async () => {
     const { ipc, sent } = makeMockIpc();
     setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set(['code'])), db });
-    ipc.emit({ type: 'brain.command', payload: cmd('code', 'report'), correlationId: 'trace-xyz' } as IpcMessage);
+    await ipc.emit({ type: 'brain.command', payload: cmd('code', 'report'), correlationId: 'trace-xyz' } as IpcMessage);
     expect(sent[0].correlationId).toBe('trace-xyz');
   });
 
-  it('inspect scope=audit → 运行 Auditor 5 维扫描，返回报告（D→C 闭环）', () => {
+  it('inspect scope=audit → 运行 Auditor 5 维扫描，返回报告（D→C 闭环）', async () => {
     const { ipc, sent } = makeMockIpc();
     setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set()), db });
     // 造重复工具调用（触发 repeated_tool 模式）
@@ -128,7 +158,7 @@ describe('brain.command handler (15.0 机制 D)', () => {
         `INSERT INTO agent_tool_calls (id, session_id, task_id, agent_name, tool_name, success, approved_by, created_at) VALUES (?,?,?,?,?,?,?,?)`,
       ).run(`a${i}`, 's', 't', 'code', 'write_file', 1, 'auto', 1000);
     }
-    ipc.emit({
+    await ipc.emit({
       type: 'brain.command',
       payload: cmd('any', 'inspect', { scope: 'audit', since: 0, to: 100000 }),
       correlationId: 'c6',

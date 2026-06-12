@@ -658,7 +658,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.setupRoutingFlow(reviewer.ipc);
     this.permissionFlow.setupJudgeHandler(reviewer.ipc);
     // 15.0 机制 D：注册 brain.command 指挥通道 handler（Brain 可向任意 Agent 派 execute/inspect/report）
-    setupBrainCommandHandler(reviewer.ipc, { agentManager: this.agentManager, db: getDb() });
+    setupBrainCommandHandler(reviewer.ipc, {
+      agentManager: this.agentManager,
+      db: getDb(),
+      // execute 真实委派：复用 dispatchModuleTask + targetAgentOverride 定向派发到 Brain 指定的 Agent
+      dispatchExecute: (input) => this.dispatchModuleTask(input),
+    });
     this.correctionFlow.setup(reviewer.ipc);
     this.superiorReviewFlow?.setup(reviewer.ipc);
     this.superiorReviewFlow?.setCallbacks({
@@ -986,6 +991,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     inputPayload: Record<string, unknown>;
     foreground?: boolean;
     correlationId?: string;
+    /** 15.0 机制 D：显式目标 Agent（brain.command execute） */
+    targetAgentOverride?: string;
   }): Promise<{ taskId: string; targetAgent: string }> {
     return withTrace('router.dispatchModuleTask', () => this.dispatchModuleTaskInternal(input));
   }
@@ -1830,8 +1837,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     inputPayload: Record<string, unknown>;
     foreground?: boolean;
     correlationId?: string;
+    /** 15.0 机制 D：显式指定目标 Agent（brain.command execute 用），提供时跳过 taskRouter 路由 */
+    targetAgentOverride?: string;
   }): Promise<{ taskId: string; targetAgent: string }> {
-    const route = this.taskRouter.route({ taskType: input.taskType, requester: input.requester });
+    // 15.0 机制 D：targetAgentOverride 时直接定向（Brain 指挥官指定目标），否则按 taskType 路由
+    const route = input.targetAgentOverride
+      ? { targetAgent: input.targetAgentOverride, reason: 'brain.command 显式指定目标 Agent' }
+      : this.taskRouter.route({ taskType: input.taskType, requester: input.requester });
     const correlationId = input.correlationId ?? genId('corr');
 
     const span = getTracer().startTrace('task.dispatch', {
