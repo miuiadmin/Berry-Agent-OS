@@ -71,6 +71,10 @@ export interface PermissionJudgeResultPayload {
     instruction?: string;
     forbidTools?: string[];
   };
+  /** 15.0 机制 B：Brain 拿不准时标记，flow 据此升级到用户确认（替代直接拒绝） */
+  uncertain?: boolean;
+  /** 15.0 机制 B：uncertain=true 时附带的升级信息（要问用户的问题） */
+  escalation?: import('./brain.js').BrainEscalation;
 }
 
 // === Agent Ask User (multi-turn) ===

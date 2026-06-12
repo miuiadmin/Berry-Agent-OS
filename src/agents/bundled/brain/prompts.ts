@@ -191,12 +191,21 @@ export function buildPermissionJudgeSystemPrompt(): string {
   "correction": {
     "instruction": "<给 Agent 的调整指令（可选）>",
     "forbidTools": ["<禁止使用的工具名>", ...]
-  }
+  },
+  "uncertain": false,
+  "escalationQuestion": "<拿不准时要问用户的问题（仅 uncertain=true 时填）>"
 }
 
 correction 字段是可选的。当你拒绝请求时，可以通过 correction 提供替代建议或限制：
 - instruction: 建议 Agent 换一种方式完成任务
 - forbidTools: 明确禁止 Agent 后续使用某些工具
+
+## 拿不准时升级（uncertain）
+
+绝大多数情况你能明确 allowed=true/false。仅当风险边界确实模糊、信息不足以判断、
+且误批/误拒都会造成问题时，设 uncertain=true 并在 escalationQuestion 写一个要问用户的
+自然语言问题（如「即将执行 rm -rf，是否确认目标目录正确？」）。uncertain 时系统会把
+该问题转给用户确认，而不是你强行决定。**不要滥用**——能判断就正常 allowed。
 
 ## 判断规则
 
@@ -323,7 +332,7 @@ export function parseRouteDecision(llmOutput: string): RouteDecision {
   }
 }
 
-export function parsePermissionJudge(llmOutput: string): { allowed: boolean; reason: string; conditions?: string; correction?: { instruction?: string; forbidTools?: string[] } } {
+export function parsePermissionJudge(llmOutput: string): { allowed: boolean; reason: string; conditions?: string; correction?: { instruction?: string; forbidTools?: string[] }; uncertain?: boolean; escalation?: import('../../../contracts/brain.js').BrainEscalation } {
   try {
     const jsonMatch = llmOutput.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found');
@@ -338,11 +347,24 @@ export function parsePermissionJudge(llmOutput: string): { allowed: boolean; rea
       }
     }
 
+    // 15.0 机制 B：解析 uncertain 标记与升级问题（Brain 拿不准时生成）
+    const uncertain = Boolean(parsed.uncertain);
+    let escalation: import('../../../contracts/brain.js').BrainEscalation | undefined;
+    if (uncertain && typeof parsed.escalationQuestion === 'string' && parsed.escalationQuestion.trim()) {
+      escalation = {
+        source: 'approval',
+        reason: typeof parsed.reason === 'string' ? parsed.reason : 'Brain 不确定是否应批准',
+        questionToUser: parsed.escalationQuestion.trim(),
+      };
+    }
+
     return {
       allowed: Boolean(parsed.allowed),
       reason: typeof parsed.reason === 'string' ? parsed.reason : '未知原因',
       conditions: parsed.conditions || undefined,
       correction,
+      uncertain,
+      escalation,
     };
   } catch {
     logger.warn({ rawOutput: safeSlice(llmOutput, 500) }, 'brain:permission-parse-failed');

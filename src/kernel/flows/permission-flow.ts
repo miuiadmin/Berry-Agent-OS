@@ -156,6 +156,15 @@ export class PermissionFlow {
       dangerLevel,
       taskContext: taskId,
     });
+    // 15.0 机制 B：Brain 拿不准（uncertain）→ 升级到用户确认，复用 handleUserConfirm，
+    // 不直接拒绝。questionToUser 优先用 Brain 给的 escalation 问题，否则回退通用提示。
+    if (judge.uncertain) {
+      this.handleUserConfirm({
+        agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel,
+        brainReason: judge.escalation?.questionToUser ?? (judge.reason || 'Brain 不确定是否批准，需用户确认'),
+      });
+      return;
+    }
     if (judge.allowed) {
       const token = this.deps.permissionCoordinator.resolve(requestId, {
         verdict: 'approved',
@@ -178,6 +187,47 @@ export class PermissionFlow {
         replyId,
       );
     }
+  }
+
+  /**
+   * 用户确认流程（L3 dangerous 直接走 / 机制 B uncertain 升级走）。
+   *
+   * emit permission.user_confirm_needed 让前端/CLI 弹确认；登记 pendingUserConfirms，
+   * 5 分钟超时自动拒绝。resolveUserConfirm() 处理用户回答。
+   *
+   * 15.0 机制 B：从 handler 内联块抽成可复用方法，供 handleBrainReview 的 uncertain 分支复用。
+   */
+  private handleUserConfirm(params: {
+    agentIpc: AgentIpc;
+    agentName: string;
+    replyId: string;
+    requestId: string;
+    sessionId: string;
+    toolName: string;
+    toolInput: string;
+    dangerLevel: DangerLevel | string;
+    brainReason: string;
+  }): void {
+    const { agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel, brainReason } = params;
+    getEventBus().emit('permission.user_confirm_needed', {
+      requestId,
+      sessionId,
+      agentName,
+      toolName,
+      toolInput: toolInput.slice(0, 500),
+      dangerLevel,
+      brainReason,
+    });
+    const timer = setTimeout(() => {
+      if (this.pendingUserConfirms.has(requestId)) {
+        this.pendingUserConfirms.delete(requestId);
+        agentIpc.send('permission.result', agentName, {
+          allowed: false,
+          reason: '用户确认超时（5 分钟），自动拒绝',
+        }, replyId);
+      }
+    }, 300_000);
+    this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId, timer });
   }
 
   setupHandlers(agentIpc: AgentIpc, agentName: string, isPrimary: boolean): void {
@@ -270,25 +320,10 @@ export class PermissionFlow {
             return;
           }
           // L3 dangerous（ask 模式）→ 用户确认
-          getEventBus().emit('permission.user_confirm_needed', {
-            requestId,
-            sessionId,
-            agentName,
-            toolName,
-            toolInput: toolInput.slice(0, 500),
-            dangerLevel,
+          this.handleUserConfirm({
+            agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel,
             brainReason: '危险操作，需要用户确认',
           });
-          const timer = setTimeout(() => {
-            if (this.pendingUserConfirms.has(requestId)) {
-              this.pendingUserConfirms.delete(requestId);
-              agentIpc.send('permission.result', agentName, {
-                allowed: false,
-                reason: '用户确认超时（5 分钟），自动拒绝',
-              }, replyId);
-            }
-          }, 300_000);
-          this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId, timer });
           return;
         } else {
           agentIpc.send('permission.result', agentName, result, replyId);
