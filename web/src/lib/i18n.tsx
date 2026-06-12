@@ -86,6 +86,30 @@ export function useT() {
 }
 
 /**
+ * 非 Hook 环境的翻译函数（store / class 组件 / api 层）
+ *
+ * 从 localStorage 读取当前语言，查翻译表并做参数插值。
+ * 用途：zustand store、ErrorBoundary（class 组件）、fetchApi 错误消息等
+ * 不能使用 useT() hook 的场景。每次调用都会读 localStorage，
+ * 所以结果始终反映最新语言设置。
+ *
+ * @param key 扁平点分格式的翻译键，如 "common.retry"
+ * @param params 可选插值参数，{ count: 5 } → "5 条消息"
+ */
+export function tOutside(key: string, params?: Record<string, string | number>): string {
+  const locale: Locale =
+    (typeof window !== "undefined" && localStorage.getItem("locale") === "en") ? "en" : "zh";
+  const translations = locale === "zh" ? zh : en;
+  let value = translations[key] ?? key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      value = value.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+    }
+  }
+  return value;
+}
+
+/**
  * 日期/数字格式化 Hook — 根据 locale 自动切换格式化规则
  *
  * 提供四个方法：

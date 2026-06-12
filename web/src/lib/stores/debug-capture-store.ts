@@ -6,15 +6,7 @@ import {
   getDebugCaptureStatus,
   type CaptureResult,
 } from "@/lib/api";
-import zh from "@/locales/zh";
-import en from "@/locales/en";
-
-/** Store 内部翻译辅助（非 hook 环境，直接查翻译表） */
-function t(key: string): string {
-  const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
-  const translations = locale === "en" ? en : zh;
-  return translations[key] ?? key;
-}
+import { tOutside as t } from "@/lib/i18n";
 
 interface DebugCaptureState {
   isCapturing: boolean;

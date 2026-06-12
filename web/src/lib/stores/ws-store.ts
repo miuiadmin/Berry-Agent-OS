@@ -2,15 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { toast } from "sonner";
 import { useChatStore } from "./chat-store";
-import zh from "@/locales/zh";
-import en from "@/locales/en";
-
-/** Store 内部翻译辅助（非 hook 环境，直接查翻译表） */
-function t(key: string): string {
-  const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
-  const translations = locale === "en" ? en : zh;
-  return translations[key] ?? key;
-}
+import { tOutside as t } from "@/lib/i18n";
 
 /** WebSocket 连接状态 */
 type WsStatus = "connected" | "connecting" | "disconnected";

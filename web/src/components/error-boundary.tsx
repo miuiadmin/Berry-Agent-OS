@@ -1,8 +1,7 @@
 import React, { type ReactNode } from "react";
 import { Button } from "./ui/button";
 import { AlertCircle } from "lucide-react";
-import zh from "@/locales/zh";
-import en from "@/locales/en";
+import { tOutside } from "@/lib/i18n";
 
 interface Props {
   children: ReactNode;
@@ -16,7 +15,7 @@ interface State {
 
 /**
  * 错误边界组件 — class 组件，无法使用 hook
- * 直接读取 localStorage 获取当前语言，查翻译表
+ * 使用统一的 i18n.tOutside 翻译（每次调用读 localStorage，反映最新语言）
  */
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
@@ -32,13 +31,6 @@ export class ErrorBoundary extends React.Component<Props, State> {
     console.error("[ErrorBoundary]", error, info.componentStack);
   }
 
-  /** 直接查翻译表，避免 hook 依赖 */
-  private t(key: string): string {
-    const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
-    const translations = locale === "en" ? en : zh;
-    return translations[key] ?? key;
-  }
-
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
@@ -46,9 +38,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <div className="flex h-full items-center justify-center p-8">
           <div className="text-center max-w-sm">
             <AlertCircle className="mx-auto size-10 text-destructive opacity-70" />
-            <h2 className="mt-4 text-lg font-semibold">{this.t("errorBoundary.title")}</h2>
+            <h2 className="mt-4 text-lg font-semibold">{tOutside("errorBoundary.title")}</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              {this.state.error?.message || this.t("errorBoundary.description")}
+              {this.state.error?.message || tOutside("errorBoundary.description")}
             </p>
             <Button
               variant="outline"
@@ -56,7 +48,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               className="mt-4 h-10 md:h-7 px-4 md:px-2.5"
               onClick={() => this.setState({ hasError: false, error: null })}
             >
-              {this.t("errorBoundary.tryAgain")}
+              {tOutside("errorBoundary.tryAgain")}
             </Button>
           </div>
         </div>

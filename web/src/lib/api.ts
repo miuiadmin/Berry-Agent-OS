@@ -1,19 +1,7 @@
 const BASE_URL = "";
 
-/** API 层翻译辅助（非 hook 环境） */
-import zh from "@/locales/zh";
-import en from "@/locales/en";
-function t(key: string, params?: Record<string, string | number>): string {
-  const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
-  const translations = locale === "en" ? en : zh;
-  let value = translations[key] ?? key;
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      value = value.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
-    }
-  }
-  return value;
-}
+/** API 层翻译辅助（非 hook 环境，统一使用 i18n 导出） */
+import { tOutside as t } from "@/lib/i18n";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;

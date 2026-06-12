@@ -4,8 +4,7 @@ import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "./button";
-import zh from "@/locales/zh";
-import en from "@/locales/en";
+import { tOutside as t } from "@/lib/i18n";
 
 interface QueryBoundaryProps<T> {
   query: UseQueryResult<T>;
@@ -15,13 +14,6 @@ interface QueryBoundaryProps<T> {
 }
 
 export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: QueryBoundaryProps<T>) {
-  /** 直接查翻译表（非 hook 组件模式，与 ErrorBoundary 一致） */
-  const t = (key: string) => {
-    const locale = (typeof window !== "undefined" && localStorage.getItem("locale")) || "zh";
-    const translations = locale === "en" ? en : zh;
-    return translations[key] ?? key;
-  };
-
   if (query.isLoading) {
     return <>{skeleton}</>;
   }
