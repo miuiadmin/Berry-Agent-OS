@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Spinner } from "@/components/ui/spinner";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 interface LogLine {
@@ -96,9 +97,9 @@ export default function LogsPage() {
           variant="ghost"
           aria-label={t("logs.refreshLogs")}
           onClick={() => refetch()}
-          className={cn("size-11 md:size-8", isFetching && "animate-spin")}
+          className="size-11 md:size-8"
         >
-          <RefreshCw className="size-3.5" />
+          {isFetching ? <Spinner size="sm" /> : <RefreshCw className="size-3.5" />}
         </Button>
 
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">

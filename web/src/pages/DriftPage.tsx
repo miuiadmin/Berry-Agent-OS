@@ -4,20 +4,21 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT } from "@/lib/i18n";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import { Shield, TrendingUp, AlertTriangle, CheckCircle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 
+/** 分数进度条 — 使用 HeroUI Progress adapter 渲染，自动处理 ARIA */
 function ScoreBar({ score, label }: { score: number; label: string }) {
-  const color = score >= 0.7 ? "bg-success" : score >= 0.5 ? "bg-warning" : "bg-danger";
+  /** 根据分数段选择语义色：≥0.7 成功、≥0.5 警告、<0.5 危险 */
+  const color = score >= 0.7 ? "success" as const : score >= 0.5 ? "warning" as const : "danger" as const;
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-muted-foreground">
         <span>{label}</span>
         <span className="tabular-nums">{(score * 100).toFixed(1)}%</span>
       </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${score * 100}%` }} />
-      </div>
+      <Progress value={score * 100} max={100} color={color} aria-label={label} />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 
 import { useState, useEffect, useRef } from "react";
-import { ChevronRight, Loader2 } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { ThinkingStep } from "@/lib/stores/chat-store";
@@ -75,7 +76,7 @@ export function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessP
       >
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <span>{isActive ? t("thinking.active") : t("thinking.inactive")}</span>
-        {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
+        {isActive && <Spinner size="sm" className="ml-0.5 [&>svg]:size-2.5" />}
         {!isActive && steps.length > 0 && (
           <span className="ml-0.5 opacity-60">
             ({steps.length}{totalMs > 500 ? ` · ${formatElapsed(totalMs)}` : ""})

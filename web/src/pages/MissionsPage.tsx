@@ -22,11 +22,11 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
-  Loader2,
   GitBranch,
   Users,
   Radio,
 } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 
 // ─── API 响应类型 ───
 
@@ -57,13 +57,13 @@ interface PlanResponse {
 function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, { variant: "default" | "secondary" | "success" | "warning" | "danger"; icon: React.ReactNode }> = {
     pending: { variant: "secondary", icon: <Clock className="size-3" /> },
-    in_progress: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
+    in_progress: { variant: "warning", icon: <Spinner size="sm" className="[&>svg]:size-3" /> },
     completed: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
     failed: { variant: "danger", icon: <AlertTriangle className="size-3" /> },
     cancelled: { variant: "secondary", icon: <Clock className="size-3" /> },
     // task-level statuses
     waiting: { variant: "secondary", icon: <Clock className="size-3" /> },
-    working: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
+    working: { variant: "warning", icon: <Spinner size="sm" className="[&>svg]:size-3" /> },
     done: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
   };
   const config = variants[status] ?? { variant: "secondary" as const, icon: null };

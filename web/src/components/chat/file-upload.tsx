@@ -1,9 +1,10 @@
 
 import { useState, useRef, useCallback } from "react";
-import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Paperclip, X, FileText, Image as ImageIcon } from "lucide-react";
 import { uploadFile, type UploadResponse } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { useT } from "@/lib/i18n";
 
 export interface Attachment {
@@ -59,7 +60,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+        {uploading ? <Spinner size="sm" /> : <Paperclip className="size-4" />}
       </Button>
       <input
         ref={inputRef}

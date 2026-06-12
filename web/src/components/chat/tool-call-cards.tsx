@@ -1,7 +1,8 @@
 
 import { useState, useEffect, useRef } from "react";
-import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
+import { ChevronRight, Wrench, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
@@ -91,7 +92,7 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <Wrench className="size-3" />
         <span>{t("tools.header", { count: calls.length })}</span>
-        {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
+        {isActive && <Spinner size="sm" className="ml-0.5 [&>svg]:size-2.5" />}
         {!isActive && (
           <span className="ml-0.5 opacity-60">
             {totalMs > 0 ? `· ${formatDuration(totalMs)}` : ""}

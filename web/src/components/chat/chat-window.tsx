@@ -9,6 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck, ChevronDown } from "lucide-react";
 import { apiGet, apiPut, uploadFile, queries } from "@/lib/api";
 import { toast } from "sonner";
@@ -55,6 +57,7 @@ function HistoryError({ error, onRetry }: { error: string; onRetry: () => void }
   );
 }
 
+/** 委派请求对话框 — 使用 Dialog adapter 自动处理遮罩/ESC/聚焦陷阱 */
 function DelegationDialog({
   request,
   onRespond,
@@ -64,20 +67,24 @@ function DelegationDialog({
 }) {
   const t = useT();
   return (
-    <div role="alertdialog" aria-modal="true" aria-label={request.title} className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
-      <div className="rounded-xl border border-border bg-background shadow-lg p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <UserCheck className="size-4 text-warning" />
-          <h4 className="text-sm font-medium">{request.title}</h4>
-          {request.urgency === "high" && (
-            <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">{t("chat.urgent")}</span>
+    <Dialog open onOpenChange={(open) => { if (!open) onRespond(request.delegationId, null, false); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="size-4 text-warning" />
+            {request.title}
+            {request.urgency === "high" && (
+              <Badge variant="danger" className="text-[11px]">{t("chat.urgent")}</Badge>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2 px-6 pb-2">
+          {request.description && (
+            <p className="text-xs text-muted-foreground">{request.description}</p>
           )}
+          <p className="text-[11px] text-muted-foreground/70">{t("chat.requestedBy")}: {request.requestedBy}</p>
         </div>
-        {request.description && (
-          <p className="text-xs text-muted-foreground">{request.description}</p>
-        )}
-        <p className="text-[11px] text-muted-foreground/70">{t("chat.requestedBy")}: {request.requestedBy}</p>
-        <div className="flex items-center gap-2 justify-end">
+        <DialogFooter>
           {request.options.includes("deny") && (
             <Button variant="outline" size="sm" onClick={() => onRespond(request.delegationId, null, false)}>
               {t("chat.deny")}
@@ -88,12 +95,13 @@ function DelegationDialog({
               {t("chat.approve")}
             </Button>
           )}
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
+/** 权限确认对话框 — 使用 Dialog adapter 自动处理遮罩/ESC/聚焦陷阱 */
 function PermissionConfirmDialog({
   request,
   onRespond,
@@ -103,13 +111,15 @@ function PermissionConfirmDialog({
 }) {
   const t = useT();
   return (
-    <div role="alertdialog" aria-modal="true" aria-label={t("chat.permissionRequired")} className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0">
-      <div className="rounded-xl border border-destructive/30 bg-background shadow-lg p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="size-4 text-destructive" />
-          <h4 className="text-sm font-medium">{t("chat.permissionRequired")}</h4>
-        </div>
-        <div className="space-y-1 text-xs">
+    <Dialog open onOpenChange={(open) => { if (!open) onRespond(request.requestId, false); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldAlert className="size-4 text-destructive" />
+            {t("chat.permissionRequired")}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-1 text-xs px-6 pb-2">
           <p><span className="text-muted-foreground">{t("chat.agent")}:</span> {request.agentName}</p>
           <p><span className="text-muted-foreground">{t("chat.tool")}:</span> {request.toolName}</p>
           {request.toolInput && (
@@ -119,16 +129,16 @@ function PermissionConfirmDialog({
             <p className="text-muted-foreground italic">{t("chat.reason")}: {request.brainReason}</p>
           )}
         </div>
-        <div className="flex items-center gap-2 justify-end">
+        <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onRespond(request.requestId, false)}>
             {t("chat.deny")}
           </Button>
           <Button size="sm" onClick={() => onRespond(request.requestId, true)}>
             {t("chat.approve")}
           </Button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
