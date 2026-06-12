@@ -144,6 +144,7 @@ function AlertDialogDescription({
 /**
  * 确认按钮 —— 基于 AlertDialogPrimitive.Close（点击自动关闭对话框）+ render Button 渲染。
  * 保持"点击关闭"语义（原 Action 原语行为），ConfirmDialog 无需改动。
+ * 注意：消费侧的 onClick 回调同步执行后，Close 原语自动关闭对话框。
  */
 function AlertDialogAction({
   className,

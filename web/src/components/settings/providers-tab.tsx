@@ -776,10 +776,10 @@ function ChannelCard({
             {t("providers.modelsCount", { count: String(channel.modelCount) })}
           </span>
           <div className="hidden md:flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7" aria-label={t("providers.editChannel")}>
+            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-7" aria-label={t("providers.editChannel")}>
               <Pencil className="size-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-7 text-muted-foreground" aria-label={t("providers.deleteChannel")}>
+            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-7 text-muted-foreground" aria-label={t("providers.deleteChannel")}>
               <Trash2 className="size-3.5" />
             </Button>
             <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-7">

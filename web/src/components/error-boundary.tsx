@@ -53,7 +53,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <Button
               variant="outline"
               size="sm"
-              className="mt-4"
+              className="mt-4 h-10 md:h-7 px-4 md:px-2.5"
               onClick={() => this.setState({ hasError: false, error: null })}
             >
               {this.t("errorBoundary.tryAgain")}
