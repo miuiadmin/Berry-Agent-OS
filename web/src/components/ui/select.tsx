@@ -1,14 +1,16 @@
 /**
  * 下拉选择器 — 封装 HeroUI v3 Select compound（基于 react-aria-components Select）。
  *
- * 提供简化 API（替代原生 <select>）：
- *   <Select value="running" onValueChange={setFilter} options={...} />
+ * 精简 adapter：直接暴露 HeroUI 原生 variant，
+ * 不再手动复写边框/焦点样式——HeroUI variant="primary" 已原生处理。
+ * 仅追加项目特有能力：
+ *   - 移动端 44px 触控目标
+ *   - 列表项 hover/selection 语义色
  *
  * HeroUI Select compound 结构：
  *   Select.Root > Select.Trigger[Select.Value + Select.Indicator] + Select.Popover > ListBoxItem
  *
  * value/onValueChange（项目约定）映射到 react-aria 的 selectedKey/onSelectionChange。
- * items 用 ListBoxItem 渲染，自动获得键盘导航、聚焦管理、无障碍。
  */
 import * as React from "react";
 import {
@@ -52,6 +54,9 @@ export interface SelectProps {
 /**
  * 下拉选择器。
  *
+ * 边框/焦点/hover/disabled 样式全部由 HeroUI variant 系统原生处理，
+ * Trigger 仅追加高度和布局。
+ *
  * 示例：
  *   <Select value={status} onValueChange={setStatus}
  *     options={[{key:"all",label:"全部"},{key:"running",label:"运行中"}]}
@@ -74,10 +79,10 @@ export const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
         aria-label={ariaLabel}
         className={cn("min-h-[44px] md:min-h-0", className)}
       >
+        {/* Trigger：HeroUI variant 处理边框/焦点/hover，仅追加高度和布局 */}
         <HeroUISelect.Trigger
           className={cn(
-            /* 触发按钮样式：边框、圆角、高度；移动端 44px */
-            "flex items-center justify-between gap-2 w-full rounded-md border border-input bg-background px-3 h-11 md:h-8 text-sm transition-colors data-[hover=true]:border-input data-[focus-visible=true]:border-ring outline-none"
+            "flex items-center justify-between gap-2 w-full px-3 h-11 md:h-8 text-sm"
           )}
         >
           <HeroUISelect.Value className="text-sm data-[placeholder]:text-muted-foreground" />

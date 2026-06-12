@@ -31,9 +31,6 @@ html {
   --color-card: var(--surface);
   --color-card-foreground: var(--surface-foreground);
 
-  /* 浮层：Tooltip / Popover / Modal / Menu */
-  --color-popover: var(--overlay);
-
   /* 柔和/灰底：default 用于背景，muted 用于辅助文字 */
   --color-muted: var(--default);
   --color-muted-foreground: var(--muted);

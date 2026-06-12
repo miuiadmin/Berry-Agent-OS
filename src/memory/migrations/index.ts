@@ -703,6 +703,82 @@ const v17RedactHistoryScan: Migration = {
   },
 };
 
+/**
+ * v18: 15.0 存储层加固 — dialogue_messages / agent_chat_messages FTS5 全文索引，
+ *      并补齐 conversations 缺失的 UPDATE 触发器。
+ *
+ * 设计沿用 v12 conversations_fts 已验证的模式：外部内容表（content=源表, content_rowid=rowid）
+ * + 纯 trigram tokenizer。**不做 unicode61 双索引** —— BerryAgent 是中文优先产品，
+ * trigram 对 CJK 子串已完全正确（unicode61 会把 CJK 拆成单字破坏短语匹配），双索引只会
+ * 翻倍存储换边际的英文 ranking 收益。
+ *
+ * 触发器三件套（insert/delete/update）保证 FTS 与源表自动同步，应用层写入无需感知。
+ * external content 表的 delete 用 `INSERT INTO fts(fts,rowid,col) VALUES('delete',...)` 语法；
+ * update = delete 旧行 + insert 新行（FTS5 官方推荐模式）。
+ *
+ * conversations_fts 之前只有 insert/delete 触发器（v12），UPDATE content 时索引不同步——
+ * 本迁移补上 update 触发器并 rebuild 三个索引，让历史数据与新触发器一致。
+ */
+const v18DialogueAndAgentChatFts: Migration = {
+  version: 18,
+  name: 'dialogue-agent-chat-fts',
+  up: (db: Database.Database) => {
+    db.exec(`
+      -- ── dialogue_messages FTS5 ──
+      CREATE VIRTUAL TABLE IF NOT EXISTS dialogue_messages_fts USING fts5(
+        content,
+        content='dialogue_messages',
+        content_rowid='rowid',
+        tokenize='trigram'
+      );
+      CREATE TRIGGER IF NOT EXISTS dialogue_messages_fts_insert AFTER INSERT ON dialogue_messages BEGIN
+        INSERT INTO dialogue_messages_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS dialogue_messages_fts_delete AFTER DELETE ON dialogue_messages BEGIN
+        INSERT INTO dialogue_messages_fts(dialogue_messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS dialogue_messages_fts_update AFTER UPDATE ON dialogue_messages BEGIN
+        INSERT INTO dialogue_messages_fts(dialogue_messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        INSERT INTO dialogue_messages_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+
+      -- ── agent_chat_messages FTS5 ──
+      CREATE VIRTUAL TABLE IF NOT EXISTS agent_chat_messages_fts USING fts5(
+        content,
+        content='agent_chat_messages',
+        content_rowid='rowid',
+        tokenize='trigram'
+      );
+      CREATE TRIGGER IF NOT EXISTS agent_chat_messages_fts_insert AFTER INSERT ON agent_chat_messages BEGIN
+        INSERT INTO agent_chat_messages_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS agent_chat_messages_fts_delete AFTER DELETE ON agent_chat_messages BEGIN
+        INSERT INTO agent_chat_messages_fts(agent_chat_messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+      END;
+      CREATE TRIGGER IF NOT EXISTS agent_chat_messages_fts_update AFTER UPDATE ON agent_chat_messages BEGIN
+        INSERT INTO agent_chat_messages_fts(agent_chat_messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        INSERT INTO agent_chat_messages_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+
+      -- ── 补齐 conversations_fts 缺失的 UPDATE 触发器（v12 遗留） ──
+      CREATE TRIGGER IF NOT EXISTS conversations_fts_update AFTER UPDATE ON conversations BEGIN
+        INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+        INSERT INTO conversations_fts(rowid, content) VALUES (new.rowid, new.content);
+      END;
+    `);
+
+    // rebuild 三个索引：让触发器上线前的历史数据进入索引（external content 表从源表重建）
+    // 失败不致命——索引为空只是搜不到，不影响主流程；用 try 包住避免迁移卡死。
+    for (const fts of ['dialogue_messages_fts', 'agent_chat_messages_fts', 'conversations_fts']) {
+      try {
+        db.prepare(`INSERT INTO ${fts}(${fts}) VALUES ('rebuild')`).run();
+      } catch (err) {
+        logger.warn({ fts, err }, '15.0 FTS rebuild 跳过（源表可能不存在）');
+      }
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -722,4 +798,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v15BrainDecisionsTaskId,
   v16PendingRequestState,
   v17RedactHistoryScan,
+  v18DialogueAndAgentChatFts,
 ];
