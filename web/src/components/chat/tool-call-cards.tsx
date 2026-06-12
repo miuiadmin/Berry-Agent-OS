@@ -4,17 +4,13 @@ import { ChevronRight, Wrench, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
 
 interface ToolCallCardsProps {
   calls: ToolCallEvent[];
   isActive: boolean;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function ToolCallDetail({ call }: { call: ToolCallEvent }) {
@@ -32,7 +28,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
         <ChevronRight className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")} />
         <code className="font-mono text-[11px]">{call.toolName}</code>
         <span className="ml-auto flex items-center gap-1 shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
-          {formatDuration(call.durationMs)}
+          {formatDurationMs(call.durationMs)}
           {call.isError
             ? <X className="size-3 text-danger" />
             : <Check className="size-3 text-success" />
@@ -95,7 +91,7 @@ export function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
         {isActive && <Spinner size="sm" className="ml-0.5 [&>svg]:size-2.5" />}
         {!isActive && (
           <span className="ml-0.5 opacity-60">
-            {totalMs > 0 ? `· ${formatDuration(totalMs)}` : ""}
+            {totalMs > 0 ? `· ${formatDurationMs(totalMs)}` : ""}
             {hasErrors ? t("thinking.hasErrors") : ""}
           </span>
         )}

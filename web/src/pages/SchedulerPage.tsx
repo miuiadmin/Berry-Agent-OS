@@ -31,6 +31,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/shared/page-header";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 // ─── Status badge helper ───────────────────────────────────────────────────
@@ -254,25 +255,21 @@ export default function SchedulerPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Clock className="size-5 text-accent" />
-            {t("scheduler.title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("scheduler.subtitle")}
-          </p>
-        </div>
-        <Button
-          onClick={() => setShowCreate(!showCreate)}
-          size="sm"
-          className="h-11 md:h-9"
-        >
-          <Plus className="mr-1 size-4" />
-          {t("scheduler.newJob")}
-        </Button>
-      </div>
+      <PageHeader
+        icon={Clock}
+        title={t("scheduler.title")}
+        subtitle={t("scheduler.subtitle")}
+        action={
+          <Button
+            onClick={() => setShowCreate(!showCreate)}
+            size="sm"
+            className="h-11 md:h-9"
+          >
+            <Plus className="mr-1 size-4" />
+            {t("scheduler.newJob")}
+          </Button>
+        }
+      />
 
       {/* Queue status mini-bar */}
       {queue && (

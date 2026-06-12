@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
 import { ListTodo, ChevronRight, XCircle, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDuration, formatJson } from "@/lib/format";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 const STATUS_OPTIONS = ["all", "created", "dispatched", "running", "completed", "failed", "cancelled", "timeout", "resumable"] as const;
@@ -319,23 +320,4 @@ function TaskDetail({ task }: { task: TaskInfo }) {
       )}
     </div>
   );
-}
-
-function formatDuration(startedAt?: string, finishedAt?: string, status?: string): string {
-  if (!startedAt) return "—";
-  const start = new Date(startedAt).getTime();
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
-  const seconds = Math.round((end - start) / 1000);
-  if (seconds < 60) return `${seconds}s${status === "running" ? "..." : ""}`;
-  const minutes = Math.floor(seconds / 60);
-  const rem = seconds % 60;
-  return `${minutes}m ${rem}s${status === "running" ? "..." : ""}`;
-}
-
-function formatJson(str: string): string {
-  try {
-    return JSON.stringify(JSON.parse(str), null, 2);
-  } catch {
-    return str;
-  }
 }

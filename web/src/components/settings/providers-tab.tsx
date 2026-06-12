@@ -18,6 +18,7 @@ import {
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { formatTokens } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import {
   Plus,
@@ -802,12 +803,6 @@ function ChannelCard({
 // ─── Model Row ────────────────────────────────────────────────────
 
 function ModelRow({ model }: { model: ModelEntry }) {
-  const formatTokens = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-    return String(n);
-  };
-
   return (
     <>
       <span className="font-mono truncate" title={model.id}>

@@ -11,15 +11,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
+import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${s % 60}s`;
-}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -59,7 +52,7 @@ export function DebugCaptureDialog() {
           <DialogDescription>
             {t("debug.captureDesc", {
               count: lastResult.eventCount.toLocaleString(),
-              duration: formatDuration(lastResult.durationMs),
+              duration: formatDurationMs(lastResult.durationMs),
               size: formatSize(lastResult.size),
             })}
           </DialogDescription>

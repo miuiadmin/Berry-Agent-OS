@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/shared/page-header";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 type Filter = "unread" | "all" | "archived";
@@ -80,22 +81,20 @@ export default function NotificationsPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Bell className="size-5 text-accent" />
+      <PageHeader
+        icon={Bell}
+        title={
+          <>
             {t("notifications.title")}
             {unread > 0 && (
               <Badge variant="danger" className="text-[11px]">
                 {unread}
               </Badge>
             )}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("notifications.subtitle")}
-          </p>
-        </div>
-        {unread > 0 && (
+          </>
+        }
+        subtitle={t("notifications.subtitle")}
+        action={unread > 0 && (
           <Button
             variant="outline"
             size="sm"
@@ -107,7 +106,7 @@ export default function NotificationsPage() {
             {t("notifications.markAllRead")}
           </Button>
         )}
-      </div>
+      />
 
       {/* Filter tabs */}
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>

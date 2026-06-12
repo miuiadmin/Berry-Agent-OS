@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/shared/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -128,25 +129,21 @@ export default function MemoryPage() {
   return (
     <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Brain className="size-5 text-accent" />
-            {t("memory.title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("memory.subtitle")}
-          </p>
-        </div>
-        <Button
-          onClick={() => setShowCreate(!showCreate)}
-          size="sm"
-          className="h-11 md:h-9"
-        >
-          <Plus className="mr-1 size-4" />
-          {t("memory.addMemory")}
-        </Button>
-      </div>
+      <PageHeader
+        icon={Brain}
+        title={t("memory.title")}
+        subtitle={t("memory.subtitle")}
+        action={
+          <Button
+            onClick={() => setShowCreate(!showCreate)}
+            size="sm"
+            className="h-11 md:h-9"
+          >
+            <Plus className="mr-1 size-4" />
+            {t("memory.addMemory")}
+          </Button>
+        }
+      />
 
       {/* Layer tabs + scope selector */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end">

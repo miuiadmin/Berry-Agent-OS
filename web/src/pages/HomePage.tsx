@@ -6,7 +6,8 @@ import { queries } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT, useDateFormat } from "@/lib/i18n";
-import { useCountUp } from "@/hooks/use-count-up";
+import { AnimatedStat } from "@/components/shared/animated-stat";
+import { formatTokens } from "@/lib/format";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/charts/sparkline";
@@ -51,19 +52,6 @@ function TrendIndicator({ current, previous }: { current: number; previous: numb
   if (current > previous) return <TrendingUp className="size-3 text-success" />;
   if (current < previous) return <TrendingDown className="size-3 text-danger" />;
   return <Minus className="size-3 text-muted-foreground" />;
-}
-
-/** Animated stat number — counts up from 0 on mount */
-function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
-  const animated = useCountUp(value);
-  const display = format ? format(animated) : String(animated);
-  return <span className="tabular-nums">{display}</span>;
-}
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
 
 export default function HomePage() {
@@ -267,7 +255,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold tabular-nums">
-              <AnimatedStat value={usageData?.today.totalTokens ?? 0} format={formatTokenCount} />
+              <AnimatedStat value={usageData?.today.totalTokens ?? 0} format={formatTokens} />
             </p>
             <p className="text-xs text-muted-foreground">
               {t("home.today")} (${(usageData?.today.costUsd ?? 0).toFixed(3)})
