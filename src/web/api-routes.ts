@@ -7,6 +7,7 @@ import { registerCaptureRoutes } from '../observability/index.js';
 import { metrics } from '../observability/metrics.js';
 import { MS_PER_DAY } from '../lib/time-constants.js';
 import { getDb } from '../memory/index.js';
+import { sanitizeFtsQuery } from '../memory/search.js';
 import { getHistory } from '../memory/conversations.js';
 import { getAppHome } from '../utils/paths.js';
 import type { IConfigService } from '../config/contract.js';
@@ -201,8 +202,19 @@ export function createApiRouter(deps: WebServerDependencies) {
     let whereClause = '';
     const params: unknown[] = [];
     if (search) {
-      whereClause = 'WHERE (c.session_id LIKE ? OR m.title LIKE ?)';
+      // 15.0 FTS5：除 session_id/title LIKE 外，经 conversations_fts 做内容全文匹配
+      // （CJK 由 sanitizeFtsQuery 做 3 字滑窗，满足「中文搜对话内容」验收）。
+      const ftsQuery = sanitizeFtsQuery(search);
+      const hasFts = ftsQuery && ftsQuery !== '""';
+      whereClause = hasFts
+        ? `WHERE (c.session_id LIKE ? OR m.title LIKE ? OR EXISTS (
+              SELECT 1 FROM conversations cc
+              JOIN conversations_fts f ON cc.rowid = f.rowid
+              WHERE cc.session_id = c.session_id AND conversations_fts MATCH ?
+            ))`
+        : 'WHERE (c.session_id LIKE ? OR m.title LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
+      if (hasFts) params.push(ftsQuery);
     }
 
     const orderBy = sort === 'messages' ? 'message_count DESC' : 'last_active DESC';
