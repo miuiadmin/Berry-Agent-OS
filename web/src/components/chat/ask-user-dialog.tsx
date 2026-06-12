@@ -177,6 +177,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
           size="icon"
           disabled={isSubmitting || !customAnswer.trim()}
           onClick={handleSubmitCustom}
+          aria-label={t("chat.send")}
           className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0"
         >
           <Send className="w-4 h-4" />
