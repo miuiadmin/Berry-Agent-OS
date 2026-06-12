@@ -178,7 +178,7 @@ function SettingsContent() {
               const Icon = tab.icon;
               const isActive = activeTab === tab.key;
               return (
-                <button
+                <button type="button"
                   key={tab.key}
                   role="tab"
                   aria-selected={isActive}

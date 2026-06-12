@@ -300,7 +300,7 @@ function MissionListItem({
   onClick: () => void;
 }) {
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       className={`w-full rounded-lg border p-3 text-left transition-colors hover:bg-muted/50 ${
         isSelected ? "border-primary bg-primary/5" : ""

@@ -142,7 +142,7 @@ export function UserMenu() {
           >
             <div className="py-1">
               {/* 深色模式切换 */}
-              <button
+              <button type="button"
                 role="menuitem"
                 tabIndex={-1}
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -159,7 +159,7 @@ export function UserMenu() {
               <Separator />
 
               {/* 语言切换 */}
-              <button
+              <button type="button"
                 role="menuitem"
                 tabIndex={-1}
                 onClick={() => setLocale(locale === "zh" ? "en" : "zh")}
@@ -175,7 +175,7 @@ export function UserMenu() {
               <Separator />
 
               {/* 设置 */}
-              <button
+              <button type="button"
                 role="menuitem"
                 tabIndex={-1}
                 onClick={() => { setOpen(false); navigate("/settings"); }}
@@ -188,7 +188,7 @@ export function UserMenu() {
               <Separator />
 
               {/* 登出（占位） */}
-              <button
+              <button type="button"
                 role="menuitem"
                 tabIndex={-1}
                 disabled

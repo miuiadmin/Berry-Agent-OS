@@ -752,7 +752,7 @@ function ChannelCard({
       <div className="px-3 py-2.5 md:py-2">
         {/* Row 1: expand + status + name */}
         <div className="flex items-center gap-2">
-          <button
+          <button type="button"
             onClick={() => setExpanded(!expanded)}
             aria-expanded={expanded}
             aria-label={t("providers.toggleModels")}

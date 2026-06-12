@@ -167,7 +167,7 @@ export function BrainReviewModal({
         {/* Diff 对比（仅 modify 时展示） */}
         {verdict === "modify" && originalDraft && (
           <div className="border-t border-border pt-3">
-            <button
+            <button type="button"
               onClick={() => setShowDiff(!showDiff)}
               className="flex w-full items-center justify-between py-1 text-xs text-muted-foreground hover:text-foreground"
             >

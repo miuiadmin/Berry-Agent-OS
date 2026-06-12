@@ -113,7 +113,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
                 </ToolbarButton>
               )}
             </div>
-            <button
+            <button type="button"
               onClick={handleSubmit}
               disabled={!canSend || isStreaming || disabled}
               className={cn(

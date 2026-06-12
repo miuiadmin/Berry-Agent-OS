@@ -19,7 +19,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
-      <button
+      <button type="button"
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors"
       >

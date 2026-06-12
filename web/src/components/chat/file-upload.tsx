@@ -94,7 +94,7 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
           )}
           <span className="max-w-[100px] sm:max-w-[120px] truncate">{a.filename}</span>
           <span className="text-muted-foreground/60">{formatSize(a.size)}</span>
-          <button
+          <button type="button"
             onClick={() => onRemove(a.fileId)}
             aria-label={t("fileUpload.remove", { filename: a.filename })}
             className="ml-0.5 rounded p-1.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-0.5 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"

@@ -120,7 +120,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   return (
     <div className="flex h-full w-72 md:w-64 max-w-[85vw] flex-col border-r bg-background md:bg-muted/30">
       <div className="border-b p-3 space-y-2">
-        <button
+        <button type="button"
           onClick={handleNewChat}
           className="w-full rounded-lg border border-dashed border-border px-3 py-2.5 md:py-2 text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
         >
@@ -167,10 +167,10 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     }}
                     className="flex-1 bg-background border rounded px-2 py-1.5 min-h-[44px] md:min-h-0 md:px-1.5 md:py-0.5 text-[16px] md:text-xs outline-none focus:ring-1 focus:ring-ring"
                   />
-                  <button onClick={submitRename} aria-label={t("chat.saveRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
+                  <button type="button" onClick={submitRename} aria-label={t("chat.saveRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
                     <Check className="size-3" />
                   </button>
-                  <button onClick={() => setEditingId(null)} aria-label={t("chat.cancelRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
+                  <button type="button" onClick={() => setEditingId(null)} aria-label={t("chat.cancelRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
                     <X className="size-3" />
                   </button>
                 </div>
@@ -186,7 +186,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     <span>{fmtRelative(conv.lastActive)}</span>
                   </div>
                   <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
-                    <button
+                    <button type="button"
                       aria-label={t("chat.renameConversation")}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -196,7 +196,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                     >
                       <Pencil className="size-3" />
                     </button>
-                    <button
+                    <button type="button"
                       aria-label={t("chat.deleteConversation")}
                       onClick={(e) => {
                         e.stopPropagation();

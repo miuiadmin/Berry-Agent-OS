@@ -242,7 +242,7 @@ function ModelSelector() {
 
   return (
     <div className="relative">
-      <button
+      <button type="button"
         onClick={handleOpen}
         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
       >
@@ -284,7 +284,7 @@ function ModelSelector() {
                   <div key={ch.id} className="mb-1">
                     <div className="px-2 py-1 text-[11px] text-muted-foreground font-medium">{ch.name}</div>
                     {chModels.map(m => (
-                      <button
+                      <button type="button"
                         key={m.id}
                         onClick={() => handleSwitch(m.id, ch.id)}
                         className="w-full text-left px-3 py-2 md:py-1.5 rounded-md text-sm hover:bg-accent transition-colors flex items-center justify-between min-h-[44px] md:min-h-0"
@@ -318,7 +318,7 @@ function ModelSelector() {
                   onKeyDown={(e) => { if (e.key === "Enter") handleManualSwitch(); }}
                   className="flex-1 rounded-md border border-input bg-muted/50 px-2.5 py-2 md:py-1.5 text-[16px] md:text-xs outline-none focus:border-ring focus:ring-1 focus:ring-ring/30"
                 />
-                <button
+                <button type="button"
                   onClick={handleManualSwitch}
                   disabled={!editModel.trim()}
                   className="rounded-md px-3 py-2 md:px-2.5 md:py-1.5 text-xs font-medium bg-foreground text-background hover:bg-foreground/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors min-h-[44px] md:min-h-0"

@@ -61,7 +61,7 @@ function JobExecutions({ jobId }: { jobId: string }) {
 
   return (
     <div>
-      <button
+      <button type="button"
         onClick={() => setShow(!show)}
         className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
       >
@@ -287,7 +287,7 @@ export default function SchedulerPage() {
       {/* Tab switcher — ARIA tablist 模式 */}
       <div className="flex gap-1 border-b" role="tablist" aria-label={t("scheduler.title")}>
         {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
-          <button
+          <button type="button"
             key={tabKey}
             role="tab"
             aria-selected={tab === tabKey}
