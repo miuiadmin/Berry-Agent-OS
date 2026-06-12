@@ -127,6 +127,127 @@ function EditableMessage({
   );
 }
 
+/**
+ * 消息错误/失败提示 + 重试按钮。
+ *
+ * 统一 isError（destructive 红）与 isUserFailed（warning 黄）两种场景 ——
+ * 它们 UI 几乎完全相同，只是语义色不同，抽出后消除 ~20 行重复。
+ */
+function MessageError({
+  message,
+  onRetry,
+  variant,
+}: {
+  message: string;
+  onRetry?: () => void;
+  variant: "destructive" | "warning";
+}) {
+  const t = useT();
+  const color = variant === "destructive" ? "text-destructive" : "text-warning";
+  return (
+    <div className={cn("mt-2 space-y-1 text-xs", color)}>
+      <div className="flex items-center gap-1.5">
+        <AlertCircle className="size-3 shrink-0" />
+        <span>{message}</span>
+      </div>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex items-center gap-0.5 underline hover:no-underline"
+        >
+          <RotateCcw className="size-2.5" />
+          {t("common.retry")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Brain 审核标注（modify/reject 时在助手消息下方展示）。
+ *
+ * modify → warning 黄 badge；reject → destructive 红 badge；
+ * 若有 reviewReason 则附在右侧（可截断，hover 显示完整）。
+ */
+function BrainReviewBadge({
+  verdict,
+  reason,
+}: {
+  verdict: "modify" | "reject";
+  reason?: string;
+}) {
+  const t = useT();
+  const isModify = verdict === "modify";
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
+          isModify ? "bg-warning/10 text-warning" : "bg-destructive/10 text-destructive",
+        )}
+      >
+        {isModify ? (
+          <Pencil className="size-2.5" />
+        ) : (
+          <AlertCircle className="size-2.5" />
+        )}
+        {isModify ? t("chat.brainModified") : t("chat.brainRejected")}
+      </span>
+      {reason && (
+        <span
+          className="max-w-[200px] truncate text-muted-foreground/70"
+          title={reason}
+        >
+          {reason}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** 消息下方操作按钮组（复制 / 编辑 / 删除），移动端始终可见，桌面端 hover 显示 */
+function MessageActions({
+  copyText,
+  isUser,
+  onEdit,
+  onDelete,
+}: {
+  copyText: string;
+  isUser: boolean;
+  onEdit?: () => void;
+  onDelete?: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="flex items-center gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+      {/* 复制按钮（所有消息都有） */}
+      <CopyButton text={copyText} />
+      {/* 编辑 / 删除按钮仅用户消息有 */}
+      {isUser && onEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex items-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground active:bg-accent md:p-1"
+          aria-label={t("chat.editMessage")}
+        >
+          <Pencil className="size-3" />
+        </button>
+      )}
+      {isUser && onDelete && (
+        <button
+          type="button"
+          onClick={onDelete}
+          className="inline-flex items-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 md:p-1"
+          aria-label={t("chat.deleteMessage")}
+        >
+          <Trash2 className="size-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
@@ -229,40 +350,20 @@ const MessageBubble = memo(function MessageBubble({
             <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
           </div>
         )}
+        {/* 错误提示 + 重试（isError=destructive / isUserFailed=warning，UI 复用 MessageError） */}
         {isError && (
-          <div className="mt-2 text-xs text-destructive space-y-1">
-            <div className="flex items-center gap-1.5">
-              <AlertCircle className="size-3 shrink-0" />
-              <span>{message.error || t("chat.failedToSend")}</span>
-            </div>
-            {onRetry && (
-              <button type="button"
-                onClick={() => onRetry(message.id)}
-                className="inline-flex items-center gap-0.5 underline hover:no-underline"
-              >
-                <RotateCcw className="size-2.5" />
-                {t("common.retry")}
-              </button>
-            )}
-          </div>
+          <MessageError
+            message={message.error || t("chat.failedToSend")}
+            onRetry={onRetry ? () => onRetry(message.id) : undefined}
+            variant="destructive"
+          />
         )}
-        {/* 用户消息发送失败提示 + 重试 */}
         {isUserFailed && (
-          <div className="mt-2 space-y-1 text-xs text-warning">
-            <div className="flex items-center gap-1.5">
-              <AlertCircle className="size-3 shrink-0" />
-              <span>{t("chat.failedToSend")}</span>
-            </div>
-            {onRetry && (
-              <button type="button"
-                onClick={() => onRetry(message.id)}
-                className="inline-flex items-center gap-0.5 underline hover:no-underline"
-              >
-                <RotateCcw className="size-2.5" />
-                {t("common.retry")}
-              </button>
-            )}
-          </div>
+          <MessageError
+            message={t("chat.failedToSend")}
+            onRetry={onRetry ? () => onRetry(message.id) : undefined}
+            variant="warning"
+          />
         )}
         {/* 用户消息发送中指示 */}
         {isSending && (
@@ -275,25 +376,10 @@ const MessageBubble = memo(function MessageBubble({
         )}
         {/* 13.0 灵魂版：Brain 审核标注（modify/reject 时展示） */}
         {!isUser && message.reviewVerdict && message.reviewVerdict !== "approve" && (
-          <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
-            {message.reviewVerdict === "modify" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-warning">
-                <Pencil className="size-2.5" />
-                {t("chat.brainModified")}
-              </span>
-            )}
-            {message.reviewVerdict === "reject" && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-destructive">
-                <AlertCircle className="size-2.5" />
-                {t("chat.brainRejected")}
-              </span>
-            )}
-            {message.reviewReason && (
-              <span className="truncate max-w-[200px] text-muted-foreground/70" title={message.reviewReason}>
-                {message.reviewReason}
-              </span>
-            )}
-          </div>
+          <BrainReviewBadge
+            verdict={message.reviewVerdict as "modify" | "reject"}
+            reason={message.reviewReason}
+          />
         )}
       </div>
       <div className="flex items-center gap-1 mt-px px-1">
@@ -301,27 +387,12 @@ const MessageBubble = memo(function MessageBubble({
           {formatTime(message.timestamp, locale === "zh" ? "zh-CN" : "en-US")}
         </span>
         {!isStreaming && message.content && (
-          <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
-            <CopyButton text={message.content} />
-            {isUser && (
-              <>
-                <button type="button"
-                  onClick={() => setEditing(true)}
-                  className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
-                  aria-label={t("chat.editMessage")}
-                >
-                  <Pencil className="size-3" />
-                </button>
-                <button type="button"
-                  onClick={() => onDelete?.(message.id)}
-                  className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
-                  aria-label={t("chat.deleteMessage")}
-                >
-                  <Trash2 className="size-3" />
-                </button>
-              </>
-            )}
-          </div>
+          <MessageActions
+            copyText={message.content}
+            isUser={isUser}
+            onEdit={() => setEditing(true)}
+            onDelete={onDelete ? () => onDelete(message.id) : undefined}
+          />
         )}
       </div>
       {/* 思考过程 / 工具调用块：外层包裹不加 mt，与上方"时间戳行"紧邻。
