@@ -132,7 +132,12 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           isIconOnly && "min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0",
           className
         )}
-        {...props}
+        /**
+         * React Aria Button 的 value 类型为 string | undefined，
+         * 而 HTMLButtonElement.value 包含 number | readonly string[]，
+         * 类型不兼容。用类型断言绕过，运行时无影响（按钮很少用 value）。
+         */
+        {...(props as React.ComponentPropsWithRef<typeof HeroUIButton>)}
       />
     );
   }

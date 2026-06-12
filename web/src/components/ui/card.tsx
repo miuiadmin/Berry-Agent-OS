@@ -23,12 +23,18 @@ import { cn } from "@/lib/utils";
 
 /** 卡片容器，委托 HeroUI CardRoot，保持原有边框/背景样式 */
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+  ({ className, children, ...props }, ref) => (
     <HeroUICard
       ref={ref}
       className={cn("border border-border bg-card text-card-foreground", className)}
-      {...props}
-    />
+      /**
+       * HeroUI CardRootProps.children 为必填项，
+       * 但 HTMLAttributes.children 是可选的，故显式透传 children 并对剩余 props 断言。
+       */
+      {...(props as React.ComponentPropsWithRef<typeof HeroUICard>)}
+    >
+      {children}
+    </HeroUICard>
   )
 );
 Card.displayName = "Card";
