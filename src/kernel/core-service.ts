@@ -403,6 +403,8 @@ export class CoreService {
         return { allowed: result.allowed, reason: result.reason };
       },
     });
+    // 15.0 机制 A §2.5：让 capability 权限路径与 IPC 路径一致尊重当前权限模式
+    permissionGate.setMode(() => this.messageRouter?.permissionCoordinator?.getMode() ?? 'ask');
     capabilityBus.setPermissionGate(permissionGate);
     capabilityBus.setAuditLogger(new BusAuditLogger(getDb()));
 
