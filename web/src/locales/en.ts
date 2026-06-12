@@ -144,6 +144,7 @@ const en: Record<string, string> = {
   "chat.permissionMode": "Permission mode",
   "chat.permissionAsk": "Ask",
   "chat.permissionAuto": "Auto",
+  "chat.permissionYolo": "YOLO (Brain)",
   "chat.permissionDeny": "Deny",
   "chat.session": "Session",
   "chat.toggleSidebar": "Toggle sidebar",

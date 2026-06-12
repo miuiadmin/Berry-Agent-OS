@@ -94,7 +94,7 @@ interface ChatState {
   pendingStreamMessageId: string | null;
   pendingDelegation: DelegationRequest | null;
   pendingPermission: PermissionConfirmRequest | null;
-  permissionMode: 'ask' | 'allow-all' | 'deny-all';
+  permissionMode: 'ask' | 'allow-all' | 'deny-all' | 'yolo';
   /** 用户主动清空对话（删除/新建）后为 true，阻止自动恢复 effect 拉取最近对话 */
   skipAutoRestore: boolean;
   /** 该 sessionId 正在执行 sharedSessionRestore（防止 onMessage 与 effect 并发触发） */
@@ -109,7 +109,7 @@ interface ChatState {
   removeMessagesAfter: (id: string) => void;
   setPendingDelegation: (req: DelegationRequest | null) => void;
   setPendingPermission: (req: PermissionConfirmRequest | null) => void;
-  setPermissionMode: (mode: 'ask' | 'allow-all' | 'deny-all') => void;
+  setPermissionMode: (mode: 'ask' | 'allow-all' | 'deny-all' | 'yolo') => void;
   /** 标记跳过自动恢复（删除对话后调用） */
   setSkipAutoRestore: (v: boolean) => void;
   restoreSession: (messages: ChatMessage[], activeTask?: { progress?: string | null; thinkingSteps?: ThinkingStep[]; streamingContent?: string | null; streamingReasoning?: string | null }) => void;

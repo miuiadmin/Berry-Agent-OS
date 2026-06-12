@@ -144,6 +144,7 @@ const zh: Record<string, string> = {
   "chat.permissionMode": "权限模式",
   "chat.permissionAsk": "询问",
   "chat.permissionAuto": "自动",
+  "chat.permissionYolo": "YOLO(Brain)",
   "chat.permissionDeny": "拒绝",
   "chat.session": "会话",
   "chat.toggleSidebar": "切换侧边栏",

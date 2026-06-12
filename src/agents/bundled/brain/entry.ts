@@ -183,6 +183,25 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    * 如果发现 working 状态的任务长时间未更新（updated_at 超过 TASK_STALLED_MS），
    * 记录一条 agent_event 类型观察"plan_stalled: task X"——后续 C 级审核时 LLM 可见。
    */
+  // 15.0 机制 D：消费 brain.command 的执行结果（inspect/report 数据记为观察，供 Brain 后续决策消费）。
+  // 闭合 D 闭环 —— Brain 主动 command 问到的结果不再被丢弃。
+  ipc.onMessage('brain.command.result', (msg: IpcMessage) => {
+    const result = msg.payload as { success?: boolean; data?: unknown; error?: string };
+    try {
+      observationRecorder.record({
+        sessionId: 'brain-command',
+        taskId: msg.correlationId ?? msg.id ?? 'unknown',
+        observationType: 'agent_event',
+        fromAgent: 'core',
+        toAgent: 'brain',
+        content: safeSlice(JSON.stringify(result), 2000),
+        priority: 1,
+      });
+    } catch (err) {
+      logger.warn({ err }, 'brain.command.result:record failed');
+    }
+  });
+
   ipc.onMessage('brain.observe', (msg: IpcMessage) => {
     const payload = msg.payload as BrainObservePayload;
     try {

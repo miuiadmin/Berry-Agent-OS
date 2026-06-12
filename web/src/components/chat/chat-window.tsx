@@ -196,12 +196,13 @@ function PermissionModeSelector() {
   return (
     <select
       value={mode}
-      onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all')}
+      onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all' | 'yolo')}
       className="h-11 md:h-7 rounded-md border border-input bg-background px-1.5 text-[16px] md:text-[11px] text-muted-foreground min-h-[44px] md:min-h-0"
       title={t("chat.permissionMode")}
     >
       <option value="ask">{t("chat.permissionAsk")}</option>
       <option value="allow-all">{t("chat.permissionAuto")}</option>
+      <option value="yolo">{t("chat.permissionYolo")}</option>
       <option value="deny-all">{t("chat.permissionDeny")}</option>
     </select>
   );
