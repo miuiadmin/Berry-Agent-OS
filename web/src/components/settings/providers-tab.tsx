@@ -1,128 +1,45 @@
-import { useState, useCallback, useEffect } from "react";
+/**
+ * Provider 设置面板（主组件）。
+ *
+ * 职责：
+ *   - 拉取 channels / tiers / kinds 三组数据
+ *   - 维护 channel 新增 / 编辑 / 删除的交互状态
+ *   - 维护 tier 映射编辑器状态（三档模型档位）
+ *
+ * 渲染细节下放到子组件：
+ *   - {@link ChannelCard} / 模型行 → channel-card.tsx
+ *   - {@link ChannelFormDialog}（表单状态内聚）→ channel-form-dialog.tsx
+ *   - 类型 / 常量 / SelectChevron → providers-types.ts
+ */
+
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { Plus, Server, Save } from "lucide-react";
 import {
-  Plus,
-  Server,
-  Trash2,
-  Wifi,
-  WifiOff,
-  ChevronDown,
-  ChevronRight,
-  Zap,
-  Brain,
-  Crown,
-  Pencil,
-  Save,
-} from "lucide-react";
-
-// ─── Types ────────────────────────────────────────────────────────
-
-interface ModelEntry {
-  id: string;
-  name: string;
-  contextWindow: number;
-  defaultMaxTokens: number;
-  supportsThinking: boolean;
-  supportsAttachments: boolean;
-  inputPricePer1M?: number;
-  outputPricePer1M?: number;
-}
-
-interface ProviderChannel {
-  id: string;
-  name: string;
-  kind: string;
-  baseUrl?: string;
-  apiKey?: string;
-  enabled: boolean;
-  configured: boolean;
-  modelCount: number;
-  models: ModelEntry[];
-}
-
-interface TierTarget {
-  channel: string;
-  model: string;
-}
-
-interface TierMapping {
-  fast?: TierTarget;
-  default?: TierTarget;
-  high?: TierTarget;
-}
-
-interface ChannelsResponse {
-  ok: boolean;
-  channels: ProviderChannel[];
-}
-
-interface TiersResponse {
-  ok: boolean;
-  tiers: TierMapping;
-}
-
-interface KindsResponse {
-  ok: boolean;
-  kinds: string[];
-  supported?: string[];
-}
-
-interface CatalogResponse {
-  ok: boolean;
-  kind: string;
-  models: ModelEntry[];
-}
-
-const PROVIDER_KIND_LABEL_KEYS: Record<string, string> = {
-  anthropic: "providers.anthropic",
-  openai: "providers.openai",
-  "openai-compatible": "providers.openaiCompatible",
-  "google-gemini": "providers.googleGemini",
-  "azure-openai": "providers.azureOpenai",
-  bedrock: "providers.awsBedrock",
-};
-
-const TIER_CONFIG = [
-  { key: "fast" as const, labelKey: "providers.tierFast", icon: Zap, color: "text-success" },
-  { key: "default" as const, labelKey: "providers.tierDefault", icon: Brain, color: "text-info" },
-  { key: "high" as const, labelKey: "providers.tierHigh", icon: Crown, color: "text-warning" },
-];
-
-// ─── Shared select styling ───────────────────────────────────────
-
-const SELECT_BASE =
-  "w-full rounded-lg border border-input bg-background px-3 py-2 md:py-1.5 text-[16px] md:text-sm min-h-[44px] md:min-h-0 appearance-none pr-8 disabled:opacity-50 transition-all focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30";
-
-function SelectChevron() {
-  return (
-    <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-  );
-}
-
-// ─── Main Component ───────────────────────────────────────────────
+  type ProviderChannel,
+  type TierMapping,
+  type ChannelsResponse,
+  type TiersResponse,
+  type KindsResponse,
+  TIER_CONFIG,
+  SELECT_BASE,
+  SelectChevron,
+} from "./providers-types";
+import { ChannelCard } from "./channel-card";
+import { ChannelFormDialog, type ChannelFormData } from "./channel-form-dialog";
 
 export function ProvidersTab() {
   const t = useT();
   const queryClient = useQueryClient();
 
-  // ── Queries ──
+  // ── 数据查询 ──
   const { data: channelsData, isLoading: channelsLoading } = useQuery({
     queryKey: ["providers", "channels"],
     queryFn: () => apiGet<ChannelsResponse>("/api/providers/channels"),
@@ -140,225 +57,52 @@ export function ProvidersTab() {
   const tiers = tiersData?.tiers ?? {};
   const kinds = kindsData?.kinds ?? [];
 
-  // ── Dialog state ──
+  // ── 弹窗状态 ──
+  /** 当前打开的渠道弹窗模式（null = 关闭） */
   const [channelDialog, setChannelDialog] = useState<"add" | "edit" | null>(null);
+  /** 编辑模式下的目标渠道（add 模式为 null） */
   const [editingChannel, setEditingChannel] = useState<ProviderChannel | null>(null);
+  /** 待删除的渠道 ID（非 null 时弹出确认框） */
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  // ── Form state ──
-  const [formKind, setFormKind] = useState("");
-  const [formId, setFormId] = useState("");
-  const [formName, setFormName] = useState("");
-  const [formBaseUrl, setFormBaseUrl] = useState("");
-  const [formApiKey, setFormApiKey] = useState("");
-  const [formEnabled, setFormEnabled] = useState(true);
-
-  // ── Catalog query (fetched when user picks a kind in add mode) ──
-  const { data: catalogData } = useQuery({
-    queryKey: ["providers", "catalogs", formKind],
-    queryFn: () => apiGet<CatalogResponse>(`/api/providers/catalogs/${formKind}`),
-    enabled: channelDialog === "add" && !!formKind,
-  });
-
-  // ── Tier editor state ──
-  const [editingTiers, setEditingTiers] = useState<TierMapping>({});
-  const [tiersInitialized, setTiersInitialized] = useState(false);
-  const [selectedTierChannel, setSelectedTierChannel] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (tiers && !tiersInitialized) {
-      setEditingTiers(tiers);
-      setSelectedTierChannel({
-        fast: tiers.fast?.channel ?? "",
-        default: tiers.default?.channel ?? "",
-        high: tiers.high?.channel ?? "",
-      });
-      setTiersInitialized(true);
-    }
-  }, [tiers, tiersInitialized]);
-
-  // Reset tier editor when server data changes after save
-  useEffect(() => {
-    if (tiersInitialized && tiers) {
-      setEditingTiers(tiers);
-      setSelectedTierChannel({
-        fast: tiers.fast?.channel ?? "",
-        default: tiers.default?.channel ?? "",
-        high: tiers.high?.channel ?? "",
-      });
-    }
-  }, [tiers, tiersInitialized]);
+  // ── tier 编辑器状态 ──
+  const tierEditor = useTierEditor(tiers);
 
   // ── Mutations ──
-  const testMutation = useMutation({
-    mutationFn: async (channelId: string) => {
-      return apiPost<{ ok: boolean; message?: string; error?: string }>(
-        `/api/providers/channels/${channelId}/test`,
-      );
-    },
-    onSuccess: (data) => {
-      if (data.ok) {
-        toast.success(t("providers.connectionSuccessful"));
-      } else {
-        toast.error(data.error ?? t("providers.connectionFailed"));
-      }
-    },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    },
-  });
-
-  const createMutation = useMutation({
-    mutationFn: async (data: {
-      id: string;
-      name: string;
-      kind: string;
-      baseUrl?: string;
-      apiKey?: string;
-      enabled: boolean;
-    }) => {
-      return apiPost<{ ok: boolean; channelId: string }>("/api/providers/channels", data);
-    },
-    onSuccess: () => {
-      toast.success(t("providers.channelCreated"));
-      refresh();
-      closeChannelDialog();
-    },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async ({
-      channelId,
-      updates,
-    }: {
-      channelId: string;
-      updates: Record<string, unknown>;
-    }) => {
-      return apiPut<{ ok: boolean }>(`/api/providers/channels/${channelId}`, updates);
-    },
-    onSuccess: () => {
-      toast.success(t("providers.channelUpdated"));
-      refresh();
-      closeChannelDialog();
-    },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (channelId: string) => {
-      return apiDelete(`/api/providers/channels/${channelId}`);
-    },
-    onSuccess: () => {
-      toast.success(t("providers.channelDeleted"));
-      refresh();
+  const { testChannel, createChannel, updateChannel, deleteChannel, saveTiers, pendingFlags } =
+    useProviderMutations(() => {
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+      setChannelDialog(null);
+      setEditingChannel(null);
       setDeleteTarget(null);
-    },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    },
-  });
+    });
 
-  const saveTiersMutation = useMutation({
-    mutationFn: async (t: TierMapping) => {
-      return apiPut<{ ok: boolean; tiers: TierMapping }>("/api/providers/tiers", t);
-    },
-    onSuccess: () => {
-      toast.success(t("providers.tierMappingSaved"));
-      refresh();
-    },
-    onError: (err: Error) => {
-      toast.error(err.message);
-    },
-  });
-
-  // ── Helpers ──
-  const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["providers"] });
-  }, [queryClient]);
-
-  const closeChannelDialog = () => {
-    setChannelDialog(null);
-    setEditingChannel(null);
-    setFormKind("");
-    setFormId("");
-    setFormName("");
-    setFormBaseUrl("");
-    setFormApiKey("");
-    setFormEnabled(true);
-  };
-
-  const openAddDialog = () => {
-    closeChannelDialog();
-    setChannelDialog("add");
-  };
-
-  const openEditDialog = (ch: ProviderChannel) => {
-    closeChannelDialog();
-    setEditingChannel(ch);
-    setFormKind(ch.kind);
-    setFormId(ch.id);
-    setFormName(ch.name);
-    setFormBaseUrl(ch.baseUrl ?? "");
-    setFormApiKey(""); // always blank — server masks it
-    setFormEnabled(ch.enabled);
-    setChannelDialog("edit");
-  };
-
-  const handleChannelSubmit = () => {
-    if (channelDialog === "add") {
-      createMutation.mutate({
-        id: formId.trim(),
-        name: formName.trim() || formId.trim(),
-        kind: formKind,
-        baseUrl: formBaseUrl.trim() || undefined,
-        apiKey: formApiKey.trim() || undefined,
-        enabled: true,
-      });
-    } else if (channelDialog === "edit" && editingChannel) {
-      const updates: Record<string, unknown> = {};
-      if (formName.trim()) updates.name = formName.trim();
-      if (formBaseUrl.trim()) updates.baseUrl = formBaseUrl.trim();
-      if (formApiKey.trim()) updates.apiKey = formApiKey.trim();
-      updates.enabled = formEnabled;
-      updateMutation.mutate({ channelId: editingChannel.id, updates });
-    }
-  };
-
+  /** 删除确认框展示用的渠道对象 */
   const deleteTargetChannel = deleteTarget
     ? channels.find((c) => c.id === deleteTarget)
     : null;
 
-  // ── Render ──
   if (channelsLoading) {
-    return (
-      <div className="space-y-3">
-        <div className="h-10 w-full animate-pulse rounded-md bg-muted" />
-        <div className="h-24 w-full animate-pulse rounded-md bg-muted" />
-        <div className="h-24 w-full animate-pulse rounded-md bg-muted" />
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   return (
     <div className="space-y-6">
-      {/* Channel List */}
+      {/* 渠道列表 */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div>
-            <CardTitle className="text-base">{t("providers.providerChannels")}</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
+            <CardTitle className="text-base">
+              {t("providers.providerChannels")}
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
               {t("providers.providerChannelsDesc")}
             </p>
           </div>
           <Button
             variant="outline"
             size="sm"
-            onClick={openAddDialog}
+            onClick={openAdd}
             className="min-h-[44px] md:min-h-0"
           >
             <Plus className="size-4" />
@@ -367,29 +111,15 @@ export function ProvidersTab() {
         </CardHeader>
         <CardContent className="space-y-3">
           {channels.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border p-6 text-center">
-              <Server className="size-8 text-muted-foreground/40 mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground">
-                {t("providers.noChannels")}
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={openAddDialog}
-                className="mt-3 min-h-[44px] md:min-h-0"
-              >
-                <Plus className="size-4" />
-                {t("providers.addFirstChannel")}
-              </Button>
-            </div>
+            <EmptyChannels onAdd={openAdd} />
           ) : (
             channels.map((ch) => (
               <ChannelCard
                 key={ch.id}
                 channel={ch}
-                onTest={() => testMutation.mutate(ch.id)}
-                isTesting={testMutation.isPending}
-                onEdit={() => openEditDialog(ch)}
+                onTest={() => testChannel(ch.id)}
+                isTesting={pendingFlags.testing}
+                onEdit={() => openEdit(ch)}
                 onDelete={() => setDeleteTarget(ch.id)}
               />
             ))
@@ -397,20 +127,22 @@ export function ProvidersTab() {
         </CardContent>
       </Card>
 
-      {/* Tier Mapping */}
+      {/* tier 映射编辑器 */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
           <div>
-            <CardTitle className="text-base">{t("providers.tierMapping")}</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
+            <CardTitle className="text-base">
+              {t("providers.tierMapping")}
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
               {t("providers.tierMappingDesc")}
             </p>
           </div>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => saveTiersMutation.mutate(editingTiers)}
-            disabled={saveTiersMutation.isPending}
+            onClick={() => saveTiers(tierEditor.editingTiers)}
+            disabled={pendingFlags.savingTiers}
             className="min-h-[44px] md:min-h-0"
           >
             <Save className="size-4" />
@@ -418,443 +150,309 @@ export function ProvidersTab() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          {TIER_CONFIG.map(({ key, labelKey, icon: Icon, color }) => {
-            const channel = selectedTierChannel[key] ?? "";
-            const selectedCh = channels.find((c) => c.id === channel);
-            const models = selectedCh?.models ?? [];
-            const target = editingTiers[key];
-
-            return (
-              <div
-                key={key}
-                className="rounded-lg border border-border px-3 py-3 space-y-2"
-              >
-                <div className="flex items-center gap-2">
-                  <Icon className={cn("size-4 shrink-0", color)} />
-                  <span className="text-sm font-medium">{t(labelKey)}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="relative">
-                    <select
-                      value={channel}
-                      onChange={(e) => {
-                        const ch = e.target.value;
-                        setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
-                        setEditingTiers((prev) => ({
-                          ...prev,
-                          [key]: ch ? { channel: ch, model: "" } : undefined,
-                        }));
-                      }}
-                      className={SELECT_BASE}
-                    >
-                      <option value="">{t("chat.notConfigured")}</option>
-                      {channels.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.kind})
-                        </option>
-                      ))}
-                    </select>
-                    <SelectChevron />
-                  </div>
-                  <div className="relative">
-                    <select
-                      value={target?.model ?? ""}
-                      onChange={(e) => {
-                        const model = e.target.value;
-                        setEditingTiers((prev) => ({
-                          ...prev,
-                          [key]: channel ? { channel, model } : undefined,
-                        }));
-                      }}
-                      disabled={!channel || models.length === 0}
-                      className={SELECT_BASE}
-                    >
-                      <option value="">{t("providers.selectModel")}</option>
-                      {models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectChevron />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          <TierEditor channels={channels} editor={tierEditor} />
         </CardContent>
       </Card>
 
-      {/* Delete confirmation */}
+      {/* 删除确认 */}
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null);
         }}
         title={t("providers.deleteChannel")}
-        description={t("providers.deleteChannelConfirm", { name: deleteTargetChannel?.name ?? (deleteTarget as string) })}
+        description={t("providers.deleteChannelConfirm", {
+          name: deleteTargetChannel?.name ?? (deleteTarget as string),
+        })}
         actionLabel={t("common.delete")}
         onAction={() => {
-          if (deleteTarget) deleteMutation.mutate(deleteTarget);
+          if (deleteTarget) deleteChannel(deleteTarget);
         }}
       />
 
-      {/* Add/Edit dialog */}
+      {/* 新增 / 编辑表单弹窗 */}
       <ChannelFormDialog
         mode={channelDialog === "edit" ? "edit" : "add"}
         open={!!channelDialog}
         onOpenChange={(open) => {
-          if (!open) closeChannelDialog();
+          if (!open) {
+            setChannelDialog(null);
+            setEditingChannel(null);
+          }
         }}
         kinds={kinds}
-        formKind={formKind}
-        setFormKind={setFormKind}
-        formId={formId}
-        setFormId={setFormId}
-        formName={formName}
-        setFormName={setFormName}
-        formBaseUrl={formBaseUrl}
-        setFormBaseUrl={setFormBaseUrl}
-        formApiKey={formApiKey}
-        setFormApiKey={setFormApiKey}
-        formEnabled={formEnabled}
-        setFormEnabled={setFormEnabled}
-        catalogModels={catalogData?.models ?? []}
-        onSubmit={handleChannelSubmit}
-        isPending={createMutation.isPending || updateMutation.isPending}
+        editingChannel={editingChannel}
+        onSubmit={(data: ChannelFormData) => {
+          if (channelDialog === "edit" && editingChannel) {
+            // 编辑：只提交变更字段（apiKey 留空 = 服务端保持不变）
+            const updates: Record<string, unknown> = {};
+            if (data.name) updates.name = data.name;
+            if (data.baseUrl) updates.baseUrl = data.baseUrl;
+            if (data.apiKey) updates.apiKey = data.apiKey;
+            updates.enabled = data.enabled;
+            updateChannel(editingChannel.id, updates);
+          } else {
+            // 新增
+            createChannel(data);
+          }
+        }}
+        isPending={pendingFlags.creating || pendingFlags.updating}
       />
     </div>
   );
+
+  // ── 本地辅助：打开弹窗 ──
+
+  /** 打开新增弹窗 */
+  function openAdd() {
+    setEditingChannel(null);
+    setChannelDialog("add");
+  }
+
+  /** 打开编辑弹窗（回填目标渠道） */
+  function openEdit(ch: ProviderChannel) {
+    setEditingChannel(ch);
+    setChannelDialog("edit");
+  }
 }
 
-// ─── Channel Form Dialog ──────────────────────────────────────────
+// ─── Loading / Empty 子组件 ───────────────────────────────────────
 
-function ChannelFormDialog({
-  mode,
-  open,
-  onOpenChange,
-  kinds,
-  formKind,
-  setFormKind,
-  formId,
-  setFormId,
-  formName,
-  setFormName,
-  formBaseUrl,
-  setFormBaseUrl,
-  formApiKey,
-  setFormApiKey,
-  formEnabled,
-  setFormEnabled,
-  catalogModels,
-  onSubmit,
-  isPending,
-}: {
-  mode: "add" | "edit";
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  kinds: string[];
-  formKind: string;
-  setFormKind: (v: string) => void;
-  formId: string;
-  setFormId: (v: string) => void;
-  formName: string;
-  setFormName: (v: string) => void;
-  formBaseUrl: string;
-  setFormBaseUrl: (v: string) => void;
-  formApiKey: string;
-  setFormApiKey: (v: string) => void;
-  formEnabled: boolean;
-  setFormEnabled: (v: boolean) => void;
-  catalogModels: ModelEntry[];
-  onSubmit: () => void;
-  isPending: boolean;
-}) {
-  const isEdit = mode === "edit";
-  const t = useT();
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit();
-  };
-
+/** 加载骨架屏（3 行占位） */
+function LoadingSkeleton() {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? t("providers.editChannel") : t("providers.addChannelTitle")}</DialogTitle>
-          <DialogDescription>
-            {isEdit
-              ? t("providers.editChannelDesc")
-              : t("providers.addChannelDesc")}
-          </DialogDescription>
-        </DialogHeader>
-
-        <form onSubmit={handleSubmit} className="space-y-5 mt-2">
-          {/* Kind */}
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              {t("providers.providerKind")}
-            </label>
-            <div className="relative">
-              <select
-                value={formKind}
-                onChange={(e) => {
-                  setFormKind(e.target.value);
-                  if (!isEdit) setFormId("");
-                }}
-                disabled={isEdit}
-                className={SELECT_BASE}
-              >
-                <option value="">{t("providers.selectKind")}</option>
-                {kinds.map((k) => (
-                  <option key={k} value={k}>
-                    {t(PROVIDER_KIND_LABEL_KEYS[k] ?? k)}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
-          </div>
-
-          {/* ID */}
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              {t("providers.channelId")}
-            </label>
-            <Input
-              value={formId}
-              onChange={(e) => setFormId(e.target.value)}
-              disabled={isEdit}
-              placeholder={t("providers.channelIdPlaceholder")}
-              className="h-10 md:h-8 disabled:opacity-50"
-            />
-          </div>
-
-          {/* Name */}
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              {t("providers.displayName")}
-            </label>
-            <Input
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder={t("providers.displayNamePlaceholder")}
-              className="h-10 md:h-8"
-            />
-          </div>
-
-          {/* Base URL */}
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              {t("providers.baseUrl")}
-            </label>
-            <Input
-              value={formBaseUrl}
-              onChange={(e) => setFormBaseUrl(e.target.value)}
-              placeholder={t("providers.baseUrlPlaceholder")}
-              className="h-10 md:h-8"
-            />
-          </div>
-
-          {/* API Key */}
-          <div className="grid gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              {t("providers.apiKey")} {isEdit && t("providers.apiKeyKeepCurrent")}
-            </label>
-            <Input
-              type="password"
-              value={formApiKey}
-              onChange={(e) => setFormApiKey(e.target.value)}
-              placeholder={isEdit ? t("providers.apiKeyEditPlaceholder") : t("providers.apiKeyPlaceholder")}
-              className="h-10 md:h-8"
-            />
-          </div>
-
-          {/* Enabled (edit only) */}
-          {isEdit && (
-            <div className="flex items-center gap-2">
-              <Switch checked={formEnabled} onCheckedChange={setFormEnabled} />
-              <span className="text-sm text-muted-foreground">
-                {formEnabled ? t("common.enabled") : t("common.disabled")}
-              </span>
-            </div>
-          )}
-
-          {/* Model catalog preview (add only) */}
-          {!isEdit && formKind && catalogModels.length > 0 && (
-            <div className="rounded-lg border border-border p-3 max-h-40 overflow-y-auto">
-              <p className="text-[11px] font-medium text-muted-foreground mb-2">
-                {t("providers.builtinModels", { kind: t(PROVIDER_KIND_LABEL_KEYS[formKind] ?? formKind) })}:
-              </p>
-              <div className="space-y-1">
-                {catalogModels.map((m) => (
-                  <div
-                    key={m.id}
-                    className="text-xs font-mono text-muted-foreground truncate"
-                  >
-                    {m.id}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="w-full sm:w-auto min-h-[44px] md:min-h-0"
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="submit"
-              disabled={
-                isPending ||
-                !formKind ||
-                !formId ||
-                (!isEdit && !formApiKey)
-              }
-              className="w-full sm:w-auto min-h-[44px] md:min-h-0"
-            >
-              {isPending ? t("common.saving") : isEdit ? t("common.update") : t("common.create")}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Channel Card ─────────────────────────────────────────────────
-
-function ChannelCard({
-  channel,
-  onTest,
-  isTesting,
-  onEdit,
-  onDelete,
-}: {
-  channel: ProviderChannel;
-  onTest: () => void;
-  isTesting: boolean;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const t = useT();
-
-  return (
-    <div className="rounded-lg border border-border">
-      {/* Header — two rows on mobile, single row on desktop */}
-      <div className="px-3 py-2.5 md:py-2">
-        {/* Row 1: expand + status + name */}
-        <div className="flex items-center gap-2">
-          <button type="button"
-            onClick={() => setExpanded(!expanded)}
-            aria-expanded={expanded}
-            aria-label={t("providers.toggleModels")}
-            className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-11 md:size-7 flex items-center justify-center"
-          >
-            <ChevronRight className={cn("size-4 transition-transform duration-200", expanded && "rotate-90")} />
-          </button>
-
-          {channel.enabled ? (
-            <Wifi className="size-3.5 shrink-0 text-success" />
-          ) : (
-            <WifiOff className="size-3.5 text-muted-foreground shrink-0" />
-          )}
-          <span className="text-sm font-medium truncate flex-1">{channel.name}</span>
-          <span className="text-[11px] text-muted-foreground font-mono shrink-0 hidden sm:inline">
-            {t(PROVIDER_KIND_LABEL_KEYS[channel.kind] ?? channel.kind)}
-          </span>
-
-          {/* Desktop: actions inline */}
-          <span className="text-xs text-muted-foreground shrink-0 hidden md:inline">
-            {t("providers.modelsCount", { count: String(channel.modelCount) })}
-          </span>
-          <div className="hidden md:flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 size-7" aria-label={t("providers.editChannel")}>
-              <Pencil className="size-3.5" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 size-7 text-muted-foreground" aria-label={t("providers.deleteChannel")}>
-              <Trash2 className="size-3.5" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs h-7">
-              {isTesting ? t("providers.testChannelRunning") : t("providers.testChannel")}
-            </Button>
-          </div>
-        </div>
-
-        {/* Mobile: actions row */}
-        <div className="flex items-center gap-1 mt-1.5 pl-10 md:hidden">
-          <span className="text-xs text-muted-foreground mr-auto">
-            {t("providers.modelsCount", { count: String(channel.modelCount) })} · {t(PROVIDER_KIND_LABEL_KEYS[channel.kind] ?? channel.kind)}
-          </span>
-          <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8" aria-label={t("providers.editChannel")}>
-            <Pencil className="size-3.5" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onDelete} className="shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 size-8 text-muted-foreground" aria-label={t("providers.deleteChannel")}>
-            <Trash2 className="size-3.5" />
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onTest} disabled={isTesting || !channel.configured} className="shrink-0 text-xs min-h-[44px] md:min-h-0">
-            {isTesting ? "..." : t("providers.testChannel")}
-          </Button>
-        </div>
-      </div>
-
-      {/* Models list (expandable) */}
-      {expanded && channel.models.length > 0 && (
-        <div className="border-t border-border px-3 py-2 max-h-64 overflow-y-auto">
-          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 gap-y-1 text-xs">
-            <span className="font-medium text-muted-foreground">{t("providers.model")}</span>
-            <span className="font-medium text-muted-foreground text-right">{t("providers.context")}</span>
-            <span className="font-medium text-muted-foreground text-right">{t("providers.maxOut")}</span>
-            <span className="font-medium text-muted-foreground text-right">{t("providers.priceInOut")}</span>
-
-            {channel.models.map((m) => (
-              <ModelRow key={m.id} model={m} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {expanded && channel.models.length === 0 && (
-        <div className="border-t border-border px-3 py-3 text-xs text-muted-foreground text-center">
-          {t("providers.noModelsForChannel")}
-        </div>
-      )}
+    <div className="space-y-3">
+      <div className="h-10 w-full animate-pulse rounded-md bg-muted" />
+      <div className="h-24 w-full animate-pulse rounded-md bg-muted" />
+      <div className="h-24 w-full animate-pulse rounded-md bg-muted" />
     </div>
   );
 }
 
-// ─── Model Row ────────────────────────────────────────────────────
+/** 无渠道时的空状态 */
+function EmptyChannels({ onAdd }: { onAdd: () => void }) {
+  const t = useT();
+  return (
+    <div className="rounded-lg border border-dashed border-border p-6 text-center">
+      <Server className="mx-auto mb-2 size-8 text-muted-foreground/40" />
+      <p className="text-sm text-muted-foreground">
+        {t("providers.noChannels")}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onAdd}
+        className="mt-3 min-h-[44px] md:min-h-0"
+      >
+        <Plus className="size-4" />
+        {t("providers.addFirstChannel")}
+      </Button>
+    </div>
+  );
+}
 
-function ModelRow({ model }: { model: ModelEntry }) {
-  const formatTokens = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-    return String(n);
+// ─── Tier 编辑器 ──────────────────────────────────────────────────
+
+/** tier 编辑器状态（从服务端 tiers 初始化，本地编辑，保存时提交） */
+function useTierEditor(tiers: TierMapping) {
+  const [editingTiers, setEditingTiers] = useState<TierMapping>({});
+  const [tiersInitialized, setTiersInitialized] = useState(false);
+  /** 每个 tier 当前选中的 channel（用于联动显示该 channel 下的模型列表） */
+  const [selectedTierChannel, setSelectedTierChannel] = useState<
+    Record<string, string>
+  >({});
+
+  /** 从服务端 tiers 重建本地编辑状态 */
+  function syncFromServer(serverTiers: TierMapping) {
+    setEditingTiers(serverTiers);
+    setSelectedTierChannel({
+      fast: serverTiers.fast?.channel ?? "",
+      default: serverTiers.default?.channel ?? "",
+      high: serverTiers.high?.channel ?? "",
+    });
+  }
+
+  // 首次加载 + 保存后服务端数据变化时，同步本地状态
+  useEffect(() => {
+    if (!tiersInitialized) {
+      syncFromServer(tiers);
+      setTiersInitialized(true);
+    } else {
+      syncFromServer(tiers);
+    }
+  }, [tiers, tiersInitialized]);
+
+  return {
+    editingTiers,
+    setEditingTiers,
+    selectedTierChannel,
+    setSelectedTierChannel,
   };
+}
+
+/** tier 映射编辑器 UI：三档（fast/default/high）各选 channel + model */
+function TierEditor({
+  channels,
+  editor,
+}: {
+  channels: ProviderChannel[];
+  editor: ReturnType<typeof useTierEditor>;
+}) {
+  const t = useT();
+  const { editingTiers, setEditingTiers, selectedTierChannel, setSelectedTierChannel } =
+    editor;
 
   return (
     <>
-      <span className="font-mono truncate" title={model.id}>
-        {model.name}
-      </span>
-      <span className="text-right text-muted-foreground">
-        {formatTokens(model.contextWindow)}
-      </span>
-      <span className="text-right text-muted-foreground">
-        {formatTokens(model.defaultMaxTokens)}
-      </span>
-      <span className="text-right text-muted-foreground">
-        {model.inputPricePer1M != null
-          ? `$${model.inputPricePer1M}/${model.outputPricePer1M ?? "-"}`
-          : "—"}
-      </span>
+      {TIER_CONFIG.map(({ key, labelKey, icon: Icon, color }) => {
+        const channel = selectedTierChannel[key] ?? "";
+        const selectedCh = channels.find((c) => c.id === channel);
+        const models = selectedCh?.models ?? [];
+        const target = editingTiers[key];
+
+        return (
+          <div
+            key={key}
+            className="space-y-2 rounded-lg border border-border px-3 py-3"
+          >
+            <div className="flex items-center gap-2">
+              <Icon className={cn("size-4 shrink-0", color)} />
+              <span className="text-sm font-medium">{t(labelKey)}</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {/* channel 选择 */}
+              <div className="relative">
+                <select
+                  value={channel}
+                  onChange={(e) => {
+                    const ch = e.target.value;
+                    setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
+                    setEditingTiers((prev) => ({
+                      ...prev,
+                      [key]: ch ? { channel: ch, model: "" } : undefined,
+                    }));
+                  }}
+                  className={SELECT_BASE}
+                >
+                  <option value="">{t("chat.notConfigured")}</option>
+                  {channels.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.kind})
+                    </option>
+                  ))}
+                </select>
+                <SelectChevron />
+              </div>
+              {/* model 选择（依赖已选 channel 的模型列表） */}
+              <div className="relative">
+                <select
+                  value={target?.model ?? ""}
+                  onChange={(e) => {
+                    const model = e.target.value;
+                    setEditingTiers((prev) => ({
+                      ...prev,
+                      [key]: channel ? { channel, model } : undefined,
+                    }));
+                  }}
+                  disabled={!channel || models.length === 0}
+                  className={SELECT_BASE}
+                >
+                  <option value="">{t("providers.selectModel")}</option>
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+                <SelectChevron />
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </>
   );
+}
+
+// ─── Provider Mutations ───────────────────────────────────────────
+
+/** 所有 provider 相关 mutation 的集合，统一 toast 反馈 + 成功后刷新 */
+function useProviderMutations(onSuccess: () => void) {
+  const t = useT();
+
+  const testMutation = useMutation({
+    mutationFn: (channelId: string) =>
+      apiPost<{ ok: boolean; message?: string; error?: string }>(
+        `/api/providers/channels/${channelId}/test`,
+      ),
+    onSuccess: (data) => {
+      if (data.ok) toast.success(t("providers.connectionSuccessful"));
+      else toast.error(data.error ?? t("providers.connectionFailed"));
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (data: ChannelFormData) =>
+      apiPost<{ ok: boolean; channelId: string }>(
+        "/api/providers/channels",
+        data,
+      ),
+    onSuccess: () => {
+      toast.success(t("providers.channelCreated"));
+      onSuccess();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      channelId,
+      updates,
+    }: {
+      channelId: string;
+      updates: Record<string, unknown>;
+    }) =>
+      apiPut<{ ok: boolean }>(`/api/providers/channels/${channelId}`, updates),
+    onSuccess: () => {
+      toast.success(t("providers.channelUpdated"));
+      onSuccess();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (channelId: string) =>
+      apiDelete(`/api/providers/channels/${channelId}`),
+    onSuccess: () => {
+      toast.success(t("providers.channelDeleted"));
+      onSuccess();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const saveTiersMutation = useMutation({
+    mutationFn: (tm: TierMapping) =>
+      apiPut<{ ok: boolean; tiers: TierMapping }>("/api/providers/tiers", tm),
+    onSuccess: () => {
+      toast.success(t("providers.tierMappingSaved"));
+      onSuccess();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  return {
+    testChannel: testMutation.mutate,
+    createChannel: createMutation.mutate,
+    updateChannel: (channelId: string, updates: Record<string, unknown>) =>
+      updateMutation.mutate({ channelId, updates }),
+    deleteChannel: deleteMutation.mutate,
+    saveTiers: saveTiersMutation.mutate,
+    pendingFlags: {
+      testing: testMutation.isPending,
+      creating: createMutation.isPending,
+      updating: updateMutation.isPending,
+      savingTiers: saveTiersMutation.isPending,
+    },
+  };
 }
