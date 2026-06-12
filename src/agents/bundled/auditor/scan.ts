@@ -119,18 +119,22 @@ function scanCoverageGaps(db: Database.Database, since: number, to: number): Aud
 /** 5. 漂移回顾：drift_signals 中 needs_intervention=1（需干预的漂移） */
 function scanDriftRecap(db: Database.Database, since: number, to: number): AuditIssue[] {
   const issues: AuditIssue[] = [];
-  const rows = db
-    .prepare(
-      `SELECT id, session_id, alignment_score, drift_description FROM drift_signals
-       WHERE created_at >= ? AND created_at <= ? AND needs_intervention = 1`,
-    )
-    .all(since, to) as Array<{ id: string; session_id: string; alignment_score: number; drift_description: string | null }>;
-  for (const r of rows) {
-    issues.push({
-      kind: 'drift_approved',
-      description: `session ${r.session_id} 检测到需干预的漂移（alignment=${r.alignment_score.toFixed(2)}）：${r.drift_description ?? '无描述'}`,
-      refId: r.id,
-    });
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id, session_id, alignment_score, drift_description FROM drift_signals
+         WHERE created_at >= ? AND created_at <= ? AND needs_intervention = 1`,
+      )
+      .all(since, to) as Array<{ id: string; session_id: string; alignment_score: number; drift_description: string | null }>;
+    for (const r of rows) {
+      issues.push({
+        kind: 'drift_approved',
+        description: `session ${r.session_id} 检测到需干预的漂移（alignment=${r.alignment_score.toFixed(2)}）：${r.drift_description ?? '无描述'}`,
+        refId: r.id,
+      });
+    }
+  } catch {
+    // drift_signals 可能不存在（旧库/部分 schema）—— 静默跳过该维度
   }
   return issues;
 }

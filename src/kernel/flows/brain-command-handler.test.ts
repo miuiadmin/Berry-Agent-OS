@@ -118,4 +118,26 @@ describe('brain.command handler (15.0 机制 D)', () => {
     ipc.emit({ type: 'brain.command', payload: cmd('code', 'report'), correlationId: 'trace-xyz' } as IpcMessage);
     expect(sent[0].correlationId).toBe('trace-xyz');
   });
+
+  it('inspect scope=audit → 运行 Auditor 5 维扫描，返回报告（D→C 闭环）', () => {
+    const { ipc, sent } = makeMockIpc();
+    setupBrainCommandHandler(ipc, { agentManager: makeMockAgentManager(new Set()), db });
+    // 造重复工具调用（触发 repeated_tool 模式）
+    for (let i = 0; i < 12; i++) {
+      db.prepare(
+        `INSERT INTO agent_tool_calls (id, session_id, task_id, agent_name, tool_name, success, approved_by, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+      ).run(`a${i}`, 's', 't', 'code', 'write_file', 1, 'auto', 1000);
+    }
+    ipc.emit({
+      type: 'brain.command',
+      payload: cmd('any', 'inspect', { scope: 'audit', since: 0, to: 100000 }),
+      correlationId: 'c6',
+    } as IpcMessage);
+    const result = sent[0].payload as BrainCommandResult;
+    expect(result.success).toBe(true);
+    const audit = (result.data as { audit: { findings: { patterns: Array<{ subject: string }> }; riskScore: number } }).audit;
+    expect(audit.findings.patterns.length).toBeGreaterThanOrEqual(1);
+    expect(audit.findings.patterns[0].subject).toBe('write_file');
+    expect(audit.riskScore).toBeGreaterThan(0);
+  });
 });

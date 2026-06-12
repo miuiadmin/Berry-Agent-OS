@@ -17,6 +17,7 @@ import type { IpcChannel } from '../ipc.js';
 import type { AgentManager } from '../agent-manager.js';
 import type Database from 'better-sqlite3';
 import type { BrainCommand, BrainCommandResult } from '../../contracts/brain.js';
+import { runAudit } from '../../agents/bundled/auditor/scan.js';
 import { getLogger } from '../../utils/logger.js';
 
 const logger = getLogger('brain-command');
@@ -81,8 +82,18 @@ function reportAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): BrainCom
   };
 }
 
-/** inspect：返回目标 Agent 最近的工具调用（机制 C 上线后可触发深度 Auditor 扫描） */
+/** inspect：scope='audit' → 运行 Auditor 5 维扫描；否则返回目标 Agent 最近工具调用 */
 function inspectAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): BrainCommandResult {
+  // 15.0 机制 D→C 闭环：inspect 审计范围直接在进程内跑确定性扫描（复用 scan.ts 纯逻辑），
+  // 不必启动 auditor 子进程。重活/定时扫描走 cron + auditor agent；轻量 inspect 走这里。
+  if (cmd.payload?.scope === 'audit') {
+    const report = runAudit(deps.db, {
+      since: typeof cmd.payload.since === 'number' ? cmd.payload.since : undefined,
+      to: typeof cmd.payload.to === 'number' ? cmd.payload.to : undefined,
+    });
+    return { success: true, data: { audit: report } };
+  }
+
   const agent = deps.agentManager.getAgent(cmd.target);
   if (!agent) {
     return { success: false, error: `目标 Agent 不存在或未加载: ${cmd.target}` };
