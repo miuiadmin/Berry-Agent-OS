@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import {
   Target,
   CheckCircle2,
@@ -149,13 +150,8 @@ function MissionDetail({ missionId }: { missionId: string }) {
         </div>
       </div>
 
-      {/* 进度条 */}
-      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-success transition-all duration-500"
-          style={{ width: `${progressPercent}%` }}
-        />
-      </div>
+      {/* 进度条 — HeroUI ProgressBar 适配器，自动处理 ARIA */}
+      <Progress value={progressPercent} max={100} color="success" />
 
       {/* 任务列表 */}
       <Tabs value="tasks" onValueChange={() => {}}>

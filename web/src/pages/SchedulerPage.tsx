@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
@@ -61,14 +62,16 @@ function JobExecutions({ jobId }: { jobId: string }) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setShow(!show)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors min-h-[44px] md:min-h-0"
+        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground min-h-0 h-auto"
       >
         {show ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         <History className="size-3" />
         {t("scheduler.executionHistory")}
-      </button>
+      </Button>
       {show && (
         <div className="mt-2 space-y-1 pl-4">
           <QueryBoundary query={execQuery} skeleton={<p className="text-[11px] text-muted-foreground">{t("common.loading")}</p>}>
@@ -284,36 +287,20 @@ export default function SchedulerPage() {
         </div>
       )}
 
-      {/* Tab switcher — ARIA tablist 模式 */}
-      <div className="flex gap-1 border-b" role="tablist" aria-label={t("scheduler.title")}>
-        {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
-          <button
-            key={tabKey}
-            role="tab"
-            aria-selected={tab === tabKey}
-            onClick={() => setTab(tabKey)}
-            onKeyDown={(e) => {
-              const tabs = ["jobs", "queue", "webhooks"] as const;
-              const idx = tabs.indexOf(tabKey);
-              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-                e.preventDefault();
-                setTab(tabs[(idx + 1) % tabs.length]);
-              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-                e.preventDefault();
-                setTab(tabs[(idx - 1 + tabs.length) % tabs.length]);
-              }
-            }}
-            className={cn(
-              "px-3 py-2 text-sm font-medium capitalize transition-colors min-h-[44px] md:min-h-0",
-              tab === tabKey
-                ? "border-b-2 border-brand text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : t("scheduler.webhooks")}
-          </button>
-        ))}
-      </div>
+      {/* Tab switcher — HeroUI Tabs 适配器（自动处理 ARIA 与键盘导航） */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "jobs" | "queue" | "webhooks")} className="w-full">
+        <TabsList className="h-auto bg-transparent p-0 gap-1 border-b rounded-none w-full justify-start">
+          {(["jobs", "queue", "webhooks"] as const).map((tabKey) => (
+            <TabsTrigger
+              key={tabKey}
+              value={tabKey}
+              className="capitalize rounded-none border-b-2 border-transparent data-[selected]:border-brand data-[selected]:bg-transparent data-[selected]:shadow-none"
+            >
+              {tabKey === "jobs" ? t("scheduler.title") : tabKey === "queue" ? t("scheduler.running") : t("scheduler.webhooks")}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {/* Create job form */}
       {showCreate && tab === "jobs" && (

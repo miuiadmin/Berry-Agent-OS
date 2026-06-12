@@ -3,6 +3,7 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-react";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
@@ -113,19 +114,18 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
                 </ToolbarButton>
               )}
             </div>
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleSubmit}
               disabled={!canSend || isStreaming || disabled}
               className={cn(
-                "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 btn-press",
-                "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
-                canSend && !isStreaming && !disabled
-                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97] animate-send-ready"
-                  : "bg-muted text-muted-foreground cursor-not-allowed"
+                "btn-press",
+                canSend && !isStreaming && !disabled && "animate-send-ready"
               )}
             >
               {t("chat.send")}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -147,20 +147,15 @@ function ToolbarButton({
   "aria-label"?: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={variant === "destructive" ? "danger" : "ghost"}
+      size="icon-sm"
       onClick={onClick}
       disabled={disabled}
       aria-label={ariaLabel}
-      className={cn(
-        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-all duration-150 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 active:scale-90",
-        variant === "destructive"
-          ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent",
-        "disabled:opacity-40 disabled:pointer-events-none"
-      )}
     >
       {children}
-    </button>
+    </Button>
   );
 }

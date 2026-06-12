@@ -3,7 +3,7 @@ import { useState, useRef, useCallback } from "react";
 import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
 import { uploadFile, type UploadResponse } from "@/lib/api";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 
 export interface Attachment {
@@ -51,19 +51,16 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-sm"
         aria-label={t("fileUpload.attach")}
         disabled={disabled || uploading}
         onClick={() => inputRef.current?.click()}
-        className={cn(
-          "shrink-0 rounded-lg p-2.5 md:p-2 text-muted-foreground transition-colors",
-          "hover:bg-accent hover:text-foreground active:bg-accent",
-          "disabled:opacity-50 disabled:cursor-not-allowed"
-        )}
       >
         {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
-      </button>
+      </Button>
       <input
         ref={inputRef}
         type="file"
@@ -94,13 +91,15 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
           )}
           <span className="max-w-[100px] sm:max-w-[120px] truncate">{a.filename}</span>
           <span className="text-muted-foreground/60">{formatSize(a.size)}</span>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={() => onRemove(a.fileId)}
             aria-label={t("fileUpload.remove", { filename: a.filename })}
-            className="ml-0.5 rounded p-1.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-0.5 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"
+            className="text-muted-foreground hover:text-destructive"
           >
             <X className="size-3" />
-          </button>
+          </Button>
         </div>
       ))}
     </div>

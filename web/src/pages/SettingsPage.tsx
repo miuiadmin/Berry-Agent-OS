@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import {
@@ -173,40 +174,30 @@ function SettingsContent() {
       <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
         <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">{t("settings.title")}</h1>
         <div className="relative md:contents">
-          <nav role="tablist" aria-label={t("settings.title")} className="flex md:flex-col gap-2 md:gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
-            {TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => handleTabChange(tab.key)}
-                  onKeyDown={(e) => {
-                    const idx = TABS.findIndex(t => t.key === tab.key);
-                    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-                      e.preventDefault();
-                      handleTabChange(TABS[(idx + 1) % TABS.length].key);
-                    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-                      e.preventDefault();
-                      handleTabChange(TABS[(idx - 1 + TABS.length) % TABS.length].key);
-                    }
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm whitespace-nowrap transition-colors active:bg-accent",
-                    isActive
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  )}
-                >
-                  <Icon className={cn("size-4 shrink-0 transition-transform duration-200", isActive && "scale-110")} />
-                  <span className="hidden sm:inline md:inline">{t(tab.labelKey)}</span>
-                  <span className="sm:hidden text-[11px]">{t(tab.labelKey)}</span>
-                </button>
-              );
-            })}
-          </nav>
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+            <TabsList variant="bare" className="flex md:flex-col gap-2 md:gap-1 overflow-x-auto md:overflow-x-visible scrollbar-none pb-1 md:pb-0">
+              {TABS.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.key;
+                return (
+                  <TabsTrigger
+                    key={tab.key}
+                    value={tab.key}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm whitespace-nowrap transition-colors active:bg-accent",
+                      isActive
+                        ? "bg-accent text-accent-foreground font-medium"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                    )}
+                  >
+                    <Icon className={cn("size-4 shrink-0 transition-transform duration-200", isActive && "scale-110")} />
+                    <span className="hidden sm:inline md:inline">{t(tab.labelKey)}</span>
+                    <span className="sm:hidden text-[11px]">{t(tab.labelKey)}</span>
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </Tabs>
           <div className="pointer-events-none absolute right-0 top-0 h-full w-6 bg-gradient-to-l from-background to-transparent md:hidden" />
         </div>
       </div>

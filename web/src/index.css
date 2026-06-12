@@ -10,7 +10,9 @@ html {
 
 /* ════════════════════════════════════════════════════════════════
    Tailwind v4 主题 token 注册
-   把 CSS 自定义属性注册为 Tailwind 工具类可用 token（如 bg-card）
+   将项目的 Tailwind 工具类名（bg-card / text-foreground 等）桥接到
+   HeroUI v3 原生 CSS 变量。业务代码的工具类名保持不变，
+   值自动跟随 HeroUI 原生默认主题（冷中性灰 hue 286 + 靛蓝 accent hue 254）。
    ════════════════════════════════════════════════════════════════ */
 
 @theme inline {
@@ -19,45 +21,71 @@ html {
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
     monospace;
 
-  /* 颜色 token → 指向下方 :root/.dark 中定义的 CSS 变量 */
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
+  /* ── 颜色 token：shadcn 工具类名 → HeroUI 原生变量 ── */
+
+  /* 基础层：页面背景与全局文字 */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* 表面层：卡片、面板等非浮层组件 */
+  --color-card: var(--surface);
+  --color-card-foreground: var(--surface-foreground);
+
+  /* 浮层：Tooltip / Popover / Modal / Menu */
+  --color-popover: var(--overlay);
+  --color-popover-foreground: var(--overlay-foreground);
+
+  /* 主色（品牌色）→ HeroUI accent（靛蓝 hue 254） */
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
+
+  /* 次要色 → HeroUI default（中性灰） */
+  --color-secondary: var(--default);
+  --color-secondary-foreground: var(--default-foreground);
+
+  /* 柔和/灰底：default 用于背景，muted 用于辅助文字 */
+  --color-muted: var(--default);
+  --color-muted-foreground: var(--muted);
+
+  /* 强调色（hover / selected 底色）→ accent-soft（靛蓝浅 tint） */
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--accent-soft-foreground);
+
+  /* 危险色 → HeroUI danger */
+  --color-destructive: var(--danger);
+
+  /* 品牌色 = 主色（保留旧工具类名 bg-brand / text-brand 的语义） */
+  --color-brand: var(--accent);
+  --color-brand-foreground: var(--accent-foreground);
+
+  /* 状态色 → HeroUI 原生 success / warning */
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
-  --color-brand: var(--brand);
-  --color-brand-foreground: var(--brand-foreground);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --color-foreground: var(--foreground);
-  --color-background: var(--background);
 
-  /* 圆角梯度（基于 --radius 派生） */
+  /* 边框 / 输入 / 聚焦环 */
+  --color-border: var(--border);
+  --color-input: var(--field-background);
+  --color-ring: var(--focus);
+
+  /* 侧边栏 → 基于 HeroUI 表面层级派生 */
+  --color-sidebar: var(--background-secondary);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-primary-foreground: var(--accent-foreground);
+  --color-sidebar-accent: var(--accent-soft);
+  --color-sidebar-accent-foreground: var(--accent-soft-foreground);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--focus);
+
+  /* 图表色（HeroUI 原生主题未提供，自定义补充） */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* 圆角梯度（基于 HeroUI --radius 派生，原生 --radius = 0.5rem） */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -66,115 +94,45 @@ html {
 }
 
 /* ════════════════════════════════════════════════════════════════
-   配色方案：暖中性 + 青蓝品牌色（hue 220）
-   浅色模式 — 暖白底、纯白卡片、青蓝主色
+   项目自定义 token（仅补充 HeroUI 原生主题未提供的颜色）
+   主色板已采用 HeroUI v3 原生默认主题，由 @heroui/styles 的 variables.css 定义，
+   无需在此重复声明 background / foreground / surface / accent / danger / success 等。
+   此处仅定义：品牌别名、辅助文字别名、info 状态色、图表色。
    ════════════════════════════════════════════════════════════════ */
 
 :root {
-  --background: oklch(0.99 0.002 75); /* 暖白底 */
-  --foreground: oklch(0.16 0.008 50); /* 暖深灰文字 */
-  --card: oklch(1 0 0); /* 纯白卡片 */
-  --card-foreground: oklch(0.16 0.008 50);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0.008 50);
-  --primary: oklch(0.55 0.15 220); /* 青蓝主色（= 品牌色） */
-  --primary-foreground: oklch(0.99 0.002 75);
-  --secondary: oklch(0.96 0.004 75); /* 暖浅灰表面 */
-  --secondary-foreground: oklch(0.20 0.008 50);
-  --muted: oklch(0.96 0.004 75);
-  --muted-foreground: oklch(0.52 0.012 60); /* 暖中灰辅助文字 */
-  --accent: oklch(0.94 0.025 220); /* 青蓝浅 tint（hover/selected） */
-  --accent-foreground: oklch(0.30 0.08 220);
-  --destructive: oklch(0.58 0.22 25); /* 暖红 */
-  --border: oklch(0.90 0.005 75); /* 暖灰边框 */
-  --input: oklch(0.90 0.005 75);
-  --ring: oklch(0.55 0.15 220); /* 青蓝聚焦环 */
-  --chart-1: oklch(0.55 0.15 220); /* 青蓝主图表色 */
-  --chart-2: oklch(0.64 0.12 200); /* 青 */
-  --chart-3: oklch(0.70 0.13 180); /* 青绿 */
-  --chart-4: oklch(0.72 0.10 250); /* 蓝 */
-  --chart-5: oklch(0.78 0.08 280); /* 紫 */
-  --radius: 0.5rem; /* 8px，比原来 10px 更利落 */
-  --sidebar: oklch(0.975 0.002 75);
-  --sidebar-foreground: oklch(0.16 0.008 50);
-  --sidebar-primary: oklch(0.55 0.15 220);
-  --sidebar-primary-foreground: oklch(0.99 0.002 75);
-  --sidebar-accent: oklch(0.94 0.025 220);
-  --sidebar-accent-foreground: oklch(0.30 0.08 220);
-  --sidebar-border: oklch(0.90 0.005 75);
-  --sidebar-ring: oklch(0.55 0.15 220);
-  --brand: oklch(0.55 0.15 220);
-  --brand-foreground: oklch(0.99 0.002 75);
-  --success: oklch(0.55 0.14 160); /* 翠绿 */
-  --warning: oklch(0.75 0.16 70); /* 琥珀 */
-  --info: oklch(0.55 0.14 230);
+  /* 品牌色别名（动画/内联样式中的 var(--brand) 需要） */
+  --brand: var(--accent);
+  --brand-foreground: var(--accent-foreground);
 
-  /* HeroUI 语义变量映射（本块无 @layer，优先级高于 HeroUI 的 @layer theme 定义）
-     让 HeroUI 组件（Modal/Card/Input/Button 等）读取到我们的配色 */
-  --surface: var(--card);
-  --surface-foreground: var(--card-foreground);
-  --overlay: var(--popover);
-  --overlay-foreground: var(--popover-foreground);
-  --danger: var(--destructive);
-  --field-background: var(--input);
-  --field-foreground: var(--foreground);
-  --field-placeholder: var(--muted-foreground);
+  /* 辅助文字色别名（动画/内联样式中的 var(--muted-foreground) 需要） */
+  --muted-foreground: var(--muted);
+
+  /* HeroUI 原生主题不包含 info 色和图表色，自定义补充 */
+  --info: oklch(0.62 0.14 230);
+  --chart-1: var(--accent);
+  --chart-2: oklch(0.66 0.12 200);
+  --chart-3: oklch(0.70 0.13 180);
+  --chart-4: oklch(0.68 0.10 250);
+  --chart-5: oklch(0.72 0.09 280);
 }
 
-/* ════════════════════════════════════════════════════════════════
-   深色模式 — 暖黑底、抬起卡片层、亮青蓝主色
-   ════════════════════════════════════════════════════════════════ */
-
 .dark {
-  --background: oklch(0.145 0.004 50); /* 暖黑底 */
-  --foreground: oklch(0.95 0.004 75); /* 暖白文字 */
-  --card: oklch(0.18 0.005 50); /* 抬起的卡片层 */
-  --card-foreground: oklch(0.95 0.004 75);
-  --popover: oklch(0.18 0.005 50);
-  --popover-foreground: oklch(0.95 0.004 75);
-  --primary: oklch(0.58 0.15 220); /* 青蓝（暗色下微调） */
-  --primary-foreground: oklch(0.99 0.002 75);
-  --secondary: oklch(0.24 0.006 50);
-  --secondary-foreground: oklch(0.95 0.004 75);
-  --muted: oklch(0.24 0.006 50);
-  --muted-foreground: oklch(0.66 0.010 60);
-  --accent: oklch(0.26 0.03 220); /* 青蓝暗 tint */
-  --accent-foreground: oklch(0.85 0.04 220);
-  --destructive: oklch(0.65 0.20 25);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.58 0.15 220);
-  --chart-1: oklch(0.62 0.14 220);
+  /* 暗色下的品牌色与辅助文字色别名 */
+  --brand: var(--accent);
+  --brand-foreground: var(--accent-foreground);
+  --muted-foreground: var(--muted);
+
+  /* 暗色图表色（保持鲜艳度） */
+  --info: oklch(0.62 0.13 230);
+  --chart-1: var(--accent);
   --chart-2: oklch(0.66 0.12 200);
   --chart-3: oklch(0.70 0.12 180);
   --chart-4: oklch(0.68 0.10 250);
   --chart-5: oklch(0.72 0.09 280);
-  --sidebar: oklch(0.16 0.004 50);
-  --sidebar-foreground: oklch(0.95 0.004 75);
-  --sidebar-primary: oklch(0.58 0.15 220);
-  --sidebar-primary-foreground: oklch(0.99 0.002 75);
-  --sidebar-accent: oklch(0.26 0.03 220);
-  --sidebar-accent-foreground: oklch(0.85 0.04 220);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.58 0.15 220);
-  --brand: oklch(0.58 0.15 220);
-  --brand-foreground: oklch(0.99 0.002 75);
-  --success: oklch(0.62 0.13 160);
-  --warning: oklch(0.72 0.15 70);
-  --info: oklch(0.62 0.13 230);
-
-  /* HeroUI 暗色语义变量映射 */
-  --surface: var(--card);
-  --surface-foreground: var(--card-foreground);
-  --overlay: var(--popover);
-  --overlay-foreground: var(--popover-foreground);
-  --danger: var(--destructive);
-  --field-background: var(--input);
-  --field-foreground: var(--foreground);
-  --field-placeholder: var(--muted-foreground);
 }
 
-/* 全局边框回退色（未显式指定 border-color 时统一用暖灰） */
+/* 全局边框回退色（未显式指定 border-color 时统一用 HeroUI 语义边框色） */
 * {
   border-color: var(--border);
 }
@@ -189,27 +147,26 @@ body {
   overflow-x: hidden;
 }
 
-/* 选中文本配色（青蓝） */
+/* 选中文本配色（靛蓝 accent） */
 ::selection {
-  background: color-mix(in oklch, var(--brand) 25%, transparent);
+  background: color-mix(in oklch, var(--accent) 25%, transparent);
 }
 
-/* 自定义滚动条（细、暖灰、青蓝 hover） */
+/* 自定义滚动条（基于 HeroUI scrollbar 变量，hover 用 accent 高亮） */
 * {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent)
-    transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: color-mix(in oklch, var(--muted-foreground) 25%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--brand) 40%, transparent);
+  background: color-mix(in oklch, var(--accent) 40%, transparent);
 }
 
 /* ════════════════════════════════════════════════════════════════════════════

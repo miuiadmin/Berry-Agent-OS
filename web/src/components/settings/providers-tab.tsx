@@ -718,14 +718,16 @@ function ChannelCard({
       <div className="px-3 py-2.5 md:py-2">
         {/* Row 1: expand + status + name */}
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             onClick={() => setExpanded(!expanded)}
             aria-expanded={expanded}
             aria-label={t("providers.toggleModels")}
-            className="shrink-0 rounded p-1 hover:bg-accent transition-colors size-11 md:size-7 flex items-center justify-center"
+            className="shrink-0 size-11 md:size-7"
           >
             <ChevronRight className={cn("size-4 transition-transform duration-200", expanded && "rotate-90")} />
-          </button>
+          </Button>
 
           {channel.enabled ? (
             <Wifi className="size-3.5 text-success shrink-0" />

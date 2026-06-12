@@ -10,6 +10,7 @@
 import { useEffect, useRef } from "react";
 import { useAgentChatStore, type AgentChatMessage } from "@/lib/stores/agent-chat-store";
 import { useT } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
 import {
   Bot,
   ChevronDown,
@@ -19,26 +20,26 @@ import {
   X,
 } from "lucide-react";
 
-/** Agent 名称 → 显示颜色映射 */
+/** Agent 名称 → 显示颜色映射（全部走语义 token，明暗自适应） */
 const AGENT_COLORS: Record<string, string> = {
   code: "text-info",
   learning: "text-success",
-  memory: "text-emerald-400",
-  skills: "text-purple-400",
-  conversation: "text-orange-400",
+  memory: "text-chart-3",
+  skills: "text-chart-5",
+  conversation: "text-chart-4",
   brain: "text-danger",
-  plugin_builder: "text-pink-400",
+  plugin_builder: "text-chart-1",
   skill_tester: "text-warning",
-  evolution: "text-cyan-400",
+  evolution: "text-chart-2",
 };
 
-/** Agent 名称 → 图标背景色 */
+/** Agent 名称 → 图标背景色（/10 透明度浅底，明暗自适应） */
 const AGENT_BG: Record<string, string> = {
   code: "bg-info/10",
   learning: "bg-success/10",
-  memory: "bg-emerald-500/10",
-  skills: "bg-purple-500/10",
-  conversation: "bg-orange-500/10",
+  memory: "bg-chart-3/10",
+  skills: "bg-chart-5/10",
+  conversation: "bg-chart-4/10",
   brain: "bg-danger/10",
 };
 
@@ -123,10 +124,18 @@ export function AgentChatPanel() {
 
   return (
     <div className="border-t border-border bg-muted/50">
-      {/* 头部（点击折叠/展开） */}
-      <button
+      {/* 头部（点击折叠/展开）— 用 div 承载点击避免与内部关闭按钮形成嵌套 button */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={toggleOpen}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleOpen();
+          }
+        }}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/50 transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-muted-foreground" />
@@ -141,15 +150,17 @@ export function AgentChatPanel() {
         </div>
         <div className="flex items-center gap-1">
           {isOpen && (
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
               }}
-              className="p-1 hover:bg-muted rounded"
+              className="min-w-0 min-h-0 size-6"
             >
               <X className="w-3 h-3 text-muted-foreground" />
-            </button>
+            </Button>
           )}
           {isOpen ? (
             <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -157,7 +168,7 @@ export function AgentChatPanel() {
             <ChevronUp className="w-4 h-4 text-muted-foreground" />
           )}
         </div>
-      </button>
+      </div>
 
       {/* 消息列表（折叠时隐藏） */}
       {isOpen && (

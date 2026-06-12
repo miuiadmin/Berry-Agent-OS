@@ -3,6 +3,7 @@ import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import { useChatStore, type ChatMessage, type ChatAttachment } from "@/lib/stores/chat-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Check, Copy, AlertCircle, RotateCcw, ChevronDown, Pencil, Trash2, X, SendHorizontal, FileText, Download } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
@@ -44,16 +45,15 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   }, [text]);
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon-sm"
       onClick={handleCopy}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1.5 md:px-1.5 md:py-0 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
-        className
-      )}
+      className={className}
       aria-label={t("chat.copy")}
     >
       {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
-    </button>
+    </Button>
   );
 }
 
@@ -104,24 +104,26 @@ function EditableMessage({
         rows={1}
       />
       <div className="flex items-center gap-2 justify-end">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onCancel}
-          className="inline-flex items-center gap-1 rounded-md px-3 py-2 md:px-2 md:py-1 text-xs text-muted-foreground hover:bg-accent transition-colors min-h-[44px] md:min-h-0"
         >
           <X className="size-3" />
           {t("common.cancel")}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => {
             const trimmed = text.trim();
             if (trimmed) onSubmit(trimmed);
           }}
           disabled={!text.trim()}
-          className="inline-flex items-center gap-1 rounded-md bg-brand px-3 py-2 md:px-2 md:py-1 text-xs text-brand-foreground hover:bg-brand/90 transition-colors disabled:opacity-50 min-h-[44px] md:min-h-0"
         >
           <SendHorizontal className="size-3" />
           {t("chat.send")}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -236,13 +238,15 @@ const MessageBubble = memo(function MessageBubble({
               <span>{message.error || t("chat.failedToSend")}</span>
             </div>
             {onRetry && (
-              <button
+              <Button
+                variant="link"
+                size="sm"
                 onClick={() => onRetry(message.id)}
-                className="inline-flex items-center gap-0.5 underline hover:no-underline"
+                className="inline-flex items-center gap-0.5 px-0"
               >
                 <RotateCcw className="size-2.5" />
                 {t("common.retry")}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -254,13 +258,15 @@ const MessageBubble = memo(function MessageBubble({
               <span>{t("chat.failedToSend")}</span>
             </div>
             {onRetry && (
-              <button
+              <Button
+                variant="link"
+                size="sm"
                 onClick={() => onRetry(message.id)}
-                className="inline-flex items-center gap-0.5 underline hover:no-underline"
+                className="inline-flex items-center gap-0.5 px-0"
               >
                 <RotateCcw className="size-2.5" />
                 {t("common.retry")}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -305,20 +311,23 @@ const MessageBubble = memo(function MessageBubble({
             <CopyButton text={message.content} />
             {isUser && (
               <>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => setEditing(true)}
-                  className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors"
                   aria-label={t("chat.editMessage")}
                 >
                   <Pencil className="size-3" />
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => onDelete?.(message.id)}
-                  className="inline-flex items-center rounded-md p-2.5 md:p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 transition-colors"
+                  className="text-muted-foreground hover:text-destructive"
                   aria-label={t("chat.deleteMessage")}
                 >
                   <Trash2 className="size-3" />
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -415,16 +424,18 @@ export function ChatMessageList({
           </div>
       </ScrollArea>
       )}
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={scrollToBottom}
         className={cn(
-          "absolute bottom-4 right-4 z-10 flex size-11 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
+          "absolute bottom-4 right-4 z-10 rounded-full border border-border bg-background shadow-md",
           showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
         )}
         aria-label={t("chat.scrollToBottom")}
       >
         <ChevronDown className="size-4 text-muted-foreground" />
-      </button>
+      </Button>
     </div>
   );
 }

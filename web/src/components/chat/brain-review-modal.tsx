@@ -162,13 +162,15 @@ export function BrainReviewModal({
           {/* Diff 对比（仅 modify 时展示） */}
           {verdict === "modify" && originalDraft && (
             <div className="border-b border-border">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowDiff(!showDiff)}
-                className="w-full flex items-center justify-between py-2 hover:bg-muted/40"
+                className="w-full flex items-center justify-between py-2 min-h-0 h-auto"
               >
                 <span className="text-xs text-muted-foreground">{t("brain.diffToggle")}</span>
                 {showDiff ? <ChevronUp className="size-3 text-muted-foreground" /> : <ChevronDown className="size-3 text-muted-foreground" />}
-              </button>
+              </Button>
               {showDiff && (
                 <div className="pb-3 space-y-2">
                   <div>

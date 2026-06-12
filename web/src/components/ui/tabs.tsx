@@ -52,6 +52,8 @@ function Tabs({ value, onValueChange, className, children }: TabsProps) {
 
 /** Tab 列表容器 props */
 interface TabsListProps {
+  /** 视觉变体：pill（圆角药丸背景，默认）/ bare（无背景，适合侧边栏式导航） */
+  variant?: "pill" | "bare";
   /** 透传 className */
   className?: string;
   /** TabsTrigger 子组件 */
@@ -60,14 +62,16 @@ interface TabsListProps {
 
 /**
  * Tab 列表容器。映射到 HeroUI Tabs.List。
- * 水平排列、居中、圆角背景，移动端触控目标 44px。
+ * pill 变体：水平排列、居中、圆角药丸背景，移动端触控目标 44px。
+ * bare 变体：仅保留 flex 布局，允许调用方通过 className 完全自定义样式。
  */
-function TabsList({ className, children }: TabsListProps) {
+function TabsList({ variant = "pill", className, children }: TabsListProps) {
   return (
     <HeroUITabs.List
       className={cn(
-        "inline-flex h-11 md:h-9 items-center gap-1 rounded-lg bg-muted p-1",
-        className
+        variant === "pill" && "inline-flex h-11 md:h-9 items-center gap-1 rounded-lg bg-muted p-1",
+        variant === "bare" && "flex items-center gap-1",
+        className,
       )}
     >
       {children}

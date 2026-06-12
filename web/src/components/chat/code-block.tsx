@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { useTheme } from "@/lib/theme";
 import { highlight } from "@/lib/highlighter";
 import { Check, Copy } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 
 function CopyBtn({ text, className }: { text: string; className?: string }) {
@@ -22,16 +22,15 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
   }, [text]);
 
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon-sm"
       onClick={handleCopy}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-2.5 md:px-1.5 md:py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
-        className,
-      )}
+      className={className}
       aria-label={t("chat.copy")}
     >
       {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
-    </button>
+    </Button>
   );
 }
 
