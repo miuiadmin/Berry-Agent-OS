@@ -18,7 +18,7 @@ type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>
 interface ConfirmDialogProps {
   /** 是否打开 */
   open: boolean;
-  /** 开关回调（关闭时 Radix 自动调用） */
+  /** 开关回调（关闭时底层自动调用） */
   onOpenChange: (open: boolean) => void;
   /** 对话框标题 */
   title: string;
@@ -38,7 +38,7 @@ interface ConfirmDialogProps {
  * 确认对话框 —— 基于官方 shadcn AlertDialog 原语的谓词式包装。
  *
  * 项目中所有"确认删除/禁用"对话框共享同一结构，此处封装为谓词式 API
- * （open/onAction），避免 6 处消费侧重复书写 Radix 组合 JSX。
+ * （open/onAction），避免 6 处消费侧重复书写 AlertDialog 组合 JSX。
  * 内部仍使用官方 AlertDialog compound 原语。
  */
 export function ConfirmDialog({

@@ -106,7 +106,7 @@ berry/
 
 ### 前端组件
 
-- 使用 **Tailwind CSS 4** + **Radix UI** 无头组件（shadcn/ui 风格）
+- 使用 **Tailwind CSS 4** + **Base UI** 无头组件（shadcn/ui 风格）
 - **不使用 MUI / Ant Design 等重型组件库**
 
 ---
