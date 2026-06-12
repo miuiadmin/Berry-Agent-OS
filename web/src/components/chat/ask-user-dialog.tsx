@@ -150,8 +150,8 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
               key={idx}
               variant={selectedOption === option ? "primary" : "outline"}
               size="sm"
-              onPress={() => handleRespond(option)}
-              isDisabled={isSubmitting}
+              onClick={() => handleRespond(option)}
+              disabled={isSubmitting}
               className="min-h-[44px] md:min-h-0"
             >
               {option}
@@ -174,9 +174,9 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
         />
         <Button
           variant="primary"
-          isIconOnly
-          isDisabled={isSubmitting || !customAnswer.trim()}
-          onPress={handleSubmitCustom}
+          size="icon"
+          disabled={isSubmitting || !customAnswer.trim()}
+          onClick={handleSubmitCustom}
           className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0"
         >
           <Send className="w-4 h-4" />
