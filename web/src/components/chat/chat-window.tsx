@@ -7,6 +7,7 @@ import { ChatInput } from "@/components/chat/chat-input";
 import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { PanelLeft, AlertCircle, RefreshCw, ShieldAlert, UserCheck, ChevronDown } from "lucide-react";
 import { apiGet, apiPut, uploadFile, queries } from "@/lib/api";
 import { toast } from "sonner";
@@ -194,16 +195,17 @@ function PermissionModeSelector() {
   const mode = useChatStore((s) => s.permissionMode);
   const setMode = useChatStore((s) => s.setPermissionMode);
   return (
-    <select
+    <Select
       value={mode}
-      onChange={(e) => setMode(e.target.value as 'ask' | 'allow-all' | 'deny-all')}
-      className="h-11 md:h-7 rounded-md border border-input bg-background px-1.5 text-[16px] md:text-[11px] text-muted-foreground min-h-[44px] md:min-h-0"
-      title={t("chat.permissionMode")}
-    >
-      <option value="ask">{t("chat.permissionAsk")}</option>
-      <option value="allow-all">{t("chat.permissionAuto")}</option>
-      <option value="deny-all">{t("chat.permissionDeny")}</option>
-    </select>
+      onValueChange={(v) => setMode(v as 'ask' | 'allow-all' | 'deny-all')}
+      ariaLabel={t("chat.permissionMode")}
+      options={[
+        { key: "ask", label: t("chat.permissionAsk") },
+        { key: "allow-all", label: t("chat.permissionAuto") },
+        { key: "deny-all", label: t("chat.permissionDeny") },
+      ]}
+      className="w-auto"
+    />
   );
 }
 

@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Select } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +24,6 @@ import {
   Trash2,
   Wifi,
   WifiOff,
-  ChevronDown,
   ChevronRight,
   Zap,
   Brain,
@@ -104,17 +104,6 @@ const TIER_CONFIG = [
   { key: "default" as const, labelKey: "providers.tierDefault", icon: Brain, color: "text-blue-500" },
   { key: "high" as const, labelKey: "providers.tierHigh", icon: Crown, color: "text-amber-500" },
 ];
-
-// ─── Shared select styling ───────────────────────────────────────
-
-const SELECT_BASE =
-  "w-full rounded-lg border border-input bg-background px-3 py-2 md:py-1.5 text-[16px] md:text-sm min-h-[44px] md:min-h-0 appearance-none pr-8 disabled:opacity-50 transition-all focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30";
-
-function SelectChevron() {
-  return (
-    <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-  );
-}
 
 // ─── Main Component ───────────────────────────────────────────────
 
@@ -434,50 +423,33 @@ export function ProvidersTab() {
                   <span className="text-sm font-medium">{t(labelKey)}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="relative">
-                    <select
-                      value={channel}
-                      onChange={(e) => {
-                        const ch = e.target.value;
-                        setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
-                        setEditingTiers((prev) => ({
-                          ...prev,
-                          [key]: ch ? { channel: ch, model: "" } : undefined,
-                        }));
-                      }}
-                      className={SELECT_BASE}
-                    >
-                      <option value="">{t("chat.notConfigured")}</option>
-                      {channels.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.kind})
-                        </option>
-                      ))}
-                    </select>
-                    <SelectChevron />
-                  </div>
-                  <div className="relative">
-                    <select
-                      value={target?.model ?? ""}
-                      onChange={(e) => {
-                        const model = e.target.value;
-                        setEditingTiers((prev) => ({
-                          ...prev,
-                          [key]: channel ? { channel, model } : undefined,
-                        }));
-                      }}
-                      disabled={!channel || models.length === 0}
-                      className={SELECT_BASE}
-                    >
-                      <option value="">{t("providers.selectModel")}</option>
-                      {models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectChevron />
-                  </div>
+                  <Select
+                    value={channel}
+                    onValueChange={(ch) => {
+                      setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
+                      setEditingTiers((prev) => ({
+                        ...prev,
+                        [key]: ch ? { channel: ch, model: "" } : undefined,
+                      }));
+                    }}
+                    placeholder={t("chat.notConfigured")}
+                    options={channels.map((c) => ({
+                      key: c.id,
+                      label: `${c.name} (${c.kind})`,
+                    }))}
+                  />
+                  <Select
+                    value={target?.model ?? ""}
+                    onValueChange={(model) => {
+                      setEditingTiers((prev) => ({
+                        ...prev,
+                        [key]: channel ? { channel, model } : undefined,
+                      }));
+                    }}
+                    disabled={!channel || models.length === 0}
+                    placeholder={t("providers.selectModel")}
+                    options={models.map((m) => ({ key: m.id, label: m.name }))}
+                  />
                 </div>
               </div>
             );
@@ -596,25 +568,19 @@ function ChannelFormDialog({
             <label className="text-xs font-medium text-muted-foreground">
               {t("providers.providerKind")}
             </label>
-            <div className="relative">
-              <select
-                value={formKind}
-                onChange={(e) => {
-                  setFormKind(e.target.value);
-                  if (!isEdit) setFormId("");
-                }}
-                disabled={isEdit}
-                className={SELECT_BASE}
-              >
-                <option value="">{t("providers.selectKind")}</option>
-                {kinds.map((k) => (
-                  <option key={k} value={k}>
-                    {t(PROVIDER_KIND_LABEL_KEYS[k] ?? k)}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <Select
+              value={formKind}
+              onValueChange={(k) => {
+                setFormKind(k);
+                if (!isEdit) setFormId("");
+              }}
+              disabled={isEdit}
+              placeholder={t("providers.selectKind")}
+              options={kinds.map((k) => ({
+                key: k,
+                label: t(PROVIDER_KIND_LABEL_KEYS[k] ?? k),
+              }))}
+            />
           </div>
 
           {/* ID */}

@@ -4,6 +4,7 @@ import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 interface LogLine {
@@ -53,17 +54,19 @@ export default function LogsPage() {
       <div className="shrink-0 border-b px-4 py-3 flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-semibold mr-auto">{t("logs.title")}</h1>
 
-        <select aria-label={t("logs.logLevel")}
+        <Select
           value={level}
-          onChange={(e) => setLevel(e.target.value)}
-          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
-        >
-          <option value="ALL">{t("logs.all")}</option>
-          <option value="DEBUG">{t("logs.debug")}</option>
-          <option value="INFO">{t("logs.info")}</option>
-          <option value="WARN">{t("logs.warn")}</option>
-          <option value="ERROR">{t("logs.error")}</option>
-        </select>
+          onValueChange={setLevel}
+          ariaLabel={t("logs.logLevel")}
+          options={[
+            { key: "ALL", label: t("logs.all") },
+            { key: "DEBUG", label: t("logs.debug") },
+            { key: "INFO", label: t("logs.info") },
+            { key: "WARN", label: t("logs.warn") },
+            { key: "ERROR", label: t("logs.error") },
+          ]}
+          className="w-auto"
+        />
 
         <input
           type="text"
@@ -74,16 +77,18 @@ export default function LogsPage() {
           className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         />
 
-        <select aria-label={t("logs.numberOfLines")}
-          value={lines}
-          onChange={(e) => setLines(Number(e.target.value))}
-          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
-        >
-          <option value={50}>50</option>
-          <option value={100}>100</option>
-          <option value={200}>200</option>
-          <option value={500}>500</option>
-        </select>
+        <Select
+          value={String(lines)}
+          onValueChange={(v) => setLines(Number(v))}
+          ariaLabel={t("logs.numberOfLines")}
+          options={[
+            { key: "50", label: "50" },
+            { key: "100", label: "100" },
+            { key: "200", label: "200" },
+            { key: "500", label: "500" },
+          ]}
+          className="w-auto"
+        />
 
         <Button
           variant="ghost"

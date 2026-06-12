@@ -6,6 +6,7 @@ import { queries, apiPost, type TaskInfo } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
@@ -70,30 +71,27 @@ export default function TasksPage() {
       <p className="mt-1 text-sm text-muted-foreground">{t("tasks.subtitle")}</p>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">
-        <select
+        <Select
           value={statusFilter}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          aria-label={t("tasks.filterByStatus")}
-          className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
-        >
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s}
-            </option>
-          ))}
-        </select>
+          onValueChange={handleStatusChange}
+          ariaLabel={t("tasks.filterByStatus")}
+          options={STATUS_OPTIONS.map((s) => ({
+            key: s,
+            label: s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s,
+          }))}
+          className="w-auto"
+        />
         {agents && agents.length > 0 && (
-          <select
+          <Select
             value={agentFilter}
-            onChange={(e) => handleAgentChange(e.target.value)}
-            aria-label={t("tasks.filterByAgent")}
-            className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
-          >
-            <option value="all">{t("tasks.allAgents")}</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>{a.name}</option>
-            ))}
-          </select>
+            onValueChange={handleAgentChange}
+            ariaLabel={t("tasks.filterByAgent")}
+            options={[
+              { key: "all", label: t("tasks.allAgents") },
+              ...agents.map((a) => ({ key: a.name, label: a.name })),
+            ]}
+            className="w-auto"
+          />
         )}
         {hasFilters && (
           <Button
