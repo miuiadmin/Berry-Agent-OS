@@ -106,7 +106,9 @@ berry/
 
 ### 前端组件
 
-- 使用 **Tailwind CSS 4** + **Radix UI** 无头组件（shadcn/ui 风格）
+- 使用 **Tailwind CSS 4** + **HeroUI v3**（基于 React Aria 的组件库）
+- 组件经 `web/src/components/ui/` 下的 adapter 精简封装，直接暴露 HeroUI 原生 variant/size 名
+- 配色为暖中性底色 + 青蓝品牌色（hue 220），定义在 `web/src/index.css` 的 CSS 变量中
 - **不使用 MUI / Ant Design 等重型组件库**
 
 ---
