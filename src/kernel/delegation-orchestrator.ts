@@ -27,6 +27,7 @@ import { CorrectionFlow } from './flows/correction-flow.js';
 import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
+import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
@@ -656,6 +657,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.setupReviewFlow(primary.ipc, reviewer.ipc, primaryName, reviewerName);
     this.setupRoutingFlow(reviewer.ipc);
     this.permissionFlow.setupJudgeHandler(reviewer.ipc);
+    // 15.0 机制 D：注册 brain.command 指挥通道 handler（Brain 可向任意 Agent 派 execute/inspect/report）
+    setupBrainCommandHandler(reviewer.ipc, { agentManager: this.agentManager, db: getDb() });
     this.correctionFlow.setup(reviewer.ipc);
     this.superiorReviewFlow?.setup(reviewer.ipc);
     this.superiorReviewFlow?.setCallbacks({

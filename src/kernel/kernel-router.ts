@@ -88,8 +88,8 @@ const AGENT_MESSAGE_WHITELIST: Record<string, AgentMessagePermission> = {
     canReceive: ['user.message', 'review.result', 'turn.correction', 'dialogue.reply'],
   },
   brain: {
-    canSend: ['route.result', 'review.result', 'permission.judge.result', 'checkpoint.result', 'brain.correction'],
-    canReceive: ['route.request', 'review.request', 'permission.judge', 'brain.observe', 'dialogue.observe', 'checkpoint.evaluate', 'drift.check.request'],
+    canSend: ['route.result', 'review.result', 'permission.judge.result', 'checkpoint.result', 'brain.correction', 'brain.command'],
+    canReceive: ['route.request', 'review.request', 'permission.judge', 'brain.observe', 'dialogue.observe', 'checkpoint.evaluate', 'drift.check.request', 'brain.command.result'],
   },
   evolution: {
     canSend: ['agent.answer', 'agent.result', 'turn.final', 'stream.*'],

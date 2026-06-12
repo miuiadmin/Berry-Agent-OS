@@ -96,7 +96,11 @@ export type IpcMessageType =
   /** brain → core：Brain 派发 checker 独立二次审核 */
   | 'brain.checker.dispatch'
   /** brain → core：cron 审核发现问题，前端展示警告 */
-  | 'brain.cron_review_flagged';
+  | 'brain.cron_review_flagged'
+  /** brain → core：15.0 机制 D — Brain 向任意 Agent 发号施令（execute/inspect/report） */
+  | 'brain.command'
+  /** core → brain：15.0 机制 D — brain.command 的执行结果 */
+  | 'brain.command.result';
 
 // === Global registry for kernel-owned singletons (for graceful shutdown + observability) ===
 // R14-2：OrphanReconciler 已删除，相关 globalThis 占位声明清理。
