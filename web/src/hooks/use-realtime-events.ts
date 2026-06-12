@@ -4,8 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useT } from "@/lib/i18n";
-import { useMissionStore } from "@/lib/stores/mission-store";
-import { useAgentChatStore } from "@/lib/stores/agent-chat-store";
+import { useMissionStore, type Mission, type MissionTask } from "@/lib/stores/mission-store";
+import { useAgentChatStore, type AgentChatMessage } from "@/lib/stores/agent-chat-store";
 
 export function useRealtimeEvents() {
   const queryClient = useQueryClient();
@@ -156,7 +156,7 @@ export function useRealtimeEvents() {
     unsubs.push(
       subscribe("mission.status_changed", (payload) => {
         const p = payload as { missionId: string; oldStatus: string; newStatus: string };
-        missionStore.updateMission(p.missionId, { status: p.newStatus as any });
+        missionStore.updateMission(p.missionId, { status: p.newStatus as Mission["status"] });
         queryClient.invalidateQueries({ queryKey: ["missions"] });
         if (p.newStatus === "completed") {
           toast.success(t("events.missionCompleted"));
@@ -168,7 +168,7 @@ export function useRealtimeEvents() {
     unsubs.push(
       subscribe("mission.task_updated", (payload) => {
         const p = payload as { missionId: string; taskId: string; status: string; who: string };
-        missionStore.updateTask(p.missionId, p.taskId, { status: p.status as any });
+        missionStore.updateTask(p.missionId, p.taskId, { status: p.status as MissionTask["status"] });
         queryClient.invalidateQueries({ queryKey: ["missions"] });
       })
     );
@@ -196,7 +196,7 @@ export function useRealtimeEvents() {
     const agentChatStore = useAgentChatStore.getState();
 
     unsubs.push(
-      subscribe("agent_dialogue" as any, (payload) => {
+      subscribe("agent_dialogue", (payload) => {
         const p = payload as {
           id?: string; sessionId?: string; taskId?: string;
           from?: string; to?: string; direction?: string;
@@ -209,7 +209,7 @@ export function useRealtimeEvents() {
             taskId: p.taskId,
             fromAgent: p.from ?? "",
             toAgent: p.to ?? "",
-            direction: (p.direction as any) ?? "request",
+            direction: (p.direction as AgentChatMessage["direction"]) ?? "request",
             messageType: p.messageType ?? "agent.question",
             content: p.content ?? "",
             correlationId: p.correlationId,
