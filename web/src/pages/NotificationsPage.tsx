@@ -4,7 +4,7 @@ import { Bell, Check, Archive } from "lucide-react";
 import { toast } from "sonner";
 import { notificationsApi, type NotificationItem } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { QueryBoundary } from "@/components/ui/query-boundary";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";

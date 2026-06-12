@@ -19,7 +19,7 @@ import {
   type SchedulerQueue,
 } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { QueryBoundary } from "@/components/ui/query-boundary";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";

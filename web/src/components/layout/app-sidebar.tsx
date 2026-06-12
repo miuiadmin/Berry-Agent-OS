@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { Separator } from "@/components/ui/separator";
-import { StrawberryLogo } from "@/components/ui/strawberry-logo";
+import { StrawberryLogo } from "@/components/brand/strawberry-logo";
 
 /** 导航项定义（label 用 i18n key） */
 const navItems = [

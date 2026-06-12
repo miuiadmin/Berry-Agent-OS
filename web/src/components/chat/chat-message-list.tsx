@@ -9,7 +9,7 @@ import { createMarkdownComponents } from "./markdown-components";
 import { ThinkingProcess } from "./thinking-process";
 import { ToolCallCards } from "./tool-call-cards";
 import { ClickableImage } from "@/components/ui/image-lightbox";
-import { StrawberryLogo } from "@/components/ui/strawberry-logo";
+import { StrawberryLogo } from "@/components/brand/strawberry-logo";
 import { useT, useLocale } from "@/lib/i18n";
 
 /**

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { QueryBoundary } from "@/components/ui/query-boundary";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";

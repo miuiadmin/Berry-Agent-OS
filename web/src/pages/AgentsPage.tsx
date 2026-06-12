@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { QueryBoundary } from "@/components/ui/query-boundary";
+import { QueryBoundary } from "@/components/shared/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bot, Power, PowerOff, ArrowLeft, Clock, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";

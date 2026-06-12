@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { AlertCircle, RefreshCw } from "lucide-react";
-import { Button } from "./button";
+import { Button } from "@/components/ui/button";
 import zh from "@/locales/zh";
 import en from "@/locales/en";
 
