@@ -2,7 +2,19 @@ const BASE_URL = "";
 
 /** API 层翻译辅助（非 hook 环境，统一使用 i18n 导出） */
 import { tOutside as t } from "@/lib/i18n";
+import type { QueryFunctionContext } from "@tanstack/react-query";
 
+/** 判断是否为请求被取消（AbortError），让 React Query 识别"已取消"状态 */
+function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "AbortError";
+}
+
+/**
+ * 通用 fetch 封装
+ *
+ * 统一处理：网络错误、HTTP 错误码、AbortError 透传。
+ * AbortError 不包装成 networkError — React Query 需要识别取消状态。
+ */
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -10,7 +22,9 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       headers: { "Content-Type": "application/json", ...options?.headers },
       ...options,
     });
-  } catch {
+  } catch (err) {
+    // AbortError（请求被取消）必须原样透传，让 React Query 识别"已取消"状态
+    if (isAbortError(err)) throw err;
     throw new Error(t("api.networkError"));
   }
   if (!res.ok) {
@@ -28,20 +42,24 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export function apiGet<T>(path: string) {
-  return fetchApi<T>(path);
+/** GET 请求，支持可选的 AbortSignal（React Query queryFn 透传 ctx.signal） */
+export function apiGet<T>(path: string, signal?: AbortSignal) {
+  return fetchApi<T>(path, signal ? { signal } : undefined);
 }
 
-export function apiPut<T>(path: string, body: unknown) {
-  return fetchApi<T>(path, { method: "PUT", body: JSON.stringify(body) });
+/** PUT 请求，body 会自动 JSON 序列化 */
+export function apiPut<T>(path: string, body: unknown, signal?: AbortSignal) {
+  return fetchApi<T>(path, { method: "PUT", body: JSON.stringify(body), signal });
 }
 
-export function apiPost<T>(path: string, body?: unknown) {
-  return fetchApi<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+/** POST 请求，body 可选（省略时不带请求体） */
+export function apiPost<T>(path: string, body?: unknown, signal?: AbortSignal) {
+  return fetchApi<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined, signal });
 }
 
-export function apiDelete(path: string) {
-  return fetchApi<void>(path, { method: "DELETE" });
+/** DELETE 请求 */
+export function apiDelete(path: string, signal?: AbortSignal) {
+  return fetchApi<void>(path, { method: "DELETE", signal });
 }
 
 export interface HealthResponse {
@@ -136,16 +154,18 @@ export interface UploadResponse {
 }
 
 export const queries = {
-  health: () => ({ queryKey: ["health"], queryFn: () => apiGet<HealthResponse>("/api/health") }),
-  config: () => ({ queryKey: ["config"], queryFn: () => apiGet<Record<string, unknown>>("/api/config") }),
-  agents: () => ({ queryKey: ["agents"], queryFn: () => apiGet<AgentInfo[]>("/api/agents") }),
-  agent: (name: string) => ({ queryKey: ["agents", name], queryFn: () => apiGet<AgentInfo>(`/api/agents/${name}`) }),
+  health: () => ({ queryKey: ["health"], queryFn: (ctx: QueryFunctionContext) => apiGet<HealthResponse>("/api/health", ctx.signal) }),
+  config: () => ({ queryKey: ["config"], queryFn: (ctx: QueryFunctionContext) => apiGet<Record<string, unknown>>("/api/config", ctx.signal) }),
+  agents: () => ({ queryKey: ["agents"], queryFn: (ctx: QueryFunctionContext) => apiGet<AgentInfo[]>("/api/agents", ctx.signal) }),
+  agent: (name: string) => ({ queryKey: ["agents", name], queryFn: (ctx: QueryFunctionContext) => apiGet<AgentInfo>(`/api/agents/${name}`, ctx.signal) }),
   taskStats: (days = 7) => ({
     queryKey: ["taskStats", days],
-    queryFn: async (): Promise<TaskStatsDay[]> => {
+    queryFn: async (ctx: QueryFunctionContext): Promise<TaskStatsDay[]> => {
       try {
-        return await apiGet<TaskStatsDay[]>(`/api/tasks/stats?days=${days}`);
-      } catch {
+        return await apiGet<TaskStatsDay[]>(`/api/tasks/stats?days=${days}`, ctx.signal);
+      } catch (e) {
+        // 取消时透传 AbortError，让 RQ 识别已取消；其他错误降级为空数据
+        if (isAbortError(e)) throw e;
         return [];
       }
     },
@@ -159,7 +179,7 @@ export const queries = {
     const qs = searchParams.toString();
     return {
       queryKey: ["tasks", params],
-      queryFn: () => apiGet<PaginatedResponse<TaskInfo>>(`/api/tasks${qs ? `?${qs}` : ""}`),
+      queryFn: (ctx: QueryFunctionContext) => apiGet<PaginatedResponse<TaskInfo>>(`/api/tasks${qs ? `?${qs}` : ""}`, ctx.signal),
     };
   },
   conversations: (params?: { search?: string; sort?: string; limit?: number; offset?: number }) => {
@@ -171,45 +191,48 @@ export const queries = {
     const qs = searchParams.toString();
     return {
       queryKey: ["conversations", params],
-      queryFn: () => apiGet<ConversationInfo[]>(`/api/conversations${qs ? `?${qs}` : ""}`),
+      queryFn: (ctx: QueryFunctionContext) => apiGet<ConversationInfo[]>(`/api/conversations${qs ? `?${qs}` : ""}`, ctx.signal),
     };
   },
-  conversation: (sid: string) => ({ queryKey: ["conversations", sid], queryFn: () => apiGet<unknown[]>(`/api/conversations/${sid}`) }),
+  conversation: (sid: string) => ({ queryKey: ["conversations", sid], queryFn: (ctx: QueryFunctionContext) => apiGet<unknown[]>(`/api/conversations/${sid}`, ctx.signal) }),
   search: (q: string, limit = 20) => ({
     queryKey: ["search", q, limit],
-    queryFn: async (): Promise<SearchResponse> => {
+    queryFn: async (ctx: QueryFunctionContext): Promise<SearchResponse> => {
       if (!q.trim()) return { results: [], total: 0 };
-      return apiGet<SearchResponse>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+      return apiGet<SearchResponse>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`, ctx.signal);
     },
     enabled: q.trim().length > 0,
   }),
   usage: (days = 7) => ({
     queryKey: ["usage", days],
-    queryFn: async (): Promise<UsageSummary> => {
+    queryFn: async (ctx: QueryFunctionContext): Promise<UsageSummary> => {
       try {
-        return await apiGet<UsageSummary>(`/api/usage/summary?days=${days}`);
-      } catch {
+        return await apiGet<UsageSummary>(`/api/usage/summary?days=${days}`, ctx.signal);
+      } catch (e) {
+        if (isAbortError(e)) throw e;
         return { today: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 }, period: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 }, daily: [], byAgent: [], byModel: [] };
       }
     },
   }),
   drift: (days = 7) => ({
     queryKey: ["drift", days],
-    queryFn: async () => {
+    queryFn: async (ctx: QueryFunctionContext) => {
       try {
-        return await apiGet<{ avgAlignmentScore: number; interventionRate: number; recoveryRate: number; finalResponseAlignment: number; totalSignals: number; hotspotPairs: Array<{ from: string; to: string; avgScore: number }> }>(`/api/drift/metrics?days=${days}`);
-      } catch {
+        return await apiGet<{ avgAlignmentScore: number; interventionRate: number; recoveryRate: number; finalResponseAlignment: number; totalSignals: number; hotspotPairs: Array<{ from: string; to: string; avgScore: number }> }>(`/api/drift/metrics?days=${days}`, ctx.signal);
+      } catch (e) {
+        if (isAbortError(e)) throw e;
         return { avgAlignmentScore: 1, interventionRate: 0, recoveryRate: 0, finalResponseAlignment: 1, totalSignals: 0, hotspotPairs: [] };
       }
     },
   }),
   driftSignals: (sessionId?: string) => ({
     queryKey: ["driftSignals", sessionId],
-    queryFn: async () => {
+    queryFn: async (ctx: QueryFunctionContext) => {
       const params = sessionId ? `?sessionId=${sessionId}&limit=50` : '?limit=50';
       try {
-        return await apiGet<{ signals: Array<{ id: string; checkpointType: string; alignmentScore: number; needsIntervention: boolean; driftDescription: string | null; suggestedAction: string | null; createdAt: number }>; total: number }>(`/api/drift/signals${params}`);
-      } catch {
+        return await apiGet<{ signals: Array<{ id: string; checkpointType: string; alignmentScore: number; needsIntervention: boolean; driftDescription: string | null; suggestedAction: string | null; createdAt: number }>; total: number }>(`/api/drift/signals${params}`, ctx.signal);
+      } catch (e) {
+        if (isAbortError(e)) throw e;
         return { signals: [], total: 0 };
       }
     },
@@ -296,8 +319,8 @@ export const memoryApi = {
     apiGet<MemoryEntry[]>(`/api/memory/global/${encodeURIComponent(userId)}`),
   createGlobal: (data: { userId: string; key: string; value: string }) =>
     apiPost<MemoryEntry>("/api/memory/global", data),
-  recall: (query: string, opts?: { agentId?: string; workspaceId?: string; limit?: number }) =>
-    apiPost<MemoryRecallResult>("/api/memory/recall", { query, ...opts }),
+  recall: (query: string, opts?: { agentId?: string; workspaceId?: string; limit?: number }, signal?: AbortSignal) =>
+    apiPost<MemoryRecallResult>("/api/memory/recall", { query, ...opts }, signal),
   promote: (id: string, targetLayer: string) =>
     apiPost<MemoryEntry>(`/api/memory/${encodeURIComponent(id)}/promote`, { targetLayer }),
   update: (layer: string, id: string, data: { key?: string; value?: string }) =>
