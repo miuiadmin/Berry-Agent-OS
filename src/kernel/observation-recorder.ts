@@ -16,6 +16,7 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 const logger = getLogger('observation-recorder');
 
@@ -149,7 +150,7 @@ export class ObservationRecorder {
         input.observationType,
         input.fromAgent,
         input.toAgent ?? null,
-        input.content,
+        redactSecrets(input.content),
         priority,
         metadataJson,
         Date.now(),

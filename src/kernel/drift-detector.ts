@@ -10,6 +10,7 @@ import type { IntentAnchor, DriftSignal, DriftCheckpointType, DriftThresholds } 
 import { DEFAULT_DRIFT_THRESHOLDS } from '../contracts/intent.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { redactSecrets } from '../observability/redaction.js';
 import { safeSlice } from '../utils/safe-slice.js';
 
 const logger = getLogger('drift-detector');
@@ -130,7 +131,7 @@ export class DriftDetector {
         id,
         sessionId,
         correlationId,
-        safeSlice(rawMessage, 2000),
+        safeSlice(redactSecrets(rawMessage), 2000),
         safeSlice(anchor.goal, 500),
         JSON.stringify(anchor.constraints),
         anchor.outputType,

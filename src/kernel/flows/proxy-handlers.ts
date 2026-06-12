@@ -13,6 +13,7 @@ import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import type { ObservationRecorder } from '../observation-recorder.js';
 import { getDb } from '../../memory/index.js';
+import { redactSecrets } from '../../observability/redaction.js';
 import { getUserPreferences } from '../../memory/user-preferences.js';
 
 const logger = getLogger('proxy-handlers');
@@ -110,7 +111,7 @@ export function setupAuditHandler(agentIpc: AgentIpc, agentName: string, deps: P
             audit.taskId ?? '',
             agentName,
             audit.toolName,
-            typeof audit.toolInput === 'string' ? audit.toolInput.slice(0, 500) : JSON.stringify(audit.toolInput).slice(0, 500),
+            typeof audit.toolInput === 'string' ? redactSecrets(audit.toolInput).slice(0, 500) : redactSecrets(JSON.stringify(audit.toolInput)).slice(0, 500),
             audit.isError ? 0 : 1,
             audit.durationMs ?? null,
             'auto', // 默认 auto 审批；如果经过 scope 预授权则由 scope 层更新为 'scope'

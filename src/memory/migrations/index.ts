@@ -779,6 +779,52 @@ const v18DialogueAndAgentChatFts: Migration = {
   },
 };
 
+/**
+ * v19: 15.0 redact 扩展 — 补扫 intent_anchors / brain_observations / agent_tool_calls
+ * 三张表的历史明文 secret（v17 只覆盖了 conversations/dialogue_messages/agent_chat_messages）。
+ *
+ * 这三张表分别存：原始用户消息（intent_anchors.raw_message，最高风险——直接是用户输入）、
+ * Brain 观察队列（brain_observations.content，镜像对话/工具调用）、工具调用摘要
+ * （agent_tool_calls.input_summary，可能含传给工具的 key）。三者都可能内嵌用户误发的 secret。
+ *
+ * 幂等：与 v17 同理，已清洗内容（[REDACTED:xxx]）不再匹配 secret 模式，重复执行零副作用。
+ */
+const v19RedactExtraTablesScan: Migration = {
+  version: 19,
+  name: 'redact-extra-tables-scan',
+  up: (db: Database.Database) => {
+    const targets: Array<{ table: string; contentCol: string }> = [
+      { table: 'intent_anchors', contentCol: 'raw_message' },
+      { table: 'brain_observations', contentCol: 'content' },
+      { table: 'agent_tool_calls', contentCol: 'input_summary' },
+    ];
+
+    for (const { table, contentCol } of targets) {
+      const exists = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .get(table);
+      if (!exists) continue;
+
+      const rows = db
+        .prepare(`SELECT rowid AS rid, ${contentCol} AS content FROM ${table} WHERE ${contentCol} IS NOT NULL`)
+        .all() as Array<{ rid: number; content: string }>;
+
+      const update = db.prepare(`UPDATE ${table} SET ${contentCol} = ? WHERE rowid = ?`);
+      let cleaned = 0;
+      for (const row of rows) {
+        const redacted = redactSecrets(row.content);
+        if (redacted !== row.content) {
+          update.run(redacted, row.rid);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        logger.info({ table, cleaned }, '15.0 redact 扩展扫描：清洗明文 secret');
+      }
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -799,4 +845,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v16PendingRequestState,
   v17RedactHistoryScan,
   v18DialogueAndAgentChatFts,
+  v19RedactExtraTablesScan,
 ];
