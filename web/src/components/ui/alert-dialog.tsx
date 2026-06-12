@@ -93,7 +93,7 @@ export function AlertDialog({
                 variant="outline"
                 size="sm"
                 className="min-h-[44px] md:min-h-0"
-                onPress={() => onOpenChange(false)}
+                onClick={() => onOpenChange(false)}
               >
                 {cancelLabel ?? t("common.cancel")}
               </Button>
@@ -102,7 +102,7 @@ export function AlertDialog({
               variant={actionVariant}
               size="sm"
               className="min-h-[44px] md:min-h-0"
-              onPress={() => {
+              onClick={() => {
                 onAction();
                 onOpenChange(false);
               }}
