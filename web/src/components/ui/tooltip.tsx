@@ -1,80 +1,57 @@
-"use client";
+"use client"
 
-import { useState, useCallback, useRef, useEffect, useId, type ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import * as React from "react"
+import { Tooltip as TooltipPrimitive } from "radix-ui"
 
-interface TooltipProps {
-  content: string;
-  side?: "top" | "bottom" | "left" | "right";
-  children: ReactNode;
-}
+import { cn } from "@/lib/utils"
 
-/**
- * Tooltip 组件。
- *
- * 功能：
- * - 指针 hover 显示 / 离开隐藏（150ms 延迟防闪烁）
- * - 点击切换（触控支持）
- * - 焦点显示 / 失焦隐藏（键盘无障碍）
- * - ARIA: role="tooltip" + aria-describedby 关联触发器
- */
-export function Tooltip({ content, side = "top", children }: TooltipProps) {
-  const [visible, setVisible] = useState(false);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** 为 tooltip 内容生成唯一 ID，用于 aria-describedby */
-  const tooltipId = useId();
-
-  useEffect(() => {
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, []);
-
-  const show = useCallback(() => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    setVisible(true);
-  }, []);
-
-  const hide = useCallback(() => {
-    hideTimerRef.current = setTimeout(() => setVisible(false), 150);
-  }, []);
-
-  const toggle = useCallback(() => {
-    setVisible((v) => !v);
-  }, []);
-
-  const positionClasses = {
-    top: "bottom-full left-1/2 -translate-x-1/2 mb-2",
-    bottom: "top-full left-1/2 -translate-x-1/2 mt-2",
-    left: "right-full top-1/2 -translate-y-1/2 mr-2",
-    right: "left-full top-1/2 -translate-y-1/2 ml-2",
-  };
-
+function TooltipProvider({
+  delayDuration = 0,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
-    <div
-      className="relative inline-flex"
-      onPointerEnter={show}
-      onPointerLeave={hide}
-      onClick={toggle}
-      onFocus={show}
-      onBlur={hide}
-      aria-describedby={visible ? tooltipId : undefined}
-    >
-      {children}
-      {visible && (
-        <div
-          id={tooltipId}
-          role="tooltip"
-          className={cn(
-            "absolute z-50 max-w-[200px] md:max-w-none md:whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 md:py-1 text-xs text-popover-foreground shadow-md border border-border text-center md:text-left animate-fade-in",
-            "animate-in fade-in-0 zoom-in-95",
-            positionClasses[side]
-          )}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {content}
-        </div>
-      )}
-    </div>
-  );
+    <TooltipPrimitive.Provider
+      data-slot="tooltip-provider"
+      delayDuration={delayDuration}
+      {...props}
+    />
+  )
 }
+
+function Tooltip({
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+}
+
+function TooltipTrigger({
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
+}
+
+function TooltipContent({
+  className,
+  sideOffset = 0,
+  children,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+  return (
+    <TooltipPrimitive.Portal>
+      <TooltipPrimitive.Content
+        data-slot="tooltip-content"
+        sideOffset={sideOffset}
+        className={cn(
+          "z-50 inline-flex w-fit max-w-xs origin-(--radix-tooltip-content-transform-origin) items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          className
+        )}
+        {...props}
+      >
+        {children}
+        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
+      </TooltipPrimitive.Content>
+    </TooltipPrimitive.Portal>
+  )
+}
+
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }

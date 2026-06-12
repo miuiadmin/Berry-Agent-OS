@@ -125,6 +125,8 @@ export class CoreService {
   private willLoop: import('./will-loop.js').WillLoop | null = null;
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
   private suggestionCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  /** 15.0 机制 C：周期审计定时器（定时跑 Auditor 扫描，高危报告推 Brain） */
+  private auditTimer: ReturnType<typeof setInterval> | null = null;
   private providerRegistryHolder: { current: ProviderRegistry } | null = null;
   /** 主进程 LLM 客户端 holder（支持配置热重载时替换） */
   private builtinLlmHolder: { current: import('../llm/index.js').LlmClient } | null = null;
@@ -503,6 +505,41 @@ export class CoreService {
       runInsightsLifecycle(getDb());
       import('../evolution/stats-job.js').then(m => m.runStatsJob(getDb())).catch((e) => { logger.warn({ err: e }, 'Stats job failed'); });
     }, 3600_000);
+
+    // 15.0 机制 C：周期审计 — 定时跑 Auditor 5 维扫描，高危报告经现有 brain.observe 通道推 Brain
+    // （observationType='agent_event' 复用观察通道，priority=0 永不裁剪；低危仅记 debug 日志）。
+    // 用动态 import 匹配 insightsTimer 风格；runAudit 是纯确定性 SQL，进程内执行无需派发子进程。
+    const AUDIT_INTERVAL_MS = 3600_000; // 1 小时
+    const AUDIT_ESCALATE_THRESHOLD = 0.3;
+    this.auditTimer = setInterval(() => {
+      import('../agents/bundled/auditor/scan.js')
+        .then(({ runAudit }) => {
+          try {
+            const report = runAudit(getDb());
+            if (report.riskScore < AUDIT_ESCALATE_THRESHOLD) {
+              logger.debug({ riskScore: report.riskScore, taskCount: report.taskCount }, '周期审计通过');
+              return;
+            }
+            const brainName = this.registry.requireRole('orchestrator').manifest.name;
+            const brain = this.agentManager.getAgent(brainName);
+            if (brain?.ipc) {
+              brain.ipc.send('brain.observe', brainName, {
+                sessionId: 'system-audit',
+                taskId: 'audit-periodic',
+                observationType: 'agent_event',
+                fromAgent: 'auditor',
+                toAgent: 'brain',
+                content: JSON.stringify({ kind: 'audit_report', riskScore: report.riskScore, findings: report.findings, recommendations: report.recommendations }),
+                priority: report.riskScore >= 0.6 ? 0 : 1, // 高危 critical 永不裁剪
+              });
+            }
+            logger.warn({ riskScore: report.riskScore, taskCount: report.taskCount }, '周期审计发现风险，已推 Brain');
+          } catch (err) {
+            logger.warn({ err }, '周期审计执行失败（best-effort）');
+          }
+        })
+        .catch((err) => logger.warn({ err }, '周期审计模块加载失败'));
+    }, AUDIT_INTERVAL_MS);
 
     // §3.1/§3.2 Lifecycle subscriptions: wire system events to agent tasks
     const { LifecycleEventManager } = await import('../bus/lifecycle.js');
@@ -1102,6 +1139,10 @@ export class CoreService {
     if (this.suggestionCleanupTimer) {
       clearInterval(this.suggestionCleanupTimer);
       this.suggestionCleanupTimer = null;
+    }
+    if (this.auditTimer) {
+      clearInterval(this.auditTimer);
+      this.auditTimer = null;
     }
     if (this.capabilityBus?.stopAllTriggers) {
       this.capabilityBus.stopAllTriggers();
