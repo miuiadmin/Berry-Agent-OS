@@ -213,18 +213,21 @@ export class ApprovalManager {
         return null;
 
       case 'ask':
-        if (request.riskLevel === 'low' || request.riskLevel === 'medium') {
-          // 低/中风险（safe/moderate 工具）自动批准并签发 token——
+      case 'yolo':
+        // 15.0 机制 A：ask / yolo 仅 L1（low）规则自动批准；L2（medium）/ L3（high）返回 null，
+        // 由上层 handler 路由——ask：L2→Brain、L3→用户确认；yolo：L2/L3 全→Brain。
+        // （engine 已在 checkAndIssue 前把非 safe 标为 requiresReview，故此处实际只收到 low；
+        //  保留 medium/high → null 是为了防御 engine 行为变化时仍 fail-closed。）
+        if (request.riskLevel === 'low') {
           // 工具执行层强制要求 tokenId，必须走 resolve() 让 tokenIssuer 签发，
           // 而非在外面 hack 一个无 token 的 allowed:true（会导致"缺少 permission token"）。
-          // 仅 high 风险（dangerous）才 escalate 到 Brain/用户确认。
           return this.resolve(request.id, {
             verdict: 'approved',
             source: 'rule',
-            reason: '低/中风险自动批准',
+            reason: 'L1 低风险自动批准',
           });
         }
-        // high risk → return null to escalate to Brain permission judge / 用户确认
+        // L2/L3 → return null，交由上层 handler 路由到 Brain permission judge / 用户确认
         return null;
     }
   }

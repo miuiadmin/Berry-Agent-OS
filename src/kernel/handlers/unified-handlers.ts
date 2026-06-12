@@ -504,8 +504,8 @@ export function handleMessage(
 
   // 权限模式（与 messaging-handlers 同款：提取 effectiveMode 变量）
   const permissionMode = requireString(request, 'permissionMode');
-  const effectiveMode = (permissionMode && ['ask', 'allow-all', 'deny-all'].includes(permissionMode))
-    ? permissionMode as 'ask' | 'allow-all' | 'deny-all'
+  const effectiveMode = (permissionMode && ['ask', 'allow-all', 'deny-all', 'yolo'].includes(permissionMode))
+    ? permissionMode as 'ask' | 'allow-all' | 'deny-all' | 'yolo'
     : services.config.permissionMode;
   const permissionEngine = new PermissionEngine(effectiveMode);
   const approvalManager = new ApprovalManager(getDb(), new TokenIssuer(getDb()), effectiveMode);

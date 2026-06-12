@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PermissionEngine, TokenIssuer, ApprovalManager, RiskLevel } from '../safety/index.js';
+import type { PermissionEngine, TokenIssuer, ApprovalManager, RiskLevel, PermissionMode } from '../safety/index.js';
 import type { PermissionResultPayload } from '../contracts/permissions.js';
 import type { DangerLevel } from '../utils/types.js';
 import type { StateCache } from './state-cache.js';
@@ -179,6 +179,11 @@ export class PermissionCoordinator {
     this.engine = engine;
   }
 
+  /** 当前权限模式（15.0 机制 A：handler 据此决定 requiresReview 走 Brain 还是用户确认） */
+  getMode(): PermissionMode {
+    return this.engine.getMode();
+  }
+
   /** 审批管理器热更新（admin 改 approval policy 时调用） */
   updateApprovalManager(approvalManager: ApprovalManager): void {
     this.approvalManager = approvalManager;
@@ -243,12 +248,13 @@ export class PermissionCoordinator {
   }
 
   checkAndIssue(params: CheckAndIssueParams): PermissionResultPayload {
-    // 13.0 §3.8 第二层: 先做 active_scope 硬拦截（在 engine.checkPermission 之前，fail-closed）
+    // 13.0 §3.8 第二层: 先做 active_scope 硬拦截（fail-closed）
     const scopeBlock = this.checkActiveScope(params.taskId, params.toolName, params.toolInput);
     if (scopeBlock) {
       return { allowed: false, reason: scopeBlock };
     }
 
+    // engine 硬确定性检查：dangerous_tool 类别 / blocklist / deny-all（不涉及风险路由）
     const blockResult = this.engine.checkPermission(
       params.toolName,
       params.toolInput,
@@ -257,10 +263,10 @@ export class PermissionCoordinator {
     if (!blockResult.allowed && !blockResult.requiresReview) {
       return { allowed: false, reason: blockResult.reason };
     }
-    if (blockResult.requiresReview) {
-      return { allowed: false, requiresReview: true, reason: blockResult.reason };
-    }
 
+    // 15.0 收敛：统一在决策前创建 approval request，保证 requiresReview 一律携带 requestId。
+    // 修复历史 quirk —— 之前 engine 路径的 requiresReview 在创建 request 前就 return，
+    // 不带 requestId，导致上层 handler 无法 resolve（无法签 token），moderate 实际落到 user_confirm。
     const inputHash = createHash('sha256').update(params.toolInput).digest('hex').slice(0, 16);
     const riskMap: Record<string, RiskLevel> = { safe: 'low', moderate: 'medium', dangerous: 'high' };
     const riskLevel = riskMap[params.dangerLevel] ?? 'medium';
@@ -278,6 +284,12 @@ export class PermissionCoordinator {
       bindingPayload: { agentName: params.agentName, toolName: params.toolName, inputHash },
     });
 
+    // engine 标记 requiresReview（危险工具类别 / ask 非 safe）→ 带 requestId 返回，供 handler resolve
+    if (blockResult.requiresReview) {
+      return { allowed: false, requiresReview: true, reason: blockResult.reason, requestId: request.id };
+    }
+
+    // 风险路由单一决策点：autoDecide（allow-all 放行 / ask low 放行 / 其余 requiresReview）
     const token = this.approvalManager.autoDecide(request);
 
     if (token) {

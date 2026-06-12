@@ -1,6 +1,12 @@
 import type { DangerLevel } from '../utils/types.js';
 
-export type PermissionMode = 'ask' | 'allow-all' | 'deny-all';
+/**
+ * 权限模式（15.0 机制 A 权威定义）。
+ * - ask（默认）：L1 safe 规则放行 / L2 moderate 走 Brain / L3 dangerous 走用户确认
+ * - yolo：L2 + L3 全走 Brain（用户委托 Brain 决定，不再打扰用户）
+ * - allow-all / deny-all：全放行 / 全拒绝（慎用 / 锁死）
+ */
+export type PermissionMode = 'ask' | 'allow-all' | 'deny-all' | 'yolo';
 
 export interface PermissionCheckResult {
   allowed: boolean;

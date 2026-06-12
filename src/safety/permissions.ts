@@ -1,8 +1,11 @@
 import type { DangerLevel } from '../utils/types.js';
-import type { IPermissionEngine, PermissionCheckResult } from './contract.js';
+import type { IPermissionEngine, PermissionCheckResult, PermissionMode } from './contract.js';
 import { checkBlocklist } from './blocklist.js';
 
-export type PermissionMode = 'ask' | 'allow-all' | 'deny-all';
+// PermissionMode 的权威定义在 contract.ts（契约层），此处 re-export 供现有
+// 从 permissions.js 导入的消费者（index.ts / approval-manager.ts）保持兼容。
+// 机制 A 新增 'yolo' 只需改 contract.ts 一处。
+export type { PermissionMode };
 
 /**
  * 13.0 §5.3.6: 危险工具集合 — 使用这些工具必须先经用户确认（user_confirm）。
@@ -105,6 +108,14 @@ export class PermissionEngine implements IPermissionEngine {
           return { allowed: true };
         }
         return { allowed: false, requiresReview: true, reason: 'ask 模式需要 Brain 审核' };
+
+      case 'yolo':
+        // 15.0 机制 A：yolo 模式与 ask 同样把非 safe 标为 requiresReview，
+        // 区别在 handler 路由 —— yolo 下 L2/L3 都走 Brain（不再 user_confirm）。
+        if (dangerLevel === 'safe') {
+          return { allowed: true };
+        }
+        return { allowed: false, requiresReview: true, reason: 'yolo 模式需要 Brain 审核' };
     }
   }
 

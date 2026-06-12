@@ -10,6 +10,7 @@ import { getLogger } from '../../utils/logger.js';
 
 const logger = getLogger('permission-flow');
 import type { DangerLevel } from '../../bus/contract.js';
+import type { PermissionMode } from '../../safety/permissions.js';
 import { genId } from '../../utils/id.js';
 import { getEventBus } from '../event-bus.js';
 
@@ -18,6 +19,25 @@ type AgentIpc = { send: (type: IpcMessageType, to: string, payload: unknown, cor
 const JUDGE_TIMEOUT_MS = 30_000;
 const JUDGE_WINDOW_MS = 10_000;
 const JUDGE_MAX_PER_WINDOW = 5;
+
+/**
+ * 15.0 机制 A：requiresReview 的路由决策（纯函数，便于单测）。
+ *
+ * 决策规则：
+ * - L2 moderate → 'brain'（任何模式下都由 Brain LLM 审批，替代旧的规则放行/用户确认）
+ * - L3 dangerous / 危险工具类别（dangerLevel 非 moderate）→ ask 模式 'user'（用户最终权威），
+ *   yolo 模式 'brain'（用户委托 Brain）
+ *
+ * @param dangerLevel 工具危险等级（safe/moderate/dangerous；safe 进此分支说明命中危险工具类别）
+ * @param mode 当前权限模式
+ * @returns 'brain'（交 Brain permission.judge）| 'user'（交用户确认）
+ */
+export function routeReviewTarget(dangerLevel: DangerLevel | string, mode: PermissionMode): 'brain' | 'user' {
+  // L2 moderate 一律走 Brain（机制 A 核心行为）
+  if (dangerLevel === 'moderate') return 'brain';
+  // 其余（dangerous / 危险工具类别）：yolo → Brain，否则 → 用户确认
+  return mode === 'yolo' ? 'brain' : 'user';
+}
 
 export interface PermissionFlowDeps {
   permissionCoordinator: PermissionCoordinator;
@@ -109,6 +129,57 @@ export class PermissionFlow {
     });
   }
 
+  /**
+   * 15.0 机制 A：把 requiresReview 交由 Brain permission.judge 审批。
+   *
+   * 触发条件（见 routeReviewTarget）：L2 moderate（任意模式）/ L3 dangerous（yolo 模式）。
+   * Brain approve → resolve approval request 签 token；Brain deny / 超时 / 不可用 / 限流 → 拒绝。
+   * fail-closed：requestJudge 在超时/限流/Brain 不可用时返回 allowed:false，此处统一按拒绝处理。
+   */
+  private async handleBrainReview(params: {
+    agentIpc: AgentIpc;
+    agentName: string;
+    replyId: string;
+    requestId: string;
+    sessionId: string;
+    toolName: string;
+    toolInput: string;
+    dangerLevel: DangerLevel;
+    taskId?: string;
+  }): Promise<void> {
+    const { agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel, taskId } = params;
+    const judge = await this.requestJudge({
+      sessionId,
+      agentName,
+      toolName,
+      toolInput,
+      dangerLevel,
+      taskContext: taskId,
+    });
+    if (judge.allowed) {
+      const token = this.deps.permissionCoordinator.resolve(requestId, {
+        verdict: 'approved',
+        source: 'brain',
+        reason: judge.reason,
+      });
+      agentIpc.send(
+        'permission.result',
+        agentName,
+        token
+          ? { allowed: true, reason: judge.reason ?? 'Brain 审批通过', tokenId: token.id }
+          : { allowed: false, reason: 'Brain 审批通过但签发 token 失败' },
+        replyId,
+      );
+    } else {
+      agentIpc.send(
+        'permission.result',
+        agentName,
+        { allowed: false, reason: judge.reason ?? 'Brain 拒绝执行' },
+        replyId,
+      );
+    }
+  }
+
   setupHandlers(agentIpc: AgentIpc, agentName: string, isPrimary: boolean): void {
     agentIpc.onMessage('permission.request', (msg: IpcMessage) => {
       const { toolName, toolInput, dangerLevel, taskId, sessionId: explicitSessionId } = msg.payload as PermissionRequestPayload;
@@ -186,24 +257,19 @@ export class PermissionFlow {
         });
 
         if (result.requiresReview) {
-          if (dangerLevel !== 'dangerous' && result.requestId) {
-            // moderate 工具免用户确认放行，但必须签发 permission token——
-            // tool-caller 执行层强制要求 tokenId（无 token 会报"缺少 permission token"导致工具无法执行）。
-            // 这里 resolve 已创建的 approval request → 由 tokenIssuer 签发 allow_once token。
-            const token = this.deps.permissionCoordinator.resolve(result.requestId, {
-              verdict: 'approved',
-              source: 'rule',
-              reason: 'auto-approved (moderate)',
+          // 15.0：所有 requiresReview 统一带 requestId（checkAndIssue 已保证）。
+          const requestId = result.requestId ?? genId('perm');
+          const mode = this.deps.permissionCoordinator.getMode();
+          // 机制 A：按 routeReviewTarget 分流 —— moderate(任意模式) / 任意风险(yolo) 走 Brain；
+          // dangerous(ask) 走用户确认。
+          if (routeReviewTarget(dangerLevel, mode) === 'brain') {
+            void this.handleBrainReview({
+              agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput,
+              dangerLevel: dangerLevel as DangerLevel, taskId,
             });
-            agentIpc.send('permission.result', agentName,
-              token
-                ? { allowed: true, reason: 'auto-approved (moderate)', tokenId: token.id }
-                : { allowed: false, reason: 'auto-approved 失败：approval request 已被处理，无法签发 token' },
-              replyId);
             return;
           }
-
-          const requestId = result.requestId ?? genId('perm');
+          // L3 dangerous（ask 模式）→ 用户确认
           getEventBus().emit('permission.user_confirm_needed', {
             requestId,
             sessionId,

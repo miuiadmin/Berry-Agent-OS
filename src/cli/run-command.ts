@@ -14,7 +14,7 @@ export function registerRunCommand(program: Command): void {
     .command('run <message>')
     .description('向 Berry 发送消息')
     .option('-s, --session <id>', '会话 ID，用于连续对话')
-    .option('-p, --permission-mode <mode>', '权限模式: ask, allow-all, deny-all')
+    .option('-p, --permission-mode <mode>', '权限模式: ask, allow-all, deny-all, yolo')
     .option('--non-interactive', '非交互模式；ask 会按 deny-all 处理')
     .option('--json', '以 JSON 格式输出')
     .option('--steps', '输出每一步的详细过程')
