@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { getDbPath } from '../utils/paths.js';
 import { runMigrations } from './migration-runner.js';
 import { ALL_MIGRATIONS } from './migrations/index.js';
-import { CORE_INDEX_SQL, CORE_SCHEMA_SQL, KNOWLEDGE_FTS_SQL } from './schema.js';
+import { CORE_INDEX_SQL, CORE_SCHEMA_SQL, KNOWLEDGE_FTS_SQL, MESSAGE_BLOCKS_FTS_SQL } from './schema.js';
 
 let db: Database.Database | null = null;
 
@@ -31,6 +31,9 @@ export function initDb(path?: string): Database.Database {
   db.exec(CORE_INDEX_SQL);
   runMigrations(db, ALL_MIGRATIONS);
   db.exec(KNOWLEDGE_FTS_SQL);
+  // 对话内联模型 FTS（设计文档/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
+  // 不进 ensureFtsConsistency——本表与 message_blocks 非 1:1（仅 text/thinking 子集），行数对比无意义。
+  db.exec(MESSAGE_BLOCKS_FTS_SQL);
   // 15.0 §5.3 启动自愈：所有 FTS 表行数与源表不一致（触发器遗漏/刚创建/索引损坏/运维清表）
   // 时才 rebuild。FTS5 COUNT(*) 是 O(1)。修复前仅 knowledge_fts 有保护。
   // 多列 external-content FTS（dialogue/agent_chat 的 from/to/content）的 rebuild 读所有映射列，

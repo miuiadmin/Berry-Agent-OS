@@ -50,6 +50,39 @@ export const CORE_SCHEMA_SQL = `
   );
   -- client_msg_id UNIQUE 索引由 addConversationsClientMsgIdColumn migration 创建（避免 legacy schema 与新列冲突）
 
+  -- ─── 对话内联模型（设计文档/22）：messages + message_blocks 是对话的唯一规范存储 ───
+  -- 取代 6 张分散内容表（conversations / dialogue_messages / agent_chat_messages /
+  -- tool_calls / agent_tool_calls / agent_tasks.payload）的"4 层分离病"，对齐
+  -- Claude Code 的 content[] 与 OpenCode 的 parts[]：一条消息 = 有序 Block 数组。
+  -- 旧表保留为冷归档（不立即 drop），新代码读写这两张表；写路径切换 + 历史 backfill 见期3 / v25。
+  --
+  -- messages：一轮消息（user/assistant/system/tool），由现 conversations 演进（去掉 4 个死列）。
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,                 -- genId('msg')；消息主键
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
+    -- 客户端消息幂等键（user 消息入口去重，对齐 conversations.client_msg_id 语义）
+    client_msg_id TEXT,
+    -- 关联 agent task（assistant 消息所属任务；还原初稿 / 委派归属用）
+    task_id TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+
+  -- message_blocks：每行一个 Block，即 Block[] 的关系化形态（payload_json = BlockSchema 序列化）。
+  -- redact 单漏斗：payload_json 落盘前在 message-blocks-repo 的 appendBlock/patchBlock 统一清洗。
+  CREATE TABLE IF NOT EXISTS message_blocks (
+    -- block 幂等键：ToolBlock=callId、DelegationBlock=taskId、其余=genId('blk')
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    -- 块在消息内的顺序（timeline 按 message.created_at ASC, seq ASC 回放）
+    seq INTEGER NOT NULL,
+    block_type TEXT NOT NULL CHECK(block_type IN ('text','thinking','tool','delegation','review')),
+    -- BlockSchema 序列化后的 JSON（已 redact）
+    payload_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    UNIQUE(message_id, seq)
+  );
+
   CREATE TABLE IF NOT EXISTS agent_tasks (
     id TEXT PRIMARY KEY,
     run_id TEXT REFERENCES run_artifacts(id),
@@ -824,6 +857,13 @@ export const CORE_SCHEMA_SQL = `
 
 export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id, created_at);
+  -- ─── 对话内联模型索引（设计文档/22）───
+  CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
+  -- user 消息 client_msg_id 精确幂等去重（部分唯一索引：仅 client_msg_id 非空行参与）
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_msg
+    ON messages(session_id, client_msg_id) WHERE client_msg_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_message_blocks_message ON message_blocks(message_id, seq);
+  CREATE INDEX IF NOT EXISTS idx_message_blocks_type ON message_blocks(block_type, created_at);
   CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status, created_at);
   CREATE INDEX IF NOT EXISTS idx_agent_tasks_run ON agent_tasks(run_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_agent_tasks_corr ON agent_tasks(correlation_id);
@@ -1094,4 +1134,23 @@ export const KNOWLEDGE_FTS_SQL = `
     INSERT INTO knowledge_fts(knowledge_fts, rowid, summary, detail) VALUES ('delete', old.rowid, COALESCE(old.summary, ''), COALESCE(old.detail, ''));
     INSERT INTO knowledge_fts(rowid, summary, detail) VALUES (new.rowid, COALESCE(new.summary, ''), COALESCE(new.detail, ''));
   END;
+`;
+
+/**
+ * 对话内联模型 FTS（设计文档/22）：单一全文索引，覆盖所有 text/thinking block 的内容，
+ * 取代 conversations_fts + dialogue_messages_fts + agent_chat_messages_fts 三张分散索引。
+ *
+ * 独立（非 external-content）FTS：message_blocks.payload_json 是 JSON，无法直接外链单列；
+ * 由 message-blocks-repo 在 appendBlock/patchBlock 时维护（仅 text/thinking block 增删改同步）。
+ * rebuildMessageBlocksFts() 从 payload_json 的 $.text 字段全量重建（运维 / 回填后调用）。
+ * 不进 ensureFtsConsistency：本表与 message_blocks 非 1:1（只索引 text/thinking 子集），行数对比无意义。
+ */
+export const MESSAGE_BLOCKS_FTS_SQL = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS message_blocks_fts USING fts5(
+    session_id UNINDEXED,   -- 会话过滤（不参与 MATCH 分词）
+    message_id UNINDEXED,   -- 回链消息（不参与 MATCH）
+    block_id UNINDEXED,     -- 回链 block（不参与 MATCH）
+    content,                -- text/thinking block 的 .text 字段（MATCH 目标）
+    tokenize = 'trigram'
+  );
 `;
