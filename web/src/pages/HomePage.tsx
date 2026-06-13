@@ -1,6 +1,14 @@
+/**
+ * 首页 — 系统 Dashboard。
+ *
+ * 编排 5 个统计卡片 + 任务活动图 + 实时事件流 + 快捷导航。
+ * 图表数据构建 / TrendIndicator / QuickLink → home-chart-data.ts
+ * 格式化工具 → lib/format.ts
+ * AnimatedStat → ui/animated-stat.tsx
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { queries } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -13,6 +21,7 @@ import { Sparkline } from "@/components/charts/sparkline";
 import { AreaChart } from "@/components/charts/area-chart";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
+import { buildChartData, TrendIndicator, QuickLink } from "./home-chart-data";
 import {
   Activity,
   Bot,
@@ -22,9 +31,6 @@ import {
   CheckCircle,
   XCircle,
   Coins,
-  TrendingUp,
-  TrendingDown,
-  Minus,
 } from "lucide-react";
 
 /** 实时活动事件的类型 */
@@ -47,74 +53,6 @@ function getEventColor(event: string) {
   if (event.includes("completed") || event.includes("enabled")) return "text-success";
   if (event.includes("running") || event.includes("started")) return "text-warning";
   return "text-muted-foreground";
-}
-
-/** 趋势指示器——上升/下降/持平 */
-function TrendIndicator({ current, previous }: { current: number; previous: number }) {
-  if (previous === 0 && current === 0) return <Minus className="size-3 text-muted-foreground" />;
-  if (current > previous) return <TrendingUp className="size-3 text-success" />;
-  if (current < previous) return <TrendingDown className="size-3 text-destructive" />;
-  return <Minus className="size-3 text-muted-foreground" />;
-}
-
-/**
- * 构建 7 天图表数据（完成 / 失败 + sparkline 数组）。
- *
- * 纯函数，无 React 依赖：优先用 stats API 数据，否则从任务列表客户端聚合。
- */
-function buildChartData(
-  statsData: { date: string; completed: number; failed: number }[] | undefined,
-  completedTasks: { finishedAt?: string | number; createdAt: string | number }[],
-  failedTasks: { finishedAt?: string | number; createdAt: string | number }[],
-  formatDate: (d: Date, opts?: Intl.DateTimeFormatOptions) => string,
-) {
-  // 优先用服务端按天统计
-  if (statsData && statsData.length > 0) {
-    const completedByDay = statsData.map((d) => d.completed);
-    const failedByDay = statsData.map((d) => d.failed);
-    const labels = statsData.map((d) =>
-      formatDate(new Date(d.date), { weekday: "short" }),
-    );
-    return {
-      completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
-      failed: labels.map((label, i) => ({ label, value: failedByDay[i] })),
-      sparkCompleted: completedByDay,
-      sparkFailed: failedByDay,
-    };
-  }
-
-  // 回退：客户端按天聚合任务列表（最近 7 天）
-  const days = 7;
-  const now = new Date();
-  const labels: string[] = [];
-  const completedByDay: number[] = [];
-  const failedByDay: number[] = [];
-
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    labels.push(formatDate(date, { weekday: "short" }));
-
-    const dateStart = new Date(date.setHours(0, 0, 0, 0)).getTime();
-    const dateEnd = dateStart + 86400000;
-
-    /** 统计任务在某天的时间窗口内数量（按 finishedAt 优先，否则 createdAt） */
-    const countInDay = (tasks: typeof completedTasks) =>
-      tasks.filter((t) => {
-        const ts = new Date(t.finishedAt ?? t.createdAt).getTime();
-        return ts >= dateStart && ts < dateEnd;
-      }).length;
-
-    completedByDay.push(countInDay(completedTasks));
-    failedByDay.push(countInDay(failedTasks));
-  }
-
-  return {
-    completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
-    failed: labels.map((label, i) => ({ label, value: failedByDay[i] })),
-    sparkCompleted: completedByDay,
-    sparkFailed: failedByDay,
-  };
 }
 
 export default function HomePage() {
@@ -267,7 +205,7 @@ export default function HomePage() {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <Coins className="size-4" />
-              <Link to="/usage" className="hover:text-foreground transition-colors">{t("home.tokens")}</Link>
+              <a href="/settings?tab=providers" className="hover:text-foreground transition-colors">{t("home.tokens")}</a>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -316,9 +254,9 @@ export default function HomePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">{t("home.recentActivity")}</CardTitle>
-            <Link to="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <a href="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
               {t("home.viewAll")}
-            </Link>
+            </a>
           </CardHeader>
           <CardContent>
             {events.length === 0 ? (
@@ -361,18 +299,5 @@ export default function HomePage() {
         <QuickLink href="/conversations" icon={Activity} label={t("home.quickHistory")} />
       </div>
     </div>
-  );
-}
-
-/** 快捷导航链接卡片 */
-function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.ComponentType<{ className?: string }>; label: string }) {
-  return (
-    <Link
-      to={href}
-      className="group flex items-center gap-2 rounded-lg border px-3 py-3 md:py-2.5 text-sm card-lift hover:border-ring/30 active:scale-[0.97] transition-all duration-200"
-    >
-      <Icon className="size-4 text-muted-foreground transition-transform duration-200 group-hover:scale-110" />
-      {label}
-    </Link>
   );
 }
