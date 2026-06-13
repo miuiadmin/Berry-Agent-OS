@@ -95,3 +95,22 @@ export function formatJson(str: string): string {
     return str;
   }
 }
+
+/** Badge variant 取值（与 ui/badge 的 variant 保持一致，内联定义以避免 lib→ui 反向依赖） */
+type BadgeVariant = "default" | "secondary" | "destructive" | "success" | "warning" | "outline" | "ghost" | "link";
+
+/**
+ * 任务状态 → Badge variant 映射。
+ *
+ * 统一 tasks-components（任务表格行）与 agents-components（Agent 最近任务）的状态徽章配色，
+ * 避免两处各写一遍 completed→success / failed→destructive / running→warning 的嵌套三元。
+ *
+ * @param status 任务状态字符串（task.status）
+ * @returns 对应的 Badge variant，未知状态降级为 secondary
+ */
+export function taskStatusVariant(status: string): BadgeVariant {
+  if (status === "completed") return "success";
+  if (status === "failed") return "destructive";
+  if (status === "running") return "warning";
+  return "secondary";
+}

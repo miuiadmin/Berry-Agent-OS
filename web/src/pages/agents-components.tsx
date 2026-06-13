@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queries, type TaskInfo } from "@/lib/api";
+import { taskStatusVariant } from "@/lib/format";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,14 +25,6 @@ export interface AgentDetailInput {
   description?: string;
   kind?: string;
   version?: string;
-}
-
-/** 任务状态 → Badge variant 映射 */
-function taskStatusVariant(status: string) {
-  if (status === "completed") return "success" as const;
-  if (status === "failed") return "destructive" as const;
-  if (status === "running") return "warning" as const;
-  return "secondary" as const;
 }
 
 /**

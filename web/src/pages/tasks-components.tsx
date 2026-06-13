@@ -6,7 +6,7 @@
  */
 
 import type { TaskInfo } from "@/lib/api";
-import { formatDuration, formatJson } from "@/lib/format";
+import { formatDuration, formatJson, taskStatusVariant } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, XCircle } from "lucide-react";
@@ -59,17 +59,7 @@ export function TaskRow({ task, expanded, onToggle, onCancel }: TaskRowProps) {
         <td className="px-4 py-2.5">{task.targetAgent}</td>
         {/* 状态 Badge */}
         <td className="px-4 py-2.5">
-          <Badge
-            variant={
-              task.status === "completed"
-                ? "success"
-                : task.status === "failed"
-                  ? "destructive"
-                  : task.status === "running"
-                    ? "warning"
-                    : "secondary"
-            }
-          >
+          <Badge variant={taskStatusVariant(task.status)}>
             {t(`status.${task.status}`) ?? task.status}
           </Badge>
         </td>
@@ -158,39 +148,66 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
       {/* 失败任务：错误信息 */}
       {task.status === "failed" && task.error && (
-        <div>
-          <span className="font-medium text-destructive">
-            {t("common.error")}
-          </span>
-          <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-3 text-[11px] text-destructive">
-            {task.error}
-          </pre>
-        </div>
+        <PayloadBlock
+          label={t("common.error")}
+          content={task.error}
+          tone="destructive"
+        />
       )}
 
       {/* 输入 payload */}
       {task.inputPayload && (
-        <div>
-          <span className="font-medium text-muted-foreground">
-            {t("tools.input")}
-          </span>
-          <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-background border p-3 text-[11px]">
-            {formatJson(task.inputPayload)}
-          </pre>
-        </div>
+        <PayloadBlock label={t("tools.input")} content={formatJson(task.inputPayload)} />
       )}
 
       {/* 输出 payload */}
       {task.outputPayload && (
-        <div>
-          <span className="font-medium text-muted-foreground">
-            {t("tools.output")}
-          </span>
-          <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-background border p-3 text-[11px]">
-            {formatJson(task.outputPayload)}
-          </pre>
-        </div>
+        <PayloadBlock label={t("tools.output")} content={formatJson(task.outputPayload)} />
       )}
+    </div>
+  );
+}
+
+/** payload 块的配色基调：neutral=中性灰、destructive=错误红 */
+type PayloadTone = "neutral" | "destructive";
+
+interface PayloadBlockProps {
+  /** 区块标题（如「错误」「输入」「输出」） */
+  label: string;
+  /** pre 内展示的文本内容（调用方负责 formatJson） */
+  content: string;
+  /** 配色基调，默认 neutral */
+  tone?: PayloadTone;
+}
+
+/**
+ * 任务详情里的「标签 + <pre> 代码块」组合。
+ *
+ * TaskDetail 的错误 / 输入 / 输出三处是同构的 label+pre 结构，仅配色基调不同
+ * （错误用红、输入输出用中性灰）。抽出后三处共用一套样式，加一处只改一处。
+ */
+function PayloadBlock({ label, content, tone = "neutral" }: PayloadBlockProps) {
+  const destructive = tone === "destructive";
+  return (
+    <div>
+      <span
+        className={cn(
+          "font-medium",
+          destructive ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <pre
+        className={cn(
+          "mt-1 overflow-auto rounded-lg border p-3 text-[11px]",
+          destructive
+            ? "max-h-24 bg-destructive/5 border-destructive/20 text-destructive"
+            : "max-h-40 bg-background",
+        )}
+      >
+        {content}
+      </pre>
     </div>
   );
 }
