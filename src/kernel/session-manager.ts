@@ -289,6 +289,19 @@ export class SessionManager {
     return false;
   }
 
+  /**
+   * 取该 session 所有活跃 pending 的 correlationId（删会话中断活跃 turn 用）。
+   * 删活跃 session 前，调用方遍历这些 correlationId 调 fail(terminated)，
+   * 防 agent 完成 task.result 时写已删 session 重建会话（"删了又回来"根因之一）。
+   */
+  findPendingCorrelationIds(sessionId: string): string[] {
+    const ids: string[] = [];
+    for (const [correlationId, pending] of this.pendingRequests) {
+      if (pending.sessionId === sessionId) ids.push(correlationId);
+    }
+    return ids;
+  }
+
   getModelOverride(sessionId: string): ModelTier | undefined {
     return this.sessionModelOverrides.get(sessionId);
   }

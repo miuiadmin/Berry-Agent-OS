@@ -334,9 +334,12 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('DELETE', '/conversations/:sid', (_req, res, _url, params) => {
-    // 动态发现清该 session 的所有 session_id 表（根治漏表——加新表自动覆盖），含关 FK +
-    // message_blocks 显式 subquery + 用量统计（model_requests/token_usage 一并清）。
-    // 实现 + 安全说明见 src/memory/db.ts deleteSession。
+    // 先中断该 session 的活跃 turn（防 agent 完成 task.result 时写已删 session 重建会话——"删了又回来"根因之一）
+    for (const cid of deps.sessionManager.findPendingCorrelationIds(params.sid)) {
+      deps.sessionManager.fail(cid, { kind: 'terminated', agentName: '__delete__', error: '会话已删除' });
+    }
+    // deleteSession 动态发现清该 session 的所有 session_id 表（根治漏表——加新表自动覆盖），含关 FK +
+    // message_blocks 显式 subquery + task_id 残留表 + 用量统计。实现见 src/memory/db.ts deleteSession。
     const { cleanedTables } = deleteSession(params.sid);
     json(res, { ok: true, cleanedTables });
   });
