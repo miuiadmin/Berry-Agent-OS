@@ -15,6 +15,35 @@ import type { TaskInfo } from "@/lib/api";
 import { useT, useDateFormat } from "@/lib/i18n";
 import { formatDuration, formatJson } from "@/lib/format";
 
+/** 状态 → Badge variant 映射 */
+const STATUS_VARIANT: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
+  completed: "success",
+  failed: "destructive",
+  running: "warning",
+};
+
+/** 详情行：标签 + 内容（展开区域的重复模式） */
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <span className="font-medium text-muted-foreground">{label}</span>
+      <div className="mt-0.5 text-[11px]">{children}</div>
+    </div>
+  );
+}
+
+/** 详情 pre 块：标签 + 格式化内容（输入/输出复用） */
+function DetailPre({ label, content, tone }: { label: string; content: string; tone?: "destructive" }) {
+  return (
+    <DetailRow label={label}>
+      <pre className={cn(
+        "mt-1 max-h-24 overflow-auto rounded-lg border p-2 text-[11px] whitespace-pre-wrap",
+        tone === "destructive" ? "border-destructive/20 bg-destructive/5 text-destructive" : "bg-background",
+      )}>{content}</pre>
+    </DetailRow>
+  );
+}
+
 interface TaskCardMobileProps {
   task: TaskInfo;
   onCancel: () => void;
@@ -27,28 +56,19 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
   const { formatDateTime: fmtDT } = useDateFormat();
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
-      <button type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-muted/30 active:bg-muted/40 transition-colors"
-      >
+    <div className="overflow-hidden rounded-xl border border-border">
+      {/* 头部（点击展开/收起） */}
+      <button type="button" onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-muted/30 active:bg-muted/40">
         <div className="text-muted-foreground">
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <Badge
-              variant={
-                task.status === "completed" ? "success"
-                  : task.status === "failed" ? "destructive"
-                  : task.status === "running" ? "warning"
-                  : "secondary"
-              }
-              className="text-[11px]"
-            >
+            <Badge variant={STATUS_VARIANT[task.status] ?? "secondary"} className="text-[11px]">
               {t(`status.${task.status}`) ?? task.status}
             </Badge>
-            <span className="text-xs font-medium truncate">{task.taskType}</span>
+            <span className="truncate text-xs font-medium">{task.taskType}</span>
           </div>
           <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
             <span>{task.targetAgent}</span>
@@ -57,60 +77,37 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           </div>
         </div>
         {task.status === "running" && (
-          <Button
-            variant="destructive"
-            size="sm"
-            aria-label={t("taskCard.cancelTask")}
-            className="h-11 md:h-6 px-3 md:px-2 text-xs shrink-0 min-h-[44px] md:min-h-0 min-w-[44px]"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCancel();
-            }}
-          >
+          <Button variant="destructive" size="sm" aria-label={t("taskCard.cancelTask")}
+            onClick={(e) => { e.stopPropagation(); onCancel(); }}
+            className="min-h-[44px] min-w-[44px] shrink-0 px-3 text-xs h-11 md:h-6 md:px-2 md:min-h-0">
             <XCircle className="size-3" />
           </Button>
         )}
       </button>
+
+      {/* 展开详情 */}
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
-          <div className="border-t border-border bg-muted/10 p-3 space-y-2 text-xs">
-            <div>
-              <span className="font-medium text-muted-foreground">{t("tasks.id")}</span>
-              <p className="mt-0.5 font-mono break-all text-[11px]">{task.id}</p>
-            </div>
+          <div className="space-y-2 border-t border-border bg-muted/10 p-3 text-xs">
+            <DetailRow label={t("tasks.id")}>
+              <p className="font-mono break-all">{task.id}</p>
+            </DetailRow>
             {task.sessionId && (
-              <div>
-                <span className="font-medium text-muted-foreground">{t("taskCard.session")}</span>
-                <p className="mt-0.5 font-mono text-[11px]">{task.sessionId}</p>
-              </div>
+              <DetailRow label={t("taskCard.session")}>
+                <p className="font-mono">{task.sessionId}</p>
+              </DetailRow>
             )}
-            <div>
-              <span className="font-medium text-muted-foreground">{t("tasks.created")}</span>
-              <p className="mt-0.5 text-[11px]">{fmtDT(new Date(task.createdAt))}</p>
-            </div>
+            <DetailRow label={t("tasks.created")}>
+              <p>{fmtDT(new Date(task.createdAt))}</p>
+            </DetailRow>
             {task.status === "failed" && task.error && (
-              <div>
-                <span className="font-medium text-destructive">{t("common.error")}</span>
-                <pre className="mt-1 max-h-20 overflow-auto rounded-lg bg-destructive/5 border border-destructive/20 p-2 text-[11px] text-destructive whitespace-pre-wrap">
-                  {task.error}
-                </pre>
-              </div>
+              <DetailPre label={t("common.error")} content={task.error} tone="destructive" />
             )}
             {task.inputPayload && (
-              <div>
-                <span className="font-medium text-muted-foreground">{t("tools.input")}</span>
-                <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
-                  {formatJson(task.inputPayload)}
-                </pre>
-              </div>
+              <DetailPre label={t("tools.input")} content={formatJson(task.inputPayload)} />
             )}
             {task.outputPayload && (
-              <div>
-                <span className="font-medium text-muted-foreground">{t("tools.output")}</span>
-                <pre className="mt-1 max-h-24 overflow-auto rounded-lg bg-background border p-2 text-[11px] whitespace-pre-wrap">
-                  {formatJson(task.outputPayload)}
-                </pre>
-              </div>
+              <DetailPre label={t("tools.output")} content={formatJson(task.outputPayload)} />
             )}
           </div>
         </div>
