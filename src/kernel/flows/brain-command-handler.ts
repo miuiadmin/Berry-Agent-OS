@@ -136,10 +136,11 @@ async function executeAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): P
   if (!deps.dispatchExecute) {
     return { success: false, error: 'execute 委派未接线（orchestrator 未注入 dispatchExecute）' };
   }
-  const agent = deps.agentManager.getAgent(cmd.target);
-  if (!agent) {
-    return { success: false, error: `目标 Agent 不存在或未加载: ${cmd.target}` };
-  }
+  // 15.0 R2-3：移除 getAgent 运行态预检——它对 on-demand agent（如 auditor）语义错误
+  // （未启动时 getAgent 返回 undefined），首次 execute target=auditor 必返回「未加载」，
+  // dispatchExecute→ensureAgent 那条真 fork 子进程的路径被短路。
+  // 改由 dispatchExecute（→dispatchModuleTask→ensureAgent→registry.get）统一处理：
+  // 已注册则按需启动，未注册则 ensureAgent 抛「未注册」→ 下面 catch 返回 success:false。
   const sessionId = typeof cmd.payload.sessionId === 'string' ? cmd.payload.sessionId : 'brain-command';
   const taskType = typeof cmd.payload.taskType === 'string' ? cmd.payload.taskType : 'brain_command';
   try {

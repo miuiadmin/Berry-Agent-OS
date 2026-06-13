@@ -97,11 +97,12 @@ describe('brain.command handler (15.0 机制 D)', () => {
     expect(data.recentToolCalls[0].tool_name).toBe('write_file');
   });
 
-  it('execute：真实委派目标 Agent，返回 taskId（非 stub）', async () => {
+  it('execute：真实委派目标 Agent，返回 taskId（on-demand 未加载也能派发）', async () => {
     const { ipc, sent } = makeMockIpc();
     let dispatched: Record<string, unknown> | undefined;
     setupBrainCommandHandler(ipc, {
-      agentManager: makeMockAgentManager(new Set(['code'])),
+      // 空 online set —— 模拟 on-demand agent（如 auditor）未加载，验证 execute 不被预检短路
+      agentManager: makeMockAgentManager(new Set()),
       db,
       dispatchExecute: async (input) => {
         dispatched = input;
@@ -110,17 +111,17 @@ describe('brain.command handler (15.0 机制 D)', () => {
     });
     await ipc.emit({
       type: 'brain.command',
-      payload: cmd('code', 'execute', { taskType: 'code_edit', message: 'do something', sessionId: 's1' }, 'high'),
+      payload: cmd('auditor', 'execute', { taskType: 'audit_scan', message: 'do something', sessionId: 's1' }, 'high'),
       correlationId: 'c4',
     } as IpcMessage);
     const result = sent[0].payload as BrainCommandResult;
     expect(result.success).toBe(true);
     const data = result.data as { taskId: string; targetAgent: string; taskType: string };
     expect(data.taskId).toBe('task_123');
-    expect(data.targetAgent).toBe('code');
-    // 验证 dispatchExecute 收到了 targetAgentOverride 定向 + brain requester
+    expect(data.targetAgent).toBe('auditor');
+    // 验证 dispatchExecute 收到了 targetAgentOverride 定向 + brain requester（ensureAgent 在下游启动）
     expect(dispatched).toBeDefined();
-    expect((dispatched as { targetAgentOverride?: string }).targetAgentOverride).toBe('code');
+    expect((dispatched as { targetAgentOverride?: string }).targetAgentOverride).toBe('auditor');
     expect((dispatched as { requester: string }).requester).toBe('brain');
   });
 
