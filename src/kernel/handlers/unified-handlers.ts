@@ -18,7 +18,7 @@ import { getUserSessionQueue } from '../user-session-queue.js';
 import type { ReviewVerdict } from '../../contracts/review.js';
 import type { ModelTier } from '../../contracts/model.js';
 import type { LogLevel } from '../../observability/types.js';
-import { PermissionEngine } from '../../safety/permissions.js';
+import { type PermissionMode } from '../../safety/permissions.js';
 import { TokenIssuer } from '../../safety/token-issuer.js';
 import { ApprovalManager } from '../../safety/approval-manager.js';
 import { buildAvailableAgentsList } from '../agent-registry.js';
@@ -50,6 +50,21 @@ interface HandlerDefinition {
 function requireString(request: Record<string, unknown>, field: string): string | undefined {
   const val = request[field];
   return typeof val === 'string' && val.length > 0 ? val : undefined;
+}
+
+/** 合法的权限模式集合（用于校验入口传入的 permissionMode） */
+const VALID_MODES: readonly PermissionMode[] = ['ask', 'allow-all', 'deny-all', 'yolo'];
+
+/**
+ * 15.0 R2-4：把入口传入的原始 permissionMode 规范化为合法 PermissionMode。
+ * 非法/缺省时回退 defaultMode（通常是 config.permissionMode）。
+ * 抽到一处是因为 ws/socket/channel 三个入口都要做同样的校验+回退——
+ * 收敛进 routeUserMessage 后各入口只需把原始值透传进来。
+ */
+function resolveEffectiveMode(raw: string | undefined, defaultMode: PermissionMode): PermissionMode {
+  return raw && (VALID_MODES as readonly string[]).includes(raw)
+    ? raw as PermissionMode
+    : defaultMode;
 }
 
 function requireFields(ctx: MessageContext, request: Record<string, unknown>, fields: string[]): string[] | null {
@@ -372,9 +387,23 @@ function routeUserMessage(
     strategy?: CompletionStrategy;
     /** 并发防护回调：session 有 pending 任务时的处理 */
     onBusy?: () => void;
+    /**
+     * 15.0 R2-4：入口传入的原始权限模式（ws/socket 从请求取，channel 不传）。
+     * routeUserMessage 统一规范化 + setSessionMode——这是 3 个入口的公共漏斗，
+     * 在此设置保证 ws/socket/channel 三路 per-session mode 一致生效，避免某入口漏设
+     * 导致会话回退默认 mode（历史 bug：channel/socket 路径从不设 mode）。
+     */
+    permissionMode?: string;
   },
 ): void {
   const { sessionId, isStreaming, clientMsgId, createWorkspace, entry } = options;
+
+  // 15.0 R2-4：per-session 权限模式收敛点——所有入口经此设 mode（非法/缺省回退 config 默认）。
+  // 必须在 createPending/派发之前设，coordinator 才能用本会话 mode 决策本轮工具权限。
+  services.permissionCoordinator.setSessionMode(
+    sessionId,
+    resolveEffectiveMode(options.permissionMode, services.config.permissionMode),
+  );
 
   // 入口入库：先 saveUserMessage 再 createPending（user 消息在中断时全丢的双层漏洞的第一道闸门）
   try {
@@ -503,14 +532,8 @@ export function handleMessage(
   }
 
   const sessionId = requireString(request, 'sessionId') ?? genId('ses');
-  // 权限模式（与 messaging-handlers 同款：提取 effectiveMode 变量）
+  // 权限模式：原始值透传给 routeUserMessage 统一规范化 + setSessionMode（收敛点）
   const permissionMode = requireString(request, 'permissionMode');
-  const effectiveMode = (permissionMode && ['ask', 'allow-all', 'deny-all', 'yolo'].includes(permissionMode))
-    ? permissionMode as 'ask' | 'allow-all' | 'deny-all' | 'yolo'
-    : services.config.permissionMode;
-  // 15.0 R2-4：per-session mode（不再进程级 updateEngine——并发会话 LLM await 期间会 last-writer-wins
-  // 串改 mode）。coordinator 按 sessionId 索引 engine（mode 缓存），checkAndIssue 用本会话 mode。
-  services.permissionCoordinator.setSessionMode(sessionId, effectiveMode);
 
   const clientMsgId = genId('umsg');
 
@@ -522,6 +545,7 @@ export function handleMessage(
     clientMsgId,
     createWorkspace: true,
     entry: 'ws',
+    permissionMode,
     onBusy: () => {
       channel.write(JSON.stringify({ type: 'error', error: '该对话正在处理中，请等待完成', sessionId }) + '\n');
     },
@@ -704,6 +728,9 @@ const socketServerMessageHandler: HandlerFn = (request, ctx, services) => {
   // channel 已由 socket-server.ts 通过 MessageContext.channel 注入（WritableChannel）
   const channel = ctx.channel!;
   const sessionId = requireString(request, 'sessionId') ?? genId('ses');
+  // 15.0 R2-4：透传 socket 请求的 permissionMode（CLI/test 经 socket:message 可指定 mode），
+  // 由 routeUserMessage 统一规范化 + setSessionMode
+  const permissionMode = requireString(request, 'permissionMode');
   routeUserMessage(message, services, {
     sessionId,
     isStreaming: request.streaming !== false,
@@ -711,6 +738,7 @@ const socketServerMessageHandler: HandlerFn = (request, ctx, services) => {
     createWorkspace: true,
     entry: 'socket',
     strategy: new ChannelWriteStrategy(channel), // 同步直写 channel（harness/CLI 期待）
+    permissionMode,
     onBusy: () => {
       channel.write(JSON.stringify({ type: 'error', error: '该对话正在处理中，请等待完成', sessionId }) + '\n');
     },

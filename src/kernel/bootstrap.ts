@@ -156,6 +156,9 @@ export async function initServices(
     evolutionEngine,
     pluginRuntimeV2,
     config,
+    // 15.0 R2-4：session 被 GC 回收时，同步清理 PermissionCoordinator 的 per-session mode，
+    // 避免 sessionModes 随会话累积无界增长。
+    onSessionGc: (sessionId) => permissionCoordinator.clearSessionMode(sessionId),
   });
 
   const auditRecorder = new AuditRecorder(db);

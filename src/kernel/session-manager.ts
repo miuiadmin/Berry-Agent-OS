@@ -66,6 +66,12 @@ export class SessionManager {
   private evolutionEngine: EvolutionEngine | null;
   private pluginRuntimeV2: IPluginRuntimeV2 | null;
   private config: AppConfig;
+  /**
+   * 15.0 R2-4：session 被 GC 回收时的回调（由 core-service 接线，调 PermissionCoordinator.clearSessionMode）。
+   * 用回调而非直接注入 coordinator，避免低层 SessionManager 反向依赖 kernel 权限组件。
+   * 不传则仅清理 SessionManager 自身 per-session 状态（向后兼容）。
+   */
+  private onSessionGc: ((sessionId: string) => void) | null = null;
 
   constructor(deps: {
     memoryRuntime: MemoryRuntime;
@@ -73,12 +79,15 @@ export class SessionManager {
     evolutionEngine: EvolutionEngine | null;
     pluginRuntimeV2?: IPluginRuntimeV2 | null;
     config: AppConfig;
+    /** 15.0 R2-4：session GC 回调（清理外部 per-session 状态，如 PermissionCoordinator.sessionModes） */
+    onSessionGc?: (sessionId: string) => void;
   }) {
     this.memoryRuntime = deps.memoryRuntime;
     this.skillLoader = deps.skillLoader;
     this.evolutionEngine = deps.evolutionEngine;
     this.pluginRuntimeV2 = deps.pluginRuntimeV2 ?? null;
     this.config = deps.config;
+    this.onSessionGc = deps.onSessionGc ?? null;
   }
 
   createPending(msgId: string, entry: PendingRequest): void {
@@ -708,6 +717,9 @@ export class SessionManager {
         if (this.pendingAsks.has(sessionId)) {
           this.clearPendingAsk(sessionId); // 同时删除 SQLite 行
         }
+        // 15.0 R2-4：通知外部清理 per-session 状态（PermissionCoordinator.clearSessionMode），
+        // 防止 sessionModes 随 session 累积无界增长。
+        this.onSessionGc?.(sessionId);
         cleaned++;
       }
     }
