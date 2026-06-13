@@ -13,8 +13,8 @@ import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
 import { getEventBus } from './event-bus.js';
 import { disposeBlockCollector } from './block-collector.js';
-// 对话内联（doc 22）：消灭持久化双轨制——assistant / user 唯一落库漏斗都走 message_blocks + messages。
-// saveMessage 仅保留给 recoverSessions 写「[系统] 兜底行」的历史路径（下方已切到 persistAssistantTurn）。
+// 对话内联（doc 22）：消灭持久化双轨制——assistant / user 唯一落库漏斗都走 messages + message_blocks。
+// recoverSessions 的「[系统] 兜底行」也改走 persistAssistantTurn（旧 conversations 写路径已停用）。
 import { persistAssistantTurn, persistUserMessage } from '../memory/message-blocks-repo.js';
 
 const logger = getLogger('session-manager');
@@ -392,7 +392,7 @@ export class SessionManager {
    * 超时 / handoff 投机）共用，消除此前分散在 task-flow / 委派 finally / 缺失的三套写入逻辑。
    *
    * collector 不存在（纯文本对话 / daemon 旧协议 / 已落库）则 no-op。失败仅 log，不阻塞对话收尾
-   * （与 saveConversationTurn 的失败语义一致——best-effort 持久化，不回滚 conversations）。
+   * （best-effort 持久化语义——落库失败不回滚已 resolve 的对话）。
    *
    * @param pending       本轮 pending request（含 sessionId/taskId/delegationTaskId/reasoning）
    * @param persistContent 入库文本（含可能的错误标签），同时作为 text block 的 draftResponse
@@ -722,7 +722,7 @@ export class SessionManager {
   /**
    * 服务关闭时收尾所有未完成的 pending requests。
    * 清理 timer、resolve 一个服务关闭提示，防止 setTimeout 回调
-   * 在 DB 关闭后触发 saveConversationTurn 失败。
+   * 在 DB 关闭后触发持久化（persistAssistantTurn）失败。
    *
    * @param reason resolve 传给前端的关闭原因
    */

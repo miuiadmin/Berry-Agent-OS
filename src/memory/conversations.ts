@@ -2,6 +2,22 @@ import { getDb } from './db.js';
 import { genId } from '../utils/id.js';
 import { redactSecrets } from '../observability/redaction.js';
 
+/**
+ * conversations 表（扁平 text + reasoning）—— **已退役为只读冷归档**。
+ *
+ * 消灭持久化双轨制（设计文档/22）后，对话内容唯一规范存储是 `messages` + `message_blocks`
+ * （见 `./message-blocks-repo.ts`）：
+ *   - user 消息活跃漏斗 = `persistUserMessage`
+ *   - assistant 消息活跃漏斗 = `persistAssistantTurn`
+ *   - 唯一对话读取原语 = `getTimeline` / `extractTextFromBlocks`
+ *
+ * 本文件的写入函数（saveMessage / saveUserMessage / updateAssistantMessage）已无任何活线调用方，
+ * 保留仅为「冷归档读取 + 迁移回退」语义；下方的 `getHistory` 仍可用于读取历史冷数据
+ * （v25/v26 已把 conversations 全量回填进新表，正常路径不依赖本表）。
+ *
+ * 旧表保留不 DROP（遵循项目既定原则 + doc 22「旧表保留为冷归档不立即 drop」）。
+ */
+
 export interface ConversationMessage {
   id: string;
   sessionId: string;
@@ -13,6 +29,9 @@ export interface ConversationMessage {
 
 /**
  * 单行写入会话消息到 conversations 表。
+ *
+ * @deprecated 消灭双轨制（doc 22）后无活线调用方——assistant 落库走 `persistAssistantTurn`，
+ *             user 落库走 `persistUserMessage`（均写 messages + message_blocks）。本函数仅冷归档保留。
  *
  * 该函数是最低层级的持久化原语：内部直接执行 SQL INSERT。
  * 既有调用方（saveConversationTurn / 其它内部）依赖此 API；
@@ -42,6 +61,9 @@ export function saveMessage(sessionId: string, role: 'user' | 'assistant', conte
 /**
  * 13.0 §5.3.12: 替换已落库的 assistant 消息为用户还原后的原始版本。
  *
+ * @deprecated 消灭双轨制（doc 22）后 assistant 正文唯一在 message_blocks 的 text block——
+ *             「还原 Brain 修改」改走 `replaceLastAssistantText`（写新表）。本函数仅冷归档保留。
+ *
  * 用户点击「还原 Brain 的修改」时调用 — 同一 taskId 范围内的 assistant 行被覆盖。
  * 配套 in-memory history 更新（conversation agent 同步）。
  *
@@ -69,6 +91,9 @@ export function updateAssistantMessage(
 
 /**
  * 专门为「user 消息入口入库」设计的幂等保存 API。
+ *
+ * @deprecated 消灭双轨制（doc 22）后 user 消息活跃漏斗走 `persistUserMessage`（写 messages + 单 text block，
+ *             同样幂等且经 redact 单漏斗）。本函数仅冷归档保留。
  *
  * 设计动机：
  * 1. 修复 user 消息在中断时丢失的 bug —— 任何路径（kernel 入口 /
