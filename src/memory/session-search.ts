@@ -40,19 +40,21 @@ export function registerSessionSearchCapability(bus: CapabilityBus, db: Database
         const ftsQuery = query.split(/\s+/).filter(w => w.length > 0).map(w => `"${w.replace(/"/g, '')}"`).join(' OR ');
         if (!ftsQuery) return { results: [], total: 0 };
 
-        const conditions: string[] = ['conversations_fts MATCH ?'];
+        // 对话内联（doc 22）：跨会话搜索走 message_blocks_fts（消灭双轨制后对话内容唯一在新表）。
+        // JOIN messages 取 role / created_at 供片段构造与排序。filters（exclude/date）保留。
+        const conditions: string[] = ['message_blocks_fts MATCH ?'];
         const params: unknown[] = [ftsQuery];
 
         if (excludeSessionId) {
-          conditions.push('c.session_id != ?');
+          conditions.push('f.session_id != ?');
           params.push(excludeSessionId);
         }
         if (dateFrom) {
-          conditions.push('c.created_at >= ?');
+          conditions.push('m.created_at >= ?');
           params.push(dateFrom);
         }
         if (dateTo) {
-          conditions.push('c.created_at <= ?');
+          conditions.push('m.created_at <= ?');
           params.push(dateTo);
         }
 
@@ -61,11 +63,11 @@ export function registerSessionSearchCapability(bus: CapabilityBus, db: Database
         params.push(fetchLimit);
 
         const rows = db.prepare(`
-          SELECT c.session_id, c.role, c.content, c.created_at, rank
-          FROM conversations c
-          JOIN conversations_fts f ON c.rowid = f.rowid
+          SELECT f.session_id AS session_id, m.role AS role, f.content AS content, m.created_at AS created_at
+          FROM message_blocks_fts f
+          JOIN messages m ON m.id = f.message_id
           WHERE ${whereClause}
-          ORDER BY rank, c.created_at DESC
+          ORDER BY rank, m.created_at DESC
           LIMIT ?
         `).all(...params) as Array<{ session_id: string; role: string; content: string; created_at: number }>;
 

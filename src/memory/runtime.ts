@@ -12,7 +12,10 @@ import type {
 import { addKnowledge, dismissKnowledge } from './knowledge.js';
 import { searchKnowledge } from './search.js';
 import { buildMemoryContext } from './context-builder.js';
-import { saveMessage, saveUserMessage, getHistory } from './conversations.js';
+// 对话内联（doc 22）：runtime 的对话读写都切到 messages+message_blocks——
+// persistUserMessage（user 落库）/ getTimeline（读取）替代旧 conversations 读写。
+// extractTextFromBlocks：Block[]→纯文本平铺（getRecentTurns 把内联模型还原为文本对用）。
+import { persistUserMessage, getTimeline, extractTextFromBlocks } from './message-blocks-repo.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('memory-runtime');
@@ -76,34 +79,34 @@ export class MemoryRuntime {
     }
   }
 
-  saveConversationTurn(sessionId: string, userMessage: string, assistantResponse: string, reasoning?: string): void {
-    // 修复 C2/H8/H9：user 行改用幂等的 saveUserMessage 写入，
-    // 配合 kernel 入口的预写入，重复调用不会产生重复行。
-    // assistant 行始终是新增（同一 final 不会重复落库）。
-    saveUserMessage(sessionId, userMessage);
-    saveMessage(sessionId, 'assistant', assistantResponse, reasoning);
+  /**
+   * 单独持久化一条 user 消息，专供 kernel 入口在 createPending 之后
+   * 立即调用。幂等性由 clientMsgId 触发。
+   *
+   * 消灭双轨制（doc 22）：user 消息落 messages 表（persistUserMessage），
+   * 而非旧 conversations——assistant 行不再与 user 合并写，各走单一漏斗
+   * （user=入口 persistUserMessage；assistant=turn 终态 persistInlineBlocks）。
+   */
+  saveUserMessage(sessionId: string, content: string, options: { clientMsgId?: string } = {}): { id: string; deduplicated: boolean } {
+    return persistUserMessage({ sessionId, content, clientMsgId: options.clientMsgId });
   }
 
   /**
-   * 单独持久化一条 user 消息，专供 kernel 入口在 createPending 之后
-   * 立即调用。幂等性由 clientMsgId 触发，参见 conversations.saveUserMessage。
+   * 取最近 N 轮对话（user/assistant 文本对），供记忆提取 / 会话上下文。
    *
-   * 为什么不复用 saveConversationTurn？
-   *   saveConversationTurn 合并写 user+assistant，而 assistant 行
-   *   可能在数秒/数分钟后才到达 final.response 路径。把 user 行与
-   *   assistant 行解耦后，user 消息在入口处就落盘，避免 agent 崩溃 /
-   *   路由失败 / 超时等任何中断下 user 消息全丢。
+   * 消灭双轨制（doc 22）：从 messages+message_blocks 读（getTimeline），Block[] 平铺为文本对——
+   * text block 抽为 content，其余 block（thinking/tool/delegation）忽略（记忆提取只需文本语义）。
    */
-  saveUserMessage(sessionId: string, content: string, options: { clientMsgId?: string } = {}): { id: string; deduplicated: boolean } {
-    return saveUserMessage(sessionId, content, options);
-  }
-
   getRecentTurns(sessionId: string, maxTurns = 5): Array<{ userMessage: string; response: string }> {
-    const messages = getHistory(sessionId, maxTurns * 2);
+    const timeline = getTimeline(sessionId, { limit: maxTurns * 2 });
     const turns: Array<{ userMessage: string; response: string }> = [];
-    for (let i = 0; i < messages.length - 1; i += 2) {
-      if (messages[i].role === 'user' && messages[i + 1]?.role === 'assistant') {
-        turns.push({ userMessage: messages[i].content, response: messages[i + 1].content });
+    for (let i = 0; i < timeline.length - 1; i += 1) {
+      const cur = timeline[i];
+      const nxt = timeline[i + 1];
+      if (cur.role === 'user' && nxt?.role === 'assistant') {
+        const userText = extractTextFromBlocks(cur.blocks);
+        const assistantText = extractTextFromBlocks(nxt.blocks);
+        if (userText && assistantText) turns.push({ userMessage: userText, response: assistantText });
       }
     }
     return turns.slice(-maxTurns);

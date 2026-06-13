@@ -293,7 +293,46 @@ export function replaceBlockText(blockId: string, text: string): void {
   patchBlock(blockId, { text });
 }
 
+/**
+ * 替换某会话最后一条 assistant 消息的正文 text block（conversation.restore 还原 Brain 修改用）。
+ *
+ * 消灭双轨制后 assistant 正文唯一在 message_blocks 的 text block——本函数定位该会话最后一条
+ * assistant 消息的（最后一个）text block，整体替换其文本（走 patchBlock→serializeBlock redact 单漏斗）。
+ * 用于「用户还原 Brain 的修改」：把被 Brain modify/reject 改写的 assistant 正文还原为初稿。
+ *
+ * @returns 是否找到并替换（false=该会话无 assistant 消息 / 无 text block）
+ */
+export function replaceLastAssistantText(sessionId: string, newText: string): boolean {
+  const db = getDb();
+  // 最后一条 assistant 消息的最后一个 text block（created_at DESC, seq DESC 双重定位）
+  const row = db.prepare(`
+    SELECT mb.id AS block_id
+    FROM message_blocks mb
+    JOIN messages m ON m.id = mb.message_id
+    WHERE m.session_id = ? AND m.role = 'assistant' AND mb.block_type = 'text'
+    ORDER BY m.created_at DESC, mb.seq DESC
+    LIMIT 1
+  `).get(sessionId) as { block_id: string } | undefined;
+  if (!row) return false;
+  replaceBlockText(row.block_id, newText);
+  return true;
+}
+
 // ─── 读取 API ───
+
+/**
+ * 从 Block[] 抽取所有 text block 文本并拼接（把内联模型平铺为纯文本）。
+ * thinking/tool/delegation/review block 不含可读正文，跳过——
+ * 供旧 content 字段（/state 列表预览）、记忆提取（getRecentTurns 文本对）等「只需文本语义」的下游。
+ * 单一平铺实现，避免各读取点各自手写 block 遍历。
+ */
+export function extractTextFromBlocks(blocks: Block[]): string {
+  return blocks
+    .filter((b): b is Extract<Block, { type: 'text'; text: string }> => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+}
 
 /** 取单条消息（含其有序 blocks）；不存在返回 null */
 export function getMessage(messageId: string): TimelineMessage | null {

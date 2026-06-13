@@ -480,7 +480,7 @@ export const useChatStore = create<ChatState>()(
         set({ restoringSessionId: sessionId });
         try {
           const data = await apiGet<{
-            messages?: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: ThinkingStep[] }>;
+            messages?: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: ThinkingStep[]; blocks?: Block[] }>;
             activeTasks?: Array<{ progress?: string; thinkingSteps?: ThinkingStep[]; streamingContent?: string; streamingReasoning?: string }>;
           }>(`/api/sessions/${sessionId}/state?limit=200`);
           // 拉取过程中用户可能已经切换 session
@@ -495,6 +495,8 @@ export const useChatStore = create<ChatState>()(
             status: "complete" as const,
             reasoning: m.reasoning,
             thinkingSteps: m.thinkingSteps,
+            // 对话内联（doc 22）：透传后端 getTimeline 返回的 blocks，刷新后 thinking/tool/delegation 卡片内联可见。
+            blocks: m.blocks,
           }));
 
           let pendingStreamId: string | null = null;

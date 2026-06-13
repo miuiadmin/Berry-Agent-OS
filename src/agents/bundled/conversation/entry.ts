@@ -13,7 +13,10 @@ import { createDialogueTools } from '../../../tools/dialogue-tools.js';
 import { setCronToolsDb } from '../../../tools/cron-tools.js';
 import { setSessionToolsDb } from '../../../tools/session-tools.js';
 import { ContextManager } from '../../../llm/context-manager.js';
-import { saveUserMessage as persistUserMessage, getHistory as loadHistoryFromDb } from '../../../memory/conversations.js';
+// 对话内联（doc 22）：消灭双轨制——user 消息与历史读取都切到 messages+message_blocks。
+// persistUserMessage 写新表；getTimeline 读历史（Block[] 平铺为 ModelMessage）。
+import { persistUserMessage, getTimeline } from '../../../memory/message-blocks-repo.js';
+import type { Block } from '../../../contracts/message-blocks.js';
 import { z } from 'zod';
 import type { IpcMessage } from '../../../kernel/types.js';
 import type { UserMessagePayload, DraftResponsePayload, FinalResponsePayload } from '../../../contracts/messaging.js';
@@ -244,10 +247,19 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       }
       // 11.0 启动预热：从 SQLite 加载该 session 的历史对话，注入 sessionHistories
       // 避免重启后丢失上下文；同时修复重启后第一条消息 history 为空导致的工具调用幻觉。
-      const persistedHistory = loadHistoryFromDb(sessionId, 50);
-      const initialHistory: ModelMessage[] = persistedHistory
+      // 对话内联（doc 22）：从 messages+message_blocks 读（getTimeline），Block[] 平铺为 ModelMessage——
+      // text block 抽为 content（LLM 上下文用）；thinking/tool/delegation 不进 LLM 历史（避免噪音 + token 膨胀）。
+      const timeline = getTimeline(sessionId, { limit: 50 });
+      const initialHistory: ModelMessage[] = timeline
         .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .map((m) => ({ role: m.role, content: m.content }));
+        .map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.blocks
+            .filter((b): b is Extract<Block, { type: 'text'; text: string }> => b.type === 'text')
+            .map((b) => b.text)
+            .join('\n'),
+        }))
+        .filter((m) => m.content.length > 0);
       sessionHistories.set(sessionId, initialHistory);
     }
     const history = sessionHistories.get(sessionId)!;
@@ -273,7 +285,7 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
     // 只有当 kernel 入口失败 / 网络丢包 / 重连时，这一行才真正写入。
     // 与 final.response 路径解耦 —— final 路径只补写 assistant 行。
     try {
-      const result = persistUserMessage(sessionId, message, { clientMsgId });
+      const result = persistUserMessage({ sessionId, content: message, clientMsgId });
       if (result.deduplicated) {
         logger.debug({ sessionId, clientMsgId, msgId: result.id }, 'conversation: user 消息已存在（kernel 入口已落盘）');
       } else {
@@ -525,10 +537,12 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
       }
     }
 
-    // ② 持久化到 conversations 表（让 11.0 启动预热加载的也是原始版本）
+    // ② 持久化到 message_blocks（让 11.0 启动预热加载的也是原始版本）
+    // 对话内联（doc 22）：assistant 正文在 message_blocks 的 text block——还原初稿改写最后一条
+    // assistant 消息的 text block（消灭双轨制后 conversations 不再是读取源）。
     try {
-      const { updateAssistantMessage } = await import('../../../memory/conversations.js');
-      updateAssistantMessage(restoreSessionId, restoreTaskId, originalResponse);
+      const { replaceLastAssistantText } = await import('../../../memory/message-blocks-repo.js');
+      replaceLastAssistantText(restoreSessionId, originalResponse);
     } catch (err) {
       logger.warn({ err, sessionId: restoreSessionId, taskId: restoreTaskId }, 'conversation: persist original response failed');
     }

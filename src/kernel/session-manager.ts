@@ -4,16 +4,18 @@ import type { ModelTier } from '../contracts/model.js';
 import type { MemoryContextFrame } from '../contracts/memory.js';
 import type { MemoryRuntime } from '../memory/index.js';
 import { getDb } from '../memory/index.js';
-import { saveMessage } from '../memory/conversations.js';
 import type { EvolutionEngine } from '../evolution/index.js';
 import type { ISkillLoader } from '../skills/contract.js';
 import type { IPluginRuntimeV2, PromptInjectionContext } from '../contracts/plugins-v2.js';
 import type { AppConfig } from '../config/schema.js';
 import { buildSystemPrompt } from '../llm/prompt-builder.js';
 import { getLogger } from '../utils/logger.js';
+import { genId } from '../utils/id.js';
 import { getEventBus } from './event-bus.js';
 import { disposeBlockCollector } from './block-collector.js';
-import { persistAssistantTurn } from '../memory/message-blocks-repo.js';
+// 对话内联（doc 22）：消灭持久化双轨制——assistant / user 唯一落库漏斗都走 message_blocks + messages。
+// saveMessage 仅保留给 recoverSessions 写「[系统] 兜底行」的历史路径（下方已切到 persistAssistantTurn）。
+import { persistAssistantTurn, persistUserMessage } from '../memory/message-blocks-repo.js';
 
 const logger = getLogger('session-manager');
 
@@ -135,9 +137,8 @@ export class SessionManager {
         }, 'pending 请求超时');
         if (pending) {
         // 11.0 修复：超时时保存已有的部分内容到对话历史，防止刷新后空白气泡。
-        // 对话内联（doc 22）：改走 complete() 统一收尾——同时落本轮内联 blocks（已执行的工具/思考）。
-        // 有 partial 时落 partial+超时标签到 conversations；无 partial 时 saveTurn=false 不写 conversation，
-        // 但 persistInlineBlocks 仍会落本轮已有的 tool/thinking blocks。
+        // 对话内联（doc 22）：改走 complete() 统一收尾——persistInlineBlocks 必然落本轮 blocks
+        // （有 partial 落 partial+超时标签；无 partial 落纯超时标签），conversations 不再双写。
         const partialContent = pending.draftResponse ?? '';
         const hasPartial = !!(partialContent && pending.userMessage);
         // 通知前端请求超时（与其他错误路径保持一致，前端 WS 客户端可实时感知）
@@ -147,9 +148,8 @@ export class SessionManager {
           taskId: pending.taskId,
           correlationId: msgId,
         });
-        // complete 内部：persistInlineBlocks 落 blocks + (有 partial 时) saveConversationTurn + deletePending + resolve
+        // complete 内部：persistInlineBlocks 落 blocks + deletePending + resolve
         this.complete(msgId, '[超时] 请求处理超时，请重试', {
-          saveTurn: hasPartial,
           contentOverride: hasPartial ? partialContent + '\n\n*[回复超时，内容可能不完整]*' : undefined,
         });
         logger.info({ msgId, sessionId: entry.sessionId, partialLen: partialContent.length, hasPartial }, '请求超时，已走 complete 收尾');
@@ -244,33 +244,17 @@ export class SessionManager {
    * @returns true=找到并处理了 pending（skipResolve 时返回 pending 引用），false=无此 pending
    */
   complete(msgId: string, response: string, options?: {
-    saveTurn?: boolean;
     contentOverride?: string;
     skipResolve?: boolean;
   }): boolean | PendingRequest {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return false;
 
-    // 对话内联（doc 22）：统一落本轮 assistant blocks——persistInlineBlocks 内部 dispose 本轮 collector +
-    // buildBlocks + persistAssistantTurn。覆盖内置 agent / 委派 / daemon 所有 turn 终态（成功/失败）。
-    // collector 不存在则 no-op；失败 log 不阻塞收尾。
-    // persistContent 同时供 saveConversationTurn（conversations 双写）与 buildBlocks（text block）使用，保证两表内容一致。
+    // 对话内联（doc 22）：assistant 唯一落库漏斗——persistInlineBlocks 内部 dispose 本轮 collector +
+    // buildBlocks + persistAssistantTurn（无 collector 时降级单 text block，保证气泡必然落库）。
+    // 覆盖内置 agent / 委派 / daemon 所有 turn 终态（成功/失败/超时）。conversations 不再双写。
     const persistContent = options?.contentOverride ?? response;
     this.persistInlineBlocks(pending, persistContent);
-
-    // 默认保存对话轮次（兼容期：conversations 表双写，与 message_blocks 并存）
-    if (options?.saveTurn !== false && pending.userMessage) {
-      try {
-        this.saveConversationTurn(
-          pending.sessionId,
-          pending.userMessage,
-          persistContent,
-          pending.reasoning,
-        );
-      } catch (err) {
-        logger.error({ err, msgId, sessionId: pending.sessionId }, 'complete saveConversationTurn 失败');
-      }
-    }
 
     this.deletePending(msgId);
 
@@ -417,17 +401,30 @@ export class SessionManager {
     // collector key：委派/daemon/runtime 用 delegationTaskId（delegation-orchestrator:1690 赋值），
     // 纯 conversation agent（内置）用 taskId（task-flow telemetry 按 payload.taskId 建 collector）
     const key = pending.delegationTaskId ?? pending.taskId;
-    if (!key) return;
     try {
-      const collector = disposeBlockCollector(key);
-      if (!collector) return; // 本轮无 collector（纯文本 / 已落库）—— no-op
-      const blocks = collector.buildBlocks({
-        reasoning: pending.reasoning,
-        draftResponse: persistContent,
-      });
-      if (blocks.length > 0) {
+      // 有 collector（本轮有 telemetry：流式文本 / 工具 / 思考）→ dispose 取完整 Block[]（thinking→tool→text）
+      let blocks: import('../contracts/message-blocks.js').Block[] | undefined;
+      let messageId: string | undefined;
+      if (key) {
+        const collector = disposeBlockCollector(key);
+        if (collector) {
+          blocks = collector.buildBlocks({
+            reasoning: pending.reasoning,
+            draftResponse: persistContent,
+          });
+          messageId = collector.messageId;
+        }
+      }
+      // 无 collector 或空 blocks（无 taskId / 立即返回未流式 / 错误路径 / 已落库）→ 降级单 text block。
+      // 消灭双轨制后 conversations 不再兜底，此处是 assistant 唯一真相源——必须保证气泡必然落库。
+      // persistContent 真空（不该发生）才跳过，避免空气泡。
+      if ((!blocks || blocks.length === 0) && persistContent) {
+        blocks = [{ type: 'text', text: persistContent }];
+        messageId = genId('msg');
+      }
+      if (blocks && blocks.length > 0 && messageId) {
         persistAssistantTurn({
-          messageId: collector.messageId,
+          messageId,
           sessionId: pending.sessionId,
           taskId: key,
           blocks,
@@ -438,21 +435,19 @@ export class SessionManager {
     }
   }
 
-  saveConversationTurn(sessionId: string, userMessage: string, response: string, reasoning?: string): void {
-    this.memoryRuntime.saveConversationTurn(sessionId, userMessage, response, reasoning);
-  }
-
   /**
-   * 在 kernel 入口（handleMessage）创建 pending 之后立即落 user 行。
-   * 这是修复「user 消息从不持久化」双层漏洞的关键。
+   * 在 kernel 入口（handleMessage）创建 pending 之后立即落 user 行到 messages 表（doc 22）。
+   *
+   * 消灭双轨制：user 消息的唯一落库漏斗——经 persistUserMessage 写 messages(role:'user') + 一个 text block，
+   * redact 走 appendBlock→serializeBlock 单漏斗（闭合双轨制遗留的 user 文本 secret 未脱敏点）。
+   * 幂等由 clientMsgId 触发，与下游 conversation agent 的二次兜底去重。
    *
    * 失败时仅记 warn，不阻塞后续路由（fail-open：路由优先，
-   * user 消息至少经过一次尝试；中断场景下仍能在 conversation agent
-   * 内部二次尝试时落盘）。
+   * user 消息至少经过一次尝试；中断场景下仍能在 conversation agent 内部二次尝试时落盘）。
    */
   saveUserMessage(sessionId: string, content: string, options: { clientMsgId?: string } = {}): { id: string; deduplicated: boolean } {
     try {
-      return this.memoryRuntime.saveUserMessage(sessionId, content, options);
+      return persistUserMessage({ sessionId, content, clientMsgId: options.clientMsgId });
     } catch (err) {
       logger.warn({ err, sessionId, clientMsgId: options.clientMsgId }, 'user 消息入口入库失败，将依赖下游 conversation agent 兜底');
       return { id: '', deduplicated: false };
@@ -674,8 +669,13 @@ export class SessionManager {
         db.prepare(`UPDATE agent_tasks SET status = 'failed', error = ?, finished_at = ? WHERE id = ?`)
           .run('权限请求因服务重启被自动拒绝', now, task.id);
         // R14-2：直接在写入点兜底写 [系统] 行，消解 OrphanReconciler 周期性扫表
+        // 对话内联（doc 22）：[系统] 兜底行落 messages 表（消灭双轨制后 conversations 不再是读取源）
         try {
-          saveMessage(task.session_id, 'assistant', '[系统] 上次权限请求因服务重启被自动拒绝，请重新发起');
+          persistAssistantTurn({
+            messageId: genId('msg'),
+            sessionId: task.session_id,
+            blocks: [{ type: 'text', text: '[系统] 上次权限请求因服务重启被自动拒绝，请重新发起' }],
+          });
         } catch (err) {
           logger.warn({ err, taskId: task.id }, 'recoverSessions 写 [系统] 行失败（不影响任务状态）');
         }
@@ -683,9 +683,13 @@ export class SessionManager {
       } else {
         db.prepare(`UPDATE agent_tasks SET status = 'timeout', error = ?, finished_at = ? WHERE id = ?`)
           .run('任务因服务重启被标记为超时', now, task.id);
-        // R14-2：写入点兜底——标记 stale task 同时 [系统] 行落 conversations
+        // R14-2：写入点兜底——标记 stale task 同时 [系统] 行落 messages（conversations 已退役）
         try {
-          saveMessage(task.session_id, 'assistant', '[系统] 上次回复因服务重启未完成，请重新提问');
+          persistAssistantTurn({
+            messageId: genId('msg'),
+            sessionId: task.session_id,
+            blocks: [{ type: 'text', text: '[系统] 上次回复因服务重启未完成，请重新提问' }],
+          });
         } catch (err) {
           logger.warn({ err, taskId: task.id }, 'recoverSessions 写 [系统] 行失败（不影响任务状态）');
         }

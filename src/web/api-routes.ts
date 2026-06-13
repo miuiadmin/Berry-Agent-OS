@@ -8,8 +8,7 @@ import { metrics } from '../observability/metrics.js';
 import { MS_PER_DAY } from '../lib/time-constants.js';
 import { getDb } from '../memory/index.js';
 import { sanitizeFtsQuery } from '../memory/search.js';
-import { getHistory } from '../memory/conversations.js';
-import { getTimeline } from '../memory/message-blocks-repo.js';
+import { getTimeline, extractTextFromBlocks } from '../memory/message-blocks-repo.js';
 import { getAppHome } from '../utils/paths.js';
 import type { IConfigService } from '../config/contract.js';
 import { registerSchedulerRoutes } from '../scheduler/api-handlers.js';
@@ -203,17 +202,15 @@ export function createApiRouter(deps: WebServerDependencies) {
     let whereClause = '';
     const params: unknown[] = [];
     if (search) {
-      // 15.0 FTS5：除 session_id/title LIKE 外，经 conversations_fts 做内容全文匹配
-      // （CJK 由 sanitizeFtsQuery 做 3 字滑窗，满足「中文搜对话内容」验收）。
+      // 对话内联（doc 22）：会话列表全文匹配走 message_blocks_fts（消灭双轨制后对话内容唯一在新表）。
       const ftsQuery = sanitizeFtsQuery(search);
       const hasFts = ftsQuery && ftsQuery !== '""';
       whereClause = hasFts
-        ? `WHERE (c.session_id LIKE ? OR m.title LIKE ? OR EXISTS (
-              SELECT 1 FROM conversations cc
-              JOIN conversations_fts f ON cc.rowid = f.rowid
-              WHERE cc.session_id = c.session_id AND conversations_fts MATCH ?
+        ? `WHERE (msg.session_id LIKE ? OR meta.title LIKE ? OR EXISTS (
+              SELECT 1 FROM message_blocks_fts f
+              WHERE f.session_id = msg.session_id AND message_blocks_fts MATCH ?
             ))`
-        : 'WHERE (c.session_id LIKE ? OR m.title LIKE ?)';
+        : 'WHERE (msg.session_id LIKE ? OR meta.title LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
       if (hasFts) params.push(ftsQuery);
     }
@@ -221,13 +218,17 @@ export function createApiRouter(deps: WebServerDependencies) {
     const orderBy = sort === 'messages' ? 'message_count DESC' : 'last_active DESC';
 
     const rows = db.prepare(`
-      SELECT c.session_id, COUNT(*) as message_count, MAX(c.created_at) as last_active,
-        (SELECT content FROM conversations WHERE session_id = c.session_id ORDER BY created_at ASC LIMIT 1) as first_message,
-        m.title
-      FROM conversations c
-      LEFT JOIN conversation_meta m ON m.session_id = c.session_id
+      SELECT msg.session_id, COUNT(DISTINCT msg.id) as message_count, MAX(msg.created_at) as last_active,
+        (SELECT json_extract(mb.payload_json, '$.text')
+         FROM messages m2
+         JOIN message_blocks mb ON mb.message_id = m2.id
+         WHERE m2.session_id = msg.session_id AND mb.block_type = 'text'
+         ORDER BY m2.created_at ASC, mb.seq ASC LIMIT 1) as first_message,
+        meta.title
+      FROM messages msg
+      LEFT JOIN conversation_meta meta ON meta.session_id = msg.session_id
       ${whereClause}
-      GROUP BY c.session_id
+      GROUP BY msg.session_id
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?
     `).all(...params, limit, offset);
@@ -235,9 +236,10 @@ export function createApiRouter(deps: WebServerDependencies) {
   });
 
   route('GET', '/conversations/:sid', (_req, res, url, params) => {
+    // 对话内联（doc 22）：单会话读取统一走 getTimeline（有序 messages + 各自 blocks）。
     const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
-    const messages = getHistory(params.sid, limit);
-    json(res, messages);
+    const timeline = getTimeline(params.sid, { limit });
+    json(res, timeline);
   });
 
   // --- 对话内联时间线（设计文档/22）：单端点返回有序 messages + 各自 blocks，替代旧
@@ -292,8 +294,10 @@ export function createApiRouter(deps: WebServerDependencies) {
       };
     });
 
-    // Conversation messages with thinkingSteps from task_events
-    const rawMessages = getHistory(sessionId, limit);
+    // 对话内联（doc 22）：state 的消息从新表读（getTimeline），Block[] 平铺为 content（旧字段兼容）
+    // 并透传 blocks 供前端内联渲染（thinking/tool/delegation 卡片）。下面 thinkingSteps 时间窗富化逻辑不变。
+    const timeline = getTimeline(sessionId, { limit });
+    const rawMessages = timeline.map((m) => ({ ...m, content: extractTextFromBlocks(m.blocks) }));
     // 查询该 session 所有任务（不限 task_type），按时间正序排列。
     // 不使用 finished_at 时间窗口：conversation_turn 可能几百毫秒就结束，
     // 但 assistant 消息要等委派任务（如 code_task）跑完后才写入，时间差可达数十秒。
@@ -332,6 +336,11 @@ export function createApiRouter(deps: WebServerDependencies) {
   route('DELETE', '/conversations/:sid', (_req, res, _url, params) => {
     const db = getDb();
     const deleteAll = db.transaction(() => {
+      // 对话内联（doc 22）：删除会话同时清新表（messages/message_blocks/message_blocks_fts），
+      // 旧表 conversations/conversation_meta 顺手清（冷归档）。FTS 表按 session_id 列删（UNINDEXED 但可过滤）。
+      db.prepare('DELETE FROM message_blocks_fts WHERE session_id = ?').run(params.sid);
+      db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(params.sid);
+      db.prepare('DELETE FROM messages WHERE session_id = ?').run(params.sid);
       db.prepare('DELETE FROM conversations WHERE session_id = ?').run(params.sid);
       db.prepare('DELETE FROM conversation_meta WHERE session_id = ?').run(params.sid);
     });
@@ -359,32 +368,42 @@ export function createApiRouter(deps: WebServerDependencies) {
     const offset = safeInt(url.searchParams.get('offset'), 0);
     const db = getDb();
 
-    // 15.0 FTS5：优先 conversations_fts 全文匹配（CJK 友好、rank 排序）；短 query 或索引未建时回退 LIKE
+    // 对话内联（doc 22）：全文检索走 message_blocks_fts（消灭双轨制后对话内容唯一在新表）。
+    // JOIN messages 取 role/created_at；snippet 高亮命中片段。短 query 或索引未建时回退 payload LIKE。
     const ftsQuery = sanitizeFtsQuery(q);
     const hasFts = ftsQuery && ftsQuery !== '""';
     let total: number;
-    let rows: Record<string, unknown>[];
+    let rows: Array<{ session_id: string; role: string; content: string; created_at: number; highlight: string | null }>;
     try {
       if (!hasFts) throw new Error('query too short for FTS');
       total = (db.prepare(`
-        SELECT COUNT(*) as cnt FROM conversations c
-        JOIN conversations_fts f ON c.rowid = f.rowid
-        WHERE conversations_fts MATCH ?
+        SELECT COUNT(*) as cnt FROM message_blocks_fts f
+        JOIN messages m ON m.id = f.message_id
+        WHERE message_blocks_fts MATCH ?
       `).get(ftsQuery) as { cnt: number }).cnt;
       rows = db.prepare(`
-        SELECT c.id, c.session_id, c.role, c.content, c.created_at FROM conversations c
-        JOIN conversations_fts f ON c.rowid = f.rowid
-        WHERE conversations_fts MATCH ?
-        ORDER BY rank, c.created_at DESC LIMIT ? OFFSET ?
-      `).all(ftsQuery, limit, offset) as Record<string, unknown>[];
+        SELECT f.session_id, m.role, f.content, m.created_at,
+               snippet(message_blocks_fts, 3, '<mark>', '</mark>', '...', 24) AS highlight
+        FROM message_blocks_fts f
+        JOIN messages m ON m.id = f.message_id
+        WHERE message_blocks_fts MATCH ?
+        ORDER BY rank, m.created_at DESC LIMIT ? OFFSET ?
+      `).all(ftsQuery, limit, offset) as Array<{ session_id: string; role: string; content: string; created_at: number; highlight: string }>;
     } catch {
-      // FTS 不可用（索引未建 / query 过短）→ 回退 LIKE 全表扫描
-      total = (db.prepare(`SELECT COUNT(*) as cnt FROM conversations WHERE content LIKE ?`).get(`%${q}%`) as { cnt: number }).cnt;
+      // FTS 不可用（索引未建 / query 过短）→ 回退 payload_json LIKE 全表扫描（仅 text/thinking block）
+      total = (db.prepare(`
+        SELECT COUNT(*) as cnt FROM message_blocks mb
+        JOIN messages m ON m.id = mb.message_id
+        WHERE mb.block_type IN ('text','thinking') AND json_extract(mb.payload_json, '$.text') LIKE ?
+      `).get(`%${q}%`) as { cnt: number }).cnt;
       rows = db.prepare(`
-        SELECT id, session_id, role, content, created_at FROM conversations
-        WHERE content LIKE ?
-        ORDER BY created_at DESC LIMIT ? OFFSET ?
-      `).all(`%${q}%`, limit, offset) as Record<string, unknown>[];
+        SELECT m.session_id, m.role, json_extract(mb.payload_json, '$.text') AS content, m.created_at,
+               NULL AS highlight
+        FROM message_blocks mb
+        JOIN messages m ON m.id = mb.message_id
+        WHERE mb.block_type IN ('text','thinking') AND json_extract(mb.payload_json, '$.text') LIKE ?
+        ORDER BY m.created_at DESC LIMIT ? OFFSET ?
+      `).all(`%${q}%`, limit, offset) as Array<{ session_id: string; role: string; content: string; created_at: number; highlight: string | null }>;
     }
 
     const results = rows.map((r) => ({
@@ -392,7 +411,7 @@ export function createApiRouter(deps: WebServerDependencies) {
       content: r.content,
       role: r.role,
       createdAt: r.created_at,
-      highlight: highlightSnippet(r.content as string, q),
+      highlight: r.highlight ?? highlightSnippet(r.content as string, q),
     }));
     json(res, { results, total });
   });

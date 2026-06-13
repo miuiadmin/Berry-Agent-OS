@@ -1157,6 +1157,85 @@ const v25InlineBlocksBackfill: Migration = {
   },
 };
 
+/**
+ * 对话内联统一收尾（设计文档/22 期2）：回填 v25 之后、消灭双轨制之前新增的 user 行到 messages + message_blocks。
+ *
+ * 为什么需要 v26（v25 已迁移 conversations 全表）：v25 在「迁移时刻」一次性回填了当时存在的所有 conversations
+ * 行；但此后新增的 user 消息只落 conversations（旧 saveUserMessage 路径不写新表）。消灭双轨制后 user 活跃漏斗
+ * 切到 persistUserMessage（SessionManager / MemoryRuntime 的 saveUserMessage 均走它，直写 messages），新 user 行
+ * 不再有缺口。v26 即「闭合 v25→消灭双轨制 这段窗口」的一次性补漏——把期间只落 conversations 的 user 行补进新表。
+ *
+ * 范围限定 role='user'：assistant 行的 messages 落点用 BlockCollector.messageId（与 conversations.id 不同源），
+ * 若按 conversations.id 回填 assistant 会与 collector 落库的行重复（双行）；user 行无此问题（user 不经 collector）。
+ *
+ * 幂等：messages.id = conversations.id（与 v25 同源），INSERT OR IGNORE 保证重跑安全；block 用派生稳定 id。
+ * FTS：不在迁移内重建（message_blocks_fts 在 runMigrations 之后才创建，v26 执行时尚不存在，与 v25 同理）；
+ * 首启由 db.ts populateMessageBlocksFtsIfEmpty 全量索引；存量库由活跃漏斗 persistUserMessage 的增量 appendBlock 维护。
+ */
+const v26UserMessagesBackfill: Migration = {
+  version: 26,
+  name: 'user-messages-backfill',
+  up: (db: Database.Database) => {
+    // 旧 conversations 表不存在（全新库）→ 无历史可回填
+    const hasConversations = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = 'conversations'`)
+      .get();
+    if (!hasConversations) return;
+
+    // client_msg_id 列旧库可能缺——按 table_info 容错取列
+    const cols = new Set(
+      (db.pragma('table_info(conversations)') as Array<{ name: string }>).map((c) => c.name),
+    );
+    const hasClientMsgId = cols.has('client_msg_id');
+
+    // 仅取「尚未回填到 messages」的 user 行（LEFT JOIN 找空），避免与 v25 已迁移行重复
+    const rows = db
+      .prepare(
+        `SELECT c.id, c.session_id, c.content${
+          hasClientMsgId ? ', c.client_msg_id' : ''
+        }, c.created_at
+         FROM conversations c
+         LEFT JOIN messages m ON m.id = c.id
+         WHERE c.role = 'user' AND m.id IS NULL
+         ORDER BY c.created_at ASC`,
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    if (rows.length === 0) return;
+
+    const insertMessage = db.prepare(
+      `INSERT OR IGNORE INTO messages (id, session_id, role, client_msg_id, task_id, created_at)
+       VALUES (?, ?, 'user', ?, NULL, ?)`,
+    );
+    // text block：派生稳定 id（blk-<conversations.id>），seq=1（user 行单 text block）；OR IGNORE 兜底任意约束冲突
+    const insertBlock = db.prepare(
+      `INSERT OR IGNORE INTO message_blocks (id, message_id, seq, block_type, payload_json, created_at)
+       VALUES (?, ?, 1, 'text', ?, ?)`,
+    );
+
+    let migrated = 0;
+    for (const r of rows) {
+      const id = r.id as string;
+      insertMessage.run(
+        id,
+        r.session_id,
+        hasClientMsgId ? ((r.client_msg_id as string) ?? null) : null,
+        r.created_at,
+      );
+      // content 落 message_blocks 前清洗（与 v25 同法，覆盖 pre-15.0 残留明文 secret）
+      insertBlock.run(
+        `blk-${id}`,
+        id,
+        JSON.stringify({ type: 'text', text: redactSecrets((r.content as string) ?? '') }),
+        r.created_at,
+      );
+      migrated++;
+    }
+
+    logger.info({ migrated }, '对话内联 v26 回填：conversations user 行 → messages + message_blocks');
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -1184,4 +1263,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v23RedactOutputPayloadScan,
   v24RedactInputPayloadScan,
   v25InlineBlocksBackfill,
+  v26UserMessagesBackfill,
 ];

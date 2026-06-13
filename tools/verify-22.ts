@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initDb, closeDb, getDb } from '../src/memory/index.js';
 import { ALL_MIGRATIONS } from '../src/memory/migrations/index.js';
-import { persistAssistantTurn, getTimeline } from '../src/memory/message-blocks-repo.js';
+import { persistAssistantTurn, persistUserMessage, getTimeline } from '../src/memory/message-blocks-repo.js';
 import type { Block } from '../src/contracts/message-blocks.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'berry-verify22-'));
@@ -78,6 +78,42 @@ try {
     .prepare(`SELECT content FROM message_blocks_fts WHERE message_blocks_fts MATCH ?`)
     .all('"项目管理"') as Array<{ content: string }>;
   check('message_blocks_fts 端到端：text block 入库后可搜中（中文 trigram）', ftsHit.some((r) => r.content.includes('项目管理')));
+
+  // ─── doc 22 期2：user 行落 messages + v26 backfill ───
+  // 注：user 消息的活跃写入漏斗已是 persistUserMessage（消灭双轨制后，SessionManager /
+  //   MemoryRuntime 的 saveUserMessage 均走它）；旧 conversations.saveUserMessage 已无调用方，
+  //   历史遗留 user 行由 v26 一次性回填。此处验证活跃漏斗 + v26 回填两端。
+  // 6. v26 migration 注册 + initDb 已应用（user 行回填迁移）
+  check('ALL_MIGRATIONS 含 v26', ALL_MIGRATIONS.some((m) => m.version === 26));
+  const maxVer = db.prepare(`SELECT MAX(version) as v FROM schema_migrations`).get() as { v: number };
+  check('initDb 应用到 v26', maxVer.v === 26);
+
+  // 7. user 消息落 messages（活跃漏斗 persistUserMessage）
+  persistUserMessage({ sessionId: 's3', content: '用户消息落库测试', clientMsgId: 'cm-verify22' });
+  const tlUser = getTimeline('s3').find((m) => m.role === 'user');
+  check('persistUserMessage 写 messages（getTimeline 可见）', !!tlUser);
+  check('user timeline 含 text block（内容无损）', !!tlUser && tlUser.blocks.some((b) => b.type === 'text' && (b as { text: string }).text === '用户消息落库测试'));
+
+  // 8. 幂等：同 clientMsgId 再写一次，messages 不产生重复行
+  persistUserMessage({ sessionId: 's3', content: '用户消息落库测试', clientMsgId: 'cm-verify22' });
+  check('persistUserMessage 幂等（同 clientMsgId 不重复）', getTimeline('s3').filter((m) => m.role === 'user').length === 1);
+
+  // 9. user 文本 redact（payload_json 无明文 secret）
+  persistUserMessage({ sessionId: 's4', content: 'key=sk-ant-api03-zzzzzzzzzzzzzzzzz', clientMsgId: 'cm-redact' });
+  const tlRedact = getTimeline('s4').find((m) => m.role === 'user');
+  const userTextBlock = tlRedact?.blocks.find((b) => b.type === 'text') as { text: string } | undefined;
+  check('user text block 脱敏（无明文 sk-ant）', !!userTextBlock && !userTextBlock.text.includes('sk-ant-api03'));
+
+  // 10. v26 backfill 闭合窗口：手工塞一条「只在 conversations 不在 messages」的 user 行，重跑 v26 验证回填
+  //     （模拟 v25 之后、消灭双轨制之前的遗留 user 行；v26 幂等重跑只补缺失行，不破坏已有数据）
+  db.prepare(`INSERT INTO conversations (id, session_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)`).run('gap-u1', 's5', '回填窗口测试', 5000);
+  const v26 = ALL_MIGRATIONS.find((m) => m.version === 26)!;
+  v26.up(db); // 幂等重跑——只回填缺失的 gap-u1
+  const gapMsg = db.prepare(`SELECT id FROM messages WHERE id = ?`).get('gap-u1');
+  check('v26 backfill：缺失 user 行回填进 messages', !!gapMsg);
+  const gapBlock = db.prepare(`SELECT payload_json FROM message_blocks WHERE message_id = ?`).get('gap-u1') as { payload_json: string } | undefined;
+  check('v26 backfill：user 行附带 text block（内容无损）', !!gapBlock && JSON.parse(gapBlock.payload_json).text === '回填窗口测试');
+  check('v26 backfill 幂等：再跑一次不重复', (v26.up(db), db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE id = ?`).get('gap-u1') as { c: number }).c === 1);
 
   closeDb();
 } catch (err) {

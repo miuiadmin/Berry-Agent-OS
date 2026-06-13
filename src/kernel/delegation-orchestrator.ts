@@ -2219,11 +2219,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             this.taskManager.complete(pending.taskId, { response, reviewVerdict, handoffTo: handoff.targetAgent });
           }
 
-          // 保存 conversation 的回复到对话历史
-          // 对话内联（doc 22）：handoff 投机路径不走 complete()，手动落本轮 conversation 阶段的内联 blocks
-          // （collector key=pending.taskId，此刻还未在下方 :2237 清空）。与 saveConversationTurn 双写并行。
+          // 保存 conversation 阶段的回复到对话历史（doc 22：messages+message_blocks 唯一存储）
+          // handoff 投机路径不走 complete()，手动落本轮 conversation 阶段的内联 blocks
+          // （collector key=pending.taskId，此刻还未在下方 :2239 清空）。conversations 不再双写。
           this.sessionManager.persistInlineBlocks(pending, response);
-          this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
 
           // 向前端发送 handoff 分隔事件（同一个气泡内）
           // P0-B 修复：业务路径不再直写 socket，改为 emit
