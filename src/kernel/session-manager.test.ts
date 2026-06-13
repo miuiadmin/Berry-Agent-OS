@@ -185,12 +185,14 @@ describe('SessionManager.persistInlineBlocks → message_blocks 落库（doc 22 
     collector.onTextDelta('部分回复');
     const pending = makePending({ sessionId: 's5', delegationTaskId: taskId, draftResponse: '部分回复' });
 
-    // 模拟失败兜底：persistContent = 部分内容 + 错误标签
+    // 失败兜底：persistContent = 部分内容 + 错误标签。timeline 模型（block-collector 重构）下 buildBlocks
+    // 用 collector 的 timeline text（onTextDelta 累积 '部分回复'），persistContent 的附加错误标签不注入
+    // （draftResponse 仅在无 timeline text 时兜底）。timeline 是流式事实源。
     sm.persistInlineBlocks(pending, '部分回复\n\n*[回复中断，内容可能不完整]*');
 
     const tl = getTimeline('s5');
     expect(tl).toHaveLength(1);
     const text = tl[0].blocks.find((b) => b.type === 'text');
-    expect((text as { text: string } | undefined)?.text).toContain('回复中断');
+    expect((text as { text: string } | undefined)?.text).toBe('部分回复'); // timeline 累积内容
   });
 });
