@@ -15,6 +15,7 @@ import ReactMarkdown from "react-markdown";
 import { useChatStore, type ChatMessage } from "@/lib/stores/chat-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { textFromBlocks } from "@/lib/blocks";
 import { ChevronDown } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
 import { InlineLeadBlocks } from "./block-renderers";
@@ -71,6 +72,9 @@ const MessageBubble = memo(function MessageBubble({
   const { locale } = useLocale();
   const markdownComponents = useMemo(() => createMarkdownComponents(isStreaming), [isStreaming]);
   const localeTag = locale === "zh" ? "zh-CN" : "en-US";
+  // 对话内联（doc 22 Phase C）：block-first 渲染——优先从 TextBlock 取正文（单一事实源），
+  // 回退 content（兼容无 text block 的历史消息 / 过渡期）。user 消息无 blocks → 回退 content。
+  const displayContent = textFromBlocks(message.blocks, message.content);
 
   /** 编辑态 */
   if (editing && isUser) {
@@ -108,20 +112,20 @@ const MessageBubble = memo(function MessageBubble({
         )}
       >
         {/* 内容：流式等待 / 用户文本 / 助手 Markdown */}
-        {isStreaming && message.content === "" ? (
+        {isStreaming && displayContent === "" ? (
           <div className="flex items-center gap-2 py-1">
             {[0, 150, 300].map((d) => (
               <span key={d} className="size-1.5 animate-pulse rounded-full bg-current opacity-60" style={{ animationDelay: `${d}ms` }} />
             ))}
           </div>
         ) : isUser ? (
-          <div className="whitespace-pre-wrap break-words">{message.content}</div>
+          <div className="whitespace-pre-wrap break-words">{displayContent}</div>
         ) : (
           <div className={cn(
             "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
             isStreaming && "streaming-cursor",
           )}>
-            <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
+            <ReactMarkdown components={markdownComponents}>{displayContent}</ReactMarkdown>
           </div>
         )}
 
@@ -145,8 +149,8 @@ const MessageBubble = memo(function MessageBubble({
       {/* 时间戳 + 操作按钮 */}
       <div className="mt-px flex items-center gap-1 px-1">
         <span className="text-[11px] text-muted-foreground/60">{formatTime(message.timestamp, localeTag)}</span>
-        {!isStreaming && message.content && (
-          <MessageActions copyText={message.content} isUser={isUser} onEdit={() => setEditing(true)} onDelete={onDelete ? () => onDelete(message.id) : undefined} />
+        {!isStreaming && displayContent && (
+          <MessageActions copyText={displayContent} isUser={isUser} onEdit={() => setEditing(true)} onDelete={onDelete ? () => onDelete(message.id) : undefined} />
         )}
       </div>
     </div>

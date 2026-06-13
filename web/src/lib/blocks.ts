@@ -138,7 +138,33 @@ export function applyBlockToBlocks(blocks: Block[] | undefined, p: StreamBlockPa
     return [...list, p.block];
   }
 
+  // review：按 type 定位 upsert（Brain 审核裁决，整体替换）。ReviewBlock 无 id 字段，
+  // 且一轮至多一个审核 → 直接 findIndex type==='review'（与 tool/delegation 同「整体替换」机制）。
+  if (p.blockType === 'review' && p.block) {
+    const idx = list.findIndex((b) => b.type === 'review');
+    if (idx >= 0) {
+      const copy = list.slice();
+      copy[idx] = p.block;
+      return copy;
+    }
+    return [...list, p.block];
+  }
+
   return list;
+}
+
+/**
+ * 从 blocks 抽取正文文本（TextBlock.text 拼接）；无 TextBlock 则返回 fallback。
+ * block-first 渲染点（文本气泡 / MessageActions）用此优先读 TextBlock（单一事实源），
+ * 回退 content（兼容无 text block 的历史消息 / 过渡期）。消灭双源后 fallback 仅历史消息触发。
+ */
+export function textFromBlocks(blocks: Block[] | undefined, fallback = ''): string {
+  const text = (blocks ?? [])
+    .filter((b): b is TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+  return text || fallback;
 }
 
 /**
