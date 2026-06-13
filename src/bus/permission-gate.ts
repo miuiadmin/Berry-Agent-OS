@@ -74,10 +74,9 @@ export class PermissionGate implements IPermissionGate {
     // ask / yolo → Brain judge（moderate→Brain 与机制 A L2→Brain 一致；yolo 全→Brain 一致）。
 
     if (!this.brainJudge) {
-      if (capability.dangerLevel === 'moderate') {
-        return { allowed: true, reason: 'no brain judge configured, moderate auto-approved', source: 'auto' };
-      }
-      return { allowed: false, reason: 'dangerous capability requires Brain judge but none configured', source: 'auto' };
+      // 15.0 mechA A-2：无 Brain judge 时 fail-closed（与 IPC 路径 permission-flow 一致）——
+      // ask/yolo 模式期望 Brain 审批，Brain 不可用应拒绝而非对 moderate auto-approve。
+      return { allowed: false, reason: `Brain judge 未配置，${capability.dangerLevel} capability 拒绝（fail-closed）`, source: 'auto' };
     }
 
     try {

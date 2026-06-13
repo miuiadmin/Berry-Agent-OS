@@ -86,3 +86,22 @@ describe('PermissionGate mode 尊重 (15.0 机制 A §2.5)', () => {
     expect((await gate.check(capability('moderate'), {}, ctx)).allowed).toBe(false); // deny-all
   });
 });
+
+describe('PermissionGate 无 Brain judge fail-closed (15.0 mechA A-2)', () => {
+  it('ask 无 judge → moderate/dangerous 均 fail-closed 拒绝（与 IPC 一致，不再 auto-approve moderate）', async () => {
+    const gate = new PermissionGate();
+    gate.setMode(() => 'ask');
+    // 不调 setBrainJudge —— 模拟 Brain judge 未配置
+    const moderate = await gate.check(capability('moderate'), {}, ctx);
+    const dangerous = await gate.check(capability('dangerous'), {}, ctx);
+    expect(moderate.allowed).toBe(false);
+    expect(dangerous.allowed).toBe(false);
+    expect(moderate.reason).toContain('fail-closed');
+  });
+
+  it('allow-all 无 judge 仍放行（mode 检查在 judge 之前）', async () => {
+    const gate = new PermissionGate();
+    gate.setMode(() => 'allow-all');
+    expect((await gate.check(capability('moderate'), {}, ctx)).allowed).toBe(true);
+  });
+});
