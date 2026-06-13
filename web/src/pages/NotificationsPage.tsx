@@ -13,6 +13,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -140,28 +141,20 @@ export default function NotificationsPage() {
                   {/* 操作按钮：移动端常驻，桌面端 hover 显示 */}
                   <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     {!item.read && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
+                      <IconButton
                         title={t("notifications.markRead")}
-                        aria-label={t("notifications.markRead")}
                         onClick={() => readMut.mutate(item.id)}
                       >
                         <Check className="size-3.5" />
-                      </Button>
+                      </IconButton>
                     )}
                     {!item.archived && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
+                      <IconButton
                         title={t("notifications.archive")}
-                        aria-label={t("notifications.archive")}
                         onClick={() => archiveMut.mutate(item.id)}
                       >
                         <Archive className="size-3.5" />
-                      </Button>
+                      </IconButton>
                     )}
                   </div>
                 </CardContent>

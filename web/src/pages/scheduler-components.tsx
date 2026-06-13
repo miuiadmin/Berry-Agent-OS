@@ -20,11 +20,11 @@ import {
 import { schedulerApi, type SchedulerJob } from "@/lib/api";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { TextAreaField } from "@/components/ui/text-area-field";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 // ─── Status Badge ─────────────────────────────────────────────────
@@ -162,38 +162,6 @@ export function JobCard({
         <JobExecutions jobId={job.id} />
       </CardContent>
     </Card>
-  );
-}
-
-/** Job 卡片右侧的图标按钮：移动端 44px 触控目标，桌面端 32px */
-function IconButton({
-  title,
-  disabled,
-  onClick,
-  destructive,
-  children,
-}: {
-  title: string;
-  disabled?: boolean;
-  onClick: () => void;
-  destructive?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      title={title}
-      aria-label={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "size-11 md:size-8",
-        destructive && "text-destructive hover:text-destructive",
-      )}
-    >
-      {children}
-    </Button>
   );
 }
 

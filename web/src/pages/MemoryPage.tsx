@@ -15,6 +15,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +23,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { TextAreaField } from "@/components/ui/text-area-field";
-import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 import { useMemoryMutations } from "./use-memory-mutations";
 
@@ -240,27 +240,6 @@ function MemoryCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-/** 统一图标按钮（移动端 44px / 桌面端 32px） */
-function IconButton({
-  title, disabled, onClick, destructive, children,
-}: {
-  title: string;
-  disabled?: boolean;
-  onClick: () => void;
-  destructive?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button
-      variant="ghost" size="icon" title={title} aria-label={title}
-      disabled={disabled} onClick={onClick}
-      className={cn("size-11 md:size-8", destructive && "text-destructive hover:text-destructive")}
-    >
-      {children}
-    </Button>
   );
 }
 

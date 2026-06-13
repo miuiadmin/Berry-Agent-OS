@@ -15,7 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 /** 单条日志行（对应服务端 JSON） */
@@ -119,14 +119,13 @@ export default function LogsPage() {
         </select>
 
         {/* 刷新按钮（加载中旋转） */}
-        <Button
-          variant="ghost"
-          aria-label={t("logs.refreshLogs")}
+        <IconButton
+          title={t("logs.refreshLogs")}
           onClick={() => refetch()}
-          className={cn("size-11 md:size-8", isFetching && "animate-spin")}
+          className={isFetching ? "animate-spin" : undefined}
         >
           <RefreshCw className="size-3.5" />
-        </Button>
+        </IconButton>
 
         {/* 自动刷新开关 */}
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">

@@ -16,13 +16,12 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bot, Power, PowerOff } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { AgentDetailView } from "./agents-components";
 import { useAgentMutations } from "./use-agent-mutations";
@@ -182,11 +181,8 @@ function AgentCard({
               </span>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-11 md:size-8"
-            aria-label={
+          <IconButton
+            title={
               isEnabled ? t("agents.disableAgent") : t("agents.enableAgent")
             }
             onClick={(e) => {
@@ -199,7 +195,7 @@ function AgentCard({
             ) : (
               <Power className="size-4" />
             )}
-          </Button>
+          </IconButton>
         </div>
       </CardContent>
     </Card>
