@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useChatStore, genMsgId,
-  appendToLast, setLastStatus, setLastProgress, setLastError, appendReasoning, appendToolCall, updateLastToolCallResult,
+  setLastStatus, setLastProgress, setLastError, updateLastToolCallResult,
   type DelegationRequest, type PermissionConfirmRequest,
 } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
@@ -224,16 +224,9 @@ export function useChatSocket() {
           resetTimer();
           break;
         }
-        case "text_delta":
-          appendToLast(msg.text);
-          resetTimer();
-          break;
-        case "reasoning_delta": {
-          const rd = msg as Extract<ServerMessage, { type: "reasoning_delta" }>;
-          appendReasoning(rd.text);
-          resetTimer();
-          break;
-        }
+        // 对话内联（doc 22 Phase C）：text_delta / reasoning_delta 粒度事件已删（后端不再 emit、
+        // ws-event-bridge 不再映射）。文本/思考统一走上方 case "block"（stream.block text/thinking）。
+        // 占位创建（上方 194 行）仍对 block 事件触发。
         case "progress":
           if (msg.summary) setLastProgress(msg.summary);
           resetTimer();
@@ -259,19 +252,8 @@ export function useChatSocket() {
           resetTimer();
           break;
         }
-        case "tool_call": {
-          const tc = msg as Extract<ServerMessage, { type: "tool_call" }>;
-          appendToolCall({
-            toolName: tc.toolName,
-            input: tc.input,
-            result: tc.result,
-            isError: tc.isError,
-            durationMs: tc.durationMs,
-            ts: Date.now(),
-          });
-          resetTimer();
-          break;
-        }
+        // 对话内联（doc 22 Phase C）：tool_call 粒度事件已删——工具卡统一走 case "block"
+        // （stream.block tool，出生即终态带 input/result/durationMs）。
         case "tool_result": {
           // 流式契约补全：tool_call 之后到达的独立 tool_result（结果稍后才到）
           const tr = msg as Extract<ServerMessage, { type: "tool_result" }>;
