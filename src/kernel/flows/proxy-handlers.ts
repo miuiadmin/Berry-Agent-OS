@@ -7,7 +7,8 @@ import type { ToolAuditPayload } from '../../contracts/audit.js';
 import type { MemoryQueryPayload, MemoryAddPayload, MemoryDeletePayload } from '../../contracts/memory.js';
 import type { CapabilityRequestPayload, CapabilityResponsePayload } from '../../contracts/capabilities.js';
 import type { ModelTakeoverRequestPayload, ModelTakeoverRespondPayload } from '../../contracts/model.js';
-import type { ICapabilityBus, InvokeContext } from '../../bus/contract.js';
+import type { ICapabilityBus, InvokeContext, CapabilityDescriptor } from '../../bus/contract.js';
+import { z } from 'zod';
 import { getEventBus } from '../event-bus.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
@@ -315,88 +316,39 @@ export function setupBusHandlers(agentIpc: AgentIpc, agentName: string, capabili
     const payload = msg.payload as { agentName: string; required: string[] };
     const required = payload.required;
 
-    const tools = required.length > 0
+    // required 非空 → 按名称精确取；否则 discover 全部 safe 能力。两路共用同一映射
+    // （descriptorToToolSpec），保证 inputSchema 的 JSON Schema 转换一致。
+    // 修复前 required 分支是恒 {} 的死三元 `cap!.inputSchema ? {} : {}`——能力真实的
+    // Zod schema 从未抵达 Agent，Agent 拿不到入参约束；discover 分支也恒 {}。
+    const caps: CapabilityDescriptor[] = required.length > 0
       ? required
           .map((name) => capabilityBus.getDescriptor(name))
-          .filter(Boolean)
-          .map((cap) => ({
-            name: cap!.name,
-            description: cap!.description,
-            inputSchema: cap!.inputSchema ? {} : {},
-          }))
-      : capabilityBus.discover({ dangerLevel: 'safe' }).map((cap) => ({
-          name: cap.name,
-          description: cap.description,
-          inputSchema: {},
-        }));
+          .filter((c): c is CapabilityDescriptor => Boolean(c))
+      : capabilityBus.discover({ dangerLevel: 'safe' });
 
-    agentIpc.send('bus.capabilities.response', agentName, { tools }, msg.id);
+    agentIpc.send('bus.capabilities.response', agentName, { tools: caps.map(descriptorToToolSpec) }, msg.id);
   });
 }
 
-export type BusHandlerDeps = {
-  capabilityBus: import('../../bus/index.js').ICapabilityBus | null;
-};
-
-export function setupBusInvokeHandler(agentIpc: AgentIpc, agentName: string, deps: BusHandlerDeps): void {
-  agentIpc.onMessage('bus.invoke' as IpcMessageType, async (msg: IpcMessage) => {
-    const { capabilityName, input, callerAgent, sessionId, correlationId } = msg.payload as {
-      capabilityName: string;
-      input: unknown;
-      callerAgent: string;
-      sessionId: string;
-      correlationId: string;
-    };
-
-    if (!deps.capabilityBus) {
-      agentIpc.send('bus.invoke.result' as IpcMessageType, agentName, {
-        ok: false,
-        error: 'Capability Bus not initialized',
-        auditId: '',
-        durationMs: 0,
-        provider: { type: 'builtin', name: 'error' },
-      }, msg.id);
-      return;
-    }
-
-    try {
-      const result = await deps.capabilityBus.invoke(capabilityName, input, {
-        callChain: [`${callerAgent}:${capabilityName}`],
-        callerAgent,
-        sessionId,
-        correlationId,
-      });
-      agentIpc.send('bus.invoke.result' as IpcMessageType, agentName, result, msg.id);
-    } catch (err) {
-      agentIpc.send('bus.invoke.result' as IpcMessageType, agentName, {
-        ok: false,
-        error: (err as Error).message,
-        auditId: '',
-        durationMs: 0,
-        provider: { type: 'builtin', name: 'error' },
-      }, msg.id);
-    }
-  });
-
-  agentIpc.onMessage('bus.capabilities.request' as IpcMessageType, (msg: IpcMessage) => {
-    const { required } = msg.payload as { agentName: string; required: string[] };
-
-    if (!deps.capabilityBus) {
-      agentIpc.send('bus.capabilities.response' as IpcMessageType, agentName, { tools: [] }, msg.id);
-      return;
-    }
-
-    const tools = required
-      .map((name: string) => deps.capabilityBus!.getDescriptor(name))
-      .filter(Boolean)
-      .map((desc: any) => ({
-        name: desc.name,
-        description: desc.description,
-        inputSchema: desc.inputSchema
-          ? (typeof desc.inputSchema.toJsonSchema === 'function' ? desc.inputSchema.toJsonSchema() : { type: 'object' })
-          : { type: 'object' },
-      }));
-
-    agentIpc.send('bus.capabilities.response' as IpcMessageType, agentName, { tools }, msg.id);
-  });
+/**
+ * 把 capability descriptor 映射成发给 Agent 的工具描述。
+ *
+ * inputSchema 是 Zod schema——用 Zod 4 顶层 z.toJSONSchema() 转成标准 JSON Schema（与
+ * src/tools/types.ts 的 zodToJsonSchema 同一做法，剔除 $schema 元键）。缺省 schema 时回退
+ * { type:'object' }（Agent 据此按自由入参处理）。
+ *
+ * 单独成函数：bus.capabilities.request 的 required / discover 两路共用，避免重复映射——
+ * 重复正是此前死三元 bug 的根源（required 分支手写映射出错成 `? {} : {}`）。
+ */
+function descriptorToToolSpec(cap: CapabilityDescriptor): { name: string; description: string; inputSchema: unknown } {
+  if (!cap.inputSchema) return { name: cap.name, description: cap.description, inputSchema: { type: 'object' } };
+  // z.toJSONSchema 对任意 ZodType 均可用；失败时回退宽松 schema，不阻断能力列表下发
+  try {
+    const jsonSchema = z.toJSONSchema(cap.inputSchema) as Record<string, unknown>;
+    delete jsonSchema.$schema;
+    return { name: cap.name, description: cap.description, inputSchema: jsonSchema };
+  } catch (err) {
+    logger.debug({ err, cap: cap.name }, 'capability inputSchema 转换失败，回退 { type: object }');
+    return { name: cap.name, description: cap.description, inputSchema: { type: 'object' } };
+  }
 }

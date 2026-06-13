@@ -148,15 +148,6 @@ export class BrainDecisionRecorder {
     }
   }
 
-  recordAggregatedInsight(sessionId: string, insight: string, evidence: string[]): string | null {
-    return this.record({
-      sessionId,
-      decisionType: 'aggregated_insight',
-      inputSummary: evidence.slice(0, 3).join('; ').slice(0, 500),
-      outputJson: { insight, evidence },
-    });
-  }
-
   updateLesson(decisionId: string, lesson: string): void {
     try {
       this.db.prepare(`UPDATE brain_decisions SET lesson = ?, resolved_at = ? WHERE id = ?`).run(lesson, Date.now(), decisionId);

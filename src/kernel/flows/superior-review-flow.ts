@@ -205,10 +205,9 @@ export class SuperiorReviewFlow {
     clearTimeout(pending.timeoutId);
     this.pendingReviews.delete(reviewCorrelationId);
 
-    const agentBinding = this.ctx.db.prepare(
-      'SELECT id FROM workspace_agents WHERE workspace_id = ? AND agent_name = ? AND enabled = 1 LIMIT 1',
-    ).get(pending.workspaceId, pending.turn.userMessage ? undefined : undefined) as { id: string } | undefined;
-
+    // 15.0 V-5：删除此处 dead 的 agentBinding 查询块——它 SELECT workspace_agents 后赋值给
+    // agentBinding 却从未被读取（下面用的是 findAgentIdByDelegation → agentId），且其 bind
+    // 参数是 `pending.turn.userMessage ? undefined : undefined`（两支都是 undefined，恒无效查询）。
     const agentId = this.findAgentIdByDelegation(pending);
 
     switch (result.verdict) {
