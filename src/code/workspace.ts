@@ -43,6 +43,11 @@ const DEFAULT_EXCLUDED_PATHS = [
   '*.pfx',
 ];
 
+/**
+ * 检测工作区。优先 git 仓库（含 branch/dirty 状态），非 git 目录返回轻量工作区（路径验证仍生效，
+ * git 功能降级为默认值）。这样 code agent 在普通目录也能创建文件——否则 detectWorkspace 返回 null
+ * → task-phases synthesis 跳过 → implementation 永不执行 → 文件不创建（code agent 瘫痪）。
+ */
 export async function detectWorkspace(targetPath: string, options: WorkspaceOptions = {}): Promise<CodeWorkspace | null> {
   const absPath = resolve(targetPath);
   let gitRoot: string;
@@ -54,7 +59,15 @@ export async function detectWorkspace(targetPath: string, options: WorkspaceOpti
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
-    return null;
+    // 非 git 目录：返回轻量工作区（路径验证仍用 absPath 作边界，git 功能降级为默认值）
+    return {
+      gitRoot: absPath,
+      allowedPaths: options.allowedPaths ?? [],
+      readOnlyPaths: options.readOnlyPaths ?? [],
+      excludedPaths: options.excludedPaths ?? DEFAULT_EXCLUDED_PATHS,
+      isDirty: false,
+      branch: 'non-git',
+    };
   }
 
   if (!gitRoot) return null;
