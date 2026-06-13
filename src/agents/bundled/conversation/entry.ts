@@ -267,10 +267,9 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
 
     if (contextManager.needsCompression(priorHistory)) {
       const compressed = await contextManager.compress(priorHistory, llm.current);
-      // 11.0 修复：压缩后将「被替换的旧消息」持久化到 conversations 表
-      // （通过 insert new + 不删旧行实现，依赖 getHistory 的时间序读取），
-      // 这里仅替换内存中的 history，不动 DB —— 因为旧消息已经在
-      // conversations 表里，压缩只是把它们从 LLM context 中挤出。
+      // 11.0：压缩只把被挤出的旧消息从 LLM context 移除（仅替换内存 history，不动 DB）。
+      // 旧消息已持久化在 messages+message_blocks（消灭双轨制后对话唯一存储），压缩不影响落库，
+      // 重新启动由 loadHistoryFromDb→getTimeline 读回。
       sessionHistories.set(sessionId, compressed);
       priorHistory = [...compressed];
     }

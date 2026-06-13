@@ -653,9 +653,10 @@ export class SessionManager {
     let timedOut = 0;
     let denied = 0;
 
-    // R14-2：原 SQL 漏取 session_id，导致 stale task 标记后无法定位 conversations 表的 user 行。
-    // 现在需要：标记 stale task + 写 [系统] 行到对应 session 的 conversations 表
-    // （替代 OrphanReconciler 后台扫表的兜底职责）
+    // R14-2：原 SQL 漏取 session_id，导致 stale task 标记后无法定位对应会话的 user 行。
+    // 现在需要：标记 stale task + 写 [系统] 兜底行到对应 session 的 messages 表
+    // （消灭双轨制后 conversations 退役，[系统] 行经 persistAssistantTurn 落 messages+message_blocks；
+    //  替代 OrphanReconciler 后台扫表的兜底职责）
     const staleTasks = db.prepare(`
       SELECT id, status, target_agent, session_id FROM agent_tasks
       WHERE status IN ('running', 'dispatched', 'acknowledged', 'waiting_approval')
