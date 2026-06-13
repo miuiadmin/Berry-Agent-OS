@@ -10,30 +10,28 @@
  *   - {@link ChannelCard} / 模型行 → channel-card.tsx
  *   - {@link ChannelFormDialog}（表单状态内聚）→ channel-form-dialog.tsx
  *   - 类型 / 常量 / SelectChevron → providers-types.ts
+ *   - {@link TierEditor} + useTierEditor → tier-editor.tsx
+ *   - useProviderMutations → use-provider-mutations.ts
  */
 
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiGet } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { Plus, Server, Save } from "lucide-react";
 import {
   type ProviderChannel,
-  type TierMapping,
   type ChannelsResponse,
   type TiersResponse,
   type KindsResponse,
-  TIER_CONFIG,
-  SELECT_BASE,
-  SelectChevron,
 } from "./providers-types";
 import { ChannelCard } from "./channel-card";
 import { ChannelFormDialog, type ChannelFormData } from "./channel-form-dialog";
+import { TierEditor, useTierEditor } from "./tier-editor";
+import { useProviderMutations } from "./use-provider-mutations";
 
 export function ProvidersTab() {
   const t = useT();
@@ -249,210 +247,4 @@ function EmptyChannels({ onAdd }: { onAdd: () => void }) {
       </Button>
     </div>
   );
-}
-
-// ─── Tier 编辑器 ──────────────────────────────────────────────────
-
-/** tier 编辑器状态（从服务端 tiers 初始化，本地编辑，保存时提交） */
-function useTierEditor(tiers: TierMapping) {
-  const [editingTiers, setEditingTiers] = useState<TierMapping>({});
-  const [tiersInitialized, setTiersInitialized] = useState(false);
-  /** 每个 tier 当前选中的 channel（用于联动显示该 channel 下的模型列表） */
-  const [selectedTierChannel, setSelectedTierChannel] = useState<
-    Record<string, string>
-  >({});
-
-  /** 从服务端 tiers 重建本地编辑状态 */
-  function syncFromServer(serverTiers: TierMapping) {
-    setEditingTiers(serverTiers);
-    setSelectedTierChannel({
-      fast: serverTiers.fast?.channel ?? "",
-      default: serverTiers.default?.channel ?? "",
-      high: serverTiers.high?.channel ?? "",
-    });
-  }
-
-  // 首次加载 + 保存后服务端数据变化时，同步本地状态
-  useEffect(() => {
-    if (!tiersInitialized) {
-      syncFromServer(tiers);
-      setTiersInitialized(true);
-    } else {
-      syncFromServer(tiers);
-    }
-  }, [tiers, tiersInitialized]);
-
-  return {
-    editingTiers,
-    setEditingTiers,
-    selectedTierChannel,
-    setSelectedTierChannel,
-  };
-}
-
-/** tier 映射编辑器 UI：三档（fast/default/high）各选 channel + model */
-function TierEditor({
-  channels,
-  editor,
-}: {
-  channels: ProviderChannel[];
-  editor: ReturnType<typeof useTierEditor>;
-}) {
-  const t = useT();
-  const { editingTiers, setEditingTiers, selectedTierChannel, setSelectedTierChannel } =
-    editor;
-
-  return (
-    <>
-      {TIER_CONFIG.map(({ key, labelKey, icon: Icon, color }) => {
-        const channel = selectedTierChannel[key] ?? "";
-        const selectedCh = channels.find((c) => c.id === channel);
-        const models = selectedCh?.models ?? [];
-        const target = editingTiers[key];
-
-        return (
-          <div
-            key={key}
-            className="space-y-2 rounded-lg border border-border px-3 py-3"
-          >
-            <div className="flex items-center gap-2">
-              <Icon className={cn("size-4 shrink-0", color)} />
-              <span className="text-sm font-medium">{t(labelKey)}</span>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {/* channel 选择 */}
-              <div className="relative">
-                <select
-                  value={channel}
-                  onChange={(e) => {
-                    const ch = e.target.value;
-                    setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
-                    setEditingTiers((prev) => ({
-                      ...prev,
-                      [key]: ch ? { channel: ch, model: "" } : undefined,
-                    }));
-                  }}
-                  className={SELECT_BASE}
-                >
-                  <option value="">{t("chat.notConfigured")}</option>
-                  {channels.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.kind})
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </div>
-              {/* model 选择（依赖已选 channel 的模型列表） */}
-              <div className="relative">
-                <select
-                  value={target?.model ?? ""}
-                  onChange={(e) => {
-                    const model = e.target.value;
-                    setEditingTiers((prev) => ({
-                      ...prev,
-                      [key]: channel ? { channel, model } : undefined,
-                    }));
-                  }}
-                  disabled={!channel || models.length === 0}
-                  className={SELECT_BASE}
-                >
-                  <option value="">{t("providers.selectModel")}</option>
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-// ─── Provider Mutations ───────────────────────────────────────────
-
-/** 所有 provider 相关 mutation 的集合，统一 toast 反馈 + 成功后刷新 */
-function useProviderMutations(onSuccess: () => void) {
-  const t = useT();
-
-  const testMutation = useMutation({
-    mutationFn: (channelId: string) =>
-      apiPost<{ ok: boolean; message?: string; error?: string }>(
-        `/api/providers/channels/${channelId}/test`,
-      ),
-    onSuccess: (data) => {
-      if (data.ok) toast.success(t("providers.connectionSuccessful"));
-      else toast.error(data.error ?? t("providers.connectionFailed"));
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data: ChannelFormData) =>
-      apiPost<{ ok: boolean; channelId: string }>(
-        "/api/providers/channels",
-        data,
-      ),
-    onSuccess: () => {
-      toast.success(t("providers.channelCreated"));
-      onSuccess();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({
-      channelId,
-      updates,
-    }: {
-      channelId: string;
-      updates: Record<string, unknown>;
-    }) =>
-      apiPut<{ ok: boolean }>(`/api/providers/channels/${channelId}`, updates),
-    onSuccess: () => {
-      toast.success(t("providers.channelUpdated"));
-      onSuccess();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (channelId: string) =>
-      apiDelete(`/api/providers/channels/${channelId}`),
-    onSuccess: () => {
-      toast.success(t("providers.channelDeleted"));
-      onSuccess();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const saveTiersMutation = useMutation({
-    mutationFn: (tm: TierMapping) =>
-      apiPut<{ ok: boolean; tiers: TierMapping }>("/api/providers/tiers", tm),
-    onSuccess: () => {
-      toast.success(t("providers.tierMappingSaved"));
-      onSuccess();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  return {
-    testChannel: testMutation.mutate,
-    createChannel: createMutation.mutate,
-    updateChannel: (channelId: string, updates: Record<string, unknown>) =>
-      updateMutation.mutate({ channelId, updates }),
-    deleteChannel: deleteMutation.mutate,
-    saveTiers: saveTiersMutation.mutate,
-    pendingFlags: {
-      testing: testMutation.isPending,
-      creating: createMutation.isPending,
-      updating: updateMutation.isPending,
-      savingTiers: saveTiersMutation.isPending,
-    },
-  };
 }

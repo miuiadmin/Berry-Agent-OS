@@ -31,8 +31,8 @@ import {
   DelegationDialog,
   PermissionConfirmDialog,
   PermissionModeSelector,
-  ModelSelector,
 } from "./chat-window-parts";
+import { ModelSelector } from "./model-selector";
 
 interface ChatWindowProps {
   /** 切换侧边栏（移动端 hamburger 按钮） */

@@ -1,3 +1,10 @@
+/**
+ * 设置页面（多 Tab 布局）。
+ *
+ * 左侧 Tab 导航 + 右侧内容面板。
+ * Tab 内容由 settings-tab-content.tsx 中的 TabContent 组件渲染。
+ * 校验逻辑由 settings-tab-content.tsx 中的 validateConfig 函数提供。
+ */
 
 import { Suspense, useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -7,13 +14,9 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT } from "@/lib/i18n";
 import { queries, apiPut, apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { ProvidersTab } from "@/components/settings/providers-tab";
-import { ConfigSection, type FieldDef } from "./settings-config-section";
+import { TabContent, validateConfig, type TabKey } from "./settings-tab-content";
 import {
   Save,
   Wallet,
@@ -36,7 +39,6 @@ const TABS = [
   { key: "web", labelKey: "settings.tabs.web", icon: Globe },
 ] as const;
 
-type TabKey = (typeof TABS)[number]["key"];
 const VALID_TABS = new Set<string>(TABS.map((tabItem) => tabItem.key));
 
 export default function SettingsPage() {
@@ -58,9 +60,11 @@ function SettingsContent() {
   const { data: config, isLoading } = useQuery(queries.config());
   const queryClient = useQueryClient();
   const [editedConfig, setEditedConfig] = useState<Record<string, unknown>>({});
+  /** 是否已从服务端同步过初始值 */
   const [initialized, setInitialized] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // 首次加载时从服务端配置初始化本地编辑状态
   useEffect(() => {
     if (config && !initialized) {
       setEditedConfig(config);
@@ -68,11 +72,13 @@ function SettingsContent() {
     }
   }, [config, initialized]);
 
+  /** 是否有未保存的变更（深比较） */
   const hasChanges = useMemo(() => {
     if (!config || !initialized) return false;
     return JSON.stringify(config) !== JSON.stringify(editedConfig);
   }, [config, editedConfig, initialized]);
 
+  // 有未保存变更时，拦截浏览器关闭/刷新
   useEffect(() => {
     if (!hasChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
@@ -83,35 +89,7 @@ function SettingsContent() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasChanges]);
 
-  const validate = useCallback((cfg: Record<string, unknown>): Record<string, string> => {
-    const errs: Record<string, string> = {};
-    const web = cfg.web as Record<string, unknown> | undefined;
-    if (web) {
-      const port = Number(web.port);
-      if (web.port !== "" && (isNaN(port) || port < 1 || port > 65535)) {
-        errs["web.port"] = t("settings.portRange");
-      }
-    }
-    const budget = cfg.budget as Record<string, unknown> | undefined;
-    if (budget) {
-      for (const key of ["sessionLimit", "agentLimit", "taskLimit", "dailyLimit"]) {
-        const val = Number(budget[key]);
-        if (budget[key] !== "" && !isNaN(val) && val < 0) {
-          errs[`budget.${key}`] = t("settings.mustBeNonNegative");
-        }
-      }
-    }
-    const memory = cfg.memory as Record<string, unknown> | undefined;
-    if (memory) {
-      for (const key of ["consolidationInterval", "maxResults"]) {
-        const val = Number(memory[key]);
-        if (memory[key] !== "" && !isNaN(val) && val < 0) {
-          errs[`memory.${key}`] = t("settings.mustBeNonNegative");
-        }
-      }
-    }
-    return errs;
-  }, [t]);
+  const validate = useCallback((cfg: Record<string, unknown>) => validateConfig(cfg, t), [t]);
 
   const saveConfig = useMutation({
     mutationFn: async (updates: Record<string, unknown>) => {
@@ -123,11 +101,12 @@ function SettingsContent() {
     },
     onError: (err: Error) => {
       toast.error(err.message || t("settings.failedToSave"));
-      // Reset editedConfig to last known server state
+      // 保存失败时刷新缓存，回到服务端状态
       queryClient.invalidateQueries({ queryKey: ["config"] });
     },
   });
 
+  /** 更新单个配置字段并实时校验 */
   const updateField = (section: string, key: string, value: unknown) => {
     setEditedConfig((prev) => {
       const next = {
@@ -139,6 +118,7 @@ function SettingsContent() {
     });
   };
 
+  /** 保存按钮：先校验，通过则提交 */
   const handleSave = () => {
     const errs = validate(editedConfig);
     setErrors(errs);
@@ -149,6 +129,7 @@ function SettingsContent() {
     saveConfig.mutate(editedConfig);
   };
 
+  /** 重置为默认配置 */
   const handleReset = async () => {
     try {
       const defaults = await apiGet<Record<string, unknown>>("/api/config/defaults");
@@ -160,6 +141,7 @@ function SettingsContent() {
     }
   };
 
+  /** 切换 Tab（URL 参数同步） */
   const handleTabChange = (tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
@@ -170,7 +152,7 @@ function SettingsContent() {
 
   return (
     <div className="flex flex-col md:h-full md:flex-row md:overflow-hidden">
-      {/* Left nav */}
+      {/* 左侧 Tab 导航 */}
       <div className="shrink-0 border-b md:border-b-0 md:border-r md:w-52 md:overflow-y-auto p-3 md:p-4 sticky top-0 z-10 bg-background md:static md:z-auto">
         <h1 className="text-sm font-semibold mb-4 px-2 hidden md:block">{t("settings.title")}</h1>
         <div className="relative md:contents">
@@ -208,13 +190,15 @@ function SettingsContent() {
               );
             })}
           </nav>
+          {/* 移动端右侧渐隐遮罩 */}
           <div className="pointer-events-none absolute right-0 top-0 h-full w-6 bg-gradient-to-l from-background to-transparent md:hidden" />
         </div>
       </div>
 
-      {/* Right content */}
+      {/* 右侧内容面板 */}
       <div role="tabpanel" className="flex-1 min-w-0 md:overflow-y-auto">
         <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
+          {/* 标题栏 + 操作按钮 */}
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-lg font-semibold md:hidden">{t("settings.title")}</h2>
@@ -242,6 +226,7 @@ function SettingsContent() {
             </div>
           </div>
 
+          {/* 校验错误横幅 */}
           {errorCount > 0 && (
             <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {t("settings.validationBanner", { count: errorCount })}
@@ -275,152 +260,4 @@ function SettingsSkeleton() {
       </div>
     </div>
   );
-}
-
-function TabContent({
-  tab,
-  config,
-  onUpdate,
-  errors,
-}: {
-  tab: TabKey;
-  config: Record<string, unknown>;
-  onUpdate: (section: string, key: string, value: unknown) => void;
-  errors: Record<string, string>;
-}) {
-  const t = useT();
-  switch (tab) {
-    case "providers":
-      return <ProvidersTab />;
-    case "budget":
-      return (
-        <ConfigSection
-          title={t("settings.budgetLimits")}
-          description={t("settings.budgetLimitsDesc")}
-          section="budget"
-          config={config}
-          onUpdate={onUpdate}
-          errors={errors}
-          fields={[
-            { key: "sessionLimit", label: t("settings.sessionLimit"), type: "number" },
-            { key: "agentLimit", label: t("settings.agentLimit"), type: "number" },
-            { key: "taskLimit", label: t("settings.taskLimit"), type: "number" },
-            { key: "dailyLimit", label: t("settings.dailyLimit"), type: "number" },
-          ]}
-        />
-      );
-    case "memory":
-      return (
-        <ConfigSection
-          title={t("settings.memorySettings")}
-          description={t("settings.memorySettingsDesc")}
-          section="memory"
-          config={config}
-          onUpdate={onUpdate}
-          errors={errors}
-          fields={[
-            { key: "evolutionEnabled", label: t("settings.evolutionEnabled"), type: "boolean" },
-            { key: "consolidationInterval", label: t("settings.consolidationInterval"), type: "number" },
-            { key: "maxResults", label: t("settings.maxResults"), type: "number" },
-          ]}
-        />
-      );
-    case "skills":
-      return (
-        <ConfigSection
-          title={t("settings.skillsSettings")}
-          description={t("settings.skillsSettingsDesc")}
-          section="skills"
-          config={config}
-          onUpdate={onUpdate}
-          errors={errors}
-          fields={[
-            { key: "promptMode", label: t("settings.promptMode"), type: "text" },
-            { key: "maxPromptChars", label: t("settings.maxPromptChars"), type: "number" },
-            { key: "maxDescriptionChars", label: t("settings.maxDescriptionChars"), type: "number" },
-            { key: "shellInjection", label: t("settings.shellInjection"), type: "boolean" },
-          ]}
-        />
-      );
-    case "channels":
-      return (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("settings.channelSettings")}</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {t("settings.channelSettingsDesc")}
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-lg border border-border p-4">
-              <div className="flex items-center gap-2">
-                <Radio className="size-4 text-info" />
-                <h4 className="text-sm font-medium">{t("settings.telegram")}</h4>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                {t("settings.telegramInstructions")}
-              </p>
-              <pre className="mt-2 rounded-md bg-muted/50 p-3 text-[11px] font-mono text-muted-foreground overflow-x-auto">
-{`channels:
-  telegram:
-    token: "your-bot-token"
-    allowedUserIds:
-      - 123456789`}
-              </pre>
-              {(config.channels as Record<string, unknown> | undefined)?.telegram ? (
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="inline-flex size-2 rounded-full bg-success" />
-                  <span className="text-xs text-success font-medium">{t("settings.configured")}</span>
-                </div>
-              ) : (
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="inline-flex size-2 rounded-full bg-muted-foreground/30" />
-                  <span className="text-xs text-muted-foreground">{t("common.notConfigured")}</span>
-                </div>
-              )}
-            </div>
-            <div className="rounded-lg border border-dashed border-border p-4">
-              <div className="flex items-center gap-2">
-                <Globe className="size-4 text-muted-foreground" />
-                <h4 className="text-sm font-medium text-muted-foreground">{t("settings.moreChannels")}</h4>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("settings.moreChannelsDesc")}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      );
-    case "observability":
-      return (
-        <ConfigSection
-          title={t("settings.observability")}
-          description={t("settings.observabilityDesc")}
-          section="observability"
-          config={config}
-          onUpdate={onUpdate}
-          errors={errors}
-          fields={[
-            { key: "level", label: t("settings.logLevel"), type: "text" },
-            { key: "captureOutput", label: t("settings.captureOutput"), type: "boolean" },
-          ]}
-        />
-      );
-    case "web":
-      return (
-        <ConfigSection
-          title={t("settings.webServer")}
-          description={t("settings.webServerDesc")}
-          section="web"
-          config={config}
-          onUpdate={onUpdate}
-          errors={errors}
-          fields={[
-            { key: "enabled", label: t("settings.enabled"), type: "boolean" },
-            { key: "port", label: t("settings.port"), type: "number" },
-            { key: "host", label: t("settings.host"), type: "text" },
-          ]}
-        />
-      );
-  }
 }
