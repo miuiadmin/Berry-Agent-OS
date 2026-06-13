@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { getDbPath } from '../utils/paths.js';
 import { runMigrations } from './migration-runner.js';
 import { ALL_MIGRATIONS } from './migrations/index.js';
-import { CORE_INDEX_SQL, CORE_SCHEMA_SQL, KNOWLEDGE_FTS_SQL, MESSAGE_BLOCKS_FTS_SQL } from './schema.js';
+import { CORE_INDEX_SQL, CORE_SCHEMA_SQL, KNOWLEDGE_FTS_SQL, MESSAGE_BLOCKS_FTS_SQL, TASK_BOARD_SQL } from './schema.js';
 import { getLogger } from '../utils/logger.js';
 
 /** 模块日志器：deleteSession 列名约定 warn 等诊断用 */
@@ -38,6 +38,9 @@ export function initDb(path?: string): Database.Database {
   // 对话内联模型 FTS（设计文档/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
   // 不进 ensureFtsConsistency——本表与 message_blocks 非 1:1（仅 text/thinking 子集），行数对比无意义。
   db.exec(MESSAGE_BLOCKS_FTS_SQL);
+  // 16.0 任务板表（设计文档/23 §5.1）：task_thread（发言流）+ task_members（花名册）。
+  // agent_tasks 加 board 列由 v28 migration ALTER TABLE 补。
+  db.exec(TASK_BOARD_SQL);
   // 启动期 conversations→messages 幂等同步：把冷归档 conversations 里不在 messages 的孤行补进新表。
   // 取代反复追加的回填迁移（v25/v26/v28 打补丁的反模式）——「迁移时刻」与「服务升级时刻」不同步，
   // 一次性迁移只回填它跑那一刻的行；本函数每次启动都收敛，全同步后 LEFT JOIN 返回空集、零写入。

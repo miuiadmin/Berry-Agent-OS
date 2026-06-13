@@ -66,13 +66,25 @@ export interface BoardMessageEnvelope {
   ts: number;
 }
 
-// ─── 7 种 body schema（§12 定稿）───
+// ─── 信封公共字段（Zod 版，spread 到每 type schema）───
+const Env = {
+  id: z.string(),
+  from: z.string(),
+  to: z.string(),
+  taskId: z.string(),
+  parentTaskId: z.string().optional(),
+  sessionId: z.string().optional(),
+  ts: z.number(),
+};
+
+// ─── 7 种 body schema（§12 定稿，每个含信封公共字段）───
 
 /**
  * @指派：leader 把（子）任务交给某 agent。
  * 替代：delegation-orchestrator handoff。
  */
 const DelegateMsgSchema = z.object({
+  ...Env,
   type: z.literal('delegate'),
   /** 被指派的 agentId（或 'capability:xxx' 由 Directory 解析） */
   to: z.string(),
@@ -99,6 +111,7 @@ const DelegateMsgSchema = z.object({
  * 替代：review 上报 + conversation.result。
  */
 const ReportMsgSchema = z.object({
+  ...Env,
   type: z.literal('report'),
   /** 上报对象（@brain 协调 / @user 经助手 / @leader） */
   to: z.enum(['brain', 'user']).or(z.string()),
@@ -115,6 +128,7 @@ const ReportMsgSchema = z.object({
  * 替代：EventBus 陈述类事件。
  */
 const TellMsgSchema = z.object({
+  ...Env,
   type: z.literal('tell'),
   /** @某成员 或 @all 板内广播 */
   to: z.string().or(z.literal('all')),
@@ -128,6 +142,7 @@ const TellMsgSchema = z.object({
  * 判别 = to 字段：非 'brain' = peer 求助（不惊动治理硬闸）；'brain' = 升级。
  */
 const AskMsgSchema = z.object({
+  ...Env,
   type: z.literal('ask'),
   /** @peer(agentId) 或 @brain（升级） */
   to: z.string().or(z.literal('brain')),
@@ -142,6 +157,7 @@ const AskMsgSchema = z.object({
  * 替代：CapabilityBus permission-gate。
  */
 const ToolRequestMsgSchema = z.object({
+  ...Env,
   type: z.literal('tool_request'),
   /** 固定 'system'（工具由系统执行） */
   to: z.literal('system'),
@@ -156,6 +172,7 @@ const ToolRequestMsgSchema = z.object({
  * 结果是事实非动作，不再经任何审核。
  */
 const ToolResultMsgSchema = z.object({
+  ...Env,
   type: z.literal('tool_result'),
   /** 固定 'system'（工具结果由系统产出） */
   from: z.literal('system'),
@@ -173,6 +190,7 @@ const ToolResultMsgSchema = z.object({
  * 4 种 intent：redirect(掰方向) / stop(叫停) / inspect(问状态) / dispatch(补派)。
  */
 const CommandMsgSchema = z.object({
+  ...Env,
   type: z.literal('command'),
   /** 固定 'brain'（只有 brain 发 command） */
   from: z.literal('brain'),
@@ -194,7 +212,19 @@ const CommandMsgSchema = z.object({
 /**
  * 板上发言/动作的完整 Zod 判别联合（type 为判别字段）。
  * 每 type 固定 schema，编译期类型安全，禁止自由 payload 的 god-object。
+ *
+ * 每个变体包含完整信封字段（id/from/to/taskId/ts + type-specific body），
+ * 使 z.infer<BoardMessageSchema> 即可直接用于存储/读取/传输。
  */
+const EnvelopeFields = {
+  id: z.string(),
+  from: z.string(),
+  taskId: z.string(),
+  parentTaskId: z.string().optional(),
+  sessionId: z.string().optional(),
+  ts: z.number(),
+};
+
 export const BoardMessageSchema = z.discriminatedUnion('type', [
   DelegateMsgSchema,
   ReportMsgSchema,

@@ -75,7 +75,7 @@ describe('BoardMessage 契约（16.0 P1 信封判别联合）', () => {
 
   it('tool_result：工具结果，from 固定 system', () => {
     const msg = BoardMessageSchema.parse({
-      ...base, type: 'tool_result', from: 'system', callId: 'c1', output: 'ok', ok: true,
+      ...base, type: 'tool_result', from: 'system', to: 'code', callId: 'c1', output: 'ok', ok: true,
     });
     expect(msg.type).toBe('tool_result');
   });

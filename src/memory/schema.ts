@@ -1154,3 +1154,34 @@ export const MESSAGE_BLOCKS_FTS_SQL = `
     tokenize = 'trigram'
   );
 `;
+
+/**
+ * 16.0 任务板表（设计文档/23 §5.1）—— BoardMessage 发言流 + 成员花名册。
+ * agent_tasks 加 board 列由 migration v28 ALTER TABLE 补（不在此重建表）。
+ */
+export const TASK_BOARD_SQL = `
+  -- 板发言 thread（每条 = 一个 BoardMessage 信封，§3/§12）
+  CREATE TABLE IF NOT EXISTS task_thread (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    message_type TEXT NOT NULL
+      CHECK(message_type IN ('delegate','report','tell','ask','tool_request','tool_result','command')),
+    from_agent TEXT NOT NULL,
+    to_target TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_thread_task_id ON task_thread(task_id, seq);
+
+  -- 板成员花名册（§6 scope = 板花名册）
+  CREATE TABLE IF NOT EXISTS task_members (
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member'
+      CHECK(role IN ('leader','member','governance')),
+    joined_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+    PRIMARY KEY (task_id, agent_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_task_members_agent ON task_members(agent_id);
+`;

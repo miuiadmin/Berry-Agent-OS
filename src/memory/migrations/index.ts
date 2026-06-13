@@ -1138,6 +1138,46 @@ const v27RedactBlindSpotScan: Migration = {
   },
 };
 
+/**
+ * 16.0 任务板（设计文档/23 §5.1）：agent_tasks 加 board 列。
+ * task_thread + task_members 表由 CORE_SCHEMA_SQL 的 TASK_BOARD_SQL 在 initDb 时 CREATE IF NOT EXISTS，
+ * 旧库 ALTER TABLE 补 board 列即可（SQLite ADD COLUMN 幂等安全——列已存在时容错跳过）。
+ */
+const v28TaskBoardColumns: Migration = {
+  version: 28,
+  name: 'task-board-columns',
+  up: (db: Database.Database) => {
+    const boardColumns: Array<{ col: string; def: string }> = [
+      { col: 'board_goal', def: 'TEXT' },
+      { col: 'board_status', def: "TEXT NOT NULL DEFAULT 'created'" },
+      { col: 'board_leader', def: 'TEXT' },
+      { col: 'parent_task_id', def: 'TEXT' },
+      { col: 'spawn_depth', def: 'INTEGER NOT NULL DEFAULT 0' },
+      { col: 'turn_count', def: 'INTEGER NOT NULL DEFAULT 0' },
+      { col: 'max_turns', def: 'INTEGER NOT NULL DEFAULT 50' },
+      { col: 'max_spawn_depth', def: 'INTEGER NOT NULL DEFAULT 3' },
+      { col: 'active_scope', def: 'TEXT' },
+    ];
+    // 容错：列已存在（旧库已跑过/手动加过）→ ALTER 报错，catch 跳过
+    const cols = new Set(
+      (db.pragma('table_info(agent_tasks)') as Array<{ name: string }>).map((c) => c.name),
+    );
+    let added = 0;
+    for (const { col, def } of boardColumns) {
+      if (cols.has(col)) continue;
+      try {
+        db.exec(`ALTER TABLE agent_tasks ADD COLUMN ${col} ${def}`);
+        added++;
+      } catch (err) {
+        logger.warn({ err, col }, 'v28: ALTER TABLE agent_tasks ADD COLUMN 跳过（列已存在或异常）');
+      }
+    }
+    if (added > 0) {
+      logger.info({ added }, '16.0 v28: agent_tasks 加 board 列（task board 元数据）');
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -1165,4 +1205,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v23RedactOutputPayloadScan,
   v24RedactInputPayloadScan,
   v27RedactBlindSpotScan,
+  v28TaskBoardColumns,
 ];
