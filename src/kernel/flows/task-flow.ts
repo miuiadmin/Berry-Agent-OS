@@ -14,6 +14,16 @@ import type { AgentAskUserPayload } from '../../contracts/routing.js';
 import type { AgentManager } from '../agent-manager.js';
 import type { AgentRegistry } from '../agent-registry.js';
 import { getEventBus } from '../event-bus.js';
+import { getLogger } from '../../utils/logger.js';
+import { getOrCreateBlockCollector, disposeBlockCollector } from '../block-collector.js';
+
+/**
+ * 工具调用计时链路 trace 日志器。
+ * 追踪 durationMs 从 task.telemetry → stream.tool_call 的流转，
+ * 定位「委派给其他智能体时工具调用计时显示 N/A」时耗时在哪一层丢失。
+ * grep `tool-trace` 可看全链路。
+ */
+const logger = getLogger('task-flow');
 
 interface AgentIpc {
   onMessage: (type: IpcMessageType, handler: (msg: IpcMessage) => void) => void;
@@ -88,6 +98,13 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           text: payload.text,
           correlationId: entry?.correlationId,
         });
+        // 对话内联（设计文档/22）：并行 emit stream.block，前端把文本增量内联到对话气泡
+        {
+          const sid = pending?.sessionId ?? entry?.sessionId ?? '';
+          if (sid) {
+            getOrCreateBlockCollector(payload.taskId, sid, entry?.correlationId).onTextDelta(payload.text);
+          }
+        }
         break;
       }
       case 'reasoning_delta': {
@@ -114,6 +131,13 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           text: payload.text,
           correlationId: rEntry?.correlationId,
         });
+        // 对话内联（设计文档/22）：并行 emit stream.block，前端把推理增量内联为可折叠 thinking 块
+        {
+          const sid = rPending?.sessionId ?? rEntry?.sessionId ?? '';
+          if (sid) {
+            getOrCreateBlockCollector(payload.taskId, sid, rEntry?.correlationId).onReasoningDelta(payload.text);
+          }
+        }
         break;
       }
       case 'llm_completed': {
@@ -139,6 +163,8 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         break;
       }
       case 'tool_result': {
+        // tool-trace: tool_result 变体契约本身无 durationMs 字段（见 contracts/tasks.ts:37），仅记录到达
+        logger.debug({ taskId: payload.taskId, toolName: payload.toolName, isError: payload.isError, source: msg.from }, 'tool-trace: recv task.telemetry tool_result');
         if (!payload.taskId) return;
         const entry = deps.delegationManager.get(payload.taskId);
         if (!entry) return;
@@ -155,9 +181,14 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           isError: payload.isError,
           correlationId: entry.correlationId,
         });
+        // tool-trace: emit stream.tool_result 未透传 durationMs — payload 的 tool_result 变体无此字段，
+        // daemon 路径（外部 agent）的工具耗时在此处无法传递给前端（已知盲点，待彻底修复）
+        logger.debug({ taskId: payload.taskId, toolName: payload.toolName }, 'tool-trace: emit stream.tool_result（无 durationMs 字段）');
         break;
       }
       case 'tool_call': {
+        // tool-trace: 追踪 agent 上报的 tool_call 是否携带 durationMs（计时源头）
+        logger.debug({ taskId: payload.taskId, toolName: payload.toolName, durationMs: payload.durationMs, hasDurationMs: payload.durationMs != null, source: msg.from }, 'tool-trace: recv task.telemetry tool_call');
         if (!payload.taskId) return;
         const entry = deps.delegationManager.get(payload.taskId);
         let pending: PendingRequest | null | undefined;
@@ -177,6 +208,22 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           durationMs: payload.durationMs,
           correlationId: entry?.correlationId,
         });
+        // 对话内联（设计文档/22）：并行 emit stream.block——工具调用作为内联 tool 块（出生即终态，
+        // task.telemetry 的 tool_call 一次性带 result/input/durationMs）
+        {
+          const sid = pending?.sessionId ?? entry?.sessionId ?? '';
+          if (sid) {
+            getOrCreateBlockCollector(payload.taskId, sid, entry?.correlationId).onToolCall({
+              toolName: payload.toolName,
+              input: payload.input,
+              result: payload.result,
+              isError: payload.isError,
+              durationMs: payload.durationMs,
+            });
+          }
+        }
+        // tool-trace: emit stream.tool_call 时的 durationMs（确认透传到 EventBus → ws-event-bridge → 前端）
+        logger.debug({ taskId: payload.taskId, toolName: payload.toolName, durationMs: payload.durationMs }, 'tool-trace: emit stream.tool_call');
         break;
       }
       case 'uncertainty': {
@@ -211,6 +258,9 @@ export function setupModuleTaskResultHandler(
     } else {
       deps.taskManager.fail(result.taskId, result.error ?? '任务失败');
     }
+
+    // 对话内联（设计文档/22）：前台任务结束，释放本轮 BlockCollector（期3b 在此触发 flush 落库）
+    disposeBlockCollector(result.taskId);
 
     const entry = deps.delegationManager.get(result.taskId);
     if (entry) {

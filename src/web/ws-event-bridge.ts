@@ -1,6 +1,7 @@
 import type { WebSocketServer, WebSocket } from 'ws';
 import type { EventBus, EventName } from '../contracts/infrastructure.js';
 import type { EventMap } from '../contracts/messages.js';
+import { getLogger } from '../utils/logger.js';
 
 /**
  * WebSocket Event Bridge - 将 EventBus 事件桥接到 WS 客户端
@@ -106,6 +107,9 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'stream.tool_call': 'tool_call',
   'stream.tool_result': 'tool_result',
   'stream.uncertainty': 'uncertainty',
+  // 对话内联（设计文档/22）：统一 block 事件族——收敛上面 4 个 stream.* 到单一 block 事件，
+  // 前端按 payload.blockType 内联渲染（text/thinking/tool/delegation/review）。旧事件兼容期保留。
+  'stream.block': 'block',
   'dialogue.status': 'dialogue_status',
   /** 13.0 灵魂版：Agent 间对话每条消息推送（与 dialogue.status 互补） */
   'agent.dialogue': 'agent_dialogue',
@@ -129,6 +133,9 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   // 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送 — 顶层格式 + sessionId 过滤）
   'brain.budget.alert': 'budget_alert',
 };
+
+/** 工具调用计时链路 trace 日志器（grep `tool-trace` 看全链路） */
+const logger = getLogger('ws-bridge');
 
 export class WsEventBridge {
   private unsubscribes: Array<() => void> = [];
@@ -177,6 +184,10 @@ export class WsEventBridge {
       const unsub = eventBus.on(eventName as EventName, (payload: unknown) => {
         const p = payload as Record<string, unknown>;
         const msg = JSON.stringify({ type: wsType, ...p, ts: Date.now() });
+        // tool-trace: tool_call/tool_result 转发到 WS 时核对 durationMs（确认 {type,...p} 平铺后透传给前端）
+        if (wsType === 'tool_call' || wsType === 'tool_result') {
+          logger.debug({ wsType, toolName: p.toolName, durationMs: p.durationMs, hasDurationMs: p.durationMs != null }, 'tool-trace: ws-bridge 转发 stream→WS');
+        }
         const sessionId = p.sessionId as string | undefined;
         // 流式事件按 sessionId 过滤：只发给订阅了该 sessionId 的客户端
         this.broadcastFiltered(msg, sessionId);

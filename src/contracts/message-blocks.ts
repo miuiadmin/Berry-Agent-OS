@@ -157,10 +157,12 @@ export const BlockSchema: z.ZodType<Block> = z.discriminatedUnion('type', [
  * stream.block 事件族的 payload。收敛旧的 stream.text_delta / stream.tool_call /
  * stream.tool_result / stream.reasoning_delta / agent.dialogue 到这一个事件。
  *
- * 前端按 blockId 幂等定位 block，按 blockType 分支处理：
- *   - delta 非空 → 追加到 text/thinking block 的内容（流式增量）
- *   - state 非空 → 推进 tool/delegation block 的状态机
- *   - patch 非空 → 合并 output/error/summary 等终态字段
+ * 前端按 blockId 幂等定位 block，按事件字段分支处理：
+ *   - block 非空 → 块创建：在该 blockId 处建立完整 Block（tool 的 name/input、delegation 的
+ *     targetAgent 等创建即定字段只在创建事件携带一次）
+ *   - delta 非空 → 追加到 text/thinking block 的内容（流式增量；前端首次 delta 时惰性建块）
+ *   - patch 非空 → 合并 state/output/error/summary 等可变字段（状态机推进 / 结果回填）
+ *   - state 非空 → 推进 tool/delegation block 的状态机（patch.state 的简写）
  */
 export interface StreamBlockPayload {
   /** 会话 id */
@@ -171,6 +173,12 @@ export interface StreamBlockPayload {
   blockId: string;
   /** Block 类型，前端按此分支渲染 */
   blockType: BlockType;
+  /**
+   * 块创建事件携带的完整初始 Block。tool 的 name/input、delegation 的 targetAgent 等
+   * "创建即定"字段只在创建事件里出现一次；后续事件用 patch/delta 推进。
+   * text/thinking 无需创建事件（首次 delta 时前端惰性建块）。
+   */
+  block?: Block;
   /** tool/delegation 状态机推进的目标态（text/thinking 不用） */
   state?: ToolBlockState | DelegationBlockState;
   /** text/thinking 流式增量（按 blockId 追加，不替换） */
