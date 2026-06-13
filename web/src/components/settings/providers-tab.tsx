@@ -9,7 +9,7 @@
  * 渲染细节下放到子组件：
  *   - {@link ChannelCard} / 模型行 → channel-card.tsx
  *   - {@link ChannelFormDialog}（表单状态内聚）→ channel-form-dialog.tsx
- *   - 类型 / 常量 / SelectChevron → providers-types.ts
+ *   - 类型 / 常量 → providers-types.ts
  *   - {@link TierEditor} + useTierEditor → tier-editor.tsx
  *   - useProviderMutations → use-provider-mutations.ts
  */

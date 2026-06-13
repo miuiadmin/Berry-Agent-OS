@@ -22,8 +22,6 @@ import { SelectField } from "@/components/ui/select-field";
 export function useTierEditor(tiers: TierMapping) {
   /** 本地编辑中的 tier 映射 */
   const [editingTiers, setEditingTiers] = useState<TierMapping>({});
-  /** 是否已从服务端同步过初始值 */
-  const [tiersInitialized, setTiersInitialized] = useState(false);
   /** 每个 tier 当前选中的 channel（用于联动显示该 channel 下的模型列表） */
   const [selectedTierChannel, setSelectedTierChannel] = useState<
     Record<string, string>
@@ -40,14 +38,10 @@ export function useTierEditor(tiers: TierMapping) {
   }
 
   // 首次加载 + 保存后服务端数据变化时，同步本地状态
+  // （原 tiersInitialized 守卫是空操作：if/else 两分支都调 syncFromServer，已折叠）
   useEffect(() => {
-    if (!tiersInitialized) {
-      syncFromServer(tiers);
-      setTiersInitialized(true);
-    } else {
-      syncFromServer(tiers);
-    }
-  }, [tiers, tiersInitialized]);
+    syncFromServer(tiers);
+  }, [tiers]);
 
   return {
     editingTiers,
