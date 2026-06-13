@@ -116,7 +116,9 @@ export function useChatSocket() {
   // ─── 断连时暂停超时计时器，重连后按需恢复 ─────────────────────
   useEffect(() => {
     if (status === "disconnected" || status === "connecting") {
-      // 断连/重连中：暂停超时计时器，防止误触发
+      // 断连/重连中：冲残留 delta（防 reconnect 后 restore 从 /state 替换消息时旧 buffer 残留 applyBlock 重复/错乱；
+      // flushNow applyBlock 的已生成部分随后被 restore 的完整态覆盖，最终一致）+ 暂停超时计时器
+      deltaThrottleRef.current?.flushNow();
       clearTimer();
     } else if (status === "connected") {
       // 重连成功后：如果仍在流式中，重新启动超时计时器
@@ -486,6 +488,7 @@ export function useChatSocket() {
 
   /** 取消当前生成 */
   const cancelGeneration = useCallback(() => {
+    deltaThrottleRef.current?.flushNow(); // 取消生成：冲残留 delta，显示已生成部分（否则 buffer 丢失）
     send({ type: "interrupt", sessionId });
     setLastStatus("complete");
     setStreaming(false);
