@@ -46,7 +46,9 @@ export default function MemoryPage() {
   useDocumentTitle(t("memory.title"));
   const qc = useQueryClient();
 
+  /** 当前选中的 layer（global/agent/workspace） */
   const [layer, setLayer] = useState<Layer>("global");
+  /** 当前 scope ID（user/agent/workspace 标识） */
   const [scopeId, setScopeId] = useState("default");
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreate, setShowCreate] = useState(false);
@@ -73,54 +75,16 @@ export default function MemoryPage() {
     enabled: searchQuery.trim().length > 0,
   });
 
-  // Create mutation
-  const createMut = useMutation({
-    mutationFn: (data: { key: string; value: string }) => {
-      if (layer === "agent") return memoryApi.createAgent({ agentId: scopeId, ...data });
-      if (layer === "workspace") return memoryApi.createWorkspace({ workspaceId: scopeId, ...data });
-      return memoryApi.createGlobal({ userId: scopeId, ...data });
-    },
-    onSuccess: () => {
-      toast.success(t("memory.memoryCreated"));
-      qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
+  // 四个 mutation（创建 / 删除 / 提升 / 验证），统一 toast 反馈 + 刷新列表
+  const { createMut, deleteMut, promoteMut, verifyMut } = useMemoryMutations(
+    layer,
+    scopeId,
+    () => {
       setShowCreate(false);
       setNewKey("");
       setNewValue("");
     },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  // Delete mutation
-  const deleteMut = useMutation({
-    mutationFn: ({ entryLayer, id }: { entryLayer: string; id: string }) =>
-      memoryApi.delete(entryLayer, id),
-    onSuccess: () => {
-      toast.success(t("memory.memoryDeleted"));
-      qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  // Promote mutation
-  const promoteMut = useMutation({
-    mutationFn: ({ id, target }: { id: string; target: string }) =>
-      memoryApi.promote(id, target),
-    onSuccess: () => {
-      toast.success(t("memory.memoryPromoted"));
-      qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  // Verify mutation
-  const verifyMut = useMutation({
-    mutationFn: (id: string) => memoryApi.verify(id),
-    onSuccess: () => {
-      toast.success(t("memory.memoryVerified"));
-      qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
+  );
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -317,4 +281,68 @@ export default function MemoryPage() {
       />
     </div>
   );
+}
+
+// ─── Memory Mutations Hook ────────────────────────────────────────
+
+/**
+ * 统一封装 memory 的 4 个 mutation（创建 / 删除 / 提升 / 验证）。
+ *
+ * 每个 mutation 成功后都：toast 提示 + invalidate 当前 layer/scope 的列表缓存。
+ * 创建成功额外关闭表单 + 清空输入（通过 onCreateSuccess 回调）。
+ */
+function useMemoryMutations(
+  layer: string,
+  scopeId: string,
+  onCreateSuccess: () => void,
+) {
+  const t = useT();
+  const qc = useQueryClient();
+  const invalidateList = () =>
+    qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
+
+  const createMut = useMutation({
+    mutationFn: (data: { key: string; value: string }) => {
+      if (layer === "agent") return memoryApi.createAgent({ agentId: scopeId, ...data });
+      if (layer === "workspace") return memoryApi.createWorkspace({ workspaceId: scopeId, ...data });
+      return memoryApi.createGlobal({ userId: scopeId, ...data });
+    },
+    onSuccess: () => {
+      toast.success(t("memory.memoryCreated"));
+      invalidateList();
+      onCreateSuccess();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: ({ entryLayer, id }: { entryLayer: string; id: string }) =>
+      memoryApi.delete(entryLayer, id),
+    onSuccess: () => {
+      toast.success(t("memory.memoryDeleted"));
+      invalidateList();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const promoteMut = useMutation({
+    mutationFn: ({ id, target }: { id: string; target: string }) =>
+      memoryApi.promote(id, target),
+    onSuccess: () => {
+      toast.success(t("memory.memoryPromoted"));
+      invalidateList();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const verifyMut = useMutation({
+    mutationFn: (id: string) => memoryApi.verify(id),
+    onSuccess: () => {
+      toast.success(t("memory.memoryVerified"));
+      invalidateList();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  return { createMut, deleteMut, promoteMut, verifyMut };
 }
