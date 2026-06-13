@@ -1,7 +1,13 @@
+/**
+ * 记忆管理页面。
+ *
+ * 支持三层记忆（global / agent / workspace）的 CRUD + 搜索 + 验证 + 提升。
+ * Mutations 逻辑 → use-memory-mutations.ts
+ */
+
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Brain, Plus, Search, Trash2, ArrowUpRight, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
 import { memoryApi, type MemoryEntry } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
@@ -14,6 +20,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
+import { useMemoryMutations } from "./use-memory-mutations";
 
 type Layer = "agent" | "workspace" | "global";
 
@@ -44,7 +51,6 @@ export default function MemoryPage() {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("memory.title"));
-  const qc = useQueryClient();
 
   /** 当前选中的 layer（global/agent/workspace） */
   const [layer, setLayer] = useState<Layer>("global");
@@ -57,7 +63,7 @@ export default function MemoryPage() {
   /** 删除确认对话框状态 */
   const [deleteTarget, setDeleteTarget] = useState<{ layer: string; id: string } | null>(null);
 
-  // List memories for current scope
+  // 当前 scope 的记忆列表
   const listQuery = useQuery({
     queryKey: ["memory", layer, scopeId],
     queryFn: () => {
@@ -68,14 +74,14 @@ export default function MemoryPage() {
     enabled: scopeId.length > 0,
   });
 
-  // Recall (search) query
+  // 搜索（recall）查询
   const recallQuery = useQuery({
     queryKey: ["memory-recall", searchQuery],
     queryFn: (ctx) => memoryApi.recall(searchQuery, { limit: 50 }, ctx.signal),
     enabled: searchQuery.trim().length > 0,
   });
 
-  // 四个 mutation（创建 / 删除 / 提升 / 验证），统一 toast 反馈 + 刷新列表
+  // 四个 mutation（创建 / 删除 / 提升 / 验证）
   const { createMut, deleteMut, promoteMut, verifyMut } = useMemoryMutations(
     layer,
     scopeId,
@@ -88,7 +94,7 @@ export default function MemoryPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* Header */}
+      {/* 页面头部 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
@@ -109,7 +115,7 @@ export default function MemoryPage() {
         </Button>
       </div>
 
-      {/* Layer tabs + scope selector */}
+      {/* Layer tabs + scope 选择 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
         <Tabs value={layer} onValueChange={(v) => setLayer(v as Layer)}>
           <TabsList>
@@ -128,7 +134,7 @@ export default function MemoryPage() {
         )}
       </div>
 
-      {/* Create form */}
+      {/* 创建表单 */}
       {showCreate && (
         <Card>
           <CardHeader className="pb-3">
@@ -164,7 +170,7 @@ export default function MemoryPage() {
         </Card>
       )}
 
-      {/* Search */}
+      {/* 搜索框 */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -175,10 +181,10 @@ export default function MemoryPage() {
         />
       </div>
 
-      {/* Memory list — always use listQuery for the boundary */}
+      {/* 记忆列表 */}
       <QueryBoundary query={listQuery} skeleton={<MemorySkeleton />}>
         {(memories) => {
-          // If user is searching, merge recall results instead
+          // 搜索模式下用 recall 结果替换
           const entries: MemoryEntry[] = searchQuery.trim()
             ? (recallQuery.data?.results ?? [])
             : memories;
@@ -223,6 +229,7 @@ export default function MemoryPage() {
                         {entry.source ? ` · ${entry.source}` : ""}
                       </p>
                     </div>
+                    {/* 操作按钮：移动端常驻，桌面端 hover 显示 */}
                     <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <Button
                         variant="ghost"
@@ -281,68 +288,4 @@ export default function MemoryPage() {
       />
     </div>
   );
-}
-
-// ─── Memory Mutations Hook ────────────────────────────────────────
-
-/**
- * 统一封装 memory 的 4 个 mutation（创建 / 删除 / 提升 / 验证）。
- *
- * 每个 mutation 成功后都：toast 提示 + invalidate 当前 layer/scope 的列表缓存。
- * 创建成功额外关闭表单 + 清空输入（通过 onCreateSuccess 回调）。
- */
-function useMemoryMutations(
-  layer: string,
-  scopeId: string,
-  onCreateSuccess: () => void,
-) {
-  const t = useT();
-  const qc = useQueryClient();
-  const invalidateList = () =>
-    qc.invalidateQueries({ queryKey: ["memory", layer, scopeId] });
-
-  const createMut = useMutation({
-    mutationFn: (data: { key: string; value: string }) => {
-      if (layer === "agent") return memoryApi.createAgent({ agentId: scopeId, ...data });
-      if (layer === "workspace") return memoryApi.createWorkspace({ workspaceId: scopeId, ...data });
-      return memoryApi.createGlobal({ userId: scopeId, ...data });
-    },
-    onSuccess: () => {
-      toast.success(t("memory.memoryCreated"));
-      invalidateList();
-      onCreateSuccess();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: ({ entryLayer, id }: { entryLayer: string; id: string }) =>
-      memoryApi.delete(entryLayer, id),
-    onSuccess: () => {
-      toast.success(t("memory.memoryDeleted"));
-      invalidateList();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const promoteMut = useMutation({
-    mutationFn: ({ id, target }: { id: string; target: string }) =>
-      memoryApi.promote(id, target),
-    onSuccess: () => {
-      toast.success(t("memory.memoryPromoted"));
-      invalidateList();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const verifyMut = useMutation({
-    mutationFn: (id: string) => memoryApi.verify(id),
-    onSuccess: () => {
-      toast.success(t("memory.memoryVerified"));
-      invalidateList();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  return { createMut, deleteMut, promoteMut, verifyMut };
 }

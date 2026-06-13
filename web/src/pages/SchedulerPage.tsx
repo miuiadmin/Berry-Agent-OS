@@ -4,12 +4,12 @@
  * 编排三组 tab 数据（Jobs / Queue / Webhooks）+ mutations（创建/删除/暂停/恢复/触发），
  * 渲染细节下放到子组件：
  *   - {@link JobCard} / {@link JobExecutions} / {@link CreateJobCard} → scheduler-components.tsx
+ *   - useSchedulerMutations → use-scheduler-mutations.ts
  */
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Clock, Plus, Webhook } from "lucide-react";
-import { toast } from "sonner";
 import { schedulerApi, type SchedulerQueue } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
@@ -25,14 +25,12 @@ import {
   CreateJobCard,
   type JobCardActions,
 } from "./scheduler-components";
-
-// ─── Main Page ────────────────────────────────────────────────────
+import { useSchedulerMutations } from "./use-scheduler-mutations";
 
 export default function SchedulerPage() {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("scheduler.title"));
-  const qc = useQueryClient();
 
   // ── 页面状态 ──
   /** 是否展开新建表单 */
@@ -62,7 +60,7 @@ export default function SchedulerPage() {
 
   // ── Mutations ──
   const { createMut, deleteMut, pauseMut, resumeMut, triggerMut } =
-    useSchedulerMutations(qc);
+    useSchedulerMutations();
 
   /** 传给 JobCard 的操作回调（统一 pending 状态） */
   const jobActions: JobCardActions = {
@@ -127,7 +125,7 @@ export default function SchedulerPage() {
         </div>
       )}
 
-      {/* Tab 切换器（ARIA tablist + 键盘导航） */}
+      {/* Tab 切换器 */}
       <div
         className="flex gap-1 border-b"
         role="tablist"
@@ -210,18 +208,9 @@ export default function SchedulerPage() {
             {(queue) =>
               queue ? (
                 <div className="grid gap-4 md:grid-cols-3">
-                  <StatCard
-                    value={queue.running}
-                    label={t("scheduler.running")}
-                  />
-                  <StatCard
-                    value={queue.pending}
-                    label={t("scheduler.pending")}
-                  />
-                  <StatCard
-                    value={queue.maxConcurrency}
-                    label={t("scheduler.maxConcurrency")}
-                  />
+                  <StatCard value={queue.running} label={t("scheduler.running")} />
+                  <StatCard value={queue.pending} label={t("scheduler.pending")} />
+                  <StatCard value={queue.maxConcurrency} label={t("scheduler.maxConcurrency")} />
                 </div>
               ) : (
                 <EmptyState
@@ -300,9 +289,8 @@ export default function SchedulerPage() {
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────
+// ─── Skeleton 组件 ─────────────────────────────────────────────────
 
-/** Jobs 列表加载骨架屏 */
 function JobsSkeleton() {
   return (
     <div className="space-y-2">
@@ -320,7 +308,6 @@ function JobsSkeleton() {
   );
 }
 
-/** Queue 面板加载骨架屏 */
 function QueueSkeleton() {
   return (
     <div className="grid gap-4 md:grid-cols-3">
@@ -335,7 +322,6 @@ function QueueSkeleton() {
   );
 }
 
-/** Webhooks 面板加载骨架屏 */
 function WebhooksSkeleton() {
   return (
     <div className="space-y-2">
@@ -350,16 +336,8 @@ function WebhooksSkeleton() {
   );
 }
 
-// ─── 小组件 ────────────────────────────────────────────────────────
-
 /** 队列统计卡片（单个数字 + 标签） */
-function StatCard({
-  value,
-  label,
-}: {
-  value: number;
-  label: string;
-}) {
+function StatCard({ value, label }: { value: number; label: string }) {
   return (
     <Card>
       <CardContent className="py-4 text-center">
@@ -368,62 +346,4 @@ function StatCard({
       </CardContent>
     </Card>
   );
-}
-
-// ─── Mutations Hook ───────────────────────────────────────────────
-
-/** 统一封装 scheduler 的 5 个 mutation（创建/删除/暂停/恢复/触发） */
-function useSchedulerMutations(qc: ReturnType<typeof useQueryClient>) {
-  const t = useT();
-  const invalidateJobs = () =>
-    qc.invalidateQueries({ queryKey: ["scheduler-jobs"] });
-
-  const createMut = useMutation({
-    mutationFn: schedulerApi.createJob,
-    onSuccess: () => {
-      toast.success(t("scheduler.jobCreated"));
-      invalidateJobs();
-      // 不在这里 setShowCreate(false) —— 由页面组件在 onCreate 回调中处理
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: schedulerApi.deleteJob,
-    onSuccess: () => {
-      toast.success(t("scheduler.jobDeleted"));
-      invalidateJobs();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const pauseMut = useMutation({
-    mutationFn: schedulerApi.pauseJob,
-    onSuccess: () => {
-      toast.success(t("scheduler.jobPaused"));
-      invalidateJobs();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const resumeMut = useMutation({
-    mutationFn: schedulerApi.resumeJob,
-    onSuccess: () => {
-      toast.success(t("scheduler.jobResumed"));
-      invalidateJobs();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const triggerMut = useMutation({
-    mutationFn: schedulerApi.triggerJob,
-    onSuccess: () => {
-      toast.success(t("scheduler.jobTriggered"));
-      invalidateJobs();
-      qc.invalidateQueries({ queryKey: ["scheduler-queue"] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  return { createMut, deleteMut, pauseMut, resumeMut, triggerMut };
 }

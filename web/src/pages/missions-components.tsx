@@ -1,9 +1,11 @@
 /**
- * Missions 页面的子组件 + API 类型。
+ * Missions 页面的子组件。
  *
  * 从 MissionsPage 拆出，让页面主文件只保留列表 + 详情的状态编排。
  * 组件间有依赖链（StatusBadge → TaskCard → MissionDetail → SquadTab → SquadCard），
  * 故集中在一个文件避免循环依赖。
+ *
+ * API 类型 → missions-types.ts
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -24,61 +26,23 @@ import {
   Users,
   Radio,
 } from "lucide-react";
+import type {
+  MissionListItemData,
+  PlanResponse,
+  SquadNode,
+  SquadMember,
+  SquadSignal,
+} from "./missions-types";
 
-// ─── API 响应类型 ──────────────────────────────────────────────────
-
-/** mission 列表项 */
-export interface MissionListItemData {
-  id: string;
-  goal: string;
-  status: string;
-  taskCount: number;
-}
-
-/** mission 列表响应 */
-export interface MissionsListResponse {
-  items: MissionListItemData[];
-  total: number;
-}
-
-/** mission 详情响应（plan.json 内容） */
-export interface PlanResponse {
-  mission: {
-    id: string;
-    goal: string;
-    status: string;
-    created_by: string;
-    created_at: string;
-    context?: string;
-  };
-  tasks: MissionTask[];
-}
-
-/** Squad 组织单元（可嵌套） */
-export interface SquadNode {
-  id: string;
-  name: string;
-  status: string;
-  goal: string;
-  leader: string;
-  members?: SquadMember[];
-  squads?: SquadNode[];
-}
-
-/** Squad 成员 */
-export interface SquadMember {
-  agent: string;
-  role: string;
-  status: string;
-  on: string;
-}
-
-/** Squad 间信号 */
-export interface SquadSignal {
-  type: string;
-  from: string;
-  msg: string;
-}
+// 重新导出类型，保持消费方 import 兼容
+export type {
+  MissionListItemData,
+  MissionsListResponse,
+  PlanResponse,
+  SquadNode,
+  SquadMember,
+  SquadSignal,
+} from "./missions-types";
 
 // ─── 状态徽章 ──────────────────────────────────────────────────────
 
