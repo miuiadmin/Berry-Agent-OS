@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { PermissionEngine, TokenIssuer, ApprovalManager, RiskLevel, PermissionMode } from '../safety/index.js';
+import type { TokenIssuer, ApprovalManager, RiskLevel, PermissionMode } from '../safety/index.js';
+import { PermissionEngine } from '../safety/permissions.js';
 import type { PermissionResultPayload } from '../contracts/permissions.js';
 import type { DangerLevel } from '../utils/types.js';
 import type { StateCache } from './state-cache.js';
@@ -152,6 +153,11 @@ export class PermissionCoordinator {
   private approvalManager: ApprovalManager;
   /** 13.0 §3.8 第二层: StateCache 注入，用于读取 active_scope */
   private stateCache: StateCache | null = null;
+  /** 15.0 R2-4：per-session 权限模式（修复进程级单例并发污染——并发会话 last-writer-wins 串改 mode） */
+  private defaultMode: PermissionMode;
+  private readonly sessionModes = new Map<string, PermissionMode>();
+  /** 按 mode 缓存 PermissionEngine（最多 4 个：ask/allow-all/deny-all/yolo），避免每消息重建 */
+  private readonly modeEngines = new Map<string, PermissionEngine>();
 
   constructor(deps: {
     engine: PermissionEngine;
@@ -164,6 +170,31 @@ export class PermissionCoordinator {
     this.tokenIssuer = deps.tokenIssuer;
     this.approvalManager = deps.approvalManager;
     this.stateCache = deps.stateCache ?? null;
+    this.defaultMode = deps.engine.getMode();
+    this.modeEngines.set(this.defaultMode, deps.engine);
+  }
+
+  /**
+   * 15.0 R2-4：设置某会话的权限模式（替代进程级 updateEngine，避免并发污染）。
+   * 按 mode 缓存 engine（4 个上限）。unified-handlers 每条消息按 sessionId 设置。
+   */
+  setSessionMode(sessionId: string, mode: PermissionMode): void {
+    this.sessionModes.set(sessionId, mode);
+    if (!this.modeEngines.has(mode)) {
+      this.modeEngines.set(mode, new PermissionEngine(mode));
+    }
+  }
+
+  /** 取某会话的权限模式（无则回退默认） */
+  getMode(sessionId?: string): PermissionMode {
+    const m = sessionId ? this.sessionModes.get(sessionId) : undefined;
+    return m ?? this.defaultMode;
+  }
+
+  /** 取某会话的 engine（按 session mode 缓存命中；无 session mode 回退默认 engine） */
+  private getEngineForSession(sessionId?: string): PermissionEngine {
+    const mode = this.getMode(sessionId);
+    return this.modeEngines.get(mode) ?? this.engine;
   }
 
   /**
@@ -174,14 +205,17 @@ export class PermissionCoordinator {
     this.stateCache = stateCache;
   }
 
-  /** 引擎热更新（permission mode 切换时调用） */
+  /**
+   * 引擎热更新（默认权限模式切换时调用，如 admin 改全局 config）。
+   * 15.0 R2-4：per-message 的 mode 不再走这里（用 setSessionMode 避免并发污染）；
+   * 此处仅用于全局默认变更，同步 defaultMode + 缓存。
+   */
   updateEngine(engine: PermissionEngine): void {
     this.engine = engine;
-  }
-
-  /** 当前权限模式（15.0 机制 A：handler 据此决定 requiresReview 走 Brain 还是用户确认） */
-  getMode(): PermissionMode {
-    return this.engine.getMode();
+    const mode = engine.getMode();
+    // 同步默认模式 + 缓存（getMode 无 session 时回退此值）
+    this.defaultMode = mode;
+    this.modeEngines.set(mode, engine);
   }
 
   /** 审批管理器热更新（admin 改 approval policy 时调用） */
@@ -255,7 +289,7 @@ export class PermissionCoordinator {
     }
 
     // engine 硬确定性检查：dangerous_tool 类别 / blocklist / deny-all（不涉及风险路由）
-    const blockResult = this.engine.checkPermission(
+    const blockResult = this.getEngineForSession(params.sessionId).checkPermission(
       params.toolName,
       params.toolInput,
       params.dangerLevel,
@@ -290,7 +324,7 @@ export class PermissionCoordinator {
     }
 
     // 风险路由单一决策点：autoDecide（allow-all 放行 / ask low 放行 / 其余 requiresReview）
-    const token = this.approvalManager.autoDecide(request);
+    const token = this.approvalManager.autoDecide(request, this.getMode(params.sessionId));
 
     if (token) {
       return { allowed: true, tokenId: token.id };
@@ -320,7 +354,7 @@ export class PermissionCoordinator {
       return { allowed: false, reason: scopeBlock };
     }
 
-    const blockResult = this.engine.checkPermission(
+    const blockResult = this.getEngineForSession(params.sessionId).checkPermission(
       params.toolName,
       params.toolInput,
       params.dangerLevel,

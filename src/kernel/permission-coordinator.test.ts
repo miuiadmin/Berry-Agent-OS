@@ -164,3 +164,33 @@ describe('checkAndIssueSimple (15.0 R2-2, module agent requiresReview 不硬拒)
     expect(r.allowed).toBe(true);
   });
 });
+
+describe('PermissionCoordinator per-session mode (15.0 R2-4，并发不污染)', () => {
+  it('两个会话不同 mode 互不污染——s1=ask 的 moderate 走 requiresReview，s2=allow-all 放行', () => {
+    const { coord } = makeCoordinator('ask'); // 默认 ask
+    coord.setSessionMode('s1', 'ask');
+    coord.setSessionMode('s2', 'allow-all');
+    // s1（ask）：moderate → requiresReview
+    const r1 = coord.checkAndIssue({ ...baseParams('moderate_tool', 'moderate'), sessionId: 's1' });
+    expect(r1.requiresReview).toBe(true);
+    // s2（allow-all）：moderate → allowed + token（不被 s1 的 ask 污染）
+    const r2 = coord.checkAndIssue({ ...baseParams('moderate_tool', 'moderate'), sessionId: 's2' });
+    expect(r2.allowed).toBe(true);
+    expect(r2.tokenId).toBeTruthy();
+  });
+
+  it('getMode(sessionId) 返回该会话 mode，无则回退默认', () => {
+    const { coord } = makeCoordinator('ask');
+    coord.setSessionMode('sX', 'yolo');
+    expect(coord.getMode('sX')).toBe('yolo');
+    expect(coord.getMode('unknown')).toBe('ask'); // 回退默认
+    expect(coord.getMode()).toBe('ask'); // 无参=默认
+  });
+
+  it('checkAndIssueSimple 也按 per-session mode（s2=allow-all 的 moderate 签 token）', () => {
+    const { coord } = makeCoordinator('deny-all');
+    coord.setSessionMode('sA', 'allow-all');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 'sA', toolName: 'm', toolInput: '{}', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(true); // sA=allow-all，不被全局 deny-all 污染
+  });
+});

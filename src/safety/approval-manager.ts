@@ -195,8 +195,13 @@ export class ApprovalManager {
     });
   }
 
-  autoDecide(request: ApprovalRequest): PermissionToken | null {
-    switch (this.permissionMode) {
+  /**
+   * 15.0 R2-4：autoDecide 接受可选 mode 参数（per-session 模式由 coordinator 传入，
+   * 避免进程级单例 approvalManager.permissionMode 并发污染）。不传则回退 this.permissionMode。
+   */
+  autoDecide(request: ApprovalRequest, mode?: PermissionMode): PermissionToken | null {
+    const decisionMode = mode ?? this.permissionMode;
+    switch (decisionMode) {
       case 'allow-all':
         return this.resolve(request.id, {
           verdict: 'approved',

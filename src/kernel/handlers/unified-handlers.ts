@@ -502,17 +502,16 @@ export function handleMessage(
     return;
   }
 
+  const sessionId = requireString(request, 'sessionId') ?? genId('ses');
   // 权限模式（与 messaging-handlers 同款：提取 effectiveMode 变量）
   const permissionMode = requireString(request, 'permissionMode');
   const effectiveMode = (permissionMode && ['ask', 'allow-all', 'deny-all', 'yolo'].includes(permissionMode))
     ? permissionMode as 'ask' | 'allow-all' | 'deny-all' | 'yolo'
     : services.config.permissionMode;
-  const permissionEngine = new PermissionEngine(effectiveMode);
-  const approvalManager = new ApprovalManager(getDb(), new TokenIssuer(getDb()), effectiveMode);
-  services.permissionCoordinator.updateEngine(permissionEngine);
-  services.permissionCoordinator.updateApprovalManager(approvalManager);
+  // 15.0 R2-4：per-session mode（不再进程级 updateEngine——并发会话 LLM await 期间会 last-writer-wins
+  // 串改 mode）。coordinator 按 sessionId 索引 engine（mode 缓存），checkAndIssue 用本会话 mode。
+  services.permissionCoordinator.setSessionMode(sessionId, effectiveMode);
 
-  const sessionId = requireString(request, 'sessionId') ?? genId('ses');
   const clientMsgId = genId('umsg');
 
   // WS 路径：默认 EventBusStrategy（不传 strategy），createWorkspace = true
