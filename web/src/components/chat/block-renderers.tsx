@@ -17,7 +17,7 @@ import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { toolBlocksFromLegacy, reasoningFromBlocks } from "@/lib/blocks";
+import { reasoningFromBlocks } from "@/lib/blocks";
 import type { ToolBlock, DelegationBlock } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
@@ -130,9 +130,9 @@ export const InlineLeadBlocks = memo(function InlineLeadBlocks({
   const blockReasoning = reasoningFromBlocks(message.blocks, message.reasoning);
   const hasThinking = !!blockReasoning || (message.thinkingSteps?.length ?? 0) > 0;
 
-  // tool blocks：live blocks 优先（stream.block 累积），否则从旧 toolCalls 投影兜底
-  const liveToolBlocks = (message.blocks ?? []).filter((b): b is ToolBlock => b.type === "tool");
-  const toolBlocks = liveToolBlocks.length > 0 ? liveToolBlocks : toolBlocksFromLegacy(message.toolCalls);
+  // tool blocks：从 message.blocks 取（stream.block tool 累积，单一源——所有路径都 emit tool block，
+  // 消灭双轨制后无「不经 block 事件的路径」）。toolBlocksFromLegacy 兜底已删。
+  const toolBlocks = (message.blocks ?? []).filter((b): b is ToolBlock => b.type === "tool");
   // 期4 占位：delegation blocks（childSessionId 嵌套会话待落地）
   const delegationBlocks = (message.blocks ?? []).filter(
     (b): b is DelegationBlock => b.type === "delegation",

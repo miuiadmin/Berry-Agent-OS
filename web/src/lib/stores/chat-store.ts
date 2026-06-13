@@ -679,9 +679,6 @@ export const useChatStore = create<ChatState>()(
 
 // --- Convenience selectors (backward compat for callers using old API) ---
 
-export function appendToLast(text: string) {
-  useChatStore.getState().updateLastMessage((m) => ({ content: m.content + text }));
-}
 export function setLastStatus(status: ChatMessage["status"]) {
   useChatStore.getState().updateLastMessage(() => ({ status, progress: undefined }));
   // 流式结束时清除 pendingStreamMessageId，避免下次响应重用旧消息
@@ -707,12 +704,9 @@ export function setLastError(error: string) {
   // 错误也是流结束，立即刷入 localStorage
   flushPersist();
 }
-export function appendReasoning(text: string) {
-  useChatStore.getState().updateLastMessage((m) => ({ reasoning: (m.reasoning ?? "") + text }));
-}
-export function appendToolCall(event: ToolCallEvent) {
-  useChatStore.getState().updateLastMessage((m) => ({ toolCalls: [...(m.toolCalls ?? []), event] }));
-}
+// 对话内联（doc 22 Phase D）：appendToLast / appendReasoning / appendToolCall 已删——
+// 粒度 text_delta/reasoning_delta/tool_call 前端 handler 移除后，这些 convenience 不再被引用
+// （文本/思考/工具统一走 applyBlock → blocks，单一源）。
 
 /**
  * 补全最近一条尚未填 result 的 toolCall 卡片（按 toolName 匹配）

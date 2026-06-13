@@ -7,7 +7,7 @@
  * 本文件是前端的纯逻辑层（无 React / zustand 依赖）：
  *   - Block 判别联合（与后端契约同形）
  *   - applyBlockToBlocks：stream.block 事件 → Block[] 的纯 reducer（store 用）
- *   - toolBlocksFromLegacy：旧 toolCalls[] → ToolBlock[] 投影（历史消息 / 无 block 事件的路径兜底）
+ *   - textFromBlocks / reasoningFromBlocks：block-first 渲染投影（Phase C：text/thinking 从 block 取，回退旧字段）
  *
  * 文本不进 block 数组：文本正文仍由 ChatMessage.content 承载（覆盖 task-flow 与 delegation-orchestrator
  * 两条流式路径），block 数组只承载「原先被分离出去」的 tool / thinking / delegation。这避免文本重复，
@@ -194,39 +194,5 @@ function coercePayload(s: string | undefined | null): unknown {
   }
 }
 
-/**
- * 旧 ToolCallEvent（前端的 toolCalls[] 数组项）——只取渲染 block 需要的字段。
- * 与 chat-store.ts 的 ToolCallEvent 形状对齐（避免循环 import，这里局部定义）。
- */
-interface LegacyToolCall {
-  toolName: string;
-  input: string;
-  result: string;
-  isError: boolean;
-  durationMs: number;
-  ts: number;
-}
-
-/**
- * 旧字段（toolCalls[]）→ ToolBlock[] 投影。
- * 用于历史消息 / 无 stream.block 事件的流式路径兜底（如 delegation-orchestrator 的工具调用不经 block 事件）。
- * 顺序由调用方保证（thinking 由 reasoning 单独承载；这里只产出 tool block）。
- */
-export function toolBlocksFromLegacy(calls: LegacyToolCall[] | undefined): ToolBlock[] {
-  if (!calls?.length) return [];
-  return calls.map((tc, i) => {
-    const block: ToolBlock = {
-      type: 'tool',
-      id: `legacy-${tc.toolName}-${tc.ts ?? i}`,
-      name: tc.toolName,
-      input: coercePayload(tc.input) ?? {},
-      state: tc.isError ? 'failed' : 'completed',
-    };
-    const output = coercePayload(tc.result);
-    if (output !== undefined) block.output = output;
-    if (tc.isError && tc.result) block.error = tc.result;
-    // 防御 durationMs 缺失（daemon 路径）：有限数才写入
-    if (tc.durationMs != null && Number.isFinite(tc.durationMs)) block.durationMs = tc.durationMs;
-    return block;
-  });
-}
+// 对话内联（doc 22 Phase D）：旧 toolCalls[] → ToolBlock[] 投影（toolBlocksFromLegacy）已删——
+// 消灭双轨制后所有路径都 emit stream.block tool，message.blocks 即工具唯一源，无需 legacy 兜底。
