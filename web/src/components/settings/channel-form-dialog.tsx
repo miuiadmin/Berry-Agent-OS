@@ -4,8 +4,7 @@
  * 设计：表单状态完全内聚于本组件 —— 不再由父组件透传 7 组 form* state，
  * 而是在弹窗打开时根据 mode / editingChannel 自行初始化，
  * 提交时通过 onSubmit(formData) 回传干净的表单数据。
- *
- * 这样父组件只需关心"打开哪个渠道编辑 / 创建请求"，无需维护表单字段细节。
+ * 所有字段收归单个 form 状态对象，避免 7 个独立 useState 散落。
  */
 
 import { useEffect, useState } from "react";
@@ -48,6 +47,16 @@ export interface ChannelFormData {
   enabled: boolean;
 }
 
+/** 表单状态类型（所有字段收归一个对象） */
+interface FormState {
+  kind: string;
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  enabled: boolean;
+}
+
 interface ChannelFormDialogProps {
   /** 模式：新增 / 编辑 */
   mode: "add" | "edit";
@@ -66,7 +75,7 @@ interface ChannelFormDialogProps {
 }
 
 /** 空表单初始值 */
-const EMPTY_FORM = {
+const EMPTY_FORM: FormState = {
   kind: "",
   id: "",
   name: "",
@@ -74,6 +83,21 @@ const EMPTY_FORM = {
   apiKey: "",
   enabled: true,
 };
+
+/** 根据编辑渠道生成初始表单状态（apiKey 永远留空 —— 服务端 mask） */
+function initForm(mode: "add" | "edit", channel?: ProviderChannel | null): FormState {
+  if (mode === "edit" && channel) {
+    return {
+      kind: channel.kind,
+      id: channel.id,
+      name: channel.name,
+      baseUrl: channel.baseUrl ?? "",
+      apiKey: "",
+      enabled: channel.enabled,
+    };
+  }
+  return { ...EMPTY_FORM };
+}
 
 export function ChannelFormDialog({
   mode,
@@ -87,47 +111,33 @@ export function ChannelFormDialog({
   const isEdit = mode === "edit";
   const t = useT();
 
-  // ── 表单字段 ──
-  const [formKind, setFormKind] = useState("");
-  const [formId, setFormId] = useState("");
-  const [formName, setFormName] = useState("");
-  const [formBaseUrl, setFormBaseUrl] = useState("");
-  const [formApiKey, setFormApiKey] = useState("");
-  const [formEnabled, setFormEnabled] = useState(true);
+  // ── 表单状态（单对象，替代 7 个独立 useState） ──
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+
+  /** 更新单个表单字段 */
+  const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
 
   /**
    * 弹窗打开时初始化表单：
-   *   - edit 模式：从 editingChannel 回填（apiKey 永远留空 —— 服务端 mask）
+   *   - edit 模式：从 editingChannel 回填
    *   - add 模式：清空为初始值
    */
   useEffect(() => {
     if (!open) return;
-    if (isEdit && editingChannel) {
-      setFormKind(editingChannel.kind);
-      setFormId(editingChannel.id);
-      setFormName(editingChannel.name);
-      setFormBaseUrl(editingChannel.baseUrl ?? "");
-      setFormApiKey("");
-      setFormEnabled(editingChannel.enabled);
-    } else {
-      setFormKind(EMPTY_FORM.kind);
-      setFormId(EMPTY_FORM.id);
-      setFormName(EMPTY_FORM.name);
-      setFormBaseUrl(EMPTY_FORM.baseUrl);
-      setFormApiKey(EMPTY_FORM.apiKey);
-      setFormEnabled(EMPTY_FORM.enabled);
-    }
-  }, [open, isEdit, editingChannel]);
+    setForm(initForm(mode, editingChannel));
+  }, [open, mode, editingChannel]);
 
   /**
    * add 模式下，按选中的 provider kind 拉取内置模型目录（用于预览）。
    * edit 模式不需要目录（模型列表已在 channel 中）。
    */
   const { data: catalogData } = useQuery({
-    queryKey: ["providers", "catalogs", formKind],
+    queryKey: ["providers", "catalogs", form.kind],
     queryFn: () =>
-      apiGet<CatalogResponse>(`/api/providers/catalogs/${formKind}`),
-    enabled: mode === "add" && !!formKind && open,
+      apiGet<CatalogResponse>(`/api/providers/catalogs/${form.kind}`),
+    enabled: mode === "add" && !!form.kind && open,
   });
   const catalogModels: ModelEntry[] = catalogData?.models ?? [];
 
@@ -135,18 +145,18 @@ export function ChannelFormDialog({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     onSubmit({
-      id: formId.trim(),
-      name: formName.trim() || formId.trim(),
-      kind: formKind,
-      baseUrl: formBaseUrl.trim() || undefined,
-      apiKey: formApiKey.trim() || undefined,
-      enabled: formEnabled,
+      id: form.id.trim(),
+      name: form.name.trim() || form.id.trim(),
+      kind: form.kind,
+      baseUrl: form.baseUrl.trim() || undefined,
+      apiKey: form.apiKey.trim() || undefined,
+      enabled: form.enabled,
     });
   }
 
   // ── 校验：add 需填 kind/id/apiKey，edit 需 kind/id ──
   const canSubmit =
-    !isPending && !!formKind && !!formId && (!(!isEdit && !formApiKey));
+    !isPending && !!form.kind && !!form.id && (!(!isEdit && !form.apiKey));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -167,11 +177,11 @@ export function ChannelFormDialog({
           <Field label={t("providers.providerKind")}>
             <div className="relative">
               <select
-                value={formKind}
+                value={form.kind}
                 onChange={(e) => {
-                  setFormKind(e.target.value);
+                  setField("kind", e.target.value);
                   // add 模式切换类型时清空 ID（不同类型的 ID 命名规则不同）
-                  if (!isEdit) setFormId("");
+                  if (!isEdit) setField("id", "");
                 }}
                 disabled={isEdit}
                 className={SELECT_BASE}
@@ -190,8 +200,8 @@ export function ChannelFormDialog({
           {/* 渠道 ID（编辑时不可改） */}
           <Field label={t("providers.channelId")}>
             <Input
-              value={formId}
-              onChange={(e) => setFormId(e.target.value)}
+              value={form.id}
+              onChange={(e) => setField("id", e.target.value)}
               disabled={isEdit}
               placeholder={t("providers.channelIdPlaceholder")}
               className="h-10 md:h-8 disabled:opacity-50"
@@ -201,8 +211,8 @@ export function ChannelFormDialog({
           {/* 展示名 */}
           <Field label={t("providers.displayName")}>
             <Input
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
+              value={form.name}
+              onChange={(e) => setField("name", e.target.value)}
               placeholder={t("providers.displayNamePlaceholder")}
               className="h-10 md:h-8"
             />
@@ -211,8 +221,8 @@ export function ChannelFormDialog({
           {/* Base URL */}
           <Field label={t("providers.baseUrl")}>
             <Input
-              value={formBaseUrl}
-              onChange={(e) => setFormBaseUrl(e.target.value)}
+              value={form.baseUrl}
+              onChange={(e) => setField("baseUrl", e.target.value)}
               placeholder={t("providers.baseUrlPlaceholder")}
               className="h-10 md:h-8"
             />
@@ -226,8 +236,8 @@ export function ChannelFormDialog({
           >
             <Input
               type="password"
-              value={formApiKey}
-              onChange={(e) => setFormApiKey(e.target.value)}
+              value={form.apiKey}
+              onChange={(e) => setField("apiKey", e.target.value)}
               placeholder={
                 isEdit
                   ? t("providers.apiKeyEditPlaceholder")
@@ -241,21 +251,21 @@ export function ChannelFormDialog({
           {isEdit && (
             <div className="flex items-center gap-2">
               <Switch
-                checked={formEnabled}
-                onCheckedChange={setFormEnabled}
+                checked={form.enabled}
+                onCheckedChange={(v) => setField("enabled", v)}
               />
               <span className="text-sm text-muted-foreground">
-                {formEnabled ? t("common.enabled") : t("common.disabled")}
+                {form.enabled ? t("common.enabled") : t("common.disabled")}
               </span>
             </div>
           )}
 
           {/* 内置模型目录预览（仅 add 模式 + 有目录数据） */}
-          {!isEdit && formKind && catalogModels.length > 0 && (
+          {!isEdit && form.kind && catalogModels.length > 0 && (
             <div className="max-h-40 overflow-y-auto rounded-lg border border-border p-3">
               <p className="mb-2 text-[11px] font-medium text-muted-foreground">
                 {t("providers.builtinModels", {
-                  kind: t(PROVIDER_KIND_LABEL_KEYS[formKind] ?? formKind),
+                  kind: t(PROVIDER_KIND_LABEL_KEYS[form.kind] ?? form.kind),
                 })}
                 :
               </p>

@@ -8,15 +8,16 @@
 
 import { Suspense, useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT } from "@/lib/i18n";
-import { queries, apiPut, apiGet } from "@/lib/api";
+import { queries, apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { TabContent, validateConfig, type TabKey } from "./settings-tab-content";
+import { useConfigMutations } from "./use-config-mutations";
 import {
   Save,
   Wallet,
@@ -58,11 +59,13 @@ function SettingsContent() {
   const activeTab: TabKey = tabFromUrl && VALID_TABS.has(tabFromUrl) ? (tabFromUrl as TabKey) : "providers";
 
   const { data: config, isLoading } = useQuery(queries.config());
-  const queryClient = useQueryClient();
   const [editedConfig, setEditedConfig] = useState<Record<string, unknown>>({});
   /** 是否已从服务端同步过初始值 */
   const [initialized, setInitialized] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // ── Mutations ──
+  const { saveConfig } = useConfigMutations();
 
   // 首次加载时从服务端配置初始化本地编辑状态
   useEffect(() => {
@@ -90,21 +93,6 @@ function SettingsContent() {
   }, [hasChanges]);
 
   const validate = useCallback((cfg: Record<string, unknown>) => validateConfig(cfg, t), [t]);
-
-  const saveConfig = useMutation({
-    mutationFn: async (updates: Record<string, unknown>) => {
-      await apiPut("/api/config", updates);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["config"] });
-      toast.success(t("settings.saved"));
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || t("settings.failedToSave"));
-      // 保存失败时刷新缓存，回到服务端状态
-      queryClient.invalidateQueries({ queryKey: ["config"] });
-    },
-  });
 
   /** 更新单个配置字段并实时校验 */
   const updateField = (section: string, key: string, value: unknown) => {

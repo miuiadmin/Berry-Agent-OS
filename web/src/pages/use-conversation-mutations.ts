@@ -1,14 +1,21 @@
 /**
- * 对话列表页面的 mutations hooks。
+ * 对话 mutations hooks（页面 + 侧边栏共用）。
  *
- * 封装对话删除 mutation，统一 invalidate / toast / 当前会话清理逻辑。
- * 导出功能（单条 / 全部）也封装在此，因为依赖 query 数据。
+ * 封装对话删除 / 重命名 / 导出 mutations，统一 invalidate / toast / 当前会话清理。
+ * 被以下消费方使用：
+ *   - ConversationsPage（页面级）
+ *   - ConversationSidebar（侧边栏）
  */
 
 import { useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { apiDelete, exportConversation, type ConversationInfo } from "@/lib/api";
+import {
+  apiDelete,
+  exportConversation,
+  renameConversation,
+  type ConversationInfo,
+} from "@/lib/api";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useT } from "@/lib/i18n";
 
@@ -39,22 +46,38 @@ export function useConversationMutations() {
     },
   });
 
+  /** 重命名对话 */
+  const renameConversationMut = useMutation({
+    mutationFn: async ({ sid, title }: { sid: string; title: string }) => {
+      await renameConversation(sid, title);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || t("chat.failedToRename"));
+    },
+  });
+
   /** 导出单条对话为 JSON 文件下载 */
-  const exportSingle = useCallback(async (conv: ConversationInfo) => {
-    try {
-      const messages = await exportConversation(conv.sessionId);
-      const data = {
-        sessionId: conv.sessionId,
-        title: conv.title,
-        exportedAt: new Date().toISOString(),
-        messages,
-      };
-      downloadJson(data, `conversation-${conv.sessionId.slice(0, 8)}.json`);
-      toast.success(t("conversations.exportedConversation"));
-    } catch {
-      toast.error(t("conversations.failedToExport"));
-    }
-  }, [t]);
+  const exportSingle = useCallback(
+    async (conv: ConversationInfo) => {
+      try {
+        const messages = await exportConversation(conv.sessionId);
+        const data = {
+          sessionId: conv.sessionId,
+          title: conv.title,
+          exportedAt: new Date().toISOString(),
+          messages,
+        };
+        downloadJson(data, `conversation-${conv.sessionId.slice(0, 8)}.json`);
+        toast.success(t("conversations.exportedConversation"));
+      } catch {
+        toast.error(t("conversations.failedToExport"));
+      }
+    },
+    [t],
+  );
 
   /** 导出全部对话为一个打包 JSON 文件 */
   const exportAll = useCallback(
@@ -81,7 +104,12 @@ export function useConversationMutations() {
     [t],
   );
 
-  return { deleteConversation, exportSingle, exportAll };
+  return {
+    deleteConversation,
+    renameConversation: renameConversationMut,
+    exportSingle,
+    exportAll,
+  };
 }
 
 // ─── 工具函数 ──────────────────────────────────────────────────────

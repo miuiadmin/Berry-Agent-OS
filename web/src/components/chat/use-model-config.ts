@@ -7,7 +7,7 @@
 
 import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiPut, queries } from "@/lib/api";
+import { apiGet, apiPut, queries } from "@/lib/api";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
 
@@ -38,15 +38,8 @@ export function useModelConfig() {
   const { data: config } = useQuery(queries.config());
   const { data: channelsData } = useQuery({
     queryKey: ["providers", "channels"],
-    queryFn: async () => {
-      try {
-        const res = await fetch("/api/providers/channels");
-        if (!res.ok) return null;
-        return (await res.json()) as { ok: boolean; channels: ProviderChannel[] };
-      } catch {
-        return null;
-      }
-    },
+    queryFn: () =>
+      apiGet<{ ok: boolean; channels: ProviderChannel[] }>("/api/providers/channels").catch(() => null),
   });
   const queryClient = useQueryClient();
   const llm = config?.llm as Record<string, unknown> | undefined;

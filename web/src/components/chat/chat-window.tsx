@@ -68,19 +68,11 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const t = useT();
 
   // 是否已配置至少一个可用的 provider/model channel
-  // 用 React Query 缓存（与 sendMessage 中的快查保持一致）
+  // 复用 apiGet 统一错误处理，与 use-model-config.ts 同一接口
   const channelsQuery = useQuery({
     queryKey: ["providers", "channels"],
-    queryFn: async () => {
-      const res = await fetch("/api/providers/channels");
-      if (!res.ok)
-        return {
-          channels: [] as Array<{ configured?: boolean; modelCount?: number }>,
-        };
-      return res.json() as Promise<{
-        channels?: Array<{ configured?: boolean; modelCount?: number }>;
-      }>;
-    },
+    queryFn: () =>
+      apiGet<{ channels?: Array<{ configured?: boolean; modelCount?: number }> }>("/api/providers/channels").catch(() => ({ channels: [] })),
     staleTime: 30_000,
   });
   const isModelConfigured = !!channelsQuery.data?.channels?.some(

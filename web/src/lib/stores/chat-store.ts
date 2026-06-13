@@ -13,6 +13,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { apiGet } from "@/lib/api";
 import { useWsStore } from "./ws-store";
 
 export interface ChatAttachment {
@@ -435,12 +436,10 @@ export const useChatStore = create<ChatState>()(
         if (get().restoringSessionId === sessionId) return get().messages;
         set({ restoringSessionId: sessionId });
         try {
-          const res = await fetch(`/api/sessions/${sessionId}/state?limit=200`);
-          if (!res.ok) return get().messages;
-          const data = await res.json() as {
+          const data = await apiGet<{
             messages?: Array<{ role: string; content: string; createdAt: string; reasoning?: string; thinkingSteps?: ThinkingStep[] }>;
             activeTasks?: Array<{ progress?: string; thinkingSteps?: ThinkingStep[]; streamingContent?: string; streamingReasoning?: string }>;
-          };
+          }>(`/api/sessions/${sessionId}/state?limit=200`);
           // 拉取过程中用户可能已经切换 session
           if (get().sessionId !== sessionId) return get().messages;
 
