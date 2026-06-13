@@ -6,13 +6,40 @@
  * Enter 发送 / Shift+Enter 换行。
  */
 
-import { useState, useRef, useCallback, useMemo } from "react";
-import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-react";
+import { useState, useRef, useMemo } from "react";
+import { Square, ImagePlus, Settings } from "lucide-react";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
+
+/** textarea 自适应高度上限 */
+const MAX_HEIGHT = 300;
+
+/** 工具栏按钮 */
+function ToolbarButton({
+  children, onClick, disabled, variant, "aria-label": ariaLabel,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: "default" | "destructive";
+  "aria-label"?: string;
+}) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={ariaLabel}
+      className={cn(
+        "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 transition-all duration-150 active:scale-90 md:min-h-0 md:min-w-0 md:p-1.5",
+        variant === "destructive"
+          ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent",
+        "disabled:pointer-events-none disabled:opacity-40",
+      )}>
+      {children}
+    </button>
+  );
+}
 
 interface ChatInputProps {
   onSend: (text: string, attachments?: Attachment[]) => void;
@@ -28,90 +55,68 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
   const isStreaming = useChatStore((s) => s.isStreaming);
   const t = useT();
 
+  /** 合并内部 + 外部拖拽附件 */
   const allAttachments = useMemo(
     () => [...attachments, ...(externalAttachments ?? [])],
     [attachments, externalAttachments],
   );
-
+  /** 是否可发送（有内容且未禁用） */
   const canSend = text.trim().length > 0 || allAttachments.length > 0;
+  /** 发送按钮禁用条件（与 className 的可用条件互为反义，统一计算） */
+  const sendDisabled = !canSend || isStreaming || disabled;
 
-  const handleSubmit = useCallback(() => {
-    if (disabled) {
-      toast.error(t("chat.notConnected"));
-      return;
-    }
+  /** 提交发送 */
+  const handleSubmit = () => {
+    if (disabled) { toast.error(t("chat.notConnected")); return; }
     const trimmed = text.trim();
     if ((!trimmed && allAttachments.length === 0) || isStreaming) return;
     onSend(trimmed, allAttachments.length > 0 ? allAttachments : undefined);
     setText("");
     setAttachments([]);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [text, allAttachments, isStreaming, onSend, disabled]);
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   };
 
+  /** 输入时同步内容并自适应高度（封顶 MAX_HEIGHT） */
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    const el = e.target;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 300) + "px";
+    e.target.style.height = "auto";
+    e.target.style.height = `${Math.min(e.target.scrollHeight, MAX_HEIGHT)}px`;
   };
-
-  const handleAttach = useCallback((a: Attachment) => {
-    setAttachments((prev) => [...prev, a]);
-  }, []);
-
-  const handleRemoveAttachment = useCallback((fileId: string) => {
-    setAttachments((prev) => prev.filter((a) => a.fileId !== fileId));
-  }, []);
-
-  const charCount = text.length;
 
   return (
     <div className="border-t border-border bg-background p-3 md:p-4">
       <div className="mx-auto max-w-3xl">
-        {/* Single unified card */}
-        <div className="rounded-2xl border border-input bg-muted/50 overflow-hidden transition-all duration-200 input-focus-glow">
-          {/* Attachments */}
+        <div className="input-focus-glow overflow-hidden rounded-2xl border border-input bg-muted/50 transition-all duration-200">
+          {/* 附件预览 */}
           {allAttachments.length > 0 && (
-            <AttachmentPreview attachments={allAttachments} onRemove={handleRemoveAttachment} />
-          )}
-          {/* Text input */}
-          <div className="relative">
-            <textarea
-              ref={textareaRef}
-              value={text}
-              onChange={handleInput}
-              onKeyDown={handleKeyDown}
-              placeholder={t("chat.typePlaceholder")}
-              aria-label={t("chat.typePlaceholder")}
-              rows={1}
-              className={cn(
-                "w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[16px] md:text-sm leading-relaxed outline-none",
-                "placeholder:text-muted-foreground"
-              )}
+            <AttachmentPreview
+              attachments={allAttachments}
+              onRemove={(fileId) => setAttachments((prev) => prev.filter((a) => a.fileId !== fileId))}
             />
-            {charCount > 500 && (
-              <span className="absolute bottom-2 right-3 text-[11px] text-muted-foreground/60">
-                {charCount}
-              </span>
+          )}
+
+          {/* 文本输入 */}
+          <div className="relative">
+            <textarea ref={textareaRef} value={text} onChange={handleInput} onKeyDown={handleKeyDown}
+              placeholder={t("chat.typePlaceholder")} aria-label={t("chat.typePlaceholder")} rows={1}
+              className="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[16px] leading-relaxed outline-none placeholder:text-muted-foreground md:text-sm" />
+            {text.length > 500 && (
+              <span className="absolute bottom-2 right-3 text-[11px] text-muted-foreground/60">{text.length}</span>
             )}
           </div>
-          {/* Toolbar */}
+
+          {/* 工具栏 */}
           <div className="flex items-center justify-between px-2 pb-2 pt-1">
             <div className="flex items-center gap-0.5">
-              <FileUploadButton onAttach={handleAttach} disabled={isStreaming} />
-              <ToolbarButton disabled aria-disabled="true" aria-label={t("chat.uploadImage")}>
+              <FileUploadButton onAttach={(a) => setAttachments((prev) => [...prev, a])} disabled={isStreaming} />
+              <ToolbarButton disabled aria-label={t("chat.uploadImage")}>
                 <ImagePlus className="size-4" />
               </ToolbarButton>
-              <ToolbarButton disabled aria-disabled="true" aria-label={t("chat.settings")}>
+              <ToolbarButton disabled aria-label={t("chat.settings")}>
                 <Settings className="size-4" />
               </ToolbarButton>
               {isStreaming && (
@@ -120,54 +125,19 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
                 </ToolbarButton>
               )}
             </div>
-            <button type="button"
-              onClick={handleSubmit}
-              disabled={!canSend || isStreaming || disabled}
+            {/* 发送按钮 */}
+            <button type="button" onClick={handleSubmit} disabled={sendDisabled}
               className={cn(
-                "rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 btn-press",
-                "min-h-[44px] md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
-                canSend && !isStreaming && !disabled
-                  ? "bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/80 active:scale-[0.97] animate-send-ready"
-                  : "bg-muted text-muted-foreground cursor-not-allowed"
-              )}
-            >
+                "btn-press min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 md:min-h-0 md:px-3 md:py-1.5 md:text-xs",
+                sendDisabled
+                  ? "cursor-not-allowed bg-muted text-muted-foreground"
+                  : "bg-foreground text-background hover:bg-foreground/90 active:scale-[0.97] active:bg-foreground/80 animate-send-ready",
+              )}>
               {t("chat.send")}
             </button>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-function ToolbarButton({
-  children,
-  onClick,
-  disabled,
-  variant,
-  "aria-label": ariaLabel,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-  variant?: "default" | "destructive";
-  "aria-label"?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      className={cn(
-        "inline-flex items-center justify-center rounded-lg p-2 md:p-1.5 transition-all duration-150 min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 active:scale-90",
-        variant === "destructive"
-          ? "text-destructive hover:bg-destructive/10 active:bg-destructive/20"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent",
-        "disabled:opacity-40 disabled:pointer-events-none"
-      )}
-    >
-      {children}
-    </button>
   );
 }
