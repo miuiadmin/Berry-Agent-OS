@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { textFromBlocks } from "@/lib/blocks";
 import { ChevronDown } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
-import { InlineLeadBlocks } from "./block-renderers";
+import { MessageTimeline } from "./block-renderers";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 import { useT, useLocale } from "@/lib/i18n";
 import {
@@ -100,9 +100,6 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className={cn("group flex flex-col", isUser ? "items-end" : "items-start")}>
-      {/* 对话内联（设计文档/22）：assistant 消息的思考 / 工具 / 委派 block 按序内联在正文气泡之前，
-          不再是气泡下方的分离兄弟节点——对齐 Claude Code / OpenCode 的内联范式。 */}
-      {!isUser && <InlineLeadBlocks message={message} isActive={isStreaming} />}
       <div
         className={cn(
           "relative max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-4 sm:py-2.5",
@@ -111,8 +108,10 @@ const MessageBubble = memo(function MessageBubble({
           isStreaming && !isUser && "animate-stream-pulse",
         )}
       >
-        {/* 内容：流式等待 / 用户文本 / 助手 Markdown */}
-        {isStreaming && displayContent === "" ? (
+        {/* 对话内联（doc 22）：整条 assistant 响应在一个气泡内按时间穿插渲染
+            （思考→文字→工具→文字…），对齐 Claude Code。MessageTimeline 按 message.blocks 顺序渲染；
+            user 消息仍是纯文本；流式且无任何 block/content 时显示等待动画。 */}
+        {isStreaming && (message.blocks ?? []).length === 0 && !displayContent ? (
           <div className="flex items-center gap-2 py-1">
             {[0, 150, 300].map((d) => (
               <span key={d} className="size-1.5 animate-pulse rounded-full bg-current opacity-60" style={{ animationDelay: `${d}ms` }} />
@@ -120,6 +119,8 @@ const MessageBubble = memo(function MessageBubble({
           </div>
         ) : isUser ? (
           <div className="whitespace-pre-wrap break-words">{displayContent}</div>
+        ) : (message.blocks ?? []).length > 0 ? (
+          <MessageTimeline message={message} isActive={isStreaming} markdownComponents={markdownComponents} />
         ) : (
           <div className={cn(
             "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",

@@ -28,11 +28,13 @@ export interface TextBlock {
   text: string;
 }
 
-/** 推理 block（可折叠思考过程）。id 语义同 TextBlock。 */
+/** 推理 block（可折叠思考过程）。id 语义同 TextBlock。durationMs = 思考耗时（前端显示「思考了 Ns」）。 */
 export interface ThinkingBlock {
   type: 'thinking';
   id?: string;
   text: string;
+  /** 思考耗时（毫秒），后端 BlockCollector 按「首 reasoning delta → 首文字/工具」计算 */
+  durationMs?: number;
 }
 
 /** 工具调用 block（内联工具卡）。出生即终态（task.telemetry 一次性带 input/output）。 */

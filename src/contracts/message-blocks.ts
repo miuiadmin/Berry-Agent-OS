@@ -42,10 +42,12 @@ export interface TextBlock {
   text: string;
 }
 
-/** 推理过程块（可折叠，对应模型 thinking / reasoning） */
+/** 推理过程块（可折叠，对应模型 thinking / reasoning）。durationMs = 思考耗时（首 reasoning delta → 首文字/工具）*/
 export interface ThinkingBlock {
   type: 'thinking';
   text: string;
+  /** 思考耗时（毫秒）：首个 reasoning delta 到首个文字/工具的时间差。前端据此显示「思考了 Ns」 */
+  durationMs?: number;
 }
 
 /**
@@ -113,6 +115,7 @@ const TextBlockSchema = z.object({
 const ThinkingBlockSchema = z.object({
   type: z.literal('thinking'),
   text: z.string(),
+  durationMs: z.number().optional(),
 });
 
 const ToolBlockSchema = z.object({

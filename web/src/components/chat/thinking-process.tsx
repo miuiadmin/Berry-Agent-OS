@@ -17,6 +17,8 @@ interface ThinkingProcessProps {
   steps: ThinkingStep[];
   reasoning?: string;
   isActive: boolean;
+  /** 思考耗时（毫秒，来自 thinking block 的 durationMs）—— 非流式时 header 显示「思考了 Ns」 */
+  durationMs?: number;
 }
 
 function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep; nextStep?: ThinkingStep; isLast: boolean; isActive: boolean }) {
@@ -42,7 +44,7 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
  * 思考过程折叠面板 — memo 包装，已完成消息不会因其他消息流式更新而重渲染。
  * 流式活跃消息（steps 数组引用每次变化）仍正常重渲染。
  */
-export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessProps) {
+export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning, isActive, durationMs }: ThinkingProcessProps) {
   const [expanded, setExpanded] = useAutoCollapse(isActive);
   const listRef = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -74,7 +76,10 @@ export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning,
         <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
         <span>{isActive ? t("thinking.active") : t("thinking.inactive")}</span>
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
-        {!isActive && steps.length > 0 && (
+        {!isActive && durationMs != null && (
+          <span className="ml-0.5 opacity-60">· {formatDurationMs(durationMs)}</span>
+        )}
+        {!isActive && durationMs == null && steps.length > 0 && (
           <span className="ml-0.5 opacity-60">
             ({steps.length}{totalMs > 500 ? ` · ${formatDurationMs(totalMs)}` : ""})
           </span>

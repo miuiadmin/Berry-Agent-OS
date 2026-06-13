@@ -13,6 +13,8 @@
  */
 
 import { useState, memo } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDurationMs } from "@/lib/format";
@@ -163,6 +165,86 @@ export const InlineLeadBlocks = memo(function InlineLeadBlocks({
           <span className="ml-auto text-[11px] uppercase tracking-wide">{b.state}</span>
         </div>
       ))}
+    </div>
+  );
+});
+
+/**
+ * 单气泡时间线：按 message.blocks 数组顺序渲染（思考→文字段→工具→文字段…穿插，对齐 Claude Code）。
+ * 替代 InlineLeadBlocks 的「按 type 分组 + 气泡外渲染」——整条响应在一个气泡内按到达时间穿插。
+ * - thinking → ThinkingProcess（带 durationMs 计时）
+ * - text → ReactMarkdown 段（经 markdownComponents；流式光标附在最后一个 text 段）
+ * - tool → ToolBlockCard（折叠卡）
+ * - delegation → 委派卡（targetAgent + state）
+ * - review → 跳过（BrainReviewBadge 由 message.reviewVerdict 单独渲染，restore 从 review block 投影）
+ *
+ * @param message           当前消息（取 blocks 有序数组）
+ * @param isActive          流式活跃（驱动 ThinkingProcess 折叠态 / text 段光标）
+ * @param markdownComponents text 段的 markdown 渲染组件（由 chat-message-list 注入，复用其配置）
+ */
+export const MessageTimeline = memo(function MessageTimeline({
+  message,
+  isActive,
+  markdownComponents,
+}: {
+  message: ChatMessage;
+  isActive: boolean;
+  markdownComponents: Components;
+}) {
+  if (message.role === "user") return null;
+  const blocks = message.blocks ?? [];
+  if (blocks.length === 0) return null;
+  // 流式光标附在最后一个 text 段上（流式时正在生成的就是末尾文字段）
+  let lastTextIdx = -1;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].type === "text") { lastTextIdx = i; break; }
+  }
+  return (
+    <div className="space-y-2">
+      {blocks.map((block, i) => {
+        switch (block.type) {
+          case "thinking":
+            return (
+              <ThinkingProcess
+                key={`tg-${i}`}
+                steps={message.thinkingSteps ?? []}
+                reasoning={block.text}
+                durationMs={block.durationMs}
+                isActive={isActive}
+              />
+            );
+          case "text":
+            return (
+              <div
+                key={`tx-${i}`}
+                className={cn(
+                  "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
+                  isActive && i === lastTextIdx && "streaming-cursor",
+                )}
+              >
+                <ReactMarkdown components={markdownComponents}>{block.text}</ReactMarkdown>
+              </div>
+            );
+          case "tool":
+            return <ToolBlockCard key={block.id ?? `tl-${i}`} block={block} isActive={isActive} />;
+          case "delegation":
+            return (
+              <div
+                key={block.id ?? `dg-${i}`}
+                className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70 min-h-[44px] md:min-h-0"
+              >
+                <ChevronRight className="size-2.5" />
+                <Wrench className="size-3" />
+                <span>{block.targetAgent}</span>
+                <span className="ml-auto text-[11px] uppercase tracking-wide">{block.state}</span>
+              </div>
+            );
+          case "review":
+            return null; // BrainReviewBadge 由 message.reviewVerdict 单独渲染
+          default:
+            return null;
+        }
+      })}
     </div>
   );
 });
