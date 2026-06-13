@@ -2846,20 +2846,24 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       if (event.data.kind === 'tool_call') {
         const d = event.data;
         // input 直传对象（block 模型 input 为结构化对象，非旧 stream.tool_call 的 string 形）
+        // ts 透传事件原始 timestamp（与委派 :1731 同构）：durationMs 才反映工具实际耗时，而非 orchestrator 收到事件的间隔
         collector.onToolStart({
           callId: d.callId,
           toolName: d.toolName,
           input: d.input,
+          ts: event.timestamp,
         });
         logger.debug({ taskId, callId: d.callId, toolName: d.toolName }, 'tool-trace: daemon tool_call → onToolStart');
       } else if (event.data.kind === 'tool_result') {
         const d = event.data;
         // onToolComplete 内部按 callId 回查 onToolStart 暂存的 toolName/input（result 事件不带这些），
         // 组装终态 block；无配对 start 时 fail-open（toolName=unknown），不再需要手动兜底 emit。
+        // ts 透传 event.timestamp：与 onToolStart 的 startedAt 配对算 durationMs（与委派 :1742 同构）
         collector.onToolComplete({
           callId: d.callId,
           output: d.output,
           success: d.success,
+          ts: event.timestamp,
         });
         logger.debug({ taskId, callId: d.callId, success: d.success }, 'tool-trace: daemon tool_result → onToolComplete');
       }
