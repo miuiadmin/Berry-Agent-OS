@@ -26,8 +26,6 @@
  * - capability bus handlers
  * - model override handlers
  * - takeover routing
- *
- * 设计依据：设计文档/19-架构升级-13.0.md §20.5（Phase 5 KernelRouter 抽取）
  */
 
 import type { IpcMessage } from './types.js';

@@ -5,8 +5,6 @@
  * - 6 个原语覆盖 Agent 间所有通信模式
  * - 实现 100% 封装现有 dialogue.send/reply IPC，零新协议
  * - 安全门禁：禁止直接发消息给 Brain（to: 'brain' 在实现层拒绝）
- *
- * 参见：设计文档/19-架构升级-13.0.md §19.2 / §19.6
  */
 
 import type { ToolResult } from '../tools/types.js';
