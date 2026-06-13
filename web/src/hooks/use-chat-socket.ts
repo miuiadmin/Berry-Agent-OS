@@ -14,6 +14,7 @@ import {
   type DelegationRequest, type PermissionConfirmRequest,
 } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
+import { DeltaThrottle } from "@/lib/delta-throttle";
 import type { ServerMessage } from "@/lib/types/ws-messages";
 import { useT } from "@/lib/i18n";
 
@@ -86,8 +87,31 @@ export function useChatSocket() {
     streamingSessionRef.current = null;
   }, []);
 
-  // 卸载时清理定时器
-  useEffect(() => () => { clearTimer(); }, [clearTimer]);
+  // ─── text/thinking delta rAF 节流（性能优化：1188 token 逐个 setState → ~60fps 合并渲染）───
+  // resetTimer 的 ref：供 DeltaThrottle.onFlush 闭包拿最新引用（resetTimer 随 i18n t 变），避免 stale
+  const resetTimerRef = useRef(resetTimer);
+  resetTimerRef.current = resetTimer;
+  // 节流器一次创建；onFlush 经 store.getState + ref 拿最新 action，无 stale closure
+  const deltaThrottleRef = useRef<DeltaThrottle | null>(null);
+  if (!deltaThrottleRef.current) {
+    deltaThrottleRef.current = new DeltaThrottle((deltas) => {
+      const apply = useChatStore.getState().applyBlock;
+      for (const d of deltas) {
+        apply({ sessionId: d.sessionId, messageId: d.messageId, blockId: d.blockId, blockType: d.blockType, delta: d.delta, ts: d.ts, taskId: d.taskId, correlationId: d.correlationId });
+      }
+      resetTimerRef.current(); // 一帧一次 resetTimer（搭节流便车，1188 次 clearTimeout+setTimeout → ~60fps）
+    });
+  }
+
+  // 卸载时 flush 残留 delta + 清理定时器（防 unmount 时 buffer 残留丢失）
+  useEffect(() => () => { deltaThrottleRef.current?.flushNow(); clearTimer(); }, [clearTimer]);
+
+  // 切后台时 flush（rAF 在后台标签暂停，visibilitychange→hidden 同步冲刷防丢）
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === "hidden") deltaThrottleRef.current?.flushNow(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   // ─── 断连时暂停超时计时器，重连后按需恢复 ─────────────────────
   useEffect(() => {
@@ -209,19 +233,29 @@ export function useChatSocket() {
           // 对话内联（设计文档/22）：stream.block 事件 → 累积到当前流式消息的 blocks。
           // applyBlock 内部按 blockId upsert（text/thinking 追加 delta，tool/delegation 整体替换）。
           const bm = msg as Extract<ServerMessage, { type: "block" }>;
-          applyBlock({
-            sessionId: bm.sessionId ?? sessionId ?? "",
-            messageId: bm.messageId,
-            blockId: bm.blockId,
-            blockType: bm.blockType,
-            block: bm.block as Parameters<typeof applyBlock>[0]["block"],
-            state: bm.state,
-            delta: bm.delta,
-            ts: bm.ts,
-            taskId: bm.taskId,
-            correlationId: bm.correlationId,
-          });
-          resetTimer();
+          if (bm.blockType === "text" || bm.blockType === "thinking") {
+            // text/thinking delta 走 rAF 节流（高频逐 token，合并到一帧一次 applyBlock）；resetTimer 由 onFlush 统一调
+            deltaThrottleRef.current!.push({
+              sessionId: bm.sessionId ?? sessionId ?? "",
+              messageId: bm.messageId, blockId: bm.blockId, blockType: bm.blockType,
+              delta: bm.delta ?? "", ts: bm.ts, taskId: bm.taskId, correlationId: bm.correlationId,
+            });
+          } else {
+            // tool/delegation/review：出生即终态/低频，直接 applyBlock + resetTimer（不经节流）
+            applyBlock({
+              sessionId: bm.sessionId ?? sessionId ?? "",
+              messageId: bm.messageId,
+              blockId: bm.blockId,
+              blockType: bm.blockType,
+              block: bm.block as Parameters<typeof applyBlock>[0]["block"],
+              state: bm.state,
+              delta: bm.delta,
+              ts: bm.ts,
+              taskId: bm.taskId,
+              correlationId: bm.correlationId,
+            });
+            resetTimer();
+          }
           break;
         }
         // 对话内联（doc 22 Phase C）：text_delta / reasoning_delta 粒度事件已删（后端不再 emit、
@@ -273,6 +307,7 @@ export function useChatSocket() {
           break;
         }
         case "no_response": {
+          deltaThrottleRef.current?.flushNow();
           // P1-4: Brain 路由失败 / Runtime 异常 — 找到当前 streaming 的 user 消息标 failed
           const nr = msg as Extract<ServerMessage, { type: "no_response" }>;
           const current = useChatStore.getState().messages;
@@ -294,6 +329,7 @@ export function useChatSocket() {
           break;
         }
         case "result": {
+          deltaThrottleRef.current?.flushNow(); // 流结束：冲掉残留 text/thinking delta，blocks 完整后再替换 content
           const resultMsg = msg as Extract<ServerMessage, { type: "result" }>;
           // 后端 SocketResultEvent 用 response 字段，兼容旧版 content 字段
           const response = resultMsg.response ?? resultMsg.content;
@@ -327,11 +363,13 @@ export function useChatSocket() {
           break;
         }
         case "error":
+          deltaThrottleRef.current?.flushNow();
           setLastError(msg.error ?? msg.message ?? t("chat.unknownError"));
           clearTimer();
           break;
         case "cancelled":
         case "interrupted":
+          deltaThrottleRef.current?.flushNow();
           setLastStatus("complete");
           setStreaming(false);
           clearTimer();

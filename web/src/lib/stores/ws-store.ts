@@ -224,7 +224,12 @@ export const useWsStore = create<WsStore>()(
         const heartbeatCheck = setInterval(() => {
           if (ws !== socket) { clearInterval(heartbeatCheck); return; } // 过时实例，停止检查
           if (Date.now() - lastActivityTs > 60_000) {
-            // 60 秒未收到任何消息（含 ping/pong），视为静默断连
+            // 60 秒未收到任何消息（含 ping/pong），视为静默断连。
+            // DEV 诊断：若复现，多半是主线程被长任务（如逐 token 渲染）卡死致 onmessage 不触发——
+            // 查 delta-throttle 是否生效、blocks 数组是否膨胀。日志不读 store 避免循环依赖。
+            if (import.meta.env.DEV) {
+              console.warn("[ws] heartbeat timeout (60s 无消息) — 疑似主线程卡死致 onmessage 不触发（查 delta-throttle 节流 / blocks 膨胀）");
+            }
             clearInterval(heartbeatCheck);
             socket.close(4000, "heartbeat timeout");
           }
