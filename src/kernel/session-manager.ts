@@ -12,6 +12,8 @@ import type { AppConfig } from '../config/schema.js';
 import { buildSystemPrompt } from '../llm/prompt-builder.js';
 import { getLogger } from '../utils/logger.js';
 import { getEventBus } from './event-bus.js';
+import { disposeBlockCollector } from './block-collector.js';
+import { persistAssistantTurn } from '../memory/message-blocks-repo.js';
 
 const logger = getLogger('session-manager');
 
@@ -132,19 +134,12 @@ export class SessionManager {
           streamingActive: !!pending?.streaming,
         }, 'pending 请求超时');
         if (pending) {
-        // 11.0 修复：超时时保存已有的部分内容到对话历史，防止刷新后空白气泡
+        // 11.0 修复：超时时保存已有的部分内容到对话历史，防止刷新后空白气泡。
+        // 对话内联（doc 22）：改走 complete() 统一收尾——同时落本轮内联 blocks（已执行的工具/思考）。
+        // 有 partial 时落 partial+超时标签到 conversations；无 partial 时 saveTurn=false 不写 conversation，
+        // 但 persistInlineBlocks 仍会落本轮已有的 tool/thinking blocks。
         const partialContent = pending.draftResponse ?? '';
-        if (partialContent && pending.userMessage) {
-          this.saveConversationTurn(
-            entry.sessionId,
-            pending.userMessage,
-            partialContent + '\n\n*[回复超时，内容可能不完整]*',
-            pending.reasoning,
-          );
-          logger.info({ msgId, sessionId: entry.sessionId, partialLen: partialContent.length }, '请求超时，已保存部分内容');
-        } else {
-          logger.warn({ msgId, sessionId: entry.sessionId }, '请求超时，无部分内容可保存');
-        }
+        const hasPartial = !!(partialContent && pending.userMessage);
         // 通知前端请求超时（与其他错误路径保持一致，前端 WS 客户端可实时感知）
         getEventBus().emit('conversation.no_response', {
           sessionId: entry.sessionId,
@@ -152,8 +147,12 @@ export class SessionManager {
           taskId: pending.taskId,
           correlationId: msgId,
         });
-        this.deletePending(msgId);
-        pending.resolve('[超时] 请求处理超时，请重试');
+        // complete 内部：persistInlineBlocks 落 blocks + (有 partial 时) saveConversationTurn + deletePending + resolve
+        this.complete(msgId, '[超时] 请求处理超时，请重试', {
+          saveTurn: hasPartial,
+          contentOverride: hasPartial ? partialContent + '\n\n*[回复超时，内容可能不完整]*' : undefined,
+        });
+        logger.info({ msgId, sessionId: entry.sessionId, partialLen: partialContent.length, hasPartial }, '请求超时，已走 complete 收尾');
       }
     }, baseTimeoutMs);
     // 记录 timer 以便 complete 时清理
@@ -252,10 +251,16 @@ export class SessionManager {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return false;
 
-    // 默认保存对话轮次
+    // 对话内联（doc 22）：统一落本轮 assistant blocks——persistInlineBlocks 内部 dispose 本轮 collector +
+    // buildBlocks + persistAssistantTurn。覆盖内置 agent / 委派 / daemon 所有 turn 终态（成功/失败）。
+    // collector 不存在则 no-op；失败 log 不阻塞收尾。
+    // persistContent 同时供 saveConversationTurn（conversations 双写）与 buildBlocks（text block）使用，保证两表内容一致。
+    const persistContent = options?.contentOverride ?? response;
+    this.persistInlineBlocks(pending, persistContent);
+
+    // 默认保存对话轮次（兼容期：conversations 表双写，与 message_blocks 并存）
     if (options?.saveTurn !== false && pending.userMessage) {
       try {
-        const persistContent = options?.contentOverride ?? response;
         this.saveConversationTurn(
           pending.sessionId,
           pending.userMessage,
@@ -275,7 +280,6 @@ export class SessionManager {
     }
 
     pending.resolve(response);
-    return true;
     return true;
   }
 
@@ -393,6 +397,44 @@ export class SessionManager {
       }
     } catch (err) {
       logger.error({ err, sessionId }, '能力自进化检查失败');
+    }
+  }
+
+  /**
+   * 落本轮 assistant 消息的内联 blocks（tool / thinking / text）到 message_blocks 表（doc 22）。
+   *
+   * 收敛点：把「turn 终态落 blocks」统一到这里——按 pending.delegationTaskId ?? pending.taskId
+   * dispose 本轮 BlockCollector，buildBlocks 后 persistAssistantTurn。所有 turn 终态（complete / fail /
+   * 超时 / handoff 投机）共用，消除此前分散在 task-flow / 委派 finally / 缺失的三套写入逻辑。
+   *
+   * collector 不存在（纯文本对话 / daemon 旧协议 / 已落库）则 no-op。失败仅 log，不阻塞对话收尾
+   * （与 saveConversationTurn 的失败语义一致——best-effort 持久化，不回滚 conversations）。
+   *
+   * @param pending       本轮 pending request（含 sessionId/taskId/delegationTaskId/reasoning）
+   * @param persistContent 入库文本（含可能的错误标签），同时作为 text block 的 draftResponse
+   */
+  persistInlineBlocks(pending: PendingRequest, persistContent: string): void {
+    // collector key：委派/daemon/runtime 用 delegationTaskId（delegation-orchestrator:1690 赋值），
+    // 纯 conversation agent（内置）用 taskId（task-flow telemetry 按 payload.taskId 建 collector）
+    const key = pending.delegationTaskId ?? pending.taskId;
+    if (!key) return;
+    try {
+      const collector = disposeBlockCollector(key);
+      if (!collector) return; // 本轮无 collector（纯文本 / 已落库）—— no-op
+      const blocks = collector.buildBlocks({
+        reasoning: pending.reasoning,
+        draftResponse: persistContent,
+      });
+      if (blocks.length > 0) {
+        persistAssistantTurn({
+          messageId: collector.messageId,
+          sessionId: pending.sessionId,
+          taskId: key,
+          blocks,
+        });
+      }
+    } catch (err) {
+      logger.error({ err, sessionId: pending.sessionId, key }, 'persistInlineBlocks 落 blocks 失败（不阻塞对话收尾）');
     }
   }
 

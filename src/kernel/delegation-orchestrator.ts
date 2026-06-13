@@ -30,7 +30,7 @@ import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
-import { getOrCreateBlockCollector, disposeBlockCollector } from './block-collector.js';
+import { getOrCreateBlockCollector } from './block-collector.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
 import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
 import {
@@ -1702,10 +1702,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         : runtime.execute(task);
 
       for await (const event of eventSource) {
-        // tool-trace（保留诊断）：external-driver 路径（opencode/claude 等外部 agent）的 tool_*/thinking_delta
-        // AgentEvent 在此被消费——期4 已接入 BlockCollector（下方 switch 新增 4 个 case），不再落入 default 丢弃。
-        if (event.kind === 'tool_running' || event.kind === 'tool_completed' || event.kind === 'tool_failed' || event.kind === 'thinking_delta') {
-          logger.debug({ delegationId, eventKind: event.kind, callId: (event.data as { callId?: string }).callId, name: (event.data as { name?: string }).name, timestamp: event.timestamp }, 'tool-trace: orchestrator AgentEvent → BlockCollector');
+        // tool-trace（保留诊断）：runtime/driver 路径（builtin / opencode / claude / 自定义 driver）的
+        // tool_* / thinking_delta AgentEvent 在此被消费——期4 已接入 BlockCollector（下方 switch 新增 case），
+        // 不再落入 default 丢弃。覆盖全部 4 个工具 kind（曾漏掉 builtin-driver 的 tool_pending）。
+        if (
+          event.kind === 'tool_pending' ||
+          event.kind === 'tool_running' ||
+          event.kind === 'tool_completed' ||
+          event.kind === 'tool_failed' ||
+          event.kind === 'thinking_delta'
+        ) {
+          logger.debug(
+            { delegationId, eventKind: event.kind, callId: (event.data as { callId?: string }).callId, name: (event.data as { name?: string }).name, timestamp: event.timestamp },
+            'tool-trace: orchestrator AgentEvent → BlockCollector',
+          );
         }
         switch (event.kind) {
           // 对话内联（设计文档/22 期4）：外部 driver 的思考增量 → thinking block（前端可折叠）+ 累积进 pending.reasoning 供持久化
@@ -1813,11 +1823,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.fail(delegationId, message);
       // R14-1：Runtime exception 兜底走 finalizeTask 统一入口（含 no_response 通知）
       this.sessionManager.fail(correlationId, { kind: 'runtime_error', agentName: runtime.name, error: message });
-    } finally {
-      // 对话内联（设计文档/22 期4）：统一释放本委派的 BlockCollector（防内存泄漏）。
-      // 期4 当前仅实时 emit 不落库——persist 跨刷新留待 saveConversationTurn 块化后补（pre-existing gap）。
-      disposeBlockCollector(delegationId);
     }
+    // 对话内联（doc 22）：本委派的 BlockCollector 不再在 finally 释放——dispose + buildBlocks + persistAssistantTurn
+    // 已统一下沉到 SessionManager.persistInlineBlocks()（由 fail()/final.response 路径的 complete() 调用）。
+    // collector 在 runtime 结束后留 registry，直到 turn 终态 complete() 时 dispose 落库。
   }
 
   private async handleMultiRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
@@ -2211,6 +2220,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           }
 
           // 保存 conversation 的回复到对话历史
+          // 对话内联（doc 22）：handoff 投机路径不走 complete()，手动落本轮 conversation 阶段的内联 blocks
+          // （collector key=pending.taskId，此刻还未在下方 :2237 清空）。与 saveConversationTurn 双写并行。
+          this.sessionManager.persistInlineBlocks(pending, response);
           this.sessionManager.saveConversationTurn(sessionId, pending.userMessage, response, pending.reasoning);
 
           // 向前端发送 handoff 分隔事件（同一个气泡内）

@@ -15,8 +15,7 @@ import type { AgentManager } from '../agent-manager.js';
 import type { AgentRegistry } from '../agent-registry.js';
 import { getEventBus } from '../event-bus.js';
 import { getLogger } from '../../utils/logger.js';
-import { getOrCreateBlockCollector, disposeBlockCollector } from '../block-collector.js';
-import { persistAssistantTurn } from '../../memory/message-blocks-repo.js';
+import { getOrCreateBlockCollector } from '../block-collector.js';
 
 /**
  * 工具调用计时链路 trace 日志器。
@@ -262,28 +261,9 @@ export function setupModuleTaskResultHandler(
 
     const entry = deps.delegationManager.get(result.taskId);
 
-    // 对话内联（设计文档/22 期3b）：flush + dispose 本轮 BlockCollector——
-    // 用 pending.draftResponse/reasoning（单一事实源）+ collector 持有的 toolBlocks 组装 Block[]，落库到 message_blocks。
-    // 与旧 conversations 写入并行（兼容期双写）；空内容跳过。
-    const collector = disposeBlockCollector(result.taskId);
-    if (collector) {
-      const pending = deps.sessionManager.findPendingByTaskId(result.taskId);
-      const sessionId = pending?.sessionId ?? entry?.sessionId;
-      if (sessionId) {
-        const blocks = collector.buildBlocks({
-          reasoning: pending?.reasoning ?? undefined,
-          draftResponse: pending?.draftResponse ?? undefined,
-        });
-        if (blocks.length > 0) {
-          persistAssistantTurn({
-            messageId: collector.messageId,
-            sessionId,
-            taskId: result.taskId,
-            blocks,
-          });
-        }
-      }
-    }
+    // 对话内联（doc 22）：本轮 BlockCollector 的 dispose + buildBlocks + persistAssistantTurn 已统一
+    // 下沉到 SessionManager.persistInlineBlocks()（由 complete() 调用）。agent.task.result 之后最终态
+    // 必经 complete()，blocks 在那里落 message_blocks，此处不再单独落库（避免双重 dispose）。
 
     if (entry) {
       onForegroundResult(result, { correlationId: entry.correlationId, sessionId: entry.sessionId }, agentName);
