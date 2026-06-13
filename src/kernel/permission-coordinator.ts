@@ -325,7 +325,12 @@ export class PermissionCoordinator {
       params.toolInput,
       params.dangerLevel,
     );
-    if (!blockResult.allowed) {
+    // 15.0 R2-2: requiresReview 不当硬拒——模块 Agent 走同步 request 路径无法做异步 Brain/用户审核，
+    // 但它们是 Brain 委派的受信执行（Brain 经 active_scope 的 forbiddenTools 控制，而非逐工具审核）。
+    // requiresReview 时在 scope 内签 token（auto-approve within scope）；仅真正的硬拒（!allowed 且非
+    // requiresReview，如 deny-all / blocklist）才拒绝。修复前 ask/yolo 下模块 Agent 的 moderate/
+    // 危险类别工具全部被拒，绕过机制 A 的委托语义。
+    if (!blockResult.allowed && !blockResult.requiresReview) {
       return { allowed: false, reason: blockResult.reason };
     }
 

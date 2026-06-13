@@ -580,6 +580,7 @@ function buildPermissionFn(ctx: PhaseContext) {
       toolInput,
       dangerLevel,
       taskId: ctx.taskId,
+      sessionId: ctx.sessionId, // 15.0 R2-2: 带会话上下文，permission-flow 用真实 session（非 taskId 兜底）
     }, config.requestTimeoutMs);
     const p = response.payload as PermissionResultPayload;
     return { allowed: p.allowed, reason: p.reason, tokenId: p.tokenId };

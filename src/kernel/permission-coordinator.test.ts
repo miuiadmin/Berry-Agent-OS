@@ -137,3 +137,30 @@ describe('PermissionCoordinator.checkAndIssue 表征（当前行为）', () => {
     });
   });
 });
+
+describe('checkAndIssueSimple (15.0 R2-2, module agent requiresReview 不硬拒)', () => {
+  it('ask + moderate → 不硬拒，在 scope 内签 token（修复前被拒）', () => {
+    const { coord } = makeCoordinator('ask');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'moderate_tool', toolInput: '{}', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(true);
+    expect(r.tokenId).toBeTruthy();
+  });
+
+  it('ask + dangerous 普通工具 → 签 token（requiresReview 非硬拒）', () => {
+    const { coord } = makeCoordinator('ask');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'plain_tool', toolInput: '{}', dangerLevel: 'dangerous' });
+    expect(r.allowed).toBe(true);
+  });
+
+  it('deny-all → 仍硬拒（!allowed 且非 requiresReview）', () => {
+    const { coord } = makeCoordinator('deny-all');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'moderate_tool', toolInput: '{}', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(false);
+  });
+
+  it('allow-all + moderate → 签 token', () => {
+    const { coord } = makeCoordinator('allow-all');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'moderate_tool', toolInput: '{}', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(true);
+  });
+});
