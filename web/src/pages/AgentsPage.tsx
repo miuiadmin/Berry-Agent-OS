@@ -1,8 +1,7 @@
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { queries, apiPost, type TaskInfo } from "@/lib/api";
-import { useWsStore } from "@/lib/stores/ws-store";
+import { queries, apiPost } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { toast } from "sonner";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -12,9 +11,10 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Bot, Power, PowerOff, ArrowLeft, Clock, ListTodo } from "lucide-react";
+import { Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useT, useDateFormat } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
+import { AgentDetailView } from "./agents-components";
 
 function AgentsGridSkeleton() {
   return (
@@ -166,172 +166,6 @@ export default function AgentsPage() {
           if (disableTarget) toggleAgent.mutate({ name: disableTarget, enable: false });
         }}
       />
-    </div>
-  );
-}
-
-function AgentDetailView({
-  agent,
-  onBack,
-  onToggle,
-}: {
-  agent: { name: string; status: string; description?: string; kind?: string; version?: string };
-  onBack: () => void;
-  onToggle: (enable: boolean) => void;
-}) {
-  const t = useT();
-  const { formatDate, formatTime } = useDateFormat();
-  const { data: tasksData } = useQuery(queries.tasks({ limit: 50 }));
-  const [events, setEvents] = useState<Array<{ event: string; ts: number }>>([]);
-  const subscribe = useWsStore((s) => s.subscribe);
-
-  const recentTasks = (tasksData?.items ?? [])
-    .filter((t: TaskInfo) => t.targetAgent === agent.name)
-    .slice(0, 5);
-
-  useEffect(() => {
-    const unsubs = [
-      subscribe("agent.enabled", (payload) => {
-        const p = payload as { name?: string };
-        if (p.name === agent.name) {
-          setEvents((prev) => [...prev.slice(-9), { event: "enabled", ts: Date.now() }]);
-        }
-      }),
-      subscribe("agent.disabled", (payload) => {
-        const p = payload as { name?: string };
-        if (p.name === agent.name) {
-          setEvents((prev) => [...prev.slice(-9), { event: "disabled", ts: Date.now() }]);
-        }
-      }),
-      subscribe("agent.crashed", (payload) => {
-        const p = payload as { name?: string };
-        if (p.name === agent.name) {
-          setEvents((prev) => [...prev.slice(-9), { event: "crashed", ts: Date.now() }]);
-        }
-      }),
-    ];
-    return () => unsubs.forEach((fn) => fn());
-  }, [agent.name, subscribe]);
-
-  return (
-    <div className="mt-4 animate-page-in">
-      <Button variant="ghost" size="default" className="mb-4" onClick={onBack}>
-        <ArrowLeft className="size-4" />
-        {t("agents.backToAgents")}
-      </Button>
-
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold">{agent.name}</h1>
-        <Badge key={agent.status} variant={agent.status === "enabled" ? "success" : "secondary"} className="animate-badge-pop">
-          {agent.status === "enabled" ? t("status.active") : t("status.disabled")}
-        </Badge>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onToggle(agent.status !== "enabled")}
-        >
-          {agent.status === "enabled" ? (
-            <><PowerOff className="size-3.5" /> {t("agents.disableAgent")}</>
-          ) : (
-            <><Power className="size-3.5" /> {t("agents.enableAgent")}</>
-          )}
-        </Button>
-      </div>
-
-      {agent.description && (
-        <p className="mt-2 text-sm text-muted-foreground">{agent.description}</p>
-      )}
-
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>{t("common.details")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <div>
-              <dt className="font-medium text-muted-foreground">{t("common.status")}</dt>
-              <dd className="mt-0.5">{t(`status.${agent.status}`) ?? agent.status}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-muted-foreground">{t("agents.kind")}</dt>
-              <dd className="mt-0.5">{agent.kind ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-muted-foreground">{t("agents.version")}</dt>
-              <dd className="mt-0.5">{agent.version ? `v${agent.version}` : "—"}</dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>{t("agents.recentTasks")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recentTasks.length === 0 ? (
-            <EmptyState icon={ListTodo} title={t("agents.noTasksForAgent")} description={t("agents.noTasksForAgent")} />
-          ) : (
-            <div className="space-y-2">
-              {recentTasks.map((task: TaskInfo, i: number) => (
-                <div key={task.id} className={cn("flex items-center justify-between rounded-lg border px-3 py-2", `stagger-${Math.min(i + 1, 8)}`)}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono text-muted-foreground">{task.id.slice(0, 8)}</span>
-                    <span className="text-sm">{task.taskType}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={
-                        task.status === "completed" ? "success"
-                          : task.status === "failed" ? "destructive"
-                          : task.status === "running" ? "warning"
-                          : "secondary"
-                      }
-                    >
-                      {t(`status.${task.status}`) ?? task.status}
-                    </Badge>
-                    <span className="text-[11px] text-muted-foreground">
-                      {formatDate(new Date(task.createdAt))}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>{t("agents.liveEvents")}</CardTitle>
-          <CardDescription>{t("agents.eventsSinceOpened")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {events.length === 0 ? (
-            <EmptyState icon={Clock} title={t("agents.noEvents")} description={t("agents.listening")} />
-          ) : (
-            <div className="space-y-1.5">
-              {events.map((ev) => (
-                <div key={ev.ts} className="flex items-center gap-2 text-xs animate-slide-left">
-                  <Clock className="size-3 text-muted-foreground" />
-                  <span className="text-muted-foreground">
-                    {formatTime(new Date(ev.ts))}
-                  </span>
-                  <Badge
-                    variant={
-                      ev.event === "enabled" ? "success"
-                        : ev.event === "crashed" ? "destructive"
-                        : "secondary"
-                    }
-                  >
-                    {t(`status.${ev.event}`) ?? ev.event}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
