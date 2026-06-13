@@ -531,7 +531,23 @@ export class CoreService {
                 observationType: 'agent_event',
                 fromAgent: 'auditor',
                 toAgent: 'brain',
-                content: JSON.stringify({ kind: 'audit_report', riskScore: report.riskScore, findings: report.findings, recommendations: report.recommendations }),
+                // 15.0 mechC C-5：发 condensed 摘要（riskScore + recommendations + 各维度计数），
+                // 避免完整 findings 经 observationRecorder 的 safeSlice(content,2000) 截断丢数据。
+                // Brain 拿到可行动的 riskScore + 建议即可；完整报告留在 AuditReport 返回值。
+                content: JSON.stringify({
+                  kind: 'audit_report',
+                  riskScore: report.riskScore,
+                  taskCount: report.taskCount,
+                  counts: {
+                    patterns: report.findings.patterns.length,
+                    risks: report.findings.risks.length,
+                    inconsistencies: report.findings.inconsistencies.length,
+                    coverageGaps: report.findings.coverageGaps.length,
+                    driftRecap: report.findings.driftRecap.length,
+                  },
+                  recommendations: report.recommendations,
+                  topRisks: report.findings.risks.slice(0, 3).map(r => `${r.severity}:${r.description.slice(0, 80)}`),
+                }),
                 priority: report.riskScore >= 0.6 ? 0 : 1, // 高危 critical 永不裁剪
               });
             }
