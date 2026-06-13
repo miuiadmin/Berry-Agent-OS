@@ -1,7 +1,13 @@
+/**
+ * 通知管理页面。
+ *
+ * 支持三栏过滤（未读 / 全部 / 已归档）+ 标记已读 + 全部已读 + 归档操作。
+ * Mutations → use-notification-mutations.ts
+ */
+
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Bell, Check, Archive } from "lucide-react";
-import { toast } from "sonner";
 import { notificationsApi, type NotificationItem } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
@@ -12,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
+import { useNotificationMutations } from "./use-notification-mutations";
 
 type Filter = "unread" | "all" | "archived";
 
@@ -19,18 +26,17 @@ export default function NotificationsPage() {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("notifications.title"));
-  const qc = useQueryClient();
 
   const [filter, setFilter] = useState<Filter>("unread");
 
-  // Unread count
+  // 未读数查询（30 秒轮询）
   const countQuery = useQuery({
     queryKey: ["notification-count"],
     queryFn: () => notificationsApi.count(),
     refetchInterval: 30_000,
   });
 
-  // List notifications
+  // 通知列表查询（按 filter 参数过滤）
   const listQuery = useQuery({
     queryKey: ["notifications", filter],
     queryFn: () =>
@@ -40,44 +46,14 @@ export default function NotificationsPage() {
       }),
   });
 
-  // Mark read
-  const readMut = useMutation({
-    mutationFn: (id: string) => notificationsApi.markRead(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["notifications"] });
-      qc.invalidateQueries({ queryKey: ["notification-count"] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  // Mark all read
-  const readAllMut = useMutation({
-    mutationFn: () => notificationsApi.markAllRead(),
-    onSuccess: () => {
-      toast.success(t("notifications.allMarkedRead"));
-      qc.invalidateQueries({ queryKey: ["notifications"] });
-      qc.invalidateQueries({ queryKey: ["notification-count"] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  // Archive
-  const archiveMut = useMutation({
-    mutationFn: (id: string) => notificationsApi.archive(id),
-    onSuccess: () => {
-      toast.success(t("notifications.notificationArchived"));
-      qc.invalidateQueries({ queryKey: ["notifications"] });
-      qc.invalidateQueries({ queryKey: ["notification-count"] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
+  const { readMut, readAllMut, archiveMut } = useNotificationMutations();
 
   const items: NotificationItem[] = listQuery.data ?? [];
   const unread = countQuery.data?.unread ?? 0;
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* Header */}
+      {/* 页面头部 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
@@ -107,7 +83,7 @@ export default function NotificationsPage() {
         )}
       </div>
 
-      {/* Filter tabs */}
+      {/* 过滤 tabs */}
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
         <TabsList>
           <TabsTrigger value="unread">
@@ -118,11 +94,8 @@ export default function NotificationsPage() {
         </TabsList>
       </Tabs>
 
-      {/* Notification list */}
-      <QueryBoundary
-        query={listQuery}
-        skeleton={<div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <Card key={i}><CardContent className="py-3"><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /></CardContent></Card>)}</div>}
-      >
+      {/* 通知列表 */}
+      <QueryBoundary query={listQuery} skeleton={<NotificationsSkeleton />}>
         {(notifications) => notifications.length === 0 ? (
           <EmptyState
             icon={Bell}
@@ -146,6 +119,7 @@ export default function NotificationsPage() {
                 )}
               >
                 <CardContent className="flex items-start gap-3 py-3">
+                  {/* 已读/未读指示点 */}
                   <div className="mt-0.5 shrink-0">
                     {!item.read ? (
                       <div className="size-2 rounded-full bg-brand" />
@@ -171,6 +145,7 @@ export default function NotificationsPage() {
                       {fmtDT(new Date(item.createdAt))}
                     </p>
                   </div>
+                  {/* 操作按钮：移动端常驻，桌面端 hover 显示 */}
                   <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     {!item.read && (
                       <Button
@@ -203,6 +178,21 @@ export default function NotificationsPage() {
           </div>
         )}
       </QueryBoundary>
+    </div>
+  );
+}
+
+/** 通知列表骨架屏 */
+function NotificationsSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Card key={i}>
+          <CardContent className="py-3">
+            <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
