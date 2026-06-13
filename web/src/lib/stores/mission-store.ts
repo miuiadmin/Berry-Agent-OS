@@ -37,36 +37,6 @@ export interface Mission {
   progressPercent: number;
 }
 
-/** Squad 成员 */
-export interface SquadMember {
-  agent: string;
-  role: "lead" | "work" | "check";
-  on: string;
-  status: "idle" | "working" | "done" | "failed";
-}
-
-/** Squad */
-export interface Squad {
-  id: string;
-  name: string;
-  depth: number;
-  goal: string;
-  leader: string;
-  members: SquadMember[];
-  squads?: Squad[];
-  /** Squad 内部信号 */
-  signals?: MissionSignal[];
-  status: "waiting" | "working" | "done" | "failed";
-}
-
-/** 信号 */
-export interface MissionSignal {
-  from: string;
-  at: string;
-  type: "progress" | "blocker" | "done" | "question";
-  msg: string;
-}
-
 // ─── Store 接口 ───
 
 interface MissionState {
