@@ -405,9 +405,15 @@ function routeUserMessage(
     resolveEffectiveMode(options.permissionMode, services.config.permissionMode),
   );
 
-  // 入口入库：先 saveUserMessage 再 createPending（user 消息在中断时全丢的双层漏洞的第一道闸门）
+  // 入口入库：先 saveUserMessage 再 createPending（user 消息在中断时全丢的双层漏洞的第一道闸门）。
+  // saveUserMessage 按 clientMsgId 幂等：重发（刷新/outbox 重发）命中已存在行 → deduplicated=true，
+  // 短路不重复路由/agent/流式（否则刷新会把历史对话"又发一次"）。
   try {
-    services.sessionManager.saveUserMessage(sessionId, message, { clientMsgId });
+    const saved = services.sessionManager.saveUserMessage(sessionId, message, { clientMsgId });
+    if (saved.deduplicated) {
+      logger.info({ sessionId, clientMsgId }, `${entry} user 消息 clientMsgId 幂等命中，跳过重复处理（重发）`);
+      return;
+    }
   } catch (err) {
     logger.warn({ err, sessionId, entry }, `${entry} 入口入库 user 消息失败`);
   }
