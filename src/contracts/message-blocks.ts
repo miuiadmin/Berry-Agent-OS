@@ -226,3 +226,48 @@ export function isBlockTerminal(block: Block): boolean {
   // text/thinking/review 无状态机，视为即终态
   return true;
 }
+
+// ─── 辅助：ToolBlock → 字符串投影（审核/审计链路统一入口） ───
+
+/**
+ * unknown → 稳定字符串（{@link toolInputString} / {@link toolResultString} 共用）。
+ * string 直通（避免对已字符串化入参二次 JSON.stringify 产生双重引号）；对象 JSON.stringify；
+ * null/undefined → ''。**不 redact**（redact 是落库边界 `redactSecrets` 的单一职责）、**不截断**（调用方按需 slice）。
+ */
+function stringifyToolPayload(payload: unknown): string {
+  if (payload == null) return '';
+  if (typeof payload === 'string') return payload;
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+/**
+ * ToolBlock 入参 → 字符串。ToolBlock.input 是 unknown（对象 / 字符串 / null），此处归一为字符串，
+ * 供审核 prompt 拼装、审计落库前 redact、进化提取等下游消费。
+ */
+export function toolInputString(b: ToolBlock): string {
+  return stringifyToolPayload(b.input);
+}
+
+/**
+ * ToolBlock 结果 → 字符串：failed 态取 error，否则取 output（同 {@link stringifyToolPayload} 规则）。
+ * 与 {@link toolInputString} 配对，覆盖审核/审计链路对「工具结果」的消费。
+ */
+export function toolResultString(b: ToolBlock): string {
+  if (b.state === 'failed') return b.error ?? '';
+  return stringifyToolPayload(b.output);
+}
+
+/**
+ * 【过渡 seam，提交2删除】ToolBlock[] → 旧 `{name,input,result}[]` 投影。
+ * 提交1：审核 IPC 契约（TurnRecord / SuperiorReviewRequest）仍是 `{name,input,result}[]`，kernel 从 collector
+ *        取 ToolBlock[] 后经此投影喂 IPC。提交2 契约切到 `ToolBlock[]` 后，本函数及全部调用点一并删除。
+ */
+export function projectToLegacyToolCalls(
+  blocks: ToolBlock[],
+): Array<{ name: string; input: string; result: string }> {
+  return blocks.map((b) => ({ name: b.name, input: toolInputString(b), result: toolResultString(b) }));
+}

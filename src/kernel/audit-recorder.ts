@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { ToolAuditPayload } from '../contracts/audit.js';
+import type { ToolBlock } from '../contracts/message-blocks.js';
+import { toolInputString, toolResultString } from '../contracts/message-blocks.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import { redactSecrets } from '../observability/redaction.js';
@@ -58,7 +60,8 @@ export class AuditRecorder {
     level: string;
     draft: string;
     userMessage: string;
-    toolCalls: Array<{ name: string; input: string; result: string }>;
+    /** 工具调用轨迹（ToolBlock[]，来自 BlockCollector —— 审核链单一源）。input/output 为 raw，本函数落库前 redact。 */
+    toolCalls: ToolBlock[];
     verdict: string;
     finalResponse: string;
     /** R14-4：可选 reason 字段，用于 auto-approve 等场景标注短路原因 */
@@ -67,12 +70,14 @@ export class AuditRecorder {
     try {
       // 15.0 D3-1：review_input 含 user_message + tool_calls 的 input/result，同样可能携带密钥
       // （工具入参/结果明文拼进审核输入）。落库前逐字段 redact，与 tool_calls 路径一致。
+      // ToolBlock.input/output 是 raw（collector 持有未脱敏值）——必须 toolInputString/toolResultString
+      // 先归一为字符串再 redactSecrets，让 secret 扫描覆盖字符串化形式（顺序不可反）。
       const reviewInput = JSON.stringify({
         user_message: redactSecrets(params.userMessage),
-        tool_calls: params.toolCalls.map((call) => ({
-          name: call.name,
-          input: redactSecrets(call.input),
-          result_preview: redactSecrets(call.result.slice(0, 500)),
+        tool_calls: params.toolCalls.map((b) => ({
+          name: b.name,
+          input: redactSecrets(toolInputString(b)),
+          result_preview: redactSecrets(toolResultString(b).slice(0, 500)),
         })),
       });
       this.db.prepare(`

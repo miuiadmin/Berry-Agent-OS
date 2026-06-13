@@ -450,6 +450,8 @@ startResidentAgent(({ name, config, ipc, llm, db }) => {
         sessionId,
         draft,
         reasoning: result.reasoning,
+        // TODO(commit-2 删除): 审核链工具真相已统一到 BlockCollector（kernel 从 collector 取 ToolBlock[]，
+        // 不再读此字段）。此处暂留仅因 DraftResponsePayload.toolCalls 字段仍在（提交2 删字段 + 本投影）。
         toolCalls: result.toolCalls.map((tc) => ({ name: tc.name, input: tc.input, result: tc.result })),
       } satisfies DraftResponsePayload, trackingId);
     } catch (err) {

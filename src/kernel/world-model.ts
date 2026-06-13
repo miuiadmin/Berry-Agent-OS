@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { WorldModelSnapshot, UserState, ProjectState, EnvironmentState, TemporalState, WorldModelUpdate } from '../contracts/world-model.js';
+import type { ToolBlock } from '../contracts/message-blocks.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('world-model');
@@ -46,7 +47,8 @@ export class WorldModelRuntime {
   updateFromConversation(input: {
     userMessage: string;
     assistantResponse: string;
-    toolCalls?: Array<{ name: string }>;
+    /** 工具调用轨迹（ToolBlock[]，来自 BlockCollector —— 审核链单一源）。本函数仅读 .name 推断意图。 */
+    toolCalls?: ToolBlock[];
     sessionId: string;
   }): void {
     const now = Date.now();

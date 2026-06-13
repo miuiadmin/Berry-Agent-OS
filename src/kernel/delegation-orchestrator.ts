@@ -31,6 +31,9 @@ import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
+// 对话内联：审核链工具真相单一源 = BlockCollector。projectToLegacyToolCalls 是提交1→2 的 IPC seam（提交2删）。
+import { projectToLegacyToolCalls } from '../contracts/message-blocks.js';
+import type { ToolBlock } from '../contracts/message-blocks.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
 import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
 import {
@@ -570,7 +573,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     sessionId: string,
     userMessage: string,
     assistantResponse: string,
-    toolCalls?: Array<{ name: string }>,
+    /** 本轮工具调用（ToolBlock[]，来自 BlockCollector —— 审核链单一源）；World Model 仅读 .name 推断 activeGoals */
+    toolCalls?: ToolBlock[],
   ): void {
     this.sessionManager.queueEvolution(sessionId, userMessage, assistantResponse);
     this.sessionManager.queueCapabilityEvolution(sessionId, userMessage, assistantResponse);
@@ -2056,14 +2060,21 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   private setupReviewFlow(primaryIpc: AgentIpc, reviewerIpc: AgentIpc, primaryName: string, reviewerName: string): void {
     primaryIpc.onMessage('draft.response', (msg: IpcMessage) => {
-      const { sessionId, draft, reasoning, toolCalls } = msg.payload as DraftResponsePayload;
+      const { sessionId, draft, reasoning } = msg.payload as DraftResponsePayload;
       const correlationId = msg.correlationId!;
       const pending = this.sessionManager.getPending(correlationId);
       if (!pending) return;
 
-      logger.debug({ correlationId, draftLen: draft.length, toolCalls: (toolCalls ?? []).length, sessionId }, 'orchestrator:draft');
+      // 对话内联：工具真相单一源 = BlockCollector（消灭 pending.toolCalls 双源）。
+      // 审核入口（draft.response）时 collector 仍存活（dispose 发生在 turn-terminal complete 之后）；
+      // key 与 persistInlineBlocks 一致（pending.delegationTaskId ?? pending.taskId）。
+      // payload.toolCalls（agent 自报）不再使用——遥测累积的 ToolBlock[] 是唯一源（更全：含 state/error/durationMs）。
+      const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
+      // 提交1 seam：审核 IPC 契约（TurnRecord）仍是 {name,input,result}[]，投影回旧形；提交2 契约切 ToolBlock[] 后删。
+      const calls = projectToLegacyToolCalls(toolBlocks);
 
-      const calls = toolCalls ?? [];
+      logger.debug({ correlationId, draftLen: draft.length, toolCalls: toolBlocks.length, sessionId }, 'orchestrator:draft');
+
       const turn: TurnRecord = {
         sessionId,
         userMessage: pending.userMessage,
@@ -2086,7 +2097,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       pending.level = turn.level;
       pending.draftResponse = draft;
       pending.reasoning = reasoning;
-      pending.toolCalls = calls;
 
       // §9.0 M15.3 + §12.0: 生产模式分级审核
       if (!this.takeoverController) {
@@ -2104,7 +2114,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             level: 'A',
             draft,
             userMessage: pending.userMessage,
-            toolCalls: calls,
+            toolCalls: toolBlocks,
             verdict: 'approve',
             finalResponse: draft,
             reason: !pending.intentAnchor ? 'auto_approve: no_intent_anchor' : 'auto_approve: level_A',
@@ -2249,7 +2259,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           pending.delegationTaskId = undefined;
           pending.draftResponse = '';
           pending.reasoning = undefined;
-          pending.toolCalls = undefined;
 
           // 直接用现有 pending 分发 handoff（不重建 pending）
           this.handleRouteDecision(handoff, correlationId);
@@ -2270,6 +2279,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           originalDraft,
         });
       }
+      // 对话内联：complete() 内 persistInlineBlocks 会 dispose collector——须在 complete 之前捕获本轮 toolBlocks，
+      // 供下方 audit + onConversationCompleted（post-complete 消费者，collector 已 dispose 不能再 peek）。
+      const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
       // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
       const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
       if (!finalized || finalized === true) return;
@@ -2288,12 +2300,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         level: pending.level ?? 'A',
         draft: pending.draftResponse ?? response,
         userMessage: pending.userMessage,
-        toolCalls: pending.toolCalls ?? [],
+        toolCalls: toolBlocks,
         verdict: reviewVerdict,
         finalResponse: response,
       });
 
-      this.onConversationCompleted(sessionId, pending.userMessage, response, pending.toolCalls);
+      this.onConversationCompleted(sessionId, pending.userMessage, response, toolBlocks);
 
       getEventBus().emit('message.responded', {
         sessionId,
@@ -2365,11 +2377,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       }
     }
 
+    // 对话内联：complete() 内 persistInlineBlocks 会 dispose collector——须在 complete 之前捕获本轮 toolBlocks
+    // 供下方 onConversationCompleted（post-complete 消费者，collector 已 dispose 不能再 peek）。
+    const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
     // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
     const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
     if (!finalized || finalized === true) return;
 
-    this.onConversationCompleted(pending.sessionId, pending.userMessage, response, pending.toolCalls);
+    this.onConversationCompleted(pending.sessionId, pending.userMessage, response, toolBlocks);
     // 所有后续操作完成后再 resolve
     finalized.resolve(response);
   }
@@ -2382,6 +2397,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       pending.draftResponse = modifiedResponse;
     }
 
+    // 对话内联：工具真相单一源 collector（superior 链审核期间 collector 仍存活，未到 turn-terminal complete）。
+    const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
+
     const origin = this.pendingReviewOrigins.get(correlationId);
     this.pendingReviewOrigins.set(correlationId, origin === 'superior_chain' ? (pending.taskId ? 'task' : 'conversation') : origin ?? 'conversation');
     this.reportProgress(pending, 'reviewing', '上级审核通过，正在 Brain 审核...');
@@ -2390,7 +2408,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       sessionId: pending.sessionId,
       userMessage: pending.userMessage,
       draftResponse: pending.draftResponse ?? '',
-      toolCalls: pending.toolCalls ?? [],
+      toolCalls: projectToLegacyToolCalls(toolBlocks),
       level: pending.level as 'A' | 'B' | 'C' ?? 'A',
       missionId: pending.missionId,
       planTaskId: pending.planTaskId,
@@ -2476,8 +2494,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       } catch { /* 非关键 */ }
     }
 
-    // 使用 pending 中已记录的 toolCalls（如果有）
-    const toolCalls = pending.toolCalls ?? [];
+    // 对话内联：工具真相单一源 collector（审核入口，collector 仍存活——dispose 在 turn-terminal complete）。
+    // daemon/foreground 路径原读 pending.toolCalls（无生产者恒为 []）→ 现从 collector 取真实工具，
+    // 修复「Brain 审核看不到 daemon/外部 agent 任务工具」的隐性 bug。key 与 persistInlineBlocks 一致。
+    const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
+    // 提交1 seam：TurnRecord/classifyLevel 仍是 {name,input,result}[]（提交2 契约切 ToolBlock[] 后删）。
+    const toolCalls = projectToLegacyToolCalls(toolBlocks);
 
     const turn: TurnRecord = {
       sessionId: fgEntry.sessionId,

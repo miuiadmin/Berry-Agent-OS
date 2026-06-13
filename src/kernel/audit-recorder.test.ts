@@ -61,7 +61,7 @@ describe('AuditRecorder redaction (15.0 D3-1)', () => {
       level: 'A',
       draft: 'draft',
       userMessage: 'my key is ghp_1234567890abcdefghijklmnopqrstuvwxyz',
-      toolCalls: [{ name: 'run_command', input: SECRET_INPUT, result: SECRET_RESULT }],
+      toolCalls: [{ type: 'tool', id: 't1', name: 'run_command', input: SECRET_INPUT, state: 'completed', output: SECRET_RESULT }],
       verdict: 'approve',
       finalResponse: 'ok',
     });
