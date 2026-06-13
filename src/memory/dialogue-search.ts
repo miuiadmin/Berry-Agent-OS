@@ -41,6 +41,30 @@ const MAX_LIMIT = 100;
 const MIN_QUERY_LEN = 2;
 
 /**
+ * 15.0 D3-2：转义 LIKE 模式的通配符（%、_、\），避免用户查询里的这些字符被当通配符。
+ * 配合 `LIKE ? ESCAPE '\\'` 使用。
+ */
+function escapeLikePattern(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/**
+ * 15.0 D3-2：LIKE 兜底路径的 snippet 构造（FTS 的 snippet() 函数不可用）。
+ * 在 content 中定位 term（大小写不敏感）首次出现位置，取前后各 radius 字符的窗口，
+ * 用 <mark> 包裹匹配子串。找不到则返回 content 头部截断。
+ */
+function buildLikeSnippet(content: string, term: string, radius = 32): string {
+  const idx = content.toLowerCase().indexOf(term.toLowerCase());
+  if (idx < 0) return content.slice(0, radius * 2) + (content.length > radius * 2 ? '...' : '');
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(content.length, idx + term.length + radius);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < content.length ? '...' : '';
+  const matched = content.slice(idx, idx + term.length);
+  return `${prefix}${content.slice(start, idx)}<mark>${matched}</mark>${content.slice(idx + term.length, end)}${suffix}`;
+}
+
+/**
  * 15.0 FTS5：跨 agent 对话内容检索（dialogue_messages 表）。
  *
  * 利用 v18 建立的 dialogue_messages_fts（trigram 外部内容表）做 MATCH 查询，
@@ -58,34 +82,62 @@ export function searchDialogueMessages(
   options?: DialogueSearchOptions,
 ): DialogueSearchHit[] {
   if (!query || query.trim().length < MIN_QUERY_LEN) return [];
-  const match = sanitizeFtsQuery(query);
-  if (!match || match === '""') return [];
-
   const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
-  const conditions = ['dialogue_messages_fts MATCH ?'];
-  const params: unknown[] = [match];
+  const match = sanitizeFtsQuery(query);
+
+  // FTS 可命中（trigram tokenizer 至少需 3 字成窗）→ MATCH 路径
+  if (match && match !== '""') {
+    const conditions = ['dialogue_messages_fts MATCH ?'];
+    const params: unknown[] = [match];
+    if (options?.sessionId) {
+      conditions.push('m.session_id = ?');
+      params.push(options.sessionId);
+    }
+    params.push(limit);
+
+    // 列别名直接产出 camelCase 字段，避免 JS 层映射
+    return db
+      .prepare(
+        `
+        SELECT m.rowid, m.session_id AS sessionId, m.dialogue_id AS dialogueId,
+               m.from_agent AS fromAgent, m.to_agent AS toAgent, m.content,
+               snippet(dialogue_messages_fts, 2, '<mark>', '</mark>', '...', 24) AS snippet,
+               m.created_at AS createdAt
+        FROM dialogue_messages m
+        JOIN dialogue_messages_fts f ON m.rowid = f.rowid
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY rank, m.created_at DESC
+        LIMIT ?
+      `,
+      )
+      .all(...params) as DialogueSearchHit[];
+  }
+
+  // 15.0 D3-2：FTS 无法召回的 sub-trigram 查询（最典型：2 字 CJK 短词如"权限/你好"——
+  // 中文最常见词长）走 LIKE 兜底，否则这类词永远搜不到。转义通配符防注入/误匹配。
+  const likePattern = `%${escapeLikePattern(query.trim())}%`;
+  const conditions = ['m.content LIKE ? ESCAPE \'\\\''];
+  const params: unknown[] = [likePattern];
   if (options?.sessionId) {
     conditions.push('m.session_id = ?');
     params.push(options.sessionId);
   }
   params.push(limit);
-
-  // 列别名直接产出 camelCase 字段，避免 JS 层映射
-  return db
+  const rows = db
     .prepare(
       `
       SELECT m.rowid, m.session_id AS sessionId, m.dialogue_id AS dialogueId,
              m.from_agent AS fromAgent, m.to_agent AS toAgent, m.content,
-             snippet(dialogue_messages_fts, 2, '<mark>', '</mark>', '...', 24) AS snippet,
              m.created_at AS createdAt
       FROM dialogue_messages m
-      JOIN dialogue_messages_fts f ON m.rowid = f.rowid
       WHERE ${conditions.join(' AND ')}
-      ORDER BY rank, m.created_at DESC
+      ORDER BY m.created_at DESC
       LIMIT ?
     `,
     )
-    .all(...params) as DialogueSearchHit[];
+    .all(...params) as Array<Omit<DialogueSearchHit, 'snippet'>>;
+  const term = query.trim();
+  return rows.map((r) => ({ ...r, snippet: buildLikeSnippet(r.content, term) }));
 }
 
 /**
@@ -100,33 +152,60 @@ export function searchAgentChatMessages(
   options?: DialogueSearchOptions,
 ): AgentChatSearchHit[] {
   if (!query || query.trim().length < MIN_QUERY_LEN) return [];
-  const match = sanitizeFtsQuery(query);
-  if (!match || match === '""') return [];
-
   const limit = Math.min(options?.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
-  const conditions = ['agent_chat_messages_fts MATCH ?'];
-  const params: unknown[] = [match];
+  const match = sanitizeFtsQuery(query);
+
+  // FTS 可命中 → MATCH 路径
+  if (match && match !== '""') {
+    const conditions = ['agent_chat_messages_fts MATCH ?'];
+    const params: unknown[] = [match];
+    if (options?.sessionId) {
+      conditions.push('m.session_id = ?');
+      params.push(options.sessionId);
+    }
+    params.push(limit);
+
+    return db
+      .prepare(
+        `
+        SELECT m.rowid, m.session_id AS sessionId, m.task_id AS taskId,
+               m.from_agent AS fromAgent, m.to_agent AS toAgent, m.direction, m.content,
+               snippet(agent_chat_messages_fts, 2, '<mark>', '</mark>', '...', 24) AS snippet,
+               m.created_at AS createdAt
+        FROM agent_chat_messages m
+        JOIN agent_chat_messages_fts f ON m.rowid = f.rowid
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY rank, m.created_at DESC
+        LIMIT ?
+      `,
+      )
+      .all(...params) as AgentChatSearchHit[];
+  }
+
+  // 15.0 D3-2：sub-trigram 查询（2 字 CJK 等）走 LIKE 兜底，与 searchDialogueMessages 对称
+  const likePattern = `%${escapeLikePattern(query.trim())}%`;
+  const conditions = ['m.content LIKE ? ESCAPE \'\\\''];
+  const params: unknown[] = [likePattern];
   if (options?.sessionId) {
     conditions.push('m.session_id = ?');
     params.push(options.sessionId);
   }
   params.push(limit);
-
-  return db
+  const rows = db
     .prepare(
       `
       SELECT m.rowid, m.session_id AS sessionId, m.task_id AS taskId,
              m.from_agent AS fromAgent, m.to_agent AS toAgent, m.direction, m.content,
-             snippet(agent_chat_messages_fts, 2, '<mark>', '</mark>', '...', 24) AS snippet,
              m.created_at AS createdAt
       FROM agent_chat_messages m
-      JOIN agent_chat_messages_fts f ON m.rowid = f.rowid
       WHERE ${conditions.join(' AND ')}
-      ORDER BY rank, m.created_at DESC
+      ORDER BY m.created_at DESC
       LIMIT ?
     `,
     )
-    .all(...params) as AgentChatSearchHit[];
+    .all(...params) as Array<Omit<AgentChatSearchHit, 'snippet'>>;
+  const term = query.trim();
+  return rows.map((r) => ({ ...r, snippet: buildLikeSnippet(r.content, term) }));
 }
 
 export interface DialogueSearchCapabilityInput {

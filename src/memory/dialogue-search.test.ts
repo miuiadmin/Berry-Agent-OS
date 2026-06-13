@@ -222,8 +222,88 @@ describe('v20 历史行重索引（UPDATE-trigger，原 rebuild 失效的回归�
     // 现在 brain 应命中（UPDATE content=content 触发了拼接触发器，重索引历史行）
     expect(searchDialogueMessages(db, 'brain').length).toBe(1);
     expect(searchDialogueMessages(db, 'code').length).toBe(1);
-    // content 关键词仍正常（用 ≥3 字 CJK；2 字如「部署」trigram 不可召回，是已知限制）
+    // content 关键词仍正常（用 ≥3 字 CJK 走 FTS 路径，验证 v20 重索引）
     expect(searchDialogueMessages(db, '部署记录').length).toBe(1);
+    db.close();
+  });
+});
+
+/**
+ * 15.0 D3-2：2 字 CJK FTS 召回缺口的 LIKE 兜底回归测试。
+ *
+ * trigram tokenizer 至少需 3 字成窗，2 字 CJK（中文最常见词长，如"权限/部署/你好"）
+ * 既不满足 `length>=3` 也不满足 `length>3` → sanitizeFtsQuery 返回 '""' → 修复前搜索永远返回空。
+ * 修复：sanitizeFtsQuery 返回 '""' 时走 LIKE 兜底（escapeLikePattern 转义通配符 + buildLikeSnippet 高亮）。
+ * 本组钉死这条兜底路径，防止再次回归为"中文短词搜不到"。
+ */
+describe('D3-2: 2 字 CJK LIKE 兜底（trigram 召回缺口）', () => {
+  it('searchDialogueMessages 召回 2 字 CJK 短词（修复前返回空）', () => {
+    const db = makeFtsDb();
+    const ins = db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    );
+    ins.run('1', 'd1', 's1', 'c1', 0, 'brain', 'code', '权限管理需要分级审批', 1);
+    ins.run('2', 'd2', 's1', 'c2', 0, 'code', 'brain', '不相关的内容', 2);
+
+    const hits = searchDialogueMessages(db, '权限');
+    expect(hits.length).toBe(1);
+    expect(hits[0].content).toContain('权限');
+    // LIKE 路径用 buildLikeSnippet 产出 <mark> 高亮片段
+    expect(hits[0].snippet).toContain('<mark>权限</mark>');
+    db.close();
+  });
+
+  it('2 字 CJK 兜底尊重 sessionId 过滤', () => {
+    const db = makeFtsDb();
+    const ins = db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    );
+    ins.run('1', 'd1', 's1', 'c1', 0, 'a', 'b', '部署上线流程', 1);
+    ins.run('2', 'd2', 's2', 'c2', 0, 'a', 'b', '部署上线流程', 2);
+
+    const s1 = searchDialogueMessages(db, '部署', { sessionId: 's1' });
+    expect(s1.length).toBe(1);
+    expect(s1[0].sessionId).toBe('s1');
+    expect(searchDialogueMessages(db, '部署').length).toBe(2);
+    db.close();
+  });
+
+  it('searchAgentChatMessages 召回 2 字 CJK（与 dialogue 路径对称）', () => {
+    const db = makeFtsDb();
+    db.prepare(
+      `INSERT INTO agent_chat_messages (id, session_id, task_id, from_agent, to_agent, direction, content, created_at) VALUES (?,?,?,?,?,?,?,?)`,
+    ).run('1', 's1', 't1', 'conversation', 'code', 'request', '正在处理审批流程', 1);
+
+    const hits = searchAgentChatMessages(db, '审批');
+    expect(hits.length).toBe(1);
+    expect(hits[0].content).toContain('审批');
+    expect(hits[0].snippet).toContain('<mark>审批</mark>');
+    db.close();
+  });
+
+  it('LIKE 模式转义：查询含 % _ 不被当通配符', () => {
+    const db = makeFtsDb();
+    db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run('1', 'd1', 's1', 'c1', 0, 'a', 'b', '50%完成 2_3 计划', 1);
+
+    // 查 '50%' 应只命中字面含 "50%" 的行，而非任何含 "50" 后接任意字符的行
+    const hits = searchDialogueMessages(db, '50%');
+    expect(hits.length).toBe(1);
+    expect(hits[0].content).toBe('50%完成 2_3 计划');
+    db.close();
+  });
+
+  it('≥3 字 CJK 仍走 FTS 路径不受影响（回归）', () => {
+    const db = makeFtsDb();
+    db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run('1', 'd1', 's1', 'c1', 0, 'a', 'b', '项目管理的最佳实践', 1);
+
+    // 4 字 → sanitizeFtsQuery 产出有效 token → FTS 路径（snippet 由 FTS snippet() 生成）
+    const hits = searchDialogueMessages(db, '项目管理');
+    expect(hits.length).toBe(1);
+    expect(hits[0].snippet).toContain('<mark>');
     db.close();
   });
 });
