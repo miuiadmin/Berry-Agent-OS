@@ -9,6 +9,7 @@ import type { UserMessagePayload, DraftResponsePayload, FinalResponsePayload } f
 import type { NormalizedExternalEvent } from './daemon-events.js';
 import type { RuntimeInfo } from './daemon-protocol.js';
 import type { SocketProgressEvent, SocketInterruptedEvent, SocketResultEvent } from './socket-protocol.js';
+import type { StreamBlockPayload } from './message-blocks.js';
 
 // === Socket API Messages (external client → kernel) ===
 
@@ -264,6 +265,13 @@ export type EventMap = {
   'stream.tool_call': { taskId: string; sessionId: string; toolName: string; input: unknown; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
   'stream.tool_result': { taskId: string; sessionId: string; toolName: string; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
   'stream.uncertainty': { taskId: string; sessionId: string; reason: string; correlationId?: string };
+  /**
+   * 对话内联统一事件族（见 设计文档/22-对话内联统一.md）。
+   * 收敛 stream.text_delta / stream.tool_call / stream.tool_result / stream.reasoning_delta / agent.dialogue
+   * 到单一事件：文本/工具/MCP/委派都是 Block，前端按 blockId 幂等推进、按 blockType 内联渲染。
+   * 旧事件保留兼容期（仍可 emit），新链路以 stream.block 为准。
+   */
+  'stream.block': StreamBlockPayload;
   'dialogue.status': { dialogueId: string; sessionId: string; status: 'started' | 'round_complete' | 'ended'; from: string; to: string; round: number };
   /** 13.0 灵魂版：Agent 间对话每条消息推送至前端对话面板 */
   'agent.dialogue': { dialogueId: string; sessionId?: string; taskId?: string; from: string; to: string; content: string; round: number; phase: 'send' | 'reply' | 'end'; timestamp: number };

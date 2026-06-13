@@ -14,6 +14,7 @@ export * from './skills.js';
 export * from './routing.js';
 export * from './delegation.js';
 export * from './messages.js';
+export * from './message-blocks.js';
 export * from './plugins-v2.js';
 export * from './plugins-v2.schema.js';
 export * from './org-tree.js';
