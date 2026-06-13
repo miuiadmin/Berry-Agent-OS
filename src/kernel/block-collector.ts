@@ -20,7 +20,7 @@
 
 import { getEventBus } from './event-bus.js';
 import { genId } from '../utils/id.js';
-import type { StreamBlockPayload, ToolBlock, DelegationBlock, DelegationBlockState, ReviewBlock, Block } from '../contracts/message-blocks.js';
+import type { StreamBlockPayload, ToolBlock, TextBlock, ThinkingBlock, DelegationBlock, DelegationBlockState, ReviewBlock, Block } from '../contracts/message-blocks.js';
 /** stream.block emit 函数类型（默认走全局 EventBus；测试可注入捕获函数） */
 export type BlockEmitter = (payload: StreamBlockPayload) => void;
 
@@ -52,29 +52,36 @@ export class BlockCollector {
   /** 每个工具名的出现序号（合成稳定 tool blockId；task.telemetry 无 callId） */
   private toolSeq = new Map<string, number>();
   /**
-   * 本轮 tool block（落库用）。text/thinking 不在此保留——它们由调用方在 flush 时
-   * 从 pending.draftResponse / pending.reasoning（单一事实源）注入，避免双份内存。
+   * 有序时间线（chronological）：按 block 到达顺序累积，buildBlocks 直接返回它（过滤空段/running）。
+   * 取代旧的 5-bucket 拼接（delegation→thinking→tools→text→review）——现在委派/思考在前、
+   * 文本段与工具按到达序穿插（思考→文字→工具→文字→…）、审核在末。对齐 Claude Code 时间线模型：
+   * 整条响应是一个穿插序列，不是按类型堆。timeline API 按 seq 返回同序 → 刷新后穿插保留。
    */
-  private toolBlocks: ToolBlock[] = [];
+  private timeline: Block[] = [];
+  /** 当前 thinking block 引用（在 timeline 中）。onReasoningDelta 累积 text；buildBlocks 算 durationMs */
+  private thinkingBlock: ThinkingBlock | null = null;
+  /** 当前文本段引用（在 timeline 中）。工具到达时关闭（=null），下段文字开新段 → 文本按工具边界切段穿插 */
+  private currentTextBlock: TextBlock | null = null;
+  /** 当前文本段序号（live emit blockId = `${messageId}#text#${n}`，每段独立 → 前端 append 即穿插）；0=无当前段 */
+  private currentTextSegNum = 0;
+  private textSegCounter = 0;
+  /** 思考计时（毫秒）：首个 reasoning delta 开始 / 首个文字或工具结束。buildBlocks 算 durationMs */
+  private reasoningStartedAt: number | undefined;
+  private reasoningEndedAt: number | undefined;
   /**
-   * 本轮委派 block（落库用）。一轮至多一个委派（runtime 路径整轮即一次委派），故单值而非数组。
-   * 由 onDelegationStart 创建（running）、onDelegationComplete 推进终态；buildBlocks 时置于最前
-   * （委派卡作为「本轮委派给 X agent」的表头，先于其内部思考/工具/正文）。
+   * 本轮委派 block 引用（在 timeline 中，unshift 到最前作表头）。onDelegationComplete 原地推进终态。
    */
   private delegationBlock: DelegationBlock | undefined;
-  /**
-   * 本轮 Brain 审核裁决 block（落库用）。一轮至多一个审核终态，故单值。
-   * 由 onReview 创建（出生即终态，无状态机——审核裁决不像工具/委派有中间态）；
-   * buildBlocks 时置于末尾（审核是对整轮的裁决，排在正文之后）。仅 modify/reject 落库
-   * （approve 不显示徽章，且多为自动批准，落库会误导「发生过审核」）。
-   */
+  /** 本轮 Brain 审核裁决 block 引用（在 timeline 末尾，turn 终态时 onReview push）。仅 modify/reject 落库。 */
   private reviewBlock: ReviewBlock | undefined;
+  /** callId → {block 引用, startedAt}：onToolComplete 原地更新 timeline 中的 running tool（按引用 mutate） */
+  private pendingTools = new Map<string, { block: ToolBlock; startedAt: number }>();
 
   /**
    * 流式 text/thinking delta 合并缓冲（性能优化：逐 token emit → 30ms 窗口合并）。
    * onTextDelta/onReasoningDelta 累积到此，scheduleFlush 定时 flushPendingDeltas emit 合并 delta；
-   * disposeBlockCollector 强制 flush（turn 终态不丢尾部 delta）。
-   * 与 buildBlocks（从外部 pending.draftResponse 注入落库）是独立两条链路——互不污染。
+   * disposeBlockCollector / closeTextSegment 强制 flush（turn 终态 / 工具切段时不丢尾部 delta）。
+   * buffer 只管 live emit 合批；timeline 里的 text/thinking block 持有全文（落库用），两条链路独立。
    */
   private textBuffer = '';
   private reasoningBuffer = '';
@@ -91,18 +98,56 @@ export class BlockCollector {
     this.messageId = genId('msg');
   }
 
-  /** text 增量：累积到 buffer，30ms 窗口合并 emit（减少 WS 事件数；dispose 强制 flush 尾部） */
+  /**
+   * text 增量：累积到当前文本段（无则开新段，push 进 timeline），并进 30ms 合并缓冲 emit。
+   * 首段文字标记思考结束（reasoningEndedAt）。工具到达后 currentTextBlock 已被 closeTextSegment 置空，
+   * 故工具后的首段文字会开新段 → 文本按工具边界切段，与工具穿插。
+   */
   onTextDelta(text: string): void {
     if (!text) return;
     this.textBuffer += text;
+    if (!this.currentTextBlock) {
+      this.textSegCounter++;
+      this.currentTextSegNum = this.textSegCounter;
+      this.currentTextBlock = { type: 'text', text: '' };
+      this.timeline.push(this.currentTextBlock);
+    }
+    this.currentTextBlock.text += text;
+    this.markReasoningEnd();
     this.scheduleFlush();
   }
 
-  /** reasoning 增量：累积到 buffer，30ms 窗口合并 emit（同 onTextDelta） */
+  /**
+   * reasoning 增量：累积到 thinking block（首次创建并记 startedAt，push 进 timeline），并进缓冲 emit。
+   * reasoning 通常在文字/工具前到达 → thinking block 落在 timeline 前部（委派之后）。
+   */
   onReasoningDelta(text: string): void {
     if (!text) return;
     this.reasoningBuffer += text;
+    if (!this.thinkingBlock) {
+      if (this.reasoningStartedAt === undefined) this.reasoningStartedAt = Date.now();
+      this.thinkingBlock = { type: 'thinking', text: '' };
+      this.timeline.push(this.thinkingBlock);
+    }
+    this.thinkingBlock.text += text;
     this.scheduleFlush();
+  }
+
+  /** 标记思考结束：首个文字或工具到达时记一次 reasoningEndedAt（用于算 durationMs） */
+  private markReasoningEnd(): void {
+    if (this.thinkingBlock && this.reasoningEndedAt === undefined) {
+      this.reasoningEndedAt = Date.now();
+    }
+  }
+
+  /**
+   * 关闭当前文本段：先 flushPendingDeltas（把工具前的缓冲文本作为当前段 emit），
+   * 再清当前段引用（下段文字开新段）。工具/delegation 到达前调用，确保文本按工具边界切段。
+   */
+  private closeTextSegment(): void {
+    this.flushPendingDeltas();
+    this.currentTextBlock = null;
+    this.currentTextSegNum = 0;
   }
 
   /**
@@ -119,9 +164,12 @@ export class BlockCollector {
 
   /**
    * 冲刷累积的 text/reasoning delta：双 buffer 快照后立即清空（防回调期间新 delta 丢失），
-   * text/reasoning 各 emit 一个合并 delta（blockId 稳定 `${messageId}#text`/`#thinking`，
-   * 前端按 blockId upsert 追加，对单 token vs 合并段无感）。开头 clearTimeout 自清理——
-   * disposeBlockCollector 可直接调用，无需额外清 timer。
+   * text/reasoning 各 emit 一个合并 delta。开头 clearTimeout 自清理——disposeBlockCollector /
+   * closeTextSegment 可直接调用，无需额外清 timer。
+   *
+   * text blockId 段感知：`${messageId}#text#${currentTextSegNum}`——每段独立 blockId，
+   * 前端 applyBlockToBlocks 按首次到达 append → 文本段与工具穿插（不再单一 #text 全文一块）。
+   * thinking blockId 固定 `${messageId}#thinking`（一轮一个思考块）。
    */
   flushPendingDeltas(): void {
     if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
@@ -132,7 +180,7 @@ export class BlockCollector {
     if (!text && !reasoning) return;
     const ts = Date.now();
     if (text) {
-      this.emit({ sessionId: this.sessionId, messageId: this.messageId, blockId: `${this.messageId}#text`, blockType: 'text', delta: text, ts, taskId: this.taskId, correlationId: this.correlationId });
+      this.emit({ sessionId: this.sessionId, messageId: this.messageId, blockId: `${this.messageId}#text#${this.currentTextSegNum}`, blockType: 'text', delta: text, ts, taskId: this.taskId, correlationId: this.correlationId });
     }
     if (reasoning) {
       this.emit({ sessionId: this.sessionId, messageId: this.messageId, blockId: `${this.messageId}#thinking`, blockType: 'thinking', delta: reasoning, ts, taskId: this.taskId, correlationId: this.correlationId });
@@ -150,6 +198,9 @@ export class BlockCollector {
     isError: boolean;
     durationMs?: number;
   }): void {
+    // 工具到达：关闭当前文本段（文本按工具边界切段穿插）+ 标记思考结束
+    this.closeTextSegment();
+    this.markReasoningEnd();
     const seq = (this.toolSeq.get(opts.toolName) ?? 0) + 1;
     this.toolSeq.set(opts.toolName, seq);
     const blockId = `${this.messageId}#tool#${opts.toolName}#${seq}`;
@@ -178,27 +229,20 @@ export class BlockCollector {
       taskId: this.taskId,
       correlationId: this.correlationId,
     });
-    // 保留供 flush 落库（tool 的 input/output 不在 draftResponse，必须由 collector 持有）
-    this.toolBlocks.push(block);
+    // push 进 timeline（chronological 位——在已关闭的文本段之后）；buildBlocks 过滤终态时保留
+    this.timeline.push(block);
   }
-
-  /**
-   * 按 callId 配对的待完成工具（daemon / 外部 driver 路径：call 与 result 分离到达）。
-   * key=callId，value=创建事件携带的 toolName/input/起始时间——result 事件无 toolName，
-   * 必须回查此表才能组装完整终态 block。complete 时删除条目（配对完成即释放）。
-   */
-  private pendingTools = new Map<string, { toolName: string; blockId: string; input: unknown; startedAt: number }>();
 
   /**
    * 工具启动（daemon / 外部 driver 路径：tool_call / tool_running 事件）。
    *
    * 与 {@link onToolCall}（task.telemetry 一次性 call+result，块出生即终态）互补：本方法处理
    * callId 配对的分离事件流——daemon/外部 agent 先发 call（toolName+input）后发 result（output+success），
-   * 两事件按 callId 配对。emit 一个 running 态 tool block（前端可见"运行中"），按 callId 暂存，
-   * 等 {@link onToolComplete} 回填结果并推进状态机。
+   * 两事件按 callId 配对。emit 一个 running 态 tool block（前端可见"运行中"），按 callId 暂存 block 引用，
+   * 等 {@link onToolComplete} 原地回填结果推进状态机。
    *
-   * blockId = `${messageId}#tool#${callId}`：跨 start/complete 两事件幂等定位同一 block，
-   * 前端 applyBlockToBlocks 按 blockId upsert（running→completed 原地更新，不重复建块）。
+   * running tool push 进 timeline（chronological 位——在已关闭文本段之后）；buildBlocks 过滤掉 running
+   * （只持久化终态），故 daemon 崩溃不留永驻 running 幽灵 block，同时位置正确（工具在它出现的时刻切段文本）。
    *
    * @param opts.callId   工具调用 id（跨事件配对的幂等键）
    * @param opts.toolName 工具名（MCP 形如 mcp__server__tool）
@@ -206,11 +250,11 @@ export class BlockCollector {
    * @param opts.ts       事件时间戳（与 complete 配对算 durationMs；缺省取当前）
    */
   onToolStart(opts: { callId: string; toolName: string; input?: unknown; ts?: number }): void {
+    // 工具到达：关闭当前文本段（切段穿插）+ 标记思考结束
+    this.closeTextSegment();
+    this.markReasoningEnd();
     const blockId = `${this.messageId}#tool#${opts.callId}`;
     const startedAt = opts.ts ?? Date.now();
-    // 暂存：complete 事件无 toolName/input，必须从此回查才能组装完整终态 block
-    this.pendingTools.set(opts.callId, { toolName: opts.toolName, blockId, input: opts.input ?? {}, startedAt });
-
     const block: ToolBlock = {
       type: 'tool',
       id: blockId,
@@ -218,6 +262,9 @@ export class BlockCollector {
       input: opts.input ?? {},
       state: 'running',
     };
+    // 暂存 block 引用：onToolComplete 按引用原地更新为终态（timeline 中同位置）
+    this.pendingTools.set(opts.callId, { block, startedAt });
+    this.timeline.push(block);
     this.emit({
       sessionId: this.sessionId,
       messageId: this.messageId,
@@ -229,19 +276,18 @@ export class BlockCollector {
       taskId: this.taskId,
       correlationId: this.correlationId,
     });
-    // 注意：running 态不进 toolBlocks——只持久化终态（与 onToolCall 一致），
-    // 避免 daemon 崩溃时留下永驻 running 的幽灵 block。
   }
 
   /**
    * 工具完成（daemon / 外部 driver 路径：tool_result / tool_completed / tool_failed 事件）。
    *
-   * 按 callId 回查 {@link onToolStart} 暂存的 toolName/input（result 事件不带这些字段），
-   * 组装完整终态 block 并推进状态机（completed/failed），同时按 start→complete 时间差算 durationMs。
+   * 按 callId 回查 {@link onToolStart} 暂存的 block 引用 + startedAt，原地更新该 block 为终态
+   * （completed/failed，回填 output/error，按 start→complete 时间差算 durationMs）。timeline 中该工具
+   * 保持在原位（chronological 不变），buildBlocks 过滤后保留此终态块。
    *
-   * 容错（fail-open）：若 complete 先于 start 到达（事件乱序 / start 丢失），降级为
-   * toolName='unknown'、input={} 的一次性终态块——保住"工具卡片可见"这一核心目标，
-   * 不因配对缺失而整块丢失（durationMs 此时也无法计算，留 undefined，前端 formatDurationMs 兜底"—"）。
+   * 容错（fail-open）：若 complete 先于 start 到达（事件乱序 / start 丢失），无 pending 引用——
+   * 降级为 toolName='unknown' 的一次性终态块 push 到 timeline 当前位（closeTextSegment 之后），
+   * 保住"工具卡片可见"，durationMs 留 undefined（前端 formatDurationMs 兜底"—"）。
    *
    * @param opts.callId  与 onToolStart 同一 callId（配对键）
    * @param opts.output  工具结果文本（结构化 JSON 或原始字符串）
@@ -250,41 +296,43 @@ export class BlockCollector {
    */
   onToolComplete(opts: { callId: string; output?: string; success: boolean; ts?: number }): void {
     const pending = this.pendingTools.get(opts.callId);
-    const toolName = pending?.toolName ?? 'unknown';
-    const blockId = pending?.blockId ?? `${this.messageId}#tool#${opts.callId}`;
-    const input = pending?.input ?? {};
-    if (pending) this.pendingTools.delete(opts.callId);
-
     const isError = !opts.success;
     const endTs = opts.ts ?? Date.now();
-    // 有配对 start 才算耗时（乱序到达的孤儿 complete 无法计时）
-    const durationMs = pending ? Math.max(0, endTs - pending.startedAt) : undefined;
+    const output = coercePayload(opts.output);
 
+    if (pending) {
+      // 原地更新 timeline 中的 running tool → 终态（按引用 mutate，位置不变）
+      const b = pending.block;
+      const durationMs = Math.max(0, endTs - pending.startedAt);
+      b.state = isError ? 'failed' : 'completed';
+      if (output !== undefined) b.output = output;
+      if (isError && opts.output) b.error = opts.output;
+      b.durationMs = durationMs;
+      this.pendingTools.delete(opts.callId);
+      this.emit({
+        sessionId: this.sessionId, messageId: this.messageId, blockId: b.id, blockType: 'tool',
+        block: b, state: b.state, ts: endTs, taskId: this.taskId, correlationId: this.correlationId,
+      });
+      return;
+    }
+
+    // 孤儿 complete（无 start）：fail-open 降级为 unknown 终态块，push 到当前位
+    this.closeTextSegment();
+    const blockId = `${this.messageId}#tool#${opts.callId}`;
     const block: ToolBlock = {
       type: 'tool',
       id: blockId,
-      name: toolName,
-      input,
+      name: 'unknown',
+      input: {},
       state: isError ? 'failed' : 'completed',
     };
-    const output = coercePayload(opts.output);
     if (output !== undefined) block.output = output;
     if (isError && opts.output) block.error = opts.output;
-    if (durationMs != null) block.durationMs = durationMs;
-
+    this.timeline.push(block);
     this.emit({
-      sessionId: this.sessionId,
-      messageId: this.messageId,
-      blockId,
-      blockType: 'tool',
-      block,
-      state: block.state,
-      ts: endTs,
-      taskId: this.taskId,
-      correlationId: this.correlationId,
+      sessionId: this.sessionId, messageId: this.messageId, blockId, blockType: 'tool',
+      block, state: block.state, ts: endTs, taskId: this.taskId, correlationId: this.correlationId,
     });
-    // 保留终态 block 供 buildBlocks 落库（与 onToolCall 一致：只持久化终态）
-    this.toolBlocks.push(block);
   }
 
   /**
@@ -310,6 +358,8 @@ export class BlockCollector {
     };
     if (opts.childSessionId) block.childSessionId = opts.childSessionId;
     this.delegationBlock = block;
+    // delegation = 表头，unshift 到 timeline 最前（委派在 event loop 前创建，天然首块）
+    this.timeline.unshift(block);
     this.emit({
       sessionId: this.sessionId,
       messageId: this.messageId,
@@ -373,6 +423,8 @@ export class BlockCollector {
     if (opts.reason) block.reason = opts.reason;
     if (opts.originalDraft) block.originalDraft = opts.originalDraft;
     this.reviewBlock = block;
+    // review = 末尾（turn 终态 onReview 时 push，排在正文之后）
+    this.timeline.push(block);
     this.emit({
       sessionId: this.sessionId,
       messageId: this.messageId,
@@ -386,30 +438,66 @@ export class BlockCollector {
   }
 
   /**
-   * 构建本轮完整 Block[]（顺序：delegation → thinking → tools → text → review），供调用方落库到 message_blocks。
-   * delegation 置于最前（委派表头）；review 置于末尾（对整轮的裁决，排在正文之后）。
-   * text/thinking 从外部事实源（pending.draftResponse / reasoning）注入，避免 collector 重复持有全文。
-   * 无任何内容时返回空数组（调用方据此跳过建空消息）。
+   * 构建本轮完整 Block[]——返回 timeline（chronological 穿插序），供调用方落库到 message_blocks。
+   *
+   * 对齐 Claude Code 时间线模型：delegation（表头）→ thinking（带 durationMs）→ 文字段↔工具穿插 → review（末尾），
+   * 全部按到达序。timeline API 按 seq 返回同序 → 刷新后穿插保留。
+   *
+   * 过滤：空文本段（工具间无文字）+ running（非终态）工具（防崩溃幽灵 block）。
+   * 兜底：timeline 无文本段但 opts.draftResponse 有内容（非流式直出 finalText，未走 onTextDelta）→ 末尾补 text block；
+   * 无 thinking 但 opts.reasoning 有内容 → delegation 后补 thinking block。
+   *
+   * @param opts.reasoning       非流式 reasoning 兜底（timeline 已有 thinking 时忽略）
+   * @param opts.draftResponse   非流式正文兜底（timeline 已有文本段时忽略）
    */
   buildBlocks(opts: { reasoning?: string; draftResponse?: string }): Block[] {
-    const blocks: Block[] = [];
-    if (this.delegationBlock) blocks.push(this.delegationBlock);
-    if (opts.reasoning) blocks.push({ type: 'thinking', text: opts.reasoning });
-    blocks.push(...this.toolBlocks);
-    if (opts.draftResponse) blocks.push({ type: 'text', text: opts.draftResponse });
-    if (this.reviewBlock) blocks.push(this.reviewBlock);
-    return blocks;
+    // 冲刷尾部 delta（turn 终态不丢尾部文字/思考）
+    this.flushPendingDeltas();
+    // 思考耗时：首个 reasoning delta → 首个文字/工具（或 buildBlocks 时刻，若思考持续到最后）
+    if (this.thinkingBlock && this.reasoningStartedAt !== undefined) {
+      const end = this.reasoningEndedAt ?? Date.now();
+      this.thinkingBlock.durationMs = Math.max(0, end - this.reasoningStartedAt);
+    }
+    // 过滤空文本段 + running 工具（只持久化终态）
+    const result = this.timeline.filter((b) => {
+      if (b.type === 'text') return b.text.length > 0;
+      if (b.type === 'tool') return b.state === 'completed' || b.state === 'failed';
+      return true; // thinking / delegation / review
+    });
+    // 文本兜底/补全：draftResponse = 完整 persistContent（含 fail 错误标签等 turn 终态追加）
+    if (opts.draftResponse) {
+      const textSegs = result.filter((b): b is TextBlock => b.type === 'text');
+      const joined = textSegs.map((s) => s.text).join('');
+      if (textSegs.length === 0) {
+        // 无流式文本段（非流式直出 finalText）→ 插 draftResponse 为 text block（review 前）
+        const textBlock: Block = { type: 'text', text: opts.draftResponse };
+        const reviewIdx = result.findIndex((b) => b.type === 'review');
+        if (reviewIdx >= 0) result.splice(reviewIdx, 0, textBlock);
+        else result.push(textBlock);
+      } else if (opts.draftResponse.length > joined.length && opts.draftResponse.startsWith(joined)) {
+        // draftResponse = 流式文本 + 尾部追加（fail 错误标签）→ 追加到末段，保持穿插结构不破坏
+        textSegs[textSegs.length - 1].text += opts.draftResponse.slice(joined.length);
+      }
+      // else: draftResponse == joined（正常流式）→ 不动
+    }
+    // 兜底：非流式 reasoning（无 onReasoningDelta 但 pending.reasoning 有内容）→ delegation 后补 thinking
+    if (!result.some((b) => b.type === 'thinking') && opts.reasoning) {
+      const insertAt = result.some((b) => b.type === 'delegation') ? 1 : 0;
+      result.splice(insertAt, 0, { type: 'thinking', text: opts.reasoning });
+    }
+    return result;
   }
 
   /**
    * 取本轮已收集的终态 tool blocks（供审核链路 / 下游需要工具轨迹处取用）。
    *
-   * 取代旧 PendingRequest.toolCalls（简化的 {name,input,result}[] 双真相源）——
-   * 消灭持久化双轨制后，工具调用的唯一真相在 collector（完整 ToolBlock：state/output/durationMs/error）。
-   * 注意：仅返回已终态（completed/failed）的工具；running 态不进 toolBlocks（见 onToolStart 注释）。
+   * 从 timeline 过滤终态（completed/failed）工具——running 态不返回（与 onToolStart「running 不持久化」一致）。
+   * 取代旧 PendingRequest.toolCalls 双真相源；工具调用唯一真相在 collector（完整 ToolBlock）。
    */
   getToolBlocks(): ToolBlock[] {
-    return this.toolBlocks;
+    return this.timeline.filter(
+      (b): b is ToolBlock => b.type === 'tool' && (b.state === 'completed' || b.state === 'failed'),
+    );
   }
 }
 

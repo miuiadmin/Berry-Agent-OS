@@ -36,8 +36,8 @@ describe('BlockCollector（对话内联事件归一）', () => {
     expect(emitted).toHaveLength(1);
     expect(emitted[0].blockType).toBe('text');
     expect(emitted[0].delta).toBe('你好'); // 合并两个 delta
-    // 同 collector 的 text blockId 稳定（前端据此聚到同一块）
-    expect(emitted[0].blockId).toBe(`${c.messageId}#text`);
+    // 同 collector 的 text blockId 稳定（前端据此聚到同一块）；段感知：首段 = `${messageId}#text#1`
+    expect(emitted[0].blockId).toBe(`${c.messageId}#text#1`);
     expect(emitted[0].messageId).toBe(c.messageId);
     expect(emitted[0].sessionId).toBe('s1');
     expect(emitted[0].taskId).toBe('t1');
@@ -331,6 +331,66 @@ describe('BlockCollector 审核块（onReview）', () => {
     const c = new BlockCollector('s1', 't1', undefined, emit);
     const blocks = c.buildBlocks({ draftResponse: 'hi' });
     expect(blocks.filter((b) => b.type === 'review')).toHaveLength(0);
+  });
+});
+
+describe('BlockCollector 时间线穿插（chronological：文本按工具边界切段，对齐 Claude Code）', () => {
+  let emitted: StreamBlockPayload[];
+  const emit: BlockEmitter = (p) => emitted.push(p);
+
+  beforeEach(() => {
+    emitted = [];
+    _clearBlockCollectorsForTest();
+  });
+
+  it('文字→工具→文字：buildBlocks = [text1, tool, text2]（穿插，非 [全文, tool]）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onTextDelta('第一段');
+    c.flushPendingDeltas();
+    c.onToolCall({ toolName: 'shell', input: '{}', result: 'r', isError: false });
+    c.onTextDelta('第二段');
+    c.flushPendingDeltas();
+    const blocks = c.buildBlocks({});
+    // 工具在两段文字之间穿插（不再全文一块堆在工具前）
+    expect(blocks.map((b) => b.type)).toEqual(['text', 'tool', 'text']);
+    expect(blocks[0].type === 'text' && blocks[0].text).toBe('第一段');
+    expect(blocks[2].type === 'text' && blocks[2].text).toBe('第二段');
+  });
+
+  it('live emit 文本段 blockId 递增：#text#1 → 工具 → #text#2（前端 append 即穿插）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onTextDelta('A');
+    c.flushPendingDeltas();
+    c.onToolCall({ toolName: 't', input: '{}', result: 'r', isError: false });
+    c.onTextDelta('B');
+    c.flushPendingDeltas();
+    const textEmits = emitted.filter((e) => e.blockType === 'text');
+    expect(textEmits[0].blockId).toBe(`${c.messageId}#text#1`);
+    expect(textEmits[1].blockId).toBe(`${c.messageId}#text#2`);
+  });
+
+  it('思考→文字→工具→文字：buildBlocks = [thinking, text, tool, text]，thinking 带 durationMs', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onReasoningDelta('思考');
+    c.flushPendingDeltas();
+    c.onTextDelta('文字1');
+    c.flushPendingDeltas();
+    c.onToolCall({ toolName: 'x', input: '{}', result: 'r', isError: false });
+    c.onTextDelta('文字2');
+    c.flushPendingDeltas();
+    const blocks = c.buildBlocks({});
+    expect(blocks.map((b) => b.type)).toEqual(['thinking', 'text', 'tool', 'text']);
+    // thinking 在最前，带耗时（首 reasoning delta → 首文字）
+    expect(blocks[0].type === 'thinking' && typeof blocks[0].durationMs === 'number').toBe(true);
+  });
+
+  it('空文本段（工具间无文字）被过滤', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolCall({ toolName: 'a', input: '{}', result: 'r1', isError: false });
+    c.onToolCall({ toolName: 'b', input: '{}', result: 'r2', isError: false });
+    const blocks = c.buildBlocks({});
+    // 两个工具间无文字 → 不产生空 text 段
+    expect(blocks.map((b) => b.type)).toEqual(['tool', 'tool']);
   });
 });
 
