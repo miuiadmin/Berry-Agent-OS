@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initDb, closeDb, getDb } from './db.js';
+import { ALL_MIGRATIONS } from './migrations/index.js';
 
 /**
  * 15.0 回归测试：完整 initDb 启动路径（CORE_SCHEMA → CORE_INDEX → migrations → FTS）。
@@ -51,12 +52,13 @@ describe('initDb 完整启动路径 (15.0 回归)', () => {
     expect(hit[0].content).toContain('项目管理');
   });
 
-  it('schema_migrations 记录到 v28（全部迁移应用）', () => {
+  it('schema_migrations 记录全部迁移（动态对齐 ALL_MIGRATIONS 最大版本）', () => {
     dir = mkdtempSync(join(tmpdir(), 'berry-initdb-'));
     initDb(join(dir, 'test.db'));
     const db = getDb();
     const max = db.prepare(`SELECT MAX(version) as v FROM schema_migrations`).get() as { v: number };
-    expect(max.v).toBe(28);
+    // 动态对齐：新增迁移后无需手改此断言（避免反复 25→26→27→… 的补丁式维护）
+    expect(max.v).toBe(Math.max(...ALL_MIGRATIONS.map((m) => m.version)));
   });
 
   /**
@@ -99,6 +101,47 @@ describe('initDb 完整启动路径 (15.0 回归)', () => {
     closeDb();
     initDb(dbPath);
     expect((getDb().prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts WHERE block_id = ?`).get('blk-gap') as { c: number }).c).toBe(1);
+    closeDb();
+  });
+
+  /**
+   * 消灭双轨制：conversations→messages 启动期幂等同步（取代反复追加的回填迁移 v25/v26/v28 反模式）。
+   * 场景：服务跑老代码（写 conversations）制造孤子，一次性迁移只回填它跑那一刻；本同步每次启动收敛，
+   * 全同步后零写入。user+assistant 都回填，assistant 的 reasoning→thinking block。
+   */
+  it('启动期 conversations→messages 幂等同步：孤行(user+assistant)下次启动回填，收敛后零写入', () => {
+    dir = mkdtempSync(join(tmpdir(), 'berry-sync-conv-'));
+    const dbPath = join(dir, 'test.db');
+    initDb(dbPath);
+    const db = getDb();
+    // 手写 conversations 孤行（不在 messages）——模拟老代码制造的孤子
+    const ins = db.prepare(
+      `INSERT INTO conversations (id, session_id, role, content, reasoning, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    ins.run('u1', 's1', 'user', '用户提问内容', null, 1000);
+    ins.run('a1', 's1', 'assistant', '助手回复正文', '推理过程记录', 2000);
+    // 此刻 messages 无这些（孤子）
+    expect((db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE id IN ('u1','a1')`).get() as { c: number }).c).toBe(0);
+
+    closeDb();
+    initDb(dbPath); // 再次启动 → syncConversationsToMessages 回填
+    const db2 = getDb();
+    // user + assistant 都进 messages
+    expect((db2.prepare(`SELECT COUNT(*) AS c FROM messages WHERE id IN ('u1','a1')`).get() as { c: number }).c).toBe(2);
+    // a1（带 reasoning）：thinking + text；u1：仅 text
+    const a1 = db2.prepare(`SELECT block_type FROM message_blocks WHERE message_id = 'a1' ORDER BY seq`).all() as Array<{ block_type: string }>;
+    expect(a1.map((b) => b.block_type)).toEqual(['thinking', 'text']);
+    const u1 = db2.prepare(`SELECT block_type FROM message_blocks WHERE message_id = 'u1'`).all() as Array<{ block_type: string }>;
+    expect(u1.map((b) => b.block_type)).toEqual(['text']);
+    // 回填的 text block 同次启动进 FTS（sync 在 populateMessageBlocksFts 前）
+    const hit = db2.prepare(`SELECT content FROM message_blocks_fts WHERE message_blocks_fts MATCH ?`).all('"用户提问内容"') as Array<{ content: string }>;
+    expect(hit.some((r) => r.content.includes('用户提问内容'))).toBe(true);
+
+    // 幂等：再启动一次，messages/message_blocks 不重复（收敛后零写入）
+    closeDb();
+    initDb(dbPath);
+    expect((getDb().prepare(`SELECT COUNT(*) AS c FROM messages`).get() as { c: number }).c).toBe(2);
+    expect((getDb().prepare(`SELECT COUNT(*) AS c FROM message_blocks`).get() as { c: number }).c).toBe(3); // a1(2) + u1(1)
     closeDb();
   });
 });

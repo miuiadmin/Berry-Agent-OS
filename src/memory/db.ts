@@ -34,6 +34,11 @@ export function initDb(path?: string): Database.Database {
   // 对话内联模型 FTS（设计文档/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
   // 不进 ensureFtsConsistency——本表与 message_blocks 非 1:1（仅 text/thinking 子集），行数对比无意义。
   db.exec(MESSAGE_BLOCKS_FTS_SQL);
+  // 启动期 conversations→messages 幂等同步：把冷归档 conversations 里不在 messages 的孤行补进新表。
+  // 取代反复追加的回填迁移（v25/v26/v28 打补丁的反模式）——「迁移时刻」与「服务升级时刻」不同步，
+  // 一次性迁移只回填它跑那一刻的行；本函数每次启动都收敛，全同步后 LEFT JOIN 返回空集、零写入。
+  // 须在 populateMessageBlocksFts 前：先回填 block，同一次启动就能进 FTS。
+  syncConversationsToMessages(db);
   // 启动期 FTS 补齐：把 message_blocks 里尚不在 message_blocks_fts 的 text/thinking block 索引进去。
   // 增量幂等——migration（v25/v26 回填）直写 message_blocks 绕过 repo 的 appendBlock，故需此 catch-up；
   // 全新库等价全量；稳态无缺失则零写入。修复 v25→v26 升级窗口回填行补索引（否则历史 user 行搜不到）。
@@ -90,6 +95,96 @@ function populateMessageBlocksFts(db: Database.Database): void {
     `);
   } catch {
     // message_blocks_fts / message_blocks 不存在（理论上不该发生）—— 静默跳过
+  }
+}
+
+/**
+ * 对话内联：启动期幂等同步 conversations → messages（设计文档/22）。
+ *
+ * 为什么需要：消灭双轨制后 messages+message_blocks 是唯一规范存储，conversations 退役为冷归档。
+ * 但「迁移时刻」与「服务升级时刻」不同步——v25/v26 一次性迁移只回填它跑那一刻的行，之后若服务
+ * 仍跑老代码（写 conversations）会持续制造孤子，而一次性迁移不再跑。本函数取代反复追加的回填迁移
+ * （v25→v26→v28 打补丁的反模式）：每次启动幂等把所有 conversations ∉ messages 的孤行补进新表，
+ * 收敛到稳定态（全同步）后 LEFT JOIN 返回空集、零写入。与 populateMessageBlocksFts 同构（启动自愈）。
+ *
+ * user + assistant 都回填（assistant 的 reasoning→thinking block + content→text block，与 v25 同构）。
+ * 幂等：LEFT JOIN m.id IS NULL + INSERT OR IGNORE。列存在性按 table_info 容错（旧库可能缺列）。
+ * redact：conversations 的 content/reasoning 写入时已清洗（saveUserMessage/saveMessage 入口 redact +
+ * v17 历史扫描），此处直搬不再重复 redact。
+ */
+function syncConversationsToMessages(db: Database.Database): void {
+  try {
+    const hasConversations = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = 'conversations'`)
+      .get();
+    if (!hasConversations) return;
+
+    const cols = new Set(
+      (db.pragma('table_info(conversations)') as Array<{ name: string }>).map((c) => c.name),
+    );
+    const hasReasoning = cols.has('reasoning');
+    const hasClientMsgId = cols.has('client_msg_id');
+    const hasTaskId = cols.has('task_id');
+
+    // 仅取「尚未进 messages」的孤行（LEFT JOIN 找空）——user + assistant 都要，避免与已回填行重复
+    const rows = db
+      .prepare(
+        `SELECT c.id, c.session_id, c.role, c.content${
+          hasReasoning ? ', c.reasoning' : ''
+        }${hasClientMsgId ? ', c.client_msg_id' : ''}${hasTaskId ? ', c.task_id' : ''}, c.created_at
+         FROM conversations c
+         LEFT JOIN messages m ON m.id = c.id
+         WHERE m.id IS NULL
+         ORDER BY c.created_at ASC`,
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    if (rows.length === 0) return; // 稳态：全同步，零写入
+
+    const insertMessage = db.prepare(
+      `INSERT OR IGNORE INTO messages (id, session_id, role, client_msg_id, task_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const insertBlock = db.prepare(
+      `INSERT OR IGNORE INTO message_blocks (id, message_id, seq, block_type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+
+    for (const r of rows) {
+      const id = r.id as string;
+      insertMessage.run(
+        id,
+        r.session_id,
+        r.role,
+        hasClientMsgId ? ((r.client_msg_id as string) ?? null) : null,
+        hasTaskId ? ((r.task_id as string) ?? null) : null,
+        r.created_at,
+      );
+      // assistant 的 reasoning（非空）→ thinking block；content → text block（与 v25 同构）
+      let seq = 0;
+      if (hasReasoning && r.reasoning) {
+        seq++;
+        insertBlock.run(
+          `${id}#b${seq}`,
+          id,
+          seq,
+          'thinking',
+          JSON.stringify({ type: 'thinking', text: r.reasoning as string }),
+          r.created_at,
+        );
+      }
+      seq++;
+      insertBlock.run(
+        `${id}#b${seq}`,
+        id,
+        seq,
+        'text',
+        JSON.stringify({ type: 'text', text: (r.content as string) ?? '' }),
+        r.created_at,
+      );
+    }
+  } catch {
+    // conversations/messages/message_blocks 不存在（旧库 / 迁移未跑完）—— 静默跳过
   }
 }
 
