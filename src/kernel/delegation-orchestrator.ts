@@ -2766,16 +2766,38 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         return;
       }
 
-      // R14-1：task.timeout 走 finalizeTask 统一入口（含 no_response 通知）
+      // R14-1 + V-2：超时必须终态化委派 + 标记 plan failed，二者都不应被「无 pending」门挡住。
+      // 原代码 `if (!pending) return` 提前 bail：① 委派留非终态 → active_scope 泄漏至 sweepStale(10min)；
+      // ② 后台任务（无 pending）连 plan 状态都不更新 → mission 卡 working（§13.21）。
+      // 现统一：委派 fail（幂等，触发 onTermination→cleanupTaskState 释放 active_scope）+ plan failed 始终执行；
+      // pending fail + flusher 清理仅前台（有 pending）执行——后台任务无可达 pending。
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
-      const pending = this.sessionManager.getPending(entry.correlationId);
-      if (!pending) return;
-      this.streamingFlusher.remove(taskId);
       // 13.0 §13.21: 超时的 plan task 必须标记 failed，否则永留 working →
       // 级联失效依赖它的任务 → mission 永不终态（与 1804 失败路径一致）
-      this.updatePlanTaskStatus(taskId, 'failed', `任务执行超时（${targetAgent}）`);
-      this.sessionManager.fail(entry.correlationId, { kind: 'timeout', agentName: targetAgent, error: `任务执行超时（${targetAgent}）` });
+      const timeoutError = `任务执行超时（${targetAgent}）`;
+      this.updatePlanTaskStatus(taskId, 'failed', timeoutError);
+      this.delegationManager.fail(taskId, timeoutError);
+      const pending = this.sessionManager.getPending(entry.correlationId);
+      if (pending) {
+        this.streamingFlusher.remove(taskId);
+        this.sessionManager.fail(entry.correlationId, { kind: 'timeout', agentName: targetAgent, error: timeoutError });
+      }
+    });
+
+    // V-2：cancel（API tasks/:id/cancel · CLI task stop，两入口都 emit task.cancelled）终态化委派 + pending。
+    // task 层只标 task cancelled + emit 事件，委派层无感知 → active_scope 泄漏；前台任务 pending 不失败则会话卡死。
+    // 委派 fail（→ onTermination 释放 active_scope，幂等）；有 pending 则 fail pending（kind=terminated，同 interruptSession）。
+    // 与 interruptSession 不冲突：interruptSession 用 delegationManager.interrupt 直处理、不 emit task.cancelled，两路径不相交。
+    eventBus.on('task.cancelled', ({ taskId, reason }) => {
+      const entry = this.delegationManager.get(taskId);
+      if (!entry) return;
+      this.delegationManager.fail(taskId, `任务取消: ${reason ?? '用户停止'}`);
+      const pending = this.sessionManager.getPending(entry.correlationId);
+      if (pending) {
+        this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
+        this.sessionManager.fail(entry.correlationId, { kind: 'terminated' });
+      }
     });
   }
 
