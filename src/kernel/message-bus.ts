@@ -129,8 +129,13 @@ export class MessageBus {
   }
 
   private async executeSend(type: MessageType, payload: unknown, ctx: MessageContext): Promise<unknown> {
+    // rpc> 中枢 RPC trace：所有模块间 send（请求/响应）必经此。与 EventBus.emit 的 evt> 平面 disjoint，
+    // 用来回答「某查询/命令到底发没发、有没有 handler 接」。grep `rpc>` 看全部。
+    logger.debug({ type, hasCtx: !!ctx && Object.keys(ctx).length > 0 }, 'rpc> send');
     const handler = this.handlers.get(type);
     if (!handler) {
+      // send 找不到 handler = 静默失败的常见根因，单独 warn 突出
+      logger.warn({ type }, 'rpc> send 无 handler（将抛 No handler）');
       throw new Error(`No handler registered for message type: ${type}`);
     }
 

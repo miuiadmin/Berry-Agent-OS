@@ -71,7 +71,7 @@ const ToolBlockCard = memo(function ToolBlockCard({
         <Wrench className="size-3 shrink-0 text-muted-foreground/70" />
         <code className="font-mono text-[11px]">{block.name}</code>
         <span className="ml-auto flex items-center gap-1 shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
-          {formatDurationMs(block.durationMs ?? 0)}
+          {formatDurationMs(block.durationMs)}
           {isRunning ? (
             <Loader2 className="size-3 animate-spin" />
           ) : isFailed ? (

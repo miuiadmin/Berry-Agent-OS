@@ -10,6 +10,35 @@ import { computeBackoff, type BackpressureMonitor, type DeadLetterQueue } from '
 
 const logger = getLogger('ipc');
 
+// ── IPC 中枢 trace（上帝视角）─────────────────────────────────────────────
+// IpcChannel 是 kernel ↔ agent 子进程通信的唯一通道。在入站（child.on message）与
+// 出站（writeOrFail）各插一个 tap = 覆盖全部 agent 通信，回答「agent 报了什么 /
+// kernel 派了什么」。grep `ipc>` 看全部。
+// task.telemetry 的 per-token 增量（text/reasoning delta，agent 逐 token 上报）按 1/50 节流。
+const IPC_FP_KEYS = [
+  'taskId', 'toolName', 'callId', 'durationMs', 'kind', 'isError', 'summary',
+  'reason', 'ok', 'agentName', 'inputTokens', 'outputTokens', 'intent', 'targetAgent',
+] as const;
+let _ipcTextDeltaN = 0;
+let _ipcReasoningDeltaN = 0;
+/** 入站 IPC 消息指纹（kernel 侧收到 agent 的消息） */
+function traceIpcRecv(msg: IpcMessage): void {
+  const type = msg.type;
+  const payload = msg.payload as Record<string, unknown> | undefined;
+  // task.telemetry 的 per-token 增量节流
+  if (type === 'task.telemetry') {
+    const kind = payload?.kind;
+    if (kind === 'text_delta') { _ipcTextDeltaN++; if (_ipcTextDeltaN % 50 === 1) logger.debug({ type, from: msg.from, kind, n: _ipcTextDeltaN }, 'ipc> recv(1/50 节流)'); return; }
+    if (kind === 'reasoning_delta') { _ipcReasoningDeltaN++; if (_ipcReasoningDeltaN % 50 === 1) logger.debug({ type, from: msg.from, kind, n: _ipcReasoningDeltaN }, 'ipc> recv(1/50 节流)'); return; }
+  }
+  const fp: Record<string, unknown> = { type, from: msg.from };
+  if (payload && typeof payload === 'object') {
+    for (const k of IPC_FP_KEYS) if (k in payload) fp[k] = payload[k];
+    if ('durationMs' in payload) fp.hasDurationMs = payload.durationMs != null;
+  }
+  logger.debug(fp, 'ipc> recv');
+}
+
 type MessageHandler = (msg: IpcMessage) => void;
 
 export class IpcChannel {
@@ -32,6 +61,8 @@ export class IpcChannel {
     if (options?.journal) this.journal = options.journal;
     child.on('message', (raw: unknown) => {
       const msg = raw as IpcMessage;
+      // 上帝视角：所有 agent→kernel 入站 IPC 在此到达（见 traceIpcRecv）
+      traceIpcRecv(msg);
       const pending = this.pendingRequests.get(msg.correlationId ?? '');
       if (pending) {
         clearTimeout(pending.timer);
@@ -82,6 +113,8 @@ export class IpcChannel {
    * 两侧 channel 复用，行为一致。
    */
   private writeOrFail<T>(msg: IpcMessage<T>, type: IpcMessageType, sender: (m: IpcMessage<T>) => boolean): boolean {
+    // 上帝视角：所有 kernel→agent 出站 IPC 经此（send / request / emit-to-child 共用）
+    logger.debug({ type, to: (msg as IpcMessage).to, from: (msg as IpcMessage).from }, 'ipc> send');
     if (this.journal?.shouldJournal(type)) {
       this.journal.record(msg as unknown as IpcMessage);
     }

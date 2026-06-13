@@ -137,6 +137,37 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
 /** 工具调用计时链路 trace 日志器（grep `tool-trace` 看全链路） */
 const logger = getLogger('ws-bridge');
 
+// ── WS 出站 trace（上帝视角·最后一公里）──────────────────────────────────
+// ws-event-bridge 是 EventBus → 前端 WS 客户端的唯一出口。在此插桩 = 回答
+// 「某事件前端到底收没收到」。与 evt>（总线发出）配合可定位静默缺口：
+//   - evt> 有、ws> 无 → 事件不在转发表里（BRIDGED_EVENTS / STREAM_EVENT_MAPPING 都没收录）
+//   - ws> 有但 recipients=0 → 转发了但无客户端订阅该 session（前端开着但看不到）
+// grep `ws>` 看全部出站；`ws> 转发但无人接收` 直接 warn 突出静默缺口。
+let _wsTextDeltaN = 0;
+let _wsReasoningDeltaN = 0;
+const WS_FP_KEYS = [
+  'toolName', 'durationMs', 'callId', 'blockType', 'blockId', 'messageId',
+  'taskId', 'isError', 'state', 'dialogueId', 'intent', 'from', 'to',
+] as const;
+/**
+ * WS 出站指纹。recipients = 实际收到的客户端数。
+ * per-token 流式增量（text/reasoning delta）按 1/50 节流；其余完整记录。
+ * recipients===0 时升为 warn（事件发了却没前端收到 = 静默缺口）。
+ */
+function traceWsForward(wsType: string, eventName: string, p: Record<string, unknown>, recipients: number): void {
+  if (wsType === 'text_delta') { _wsTextDeltaN++; if (_wsTextDeltaN % 50 === 1) logger.debug({ wsType, event: eventName, recipients, n: _wsTextDeltaN }, 'ws> 转发(1/50 节流)'); return; }
+  if (wsType === 'reasoning_delta') { _wsReasoningDeltaN++; if (_wsReasoningDeltaN % 50 === 1) logger.debug({ wsType, event: eventName, recipients, n: _wsReasoningDeltaN }, 'ws> 转发(1/50 节流)'); return; }
+  const fp: Record<string, unknown> = { wsType, event: eventName, sessionId: p.sessionId, recipients };
+  for (const k of WS_FP_KEYS) if (k in p) fp[k] = p[k];
+  if ('durationMs' in p) fp.hasDurationMs = p.durationMs != null;
+  if (recipients === 0) {
+    // 静默缺口：转发了但无客户端接收——前端必然看不到此事件
+    logger.warn({ wsType, event: eventName, sessionId: p.sessionId }, 'ws> 转发但无人接收（前端看不到·静默缺口）');
+  } else {
+    logger.debug(fp, 'ws> 转发');
+  }
+}
+
 export class WsEventBridge {
   private unsubscribes: Array<() => void> = [];
 
@@ -174,7 +205,10 @@ export class WsEventBridge {
     for (const event of BRIDGED_EVENTS) {
       const unsub = eventBus.on(event, (payload) => {
         const msg = JSON.stringify({ type: 'event', event, payload, ts: Date.now() });
-        this.broadcast(msg);
+        const recipients = this.broadcast(msg);
+        // ws> 全局事件出站（低频不节流）；0 客户端 = 无前端连接，warn 提示静默缺口
+        if (recipients === 0) logger.warn({ wsType: 'event', event }, 'ws> 全局事件转发但无人接收（无前端连接）');
+        else logger.debug({ wsType: 'event', event, recipients }, 'ws> 转发全局事件');
       });
       this.unsubscribes.push(unsub);
     }
@@ -190,23 +224,28 @@ export class WsEventBridge {
         }
         const sessionId = p.sessionId as string | undefined;
         // 流式事件按 sessionId 过滤：只发给订阅了该 sessionId 的客户端
-        this.broadcastFiltered(msg, sessionId);
+        const recipients = this.broadcastFiltered(msg, sessionId);
+        // ws> 出站上帝视角：每条转发都记，带接收客户端数；0 客户端 = 静默缺口（traceWsForward 内部 warn）
+        traceWsForward(wsType, eventName, p, recipients);
       });
       this.unsubscribes.push(unsub);
     }
   }
 
-  /** 广播一条消息给所有 readyState=1 (OPEN) 的 ws 客户端 */
-  private broadcast(msg: string): void {
+  /** 广播一条消息给所有 readyState=1 (OPEN) 的 ws 客户端；返回实际接收的客户端数 */
+  private broadcast(msg: string): number {
+    let recipients = 0;
     for (const client of this.wss.clients) {
       if ((client as unknown as { readyState: number }).readyState === 1) {
         try {
           (client as WebSocket).send(msg);
+          recipients++;
         } catch {
           // TOCTOU 竞争窗口：readyState 检查后、send() 前客户端可能断连，忽略
         }
       }
     }
+    return recipients;
   }
 
   /**
@@ -214,7 +253,8 @@ export class WsEventBridge {
    * - 有 sessionId 的事件：只发给订阅了该 sessionId 的客户端，以及未订阅任何 session 的客户端（兼容旧版）
    * - 无 sessionId 的事件：广播给所有客户端
    */
-  private broadcastFiltered(msg: string, sessionId: string | undefined): void {
+  private broadcastFiltered(msg: string, sessionId: string | undefined): number {
+    let recipients = 0;
     for (const client of this.wss.clients) {
       if ((client as unknown as { readyState: number }).readyState !== 1) continue;
       const subs = this.clientSubscriptions.get(client as WebSocket);
@@ -222,6 +262,7 @@ export class WsEventBridge {
       if (!subs || subs.size === 0) {
         try {
           (client as WebSocket).send(msg);
+          recipients++;
         } catch {
           // 客户端在 readyState 检查后断连，忽略
         }
@@ -231,11 +272,13 @@ export class WsEventBridge {
       if (sessionId && subs.has(sessionId)) {
         try {
           (client as WebSocket).send(msg);
+          recipients++;
         } catch {
           // 客户端在 readyState 检查后断连，忽略
         }
       }
     }
+    return recipients;
   }
 
   dispose(): void {

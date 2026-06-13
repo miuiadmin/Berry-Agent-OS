@@ -62,14 +62,22 @@ export function formatDuration(startedAt?: string, finishedAt?: string, status?:
  *
  * - <1000ms → "420ms"
  * - ≥1000ms → "1.2s"
+ * - undefined / null / NaN / 负数 → "—"（无计时数据）
  *
  * 与 {@link formatDuration} 不同：那个按起止时间戳算任务总时长，这个直接吃毫秒数，
  * 用于 chat 流式面板里单步/单次工具的短耗时展示。
  *
- * @param ms 毫秒数
+ * 接受 undefined：工具 block 在 running 态 / 孤儿 complete（配对缺失算不出耗时）时
+ * durationMs 为 undefined，调用方可直接传入（无需 `?? 0`——那样会把"无数据"显示成误导性的 "0ms"）。
+ *
+ * @param ms 毫秒数（可能为 undefined）
  * @returns 格式化后的时长字符串
  */
-export function formatDurationMs(ms: number): string {
+export function formatDurationMs(ms: number | undefined | null): string {
+  // 防御 undefined / NaN / 负数：后端 daemon 路径（委派给外部 agent）的 tool_call
+  // 可能不带 durationMs，此时不能让它走到 `ms/1000` 分支——undefined < 1000 为 false，
+  // 会算出 NaN 显示成 "NaNs"。统一兜底为 "—"（无计时数据），与 formatDuration 风格一致。
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }

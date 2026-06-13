@@ -174,7 +174,12 @@ export function createWsHandler(deps: WebServerDependencies) {
       }
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
-        logger.debug(msg, 'ws:in');
+        // ws< 入站上帝视角：前端→后端消息到达。只记 type/sessionId/体积，不 dump 正文
+        // （与 evt>/ipc>/ws> 一致：避免 berry.log 被用户原文灌满；正文调试可临时放开）
+        logger.debug(
+          { type: msg.type, sessionId: msg.sessionId, textLen: typeof msg.text === 'string' ? msg.text.length : undefined, hasAttachments: Array.isArray(msg.attachments), sizeBytes: size },
+          'ws< 入站',
+        );
         handleWsMessage(ws, msg, clientId, deps);
       } catch (err) {
         wsError(ws, (err as Error).message);
