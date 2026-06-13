@@ -13,6 +13,8 @@ import {
   getTimeline,
   searchMessageBlocks,
   rebuildMessageBlocksFts,
+  persistUserMessage,
+  persistAssistantTurn,
 } from './message-blocks-repo.js';
 import type { Block, ToolBlock, DelegationBlock } from '../contracts/message-blocks.js';
 import { isBlockTerminal } from '../contracts/message-blocks.js';
@@ -54,6 +56,74 @@ describe('对话内联模型存储层（messages + message_blocks）', () => {
       const a = createMessage({ sessionId: 's1', role: 'assistant' });
       const b = createMessage({ sessionId: 's1', role: 'assistant' });
       expect(a.id).not.toBe(b.id);
+    });
+  });
+
+  // ─── persist* 落库漏斗（user / assistant 单一入口） ───
+
+  describe('persistUserMessage（user 落库漏斗）', () => {
+    it('建 user 行 + 一个 text block，getTimeline 能读回', () => {
+      const { id, deduplicated } = persistUserMessage({ sessionId: 's1', content: '帮我重构', clientMsgId: 'cm-1' });
+      expect(deduplicated).toBe(false);
+
+      const tl = getTimeline('s1');
+      expect(tl).toHaveLength(1);
+      expect(tl[0].id).toBe(id);
+      expect(tl[0].role).toBe('user');
+      expect(tl[0].blocks).toHaveLength(1);
+      expect((tl[0].blocks[0] as { text: string }).text).toBe('帮我重构');
+    });
+
+    it('幂等：同 clientMsgId 重复调用复用已存在行，不重复追加 block', () => {
+      const a = persistUserMessage({ sessionId: 's1', content: '第一条', clientMsgId: 'cm-1' });
+      const b = persistUserMessage({ sessionId: 's1', content: '第一条（重试）', clientMsgId: 'cm-1' });
+      expect(b.deduplicated).toBe(true);
+      expect(b.id).toBe(a.id);
+
+      // 仅一个 text block（重试未新增）
+      const tl = getTimeline('s1');
+      expect(tl).toHaveLength(1);
+      expect(tl[0].blocks).toHaveLength(1);
+    });
+
+    it('redact 单漏斗覆盖 user 文本（闭合双轨制遗留的 user 未脱敏点）', () => {
+      const secret = 'sk-ant-' + 'd'.repeat(30);
+      persistUserMessage({ sessionId: 's1', content: `我的 key 是 ${secret}`, clientMsgId: 'cm-1' });
+
+      const row = getDb()
+        .prepare(`SELECT payload_json FROM message_blocks WHERE block_type = 'text'`)
+        .get() as { payload_json: string };
+      expect(row.payload_json).not.toContain(secret);
+      expect(row.payload_json).toContain('[REDACTED:anthropic_key]');
+    });
+
+    it('user 文本进 FTS（可被 searchMessageBlocks 搜中）', () => {
+      persistUserMessage({ sessionId: 's1', content: '如何用 React 写一个状态机', clientMsgId: 'cm-1' });
+      const hits = searchMessageBlocks('React');
+      expect(hits).toHaveLength(1);
+    });
+  });
+
+  describe('persistAssistantTurn（assistant 落库漏斗，= saveAssistantBlocks 改名）', () => {
+    it('空 blocks 跳过（不建空消息）', () => {
+      persistAssistantTurn({ messageId: 'a1', sessionId: 's1', blocks: [] });
+      expect(getTimeline('s1')).toHaveLength(0);
+    });
+
+    it('用指定 messageId 建行 + 有序 blocks（前后端 id 对齐）', () => {
+      persistAssistantTurn({
+        messageId: 'a1',
+        sessionId: 's1',
+        taskId: 't1',
+        blocks: [
+          { type: 'thinking', text: '分析' },
+          { type: 'tool', id: 'a1#tool#shell#1', name: 'shell', input: { cmd: 'ls' }, state: 'completed' },
+          { type: 'text', text: '结果' },
+        ],
+      });
+      const tl = getTimeline('s1');
+      expect(tl[0].id).toBe('a1');
+      expect(tl[0].blocks.map((b) => b.type)).toEqual(['thinking', 'tool', 'text']);
     });
   });
 

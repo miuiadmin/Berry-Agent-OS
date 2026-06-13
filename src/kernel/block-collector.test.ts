@@ -3,6 +3,7 @@ import {
   BlockCollector,
   getOrCreateBlockCollector,
   disposeBlockCollector,
+  peekBlockCollector,
   _clearBlockCollectorsForTest,
   type BlockEmitter,
 } from './block-collector.js';
@@ -176,12 +177,26 @@ describe('BlockCollector 流式工具（onToolStart/onToolComplete）', () => {
     // 文本 block 仍由 draftResponse 注入
     expect(blocks.some((b) => b.type === 'text' && b.text === 'hi')).toBe(true);
   });
+
+  it('getToolBlocks 返回已终态 tool（替代旧 pending.toolCalls 双真相源）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: { cmd: 'ls' }, ts: 1000 });
+    // 仅 start：running 态不进 toolBlocks
+    expect(c.getToolBlocks()).toHaveLength(0);
+    c.onToolComplete({ callId: 'c1', output: '{"ok":true}', success: true, ts: 1100 });
+    // complete 后：终态 tool 进 toolBlocks，携带完整字段
+    const tools = c.getToolBlocks();
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe('shell');
+    expect(tools[0].state).toBe('completed');
+    expect(tools[0].durationMs).toBe(100);
+  });
 });
 
 describe('BlockCollector registry', () => {
   beforeEach(() => _clearBlockCollectorsForTest());
 
-  it('同 taskId 复用同一 collector（messageId 稳定）', () => {
+  it('同 key 复用同一 collector（messageId 稳定）', () => {
     const a = getOrCreateBlockCollector('t1', 's1', 'c1');
     const b = getOrCreateBlockCollector('t1', 's1', 'c1');
     expect(b).toBe(a);
@@ -195,5 +210,19 @@ describe('BlockCollector registry', () => {
     const b = getOrCreateBlockCollector('t1', 's1', undefined);
     expect(b).not.toBe(a);
     expect(b.messageId).not.toBe(a.messageId);
+  });
+
+  it('peekBlockCollector 窥取但不移除（落库 peek 模式：取 collector 做落库，registry 保留）', () => {
+    const a = getOrCreateBlockCollector('t1', 's1', undefined);
+    // peek 返回同一实例，不从 registry 移除
+    expect(peekBlockCollector('t1')).toBe(a);
+    expect(peekBlockCollector('t1')).toBe(a);
+    // registry 仍持有：dispose 仍能取到（peek 未释放生命周期）
+    expect(disposeBlockCollector('t1')).toBe(a);
+    expect(peekBlockCollector('t1')).toBeUndefined();
+  });
+
+  it('peekBlockCollector 未注册的 key 返回 undefined', () => {
+    expect(peekBlockCollector('never')).toBeUndefined();
   });
 });

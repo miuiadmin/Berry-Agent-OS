@@ -16,7 +16,7 @@ import type { AgentRegistry } from '../agent-registry.js';
 import { getEventBus } from '../event-bus.js';
 import { getLogger } from '../../utils/logger.js';
 import { getOrCreateBlockCollector, disposeBlockCollector } from '../block-collector.js';
-import { saveAssistantBlocks } from '../../memory/message-blocks-repo.js';
+import { persistAssistantTurn } from '../../memory/message-blocks-repo.js';
 
 /**
  * 工具调用计时链路 trace 日志器。
@@ -275,7 +275,7 @@ export function setupModuleTaskResultHandler(
           draftResponse: pending?.draftResponse ?? undefined,
         });
         if (blocks.length > 0) {
-          saveAssistantBlocks({
+          persistAssistantTurn({
             messageId: collector.messageId,
             sessionId,
             taskId: result.taskId,

@@ -5,7 +5,7 @@
  * initDb（CORE_SCHEMA + 全部 migration v0-v25 + MESSAGE_BLOCKS_FTS），在真 DB 上证明：
  *   1. initDb 成功（含 v25 messages/message_blocks reshape）
  *   2. messages / message_blocks 表存在；message_blocks_fts 虚表存在
- *   3. saveAssistantBlocks → getTimeline 往返：blocks 按序读回（thinking → tool → text）
+ *   3. persistAssistantTurn → getTimeline 往返：blocks 按序读回（thinking → tool → text）
  *   4. redact 单漏斗：tool block.input 含 sk-ant- 密钥 → payload_json 无明文
  *   5. FTS 端到端：text block 入库后可被 message_blocks_fts（trigram）搜中
  *
@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initDb, closeDb, getDb } from '../src/memory/index.js';
 import { ALL_MIGRATIONS } from '../src/memory/migrations/index.js';
-import { saveAssistantBlocks, getTimeline } from '../src/memory/message-blocks-repo.js';
+import { persistAssistantTurn, getTimeline } from '../src/memory/message-blocks-repo.js';
 import type { Block } from '../src/contracts/message-blocks.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'berry-verify22-'));
@@ -43,13 +43,13 @@ try {
   check('message_blocks 表存在', tableExists('message_blocks'));
   check('message_blocks_fts 虚表存在', tableExists('message_blocks_fts'));
 
-  // 3. saveAssistantBlocks → getTimeline 往返（thinking → tool → text 有序）
+  // 3. persistAssistantTurn → getTimeline 往返（thinking → tool → text 有序）
   const blocks: Block[] = [
     { type: 'thinking', text: '先分析需求' },
     { type: 'tool', id: 'm1#tool#shell#1', name: 'shell', input: { cmd: 'ls' }, state: 'completed', output: 'a\nb', durationMs: 12 },
     { type: 'text', text: '这是回复正文' },
   ];
-  saveAssistantBlocks({ messageId: 'm1', sessionId: 's1', taskId: 't1', blocks });
+  persistAssistantTurn({ messageId: 'm1', sessionId: 's1', taskId: 't1', blocks });
   const timeline = getTimeline('s1');
   check('getTimeline 返回 1 条消息', timeline.length === 1);
   check('消息含 3 个有序 blocks', timeline[0]?.blocks.length === 3);
@@ -58,7 +58,7 @@ try {
   check('tool block 字段往返无损（name/input/output/state/durationMs）', tb?.type === 'tool' && tb.name === 'shell' && (tb.input as { cmd: string }).cmd === 'ls' && tb.output === 'a\nb' && tb.state === 'completed' && tb.durationMs === 12);
 
   // 4. redact 单漏斗：tool block.input 含 sk-ant- 密钥 → payload_json 无明文
-  saveAssistantBlocks({
+  persistAssistantTurn({
     messageId: 'm2',
     sessionId: 's1',
     blocks: [
@@ -69,7 +69,7 @@ try {
   check('redact 单漏斗：tool block.input 的 sk-ant- 密钥已脱敏（payload_json 无明文）', !rawPayload.payload_json.includes('sk-ant-0123456789abcdefghijklmnop'));
 
   // 5. FTS 端到端：text block 入库后可被 message_blocks_fts（trigram，需 ≥3 字符词）搜中
-  saveAssistantBlocks({
+  persistAssistantTurn({
     messageId: 'm3',
     sessionId: 's2',
     blocks: [{ type: 'text', text: '项目管理最佳实践讨论' }],

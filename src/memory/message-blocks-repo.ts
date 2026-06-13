@@ -174,13 +174,53 @@ function pickNextSeq(messageId: string): number {
 }
 
 /**
- * 落库一轮 assistant 消息的全部 blocks（task-flow 在 agent.task.result 调用）。
- * 用指定 messageId 建 messages 行（与 stream.block 已广播的 id 一致，保证前后端 id 对齐），
- * 顺序追加各 block。空内容跳过（不建空消息）。单事务保证原子。
+ * 落库一条 user 消息到新表（messages + 一个 text block）——对话内联统一后 user 消息的唯一持久化漏斗。
  *
- * 这是"写路径切到新表"的落库漏斗（设计文档/22 期3b）；与旧 conversations 写入并行（兼容期双写）。
+ * 与 {@link persistAssistantTurn} 对称：user 消息 = 单个 text block（user 无 thinking / tool）。
+ * redact 经 {@link appendBlock} → {@link serializeBlock} 单漏斗（user 文本同样清洗 secret——
+ * 闭合双轨制遗留的最后一个未 redact 写入点：旧轨 saveUserMessage 直写 conversations 无脱敏）。
+ *
+ * 幂等：同一 (session_id, clientMsgId) 重复调用复用已存在行（不重复追加 block），保证入口预写 +
+ * 后续路径二次落库不产生重复文本 block。
+ *
+ * @param opts.clientMsgId 客户端消息幂等键（kernel 入口去重）
+ * @param opts.id          指定消息 id（与 stream.block 已广播的 messageId 对齐；user 通常不预广播，省略则自动生成）
  */
-export function saveAssistantBlocks(opts: {
+export function persistUserMessage(opts: {
+  sessionId: string;
+  content: string;
+  clientMsgId?: string;
+  id?: string;
+}): { id: string; deduplicated: boolean } {
+  const db = getDb();
+  // 单事务保证 createMessage + appendBlock 原子（user 行与其 text block 同生共死）
+  const tx = db.transaction((): { id: string; deduplicated: boolean } => {
+    const result = createMessage({
+      id: opts.id,
+      sessionId: opts.sessionId,
+      role: 'user',
+      clientMsgId: opts.clientMsgId,
+    });
+    // 幂等：clientMsgId 命中已有行时不重复追加 block（该行已自带其 blocks）
+    if (!result.deduplicated) {
+      appendBlock(result.id, { type: 'text', text: opts.content });
+    }
+    return result;
+  });
+  return tx();
+}
+
+/**
+ * 落库一轮 assistant 消息的全部 blocks——assistant 持久化的规范漏斗。
+ *
+ * 用指定 messageId 建 messages 行（与 stream.block 已广播的 id 一致，保证前后端 id 对齐），
+ * 顺序追加各 block（thinking → tools → text）。空内容跳过（不建空消息）。单事务保证原子。
+ *
+ * 命名 persistAssistantTurn：与 {@link persistUserMessage} 对称，是"一轮对话落库"在 assistant 侧的
+ * 唯一入口。消灭持久化双轨制后，所有终态路径（正常完成 / 审核后 / 委派 / daemon / 兜底 / 超时）
+ * 都汇聚于此——不再有 saveConversationTurn 的扁平文本并行写入。
+ */
+export function persistAssistantTurn(opts: {
   messageId: string;
   sessionId: string;
   taskId?: string;

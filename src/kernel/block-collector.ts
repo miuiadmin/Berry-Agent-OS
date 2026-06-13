@@ -256,37 +256,65 @@ export class BlockCollector {
     if (opts.draftResponse) blocks.push({ type: 'text', text: opts.draftResponse });
     return blocks;
   }
+
+  /**
+   * 取本轮已收集的终态 tool blocks（供审核链路 / 下游需要工具轨迹处取用）。
+   *
+   * 取代旧 PendingRequest.toolCalls（简化的 {name,input,result}[] 双真相源）——
+   * 消灭持久化双轨制后，工具调用的唯一真相在 collector（完整 ToolBlock：state/output/durationMs/error）。
+   * 注意：仅返回已终态（completed/failed）的工具；running 态不进 toolBlocks（见 onToolStart 注释）。
+   */
+  getToolBlocks(): ToolBlock[] {
+    return this.toolBlocks;
+  }
 }
 
-// ─── 模块级 registry（按 taskId 缓存，一轮对话一个 collector） ───
+// ─── 模块级 registry（按 turn key 缓存，一轮对话一个 collector） ───
+//
+// key 在消灭双轨制后 = correlationId（turn 的天然标识，贯穿入口→complete/fail）。
+// 期1-7 过渡期 key = taskId（task-flow）/ delegationId（委派），消灭双轨制时统一切到 correlationId，
+// 使 handoff（conversation→目标 agent）天然共享同一 collector/messageId。
 
 const activeCollectors = new Map<string, BlockCollector>();
 
 /**
- * 取或创建 taskId 对应的 collector。同一 taskId 多次调用返回同一实例（保证 messageId 稳定）。
- * @param emit 测试注入用；生产路径用默认 EventBus emit
+ * 取或创建 key 对应的 collector。同一 key 多次调用返回同一实例（保证 messageId 稳定）。
+ * @param key      collector 注册键（过渡期=taskId/delegationId；消灭双轨制后=correlationId）
+ * @param emit     测试注入用；生产路径用默认 EventBus emit
  */
 export function getOrCreateBlockCollector(
-  taskId: string,
+  key: string,
   sessionId: string,
   correlationId: string | undefined,
   emit?: BlockEmitter,
 ): BlockCollector {
-  let c = activeCollectors.get(taskId);
+  let c = activeCollectors.get(key);
   if (!c) {
-    c = new BlockCollector(sessionId, taskId, correlationId, emit);
-    activeCollectors.set(taskId, c);
+    c = new BlockCollector(sessionId, key, correlationId, emit);
+    activeCollectors.set(key, c);
   }
   return c;
 }
 
 /**
- * 释放 taskId 的 collector（turn 结束调用）。期3a 仅从 map 移除（collector 无资源）；
- * 期3b 在此触发 flush 落库。
+ * 窥取 key 对应的 collector（不从 registry 移除）。供 turn 终态收尾时取 collector 做 buildBlocks 落库。
+ *
+ * 与 {@link disposeBlockCollector} 的区别：peek 保留注册（handoff 链中途取工具轨迹 / 审核链路查看不销毁）；
+ * dispose 才是真正的生命周期终结（turn 终态落库后调用，释放 collector）。消灭双轨制后，落库 = peek + buildBlocks，
+ * 真正释放 = 末态 dispose（与 pending 生命周期对齐）。
  */
-export function disposeBlockCollector(taskId: string): BlockCollector | undefined {
-  const c = activeCollectors.get(taskId);
-  activeCollectors.delete(taskId);
+export function peekBlockCollector(key: string): BlockCollector | undefined {
+  return activeCollectors.get(key);
+}
+
+/**
+ * 释放 key 的 collector（turn 终态调用）：从 registry 移除并返回，调用方负责 buildBlocks 落库。
+ * 注意：dispose 返回的 collector 仍持有 toolBlocks（未被销毁），调用方取 toolBlocks/getToolBlocks 后
+ * 实例才随引用释放变为 GC 候选——不要丢弃返回值否则 toolBlocks 丢失（委派路径的历史 bug 根因）。
+ */
+export function disposeBlockCollector(key: string): BlockCollector | undefined {
+  const c = activeCollectors.get(key);
+  activeCollectors.delete(key);
   return c;
 }
 
