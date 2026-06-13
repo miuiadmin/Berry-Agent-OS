@@ -11,7 +11,7 @@
  * 触发：WS ask_user 事件 → ChatWindow 展示此组件
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useT } from "@/lib/i18n";
 import { HelpCircle, Send, Clock } from "lucide-react";
 import { apiPost } from "@/lib/api";
@@ -35,55 +35,39 @@ export interface AskUserPayload {
 
 /** 组件 props */
 interface AskUserDialogProps {
-  /** askUser 事件数据 */
   payload: AskUserPayload;
-  /** 回复后的回调 */
   onResponded?: () => void;
 }
 
 /** 默认超时 5 分钟（§5.3.5） */
 const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
 
+/** 格式化剩余时间（m:ss） */
+function fmtTime(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`;
+}
+
 /**
  * 交互式 AskUser 对话框。
  *
  * 展示 Agent 的问题 + 选项按钮，用户点击后通过 API 回复。
+ * 修复：timer 使用 ref 追踪 responded 状态，避免闭包过期导致超时重复提交。
  */
 export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
   const t = useT();
-  const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [customAnswer, setCustomAnswer] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [responded, setResponded] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState(
-    Math.floor(ASK_USER_TIMEOUT_MS / 1000)
-  );
+  const [remaining, setRemaining] = useState(Math.floor(ASK_USER_TIMEOUT_MS / 1000));
+
+  /** ref 追踪 responded 状态，让 timer 回调读到最新值 */
+  const respondedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /** 超时倒计时（§5.3.5: 5 分钟超时） */
-  useEffect(() => {
-    timerRef.current = setInterval(() => {
-      setRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          /** 超时自动选择第一个选项 */
-          handleRespond(payload.options?.[0] ?? t("askUser.noResponse"));
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (timerRef.current != null) clearInterval(timerRef.current);
-    };
-  }, []);
-
   /** 提交用户回复 */
-  async function handleRespond(answer: string) {
-    if (isSubmitting || responded) return;
-    setIsSubmitting(true);
-
+  const handleRespond = useCallback(async (answer: string) => {
+    if (submitting || respondedRef.current) return;
+    setSubmitting(true);
     try {
       await apiPost("/conversation/ask-user-response", {
         sessionId: payload.sessionId,
@@ -91,54 +75,61 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
         correlationId: payload.correlationId ?? "",
         answer,
       });
+      respondedRef.current = true;
       setResponded(true);
-      setLastProgress(
-        t("askUser.responded", { answer: answer.slice(0, 50) })
-      );
+      setLastProgress(t("askUser.responded", { answer: answer.slice(0, 50) }));
       onResponded?.();
     } catch (err) {
       console.error("Failed to respond to askUser:", err);
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
-  }
+  }, [submitting, payload, t, onResponded]);
 
-  /** 提交自由文本回复 */
-  function handleSubmitCustom() {
-    if (!customAnswer.trim()) return;
-    handleRespond(customAnswer.trim());
-  }
+  /** 超时倒计时（§5.3.5: 5 分钟超时，通过 ref 避免闭包过期） */
+  useEffect(() => {
+    timerRef.current = setInterval(() => {
+      setRemaining((prev) => {
+        if (prev <= 1) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          /** 超时自动选择第一个选项（ref 检查防止重复提交） */
+          if (!respondedRef.current) {
+            handleRespond(payload.options?.[0] ?? t("askUser.noResponse"));
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [handleRespond, payload.options, t]);
 
-  /** 格式化剩余时间 */
-  function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  }
+  /** 提交自由文本 */
+  const submitCustom = () => {
+    const trimmed = customAnswer.trim();
+    if (trimmed) handleRespond(trimmed);
+  };
 
+  /** 已回复状态 */
   if (responded) {
     return (
       <div className="mx-3 my-2 flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-2">
         <HelpCircle className="size-4 shrink-0 text-success" />
-        <span className="text-[13px] text-success">
-          {t("askUser.respondedLabel")}
-        </span>
+        <span className="text-[13px] text-success">{t("askUser.respondedLabel")}</span>
       </div>
     );
   }
 
   return (
     <div className="mx-3 my-2 overflow-hidden rounded-lg border border-border bg-muted/50">
-      {/* 问题 */}
+      {/* 问题 + 倒计时 */}
       <div className="flex items-start gap-2 border-b border-border px-3 py-2">
-        <HelpCircle className="size-4 mt-0.5 shrink-0 text-info" />
+        <HelpCircle className="mt-0.5 size-4 shrink-0 text-info" />
         <div className="flex-1">
           <p className="text-[13px] text-foreground">{payload.question}</p>
           <div className="mt-1 flex items-center gap-1">
             <Clock className="size-3 text-muted-foreground" />
-            <span className="text-[11px] text-muted-foreground">
-              {formatTime(remainingSeconds)}
-            </span>
+            <span className="text-[11px] text-muted-foreground">{fmtTime(remaining)}</span>
           </div>
         </div>
       </div>
@@ -147,14 +138,9 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
       {payload.options && payload.options.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 py-2">
           {payload.options.map((option, idx) => (
-            <Button
-              key={idx}
-              variant={selectedOption === option ? "default" : "outline"}
-              size="sm"
-              onClick={() => handleRespond(option)}
-              disabled={isSubmitting}
-              className="min-h-[44px] md:min-h-0"
-            >
+            <Button key={idx} variant="outline" size="sm"
+              onClick={() => handleRespond(option)} disabled={submitting}
+              className="min-h-[44px] md:min-h-0">
               {option}
             </Button>
           ))}
@@ -167,19 +153,12 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
           type="text"
           value={customAnswer}
           onChange={(e) => setCustomAnswer(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleSubmitCustom();
-          }}
+          onKeyDown={(e) => { if (e.key === "Enter") submitCustom(); }}
           placeholder={t("askUser.customPlaceholder")}
         />
-        <Button
-          variant="default"
-          size="icon"
-          onClick={handleSubmitCustom}
-          disabled={isSubmitting || !customAnswer.trim()}
-          className="size-11 md:size-8"
-          aria-label={t("askUser.customPlaceholder")}
-        >
+        <Button variant="default" size="icon"
+          onClick={submitCustom} disabled={submitting || !customAnswer.trim()}
+          className="size-11 md:size-8" aria-label={t("askUser.customPlaceholder")}>
           <Send className="size-4" />
         </Button>
       </div>
