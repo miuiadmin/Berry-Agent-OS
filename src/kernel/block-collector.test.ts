@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   BlockCollector,
   getOrCreateBlockCollector,
@@ -26,24 +26,28 @@ describe('BlockCollector（对话内联事件归一）', () => {
     _clearBlockCollectorsForTest();
   });
 
-  it('text delta：emit blockType=text + delta，blockId 由 messageId 派生且稳定', () => {
+  it('text delta：累积到 buffer，flush 后 emit 合并 delta（blockId 由 messageId 派生且稳定）', () => {
     const c = new BlockCollector('s1', 't1', 'c1', emit);
     c.onTextDelta('你');
     c.onTextDelta('好');
-    expect(emitted).toHaveLength(2);
-    expect(emitted.every((e) => e.blockType === 'text')).toBe(true);
-    expect(emitted.every((e) => e.delta !== undefined)).toBe(true);
+    // 节流：onTextDelta 累积，未 flush 前 emit 为空
+    expect(emitted).toHaveLength(0);
+    c.flushPendingDeltas();
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].blockType).toBe('text');
+    expect(emitted[0].delta).toBe('你好'); // 合并两个 delta
     // 同 collector 的 text blockId 稳定（前端据此聚到同一块）
     expect(emitted[0].blockId).toBe(`${c.messageId}#text`);
-    expect(emitted[1].blockId).toBe(emitted[0].blockId);
     expect(emitted[0].messageId).toBe(c.messageId);
     expect(emitted[0].sessionId).toBe('s1');
     expect(emitted[0].taskId).toBe('t1');
   });
 
-  it('reasoning delta：emit blockType=thinking', () => {
+  it('reasoning delta：累积后 flush emit blockType=thinking', () => {
     const c = new BlockCollector('s1', 't1', undefined, emit);
     c.onReasoningDelta('分析中');
+    c.flushPendingDeltas();
+    expect(emitted).toHaveLength(1);
     expect(emitted[0].blockType).toBe('thinking');
     expect(emitted[0].blockId).toBe(`${c.messageId}#thinking`);
     expect(emitted[0].delta).toBe('分析中');
@@ -361,5 +365,66 @@ describe('BlockCollector registry', () => {
 
   it('peekBlockCollector 未注册的 key 返回 undefined', () => {
     expect(peekBlockCollector('never')).toBeUndefined();
+  });
+});
+
+/**
+ * delta 合并节流（性能优化）：逐 token emit → 30ms 窗口合并，解决"一次对话 1188 token
+ * 逐个 emit + 渲染卡死前端主线程触发 heartbeat 误断"。钉死：压缩比、不丢、dispose flush、幂等。
+ */
+describe('BlockCollector delta 合并节流', () => {
+  let emitted: StreamBlockPayload[];
+  const emit: BlockEmitter = (p) => emitted.push(p);
+
+  beforeEach(() => {
+    emitted = [];
+    _clearBlockCollectorsForTest();
+  });
+
+  it('节流压缩：连续 onTextDelta×100 在一个 30ms 窗口内只 emit 1 次（合并 delta）', () => {
+    vi.useFakeTimers();
+    try {
+      const c = new BlockCollector('s1', 't1', undefined, emit);
+      for (let i = 0; i < 100; i++) c.onTextDelta('x');
+      expect(emitted).toHaveLength(0); // 30ms 未到，未 flush
+      vi.advanceTimersByTime(30);
+      expect(emitted).toHaveLength(1); // 一个窗口合并 100 个 delta（1188→几十的压缩来源）
+      expect(emitted[0].delta).toBe('x'.repeat(100));
+      expect(emitted[0].blockType).toBe('text');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('不丢：混合 text+reasoning，flush 后总字符数 == 输入', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onTextDelta('abc');
+    c.onReasoningDelta('xyz');
+    c.onTextDelta('def');
+    c.flushPendingDeltas();
+    const textDelta = emitted.filter((e) => e.blockType === 'text').map((e) => e.delta).join('');
+    const reasoningDelta = emitted.filter((e) => e.blockType === 'thinking').map((e) => e.delta).join('');
+    expect(textDelta).toBe('abcdef');
+    expect(reasoningDelta).toBe('xyz');
+  });
+
+  it('dispose 强制 flush：timer pending 时残留 delta 被 emit（turn 终态尾部不丢）', () => {
+    const key = 'k1';
+    const c = getOrCreateBlockCollector(key, 's1', undefined, emit);
+    c.onTextDelta('残留');
+    // 未等 30ms，直接 dispose → flushPendingDeltas 强制 flush
+    disposeBlockCollector(key);
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].delta).toBe('残留');
+  });
+
+  it('幂等防泄漏：重复 flushPendingDeltas 无 delta 时不重复 emit', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onTextDelta('a');
+    c.flushPendingDeltas();
+    expect(emitted).toHaveLength(1);
+    c.flushPendingDeltas(); // 二次 flush 无 delta
+    c.flushPendingDeltas();
+    expect(emitted).toHaveLength(1); // 不重复 emit
   });
 });

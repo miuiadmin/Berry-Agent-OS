@@ -70,6 +70,18 @@ export class BlockCollector {
    */
   private reviewBlock: ReviewBlock | undefined;
 
+  /**
+   * 流式 text/thinking delta 合并缓冲（性能优化：逐 token emit → 30ms 窗口合并）。
+   * onTextDelta/onReasoningDelta 累积到此，scheduleFlush 定时 flushPendingDeltas emit 合并 delta；
+   * disposeBlockCollector 强制 flush（turn 终态不丢尾部 delta）。
+   * 与 buildBlocks（从外部 pending.draftResponse 注入落库）是独立两条链路——互不污染。
+   */
+  private textBuffer = '';
+  private reasoningBuffer = '';
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** delta 合并窗口（毫秒）：吸收 LLM SSE 突发帧，端到端 +30ms 不可感知 */
+  private static readonly FLUSH_INTERVAL_MS = 30;
+
   constructor(
     private readonly sessionId: string,
     private readonly taskId: string,
@@ -79,34 +91,52 @@ export class BlockCollector {
     this.messageId = genId('msg');
   }
 
-  /** text 增量：emit delta（前端首次 delta 在 blockId 惰性建 text 块） */
+  /** text 增量：累积到 buffer，30ms 窗口合并 emit（减少 WS 事件数；dispose 强制 flush 尾部） */
   onTextDelta(text: string): void {
     if (!text) return;
-    this.emit({
-      sessionId: this.sessionId,
-      messageId: this.messageId,
-      blockId: `${this.messageId}#text`,
-      blockType: 'text',
-      delta: text,
-      ts: Date.now(),
-      taskId: this.taskId,
-      correlationId: this.correlationId,
-    });
+    this.textBuffer += text;
+    this.scheduleFlush();
   }
 
-  /** reasoning 增量：emit delta（前端惰性建 thinking 块） */
+  /** reasoning 增量：累积到 buffer，30ms 窗口合并 emit（同 onTextDelta） */
   onReasoningDelta(text: string): void {
     if (!text) return;
-    this.emit({
-      sessionId: this.sessionId,
-      messageId: this.messageId,
-      blockId: `${this.messageId}#thinking`,
-      blockType: 'thinking',
-      delta: text,
-      ts: Date.now(),
-      taskId: this.taskId,
-      correlationId: this.correlationId,
-    });
+    this.reasoningBuffer += text;
+    this.scheduleFlush();
+  }
+
+  /**
+   * 幂等调度 flush：timer 在等时不重复调度（参考 streaming-flusher 模式）。
+   * 仅在有 delta 到达时启动 timer，无 delta 不空跑。
+   */
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flushPendingDeltas();
+    }, BlockCollector.FLUSH_INTERVAL_MS);
+  }
+
+  /**
+   * 冲刷累积的 text/reasoning delta：双 buffer 快照后立即清空（防回调期间新 delta 丢失），
+   * text/reasoning 各 emit 一个合并 delta（blockId 稳定 `${messageId}#text`/`#thinking`，
+   * 前端按 blockId upsert 追加，对单 token vs 合并段无感）。开头 clearTimeout 自清理——
+   * disposeBlockCollector 可直接调用，无需额外清 timer。
+   */
+  flushPendingDeltas(): void {
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
+    const text = this.textBuffer;
+    const reasoning = this.reasoningBuffer;
+    this.textBuffer = '';
+    this.reasoningBuffer = '';
+    if (!text && !reasoning) return;
+    const ts = Date.now();
+    if (text) {
+      this.emit({ sessionId: this.sessionId, messageId: this.messageId, blockId: `${this.messageId}#text`, blockType: 'text', delta: text, ts, taskId: this.taskId, correlationId: this.correlationId });
+    }
+    if (reasoning) {
+      this.emit({ sessionId: this.sessionId, messageId: this.messageId, blockId: `${this.messageId}#thinking`, blockType: 'thinking', delta: reasoning, ts, taskId: this.taskId, correlationId: this.correlationId });
+    }
   }
 
   /**
@@ -429,6 +459,8 @@ export function peekBlockCollector(key: string): BlockCollector | undefined {
 export function disposeBlockCollector(key: string): BlockCollector | undefined {
   const c = activeCollectors.get(key);
   activeCollectors.delete(key);
+  // turn 终态强制 flush 累积的 text/reasoning delta（尾部不丢）+ 清 timer（防泄漏）
+  c?.flushPendingDeltas();
   return c;
 }
 
