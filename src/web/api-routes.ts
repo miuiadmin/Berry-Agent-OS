@@ -335,26 +335,32 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   route('DELETE', '/conversations/:sid', (_req, res, _url, params) => {
     const db = getDb();
-    const deleteAll = db.transaction(() => {
-      // 对话内联（doc 22）：删会话清新表（messages/message_blocks/message_blocks_fts）+ 旧表冷归档。
-      // 全面清该 session 的会话强关联表（任务/工具/审核/权限/意图/记忆）——否则删会话后残留孤儿
-      // （实测 permission_tokens 17 / task_events 1297 / brain_decisions 119 / review_requests 98 等孤儿）。
-      // 用量/日志/trace（model_requests/token_usage/trace_spans/log_events/notifications）保留作全局统计，
-      // 由运维「清空对话/过程数据」脚本统一清。
-      const sid = params.sid;
-      const clearBySession = (table: string) => db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sid);
-      db.prepare('DELETE FROM message_blocks_fts WHERE session_id = ?').run(sid);
-      db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(sid);
-      for (const t of [
-        'messages', 'conversations', 'conversation_meta',
-        'agent_tasks', 'task_events', 'tool_calls', 'agent_tool_calls',
-        'brain_decisions', 'brain_observations', 'review_requests', 'approval_requests', 'permission_tokens',
-        'intent_anchors', 'drift_signals', 'episodes', 'pending_asks',
-      ]) {
-        clearBySession(t);
-      }
-    });
-    deleteAll();
+    // 会话强关联表互有 FK 引用（task_events/tool_calls → agent_tasks 等），按 session_id 批量删时
+    // 顺序无法保证引用方先删，触发 "FOREIGN KEY constraint failed" 整事务回滚（删不掉）。事务前关 FK
+    // （better-sqlite3 同步单线程无并发，finally 恢复原状态）。
+    const fkWasOn = db.pragma('foreign_keys', { simple: true }) === 1;
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        // 对话内联（doc 22）：删会话清新表（messages/message_blocks/message_blocks_fts）+ 旧表冷归档。
+        // 全面清该 session 的会话强关联表（任务/工具/审核/权限/意图/记忆）——否则删会话后残留孤儿。
+        // 用量/日志/trace（model_requests/token_usage/trace_spans）保留作全局统计，由运维脚本统一清。
+        const sid = params.sid;
+        const clearBySession = (table: string) => db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sid);
+        db.prepare('DELETE FROM message_blocks_fts WHERE session_id = ?').run(sid);
+        db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(sid);
+        for (const t of [
+          'messages', 'conversations', 'conversation_meta',
+          'agent_tasks', 'task_events', 'tool_calls', 'agent_tool_calls',
+          'brain_decisions', 'brain_observations', 'review_requests', 'approval_requests', 'permission_tokens',
+          'intent_anchors', 'drift_signals', 'episodes', 'pending_asks',
+        ]) {
+          clearBySession(t);
+        }
+      })();
+    } finally {
+      if (fkWasOn) db.pragma('foreign_keys = ON');
+    }
     json(res, { ok: true });
   });
 
