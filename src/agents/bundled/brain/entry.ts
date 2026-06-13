@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentManifest } from '../../manifest.js';
 import type { ModelMessage } from '../../../contracts/model.js';
 import type { ReviewResult } from '../../../contracts/review.js';
+import type { ToolBlock } from '../../../contracts/message-blocks.js';
 import type { RouteResultPayload, PermissionJudgeResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload } from '../../../contracts/delegation.js';
 import { CORRECTION_LIMITS } from '../../../contracts/delegation.js';
@@ -134,7 +135,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    * @param cause 降级原因（用于 reason 字段和日志追踪）
    */
   function buildFallbackReviewResult(
-    turn: { draftResponse?: string; toolCalls: Array<{ name: string }> },
+    turn: { draftResponse?: string; toolCalls: ToolBlock[] },
     cause: string,
   ): ReviewResult {
     const fallbackResult = fallbackReviewer.review({
@@ -438,7 +439,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     // §5.2.5: 并发审核准入控制 — 等待获取审核 slot
     await acquireReviewSlot();
     try {
-    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string } };
+    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: ToolBlock[]; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string } };
     const trackingId = msg.correlationId ?? msg.id;
     let systemPrompt = getReviewPrompt(turn.level);
 
@@ -821,7 +822,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   function dispatchCheckerReview(
     missionId: string,
     planTaskId: string,
-    turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: Array<{ name: string; input: string; result: string }>; taskDescription?: string },
+    turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: ToolBlock[]; taskDescription?: string },
     brainReviewResult: ReviewResult,
     parentCorrelationId: string,
   ): void {

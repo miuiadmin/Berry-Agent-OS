@@ -4,6 +4,7 @@ import type { IntentAnchor, IntentOutputType } from '../../../contracts/intent.j
 import type { DangerLevel } from '../../../utils/types.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload, CorrectionAction } from '../../../contracts/delegation.js';
 import type { SuperiorReviewRequest, SuperiorReviewResult, SuperiorReviewVerdict } from '../../../contracts/superior-review.js';
+import { toolInputString, toolResultString } from '../../../contracts/message-blocks.js';
 import { getLogger } from '../../../utils/logger.js';
 import { safeSlice, safeSliceWithEllipsis } from '../../../utils/safe-slice.js';
 
@@ -36,7 +37,7 @@ export function buildReviewInput(level: ReviewLevel, turn: TurnRecord): string {
       input += `\n\nTools used: ${toolSummary}`;
     } else {
       const toolDetails = turn.toolCalls
-        .map(tc => `[${tc.name}]\nInput: ${tc.input}\nResult: ${tc.result}`)
+        .map(tc => `[${tc.name}]\nInput: ${toolInputString(tc)}\nResult: ${toolResultString(tc)}`)
         .join('\n\n');
       input += `\n\nTool calls:\n${toolDetails}`;
     }
@@ -586,7 +587,7 @@ export function buildSuperiorReviewUserPrompt(request: SuperiorReviewRequest): s
   if (request.toolCalls.length > 0) {
     prompt += `\n## 工具调用记录\n\n`;
     for (const tc of request.toolCalls) {
-      prompt += `- [${tc.name}] 输入: ${safeSlice(tc.input, 200)}\n  结果: ${safeSlice(tc.result, 200)}\n`;
+      prompt += `- [${tc.name}] 输入: ${safeSlice(toolInputString(tc), 200)}\n  结果: ${safeSlice(toolResultString(tc), 200)}\n`;
     }
   }
 

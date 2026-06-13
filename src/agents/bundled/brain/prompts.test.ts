@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parsePermissionJudge, parseRouteDecision, parseCheckpointResult } from './prompts.js';
+import { parsePermissionJudge, parseRouteDecision, parseCheckpointResult, buildReviewInput } from './prompts.js';
+import type { TurnRecord } from '../../../contracts/review.js';
+import type { ToolBlock } from '../../../contracts/message-blocks.js';
 
 /**
  * 15.0 机制 B：parsePermissionJudge 的 uncertain/escalation 解析测试。
@@ -286,5 +288,54 @@ describe('机制 B escalation emit 边界补全', () => {
       const allowedSources = ['review', 'approval', 'decision', 'checkpoint'];
       expect(allowedSources).toContain('review');
     });
+  });
+});
+
+/**
+ * buildReviewInput（ToolBlock[] turn）—— 审核链工具真相源统一②-b 回归。
+ *
+ * TurnRecord.toolCalls 已是 ToolBlock[]（来自 BlockCollector）。验证 buildReviewInput 在 A/B 级
+ * 正确消费 ToolBlock：A 级只 [name] 摘要；B 级展开 Input/Result（经 toolInputString/toolResultString——
+ * 对象 input JSON 化、字符串 input 直通、completed 取 output、failed 取 error）。
+ */
+describe('buildReviewInput (ToolBlock[] turn)', () => {
+  const baseTurn = {
+    sessionId: 's1',
+    userMessage: '帮我改代码',
+    draftResponse: '已改完',
+    level: 'A' as const,
+  };
+  // ToolBlock[] 模拟 collector 取出的轨迹：一个对象 input + completed，一个字符串 input + failed
+  const toolBlocks: ToolBlock[] = [
+    { type: 'tool', id: 't1', name: 'edit_code', input: { file: 'a.ts', old: 'x' }, state: 'completed', output: 'ok' },
+    { type: 'tool', id: 't2', name: 'run_command', input: 'npm test', state: 'failed', error: 'exit 1' },
+  ];
+
+  it('A 级：toolCalls 渲染为 [name] 摘要，不展开 Input/Result', () => {
+    const out = buildReviewInput('A', { ...baseTurn, toolCalls: toolBlocks });
+    expect(out).toContain('[edit_code]');
+    expect(out).toContain('[run_command]');
+    // A 级只摘要，不展开
+    expect(out).not.toContain('Input:');
+    expect(out).not.toContain('Result:');
+  });
+
+  it('B 级：对象 input 经 toolInputString JSON 化；completed→output、failed→error', () => {
+    const out = buildReviewInput('B', { ...baseTurn, toolCalls: toolBlocks });
+    expect(out).toContain('[edit_code]');
+    // 对象 input → JSON.stringify（toolInputString）
+    expect(out).toContain('"file":"a.ts"');
+    // completed 态 result = output
+    expect(out).toContain('Result: ok');
+    // 字符串 input 直通（不二次引号）
+    expect(out).toContain('Input: npm test');
+    // failed 态 result = error（toolResultString）
+    expect(out).toContain('Result: exit 1');
+  });
+
+  it('空 toolCalls → 无工具段', () => {
+    const out = buildReviewInput('A', { ...baseTurn, toolCalls: [] });
+    expect(out).not.toContain('Tools used');
+    expect(out).not.toContain('Tool calls');
   });
 });

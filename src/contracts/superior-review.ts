@@ -1,5 +1,7 @@
 export type TrustLevel = 'probation' | 'standard' | 'trusted' | 'autonomous';
 
+import type { ToolBlock } from './message-blocks.js';
+
 export type SuperiorReviewVerdict = 'approve' | 'modify' | 'reject';
 
 export interface SuperiorReviewRequest {
@@ -12,7 +14,8 @@ export interface SuperiorReviewRequest {
   workspaceId: string;
   userMessage: string;
   draftResponse: string;
-  toolCalls: Array<{ name: string; input: string; result: string }>;
+  /** 本轮工具调用轨迹（ToolBlock[]，与 TurnRecord 同源 BlockCollector） */
+  toolCalls: ToolBlock[];
   trustLevel: TrustLevel;
   chainDepth: number;
 }

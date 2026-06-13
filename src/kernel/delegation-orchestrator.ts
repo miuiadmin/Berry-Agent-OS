@@ -31,8 +31,7 @@ import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
-// 对话内联：审核链工具真相单一源 = BlockCollector。projectToLegacyToolCalls 是提交1→2 的 IPC seam（提交2删）。
-import { projectToLegacyToolCalls } from '../contracts/message-blocks.js';
+// 对话内联：审核链工具真相单一源 = BlockCollector。onConversationCompleted 等签名用 ToolBlock[]。
 import type { ToolBlock } from '../contracts/message-blocks.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
 import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
@@ -2060,10 +2059,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 对话内联：工具真相单一源 = BlockCollector（消灭 pending.toolCalls 双源）。
       // 审核入口（draft.response）时 collector 仍存活（dispose 发生在 turn-terminal complete 之后）；
       // key 与 persistInlineBlocks 一致（pending.delegationTaskId ?? pending.taskId）。
-      // payload.toolCalls（agent 自报）不再使用——遥测累积的 ToolBlock[] 是唯一源（更全：含 state/error/durationMs）。
+      // TurnRecord.toolCalls 已是 ToolBlock[]（契约统一），直接用 collector 取的完整块（含 state/output/durationMs）。
       const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
-      // 提交1 seam：审核 IPC 契约（TurnRecord）仍是 {name,input,result}[]，投影回旧形；提交2 契约切 ToolBlock[] 后删。
-      const calls = projectToLegacyToolCalls(toolBlocks);
 
       logger.debug({ correlationId, draftLen: draft.length, toolCalls: toolBlocks.length, sessionId }, 'orchestrator:draft');
 
@@ -2071,12 +2068,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         sessionId,
         userMessage: pending.userMessage,
         draftResponse: draft,
-        toolCalls: calls,
+        toolCalls: toolBlocks,
         level: classifyLevel({
           sessionId,
           userMessage: pending.userMessage,
           draftResponse: draft,
-          toolCalls: calls,
+          toolCalls: toolBlocks,
           level: 'A',
           agentDialogCount: this.dialogueRouter?.getDialogueCountByCorrelation(correlationId),
         }),
@@ -2400,7 +2397,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       sessionId: pending.sessionId,
       userMessage: pending.userMessage,
       draftResponse: pending.draftResponse ?? '',
-      toolCalls: projectToLegacyToolCalls(toolBlocks),
+      toolCalls: toolBlocks,
       level: pending.level as 'A' | 'B' | 'C' ?? 'A',
       missionId: pending.missionId,
       planTaskId: pending.planTaskId,
@@ -2489,20 +2486,19 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // 对话内联：工具真相单一源 collector（审核入口，collector 仍存活——dispose 在 turn-terminal complete）。
     // daemon/foreground 路径原读 pending.toolCalls（无生产者恒为 []）→ 现从 collector 取真实工具，
     // 修复「Brain 审核看不到 daemon/外部 agent 任务工具」的隐性 bug。key 与 persistInlineBlocks 一致。
+    // TurnRecord.toolCalls 已是 ToolBlock[]（契约统一），直接用 collector 取的完整块。
     const toolBlocks = peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.getToolBlocks() ?? [];
-    // 提交1 seam：TurnRecord/classifyLevel 仍是 {name,input,result}[]（提交2 契约切 ToolBlock[] 后删）。
-    const toolCalls = projectToLegacyToolCalls(toolBlocks);
 
     const turn: TurnRecord = {
       sessionId: fgEntry.sessionId,
       userMessage: pending.userMessage,
       draftResponse,
-      toolCalls,
+      toolCalls: toolBlocks,
       level: classifyLevel({
         sessionId: fgEntry.sessionId,
         userMessage: pending.userMessage,
         draftResponse,
-        toolCalls,
+        toolCalls: toolBlocks,
         level: 'A',
         missionId,
         agentDialogCount: this.dialogueRouter?.getDialogueCountByCorrelation(fgEntry.correlationId),

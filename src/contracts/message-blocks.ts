@@ -260,14 +260,3 @@ export function toolResultString(b: ToolBlock): string {
   if (b.state === 'failed') return b.error ?? '';
   return stringifyToolPayload(b.output);
 }
-
-/**
- * 【过渡 seam，提交2删除】ToolBlock[] → 旧 `{name,input,result}[]` 投影。
- * 提交1：审核 IPC 契约（TurnRecord / SuperiorReviewRequest）仍是 `{name,input,result}[]`，kernel 从 collector
- *        取 ToolBlock[] 后经此投影喂 IPC。提交2 契约切到 `ToolBlock[]` 后，本函数及全部调用点一并删除。
- */
-export function projectToLegacyToolCalls(
-  blocks: ToolBlock[],
-): Array<{ name: string; input: string; result: string }> {
-  return blocks.map((b) => ({ name: b.name, input: toolInputString(b), result: toolResultString(b) }));
-}

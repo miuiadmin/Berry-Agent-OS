@@ -1,4 +1,5 @@
 import type { RouteDecision } from './routing.js';
+import type { ToolBlock } from './message-blocks.js';
 
 export type ReviewVerdict = 'approve' | 'modify' | 'reject';
 export type ReviewLevel = 'A' | 'B' | 'C';
@@ -13,7 +14,8 @@ export interface TurnRecord {
   sessionId: string;
   userMessage: string;
   draftResponse: string;
-  toolCalls: Array<{ name: string; input: string; result: string }>;
+  /** 本轮工具调用轨迹（ToolBlock[]，单一源 BlockCollector——含 state/output/error/durationMs，比旧 {name,input,result} 更全） */
+  toolCalls: ToolBlock[];
   level: ReviewLevel;
   /** 13.0 §12.6: 关联的 mission ID（Brain 创建 mission 后注入） */
   missionId?: string;
@@ -108,8 +110,8 @@ const DANGEROUS_TOOLS: readonly string[] = [
   'db_write',          // 数据库写入
 ];
 
-/** 检查工具调用列表中是否包含危险工具 */
-function hasDangerousTool(toolCalls: Array<{ name: string }>): boolean {
+/** 检查工具调用列表中是否包含危险工具（仅读 ToolBlock.name） */
+function hasDangerousTool(toolCalls: ToolBlock[]): boolean {
   const dangerousSet = new Set(DANGEROUS_TOOLS);
   return toolCalls.some(tc => dangerousSet.has(tc.name));
 }
