@@ -7,12 +7,11 @@
  * 本文件是前端的纯逻辑层（无 React / zustand 依赖）：
  *   - Block 判别联合（与后端契约同形）
  *   - applyBlockToBlocks：stream.block 事件 → Block[] 的纯 reducer（store 用）
- *   - blocksFromLegacy：旧字段（reasoning/toolCalls）→ Block[] 投影（历史消息 / 无 block 事件的路径兜底）
- *   - displayBlocks：渲染统一入口——live block 优先，缺失项用旧字段补齐（兼容 delegation 路径只走 content）
+ *   - toolBlocksFromLegacy：旧 toolCalls[] → ToolBlock[] 投影（历史消息 / 无 block 事件的路径兜底）
  *
  * 文本不进 block 数组：文本正文仍由 ChatMessage.content 承载（覆盖 task-flow 与 delegation-orchestrator
  * 两条流式路径），block 数组只承载「原先被分离出去」的 tool / thinking / delegation。这避免文本重复，
- * 且精准命中用户痛点（工具调用分离）。displayBlocks 在无 live block 时把 content 也投影为 text block。
+ * 且精准命中用户痛点（工具调用分离）。
  */
 
 /** ToolBlock 4 态机（OpenCode 式 call+result 同一 block）：pending→running→completed|failed */
@@ -169,52 +168,9 @@ interface LegacyToolCall {
 }
 
 /**
- * 渲染统一入口所需的消息形状（结构化类型，避免 import ChatMessage 造成循环依赖）。
- * 只要消息对象有这四个可选字段即可。
- */
-export interface BlockRenderSource {
-  blocks?: Block[];
-  content?: string;
-  reasoning?: string;
-  toolCalls?: LegacyToolCall[];
-}
-
-/**
- * 渲染统一入口：把消息规整为待渲染的 Block[]（设计文档/22）。
- *
- * 策略（兼容两条流式路径 + 历史消息）：
- *   - 有 live block（stream.block 事件累积，多为 tool 块）：以其为基础；缺 text/thinking 时用旧字段补齐
- *     （delegation-orchestrator 路径的 text 只走 content，不经 block 事件——补 text 块避免正文丢失）。
- *   - 无 live block（历史消息 / 纯 legacy 路径）：从 reasoning + toolCalls + content 全量投影。
- *
- * 顺序：thinking → tools → text（与后端 buildBlocks 一致），保证跨刷新与 live 的视觉稳定。
- */
-export function displayBlocks(msg: BlockRenderSource): Block[] {
-  const live = msg.blocks && msg.blocks.length > 0 ? msg.blocks.slice() : [];
-
-  if (live.length === 0) {
-    // 全量投影：thinking ← reasoning, tools ← toolCalls, text ← content
-    const blocks: Block[] = [];
-    if (msg.reasoning) blocks.push({ type: 'thinking', text: msg.reasoning });
-    blocks.push(...toolBlocksFromLegacy(msg.toolCalls));
-    if (msg.content) blocks.push({ type: 'text', text: msg.content });
-    return blocks;
-  }
-
-  // 有 live block：补齐可能缺失的 thinking / text（hybrid 兜底）
-  if (!live.some((b) => b.type === 'thinking') && msg.reasoning) {
-    live.unshift({ type: 'thinking', text: msg.reasoning });
-  }
-  if (!live.some((b) => b.type === 'text') && msg.content) {
-    live.push({ type: 'text', text: msg.content });
-  }
-  return live;
-}
-
-/**
- * 旧字段（reasoning / toolCalls）→ Block[] 投影。
- * 用于历史消息 / 无 stream.block 事件的流式路径（如 delegation-orchestrator 的 text_delta 只走 content）。
- * 顺序：thinking → tools（与后端 buildBlocks 一致；text 由调用方 displayBlocks 单独处理）。
+ * 旧字段（toolCalls[]）→ ToolBlock[] 投影。
+ * 用于历史消息 / 无 stream.block 事件的流式路径兜底（如 delegation-orchestrator 的工具调用不经 block 事件）。
+ * 顺序由调用方保证（thinking 由 reasoning 单独承载；这里只产出 tool block）。
  */
 export function toolBlocksFromLegacy(calls: LegacyToolCall[] | undefined): ToolBlock[] {
   if (!calls?.length) return [];

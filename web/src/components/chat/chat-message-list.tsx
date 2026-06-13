@@ -17,8 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
-import { ThinkingProcess } from "./thinking-process";
-import { ToolCallCards } from "./tool-call-cards";
+import { InlineLeadBlocks } from "./block-renderers";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 import { useT, useLocale } from "@/lib/i18n";
 import {
@@ -97,6 +96,9 @@ const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className={cn("group flex flex-col", isUser ? "items-end" : "items-start")}>
+      {/* 对话内联（设计文档/22）：assistant 消息的思考 / 工具 / 委派 block 按序内联在正文气泡之前，
+          不再是气泡下方的分离兄弟节点——对齐 Claude Code / OpenCode 的内联范式。 */}
+      {!isUser && <InlineLeadBlocks message={message} isActive={isStreaming} />}
       <div
         className={cn(
           "relative max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-4 sm:py-2.5",
@@ -147,18 +149,6 @@ const MessageBubble = memo(function MessageBubble({
           <MessageActions copyText={message.content} isUser={isUser} onEdit={() => setEditing(true)} onDelete={onDelete ? () => onDelete(message.id) : undefined} />
         )}
       </div>
-
-      {/* 思考过程 / 工具调用（间距来自文本行高，不需要额外 margin） */}
-      {!isUser && ((message.thinkingSteps?.length ?? 0) > 0 || message.reasoning) && (
-        <div className="max-w-[90%] sm:max-w-[80%]">
-          <ThinkingProcess steps={message.thinkingSteps ?? []} reasoning={message.reasoning} isActive={isStreaming} />
-        </div>
-      )}
-      {!isUser && (message.toolCalls?.length ?? 0) > 0 && (
-        <div className="max-w-[90%] sm:max-w-[80%]">
-          <ToolCallCards calls={message.toolCalls ?? []} isActive={isStreaming} />
-        </div>
-      )}
     </div>
   );
 });
