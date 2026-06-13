@@ -4,12 +4,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { queries, apiDelete, renameConversation, type ConversationInfo } from "@/lib/api";
-import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Search, Trash2, Pencil, Check, X } from "lucide-react";
-import { useT, useDateFormat } from "@/lib/i18n";
+import { Search } from "lucide-react";
+import { useT } from "@/lib/i18n";
+import { ConversationItem } from "./conversation-item";
 
 interface ConversationSidebarProps {
   onSelect?: () => void;
@@ -17,14 +17,12 @@ interface ConversationSidebarProps {
 
 export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const [search, setSearch] = useState("");
+  /** 待删除确认的会话 ID（非 null 时弹确认框） */
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  /** 正在播放退场动画的会话 ID（动画结束才真正删除） */
   const [removingId, setRemovingId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
-  const editInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const t = useT();
-  const { formatRelative: fmtRelative } = useDateFormat();
 
   const debouncedSearch = useMemo(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -77,7 +75,6 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      setEditingId(null);
     },
     onError: (err: Error) => {
       toast.error(err.message || t("chat.failedToRename"));
@@ -91,31 +88,11 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   };
 
   const handleSelect = (sid: string) => {
-    if (sid === sessionId || editingId === sid) return;
+    if (sid === sessionId) return;
     clearMessages();
     setSessionId(sid);
     onSelect?.();
   };
-
-  const startEditing = (conv: ConversationInfo) => {
-    setEditingId(conv.sessionId);
-    setEditValue(conv.title || conv.firstMessage?.slice(0, 40) || "");
-  };
-
-  const submitRename = () => {
-    if (editingId && editValue.trim()) {
-      renameMutation.mutate({ sid: editingId, title: editValue.trim() });
-    } else {
-      setEditingId(null);
-    }
-  };
-
-  useEffect(() => {
-    if (editingId && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
-    }
-  }, [editingId]);
 
   return (
     <div className="flex h-full w-72 md:w-64 max-w-[85vw] flex-col border-r bg-background md:bg-muted/30">
@@ -138,78 +115,19 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-1">
           {conversations?.map((conv) => (
-            <div
+            <ConversationItem
               key={conv.sessionId}
-              className={cn(
-                "group relative w-full rounded-lg px-3 py-2 text-left text-sm transition-all cursor-pointer active:scale-[0.98] conv-item",
-                conv.sessionId === removingId && "animate-item-exit",
-                conv.sessionId === sessionId
-                  ? "nav-link-active bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50 text-muted-foreground"
-              )}
-              onClick={() => { if (conv.sessionId !== removingId) handleSelect(conv.sessionId); }}
-              onAnimationEnd={() => {
-                if (conv.sessionId === removingId) {
-                  deleteConversation.mutate(removingId);
-                  setRemovingId(null);
-                }
+              conv={conv}
+              isActive={conv.sessionId === sessionId}
+              isRemoving={conv.sessionId === removingId}
+              onSelect={() => handleSelect(conv.sessionId)}
+              onRename={(sid, title) => renameMutation.mutate({ sid, title })}
+              onRequestDelete={() => setDeleteTarget(conv.sessionId)}
+              onExitEnd={() => {
+                if (removingId) deleteConversation.mutate(removingId);
+                setRemovingId(null);
               }}
-            >
-              {editingId === conv.sessionId ? (
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    ref={editInputRef}
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") submitRename();
-                      if (e.key === "Escape") setEditingId(null);
-                    }}
-                    className="flex-1 bg-background border rounded px-2 py-1.5 min-h-[44px] md:min-h-0 md:px-1.5 md:py-0.5 text-[16px] md:text-xs outline-none focus:ring-1 focus:ring-ring"
-                  />
-                  <button type="button" onClick={submitRename} aria-label={t("chat.saveRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-success hover:text-success/80">
-                    <Check className="size-3" />
-                  </button>
-                  <button type="button" onClick={() => setEditingId(null)} aria-label={t("chat.cancelRename")} className="p-1.5 min-h-[44px] md:min-h-0 md:p-0.5 text-muted-foreground hover:text-foreground active:text-foreground">
-                    <X className="size-3" />
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="truncate font-medium pr-20 md:pr-12">
-                    {conv.title || (conv.firstMessage
-                      ? conv.firstMessage.slice(0, 40) + (conv.firstMessage.length > 40 ? "..." : "")
-                      : conv.sessionId.slice(0, 16))}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground/70">
-                    <span>{t("chat.messages", { count: conv.messageCount })}</span>
-                    <span>{fmtRelative(conv.lastActive)}</span>
-                  </div>
-                  <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-all">
-                    <button type="button"
-                      aria-label={t("chat.renameConversation")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditing(conv);
-                      }}
-                      className="rounded-md p-2 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-1 text-muted-foreground hover:text-foreground active:bg-accent flex items-center justify-center"
-                    >
-                      <Pencil className="size-3" />
-                    </button>
-                    <button type="button"
-                      aria-label={t("chat.deleteConversation")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteTarget(conv.sessionId);
-                      }}
-                      className="rounded-md p-2 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-1 text-muted-foreground hover:text-destructive active:bg-destructive/10 flex items-center justify-center"
-                    >
-                      <Trash2 className="size-3" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            />
           ))}
           {(!conversations || conversations.length === 0) && (
             <p className="px-3 py-4 text-center text-xs text-muted-foreground">
