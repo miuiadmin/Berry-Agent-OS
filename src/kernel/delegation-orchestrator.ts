@@ -1752,16 +1752,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             pending.draftResponse = textAccumulator;
             // 定期持久化到 SQLite，前端断连/刷新后可恢复
             this.streamingFlusher.onTextAccumulated(delegationId, textAccumulator, pending.reasoning);
-            // H1 修复：业务路径不再直写 socket，改为 emit，由 WsEventBridge 桥接
-            getEventBus().emit('stream.text_delta', {
-              taskId: delegationId,
-              sessionId: pending.sessionId,
-              text,
-              correlationId,
-            });
-            // 对话内联（doc 22 Phase C）：文本喂 collector → emit stream.block text（TextBlock），
-            // 与 task-flow 路径统一为 block 单源。过渡期与上方 stream.text_delta 双 emit；
-            // 待前端气泡改读 TextBlock 后删 stream.text_delta（Commit 4 消灭双写）。
+            // 对话内联（doc 22 Phase C）：文本经 collector → emit stream.block text（单一事件族，前端气泡从 TextBlock 渲染）。
+            // 粒度 stream.text_delta 已删（与 task-flow 同步消灭双写）；textAccumulator + flusher 仍保留（持久化事实源）。
             blockCollector.onTextDelta(text);
             break;
           }
@@ -2857,15 +2849,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         pending.draftResponse = (pending.draftResponse ?? '') + event.data.text;
         // 定时持久化到 SQLite（断连/刷新恢复用）
         this.streamingFlusher.onTextAccumulated(taskId, pending.draftResponse, pending.reasoning);
-        // P0-B 修复：业务路径不再直写 socket，改为 emit
-        getEventBus().emit('stream.text_delta', {
-          taskId,
-          sessionId: pending.sessionId,
-          text: event.data.text,
-          correlationId: entry.correlationId,
-        });
-        // 对话内联（doc 22 Phase C）：文本喂 collector → emit stream.block text，与 task-flow/runtime 统一。
-        // 过渡期双 emit；待前端改读 TextBlock 后删 stream.text_delta（Commit 4）。
+        // 对话内联（doc 22 Phase C）：文本经 collector → emit stream.block text（单一事件族，前端从 TextBlock 渲染）。
+        // 粒度 stream.text_delta 已删（与 task-flow/runtime 同步消灭双写）；draftResponse + flusher 仍保留（持久化事实源）。
         collector.onTextDelta(event.data.text);
       }
 

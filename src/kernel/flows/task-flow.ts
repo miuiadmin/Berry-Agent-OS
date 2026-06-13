@@ -90,15 +90,8 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
           // 通知 flusher 定期持久化到 SQLite（前端断连恢复用）
           deps.streamingFlusher?.onTextAccumulated(payload.taskId, pending.draftResponse, pending.reasoning);
         }
-        // H1/H2/H3: 不再直写 socket。改为 emit 到 EventBus，由 WsEventBridge 转发给 WS 客户端。
-        // 没有 pending 也照样 emit（可能用于其它 transport / 重连补发 / 持久化 logger）。
-        getEventBus().emit('stream.text_delta', {
-          taskId: payload.taskId,
-          sessionId: pending?.sessionId ?? entry?.sessionId ?? '',
-          text: payload.text,
-          correlationId: entry?.correlationId,
-        });
-        // 对话内联（设计文档/22）：并行 emit stream.block，前端把文本增量内联到对话气泡
+        // 对话内联（doc 22 Phase C）：文本经 collector → emit stream.block（单一事件族，前端气泡从 TextBlock 渲染）。
+        // 粒度 stream.text_delta 已删——消灭双写；pending.draftResponse 累积 + flusher 仍保留（持久化事实源）。
         {
           const sid = pending?.sessionId ?? entry?.sessionId ?? '';
           if (sid) {
@@ -124,14 +117,8 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
             rPending.reasoning ?? '',
           );
         }
-        // 改为 emit，由 WsEventBridge 订阅 EventBus 并转发到 WS 客户端
-        getEventBus().emit('stream.reasoning_delta', {
-          taskId: payload.taskId,
-          sessionId: rPending?.sessionId ?? rEntry?.sessionId ?? '',
-          text: payload.text,
-          correlationId: rEntry?.correlationId,
-        });
-        // 对话内联（设计文档/22）：并行 emit stream.block，前端把推理增量内联为可折叠 thinking 块
+        // 对话内联（doc 22 Phase C）：推理经 collector → emit stream.block thinking（单一事件族，前端从 thinking block 渲染）。
+        // 粒度 stream.reasoning_delta 已删——消灭双写；rPending.reasoning 累积 + flusher 仍保留（持久化事实源）。
         {
           const sid = rPending?.sessionId ?? rEntry?.sessionId ?? '';
           if (sid) {
@@ -197,19 +184,8 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
         } else {
           pending = deps.sessionManager.findPendingByTaskId(payload.taskId);
         }
-        // H1/H2: 不再直写 socket。改为 emit，由 WsEventBridge 转发到 WS 客户端。
-        getEventBus().emit('stream.tool_call', {
-          taskId: payload.taskId,
-          sessionId: pending?.sessionId ?? entry?.sessionId ?? '',
-          toolName: payload.toolName,
-          input: payload.input,
-          result: payload.result,
-          isError: payload.isError,
-          durationMs: payload.durationMs,
-          correlationId: entry?.correlationId,
-        });
-        // 对话内联（设计文档/22）：并行 emit stream.block——工具调用作为内联 tool 块（出生即终态，
-        // task.telemetry 的 tool_call 一次性带 result/input/durationMs）
+        // 对话内联（doc 22 Phase C）：工具调用经 collector → emit stream.block tool（单一事件族，出生即终态
+        // 带 input/result/durationMs，前端从 tool block 渲染）。粒度 stream.tool_call 已删——消灭双写。
         {
           const sid = pending?.sessionId ?? entry?.sessionId ?? '';
           if (sid) {
@@ -222,8 +198,8 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
             });
           }
         }
-        // tool-trace: emit stream.tool_call 时的 durationMs（确认透传到 EventBus → ws-event-bridge → 前端）
-        logger.debug({ taskId: payload.taskId, toolName: payload.toolName, durationMs: payload.durationMs }, 'tool-trace: emit stream.tool_call');
+        // tool-trace: tool_call → onToolCall → stream.block tool（durationMs 随 block 透传到前端）
+        logger.debug({ taskId: payload.taskId, toolName: payload.toolName, durationMs: payload.durationMs }, 'tool-trace: tool_call → onToolCall → stream.block');
         break;
       }
       case 'uncertainty': {

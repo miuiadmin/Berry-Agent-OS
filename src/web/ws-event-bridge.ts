@@ -102,13 +102,11 @@ const BRIDGED_EVENTS: EventName[] = [
  * 命名映射：EventBus 事件名 → ws 客户端消息 type
  */
 const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
-  'stream.text_delta': 'text_delta',
-  'stream.reasoning_delta': 'reasoning_delta',
-  'stream.tool_call': 'tool_call',
   'stream.tool_result': 'tool_result',
   'stream.uncertainty': 'uncertainty',
-  // 对话内联（设计文档/22）：统一 block 事件族——收敛上面 4 个 stream.* 到单一 block 事件，
-  // 前端按 payload.blockType 内联渲染（text/thinking/tool/delegation/review）。旧事件兼容期保留。
+  // 对话内联（doc 22 Phase C）：统一 block 事件族——text/thinking/tool/reasoning 全走 stream.block，
+  // 前端按 payload.blockType 内联渲染。粒度 stream.text_delta/reasoning_delta/tool_call 已删（消灭双写）。
+  // stream.tool_result 暂留（无 block 等价：轻量 toolName+isError 通知，不携带完整 result）。
   'stream.block': 'block',
   'dialogue.status': 'dialogue_status',
   /** 13.0 灵魂版：Agent 间对话每条消息推送（与 dialogue.status 互补） */
