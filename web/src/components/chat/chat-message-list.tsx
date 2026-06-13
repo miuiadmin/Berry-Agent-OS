@@ -156,7 +156,7 @@ const MessageBubble = memo(function MessageBubble({
       )}
       {!isUser && (message.toolCalls?.length ?? 0) > 0 && (
         <div className="max-w-[90%] sm:max-w-[80%]">
-          <ToolCallCards calls={message.toolCalls} isActive={isStreaming} />
+          <ToolCallCards calls={message.toolCalls ?? []} isActive={isStreaming} />
         </div>
       )}
     </div>

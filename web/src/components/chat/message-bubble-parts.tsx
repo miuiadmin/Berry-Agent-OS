@@ -12,9 +12,10 @@ import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { TextAreaField } from "@/components/ui/text-area-field";
+import { CopyButton } from "@/components/ui/copy-button";
 import type { ChatMessage, ChatAttachment } from "@/lib/stores/chat-store";
 
-// ─── CopyButton 已提取到 ui/copy-button.tsx（与 code-block 共享） ───
+// ─── CopyButton 已提取到 ui/copy-button.tsx（与 code-block 共享），此处 re-export 供外部导入 ───
 
 export { CopyButton } from "@/components/ui/copy-button";
 
