@@ -309,7 +309,7 @@ export class PermissionFlow {
         if (result.requiresReview) {
           // 15.0：所有 requiresReview 统一带 requestId（checkAndIssue 已保证）。
           const requestId = result.requestId ?? genId('perm');
-          const mode = this.deps.permissionCoordinator.getMode();
+          const mode = this.deps.permissionCoordinator.getMode(sessionId);
           // 机制 A：按 routeReviewTarget 分流 —— moderate(任意模式) / 任意风险(yolo) 走 Brain；
           // dangerous(ask) 走用户确认。
           if (routeReviewTarget(dangerLevel, mode) === 'brain') {

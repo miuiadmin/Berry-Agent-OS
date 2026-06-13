@@ -185,6 +185,11 @@ export class PermissionCoordinator {
     }
   }
 
+  /** 15.0 R3：清理会话 mode（session GC/teardown 时调用，防 sessionModes 无界增长） */
+  clearSessionMode(sessionId: string): void {
+    this.sessionModes.delete(sessionId);
+  }
+
   /** 取某会话的权限模式（无则回退默认） */
   getMode(sessionId?: string): PermissionMode {
     const m = sessionId ? this.sessionModes.get(sessionId) : undefined;
@@ -354,18 +359,22 @@ export class PermissionCoordinator {
       return { allowed: false, reason: scopeBlock };
     }
 
-    const blockResult = this.getEngineForSession(params.sessionId).checkPermission(
+    const engine = this.getEngineForSession(params.sessionId);
+    const blockResult = engine.checkPermission(
       params.toolName,
       params.toolInput,
       params.dangerLevel,
     );
-    // 15.0 R2-2: requiresReview 不当硬拒——模块 Agent 走同步 request 路径无法做异步 Brain/用户审核，
-    // 但它们是 Brain 委派的受信执行（Brain 经 active_scope 的 forbiddenTools 控制，而非逐工具审核）。
-    // requiresReview 时在 scope 内签 token（auto-approve within scope）；仅真正的硬拒（!allowed 且非
-    // requiresReview，如 deny-all / blocklist）才拒绝。修复前 ask/yolo 下模块 Agent 的 moderate/
-    // 危险类别工具全部被拒，绕过机制 A 的委托语义。
+    // 硬拒（!allowed 且非 requiresReview，如 deny-all）：直接拒绝
     if (!blockResult.allowed && !blockResult.requiresReview) {
       return { allowed: false, reason: blockResult.reason };
+    }
+    // 15.0 R3 F1/F2/F5（修复 R2-2 过度放行）：危险工具类别（write_file/edit_code/run_command 等）
+    // 即使 requiresReview 也不自动签 token——这些工具需要用户/Brain 审核，module agent 同步路径无法
+    // 做异步审核，应 fail-closed 拒绝。仅 moderate 非类别工具走 delegated trust 自动放行（R2-2 原意）。
+    // 修复前：R2-2 的守卫对所有 requiresReview 签 token → 危险工具（含 run_command 的 rm -rf）被放行。
+    if (blockResult.requiresReview && engine.isDangerousTool(params.toolName)) {
+      return { allowed: false, reason: `危险工具 ${params.toolName} 需用户/Brain 审核（module agent 同步路径无法异步审核）` };
     }
 
     const inputHash = createHash('sha256').update(params.toolInput).digest('hex').slice(0, 16);

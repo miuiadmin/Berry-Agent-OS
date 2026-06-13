@@ -359,12 +359,17 @@ export function SquadTab({ missionId }: SquadTabProps) {
   );
 }
 
-/** 信号类型 → emoji 映射 */
-function signalEmoji(type: string) {
-  if (type === "blocker") return "🚫";
-  if (type === "done") return "✅";
-  if (type === "question") return "❓";
-  return "📊";
+/** 信号类型 → emoji（声明式映射表，与 STATUS_VARIANTS 同风格） */
+const SIGNAL_EMOJI: Record<string, string> = {
+  progress: "📊",
+  blocker: "🚫",
+  done: "✅",
+  question: "❓",
+};
+
+/** 取信号 emoji，未知类型回退到 progress 图标 */
+function signalEmoji(type: string): string {
+  return SIGNAL_EMOJI[type] ?? "📊";
 }
 
 /** 单条信号行（发送者 + 消息） */
@@ -425,11 +430,16 @@ function SquadCard({ squad, depth }: SquadCardProps) {
   );
 }
 
-/** 成员角色 → emoji */
-function roleEmoji(role: string) {
-  if (role === "check") return "🔍";
-  if (role === "lead") return "🧠";
-  return "🔧";
+/** 成员角色 → emoji（声明式映射表，与 STATUS_VARIANTS 同风格） */
+const ROLE_EMOJI: Record<string, string> = {
+  lead: "🧠",
+  work: "🔧",
+  check: "🔍",
+};
+
+/** 取角色 emoji，未知角色回退到 work 图标 */
+function roleEmoji(role: string): string {
+  return ROLE_EMOJI[role] ?? "🔧";
 }
 
 /** 单个 squad 成员行 */

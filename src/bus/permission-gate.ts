@@ -23,7 +23,7 @@ export interface BrainJudgeAdapter {
 export class PermissionGate implements IPermissionGate {
   private brainJudge: BrainJudgeAdapter | null = null;
   /** 15.0 机制 A §2.5：读取当前权限模式，让 capability 路径与 IPC 路径一致尊重 mode */
-  private getMode: (() => PermissionMode) | null = null;
+  private getMode: ((sessionId: string) => PermissionMode) | null = null;
   private activeScopeCheckers = new Map<string, ScopeChecker>();
 
   setBrainJudge(judge: BrainJudgeAdapter): void {
@@ -31,7 +31,7 @@ export class PermissionGate implements IPermissionGate {
   }
 
   /** 注入权限模式读取器（返回当前 ask/allow-all/deny-all/yolo） */
-  setMode(getMode: () => PermissionMode): void {
+  setMode(getMode: (sessionId: string) => PermissionMode): void {
     this.getMode = getMode;
   }
 
@@ -64,7 +64,7 @@ export class PermissionGate implements IPermissionGate {
     // 15.0 机制 A §2.5：尊重权限模式，与 IPC 权限路径（permission-flow）保持一致。
     // 此前 gate 完全忽略 mode —— 默认 allow-all 下 capability 仍走 Brain judge（可能拒绝），
     // 与工具路径（allow-all 自动放行）不一致。
-    const mode = this.getMode?.() ?? 'ask';
+    const mode = this.getMode?.(ctx.sessionId) ?? 'ask';
     if (mode === 'allow-all') {
       return { allowed: true, reason: '权限模式 allow-all', source: 'auto' };
     }

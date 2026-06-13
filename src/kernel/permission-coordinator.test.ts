@@ -194,3 +194,37 @@ describe('PermissionCoordinator per-session mode (15.0 R2-4，并发不污染)',
     expect(r.allowed).toBe(true); // sA=allow-all，不被全局 deny-all 污染
   });
 });
+
+describe('checkAndIssueSimple 危险类别不自动放行 (15.0 R3 F1/F2/F5)', () => {
+  it('ask + write_file（危险类别）→ 拒绝（不签 token，需用户/Brain 审核）', () => {
+    const { coord } = makeCoordinator('ask');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe' });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toContain('危险工具');
+  });
+
+  it('ask + run_command（危险类别）→ 拒绝（blocklist rm -rf 不被绕过）', () => {
+    const { coord } = makeCoordinator('ask');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'run_command', toolInput: 'rm -rf /', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(false);
+  });
+
+  it('ask + edit_code（危险类别）→ 拒绝', () => {
+    const { coord } = makeCoordinator('ask');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(false);
+  });
+
+  it('ask + moderate 非类别工具 → 仍签 token（R2-2 delegated trust 保留）', () => {
+    const { coord } = makeCoordinator('ask');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'memory_query', toolInput: '{}', dangerLevel: 'moderate' });
+    expect(r.allowed).toBe(true);
+    expect(r.tokenId).toBeTruthy();
+  });
+
+  it('allow-all + write_file（危险类别）→ 仍拒绝（危险类别在任何模式下都需审核）', () => {
+    const { coord } = makeCoordinator('allow-all');
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe' });
+    expect(r.allowed).toBe(false);
+  });
+});
