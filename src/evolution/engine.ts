@@ -10,6 +10,7 @@ import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('evolution-engine');
 import { genId } from '../utils/id.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 export class EvolutionEngine implements IEvolutionEngine {
   private readonly proposals: EvolutionProposalStore;
@@ -69,7 +70,7 @@ export class EvolutionEngine implements IEvolutionEngine {
         `).run(
           genId('kn'),
           mapFactTypeToKnowledgeType(fact.type),
-          fact.summary,
+          redactSecrets(fact.summary),
           fact.confidence,
           Date.now(),
           Date.now(),

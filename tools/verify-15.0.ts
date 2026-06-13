@@ -1,6 +1,6 @@
 /**
  * 15.0 运行时验证脚本（临时，验证后删除）：
- * 对临时 DB 跑完整 initDb（CORE_SCHEMA + 全部 migration v0-v19），验证：
+ * 对临时 DB 跑完整 initDb（CORE_SCHEMA + 全部 migration v0-v27），验证：
  * 1. 启动无迁移错误
  * 2. FTS 虚表 + 触发器建立（conversations_fts / dialogue_messages_fts / agent_chat_messages_fts + update 触发器）
  * 3. auditor agent.json 合法可加载
@@ -27,8 +27,8 @@ const check = (name: string, cond: boolean) => {
 try {
   // 1. 完整 initDb（跑 CORE_SCHEMA + runMigrations(ALL_MIGRATIONS)）
   initDb(dbPath);
-  check('initDb 成功（全部 migration v0-v19 无错误）', true);
-  check(`ALL_MIGRATIONS 含 v17/v18/v19`, ALL_MIGRATIONS.some(m => m.version === 17) && ALL_MIGRATIONS.some(m => m.version === 18) && ALL_MIGRATIONS.some(m => m.version === 19));
+  check('initDb 成功（全部 migration v0-v27 无错误）', true);
+  check(`ALL_MIGRATIONS 含 v17/v18/v19/v27`, ALL_MIGRATIONS.some(m => m.version === 17) && ALL_MIGRATIONS.some(m => m.version === 18) && ALL_MIGRATIONS.some(m => m.version === 19) && ALL_MIGRATIONS.some(m => m.version === 27));
 
   const db = getDb();
   const tableExists = (t: string) => !!db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(t);

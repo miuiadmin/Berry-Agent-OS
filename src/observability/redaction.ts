@@ -55,7 +55,18 @@ export function redact(obj: unknown): unknown {
  * @param input 原始文本
  * @returns secret 被替换为 [REDACTED:name] 的文本；input 为空则原样返回
  */
-const SECRET_CONTENT_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
+/**
+ * 对话内容子串级 secret 清洗的正则规则表（15.0 存储层加固）。
+ *
+ * **单源原则**：本表是全仓 secret 模式的唯一真相源。`src/kernel/sensitive-redactor.ts`
+ * （PII+secret 脱敏）复用本表做 secret 检测，避免两套正则双写漂移（历史曾因此漏匹配 PGP
+ * `PRIVATE KEY BLOCK` 后缀，见 `redaction.test.ts` 的 PGP 用例）。新增 secret 前缀只改本表，
+ * 两处 redact 同步生效。
+ *
+ * 顺序敏感：PEM 块必须最先匹配（其 base64 正文若被 long_hex 等部分吞掉会破坏整体边界）；
+ * anthropic 必须排在 openai 之前（sk-ant- 前缀会被 sk- 正则部分吞掉）。
+ */
+export const SECRET_CONTENT_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
   // PEM 私钥块必须最先匹配：其 base64 正文若被后续模式（long_hex 等）部分吞掉会破坏整体边界。
   // 覆盖 RSA / EC / OPENSSH / ENCRYPTED / 无算法前缀（PKCS#8）/ PGP（带 BLOCK 后缀）等 PRIVATE KEY 块。
   // 注意 PGP 私钥是 `-----BEGIN PGP PRIVATE KEY BLOCK-----`（多一个 BLOCK 后缀），故尾部需 `(?: BLOCK)?`。
@@ -66,6 +77,9 @@ const SECRET_CONTENT_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: 'github_pat', re: /ghp_[A-Za-z0-9]{36,}/g },
   { name: 'aws_key', re: /AKIA[0-9A-Z]{16}/g },
   { name: 'slack_token', re: /xox[abpsa]-[A-Za-z0-9-]{10,}/g },
+  // 其他厂商 API key 前缀（Groq gsk_ / xAI xai- / 通用 sk_）——与 sensitive-redactor 旧实现合并时补入，
+  // 避免单源化后丢失这几类覆盖。sk_ 用下划线区分于 sk-（连字符，openai_key 已覆盖）。
+  { name: 'api_key_other', re: /\b(?:gsk_|xai-|sk_)[A-Za-z0-9_-]{20,}/g },
   // JWT：三段 base64url，header 几乎必以 eyJ（"{" 的 base64）开头——强信号、低误报
   { name: 'jwt', re: /\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g },
   { name: 'bearer_token', re: /Bearer\s+[A-Za-z0-9\-._~+/]+={0,2}/g },

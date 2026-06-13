@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
+import { redactSecrets } from '../observability/redaction.js';
 import type { IAsyncDelegationService, AsyncDelegationRow, CreateAsyncDelegationInput, AsyncDelegationStatus, AggregatedResult } from './contracts.js';
 
 export class AsyncDelegationService implements IAsyncDelegationService {
@@ -39,10 +40,13 @@ export class AsyncDelegationService implements IAsyncDelegationService {
     const now = Date.now();
     const priority = input.priority ?? 'normal';
     const timeoutMs = input.timeoutMs ?? 7200000;
+    // 15.0 redact 盲区：prompt / context_snapshot 含用户原始委派文本，可能内嵌 secret
+    const prompt = redactSecrets(input.prompt);
+    const contextSnapshot = input.contextSnapshot != null ? redactSecrets(input.contextSnapshot) : null;
     this.stmts.insert.run(
       id, input.sourceSessionId, input.sourceWorkspaceId ?? null,
       input.targetWorkspaceId, input.targetAgentId ?? null,
-      input.prompt, input.contextSnapshot ?? null,
+      prompt, contextSnapshot,
       priority, timeoutMs, input.parentDelegationId ?? null, now,
     );
     return {
@@ -50,7 +54,7 @@ export class AsyncDelegationService implements IAsyncDelegationService {
       source_workspace_id: input.sourceWorkspaceId ?? null,
       target_workspace_id: input.targetWorkspaceId,
       target_agent_id: input.targetAgentId ?? null,
-      prompt: input.prompt, context_snapshot: input.contextSnapshot ?? null,
+      prompt, context_snapshot: contextSnapshot,
       status: 'pending', priority, timeout_ms: timeoutMs,
       result: null, error: null, parent_delegation_id: input.parentDelegationId ?? null,
       created_at: now, accepted_at: null, completed_at: null,
@@ -66,11 +70,13 @@ export class AsyncDelegationService implements IAsyncDelegationService {
   }
 
   complete(delegationId: string, result: string): void {
-    this.stmts.complete.run(result, Date.now(), delegationId);
+    // 15.0 redact 盲区：agent 执行结果可能回显 secret
+    this.stmts.complete.run(redactSecrets(result), Date.now(), delegationId);
   }
 
   fail(delegationId: string, error: string): void {
-    this.stmts.fail.run(error, Date.now(), delegationId);
+    // 15.0 redact 盲区：错误信息可能回显 secret
+    this.stmts.fail.run(redactSecrets(error), Date.now(), delegationId);
   }
 
   cancel(delegationId: string): void {

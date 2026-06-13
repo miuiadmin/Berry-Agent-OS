@@ -5,6 +5,7 @@ import { genId } from '../utils/id.js';
 import type { Database } from 'better-sqlite3';
 import { getLogger } from '../utils/logger.js';
 import { safeSlice } from '../utils/safe-slice.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 const logger = getLogger('unified-evolution-extractor');
 
@@ -141,8 +142,9 @@ export class UnifiedEvolutionExtractor {
           genId('bdec'),
           sessionId,
           feedback.decisionType,
-          safeSlice(userMessage, 200),
-          JSON.stringify(feedback),
+          // 15.0 redact 盲区：userMessage 是用户原文、feedback 含决策回显——脱敏后落库
+          redactSecrets(safeSlice(userMessage, 200)),
+          redactSecrets(JSON.stringify(feedback)),
           null,
           feedback.sentiment === 'negative' ? 'bad' : feedback.sentiment === 'positive' ? 'good' : 'neutral',
           'evolution_engine',

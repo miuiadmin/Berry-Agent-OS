@@ -73,7 +73,10 @@ export const ToolCallCards = memo(function ToolCallCards({ calls, isActive }: To
 
   if (calls.length === 0) return null;
 
-  const totalMs = calls.reduce((sum, c) => sum + c.durationMs, 0);
+  // 防御 durationMs 缺失（daemon 路径的委派 tool_call 可能不带耗时）：
+  // undefined 参与加法会让整个 totalMs 变 NaN，导致总耗时彻底丢失。缺失项按 0 累加，
+  // 至少保住其余有耗时工具的汇总值。
+  const totalMs = calls.reduce((sum, c) => sum + (c.durationMs ?? 0), 0);
   const hasErrors = calls.some((c) => c.isError);
 
   // 外层容器不加 margin，与"思考过程"块紧邻；块间剩余视觉间距来自文本 line-height（行盒留白）而非 margin

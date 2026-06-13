@@ -4,6 +4,7 @@ import type { RuntimeAdapter } from './adapters/types.js';
 import type { NormalizedExternalEvent } from '../contracts/daemon-events.js';
 import type { DaemonTaskInput } from '../contracts/daemon-protocol.js';
 import { killProcessSafely } from '../lib/process-utils.js';
+import { getLogger } from '../utils/logger.js';
 
 export interface ExecutionResult {
   ok: boolean;
@@ -16,6 +17,9 @@ export interface ExecutionResult {
 }
 
 export type ProgressCallback = (event: NormalizedExternalEvent) => void;
+
+/** 工具调用计时链路 trace 日志器（grep `tool-trace` 看全链路） */
+const logger = getLogger('daemon-executor');
 
 export class Executor {
   private adapter: RuntimeAdapter;
@@ -74,6 +78,11 @@ export class Executor {
 
         const events = Array.isArray(parsed) ? parsed : [parsed];
         for (const event of events) {
+          // tool-trace: daemon 外部 agent 的 tool_call/tool_result 事件（验证是否到达、callId 是否可用于配对计时）
+          if (event.data.kind === 'tool_call' || event.data.kind === 'tool_result') {
+            const d = event.data as { toolName?: string; callId?: string };
+            logger.debug({ kind: event.data.kind, toolName: d.toolName, callId: d.callId }, 'tool-trace: daemon executor onProgress');
+          }
           onProgress(event);
 
           switch (event.data.kind) {

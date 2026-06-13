@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { genId } from '../utils/id.js';
 import { MS_PER_DAY } from '../lib/time-constants.js';
+import { redactSecrets } from '../observability/redaction.js';
 import type {
   IMemoryLayerService,
   AgentMemoryRow,
@@ -136,11 +137,13 @@ export class MemoryLayerService implements IMemoryLayerService {
     const id = genId();
     const now = Date.now();
     const importance = input.importance ?? 0.5;
-    this.stmts.insertAgent.run(id, input.agentId, input.workspaceId ?? null, input.type, input.content, input.source ?? null, importance, now, now);
-    this.syncAgentFts(id, input.content);
+    // 15.0 redact 盲区：三层记忆 content 落库前脱敏（redacted 同步入 FTS，避免 secret 被索引）
+    const content = redactSecrets(input.content);
+    this.stmts.insertAgent.run(id, input.agentId, input.workspaceId ?? null, input.type, content, input.source ?? null, importance, now, now);
+    this.syncAgentFts(id, content);
     return {
       id, agent_id: input.agentId, workspace_id: input.workspaceId ?? null,
-      type: input.type, content: input.content, source: input.source ?? null,
+      type: input.type, content, source: input.source ?? null,
       importance, access_count: 0, last_accessed_at: null, archived: 0, created_at: now, updated_at: now,
     };
   }
@@ -154,7 +157,7 @@ export class MemoryLayerService implements IMemoryLayerService {
   updateAgentMemory(id: string, updates: Partial<Pick<AgentMemoryRow, 'content' | 'importance' | 'type'>>): void {
     const row = this.stmts.getAgentMemory.get(id) as AgentMemoryRow | undefined;
     if (!row) return;
-    const content = updates.content ?? row.content;
+    const content = redactSecrets(updates.content ?? row.content);
     const importance = updates.importance ?? row.importance;
     const type = updates.type ?? row.type;
     this.stmts.updateAgentMemory.run(content, importance, type, Date.now(), id);
@@ -183,11 +186,13 @@ export class MemoryLayerService implements IMemoryLayerService {
     const origin = input.origin ?? 'manual';
     const visibility = input.visibility ?? 'workspace';
     const tags = input.tags ? JSON.stringify(input.tags) : null;
-    this.stmts.insertWorkspace.run(id, input.workspaceId, input.ownerAgentId ?? null, input.type, input.content, origin, visibility, importance, tags, input.sourceMemoryId ?? null, now, now);
-    this.syncWorkspaceFts(id, input.content);
+    // 15.0 redact 盲区：workspace 记忆 content 落库前脱敏（redacted 同步入 FTS）
+    const content = redactSecrets(input.content);
+    this.stmts.insertWorkspace.run(id, input.workspaceId, input.ownerAgentId ?? null, input.type, content, origin, visibility, importance, tags, input.sourceMemoryId ?? null, now, now);
+    this.syncWorkspaceFts(id, content);
     return {
       id, workspace_id: input.workspaceId, owner_agent_id: input.ownerAgentId ?? null,
-      type: input.type, content: input.content, origin, visibility, importance, tags,
+      type: input.type, content, origin, visibility, importance, tags,
       recall_count: 0, verified_at: null, source_memory_id: input.sourceMemoryId ?? null,
       archived: 0, last_recalled_at: null, created_at: now, updated_at: now,
     };
@@ -203,7 +208,7 @@ export class MemoryLayerService implements IMemoryLayerService {
   updateWorkspaceMemory(id: string, updates: Partial<Pick<WorkspaceMemoryRow, 'content' | 'importance' | 'visibility' | 'type'>>): void {
     const row = this.stmts.getWorkspaceMemory.get(id) as WorkspaceMemoryRow | undefined;
     if (!row) return;
-    const content = updates.content ?? row.content;
+    const content = redactSecrets(updates.content ?? row.content);
     const importance = updates.importance ?? row.importance;
     const visibility = updates.visibility ?? row.visibility;
     const type = updates.type ?? row.type;
@@ -223,10 +228,12 @@ export class MemoryLayerService implements IMemoryLayerService {
     const importance = input.importance ?? 0.5;
     const origin = input.origin ?? 'manual';
     const tags = input.tags ? JSON.stringify(input.tags) : null;
-    this.stmts.insertGlobal.run(id, input.userId, input.type, input.content, origin, input.sourceWorkspaceId ?? null, input.sourceMemoryId ?? null, importance, tags, now, now);
-    this.syncGlobalFts(id, input.content);
+    // 15.0 redact 盲区：global 记忆 content 落库前脱敏（redacted 同步入 FTS）
+    const content = redactSecrets(input.content);
+    this.stmts.insertGlobal.run(id, input.userId, input.type, content, origin, input.sourceWorkspaceId ?? null, input.sourceMemoryId ?? null, importance, tags, now, now);
+    this.syncGlobalFts(id, content);
     return {
-      id, user_id: input.userId, type: input.type, content: input.content, origin, importance, tags,
+      id, user_id: input.userId, type: input.type, content, origin, importance, tags,
       source_workspace_id: input.sourceWorkspaceId ?? null, source_memory_id: input.sourceMemoryId ?? null,
       recall_count: 0, verified_at: null, archived: 0, last_recalled_at: null, created_at: now, updated_at: now,
     };
@@ -241,7 +248,7 @@ export class MemoryLayerService implements IMemoryLayerService {
   updateGlobalMemory(id: string, updates: Partial<Pick<GlobalMemoryRow, 'content' | 'importance' | 'type'>>): void {
     const row = this.stmts.getGlobalMemory.get(id) as GlobalMemoryRow | undefined;
     if (!row) return;
-    const content = updates.content ?? row.content;
+    const content = redactSecrets(updates.content ?? row.content);
     const importance = updates.importance ?? row.importance;
     const type = updates.type ?? row.type;
     this.stmts.updateGlobalMemory.run(content, importance, type, Date.now(), id);

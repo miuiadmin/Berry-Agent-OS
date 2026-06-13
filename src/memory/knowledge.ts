@@ -1,5 +1,6 @@
 import { getDb } from './db.js';
 import { genId } from '../utils/id.js';
+import { redactSecrets } from '../observability/redaction.js';
 import type {
   AddKnowledgeInput,
   EvidenceKind,
@@ -38,7 +39,7 @@ export function addKnowledge(input: AddKnowledgeInput): KnowledgeEntry {
 
       if (input.detail) {
         sets.push('detail = ?');
-        values.push(input.detail);
+        values.push(redactSecrets(input.detail));
       }
       if (input.evidenceKind === 'direct') {
         sets.push("evidence_kind = 'direct'");
@@ -69,8 +70,8 @@ export function addKnowledge(input: AddKnowledgeInput): KnowledgeEntry {
       id,
       ownerKey,
       input.type,
-      input.summary,
-      input.detail ?? null,
+      redactSecrets(input.summary),
+      input.detail ? redactSecrets(input.detail) : null,
       input.evidenceKind ?? 'inferred',
       input.source ?? 'conversation',
       confidence,
@@ -106,8 +107,8 @@ export function updateKnowledge(id: string, updates: UpdateKnowledgeInput): void
   const sets: string[] = ['updated_at = ?'];
   const values: unknown[] = [Date.now()];
 
-  if (updates.summary !== undefined) { sets.push('summary = ?'); values.push(updates.summary); }
-  if (updates.detail !== undefined) { sets.push('detail = ?'); values.push(updates.detail); }
+  if (updates.summary !== undefined) { sets.push('summary = ?'); values.push(redactSecrets(updates.summary)); }
+  if (updates.detail !== undefined) { sets.push('detail = ?'); values.push(redactSecrets(updates.detail)); }
   if (updates.confidence !== undefined) { sets.push('confidence = ?'); values.push(updates.confidence); }
   if (updates.importance !== undefined) { sets.push('importance = ?'); values.push(updates.importance); }
   if (updates.durability !== undefined) { sets.push('durability = ?'); values.push(updates.durability); }

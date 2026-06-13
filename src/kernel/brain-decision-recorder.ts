@@ -40,8 +40,9 @@ export class BrainDecisionRecorder {
         id,
         input.sessionId,
         input.decisionType,
-        input.inputSummary.slice(0, 500),
-        JSON.stringify(input.outputJson),
+        // 15.0 redact 盲区：input_summary 常含用户原文、output_json 含工具输入输出回显——脱敏后落库
+        redactSensitiveData(input.inputSummary.slice(0, 500)).redacted,
+        redactSensitiveData(JSON.stringify(input.outputJson)).redacted,
         input.confidence ?? null,
         outcome,
         input.taskId ?? null,

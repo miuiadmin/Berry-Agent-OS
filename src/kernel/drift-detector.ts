@@ -167,8 +167,9 @@ export class DriftDetector {
         signal.checkpointType,
         signal.alignmentScore,
         signal.needsIntervention ? 1 : 0,
-        signal.driftDescription ?? null,
-        signal.suggestedAction ?? null,
+        // 15.0 redact 盲区：drift_description / suggested_action 是 LLM 生成的分析文本，可能回显用户原文中的 secret
+        signal.driftDescription != null ? redactSecrets(signal.driftDescription) : null,
+        signal.suggestedAction != null ? redactSecrets(signal.suggestedAction) : null,
         null,
         anchorId ?? null,
         Date.now(),

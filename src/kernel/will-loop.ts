@@ -8,6 +8,7 @@ import { getLogger } from '../utils/logger.js';
 import { genId } from '../utils/id.js';
 import { MS_PER_HOUR } from '../lib/time-constants.js';
 import { metrics } from '../observability/metrics.js';
+import { redactSecrets } from '../observability/redaction.js';
 import type Database from 'better-sqlite3';
 
 const logger = getLogger('will-loop');
@@ -338,8 +339,9 @@ export class WillLoop {
         VALUES (?, 'will-loop', 'will_action', ?, ?, ?, ?)
       `).run(
         genId('bdec'),
-        decision.description.slice(0, 200),
-        JSON.stringify(decision),
+        // 15.0 redact 盲区：will_action 决策描述 / 输出可能回显 secret
+        redactSecrets(decision.description.slice(0, 200)),
+        redactSecrets(JSON.stringify(decision)),
         decision.confidence,
         Date.now(),
       );

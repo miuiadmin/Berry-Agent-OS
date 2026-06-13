@@ -2,6 +2,7 @@ import type { AgentTaskPayload } from '../../../contracts/tasks.js';
 import { getDb, startModuleAgent } from '../../module-agent.js';
 import type { ModuleAgentContext } from '../../module-agent.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
+import { redactSecrets } from '../../../observability/redaction.js';
 // 13.0: 注册 memory 工具，使 dialogue handler 的 runToolLoop 能使用 memory_query 等
 import { createMemoryTools } from '../../../tools/memory-tools.js';
 import { registerTool } from '../../../tools/index.js';
@@ -92,7 +93,7 @@ async function handleMemoryJudge(
       db.prepare(`
         INSERT INTO knowledge (id, owner_key, type, summary, evidence_kind, source, confidence, created_at, updated_at, last_seen_at)
         VALUES (?, 'user:owner', ?, ?, 'inferred', 'conversation', ?, ?, ?, ?)
-      `).run(genId('kn'), fact.type, fact.summary, fact.confidence, Date.now(), Date.now(), Date.now());
+      `).run(genId('kn'), fact.type, redactSecrets(fact.summary), fact.confidence, Date.now(), Date.now(), Date.now());
       saved++;
     } catch { /* skip duplicates */ }
   }
