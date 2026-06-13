@@ -22,6 +22,11 @@ export interface Attachment {
   url: string;
 }
 
+/** UploadResponse → Attachment 映射（file-upload / use-file-drop 共用） */
+export function toAttachment(r: UploadResponse): Attachment {
+  return { fileId: r.fileId, filename: r.filename, mimeType: r.mimeType, size: r.size, url: r.url };
+}
+
 interface FileUploadProps {
   attachments: Attachment[];
   onAttach: (attachment: Attachment) => void;
@@ -40,13 +45,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
     try {
       for (const file of Array.from(files)) {
         const result = await uploadFile(file);
-        onAttach({
-          fileId: result.fileId,
-          filename: result.filename,
-          mimeType: result.mimeType,
-          size: result.size,
-          url: result.url,
-        });
+        onAttach(toAttachment(result));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : t("fileUpload.uploadFailed");

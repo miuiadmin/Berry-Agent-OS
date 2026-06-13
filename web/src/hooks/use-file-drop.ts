@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useRef } from "react";
-import type { Attachment } from "@/components/chat/file-upload";
+import { toAttachment, type Attachment } from "@/components/chat/file-upload";
 import { uploadFile } from "@/lib/api";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
@@ -83,13 +83,7 @@ export function useFileDrop(): UseFileDropReturn {
         if (controller.signal.aborted) break;
         try {
           const result = await uploadFile(file, controller.signal);
-          uploaded.push({
-            fileId: result.fileId,
-            filename: result.filename,
-            mimeType: result.mimeType,
-            size: result.size,
-            url: result.url,
-          });
+          uploaded.push(toAttachment(result));
         } catch (err) {
           if (controller.signal.aborted) break;
           const msg = err instanceof Error ? err.message : t("chat.fileUploadFailed");

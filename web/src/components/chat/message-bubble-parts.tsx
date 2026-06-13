@@ -2,11 +2,11 @@
  * 消息气泡的辅助子组件。
  *
  * 从 chat-message-list.tsx 拆出，让 MessageBubble 主组件只保留编排逻辑。
- * 这些组件互相独立，CopyButton 被 MessageActions 内部复用。
+ * CopyButton 已提取到 ui/copy-button.tsx（与 code-block 共享），此处 re-export。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, X, SendHorizontal, AlertCircle, RotateCcw, Pencil, Trash2, FileText, Download } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { X, SendHorizontal, AlertCircle, RotateCcw, Pencil, Trash2, FileText, Download } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -14,47 +14,15 @@ import { ClickableImage } from "@/components/ui/image-lightbox";
 import { TextAreaField } from "@/components/ui/text-area-field";
 import type { ChatMessage, ChatAttachment } from "@/lib/stores/chat-store";
 
+// ─── CopyButton 已提取到 ui/copy-button.tsx（与 code-block 共享） ───
+
+export { CopyButton } from "@/components/ui/copy-button";
+
 /** Brain 审核标注视觉配置（消除 verdict 三元重复） */
 const REVIEW_CFG: Record<"modify" | "reject", { style: string; icon: LucideIcon; labelKey: string }> = {
   modify: { style: "bg-warning/10 text-warning", icon: Pencil, labelKey: "chat.brainModified" },
   reject: { style: "bg-destructive/10 text-destructive", icon: AlertCircle, labelKey: "chat.brainRejected" },
 };
-
-// ─── CopyButton ───────────────────────────────────────────────────
-
-/**
- * 复制按钮：点击写入剪贴板，1.5s 内显示 ✓ 反馈。
- * 失败时静默（剪贴板被拒 / 非安全上下文）。
- */
-export function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const t = useT();
-  /** 反馈态定时器引用，卸载时清除 */
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 1500);
-    }).catch(() => { /* clipboard access denied or insecure context */ });
-  }, [text]);
-
-  return (
-    <button type="button"
-      onClick={handleCopy}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground active:bg-accent min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:px-1.5 md:py-0",
-        className,
-      )}
-      aria-label={t("chat.copy")}
-    >
-      {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
-    </button>
-  );
-}
 
 // ─── EditableMessage ──────────────────────────────────────────────
 
