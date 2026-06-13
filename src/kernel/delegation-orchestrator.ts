@@ -30,7 +30,7 @@ import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
-import { getOrCreateBlockCollector } from './block-collector.js';
+import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
 import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
 import {
@@ -2254,6 +2254,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       // 无 handoff — 正常关闭路径
       this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
+      // 对话内联（doc 22）：Brain 审核 modify/reject → 落 ReviewBlock，刷新后徽章保留。
+      // complete() 内 persistInlineBlocks 会 dispose collector 并 buildBlocks 含此 review block。
+      // 仅 modify/reject（approve 不显示徽章，且自动批准居多）。collector 此刻仍存活（complete 才 dispose），
+      // 故用 peek（不销毁）。无 collector（纯文本无 telemetry 的极端情况）则 optional chaining 跳过。
+      if (reviewVerdict === 'modify' || reviewVerdict === 'reject') {
+        peekBlockCollector(pending.delegationTaskId ?? pending.taskId ?? '')?.onReview({
+          verdict: reviewVerdict,
+          reason: reviewReason,
+          originalDraft,
+        });
+      }
       // 半收尾：保存对话轮次 + 删除 pending（不 resolve），留后续操作用 pending 数据
       const finalized = this.sessionManager.complete(correlationId, response, { skipResolve: true });
       if (!finalized || finalized === true) return;

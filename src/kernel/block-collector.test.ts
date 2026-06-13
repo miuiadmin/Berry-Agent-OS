@@ -276,6 +276,60 @@ describe('BlockCollector 委派块（onDelegationStart/onDelegationComplete）',
   });
 });
 
+/**
+ * 审核块路径（conversation agent final.response：Brain 审核 modify/reject）。
+ * 钉死 onReview 的出生即终态 + 落库序（review 置于末尾）—— 这是 doc-22 审核裁决持久化
+ * （刷新后 Brain 徽章保留）所依赖的核心归一逻辑。ReviewBlock 无状态机、无 id（同 text/thinking）。
+ */
+describe('BlockCollector 审核块（onReview）', () => {
+  let emitted: StreamBlockPayload[];
+  const emit: BlockEmitter = (p) => emitted.push(p);
+
+  beforeEach(() => {
+    emitted = [];
+    _clearBlockCollectorsForTest();
+  });
+
+  it('onReview(modify) → review block，blockId = ${messageId}#review，携带 verdict/reason/originalDraft', () => {
+    const c = new BlockCollector('s1', 't1', 'c1', emit);
+    c.onReview({ verdict: 'modify', reason: '补充安全提示', originalDraft: '初稿...' });
+    expect(emitted).toHaveLength(1);
+    const e = emitted[0];
+    expect(e.blockType).toBe('review');
+    expect(e.blockId).toBe(`${c.messageId}#review`);
+    expect(e.block?.type).toBe('review');
+    expect(e.block?.verdict).toBe('modify');
+    expect(e.block?.reason).toBe('补充安全提示');
+    expect(e.block?.originalDraft).toBe('初稿...');
+  });
+
+  it('onReview(reject)：仅 verdict + reason（originalDraft 可选）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onReview({ verdict: 'reject', reason: '涉及危险操作' });
+    expect(emitted[0].block?.verdict).toBe('reject');
+    expect(emitted[0].block?.originalDraft).toBeUndefined();
+  });
+
+  it('buildBlocks：review 置于末尾（delegation→thinking→tools→text→review）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onDelegationStart({ targetAgent: 'code' });
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 1000 });
+    c.onToolComplete({ callId: 'c1', output: '{"ok":true}', success: true, ts: 1100 });
+    c.onReview({ verdict: 'modify', reason: 'r' });
+    const blocks = c.buildBlocks({ reasoning: '思考', draftResponse: '正文' });
+    // 顺序：delegation → thinking → tool → text → review
+    expect(blocks.map((b) => b.type)).toEqual(['delegation', 'thinking', 'tool', 'text', 'review']);
+    const last = blocks[blocks.length - 1];
+    expect(last.type === 'review' && last.verdict).toBe('modify');
+  });
+
+  it('buildBlocks：无审核时不含 review（纯对话 / approve 不落 review block）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    const blocks = c.buildBlocks({ draftResponse: 'hi' });
+    expect(blocks.filter((b) => b.type === 'review')).toHaveLength(0);
+  });
+});
+
 describe('BlockCollector registry', () => {
   beforeEach(() => _clearBlockCollectorsForTest());
 

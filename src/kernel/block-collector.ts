@@ -20,7 +20,7 @@
 
 import { getEventBus } from './event-bus.js';
 import { genId } from '../utils/id.js';
-import type { StreamBlockPayload, ToolBlock, DelegationBlock, DelegationBlockState, Block } from '../contracts/message-blocks.js';
+import type { StreamBlockPayload, ToolBlock, DelegationBlock, DelegationBlockState, ReviewBlock, Block } from '../contracts/message-blocks.js';
 /** stream.block emit 函数类型（默认走全局 EventBus；测试可注入捕获函数） */
 export type BlockEmitter = (payload: StreamBlockPayload) => void;
 
@@ -62,6 +62,13 @@ export class BlockCollector {
    * （委派卡作为「本轮委派给 X agent」的表头，先于其内部思考/工具/正文）。
    */
   private delegationBlock: DelegationBlock | undefined;
+  /**
+   * 本轮 Brain 审核裁决 block（落库用）。一轮至多一个审核终态，故单值。
+   * 由 onReview 创建（出生即终态，无状态机——审核裁决不像工具/委派有中间态）；
+   * buildBlocks 时置于末尾（审核是对整轮的裁决，排在正文之后）。仅 modify/reject 落库
+   * （approve 不显示徽章，且多为自动批准，落库会误导「发生过审核」）。
+   */
+  private reviewBlock: ReviewBlock | undefined;
 
   constructor(
     private readonly sessionId: string,
@@ -316,8 +323,41 @@ export class BlockCollector {
   }
 
   /**
-   * 构建本轮完整 Block[]（顺序：delegation → thinking → tools → text），供调用方落库到 message_blocks。
-   * delegation 置于最前——委派卡作为本轮表头，先于子 agent 的思考 / 工具 / 正文。
+   * Brain 审核裁决（conversation agent final.response 路径：modify / reject）。
+   *
+   * ReviewBlock 出生即终态——无状态机（审核裁决不像工具/委派有 running 中间态），与 onToolCall 同形。
+   * 存入 {@link reviewBlock} 供 buildBlocks 落库（审核裁决刷新后保留——前端从 message_blocks 的 review
+   * block 投影 reviewVerdict，徽章刷新不丢）。
+   *
+   * emit stream.block（blockType='review'）——前端 applyBlockToBlocks 暂无 review 分支时为 no-op
+   * （实时渲染仍走既有 review_info 事件）；持久化是本方法的核心目的。仅 modify/reject 调用
+   * （approve 不显示徽章，且自动批准居多，落库会误导「发生过真实审核」）。
+   *
+   * @param opts.verdict       审核裁决（modify / reject）
+   * @param opts.reason        裁决理由（reject 原因 / modify 说明）
+   * @param opts.originalDraft modify 时的初稿（前端 diff / 一键还原用）
+   */
+  onReview(opts: { verdict: ReviewBlock['verdict']; reason?: string; originalDraft?: string }): void {
+    const blockId = `${this.messageId}#review`;
+    const block: ReviewBlock = { type: 'review', verdict: opts.verdict };
+    if (opts.reason) block.reason = opts.reason;
+    if (opts.originalDraft) block.originalDraft = opts.originalDraft;
+    this.reviewBlock = block;
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId,
+      blockType: 'review',
+      block,
+      ts: Date.now(),
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+  }
+
+  /**
+   * 构建本轮完整 Block[]（顺序：delegation → thinking → tools → text → review），供调用方落库到 message_blocks。
+   * delegation 置于最前（委派表头）；review 置于末尾（对整轮的裁决，排在正文之后）。
    * text/thinking 从外部事实源（pending.draftResponse / reasoning）注入，避免 collector 重复持有全文。
    * 无任何内容时返回空数组（调用方据此跳过建空消息）。
    */
@@ -327,6 +367,7 @@ export class BlockCollector {
     if (opts.reasoning) blocks.push({ type: 'thinking', text: opts.reasoning });
     blocks.push(...this.toolBlocks);
     if (opts.draftResponse) blocks.push({ type: 'text', text: opts.draftResponse });
+    if (this.reviewBlock) blocks.push(this.reviewBlock);
     return blocks;
   }
 
