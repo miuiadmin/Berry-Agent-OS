@@ -18,6 +18,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { CardListSkeleton } from "@/components/ui/card-list-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -131,7 +132,7 @@ export default function SchedulerPage() {
       {/* Jobs tab */}
       {tab === "jobs" && (
         <div role="tabpanel">
-          <QueryBoundary query={jobsQuery} skeleton={<JobsSkeleton />}>
+          <QueryBoundary query={jobsQuery} skeleton={<CardListSkeleton count={2} bars={["h-4 w-1/3", "h-3 w-2/3"]} />}>
             {(jobs) =>
               jobs.length === 0 ? (
                 <EmptyState
@@ -168,7 +169,7 @@ export default function SchedulerPage() {
       {/* Webhooks tab */}
       {tab === "webhooks" && (
         <div role="tabpanel">
-          <QueryBoundary query={webhookQuery} skeleton={<WebhooksSkeleton />}>
+          <QueryBoundary query={webhookQuery} skeleton={<CardListSkeleton count={3} bars={["h-4 w-1/3"]} />}>
             {(webhooks) => webhooks.length === 0 ? (
               <EmptyState icon={Webhook} title={t("scheduler.noWebhookDeliveries")} description={t("scheduler.webhookHint")} />
             ) : (
@@ -211,37 +212,12 @@ export default function SchedulerPage() {
 
 // ─── Skeleton 组件 ─────────────────────────────────────────────────
 
-function JobsSkeleton() {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: 2 }).map((_, i) => (
-        <Card key={i}><CardContent className="py-3"><div className="space-y-2">
-          <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-          <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-        </div></CardContent></Card>
-      ))}
-    </div>
-  );
-}
-
 function QueueSkeleton() {
   return (
     <div className="grid gap-4 md:grid-cols-3">
       {Array.from({ length: 3 }).map((_, i) => (
         <Card key={i}><CardContent className="py-4 text-center">
           <div className="mx-auto h-8 w-16 animate-pulse rounded bg-muted" />
-        </CardContent></Card>
-      ))}
-    </div>
-  );
-}
-
-function WebhooksSkeleton() {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}><CardContent className="py-3">
-          <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
         </CardContent></Card>
       ))}
     </div>

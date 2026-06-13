@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { CardListSkeleton } from "@/components/ui/card-list-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -141,7 +142,7 @@ export default function MemoryPage() {
       </div>
 
       {/* 记忆列表 */}
-      <QueryBoundary query={listQuery} skeleton={<MemorySkeleton />}>
+      <QueryBoundary query={listQuery} skeleton={<CardListSkeleton count={3} bars={["h-4 w-1/3", "h-3 w-2/3"]} />}>
         {(memories) => {
           const entries: MemoryEntry[] = searchQuery.trim()
             ? (recallQuery.data?.results ?? [])
@@ -240,23 +241,5 @@ function MemoryCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-/** 记忆列表骨架屏 */
-function MemorySkeleton() {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="py-3">
-            <div className="space-y-2">
-              <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
   );
 }
