@@ -113,15 +113,15 @@ export class CorrectionFlow {
 
     logger.info({ delegationId, action: correction.action }, 'Applying correction');
 
-    // 15.0 机制 B：checkpoint 拿不准任务走向 → 升级问用户，不 apply action（continue/adjust/stop/restart）
+    // 15.0 机制 B：checkpoint 拿不准任务走向 → 澄清问题作为本轮回复结束（Design A，与 route/review 升级一致）。
+    // 不走 conversation.ask_user 死通道（无 setPendingAsk → sendUserReply 丢弃回复）。前台轮次：
+    // getPending(entry.correlationId) 有 pending → complete 把 Brain 问题作为 assistant 回复，用户下轮补充后重新委派。
+    // 后台任务无 pending → complete 返回 false（安全 no-op），问题对该任务无可达用户——属已知限制。
+    // 委派 fail 释放 active_scope（onTermination→cleanupTaskState→clearActiveScope），与 V-2 同源防泄漏；fail 幂等。
     if (correction.escalation) {
-      getEventBus().emit('conversation.ask_user', {
-        sessionId: entry.sessionId,
-        taskId: delegationId,
-        agent: 'brain',
-        question: correction.escalation.questionToUser,
-      });
       logger.info({ delegationId, question: correction.escalation.questionToUser.slice(0, 100) }, 'checkpoint 升级问用户（机制 B）');
+      this.ctx.sessionManager.complete(entry.correlationId, correction.escalation.questionToUser);
+      this.ctx.delegationManager.fail(delegationId, 'Brain checkpoint 升级问用户');
       return;
     }
 
@@ -330,15 +330,11 @@ export class CorrectionFlow {
       if (pending) {
         const questionText = correction.instruction
           ?? `我尝试了多种方案处理你的请求但都失败了。能否提供更多细节？`;
-        // 直接 resolve pending（让 conversation 把 askUser 转给真实用户）
-        const finalized = this.ctx.sessionManager.complete(entry.correlationId, questionText, { skipResolve: false });
-        if (finalized && typeof finalized !== 'boolean') {
-          finalized.resolve(questionText, {
-            verdict: 'modify',
-            reason: 'Brain 多次 reRoute 失败 — 降级为 askUser',
-            originalDraft: pending.draftResponse ?? pending.userMessage,
-          });
-        }
+        // 直接 resolve pending（让 conversation 把 askUser 转给真实用户）。
+        // complete(skipResolve 缺省 false) 已内部 resolve(questionText) 并删除 pending、返回 true ——
+        // 旧版额外判 `typeof finalized !== 'boolean'` 再二次 resolve 是死分支（skipResolve:false 恒返回 boolean），
+        // 且会对已删 pending 二次 resolve，已移除。
+        this.ctx.sessionManager.complete(entry.correlationId, questionText);
         logger.info({ delegationId, correlationId: entry.correlationId }, 'applyRestart: 降级为 askUser 完成');
       }
       return;

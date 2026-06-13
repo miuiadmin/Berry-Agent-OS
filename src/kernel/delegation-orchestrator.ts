@@ -1042,15 +1042,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
       const pending = this.sessionManager.getPending(correlationId);
 
-      // 15.0 机制 B：Brain 路由拿不准意图 → 升级问用户（优于 FallbackRouter 猜测），不继续路由
+      // 15.0 机制 B：Brain 路由拿不准意图 → 把澄清问题作为本轮 assistant 回复结束，用户下一轮补充后 Brain 重新路由。
+      // 不走 conversation.ask_user 交互暂停通道（AskUserDialog→sendUserReply）：那条通道要求事前 setPendingAsk 注册
+      // 一个可恢复 agent 任务，但路由阶段尚未派发任何 agent，sendUserReply 的 getPendingAsk 空查会丢弃回复（死通道）。
+      // Brain 是反应式决策者——以「问题结束本轮 + 用户下轮重新发起」承载，complete 删 pending 后
+      // hasActivePendingForSession=false，用户下条消息自然进入新轮。这与 applyRestart 降级路径（correction-flow）
+      // 的问用户方式一致，消除两套不一致的「问用户」实现。投机执行的 conversation 末态有 getPending 守卫
+      // （final.response:2124），pending 已删 → late 投机输出 no-op，无竞态。
       if (escalation && pending) {
         logger.info({ correlationId, question: safeSlice(escalation.questionToUser, 100) }, 'route 升级问用户（机制 B）');
-        getEventBus().emit('conversation.ask_user', {
-          sessionId: pending.sessionId,
-          taskId: pending.taskId ?? correlationId,
-          agent: 'brain',
-          question: escalation.questionToUser,
-        });
+        this.sessionManager.complete(correlationId, escalation.questionToUser);
         return;
       }
 
@@ -2092,15 +2093,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const origin = this.pendingReviewOrigins.get(correlationId);
       this.pendingReviewOrigins.delete(correlationId);
 
-      // 15.0 机制 B：Brain 审核拿不准质量 → 升级问用户，跳过正常 verdict/reRoute 分支
+      // 15.0 机制 B：Brain 审核拿不准质量 → 澄清问题作为本轮回复结束（Design A，同 route 升级理由）。
+      // task-origin 审核背后有在审委派（state=reviewing），complete 后该委派需 fail 释放其 active_scope
+      // （与 V-2 同源的泄漏路径），否则卡在 reviewing 直到 sweepStale(10min)。fail 幂等（终态守卫），对
+      // 无委派的 conversation-origin 审核 no-op。review 30s 超时 approveReviewDegraded 有 getPending 守卫，
+      // pending 已被 complete 删除 → 自动 no-op，无竞态。
       if (review.escalation && pending) {
         logger.info({ correlationId, question: safeSlice(review.escalation.questionToUser, 100) }, 'review 升级问用户（机制 B）');
-        getEventBus().emit('conversation.ask_user', {
-          sessionId: pending.sessionId,
-          taskId: pending.taskId ?? correlationId,
-          agent: 'brain',
-          question: review.escalation.questionToUser,
-        });
+        const reviewDelegation = this.delegationManager.getByCorrelation(correlationId);
+        if (reviewDelegation) {
+          this.delegationManager.fail(reviewDelegation.id, 'Brain review 升级问用户');
+        }
+        this.sessionManager.complete(correlationId, review.escalation.questionToUser);
         return;
       }
 
