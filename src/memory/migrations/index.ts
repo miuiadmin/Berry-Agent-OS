@@ -825,6 +825,66 @@ const v19RedactExtraTablesScan: Migration = {
   },
 };
 
+/**
+ * v20: 15.0 §5.2 修复 — dialogue/agent_chat FTS 触发器改为拼接 from_agent||to_agent||content。
+ *
+ * v18 触发器只索引 content，导致按 agent 名搜索（如「brain 对 code 说了什么」）无法召回。
+ * 本迁移 DROP v18 的 6 条触发器，重建为拼接版本（from_agent||to_agent||content），并 rebuild
+ * 让历史行重新按拼接内容索引。external content 表 rebuild 从源表重读。
+ */
+const v20FtsConcatAgentNames: Migration = {
+  version: 20,
+  name: 'fts-concat-agent-names',
+  up: (db: Database.Database) => {
+    // dialogue_messages_fts：DROP v18 触发器，重建为拼接 from||to||content
+    db.exec(`
+      DROP TRIGGER IF EXISTS dialogue_messages_fts_insert;
+      DROP TRIGGER IF EXISTS dialogue_messages_fts_delete;
+      DROP TRIGGER IF EXISTS dialogue_messages_fts_update;
+      CREATE TRIGGER dialogue_messages_fts_insert AFTER INSERT ON dialogue_messages BEGIN
+        INSERT INTO dialogue_messages_fts(rowid, content) VALUES (new.rowid,
+          COALESCE(new.from_agent, '') || ' ' || COALESCE(new.to_agent, '') || ' ' || COALESCE(new.content, ''));
+      END;
+      CREATE TRIGGER dialogue_messages_fts_delete AFTER DELETE ON dialogue_messages BEGIN
+        INSERT INTO dialogue_messages_fts(dialogue_messages_fts, rowid, content) VALUES('delete', old.rowid,
+          COALESCE(old.from_agent, '') || ' ' || COALESCE(old.to_agent, '') || ' ' || COALESCE(old.content, ''));
+      END;
+      CREATE TRIGGER dialogue_messages_fts_update AFTER UPDATE ON dialogue_messages BEGIN
+        INSERT INTO dialogue_messages_fts(dialogue_messages_fts, rowid, content) VALUES('delete', old.rowid,
+          COALESCE(old.from_agent, '') || ' ' || COALESCE(old.to_agent, '') || ' ' || COALESCE(old.content, ''));
+        INSERT INTO dialogue_messages_fts(rowid, content) VALUES (new.rowid,
+          COALESCE(new.from_agent, '') || ' ' || COALESCE(new.to_agent, '') || ' ' || COALESCE(new.content, ''));
+      END;
+
+      DROP TRIGGER IF EXISTS agent_chat_messages_fts_insert;
+      DROP TRIGGER IF EXISTS agent_chat_messages_fts_delete;
+      DROP TRIGGER IF EXISTS agent_chat_messages_fts_update;
+      CREATE TRIGGER agent_chat_messages_fts_insert AFTER INSERT ON agent_chat_messages BEGIN
+        INSERT INTO agent_chat_messages_fts(rowid, content) VALUES (new.rowid,
+          COALESCE(new.from_agent, '') || ' ' || COALESCE(new.to_agent, '') || ' ' || COALESCE(new.content, ''));
+      END;
+      CREATE TRIGGER agent_chat_messages_fts_delete AFTER DELETE ON agent_chat_messages BEGIN
+        INSERT INTO agent_chat_messages_fts(agent_chat_messages_fts, rowid, content) VALUES('delete', old.rowid,
+          COALESCE(old.from_agent, '') || ' ' || COALESCE(old.to_agent, '') || ' ' || COALESCE(old.content, ''));
+      END;
+      CREATE TRIGGER agent_chat_messages_fts_update AFTER UPDATE ON agent_chat_messages BEGIN
+        INSERT INTO agent_chat_messages_fts(agent_chat_messages_fts, rowid, content) VALUES('delete', old.rowid,
+          COALESCE(old.from_agent, '') || ' ' || COALESCE(old.to_agent, '') || ' ' || COALESCE(old.content, ''));
+        INSERT INTO agent_chat_messages_fts(rowid, content) VALUES (new.rowid,
+          COALESCE(new.from_agent, '') || ' ' || COALESCE(new.to_agent, '') || ' ' || COALESCE(new.content, ''));
+      END;
+    `);
+    // rebuild：让历史行按拼接内容重新索引（external content 表从源表重读）
+    for (const fts of ['dialogue_messages_fts', 'agent_chat_messages_fts']) {
+      try {
+        db.prepare(`INSERT INTO ${fts}(${fts}) VALUES ('rebuild')`).run();
+      } catch (err) {
+        logger.warn({ fts, err }, '15.0 v20 FTS rebuild 跳过（源表可能不存在）');
+      }
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -846,4 +906,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v17RedactHistoryScan,
   v18DialogueAndAgentChatFts,
   v19RedactExtraTablesScan,
+  v20FtsConcatAgentNames,
 ];

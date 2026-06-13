@@ -31,16 +31,33 @@ export function initDb(path?: string): Database.Database {
   db.exec(CORE_INDEX_SQL);
   runMigrations(db, ALL_MIGRATIONS);
   db.exec(KNOWLEDGE_FTS_SQL);
-  // knowledge_fts 由 KNOWLEDGE_FTS_SQL 的 insert/delete/update 触发器在运行时维护，
-  // 仅当 FTS 行数与源表不一致（触发器遗漏 / 刚创建 / 损坏）时才 rebuild。
-  // 修复前每次启动都全量 rebuild（O(n)），对大知识库是冗余启动开销。FTS5 COUNT(*) 是 O(1)。
-  const ftsCount = db.prepare(`SELECT COUNT(*) AS c FROM knowledge_fts`).get() as { c: number };
-  const srcCount = db.prepare(`SELECT COUNT(*) AS c FROM knowledge`).get() as { c: number };
-  if (ftsCount.c !== srcCount.c) {
-    db.prepare(`INSERT INTO knowledge_fts(knowledge_fts) VALUES ('rebuild')`).run();
-  }
+  // 15.0 §5.3 启动自愈：所有 FTS 表行数与源表不一致（触发器遗漏/刚创建/索引损坏/运维清表）
+  // 时才 rebuild。FTS5 COUNT(*) 是 O(1)，开销可忽略。修复前仅 knowledge_fts 有此保护，
+  // conversations/dialogue/agent_chat 三表无启动自愈——索引损坏会静默「搜不到」。
+  // 表可能因旧库/部分迁移缺失，用 try/catch 容错跳过。
+  ensureFtsConsistency(db, 'knowledge_fts', 'knowledge');
+  ensureFtsConsistency(db, 'conversations_fts', 'conversations');
+  ensureFtsConsistency(db, 'dialogue_messages_fts', 'dialogue_messages');
+  ensureFtsConsistency(db, 'agent_chat_messages_fts', 'agent_chat_messages');
 
   return db;
+}
+
+/**
+ * 15.0 §5.3：FTS 启动自愈。external-content FTS 表的行数应与源表一致（触发器维护）；
+ * 不一致（损坏/遗漏/刚创建）则 rebuild 从源表重读。FTS5 `COUNT(*)` 为 O(1)。
+ * 表/源不存在时静默跳过（旧库或部分迁移）。
+ */
+function ensureFtsConsistency(db: Database.Database, fts: string, source: string): void {
+  try {
+    const ftsCount = (db.prepare(`SELECT COUNT(*) AS c FROM ${fts}`).get() as { c: number }).c;
+    const srcCount = (db.prepare(`SELECT COUNT(*) AS c FROM ${source}`).get() as { c: number }).c;
+    if (ftsCount !== srcCount) {
+      db.prepare(`INSERT INTO ${fts}(${fts}) VALUES ('rebuild')`).run();
+    }
+  } catch {
+    // FTS 虚表或源表不存在（旧库 / 迁移未跑）—— 静默跳过
+  }
 }
 
 export function getDb(): Database.Database {

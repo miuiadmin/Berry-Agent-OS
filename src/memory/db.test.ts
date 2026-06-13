@@ -56,6 +56,6 @@ describe('initDb 完整启动路径 (15.0 回归)', () => {
     initDb(join(dir, 'test.db'));
     const db = getDb();
     const max = db.prepare(`SELECT MAX(version) as v FROM schema_migrations`).get() as { v: number };
-    expect(max.v).toBe(19);
+    expect(max.v).toBe(20);
   });
 });

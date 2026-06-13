@@ -13,6 +13,7 @@ import { searchDialogueMessages, searchAgentChatMessages } from './dialogue-sear
  * 用 :memory: 库手建三张源表后跑 v18.up（模拟生产 initDb 顺序：建表 → 跑迁移）。
  */
 const v18 = ALL_MIGRATIONS.find((m) => m.version === 18)!;
+const v20 = ALL_MIGRATIONS.find((m) => m.version === 20)!;
 
 /** 建三张源表的最小结构（含 FTS 触发器引用的列）+ conversations_fts（复刻 v12），
  *  再跑 v18 建 dialogue/agent_chat FTS + 触发器 + conversations update 触发器 */
@@ -42,6 +43,13 @@ function makeFtsDb(): Database.Database {
     END;
   `);
   v18.up(db);
+  return db;
+}
+
+/** makeFtsDb + v20（触发器改为拼接 from/to agent），用于验证按 agent 名召回 */
+function makeFtsDbV20(): Database.Database {
+  const db = makeFtsDb();
+  v20.up(db);
   return db;
 }
 
@@ -136,6 +144,38 @@ describe('v18 FTS5 + dialogue-search (15.0)', () => {
       ins.run(`r${i}`, `d${i}`, 's1', `c${i}`, 0, 'a', 'b', '重复关键词部署', i);
     }
     expect(searchDialogueMessages(db, '关键词', { limit: 3 }).length).toBe(3);
+    db.close();
+  });
+});
+
+describe('v20 FTS 拼接 from/to agent（§5.2，按 agent 名召回）', () => {
+  it('按 from_agent 名搜索能命中（v20 拼接后）', () => {
+    const db = makeFtsDbV20();
+    db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run('1', 'd1', 's1', 'c1', 0, 'brain', 'code', '请帮我重构这个模块', 1);
+    // v20 之前：搜 'brain'（agent 名）命中不了（只索引 content）；v20 拼接后能命中
+    const hits = searchDialogueMessages(db, 'brain');
+    expect(hits.length).toBe(1);
+    expect(hits[0].fromAgent).toBe('brain');
+    db.close();
+  });
+
+  it('按 to_agent 名搜索也能命中', () => {
+    const db = makeFtsDbV20();
+    db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run('1', 'd1', 's1', 'c1', 0, 'brain', 'code', '部署到生产环境', 1);
+    expect(searchDialogueMessages(db, 'code').length).toBe(1);
+    db.close();
+  });
+
+  it('content 关键词搜索仍正常（v20 不破坏 content 召回）', () => {
+    const db = makeFtsDbV20();
+    db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run('1', 'd1', 's1', 'c1', 0, 'brain', 'code', '项目管理的最佳实践', 1);
+    expect(searchDialogueMessages(db, '项目管理').length).toBe(1);
     db.close();
   });
 });
