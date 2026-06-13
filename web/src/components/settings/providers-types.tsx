@@ -5,7 +5,7 @@
  * 单独抽出以避免循环依赖，并让每个文件只关注自己的渲染职责。
  */
 
-import { ChevronDown, Zap, Brain, Crown } from "lucide-react";
+import { Zap, Brain, Crown, ChevronDown } from "lucide-react";
 
 // ─── API 数据类型 ──────────────────────────────────────────────────
 
@@ -110,13 +110,16 @@ export const TIER_CONFIG = [
 ];
 
 /**
- * 原生 <select> 的统一样式。
- * 自定义右侧箭头（SelectChevron）覆盖浏览器默认外观，移动端 min-h-[44px] 保证触控目标。
+ * 原生 <select> 的统一样式（已废弃，请使用 ui/select-field 组件）。
+ * @deprecated 使用 {@link SelectField} 代替
  */
 export const SELECT_BASE =
   "w-full rounded-lg border border-input bg-background px-3 py-2 md:py-1.5 text-[16px] md:text-sm min-h-[44px] md:min-h-0 appearance-none pr-8 disabled:opacity-50 transition-all focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30";
 
-/** 原生 <select> 的右侧下拉箭头（配合 appearance-none 使用） */
+/**
+ * 原生 <select> 右侧箭头（已废弃，请使用 ui/select-field 组件）。
+ * @deprecated 使用 {@link SelectField} 代替
+ */
 export function SelectChevron() {
   return (
     <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
