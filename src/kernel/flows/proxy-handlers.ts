@@ -101,6 +101,19 @@ export function setupAuditHandler(agentIpc: AgentIpc, agentName: string, deps: P
       try {
         const db = getDb();
         if (db) {
+          // 15.0 crosscut A-3：approved_by 从 permissionToken 反查 approval_requests.decision_source
+          // （修复前恒 'auto'，Auditor 的审核覆盖/累积风险维度基于失真数据——无法识别 Brain 审批的工具）。
+          // token consume 仅置 consumed=1 不删行，audit 时仍可查。映射到 CHECK 允许的 auto/scope/brain/user。
+          let approvedBy = 'auto';
+          if (audit.permissionToken) {
+            const row = db.prepare(`
+              SELECT ar.decision_source AS s
+              FROM permission_tokens pt JOIN approval_requests ar ON ar.id = pt.approval_id
+              WHERE pt.id = ?
+            `).get(audit.permissionToken) as { s: string | null } | undefined;
+            const s = row?.s;
+            if (s === 'brain' || s === 'user' || s === 'scope') approvedBy = s;
+          }
           const insertStmt = db.prepare(`
             INSERT INTO agent_tool_calls (id, session_id, task_id, agent_name, tool_name, input_summary, success, duration_ms, approved_by, error_message, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -114,8 +127,8 @@ export function setupAuditHandler(agentIpc: AgentIpc, agentName: string, deps: P
             typeof audit.toolInput === 'string' ? redactSecrets(audit.toolInput).slice(0, 500) : redactSecrets(JSON.stringify(audit.toolInput)).slice(0, 500),
             audit.isError ? 0 : 1,
             audit.durationMs ?? null,
-            'auto', // 默认 auto 审批；如果经过 scope 预授权则由 scope 层更新为 'scope'
-            audit.isError ? (typeof audit.toolResult === 'string' ? audit.toolResult.slice(0, 500) : null) : null,
+            approvedBy,
+            audit.isError ? (typeof audit.toolResult === 'string' ? redactSecrets(audit.toolResult).slice(0, 500) : null) : null,
             Date.now(),
           );
         }
