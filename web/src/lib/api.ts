@@ -1,19 +1,25 @@
+/**
+ * API 客户端层。
+ *
+ * 提供 GET/POST/PUT/DELETE 封装 + React Query query 工厂 + 各领域 API 集合。
+ * 统一错误处理、AbortSignal 透传、降级兜底。
+ */
+
 const BASE_URL = "";
 
-/** API 层翻译辅助（非 hook 环境，统一使用 i18n 导出） */
 import { tOutside as t } from "@/lib/i18n";
 import type { QueryFunctionContext } from "@tanstack/react-query";
 
-/** 判断是否为请求被取消（AbortError），让 React Query 识别"已取消"状态 */
+// ─── 通用 fetch 封装 ──────────────────────────────────────────────
+
+/** 判断是否为 AbortError（请求被取消） */
 function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === "AbortError";
 }
 
 /**
- * 通用 fetch 封装
- *
+ * 通用 fetch 封装。
  * 统一处理：网络错误、HTTP 错误码、AbortError 透传。
- * AbortError 不包装成 networkError — React Query 需要识别取消状态。
  */
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;
@@ -23,7 +29,6 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       ...options,
     });
   } catch (err) {
-    // AbortError（请求被取消）必须原样透传，让 React Query 识别"已取消"状态
     if (isAbortError(err)) throw err;
     throw new Error(t("api.networkError"));
   }
@@ -42,17 +47,19 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-/** GET 请求，支持可选的 AbortSignal（React Query queryFn 透传 ctx.signal） */
+// ─── HTTP 方法封装 ────────────────────────────────────────────────
+
+/** GET 请求，支持 AbortSignal */
 export function apiGet<T>(path: string, signal?: AbortSignal) {
   return fetchApi<T>(path, signal ? { signal } : undefined);
 }
 
-/** PUT 请求，body 会自动 JSON 序列化 */
+/** PUT 请求 */
 export function apiPut<T>(path: string, body: unknown, signal?: AbortSignal) {
   return fetchApi<T>(path, { method: "PUT", body: JSON.stringify(body), signal });
 }
 
-/** POST 请求，body 可选（省略时不带请求体） */
+/** POST 请求（body 可选） */
 export function apiPost<T>(path: string, body?: unknown, signal?: AbortSignal) {
   return fetchApi<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined, signal });
 }
@@ -61,6 +68,36 @@ export function apiPost<T>(path: string, body?: unknown, signal?: AbortSignal) {
 export function apiDelete(path: string, signal?: AbortSignal) {
   return fetchApi<void>(path, { method: "DELETE", signal });
 }
+
+// ─── Query 工厂辅助 ──────────────────────────────────────────────
+
+/** 构建 URL 查询参数（从键值对对象） */
+function buildSearchParams(params?: Record<string, string | number | boolean | undefined>): string {
+  if (!params) return "";
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined) sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
+/**
+ * 带降级兜底的 queryFn 包装器。
+ * 捕获非 AbortError 异常并返回 fallback 值，避免查询失败阻塞页面。
+ */
+function withFallback<T>(fetcher: (signal: AbortSignal) => Promise<T>, fallback: T) {
+  return async (ctx: QueryFunctionContext): Promise<T> => {
+    try {
+      return await fetcher(ctx.signal);
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      return fallback;
+    }
+  };
+}
+
+// ─── 类型定义 ──────────────────────────────────────────────────────
 
 export interface HealthResponse {
   ok: boolean;
@@ -105,38 +142,13 @@ export interface PaginatedResponse<T> {
   total: number;
 }
 
-export interface TaskStatsDay {
-  date: string;
-  completed: number;
-  failed: number;
-}
+export interface TaskStatsDay { date: string; completed: number; failed: number; }
 
-export interface SearchResult {
-  sessionId: string;
-  content: string;
-  role: string;
-  createdAt: number;
-  highlight: string;
-}
+export interface SearchResult { sessionId: string; content: string; role: string; createdAt: number; highlight: string; }
+export interface SearchResponse { results: SearchResult[]; total: number; }
 
-export interface SearchResponse {
-  results: SearchResult[];
-  total: number;
-}
-
-export interface UsageDaySummary {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  costUsd: number;
-}
-
-export interface UsageDailyPoint extends UsageDaySummary {
-  date: string;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-}
-
+export interface UsageDaySummary { inputTokens: number; outputTokens: number; totalTokens: number; costUsd: number; }
+export interface UsageDailyPoint extends UsageDaySummary { date: string; cacheReadTokens: number; cacheCreationTokens: number; }
 export interface UsageSummary {
   today: UsageDaySummary;
   period: UsageDaySummary;
@@ -145,56 +157,112 @@ export interface UsageSummary {
   byModel: { model: string; totalTokens: number; costUsd: number }[];
 }
 
-export interface UploadResponse {
-  fileId: string;
-  filename: string;
-  mimeType: string;
-  size: number;
-  url: string;
+export interface UploadResponse { fileId: string; filename: string; mimeType: string; size: number; url: string; }
+
+export interface MemoryEntry {
+  id: string;
+  key: string;
+  value: string;
+  layer: "agent" | "workspace" | "global";
+  source?: string;
+  agentId?: string;
+  workspaceId?: string;
+  createdAt: number;
+  updatedAt?: number;
+  verified?: boolean;
 }
 
+export interface MemoryRecallResult { results: MemoryEntry[]; total: number; }
+export interface MemoryBinding { agentId: string; memoryId: string; createdAt: number; }
+
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  body?: string;
+  targetId?: string;
+  targetType?: string;
+  read: boolean;
+  archived: boolean;
+  createdAt: number;
+}
+
+export interface NotificationPreferences { workspaceId: string; muted: boolean; channels: string[]; }
+
+export interface SchedulerJob {
+  id: string;
+  name: string;
+  cron: string;
+  prompt: string;
+  enabled: boolean;
+  status: "idle" | "running" | "paused";
+  lastRunAt?: number;
+  nextRunAt?: number;
+  createdAt: number;
+}
+
+export interface SchedulerExecution { id: string; jobId: string; status: "completed" | "failed" | "running"; startedAt: number; finishedAt?: number; error?: string; }
+export interface SchedulerQueue { pending: number; running: number; maxConcurrency: number; }
+export interface WebhookAuditEntry { id: string; token: string; payload: unknown; result: string; createdAt: number; }
+export interface Reminder { id: string; prompt: string; triggerAt: number; status: "pending" | "fired" | "cancelled"; createdAt: number; }
+
+export interface PluginInfo { id: string; name: string; description?: string; version?: string; enabled: boolean; scope: "agent" | "workspace" | "global"; }
+export interface PluginBinding { agentId: string; pluginId: string; enabled: boolean; }
+
+export interface CaptureStartResponse { captureId: string; path: string; }
+export interface CaptureResult { captureId: string; path: string; durationMs: number; eventCount: number; size: number; }
+export interface CaptureStatus { active: boolean; captureId?: string; startedAt?: number; }
+
+// ─── 降级兜底常量 ──────────────────────────────────────────────────
+
+const EMPTY_USAGE: UsageSummary = {
+  today: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+  period: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 },
+  daily: [], byAgent: [], byModel: [],
+};
+
+const EMPTY_DRIFT = { avgAlignmentScore: 1, interventionRate: 0, recoveryRate: 0, finalResponseAlignment: 1, totalSignals: 0, hotspotPairs: [] };
+
+// ─── React Query queries 工厂 ─────────────────────────────────────
+
 export const queries = {
-  health: () => ({ queryKey: ["health"], queryFn: (ctx: QueryFunctionContext) => apiGet<HealthResponse>("/api/health", ctx.signal) }),
-  config: () => ({ queryKey: ["config"], queryFn: (ctx: QueryFunctionContext) => apiGet<Record<string, unknown>>("/api/config", ctx.signal) }),
-  agents: () => ({ queryKey: ["agents"], queryFn: (ctx: QueryFunctionContext) => apiGet<AgentInfo[]>("/api/agents", ctx.signal) }),
-  agent: (name: string) => ({ queryKey: ["agents", name], queryFn: (ctx: QueryFunctionContext) => apiGet<AgentInfo>(`/api/agents/${name}`, ctx.signal) }),
+  health: () => ({
+    queryKey: ["health"],
+    queryFn: (ctx: QueryFunctionContext) => apiGet<HealthResponse>("/api/health", ctx.signal),
+  }),
+  config: () => ({
+    queryKey: ["config"],
+    queryFn: (ctx: QueryFunctionContext) => apiGet<Record<string, unknown>>("/api/config", ctx.signal),
+  }),
+  agents: () => ({
+    queryKey: ["agents"],
+    queryFn: (ctx: QueryFunctionContext) => apiGet<AgentInfo[]>("/api/agents", ctx.signal),
+  }),
+  agent: (name: string) => ({
+    queryKey: ["agents", name],
+    queryFn: (ctx: QueryFunctionContext) => apiGet<AgentInfo>(`/api/agents/${name}`, ctx.signal),
+  }),
   taskStats: (days = 7) => ({
     queryKey: ["taskStats", days],
-    queryFn: async (ctx: QueryFunctionContext): Promise<TaskStatsDay[]> => {
-      try {
-        return await apiGet<TaskStatsDay[]>(`/api/tasks/stats?days=${days}`, ctx.signal);
-      } catch (e) {
-        // 取消时透传 AbortError，让 RQ 识别已取消；其他错误降级为空数据
-        if (isAbortError(e)) throw e;
-        return [];
-      }
-    },
+    queryFn: withFallback(
+      (signal) => apiGet<TaskStatsDay[]>(`/api/tasks/stats?days=${days}`, signal),
+      [] as TaskStatsDay[],
+    ),
   }),
-  tasks: (params?: { status?: string; agent?: string; limit?: number; offset?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.status) searchParams.set("status", params.status);
-    if (params?.agent) searchParams.set("agent", params.agent);
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-    const qs = searchParams.toString();
-    return {
-      queryKey: ["tasks", params],
-      queryFn: (ctx: QueryFunctionContext) => apiGet<PaginatedResponse<TaskInfo>>(`/api/tasks${qs ? `?${qs}` : ""}`, ctx.signal),
-    };
-  },
-  conversations: (params?: { search?: string; sort?: string; limit?: number; offset?: number }) => {
-    const searchParams = new URLSearchParams();
-    if (params?.search) searchParams.set("search", params.search);
-    if (params?.sort) searchParams.set("sort", params.sort);
-    if (params?.limit) searchParams.set("limit", String(params.limit));
-    if (params?.offset) searchParams.set("offset", String(params.offset));
-    const qs = searchParams.toString();
-    return {
-      queryKey: ["conversations", params],
-      queryFn: (ctx: QueryFunctionContext) => apiGet<ConversationInfo[]>(`/api/conversations${qs ? `?${qs}` : ""}`, ctx.signal),
-    };
-  },
-  conversation: (sid: string) => ({ queryKey: ["conversations", sid], queryFn: (ctx: QueryFunctionContext) => apiGet<unknown[]>(`/api/conversations/${sid}`, ctx.signal) }),
+  tasks: (params?: { status?: string; agent?: string; limit?: number; offset?: number }) => ({
+    queryKey: ["tasks", params],
+    queryFn: (ctx: QueryFunctionContext) =>
+      apiGet<PaginatedResponse<TaskInfo>>(`/api/tasks${buildSearchParams(params as Record<string, string | number | undefined>)}`, ctx.signal),
+  }),
+  conversations: (params?: { search?: string; sort?: string; limit?: number; offset?: number }) => ({
+    queryKey: ["conversations", params],
+    queryFn: (ctx: QueryFunctionContext) =>
+      apiGet<ConversationInfo[]>(`/api/conversations${buildSearchParams(params as Record<string, string | number | undefined>)}`, ctx.signal),
+  }),
+  conversation: (sid: string) => ({
+    queryKey: ["conversations", sid],
+    queryFn: (ctx: QueryFunctionContext) => apiGet<unknown[]>(`/api/conversations/${sid}`, ctx.signal),
+  }),
   search: (q: string, limit = 20) => ({
     queryKey: ["search", q, limit],
     queryFn: async (ctx: QueryFunctionContext): Promise<SearchResponse> => {
@@ -205,41 +273,41 @@ export const queries = {
   }),
   usage: (days = 7) => ({
     queryKey: ["usage", days],
-    queryFn: async (ctx: QueryFunctionContext): Promise<UsageSummary> => {
-      try {
-        return await apiGet<UsageSummary>(`/api/usage/summary?days=${days}`, ctx.signal);
-      } catch (e) {
-        if (isAbortError(e)) throw e;
-        return { today: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 }, period: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0 }, daily: [], byAgent: [], byModel: [] };
-      }
-    },
+    queryFn: withFallback(
+      (signal) => apiGet<UsageSummary>(`/api/usage/summary?days=${days}`, signal),
+      EMPTY_USAGE,
+    ),
   }),
   drift: (days = 7) => ({
     queryKey: ["drift", days],
-    queryFn: async (ctx: QueryFunctionContext) => {
-      try {
-        return await apiGet<{ avgAlignmentScore: number; interventionRate: number; recoveryRate: number; finalResponseAlignment: number; totalSignals: number; hotspotPairs: Array<{ from: string; to: string; avgScore: number }> }>(`/api/drift/metrics?days=${days}`, ctx.signal);
-      } catch (e) {
-        if (isAbortError(e)) throw e;
-        return { avgAlignmentScore: 1, interventionRate: 0, recoveryRate: 0, finalResponseAlignment: 1, totalSignals: 0, hotspotPairs: [] };
-      }
-    },
+    queryFn: withFallback(
+      (signal) => apiGet<{
+        avgAlignmentScore: number; interventionRate: number; recoveryRate: number;
+        finalResponseAlignment: number; totalSignals: number;
+        hotspotPairs: Array<{ from: string; to: string; avgScore: number }>;
+      }>(`/api/drift/metrics?days=${days}`, signal),
+      EMPTY_DRIFT,
+    ),
   }),
   driftSignals: (sessionId?: string) => ({
     queryKey: ["driftSignals", sessionId],
-    queryFn: async (ctx: QueryFunctionContext) => {
-      const params = sessionId ? `?sessionId=${sessionId}&limit=50` : '?limit=50';
-      try {
-        return await apiGet<{ signals: Array<{ id: string; checkpointType: string; alignmentScore: number; needsIntervention: boolean; driftDescription: string | null; suggestedAction: string | null; createdAt: number }>; total: number }>(`/api/drift/signals${params}`, ctx.signal);
-      } catch (e) {
-        if (isAbortError(e)) throw e;
-        return { signals: [], total: 0 };
-      }
-    },
+    queryFn: withFallback(
+      (signal) => apiGet<{
+        signals: Array<{
+          id: string; checkpointType: string; alignmentScore: number;
+          needsIntervention: boolean; driftDescription: string | null;
+          suggestedAction: string | null; createdAt: number;
+        }>;
+        total: number;
+      }>(`/api/drift/signals${sessionId ? `?sessionId=${sessionId}&limit=50` : "?limit=50"}`, signal),
+      { signals: [], total: 0 },
+    ),
   }),
 };
 
-/** 上传文件，支持可选的 AbortSignal 用于取消上传 */
+// ─── 文件上传 ──────────────────────────────────────────────────────
+
+/** 上传文件，支持 AbortSignal 取消 */
 export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -259,64 +327,16 @@ export async function exportConversation(sessionId: string): Promise<{ role: str
   return apiGet<{ role: string; content: string; createdAt: string }[]>(`/api/conversations/${sessionId}?limit=9999`);
 }
 
-// --- Debug Capture ---
-
-export interface CaptureStartResponse {
-  captureId: string;
-  path: string;
-}
-
-export interface CaptureResult {
-  captureId: string;
-  path: string;
-  durationMs: number;
-  eventCount: number;
-  size: number;
-}
-
-export interface CaptureStatus {
-  active: boolean;
-  captureId?: string;
-  startedAt?: number;
-}
-
-// ─── Memory ────────────────────────────────────────────────────────────────
-
-export interface MemoryEntry {
-  id: string;
-  key: string;
-  value: string;
-  layer: "agent" | "workspace" | "global";
-  source?: string;
-  agentId?: string;
-  workspaceId?: string;
-  createdAt: number;
-  updatedAt?: number;
-  verified?: boolean;
-}
-
-export interface MemoryRecallResult {
-  results: MemoryEntry[];
-  total: number;
-}
-
-export interface MemoryBinding {
-  agentId: string;
-  memoryId: string;
-  createdAt: number;
-}
+// ─── Memory API ────────────────────────────────────────────────────
 
 export const memoryApi = {
-  listAgent: (agentId: string) =>
-    apiGet<MemoryEntry[]>(`/api/memory/agent/${encodeURIComponent(agentId)}`),
+  listAgent: (agentId: string) => apiGet<MemoryEntry[]>(`/api/memory/agent/${encodeURIComponent(agentId)}`),
   createAgent: (data: { agentId: string; key: string; value: string; source?: string }) =>
     apiPost<MemoryEntry>("/api/memory/agent", data),
-  listWorkspace: (wsId: string) =>
-    apiGet<MemoryEntry[]>(`/api/memory/workspace/${encodeURIComponent(wsId)}`),
+  listWorkspace: (wsId: string) => apiGet<MemoryEntry[]>(`/api/memory/workspace/${encodeURIComponent(wsId)}`),
   createWorkspace: (data: { workspaceId: string; key: string; value: string }) =>
     apiPost<MemoryEntry>("/api/memory/workspace", data),
-  listGlobal: (userId: string) =>
-    apiGet<MemoryEntry[]>(`/api/memory/global/${encodeURIComponent(userId)}`),
+  listGlobal: (userId: string) => apiGet<MemoryEntry[]>(`/api/memory/global/${encodeURIComponent(userId)}`),
   createGlobal: (data: { userId: string; key: string; value: string }) =>
     apiPost<MemoryEntry>("/api/memory/global", data),
   recall: (query: string, opts?: { agentId?: string; workspaceId?: string; limit?: number }, signal?: AbortSignal) =>
@@ -325,181 +345,62 @@ export const memoryApi = {
     apiPost<MemoryEntry>(`/api/memory/${encodeURIComponent(id)}/promote`, { targetLayer }),
   update: (layer: string, id: string, data: { key?: string; value?: string }) =>
     apiPut<MemoryEntry>(`/api/memory/${layer}/${encodeURIComponent(id)}`, data),
-  delete: (layer: string, id: string) =>
-    apiDelete(`/api/memory/${layer}/${encodeURIComponent(id)}`),
-  verify: (id: string) =>
-    apiPost<MemoryEntry>(`/api/memory/${encodeURIComponent(id)}/verify`, {}),
-  listBindings: (agentId: string) =>
-    apiGet<MemoryBinding[]>(`/api/memory/agent/${encodeURIComponent(agentId)}/bindings`),
-  bind: (data: { agentId: string; memoryId: string }) =>
-    apiPost<MemoryBinding>("/api/memory/bind", data),
-  unbind: (agentId: string, memoryId: string) =>
-    apiDelete(`/api/memory/bind/${encodeURIComponent(agentId)}/${encodeURIComponent(memoryId)}`),
+  delete: (layer: string, id: string) => apiDelete(`/api/memory/${layer}/${encodeURIComponent(id)}`),
+  verify: (id: string) => apiPost<MemoryEntry>(`/api/memory/${encodeURIComponent(id)}/verify`, {}),
+  listBindings: (agentId: string) => apiGet<MemoryBinding[]>(`/api/memory/agent/${encodeURIComponent(agentId)}/bindings`),
+  bind: (data: { agentId: string; memoryId: string }) => apiPost<MemoryBinding>("/api/memory/bind", data),
+  unbind: (agentId: string, memoryId: string) => apiDelete(`/api/memory/bind/${encodeURIComponent(agentId)}/${encodeURIComponent(memoryId)}`),
 };
 
-// ─── Notifications ─────────────────────────────────────────────────────────
-
-export interface NotificationItem {
-  id: string;
-  type: string;
-  title: string;
-  body?: string;
-  targetId?: string;
-  targetType?: string;
-  read: boolean;
-  archived: boolean;
-  createdAt: number;
-}
-
-export interface NotificationPreferences {
-  workspaceId: string;
-  muted: boolean;
-  channels: string[];
-}
+// ─── Notifications API ─────────────────────────────────────────────
 
 export const notificationsApi = {
-  list: (params?: { targetId?: string; targetType?: string; archived?: boolean; limit?: number; offset?: number }) => {
-    const sp = new URLSearchParams();
-    if (params?.targetId) sp.set("targetId", params.targetId);
-    if (params?.targetType) sp.set("targetType", params.targetType);
-    if (params?.archived !== undefined) sp.set("archived", String(params.archived));
-    if (params?.limit) sp.set("limit", String(params.limit));
-    if (params?.offset) sp.set("offset", String(params.offset));
-    const qs = sp.toString();
-    return apiGet<NotificationItem[]>(`/api/notifications${qs ? `?${qs}` : ""}`);
-  },
-  count: () =>
-    apiGet<{ unread: number; total: number }>("/api/notifications/count"),
-  markRead: (id: string) =>
-    apiPost<void>(`/api/notifications/${encodeURIComponent(id)}/read`),
-  markAllRead: () =>
-    apiPost<void>("/api/notifications/read-all"),
-  archive: (id: string) =>
-    apiPost<void>(`/api/notifications/${encodeURIComponent(id)}/archive`),
-  getPreferences: (workspaceId: string) =>
-    apiGet<NotificationPreferences>(`/api/notifications/preferences/${encodeURIComponent(workspaceId)}`),
+  list: (params?: { targetId?: string; targetType?: string; archived?: boolean; limit?: number; offset?: number }) =>
+    apiGet<NotificationItem[]>(`/api/notifications${buildSearchParams(params as Record<string, string | number | boolean | undefined>)}`),
+  count: () => apiGet<{ unread: number; total: number }>("/api/notifications/count"),
+  markRead: (id: string) => apiPost<void>(`/api/notifications/${encodeURIComponent(id)}/read`),
+  markAllRead: () => apiPost<void>("/api/notifications/read-all"),
+  archive: (id: string) => apiPost<void>(`/api/notifications/${encodeURIComponent(id)}/archive`),
+  getPreferences: (workspaceId: string) => apiGet<NotificationPreferences>(`/api/notifications/preferences/${encodeURIComponent(workspaceId)}`),
   updatePreferences: (workspaceId: string, data: Partial<NotificationPreferences>) =>
     apiPut<NotificationPreferences>(`/api/notifications/preferences/${encodeURIComponent(workspaceId)}`, data),
 };
 
-// ─── Scheduler ─────────────────────────────────────────────────────────────
-
-export interface SchedulerJob {
-  id: string;
-  name: string;
-  cron: string;
-  prompt: string;
-  enabled: boolean;
-  status: "idle" | "running" | "paused";
-  lastRunAt?: number;
-  nextRunAt?: number;
-  createdAt: number;
-}
-
-export interface SchedulerExecution {
-  id: string;
-  jobId: string;
-  status: "completed" | "failed" | "running";
-  startedAt: number;
-  finishedAt?: number;
-  error?: string;
-}
-
-export interface SchedulerQueue {
-  pending: number;
-  running: number;
-  maxConcurrency: number;
-}
-
-export interface WebhookAuditEntry {
-  id: string;
-  token: string;
-  payload: unknown;
-  result: string;
-  createdAt: number;
-}
-
-export interface Reminder {
-  id: string;
-  prompt: string;
-  triggerAt: number;
-  status: "pending" | "fired" | "cancelled";
-  createdAt: number;
-}
+// ─── Scheduler API ────────────────────────────────────────────────
 
 export const schedulerApi = {
-  listJobs: () =>
-    apiGet<SchedulerJob[]>("/api/scheduler/jobs"),
-  getJob: (id: string) =>
-    apiGet<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}`),
+  listJobs: () => apiGet<SchedulerJob[]>("/api/scheduler/jobs"),
+  getJob: (id: string) => apiGet<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}`),
   createJob: (data: { name: string; cron: string; prompt: string; enabled?: boolean }) =>
     apiPost<SchedulerJob>("/api/scheduler/jobs", data),
   updateJob: (id: string, data: Partial<Pick<SchedulerJob, "name" | "cron" | "prompt" | "enabled">>) =>
     apiPut<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}`, data),
-  deleteJob: (id: string) =>
-    apiDelete(`/api/scheduler/jobs/${encodeURIComponent(id)}`),
-  pauseJob: (id: string) =>
-    apiPost<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}/pause`),
-  resumeJob: (id: string) =>
-    apiPost<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}/resume`),
-  triggerJob: (id: string) =>
-    apiPost<SchedulerExecution>(`/api/scheduler/jobs/${encodeURIComponent(id)}/trigger`),
-  executions: (id: string, params?: { limit?: number; offset?: number }) => {
-    const sp = new URLSearchParams();
-    if (params?.limit) sp.set("limit", String(params.limit));
-    if (params?.offset) sp.set("offset", String(params.offset));
-    const qs = sp.toString();
-    return apiGet<SchedulerExecution[]>(`/api/scheduler/jobs/${encodeURIComponent(id)}/executions${qs ? `?${qs}` : ""}`);
-  },
-  queue: () =>
-    apiGet<SchedulerQueue>("/api/scheduler/queue"),
+  deleteJob: (id: string) => apiDelete(`/api/scheduler/jobs/${encodeURIComponent(id)}`),
+  pauseJob: (id: string) => apiPost<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}/pause`),
+  resumeJob: (id: string) => apiPost<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}/resume`),
+  triggerJob: (id: string) => apiPost<SchedulerExecution>(`/api/scheduler/jobs/${encodeURIComponent(id)}/trigger`),
+  executions: (id: string, params?: { limit?: number; offset?: number }) =>
+    apiGet<SchedulerExecution[]>(`/api/scheduler/jobs/${encodeURIComponent(id)}/executions${buildSearchParams(params as Record<string, number | undefined>)}`),
+  queue: () => apiGet<SchedulerQueue>("/api/scheduler/queue"),
   approveChain: (roundId: string, stepId: string) =>
     apiPost<void>(`/api/scheduler/chain/${encodeURIComponent(roundId)}/approve/${encodeURIComponent(stepId)}`),
   rejectChain: (roundId: string, stepId: string) =>
     apiPost<void>(`/api/scheduler/chain/${encodeURIComponent(roundId)}/reject/${encodeURIComponent(stepId)}`),
-  webhookAudit: (params?: { limit?: number }) => {
-    const sp = new URLSearchParams();
-    if (params?.limit) sp.set("limit", String(params.limit));
-    const qs = sp.toString();
-    return apiGet<WebhookAuditEntry[]>(`/api/scheduler/webhooks/audit${qs ? `?${qs}` : ""}`);
-  },
-  createReminder: (data: { prompt: string; triggerAt: number }) =>
-    apiPost<Reminder>("/api/scheduler/reminders", data),
-  deleteReminder: (id: string) =>
-    apiDelete(`/api/scheduler/reminders/${encodeURIComponent(id)}`),
+  webhookAudit: (params?: { limit?: number }) =>
+    apiGet<WebhookAuditEntry[]>(`/api/scheduler/webhooks/audit${buildSearchParams(params as Record<string, number | undefined>)}`),
+  createReminder: (data: { prompt: string; triggerAt: number }) => apiPost<Reminder>("/api/scheduler/reminders", data),
+  deleteReminder: (id: string) => apiDelete(`/api/scheduler/reminders/${encodeURIComponent(id)}`),
 };
 
-// ─── Plugins ───────────────────────────────────────────────────────────────
-
-export interface PluginInfo {
-  id: string;
-  name: string;
-  description?: string;
-  version?: string;
-  enabled: boolean;
-  scope: "agent" | "workspace" | "global";
-}
-
-export interface PluginBinding {
-  agentId: string;
-  pluginId: string;
-  enabled: boolean;
-}
+// ─── Plugins API ──────────────────────────────────────────────────
 
 export const pluginsApi = {
-  discover: (params?: { scope?: string; agentId?: string }) => {
-    const sp = new URLSearchParams();
-    if (params?.scope) sp.set("scope", params.scope);
-    if (params?.agentId) sp.set("agentId", params.agentId);
-    const qs = sp.toString();
-    return apiGet<PluginInfo[]>(`/api/plugins/discover${qs ? `?${qs}` : ""}`);
-  },
-  bindings: (pluginId: string) =>
-    apiGet<PluginBinding[]>(`/api/plugins/${encodeURIComponent(pluginId)}/bindings`),
+  discover: (params?: { scope?: string; agentId?: string }) =>
+    apiGet<PluginInfo[]>(`/api/plugins/discover${buildSearchParams(params as Record<string, string | undefined>)}`),
+  bindings: (pluginId: string) => apiGet<PluginBinding[]>(`/api/plugins/${encodeURIComponent(pluginId)}/bindings`),
   promote: (pluginId: string, data: { targetScope: string; targetId?: string }) =>
     apiPost<PluginInfo>(`/api/plugins/${encodeURIComponent(pluginId)}/promote`, data),
-  demote: (pluginId: string) =>
-    apiPost<PluginInfo>(`/api/plugins/${encodeURIComponent(pluginId)}/demote`),
+  demote: (pluginId: string) => apiPost<PluginInfo>(`/api/plugins/${encodeURIComponent(pluginId)}/demote`),
   share: (pluginId: string, data: { agentId: string }) =>
     apiPost<PluginBinding>(`/api/plugins/${encodeURIComponent(pluginId)}/share`, data),
   unshare: (pluginId: string, agentId: string) =>
@@ -508,14 +409,8 @@ export const pluginsApi = {
     apiPost<PluginBinding>(`/api/plugins/${encodeURIComponent(pluginId)}/toggle`, data),
 };
 
-export function startDebugCapture() {
-  return apiPost<CaptureStartResponse>("/api/debug/capture/start");
-}
+// ─── Debug Capture API ────────────────────────────────────────────
 
-export function stopDebugCapture() {
-  return apiPost<CaptureResult>("/api/debug/capture/stop");
-}
-
-export function getDebugCaptureStatus() {
-  return apiGet<CaptureStatus>("/api/debug/capture/status");
-}
+export function startDebugCapture() { return apiPost<CaptureStartResponse>("/api/debug/capture/start"); }
+export function stopDebugCapture() { return apiPost<CaptureResult>("/api/debug/capture/stop"); }
+export function getDebugCaptureStatus() { return apiGet<CaptureStatus>("/api/debug/capture/status"); }
