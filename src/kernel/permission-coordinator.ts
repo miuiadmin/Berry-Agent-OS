@@ -342,6 +342,18 @@ export class PermissionCoordinator {
     this.stateCache.delete('active_scope', taskId);
   }
 
+  /**
+   * V-3：委派授权（active_scope allowTools/allowPaths，即「委派即授权」）是否实际生效。
+   *
+   * grant 可跳过 ask/yolo 的 requiresReview（委派即授权的初衷——Brain 已通过委派授权该 Agent 用自身工具），
+   * 但 deny-all 是会话级硬上限：Brain 委派写入的 allowTools:['*'] 不得穿透 deny-all 锁，否则 deny-all 形同虚设
+   * （会话被锁死后 Agent 仍可任意用工具）。deny-all 时返回 false——调用方不进入 grant 分支，落到
+   * engine.checkPermission（deny-all 必拒），保证硬上限不被委派绕过。
+   */
+  private delegationGrantEffective(sessionId: string): boolean {
+    return this.getMode(sessionId) !== 'deny-all';
+  }
+
   checkAndIssue(params: CheckAndIssueParams): PermissionResultPayload {
     // 13.0 §3.8 第二层 + 15.0 R4「委派即授权」：先做 active_scope 三态决策
     // - block：硬拦截（blockTools / blockPaths / run_command blocklist）
@@ -351,8 +363,9 @@ export class PermissionCoordinator {
     if (scopeDecision && 'block' in scopeDecision) {
       return { allowed: false, reason: scopeDecision.block };
     }
-    if (scopeDecision && 'grant' in scopeDecision) {
-      // 委派即授权：Brain 已通过委派授权该 Agent 用自身工具，直接签 token 放行
+    if (scopeDecision && 'grant' in scopeDecision && this.delegationGrantEffective(params.sessionId)) {
+      // 委派即授权：Brain 已通过委派授权该 Agent 用自身工具，直接签 token 放行。
+      // deny-all 会话下 grant 不生效（见 delegationGrantEffective）——落到下方 engine 检查必拒，硬上限不被绕过。
       const inputHash = createHash('sha256').update(params.toolInput).digest('hex').slice(0, 16);
       const token = this.tokenIssuer.issue({ sessionId: params.sessionId, agentName: params.agentName, toolName: params.toolName, inputHash });
       return { allowed: true, tokenId: token.id };
@@ -423,8 +436,9 @@ export class PermissionCoordinator {
     if (scopeDecision && 'block' in scopeDecision) {
       return { allowed: false, reason: scopeDecision.block };
     }
-    if (scopeDecision && 'grant' in scopeDecision) {
-      // 委派即授权：直接签 token 放行，module agent 同步路径无需异步审核
+    if (scopeDecision && 'grant' in scopeDecision && this.delegationGrantEffective(params.sessionId)) {
+      // 委派即授权：直接签 token 放行，module agent 同步路径无需异步审核。
+      // deny-all 会话下 grant 不生效（见 delegationGrantEffective）——落到下方 engine 检查必拒。
       const inputHash = createHash('sha256').update(params.toolInput).digest('hex').slice(0, 16);
       const token = this.tokenIssuer.issue({ sessionId: params.sessionId, agentName: params.agentName, toolName: params.toolName, inputHash });
       return { allowed: true, tokenId: token.id };

@@ -343,3 +343,47 @@ describe('active_scope 委派即授权 (15.0 R4，D5-1 修复)', () => {
     expect(r.requiresReview).toBe(true);
   });
 });
+
+/**
+ * 15.0 V-3：deny-all 是会话级硬上限——委派授权（allowTools，委派即授权）不得穿透。
+ *
+ * 修复前：checkAndIssue / checkAndIssueSimple 的 grant 分支在 engine.checkPermission（deny-all 判定）
+ * 之前 return allowed:true → Brain 委派（allowTools:['*']）让 deny-all 会话里的 Agent 任意用工具，锁形同虚设。
+ * 修复：grant 分支加 delegationGrantEffective 门（mode !== 'deny-all'），deny-all 时降级，落到 engine 必拒。
+ */
+describe('V-3 deny-all 硬上限：委派授权不穿透会话锁', () => {
+  it('deny-all + allowTools:["*"] → checkAndIssue 拒绝（grant 不生效）', () => {
+    const { coord } = makeCoordinator('deny-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const r = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(r.allowed).toBe(false);
+    expect(r.tokenId).toBeUndefined();
+  });
+
+  it('deny-all + allowTools:["*"] → checkAndIssueSimple 拒绝（同步路径同样不穿透）', () => {
+    const { coord } = makeCoordinator('deny-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe', taskId: 't1' });
+    expect(r.allowed).toBe(false);
+    expect(r.tokenId).toBeUndefined();
+  });
+
+  it('对照：allow-all + allowTools:["*"] 仍放行（门只挡 deny-all）', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const r = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(r.allowed).toBe(true);
+    expect(r.tokenId).toBeTruthy();
+  });
+
+  it('per-session：全局 allow-all 但 s1=deny-all → s1 委派授权不穿透', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    coord.setSessionMode('s1', 'deny-all');
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const denied = coord.checkAndIssue({ agentName: 'code', sessionId: 's1', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(denied.allowed).toBe(false);
+    // 对照：s2（allow-all）同样委派授权 → 放行（deny-all 仅锁 s1）
+    const allowed = coord.checkAndIssue({ agentName: 'code', sessionId: 's2', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(allowed.allowed).toBe(true);
+  });
+});
