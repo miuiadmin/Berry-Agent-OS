@@ -1,13 +1,8 @@
 /**
  * Brain 审核详情弹窗。
  *
- * 展示 Brain 审核结果：
- *   - 原始回复 vs 修改后回复的 diff 对比
- *   - "还原 Brain 修改"按钮
- *   - "反馈 Brain 修改有问题"按钮
- *
+ * 展示 Brain 审核结果：原始回复 vs 修改后回复的 diff 对比、还原、反馈。
  * 触发：点击消息上的 Brain 审核 badge。
- * 复用 shadcn Dialog（遮罩 / 居中 / 关闭按钮 / 动画 / 主题 token）。
  */
 
 import { useState } from "react";
@@ -32,30 +27,52 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { TextAreaField } from "@/components/ui/text-area-field";
 
 /** Brain 审核裁决类型 */
 type Verdict = "approve" | "modify" | "reject";
 
-/** 裁决 → Badge 语义 variant */
-type VerdictBadgeVariant = "success" | "warning" | "destructive";
+/** 裁决视觉配置：图标、badge variant、i18n 标签 key */
+const VERDICT_CFG: Record<
+  Verdict,
+  {
+    icon: React.ReactNode;
+    badge: "success" | "warning" | "destructive";
+    labelKey: string;
+  }
+> = {
+  approve: {
+    icon: <ShieldCheck className="size-5 text-success" />,
+    badge: "success",
+    labelKey: "brain.approved",
+  },
+  modify: {
+    icon: <Shield className="size-5 text-warning" />,
+    badge: "warning",
+    labelKey: "brain.modified",
+  },
+  reject: {
+    icon: <ShieldAlert className="size-5 text-destructive" />,
+    badge: "destructive",
+    labelKey: "brain.rejected",
+  },
+};
+
+/** 内容块色调样式（Tailwind 要求完整类名字面量） */
+const TONE_STYLE: Record<"destructive" | "success", string> = {
+  destructive: "border-destructive/20 bg-destructive/5",
+  success: "border-success/20 bg-success/5",
+};
 
 /** 弹窗 props */
 interface BrainReviewModalProps {
-  /** 是否显示 */
   isOpen: boolean;
-  /** 关闭弹窗 */
   onClose: () => void;
-  /** 当前 session ID */
   sessionId: string;
-  /** 任务 ID */
   taskId?: string;
-  /** 审核裁决 */
   verdict: Verdict;
-  /** Brain 审核理由 */
   reviewReason?: string;
-  /** 原始草稿（Brain 修改前的回复） */
   originalDraft?: string;
-  /** 最终回复（Brain 修改后的回复） */
   finalResponse: string;
 }
 
@@ -70,45 +87,40 @@ export function BrainReviewModal({
   finalResponse,
 }: BrainReviewModalProps) {
   const t = useT();
+  const cfg = VERDICT_CFG[verdict];
 
-  // ── UI 交互状态 ──
-  /** Diff 区域是否展开（modify 模式默认展开） */
+  /** Diff 区域是否展开（modify 时默认展开） */
   const [showDiff, setShowDiff] = useState(verdict === "modify");
-  /** 反馈区域是否展开 */
+  /** 反馈输入区域是否展开 */
   const [showFeedback, setShowFeedback] = useState(false);
-  /** 反馈文本 */
-  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackText, setFeedbackText] = useState("");
+  /** 异步操作状态 */
+  const [restoring, setRestoring] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [restored, setRestored] = useState(false);
 
-  // ── 异步操作状态 ──
-  /** 还原中 */
-  const [isRestoring, setIsRestoring] = useState(false);
-  /** 提交反馈中 */
-  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
-  /** 还原成功 */
-  const [restoreSuccess, setRestoreSuccess] = useState(false);
-
-  /** 还原 Brain 修改（调用 /brain/restore-original 接口） */
+  /** 还原 Brain 修改 */
   async function handleRestore() {
-    if (!originalDraft || isRestoring) return;
-    setIsRestoring(true);
+    if (!originalDraft || restoring) return;
+    setRestoring(true);
     try {
       await apiPost("/brain/restore-original", {
         sessionId,
         taskId: taskId ?? "",
         originalResponse: originalDraft,
       });
-      setRestoreSuccess(true);
+      setRestored(true);
     } catch (err) {
       console.error("还原失败:", err);
     } finally {
-      setIsRestoring(false);
+      setRestoring(false);
     }
   }
 
-  /** 提交反馈（调用 /brain/feedback 接口） */
+  /** 提交反馈 */
   async function handleSubmitFeedback() {
-    if (isSubmittingFeedback) return;
-    setIsSubmittingFeedback(true);
+    if (submitting) return;
+    setSubmitting(true);
     try {
       await apiPost("/brain/feedback", {
         sessionId,
@@ -116,28 +128,31 @@ export function BrainReviewModal({
         type: verdict === "modify" ? "brain_modify_wrong" : "brain_reject_wrong",
         originalResponse: originalDraft ?? "",
         modifiedResponse: finalResponse,
-        userComment: feedbackComment,
+        userComment: feedbackText,
       });
       setShowFeedback(false);
-      setFeedbackComment("");
+      setFeedbackText("");
     } catch (err) {
       console.error("提交反馈失败:", err);
     } finally {
-      setIsSubmittingFeedback(false);
+      setSubmitting(false);
     }
   }
 
+  /** 是否可显示反馈按钮 */
+  const canFeedback = (verdict === "modify" || verdict === "reject") && !showFeedback && !restored;
+  /** 是否可显示还原按钮 */
+  const canRestore = verdict === "modify" && !!originalDraft && !restored;
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={isOpen} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         {/* 头部：裁决图标 + 标题 + 裁决 badge */}
         <DialogHeader>
           <div className="flex items-center gap-2">
-            <VerdictIcon verdict={verdict} />
+            {cfg.icon}
             <DialogTitle>{t("brain.reviewTitle")}</DialogTitle>
-            <Badge variant={verdictBadgeVariant(verdict)}>
-              {verdictLabel(verdict, t)}
-            </Badge>
+            <Badge variant={cfg.badge}>{t(cfg.labelKey)}</Badge>
           </div>
         </DialogHeader>
 
@@ -145,58 +160,47 @@ export function BrainReviewModal({
         {reviewReason && (
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">{t("brain.reason")}</p>
-            <DialogDescription className="text-[13px]">
-              {reviewReason}
-            </DialogDescription>
+            <DialogDescription className="text-[13px]">{reviewReason}</DialogDescription>
           </div>
         )}
 
-        {/* Diff 对比（仅 modify 时展示） */}
+        {/* Diff 对比（仅 modify） */}
         {verdict === "modify" && originalDraft && (
           <DiffSection
             originalDraft={originalDraft}
             finalResponse={finalResponse}
-            showDiff={showDiff}
+            open={showDiff}
             onToggle={() => setShowDiff(!showDiff)}
-            t={t}
           />
         )}
 
-        {/* reject 时展示被拦截的内容 */}
+        {/* 被拦截内容（仅 reject） */}
         {verdict === "reject" && (
-          <div className="space-y-1 border-t border-border pt-3">
-            <p className="text-xs text-muted-foreground">
-              {t("brain.rejectedContent")}
-            </p>
-            <div className="max-h-[150px] overflow-y-auto whitespace-pre-wrap rounded border border-destructive/20 bg-destructive/5 p-2 text-xs text-foreground">
-              {originalDraft ?? finalResponse}
-            </div>
+          <div className="border-t border-border pt-3">
+            <ContentBlock
+              label={t("brain.rejectedContent")}
+              content={originalDraft ?? finalResponse}
+              tone="destructive"
+            />
           </div>
         )}
 
-        {/* 反馈区域（展开时显示） */}
+        {/* 反馈输入区域 */}
         {showFeedback && (
           <div className="space-y-2 border-t border-border pt-3">
-            <textarea
-              value={feedbackComment}
-              onChange={(e) => setFeedbackComment(e.target.value)}
+            <TextAreaField
+              rows={3}
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
               placeholder={t("brain.feedbackPlaceholder")}
-              className="h-20 w-full resize-none rounded-lg border border-input bg-transparent p-2 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              className="text-[13px]"
             />
             <div className="flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowFeedback(false)}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setShowFeedback(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button
-                size="sm"
-                onClick={handleSubmitFeedback}
-                disabled={isSubmittingFeedback}
-              >
-                {isSubmittingFeedback ? "…" : t("brain.submitFeedback")}
+              <Button size="sm" onClick={handleSubmitFeedback} disabled={submitting}>
+                {submitting ? "…" : t("brain.submitFeedback")}
               </Button>
             </div>
           </div>
@@ -204,35 +208,19 @@ export function BrainReviewModal({
 
         {/* 底部操作栏 */}
         <DialogFooter className="border-t border-border pt-3">
-          {/* 反馈入口 */}
-          {(verdict === "modify" || verdict === "reject") &&
-            !showFeedback &&
-            !restoreSuccess && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mr-auto"
-                onClick={() => setShowFeedback(true)}
-              >
-                <MessageCircle className="size-3" />
-                {t("brain.feedback")}
-              </Button>
-            )}
-          {/* 还原入口（仅 modify + 有原始草稿） */}
-          {verdict === "modify" && originalDraft && !restoreSuccess && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRestore}
-              disabled={isRestoring}
-            >
-              <RotateCcw className="size-3" />
-              {isRestoring ? "…" : t("brain.restore")}
+          {canFeedback && (
+            <Button variant="ghost" size="sm" className="mr-auto" onClick={() => setShowFeedback(true)}>
+              <MessageCircle className="size-3" />
+              {t("brain.feedback")}
             </Button>
           )}
-          {restoreSuccess && (
-            <span className="text-xs text-success">{t("brain.restoreSuccess")}</span>
+          {canRestore && (
+            <Button variant="outline" size="sm" onClick={handleRestore} disabled={restoring}>
+              <RotateCcw className="size-3" />
+              {restoring ? "…" : t("brain.restore")}
+            </Button>
           )}
+          {restored && <span className="text-xs text-success">{t("brain.restoreSuccess")}</span>}
           <Button variant="secondary" size="sm" onClick={onClose}>
             {t("common.close")}
           </Button>
@@ -244,41 +232,34 @@ export function BrainReviewModal({
 
 // ─── 辅助组件 ──────────────────────────────────────────────────────
 
-/** 裁决 → 图标 */
-function VerdictIcon({ verdict }: { verdict: Verdict }) {
-  if (verdict === "approve") return <ShieldCheck className="size-5 text-success" />;
-  if (verdict === "modify") return <Shield className="size-5 text-warning" />;
-  return <ShieldAlert className="size-5 text-destructive" />;
+/** 带色调的内容展示块（diff / 被拦截内容复用） */
+function ContentBlock({ label, content, tone }: {
+  label: string;
+  content: string;
+  /** 色调：destructive 红色 / success 绿色 */
+  tone: "destructive" | "success";
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-[11px] text-muted-foreground">{label}</p>
+      <div
+        className={`max-h-[150px] overflow-y-auto whitespace-pre-wrap rounded border p-2 text-xs text-foreground ${TONE_STYLE[tone]}`}
+      >
+        {content}
+      </div>
+    </div>
+  );
 }
 
-/** 裁决 → Badge variant */
-function verdictBadgeVariant(verdict: Verdict): VerdictBadgeVariant {
-  if (verdict === "approve") return "success";
-  if (verdict === "modify") return "warning";
-  return "destructive";
-}
-
-/** 裁决 → 标签文本 */
-function verdictLabel(verdict: Verdict, t: (key: string) => string): string {
-  if (verdict === "approve") return t("brain.approved");
-  if (verdict === "modify") return t("brain.modified");
-  return t("brain.rejected");
-}
-
-/** Diff 对比区域（原始 vs 修改后） */
-function DiffSection({
-  originalDraft,
-  finalResponse,
-  showDiff,
-  onToggle,
-  t,
-}: {
+/** Diff 对比区域（原始 vs 修改后，可折叠） */
+function DiffSection({ originalDraft, finalResponse, open, onToggle }: {
   originalDraft: string;
   finalResponse: string;
-  showDiff: boolean;
+  open: boolean;
   onToggle: () => void;
-  t: (key: string) => string;
 }) {
+  const t = useT();
+
   return (
     <div className="border-t border-border pt-3">
       <button
@@ -287,30 +268,12 @@ function DiffSection({
         className="flex w-full items-center justify-between py-1 text-xs text-muted-foreground hover:text-foreground"
       >
         <span>{t("brain.diffToggle")}</span>
-        {showDiff ? (
-          <ChevronUp className="size-3" />
-        ) : (
-          <ChevronDown className="size-3" />
-        )}
+        {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
       </button>
-      {showDiff && (
+      {open && (
         <div className="mt-2 space-y-2">
-          <div>
-            <p className="mb-1 text-[11px] text-muted-foreground">
-              {t("brain.original")}
-            </p>
-            <div className="max-h-[150px] overflow-y-auto whitespace-pre-wrap rounded border border-destructive/20 bg-destructive/5 p-2 text-xs text-foreground">
-              {originalDraft}
-            </div>
-          </div>
-          <div>
-            <p className="mb-1 text-[11px] text-muted-foreground">
-              {t("brain.modified")}
-            </p>
-            <div className="max-h-[150px] overflow-y-auto whitespace-pre-wrap rounded border border-success/20 bg-success/5 p-2 text-xs text-foreground">
-              {finalResponse}
-            </div>
-          </div>
+          <ContentBlock label={t("brain.original")} content={originalDraft} tone="destructive" />
+          <ContentBlock label={t("brain.modifiedLabel")} content={finalResponse} tone="success" />
         </div>
       )}
     </div>
