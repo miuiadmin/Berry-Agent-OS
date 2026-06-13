@@ -1,3 +1,9 @@
+/**
+ * CodeBlock — Markdown 代码块渲染组件。
+ *
+ * 支持 Shiki 语法高亮（异步加载主题）、行数统计、一键复制。
+ * 流式模式下跳过高亮（避免闪烁），降级为纯文本渲染。
+ */
 
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { useTheme } from "@/lib/theme";
@@ -6,18 +12,23 @@ import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
+/** 复制按钮：点击后显示 ✓ 图标 1.5 秒 */
 function CopyBtn({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  /** 复制成功状态的定时器引用（卸载时清理） */
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const t = useT();
+
   useEffect(() => { return () => { if (timerRef.current) clearTimeout(timerRef.current); }; }, []);
+
+  /** 复制文本到剪贴板，1.5 秒后恢复图标 */
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
     }).catch(() => {
-      // clipboard access denied or insecure context
+      // 剪贴板访问被拒绝或非安全上下文
     });
   }, [text]);
 
@@ -36,18 +47,31 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
 }
 
 interface CodeBlockProps {
+  /** 编程语言标识（如 "typescript"、"python"） */
   lang: string | null;
+  /** 代码文本内容 */
   children?: ReactNode;
+  /** 是否在流式输出中（跳过高亮） */
   isStreaming?: boolean;
 }
 
+/**
+ * 代码块组件。
+ *
+ * - 有 lang 时：Shiki 异步高亮，加载中降级为等宽文本
+ * - 无 lang 时：行内 `<code>` 渲染
+ * - 超过 10 行时显示行数统计
+ */
 export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
   const t = useT();
+  /** 去掉末尾换行的纯代码文本 */
   const code = String(children).replace(/\n$/, "");
   const { resolvedTheme } = useTheme();
+  /** Shiki 高亮后的 HTML（空字符串 = 未高亮） */
   const [highlightedHtml, setHighlightedHtml] = useState<string>("");
 
   useEffect(() => {
+    // 无语言或流式中跳过高亮
     if (!lang || isStreaming) {
       setHighlightedHtml("");
       return;
@@ -58,13 +82,14 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
     highlight(code, lang, theme).then((html) => {
       if (!cancelled) setHighlightedHtml(html);
     }).catch(() => {
-      // highlighter failed, fallback to plain rendering
+      // 高亮失败，降级为纯文本
     });
     return () => {
       cancelled = true;
     };
   }, [code, lang, resolvedTheme, isStreaming]);
 
+  /* 无语言标识 → 行内 code 渲染 */
   if (!lang) {
     return (
       <code className="rounded bg-muted/80 px-1.5 py-0.5 text-[13px] font-mono text-foreground">
@@ -73,10 +98,12 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
     );
   }
 
+  /** 代码行数（用于判断是否显示行数统计） */
   const lineCount = code.split("\n").length;
 
   return (
     <div className="group/code relative my-3 rounded-lg border border-border bg-muted/30 overflow-hidden">
+      {/* 标题栏：语言名 + 行数 + 复制按钮 */}
       <div className="flex items-center justify-between border-b border-border px-3 py-1.5 bg-muted/50">
         <span className="text-[11px] md:text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
           {lang}
@@ -90,6 +117,7 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
           <CopyBtn text={code} />
         </div>
       </div>
+      {/* 高亮结果或纯文本降级 */}
       {highlightedHtml ? (
         <div
           className="overflow-x-auto p-3 text-[13px] md:text-xs [&_pre]:!m-0 [&_pre]:!p-0 [&_pre]:!bg-transparent [&_code]:!text-[13px] md:[&_code]:!text-xs [&_code]:!font-mono"

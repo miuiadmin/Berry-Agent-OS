@@ -1,3 +1,15 @@
+/**
+ * 日志查看页面。
+ *
+ * 提供服务端日志的实时查看能力：
+ *   - 按级别（DEBUG/INFO/WARN/ERROR）过滤
+ *   - 按模块名模糊搜索
+ *   - 行数选择（50/100/200/500）
+ *   - 手动刷新 + 5 秒自动刷新
+ *
+ * 数据来源：GET /api/logs
+ */
+
 import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
@@ -6,15 +18,23 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useT, useDateFormat } from "@/lib/i18n";
 
+/** 单条日志行（对应服务端 JSON） */
 interface LogLine {
+  /** 时间戳（毫秒） */
   time?: number;
+  /** 日志级别（20=DEBUG, 30=INFO, 40=WARN, 50=ERROR） */
   level?: number;
+  /** 模块名 */
   module?: string;
+  /** 日志消息 */
   msg?: string;
+  /** 其他字段（透传） */
   [key: string]: unknown;
 }
 
+/** 日志级别 → 缩写标签 */
 const LEVEL_NAMES: Record<number, string> = { 20: "DBG", 30: "INF", 40: "WRN", 50: "ERR" };
+
 /** 日志级别 → 语义色（warn=warning, error=destructive） */
 const LEVEL_COLORS: Record<number, string> = {
   20: "text-muted-foreground/50",
@@ -26,12 +46,18 @@ const LEVEL_COLORS: Record<number, string> = {
 export default function LogsPage() {
   const t = useT();
   const { formatTime: fmtTime } = useDateFormat();
+  /** 日志级别过滤（ALL = 不过滤） */
   const [level, setLevel] = useState("ALL");
+  /** 模块名过滤（模糊匹配） */
   const [module, setModule] = useState("");
+  /** 拉取行数 */
   const [lines, setLines] = useState(100);
+  /** 是否开启 5 秒自动刷新 */
   const [autoRefresh, setAutoRefresh] = useState(false);
+  /** 日志列表容器引用（用于自动滚到底部） */
   const listRef = useRef<HTMLDivElement>(null);
 
+  // 构建查询参数
   const params = new URLSearchParams();
   params.set("lines", String(lines));
   if (level !== "ALL") params.set("level", level.toLowerCase());
@@ -40,9 +66,11 @@ export default function LogsPage() {
   const { data, refetch, isFetching } = useQuery({
     queryKey: ["logs", level, module, lines],
     queryFn: (ctx) => apiGet<{ lines: LogLine[]; total: number }>(`/api/logs?${params.toString()}`, ctx.signal),
+    /** 自动刷新模式下每 5 秒拉一次 */
     refetchInterval: autoRefresh ? 5000 : false,
   });
 
+  // 数据更新后自动滚到底部（最新日志）
   useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
@@ -51,9 +79,11 @@ export default function LogsPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* 工具栏：级别/模块/行数筛选 + 刷新按钮 */}
       <div className="shrink-0 border-b px-4 py-3 flex flex-wrap items-center gap-2">
         <h1 className="text-lg font-semibold mr-auto">{t("logs.title")}</h1>
 
+        {/* 级别选择 */}
         <select aria-label={t("logs.logLevel")}
           value={level}
           onChange={(e) => setLevel(e.target.value)}
@@ -66,6 +96,7 @@ export default function LogsPage() {
           <option value="ERROR">{t("logs.error")}</option>
         </select>
 
+        {/* 模块名输入 */}
         <input
           type="text"
           aria-label={t("logs.filterByModule")}
@@ -75,6 +106,7 @@ export default function LogsPage() {
           className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         />
 
+        {/* 行数选择 */}
         <select aria-label={t("logs.numberOfLines")}
           value={lines}
           onChange={(e) => setLines(Number(e.target.value))}
@@ -86,6 +118,7 @@ export default function LogsPage() {
           <option value={500}>500</option>
         </select>
 
+        {/* 刷新按钮（加载中旋转） */}
         <Button
           variant="ghost"
           aria-label={t("logs.refreshLogs")}
@@ -95,6 +128,7 @@ export default function LogsPage() {
           <RefreshCw className="size-3.5" />
         </Button>
 
+        {/* 自动刷新开关 */}
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">
           <input
             type="checkbox"
@@ -106,6 +140,7 @@ export default function LogsPage() {
         </label>
       </div>
 
+      {/* 日志列表（等宽字体，按级别着色） */}
       <div ref={listRef} className="flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
         {data?.lines.map((line, i) => (
           <div key={i} className={cn("py-0.5 flex gap-2", LEVEL_COLORS[line.level ?? 30])}>
