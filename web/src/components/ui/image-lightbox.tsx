@@ -1,9 +1,28 @@
+/**
+ * 图片灯箱组件集。
+ *
+ * - ImageLightbox：全屏覆盖层查看大图（ESC 关闭、点击背景关闭、焦点管理）
+ * - ClickableImage：内联缩略图，点击打开灯箱
+ *
+ * 两个组件共享 error/loaded 状态模式。
+ */
+
 "use client";
 
 import { useEffect, useCallback, useRef, useState } from "react";
 import { X, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+
+/** 图片加载错误占位 */
+function ImageError({ className, message }: { className?: string; message: string }) {
+  return (
+    <div className={cn("flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground", className)}>
+      <ImageOff className="size-4" />
+      <span>{message}</span>
+    </div>
+  );
+}
 
 interface ImageLightboxProps {
   src: string;
@@ -12,58 +31,42 @@ interface ImageLightboxProps {
   onClose: () => void;
 }
 
+/** 全屏灯箱（ESC / 点击背景关闭，焦点恢复） */
 export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const t = useT();
-
-  /** 打开前记录焦点元素，关闭时恢复 */
-  const previousFocusRef = useState(() => null as HTMLElement | null)[0];
+  /** 打开前的焦点元素，关闭时恢复 */
   const prevFocusRef = useRef<HTMLElement | null>(null);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    },
-    [onClose],
-  );
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
-    // 保存当前焦点
     prevFocusRef.current = document.activeElement as HTMLElement;
     document.addEventListener("keydown", handleKeyDown);
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
-      // 关闭时恢复焦点
-      if (prevFocusRef.current) {
-        prevFocusRef.current.focus();
-        prevFocusRef.current = null;
-      }
+      prevFocusRef.current?.focus();
+      prevFocusRef.current = null;
     };
   }, [open, handleKeyDown]);
 
-  useEffect(() => {
-    setError(false);
-  }, [src]);
+  useEffect(() => { setError(false); }, [src]);
 
   if (!open) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={alt || t("lightbox.image")}
+    <div role="dialog" aria-modal="true" aria-label={alt || t("lightbox.image")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
-      onClick={onClose}
-    >
-      <button
-        onClick={onClose}
-        className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 z-10 flex size-11 md:size-9 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 active:bg-black/70 transition-colors"
-        aria-label={t("common.close")}
-      >
+      onClick={onClose}>
+      <button onClick={onClose}
+        className="absolute top-[calc(1rem+env(safe-area-inset-top,0px))] right-4 z-10 flex size-11 items-center justify-center rounded-full bg-black/50 text-white transition-colors hover:bg-black/70 active:bg-black/70 md:size-9"
+        aria-label={t("common.close")}>
         <X className="size-5" />
       </button>
       {error ? (
@@ -72,31 +75,17 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
           <span className="text-sm">{t("lightbox.failedToLoad")}</span>
         </div>
       ) : (
-        <img
-          src={src}
-          alt={alt || ""}
-          className={cn(
-            "max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl transition-opacity duration-300",
-            loaded ? "opacity-100" : "opacity-0"
-          )}
+        <img src={src} alt={alt || ""}
+          className={cn("max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
           onClick={(e) => e.stopPropagation()}
-          onError={() => setError(true)}
-          onLoad={() => setLoaded(true)}
-        />
+          onError={() => setError(true)} onLoad={() => setLoaded(true)} />
       )}
     </div>
   );
 }
 
-export function ClickableImage({
-  src,
-  alt,
-  className,
-}: {
-  src?: string;
-  alt?: string;
-  className?: string;
-}) {
+/** 可点击图片（内联缩略图 → 点击打开灯箱） */
+export function ClickableImage({ src, alt, className }: { src?: string; alt?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -104,29 +93,14 @@ export function ClickableImage({
 
   if (!src) return null;
 
-  if (error) {
-    return (
-      <div className={cn("flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground", className)}>
-        <ImageOff className="size-4" />
-        <span>{alt || t("lightbox.imageFailedToLoad")}</span>
-      </div>
-    );
-  }
+  if (error) return <ImageError className={className} message={alt || t("lightbox.imageFailedToLoad")} />;
 
   return (
     <>
-      <img
-        src={src}
-        alt={alt || ""}
-        className={cn(
-          "rounded-lg max-w-full max-h-80 cursor-pointer hover:opacity-90 transition-all duration-300 my-2",
-          loaded ? "opacity-100" : "opacity-0",
-          className
-        )}
+      <img src={src} alt={alt || ""}
+        className={cn("my-2 max-h-80 max-w-full cursor-pointer rounded-lg transition-all duration-300 hover:opacity-90", loaded ? "opacity-100" : "opacity-0", className)}
         onClick={() => setOpen(true)}
-        onError={() => setError(true)}
-        onLoad={() => setLoaded(true)}
-      />
+        onError={() => setError(true)} onLoad={() => setLoaded(true)} />
       <ImageLightbox src={src} alt={alt} open={open} onClose={() => setOpen(false)} />
     </>
   );
