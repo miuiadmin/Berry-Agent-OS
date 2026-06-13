@@ -1,5 +1,5 @@
 /**
- * Missions 页面的子组件。
+ * Missions 页面的子组件集合。
  *
  * 从 MissionsPage 拆出，让页面主文件只保留列表 + 详情的状态编排。
  * 组件间有依赖链（StatusBadge → TaskCard → MissionDetail → SquadTab → SquadCard），
@@ -26,6 +26,7 @@ import {
   Users,
   Radio,
 } from "lucide-react";
+import { useT } from "@/lib/i18n";
 import type {
   MissionListItemData,
   PlanResponse,
@@ -46,49 +47,83 @@ export type {
 
 // ─── 状态徽章 ──────────────────────────────────────────────────────
 
-/** 任务/mission 状态 → Badge variant + 图标的映射 */
+/** 任务/mission 状态 → Badge variant + 图标的映射配置 */
 const STATUS_VARIANTS: Record<
   string,
-  { variant: "default" | "secondary" | "success" | "warning" | "destructive"; icon: React.ReactNode }
+  {
+    variant: "default" | "secondary" | "success" | "warning" | "destructive";
+    icon: React.ReactNode;
+  }
 > = {
-  // mission 级状态
+  /** mission 级状态 */
   pending: { variant: "secondary", icon: <Clock className="size-3" /> },
-  in_progress: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
-  completed: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
-  failed: { variant: "destructive", icon: <AlertTriangle className="size-3" /> },
+  in_progress: {
+    variant: "warning",
+    icon: <Loader2 className="size-3 animate-spin" />,
+  },
+  completed: {
+    variant: "success",
+    icon: <CheckCircle2 className="size-3" />,
+  },
+  failed: {
+    variant: "destructive",
+    icon: <AlertTriangle className="size-3" />,
+  },
   cancelled: { variant: "secondary", icon: <Clock className="size-3" /> },
-  // task 级状态
+  /** task 级状态 */
   waiting: { variant: "secondary", icon: <Clock className="size-3" /> },
-  working: { variant: "warning", icon: <Loader2 className="size-3 animate-spin" /> },
+  working: {
+    variant: "warning",
+    icon: <Loader2 className="size-3 animate-spin" />,
+  },
   done: { variant: "success", icon: <CheckCircle2 className="size-3" /> },
 };
 
-/** 状态徽章：把 mission/task 状态翻译成 Badge（图标 + 颜色 + 文字） */
+/** 默认状态配置（未知状态 fallback） */
+const DEFAULT_STATUS = {
+  variant: "secondary" as const,
+  icon: null,
+};
+
+/**
+ * 状态徽章：把 mission/task 状态翻译成带图标的 Badge。
+ * 优先使用 i18n key `missions.task{Status}`，不存在则直接显示原始值。
+ */
 export function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_VARIANTS[status] ?? {
-    variant: "secondary" as const,
-    icon: null,
-  };
+  const t = useT();
+  const config = STATUS_VARIANTS[status] ?? DEFAULT_STATUS;
+  /** 尝试 i18n 映射，无匹配则回退到原始状态文本 */
+  const label =
+    t(`missions.task${status.charAt(0).toUpperCase()}${status.slice(1)}`) ??
+    status;
+
   return (
     <Badge variant={config.variant} className="gap-1">
       {config.icon}
-      {status}
+      {label}
     </Badge>
   );
 }
 
 // ─── Mission 列表项 ───────────────────────────────────────────────
 
-/** mission 列表中的单个项（点击选中后展示详情） */
+interface MissionListItemProps {
+  /** 列表项数据 */
+  mission: MissionListItemData;
+  /** 是否被选中（高亮边框） */
+  isSelected: boolean;
+  /** 点击选中回调 */
+  onClick: () => void;
+}
+
+/** mission 列表中的单个项：展示目标 / 状态 / 任务数，点击后右侧展示详情 */
 export function MissionListItem({
   mission,
   isSelected,
   onClick,
-}: {
-  mission: MissionListItemData;
-  isSelected: boolean;
-  onClick: () => void;
-}) {
+}: MissionListItemProps) {
+  const t = useT();
+
   return (
     <button
       type="button"
@@ -102,7 +137,12 @@ export function MissionListItem({
           <p className="truncate text-sm font-medium">{mission.goal}</p>
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <StatusBadge status={mission.status} />
-            <span>{mission.taskCount} tasks</span>
+            <span>
+              {t("missions.progressLabel", {
+                done: String(mission.taskCount),
+                total: String(mission.taskCount),
+              })}
+            </span>
           </div>
         </div>
         <Target className="size-4 shrink-0 text-muted-foreground" />
@@ -113,11 +153,17 @@ export function MissionListItem({
 
 // ─── Mission 详情面板 ─────────────────────────────────────────────
 
+interface MissionDetailProps {
+  /** 要展示详情的 mission ID */
+  missionId: string;
+}
+
 /**
  * Mission 详情：拉取 plan.json，展示目标 / 进度 / 任务列表 / squad 结构。
  * 使用 Tabs 切换 Tasks 视图与 Squad 视图。
  */
-export function MissionDetail({ missionId }: { missionId: string }) {
+export function MissionDetail({ missionId }: MissionDetailProps) {
+  const t = useT();
   const { data: plan, isLoading } = useQuery({
     queryKey: ["mission", missionId],
     queryFn: (ctx) =>
@@ -137,13 +183,16 @@ export function MissionDetail({ missionId }: { missionId: string }) {
   if (!plan) {
     return (
       <p className="p-4 text-sm text-muted-foreground">
-        Failed to load mission details
+        {t("missions.failedToLoad")}
       </p>
     );
   }
 
+  /** 已完成任务数 */
   const doneTasks = plan.tasks.filter((t) => t.status === "done").length;
+  /** 总任务数 */
   const totalTasks = plan.tasks.length;
+  /** 进度百分比（0–100） */
   const progressPercent =
     totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
@@ -155,7 +204,7 @@ export function MissionDetail({ missionId }: { missionId: string }) {
           <h3 className="text-lg font-semibold">{plan.mission.goal}</h3>
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
             <StatusBadge status={plan.mission.status} />
-            <span>by @{plan.mission.created_by}</span>
+            <span>{t("missions.createdBy", { user: plan.mission.created_by })}</span>
             <span>{new Date(plan.mission.created_at).toLocaleString()}</span>
           </div>
           {plan.mission.context && (
@@ -168,7 +217,10 @@ export function MissionDetail({ missionId }: { missionId: string }) {
         <div className="shrink-0 text-right">
           <div className="text-2xl font-bold">{progressPercent}%</div>
           <div className="text-xs text-muted-foreground">
-            {doneTasks}/{totalTasks} tasks
+            {t("missions.progressLabel", {
+              done: String(doneTasks),
+              total: String(totalTasks),
+            })}
           </div>
         </div>
       </div>
@@ -185,16 +237,17 @@ export function MissionDetail({ missionId }: { missionId: string }) {
       <Tabs value="tasks" onValueChange={() => {}}>
         <TabsList>
           <TabsTrigger value="tasks" className="gap-1">
-            <GitBranch className="size-3" /> Tasks ({totalTasks})
+            <GitBranch className="size-3" /> {t("missions.tasksTab")} (
+            {totalTasks})
           </TabsTrigger>
           <TabsTrigger value="squad" className="gap-1">
-            <Users className="size-3" /> Squad
+            <Users className="size-3" /> {t("missions.squadTab")}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="tasks" className="space-y-2">
           {plan.tasks.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              No tasks yet
+              {t("missions.noTasksYet")}
             </p>
           ) : (
             plan.tasks.map((task) => <TaskCard key={task.id} task={task} />)
@@ -212,6 +265,8 @@ export function MissionDetail({ missionId }: { missionId: string }) {
 
 /** 单个任务卡片：状态徽章 + ID + 执行者 + 内容 + 进度/结果/依赖 */
 function TaskCard({ task }: { task: MissionTask }) {
+  const t = useT();
+
   return (
     <div className="flex items-start gap-3 rounded-lg border p-3 text-sm transition-colors hover:bg-muted/50">
       <div className="mt-0.5 shrink-0">
@@ -228,14 +283,17 @@ function TaskCard({ task }: { task: MissionTask }) {
         </div>
         <p className="mt-0.5">{task.what}</p>
         {task.progress && (
-          <p className="mt-1 text-xs text-muted-foreground">📊 {task.progress}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            📊 {task.progress}
+          </p>
         )}
         {task.result && (
           <p className="mt-1 text-xs text-success">✅ {task.result}</p>
         )}
         {task.depends_on.length > 0 && (
           <p className="mt-1 text-xs text-muted-foreground">
-            depends: {task.depends_on.join(", ")}
+            {t("missions.dependsLabel")}
+            {task.depends_on.join(", ")}
           </p>
         )}
       </div>
@@ -245,28 +303,37 @@ function TaskCard({ task }: { task: MissionTask }) {
 
 // ─── Squad 面板 ───────────────────────────────────────────────────
 
+interface SquadTabProps {
+  /** mission ID（用于拉取 squad 数据） */
+  missionId: string;
+}
+
 /**
  * Squad 视图：拉取 mission 的 squad 组织结构，递归渲染 {@link SquadCard}。
  * 无 squad 时显示空状态；有信号时展示最近 5 条。
  */
-export function SquadTab({ missionId }: { missionId: string }) {
+export function SquadTab({ missionId }: SquadTabProps) {
+  const t = useT();
   const { data: squad, isLoading } = useQuery({
     queryKey: ["mission", missionId, "squad"],
     queryFn: (ctx) =>
-      apiGet<{ org?: { squads: SquadNode[] }; signals: SquadSignal[] } | null>(
-        `/api/missions/${missionId}/squad`,
-        ctx.signal,
-      ).catch(() => null),
+      apiGet<{
+        org?: { squads: SquadNode[] };
+        signals: SquadSignal[];
+      } | null>(`/api/missions/${missionId}/squad`, ctx.signal).catch(
+        () => null,
+      ),
   });
 
   if (isLoading) return <Skeleton className="h-20 w-full" />;
+
   if (!squad) {
     return (
       <div className="py-8 text-center">
         <EmptyState
           icon={Users}
-          title="No Squad Structure"
-          description="This mission uses flat task coordination without squad organization."
+          title={t("missions.noSquad")}
+          description={t("missions.noSquadDesc")}
         />
       </div>
     );
@@ -281,22 +348,10 @@ export function SquadTab({ missionId }: { missionId: string }) {
       {squad.signals && squad.signals.length > 0 && (
         <div className="mt-4">
           <h4 className="mb-2 flex items-center gap-1 text-sm font-medium">
-            <Radio className="size-3" /> Recent Signals
+            <Radio className="size-3" /> {t("missions.recentSignals")}
           </h4>
           {squad.signals.slice(-5).map((sig: SquadSignal, i: number) => (
-            <div key={i} className="flex items-center gap-2 py-1 text-xs">
-              <span>
-                {sig.type === "blocker"
-                  ? "🚫"
-                  : sig.type === "done"
-                    ? "✅"
-                    : sig.type === "question"
-                      ? "❓"
-                      : "📊"}
-              </span>
-              <span className="font-medium">{sig.from}:</span>
-              <span className="text-muted-foreground">{sig.msg}</span>
-            </div>
+            <SignalLine key={i} sig={sig} />
           ))}
         </div>
       )}
@@ -304,9 +359,40 @@ export function SquadTab({ missionId }: { missionId: string }) {
   );
 }
 
-/** 单个 Squad 卡片（递归渲染子 squad，按 depth 缩进） */
-function SquadCard({ squad, depth }: { squad: SquadNode; depth: number }) {
+/** 信号类型 → emoji 映射 */
+function signalEmoji(type: string) {
+  if (type === "blocker") return "🚫";
+  if (type === "done") return "✅";
+  if (type === "question") return "❓";
+  return "📊";
+}
+
+/** 单条信号行（发送者 + 消息） */
+function SignalLine({ sig }: { sig: SquadSignal }) {
+  return (
+    <div className="flex items-center gap-2 py-1 text-xs">
+      <span>{signalEmoji(sig.type)}</span>
+      <span className="font-medium">{sig.from}:</span>
+      <span className="text-muted-foreground">{sig.msg}</span>
+    </div>
+  );
+}
+
+// ─── Squad 卡片（递归） ────────────────────────────────────────────
+
+interface SquadCardProps {
+  /** 当前 squad 节点数据 */
+  squad: SquadNode;
+  /** 递归深度（控制缩进） */
+  depth: number;
+}
+
+/** 单个 Squad 卡片：展示名称 / 目标 / 负责人 / 成员，递归渲染子 squad */
+function SquadCard({ squad, depth }: SquadCardProps) {
+  const t = useT();
+  /** 每层缩进 16px */
   const indent = depth * 16;
+
   return (
     <div style={{ marginLeft: indent }}>
       <Card>
@@ -317,24 +403,17 @@ function SquadCard({ squad, depth }: { squad: SquadNode; depth: number }) {
             </CardTitle>
             <StatusBadge status={squad.status} />
           </div>
-          <p className="text-xs text-muted-foreground">Goal: {squad.goal}</p>
           <p className="text-xs text-muted-foreground">
-            Leader: @{squad.leader}
+            {t("missions.goalLabel")}
+            {squad.goal}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("missions.leaderLabel")}@{squad.leader}
           </p>
         </CardHeader>
         <CardContent>
           {squad.members?.map((m: SquadMember) => (
-            <div
-              key={m.agent}
-              className="flex items-center gap-2 py-0.5 text-xs"
-            >
-              <span>
-                {m.role === "check" ? "🔍" : m.role === "lead" ? "🧠" : "🔧"}
-              </span>
-              <span className="font-medium">@{m.agent}</span>
-              <span className="text-muted-foreground">[{m.status}]</span>
-              <span className="text-muted-foreground">{m.on}</span>
-            </div>
+            <SquadMemberLine key={m.agent} member={m} />
           ))}
         </CardContent>
       </Card>
@@ -342,6 +421,25 @@ function SquadCard({ squad, depth }: { squad: SquadNode; depth: number }) {
       {squad.squads?.map((sub: SquadNode) => (
         <SquadCard key={sub.id} squad={sub} depth={depth + 1} />
       ))}
+    </div>
+  );
+}
+
+/** 成员角色 → emoji */
+function roleEmoji(role: string) {
+  if (role === "check") return "🔍";
+  if (role === "lead") return "🧠";
+  return "🔧";
+}
+
+/** 单个 squad 成员行 */
+function SquadMemberLine({ member }: { member: SquadMember }) {
+  return (
+    <div className="flex items-center gap-2 py-0.5 text-xs">
+      <span>{roleEmoji(member.role)}</span>
+      <span className="font-medium">@{member.agent}</span>
+      <span className="text-muted-foreground">[{member.status}]</span>
+      <span className="text-muted-foreground">{member.on}</span>
     </div>
   );
 }

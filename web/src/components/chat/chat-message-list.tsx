@@ -1,3 +1,14 @@
+/**
+ * 聊天消息列表 + 消息气泡。
+ *
+ * 职责：
+ *   - ChatMessageList：消息列表容器（自动滚动 / 滚到底部按钮 / 空状态）
+ *   - MessageBubble：单条消息气泡（用户 / 助手 / 错误 / 流式动画）
+ *
+ * 子组件（从 message-bubble-parts.tsx 导入）：
+ *   - CopyButton / EditableMessage / MessageError / BrainReviewBadge /
+ *     MessageActions / AttachmentList
+ */
 
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";

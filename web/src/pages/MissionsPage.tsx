@@ -1,17 +1,18 @@
 /**
- * Mission 管理页面（13.0 多智能体协作）。
+ * Mission 管理页面（多智能体协作）。
  *
  * 左侧列表 + 右侧详情布局。点击 mission 展示 plan.json 任务状态 + squad 组织。
  * 每 10 秒自动刷新（mission 状态可能实时变化）。
  *
- * 子组件 + 类型在 missions-components.tsx：
- *   - {@link MissionListItem} / {@link MissionDetail} / {@link StatusBadge} /
- *     {@link SquadTab} 等
+ * 子组件 + 类型 → missions-components.tsx：
+ *   - {@link MissionListItem} / {@link MissionDetail} / {@link StatusBadge} 等
  */
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useT } from "@/lib/i18n";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,31 +24,36 @@ import {
 } from "./missions-components";
 
 export default function MissionsPage() {
+  const t = useT();
+  useDocumentTitle(t("sidebar.missions"));
+
   /** 当前选中的 mission ID（null = 未选中，右侧显示占位） */
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // ── 数据查询 ──
   const { data, isLoading } = useQuery({
     queryKey: ["missions"],
     queryFn: (ctx) => apiGet<MissionsListResponse>("/api/missions", ctx.signal),
-    refetchInterval: 10_000, // 每 10 秒刷新一次（mission 状态可能实时变化）
+    /** 每 10 秒刷新一次（mission 状态可能实时变化） */
+    refetchInterval: 10_000,
   });
 
   const missions = data?.items ?? [];
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 md:p-6">
-      {/* 标题 */}
+      {/* 页面标题 */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Missions</h1>
+        <h1 className="text-2xl font-bold">{t("missions.title")}</h1>
         <p className="text-sm text-muted-foreground">
           {missions.length > 0
-            ? `${missions.length} missions`
-            : "No active missions"}
+            ? t("missions.count", { count: String(missions.length) })
+            : t("missions.noActive")}
         </p>
       </div>
 
       {isLoading ? (
-        // 加载骨架屏
+        /* 加载骨架屏 */
         <div className="grid gap-4 md:grid-cols-[320px_1fr]">
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
@@ -57,14 +63,14 @@ export default function MissionsPage() {
           <Skeleton className="h-64 w-full" />
         </div>
       ) : missions.length === 0 ? (
-        // 空状态
+        /* 空状态 */
         <EmptyState
           icon={Target}
-          title="No Missions Yet"
-          description="Missions are created automatically when Brain detects complex multi-agent tasks. Try asking for something that requires multiple agents to collaborate."
+          title={t("missions.noActiveMissions")}
+          description={t("missions.noActive")}
         />
       ) : (
-        // 列表 + 详情双栏布局
+        /* 列表 + 详情双栏布局 */
         <div className="grid gap-4 md:grid-cols-[320px_1fr]">
           {/* 左侧：mission 列表 */}
           <div className="space-y-2 overflow-y-auto">
@@ -85,7 +91,7 @@ export default function MissionsPage() {
                 <MissionDetail missionId={selectedId} />
               ) : (
                 <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-                  Select a mission to view details
+                  {t("missions.selectToView")}
                 </div>
               )}
             </CardContent>
