@@ -222,6 +222,12 @@ export function deleteSession(sid: string): { cleanedTables: number } {
         db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(sid);
       } catch { /* message_blocks 不存在（旧库）— 静默跳过 */ }
 
+      // message_blocks_fts（独立 FTS5）显式清：动态发现靠它"恰好有 session_id 列"兜底（隐式依赖），
+      // 若未来改 external-content（去 session_id 列）会漏清。显式 DELETE WHERE session_id 加固。
+      try {
+        db.prepare('DELETE FROM message_blocks_fts WHERE session_id = ?').run(sid);
+      } catch { /* message_blocks_fts 不存在（旧库）— 静默跳过 */ }
+
       // 通过 task_id 关联但无 session_id 列的表（动态发现捕获不到）→ 显式 subquery（须在 agent_tasks 删前，
       // 否则子查询空集）。agent_task_workspaces / code_task_artifacts / task_subscribers 均以 task_id 指向 agent_tasks。
       for (const t of ['agent_task_workspaces', 'code_task_artifacts', 'task_subscribers']) {
