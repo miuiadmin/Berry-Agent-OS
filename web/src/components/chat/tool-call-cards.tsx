@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
 
+/** 工具调用详情的输入/输出 pre 共享样式 */
+const PRE_BASE = "mt-0.5 rounded px-2 py-1.5 overflow-x-auto overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all";
+
 interface ToolCallCardsProps {
   calls: ToolCallEvent[];
   isActive: boolean;
@@ -47,18 +50,13 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
         <div className="mt-1 ml-4 space-y-1.5 text-[11px]">
           <div>
             <span className="text-muted-foreground/60 text-[11px] uppercase tracking-wide">{t("tools.input")}</span>
-            <pre className="mt-0.5 rounded bg-muted/50 px-2 py-1.5 overflow-x-auto max-h-32 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all">
-              {call.input}
-            </pre>
+            <pre className={cn(PRE_BASE, "bg-muted/50 max-h-32")}>{call.input}</pre>
           </div>
           <div>
             <span className={cn("text-[11px] uppercase tracking-wide", call.isError ? "text-destructive" : "text-muted-foreground/60")}>
               {t(call.isError ? "tools.error" : "tools.output")}
             </span>
-            <pre className={cn(
-              "mt-0.5 rounded px-2 py-1.5 overflow-x-auto max-h-40 overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all",
-              call.isError ? "bg-destructive/5" : "bg-muted/50",
-            )}>
+            <pre className={cn(PRE_BASE, "max-h-40", call.isError ? "bg-destructive/5" : "bg-muted/50")}>
               {call.result}
             </pre>
           </div>

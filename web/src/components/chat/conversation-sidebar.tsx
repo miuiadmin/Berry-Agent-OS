@@ -101,7 +101,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
               }}
             />
           ))}
-          {(!conversations || conversations.length === 0) && (
+          {!conversations?.length && (
             <p className="px-3 py-4 text-center text-xs text-muted-foreground">
               {search ? t("chat.noMatches") : t("chat.noConversations")}
             </p>
