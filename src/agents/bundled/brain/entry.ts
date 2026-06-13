@@ -1,6 +1,7 @@
 import { startResidentAgent } from '../../resident-agent.js';
 import { getLogger } from '../../../utils/logger.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
+import { C_LEVEL_OBSERVATION_TYPES, renderObservationContext } from './observation-context.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -451,15 +452,16 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     // 设计依据：§20.7 后置审核增强 — C 级使用完整 observation queue
     // M1 保真度：若观察队列被截断（窗口裁剪），追加警告降低审核置信度
     if (turn.level === 'C' && turn.sessionId) {
+      // 15.0 C3 闭合：C 级审核注入近期 Agent 行为观察（白名单含 agent_event——审计报告 + plan_stalled）。
+      // 白名单 + 渲染预算逻辑抽到 observation-context.ts（纯逻辑可单测）：此前内联实现曾遗漏
+      // agent_event，导致这两类观察「只写不读」——落了表但 queryByType 查不到，§4.6 闭环断裂。
       const observations = observationRecorder.queryByType(
         turn.sessionId,
-        ['dialogue_send', 'dialogue_reply', 'tool_call', 'tool_result', 'drift_signal'],
+        [...C_LEVEL_OBSERVATION_TYPES],
         20,
       );
       if (observations.length > 0) {
-        const observationContext = observations
-          .map(o => `[${o.observationType}] ${o.fromAgent}${o.toAgent ? '→' + o.toAgent : ''}: ${safeSlice(o.content, 200)}`)
-          .join('\n');
+        const observationContext = renderObservationContext(observations);
         systemPrompt += `\n\n## 近期 Agent 行为观察（供 C 级审核参考）\n${observationContext}`;
 
         // M1 截断降级：若第一条观察记录的 taskId 存在，检查截断状态
