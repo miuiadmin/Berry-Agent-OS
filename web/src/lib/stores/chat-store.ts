@@ -14,6 +14,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { apiGet } from "@/lib/api";
+import type { Block, StreamBlockPayload } from "@/lib/blocks";
+import { applyBlockToBlocks } from "@/lib/blocks";
 import { useWsStore } from "./ws-store";
 
 export interface ChatAttachment {
@@ -57,6 +59,12 @@ export interface ChatMessage {
   reasoning?: string;
   error?: string;
   attachments?: ChatAttachment[];
+  /**
+   * 对话内联 block（设计文档/22）：tool / thinking / delegation 的内联模型。
+   * 流式期间由 applyBlock（stream.block 事件）累积；历史/无 block 事件路径由渲染层 displayBlocks 投影兜底。
+   * 与 toolCalls/reasoning 并存（兼容期双写）——渲染层优先用 blocks，缺项用旧字段补齐。
+   */
+  blocks?: Block[];
   /**
    * 13.0 灵魂版：Brain 审核裁决（modify/reject 时前端展示徽章）
    * - 'modify'：Brain 修改了初稿，显示 "Brain 已修改" 蓝色标签
@@ -157,6 +165,13 @@ interface ChatState {
 
   /** 标记最后一条消息的发送状态（user 消息用 'sending' / 'failed' / 'complete'） */
   markLastMessageStatus: (status: "sending" | "failed" | "complete") => void;
+
+  /**
+   * 应用一个 stream.block 事件到当前流式 assistant 消息（对话内联，设计文档/22）。
+   * 目标消息：优先 pendingStreamMessageId，回退最后一条 streaming assistant。
+   * 用 applyBlockToBlocks 纯 reducer 更新 blocks（text/thinking 追加 delta，tool/delegation upsert）。
+   */
+  applyBlock: (payload: StreamBlockPayload) => void;
 }
 
 /**
@@ -164,6 +179,14 @@ interface ChatState {
  * 截断为最近 50 条消息，将流式状态标记为 complete，截断工具调用结果。
  * 独立为函数以便防抖写入时复用。
  */
+function truncateBlockForPersist(block: Block): Block {
+  // 仅截断 tool block 的大 output/error（结构与 toolCalls.result 同性质）；其余 block 原样
+  if (block.type !== 'tool') return block;
+  const out = typeof block.output === 'string' ? block.output.slice(0, 500) : block.output;
+  const err = block.error ? block.error.slice(0, 500) : block.error;
+  return { ...block, output: out, error: err };
+}
+
 function partializeForPersist(state: ChatState) {
   return {
     sessionId: state.sessionId,
@@ -172,6 +195,8 @@ function partializeForPersist(state: ChatState) {
       status: m.status === "streaming" ? "complete" as const : m.status,
       progress: m.status === "streaming" ? undefined : m.progress,
       toolCalls: m.toolCalls?.slice(-5).map(tc => ({ ...tc, result: tc.result?.slice(0, 500) })),
+      // 对话内联 block：截断 tool output（与 toolCalls 同策略），避免 localStorage 溢出
+      blocks: m.blocks?.slice(-8).map(b => truncateBlockForPersist(b)),
     })),
     pendingStreamMessageId: state.pendingStreamMessageId,
   };
@@ -413,6 +438,24 @@ export const useChatStore = create<ChatState>()(
           }
           msgs[msgs.length - 1] = { ...last, ...patch };
           return { messages: msgs };
+        }),
+
+      /**
+       * 应用 stream.block 事件到当前流式消息（对话内联，设计文档/22）。
+       * 与 appendToLast/appendToolCall 同策略定位目标消息（pendingStreamMessageId 优先），
+       * 用 applyBlockToBlocks 纯 reducer 不可变更新 blocks。
+       */
+      applyBlock: (payload) =>
+        set((s) => {
+          const msgs = s.messages;
+          // 目标：当前流式占位（pendingStreamMessageId）；找不到则回退最后一条 streaming assistant
+          let idx = s.pendingStreamMessageId ? msgs.findIndex((m) => m.id === s.pendingStreamMessageId) : -1;
+          if (idx < 0) idx = msgs.findLastIndex((m) => m.role === "assistant" && m.status === "streaming");
+          if (idx < 0) return s; // 无目标消息（占位尚未创建）——事件丢弃，下一条 delta 会重建
+          const msg = msgs[idx];
+          const copy = msgs.slice();
+          copy[idx] = { ...msg, blocks: applyBlockToBlocks(msg.blocks, payload) };
+          return { messages: copy };
         }),
 
       /**

@@ -53,7 +53,7 @@ function toPermissionRequest(msg: Extract<ServerMessage, { type: "permission.con
  * 3. 提供 send/cancel/respond 等消息操作方法
  */
 export function useChatSocket() {
-  const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission, sharedSessionRestore, createStreamingPlaceholder, markLastMessageStatus } = useChatStore();
+  const { sessionId, addMessage, setStreaming, setPendingDelegation, setPendingPermission, sharedSessionRestore, createStreamingPlaceholder, markLastMessageStatus, applyBlock } = useChatStore();
   const { send, confirmOutgoingMessage, onMessage, status } = useWsStore();
   const queryClient = useQueryClient();
   const t = useT();
@@ -191,7 +191,7 @@ export function useChatSocket() {
 
       // H6 修复：占位创建统一走 createStreamingPlaceholder
       // 收到第一个流式事件时，如果当前还没有 streaming 占位（pendingStreamMessageId 为空且末尾非 streaming assistant），创建之
-      if (msg.type === "text_delta" || msg.type === "reasoning_delta" || msg.type === "tool_call" || msg.type === "progress" || msg.type === "agent_handoff" || msg.type === "ask_user" || msg.type === "dialogue_status") {
+      if (msg.type === "text_delta" || msg.type === "reasoning_delta" || msg.type === "tool_call" || msg.type === "progress" || msg.type === "agent_handoff" || msg.type === "ask_user" || msg.type === "dialogue_status" || msg.type === "block") {
         const state = useChatStore.getState();
         // 只有在没有 pending 占位时才会真创建（store 内部幂等）
         const placeholderId = createStreamingPlaceholder();
@@ -205,6 +205,25 @@ export function useChatSocket() {
       }
 
       switch (msg.type) {
+        case "block": {
+          // 对话内联（设计文档/22）：stream.block 事件 → 累积到当前流式消息的 blocks。
+          // applyBlock 内部按 blockId upsert（text/thinking 追加 delta，tool/delegation 整体替换）。
+          const bm = msg as Extract<ServerMessage, { type: "block" }>;
+          applyBlock({
+            sessionId: bm.sessionId ?? sessionId ?? "",
+            messageId: bm.messageId,
+            blockId: bm.blockId,
+            blockType: bm.blockType,
+            block: bm.block as Parameters<typeof applyBlock>[0]["block"],
+            state: bm.state,
+            delta: bm.delta,
+            ts: bm.ts,
+            taskId: bm.taskId,
+            correlationId: bm.correlationId,
+          });
+          resetTimer();
+          break;
+        }
         case "text_delta":
           appendToLast(msg.text);
           resetTimer();

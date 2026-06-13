@@ -166,6 +166,26 @@ export interface NoResponseMessage {
   taskId?: string;
 }
 
+/**
+ * 对话内联 block 事件（设计文档/22）。
+ * 后端 stream.block 经 ws-event-bridge 单映射为 ws type 'block'。
+ * payload 即 StreamBlockPayload（见 lib/blocks.ts）：携带 messageId/blockId/blockType，
+ * text/thinking 走 delta，tool/delegation 走完整 block。前端 applyBlock 据此内联渲染。
+ */
+export interface BlockMessage {
+  type: "block";
+  sessionId?: string;
+  messageId: string;
+  blockId: string;
+  blockType: "text" | "thinking" | "tool" | "delegation" | "review";
+  block?: unknown;
+  state?: string;
+  delta?: string;
+  ts: number;
+  taskId?: string;
+  correlationId?: string;
+}
+
 /** Union of all server → client WebSocket messages */
 export type ServerMessage =
   | TextDeltaMessage
@@ -184,7 +204,8 @@ export type ServerMessage =
   | AskUserMessage
   | UncertaintyMessage
   | NoResponseMessage
-  | ReviewInfoMessage;
+  | ReviewInfoMessage
+  | BlockMessage;
 
 // ─── Client → Server messages ─────────────────────────────────────
 
