@@ -20,7 +20,7 @@
 
 import { getEventBus } from './event-bus.js';
 import { genId } from '../utils/id.js';
-import type { StreamBlockPayload, ToolBlock, Block } from '../contracts/message-blocks.js';
+import type { StreamBlockPayload, ToolBlock, DelegationBlock, DelegationBlockState, Block } from '../contracts/message-blocks.js';
 /** stream.block emit 函数类型（默认走全局 EventBus；测试可注入捕获函数） */
 export type BlockEmitter = (payload: StreamBlockPayload) => void;
 
@@ -56,6 +56,12 @@ export class BlockCollector {
    * 从 pending.draftResponse / pending.reasoning（单一事实源）注入，避免双份内存。
    */
   private toolBlocks: ToolBlock[] = [];
+  /**
+   * 本轮委派 block（落库用）。一轮至多一个委派（runtime 路径整轮即一次委派），故单值而非数组。
+   * 由 onDelegationStart 创建（running）、onDelegationComplete 推进终态；buildBlocks 时置于最前
+   * （委派卡作为「本轮委派给 X agent」的表头，先于其内部思考/工具/正文）。
+   */
+  private delegationBlock: DelegationBlock | undefined;
 
   constructor(
     private readonly sessionId: string,
@@ -245,12 +251,79 @@ export class BlockCollector {
   }
 
   /**
-   * 构建本轮完整 Block[]（顺序：thinking → tools → text），供调用方落库到 message_blocks。
+   * 委派启动（runtime / 外部 driver 路径：Brain 委派给子 agent）。
+   *
+   * 与 {@link onToolStart} 同源——DelegationBlock 也是状态机（running → completed/failed/interrupted）。
+   * 创建一个 running 态 delegation block，emit stream.block（前端实时渲染「委派给 X agent」卡），
+   * 并存入 {@link delegationBlock} 供 buildBlocks 落库（委派卡刷新后保留）。
+   *
+   * blockId = `${messageId}#delegation`：一轮一个委派，跨 start/complete 两事件幂等定位同一 block
+   * （前端 applyBlockToBlocks 按 blockId 整体替换 running→终态，与 tool 同机制）。
+   *
+   * @param opts.targetAgent    目标 agent 名（runtime.name / decision.targetAgent）
+   * @param opts.childSessionId 子会话 id（嵌套会话展开用；当前 runtime 路径暂无）
+   */
+  onDelegationStart(opts: { targetAgent: string; childSessionId?: string }): void {
+    const blockId = `${this.messageId}#delegation`;
+    const block: DelegationBlock = {
+      type: 'delegation',
+      id: blockId,
+      targetAgent: opts.targetAgent,
+      state: 'running',
+    };
+    if (opts.childSessionId) block.childSessionId = opts.childSessionId;
+    this.delegationBlock = block;
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId,
+      blockType: 'delegation',
+      block,
+      state: 'running',
+      ts: Date.now(),
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+  }
+
+  /**
+   * 委派终态（runtime / 外部 driver 路径：execution_completed / failed / cancelled）。
+   *
+   * 推进 delegation block 状态机到终态（completed / failed / interrupted），可选回填 summary。
+   * emit 完整终态 block——前端按 blockId 整体替换 running 卡为终态卡（与 onToolComplete 机制一致）。
+   *
+   * fail-open：无对应 start（理论上不会发生——start 在 collector 创建后立即调用）则 no-op，
+   * 不凭空造 block（缺 targetAgent 无法组装有意义的委派卡）。
+   *
+   * @param opts.state   终态（completed / failed / interrupted）
+   * @param opts.summary 委派摘要 / 最终产出（可选；runtime 路径产出已由 text block 承载，通常省略避免重复）
+   */
+  onDelegationComplete(opts: { state: DelegationBlockState; summary?: string }): void {
+    if (!this.delegationBlock) return; // fail-open：无 start 则缺 targetAgent，无法组装
+    this.delegationBlock = { ...this.delegationBlock, state: opts.state };
+    if (opts.summary !== undefined) this.delegationBlock.summary = opts.summary;
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId: this.delegationBlock.id,
+      blockType: 'delegation',
+      block: this.delegationBlock,
+      state: opts.state,
+      ts: Date.now(),
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+  }
+
+  /**
+   * 构建本轮完整 Block[]（顺序：delegation → thinking → tools → text），供调用方落库到 message_blocks。
+   * delegation 置于最前——委派卡作为本轮表头，先于子 agent 的思考 / 工具 / 正文。
    * text/thinking 从外部事实源（pending.draftResponse / reasoning）注入，避免 collector 重复持有全文。
    * 无任何内容时返回空数组（调用方据此跳过建空消息）。
    */
   buildBlocks(opts: { reasoning?: string; draftResponse?: string }): Block[] {
     const blocks: Block[] = [];
+    if (this.delegationBlock) blocks.push(this.delegationBlock);
     if (opts.reasoning) blocks.push({ type: 'thinking', text: opts.reasoning });
     blocks.push(...this.toolBlocks);
     if (opts.draftResponse) blocks.push({ type: 'text', text: opts.draftResponse });

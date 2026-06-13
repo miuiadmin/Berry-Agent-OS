@@ -1685,6 +1685,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // 文本不喂 collector（仍走下方 text_delta → content 单源），避免文本双写。
     // 之前这些事件落入 default:break 被丢弃——正是「外部 agent 委派时工具卡片缺失」的根因。
     const blockCollector = getOrCreateBlockCollector(delegationId, pending.sessionId, correlationId);
+    // 对话内联（doc 22 期4+）：本轮即一次委派——产出 delegation block（「委派给 X agent」表头卡），
+    // 实时内联 + 落库后刷新保留。终态在各 execution_* 分支用 onDelegationComplete 推进。
+    blockCollector.onDelegationStart({ targetAgent: runtime.name });
 
     try {
       const eventSource = this.runtimeExecutor
@@ -1757,6 +1760,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             const finalText = textAccumulator || (event.data.content as string) || '';
             pending.draftResponse = finalText;
             this.streamingFlusher.remove(delegationId);
+            // 委派终态：推进 delegation block 到 completed（产出由下方 text block 承载，summary 省略避免重复）
+            blockCollector.onDelegationComplete({ state: 'completed' });
             if (workspaceId && task.workspacePath) {
               getDb().prepare(
                 'UPDATE workspace_agents SET prior_work_dir = ?, prior_session_id = ? WHERE workspace_id = ? AND agent_name = ?',
@@ -1773,6 +1778,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
             const error = (event.data.error as string) || '执行失败';
             const resumable = event.data.resumable as boolean | undefined;
             this.streamingFlusher.remove(delegationId);
+            // 委派终态：可恢复→interrupted，否则 failed
+            blockCollector.onDelegationComplete({ state: resumable ? 'interrupted' : 'failed' });
             this.delegationManager.fail(delegationId, resumable ? `[resumable] ${error}` : error);
             this.sessionManager.fail(correlationId, {
               kind: resumable ? 'cancelled' : 'failed',
@@ -1783,6 +1790,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           }
           case 'execution_cancelled': {
             this.streamingFlusher.remove(delegationId);
+            // 委派终态：取消→interrupted
+            blockCollector.onDelegationComplete({ state: 'interrupted' });
             this.delegationManager.fail(delegationId, 'Cancelled');
             this.sessionManager.fail(correlationId, { kind: 'cancelled', agentName: runtime.name });
             return;
@@ -1795,6 +1804,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // Generator completed without explicit execution_completed event
       if (textAccumulator) {
         pending.draftResponse = textAccumulator;
+        // 委派终态：generator 自然结束且有产出 → completed
+        blockCollector.onDelegationComplete({ state: 'completed' });
         this.sendTaskResultForReview(
           { correlationId, sessionId: pending.sessionId },
           pending,
@@ -1802,6 +1813,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         );
       } else {
         this.streamingFlusher.remove(delegationId);
+        // 委派终态：无产出 → failed
+        blockCollector.onDelegationComplete({ state: 'failed' });
         this.delegationManager.fail(delegationId, 'No output produced');
         // R14-1：未产出输出 走 finalizeTask 统一入口
         this.sessionManager.fail(correlationId, { kind: 'failed', agentName: runtime.name, error: '未产出任何输出' });
@@ -1810,6 +1823,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       const message = err instanceof Error ? err.message : String(err);
       logger.error({ correlationId, err }, 'Runtime execution error');
       this.streamingFlusher.remove(delegationId);
+      // 委派终态：Runtime 异常 → failed
+      blockCollector.onDelegationComplete({ state: 'failed' });
       this.delegationManager.fail(delegationId, message);
       // R14-1：Runtime exception 兜底走 finalizeTask 统一入口（含 no_response 通知）
       this.sessionManager.fail(correlationId, { kind: 'runtime_error', agentName: runtime.name, error: message });

@@ -193,6 +193,89 @@ describe('BlockCollector 流式工具（onToolStart/onToolComplete）', () => {
   });
 });
 
+/**
+ * 委派块路径（runtime / 外部 driver：Brain 委派给子 agent）。
+ * 钉死 onDelegationStart/onDelegationComplete 的状态机推进 + 幂等 + 容错 + 落库序不变量——
+ * 这是 doc-22 委派卡持久化（刷新后保留「委派给 X agent」表头）所依赖的核心归一逻辑。
+ */
+describe('BlockCollector 委派块（onDelegationStart/onDelegationComplete）', () => {
+  let emitted: StreamBlockPayload[];
+  const emit: BlockEmitter = (p) => emitted.push(p);
+
+  beforeEach(() => {
+    emitted = [];
+    _clearBlockCollectorsForTest();
+  });
+
+  it('start → running delegation block，blockId = ${messageId}#delegation，携带 targetAgent', () => {
+    const c = new BlockCollector('s1', 't1', 'c1', emit);
+    c.onDelegationStart({ targetAgent: 'code' });
+    expect(emitted).toHaveLength(1);
+    const e = emitted[0];
+    expect(e.blockType).toBe('delegation');
+    expect(e.state).toBe('running');
+    expect(e.blockId).toBe(`${c.messageId}#delegation`);
+    expect(e.block?.type).toBe('delegation');
+    expect(e.block?.state).toBe('running');
+    expect(e.block?.targetAgent).toBe('code');
+  });
+
+  it('start + complete：emit running 再 emit 终态，同 blockId，state 推进到 completed', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onDelegationStart({ targetAgent: 'code' });
+    c.onDelegationComplete({ state: 'completed' });
+    expect(emitted).toHaveLength(2);
+    // 两次同 blockId（前端 upsert 原地替换 running→completed）
+    expect(emitted[0].blockId).toBe(emitted[1].blockId);
+    const terminal = emitted[1];
+    expect(terminal.state).toBe('completed');
+    expect(terminal.block?.state).toBe('completed');
+    expect(terminal.block?.targetAgent).toBe('code');
+  });
+
+  it('complete 可选回填 summary；failed/interrupted 同机制', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onDelegationStart({ targetAgent: 'skills' });
+    c.onDelegationComplete({ state: 'failed', summary: '插件构建失败' });
+    const terminal = emitted[1];
+    expect(terminal.block?.state).toBe('failed');
+    expect(terminal.block?.summary).toBe('插件构建失败');
+  });
+
+  it('fail-open：complete 先于 start（孤儿）→ no-op，不凭空造 block', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onDelegationComplete({ state: 'completed' });
+    expect(emitted).toHaveLength(0);
+  });
+
+  it('childSessionId 透传到 delegation block', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onDelegationStart({ targetAgent: 'code', childSessionId: 'ses-child-1' });
+    expect(emitted[0].block?.childSessionId).toBe('ses-child-1');
+  });
+
+  it('buildBlocks：delegation 置于最前（表头），先于 thinking/tools/text', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onDelegationStart({ targetAgent: 'code' });
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 1000 });
+    c.onToolComplete({ callId: 'c1', output: '{"ok":true}', success: true, ts: 1100 });
+    const blocks = c.buildBlocks({ reasoning: '思考', draftResponse: '结果' });
+    // 顺序：delegation → thinking → tool → text
+    expect(blocks[0].type).toBe('delegation');
+    expect(blocks[1].type).toBe('thinking');
+    expect(blocks[2].type).toBe('tool');
+    expect(blocks[3].type).toBe('text');
+    expect(blocks[0].type === 'delegation' && blocks[0].targetAgent).toBe('code');
+  });
+
+  it('buildBlocks：无委派时不含 delegation（纯对话 / module 路径不受影响）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    const blocks = c.buildBlocks({ draftResponse: 'hi' });
+    expect(blocks.filter((b) => b.type === 'delegation')).toHaveLength(0);
+    expect(blocks.some((b) => b.type === 'text')).toBe(true);
+  });
+});
+
 describe('BlockCollector registry', () => {
   beforeEach(() => _clearBlockCollectorsForTest());
 
