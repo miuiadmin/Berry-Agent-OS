@@ -496,6 +496,13 @@ export const useChatStore = create<ChatState>()(
               .map((b) => (b as { text?: string }).text ?? "")
               .join("\n")
               .trim();
+            // 对话内联（doc 22）：review block 是持久化的审核裁决真相源。后端 ReviewBlock（modify/reject）
+            // 落 message_blocks，刷新后从此投影 reviewVerdict/reviewReason/originalDraft 回填消息——
+            // BrainReviewBadge 读 message.reviewVerdict 渲染徽章 → 刷新后徽章保留。
+            // approve 不落 review block（无徽章）；无 review block 时三字段 undefined（无徽章，正确）。
+            const blockReview = (m.blocks ?? []).find(
+              (b): b is Extract<Block, { type: "review" }> => b.type === "review",
+            );
             return {
               id: genMsgId("hist"),
               role: m.role as "user" | "assistant",
@@ -504,6 +511,9 @@ export const useChatStore = create<ChatState>()(
               status: "complete" as const,
               reasoning: m.reasoning ?? (blockReasoning || undefined),
               thinkingSteps: m.thinkingSteps,
+              reviewVerdict: blockReview?.verdict,
+              reviewReason: blockReview?.reason,
+              originalDraft: blockReview?.originalDraft,
               // 对话内联（doc 22）：透传后端 getTimeline 返回的 blocks，刷新后 thinking/tool/delegation 卡片内联可见。
               blocks: m.blocks,
             };
