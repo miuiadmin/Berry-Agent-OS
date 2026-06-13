@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
+import { moveTabOnArrow } from "@/lib/keyboard";
 import { useT, useDateFormat } from "@/lib/i18n";
 import { JobCard, CreateJobCard, type JobCardActions } from "./scheduler-components";
 import { useSchedulerMutations } from "./use-scheduler-mutations";
@@ -35,6 +36,8 @@ const TAB_CONFIG = [
 ] as const;
 
 type TabKey = (typeof TAB_CONFIG)[number]["key"];
+/** Tab key 有序列表，供箭头键导航取模用（模块级常量，引用稳定） */
+const TAB_KEYS: readonly TabKey[] = TAB_CONFIG.map((t) => t.key);
 
 export default function SchedulerPage() {
   const t = useT();
@@ -72,18 +75,6 @@ export default function SchedulerPage() {
     triggering: triggerMut.isPending,
   };
 
-  /** Tab 键盘导航（左右箭头） */
-  const handleTabKeyDown = (e: React.KeyboardEvent, idx: number) => {
-    const len = TAB_CONFIG.length;
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-      e.preventDefault();
-      setTab(TAB_CONFIG[(idx + 1) % len].key);
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-      e.preventDefault();
-      setTab(TAB_CONFIG[(idx - 1 + len) % len].key);
-    }
-  };
-
   return (
     <div className="space-y-6 p-4 md:p-6">
       <PageHeader title={t("scheduler.title")} subtitle={t("scheduler.subtitle")} icon={Clock} iconClass="text-brand">
@@ -104,14 +95,14 @@ export default function SchedulerPage() {
 
       {/* Tab 切换器 */}
       <div className="flex gap-1 border-b" role="tablist" aria-label={t("scheduler.title")}>
-        {TAB_CONFIG.map((tabItem, idx) => (
+        {TAB_CONFIG.map((tabItem) => (
           <button
             type="button"
             key={tabItem.key}
             role="tab"
             aria-selected={tab === tabItem.key}
             onClick={() => setTab(tabItem.key)}
-            onKeyDown={(e) => handleTabKeyDown(e, idx)}
+            onKeyDown={(e) => moveTabOnArrow(e, TAB_KEYS, tabItem.key, setTab)}
             className={cn(
               "min-h-[44px] px-3 py-2 text-sm font-medium capitalize transition-colors md:min-h-0",
               tab === tabItem.key

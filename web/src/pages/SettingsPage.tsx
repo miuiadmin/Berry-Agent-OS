@@ -16,6 +16,7 @@ import { queries, apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { moveTabOnArrow } from "@/lib/keyboard";
 import { TabContent, validateConfig, type TabKey } from "./settings-tab-content";
 import { useConfigMutations } from "./use-config-mutations";
 import {
@@ -41,6 +42,8 @@ const TABS = [
 ] as const;
 
 const VALID_TABS = new Set<string>(TABS.map((tabItem) => tabItem.key));
+/** Tab key 有序列表，供箭头键导航取模用（模块级常量，引用稳定） */
+const TAB_KEYS = TABS.map((tabItem) => tabItem.key);
 
 export default function SettingsPage() {
   return (
@@ -154,16 +157,7 @@ function SettingsContent() {
                   role="tab"
                   aria-selected={isActive}
                   onClick={() => handleTabChange(tab.key)}
-                  onKeyDown={(e) => {
-                    const idx = TABS.findIndex(t => t.key === tab.key);
-                    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-                      e.preventDefault();
-                      handleTabChange(TABS[(idx + 1) % TABS.length].key);
-                    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-                      e.preventDefault();
-                      handleTabChange(TABS[(idx - 1 + TABS.length) % TABS.length].key);
-                    }
-                  }}
+                  onKeyDown={(e) => moveTabOnArrow(e, TAB_KEYS, tab.key, handleTabChange)}
                   className={cn(
                     "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm whitespace-nowrap transition-colors active:bg-accent",
                     isActive
