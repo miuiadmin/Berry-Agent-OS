@@ -6,7 +6,7 @@
   "level": 2,
   "kind": "on-demand",
   "taskTypes": ["audit_scan"],
-  "roles": ["auditor"],
+  "roles": [],
   "source": "bundled",
   "entry": "entry.ts",
   "ipcProtocol": "module-agent",
