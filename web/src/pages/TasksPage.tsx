@@ -10,16 +10,15 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queries, type TaskInfo } from "@/lib/api";
+import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageHeader } from "@/components/ui/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SelectField } from "@/components/ui/select-field";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
 import { ListTodo, Filter } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { TaskRow } from "./tasks-components";
 import { useTaskMutations } from "./use-task-mutations";
@@ -39,6 +38,23 @@ const STATUS_OPTIONS = [
 
 /** 每页条数 */
 const PAGE_SIZE = 20;
+
+/** 普通数据列（非首列）的表头单元格样式 */
+const TH_CLASS = "px-4 py-2.5 text-left font-medium text-muted-foreground";
+/** 普通数据列（非首列）的表体单元格样式 */
+const TD_CLASS = "px-4 py-2.5";
+
+/** 桌面端表格的一列：表头文案 + 单元格样式 + 加载骨架条尺寸 */
+interface TaskColumn {
+  /** 表头文案（首列展开箭头为空串） */
+  head: string;
+  /** 表头单元格 className */
+  headClass: string;
+  /** 表体单元格 className */
+  cellClass: string;
+  /** 该列加载骨架的尺寸 className */
+  skeleton: string;
+}
 
 export default function TasksPage() {
   const t = useT();
@@ -85,33 +101,56 @@ export default function TasksPage() {
   /** 是否有筛选条件激活（决定是否显示"清除筛选"按钮） */
   const hasFilters = statusFilter !== "all" || agentFilter !== "all";
 
+  /**
+   * 桌面端表格列配置：表头与加载骨架共用同一份，新增/调整列只改这里。
+   * 首列是展开箭头（窄列、空表头），其余 6 列为数据列。
+   */
+  const columns: TaskColumn[] = [
+    { head: "", headClass: "w-8 px-2", cellClass: "px-2", skeleton: "size-4" },
+    { head: t("tasks.id"), headClass: TH_CLASS, cellClass: TD_CLASS, skeleton: "h-3 w-16" },
+    { head: t("tasks.type"), headClass: TH_CLASS, cellClass: TD_CLASS, skeleton: "h-3 w-20" },
+    { head: t("tasks.agent"), headClass: TH_CLASS, cellClass: TD_CLASS, skeleton: "h-3 w-20" },
+    { head: t("tasks.status"), headClass: TH_CLASS, cellClass: TD_CLASS, skeleton: "h-5 w-16 rounded-md" },
+    { head: t("tasks.duration"), headClass: TH_CLASS, cellClass: TD_CLASS, skeleton: "h-3 w-12" },
+    { head: t("tasks.actions"), headClass: TH_CLASS, cellClass: TD_CLASS, skeleton: "h-3 w-12" },
+  ];
+
+  /** 空状态：桌面表格行内与移动卡片视图共用同一份文案/图标 */
+  const emptyTasks = (
+    <EmptyState
+      icon={ListTodo}
+      title={t("tasks.noTasks")}
+      description={t("tasks.noTasksDesc")}
+    />
+  );
+
   return (
     <div className="p-4 sm:p-6">
       <PageHeader title={t("tasks.title")} subtitle={t("tasks.subtitle")} />
 
       {/* 筛选栏：状态 + Agent + 清除 + 分页信息 */}
       <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">
-        {/* 状态下拉 */}
-        <select
+        {/* 状态下拉（w-auto 覆盖 SelectField 默认 w-full，保持筛选栏内联布局） */}
+        <SelectField
+          className="w-auto"
           value={statusFilter}
           onChange={(e) => handleStatusChange(e.target.value)}
           aria-label={t("tasks.filterByStatus")}
-          className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
         >
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
               {s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s}
             </option>
           ))}
-        </select>
+        </SelectField>
 
         {/* Agent 下拉（有 Agent 时才显示） */}
         {agents && agents.length > 0 && (
-          <select
+          <SelectField
+            className="w-auto"
             value={agentFilter}
             onChange={(e) => handleAgentChange(e.target.value)}
             aria-label={t("tasks.filterByAgent")}
-            className="rounded-lg border border-border bg-background px-3 py-2 md:py-1.5 text-sm min-h-[44px] md:min-h-0"
           >
             <option value="all">{t("tasks.allAgents")}</option>
             {agents.map((a) => (
@@ -119,7 +158,7 @@ export default function TasksPage() {
                 {a.name}
               </option>
             ))}
-          </select>
+          </SelectField>
         )}
 
         {/* 清除筛选按钮 */}
@@ -155,53 +194,23 @@ export default function TasksPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/50">
-              <th className="w-8 px-2" />
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                {t("tasks.id")}
-              </th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                {t("tasks.type")}
-              </th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                {t("tasks.agent")}
-              </th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                {t("tasks.status")}
-              </th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                {t("tasks.duration")}
-              </th>
-              <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">
-                {t("tasks.actions")}
-              </th>
+              {columns.map((col, i) => (
+                <th key={i} className={col.headClass}>
+                  {col.head}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {/* 加载骨架屏 */}
+            {/* 加载骨架屏（与表头共用列配置） */}
             {isLoading &&
-              Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i} className="border-b border-border last:border-0">
-                  <td className="px-2">
-                    <Skeleton className="size-4" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Skeleton className="h-3 w-16" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Skeleton className="h-3 w-20" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Skeleton className="h-3 w-20" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Skeleton className="h-5 w-16 rounded-md" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Skeleton className="h-3 w-12" />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Skeleton className="h-3 w-12" />
-                  </td>
+              Array.from({ length: 5 }).map((_, row) => (
+                <tr key={row} className="border-b border-border last:border-0">
+                  {columns.map((col, i) => (
+                    <td key={i} className={col.cellClass}>
+                      <Skeleton className={col.skeleton} />
+                    </td>
+                  ))}
                 </tr>
               ))}
             {/* 任务行 */}
@@ -220,13 +229,7 @@ export default function TasksPage() {
             {/* 空状态 */}
             {!isLoading && tasks.length === 0 && (
               <tr>
-                <td colSpan={7}>
-                  <EmptyState
-                    icon={ListTodo}
-                    title={t("tasks.noTasks")}
-                    description={t("tasks.noTasksDesc")}
-                  />
-                </td>
+                <td colSpan={columns.length}>{emptyTasks}</td>
               </tr>
             )}
           </tbody>
@@ -242,13 +245,7 @@ export default function TasksPage() {
               className={`h-16 w-full rounded-xl stagger-${Math.min(i + 1, 8)}`}
             />
           ))}
-        {!isLoading && tasks.length === 0 && (
-          <EmptyState
-            icon={ListTodo}
-            title={t("tasks.noTasks")}
-            description={t("tasks.noTasksDesc")}
-          />
-        )}
+        {!isLoading && tasks.length === 0 && emptyTasks}
         {!isLoading &&
           tasks.map((task, i) => (
             <div key={task.id} className={`stagger-${Math.min(i + 1, 8)}`}>
