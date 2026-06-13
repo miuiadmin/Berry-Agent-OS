@@ -197,6 +197,32 @@ describe('PermissionCoordinator per-session mode (15.0 R2-4，并发不污染)',
   });
 });
 
+/**
+ * 15.0 D4：updateEngine 是 config reload 的活跃入口（CoreService 在 permissionMode 变更时调用）。
+ * 钉死它改变全局默认 mode，且只影响无显式 per-session mode 的会话。
+ */
+describe('updateEngine 全局默认热重载 (15.0 D4，config reload 入口)', () => {
+  it('updateEngine 改变默认 mode——无 per-session mode 的会话跟随新默认', () => {
+    const { coord } = makeCoordinator('ask'); // 默认 ask
+    // 未设 per-session mode 的会话 'fresh'，初始走默认 ask → moderate requiresReview
+    const before = coord.checkAndIssue({ ...baseParams('moderate_tool', 'moderate'), sessionId: 'fresh' });
+    expect(before.requiresReview).toBe(true);
+    // config reload：默认改为 allow-all
+    coord.updateEngine(new PermissionEngine('allow-all'));
+    expect(coord.getMode('fresh')).toBe('allow-all'); // 回退新默认
+    const after = coord.checkAndIssue({ ...baseParams('moderate_tool', 'moderate'), sessionId: 'fresh' });
+    expect(after.allowed).toBe(true); // 现在放行
+  });
+
+  it('updateEngine 不覆盖已设的 per-session mode', () => {
+    const { coord } = makeCoordinator('ask');
+    coord.setSessionMode('s1', 'deny-all');
+    coord.updateEngine(new PermissionEngine('allow-all')); // 全局改 allow-all
+    // s1 仍保持显式 deny-all，不被全局热重载覆盖
+    expect(coord.getMode('s1')).toBe('deny-all');
+  });
+});
+
 describe('checkAndIssueSimple 危险类别不自动放行 (15.0 R3 F1/F2/F5)', () => {
   it('ask + write_file（危险类别）→ 拒绝（不签 token，需用户/Brain 审核）', () => {
     const { coord } = makeCoordinator('ask');

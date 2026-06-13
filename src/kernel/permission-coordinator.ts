@@ -232,9 +232,9 @@ export class PermissionCoordinator {
   }
 
   /**
-   * 引擎热更新（默认权限模式切换时调用，如 admin 改全局 config）。
-   * 15.0 R2-4：per-message 的 mode 不再走这里（用 setSessionMode 避免并发污染）；
-   * 此处仅用于全局默认变更，同步 defaultMode + 缓存。
+   * 引擎热更新（CoreService config reload 在 permissionMode 变更时调用——见 core-service.ts reload handler）。
+   * 15.0 R2-4：per-message 的 mode 不走这里（用 setSessionMode 避免并发污染）；
+   * 此处仅同步全局默认 defaultMode + 缓存，影响无显式 per-session mode 的会话。
    */
   updateEngine(engine: PermissionEngine): void {
     this.engine = engine;
@@ -242,11 +242,6 @@ export class PermissionCoordinator {
     // 同步默认模式 + 缓存（getMode 无 session 时回退此值）
     this.defaultMode = mode;
     this.modeEngines.set(mode, engine);
-  }
-
-  /** 审批管理器热更新（admin 改 approval policy 时调用） */
-  updateApprovalManager(approvalManager: ApprovalManager): void {
-    this.approvalManager = approvalManager;
   }
 
   /**

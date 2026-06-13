@@ -21,6 +21,7 @@ import { DelegationOrchestrator } from './delegation-orchestrator.js';
 import { WorkspaceRouter } from './workspace-router.js';
 import { SocketServer } from './socket-server.js';
 import { PermissionCoordinator } from './permission-coordinator.js';
+import { PermissionEngine } from '../safety/permissions.js';
 import { AuditRecorder } from './audit-recorder.js';
 import { SessionManager } from './session-manager.js';
 import { DriftMetricsService } from './drift-metrics.js';
@@ -819,6 +820,13 @@ export class CoreService {
       }
       if (fields.includes('llm')) {
         this.propagateLlmConfig(config.llm);
+      }
+      // 15.0 D4：全局默认权限模式热重载——与 mcp/skills/llm 同走 config reload。
+      // 仅影响无显式 per-session mode 的会话（它们回退 default）；per-session mode 不受影响。
+      // 之前 config.permissionMode 改动不生效（updateEngine 零调用），靠重启才能切换默认模式。
+      if (fields.includes('permissionMode')) {
+        this.permissionCoordinator?.updateEngine(new PermissionEngine(config.permissionMode));
+        logger.info({ mode: config.permissionMode }, 'PermissionCoordinator 默认引擎已热重载');
       }
 
       logger.info({ fields }, 'Config reloaded');

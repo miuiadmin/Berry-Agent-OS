@@ -229,7 +229,7 @@ describe('机制 B escalation emit 边界补全', () => {
 
   describe('各 source 值正确', () => {
     // 集中校验三个可测解析器 emit 的固定 source 字符串。
-    // BrainEscalation.source 契约（brain.ts:23）允许 'review' | 'approval' | 'decision' | 'answer' | 'checkpoint'，
+    // BrainEscalation.source 契约（brain.ts:23）允许 'review' | 'approval' | 'decision' | 'checkpoint'，
     // 但 prompts.ts 三个解析器各自只 emit 一个固定值。本组锁死这些映射，防日后改串。
 
     it('parseRouteDecision → source="decision"', () => {
@@ -283,7 +283,7 @@ describe('机制 B escalation emit 边界补全', () => {
     it('source=review 的 emit 归属 entry.ts review 内联逻辑，需在 entry 层 1-to-1 测试覆盖', () => {
       // 仅断言契约允许的 source 集合包含 'review'，作为契约回归锚点。
       // 真正的 emit 验证在 entry 层 1-to-1 测试（model-takeover）。
-      const allowedSources = ['review', 'approval', 'decision', 'answer', 'checkpoint'];
+      const allowedSources = ['review', 'approval', 'decision', 'checkpoint'];
       expect(allowedSources).toContain('review');
     });
   });
