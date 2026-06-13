@@ -487,17 +487,27 @@ export const useChatStore = create<ChatState>()(
           if (get().sessionId !== sessionId) return get().messages;
 
           const activeTask = data.activeTasks?.[0];
-          const historyMsgs: ChatMessage[] = (data.messages ?? []).map((m) => ({
-            id: genMsgId("hist"),
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            timestamp: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
-            status: "complete" as const,
-            reasoning: m.reasoning,
-            thinkingSteps: m.thinkingSteps,
-            // 对话内联（doc 22）：透传后端 getTimeline 返回的 blocks，刷新后 thinking/tool/delegation 卡片内联可见。
-            blocks: m.blocks,
-          }));
+          const historyMsgs: ChatMessage[] = (data.messages ?? []).map((m) => {
+            // 对话内联（doc 22）：thinking block 是持久化的推理真相源；/state 不单独返回 reasoning，
+            // 从 message.blocks 的 thinking block 抽取文本回填 message.reasoning（InlineLeadBlocks 读此字段
+            // 渲染思考）。刷新后思考过程可见；流式期 reasoning_delta 仍走 m.reasoning（此处 ?? 回退）。
+            const blockReasoning = (m.blocks ?? [])
+              .filter((b) => b.type === "thinking")
+              .map((b) => (b as { text?: string }).text ?? "")
+              .join("\n")
+              .trim();
+            return {
+              id: genMsgId("hist"),
+              role: m.role as "user" | "assistant",
+              content: m.content,
+              timestamp: m.createdAt ? new Date(m.createdAt).getTime() : Date.now(),
+              status: "complete" as const,
+              reasoning: m.reasoning ?? (blockReasoning || undefined),
+              thinkingSteps: m.thinkingSteps,
+              // 对话内联（doc 22）：透传后端 getTimeline 返回的 blocks，刷新后 thinking/tool/delegation 卡片内联可见。
+              blocks: m.blocks,
+            };
+          });
 
           let pendingStreamId: string | null = null;
           if (activeTask) {
