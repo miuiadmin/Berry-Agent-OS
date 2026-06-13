@@ -1,16 +1,23 @@
 
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
-import { useChatStore, type ChatMessage, type ChatAttachment } from "@/lib/stores/chat-store";
+import { useChatStore, type ChatMessage } from "@/lib/stores/chat-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { Check, Copy, AlertCircle, RotateCcw, ChevronDown, Pencil, Trash2, X, SendHorizontal, FileText, Download } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
 import { ThinkingProcess } from "./thinking-process";
 import { ToolCallCards } from "./tool-call-cards";
-import { ClickableImage } from "@/components/ui/image-lightbox";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 import { useT, useLocale } from "@/lib/i18n";
+import {
+  CopyButton,
+  EditableMessage,
+  AttachmentList,
+  MessageError,
+  BrainReviewBadge,
+  MessageActions,
+} from "./message-bubble-parts";
 
 /**
  * 格式化消息时间戳
@@ -28,256 +35,6 @@ function formatTime(ts: number, localeTag: string): string {
     d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
 }
 
-function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const t = useT();
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => { return () => { if (timerRef.current) clearTimeout(timerRef.current); }; }, []);
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {
-      // clipboard access denied or insecure context
-    });
-  }, [text]);
-
-  return (
-    <button type="button"
-      onClick={handleCopy}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-2 py-1.5 md:px-1.5 md:py-0 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent transition-colors min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
-        className
-      )}
-      aria-label={t("chat.copy")}
-    >
-      {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
-    </button>
-  );
-}
-
-function EditableMessage({
-  message,
-  onSubmit,
-  onCancel,
-}: {
-  message: ChatMessage;
-  onSubmit: (content: string) => void;
-  onCancel: () => void;
-}) {
-  const [text, setText] = useState(message.content);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const t = useT();
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-    }
-  }, []);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      const trimmed = text.trim();
-      if (trimmed) onSubmit(trimmed);
-    }
-    if (e.key === "Escape") {
-      onCancel();
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-2 max-w-[90%] sm:max-w-[80%]">
-      <textarea
-        ref={textareaRef}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          e.target.style.height = "auto";
-          e.target.style.height = e.target.scrollHeight + "px";
-        }}
-        onKeyDown={handleKeyDown}
-        className="resize-none rounded-xl border border-input bg-muted/50 px-4 py-2.5 text-sm leading-relaxed outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-        rows={1}
-      />
-      <div className="flex items-center gap-2 justify-end">
-        <button type="button"
-          onClick={onCancel}
-          className="inline-flex items-center gap-1 rounded-md px-3 py-2 md:px-2 md:py-1 text-xs text-muted-foreground hover:bg-accent transition-colors min-h-[44px] md:min-h-0"
-        >
-          <X className="size-3" />
-          {t("common.cancel")}
-        </button>
-        <button type="button"
-          onClick={() => {
-            const trimmed = text.trim();
-            if (trimmed) onSubmit(trimmed);
-          }}
-          disabled={!text.trim()}
-          className="inline-flex items-center gap-1 rounded-md bg-brand px-3 py-2 md:px-2 md:py-1 text-xs text-brand-foreground hover:bg-brand/90 transition-colors disabled:opacity-50 min-h-[44px] md:min-h-0"
-        >
-          <SendHorizontal className="size-3" />
-          {t("chat.send")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * 消息错误/失败提示 + 重试按钮。
- *
- * 统一 isError（destructive 红）与 isUserFailed（warning 黄）两种场景 ——
- * 它们 UI 几乎完全相同，只是语义色不同，抽出后消除 ~20 行重复。
- */
-function MessageError({
-  message,
-  onRetry,
-  variant,
-}: {
-  message: string;
-  onRetry?: () => void;
-  variant: "destructive" | "warning";
-}) {
-  const t = useT();
-  const color = variant === "destructive" ? "text-destructive" : "text-warning";
-  return (
-    <div className={cn("mt-2 space-y-1 text-xs", color)}>
-      <div className="flex items-center gap-1.5">
-        <AlertCircle className="size-3 shrink-0" />
-        <span>{message}</span>
-      </div>
-      {onRetry && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="inline-flex items-center gap-0.5 underline hover:no-underline"
-        >
-          <RotateCcw className="size-2.5" />
-          {t("common.retry")}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/**
- * Brain 审核标注（modify/reject 时在助手消息下方展示）。
- *
- * modify → warning 黄 badge；reject → destructive 红 badge；
- * 若有 reviewReason 则附在右侧（可截断，hover 显示完整）。
- */
-function BrainReviewBadge({
-  verdict,
-  reason,
-}: {
-  verdict: "modify" | "reject";
-  reason?: string;
-}) {
-  const t = useT();
-  const isModify = verdict === "modify";
-  return (
-    <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
-      <span
-        className={cn(
-          "inline-flex items-center gap-1 rounded-full px-2 py-0.5",
-          isModify ? "bg-warning/10 text-warning" : "bg-destructive/10 text-destructive",
-        )}
-      >
-        {isModify ? (
-          <Pencil className="size-2.5" />
-        ) : (
-          <AlertCircle className="size-2.5" />
-        )}
-        {isModify ? t("chat.brainModified") : t("chat.brainRejected")}
-      </span>
-      {reason && (
-        <span
-          className="max-w-[200px] truncate text-muted-foreground/70"
-          title={reason}
-        >
-          {reason}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** 消息下方操作按钮组（复制 / 编辑 / 删除），移动端始终可见，桌面端 hover 显示 */
-function MessageActions({
-  copyText,
-  isUser,
-  onEdit,
-  onDelete,
-}: {
-  copyText: string;
-  isUser: boolean;
-  onEdit?: () => void;
-  onDelete?: () => void;
-}) {
-  const t = useT();
-  return (
-    <div className="flex items-center gap-0.5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-      {/* 复制按钮（所有消息都有） */}
-      <CopyButton text={copyText} />
-      {/* 编辑 / 删除按钮仅用户消息有 */}
-      {isUser && onEdit && (
-        <button
-          type="button"
-          onClick={onEdit}
-          className="inline-flex items-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground active:bg-accent md:p-1"
-          aria-label={t("chat.editMessage")}
-        >
-          <Pencil className="size-3" />
-        </button>
-      )}
-      {isUser && onDelete && (
-        <button
-          type="button"
-          onClick={onDelete}
-          className="inline-flex items-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10 md:p-1"
-          aria-label={t("chat.deleteMessage")}
-        >
-          <Trash2 className="size-3" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
-  return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {attachments.map((att) =>
-        att.mimeType.startsWith("image/") ? (
-          <ClickableImage
-            key={att.fileId}
-            src={att.url}
-            alt={att.filename}
-            className="max-h-48 rounded-lg animate-slide-down"
-          />
-        ) : (
-          <a
-            key={att.fileId}
-            href={att.url}
-            download={att.filename}
-            className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs hover:bg-accent transition-colors animate-slide-down"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <FileText className="size-4 text-muted-foreground" />
-            <span className="max-w-[150px] truncate">{att.filename}</span>
-            <Download className="size-3 text-muted-foreground" />
-          </a>
-        ),
-      )}
-    </div>
-  );
-}
-
-/** 消息气泡组件 — 用 memo 包裹，避免流式传输时已完成消息不必要重渲染 */
 const MessageBubble = memo(function MessageBubble({
   message,
   onRetry,
