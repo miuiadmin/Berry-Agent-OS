@@ -767,4 +767,23 @@ if (typeof window !== "undefined") {
       // 解析失败静默忽略，不影响本地状态
     }
   });
+
+  // ─── 跨标签页删除同步（BroadcastChannel）───
+  // storage event 只合并消息（不处理删除）——Tab A 删会话，Tab B storage event 合并 = local（不更新），
+  // 不知删除。BroadcastChannel 显式广播 session-deleted，Tab B 收到若当前在该 session 则 clearMessages
+  // + setSessionId(null)，根治"删了又回来（跨标签页）"。
+  if ("BroadcastChannel" in window) {
+    const deleteChannel = new BroadcastChannel("chat-sync");
+    deleteChannel.onmessage = (e) => {
+      const data = e.data as { type?: string; sid?: string };
+      if (data.type === "session-deleted" && data.sid) {
+        const local = useChatStore.getState();
+        if (local.sessionId === data.sid) {
+          local.clearMessages();
+          local.setSessionId(null);
+          local.setSkipAutoRestore(true);
+        }
+      }
+    };
+  }
 }

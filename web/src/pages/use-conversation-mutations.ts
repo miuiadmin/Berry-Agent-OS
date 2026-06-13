@@ -38,6 +38,10 @@ export function useConversationMutations() {
       toast.success(t("conversations.conversationDeleted"));
       // 清该 session 的 outbox：防残留消息刷新重发重建会话（按 payload.sessionId 精确清，不误删别会话）
       clearOutboxForSession(sid);
+      // 广播删除（跨标签页同步：别标签若在该 session 则 clearMessages + setSessionId null）
+      if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+        new BroadcastChannel("chat-sync").postMessage({ type: "session-deleted", sid });
+      }
       if (sid === sessionId) {
         clearMessages();
         setSessionId(null);
