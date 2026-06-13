@@ -1,3 +1,10 @@
+/**
+ * React 错误边界组件。
+ *
+ * 捕获子组件树中的渲染错误，显示友好的错误提示 + 重试按钮，
+ * 避免整个应用白屏崩溃。
+ */
+
 import React, { type ReactNode } from "react";
 import { Button } from "./ui/button";
 import { AlertCircle } from "lucide-react";

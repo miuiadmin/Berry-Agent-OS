@@ -1,3 +1,10 @@
+/**
+ * 应用根组件 — 路由表 + 全局初始化。
+ *
+ * 定义所有页面路由（/ → DashboardLayout 子路由），
+ * 挂载 useRealtimeEvents（全局 WS 事件订阅）和 ErrorBoundary。
+ */
+
 import { Routes, Route, Navigate } from "react-router-dom";
 import { DashboardLayout } from "./components/layout/dashboard-layout";
 import { useRealtimeEvents } from "./hooks/use-realtime-events";

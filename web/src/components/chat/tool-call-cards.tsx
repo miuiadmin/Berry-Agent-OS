@@ -1,3 +1,9 @@
+/**
+ * 工具调用卡片组件。
+ *
+ * 展示 AI 调用工具的详情：工具名 / 输入参数 / 执行结果 / 耗时 / 状态。
+ * 可折叠展开，失败时显示错误信息。
+ */
 
 import { useState, useEffect, useRef, memo } from "react";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";

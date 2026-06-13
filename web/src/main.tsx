@@ -1,3 +1,10 @@
+/**
+ * 应用入口 — React 根挂载 + 全局 Provider 注入。
+ *
+ * Provider 层级（由外到内）：StrictMode → BrowserRouter → QueryClientProvider →
+ * ThemeProvider → I18nProvider → Toaster → App
+ */
+
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

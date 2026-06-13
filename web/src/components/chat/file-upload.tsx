@@ -1,3 +1,11 @@
+/**
+ * 文件上传组件集。
+ *
+ * - FileUploadButton：点击触发文件选择 + 上传到服务端
+ * - AttachmentPreview：附件缩略图列表（可移除）
+ * - DragOverlay：拖拽上传时的全屏遮罩
+ * - uploadFile：上传 API 封装（支持 AbortController 取消）
+ */
 
 import { useState, useRef, useCallback } from "react";
 import { Paperclip, X, FileText, Image as ImageIcon, Loader2 } from "lucide-react";

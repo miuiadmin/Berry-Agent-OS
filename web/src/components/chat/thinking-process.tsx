@@ -1,3 +1,9 @@
+/**
+ * 思考过程折叠面板。
+ *
+ * 展示 AI 的思考步骤（thinkingSteps）和推理链（reasoning），
+ * 可折叠展开，流式传输时自动展开 + 动画。
+ */
 
 import { useState, useEffect, useRef, memo } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";

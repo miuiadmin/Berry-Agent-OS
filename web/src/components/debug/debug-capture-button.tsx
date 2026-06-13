@@ -1,3 +1,10 @@
+/**
+ * Debug 抓包触发按钮。
+ *
+ * 悬浮按钮，点击开始/停止抓包。抓包中显示脉冲动画 + 计数 badge。
+ * 仅在 DEV 模式或 config.debugEnabled=true 时渲染。
+ */
+
 import { Bug } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";

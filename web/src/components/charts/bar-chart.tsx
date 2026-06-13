@@ -1,3 +1,9 @@
+/**
+ * 柱状图组件（SVG 纯渲染）。
+ *
+ * 纯 SVG 柱状图：支持多色柱体 + 数值标签 + 自定义格式化函数。
+ * 无第三方图表库依赖，轻量高可控。
+ */
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";

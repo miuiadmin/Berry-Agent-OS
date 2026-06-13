@@ -1,3 +1,10 @@
+/**
+ * Debug 抓包结果对话框。
+ *
+ * 展示抓取的事件列表 + 附件截图 + 一键复制 JSON / 导出文件。
+ * 基于 shadcn Dialog 组件。
+ */
+
 import { Copy, Check } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";

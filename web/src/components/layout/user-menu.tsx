@@ -1,3 +1,10 @@
+/**
+ * 用户菜单（右上角下拉）。
+ *
+ * 功能：主题切换（明/暗） + 语言切换（中/英） + 设置快捷入口。
+ * 移动端下拉菜单，桌面端简洁图标按钮。
+ */
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { CircleUser, Sun, Moon, Globe, LogOut, Settings } from "lucide-react";
