@@ -168,6 +168,20 @@ export function textFromBlocks(blocks: Block[] | undefined, fallback = ''): stri
 }
 
 /**
+ * 从 blocks 抽取推理文本（ThinkingBlock.text 拼接）；无则返回 fallback。
+ * block-first：InlineLeadBlocks 的思考卡用此优先读 thinking block（单一事实源，stream.block thinking 喂），
+ * 回退 message.reasoning（兼容历史消息 / 过渡期）。消灭 reasoning_delta 后 fallback 仅历史消息触发。
+ */
+export function reasoningFromBlocks(blocks: Block[] | undefined, fallback = ''): string {
+  const text = (blocks ?? [])
+    .filter((b): b is ThinkingBlock => b.type === 'thinking')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+  return text || fallback;
+}
+
+/**
  * 把字符串规整为结构化载荷：尝试 JSON.parse，失败则原样返回字符串；空串返回 undefined。
  * 与后端 block-collector.ts 的 coercePayload 同义（tool input/result 规整）。
  */

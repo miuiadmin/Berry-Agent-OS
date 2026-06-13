@@ -17,7 +17,7 @@ import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { toolBlocksFromLegacy } from "@/lib/blocks";
+import { toolBlocksFromLegacy, reasoningFromBlocks } from "@/lib/blocks";
 import type { ToolBlock, DelegationBlock } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
@@ -125,7 +125,10 @@ export const InlineLeadBlocks = memo(function InlineLeadBlocks({
   // 仅 assistant 消息有内联 blocks；user 消息直接走正文
   if (message.role === "user") return null;
 
-  const hasThinking = !!message.reasoning || (message.thinkingSteps?.length ?? 0) > 0;
+  // thinking：block-first——优先从 thinking block 取（stream.block thinking 喂，单一事实源），
+  // 回退 message.reasoning（兼容历史消息 / 过渡期）。消灭 reasoning_delta 后 fallback 仅历史触发。
+  const blockReasoning = reasoningFromBlocks(message.blocks, message.reasoning);
+  const hasThinking = !!blockReasoning || (message.thinkingSteps?.length ?? 0) > 0;
 
   // tool blocks：live blocks 优先（stream.block 累积），否则从旧 toolCalls 投影兜底
   const liveToolBlocks = (message.blocks ?? []).filter((b): b is ToolBlock => b.type === "tool");
@@ -142,7 +145,7 @@ export const InlineLeadBlocks = memo(function InlineLeadBlocks({
       {hasThinking && (
         <ThinkingProcess
           steps={message.thinkingSteps ?? []}
-          reasoning={message.reasoning}
+          reasoning={blockReasoning}
           isActive={isActive}
         />
       )}
