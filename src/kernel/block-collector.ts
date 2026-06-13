@@ -109,7 +109,8 @@ export class BlockCollector {
     if (!this.currentTextBlock) {
       this.textSegCounter++;
       this.currentTextSegNum = this.textSegCounter;
-      this.currentTextBlock = { type: 'text', text: '' };
+      // id = 段 blockId（与 flushPendingDeltas emit 一致），持久化后重连可匹配 → 防 restore 重复建块
+      this.currentTextBlock = { type: 'text', id: `${this.messageId}#text#${this.textSegCounter}`, text: '' };
       this.timeline.push(this.currentTextBlock);
     }
     this.currentTextBlock.text += text;
@@ -126,17 +127,39 @@ export class BlockCollector {
     this.reasoningBuffer += text;
     if (!this.thinkingBlock) {
       if (this.reasoningStartedAt === undefined) this.reasoningStartedAt = Date.now();
-      this.thinkingBlock = { type: 'thinking', text: '' };
+      // id = thinking blockId（与 flushPendingDeltas emit 一致），持久化后重连可匹配
+      this.thinkingBlock = { type: 'thinking', id: `${this.messageId}#thinking`, text: '' };
       this.timeline.push(this.thinkingBlock);
     }
     this.thinkingBlock.text += text;
     this.scheduleFlush();
   }
 
-  /** 标记思考结束：首个文字或工具到达时记一次 reasoningEndedAt（用于算 durationMs） */
+  /**
+   * 标记思考结束：首个文字或工具到达时记一次 reasoningEndedAt，并 emit 一个 thinking「替换」事件
+   * （携带 durationMs）——前端 applyBlockToBlocks 据 blockId 整体替换，使「思考了 Ns」计时在 live
+   * 流式结束瞬间即可显示（不必等 buildBlocks 落库 + 刷新）。buildBlocks 落库时算同一 durationMs。
+   */
   private markReasoningEnd(): void {
     if (this.thinkingBlock && this.reasoningEndedAt === undefined) {
       this.reasoningEndedAt = Date.now();
+      // 先 flush 缓冲：把未 emit 的 reasoning/text 尾部 delta 先发出（前端 append 到位），
+      // 再 emit thinking 替换（携带完整 text + durationMs，覆盖 = 同文本 + 加计时，不重复 append）。
+      // 若改为清空 buffer 会丢尾部 delta（破坏「不丢字符」）；若不 flush 直接 replace 会与后续 delta 重复。
+      this.flushPendingDeltas();
+      const durationMs = this.reasoningStartedAt !== undefined
+        ? Math.max(0, this.reasoningEndedAt - this.reasoningStartedAt)
+        : undefined;
+      this.emit({
+        sessionId: this.sessionId,
+        messageId: this.messageId,
+        blockId: `${this.messageId}#thinking`,
+        blockType: 'thinking',
+        block: { ...this.thinkingBlock, durationMs },
+        ts: this.reasoningEndedAt,
+        taskId: this.taskId,
+        correlationId: this.correlationId,
+      });
     }
   }
 
@@ -250,10 +273,12 @@ export class BlockCollector {
    * @param opts.ts       事件时间戳（与 complete 配对算 durationMs；缺省取当前）
    */
   onToolStart(opts: { callId: string; toolName: string; input?: unknown; ts?: number }): void {
+    const blockId = `${this.messageId}#tool#${opts.callId}`;
+    // 幂等防重：timeline 已有同 blockId 工具（重复 start / 孤儿 complete 先到）→ 不新建，防重复工具块卡 running
+    if (this.timeline.some((b) => b.type === 'tool' && b.id === blockId)) return;
     // 工具到达：关闭当前文本段（切段穿插）+ 标记思考结束
     this.closeTextSegment();
     this.markReasoningEnd();
-    const blockId = `${this.messageId}#tool#${opts.callId}`;
     const startedAt = opts.ts ?? Date.now();
     const block: ToolBlock = {
       type: 'tool',
@@ -349,6 +374,8 @@ export class BlockCollector {
    * @param opts.childSessionId 子会话 id（嵌套会话展开用；当前 runtime 路径暂无）
    */
   onDelegationStart(opts: { targetAgent: string; childSessionId?: string }): void {
+    // 幂等防重：一轮一个委派，已有 delegationBlock（重入/重试）→ 不新建，防 timeline 重复委派块卡 running
+    if (this.delegationBlock) return;
     const blockId = `${this.messageId}#delegation`;
     const block: DelegationBlock = {
       type: 'delegation',
@@ -459,12 +486,12 @@ export class BlockCollector {
       this.thinkingBlock.durationMs = Math.max(0, end - this.reasoningStartedAt);
     }
     // 过滤空文本段 + running 工具（只持久化终态）
-    const result = this.timeline.filter((b) => {
+    let result = this.timeline.filter((b) => {
       if (b.type === 'text') return b.text.length > 0;
       if (b.type === 'tool') return b.state === 'completed' || b.state === 'failed';
       return true; // thinking / delegation / review
     });
-    // 文本兜底/补全：draftResponse = 完整 persistContent（含 fail 错误标签等 turn 终态追加）
+    // 文本兜底/补全/覆盖：draftResponse = 完整 persistContent（含 fail 标签 / Brain 改写等 turn 终态覆盖）
     if (opts.draftResponse) {
       const textSegs = result.filter((b): b is TextBlock => b.type === 'text');
       const joined = textSegs.map((s) => s.text).join('');
@@ -477,6 +504,15 @@ export class BlockCollector {
       } else if (opts.draftResponse.length > joined.length && opts.draftResponse.startsWith(joined)) {
         // draftResponse = 流式文本 + 尾部追加（fail 错误标签）→ 追加到末段，保持穿插结构不破坏
         textSegs[textSegs.length - 1].text += opts.draftResponse.slice(joined.length);
+      } else if (opts.draftResponse !== joined) {
+        // Brain 改写：draftResponse 与流式文本不一致（非前缀追加）→ 用 draftResponse 替换全部文本段
+        // （单块置原首文本段位）。修「含工具流式响应 Brain modify 改写被静默吞掉」——徽章显示已改但文字仍是草稿。
+        const firstTextIdx = result.findIndex((b) => b.type === 'text');
+        const noText: Block[] = result.filter((b) => b.type !== 'text');
+        const replaceBlock: Block = { type: 'text', text: opts.draftResponse };
+        const insertAt = firstTextIdx >= 0 ? Math.min(firstTextIdx, noText.length) : noText.length;
+        noText.splice(insertAt, 0, replaceBlock);
+        result = noText;
       }
       // else: draftResponse == joined（正常流式）→ 不动
     }

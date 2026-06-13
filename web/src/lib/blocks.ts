@@ -110,6 +110,18 @@ export interface StreamBlockPayload {
 export function applyBlockToBlocks(blocks: Block[] | undefined, p: StreamBlockPayload): Block[] {
   const list = blocks ?? [];
 
+  // text / thinking 整体替换（无 delta，带 block）：markReasoningEnd emit thinking block 带 durationMs
+  // （live 显示「思考了 Ns」）；按 blockId upsert，使流式结束瞬间即显示计时（不必等落库刷新）
+  if ((p.blockType === 'text' || p.blockType === 'thinking') && p.block && p.delta == null) {
+    const idx = list.findIndex((b) => b.type === p.blockType && (b as { id?: string }).id === p.blockId);
+    if (idx >= 0) {
+      const copy = list.slice();
+      copy[idx] = p.block;
+      return copy;
+    }
+    return [...list, p.block];
+  }
+
   // text / thinking 增量追加
   if ((p.blockType === 'text' || p.blockType === 'thinking') && p.delta != null) {
     const idx = list.findIndex((b) => b.type === p.blockType && (b as { id?: string }).id === p.blockId);
@@ -164,7 +176,7 @@ export function textFromBlocks(blocks: Block[] | undefined, fallback = ''): stri
   const text = (blocks ?? [])
     .filter((b): b is TextBlock => b.type === 'text')
     .map((b) => b.text)
-    .join('\n')
+    .join('') // 文本段是原文按工具边界切分（无分隔）→ join '' 还原连续原文；与后端 extractTextFromBlocks 一致（旧 '\n' 在工具边界插假换行）
     .trim();
   return text || fallback;
 }

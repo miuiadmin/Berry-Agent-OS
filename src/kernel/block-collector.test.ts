@@ -392,6 +392,59 @@ describe('BlockCollector 时间线穿插（chronological：文本按工具边界
     // 两个工具间无文字 → 不产生空 text 段
     expect(blocks.map((b) => b.type)).toEqual(['tool', 'tool']);
   });
+
+  it('Brain modify：draftResponse 与流式文本不一致 → 替换为 draftResponse（修「改写被吞」）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onTextDelta('原始草稿');
+    c.flushPendingDeltas();
+    // Brain 改写（draftResponse 不是流式文本的前缀+追加，而是完全不同）
+    const blocks = c.buildBlocks({ draftResponse: 'Brain 改写后的版本' });
+    const text = blocks.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
+    expect(text).toBe('Brain 改写后的版本'); // 不再是「原始草稿」
+  });
+
+  it('思考计时 live：首文字到达时 markReasoningEnd emit thinking 替换带 durationMs，且不重复文本', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onReasoningDelta('思');
+    c.flushPendingDeltas();
+    c.onReasoningDelta('考');
+    // 首段文字触发 markReasoningEnd：emit 一个 thinking 替换事件（带 durationMs）
+    c.onTextDelta('正文');
+    c.flushPendingDeltas();
+    const thinkingReplace = emitted.find((e) => e.blockType === 'thinking' && e.block);
+    expect(thinkingReplace).toBeTruthy();
+    expect((thinkingReplace!.block as { text: string }).text).toBe('思考');
+    expect(typeof (thinkingReplace!.block as { durationMs?: number }).durationMs).toBe('number');
+    // 不重复：所有 thinking delta 的总和 + 替换块文本，前端若 append 不会翻倍——这里验证替换块文本 == 完整思考
+    expect((thinkingReplace!.block as { text: string }).text).toBe('思考');
+  });
+
+  it('文本/思考 block 带 id（持久化后重连可匹配，防 restore 重复建块）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onReasoningDelta('思考');
+    c.onTextDelta('文字1');
+    c.flushPendingDeltas();
+    c.onToolCall({ toolName: 'x', input: '{}', result: 'r', isError: false });
+    c.onTextDelta('文字2');
+    c.flushPendingDeltas();
+    const blocks = c.buildBlocks({});
+    const thinking = blocks.find((b) => b.type === 'thinking') as { id?: string };
+    const textBlocks = blocks.filter((b) => b.type === 'text') as Array<{ id?: string }>;
+    expect(thinking.id).toBe(`${c.messageId}#thinking`);
+    expect(textBlocks[0].id).toBe(`${c.messageId}#text#1`);
+    expect(textBlocks[1].id).toBe(`${c.messageId}#text#2`);
+  });
+
+  it('幂等防重：onToolStart 重复 callId → 只一个工具；onDelegationStart 重复 → 只一个委派', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 1000 });
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 1100 }); // 重复
+    c.onDelegationStart({ targetAgent: 'code' });
+    c.onDelegationStart({ targetAgent: 'code' }); // 重复
+    // 重复被 guard 跳过 → 只 emit 一个 tool / 一个 delegation 事件（防 timeline 重复块）
+    expect(emitted.filter((e) => e.blockType === 'tool').length).toBe(1);
+    expect(emitted.filter((e) => e.blockType === 'delegation').length).toBe(1);
+  });
 });
 
 describe('BlockCollector registry', () => {

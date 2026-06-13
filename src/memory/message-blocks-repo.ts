@@ -54,7 +54,9 @@ export interface MessageBlockSearchHit {
  * 这样 stream.block 事件重发同一 callId 时 upsert 命中同一行，天然幂等。
  */
 function blockIdOf(block: Block): string {
+  // tool/delegation 必有 id；text/thinking 现带流式段 id（持久化后重连可匹配，防 restore 重复建块）；无 id（历史遗留）→ genId
   if (block.type === 'tool' || block.type === 'delegation') return block.id;
+  if ((block.type === 'text' || block.type === 'thinking') && block.id) return block.id;
   return genId('blk');
 }
 
@@ -330,7 +332,7 @@ export function extractTextFromBlocks(blocks: Block[]): string {
   return blocks
     .filter((b): b is Extract<Block, { type: 'text'; text: string }> => b.type === 'text')
     .map((b) => b.text)
-    .join('\n')
+    .join('') // 文本段是原文按工具边界切分（无分隔符）→ join '' 还原连续原文；旧 join '\n' 会在每个工具边界插假换行（污染 LLM 记忆上下文）
     .trim();
 }
 

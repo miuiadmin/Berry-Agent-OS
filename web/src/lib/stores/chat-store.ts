@@ -195,8 +195,10 @@ function partializeForPersist(state: ChatState) {
       status: m.status === "streaming" ? "complete" as const : m.status,
       progress: m.status === "streaming" ? undefined : m.progress,
       toolCalls: m.toolCalls?.slice(-5).map(tc => ({ ...tc, result: tc.result?.slice(0, 500) })),
-      // 对话内联 block：截断 tool output（与 toolCalls 同策略），避免 localStorage 溢出
-      blocks: m.blocks?.slice(-8).map(b => truncateBlockForPersist(b)),
+      // 对话内联 block：截断 tool output（与 toolCalls 同策略），避免 localStorage 溢出。
+      // slice(-20)：时间线穿插后单消息 block 数增多（文字段+工具），-8 会丢早期思考/文字段 → 提到 -20。
+      // 服务端 /state 是真相源（restore 全量拉取），此处仅 reload→restore 之间的瞬态窗口。
+      blocks: m.blocks?.slice(-20).map(b => truncateBlockForPersist(b)),
     })),
     pendingStreamMessageId: state.pendingStreamMessageId,
   };

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useChatStore, genMsgId,
-  setLastStatus, setLastProgress, setLastError, updateLastToolCallResult,
+  setLastStatus, setLastProgress, setLastError,
   type DelegationRequest, type PermissionConfirmRequest,
 } from "@/lib/stores/chat-store";
 import { useWsStore } from "@/lib/stores/ws-store";
@@ -288,19 +288,9 @@ export function useChatSocket() {
           resetTimer();
           break;
         }
-        // 对话内联（doc 22 Phase C）：tool_call 粒度事件已删——工具卡统一走 case "block"
-        // （stream.block tool，出生即终态带 input/result/durationMs）。
-        case "tool_result": {
-          // 流式契约补全：tool_call 之后到达的独立 tool_result（结果稍后才到）
-          const tr = msg as Extract<ServerMessage, { type: "tool_result" }>;
-          // 把 tool_result 追加到对应的 tool_call 卡片（按 toolName 匹配最新未填 result 的卡片）
-          updateLastToolCallResult(tr.toolName, {
-            isError: tr.isError ?? false,
-            durationMs: tr.durationMs,
-          });
-          resetTimer();
-          break;
-        }
+        // 对话内联（doc 22 Phase C/D）：tool_call / tool_result 粒度事件已删——工具卡统一走 case "block"
+        // （stream.block tool，出生即终态带 input/result/durationMs/error）。tool_result 旧 handler
+        // mutate 死字段 message.toolCalls（MessageTimeline 只读 blocks），已移除。
         case "uncertainty": {
           // 模型自报 confidence 低：展示提示但不打断流
           const u = msg as Extract<ServerMessage, { type: "uncertainty" }>;

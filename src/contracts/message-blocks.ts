@@ -39,12 +39,16 @@ export type DelegationBlockState = 'pending' | 'running' | 'completed' | 'failed
 /** 纯文本块（消息正文 markdown） */
 export interface TextBlock {
   type: 'text';
+  /** 流式段 blockId（`${messageId}#text#N`）；持久化 + 重连匹配用（防 restore 后 live 续传重复建块）。无 id = 历史遗留块 */
+  id?: string;
   text: string;
 }
 
 /** 推理过程块（可折叠，对应模型 thinking / reasoning）。durationMs = 思考耗时（首 reasoning delta → 首文字/工具）*/
 export interface ThinkingBlock {
   type: 'thinking';
+  /** 流式 blockId（`${messageId}#thinking`）；持久化 + 重连匹配用 */
+  id?: string;
   text: string;
   /** 思考耗时（毫秒）：首个 reasoning delta 到首个文字/工具的时间差。前端据此显示「思考了 Ns」 */
   durationMs?: number;
@@ -109,11 +113,13 @@ export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | Re
 
 const TextBlockSchema = z.object({
   type: z.literal('text'),
+  id: z.string().optional(),
   text: z.string(),
 });
 
 const ThinkingBlockSchema = z.object({
   type: z.literal('thinking'),
+  id: z.string().optional(),
   text: z.string(),
   durationMs: z.number().optional(),
 });

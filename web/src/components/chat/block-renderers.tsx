@@ -129,11 +129,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   if (message.role === "user") return null;
   const blocks = message.blocks ?? [];
   if (blocks.length === 0) return null;
-  // 流式光标附在最后一个 text 段上（流式时正在生成的就是末尾文字段）
-  let lastTextIdx = -1;
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    if (blocks[i].type === "text") { lastTextIdx = i; break; }
-  }
+  // 流式光标只附在「最后一个 block 且是 text」上——流式时正在生成的就是末尾文字段；
+  // 若末尾是工具卡（工具刚到、新文字段未开始），不显示光标（无内容在流），避免光标错位到消息中间
   return (
     <div className="space-y-2">
       {blocks.map((block, i) => {
@@ -154,7 +151,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 key={`tx-${i}`}
                 className={cn(
                   "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
-                  isActive && i === lastTextIdx && "streaming-cursor",
+                  isActive && i === blocks.length - 1 && "streaming-cursor",
                 )}
               >
                 <ReactMarkdown components={markdownComponents}>{block.text}</ReactMarkdown>
