@@ -136,6 +136,10 @@ async function executeAgent(cmd: BrainCommand, deps: BrainCommandHandlerDeps): P
   if (!deps.dispatchExecute) {
     return { success: false, error: 'execute 委派未接线（orchestrator 未注入 dispatchExecute）' };
   }
+  // 15.0 R2-5 NG-2：禁止 Brain 派任务给自己（递归无 maxDepth，FORBIDDEN_TARGETS 语义）
+  if (cmd.target === 'brain') {
+    return { success: false, error: '禁止 Brain 向自身派任务（递归）' };
+  }
   // 15.0 R2-3：移除 getAgent 运行态预检——它对 on-demand agent（如 auditor）语义错误
   // （未启动时 getAgent 返回 undefined），首次 execute target=auditor 必返回「未加载」，
   // dispatchExecute→ensureAgent 那条真 fork 子进程的路径被短路。

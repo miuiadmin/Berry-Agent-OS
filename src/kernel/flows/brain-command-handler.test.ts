@@ -172,3 +172,16 @@ describe('brain.command handler (15.0 机制 D)', () => {
     expect(audit.riskScore).toBeGreaterThan(0);
   });
 });
+
+  it('execute：target=brain → 拒绝（防递归，R2-5 NG-2）', async () => {
+    const { ipc, sent } = makeMockIpc();
+    setupBrainCommandHandler(ipc, {
+      agentManager: makeMockAgentManager(new Set(['brain'])),
+      db: makeDb(),
+      dispatchExecute: async () => ({ taskId: 'should_not_reach', targetAgent: 'brain' }),
+    });
+    await ipc.emit({ type: 'brain.command', payload: cmd('brain', 'execute', { message: 'x' }), correlationId: 'c-rec' } as IpcMessage);
+    const result = sent[0].payload as BrainCommandResult;
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('递归');
+  });

@@ -183,6 +183,12 @@ export class CorrectionFlow {
       case 'restart':
         this.applyRestart(delegationId, correction);
         break;
+
+      default: {
+        // 15.0 R2-6：未知 action（LLM 输出走样等）不再静默穿透——记 warn 并按 continue 处理（最保守）
+        logger.warn({ delegationId, action: correction.action }, '未知 correction action，按 continue 处理');
+        break;
+      }
     }
   }
 

@@ -545,7 +545,12 @@ export class CoreService {
                     coverageGaps: report.findings.coverageGaps.length,
                     driftRecap: report.findings.driftRecap.length,
                   },
-                  recommendations: report.recommendations,
+                  // recommendations 限长防 safeSlice(2000) 截断成残缺 JSON（forbiddenTools/evolutionTriggers 上限）
+                  recommendations: {
+                    escalationToUser: report.recommendations.escalationToUser,
+                    forbiddenTools: report.recommendations.forbiddenTools?.slice(0, 20),
+                    evolutionTriggers: report.recommendations.evolutionTriggers?.slice(0, 5),
+                  },
                   topRisks: report.findings.risks.slice(0, 3).map(r => `${r.severity}:${r.description.slice(0, 80)}`),
                 }),
                 priority: report.riskScore >= 0.6 ? 0 : 1, // 高危 critical 永不裁剪
