@@ -338,11 +338,13 @@ export function createApiRouter(deps: WebServerDependencies) {
     const deleteAll = db.transaction(() => {
       // 对话内联（doc 22）：删除会话同时清新表（messages/message_blocks/message_blocks_fts），
       // 旧表 conversations/conversation_meta 顺手清（冷归档）。FTS 表按 session_id 列删（UNINDEXED 但可过滤）。
+      // agent_tasks 也按 session_id 清——否则删会话后任务行残留（实测 108 行孤儿 + 14 孤儿 session），数据泄漏。
       db.prepare('DELETE FROM message_blocks_fts WHERE session_id = ?').run(params.sid);
       db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(params.sid);
       db.prepare('DELETE FROM messages WHERE session_id = ?').run(params.sid);
       db.prepare('DELETE FROM conversations WHERE session_id = ?').run(params.sid);
       db.prepare('DELETE FROM conversation_meta WHERE session_id = ?').run(params.sid);
+      db.prepare('DELETE FROM agent_tasks WHERE session_id = ?').run(params.sid);
     });
     deleteAll();
     json(res, { ok: true });

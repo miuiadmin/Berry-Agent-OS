@@ -16,7 +16,7 @@ import {
   renameConversation,
   type ConversationInfo,
 } from "@/lib/api";
-import { useChatStore } from "@/lib/stores/chat-store";
+import { useChatStore, flushPersist } from "@/lib/stores/chat-store";
 import { useT } from "@/lib/i18n";
 
 export function useConversationMutations() {
@@ -39,6 +39,9 @@ export function useConversationMutations() {
         clearMessages();
         setSessionId(null);
         setSkipAutoRestore(true);
+        // 立即同步 localStorage：chat-store persist 默认 2s 防抖写，删除当前会话必须立即落盘，
+        // 否则刷新快于 2s 会从 localStorage 恢复已删会话（"删了又回来"根因）
+        flushPersist();
       }
     },
     onError: (err: Error) => {
