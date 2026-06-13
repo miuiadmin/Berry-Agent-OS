@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * 11.0 智能体对话式协作 — 全功能真实 AI 验证
+ * 智能体对话式协作 — 全功能真实 AI 验证
  *
- * 验证清单（来自 设计文档/17-架构升级-11.0.md）：
+ * 验证清单：
  *  F1  Dialogue 工具被 LLM 正确调用
  *  F2  消息持久化到 dialogue_messages 表
  *  F3  多轮对话（同一 dialogueId 续接）
@@ -26,7 +26,7 @@ let passCount = 0, failCount = 0;
 const results = [];
 const c = { reset:'\x1b[0m', bold:'\x1b[1m', dim:'\x1b[2m', green:'\x1b[32m', red:'\x1b[31m', cyan:'\x1b[36m', yellow:'\x1b[33m', blue:'\x1b[34m', magenta:'\x1b[35m' };
 
-function log(msg) { console.log(`${c.dim}[11.0]${c.reset} ${msg}`); }
+function log(msg) { console.log(`${c.dim}[dialogue-e2e]${c.reset} ${msg}`); }
 function logSection(title) { console.log(`\n${c.bold}${c.magenta}━━━ ${title} ━━━${c.reset}\n`); }
 function record(name, r) {
   results.push({ name, ...r });
@@ -338,7 +338,7 @@ async function test_F12_tools_available() {
 async function main() {
   console.log(`${c.bold}${c.magenta}
 ╔════════════════════════════════════════════════════════════╗
-║   11.0 智能体对话式协作 — 全功能真实 AI 验证                ║
+║   智能体对话式协作 — 全功能真实 AI 验证                    ║
 ║   目标: http://localhost:3888    间隔: ${COOLDOWN/1000}s                     ║
 ╚════════════════════════════════════════════════════════════╝${c.reset}
 
@@ -382,7 +382,7 @@ async function main() {
   await test_F8_user_interrupt();
 
   // 汇总
-  console.log(`\n${c.bold}${c.magenta}━━━ 11.0 测试汇总 ━━━${c.reset}\n`);
+  console.log(`\n${c.bold}${c.magenta}━━━ 对话协作 e2e 测试汇总 ━━━${c.reset}\n`);
   console.log(`  总计: ${results.length} 个测试`);
   console.log(`  ${c.green}通过: ${passCount}${c.reset}  ${c.red}失败: ${failCount}${c.reset}`);
 
