@@ -34,7 +34,9 @@ export function useConversationMutations() {
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
     clearOutboxForSession(sid);
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-      new BroadcastChannel("chat-sync").postMessage({ type: "session-deleted", sid });
+      const ch = new BroadcastChannel("chat-sync");
+      ch.postMessage({ type: "session-deleted", sid });
+      ch.close();
     }
     if (sid === sessionId) {
       clearMessages();
