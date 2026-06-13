@@ -897,6 +897,53 @@ const v20FtsConcatAgentNames: Migration = {
   },
 };
 
+/**
+ * v21: 15.0 D3-1 修复 — redact tool_calls 与 review_requests 的明文 secret。
+ *
+ * 这些表存工具入参/结果（input/result）与审核输入（review_input），常含密钥（凭证、token、
+ * env 值）。v17-v19 redact 扫描覆盖了 conversations / intent_anchors / brain_observations /
+ * agent_tool_calls，但漏了 tool_calls（主审计表）和 review_requests。本迁移补扫这两表，
+ * 并与 audit-recorder.ts 写入时 redact（D3-1 正向修复）配合，确保历史 + 新增数据均无明文密钥。
+ *
+ * 幂等：与 v17-v19 同理，redactSecrets 对已清洗内容（[REDACTED:xxx]）不再匹配 secret 模式。
+ */
+const v21RedactToolCallsScan: Migration = {
+  version: 21,
+  name: 'redact-tool-calls-scan',
+  up: (db: Database.Database) => {
+    // tool_calls 两列（input/result）+ review_requests 一列（review_input）
+    const targets: Array<{ table: string; contentCol: string }> = [
+      { table: 'tool_calls', contentCol: 'input' },
+      { table: 'tool_calls', contentCol: 'result' },
+      { table: 'review_requests', contentCol: 'review_input' },
+    ];
+
+    for (const { table, contentCol } of targets) {
+      const exists = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .get(table);
+      if (!exists) continue;
+
+      const rows = db
+        .prepare(`SELECT rowid AS rid, ${contentCol} AS content FROM ${table} WHERE ${contentCol} IS NOT NULL`)
+        .all() as Array<{ rid: number; content: string }>;
+
+      const update = db.prepare(`UPDATE ${table} SET ${contentCol} = ? WHERE rowid = ?`);
+      let cleaned = 0;
+      for (const row of rows) {
+        const redacted = redactSecrets(row.content);
+        if (redacted !== row.content) {
+          update.run(redacted, row.rid);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        logger.info({ table, contentCol: contentCol, cleaned }, '15.0 D3-1 redact 扫描：清洗工具/审核明文 secret');
+      }
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -919,4 +966,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v18DialogueAndAgentChatFts,
   v19RedactExtraTablesScan,
   v20FtsConcatAgentNames,
+  v21RedactToolCallsScan,
 ];

@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import type { ToolAuditPayload } from '../contracts/audit.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 const logger = getLogger('audit-recorder');
 
@@ -17,6 +18,9 @@ export class AuditRecorder {
     try {
       const finishedAt = Date.now();
       const startedAt = finishedAt - (audit.durationMs ?? 0);
+      // input_hash 从原始 toolInput 计算（与权限 token 绑定的 inputHash 一致，便于交叉引用），
+      // 但落库的 input/result 必须 redact——工具入参/结果常含密钥（如凭证、token、env），
+      // 明文落库会造成密钥持久化泄露。15.0 D3-1：与 conversation content 同等 redact。
       const inputHash = createHash('sha256').update(audit.toolInput).digest('hex').slice(0, 16);
       const permissionVerdict = audit.toolResult.startsWith('权限被拒绝:') ? 'deny' : 'allow';
       // 11.0: ephemeral taskId（dtask_xxx）是 dialogue 临时 ID，不存在于 agent_tasks 表，
@@ -33,11 +37,11 @@ export class AuditRecorder {
         audit.correlationId ?? null,
         audit.agentName,
         audit.toolName,
-        audit.toolInput,
+        redactSecrets(audit.toolInput),
         inputHash,
         audit.permissionToken ?? null,
         permissionVerdict,
-        audit.toolResult,
+        redactSecrets(audit.toolResult),
         audit.isError ? 1 : 0,
         audit.dangerLevel,
         startedAt,
@@ -61,12 +65,14 @@ export class AuditRecorder {
     reason?: string;
   }): void {
     try {
+      // 15.0 D3-1：review_input 含 user_message + tool_calls 的 input/result，同样可能携带密钥
+      // （工具入参/结果明文拼进审核输入）。落库前逐字段 redact，与 tool_calls 路径一致。
       const reviewInput = JSON.stringify({
-        user_message: params.userMessage,
+        user_message: redactSecrets(params.userMessage),
         tool_calls: params.toolCalls.map((call) => ({
           name: call.name,
-          input: call.input,
-          result_preview: call.result.slice(0, 500),
+          input: redactSecrets(call.input),
+          result_preview: redactSecrets(call.result.slice(0, 500)),
         })),
       });
       this.db.prepare(`
