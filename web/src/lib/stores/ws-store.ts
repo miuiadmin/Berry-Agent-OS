@@ -154,11 +154,14 @@ function removeFromOutbox(clientMsgId: string) {
 }
 
 /**
- * 清空全部 outbox（删会话时调用）。outbox 持久化未送达消息跨刷新重发，删会话后若残留 →
- * onopen 会重发历史消息重建会话（用户看到的"删了又回来 / 刷新重发"）。删会话时清空杜绝重发。
+ * 清空指定 session 的 outbox 条目（删会话时按 payload.sessionId 过滤，不清全部）。
+ * outbox 持久化未送达消息跨刷新重发，删会话后该 session 残留 → onopen 重发重建（"删了又回来"）。
+ * 按 payload.sessionId 精确清，保留其它会话的未送达消息（避免误删别会话）。
  */
-export function clearOutbox() {
-  saveOutbox([]);
+export function clearOutboxForSession(sid: string) {
+  const cur = loadOutbox();
+  const next = cur.filter((e) => (e.payload as { sessionId?: string } | null)?.sessionId !== sid);
+  if (next.length !== cur.length) saveOutbox(next);
 }
 
 // ─── 辅助函数 ─────────────────────────────────────────────────
