@@ -5,6 +5,7 @@
  * 渲染细节下放到子组件：
  *   - {@link JobCard} / {@link JobExecutions} / {@link CreateJobCard} → scheduler-components.tsx
  *   - useSchedulerMutations → use-scheduler-mutations.ts
+ * 共享组件：PageHeader / StatCard / TextAreaField → ui/
  */
 
 import { useState } from "react";
@@ -13,6 +14,8 @@ import { Clock, Plus, Webhook } from "lucide-react";
 import { schedulerApi, type SchedulerQueue } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,12 +23,17 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
-import {
-  JobCard,
-  CreateJobCard,
-  type JobCardActions,
-} from "./scheduler-components";
+import { JobCard, CreateJobCard, type JobCardActions } from "./scheduler-components";
 import { useSchedulerMutations } from "./use-scheduler-mutations";
+
+/** Tab 配置（key + 对应的 i18n label key） */
+const TAB_CONFIG = [
+  { key: "jobs", labelKey: "scheduler.title" },
+  { key: "queue", labelKey: "scheduler.running" },
+  { key: "webhooks", labelKey: "scheduler.webhooks" },
+] as const;
+
+type TabKey = (typeof TAB_CONFIG)[number]["key"];
 
 export default function SchedulerPage() {
   const t = useT();
@@ -33,22 +41,13 @@ export default function SchedulerPage() {
   useDocumentTitle(t("scheduler.title"));
 
   // ── 页面状态 ──
-  /** 是否展开新建表单 */
   const [showCreate, setShowCreate] = useState(false);
-  /** 当前 tab */
-  const [tab, setTab] = useState<"jobs" | "queue" | "webhooks">("jobs");
-  /** 待删除确认的 job ID */
+  const [tab, setTab] = useState<TabKey>("jobs");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   // ── 数据查询 ──
-  const jobsQuery = useQuery({
-    queryKey: ["scheduler-jobs"],
-    queryFn: () => schedulerApi.listJobs(),
-  });
-  const queueQuery = useQuery({
-    queryKey: ["scheduler-queue"],
-    queryFn: () => schedulerApi.queue(),
-  });
+  const jobsQuery = useQuery({ queryKey: ["scheduler-jobs"], queryFn: () => schedulerApi.listJobs() });
+  const queueQuery = useQuery({ queryKey: ["scheduler-queue"], queryFn: () => schedulerApi.queue() });
   const webhookQuery = useQuery({
     queryKey: ["scheduler-webhooks"],
     queryFn: () => schedulerApi.webhookAudit({ limit: 50 }),
@@ -59,8 +58,7 @@ export default function SchedulerPage() {
   const queue: SchedulerQueue | null = queueQuery.data ?? null;
 
   // ── Mutations ──
-  const { createMut, deleteMut, pauseMut, resumeMut, triggerMut } =
-    useSchedulerMutations();
+  const { createMut, deleteMut, pauseMut, resumeMut, triggerMut } = useSchedulerMutations();
 
   /** 传给 JobCard 的操作回调（统一 pending 状态） */
   const jobActions: JobCardActions = {
@@ -73,124 +71,76 @@ export default function SchedulerPage() {
     triggering: triggerMut.isPending,
   };
 
-  // ── Tab 切换 ──
-  const TAB_KEYS = ["jobs", "queue", "webhooks"] as const;
-  const TAB_LABELS: Record<string, string> = {
-    jobs: t("scheduler.title"),
-    queue: t("scheduler.running"),
-    webhooks: t("scheduler.webhooks"),
+  /** Tab 键盘导航（左右箭头） */
+  const handleTabKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    const len = TAB_CONFIG.length;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      setTab(TAB_CONFIG[(idx + 1) % len].key);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setTab(TAB_CONFIG[(idx - 1 + len) % len].key);
+    }
   };
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* 页面头部 */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Clock className="size-5 text-brand" />
-            {t("scheduler.title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("scheduler.subtitle")}
-          </p>
-        </div>
-        <Button
-          onClick={() => setShowCreate(!showCreate)}
-          size="sm"
-          className="h-11 md:h-9"
-        >
+      <PageHeader title={t("scheduler.title")} subtitle={t("scheduler.subtitle")} icon={Clock} iconClass="text-brand">
+        <Button onClick={() => setShowCreate(!showCreate)} size="sm" className="h-11 md:h-9">
           <Plus className="mr-1 size-4" />
           {t("scheduler.newJob")}
         </Button>
-      </div>
+      </PageHeader>
 
       {/* 队列状态迷你栏 */}
       {queue && (
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <span>
-            {t("scheduler.queueRunning", {
-              count: String(queue.running),
-            })}
-          </span>
-          <span>
-            {t("scheduler.queuePending", {
-              count: String(queue.pending),
-            })}
-          </span>
-          <span>
-            {t("scheduler.queueMaxConcurrency", {
-              count: String(queue.maxConcurrency),
-            })}
-          </span>
+          <span>{t("scheduler.queueRunning", { count: String(queue.running) })}</span>
+          <span>{t("scheduler.queuePending", { count: String(queue.pending) })}</span>
+          <span>{t("scheduler.queueMaxConcurrency", { count: String(queue.maxConcurrency) })}</span>
         </div>
       )}
 
       {/* Tab 切换器 */}
-      <div
-        className="flex gap-1 border-b"
-        role="tablist"
-        aria-label={t("scheduler.title")}
-      >
-        {TAB_KEYS.map((tabKey) => (
+      <div className="flex gap-1 border-b" role="tablist" aria-label={t("scheduler.title")}>
+        {TAB_CONFIG.map((tabItem, idx) => (
           <button
             type="button"
-            key={tabKey}
+            key={tabItem.key}
             role="tab"
-            aria-selected={tab === tabKey}
-            onClick={() => setTab(tabKey)}
-            onKeyDown={(e) => {
-              const idx = TAB_KEYS.indexOf(tabKey);
-              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-                e.preventDefault();
-                setTab(TAB_KEYS[(idx + 1) % TAB_KEYS.length]);
-              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-                e.preventDefault();
-                setTab(TAB_KEYS[(idx - 1 + TAB_KEYS.length) % TAB_KEYS.length]);
-              }
-            }}
+            aria-selected={tab === tabItem.key}
+            onClick={() => setTab(tabItem.key)}
+            onKeyDown={(e) => handleTabKeyDown(e, idx)}
             className={cn(
               "min-h-[44px] px-3 py-2 text-sm font-medium capitalize transition-colors md:min-h-0",
-              tab === tabKey
+              tab === tabItem.key
                 ? "border-b-2 border-brand text-foreground"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {TAB_LABELS[tabKey]}
+            {t(tabItem.labelKey)}
           </button>
         ))}
       </div>
 
       {/* 新建 Job 表单 */}
       {showCreate && tab === "jobs" && (
-        <CreateJobCard
-          onClose={() => setShowCreate(false)}
-          onCreate={(data) => createMut.mutate(data)}
-        />
+        <CreateJobCard onClose={() => setShowCreate(false)} onCreate={(data) => createMut.mutate(data)} />
       )}
 
       {/* Jobs tab */}
       {tab === "jobs" && (
         <div role="tabpanel">
-          <QueryBoundary
-            query={jobsQuery}
-            skeleton={<JobsSkeleton />}
-          >
+          <QueryBoundary query={jobsQuery} skeleton={<JobsSkeleton />}>
             {(jobs) =>
               jobs.length === 0 ? (
                 <EmptyState
-                  icon={Clock}
-                  title={t("scheduler.noJobs")}
-                  description={t("scheduler.noJobsDesc")}
-                  action={{
-                    label: t("scheduler.newJob"),
-                    onClick: () => setShowCreate(true),
-                  }}
+                  icon={Clock} title={t("scheduler.noJobs")} description={t("scheduler.noJobsDesc")}
+                  action={{ label: t("scheduler.newJob"), onClick: () => setShowCreate(true) }}
                 />
               ) : (
                 <div className="space-y-2">
-                  {jobs.map((job) => (
-                    <JobCard key={job.id} job={job} actions={jobActions} />
-                  ))}
+                  {jobs.map((job) => <JobCard key={job.id} job={job} actions={jobActions} />)}
                 </div>
               )
             }
@@ -201,25 +151,16 @@ export default function SchedulerPage() {
       {/* Queue tab */}
       {tab === "queue" && (
         <div role="tabpanel">
-          <QueryBoundary
-            query={queueQuery}
-            skeleton={<QueueSkeleton />}
-          >
-            {(queue) =>
-              queue ? (
-                <div className="grid gap-4 md:grid-cols-3">
-                  <StatCard value={queue.running} label={t("scheduler.running")} />
-                  <StatCard value={queue.pending} label={t("scheduler.pending")} />
-                  <StatCard value={queue.maxConcurrency} label={t("scheduler.maxConcurrency")} />
-                </div>
-              ) : (
-                <EmptyState
-                  icon={Clock}
-                  title={t("scheduler.queueStatusUnavailable")}
-                  description={t("scheduler.queueStatusUnavailableDesc")}
-                />
-              )
-            }
+          <QueryBoundary query={queueQuery} skeleton={<QueueSkeleton />}>
+            {(q) => q ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                <StatCard icon={Clock} label={t("scheduler.running")} value={q.running} />
+                <StatCard icon={Clock} label={t("scheduler.pending")} value={q.pending} />
+                <StatCard icon={Clock} label={t("scheduler.maxConcurrency")} value={q.maxConcurrency} />
+              </div>
+            ) : (
+              <EmptyState icon={Clock} title={t("scheduler.queueStatusUnavailable")} description={t("scheduler.queueStatusUnavailableDesc")} />
+            )}
           </QueryBoundary>
         </div>
       )}
@@ -227,42 +168,28 @@ export default function SchedulerPage() {
       {/* Webhooks tab */}
       {tab === "webhooks" && (
         <div role="tabpanel">
-          <QueryBoundary
-            query={webhookQuery}
-            skeleton={<WebhooksSkeleton />}
-          >
-            {(webhooks) =>
-              webhooks.length === 0 ? (
-                <EmptyState
-                  icon={Webhook}
-                  title={t("scheduler.noWebhookDeliveries")}
-                  description={t("scheduler.webhookHint")}
-                />
-              ) : (
-                <div className="space-y-2">
-                  {webhooks.map((entry) => (
-                    <Card key={entry.id}>
-                      <CardContent className="py-3">
-                        <div className="flex items-center gap-2 text-sm">
-                          <Badge
-                            variant="outline"
-                            className="text-[11px] font-mono"
-                          >
-                            {entry.token.slice(0, 8)}…
-                          </Badge>
-                          <span className="text-muted-foreground">
-                            {entry.result}
-                          </span>
-                          <span className="ml-auto text-[11px] text-muted-foreground/70">
-                            {fmtDT(new Date(entry.createdAt))}
-                          </span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )
-            }
+          <QueryBoundary query={webhookQuery} skeleton={<WebhooksSkeleton />}>
+            {(webhooks) => webhooks.length === 0 ? (
+              <EmptyState icon={Webhook} title={t("scheduler.noWebhookDeliveries")} description={t("scheduler.webhookHint")} />
+            ) : (
+              <div className="space-y-2">
+                {webhooks.map((entry) => (
+                  <Card key={entry.id}>
+                    <CardContent className="py-3">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Badge variant="outline" className="text-[11px] font-mono">
+                          {entry.token.slice(0, 8)}…
+                        </Badge>
+                        <span className="text-muted-foreground">{entry.result}</span>
+                        <span className="ml-auto text-[11px] text-muted-foreground/70">
+                          {fmtDT(new Date(entry.createdAt))}
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </QueryBoundary>
         </div>
       )}
@@ -270,19 +197,12 @@ export default function SchedulerPage() {
       {/* 删除确认对话框 */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-        title={t("scheduler.deleteJobConfirm", {
-          name: t("scheduler.job"),
-        })}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        title={t("scheduler.deleteJobConfirm", { name: t("scheduler.job") })}
         description={t("scheduler.deleteConfirmDesc")}
         actionLabel={t("common.delete")}
         onAction={() => {
-          if (deleteTarget) {
-            deleteMut.mutate(deleteTarget);
-            setDeleteTarget(null);
-          }
+          if (deleteTarget) { deleteMut.mutate(deleteTarget); setDeleteTarget(null); }
         }}
       />
     </div>
@@ -295,14 +215,10 @@ function JobsSkeleton() {
   return (
     <div className="space-y-2">
       {Array.from({ length: 2 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="py-3">
-            <div className="space-y-2">
-              <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-            </div>
-          </CardContent>
-        </Card>
+        <Card key={i}><CardContent className="py-3"><div className="space-y-2">
+          <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+        </div></CardContent></Card>
       ))}
     </div>
   );
@@ -312,11 +228,9 @@ function QueueSkeleton() {
   return (
     <div className="grid gap-4 md:grid-cols-3">
       {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="py-4 text-center">
-            <div className="mx-auto h-8 w-16 animate-pulse rounded bg-muted" />
-          </CardContent>
-        </Card>
+        <Card key={i}><CardContent className="py-4 text-center">
+          <div className="mx-auto h-8 w-16 animate-pulse rounded bg-muted" />
+        </CardContent></Card>
       ))}
     </div>
   );
@@ -326,24 +240,10 @@ function WebhooksSkeleton() {
   return (
     <div className="space-y-2">
       {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="py-3">
-            <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-          </CardContent>
-        </Card>
+        <Card key={i}><CardContent className="py-3">
+          <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
+        </CardContent></Card>
       ))}
     </div>
-  );
-}
-
-/** 队列统计卡片（单个数字 + 标签） */
-function StatCard({ value, label }: { value: number; label: string }) {
-  return (
-    <Card>
-      <CardContent className="py-4 text-center">
-        <p className="text-2xl font-bold">{value}</p>
-        <p className="text-sm text-muted-foreground">{label}</p>
-      </CardContent>
-    </Card>
   );
 }

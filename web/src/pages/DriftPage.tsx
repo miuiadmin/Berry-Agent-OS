@@ -3,17 +3,24 @@
  *
  * 展示 7 天内的对齐度指标（平均对齐 / 最终回复对齐 / 干预率 / 信号总数）
  * 和最近漂移事件列表。
- * ScoreBar 组件内聚于本文件（仅此页面使用）。
+ * 共享组件：PageHeader / StatCard → ui/
  */
 
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT } from "@/lib/i18n";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Shield, TrendingUp, AlertTriangle, CheckCircle } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
+
+/** 对齐分数 → 进度条颜色 class */
+function scoreColor(score: number) {
+  return score >= 0.7 ? "bg-success" : score >= 0.5 ? "bg-warning" : "bg-destructive";
+}
 
 export default function DriftPage() {
   const t = useT();
@@ -26,7 +33,7 @@ export default function DriftPage() {
   if (isError) {
     return (
       <div className="p-4 sm:p-6">
-        <h1 className="text-lg font-semibold">{t("drift.title")}</h1>
+        <PageHeader title={t("drift.title")} />
         <EmptyState
           icon={Shield}
           title={t("drift.failedToLoad")}
@@ -41,11 +48,9 @@ export default function DriftPage() {
   if (isLoading || !data) {
     return (
       <div className="p-4 sm:p-6 space-y-4">
-        <h1 className="text-lg font-semibold">{t("drift.title")}</h1>
+        <PageHeader title={t("drift.title")} />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-28" />
-          ))}
+          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-28" />)}
         </div>
       </div>
     );
@@ -57,102 +62,38 @@ export default function DriftPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">{t("drift.metricsTitle")}</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {t("drift.overview")}
-        </p>
-      </div>
+      <PageHeader title={t("drift.metricsTitle")} subtitle={t("drift.overview")} />
 
       {/* 指标卡片 */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 平均对齐度 */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <TrendingUp className="size-4" />
-              {t("drift.avgAlignment")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold tabular-nums">
-              {(metrics.avgAlignmentScore * 100).toFixed(1)}%
-            </div>
-            <ScoreBar
-              score={metrics.avgAlignmentScore}
-              label={t("drift.allCheckpoints")}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 最终回复对齐度 */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <CheckCircle className="size-4" />
-              {t("drift.finalResponse")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold tabular-nums">
-              {(metrics.finalResponseAlignment * 100).toFixed(1)}%
-            </div>
-            <ScoreBar
-              score={metrics.finalResponseAlignment}
-              label={t("drift.userFacingReplies")}
-            />
-          </CardContent>
-        </Card>
-
-        {/* 干预率 */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <AlertTriangle className="size-4" />
-              {t("drift.interventionRate")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold tabular-nums">
-              {(metrics.interventionRate * 100).toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("drift.signalsTriggeredCorrection")}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* 信号总数 */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Shield className="size-4" />
-              {t("drift.totalSignals")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold tabular-nums">
-              {metrics.totalSignals}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {t("drift.driftChecksIn7Days")}
-            </p>
-          </CardContent>
-        </Card>
+        <StatCard
+          icon={TrendingUp} label={t("drift.avgAlignment")}
+          value={`${(metrics.avgAlignmentScore * 100).toFixed(1)}%`}
+          extra={<ScoreBar score={metrics.avgAlignmentScore} label={t("drift.allCheckpoints")} />}
+        />
+        <StatCard
+          icon={CheckCircle} label={t("drift.finalResponse")}
+          value={`${(metrics.finalResponseAlignment * 100).toFixed(1)}%`}
+          extra={<ScoreBar score={metrics.finalResponseAlignment} label={t("drift.userFacingReplies")} />}
+        />
+        <StatCard
+          icon={AlertTriangle} label={t("drift.interventionRate")}
+          value={`${(metrics.interventionRate * 100).toFixed(1)}%`}
+          desc={t("drift.signalsTriggeredCorrection")}
+        />
+        <StatCard
+          icon={Shield} label={t("drift.totalSignals")}
+          value={metrics.totalSignals}
+          desc={t("drift.driftChecksIn7Days")}
+        />
       </div>
 
       {/* 最近漂移事件 */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">
-            {t("drift.recentSignals")}
-          </CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-sm font-medium">{t("drift.recentSignals")}</CardTitle></CardHeader>
         <CardContent>
           {signals.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("drift.noSignals")}
-            </p>
+            <p className="text-sm text-muted-foreground">{t("drift.noSignals")}</p>
           ) : (
             <div className="space-y-2">
               {signals.slice(0, 20).map((sig) => (
@@ -161,18 +102,8 @@ export default function DriftPage() {
                   className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm border-b last:border-0 pb-2"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={`size-2 shrink-0 rounded-full ${
-                        sig.alignmentScore >= 0.7
-                          ? "bg-success"
-                          : sig.alignmentScore >= 0.5
-                            ? "bg-warning"
-                            : "bg-destructive"
-                      }`}
-                    />
-                    <span className="text-muted-foreground shrink-0">
-                      {sig.checkpointType}
-                    </span>
+                    <span className={`size-2 shrink-0 rounded-full ${scoreColor(sig.alignmentScore)}`} />
+                    <span className="text-muted-foreground shrink-0">{sig.checkpointType}</span>
                     {sig.driftDescription && (
                       <span className="text-xs truncate max-w-[120px] sm:max-w-[200px] md:max-w-[400px]">
                         {sig.driftDescription}
@@ -180,12 +111,8 @@ export default function DriftPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 shrink-0 pl-4 sm:pl-0">
-                    <span className="tabular-nums font-medium">
-                      {(sig.alignmentScore * 100).toFixed(0)}%
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(sig.createdAt).toLocaleString()}
-                    </span>
+                    <span className="tabular-nums font-medium">{(sig.alignmentScore * 100).toFixed(0)}%</span>
+                    <span className="text-xs text-muted-foreground">{new Date(sig.createdAt).toLocaleString()}</span>
                   </div>
                 </div>
               ))}
@@ -197,13 +124,10 @@ export default function DriftPage() {
   );
 }
 
-// ─── 分数进度条 ────────────────────────────────────────────────────
+// ─── 分数进度条（仅本页面使用） ────────────────────────────────────
 
-/** 对齐分数进度条：高(≥0.7)=success / 中(≥0.5)=warning / 低(<0.5)=destructive */
+/** 对齐分数进度条 */
 function ScoreBar({ score, label }: { score: number; label: string }) {
-  const color =
-    score >= 0.7 ? "bg-success" : score >= 0.5 ? "bg-warning" : "bg-destructive";
-
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs text-muted-foreground">
@@ -211,10 +135,7 @@ function ScoreBar({ score, label }: { score: number; label: string }) {
         <span className="tabular-nums">{(score * 100).toFixed(1)}%</span>
       </div>
       <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div
-          className={`h-full rounded-full ${color} transition-all`}
-          style={{ width: `${score * 100}%` }}
-        />
+        <div className={`h-full rounded-full ${scoreColor(score)} transition-all`} style={{ width: `${score * 100}%` }} />
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queries, type TaskInfo } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -86,9 +87,7 @@ export default function TasksPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      {/* 页面标题 */}
-      <h1 className="text-lg font-semibold">{t("tasks.title")}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{t("tasks.subtitle")}</p>
+      <PageHeader title={t("tasks.title")} subtitle={t("tasks.subtitle")} />
 
       {/* 筛选栏：状态 + Agent + 清除 + 分页信息 */}
       <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">

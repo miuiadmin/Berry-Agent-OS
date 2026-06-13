@@ -13,6 +13,7 @@ import { queries, type ConversationInfo } from "@/lib/api";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useDebouncedSearch } from "@/hooks/use-debounced-search";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -68,10 +69,7 @@ export default function ConversationsPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-lg font-semibold">{t("conversations.title")}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {t("conversations.subtitle")}
-      </p>
+      <PageHeader title={t("conversations.title")} subtitle={t("conversations.subtitle")} />
 
       {/* 工具栏：搜索 + 排序 + 导出全部 */}
       <div className="mt-4 flex items-center gap-3">

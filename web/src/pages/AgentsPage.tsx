@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,8 +45,7 @@ export default function AgentsPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="text-lg font-semibold">{t("agents.title")}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{t("agents.subtitle")}</p>
+      <PageHeader title={t("agents.title")} subtitle={t("agents.subtitle")} />
 
       <QueryBoundary
         query={agentsQuery}

@@ -4,6 +4,7 @@
  * 支持三层记忆（global / agent / workspace）的 CRUD + 搜索 + 验证 + 提升。
  * 页面编排层：筛选 / 列表 / 创建表单 / 删除确认。
  * Mutations → use-memory-mutations.ts
+ * 共享组件：PageHeader / TextAreaField → ui/
  */
 
 import { useState } from "react";
@@ -12,6 +13,7 @@ import { Brain, Plus, Search, Trash2, ArrowUpRight, RefreshCw } from "lucide-rea
 import { memoryApi, type MemoryEntry } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { TextAreaField } from "@/components/ui/text-area-field";
 import { cn } from "@/lib/utils";
 import { useT, useDateFormat } from "@/lib/i18n";
 import { useMemoryMutations } from "./use-memory-mutations";
@@ -31,19 +34,13 @@ export default function MemoryPage() {
   useDocumentTitle(t("memory.title"));
 
   // ── 筛选 + 表单状态 ──
-  /** 当前选中的 layer */
   const [layer, setLayer] = useState<Layer>("global");
-  /** 当前 scope ID（user/agent/workspace 标识） */
   const [scopeId, setScopeId] = useState("default");
-  /** 搜索关键词 */
   const [searchQuery, setSearchQuery] = useState("");
-  /** 创建表单状态 */
   const [createState, setCreateState] = useState({ show: false, key: "", value: "" });
-  /** 删除确认目标 */
   const [deleteTarget, setDeleteTarget] = useState<{ layer: string; id: string } | null>(null);
 
   // ── 数据查询 ──
-  /** 当前 scope 的记忆列表 */
   const listQuery = useQuery({
     queryKey: ["memory", layer, scopeId],
     queryFn: () => {
@@ -54,7 +51,6 @@ export default function MemoryPage() {
     enabled: scopeId.length > 0,
   });
 
-  /** 搜索（recall）查询 */
   const recallQuery = useQuery({
     queryKey: ["memory-recall", searchQuery],
     queryFn: (ctx) => memoryApi.recall(searchQuery, { limit: 50 }, ctx.signal),
@@ -63,12 +59,11 @@ export default function MemoryPage() {
 
   // ── Mutations ──
   const { createMut, deleteMut, promoteMut, verifyMut } = useMemoryMutations(
-    layer,
-    scopeId,
+    layer, scopeId,
     () => setCreateState({ show: false, key: "", value: "" }),
   );
 
-  // ── 辅助：layer 配置 ──
+  /** layer → scope 输入框 placeholder */
   const layerPlaceholder: Record<Layer, string> = {
     agent: t("memory.enterAgentName"),
     workspace: t("memory.enterWorkspaceId"),
@@ -77,26 +72,12 @@ export default function MemoryPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* 页面头部 */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Brain className="size-5 text-brand" />
-            {t("memory.title")}
-          </h1>
-          <p className="text-sm text-muted-foreground">{t("memory.subtitle")}</p>
-        </div>
-        <Button
-          onClick={() =>
-            setCreateState((s) => ({ ...s, show: !s.show }))
-          }
-          size="sm"
-          className="h-11 md:h-9"
-        >
+      <PageHeader title={t("memory.title")} subtitle={t("memory.subtitle")} icon={Brain} iconClass="text-brand">
+        <Button onClick={() => setCreateState((s) => ({ ...s, show: !s.show }))} size="sm" className="h-11 md:h-9">
           <Plus className="mr-1 size-4" />
           {t("memory.addMemory")}
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Layer tabs + scope 选择 */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
@@ -124,44 +105,23 @@ export default function MemoryPage() {
             <Input
               placeholder={t("memory.keyPlaceholder")}
               value={createState.key}
-              onChange={(e) =>
-                setCreateState((s) => ({ ...s, key: e.target.value }))
-              }
+              onChange={(e) => setCreateState((s) => ({ ...s, key: e.target.value }))}
               className="h-11 md:h-8"
             />
-            <textarea
+            <TextAreaField
               placeholder={t("memory.valuePlaceholder")}
               value={createState.value}
-              onChange={(e) =>
-                setCreateState((s) => ({ ...s, value: e.target.value }))
-              }
-              rows={3}
-              className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onChange={(e) => setCreateState((s) => ({ ...s, value: e.target.value }))}
             />
             <div className="flex gap-2">
               <Button
                 size="sm"
-                disabled={
-                  !createState.key.trim() ||
-                  !createState.value.trim() ||
-                  createMut.isPending
-                }
-                onClick={() =>
-                  createMut.mutate({
-                    key: createState.key,
-                    value: createState.value,
-                  })
-                }
+                disabled={!createState.key.trim() || !createState.value.trim() || createMut.isPending}
+                onClick={() => createMut.mutate({ key: createState.key, value: createState.value })}
               >
                 {t("common.create")}
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setCreateState({ show: false, key: "", value: "" })
-                }
-              >
+              <Button size="sm" variant="outline" onClick={() => setCreateState({ show: false, key: "", value: "" })}>
                 {t("common.cancel")}
               </Button>
             </div>
@@ -191,36 +151,20 @@ export default function MemoryPage() {
             <EmptyState
               icon={Brain}
               title={t("memory.noMemories")}
-              description={
-                searchQuery.trim()
-                  ? t("memory.noMemoriesSearch")
-                  : t("memory.noMemoriesDesc")
-              }
-              action={
-                !searchQuery.trim()
-                  ? {
-                      label: t("memory.addMemory"),
-                      onClick: () =>
-                        setCreateState((s) => ({ ...s, show: true })),
-                    }
-                  : undefined
-              }
+              description={searchQuery.trim() ? t("memory.noMemoriesSearch") : t("memory.noMemoriesDesc")}
+              action={!searchQuery.trim() ? {
+                label: t("memory.addMemory"),
+                onClick: () => setCreateState((s) => ({ ...s, show: true })),
+              } : undefined}
             />
           ) : (
             <div className="space-y-2">
               {entries.map((entry) => (
                 <MemoryCard
-                  key={entry.id}
-                  entry={entry}
-                  fmtDT={fmtDT}
-                  t={t}
+                  key={entry.id} entry={entry} fmtDT={fmtDT} t={t}
                   onVerify={() => verifyMut.mutate(entry.id)}
-                  onPromote={() =>
-                    promoteMut.mutate({ id: entry.id, target: "global" })
-                  }
-                  onDelete={() =>
-                    setDeleteTarget({ layer: entry.layer, id: entry.id })
-                  }
+                  onPromote={() => promoteMut.mutate({ id: entry.id, target: "global" })}
+                  onDelete={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
                   verifyPending={verifyMut.isPending}
                   promotePending={promoteMut.isPending}
                 />
@@ -233,18 +177,13 @@ export default function MemoryPage() {
       {/* 删除确认对话框 */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t("memory.deleteThisMemory")}
         description={t("memory.deleteConfirmDesc")}
         actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) {
-            deleteMut.mutate({
-              entryLayer: deleteTarget.layer,
-              id: deleteTarget.id,
-            });
+            deleteMut.mutate({ entryLayer: deleteTarget.layer, id: deleteTarget.id });
             setDeleteTarget(null);
           }
         }}
@@ -257,14 +196,7 @@ export default function MemoryPage() {
 
 /** 单条记忆卡片：key / layer badge / value / 操作按钮 */
 function MemoryCard({
-  entry,
-  fmtDT,
-  t,
-  onVerify,
-  onPromote,
-  onDelete,
-  verifyPending,
-  promotePending,
+  entry, fmtDT, t, onVerify, onPromote, onDelete, verifyPending, promotePending,
 }: {
   entry: MemoryEntry;
   fmtDT: (date: Date) => string;
@@ -285,14 +217,10 @@ function MemoryCard({
               {t(`memory.${entry.layer}`) ?? entry.layer}
             </Badge>
             {entry.verified && (
-              <Badge variant="secondary" className="shrink-0 text-[11px]">
-                {t("memory.verified")}
-              </Badge>
+              <Badge variant="secondary" className="shrink-0 text-[11px]">{t("memory.verified")}</Badge>
             )}
           </div>
-          <p className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap">
-            {entry.value}
-          </p>
+          <p className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap">{entry.value}</p>
           <p className="text-[11px] text-muted-foreground/70">
             {fmtDT(new Date(entry.createdAt))}
             {entry.source ? ` · ${entry.source}` : ""}
@@ -300,43 +228,39 @@ function MemoryCard({
         </div>
         {/* 操作按钮：移动端常驻，桌面端 hover 显示 */}
         <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-11 md:size-8"
-            title={t("memory.verify")}
-            aria-label={t("memory.verify")}
-            disabled={verifyPending}
-            onClick={onVerify}
-          >
+          <IconButton title={t("memory.verify")} disabled={verifyPending} onClick={onVerify}>
             <RefreshCw className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-11 md:size-8"
-            title={t("memory.promote")}
-            aria-label={t("memory.promote")}
-            disabled={promotePending}
-            onClick={onPromote}
-          >
+          </IconButton>
+          <IconButton title={t("memory.promote")} disabled={promotePending} onClick={onPromote}>
             <ArrowUpRight className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "size-11 md:size-8 text-destructive hover:text-destructive",
-            )}
-            title={t("common.delete")}
-            aria-label={t("common.delete")}
-            onClick={onDelete}
-          >
+          </IconButton>
+          <IconButton title={t("common.delete")} onClick={onDelete} destructive>
             <Trash2 className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** 统一图标按钮（移动端 44px / 桌面端 32px） */
+function IconButton({
+  title, disabled, onClick, destructive, children,
+}: {
+  title: string;
+  disabled?: boolean;
+  onClick: () => void;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      variant="ghost" size="icon" title={title} aria-label={title}
+      disabled={disabled} onClick={onClick}
+      className={cn("size-11 md:size-8", destructive && "text-destructive hover:text-destructive")}
+    >
+      {children}
+    </Button>
   );
 }
 

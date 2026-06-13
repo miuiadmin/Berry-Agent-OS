@@ -11,6 +11,7 @@ import { Bell, Check, Archive } from "lucide-react";
 import { notificationsApi, type NotificationItem } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
+import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -53,22 +54,13 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      {/* 页面头部 */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold">
-            <Bell className="size-5 text-brand" />
-            {t("notifications.title")}
-            {unread > 0 && (
-              <Badge variant="destructive" className="text-[11px]">
-                {unread}
-              </Badge>
-            )}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("notifications.subtitle")}
-          </p>
-        </div>
+      <PageHeader
+        title={t("notifications.title")}
+        subtitle={t("notifications.subtitle")}
+        icon={Bell}
+        iconClass="text-brand"
+        titleExtra={unread > 0 ? <Badge variant="destructive" className="text-[11px]">{unread}</Badge> : undefined}
+      >
         {unread > 0 && (
           <Button
             variant="outline"
@@ -81,7 +73,7 @@ export default function NotificationsPage() {
             {t("notifications.markAllRead")}
           </Button>
         )}
-      </div>
+      </PageHeader>
 
       {/* 过滤 tabs */}
       <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>

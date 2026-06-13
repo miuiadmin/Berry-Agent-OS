@@ -21,6 +21,7 @@ import { schedulerApi, type SchedulerJob } from "@/lib/api";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TextAreaField } from "@/components/ui/text-area-field";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -317,12 +318,10 @@ export function CreateJobCard({
           onChange={(e) => setCron(e.target.value)}
           className="h-11 md:h-8 font-mono text-sm"
         />
-        <textarea
+        <TextAreaField
           placeholder={t("scheduler.promptPlaceholder")}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          rows={3}
-          className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm"
         />
         <div className="flex gap-2">
           <Button
