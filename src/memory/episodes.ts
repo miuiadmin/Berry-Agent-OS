@@ -21,19 +21,24 @@ export interface Episode {
  * 与 conversations / dialogue_messages 的 content 同样可能内嵌密钥（用户在对话里贴的 key / Agent 转述的工具结果）。
  * 落库前 redact，避免明文密钥持久化到 episodes 表。
  *
+ * eventType 是**自由标签**（不是封闭枚举）：各模块写自己的事件标签（如 skill-tools 的
+ * 'skill_viewed' / 'skill_executed'），EpisodeEventType 仅枚举常见值供参考。故参数取 string。
+ *
  * @param sessionId 会话 ID
- * @param eventType 事件类型
+ * @param eventType 事件类型（自由标签）
  * @param content   原始事件内容（将先 redact 再落库）
- * @param metadata  可选元数据
+ * @param metadata  可选元数据（序列化后整体 redact）
  * @returns 新建的 episode ID
  */
-export function logEpisode(sessionId: string, eventType: EpisodeEventType, content: string, metadata?: Record<string, unknown>): string {
+export function logEpisode(sessionId: string, eventType: string, content: string, metadata?: Record<string, unknown>): string {
   const db = getDb();
   const id = genId('ep');
+  // metadata 同样可能携带密钥（如 report_skill_outcome 的 note 字段是用户/Agent 自由文本，可内嵌 key）。
+  // 序列化后整体 redactSecrets——占位符 [REDACTED:xxx] 是普通字符，落进 JSON 字符串值内不破坏结构。
   db.prepare(`
     INSERT INTO episodes (id, session_id, event_type, content, metadata, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, sessionId, eventType, redactSecrets(content), metadata ? JSON.stringify(metadata) : null, Date.now());
+  `).run(id, sessionId, eventType, redactSecrets(content), metadata ? redactSecrets(JSON.stringify(metadata)) : null, Date.now());
   return id;
 }
 

@@ -54,6 +54,13 @@ describe('redactSecrets (15.0 对话内容子串清洗)', () => {
     expect(redactSecrets(pem)).toBe('[REDACTED:pem_private_key]');
   });
 
+  it('PEM 覆盖 PGP 私钥块（带 BLOCK 后缀，与 RSA 同样整块替换）', () => {
+    // PGP 是 `-----BEGIN PGP PRIVATE KEY BLOCK-----`（多 BLOCK 后缀），正则需 `(?: BLOCK)?` 才匹配
+    const pgp = '-----BEGIN PGP PRIVATE KEY BLOCK-----\ncomment: test\nmQENabc\n-----END PGP PRIVATE KEY BLOCK-----';
+    expect(redactSecrets(`armor: ${pgp}`)).toContain('[REDACTED:pem_private_key]');
+    expect(redactSecrets(`armor: ${pgp}`)).not.toContain('mQENabc');
+  });
+
   it('PEM 先于 long_hex 匹配：块内长 hex 不被单独吞掉', () => {
     // 若 long_hex 先跑，会先把块内的 80 位 hex 换成占位符，破坏 PEM 整体边界。
     // PEM 排在第一位 → 整块（含内嵌 hex）一次替换，结果应是单一 PEM 占位符。

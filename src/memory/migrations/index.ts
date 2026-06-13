@@ -991,6 +991,44 @@ const v22RedactResponsesScan: Migration = {
   },
 };
 
+/**
+ * v23: 15.0 V-6 修复 — redact agent_tasks.output_payload。
+ *
+ * output_payload 是 Agent 最终输出 / 流式累积文本的 JSON blob（streamingContent / response 等），
+ * 与对话正文同等可能回显或转述密钥。task-manager.complete / flushStreamingContent 写入时 redact
+ * （V-6 正向修复）只覆盖新增数据，本迁移补扫历史。整体 redactSecrets（对 JSON 字符串做子串匹配）——
+ * 占位符 [REDACTED:xxx] 是普通字符，落进 JSON 字符串值内不破坏结构。
+ *
+ * 幂等：与 v17-v22 同理，redactSecrets 对已清洗内容不再匹配 secret 模式。
+ */
+const v23RedactOutputPayloadScan: Migration = {
+  version: 23,
+  name: 'redact-output-payload-scan',
+  up: (db: Database.Database) => {
+    const exists = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+      .get('agent_tasks');
+    if (!exists) return;
+
+    const rows = db
+      .prepare(`SELECT rowid AS rid, output_payload AS content FROM agent_tasks WHERE output_payload IS NOT NULL`)
+      .all() as Array<{ rid: number; content: string }>;
+
+    const update = db.prepare(`UPDATE agent_tasks SET output_payload = ? WHERE rowid = ?`);
+    let cleaned = 0;
+    for (const row of rows) {
+      const redacted = redactSecrets(row.content);
+      if (redacted !== row.content) {
+        update.run(redacted, row.rid);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      logger.info({ table: 'agent_tasks', contentCol: 'output_payload', cleaned }, '15.0 V-6 redact 扫描：清洗任务输出明文 secret');
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -1015,4 +1053,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v20FtsConcatAgentNames,
   v21RedactToolCallsScan,
   v22RedactResponsesScan,
+  v23RedactOutputPayloadScan,
 ];

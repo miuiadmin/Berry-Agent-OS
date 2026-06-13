@@ -5,6 +5,7 @@ import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import { metrics } from '../observability/metrics.js';
 import { getCurrentTrace } from '../observability/trace-context.js';
+import { redactSecrets } from '../observability/redaction.js';
 
 const logger = getLogger('task-manager');
 
@@ -218,10 +219,13 @@ export class TaskManager implements TaskManagerDb {
 
     this.clearTimeout(taskId);
     this.abortControllers.delete(taskId);
+    // 15.0 V-6（sec-1）：output_payload 是 Agent 最终输出的 JSON blob（可回显/转述工具结果中的密钥），
+    // 与对话正文同等脱敏。序列化后整体 redactSecrets——占位符是普通字符，不破坏 JSON 结构。
+    const payloadJson = redactSecrets(JSON.stringify(outputPayload));
     const result = this.db.prepare(`
       UPDATE agent_tasks SET status = 'completed', output_payload = ?, finished_at = ?, version = version + 1
       WHERE id = ? AND status NOT IN ('completed','failed','timeout','cancelled')
-    `).run(JSON.stringify(outputPayload), now, taskId);
+    `).run(payloadJson, now, taskId);
 
     if (result.changes === 0) {
       logger.debug({ taskId }, 'Concurrent modification detected on complete');
@@ -243,9 +247,11 @@ export class TaskManager implements TaskManagerDb {
    * 只在 running/acknowledged 状态时写入；任务已完成则 no-op（complete() 会覆盖最终内容）。
    */
   flushStreamingContent(taskId: string, content: string, reasoning?: string): void {
+    // 15.0 V-6（sec-1）：streamingContent 是 Agent 流式累积文本，同样可能内嵌密钥，写前 redact。
+    const payloadJson = redactSecrets(JSON.stringify({ streamingContent: content, reasoning: reasoning ?? null, flushedAt: Date.now() }));
     this.db.prepare(
       `UPDATE agent_tasks SET output_payload = ? WHERE id = ? AND status IN ('running','acknowledged')`,
-    ).run(JSON.stringify({ streamingContent: content, reasoning: reasoning ?? null, flushedAt: Date.now() }), taskId);
+    ).run(payloadJson, taskId);
   }
 
   fail(taskId: string, error: string): boolean {

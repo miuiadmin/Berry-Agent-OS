@@ -7,7 +7,7 @@ import type { ToolDefinition, ToolResult } from './types.js';
 import { SkillService } from '../skills/skill-service.js';
 import type { SkillView } from '../contracts/skills.js';
 import { validateSkillMarkdown } from '../skills/registry.js';
-import { genId } from '../utils/id.js';
+import { logEpisode } from '../memory/episodes.js';
 
 interface SkillToolsOptions {
   onChange?: () => void;
@@ -90,13 +90,14 @@ export function createSkillTools(db: Database, serviceOrOptions?: SkillService |
   const shellInjectionEnabled = options?.shellInjection ?? false;
 
   function writeEpisode(eventType: string, content: string, metadata?: Record<string, unknown>): void {
+    // 收敛到 src/memory/episodes.ts 的 logEpisode 单一入口（内置 content + metadata redactSecrets）。
+    // 不在此另写裸 INSERT episodes——那是 V-4 漏掉的明文 sink（patch-1）：第二条写入路径绕过了
+    // 落盘 redact。保留本地的 sessionId 守卫 + best-effort try/catch（logEpisode 自身会抛，工具侧吞掉）。
     const sessionId = getSessionId?.();
     if (!sessionId) return;
     try {
-      db.prepare(
-        `INSERT INTO episodes (id, session_id, event_type, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(genId('ep'), sessionId, eventType, content, metadata ? JSON.stringify(metadata) : null, Date.now());
-    } catch { /* best-effort */ }
+      logEpisode(sessionId, eventType, content, metadata);
+    } catch { /* best-effort：技能事件记录失败不影响工具主流程 */ }
   }
 
   const listSkillsTool: ToolDefinition = {

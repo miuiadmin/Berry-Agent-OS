@@ -57,8 +57,9 @@ export function redact(obj: unknown): unknown {
  */
 const SECRET_CONTENT_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
   // PEM 私钥块必须最先匹配：其 base64 正文若被后续模式（long_hex 等）部分吞掉会破坏整体边界。
-  // 覆盖 RSA / EC / OPENSSH / PGP / ENCRYPTED / 无算法前缀（PKCS#8）等 PRIVATE KEY 块。
-  { name: 'pem_private_key', re: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g },
+  // 覆盖 RSA / EC / OPENSSH / ENCRYPTED / 无算法前缀（PKCS#8）/ PGP（带 BLOCK 后缀）等 PRIVATE KEY 块。
+  // 注意 PGP 私钥是 `-----BEGIN PGP PRIVATE KEY BLOCK-----`（多一个 BLOCK 后缀），故尾部需 `(?: BLOCK)?`。
+  { name: 'pem_private_key', re: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY(?: BLOCK)?-----/g },
   // anthropic 必须排在 openai 之前：sk-ant- 前缀会被 sk- 正则部分吞掉
   { name: 'anthropic_key', re: /sk-ant-[A-Za-z0-9_-]{20,}/g },
   { name: 'openai_key', re: /sk-(?!ant-)[A-Za-z0-9]{20,}/g },

@@ -51,11 +51,11 @@ describe('initDb 完整启动路径 (15.0 回归)', () => {
     expect(hit[0].content).toContain('项目管理');
   });
 
-  it('schema_migrations 记录到 v22（全部迁移应用）', () => {
+  it('schema_migrations 记录到 v23（全部迁移应用）', () => {
     dir = mkdtempSync(join(tmpdir(), 'berry-initdb-'));
     initDb(join(dir, 'test.db'));
     const db = getDb();
     const max = db.prepare(`SELECT MAX(version) as v FROM schema_migrations`).get() as { v: number };
-    expect(max.v).toBe(22);
+    expect(max.v).toBe(23);
   });
 });
