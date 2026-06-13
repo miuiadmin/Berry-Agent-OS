@@ -64,6 +64,35 @@ const TONE_STYLE: Record<"destructive" | "success", string> = {
   success: "border-success/20 bg-success/5",
 };
 
+/**
+ * 包裹一个异步操作：自动管理 pending 态 + try/catch/finally + 错误日志。
+ *
+ * 消除还原 / 提交反馈两处手写的
+ *   setBusy(true) → try { await } catch { console.error } finally { setBusy(false) }
+ * 样板。pending 期间重复触发被忽略（等价手写的 if (busy) return）。
+ *
+ * 成功副作用写在传入的 action 里（await 之后、finally 之前执行），
+ * 因此 setRestored 这类「成功标记」能正常留存。
+ *
+ * @param errLabel 失败时 console.error 的前缀文案
+ * @returns run（接收实际异步逻辑）+ isPending
+ */
+function useAsyncAction(errLabel: string) {
+  const [isPending, setIsPending] = useState(false);
+  const run = async (action: () => Promise<void>) => {
+    if (isPending) return;
+    setIsPending(true);
+    try {
+      await action();
+    } catch (err) {
+      console.error(errLabel, err);
+    } finally {
+      setIsPending(false);
+    }
+  };
+  return { run, isPending };
+}
+
 /** 弹窗 props */
 interface BrainReviewModalProps {
   isOpen: boolean;
@@ -94,34 +123,28 @@ export function BrainReviewModal({
   /** 反馈输入区域是否展开 */
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
-  /** 异步操作状态 */
-  const [restoring, setRestoring] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  /** 还原 / 反馈两个异步操作（各自独立的 pending 态，由 useAsyncAction 统一管理） */
+  const restoreAction = useAsyncAction("还原失败:");
+  const submitAction = useAsyncAction("提交反馈失败:");
+  /** 还原是否已成功（决定显示成功提示、隐藏还原/反馈按钮） */
   const [restored, setRestored] = useState(false);
 
-  /** 还原 Brain 修改 */
-  async function handleRestore() {
-    if (!originalDraft || restoring) return;
-    setRestoring(true);
-    try {
+  /** 还原 Brain 修改（pending 态与错误日志由 useAsyncAction 统一） */
+  function handleRestore() {
+    if (!originalDraft) return;
+    void restoreAction.run(async () => {
       await apiPost("/brain/restore-original", {
         sessionId,
         taskId: taskId ?? "",
         originalResponse: originalDraft,
       });
       setRestored(true);
-    } catch (err) {
-      console.error("还原失败:", err);
-    } finally {
-      setRestoring(false);
-    }
+    });
   }
 
-  /** 提交反馈 */
-  async function handleSubmitFeedback() {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
+  /** 提交反馈（pending 态与错误日志由 useAsyncAction 统一） */
+  function handleSubmitFeedback() {
+    void submitAction.run(async () => {
       await apiPost("/brain/feedback", {
         sessionId,
         taskId: taskId ?? "",
@@ -132,11 +155,7 @@ export function BrainReviewModal({
       });
       setShowFeedback(false);
       setFeedbackText("");
-    } catch (err) {
-      console.error("提交反馈失败:", err);
-    } finally {
-      setSubmitting(false);
-    }
+    });
   }
 
   /** 是否可显示反馈按钮 */
@@ -199,8 +218,8 @@ export function BrainReviewModal({
               <Button variant="ghost" size="sm" onClick={() => setShowFeedback(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button size="sm" onClick={handleSubmitFeedback} disabled={submitting}>
-                {submitting ? "…" : t("brain.submitFeedback")}
+              <Button size="sm" onClick={handleSubmitFeedback} disabled={submitAction.isPending}>
+                {submitAction.isPending ? "…" : t("brain.submitFeedback")}
               </Button>
             </div>
           </div>
@@ -215,9 +234,9 @@ export function BrainReviewModal({
             </Button>
           )}
           {canRestore && (
-            <Button variant="outline" size="sm" onClick={handleRestore} disabled={restoring}>
+            <Button variant="outline" size="sm" onClick={handleRestore} disabled={restoreAction.isPending}>
               <RotateCcw className="size-3" />
-              {restoring ? "…" : t("brain.restore")}
+              {restoreAction.isPending ? "…" : t("brain.restore")}
             </Button>
           )}
           {restored && <span className="text-xs text-success">{t("brain.restoreSuccess")}</span>}
