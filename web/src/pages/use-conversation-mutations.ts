@@ -12,6 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   apiDelete,
+  apiGet,
   exportConversation,
   renameConversation,
   type ConversationInfo,
@@ -28,30 +29,44 @@ export function useConversationMutations() {
   const clearMessages = useChatStore((s) => s.clearMessages);
   const setSkipAutoRestore = useChatStore((s) => s.setSkipAutoRestore);
 
+  /** 删除后清理前端状态（onSuccess + onError 校验后端已删时复用） */
+  const cleanupAfterDelete = (sid: string) => {
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    clearOutboxForSession(sid);
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      new BroadcastChannel("chat-sync").postMessage({ type: "session-deleted", sid });
+    }
+    if (sid === sessionId) {
+      clearMessages();
+      setSessionId(null);
+      setSkipAutoRestore(true);
+      // 立即同步 localStorage：chat-store persist 默认 2s 防抖写，删除当前会话必须立即落盘，
+      // 否则刷新快于 2s 会从 localStorage 恢复已删会话（"删了又回来"根因）
+      flushPersist();
+    }
+  };
+
   /** 删除对话（若删除的是当前活跃对话则清理状态并阻止自动恢复） */
   const deleteConversation = useMutation({
     mutationFn: async (sid: string) => {
       await apiDelete(`/api/conversations/${sid}`);
     },
     onSuccess: (_data, sid) => {
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      cleanupAfterDelete(sid);
       toast.success(t("conversations.conversationDeleted"));
-      // 清该 session 的 outbox：防残留消息刷新重发重建会话（按 payload.sessionId 精确清，不误删别会话）
-      clearOutboxForSession(sid);
-      // 广播删除（跨标签页同步：别标签若在该 session 则 clearMessages + setSessionId null）
-      if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-        new BroadcastChannel("chat-sync").postMessage({ type: "session-deleted", sid });
-      }
-      if (sid === sessionId) {
-        clearMessages();
-        setSessionId(null);
-        setSkipAutoRestore(true);
-        // 立即同步 localStorage：chat-store persist 默认 2s 防抖写，删除当前会话必须立即落盘，
-        // 否则刷新快于 2s 会从 localStorage 恢复已删会话（"删了又回来"根因）
-        flushPersist();
-      }
     },
-    onError: (err: Error) => {
+    onError: async (err: Error, sid) => {
+      // 网络抖动可能后端已删但 HTTP 响应丢失 → GET 校验实际状态（防误判失败导致前端残留已删会话）
+      try {
+        const list = await apiGet<Array<{ sessionId: string }>>("/api/conversations?limit=200");
+        if (!list.some((c) => c.sessionId === sid)) {
+          // 后端确实删了（响应丢失误判）→ 清前端（同 onSuccess），不 toast 错误
+          cleanupAfterDelete(sid);
+          return;
+        }
+      } catch {
+        // GET 也失败（真网络问题）→ 走下面 toast
+      }
       toast.error(err.message || t("conversations.failedToDelete"));
     },
   });
