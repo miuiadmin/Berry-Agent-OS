@@ -153,6 +153,14 @@ function removeFromOutbox(clientMsgId: string) {
   if (next.length !== cur.length) saveOutbox(next);
 }
 
+/**
+ * 清空全部 outbox（删会话时调用）。outbox 持久化未送达消息跨刷新重发，删会话后若残留 →
+ * onopen 会重发历史消息重建会话（用户看到的"删了又回来 / 刷新重发"）。删会话时清空杜绝重发。
+ */
+export function clearOutbox() {
+  saveOutbox([]);
+}
+
 // ─── 辅助函数 ─────────────────────────────────────────────────
 
 /** 将发送队列中所有消息依次发出（连接成功后调用） */

@@ -17,6 +17,7 @@ import {
   type ConversationInfo,
 } from "@/lib/api";
 import { useChatStore, flushPersist } from "@/lib/stores/chat-store";
+import { clearOutbox } from "@/lib/stores/ws-store";
 import { useT } from "@/lib/i18n";
 
 export function useConversationMutations() {
@@ -35,6 +36,8 @@ export function useConversationMutations() {
     onSuccess: (_data, sid) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success(t("conversations.conversationDeleted"));
+      // 清 outbox：防残留消息刷新重发重建会话（"删了又回来 / 刷新重发"根因）
+      clearOutbox();
       if (sid === sessionId) {
         clearMessages();
         setSessionId(null);
