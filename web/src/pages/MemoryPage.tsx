@@ -2,7 +2,8 @@
  * 记忆管理页面。
  *
  * 支持三层记忆（global / agent / workspace）的 CRUD + 搜索 + 验证 + 提升。
- * Mutations 逻辑 → use-memory-mutations.ts
+ * 页面编排层：筛选 / 列表 / 创建表单 / 删除确认。
+ * Mutations → use-memory-mutations.ts
  */
 
 import { useState } from "react";
@@ -13,7 +14,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -24,46 +25,25 @@ import { useMemoryMutations } from "./use-memory-mutations";
 
 type Layer = "agent" | "workspace" | "global";
 
-const LAYER_CONFIG: Record<Layer, { labelKey: string; placeholderKey: string }> = {
-  agent: { labelKey: "memory.agent", placeholderKey: "memory.enterAgentName" },
-  workspace: { labelKey: "memory.workspace", placeholderKey: "memory.enterWorkspaceId" },
-  global: { labelKey: "memory.global", placeholderKey: "memory.enterUserId" },
-};
-
-function MemorySkeleton() {
-  return (
-    <div className="space-y-2">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="py-3">
-            <div className="space-y-2">
-              <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
 export default function MemoryPage() {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("memory.title"));
 
-  /** 当前选中的 layer（global/agent/workspace） */
+  // ── 筛选 + 表单状态 ──
+  /** 当前选中的 layer */
   const [layer, setLayer] = useState<Layer>("global");
   /** 当前 scope ID（user/agent/workspace 标识） */
   const [scopeId, setScopeId] = useState("default");
+  /** 搜索关键词 */
   const [searchQuery, setSearchQuery] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
-  const [newKey, setNewKey] = useState("");
-  const [newValue, setNewValue] = useState("");
-  /** 删除确认对话框状态 */
+  /** 创建表单状态 */
+  const [createState, setCreateState] = useState({ show: false, key: "", value: "" });
+  /** 删除确认目标 */
   const [deleteTarget, setDeleteTarget] = useState<{ layer: string; id: string } | null>(null);
 
-  // 当前 scope 的记忆列表
+  // ── 数据查询 ──
+  /** 当前 scope 的记忆列表 */
   const listQuery = useQuery({
     queryKey: ["memory", layer, scopeId],
     queryFn: () => {
@@ -74,23 +54,26 @@ export default function MemoryPage() {
     enabled: scopeId.length > 0,
   });
 
-  // 搜索（recall）查询
+  /** 搜索（recall）查询 */
   const recallQuery = useQuery({
     queryKey: ["memory-recall", searchQuery],
     queryFn: (ctx) => memoryApi.recall(searchQuery, { limit: 50 }, ctx.signal),
     enabled: searchQuery.trim().length > 0,
   });
 
-  // 四个 mutation（创建 / 删除 / 提升 / 验证）
+  // ── Mutations ──
   const { createMut, deleteMut, promoteMut, verifyMut } = useMemoryMutations(
     layer,
     scopeId,
-    () => {
-      setShowCreate(false);
-      setNewKey("");
-      setNewValue("");
-    },
+    () => setCreateState({ show: false, key: "", value: "" }),
   );
+
+  // ── 辅助：layer 配置 ──
+  const layerPlaceholder: Record<Layer, string> = {
+    agent: t("memory.enterAgentName"),
+    workspace: t("memory.enterWorkspaceId"),
+    global: t("memory.enterUserId"),
+  };
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -101,12 +84,12 @@ export default function MemoryPage() {
             <Brain className="size-5 text-brand" />
             {t("memory.title")}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("memory.subtitle")}
-          </p>
+          <p className="text-sm text-muted-foreground">{t("memory.subtitle")}</p>
         </div>
         <Button
-          onClick={() => setShowCreate(!showCreate)}
+          onClick={() =>
+            setCreateState((s) => ({ ...s, show: !s.show }))
+          }
           size="sm"
           className="h-11 md:h-9"
         >
@@ -126,7 +109,7 @@ export default function MemoryPage() {
         </Tabs>
         {layer !== "global" && (
           <Input
-            placeholder={t(LAYER_CONFIG[layer].placeholderKey)}
+            placeholder={layerPlaceholder[layer]}
             value={scopeId}
             onChange={(e) => setScopeId(e.target.value)}
             className="max-w-xs h-11 md:h-8"
@@ -135,34 +118,50 @@ export default function MemoryPage() {
       </div>
 
       {/* 创建表单 */}
-      {showCreate && (
+      {createState.show && (
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm">{t("memory.newMemory")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-3 pt-6">
             <Input
               placeholder={t("memory.keyPlaceholder")}
-              value={newKey}
-              onChange={(e) => setNewKey(e.target.value)}
+              value={createState.key}
+              onChange={(e) =>
+                setCreateState((s) => ({ ...s, key: e.target.value }))
+              }
               className="h-11 md:h-8"
             />
             <textarea
               placeholder={t("memory.valuePlaceholder")}
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
+              value={createState.value}
+              onChange={(e) =>
+                setCreateState((s) => ({ ...s, value: e.target.value }))
+              }
               rows={3}
               className="flex w-full rounded-md border bg-transparent px-3 py-2 text-[16px] md:text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <div className="flex gap-2">
               <Button
                 size="sm"
-                disabled={!newKey.trim() || !newValue.trim() || createMut.isPending}
-                onClick={() => createMut.mutate({ key: newKey, value: newValue })}
+                disabled={
+                  !createState.key.trim() ||
+                  !createState.value.trim() ||
+                  createMut.isPending
+                }
+                onClick={() =>
+                  createMut.mutate({
+                    key: createState.key,
+                    value: createState.value,
+                  })
+                }
               >
                 {t("common.create")}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => setShowCreate(false)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setCreateState({ show: false, key: "", value: "" })
+                }
+              >
                 {t("common.cancel")}
               </Button>
             </div>
@@ -184,7 +183,6 @@ export default function MemoryPage() {
       {/* 记忆列表 */}
       <QueryBoundary query={listQuery} skeleton={<MemorySkeleton />}>
         {(memories) => {
-          // 搜索模式下用 recall 结果替换
           const entries: MemoryEntry[] = searchQuery.trim()
             ? (recallQuery.data?.results ?? [])
             : memories;
@@ -200,72 +198,32 @@ export default function MemoryPage() {
               }
               action={
                 !searchQuery.trim()
-                  ? { label: t("memory.addMemory"), onClick: () => setShowCreate(true) }
+                  ? {
+                      label: t("memory.addMemory"),
+                      onClick: () =>
+                        setCreateState((s) => ({ ...s, show: true })),
+                    }
                   : undefined
               }
             />
           ) : (
             <div className="space-y-2">
               {entries.map((entry) => (
-                <Card key={entry.id} className="group">
-                  <CardContent className="flex items-start gap-3 py-3">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium">{entry.key}</span>
-                        <Badge variant="outline" className="shrink-0 text-[11px]">
-                          {t(`memory.${entry.layer}`) ?? entry.layer}
-                        </Badge>
-                        {entry.verified && (
-                          <Badge variant="secondary" className="shrink-0 text-[11px]">
-                            {t("memory.verified")}
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap">
-                        {entry.value}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground/70">
-                        {fmtDT(new Date(entry.createdAt))}
-                        {entry.source ? ` · ${entry.source}` : ""}
-                      </p>
-                    </div>
-                    {/* 操作按钮：移动端常驻，桌面端 hover 显示 */}
-                    <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
-                        title={t("memory.verify")}
-                        aria-label={t("memory.verify")}
-                        disabled={verifyMut.isPending}
-                        onClick={() => verifyMut.mutate(entry.id)}
-                      >
-                        <RefreshCw className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 md:size-8"
-                        title={t("memory.promote")}
-                        aria-label={t("memory.promote")}
-                        disabled={promoteMut.isPending}
-                        onClick={() => promoteMut.mutate({ id: entry.id, target: "global" })}
-                      >
-                        <ArrowUpRight className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn("size-11 md:size-8 text-destructive hover:text-destructive")}
-                        title={t("common.delete")}
-                        aria-label={t("common.delete")}
-                        onClick={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <MemoryCard
+                  key={entry.id}
+                  entry={entry}
+                  fmtDT={fmtDT}
+                  t={t}
+                  onVerify={() => verifyMut.mutate(entry.id)}
+                  onPromote={() =>
+                    promoteMut.mutate({ id: entry.id, target: "global" })
+                  }
+                  onDelete={() =>
+                    setDeleteTarget({ layer: entry.layer, id: entry.id })
+                  }
+                  verifyPending={verifyMut.isPending}
+                  promotePending={promoteMut.isPending}
+                />
               ))}
             </div>
           );
@@ -275,17 +233,127 @@ export default function MemoryPage() {
       {/* 删除确认对话框 */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
         title={t("memory.deleteThisMemory")}
         description={t("memory.deleteConfirmDesc")}
         actionLabel={t("common.delete")}
         onAction={() => {
           if (deleteTarget) {
-            deleteMut.mutate({ entryLayer: deleteTarget.layer, id: deleteTarget.id });
+            deleteMut.mutate({
+              entryLayer: deleteTarget.layer,
+              id: deleteTarget.id,
+            });
             setDeleteTarget(null);
           }
         }}
       />
+    </div>
+  );
+}
+
+// ─── 子组件 ─────────────────────────────────────────────────────────
+
+/** 单条记忆卡片：key / layer badge / value / 操作按钮 */
+function MemoryCard({
+  entry,
+  fmtDT,
+  t,
+  onVerify,
+  onPromote,
+  onDelete,
+  verifyPending,
+  promotePending,
+}: {
+  entry: MemoryEntry;
+  fmtDT: (date: Date) => string;
+  t: (key: string) => string;
+  onVerify: () => void;
+  onPromote: () => void;
+  onDelete: () => void;
+  verifyPending: boolean;
+  promotePending: boolean;
+}) {
+  return (
+    <Card className="group">
+      <CardContent className="flex items-start gap-3 py-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-medium">{entry.key}</span>
+            <Badge variant="outline" className="shrink-0 text-[11px]">
+              {t(`memory.${entry.layer}`) ?? entry.layer}
+            </Badge>
+            {entry.verified && (
+              <Badge variant="secondary" className="shrink-0 text-[11px]">
+                {t("memory.verified")}
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-wrap">
+            {entry.value}
+          </p>
+          <p className="text-[11px] text-muted-foreground/70">
+            {fmtDT(new Date(entry.createdAt))}
+            {entry.source ? ` · ${entry.source}` : ""}
+          </p>
+        </div>
+        {/* 操作按钮：移动端常驻，桌面端 hover 显示 */}
+        <div className="flex shrink-0 gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-11 md:size-8"
+            title={t("memory.verify")}
+            aria-label={t("memory.verify")}
+            disabled={verifyPending}
+            onClick={onVerify}
+          >
+            <RefreshCw className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-11 md:size-8"
+            title={t("memory.promote")}
+            aria-label={t("memory.promote")}
+            disabled={promotePending}
+            onClick={onPromote}
+          >
+            <ArrowUpRight className="size-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "size-11 md:size-8 text-destructive hover:text-destructive",
+            )}
+            title={t("common.delete")}
+            aria-label={t("common.delete")}
+            onClick={onDelete}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** 记忆列表骨架屏 */
+function MemorySkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <Card key={i}>
+          <CardContent className="py-3">
+            <div className="space-y-2">
+              <div className="h-4 w-1/3 animate-pulse rounded bg-muted" />
+              <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
