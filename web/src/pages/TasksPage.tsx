@@ -1,9 +1,9 @@
-
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { queries, apiPost, type TaskInfo } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { formatDuration, formatJson } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,6 +69,7 @@ export default function TasksPage() {
       <h1 className="text-lg font-semibold">{t("tasks.title")}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{t("tasks.subtitle")}</p>
 
+      {/* 筛选栏 */}
       <div className="mt-4 flex flex-wrap items-center gap-2 sm:gap-3">
         <select
           value={statusFilter}
@@ -113,6 +114,7 @@ export default function TasksPage() {
         )}
       </div>
 
+      {/* 桌面端表格视图 */}
       <div className="mt-4 rounded-xl border border-border hidden md:block">
         <table className="w-full text-sm">
           <thead>
@@ -162,7 +164,7 @@ export default function TasksPage() {
         </table>
       </div>
 
-      {/* Mobile card view */}
+      {/* 移动端卡片视图 */}
       <div className="mt-4 space-y-3 md:hidden">
         {isLoading && Array.from({ length: 3 }).map((_, i) => (
           <Skeleton key={i} className={`h-16 w-full rounded-xl stagger-${Math.min(i + 1, 8)}`} />
@@ -184,6 +186,7 @@ export default function TasksPage() {
         ))}
       </div>
 
+      {/* 分页加载更多 */}
       {total > offset + PAGE_SIZE && (
         <div className="mt-4 flex justify-center">
           <Button
@@ -199,6 +202,7 @@ export default function TasksPage() {
   );
 }
 
+/** 桌面端表格行（点击展开详情） */
 function TaskRow({
   task,
   expanded,
@@ -273,6 +277,7 @@ function TaskRow({
   );
 }
 
+/** 展开后的任务详情（完整 ID / Session / 时间 / 错误 / 输入输出） */
 function TaskDetail({ task }: { task: TaskInfo }) {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
@@ -321,23 +326,4 @@ function TaskDetail({ task }: { task: TaskInfo }) {
       )}
     </div>
   );
-}
-
-function formatDuration(startedAt?: string, finishedAt?: string, status?: string): string {
-  if (!startedAt) return "—";
-  const start = new Date(startedAt).getTime();
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
-  const seconds = Math.round((end - start) / 1000);
-  if (seconds < 60) return `${seconds}s${status === "running" ? "..." : ""}`;
-  const minutes = Math.floor(seconds / 60);
-  const rem = seconds % 60;
-  return `${minutes}m ${rem}s${status === "running" ? "..." : ""}`;
-}
-
-function formatJson(str: string): string {
-  try {
-    return JSON.stringify(JSON.parse(str), null, 2);
-  } catch {
-    return str;
-  }
 }

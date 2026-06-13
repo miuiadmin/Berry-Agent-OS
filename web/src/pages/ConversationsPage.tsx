@@ -1,11 +1,11 @@
-
-import { useState, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { queries, apiDelete, exportConversation, type ConversationInfo } from "@/lib/api";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useDebouncedSearch } from "@/hooks/use-debounced-search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -36,9 +36,9 @@ export default function ConversationsPage() {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("conversations.title"));
-  const [search, setSearch] = useState("");
   const [sort, setSort] = useState<"recent" | "messages">("recent");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [search, debouncedSearch] = useDebouncedSearch();
   const navigate = useNavigate();
   const sessionId = useChatStore((s) => s.sessionId);
   const setSessionId = useChatStore((s) => s.setSessionId);
@@ -76,6 +76,7 @@ export default function ConversationsPage() {
     navigate("/chat");
   };
 
+  /** 导出单条对话为 JSON 文件下载 */
   const handleExport = useCallback(async (conv: ConversationInfo) => {
     try {
       const messages = await exportConversation(conv.sessionId);
@@ -93,6 +94,7 @@ export default function ConversationsPage() {
     }
   }, []);
 
+  /** 导出全部对话为一个打包 JSON 文件 */
   const handleExportAll = useCallback(async () => {
     const conversations = conversationsQuery.data;
     if (!conversations?.length) return;
@@ -115,16 +117,6 @@ export default function ConversationsPage() {
       toast.error(t("conversations.failedToExportAll"));
     }
   }, [conversationsQuery.data]);
-
-  const debouncedSearch = useMemo(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const fn = (value: string) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => setSearch(value), 300);
-    };
-    fn.cancel = () => clearTimeout(timer);
-    return fn;
-  }, []);
 
   return (
     <div className="p-4 sm:p-6">

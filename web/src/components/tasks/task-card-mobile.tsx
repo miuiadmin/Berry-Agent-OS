@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,12 +5,14 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, XCircle } from "lucide-react";
 import type { TaskInfo } from "@/lib/api";
 import { useT, useDateFormat } from "@/lib/i18n";
+import { formatDuration, formatJson } from "@/lib/format";
 
 interface TaskCardMobileProps {
   task: TaskInfo;
   onCancel: () => void;
 }
 
+/** 移动端任务卡片（可展开查看详情） */
 export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
   const [expanded, setExpanded] = useState(false);
   const t = useT();
@@ -108,23 +109,4 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
       </div>
     </div>
   );
-}
-
-function formatDuration(startedAt?: string, finishedAt?: string, status?: string): string {
-  if (!startedAt) return "—";
-  const start = new Date(startedAt).getTime();
-  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
-  const seconds = Math.round((end - start) / 1000);
-  if (seconds < 60) return `${seconds}s${status === "running" ? "..." : ""}`;
-  const minutes = Math.floor(seconds / 60);
-  const rem = seconds % 60;
-  return `${minutes}m ${rem}s${status === "running" ? "..." : ""}`;
-}
-
-function formatJson(str: string): string {
-  try {
-    return JSON.stringify(JSON.parse(str), null, 2);
-  } catch {
-    return str;
-  }
 }

@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -6,7 +5,8 @@ import { queries } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT, useDateFormat } from "@/lib/i18n";
-import { useCountUp } from "@/hooks/use-count-up";
+import { AnimatedStat } from "@/components/ui/animated-stat";
+import { formatTokens as formatTokenCount, formatUptime } from "@/lib/format";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkline } from "@/components/charts/sparkline";
@@ -27,18 +27,21 @@ import {
   Minus,
 } from "lucide-react";
 
+/** 实时活动事件的类型 */
 interface ActivityEvent {
   event: string;
   ts: number;
   payload: Record<string, unknown>;
 }
 
+/** 根据事件前缀返回对应图标 */
 function getEventIcon(event: string) {
   if (event.startsWith("task.")) return ListTodo;
   if (event.startsWith("agent.")) return Bot;
   return Activity;
 }
 
+/** 根据事件关键词返回语义颜色 class */
 function getEventColor(event: string) {
   if (event.includes("failed") || event.includes("crashed")) return "text-destructive";
   if (event.includes("completed") || event.includes("enabled")) return "text-success";
@@ -46,6 +49,7 @@ function getEventColor(event: string) {
   return "text-muted-foreground";
 }
 
+/** 趋势指示器——上升/下降/持平 */
 function TrendIndicator({ current, previous }: { current: number; previous: number }) {
   if (previous === 0 && current === 0) return <Minus className="size-3 text-muted-foreground" />;
   if (current > previous) return <TrendingUp className="size-3 text-success" />;
@@ -53,32 +57,15 @@ function TrendIndicator({ current, previous }: { current: number; previous: numb
   return <Minus className="size-3 text-muted-foreground" />;
 }
 
-/** Animated stat number — counts up from 0 on mount */
-function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
-  const animated = useCountUp(value);
-  const display = format ? format(animated) : String(animated);
-  return <span className="tabular-nums">{display}</span>;
-}
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
 /**
  * 构建 7 天图表数据（完成 / 失败 + sparkline 数组）。
  *
  * 纯函数，无 React 依赖：优先用 stats API 数据，否则从任务列表客户端聚合。
- * @param statsData 服务端按天统计（可选）
- * @param completedTasks 已完成任务（聚合回退用）
- * @param failedTasks 失败任务（聚合回退用）
- * @param formatDate 日期格式化（i18n）
  */
 function buildChartData(
   statsData: { date: string; completed: number; failed: number }[] | undefined,
-  completedTasks: { finishedAt?: number; createdAt: number }[],
-  failedTasks: { finishedAt?: number; createdAt: number }[],
+  completedTasks: { finishedAt?: string | number; createdAt: string | number }[],
+  failedTasks: { finishedAt?: string | number; createdAt: string | number }[],
   formatDate: (d: Date, opts?: Intl.DateTimeFormatOptions) => string,
 ) {
   // 优先用服务端按天统计
@@ -132,7 +119,7 @@ function buildChartData(
 
 export default function HomePage() {
   const t = useT();
-  const { formatDate, formatTime, formatNumber } = useDateFormat();
+  const { formatDate, formatTime } = useDateFormat();
   useDocumentTitle(t("sidebar.home"));
   const { data: health, isLoading: healthLoading } = useQuery(queries.health());
   const { data: agents, isLoading: agentsLoading } = useQuery(queries.agents());
@@ -145,6 +132,7 @@ export default function HomePage() {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const subscribe = useWsStore((s) => s.subscribe);
 
+  // 订阅全局 WebSocket 事件，保留最近 15 条用于实时活动展示
   useEffect(() => {
     const unsub = subscribe("*", (raw) => {
       const data = raw as { event?: string; payload?: Record<string, unknown>; ts?: number };
@@ -181,9 +169,9 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* 统计卡片网格 */}
       <div className="mt-6 grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-        {/* Health */}
+        {/* 系统健康 */}
         <Card className="card-lift stagger-1">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -207,7 +195,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Agents */}
+        {/* Agent 数量 */}
         <Card className="card-lift stagger-2">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -229,7 +217,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Running Tasks */}
+        {/* 运行中任务 */}
         <Card className="card-lift stagger-3">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -245,7 +233,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Task Totals */}
+        {/* 任务总计（完成/失败 + 趋势 sparkline） */}
         <Card className="card-lift stagger-4">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -274,7 +262,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Token Usage */}
+        {/* Token 用量 */}
         <Card className="card-lift stagger-5">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -298,9 +286,8 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* Bottom Section */}
+      {/* 底部双栏：任务活动图 + 实时事件 */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        {/* Task Activity Chart */}
         <Card className="stagger-6">
           <CardHeader>
             <CardTitle className="text-sm">{t("home.taskActivity")}</CardTitle>
@@ -326,7 +313,6 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">{t("home.recentActivity")}</CardTitle>
@@ -343,7 +329,7 @@ export default function HomePage() {
               />
             ) : (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {events.map((ev, i) => {
+                {events.map((ev) => {
                   const Icon = getEventIcon(ev.event);
                   const colorClass = getEventColor(ev.event);
                   return (
@@ -367,7 +353,7 @@ export default function HomePage() {
         </Card>
       </div>
 
-      {/* Quick Navigation */}
+      {/* 快捷导航 */}
       <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
         <QuickLink href="/chat" icon={MessageCircle} label={t("home.quickChat")} />
         <QuickLink href="/agents" icon={Bot} label={t("home.agents")} />
@@ -378,6 +364,7 @@ export default function HomePage() {
   );
 }
 
+/** 快捷导航链接卡片 */
 function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.ComponentType<{ className?: string }>; label: string }) {
   return (
     <Link
@@ -388,16 +375,4 @@ function QuickLink({ href, icon: Icon, label }: { href: string; icon: React.Comp
       {label}
     </Link>
   );
-}
-
-function formatUptime(seconds: number | undefined | null): string {
-  if (seconds == null || seconds < 0) return "—";
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainMin = minutes % 60;
-  if (hours < 24) return `${hours}h ${remainMin}m`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h`;
 }

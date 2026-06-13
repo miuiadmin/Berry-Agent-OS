@@ -1,9 +1,15 @@
+/**
+ * 对话侧边栏——对话列表 + 搜索 + 新建 + 删除确认。
+ *
+ * 在 Chat 页面左侧以抽屉形式展示，移动端点击后自动关闭。
+ */
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { queries, apiDelete, renameConversation, type ConversationInfo } from "@/lib/api";
+import { useDebouncedSearch } from "@/hooks/use-debounced-search";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -12,33 +18,18 @@ import { useT } from "@/lib/i18n";
 import { ConversationItem } from "./conversation-item";
 
 interface ConversationSidebarProps {
+  /** 选中对话后的回调（用于移动端关闭抽屉） */
   onSelect?: () => void;
 }
 
 export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
-  const [search, setSearch] = useState("");
+  const [search, debouncedSearch] = useDebouncedSearch();
   /** 待删除确认的会话 ID（非 null 时弹确认框） */
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   /** 正在播放退场动画的会话 ID（动画结束才真正删除） */
   const [removingId, setRemovingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const t = useT();
-
-  const debouncedSearch = useMemo(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const debounced = (value: string) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => setSearch(value), 300);
-    };
-    /** 组件卸载时清除待处理的防抖定时器 */
-    debounced.cancel = () => clearTimeout(timer);
-    return debounced;
-  }, []);
-
-  // 卸载时清理防抖定时器
-  useEffect(() => {
-    return () => { debouncedSearch.cancel(); };
-  }, [debouncedSearch]);
 
   const { data: conversations } = useQuery({
     ...queries.conversations({ search: search || undefined }),
@@ -81,12 +72,14 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
     },
   });
 
+  /** 新建对话：清空当前状态 */
   const handleNewChat = () => {
     clearMessages();
     setSessionId(null);
     onSelect?.();
   };
 
+  /** 选择已有对话 */
   const handleSelect = (sid: string) => {
     if (sid === sessionId) return;
     clearMessages();
@@ -96,6 +89,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
 
   return (
     <div className="flex h-full w-72 md:w-64 max-w-[85vw] flex-col border-r bg-background md:bg-muted/30">
+      {/* 新建按钮 + 搜索框 */}
       <div className="border-b p-3 space-y-2">
         <button type="button"
           onClick={handleNewChat}
@@ -154,5 +148,3 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
     </div>
   );
 }
-
-

@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { formatTokensCompact } from "@/lib/format";
 import {
   type ProviderChannel,
   type ModelEntry,
@@ -236,13 +237,6 @@ function ModelTable({ models }: { models: ModelEntry[] }) {
 
 // ─── 模型行 ────────────────────────────────────────────────────────
 
-/** 格式化 token 数（如 200K / 1.5M） */
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return String(n);
-}
-
 /** 单个模型行（4 列数据，Fragment 包裹以配合 CSS Grid） */
 function ModelRow({ model }: { model: ModelEntry }) {
   return (
@@ -251,10 +245,10 @@ function ModelRow({ model }: { model: ModelEntry }) {
         {model.name}
       </span>
       <span className="text-right text-muted-foreground">
-        {formatTokens(model.contextWindow)}
+        {formatTokensCompact(model.contextWindow)}
       </span>
       <span className="text-right text-muted-foreground">
-        {formatTokens(model.defaultMaxTokens)}
+        {formatTokensCompact(model.defaultMaxTokens)}
       </span>
       <span className="text-right text-muted-foreground">
         {model.inputPricePer1M != null

@@ -1,9 +1,9 @@
-
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT, useDateFormat } from "@/lib/i18n";
-import { useCountUp } from "@/hooks/use-count-up";
+import { AnimatedStat } from "@/components/ui/animated-stat";
+import { formatTokens } from "@/lib/format";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AreaChart } from "@/components/charts/area-chart";
@@ -11,12 +11,6 @@ import { BarChart } from "@/components/charts/bar-chart";
 import { Sparkline } from "@/components/charts/sparkline";
 import { Coins, TrendingUp, Cpu, Bot } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
-
-function AnimatedStat({ value, format }: { value: number; format?: (n: number) => string }) {
-  const animated = useCountUp(value);
-  const display = format ? format(animated) : String(animated);
-  return <span className="tabular-nums">{display}</span>;
-}
 
 export default function UsagePage() {
   const t = useT();
@@ -56,7 +50,7 @@ export default function UsagePage() {
       <h1 className="text-lg font-semibold">{t("usage.title")}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{t("usage.subtitle")}</p>
 
-      {/* Summary cards */}
+      {/* 汇总卡片 */}
       <div className="mt-6 grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Card className="card-lift stagger-1">
           <CardHeader className="pb-2">
@@ -126,7 +120,7 @@ export default function UsagePage() {
         </Card>
       </div>
 
-      {/* Charts */}
+      {/* 图表区域 */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card className="stagger-5">
           <CardHeader>
@@ -213,10 +207,4 @@ export default function UsagePage() {
       </div>
     </div>
   );
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
 }
