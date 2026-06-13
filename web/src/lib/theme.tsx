@@ -1,3 +1,12 @@
+/**
+ * 主题管理（明/暗模式）。
+ *
+ * 基于 React Context 的轻量主题系统：
+ *   - ThemeProvider：管理 theme 状态 + 同步 document.documentElement.classList
+ *   - useTheme()：读取/切换主题
+ * 持久化到 localStorage("theme")，未设置时跟随系统 prefers-color-scheme。
+ */
+
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 
 type Theme = "light" | "dark";

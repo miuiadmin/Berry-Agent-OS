@@ -1,3 +1,13 @@
+/**
+ * 应用根布局 — 侧边栏 + 主内容区。
+ *
+ * 职责：
+ *   - 全局 WebSocket 连接管理（进入时连接，离开时断开）
+ *   - 移动端侧边栏 overlay（路由切换 / ESC 自动关闭）
+ *   - 桌面端右上角浮动工具栏（连接状态 + debug + 用户菜单）
+ *   - 页面切换动画（key by pathname 触发 animate-page-in）
+ */
+
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppSidebar } from "./app-sidebar";

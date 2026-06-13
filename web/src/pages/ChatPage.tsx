@@ -1,3 +1,10 @@
+/**
+ * 聊天页面 — 侧边栏 + 主窗口布局。
+ *
+ * 移动端：侧边栏为 overlay 抽屉（点击对话后自动关闭）。
+ * 桌面端：侧边栏常驻左侧。
+ * 快捷键：Cmd+N 新建对话，Escape 关闭侧边栏。
+ */
 
 import { useMemo, useState } from "react";
 import { ChatWindow } from "@/components/chat/chat-window";

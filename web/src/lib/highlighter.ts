@@ -1,3 +1,11 @@
+/**
+ * 代码语法高亮工具（Shiki）。
+ *
+ * 基于 Shiki 的懒加载高亮器：首次调用时初始化，预加载常用语言。
+ * LRU 缓存（200 条）避免重复高亮同一代码片段。
+ * 主题：github-dark / github-light，跟随系统主题切换。
+ */
+
 import { createHighlighter, type Highlighter } from "shiki";
 
 let highlighterPromise: Promise<Highlighter> | null = null;

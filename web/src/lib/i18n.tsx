@@ -1,3 +1,11 @@
+/**
+ * 国际化（i18n）系统。
+ *
+ * 基于 React Context 的轻量 i18n：useT() 返回 t(key) 翻译函数。
+ * 支持 {placeholder} 模板插值（如 t("greeting", { name: "Alice" })）。
+ * 语言资源在 locales/zh.ts / locales/en.ts 中集中定义。
+ */
+
 import {
   createContext,
   useContext,

@@ -1,3 +1,11 @@
+/**
+ * WebSocket 连接状态管理（Zustand + persist）。
+ *
+ * 管理全局 WebSocket 连接生命周期：连接 / 断线重连 / 心跳 / 消息订阅。
+ * 持久化 clientId 到 localStorage，重连时保持身份。
+ * 提供事件订阅机制（subscribe/unsubscribe），消费方按事件名过滤。
+ */
+
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { toast } from "sonner";

@@ -1,3 +1,9 @@
+/**
+ * 键盘快捷键 hook。
+ *
+ * 注册全局快捷键（支持 Meta/Ctrl 修饰键），卸载时自动清理监听器。
+ * 快捷键定义：{ key, meta?, handler }。
+ */
 
 import { useEffect } from "react";
 

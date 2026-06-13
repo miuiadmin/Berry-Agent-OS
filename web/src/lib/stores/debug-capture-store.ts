@@ -1,3 +1,10 @@
+/**
+ * Debug 抓包状态管理（Zustand）。
+ *
+ * 管理调试抓包的启停 / 抓取的事件列表 / 截图附件。
+ * 抓包数据用于 debug-capture-dialog 的展示和导出。
+ */
+
 import { create } from "zustand";
 import { toast } from "sonner";
 import {

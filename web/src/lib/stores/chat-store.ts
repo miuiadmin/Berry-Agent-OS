@@ -1,3 +1,16 @@
+/**
+ * 聊天状态管理（Zustand + persist）。
+ *
+ * 管理对话会话的核心状态：消息列表 / 流式传输 / 委派请求 / 权限确认。
+ * 持久化到 localStorage（防抖写入，流式期间最多 2s 写一次）。
+ * 支持跨标签页 localStorage 同步（storage event 合并消息）。
+ *
+ * 关键机制：
+ *   - sharedSessionRestore：统一的"拉历史 + 恢复活跃任务"入口（H6 修复）
+ *   - createStreamingPlaceholder：流式占位符去重（防止 onMessage 重复创建）
+ *   - pendingStreamMessageId：跟踪当前流式消息 ID（避免多消息交叉）
+ */
+
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { useWsStore } from "./ws-store";

@@ -1,3 +1,9 @@
+/**
+ * 文档标题 hook。
+ *
+ * 设置浏览器标签页标题（"{title} | Berry"），切换语言时自动更新。
+ * 无标题时回退到 "Berry 仪表盘"。
+ */
 
 import { useEffect } from "react";
 import { useT } from "@/lib/i18n";

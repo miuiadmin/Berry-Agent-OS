@@ -1,4 +1,11 @@
 
+/**
+ * 聊天 WebSocket 通信 hook。
+ *
+ * 封装发送消息 / 重发 / 取消生成 / 委派响应 / 权限响应等操作，
+ * 通过 WebSocket 与后端实时通信。消息自动持久化到 chat-store。
+ */
+
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {

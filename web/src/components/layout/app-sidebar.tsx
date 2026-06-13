@@ -1,3 +1,11 @@
+/**
+ * 应用侧边栏导航。
+ *
+ * 展示所有页面导航链接（图标 + 文字），当前路由高亮。
+ * 移动端：overlay 抽屉（w-72），桌面端：常驻（w-56）。
+ * 使用 sidebar-* 主题 token，与主内容区视觉分离。
+ */
+
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,

@@ -1,3 +1,10 @@
+/**
+ * 实时事件 hook。
+ *
+ * 订阅 WebSocket 事件总线，自动 invalidate React Query 缓存 + 显示 toast 通知。
+ * 覆盖：task / agent / notification / scheduler / MCP / mission / agent_dialogue 七大类事件。
+ * 仅在 DashboardLayout 挂载时注册（全局唯一）。
+ */
 
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";

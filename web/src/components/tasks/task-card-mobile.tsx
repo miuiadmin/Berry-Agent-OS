@@ -1,3 +1,11 @@
+/**
+ * 移动端任务卡片组件。
+ *
+ * 可展开查看详情的卡片：点击展开显示完整 ID / Session / 时间 / 错误 / 输入输出。
+ * 运行中的任务可点击取消按钮。
+ * 所有触控目标 ≥ 44px（Apple HIG 标准）。
+ */
+
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

@@ -1,3 +1,10 @@
+/**
+ * 聊天输入框组件。
+ *
+ * 底部固定的输入区域：textarea + 附件管理 + 工具栏（上传/图片/设置/停止） + 发送按钮。
+ * 自适应高度（最大 300px），超过 500 字符时显示字数统计。
+ * Enter 发送 / Shift+Enter 换行。
+ */
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import { SendHorizontal, Square, Paperclip, ImagePlus, Settings } from "lucide-react";
