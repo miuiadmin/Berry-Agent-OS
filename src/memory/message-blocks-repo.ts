@@ -97,12 +97,14 @@ function parseBlock(row: { payload_json: string }): Block {
  * @param opts.role 消息角色
  * @param opts.clientMsgId 客户端消息幂等键（user 消息入口去重）
  * @param opts.taskId 关联 agent task（assistant 消息归属）
+ * @param opts.id 指定消息 id（BlockCollector 用 stream.block 已广播的 messageId 落库，保证前后端一致）
  */
 export function createMessage(opts: {
   sessionId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   clientMsgId?: string;
   taskId?: string;
+  id?: string;
 }): { id: string; deduplicated: boolean } {
   const db = getDb();
 
@@ -116,7 +118,7 @@ export function createMessage(opts: {
     if (existing) return { id: existing.id, deduplicated: true };
   }
 
-  const id = genId('msg');
+  const id = opts.id ?? genId('msg');
   try {
     db.prepare(`
       INSERT INTO messages (id, session_id, role, client_msg_id, task_id, created_at)
@@ -169,6 +171,33 @@ function pickNextSeq(messageId: string): number {
     .prepare(`SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM message_blocks WHERE message_id = ?`)
     .get(messageId) as { next: number };
   return row.next;
+}
+
+/**
+ * 落库一轮 assistant 消息的全部 blocks（task-flow 在 agent.task.result 调用）。
+ * 用指定 messageId 建 messages 行（与 stream.block 已广播的 id 一致，保证前后端 id 对齐），
+ * 顺序追加各 block。空内容跳过（不建空消息）。单事务保证原子。
+ *
+ * 这是"写路径切到新表"的落库漏斗（设计文档/22 期3b）；与旧 conversations 写入并行（兼容期双写）。
+ */
+export function saveAssistantBlocks(opts: {
+  messageId: string;
+  sessionId: string;
+  taskId?: string;
+  blocks: Block[];
+}): void {
+  if (opts.blocks.length === 0) return;
+  const db = getDb();
+  const tx = db.transaction(() => {
+    createMessage({
+      id: opts.messageId,
+      sessionId: opts.sessionId,
+      role: 'assistant',
+      taskId: opts.taskId,
+    });
+    for (const block of opts.blocks) appendBlock(opts.messageId, block);
+  });
+  tx();
 }
 
 /**

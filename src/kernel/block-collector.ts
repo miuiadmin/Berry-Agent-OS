@@ -21,7 +21,6 @@
 import { getEventBus } from './event-bus.js';
 import { genId } from '../utils/id.js';
 import type { StreamBlockPayload, ToolBlock, Block } from '../contracts/message-blocks.js';
-
 /** stream.block emit 函数类型（默认走全局 EventBus；测试可注入捕获函数） */
 export type BlockEmitter = (payload: StreamBlockPayload) => void;
 
@@ -52,6 +51,11 @@ export class BlockCollector {
   readonly messageId: string;
   /** 每个工具名的出现序号（合成稳定 tool blockId；task.telemetry 无 callId） */
   private toolSeq = new Map<string, number>();
+  /**
+   * 本轮 tool block（落库用）。text/thinking 不在此保留——它们由调用方在 flush 时
+   * 从 pending.draftResponse / pending.reasoning（单一事实源）注入，避免双份内存。
+   */
+  private toolBlocks: ToolBlock[] = [];
 
   constructor(
     private readonly sessionId: string,
@@ -131,6 +135,21 @@ export class BlockCollector {
       taskId: this.taskId,
       correlationId: this.correlationId,
     });
+    // 保留供 flush 落库（tool 的 input/output 不在 draftResponse，必须由 collector 持有）
+    this.toolBlocks.push(block);
+  }
+
+  /**
+   * 构建本轮完整 Block[]（顺序：thinking → tools → text），供调用方落库到 message_blocks。
+   * text/thinking 从外部事实源（pending.draftResponse / reasoning）注入，避免 collector 重复持有全文。
+   * 无任何内容时返回空数组（调用方据此跳过建空消息）。
+   */
+  buildBlocks(opts: { reasoning?: string; draftResponse?: string }): Block[] {
+    const blocks: Block[] = [];
+    if (opts.reasoning) blocks.push({ type: 'thinking', text: opts.reasoning });
+    blocks.push(...this.toolBlocks);
+    if (opts.draftResponse) blocks.push({ type: 'text', text: opts.draftResponse });
+    return blocks;
   }
 }
 

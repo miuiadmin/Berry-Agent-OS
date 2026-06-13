@@ -34,6 +34,9 @@ export function initDb(path?: string): Database.Database {
   // 对话内联模型 FTS（设计文档/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
   // 不进 ensureFtsConsistency——本表与 message_blocks 非 1:1（仅 text/thinking 子集），行数对比无意义。
   db.exec(MESSAGE_BLOCKS_FTS_SQL);
+  // 首启 / v25 回填后：FTS 表刚创建为空，但 message_blocks 已有 text/thinking 行（回填的旧历史）。
+  // 仅在 FTS 空且存在可索引 block 时做一次性全量 populate；之后由 repo 增量维护，不重复全量。
+  populateMessageBlocksFtsIfEmpty(db);
   // 15.0 §5.3 启动自愈：所有 FTS 表行数与源表不一致（触发器遗漏/刚创建/索引损坏/运维清表）
   // 时才 rebuild。FTS5 COUNT(*) 是 O(1)。修复前仅 knowledge_fts 有保护。
   // 多列 external-content FTS（dialogue/agent_chat 的 from/to/content）的 rebuild 读所有映射列，
@@ -59,6 +62,35 @@ function ensureFtsConsistency(db: Database.Database, fts: string, source: string
     }
   } catch {
     // FTS 虚表或源表不存在（旧库 / 迁移未跑）—— 静默跳过
+  }
+}
+
+/**
+ * 对话内联 FTS 一次性 populate（设计文档/22）。
+ * message_blocks_fts 是独立（非 external-content）虚表，只能手动 DELETE+INSERT 维护。
+ * 首启 / v25 回填后 FTS 表为空但 message_blocks 已有 text/thinking 行——此时全量索引一次；
+ * 之后由 message-blocks-repo 的 appendBlock/patchBlock 增量维护，不在每次启动重复全量。
+ */
+function populateMessageBlocksFtsIfEmpty(db: Database.Database): void {
+  try {
+    const ftsCount = (db.prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts`).get() as { c: number }).c;
+    if (ftsCount > 0) return; // 已有索引行——增量维护中，不重复全量
+    const idxCount = (
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM message_blocks WHERE block_type IN ('text','thinking')`)
+        .get() as { c: number }
+    ).c;
+    if (idxCount === 0) return; // 无可索引内容（全新库）—— 等 repo 首次写入
+    db.exec(`
+      INSERT INTO message_blocks_fts (session_id, message_id, block_id, content)
+      SELECT m.session_id, b.message_id, b.id, json_extract(b.payload_json, '$.text')
+      FROM message_blocks b
+      JOIN messages m ON m.id = b.message_id
+      WHERE b.block_type IN ('text', 'thinking')
+        AND json_extract(b.payload_json, '$.text') IS NOT NULL;
+    `);
+  } catch {
+    // message_blocks_fts / message_blocks 不存在（理论上不该发生）—— 静默跳过
   }
 }
 

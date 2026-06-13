@@ -9,6 +9,7 @@ import { MS_PER_DAY } from '../lib/time-constants.js';
 import { getDb } from '../memory/index.js';
 import { sanitizeFtsQuery } from '../memory/search.js';
 import { getHistory } from '../memory/conversations.js';
+import { getTimeline } from '../memory/message-blocks-repo.js';
 import { getAppHome } from '../utils/paths.js';
 import type { IConfigService } from '../config/contract.js';
 import { registerSchedulerRoutes } from '../scheduler/api-handlers.js';
@@ -237,6 +238,14 @@ export function createApiRouter(deps: WebServerDependencies) {
     const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
     const messages = getHistory(params.sid, limit);
     json(res, messages);
+  });
+
+  // --- 对话内联时间线（设计文档/22）：单端点返回有序 messages + 各自 blocks，替代旧
+  // conversations + dialogue_messages + agent_tasks.output_payload 三层拼接。前端刷新拉历史用。
+  route('GET', '/sessions/:sid/timeline', (_req, res, url, params) => {
+    const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
+    const timeline = getTimeline(params.sid, { limit });
+    json(res, timeline);
   });
 
   // --- Session state (for reconnection recovery) ---

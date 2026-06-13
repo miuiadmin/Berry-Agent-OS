@@ -1064,6 +1064,99 @@ const v24RedactInputPayloadScan: Migration = {
   },
 };
 
+/**
+ * 对话内联统一（设计文档/22 期3b）：把旧 conversations 历史回填到新 messages + message_blocks。
+ *
+ * 回填范围：conversations 行 → messages（同 id）+ thinking block（reasoning）+ text block（content）。
+ *   - 同 id 幂等（重跑安全）：已存在于 messages 的跳过。
+ *   - redact：content/reasoning 落 message_blocks 前清洗（与 v17~v24 同法，覆盖 pre-15.0 残留明文）。
+ *   - 不回填 tool_calls / dialogue_messages / agent_chat_messages：历史工具上下文留在旧表冷归档；
+ *     新对话的工具调用由 BlockCollector 直接落 message_blocks（期3a/3b）。dialogue 折叠为 delegation block 属期4。
+ *
+ * FTS 重建不在此处：message_blocks_fts 在 db.ts 的 runMigrations 之后才创建，v25 执行时尚不存在；
+ * 首启时由 db.ts 在建 FTS 表后做一次性全量 populate（见 db.ts populateMessageBlocksFtsIfEmpty）。
+ */
+const v25InlineBlocksBackfill: Migration = {
+  version: 25,
+  name: 'inline-blocks-backfill',
+  up: (db: Database.Database) => {
+    // 旧 conversations 表不存在（全新库）→ 无历史可回填
+    const hasConversations = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = 'conversations'`)
+      .get();
+    if (!hasConversations) return;
+
+    // reasoning / task_id 列由 v11 / 后续迁移添加；旧库可能缺列——按 table_info 容错取列
+    const cols = new Set(
+      (db.pragma('table_info(conversations)') as Array<{ name: string }>).map((c) => c.name),
+    );
+    const hasReasoning = cols.has('reasoning');
+    const hasTaskId = cols.has('task_id');
+    const hasClientMsgId = cols.has('client_msg_id');
+
+    const selectSql = `SELECT id, session_id, role, content${
+      hasReasoning ? ', reasoning' : ''
+    }${hasClientMsgId ? ', client_msg_id' : ''}${hasTaskId ? ', task_id' : ''}, created_at
+      FROM conversations ORDER BY created_at ASC`;
+    const rows = db.prepare(selectSql).all() as Array<Record<string, unknown>>;
+
+    const insertMessage = db.prepare(
+      `INSERT OR IGNORE INTO messages (id, session_id, role, client_msg_id, task_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const insertBlock = db.prepare(
+      `INSERT INTO message_blocks (id, message_id, seq, block_type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const messageExists = db.prepare(`SELECT 1 FROM messages WHERE id = ?`);
+
+    let migrated = 0;
+    for (const r of rows) {
+      // 幂等：已回填的消息跳过（重跑 / 部分失败恢复安全）
+      if (messageExists.get(r.id as string)) continue;
+
+      insertMessage.run(
+        r.id,
+        r.session_id,
+        r.role,
+        hasClientMsgId ? ((r.client_msg_id as string) ?? null) : null,
+        hasTaskId ? ((r.task_id as string) ?? null) : null,
+        r.created_at,
+      );
+
+      let seq = 0;
+      const created = r.created_at as number;
+      // thinking block（reasoning 非空时）
+      if (hasReasoning && r.reasoning) {
+        seq++;
+        insertBlock.run(
+          `${r.id}#b${seq}`,
+          r.id,
+          seq,
+          'thinking',
+          JSON.stringify({ type: 'thinking', text: redactSecrets(r.reasoning as string) }),
+          created,
+        );
+      }
+      // text block（content；空内容也建块以保留消息存在性）
+      seq++;
+      insertBlock.run(
+        `${r.id}#b${seq}`,
+        r.id,
+        seq,
+        'text',
+        JSON.stringify({ type: 'text', text: redactSecrets((r.content as string) ?? '') }),
+        created,
+      );
+      migrated++;
+    }
+
+    if (migrated > 0) {
+      logger.info({ migrated }, '对话内联 v25 回填：conversations → messages + message_blocks');
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -1090,4 +1183,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v22RedactResponsesScan,
   v23RedactOutputPayloadScan,
   v24RedactInputPayloadScan,
+  v25InlineBlocksBackfill,
 ];
