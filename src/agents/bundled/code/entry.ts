@@ -20,6 +20,8 @@ import { SagaOrchestrator } from '../../../kernel/saga.js';
 // 13.0 §13.7: 跨进程文件备份/回滚（Brain stop 时 kernel 侧 rollbackTask 读取）
 import { setCurrentTask, commitTask } from '../../../kernel/file-edit-rollback.js';
 import { getLogger } from '../../../utils/logger.js';
+// buildUserResponse 是无副作用纯呈现函数，提取到独立文件以便单测（避免 import entry.ts 触发 agent 启动副作用）
+import { buildUserResponse } from './build-response.js';
 
 const logger = getLogger('code-entry');
 
@@ -220,36 +222,6 @@ function ensureLockedTools(): LockManager {
     registerLockedTools(lockManager, workspaceDir, agentName, sagaInstance);
   }
   return lockManager;
-}
-
-/**
- * 从 code agent 任务结果中构建用户友好的回复文本。
- * 优先使用 implementation phase 的 LLM 输出（自然语言描述），
- * 而非 lastPhase.summary（可能是 "测试失败: ..." 等 terse 文本）。
- *
- * @param result runTaskPhases 返回的完整结果
- * @returns 用户可见的自然语言回复
- */
-function buildUserResponse(result: { phases: Array<{ phase: string; success: boolean; summary: string }>; success: boolean; summary: string; filesChanged?: string[]; testResult?: { passed: boolean } }): string {
-  const parts: string[] = [];
-  const filesChanged = result.filesChanged ?? [];
-
-  // 优先找 implementation phase 的 summary（LLM 的完整自然语言输出）
-  const implPhase = result.phases.find(p => p.phase === 'implementation');
-  const mainText = implPhase?.summary || result.summary;
-  if (mainText) parts.push(mainText);
-
-  // 追加文件变更列表
-  if (filesChanged.length > 0) {
-    parts.push(`\n变更的文件：${filesChanged.join(', ')}`);
-  }
-
-  // 如果测试失败但文件已创建，标注测试状态（不覆盖正文）
-  if (!result.success && result.testResult && !result.testResult.passed && filesChanged.length > 0) {
-    parts.push('\n⚠️ 自动测试未通过，但文件已成功创建。');
-  }
-
-  return parts.join('\n');
 }
 
 /** 确保只注册一次 AgentPort 工具（首次 agent.task 或 dialogue.send 触发时） */
