@@ -2669,7 +2669,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
 
     const pending = this.sessionManager.getPending(fgEntry.correlationId);
-    if (!pending) return;
+    if (!pending) {
+      // 无 user session pending：fire-and-forget 异步委派（evolution extract_feedback / detect_gap 等
+      // 后台学习任务）或 pending 已被并发消费的 race 场景。task 既已结束，delegation entry 必须收口到
+      // 终态——否则 entry.state 永驻 delegated/active/reviewing，TaskHeartbeatManager 会持续对已完成
+      // task 误发 task.heartbeat（违反状态机不变量：task 完成 ⇒ delegation 收口）。
+      // 同步 foreground 委派有 pending，走下方 review 流程由 delegationManager.complete 收口；
+      // 本分支只补齐无 pending 的收口路径。complete/fail 对已终态 entry 幂等（return false）。
+      if (result.ok) {
+        this.delegationManager.complete(result.taskId, this.formatAgentResult(agentName, result.outputPayload ?? {}));
+      } else {
+        this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
+      }
+      return;
+    }
 
     if (!result.ok) {
       this.streamingFlusher.remove(result.taskId);
