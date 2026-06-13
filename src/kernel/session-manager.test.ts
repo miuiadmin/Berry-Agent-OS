@@ -193,6 +193,6 @@ describe('SessionManager.persistInlineBlocks → message_blocks 落库（doc 22 
     const tl = getTimeline('s5');
     expect(tl).toHaveLength(1);
     const text = tl[0].blocks.find((b) => b.type === 'text');
-    expect((text as { text: string } | undefined)?.text).toBe('部分回复'); // timeline 累积内容
+    expect((text as { text: string } | undefined)?.text).toContain('回复中断'); // 失败标签落库（persistContent 覆盖 timeline text，刷新可见）
   });
 });
