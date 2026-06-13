@@ -6,8 +6,8 @@
  *   - MessageBubble：单条消息气泡（用户 / 助手 / 错误 / 流式动画）
  *
  * 子组件（从 message-bubble-parts.tsx 导入）：
- *   - CopyButton / EditableMessage / MessageError / BrainReviewBadge /
- *     MessageActions / AttachmentList
+ *   CopyButton / EditableMessage / MessageError / BrainReviewBadge /
+ *   MessageActions / AttachmentList
  */
 
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from "react";
@@ -22,7 +22,6 @@ import { ToolCallCards } from "./tool-call-cards";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 import { useT, useLocale } from "@/lib/i18n";
 import {
-  CopyButton,
   EditableMessage,
   AttachmentList,
   MessageError,
@@ -30,22 +29,27 @@ import {
   MessageActions,
 } from "./message-bubble-parts";
 
+/** 气泡背景样式配置（消除嵌套三元，Tailwind 要求完整类名字面量） */
+const BUBBLE_STYLE: Record<"error" | "userFailed" | "user" | "assistant", string> = {
+  error: "bg-destructive/10 border border-destructive/30 text-foreground",
+  userFailed: "bg-brand/60 border border-warning/40 text-brand-foreground",
+  user: "bg-brand text-brand-foreground",
+  assistant: "bg-muted text-foreground",
+};
+
 /**
- * 格式化消息时间戳
+ * 格式化消息时间戳：今天仅显示时分，否则显示月日 + 时分。
  * @param ts 时间戳（毫秒）
- * @param localeTag 用于 Intl API 的 locale 标签（如 "zh-CN" 或 "en-US"）
+ * @param localeTag Intl locale 标签
  */
 function formatTime(ts: number, localeTag: string): string {
   const d = new Date(ts);
-  const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) {
-    return d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleDateString(localeTag, { month: "short", day: "numeric" }) + " " +
-    d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
+  const time = d.toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return d.toLocaleDateString(localeTag, { month: "short", day: "numeric" }) + " " + time;
 }
 
+/** 单条消息气泡 */
 const MessageBubble = memo(function MessageBubble({
   message,
   onRetry,
@@ -62,51 +66,51 @@ const MessageBubble = memo(function MessageBubble({
   const isStreaming = message.status === "streaming";
   const isSending = isUser && message.status === "sending";
   const isUserFailed = isUser && message.status === "failed";
+
   const [editing, setEditing] = useState(false);
   const t = useT();
   const { locale } = useLocale();
+  const markdownComponents = useMemo(() => createMarkdownComponents(isStreaming), [isStreaming]);
+  const localeTag = locale === "zh" ? "zh-CN" : "en-US";
 
-  const markdownComponents = useMemo(
-    () => createMarkdownComponents(isStreaming),
-    [isStreaming],
-  );
-
+  /** 编辑态 */
   if (editing && isUser) {
     return (
       <div className="flex flex-col items-end">
         <EditableMessage
           message={message}
-          onSubmit={(content) => {
-            setEditing(false);
-            onEdit?.(message.id, content);
-          }}
+          onSubmit={(content) => { setEditing(false); onEdit?.(message.id, content); }}
           onCancel={() => setEditing(false)}
         />
       </div>
     );
   }
 
+  /** 气泡样式 key */
+  const styleKey = isError ? "error" : isUserFailed ? "userFailed" : isUser ? "user" : "assistant";
+  /** 错误提示配置（合并两种场景） */
+  const errorCfg = isError
+    ? { msg: message.error || t("chat.failedToSend"), variant: "destructive" as const }
+    : isUserFailed
+      ? { msg: t("chat.failedToSend"), variant: "warning" as const }
+      : null;
+
   return (
     <div className={cn("group flex flex-col", isUser ? "items-end" : "items-start")}>
       <div
         className={cn(
-          "relative max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 text-sm leading-relaxed",
-          isError
-            ? "bg-destructive/10 border border-destructive/30 text-foreground"
-            : isUserFailed
-              ? "bg-brand/60 border border-warning/40 text-brand-foreground"
-              : isUser
-                ? "bg-brand text-brand-foreground"
-                : "bg-muted text-foreground",
+          "relative max-w-[90%] sm:max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-4 sm:py-2.5",
+          BUBBLE_STYLE[styleKey],
           isSending && "opacity-70",
           isStreaming && !isUser && "animate-stream-pulse",
         )}
       >
+        {/* 内容：流式等待 / 用户文本 / 助手 Markdown */}
         {isStreaming && message.content === "" ? (
           <div className="flex items-center gap-2 py-1">
-            <span className="size-1.5 animate-pulse rounded-full bg-current opacity-60" />
-            <span className="size-1.5 animate-pulse rounded-full bg-current opacity-60 [animation-delay:150ms]" />
-            <span className="size-1.5 animate-pulse rounded-full bg-current opacity-60 [animation-delay:300ms]" />
+            {[0, 150, 300].map((d) => (
+              <span key={d} className="size-1.5 animate-pulse rounded-full bg-current opacity-60" style={{ animationDelay: `${d}ms` }} />
+            ))}
           </div>
         ) : isUser ? (
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
@@ -118,60 +122,39 @@ const MessageBubble = memo(function MessageBubble({
             <ReactMarkdown components={markdownComponents}>{message.content}</ReactMarkdown>
           </div>
         )}
-        {/* 错误提示 + 重试（isError=destructive / isUserFailed=warning，UI 复用 MessageError） */}
-        {isError && (
-          <MessageError
-            message={message.error || t("chat.failedToSend")}
-            onRetry={onRetry ? () => onRetry(message.id) : undefined}
-            variant="destructive"
-          />
+
+        {/* 错误 / 失败提示 */}
+        {errorCfg && (
+          <MessageError message={errorCfg.msg} onRetry={onRetry ? () => onRetry(message.id) : undefined} variant={errorCfg.variant} />
         )}
-        {isUserFailed && (
-          <MessageError
-            message={t("chat.failedToSend")}
-            onRetry={onRetry ? () => onRetry(message.id) : undefined}
-            variant="warning"
-          />
-        )}
-        {/* 用户消息发送中指示 */}
+        {/* 发送中指示 */}
         {isSending && (
-          <div className="mt-1 text-[11px] text-brand-foreground/50 flex items-center gap-1">
+          <div className="mt-1 flex items-center gap-1 text-[11px] text-brand-foreground/50">
             <span className="size-1 animate-pulse rounded-full bg-current" />
           </div>
         )}
-        {message.attachments && message.attachments.length > 0 && (
-          <AttachmentList attachments={message.attachments} />
-        )}
-        {/* 13.0 灵魂版：Brain 审核标注（modify/reject 时展示） */}
+        {message.attachments && message.attachments.length > 0 && <AttachmentList attachments={message.attachments} />}
+        {/* Brain 审核标注 */}
         {!isUser && message.reviewVerdict && message.reviewVerdict !== "approve" && (
-          <BrainReviewBadge
-            verdict={message.reviewVerdict as "modify" | "reject"}
-            reason={message.reviewReason}
-          />
+          <BrainReviewBadge verdict={message.reviewVerdict as "modify" | "reject"} reason={message.reviewReason} />
         )}
       </div>
-      <div className="flex items-center gap-1 mt-px px-1">
-        <span className="text-[11px] text-muted-foreground/60">
-          {formatTime(message.timestamp, locale === "zh" ? "zh-CN" : "en-US")}
-        </span>
+
+      {/* 时间戳 + 操作按钮 */}
+      <div className="mt-px flex items-center gap-1 px-1">
+        <span className="text-[11px] text-muted-foreground/60">{formatTime(message.timestamp, localeTag)}</span>
         {!isStreaming && message.content && (
-          <MessageActions
-            copyText={message.content}
-            isUser={isUser}
-            onEdit={() => setEditing(true)}
-            onDelete={onDelete ? () => onDelete(message.id) : undefined}
-          />
+          <MessageActions copyText={message.content} isUser={isUser} onEdit={() => setEditing(true)} onDelete={onDelete ? () => onDelete(message.id) : undefined} />
         )}
       </div>
-      {/* 思考过程 / 工具调用块：外层包裹不加 mt，与上方"时间戳行"紧邻。
-          块与块之间剩余的视觉间距来自文本 line-height（行盒留白），并非 margin；
-          这是 11px 小字的正常排印行为，详见 thinking-process.tsx 注释。 */}
-      {!isUser && ((message.thinkingSteps && message.thinkingSteps.length > 0) || message.reasoning) && (
+
+      {/* 思考过程 / 工具调用（间距来自文本行高，不需要额外 margin） */}
+      {!isUser && ((message.thinkingSteps?.length ?? 0) > 0 || message.reasoning) && (
         <div className="max-w-[90%] sm:max-w-[80%]">
           <ThinkingProcess steps={message.thinkingSteps ?? []} reasoning={message.reasoning} isActive={isStreaming} />
         </div>
       )}
-      {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+      {!isUser && (message.toolCalls?.length ?? 0) > 0 && (
         <div className="max-w-[90%] sm:max-w-[80%]">
           <ToolCallCards calls={message.toolCalls} isActive={isStreaming} />
         </div>
@@ -180,6 +163,7 @@ const MessageBubble = memo(function MessageBubble({
   );
 });
 
+/** 消息列表容器：自动滚动 + 空状态 + 滚到底部按钮 */
 export function ChatMessageList({
   onRetry,
   onEdit,
@@ -195,35 +179,35 @@ export function ChatMessageList({
   const t = useT();
   const isNearBottom = useRef(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  /** 上一轮消息数（判断是否新增用户消息以强制滚到底） */
   const prevMsgCountRef = useRef(messages.length);
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isNearBottom.current = distFromBottom < 80;
-    setShowScrollBtn(distFromBottom > 200);
+    const dist = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight;
+    isNearBottom.current = dist < 80;
+    setShowScrollBtn(dist > 200);
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      isNearBottom.current = true;
-      setShowScrollBtn(false);
-    }
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    isNearBottom.current = true;
+    setShowScrollBtn(false);
   }, []);
 
+  /** 新消息到达时自动滚动（接近底部 或 新用户消息强制） */
   useEffect(() => {
     if (!scrollRef.current) return;
     const lastMsg = messages[messages.length - 1];
-    const isNewUserMessage = messages.length > prevMsgCountRef.current && lastMsg?.role === "user";
-    if (isNearBottom.current || isNewUserMessage) {
+    const isNewUserMsg = messages.length > prevMsgCountRef.current && lastMsg?.role === "user";
+    if (isNearBottom.current || isNewUserMsg) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
     prevMsgCountRef.current = messages.length;
   }, [messages]);
 
   return (
-    <div className="relative overflow-hidden h-full">
+    <div className="relative h-full overflow-hidden">
       {messages.length === 0 ? (
         <div className="flex h-full items-center justify-center p-4">
           <div className="text-center">
@@ -235,30 +219,26 @@ export function ChatMessageList({
           </div>
         </div>
       ) : (
-      <ScrollArea ref={scrollRef} className="h-full p-4" onScroll={handleScroll}>
+        <ScrollArea ref={scrollRef} className="h-full p-4" onScroll={handleScroll}>
           <div className="mx-auto max-w-3xl space-y-4">
-            {messages.map((msg, i) => {
-              const isLatest = i === messages.length - 1;
-              const animClass = isLatest ? (msg.role === "user" ? "animate-msg-user" : "animate-msg-assistant") : undefined;
-              return (
-                <div key={msg.id} className={animClass}>
-                  <MessageBubble
-                    message={msg}
-                    onRetry={onRetry}
-                    onEdit={onEdit}
-                    onDelete={stableRemoveMessage}
-                  />
-                </div>
-              );
-            })}
+            {messages.map((msg, i) => (
+              <div
+                key={msg.id}
+                className={i === messages.length - 1 ? (msg.role === "user" ? "animate-msg-user" : "animate-msg-assistant") : undefined}
+              >
+                <MessageBubble message={msg} onRetry={onRetry} onEdit={onEdit} onDelete={stableRemoveMessage} />
+              </div>
+            ))}
           </div>
-      </ScrollArea>
+        </ScrollArea>
       )}
-      <button type="button"
+      {/* 滚到底部按钮（移动端 44px 触控目标） */}
+      <button
+        type="button"
         onClick={scrollToBottom}
         className={cn(
-          "absolute bottom-4 right-4 z-10 flex size-11 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-accent active:bg-accent transition-all duration-200",
-          showScrollBtn ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-75 pointer-events-none",
+          "absolute bottom-4 right-4 z-10 flex size-11 md:size-8 items-center justify-center rounded-full border border-border bg-background shadow-md transition-all duration-200 hover:bg-accent active:bg-accent",
+          showScrollBtn ? "translate-y-0 scale-100 opacity-100" : "pointer-events-none translate-y-2 scale-75 opacity-0",
         )}
         aria-label={t("chat.scrollToBottom")}
       >
