@@ -1029,6 +1029,41 @@ const v23RedactOutputPayloadScan: Migration = {
   },
 };
 
+/**
+ * 15.0 V-7（sec-1 收尾）：回填扫描 agent_tasks.input_payload 列。
+ *
+ * input_payload 与 output_payload 对称——delegation-orchestrator 把 userMessage / assistantResponse /
+ * 被拒指令直接嵌进 inputPayload（extract_feedback / detect_gap 等任务），其中可内嵌用户贴的密钥。
+ * V-7 在 create() 写入时已加 redact（新数据），本迁移负责清洗存量库里的历史明文（与 v23 同构）。
+ */
+const v24RedactInputPayloadScan: Migration = {
+  version: 24,
+  name: 'redact-input-payload-scan',
+  up: (db: Database.Database) => {
+    const exists = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+      .get('agent_tasks');
+    if (!exists) return;
+
+    const rows = db
+      .prepare(`SELECT rowid AS rid, input_payload AS content FROM agent_tasks WHERE input_payload IS NOT NULL`)
+      .all() as Array<{ rid: number; content: string }>;
+
+    const update = db.prepare(`UPDATE agent_tasks SET input_payload = ? WHERE rowid = ?`);
+    let cleaned = 0;
+    for (const row of rows) {
+      const redacted = redactSecrets(row.content);
+      if (redacted !== row.content) {
+        update.run(redacted, row.rid);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      logger.info({ table: 'agent_tasks', contentCol: 'input_payload', cleaned }, '15.0 V-7 redact 扫描：清洗任务输入明文 secret');
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -1054,4 +1089,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v21RedactToolCallsScan,
   v22RedactResponsesScan,
   v23RedactOutputPayloadScan,
+  v24RedactInputPayloadScan,
 ];

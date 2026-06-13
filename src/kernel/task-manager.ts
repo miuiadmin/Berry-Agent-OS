@@ -139,7 +139,12 @@ export class TaskManager implements TaskManagerDb {
       input.targetAgent,
       input.foreground ? 1 : 0,
       input.priority ?? 0,
-      JSON.stringify(input.inputPayload),
+      // 15.0 V-7（sec-1 收尾）：input_payload 是任务输入的 JSON blob。delegation-orchestrator 会把
+      // userMessage / assistantResponse / 被拒指令直接嵌进 inputPayload（extract_feedback / detect_gap 等），
+      // 与 output_payload 同样可能内嵌用户贴的密钥。落库前 redact，对称覆盖两个 JSON blob 列。
+      // 安全性：input_payload 仅用于事后 mission 元数据提取（missionId/planTaskId 是 ID，非密钥形态，
+      // 不会被 redact 命中），永不回读喂给 agent 执行——live 派发用内存中的 inputPayload。故 redact 不影响执行路径。
+      redactSecrets(JSON.stringify(input.inputPayload)),
       now,
       traceId,
     );
