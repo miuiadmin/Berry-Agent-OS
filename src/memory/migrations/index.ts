@@ -1236,6 +1236,171 @@ const v26UserMessagesBackfill: Migration = {
   },
 };
 
+/**
+ * 15.0 redact 盲区存量清洗（P0-2）。
+ *
+ * v17~v24 覆盖了对话 / 任务 / 审核核心表，但漏了**记忆系统 + 若干旁路表**（这些不在 15.0 §9 的
+ * 6 表承诺内，是全面核对时新发现的明文落库盲区）。P0-2 已在写入路径补 redact：
+ *   - knowledge（knowledge.ts addKnowledge + evolution/engine + memory/entry 直接 INSERT）
+ *   - 三层记忆（memory-layer-service create/update + FTS 同步 redacted）
+ *   - brain_decisions（brain-decision-recorder.record + will-loop + unified-extractor 直接 INSERT）
+ *   - drift_signals（drift-detector.recordSignal）
+ *   - async_delegations（create/complete/fail）
+ * 本迁移清洗这些表里 pre-fix 的历史明文（与 v17~v24 同法）。
+ *
+ * 配置驱动：一张 (表, 列) 清单统一扫，避免 14 段重复代码（v24 是单表单列写法，此处循环化是
+ * 同构的自然延伸——不是新概念）。表 / 列不存在则跳过（全新库或旁路表未建），不阻塞启动。
+ */
+const V27_REDACT_TARGETS: ReadonlyArray<{ table: string; col: string }> = [
+  { table: 'knowledge', col: 'summary' },
+  { table: 'knowledge', col: 'detail' },
+  { table: 'agent_memories_v2', col: 'content' },
+  { table: 'workspace_memories', col: 'content' },
+  { table: 'global_memories', col: 'content' },
+  { table: 'brain_decisions', col: 'input_summary' },
+  { table: 'brain_decisions', col: 'output_json' },
+  { table: 'drift_signals', col: 'drift_description' },
+  { table: 'drift_signals', col: 'suggested_action' },
+  { table: 'drift_signals', col: 'actual_action' },
+  { table: 'async_delegations', col: 'prompt' },
+  { table: 'async_delegations', col: 'context_snapshot' },
+  { table: 'async_delegations', col: 'result' },
+  { table: 'async_delegations', col: 'error' },
+];
+
+const v27RedactBlindSpotScan: Migration = {
+  version: 27,
+  name: 'redact-blind-spot-scan',
+  up: (db: Database.Database) => {
+    let totalCleaned = 0;
+    for (const { table, col } of V27_REDACT_TARGETS) {
+      // 表不存在（全新库 / 旁路表未建）→ 跳过
+      const tableExists = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .get(table);
+      if (!tableExists) continue;
+      // 列不存在（旧库 schema 漂移）→ 跳过，不阻塞启动
+      const cols = new Set(
+        (db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name),
+      );
+      if (!cols.has(col)) continue;
+
+      // table / col 来自上方硬编码常量（非用户输入），无注入风险——与 v17~v24 同法
+      const rows = db
+        .prepare(`SELECT rowid AS rid, ${col} AS content FROM ${table} WHERE ${col} IS NOT NULL`)
+        .all() as Array<{ rid: number; content: string }>;
+      const update = db.prepare(`UPDATE ${table} SET ${col} = ? WHERE rowid = ?`);
+      let cleaned = 0;
+      for (const row of rows) {
+        const redacted = redactSecrets(row.content);
+        if (redacted !== row.content) {
+          update.run(redacted, row.rid);
+          cleaned++;
+        }
+      }
+      totalCleaned += cleaned;
+      if (cleaned > 0) {
+        logger.info({ table, col, cleaned }, '15.0 P0-2 redact 盲区扫描：清洗历史明文 secret');
+      }
+    }
+    if (totalCleaned === 0) {
+      logger.debug({}, '15.0 P0-2 redact 盲区扫描：无历史明文需清洗');
+    }
+  },
+};
+
+/**
+ * 对话内联统一收尾（设计文档/22）：回填 conversations 里仍残留、不在 messages 的孤行（user + assistant）。
+ *
+ * 根因：v25 一次性回填了它跑时刻的 conversations 全表，v26 只回填 user。但服务若仍跑老代码（期1 /
+ * 消灭双轨制之前），会持续向 conversations 写新行制造孤子；这些孤子（含 v25 之后的 assistant 行，
+ * v25/v26 都不会再跑）永远进不了 messages。本迁移收口：把所有 conversations ∉ messages 的行一次性
+ * 补进新表，使 /state（读 messages）刷新不丢历史对话。消灭双轨制后新代码不再制造孤子，本迁移一次性善后。
+ *
+ * 与 v25 同构（reasoning→thinking block + content→text block），但用 LEFT JOIN 精确定位「不在 messages」
+ * 的孤行；user + assistant 都回填（补 v26 只回填 user 的缺口）。幂等：LEFT JOIN m.id IS NULL + INSERT OR IGNORE。
+ * FTS 不在此建（runMigrations 后才有 FTS 表，靠 db.ts populateMessageBlocksFts 增量补，与 v25/v26 同理）。
+ */
+const v28ConversationsOrphanBackfill: Migration = {
+  version: 28,
+  name: 'conversations-orphan-backfill',
+  up: (db: Database.Database) => {
+    const hasConversations = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = 'conversations'`)
+      .get();
+    if (!hasConversations) return;
+
+    const cols = new Set(
+      (db.pragma('table_info(conversations)') as Array<{ name: string }>).map((c) => c.name),
+    );
+    const hasReasoning = cols.has('reasoning');
+    const hasClientMsgId = cols.has('client_msg_id');
+    const hasTaskId = cols.has('task_id');
+
+    // 仅取「尚未进 messages」的孤行（LEFT JOIN 找空）——user + assistant 都要，避免与 v25/v26 已回填行重复
+    const rows = db
+      .prepare(
+        `SELECT c.id, c.session_id, c.role, c.content${
+          hasReasoning ? ', c.reasoning' : ''
+        }${hasClientMsgId ? ', c.client_msg_id' : ''}${hasTaskId ? ', c.task_id' : ''}, c.created_at
+         FROM conversations c
+         LEFT JOIN messages m ON m.id = c.id
+         WHERE m.id IS NULL
+         ORDER BY c.created_at ASC`,
+      )
+      .all() as Array<Record<string, unknown>>;
+
+    if (rows.length === 0) return;
+
+    const insertMessage = db.prepare(
+      `INSERT OR IGNORE INTO messages (id, session_id, role, client_msg_id, task_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const insertBlock = db.prepare(
+      `INSERT OR IGNORE INTO message_blocks (id, message_id, seq, block_type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+
+    let migrated = 0;
+    for (const r of rows) {
+      const id = r.id as string;
+      insertMessage.run(
+        id,
+        r.session_id,
+        r.role,
+        hasClientMsgId ? ((r.client_msg_id as string) ?? null) : null,
+        hasTaskId ? ((r.task_id as string) ?? null) : null,
+        r.created_at,
+      );
+      // thinking block（assistant 的 reasoning 非空时）；content 落 text block 前清洗 secret（与 v25 同法）
+      let seq = 0;
+      if (hasReasoning && r.reasoning) {
+        seq++;
+        insertBlock.run(
+          `${id}#b${seq}`,
+          id,
+          seq,
+          'thinking',
+          JSON.stringify({ type: 'thinking', text: redactSecrets(r.reasoning as string) }),
+          r.created_at,
+        );
+      }
+      seq++;
+      insertBlock.run(
+        `${id}#b${seq}`,
+        id,
+        seq,
+        'text',
+        JSON.stringify({ type: 'text', text: redactSecrets((r.content as string) ?? '') }),
+        r.created_at,
+      );
+      migrated++;
+    }
+
+    logger.info({ migrated }, '对话内联 v28 回填：conversations 孤行（user+assistant）→ messages + message_blocks');
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -1264,4 +1429,6 @@ export const ALL_MIGRATIONS: Migration[] = [
   v24RedactInputPayloadScan,
   v25InlineBlocksBackfill,
   v26UserMessagesBackfill,
+  v27RedactBlindSpotScan,
+  v28ConversationsOrphanBackfill,
 ];
