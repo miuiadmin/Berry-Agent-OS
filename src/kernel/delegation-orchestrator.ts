@@ -30,6 +30,7 @@ import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
+import { getOrCreateBlockCollector, disposeBlockCollector } from './block-collector.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
 import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
 import {
@@ -804,6 +805,20 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // Track speculative execution state (conversation started before Brain routing confirms)
   private speculativeCorrelations = new Set<string>();
   private pendingHandoffs = new Map<string, RouteDecision>();
+
+  /**
+   * daemon 外部 agent 工具调用缓冲（设计文档/22 期4·委派内联）。
+   *
+   * daemon（claude-code / opencode 等外部 CLI）的 tool_call / tool_result 是两个独立事件
+   * （OpenCode 式流式，按 callId 配对），而前端工具卡片是「出生即终态」模型——
+   * call+result 需一次性给全（见 ws.tool_call 契约：toolName+input+result+isError 同一事件）。
+   * 故在此缓冲 tool_call（callId→{toolName,input}），等配对的 tool_result 到达后 emit 一个
+   * 捆绑 stream.tool_call，复用前端既有渲染（与进程内工具完全一致：一张完整终态卡片）。
+   *
+   * 外层 key=taskId，内层 key=callId。任务终态（completed/failed）时整体清理防泄漏；
+   * 未配对的 tool_call（外部 agent 异常中断）随之丢弃。
+   */
+  private daemonToolCallBuffer = new Map<string, Map<string, { toolName: string; input: unknown }>>();
 
   sendRouteRequest(payload: RouteRequestPayload, correlationId: string): void {
     withTrace('router.sendRouteRequest', () => {
@@ -1675,13 +1690,53 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     pending.delegationTaskId = delegationId;
     let textAccumulator = '';
 
+    // 对话内联（设计文档/22 期4）：为本次委派创建 BlockCollector——把外部 driver 的
+    // tool_running/completed/failed + thinking_delta 归一为内联 block，前端实时渲染工具卡 / 思考。
+    // 文本不喂 collector（仍走下方 text_delta → content 单源），避免文本双写。
+    // 之前这些事件落入 default:break 被丢弃——正是「外部 agent 委派时工具卡片缺失」的根因。
+    const blockCollector = getOrCreateBlockCollector(delegationId, pending.sessionId, correlationId);
+
     try {
       const eventSource = this.runtimeExecutor
         ? this.runtimeExecutor.executeWithCheckpoint(runtime, task)
         : runtime.execute(task);
 
       for await (const event of eventSource) {
+        // tool-trace（保留诊断）：external-driver 路径（opencode/claude 等外部 agent）的 tool_*/thinking_delta
+        // AgentEvent 在此被消费——期4 已接入 BlockCollector（下方 switch 新增 4 个 case），不再落入 default 丢弃。
+        if (event.kind === 'tool_running' || event.kind === 'tool_completed' || event.kind === 'tool_failed' || event.kind === 'thinking_delta') {
+          logger.debug({ delegationId, eventKind: event.kind, callId: (event.data as { callId?: string }).callId, name: (event.data as { name?: string }).name, timestamp: event.timestamp }, 'tool-trace: orchestrator AgentEvent → BlockCollector');
+        }
         switch (event.kind) {
+          // 对话内联（设计文档/22 期4）：外部 driver 的思考增量 → thinking block（前端可折叠）+ 累积进 pending.reasoning 供持久化
+          case 'thinking_delta': {
+            const text = event.data.text as string;
+            pending.reasoning = (pending.reasoning ?? '') + text;
+            blockCollector.onReasoningDelta(text);
+            break;
+          }
+          // 工具启动（tool_pending / tool_running）：发 running 态 tool block，按 callId 暂存等 result 配对
+          case 'tool_pending':
+          case 'tool_running': {
+            blockCollector.onToolStart({
+              callId: event.data.callId as string,
+              toolName: event.data.name as string,
+              input: event.data.input,
+              ts: event.timestamp,
+            });
+            break;
+          }
+          // 工具完成（tool_completed / tool_failed）：按 callId 回查 start，组装终态 block + 算耗时
+          case 'tool_completed':
+          case 'tool_failed': {
+            blockCollector.onToolComplete({
+              callId: event.data.callId as string,
+              output: event.data.output as string | undefined,
+              success: event.kind === 'tool_completed',
+              ts: event.timestamp,
+            });
+            break;
+          }
           case 'text_delta': {
             const text = event.data.text as string;
             textAccumulator += text;
@@ -1758,6 +1813,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.fail(delegationId, message);
       // R14-1：Runtime exception 兜底走 finalizeTask 统一入口（含 no_response 通知）
       this.sessionManager.fail(correlationId, { kind: 'runtime_error', agentName: runtime.name, error: message });
+    } finally {
+      // 对话内联（设计文档/22 期4）：统一释放本委派的 BlockCollector（防内存泄漏）。
+      // 期4 当前仅实时 emit 不落库——persist 跨刷新留待 saveConversationTurn 块化后补（pre-existing gap）。
+      disposeBlockCollector(delegationId);
     }
   }
 
@@ -2727,6 +2786,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   private setupDaemonTaskResultHandlers(): void {
     const eventBus = getEventBus();
     eventBus.on('daemon.task.progress', ({ taskId, event }) => {
+      // tool-trace: daemon 外部 agent 事件到达 orchestrator — 记录 kind（text / tool_call / tool_result / thinking）
+      logger.debug({ taskId, eventKind: event.kind, dataKind: (event.data as { kind?: string }).kind }, 'tool-trace: daemon.task.progress 到达 orchestrator');
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
       const pending = this.sessionManager.getPending(entry.correlationId);
@@ -2745,9 +2806,56 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           correlationId: entry.correlationId,
         });
       }
+
+      // 对话内联（设计文档/22 期4·委派内联）：daemon 工具调用转发。
+      // daemon 的 tool_call / tool_result 是两个独立事件（按 callId 配对），而前端工具卡片是
+      // 「出生即终态」模型（call+result 一次性给全）。故缓冲 call，等配对 result 到达后 emit
+      // 一个捆绑 stream.tool_call——与进程内工具行为一致，复用前端既有渲染管线。
+      // （daemon 路径整体仍在旧 stream.* 协议：文本走 stream.text_delta；全量迁移到 stream.block
+      //  是更后的独立子项，此处先保证工具卡片可见且自洽。）
+      if (event.data.kind === 'tool_call') {
+        const d = event.data;
+        let taskBuf = this.daemonToolCallBuffer.get(taskId);
+        if (!taskBuf) { taskBuf = new Map(); this.daemonToolCallBuffer.set(taskId, taskBuf); }
+        // input 序列化为 JSON 字符串（与进程内 task.telemetry 的 string 形 input 一致，
+        // 前端 ToolCallEvent.input 即 string，避免渲染成 [object Object]）
+        taskBuf.set(d.callId, { toolName: d.toolName, input: JSON.stringify(d.input) });
+        logger.debug({ taskId, callId: d.callId, toolName: d.toolName }, 'tool-trace: daemon tool_call 缓冲（等配对 result）');
+      } else if (event.data.kind === 'tool_result') {
+        const d = event.data;
+        const taskBuf = this.daemonToolCallBuffer.get(taskId);
+        const buffered = taskBuf?.get(d.callId);
+        if (buffered) {
+          taskBuf!.delete(d.callId);
+          getEventBus().emit('stream.tool_call', {
+            taskId,
+            sessionId: pending.sessionId,
+            toolName: buffered.toolName,
+            input: buffered.input,
+            result: d.output,
+            isError: !d.success,
+            correlationId: entry.correlationId,
+          });
+          logger.debug({ taskId, callId: d.callId, toolName: buffered.toolName, success: d.success }, 'tool-trace: daemon tool 配对完成 → emit stream.tool_call');
+        } else {
+          // result 先于 call 到达（或 call 丢失）：input 缺失，仍 emit 让卡片可见（input 为空串）
+          getEventBus().emit('stream.tool_call', {
+            taskId,
+            sessionId: pending.sessionId,
+            toolName: '(unknown)',
+            input: '',
+            result: d.output,
+            isError: !d.success,
+            correlationId: entry.correlationId,
+          });
+          logger.debug({ taskId, callId: d.callId }, 'tool-trace: daemon tool_result 无配对 call（兜底 emit）');
+        }
+      }
     });
 
     eventBus.on('daemon.task.completed', ({ taskId }) => {
+      // 终态必清工具缓冲（防泄漏）——未配对的 tool_call 随之丢弃（外部 agent 已结束，不会有 result 了）
+      this.daemonToolCallBuffer.delete(taskId);
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
 
@@ -2762,6 +2870,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     });
 
     eventBus.on('daemon.task.failed', ({ taskId, error }) => {
+      // 终态必清工具缓冲（防泄漏）——失败时未配对的 tool_call 随之丢弃
+      this.daemonToolCallBuffer.delete(taskId);
       const entry = this.delegationManager.get(taskId);
       if (!entry) return;
 
@@ -2772,6 +2882,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     eventBus.on('task.timeout', ({ taskId, targetAgent }) => {
       if (targetAgent === '__daemon__') {
         // daemon 外部智能体超时走 foreground 路径
+        // 终态必清工具缓冲（防泄漏）
+        this.daemonToolCallBuffer.delete(taskId);
         const entry = this.delegationManager.get(taskId);
         if (!entry) return;
         const result: AgentTaskResultPayload = { taskId, ok: false, error: '外部智能体执行超时' };

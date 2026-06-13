@@ -140,6 +140,111 @@ export class BlockCollector {
   }
 
   /**
+   * 按 callId 配对的待完成工具（daemon / 外部 driver 路径：call 与 result 分离到达）。
+   * key=callId，value=创建事件携带的 toolName/input/起始时间——result 事件无 toolName，
+   * 必须回查此表才能组装完整终态 block。complete 时删除条目（配对完成即释放）。
+   */
+  private pendingTools = new Map<string, { toolName: string; blockId: string; input: unknown; startedAt: number }>();
+
+  /**
+   * 工具启动（daemon / 外部 driver 路径：tool_call / tool_running 事件）。
+   *
+   * 与 {@link onToolCall}（task.telemetry 一次性 call+result，块出生即终态）互补：本方法处理
+   * callId 配对的分离事件流——daemon/外部 agent 先发 call（toolName+input）后发 result（output+success），
+   * 两事件按 callId 配对。emit 一个 running 态 tool block（前端可见"运行中"），按 callId 暂存，
+   * 等 {@link onToolComplete} 回填结果并推进状态机。
+   *
+   * blockId = `${messageId}#tool#${callId}`：跨 start/complete 两事件幂等定位同一 block，
+   * 前端 applyBlockToBlocks 按 blockId upsert（running→completed 原地更新，不重复建块）。
+   *
+   * @param opts.callId   工具调用 id（跨事件配对的幂等键）
+   * @param opts.toolName 工具名（MCP 形如 mcp__server__tool）
+   * @param opts.input    调用入参（结构化对象；持久化前由调用方 redact）
+   * @param opts.ts       事件时间戳（与 complete 配对算 durationMs；缺省取当前）
+   */
+  onToolStart(opts: { callId: string; toolName: string; input?: unknown; ts?: number }): void {
+    const blockId = `${this.messageId}#tool#${opts.callId}`;
+    const startedAt = opts.ts ?? Date.now();
+    // 暂存：complete 事件无 toolName/input，必须从此回查才能组装完整终态 block
+    this.pendingTools.set(opts.callId, { toolName: opts.toolName, blockId, input: opts.input ?? {}, startedAt });
+
+    const block: ToolBlock = {
+      type: 'tool',
+      id: blockId,
+      name: opts.toolName,
+      input: opts.input ?? {},
+      state: 'running',
+    };
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId,
+      blockType: 'tool',
+      block,
+      state: 'running',
+      ts: startedAt,
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+    // 注意：running 态不进 toolBlocks——只持久化终态（与 onToolCall 一致），
+    // 避免 daemon 崩溃时留下永驻 running 的幽灵 block。
+  }
+
+  /**
+   * 工具完成（daemon / 外部 driver 路径：tool_result / tool_completed / tool_failed 事件）。
+   *
+   * 按 callId 回查 {@link onToolStart} 暂存的 toolName/input（result 事件不带这些字段），
+   * 组装完整终态 block 并推进状态机（completed/failed），同时按 start→complete 时间差算 durationMs。
+   *
+   * 容错（fail-open）：若 complete 先于 start 到达（事件乱序 / start 丢失），降级为
+   * toolName='unknown'、input={} 的一次性终态块——保住"工具卡片可见"这一核心目标，
+   * 不因配对缺失而整块丢失（durationMs 此时也无法计算，留 undefined，前端 formatDurationMs 兜底"—"）。
+   *
+   * @param opts.callId  与 onToolStart 同一 callId（配对键）
+   * @param opts.output  工具结果文本（结构化 JSON 或原始字符串）
+   * @param opts.success 是否成功（false → state=failed，output 同时写入 error）
+   * @param opts.ts      事件时间戳（与 startedAt 配对算耗时）
+   */
+  onToolComplete(opts: { callId: string; output?: string; success: boolean; ts?: number }): void {
+    const pending = this.pendingTools.get(opts.callId);
+    const toolName = pending?.toolName ?? 'unknown';
+    const blockId = pending?.blockId ?? `${this.messageId}#tool#${opts.callId}`;
+    const input = pending?.input ?? {};
+    if (pending) this.pendingTools.delete(opts.callId);
+
+    const isError = !opts.success;
+    const endTs = opts.ts ?? Date.now();
+    // 有配对 start 才算耗时（乱序到达的孤儿 complete 无法计时）
+    const durationMs = pending ? Math.max(0, endTs - pending.startedAt) : undefined;
+
+    const block: ToolBlock = {
+      type: 'tool',
+      id: blockId,
+      name: toolName,
+      input,
+      state: isError ? 'failed' : 'completed',
+    };
+    const output = coercePayload(opts.output);
+    if (output !== undefined) block.output = output;
+    if (isError && opts.output) block.error = opts.output;
+    if (durationMs != null) block.durationMs = durationMs;
+
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId,
+      blockType: 'tool',
+      block,
+      state: block.state,
+      ts: endTs,
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+    // 保留终态 block 供 buildBlocks 落库（与 onToolCall 一致：只持久化终态）
+    this.toolBlocks.push(block);
+  }
+
+  /**
    * 构建本轮完整 Block[]（顺序：thinking → tools → text），供调用方落库到 message_blocks。
    * text/thinking 从外部事实源（pending.draftResponse / reasoning）注入，避免 collector 重复持有全文。
    * 无任何内容时返回空数组（调用方据此跳过建空消息）。

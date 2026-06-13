@@ -104,6 +104,80 @@ describe('BlockCollector（对话内联事件归一）', () => {
   });
 });
 
+/**
+ * 流式工具路径（daemon / 外部 driver：call 与 result 分离到达，按 callId 配对）。
+ * 钉死 onToolStart/onToolComplete 的状态机推进 + 配对 + 容错不变量——
+ * 这是期4 委派内联（外部 agent 工具卡片）所依赖的核心归一逻辑。
+ */
+describe('BlockCollector 流式工具（onToolStart/onToolComplete）', () => {
+  let emitted: StreamBlockPayload[];
+  const emit: BlockEmitter = (p) => emitted.push(p);
+
+  beforeEach(() => {
+    emitted = [];
+    _clearBlockCollectorsForTest();
+  });
+
+  it('start → running block，blockId 由 callId 派生（跨 start/complete 幂等定位）', () => {
+    const c = new BlockCollector('s1', 't1', 'c1', emit);
+    c.onToolStart({ callId: 'call-1', toolName: 'shell', input: { cmd: 'ls' }, ts: 1000 });
+    expect(emitted).toHaveLength(1);
+    const e = emitted[0];
+    expect(e.blockType).toBe('tool');
+    expect(e.state).toBe('running');
+    expect(e.blockId).toBe(`${c.messageId}#tool#call-1`);
+    expect(e.block?.type).toBe('tool');
+    expect(e.block?.state).toBe('running');
+    expect(e.block?.name).toBe('shell');
+    expect(e.block?.input).toEqual({ cmd: 'ls' });
+  });
+
+  it('start + complete 配对：emit running 再 emit 终态，同 blockId，durationMs = 时间差', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 1000 });
+    c.onToolComplete({ callId: 'c1', output: '{"ok":true}', success: true, ts: 1250 });
+    expect(emitted).toHaveLength(2);
+    // 两次同 blockId（前端 upsert 原地更新 running→completed）
+    expect(emitted[0].blockId).toBe(emitted[1].blockId);
+    const terminal = emitted[1];
+    expect(terminal.state).toBe('completed');
+    expect(terminal.block?.state).toBe('completed');
+    expect(terminal.block?.output).toEqual({ ok: true });
+    // 1250 - 1000 = 250ms
+    expect(terminal.block?.durationMs).toBe(250);
+  });
+
+  it('complete success=false：终态 failed，output 同时写 error', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 100 });
+    c.onToolComplete({ callId: 'c1', output: '命令未找到', success: false, ts: 200 });
+    const terminal = emitted[1];
+    expect(terminal.block?.state).toBe('failed');
+    expect(terminal.block?.error).toBe('命令未找到');
+  });
+
+  it('fail-open：complete 先于 start（孤儿 result）→ 降级 toolName=unknown、无 durationMs', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolComplete({ callId: 'orphan', output: 'r', success: true, ts: 500 });
+    expect(emitted).toHaveLength(1);
+    const e = emitted[0];
+    expect(e.block?.name).toBe('unknown');
+    expect(e.block?.state).toBe('completed');
+    // 乱序孤儿无法计时
+    expect(e.block?.durationMs).toBeUndefined();
+  });
+
+  it('buildBlocks 只含终态 tool（running 不落库，防崩溃幽灵 block）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onToolStart({ callId: 'c1', toolName: 'shell', input: {}, ts: 1000 });
+    // 未 complete 即 buildBlocks——只有 start 的 running 不应出现
+    const blocks = c.buildBlocks({ draftResponse: 'hi' });
+    expect(blocks.filter((b) => b.type === 'tool')).toHaveLength(0);
+    // 文本 block 仍由 draftResponse 注入
+    expect(blocks.some((b) => b.type === 'text' && b.text === 'hi')).toBe(true);
+  });
+});
+
 describe('BlockCollector registry', () => {
   beforeEach(() => _clearBlockCollectorsForTest());
 
