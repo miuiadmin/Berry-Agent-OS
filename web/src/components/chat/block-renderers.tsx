@@ -19,7 +19,6 @@ import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import { reasoningFromBlocks } from "@/lib/blocks";
 import type { ToolBlock, DelegationBlock } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
@@ -101,70 +100,6 @@ const ToolBlockCard = memo(function ToolBlockCard({
           )}
         </div>
       )}
-    </div>
-  );
-});
-
-/**
- * 渲染消息的前置内联 blocks（thinking + tool），按 thinking → tools 序列。
- * text block 跳过——正文由 chat-message-list 的气泡承载（避免重复）。
- * delegation block（期4）暂以占位渲染，待 childSessionId 嵌套会话落地。
- *
- * 兼容两条流式路径：
- *   - tool：live blocks（stream.block 事件累积）优先；无则从旧 toolCalls[] 投影（delegation 路径不经 block 事件）。
- *   - thinking：reasoning + thinkingSteps 都透传给 ThinkingProcess（保留进度步骤，防回归）。
- *
- * @param message 当前消息
- * @param isActive 是否流式活跃（驱动 ThinkingProcess 折叠态 / spinner）
- */
-export const InlineLeadBlocks = memo(function InlineLeadBlocks({
-  message,
-  isActive,
-}: {
-  message: ChatMessage;
-  isActive: boolean;
-}) {
-  // 仅 assistant 消息有内联 blocks；user 消息直接走正文
-  if (message.role === "user") return null;
-
-  // thinking：block-first——优先从 thinking block 取（stream.block thinking 喂，单一事实源），
-  // 回退 message.reasoning（兼容历史消息 / 过渡期）。消灭 reasoning_delta 后 fallback 仅历史触发。
-  const blockReasoning = reasoningFromBlocks(message.blocks, message.reasoning);
-  const hasThinking = !!blockReasoning || (message.thinkingSteps?.length ?? 0) > 0;
-
-  // tool blocks：从 message.blocks 取（stream.block tool 累积，单一源——所有路径都 emit tool block，
-  // 消灭双轨制后无「不经 block 事件的路径」）。toolBlocksFromLegacy 兜底已删。
-  const toolBlocks = (message.blocks ?? []).filter((b): b is ToolBlock => b.type === "tool");
-  // 期4 占位：delegation blocks（childSessionId 嵌套会话待落地）
-  const delegationBlocks = (message.blocks ?? []).filter(
-    (b): b is DelegationBlock => b.type === "delegation",
-  );
-
-  if (!hasThinking && toolBlocks.length === 0 && delegationBlocks.length === 0) return null;
-
-  return (
-    <div className="w-[90%] sm:w-[80%] space-y-0.5">
-      {hasThinking && (
-        <ThinkingProcess
-          steps={message.thinkingSteps ?? []}
-          reasoning={blockReasoning}
-          isActive={isActive}
-        />
-      )}
-      {toolBlocks.map((b) => (
-        <ToolBlockCard key={b.id} block={b} isActive={isActive} />
-      ))}
-      {delegationBlocks.map((b) => (
-        <div
-          key={b.id}
-          className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70 min-h-[44px] md:min-h-0"
-        >
-          <ChevronRight className="size-2.5" />
-          <Wrench className="size-3" />
-          <span>{b.targetAgent}</span>
-          <span className="ml-auto text-[11px] uppercase tracking-wide">{b.state}</span>
-        </div>
-      ))}
     </div>
   );
 });

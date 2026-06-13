@@ -7,7 +7,7 @@
  * 本文件是前端的纯逻辑层（无 React / zustand 依赖）：
  *   - Block 判别联合（与后端契约同形）
  *   - applyBlockToBlocks：stream.block 事件 → Block[] 的纯 reducer（store 用）
- *   - textFromBlocks / reasoningFromBlocks：block-first 渲染投影（Phase C：text/thinking 从 block 取，回退旧字段）
+ *   - textFromBlocks：block-first 正文投影（MessageActions copy / fallback 用，TextBlock 优先回退 content）
  *
  * 文本不进 block 数组：文本正文仍由 ChatMessage.content 承载（覆盖 task-flow 与 delegation-orchestrator
  * 两条流式路径），block 数组只承载「原先被分离出去」的 tool / thinking / delegation。这避免文本重复，
@@ -167,33 +167,6 @@ export function textFromBlocks(blocks: Block[] | undefined, fallback = ''): stri
     .join('\n')
     .trim();
   return text || fallback;
-}
-
-/**
- * 从 blocks 抽取推理文本（ThinkingBlock.text 拼接）；无则返回 fallback。
- * block-first：InlineLeadBlocks 的思考卡用此优先读 thinking block（单一事实源，stream.block thinking 喂），
- * 回退 message.reasoning（兼容历史消息 / 过渡期）。消灭 reasoning_delta 后 fallback 仅历史消息触发。
- */
-export function reasoningFromBlocks(blocks: Block[] | undefined, fallback = ''): string {
-  const text = (blocks ?? [])
-    .filter((b): b is ThinkingBlock => b.type === 'thinking')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
-  return text || fallback;
-}
-
-/**
- * 把字符串规整为结构化载荷：尝试 JSON.parse，失败则原样返回字符串；空串返回 undefined。
- * 与后端 block-collector.ts 的 coercePayload 同义（tool input/result 规整）。
- */
-function coercePayload(s: string | undefined | null): unknown {
-  if (s == null || s === '') return undefined;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s; // 非结构化文本：保留原串
-  }
 }
 
 // 对话内联（doc 22 Phase D）：旧 toolCalls[] → ToolBlock[] 投影（toolBlocksFromLegacy）已删——
