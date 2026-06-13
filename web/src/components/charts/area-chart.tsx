@@ -2,11 +2,14 @@
 import { useMemo, useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
-
-interface DataPoint {
-  label: string;
-  value: number;
-}
+import {
+  type DataPoint,
+  type ChartPadding,
+  SVG_WIDTH,
+  buildSmoothPath,
+  pointCoordAt,
+  buildYTicks,
+} from "./chart-geometry";
 
 interface AreaChartProps {
   data: DataPoint[];
@@ -36,41 +39,16 @@ export function AreaChart({
 
   const maxVal = useMemo(() => Math.max(...allValues, 1), [allValues]);
 
-  const padding = { top: 20, right: 12, bottom: 28, left: 36 };
-  const svgWidth = 400;
+  const padding: ChartPadding = { top: 20, right: 12, bottom: 28, left: 36 };
+  const svgWidth = SVG_WIDTH;
   const chartWidth = svgWidth - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
 
+  // path 构建（纯函数，见 chart-geometry.ts）
   const buildPath = useCallback(
-    (points: DataPoint[]) => {
-      if (points.length < 2) return { line: "", area: "" };
-      const step = chartWidth / (points.length - 1);
-      const coords = points.map((p, i) => ({
-        x: padding.left + i * step,
-        y: padding.top + chartHeight - (p.value / maxVal) * chartHeight,
-      }));
-
-      let line = `M ${coords[0].x} ${coords[0].y}`;
-      for (let i = 1; i < coords.length; i++) {
-        const prev = coords[i - 1];
-        const curr = coords[i];
-        const cpx = (prev.x + curr.x) / 2;
-        line += ` C ${cpx} ${prev.y}, ${cpx} ${curr.y}, ${curr.x} ${curr.y}`;
-      }
-
-      const baseline = padding.top + chartHeight;
-      let area = `M ${coords[0].x} ${baseline} L ${coords[0].x} ${coords[0].y}`;
-      for (let i = 1; i < coords.length; i++) {
-        const prev = coords[i - 1];
-        const curr = coords[i];
-        const cpx = (prev.x + curr.x) / 2;
-        area += ` C ${cpx} ${prev.y}, ${cpx} ${curr.y}, ${curr.x} ${curr.y}`;
-      }
-      area += ` L ${coords[coords.length - 1].x} ${baseline} Z`;
-
-      return { line, area };
-    },
-    [chartWidth, chartHeight, maxVal, padding.left, padding.top],
+    (points: DataPoint[]) =>
+      buildSmoothPath(points, maxVal, chartWidth, chartHeight, padding),
+    [chartWidth, chartHeight, maxVal],
   );
 
   const primary = useMemo(() => buildPath(data), [buildPath, data]);
@@ -79,14 +57,10 @@ export function AreaChart({
     [buildPath, secondaryData],
   );
 
-  const yTicks = useMemo(() => {
-    const count = 4;
-    return Array.from({ length: count }, (_, i) => {
-      const value = Math.round((maxVal / (count - 1)) * i);
-      const y = padding.top + chartHeight - (value / maxVal) * chartHeight;
-      return { value, y };
-    });
-  }, [maxVal, chartHeight, padding.top]);
+  const yTicks = useMemo(
+    () => buildYTicks(maxVal, 4, chartHeight, padding),
+    [maxVal, chartHeight],
+  );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
@@ -99,8 +73,9 @@ export function AreaChart({
         setTooltip(null);
         return;
       }
-      const px = padding.left + idx * step;
-      const py = padding.top + chartHeight - (data[idx].value / maxVal) * chartHeight;
+      const { x: px, y: py } = pointCoordAt(
+        idx, data[idx], data.length, maxVal, chartWidth, chartHeight, padding,
+      );
       setTooltip({
         x: px,
         y: py,
@@ -109,7 +84,7 @@ export function AreaChart({
         secondary: secondaryData?.[idx]?.value,
       });
     },
-    [data, secondaryData, chartWidth, chartHeight, maxVal, padding.left, padding.top, svgWidth],
+    [data, secondaryData, chartWidth, chartHeight, maxVal, padding, svgWidth],
   );
 
   if (data.length < 2) {
