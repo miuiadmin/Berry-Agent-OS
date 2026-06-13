@@ -1681,8 +1681,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     let textAccumulator = '';
 
     // 对话内联（设计文档/22 期4）：为本次委派创建 BlockCollector——把外部 driver 的
-    // tool_running/completed/failed + thinking_delta 归一为内联 block，前端实时渲染工具卡 / 思考。
-    // 文本不喂 collector（仍走下方 text_delta → content 单源），避免文本双写。
+    // tool_running/completed/failed + thinking_delta + text_delta 归一为内联 block（前端实时渲染工具卡 / 思考 / 正文）。
+    // Phase C：文本也喂 collector（下方 text_delta case 调 onTextDelta），与 task-flow 统一为 block 单源；
+    // 过渡期 stream.text_delta 仍 emit（双写），待前端改读 TextBlock 后删（Commit 4）。
     // 之前这些事件落入 default:break 被丢弃——正是「外部 agent 委派时工具卡片缺失」的根因。
     const blockCollector = getOrCreateBlockCollector(delegationId, pending.sessionId, correlationId);
     // 对话内联（doc 22 期4+）：本轮即一次委派——产出 delegation block（「委派给 X agent」表头卡），
@@ -1754,6 +1755,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
               text,
               correlationId,
             });
+            // 对话内联（doc 22 Phase C）：文本喂 collector → emit stream.block text（TextBlock），
+            // 与 task-flow 路径统一为 block 单源。过渡期与上方 stream.text_delta 双 emit；
+            // 待前端气泡改读 TextBlock 后删 stream.text_delta（Commit 4 消灭双写）。
+            blockCollector.onTextDelta(text);
             break;
           }
           case 'execution_completed': {
@@ -2837,6 +2842,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           text: event.data.text,
           correlationId: entry.correlationId,
         });
+        // 对话内联（doc 22 Phase C）：文本喂 collector → emit stream.block text，与 task-flow/runtime 统一。
+        // 过渡期双 emit；待前端改读 TextBlock 后删 stream.text_delta（Commit 4）。
+        collector.onTextDelta(event.data.text);
       }
 
       // 对话内联（设计文档/22 期4）：daemon 工具调用统一走 BlockCollector（onToolStart/onToolComplete），
