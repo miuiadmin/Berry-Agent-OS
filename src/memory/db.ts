@@ -199,3 +199,48 @@ export function closeDb(): void {
     db = null;
   }
 }
+
+/**
+ * 删除会话（治本：动态发现所有 session_id 表，根治漏表）。
+ *
+ * 24 张 session_id 表零张有 session FK（无 sessions 主表），手动列清单清注定漏（实测漏 13 张）。
+ * 本函数查 sqlite_master + table_info 自动发现所有 session_id / source_session_id 列的表，逐个 DELETE，
+ * 加新表（有 session_id）自动覆盖。message_blocks 无 session_id 列 + FK 关后 CASCADE 不触发 → 显式
+ * subquery 兜底（须在 messages 删前）。关 FK（session_id 表互有 task_id FK，删顺序错触发 FK failed），
+ * finally 恢复。table/column 名来自 DB 元数据（非用户输入）无注入风险；白名单正则额外防御。
+ */
+export function deleteSession(sid: string): { cleanedTables: number } {
+  const db = getDb();
+  const fkWasOn = db.pragma('foreign_keys', { simple: true }) === 1;
+  db.pragma('foreign_keys = OFF');
+  try {
+    let cleaned = 0;
+    db.transaction(() => {
+      // message_blocks 无 session_id 列（动态发现捕获不到）+ FK 关后 CASCADE 不触发 → 显式 subquery。
+      // 须在 messages 删前（否则子查询返空集，blocks 残留）。
+      try {
+        db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(sid);
+      } catch { /* message_blocks 不存在（旧库）— 静默跳过 */ }
+
+      // 动态发现所有有 session_id / source_session_id 列的表（排除 sqlite_% + FTS5 影子表）
+      const SHADOW = /_(data|idx|content|config|segdir|segments|docsize|stat)$/;
+      const NAME_OK = /^[a-z_]+$/; // 白名单：名只允许小写字母+下划线（DB 元数据，额外防注入）
+      const tables = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+        .all() as { name: string }[];
+      for (const { name } of tables) {
+        if (SHADOW.test(name) || !NAME_OK.test(name)) continue; // FTS5 影子表 / 异常名跳过
+        let cols: { name: string }[];
+        try { cols = db.pragma(`table_info(${name})`) as { name: string }[]; } catch { continue; }
+        const col = cols.find((c) => c.name === 'session_id') ?? cols.find((c) => c.name === 'source_session_id');
+        if (col) {
+          db.prepare(`DELETE FROM ${name} WHERE ${col.name} = ?`).run(sid);
+          cleaned++;
+        }
+      }
+    })();
+    return { cleanedTables: cleaned };
+  } finally {
+    if (fkWasOn) db.pragma('foreign_keys = ON');
+  }
+}
