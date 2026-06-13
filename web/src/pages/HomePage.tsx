@@ -66,6 +66,70 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+/**
+ * 构建 7 天图表数据（完成 / 失败 + sparkline 数组）。
+ *
+ * 纯函数，无 React 依赖：优先用 stats API 数据，否则从任务列表客户端聚合。
+ * @param statsData 服务端按天统计（可选）
+ * @param completedTasks 已完成任务（聚合回退用）
+ * @param failedTasks 失败任务（聚合回退用）
+ * @param formatDate 日期格式化（i18n）
+ */
+function buildChartData(
+  statsData: { date: string; completed: number; failed: number }[] | undefined,
+  completedTasks: { finishedAt?: number; createdAt: number }[],
+  failedTasks: { finishedAt?: number; createdAt: number }[],
+  formatDate: (d: Date, opts?: Intl.DateTimeFormatOptions) => string,
+) {
+  // 优先用服务端按天统计
+  if (statsData && statsData.length > 0) {
+    const completedByDay = statsData.map((d) => d.completed);
+    const failedByDay = statsData.map((d) => d.failed);
+    const labels = statsData.map((d) =>
+      formatDate(new Date(d.date), { weekday: "short" }),
+    );
+    return {
+      completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
+      failed: labels.map((label, i) => ({ label, value: failedByDay[i] })),
+      sparkCompleted: completedByDay,
+      sparkFailed: failedByDay,
+    };
+  }
+
+  // 回退：客户端按天聚合任务列表（最近 7 天）
+  const days = 7;
+  const now = new Date();
+  const labels: string[] = [];
+  const completedByDay: number[] = [];
+  const failedByDay: number[] = [];
+
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(now);
+    date.setDate(date.getDate() - i);
+    labels.push(formatDate(date, { weekday: "short" }));
+
+    const dateStart = new Date(date.setHours(0, 0, 0, 0)).getTime();
+    const dateEnd = dateStart + 86400000;
+
+    /** 统计任务在某天的时间窗口内数量（按 finishedAt 优先，否则 createdAt） */
+    const countInDay = (tasks: typeof completedTasks) =>
+      tasks.filter((t) => {
+        const ts = new Date(t.finishedAt ?? t.createdAt).getTime();
+        return ts >= dateStart && ts < dateEnd;
+      }).length;
+
+    completedByDay.push(countInDay(completedTasks));
+    failedByDay.push(countInDay(failedTasks));
+  }
+
+  return {
+    completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
+    failed: labels.map((label, i) => ({ label, value: failedByDay[i] })),
+    sparkCompleted: completedByDay,
+    sparkFailed: failedByDay,
+  };
+}
+
 export default function HomePage() {
   const t = useT();
   const { formatDate, formatTime, formatNumber } = useDateFormat();
@@ -97,63 +161,16 @@ export default function HomePage() {
   const activeAgents = agents?.filter((a) => a.status === "enabled").length ?? 0;
   const totalAgents = agents?.length ?? 0;
 
-  const chartData = useMemo(() => {
-    // Prefer stats API data if available
-    if (statsData && statsData.length > 0) {
-      const completedByDay = statsData.map((d) => d.completed);
-      const failedByDay = statsData.map((d) => d.failed);
-      const labels = statsData.map((d) => {
-        const date = new Date(d.date);
-        return formatDate(date, { weekday: "short" });
-      });
-      return {
-        completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
-        failed: labels.map((label, i) => ({ label, value: failedByDay[i] })),
-        sparkCompleted: completedByDay,
-        sparkFailed: failedByDay,
-      };
-    }
-
-    // Fallback: client-side aggregation from task lists
-    const completedTasks = completedData?.items ?? [];
-    const failedTasks = failedData?.items ?? [];
-
-    const days = 7;
-    const now = new Date();
-    const labels: string[] = [];
-    const completedByDay: number[] = [];
-    const failedByDay: number[] = [];
-
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      const dayStr = formatDate(date, { weekday: "short" });
-      labels.push(dayStr);
-
-      const dateStart = new Date(date.setHours(0, 0, 0, 0)).getTime();
-      const dateEnd = dateStart + 86400000;
-
-      completedByDay.push(
-        completedTasks.filter((t) => {
-          const ts = new Date(t.finishedAt ?? t.createdAt).getTime();
-          return ts >= dateStart && ts < dateEnd;
-        }).length,
-      );
-      failedByDay.push(
-        failedTasks.filter((t) => {
-          const ts = new Date(t.finishedAt ?? t.createdAt).getTime();
-          return ts >= dateStart && ts < dateEnd;
-        }).length,
-      );
-    }
-
-    return {
-      completed: labels.map((label, i) => ({ label, value: completedByDay[i] })),
-      failed: labels.map((label, i) => ({ label, value: failedByDay[i] })),
-      sparkCompleted: completedByDay,
-      sparkFailed: failedByDay,
-    };
-  }, [statsData, completedData, failedData]);
+  const chartData = useMemo(
+    () =>
+      buildChartData(
+        statsData,
+        completedData?.items ?? [],
+        failedData?.items ?? [],
+        formatDate,
+      ),
+    [statsData, completedData, failedData, formatDate],
+  );
 
   return (
     <div className="p-4 sm:p-6">
