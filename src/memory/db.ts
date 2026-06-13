@@ -34,9 +34,10 @@ export function initDb(path?: string): Database.Database {
   // 对话内联模型 FTS（设计文档/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
   // 不进 ensureFtsConsistency——本表与 message_blocks 非 1:1（仅 text/thinking 子集），行数对比无意义。
   db.exec(MESSAGE_BLOCKS_FTS_SQL);
-  // 首启 / v25 回填后：FTS 表刚创建为空，但 message_blocks 已有 text/thinking 行（回填的旧历史）。
-  // 仅在 FTS 空且存在可索引 block 时做一次性全量 populate；之后由 repo 增量维护，不重复全量。
-  populateMessageBlocksFtsIfEmpty(db);
+  // 启动期 FTS 补齐：把 message_blocks 里尚不在 message_blocks_fts 的 text/thinking block 索引进去。
+  // 增量幂等——migration（v25/v26 回填）直写 message_blocks 绕过 repo 的 appendBlock，故需此 catch-up；
+  // 全新库等价全量；稳态无缺失则零写入。修复 v25→v26 升级窗口回填行补索引（否则历史 user 行搜不到）。
+  populateMessageBlocksFts(db);
   // 15.0 §5.3 启动自愈：所有 FTS 表行数与源表不一致（触发器遗漏/刚创建/索引损坏/运维清表）
   // 时才 rebuild。FTS5 COUNT(*) 是 O(1)。修复前仅 knowledge_fts 有保护。
   // 多列 external-content FTS（dialogue/agent_chat 的 from/to/content）的 rebuild 读所有映射列，
@@ -66,28 +67,26 @@ function ensureFtsConsistency(db: Database.Database, fts: string, source: string
 }
 
 /**
- * 对话内联 FTS 一次性 populate（设计文档/22）。
+ * 对话内联 FTS 启动期补齐（设计文档/22）。
  * message_blocks_fts 是独立（非 external-content）虚表，只能手动 DELETE+INSERT 维护。
- * 首启 / v25 回填后 FTS 表为空但 message_blocks 已有 text/thinking 行——此时全量索引一次；
- * 之后由 message-blocks-repo 的 appendBlock/patchBlock 增量维护，不在每次启动重复全量。
+ * repo 的 appendBlock/patchBlock 增量维护 text/thinking block 的索引；但 migration（v25/v26 回填）
+ * 直写 message_blocks 绕过 repo，这些行需在此 catch-up。
+ *
+ * 增量幂等：只索引「message_blocks 有但 message_blocks_fts 没有」的 block（block_id NOT IN 已索引集合）。
+ * 三态覆盖——全新库（FTS 空→等价全量）、升级（v25→v26 回填的新行补索引，否则历史 user 行搜不到）、
+ * 稳态（无缺失→NOT IN 返回空集，零写入）。比旧的「FTS 非空即 skip」更鲁棒：旧逻辑在升级时
+ * （FTS 已有 v25 行非空）会跳过，导致 v26 回填的窗口期 user 行永不进 FTS。
  */
-function populateMessageBlocksFtsIfEmpty(db: Database.Database): void {
+function populateMessageBlocksFts(db: Database.Database): void {
   try {
-    const ftsCount = (db.prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts`).get() as { c: number }).c;
-    if (ftsCount > 0) return; // 已有索引行——增量维护中，不重复全量
-    const idxCount = (
-      db
-        .prepare(`SELECT COUNT(*) AS c FROM message_blocks WHERE block_type IN ('text','thinking')`)
-        .get() as { c: number }
-    ).c;
-    if (idxCount === 0) return; // 无可索引内容（全新库）—— 等 repo 首次写入
     db.exec(`
       INSERT INTO message_blocks_fts (session_id, message_id, block_id, content)
       SELECT m.session_id, b.message_id, b.id, json_extract(b.payload_json, '$.text')
       FROM message_blocks b
       JOIN messages m ON m.id = b.message_id
       WHERE b.block_type IN ('text', 'thinking')
-        AND json_extract(b.payload_json, '$.text') IS NOT NULL;
+        AND json_extract(b.payload_json, '$.text') IS NOT NULL
+        AND b.id NOT IN (SELECT block_id FROM message_blocks_fts);
     `);
   } catch {
     // message_blocks_fts / message_blocks 不存在（理论上不该发生）—— 静默跳过

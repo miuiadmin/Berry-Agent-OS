@@ -1074,7 +1074,7 @@ const v24RedactInputPayloadScan: Migration = {
  *     新对话的工具调用由 BlockCollector 直接落 message_blocks（期3a/3b）。dialogue 折叠为 delegation block 属期4。
  *
  * FTS 重建不在此处：message_blocks_fts 在 db.ts 的 runMigrations 之后才创建，v25 执行时尚不存在；
- * 首启时由 db.ts 在建 FTS 表后做一次性全量 populate（见 db.ts populateMessageBlocksFtsIfEmpty）。
+ * 首启时由 db.ts 在建 FTS 表后做增量补齐 populate（见 db.ts populateMessageBlocksFts，幂等补缺失行）。
  */
 const v25InlineBlocksBackfill: Migration = {
   version: 25,
@@ -1170,7 +1170,7 @@ const v25InlineBlocksBackfill: Migration = {
  *
  * 幂等：messages.id = conversations.id（与 v25 同源），INSERT OR IGNORE 保证重跑安全；block 用派生稳定 id。
  * FTS：不在迁移内重建（message_blocks_fts 在 runMigrations 之后才创建，v26 执行时尚不存在，与 v25 同理）；
- * 首启由 db.ts populateMessageBlocksFtsIfEmpty 全量索引；存量库由活跃漏斗 persistUserMessage 的增量 appendBlock 维护。
+ * 首启由 db.ts populateMessageBlocksFts 增量补齐索引（v25→v26 升级时也会补，否则窗口期 user 行搜不到）；存量库由活跃漏斗 persistUserMessage 的增量 appendBlock 维护。
  */
 const v26UserMessagesBackfill: Migration = {
   version: 26,

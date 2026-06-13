@@ -58,4 +58,47 @@ describe('initDb 完整启动路径 (15.0 回归)', () => {
     const max = db.prepare(`SELECT MAX(version) as v FROM schema_migrations`).get() as { v: number };
     expect(max.v).toBe(26);
   });
+
+  /**
+   * 消灭双轨制回归：message_blocks_fts 启动期【增量】补齐。
+   * 场景：v25→v26 升级——已存在数据使 FTS 非空，之后 v26 回填（绕过 repo 直写 message_blocks）
+   * 的 user 行不在 FTS。修复前 populateMessageBlocksFtsIfEmpty「FTS 非空即 skip」→ 这些行永不进 FTS、搜不到。
+   * 修复后 populateMessageBlocksFts 增量补缺失行（block_id NOT IN 已索引集合），下次启动必补。
+   */
+  it('message_blocks_fts 启动期增量补齐：绕过 repo 直写的 block 下次启动补索引（幂等）', () => {
+    dir = mkdtempSync(join(tmpdir(), 'berry-fts-populate-'));
+    const dbPath = join(dir, 'test.db');
+    initDb(dbPath);
+    const db = getDb();
+    // 直写一条「已有数据」（模拟 v25 期历史，绕过 repo）——首次启动 FTS 空，下次启动等价全量索引
+    db.prepare(`INSERT INTO messages (id, session_id, role, created_at) VALUES (?, 's1', 'assistant', 1000)`).run('m-exist');
+    db.prepare(`INSERT INTO message_blocks (id, message_id, seq, block_type, payload_json, created_at) VALUES (?, ?, 1, 'text', ?, 1000)`)
+      .run('blk-exist', 'm-exist', JSON.stringify({ type: 'text', text: '历史数据项目管理' }));
+
+    closeDb();
+    initDb(dbPath);
+    const db2 = getDb();
+    // blk-exist 经首次增量 populate 进 FTS（FTS 此前为空→全量等价）
+    expect((db2.prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts WHERE block_id = ?`).get('blk-exist') as { c: number }).c).toBe(1);
+
+    // 再直写一条「绕过 repo」的 block（模拟 v26 回填 / 迁移直写）——此刻 FTS 非空，该行不在 FTS
+    db2.prepare(`INSERT INTO messages (id, session_id, role, created_at) VALUES (?, 's1', 'user', 2000)`).run('m-gap');
+    db2.prepare(`INSERT INTO message_blocks (id, message_id, seq, block_type, payload_json, created_at) VALUES (?, ?, 1, 'text', ?, 2000)`)
+      .run('blk-gap', 'm-gap', JSON.stringify({ type: 'text', text: '窗口期遗漏的对话内容' }));
+    expect((db2.prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts WHERE block_id = ?`).get('blk-gap') as { c: number }).c).toBe(0);
+
+    // 再次启动——【增量 populate 必须补这条】（修复前因 FTS 非空 skip 而遗漏）
+    closeDb();
+    initDb(dbPath);
+    const db3 = getDb();
+    expect((db3.prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts WHERE block_id = ?`).get('blk-gap') as { c: number }).c).toBe(1);
+    // 且可被 trigram 全文搜中
+    const hit = db3.prepare(`SELECT content FROM message_blocks_fts WHERE message_blocks_fts MATCH ?`).all('"窗口期遗漏"') as Array<{ content: string }>;
+    expect(hit.some((r) => r.content.includes('窗口期遗漏'))).toBe(true);
+    // 幂等：再启动一次不产生重复 FTS 行
+    closeDb();
+    initDb(dbPath);
+    expect((getDb().prepare(`SELECT COUNT(*) AS c FROM message_blocks_fts WHERE block_id = ?`).get('blk-gap') as { c: number }).c).toBe(1);
+    closeDb();
+  });
 });
