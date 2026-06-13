@@ -82,10 +82,13 @@ export class AuditRecorder {
         genId('rev'),
         params.sessionId,
         params.level,
-        params.draft,
+        // 15.0 D3-1（V-4 补全）：draft_response / final_response 是 Agent 生成的文本，
+        // 同样会回显或转述工具结果中的密钥（如用户在对话里贴的 key 被 Agent 复述）。
+        // 与 review_input 的 user_message/tool_calls 同等 redact，避免明文密钥落库。
+        redactSecrets(params.draft),
         reviewInput,
         params.verdict,
-        params.finalResponse,
+        redactSecrets(params.finalResponse),
         params.reason ?? null,
         Date.now(),
         Date.now(),

@@ -42,8 +42,47 @@ describe('redactSecrets (15.0 对话内容子串清洗)', () => {
     expect(out).not.toContain('abcdef1234567890xyz');
   });
 
-  it('替换长 hex（疑似私钥，40+ 位）', () => {
-    const hex = 'a'.repeat(48);
+  it('替换整段 PEM 私钥块（带算法前缀 RSA）', () => {
+    const rsa = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAabcd1234xyz\n-----END RSA PRIVATE KEY-----';
+    const out = redactSecrets(`key block: ${rsa}`);
+    expect(out).toContain('[REDACTED:pem_private_key]');
+    expect(out).not.toContain('MIIEpAIBAAKCAQEAabcd1234xyz');
+  });
+
+  it('PEM 无算法前缀（PKCS#8）也匹配', () => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nbody123\n-----END PRIVATE KEY-----';
+    expect(redactSecrets(pem)).toBe('[REDACTED:pem_private_key]');
+  });
+
+  it('PEM 先于 long_hex 匹配：块内长 hex 不被单独吞掉', () => {
+    // 若 long_hex 先跑，会先把块内的 80 位 hex 换成占位符，破坏 PEM 整体边界。
+    // PEM 排在第一位 → 整块（含内嵌 hex）一次替换，结果应是单一 PEM 占位符。
+    const pem = `-----BEGIN PRIVATE KEY-----\n${'a'.repeat(80)}\n-----END PRIVATE KEY-----`;
+    expect(redactSecrets(pem)).toBe('[REDACTED:pem_private_key]');
+    expect(redactSecrets(pem)).not.toContain('[REDACTED:long_hex]');
+  });
+
+  it('替换 JWT（三段 base64url，header 以 eyJ 开头）', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    const out = redactSecrets(`token: ${jwt}`);
+    expect(out).toContain('[REDACTED:jwt]');
+    expect(out).not.toContain(jwt);
+  });
+
+  it('替换非 Bearer 的 Authorization 头（Basic 方案）', () => {
+    const out = redactSecrets('Authorization: Basic dXNlcjpwYXNzMTIzNDU2');
+    expect(out).toContain('[REDACTED:authorization_header]');
+    expect(out).not.toContain('dXNlcjpwYXNzMTIzNDU2');
+  });
+
+  it('Bearer 方案仍由 bearer_token 命中（不被 authorization_header 覆盖/二次替换）', () => {
+    const out = redactSecrets('Authorization: Bearer abcdef1234567890xyz');
+    expect(out).toContain('[REDACTED:bearer_token]');
+    expect(out).not.toContain('[REDACTED:authorization_header]');
+  });
+
+  it('替换长 hex（疑似私钥/secret，64+ 位）', () => {
+    const hex = 'a'.repeat(72);
     const out = redactSecrets(`private: ${hex}`);
     expect(out).toContain('[REDACTED:long_hex]');
   });
@@ -53,8 +92,8 @@ describe('redactSecrets (15.0 对话内容子串清洗)', () => {
     expect(redactSecrets(input)).toBe(input);
   });
 
-  it('不误伤短 hex（< 40 位）', () => {
-    // 32 位 hex 是常见的 hash/uuid 片段，不应被当私钥替换
+  it('不误伤短 hex（< 64 位，如 commit SHA / uuid 片段）', () => {
+    // 32 位 hex 是常见的 hash/uuid 片段，阈值 64 时不应被当私钥替换
     const input = 'commit sha: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
     expect(redactSecrets(input)).toBe(input);
   });

@@ -56,15 +56,25 @@ export function redact(obj: unknown): unknown {
  * @returns secret 被替换为 [REDACTED:name] 的文本；input 为空则原样返回
  */
 const SECRET_CONTENT_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
+  // PEM 私钥块必须最先匹配：其 base64 正文若被后续模式（long_hex 等）部分吞掉会破坏整体边界。
+  // 覆盖 RSA / EC / OPENSSH / PGP / ENCRYPTED / 无算法前缀（PKCS#8）等 PRIVATE KEY 块。
+  { name: 'pem_private_key', re: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g },
   // anthropic 必须排在 openai 之前：sk-ant- 前缀会被 sk- 正则部分吞掉
   { name: 'anthropic_key', re: /sk-ant-[A-Za-z0-9_-]{20,}/g },
   { name: 'openai_key', re: /sk-(?!ant-)[A-Za-z0-9]{20,}/g },
   { name: 'github_pat', re: /ghp_[A-Za-z0-9]{36,}/g },
   { name: 'aws_key', re: /AKIA[0-9A-Z]{16}/g },
   { name: 'slack_token', re: /xox[abpsa]-[A-Za-z0-9-]{10,}/g },
+  // JWT：三段 base64url，header 几乎必以 eyJ（"{" 的 base64）开头——强信号、低误报
+  { name: 'jwt', re: /\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g },
   { name: 'bearer_token', re: /Bearer\s+[A-Za-z0-9\-._~+/]+={0,2}/g },
-  // 长 hex（疑似私钥 / secret，40+ 位）
-  { name: 'long_hex', re: /\b[a-f0-9]{40,}\b/gi },
+  // Authorization 头：Basic / Token / Digest 等「非 Bearer」方案（Bearer 方案已被上一条整段吃掉，
+  // 故本条在已 redact 的 "Authorization: [REDACTED:bearer_token]" 上因 '[' 不匹配 scheme 而跳过，幂等）
+  { name: 'authorization_header', re: /Authorization:\s*[A-Za-z][A-Za-z0-9_-]*\s+[^\s,]+/gi },
+  // 长 hex（疑似私钥 / secret）。阈值 64：避开 SHA1(40) / 短哈希的常见误报（日志里的 git SHA、文件摘要），
+  // 仅留极长 hex secret 作兜底。注意 SHA256 恰为 64 位——若你的场景里 SHA256 频繁出现在对话正文且不应被
+  // 清洗，可进一步提高阈值；当前 64 是「清洗极长 hex secret」与「不动短哈希」的折中。
+  { name: 'long_hex', re: /\b[a-f0-9]{64,}\b/gi },
 ];
 
 export function redactSecrets(input: string): string {

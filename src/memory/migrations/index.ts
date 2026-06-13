@@ -944,6 +944,53 @@ const v21RedactToolCallsScan: Migration = {
   },
 };
 
+/**
+ * v22: 15.0 V-4 修复 — redact review_requests.draft_response/final_response 与 episodes.content。
+ *
+ * v21 扫描了 review_requests.review_input（user_message + tool_calls 的 input/result），
+ * 但 review_requests 的 draft_response / final_response（Agent 生成的文本，会转述/回显密钥）
+ * 与 episodes.content（会话事件流水）仍是明文落库——audit-recorder.recordReview 与
+ * logEpisode 的写入时 redact（V-4 正向修复）只覆盖新增数据，本迁移补扫历史数据。
+ *
+ * 幂等：与 v17-v21 同理，redactSecrets 对已清洗内容（[REDACTED:xxx]）不再匹配 secret 模式。
+ */
+const v22RedactResponsesScan: Migration = {
+  version: 22,
+  name: 'redact-responses-scan',
+  up: (db: Database.Database) => {
+    // review_requests 两列（draft_response/final_response，Agent 文本）+ episodes 一列（content，事件流水）
+    const targets: Array<{ table: string; contentCol: string }> = [
+      { table: 'review_requests', contentCol: 'draft_response' },
+      { table: 'review_requests', contentCol: 'final_response' },
+      { table: 'episodes', contentCol: 'content' },
+    ];
+
+    for (const { table, contentCol } of targets) {
+      const exists = db
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .get(table);
+      if (!exists) continue;
+
+      const rows = db
+        .prepare(`SELECT rowid AS rid, ${contentCol} AS content FROM ${table} WHERE ${contentCol} IS NOT NULL`)
+        .all() as Array<{ rid: number; content: string }>;
+
+      const update = db.prepare(`UPDATE ${table} SET ${contentCol} = ? WHERE rowid = ?`);
+      let cleaned = 0;
+      for (const row of rows) {
+        const redacted = redactSecrets(row.content);
+        if (redacted !== row.content) {
+          update.run(redacted, row.rid);
+          cleaned++;
+        }
+      }
+      if (cleaned > 0) {
+        logger.info({ table, contentCol: contentCol, cleaned }, '15.0 V-4 redact 扫描：清洗回复/事件明文 secret');
+      }
+    }
+  },
+};
+
 export const ALL_MIGRATIONS: Migration[] = [
   v0Baseline,
   v1ExtendScheduledTasks,
@@ -967,4 +1014,5 @@ export const ALL_MIGRATIONS: Migration[] = [
   v19RedactExtraTablesScan,
   v20FtsConcatAgentNames,
   v21RedactToolCallsScan,
+  v22RedactResponsesScan,
 ];
