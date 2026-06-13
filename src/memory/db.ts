@@ -224,7 +224,7 @@ export function deleteSession(sid: string): { cleanedTables: number } {
 
       // 动态发现所有有 session_id / source_session_id 列的表（排除 sqlite_% + FTS5 影子表）
       const SHADOW = /_(data|idx|content|config|segdir|segments|docsize|stat)$/;
-      const NAME_OK = /^[a-z_]+$/; // 白名单：名只允许小写字母+下划线（DB 元数据，额外防注入）
+      const NAME_OK = /^[a-z0-9_]+$/; // 白名单：表/列名允许小写字母+数字+下划线（DB 元数据，额外防注入；含 _v2 等数字后缀表，避免漏清）
       const tables = db
         .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
         .all() as { name: string }[];
