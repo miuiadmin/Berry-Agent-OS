@@ -2,8 +2,8 @@
  * 22 号文档（对话内联统一）运行时验证脚本（仿 verify-15.0.ts，临时——验证后删除）。
  *
  * 动机（plan 强约束）：15.0 教训——initDb 全路径不能只靠隔离单测。本脚本对临时 DB 跑完整
- * initDb（CORE_SCHEMA + 全部 migration v0-v25 + MESSAGE_BLOCKS_FTS），在真 DB 上证明：
- *   1. initDb 成功（含 v25 messages/message_blocks reshape）
+ * initDb（CORE_SCHEMA + 全部 migration v0-v27 + MESSAGE_BLOCKS_FTS + conversations→messages 启动同步），在真 DB 上证明：
+ *   1. initDb 成功（migration 全应用 + 启动幂等同步）
  *   2. messages / message_blocks 表存在；message_blocks_fts 虚表存在
  *   3. persistAssistantTurn → getTimeline 往返：blocks 按序读回（thinking → tool → text）
  *   4. redact 单漏斗：tool block.input 含 sk-ant- 密钥 → payload_json 无明文
@@ -29,10 +29,10 @@ const check = (name: string, cond: boolean) => {
 };
 
 try {
-  // 1. 完整 initDb（跑 CORE_SCHEMA + runMigrations(ALL_MIGRATIONS) + MESSAGE_BLOCKS_FTS）
+  // 1. 完整 initDb（跑 CORE_SCHEMA + runMigrations(ALL_MIGRATIONS) + MESSAGE_BLOCKS_FTS + 启动同步）
   initDb(dbPath);
-  check('initDb 成功（含 v25 messages/message_blocks migration）', true);
-  check('ALL_MIGRATIONS 含 v25', ALL_MIGRATIONS.some((m) => m.version === 25));
+  check('initDb 成功（全部 migration + conversations→messages 启动同步）', true);
+  check('ALL_MIGRATIONS 最大版本已应用', ALL_MIGRATIONS.some((m) => m.version === Math.max(...ALL_MIGRATIONS.map((x) => x.version))));
 
   const db = getDb();
   const tableExists = (t: string) =>
@@ -79,14 +79,15 @@ try {
     .all('"项目管理"') as Array<{ content: string }>;
   check('message_blocks_fts 端到端：text block 入库后可搜中（中文 trigram）', ftsHit.some((r) => r.content.includes('项目管理')));
 
-  // ─── doc 22 期2：user 行落 messages + v26 backfill ───
-  // 注：user 消息的活跃写入漏斗已是 persistUserMessage（消灭双轨制后，SessionManager /
-  //   MemoryRuntime 的 saveUserMessage 均走它）；旧 conversations.saveUserMessage 已无调用方，
-  //   历史遗留 user 行由 v26 一次性回填。此处验证活跃漏斗 + v26 回填两端。
-  // 6. v26 migration 注册 + initDb 已应用（user 行回填迁移）
-  check('ALL_MIGRATIONS 含 v26', ALL_MIGRATIONS.some((m) => m.version === 26));
+  // ─── doc 22：user 行落 messages + 启动同步 ───
+  // 注：user 消息活跃漏斗 = persistUserMessage（消灭双轨制后 SessionManager / MemoryRuntime 的 saveUserMessage 均走它）；
+  //   旧 conversations.saveUserMessage 已无调用方，历史遗留行由 db.ts syncConversationsToMessages
+  //   启动幂等同步（取代 v25/v26 一次性回填迁移）。此处验证活跃漏斗 + 启动同步两端。
+  // 6. migration 全部应用（动态对齐 ALL_MIGRATIONS 最大版本）
   const maxVer = db.prepare(`SELECT MAX(version) as v FROM schema_migrations`).get() as { v: number };
-  check('initDb 应用到 v26', maxVer.v === 26);
+  // 动态对齐 ALL_MIGRATIONS 的最大版本——新增迁移后无需手改此断言（避免再次过时）
+  const expectedMax = Math.max(...ALL_MIGRATIONS.map((m) => m.version));
+  check(`initDb 应用到最新 migration（v${expectedMax}）`, maxVer.v === expectedMax);
 
   // 7. user 消息落 messages（活跃漏斗 persistUserMessage）
   persistUserMessage({ sessionId: 's3', content: '用户消息落库测试', clientMsgId: 'cm-verify22' });
@@ -104,16 +105,20 @@ try {
   const userTextBlock = tlRedact?.blocks.find((b) => b.type === 'text') as { text: string } | undefined;
   check('user text block 脱敏（无明文 sk-ant）', !!userTextBlock && !userTextBlock.text.includes('sk-ant-api03'));
 
-  // 10. v26 backfill 闭合窗口：手工塞一条「只在 conversations 不在 messages」的 user 行，重跑 v26 验证回填
-  //     （模拟 v25 之后、消灭双轨制之前的遗留 user 行；v26 幂等重跑只补缺失行，不破坏已有数据）
+  // 10. 启动幂等同步 conversations→messages：手写孤行，重新 initDb 触发 sync 验证回填
+  //     （取代 v25/v26 一次性回填迁移——sync 每次启动都收敛，对未来免疫）
   db.prepare(`INSERT INTO conversations (id, session_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)`).run('gap-u1', 's5', '回填窗口测试', 5000);
-  const v26 = ALL_MIGRATIONS.find((m) => m.version === 26)!;
-  v26.up(db); // 幂等重跑——只回填缺失的 gap-u1
-  const gapMsg = db.prepare(`SELECT id FROM messages WHERE id = ?`).get('gap-u1');
-  check('v26 backfill：缺失 user 行回填进 messages', !!gapMsg);
-  const gapBlock = db.prepare(`SELECT payload_json FROM message_blocks WHERE message_id = ?`).get('gap-u1') as { payload_json: string } | undefined;
-  check('v26 backfill：user 行附带 text block（内容无损）', !!gapBlock && JSON.parse(gapBlock.payload_json).text === '回填窗口测试');
-  check('v26 backfill 幂等：再跑一次不重复', (v26.up(db), db.prepare(`SELECT COUNT(*) AS c FROM messages WHERE id = ?`).get('gap-u1') as { c: number }).c === 1);
+  closeDb();
+  initDb(dbPath); // 重新启动 → syncConversationsToMessages 回填 gap-u1
+  const db2 = getDb();
+  const gapMsg = db2.prepare(`SELECT id FROM messages WHERE id = ?`).get('gap-u1');
+  check('启动同步：conversations 孤行回填进 messages', !!gapMsg);
+  const gapBlock = db2.prepare(`SELECT payload_json FROM message_blocks WHERE message_id = ?`).get('gap-u1') as { payload_json: string } | undefined;
+  check('启动同步：user 行附带 text block（内容无损）', !!gapBlock && JSON.parse(gapBlock.payload_json).text === '回填窗口测试');
+  // 幂等：再启动一次不重复（收敛后零写入）
+  closeDb();
+  initDb(dbPath);
+  check('启动同步幂等：再启动不重复', (getDb().prepare(`SELECT COUNT(*) AS c FROM messages WHERE id = ?`).get('gap-u1') as { c: number }).c === 1);
 
   closeDb();
 } catch (err) {
