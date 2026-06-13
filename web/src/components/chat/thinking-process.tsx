@@ -8,6 +8,8 @@
 import { useState, useEffect, useRef, memo } from "react";
 import { ChevronRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDurationMs } from "@/lib/format";
+import { useAutoCollapse } from "@/hooks/use-auto-collapse";
 import { useT } from "@/lib/i18n";
 import type { ThinkingStep } from "@/lib/stores/chat-store";
 
@@ -15,11 +17,6 @@ interface ThinkingProcessProps {
   steps: ThinkingStep[];
   reasoning?: string;
   isActive: boolean;
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep; nextStep?: ThinkingStep; isLast: boolean; isActive: boolean }) {
@@ -36,7 +33,7 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
 
   return (
     <span className="ml-auto pl-2 text-[11px] tabular-nums text-muted-foreground/50 shrink-0">
-      {formatElapsed(elapsed)}
+      {formatDurationMs(elapsed)}
     </span>
   );
 }
@@ -46,16 +43,9 @@ function StepDuration({ step, nextStep, isLast, isActive }: { step: ThinkingStep
  * 流式活跃消息（steps 数组引用每次变化）仍正常重渲染。
  */
 export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning, isActive }: ThinkingProcessProps) {
-  const [expanded, setExpanded] = useState(isActive);
+  const [expanded, setExpanded] = useAutoCollapse(isActive);
   const listRef = useRef<HTMLDivElement>(null);
-  const wasActive = useRef(isActive);
   const t = useT();
-
-  // Auto-collapse when streaming completes
-  useEffect(() => {
-    if (wasActive.current && !isActive) setExpanded(false);
-    wasActive.current = isActive;
-  }, [isActive]);
 
   // Auto-scroll to bottom when new steps arrive
   useEffect(() => {
@@ -86,7 +76,7 @@ export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning,
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
         {!isActive && steps.length > 0 && (
           <span className="ml-0.5 opacity-60">
-            ({steps.length}{totalMs > 500 ? ` · ${formatElapsed(totalMs)}` : ""})
+            ({steps.length}{totalMs > 500 ? ` · ${formatDurationMs(totalMs)}` : ""})
           </span>
         )}
       </button>

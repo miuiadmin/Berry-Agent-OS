@@ -5,9 +5,11 @@
  * 可折叠展开，失败时显示错误信息。
  */
 
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, memo } from "react";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDurationMs } from "@/lib/format";
+import { useAutoCollapse } from "@/hooks/use-auto-collapse";
 import { useT } from "@/lib/i18n";
 import type { ToolCallEvent } from "@/lib/stores/chat-store";
 
@@ -17,11 +19,6 @@ const PRE_BASE = "mt-0.5 rounded px-2 py-1.5 overflow-x-auto overflow-y-auto tex
 interface ToolCallCardsProps {
   calls: ToolCallEvent[];
   isActive: boolean;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function ToolCallDetail({ call }: { call: ToolCallEvent }) {
@@ -39,7 +36,7 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
         <ChevronRight className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")} />
         <code className="font-mono text-[11px]">{call.toolName}</code>
         <span className="ml-auto flex items-center gap-1 shrink-0 text-[11px] tabular-nums text-muted-foreground/60">
-          {formatDuration(call.durationMs)}
+          {formatDurationMs(call.durationMs)}
           {call.isError
             ? <X className="size-3 text-destructive" />
             : <Check className="size-3 text-success" />
@@ -71,14 +68,8 @@ function ToolCallDetail({ call }: { call: ToolCallEvent }) {
  * 流式活跃消息（calls 数组引用每次变化）仍正常重渲染。
  */
 export const ToolCallCards = memo(function ToolCallCards({ calls, isActive }: ToolCallCardsProps) {
-  const [expanded, setExpanded] = useState(isActive);
-  const wasActive = useRef(isActive);
+  const [expanded, setExpanded] = useAutoCollapse(isActive);
   const t = useT();
-
-  useEffect(() => {
-    if (wasActive.current && !isActive) setExpanded(false);
-    wasActive.current = isActive;
-  }, [isActive]);
 
   if (calls.length === 0) return null;
 
@@ -100,7 +91,7 @@ export const ToolCallCards = memo(function ToolCallCards({ calls, isActive }: To
         {isActive && <Loader2 className="size-2.5 animate-spin ml-0.5" />}
         {!isActive && (
           <span className="ml-0.5 opacity-60">
-            {totalMs > 0 ? `· ${formatDuration(totalMs)}` : ""}
+            {totalMs > 0 ? `· ${formatDurationMs(totalMs)}` : ""}
             {hasErrors ? t("thinking.hasErrors") : ""}
           </span>
         )}

@@ -58,6 +58,23 @@ export function formatDuration(startedAt?: string, finishedAt?: string, status?:
 }
 
 /**
+ * 格式化毫秒级时长（流式面板的思考步骤 / 工具调用耗时用）。
+ *
+ * - <1000ms → "420ms"
+ * - ≥1000ms → "1.2s"
+ *
+ * 与 {@link formatDuration} 不同：那个按起止时间戳算任务总时长，这个直接吃毫秒数，
+ * 用于 chat 流式面板里单步/单次工具的短耗时展示。
+ *
+ * @param ms 毫秒数
+ * @returns 格式化后的时长字符串
+ */
+export function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
  * 格式化系统运行时间（从秒数转为人类可读形式）。
  *
  * - <60s → "42s"
