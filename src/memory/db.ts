@@ -222,6 +222,12 @@ export function deleteSession(sid: string): { cleanedTables: number } {
         db.prepare('DELETE FROM message_blocks WHERE message_id IN (SELECT id FROM messages WHERE session_id = ?)').run(sid);
       } catch { /* message_blocks 不存在（旧库）— 静默跳过 */ }
 
+      // 通过 task_id 关联但无 session_id 列的表（动态发现捕获不到）→ 显式 subquery（须在 agent_tasks 删前，
+      // 否则子查询空集）。agent_task_workspaces / code_task_artifacts / task_subscribers 均以 task_id 指向 agent_tasks。
+      for (const t of ['agent_task_workspaces', 'code_task_artifacts', 'task_subscribers']) {
+        try { db.prepare(`DELETE FROM ${t} WHERE task_id IN (SELECT id FROM agent_tasks WHERE session_id = ?)`).run(sid); } catch { /* 表不存在（旧库）— 静默跳过 */ }
+      }
+
       // 动态发现所有有 session_id / source_session_id 列的表（排除 sqlite_% + FTS5 影子表）
       const SHADOW = /_(data|idx|content|config|segdir|segments|docsize|stat)$/;
       const NAME_OK = /^[a-z0-9_]+$/; // 白名单：表/列名允许小写字母+数字+下划线（DB 元数据，额外防注入；含 _v2 等数字后缀表，避免漏清）
