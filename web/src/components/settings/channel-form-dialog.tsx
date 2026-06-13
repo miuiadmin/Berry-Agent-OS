@@ -27,9 +27,8 @@ import {
   type ProviderChannel,
   type CatalogResponse,
   PROVIDER_KIND_LABEL_KEYS,
-  SELECT_BASE,
-  SelectChevron,
 } from "./providers-types";
+import { SelectField } from "@/components/ui/select-field";
 
 /** 表单提交数据（父组件据此发请求） */
 export interface ChannelFormData {
@@ -175,26 +174,21 @@ export function ChannelFormDialog({
         <form onSubmit={handleSubmit} className="mt-2 space-y-5">
           {/* provider 类型选择 */}
           <Field label={t("providers.providerKind")}>
-            <div className="relative">
-              <select
-                value={form.kind}
-                onChange={(e) => {
-                  setField("kind", e.target.value);
-                  // add 模式切换类型时清空 ID（不同类型的 ID 命名规则不同）
-                  if (!isEdit) setField("id", "");
-                }}
-                disabled={isEdit}
-                className={SELECT_BASE}
-              >
-                <option value="">{t("providers.selectKind")}</option>
-                {kinds.map((k) => (
-                  <option key={k} value={k}>
-                    {t(PROVIDER_KIND_LABEL_KEYS[k] ?? k)}
-                  </option>
-                ))}
-              </select>
-              <SelectChevron />
-            </div>
+            <SelectField
+              value={form.kind}
+              onChange={(e) => {
+                setField("kind", e.target.value);
+                if (!isEdit) setField("id", "");
+              }}
+              disabled={isEdit}
+            >
+              <option value="">{t("providers.selectKind")}</option>
+              {kinds.map((k) => (
+                <option key={k} value={k}>
+                  {t(PROVIDER_KIND_LABEL_KEYS[k] ?? k)}
+                </option>
+              ))}
+            </SelectField>
           </Field>
 
           {/* 渠道 ID（编辑时不可改） */}

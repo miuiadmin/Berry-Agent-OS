@@ -13,9 +13,8 @@ import {
   type ProviderChannel,
   type TierMapping,
   TIER_CONFIG,
-  SELECT_BASE,
-  SelectChevron,
 } from "./providers-types";
+import { SelectField } from "@/components/ui/select-field";
 
 // ─── useTierEditor Hook ──────────────────────────────────────────
 
@@ -90,51 +89,43 @@ export function TierEditor({
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {/* channel 选择 */}
-              <div className="relative">
-                <select
-                  value={channel}
-                  onChange={(e) => {
-                    const ch = e.target.value;
-                    setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
-                    setEditingTiers((prev) => ({
-                      ...prev,
-                      [key]: ch ? { channel: ch, model: "" } : undefined,
-                    }));
-                  }}
-                  className={SELECT_BASE}
-                >
-                  <option value="">{t("chat.notConfigured")}</option>
-                  {channels.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.kind})
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </div>
+              <SelectField
+                value={channel}
+                onChange={(e) => {
+                  const ch = e.target.value;
+                  setSelectedTierChannel((prev) => ({ ...prev, [key]: ch }));
+                  setEditingTiers((prev) => ({
+                    ...prev,
+                    [key]: ch ? { channel: ch, model: "" } : undefined,
+                  }));
+                }}
+              >
+                <option value="">{t("chat.notConfigured")}</option>
+                {channels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.kind})
+                  </option>
+                ))}
+              </SelectField>
               {/* model 选择（依赖已选 channel 的模型列表） */}
-              <div className="relative">
-                <select
-                  value={target?.model ?? ""}
-                  onChange={(e) => {
-                    const model = e.target.value;
-                    setEditingTiers((prev) => ({
-                      ...prev,
-                      [key]: channel ? { channel, model } : undefined,
-                    }));
-                  }}
-                  disabled={!channel || models.length === 0}
-                  className={SELECT_BASE}
-                >
-                  <option value="">{t("providers.selectModel")}</option>
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </div>
+              <SelectField
+                value={target?.model ?? ""}
+                onChange={(e) => {
+                  const model = e.target.value;
+                  setEditingTiers((prev) => ({
+                    ...prev,
+                    [key]: channel ? { channel, model } : undefined,
+                  }));
+                }}
+                disabled={!channel || models.length === 0}
+              >
+                <option value="">{t("providers.selectModel")}</option>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </SelectField>
             </div>
           </div>
         );
