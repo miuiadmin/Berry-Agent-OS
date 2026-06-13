@@ -5,6 +5,10 @@ import { getDbPath } from '../utils/paths.js';
 import { runMigrations } from './migration-runner.js';
 import { ALL_MIGRATIONS } from './migrations/index.js';
 import { CORE_INDEX_SQL, CORE_SCHEMA_SQL, KNOWLEDGE_FTS_SQL, MESSAGE_BLOCKS_FTS_SQL } from './schema.js';
+import { getLogger } from '../utils/logger.js';
+
+/** 模块日志器：deleteSession 列名约定 warn 等诊断用 */
+const logger = getLogger('memory-db');
 
 let db: Database.Database | null = null;
 
@@ -248,6 +252,10 @@ export function deleteSession(sid: string): { cleanedTables: number } {
         if (col) {
           db.prepare(`DELETE FROM ${name} WHERE ${col.name} = ?`).run(sid);
           cleaned++;
+        } else {
+          // 列名约定 warn：发现疑似 session 关联但非标准名 → 告警防漏清（未来表用 conversation_id 等会提醒）
+          const suspect = cols.find((c) => ['conversation_id', 'sid', 'sess_id', 'dialog_id'].includes(c.name));
+          if (suspect) logger.warn({ table: name, column: suspect.name }, 'deleteSession 发现疑似 session 关联列但非标准名，可能漏清——请确认列名约定（session_id / source_session_id）');
         }
       }
     })();
