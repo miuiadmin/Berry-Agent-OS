@@ -32,9 +32,9 @@ export function initDb(path?: string): Database.Database {
   runMigrations(db, ALL_MIGRATIONS);
   db.exec(KNOWLEDGE_FTS_SQL);
   // 15.0 §5.3 启动自愈：所有 FTS 表行数与源表不一致（触发器遗漏/刚创建/索引损坏/运维清表）
-  // 时才 rebuild。FTS5 COUNT(*) 是 O(1)，开销可忽略。修复前仅 knowledge_fts 有此保护，
-  // conversations/dialogue/agent_chat 三表无启动自愈——索引损坏会静默「搜不到」。
-  // 表可能因旧库/部分迁移缺失，用 try/catch 容错跳过。
+  // 时才 rebuild。FTS5 COUNT(*) 是 O(1)。修复前仅 knowledge_fts 有保护。
+  // 多列 external-content FTS（dialogue/agent_chat 的 from/to/content）的 rebuild 读所有映射列，
+  // 正确索引（单列+拼接触发器方案已废弃——rebuild 只读 content 列会丢拼接，是半成品）。
   ensureFtsConsistency(db, 'knowledge_fts', 'knowledge');
   ensureFtsConsistency(db, 'conversations_fts', 'conversations');
   ensureFtsConsistency(db, 'dialogue_messages_fts', 'dialogue_messages');
@@ -44,9 +44,8 @@ export function initDb(path?: string): Database.Database {
 }
 
 /**
- * 15.0 §5.3：FTS 启动自愈。external-content FTS 表的行数应与源表一致（触发器维护）；
- * 不一致（损坏/遗漏/刚创建）则 rebuild 从源表重读。FTS5 `COUNT(*)` 为 O(1)。
- * 表/源不存在时静默跳过（旧库或部分迁移）。
+ * 15.0 §5.3：FTS 启动自愈。external-content FTS 表行数应与源表一致（触发器维护）；
+ * 不一致则 rebuild（多列表读所有映射列，正确）。FTS5 COUNT(*) 为 O(1)。表不存在时静默跳过。
  */
 function ensureFtsConsistency(db: Database.Database, fts: string, source: string): void {
   try {

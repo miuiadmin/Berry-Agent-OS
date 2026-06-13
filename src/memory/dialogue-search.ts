@@ -76,7 +76,7 @@ export function searchDialogueMessages(
       `
       SELECT m.rowid, m.session_id AS sessionId, m.dialogue_id AS dialogueId,
              m.from_agent AS fromAgent, m.to_agent AS toAgent, m.content,
-             snippet(dialogue_messages_fts, 0, '<mark>', '</mark>', '...', 24) AS snippet,
+             snippet(dialogue_messages_fts, 2, '<mark>', '</mark>', '...', 24) AS snippet,
              m.created_at AS createdAt
       FROM dialogue_messages m
       JOIN dialogue_messages_fts f ON m.rowid = f.rowid
@@ -117,7 +117,7 @@ export function searchAgentChatMessages(
       `
       SELECT m.rowid, m.session_id AS sessionId, m.task_id AS taskId,
              m.from_agent AS fromAgent, m.to_agent AS toAgent, m.direction, m.content,
-             snippet(agent_chat_messages_fts, 0, '<mark>', '</mark>', '...', 24) AS snippet,
+             snippet(agent_chat_messages_fts, 2, '<mark>', '</mark>', '...', 24) AS snippet,
              m.created_at AS createdAt
       FROM agent_chat_messages m
       JOIN agent_chat_messages_fts f ON m.rowid = f.rowid

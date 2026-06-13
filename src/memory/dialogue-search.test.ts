@@ -43,14 +43,42 @@ function makeFtsDb(): Database.Database {
     END;
   `);
   v18.up(db);
+  v20.up(db); // 生产态：v18 后总跑 v20（多列 FTS），searchDialogueMessages 的 snippet 用列 2(content)
   return db;
 }
 
-/** makeFtsDb + v20（触发器改为拼接 from/to agent），用于验证按 agent 名召回 */
-function makeFtsDbV20(): Database.Database {
-  const db = makeFtsDb();
-  v20.up(db);
+/** 仅 v18（单列 content FTS）——用于验证 v20 对历史行的重索引效果 */
+function makeFtsDbV18Only(): Database.Database {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE conversations (id TEXT PRIMARY KEY, content TEXT NOT NULL);
+    CREATE TABLE dialogue_messages (
+      id TEXT PRIMARY KEY, dialogue_id TEXT NOT NULL, session_id TEXT NOT NULL,
+      correlation_id TEXT NOT NULL, sequence_number INTEGER NOT NULL,
+      from_agent TEXT NOT NULL, to_agent TEXT NOT NULL, content TEXT NOT NULL,
+      context_json TEXT, metadata_json TEXT, created_at INTEGER NOT NULL
+    );
+    CREATE TABLE agent_chat_messages (
+      id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT NOT NULL,
+      from_agent TEXT NOT NULL, to_agent TEXT NOT NULL, direction TEXT NOT NULL,
+      message_type TEXT NOT NULL DEFAULT 'agent.question', content TEXT NOT NULL,
+      correlation_id TEXT, created_at INTEGER NOT NULL
+    );
+    CREATE VIRTUAL TABLE conversations_fts USING fts5(content, content='conversations', content_rowid='rowid', tokenize='trigram');
+    CREATE TRIGGER conversations_fts_insert AFTER INSERT ON conversations BEGIN
+      INSERT INTO conversations_fts(rowid, content) VALUES (new.rowid, new.content);
+    END;
+    CREATE TRIGGER conversations_fts_delete AFTER DELETE ON conversations BEGIN
+      INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+    END;
+  `);
+  v18.up(db);
   return db;
+}
+
+/** makeFtsDb 已含 v20（多列）；此别名保留向后兼容 */
+function makeFtsDbV20(): Database.Database {
+  return makeFtsDb();
 }
 
 describe('v18 FTS5 + dialogue-search (15.0)', () => {
@@ -176,6 +204,26 @@ describe('v20 FTS 拼接 from/to agent（§5.2，按 agent 名召回）', () => 
       `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
     ).run('1', 'd1', 's1', 'c1', 0, 'brain', 'code', '项目管理的最佳实践', 1);
     expect(searchDialogueMessages(db, '项目管理').length).toBe(1);
+    db.close();
+  });
+});
+
+describe('v20 历史行重索引（UPDATE-trigger，原 rebuild 失效的回归守护）', () => {
+  it('v18 阶段插入的历史行 → v20 后按 agent 名能命中（UPDATE 触发器重索引生效）', () => {
+    const db = makeFtsDbV18Only(); // 仅 v18（单列 content-only 触发器）
+    // v20 之前插入历史行 —— 此时 FTS 是 content-only（v18 触发器），agent 名未入索引
+    db.prepare(
+      `INSERT INTO dialogue_messages (id, dialogue_id, session_id, correlation_id, sequence_number, from_agent, to_agent, content, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run('hist1', 'd1', 's1', 'c1', 0, 'brain', 'code', '历史消息部署记录', 1);
+    // v20 之前：搜 brain 命中不了（content-only）
+    expect(searchDialogueMessages(db, 'brain').length).toBe(0);
+    // 跑 v20：DROP v18 触发器 + 建拼接触发器 + UPDATE-trigger 重索引历史行
+    v20.up(db);
+    // 现在 brain 应命中（UPDATE content=content 触发了拼接触发器，重索引历史行）
+    expect(searchDialogueMessages(db, 'brain').length).toBe(1);
+    expect(searchDialogueMessages(db, 'code').length).toBe(1);
+    // content 关键词仍正常（用 ≥3 字 CJK；2 字如「部署」trigram 不可召回，是已知限制）
+    expect(searchDialogueMessages(db, '部署记录').length).toBe(1);
     db.close();
   });
 });
