@@ -5,6 +5,7 @@ import { PermissionEngine } from '../safety/permissions.js';
 import { TokenIssuer } from '../safety/token-issuer.js';
 import { ApprovalManager } from '../safety/approval-manager.js';
 import { PermissionCoordinator } from './permission-coordinator.js';
+import { StateCache } from './state-cache.js';
 import type { PermissionMode } from '../safety/permissions.js';
 import type { DangerLevel } from '../bus/contract.js';
 
@@ -19,14 +20,15 @@ import type { DangerLevel } from '../bus/contract.js';
  * 机制 A 在此基础上把 moderate 路由从 user_confirm 改到 Brain，届时增补 yolo 断言。
  * 行为变化需显式记录，不能静默漂移。
  */
-function makeCoordinator(mode: PermissionMode): { coord: PermissionCoordinator; db: Database.Database } {
+function makeCoordinator(mode: PermissionMode, withCache = false): { coord: PermissionCoordinator; db: Database.Database; stateCache: StateCache } {
   const db = new Database(':memory:');
   db.exec(CORE_SCHEMA_SQL);
   const tokenIssuer = new TokenIssuer(db);
   const approvalManager = new ApprovalManager(db, tokenIssuer, mode);
   const engine = new PermissionEngine(mode);
-  const coord = new PermissionCoordinator({ engine, tokenIssuer, approvalManager });
-  return { coord, db };
+  const stateCache = new StateCache();
+  const coord = new PermissionCoordinator(withCache ? { engine, tokenIssuer, approvalManager, stateCache } : { engine, tokenIssuer, approvalManager });
+  return { coord, db, stateCache };
 }
 
 const baseParams = (toolName: string, dangerLevel: DangerLevel) => ({
@@ -226,5 +228,92 @@ describe('checkAndIssueSimple 危险类别不自动放行 (15.0 R3 F1/F2/F5)', (
     const { coord } = makeCoordinator('allow-all');
     const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe' });
     expect(r.allowed).toBe(false);
+  });
+});
+
+/**
+ * 15.0 R4「委派即授权」(active_scope.allowTools) —— D5-1 CRITICAL 修复的安全网。
+ *
+ * 背景：13.0 起 write_file/edit_code/run_command 被划入危险工具类别，checkPermission 在 mode
+ * 判断前早返回 requiresReview。Code Agent 经 permission.request（同步、无 Brain 路由）拿到的就是
+ * {allowed:false, requiresReview:true}，tool-caller 判定权限被拒绝 → 写文件静默失败。
+ * 15.0 R4 用 active_scope.allowTools 解决：委派时写 allowTools:['*']，evaluateScope 返回 grant，
+ * 直接签 token 放行。本组钉死这套语义，防止回归。
+ */
+describe('active_scope 委派即授权 (15.0 R4，D5-1 修复)', () => {
+  it('委派 allowTools:["*"] → edit_code（危险类别）放行 + tokenId', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const r = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(r.allowed).toBe(true);
+    expect(r.tokenId).toBeTruthy();
+  });
+
+  it('委派 allowTools:["*"] → write_file / run_command 放行', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const w = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe', taskId: 't1' });
+    expect(w.allowed).toBe(true);
+    const rc = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'run_command', toolInput: 'ls -la', dangerLevel: 'moderate', taskId: 't1' });
+    expect(rc.allowed).toBe(true);
+  });
+
+  it('委派授权 + run_command blocklist（rm -rf）→ fail-closed 不被绕过', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const r = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'run_command', toolInput: 'rm -rf /', dangerLevel: 'moderate', taskId: 't1' });
+    expect(r.allowed).toBe(false);
+    // blocklist 命中原因（即使授权也不放行不可逆危险命令）
+    expect(r.reason).toContain('根目录');
+  });
+
+  it('block 优先于 allow：委派授权后再 blockTools edit_code → 仍拒绝', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    coord.setActiveScope('t1', { allowTools: ['*'], blockTools: ['edit_code'] });
+    const blocked = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(blocked.allowed).toBe(false);
+    // write_file 未被 block → 仍放行
+    const allowed = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe', taskId: 't1' });
+    expect(allowed.allowed).toBe(true);
+  });
+
+  it('checkAndIssueSimple 同样尊重委派授权（module agent 同步路径）', () => {
+    const { coord } = makeCoordinator('ask', true);
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    const r = coord.checkAndIssueSimple({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(r.allowed).toBe(true);
+    expect(r.tokenId).toBeTruthy();
+  });
+
+  it('setActiveScope 合并语义：纠偏 blockTools 写入不丢失委派 allowTools', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    // 模拟真实流程：委派先写 allowTools，随后 CorrectionFlow 纠偏并入 blockTools
+    coord.setActiveScope('t1', { allowTools: ['*'] });
+    coord.setActiveScope('t1', { blockTools: ['edit_code'] });
+    // write_file 仍应放行（allowTools 未被覆盖丢失）
+    const w = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'write_file', toolInput: '{}', dangerLevel: 'safe', taskId: 't1' });
+    expect(w.allowed).toBe(true);
+    // edit_code 被 block 收窄（block 优先）
+    const e = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 't1' });
+    expect(e.allowed).toBe(false);
+  });
+
+  it('clearActiveScope 后委派授权失效 → 危险类别回到 requiresReview', () => {
+    const { coord } = makeCoordinator('allow-all', true);
+    // 用 dtask_ 前缀 taskId：createRequest 会过滤掉它（ephemeral taskId 不入库），避免 FK；
+    // evaluateScope 仍按原 taskId 读 scope。
+    coord.setActiveScope('dtask_x', { allowTools: ['*'] });
+    coord.clearActiveScope('dtask_x');
+    const r = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 'dtask_x' });
+    expect(r.allowed).toBe(false);
+    expect(r.requiresReview).toBe(true);
+  });
+
+  it('未注入 StateCache（默认）→ 委派场景退化为 requiresReview（无 scope 可读）', () => {
+    // 不带 withCache，stateCache 为 null → evaluateScope 永远返回 null
+    const { coord } = makeCoordinator('allow-all');
+    const r = coord.checkAndIssue({ agentName: 'code', sessionId: 's', toolName: 'edit_code', toolInput: '{}', dangerLevel: 'moderate', taskId: 'dtask_x' });
+    expect(r.allowed).toBe(false);
+    expect(r.requiresReview).toBe(true);
   });
 });

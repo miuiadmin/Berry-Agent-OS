@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { TokenIssuer, ApprovalManager, RiskLevel, PermissionMode } from '../safety/index.js';
+import { checkBlocklist } from '../safety/blocklist.js';
 import { PermissionEngine } from '../safety/permissions.js';
 import type { PermissionResultPayload } from '../contracts/permissions.js';
 import type { DangerLevel } from '../utils/types.js';
@@ -11,6 +12,16 @@ export interface ActiveScope {
   blockPaths?: string[];
   /** 禁止使用的工具 */
   blockTools?: string[];
+  /**
+   * 15.0 R4（"委派即授权"）：委派授权的工具白名单。
+   * 命中的工具自动放行（签 token），绕过危险类别 requiresReview——
+   * 因为委派本身即 Brain 对该 Agent 用自身工具完成任务的授权。
+   * 支持通配 '*'（= 委派授权该 Agent 全工具集，受 blockTools/blockPaths 约束）。
+   * Brain 纠偏仍可用 blockTools/blockPaths 收窄（block 永远优先于 allow）。
+   */
+  allowTools?: string[];
+  /** 委派授权的路径白名单（glob / 精确路径前缀）；路径在范围内自动放行 */
+  allowPaths?: string[];
 }
 
 /**
@@ -137,6 +148,16 @@ function extractPathsFromInput(toolInput: string): string[] {
   return paths;
 }
 
+/**
+ * 15.0 R4：合并两个字符串数组并去重（用于 active_scope 的合并写入）。
+ * 任一为 undefined/空则取另一边，保证不丢既有约束。
+ */
+function mergeUnique(a: string[] | undefined, b: string[] | undefined): string[] | undefined {
+  if (!a?.length) return b?.length ? [...b] : undefined;
+  if (!b?.length) return [...a];
+  return [...new Set([...a, ...b])];
+}
+
 export interface CheckAndIssueParams {
   agentName: string;
   sessionId: string;
@@ -229,35 +250,63 @@ export class PermissionCoordinator {
   }
 
   /**
-   * 13.0 §3.8 第二层: 检查 active_scope 是否禁止当前 toolName / path。
+   * 13.0 §3.8 第二层 + 15.0 R4「委派即授权」：评估 active_scope 对当前工具调用的决策。
    *
-   * @param taskId - delegation / agent_task ID（active_scope 的 key）
-   * @param toolName - 当前要执行的工具名
-   * @param toolInput - 工具输入（用于检查 blockPaths）
-   * @returns null 表示通过；否则返回拒绝原因
+   * 三态返回（block 永远优先于 grant——Brain 纠偏的硬约束不能被委派授权绕过）：
+   * - `{ block }` —— 命中 blockTools / blockPaths / run_command blocklist，硬拦截
+   * - `{ grant }` —— 命中 allowTools / allowPaths（委派授权），自动放行（绕过危险类别 requiresReview）
+   * - `null`     —— 无 scope 或 block/allow 均未命中，走正常权限流（危险类别 requiresReview 等）
+   *
+   * @param taskId    - delegation / agent_task ID（active_scope 的 key）
+   * @param toolName  - 当前要执行的工具名
+   * @param toolInput - 工具输入（用于检查 blockPaths / allowPaths / run_command blocklist）
    */
-  checkActiveScope(taskId: string | undefined, toolName: string, toolInput: string): string | null {
+  evaluateScope(taskId: string | undefined, toolName: string, toolInput: string): { block: string } | { grant: string } | null {
     if (!this.stateCache || !taskId) return null;
     const scope = this.stateCache.get<ActiveScope>('active_scope', taskId);
     if (!scope) return null;
 
-    // ① blockTools 命中
-    if (scope.blockTools && scope.blockTools.length > 0) {
-      if (scope.blockTools.includes(toolName)) {
-        return `active_scope 禁止工具: ${toolName}`;
+    // ── ① block（硬约束，永远先于授权生效）──────────────────────────────
+    if (scope.blockTools && scope.blockTools.length > 0 && scope.blockTools.includes(toolName)) {
+      return { block: `active_scope 禁止工具: ${toolName}` };
+    }
+    // run_command blocklist 永远生效：即使委派授权（allowTools '*'）也不放行 rm -rf 等
+    // 不可逆危险命令。注：PermissionEngine.checkPermission 因 run_command 属危险类别会在
+    // mode 判断前早返回 requiresReview，反而跳过了 blocklist——此处补上，确保 blocklist 不被绕过。
+    if (toolName === 'run_command') {
+      const blockResult = checkBlocklist(toolInput);
+      if (blockResult.blocked) {
+        return { block: blockResult.reason ?? 'run_command 命中危险命令 blocklist' };
       }
     }
-
-    // ② blockPaths 命中（精确路径匹配 + glob，修正旧版子串匹配的误判）
-    // 旧版 `inputStr.includes(blockPath)` 会误判：blockPath='src' 命中 'src-old'，
-    // blockPath='auth.ts' 命中 'auth.ts.bak'。新版按路径字段精确匹配。
+    // blockPaths 命中（精确路径 + glob，修正旧版子串匹配的误判：
+    // blockPath='src' 不应命中 'src-old'，按路径字段精确匹配）
     if (scope.blockPaths && scope.blockPaths.length > 0) {
       const inputPaths = extractPathsFromInput(toolInput);
       const normalizedBlocks = scope.blockPaths.map(normalizePath);
       for (const inputPath of inputPaths) {
         for (const blockPath of normalizedBlocks) {
           if (isPathBlocked(inputPath, blockPath)) {
-            return `active_scope 禁止访问路径: ${blockPath}（命中 ${inputPath}）`;
+            return { block: `active_scope 禁止访问路径: ${blockPath}（命中 ${inputPath}）` };
+          }
+        }
+      }
+    }
+
+    // ── ② grant（委派授权）────────────────────────────────────────────
+    // allowTools：含本工具或通配 '*' → 自动放行（委派即授权该 Agent 用自身工具）
+    const allowTools = scope.allowTools;
+    if (allowTools && allowTools.length > 0 && (allowTools.includes(toolName) || allowTools.includes('*'))) {
+      return { grant: `委派授权工具: ${toolName}` };
+    }
+    // allowPaths：工具入参路径落在授权范围内 → 放行
+    if (scope.allowPaths && scope.allowPaths.length > 0) {
+      const inputPaths = extractPathsFromInput(toolInput);
+      const normalizedAllows = scope.allowPaths.map(normalizePath);
+      for (const inputPath of inputPaths) {
+        for (const allowPath of normalizedAllows) {
+          if (isPathBlocked(inputPath, allowPath)) {
+            return { grant: `委派授权路径: ${inputPath}` };
           }
         }
       }
@@ -267,15 +316,27 @@ export class PermissionCoordinator {
   }
 
   /**
-   * 写入 active_scope（由 CorrectionFlow 调用）。
-   * 13.0 §3.8 第二层：Brain 纠偏的 scopeUpdate 强制生效。
+   * 写入 active_scope（由 CorrectionFlow / delegation-orchestrator 调用）。
    *
-   * @param taskId - delegation ID（与 checkActiveScope 的 key 对应）
-   * @param scope - 硬约束 scope
+   * 15.0 R4 改为**合并语义**（read-modify-write）：新约束并入既有 scope，而非整体覆盖。
+   * 原因——委派时写入 `allowTools:['*']`（委派即授权），随后 CorrectionFlow 纠偏写入
+   * `blockTools:[...]`（Brain 收窄）。若用覆盖，纠偏的 blockTools 写入会把 allowTools 抹掉，
+   * 委派授权丢失、Code Agent 又回到"无法写文件"。合并让两者共存：allow 放行、block 收窄。
+   * block 永远优先于 allow（evaluateScope 中先判 block），所以收窄依然生效。
+   *
+   * @param taskId - delegation ID（与 evaluateScope 的 key 对应）
+   * @param patch  - 要并入的约束（blockTools/blockPaths/allowTools/allowPaths）
    */
-  setActiveScope(taskId: string, scope: ActiveScope): void {
+  setActiveScope(taskId: string, patch: ActiveScope): void {
     if (!this.stateCache) return;
-    this.stateCache.set('active_scope', taskId, scope);
+    const prev = this.stateCache.get<ActiveScope>('active_scope', taskId) ?? {};
+    // 数组字段取并集去重；同一 taskId 的多次 setActiveScope 累加而非替换
+    this.stateCache.set('active_scope', taskId, {
+      blockTools: mergeUnique(prev.blockTools, patch.blockTools),
+      blockPaths: mergeUnique(prev.blockPaths, patch.blockPaths),
+      allowTools: mergeUnique(prev.allowTools, patch.allowTools),
+      allowPaths: mergeUnique(prev.allowPaths, patch.allowPaths),
+    });
   }
 
   /**
@@ -287,10 +348,19 @@ export class PermissionCoordinator {
   }
 
   checkAndIssue(params: CheckAndIssueParams): PermissionResultPayload {
-    // 13.0 §3.8 第二层: 先做 active_scope 硬拦截（fail-closed）
-    const scopeBlock = this.checkActiveScope(params.taskId, params.toolName, params.toolInput);
-    if (scopeBlock) {
-      return { allowed: false, reason: scopeBlock };
+    // 13.0 §3.8 第二层 + 15.0 R4「委派即授权」：先做 active_scope 三态决策
+    // - block：硬拦截（blockTools / blockPaths / run_command blocklist）
+    // - grant：委派授权，签 token 直接放行（绕过危险类别 requiresReview）
+    // - null：无 scope，走下方正常权限流
+    const scopeDecision = this.evaluateScope(params.taskId, params.toolName, params.toolInput);
+    if (scopeDecision && 'block' in scopeDecision) {
+      return { allowed: false, reason: scopeDecision.block };
+    }
+    if (scopeDecision && 'grant' in scopeDecision) {
+      // 委派即授权：Brain 已通过委派授权该 Agent 用自身工具，直接签 token 放行
+      const inputHash = createHash('sha256').update(params.toolInput).digest('hex').slice(0, 16);
+      const token = this.tokenIssuer.issue({ sessionId: params.sessionId, agentName: params.agentName, toolName: params.toolName, inputHash });
+      return { allowed: true, tokenId: token.id };
     }
 
     // engine 硬确定性检查：dangerous_tool 类别 / blocklist / deny-all（不涉及风险路由）
@@ -342,7 +412,7 @@ export class PermissionCoordinator {
    * 简化版权限检查（模块 Agent 用）。
    *
    * 13.0 修复：与 checkAndIssue() 对齐，增加 active_scope 硬拦截。
-   * 之前 checkAndIssueSimple() 跳过了 checkActiveScope()，导致 Brain 纠偏
+   * 之前 checkAndIssueSimple() 跳过了 active_scope 评估，导致 Brain 纠偏
    * 设置的 forbiddenTools 对模块 Agent 的工具调用没有硬强制。
    *
    * @param params.agentName Agent 名称
@@ -353,10 +423,16 @@ export class PermissionCoordinator {
    * @param params.taskId 可选任务 ID（用于 active_scope 检查，§3.8 第二层）
    */
   checkAndIssueSimple(params: { agentName: string; sessionId: string; toolName: string; toolInput: string; dangerLevel: DangerLevel; taskId?: string }): PermissionResultPayload {
-    // 13.0 §3.8 第二层: active_scope 硬拦截（与 checkAndIssue 对齐，fail-closed）
-    const scopeBlock = this.checkActiveScope(params.taskId, params.toolName, params.toolInput);
-    if (scopeBlock) {
-      return { allowed: false, reason: scopeBlock };
+    // 13.0 §3.8 第二层 + 15.0 R4：active_scope 三态决策（与 checkAndIssue 对齐）
+    const scopeDecision = this.evaluateScope(params.taskId, params.toolName, params.toolInput);
+    if (scopeDecision && 'block' in scopeDecision) {
+      return { allowed: false, reason: scopeDecision.block };
+    }
+    if (scopeDecision && 'grant' in scopeDecision) {
+      // 委派即授权：直接签 token 放行，module agent 同步路径无需异步审核
+      const inputHash = createHash('sha256').update(params.toolInput).digest('hex').slice(0, 16);
+      const token = this.tokenIssuer.issue({ sessionId: params.sessionId, agentName: params.agentName, toolName: params.toolName, inputHash });
+      return { allowed: true, tokenId: token.id };
     }
 
     const engine = this.getEngineForSession(params.sessionId);

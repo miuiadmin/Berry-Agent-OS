@@ -200,23 +200,21 @@ export class CorrectionFlow {
     const entry = this.ctx.delegationManager.get(delegationId);
     if (!entry) return;
 
-    // 13.0 §3.8 第二层: 把 Brain 的 forbiddenTools/blockPaths 写入 active_scope 硬约束
-    // PermissionCoordinator 在所有 tool 执行前都会强制检查 active_scope
+    // 13.0 §3.8 第二层 + 15.0 R4: 把 Brain 纠偏的 forbiddenTools/blockPaths 并入 active_scope
+    // setActiveScope 已是合并语义（read-modify-write，数组的并集），所以这里只需传入本次
+    // 新增约束——既有的 allowTools:['*']（委派即授权）与之前的 blockPaths 都会被保留，
+    // 不会因纠偏写入而丢失授权。
+    // （旧版在此用 checkActiveScope('__dummy__') 取旧 scope 做"手工合并"，但 checkActiveScope
+    //  返回的是拒绝原因字符串、拿不到 scope 对象，合并恒为失效——属于死补丁，已随 setActiveScope
+    //  内建合并一并移除。）
     const corrBlockPaths = correction.newConstraints?.blockPaths;
     const corrForbiddenTools = correction.newConstraints?.forbiddenTools;
     if ((corrForbiddenTools && corrForbiddenTools.length > 0) || (corrBlockPaths && corrBlockPaths.length > 0)) {
-      const existing = this.ctx.permissionCoordinator?.checkActiveScope(delegationId, '__dummy__', '')
-        ?? null;
-      const prevBlockPaths = existing && typeof existing === 'object' && 'blockPaths' in existing
-        ? (existing as { blockPaths?: string[] }).blockPaths
-        : undefined;
-      // 合并：既有 blockPaths（来自之前纠偏）∪ 本次纠偏新增 blockPaths，去重
-      const mergedBlockPaths = [...new Set([...(prevBlockPaths ?? []), ...(corrBlockPaths ?? [])])];
       this.ctx.permissionCoordinator?.setActiveScope(delegationId, {
         blockTools: corrForbiddenTools,
-        blockPaths: mergedBlockPaths.length > 0 ? mergedBlockPaths : undefined,
+        blockPaths: corrBlockPaths,
       });
-      logger.debug({ delegationId, forbiddenTools: corrForbiddenTools, blockPaths: corrBlockPaths }, 'applyAdjust: set active_scope (blockTools + blockPaths)');
+      logger.debug({ delegationId, forbiddenTools: corrForbiddenTools, blockPaths: corrBlockPaths }, 'applyAdjust: 并入 active_scope（blockTools + blockPaths）');
     }
 
     // 13.0 §13.20: 记录到 frequency detector，Evolution 学习闭环的触发器

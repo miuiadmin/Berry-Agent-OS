@@ -1913,18 +1913,27 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     let agent = await this.agentManager.ensureAgent(route.targetAgent);
     this.setupModuleAgent(route.targetAgent);
 
-    // ─── 13.0 §8.5: scope 预授权 ───
-    // 任务派发时将 session 级的 PermissionGate scope 复制到 task 级的 active_scope。
-    // 这样即使 Brain 纠偏还没来得及触发，第一轮工具执行也受 scope 约束。
-    // 如果 inputPayload 中有 forbiddenTools（来自 Brain 路由或纠偏），直接设置。
+    // ─── 13.0 §8.5 + 15.0 R4「委派即授权」: scope 预授权 ───
+    // 任务派发时将约束写入 task 级 active_scope。15.0 R4 改为：委派本身即授权该 Agent
+    // 用自身工具完成任务，因此默认写入 allowTools:['*']（受下方 blockTools/blockPaths 约束）。
+    //
+    // 为什么委派即授权：Brain 决定把任务交给目标 Agent，意味着已认可"该 Agent 用自身工具
+    // 完成任务"——逐次让 Brain 审核每个 edit_code/write_file 既无必要（Brain 已知情），又会在
+    // 默认 allow-all 配置下因危险类别早返回 requiresReview 而被静默阻断（Code Agent 经
+    // permission.request 同步路径无法异步审核）。allowTools 让这些工具自动放行（签 token）。
+    //
+    // 若 inputPayload 带 forbiddenTools（Brain 路由 / 纠偏收窄），并入 blockTools——
+    // block 永远优先于 allow（evaluateScope 先判 block），Brain 收窄依然生效。
     if (this.permissionCoordinator && this._stateCache) {
       const forbiddenTools = input.inputPayload.forbiddenTools as string[] | undefined;
-      if (forbiddenTools && forbiddenTools.length > 0) {
-        this.permissionCoordinator.setActiveScope(taskId, {
-          blockTools: forbiddenTools,
-        });
-        logger.debug({ taskId, forbiddenTools }, 'task.dispatch: 预授权 scope (forbiddenTools)');
-      }
+      this.permissionCoordinator.setActiveScope(taskId, {
+        allowTools: ['*'],
+        ...(forbiddenTools && forbiddenTools.length > 0 ? { blockTools: forbiddenTools } : {}),
+      });
+      logger.debug(
+        { taskId, allowTools: ['*'], blockTools: forbiddenTools ?? null },
+        'task.dispatch: 委派即授权 scope（allowTools 全工具集 + forbiddenTools 收窄）',
+      );
     }
 
     // 13.0 多智能体协作：从 inputPayload 透传 missionId 和 planTaskId
