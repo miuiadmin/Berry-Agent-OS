@@ -34,7 +34,9 @@ interface ActivityEvent {
   payload: Record<string, unknown>;
 }
 
-/** 事件前缀 → 图标 */
+/** 事件前缀 → 图标。
+ *  事件列表上限 15 条（见订阅处 slice(0, 15)），线性前缀扫描开销可忽略，
+ *  无需引入更复杂的映射结构。 */
 const EVENT_ICONS: Record<string, typeof Activity> = {
   "task.": ListTodo,
   "agent.": Bot,
@@ -185,15 +187,16 @@ export default function HomePage() {
               <EmptyState icon={Activity} title={t("home.listening")} description={t("home.activityHint")} />
             ) : (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {events.map((ev) => {
+                {events.map((ev, idx) => {
                   const Icon = EVENT_ICONS[Object.keys(EVENT_ICONS).find((p) => ev.event.startsWith(p)) ?? ""] ?? Activity;
                   return (
-                    <div key={ev.ts} className="flex items-center gap-2 text-xs min-w-0 animate-slide-left">
+                    <div key={`${ev.ts}-${ev.event}-${idx}`} className="flex items-center gap-2 text-xs min-w-0 animate-slide-left">
                       <Icon className={`size-3.5 shrink-0 ${eventColor(ev.event)}`} />
                       <span className="text-muted-foreground shrink-0">
                         {formatTime(new Date(ev.ts), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
-                      <span className="font-medium truncate">{t(`status.${ev.event.split(".").pop()}`) ?? ev.event}</span>
+                      {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需再兜底 ?? ev.event */}
+                      <span className="font-medium truncate">{t(`status.${ev.event.split(".").pop()}`)}</span>
                       {typeof ev.payload.name === "string" && (
                         <span className="text-muted-foreground truncate">{ev.payload.name}</span>
                       )}

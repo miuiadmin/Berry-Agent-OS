@@ -29,6 +29,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
 import { Button } from "@/components/ui/button"
 import { MODAL_OVERLAY, POPUP_ANIMATION, POPUP_BASE, TOUCH_TARGET } from "@/components/ui/_shared"
 
@@ -79,6 +80,8 @@ function DialogContent({
   /** 是否显示右上角关闭按钮（默认 true） */
   showCloseButton?: boolean
 }) {
+  // i18n：右上角 X 按钮的 sr-only aria-label 走翻译表，避免硬编码 "Close"
+  const t = useT()
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -97,6 +100,7 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
+            aria-label={t("common.close")}
             render={
               // 移动端 44px 触控目标（TOUCH_TARGET 仅尺寸，位置类本组件独有）
               <Button
@@ -107,7 +111,7 @@ function DialogContent({
             }
           >
             <XIcon className="size-5 md:size-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("common.close")}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -139,6 +143,8 @@ function DialogFooter({
   /** 是否在末尾渲染 Close 按钮（默认 false） */
   showCloseButton?: boolean
 }) {
+  // i18n：底部 Close 按钮文案走翻译表（common.close），避免硬编码 "Close"
+  const t = useT()
   return (
     <div
       data-slot="dialog-footer"
@@ -151,7 +157,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t("common.close")}
         </DialogPrimitive.Close>
       )}
     </div>

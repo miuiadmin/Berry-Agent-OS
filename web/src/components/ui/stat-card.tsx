@@ -22,6 +22,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { staggerClass } from "@/components/ui/_shared"
 
 interface StatCardProps {
   /** 左侧图标 */
@@ -53,7 +54,9 @@ export function StatCard({
   className,
 }: StatCardProps) {
   return (
-    <Card className={cn("card-lift", stagger && `stagger-${stagger}`, className)}>
+    // staggerClass 统一生成 stagger-N（封顶 STAGGER_MAX=8，超出不会无动画）；
+    // stagger prop 是 1-based，helper 是 0-based，故传 (stagger ?? 1) - 1。
+    <Card className={cn("card-lift", stagger !== undefined && staggerClass(stagger - 1), className)}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <Icon className="size-4" />

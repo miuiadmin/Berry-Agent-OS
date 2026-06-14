@@ -48,25 +48,31 @@ export function Sparkline({
   height = SPARKLINE_DEFAULT_HEIGHT,
   className,
 }: SparklineProps) {
+  // 数据不足 2 点：无法画线，不渲染（卡片角落无空间放 noData 文案）。
+  // 该判断放在 hooks 之前，避免 <2 时仍白跑 normalizePoints + 平滑 path 计算。
+  if (values.length < 2) return null;
+
   /**
    * 点坐标：normalizePoints 内部做 min/max 归一化 + 留白。
    * useMemo 避免每次 render 重算（虽然计算量小，但 path 派生依赖它）。
    */
   const points = useMemo(
-    () => (values.length < 2 ? [] : normalizePoints(values, width, height)),
+    () => normalizePoints(values, width, height),
     [values, width, height],
   );
 
-  /** 线条 path（空数组时 smoothLinePath 返回空串，渲染时 SVG path 不绘制） */
-  const linePath = useMemo(() => smoothLinePath(points), [points]);
   /**
-   * 面积 path：基线 = SVG 底部（y = height）。
-   * smoothAreaPath 内部复用 smoothLinePath 的曲线段，首尾各加一条到基线的 L。
+   * 线条 + 面积 path 一次派生（areaPath 基线 = SVG 底部 y = height）。
+   * 合并到单个 useMemo：两者共享同一份 points 输入，拆开会让两个 memo 各自
+   * 缓存一份 points 引用判断，无收益。空数组时均返回空串，SVG path 不绘制。
    */
-  const areaPath = useMemo(() => smoothAreaPath(points, height), [points, height]);
-
-  /* 数据不足 2 点：无法画线，不渲染（卡片角落无空间放 noData 文案） */
-  if (values.length < 2) return null;
+  const { linePath, areaPath } = useMemo(
+    () => ({
+      linePath: smoothLinePath(points),
+      areaPath: smoothAreaPath(points, height),
+    }),
+    [points, height],
+  );
 
   return (
     <svg

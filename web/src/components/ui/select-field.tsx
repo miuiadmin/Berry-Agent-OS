@@ -17,6 +17,7 @@
  * 触控目标类抽到 _shared.TOUCH_TARGET，与 Input / TextAreaField 共用同一组移动端规则。
  */
 
+import * as React from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TOUCH_TARGET } from "@/components/ui/_shared"

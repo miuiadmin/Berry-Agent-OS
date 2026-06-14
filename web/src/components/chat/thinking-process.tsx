@@ -66,12 +66,15 @@ export const ThinkingProcess = memo(function ThinkingProcess({ steps, reasoning,
   const listRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
-  // 新步骤到来时自动滚到底（仅在展开态生效）
+  /**
+   * 自动滚到底：新步骤到来 / 展开切换 / reasoning 文本增长 时触发。
+   * reasoning 也加入依赖——推理链流式增长时若不触发滚动，用户看不到最新文本。
+   */
   useEffect(() => {
     if (expanded && listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [steps.length, expanded]);
+  }, [steps.length, expanded, reasoning]);
 
   // 无步骤无推理 → 不渲染
   if (steps.length === 0 && !reasoning) return null;

@@ -87,7 +87,11 @@ function AlertDialogContent({
       <AlertDialogPrimitive.Popup
         data-slot="alert-dialog-content"
         data-size={size}
+        // group/alert-dialog-content：后代 size 变体选择器（Header / Footer / Media / Title
+        // 通过 sm:group-data-[size=...]/alert-dialog-content: 定位本元素）依赖此命名分组，
+        // 缺失则所有 size 变体样式静默失效。对标 card.tsx 的 group/card。
         className={cn(
+          "group/alert-dialog-content",
           POPUP_BASE,
           // 宽度：default 移动端 max-w-xs、桌面端 sm:max-w-sm；sm 始终 max-w-xs
           "max-w-xs data-[size=default]:sm:max-w-sm",

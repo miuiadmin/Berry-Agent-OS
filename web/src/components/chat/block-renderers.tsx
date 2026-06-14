@@ -14,7 +14,7 @@
  * 移动端硬规则：触控目标 min-h-[44px] md:min-h-0；hover 仅桌面端。
  */
 
-import { useState, memo } from "react";
+import { useState, useMemo, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
@@ -26,9 +26,9 @@ import type { ToolBlock, DelegationBlock, Block } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
 
-/** 工具卡 input/output 的 pre 共享样式（等宽小字、可滚动、自动换行） */
+/** 工具卡 input/output 的 pre 共享样式（等宽小字、可滚动、自动换行）。代码场景用 11px（CLAUDE.md 移动端硬规则：非代码内容禁用 text-[10px]，此处为等宽代码 pre，11px 保留可读性） */
 const PRE_BASE =
-  "mt-0.5 rounded px-2 py-1.5 overflow-x-auto overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all";
+  "mt-0.5 rounded px-2 py-1.5 overflow-x-auto overflow-y-auto text-[11px] leading-relaxed whitespace-pre-wrap break-all";
 
 /**
  * 把 block 的 unknown 载荷规整为可展示字符串：对象/原始值 JSON.stringify（2 空格缩进），字符串原样。
@@ -54,9 +54,13 @@ const ToolBlockCard = memo(function ToolBlockCard({ block }: { block: ToolBlock 
 
   const isFailed = block.state === "failed";
   const isRunning = block.state === "pending" || block.state === "running";
-  const inputStr = payloadToString(block.input);
+  // useMemo 缓存：大 output（如长 shell 输出）每帧 stringify 浪费，仅 block 字段变化时重算
+  const inputStr = useMemo(() => payloadToString(block.input), [block.input]);
   // 失败优先展示 error；否则展示 output
-  const outputStr = block.error ? payloadToString(block.error) : payloadToString(block.output);
+  const outputStr = useMemo(
+    () => (block.error ? payloadToString(block.error) : payloadToString(block.output)),
+    [block.error, block.output],
+  );
 
   return (
     <div>
@@ -103,7 +107,11 @@ const ToolBlockCard = memo(function ToolBlockCard({ block }: { block: ToolBlock 
 });
 
 /**
- * 委派卡（Brain→子 agent 委派的表头）：targetAgent + state。可折叠展开嵌套子会话待 childSessionId 落地。
+ * 委派卡（Brain→子 agent 委派的表头）：targetAgent + state。
+ *
+ * 仅渲染表头一行——DelegationBlock 类型里的 summary / childSessionId 字段当前不在此卡消费：
+ * summary 暂无独立 UI 槽位；childSessionId（嵌套子会话折叠展开）功能未落地。
+ * 字段保留在类型里供未来扩展，但此处不渲染，避免误导用户以为可点击展开。
  */
 const DelegationBlockCard = memo(function DelegationBlockCard({ block }: { block: DelegationBlock }) {
   return (

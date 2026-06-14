@@ -30,8 +30,14 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const [search, debouncedSearch] = useDebouncedSearch();
   /** 待删除确认的会话 ID（非 null 时弹确认框） */
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  /** 正在播放退场动画的会话 ID（动画结束才真正删除） */
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  /**
+   * 正在播放退场动画的会话 ID 集合。
+   *
+   * 改用 Set 而非单值：用户连续快速删除多个会话时（A 动画中又删 B），
+   * 单值会被覆盖导致 A 永远停在动画态、且 onExitEnd 读到的 removingId 可能已是 B。
+   * Set 允许多个会话同时处于退场动画，onExitEnd 携带具体 sid 精确移除。
+   */
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
   const t = useT();
 
   // ── 数据查询 ──
@@ -44,12 +50,17 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const sessionId = useChatStore((s) => s.sessionId);
   const setSessionId = useChatStore((s) => s.setSessionId);
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const setSkipAutoRestore = useChatStore((s) => s.setSkipAutoRestore);
 
   // ── Mutations（与 ConversationsPage 共用） ──
   const { deleteConversation, renameConversation } = useConversationMutations();
 
-  /** 新建对话：清空当前消息 + 会话 + 关闭抽屉 */
+  /**
+   * 新建对话：清空当前消息 + 会话 + 关闭抽屉。
+   * setSkipAutoRestore(true) 阻止 chat-window 的 auto-restore effect 立刻拉最近对话覆盖（让"新建"按钮有效）。
+   */
   const handleNewChat = () => {
+    setSkipAutoRestore(true);
     clearMessages();
     setSessionId(null);
     onSelect?.();
@@ -78,6 +89,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder={t("chat.searchPlaceholder")}
+            value={search}
             className="h-11 md:h-8 pl-8 text-[16px] md:text-xs"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
@@ -90,14 +102,25 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
               key={conv.sessionId}
               conv={conv}
               isActive={conv.sessionId === sessionId}
-              isRemoving={conv.sessionId === removingId}
+              isRemoving={removingIds.has(conv.sessionId)}
               onSelect={() => handleSelect(conv.sessionId)}
               onRename={(sid, title) => renameConversation.mutate({ sid, title })}
               onRequestDelete={() => setDeleteTarget(conv.sessionId)}
-              onExitEnd={() => {
-                // 动画结束 → 真正删除当前 removingId 对应的会话
-                if (removingId) deleteConversation.mutate(removingId);
-                setRemovingId(null);
+              onExitEnd={(sid) => {
+                // 动画结束 → 从 removingIds 移除该 sid + 真正调用删除 mutation。
+                // sid 由 ConversationItem 直接透传（不再从 closure 读 removingId），
+                // 避免连续删除 A/B 时闭包里读到错误 sid 的竞态。
+                setRemovingIds((prev) => {
+                  const next = new Set(prev);
+                  next.delete(sid);
+                  return next;
+                });
+                deleteConversation.mutate(sid, {
+                  onError: () => {
+                    // 删除失败：onError 已在 use-conversation-mutations 内 GET 校验 + toast。
+                    // 这里无需额外回滚——removingIds 已在上方移除，item 自动从动画态恢复为正常展示态。
+                  },
+                });
               }}
             />
           ))}
@@ -119,7 +142,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
         onAction={() => {
           // 关闭确认框 + 触发退场动画（真正删除在动画结束后）
           if (deleteTarget) {
-            setRemovingId(deleteTarget);
+            setRemovingIds((prev) => new Set(prev).add(deleteTarget));
             setDeleteTarget(null);
           }
         }}

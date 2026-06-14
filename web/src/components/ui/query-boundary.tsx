@@ -26,7 +26,7 @@ import { AlertCircle, RefreshCw } from "lucide-react"
 import { Button } from "./button"
 import { cn } from "@/lib/utils"
 import { TOUCH_TARGET } from "@/components/ui/_shared"
-import { tOutside as t } from "@/lib/i18n"
+import { useT } from "@/lib/i18n"
 
 interface QueryBoundaryProps<T> {
   /** TanStack Query 结果对象 */
@@ -40,6 +40,9 @@ interface QueryBoundaryProps<T> {
 }
 
 export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: QueryBoundaryProps<T>) {
+  // useT() 订阅 locale context：用户运行时切换语言时本组件会随之重渲染，
+  // 与 codebase 其它客户端组件保持一致（tOutside 非响应式，已弃用于此场景）。
+  const t = useT()
   // 加载中：渲染骨架
   if (query.isLoading) {
     return <>{skeleton}</>

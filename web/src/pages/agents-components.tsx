@@ -43,15 +43,16 @@ export function AgentDetailView({
 }) {
   const t = useT();
   const { formatDate, formatTime } = useDateFormat();
-  const { data: tasksData } = useQuery(queries.tasks({ limit: 50 }));
+  // 按目标 agent 过滤拉取该 agent 最近 5 条任务。
+  // 之前拉全局最近 50 条再客户端 filter，会漏掉"该 agent 活跃度低 / 别的 agent 太活跃"
+  // 的场景——recentTasks 名不副实。这里直接走后端 agent 过滤，结果语义与命名一致。
+  const { data: tasksData } = useQuery(queries.tasks({ agent: agent.name, limit: 5 }));
   /** 打开详情后收集的实时事件（最多保留 10 条） */
   const [events, setEvents] = useState<Array<{ event: string; ts: number }>>([]);
   const subscribe = useWsStore((s) => s.subscribe);
 
-  /** 该 agent 的最近 5 条任务 */
-  const recentTasks = (tasksData?.items ?? [])
-    .filter((t: TaskInfo) => t.targetAgent === agent.name)
-    .slice(0, 5);
+  /** 该 agent 的最近任务（后端已按 agent 过滤 + 限 5 条） */
+  const recentTasks = tasksData?.items ?? [];
 
   // 订阅 agent 生命周期事件，仅记录本 agent 的事件
   useEffect(() => {
@@ -93,6 +94,7 @@ export function AgentDetailView({
         <Button
           variant="outline"
           size="sm"
+          className="min-h-[44px] md:min-h-0"
           onClick={() => onToggle(!isEnabled)}
         >
           {isEnabled ? (
@@ -118,7 +120,8 @@ export function AgentDetailView({
         </CardHeader>
         <CardContent>
           <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <MetaItem label={t("common.status")} value={t(`status.${agent.status}`) ?? agent.status} />
+            {/* t() 对未知 key 回退到 key 本身，无需 ?? agent.status 兜底 */}
+            <MetaItem label={t("common.status")} value={t(`status.${agent.status}`)} />
             <MetaItem label={t("agents.kind")} value={agent.kind ?? "—"} />
             <MetaItem label={t("agents.version")} value={agent.version ? `v${agent.version}` : "—"} />
           </dl>
@@ -132,7 +135,8 @@ export function AgentDetailView({
         </CardHeader>
         <CardContent>
           {recentTasks.length === 0 ? (
-            <EmptyState icon={ListTodo} title={t("agents.noTasksForAgent")} description={t("agents.noTasksForAgent")} />
+            // title 用短文案 "最近任务"，description 用句子级说明——避免重复同一 i18n key
+            <EmptyState icon={ListTodo} title={t("agents.recentTasks")} description={t("agents.noTasksForAgent")} />
           ) : (
             <div className="space-y-2">
               {recentTasks.map((task: TaskInfo, i: number) => (
@@ -150,8 +154,9 @@ export function AgentDetailView({
                     <span className="text-sm">{task.taskType}</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需 ?? task.status 兜底 */}
                     <Badge variant={taskStatusVariant(task.status)}>
-                      {t(`status.${task.status}`) ?? task.status}
+                      {t(`status.${task.status}`)}
                     </Badge>
                     <span className="text-[11px] text-muted-foreground">
                       {formatDate(new Date(task.createdAt))}
@@ -175,8 +180,8 @@ export function AgentDetailView({
             <EmptyState icon={Clock} title={t("agents.noEvents")} description={t("agents.listening")} />
           ) : (
             <div className="space-y-1.5">
-              {events.map((ev) => (
-                <div key={ev.ts} className="flex animate-slide-left items-center gap-2 text-xs">
+              {events.map((ev, idx) => (
+                <div key={`${ev.ts}-${ev.event}-${idx}`} className="flex animate-slide-left items-center gap-2 text-xs">
                   <Clock className="size-3 text-muted-foreground" />
                   <span className="text-muted-foreground">
                     {formatTime(new Date(ev.ts))}
@@ -190,7 +195,8 @@ export function AgentDetailView({
                           : "secondary"
                     }
                   >
-                    {t(`status.${ev.event}`) ?? ev.event}
+                    {/* t() 对未知 key 回退到 key 本身，无需 ?? ev.event 兜底 */}
+                    {t(`status.${ev.event}`)}
                   </Badge>
                 </div>
               ))}

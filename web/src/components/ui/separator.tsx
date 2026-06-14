@@ -17,8 +17,10 @@ import { cn } from "@/lib/utils"
 
 /** 朝向差异：横向 h-px w-full / 纵向 w-px self-stretch */
 const ORIENTATION_CLASS: Record<"horizontal" | "vertical", string> = {
-  horizontal: "data-horizontal:h-px data-horizontal:w-full",
-  vertical: "data-vertical:w-px data-vertical:self-stretch",
+  // 注意：Base UI Separator 暴露 data-orientation="horizontal|vertical"（非裸 data-horizontal），
+  // 必须用 data-[orientation=...]: 才能命中，否则纵向分隔线会塌成 0 宽度。
+  horizontal: "data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full",
+  vertical: "data-[orientation=vertical]:w-px data-[orientation=vertical]:self-stretch",
 }
 
 /**

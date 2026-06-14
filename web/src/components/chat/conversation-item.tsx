@@ -24,7 +24,8 @@ interface ConversationItemProps {
   onSelect: () => void;
   onRename: (sid: string, title: string) => void;
   onRequestDelete: () => void;
-  onExitEnd: () => void;
+  /** 退场动画结束回调 —— 携带具体 sessionId，避免父组件从闭包读 removingId 时与并发删除竞态 */
+  onExitEnd: (sid: string) => void;
 }
 
 /** 字符串截断（超长加省略号），不超过 max 的原样返回 */
@@ -42,7 +43,11 @@ function displayTitle(conv: ConversationInfo): string {
   return conv.sessionId.slice(0, 16);
 }
 
-/** 编辑态预填值（与 displayTitle 截断规则保持一致，避免编辑后多出截断字符） */
+/**
+ * 编辑态预填值。
+ * 与 displayTitle 不同：编辑框特意不加省略号「…」，方便用户在尾部继续输入，
+ * 而 displayTitle（展示态）超长会加省略号。两者截断长度一致（TITLE_MAX）。
+ */
 function editPlaceholder(conv: ConversationInfo): string {
   return conv.title || conv.firstMessage?.slice(0, TITLE_MAX) || "";
 }
@@ -84,7 +89,7 @@ export function ConversationItem({
         isActive ? "nav-link-active bg-accent text-accent-foreground" : "hover:bg-accent/50 text-muted-foreground",
       )}
       onClick={() => { if (!isRemoving) onSelect(); }}
-      onAnimationEnd={() => { if (isRemoving) onExitEnd(); }}
+      onAnimationEnd={() => { if (isRemoving) onExitEnd(conv.sessionId); }}
     >
       {editing ? (
         /* 编辑态：输入框 + 保存/取消（阻止事件冒泡，避免误触选中） */

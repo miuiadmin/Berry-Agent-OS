@@ -595,6 +595,7 @@ const en: Record<string, string> = {
   "missions.createdBy": "by @{user}",
 
   // ===== Image lightbox =====
+  "lightbox.image": "Image",
   "lightbox.failedToLoad": "Failed to load image",
   "lightbox.imageFailedToLoad": "Image failed to load",
 

@@ -78,7 +78,10 @@ function SettingsContent() {
     }
   }, [config, initialized]);
 
-  /** 是否有未保存的变更（深比较） */
+  /** 是否有未保存的变更（深比较）。
+   *  注：用 JSON.stringify 比较依赖 config 与 editedConfig 的字段顺序稳定——
+   *  实际场景中 editedConfig 来源于 config 的浅拷贝 + 单字段更新，键顺序保持一致，
+   * 不会出现"内容相同但顺序不同"的误报。 */
   const hasChanges = useMemo(() => {
     if (!config || !initialized) return false;
     return JSON.stringify(config) !== JSON.stringify(editedConfig);

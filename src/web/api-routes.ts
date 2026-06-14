@@ -21,6 +21,13 @@ import { registerAsyncDelegationRoutes } from '../intelligence/async-delegation-
 import { registerTeamBuilderRoutes } from '../intelligence/team-builder-api.js';
 import { registerProviderRoutes } from '../providers/api-routes.js';
 import { registerMissionRoutes } from '../kernel/mission-api.js';
+// 16.0 任务板仓库：HTTP API 读取板状态（thread + meta + members + brain 上下文）的唯一入口
+import {
+  getBoardThread,
+  getBoardMeta,
+  getBoardMembers,
+  getBoardContext,
+} from '../kernel/board-repo.js';
 import type { WebServerDependencies } from './types.js';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
@@ -190,6 +197,33 @@ export function createApiRouter(deps: WebServerDependencies) {
     const reason = (body as Record<string, unknown>).reason as string | undefined ?? 'Cancelled via web dashboard';
     deps.taskManager.cancel(params.id, reason);
     json(res, { ok: true });
+  });
+
+  // --- 16.0 任务板读取（设计文档/23 §14.5）：前端「任务进展卡」从板拉数据 ---
+  // 返回指定 task 的板完整状态：发言 thread + 元数据 + 成员花名册，可选带 brain 上下文。
+  // 路径参数用 :tid（与 :id 区分语义，强调这是「板」维度）；GET 读写分离，无副作用。
+  route('GET', '/tasks/:tid/board', (_req, res, url, params) => {
+    const taskId = params.tid;
+    // 元数据为空说明 task 不存在——统一 404，避免后续调用拿不到 meta 时行为不一致
+    const meta = getBoardMeta(taskId);
+    if (!meta) { notFound(res); return; }
+
+    // 发言 thread 支持分页（query param limit/offset），默认 200 条与 getBoardThread 默认一致
+    const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
+    const offset = safeInt(url.searchParams.get('offset'), 0);
+    const thread = getBoardThread(taskId, { limit, offset });
+    const members = getBoardMembers(taskId);
+
+    // ?context=true 时额外返回 brain 看板上下文（近 N 条 + meta + 花名册 + 总数），供 board-observer 拼 prompt
+    // 用显式布尔解析：仅 'true'/'1' 视为真，其他值（含空）视为假，避免隐式真值歧义
+    const wantContext = url.searchParams.get('context') === 'true' || url.searchParams.get('context') === '1';
+
+    if (wantContext) {
+      const context = getBoardContext(taskId);
+      json(res, { taskId, thread, meta, members, context });
+      return;
+    }
+    json(res, { taskId, thread, meta, members });
   });
 
   route('GET', '/conversations', (_req, res, url) => {

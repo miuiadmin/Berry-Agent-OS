@@ -24,7 +24,9 @@ import { useT } from "@/lib/i18n";
 import { TaskRow } from "./tasks-components";
 import { useTaskMutations } from "./use-task-mutations";
 
-/** 状态筛选选项（all = 不筛选） */
+/** 状态筛选选项（all = 不筛选）。
+ *  注：每项都有对应的 i18n key（如 status.resumable 在 zh.ts/en.ts 已定义），
+ *  缺失 key 时 t() 会回退到 key 本身，不会显示英文残留。 */
 const STATUS_OPTIONS = [
   "all",
   "created",
@@ -87,16 +89,18 @@ export default function TasksPage() {
   const { cancelTask } = useTaskMutations();
 
   // ── 筛选操作 ──
-  /** 切换状态筛选，重置分页 */
+  /** 切换状态筛选，重置分页 + 收起展开行（新筛选结果里展开的任务可能不存在） */
   const handleStatusChange = (status: string) => {
     setStatusFilter(status);
     setOffset(0);
+    setExpandedId(null);
   };
 
-  /** 切换 Agent 筛选，重置分页 */
+  /** 切换 Agent 筛选，重置分页 + 收起展开行 */
   const handleAgentChange = (agent: string) => {
     setAgentFilter(agent);
     setOffset(0);
+    setExpandedId(null);
   };
 
   /** 是否有筛选条件激活（决定是否显示"清除筛选"按钮） */
@@ -265,6 +269,7 @@ export default function TasksPage() {
           <Button
             variant="outline"
             size="default"
+            className="min-h-[44px] md:min-h-0"
             onClick={() => setOffset((o) => o + PAGE_SIZE)}
           >
             {t("tasks.loadMore")}

@@ -595,6 +595,7 @@ const zh: Record<string, string> = {
   "missions.createdBy": "由 @{user} 创建",
 
   // ===== 图片灯箱 =====
+  "lightbox.image": "图片",
   "lightbox.failedToLoad": "图片加载失败",
   "lightbox.imageFailedToLoad": "图片加载失败",
 

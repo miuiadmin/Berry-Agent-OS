@@ -186,6 +186,36 @@ export interface BlockMessage {
   correlationId?: string;
 }
 
+/**
+ * 16.0 P5-C2：任务板新信封落板事件（board.message.posted → ws.type='board.message'）。
+ *
+ * 后端 board-projection.safePost 在信封落板成功后 emit 'board.message.posted'，
+ * WsEventBridge 经 STREAM_EVENT_MAPPING 平铺转发为 ws.type='board.message'，
+ * 前端看板 UI（§14.5 任务进展卡）据此实时刷新。当前为最小消费（仅 debug log 证明链路通）。
+ *
+ * 字段语义（与后端 EventMap['board.message.posted'] 完全一致）：
+ *   - taskId：板 id（= delegationId，板与 delegation 1:1）
+ *   - sessionId：关联会话 id（前端按对话过滤用）
+ *   - messageType：信封类型（前端可据此决定 UI 优先级，如 command 高亮、report 更新徽章）
+ *   - messageId：板上信封 id（去重 / 定位用）
+ *   - from / to：信封收发方（看板气泡渲染用）
+ */
+export interface BoardMessageEvent {
+  type: "board.message";
+  /** 板 id（= delegationId） */
+  taskId: string;
+  /** 关联会话 id（前端按对话过滤） */
+  sessionId?: string;
+  /** 信封类型 */
+  messageType: "delegate" | "report" | "ask" | "tool_request" | "tool_result" | "command" | "tell";
+  /** 板上信封 id（去重 / 定位） */
+  messageId?: string;
+  /** 发送方 Agent / role 名 */
+  from?: string;
+  /** 接收方 Agent / role 名 */
+  to?: string;
+}
+
 /** Union of all server → client WebSocket messages */
 export type ServerMessage =
   | TextDeltaMessage
@@ -205,7 +235,8 @@ export type ServerMessage =
   | UncertaintyMessage
   | NoResponseMessage
   | ReviewInfoMessage
-  | BlockMessage;
+  | BlockMessage
+  | BoardMessageEvent;
 
 // ─── Client → Server messages ─────────────────────────────────────
 

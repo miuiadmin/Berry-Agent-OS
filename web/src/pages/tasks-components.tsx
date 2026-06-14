@@ -59,8 +59,9 @@ export function TaskRow({ task, expanded, onToggle, onCancel }: TaskRowProps) {
         <td className="px-4 py-2.5">{task.targetAgent}</td>
         {/* 状态 Badge */}
         <td className="px-4 py-2.5">
+          {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需 ?? task.status 兜底 */}
           <Badge variant={taskStatusVariant(task.status)}>
-            {t(`status.${task.status}`) ?? task.status}
+            {t(`status.${task.status}`)}
           </Badge>
         </td>
         {/* 执行时长 */}
@@ -73,7 +74,7 @@ export function TaskRow({ task, expanded, onToggle, onCancel }: TaskRowProps) {
             <Button
               variant="destructive"
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-9 px-2 text-xs md:h-6"
               onClick={(e) => {
                 e.stopPropagation();
                 onCancel();

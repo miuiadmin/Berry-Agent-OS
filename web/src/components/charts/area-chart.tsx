@@ -9,10 +9,10 @@
  *
  * 用法：
  *   <AreaChart data={[{ label: "1月", value: 10 }, ...]} />
- *   <AreaChart data={ok} secondaryData={fail} secondaryColor="var(--destructive)" />
+ *   <AreaChart data={ok} secondaryData={fail} secondaryColor="var(--chart-2)" />
  */
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useRef, memo } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import {
@@ -65,8 +65,13 @@ interface ChartLineProps {
 /**
  * 单条数据线：区域填充 + 描边线。
  * 抽出来让主 / 次线复用同一渲染逻辑（重构前主线 / 次线 JSX 各写一遍）。
+ *
+ * 用 React.memo 包裹：AreaChart 在 pointer 移动时高频 setState（tooltip），
+ * 导致整个组件树 re-render；ChartLine 的 props（paths / color / strokeWidth /
+ * opacity）在数据不变时引用稳定（paths 来自 useMemo 派生），memo 后 props 浅比较
+ * 相等即可跳过这条线的重渲染与 diff（path 字符串可能含上百段 C 命令，diff 开销不可忽略）。
  */
-function ChartLine({ paths, color, strokeWidth, opacity }: ChartLineProps) {
+const ChartLine = memo(function ChartLine({ paths, color, strokeWidth, opacity }: ChartLineProps) {
   return (
     <>
       <path d={paths.area} fill={color} opacity={opacity} className="chart-area-fade" />
@@ -80,7 +85,7 @@ function ChartLine({ paths, color, strokeWidth, opacity }: ChartLineProps) {
       />
     </>
   );
-}
+});
 
 /** Tooltip 状态（null = 隐藏） */
 interface TooltipState {
@@ -101,6 +106,10 @@ export function AreaChart({
 }: AreaChartProps) {
   const t = useT();
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  // 上一次命中的数据点索引，用于去抖：指针在同一个点内移动时不重复 setState
+  // （SVG 上快速滑动会触发每像素一次 pointermove，60Hz 高刷屏可达成百上千次/秒，
+  //  仅在 idx 跨越到新点时才更新 tooltip，避免整个组件树无谓 re-render）
+  const lastIdxRef = useRef<number | null>(null);
 
   /**
    * SVG 内边距 + 画布尺寸。
@@ -145,29 +154,50 @@ export function AreaChart({
    * 指针移动 → 最近 data point → tooltip。
    * 按指针在 SVG 中的相对位置换算到 viewBox 坐标系（SVG 用 preserveAspectRatio 缩放，
    * rect.width 是实际显示宽度，要做比例换算）。
+   *
+   * 去抖 + 边界处理：
+   *  1. (x - padding.left) 落到绘图区外（左/右 padding 区）→ 隐藏 tooltip，
+   *     不让圆点吸附到首/末点（Math.round 会让靠近边缘的指针算出 idx=0/last）。
+   *  2. idx 与上次相同（指针还在同一个点的范围内）→ 跳过 setTooltip，避免高频 re-render。
    */
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
       if (data.length < 2) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
-      const step = chartWidth / (data.length - 1);
-      const idx = Math.round((x - padding.left) / step);
-      // 指针落在绘图区外（左 padding / 右 padding）→ 隐藏 tooltip
-      if (idx < 0 || idx >= data.length) {
-        setTooltip(null);
+      // 相对绘图区左边界的偏移（绘图区 = [padding.left, padding.left + chartWidth]）
+      const dx = x - padding.left;
+      // 落在左/右 padding 区 → 直接隐藏并重置 lastIdx（指针已离开数据区）
+      if (dx < 0 || dx > chartWidth) {
+        if (lastIdxRef.current !== null) {
+          lastIdxRef.current = null;
+          setTooltip(null);
+        }
         return;
       }
+      const step = chartWidth / (data.length - 1);
+      const idx = Math.round(dx / step);
+      // idx 因浮点误差可能轻微越界，clamp 到合法范围（与上面的 dx 检查互补）
+      const clampedIdx = Math.max(0, Math.min(idx, data.length - 1));
+      // 同一点内的连续移动不重复 setState（高频 pointermove 去抖核心）
+      if (lastIdxRef.current === clampedIdx) return;
+      lastIdxRef.current = clampedIdx;
       const { x: px, y: py } = pointCoordAt(
-        idx, data[idx], data.length, maxVal, chartWidth, chartHeight, padding,
+        clampedIdx, data[clampedIdx], data.length, maxVal, chartWidth, chartHeight, padding,
       );
       setTooltip({
-        x: px, y: py, label: data[idx].label, value: data[idx].value,
-        secondary: secondaryData?.[idx]?.value,
+        x: px, y: py, label: data[clampedIdx].label, value: data[clampedIdx].value,
+        secondary: secondaryData?.[clampedIdx]?.value,
       });
     },
     [data, secondaryData, chartWidth, chartHeight, maxVal, padding, svgWidth],
   );
+
+  // 指针离开 SVG：隐藏 tooltip 并清掉 lastIdx（下次进入时强制刷新首个命中点）
+  const handlePointerLeave = useCallback(() => {
+    lastIdxRef.current = null;
+    setTooltip(null);
+  }, []);
 
   /* 数据不足 2 点：无法画线，显示空态 */
   if (data.length < 2) {
@@ -189,7 +219,7 @@ export function AreaChart({
         className="w-full"
         style={{ height }}
         onPointerMove={handlePointerMove}
-        onPointerLeave={() => setTooltip(null)}
+        onPointerLeave={handlePointerLeave}
       >
         {/* Y 轴刻度线 + 标签（共用 y 坐标，避免网格线和标签错位） */}
         {yTicks.map((tick, i) => (
@@ -269,25 +299,35 @@ export function AreaChart({
         )}
       </svg>
 
-      {/* Tooltip 浮层（HTML 覆盖在 SVG 上方；pointer-events:none 不挡交互） */}
-      {tooltip && (
-        <div
-          className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md animate-fade-in"
-          style={{
-            left: `${(tooltip.x / svgWidth) * 100}%`,
-            top: `${tooltip.y - 10}px`,
-            transform: "translate(-50%, -100%)",
-          }}
-        >
-          <div className="font-medium">{tooltip.label}</div>
-          <div className="flex items-center gap-2">
-            <span style={{ color }}>{tooltip.value}</span>
-            {tooltip.secondary !== undefined && (
-              <span style={{ color: secondaryColor }}>{tooltip.secondary}</span>
-            )}
+      {/* Tooltip 浮层（HTML 覆盖在 SVG 上方；pointer-events:none 不挡交互）。
+          位置策略：默认在指针点上方（translate -100%）；当指针点贴近顶部时
+          （tooltip 会被父级 overflow-hidden 裁掉），翻转到点下方避免溢出。 */}
+      {tooltip && (() => {
+        // 翻转阈值：指针点 y 小于此值时，tooltip 顶部会超出容器顶部 → 翻到下方
+        // 估算值 = tooltip 自身高度（约 44px）+ 顶部安全间距
+        const TOOLTIP_FLIP_THRESHOLD = 48;
+        const flipBelow = tooltip.y < TOOLTIP_FLIP_THRESHOLD;
+        return (
+          <div
+            className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md animate-fade-in"
+            style={{
+              left: `${(tooltip.x / svgWidth) * 100}%`,
+              top: `${flipBelow ? tooltip.y + 12 : tooltip.y - 10}px`,
+              transform: flipBelow
+                ? "translate(-50%, 0)"
+                : "translate(-50%, -100%)",
+            }}
+          >
+            <div className="font-medium">{tooltip.label}</div>
+            <div className="flex items-center gap-2">
+              <span style={{ color }}>{tooltip.value}</span>
+              {tooltip.secondary !== undefined && (
+                <span style={{ color: secondaryColor }}>{tooltip.secondary}</span>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

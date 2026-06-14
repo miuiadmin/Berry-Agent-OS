@@ -23,10 +23,33 @@ export default function ChatPage() {
 
   useDocumentTitle(t("chat.title"));
 
-  const shortcuts = useMemo(() => [
-    { key: "n", meta: true, handler: () => { clearMessages(); setSessionId(null); } },
-    { key: "Escape", handler: () => setSidebarOpen(false) },
-  ], [clearMessages, setSessionId]);
+  // 快捷键：
+  //   - Cmd/Ctrl+N：新建对话。焦点在输入框/文本域时不拦截（避免与输入法/扩展冲突）。
+  //   - Escape：仅在侧边栏打开时关闭侧边栏；关闭态下不注册该快捷键，避免与
+  //     ConfirmDialog / 模态框 / 输入框等组件自身的 Esc 行为冲突（useKeyboardShortcuts
+  //     会对匹配的快捷键调用 preventDefault，所以用条件渲染控制注册）。
+  const shortcuts = useMemo(() => {
+    const list: Array<{ key: string; meta?: boolean; handler: () => void }> = [
+      {
+        key: "n",
+        meta: true,
+        handler: () => {
+          // 焦点在可编辑控件时不处理（让原生行为/输入法生效）
+          const el = document.activeElement;
+          if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable)) {
+            return;
+          }
+          clearMessages();
+          setSessionId(null);
+        },
+      },
+    ];
+    // 仅侧边栏打开时才注册 Escape，关闭态下不拦截，让其他组件（模态框/确认框）正常响应 Esc
+    if (sidebarOpen) {
+      list.push({ key: "Escape", handler: () => setSidebarOpen(false) });
+    }
+    return list;
+  }, [clearMessages, setSessionId, sidebarOpen]);
   useKeyboardShortcuts(shortcuts);
 
   return (

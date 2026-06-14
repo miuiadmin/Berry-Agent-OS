@@ -45,7 +45,9 @@ function Tabs({
       data-slot="tabs"
       data-orientation={orientation}
       className={cn(
-        "group/tabs flex gap-2 data-horizontal:flex-col",
+        // data-[orientation=horizontal]:flex-col —— Base UI Tabs Root 暴露
+        // data-orientation="horizontal|vertical"（非裸 data-horizontal），用方括号语法才能命中。
+        "group/tabs flex gap-2 data-[orientation=horizontal]:flex-col",
         className
       )}
       {...props}
@@ -58,7 +60,9 @@ const tabsListVariants = cva(
   [
     "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground",
     // 横向时固定高度 8、纵向时高度自适应 + 切到 flex-col
-    "group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col",
+    // 注意：Base UI Tabs Root 暴露 data-orientation="horizontal|vertical"（非裸 data-horizontal），
+    // 命名分组 group/tabs 上的状态需用 group-data-[orientation=...]/tabs: 才能匹配。
+    "group-data-[orientation=horizontal]/tabs:h-8 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col",
     // line 变体去圆角
     "data-[variant=line]:rounded-none",
   ],
@@ -94,8 +98,8 @@ function TabsList({
 /** TabsTrigger 基础类（不随 variant 变化的部分） */
 const TRIGGER_BASE = [
   "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap",
-  // 纵向布局时撑满宽度 + 左对齐
-  "group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start",
+  // 纵向布局时撑满宽度 + 左对齐（命中 group/tabs 上的 data-orientation="vertical"）
+  "group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start",
   // 默认文字色（60% 透明），hover/active 时变实色
   "text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground",
   FOCUS_RING,
@@ -121,10 +125,10 @@ const TRIGGER_ACTIVE = [
 /** 底部 / 侧边指示线（after 伪元素，仅 line 变体选中时可见） */
 const TRIGGER_INDICATOR = [
   "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity",
-  // 横向布局：指示线在底部
-  "group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5",
-  // 纵向布局：指示线在右侧
-  "group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5",
+  // 横向布局：指示线在底部（命中 group/tabs 上的 data-orientation="horizontal"）
+  "group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[orientation=horizontal]/tabs:after:bottom-[-5px] group-data-[orientation=horizontal]/tabs:after:h-0.5",
+  // 纵向布局：指示线在右侧（命中 group/tabs 上的 data-orientation="vertical"）
+  "group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:-right-1 group-data-[orientation=vertical]/tabs:after:w-0.5",
   // line 变体选中时显示指示线
   "group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
 ].join(" ")

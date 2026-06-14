@@ -17,7 +17,8 @@ import { useT } from "@/lib/i18n"
 
 /**
  * 图片加载状态 hook：error / loaded 双态。
- * 切换 src 时自动重置 error（loaded 由 img onLoad 单独管理）。
+ * 切换 src 时同时重置 error 与 loaded，保证状态机对 src 单调：
+ * 旧图已加载的 loaded=true 不会污染新图（否则后续若调整 error/loaded 判定顺序会出 bug）。
  * @param src 图片 URL（变化时重置）
  * @returns { error, loaded, handleError, handleLoad }
  */
@@ -25,8 +26,12 @@ function useImageLoad(src: string) {
   const [error, setError] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
-  // src 切换时重置 error 态（loaded 由 img onLoad 触发，不在这里重置以避免闪烁）
-  useEffect(() => { setError(false) }, [src])
+  // src 切换时同步重置 error + loaded（loaded 重置会在下一帧 img onLoad 前先显示占位骨架，
+  // 避免"旧图 loaded=true 留存"导致的状态污染）
+  useEffect(() => {
+    setError(false)
+    setLoaded(false)
+  }, [src])
 
   return {
     error,

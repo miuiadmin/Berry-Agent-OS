@@ -13,6 +13,7 @@
  * 消除两份漂移的同一段类字符串。
  */
 
+import * as React from "react"
 import { forwardRef } from "react"
 import { cn } from "@/lib/utils"
 import { FOCUS_RING, ARIA_INVALID_RING } from "@/components/ui/_shared"
@@ -34,7 +35,8 @@ export const TextAreaField = forwardRef<HTMLTextAreaElement, TextAreaFieldProps>
             "flex w-full rounded-md border border-input bg-transparent px-3 py-2",
             // 移动端 text-[16px] 防 iOS 聚焦自动缩放，桌面端 md:text-sm
             "text-[16px] md:text-sm",
-            "ring-offset-background",
+            // （已删 ring-offset-background —— Tailwind v4 不识别该 v3 工具类，
+            //  与 input.tsx / select-field.tsx 保持一致：FOCUS_RING 不依赖 ring-offset。）
             "placeholder:text-muted-foreground",
             FOCUS_RING,
             ARIA_INVALID_RING,

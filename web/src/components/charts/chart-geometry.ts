@@ -70,7 +70,6 @@ export const SPARKLINE_PAD = 2;
 
 /** 图表默认色板（CSS 变量，配合 tailwind.config 的 chart-1~5） */
 export const CHART_COLOR_1 = "var(--chart-1)";
-export const CHART_COLOR_2 = "var(--chart-2)";
 /** 对比线 / 失败数默认色（语义色 destructive） */
 export const CHART_COLOR_DESTRUCTIVE = "var(--destructive)";
 
@@ -93,10 +92,15 @@ export const SPARKLINE_FILL_OPACITY = 0.15;
  * 安全归一化的最大值：给定一组数值返回 max(values, 1)。
  * 至少返回 1 避免后续除零（空数据 / 全 0 数据的退化情形）。
  *
+ * 实现用循环而非 `Math.max(...values, 1)` —— 后者 spread 展开数组，
+ * values 极大（> ~100k）时会触发调用栈溢出；本组件实际数据量小，
+ * 但作为通用工具函数用 reduce 求最值更健壮（无栈深上限）。
+ *
  * @param values 要扫描的数值序列（已扁平化，可来自多条数据线）
  */
 export function safeMaxValue(values: number[]): number {
-  return Math.max(...values, 1);
+  // reduce 求最值：空数组时初值 1，保证返回值恒 ≥ 1（防除零）
+  return values.reduce((acc, v) => (v > acc ? v : acc), 1);
 }
 
 /* ============================================================
@@ -126,7 +130,8 @@ export function pointToCoord(
   height: number,
   padding: ChartPadding,
 ): Point {
-  // count ≤ 1 时 step 取 0（单点场景，水平居中），但 AreaChart 已在入口拦掉 <2 点
+  // step：count > 1 时均匀分布，否则 0（防御性 —— 调用方 buildSmoothPaths/normalizePoints
+  // 已在入口拦掉 <2 点场景，此分支理论上不可达，但作为纯函数保留兜底避免误传单点时 NaN）
   const step = count > 1 ? width / (count - 1) : 0;
   return {
     x: padding.left + index * step,
@@ -171,11 +176,18 @@ export function normalizePoints(
 ): Point[] {
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
-  // max === min 时（全相等序列）range 取 1 避免除零，所有点会落在中线
-  const range = max - min || 1;
   const w = width - pad * 2;
   const h = height - pad * 2;
   const step = values.length > 1 ? w / (values.length - 1) : 0;
+  // range = max - min，退化（max===min 全相等序列）时取 1 避免除零：
+  // 此时 (v - min) === 0，归一化为 0 → y 贴底。为让全相等序列显示为水平中线
+  // 而非贴底（视觉上常量序列更自然是水平居中），当 range 为 0 时把所有点归一到中线。
+  if (max - min === 0) {
+    // 全相等序列：所有点落在绘图区垂直中线（pad + h/2）
+    const midY = pad + h / 2;
+    return values.map((_, i) => ({ x: pad + i * step, y: midY }));
+  }
+  const range = max - min;
   return values.map((v, i) => ({
     x: pad + i * step,
     y: pad + h - ((v - min) / range) * h,
@@ -213,8 +225,13 @@ export function smoothLinePath(points: Point[]): string {
 /**
  * 构建区域闭合 path（线条 + 半透明填充用）。
  *
- * 在 {@link smoothLinePath} 基础上：从基线起 → 沿曲线走 → 回基线闭合（Z）。
+ * 在 {@link smoothLinePath} 的同款贝塞尔算法基础上：从基线起 → 沿曲线走 → 回基线闭合（Z）。
  * baseline = 绘图区底部（AreaChart）或 SVG 底部（Sparkline）。
+ *
+ * 不复用 smoothLinePath 的字符串输出 —— 直接内联同样的曲线段生成逻辑，
+ * 避免用正则剥掉前导 `M x y` 这种脆弱的字符串拼接式复用
+ * （依赖 smoothLinePath 输出格式的精确形态，负数坐标 / 多空格 / 科学计数法都会让正则失配，
+ *  区域 path 会残留多余的 M 段导致错误渲染）。
  *
  * @param points    点序列（≥ 2）
  * @param baselineY 基线 y 坐标（区域下边界）
@@ -222,12 +239,17 @@ export function smoothLinePath(points: Point[]): string {
  */
 export function smoothAreaPath(points: Point[], baselineY: number): string {
   if (points.length < 2) return "";
-  // 用同一份曲线算法生成中间段，首尾各加一条到基线的 L
-  const line = smoothLinePath(points);
-  // line 形如 "M x0 y0 C ... C xN yN"，前面补"从基线进入"，后面补"回基线闭合"
-  return `M ${points[0].x} ${baselineY} L ${points[0].x} ${points[0].y} ` +
-    line.replace(/^M [^ ]+ [^ ]+ /, "") +
-    ` L ${points[points.length - 1].x} ${baselineY} Z`;
+  // 起点：从基线垂直进入第一个数据点（L），后续复用与 smoothLinePath 相同的 C 段
+  let d = `M ${points[0].x} ${baselineY} L ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    // 控制点 x = 两端点 x 中点，控制点 y = 各自端点 y —— 与 smoothLinePath 同算法
+    const cpx = (prev.x + curr.x) / 2;
+    d += ` C ${cpx} ${prev.y}, ${cpx} ${curr.y}, ${curr.x} ${curr.y}`;
+  }
+  // 末点回到基线并闭合（Z）—— 形成"基线 → 曲线 → 基线"封闭区域用于 fill
+  return d + ` L ${points[points.length - 1].x} ${baselineY} Z`;
 }
 
 /**

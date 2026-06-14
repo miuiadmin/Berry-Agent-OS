@@ -129,8 +129,18 @@ const MessageBubble = memo(function MessageBubble({
 
   /** 助手消息是否有 block 时间线可渲染 */
   const hasTimeline = !isUser && (message.blocks ?? []).length > 0;
-  /** 流式刚启动、尚无任何内容时显示三点等待 */
-  const showTypingDots = isStreaming && (message.blocks ?? []).length === 0 && !displayContent;
+  /*
+   * 流式三点等待动画触发条件：
+   * - 必须流式活跃
+   * - blocks 为空（尚未 emit 任何 text/thinking/tool block）
+   * - content 兜底字段也为空（历史消息过渡期）
+   *
+   * 注意：这里特意用 `!message.content` 而非 `!displayContent`。displayContent 是 blocks 投影结果，
+   * 当 blocks 已有 thinking/tool 但无 text block 时 displayContent 经 trim 后为空——
+   * 此时应该走 hasTimeline 分支渲染工具/思考卡，而不是再叠三点动画。
+   * 用原始 message.content 兜底判断，避免与 blocks 投影产生二义（流式中异常清空 text block 也安全）。
+   */
+  const showTypingDots = isStreaming && (message.blocks ?? []).length === 0 && !message.content;
 
   return (
     <div className={cn("group flex flex-col", isUser ? "items-end" : "items-start")}>
@@ -191,7 +201,7 @@ const MessageBubble = memo(function MessageBubble({
         )}
         {/* Brain 审核标注（仅展示 modify / reject；approve 不显示） */}
         {!isUser && message.reviewVerdict && message.reviewVerdict !== "approve" && (
-          <BrainReviewBadge verdict={message.reviewVerdict as "modify" | "reject"} reason={message.reviewReason} />
+          <BrainReviewBadge verdict={message.reviewVerdict} reason={message.reviewReason} />
         )}
       </div>
 
@@ -237,6 +247,15 @@ export function ChatMessageList({
   const removeMessage = useChatStore((s) => s.removeMessage);
   /** 稳定引用，避免每次渲染创建新函数导致 MessageBubble memo 失效 */
   const stableRemoveMessage = useCallback((id: string) => removeMessage(id), [removeMessage]);
+  /*
+   * 把父组件传入的 onRetry/onEdit 包一层 useCallback。
+   * MessageBubble 是 memo 包装：若父组件每次重渲染都创建新的 onRetry/onEdit 闭包，
+   * memo 会判 props 变化导致整列消息全量重渲染（store 更新一次就重渲所有 bubble）。
+   * 这里用 incoming prop 作依赖做一层记忆化——只要父组件传入的回调引用稳定，
+   * 透传下去的引用就稳定；即便父组件未稳定化，也只在回调变化时重渲，而非每次 store 更新。
+   */
+  const stableRetry = useCallback((id: string) => { onRetry?.(id); }, [onRetry]);
+  const stableEdit = useCallback((id: string, content: string) => { onEdit?.(id, content); }, [onEdit]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = useT();
   /** 用户是否停留在列表底部附近（决定是否自动跟随滚动） */
@@ -289,7 +308,7 @@ export function ChatMessageList({
                 key={msg.id}
                 className={i === messages.length - 1 ? (msg.role === "user" ? "animate-msg-user" : "animate-msg-assistant") : undefined}
               >
-                <MessageBubble message={msg} onRetry={onRetry} onEdit={onEdit} onDelete={stableRemoveMessage} />
+                <MessageBubble message={msg} onRetry={stableRetry} onEdit={stableEdit} onDelete={stableRemoveMessage} />
               </div>
             ))}
           </div>

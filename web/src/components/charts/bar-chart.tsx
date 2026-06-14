@@ -21,14 +21,13 @@ import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { staggerClass } from "@/components/ui/_shared";
-import { CHART_COLOR_1, safeMaxValue } from "./chart-geometry";
+import { CHART_COLOR_1, safeMaxValue, type DataPoint } from "./chart-geometry";
 
-/** 单条柱子的数据 */
-export interface BarItem {
-  /** 行标签 */
-  label: string;
-  /** 数值（决定柱长占比，相对 maxVal 归一化） */
-  value: number;
+/**
+ * 单条柱子的数据。复用 chart-geometry 的 DataPoint（label + value），
+ * 额外允许可选的 per-bar 颜色覆盖 —— 避免重复定义一份仅多一个字段的相似接口。
+ */
+export interface BarItem extends DataPoint {
   /** 自定义柱色（默认 var(--chart-1)） */
   color?: string;
 }
@@ -67,17 +66,23 @@ export function BarChart({
   return (
     <div className={cn("space-y-2", className)}>
       {data.map((item, i) => {
-        // 柱长百分比：value/maxVal，clamp 防止 value > maxVal 时溢出
-        const widthPct = Math.min((item.value / maxVal) * 100, 100);
+        // 柱长百分比：value/maxVal，clamp 到 [0, 100]
+        //   - 上界 100：value > maxVal 时防溢出（maxVal 是数据内最大值，正常不会超，但容错）
+        //   - 下界 0：value 为负数（异常输入）时 width 会算出负值，
+        //     CSS 对负 width 按 0 处理但语义不明确，显式 clamp 到 0 更清晰
+        const widthPct = Math.max(0, Math.min((item.value / maxVal) * 100, 100));
         return (
           <div key={i} className="space-y-1">
-            <div className="flex items-center justify-between text-xs">
-              {/* 标签截断防溢出：移动端更窄（50%），桌面端放宽（60%） */}
-              <span className="text-muted-foreground truncate max-w-[50%] md:max-w-[60%]">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              {/* 标签截断防溢出：移动端更窄（50%），桌面端放宽（60%）；min-w-0 让 flex 能收缩 */}
+              <span className="min-w-0 flex-1 truncate text-muted-foreground max-w-[50%] md:max-w-[60%]">
                 {item.label}
               </span>
-              {/* tabular-nums 让数值列等宽对齐 */}
-              <span className="font-medium tabular-nums">{formatValue(item.value)}</span>
+              {/* 数值列：min-w-0 + truncate 对称处理，防止长格式化串（如 "12,345.67ms"）
+                  无限增长挤掉标签或溢出移动端视口；tabular-nums 让数值等宽对齐 */}
+              <span className="min-w-0 shrink truncate max-w-[50%] font-medium tabular-nums">
+                {formatValue(item.value)}
+              </span>
             </div>
             <div className="h-2 w-full rounded-full bg-muted">
               {/* 柱体：宽度按百分比 + stagger 类触发 CSS 入场延迟 */}

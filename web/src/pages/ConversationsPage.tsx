@@ -34,7 +34,6 @@ import { useConversationMutations } from "./use-conversation-mutations";
 
 export default function ConversationsPage() {
   const t = useT();
-  const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("conversations.title"));
 
   // ── 状态 ──
@@ -51,10 +50,8 @@ export default function ConversationsPage() {
   const setSessionId = useChatStore((s) => s.setSessionId);
 
   // ── 数据查询 ──
-  const conversationsQuery = useQuery({
-    ...queries.conversations({ search: search || undefined, sort }),
-    select: (data) => data as ConversationInfo[],
-  });
+  // queries.conversations() 已返回 ConversationInfo[]，无需 select cast（掩盖类型）
+  const conversationsQuery = useQuery(queries.conversations({ search: search || undefined, sort }));
 
   // ── Mutations ──
   const { deleteConversation, exportSingle, exportAll } =
@@ -90,7 +87,9 @@ export default function ConversationsPage() {
           className="gap-1.5 min-h-[44px] md:min-h-0"
         >
           <ArrowUpDown className="size-3.5" />
-          <span className="hidden sm:inline">
+          {/* 排序方式文案始终可见：标签本身就短（"最近" / "消息最多"），
+              隐藏后用户无法判断当前是哪种排序，违反可发现性 */}
+          <span>
             {sort === "recent"
               ? t("conversations.mostRecent")
               : t("conversations.mostMessages")}

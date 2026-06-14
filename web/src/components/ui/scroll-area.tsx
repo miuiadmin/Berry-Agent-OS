@@ -44,6 +44,9 @@ function ScrollArea({
         className={cn(
           "size-full rounded-[inherit] transition-[color,box-shadow]",
           FOCUS_RING,
+          // 覆盖 FOCUS_RING 的 outline-none：滚动容器键盘聚焦时显示 1px 细描边，
+          // 提示可滚动区域边界（FOCUS_RING 的 ring-3 在长滚动容器里视觉过重）。
+          // outline-1 在 FOCUS_RING 之后声明，胜出 cascade，与 ring-3 共同呈现。
           "focus-visible:outline-1"
         )}
       >
@@ -58,9 +61,13 @@ function ScrollArea({
 /** ScrollBar 在两种朝向下的差异（公共部分在主 className） */
 const ORIENTATION_VARIANT: Record<"vertical" | "horizontal", string> = {
   // 纵向：撑满高度、2.5 宽、左侧透明分隔线
-  vertical: "data-vertical:h-full data-vertical:w-2.5 data-vertical:border-l data-vertical:border-l-transparent",
+  // 注意：Base UI Scrollbar 暴露 data-orientation="vertical"（非裸 data-vertical），
+  // 用 data-[orientation=vertical]: 才能命中，否则下面所有尺寸类静默失效。
+  vertical:
+    "data-[orientation=vertical]:h-full data-[orientation=vertical]:w-2.5 data-[orientation=vertical]:border-l data-[orientation=vertical]:border-l-transparent",
   // 横向：撑满宽度、2.5 高、顶部透明分隔线，并切到 flex-col
-  horizontal: "data-horizontal:h-2.5 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent",
+  horizontal:
+    "data-[orientation=horizontal]:h-2.5 data-[orientation=horizontal]:flex-col data-[orientation=horizontal]:border-t data-[orientation=horizontal]:border-t-transparent",
 }
 
 /**

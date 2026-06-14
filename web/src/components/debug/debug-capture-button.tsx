@@ -16,6 +16,7 @@
 import { Bug } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { TOUCH_TARGET } from "@/components/ui/_shared";
 import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -46,9 +47,12 @@ export function DebugCaptureButton({ className }: DebugCaptureButtonProps) {
 
   if (!isDebugMode) return null;
 
-  /** 点击处理：loading 阻断 + 当前状态决定 start / stop */
+  /**
+   * 点击处理：当前状态决定 start / stop。
+   * 不重复判 loading —— Button 已 disabled={loading}，disabled 态下 onClick 不会触发，
+   * 此处再判一次是冗余死分支（违反 DRY），交由 disabled 单一控制。
+   */
   const handleClick = () => {
-    if (loading) return;
     if (isCapturing) stop();
     else start();
   };
@@ -63,8 +67,9 @@ export function DebugCaptureButton({ className }: DebugCaptureButtonProps) {
       onClick={handleClick}
       disabled={loading}
       className={cn(
-        // 移动端 size-11（44px）触控目标，桌面端 md:size-9 收回
-        "size-11 md:size-9 transition-colors",
+        // 移动端触控目标：用项目共享 TOUCH_TARGET（min-h/min-w 44px），桌面端收回。
+        // 与项目内 dialog 关闭按钮等保持同一套写法（CLAUDE.md 移动端规则示例）。
+        TOUCH_TARGET,
         // 抓包中染红：提示这是"破坏性进行中"状态（类似录制按钮）
         isCapturing && "text-destructive",
         className,

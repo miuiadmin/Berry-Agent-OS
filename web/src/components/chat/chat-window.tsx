@@ -19,6 +19,7 @@ import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { Button } from "@/components/ui/button";
 import { PanelLeft } from "lucide-react";
 import { apiGet } from "@/lib/api";
+import { textFromBlocks } from "@/lib/blocks";
 import { useT } from "@/lib/i18n";
 import {
   ChatSkeleton,
@@ -137,10 +138,23 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
       const msgs = useChatStore.getState().messages;
       const errorIdx = msgs.findIndex((m) => m.id === errorMsgId);
       if (errorIdx < 0) return;
+      // 边界：错误消息是首条（errorIdx===0）→ 前面没有 user 消息可重发，直接删除错误占位消息后返回，
+      // 否则下方会用空字符串重发，产生一条空的 user 消息
+      if (errorIdx === 0) {
+        removeMessage(errorMsgId);
+        return;
+      }
       const userMsg = msgs[errorIdx - 1];
-      if (userMsg?.role === "user") removeMessage(userMsg.id);
-      removeMessage(errorMsgId);
-      resendMessage(userMsg?.content ?? "");
+      if (userMsg?.role === "user") {
+        removeMessage(userMsg.id);
+        removeMessage(errorMsgId);
+        // doc-22 单一事实源：用户正文可能只在 TextBlock 里（content 为兜底/旧值），
+        // 优先用 textFromBlocks 投影，回退 content
+        resendMessage(textFromBlocks(userMsg.blocks, userMsg.content ?? ""));
+      } else {
+        // 紧邻的前一条不是 user（如连续两条错误消息）→ 仅删错误占位
+        removeMessage(errorMsgId);
+      }
     },
     [removeMessage, resendMessage],
   );
@@ -148,6 +162,8 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   /** 编辑用户消息：移除该消息及之后的所有消息，然后重新发送 */
   const handleEdit = useCallback(
     (messageId: string, content: string) => {
+      // content 来自 EditableMessage 的 textFromBlocks 预填值（见 message-bubble-parts），
+      // 已是用户正文投影，无需在此再投影
       removeMessagesAfter(messageId);
       removeMessage(messageId);
       sendMessage(content);
@@ -187,7 +203,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
           )}
           <h3 className="truncate text-sm font-medium text-foreground">
             {sessionId
-              ? `${t("chat.session")}: ${sessionId.slice(0, 12)}...`
+              ? `${t("chat.session")}: ${sessionId.length > 12 ? sessionId.slice(0, 12) + "…" : sessionId}`
               : t("chat.newConversation")}
           </h3>
         </div>

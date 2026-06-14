@@ -393,6 +393,23 @@ export function useChatSocket() {
           }
           break;
         }
+        /**
+         * 16.0 P5-C2：任务板新信封落板（board.message.posted → ws.type='board.message'）。
+         *
+         * 当前为最小消费：仅 debug log 证明链路通——后端 emit → WsEventBridge 转发 → 前端收到。
+         * 不创建 streaming 占位（board 事件与对话流式正交，不是 chat 消息的一部分）。
+         * 未来 §14.5 任务进展卡会消费此事件实时更新看板 UI（按 taskId 定位卡片、按 messageType 刷新徽章）。
+         */
+        case "board.message": {
+          const bm = msg as Extract<ServerMessage, { type: "board.message" }>;
+          if (import.meta.env.DEV) {
+            console.debug(
+              "[ws] board.message: 任务板新信封",
+              { taskId: bm.taskId, messageType: bm.messageType, messageId: bm.messageId, from: bm.from, to: bm.to, sessionId: bm.sessionId },
+            );
+          }
+          break;
+        }
         default:
           if (import.meta.env.DEV) {
             console.debug("[ws] unhandled message type:", (msg as { type: string }).type, msg);

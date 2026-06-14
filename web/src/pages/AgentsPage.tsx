@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queries } from "@/lib/api";
+import { queries, type AgentInfo } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -131,7 +131,8 @@ function AgentCard({
   onSelect,
   onToggle,
 }: {
-  agent: { name: string; status: string; description?: string; kind?: string; version?: string };
+  /** 复用 api.ts 的 AgentInfo，避免后端字段扩展（如新增 tier）时类型漂移 */
+  agent: AgentInfo;
   /** 列表序号（stagger 动画） */
   index: number;
   onSelect: () => void;
@@ -177,6 +178,8 @@ function AgentCard({
               </span>
             )}
           </div>
+          {/* 启停按钮：IconButton 基础组件已内置移动端 44px 触控目标（size-11 md:size-8），
+              此处无需再追加 min-h-[44px] 覆盖 */}
           <IconButton
             title={
               isEnabled ? t("agents.disableAgent") : t("agents.enableAgent")
