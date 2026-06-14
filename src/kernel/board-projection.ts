@@ -20,6 +20,7 @@
 import { getDb } from '../memory/db.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { getEventBus } from './event-bus.js';
 import {
   postBoardMessage,
   initBoard,
@@ -39,9 +40,45 @@ function safePost(taskId: string, build: () => BoardMessage, label: string): voi
   try {
     const msg = build();
     postBoardMessage(taskId, msg);
+    // P5-C1：board 信封落板后派生 EventBus 事件（让现有订阅者无感迁移，§9 P5「旧通道降兼容层」）
+    deriveEventFromBoardMessage(taskId, msg);
   } catch (err) {
     logger.debug({ err, taskId, label }, `board-projection: ${label} 落板失败（fire-and-forget，不影响主路径）`);
   }
+}
+
+/**
+ * P5-C1：从 BoardMessage 派生 EventBus 事件（现有订阅者无感迁移）。
+ *
+ * board 信封是语义层（说什么），EventBus 是传输层（怎么送达）。P5 阶段在 board 落板后
+ * 同时 emit 对应的旧 EventBus 事件名，让 WsEventBridge/Evolution/现有订阅者继续读旧事件
+ * 而不感知 board 的存在。待订阅者全切到 board thread 再删旧事件（P5-C4）。
+ */
+function deriveEventFromBoardMessage(taskId: string, msg: BoardMessage): void {
+  try {
+    const bus = getEventBus();
+    switch (msg.type) {
+      case 'delegate':
+        // delegate → delegation.created（现有订阅者：onTermination/cleanupTaskState）
+        bus.emit('delegation.created', { delegationId: taskId, sessionId: msg.sessionId ?? '', targetAgent: msg.to });
+        break;
+      case 'report':
+        // report(done) → delegation.completed / report(blocked) → delegation.failed
+        if (msg.status === 'done') {
+          bus.emit('delegation.completed', { delegationId: taskId, targetAgent: msg.from, durationMs: 0 });
+        } else {
+          bus.emit('delegation.failed', { delegationId: taskId, targetAgent: msg.from, error: msg.summary });
+        }
+        break;
+      case 'ask':
+        // ask(@brain) → checkpoint_needed（现有 correction-flow/Evolution 订阅者）
+        if (msg.to === 'brain') {
+          bus.emit('delegation.checkpoint_needed', { delegationId: taskId, trigger: 'board_ask' });
+        }
+        break;
+      // tell / tool_request / tool_result / command 暂无对应旧事件——P5 后续按需添加
+    }
+  } catch { /* 派生事件失败不影响 board 落板主路径 */ }
 }
 
 // ─── delegate 投影：派发点落「指派」信封 ───
