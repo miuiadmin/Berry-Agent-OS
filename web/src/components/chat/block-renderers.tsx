@@ -1,14 +1,16 @@
 /**
- * 对话内联 block 渲染器（设计文档/22）。
+ * 对话内联 block 渲染器（设计文档/22）——单气泡时间线。
  *
- * 把消息的 displayBlocks（thinking / tool / delegation）按序内联渲染在对话气泡之前，
- * 对齐 Claude Code / OpenCode 的「工具调用 / 推理嵌在对话里」范式——不再是气泡下方的分离兄弟节点。
+ * MessageTimeline 按 message.blocks 数组顺序渲染整条 AI 响应（思考→文字段→工具→文字段…穿插），
+ * 对齐 Claude Code / OpenCode 的「工具调用 / 推理嵌在对话里」范式。所有 block 在同一个气泡内按
+ * 到达时间编排，不再按 type 分组堆在气泡外。
  *
  * 组件：
- *   - ToolBlockCard：单个 tool block 的内联折叠卡（input/output/state/duration）。
- *   - InlineLeadBlocks：按 displayBlocks 序列渲染 thinking + tool（text 由外层正文气泡承载，此处跳过）。
+ *   - ToolBlockCard：单个 tool block 的折叠卡（input/output/state/duration）。
+ *   - DelegationBlockCard：委派卡（targetAgent + state）。
+ *   - MessageTimeline：按 blocks 序 map 渲染（thinking→ThinkingProcess、text→ReactMarkdown、
+ *     tool→ToolBlockCard、delegation→DelegationBlockCard、review→跳过由徽章单独渲染）。
  *
- * 复用 ThinkingProcess（推理）与 ToolCallCards 的卡片视觉（PRE_BASE / 折叠头），不引入新视觉语言。
  * 移动端硬规则：触控目标 min-h-[44px] md:min-h-0；hover 仅桌面端。
  */
 
@@ -19,16 +21,17 @@ import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import type { ToolBlock, DelegationBlock } from "@/lib/blocks";
+import type { ToolBlock, DelegationBlock, Block } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
 
-/** 输入/输出 pre 共享样式（与 tool-call-cards.tsx 的 PRE_BASE 一致） */
+/** 工具卡 input/output 的 pre 共享样式（等宽小字、可滚动、自动换行） */
 const PRE_BASE =
   "mt-0.5 rounded px-2 py-1.5 overflow-x-auto overflow-y-auto text-[10px] leading-relaxed whitespace-pre-wrap break-all";
 
 /**
- * 把 block 的 unknown 载荷规整为可展示字符串：对象/原始值 JSON.stringify，字符串原样。
+ * 把 block 的 unknown 载荷规整为可展示字符串：对象/原始值 JSON.stringify（2 空格缩进），字符串原样。
+ * 用于 tool 的 input / output / error 展示。
  */
 function payloadToString(v: unknown): string {
   if (v == null) return "";
@@ -41,16 +44,10 @@ function payloadToString(v: unknown): string {
 }
 
 /**
- * 单个 tool block 的内联折叠卡（镜像 ToolCallCards 的 ToolCallDetail 视觉，但消费 ToolBlock 模型）。
- * 出生即终态（completed/failed）；pending/running 时显示 spinner。
+ * 单个 tool block 的折叠卡（input/output/state/durationMs）。出生即终态（completed/failed），
+ * pending/running 显示 spinner。点击 header 展开 input/output pre。
  */
-const ToolBlockCard = memo(function ToolBlockCard({
-  block,
-  isActive,
-}: {
-  block: ToolBlock;
-  isActive: boolean;
-}) {
+const ToolBlockCard = memo(function ToolBlockCard({ block }: { block: ToolBlock }) {
   const [expanded, setExpanded] = useState(false);
   const t = useT();
 
@@ -82,7 +79,7 @@ const ToolBlockCard = memo(function ToolBlockCard({
           )}
         </span>
       </button>
-      {expanded && (
+      {expanded && (inputStr || outputStr) && (
         <div className="mt-1 ml-4 space-y-1.5 text-[11px]">
           {inputStr && (
             <div>
@@ -105,15 +102,74 @@ const ToolBlockCard = memo(function ToolBlockCard({
 });
 
 /**
- * 单气泡时间线：按 message.blocks 数组顺序渲染（思考→文字段→工具→文字段…穿插，对齐 Claude Code）。
- * 替代 InlineLeadBlocks 的「按 type 分组 + 气泡外渲染」——整条响应在一个气泡内按到达时间穿插。
- * - thinking → ThinkingProcess（带 durationMs 计时）
- * - text → ReactMarkdown 段（经 markdownComponents；流式光标附在最后一个 text 段）
- * - tool → ToolBlockCard（折叠卡）
- * - delegation → 委派卡（targetAgent + state）
- * - review → 跳过（BrainReviewBadge 由 message.reviewVerdict 单独渲染，restore 从 review block 投影）
+ * 委派卡（Brain→子 agent 委派的表头）：targetAgent + state。可折叠展开嵌套子会话待 childSessionId 落地。
+ */
+const DelegationBlockCard = memo(function DelegationBlockCard({ block }: { block: DelegationBlock }) {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70 min-h-[44px] md:min-h-0">
+      <ChevronRight className="size-2.5" />
+      <Wrench className="size-3" />
+      <span>{block.targetAgent}</span>
+      <span className="ml-auto text-[11px] uppercase tracking-wide">{block.state}</span>
+    </div>
+  );
+});
+
+/**
+ * 按 block.type 分发到对应渲染器。MessageTimeline 的 map 用此函数保持 switch 扁平。
  *
- * @param message           当前消息（取 blocks 有序数组）
+ * @param block           单个 block
+ * @param i               在 blocks 中的序号（key + 流式光标判定）
+ * @param ctx             渲染上下文（是否最后一块、是否流式活跃、markdown 组件、thinkingSteps）
+ */
+function renderBlock(block: Block, i: number, ctx: {
+  isLast: boolean;
+  isActive: boolean;
+  markdownComponents: Components;
+  thinkingSteps: ChatMessage["thinkingSteps"];
+}): React.ReactNode {
+  switch (block.type) {
+    case "thinking":
+      return (
+        <ThinkingProcess
+          key={`tg-${i}`}
+          steps={ctx.thinkingSteps ?? []}
+          reasoning={block.text}
+          durationMs={block.durationMs}
+          isActive={ctx.isActive}
+        />
+      );
+    case "text":
+      // 流式光标只附在「最后一块且是 text」上：流式时正在生成的就是末尾文字段；
+      // 若末尾是工具卡（工具刚到、新文字段未开始），不显示光标，避免错位到消息中间
+      return (
+        <div
+          key={`tx-${i}`}
+          className={cn(
+            "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
+            ctx.isActive && ctx.isLast && "streaming-cursor",
+          )}
+        >
+          <ReactMarkdown components={ctx.markdownComponents}>{block.text}</ReactMarkdown>
+        </div>
+      );
+    case "tool":
+      return <ToolBlockCard key={block.id ?? `tl-${i}`} block={block} />;
+    case "delegation":
+      return <DelegationBlockCard key={block.id ?? `dg-${i}`} block={block} />;
+    case "review":
+      // review block 不在时间线渲染——BrainReviewBadge 由 message.reviewVerdict 单独渲染（restore 从 review block 投影）
+      return null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * 单气泡时间线：按 message.blocks 数组顺序渲染整条 AI 响应（思考→文字段→工具→文字段…穿插）。
+ * user 消息不渲染（走正文气泡）。无 blocks 时返回 null（由上层走 markdown fallback）。
+ *
+ * @param message           当前消息（取 blocks 有序数组 + thinkingSteps）
  * @param isActive          流式活跃（驱动 ThinkingProcess 折叠态 / text 段光标）
  * @param markdownComponents text 段的 markdown 渲染组件（由 chat-message-list 注入，复用其配置）
  */
@@ -129,54 +185,17 @@ export const MessageTimeline = memo(function MessageTimeline({
   if (message.role === "user") return null;
   const blocks = message.blocks ?? [];
   if (blocks.length === 0) return null;
-  // 流式光标只附在「最后一个 block 且是 text」上——流式时正在生成的就是末尾文字段；
-  // 若末尾是工具卡（工具刚到、新文字段未开始），不显示光标（无内容在流），避免光标错位到消息中间
+  const lastIdx = blocks.length - 1;
   return (
     <div className="space-y-2">
-      {blocks.map((block, i) => {
-        switch (block.type) {
-          case "thinking":
-            return (
-              <ThinkingProcess
-                key={`tg-${i}`}
-                steps={message.thinkingSteps ?? []}
-                reasoning={block.text}
-                durationMs={block.durationMs}
-                isActive={isActive}
-              />
-            );
-          case "text":
-            return (
-              <div
-                key={`tx-${i}`}
-                className={cn(
-                  "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
-                  isActive && i === blocks.length - 1 && "streaming-cursor",
-                )}
-              >
-                <ReactMarkdown components={markdownComponents}>{block.text}</ReactMarkdown>
-              </div>
-            );
-          case "tool":
-            return <ToolBlockCard key={block.id ?? `tl-${i}`} block={block} isActive={isActive} />;
-          case "delegation":
-            return (
-              <div
-                key={block.id ?? `dg-${i}`}
-                className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70 min-h-[44px] md:min-h-0"
-              >
-                <ChevronRight className="size-2.5" />
-                <Wrench className="size-3" />
-                <span>{block.targetAgent}</span>
-                <span className="ml-auto text-[11px] uppercase tracking-wide">{block.state}</span>
-              </div>
-            );
-          case "review":
-            return null; // BrainReviewBadge 由 message.reviewVerdict 单独渲染
-          default:
-            return null;
-        }
-      })}
+      {blocks.map((block, i) =>
+        renderBlock(block, i, {
+          isLast: i === lastIdx,
+          isActive,
+          markdownComponents,
+          thinkingSteps: message.thinkingSteps,
+        }),
+      )}
     </div>
   );
 });
