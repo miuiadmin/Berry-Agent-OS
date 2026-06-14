@@ -28,6 +28,7 @@ import {
   updateBoardMeta,
   getBoardMeta,
   applyBoardStatus,
+  transferLeadership,
 } from './board-repo.js';
 import type { BoardMessage } from '../contracts/board-message.js';
 
@@ -130,6 +131,8 @@ export interface DelegateEnvelopeOpts {
   parentTaskId?: string;
   /** active_scope（allowTools/blockTools/allowPaths，§5.5 继承） */
   scope?: Record<string, unknown>;
+  /** 整任务交接（§12 注：handoff 特例，true 时换板 leader = opts.to） */
+  transferLeadership?: boolean;
 }
 
 /**
@@ -151,6 +154,10 @@ export function postDelegateEnvelope(taskId: string, opts: DelegateEnvelopeOpts)
     addBoardMember(taskId, opts.to, 'member');
     // 板状态 created → in_progress（首次 delegate 触发）
     updateBoardMeta(taskId, { boardStatus: 'in_progress' });
+    // 整任务交接（§12 注）：transferLeadership:true 时换板 leader（新 leader=opts.to，旧 leader 降 member）
+    if (opts.transferLeadership) {
+      transferLeadership(taskId, opts.to);
+    }
 
     return {
       id: genId('bmsg'),
@@ -163,6 +170,7 @@ export function postDelegateEnvelope(taskId: string, opts: DelegateEnvelopeOpts)
       ts: Date.now(),
       subTaskGoal: opts.subTaskGoal,
       scope: opts.scope,
+      transferLeadership: opts.transferLeadership,
     };
   }, 'delegate');
 }

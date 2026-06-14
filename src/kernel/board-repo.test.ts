@@ -34,6 +34,7 @@ import {
   addBoardMember,
   getBoardMembers,
   isBoardMember,
+  transferLeadership,
   getBoardContext,
 } from './board-repo.js';
 import type { BoardMessage } from '../contracts/board-message.js';
@@ -463,5 +464,35 @@ describe('board-repo 16.0 任务板存储层', () => {
 
   it('getBoardContext：完全不存在的 taskId 返回 null（getBoardMeta 返回 null 短路）', () => {
     expect(getBoardContext('task-nonexistent-ctx')).toBeNull();
+  });
+
+  // ─── transferLeadership（§12 注 handoff = delegate 携带 transferLeadership:true）───
+
+  it('transferLeadership：换 leader + 花名册 role 调整（旧 leader 降 member，新 leader 升 leader）', () => {
+    insertAgentTask('task-handoff');
+    initBoard('task-handoff', { goal: '交接测试', leader: 'brain' });
+    addBoardMember('task-handoff', 'code', 'member'); // code 已在册为 member，将升 leader
+    expect(getBoardMeta('task-handoff')!.leader).toBe('brain');
+
+    transferLeadership('task-handoff', 'code');
+
+    // 板 leader 元数据换为 code
+    expect(getBoardMeta('task-handoff')!.leader).toBe('code');
+    // 花名册：code 升 leader，brain 降 member
+    const members = getBoardMembers('task-handoff');
+    expect(members.find((m) => m.agentId === 'code')?.role).toBe('leader');
+    expect(members.find((m) => m.agentId === 'brain')?.role).toBe('member');
+  });
+
+  it('transferLeadership：新 leader 不在册时自动入册升 leader；幂等（同 leader no-op）', () => {
+    insertAgentTask('task-handoff2');
+    initBoard('task-handoff2', { goal: '交接2', leader: 'brain' });
+    // research 不在册 → 自动入册
+    transferLeadership('task-handoff2', 'research');
+    expect(getBoardMeta('task-handoff2')!.leader).toBe('research');
+    expect(getBoardMembers('task-handoff2').find((m) => m.agentId === 'research')?.role).toBe('leader');
+    // 幂等：再 transfer 给已是 leader 的 research 无变化
+    expect(() => transferLeadership('task-handoff2', 'research')).not.toThrow();
+    expect(getBoardMeta('task-handoff2')!.leader).toBe('research');
   });
 });

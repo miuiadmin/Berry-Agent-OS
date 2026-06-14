@@ -208,6 +208,34 @@ export function isBoardMember(taskId: string, agentId: string): boolean {
   return !!row;
 }
 
+/**
+ * 整任务交接（§12 注：handoff = delegate 携带 transferLeadership:true）。
+ *
+ * 换板 leader：新 leader（=delegate 的 to）进花名册升 'leader'，旧 leader 降 'member'，板元数据 leader 更新。
+ * 幂等：新 leader 已是当前 leader 则 no-op。审计信封（带 transferLeadership:true 的 delegate）由调用方 post。
+ *
+ * @param taskId     板 id
+ * @param newLeader  新 leader agentId（delegate 的被指派者）
+ */
+export function transferLeadership(taskId: string, newLeader: string): void {
+  const db = getDb();
+  const meta = getBoardMeta(taskId);
+  if (!meta || meta.leader === newLeader) return; // 幂等：已是 leader 则 no-op
+  const oldLeader = meta.leader;
+  // 新 leader 先入册（INSERT OR IGNORE：若已是成员不重复插入，role 由下方 UPDATE 升 leader）
+  addBoardMember(taskId, newLeader, 'leader');
+  // 旧 leader 降 member（若仍在花名册）
+  if (oldLeader) {
+    db.prepare(`UPDATE task_members SET role = 'member' WHERE task_id = ? AND agent_id = ?`)
+      .run(taskId, oldLeader);
+  }
+  // 新 leader 升 leader（覆盖：若已作为成员存在则升 role）
+  db.prepare(`UPDATE task_members SET role = 'leader' WHERE task_id = ? AND agent_id = ?`)
+    .run(taskId, newLeader);
+  // 板 leader 元数据更新
+  updateBoardMeta(taskId, { leader: newLeader });
+}
+
 // ─── 板创建（task 升级为 board 的入口）───
 
 /**
