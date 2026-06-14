@@ -73,6 +73,8 @@ export class BoardObserver {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** 当前扫描间隔（毫秒），用于日志诊断 */
   private intervalMs: number = DEFAULT_INTERVAL_MS;
+  /** board.message.posted 事件订阅退订函数（null = 未订阅） */
+  private eventUnsub: (() => void) | null = null;
 
   constructor(private deps: BoardObserverDeps = {}) {}
 
@@ -146,6 +148,13 @@ export class BoardObserver {
       this.scanAllInProgress();
     }, intervalMs);
     logger.info({ intervalMs }, 'BoardObserver 已启动定时看板扫描');
+
+    // 16.0 §10.1 事件驱动看板：board 活动时立即扫（不等 30s 定时器），异常即下钻 brain。
+    // board.message.posted 是 board-projection 每次 board 活动后 emit 的信号——订阅它实现
+    // 「发言即扫」，让风险检测（drift/stuck/spawn_explosion）在板活动瞬间触发，不必等定时器。
+    this.eventUnsub = getEventBus().on('board.message.posted', (payload) => {
+      this.observeTask(payload.taskId, payload.sessionId);
+    });
   }
 
   /** 停止定时扫描（幂等：重复 stop 安全） */
@@ -153,6 +162,11 @@ export class BoardObserver {
     if (!this.timer) return;
     clearInterval(this.timer);
     this.timer = null;
+    // 退订事件驱动看板
+    if (this.eventUnsub) {
+      this.eventUnsub();
+      this.eventUnsub = null;
+    }
     logger.info('BoardObserver 已停止定时看板扫描');
   }
 
