@@ -216,3 +216,35 @@ export function initBoard(taskId: string, opts: {
   // leader 进花名册
   addBoardMember(taskId, opts.leader, 'leader');
 }
+
+// ─── brain 看板上下文组装（§10.5，P3 brain 看板用）───
+
+/** brain 看板上下文：近 N 条发言 + 板元数据 + 花名册，供 board-observer / board-ask-handler 拼 prompt */
+export interface BoardContext {
+  meta: BoardMetaRow;
+  members: Array<{ agentId: string; role: string }>;
+  recentMessages: BoardMessage[];
+  /** 板发言总数（预算用） */
+  totalMessages: number;
+}
+
+/**
+ * 取 brain 看板上下文（§10.5）。
+ *
+ * 不是整块板全文，而是「当前活跃窗口（近 N 条）+ 板元数据 + 花名册」。
+ * 冻结快照模式（15.0 设计原则 2）—— 组装一次保护 prompt cache。
+ * 大成果附件（diff/长文档）存文件，板上只存引用 + 摘要（§10.5）。
+ *
+ * @param taskId  板 id
+ * @param windowSize 近 N 条发言（默认 20）
+ */
+export function getBoardContext(taskId: string, windowSize: number = 20): BoardContext | null {
+  const meta = getBoardMeta(taskId);
+  if (!meta) return null;
+  return {
+    meta,
+    members: getBoardMembers(taskId),
+    recentMessages: getRecentBoardMessages(taskId, windowSize),
+    totalMessages: getBoardThreadCount(taskId),
+  };
+}
