@@ -17,7 +17,6 @@ import { registerWorkspaceContextRoutes } from '../intelligence/workspace-contex
 import { registerPluginScopeRoutes } from '../intelligence/plugin-scope-api.js';
 import { registerTemplateRoutes } from '../intelligence/template-api.js';
 import { registerAsyncDelegationRoutes } from '../intelligence/async-delegation-api.js';
-import { registerTeamBuilderRoutes } from '../intelligence/team-builder-api.js';
 import { registerProviderRoutes } from '../providers/api-routes.js';
 import { registerMissionRoutes } from '../kernel/mission-api.js';
 // 16.0 任务板仓库：HTTP API 读取板状态（thread + meta + members + brain 上下文）的唯一入口
@@ -618,9 +617,6 @@ export function createApiRouter(deps: WebServerDependencies) {
 
   // --- Async delegation routes ---
   registerAsyncDelegationRoutes(route, () => deps.asyncDelegationService, readBody, json);
-
-  // --- Team builder routes ---
-  registerTeamBuilderRoutes(route, () => deps.teamBuilderService, readBody, json);
 
   // --- Provider management routes ---
   registerProviderRoutes(route, () => deps.getProviderRegistry?.(), readBody, json, deps.configService);

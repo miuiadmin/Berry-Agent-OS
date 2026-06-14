@@ -62,8 +62,6 @@ const BRIDGED_EVENTS: EventName[] = [
   'cron.review',
   // 13.0 §5.1.3: Brain 纠偏事件（全局广播，前端 UI 可显示纠偏时间线）
   'brain.correction',
-  // 13.0 §11.5: 跨 squad 交接（结构化 handoff 通知）
-  'brain.handoff',
   // 13.0 P9: Brain 观察 blocker/question signal 后触发的 INTERVENE 事件
   'brain.signal_intervention',
   // 13.0 §5.3.10: Agent 目录变更推送

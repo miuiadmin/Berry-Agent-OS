@@ -139,30 +139,6 @@ export const CORE_SCHEMA_SQL = `
     archived_at INTEGER
   );
 
-  CREATE TABLE IF NOT EXISTS agent_messages (
-    id TEXT PRIMARY KEY,
-    task_id TEXT REFERENCES agent_tasks(id),
-    run_id TEXT REFERENCES run_artifacts(id),
-    session_id TEXT,
-    correlation_id TEXT NOT NULL,
-    from_agent TEXT NOT NULL,
-    to_agent TEXT NOT NULL,
-    type TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'created'
-      CHECK(status IN (
-        'created','persisted','dispatched','acknowledged',
-        'running','completed','failed','timeout','cancelled'
-      )),
-    error TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-    persisted_at INTEGER,
-    dispatched_at INTEGER,
-    acknowledged_at INTEGER,
-    delivered_at INTEGER,
-    processed_at INTEGER
-  );
-
   CREATE TABLE IF NOT EXISTS task_events (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES agent_tasks(id),
@@ -779,8 +755,6 @@ export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_agent_tasks_run ON agent_tasks(run_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_agent_tasks_corr ON agent_tasks(correlation_id);
   CREATE INDEX IF NOT EXISTS idx_agent_task_workspaces_agent ON agent_task_workspaces(agent_name, created_at);
-  CREATE INDEX IF NOT EXISTS idx_agent_msg_to_status ON agent_messages(to_agent, status, created_at);
-  CREATE INDEX IF NOT EXISTS idx_agent_msg_corr ON agent_messages(correlation_id);
   CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_task_events_run ON task_events(run_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_review_session ON review_requests(session_id, created_at);

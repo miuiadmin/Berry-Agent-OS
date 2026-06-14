@@ -149,26 +149,6 @@ export interface TaskEvent {
   createdAt: number;
 }
 
-export interface AgentMessage {
-  id: string;
-  taskId: string | null;
-  runId: string | null;
-  sessionId: string | null;
-  correlationId: string;
-  fromAgent: string;
-  toAgent: string;
-  type: string;
-  payload: Record<string, unknown>;
-  status: TaskStatus;
-  error: string | null;
-  createdAt: number;
-  persistedAt: number | null;
-  dispatchedAt: number | null;
-  acknowledgedAt: number | null;
-  deliveredAt: number | null;
-  processedAt: number | null;
-}
-
 export interface AgentCapability {
   name: string;
   taskTypes: TaskType[];

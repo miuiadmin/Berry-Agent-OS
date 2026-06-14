@@ -305,15 +305,6 @@ export type EventMap = {
     newConstraints?: { forbiddenTools?: string[]; maxRemainingTokens?: number; requiredApproach?: string };
     createdAt: number;
   };
-  /** 13.0 §11.5: 跨 squad 交接（与 mission.handoff 互补，提供更结构化 payload） */
-  'brain.handoff': {
-    missionId: string;
-    fromSquad: string;
-    toSquad: string;
-    what: string;
-    content?: string;
-    createdAt: number;
-  };
   /** 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送） */
   'brain.budget.alert': {
     sessionId?: string;

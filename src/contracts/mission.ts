@@ -298,28 +298,6 @@ export const MAX_OBSERVATIONS_PER_TASK = 500;
 // ─────────────────────────────────────────────────────────────────
 // Mission 事件类型（用于 EventBus 广播）
 // ─────────────────────────────────────────────────────────────────
-
-/** Mission 生命周期事件 */
-export interface MissionEvents {
-  /** Mission 被创建 */
-  'mission.created': { missionId: string; goal: string; taskCount: number };
-  /** Mission 状态变更 */
-  'mission.status_changed': { missionId: string; oldStatus: string; newStatus: string };
-  /** 任务状态变更 */
-  'mission.task_updated': { missionId: string; taskId: string; status: TaskStatus; who: string };
-  /** 任务依赖满足，可以开始执行 */
-  'mission.task_ready': { missionId: string; taskId: string; who: string; what: string };
-  /** Mission 完成（所有 tasks done） */
-  'mission.completed': { missionId: string; goal: string };
-  /** squad 被创建（裂变） */
-  'mission.squad_created': { missionId: string; squadId: string; parentSquadId?: string };
-  /** 信号发出 */
-  'mission.signal': { missionId: string; squadId: string; type: SignalType; msg: string };
-  /** 交接完成 */
-  'mission.handoff': { missionId: string; from: string; to: string; what: string };
-}
-
-// ─────────────────────────────────────────────────────────────────
 // §12.3/§12.6: 系统提示注入上下文（mission/squad/plan 一站式）
 // ─────────────────────────────────────────────────────────────────
 
