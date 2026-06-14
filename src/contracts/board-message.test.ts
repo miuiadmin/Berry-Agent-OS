@@ -25,6 +25,23 @@ describe('BoardMessage 契约（16.0 P1 信封判别联合）', () => {
     expect((withChild as { childTaskId?: string }).childTaskId).toBe('t2');
   });
 
+  it('delegate handoff：transferLeadership:true 表达整任务交接（§12 注）', () => {
+    const handoff = BoardMessageSchema.parse({
+      ...base, type: 'delegate', to: 'code2', subTaskGoal: '接手整块板',
+      transferLeadership: true,
+    });
+    expect((handoff as { transferLeadership?: boolean }).transferLeadership).toBe(true);
+  });
+
+  it('delegate debate：mode=debate + debateConfig 表达辩论子区（§5.7）', () => {
+    const debate = BoardMessageSchema.parse({
+      ...base, type: 'delegate', to: 'research', subTaskGoal: '辩论方案 A vs B',
+      mode: 'debate', debateConfig: { rounds: 3 },
+    });
+    expect((debate as { mode?: string }).mode).toBe('debate');
+    expect((debate as { debateConfig?: { rounds?: number } }).debateConfig?.rounds).toBe(3);
+  });
+
   it('report：附成果，必填 summary + status', () => {
     const msg = BoardMessageSchema.parse({
       ...base, type: 'report', to: 'brain', summary: '改完了', status: 'done',

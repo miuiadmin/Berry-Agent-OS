@@ -216,15 +216,6 @@ const CommandMsgSchema = z.object({
  * 每个变体包含完整信封字段（id/from/to/taskId/ts + type-specific body），
  * 使 z.infer<BoardMessageSchema> 即可直接用于存储/读取/传输。
  */
-const EnvelopeFields = {
-  id: z.string(),
-  from: z.string(),
-  taskId: z.string(),
-  parentTaskId: z.string().optional(),
-  sessionId: z.string().optional(),
-  ts: z.number(),
-};
-
 export const BoardMessageSchema = z.discriminatedUnion('type', [
   DelegateMsgSchema,
   ReportMsgSchema,
@@ -237,6 +228,23 @@ export const BoardMessageSchema = z.discriminatedUnion('type', [
 
 /** 完整 BoardMessage（信封头字段 + body 字段的合并类型，由 Zod 推导） */
 export type BoardMessage = z.infer<typeof BoardMessageSchema>;
+
+// ─── variant 类型别名（consumer 用别名替代 Extract<BoardMessage, {type:...}> 样板）───
+
+/** @指派信封（leader 把子任务交给某 agent） */
+export type DelegateMessage = z.infer<typeof DelegateMsgSchema>;
+/** @附成果信封（必经②产出审核专员） */
+export type ReportMessage = z.infer<typeof ReportMsgSchema>;
+/** @板上发言信封（知会/讨论） */
+export type TellMessage = z.infer<typeof TellMsgSchema>;
+/** @求助信封（@peer 板内求助 / @brain 升级） */
+export type AskMessage = z.infer<typeof AskMsgSchema>;
+/** @工具调用信封（撞①权限专员闸） */
+export type ToolRequestMessage = z.infer<typeof ToolRequestMsgSchema>;
+/** @工具结果信封（回发起者 + 落板，不再过闸） */
+export type ToolResultMessage = z.infer<typeof ToolResultMsgSchema>;
+/** @治理指令信封（③brain 板上下令：redirect/stop/inspect/dispatch） */
+export type CommandMessage = z.infer<typeof CommandMsgSchema>;
 
 // ─── 板状态机（§6.5.1）───
 
