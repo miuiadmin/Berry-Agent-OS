@@ -303,7 +303,7 @@ export function ChatMessageList({
           </div>
         </div>
       ) : (
-        <ScrollArea ref={scrollRef} className="h-full p-4" onScroll={handleScroll}>
+        <ScrollArea viewportRef={scrollRef} className="h-full p-4" onViewportScroll={handleScroll}>
           <div className="mx-auto max-w-3xl space-y-4">
             {messages.map((msg, i) => (
               <div

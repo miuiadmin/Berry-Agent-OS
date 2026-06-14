@@ -556,6 +556,9 @@ const zh: Record<string, string> = {
   "brain.feedback": "反馈问题",
   "brain.feedbackPlaceholder": "描述你觉得 Brain 修改有什么问题…",
   "brain.submitFeedback": "提交反馈",
+  "orchestration.correction": "Brain 纠偏",
+  "orchestration.signal_intervention": "Brain 介入",
+  "orchestration.checker_dispatch": "Brain 派审",
 
   // ===== 13.0 AskUser 交互 =====
   "askUser.noResponse": "用户未回复",

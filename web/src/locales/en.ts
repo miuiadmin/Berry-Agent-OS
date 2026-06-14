@@ -556,6 +556,9 @@ const en: Record<string, string> = {
   "brain.feedback": "Report issue",
   "brain.feedbackPlaceholder": "Describe what's wrong with Brain's modification…",
   "brain.submitFeedback": "Submit feedback",
+  "orchestration.correction": "Brain correction",
+  "orchestration.signal_intervention": "Brain intervention",
+  "orchestration.checker_dispatch": "Brain checker",
 
   // ===== 13.0 AskUser Interactive =====
   "askUser.noResponse": "No response from user",

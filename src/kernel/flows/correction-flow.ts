@@ -1,5 +1,6 @@
 import type { CorrectionFlowDeps } from '../delegation-orchestrator.js';
 import { getEventBus } from '../event-bus.js';
+import { peekBlockCollector } from '../block-collector.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
@@ -172,6 +173,20 @@ export class CorrectionFlow {
           : undefined,
         createdAt: Date.now(),
       });
+
+      // 对话内联（doc 22 扩展）：Brain 纠偏同步投影 orchestration block——让用户在气泡内看到
+      // 「Brain 对 X agent 做了 adjust/stop」。peek 本轮 collector（key=delegationId=taskId）；
+      // 找不到（mission 路径无 collector）静默跳过，编排块非强制。live-only（不落库，刷新不保留）。
+      const corrCollector = peekBlockCollector(delegationId);
+      if (corrCollector) {
+        corrCollector.onOrchestration({
+          action: 'correction',
+          target: entry?.targetAgent,
+          severity: result?.suggestedSeverity ?? baseSeverityFromCorrection(correction),
+          detail: correction.instruction,
+          createdAt: Date.now(),
+        });
+      }
     } catch (err) {
       logger.warn({ err, delegationId }, 'brain.correction event emit failed');
     }

@@ -25,14 +25,36 @@ import { cn } from "@/lib/utils"
 import { FOCUS_RING } from "@/components/ui/_shared"
 
 /**
- * 滚动容器根。
- * 默认 relative，宽度高度由调用方 className 控制。
+ * ScrollArea 暴露的 props。
+ *
+ * ⚠️ Root vs Viewport 的职责差异（曾导致流式输出不自动滚到底）：
+ *   - Root：position:relative 的布局容器，**没有 overflow，不滚动**。className / style 等普通 div
+ *     属性继续走 ...props 喂给它。
+ *   - Viewport：唯一 overflow:scroll 的真实滚动元素。要程序化滚动（scrollTop = scrollHeight）
+ *     或监听滚动位置，ref / onScroll 必须绑到 Viewport——绑到 Root 上 scrollTop/scrollHeight 恒为
+ *     0、scroll 事件不冒泡到 Root，自动跟随、滚到底按钮、isNearBottom 判定全部失效。
+ *   为消除这个踩坑面，wrapper 显式区分两类 prop：滚动相关走 viewportRef / onViewportScroll
+ *   （转发给 Viewport），调用方一看签名就知道该传哪个。
+ *   Base UI 的 mergeProps 会把消费者 onScroll 与内部 computeThumbPosition 的 onScroll 合并
+ *   （两者都触发），自定义滚动条同步不受影响。
+ */
+interface ScrollAreaProps extends ScrollAreaPrimitive.Root.Props {
+  /** 指向内部 Viewport（唯一 overflow:scroll 元素）的 DOM 引用——程序化滚动 / 滚动监听绑这里 */
+  viewportRef?: React.Ref<HTMLDivElement>;
+  /** Viewport 滚动回调（监听滚动位置用此 prop，而非 onScroll——后者会落到不滚动的 Root 上失效） */
+  onViewportScroll?: React.UIEventHandler<HTMLDivElement>;
+}
+
+/**
+ * 滚动容器根。默认 relative，宽度高度由调用方 className 控制。
  */
 function ScrollArea({
   className,
   children,
+  viewportRef,
+  onViewportScroll,
   ...props
-}: ScrollAreaPrimitive.Root.Props) {
+}: ScrollAreaProps) {
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
@@ -41,6 +63,8 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
+        ref={viewportRef}
+        onScroll={onViewportScroll}
         className={cn(
           "size-full rounded-[inherit] transition-[color,box-shadow]",
           FOCUS_RING,

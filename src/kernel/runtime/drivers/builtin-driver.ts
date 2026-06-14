@@ -55,6 +55,19 @@ export class BuiltinDriver implements AgentRuntime {
         },
       );
 
+      // 对话内联（doc 22）：非流式 chat() 拿到的 result.reasoning 投影为 thinking_delta AgentEvent——
+      // delegation-orchestrator 的 case 'thinking_delta' 会调 blockCollector.onReasoningDelta → stream.block thinking。
+      // 之前只 yield text_delta/tool_pending/execution_completed，builtin runtime 委派的思考过程永远到不了前端。
+      // 与 external-driver.ts mapNormalizedEvent 的 thinking 分支对齐（统一投影范式）。
+      if (result.reasoning) {
+        yield {
+          kind: 'thinking_delta',
+          executionId,
+          timestamp: Date.now(),
+          data: { text: result.reasoning },
+        };
+      }
+
       if (result.content) {
         yield {
           kind: 'text_delta',

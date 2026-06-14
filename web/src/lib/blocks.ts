@@ -73,8 +73,25 @@ export interface ReviewBlock {
   originalDraft?: string;
 }
 
+/**
+ * Brain 编排动作 block（内联编排卡：correction 纠偏 / signal_intervention 介入 / checker_dispatch 派审）。
+ * live-only：实时显示但不落库，刷新后不保留（见后端 contracts/message-blocks.ts OrchestrationBlock）。
+ */
+export interface OrchestrationBlock {
+  type: 'orchestration';
+  /** 幂等键（`${messageId}#orch#${action}_${createdAt}`） */
+  id: string;
+  action: 'correction' | 'signal_intervention' | 'checker_dispatch';
+  /** 目标 agent */
+  target?: string;
+  /** 严重度（correction / signal_intervention） */
+  severity?: 'low' | 'medium' | 'high';
+  /** 指令/原因摘要 */
+  detail?: string;
+}
+
 /** Block 判别联合——对话内容的统一模型 */
-export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock;
+export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock | OrchestrationBlock;
 
 /**
  * stream.block 事件载荷（后端 StreamBlockPayload 的前端镜像，见 contracts/message-blocks.ts）。
@@ -88,7 +105,7 @@ export interface StreamBlockPayload {
   messageId: string;
   /** block 唯一键（text/thinking 为 `${messageId}#text|#thinking`；tool 为 `${messageId}#tool#${name}#${seq}`） */
   blockId: string;
-  blockType: 'text' | 'thinking' | 'tool' | 'delegation' | 'review';
+  blockType: 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration';
   /** 创建事件携带完整 block（tool/delegation 出生即终态）；text/thinking 无此字段 */
   block?: Block;
   /** tool/delegation 状态（冗余于 block.state，便于不携带完整 block 的 patch 事件） */
@@ -156,6 +173,18 @@ export function applyBlockToBlocks(blocks: Block[] | undefined, p: StreamBlockPa
   // 且一轮至多一个审核 → 直接 findIndex type==='review'（与 tool/delegation 同「整体替换」机制）。
   if (p.blockType === 'review' && p.block) {
     const idx = list.findIndex((b) => b.type === 'review');
+    if (idx >= 0) {
+      const copy = list.slice();
+      copy[idx] = p.block;
+      return copy;
+    }
+    return [...list, p.block];
+  }
+
+  // orchestration：按 blockId upsert（整体替换，与 tool/delegation 同机制——编排动作出生即终态）。
+  // live-only 块：只 live 累积在 message.blocks，落库路径不含（刷新后消失）。
+  if (p.blockType === 'orchestration' && p.block) {
+    const idx = list.findIndex((b) => b.type === 'orchestration' && (b as { id: string }).id === p.blockId);
     if (idx >= 0) {
       const copy = list.slice();
       copy[idx] = p.block;

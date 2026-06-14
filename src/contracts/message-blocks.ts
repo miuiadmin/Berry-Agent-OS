@@ -19,8 +19,13 @@ import type { ReviewVerdict } from './review.js';
 
 // ─── Block 类型判别字面量 ───
 
-/** Block 的 type 判别值（与 message_blocks.block_type CHECK 约束一致） */
-export type BlockType = 'text' | 'thinking' | 'tool' | 'delegation' | 'review';
+/**
+ * Block 的 type 判别值。
+ * 持久化类型（text/thinking/tool/delegation/review）与 message_blocks.block_type CHECK 约束一致；
+ * 'orchestration'（Brain 编排动作）为 live-only——实时 stream.block 显示但不落库（故不在 CHECK 内），
+ * 刷新后不保留。详见 block-collector.onOrchestration。
+ */
+export type BlockType = 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration';
 
 // ─── ToolBlock 状态机（OpenCode 式：call + result 同一 block 的生命周期阶段） ───
 
@@ -104,10 +109,29 @@ export interface ReviewBlock {
 }
 
 /**
+ * Brain 编排动作块（内联编排卡，与工具/委派卡穿插）。
+ * live-only：onOrchestration emit stream.block 实时显示，但不进 timeline（不落库），刷新后不保留。
+ * action 取实际 emit 的 brain.* 事件类型（correction 纠偏 / signal_intervention 介入 / checker_dispatch 派审）。
+ */
+export interface OrchestrationBlock {
+  type: 'orchestration';
+  /** 幂等键（`${messageId}#orch#${action}#${createdAt}`），防同动作重复建块 */
+  id: string;
+  /** 编排事件类型 */
+  action: 'correction' | 'signal_intervention' | 'checker_dispatch';
+  /** 目标 agent（被纠偏/介入/派审的 agent） */
+  target?: string;
+  /** 严重度（仅 correction / signal_intervention 有意义） */
+  severity?: 'low' | 'medium' | 'high';
+  /** 指令/原因摘要（correction.instruction / 介入信号 / 派审原因） */
+  detail?: string;
+}
+
+/**
  * 对话内容 Block 判别联合。一条消息由若干有序 Block 组成（对齐 Claude Code content[] / OpenCode parts[]）。
  * 渲染时 blocks.map(block => <BlockRenderer/>)；事件流以 stream.block 单事件族承载。
  */
-export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock;
+export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock | OrchestrationBlock;
 
 // ─── Zod schema 镜像（WS 校验 / message_blocks.payload_json 序列化） ───
 
@@ -151,6 +175,15 @@ const ReviewBlockSchema = z.object({
   originalDraft: z.string().optional(),
 });
 
+const OrchestrationBlockSchema = z.object({
+  type: z.literal('orchestration'),
+  id: z.string(),
+  action: z.enum(['correction', 'signal_intervention', 'checker_dispatch']),
+  target: z.string().optional(),
+  severity: z.enum(['low', 'medium', 'high']).optional(),
+  detail: z.string().optional(),
+});
+
 /** Block 判别联合 schema（按 type 判别） */
 export const BlockSchema: z.ZodType<Block> = z.discriminatedUnion('type', [
   TextBlockSchema,
@@ -158,6 +191,7 @@ export const BlockSchema: z.ZodType<Block> = z.discriminatedUnion('type', [
   ToolBlockSchema,
   DelegationBlockSchema,
   ReviewBlockSchema,
+  OrchestrationBlockSchema,
 ]);
 
 // ─── stream.block 事件 payload ───

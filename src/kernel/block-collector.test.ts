@@ -8,6 +8,7 @@ import {
   type BlockEmitter,
 } from './block-collector.js';
 import type { StreamBlockPayload } from '../contracts/message-blocks.js';
+import { SYNTHETIC_FINAL_CONTENT_MARKER } from '../llm/tool-caller.js';
 
 /**
  * BlockCollector 单测 —— 钉死对话内联事件归一的不变量。
@@ -401,6 +402,27 @@ describe('BlockCollector 时间线穿插（chronological：文本按工具边界
     const blocks = c.buildBlocks({ draftResponse: 'Brain 改写后的版本' });
     const text = blocks.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
     expect(text).toBe('Brain 改写后的版本'); // 不再是「原始草稿」
+  });
+
+  it('合成兜底语（[tool_loop:synthetic]）：剥 marker + 追加错误标签到流式正文，保留正文不丢、marker 不落库', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    c.onTextDelta('已生成的真实正文');
+    c.flushPendingDeltas();
+    // 工具超限等场景：runToolLoop 返回带 marker 的合成兜底语（非流式正文前缀，否则会误走 Brain 改写替换分支丢正文）
+    const blocks = c.buildBlocks({ draftResponse: `${SYNTHETIC_FINAL_CONTENT_MARKER} 工具调用已达上限。最后结果:\nfoo` });
+    const text = blocks.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
+    expect(text).toContain('已生成的真实正文'); // 流式正文保留（核心：修「超限丢正文」）
+    expect(text).toContain('工具调用已达上限'); // 错误标签追加
+    expect(text).not.toContain(SYNTHETIC_FINAL_CONTENT_MARKER); // marker 不落库
+  });
+
+  it('合成兜底语 + 无流式正文：标签作唯一文本块（marker 不落库）', () => {
+    const c = new BlockCollector('s1', 't1', undefined, emit);
+    // 无 onTextDelta（预算超限前无输出 / 非流式直出）
+    const blocks = c.buildBlocks({ draftResponse: `${SYNTHETIC_FINAL_CONTENT_MARKER} Token 预算已超限，停止执行` });
+    const text = blocks.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('');
+    expect(text).toBe('Token 预算已超限，停止执行');
+    expect(text).not.toContain(SYNTHETIC_FINAL_CONTENT_MARKER);
   });
 
   it('思考计时 live：首文字到达时 markReasoningEnd emit thinking 替换带 durationMs，且不重复文本', () => {

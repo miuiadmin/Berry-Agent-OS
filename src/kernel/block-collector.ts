@@ -20,7 +20,9 @@
 
 import { getEventBus } from './event-bus.js';
 import { genId } from '../utils/id.js';
-import type { StreamBlockPayload, ToolBlock, TextBlock, ThinkingBlock, DelegationBlock, DelegationBlockState, ReviewBlock, Block } from '../contracts/message-blocks.js';
+import type { StreamBlockPayload, ToolBlock, TextBlock, ThinkingBlock, DelegationBlock, DelegationBlockState, ReviewBlock, OrchestrationBlock, Block } from '../contracts/message-blocks.js';
+// 合成兜底语 marker 识别（runToolLoop 的 tool-limit/budget/error/abort 产出，需在 buildBlocks 追加而非替换正文）
+import { isSyntheticFinalContent, SYNTHETIC_FINAL_CONTENT_MARKER } from '../llm/tool-caller.js';
 /** stream.block emit 函数类型（默认走全局 EventBus；测试可注入捕获函数） */
 export type BlockEmitter = (payload: StreamBlockPayload) => void;
 
@@ -74,6 +76,8 @@ export class BlockCollector {
   private delegationBlock: DelegationBlock | undefined;
   /** 本轮 Brain 审核裁决 block 引用（在 timeline 末尾，turn 终态时 onReview push）。仅 modify/reject 落库。 */
   private reviewBlock: ReviewBlock | undefined;
+  /** 已 emit 的 orchestration blockId（live-only 幂等防重，不进 timeline） */
+  private emittedOrchestrationIds = new Set<string>();
   /** callId → {block 引用, startedAt}：onToolComplete 原地更新 timeline 中的 running tool（按引用 mutate） */
   private pendingTools = new Map<string, { block: ToolBlock; startedAt: number }>();
 
@@ -465,6 +469,50 @@ export class BlockCollector {
   }
 
   /**
+   * Brain 编排动作（brain.correction 纠偏 / signal_intervention 介入 / checker.dispatch 派审）→ 内联 orchestration block。
+   *
+   * live-only：出生即终态（无状态机），emit stream.block 供前端实时显示「Brain 对 X agent 做了纠偏/介入」
+   * 编排卡（与工具/委派卡同范式穿插）；**不进 timeline**（不落库）→ 刷新后不保留。有意取舍：编排动作是
+   * 「正在发生」的瞬时指示，落库需重建 message_blocks 表改 block_type CHECK（核心表风险高），价值不抵风险。
+   *
+   * 幂等：同 action+createdAt 的重复编排事件不重建（EventBus 多订阅可能重复触发）。
+   * 调用方应自行 peek 守卫（mission 路径无 collector 时静默跳过，编排块非强制）。
+   *
+   * @param opts.action    编排事件类型
+   * @param opts.target    目标 agent
+   * @param opts.severity  严重度（correction / signal_intervention）
+   * @param opts.detail    指令/原因摘要
+   * @param opts.createdAt 事件时间戳（幂等键组成 + 排序用）
+   */
+  onOrchestration(opts: {
+    action: 'correction' | 'signal_intervention' | 'checker_dispatch';
+    target?: string;
+    severity?: 'low' | 'medium' | 'high';
+    detail?: string;
+    createdAt: number;
+  }): void {
+    const blockId = `${this.messageId}#orch#${opts.action}_${opts.createdAt}`;
+    // 幂等防重：同动作同时间戳的重复编排事件不重建
+    if (this.emittedOrchestrationIds.has(blockId)) return;
+    this.emittedOrchestrationIds.add(blockId);
+    const block: OrchestrationBlock = { type: 'orchestration', id: blockId, action: opts.action };
+    if (opts.target) block.target = opts.target;
+    if (opts.severity) block.severity = opts.severity;
+    if (opts.detail) block.detail = opts.detail;
+    // ⚠️ live-only：只 emit，不 push 进 timeline → buildBlocks 落库时不含编排块（避开 block_type CHECK）
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId,
+      blockType: 'orchestration',
+      block,
+      ts: opts.createdAt,
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+  }
+
+  /**
    * 构建本轮完整 Block[]——返回 timeline（chronological 穿插序），供调用方落库到 message_blocks。
    *
    * 对齐 Claude Code 时间线模型：delegation（表头）→ thinking（带 durationMs）→ 文字段↔工具穿插 → review（末尾），
@@ -495,7 +543,21 @@ export class BlockCollector {
     if (opts.draftResponse) {
       const textSegs = result.filter((b): b is TextBlock => b.type === 'text');
       const joined = textSegs.map((s) => s.text).join('');
-      if (textSegs.length === 0) {
+      if (isSyntheticFinalContent(opts.draftResponse)) {
+        // 合成兜底语（tool-limit / budget / LLM 失败 / 取消 / 监督停止，由 [tool_loop:synthetic] marker 标识）：
+        // 剥 marker 得错误标签，追加到流式正文末段（保留正文 + 显示「为何中断」）；无流式正文则标签作唯一文本块。
+        // 集中在此（所有持久化路径都经 buildBlocks）——修「工具超限刷新丢正文」+ 防 marker 落库，
+        // 覆盖 draft.response / final.response / handoff / approveReviewDegraded 等全部终态路径，不再依赖每个 handler 记得剥。
+        const label = opts.draftResponse.slice(SYNTHETIC_FINAL_CONTENT_MARKER.length).trim();
+        if (textSegs.length > 0) {
+          textSegs[textSegs.length - 1].text += `\n\n${label}`;
+        } else {
+          const textBlock: Block = { type: 'text', text: label };
+          const reviewIdx = result.findIndex((b) => b.type === 'review');
+          if (reviewIdx >= 0) result.splice(reviewIdx, 0, textBlock);
+          else result.push(textBlock);
+        }
+      } else if (textSegs.length === 0) {
         // 无流式文本段（非流式直出 finalText）→ 插 draftResponse 为 text block（review 前）
         const textBlock: Block = { type: 'text', text: opts.draftResponse };
         const reviewIdx = result.findIndex((b) => b.type === 'review');

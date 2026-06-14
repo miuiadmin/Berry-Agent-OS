@@ -11,6 +11,24 @@ import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('tool-caller');
 
+// === Synthetic Final Content Marker（合成兜底语标识） ===
+
+/**
+ * 合成兜底语统一 marker——runToolLoop 在限流 / 超预算 / LLM 失败 / 取消 / 监督停止等场景产出的
+ * finalContent 都以此前缀开头，标识「非模型真实输出」。供上游（delegation-orchestrator 的
+ * draft.response handler）区分：
+ *   - 合成语：不应覆盖流式期间已累积的真实正文，应把错误标签（剥掉 marker）追加到末尾；
+ *   - 真实最终草稿 / Brain 改写（无 marker）：正常覆盖。
+ * 修「工具调用超限后刷新页面，流式正文被错误语整段覆盖丢失」bug（详见设计文档/22 持久化漏斗）。
+ */
+export const SYNTHETIC_FINAL_CONTENT_MARKER = '[tool_loop:synthetic]';
+/** 判定一段 finalContent 是否为 runToolLoop 合成的兜底语（非模型真实输出） */
+export function isSyntheticFinalContent(text: string | undefined | null): boolean {
+  return !!text && text.startsWith(SYNTHETIC_FINAL_CONTENT_MARKER);
+}
+/** 内部用：给合成兜底语加 marker 前缀（引用 export 常量，避免硬编码漂移） */
+const markSynthetic = (text: string): string => `${SYNTHETIC_FINAL_CONTENT_MARKER} ${text}`;
+
 // === Stop Condition ===
 
 export type StopCondition =
@@ -158,7 +176,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
     if (signal?.aborted) {
       await fireOnStop('aborted');
       return {
-        finalContent: '任务已取消',
+        finalContent: markSynthetic('任务已取消'),
         reasoning: accumulatedReasoning || undefined,
         toolCalls,
         messages: workingMessages,
@@ -176,7 +194,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
           logger.info({ instruction: correction.instruction }, 'tool-loop: Brain 下令停止');
           await fireOnStop('aborted');
           return {
-            finalContent: correction.instruction ?? '监督系统要求停止当前任务',
+            finalContent: markSynthetic(correction.instruction ?? '监督系统要求停止当前任务'),
             reasoning: accumulatedReasoning || undefined,
             toolCalls,
             messages: workingMessages,
@@ -230,7 +248,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       if (!check.allowed) {
         await fireOnStop('budget_exceeded');
         return {
-          finalContent: check.alert?.message ?? 'Token 预算已超限，停止执行',
+          finalContent: markSynthetic(check.alert?.message ?? 'Token 预算已超限，停止执行'),
           reasoning: accumulatedReasoning || undefined,
           toolCalls,
           messages: workingMessages,
@@ -261,7 +279,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
       logger.warn({ step: stepIndex, err: errMsg }, 'tool-loop: LLM 调用失败，提前终止');
       await fireOnStop('error');
       return {
-        finalContent: `LLM 调用失败（步骤 ${stepIndex}）：${errMsg}。已执行 ${toolCalls.length} 次工具调用。`,
+        finalContent: markSynthetic(`LLM 调用失败（步骤 ${stepIndex}）：${errMsg}。已执行 ${toolCalls.length} 次工具调用。`),
         reasoning: accumulatedReasoning || undefined,
         toolCalls,
         messages: workingMessages,
@@ -465,7 +483,7 @@ export async function runToolLoop(params: ToolLoopParams): Promise<ToolLoopResul
         .map((r) => r.content)
         .join('\n');
       await fireOnStop('limit_reached');
-      return { finalContent: `工具调用已达上限。最后结果:\n${lastText}`, reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
+      return { finalContent: markSynthetic(`工具调用已达上限。最后结果:\n${lastText}`), reasoning: accumulatedReasoning || undefined, toolCalls, messages: workingMessages };
     }
   }
 }

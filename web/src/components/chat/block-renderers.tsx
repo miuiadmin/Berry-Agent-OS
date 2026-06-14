@@ -17,12 +17,12 @@
 import { useState, useMemo, memo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
+import { ChevronRight, Wrench, Check, X, Loader2, ShieldAlert, Zap, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MARKDOWN_PROSE } from "@/components/ui/_shared";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import type { ToolBlock, DelegationBlock, Block } from "@/lib/blocks";
+import type { ToolBlock, DelegationBlock, OrchestrationBlock, Block } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
 
@@ -128,6 +128,65 @@ const DelegationBlockCard = memo(function DelegationBlockCard({ block }: { block
 });
 
 /**
+ * Brain 编排动作卡（内联编排时间线）：correction 纠偏 / signal_intervention 介入 / checker_dispatch 派审。
+ * 与 ToolBlockCard / DelegationBlockCard 视觉对齐——同一行式：图标 + 标签 + 右侧元信息。
+ * severity 配色：high=destructive 红 / medium=amber 黄 / low 或无=muted。
+ * live-only：编排块不落库，刷新后不保留（见 contracts/message-blocks.ts OrchestrationBlock）。
+ */
+const OrchestrationBlockCard = memo(function OrchestrationBlockCard({ block }: { block: OrchestrationBlock }) {
+  const t = useT();
+  // 图标按 action 分发：correction=盾牌警 / signal_intervention=闪电 / checker_dispatch=眼睛
+  const Icon = block.action === "correction" ? ShieldAlert : block.action === "signal_intervention" ? Zap : Eye;
+  const sevColor =
+    block.severity === "high"
+      ? "text-destructive"
+      : block.severity === "medium"
+        ? "text-amber-600 dark:text-amber-500"
+        : "text-muted-foreground/70";
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] min-h-[44px] md:min-h-0">
+      {/* 与工具卡的 ChevronRight 列对齐（编排卡无展开，故占位透明） */}
+      <ChevronRight className="size-2.5 shrink-0 opacity-0" />
+      <Icon className={cn("size-3 shrink-0", sevColor)} />
+      <span className={cn("font-medium", sevColor)}>{t(`orchestration.${block.action}`)}</span>
+      {block.target && <code className="font-mono text-[11px] text-muted-foreground/70">{block.target}</code>}
+      {block.severity && (
+        <span className={cn("ml-auto text-[11px] uppercase tracking-wide", sevColor)}>{block.severity}</span>
+      )}
+    </div>
+  );
+});
+
+/**
+ * 相邻 block 间距表——按「上一块 type + 当前块 type」决定当前块的 margin-top。
+ *
+ * 背景：原 <div className="space-y-2"> 对所有相邻块一律 8px，导致用户感知「连续工具之间空空的」。
+ * 改为按相邻 pair 分三档：
+ *   - 紧贴（mt-px ≈ 1px）：tool/delegation 连续成串——同一组「机器动作」，应视觉聚合；
+ *   - 中等（mt-1.5 = 6px）：tool/delegation 与正文 text/thinking 相接——动作与人类语言的过渡；
+ *   - 维持原 8px（mt-2）：thinking↔text / text↔text 等其余组合，不回归原有节奏。
+ *
+ * 移动端硬规则：此处只调块间 margin-top，不碰 ToolBlockCard/DelegationBlockCard 的 min-h-[44px]
+ * md:min-h-0（触控目标硬规则保留）。桌面端 md:min-h-0 已取消 min-height，连续工具卡在桌面端
+ * 会真正紧贴；移动端因 44px 卡高，紧贴组内卡间是 1px + 卡自身高度，视觉上是一串连贯的小卡。
+ *
+ * @param prev  上一个实际渲染块的 type（首块传 undefined；review/null 块已被 map 阶段过滤）
+ * @param cur   当前块 type
+ * @returns     Tailwind margin-top 类名（首块返回空串，避免顶部多出间距）
+ */
+function spacingForPair(prev: Block["type"] | undefined, cur: Block["type"]): string {
+  // 首块无 margin-top（与气泡顶部 padding 自然衔接）
+  if (prev == null) return "";
+  // tool/delegation/orchestration 互为相邻 → 紧贴（机器/编排动作成组）
+  const isMachine = (t: Block["type"]) => t === "tool" || t === "delegation" || t === "orchestration";
+  if (isMachine(prev) && isMachine(cur)) return "mt-px";
+  // 机器动作 ↔ 正文/思考 → 中等过渡
+  if (isMachine(prev) !== isMachine(cur)) return "mt-1.5";
+  // 其余（thinking↔text / thinking↔thinking / text↔text）→ 维持原 8px
+  return "mt-2";
+}
+
+/**
  * 按 block.type 分发到对应渲染器。MessageTimeline 的 map 用此函数保持 switch 扁平。
  *
  * @param block           单个 block
@@ -169,6 +228,8 @@ function renderBlock(block: Block, i: number, ctx: {
       return <ToolBlockCard key={block.id ?? `tl-${i}`} block={block} />;
     case "delegation":
       return <DelegationBlockCard key={block.id ?? `dg-${i}`} block={block} />;
+    case "orchestration":
+      return <OrchestrationBlockCard key={block.id ?? `or-${i}`} block={block} />;
     case "review":
       // review block 不在时间线渲染——BrainReviewBadge 由 message.reviewVerdict 单独渲染（restore 从 review block 投影）
       return null;
@@ -198,16 +259,31 @@ export const MessageTimeline = memo(function MessageTimeline({
   const blocks = message.blocks ?? [];
   if (blocks.length === 0) return null;
   const lastIdx = blocks.length - 1;
+  // 维护「上一个实际渲染块的 type」：review/null 块不渲染，不参与相邻间距判定（避免把工具组拆开）
+  let prevType: Block["type"] | undefined;
   return (
-    <div className="space-y-2">
-      {blocks.map((block, i) =>
-        renderBlock(block, i, {
+    // 去掉 space-y-2：块间 margin-top 由 spacingForPair 按相邻 pair 自决（紧贴/中等/原 8px 三档）
+    <div>
+      {blocks.map((block, i) => {
+        const node = renderBlock(block, i, {
           isLast: i === lastIdx,
           isActive,
           markdownComponents,
           thinkingSteps: message.thinkingSteps,
-        }),
-      )}
+        });
+        // review/null 块不渲染，也不计入相邻关系
+        if (node == null) return null;
+        // 当前块顶部 margin（替代原外层 space-y-2 的统一 8px）
+        const mt = spacingForPair(prevType, block.type);
+        prevType = block.type;
+        // 始终用稳定 key 包一层：流式中新 block 到达会让某个块的 prevType 变化、mt 随之切换，
+        // 若 key 跟着变会 remount 丢 ToolBlockCard/ThinkingProcess 的展开态，故 key 固定为 blk-${i}
+        return (
+          <div key={`blk-${i}`} className={mt}>
+            {node}
+          </div>
+        );
+      })}
     </div>
   );
 });

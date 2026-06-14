@@ -6,8 +6,15 @@ import { toolInputString, toolResultString } from '../contracts/message-blocks.j
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import { redactSecrets } from '../observability/redaction.js';
+// 合成兜底语 marker（tool-loop 内部信号）——落审计表前剥除，闭合「marker 绝不落库」约束
+import { isSyntheticFinalContent, SYNTHETIC_FINAL_CONTENT_MARKER } from '../llm/tool-caller.js';
 
 const logger = getLogger('audit-recorder');
+
+/** 剥合成兜底语 marker 前缀（[tool_loop:synthetic]）——draft/finalResponse 存审计表前清洗为干净文本 */
+function stripSyntheticMarker(text: string): string {
+  return isSyntheticFinalContent(text) ? text.slice(SYNTHETIC_FINAL_CONTENT_MARKER.length).trim() : text;
+}
 
 export class AuditRecorder {
   private db: Database.Database;
@@ -90,10 +97,10 @@ export class AuditRecorder {
         // 15.0 D3-1（V-4 补全）：draft_response / final_response 是 Agent 生成的文本，
         // 同样会回显或转述工具结果中的密钥（如用户在对话里贴的 key 被 Agent 复述）。
         // 与 review_input 的 user_message/tool_calls 同等 redact，避免明文密钥落库。
-        redactSecrets(params.draft),
+        redactSecrets(stripSyntheticMarker(params.draft)),
         reviewInput,
         params.verdict,
-        redactSecrets(params.finalResponse),
+        redactSecrets(stripSyntheticMarker(params.finalResponse)),
         params.reason ?? null,
         Date.now(),
         Date.now(),
