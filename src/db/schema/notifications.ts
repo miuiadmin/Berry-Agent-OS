@@ -1,7 +1,6 @@
 import { sqliteTable, text, integer, unique } from 'drizzle-orm/sqlite-core';
 import { workspaces } from './workspaces.js';
 import { users } from './users.js';
-import { cronJobs } from './scheduler.js';
 
 export const notifications = sqliteTable('notifications', {
   id: text('id').primaryKey(),
@@ -24,21 +23,4 @@ export const notificationPreferences = sqliteTable('notification_preferences', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 }, (table) => [
   unique().on(table.workspaceId, table.userId),
-]);
-
-export const webhookDeliveries = sqliteTable('webhook_deliveries', {
-  id: text('id').primaryKey(),
-  workspaceId: text('workspace_id').notNull().references(() => workspaces.id),
-  jobId: text('job_id').notNull().references(() => cronJobs.id),
-  triggerEvent: text('trigger_event'),
-  dedupeKey: text('dedupe_key'),
-  signatureStatus: text('signature_status'),
-  status: text('status').notNull(),
-  requestHeaders: text('request_headers', { mode: 'json' }).$type<Record<string, string> | null>(),
-  requestBody: text('request_body'),
-  responseStatus: integer('response_status'),
-  error: text('error'),
-  receivedAt: integer('received_at', { mode: 'timestamp' }).notNull(),
-}, (table) => [
-  unique().on(table.jobId, table.dedupeKey),
 ]);

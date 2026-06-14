@@ -504,10 +504,6 @@ const zh: Record<string, string> = {
   "events.missionCompleted": "任务已完成",
   "events.missionAllDone": "所有任务已完成",
 
-  // ===== 13.0 Agent 协作面板 =====
-  "agentChat.title": "Agent 协作",
-  "agentChat.empty": "暂无 Agent 间对话",
-
   // ===== 13.0 Brain 审核 =====
   "brain.reviewTitle": "Brain 审核",
   "brain.approved": "已通过",

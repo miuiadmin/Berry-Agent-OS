@@ -5,7 +5,6 @@ export * from './agents.js';
 export * from './projects.js';
 export * from './tasks.js';
 export * from './comments.js';
-export * from './scheduler.js';
 export * from './executions.js';
 export * from './memory.js';
 export * from './plugins.js';

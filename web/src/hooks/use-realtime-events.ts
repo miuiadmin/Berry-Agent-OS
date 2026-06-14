@@ -2,7 +2,7 @@
  * 实时事件 hook。
  *
  * 订阅 WebSocket 事件总线，自动 invalidate React Query 缓存 + 显示 toast 通知。
- * 覆盖：task / agent / notification / scheduler / MCP / mission / agent_dialogue 七大类事件。
+ * 覆盖：task / agent / notification / scheduler / MCP / mission 六大类事件。
  * 仅在 DashboardLayout 挂载时注册（全局唯一）。
  *
  * 设计：使用声明式事件映射表（SIMPLE_EVENTS / TOAST_EVENTS）代替重复的
@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { useWsStore } from "@/lib/stores/ws-store";
 import { useT } from "@/lib/i18n";
 import { useMissionStore, type Mission, type MissionTask } from "@/lib/stores/mission-store";
-import { useAgentChatStore, type AgentChatMessage } from "@/lib/stores/agent-chat-store";
 
 // ─── 简单事件：仅 invalidate 指定 query keys ───────────────────────
 
@@ -81,25 +80,6 @@ const TOAST_EVENTS: Record<string, ToastEventConfig> = {
         description: error,
       };
     },
-  },
-  "scheduler.job_failed": {
-    queryKeys: [["scheduler-jobs"], ["scheduler-queue"]],
-    toToast: (p, t) => {
-      const { name, error } = p as { name?: string; error?: string };
-      return {
-        variant: "error",
-        title: t("events.jobFailed", { name: name ?? "unknown" }),
-        description: error,
-      };
-    },
-  },
-  "scheduler.chain_approval_pending": {
-    queryKeys: [["scheduler-jobs"]],
-    toToast: (_p, t) => ({
-      variant: "info",
-      title: t("events.chainApproval"),
-      description: t("events.chainApprovalDesc"),
-    }),
   },
   "mcp.failed": {
     queryKeys: [["mcp-status"]],
@@ -190,32 +170,6 @@ export function useRealtimeEvents() {
         missionStore.updateMission(p.missionId, { status: "completed", progressPercent: 100 });
         queryClient.invalidateQueries({ queryKey: ["missions"] });
         toast.success(t("events.missionAllDone"));
-      }),
-    );
-
-    /** Agent 间对话 → 写入 agentChatStore */
-    unsubs.push(
-      subscribe("agent_dialogue", (payload) => {
-        const p = payload as {
-          id?: string; sessionId?: string; taskId?: string;
-          from?: string; to?: string; direction?: string;
-          messageType?: string; content?: string; correlationId?: string;
-        };
-        if (p.id) {
-          const agentChatStore = useAgentChatStore.getState();
-          agentChatStore.addMessage({
-            id: p.id,
-            sessionId: p.sessionId ?? "",
-            taskId: p.taskId,
-            fromAgent: p.from ?? "",
-            toAgent: p.to ?? "",
-            direction: (p.direction as AgentChatMessage["direction"]) ?? "request",
-            messageType: p.messageType ?? "agent.question",
-            content: p.content ?? "",
-            correlationId: p.correlationId,
-            timestamp: Date.now(),
-          });
-        }
       }),
     );
 

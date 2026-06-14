@@ -504,10 +504,6 @@ const en: Record<string, string> = {
   "events.missionCompleted": "Mission completed",
   "events.missionAllDone": "All missions completed",
 
-  // ===== 13.0 Agent Chat Panel =====
-  "agentChat.title": "Agent Collaboration",
-  "agentChat.empty": "No inter-agent dialogues yet",
-
   // ===== 13.0 Brain Review =====
   "brain.reviewTitle": "Brain Review",
   "brain.approved": "Approved",
