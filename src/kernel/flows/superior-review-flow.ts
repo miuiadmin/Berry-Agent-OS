@@ -9,6 +9,7 @@ import type { TurnRecord } from '../../contracts/review.js';
 import { genId } from '../../utils/id.js';
 import { getLogger } from '../../utils/logger.js';
 import { BrainDecisionRecorder } from '../brain-decision-recorder.js';
+import { postReportEnvelope } from '../board-projection.js';
 import { getToolByName } from '../../tools/index.js';
 import type Database from 'better-sqlite3';
 
@@ -213,17 +214,35 @@ export class SuperiorReviewFlow {
     switch (result.verdict) {
       case 'approve': {
         if (agentId) this.ctx.trustManager.recordApproval(agentId);
+        // 16.0 P3-S2：②审核裁决落板（approve→report done，board 状态经 applyBoardStatus→completed）
+        postReportEnvelope(pending.delegationId, {
+          from: 'reviewer', to: 'leader',
+          summary: result.modifiedResponse ?? pending.turn.draftResponse,
+          status: 'done', sessionId: pending.turn.sessionId,
+        });
         this.escalateOrComplete(pending, result.modifiedResponse);
         break;
       }
       case 'modify': {
         if (agentId) this.ctx.trustManager.recordApproval(agentId);
+        // 16.0 P3-S2：②modify→report partial（改写后产出，board 状态→in_progress）
+        postReportEnvelope(pending.delegationId, {
+          from: 'reviewer', to: 'leader',
+          summary: result.modifiedResponse ?? pending.modifiedResponse ?? pending.turn.draftResponse,
+          status: 'partial', sessionId: pending.turn.sessionId,
+        });
         this.escalateOrComplete(pending, result.modifiedResponse ?? pending.modifiedResponse);
         break;
       }
       case 'reject': {
         if (agentId) this.ctx.trustManager.recordRejection(agentId);
         logger.info({ superiorName: pending.currentSuperiorName, reason: result.reason }, 'Superior rejected output');
+        // 16.0 P3-S2：②reject→report blocked（打回重做，board 状态→failed）
+        postReportEnvelope(pending.delegationId, {
+          from: 'reviewer', to: 'leader',
+          summary: result.reason ?? 'Superior rejected',
+          status: 'blocked', sessionId: pending.turn.sessionId,
+        });
         this.onChainRejected?.(pending.originalCorrelationId, result.reason ?? 'Superior rejected');
         break;
       }
