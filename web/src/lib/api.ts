@@ -118,6 +118,8 @@ export interface AgentInfo {
 export interface TaskInfo {
   id: string;
   taskType: string;
+  /** 任务状态：与后端 TaskStatus 枚举对齐（见 TASK_STATUS_VALUES）。
+   *  类型保留为 string 以兼容后端未来新增状态，不强制收敛为联合类型。 */
   status: string;
   targetAgent: string;
   createdAt: string;
@@ -128,6 +130,26 @@ export interface TaskInfo {
   outputPayload?: string;
   error?: string;
 }
+
+/**
+ * 已知的 Task 状态枚举（与后端 TaskStatus 常量对齐）。
+ * 集中定义避免各页面（如 TasksPage 的筛选下拉）各自硬编码一份字符串数组，
+ *  防止后端新增状态（如 'paused'）时前端漏更新选项。
+ *  TaskInfo.status 仍保留 string 类型——后端未来新增值不会破坏编译，
+ *  此处只是"已知值清单"用于驱动 UI 选项。
+ */
+export const TASK_STATUS_VALUES = [
+  "created",
+  "dispatched",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "timeout",
+  "resumable",
+] as const;
+/** 已知任务状态联合类型（用于精确标注，但 TaskInfo.status 仍为 string 兼容新值） */
+export type TaskStatus = (typeof TASK_STATUS_VALUES)[number];
 
 export interface ConversationInfo {
   sessionId: string;

@@ -74,7 +74,7 @@ export default function ConversationsPage() {
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder={t("conversations.searchPlaceholder")}
-            className="pl-9 h-10 md:h-[unset]"
+            className="pl-9 h-11 md:h-8"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
         </div>
@@ -176,7 +176,15 @@ export default function ConversationsPage() {
 /** 标题最大长度（首条消息截取后超出加省略号） */
 const TITLE_MAX = 80;
 
-/** 展示标题：有标题用标题，无标题用首条消息截取，都没有用 sessionId */
+/**
+ * 展示标题：有标题用标题，无标题用首条消息截取，都没有用 sessionId。
+ *
+ * 注：ConversationItem 的 <p> 已带 `truncate` 类做 CSS 视觉截断，这里的 JS slice
+ *   主要是"无 title 时把超长首条消息提前裁短"——避免 CSS truncate 在窄屏
+ *   下才生效而宽屏裸露出整段。两者职责不完全重叠，CSS 是兜底视觉、JS 是
+ *   语义层裁剪。其他页面（LogsPage/NotificationsPage）用纯 CSS truncate/
+ *   line-clamp，是因为它们没有"首条消息当标题"这种动态来源。
+ */
 function displayTitleFor(conv: ConversationInfo): string {
   if (conv.title) return conv.title;
   if (conv.firstMessage) {

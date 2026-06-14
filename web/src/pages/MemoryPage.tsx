@@ -31,7 +31,6 @@ type Layer = "agent" | "workspace" | "global";
 
 export default function MemoryPage() {
   const t = useT();
-  const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("memory.title"));
 
   // ── 筛选 + 表单状态 ──
@@ -68,6 +67,17 @@ export default function MemoryPage() {
     layer, scopeId,
     () => setCreateState({ show: false, key: "", value: "" }),
   );
+
+  /**
+   * 集中计算单条记忆的操作按钮 pending 状态。
+   * 之前每条 entry 在 map 内联重复 `verifyMut.isPending && verifyMut.variables === entry.id`
+   *  + `promoteMut.isPending && promoteMut.variables?.id === entry.id` 两段——
+   *  SchedulerPage 的 buildJobActions(id) 用同一思路收敛，这里照搬。
+   */
+  const buildEntryPending = (entryId: string) => ({
+    verifyPending: !!verifyMut.isPending && verifyMut.variables === entryId,
+    promotePending: !!promoteMut.isPending && promoteMut.variables?.id === entryId,
+  });
 
   /** layer → scope 输入框 placeholder */
   const layerPlaceholder: Record<Layer, string> = {
@@ -168,12 +178,12 @@ export default function MemoryPage() {
             <div className="space-y-2">
               {entries.map((entry) => (
                 <MemoryCard
-                  key={entry.id} entry={entry} fmtDT={fmtDT} t={t}
+                  key={entry.id}
+                  entry={entry}
                   onVerify={() => verifyMut.mutate(entry.id)}
                   onPromote={() => promoteMut.mutate({ id: entry.id, target: "global" })}
                   onDelete={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
-                  verifyPending={!!verifyMut.isPending && verifyMut.variables === entry.id}
-                  promotePending={!!promoteMut.isPending && promoteMut.variables?.id === entry.id}
+                  {...buildEntryPending(entry.id)}
                 />
               ))}
             </div>
@@ -201,19 +211,26 @@ export default function MemoryPage() {
 
 // ─── 子组件 ─────────────────────────────────────────────────────────
 
-/** 单条记忆卡片：key / layer badge / value / 操作按钮 */
+/**
+ * 单条记忆卡片：key / layer badge / value / 操作按钮。
+ *
+ * 作为 React 组件直接调用 useT() / useDateFormat()，而非通过 props 接收 t/fmtDT——
+ * 这与其他卡片组件（AgentDetailView / StatusBadge / JobCard / TaskRow / SquadCard）保持一致，
+ * 避免 t 签名被窄化成 `(key: string) => string` 丢失插值能力，也减少 prop 透传。
+ */
 function MemoryCard({
-  entry, fmtDT, t, onVerify, onPromote, onDelete, verifyPending, promotePending,
+  entry, onVerify, onPromote, onDelete, verifyPending, promotePending,
 }: {
   entry: MemoryEntry;
-  fmtDT: (date: Date) => string;
-  t: (key: string) => string;
   onVerify: () => void;
   onPromote: () => void;
   onDelete: () => void;
   verifyPending: boolean;
   promotePending: boolean;
 }) {
+  const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
+
   return (
     <Card className="group">
       <CardContent className="flex items-start gap-3 py-3">

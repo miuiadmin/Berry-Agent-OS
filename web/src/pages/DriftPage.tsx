@@ -32,6 +32,15 @@ export default function DriftPage() {
   const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("drift.title"));
 
+  /**
+   * drift 指标查询用了 withFallback（失败时返回 EMPTY_DRIFT 而非抛错），
+   * 因此 isError 几乎不会为 true——metrics 加载失败会被静默降级为"满分空指标"。
+   * 这里的 isError 早返回主要兜底网络层异常（非 AbortError 以外的 fetch 失败）。
+   * signals 查询同样用 withFallback，但页面内显式判断 signalsError 给出
+   * 红字报错（见下方三态处理）——两个查询的错误语义不完全一致是有意为之：
+   * metrics 失败时全屏空指标比全屏报错更温和（用户至少看到布局），
+   * signals 失败则明确告知（避免误以为"真的没有漂移"）。
+   */
   const { data, isLoading, isError, refetch } = useQuery(queries.drift(7));
   // signals 单独跟踪 loading/error：之前只取 data，失败时静默显示"无信号"，
   // 用户无法区分真空 vs 加载失败。现在显式处理三态。
@@ -115,6 +124,9 @@ export default function DriftPage() {
             <p className="text-sm text-muted-foreground">{t("drift.noSignals")}</p>
           ) : (
             <div className="space-y-2">
+              {/* 取前 20 条：后端 driftSignals 按时间倒序返回（最新在前），slice(0,20) 即"最近 20 条"。
+                  missions-components 的 SquadTab 用 slice(-5) 取最近 5 条——那里后端按正序追加，
+                  切片方向相反但语义都是"最近 N 条"。两处切片约定由各自后端排序决定，不可混用。 */}
               {signals.slice(0, 20).map((sig) => (
                 <div
                   key={sig.id}

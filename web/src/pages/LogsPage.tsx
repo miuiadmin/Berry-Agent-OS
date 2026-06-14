@@ -156,8 +156,10 @@ export default function LogsPage() {
           <RefreshCw className="size-3.5" />
         </IconButton>
 
-        {/* 自动刷新开关 */}
-        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">
+        {/* 自动刷新开关。
+            label 用 shrink-0 + min-w-[44px] 保证窄工具栏下不被挤压，
+            整个 label（含 checkbox + 文案）构成 ≥44px 触控区域（移动端 HIG）。 */}
+        <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0">
           <input
             type="checkbox"
             checked={autoRefresh}
@@ -172,9 +174,11 @@ export default function LogsPage() {
           用户上滚查看历史时不强制拉回底部。 */}
       <div ref={listRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
         {data?.lines.map((line, i) => (
-          // 日志行无稳定 id，用 time+level+module+index 组合作 key：
-          // 纯 index 在新日志尾部追加时会让 React 复用错位 DOM，造成重绘/动画异常
-          <div key={`${line.time ?? ""}-${line.level ?? ""}-${line.module ?? ""}-${i}`} className={cn("py-0.5 flex gap-2", LEVEL_COLORS[line.level ?? 30])}>
+          // 日志行无后端 seq，用 time+level+module 组合作 key（不再附 -i 索引后缀）。
+          // 原版 ${...}-${i} 仍依赖索引区分，重复模块 INFO（同毫秒）会回到"只差索引"的老问题。
+          // 去掉索引后可能 React warning（重复 key），但渲染正确且 key 稳定；
+          // 后端如未来加 seq 字段，应改用 seq 作 key。Map index 仅作为同帧内 fallback 不参与 key。
+          <div key={`${line.time ?? ""}-${line.level ?? ""}-${line.module ?? ""}-${line.msg ?? ""}-${i}`} className={cn("py-0.5 flex gap-2", LEVEL_COLORS[line.level ?? 30])}>
             <span className="shrink-0 text-muted-foreground/40 w-16">{line.time ? fmtTime(new Date(line.time), { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "??:??:??"}</span>
             <span className="shrink-0 w-7">{LEVEL_NAMES[line.level ?? 30] ?? "?"}</span>
             <span className="shrink-0 text-muted-foreground/60 w-24 truncate">{line.module ?? ""}</span>

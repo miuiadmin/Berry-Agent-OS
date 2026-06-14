@@ -8,9 +8,9 @@
  * Mutations → use-task-mutations.ts
  */
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { queries } from "@/lib/api";
+import { useMemo, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { queries, TASK_STATUS_VALUES } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
@@ -24,20 +24,13 @@ import { useT } from "@/lib/i18n";
 import { TaskRow } from "./tasks-components";
 import { useTaskMutations } from "./use-task-mutations";
 
-/** 状态筛选选项（all = 不筛选）。
- *  注：每项都有对应的 i18n key（如 status.resumable 在 zh.ts/en.ts 已定义），
- *  缺失 key 时 t() 会回退到 key 本身，不会显示英文残留。 */
-const STATUS_OPTIONS = [
-  "all",
-  "created",
-  "dispatched",
-  "running",
-  "completed",
-  "failed",
-  "cancelled",
-  "timeout",
-  "resumable",
-] as const;
+/**
+ * 状态筛选选项（"all" + 后端 TaskStatus 已知值）。
+ * 复用 lib/api 的 TASK_STATUS_VALUES，避免与后端枚举漂移——
+ * 后端新增状态时只改 api.ts 一处，本页下拉自动跟上。
+ * 注：每项都有对应的 i18n key（如 status.resumable 在 zh.ts/en.ts 已定义），
+ * 缺失 key 时 t() 会回退到 key 本身，不会显示英文残留。 */
+const STATUS_OPTIONS = ["all", ...TASK_STATUS_VALUES] as const;
 
 /** 每页条数 */
 const PAGE_SIZE = 20;
@@ -66,7 +59,6 @@ export default function TasksPage() {
   // ── 筛选 + 分页状态 ──
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
-  const [offset, setOffset] = useState(0);
   /** 桌面端当前展开的任务 ID */
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -74,16 +66,45 @@ export default function TasksPage() {
   /** Agent 列表（用于 Agent 筛选下拉） */
   const { data: agents } = useQuery(queries.agents());
 
-  /** 任务列表（带筛选 + 分页） */
-  const queryParams = {
-    status: statusFilter === "all" ? undefined : statusFilter,
-    agent: agentFilter === "all" ? undefined : agentFilter,
-    limit: PAGE_SIZE,
-    offset,
-  };
-  const { data, isLoading } = useQuery(queries.tasks(queryParams));
-  const tasks = data?.items ?? [];
-  const total = data?.total ?? 0;
+  /**
+   * 任务列表（带筛选 + 无限分页累积）。
+   *
+   * 用 useInfiniteQuery 而非 useQuery：queries.tasks() 的 queryFn 不做累积，
+   * 单纯靠 offset 触发查询会"换页即丢前页"。useInfiniteQuery 把各页结果按
+   * pages[] 数组保留，前端 concat 成完整列表，"加载更多"才名副其实。
+   *
+   * 筛选条件变化时整体重置（pageParam 回到 0）。
+   */
+  const filters = useMemo(
+    () => ({
+      status: statusFilter === "all" ? undefined : statusFilter,
+      agent: agentFilter === "all" ? undefined : agentFilter,
+    }),
+    [statusFilter, agentFilter],
+  );
+
+  const {
+    data,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    ...queries.tasks({ ...filters, limit: PAGE_SIZE }),
+    initialPageParam: 0,
+    /** 根据 total + 当前累积 offset 计算下一页起点，无更多页则返回 undefined 终止 */
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, p) => sum + (p.items?.length ?? 0), 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
+  });
+
+  // 把多页 pages[] 展平成连续 items 列表（用于渲染）
+  const tasks = useMemo(
+    () => data?.pages.flatMap((p) => p.items) ?? [],
+    [data],
+  );
+  const total = data?.pages[0]?.total ?? 0;
 
   // ── Mutations ──
   const { cancelTask } = useTaskMutations();
@@ -92,14 +113,19 @@ export default function TasksPage() {
   /** 切换状态筛选，重置分页 + 收起展开行（新筛选结果里展开的任务可能不存在） */
   const handleStatusChange = (status: string) => {
     setStatusFilter(status);
-    setOffset(0);
     setExpandedId(null);
   };
 
   /** 切换 Agent 筛选，重置分页 + 收起展开行 */
   const handleAgentChange = (agent: string) => {
     setAgentFilter(agent);
-    setOffset(0);
+    setExpandedId(null);
+  };
+
+  /** 清除筛选：与 handleStatusChange/handleAgentChange 对齐，同步收起展开行 */
+  const handleClearFilters = () => {
+    setStatusFilter("all");
+    setAgentFilter("all");
     setExpandedId(null);
   };
 
@@ -173,22 +199,18 @@ export default function TasksPage() {
             variant="ghost"
             size="sm"
             className="text-xs text-muted-foreground min-h-[44px] md:min-h-0"
-            onClick={() => {
-              setStatusFilter("all");
-              setAgentFilter("all");
-              setOffset(0);
-            }}
+            onClick={handleClearFilters}
           >
             <Filter className="size-3 mr-1" />
             {t("tasks.clearFilters")}
           </Button>
         )}
 
-        {/* 分页信息 */}
+        {/* 分页信息（显示当前已加载条数范围） */}
         {total > 0 && (
           <span className="text-xs text-muted-foreground ml-auto">
             {t("tasks.ofTotal", {
-              range: `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)}`,
+              range: `1–${Math.min(tasks.length, total)}`,
               total: String(total),
             })}
           </span>
@@ -263,14 +285,15 @@ export default function TasksPage() {
           ))}
       </div>
 
-      {/* 分页：加载更多 */}
-      {total > offset + PAGE_SIZE && (
+      {/* 分页：加载更多（基于 hasNextPage，加载下一页时按钮禁用 + 旋转指示） */}
+      {hasNextPage && (
         <div className="mt-4 flex justify-center">
           <Button
             variant="outline"
             size="default"
             className="min-h-[44px] md:min-h-0"
-            onClick={() => setOffset((o) => o + PAGE_SIZE)}
+            disabled={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
           >
             {t("tasks.loadMore")}
           </Button>

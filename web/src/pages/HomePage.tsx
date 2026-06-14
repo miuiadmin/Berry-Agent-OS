@@ -42,6 +42,31 @@ const EVENT_ICONS: Record<string, typeof Activity> = {
   "agent.": Bot,
 };
 
+/**
+ * 事件 → 显示标签的映射。
+ *
+ * 直接用 `t(\`status.${ev.event.split(".").pop()}\`)` 会让任意事件的最后一段
+ * 都去查 status.* 键，部分事件（task.progress → status.progress）无对应翻译，
+ * 回退成英文片段，UX 不一致。这里集中维护"事件段 → i18n key"白名单，
+ * 命中则用专用标签，未命中回退到段名本身（接受原生英文片段作为最小信息）。
+ */
+const EVENT_LABEL_KEYS: Record<string, string> = {
+  // status.* 命中的事件段
+  enabled: "status.enabled",
+  disabled: "status.disabled",
+  crashed: "status.crashed",
+  completed: "status.completed",
+  running: "status.running",
+  failed: "status.failed",
+  // 事件段无 status.* 翻译时，下方逻辑会回退到段名本身（progress / dispatched 等）
+};
+
+/** 取事件最后一段作为标签 key：命中白名单用翻译，否则回退到段名本身。 */
+function eventLabel(ev: string, t: (key: string, params?: Record<string, string | number>) => string) {
+  const seg = ev.split(".").pop() ?? ev;
+  return t(EVENT_LABEL_KEYS[seg] ?? seg);
+}
+
 /** 事件关键词 → 语义颜色 */
 function eventColor(event: string) {
   if (event.includes("failed") || event.includes("crashed")) return "text-destructive";
@@ -188,15 +213,17 @@ export default function HomePage() {
             ) : (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
                 {events.map((ev, idx) => {
-                  const Icon = EVENT_ICONS[Object.keys(EVENT_ICONS).find((p) => ev.event.startsWith(p)) ?? ""] ?? Activity;
+                  // 简化双重 ?? 查找：先 find 命中前缀，无命中回退 Activity 图标。
+                  const matchedPrefix = Object.keys(EVENT_ICONS).find((p) => ev.event.startsWith(p));
+                  const Icon = matchedPrefix ? EVENT_ICONS[matchedPrefix] : Activity;
                   return (
                     <div key={`${ev.ts}-${ev.event}-${idx}`} className="flex items-center gap-2 text-xs min-w-0 animate-slide-left">
                       <Icon className={`size-3.5 shrink-0 ${eventColor(ev.event)}`} />
                       <span className="text-muted-foreground shrink-0">
                         {formatTime(new Date(ev.ts), { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                       </span>
-                      {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需再兜底 ?? ev.event */}
-                      <span className="font-medium truncate">{t(`status.${ev.event.split(".").pop()}`)}</span>
+                      {/* 集中映射：命中白名单用专用翻译，否则回退段名本身 */}
+                      <span className="font-medium truncate">{eventLabel(ev.event, t)}</span>
                       {typeof ev.payload.name === "string" && (
                         <span className="text-muted-foreground truncate">{ev.payload.name}</span>
                       )}

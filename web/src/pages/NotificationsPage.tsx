@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Check, Archive } from "lucide-react";
-import { notificationsApi, type NotificationItem } from "@/lib/api";
+import { notificationsApi } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { QueryBoundary } from "@/components/ui/query-boundary";
 import { PageHeader } from "@/components/ui/page-header";
@@ -51,7 +51,7 @@ export default function NotificationsPage() {
 
   const { readMut, readAllMut, archiveMut } = useNotificationMutations();
 
-  const items: NotificationItem[] = listQuery.data ?? [];
+  // 未读数：countQuery 提供；通知列表本身由 QueryBoundary 渲染 prop 提供（listQuery.data）。
   const unread = countQuery.data?.unread ?? 0;
 
   return (

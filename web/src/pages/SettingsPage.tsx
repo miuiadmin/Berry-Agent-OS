@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useT } from "@/lib/i18n";
-import { queries, apiGet } from "@/lib/api";
+import { queries } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -68,7 +68,9 @@ function SettingsContent() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // ── Mutations ──
-  const { saveConfig } = useConfigMutations();
+  // saveConfig / resetConfig 都走 mutation 层，统一 loading 态 / toast / 缓存失效，
+  // 避免"保存走 mutation / 重置走裸 fetch"两条不对称路径。
+  const { saveConfig, resetConfig } = useConfigMutations();
 
   // 首次加载时从服务端配置初始化本地编辑状态
   useEffect(() => {
@@ -128,15 +130,19 @@ function SettingsContent() {
     saveConfig.mutate(editedConfig);
   };
 
-  /** 重置为默认配置 */
+  /**
+   * 重置为默认配置：走 resetConfig mutation。
+   * 成功后 mutation 用 setQueryData 预填 config 缓存——这里同步把本地 editedConfig
+   * 设为返回的 defaults，保证 UI 立刻显示默认值，并清空校验错误。
+   * mutateAsync + await 让按钮 disabled 能拿到 isPending（防双击重复请求）。
+   */
   const handleReset = async () => {
     try {
-      const defaults = await apiGet<Record<string, unknown>>("/api/config/defaults");
+      const defaults = await resetConfig.mutateAsync();
       setEditedConfig(defaults);
       setErrors({});
-      toast.info(t("settings.resetToDefaults"));
     } catch {
-      toast.error(t("settings.failedToLoadDefaults"));
+      // 错误 toast 已由 mutation 的 onError 统一处理，这里吞掉避免 unhandled
     }
   };
 
@@ -174,8 +180,10 @@ function SettingsContent() {
                   )}
                 >
                   <Icon className={cn("size-4 shrink-0 transition-transform duration-200", isActive && "scale-110")} />
-                  <span className="hidden sm:inline md:inline">{t(tab.labelKey)}</span>
-                  <span className="sm:hidden text-[11px]">{t(tab.labelKey)}</span>
+                  {/* 单 span + 响应式字号：移动端缩到 text-[11px] 适配窄屏横向滚动，
+                      桌面端 text-sm 正常显示。原写法渲染了两份相同文本（不同断点可见），
+                      DOM 重复且 a11y 读屏会读两遍。 */}
+                  <span className="text-[11px] md:text-sm whitespace-nowrap">{t(tab.labelKey)}</span>
                 </button>
               );
             })}
@@ -200,7 +208,7 @@ function SettingsContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="default" onClick={handleReset} className="min-h-[44px] md:min-h-0">
+              <Button variant="outline" size="default" onClick={handleReset} disabled={resetConfig.isPending} className="min-h-[44px] md:min-h-0">
                 <RotateCcw className="size-4" />
                 {t("settings.reset")}
               </Button>

@@ -21,6 +21,18 @@ import en from "@/locales/en";
 /** 支持的语言类型 */
 export type Locale = "zh" | "en";
 
+/**
+ * i18n 翻译函数的真实类型签名。
+ *
+ * key：扁平点分格式的翻译键（如 "sidebar.home"）。
+ * params：可选的插值参数对象（如 { count: 5 } → "5 条消息"）。
+ *
+ * 抽出此类型避免各处手写 `(key: string) => string` 的窄化版本——
+ * 窄化签名会丢失插值能力（如校验消息 "必须 1–65535" 想插值 port 时无法传参），
+ * 也掩盖真实签名造成误用。所有需要把 t 当 prop / 参数传递的场景应使用本类型。
+ */
+export type TFunction = (key: string, params?: Record<string, string | number>) => string;
+
 /** Locale Context 的值结构 */
 interface LocaleContextValue {
   /** 当前语言 */

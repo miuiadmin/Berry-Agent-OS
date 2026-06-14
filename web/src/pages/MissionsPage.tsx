@@ -11,7 +11,7 @@
  *   - {@link MissionListItem} / {@link MissionDetail} 等
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -45,16 +45,33 @@ export default function MissionsPage() {
     refetchInterval: 10_000,
   });
 
+  const missions = missionsQuery.data?.items ?? [];
+  const selectedStillExists =
+    selectedId == null || missions.some((m) => m.id === selectedId);
+  /**
+   * 选中态校验：选中的 mission 若从列表消失（完成/被删/后端过滤变化），
+   * 用 useEffect 清空 selectedId（而非渲染期内 setTimeout 推出周期——后者是
+   * 已知 React 反模式，会逃出批处理、多一帧 stale 渲染）。
+   * 渲染期用 effectiveSelectedId 派生值兜底，effect 执行前也不会渲染错误详情。
+   */
+  useEffect(() => {
+    if (!selectedStillExists && selectedId != null) {
+      setSelectedId(null);
+    }
+  }, [selectedStillExists, selectedId]);
+  const effectiveSelectedId = selectedStillExists ? selectedId : null;
+
   return (
     <div className="flex h-full flex-col gap-4 p-4 md:p-6">
-      {/* 页面标题（count 文案随数据同步变化，QueryBoundary 内部拿到 data 后才显示真实数量） */}
+      {/* 页面标题（count 文案随数据同步变化；列表为空时隐藏 count，避免与
+          下方 EmptyState 的"无活跃 mission"文案重复——EmptyState 已承担空态说明） */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t("missions.title")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {missionsQuery.data?.items.length
-            ? t("missions.count", { count: String(missionsQuery.data.items.length) })
-            : t("missions.noActive")}
-        </p>
+        {missions.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {t("missions.count", { count: String(missions.length) })}
+          </p>
+        )}
       </div>
 
       {/* 三态统一交给 QueryBoundary：loading → 骨架屏；error → 重试；ok → 列表/空态 */}
@@ -63,17 +80,9 @@ export default function MissionsPage() {
         skeleton={<MissionsSkeleton />}
       >
         {(data) => {
-          const missions = data.items;
-          // 选中态校验：若选中的 mission 已从列表消失（完成 / 被删 / 后端过滤变化），
-          // 立即清空 selectedId，避免右侧 MissionDetail 拉一个 404 的 missionId。
-          // 用 useEffect 会在下一帧才清，期间仍会渲染 detail——这里同步判断更稳。
-          const selectedStillExists = selectedId == null || missions.some((m) => m.id === selectedId);
-          const effectiveSelectedId = selectedStillExists ? selectedId : null;
-          if (!selectedStillExists && selectedId != null) {
-            // 用 setTimeout 把 setState 推出当前渲染周期，避免渲染中调用 setState 的告警
-            setTimeout(() => setSelectedId(null), 0);
-          }
-          if (missions.length === 0) {
+          // 注：selectedStillExists / effectiveSelectedId 已在组件体里基于最新 data 计算
+          // （此处 data === missionsQuery.data，闭包一致），render-prop 内只负责布局。
+          if (data.items.length === 0) {
             return (
               <EmptyState
                 icon={Target}
@@ -86,7 +95,7 @@ export default function MissionsPage() {
             <div className={LIST_DETAIL_GRID}>
               {/* 左侧：mission 列表 */}
               <div className="space-y-2 overflow-y-auto">
-                {missions.map((m) => (
+                {data.items.map((m) => (
                   <MissionListItem
                     key={m.id}
                     mission={m}

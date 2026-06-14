@@ -12,7 +12,7 @@
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Radio, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useT } from "@/lib/i18n";
+import { useT, type TFunction } from "@/lib/i18n";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import { ConfigSection, type FieldDef } from "./settings-config-section";
 
@@ -124,7 +124,13 @@ export function TabContent({
 }) {
   const t = useT();
 
-  // providers 和 channels 是独立组件，不走通用 ConfigSection
+  // providers 和 channels 是独立组件，不走通用 ConfigSection。
+  // 原因：这两个 tab 需要比单 Input/Switch 更丰富的 UI——
+  //   - providers：每个 LLM 供应商是独立卡片（含 model 列表、API key 输入、连通性测试），
+  //     远超 FieldDef 的"一个字段一行表单"模型。
+  //   - channels：展示 Telegram YAML 示例 + 配置状态指示灯 + 更多渠道占位，
+  //     也需要自定义排版。其余 tab（budget/memory/skills/observability/web）字段
+  //     形状规整，能完全数据驱动，故走 ConfigSection。
   if (tab === "providers") return <ProvidersTab />;
   if (tab === "channels") return <ChannelsTab config={config} />;
 
@@ -206,10 +212,15 @@ function ChannelsTab({ config }: { config: Record<string, unknown> }) {
  * 设计：每个 section 用同一份 validateNumericField 校验器，
  * 通过 rule 参数（{ min? / max? }）控制具体规则，
  * 避免为"端口范围"和"非负数"写两套结构相同的循环。
+ *
+ * @param cfg 完整配置对象
+ * @param t   i18n 翻译函数（用真实 TFunction 类型而非 `(key:string)=>string` 窄化签名，
+ *            这样错误消息未来需要插值时——如 "port 必须 1–65535" 注入 port 值——
+ *            不会因签名收窄而无法传 params。）
  */
 export function validateConfig(
   cfg: Record<string, unknown>,
-  t: (key: string) => string,
+  t: TFunction,
 ): Record<string, string> {
   const errs: Record<string, string> = {};
 

@@ -48,17 +48,23 @@ export function Sparkline({
   height = SPARKLINE_DEFAULT_HEIGHT,
   className,
 }: SparklineProps) {
-  // 数据不足 2 点：无法画线，不渲染（卡片角落无空间放 noData 文案）。
-  // 该判断放在 hooks 之前，避免 <2 时仍白跑 normalizePoints + 平滑 path 计算。
-  if (values.length < 2) return null;
+  /**
+   * 数据是否足够（≥ 2 点才能画出折线）。
+   * 关键：不在 hooks 之前 early return，而是用一个布尔量在 hooks 内部守卫计算。
+   * 否则当父组件传入的 values 在不同 render 间跨越 2 点边界（1↔3 点）时，
+   * React 会因 hook 数量变化抛出 "Rendered more hooks than during the previous render."
+   * 导致整棵子树白屏。保持 hook 调用顺序恒定是 React 的硬约束，优先于性能微优化。
+   */
+  const hasEnoughData = values.length >= 2;
 
   /**
    * 点坐标：normalizePoints 内部做 min/max 归一化 + 留白。
-   * useMemo 避免每次 render 重算（虽然计算量小，但 path 派生依赖它）。
+   * 数据不足时返回空数组（normalizePoints 对 <2 点返回 []），避免白跑后还要兜底；
+   * 同时让 useMemo 依赖与返回值稳定，下游 path 派生自然得到空串。
    */
   const points = useMemo(
-    () => normalizePoints(values, width, height),
-    [values, width, height],
+    () => (hasEnoughData ? normalizePoints(values, width, height) : []),
+    [hasEnoughData, values, width, height],
   );
 
   /**
@@ -73,6 +79,10 @@ export function Sparkline({
     }),
     [points, height],
   );
+
+  // 数据不足 2 点：无法画线，不渲染（卡片角落无空间放 noData 文案）。
+  // 放在所有 hooks 之后，保证 hook 调用顺序恒定，杜绝 Rules of Hooks 崩溃。
+  if (!hasEnoughData) return null;
 
   return (
     <svg

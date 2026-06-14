@@ -11,7 +11,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
-import type { MissionTask } from "@/lib/stores/mission-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -30,6 +29,7 @@ import {
 import { useT, useDateFormat } from "@/lib/i18n";
 import type {
   MissionListItemData,
+  MissionTask,
   PlanResponse,
   SquadNode,
   SquadMember,
@@ -39,6 +39,8 @@ import type {
 // 重新导出类型，保持消费方 import 兼容
 export type {
   MissionListItemData,
+  MissionTask,
+  MissionTaskStatus,
   MissionsListResponse,
   PlanResponse,
   SquadNode,
@@ -191,8 +193,9 @@ export function MissionDetail({ missionId }: MissionDetailProps) {
     );
   }
 
-  // 任务进度统计（done / total / 百分比）
-  const doneTasks = plan.tasks.filter((t) => t.status === "done").length;
+  // 任务进度统计（done / total / 百分比）。
+  // 注意：filter 回调参数命名为 task，避免遮蔽外层 useT() 返回的 t 翻译函数。
+  const doneTasks = plan.tasks.filter((task) => task.status === "done").length;
   const totalTasks = plan.tasks.length;
   const progressPercent = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
@@ -285,6 +288,8 @@ function TaskCard({ task }: { task: MissionTask }) {
           </span>
         </div>
         <p className="mt-0.5">{task.what}</p>
+        {/* 任务进度 / 结果用 emoji 标识（📊=进度、✅=结果），属任务内部语义层，
+            区别于页面级 lucide 图标——详见 SIGNAL_EMOJI 注释。 */}
         {task.progress && (
           <p className="mt-1 text-xs text-muted-foreground">
             📊 {task.progress}
@@ -353,6 +358,11 @@ export function SquadTab({ missionId }: SquadTabProps) {
           <h4 className="mb-2 flex items-center gap-1 text-sm font-medium">
             <Radio className="size-3" /> {t("missions.recentSignals")}
           </h4>
+          {/* 最近 5 条信号流。
+              注：SquadSignal 没有 id 字段，用数组索引作 key——
+              后端按时间追加（signals.slice(-5) 取最近 5 条），
+              refetch 后整体替换为新一批，索引 key 不会出现错位复用。
+              如后端未来给信号加 id，应改用 sig.id 作 key。 */}
           {squad.signals.slice(-5).map((sig: SquadSignal, i: number) => (
             <SignalLine key={i} sig={sig} />
           ))}
@@ -362,7 +372,14 @@ export function SquadTab({ missionId }: SquadTabProps) {
   );
 }
 
-/** 信号类型 → emoji（未知类型回退到 progress 图标） */
+/**
+ * 信号类型 → emoji（未知类型回退到 progress 图标）。
+ *
+ * 注：这里用 emoji 而非 lucide 图标是历史遗留——task 进度/结果、squad 信号/角色
+ * 都是任务内部的语义状态（progress / blocker / done / question 等），与页面级
+ * 功能图标（lucide）属不同语义层。后续如需主题化/可访问性，可统一改为 lucide
+ * 的 TrendingUp / Ban / CheckCircle2 / HelpCircle 组件。
+ */
 const SIGNAL_EMOJI: Record<string, string> = {
   progress: "📊",
   blocker: "🚫",
@@ -428,7 +445,10 @@ function SquadCard({ squad, depth }: SquadCardProps) {
   );
 }
 
-/** 成员角色 → emoji（未知角色回退到 work 图标） */
+/**
+ * 成员角色 → emoji（未知角色回退到 work 图标）。
+ * 同 SIGNAL_EMOJI 的语义层说明：任务内部状态用 emoji，区别于页面级 lucide 图标。
+ */
 const ROLE_EMOJI: Record<string, string> = {
   lead: "🧠",
   work: "🔧",
