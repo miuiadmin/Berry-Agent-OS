@@ -36,6 +36,7 @@ import {
   isBoardMember,
   transferLeadership,
   createSubBoard,
+  countActiveSubs,
   resolveLeaderForDelegate,
   assertBoardMemberOrGovernance,
   getBoardContext,
@@ -539,6 +540,27 @@ describe('board-repo 16.0 任务板存储层', () => {
       goal: 'x', leader: 'code', sessionId: 's1', correlationId: 'c1', requester: 'assistant',
     });
     expect(result.status).toBe('cant_split');
+  });
+
+  it('createSubBoard：活跃子板 ≥ MAX_ACTIVE_SUBS(8) → cant_split（§16.8 第4道物理闸）', () => {
+    insertAgentTask('task-cap-parent');
+    initBoard('task-cap-parent', { goal: '多子板父', leader: 'assistant', spawnDepth: 0 });
+    // 创建 8 个活跃子板（设为 in_progress 模拟运行中）
+    for (let i = 0; i < 8; i++) {
+      const sub = createSubBoard('task-cap-parent', {
+        goal: `子${i}`, leader: 'code', sessionId: 's', correlationId: 'c', requester: 'assistant',
+      });
+      expect(sub.status).toBe('ok');
+      updateBoardMeta((sub as { childTaskId: string }).childTaskId, { boardStatus: 'in_progress' });
+    }
+    // countActiveSubs 确认 8 个活跃
+    expect(countActiveSubs('task-cap-parent')).toBe(8);
+    // 第 9 个 → cant_split（活跃子板上限）
+    const result = createSubBoard('task-cap-parent', {
+      goal: '第9', leader: 'code', sessionId: 's', correlationId: 'c', requester: 'assistant',
+    });
+    expect(result.status).toBe('cant_split');
+    expect((result as { reason: string }).reason).toContain('活跃子板数');
   });
 
   // ─── resolveLeaderForDelegate（§5.2.1 派工归 leader 非 brain）───

@@ -283,6 +283,22 @@ export function initBoard(taskId: string, opts: {
   addBoardMember(taskId, opts.leader, 'leader');
 }
 
+/** 单板活跃子板数上限（§16.8 第4道物理闸：防失控板烧机器，默认 8） */
+const MAX_ACTIVE_SUBS = 8;
+
+/**
+ * 统计父板的活跃（in_progress）子板数（§16.8 第4闸用）。
+ * 活跃 = board_status='in_progress'（终态子板不计，只限当前在跑的）。
+ */
+export function countActiveSubs(parentTaskId: string): number {
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT COUNT(*) AS c FROM agent_tasks
+     WHERE parent_task_id = ? AND board_status = 'in_progress'`,
+  ).get(parentTaskId) as { c: number };
+  return row.c;
+}
+
 /**
  * 创建子任务板（16.0 §5.6.3 拆子板）。
  *
@@ -307,6 +323,11 @@ export function createSubBoard(parentTaskId: string, opts: {
   const parent = getBoardMeta(parentTaskId);
   if (!parent) {
     return { status: 'cant_split', reason: `父板 ${parentTaskId} 不存在` };
+  }
+  // §16.8 第4道物理闸：单板活跃 sub 上限（横向限流，防失控板烧机器，在 spawnDepth 纵向封顶之前）
+  const activeSubs = countActiveSubs(parentTaskId);
+  if (activeSubs >= MAX_ACTIVE_SUBS) {
+    return { status: 'cant_split', reason: `活跃子板数 ${activeSubs} 已达上限 ${MAX_ACTIVE_SUBS}（§16.8 第4闸），降级为自己干或上报` };
   }
   // §10.3 spawnDepth 封顶：父已达 maxSpawnDepth → 不能再拆，降级上报
   if (parent.spawnDepth >= parent.maxSpawnDepth) {
