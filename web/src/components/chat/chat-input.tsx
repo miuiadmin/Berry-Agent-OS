@@ -84,6 +84,8 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
     onSend(trimmed, allAttachments.length > 0 ? allAttachments : undefined);
     setText("");
     setAttachments([]);
+    // 直接清 DOM textarea value（不等 React 重渲染），确保 resize() 读 scrollHeight 时已是空内容
+    if (textareaRef.current) textareaRef.current.value = "";
     resize();
   };
 
