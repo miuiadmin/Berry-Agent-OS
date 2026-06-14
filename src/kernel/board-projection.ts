@@ -27,6 +27,7 @@ import {
   addBoardMember,
   updateBoardMeta,
   getBoardMeta,
+  applyBoardStatus,
 } from './board-repo.js';
 import type { BoardMessage } from '../contracts/board-message.js';
 
@@ -192,16 +193,10 @@ export interface ReportEnvelopeOpts {
  */
 export function postReportEnvelope(taskId: string, opts: ReportEnvelopeOpts): void {
   safePost(taskId, () => {
-    // board 状态机联动（§6.5.1）
-    const statusMap: Record<ReportEnvelopeOpts['status'], string> = {
-      done: 'completed',
-      partial: 'in_progress',
-      blocked: 'failed',
-      cant_split: 'in_progress',
-    };
-    try {
-      updateBoardMeta(taskId, { boardStatus: statusMap[opts.status] as 'completed' | 'failed' | 'in_progress' });
-    } catch { /* board 列不存在（旧库未跑 v28）→ 静默 */ }
+    // board 状态机联动（§6.5.1 单一事实源）：经 applyBoardStatus 统一推导 + 校验合法流转，
+    // 替代原散落的硬编码 statusMap。done→completed / blocked→failed / partial+cant_split→in_progress。
+    // 终态板收到迟到 report → no-op（防已完成板被打回）；旧库无 board 列 → 静默降级。
+    applyBoardStatus(taskId, { kind: 'report', status: opts.status });
 
     return {
       id: genId('bmsg'),

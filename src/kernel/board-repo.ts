@@ -16,8 +16,8 @@
 import { getDb } from '../memory/db.js';
 import { genId } from '../utils/id.js';
 import { redactSecrets } from '../observability/redaction.js';
-import { BoardMessageSchema } from '../contracts/board-message.js';
-import type { BoardMessage, BoardStatus, BoardMessageType } from '../contracts/board-message.js';
+import { BoardMessageSchema, nextBoardStatus } from '../contracts/board-message.js';
+import type { BoardMessage, BoardStatus, BoardMessageType, BoardStatusEvent } from '../contracts/board-message.js';
 
 // ─── BoardMessage 发言流 CRUD ───
 
@@ -126,6 +126,27 @@ export function getBoardMeta(taskId: string): BoardMetaRow | null {
     maxSpawnDepth: (row.max_spawn_depth as number) ?? 3,
     activeScope: (row.active_scope as string) ?? null,
   };
+}
+
+/**
+ * 按事件推导并更新板状态（§6.5.1 单一事实源）。
+ *
+ * 读当前 board_status → 调纯函数 {@link nextBoardStatus} 推导 + 校验合法流转 → updateBoardMeta。
+ * 旧库未跑 v28 迁移（board 列不存在）时静默降级 no-op（不阻塞信封落板）。
+ *
+ * @returns 新状态（已 UPDATE）；null=无变化/终态/旧库降级（调用方不必关心）
+ */
+export function applyBoardStatus(taskId: string, event: BoardStatusEvent): BoardStatus | null {
+  try {
+    const meta = getBoardMeta(taskId);
+    if (!meta) return null;
+    const next = nextBoardStatus(meta.boardStatus, event);
+    if (next) updateBoardMeta(taskId, { boardStatus: next });
+    return next;
+  } catch {
+    // board 列不存在（旧库未跑 v28 迁移）→ 静默降级，板状态推导 no-op 不阻塞信封落板
+    return null;
+  }
 }
 
 /**

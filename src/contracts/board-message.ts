@@ -269,6 +269,66 @@ export const BOARD_STATUS_TRANSITIONS: Record<BoardStatus, BoardStatus[]> = {
   interrupted: [],
 };
 
+// ─── 板状态推导（§6.5.1 单一事实源，纯函数）───
+
+/** 板状态流转的触发事件（经此一处推导，替代散落的硬编码 statusMap） */
+export type BoardStatusEvent =
+  | { kind: 'delegate' }                                      // 首次/再次指派 → in_progress
+  | { kind: 'report'; status: 'done' | 'partial' | 'blocked' | 'cant_split' } // 附成果
+  | { kind: 'enter_review' }                                  // report 进②审核闸
+  | { kind: 'await_user' }                                    // 撞 L3 权限 / brain ask 用户
+  | { kind: 'user_resumed' }                                  // 用户回复 → 继续干
+  | { kind: 'user_rejected' }                                 // 用户拒绝 → 失败
+  | { kind: 'interrupt' };                                    // 用户主动中断
+
+/**
+ * 按触发事件推导板的下一状态（§6.5.1 单一事实源，纯函数）。
+ *
+ * 替代 board-projection.postReportEnvelope 等处散落的硬编码 statusMap——所有板状态流转经此一处：
+ *   - 校验 BOARD_STATUS_TRANSITIONS 合法流转，非法流转抛错（早暴露状态机 bug）；
+ *   - 终态（completed/failed/interrupted）不再流转（防已完成板被迟到信封打回）；
+ *   - 暴露 enter_review/await_user/interrupt 等事件，供 P3/P4 审核闸/权限/中断路径接入。
+ *
+ * @param cur   当前板状态
+ * @param event 触发事件
+ * @returns 新状态（合法流转且≠当前态）；null=终态或无变化（调用方不必 UPDATE）；抛错=非法流转
+ */
+export function nextBoardStatus(cur: BoardStatus, event: BoardStatusEvent): BoardStatus | null {
+  // 终态不再流转（防迟到信封把已完成/已失败板打回）
+  if (cur === 'completed' || cur === 'failed' || cur === 'interrupted') return null;
+  let next: BoardStatus | null = null;
+  switch (event.kind) {
+    case 'delegate':
+      next = 'in_progress';
+      break;
+    case 'report':
+      // done→completed / blocked→failed / partial+cant_split→in_progress
+      next = event.status === 'done' ? 'completed' : event.status === 'blocked' ? 'failed' : 'in_progress';
+      break;
+    case 'enter_review':
+      next = 'awaiting_review';
+      break;
+    case 'await_user':
+      next = 'awaiting_user';
+      break;
+    case 'user_resumed':
+      next = 'in_progress';
+      break;
+    case 'user_rejected':
+      next = 'failed';
+      break;
+    case 'interrupt':
+      next = 'interrupted';
+      break;
+  }
+  if (!next || next === cur) return null;
+  // 校验合法流转（§6.5.1 状态机）——非法流转早抛错，防状态机被绕过
+  if (!BOARD_STATUS_TRANSITIONS[cur].includes(next)) {
+    throw new Error(`nextBoardStatus: 非法板状态流转 ${cur} → ${next}（事件 ${event.kind}）`);
+  }
+  return next;
+}
+
 // ─── 板元数据（§5.1，task 升级为板的附加字段）───
 
 /** task board 的元数据（附加到现有 agent_tasks / mission 表） */

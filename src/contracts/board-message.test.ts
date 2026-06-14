@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BoardMessageSchema, BOARD_STATUS_TRANSITIONS, type BoardStatus } from './board-message.js';
+import { BoardMessageSchema, BOARD_STATUS_TRANSITIONS, nextBoardStatus, type BoardStatus, type BoardStatusEvent } from './board-message.js';
 
 /**
  * BoardMessage 契约单测（16.0 P1）—— 钉死 7 种言语行为的 Zod 判别联合不变量。
@@ -154,5 +154,46 @@ describe('Board 状态机（§6.5.1）', () => {
     expect(next).toContain('in_progress'); // 打回重做
     expect(next).toContain('completed');   // approve
     expect(next).toContain('failed');      // reject
+  });
+});
+
+describe('nextBoardStatus 推导（§6.5.1 单一事实源）', () => {
+  it('report：done→completed / blocked→failed / partial+cant_split→in_progress', () => {
+    expect(nextBoardStatus('in_progress', { kind: 'report', status: 'done' })).toBe('completed');
+    expect(nextBoardStatus('in_progress', { kind: 'report', status: 'blocked' })).toBe('failed');
+    // partial/cant_split 推到 in_progress，与当前态相同 → null（无变化）
+    expect(nextBoardStatus('in_progress', { kind: 'report', status: 'partial' })).toBeNull();
+    expect(nextBoardStatus('in_progress', { kind: 'report', status: 'cant_split' })).toBeNull();
+    // partial 从 awaiting_review（打回重做）→ in_progress（合法流转）
+    expect(nextBoardStatus('awaiting_review', { kind: 'report', status: 'partial' })).toBe('in_progress');
+  });
+
+  it('delegate→in_progress（首次指派 / 再次派工）', () => {
+    expect(nextBoardStatus('created', { kind: 'delegate' })).toBe('in_progress');
+  });
+
+  it('enter_review / await_user：进审核闸 / 等用户', () => {
+    expect(nextBoardStatus('in_progress', { kind: 'enter_review' })).toBe('awaiting_review');
+    expect(nextBoardStatus('in_progress', { kind: 'await_user' })).toBe('awaiting_user');
+  });
+
+  it('user_resumed / user_rejected / interrupt：用户侧流转', () => {
+    expect(nextBoardStatus('awaiting_user', { kind: 'user_resumed' })).toBe('in_progress');
+    expect(nextBoardStatus('awaiting_user', { kind: 'user_rejected' })).toBe('failed');
+    expect(nextBoardStatus('in_progress', { kind: 'interrupt' })).toBe('interrupted');
+  });
+
+  it('终态 no-op：已完成/已失败/已中断板不被迟到信封打回', () => {
+    for (const terminal of ['completed', 'failed', 'interrupted'] as BoardStatus[]) {
+      expect(nextBoardStatus(terminal, { kind: 'report', status: 'done' })).toBeNull();
+      expect(nextBoardStatus(terminal, { kind: 'delegate' })).toBeNull();
+    }
+  });
+
+  it('非法流转抛错（防状态机被绕过）', () => {
+    // created 不能直接 enter_review（必须先 in_progress）
+    expect(() => nextBoardStatus('created', { kind: 'enter_review' })).toThrow();
+    // completed 是终态 → null（不抛，因为终态短路在合法性校验前）
+    expect(nextBoardStatus('completed', { kind: 'interrupt' })).toBeNull();
   });
 });
