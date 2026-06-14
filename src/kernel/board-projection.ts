@@ -30,6 +30,7 @@ import {
   getBoardContext,
   applyBoardStatus,
   transferLeadership,
+  createSubBoard,
 } from './board-repo.js';
 import { peekBlockCollector } from './block-collector.js';
 import type { BoardMessage } from '../contracts/board-message.js';
@@ -137,6 +138,10 @@ export interface DelegateEnvelopeOpts {
   scope?: Record<string, unknown>;
   /** 整任务交接（§12 注：handoff 特例，true 时换板 leader = opts.to） */
   transferLeadership?: boolean;
+  /** 辩论模式（§5.7：leader 显式开启板内辩论子区，≥2 agent 对抗产出方案） */
+  mode?: 'debate';
+  /** 辩论收敛条件（mode='debate' 时必填：rounds N 轮后停 / converged 达成一致 / judge 裁决） */
+  debateConfig?: { rounds?: number; converged?: boolean; judge?: string };
 }
 
 /**
@@ -163,6 +168,24 @@ export function postDelegateEnvelope(taskId: string, opts: DelegateEnvelopeOpts)
       transferLeadership(taskId, opts.to);
     }
 
+    // §5.7 辩论模式：mode='debate' 时开辩论子板（createSubBoard 创建辩论 arena childTaskId）
+    let debateChildTaskId: string | undefined;
+    if (opts.mode === 'debate') {
+      const sub = createSubBoard(taskId, {
+        goal: opts.subTaskGoal,
+        leader: opts.from,
+        sessionId: opts.sessionId ?? '',
+        correlationId: genId('corr'),
+        requester: opts.from,
+      });
+      if (sub.status === 'ok') {
+        debateChildTaskId = sub.childTaskId;
+        // 辩论参与者加入辩论子板花名册
+        addBoardMember(debateChildTaskId, opts.to, 'member');
+      }
+      // cant_split（spawnDepth 封顶）：辩论开不出，delegate 仍落板记录尝试，brain 看板可纠偏
+    }
+
     return {
       id: genId('bmsg'),
       type: 'delegate' as const,
@@ -170,11 +193,14 @@ export function postDelegateEnvelope(taskId: string, opts: DelegateEnvelopeOpts)
       to: opts.to,
       taskId,
       parentTaskId: opts.parentTaskId,
+      childTaskId: debateChildTaskId,
       sessionId: opts.sessionId,
       ts: Date.now(),
       subTaskGoal: opts.subTaskGoal,
       scope: opts.scope,
       transferLeadership: opts.transferLeadership,
+      mode: opts.mode,
+      debateConfig: opts.debateConfig,
     };
   }, 'delegate');
 }
