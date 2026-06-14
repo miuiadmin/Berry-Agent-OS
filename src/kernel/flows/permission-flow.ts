@@ -235,6 +235,27 @@ export class PermissionFlow {
       const { toolName, toolInput, dangerLevel, taskId, sessionId: explicitSessionId } = msg.payload as PermissionRequestPayload;
       const replyId = msg.id;
 
+      // 16.0 P3-B3：工具调用投影 tool_request 信封（fire-and-forget 审计影子）
+      // 在 kernel 侧（permission.request handler 收到 agent 的 IPC 时）落板，不在 agent 子进程。
+      // 映射：agentName→from, 'system'→to, toolName+toolInput→body。现有权限逻辑不变。
+      if (taskId) {
+        try {
+          const { postBoardMessage } = require('../board-repo.js');
+          const { genId } = require('../../utils/id.js');
+          postBoardMessage(taskId, {
+            id: genId('bmsg'),
+            type: 'tool_request',
+            from: agentName,
+            to: 'system',
+            taskId,
+            sessionId: explicitSessionId,
+            ts: Date.now(),
+            toolName,
+            input: (() => { try { return JSON.parse(toolInput); } catch { return { raw: toolInput }; } })(),
+          });
+        } catch { /* fire-and-forget */ }
+      }
+
       let sessionId: string;
       if (explicitSessionId) {
         // dialogue 模式：payload 显式携带 sessionId，跳过 findPending 反查
