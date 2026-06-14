@@ -7,7 +7,8 @@
  *
  * 不测：
  *   - WsEventBridge 的 ws 转发（那是 web 层，需 WS server harness，归 1-to-1/真实测试）
- *   - board-repo 的 postBoardMessage 落库细节（delegation-manager.test 已覆盖建表）
+ *   - board-repo 的 postBoardMessage 落库细节（建表由 schema.ts TASK_BOARD_SQL + migration v28 负责；
+ *     board-repo 的 DB 不变量钉死见 board-repo.test.ts）
  *   - AI 生成内容（CLAUDE.md 禁止）
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';

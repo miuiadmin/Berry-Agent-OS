@@ -124,6 +124,13 @@ export class CoreService {
   private messageBus: MessageBus;
   private capabilityBus: import('../bus/capability-bus.js').CapabilityBus | null = null;
   private willLoop: import('./will-loop.js').WillLoop | null = null;
+  /**
+   * 16.0 P3-A2 任务板纠偏观察器（advisory only）。
+   * 定时轻扫所有 in_progress 的板，嗅到 drift/stuck/spawn_explosion 风险时 emit
+   * 'delegation.checkpoint_needed' 让 brain 介入（设计文档/23 §4.2 + §10.1）。
+   * lifecycle：startInternal 创建并 .start()，stop() 时 .stop()。详见 board-observer.ts。
+   */
+  private boardObserver: import('./board-observer.js').BoardObserver | null = null;
   private insightsTimer: ReturnType<typeof setInterval> | null = null;
   private suggestionCleanupTimer: ReturnType<typeof setInterval> | null = null;
   /** 15.0 机制 C：周期审计定时器（定时跑 Auditor 扫描，高危报告推 Brain） */
@@ -486,6 +493,17 @@ export class CoreService {
     const suggestionQueue = new SuggestionQueue(getDb());
     willLoop.setSuggestionQueue(suggestionQueue);
     this.messageRouter.init({ suggestionQueue });
+
+    // 16.0 P3-A2：BoardObserver 装配（advisory only 看板纠偏定时器）。
+    // 每 30s 扫所有 in_progress 的板，嗅到 drift/stuck/spawn_explosion 风险时
+    // emit 'delegation.checkpoint_needed' 让 brain 经 checkpoint 路径介入（§4.2 + §10.1）。
+    // deps.agentManager 传入便于未来按成员活跃度过滤扫描目标；brainIpc 留 undefined——
+    // observer 走 EventBus emit checkpoint，不直投 brain（避免新造触发路径，§「架构优雅定律」）。
+    // 纯 advisory：所有扫描异常仅 warn，绝不影响主路径（详见 board-observer.ts 的硬约束）。
+    const { BoardObserver } = await import('./board-observer.js');
+    const boardObserver = new BoardObserver({ agentManager: this.agentManager ?? undefined });
+    boardObserver.start();
+    this.boardObserver = boardObserver;
 
     // Schedule daily cleanup of old suggestions
     this.suggestionCleanupTimer = setInterval(() => {
@@ -1162,6 +1180,11 @@ export class CoreService {
     if (this.willLoop) {
       this.willLoop.stop();
       this.willLoop = null;
+    }
+    // 16.0 P3-A2：停 BoardObserver 定时扫描（advisory only，停止即可，无需 flush）
+    if (this.boardObserver) {
+      this.boardObserver.stop();
+      this.boardObserver = null;
     }
     if (this.insightsTimer) {
       clearInterval(this.insightsTimer);
