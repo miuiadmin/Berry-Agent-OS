@@ -412,3 +412,69 @@ export function getBoardContext(taskId: string, windowSize: number = 20): BoardC
     totalMessages: getBoardThreadCount(taskId),
   };
 }
+
+// ─── §16.9 崩溃恢复：从板状态重建 leader 上下文 ───
+
+/** leader 崩溃恢复上下文（§16.9：从哪续，不整板重来） */
+export interface LeaderRecoveryContext {
+  goal: string;
+  status: BoardStatus;
+  leader: string;
+  members: string[];
+  /** 已完成的子任务（report done） */
+  completed: Array<{ from: string; summary: string }>;
+  /** 进行中/待审核的 */
+  pending: Array<{ type: string; from: string; detail: string }>;
+  /** 失败/受阻的 */
+  blocked: Array<{ from: string; summary: string }>;
+  /** 未回答的 ask(@brain) */
+  unansweredAsks: Array<{ from: string; question: string }>;
+  /** brain 已下的 command */
+  commands: Array<{ intent: string; to: string; instruction: string }>;
+}
+
+/**
+ * 从板状态重建 leader 上下文（§16.9 崩溃恢复粒度）。
+ *
+ * leader 崩溃/重启后，从 task_thread 持久化的完整发言流重建「我在干什么、哪些完成、哪些卡住、
+ * brain 说了什么」——不必整板重来，从断点续。纯读+派生（不写板、不改状态机）。
+ *
+ * @param taskId  板 id
+ * @returns 恢复上下文；板不存在 → null
+ */
+export function rebuildLeaderContextFromBoard(taskId: string): LeaderRecoveryContext | null {
+  // 读全量 thread（不只 20 条窗口——恢复需要完整历史）
+  const ctx = getBoardContext(taskId, 200);
+  if (!ctx) return null;
+  const recovery: LeaderRecoveryContext = {
+    goal: ctx.meta.goal ?? '(无目标)',
+    status: ctx.meta.boardStatus,
+    leader: ctx.meta.leader ?? '?',
+    members: ctx.members.map((m) => m.agentId),
+    completed: [],
+    pending: [],
+    blocked: [],
+    unansweredAsks: [],
+    commands: [],
+  };
+  for (const m of ctx.recentMessages) {
+    switch (m.type) {
+      case 'report':
+        if (m.status === 'done') recovery.completed.push({ from: m.from, summary: m.summary });
+        else if (m.status === 'blocked') recovery.blocked.push({ from: m.from, summary: m.summary });
+        else recovery.pending.push({ type: `report:${m.status}`, from: m.from, detail: m.summary });
+        break;
+      case 'ask':
+        if (m.to === 'brain') recovery.unansweredAsks.push({ from: m.from, question: m.question });
+        break;
+      case 'command':
+        recovery.commands.push({ intent: m.intent, to: m.to, instruction: m.instruction });
+        break;
+      case 'delegate':
+        recovery.pending.push({ type: 'delegate', from: m.from, detail: `@${m.to}: ${m.subTaskGoal}` });
+        break;
+      // tell / tool_request / tool_result 不影响恢复语义（讨论/工具是细节，leader 恢复看宏观）
+    }
+  }
+  return recovery;
+}

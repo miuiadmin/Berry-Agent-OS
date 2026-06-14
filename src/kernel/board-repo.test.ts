@@ -37,6 +37,7 @@ import {
   transferLeadership,
   createSubBoard,
   countActiveSubs,
+  rebuildLeaderContextFromBoard,
   resolveLeaderForDelegate,
   assertBoardMemberOrGovernance,
   getBoardContext,
@@ -594,5 +595,38 @@ describe('board-repo 16.0 任务板存储层', () => {
     expect(() => assertBoardMemberOrGovernance('task-vis', 'conversation')).not.toThrow();
     // 非成员非治理 → 抛错（§6 跨板隔离）
     expect(() => assertBoardMemberOrGovernance('task-vis', 'evil-agent')).toThrow();
+  });
+
+  // ─── rebuildLeaderContextFromBoard（§16.9 崩溃恢复：从板状态重建 leader 上下文）───
+
+  it('rebuildLeaderContextFromBoard：从板状态重建恢复上下文（completed/blocked/asks/commands/pending）', () => {
+    insertAgentTask('task-recover');
+    initBoard('task-recover', { goal: '恢复测试', leader: 'assistant' });
+    addBoardMember('task-recover', 'code', 'member');
+    // 发各种类型消息
+    postBoardMessage('task-recover', { id: 'm1', type: 'delegate', from: 'assistant', to: 'code', taskId: 'task-recover', ts: 1, subTaskGoal: '改模块 X' });
+    postBoardMessage('task-recover', { id: 'm2', type: 'report', from: 'code', to: 'brain', taskId: 'task-recover', ts: 2, summary: '改完了', status: 'done', artifactRefs: [] });
+    postBoardMessage('task-recover', { id: 'm3', type: 'report', from: 'code', to: 'brain', taskId: 'task-recover', ts: 3, summary: '卡住了', status: 'blocked', artifactRefs: [] });
+    postBoardMessage('task-recover', { id: 'm4', type: 'ask', from: 'code', to: 'brain', taskId: 'task-recover', ts: 4, question: '方向偏了？', blocking: true });
+    postBoardMessage('task-recover', { id: 'm5', type: 'command', from: 'brain', to: 'code', taskId: 'task-recover', ts: 5, intent: 'redirect', instruction: '改用方案 Y' });
+
+    const recovery = rebuildLeaderContextFromBoard('task-recover');
+    expect(recovery).not.toBeNull();
+    expect(recovery!.goal).toBe('恢复测试');
+    expect(recovery!.leader).toBe('assistant');
+    expect(recovery!.members).toContain('code');
+    expect(recovery!.completed).toHaveLength(1);
+    expect(recovery!.completed[0].summary).toBe('改完了');
+    expect(recovery!.blocked).toHaveLength(1);
+    expect(recovery!.blocked[0].summary).toBe('卡住了');
+    expect(recovery!.unansweredAsks).toHaveLength(1);
+    expect(recovery!.unansweredAsks[0].question).toBe('方向偏了？');
+    expect(recovery!.commands).toHaveLength(1);
+    expect(recovery!.commands[0].intent).toBe('redirect');
+    expect(recovery!.pending).toHaveLength(1); // delegate
+  });
+
+  it('rebuildLeaderContextFromBoard：板不存在 → null', () => {
+    expect(rebuildLeaderContextFromBoard('task-nonexistent-recover')).toBeNull();
   });
 });
