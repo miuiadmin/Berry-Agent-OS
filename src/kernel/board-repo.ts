@@ -328,6 +328,21 @@ export function listOrphanBoards(): string[] {
   return rows.map((r) => r.id);
 }
 
+/**
+ * 解析 delegate 的真实 leader（§5.2.1 派工归 leader，非 brain）。
+ * 子板派发（parentTaskId 设）→ 父板 leader（拆子板的人，递归 leader 角色）；
+ * 顶层派发（无 parentTaskId 或父板无 leader）→ 'conversation'（助手=顶层 leader，§5.4）。
+ *
+ * 派发点投影 delegate 信封时用此定 from 字段，替代硬编码 'brain'（brain 不派工，只看板纠偏）。
+ */
+export function resolveLeaderForDelegate(parentTaskId?: string): string {
+  if (parentTaskId) {
+    const parent = getBoardMeta(parentTaskId);
+    if (parent?.leader) return parent.leader;
+  }
+  return 'conversation';
+}
+
 // ─── brain 看板上下文组装（§10.5，P3 brain 看板用）───
 
 /** brain 看板上下文：近 N 条发言 + 板元数据 + 花名册，供 board-observer / board-ask-handler 拼 prompt */

@@ -36,6 +36,7 @@ import {
   isBoardMember,
   transferLeadership,
   createSubBoard,
+  resolveLeaderForDelegate,
   getBoardContext,
 } from './board-repo.js';
 import type { BoardMessage } from '../contracts/board-message.js';
@@ -537,5 +538,22 @@ describe('board-repo 16.0 任务板存储层', () => {
       goal: 'x', leader: 'code', sessionId: 's1', correlationId: 'c1', requester: 'assistant',
     });
     expect(result.status).toBe('cant_split');
+  });
+
+  // ─── resolveLeaderForDelegate（§5.2.1 派工归 leader 非 brain）───
+
+  it('resolveLeaderForDelegate：无 parentTaskId → conversation（顶层 leader=助手，§5.4）', () => {
+    expect(resolveLeaderForDelegate()).toBe('conversation');
+    expect(resolveLeaderForDelegate(undefined)).toBe('conversation');
+  });
+
+  it('resolveLeaderForDelegate：子板派发（parentTaskId 设）→ 父板 leader', () => {
+    insertAgentTask('task-parent-ldr');
+    initBoard('task-parent-ldr', { goal: '父板', leader: 'code', spawnDepth: 0 });
+    expect(resolveLeaderForDelegate('task-parent-ldr')).toBe('code');
+  });
+
+  it('resolveLeaderForDelegate：父板不存在 → conversation fallback', () => {
+    expect(resolveLeaderForDelegate('task-nonexistent-ldr')).toBe('conversation');
   });
 });

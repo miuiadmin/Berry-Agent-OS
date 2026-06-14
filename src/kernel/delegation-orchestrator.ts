@@ -82,6 +82,7 @@ import { StateCache } from './state-cache.js';
 import { VerifyGate } from './verify-gate.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
 import { postDelegateEnvelope, postReportEnvelope, postSystemReportEnvelope, postAskEnvelope } from './board-projection.js';
+import { resolveLeaderForDelegate } from './board-repo.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 
@@ -1617,7 +1618,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 16.0 P4-C4：daemon 派发点投影 delegate 信封（fire-and-forget 审计影子）
     postDelegateEnvelope(taskId, {
-      from: 'brain',
+      from: resolveLeaderForDelegate(),
       to: decision.targetAgent,
       subTaskGoal: pending.userMessage,
       sessionId: pending.sessionId,
@@ -1705,7 +1706,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 16.0 P4-C4：runtime 派发点投影 delegate 信封（fire-and-forget 审计影子）
     postDelegateEnvelope(delegationId, {
-      from: 'brain',
+      from: resolveLeaderForDelegate(),
       to: runtime.name,
       subTaskGoal: pending.userMessage,
       sessionId: pending.sessionId,
@@ -2049,7 +2050,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // 在 delegationManager.create 返回 taskId 之后、ipc.send('agent.task') 之前落板。
     // initBoard 幂等 + addMember + postBoardMessage(delegate)。失败 no-op，不影响派发主路径。
     postDelegateEnvelope(taskId, {
-      from: 'brain',
+      from: resolveLeaderForDelegate(input.inputPayload.parentTaskId as string | undefined),
       to: route.targetAgent,
       subTaskGoal: (input.inputPayload.message as string) ?? (input.inputPayload.instruction as string) ?? '',
       sessionId: input.sessionId,
