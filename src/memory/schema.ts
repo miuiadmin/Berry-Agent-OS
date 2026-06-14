@@ -39,15 +39,12 @@ export const CORE_SCHEMA_SQL = `
     session_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
     content TEXT NOT NULL,
-    -- 以下 4 列为历史遗留，从不写入。工具调用数据已迁移到 tool_calls 表。保留以兼容已有数据库。
-    tool_name TEXT,
-    tool_input TEXT,
-    tool_result TEXT,
-    token_count INTEGER,
     -- 客户端消息 ID（per-message 唯一），用作 user 消息精确幂等键
     client_msg_id TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
   );
+  -- 原 tool_name/tool_input/tool_result/token_count 4 个历史遗留死列已删除（从不写入，
+  -- 工具调用数据在 tool_calls/message_blocks；conversations 已退役为只读冷归档，doc 22）。
   -- client_msg_id UNIQUE 索引由 addConversationsClientMsgIdColumn migration 创建（避免 legacy schema 与新列冲突）
 
   -- ─── 对话内联模型（设计文档/22）：messages + message_blocks 是对话的唯一规范存储 ───

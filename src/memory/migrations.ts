@@ -198,11 +198,13 @@ function rebuildMemoryAccessLog(conn: Database.Database): void {
 function rebuildConversationsIfNeeded(conn: Database.Database): void {
   const columns = getColumns(conn, 'conversations');
   const schema = tableSql(conn, 'conversations');
+  // 现代结构判据：tool_name 死列已删 + client_msg_id 幂等键已加 + role CHECK 在位
+  // 取代旧的「4 死列存在 = 别动」反转哨兵——裸删 4 列后旧哨兵会让 fresh DB 每次启动重复重建。
+  // client_msg_id 由 addConversationsClientMsgIdColumn 保证加到所有库（rebuild 之后跑），
+  // 是稳定的「已迁移到现代结构」标记。
   if (
-    columns.has('tool_name') &&
-    columns.has('tool_input') &&
-    columns.has('tool_result') &&
-    columns.has('token_count') &&
+    !columns.has('tool_name') &&
+    columns.has('client_msg_id') &&
     schema.includes("role IN ('user','assistant','system','tool')")
   ) {
     return;
@@ -216,25 +218,17 @@ function rebuildConversationsIfNeeded(conn: Database.Database): void {
       session_id TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
       content TEXT NOT NULL,
-      tool_name TEXT,
-      tool_input TEXT,
-      tool_result TEXT,
-      token_count INTEGER,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
 
     INSERT INTO conversations (
-      id, session_id, role, content, tool_name, tool_input, tool_result, token_count, created_at
+      id, session_id, role, content, created_at
     )
     SELECT
       id,
       session_id,
       CASE WHEN role IN ('user','assistant','system','tool') THEN role ELSE 'system' END,
       content,
-      NULL,
-      NULL,
-      NULL,
-      NULL,
       created_at
     FROM conversations_old_migration;
 
