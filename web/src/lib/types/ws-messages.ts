@@ -177,7 +177,7 @@ export interface BlockMessage {
   sessionId?: string;
   messageId: string;
   blockId: string;
-  blockType: "text" | "thinking" | "tool" | "delegation" | "review";
+  blockType: "text" | "thinking" | "tool" | "delegation" | "review" | "orchestration" | "task_progress";
   block?: unknown;
   state?: string;
   delta?: string;

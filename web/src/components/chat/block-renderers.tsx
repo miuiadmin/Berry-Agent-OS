@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { MARKDOWN_PROSE } from "@/components/ui/_shared";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
-import type { ToolBlock, DelegationBlock, OrchestrationBlock, Block } from "@/lib/blocks";
+import type { ToolBlock, DelegationBlock, OrchestrationBlock, TaskProgressBlock, Block } from "@/lib/blocks";
 import type { ChatMessage } from "@/lib/stores/chat-store";
 import { ThinkingProcess } from "./thinking-process";
 
@@ -158,6 +158,52 @@ const OrchestrationBlockCard = memo(function OrchestrationBlockCard({ block }: {
 });
 
 /**
+ * 任务进展卡（§14.5 主界面：会自己生长的 block，让用户在对话里感知任务板推进）。
+ * 随 board 协作实时更新（稳定 blockId，同板 upsert 更新非堆叠）。
+ * live-only：刷新后消失（板的最终 report 是持久化结果）。
+ * 三行：目标+状态徽章 / leader+成员 / 活动摘要+预算。
+ */
+const TASK_STATUS_COLOR: Record<string, string> = {
+  in_progress: "text-success",
+  awaiting_review: "text-amber-600 dark:text-amber-500",
+  awaiting_user: "text-amber-600 dark:text-amber-500",
+  completed: "text-success",
+  failed: "text-destructive",
+  interrupted: "text-muted-foreground",
+  created: "text-muted-foreground",
+};
+
+const TaskProgressCard = memo(function TaskProgressCard({ block }: { block: TaskProgressBlock }) {
+  return (
+    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px]">
+      {/* 目标 + 状态徽章 */}
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-foreground">{block.goal}</span>
+        <span className={cn("ml-auto uppercase tracking-wide", TASK_STATUS_COLOR[block.status] ?? "text-muted-foreground")}>
+          {block.status}
+        </span>
+      </div>
+      {/* leader + 花名册 */}
+      {(block.leader || block.members?.length) && (
+        <div className="mt-1 text-muted-foreground/70">
+          {block.leader && <span>leader: {block.leader}</span>}
+          {block.members?.length ? ` · ${block.members.join(", ")}` : ""}
+        </div>
+      )}
+      {/* 活动摘要 */}
+      {block.activitySummary && <div className="mt-1 text-muted-foreground/70">{block.activitySummary}</div>}
+      {/* 预算 */}
+      {block.maxTurns != null && block.turnCount != null && (
+        <div className="mt-1 text-muted-foreground/60">
+          发言 {block.turnCount}/{block.maxTurns}
+          {block.spawnDepth != null && ` · 深度 ${block.spawnDepth}`}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/**
  * 相邻 block 间距表——按「上一块 type + 当前块 type」决定当前块的 margin-top。
  *
  * 背景：原 <div className="space-y-2"> 对所有相邻块一律 8px，导致用户感知「连续工具之间空空的」。
@@ -230,6 +276,8 @@ function renderBlock(block: Block, i: number, ctx: {
       return <DelegationBlockCard key={block.id ?? `dg-${i}`} block={block} />;
     case "orchestration":
       return <OrchestrationBlockCard key={block.id ?? `or-${i}`} block={block} />;
+    case "task_progress":
+      return <TaskProgressCard key={`tp-${i}`} block={block as TaskProgressBlock} />;
     case "review":
       // review block 不在时间线渲染——BrainReviewBadge 由 message.reviewVerdict 单独渲染（restore 从 review block 投影）
       return null;

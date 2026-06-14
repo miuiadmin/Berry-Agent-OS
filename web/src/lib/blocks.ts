@@ -90,8 +90,28 @@ export interface OrchestrationBlock {
   detail?: string;
 }
 
+/**
+ * 任务进展卡 block（§14.5 主界面：会自己生长的 block，让用户在对话里感知任务板推进）。
+ * live-only：随 board 协作实时更新（稳定 blockId = `${messageId}#taskprog`，同板 upsert 更新非重复建），
+ * 不落库，刷新后消失。见后端 contracts/message-blocks.ts TaskProgressBlock。
+ */
+export interface TaskProgressBlock {
+  type: 'task_progress';
+  /** 稳定 blockId（`${messageId}#taskprog`），同板多次更新 upsert 同一块 */
+  id: string;
+  goal: string;
+  status: string;
+  leader?: string;
+  members?: string[];
+  turnCount?: number;
+  maxTurns?: number;
+  spawnDepth?: number;
+  /** 近期活动一行摘要（如「3指派 2成果 1纠偏」） */
+  activitySummary?: string;
+}
+
 /** Block 判别联合——对话内容的统一模型 */
-export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock | OrchestrationBlock;
+export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock | OrchestrationBlock | TaskProgressBlock;
 
 /**
  * stream.block 事件载荷（后端 StreamBlockPayload 的前端镜像，见 contracts/message-blocks.ts）。
@@ -105,7 +125,7 @@ export interface StreamBlockPayload {
   messageId: string;
   /** block 唯一键（text/thinking 为 `${messageId}#text|#thinking`；tool 为 `${messageId}#tool#${name}#${seq}`） */
   blockId: string;
-  blockType: 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration';
+  blockType: 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration' | 'task_progress';
   /** 创建事件携带完整 block（tool/delegation 出生即终态）；text/thinking 无此字段 */
   block?: Block;
   /** tool/delegation 状态（冗余于 block.state，便于不携带完整 block 的 patch 事件） */
@@ -185,6 +205,18 @@ export function applyBlockToBlocks(blocks: Block[] | undefined, p: StreamBlockPa
   // live-only 块：只 live 累积在 message.blocks，落库路径不含（刷新后消失）。
   if (p.blockType === 'orchestration' && p.block) {
     const idx = list.findIndex((b) => b.type === 'orchestration' && (b as { id: string }).id === p.blockId);
+    if (idx >= 0) {
+      const copy = list.slice();
+      copy[idx] = p.block;
+      return copy;
+    }
+    return [...list, p.block];
+  }
+
+  // task_progress：稳定 blockId（`${messageId}#taskprog`），同板 upsert 更新同一块（非堆叠，§14.5 会生长的卡）。
+  // live-only 块：只 live 累积，落库路径不含（刷新后消失）。
+  if (p.blockType === 'task_progress' && p.block) {
+    const idx = list.findIndex((b) => b.type === 'task_progress');
     if (idx >= 0) {
       const copy = list.slice();
       copy[idx] = p.block;

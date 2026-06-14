@@ -22,10 +22,11 @@ import type { ReviewVerdict } from './review.js';
 /**
  * Block 的 type 判别值。
  * 持久化类型（text/thinking/tool/delegation/review）与 message_blocks.block_type CHECK 约束一致；
- * 'orchestration'（Brain 编排动作）为 live-only——实时 stream.block 显示但不落库（故不在 CHECK 内），
- * 刷新后不保留。详见 block-collector.onOrchestration。
+ * 'orchestration'（Brain 编排动作）+ 'task_progress'（任务进展卡 §14.5）为 live-only——
+ * 实时 stream.block 显示但不落库（故不在 CHECK 内），刷新后不保留。
+ * 详见 block-collector.onOrchestration / onTaskProgress。
  */
-export type BlockType = 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration';
+export type BlockType = 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration' | 'task_progress';
 
 // ─── ToolBlock 状态机（OpenCode 式：call + result 同一 block 的生命周期阶段） ───
 
@@ -128,10 +129,39 @@ export interface OrchestrationBlock {
 }
 
 /**
+ * 任务进展卡 block（§14.5 主界面：会自己生长的 block，让用户在对话里感知任务板推进）。
+ *
+ * live-only：随 board 协作实时更新（稳定 blockId = `${messageId}#taskprog`，同板 upsert 更新非重复建），
+ * 不落库（避开 block_type CHECK 迁移）；刷新后消失（板的最终 report 是持久化结果）。
+ * 由 block-collector.onTaskProgress emit，board-projection 在每次板活动后据 getBoardContext 投影。
+ */
+export interface TaskProgressBlock {
+  type: 'task_progress';
+  /** 稳定 blockId（`${messageId}#taskprog`），同板多次更新 upsert 同一块 */
+  id: string;
+  /** 任务目标（板 goal） */
+  goal: string;
+  /** 板状态（BoardStatus 子集） */
+  status: string;
+  /** 板 leader */
+  leader?: string;
+  /** 花名册成员 agentId 列表 */
+  members?: string[];
+  /** 发言计数（预算） */
+  turnCount?: number;
+  /** 发言预算上限 */
+  maxTurns?: number;
+  /** 生成深度 */
+  spawnDepth?: number;
+  /** 近期活动一行摘要（如「3指派 2成果 1纠偏」） */
+  activitySummary?: string;
+}
+
+/**
  * 对话内容 Block 判别联合。一条消息由若干有序 Block 组成（对齐 Claude Code content[] / OpenCode parts[]）。
  * 渲染时 blocks.map(block => <BlockRenderer/>)；事件流以 stream.block 单事件族承载。
  */
-export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock | OrchestrationBlock;
+export type Block = TextBlock | ThinkingBlock | ToolBlock | DelegationBlock | ReviewBlock | OrchestrationBlock | TaskProgressBlock;
 
 // ─── Zod schema 镜像（WS 校验 / message_blocks.payload_json 序列化） ───
 
@@ -184,6 +214,19 @@ const OrchestrationBlockSchema = z.object({
   detail: z.string().optional(),
 });
 
+const TaskProgressBlockSchema = z.object({
+  type: z.literal('task_progress'),
+  id: z.string(),
+  goal: z.string(),
+  status: z.string(),
+  leader: z.string().optional(),
+  members: z.array(z.string()).optional(),
+  turnCount: z.number().optional(),
+  maxTurns: z.number().optional(),
+  spawnDepth: z.number().optional(),
+  activitySummary: z.string().optional(),
+});
+
 /** Block 判别联合 schema（按 type 判别） */
 export const BlockSchema: z.ZodType<Block> = z.discriminatedUnion('type', [
   TextBlockSchema,
@@ -192,6 +235,7 @@ export const BlockSchema: z.ZodType<Block> = z.discriminatedUnion('type', [
   DelegationBlockSchema,
   ReviewBlockSchema,
   OrchestrationBlockSchema,
+  TaskProgressBlockSchema,
 ]);
 
 // ─── stream.block 事件 payload ───

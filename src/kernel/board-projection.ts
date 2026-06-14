@@ -27,9 +27,11 @@ import {
   addBoardMember,
   updateBoardMeta,
   getBoardMeta,
+  getBoardContext,
   applyBoardStatus,
   transferLeadership,
 } from './board-repo.js';
+import { peekBlockCollector } from './block-collector.js';
 import type { BoardMessage } from '../contracts/board-message.js';
 
 const logger = getLogger('board-projection');
@@ -48,6 +50,8 @@ function safePost(taskId: string, build: () => BoardMessage, label: string): voi
     // correction-flow 双触发）。P5 board 权威切换后让 delegation-manager 停发 + board 派生恢复。
     // 统一在此 emit board.message.posted（而非散落各 postXxxEnvelope），遵循「补丁过多即重构」。
     emitBoardMessagePosted(taskId, msg);
+    // §14.5 任务进展卡：board 活动 → 投影 task_progress block（live-only，经 block-collector 桥接到 chat 消息）
+    emitTaskProgressForBoard(taskId);
   } catch (err) {
     logger.debug({ err, taskId, label }, `board-projection: ${label} 落板失败（fire-and-forget，不影响主路径）`);
   }
@@ -75,6 +79,41 @@ function emitBoardMessagePosted(taskId: string, msg: BoardMessage): void {
   } catch (err) {
     // emit 失败不影响 board 落板主路径（fire-and-forget，前端可经拉历史补救）
     logger.debug({ err, taskId, messageType: msg.type }, 'board-projection: emit board.message.posted 失败（不影响主路径）');
+  }
+}
+
+/**
+ * §14.5 任务进展卡投影：board 活动 → getBoardContext → TaskProgressBlock →
+ * peekBlockCollector(taskId).onTaskProgress emit（collector 知道 messageId，桥接 board→chat 消息块）。
+ * live-only fire-and-forget：无 collector（非 board 或已 dispose）静默跳过，失败 no-op。
+ */
+function emitTaskProgressForBoard(taskId: string): void {
+  try {
+    const ctx = getBoardContext(taskId, 10);
+    if (!ctx) return;
+    const collector = peekBlockCollector(taskId);
+    if (!collector) return; // 无 collector = 无关联 chat 消息，跳过（非 board 路径或板已 dispose）
+    // 近期活动按 type 计数 → 一行摘要（让用户一眼看到板在干什么）
+    const counts = { delegate: 0, report: 0, tool: 0, command: 0, ask: 0 };
+    for (const m of ctx.recentMessages) {
+      if (m.type === 'delegate') counts.delegate++;
+      else if (m.type === 'report') counts.report++;
+      else if (m.type === 'tool_request' || m.type === 'tool_result') counts.tool++;
+      else if (m.type === 'command') counts.command++;
+      else if (m.type === 'ask') counts.ask++;
+    }
+    collector.onTaskProgress({
+      goal: ctx.meta.goal ?? '(无目标)',
+      status: ctx.meta.boardStatus,
+      leader: ctx.meta.leader ?? undefined,
+      members: ctx.members.map((mem) => mem.agentId),
+      turnCount: ctx.meta.turnCount,
+      maxTurns: ctx.meta.maxTurns,
+      spawnDepth: ctx.meta.spawnDepth,
+      activitySummary: `${counts.delegate}指派 ${counts.report}成果 ${counts.tool}工具 ${counts.command}纠偏 ${counts.ask}求助`,
+    });
+  } catch {
+    // fire-and-forget：任务卡投影失败不影响主路径
   }
 }
 

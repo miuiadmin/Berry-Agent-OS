@@ -20,7 +20,7 @@
 
 import { getEventBus } from './event-bus.js';
 import { genId } from '../utils/id.js';
-import type { StreamBlockPayload, ToolBlock, TextBlock, ThinkingBlock, DelegationBlock, DelegationBlockState, ReviewBlock, OrchestrationBlock, Block } from '../contracts/message-blocks.js';
+import type { StreamBlockPayload, ToolBlock, TextBlock, ThinkingBlock, DelegationBlock, DelegationBlockState, ReviewBlock, OrchestrationBlock, TaskProgressBlock, Block } from '../contracts/message-blocks.js';
 // 合成兜底语 marker 识别（runToolLoop 的 tool-limit/budget/error/abort 产出，需在 buildBlocks 追加而非替换正文）
 import { isSyntheticFinalContent, SYNTHETIC_FINAL_CONTENT_MARKER } from '../llm/tool-caller.js';
 /** stream.block emit 函数类型（默认走全局 EventBus；测试可注入捕获函数） */
@@ -507,6 +507,47 @@ export class BlockCollector {
       blockType: 'orchestration',
       block,
       ts: opts.createdAt,
+      taskId: this.taskId,
+      correlationId: this.correlationId,
+    });
+  }
+
+  /**
+   * 任务进展卡 block（§14.5 主界面：会自己生长的 block，让用户在对话里感知任务板推进）。
+   *
+   * live-only：稳定 blockId（`${messageId}#taskprog`），同板多次更新 upsert 同一块（非重复建），
+   * 不进 timeline（不落库，避开 block_type CHECK）。由 board-projection 在每次板活动后据
+   * getBoardContext 投影调此 emit——collector 知道 messageId，桥接 board（taskId）→ chat 消息块。
+   *
+   * @param opts  板元数据 + 近期活动摘要（由 board-projection 从 getBoardContext 派生）
+   */
+  onTaskProgress(opts: {
+    goal: string;
+    status: string;
+    leader?: string;
+    members?: string[];
+    turnCount?: number;
+    maxTurns?: number;
+    spawnDepth?: number;
+    activitySummary?: string;
+  }): void {
+    // 稳定 blockId：同板多次活动 upsert 同一块（前端 applyBlockToBlocks 整体替换 → 卡片更新非堆叠）
+    const blockId = `${this.messageId}#taskprog`;
+    const block: TaskProgressBlock = { type: 'task_progress', id: blockId, goal: opts.goal, status: opts.status };
+    if (opts.leader) block.leader = opts.leader;
+    if (opts.members) block.members = opts.members;
+    if (opts.turnCount != null) block.turnCount = opts.turnCount;
+    if (opts.maxTurns != null) block.maxTurns = opts.maxTurns;
+    if (opts.spawnDepth != null) block.spawnDepth = opts.spawnDepth;
+    if (opts.activitySummary) block.activitySummary = opts.activitySummary;
+    // ⚠️ live-only：只 emit，不 push 进 timeline → buildBlocks 落库时不含任务卡（避开 block_type CHECK）
+    this.emit({
+      sessionId: this.sessionId,
+      messageId: this.messageId,
+      blockId,
+      blockType: 'task_progress',
+      block,
+      ts: Date.now(),
       taskId: this.taskId,
       correlationId: this.correlationId,
     });
