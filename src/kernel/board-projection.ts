@@ -33,6 +33,7 @@ import {
 } from './board-repo.js';
 import { peekBlockCollector } from './block-collector.js';
 import type { BoardMessage } from '../contracts/board-message.js';
+import { routeGovernance } from './flows/governance-switch.js';
 
 const logger = getLogger('board-projection');
 
@@ -93,14 +94,16 @@ function emitTaskProgressForBoard(taskId: string): void {
     if (!ctx) return;
     const collector = peekBlockCollector(taskId);
     if (!collector) return; // 无 collector = 无关联 chat 消息，跳过（非 board 路径或板已 dispose）
-    // 近期活动按 type 计数 → 一行摘要（让用户一眼看到板在干什么）
-    const counts = { delegate: 0, report: 0, tool: 0, command: 0, ask: 0 };
+    // 用 governance-switch.routeGovernance 分类近期消息为治理类别（让任务卡显示治理视图，
+    // 也让 governance-switch 非闲置——P3 单一 switch 路由真正被消费）
+    const counts = { gate: 0, review: 0, escalate: 0, command: 0, none: 0 };
     for (const m of ctx.recentMessages) {
-      if (m.type === 'delegate') counts.delegate++;
-      else if (m.type === 'report') counts.report++;
-      else if (m.type === 'tool_request' || m.type === 'tool_result') counts.tool++;
-      else if (m.type === 'command') counts.command++;
-      else if (m.type === 'ask') counts.ask++;
+      const route = routeGovernance(m);
+      if (route.kind === 'gate') counts.gate++;
+      else if (route.kind === 'review') counts.review++;
+      else if (route.kind === 'escalate' || route.kind === 'peer_help') counts.escalate++;
+      else if (route.kind === 'command') counts.command++;
+      else counts.none++;
     }
     collector.onTaskProgress({
       goal: ctx.meta.goal ?? '(无目标)',
@@ -110,7 +113,7 @@ function emitTaskProgressForBoard(taskId: string): void {
       turnCount: ctx.meta.turnCount,
       maxTurns: ctx.meta.maxTurns,
       spawnDepth: ctx.meta.spawnDepth,
-      activitySummary: `${counts.delegate}指派 ${counts.report}成果 ${counts.tool}工具 ${counts.command}纠偏 ${counts.ask}求助`,
+      activitySummary: `${counts.gate}工具闸 ${counts.review}审核 ${counts.command}纠偏 ${counts.escalate}求助 ${counts.none}发言`,
     });
   } catch {
     // fire-and-forget：任务卡投影失败不影响主路径
