@@ -230,9 +230,10 @@ export interface TurnCorrectionPayload {
 }
 
 export const CORRECTION_LIMITS = {
-  /** 最多 5 次 checkpoint——code agent 正常任务（inspect+write+verify）可能触发多次，
-   *  3 太激进导致正常任务被误杀。5 是防死循环与容许复杂度的平衡。 */
-  maxCheckpointsPerDelegation: 5,
+  /** 最多 8 次 checkpoint——code agent 正常任务可能触发多次 checkpoint
+   *  （same_tool_repeat 15 + consecutive_failures 3 + budget_warning），
+   *  8 是防死循环与容许复杂度的平衡。 */
+  maxCheckpointsPerDelegation: 8,
   minIntervalMs: 10_000,
   maxCorrectionTokens: 2000,
   budgetFraction: 0.15,

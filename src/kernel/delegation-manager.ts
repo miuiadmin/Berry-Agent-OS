@@ -19,8 +19,10 @@ import { getLogger } from '../utils/logger.js';
 const logger = getLogger('delegation-manager');
 
 const MAX_RETAINED_OUTPUTS = 10;
+/** 连续同工具调用 ≥ N → 触发 checkpoint（原值 5 对 code agent 太严：
+ * inspect_code 查看多个路径是正常的，5 次就 checkpoint 导致任务被误杀） */
 const GUARD_CONSECUTIVE_FAILURES = 3;
-const GUARD_SAME_TOOL_REPEAT = 5;
+const GUARD_SAME_TOOL_REPEAT = 15;
 const GUARD_BUDGET_WARNING_RATIO = 0.7;
 
 function emptyMetrics(): DelegationMetrics {
