@@ -29,23 +29,30 @@ const LANG_RE = /language-(\w+)/;
 export function createMarkdownComponents(isStreaming?: boolean): Components {
   return {
     /**
-     * 代码：className 含 language-xxx 标识 → CodeBlock 组件；否则行内 code。
-     * 兼容 className 形如 "language-"（语言标识为空）的边界情况 —— 此时 lang=null 仍走 CodeBlock。
+     * 代码：react-markdown v9 的 code 组件收 `inline` prop 区分行内 / 块级。
+     * - inline=true（行内 `code`）→ 纯 inline code，不渲染 CodeBlock 标题栏
+     * - inline=false 且 className 含 language-xxx → CodeBlock 高亮块
+     * - inline=false 但无 language 标识 → 仍走 CodeBlock（lang=null 兼容裸 pre 包裹）
+     *
+     * 之前只看 className 里的 language- 前缀，某些 react-markdown 插件给行内 code 也加 language- className，
+     * 会被误判为块级 CodeBlock（多出标题栏）。显式读 inline prop 杜绝此类误判。
      */
-    code({ className, children }) {
+    code({ className, children, ...rest }) {
+      const inline = (rest as { inline?: boolean }).inline;
       const cls = className || "";
       const match = LANG_RE.exec(cls);
-      if (match || /language-/.test(cls)) {
+      // 行内 code（inline=true）或 既无 inline 标识也无 language- 前缀 → 纯 inline code
+      if (inline || (!match && !/language-/.test(cls))) {
         return (
-          <CodeBlock lang={match ? match[1] : null} isStreaming={isStreaming}>
+          <code className={INLINE_CODE}>
             {children}
-          </CodeBlock>
+          </code>
         );
       }
       return (
-        <code className={INLINE_CODE}>
+        <CodeBlock lang={match ? match[1] : null} isStreaming={isStreaming}>
           {children}
-        </code>
+        </CodeBlock>
       );
     },
 
@@ -107,10 +114,15 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
     /**
      * 超链接：仅允许安全协议，过滤 javascript:/data: 等危险 URI。
      * 外部链接新标签页打开 + 显示外链图标。
+     * 不安全 href（被过滤为 undefined）→ 渲染为纯文本 span（非可点击链接），避免出现无 href 却保留链接样式的假链接。
      */
     a({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
       const safeHref = href && SAFE_HREF.test(href) ? href : undefined;
-      const isExternal = safeHref?.startsWith("http");
+      // 不安全 href：渲染为纯文本，不保留链接样式（之前 href=undefined 仍渲染 <a> 保留蓝色下划线假链接）
+      if (!safeHref) {
+        return <span>{children}</span>;
+      }
+      const isExternal = safeHref.startsWith("http");
       return (
         <a
           href={safeHref}
@@ -172,9 +184,22 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
       return <h3 className="mt-3 mb-1.5 text-sm font-semibold" {...props}>{children}</h3>;
     },
 
-    /** 图片：使用 ClickableImage 支持灯箱放大 */
+    /**
+     * 图片：使用 ClickableImage 支持灯箱放大。
+     * src 可能是 string 或 object（某些 react-markdown 插件传 {url,...}），统一规整为 string。
+     * 校验协议白名单（与 a 标签 SAFE_HREF 一致），防止 markdown 注入 javascript:/data: 恶意图。
+     * 不安全 src → 不渲染（返回 null），避免 ClickableImage 收到 undefined src 行为未定义。
+     */
     img({ src, alt }) {
-      const imgSrc = typeof src === "string" ? src : undefined;
+      // src 规整：object 形态（react-markdown 插件）取 .url，否则 string 直用
+      const rawSrc = typeof src === "string"
+        ? src
+        : (src && typeof src === "object" && "url" in src && typeof (src as { url: unknown }).url === "string")
+          ? (src as { url: string }).url
+          : undefined;
+      // 协议白名单校验（图片通常 http(s)，相对路径也允许）
+      const imgSrc = rawSrc && SAFE_HREF.test(rawSrc) ? rawSrc : undefined;
+      if (!imgSrc) return null;
       return <ClickableImage src={imgSrc} alt={alt} />;
     },
   };

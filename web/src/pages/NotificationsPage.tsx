@@ -39,11 +39,14 @@ export default function NotificationsPage() {
     refetchInterval: 30_000,
   });
 
-  // 通知列表查询（按 filter 参数过滤：unread=未归档且未读优先展示，archived=已归档，all=全部）
+  // 通知列表查询（按 filter 参数过滤：unread=未归档且未读优先展示，archived=已归档，all=全部）。
+  // unread 态下与 countQuery 一致地 30 秒轮询——避免用户停在页面时新通知不出现（需手动切 tab）。
+  // all / archived 态轮询意义不大（被动浏览），保持默认不轮询。
   const archivedParam = filter === "archived" ? true : filter === "unread" ? false : undefined;
   const listQuery = useQuery({
     queryKey: ["notifications", filter],
     queryFn: () => notificationsApi.list({ archived: archivedParam, limit: 100 }),
+    refetchInterval: filter === "unread" ? 30_000 : false,
   });
 
   const { readMut, readAllMut, archiveMut } = useNotificationMutations();
@@ -124,7 +127,8 @@ export default function NotificationsPage() {
                         {item.title}
                       </span>
                       <Badge variant="outline" className="shrink-0 text-[11px]">
-                        {t(`notifications.type.${item.type}`) ?? item.type}
+                        {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需 ?? item.type 兜底 */}
+                        {t(`notifications.type.${item.type}`)}
                       </Badge>
                     </div>
                     {item.body && (

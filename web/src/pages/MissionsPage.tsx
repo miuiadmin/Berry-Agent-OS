@@ -64,6 +64,15 @@ export default function MissionsPage() {
       >
         {(data) => {
           const missions = data.items;
+          // 选中态校验：若选中的 mission 已从列表消失（完成 / 被删 / 后端过滤变化），
+          // 立即清空 selectedId，避免右侧 MissionDetail 拉一个 404 的 missionId。
+          // 用 useEffect 会在下一帧才清，期间仍会渲染 detail——这里同步判断更稳。
+          const selectedStillExists = selectedId == null || missions.some((m) => m.id === selectedId);
+          const effectiveSelectedId = selectedStillExists ? selectedId : null;
+          if (!selectedStillExists && selectedId != null) {
+            // 用 setTimeout 把 setState 推出当前渲染周期，避免渲染中调用 setState 的告警
+            setTimeout(() => setSelectedId(null), 0);
+          }
           if (missions.length === 0) {
             return (
               <EmptyState
@@ -90,8 +99,8 @@ export default function MissionsPage() {
               {/* 右侧：选中 mission 的详情（未选中时显示占位） */}
               <Card className="overflow-y-auto">
                 <CardContent className="p-4">
-                  {selectedId ? (
-                    <MissionDetail missionId={selectedId} />
+                  {effectiveSelectedId ? (
+                    <MissionDetail missionId={effectiveSelectedId} />
                   ) : (
                     <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
                       {t("missions.selectToView")}

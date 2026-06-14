@@ -18,6 +18,7 @@ import { apiPost } from "@/lib/api";
 import { setLastProgress } from "@/lib/stores/chat-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
 /** AskUser 事件 payload */
 export interface AskUserPayload {
@@ -65,6 +66,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
 
   /** ref 追踪 responded 状态，让 timer 回调读到最新值（避免闭包过期） */
   const respondedRef = useRef(false);
+  /** ref 持有最新 handleRespond，让倒计时 effect 只依赖 [payload] 而不依赖 handleRespond —— 否则 submitting 切换会重建 handleRespond、重建 effect、重置倒计时 */
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /** 提交用户回复（选项 or 自定义文本）。重复调用被忽略。 */
@@ -84,15 +86,26 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
       setLastProgress(t("askUser.responded", { answer: answer.slice(0, 50) }));
       onResponded?.();
     } catch (err) {
+      // 失败时 toast 提示（之前只 console.error，用户看不到原因会反复点）；
+      // respondedRef 不置 true，用户可重试
       console.error("Failed to respond to askUser:", err);
+      toast.error(t("common.error"));
     } finally {
       setSubmitting(false);
     }
   }, [submitting, payload, t, onResponded]);
 
+  /** handleRespond 的 ref 镜像：倒计时超时回调通过 ref 读最新实现，effect 依赖只需 [payload] */
+  const handleRespondRef = useRef(handleRespond);
+  handleRespondRef.current = handleRespond;
+
   /**
    * 超时倒计时（§5.3.5: 5 分钟超时）。
-   * 通过 respondedRef 检查避免超时后重复提交（与用户主动回复竞态时的兜底）。
+   *
+   * effect 仅依赖 [payload.sessionId, payload.taskId]（payload 的稳定标识）：
+   * 之前依赖 [handleRespond, payload.options, t]，submitting 切换会重建 handleRespond → 重建 effect →
+   * setInterval 重建 → setRemaining 闭包过期 → 倒计时跳回 5:00 误导用户。
+   * 现在用 handleRespondRef 读最新 handleRespond，effect 不再随 submitting 变化重建。
    */
   useEffect(() => {
     timerRef.current = setInterval(() => {
@@ -101,7 +114,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
           if (timerRef.current) clearInterval(timerRef.current);
           /** 超时自动选第一个选项（无选项时回复"无响应"文案） */
           if (!respondedRef.current) {
-            handleRespond(payload.options?.[0] ?? t("askUser.noResponse"));
+            void handleRespondRef.current(payload.options?.[0] ?? t("askUser.noResponse"));
           }
           return 0;
         }
@@ -109,7 +122,8 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
       });
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [handleRespond, payload.options, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payload.sessionId, payload.taskId, payload.options, t]);
 
   /** 提交自由文本（空值忽略） */
   const submitCustom = () => {

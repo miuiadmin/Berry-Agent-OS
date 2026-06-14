@@ -40,18 +40,29 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
   const [uploading, setUploading] = useState(false);
   const t = useT();
 
-  /** 串行上传所有选中文件（避免并发打满连接） */
+  /**
+   * 串行上传所有选中文件（避免并发打满连接）。
+   * 每个文件独立 try/catch：单个失败不影响其余文件继续上传，
+   * 所有失败原因收集后逐个 toast（之前 for-await 任一失败直接 break 到 catch，后续文件静默丢失）。
+   */
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     setUploading(true);
+    /** 本批上传失败的文件错误信息（统一 toast） */
+    const errors: string[] = [];
     try {
       for (const file of Array.from(files)) {
-        const result = await uploadFile(file);
-        onAttach(toAttachment(result));
+        try {
+          const result = await uploadFile(file);
+          onAttach(toAttachment(result));
+        } catch (err) {
+          // 单文件失败：记录原因，继续上传剩余文件
+          const fname = file.name;
+          const msg = err instanceof Error ? err.message : t("fileUpload.uploadFailed");
+          errors.push(`${fname}: ${msg}`);
+        }
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : t("fileUpload.uploadFailed");
-      toast.error(msg);
+      if (errors.length) toast.error(errors.join("\n"));
     } finally {
       setUploading(false);
       // 清空 input.value 让相同文件可再次选择（否则 onChange 不触发）
@@ -68,6 +79,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         onClick={() => inputRef.current?.click()}
         className={cn(
           "shrink-0 rounded-lg p-2.5 md:p-2 text-muted-foreground transition-colors",
+          "min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0",
           "hover:bg-accent hover:text-foreground active:bg-accent",
           "disabled:opacity-50 disabled:cursor-not-allowed",
         )}

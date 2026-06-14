@@ -40,7 +40,8 @@ export function JobStatusBadge({ status }: { status: string }) {
         : "outline";
   return (
     <Badge variant={variant} className="text-[11px]">
-      {t(`status.${status}`) ?? status}
+      {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需 ?? status 兜底 */}
+      {t(`status.${status}`)}
     </Badge>
   );
 }
@@ -221,12 +222,15 @@ export function JobExecutions({ jobId }: { jobId: string }) {
                       }
                       className="text-[11px]"
                     >
-                      {t(`status.${ex.status}`) ?? ex.status}
+                      {/* t() 对未知 key 回退到 key 本身，无需 ?? ex.status 兜底 */}
+                      {t(`status.${ex.status}`)}
                     </Badge>
                     <span className="text-muted-foreground">
                       {fmtDT(new Date(ex.startedAt))}
                     </span>
                     {ex.finishedAt && (
+                      // ex.startedAt / ex.finishedAt 类型为 number（毫秒，见 api.ts SchedulerExecution），
+                      // 相减得毫秒差，除 1000 转秒——若后端改成 ISO 字符串这里会得 NaN，类型会立即报错
                       <span className="text-muted-foreground/70">
                         ({((ex.finishedAt - ex.startedAt) / 1000).toFixed(1)}s)
                       </span>
@@ -262,7 +266,9 @@ export function CreateJobCard({
   const [prompt, setPrompt] = useState("");
   const t = useT();
 
-  /** 三字段都有值才能创建 */
+  /** 三字段都有值才能创建。
+   *  注：未做 cron 格式校验——前端只校验非空，无效 cron（如 "abc"）由后端拒绝并报错。
+   *  加客户端 cron 解析会引入额外依赖（cron-parser / cronstrue），收益低于成本。 */
   const canCreate =
     !!name.trim() && !!cron.trim() && !!prompt.trim();
 
@@ -295,11 +301,12 @@ export function CreateJobCard({
           <Button
             size="sm"
             disabled={!canCreate}
+            className="min-h-[44px] md:min-h-0"
             onClick={() => onCreate({ name, cron, prompt })}
           >
             {t("common.create")}
           </Button>
-          <Button size="sm" variant="outline" onClick={onClose}>
+          <Button size="sm" variant="outline" className="min-h-[44px] md:min-h-0" onClick={onClose}>
             {t("common.cancel")}
           </Button>
         </div>

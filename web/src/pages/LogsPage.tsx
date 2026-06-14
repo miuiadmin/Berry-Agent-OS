@@ -16,6 +16,7 @@ import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { RefreshCw } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
+import { useDebouncedSearch } from "@/hooks/use-debounced-search";
 import { useT, useDateFormat } from "@/lib/i18n";
 
 /** 单条日志行（对应服务端 JSON） */
@@ -43,12 +44,19 @@ const LEVEL_COLORS: Record<number, string> = {
   50: "text-destructive",
 };
 
+/** 三个 select 共享的尺寸 className：移动端 44px 触控目标 + iOS 防缩放字号，
+ *  桌面端恢复紧凑尺寸。抽常量避免同一长串类名在 3 处重复。 */
+const SELECT_CLASS =
+  "h-11 md:h-8 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0";
+
 export default function LogsPage() {
   const t = useT();
   const { formatTime: fmtTime } = useDateFormat();
   /** 日志级别过滤（ALL = 不过滤） */
   const [level, setLevel] = useState("ALL");
-  /** 模块名过滤（模糊匹配） */
+  /** 模块名过滤（模糊匹配，带防抖，避免快速打字时每次按键触发 GET /api/logs） */
+  const [debouncedModule, setDebouncedModule] = useDebouncedSearch(300);
+  /** 输入框受控值（与防抖值分离，输入框立刻响应、查询延迟触发） */
   const [module, setModule] = useState("");
   /** 拉取行数 */
   const [lines, setLines] = useState(100);
@@ -56,15 +64,18 @@ export default function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   /** 日志列表容器引用（用于自动滚到底部） */
   const listRef = useRef<HTMLDivElement>(null);
+  /** 用户是否手动上滚查看历史——为 true 时跳过自动滚到底，避免打断查阅 */
+  const userScrolledUp = useRef(false);
 
   const { data, refetch, isFetching } = useQuery({
-    // queryKey 必须包含所有影响查询结果的参数，否则切参数会命中旧缓存
-    queryKey: ["logs", level, module, lines],
+    // queryKey 必须包含所有影响查询结果的参数，否则切参数会命中旧缓存。
+    // 用防抖值 debouncedModule（而非 module），让快速打字只在停手后发一次请求
+    queryKey: ["logs", level, debouncedModule, lines],
     queryFn: (ctx) => {
       // 构建 URL 参数（与 queryKey 对齐：lines 必传，level/module 按需）
       const params = new URLSearchParams({ lines: String(lines) });
       if (level !== "ALL") params.set("level", level.toLowerCase());
-      if (module) params.set("module", module);
+      if (debouncedModule) params.set("module", debouncedModule);
       return apiGet<{ lines: LogLine[]; total: number }>(
         `/api/logs?${params.toString()}`,
         ctx.signal,
@@ -74,12 +85,22 @@ export default function LogsPage() {
     refetchInterval: autoRefresh ? 5000 : false,
   });
 
-  // 数据更新后自动滚到底部（最新日志）
+  // 数据更新后自动滚到底部（最新日志），仅当用户当前已在底部附近时——
+  // 否则用户上滚查看历史时，自动刷新会强行把他拉回底部，体验打断
   useEffect(() => {
-    if (listRef.current) {
+    if (listRef.current && !userScrolledUp.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
   }, [data]);
+
+  /** 监听滚动：用户上滚离开底部时标记，回到底部附近时清除 */
+  const handleScroll = () => {
+    const el = listRef.current;
+    if (!el) return;
+    // 距底部 32px 以内视为"在底部"（容忍小范围上滚，避免边缘抖动）
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+    userScrolledUp.current = !atBottom;
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -91,7 +112,7 @@ export default function LogsPage() {
         <select aria-label={t("logs.logLevel")}
           value={level}
           onChange={(e) => setLevel(e.target.value)}
-          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
+          className={SELECT_CLASS}
         >
           <option value="ALL">{t("logs.all")}</option>
           <option value="DEBUG">{t("logs.debug")}</option>
@@ -100,21 +121,25 @@ export default function LogsPage() {
           <option value="ERROR">{t("logs.error")}</option>
         </select>
 
-        {/* 模块名输入（移动端 16px 防 iOS 聚焦缩放） */}
+        {/* 模块名输入（移动端 16px 防 iOS 聚焦缩放）。
+            onChange 立刻更新输入框受控值 + 触发防抖查询，避免快速打字时每次按键发请求 */}
         <input
           type="text"
           aria-label={t("logs.filterByModule")}
           placeholder={t("logs.modulePlaceholder")}
           value={module}
-          onChange={(e) => setModule(e.target.value)}
+          onChange={(e) => {
+            setModule(e.target.value);
+            setDebouncedModule(e.target.value);
+          }}
           className="h-11 md:h-8 w-28 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         />
 
-        {/* 行数选择 */}
+        {/* 行数选择（value 用 String 显式化，避免严格模式下 number → string 隐式 coerce 的告警） */}
         <select aria-label={t("logs.numberOfLines")}
-          value={lines}
+          value={String(lines)}
           onChange={(e) => setLines(Number(e.target.value))}
-          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
+          className={SELECT_CLASS}
         >
           <option value={50}>50</option>
           <option value={100}>100</option>
@@ -143,10 +168,13 @@ export default function LogsPage() {
         </label>
       </div>
 
-      {/* 日志列表（等宽字体，按级别着色） */}
-      <div ref={listRef} className="flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
+      {/* 日志列表（等宽字体，按级别着色）。onScroll 监听用于自动滚动守卫：
+          用户上滚查看历史时不强制拉回底部。 */}
+      <div ref={listRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-2 font-mono text-[11px] leading-relaxed">
         {data?.lines.map((line, i) => (
-          <div key={i} className={cn("py-0.5 flex gap-2", LEVEL_COLORS[line.level ?? 30])}>
+          // 日志行无稳定 id，用 time+level+module+index 组合作 key：
+          // 纯 index 在新日志尾部追加时会让 React 复用错位 DOM，造成重绘/动画异常
+          <div key={`${line.time ?? ""}-${line.level ?? ""}-${line.module ?? ""}-${i}`} className={cn("py-0.5 flex gap-2", LEVEL_COLORS[line.level ?? 30])}>
             <span className="shrink-0 text-muted-foreground/40 w-16">{line.time ? fmtTime(new Date(line.time), { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "??:??:??"}</span>
             <span className="shrink-0 w-7">{LEVEL_NAMES[line.level ?? 30] ?? "?"}</span>
             <span className="shrink-0 text-muted-foreground/60 w-24 truncate">{line.module ?? ""}</span>

@@ -204,7 +204,7 @@ function ChannelsTab({ config }: { config: Record<string, unknown> }) {
  * 返回错误键值对（key = "section.field"，value = 错误消息）。
  *
  * 设计：每个 section 用同一份 validateNumericField 校验器，
- * 通过 rule 参数（{ min? / max? / allowEmpty }）控制具体规则，
+ * 通过 rule 参数（{ min? / max? }）控制具体规则，
  * 避免为"端口范围"和"非负数"写两套结构相同的循环。
  */
 export function validateConfig(
@@ -213,16 +213,19 @@ export function validateConfig(
 ): Record<string, string> {
   const errs: Record<string, string> = {};
 
-  // web.port：1 ~ 65535（空字符串允许 = 用户清空时不算非法，保存前会被 Number("") 转成 0 由后端拒绝）
-  validateNumericField(cfg, "web", "port", { min: PORT_MIN, max: PORT_MAX }, t("settings.portRange"), t, errs);
+  // web.port：1 ~ 65535。
+  // 注：用户清空输入框时，settings-config-section 的 updateField 对 number 类型
+  // 执行 Number(e.target.value)，Number("") === 0，0 < min(1) 会立即触发 port range
+  // 错误——这是预期行为（清空即非法），不是"算合法等后端拒绝"。
+  validateNumericField(cfg, "web", "port", { min: PORT_MIN, max: PORT_MAX }, t("settings.portRange"), errs);
 
   // budget / memory：非负数（>= 0）
   const nonNegativeMsg = t("settings.mustBeNonNegative");
   for (const key of ["sessionLimit", "agentLimit", "taskLimit", "dailyLimit"]) {
-    validateNumericField(cfg, "budget", key, { min: 0 }, nonNegativeMsg, t, errs);
+    validateNumericField(cfg, "budget", key, { min: 0 }, nonNegativeMsg, errs);
   }
   for (const key of ["consolidationInterval", "maxResults"]) {
-    validateNumericField(cfg, "memory", key, { min: 0 }, nonNegativeMsg, t, errs);
+    validateNumericField(cfg, "memory", key, { min: 0 }, nonNegativeMsg, errs);
   }
 
   return errs;
@@ -243,13 +246,12 @@ interface NumericRule {
  * - NaN → 跳过（用户输入非数字字符时不立即报错，失焦/保存时再处理）
  * - 数值越界 → 写入错误消息
  *
- * @param cfg   完整配置对象
+ * @param cfg     完整配置对象
  * @param section 区段名
- * @param key    字段名
- * @param rule   校验规则（min/max）
- * @param errMsg 校验失败时写入的错误消息
- * @param t      翻译函数（保留入参以备未来错误消息插值）
- * @param errs   错误收集对象（in-place 写入）
+ * @param key     字段名
+ * @param rule    校验规则（min/max）
+ * @param errMsg  校验失败时写入的错误消息
+ * @param errs    错误收集对象（in-place 写入）
  */
 function validateNumericField(
   cfg: Record<string, unknown>,
@@ -257,7 +259,6 @@ function validateNumericField(
   key: string,
   rule: NumericRule,
   errMsg: string,
-  _t: (key: string) => string,
   errs: Record<string, string>,
 ) {
   const data = cfg[section] as Record<string, unknown> | undefined;

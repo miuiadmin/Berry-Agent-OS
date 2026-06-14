@@ -10,6 +10,7 @@ import { X, SendHorizontal, AlertCircle, RotateCcw, Pencil, Trash2, FileText, Do
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { textFromBlocks } from "@/lib/blocks";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { TextAreaField } from "@/components/ui/text-area-field";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -41,7 +42,9 @@ export function EditableMessage({
   onSubmit: (content: string) => void;
   onCancel: () => void;
 }) {
-  const [text, setText] = useState(message.content);
+  // doc-22 单一事实源：用户正文优先从 TextBlock 投影，回退 content（兼容历史消息）。
+  // 之前用 message.content 会在正文只在 TextBlock 里（content 为空/旧值）时预填错误内容。
+  const [text, setText] = useState(() => textFromBlocks(message.blocks, message.content));
   // 编辑气泡：不封顶高度（自然增长，与发送框 MAX_HEIGHT 封顶不同）
   const { textareaRef, resize } = useAutoResizeTextarea();
   const t = useT();
@@ -124,7 +127,7 @@ export function MessageError({
       </div>
       {onRetry && (
         <button type="button" onClick={onRetry}
-          className="inline-flex items-center gap-0.5 underline hover:no-underline">
+          className="inline-flex min-h-[44px] items-center gap-0.5 px-1 underline hover:no-underline md:min-h-0">
           <RotateCcw className="size-2.5" />
           {t("common.retry")}
         </button>
@@ -174,7 +177,10 @@ function ActionButton({ icon: Icon, label, tone, onClick }: {
     : "hover:bg-accent hover:text-accent-foreground active:bg-accent";
   return (
     <button type="button" onClick={onClick}
-      className={cn("inline-flex items-center rounded-md p-2.5 text-muted-foreground transition-colors md:p-1", hover)}
+      className={cn(
+        "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-2.5 text-muted-foreground transition-colors md:min-h-0 md:min-w-0 md:p-1",
+        hover,
+      )}
       aria-label={label}>
       <Icon className="size-3" />
     </button>
@@ -205,6 +211,9 @@ export function MessageActions({
 
 // ─── AttachmentList ───────────────────────────────────────────────
 
+/** 附件下载链接的安全协议白名单（与 markdown-components 的 SAFE_HREF 一致） */
+const SAFE_HREF = /^(https?:|mailto:|\/|#)/i;
+
 /** 消息附件列表：图片用 ClickableImage，其他用下载链接 */
 export function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
   return (
@@ -213,13 +222,19 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
         att.mimeType.startsWith("image/") ? (
           <ClickableImage key={att.fileId} src={att.url} alt={att.filename} className="max-h-48 rounded-lg animate-slide-down" />
         ) : (
-          <a key={att.fileId} href={att.url} download={att.filename}
-            className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs transition-colors hover:bg-accent animate-slide-down"
-            onClick={(e) => e.stopPropagation()}>
-            <FileText className="size-4 text-muted-foreground" />
-            <span className="max-w-[150px] truncate">{att.filename}</span>
-            <Download className="size-3 text-muted-foreground" />
-          </a>
+          (() => {
+            // 防御性校验 url 协议：att.url 来自服务端返回，仍校验防止 javascript:/data: 注入（与 markdown a 标签一致）
+            const safeHref = SAFE_HREF.test(att.url) ? att.url : undefined;
+            return (
+              <a key={att.fileId} href={safeHref} download={att.filename}
+                className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs transition-colors hover:bg-accent animate-slide-down"
+                onClick={(e) => e.stopPropagation()}>
+                <FileText className="size-4 text-muted-foreground" />
+                <span className="max-w-[150px] truncate">{att.filename}</span>
+                <Download className="size-3 text-muted-foreground" />
+              </a>
+            );
+          })()
         ),
       )}
     </div>

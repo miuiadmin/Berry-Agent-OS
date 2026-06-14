@@ -64,16 +64,20 @@ export default function SchedulerPage() {
   // ── Mutations ──
   const { createMut, deleteMut, pauseMut, resumeMut, triggerMut } = useSchedulerMutations();
 
-  /** 传给 JobCard 的操作回调（统一 pending 状态） */
-  const jobActions: JobCardActions = {
+  /** 为单个 Job 构造操作回调 + 精确的 pending 状态。
+   *  之前用一份共享的 jobActions 把 pauseMut.isPending 等全局 pending 传给所有 JobCard，
+   *  导致暂停 job A 时所有 job 的按钮都被 disable（误以为全局卡住）。
+   *  现在按 mutate variables 跟踪当前操作的 jobId，只 disable 对应那张卡片。
+   *  JobCardActions 接口保持不变（仍是 boolean 字段），调用方为每个 Job 生成独立实例。 */
+  const buildJobActions = (jobId: string): JobCardActions => ({
     onPause: (id) => pauseMut.mutate(id),
     onResume: (id) => resumeMut.mutate(id),
     onTrigger: (id) => triggerMut.mutate(id),
     onDelete: (id) => setDeleteTarget(id),
-    pausing: pauseMut.isPending,
-    resuming: resumeMut.isPending,
-    triggering: triggerMut.isPending,
-  };
+    pausing: !!pauseMut.isPending && pauseMut.variables === jobId,
+    resuming: !!resumeMut.isPending && resumeMut.variables === jobId,
+    triggering: !!triggerMut.isPending && triggerMut.variables === jobId,
+  });
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -132,7 +136,7 @@ export default function SchedulerPage() {
                 />
               ) : (
                 <div className="space-y-2">
-                  {jobs.map((job) => <JobCard key={job.id} job={job} actions={jobActions} />)}
+                  {jobs.map((job) => <JobCard key={job.id} job={job} actions={buildJobActions(job.id)} />)}
                 </div>
               )
             }

@@ -8,6 +8,7 @@
  * API 类型 → missions-types.ts
  */
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import type { MissionTask } from "@/lib/stores/mission-store";
@@ -26,7 +27,7 @@ import {
   Users,
   Radio,
 } from "lucide-react";
-import { useT } from "@/lib/i18n";
+import { useT, useDateFormat } from "@/lib/i18n";
 import type {
   MissionListItemData,
   PlanResponse,
@@ -87,15 +88,14 @@ const DEFAULT_STATUS = {
 
 /**
  * 状态徽章：把 mission/task 状态翻译成带图标的 Badge。
- * 优先使用 i18n key `missions.task{Status}`，不存在则直接显示原始值。
+ * t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需再 ?? status 兜底。
  */
 export function StatusBadge({ status }: { status: string }) {
   const t = useT();
   const config = STATUS_VARIANTS[status] ?? DEFAULT_STATUS;
-  /** 尝试 i18n 映射，无匹配则回退到原始状态文本 */
+  /** 尝试 i18n 映射，无匹配则由 t() 回退到 key 本身 */
   const label =
-    t(`missions.task${status.charAt(0).toUpperCase()}${status.slice(1)}`) ??
-    status;
+    t(`missions.task${status.charAt(0).toUpperCase()}${status.slice(1)}`);
 
   return (
     <Badge variant={config.variant} className="gap-1">
@@ -137,11 +137,11 @@ export function MissionListItem({
           <p className="truncate text-sm font-medium">{mission.goal}</p>
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <StatusBadge status={mission.status} />
+            {/* 列表项数据里只有 taskCount（总数），没有 doneCount——
+                不能套用 progressLabel（"{done}/{total} 个任务"，会显示 5/5 误导成全部完成）。
+                改用 count key 诚实显示"任务总数"。done/total 比例只在详情视图（有 plan.tasks）展示。 */}
             <span>
-              {t("missions.progressLabel", {
-                done: String(mission.taskCount),
-                total: String(mission.taskCount),
-              })}
+              {t("missions.count", { count: String(mission.taskCount) })}
             </span>
           </div>
         </div>
@@ -164,6 +164,9 @@ interface MissionDetailProps {
  */
 export function MissionDetail({ missionId }: MissionDetailProps) {
   const t = useT();
+  /** Tabs 当前激活项（"tasks" | "squad"），受控切换以让 SquadTab 真正可用 */
+  const [tab, setTab] = useState<"tasks" | "squad">("tasks");
+  const { formatDateTime: fmtDT } = useDateFormat();
   const { data: plan, isLoading } = useQuery({
     queryKey: ["mission", missionId],
     queryFn: (ctx) =>
@@ -202,7 +205,9 @@ export function MissionDetail({ missionId }: MissionDetailProps) {
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
             <StatusBadge status={plan.mission.status} />
             <span>{t("missions.createdBy", { user: plan.mission.created_by })}</span>
-            <span>{new Date(plan.mission.created_at).toLocaleString()}</span>
+            {/* 统一走 useDateFormat，与其他页面（Conversations/Memory/Scheduler）的
+                i18n 时区/格式保持一致，不再用裸 toLocaleString */}
+            <span>{fmtDT(new Date(plan.mission.created_at))}</span>
           </div>
           {plan.mission.context && (
             <p className="mt-2 text-sm text-muted-foreground">
@@ -230,8 +235,9 @@ export function MissionDetail({ missionId }: MissionDetailProps) {
         />
       </div>
 
-      {/* Tabs value 固定为 "tasks"（当前实现下点击 squad trigger 不会切换视图） */}
-      <Tabs value="tasks" onValueChange={() => {}}>
+      {/* Tabs 受控：value 跟踪当前激活项，onValueChange 切换——修复之前
+          value 固定为 "tasks" 且 onValueChange 是空函数导致 SquadTab 永远不渲染的死代码 */}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "tasks" | "squad")}>
         <TabsList>
           <TabsTrigger value="tasks" className="gap-1">
             <GitBranch className="size-3" /> {t("missions.tasksTab")} (

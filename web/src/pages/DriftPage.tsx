@@ -9,7 +9,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { useT } from "@/lib/i18n";
+import { useT, useDateFormat } from "@/lib/i18n";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -29,10 +29,13 @@ function pct(score: number, digits = 1) {
 
 export default function DriftPage() {
   const t = useT();
+  const { formatDateTime: fmtDT } = useDateFormat();
   useDocumentTitle(t("drift.title"));
 
   const { data, isLoading, isError, refetch } = useQuery(queries.drift(7));
-  const { data: signalsData } = useQuery(queries.driftSignals());
+  // signals 单独跟踪 loading/error：之前只取 data，失败时静默显示"无信号"，
+  // 用户无法区分真空 vs 加载失败。现在显式处理三态。
+  const { data: signalsData, isLoading: signalsLoading, isError: signalsError } = useQuery(queries.driftSignals());
 
   // ── 错误兜底 ──
   if (isError) {
@@ -55,7 +58,9 @@ export default function DriftPage() {
       <div className="p-4 sm:p-6 space-y-4">
         <PageHeader title={t("drift.title")} />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-28" />)}
+          {/* 骨架高度 h-32 近似 StatCard 含 ScoreBar（extra）的实际高度，
+              加载→就绪减少跳动 */}
+          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-32" />)}
         </div>
       </div>
     );
@@ -97,7 +102,16 @@ export default function DriftPage() {
       <Card>
         <CardHeader><CardTitle className="text-sm font-medium">{t("drift.recentSignals")}</CardTitle></CardHeader>
         <CardContent>
-          {signals.length === 0 ? (
+          {/* 三态处理：加载中骨架 / 加载失败明确报错（而非静默显示"无信号"误导）/ 数据就绪列表 */}
+          {signalsLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-8 w-full" />
+              ))}
+            </div>
+          ) : signalsError ? (
+            <p className="text-sm text-destructive">{t("drift.failedToLoad")}</p>
+          ) : signals.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("drift.noSignals")}</p>
           ) : (
             <div className="space-y-2">
@@ -117,7 +131,8 @@ export default function DriftPage() {
                   </div>
                   <div className="flex items-center gap-3 shrink-0 pl-4 sm:pl-0">
                     <span className="tabular-nums font-medium">{pct(sig.alignmentScore, 0)}</span>
-                    <span className="text-xs text-muted-foreground">{new Date(sig.createdAt).toLocaleString()}</span>
+                    {/* 统一走 useDateFormat，与其他页面的 i18n 时区/格式一致 */}
+                    <span className="text-xs text-muted-foreground">{fmtDT(new Date(sig.createdAt))}</span>
                   </div>
                 </div>
               ))}

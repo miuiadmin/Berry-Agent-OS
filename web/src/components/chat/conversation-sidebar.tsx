@@ -3,9 +3,11 @@
  *
  * 在 Chat 页面左侧以抽屉形式展示，移动端点击后自动关闭。
  * Mutations 使用 useConversationMutations（与 ConversationsPage 共用），
- * 唯一的侧边栏特有逻辑是删除退场动画（removingId → onExitEnd）：
- *   1. 用户确认删除 → setRemovingId(sid) → ConversationItem 播退场动画
- *   2. 动画结束 onExitEnd → 真正调用 deleteConversation.mutate
+ * 唯一的侧边栏特有逻辑是删除退场动画（removingIds Set → onExitEnd(sid)）：
+ *   1. 用户确认删除 → setRemovingIds 加入 sid → ConversationItem 播退场动画
+ *   2. 动画结束 onExitEnd(sid) → 从 removingIds 移除 sid + 调用 deleteConversation.mutate(sid)
+ *
+ * 用 Set 而非单值：连续快速删除多个会话时单值会被覆盖导致竞态（A 卡动画态、B 被错误删除）。
  */
 
 import { useState } from "react";

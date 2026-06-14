@@ -84,26 +84,21 @@ export function DebugCaptureDialog() {
    * 内容在 open=false 过渡期间仍挂载才能播放。若直接 `if (!lastResult) return null`，
    * 关闭瞬间 DOM 被卸载，用户看到的是"瞬间消失"而非淡出。
    *
-   * 解决：用 ref 锁存最近一次非 null 的 lastResult，关闭动画期间仍渲染该快照；
-   * 仅当对话框既已关闭（showResultDialog=false）且 store 也清空 lastResult 时
-   * 才真正卸载。
+   * 解决：用 ref 锁存最近一次非 null 的 lastResult 快照，关闭动画期间仍渲染该快照；
+   * 仅在 Dialog 的关闭动画彻底结束（onOpenChangeComplete(false)）后才清掉本地缓存。
+   * 这让 store 可以即时清状态，而 DOM 卸载延迟到动画完成，二者解耦。
    */
   const keepResultRef = useRef<typeof lastResult>(lastResult);
   if (lastResult) {
-    // store 有最新结果 → 同步到本地缓存（覆盖关闭期间残留的旧快照）
+    // store 有最新结果 → 同步覆盖本地缓存
     keepResultRef.current = lastResult;
-  } else if (showResultDialog) {
-    // store 已清 lastResult 但对话框还开着（过渡中）→ 保留上一次快照让动画跑完
-    // 不更新 ref，沿用之前的值
-  } else {
-    // 对话框已关 + store 已清 → 卸载，清掉本地缓存
-    keepResultRef.current = null;
   }
   const result = keepResultRef.current;
 
-  // 当 store 彻底关闭且本地快照非空 → 同步清空（保持引用一致，避免下次再闪一下旧内容）
+  // 兜底：万一 onOpenChangeComplete 未触发（程序化关闭 / 无动画环境），
+  // 在 store 已彻底关闭时也清掉本地快照，避免残留导致下次闪一下旧内容。
   useEffect(() => {
-    if (!showResultDialog && !lastResult && keepResultRef.current) {
+    if (!showResultDialog && !lastResult) {
       keepResultRef.current = null;
     }
   }, [showResultDialog, lastResult]);
@@ -122,8 +117,13 @@ export function DebugCaptureDialog() {
     <Dialog
       open={showResultDialog}
       onOpenChange={(open) => {
-        // 用户点遮罩 / Esc / 关闭按钮 → open 变 false → 关闭对话框（store 会清状态）
+        // 用户点遮罩 / Esc / 关闭按钮 → open 变 false → 关闭对话框（store 即时清状态，
+        // 但 Dialog DOM 在动画结束后才卸载，期间仍渲染本组件缓存的 result 快照）
         if (!open) dismissDialog();
+      }}
+      // 关闭动画彻底结束后触发：此时才真正卸载 Dialog 内容，避免"瞬间消失"
+      onOpenChangeComplete={(open) => {
+        if (!open) keepResultRef.current = null;
       }}
     >
       <DialogContent>

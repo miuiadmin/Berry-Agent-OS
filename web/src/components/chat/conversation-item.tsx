@@ -84,7 +84,8 @@ export function ConversationItem({
   return (
     <div
       className={cn(
-        "conv-item group relative w-full cursor-pointer rounded-lg px-3 py-2 text-left text-sm transition-all active:scale-[0.98]",
+        // min-h-[44px] 保证移动端容器高度容纳 44px 操作按钮（之前 py-2 + 内容 ~36px，44px 按钮溢出底部）
+        "conv-item group relative w-full min-h-[44px] cursor-pointer rounded-lg px-3 py-2 text-left text-sm transition-all active:scale-[0.98]",
         isRemoving && "animate-item-exit",
         isActive ? "nav-link-active bg-accent text-accent-foreground" : "hover:bg-accent/50 text-muted-foreground",
       )}

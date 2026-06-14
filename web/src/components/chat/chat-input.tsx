@@ -72,7 +72,9 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
 
   /** 提交发送：清空文本 / 附件并重置 textarea 高度 */
   const handleSubmit = () => {
-    // 父组件禁用（断线 / 未配置模型）时弹提示，避免用户以为按钮坏了
+    // 父组件禁用（断线 / 未配置模型）时弹提示，避免用户以为按钮坏了。
+    // 注意：发送按钮虽然 visually disabled，但 Enter 键仍会触发 handleSubmit（键盘不读 disabled 态），
+    // 因此此分支可达——断线时按 Enter 会弹"未连接"提示。
     if (disabled) { toast.error(t("chat.notConnected")); return; }
     if (!hasContent || isStreaming) return;
     const trimmed = text.trim();
@@ -120,11 +122,11 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
           <div className="flex items-center justify-between px-2 pb-2 pt-1">
             <div className="flex items-center gap-0.5">
               <FileUploadButton onAttach={(a) => setAttachments((prev) => [...prev, a])} disabled={isStreaming} />
-              {/* 占位：未来上传图片功能 */}
+              {/* TODO(图片上传): 占位按钮——上传图片功能未实现。disabled 且无 onClick，仅作 UI 占位提示。落地后接 FileUploadButton 同款上传逻辑。 */}
               <ToolbarButton disabled aria-label={t("chat.uploadImage")}>
                 <ImagePlus className="size-4" />
               </ToolbarButton>
-              {/* 占位：未来输入设置 */}
+              {/* TODO(输入设置): 占位按钮——输入相关设置（如温度/max_tokens）未实现。disabled 且无 onClick，仅作 UI 占位。 */}
               <ToolbarButton disabled aria-label={t("chat.settings")}>
                 <Settings className="size-4" />
               </ToolbarButton>

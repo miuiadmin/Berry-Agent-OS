@@ -8,6 +8,7 @@
  * DelegationDialog 与 PermissionConfirmDialog 共享 BottomSheet + ConfirmButtons。
  */
 
+import { useEffect } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, RefreshCw, ShieldAlert, UserCheck } from "lucide-react";
@@ -26,30 +27,57 @@ type SheetTone = "default" | "destructive";
 /**
  * 底部弹窗容器（移动端底部固定 / 桌面端浮层）。
  * DelegationDialog 与 PermissionConfirmDialog 共用定位与卡片样式。
+ *
+ * a11y：role=alertdialog + aria-modal=true 承诺了模态行为——
+ * 因此实现 Escape 关闭 + 遮罩点击关闭（onDismiss 回调，由调用方决定是 deny 还是取消），
+ * 让屏幕阅读器 / 键盘用户能正常退出，兑现 aria-modal 承诺。
+ *
+ * 注意：未实现完整 focus trap（焦点受限在弹窗内）——这两类弹窗（委派/权限）内容极少、
+ * 且是阻塞性交互（用户必须 approve/deny 才能继续），focus trap 收益有限，暂不引入。
  */
-function BottomSheet({ label, tone = "default", children }: {
+function BottomSheet({ label, tone = "default", onDismiss, children }: {
   label: string;
   tone?: SheetTone;
+  /** 关闭回调（Escape / 遮罩点击触发）——调用方映射为 deny 或取消 */
+  onDismiss?: () => void;
   children: React.ReactNode;
 }) {
+  // Escape 键关闭（aria-modal=true 的模态行为承诺）
+  useEffect(() => {
+    if (!onDismiss) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onDismiss(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onDismiss]);
+
   return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-label={label}
-      className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0"
-    >
-      <div className={cn(
-        "space-y-3 rounded-xl border bg-background p-4 shadow-lg",
-        tone === "destructive" ? "border-destructive/30" : "border-border",
-      )}>
-        {children}
+    <>
+      {/* 透明遮罩：点击关闭（兑现 aria-modal 模态行为——click outside 可退出） */}
+      {onDismiss && (
+        <div
+          className="fixed inset-0 z-40 md:absolute"
+          onClick={onDismiss}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={label}
+        className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md px-4 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] md:absolute md:inset-x-0 md:bottom-20 md:z-20 md:pb-0"
+      >
+        <div className={cn(
+          "space-y-3 rounded-xl border bg-background p-4 shadow-lg",
+          tone === "destructive" ? "border-destructive/30" : "border-border",
+        )}>
+          {children}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-/** 拒绝 / 批准按钮组（移动端 44px 触控目标） */
+/** 拒绝 / 批准按钮组（移动端 44px 触控目标）。去掉 size=sm —— 其默认 height 会被 h-11 覆盖，class 顺序依赖脆弱，统一用 h 类控制高度。 */
 function ConfirmButtons({ denyLabel, approveLabel, onDeny, onApprove }: {
   denyLabel: string;
   approveLabel: string;
@@ -58,10 +86,10 @@ function ConfirmButtons({ denyLabel, approveLabel, onDeny, onApprove }: {
 }) {
   return (
     <div className="flex items-center justify-end gap-2">
-      <Button variant="outline" size="sm" className="h-11 px-4 md:h-7 md:px-2.5" onClick={onDeny}>
+      <Button variant="outline" className="h-11 px-4 md:h-7 md:px-2.5" onClick={onDeny}>
         {denyLabel}
       </Button>
-      <Button size="sm" className="h-11 px-4 md:h-7 md:px-2.5" onClick={onApprove}>
+      <Button className="h-11 px-4 md:h-7 md:px-2.5" onClick={onApprove}>
         {approveLabel}
       </Button>
     </div>
@@ -129,7 +157,7 @@ export function DelegationDialog({
   const t = useT();
 
   return (
-    <BottomSheet label={request.title}>
+    <BottomSheet label={request.title} onDismiss={() => onRespond(request.delegationId, null, false)}>
       {/* 标题 + 紧急标识 */}
       <div className="flex items-center gap-2">
         <UserCheck className="size-4 text-warning" />
@@ -167,7 +195,7 @@ export function PermissionConfirmDialog({
 }) {
   const t = useT();
   return (
-    <BottomSheet label={t("chat.permissionRequired")} tone="destructive">
+    <BottomSheet label={t("chat.permissionRequired")} tone="destructive" onDismiss={() => onRespond(request.requestId, false)}>
       {/* 标题 */}
       <div className="flex items-center gap-2">
         <ShieldAlert className="size-4 text-destructive" />
@@ -216,7 +244,8 @@ export function PermissionModeSelector() {
     <select
       value={mode}
       onChange={(e) => setMode(e.target.value as typeof mode)}
-      className="min-h-[44px] h-11 rounded-md border border-input bg-background px-1.5 text-[16px] text-muted-foreground md:h-7 md:min-h-0 md:text-[11px]"
+      // h-11=44px 即触控目标最小尺寸，无需再叠 min-h-[44px]（之前冗余）
+      className="h-11 rounded-md border border-input bg-background px-1.5 text-[16px] text-muted-foreground md:h-7 md:text-[11px]"
       title={t("chat.permissionMode")}
     >
       {PERMISSION_MODES.map((opt) => (

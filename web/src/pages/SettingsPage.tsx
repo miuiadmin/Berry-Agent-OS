@@ -100,16 +100,21 @@ function SettingsContent() {
 
   const validate = useCallback((cfg: Record<string, unknown>) => validateConfig(cfg, t), [t]);
 
-  /** 更新单个配置字段并实时校验 */
+  /** 更新单个配置字段并实时校验。
+   *  在事件 handler 闭包内直接计算 next（基于当前渲染周期的 editedConfig），
+   *  再分别调用 setEditedConfig / setErrors。不在 setEditedConfig 的 updater
+   *  函数里触发别的 setState——后者是 React 明确警告的反模式，且 StrictMode
+   *  下 updater 会执行两次导致 validate 跑两遍。
+   *  闭包捕获的 editedConfig 是当前渲染周期的值，对用户输入事件足够新鲜
+   *  （用户单次按键 → 一次 render → 下次按键读到的是新值）。 */
   const updateField = (section: string, key: string, value: unknown) => {
-    setEditedConfig((prev) => {
-      const next = {
-        ...prev,
-        [section]: { ...(prev[section] as Record<string, unknown> ?? {}), [key]: value },
-      };
-      setErrors(validate(next));
-      return next;
-    });
+    const prevSection = (editedConfig[section] as Record<string, unknown> | undefined) ?? {};
+    const next = {
+      ...editedConfig,
+      [section]: { ...prevSection, [key]: value },
+    };
+    setEditedConfig(next);
+    setErrors(validate(next));
   };
 
   /** 保存按钮：先校验，通过则提交 */
@@ -162,7 +167,7 @@ function SettingsContent() {
                   onClick={() => handleTabChange(tab.key)}
                   onKeyDown={(e) => moveTabOnArrow(e, TAB_KEYS, tab.key, handleTabChange)}
                   className={cn(
-                    "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm whitespace-nowrap transition-colors active:bg-accent",
+                    "flex items-center gap-2 rounded-lg px-3 py-2.5 min-h-[44px] md:min-h-0 text-sm whitespace-nowrap transition-colors active:bg-accent",
                     isActive
                       ? "bg-accent text-accent-foreground font-medium"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -195,12 +200,12 @@ function SettingsContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="default" onClick={handleReset}>
+              <Button variant="outline" size="default" onClick={handleReset} className="min-h-[44px] md:min-h-0">
                 <RotateCcw className="size-4" />
                 {t("settings.reset")}
               </Button>
               <div className="relative">
-                <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="default">
+                <Button onClick={handleSave} disabled={saveConfig.isPending || errorCount > 0} size="default" className="min-h-[44px] md:min-h-0">
                   <Save className="size-4" />
                   {t("settings.save")}
                 </Button>

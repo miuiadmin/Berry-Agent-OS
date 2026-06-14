@@ -172,8 +172,8 @@ export default function MemoryPage() {
                   onVerify={() => verifyMut.mutate(entry.id)}
                   onPromote={() => promoteMut.mutate({ id: entry.id, target: "global" })}
                   onDelete={() => setDeleteTarget({ layer: entry.layer, id: entry.id })}
-                  verifyPending={verifyMut.isPending}
-                  promotePending={promoteMut.isPending}
+                  verifyPending={!!verifyMut.isPending && verifyMut.variables === entry.id}
+                  promotePending={!!promoteMut.isPending && promoteMut.variables?.id === entry.id}
                 />
               ))}
             </div>
@@ -221,7 +221,8 @@ function MemoryCard({
           <div className="flex items-center gap-2">
             <span className="truncate text-sm font-medium">{entry.key}</span>
             <Badge variant="outline" className="shrink-0 text-[11px]">
-              {t(`memory.${entry.layer}`) ?? entry.layer}
+              {/* t() 对未知 key 回退到 key 本身（见 i18n.tsx），无需 ?? entry.layer 兜底 */}
+              {t(`memory.${entry.layer}`)}
             </Badge>
             {entry.verified && (
               <Badge variant="secondary" className="shrink-0 text-[11px]">{t("memory.verified")}</Badge>

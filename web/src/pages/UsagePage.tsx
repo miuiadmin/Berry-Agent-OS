@@ -129,7 +129,11 @@ export default function UsagePage() {
           />
         </ChartCard>
 
-        {/* 费用明细柱状图 */}
+        {/* 费用明细柱状图。
+            注：命名为 costBreakdown 但实际是按天费用（复用 daily 数组取 costUsd），
+            并非按维度（agent/model）拆分。label 带 month/day 是为了与 byAgent/byModel
+            的 weekday label 区分——此处展示绝对日期更具识别度。若未来要按维度拆分成本，
+            应新增专门接口而非复用 daily。 */}
         <ChartCard title={t("usage.costBreakdown")} stagger={8} loading={isLoading}>
           <BarChart
             data={(data?.daily ?? []).map((d) => ({
