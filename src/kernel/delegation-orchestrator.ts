@@ -81,6 +81,7 @@ import { StateCache } from './state-cache.js';
 /** 12.0/13.0 VerifyGate — 独立对抗性意图验证（高漂移时触发） */
 import { VerifyGate } from './verify-gate.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
+import { postDelegateEnvelope, postReportEnvelope, postSystemReportEnvelope } from './board-projection.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 
@@ -2014,6 +2015,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const missionId = input.inputPayload.missionId as string | undefined;
     const planTaskId = input.inputPayload.planTaskId as string | undefined;
 
+    // ─── 16.0 P4-C2：派发点投影 delegate 信封（fire-and-forget 审计影子）───
+    // 在 delegationManager.create 返回 taskId 之后、ipc.send('agent.task') 之前落板。
+    // initBoard 幂等 + addMember + postBoardMessage(delegate)。失败 no-op，不影响派发主路径。
+    postDelegateEnvelope(taskId, {
+      from: 'brain',
+      to: route.targetAgent,
+      subTaskGoal: (input.inputPayload.message as string) ?? (input.inputPayload.instruction as string) ?? '',
+      sessionId: input.sessionId,
+      parentTaskId: input.inputPayload.parentTaskId as string | undefined,
+      scope: { allowTools: ['*'], ...(input.inputPayload.forbiddenTools ? { blockTools: input.inputPayload.forbiddenTools } : {}) },
+    });
+
     const taskPayload = {
       taskId,
       sessionId: input.sessionId,
@@ -2792,6 +2805,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 13.0 多智能体协作：任务失败时同步更新 plan.json 中对应任务的状态
       this.updatePlanTaskStatus(result.taskId, 'failed', result.error);
 
+      // 16.0 P4-C3：失败结果投影 report(status:blocked) 落板（fire-and-forget 审计影子）
+      postReportEnvelope(result.taskId, {
+        from: agentName, to: 'leader', status: 'blocked', summary: result.error ?? '任务失败',
+        sessionId: fgEntry.sessionId,
+      });
+
       // R14-1：foreground 任务失败走 finalizeTask 统一入口
       this.sessionManager.fail(fgEntry.correlationId, { kind: 'failed', agentName, error: result.error });
       return;
@@ -2803,6 +2822,12 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     const draftResponse = agentOutput;
     pending.draftResponse = draftResponse;
+
+    // 16.0 P4-C3：成功结果投影 report(status:done) 落板（fire-and-forget 审计影子，在 sendTaskResultForReview 前）
+    postReportEnvelope(result.taskId, {
+      from: agentName, to: 'leader', status: 'done', summary: draftResponse,
+      sessionId: fgEntry.sessionId,
+    });
 
     this.sendTaskResultForReview(fgEntry, pending, draftResponse);
   }
