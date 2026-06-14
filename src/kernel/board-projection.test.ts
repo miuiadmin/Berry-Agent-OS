@@ -116,10 +116,10 @@ describe('board-projection P5-C2: board.message.posted 事件转发', () => {
     expect(captured[0].to).toBe('brain');
   });
 
-  it('board.message.posted 与 P5-C1 派生的旧事件正交（一次落板可同时 emit 多个）', () => {
-    // delegate 落板应同时 emit：
-    //   - board.message.posted（P5-C2 前端信号）
-    //   - delegation.created（P5-C1 旧订阅者信号，deriveEventFromBoardMessage）
+  it('board.message.posted emit，不再派生 delegation.*（P5-2：根治双 emit，delegation-manager 是权威源）', () => {
+    // P5-2：board-projection 不再从 delegate 派生 delegation.created——delegation-manager.create
+    // 是权威源，board 派生会造成双 emit（onTermination/correction-flow 双触发）。
+    // P5 board 权威切换后让 delegation-manager 停发 + board 派生恢复，届时再改回。
     const boardPosted: BoardMessagePostedPayload[] = [];
     const delegationCreated: unknown[] = [];
     getEventBus().on('board.message.posted', (p) => boardPosted.push(p));
@@ -132,9 +132,10 @@ describe('board-projection P5-C2: board.message.posted 事件转发', () => {
       sessionId: 'sess-ortho',
     });
 
-    // 两类事件都 emit，互不干扰（正交性是 P5-C2 设计要点）
+    // board.message.posted（前端看板信号）emit
     expect(boardPosted).toHaveLength(1);
-    expect(delegationCreated).toHaveLength(1);
     expect(boardPosted[0].messageType).toBe('delegate');
+    // delegation.created 不再由 board-projection 派生（避免双 emit）
+    expect(delegationCreated).toHaveLength(0);
   });
 });

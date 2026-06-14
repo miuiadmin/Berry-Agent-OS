@@ -42,15 +42,11 @@ function safePost(taskId: string, build: () => BoardMessage, label: string): voi
   try {
     const msg = build();
     postBoardMessage(taskId, msg);
-    // P5-C1：board 信封落板后派生 EventBus 事件（让现有订阅者无感迁移，§9 P5「旧通道降兼容层」）
-    deriveEventFromBoardMessage(taskId, msg);
-    // P5-C2：board 落板成功后 emit 统一的 'board.message.posted'，
-    // WsEventBridge 订阅后转发 ws.type='board.message' 给前端（前端看板 UI 实时刷新）。
-    // 此事件是 P5-C2 唯一新增的前端可见信号，与 deriveEventFromBoardMessage 派生的旧事件正交：
-    //   - 旧事件（delegation.created/completed/failed/checkpoint_needed）→ 服务端内部订阅者
-    //   - board.message.posted → 前端看板 UI（经 WsEventBridge 桥接）
-    // 统一在此 emit（而非散落各 postXxxEnvelope），遵循 CLAUDE.md「补丁过多即重构」——
-    // 所有 board 落板都经 safePost，在此一处派生前端信号即可覆盖全部信封类型。
+    // board 落板成功后 emit 统一的 'board.message.posted'（WsEventBridge 订阅后转发前端看板 UI）。
+    // 注：不再派生 delegation.* 旧事件——delegation-manager/orchestrator/observer/ask-handler 是
+    // 这些生命周期/信号事件的权威源（直 emit），board 派生会造成双 emit（onTermination/
+    // correction-flow 双触发）。P5 board 权威切换后让 delegation-manager 停发 + board 派生恢复。
+    // 统一在此 emit board.message.posted（而非散落各 postXxxEnvelope），遵循「补丁过多即重构」。
     emitBoardMessagePosted(taskId, msg);
   } catch (err) {
     logger.debug({ err, taskId, label }, `board-projection: ${label} 落板失败（fire-and-forget，不影响主路径）`);
@@ -80,40 +76,6 @@ function emitBoardMessagePosted(taskId: string, msg: BoardMessage): void {
     // emit 失败不影响 board 落板主路径（fire-and-forget，前端可经拉历史补救）
     logger.debug({ err, taskId, messageType: msg.type }, 'board-projection: emit board.message.posted 失败（不影响主路径）');
   }
-}
-
-/**
- * P5-C1：从 BoardMessage 派生 EventBus 事件（现有订阅者无感迁移）。
- *
- * board 信封是语义层（说什么），EventBus 是传输层（怎么送达）。P5 阶段在 board 落板后
- * 同时 emit 对应的旧 EventBus 事件名，让 WsEventBridge/Evolution/现有订阅者继续读旧事件
- * 而不感知 board 的存在。待订阅者全切到 board thread 再删旧事件（P5-C4）。
- */
-function deriveEventFromBoardMessage(taskId: string, msg: BoardMessage): void {
-  try {
-    const bus = getEventBus();
-    switch (msg.type) {
-      case 'delegate':
-        // delegate → delegation.created（现有订阅者：onTermination/cleanupTaskState）
-        bus.emit('delegation.created', { delegationId: taskId, sessionId: msg.sessionId ?? '', targetAgent: msg.to });
-        break;
-      case 'report':
-        // report(done) → delegation.completed / report(blocked) → delegation.failed
-        if (msg.status === 'done') {
-          bus.emit('delegation.completed', { delegationId: taskId, targetAgent: msg.from, durationMs: 0 });
-        } else {
-          bus.emit('delegation.failed', { delegationId: taskId, targetAgent: msg.from, error: msg.summary });
-        }
-        break;
-      case 'ask':
-        // ask(@brain) → checkpoint_needed（现有 correction-flow/Evolution 订阅者）
-        if (msg.to === 'brain') {
-          bus.emit('delegation.checkpoint_needed', { delegationId: taskId, trigger: 'board_ask' });
-        }
-        break;
-      // tell / tool_request / tool_result / command 暂无对应旧事件——P5 后续按需添加
-    }
-  } catch { /* 派生事件失败不影响 board 落板主路径 */ }
 }
 
 // ─── delegate 投影：派发点落「指派」信封 ───
