@@ -2125,6 +2125,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         missionId: pending.missionId,
         planTaskId: pending.planTaskId,
         taskDescription: pending.taskDescription,
+        // 16.0 P4-B1：透传板 id（= delegationTaskId，Brain 审核 C 级注入板上下文看板下钻）
+        boardTaskId: pending.delegationTaskId ?? pending.taskId,
       };
 
       pending.level = turn.level;

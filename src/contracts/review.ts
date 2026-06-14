@@ -23,6 +23,8 @@ export interface TurnRecord {
   planTaskId?: string;
   /** 13.0 §12.6: 分配给 agent 的任务描述（Brain 审核时判断"目标是否达成"） */
   taskDescription?: string;
+  /** 16.0 §5.1: 关联的任务板 id（= delegationTaskId，Brain 审核注入板上下文看板下钻，P4-B1） */
+  boardTaskId?: string;
   /**
    * 13.0 §5.2.5: 本 turn 中跨 agent 对话次数。
    * 用于 classifyLevel 判定 C 级（> 5 次跨 agent 对话意味着复杂多步骤场景）。

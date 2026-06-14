@@ -441,7 +441,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     // §5.2.5: 并发审核准入控制 — 等待获取审核 slot
     await acquireReviewSlot();
     try {
-    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: ToolBlock[]; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string } };
+    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: ToolBlock[]; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string; boardTaskId?: string } };
     const trackingId = msg.correlationId ?? msg.id;
     let systemPrompt = getReviewPrompt(turn.level);
 
@@ -471,6 +471,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
         const sampleTaskId = observations[0]?.taskId;
         if (sampleTaskId && observationRecorder.isTruncated(turn.sessionId, sampleTaskId)) {
           systemPrompt += `\n\n⚠️ **观察队列被截断**（部分历史记录因窗口限制被裁剪）。你看到的行为记录可能不完整，审核结论请保守判定，对不确定的问题标注 "低置信度"。`;
+        }
+      }
+      // 16.0 P4-B1：C 级审核注入板上下文（turn.boardTaskId，§5.1 task=board），看板下钻
+      if (turn.boardTaskId) {
+        const boardCtx = getBoardContext(turn.boardTaskId);
+        if (boardCtx) {
+          systemPrompt += `\n\n## 任务板上下文（你正在审核的板）\n${renderBoardContext(boardCtx)}`;
         }
       }
     }
