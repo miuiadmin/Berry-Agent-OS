@@ -7,7 +7,7 @@
  * 与 AreaChart 的差异：
  *  - AreaChart 是 SVG 折线（连续趋势）；BarChart 是水平进度条（类目对比）
  *  - BarChart 不需要几何计算（柱长 = value/maxVal 直接转百分比），故不依赖 chart-geometry 的 path 模块
- *  - 仅复用 staggerIndex（CSS 动画序号）和 CHART_COLOR_1 默认色
+ *  - 仅复用 CHART_COLOR_1 默认色；stagger 动画用共享的 staggerClass（ui/_shared）
  *
  * 用法：
  *   <BarChart data={[
@@ -20,7 +20,8 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
-import { CHART_COLOR_1, safeMaxValue, staggerIndex } from "./chart-geometry";
+import { staggerClass } from "@/components/ui/_shared";
+import { CHART_COLOR_1, safeMaxValue } from "./chart-geometry";
 
 /** 单条柱子的数据 */
 export interface BarItem {
@@ -83,7 +84,7 @@ export function BarChart({
               <div
                 className={cn(
                   "h-full rounded-full transition-all duration-500",
-                  `stagger-${staggerIndex(i)}`,
+                  staggerClass(i),
                 )}
                 style={{
                   width: `${widthPct}%`,

@@ -19,6 +19,7 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { ChevronRight, Wrench, Check, X, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MARKDOWN_PROSE } from "@/components/ui/_shared";
 import { formatDurationMs } from "@/lib/format";
 import { useT } from "@/lib/i18n";
 import type { ToolBlock, DelegationBlock, Block } from "@/lib/blocks";
@@ -146,7 +147,7 @@ function renderBlock(block: Block, i: number, ctx: {
         <div
           key={`tx-${i}`}
           className={cn(
-            "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
+            MARKDOWN_PROSE,
             ctx.isActive && ctx.isLast && "streaming-cursor",
           )}
         >

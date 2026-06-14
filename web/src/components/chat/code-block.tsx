@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useTheme } from "@/lib/theme";
 import { highlight } from "@/lib/highlighter";
 import { CopyButton } from "@/components/ui/copy-button";
+import { INLINE_CODE } from "@/components/ui/_shared";
 import { useT } from "@/lib/i18n";
 
 interface CodeBlockProps {
@@ -67,10 +68,10 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
     return () => { cancelledRef.current = true; };
   }, [code, lang, resolvedTheme, isStreaming]);
 
-  /** 无语言标识 → 行内 code 渲染（与 markdown-components 的兜底样式一致） */
+  /** 无语言标识 → 行内 code 渲染（与 markdown-components 的兜底样式一致，共用 INLINE_CODE 常量） */
   if (!lang) {
     return (
-      <code className="rounded bg-muted/80 px-1.5 py-0.5 text-[13px] font-mono text-foreground">
+      <code className={INLINE_CODE}>
         {children}
       </code>
     );

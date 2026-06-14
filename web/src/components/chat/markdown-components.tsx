@@ -10,6 +10,7 @@ import type { Components } from "react-markdown";
 import { ExternalLink } from "lucide-react";
 import { CodeBlock } from "./code-block";
 import { ClickableImage } from "@/components/ui/image-lightbox";
+import { INLINE_CODE } from "@/components/ui/_shared";
 
 /**
  * 允许的安全协议白名单（https / mailto / 相对路径 / 锚点）。
@@ -42,7 +43,7 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
         );
       }
       return (
-        <code className="rounded bg-muted/80 px-1.5 py-0.5 text-[13px] font-mono text-foreground">
+        <code className={INLINE_CODE}>
           {children}
         </code>
       );

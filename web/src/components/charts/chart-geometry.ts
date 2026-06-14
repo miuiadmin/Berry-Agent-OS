@@ -85,9 +85,6 @@ export const SPARKLINE_STROKE = 1.5;
 export const AREA_FILL_OPACITY = 0.15;
 export const SPARKLINE_FILL_OPACITY = 0.15;
 
-/** BarChart 柱体最大 stagger 序号（与 index.css 的 .stagger-1~8 一一对应） */
-export const BAR_STAGGER_MAX = 8;
-
 /* ============================================================
  * 通用工具
  * ========================================================== */
@@ -100,17 +97,6 @@ export const BAR_STAGGER_MAX = 8;
  */
 export function safeMaxValue(values: number[]): number {
   return Math.max(...values, 1);
-}
-
-/**
- * BarChart 入场动画的 stagger 序号：1..{@link BAR_STAGGER_MAX} 循环。
- * 超过 8 行后从 1 重新开始（CSS 只定义了 stagger-1~8）。
- *
- * @param index 行序号（0-based）
- * @returns 1~8
- */
-export function staggerIndex(index: number): number {
-  return Math.min(index + 1, BAR_STAGGER_MAX);
 }
 
 /* ============================================================

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SelectField } from "@/components/ui/select-field";
 import { EmptyState } from "@/components/ui/empty-state";
+import { staggerClass } from "@/components/ui/_shared";
 import { TaskCardMobile } from "@/components/tasks/task-card-mobile";
 import { ListTodo, Filter } from "lucide-react";
 import { useT } from "@/lib/i18n";
@@ -139,7 +140,8 @@ export default function TasksPage() {
         >
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>
-              {s === "all" ? t("tasks.allStatuses") : t(`status.${s}`) ?? s}
+              {/* i18n 的 t() 对缺失 key 自动回退到 key 本身，无需额外 ?? s 兜底 */}
+              {s === "all" ? t("tasks.allStatuses") : t(`status.${s}`)}
             </option>
           ))}
         </SelectField>
@@ -242,13 +244,13 @@ export default function TasksPage() {
           Array.from({ length: 3 }).map((_, i) => (
             <Skeleton
               key={i}
-              className={`h-16 w-full rounded-xl stagger-${Math.min(i + 1, 8)}`}
+              className={`h-16 w-full rounded-xl ${staggerClass(i)}`}
             />
           ))}
         {!isLoading && tasks.length === 0 && emptyTasks}
         {!isLoading &&
           tasks.map((task, i) => (
-            <div key={task.id} className={`stagger-${Math.min(i + 1, 8)}`}>
+            <div key={task.id} className={staggerClass(i)}>
               <TaskCardMobile
                 task={task}
                 onCancel={() => cancelTask.mutate(task.id)}

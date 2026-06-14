@@ -5,7 +5,7 @@
  * CopyButton 已提取到 ui/copy-button.tsx（与 code-block 共享），此处 re-export。
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { X, SendHorizontal, AlertCircle, RotateCcw, Pencil, Trash2, FileText, Download } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { useT } from "@/lib/i18n";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { TextAreaField } from "@/components/ui/text-area-field";
 import { CopyButton } from "@/components/ui/copy-button";
+import { useAutoResizeTextarea } from "@/hooks/use-auto-resize-textarea";
 import type { ChatMessage, ChatAttachment } from "@/lib/stores/chat-store";
 
 // ─── CopyButton 已提取到 ui/copy-button.tsx（与 code-block 共享），此处 re-export 供外部导入 ───
@@ -41,23 +42,22 @@ export function EditableMessage({
   onCancel: () => void;
 }) {
   const [text, setText] = useState(message.content);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 编辑气泡：不封顶高度（自然增长，与发送框 MAX_HEIGHT 封顶不同）
+  const { textareaRef, resize } = useAutoResizeTextarea();
   const t = useT();
 
-  /** 挂载后聚焦并自适应高度 */
+  /** 挂载后聚焦并初次撑开高度（hook 的 resize 在 ref 就绪后即可调用） */
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.focus();
-    ta.style.height = "auto";
-    ta.style.height = ta.scrollHeight + "px";
-  }, []);
+    resize();
+  }, [resize]);
 
-  /** 输入时同步内容并自适应高度 */
+  /** 输入时同步内容并触发自适应高度 */
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    e.target.style.height = "auto";
-    e.target.style.height = e.target.scrollHeight + "px";
+    resize();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

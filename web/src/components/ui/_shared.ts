@@ -37,3 +37,44 @@ export const POPUP_BASE =
  */
 export const TOUCH_TARGET =
   "min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0"
+
+/**
+ * stagger 入场动画序号上限（与 index.css 的 .stagger-1 ~ .stagger-8 一一对应）。
+ * 超过 8 行后循环从 1 重新开始（CSS 只定义了 stagger-1~8）。
+ */
+export const STAGGER_MAX = 8
+
+/**
+ * 生成 stagger 入场动画的 className。
+ *
+ * 列表 / 卡片网格常用：每个元素按序号获得递增的入场延迟，形成从上到下
+ * 依次淡入的视觉效果（index.css 的 .stagger-1~.stagger-8 定义了
+ * 0.05s ~ 0.40s 的延迟阶梯）。
+ *
+ * 抽成函数：`stagger-${Math.min(i + 1, 8)}` 这段拼接在 TasksPage / AgentsPage /
+ * ConversationsPage / UsagePage 等近 10 处重复，单一事实源避免拼写漂移。
+ *
+ * @param index 元素序号（0-based）
+ * @returns 形如 "stagger-3" 的 className
+ */
+export function staggerClass(index: number): string {
+  return `stagger-${Math.min(index + 1, STAGGER_MAX)}`
+}
+
+/**
+ * 行内 code 样式（markdown 行内 `code` 和 code-block 的内联回退共用）。
+ *
+ * code-block.tsx 的行内 `<code>` 与 markdown-components.tsx 的 markdown `code`
+ * 渲染用完全相同的 className，抽常量避免两处漂移（例如只改一处字号）。
+ */
+export const INLINE_CODE =
+  "rounded bg-muted/80 px-1.5 py-0.5 text-[13px] font-mono text-foreground"
+
+/**
+ * 消息正文 markdown 容器样式（chat-message-list 主气泡 + block-renderers 文本 block 共用）。
+ *
+ * 重置 prose 默认对 pre/code 的样式（pre 由 CodeBlock 自带容器，code 走 INLINE_CODE），
+ * 让 markdown 渲染与自定义代码组件视觉协调。两处 verbatim 重复，抽常量单一事实源。
+ */
+export const MARKDOWN_PROSE =
+  "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs"

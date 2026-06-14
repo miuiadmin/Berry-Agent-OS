@@ -15,6 +15,7 @@ import ReactMarkdown from "react-markdown";
 import { useChatStore, type ChatMessage } from "@/lib/stores/chat-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { MARKDOWN_PROSE } from "@/components/ui/_shared";
 import { textFromBlocks } from "@/lib/blocks";
 import { ChevronDown } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
@@ -164,7 +165,7 @@ const MessageBubble = memo(function MessageBubble({
           <MessageTimeline message={message} isActive={isStreaming} markdownComponents={markdownComponents} />
         ) : (
           <div className={cn(
-            "prose prose-sm dark:prose-invert max-w-none [&_pre]:my-0 [&_pre]:p-0 [&_pre]:bg-transparent [&_code]:text-xs",
+            MARKDOWN_PROSE,
             isStreaming && "streaming-cursor",
           )}>
             <ReactMarkdown components={markdownComponents}>{displayContent}</ReactMarkdown>

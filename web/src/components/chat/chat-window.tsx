@@ -19,7 +19,6 @@ import { DragOverlay, type Attachment } from "@/components/chat/file-upload";
 import { Button } from "@/components/ui/button";
 import { PanelLeft } from "lucide-react";
 import { apiGet } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
 import { useT } from "@/lib/i18n";
 import {
   ChatSkeleton,
@@ -29,6 +28,7 @@ import {
   PermissionModeSelector,
 } from "./chat-window-parts";
 import { ModelSelector } from "./model-selector";
+import { useModelConfig } from "./use-model-config";
 import { useFileDrop } from "@/hooks/use-file-drop";
 
 interface ChatWindowProps {
@@ -62,18 +62,10 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   // ── 文件拖拽上传（独立 hook，降低主组件复杂度） ──
   const fileDrop = useFileDrop();
 
-  // ── 是否已配置至少一个可用的 provider/model channel ──
-  const channelsQuery = useQuery({
-    queryKey: ["providers", "channels"],
-    queryFn: () =>
-      apiGet<{ channels?: Array<{ configured?: boolean; modelCount?: number }> }>(
-        "/api/providers/channels",
-      ).catch(() => ({ channels: [] })),
-    staleTime: 30_000,
-  });
-  const isModelConfigured = !!channelsQuery.data?.channels?.some(
-    (ch) => ch.configured || (ch.modelCount ?? 0) > 0,
-  );
+  // ── 模型配置：是否已配置至少一个"启用且含模型"的渠道 ──
+  // 复用 useModelConfig（model-selector 也在用），消除原先重复的
+  // ["providers","channels"] 查询；isModelConfigured 由 hook 统一派生。
+  const { isModelConfigured } = useModelConfig();
 
   /**
    * 输入框可用条件：

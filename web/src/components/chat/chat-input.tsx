@@ -7,13 +7,14 @@
  * - Enter 发送 / Shift+Enter 换行
  */
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Square, ImagePlus, Settings } from "lucide-react";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useT } from "@/lib/i18n";
+import { useAutoResizeTextarea } from "@/hooks/use-auto-resize-textarea";
 
 /** textarea 自适应高度上限（像素） */
 const MAX_HEIGHT = 300;
@@ -54,7 +55,8 @@ interface ChatInputProps {
 export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 自适应高度 textarea（封顶 MAX_HEIGHT，超过后内容滚动）
+  const { textareaRef, resize } = useAutoResizeTextarea(MAX_HEIGHT);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const t = useT();
 
@@ -77,7 +79,7 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
     onSend(trimmed, allAttachments.length > 0 ? allAttachments : undefined);
     setText("");
     setAttachments([]);
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    resize();
   };
 
   /** Enter 发送 / Shift+Enter 换行 */
@@ -85,11 +87,10 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
   };
 
-  /** 输入时同步内容并自适应高度（封顶 MAX_HEIGHT） */
+  /** 输入时同步内容并触发自适应高度（hook 内部处理 reset→set + maxHeight 封顶） */
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
-    e.target.style.height = "auto";
-    e.target.style.height = `${Math.min(e.target.scrollHeight, MAX_HEIGHT)}px`;
+    resize();
   };
 
   return (

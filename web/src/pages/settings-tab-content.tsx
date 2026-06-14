@@ -2,7 +2,11 @@
  * Settings Tab 内容组件。
  *
  * 从 SettingsPage.tsx 提取，负责根据当前 tab 渲染对应的配置面板。
- * providers tab 由 ProvidersTab 独立组件承载，其余 tab 使用 ConfigSection 通用组件。
+ * providers tab 由 ProvidersTab 独立组件承载，channels tab 由本文件 ChannelsTab 承载，
+ * 其余 tab（budget / memory / skills / observability / web）使用 ConfigSection 通用组件 +
+ * 数据驱动的 TAB_FIELDS 表。
+ *
+ * 校验逻辑（validateConfig）也导出在此，供 SettingsPage 实时调用。
  */
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -10,18 +14,45 @@ import { Radio, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { ProvidersTab } from "@/components/settings/providers-tab";
-import { ConfigSection } from "./settings-config-section";
+import { ConfigSection, type FieldDef } from "./settings-config-section";
 
 export type TabKey = "providers" | "budget" | "memory" | "skills" | "channels" | "observability" | "web";
 
-/** 各 tab 的配置字段定义（避免 switch 里重复 JSX 结构） */
-const TAB_FIELDS: Array<{
+/** 端口合法范围（1 ~ 65535，排除 0 和 2^16） */
+const PORT_MIN = 1;
+const PORT_MAX = 65535;
+
+/**
+ * Channels tab 的 Telegram 配置示例（YAML）。
+ * 抽成常量：原本内联在 JSX 的 <pre> 里，多行字符串与缩进容易在编辑时破坏对齐；
+ * 单独定义让"示例文本"与"渲染"解耦，调整示例只改这一处。
+ */
+const TELEGRAM_YAML_SAMPLE = `channels:
+  telegram:
+    token: "your-bot-token"
+    allowedUserIds:
+      - 123456789`;
+
+/**
+ * 各 tab 的配置字段定义（避免 switch 里重复 JSX 结构）。
+ *
+ * 复用 settings-config-section 的 FieldDef 类型——重构前这里重复定义了一份
+ * 近乎相同的 `{ key, labelKey, type }` 形状，与 FieldDef 漂移风险高
+ *（例如 FieldDef 加了 "password" type 这里不会感知）。
+ * 现在 TAB_FIELDS 的字段项是"带 labelKey 的 FieldDef 蓝本"，
+ * 渲染时 map 成完整 FieldDef（labelKey → label 翻译）。
+ */
+type TabFieldDef = Omit<FieldDef, "label"> & { labelKey: string };
+
+interface TabFieldsEntry {
   tab: TabKey;
   titleKey: string;
   descKey: string;
   section: string;
-  fields: Array<{ key: string; labelKey: string; type: "text" | "number" | "boolean" }>;
-}> = [
+  fields: TabFieldDef[];
+}
+
+const TAB_FIELDS: TabFieldsEntry[] = [
   {
     tab: "budget",
     titleKey: "settings.budgetLimits",
@@ -101,6 +132,9 @@ export function TabContent({
   const def = TAB_FIELDS.find((d) => d.tab === tab);
   if (!def) return null;
 
+  // TabFieldDef → FieldDef：labelKey 翻译成 label
+  const fields: FieldDef[] = def.fields.map((f) => ({ ...f, label: t(f.labelKey) }));
+
   return (
     <ConfigSection
       title={t(def.titleKey)}
@@ -109,7 +143,7 @@ export function TabContent({
       config={config}
       onUpdate={onUpdate}
       errors={errors}
-      fields={def.fields.map((f) => ({ ...f, label: t(f.labelKey) }))}
+      fields={fields}
     />
   );
 }
@@ -135,14 +169,11 @@ function ChannelsTab({ config }: { config: Record<string, unknown> }) {
           <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
             {t("settings.telegramInstructions")}
           </p>
+          {/* YAML 示例（const 提取，避免多行字符串缩进与 JSX 混淆） */}
           <pre className="mt-2 rounded-md bg-muted/50 p-3 text-[11px] font-mono text-muted-foreground overflow-x-auto">
-{`channels:
-  telegram:
-    token: "your-bot-token"
-    allowedUserIds:
-      - 123456789`}
+            {TELEGRAM_YAML_SAMPLE}
           </pre>
-          {/* 配置状态指示 */}
+          {/* 配置状态指示：已配置 → 绿点；未配置 → 灰点 */}
           <div className="mt-3 flex items-center gap-2">
             <span className={cn("inline-flex size-2 rounded-full", hasTelegram ? "bg-success" : "bg-muted-foreground/30")} />
             <span className={cn("text-xs", hasTelegram ? "text-success font-medium" : "text-muted-foreground")}>
@@ -169,8 +200,12 @@ function ChannelsTab({ config }: { config: Record<string, unknown> }) {
 /**
  * 配置校验函数。
  *
- * 检查 web.port / budget.* / memory.* 等字段的合法性，
+ * 检查 web.port 范围 + budget.* / memory.* 非负数等字段的合法性，
  * 返回错误键值对（key = "section.field"，value = 错误消息）。
+ *
+ * 设计：每个 section 用同一份 validateNumericField 校验器，
+ * 通过 rule 参数（{ min? / max? / allowEmpty }）控制具体规则，
+ * 避免为"端口范围"和"非负数"写两套结构相同的循环。
  */
 export function validateConfig(
   cfg: Record<string, unknown>,
@@ -178,36 +213,65 @@ export function validateConfig(
 ): Record<string, string> {
   const errs: Record<string, string> = {};
 
-  // web.port 范围校验
-  const web = cfg.web as Record<string, unknown> | undefined;
-  if (web) {
-    const port = Number(web.port);
-    if (web.port !== "" && (isNaN(port) || port < 1 || port > 65535)) {
-      errs["web.port"] = t("settings.portRange");
-    }
-  }
+  // web.port：1 ~ 65535（空字符串允许 = 用户清空时不算非法，保存前会被 Number("") 转成 0 由后端拒绝）
+  validateNumericField(cfg, "web", "port", { min: PORT_MIN, max: PORT_MAX }, t("settings.portRange"), t, errs);
 
-  // 非负数批量校验
-  validateNonNegative(cfg, "budget", ["sessionLimit", "agentLimit", "taskLimit", "dailyLimit"], t, errs);
-  validateNonNegative(cfg, "memory", ["consolidationInterval", "maxResults"], t, errs);
+  // budget / memory：非负数（>= 0）
+  const nonNegativeMsg = t("settings.mustBeNonNegative");
+  for (const key of ["sessionLimit", "agentLimit", "taskLimit", "dailyLimit"]) {
+    validateNumericField(cfg, "budget", key, { min: 0 }, nonNegativeMsg, t, errs);
+  }
+  for (const key of ["consolidationInterval", "maxResults"]) {
+    validateNumericField(cfg, "memory", key, { min: 0 }, nonNegativeMsg, t, errs);
+  }
 
   return errs;
 }
 
-/** 批量校验某个 section 下多个字段是否为非负数 */
-function validateNonNegative(
+/** 数值字段校验规则 */
+interface NumericRule {
+  /** 最小值（含），不传则不检查下界 */
+  min?: number;
+  /** 最大值（含），不传则不检查上界 */
+  max?: number;
+}
+
+/**
+ * 通用数值字段校验：读 cfg[section][key]，按 rule 检查范围。
+ *
+ * - 字段缺失 / 空字符串 → 跳过（不报错，让后端在保存时做必填校验）
+ * - NaN → 跳过（用户输入非数字字符时不立即报错，失焦/保存时再处理）
+ * - 数值越界 → 写入错误消息
+ *
+ * @param cfg   完整配置对象
+ * @param section 区段名
+ * @param key    字段名
+ * @param rule   校验规则（min/max）
+ * @param errMsg 校验失败时写入的错误消息
+ * @param t      翻译函数（保留入参以备未来错误消息插值）
+ * @param errs   错误收集对象（in-place 写入）
+ */
+function validateNumericField(
   cfg: Record<string, unknown>,
   section: string,
-  keys: string[],
-  t: (key: string) => string,
+  key: string,
+  rule: NumericRule,
+  errMsg: string,
+  _t: (key: string) => string,
   errs: Record<string, string>,
 ) {
   const data = cfg[section] as Record<string, unknown> | undefined;
   if (!data) return;
-  for (const key of keys) {
-    const val = Number(data[key]);
-    if (data[key] !== "" && !isNaN(val) && val < 0) {
-      errs[`${section}.${key}`] = t("settings.mustBeNonNegative");
-    }
+  const raw = data[key];
+  // 空字符串 / undefined → 跳过（必填校验由后端负责，前端只校验"有值时是否合法"）
+  if (raw === "" || raw == null) return;
+  const val = Number(raw);
+  if (isNaN(val)) return;
+  if (rule.min !== undefined && val < rule.min) {
+    errs[`${section}.${key}`] = errMsg;
+    return;
+  }
+  if (rule.max !== undefined && val > rule.max) {
+    errs[`${section}.${key}`] = errMsg;
   }
 }
