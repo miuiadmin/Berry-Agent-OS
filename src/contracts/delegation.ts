@@ -1,3 +1,15 @@
+/**
+ * 委派状态机 + IPC 传输 payload。
+ *
+ * 16.0 语义对齐（P3-D）：本文件的 DelegationState / HandoffContext / TurnOutputPayload 等
+ * 是 delegation-orchestrator 的内部传输结构（IPC 传输层，§8 反面清单「不消灭传输层」）。
+ * 16.0 task board 的语义层用 BoardMessage type（delegate/report/tell/ask/command），
+ * 二者关系：
+ *   - delegate BoardMessage 落板时，HandoffContext 仍是 IPC 传输 payload（不变）
+ *   - report BoardMessage 落板时，TurnOutputPayload 仍是 IPC 传输 payload（不变）
+ *   - delegation.* 5 EventBus type 作为传输层观察事件保留（供现有订阅者）
+ * 即：BoardMessage 是语义层（说什么），本文件的 payload 是传输层（怎么送达）。
+ */
 export type DelegationState =
   | 'routing'
   | 'delegated'
