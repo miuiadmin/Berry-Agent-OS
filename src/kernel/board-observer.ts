@@ -188,7 +188,7 @@ export class BoardObserver {
  * @param messages  近 N 条发言（按 seq ASC，最近在尾）
  * @returns 命中的风险种类（可能多种叠加）
  */
-function detectRisks(
+export function detectRisks(
   meta: { turnCount: number; maxTurns: number; maxSpawnDepth: number },
   messages: BoardMessage[],
 ): BoardRisk[] {
@@ -219,7 +219,7 @@ function detectRisks(
  * 统计 messages 末尾连续 report(blocked) 的条数。
  * 「卡住」定义为：最近的发言都是 blocked report（没有 done/partial/tell 打断）。
  */
-function countTrailingBlocked(messages: BoardMessage[]): number {
+export function countTrailingBlocked(messages: BoardMessage[]): number {
   let streak = 0;
   // 从尾部往前数连续 blocked report
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -239,7 +239,7 @@ function countTrailingBlocked(messages: BoardMessage[]): number {
  * 检测「某个 agent 不断 delegate（拆子任务）」的递归爆炸模式。
  * 连续 = 同一 from agent 的 delegate 之间不被其他发言打断。
  */
-function maxConsecutiveDelegateBySameAgent(messages: BoardMessage[]): number {
+export function maxConsecutiveDelegateBySameAgent(messages: BoardMessage[]): number {
   let maxStreak = 0;
   let currentAgent: string | null = null;
   let currentStreak = 0;
