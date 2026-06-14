@@ -9,26 +9,30 @@
  *   <PageHeader title={t("memory.title")} subtitle={t("memory.subtitle")} icon={Brain} iconClass="text-brand">
  *     <Button>添加</Button>
  *   </PageHeader>
+ *
+ * 结构性重构：把布局类拆分注释（容器响应式 / 标题行 / 副标题），
+ * 让 h1 的语义层级清晰可读。
  */
 
-import type { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react"
+import type { ReactNode } from "react"
+import { cn } from "@/lib/utils"
 
 interface PageHeaderProps {
   /** 页面标题（h1） */
-  title: string;
+  title: string
   /** 副标题（灰色小字，可选） */
-  subtitle?: string;
+  subtitle?: string
   /** 标题旁图标（可选） */
-  icon?: LucideIcon;
+  icon?: LucideIcon
   /** 图标额外样式（如 `text-brand`） */
-  iconClass?: string;
+  iconClass?: string
   /** 标题右侧额外内容（如 Badge 计数） */
-  titleExtra?: React.ReactNode;
+  titleExtra?: ReactNode
   /** 右侧操作区（按钮等） */
-  children?: React.ReactNode;
+  children?: ReactNode
   /** 容器额外 className */
-  className?: string;
+  className?: string
 }
 
 export function PageHeader({
@@ -41,8 +45,15 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   return (
-    <div className={cn("flex flex-col gap-3 md:flex-row md:items-center md:justify-between", className)}>
+    <div
+      className={cn(
+        // 容器：移动端纵向堆叠、桌面端横向 + 两端对齐
+        "flex flex-col gap-3 md:flex-row md:items-center md:justify-between",
+        className
+      )}
+    >
       <div>
+        {/* h1 标题行：icon + title + 可选 titleExtra（如 Badge 计数） */}
         <h1 className="flex items-center gap-2 text-lg font-semibold">
           {Icon && <Icon className={cn("size-5", iconClass)} />}
           {title}
@@ -52,7 +63,8 @@ export function PageHeader({
           <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         )}
       </div>
+      {/* 右侧操作区：按钮 / 链接等 */}
       {children}
     </div>
-  );
+  )
 }

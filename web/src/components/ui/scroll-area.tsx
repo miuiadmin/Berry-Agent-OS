@@ -10,6 +10,10 @@
  *   </ScrollArea>
  *
  * 自动添加纵向 + 横向 ScrollBar；Viewport 100% 撑满 Root。
+ *
+ * 结构性重构：把 ScrollBar 在 horizontal / vertical 两种朝向下的差异类
+ * （flex 方向、边框、宽高）拆成 Record，可读性优于单条 data-horizontal:/data-vertical:
+ * 并列的长字符串。
  */
 
 "use client"
@@ -18,6 +22,7 @@ import * as React from "react"
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area"
 
 import { cn } from "@/lib/utils"
+import { FOCUS_RING } from "@/components/ui/_shared"
 
 /**
  * 滚动容器根。
@@ -36,7 +41,11 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className={cn(
+          "size-full rounded-[inherit] transition-[color,box-shadow]",
+          FOCUS_RING,
+          "focus-visible:outline-1"
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
@@ -44,6 +53,14 @@ function ScrollArea({
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )
+}
+
+/** ScrollBar 在两种朝向下的差异（公共部分在主 className） */
+const ORIENTATION_VARIANT: Record<"vertical" | "horizontal", string> = {
+  // 纵向：撑满高度、2.5 宽、左侧透明分隔线
+  vertical: "data-vertical:h-full data-vertical:w-2.5 data-vertical:border-l data-vertical:border-l-transparent",
+  // 横向：撑满宽度、2.5 高、顶部透明分隔线，并切到 flex-col
+  horizontal: "data-horizontal:h-2.5 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent",
 }
 
 /**
@@ -61,7 +78,8 @@ function ScrollBar({
       data-orientation={orientation}
       orientation={orientation}
       className={cn(
-        "flex touch-none p-px transition-colors select-none data-horizontal:h-2.5 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent data-vertical:h-full data-vertical:w-2.5 data-vertical:border-l data-vertical:border-l-transparent",
+        "flex touch-none p-px transition-colors select-none",
+        ORIENTATION_VARIANT[orientation],
         className
       )}
       {...props}

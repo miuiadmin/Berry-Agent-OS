@@ -1,9 +1,13 @@
 /**
- * BarChart 柱状图组件（纯 SVG / div 渲染）。
+ * BarChart 水平柱状图组件（纯 div + CSS 渲染）。
  *
- * 水平进度条形式：每行 = 标签 + 数值 + 进度条。
+ * 形式：每行 = 标签 + 数值 + 进度条。无第三方图表库依赖，轻量高可控。
  * 支持自定义柱体颜色（按条覆盖）、数值格式化函数、stagger 入场动画。
- * 无第三方图表库依赖，轻量高可控。
+ *
+ * 与 AreaChart 的差异：
+ *  - AreaChart 是 SVG 折线（连续趋势）；BarChart 是水平进度条（类目对比）
+ *  - BarChart 不需要几何计算（柱长 = value/maxVal 直接转百分比），故不依赖 chart-geometry 的 path 模块
+ *  - 仅复用 staggerIndex（CSS 动画序号）和 CHART_COLOR_1 默认色
  *
  * 用法：
  *   <BarChart data={[
@@ -16,11 +20,13 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+import { CHART_COLOR_1, safeMaxValue, staggerIndex } from "./chart-geometry";
 
-interface BarItem {
+/** 单条柱子的数据 */
+export interface BarItem {
   /** 行标签 */
   label: string;
-  /** 数值（决定柱长占比） */
+  /** 数值（决定柱长占比，相对 maxVal 归一化） */
   value: number;
   /** 自定义柱色（默认 var(--chart-1)） */
   color?: string;
@@ -35,11 +41,20 @@ interface BarChartProps {
   formatValue?: (v: number) => string;
 }
 
-export function BarChart({ data, className, formatValue = (v) => String(v) }: BarChartProps) {
+export function BarChart({
+  data,
+  className,
+  formatValue = (v) => String(v),
+}: BarChartProps) {
   const t = useT();
-  /** 所有值的最大值（至少 1 避免除零） */
-  const maxVal = useMemo(() => Math.max(...data.map((d) => d.value), 1), [data]);
 
+  /** 全局最大值（至少 1 避免除零；空数据走下面的 noData 分支不会用到） */
+  const maxVal = useMemo(
+    () => safeMaxValue(data.map((d) => d.value)),
+    [data],
+  );
+
+  /* 空数据 → 显示空态（与其他图表组件一致） */
   if (data.length === 0) {
     return (
       <div className={cn("flex items-center justify-center text-sm text-muted-foreground py-4", className)}>
@@ -50,24 +65,35 @@ export function BarChart({ data, className, formatValue = (v) => String(v) }: Ba
 
   return (
     <div className={cn("space-y-2", className)}>
-      {data.map((item, i) => (
-        <div key={i} className="space-y-1">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground truncate max-w-[50%] md:max-w-[60%]">{item.label}</span>
-            <span className="font-medium tabular-nums">{formatValue(item.value)}</span>
+      {data.map((item, i) => {
+        // 柱长百分比：value/maxVal，clamp 防止 value > maxVal 时溢出
+        const widthPct = Math.min((item.value / maxVal) * 100, 100);
+        return (
+          <div key={i} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              {/* 标签截断防溢出：移动端更窄（50%），桌面端放宽（60%） */}
+              <span className="text-muted-foreground truncate max-w-[50%] md:max-w-[60%]">
+                {item.label}
+              </span>
+              {/* tabular-nums 让数值列等宽对齐 */}
+              <span className="font-medium tabular-nums">{formatValue(item.value)}</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-muted">
+              {/* 柱体：宽度按百分比 + stagger 类触发 CSS 入场延迟 */}
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all duration-500",
+                  `stagger-${staggerIndex(i)}`,
+                )}
+                style={{
+                  width: `${widthPct}%`,
+                  backgroundColor: item.color ?? CHART_COLOR_1,
+                }}
+              />
+            </div>
           </div>
-          <div className="h-2 w-full rounded-full bg-muted">
-            {/* 柱体宽度按 value/maxVal 比例；stagger 类触发 CSS 入场动画 */}
-            <div
-              className={`h-full rounded-full transition-all duration-500 stagger-${Math.min(i + 1, 8)}`}
-              style={{
-                width: `${(item.value / maxVal) * 100}%`,
-                backgroundColor: item.color ?? "var(--chart-1)",
-              }}
-            />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

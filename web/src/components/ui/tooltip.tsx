@@ -13,6 +13,10 @@
  *   </TooltipProvider>
  *
  * side：top / right / bottom / left（默认 top），align：center / start / end。
+ *
+ * 结构性重构：
+ * - 把 TooltipContent 近 600 字符的 className 按段拆分注释（气泡样式 / 进出场动画 / 箭头定位）。
+ * - 6 个方向的 slide-in 位移类用 Record 集中（原本是单条 6 段并列 data-[side=...] 字符串）。
  */
 
 "use client"
@@ -20,6 +24,16 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
+
+/** 6 个弹出方向 → 进场位移（slide-in-from-*）映射 */
+const SLIDE_IN_BY_SIDE: Record<string, string> = {
+  top: "data-[side=top]:slide-in-from-bottom-2",
+  bottom: "data-[side=bottom]:slide-in-from-top-2",
+  left: "data-[side=left]:slide-in-from-right-2",
+  right: "data-[side=right]:slide-in-from-left-2",
+  "inline-start": "data-[side=inline-start]:slide-in-from-right-2",
+  "inline-end": "data-[side=inline-end]:slide-in-from-left-2",
+}
 
 /**
  * Provider：全局 Tooltip 配置。
@@ -79,7 +93,16 @@ function TooltipContent({
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            [
+              // 气泡基础样式：深色底 + 浅色文字 + 圆角 + 最大宽度约束
+              "z-50 inline-flex w-fit max-w-xs origin-(--transform-origin) items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background",
+              // 含 kbd 子元素时右侧收紧
+              "has-data-[slot=kbd]:pr-1.5 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm",
+              // 进出场动画（delayed-open 用于 hover 延迟打开态）
+              "data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+              // 方向位移（从 Record 取，6 个方向）
+              Object.values(SLIDE_IN_BY_SIDE).join(" "),
+            ],
             className
           )}
           {...props}

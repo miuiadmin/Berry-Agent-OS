@@ -19,16 +19,33 @@
  *
  * 消费侧通过 buttonVariants({ variant, size }) 直接合成 className，
  * 用于 `<a>` 等非 Button 元素复用同一套样式。
+ *
+ * 结构性重构：基础类的 aria-invalid 错误环抽到 _shared.ARIA_INVALID_RING
+ * （Input / Badge / Switch 共用），消除 5 处漂移的同一段红色环类。
  */
 
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { FOCUS_RING, ARIA_INVALID_RING } from "@/components/ui/_shared"
 
-/** 按钮样式合成器（cva）：variant × size 矩阵 + 公共基础类 */
+/**
+ * 按钮样式合成器（cva）：variant × size 矩阵 + 公共基础类。
+ * 基础类抽出聚焦环 / aria-invalid 环到常量，剩余交互类（active 下沉、disabled 透明）保留。
+ */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  [
+    "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all select-none",
+    FOCUS_RING,
+    ARIA_INVALID_RING,
+    // active 微下沉（仅非下拉触发器，避免与展开箭头动画冲突）
+    "active:not-aria-[haspopup]:translate-y-px",
+    // disabled 状态：禁用所有指针事件 + 半透明
+    "disabled:pointer-events-none disabled:opacity-50",
+    // 子元素 svg 默认尺寸约束 + 不响应指针事件
+    "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  ],
   {
     variants: {
       variant: {

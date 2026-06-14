@@ -42,8 +42,41 @@ function safePost(taskId: string, build: () => BoardMessage, label: string): voi
     postBoardMessage(taskId, msg);
     // P5-C1：board 信封落板后派生 EventBus 事件（让现有订阅者无感迁移，§9 P5「旧通道降兼容层」）
     deriveEventFromBoardMessage(taskId, msg);
+    // P5-C2：board 落板成功后 emit 统一的 'board.message.posted'，
+    // WsEventBridge 订阅后转发 ws.type='board.message' 给前端（前端看板 UI 实时刷新）。
+    // 此事件是 P5-C2 唯一新增的前端可见信号，与 deriveEventFromBoardMessage 派生的旧事件正交：
+    //   - 旧事件（delegation.created/completed/failed/checkpoint_needed）→ 服务端内部订阅者
+    //   - board.message.posted → 前端看板 UI（经 WsEventBridge 桥接）
+    // 统一在此 emit（而非散落各 postXxxEnvelope），遵循 CLAUDE.md「补丁过多即重构」——
+    // 所有 board 落板都经 safePost，在此一处派生前端信号即可覆盖全部信封类型。
+    emitBoardMessagePosted(taskId, msg);
   } catch (err) {
     logger.debug({ err, taskId, label }, `board-projection: ${label} 落板失败（fire-and-forget，不影响主路径）`);
+  }
+}
+
+/**
+ * P5-C2：emit 'board.message.posted' 事件（WsEventBridge 订阅后转发前端）。
+ *
+ * fire-and-forget：emit 失败仅 debug 日志（board 已落库是事实，前端刷新失败可下次拉历史补救）。
+ * 字段从已落板的 msg 里取，保证与 task_thread 表内容一致（单一事实源）。
+ */
+function emitBoardMessagePosted(taskId: string, msg: BoardMessage): void {
+  try {
+    const bus = getEventBus();
+    // messageType 是 BoardMessage 判别联合的 type 字段（'delegate'|'report'|'ask'|...），
+    // 与 EventMap['board.message.posted'].messageType 字面量联合完全对齐。
+    bus.emit('board.message.posted', {
+      taskId,
+      sessionId: msg.sessionId,
+      messageType: msg.type,
+      messageId: msg.id,
+      from: msg.from,
+      to: msg.to,
+    });
+  } catch (err) {
+    // emit 失败不影响 board 落板主路径（fire-and-forget，前端可经拉历史补救）
+    logger.debug({ err, taskId, messageType: msg.type }, 'board-projection: emit board.message.posted 失败（不影响主路径）');
   }
 }
 

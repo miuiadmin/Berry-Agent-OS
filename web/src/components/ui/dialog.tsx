@@ -19,14 +19,18 @@
  *   </Dialog>
  *
  * 移动端：max-w-[calc(100%-2rem)] 避免贴边；关闭按钮 44px 触控目标。
+ *
+ * 结构性重构：遮罩 / 弹层动画 / 弹层定位三类公共类与 alert-dialog 共享
+ * （_shared.ts），消除两份漂移的同一段类字符串。
  */
 
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
+import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { XIcon } from "lucide-react"
+import { MODAL_OVERLAY, POPUP_ANIMATION, POPUP_BASE, TOUCH_TARGET } from "@/components/ui/_shared"
 
 /** 对话框根：受控开关 + 上下文 provider */
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -48,7 +52,7 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
 }
 
-/** 半透明遮罩层：隔离背景交互 + 视觉聚焦 */
+/** 半透明遮罩层：隔离背景交互 + 视觉聚焦（公共常量 MODAL_OVERLAY） */
 function DialogOverlay({
   className,
   ...props
@@ -56,10 +60,7 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
-      className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className
-      )}
+      className={cn(MODAL_OVERLAY, className)}
       {...props}
     />
   )
@@ -75,6 +76,7 @@ function DialogContent({
   showCloseButton = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
+  /** 是否显示右上角关闭按钮（默认 true） */
   showCloseButton?: boolean
 }) {
   return (
@@ -83,7 +85,10 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // 公共定位 + 动画（与 AlertDialog 共享），宽度逻辑本组件特有
+          POPUP_BASE,
+          "max-w-[calc(100%-2rem)] sm:max-w-sm",
+          POPUP_ANIMATION,
           className
         )}
         {...props}
@@ -93,10 +98,11 @@ function DialogContent({
           <DialogPrimitive.Close
             data-slot="dialog-close"
             render={
+              // 移动端 44px 触控目标（TOUCH_TARGET 仅尺寸，位置类本组件独有）
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="absolute top-2 right-2 size-11 md:size-7"
+                className={cn("absolute top-2 right-2", TOUCH_TARGET, "md:size-7")}
               />
             }
           >
@@ -130,6 +136,7 @@ function DialogFooter({
   children,
   ...props
 }: React.ComponentProps<"div"> & {
+  /** 是否在末尾渲染 Close 按钮（默认 false） */
   showCloseButton?: boolean
 }) {
   return (

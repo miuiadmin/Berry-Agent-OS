@@ -4,15 +4,37 @@
  * - ImageLightbox：全屏覆盖层查看大图（ESC 关闭、点击背景关闭、焦点管理 + body 滚动锁定）
  * - ClickableImage：内联缩略图，点击打开灯箱
  *
- * 两个组件共享 error/loaded 状态模式（加载失败展示占位 / 加载完成淡入）。
+ * 结构性重构：两个组件共享 error/loaded 双态模式原本各写一遍（2 × useState +
+ * onError/onLoad handler），抽出 useImageLoad hook 统一，消除两份漂移的同一段状态机。
  */
 
-"use client";
+"use client"
 
-import { useEffect, useCallback, useRef, useState } from "react";
-import { X, ImageOff } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { useT } from "@/lib/i18n";
+import { useEffect, useCallback, useRef, useState } from "react"
+import { X, ImageOff } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n"
+
+/**
+ * 图片加载状态 hook：error / loaded 双态。
+ * 切换 src 时自动重置 error（loaded 由 img onLoad 单独管理）。
+ * @param src 图片 URL（变化时重置）
+ * @returns { error, loaded, handleError, handleLoad }
+ */
+function useImageLoad(src: string) {
+  const [error, setError] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+
+  // src 切换时重置 error 态（loaded 由 img onLoad 触发，不在这里重置以避免闪烁）
+  useEffect(() => { setError(false) }, [src])
+
+  return {
+    error,
+    loaded,
+    handleError: useCallback(() => setError(true), []),
+    handleLoad: useCallback(() => setLoaded(true), []),
+  }
+}
 
 /** 图片加载错误占位（图标 + 文案） */
 function ImageError({ className, message }: { className?: string; message: string }) {
@@ -21,18 +43,18 @@ function ImageError({ className, message }: { className?: string; message: strin
       <ImageOff className="size-4" />
       <span>{message}</span>
     </div>
-  );
+  )
 }
 
 interface ImageLightboxProps {
   /** 大图 URL */
-  src: string;
+  src: string
   /** alt 文案（同时作为 dialog aria-label） */
-  alt?: string;
+  alt?: string
   /** 是否打开 */
-  open: boolean;
+  open: boolean
   /** 关闭回调 */
-  onClose: () => void;
+  onClose: () => void
 }
 
 /**
@@ -41,33 +63,29 @@ interface ImageLightboxProps {
  * 关闭按钮移动端 44px、桌面端 36px 触控目标。
  */
 export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
-  const [error, setError] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const t = useT();
+  const { error, loaded, handleError, handleLoad } = useImageLoad(src)
+  const t = useT()
   /** 打开前的焦点元素，关闭时恢复（无障碍） */
-  const prevFocusRef = useRef<HTMLElement | null>(null);
+  const prevFocusRef = useRef<HTMLElement | null>(null)
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
-  }, [onClose]);
+    if (e.key === "Escape") onClose()
+  }, [onClose])
 
   useEffect(() => {
-    if (!open) return;
-    prevFocusRef.current = document.activeElement as HTMLElement;
-    document.addEventListener("keydown", handleKeyDown);
-    document.body.style.overflow = "hidden";
+    if (!open) return
+    prevFocusRef.current = document.activeElement as HTMLElement
+    document.addEventListener("keydown", handleKeyDown)
+    document.body.style.overflow = "hidden"
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-      prevFocusRef.current?.focus();
-      prevFocusRef.current = null;
-    };
-  }, [open, handleKeyDown]);
+      document.removeEventListener("keydown", handleKeyDown)
+      document.body.style.overflow = ""
+      prevFocusRef.current?.focus()
+      prevFocusRef.current = null
+    }
+  }, [open, handleKeyDown])
 
-  // 切换 src 时重置错误态（loaded 由 img onLoad 单独管理）
-  useEffect(() => { setError(false); }, [src]);
-
-  if (!open) return null;
+  if (!open) return null
 
   return (
     <div role="dialog" aria-modal="true" aria-label={alt || t("lightbox.image")}
@@ -88,31 +106,32 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
         <img src={src} alt={alt || ""}
           className={cn("max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
           onClick={(e) => e.stopPropagation()}
-          onError={() => setError(true)} onLoad={() => setLoaded(true)} />
+          onError={handleError} onLoad={handleLoad} />
       )}
     </div>
-  );
+  )
 }
 
 /** 可点击图片（内联缩略图 → 点击打开灯箱） */
 export function ClickableImage({ src, alt, className }: { src?: string; alt?: string; className?: string }) {
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const t = useT();
+  const [open, setOpen] = useState(false)
+  const t = useT()
 
-  if (!src) return null;
+  // 无 src：不渲染（避免空 img 占位）
+  if (!src) return null
+
+  const { error, loaded, handleError, handleLoad } = useImageLoad(src)
 
   // 加载失败：展示错误占位（不破坏页面布局）
-  if (error) return <ImageError className={className} message={alt || t("lightbox.imageFailedToLoad")} />;
+  if (error) return <ImageError className={className} message={alt || t("lightbox.imageFailedToLoad")} />
 
   return (
     <>
       <img src={src} alt={alt || ""}
         className={cn("my-2 max-h-80 max-w-full cursor-pointer rounded-lg transition-all duration-300 hover:opacity-90", loaded ? "opacity-100" : "opacity-0", className)}
         onClick={() => setOpen(true)}
-        onError={() => setError(true)} onLoad={() => setLoaded(true)} />
+        onError={handleError} onLoad={handleLoad} />
       <ImageLightbox src={src} alt={alt} open={open} onClose={() => setOpen(false)} />
     </>
-  );
+  )
 }

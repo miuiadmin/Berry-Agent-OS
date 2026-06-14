@@ -21,6 +21,9 @@
  *
  * size 变体：default（标题居中、按钮底部纵向）/ sm（紧凑、按钮左右双列）。
  * Media 槽位（AlertDialogMedia）可选，常放警示图标。
+ *
+ * 结构性重构：遮罩层 / 弹层动画 / 弹层定位三类公共类抽到 _shared.ts，
+ * 与 dialog.tsx 共享同一事实源，消除两份漂移的同一段类字符串。
  */
 
 "use client"
@@ -30,6 +33,7 @@ import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { MODAL_OVERLAY, POPUP_ANIMATION, POPUP_BASE } from "@/components/ui/_shared"
 
 /** 对话框根：受控开关 + 上下文 provider */
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
@@ -50,7 +54,7 @@ function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {
   )
 }
 
-/** 半透明遮罩层：隔离背景交互 + 视觉聚焦 */
+/** 半透明遮罩层：隔离背景交互 + 视觉聚焦（公共常量 MODAL_OVERLAY） */
 function AlertDialogOverlay({
   className,
   ...props
@@ -58,10 +62,7 @@ function AlertDialogOverlay({
   return (
     <AlertDialogPrimitive.Backdrop
       data-slot="alert-dialog-overlay"
-      className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-        className
-      )}
+      className={cn(MODAL_OVERLAY, className)}
       {...props}
     />
   )
@@ -70,12 +71,14 @@ function AlertDialogOverlay({
 /**
  * 对话框主体（居中弹出）。
  * 自动包裹 Portal + Overlay，data-size 控制 default/sm 两种尺寸。
+ * 公共定位（POPUP_BASE）+ 动画（POPUP_ANIMATION）来自 _shared，仅 width 逻辑本组件特有。
  */
 function AlertDialogContent({
   className,
   size = "default",
   ...props
 }: AlertDialogPrimitive.Popup.Props & {
+  /** 尺寸变体：default（移动 max-w-xs / 桌面 sm:max-w-sm）/ sm（紧凑 max-w-xs） */
   size?: "default" | "sm"
 }) {
   return (
@@ -85,7 +88,10 @@ function AlertDialogContent({
         data-slot="alert-dialog-content"
         data-size={size}
         className={cn(
-          "group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-full -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none data-[size=default]:max-w-xs data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          POPUP_BASE,
+          // 宽度：default 移动端 max-w-xs、桌面端 sm:max-w-sm；sm 始终 max-w-xs
+          "max-w-xs data-[size=default]:sm:max-w-sm",
+          POPUP_ANIMATION,
           className
         )}
         {...props}
@@ -183,6 +189,10 @@ function AlertDialogDescription({
  * 关闭按钮（Action / Cancel 复用）：
  * 基于 AlertDialogPrimitive.Close（点击自动关闭对话框）+ render Button 渲染。
  * 消费侧 onClick 同步执行后，Close 原语自动关闭对话框。
+ *
+ * @param dataSlot data-slot 值（用于 CSS has-data-[slot=...] 选择器定位）
+ * @param variant Button 视觉变体
+ * @param size Button 尺寸变体
  */
 function AlertDialogCloseButton({
   dataSlot,
@@ -192,9 +202,9 @@ function AlertDialogCloseButton({
   ...props
 }: AlertDialogPrimitive.Close.Props &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size"> & {
-  /** data-slot 值（用于 CSS has-data-[slot=...] 选择器定位） */
-  dataSlot: string
-}) {
+    /** data-slot 值（用于 CSS has-data-[slot=...] 选择器定位） */
+    dataSlot: string
+  }) {
   return (
     <AlertDialogPrimitive.Close
       data-slot={dataSlot}

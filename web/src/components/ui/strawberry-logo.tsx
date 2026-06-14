@@ -5,13 +5,35 @@
  * 含径向渐变高光、底部深色阴影、12 颗黄色种子，纯 SVG 矢量。
  *
  * @param className 尺寸类（默认 size-6），可调用方覆盖
+ *
+ * 结构性重构：12 颗种子的椭圆原本手写 12 行重复 `<ellipse>`，
+ * 抽成数据数组 + map 渲染，新增/调整种子只改数据不改 JSX。
  */
 
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils"
 
 interface StrawberryLogoProps {
-  className?: string;
+  className?: string
 }
+
+/**
+ * 12 颗种子的位置 + 旋转角度（度）。
+ * 视觉上从顶部到底部、左中右交错排布，制造自然分布。
+ */
+const SEEDS: ReadonlyArray<{ cx: number; cy: number; rotate: number }> = [
+  { cx: 25, cy: 28, rotate: -15 },
+  { cx: 32, cy: 26, rotate: 5 },
+  { cx: 39, cy: 29, rotate: 15 },
+  { cx: 22, cy: 35, rotate: -10 },
+  { cx: 29, cy: 34, rotate: 0 },
+  { cx: 36, cy: 35, rotate: 8 },
+  { cx: 42, cy: 34, rotate: 12 },
+  { cx: 25, cy: 42, rotate: -5 },
+  { cx: 32, cy: 41, rotate: 3 },
+  { cx: 39, cy: 41, rotate: 10 },
+  { cx: 28, cy: 48, rotate: -2 },
+  { cx: 35, cy: 48, rotate: 5 },
+]
 
 export function StrawberryLogo({ className }: StrawberryLogoProps) {
   return (
@@ -42,19 +64,18 @@ export function StrawberryLogo({ className }: StrawberryLogoProps) {
         fill="white"
         opacity="0.2"
       />
-      {/* 种子阵列（12 颗，不同角度排布） */}
-      <ellipse cx="25" cy="28" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(-15 25 28)" />
-      <ellipse cx="32" cy="26" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(5 32 26)" />
-      <ellipse cx="39" cy="29" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(15 39 29)" />
-      <ellipse cx="22" cy="35" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(-10 22 35)" />
-      <ellipse cx="29" cy="34" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(0 29 34)" />
-      <ellipse cx="36" cy="35" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(8 36 35)" />
-      <ellipse cx="42" cy="34" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(12 42 34)" />
-      <ellipse cx="25" cy="42" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(-5 25 42)" />
-      <ellipse cx="32" cy="41" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(3 32 41)" />
-      <ellipse cx="39" cy="41" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(10 39 41)" />
-      <ellipse cx="28" cy="48" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(-2 28 48)" />
-      <ellipse cx="35" cy="48" rx="1.2" ry="1.6" fill="#f9a825" transform="rotate(5 35 48)" />
+      {/* 种子阵列：从 SEEDS 数据 map 渲染（位置 + 旋转角度数据驱动） */}
+      {SEEDS.map((s, i) => (
+        <ellipse
+          key={i}
+          cx={s.cx}
+          cy={s.cy}
+          rx={1.2}
+          ry={1.6}
+          fill="#f9a825"
+          transform={`rotate(${s.rotate} ${s.cx} ${s.cy})`}
+        />
+      ))}
       {/* 径向渐变定义（高光层引用） */}
       <defs>
         <radialGradient id="logo-gradient" cx="35%" cy="30%" r="65%">
@@ -63,5 +84,5 @@ export function StrawberryLogo({ className }: StrawberryLogoProps) {
         </radialGradient>
       </defs>
     </svg>
-  );
+  )
 }

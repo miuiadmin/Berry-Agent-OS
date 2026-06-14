@@ -418,6 +418,29 @@ export type EventMap = {
   };
   /** 13.0 §13.18: v2 插件工具注册到全局 ToolRegistry 后广播变更 */
   'tools.updated': { added: string[] };
+  /**
+   * 16.0 P5-C2：任务板有新信封落板（WsEventBridge 订阅后转发 ws.type='board.message' 给前端）。
+   *
+   * 设计意图：board 写入是 DB 操作（task_thread 表 INSERT），不是 EventBus 事件。
+   * board-projection.safePost 在落板成功后 emit 此事件，让前端经 WsEventBridge 实时感知
+   * 「这块板有新发言了」——用于前端看板 UI 刷新（设计文档/23 §9 P5「旧通道降兼容层」）。
+   *
+   * 字段语义：
+   *   - taskId：板 id（= delegationId，板与 delegation 1:1）
+   *   - sessionId：关联会话 id（WsEventBridge 按此过滤推送给订阅了该 session 的前端客户端）
+   *   - messageType：信封类型（delegate/report/ask/tool_request/tool_result/command/tell）
+   *     前端可据此决定 UI 优先级（如 command 高亮、report 更新状态徽章）
+   *   - messageId：板上信封 id（前端可据此去重 / 定位）
+   *   - from / to：信封收发方（前端看板气泡渲染用）
+   */
+  'board.message.posted': {
+    taskId: string;
+    sessionId?: string;
+    messageType: 'delegate' | 'report' | 'ask' | 'tool_request' | 'tool_result' | 'command' | 'tell';
+    messageId?: string;
+    from?: string;
+    to?: string;
+  };
 };
 
 export type EventMessageMap = {

@@ -16,6 +16,9 @@
  *   </Card>
  *
  * 使用 --card-spacing CSS 变量统一内边距（4/3 由 size 决定）。
+ *
+ * 结构性重构：Card 根那条近 400 字符的 className 按"基础布局 / spacing 变量 /
+ * Footer 修正 / 图片圆角"四段拆分注释，size 差异集中到 data-size 选择器。
  */
 
 import * as React from "react"
@@ -36,7 +39,16 @@ function Card({
       data-slot="card"
       data-size={size}
       className={cn(
-        "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-sm text-card-foreground ring-1 ring-foreground/10 [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        [
+          // 基础布局：纵向 flex + 圆角 + 背景色 + ring 描边
+          "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card text-sm text-card-foreground ring-1 ring-foreground/10",
+          // spacing 变量：default=4，sm=3（用 data-size 切换 CSS 变量）
+          "py-(--card-spacing) [--card-spacing:--spacing(4)] data-[size=sm]:[--card-spacing:--spacing(3)]",
+          // Footer 修正：有 Footer 时去掉底部 padding（Footer 自带）
+          "has-data-[slot=card-footer]:pb-0 data-[size=sm]:has-data-[slot=card-footer]:pb-0",
+          // 图片圆角：第一张图顶圆角、最后一张图底圆角
+          "has-[>img:first-child]:pt-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        ],
         className
       )}
       {...props}
@@ -50,7 +62,15 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-t-xl px-(--card-spacing) has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-(--card-spacing)",
+        [
+          "group/card-header @container/card-header grid auto-rows-min items-start gap-1 rounded-t-xl px-(--card-spacing)",
+          // 含 Action 时变两列栅格（内容 1fr + Action auto）
+          "has-data-[slot=card-action]:grid-cols-[1fr_auto]",
+          // 含 Description 时显式两行（标题 + 描述）
+          "has-data-[slot=card-description]:grid-rows-[auto_auto]",
+          // 上边框存在时底部加 spacing（嵌套分隔场景）
+          "[.border-b]:pb-(--card-spacing)",
+        ],
         className
       )}
       {...props}

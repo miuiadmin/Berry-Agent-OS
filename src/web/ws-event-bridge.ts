@@ -130,6 +130,12 @@ const STREAM_EVENT_MAPPING: Partial<Record<EventName, string>> = {
   'delegation.user_needed': 'delegation.needed',
   // 13.0 §4.4.2: 跨 agent 预算告警（per-agent token 实时推送 — 顶层格式 + sessionId 过滤）
   'brain.budget.alert': 'budget_alert',
+  // 16.0 P5-C2: 任务板有新信封落板（前端看板 UI 实时刷新）。
+  // board 写入是 DB 操作（task_thread INSERT），不是 EventBus 事件；board-projection.safePost
+  // 在落板成功后 emit 'board.message.posted'，本映射把它桥接成 ws.type='board.message'。
+  // 走流式格式（顶层 payload + sessionId 过滤）：前端经 { type: 'subscribe', sessionId } 订阅后，
+  // 只收自己关注会话的 board 刷新，避免被无关 board 噪音打扰（§4.2 看板异步 + §9 P5 兼容层）。
+  'board.message.posted': 'board.message',
 };
 
 /** 工具调用计时链路 trace 日志器（grep `tool-trace` 看全链路） */

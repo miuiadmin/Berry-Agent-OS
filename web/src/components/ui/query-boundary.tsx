@@ -13,34 +13,41 @@
  *   <QueryBoundary query={q} skeleton={<ListSkeleton />}>
  *     {(data) => <List items={data} />}
  *   </QueryBoundary>
+ *
+ * 结构性重构：触控目标类抽到 _shared.TOUCH_TARGET（与 EmptyState 等共用），
+ * 三态分发用 early return 保持线性可读。
  */
 
-"use client";
+"use client"
 
-import type { ReactNode } from "react";
-import type { UseQueryResult } from "@tanstack/react-query";
-import { AlertCircle, RefreshCw } from "lucide-react";
-import { Button } from "./button";
-import { tOutside as t } from "@/lib/i18n";
+import type { ReactNode } from "react"
+import type { UseQueryResult } from "@tanstack/react-query"
+import { AlertCircle, RefreshCw } from "lucide-react"
+import { Button } from "./button"
+import { cn } from "@/lib/utils"
+import { TOUCH_TARGET } from "@/components/ui/_shared"
+import { tOutside as t } from "@/lib/i18n"
 
 interface QueryBoundaryProps<T> {
   /** TanStack Query 结果对象 */
-  query: UseQueryResult<T>;
+  query: UseQueryResult<T>
   /** 加载态骨架（query.isLoading 或 data 为空时渲染） */
-  skeleton: ReactNode;
+  skeleton: ReactNode
   /** 成功回调：拿到 data 渲染真正内容 */
-  children: (data: T) => ReactNode;
+  children: (data: T) => ReactNode
   /** 错误标题（默认 i18n queryBoundary.failedToLoad） */
-  errorTitle?: string;
+  errorTitle?: string
 }
 
 export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: QueryBoundaryProps<T>) {
+  // 加载中：渲染骨架
   if (query.isLoading) {
-    return <>{skeleton}</>;
+    return <>{skeleton}</>
   }
 
+  // 出错：渲染错误提示 + 重试按钮
   if (query.isError) {
-    const message = query.error instanceof Error ? query.error.message : t("queryBoundary.errorOccurred");
+    const message = query.error instanceof Error ? query.error.message : t("queryBoundary.errorOccurred")
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
@@ -53,20 +60,22 @@ export function QueryBoundary<T>({ query, skeleton, children, errorTitle }: Quer
         <Button
           variant="outline"
           size="sm"
-          className="mt-4"
+          // 重试按钮：移动端 44px 触控目标，桌面端 sm 紧凑
+          className={cn("mt-4", TOUCH_TARGET, "md:min-h-0")}
           onClick={() => query.refetch()}
         >
           <RefreshCw className="mr-1.5 size-3" />
           {t("common.retry")}
         </Button>
       </div>
-    );
+    )
   }
 
-  // isIdle 或 data 仍为 undefined 时回退到骨架
+  // isIdle 或 data 仍为 undefined 时回退到骨架（防止渲染 undefined 子树）
   if (!query.data) {
-    return <>{skeleton}</>;
+    return <>{skeleton}</>
   }
 
-  return <div className="animate-fade-in">{children(query.data)}</div>;
+  // 成功：渲染 children(data)
+  return <div className="animate-fade-in">{children(query.data)}</div>
 }

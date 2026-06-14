@@ -11,16 +11,19 @@
  *
  * 用法：
  *   <CardListSkeleton count={5} bars={["h-4 w-1/3", "h-3 w-2/3"]} />
+ *
+ * 结构性重构：用 Array.from + 静态 key（i/j 索引，骨架无动态重排所以安全），
+ * 避免外部库依赖；保留 Card / Skeleton 复用关系。
  */
 
-import { Card, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface CardListSkeletonProps {
   /** 骨架卡片数量 */
-  count: number;
+  count: number
   /** 每张卡片内的骨架条尺寸（className，如 "h-4 w-1/3"）；脉冲/背景/圆角由 Skeleton 统一提供 */
-  bars: string[];
+  bars: string[]
 }
 
 export function CardListSkeleton({ count, bars }: CardListSkeletonProps) {
@@ -38,5 +41,5 @@ export function CardListSkeleton({ count, bars }: CardListSkeletonProps) {
         </Card>
       ))}
     </div>
-  );
+  )
 }

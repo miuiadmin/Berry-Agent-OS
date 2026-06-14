@@ -28,31 +28,31 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { buttonVariants } from "@/components/ui/button";
-import type { VariantProps } from "class-variance-authority";
-import { useT } from "@/lib/i18n";
+} from "@/components/ui/alert-dialog"
+import { buttonVariants } from "@/components/ui/button"
+import type { VariantProps } from "class-variance-authority"
+import { useT } from "@/lib/i18n"
 
 /** Button variant 类型，用于确认按钮样式（默认 destructive） */
-type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
+type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>
 
 interface ConfirmDialogProps {
   /** 是否打开 */
-  open: boolean;
+  open: boolean
   /** 开关回调（关闭时底层自动调用） */
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (open: boolean) => void
   /** 对话框标题 */
-  title: string;
+  title: string
   /** 对话框描述 */
-  description: string;
+  description: string
   /** 确认按钮文字 */
-  actionLabel: string;
+  actionLabel: string
   /** 点击确认的回调（点击后对话框自动关闭） */
-  onAction: () => void;
+  onAction: () => void
   /** 取消按钮文字（默认 i18n common.cancel） */
-  cancelLabel?: string;
+  cancelLabel?: string
   /** 确认按钮 variant（默认 destructive，适配删除/禁用场景） */
-  actionVariant?: ButtonVariant;
+  actionVariant?: ButtonVariant
 }
 
 export function ConfirmDialog({
@@ -65,7 +65,7 @@ export function ConfirmDialog({
   cancelLabel,
   actionVariant = "destructive",
 }: ConfirmDialogProps) {
-  const t = useT();
+  const t = useT()
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -81,5 +81,5 @@ export function ConfirmDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
+  )
 }

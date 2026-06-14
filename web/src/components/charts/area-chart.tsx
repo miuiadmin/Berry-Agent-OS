@@ -1,11 +1,11 @@
 /**
- * AreaChart 面积图组件（SVG 渲染）。
+ * AreaChart 面积图组件（纯 SVG 渲染）。
  *
  * 支持主数据线 + 可选第二数据线（如"完成 vs 失败"双线对比）。
- * 鼠标/触控 pointer 追踪 tooltip，Y 轴刻度自动计算。
+ * 鼠标 / 触控 pointer 追踪 tooltip，Y 轴刻度自动计算，X 轴标签均匀采样。
  *
- * 几何计算（path 构建、坐标映射、Y 轴刻度）委托给 chart-geometry.ts 纯函数模块，
- * 本组件只负责 SVG 渲染和交互，便于单元测试几何逻辑。
+ * 几何计算全部委托给 {@link ./chart-geometry}（path 构建、坐标映射、刻度、采样），
+ * 本组件只负责"声明渲染什么 + 交互"，数学逻辑可独立单测。
  *
  * 用法：
  *   <AreaChart data={[{ label: "1月", value: 10 }, ...]} />
@@ -19,9 +19,20 @@ import {
   type DataPoint,
   type ChartPadding,
   SVG_WIDTH,
-  buildSmoothPath,
+  AREA_CHART_DEFAULT_HEIGHT,
+  AREA_CHART_PADDING,
+  AREA_CHART_Y_TICK_COUNT,
+  AREA_CHART_X_LABEL_MAX,
+  CHART_COLOR_1,
+  CHART_COLOR_DESTRUCTIVE,
+  AREA_STROKE_PRIMARY,
+  AREA_STROKE_SECONDARY,
+  AREA_FILL_OPACITY,
+  safeMaxValue,
+  buildSmoothPaths,
   pointCoordAt,
   buildYTicks,
+  shouldShowXLabel,
 } from "./chart-geometry";
 
 interface AreaChartProps {
@@ -40,45 +51,63 @@ interface AreaChartProps {
 }
 
 /** 单条数据线的 path 对（区域填充 + 描边线） */
-type LinePaths = ReturnType<typeof buildSmoothPath>;
+type LinePaths = ReturnType<typeof buildSmoothPaths>;
 
-/** 单条数据线渲染：区域填充 + 描边线（主/次数据复用） */
-function ChartLine({ paths, color, strokeWidth, opacity }: {
+/** 单条数据线的渲染参数（主 / 次线复用同一组件） */
+interface ChartLineProps {
   paths: LinePaths;
   color: string;
   strokeWidth: number;
   /** 区域填充透明度 */
   opacity: number;
-}) {
+}
+
+/**
+ * 单条数据线：区域填充 + 描边线。
+ * 抽出来让主 / 次线复用同一渲染逻辑（重构前主线 / 次线 JSX 各写一遍）。
+ */
+function ChartLine({ paths, color, strokeWidth, opacity }: ChartLineProps) {
   return (
     <>
       <path d={paths.area} fill={color} opacity={opacity} className="chart-area-fade" />
-      <path d={paths.line} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" className="chart-line-draw" />
+      <path
+        d={paths.line}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        className="chart-line-draw"
+      />
     </>
   );
 }
 
+/** Tooltip 状态（null = 隐藏） */
+interface TooltipState {
+  x: number;
+  y: number;
+  label: string;
+  value: number;
+  secondary?: number;
+}
+
 export function AreaChart({
   data,
-  color = "var(--chart-1)",
+  color = CHART_COLOR_1,
   secondaryData,
-  secondaryColor = "var(--destructive)",
-  height = 160,
+  secondaryColor = CHART_COLOR_DESTRUCTIVE,
+  height = AREA_CHART_DEFAULT_HEIGHT,
   className,
 }: AreaChartProps) {
   const t = useT();
-  /** 当前 tooltip 状态（null = 隐藏） */
-  const [tooltip, setTooltip] = useState<{
-    x: number;
-    y: number;
-    label: string;
-    value: number;
-    secondary?: number;
-  } | null>(null);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
-  /** SVG 内边距 + 画布尺寸（仅依赖 height） */
+  /**
+   * SVG 内边距 + 画布尺寸。
+   * 仅依赖 height，独立 memo 避免数据变化时重算（padding 是常数）。
+   */
   const layout = useMemo(() => {
-    const padding: ChartPadding = { top: 20, right: 12, bottom: 28, left: 36 };
+    const padding: ChartPadding = AREA_CHART_PADDING;
     return {
       padding,
       svgWidth: SVG_WIDTH,
@@ -87,17 +116,25 @@ export function AreaChart({
     };
   }, [height]);
 
-  /** 几何派生：最大值 / 主次 path / Y 轴刻度（依赖 data + layout） */
+  /**
+   * 几何派生：Y 轴最大值 / 主次 path / Y 轴刻度。
+   * 依赖 data + layout，数据变化时重算；maxVal 合并主次两条线取全局最大，
+   * 保证两条线在同一 Y 轴尺度下可比。
+   */
   const geo = useMemo(() => {
     const { padding, chartWidth, chartHeight } = layout;
-    /** 合并所有数据值用于计算 Y 轴最大值（至少 1 避免除零） */
-    const allValues = [...data.map((d) => d.value), ...(secondaryData?.map((d) => d.value) ?? [])];
-    const maxVal = Math.max(...allValues, 1);
+    const allValues = [
+      ...data.map((d) => d.value),
+      ...(secondaryData?.map((d) => d.value) ?? []),
+    ];
+    const maxVal = safeMaxValue(allValues);
     return {
       maxVal,
-      primary: buildSmoothPath(data, maxVal, chartWidth, chartHeight, padding),
-      secondary: secondaryData ? buildSmoothPath(secondaryData, maxVal, chartWidth, chartHeight, padding) : null,
-      yTicks: buildYTicks(maxVal, 4, chartHeight, padding),
+      primary: buildSmoothPaths(data, maxVal, chartWidth, chartHeight, padding),
+      secondary: secondaryData
+        ? buildSmoothPaths(secondaryData, maxVal, chartWidth, chartHeight, padding)
+        : null,
+      yTicks: buildYTicks(maxVal, AREA_CHART_Y_TICK_COUNT, chartHeight, padding),
     };
   }, [data, secondaryData, layout]);
 
@@ -105,8 +142,9 @@ export function AreaChart({
   const { maxVal, primary, secondary, yTicks } = geo;
 
   /**
-   * 指针移动时，计算最近 data point 并更新 tooltip。
-   * 按指针在 SVG 中的相对位置换算到 viewBox 坐标系。
+   * 指针移动 → 最近 data point → tooltip。
+   * 按指针在 SVG 中的相对位置换算到 viewBox 坐标系（SVG 用 preserveAspectRatio 缩放，
+   * rect.width 是实际显示宽度，要做比例换算）。
    */
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<SVGSVGElement>) => {
@@ -115,6 +153,7 @@ export function AreaChart({
       const x = ((e.clientX - rect.left) / rect.width) * svgWidth;
       const step = chartWidth / (data.length - 1);
       const idx = Math.round((x - padding.left) / step);
+      // 指针落在绘图区外（左 padding / 右 padding）→ 隐藏 tooltip
       if (idx < 0 || idx >= data.length) {
         setTooltip(null);
         return;
@@ -130,10 +169,13 @@ export function AreaChart({
     [data, secondaryData, chartWidth, chartHeight, maxVal, padding, svgWidth],
   );
 
-  /* 数据不足 2 点时无法画线 */
+  /* 数据不足 2 点：无法画线，显示空态 */
   if (data.length < 2) {
     return (
-      <div className={cn("flex items-center justify-center text-sm text-muted-foreground", className)} style={{ height }}>
+      <div
+        className={cn("flex items-center justify-center text-sm text-muted-foreground", className)}
+        style={{ height }}
+      >
         {t("common.noData")}
       </div>
     );
@@ -149,44 +191,85 @@ export function AreaChart({
         onPointerMove={handlePointerMove}
         onPointerLeave={() => setTooltip(null)}
       >
-        {/* Y 轴刻度线 + 标签 */}
+        {/* Y 轴刻度线 + 标签（共用 y 坐标，避免网格线和标签错位） */}
         {yTicks.map((tick, i) => (
           <g key={i}>
-            <line x1={padding.left} y1={tick.y} x2={svgWidth - padding.right} y2={tick.y}
-              stroke="currentColor" strokeOpacity={0.08} strokeDasharray="3 3" />
-            <text x={padding.left - 6} y={tick.y + 3} textAnchor="end" fontSize={10} fill="currentColor" opacity={0.4}>
+            <line
+              x1={padding.left}
+              y1={tick.y}
+              x2={svgWidth - padding.right}
+              y2={tick.y}
+              stroke="currentColor"
+              strokeOpacity={0.08}
+              strokeDasharray="3 3"
+            />
+            <text
+              x={padding.left - 6}
+              y={tick.y + 3}
+              textAnchor="end"
+              fontSize={10}
+              fill="currentColor"
+              opacity={0.4}
+            >
               {tick.value}
             </text>
           </g>
         ))}
 
-        {/* X 轴标签（最多 7 个，均匀采样避免拥挤） */}
+        {/* X 轴标签（均匀采样，最多 AREA_CHART_X_LABEL_MAX 个） */}
         {data.map((d, i) => {
-          if (i % Math.ceil(data.length / 7) !== 0 && i !== data.length - 1) return null;
+          if (!shouldShowXLabel(i, data.length, AREA_CHART_X_LABEL_MAX)) return null;
           const x = padding.left + (chartWidth / (data.length - 1)) * i;
           return (
-            <text key={i} x={x} y={height - 6} textAnchor="middle" fontSize={10} fill="currentColor" opacity={0.4}>
+            <text
+              key={i}
+              x={x}
+              y={height - 6}
+              textAnchor="middle"
+              fontSize={10}
+              fill="currentColor"
+              opacity={0.4}
+            >
               {d.label}
             </text>
           );
         })}
 
-        {/* 第二数据线（先画在底层，避免遮挡主线） */}
-        {secondary && <ChartLine paths={secondary} color={secondaryColor} strokeWidth={1.5} opacity={0.1} />}
+        {/* 第二数据线（先画在底层，避免遮挡主线；更细的描边体现主次） */}
+        {secondary && (
+          <ChartLine
+            paths={secondary}
+            color={secondaryColor}
+            strokeWidth={AREA_STROKE_SECONDARY}
+            opacity={AREA_FILL_OPACITY}
+          />
+        )}
         {/* 主数据线 */}
-        <ChartLine paths={primary} color={color} strokeWidth={2} opacity={0.15} />
+        <ChartLine
+          paths={primary}
+          color={color}
+          strokeWidth={AREA_STROKE_PRIMARY}
+          opacity={AREA_FILL_OPACITY}
+        />
 
-        {/* Tooltip 竖线 + 圆点 */}
+        {/* Tooltip 竖线 + 圆点（指针交互时实时跟随） */}
         {tooltip && (
           <>
-            <line x1={tooltip.x} y1={padding.top} x2={tooltip.x} y2={padding.top + chartHeight}
-              stroke="currentColor" strokeOpacity={0.2} strokeDasharray="3 3" />
+            <line
+              x1={tooltip.x}
+              y1={padding.top}
+              x2={tooltip.x}
+              y2={padding.top + chartHeight}
+              stroke="currentColor"
+              strokeOpacity={0.2}
+              strokeDasharray="3 3"
+            />
             <circle cx={tooltip.x} cy={tooltip.y} r={4} fill={color} />
           </>
         )}
       </svg>
 
-      {/* Tooltip 浮层（HTML 覆盖在 SVG 上方，pointer-events:none 不挡交互） */}
+      {/* Tooltip 浮层（HTML 覆盖在 SVG 上方；pointer-events:none 不挡交互） */}
       {tooltip && (
         <div
           className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md animate-fade-in"
@@ -199,7 +282,9 @@ export function AreaChart({
           <div className="font-medium">{tooltip.label}</div>
           <div className="flex items-center gap-2">
             <span style={{ color }}>{tooltip.value}</span>
-            {tooltip.secondary !== undefined && <span style={{ color: secondaryColor }}>{tooltip.secondary}</span>}
+            {tooltip.secondary !== undefined && (
+              <span style={{ color: secondaryColor }}>{tooltip.secondary}</span>
+            )}
           </div>
         </div>
       )}

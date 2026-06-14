@@ -41,6 +41,8 @@ export interface BrainCommandHandlerDeps {
   dispatchExecute?: DispatchExecuteFn;
   /** 16.0 P3：当前活跃 task 的 id 解析器（供 board 信封落板投影）。无则跳过投影。 */
   getCurrentTaskId?: () => string | undefined;
+  /** 16.0 P3-A1：当前会话 id（command 信封落板投影用；无则 'unknown' 兜底） */
+  sessionId?: string;
 }
 
 /**

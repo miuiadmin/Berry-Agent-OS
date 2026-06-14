@@ -12,30 +12,34 @@
  *   <StatCard icon={Bot} label={t("home.agents")} value={`${active}/${total}`} desc={t("home.activeTotal")} />
  *   <StatCard icon={Zap} label={t("home.running")} value={42} loading={isLoading} />
  *   <StatCard icon={Cpu} label="tokens" value={tokens} extra={<Sparkline values={seq} />} />
+ *
+ * 结构性重构：loading 分支用 early return，避免主路径嵌套三元；
+ * stagger 类名生成提到组件顶部显式合成。
  */
 
-import type { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import type { LucideIcon } from "lucide-react"
+import type { ReactNode } from "react"
+import { cn } from "@/lib/utils"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface StatCardProps {
   /** 左侧图标 */
-  icon: LucideIcon;
+  icon: LucideIcon
   /** 卡片标题（小字，图标旁） */
-  label: string;
+  label: string
   /** 主数值（数字或字符串） */
-  value: React.ReactNode;
+  value: ReactNode
   /** 数值下方副文本 */
-  desc?: string;
+  desc?: string
   /** 数值下方额外内容（如 sparkline） */
-  extra?: React.ReactNode;
+  extra?: ReactNode
   /** 加载态（显示骨架屏） */
-  loading?: boolean;
+  loading?: boolean
   /** stagger 动画序号（1-8） */
-  stagger?: number;
+  stagger?: number
   /** 容器额外 className */
-  className?: string;
+  className?: string
 }
 
 export function StatCard({
@@ -57,6 +61,7 @@ export function StatCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {/* loading：骨架屏；否则数值 + 可选副文本 + 可选 extra */}
         {loading ? (
           <Skeleton className="h-7 w-20" />
         ) : (
@@ -68,5 +73,5 @@ export function StatCard({
         )}
       </CardContent>
     </Card>
-  );
+  )
 }
