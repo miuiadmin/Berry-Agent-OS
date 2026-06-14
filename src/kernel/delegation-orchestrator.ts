@@ -1604,6 +1604,15 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // 记录委托 task ID，供 flusher 清理使用
     pending.delegationTaskId = taskId;
 
+    // 16.0 P4-C4：daemon 派发点投影 delegate 信封（fire-and-forget 审计影子）
+    postDelegateEnvelope(taskId, {
+      from: 'brain',
+      to: decision.targetAgent,
+      subTaskGoal: pending.userMessage,
+      sessionId: pending.sessionId,
+      scope: { allowTools: ['*'] },
+    });
+
     const dispatched = await this.daemonBridge.dispatch(taskId, {
       prompt: pending.userMessage,
       systemPrompt: decision.instruction,
@@ -1682,6 +1691,16 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 记录委托 task ID 到 pending，供后续所有清理路径使用
     pending.delegationTaskId = delegationId;
+
+    // 16.0 P4-C4：runtime 派发点投影 delegate 信封（fire-and-forget 审计影子）
+    postDelegateEnvelope(delegationId, {
+      from: 'brain',
+      to: runtime.name,
+      subTaskGoal: pending.userMessage,
+      sessionId: pending.sessionId,
+      scope: { allowTools: ['*'] },
+    });
+
     let textAccumulator = '';
 
     // 对话内联（设计文档/22 期4）：为本次委派创建 BlockCollector——把外部 driver 的
