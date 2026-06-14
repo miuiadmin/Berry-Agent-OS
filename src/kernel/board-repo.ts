@@ -314,6 +314,20 @@ export function createSubBoard(parentTaskId: string, opts: {
   return { status: 'ok', childTaskId };
 }
 
+/**
+ * 列出孤儿板（§6.5.3）：board_status='in_progress' 但 agent_task 已终态（崩溃/超时/取消/完成未收尾）。
+ * 启动时由 board-reconciler 扫描恢复，保证板必达终态（无 in_progress 僵尸板）。
+ */
+export function listOrphanBoards(): string[] {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT id FROM agent_tasks
+     WHERE board_status = 'in_progress'
+       AND status IN ('completed','failed','cancelled','timeout')`,
+  ).all() as Array<{ id: string }>;
+  return rows.map((r) => r.id);
+}
+
 // ─── brain 看板上下文组装（§10.5，P3 brain 看板用）───
 
 /** brain 看板上下文：近 N 条发言 + 板元数据 + 花名册，供 board-observer / board-ask-handler 拼 prompt */

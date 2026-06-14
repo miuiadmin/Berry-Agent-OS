@@ -25,6 +25,7 @@ import { PermissionEngine, TokenIssuer, ApprovalManager } from '../safety/index.
 import { PermissionCoordinator } from './permission-coordinator.js';
 import { SessionManager } from './session-manager.js';
 import { AuditRecorder } from './audit-recorder.js';
+import { reconcileOrphanBoards } from './board-reconciler.js';
 import { TakeoverController } from '../testing/model-takeover.js';
 import { getPluginsDir } from '../utils/paths.js';
 import type { MemoryRuntime } from '../memory/index.js';
@@ -90,6 +91,9 @@ export function initInfrastructure(
   initTracer([createSqliteSink(db)]);
   moduleRegistry.markStatus(db, 'observability', 'running');
   moduleRegistry.markStatus(db, 'memory', 'running');
+  // 16.0 §6.5.3：启动扫板孤儿（board_status=in_progress 但 agent_task 已终态：崩溃/超时/取消）
+  // → 标 failed + 系统兜底 report，保证板必达终态（无 in_progress 僵尸板，对齐 15.0「失败永不丢」）
+  reconcileOrphanBoards();
   moduleRegistry.markStatus(db, 'permissions', 'running');
   moduleRegistry.markStatus(db, 'llm', 'running');
   moduleRegistry.markStatus(db, 'agent-manager', 'starting');
