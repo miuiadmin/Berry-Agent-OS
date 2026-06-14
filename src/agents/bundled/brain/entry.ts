@@ -2,6 +2,7 @@ import { startResidentAgent } from '../../resident-agent.js';
 import { getLogger } from '../../../utils/logger.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
 import { C_LEVEL_OBSERVATION_TYPES, renderObservationContext } from './observation-context.js';
+import { renderBoardContext } from './board-context.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +38,7 @@ import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../.
 import type { SuperiorReviewRequest } from '../../../contracts/superior-review.js';
 import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle.js';
+import { getBoardContext } from '../../../kernel/board-repo.js';
 import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.js';
 import { ObservationRecorder, type RecordObservationInput, type ObservationType } from '../../../kernel/observation-recorder.js';
 import { PromptVersioning } from '../../../kernel/prompt-versioning.js';
@@ -1089,7 +1091,14 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     const payload = msg.payload as TurnCheckpointPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
-    const systemPrompt = buildCheckpointSystemPrompt();
+    // 16.0 P4-B1：brain 看板——checkpoint 注入板上下文（payload.delegationId=board id，§5.1），
+    // 让 brain 纠偏时看到整块板（目标/状态/花名册/近期发言），§4.2 重监督 + §10.1 LLM 下钻。
+    // 冻结快照：本轮 brain 调用内 ctx 不变，保护 prompt cache。
+    const boardCtx = payload.delegationId ? getBoardContext(payload.delegationId) : null;
+    const baseSystemPrompt = buildCheckpointSystemPrompt();
+    const systemPrompt = boardCtx
+      ? `${baseSystemPrompt}\n\n## 任务板上下文（你正在监督的板）\n${renderBoardContext(boardCtx)}`
+      : baseSystemPrompt;
     const userPrompt = buildCheckpointUserPrompt(payload);
 
     const messages: ModelMessage[] = [
