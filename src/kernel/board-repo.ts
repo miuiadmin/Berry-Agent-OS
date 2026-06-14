@@ -266,6 +266,54 @@ export function initBoard(taskId: string, opts: {
   addBoardMember(taskId, opts.leader, 'leader');
 }
 
+/**
+ * 创建子任务板（16.0 §5.6.3 拆子板）。
+ *
+ * leader delegate 带 childTaskId 时调此：校验 spawnDepth → 建子 agent_task → initBoard
+ * （设 parent_task_id + spawnDepth=父+1 + 子板 leader 入花名册）。
+ * spawnDepth 封顶 maxSpawnDepth（默认 3，§10.3）：父已达上限 → 返回 cant_split（降级为自己干/上报，不硬 fail）。
+ *
+ * 本方法只建板容器（子 agent_task + 板元数据）；真正派给 agent 干活由 leader 后续 delegate 触发现有派发链路。
+ *
+ * @returns ok→{childTaskId}；拆不动→{reason}（调用方据此 postReportEnvelope(cant_split)）
+ */
+export function createSubBoard(parentTaskId: string, opts: {
+  goal: string;
+  /** 子板 leader（被指派的 agent） */
+  leader: string;
+  sessionId: string;
+  correlationId: string;
+  /** 派工的 leader agentId */
+  requester: string;
+  taskType?: string;
+}): { status: 'ok'; childTaskId: string } | { status: 'cant_split'; reason: string } {
+  const parent = getBoardMeta(parentTaskId);
+  if (!parent) {
+    return { status: 'cant_split', reason: `父板 ${parentTaskId} 不存在` };
+  }
+  // §10.3 spawnDepth 封顶：父已达 maxSpawnDepth → 不能再拆，降级上报
+  if (parent.spawnDepth >= parent.maxSpawnDepth) {
+    return { status: 'cant_split', reason: `已达最大生成深度 ${parent.maxSpawnDepth}（§10.3），降级为自己干或上报` };
+  }
+  // 建子 agent_task（最小行；parent_task_id + spawn_depth 由 initBoard UPDATE 精确设置）
+  const childTaskId = genId('tsk');
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO agent_tasks (id, session_id, correlation_id, task_type, requester, target_agent, foreground, input_payload, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, '{}', 'created', ?)
+  `).run(childTaskId, opts.sessionId, opts.correlationId, opts.taskType ?? 'subtask', opts.requester, opts.leader, Date.now());
+
+  // initBoard：设板元数据 + parent_task_id + spawnDepth=父+1 + leader 入花名册
+  initBoard(childTaskId, {
+    goal: opts.goal,
+    leader: opts.leader,
+    parentTaskId,
+    spawnDepth: parent.spawnDepth + 1,
+  });
+
+  return { status: 'ok', childTaskId };
+}
+
 // ─── brain 看板上下文组装（§10.5，P3 brain 看板用）───
 
 /** brain 看板上下文：近 N 条发言 + 板元数据 + 花名册，供 board-observer / board-ask-handler 拼 prompt */

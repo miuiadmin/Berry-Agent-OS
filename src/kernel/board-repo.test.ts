@@ -35,6 +35,7 @@ import {
   getBoardMembers,
   isBoardMember,
   transferLeadership,
+  createSubBoard,
   getBoardContext,
 } from './board-repo.js';
 import type { BoardMessage } from '../contracts/board-message.js';
@@ -494,5 +495,47 @@ describe('board-repo 16.0 任务板存储层', () => {
     // 幂等：再 transfer 给已是 leader 的 research 无变化
     expect(() => transferLeadership('task-handoff2', 'research')).not.toThrow();
     expect(getBoardMeta('task-handoff2')!.leader).toBe('research');
+  });
+
+  // ─── createSubBoard（§5.6.3 拆子板 + §10.3 spawnDepth 封顶）───
+
+  it('createSubBoard：拆子板，子板 spawnDepth=父+1 + parent_task_id 链接 + leader 入册', () => {
+    insertAgentTask('task-parent');
+    initBoard('task-parent', { goal: '父板', leader: 'assistant', spawnDepth: 0 });
+    const result = createSubBoard('task-parent', {
+      goal: '子任务', leader: 'code', sessionId: 's1', correlationId: 'c1', requester: 'assistant',
+    });
+    expect(result.status).toBe('ok');
+    const child = getBoardMeta((result as { childTaskId: string }).childTaskId)!;
+    expect(child.parentTaskId).toBe('task-parent');
+    expect(child.spawnDepth).toBe(1); // 父 0 → 子 1
+    expect(child.leader).toBe('code');
+    expect(isBoardMember(child.taskId, 'code')).toBe(true); // 子 leader 入花名册
+  });
+
+  it('createSubBoard：spawnDepth=2 的父 → 子 spawnDepth=3（恰达封顶仍 ok）', () => {
+    insertAgentTask('task-d2');
+    initBoard('task-d2', { goal: '二层板', leader: 'assistant', spawnDepth: 2 });
+    const result = createSubBoard('task-d2', {
+      goal: '三层', leader: 'code', sessionId: 's1', correlationId: 'c1', requester: 'assistant',
+    });
+    expect(result.status).toBe('ok');
+    expect(getBoardMeta((result as { childTaskId: string }).childTaskId)!.spawnDepth).toBe(3);
+  });
+
+  it('createSubBoard：父已达 maxSpawnDepth(3) → cant_split 降级（§10.3 不硬 fail）', () => {
+    insertAgentTask('task-deep');
+    initBoard('task-deep', { goal: '已达封顶', leader: 'assistant', spawnDepth: 3 });
+    const result = createSubBoard('task-deep', {
+      goal: '拆不动', leader: 'code', sessionId: 's1', correlationId: 'c1', requester: 'assistant',
+    });
+    expect(result.status).toBe('cant_split');
+  });
+
+  it('createSubBoard：父板不存在 → cant_split', () => {
+    const result = createSubBoard('task-nonexistent-sub', {
+      goal: 'x', leader: 'code', sessionId: 's1', correlationId: 'c1', requester: 'assistant',
+    });
+    expect(result.status).toBe('cant_split');
   });
 });
