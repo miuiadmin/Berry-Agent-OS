@@ -4,7 +4,6 @@ export { getLogger, createModuleLogger, resolveEffectiveLevel, setRunLogCallback
 export { RunContext, startRun, endRun, getActiveRun } from './artifacts.js';
 export type { RunContextOptions, LargeOutputResult } from './artifacts.js';
 export { ConsoleRenderer, initConsoleRenderer, getConsoleRenderer } from './console.js';
-export { safeStringify, stdoutGuard, installCapture } from './capture.js';
 export { metrics, Counter, Histogram } from './metrics.js';
 export type { Labels } from './metrics.js';
 export { registerCaptureRoutes } from './capture-session.js';
