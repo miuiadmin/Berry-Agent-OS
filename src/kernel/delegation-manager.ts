@@ -19,11 +19,34 @@ import { getLogger } from '../utils/logger.js';
 const logger = getLogger('delegation-manager');
 
 const MAX_RETAINED_OUTPUTS = 10;
-/** 连续同工具调用 ≥ N → 触发 checkpoint（原值 5 对 code agent 太严：
- * inspect_code 查看多个路径是正常的，5 次就 checkpoint 导致任务被误杀） */
+/** 连续同工具失败 ≥ N → checkpoint（失败连续是真异常信号，不需要放宽） */
 const GUARD_CONSECUTIVE_FAILURES = 3;
-const GUARD_SAME_TOOL_REPEAT = 15;
+/** 连续同**写**工具 ≥ N → checkpoint。只读工具（inspect_code/read_file/search/list_directory 等）
+ *  不计数——探索代码库连续调 inspect_code × 20 是正常的，不是死循环。
+ *  只有连续写同一工具（write_file/edit_code/shell × N 无产出）才是真 loop 信号。 */
+const GUARD_SAME_WRITE_TOOL_REPEAT = 8;
 const GUARD_BUDGET_WARNING_RATIO = 0.7;
+
+/**
+ * 只读工具集合——这些工具连续调用是「探索」而非「死循环」：
+ * inspect_code / read_file / list_directory / summarize_changes / search /
+ * cron_list / list_skills / list_plugins / inspect_plugin 等。
+ * delegation-manager 无法 import tool registry（会循环依赖），所以硬编码只读工具名。
+ * 判断逻辑：工具名在 READ_ONLY_TOOLS 里 或 以 read_/list_/inspect_/search/ 开头 → 只读。
+ */
+const READ_ONLY_TOOLS = new Set([
+  'inspect_code', 'read_file', 'list_directory', 'summarize_changes',
+  'search', 'cron_list', 'list_skills', 'list_plugins', 'inspect_plugin',
+  'dry_run_plugin', 'validate_plugin', 'cross_team_summary',
+]);
+
+/** 判断工具是否只读（不产生副作用）——连续调用只读工具不触发 same_tool_repeat guard */
+function isReadOnlyTool(toolName: string | null | undefined): boolean {
+  if (!toolName) return false;
+  if (READ_ONLY_TOOLS.has(toolName)) return true;
+  return toolName.startsWith('read_') || toolName.startsWith('list_') ||
+         toolName.startsWith('inspect_') || toolName.startsWith('search');
+}
 
 function emptyMetrics(): DelegationMetrics {
   return {
@@ -558,7 +581,8 @@ export class DelegationManager {
     if (m.consecutiveToolFailures >= GUARD_CONSECUTIVE_FAILURES) {
       return { type: 'checkpoint', trigger: 'consecutive_tool_failures' };
     }
-    if (m.sameToolRepeatCount >= GUARD_SAME_TOOL_REPEAT) {
+    // same_tool_repeat 只对写工具触发——只读工具连续调用是探索不是 loop（见 isReadOnlyTool）
+    if (!isReadOnlyTool(m.lastToolName) && m.sameToolRepeatCount >= GUARD_SAME_WRITE_TOOL_REPEAT) {
       return { type: 'checkpoint', trigger: 'same_tool_repeat' };
     }
     if (!entry.budgetWarningTriggered && m.tokenUsed.output >= b.maxOutputTokens * GUARD_BUDGET_WARNING_RATIO) {
