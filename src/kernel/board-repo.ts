@@ -209,6 +209,23 @@ export function isBoardMember(taskId: string, agentId: string): boolean {
 }
 
 /**
+ * 治理议会 + 助手 + system：对所有板可见（治理需要 / 顶层 leader / 工具结果来源）。
+ * 这些 agent 不进板花名册但仍可读任何板（§4 治理议会板上一等公民 + §5.4 助手顶层 leader）。
+ */
+const BOARD_GOVERNANCE_VIEWERS = new Set(['brain', 'permission', 'reviewer', 'evolution', 'memory', 'conversation', 'system']);
+
+/**
+ * 断言 caller 是板成员或治理 viewer（§6 可见性收口）。
+ * 非成员且非治理 → 抛错（API/Directory/agent 查询点据此拒绝越权访问，防跨板泄露）。
+ * 供 GET /board API、Directory 能力查询、agent 主动读板等调用方在读路径前置调用。
+ */
+export function assertBoardMemberOrGovernance(taskId: string, callerAgentId: string): void {
+  if (BOARD_GOVERNANCE_VIEWERS.has(callerAgentId)) return;
+  if (isBoardMember(taskId, callerAgentId)) return;
+  throw new Error(`可见性拒绝：agent ${callerAgentId} 非板 ${taskId} 成员（§6 跨板隔离）`);
+}
+
+/**
  * 整任务交接（§12 注：handoff = delegate 携带 transferLeadership:true）。
  *
  * 换板 leader：新 leader（=delegate 的 to）进花名册升 'leader'，旧 leader 降 'member'，板元数据 leader 更新。

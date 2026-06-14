@@ -37,6 +37,7 @@ import {
   transferLeadership,
   createSubBoard,
   resolveLeaderForDelegate,
+  assertBoardMemberOrGovernance,
   getBoardContext,
 } from './board-repo.js';
 import type { BoardMessage } from '../contracts/board-message.js';
@@ -555,5 +556,21 @@ describe('board-repo 16.0 任务板存储层', () => {
 
   it('resolveLeaderForDelegate：父板不存在 → conversation fallback', () => {
     expect(resolveLeaderForDelegate('task-nonexistent-ldr')).toBe('conversation');
+  });
+
+  // ─── assertBoardMemberOrGovernance（§6 可见性收口）───
+
+  it('assertBoardMemberOrGovernance：成员通过 / 治理 viewer 通过 / 非成员抛错', () => {
+    insertAgentTask('task-vis');
+    initBoard('task-vis', { goal: '可见性', leader: 'code' });
+    addBoardMember('task-vis', 'research', 'member');
+    // 成员通过
+    expect(() => assertBoardMemberOrGovernance('task-vis', 'code')).not.toThrow();
+    expect(() => assertBoardMemberOrGovernance('task-vis', 'research')).not.toThrow();
+    // 治理 viewer 通过（不进花名册也能看）
+    expect(() => assertBoardMemberOrGovernance('task-vis', 'brain')).not.toThrow();
+    expect(() => assertBoardMemberOrGovernance('task-vis', 'conversation')).not.toThrow();
+    // 非成员非治理 → 抛错（§6 跨板隔离）
+    expect(() => assertBoardMemberOrGovernance('task-vis', 'evil-agent')).toThrow();
   });
 });
