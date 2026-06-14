@@ -2,7 +2,6 @@ import type { TaskManager, SessionManager, AgentManager, AgentLifecycle, Permiss
 import type { EventBus } from '../contracts/infrastructure.js';
 import type { AppConfig } from '../contracts/config.js';
 import type { IConfigService } from '../config/contract.js';
-import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
 import type { IProviderRegistry } from '../providers/contract.js';
 import type { WritableChannel } from '../contracts/transport.js';
@@ -26,7 +25,6 @@ export interface WebServerDependencies {
   resolvePermissionConfirm?: (requestId: string, approved: boolean, reason?: string) => boolean;
   startTimeMs: number;
   secret: string;
-  schedulerService?: SchedulerService | null;
   notificationService?: INotificationService | null;
   memoryLayerService?: IMemoryLayerService | null;
   workspaceContextService?: IWorkspaceContextService | null;

@@ -906,7 +906,6 @@ export class CoreService {
       runtimeRegistry: this.runtimeRegistry,
       checkpointService: this.checkpointService,
       driftDetector: this.messageRouter!.driftDetector,
-      schedulerService: null,
       notificationService: null,
       memoryLayerService: null,
       workspaceContextService: null,

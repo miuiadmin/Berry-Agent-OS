@@ -11,7 +11,6 @@ import { sanitizeFtsQuery } from '../memory/search.js';
 import { getTimeline, extractTextFromBlocks } from '../memory/message-blocks-repo.js';
 import { getAppHome } from '../utils/paths.js';
 import type { IConfigService } from '../config/contract.js';
-import { registerSchedulerRoutes } from '../scheduler/api-handlers.js';
 import { registerNotificationRoutes } from '../intelligence/notification-api.js';
 import { registerMemoryRoutes } from '../intelligence/memory-api.js';
 import { registerWorkspaceContextRoutes } from '../intelligence/workspace-context-api.js';
@@ -601,9 +600,6 @@ export function createApiRouter(deps: WebServerDependencies) {
     });
     createReadStream(filePath).pipe(res);
   });
-
-  // --- Scheduler routes ---
-  registerSchedulerRoutes(route, () => deps.schedulerService, readBody, json);
 
   // --- Notification routes ---
   registerNotificationRoutes(route, () => deps.notificationService, readBody, json);

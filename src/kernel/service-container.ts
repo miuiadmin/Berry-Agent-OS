@@ -20,7 +20,6 @@ import type { WorkspaceRouter } from './workspace-router.js';
 import type { OrgTreeManager, TrustManager } from '../workspaces/index.js';
 import type { RuntimeRegistry } from './runtime/runtime-registry.js';
 import type { CheckpointService } from './checkpoint-service.js';
-import type { SchedulerService } from '../scheduler/scheduler-service.js';
 import type { DriftDetector } from './drift-detector.js';
 import type { INotificationService, IMemoryLayerService, IWorkspaceContextService, IPluginScopeService, ITemplateService, IAsyncDelegationService, ITeamBuilderService } from '../intelligence/index.js';
 import type { AppConfig } from '../config/schema.js';
@@ -53,7 +52,6 @@ export interface ServiceContainer {
   checkpointService: CheckpointService | null;
   /** 12.0 语义漂移检测器 */
   driftDetector: DriftDetector | null;
-  schedulerService: SchedulerService | null;
   notificationService: INotificationService | null;
   memoryLayerService: IMemoryLayerService | null;
   workspaceContextService: IWorkspaceContextService | null;
