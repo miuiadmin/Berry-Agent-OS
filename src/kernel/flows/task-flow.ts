@@ -198,6 +198,24 @@ export function setupTaskTelemetryHandler(agentIpc: AgentIpc, deps: TaskFlowDeps
             });
           }
         }
+        // 16.0 P3-B 补全：tool_call 结果投影 tool_result 信封（补全审计链——§4.4「tool_result 回发起者+落板」）。
+        // tool_request 在 permission-flow.ts 投影，此处补配对 result，使板上 request/result 完整配对。
+        // fire-and-forget（board-projection.safePost try/catch），不影响现有 telemetry 主路径。
+        try {
+          const { postBoardMessage } = require('../board-repo.js');
+          const { genId } = require('../../utils/id.js');
+          postBoardMessage(payload.taskId, {
+            id: genId('bmsg'),
+            type: 'tool_result',
+            from: 'system',
+            to: 'system',
+            taskId: payload.taskId,
+            ts: Date.now(),
+            callId: payload.taskId + '#' + payload.toolName,
+            output: payload.result ?? (payload.isError ? payload.toolName + ' failed' : ''),
+            ok: !payload.isError,
+          });
+        } catch { /* fire-and-forget */ }
         // tool-trace: tool_call → onToolCall → stream.block tool（durationMs 随 block 透传到前端）
         logger.debug({ taskId: payload.taskId, toolName: payload.toolName, durationMs: payload.durationMs }, 'tool-trace: tool_call → onToolCall → stream.block');
         break;
