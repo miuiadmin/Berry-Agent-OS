@@ -17,6 +17,7 @@
 import type { BoardContext } from '../../../kernel/board-repo.js';
 import type { BoardMessage } from '../../../contracts/board-message.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
+import { routeGovernance } from '../../../kernel/flows/governance-switch.js';
 
 /** 每条发言的字符预算（防单条长输出占满 brain 上下文） */
 const MESSAGE_BUDGET = 200;
@@ -73,6 +74,18 @@ export function renderBoardContext(ctx: BoardContext): string {
     for (const msg of ctx.recentMessages) {
       lines.push(`  [${msg.type}] ${msg.from}→${msg.to}: ${safeSlice(summarizeMessage(msg), MESSAGE_BUDGET)}`);
     }
+    // 4. 治理分类摘要（用 governance-switch.routeGovernance 分类近期消息，让 brain 看到治理视图：
+    //    这个板有多少工具闸/审核/纠偏/求助——而非裸消息类型，辅助 brain 决定治理动作）
+    const govCounts = { gate: 0, review: 0, escalate: 0, command: 0, none: 0 };
+    for (const msg of ctx.recentMessages) {
+      const route = routeGovernance(msg);
+      if (route.kind === 'gate') govCounts.gate++;
+      else if (route.kind === 'review') govCounts.review++;
+      else if (route.kind === 'escalate' || route.kind === 'peer_help') govCounts.escalate++;
+      else if (route.kind === 'command') govCounts.command++;
+      else govCounts.none++;
+    }
+    lines.push(`治理: ${govCounts.gate}工具闸 ${govCounts.review}审核 ${govCounts.command}纠偏 ${govCounts.escalate}求助 ${govCounts.none}发言`);
   }
   return lines.join('\n');
 }
