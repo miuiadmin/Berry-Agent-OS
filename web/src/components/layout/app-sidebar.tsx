@@ -17,7 +17,6 @@ import {
   ScrollText,
   Brain,
   Bell,
-  Clock,
   Shield,
   Target,
 } from "lucide-react";
@@ -37,7 +36,6 @@ const navItems: NavItem[] = [
   { href: "/tasks", labelKey: "sidebar.tasks", icon: ListTodo },
   { href: "/memory", labelKey: "sidebar.memory", icon: Brain },
   { href: "/notifications", labelKey: "sidebar.notifications", icon: Bell },
-  { href: "/scheduler", labelKey: "sidebar.scheduler", icon: Clock },
   { href: "/conversations", labelKey: "sidebar.conversations", icon: MessagesSquare },
   { href: "/usage", labelKey: "sidebar.usage", icon: BarChart3 },
   { href: "/drift", labelKey: "sidebar.drift", icon: Shield },

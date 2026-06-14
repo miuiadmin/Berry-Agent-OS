@@ -32,11 +32,6 @@ const SIMPLE_EVENTS: Record<string, string[][]> = {
   // notification
   "notification.created": [["notifications"], ["notification-count"]],
   "notification.read": [["notifications"], ["notification-count"]],
-  // scheduler（普通事件）
-  "scheduler.job_enqueued": [["scheduler-jobs"], ["scheduler-queue"]],
-  "scheduler.job_completed": [["scheduler-jobs"], ["scheduler-queue"]],
-  "scheduler.chain_step_completed": [["scheduler-jobs"], ["scheduler-queue"]],
-  "scheduler.reminder_fired": [["scheduler-jobs"], ["scheduler-queue"]],
   // MCP
   "mcp.connected": [["mcp-status"]],
   "mcp.disconnected": [["mcp-status"]],

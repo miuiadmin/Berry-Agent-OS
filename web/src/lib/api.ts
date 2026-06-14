@@ -211,23 +211,6 @@ export interface NotificationItem {
 
 export interface NotificationPreferences { workspaceId: string; muted: boolean; channels: string[]; }
 
-export interface SchedulerJob {
-  id: string;
-  name: string;
-  cron: string;
-  prompt: string;
-  enabled: boolean;
-  status: "idle" | "running" | "paused";
-  lastRunAt?: number;
-  nextRunAt?: number;
-  createdAt: number;
-}
-
-export interface SchedulerExecution { id: string; jobId: string; status: "completed" | "failed" | "running"; startedAt: number; finishedAt?: number; error?: string; }
-export interface SchedulerQueue { pending: number; running: number; maxConcurrency: number; }
-export interface WebhookAuditEntry { id: string; token: string; payload: unknown; result: string; createdAt: number; }
-export interface Reminder { id: string; prompt: string; triggerAt: number; status: "pending" | "fired" | "cancelled"; createdAt: number; }
-
 export interface PluginInfo { id: string; name: string; description?: string; version?: string; enabled: boolean; scope: "agent" | "workspace" | "global"; }
 export interface PluginBinding { agentId: string; pluginId: string; enabled: boolean; }
 
@@ -386,32 +369,6 @@ export const notificationsApi = {
   getPreferences: (workspaceId: string) => apiGet<NotificationPreferences>(`/api/notifications/preferences/${encodeURIComponent(workspaceId)}`),
   updatePreferences: (workspaceId: string, data: Partial<NotificationPreferences>) =>
     apiPut<NotificationPreferences>(`/api/notifications/preferences/${encodeURIComponent(workspaceId)}`, data),
-};
-
-// ─── Scheduler API ────────────────────────────────────────────────
-
-export const schedulerApi = {
-  listJobs: () => apiGet<SchedulerJob[]>("/api/scheduler/jobs"),
-  getJob: (id: string) => apiGet<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}`),
-  createJob: (data: { name: string; cron: string; prompt: string; enabled?: boolean }) =>
-    apiPost<SchedulerJob>("/api/scheduler/jobs", data),
-  updateJob: (id: string, data: Partial<Pick<SchedulerJob, "name" | "cron" | "prompt" | "enabled">>) =>
-    apiPut<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}`, data),
-  deleteJob: (id: string) => apiDelete(`/api/scheduler/jobs/${encodeURIComponent(id)}`),
-  pauseJob: (id: string) => apiPost<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}/pause`),
-  resumeJob: (id: string) => apiPost<SchedulerJob>(`/api/scheduler/jobs/${encodeURIComponent(id)}/resume`),
-  triggerJob: (id: string) => apiPost<SchedulerExecution>(`/api/scheduler/jobs/${encodeURIComponent(id)}/trigger`),
-  executions: (id: string, params?: { limit?: number; offset?: number }) =>
-    apiGet<SchedulerExecution[]>(`/api/scheduler/jobs/${encodeURIComponent(id)}/executions${buildSearchParams(params as Record<string, number | undefined>)}`),
-  queue: () => apiGet<SchedulerQueue>("/api/scheduler/queue"),
-  approveChain: (roundId: string, stepId: string) =>
-    apiPost<void>(`/api/scheduler/chain/${encodeURIComponent(roundId)}/approve/${encodeURIComponent(stepId)}`),
-  rejectChain: (roundId: string, stepId: string) =>
-    apiPost<void>(`/api/scheduler/chain/${encodeURIComponent(roundId)}/reject/${encodeURIComponent(stepId)}`),
-  webhookAudit: (params?: { limit?: number }) =>
-    apiGet<WebhookAuditEntry[]>(`/api/scheduler/webhooks/audit${buildSearchParams(params as Record<string, number | undefined>)}`),
-  createReminder: (data: { prompt: string; triggerAt: number }) => apiPost<Reminder>("/api/scheduler/reminders", data),
-  deleteReminder: (id: string) => apiDelete(`/api/scheduler/reminders/${encodeURIComponent(id)}`),
 };
 
 // ─── Plugins API ──────────────────────────────────────────────────
