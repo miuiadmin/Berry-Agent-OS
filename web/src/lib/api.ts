@@ -393,3 +393,31 @@ export const pluginsApi = {
 export function startDebugCapture() { return apiPost<CaptureStartResponse>("/api/debug/capture/start"); }
 export function stopDebugCapture() { return apiPost<CaptureResult>("/api/debug/capture/stop"); }
 export function getDebugCaptureStatus() { return apiGet<CaptureStatus>("/api/debug/capture/status"); }
+
+// ─── Task Board API（16.0 §14 全板视图）────────────────────────────
+
+/** 板元数据（镜像后端 board-repo BoardMetaRow） */
+export interface BoardMetaRow {
+  taskId: string;
+  goal: string | null;
+  boardStatus: string;
+  leader: string | null;
+  parentTaskId: string | null;
+  spawnDepth: number;
+  turnCount: number;
+  maxTurns: number;
+  maxSpawnDepth: number;
+}
+
+/** GET /tasks/:tid/board 响应。thread 为 BoardMessage[]，前端按 loose 渲染（不镜像完整 7-type 判别联合） */
+export interface BoardData {
+  taskId: string;
+  thread: unknown[];
+  meta: BoardMetaRow;
+  members: Array<{ agentId: string; role: string }>;
+}
+
+/** 取任务板完整协作记录（thread + 元数据 + 花名册），供 §14 全板视图渲染 */
+export function getTaskBoard(taskId: string) {
+  return apiGet<BoardData>(`/api/tasks/${encodeURIComponent(taskId)}/board`);
+}

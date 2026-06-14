@@ -25,6 +25,7 @@ const UsagePage = lazy(() => import("./pages/UsagePage"));
 const LogsPage = lazy(() => import("./pages/LogsPage"));
 const DriftPage = lazy(() => import("./pages/DriftPage"));
 const MissionsPage = lazy(() => import("./pages/MissionsPage"));
+const BoardPage = lazy(() => import("./pages/BoardPage"));
 
 /** 全局 Suspense 加载指示器 */
 function LoadingSpinner() {
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/usage" element={<ErrorBoundary><UsagePage /></ErrorBoundary>} />
             <Route path="/drift" element={<ErrorBoundary><DriftPage /></ErrorBoundary>} />
             <Route path="/missions" element={<ErrorBoundary><MissionsPage /></ErrorBoundary>} />
+            <Route path="/board/:tid" element={<ErrorBoundary><BoardPage /></ErrorBoundary>} />
             <Route path="/logs" element={<ErrorBoundary><LogsPage /></ErrorBoundary>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
