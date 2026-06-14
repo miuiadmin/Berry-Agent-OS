@@ -59,7 +59,7 @@ export interface TierTarget {
   model: string;
 }
 
-/** tier 映射表：三档模型档位 → 目标 channel+model */
+/** tier 映射表：三档模型档位 → 目标 channel+model（任意档位可缺省） */
 export interface TierMapping {
   fast?: TierTarget;
   default?: TierTarget;
@@ -102,9 +102,17 @@ export const PROVIDER_KIND_LABEL_KEYS: Record<string, string> = {
   bedrock: "providers.awsBedrock",
 };
 
+/** tier 三档的 key 字面量类型（fast/default/high） */
+export type TierKey = "fast" | "default" | "high";
+
 /** 三档 tier 的展示配置：图标 + 标签 i18n key + 语义色 */
-export const TIER_CONFIG = [
-  { key: "fast" as const, labelKey: "providers.tierFast", icon: Zap, color: "text-success" },
-  { key: "default" as const, labelKey: "providers.tierDefault", icon: Brain, color: "text-info" },
-  { key: "high" as const, labelKey: "providers.tierHigh", icon: Crown, color: "text-warning" },
+export const TIER_CONFIG: ReadonlyArray<{
+  key: TierKey;
+  labelKey: string;
+  icon: typeof Zap;
+  color: string;
+}> = [
+  { key: "fast", labelKey: "providers.tierFast", icon: Zap, color: "text-success" },
+  { key: "default", labelKey: "providers.tierDefault", icon: Brain, color: "text-info" },
+  { key: "high", labelKey: "providers.tierHigh", icon: Crown, color: "text-warning" },
 ];

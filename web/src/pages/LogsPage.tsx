@@ -57,15 +57,19 @@ export default function LogsPage() {
   /** 日志列表容器引用（用于自动滚到底部） */
   const listRef = useRef<HTMLDivElement>(null);
 
-  // 构建查询参数
-  const params = new URLSearchParams();
-  params.set("lines", String(lines));
-  if (level !== "ALL") params.set("level", level.toLowerCase());
-  if (module) params.set("module", module);
-
   const { data, refetch, isFetching } = useQuery({
+    // queryKey 必须包含所有影响查询结果的参数，否则切参数会命中旧缓存
     queryKey: ["logs", level, module, lines],
-    queryFn: (ctx) => apiGet<{ lines: LogLine[]; total: number }>(`/api/logs?${params.toString()}`, ctx.signal),
+    queryFn: (ctx) => {
+      // 构建 URL 参数（与 queryKey 对齐：lines 必传，level/module 按需）
+      const params = new URLSearchParams({ lines: String(lines) });
+      if (level !== "ALL") params.set("level", level.toLowerCase());
+      if (module) params.set("module", module);
+      return apiGet<{ lines: LogLine[]; total: number }>(
+        `/api/logs?${params.toString()}`,
+        ctx.signal,
+      );
+    },
     /** 自动刷新模式下每 5 秒拉一次 */
     refetchInterval: autoRefresh ? 5000 : false,
   });
@@ -87,7 +91,7 @@ export default function LogsPage() {
         <select aria-label={t("logs.logLevel")}
           value={level}
           onChange={(e) => setLevel(e.target.value)}
-          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
+          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         >
           <option value="ALL">{t("logs.all")}</option>
           <option value="DEBUG">{t("logs.debug")}</option>
@@ -96,7 +100,7 @@ export default function LogsPage() {
           <option value="ERROR">{t("logs.error")}</option>
         </select>
 
-        {/* 模块名输入 */}
+        {/* 模块名输入（移动端 16px 防 iOS 聚焦缩放） */}
         <input
           type="text"
           aria-label={t("logs.filterByModule")}
@@ -110,7 +114,7 @@ export default function LogsPage() {
         <select aria-label={t("logs.numberOfLines")}
           value={lines}
           onChange={(e) => setLines(Number(e.target.value))}
-          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-xs min-h-[44px] md:min-h-0"
+          className="h-11 md:h-8 rounded-md border border-input bg-background px-2 text-[16px] md:text-xs min-h-[44px] md:min-h-0"
         >
           <option value={50}>50</option>
           <option value={100}>100</option>

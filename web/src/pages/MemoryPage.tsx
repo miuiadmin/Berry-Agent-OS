@@ -42,20 +42,25 @@ export default function MemoryPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ layer: string; id: string } | null>(null);
 
   // ── 数据查询 ──
+  /** layer → 列表 API 的映射（消除 if/else 链，新增 layer 只加一行） */
+  const listByLayer: Record<Layer, (scope: string) => Promise<MemoryEntry[]>> = {
+    agent: memoryApi.listAgent,
+    workspace: memoryApi.listWorkspace,
+    global: memoryApi.listGlobal,
+  };
+
   const listQuery = useQuery({
     queryKey: ["memory", layer, scopeId],
-    queryFn: () => {
-      if (layer === "agent") return memoryApi.listAgent(scopeId);
-      if (layer === "workspace") return memoryApi.listWorkspace(scopeId);
-      return memoryApi.listGlobal(scopeId);
-    },
+    queryFn: () => listByLayer[layer](scopeId),
     enabled: scopeId.length > 0,
   });
 
+  // 搜索词去空白后再作为 queryKey / 触发条件，避免空白字符引发无意义重复请求
+  const trimmedSearch = searchQuery.trim();
   const recallQuery = useQuery({
-    queryKey: ["memory-recall", searchQuery],
-    queryFn: (ctx) => memoryApi.recall(searchQuery, { limit: 50 }, ctx.signal),
-    enabled: searchQuery.trim().length > 0,
+    queryKey: ["memory-recall", trimmedSearch],
+    queryFn: (ctx) => memoryApi.recall(trimmedSearch, { limit: 50 }, ctx.signal),
+    enabled: trimmedSearch.length > 0,
   });
 
   // ── Mutations ──
@@ -144,7 +149,8 @@ export default function MemoryPage() {
       {/* 记忆列表 */}
       <QueryBoundary query={listQuery} skeleton={<CardListSkeleton count={3} bars={["h-4 w-1/3", "h-3 w-2/3"]} />}>
         {(memories) => {
-          const entries: MemoryEntry[] = searchQuery.trim()
+          // 搜索态用 recall 结果，否则用列表结果
+          const entries: MemoryEntry[] = trimmedSearch
             ? (recallQuery.data?.results ?? [])
             : memories;
 
@@ -152,8 +158,8 @@ export default function MemoryPage() {
             <EmptyState
               icon={Brain}
               title={t("memory.noMemories")}
-              description={searchQuery.trim() ? t("memory.noMemoriesSearch") : t("memory.noMemoriesDesc")}
-              action={!searchQuery.trim() ? {
+              description={trimmedSearch ? t("memory.noMemoriesSearch") : t("memory.noMemoriesDesc")}
+              action={!trimmedSearch ? {
                 label: t("memory.addMemory"),
                 onClick: () => setCreateState((s) => ({ ...s, show: true })),
               } : undefined}

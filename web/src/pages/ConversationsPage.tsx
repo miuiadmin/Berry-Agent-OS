@@ -174,6 +174,20 @@ export default function ConversationsPage() {
 
 // ─── 子组件 ─────────────────────────────────────────────────────────
 
+/** 标题最大长度（首条消息截取后超出加省略号） */
+const TITLE_MAX = 80;
+
+/** 展示标题：有标题用标题，无标题用首条消息截取，都没有用 sessionId */
+function displayTitleFor(conv: ConversationInfo): string {
+  if (conv.title) return conv.title;
+  if (conv.firstMessage) {
+    return conv.firstMessage.length > TITLE_MAX
+      ? conv.firstMessage.slice(0, TITLE_MAX) + "..."
+      : conv.firstMessage;
+  }
+  return conv.sessionId;
+}
+
 /** 单条对话项（行内展示标题 / 消息数 / 时间 + 操作按钮） */
 function ConversationItem({
   conv,
@@ -191,14 +205,6 @@ function ConversationItem({
 }) {
   const t = useT();
   const { formatDateTime: fmtDT } = useDateFormat();
-
-  /** 展示标题：有标题用标题，无标题用首条消息截取，都没有用 sessionId */
-  const displayTitle =
-    conv.title ||
-    (conv.firstMessage
-      ? conv.firstMessage.slice(0, 80) +
-        (conv.firstMessage.length > 80 ? "..." : "")
-      : conv.sessionId);
 
   return (
     <div
@@ -218,7 +224,7 @@ function ConversationItem({
               conv.title ? "font-medium" : "text-muted-foreground italic",
             )}
           >
-            {displayTitle}
+            {displayTitleFor(conv)}
           </p>
           <p className="text-xs text-muted-foreground">
             {t("conversations.messagesCount", {

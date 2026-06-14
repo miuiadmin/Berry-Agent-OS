@@ -58,7 +58,7 @@ const VERDICT_CFG: Record<
   },
 };
 
-/** 内容块色调样式（Tailwind 要求完整类名字面量） */
+/** Diff/内容块色调（Tailwind 要求完整类名字面量） */
 const TONE_STYLE: Record<"destructive" | "success", string> = {
   destructive: "border-destructive/20 bg-destructive/5",
   success: "border-success/20 bg-success/5",
@@ -158,9 +158,9 @@ export function BrainReviewModal({
     });
   }
 
-  /** 是否可显示反馈按钮 */
+  /** 可显示反馈按钮：modify/reject 且未展开输入区 且 未还原 */
   const canFeedback = (verdict === "modify" || verdict === "reject") && !showFeedback && !restored;
-  /** 是否可显示还原按钮 */
+  /** 可显示还原按钮：仅 modify 且有原始草稿 且 未还原 */
   const canRestore = verdict === "modify" && !!originalDraft && !restored;
 
   return (
@@ -175,7 +175,7 @@ export function BrainReviewModal({
           </div>
         </DialogHeader>
 
-        {/* 审核理由 */}
+        {/* 审核理由（Brain 给出的解释） */}
         {reviewReason && (
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">{t("brain.reason")}</p>
@@ -183,7 +183,7 @@ export function BrainReviewModal({
           </div>
         )}
 
-        {/* Diff 对比（仅 modify） */}
+        {/* Diff 对比（仅 modify + 有原始草稿） */}
         {verdict === "modify" && originalDraft && (
           <DiffSection
             originalDraft={originalDraft}
@@ -204,7 +204,7 @@ export function BrainReviewModal({
           </div>
         )}
 
-        {/* 反馈输入区域 */}
+        {/* 反馈输入区域（展开时显示） */}
         {showFeedback && (
           <div className="space-y-2 border-t border-border pt-3">
             <TextAreaField

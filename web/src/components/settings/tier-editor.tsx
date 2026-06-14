@@ -16,29 +16,33 @@ import {
 } from "./providers-types";
 import { SelectField } from "@/components/ui/select-field";
 
+/** 每 tier 当前选中 channel 的索引：tier key → channel id（空串表示未选） */
+type SelectedChannelMap = Record<string, string>;
+
 // ─── useTierEditor Hook ──────────────────────────────────────────
 
-/** tier 编辑器状态（从服务端 tiers 初始化，本地编辑，保存时提交） */
+/**
+ * tier 编辑器状态管理 hook。
+ * 从服务端 tiers 初始化本地编辑状态，保存时由父组件提交 editingTiers。
+ */
 export function useTierEditor(tiers: TierMapping) {
-  /** 本地编辑中的 tier 映射 */
+  /** 本地编辑中的 tier 映射（保存时整体提交，支持"恢复未保存改动"前的回滚） */
   const [editingTiers, setEditingTiers] = useState<TierMapping>({});
   /** 每个 tier 当前选中的 channel（用于联动显示该 channel 下的模型列表） */
-  const [selectedTierChannel, setSelectedTierChannel] = useState<
-    Record<string, string>
-  >({});
+  const [selectedTierChannel, setSelectedTierChannel] = useState<SelectedChannelMap>({});
 
-  /** 从服务端 tiers 重建本地编辑状态 */
+  /** 从服务端 tiers 重建本地编辑状态（初始化 + 保存后服务端数据回流时） */
   function syncFromServer(serverTiers: TierMapping) {
     setEditingTiers(serverTiers);
-    setSelectedTierChannel({
-      fast: serverTiers.fast?.channel ?? "",
-      default: serverTiers.default?.channel ?? "",
-      high: serverTiers.high?.channel ?? "",
-    });
+    // 从 TIER_CONFIG 派生 channel 映射，避免硬编码 fast/default/high 三键字面量
+    setSelectedTierChannel(
+      Object.fromEntries(
+        TIER_CONFIG.map(({ key }) => [key, serverTiers[key]?.channel ?? ""]),
+      ),
+    );
   }
 
   // 首次加载 + 保存后服务端数据变化时，同步本地状态
-  // （原 tiersInitialized 守卫是空操作：if/else 两分支都调 syncFromServer，已折叠）
   useEffect(() => {
     syncFromServer(tiers);
   }, [tiers]);
@@ -68,6 +72,7 @@ export function TierEditor({
     <>
       {TIER_CONFIG.map(({ key, labelKey, icon: Icon, color }) => {
         const channel = selectedTierChannel[key] ?? "";
+        // 已选 channel 下的模型列表（用于联动 model 下拉）
         const selectedCh = channels.find((c) => c.id === channel);
         const models = selectedCh?.models ?? [];
         const target = editingTiers[key];
@@ -82,7 +87,7 @@ export function TierEditor({
               <span className="text-sm font-medium">{t(labelKey)}</span>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {/* channel 选择 */}
+              {/* channel 选择：切换时重置该 tier 的 model（避免指向新 channel 不存在的 model） */}
               <SelectField
                 value={channel}
                 onChange={(e) => {
@@ -101,7 +106,7 @@ export function TierEditor({
                   </option>
                 ))}
               </SelectField>
-              {/* model 选择（依赖已选 channel 的模型列表） */}
+              {/* model 选择：依赖已选 channel 的模型列表，未选 channel 或无模型时禁用 */}
               <SelectField
                 value={target?.model ?? ""}
                 onChange={(e) => {

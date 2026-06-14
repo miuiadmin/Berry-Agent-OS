@@ -3,9 +3,6 @@
  *
  * 为 react-markdown 提供自定义的 HTML 渲染规则，
  * 包括代码块（Shiki 高亮）、表格、引用、链接、列表、标题、图片等。
- *
- * @param isStreaming 是否在流式输出中（跳过代码高亮，减少闪烁）
- * @returns react-markdown 的 Components 映射对象
  */
 
 import { type ComponentPropsWithoutRef } from "react";
@@ -14,15 +11,32 @@ import { ExternalLink } from "lucide-react";
 import { CodeBlock } from "./code-block";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 
+/**
+ * 允许的安全协议白名单（https / mailto / 相对路径 / 锚点）。
+ * 用于过滤 LLM 幻觉注入的 javascript: / data: URI。
+ */
+const SAFE_HREF = /^(https?:|mailto:|\/|#)/i;
+
+/** 从 className 中提取 language-xxx 前缀的语言标识 */
+const LANG_RE = /language-(\w+)/;
+
+/**
+ * 创建 react-markdown 的 Components 映射。
+ *
+ * @param isStreaming 是否在流式输出中（true 时跳过代码高亮，减少闪烁）
+ */
 export function createMarkdownComponents(isStreaming?: boolean): Components {
   return {
-    /** 代码：有语言标识 → CodeBlock 组件，无标识 → 行内 code */
+    /**
+     * 代码：className 含 language-xxx 标识 → CodeBlock 组件；否则行内 code。
+     * 兼容 className 形如 "language-"（语言标识为空）的边界情况 —— 此时 lang=null 仍走 CodeBlock。
+     */
     code({ className, children }) {
-      const match = /language-(\w+)/.exec(className || "");
-      const lang = match ? match[1] : null;
-      if (lang || /language-/.test(className || "")) {
+      const cls = className || "";
+      const match = LANG_RE.exec(cls);
+      if (match || /language-/.test(cls)) {
         return (
-          <CodeBlock lang={lang} isStreaming={isStreaming}>
+          <CodeBlock lang={match ? match[1] : null} isStreaming={isStreaming}>
             {children}
           </CodeBlock>
         );
@@ -90,12 +104,11 @@ export function createMarkdownComponents(isStreaming?: boolean): Components {
     },
 
     /**
-     * 超链接：仅允许安全协议（https / mailto / 相对路径 / 锚点），
-     * 过滤 LLM 幻觉注入的 javascript: / data: URI。
+     * 超链接：仅允许安全协议，过滤 javascript:/data: 等危险 URI。
      * 外部链接新标签页打开 + 显示外链图标。
      */
     a({ href, children, ...props }: ComponentPropsWithoutRef<"a">) {
-      const safeHref = href && /^(https?:|mailto:|\/|#)/i.test(href) ? href : undefined;
+      const safeHref = href && SAFE_HREF.test(href) ? href : undefined;
       const isExternal = safeHref?.startsWith("http");
       return (
         <a

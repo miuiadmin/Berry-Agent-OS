@@ -38,6 +38,13 @@ interface ConfigSectionProps {
   fields: FieldDef[];
 }
 
+/** 输入框 type 字段映射（除 boolean 走 Switch 外的控件类型） */
+const INPUT_TYPE: Record<"text" | "number" | "password", string> = {
+  text: "text",
+  number: "number",
+  password: "password",
+};
+
 /**
  * 通用配置表单区块。
  *
@@ -71,54 +78,42 @@ export function ConfigSection({
           /** 字段级错误 key（格式 section.key） */
           const errorKey = `${section}.${field.key}`;
           const fieldError = errors[errorKey];
+          /** 控件 id（label htmlFor 关联） */
+          const fieldId = `${section}-${field.key}`;
 
           return (
             <div key={field.key} className="grid gap-1.5">
-              <label
-                htmlFor={`${section}-${field.key}`}
-                className="text-xs font-medium text-muted-foreground"
-              >
+              <label htmlFor={fieldId} className="text-xs font-medium text-muted-foreground">
                 {field.label}
               </label>
 
               {field.type === "boolean" ? (
                 <div className="flex items-center gap-2">
                   <Switch
-                    id={`${section}-${field.key}`}
+                    id={fieldId}
                     checked={!!sectionData[field.key]}
                     onCheckedChange={(v) => onUpdate(section, field.key, v)}
                   />
                   <span className="text-sm text-muted-foreground">
-                    {sectionData[field.key]
-                      ? t("common.enabled")
-                      : t("common.disabled")}
+                    {sectionData[field.key] ? t("common.enabled") : t("common.disabled")}
                   </span>
                 </div>
               ) : (
                 <Input
-                  id={`${section}-${field.key}`}
-                  type={
-                    field.type === "password"
-                      ? "password"
-                      : field.type === "number"
-                        ? "number"
-                        : "text"
-                  }
+                  id={fieldId}
+                  type={INPUT_TYPE[field.type]}
                   inputMode={field.type === "number" ? "numeric" : undefined}
                   value={(sectionData[field.key] as string | number) ?? ""}
                   onChange={(e) =>
                     onUpdate(
                       section,
                       field.key,
-                      field.type === "number"
-                        ? Number(e.target.value)
-                        : e.target.value,
+                      field.type === "number" ? Number(e.target.value) : e.target.value,
                     )
                   }
                   className={cn(
                     "h-10 md:h-8",
-                    fieldError &&
-                      "border-destructive focus:border-destructive focus:ring-destructive/30",
+                    fieldError && "border-destructive focus:border-destructive focus:ring-destructive/30",
                   )}
                 />
               )}

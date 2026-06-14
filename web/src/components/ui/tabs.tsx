@@ -1,8 +1,35 @@
+/**
+ * Tabs 标签页组件集（基于 Base UI 原语）。
+ *
+ * 标签页切换：Tabs（根）+ TabsList（标签条）+ TabsTrigger（单个标签）
+ * + TabsContent（对应面板）。
+ *
+ * TabsList variant：
+ * - default  灰底圆角胶囊（默认）
+ * - line     底部细线指示器（无背景）
+ *
+ * 用法：
+ *   <Tabs defaultValue="a">
+ *     <TabsList>
+ *       <TabsTrigger value="a">A</TabsTrigger>
+ *       <TabsTrigger value="b">B</TabsTrigger>
+ *     </TabsList>
+ *     <TabsContent value="a">...</TabsContent>
+ *     <TabsContent value="b">...</TabsContent>
+ *   </Tabs>
+ *
+ * orientation 默认 horizontal（横向），可设 vertical（侧栏式纵向）。
+ */
+
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Tabs 根容器。
+ * @param orientation horizontal（默认）/ vertical
+ */
 function Tabs({
   className,
   orientation = "horizontal",
@@ -21,6 +48,7 @@ function Tabs({
   )
 }
 
+/** 标签条容器样式：default（胶囊灰底）/ line（无背景细线） */
 const tabsListVariants = cva(
   "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
   {
@@ -36,6 +64,7 @@ const tabsListVariants = cva(
   }
 )
 
+/** 标签条：包裹 TabsTrigger */
 function TabsList({
   className,
   variant = "default",
@@ -51,6 +80,7 @@ function TabsList({
   )
 }
 
+/** 单个标签：选中态自动高亮（default 阴影 / line 底部指示线） */
 function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   return (
     <TabsPrimitive.Tab
@@ -67,6 +97,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   )
 }
 
+/** 标签对应的面板（仅 active value 匹配时显示） */
 function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
     <TabsPrimitive.Panel

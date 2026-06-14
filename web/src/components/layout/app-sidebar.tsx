@@ -26,8 +26,11 @@ import { useT } from "@/lib/i18n";
 import { Separator } from "@/components/ui/separator";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
 
-/** 导航项定义（label 用 i18n key） */
-const navItems = [
+/** 导航项类型：href 用于路由匹配，labelKey 用于 i18n，icon 为 Lucide 图标 */
+type NavItem = { href: string; labelKey: string; icon: typeof LayoutDashboard };
+
+/** 导航项定义（顺序即侧边栏顺序，label 用 i18n key） */
+const navItems: NavItem[] = [
   { href: "/", labelKey: "sidebar.home", icon: LayoutDashboard },
   { href: "/chat", labelKey: "sidebar.chat", icon: MessageCircle },
   { href: "/agents", labelKey: "sidebar.agents", icon: Bot },
@@ -43,7 +46,17 @@ const navItems = [
 ];
 
 interface AppSidebarProps {
+  /** 点击任一导航项后回调（移动端用于关闭抽屉） */
   onNavigate?: () => void;
+}
+
+/**
+ * 判定当前导航项是否激活：
+ *   - 根路径精确匹配（避免所有页面都高亮 Home）
+ *   - 其余路径前缀匹配（子路由同样高亮父项）
+ */
+function isActive(href: string, pathname: string): boolean {
+  return href === "/" ? pathname === "/" : pathname.startsWith(href);
 }
 
 export function AppSidebar({ onNavigate }: AppSidebarProps) {
@@ -59,20 +72,21 @@ export function AppSidebar({ onNavigate }: AppSidebarProps) {
       <Separator />
       <nav className="flex-1 space-y-1 p-2">
         {navItems.map((item) => {
-          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const active = isActive(item.href, pathname);
           return (
             <Link
               key={item.href}
               to={item.href}
               onClick={onNavigate}
               className={cn(
-                "group flex items-center gap-2 rounded-lg px-3 py-2.5 md:py-2 text-sm transition-all min-h-[44px] md:min-h-0",
-                isActive
-                  ? "nav-link-active bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent"
+                // 移动端 44px 触控目标；激活态用主题 accent，非激活态仅 hover/focus 染色
+                "group flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm transition-all min-h-[44px] md:min-h-0 md:py-2",
+                active
+                  ? "nav-link-active bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent",
               )}
             >
-              <item.icon className={cn("size-4 transition-transform duration-200", isActive ? "scale-110" : "group-hover:scale-110")} />
+              <item.icon className={cn("size-4 transition-transform duration-200", active ? "scale-110" : "group-hover:scale-110")} />
               {t(item.labelKey)}
             </Link>
           );

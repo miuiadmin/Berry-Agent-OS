@@ -1,7 +1,31 @@
+/**
+ * Card 卡片组件集（基于 Base UI 原语）。
+ *
+ * 卡片 = 内容容器，结构：Header（Title + Description + Action） / Content / Footer。
+ * size 变体：default / sm，sm 变体内边距更紧凑。
+ *
+ * 组合用法：
+ *   <Card>
+ *     <CardHeader>
+ *       <CardTitle>标题</CardTitle>
+ *       <CardDescription>副标题</CardDescription>
+ *       <CardAction><Button>...</Button></CardAction>
+ *     </CardHeader>
+ *     <CardContent>正文</CardContent>
+ *     <CardFooter>底部</CardFooter>
+ *   </Card>
+ *
+ * 使用 --card-spacing CSS 变量统一内边距（4/3 由 size 决定）。
+ */
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Card 根容器。
+ * @param size default（内边距 4）/ sm（内边距 3）
+ */
 function Card({
   className,
   size = "default",
@@ -20,6 +44,7 @@ function Card({
   )
 }
 
+/** 头部容器：栅格布局，含 CardAction 时自动右列对齐 */
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -33,6 +58,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** 卡片标题（font-heading 字体，sm 尺寸随 Card size 缩小） */
 function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -46,6 +72,7 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** 描述文字（muted 灰色） */
 function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -56,6 +83,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** 右上角操作区（自动右对齐 + 跨两行） */
 function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -69,6 +97,7 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** 正文区（仅横向内边距，纵向间距由 Card 根控制） */
 function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -79,6 +108,7 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** 底部区（带顶部分割线 + 浅色背景） */
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div

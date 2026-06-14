@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
 import { Trash2, Pencil, Check, X } from "lucide-react";
 import { useT, useDateFormat } from "@/lib/i18n";
 
+/** 标题/首条消息展示长度上限（超出截断 + 省略号） */
+const TITLE_MAX = 40;
+
 /** 操作图标按钮的共享 className（移动端 44px / 桌面端紧凑） */
 const ACTION_BTN = "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-2 md:min-h-0 md:min-w-0 md:p-1";
 
@@ -24,11 +27,24 @@ interface ConversationItemProps {
   onExitEnd: () => void;
 }
 
-/** 获取会话展示标题（优先 title → firstMessage 截断 → sessionId 截断） */
+/** 字符串截断（超长加省略号），不超过 max 的原样返回 */
+function truncate(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
+/**
+ * 获取会话展示标题（优先 title → firstMessage 截断 → sessionId 截断兜底）。
+ * 三个层级避免会话无标题时显示空白。
+ */
 function displayTitle(conv: ConversationInfo): string {
   if (conv.title) return conv.title;
-  if (conv.firstMessage) return conv.firstMessage.length > 40 ? conv.firstMessage.slice(0, 40) + "…" : conv.firstMessage;
+  if (conv.firstMessage) return truncate(conv.firstMessage, TITLE_MAX);
   return conv.sessionId.slice(0, 16);
+}
+
+/** 编辑态预填值（与 displayTitle 截断规则保持一致，避免编辑后多出截断字符） */
+function editPlaceholder(conv: ConversationInfo): string {
+  return conv.title || conv.firstMessage?.slice(0, TITLE_MAX) || "";
 }
 
 export function ConversationItem({
@@ -40,7 +56,7 @@ export function ConversationItem({
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  /** 进入编辑态时聚焦并全选 */
+  /** 进入编辑态时聚焦并全选（便于整体覆盖原标题） */
   useEffect(() => {
     if (editing && inputRef.current) {
       inputRef.current.focus();
@@ -48,13 +64,13 @@ export function ConversationItem({
     }
   }, [editing]);
 
-  /** 进入编辑态，预填当前标题 */
+  /** 进入编辑态，预填当前标题（无标题时取首条消息截断） */
   const startEditing = () => {
     setEditing(true);
-    setEditValue(conv.title || conv.firstMessage?.slice(0, 40) || "");
+    setEditValue(editPlaceholder(conv));
   };
 
-  /** 提交重命名（空值则取消） */
+  /** 提交重命名（空值则视为取消） */
   const submitRename = () => {
     if (editValue.trim()) onRename(conv.sessionId, editValue.trim());
     setEditing(false);
@@ -71,7 +87,7 @@ export function ConversationItem({
       onAnimationEnd={() => { if (isRemoving) onExitEnd(); }}
     >
       {editing ? (
-        /* 编辑态：输入框 + 保存/取消 */
+        /* 编辑态：输入框 + 保存/取消（阻止事件冒泡，避免误触选中） */
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
           <input ref={inputRef} value={editValue} onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") submitRename(); if (e.key === "Escape") setEditing(false); }}
@@ -93,7 +109,7 @@ export function ConversationItem({
             <span>{t("chat.messages", { count: conv.messageCount })}</span>
             <span>{fmtRelative(conv.lastActive)}</span>
           </div>
-          {/* 操作按钮：移动端始终可见，桌面端 hover 显示 */}
+          {/* 操作按钮：移动端始终可见，桌面端 hover 显示（触屏设备 [@media(hover:none)] 强制显示） */}
           <div className="absolute right-2 top-2.5 flex items-center gap-0.5 opacity-100 transition-all md:opacity-0 md:group-hover:opacity-100 [@media(hover:none)]:opacity-100">
             <button type="button" aria-label={t("chat.renameConversation")}
               onClick={(e) => { e.stopPropagation(); startEditing(); }}

@@ -39,14 +39,11 @@ export default function NotificationsPage() {
     refetchInterval: 30_000,
   });
 
-  // 通知列表查询（按 filter 参数过滤）
+  // 通知列表查询（按 filter 参数过滤：unread=未归档且未读优先展示，archived=已归档，all=全部）
+  const archivedParam = filter === "archived" ? true : filter === "unread" ? false : undefined;
   const listQuery = useQuery({
     queryKey: ["notifications", filter],
-    queryFn: () =>
-      notificationsApi.list({
-        archived: filter === "archived" ? true : filter === "unread" ? false : undefined,
-        limit: 100,
-      }),
+    queryFn: () => notificationsApi.list({ archived: archivedParam, limit: 100 }),
   });
 
   const { readMut, readAllMut, archiveMut } = useNotificationMutations();

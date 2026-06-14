@@ -1,3 +1,15 @@
+/**
+ * EmptyState 空状态组件。
+ *
+ * 列表 / 卡片为空时的统一占位：图标 + 标题 + 描述 + 可选行动按钮。
+ * 常用于"暂无数据"、"无搜索结果"等场景。
+ *
+ * 用法：
+ *   <EmptyState icon={Inbox} title={t("common.empty")} />
+ *   <EmptyState icon={Bot} title="暂无 Agent" description="点击下方按钮创建"
+ *     action={{ label: "创建", onClick: handleCreate }} />
+ */
+
 "use client";
 
 import type { LucideIcon } from "lucide-react";
@@ -5,13 +17,18 @@ import { cn } from "@/lib/utils";
 import { Button } from "./button";
 
 interface EmptyStateProps {
+  /** 顶部图标 */
   icon: LucideIcon;
+  /** 主标题（前景色） */
   title: string;
+  /** 副描述（muted 灰色，可选） */
   description?: string;
+  /** 行动按钮（可选） */
   action?: {
     label: string;
     onClick: () => void;
   };
+  /** 容器额外 className */
   className?: string;
 }
 
@@ -25,6 +42,7 @@ export function EmptyState({ icon: Icon, title, description, action, className }
       {description && (
         <p className="mt-1 max-w-xs text-xs text-muted-foreground">{description}</p>
       )}
+      {/* 行动按钮：移动端 44px 触控目标，桌面端紧凑 */}
       {action && (
         <Button variant="outline" size="default" className="mt-4 min-h-[44px] md:h-9 md:min-h-0" onClick={action.onClick}>
           {action.label}

@@ -1,5 +1,5 @@
 /**
- * 统一的「纯图标」按钮组件。
+ * IconButton 统一的「纯图标」按钮组件。
  *
  * 消除各页面里反复手写的同一段实现：
  *   `<Button variant="ghost" size="icon" className="size-11 md:size-8"

@@ -1,7 +1,18 @@
+/**
+ * Switch 开关组件（基于 Base UI 原语）。
+ *
+ * 二态切换控件，受控用法：`<Switch checked={v} onCheckedChange={setV} />`。
+ * 尺寸变体：default（32×18px）/ sm（24×14px），均带扩展点击区（after 伪元素）。
+ * 选中态使用 brand 品牌色，未选中态使用 input 中性色。
+ */
+
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * @param size default / sm
+ */
 function Switch({
   className,
   size = "default",

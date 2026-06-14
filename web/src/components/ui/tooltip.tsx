@@ -1,9 +1,30 @@
+/**
+ * Tooltip 提示气泡组件集（基于 Base UI 原语）。
+ *
+ * 鼠标 hover / 键盘聚焦时弹出的小气泡，常放图标按钮的解释文案。
+ * 注意：触屏设备无 hover，关键操作不要只依赖 Tooltip 传达。
+ *
+ * 组合用法：
+ *   <TooltipProvider>
+ *     <Tooltip>
+ *       <TooltipTrigger render={<Button />}>...</TooltipTrigger>
+ *       <TooltipContent side="top">提示文案</TooltipContent>
+ *     </Tooltip>
+ *   </TooltipProvider>
+ *
+ * side：top / right / bottom / left（默认 top），align：center / start / end。
+ */
+
 "use client"
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Provider：全局 Tooltip 配置。
+ * @param delay 显示延迟（ms，默认 0 立即显示）
+ */
 function TooltipProvider({
   delay = 0,
   ...props
@@ -17,14 +38,22 @@ function TooltipProvider({
   )
 }
 
+/** Tooltip 根：管理 open/close 状态 */
 function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
   return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
 }
 
+/** 触发器：hover/focus 时打开气泡（render 包裹目标元素） */
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
+/**
+ * 气泡内容（自动 Portal + 定位 + 箭头）。
+ * @param side 顶/右/底/左（默认 top）
+ * @param sideOffset 与触发器的距离（px，默认 4）
+ * @param align 对齐方式（默认 center）
+ */
 function TooltipContent({
   className,
   side = "top",

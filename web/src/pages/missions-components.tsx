@@ -188,13 +188,10 @@ export function MissionDetail({ missionId }: MissionDetailProps) {
     );
   }
 
-  /** 已完成任务数 */
+  // 任务进度统计（done / total / 百分比）
   const doneTasks = plan.tasks.filter((t) => t.status === "done").length;
-  /** 总任务数 */
   const totalTasks = plan.tasks.length;
-  /** 进度百分比（0–100） */
-  const progressPercent =
-    totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+  const progressPercent = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
   return (
     <div className="space-y-4">
@@ -233,7 +230,7 @@ export function MissionDetail({ missionId }: MissionDetailProps) {
         />
       </div>
 
-      {/* Tasks / Squad 切换 */}
+      {/* Tabs value 固定为 "tasks"（当前实现下点击 squad trigger 不会切换视图） */}
       <Tabs value="tasks" onValueChange={() => {}}>
         <TabsList>
           <TabsTrigger value="tasks" className="gap-1">
@@ -359,7 +356,7 @@ export function SquadTab({ missionId }: SquadTabProps) {
   );
 }
 
-/** 信号类型 → emoji（声明式映射表，与 STATUS_VARIANTS 同风格） */
+/** 信号类型 → emoji（未知类型回退到 progress 图标） */
 const SIGNAL_EMOJI: Record<string, string> = {
   progress: "📊",
   blocker: "🚫",
@@ -367,16 +364,11 @@ const SIGNAL_EMOJI: Record<string, string> = {
   question: "❓",
 };
 
-/** 取信号 emoji，未知类型回退到 progress 图标 */
-function signalEmoji(type: string): string {
-  return SIGNAL_EMOJI[type] ?? "📊";
-}
-
 /** 单条信号行（发送者 + 消息） */
 function SignalLine({ sig }: { sig: SquadSignal }) {
   return (
     <div className="flex items-center gap-2 py-1 text-xs">
-      <span>{signalEmoji(sig.type)}</span>
+      <span>{SIGNAL_EMOJI[sig.type] ?? "📊"}</span>
       <span className="font-medium">{sig.from}:</span>
       <span className="text-muted-foreground">{sig.msg}</span>
     </div>
@@ -430,23 +422,18 @@ function SquadCard({ squad, depth }: SquadCardProps) {
   );
 }
 
-/** 成员角色 → emoji（声明式映射表，与 STATUS_VARIANTS 同风格） */
+/** 成员角色 → emoji（未知角色回退到 work 图标） */
 const ROLE_EMOJI: Record<string, string> = {
   lead: "🧠",
   work: "🔧",
   check: "🔍",
 };
 
-/** 取角色 emoji，未知角色回退到 work 图标 */
-function roleEmoji(role: string): string {
-  return ROLE_EMOJI[role] ?? "🔧";
-}
-
 /** 单个 squad 成员行 */
 function SquadMemberLine({ member }: { member: SquadMember }) {
   return (
     <div className="flex items-center gap-2 py-0.5 text-xs">
-      <span>{roleEmoji(member.role)}</span>
+      <span>{ROLE_EMOJI[member.role] ?? "🔧"}</span>
       <span className="font-medium">@{member.agent}</span>
       <span className="text-muted-foreground">[{member.status}]</span>
       <span className="text-muted-foreground">{member.on}</span>

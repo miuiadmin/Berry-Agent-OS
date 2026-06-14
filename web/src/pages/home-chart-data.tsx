@@ -10,6 +10,11 @@ import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 // ─── 纯函数 ────────────────────────────────────────────────────────
 
+/** 一天的毫秒数（聚合回退路径按天分桶用） */
+const ONE_DAY_MS = 86_400_000;
+/** 回退聚合的天数（与服务端 stats 默认窗口对齐） */
+const AGGREGATE_DAYS = 7;
+
 /**
  * 构建 7 天图表数据（完成 / 失败 + sparkline 数组）。
  *
@@ -41,20 +46,20 @@ export function buildChartData(
     };
   }
 
-  // 回退：客户端按天聚合任务列表（最近 7 天）
-  const days = 7;
+  // 回退：客户端按天聚合任务列表（最近 N 天）
   const now = new Date();
   const labels: string[] = [];
   const completedByDay: number[] = [];
   const failedByDay: number[] = [];
 
-  for (let i = days - 1; i >= 0; i--) {
+  for (let i = AGGREGATE_DAYS - 1; i >= 0; i--) {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
     labels.push(formatDate(date, { weekday: "short" }));
 
+    // 当天 0 点为窗口起点，加一天为窗口终点（左闭右开）
     const dateStart = new Date(date.setHours(0, 0, 0, 0)).getTime();
-    const dateEnd = dateStart + 86400000;
+    const dateEnd = dateStart + ONE_DAY_MS;
 
     /** 统计任务在某天的时间窗口内数量（按 finishedAt 优先，否则 createdAt） */
     const countInDay = (tasks: typeof completedTasks) =>

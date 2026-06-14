@@ -46,15 +46,19 @@ export default function UsagePage() {
 
   // ── 图表数据（从 API 响应转换） ──
 
+  /** 日期 → 星期缩写（多处图表共用） */
+  const weekday = (d: { date: string }) =>
+    formatDate(new Date(d.date), { weekday: "short" });
+
   /** 每日总 Token 面积图数据 */
   const dailyChart = data?.daily.map((d) => ({
-    label: formatDate(new Date(d.date), { weekday: "short" }),
+    label: weekday(d),
     value: d.totalTokens,
   })) ?? [];
 
   /** 每日输出 Token 面积图数据 */
   const dailyOutputChart = data?.daily.map((d) => ({
-    label: formatDate(new Date(d.date), { weekday: "short" }),
+    label: weekday(d),
     value: d.outputTokens,
   })) ?? [];
 
@@ -97,74 +101,84 @@ export default function UsagePage() {
       {/* 图表区域 */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* 每日 Token 面积图 */}
-        <Card className="stagger-5">
-          <CardHeader><CardTitle className="text-sm">{t("usage.dailyTokenUsage")}</CardTitle></CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-40 w-full" /> : (
-              <>
-                <AreaChart data={dailyChart} color="var(--chart-1)" secondaryData={dailyOutputChart} secondaryColor="var(--chart-2)" height={180} />
-                <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block size-2 rounded-full" style={{ background: "var(--chart-1)" }} />
-                    {t("usage.total")}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block size-2 rounded-full" style={{ background: "var(--chart-2)" }} />
-                    {t("usage.output")}
-                  </span>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard title={t("usage.dailyTokenUsage")} stagger={5} loading={isLoading}>
+          <AreaChart data={dailyChart} color="var(--chart-1)" secondaryData={dailyOutputChart} secondaryColor="var(--chart-2)" height={180} />
+          <ChartLegend items={[
+            { color: "var(--chart-1)", label: t("usage.total") },
+            { color: "var(--chart-2)", label: t("usage.output") },
+          ]} />
+        </ChartCard>
 
         {/* Agent 维度柱状图 */}
-        <Card className="stagger-6">
-          <CardHeader><CardTitle className="text-sm">{t("usage.byAgent")}</CardTitle></CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-40 w-full" /> : (
-              <BarChart
-                data={(data?.byAgent ?? []).map((a, i) => ({
-                  label: a.agentName, value: a.totalTokens, color: `var(--chart-${(i % 5) + 1})`,
-                }))}
-                formatValue={formatTokens}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard title={t("usage.byAgent")} stagger={6} loading={isLoading}>
+          <BarChart
+            data={(data?.byAgent ?? []).map((a, i) => ({
+              label: a.agentName, value: a.totalTokens, color: `var(--chart-${(i % 5) + 1})`,
+            }))}
+            formatValue={formatTokens}
+          />
+        </ChartCard>
 
         {/* 模型维度柱状图 */}
-        <Card className="stagger-7">
-          <CardHeader><CardTitle className="text-sm">{t("usage.byModel")}</CardTitle></CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-40 w-full" /> : (
-              <BarChart
-                data={(data?.byModel ?? []).map((m, i) => ({
-                  label: m.model, value: m.totalTokens, color: `var(--chart-${(i % 5) + 1})`,
-                }))}
-                formatValue={formatTokens}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard title={t("usage.byModel")} stagger={7} loading={isLoading}>
+          <BarChart
+            data={(data?.byModel ?? []).map((m, i) => ({
+              label: m.model, value: m.totalTokens, color: `var(--chart-${(i % 5) + 1})`,
+            }))}
+            formatValue={formatTokens}
+          />
+        </ChartCard>
 
         {/* 费用明细柱状图 */}
-        <Card className="stagger-8">
-          <CardHeader><CardTitle className="text-sm">{t("usage.costBreakdown")}</CardTitle></CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-40 w-full" /> : (
-              <BarChart
-                data={(data?.daily ?? []).map((d) => ({
-                  label: formatDate(new Date(d.date), { weekday: "short", month: "short", day: "numeric" }),
-                  value: d.costUsd,
-                  color: "var(--chart-3)",
-                }))}
-                formatValue={(v) => `$${v.toFixed(4)}`}
-              />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard title={t("usage.costBreakdown")} stagger={8} loading={isLoading}>
+          <BarChart
+            data={(data?.daily ?? []).map((d) => ({
+              label: formatDate(new Date(d.date), { weekday: "short", month: "short", day: "numeric" }),
+              value: d.costUsd,
+              color: "var(--chart-3)",
+            }))}
+            formatValue={(v) => `$${v.toFixed(4)}`}
+          />
+        </ChartCard>
       </div>
+    </div>
+  );
+}
+
+// ─── 本页专用小组件 ─────────────────────────────────────────────────
+
+/** 图表卡片：标题 + 加载骨架 + 图表内容（4 张图表共用骨架布局） */
+function ChartCard({
+  title,
+  stagger,
+  loading,
+  children,
+}: {
+  title: string;
+  stagger: number;
+  loading: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className={`stagger-${stagger}`}>
+      <CardHeader><CardTitle className="text-sm">{title}</CardTitle></CardHeader>
+      <CardContent>
+        {loading ? <Skeleton className="h-40 w-full" /> : children}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** 图表图例（色块 + 文案列表） */
+function ChartLegend({ items }: { items: Array<{ color: string; label: string }> }) {
+  return (
+    <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+      {items.map((it) => (
+        <span key={it.label} className="flex items-center gap-1">
+          <span className="inline-block size-2 rounded-full" style={{ background: it.color }} />
+          {it.label}
+        </span>
+      ))}
     </div>
   );
 }

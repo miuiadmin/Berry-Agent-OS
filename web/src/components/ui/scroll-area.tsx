@@ -1,3 +1,17 @@
+/**
+ * ScrollArea 滚动区域组件（基于 Base UI 原语）。
+ *
+ * 自定义滚动条样式的滚动容器：保留原生滚动行为，仅美化滚动条外观。
+ * 适用于长列表 / 聊天窗口 / 侧栏等需要细滚动条的场景。
+ *
+ * 用法：
+ *   <ScrollArea className="h-72">
+ *     <长内容 />
+ *   </ScrollArea>
+ *
+ * 自动添加纵向 + 横向 ScrollBar；Viewport 100% 撑满 Root。
+ */
+
 "use client"
 
 import * as React from "react"
@@ -5,6 +19,10 @@ import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * 滚动容器根。
+ * 默认 relative，宽度高度由调用方 className 控制。
+ */
 function ScrollArea({
   className,
   children,
@@ -28,6 +46,10 @@ function ScrollArea({
   )
 }
 
+/**
+ * 自定义滚动条（横向 / 纵向）。
+ * @param orientation vertical（默认）/ horizontal
+ */
 function ScrollBar({
   className,
   orientation = "vertical",

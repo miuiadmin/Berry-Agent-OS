@@ -5,7 +5,7 @@
  * 支持搜索过滤 + 手动输入 model ID + 跳转 Provider 设置。
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
 import { useT } from "@/lib/i18n";
@@ -13,6 +13,19 @@ import { useModelConfig } from "./use-model-config";
 
 /** 面板内搜索/手动输入的统一样式（移动端 16px 防 iOS 缩放） */
 const INPUT_BASE = "rounded-md border border-input bg-muted/50 text-[16px] outline-none focus:border-ring focus:ring-1 focus:ring-ring/30 md:py-1.5 md:text-xs";
+
+/** 模型对象最小契约（FlatModel 满足此结构；用最小接口避免耦合具体类型） */
+interface ModelOption {
+  id: string;
+  name: string;
+  channelId: string;
+}
+
+/** 不区分大小写的子串匹配（用于按 name/id 过滤模型） */
+function matches<T extends ModelOption>(model: T, query: string): boolean {
+  const q = query.toLowerCase();
+  return model.name.toLowerCase().includes(q) || model.id.toLowerCase().includes(q);
+}
 
 export function ModelSelector() {
   const { currentModel, channels, allModels, switchModel } = useModelConfig();
@@ -24,26 +37,29 @@ export function ModelSelector() {
   /** 搜索过滤词 */
   const [filter, setFilter] = useState("");
 
+  /** 打开面板时重置输入态，避免上次残留 */
   const handleOpen = () => { setEditModel(""); setFilter(""); setOpen(true); };
-  const handleSwitch = (model: string, channelId?: string) => { switchModel(model, channelId); setOpen(false); };
+  /** 选择模型切换并关闭面板 */
+  const handleSwitch = (model: string, channelId?: string) => {
+    switchModel(model, channelId);
+    setOpen(false);
+  };
 
-  /** 手动输入 model ID 并切换 */
+  /** 手动输入 model ID 并切换（空值忽略） */
   const handleManualSwitch = () => {
     const trimmed = editModel.trim();
     if (trimmed) { switchModel(trimmed); setOpen(false); }
   };
 
   /** 根据搜索词过滤模型（匹配 name 或 id） */
-  const filtered = filter
-    ? allModels.filter((m) =>
-        m.name.toLowerCase().includes(filter.toLowerCase()) ||
-        m.id.toLowerCase().includes(filter.toLowerCase()),
-      )
-    : allModels;
+  const filtered = useMemo(
+    () => (filter ? allModels.filter((m) => matches(m, filter)) : allModels),
+    [allModels, filter],
+  );
 
   return (
     <div className="relative">
-      {/* 触发按钮 */}
+      {/* 触发按钮（移动端 44px 触控目标） */}
       <button type="button" onClick={handleOpen}
         className="flex min-h-[44px] items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:min-h-0">
         <span className="max-w-[100px] truncate text-[11px] md:max-w-[140px] md:text-xs">{currentModel}</span>
@@ -52,7 +68,7 @@ export function ModelSelector() {
 
       {open && (
         <>
-          {/* 透明遮罩 */}
+          {/* 透明遮罩（点击关闭面板） */}
           <div className="fixed inset-0 z-50" onClick={() => setOpen(false)} aria-hidden="true" />
 
           {/* 面板：移动端底部 sheet / 桌面端下拉浮层 */}
@@ -62,7 +78,7 @@ export function ModelSelector() {
               <div className="h-1 w-8 rounded-full bg-muted-foreground/30" />
             </div>
 
-            {/* 标题 */}
+            {/* 标题 + 当前模型 */}
             <div className="shrink-0 px-4 pb-1 pt-2 md:px-3 md:pt-3">
               <div className="text-sm font-medium">{t("chat.switchModel")}</div>
               <div className="text-[11px] text-muted-foreground">{t("chat.currentModel")}: {currentModel}</div>
@@ -91,6 +107,7 @@ export function ModelSelector() {
                           <div className="truncate">{m.name}</div>
                           <div className="truncate font-mono text-[11px] text-muted-foreground">{m.id}</div>
                         </div>
+                        {/* 当前选中模型标识 */}
                         {m.id === currentModel && <span className="ml-2 size-1.5 shrink-0 rounded-full bg-brand" />}
                       </button>
                     ))}

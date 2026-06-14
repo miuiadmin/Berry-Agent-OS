@@ -145,17 +145,22 @@ export function ChannelFormDialog({
     e.preventDefault();
     onSubmit({
       id: form.id.trim(),
+      // 未填展示名时回落到 ID（避免空名）
       name: form.name.trim() || form.id.trim(),
       kind: form.kind,
+      // 空字符串视为未提供（baseUrl 留空 = 用 provider 默认）
       baseUrl: form.baseUrl.trim() || undefined,
+      // 编辑时留空 = 服务端保持原 key 不变
       apiKey: form.apiKey.trim() || undefined,
       enabled: form.enabled,
     });
   }
 
-  // ── 校验：add 需填 kind/id/apiKey，edit 需 kind/id ──
-  const canSubmit =
-    !isPending && !!form.kind && !!form.id && (!(!isEdit && !form.apiKey));
+  // ── 校验：必须有 kind/id；新增模式还必须有 apiKey ──
+  const hasRequiredKeys = !!form.kind && !!form.id;
+  // add 模式强制要 apiKey；edit 模式留空表示保持不变，可省略
+  const apiKeyOk = isEdit || !!form.apiKey;
+  const canSubmit = !isPending && hasRequiredKeys && apiKeyOk;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

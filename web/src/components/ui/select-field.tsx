@@ -1,8 +1,12 @@
 /**
- * 统一原生 select 组件。
+ * SelectField 统一原生 select 组件。
  *
- * 封装移动端友好的 <select>：iOS 防缩放（text-[16px]）、44px 触控目标、
- * 自定义右侧箭头、桌面端紧凑模式。
+ * 封装移动端友好的 `<select>`：
+ * - iOS 防缩放（text-[16px]）→ 桌面端 md:text-sm
+ * - 44px 触控目标 → 桌面端紧凑
+ * - 自定义右侧箭头（appearance-none + ChevronDown 覆盖）
+ *
+ * 透传原生 select 属性，受控用法与原生一致。
  *
  * 用法：
  *   <SelectField value={v} onChange={e => setV(e.target.value)}>
@@ -37,6 +41,7 @@ export function SelectField({ className, children, ...props }: SelectFieldProps)
       >
         {children}
       </select>
+      {/* 右侧箭头：pointer-events-none 不挡点击 */}
       <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
     </div>
   );

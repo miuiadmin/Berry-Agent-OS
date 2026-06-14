@@ -182,15 +182,15 @@ export function ProvidersTab() {
         editingChannel={editingChannel}
         onSubmit={(data: ChannelFormData) => {
           if (channelDialog === "edit" && editingChannel) {
-            // 编辑：只提交变更字段（apiKey 留空 = 服务端保持不变）
-            const updates: Record<string, unknown> = {};
+            // 编辑：仅提交变更字段（apiKey/baseUrl 留空时 undefined = 服务端不改）
+            // name 也只在有值时提交，避免空串覆盖
+            const updates: Record<string, unknown> = { enabled: data.enabled };
             if (data.name) updates.name = data.name;
             if (data.baseUrl) updates.baseUrl = data.baseUrl;
             if (data.apiKey) updates.apiKey = data.apiKey;
-            updates.enabled = data.enabled;
             updateChannel(editingChannel.id, updates);
           } else {
-            // 新增
+            // 新增：直接透传完整表单数据
             createChannel(data);
           }
         }}
@@ -201,7 +201,7 @@ export function ProvidersTab() {
 
   // ── 本地辅助：打开弹窗 ──
 
-  /** 打开新增弹窗 */
+  /** 打开新增弹窗（清空残留的 editingChannel） */
   function openAdd() {
     setEditingChannel(null);
     setChannelDialog("add");

@@ -1,13 +1,13 @@
 /**
- * 聊天主窗口。
+ * 聊天主窗口（编排层）。
  *
- * 职责（编排层）：
+ * 职责：
  *   - 历史恢复（sessionId 变化时拉取；无 session 时恢复最近对话）
  *   - 发送 / 重试 / 编辑消息
  *   - 文件拖拽上传（委派给 useFileDrop hook）
  *   - 渲染消息列表 + 输入框 + 弹窗（委派 / 权限确认）
  *
- * 渲染子组件定义在 chat-window-parts.tsx。
+ * 渲染子组件定义在 chat-window-parts.tsx；本文件只保留编排逻辑。
  */
 
 import { useCallback, useEffect, useState, useRef } from "react";
@@ -56,7 +56,7 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const t = useT();
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  /** 已加载历史的 sessionId（避免重复拉取） */
+  /** 已加载历史的 sessionId（避免 sessionId 抖动时重复拉取） */
   const loadedSessionRef = useRef<string | null>(null);
 
   // ── 文件拖拽上传（独立 hook，降低主组件复杂度） ──
@@ -86,10 +86,13 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   // ── 历史恢复 ──
 
   /**
-   * 统一的历史恢复入口。
+   * 统一的历史恢复入口（合并原先的 loadHistory 与 sharedSessionRestore 两条路径，
+   * 消除并发触发竞态）。
    *
-   * 合并了原先的 loadHistory 和 sharedSessionRestore 两条路径，
-   * 消除了两条路径并发触发时的竞态。
+   * 三种早退条件：
+   *   1) 无 sessionId
+   *   2) 已加载过该 sessionId（loadedSessionRef 防重）
+   *   3) store 里已有消息（说明已由别处恢复，标记 loaded 后跳过）
    */
   const loadHistory = useCallback(async () => {
     if (!sessionId || loadedSessionRef.current === sessionId) return;

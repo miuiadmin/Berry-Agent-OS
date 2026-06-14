@@ -668,6 +668,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       db: getDb(),
       // execute 真实委派：复用 dispatchModuleTask + targetAgentOverride 定向派发到 Brain 指定的 Agent
       dispatchExecute: (input) => this.dispatchModuleTask(input),
+      // 16.0 P3：当前活跃 task 的 id（供 board 信封落板投影）。取最近活跃 pending 的 delegationTaskId。
+      getCurrentTaskId: () => {
+        for (const pending of this.sessionManager['pendingRequests'].values() as IterableIterator<PendingRequest>) {
+          return pending.delegationTaskId ?? pending.taskId;
+        }
+        return undefined;
+      },
     });
     this.correctionFlow.setup(reviewer.ipc);
     this.superiorReviewFlow?.setup(reviewer.ipc);

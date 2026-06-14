@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { queries } from "@/lib/api";
 import { useWsStore } from "@/lib/stores/ws-store";
@@ -175,9 +176,9 @@ export default function HomePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm">{t("home.recentActivity")}</CardTitle>
-            <a href="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/tasks" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
               {t("home.viewAll")}
-            </a>
+            </Link>
           </CardHeader>
           <CardContent>
             {events.length === 0 ? (

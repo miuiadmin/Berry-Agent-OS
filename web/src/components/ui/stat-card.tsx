@@ -1,12 +1,17 @@
 /**
- * 统计指标卡片组件。
+ * StatCard 统计指标卡片组件。
  *
  * 统一 HomePage / UsagePage / DriftPage / SchedulerPage 重复的
  * "图标 + 标签 + 大数字 + 副文本" 统计卡片模式。
  *
+ * - loading 态自动显示骨架屏
+ * - stagger 序号触发 CSS 入场动画（stagger-1 ~ stagger-8 依次延迟）
+ * - extra 插槽可放 sparkline 等附加可视化
+ *
  * 用法：
  *   <StatCard icon={Bot} label={t("home.agents")} value={`${active}/${total}`} desc={t("home.activeTotal")} />
  *   <StatCard icon={Zap} label={t("home.running")} value={42} loading={isLoading} />
+ *   <StatCard icon={Cpu} label="tokens" value={tokens} extra={<Sparkline values={seq} />} />
  */
 
 import type { LucideIcon } from "lucide-react";

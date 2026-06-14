@@ -59,20 +59,14 @@ export function AgentDetailView({
     const record = (event: string) =>
       setEvents((prev) => [...prev.slice(-9), { event, ts: Date.now() }]);
 
-    const unsubs = [
-      subscribe("agent.enabled", (payload) => {
+    // 三种事件统一处理：payload 带 name，匹配当前 agent 才记录
+    const events = ["agent.enabled", "agent.disabled", "agent.crashed"] as const;
+    const unsubs = events.map((evt) =>
+      subscribe(evt, (payload) => {
         const p = payload as { name?: string };
-        if (p.name === agent.name) record("enabled");
+        if (p.name === agent.name) record(evt.split(".")[1]);
       }),
-      subscribe("agent.disabled", (payload) => {
-        const p = payload as { name?: string };
-        if (p.name === agent.name) record("disabled");
-      }),
-      subscribe("agent.crashed", (payload) => {
-        const p = payload as { name?: string };
-        if (p.name === agent.name) record("crashed");
-      }),
-    ];
+    );
     return () => unsubs.forEach((fn) => fn());
   }, [agent.name, subscribe]);
 

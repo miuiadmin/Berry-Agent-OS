@@ -6,7 +6,7 @@
  *   - 展示问题文本
  *   - 可点击的选项按钮（§2.1 AgentPort askUser 原语）
  *   - 5 分钟超时自动回复默认（§5.3.5）
- *   - 自由文本输入（选择 "让我自己说"）
+ *   - 自由文本输入（选择"让我自己说"）
  *
  * 触发：WS ask_user 事件 → ChatWindow 展示此组件
  */
@@ -51,21 +51,25 @@ function fmtTime(seconds: number): string {
  * 交互式 AskUser 对话框。
  *
  * 展示 Agent 的问题 + 选项按钮，用户点击后通过 API 回复。
- * 修复：timer 使用 ref 追踪 responded 状态，避免闭包过期导致超时重复提交。
+ *
+ * 防重复提交：timer 用 ref 追踪 responded 状态，避免闭包过期导致超时重复提交；
+ * handleRespond 自身用 submitting + respondedRef 双重判断。
  */
 export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
   const t = useT();
   const [customAnswer, setCustomAnswer] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [responded, setResponded] = useState(false);
+  /** 初始倒计时秒数 */
   const [remaining, setRemaining] = useState(Math.floor(ASK_USER_TIMEOUT_MS / 1000));
 
-  /** ref 追踪 responded 状态，让 timer 回调读到最新值 */
+  /** ref 追踪 responded 状态，让 timer 回调读到最新值（避免闭包过期） */
   const respondedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /** 提交用户回复 */
+  /** 提交用户回复（选项 or 自定义文本）。重复调用被忽略。 */
   const handleRespond = useCallback(async (answer: string) => {
+    // 双重判断：组件 submitting 态 + ref 防闭包过期
     if (submitting || respondedRef.current) return;
     setSubmitting(true);
     try {
@@ -86,13 +90,16 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
     }
   }, [submitting, payload, t, onResponded]);
 
-  /** 超时倒计时（§5.3.5: 5 分钟超时，通过 ref 避免闭包过期） */
+  /**
+   * 超时倒计时（§5.3.5: 5 分钟超时）。
+   * 通过 respondedRef 检查避免超时后重复提交（与用户主动回复竞态时的兜底）。
+   */
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setRemaining((prev) => {
         if (prev <= 1) {
           if (timerRef.current) clearInterval(timerRef.current);
-          /** 超时自动选择第一个选项（ref 检查防止重复提交） */
+          /** 超时自动选第一个选项（无选项时回复"无响应"文案） */
           if (!respondedRef.current) {
             handleRespond(payload.options?.[0] ?? t("askUser.noResponse"));
           }
@@ -104,13 +111,13 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [handleRespond, payload.options, t]);
 
-  /** 提交自由文本 */
+  /** 提交自由文本（空值忽略） */
   const submitCustom = () => {
     const trimmed = customAnswer.trim();
     if (trimmed) handleRespond(trimmed);
   };
 
-  /** 已回复状态 */
+  /** 已回复状态：展示简洁成功提示 */
   if (responded) {
     return (
       <div className="mx-3 my-2 flex items-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-2">
@@ -134,7 +141,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
         </div>
       </div>
 
-      {/* 选项按钮 */}
+      {/* 选项按钮（移动端 44px 触控目标） */}
       {payload.options && payload.options.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 py-2">
           {payload.options.map((option, idx) => (
@@ -147,7 +154,7 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
         </div>
       )}
 
-      {/* 自由文本输入 */}
+      {/* 自由文本输入（Enter 提交） */}
       <div className="flex items-center gap-2 border-t border-border px-3 py-2">
         <Input
           type="text"

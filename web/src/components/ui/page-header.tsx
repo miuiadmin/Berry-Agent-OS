@@ -1,5 +1,5 @@
 /**
- * 页面标题头组件。
+ * PageHeader 页面标题头组件。
  *
  * 统一 10+ 页面重复的 "h1 + 副标题 + 操作按钮" 布局模式。
  * 支持左侧 icon 标记（可选）和右侧 action 插槽。
@@ -21,7 +21,7 @@ interface PageHeaderProps {
   subtitle?: string;
   /** 标题旁图标（可选） */
   icon?: LucideIcon;
-  /** 图标额外样式 */
+  /** 图标额外样式（如 `text-brand`） */
   iconClass?: string;
   /** 标题右侧额外内容（如 Badge 计数） */
   titleExtra?: React.ReactNode;

@@ -4,7 +4,7 @@
  * - FileUploadButton：点击触发文件选择 + 上传到服务端
  * - AttachmentPreview：附件缩略图列表（可移除）
  * - DragOverlay：拖拽上传时的全屏遮罩
- * - uploadFile：上传 API 封装（支持 AbortController 取消）
+ * - toAttachment：UploadResponse → Attachment 映射（file-upload / use-file-drop 共用）
  */
 
 import { useState, useRef, useCallback } from "react";
@@ -13,6 +13,13 @@ import { uploadFile, type UploadResponse } from "@/lib/api";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+
+/** 文件上传接受的 MIME / 扩展名 */
+const ACCEPTED_TYPES = "image/*,text/*,application/pdf,.md,.json,.csv,.xml,.html";
+
+/** 文件大小单位阈值（用于人类可读展示） */
+const KB = 1024;
+const MB = 1024 * 1024;
 
 export interface Attachment {
   fileId: string;
@@ -27,18 +34,13 @@ export function toAttachment(r: UploadResponse): Attachment {
   return { fileId: r.fileId, filename: r.filename, mimeType: r.mimeType, size: r.size, url: r.url };
 }
 
-interface FileUploadProps {
-  attachments: Attachment[];
-  onAttach: (attachment: Attachment) => void;
-  onRemove: (fileId: string) => void;
-  disabled?: boolean;
-}
-
+/** 文件上传按钮（点击触发隐藏 input 的文件选择） */
 export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachment) => void; disabled?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const t = useT();
 
+  /** 串行上传所有选中文件（避免并发打满连接） */
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     setUploading(true);
@@ -52,6 +54,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
       toast.error(msg);
     } finally {
       setUploading(false);
+      // 清空 input.value 让相同文件可再次选择（否则 onChange 不触发）
       if (inputRef.current) inputRef.current.value = "";
     }
   }, [onAttach, t]);
@@ -66,7 +69,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         className={cn(
           "shrink-0 rounded-lg p-2.5 md:p-2 text-muted-foreground transition-colors",
           "hover:bg-accent hover:text-foreground active:bg-accent",
-          "disabled:opacity-50 disabled:cursor-not-allowed"
+          "disabled:opacity-50 disabled:cursor-not-allowed",
         )}
       >
         {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
@@ -75,7 +78,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
         ref={inputRef}
         type="file"
         multiple
-        accept="image/*,text/*,application/pdf,.md,.json,.csv,.xml,.html"
+        accept={ACCEPTED_TYPES}
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />
@@ -83,6 +86,7 @@ export function FileUploadButton({ onAttach, disabled }: { onAttach: (a: Attachm
   );
 }
 
+/** 附件预览列表（图片 / 文件图标 + 文件名 + 大小 + 移除按钮） */
 export function AttachmentPreview({ attachments, onRemove }: { attachments: Attachment[]; onRemove: (id: string) => void }) {
   const t = useT();
   if (attachments.length === 0) return null;
@@ -94,6 +98,7 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
           key={a.fileId}
           className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs animate-slide-down"
         >
+          {/* 图标：图片用 ImageIcon，其他用 FileText */}
           {a.mimeType.startsWith("image/") ? (
             <ImageIcon className="size-3 text-muted-foreground" />
           ) : (
@@ -104,8 +109,7 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
           <button type="button"
             onClick={() => onRemove(a.fileId)}
             aria-label={t("fileUpload.remove", { filename: a.filename })}
-            className="ml-0.5 rounded p-1.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 md:p-0.5 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"
-          >
+            className="ml-0.5 flex min-h-[44px] min-w-[44px] items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:text-destructive md:min-h-0 md:min-w-0 md:p-0.5">
             <X className="size-3" />
           </button>
         </div>
@@ -114,11 +118,12 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
   );
 }
 
+/** 拖拽上传时的全屏遮罩（提示用户可释放） */
 export function DragOverlay({ visible }: { visible: boolean }) {
   const t = useT();
   if (!visible) return null;
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm border-2 border-dashed border-ring rounded-lg">
+    <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-ring bg-background/80 backdrop-blur-sm">
       <div className="text-center">
         <Paperclip className="mx-auto size-8 text-muted-foreground" />
         <p className="mt-2 text-sm font-medium">{t("fileUpload.dropHere")}</p>
@@ -127,8 +132,9 @@ export function DragOverlay({ visible }: { visible: boolean }) {
   );
 }
 
+/** 字节数 → 人类可读字符串（B / KB / MB） */
 function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes < KB) return `${bytes}B`;
+  if (bytes < MB) return `${(bytes / KB).toFixed(0)}KB`;
+  return `${(bytes / MB).toFixed(1)}MB`;
 }

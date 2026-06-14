@@ -1,8 +1,32 @@
+/**
+ * Button 按钮组件（基于 Base UI 原语）。
+ *
+ * 项目内通用按钮，提供 variant（视觉变体）+ size（尺寸变体）两套维度。
+ * 移动端触控目标由调用方按需用 className 覆盖（如 `size-11 md:size-8`），
+ * 这里只定义桌面端默认尺寸，避免对桌面端产生回归。
+ *
+ * variant：
+ * - default  主按钮（primary 填充）
+ * - outline  描边（次级动作）
+ * - secondary 辅助填充
+ * - ghost    无边框（图标按钮 / 工具栏）
+ * - destructive 危险操作（浅红幽灵态）
+ * - link     文字链接
+ *
+ * size：
+ * - default / xs / sm / lg  文字按钮
+ * - icon / icon-xs / icon-sm / icon-lg  纯图标方形按钮
+ *
+ * 消费侧通过 buttonVariants({ variant, size }) 直接合成 className，
+ * 用于 `<a>` 等非 Button 元素复用同一套样式。
+ */
+
 import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
+/** 按钮样式合成器（cva）：variant × size 矩阵 + 公共基础类 */
 const buttonVariants = cva(
   "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
@@ -40,6 +64,12 @@ const buttonVariants = cva(
   }
 )
 
+/**
+ * Button 组件。
+ * @param variant 视觉变体（默认 default）
+ * @param size 尺寸变体（默认 default）
+ * @param className 追加类（不覆盖基础类）
+ */
 function Button({
   className,
   variant = "default",

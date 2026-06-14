@@ -22,7 +22,15 @@ export interface ChartPadding {
 /** 默认 SVG 宽度（viewBox） */
 export const SVG_WIDTH = 400;
 
-/** 把数据点索引映射为 SVG 坐标 */
+/**
+ * 把数据点索引映射为 SVG 坐标。
+ * @param index 当前点索引（0-based）
+ * @param value 当前点数值
+ * @param count 数据点总数
+ * @param maxVal Y 轴最大值（纵向归一化基准）
+ * @param chartWidth / chartHeight 图表绘制区域尺寸
+ * @param padding 内边距（决定原点偏移）
+ */
 function pointToCoord(
   index: number,
   value: number,
@@ -41,27 +49,26 @@ function pointToCoord(
 
 /**
  * 构建平滑曲线 path（三次贝塞尔）+ 闭合区域 path。
- *
- * @param points 数据点
+ * @param data 数据点序列
  * @param maxVal 最大值（用于纵向归一化）
  * @param chartWidth / chartHeight 图表绘制区域尺寸
  * @param padding 内边距
- * @returns { line: 线条 d, area: 区域 d }；数据不足 2 点时返回空字符串
+ * @returns `{ line: 线条 d, area: 区域 d }`；数据不足 2 点时返回空字符串
  */
 export function buildSmoothPath(
-  points: DataPoint[],
+  data: DataPoint[],
   maxVal: number,
   chartWidth: number,
   chartHeight: number,
   padding: ChartPadding,
 ): { line: string; area: string } {
-  if (points.length < 2) return { line: "", area: "" };
+  if (data.length < 2) return { line: "", area: "" };
 
-  const coords = points.map((p, i) =>
-    pointToCoord(i, p.value, points.length, maxVal, chartWidth, chartHeight, padding),
+  const coords = data.map((p, i) =>
+    pointToCoord(i, p.value, data.length, maxVal, chartWidth, chartHeight, padding),
   );
 
-  // 平滑曲线：每段用控制点 x = 中点，y = 端点 y
+  // 平滑曲线：每段控制点 x = 端点中点，y = 端点 y（保持曲线穿过每个数据点）
   let line = `M ${coords[0].x} ${coords[0].y}`;
   for (let i = 1; i < coords.length; i++) {
     const prev = coords[i - 1];
@@ -70,7 +77,7 @@ export function buildSmoothPath(
     line += ` C ${cpx} ${prev.y}, ${cpx} ${curr.y}, ${curr.x} ${curr.y}`;
   }
 
-  // 区域 path：从基线起 → 画曲线 → 回到基线闭合
+  // 区域 path：基线起 → 沿曲线 → 回基线闭合（用于半透明填充）
   const baseline = padding.top + chartHeight;
   let area = `M ${coords[0].x} ${baseline} L ${coords[0].x} ${coords[0].y}`;
   for (let i = 1; i < coords.length; i++) {
@@ -84,7 +91,10 @@ export function buildSmoothPath(
   return { line, area };
 }
 
-/** 构建某点的 SVG 坐标（tooltip 定位用） */
+/**
+ * 构建某点的 SVG 坐标（tooltip 圆点定位用）。
+ * 参数与 pointToCoord 对齐，但接受外部 point（用于交互时查单点）。
+ */
 export function pointCoordAt(
   index: number,
   point: DataPoint,
@@ -100,7 +110,7 @@ export function pointCoordAt(
 /**
  * 构建 Y 轴刻度（值 + y 坐标）。
  * @param maxVal 最大值
- * @param count 刻度数量
+ * @param count 刻度数量（含 0 和 maxVal）
  */
 export function buildYTicks(
   maxVal: number,

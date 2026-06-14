@@ -1,10 +1,15 @@
 /**
- * AreaChart — 面积图组件（SVG）。
+ * AreaChart 面积图组件（SVG 渲染）。
  *
- * 支持主数据线 + 可选的第二数据线（如完成 vs 失败），
+ * 支持主数据线 + 可选第二数据线（如"完成 vs 失败"双线对比）。
  * 鼠标/触控 pointer 追踪 tooltip，Y 轴刻度自动计算。
  *
- * 几何计算委托给 chart-geometry.ts 纯函数模块，本组件只负责 SVG 渲染和交互。
+ * 几何计算（path 构建、坐标映射、Y 轴刻度）委托给 chart-geometry.ts 纯函数模块，
+ * 本组件只负责 SVG 渲染和交互，便于单元测试几何逻辑。
+ *
+ * 用法：
+ *   <AreaChart data={[{ label: "1月", value: 10 }, ...]} />
+ *   <AreaChart data={ok} secondaryData={fail} secondaryColor="var(--destructive)" />
  */
 
 import { useMemo, useState, useCallback } from "react";
@@ -22,15 +27,15 @@ import {
 interface AreaChartProps {
   /** 主数据序列 */
   data: DataPoint[];
-  /** 主线颜色（CSS 变量或色值） */
+  /** 主线颜色（CSS 变量或色值，默认 var(--chart-1)） */
   color?: string;
-  /** 第二数据序列（可选，如失败数） */
+  /** 第二数据序列（可选，如失败数对比） */
   secondaryData?: DataPoint[];
-  /** 第二线颜色 */
+  /** 第二线颜色（默认 var(--destructive)） */
   secondaryColor?: string;
-  /** 图表高度（px） */
+  /** 图表高度（px，默认 160） */
   height?: number;
-  /** 额外样式类 */
+  /** 容器额外 className */
   className?: string;
 }
 
@@ -155,7 +160,7 @@ export function AreaChart({
           </g>
         ))}
 
-        {/* X 轴标签（最多 7 个，均匀采样） */}
+        {/* X 轴标签（最多 7 个，均匀采样避免拥挤） */}
         {data.map((d, i) => {
           if (i % Math.ceil(data.length / 7) !== 0 && i !== data.length - 1) return null;
           const x = padding.left + (chartWidth / (data.length - 1)) * i;
@@ -166,7 +171,7 @@ export function AreaChart({
           );
         })}
 
-        {/* 第二数据线（先画在底层） */}
+        {/* 第二数据线（先画在底层，避免遮挡主线） */}
         {secondary && <ChartLine paths={secondary} color={secondaryColor} strokeWidth={1.5} opacity={0.1} />}
         {/* 主数据线 */}
         <ChartLine paths={primary} color={color} strokeWidth={2} opacity={0.15} />
@@ -181,7 +186,7 @@ export function AreaChart({
         )}
       </svg>
 
-      {/* Tooltip 浮层（HTML 覆盖在 SVG 上方） */}
+      {/* Tooltip 浮层（HTML 覆盖在 SVG 上方，pointer-events:none 不挡交互） */}
       {tooltip && (
         <div
           className="absolute pointer-events-none z-10 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs shadow-md animate-fade-in"

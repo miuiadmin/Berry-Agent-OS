@@ -1,8 +1,9 @@
 /**
  * ChatWindow 的辅助子组件。
  *
- * 把 ChatSkeleton / HistoryError / DelegationDialog / PermissionConfirmDialog /
- * PermissionModeSelector 从 chat-window.tsx 拆出，让 ChatWindow 主文件只保留编排逻辑。
+ * 把 ChatSkeleton / HistoryError / DelegationDialog /
+ * PermissionConfirmDialog / PermissionModeSelector 从 chat-window.tsx 拆出，
+ * 让 ChatWindow 主文件只保留编排逻辑。
  *
  * DelegationDialog 与 PermissionConfirmDialog 共享 BottomSheet + ConfirmButtons。
  */
@@ -14,7 +15,13 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 
+/** 权限模式联合类型（与 chat-store 同步） */
+type PermissionMode = ReturnType<typeof useChatStore.getState>["permissionMode"];
+
 // ─── 共享：底部弹窗 + 确认按钮组 ───────────────────────────────────
+
+/** 弹窗色调（destructive 用于权限请求；default 用于委派） */
+type SheetTone = "default" | "destructive";
 
 /**
  * 底部弹窗容器（移动端底部固定 / 桌面端浮层）。
@@ -22,8 +29,7 @@ import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } f
  */
 function BottomSheet({ label, tone = "default", children }: {
   label: string;
-  /** destructive 用红色边框（权限请求）；default 用普通边框（委派） */
-  tone?: "default" | "destructive";
+  tone?: SheetTone;
   children: React.ReactNode;
 }) {
   return (
@@ -192,19 +198,19 @@ export function PermissionConfirmDialog({
 
 // ─── Permission Mode Selector ─────────────────────────────────────
 
+/** 权限模式选项（value 与 store 同步） */
+const PERMISSION_MODES: Array<{ value: PermissionMode; labelKey: string }> = [
+  { value: "ask", labelKey: "chat.permissionAsk" },
+  { value: "allow-all", labelKey: "chat.permissionAuto" },
+  { value: "yolo", labelKey: "chat.permissionYolo" },
+  { value: "deny-all", labelKey: "chat.permissionDeny" },
+];
+
 /** 权限模式选择器（ask / allow-all / deny-all / yolo） */
 export function PermissionModeSelector() {
   const t = useT();
   const mode = useChatStore((s) => s.permissionMode);
   const setMode = useChatStore((s) => s.setPermissionMode);
-
-  /** 模式 → i18n key 映射 */
-  const MODE_OPTIONS: Array<{ value: typeof mode; labelKey: string }> = [
-    { value: "ask", labelKey: "chat.permissionAsk" },
-    { value: "allow-all", labelKey: "chat.permissionAuto" },
-    { value: "yolo", labelKey: "chat.permissionYolo" },
-    { value: "deny-all", labelKey: "chat.permissionDeny" },
-  ];
 
   return (
     <select
@@ -213,7 +219,7 @@ export function PermissionModeSelector() {
       className="min-h-[44px] h-11 rounded-md border border-input bg-background px-1.5 text-[16px] text-muted-foreground md:h-7 md:min-h-0 md:text-[11px]"
       title={t("chat.permissionMode")}
     >
-      {MODE_OPTIONS.map((opt) => (
+      {PERMISSION_MODES.map((opt) => (
         <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
       ))}
     </select>

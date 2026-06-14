@@ -22,6 +22,11 @@ function scoreColor(score: number) {
   return score >= 0.7 ? "bg-success" : score >= 0.5 ? "bg-warning" : "bg-destructive";
 }
 
+/** 把 0–1 的分数格式化为百分比字符串（保留 1 位小数） */
+function pct(score: number, digits = 1) {
+  return `${(score * 100).toFixed(digits)}%`;
+}
+
 export default function DriftPage() {
   const t = useT();
   useDocumentTitle(t("drift.title"));
@@ -68,17 +73,17 @@ export default function DriftPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           icon={TrendingUp} label={t("drift.avgAlignment")}
-          value={`${(metrics.avgAlignmentScore * 100).toFixed(1)}%`}
+          value={pct(metrics.avgAlignmentScore)}
           extra={<ScoreBar score={metrics.avgAlignmentScore} label={t("drift.allCheckpoints")} />}
         />
         <StatCard
           icon={CheckCircle} label={t("drift.finalResponse")}
-          value={`${(metrics.finalResponseAlignment * 100).toFixed(1)}%`}
+          value={pct(metrics.finalResponseAlignment)}
           extra={<ScoreBar score={metrics.finalResponseAlignment} label={t("drift.userFacingReplies")} />}
         />
         <StatCard
           icon={AlertTriangle} label={t("drift.interventionRate")}
-          value={`${(metrics.interventionRate * 100).toFixed(1)}%`}
+          value={pct(metrics.interventionRate)}
           desc={t("drift.signalsTriggeredCorrection")}
         />
         <StatCard
@@ -111,7 +116,7 @@ export default function DriftPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 shrink-0 pl-4 sm:pl-0">
-                    <span className="tabular-nums font-medium">{(sig.alignmentScore * 100).toFixed(0)}%</span>
+                    <span className="tabular-nums font-medium">{pct(sig.alignmentScore, 0)}</span>
                     <span className="text-xs text-muted-foreground">{new Date(sig.createdAt).toLocaleString()}</span>
                   </div>
                 </div>

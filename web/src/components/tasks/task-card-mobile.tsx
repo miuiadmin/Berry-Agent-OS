@@ -15,7 +15,7 @@ import type { TaskInfo } from "@/lib/api";
 import { useT, useDateFormat } from "@/lib/i18n";
 import { formatDuration, formatJson } from "@/lib/format";
 
-/** 状态 → Badge variant 映射 */
+/** 状态 → Badge variant 映射（未知状态回落 secondary） */
 const STATUS_VARIANT: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
   completed: "success",
   failed: "destructive",
@@ -32,7 +32,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-/** 详情 pre 块：标签 + 格式化内容（输入/输出复用） */
+/** 详情 pre 块：标签 + 格式化内容（输入/输出/错误复用） */
 function DetailPre({ label, content, tone }: { label: string; content: string; tone?: "destructive" }) {
   return (
     <DetailRow label={label}>
@@ -58,7 +58,7 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
   return (
     <div className="overflow-hidden rounded-xl border border-border">
       {/* 头部（点击展开/收起） */}
-      <button type="button" onClick={() => setExpanded(!expanded)}
+      <button type="button" onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-muted/30 active:bg-muted/40">
         <div className="text-muted-foreground">
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -77,15 +77,16 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
           </div>
         </div>
         {task.status === "running" && (
+          // stopPropagation 防止点击取消按钮误触发卡片展开
           <Button variant="destructive" size="sm" aria-label={t("taskCard.cancelTask")}
             onClick={(e) => { e.stopPropagation(); onCancel(); }}
-            className="min-h-[44px] min-w-[44px] shrink-0 px-3 text-xs h-11 md:h-6 md:px-2 md:min-h-0">
+            className="min-h-[44px] min-w-[44px] shrink-0 px-3 text-xs h-11 md:h-6 md:min-h-0 md:px-2">
             <XCircle className="size-3" />
           </Button>
         )}
       </button>
 
-      {/* 展开详情 */}
+      {/* 展开详情（collapse-wrapper/inner 由 index.css 的 grid-rows 过渡实现高度动画） */}
       <div className="collapse-wrapper" data-open={expanded}>
         <div className="collapse-inner">
           <div className="space-y-2 border-t border-border bg-muted/10 p-3 text-xs">

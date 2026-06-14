@@ -39,6 +39,8 @@ export interface BrainCommandHandlerDeps {
   db: Database.Database;
   /** 15.0 机制 D execute：真实委派到目标 Agent（orchestrator 注入 dispatchModuleTask） */
   dispatchExecute?: DispatchExecuteFn;
+  /** 16.0 P3：当前活跃 task 的 id 解析器（供 board 信封落板投影）。无则跳过投影。 */
+  getCurrentTaskId?: () => string | undefined;
 }
 
 /**
@@ -54,6 +56,34 @@ export function setupBrainCommandHandler(
   brainIpc.onMessage('brain.command', async (msg: IpcMessage) => {
     const cmd = msg.payload as BrainCommand;
     const correlationId = msg.correlationId ?? msg.id;
+
+    // 16.0 P3-A1：brain.command 落板投影（command 信封，fire-and-forget 审计影子）。
+    // 映射 BrainCommand → CommandMessage：execute≈dispatch / inspect≈inspect / report≈inspect。
+    // 双写期——保留现有 dispatchBrainCommand + brain.command.result IPC 路径（订阅者无感）。
+    const boardTaskId = deps.getCurrentTaskId?.();
+    if (boardTaskId) {
+      try {
+        const { postBoardMessage } = await import('../board-repo.js');
+        const { genId } = await import('../../utils/id.js');
+        const intentMap: Record<BrainCommand['type'], 'redirect' | 'stop' | 'inspect' | 'dispatch'> = {
+          execute: 'dispatch',
+          inspect: 'inspect',
+          report: 'inspect',
+        };
+        postBoardMessage(boardTaskId, {
+          id: genId('bmsg'),
+          type: 'command',
+          from: 'brain',
+          to: cmd.target,
+          taskId: boardTaskId,
+          ts: Date.now(),
+          intent: intentMap[cmd.type],
+          instruction: JSON.stringify(cmd.payload),
+          ...(cmd.type === 'execute' ? { dispatchSpec: { agentRef: cmd.target, goal: JSON.stringify(cmd.payload) } } : {}),
+        });
+      } catch { /* fire-and-forget：落板失败不影响 brain.command 主路径 */ }
+    }
+
     const result = await dispatchBrainCommand(cmd, deps);
     logger.debug({ target: cmd.target, type: cmd.type, success: result.success }, 'brain.command 已处理');
     brainIpc.send('brain.command.result', 'brain', result, correlationId);

@@ -1,22 +1,35 @@
 /**
- * Sparkline — 迷你趋势图（SVG 纯渲染）。
+ * Sparkline 迷你趋势图（纯 SVG 渲染）。
  *
- * 纯 SVG 迷你折线图：贝塞尔曲线 + 半透明面积填充。
- * 无第三方图表库依赖，轻量高可控。
+ * 极小尺寸的折线 + 半透明面积图，常嵌在统计卡片内显示趋势。
+ * 贝塞尔曲线平滑，无坐标轴、无 tooltip（与完整 AreaChart 的区别）。
+ * 数据不足 2 点时不渲染。
+ *
+ * 用法：
+ *   <Sparkline values={[1, 3, 2, 5, 4]} />
+ *   <Sparkline values={seq} color="var(--chart-2)" width={100} height={28} />
  */
 
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 
 interface SparklineProps {
+  /** 数值序列（≥2 才渲染） */
   values: number[];
+  /** 线条 + 面积颜色（默认 var(--chart-1)） */
   color?: string;
+  /** SVG 宽度（默认 80） */
   width?: number;
+  /** SVG 高度（默认 24） */
   height?: number;
+  /** 容器额外 className */
   className?: string;
 }
 
-/** 计算数据点坐标（path / areaPath 共享） */
+/**
+ * 计算数据点坐标（path / areaPath 共享，避免重复算）。
+ * 自动按 min/max 归一化到 [pad, width-pad] × [pad, height-pad]。
+ */
 function calcPoints(values: number[], width: number, height: number) {
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
@@ -31,7 +44,7 @@ function calcPoints(values: number[], width: number, height: number) {
   }));
 }
 
-/** 将点序列转为贝塞尔曲线 path */
+/** 将点序列转为贝塞尔曲线 path（每段控制点 x = 端点中点） */
 function toCurvePath(points: { x: number; y: number }[]): string {
   let d = `M ${points[0].x} ${points[0].y}`;
   for (let i = 1; i < points.length; i++) {
@@ -54,7 +67,7 @@ export function Sparkline({
 
   /** 线条 path */
   const linePath = useMemo(() => points.length < 2 ? "" : toCurvePath(points), [points]);
-  /** 面积 path（底部闭合） */
+  /** 面积 path：从底部起 → 沿曲线 → 回底部闭合 */
   const areaPath = useMemo(() => {
     if (points.length < 2) return "";
     return `M ${points[0].x} ${height} L ${points[0].x} ${points[0].y} ` +

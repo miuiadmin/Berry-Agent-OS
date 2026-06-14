@@ -1,8 +1,20 @@
+/**
+ * Input 文本输入框组件。
+ *
+ * 受控/非受控皆可，透传原生 input 属性。移动端硬规则：
+ * - 高度 h-10（40px 触控目标）→ 桌面端 md:h-8
+ * - 字号 text-base（防 iOS 聚焦自动缩放）→ 桌面端 md:text-sm
+ *
+ * 用法：
+ *   <Input value={v} onChange={e => setV(e.target.value)} placeholder="..." />
+ *   <Input type="password" aria-invalid={!!err} />
+ */
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-/** 文本输入框 —— 移动端 h-10（40px 触控目标）+ text-base（防 iOS 聚焦缩放），桌面端 md:h-8 + md:text-sm */
+/** @param type 原生 input type（text/email/password/number...） */
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
     <input

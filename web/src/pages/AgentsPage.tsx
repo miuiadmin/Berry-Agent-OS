@@ -42,6 +42,15 @@ export default function AgentsPage() {
   // ── Mutations ──
   const { toggleAgent } = useAgentMutations();
 
+  /** 启/停 Agent 的统一入口：禁用走确认框，启用直接 mutate */
+  const handleToggle = (name: string, enable: boolean) => {
+    if (enable) {
+      toggleAgent.mutate({ name, enable: true });
+    } else {
+      setDisableTarget(name);
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6">
       <PageHeader title={t("agents.title")} subtitle={t("agents.subtitle")} />
@@ -52,24 +61,17 @@ export default function AgentsPage() {
         errorTitle={t("agents.failedToLoad")}
       >
         {(agents) => {
-          // 详情视图模式
-          if (selectedAgent) {
-            const agent = agents.find((a) => a.name === selectedAgent);
-            if (!agent) {
-              setSelectedAgent(null);
-              return null;
-            }
+          // 详情视图模式：选中名在当前列表中找到才进详情，否则回退列表（如刷新后消失）
+          const selected = selectedAgent
+            ? agents.find((a) => a.name === selectedAgent)
+            : undefined;
+
+          if (selected) {
             return (
               <AgentDetailView
-                agent={agent}
+                agent={selected}
                 onBack={() => setSelectedAgent(null)}
-                onToggle={(enable) => {
-                  if (!enable) {
-                    setDisableTarget(agent.name);
-                  } else {
-                    toggleAgent.mutate({ name: agent.name, enable: true });
-                  }
-                }}
+                onToggle={(enable) => handleToggle(selected.name, enable)}
               />
             );
           }
@@ -84,13 +86,7 @@ export default function AgentsPage() {
                     agent={agent}
                     index={i}
                     onSelect={() => setSelectedAgent(agent.name)}
-                    onToggle={(enable) => {
-                      if (!enable) {
-                        setDisableTarget(agent.name);
-                      } else {
-                        toggleAgent.mutate({ name: agent.name, enable: true });
-                      }
-                    }}
+                    onToggle={(enable) => handleToggle(agent.name, enable)}
                   />
                 ))}
               </div>

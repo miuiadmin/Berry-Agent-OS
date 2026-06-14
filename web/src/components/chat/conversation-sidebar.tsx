@@ -3,7 +3,9 @@
  *
  * 在 Chat 页面左侧以抽屉形式展示，移动端点击后自动关闭。
  * Mutations 使用 useConversationMutations（与 ConversationsPage 共用），
- * 唯一的侧边栏特有逻辑是删除退场动画（removingId → onExitEnd）。
+ * 唯一的侧边栏特有逻辑是删除退场动画（removingId → onExitEnd）：
+ *   1. 用户确认删除 → setRemovingId(sid) → ConversationItem 播退场动画
+ *   2. 动画结束 onExitEnd → 真正调用 deleteConversation.mutate
  */
 
 import { useState } from "react";
@@ -44,17 +46,16 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const clearMessages = useChatStore((s) => s.clearMessages);
 
   // ── Mutations（与 ConversationsPage 共用） ──
-  const { deleteConversation, renameConversation } =
-    useConversationMutations();
+  const { deleteConversation, renameConversation } = useConversationMutations();
 
-  /** 新建对话：清空当前状态 */
+  /** 新建对话：清空当前消息 + 会话 + 关闭抽屉 */
   const handleNewChat = () => {
     clearMessages();
     setSessionId(null);
     onSelect?.();
   };
 
-  /** 选择已有对话 */
+  /** 选择已有对话（同一会话直接返回，避免重复 clearMessages） */
   const handleSelect = (sid: string) => {
     if (sid === sessionId) return;
     clearMessages();
@@ -65,7 +66,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   return (
     <div className="flex h-full w-72 md:w-64 max-w-[85vw] flex-col border-r bg-background md:bg-muted/30">
       {/* 新建按钮 + 搜索框 */}
-      <div className="border-b p-3 space-y-2">
+      <div className="space-y-2 border-b p-3">
         <button
           type="button"
           onClick={handleNewChat}
@@ -83,7 +84,7 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
         </div>
       </div>
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+        <div className="space-y-1 p-2">
           {conversations?.map((conv) => (
             <ConversationItem
               key={conv.sessionId}
@@ -91,11 +92,10 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
               isActive={conv.sessionId === sessionId}
               isRemoving={conv.sessionId === removingId}
               onSelect={() => handleSelect(conv.sessionId)}
-              onRename={(sid, title) =>
-                renameConversation.mutate({ sid, title })
-              }
+              onRename={(sid, title) => renameConversation.mutate({ sid, title })}
               onRequestDelete={() => setDeleteTarget(conv.sessionId)}
               onExitEnd={() => {
+                // 动画结束 → 真正删除当前 removingId 对应的会话
                 if (removingId) deleteConversation.mutate(removingId);
                 setRemovingId(null);
               }}
@@ -112,17 +112,15 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
       {/* 删除确认对话框 */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title={t("chat.deleteConfirmTitle")}
         description={t("chat.deleteConfirmDesc")}
         actionLabel={t("common.delete")}
         onAction={() => {
+          // 关闭确认框 + 触发退场动画（真正删除在动画结束后）
           if (deleteTarget) {
-            const sid = deleteTarget;
+            setRemovingId(deleteTarget);
             setDeleteTarget(null);
-            setRemovingId(sid);
           }
         }}
       />

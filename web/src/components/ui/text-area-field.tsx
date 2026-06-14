@@ -1,7 +1,7 @@
 /**
- * 统一多行文本输入组件。
+ * TextAreaField 统一多行文本输入组件。
  *
- * 替代 MemoryPage / SchedulerPage / CreateJobCard 中重复的 raw <textarea> 样式。
+ * 替代 MemoryPage / SchedulerPage / CreateJobCard 中重复的 raw `<textarea>` 样式。
  * 自动处理移动端字体缩放（16px 防止 iOS 自动缩放）和桌面端标准字号。
  * 支持 forwardRef（EditableMessage 需要直接操作 DOM 自适应高度）。
  *
