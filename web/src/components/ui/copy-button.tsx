@@ -1,10 +1,11 @@
 /**
  * CopyButton 通用复制按钮组件。
  *
- * 点击写入剪贴板，1.5s 内显示 ✓ 反馈。失败时静默（剪贴板被拒 / 非安全上下文）。
+ * 点击写入剪贴板，1.5s 内显示 ✓ + "已复制" 文字反馈。失败时静默（剪贴板被拒 / 非安全上下文）。
  * 消除 message-bubble-parts 与 code-block 中的重复实现。
  *
  * 移动端硬规则：44×44 触控目标（TOUCH_TARGET），桌面端紧凑（md: 收回）。
+ * 成功反馈用文字 + 图标双通道（移动端无 hover 时仍可感知，满足无 hover 反馈硬规则）。
  *
  * 用法：
  *   <CopyButton text={code} />
@@ -13,6 +14,8 @@
  * 结构性重构：触控目标类抽到 _shared.TOUCH_TARGET（与 IconButton / EmptyState 等共用）；
  * 复制定时器逻辑提取为命名清晰的副作用 + 清理。
  */
+
+"use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, Copy } from "lucide-react"
@@ -36,6 +39,9 @@ export function CopyButton({ text, className }: { text: string; className?: stri
   }, [])
 
   const handleCopy = useCallback(() => {
+    // 空值守卫：空串/undefined 不写剪贴板，避免静默覆盖用户原剪贴板内容。
+    // 调用方一般会传有效值，但组件作为通用 API 应自保。
+    if (!text) return
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       // 复位已有定时器再起新的，避免连续点击时反馈闪烁
@@ -56,7 +62,15 @@ export function CopyButton({ text, className }: { text: string; className?: stri
       )}
       aria-label={t("chat.copy")}
     >
-      {copied ? <Check className="size-3 animate-fade-scale" /> : <Copy className="size-3" />}
+      {copied ? (
+        <>
+          <Check className="size-3 animate-fade-scale" />
+          {/* 成功态文字反馈：移动端无 hover 时仍可感知（图标 + 文案双通道） */}
+          <span className="animate-fade-in">{t("chat.copied")}</span>
+        </>
+      ) : (
+        <Copy className="size-3" />
+      )}
     </button>
   )
 }

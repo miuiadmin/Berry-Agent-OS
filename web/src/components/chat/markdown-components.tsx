@@ -5,21 +5,30 @@
  * 包括代码块（Shiki 高亮）、表格、引用、链接、列表、标题、图片等。
  */
 
-import { type ComponentPropsWithoutRef } from "react";
+import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 import type { Components } from "react-markdown";
 import { ExternalLink } from "lucide-react";
 import { CodeBlock } from "./code-block";
 import { ClickableImage } from "@/components/ui/image-lightbox";
-import { INLINE_CODE } from "@/components/ui/_shared";
-
-/**
- * 允许的安全协议白名单（https / mailto / 相对路径 / 锚点）。
- * 用于过滤 LLM 幻觉注入的 javascript: / data: URI。
- */
-const SAFE_HREF = /^(https?:|mailto:|\/|#)/i;
+import { INLINE_CODE, SAFE_HREF } from "@/components/ui/_shared";
 
 /** 从 className 中提取 language-xxx 前缀的语言标识 */
 const LANG_RE = /language-(\w+)/;
+
+/**
+ * 把 react-markdown 传入的 code children 拼成纯文本（用于多行判据）。
+ * 兼容 string / number / array / 嵌套 array / element 形态。
+ * 与 code-block.tsx 的 nodeToText 同语义，但此处只需判换行，独立实现避免跨文件耦合。
+ */
+function childrenToText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(childrenToText).join("");
+  if (typeof node === "object" && "props" in node) {
+    return childrenToText((node as { props: { children?: ReactNode } }).props.children);
+  }
+  return "";
+}
 
 /**
  * 创建 react-markdown 的 Components 映射。
@@ -29,26 +38,34 @@ const LANG_RE = /language-(\w+)/;
 export function createMarkdownComponents(isStreaming?: boolean): Components {
   return {
     /**
-     * 代码：react-markdown v9 的 code 组件收 `inline` prop 区分行内 / 块级。
-     * - inline=true（行内 `code`）→ 纯 inline code，不渲染 CodeBlock 标题栏
-     * - inline=false 且 className 含 language-xxx → CodeBlock 高亮块
-     * - inline=false 但无 language 标识 → 仍走 CodeBlock（lang=null 兼容裸 pre 包裹）
+     * 代码组件：区分行内 `code` 与块级代码（fenced ```）。
      *
-     * 之前只看 className 里的 language- 前缀，某些 react-markdown 插件给行内 code 也加 language- className，
-     * 会被误判为块级 CodeBlock（多出标题栏）。显式读 inline prop 杜绝此类误判。
+     * react-markdown v9 不再向 code 组件传 `inline` prop（v9 起行内/块级区分由 mdast
+     * 节点结构决定，hast 中块级 code 的父节点是 <pre>，行内 code 的父节点是 <p> 等）。
+     * 因此用「内容含换行 或 className 含 language- 前缀」作为块级判据：
+     *   - fenced 代码块（```lang\n…\n```）渲染为 <code class="language-lang"> 且多行 → 块级
+     *   - 行内 `code` 渲染为 <code>（无 className、单行）→ 行内
+     *
+     * 之前曾尝试读 (rest as { inline?: boolean }).inline，但 v9 不再提供该 prop，
+     * 永远是 undefined → 该分支为死代码，已删除。块级判据改为内容/className。
      */
     code({ className, children, ...rest }) {
-      const inline = (rest as { inline?: boolean }).inline;
       const cls = className || "";
       const match = LANG_RE.exec(cls);
-      // 行内 code（inline=true）或 既无 inline 标识也无 language- 前缀 → 纯 inline code
-      if (inline || (!match && !/language-/.test(cls))) {
+      // 拼出纯文本用于多行判据（react-markdown 的 children 可能是 string/array/element）
+      const text = childrenToText(children);
+      // 块级 = 有 language- 前缀 或 内容含换行；否则行内
+      const isBlock = !!match || /language-/.test(cls) || text.includes("\n");
+      // 行内 code：纯 inline 样式，不渲染 CodeBlock 标题栏
+      if (!isBlock) {
         return (
           <code className={INLINE_CODE}>
             {children}
           </code>
         );
       }
+      // 透传可能存在的 node prop 给 CodeBlock（保留 react-markdown 内部信息，未来可用）
+      void rest;
       return (
         <CodeBlock lang={match ? match[1] : null} isStreaming={isStreaming}>
           {children}

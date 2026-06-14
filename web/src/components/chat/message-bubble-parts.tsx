@@ -14,6 +14,7 @@ import { textFromBlocks } from "@/lib/blocks";
 import { ClickableImage } from "@/components/ui/image-lightbox";
 import { TextAreaField } from "@/components/ui/text-area-field";
 import { CopyButton } from "@/components/ui/copy-button";
+import { SAFE_HREF } from "@/components/ui/_shared";
 import { useAutoResizeTextarea } from "@/hooks/use-auto-resize-textarea";
 import type { ChatMessage, ChatAttachment } from "@/lib/stores/chat-store";
 
@@ -172,8 +173,9 @@ function ActionButton({ icon: Icon, label, tone, onClick }: {
   tone: "default" | "destructive";
   onClick: () => void;
 }) {
+  // destructive 态：active 比 hover 更深（/20 > /10），强化按压反馈
   const hover = tone === "destructive"
-    ? "hover:bg-destructive/10 hover:text-destructive active:bg-destructive/10"
+    ? "hover:bg-destructive/10 hover:text-destructive active:bg-destructive/20"
     : "hover:bg-accent hover:text-accent-foreground active:bg-accent";
   return (
     <button type="button" onClick={onClick}
@@ -211,8 +213,23 @@ export function MessageActions({
 
 // ─── AttachmentList ───────────────────────────────────────────────
 
-/** 附件下载链接的安全协议白名单（与 markdown-components 的 SAFE_HREF 一致） */
-const SAFE_HREF = /^(https?:|mailto:|\/|#)/i;
+/**
+ * 非图片附件的下载链接卡片。
+ * 从 AttachmentList 的 map 中抽出（原先用 IIFE，可读性差）。
+ * 校验 url 协议白名单（att.url 来自服务端，仍校验防 javascript:/data: 注入）。
+ */
+function FileAttachment({ att }: { att: ChatAttachment }) {
+  const safeHref = SAFE_HREF.test(att.url) ? att.url : undefined;
+  return (
+    <a href={safeHref} download={att.filename}
+      className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs transition-colors hover:bg-accent animate-slide-down"
+      onClick={(e) => e.stopPropagation()}>
+      <FileText className="size-4 text-muted-foreground" />
+      <span className="max-w-[150px] truncate">{att.filename}</span>
+      <Download className="size-3 text-muted-foreground" />
+    </a>
+  );
+}
 
 /** 消息附件列表：图片用 ClickableImage，其他用下载链接 */
 export function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
@@ -222,19 +239,7 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
         att.mimeType.startsWith("image/") ? (
           <ClickableImage key={att.fileId} src={att.url} alt={att.filename} className="max-h-48 rounded-lg animate-slide-down" />
         ) : (
-          (() => {
-            // 防御性校验 url 协议：att.url 来自服务端返回，仍校验防止 javascript:/data: 注入（与 markdown a 标签一致）
-            const safeHref = SAFE_HREF.test(att.url) ? att.url : undefined;
-            return (
-              <a key={att.fileId} href={safeHref} download={att.filename}
-                className="flex items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2 text-xs transition-colors hover:bg-accent animate-slide-down"
-                onClick={(e) => e.stopPropagation()}>
-                <FileText className="size-4 text-muted-foreground" />
-                <span className="max-w-[150px] truncate">{att.filename}</span>
-                <Download className="size-3 text-muted-foreground" />
-              </a>
-            );
-          })()
+          <FileAttachment key={att.fileId} att={att} />
         ),
       )}
     </div>

@@ -96,6 +96,18 @@ interface TooltipState {
   secondary?: number;
 }
 
+/**
+ * Tooltip 上下翻转阈值（viewBox 坐标系 y 值）。
+ *
+ * 当命中点的 y 小于此值时，tooltip 默认的 translate(-50%, -100%)（浮在点上方）
+ * 会让 tooltip 顶部超出容器顶部被 overflow-hidden 裁掉，此时改翻转到点下方。
+ *
+ * 取值 = tooltip 自身高度（约 44px，含 label 行 + 数值行 + padding）+ 顶部安全间距。
+ * 与 {@link AREA_CHART_PADDING}.top（20）配合：padding.top 已给顶部留了 20px，
+ * 44px 阈值覆盖了"tooltip 高度超出 padding 区"的临界场景。
+ */
+const TOOLTIP_FLIP_THRESHOLD = 48;
+
 export function AreaChart({
   data,
   color = CHART_COLOR_1,
@@ -129,19 +141,30 @@ export function AreaChart({
    * 几何派生：Y 轴最大值 / 主次 path / Y 轴刻度。
    * 依赖 data + layout，数据变化时重算；maxVal 合并主次两条线取全局最大，
    * 保证两条线在同一 Y 轴尺度下可比。
+   *
+   * 长度对齐：secondaryData 在 buildSmoothPaths 里独立按自身 length 计算 X 步长，
+   * 若与 data 长度不一致，次线会被横向压缩/拉伸，与主轴的 X 采样错位。
+   * 这里显式截取 secondaryData 前 data.length 个点对齐到主轴长度（防御性 —— 现有
+   * 调用方 UsagePage/HomePage 都同源派生、长度天然一致，但组件不应假设这点）。
    */
   const geo = useMemo(() => {
     const { padding, chartWidth, chartHeight } = layout;
+    // 次线对齐到主线长度：取前 data.length 个点（多余的丢弃，不足时 buildSmoothPaths
+    // 内部 <2 守卫会返回空 path，次线不渲染 —— 不影响主图）
+    const alignedSecondary =
+      secondaryData && secondaryData.length > 1
+        ? secondaryData.slice(0, data.length)
+        : undefined;
     const allValues = [
       ...data.map((d) => d.value),
-      ...(secondaryData?.map((d) => d.value) ?? []),
+      ...(alignedSecondary?.map((d) => d.value) ?? []),
     ];
     const maxVal = safeMaxValue(allValues);
     return {
       maxVal,
       primary: buildSmoothPaths(data, maxVal, chartWidth, chartHeight, padding),
-      secondary: secondaryData
-        ? buildSmoothPaths(secondaryData, maxVal, chartWidth, chartHeight, padding)
+      secondary: alignedSecondary
+        ? buildSmoothPaths(alignedSecondary, maxVal, chartWidth, chartHeight, padding)
         : null,
       yTicks: buildYTicks(maxVal, AREA_CHART_Y_TICK_COUNT, chartHeight, padding),
     };
@@ -152,8 +175,8 @@ export function AreaChart({
 
   /**
    * 指针移动 → 最近 data point → tooltip。
-   * 按指针在 SVG 中的相对位置换算到 viewBox 坐标系（SVG 用 preserveAspectRatio 缩放，
-   * rect.width 是实际显示宽度，要做比例换算）。
+   * 按指针在 SVG 中的相对位置换算到 viewBox 坐标系（SVG 用 preserveAspectRatio="none"
+   * 把 viewBox 拉伸到容器尺寸，rect.width 是实际显示宽度，需做比例换算回 viewBox 坐标）。
    *
    * 去抖 + 边界处理：
    *  1. (x - padding.left) 落到绘图区外（左/右 padding 区）→ 隐藏 tooltip，
@@ -213,9 +236,17 @@ export function AreaChart({
 
   return (
     <div className={cn("relative w-full", className)}>
+      {/* SVG：viewBox="0 0 svgWidth height" + preserveAspectRatio="none" 让 viewBox 拉伸填满容器
+          （width:100% × style.height）。
+          为何不用旧 "xMidYMid meet"：style.height 钉死为 viewBox 高度时，meet 选 scale=
+          min(containerW/400, 160/160)=1，SVG 只渲染 400px 居中，两侧留 ~33% 空白（letterbox）；
+          且 pointerMove 的 x=(clientX/rect.width)*svgWidth 把空白区误判成 viewBox 坐标，
+          tooltip 的 left% 落在空白处而它索引的数据点实际更靠右 —— tooltip 偏移 bug。
+          改 none 后 viewBox 与容器 1:1 线性映射，pointerMove / tooltip.left / tooltip.top
+          三处换算同时正确（y 方向因 style.height===viewBox 高度，1 单位=1px 不变）。 */}
       <svg
         viewBox={`0 0 ${svgWidth} ${height}`}
-        preserveAspectRatio="xMidYMid meet"
+        preserveAspectRatio="none"
         className="w-full"
         style={{ height }}
         onPointerMove={handlePointerMove}
@@ -303,9 +334,7 @@ export function AreaChart({
           位置策略：默认在指针点上方（translate -100%）；当指针点贴近顶部时
           （tooltip 会被父级 overflow-hidden 裁掉），翻转到点下方避免溢出。 */}
       {tooltip && (() => {
-        // 翻转阈值：指针点 y 小于此值时，tooltip 顶部会超出容器顶部 → 翻到下方
-        // 估算值 = tooltip 自身高度（约 44px）+ 顶部安全间距
-        const TOOLTIP_FLIP_THRESHOLD = 48;
+        // 命中点贴近顶部时 tooltip 会被父级 overflow-hidden 裁掉 → 翻转到点下方
         const flipBelow = tooltip.y < TOOLTIP_FLIP_THRESHOLD;
         return (
           <div

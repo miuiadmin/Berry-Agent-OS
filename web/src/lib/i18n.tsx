@@ -22,6 +22,14 @@ import en from "@/locales/en";
 export type Locale = "zh" | "en";
 
 /**
+ * 把内部 Locale 映射为 BCP 47 语言标签（Intl API 用）。
+ * 集中映射：未来新增第三语言时只需改这一处，避免散落在各组件的硬编码三元。
+ */
+export function localeToBcp47(locale: Locale): string {
+  return locale === "zh" ? "zh-CN" : "en-US";
+}
+
+/**
  * i18n 翻译函数的真实类型签名。
  *
  * key：扁平点分格式的翻译键（如 "sidebar.home"）。

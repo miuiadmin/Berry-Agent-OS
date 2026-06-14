@@ -44,8 +44,9 @@ function Card({
           "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card text-sm text-card-foreground ring-1 ring-foreground/10",
           // spacing 变量：default=4，sm=3（用 data-size 切换 CSS 变量）
           "py-(--card-spacing) [--card-spacing:--spacing(4)] data-[size=sm]:[--card-spacing:--spacing(3)]",
-          // Footer 修正：有 Footer 时去掉底部 padding（Footer 自带）
-          "has-data-[slot=card-footer]:pb-0 data-[size=sm]:has-data-[slot=card-footer]:pb-0",
+          // Footer 修正：有 Footer 时去掉底部 padding（Footer 自带）。
+          // has-data 选择器已覆盖所有 size，无需为 sm 再重复声明。
+          "has-data-[slot=card-footer]:pb-0",
           // 图片圆角：第一张图顶圆角、最后一张图底圆角
           "has-[>img:first-child]:pt-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
         ],

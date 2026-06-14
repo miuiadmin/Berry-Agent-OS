@@ -9,6 +9,9 @@
  *
  * 结构性重构：把"状态 → 圆点 className / 翻译 key"两张映射从嵌套三元改成 Record，
  * 新增状态时只加一行，不再改三处条件分支。
+ *
+ * 类型对齐：WsStatus 直接从 ws-store 的 status 字段推导（StoreApi['getState']['status']），
+ * 不再手写本地联合，避免 store 增加新状态时此处静默漂移导致 Record 运行时返回 undefined。
  */
 
 "use client"
@@ -17,8 +20,13 @@ import { useWsStore } from "@/lib/stores/ws-store"
 import { useT } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
-/** WebSocket 三态类型（与 ws-store 对齐） */
-type WsStatus = "connected" | "connecting" | "disconnected"
+/**
+ * 从 ws-store 真实状态推导类型，而非手写本地联合。
+ * 好处：store 未来若新增第 4 种状态，此处编译期就能感知；
+ * 配合下面的 Record<WsStatus, ...> 完整性检查，新增状态会强制同步两份映射。
+ */
+type WsStoreState = ReturnType<typeof useWsStore.getState>
+type WsStatus = WsStoreState["status"]
 
 /**
  * 状态 → 圆点视觉映射。
@@ -40,7 +48,8 @@ const STATUS_I18N_KEY: Record<WsStatus, string> = {
 }
 
 export function ConnectionStatus() {
-  const status = useWsStore((s) => s.status) as WsStatus
+  // 不再用 `as WsStatus` 断言——status 类型由 store 直接推导，类型严格对齐。
+  const status = useWsStore((s) => s.status)
   const t = useT()
   // 翻译 key 查表；Record 保证 status 取值穷尽，TS 缺一种会报错
   const statusLabel = t(STATUS_I18N_KEY[status])

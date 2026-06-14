@@ -14,7 +14,7 @@
  *   - useProviderMutations → use-provider-mutations.ts
  */
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -80,6 +80,18 @@ export function ProvidersTab() {
     ? channels.find((c) => c.id === deleteTarget)
     : null;
 
+  /** 打开新增弹窗（清空残留的 editingChannel） */
+  const openAdd = useCallback(() => {
+    setEditingChannel(null);
+    setChannelDialog("add");
+  }, []);
+
+  /** 打开编辑弹窗（回填目标渠道） */
+  const openEdit = useCallback((ch: ProviderChannel) => {
+    setEditingChannel(ch);
+    setChannelDialog("edit");
+  }, []);
+
   if (channelsLoading) {
     return <LoadingSkeleton />;
   }
@@ -116,7 +128,9 @@ export function ProvidersTab() {
                 key={ch.id}
                 channel={ch}
                 onTest={() => testChannel(ch.id)}
-                isTesting={pendingFlags.testing}
+                // 按渠道 id 判定 isTesting：只有正在测试的那张卡显示"测试中"并锁定。
+                // 之前传全局 boolean 会导致点 A 卡测试时所有卡都锁定（high-severity 修复）。
+                isTesting={pendingFlags.testingChannelId === ch.id}
                 onEdit={() => openEdit(ch)}
                 onDelete={() => setDeleteTarget(ch.id)}
               />
@@ -182,8 +196,11 @@ export function ProvidersTab() {
         editingChannel={editingChannel}
         onSubmit={(data: ChannelFormData) => {
           if (channelDialog === "edit" && editingChannel) {
-            // 编辑：仅提交变更字段（apiKey/baseUrl 留空时 undefined = 服务端不改）
-            // name 也只在有值时提交，避免空串覆盖
+            // 编辑：仅提交变更字段。
+            // - apiKey/baseUrl 留空 → ChannelFormDialog 已转 undefined → 服务端"保持不变"
+            // - 已知限制：因此用户无法把 baseUrl "清空"为空串（留空 = 保持）。
+            //   baseUrl 清空属罕见操作，未单独支持；apiKey 同理（注释在表单侧）。
+            // - name 仅在有值时提交，避免空串覆盖
             const updates: Record<string, unknown> = { enabled: data.enabled };
             if (data.name) updates.name = data.name;
             if (data.baseUrl) updates.baseUrl = data.baseUrl;
@@ -198,20 +215,6 @@ export function ProvidersTab() {
       />
     </div>
   );
-
-  // ── 本地辅助：打开弹窗 ──
-
-  /** 打开新增弹窗（清空残留的 editingChannel） */
-  function openAdd() {
-    setEditingChannel(null);
-    setChannelDialog("add");
-  }
-
-  /** 打开编辑弹窗（回填目标渠道） */
-  function openEdit(ch: ProviderChannel) {
-    setEditingChannel(ch);
-    setChannelDialog("edit");
-  }
 }
 
 // ─── Loading / Empty 子组件 ───────────────────────────────────────

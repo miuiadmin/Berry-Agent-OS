@@ -48,18 +48,27 @@ export function DashboardLayout() {
   }, []);
 
   /**
-   * 移动端侧边栏的两个收尾行为合并到一个 effect：
-   *   - 路由切换 → 关闭抽屉（avoid stale open state on new page）
-   *   - ESC 键 → 关闭抽屉（仅打开时挂监听，关闭时卸载）
-   * 合并理由：二者都是"外部信号让抽屉关闭"，无独立生命周期价值，分开徒增 effect 数量。
+   * 路由切换 → 关闭移动端抽屉。
+   *
+   * 独立 effect（仅依赖 location.pathname）：每次路由变化都重置 mobileOpen=false，
+   * 避免"切到新页面但抽屉还开着"的过期态。不依赖 mobileOpen 当前值，无需读到最新快照。
    */
   useEffect(() => {
     setMobileOpen(false);
+  }, [location.pathname]);
+
+  /**
+   * ESC 键 → 关闭移动端抽屉。
+   *
+   * 独立 effect（仅依赖 mobileOpen）：只有抽屉打开时才挂 keydown 监听，关闭即卸载。
+   * 与上面的路由 effect 分离，避免二者闭包读到不同 state 快照导致监听器生命周期混乱。
+   */
+  useEffect(() => {
     if (!mobileOpen) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileOpen(false); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [location.pathname, mobileOpen]);
+  }, [mobileOpen]);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -77,7 +86,7 @@ export function DashboardLayout() {
         <AppSidebar onNavigate={() => setMobileOpen(false)} />
       </div>
 
-      {/* 主内容区 */}
+      {/* 主内容区：抽屉打开时整棵子树 aria-hidden（含移动端工具栏——它在抽屉打开时本就冗余） */}
       <div className="flex min-w-0 flex-1 flex-col" aria-hidden={mobileOpen || undefined}>
         {/* 移动端顶栏 */}
         <div className="flex h-12 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top,0px)] md:hidden">
@@ -100,7 +109,12 @@ export function DashboardLayout() {
         </div>
 
         <main id="main-content" className="relative flex-1">
-          {/* key by pathname：路由切换时重挂触发 animate-page-in 入场动画 */}
+          {/*
+           * key={location.pathname}：每次路由切换重挂滚动容器以重放 animate-page-in 入场动画。
+           * 已知 UX 代价：重挂会销毁滚动位置与容器内状态（展开的折叠项、聚焦中的输入框等），
+           * 浏览器后退/前进时无法恢复到原滚动高度。Dashboard 场景下此代价可接受——
+           * 若未来出现需要保留滚动位置的页面，改为基于动画类名增删的非重挂触发方案。
+           */}
           <div key={location.pathname} className="animate-page-in absolute inset-0 overflow-y-auto">
             <Outlet />
           </div>

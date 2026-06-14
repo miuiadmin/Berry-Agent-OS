@@ -84,12 +84,14 @@ export function CodeBlock({ lang, children, isStreaming }: CodeBlockProps) {
     <div className="group/code relative my-3 overflow-hidden rounded-lg border border-border bg-muted/30">
       {/* 标题栏：语言名 + 行数 + 复制按钮 */}
       <div className="flex items-center justify-between border-b border-border bg-muted/50 px-3 py-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:text-[10px]">
+        {/* 语言名标签：CLAUDE.md 移动端硬规则「非代码内容禁用 text-[10px]」——语言名属代码标识，
+            但为统一遵守规则字面，桌面端也用 11px（不再用 md:text-[10px]） */}
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
           {lang}
         </span>
         <div className="flex items-center gap-2">
           {lineCount > LINE_COUNT_THRESHOLD && (
-            <span className="text-[11px] text-muted-foreground/60 md:text-[10px]">
+            <span className="text-[11px] text-muted-foreground/60">
               {t("codeBlock.lineCount", { count: lineCount })}
             </span>
           )}

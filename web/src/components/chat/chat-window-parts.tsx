@@ -16,8 +16,12 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useChatStore, type DelegationRequest, type PermissionConfirmRequest } from "@/lib/stores/chat-store";
 
-/** 权限模式联合类型（与 chat-store 同步） */
-type PermissionMode = ReturnType<typeof useChatStore.getState>["permissionMode"];
+/**
+ * 权限模式联合类型（与 chat-store 的 permissionMode 字段同步）。
+ * 显式定义而非 ReturnType<typeof useChatStore.getState>['permissionMode']——
+ * 后者耦合 store 内部结构，store 字段重命名会破坏此处；显式联合更稳健。
+ */
+type PermissionMode = "ask" | "allow-all" | "deny-all" | "yolo";
 
 // ─── 共享：底部弹窗 + 确认按钮组 ───────────────────────────────────
 
@@ -244,8 +248,8 @@ export function PermissionModeSelector() {
     <select
       value={mode}
       onChange={(e) => setMode(e.target.value as typeof mode)}
-      // h-11=44px 即触控目标最小尺寸，无需再叠 min-h-[44px]（之前冗余）
-      className="h-11 rounded-md border border-input bg-background px-1.5 text-[16px] text-muted-foreground md:h-7 md:text-[11px]"
+      // CLAUDE.md 移动端硬规则：Native <select> 用 min-h-[44px] md:min-h-0（最小高度语义，非固定 h）
+      className="min-h-[44px] rounded-md border border-input bg-background px-1.5 text-[16px] text-muted-foreground md:min-h-0 md:h-7 md:text-[11px]"
       title={t("chat.permissionMode")}
     >
       {PERMISSION_MODES.map((opt) => (

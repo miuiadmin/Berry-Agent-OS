@@ -79,8 +79,20 @@ export function UserMenu() {
   /** 打开前的焦点元素，关闭时恢复焦点（无障碍） */
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  /** 主题切换（明↔暗） */
-  const toggleTheme = useCallback(() => setTheme(theme === "dark" ? "light" : "dark"), [theme, setTheme]);
+  /**
+   * 关闭动画结束：恢复打开前的焦点。
+   *
+   * 仅当 saved focus 仍挂在 document 上时才 .focus()——若打开菜单期间触发按钮已卸载
+   * 或焦点移出文档（如跳到 iframe/DevTools），ref 指向的是已脱离文档的节点，
+   * 此时不强行 .focus()（会静默 no-op），改为让浏览器自然保留当前焦点。
+   */
+  const handleAnimationEnd = useCallback(() => {
+    if (!closing) return;
+    setClosing(false);
+    const saved = previousFocusRef.current;
+    if (saved && document.contains(saved)) saved.focus();
+    previousFocusRef.current = null;
+  }, [closing]);
 
   /**
    * 打开/关闭状态跟踪：
@@ -109,15 +121,13 @@ export function UserMenu() {
     return () => document.removeEventListener("keydown", onEscape);
   }, [open, closing]);
 
-  /** 关闭动画结束：恢复打开前的焦点 */
-  const handleAnimationEnd = useCallback(() => {
-    if (!closing) return;
-    setClosing(false);
-    previousFocusRef.current?.focus();
-    previousFocusRef.current = null;
-  }, [closing]);
-
-  /** 键盘导航：方向键循环 / Home/End / Tab 关闭（基于 NAV_KEYS 配置表） */
+  /**
+   * 键盘导航：方向键循环 / Home/End / Tab 关闭（基于 NAV_KEYS 配置表）。
+   *
+   * Tab 被映射为 "close"：菜单内放弃原生 Tab-穿菜单项导航，改为方向键 roving-tabindex，
+   * Tab 直接关闭菜单并把焦点交还文档流。这是有意为之的无障碍取舍——本菜单是临时浮层，
+   * Tab 退出比 Tab 在 menuitem 间循环更符合"浮层应能被快速 ESC/Tab 退出"的用户预期。
+   */
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
     const items = menuRef.current ? Array.from(menuRef.current.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR)) : [];
     if (!items.length) return;
@@ -167,8 +177,8 @@ export function UserMenu() {
             onKeyDown={handleMenuKeyDown}
           >
             <div className="py-1">
-              {/* 深色模式切换：Switch 直接反映当前主题，点击或键盘均可触发 */}
-              <MenuButton icon={Sun} onClick={toggleTheme}>
+              {/* 深色模式切换：Switch 为唯一触发器（整行可点触发 Switch，但不再叠加 onClick） */}
+              <MenuButton icon={Sun} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-3">
                     {/* 日月图标交叉淡入：light 显日，dark 显月 */}
@@ -178,7 +188,12 @@ export function UserMenu() {
                     </div>
                     {t("userMenu.darkMode")}
                   </span>
-                  <Switch checked={theme === "dark"} onCheckedChange={(c) => setTheme(c ? "dark" : "light")} />
+                  {/*
+                   * Switch 仅作只读指示器（checked 反映当前主题），不再挂 onCheckedChange。
+                   * 之前 MenuButton.onClick 与 Switch.onCheckedChange 双触发，点击重叠命中区会
+                   * 因闭包旧值与新值竞争而 net 到 no-op 或意外翻转。现在整行统一走 onClick 切换。
+                   */}
+                  <Switch checked={theme === "dark"} aria-hidden="true" tabIndex={-1} />
                 </div>
               </MenuButton>
 

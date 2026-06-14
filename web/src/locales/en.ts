@@ -152,6 +152,7 @@ const en: Record<string, string> = {
   "chat.settings": "Settings",
   "chat.stopGeneration": "Stop generation",
   "chat.copy": "Copy",
+  "chat.copied": "Copied",
   "chat.editMessage": "Edit message",
   "chat.deleteMessage": "Delete message",
   "chat.scrollToBottom": "Scroll to bottom",

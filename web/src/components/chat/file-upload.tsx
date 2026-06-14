@@ -108,7 +108,9 @@ export function AttachmentPreview({ attachments, onRemove }: { attachments: Atta
       {attachments.map((a) => (
         <div
           key={a.fileId}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs animate-slide-down"
+          // 移动端整 chip 撑到 44px（与内部 44px 移除按钮等高），避免按钮溢出 chip 导致视觉臃肿；
+          // 桌面端收回紧凑高度。CLAUDE.md 触控目标规则优先于视觉紧凑。
+          className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2 py-1 text-xs animate-slide-down md:min-h-0"
         >
           {/* 图标：图片用 ImageIcon，其他用 FileText */}
           {a.mimeType.startsWith("image/") ? (
@@ -144,9 +146,13 @@ export function DragOverlay({ visible }: { visible: boolean }) {
   );
 }
 
-/** 字节数 → 人类可读字符串（B / KB / MB） */
+/**
+ * 字节数 → 人类可读字符串（B / KB / MB）。
+ * KB 与 MB 统一保留 1 位小数（之前 KB 用 toFixed(0) 丢精度、MB 用 toFixed(1)，
+ * 两档精度不一致；统一后 500KB 显示「500.0KB」、1.5MB 显示「1.5MB」，策略一致）。
+ */
 function formatSize(bytes: number): string {
   if (bytes < KB) return `${bytes}B`;
-  if (bytes < MB) return `${(bytes / KB).toFixed(0)}KB`;
+  if (bytes < MB) return `${(bytes / KB).toFixed(1)}KB`;
   return `${(bytes / MB).toFixed(1)}MB`;
 }

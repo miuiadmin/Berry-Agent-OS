@@ -152,6 +152,7 @@ const zh: Record<string, string> = {
   "chat.settings": "设置",
   "chat.stopGeneration": "停止生成",
   "chat.copy": "复制",
+  "chat.copied": "已复制",
   "chat.editMessage": "编辑消息",
   "chat.deleteMessage": "删除消息",
   "chat.scrollToBottom": "滚动到底部",

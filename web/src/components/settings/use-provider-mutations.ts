@@ -5,6 +5,7 @@
  * 从 providers-tab.tsx 提取，减少主文件体积。
  */
 
+import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiPost, apiPut, apiDelete } from "@/lib/api";
@@ -13,7 +14,14 @@ import type { ChannelFormData } from "@/components/settings/channel-form-dialog"
 import type { TierMapping } from "@/components/settings/providers-types";
 
 export interface ProviderPendingFlags {
-  testing: boolean;
+  /**
+   * 当前正在测试的渠道 id（null = 无渠道在测试）。
+   *
+   * 用单 id 而非 boolean：testMutation.isPending 是全局布尔，无法区分是哪个渠道在跑；
+   * 直接传 boolean 会让所有渠道卡片同时显示"测试中"并锁定。这里显式记录待测 id，
+   * 调用方据此判定单卡片的 isTesting = (testingChannelId === ch.id)。
+   */
+  testingChannelId: string | null;
   creating: boolean;
   updating: boolean;
   savingTiers: boolean;
@@ -24,6 +32,8 @@ export interface ProviderPendingFlags {
  */
 export function useProviderMutations(onSuccess: () => void) {
   const t = useT();
+  /** 当前正在测试的渠道 id（驱动单卡片 isTesting，见 ProviderPendingFlags） */
+  const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
 
   /** 测试渠道连接 */
   const testMutation = useMutation({
@@ -36,6 +46,7 @@ export function useProviderMutations(onSuccess: () => void) {
       else toast.error(data.error ?? t("providers.connectionFailed"));
     },
     onError: (err: Error) => toast.error(err.message),
+    onSettled: () => setTestingChannelId(null),
   });
 
   /** 新增渠道 */
@@ -92,14 +103,18 @@ export function useProviderMutations(onSuccess: () => void) {
   });
 
   return {
-    testChannel: testMutation.mutate,
+    // testChannel：先记录待测 id，再触发 mutation。调用方读 testingChannelId 判定单卡片态。
+    testChannel: (channelId: string) => {
+      setTestingChannelId(channelId);
+      testMutation.mutate(channelId);
+    },
     createChannel: createMutation.mutate,
     updateChannel: (channelId: string, updates: Record<string, unknown>) =>
       updateMutation.mutate({ channelId, updates }),
     deleteChannel: deleteMutation.mutate,
     saveTiers: saveTiersMutation.mutate,
     pendingFlags: {
-      testing: testMutation.isPending,
+      testingChannelId,
       creating: createMutation.isPending,
       updating: updateMutation.isPending,
       savingTiers: saveTiersMutation.isPending,

@@ -17,7 +17,12 @@
  *     actionLabel={t("common.delete")}
  *     onAction={handleDelete}
  *   />
+ *
+ * size 透传：调用方可传 size="sm" 启用紧凑布局（窄屏/批量操作场景），
+ * 默认 default 与历史行为一致。
  */
+
+"use client"
 
 import {
   AlertDialog,
@@ -36,6 +41,9 @@ import { useT } from "@/lib/i18n"
 /** Button variant 类型，用于确认按钮样式（默认 destructive） */
 type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>
 
+/** AlertDialogContent 的 size 变体类型，透传给底层 Popup */
+type DialogSize = "default" | "sm"
+
 interface ConfirmDialogProps {
   /** 是否打开 */
   open: boolean
@@ -53,6 +61,8 @@ interface ConfirmDialogProps {
   cancelLabel?: string
   /** 确认按钮 variant（默认 destructive，适配删除/禁用场景） */
   actionVariant?: ButtonVariant
+  /** 对话框尺寸（默认 default；sm 为紧凑布局，按钮双列） */
+  size?: DialogSize
 }
 
 export function ConfirmDialog({
@@ -64,11 +74,12 @@ export function ConfirmDialog({
   onAction,
   cancelLabel,
   actionVariant = "destructive",
+  size = "default",
 }: ConfirmDialogProps) {
   const t = useT()
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent size={size}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>

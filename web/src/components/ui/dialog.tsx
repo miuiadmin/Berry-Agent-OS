@@ -24,6 +24,8 @@
  * （_shared.ts），消除两份漂移的同一段类字符串。
  */
 
+"use client"
+
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon } from "lucide-react"
@@ -32,6 +34,9 @@ import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n"
 import { Button } from "@/components/ui/button"
 import { MODAL_OVERLAY, POPUP_ANIMATION, POPUP_BASE, TOUCH_TARGET } from "@/components/ui/_shared"
+
+/** common.close i18n key 常量（DialogContent / DialogFooter 共用，避免两处各写一遍字面量） */
+const CLOSE_I18N_KEY = "common.close"
 
 /** 对话框根：受控开关 + 上下文 provider */
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
@@ -80,8 +85,9 @@ function DialogContent({
   /** 是否显示右上角关闭按钮（默认 true） */
   showCloseButton?: boolean
 }) {
-  // i18n：右上角 X 按钮的 sr-only aria-label 走翻译表，避免硬编码 "Close"
-  const t = useT()
+  // i18n：右上角 X 按钮的 sr-only aria-label 走翻译表，避免硬编码 "Close"。
+  // 与 DialogFooter 共用 CLOSE_I18N_KEY，整文件只 useT 一次取值。
+  const closeLabel = useT()(CLOSE_I18N_KEY)
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -100,7 +106,7 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
-            aria-label={t("common.close")}
+            aria-label={closeLabel}
             render={
               // 移动端 44px 触控目标（TOUCH_TARGET 仅尺寸，位置类本组件独有）
               <Button
@@ -111,7 +117,7 @@ function DialogContent({
             }
           >
             <XIcon className="size-5 md:size-4" />
-            <span className="sr-only">{t("common.close")}</span>
+            <span className="sr-only">{closeLabel}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -132,7 +138,9 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 
 /**
  * 底部按钮容器。
- * @param showCloseButton 是否在末尾渲染 Close 按钮（默认 false，使用方自行放置按钮）
+ * @param showCloseButton 是否在末尾渲染 Close 按钮（默认 false，使用方自行放置按钮）。
+ *   注意：与 DialogContent 同名但语义不同（此处是 footer 末尾的关闭按钮）。
+ *   当前项目消费侧均自行在 footer 内放 Button，未启用此开关；保留以兼容未来场景。
  */
 function DialogFooter({
   className,
@@ -143,8 +151,9 @@ function DialogFooter({
   /** 是否在末尾渲染 Close 按钮（默认 false） */
   showCloseButton?: boolean
 }) {
-  // i18n：底部 Close 按钮文案走翻译表（common.close），避免硬编码 "Close"
-  const t = useT()
+  // i18n：底部 Close 按钮文案走翻译表（与 DialogContent 共用 CLOSE_I18N_KEY），
+  // 仅在 showCloseButton=true 分支用，避免无谓的额外 useT 调用污染主路径。
+  const closeLabel = useT()(CLOSE_I18N_KEY)
   return (
     <div
       data-slot="dialog-footer"
@@ -157,7 +166,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          {t("common.close")}
+          {closeLabel}
         </DialogPrimitive.Close>
       )}
     </div>

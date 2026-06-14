@@ -7,7 +7,7 @@
  * - Enter 发送 / Shift+Enter 换行
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type ReactNode } from "react";
 import { Square, ImagePlus, Settings } from "lucide-react";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { FileUploadButton, AttachmentPreview, type Attachment } from "@/components/chat/file-upload";
@@ -25,7 +25,7 @@ const CHAR_COUNT_THRESHOLD = 500;
 function ToolbarButton({
   children, onClick, disabled, variant, "aria-label": ariaLabel,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   variant?: "default" | "destructive";
@@ -72,9 +72,12 @@ export function ChatInput({ onSend, onCancel, externalAttachments, disabled }: C
 
   /** 提交发送：清空文本 / 附件并重置 textarea 高度 */
   const handleSubmit = () => {
-    // 父组件禁用（断线 / 未配置模型）时弹提示，避免用户以为按钮坏了。
-    // 注意：发送按钮虽然 visually disabled，但 Enter 键仍会触发 handleSubmit（键盘不读 disabled 态），
-    // 因此此分支可达——断线时按 Enter 会弹"未连接"提示。
+    // 父组件禁用（未配置模型）时弹提示，避免用户以为按钮坏了。
+    // 注意：发送按钮虽然 visually disabled，但 Enter 键仍会触发 handleSubmit（textarea 的
+    // onKeyDown 不读 button 的 disabled 态）——此分支正是为「未配置模型时按 Enter」兜底。
+    // 流式中 isStreaming=true 时也会进 handleSubmit，但被下方 hasContent/isStreaming 检查拦截，不会弹 toast。
+    // 「断线」场景不走此分支：disabled 仅在 !canSend（未配置模型 / 流式中）时为 true，
+    // 断线时 isModelConfigured 仍 true，消息走 ws-store.sendQueue 暂存，不在此弹提示。
     if (disabled) { toast.error(t("chat.notConnected")); return; }
     if (!hasContent || isStreaming) return;
     const trimmed = text.trim();

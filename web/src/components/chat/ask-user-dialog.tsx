@@ -43,9 +43,13 @@ interface AskUserDialogProps {
 /** 默认超时 5 分钟（§5.3.5） */
 const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
 
-/** 格式化剩余时间（m:ss） */
+/** AskUser 超时默认回复文案的 i18n key（避免把 t 放进 effect deps） */
+const NO_RESPONSE_KEY = "askUser.noResponse";
+
+/** 格式化剩余时间为 m:ss。负数或 NaN 归零保护，避免异常展示 "-1:NaN"。 */
 function fmtTime(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`;
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  return `${Math.floor(safe / 60)}:${(Math.floor(safe) % 60).toString().padStart(2, "0")}`;
 }
 
 /**
@@ -95,35 +99,46 @@ export function AskUserDialog({ payload, onResponded }: AskUserDialogProps) {
     }
   }, [submitting, payload, t, onResponded]);
 
-  /** handleRespond 的 ref 镜像：倒计时超时回调通过 ref 读最新实现，effect 依赖只需 [payload] */
+  /** handleRespond 的 ref 镜像：倒计时超时回调通过 ref 读最新实现，effect 依赖只需稳定会话标识 */
   const handleRespondRef = useRef(handleRespond);
   handleRespondRef.current = handleRespond;
+  /**
+   * 超时时自动选用的默认选项 ref 镜像。
+   * payload.options 是数组引用——父组件每次渲染若新建数组会让「依赖 options 的 effect」重建。
+   * 把 options + 默认文案收进 ref，让倒计时 effect 不依赖 options。
+   */
+  const defaultAnswerRef = useRef<string>("");
+  defaultAnswerRef.current = payload.options?.[0] ?? t(NO_RESPONSE_KEY);
 
   /**
    * 超时倒计时（§5.3.5: 5 分钟超时）。
    *
-   * effect 仅依赖 [payload.sessionId, payload.taskId]（payload 的稳定标识）：
-   * 之前依赖 [handleRespond, payload.options, t]，submitting 切换会重建 handleRespond → 重建 effect →
-   * setInterval 重建 → setRemaining 闭包过期 → 倒计时跳回 5:00 误导用户。
-   * 现在用 handleRespondRef 读最新 handleRespond，effect 不再随 submitting 变化重建。
+   * effect 仅依赖 [payload.sessionId, payload.taskId]（稳定的会话标识）：
+   * 之前依赖数组是 [payload.sessionId, payload.taskId, payload.options, t]——
+   * payload.options 是数组引用（父组件每次渲染若新建数组即重建 effect），t 在 locale 切换时也变，
+   * submitting 切换会通过 handleRespond 间接重建 effect → setInterval 重建 →
+   * setRemaining 闭包过期 → 倒计时跳回 5:00 误导用户。
+   * 现在用 ref 读最新 handleRespond / 默认选项，effect 只在会话标识变化时重建。
    */
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setRemaining((prev) => {
         if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          /** 超时自动选第一个选项（无选项时回复"无响应"文案） */
+          // clear 后立即 null，让 cleanup 的二次 clear 有明确状态（虽然 clear 已结束的 id 无副作用，
+          // 但 null 表示「无活跃 timer」更干净，便于未来扩展「超时前取消」逻辑）
+          if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+          /** 超时自动回复默认选项（ref 读最新值，options 变化不重建 effect） */
           if (!respondedRef.current) {
-            void handleRespondRef.current(payload.options?.[0] ?? t("askUser.noResponse"));
+            void handleRespondRef.current(defaultAnswerRef.current);
           }
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload.sessionId, payload.taskId, payload.options, t]);
+  }, [payload.sessionId, payload.taskId]);
 
   /** 提交自由文本（空值忽略） */
   const submitCustom = () => {

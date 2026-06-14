@@ -13,6 +13,12 @@ import { useT, useDateFormat } from "@/lib/i18n";
 
 /** 标题/首条消息展示长度上限（超出截断 + 省略号） */
 const TITLE_MAX = 40;
+/**
+ * 退场动画兜底超时（毫秒）。
+ * 用于 prefers-reduced-motion 等场景：动画事件不触发时强制调用 onExitEnd，
+ * 避免会话卡在动画态删不掉。取值略大于 animate-item-exit 的实际时长。
+ */
+const MAX_EXIT_MS = 400;
 
 /** 操作图标按钮的共享 className（移动端 44px / 桌面端紧凑） */
 const ACTION_BTN = "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-2 md:min-h-0 md:min-w-0 md:p-1";
@@ -60,6 +66,10 @@ export function ConversationItem({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  /** 列表项 DOM（用于兜底退场动画超时） */
+  const itemRef = useRef<HTMLDivElement | null>(null);
+  /** 退场动画兜底计时器（reduced-motion 等场景动画事件不触发时强制 onExitEnd） */
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** 进入编辑态时聚焦并全选（便于整体覆盖原标题） */
   useEffect(() => {
@@ -90,7 +100,28 @@ export function ConversationItem({
         isActive ? "nav-link-active bg-accent text-accent-foreground" : "hover:bg-accent/50 text-muted-foreground",
       )}
       onClick={() => { if (!isRemoving) onSelect(); }}
+      /*
+       * 退场动画结束时通知父组件真正删除。
+       *
+       * 关键场景——prefers-reduced-motion：浏览器在用户启用「减少动态」时可能完全跳过动画，
+       * 不触发 animationend → onExitEnd 永不调用 → 会话卡在动画态删不掉。
+       * React 的 HTMLAttributes 不暴露 onAnimationCancel，故无法监听动画取消事件；
+       * 改用 ref 回调里的 setTimeout 兜底：isRemoving 置 true 后 MAX_EXIT_MS 内未收到
+       * animationend 就强制结束。正常动画路径（~200ms）远小于 MAX_EXIT_MS(400ms)，
+       * 不会与 animationend 重复触发（兜底触发时 onExitEnd 已是幂等清理）。
+       */
       onAnimationEnd={() => { if (isRemoving) onExitEnd(conv.sessionId); }}
+      ref={(el) => {
+        itemRef.current = el;
+        // 兜底：reduced-motion 等场景 animationend 不触发时，限时强制结束
+        if (isRemoving && el) {
+          if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+          exitTimerRef.current = setTimeout(() => onExitEnd(conv.sessionId), MAX_EXIT_MS);
+        } else if (!isRemoving && exitTimerRef.current) {
+          clearTimeout(exitTimerRef.current);
+          exitTimerRef.current = null;
+        }
+      }}
     >
       {editing ? (
         /* 编辑态：输入框 + 保存/取消（阻止事件冒泡，避免误触选中） */

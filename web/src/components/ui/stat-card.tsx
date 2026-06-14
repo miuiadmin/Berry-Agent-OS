@@ -55,8 +55,17 @@ export function StatCard({
 }: StatCardProps) {
   return (
     // staggerClass 统一生成 stagger-N（封顶 STAGGER_MAX=8，超出不会无动画）；
-    // stagger prop 是 1-based，helper 是 0-based，故传 (stagger ?? 1) - 1。
-    <Card className={cn("card-lift", stagger !== undefined && staggerClass(stagger - 1), className)}>
+    // stagger prop 是 1-based。加 Math.max(0, ...) 下界保护：
+    // 若调用方误传 stagger={0}（0-based），原本会算出 staggerClass(-1) → stagger-0，
+    // 而 CSS 只定义了 stagger-1~8，class 静默失效（动画丢失但不崩）。
+    // 下界保护后 stagger<1 一律回退到 stagger-1，确保至少有一个最小延迟。
+    <Card
+      className={cn(
+        "card-lift",
+        stagger !== undefined && staggerClass(Math.max(0, stagger - 1)),
+        className,
+      )}
+    >
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <Icon className="size-4" />
@@ -64,9 +73,20 @@ export function StatCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {/* loading：骨架屏；否则数值 + 可选副文本 + 可选 extra */}
+        {/*
+          loading：渲染与 loaded 态等高的占位结构。
+          旧实现只放一个 Skeleton h-7 w-20，desc/extra 在 loading 时不渲染，
+          导致 loading→loaded 切换时高度抖动（loaded 多两行）。这里始终保留
+          desc / extra 的占位行，loaded 与 loading 行数一致，消除视觉跳变。
+        */}
         {loading ? (
-          <Skeleton className="h-7 w-20" />
+          <>
+            <Skeleton className="h-7 w-20" />
+            {/* desc 占位：loaded 有 desc 时此处也占一行，避免高度跳变 */}
+            {desc !== undefined && <Skeleton className="mt-1 h-3 w-16" />}
+            {/* extra 占位：loaded 有 extra 时此处保留空间 */}
+            {extra !== undefined && <div className="mt-1">{/* extra 占位（无视觉内容） */}</div>}
+          </>
         ) : (
           <>
             <p className="text-2xl font-bold">{value}</p>

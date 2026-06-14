@@ -71,6 +71,15 @@ export const INLINE_CODE =
   "rounded bg-muted/80 px-1.5 py-0.5 text-[13px] font-mono text-foreground"
 
 /**
+ * 链接 / 图片 / 附件下载 URL 的安全协议白名单（https / mailto / 相对路径 / 锚点）。
+ *
+ * 用于过滤 LLM 幻觉注入的 javascript: / data: / vbscript: URI。
+ * markdown-components.tsx（a / img）与 message-bubble-parts.tsx（附件下载）共用，
+ * 抽到此处单一事实源，避免两处正则漂移。
+ */
+export const SAFE_HREF = /^(https?:|mailto:|\/|#)/i
+
+/**
  * 消息正文 markdown 容器样式（chat-message-list 主气泡 + block-renderers 文本 block 共用）。
  *
  * 重置 prose 默认对 pre/code 的样式（pre 由 CodeBlock 自带容器，code 走 INLINE_CODE），

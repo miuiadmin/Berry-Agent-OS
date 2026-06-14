@@ -15,11 +15,16 @@ import type { TaskInfo } from "@/lib/api";
 import { useT, useDateFormat } from "@/lib/i18n";
 import { formatDuration, formatJson } from "@/lib/format";
 
+/** 已知任务状态集合（与 locales 的 status.* 键一一对应） */
+const KNOWN_STATUSES = new Set(["running", "completed", "failed", "cancelled", "pending"]);
+
 /** 状态 → Badge variant 映射（未知状态回落 secondary） */
 const STATUS_VARIANT: Record<string, "success" | "destructive" | "warning" | "secondary"> = {
   completed: "success",
   failed: "destructive",
   running: "warning",
+  cancelled: "secondary",
+  pending: "secondary",
 };
 
 /** 详情行：标签 + 内容（展开区域的重复模式） */
@@ -44,6 +49,20 @@ function DetailPre({ label, content, tone }: { label: string; content: string; t
   );
 }
 
+/**
+ * 渲染任务状态徽章文案。
+ *
+ * - 已知状态（completed/failed/running/cancelled/pending）→ 走 i18n 翻译
+ * - 未知状态 → 返回状态原值首字母大写（绝不让用户看到 "status.<unknown>" 这种
+ *   字面键——t() 在缺键时返回原 key，原先的 `?? task.status` 因 t() 永不返回
+ *   null/undefined 而成为死代码，无法兜底）
+ */
+function statusLabel(status: string, t: (key: string) => string): string {
+  if (KNOWN_STATUSES.has(status)) return t(`status.${status}`);
+  // 未知状态：直接用原始值，避免暴露 i18n 键命名
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 interface TaskCardMobileProps {
   task: TaskInfo;
   onCancel: () => void;
@@ -57,16 +76,19 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border">
-      {/* 头部（点击展开/收起） */}
+      {/*
+       * 头部（点击展开/收起）。显式 min-h-[44px] md:min-h-0 满足 CLAUDE.md 移动端
+       * 触控目标硬规则——之前仅靠 p-3 隐式撑高，极端字号缩放下可能跌破 44px。
+       */}
       <button type="button" onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-muted/30 active:bg-muted/40">
+        className="flex min-h-[44px] w-full items-center gap-3 p-3 text-left transition-colors hover:bg-muted/30 active:bg-muted/40 md:min-h-0">
         <div className="text-muted-foreground">
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <Badge variant={STATUS_VARIANT[task.status] ?? "secondary"} className="text-[11px]">
-              {t(`status.${task.status}`) ?? task.status}
+              {statusLabel(task.status, t)}
             </Badge>
             <span className="truncate text-xs font-medium">{task.taskType}</span>
           </div>
@@ -78,9 +100,11 @@ export function TaskCardMobile({ task, onCancel }: TaskCardMobileProps) {
         </div>
         {task.status === "running" && (
           // stopPropagation 防止点击取消按钮误触发卡片展开
+          // 移动端类序：min-h/min-w 在前，md: 覆盖在后（CLAUDE.md 移动端硬规则）。
+          // 去掉冗余的 h-11（与 min-h-[44px] 重复）和被显式高度覆盖的 size-sm h-7 噪音。
           <Button variant="destructive" size="sm" aria-label={t("taskCard.cancelTask")}
             onClick={(e) => { e.stopPropagation(); onCancel(); }}
-            className="min-h-[44px] min-w-[44px] shrink-0 px-3 text-xs h-11 md:h-6 md:min-h-0 md:px-2">
+            className="min-h-[44px] min-w-[44px] shrink-0 px-3 text-xs md:h-6 md:min-h-0 md:px-2">
             <XCircle className="size-3" />
           </Button>
         )}

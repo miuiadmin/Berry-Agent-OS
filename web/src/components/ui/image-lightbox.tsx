@@ -86,14 +86,22 @@ export function ImageLightbox({ src, alt, open, onClose }: ImageLightboxProps) {
    * 每次父渲染 onClose 引用都变。若直接进 handleKeyDown 依赖 → keydown effect 频繁 re-run
    * → prevFocusRef.current 被反复覆盖为当前 activeElement（可能已不是打开前的元素），
    * 关闭时会 focus 到错误元素。ref 方案让 effect 依赖只剩 [open]，稳定。
+   *
+   * 注意：ref 同步放进 effect 内（而非 render 期直接写）—— render 期写 ref.current
+   * 是 React 反模式，会破坏 concurrent 模式下的可暂停渲染语义。这里 effect 依赖
+   * [onClose]，回调变化时把最新引用挂进 ref，行为与原来等价但符合官方推荐。
    */
   const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
 
   // ESC 处理器：依赖为空 → 引用稳定，永不重建
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === "Escape") onCloseRef.current()
   }, [])
+
+  useEffect(() => {
+    // 把最新 onClose 挂进 ref（替代原来 render 期直接写）。
+    onCloseRef.current = onClose
+  }, [onClose])
 
   useEffect(() => {
     if (!open) return

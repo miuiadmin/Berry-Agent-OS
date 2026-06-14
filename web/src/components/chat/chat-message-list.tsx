@@ -21,7 +21,7 @@ import { ChevronDown } from "lucide-react";
 import { createMarkdownComponents } from "./markdown-components";
 import { MessageTimeline } from "./block-renderers";
 import { StrawberryLogo } from "@/components/ui/strawberry-logo";
-import { useT, useLocale } from "@/lib/i18n";
+import { useT, useLocale, localeToBcp47 } from "@/lib/i18n";
 import {
   EditableMessage,
   AttachmentList,
@@ -88,7 +88,8 @@ const MessageBubble = memo(function MessageBubble({
   const [editing, setEditing] = useState(false);
   const t = useT();
   const { locale } = useLocale();
-  const localeTag = locale === "zh" ? "zh-CN" : "en-US";
+  // BCP 47 标签用于 Intl 时间格式化（集中映射，未来加语言只改 i18n 层）
+  const localeTag = localeToBcp47(locale);
   /** markdown 组件映射缓存到 isStreaming 粒度，避免每帧重建 */
   const markdownComponents = useMemo(
     () => createMarkdownComponents(isStreaming),
@@ -244,15 +245,16 @@ export function ChatMessageList({
   onEdit?: (messageId: string, content: string) => void;
 }) {
   const messages = useChatStore((s) => s.messages);
+  // removeMessage 是 zustand store action，引用天然稳定（store 创建后不变），
+  // 无需 useCallback 包一层——之前包 stableRemoveMessage 是冗余防御。
   const removeMessage = useChatStore((s) => s.removeMessage);
-  /** 稳定引用，避免每次渲染创建新函数导致 MessageBubble memo 失效 */
-  const stableRemoveMessage = useCallback((id: string) => removeMessage(id), [removeMessage]);
   /*
    * 把父组件传入的 onRetry/onEdit 包一层 useCallback。
    * MessageBubble 是 memo 包装：若父组件每次重渲染都创建新的 onRetry/onEdit 闭包，
    * memo 会判 props 变化导致整列消息全量重渲染（store 更新一次就重渲所有 bubble）。
    * 这里用 incoming prop 作依赖做一层记忆化——只要父组件传入的回调引用稳定，
    * 透传下去的引用就稳定；即便父组件未稳定化，也只在回调变化时重渲，而非每次 store 更新。
+   * removeMessage 是 store action 不需要这层包装（见上注释）。
    */
   const stableRetry = useCallback((id: string) => { onRetry?.(id); }, [onRetry]);
   const stableEdit = useCallback((id: string, content: string) => { onEdit?.(id, content); }, [onEdit]);
@@ -308,7 +310,7 @@ export function ChatMessageList({
                 key={msg.id}
                 className={i === messages.length - 1 ? (msg.role === "user" ? "animate-msg-user" : "animate-msg-assistant") : undefined}
               >
-                <MessageBubble message={msg} onRetry={stableRetry} onEdit={stableEdit} onDelete={stableRemoveMessage} />
+                <MessageBubble message={msg} onRetry={stableRetry} onEdit={stableEdit} onDelete={removeMessage} />
               </div>
             ))}
           </div>

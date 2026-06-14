@@ -10,22 +10,33 @@
  * - `title` 同时渲染为原生 title 提示与 aria-label 无障碍标签，
  *   避免每个图标按钮都把同一句文案写两遍。
  * - `onClick` 透传原生鼠标事件，便于在卡片内调用 stopPropagation。
+ * - `type` 透传给底层 button（默认 'button'，不触发 form submit）。
+ *   重要：HTML button 默认 type='submit'，若 IconButton 出现在 form 内且未显式
+ *   传 type='button'，点击会触发表单提交。这里默认 'button' 杜绝该隐患。
+ * - `variant` 透传给底层 Button variant（默认 'ghost'，保留历史行为）。
+ *   destructive 操作通过 destructive prop 染色即可，无需改 variant。
  * - `className` 追加（而非覆盖）基础类，支持如 `animate-spin` 的临时态。
  *
- * 适用范围：纯图标、ghost 变体的操作按钮（删除 / 刷新 / 启用切换 等）。
- * 不适用：带文字的按钮（用 `min-h-[44px]` 那套尺寸）、primary 填充按钮、
+ * 适用范围：纯图标操作按钮（删除 / 刷新 / 启用切换 等）。
+ * 不适用：带文字的按钮（用 `min-h-[44px]` 那套尺寸）、
  * 圆形悬浮按钮（FAB）——这些是不同的尺寸/形态，不要强行塞进来。
  */
 
 import type { MouseEventHandler, ReactNode } from "react"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
+import type { VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
+
+/** Button variant 类型，透传给底层 Button */
+type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>
 
 export function IconButton({
   title,
   disabled,
   onClick,
   destructive,
+  variant = "ghost",
+  type = "button",
   className,
   children,
 }: {
@@ -37,6 +48,14 @@ export function IconButton({
   onClick?: MouseEventHandler<HTMLButtonElement>
   /** 危险操作（删除等）：hover 态染红，提示破坏性后果 */
   destructive?: boolean
+  /** Button variant（默认 ghost，保留历史行为） */
+  variant?: ButtonVariant
+  /**
+   * 原生 button type 属性。
+   * 默认 'button'，确保在 form 内点击不会意外触发提交。
+   * 需要提交时显式传 'submit'。
+   */
+  type?: "button" | "submit" | "reset"
   /** 追加到基础尺寸之后的 className（如加载中 `animate-spin`） */
   className?: string
   /** 图标内容 */
@@ -44,8 +63,9 @@ export function IconButton({
 }) {
   return (
     <Button
-      variant="ghost"
+      variant={variant}
       size="icon"
+      type={type}
       title={title}
       aria-label={title}
       disabled={disabled}

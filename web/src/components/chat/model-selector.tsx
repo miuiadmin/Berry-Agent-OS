@@ -9,6 +9,7 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { useModelConfig } from "./use-model-config";
 
@@ -109,7 +110,7 @@ export function ModelSelector() {
             <div className="shrink-0 px-4 pb-2 md:px-3">
               <input type="text" placeholder={t("chat.searchModels")} aria-label={t("chat.searchModels")}
                 value={filter} onChange={(e) => setFilter(e.target.value)}
-                className={`w-full px-3 py-2 ${INPUT_BASE}`} autoFocus />
+                className={cn("w-full px-3 py-2", INPUT_BASE)} autoFocus />
             </div>
 
             {/* 模型列表（按渠道分组） */}
@@ -147,7 +148,7 @@ export function ModelSelector() {
                 <input type="text" placeholder={t("chat.orEnterModelId")}
                   value={editModel} onChange={(e) => setEditModel(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") handleManualSwitch(); }}
-                  className={`flex-1 px-2.5 py-2 ${INPUT_BASE}`} />
+                  className={cn("flex-1 px-2.5 py-2", INPUT_BASE)} />
                 <Button size="sm" onClick={handleManualSwitch} disabled={!editModel.trim()}
                   className="min-h-[44px] md:min-h-0">
                   {t("common.apply")}

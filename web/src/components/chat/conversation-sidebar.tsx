@@ -13,7 +13,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useChatStore } from "@/lib/stores/chat-store";
-import { queries, type ConversationInfo } from "@/lib/api";
+import { queries } from "@/lib/api";
 import { useDebouncedSearch } from "@/hooks/use-debounced-search";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
@@ -43,9 +43,11 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   const t = useT();
 
   // ── 数据查询 ──
+  // queries.conversations 的 queryFn 已声明返回 ConversationInfo[]（见 lib/api.ts），
+  // 无需 select 类型断言——之前 select: (data) => data as ConversationInfo[] 是冗余的
+  // 类型断言，会绕过类型检查（若后端返回结构变化，断言掩盖不兼容）。
   const { data: conversations } = useQuery({
     ...queries.conversations({ search: search || undefined }),
-    select: (data) => data as ConversationInfo[],
   });
 
   // ── Chat store ──
@@ -60,6 +62,11 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
   /**
    * 新建对话：清空当前消息 + 会话 + 关闭抽屉。
    * setSkipAutoRestore(true) 阻止 chat-window 的 auto-restore effect 立刻拉最近对话覆盖（让"新建"按钮有效）。
+   *
+   * 标志生命周期：setSkipAutoRestore(true) 仅在「新建」时置位；store 的 setSessionId(id) 在选择
+   * 已有对话时会重置 skipAutoRestore=false（见 chat-store.ts 的 setSessionId 实现），
+   * 故「新建 → 选已有对话」后标志自动复位，不是永久粘性。「新建 → 删除全部对话」时无对话可恢复，
+   * 标志保持 true 也无害（下次选对话仍会复位）。
    */
   const handleNewChat = () => {
     setSkipAutoRestore(true);
@@ -92,7 +99,8 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
           <Input
             placeholder={t("chat.searchPlaceholder")}
             value={search}
-            className="h-11 md:h-8 pl-8 text-[16px] md:text-xs"
+            // CLAUDE.md 移动端硬规则：Input 移动端最小 h-10(40px)；此处用 min-h-[44px] 对齐触控目标规则
+            className="min-h-[44px] pl-8 text-[16px] md:min-h-0 md:h-8 md:text-xs"
             onChange={(e) => debouncedSearch(e.target.value)}
           />
         </div>
@@ -117,12 +125,10 @@ export function ConversationSidebar({ onSelect }: ConversationSidebarProps) {
                   next.delete(sid);
                   return next;
                 });
-                deleteConversation.mutate(sid, {
-                  onError: () => {
-                    // 删除失败：onError 已在 use-conversation-mutations 内 GET 校验 + toast。
-                    // 这里无需额外回滚——removingIds 已在上方移除，item 自动从动画态恢复为正常展示态。
-                  },
-                });
+                // 不传 onError：删除失败的处理（GET 校验 + toast + 数据回滚）已在
+                // use-conversation-mutations 内统一完成。此处 removingIds 已上方移除，
+                // item 自动从动画态恢复为正常展示态，无需侧边栏额外补救。
+                deleteConversation.mutate(sid);
               }}
             />
           ))}

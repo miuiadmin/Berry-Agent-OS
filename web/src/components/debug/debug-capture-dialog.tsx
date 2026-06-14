@@ -25,7 +25,7 @@ import {
 import { CopyButton } from "@/components/ui/copy-button";
 import { useDebugCaptureStore } from "@/lib/stores/debug-capture-store";
 import { useLocale, useT } from "@/lib/i18n";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 
 /* ============================================================
  * 抓包结果的本地格式化（仅 debug 用，不外提）
@@ -87,21 +87,20 @@ export function DebugCaptureDialog() {
    * 解决：用 ref 锁存最近一次非 null 的 lastResult 快照，关闭动画期间仍渲染该快照；
    * 仅在 Dialog 的关闭动画彻底结束（onOpenChangeComplete(false)）后才清掉本地缓存。
    * 这让 store 可以即时清状态，而 DOM 卸载延迟到动画完成，二者解耦。
+   *
+   * 清理点（唯一）：onOpenChangeComplete(false)（Base UI Dialog Root 的真实 prop，
+   * 已验证 wrapper Dialog 透传所有 props）。先前曾额外挂一个 useEffect 兜底"万一
+   * onOpenChangeComplete 不触发"，但该 prop 经核实会可靠触发（关闭动画结束即回调），
+   * 双清理点属于 patch over patch —— 单一机制 + 明确语义更符合架构优雅定律。
    */
   const keepResultRef = useRef<typeof lastResult>(lastResult);
   if (lastResult) {
-    // store 有最新结果 → 同步覆盖本地缓存
+    // store 有最新结果 → 同步覆盖本地缓存（render 期写 ref：strict-mode 双渲染幂等，
+    // 且此处必须在 render 期而非 effect 内执行——否则首屏 lastResult 已就绪时，
+    // effect 在 paint 后才写 ref 会导致首帧渲染 null 快照闪烁）
     keepResultRef.current = lastResult;
   }
   const result = keepResultRef.current;
-
-  // 兜底：万一 onOpenChangeComplete 未触发（程序化关闭 / 无动画环境），
-  // 在 store 已彻底关闭时也清掉本地快照，避免残留导致下次闪一下旧内容。
-  useEffect(() => {
-    if (!showResultDialog && !lastResult) {
-      keepResultRef.current = null;
-    }
-  }, [showResultDialog, lastResult]);
 
   // 完全没有内容可展示（首次加载 / 从未触发过 / 已彻底关闭）→ 不渲染
   if (!result) return null;

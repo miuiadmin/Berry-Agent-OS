@@ -17,6 +17,16 @@ import { type ProviderChannel, type ModelEntry, PROVIDER_KIND_LABEL_KEYS } from 
 /** Lucide 图标组件的最小契约 */
 type IconType = React.ComponentType<{ className?: string }>;
 
+/**
+ * 防御性 token 格式化：后端实际返回偶有缺字段（ModelEntry.contextWindow 等），
+ * 直接喂 formatTokensCompact 会渲染出 "NaN"。先判空降级为 "—"，与 price 行的
+ * `inputPricePer1M != null ? … : "—"` 风格一致。
+ */
+function safeTokens(n: number | undefined | null): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return formatTokensCompact(n);
+}
+
 /** 桌面/移动两套尺寸 className，避免每个 Action 组件都重复三元 */
 const actionSizing = {
   icon: { desktop: "size-7", mobile: "size-8 min-h-[44px] min-w-[44px]" },
@@ -32,8 +42,20 @@ function ActionIcon({ icon: Icon, label, onClick, mobile, className }: {
   className?: string;
 }) {
   return (
-    <Button variant="ghost" size="sm" onClick={onClick} aria-label={label}
-      className={cn("shrink-0", mobile ? actionSizing.icon.mobile : actionSizing.icon.desktop, className)}>
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={onClick}
+      aria-label={label}
+      // 移动端用 h-auto 取消 size-sm 的固定 h-7，让 min-h-[44px]/min-w-[44px] 唯一决定
+      // 触控目标尺寸，避免两套高度类竞争导致渲染高度不确定（CLAUDE.md 移动端 44px 硬规则）。
+      // p-0 让 size-sm 的 px-2.5 不挤占图标居中。桌面端保持 size-sm 默认（h-7）。
+      className={cn(
+        "shrink-0",
+        mobile ? "h-auto p-0 " + actionSizing.icon.mobile : actionSizing.icon.desktop,
+        className,
+      )}
+    >
       <Icon className="size-3.5" />
     </Button>
   );
@@ -81,8 +103,8 @@ function ModelRow({ model }: { model: ModelEntry }) {
   return (
     <>
       <span className="truncate font-mono" title={model.id}>{model.name}</span>
-      <span className="text-right text-muted-foreground">{formatTokensCompact(model.contextWindow)}</span>
-      <span className="text-right text-muted-foreground">{formatTokensCompact(model.defaultMaxTokens)}</span>
+      <span className="text-right text-muted-foreground">{safeTokens(model.contextWindow)}</span>
+      <span className="text-right text-muted-foreground">{safeTokens(model.defaultMaxTokens)}</span>
       <span className="text-right text-muted-foreground">
         {model.inputPricePer1M != null ? `$${model.inputPricePer1M}/${model.outputPricePer1M ?? "-"}` : "—"}
       </span>

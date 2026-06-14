@@ -163,7 +163,13 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
   const handleEdit = useCallback(
     (messageId: string, content: string) => {
       // content 来自 EditableMessage 的 textFromBlocks 预填值（见 message-bubble-parts），
-      // 已是用户正文投影，无需在此再投影
+      // 已是用户正文投影，无需在此再投影。
+      //
+      // 两次 store.set（removeMessagesAfter 删后继 + removeMessage 删自身）：
+      // zustand set 同步触发订阅者，理论上两次 set 之间存在「消息还在但后继已没」的瞬态。
+      // 但 React 18 自动批处理把两次 set 合并成一次渲染，UI 订阅者看不到瞬态；
+      // 且无生产订阅者依赖该中间态。若未来 store 暴露 removeMessagesAfter(id, { inclusive })，
+      // 可合并为单次 set 消除瞬态（当前 store 无此签名，保持两次调用）。
       removeMessagesAfter(messageId);
       removeMessage(messageId);
       sendMessage(content);
@@ -222,11 +228,15 @@ export function ChatWindow({ onToggleSidebar }: ChatWindowProps) {
         <ChatMessageList onRetry={handleRetry} onEdit={handleEdit} />
       )}
 
-      {/* 委派请求弹窗 */}
-      {pendingDelegation && (
+      {/*
+        委派请求弹窗 + 权限确认弹窗。
+        互斥渲染（权限优先）：两者类型上可同时为非 null，但若同时挂载两个 BottomSheet，
+        一次 Escape 会触发两个 onDismiss（双否认）。权限弹窗是 destructive 色调、更紧急，
+        故 pendingPermission 存在时优先展示，pendingDelegation 暂缓（权限解决后再出现）。
+      */}
+      {pendingDelegation && !pendingPermission && (
         <DelegationDialog request={pendingDelegation} onRespond={respondDelegation} />
       )}
-      {/* 权限确认弹窗 */}
       {pendingPermission && (
         <PermissionConfirmDialog request={pendingPermission} onRespond={respondPermission} />
       )}
