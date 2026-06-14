@@ -15,6 +15,7 @@ import type {
 } from '../contracts/delegation.js';
 import { isDelegationTerminal, DEFAULT_INTERNAL_BUDGET, DEFAULT_EXTERNAL_BUDGET, CORRECTION_LIMITS } from '../contracts/delegation.js';
 import { getLogger } from '../utils/logger.js';
+import { postSystemReportEnvelope } from './board-projection.js';
 
 const logger = getLogger('delegation-manager');
 
@@ -287,6 +288,13 @@ export class DelegationManager {
       error,
     });
 
+    // 16.0 §7.5 板即审计：fail 同步投影 system report 信封（best-effort），让 board 忠实镜像所有 fail
+    // 转换——包括不经 orchestrator report 的路径（agent.crashed/task.timeout/sweepStale/guard-terminate/
+    // failByAgent）。不替代权威 delegation.failed emit（状态机仍是权威源）；board 是 best-effort 审计镜像。
+    try {
+      postSystemReportEnvelope(id, { summary: `任务失败：${error}`, sessionId: entry.sessionId });
+    } catch { /* best-effort 审计镜像，失败不影响状态机 */ }
+
     logger.warn({ delegationId: id, error }, 'Delegation failed');
     return true;
   }
@@ -308,6 +316,11 @@ export class DelegationManager {
       targetAgent: entry.targetAgent,
       error: reason ?? 'interrupted',
     });
+
+    // 16.0 §7.5 板即审计：interrupt 同步投影 system report（best-effort，让 board 镜像用户中断转换）
+    try {
+      postSystemReportEnvelope(id, { summary: `执行已取消：${reason ?? 'interrupted'}`, sessionId: entry.sessionId });
+    } catch { /* best-effort 审计镜像 */ }
 
     logger.info({ delegationId: id, reason }, 'Delegation interrupted');
     return true;
