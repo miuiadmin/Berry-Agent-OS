@@ -33,17 +33,6 @@ export interface SocketMessageMap {
   'socket:agents.enable': { request: { name: string }; response: { ok: boolean; name?: string; error?: string } };
   'socket:agents.disable': { request: { name: string; reason?: string }; response: { ok: boolean; name?: string; error?: string } };
   'socket:agents.reload': { request: Record<string, unknown>; response: { ok: boolean; error?: string } };
-  'socket:scheduler.jobs.list': { request: { workspaceId?: string }; response: { ok: boolean; jobs: unknown[] } };
-  'socket:scheduler.jobs.create': { request: { workspaceId: string; agentId: string; name: string; scheduleType: string; prompt: string; cronExpression?: string; intervalMinutes?: number; webhookSecret?: string; eventFilter?: Record<string, unknown>; concurrencyPolicy?: string; executionMode?: string; sessionMode?: string; maxRetries?: number }; response: { ok: boolean; jobId?: string; webhookToken?: string; error?: string } };
-  'socket:scheduler.jobs.get': { request: { jobId: string }; response: { ok: boolean; job?: unknown; error?: string } };
-  'socket:scheduler.jobs.delete': { request: { jobId: string }; response: { ok: boolean; error?: string } };
-  'socket:scheduler.jobs.trigger': { request: { jobId: string }; response: { ok: boolean; executionId?: string; error?: string } };
-  'socket:scheduler.jobs.pause': { request: { jobId: string; reason?: string }; response: { ok: boolean } };
-  'socket:scheduler.jobs.resume': { request: { jobId: string }; response: { ok: boolean } };
-  'socket:scheduler.queue.status': { request: { workspaceId?: string }; response: { ok: boolean; status?: unknown } };
-  'socket:scheduler.chain.approve': { request: { roundId: string; stepId: string }; response: { ok: boolean } };
-  'socket:scheduler.chain.reject': { request: { roundId: string; stepId: string; reason: string }; response: { ok: boolean } };
-  'socket:scheduler.executions': { request: { jobId: string; limit?: number }; response: { ok: boolean; executions: unknown[] } };
   'socket:message': { request: { message: string; sessionId?: string; streaming?: boolean; permissionMode?: string }; response: SocketResultEvent | SocketInterruptedEvent };
   'socket:interrupt': { request: { sessionId: string; reason?: string }; response: SocketInterruptedEvent };
   'socket:daemon.register': { request: { daemonId: string; pid: number; runtimes: RuntimeInfo[]; maxSlots: number; availableSlots: number }; response: void };
@@ -228,17 +217,6 @@ export type EventMap = {
   'message.responded': { sessionId: string; taskId: string; response: string; /** Brain 审核裁决（approve/modify/reject），或 'restored'（用户还原了 Brain 的修改） */ verdict?: string; /** 13.0 灵魂版：Brain 审核理由（modify/reject 时非空） */ reviewReason?: string; /** 13.0 灵魂版：Brain 修改前的原始初稿 */ originalDraft?: string };
   'tool.executed': { agentName: string; toolName: string; durationMs: number; isError: boolean; taskId?: string };
   'llm.request.completed': { taskId?: string; agentName: string; inputTokens: number; outputTokens: number; cacheRead?: number; cacheCreation?: number; durationMs: number };
-  'scheduler.job_enqueued': { jobId: string; queueItemId: string; triggerSource: string };
-  'scheduler.job_claimed': { queueItemId: string; agentId: string };
-  'scheduler.job_completed': { queueItemId: string; jobId: string; durationMs: number };
-  'scheduler.job_failed': { queueItemId: string; jobId: string; error: string; retryable: boolean };
-  'scheduler.webhook_received': { jobId: string; requestId: string; verified: boolean };
-  'scheduler.chain_started': { roundId: string; jobId: string; totalSteps: number };
-  'scheduler.chain_step_completed': { roundId: string; stepId: string };
-  'scheduler.chain_approval_pending': { roundId: string; stepId: string };
-  'scheduler.chain_completed': { roundId: string };
-  'scheduler.auto_paused': { jobId: string; failureRate: number; totalExecutions: number };
-  'scheduler.reminder_fired': { reminderId: string; agentId: string };
   // P7: Intelligence layer events
   'notification.created': { notificationId: string; workspaceId: string; targetType: string; targetId: string; type: string };
   'notification.read': { notificationId: string };

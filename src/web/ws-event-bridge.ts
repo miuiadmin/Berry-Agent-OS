@@ -7,7 +7,7 @@ import { getLogger } from '../utils/logger.js';
  * WebSocket Event Bridge - 将 EventBus 事件桥接到 WS 客户端
  *
  * 两类事件，两种序列化格式：
- * 1. 全局事件（task.created / task.failed / scheduler.* / mcp.* 等）：
+ * 1. 全局事件（task.created / task.failed / mcp.* 等）：
  *    包装为 { type: 'event', event, payload, ts }，前端通过 event 字段判断
  * 2. 流式事件（stream.* / dialogue.status / conversation.*）：
  *    顶层格式（payload 平铺到顶层 + ts），前端 onMessage 直接按 msg.type 分支
@@ -15,7 +15,7 @@ import { getLogger } from '../utils/logger.js';
  * P2-11: per-client sessionId 过滤
  * - WS 客户端发送 { type: 'subscribe', sessionId } 声明关注的对话
  * - 流式事件按 sessionId 过滤，只推送给订阅了该 sessionId 的客户端
- * - 全局事件（task.* / agent.* / scheduler.* / mcp.* / cron.*）仍广播给所有客户端
+ * - 全局事件（task.* / agent.* / mcp.* / cron.*）仍广播给所有客户端
  * - 未订阅任何 sessionId 的客户端收到所有事件（兼容旧行为）
  */
 const BRIDGED_EVENTS: EventName[] = [
@@ -38,15 +38,6 @@ const BRIDGED_EVENTS: EventName[] = [
   // Notification events
   'notification.created',
   'notification.read',
-  // Scheduler events
-  'scheduler.job_enqueued',
-  'scheduler.job_claimed',
-  'scheduler.job_completed',
-  'scheduler.job_failed',
-  'scheduler.chain_step_completed',
-  'scheduler.chain_approval_pending',
-  'scheduler.reminder_fired',
-  'scheduler.webhook_received',
   // MCP events
   'mcp.connected',
   'mcp.disconnected',

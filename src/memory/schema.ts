@@ -567,95 +567,6 @@ export const CORE_SCHEMA_SQL = `
     delivery_target TEXT
   );
 
-  CREATE TABLE IF NOT EXISTS cron_jobs (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    description TEXT,
-    cron_expression TEXT,
-    interval_minutes INTEGER,
-    schedule_type TEXT NOT NULL CHECK(schedule_type IN ('cron','webhook','event')),
-    webhook_secret TEXT,
-    webhook_token TEXT,
-    event_filter TEXT,
-    concurrency_policy TEXT NOT NULL DEFAULT 'queue' CHECK(concurrency_policy IN ('queue','replace','forbid')),
-    execution_mode TEXT NOT NULL DEFAULT 'run_only' CHECK(execution_mode IN ('create_task','run_only')),
-    admission_gate INTEGER NOT NULL DEFAULT 1,
-    prompt TEXT NOT NULL,
-    chain_config TEXT,
-    fan_out_config TEXT,
-    session_mode TEXT NOT NULL DEFAULT 'new' CHECK(session_mode IN ('new','continue','pool')),
-    enabled INTEGER NOT NULL DEFAULT 1,
-    max_retries INTEGER NOT NULL DEFAULT 3,
-    retry_delay_ms INTEGER NOT NULL DEFAULT 5000,
-    last_triggered_at INTEGER,
-    next_trigger_at INTEGER,
-    pause_reason TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-
-  CREATE TABLE IF NOT EXISTS cron_executions (
-    id TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL,
-    workspace_id TEXT NOT NULL,
-    round_id TEXT,
-    trigger_source TEXT NOT NULL DEFAULT 'cron',
-    status TEXT NOT NULL CHECK(status IN ('running','completed','failed','skipped','timeout')),
-    total_agents INTEGER,
-    completed_count INTEGER NOT NULL DEFAULT 0,
-    failed_count INTEGER NOT NULL DEFAULT 0,
-    trace_id TEXT,
-    started_at INTEGER NOT NULL,
-    completed_at INTEGER,
-    summary TEXT,
-    error TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS job_queue (
-    id TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    job_type TEXT NOT NULL,
-    source_id TEXT,
-    payload TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','claimed','running','completed','failed','skipped','timeout')),
-    priority INTEGER NOT NULL DEFAULT 0,
-    trace_id TEXT,
-    claimed_at INTEGER,
-    started_at INTEGER,
-    completed_at INTEGER,
-    error TEXT,
-    output TEXT,
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    max_retries INTEGER NOT NULL DEFAULT 3,
-    timeout_ms INTEGER NOT NULL DEFAULT 300000,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-
-  CREATE TABLE IF NOT EXISTS agent_reminders (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    workspace_id TEXT NOT NULL,
-    name TEXT,
-    prompt TEXT NOT NULL,
-    trigger_at INTEGER NOT NULL,
-    recurring_cron TEXT,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    last_fired_at INTEGER,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-
-  CREATE TABLE IF NOT EXISTS webhook_audit_log (
-    id TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL,
-    request_id TEXT,
-    source_ip TEXT,
-    payload_hash TEXT,
-    signature_valid INTEGER,
-    received_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-  );
-
   CREATE TABLE IF NOT EXISTS token_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
@@ -903,17 +814,6 @@ export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_agents_meta_status ON agents_meta(status);
   CREATE INDEX IF NOT EXISTS idx_agents_meta_source ON agents_meta(source, status);
   CREATE INDEX IF NOT EXISTS idx_agent_lifecycle_name ON agent_lifecycle_events(agent_name, created_at);
-  CREATE INDEX IF NOT EXISTS idx_cron_jobs_workspace ON cron_jobs(workspace_id, enabled);
-  CREATE INDEX IF NOT EXISTS idx_cron_jobs_next ON cron_jobs(enabled, next_trigger_at);
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_jobs_webhook_token ON cron_jobs(webhook_token);
-  CREATE INDEX IF NOT EXISTS idx_cron_executions_job ON cron_executions(job_id, started_at);
-  CREATE INDEX IF NOT EXISTS idx_cron_executions_status ON cron_executions(status, started_at);
-  CREATE INDEX IF NOT EXISTS idx_job_queue_pending ON job_queue(status, priority, created_at);
-  CREATE INDEX IF NOT EXISTS idx_job_queue_agent ON job_queue(agent_id, status);
-  CREATE INDEX IF NOT EXISTS idx_job_queue_source ON job_queue(source_id);
-  CREATE INDEX IF NOT EXISTS idx_reminders_due ON agent_reminders(enabled, trigger_at);
-  CREATE INDEX IF NOT EXISTS idx_reminders_agent ON agent_reminders(agent_id);
-  CREATE INDEX IF NOT EXISTS idx_webhook_audit_job ON webhook_audit_log(job_id, received_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_target ON notifications(target_type, target_id, read, created_at);
   CREATE INDEX IF NOT EXISTS idx_notifications_workspace ON notifications(workspace_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_task_subscribers_task ON task_subscribers(task_id);
