@@ -383,7 +383,7 @@ export function resolveLeaderForDelegate(parentTaskId?: string): string {
 
 // ─── brain 看板上下文组装（§10.5，P3 brain 看板用）───
 
-/** brain 看板上下文：近 N 条发言 + 板元数据 + 花名册，供 board-observer / board-ask-handler 拼 prompt */
+/** brain 看板上下文：近 N 条发言 + 板元数据 + 花名册，供 board-observer / brain board-context 拼 prompt */
 export interface BoardContext {
   meta: BoardMetaRow;
   members: Array<{ agentId: string; role: string }>;
