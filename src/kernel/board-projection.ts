@@ -174,3 +174,36 @@ export function postSystemReportEnvelope(taskId: string, opts: SystemReportOpts)
     parentTaskId: opts.parentTaskId,
   });
 }
+
+// ─── ask 投影：escalation 出口落「求助」信封 ───
+
+export interface AskEnvelopeOpts {
+  /** 求助者（触发升级的 agent 或治理专员） */
+  from: string;
+  /** 求助问题（escalation.questionToUser） */
+  question: string;
+  /** 是否阻塞（true=等回复才继续） */
+  blocking?: boolean;
+  /** 会话 id */
+  sessionId?: string;
+}
+
+/**
+ * escalation 出口投影：postBoardMessage(ask, to:'brain')。
+ *
+ * 15.0 机制 B 的 4 个 escalation 触发点（route/review/approval/checkpoint）统一加此投影。
+ * ask(@brain) 落板不阻塞——brain 异步看板消费（§4.2）。现有 complete/handleUserConfirm 语义不变。
+ */
+export function postAskEnvelope(taskId: string, opts: AskEnvelopeOpts): void {
+  safePost(taskId, () => ({
+    id: genId('bmsg'),
+    type: 'ask' as const,
+    from: opts.from,
+    to: 'brain',
+    taskId,
+    sessionId: opts.sessionId,
+    ts: Date.now(),
+    question: opts.question,
+    blocking: opts.blocking ?? true,
+  }), 'ask(@brain)');
+}

@@ -81,7 +81,7 @@ import { StateCache } from './state-cache.js';
 /** 12.0/13.0 VerifyGate — 独立对抗性意图验证（高漂移时触发） */
 import { VerifyGate } from './verify-gate.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
-import { postDelegateEnvelope, postReportEnvelope, postSystemReportEnvelope } from './board-projection.js';
+import { postDelegateEnvelope, postReportEnvelope, postSystemReportEnvelope, postAskEnvelope } from './board-projection.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 
@@ -1067,6 +1067,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // （final.response:2124），pending 已删 → late 投机输出 no-op，无竞态。
       if (escalation && pending) {
         logger.info({ correlationId, question: safeSlice(escalation.questionToUser, 100) }, 'route 升级问用户（机制 B）');
+        // 16.0 P3-C1：route 升级投影 ask(@brain)（fire-and-forget）
+        postAskEnvelope(pending.delegationTaskId ?? pending.taskId ?? correlationId, {
+          from: 'brain', question: escalation.questionToUser, sessionId: pending.sessionId,
+        });
         this.sessionManager.complete(correlationId, escalation.questionToUser);
         return;
       }
@@ -2216,6 +2220,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // pending 已被 complete 删除 → 自动 no-op，无竞态。
       if (review.escalation && pending) {
         logger.info({ correlationId, question: safeSlice(review.escalation.questionToUser, 100) }, 'review 升级问用户（机制 B）');
+        // 16.0 P3-C1：review 升级投影 ask(@brain)（fire-and-forget）
+        postAskEnvelope(pending.delegationTaskId ?? pending.taskId ?? correlationId, {
+          from: 'reviewer', question: review.escalation.questionToUser, sessionId: pending.sessionId,
+        });
         const reviewDelegation = this.delegationManager.getByCorrelation(correlationId);
         if (reviewDelegation) {
           this.delegationManager.fail(reviewDelegation.id, 'Brain review 升级问用户');

@@ -120,6 +120,14 @@ export class CorrectionFlow {
     // 委派 fail 释放 active_scope（onTermination→cleanupTaskState→clearActiveScope），与 V-2 同源防泄漏；fail 幂等。
     if (correction.escalation) {
       logger.info({ delegationId, question: correction.escalation.questionToUser.slice(0, 100) }, 'checkpoint 升级问用户（机制 B）');
+      // 16.0 P3-C1：checkpoint 升级投影 ask(@brain)（fire-and-forget）
+      try {
+        const { postAskEnvelope } = require('../board-projection.js');
+        postAskEnvelope(delegationId, {
+          from: 'brain', question: correction.escalation.questionToUser,
+          sessionId: entry.sessionId,
+        });
+      } catch { /* fire-and-forget */ }
       this.ctx.sessionManager.complete(entry.correlationId, correction.escalation.questionToUser);
       this.ctx.delegationManager.fail(delegationId, 'Brain checkpoint 升级问用户');
       return;
