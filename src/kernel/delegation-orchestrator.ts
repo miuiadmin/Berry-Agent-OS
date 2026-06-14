@@ -2817,6 +2817,18 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
 
     const pending = this.sessionManager.getPending(fgEntry.correlationId);
+
+    // 16.0 P4-C3：在所有分支之前统一投影 report 信封——不论 foreground/background/group，
+    // 只要 task 结果到达就落板（§7.5 审计载体：板上可重建完整协作链）。
+    // fire-and-forget，不影响现有终态收口逻辑。
+    postReportEnvelope(result.taskId, {
+      from: agentName,
+      to: 'leader',
+      status: result.ok ? 'done' : 'blocked',
+      summary: result.ok ? this.formatAgentResult(agentName, result.outputPayload ?? {}) : (result.error ?? '任务失败'),
+      sessionId: fgEntry.sessionId,
+    });
+
     if (!pending) {
       // 无 user session pending：fire-and-forget 异步委派（evolution extract_feedback / detect_gap 等
       // 后台学习任务）或 pending 已被并发消费的 race 场景。task 既已结束，delegation entry 必须收口到
