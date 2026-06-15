@@ -13,6 +13,7 @@ import { setupReviewFeedbackHandler } from './review-feedback-handler.js';
 import { setupDialogueHandler } from './dialogue-handler.js';
 import { createPlanMonitor } from './plan-monitor.js';
 import { createCheckerDispatch } from './checker-dispatch.js';
+import { setupObserveHandler } from './observe-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -197,65 +198,8 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    * 如果发现 working 状态的任务长时间未更新（updated_at 超过 TASK_STALLED_MS），
    * 记录一条 agent_event 类型观察"plan_stalled: task X"——后续 C 级审核时 LLM 可见。
    */
-  // 15.0 机制 D：消费 brain.command 的执行结果（inspect/report 数据记为观察，供 Brain 后续决策消费）。
-  // 闭合 D 闭环 —— Brain 主动 command 问到的结果不再被丢弃。
-  ipc.onMessage('brain.command.result', (msg: IpcMessage) => {
-    const result = msg.payload as { success?: boolean; data?: unknown; error?: string };
-    try {
-      observationRecorder.record({
-        sessionId: 'brain-command',
-        taskId: msg.correlationId ?? msg.id ?? 'unknown',
-        observationType: 'agent_event',
-        fromAgent: 'core',
-        toAgent: 'brain',
-        content: safeSlice(JSON.stringify(result), 2000),
-        priority: 1,
-      });
-    } catch (err) {
-      logger.warn({ err }, 'brain.command.result:record failed');
-    }
-  });
+  setupObserveHandler({ observationRecorder, checkPlanProgress, ipc });
 
-  ipc.onMessage('brain.observe', (msg: IpcMessage) => {
-    const payload = msg.payload as BrainObservePayload;
-    try {
-      const recordInput: RecordObservationInput = {
-        sessionId: payload.sessionId,
-        taskId: payload.taskId,
-        observationType: payload.observationType,
-        fromAgent: payload.fromAgent,
-        toAgent: payload.toAgent,
-        content: safeSlice(payload.content, 2000),
-        priority: payload.priority ?? 1,
-        metadata: payload.metadata,
-      };
-      observationRecorder.record(recordInput);
-    } catch (err) {
-      // 观察记录失败不应阻塞其他业务
-      logger.warn({ err, sessionId: payload.sessionId, taskId: payload.taskId }, 'brain.observe:record failed');
-    }
-
-    // §12.5 定期 plan 进度检查（零 LLM，规则化）
-    try {
-      const count = (observationCounter.get(payload.sessionId) ?? 0) + 1;
-      observationCounter.set(payload.sessionId, count);
-      if (count >= PLAN_CHECK_INTERVAL) {
-        observationCounter.set(payload.sessionId, 0);
-        checkPlanProgress(payload.sessionId, payload.taskId);
-      }
-    } catch (err) {
-      logger.warn({ err, sessionId: payload.sessionId }, 'brain.observe:plan-check failed');
-    }
-  });
-
-  /**
-   * 检查指定 session 的活跃 mission 进度，识别卡住的任务。
-   * 规则：working 状态的 task 如果 updated_at 超过 TASK_STALLED_MS，视为卡住。
-   * 该信号以 agent_event 类型观察形式记录，不消耗 LLM——LLM 只在 C 级审核时看到。
-   *
-   * @param sessionId 触发检查的 session
-   * @param taskId 触发检查的 task（仅用于上下文标记，不影响匹配逻辑）
-   */
   function recallDecisionsBlock(decisionType: string): string {
     const decisions = decisionRecorder.recallForDecision(decisionType, 5);
     if (decisions.length === 0) return '';
