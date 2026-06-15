@@ -9,6 +9,7 @@ import { evaluatePermissionJudge } from './permission-handler.js';
 import { evaluateRoute } from './route-handler.js';
 import { evaluateCronReview } from './cron-review-handler.js';
 import { evaluateReview } from './review-handler.js';
+import { setupReviewFeedbackHandler } from './review-feedback-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -620,157 +621,8 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   //   - §3.1 "提示"能力：给 agent 建议和引导，让它们越做越好
   //   - §8.8: Brain 高 severity 纠偏升级为跨 session 偏好
   //   - §3.9: 软纠偏通过 StateCache 行为注释跨 task 持久
-  const PROMPT_SELF_MOD_LESSON_THRESHOLD = 3; // 同一 promptKey 累积 3 条 lesson 后触发自修改
-
-  ipc.onMessage('brain.review.feedback', (msg: IpcMessage) => {
-    const payload = msg.payload as { decisionId?: string; feedbackType?: string; lesson?: string; outcome?: 'good' | 'bad' | 'neutral'; promptKey?: string };
-    if (!payload?.decisionId || !payload.lesson) {
-      ipc.send('brain.review.feedback.result', 'core', { ok: false, reason: 'Missing decisionId or lesson' }, msg.correlationId ?? msg.id);
-      return;
-    }
-    try {
-      decisionRecorder.updateLesson(payload.decisionId, payload.lesson);
-      // 同时记录一条新的 decision（outcome 字段记录用户反馈）
-      if (payload.outcome) {
-        decisionRecorder.record({
-          sessionId: 'feedback:' + payload.decisionId,
-          decisionType: 'review',
-          inputSummary: `feedback_type=${payload.feedbackType ?? 'unknown'}`,
-          outputJson: { decisionId: payload.decisionId, feedbackType: payload.feedbackType },
-          outcome: payload.outcome,
-        });
-      }
-      logger.info({
-        decisionId: payload.decisionId,
-        feedbackType: payload.feedbackType,
-        lessonLen: payload.lesson.length,
-      }, 'brain:self-review feedback recorded');
-
-      // ── §3.1 提示能力: 检查是否触发 prompt 自修改 ──
-      // 根据反馈类型推断应该修改哪个 prompt key
-      const promptKey = payload.promptKey ?? inferPromptKeyFromFeedback(payload.feedbackType);
-      if (promptKey) {
-        tryTriggerPromptSelfMod(promptKey, payload.lesson);
-      }
-
-      ipc.send('brain.review.feedback.result', 'core', { ok: true, id: payload.decisionId }, msg.correlationId ?? msg.id);
-    } catch (err) {
-      logger.warn({ err, decisionId: payload.decisionId }, 'brain:self-review feedback failed');
-      ipc.send('brain.review.feedback.result', 'core', { ok: false, reason: (err as Error).message }, msg.correlationId ?? msg.id);
-    }
-  });
-
-  /**
-   * §3.1 提示能力: 根据反馈类型推断应该修改哪个 prompt key。
-   * 映射关系：
-   *   - 路由反馈 → brain.routing
-   *   - 审核反馈 → brain.review.a 或 brain.review.bc
-   *   - 权限反馈 → brain.permission
-   *   - 默认 → null（不触发自修改）
-   */
-  function inferPromptKeyFromFeedback(feedbackType?: string): string | null {
-    if (!feedbackType) return null;
-    if (feedbackType.includes('route') || feedbackType.includes('routing')) return 'brain.routing';
-    if (feedbackType.includes('review_a') || feedbackType.includes('review_a')) return 'brain.review.a';
-    if (feedbackType.includes('review') || feedbackType.includes('modify') || feedbackType.includes('reject')) return 'brain.review.bc';
-    if (feedbackType.includes('permission') || feedbackType.includes('tool')) return 'brain.permission';
-    return null;
-  }
-
-  /**
-   * §3.1 提示能力: 检查该 promptKey 下的 lessons 是否达到阈值，触发 prompt 自修改。
-   *
-   * 机制：
-   *   1. 从 brain_decisions 查询该 promptKey 相关的、带 lesson 的决策
-   *   2. 如果未处理的 lessons 数量 >= PROMPT_SELF_MOD_LESSON_THRESHOLD (3)
-   *   3. 把这些 lessons 合并为一条 "prompt 增补指令"，追加到当前 prompt 末尾
-   *   4. 调用 PromptVersioning.propose() 创建新版本
-   *   5. 下次 Brain 使用该 prompt 时自动读取新版本（getReviewPrompt 等）
-   *
-   * 安全边界：
-   *   - 新版本的内容 = 当前 active prompt + lessons 合并的增补段
-   *   - 不删除原有内容，只追加 "## 自动学习的教训" 段落
-   *   - 可通过 PromptVersioning.rollback() 回滚
-   */
-  function tryTriggerPromptSelfMod(promptKey: string, newLesson: string): void {
-    try {
-      // 查询该 promptKey 相关的、带 lesson 的决策
-      const lessonsWithFeedback = db.prepare(`
-        SELECT lesson FROM brain_decisions
-        WHERE decision_type = 'review'
-          AND lesson IS NOT NULL AND lesson != ''
-          AND input_summary LIKE '%' || ? || '%'
-        ORDER BY created_at DESC LIMIT ?
-      `).all(promptKey, PROMPT_SELF_MOD_LESSON_THRESHOLD + 2) as Array<{ lesson: string }>;
-
-      // 如果带 lesson 的决策不够，尝试更宽泛的查询
-      const allLessons = lessonsWithFeedback.length >= PROMPT_SELF_MOD_LESSON_THRESHOLD
-        ? lessonsWithFeedback
-        : (db.prepare(`
-            SELECT lesson FROM brain_decisions
-            WHERE lesson IS NOT NULL AND lesson != ''
-            ORDER BY created_at DESC LIMIT ?
-          `).all(PROMPT_SELF_MOD_LESSON_THRESHOLD) as Array<{ lesson: string }>);
-
-      if (allLessons.length < PROMPT_SELF_MOD_LESSON_THRESHOLD) {
-        logger.debug({
-          promptKey,
-          lessonCount: allLessons.length,
-          threshold: PROMPT_SELF_MOD_LESSON_THRESHOLD,
-        }, 'brain:prompt-self-mod not triggered (lessons below threshold)');
-        return;
-      }
-
-      // 获取当前 active prompt
-      const current = promptVersioning.getActiveVersion(promptKey);
-      const baseContent = current?.content ?? getDefaultPromptContent(promptKey);
-
-      // 构建增补段：合并 lessons 为简洁的指导原则
-      const lessonLines = allLessons
-        .slice(0, PROMPT_SELF_MOD_LESSON_THRESHOLD)
-        .map((l, i) => `${i + 1}. ${l.lesson.slice(0, 200)}`);
-
-      const supplement = `\n\n## 自动学习的教训（基于 ${allLessons.length} 条反馈，${new Date().toISOString().slice(0, 10)} 更新）\n${lessonLines.join('\n')}`;
-
-      // 检查是否已包含同样的增补内容（防止重复追加）
-      if (baseContent.includes(supplement.slice(0, 50))) {
-        logger.debug({ promptKey }, 'brain:prompt-self-mod skipped (supplement already present)');
-        return;
-      }
-
-      // 追加到当前 prompt 末尾
-      const newContent = baseContent + supplement;
-
-      // 创建新版本
-      const version = promptVersioning.propose({
-        promptKey,
-        newContent,
-        changeReason: `自动学习：基于 ${allLessons.length} 条审核反馈教训`,
-        changeSource: 'brain',
-        currentMetrics: { lessonCount: allLessons.length },
-      });
-
-      logger.info({
-        promptKey,
-        version: version.version,
-        lessonCount: allLessons.length,
-      }, 'brain:prompt-self-mod triggered — new prompt version created');
-    } catch (err) {
-      // prompt 自修改失败不应阻塞反馈流程
-      logger.warn({ err, promptKey }, 'brain:prompt-self-mod failed (non-critical)');
-    }
-  }
-
-  /** 获取 promptKey 的默认内容（当没有 active version 时） */
-  function getDefaultPromptContent(promptKey: string): string {
-    switch (promptKey) {
-      case 'brain.review.a': return DEFAULT_PROMPT_A;
-      case 'brain.review.bc': return DEFAULT_PROMPT_BC;
-      case 'brain.routing': return buildRoutingSystemPrompt();
-      case 'brain.permission': return buildPermissionJudgeSystemPrompt();
-      default: return '';
-    }
-  }
+  // §17.4 巨石拆解：brain.review.feedback 整组提取到 review-feedback-handler.ts
+  setupReviewFeedbackHandler({ db, decisionRecorder, promptVersioning, ipc, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
 
   /**
    * 13.0 P10: 派发独立 checker 审核。
