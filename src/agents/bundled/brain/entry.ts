@@ -3,6 +3,7 @@ import { getLogger } from '../../../utils/logger.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
 import { C_LEVEL_OBSERVATION_TYPES, renderObservationContext } from './observation-context.js';
 import { renderBoardContext } from './board-context.js';
+import { evaluateCheckpoint } from './checkpoint-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1093,44 +1094,24 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   });
 
   // --- Handler 5: checkpoint.evaluate (Layer 3 semantic correction) ---
+  // 核心逻辑提取到 brain/checkpoint-handler.ts（§17.4 巨石拆解），entry.ts 保留 ipc 薄包装。
 
   ipc.onMessage('checkpoint.evaluate', async (msg: IpcMessage) => {
     const payload = msg.payload as TurnCheckpointPayload;
     const trackingId = msg.correlationId ?? msg.id;
-
-    // 16.0 P4-B1：brain 看板——checkpoint 注入板上下文（payload.delegationId=board id，§5.1），
-    // 让 brain 纠偏时看到整块板（目标/状态/花名册/近期发言），§4.2 重监督 + §10.1 LLM 下钻。
-    // 冻结快照：本轮 brain 调用内 ctx 不变，保护 prompt cache。
-    const boardCtx = payload.delegationId ? getBoardContext(payload.delegationId) : null;
-    const baseSystemPrompt = buildCheckpointSystemPrompt();
-    const systemPrompt = boardCtx
-      ? `${baseSystemPrompt}\n\n## 任务板上下文（你正在监督的板）\n${renderBoardContext(boardCtx)}`
-      : baseSystemPrompt;
-    const userPrompt = buildCheckpointUserPrompt(payload);
-
-    const messages: ModelMessage[] = [
-      { role: 'user', content: userPrompt },
-    ];
-
     try {
-      const result = await llm.current.chat(messages, {
-        system: systemPrompt,
-        maxTokens: CORRECTION_LIMITS.maxCorrectionTokens,
-        temperature: 0.1,
-        agent: name,
-        purpose: 'brain_checkpoint',
-        sessionId: 'system',
-        correlationId: trackingId,
-      });
-
-      const correction = parseCheckpointResult(result.content, payload.delegationId);
+      const correction = await evaluateCheckpoint(
+        payload,
+        (messages, options) => llm.current.chat(messages, options as Parameters<typeof llm.current.chat>[1]),
+        name,
+        trackingId,
+      );
       // 15.0 机制 D：checkpoint 阶段 Brain 顺带发号施令（command 伴随字段）。
-      // ipc.send 触发 core 侧 setupBrainCommandHandler 注册的拦截 handler（与 route.result 同机制）。
       if (correction.command) {
         ipc.send('brain.command', 'core', correction.command, trackingId);
       }
       ipc.send('checkpoint.evaluate.result', 'core', correction, trackingId);
-    } catch (err) {
+    } catch {
       ipc.send('checkpoint.evaluate.result', 'core', {
         delegationId: payload.delegationId,
         action: 'continue',
