@@ -28,6 +28,7 @@ import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
+import { attachBrainEventRelay } from './flows/brain-relay.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
@@ -752,35 +753,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
   }
 
-  /** 挂载 Brain 子进程 ↔ core EventBus 的双向事件中继（幂等：同一 ipc 不重复挂载） */
+  /** 挂载 Brain 子进程 ↔ core EventBus 的双向事件中继（幂等）——逻辑提取至 flows/brain-relay.ts */
   private reattachBrainRelay(brainIpc: IpcChannel): void {
-    if (this.brainRelayIpcs.has(brainIpc)) return;
-    this.brainRelayIpcs.add(brainIpc);
-    const bus = getEventBus();
-
-    // ── inbound：Brain → core（brain 用 ipc.send 发来，core re-emit 到 EventBus） ──
-    // brain.signal_intervention：delegation-orchestrator 订阅后注入 turn.correction 软纠偏
-    brainIpc.onMessage('brain.signal_intervention', (msg) => {
-      bus.emit('brain.signal_intervention', msg.payload as EventPayload<'brain.signal_intervention'>);
-    });
-    // brain.checker.dispatch：delegation-orchestrator 订阅后派发 checker 独立审核
-    brainIpc.onMessage('brain.checker.dispatch', (msg) => {
-      bus.emit('brain.checker.dispatch', msg.payload as EventPayload<'brain.checker.dispatch'>);
-    });
-    // brain.cron_review_flagged：ws-event-bridge 订阅后转发前端展示警告
-    brainIpc.onMessage('brain.cron_review_flagged', (msg) => {
-      bus.emit('brain.cron_review_flagged', msg.payload as EventPayload<'brain.cron_review_flagged'>);
-    });
-
-    // ── outbound：core → Brain（CronScheduler 在 core 发 cron.review，转发 IPC 给 Brain 审核） ──
-    const brainName = this.registry.requireRole('reviewer').manifest.name;
-    bus.on('cron.review', (payload) => {
-      // 发送失败（Brain 未就绪/已退出）静默跳过——cron 审核是 best-effort，不阻塞 cron 流程
-      const sent = brainIpc.send('cron.review', brainName, payload);
-      if (!sent) {
-        logger.debug({ taskId: payload.taskId }, 'cron.review → brain IPC 发送失败（brain 可能未就绪），跳过审核');
-      }
-    });
+    attachBrainEventRelay(brainIpc, this.brainRelayIpcs, this.registry);
   }
 
   setupDaemonEvents(): void {
