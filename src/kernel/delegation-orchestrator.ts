@@ -107,7 +107,7 @@ import { MissionManager } from './mission-manager.js';
 import { StateCache } from './state-cache.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
 import { postDelegateEnvelope } from './board-projection.js';
-import { resolveLeaderForDelegate, applyBoardStatus } from './board-repo.js';
+import { resolveLeaderForDelegate } from './board-repo.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 
@@ -828,8 +828,6 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     for (const entry of activeEntries) {
       this.delegationManager.interrupt(entry.id, reason ?? 'user interrupt');
-      // 16.0 §6.5.1/D：用户中断 → 板状态机 interrupted 终态（fire-and-forget；entry.id 即板 taskId）
-      applyBoardStatus(entry.id, { kind: 'interrupt' });
     }
 
     const primary = activeEntries[0];

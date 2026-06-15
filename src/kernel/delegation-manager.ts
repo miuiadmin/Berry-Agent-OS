@@ -317,9 +317,11 @@ export class DelegationManager {
       error: reason ?? 'interrupted',
     });
 
-    // 16.0 §7.5 板即审计：interrupt 同步投影 system report（best-effort，让 board 镜像用户中断转换）
+    // 16.0 §7.5/§6.5.1 板即审计 + 状态机：interrupt 投影 system report 信封（审计记录"执行已取消"，
+    // report.status=blocked）但板状态机走 interrupted 终态（boardStatusEvent 覆盖默认 blocked→failed）。
+    // 解耦审计 status 与板状态——cancel/中断的审计事实是"未完成(blocked)"，但板终态是 interrupted。
     try {
-      postSystemReportEnvelope(id, { summary: `执行已取消：${reason ?? 'interrupted'}`, sessionId: entry.sessionId });
+      postSystemReportEnvelope(id, { summary: `执行已取消：${reason ?? 'interrupted'}`, sessionId: entry.sessionId }, { kind: 'interrupt' });
     } catch { /* best-effort 审计镜像 */ }
 
     logger.info({ delegationId: id, reason }, 'Delegation interrupted');

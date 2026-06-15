@@ -33,7 +33,7 @@ import {
   createSubBoard,
 } from './board-repo.js';
 import { peekBlockCollector } from './block-collector.js';
-import type { BoardMessage } from '../contracts/board-message.js';
+import type { BoardMessage, BoardStatusEvent } from '../contracts/board-message.js';
 import { routeGovernance } from './flows/governance-switch.js';
 
 const logger = getLogger('board-projection');
@@ -229,14 +229,17 @@ export interface ReportEnvelopeOpts {
 /**
  * 结果/审核点投影：postBoardMessage(report) + updateBoardMeta(boardStatus)。
  * 在 handleForegroundTaskResult 结果到达时 / handleTaskReviewResult 审核裁决时调用。
- * board_status 联动：done→completed / blocked→failed 或 awaiting_review。
+ * board_status 联动：默认按 report.status 推导（done→completed / blocked→failed / partial→in_progress）；
+ * boardStatusEvent 显式覆盖（如 interrupt→interrupted、enter_review→awaiting_review），解耦 report 信封的
+ * 审计 status 与板状态机流转（§6.5.1 单一事实源——审计说什么 ≠ 板状态机转到哪）。
+ *
+ * @param boardStatusEvent 可选：显式板状态事件。省略则按 opts.status 推导（report→completed/failed/in_progress）
  */
-export function postReportEnvelope(taskId: string, opts: ReportEnvelopeOpts): void {
+export function postReportEnvelope(taskId: string, opts: ReportEnvelopeOpts, boardStatusEvent?: BoardStatusEvent): void {
   safePost(taskId, () => {
-    // board 状态机联动（§6.5.1 单一事实源）：经 applyBoardStatus 统一推导 + 校验合法流转，
-    // 替代原散落的硬编码 statusMap。done→completed / blocked→failed / partial+cant_split→in_progress。
-    // 终态板收到迟到 report → no-op（防已完成板被打回）；旧库无 board 列 → 静默降级。
-    applyBoardStatus(taskId, { kind: 'report', status: opts.status });
+    // board 状态机联动（§6.5.1 单一事实源）：经 applyBoardStatus 统一推导 + 校验合法流转。
+    // boardStatusEvent 覆盖默认推导（解耦审计 status 与状态机）。
+    applyBoardStatus(taskId, boardStatusEvent ?? { kind: 'report', status: opts.status });
 
     return {
       id: genId('bmsg'),
@@ -267,9 +270,12 @@ export interface SystemReportOpts {
 
 /**
  * 系统兜底失败投影：reviewer 崩溃 / heartbeat 超时 / interrupt 等 review 主路径外的失败（§6.5.2/6.5.3）。
- * from 固定 'system'，status 固定 'blocked'。
+ * from 固定 'system'，审计 status 固定 'blocked'；板状态默认 blocked→failed。
+ *
+ * @param boardStatusEvent 可选：显式板状态事件（如 interrupt 用 {kind:'interrupt'}→interrupted，
+ *   解耦审计 report(blocked) 与板状态机——cancel/中断的审计记录是 blocked，但板终态是 interrupted）。
  */
-export function postSystemReportEnvelope(taskId: string, opts: SystemReportOpts): void {
+export function postSystemReportEnvelope(taskId: string, opts: SystemReportOpts, boardStatusEvent?: BoardStatusEvent): void {
   postReportEnvelope(taskId, {
     from: 'system',
     to: 'leader',
@@ -277,7 +283,7 @@ export function postSystemReportEnvelope(taskId: string, opts: SystemReportOpts)
     status: 'blocked',
     sessionId: opts.sessionId,
     parentTaskId: opts.parentTaskId,
-  });
+  }, boardStatusEvent);
 }
 
 // ─── ask 投影：escalation 出口落「求助」信封 ───
