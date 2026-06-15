@@ -60,6 +60,7 @@ import {
   sendTaskResultForReview as sendTaskResultForReviewImpl,
   type ReviewFlowDeps,
 } from './flows/review-flow.js';
+import { performDriftCheckAndApprove as performDriftCheckAndApproveImpl, type DriftFlowDeps } from './flows/drift-flow.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
@@ -213,8 +214,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   dialogueRouter: DialogueRouter | null = null;
   /** 12.0 漂移检测器 */
   private _driftDetector: import('./drift-detector.js').DriftDetector | null = null;
-  /** 12.0/13.0 VerifyGate — 高漂移时的独立对抗性意图验证 */
-  private readonly verifyGate = new VerifyGate();
+  /** §17.4: VerifyGate 已搬入 flows/drift-flow.ts（performDriftCheckAndApprove 内部实例化） */
 
   // Permission judge state
   private permissionFlow: PermissionFlow;
@@ -1379,12 +1379,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   // ═══ 12.0 DRIFT DETECTION ═════════════════════════════
 
-  /**
-   * B/C 级回复的漂移检测：通过 Brain IPC 做轻量检测，根据结果决定：
-   * - 正常：auto-approve
-   * - 中偏离（correct）：触发 CorrectionFlow
-   * - 高偏离（verify）：走同步 Brain review
-   */
+  /** §17.4: performDriftCheckAndApprove 逻辑已提取至 flows/drift-flow.ts（DriftDetector + VerifyGate 逐字保留，§17.7.3 keep 的活路径） */
   private performDriftCheckAndApprove(
     pending: PendingRequest,
     primaryIpc: AgentIpc,
@@ -1396,138 +1391,17 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     draft: string,
     turn: import('../contracts/review.js').TurnRecord,
   ): void {
-    const brainAgent = this.agentManager.getAgent(this.registry.requireRole('reviewer').manifest.name);
-    if (!brainAgent || !pending.intentAnchor) {
-      // Brain 不可用或无 anchor → 降级为直接 approve
-      primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-      return;
-    }
-
-    // 发 drift.check.request 给 Brain
-    const driftCorrelationId = genId('drift');
-    brainAgent.ipc.send('drift.check.request', 'brain', {
-      anchor: pending.intentAnchor,
-      content: safeSlice(draft, 3000),
-      checkpointType: 'final_response',
-    }, driftCorrelationId);
-
-    // 超时设置：drift check 涉及 IPC + fast tier LLM，2s 过短易误判。
-    // 超时不再 auto-approve（绕过审核违反硬规则），而是降级为同步 Brain review 深度审核。
-    let settled = false;  // drift check 是否已出结果（正常返回或超时），保证二者只有一个生效
-    const timeoutId = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      logger.warn({ correlationId }, 'drift check timeout, falling back to sync Brain review (not auto-approve)');
-      this.pendingReviewOrigins.set(correlationId, 'conversation');
-      this.reportProgress(pending, 'reviewing', '漂移检测超时，降级为完整审核...');
-      // 补齐 sent 检查 + 30s 审核超时保护，与正常审核路径（2030-2037 行）保持一致。
-      // 防止 drift 降级发 review.request 后 Brain LLM 挂死导致审核永久挂起——
-      // 否则只能靠 240s pending 超时兜底，用户等待过久。
-      const sent = reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
-      if (!sent) {
-        logger.warn({ correlationId }, 'drift 降级 review.request IPC 发送失败，自动 approve');
-        this.pendingReviewOrigins.delete(correlationId);
-        this.approveReviewDegraded(correlationId, draft, 'review_ipc_send_failed', pending.sessionId);
-        return;
-      }
-      setTimeout(() => {
-        const stillPending = this.sessionManager.getPending(correlationId);
-        if (!stillPending) return;
-        logger.warn({ correlationId }, 'drift 降级审核超时，自动 approve');
-        this.pendingReviewOrigins.delete(correlationId);
-        this.approveReviewDegraded(correlationId, draft, 'review_timeout', pending.sessionId);
-      }, 30_000);
-    }, 5000);
-
-    const cleanup = () => {
-      clearTimeout(timeoutId);
+    const deps: DriftFlowDeps = {
+      agentManager: this.agentManager,
+      registry: this.registry,
+      delegationManager: this.delegationManager,
+      sessionManager: this.sessionManager,
+      driftDetector: this.driftDetector,
+      pendingReviewOrigins: this.pendingReviewOrigins,
+      approveReviewDegraded: (correlationId, draft, reason, sessionId) => this.approveReviewDegraded(correlationId, draft, reason, sessionId),
+      dispatchFeedbackExtraction: (sessionId, userMessage, assistantResponse, requester) => this.dispatchFeedbackExtraction(sessionId, userMessage, assistantResponse, requester),
+      reportProgress: (pending, status, summary) => this.reportProgress(pending, status, summary),
     };
-
-    const handler = async (msg: IpcMessage) => {
-      if (msg.correlationId !== driftCorrelationId) return;
-      if (settled) return;  // 已超时降级，忽略迟到的 drift 结果（避免重复处理）
-      settled = true;
-      cleanup();
-
-      const { signal } = msg.payload as { signal: import('../contracts/intent.js').DriftSignal };
-      const evaluated = this.driftDetector?.evaluate(signal) ?? signal;
-
-      // 记录漂移信号
-      this.driftDetector?.recordSignal(evaluated, sessionId, correlationId);
-
-      if (evaluated.suggestedAction === 'verify') {
-        // 高偏离 → 先运行 VerifyGate 独立对抗性验证
-        // VerifyGate 用 Brain 的 default tier 模型以对抗性视角快速判断回复是否有根本性错误
-        // 如果 VerifyGate 确认失败（pass=false）→ 直接 reject，无需完整 review
-        // 如果 VerifyGate 无法确认（pass=true）→ 走同步 Brain review 深度审核
-        logger.info({ correlationId, score: evaluated.alignmentScore }, 'drift:high → verify gate + sync review');
-        if (pending.intentAnchor) {
-          try {
-            const verdict = await this.verifyGate.verify(
-              brainAgent.ipc as any,
-              pending.intentAnchor,
-              draft,
-            );
-            if (!verdict.pass) {
-              // VerifyGate 确认回复有根本性错误 → 直接 reject（节省一次完整 review LLM 调用）
-              logger.info({ correlationId, reason: verdict.reason?.slice(0, 200) }, 'verify:gate REJECT');
-              primaryIpc.send('review.result', primaryName, {
-                verdict: 'reject',
-                reason: `独立验证未通过: ${verdict.reason ?? '回复与用户意图不匹配'}`,
-              } as ReviewResult, correlationId);
-              this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
-              return;
-            }
-            // VerifyGate 通过但仍高漂移 → 走完整 Brain review
-            logger.debug({ correlationId }, 'verify:gate pass, proceeding to full review');
-          } catch (err) {
-            // VerifyGate 异常 → 不阻断，继续走完整 review
-            logger.warn({ err, correlationId }, 'verify:gate error, falling back to full review');
-          }
-        }
-        this.pendingReviewOrigins.set(correlationId, 'conversation');
-        this.reportProgress(pending, 'reviewing', '检测到可能偏离，正在深度审核...');
-        // 补齐 sent 检查 + 30s 审核超时保护，与正常审核路径保持一致（同 drift 超时降级路径）。
-        // verify 通过后走完整 review，同样需要超时保护防止 Brain LLM 挂死。
-        const sent = reviewerIpc.send('review.request', reviewerName, { turn }, correlationId);
-        if (!sent) {
-          logger.warn({ correlationId }, 'drift verify 降级 review.request IPC 发送失败，自动 approve');
-          this.pendingReviewOrigins.delete(correlationId);
-          this.approveReviewDegraded(correlationId, draft, 'review_ipc_send_failed', pending.sessionId);
-          return;
-        }
-        setTimeout(() => {
-          const stillPending = this.sessionManager.getPending(correlationId);
-          if (!stillPending) return;
-          logger.warn({ correlationId }, 'drift verify 审核超时，自动 approve');
-          this.pendingReviewOrigins.delete(correlationId);
-          this.approveReviewDegraded(correlationId, draft, 'review_timeout', pending.sessionId);
-        }, 30_000);
-        return;
-      }
-
-      if (evaluated.suggestedAction === 'correct') {
-        // 中偏离 → 触发 CorrectionFlow
-        logger.info({ correlationId, score: evaluated.alignmentScore }, 'drift:medium → correction');
-        const entry = this.delegationManager.getByCorrelation(correlationId);
-        if (entry) {
-          getEventBus().emit('delegation.checkpoint_needed', {
-            delegationId: entry.id,
-            trigger: 'semantic_drift' as import('../contracts/delegation.js').CheckpointTrigger,
-          });
-        } else {
-          // 无 delegation entry → 降级 approve
-          primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-        }
-        return;
-      }
-
-      // 正常对齐 → approve
-      primaryIpc.send('review.result', primaryName, { verdict: 'approve' } as ReviewResult, correlationId);
-      this.dispatchFeedbackExtraction(sessionId, pending.userMessage, draft, 'post_review');
-    };
-
-    brainAgent.ipc.onMessage('drift.check.result', handler);
+    performDriftCheckAndApproveImpl(pending, primaryIpc, primaryName, reviewerIpc, reviewerName, correlationId, sessionId, draft, turn, deps);
   }
 }
