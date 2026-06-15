@@ -14,6 +14,7 @@ import { setupDialogueHandler } from './dialogue-handler.js';
 import { createPlanMonitor } from './plan-monitor.js';
 import { createCheckerDispatch } from './checker-dispatch.js';
 import { setupObserveHandler } from './observe-handler.js';
+import { createBrainHelpers } from './brain-helpers.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -147,25 +148,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    * @param turn 待审核的对话轮次（需要 draftResponse 和 toolCalls）
    * @param cause 降级原因（用于 reason 字段和日志追踪）
    */
-  function buildFallbackReviewResult(
-    turn: { draftResponse?: string; toolCalls: ToolBlock[] },
-    cause: string,
-  ): ReviewResult {
-    const fallbackResult = fallbackReviewer.review({
-      responseText: turn.draftResponse ?? '',
-      hasToolCalls: turn.toolCalls.length > 0,
-      toolNames: turn.toolCalls.map(tc => tc.name),
-      agentName: name,
-    });
-    switch (fallbackResult.verdict) {
-      case 'deny':
-        return { verdict: 'reject', reason: `${cause}，规则审核拒绝: ${fallbackResult.reason}` };
-      case 'hold':
-        return { verdict: 'modify', reason: `${cause}，规则审核标记需人工确认: ${fallbackResult.reason}` };
-      default:
-        return { verdict: 'approve', reason: `${cause}，规则审核批准: ${fallbackResult.reason}` };
-    }
-  }
+  // buildFallbackReviewResult 提取到 brain-helpers.ts
 
   /**
    * session 级观察计数器，用于定期触发 plan 进度检查
@@ -200,69 +183,9 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    */
   setupObserveHandler({ observationRecorder, checkPlanProgress, ipc });
 
-  function recallDecisionsBlock(decisionType: string): string {
-    const decisions = decisionRecorder.recallForDecision(decisionType, 5);
-    if (decisions.length === 0) return '';
-    const lines = decisions.map(d => {
-      const outcome = d.outcome ? ` [${d.outcome}]` : '';
-      const lesson = d.lesson ? ` 教训: ${d.lesson}` : '';
-      return `- ${safeSlice(d.inputSummary, 80)}${outcome}${lesson}`;
-    });
-    return `\n\n## 历史决策参考\n\n${lines.join('\n')}\n`;
-  }
-
-  function getReviewPrompt(level: 'A' | 'B' | 'C'): string {
-    const key = level === 'A' ? 'brain.review.a' : 'brain.review.bc';
-    const versioned = promptVersioning.getActiveVersion(key);
-    return versioned?.content ?? (level === 'A' ? DEFAULT_PROMPT_A : DEFAULT_PROMPT_BC);
-  }
-
-  function getRoutingPrompt(): string {
-    const versioned = promptVersioning.getActiveVersion('brain.routing');
-    return versioned?.content ?? buildRoutingSystemPrompt();
-  }
-
-  function getPermissionPrompt(): string {
-    const versioned = promptVersioning.getActiveVersion('brain.permission');
-    return versioned?.content ?? buildPermissionJudgeSystemPrompt();
-  }
-
-  // ─── §5.2.5: Brain 并发审核准入控制 ───
-  // 限制同时进行的 LLM 审核数量（默认 5），防止：
-  //   1. Brain LLM 不可用时 FallbackReviewer 被雷群效应压垮
-  //   2. 多个 review 同时争抢 LLM token 配额
-  //   3. 内存暴涨（每个审核都构建完整 context）
-  const MAX_CONCURRENT_REVIEWS = 5;
-  /** 当前正在执行的审核数 */
-  let activeReviewCount = 0;
-  /** 等待审核的队列（先进先出） */
-  const reviewQueue: Array<{ msg: IpcMessage; resolve: () => void }> = [];
-
-  /** 获取审核许可（排队等待） */
-  function acquireReviewSlot(): Promise<void> {
-    if (activeReviewCount < MAX_CONCURRENT_REVIEWS) {
-      activeReviewCount++;
-      return Promise.resolve();
-    }
-    // 超出并发上限，排队等待
-    return new Promise<void>((resolve) => {
-      reviewQueue.push({ msg: null as unknown as IpcMessage, resolve });
-      logger.debug({
-        activeCount: activeReviewCount,
-        queueLength: reviewQueue.length,
-      }, 'brain:review queued (concurrency limit)');
-    });
-  }
-
-  /** 释放审核许可（唤醒下一个排队的） */
-  function releaseReviewSlot(): void {
-    activeReviewCount = Math.max(0, activeReviewCount - 1);
-    if (reviewQueue.length > 0) {
-      const next = reviewQueue.shift()!;
-      activeReviewCount++;
-      next.resolve();
-    }
-  }
+  // recallDecisionsBlock / getReviewPrompt / getRoutingPrompt / getPermissionPrompt /
+  // acquireReviewSlot / releaseReviewSlot 全部提取到 brain-helpers.ts
+  const { recallDecisionsBlock, getReviewPrompt, getRoutingPrompt, getPermissionPrompt, buildFallbackReviewResult, acquireReviewSlot, releaseReviewSlot } = createBrainHelpers({ decisionRecorder, promptVersioning, fallbackReviewer, name, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
 
   // --- Handler 1: review.request (existing, enhanced with reRoute + concurrency control) ---
 
