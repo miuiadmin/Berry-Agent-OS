@@ -8,12 +8,13 @@ import { evaluateAskUser, evaluateSuperiorReview, evaluateDriftCheck, evaluateVe
 import { evaluatePermissionJudge } from './permission-handler.js';
 import { evaluateRoute } from './route-handler.js';
 import { evaluateCronReview } from './cron-review-handler.js';
+import { evaluateReview } from './review-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentManifest } from '../../manifest.js';
 import type { ModelMessage } from '../../../contracts/model.js';
-import type { ReviewResult } from '../../../contracts/review.js';
+import type { ReviewResult, TurnRecord } from '../../../contracts/review.js';
 import type { ToolBlock } from '../../../contracts/message-blocks.js';
 import type { RouteResultPayload, PermissionJudgeResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload } from '../../../contracts/delegation.js';
@@ -521,54 +522,9 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       `无法判断回复质量且误判代价高时，额外返回 "uncertain": true 与 "escalationQuestion"（要问用户的自然语言问题），` +
       `系统会把问题转给用户而非你强行裁决。能判断就正常给 verdict，不要滥用。`;
 
-    const reviewContent = buildReviewInput(turn.level, turn);
-    const messages: ModelMessage[] = [
-      { role: 'user', content: reviewContent },
-    ];
-
     try {
-      const result = await llm.current.chat(messages, {
-        system: systemPrompt,
-        maxTokens: turn.level === 'A' ? 1024 : 2048,
-        temperature: 0.3,
-        agent: name,
-        purpose: 'brain_review',
-        sessionId: turn.sessionId,
-        correlationId: trackingId,
-      });
-
-      let reviewResult: ReviewResult;
-      try {
-        // 容错提取：LLM（尤其 fast tier 的 glm-5.1）可能用 ```json 包裹或前后附加文字，
-        // 直接 JSON.parse 会失败。先用正则提取首个 JSON 对象。
-        const jsonMatch = result.content.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) throw new Error('No JSON object found in review response');
-        const parsed = JSON.parse(jsonMatch[0]);
-        // 校验 verdict 合法性，非法值回退为 reject（保守策略，避免无效 verdict 溜过审核）
-        const validVerdicts = ['approve', 'modify', 'reject'] as const;
-        const verdict = validVerdicts.includes(parsed.verdict) ? parsed.verdict : 'reject';
-        // 15.0 机制 B：解析 uncertain 升级（Brain 审核拿不准质量时）
-        let escalation: import('../../../contracts/brain.js').BrainEscalation | undefined;
-        if (Boolean(parsed.uncertain) && typeof parsed.escalationQuestion === 'string' && parsed.escalationQuestion.trim()) {
-          escalation = {
-            source: 'review',
-            reason: typeof parsed.reason === 'string' ? parsed.reason : 'Brain 审核不确定回复质量',
-            questionToUser: parsed.escalationQuestion.trim(),
-          };
-        }
-        reviewResult = {
-          verdict,
-          finalResponse: parsed.finalResponse,
-          reason: parsed.reason,
-          reRoute: parsed.reRoute || undefined,
-          escalation,
-        };
-      } catch (parseErr) {
-        // 解析失败 = 审核未成功 = 禁止默认批准（违反"所有回复必须经 Brain 审核"硬规则）
-        // 走 FallbackReviewer 规则化降级（与 LLM 调用失败路径一致）
-        logger.warn({ err: (parseErr as Error).message, contentLen: result.content?.length }, 'brain:review response parse failed, falling back to FallbackReviewer');
-        reviewResult = buildFallbackReviewResult(turn, 'Brain review 响应解析失败');
-      }
+      // 核心逻辑提取到 review-handler.ts（§17.4 巨石拆解，review.request 最大单块提取）
+      const reviewResult = await evaluateReview(turn as TurnRecord, systemPrompt, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId, buildFallbackReviewResult);
 
       logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: safeSlice(reviewResult.reason, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
 
