@@ -6,6 +6,7 @@ import { renderBoardContext } from './board-context.js';
 import { evaluateCheckpoint } from './checkpoint-handler.js';
 import { evaluateAskUser, evaluateSuperiorReview, evaluateDriftCheck, evaluateVerify } from './simple-handlers.js';
 import { evaluatePermissionJudge } from './permission-handler.js';
+import { evaluateRoute } from './route-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -889,115 +890,43 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   }
 
-  // --- Handler 2: route.request (NEW — intent analysis + routing) ---
+  // --- Handler 2: route.request (LLM 调用提取到 route-handler.ts，§17.4) ---
 
   ipc.onMessage('route.request', async (msg: IpcMessage) => {
     const payload = msg.payload as RouteRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
+    // systemPrompt 构造（含 recallInsights/recallDecisions/mission 上下文/升级指令 闭包，留在 entry.ts）
     let systemPrompt = getRoutingPrompt();
-
-    // Inject validated system insights for routing decisions
     const insights = recallInsightsForDecision(db, 'route', 5);
     if (insights.length > 0) {
       systemPrompt += formatInsightsBlock(insights);
       markInsightAdoptedByDecision(db, 'route', insights.map(i => i.id));
     }
-
-    // Recall historical routing decisions for dynamic context (§3.3)
     systemPrompt += recallDecisionsBlock('route');
-
-    // 13.0 §12.3: 注入活跃 mission 摘要 — Brain 作为中枢需了解全局协作进展
-    // 让 Brain 在路由新消息时能判断是否与某个进行中的 mission 相关，避免重复创建或脱节
     try {
-      const activeMissions = missionManager.listMissions()
-        .filter(m => m.status === 'in_progress')
-        .slice(0, 3); // 最多 3 个，控制 token 消耗
+      const activeMissions = missionManager.listMissions().filter(m => m.status === 'in_progress').slice(0, 3);
       if (activeMissions.length > 0) {
-        const missionSummary = activeMissions.map(m =>
-          `- ${m.id}（${m.goal}）进度: ${m.taskCount} 个任务`
-        ).join('\n');
-        systemPrompt += `\n\n## 当前活跃 Mission（供路由参考，新消息若与某个相关请在 missionSpec 中复用）\n${missionSummary}`;
+        systemPrompt += `\n\n## 当前活跃 Mission（供路由参考）\n${activeMissions.map(m => `- ${m.id}（${m.goal}）进度: ${m.taskCount} 个任务`).join('\n')}`;
       }
-    } catch (missionErr) {
-      logger.debug({ err: missionErr }, 'brain:route active mission context injection skipped');
-    }
-
-    // 15.0 机制 B：路由 uncertain 升级指令（保守，仅意图严重歧义时用）
-    systemPrompt += `\n\n## 拿不准时升级（uncertain）\n绝大多数情况你能明确判断 intent + targetAgent。仅当用户意图严重歧义、` +
-      `多个 Agent 都看似相关且误路由代价高时，额外返回 "uncertain": true 与 "escalationQuestion"（要问用户的澄清问题，如「你是想改代码还是查资料？」），` +
-      `系统会把问题转给用户而非猜测路由。能判断就正常输出 intent/targetAgent，不要滥用。`;
-
-    const userPrompt = buildRoutingUserPrompt(
-      payload.message,
-      payload.availableAgents,
-      payload.sessionContext,
-    );
-
-    const messages: ModelMessage[] = [
-      { role: 'user', content: userPrompt },
-    ];
+    } catch (missionErr) { logger.debug({ err: missionErr }, 'brain:route mission context skipped'); }
+    systemPrompt += `\n\n## 拿不准时升级（uncertain）\n绝大多数情况你能明确判断 intent + targetAgent。仅当用户意图严重歧义、多个 Agent 都看似相关且误路由代价高时，额外返回 "uncertain": true 与 "escalationQuestion"，系统会把问题转给用户而非猜测路由。能判断就正常输出 intent/targetAgent，不要滥用。`;
 
     try {
-      const result = await llm.current.chat(messages, {
-        system: systemPrompt,
-        maxTokens: 1024,
-        temperature: 0.1,
-        agent: name,
-        purpose: 'brain_routing',
-        sessionId: payload.sessionId,
-        correlationId: trackingId,
-      });
-
-      const decision = parseRouteDecision(result.content);
-      logger.debug({ intent: decision.intent, target: decision.targetAgent, reason: safeSlice(decision.reason, 200), agents: payload.availableAgents.map((a: { name: string }) => a.name) }, 'brain:route');
-
-      // 13.0 §12.2: Brain 判断任务复杂（missionSpec 非空）→ 自动创建 mission
-      // LLM 在路由决策中输出 missionSpec（goal + tasks），此处消费并写入 plan.json
-      // 创建后的 missionId 写回 decision 供 kernel 的 dispatch 路径携带
+      const decision = await evaluateRoute(payload, systemPrompt, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
+      logger.debug({ intent: decision.intent, target: decision.targetAgent, reason: safeSlice(decision.reason, 200) }, 'brain:route');
+      // missionSpec → createMission
       if (decision.missionSpec && decision.missionSpec.goal && decision.missionSpec.tasks.length > 0) {
         try {
-          const plan = missionManager.createMission(
-            decision.missionSpec.goal,
-            decision.missionSpec.context ?? payload.message,
-            decision.missionSpec.tasks,
-          );
+          const plan = missionManager.createMission(decision.missionSpec.goal, decision.missionSpec.context ?? payload.message, decision.missionSpec.tasks);
           decision.missionId = plan.mission.id;
-          logger.info({
-            missionId: plan.mission.id,
-            goal: decision.missionSpec.goal,
-            taskCount: decision.missionSpec.tasks.length,
-          }, 'brain:route mission created from missionSpec');
-        } catch (missionErr) {
-          logger.warn({ err: missionErr, goal: decision.missionSpec.goal }, 'brain:route mission creation failed, routing without mission');
-        }
+          logger.info({ missionId: plan.mission.id, goal: decision.missionSpec.goal }, 'brain:route mission created');
+        } catch (missionErr) { logger.warn({ err: missionErr }, 'brain:route mission creation failed'); }
       }
-
-      const routeResult: RouteResultPayload = { decision, escalation: decision.escalation };
-      ipc.send('route.result', 'core', routeResult, trackingId);
-
-      // 13.0 §12: 记录路由决策到 BrainDecisionRecorder（供后续审核/进化反馈）
-      decisionRecorder.recordRouteDecision(
-        payload.sessionId,
-        payload.message,
-        { ...decision, missionId: decision.missionId },
-        payload.taskId,
-      );
-
-      // Mark recalled insights as adopted on successful routing
-      if (insights.length > 0) {
-        markInsightAdoptedByDecision(db, 'route', insights.map(i => i.id));
-      }
+      ipc.send('route.result', 'core', { decision, escalation: decision.escalation } satisfies RouteResultPayload, trackingId);
+      decisionRecorder.recordRouteDecision(payload.sessionId, payload.message, { ...decision, missionId: decision.missionId }, payload.taskId);
     } catch (err) {
-      const fallback: RouteResultPayload = {
-        decision: {
-          intent: 'chat',
-          targetAgent: 'conversation',
-          priority: 'normal',
-          reason: `路由 LLM 失败: ${(err as Error).message}，fallback 到对话`,
-        },
-      };
-      ipc.send('route.result', 'core', fallback, trackingId);
+      ipc.send('route.result', 'core', { decision: { intent: 'chat', targetAgent: 'conversation', priority: 'normal', reason: `路由 LLM 失败: ${(err as Error).message}` } } satisfies RouteResultPayload, trackingId);
     }
   });
 
