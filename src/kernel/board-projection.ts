@@ -161,8 +161,10 @@ export function postDelegateEnvelope(taskId: string, opts: DelegateEnvelopeOpts)
       });
     }
     addBoardMember(taskId, opts.to, 'member');
-    // 板状态 created → in_progress（首次 delegate 触发）
-    updateBoardMeta(taskId, { boardStatus: 'in_progress' });
+    // 板状态 created → in_progress（首次/再次 delegate 触发）。经 applyBoardStatus 状态机单一事实源
+    // 推导（§6.5.1），替代原硬编码 updateBoardMeta——校验合法流转 + 终态安全（completed/failed/interrupted
+    // 不被 delegate 打回）。与 postReportEnvelope 一致走 nextBoardStatus。
+    applyBoardStatus(taskId, { kind: 'delegate' });
     // 整任务交接（§12 注）：transferLeadership:true 时换板 leader（新 leader=opts.to，旧 leader 降 member）
     if (opts.transferLeadership) {
       transferLeadership(taskId, opts.to);

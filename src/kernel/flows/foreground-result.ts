@@ -26,6 +26,7 @@ import type { IpcMessage } from '../types.js';
 import type { DelegationGroup } from '../../contracts/delegation.js';
 import { getOrCreateBlockCollector } from '../block-collector.js';
 import { postReportEnvelope } from '../board-projection.js';
+import { applyBoardStatus } from '../board-repo.js';
 import { updatePlanTaskStatus } from './mission-context-builder.js';
 import { getEventBus } from '../event-bus.js';
 import { getLogger } from '../../utils/logger.js';
@@ -458,6 +459,9 @@ export function setupDaemonTaskResultHandlers(deps: ForegroundResultDeps): void 
     const entry = delegationManager.get(taskId);
     if (!entry) return;
     delegationManager.fail(taskId, `任务取消: ${reason ?? '用户停止'}`);
+    // 16.0 §6.5.1/D：用户取消 → 板状态机 interrupted 终态（fire-and-forget，旧库无 board 列静默降级）。
+    // 与委派 fail 独立——委派层终态化释放 active_scope，板层终态化让前端任务卡显示「已中断」。
+    applyBoardStatus(taskId, { kind: 'interrupt' });
     const pending = sessionManager.getPending(entry.correlationId);
     if (pending) {
       streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
