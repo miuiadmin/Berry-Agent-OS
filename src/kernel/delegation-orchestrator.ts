@@ -61,6 +61,7 @@ import {
   type ReviewFlowDeps,
 } from './flows/review-flow.js';
 import { performDriftCheckAndApprove as performDriftCheckAndApproveImpl, type DriftFlowDeps } from './flows/drift-flow.js';
+import { onConversationCompleted as onConversationCompletedImpl, dispatchFeedbackExtraction as dispatchFeedbackExtractionImpl, type PostCompletionDeps } from './flows/post-completion.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
@@ -408,12 +409,23 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
   // ═══ POST-COMPLETION HELPERS ═════════════════════════════════════
 
+  /** §17.4: 后完成学习序列已提取至 flows/post-completion.ts（本 getter 构建 PostCompletionDeps） */
+  private get postCompletionDeps(): PostCompletionDeps {
+    return {
+      sessionManager: this.sessionManager,
+      worldModel: this.worldModelRef,
+      dispatchModuleTask: (input) => this.dispatchModuleTask(input),
+    };
+  }
+
   /**
    * 对话完成后统一的「后完成学习」序列
    *
    * R15 解耦审计：final.response handler 和 handleTaskReviewResult 中
    * queueEvolution + queueCapabilityEvolution + extract_feedback + worldModel
    * 4 步几乎逐行重复。提取为统一 helper，消除补丁式复制粘贴。
+   *
+   * §17.4: 逻辑已提取至 flows/post-completion.ts（行为保持）
    *
    * @param sessionId 对话 session
    * @param userMessage 用户原始消息
@@ -427,15 +439,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     /** 本轮工具调用（ToolBlock[]，来自 BlockCollector —— 审核链单一源）；World Model 仅读 .name 推断 activeGoals */
     toolCalls?: ToolBlock[],
   ): void {
-    this.sessionManager.queueEvolution(sessionId, userMessage, assistantResponse);
-    this.sessionManager.queueCapabilityEvolution(sessionId, userMessage, assistantResponse);
-    this.dispatchFeedbackExtraction(sessionId, userMessage, assistantResponse, 'brain_learning');
-    this.worldModelRef?.updateFromConversation({
-      userMessage,
-      assistantResponse,
-      toolCalls,
-      sessionId,
-    });
+    onConversationCompletedImpl(sessionId, userMessage, assistantResponse, toolCalls, this.postCompletionDeps);
   }
 
   /**
@@ -444,6 +448,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
    * R15 解耦审计：extract_feedback 的 dispatchModuleTask 调用在 orchestrator 中
    * 出现 5 处（auto-approve / drift-timeout / drift-approve / final.response /
    * handleTaskReviewResult），参数结构完全相同。提取为一行调用。
+   *
+   * §17.4: 逻辑已提取至 flows/post-completion.ts（行为保持）
    *
    * @param sessionId 对话 session
    * @param userMessage 用户原始消息
@@ -456,14 +462,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     assistantResponse: string,
     requester: 'brain_learning' | 'post_review',
   ): void {
-    this.dispatchModuleTask({
-      sessionId,
-      taskType: 'extract_feedback',
-      requester,
-      inputPayload: { taskType: 'extract_feedback', userMessage, assistantResponse },
-    }).catch((err) => {
-      logger.debug({ err, sessionId }, 'Feedback extraction dispatch failed');
-    });
+    dispatchFeedbackExtractionImpl(sessionId, userMessage, assistantResponse, requester, this.postCompletionDeps);
   }
 
   private get proxyDeps(): ProxyHandlersDeps {
