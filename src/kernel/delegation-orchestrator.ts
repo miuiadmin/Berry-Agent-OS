@@ -38,6 +38,17 @@ import {
   setupDaemonTaskResultHandlers as setupDaemonTaskResultHandlersImpl,
   type ForegroundResultDeps,
 } from './flows/foreground-result.js';
+import {
+  handleChatRoute as handleChatRouteImpl,
+  handleTaskRoute as handleTaskRouteImpl,
+  handleExternalRoute as handleExternalRouteImpl,
+  handleMultiRoute as handleMultiRouteImpl,
+  handleWorkspaceRoute as handleWorkspaceRouteImpl,
+  handleRouteFallback as handleRouteFallbackImpl,
+  executeSetupAction as executeSetupActionImpl,
+  loadActiveSkills as loadActiveSkillsImpl,
+  type RouteHandlersDeps,
+} from './flows/route-handlers.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
@@ -1149,60 +1160,19 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     span.end();
   }
 
+  /** §17.4: handleRouteFallback 逻辑已提取至 flows/route-handlers.ts（VF-2 LLM 降级副作用逐字保留） */
   private handleRouteFallback(correlationId: string, userMessage?: string): void {
-    const pending = this.sessionManager.getPending(correlationId);
-    if (!pending) return;
-
-    const message = userMessage ?? pending.userMessage;
-    // 13.0 VF-2: 记录 LLM 全局故障的回退路径，让监控和前端能感知
-    // 设计依据：设计文档 §23 漏洞 #2 — LLM global failure no fallback strategy
-    // 当前策略：fail-soft（用规则 fallback）但记录指标 + 事件，便于：
-    // 1. 运维发现 LLM 异常时及时干预
-    // 2. 前端可显示「Brain 暂时不可用」提示
-    metrics.counter('routing_llm_fallback_total').inc({ reason: 'brain_unavailable' });
-    logger.warn({ correlationId, intent: 'chat', sessionId: pending.sessionId }, 'routing: Brain LLM 不可用，降级到 FallbackRouter（规则路由）');
-
-    const decision = this.fallbackRouter.route(message);
-    this.handleRouteDecision(decision, correlationId);
+    handleRouteFallbackImpl(correlationId, userMessage, this.routeHandlersDeps);
   }
 
+  /** §17.4: executeSetupAction 逻辑已提取至 flows/route-handlers.ts */
   private executeSetupAction(action: { action: string; params: unknown }): void {
-    switch (action.action) {
-      case 'create_agent':
-        logger.info({ params: action.params }, 'Setup: creating dynamic agent');
-        break;
-      case 'activate_skill':
-        logger.info({ params: action.params }, 'Setup: activating skill');
-        break;
-      case 'enable_plugin':
-        logger.info({ params: action.params }, 'Setup: enabling plugin');
-        break;
-      default:
-        logger.warn({ action: action.action }, 'Unknown setup action');
-    }
+    executeSetupActionImpl(action);
   }
 
+  /** §17.4: loadActiveSkills 逻辑已提取至 flows/route-handlers.ts（注入检测逐字保留） */
   private loadActiveSkills(skillNames: string[]): string | null {
-    try {
-      const { SkillsRegistry } = require('../skills/index.js');
-      const { scanContextFile } = require('../safety/context-file-scanner.js');
-      const registry = new SkillsRegistry(getDb());
-      const parts: string[] = [];
-      for (const name of skillNames.slice(0, 5)) {
-        const skill = registry.get(name);
-        if (skill?.content) {
-          const scan = scanContextFile(skill.content);
-          if (!scan.safe) {
-            logger.warn({ skill: name, threats: scan.threats }, 'Skill content blocked: injection detected');
-            continue;
-          }
-          parts.push(`--- Skill: ${name} ---\n${skill.content}`);
-        }
-      }
-      return parts.length > 0 ? parts.join('\n\n') : null;
-    } catch {
-      return null;
-    }
+    return loadActiveSkillsImpl(skillNames);
   }
 
   /** 16.0 §17.4: mission 上下文 helper 函数已提取到 flows/mission-context-builder.ts；§17.4 拆解公开供 flows 文件构建 deps */
@@ -1214,164 +1184,43 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     };
   }
 
-  private handleChatRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): void {
-    const primaryAgent = this.registry.requireRole('primary');
-    const primaryName = primaryAgent.manifest.name;
-    const primary = this.agentManager.getAgent(primaryName);
-    if (!primary) {
-      // R14-1：unavailable 失败源走 finalizeTask 统一入口
-      this.sessionManager.fail(correlationId, { kind: 'unavailable' });
-      return;
-    }
-
-    this.pendingReviewOrigins.set(correlationId, 'conversation');
-    this.reportProgress(pending, 'thinking', '正在思考...');
-    let systemPrompt = this.sessionManager.buildPrompt(pending.sessionId);
-    const memoryContext = this.sessionManager.buildMemoryContext(pending.sessionId, pending.userMessage);
-
-    // 崩溃恢复：注入未完成对话的摘要（Conversation 重启后不丢失上下文）
-    if (this.dialogueRouter) {
-      const recovery = this.dialogueRouter.getRecentUnfinishedSummary(pending.sessionId);
-      if (recovery) {
-        systemPrompt += `\n\n## 上次未完成的智能体对话\n\n${recovery}\n\n如果用户希望继续，可以通过 dialogue 工具恢复协作。`;
-      }
-    }
-
-    // §8.9 Skill activation: inject active Skills into system prompt
-    if (decision.activeSkills && decision.activeSkills.length > 0) {
-      const skillContent = this.loadActiveSkills(decision.activeSkills);
-      if (skillContent) {
-        systemPrompt += `\n\n${skillContent}`;
-      }
-    }
-
-    // 13.0 多智能体协作：注入 mission context（让 agent 知道自己的 mission 目标 + squad 角色）
-    if (decision.missionId) {
-      const missionContext = buildMissionContextPrompt(
-        this.missionContextDeps,
-        decision.missionId,
-        decision.planTaskId,
-        decision.targetAgent,
-      );
-      if (missionContext) {
-        systemPrompt += `\n\n${missionContext}`;
-      }
-    }
-
-    primary.ipc.send('user.message', primaryName, {
-      sessionId: pending.sessionId,
-      message: pending.userMessage,
-      taskId: pending.taskId,
-      systemPrompt,
-      memoryContext,
-      instruction: decision.instruction,
-      intent: decision.intent,
-      modelTierOverride: decision.modelTier,
-    }, correlationId);
-  }
-
-  private async handleTaskRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
-    const taskTypeMap: Record<string, string> = {
-      code: 'code_task',
-      skill_test: 'skill_test',
-      learning: 'learning_review',
-      plugin: 'plugin_task',
+  /** §17.4: 路由处理器簇已提取至 flows/route-handlers.ts（本 getter 构建 RouteHandlersDeps） */
+  private get routeHandlersDeps(): RouteHandlersDeps {
+    return {
+      agentManager: this.agentManager,
+      registry: this.registry,
+      sessionManager: this.sessionManager,
+      taskManager: this.taskManager,
+      delegationManager: this.delegationManager,
+      fallbackRouter: this.fallbackRouter,
+      dialogueRouter: this.dialogueRouter,
+      daemonBridge: this.daemonBridge,
+      workspaceRouter: this.workspaceRouter,
+      runtimeRegistry: this.runtimeRegistry,
+      runtimeExecutor: this.runtimeExecutor,
+      missionContextDeps: this.missionContextDeps,
+      pendingReviewOrigins: this.pendingReviewOrigins,
+      handleRouteDecision: (decision, correlationId) => this.handleRouteDecision(decision, correlationId),
+      resolveRuntimeForTarget: (targetAgent) => this.resolveRuntimeForTarget(targetAgent),
+      executeViaRuntime: (runtime, decision, correlationId, pending) => this.executeViaRuntime(runtime, decision, correlationId, pending),
+      dispatchModuleTaskInternal: (input) => this.dispatchModuleTaskInternal(input),
+      reportProgress: (pending, status, summary) => this.reportProgress(pending, status, summary),
     };
-    const taskType = taskTypeMap[decision.intent] ?? 'conversation_turn';
-
-    this.reportProgress(pending, 'dispatching', `正在分发给 ${decision.targetAgent}...`);
-
-    try {
-      const { getLastCwd } = await import('../tools/shell.js');
-      const { taskId } = await this.dispatchModuleTaskInternal({
-        sessionId: pending.sessionId,
-        taskType,
-        requester: 'brain-route',
-        inputPayload: {
-          message: pending.userMessage,
-          instruction: decision.instruction,
-          contextHints: decision.contextHints,
-          workingDir: getLastCwd(),
-          // 13.0 多智能体协作：透传 missionId，让 Agent 知道自己属于哪个 mission
-          ...(decision.missionId ? { missionId: decision.missionId } : {}),
-        },
-        foreground: true,
-        correlationId,
-      });
-      // 关联新 taskId 到 pending（供 flusher/rebind 使用）
-      pending.delegationTaskId = taskId;
-      if (pending.taskId) {
-        this.taskManager.complete(pending.taskId, { delegatedTo: taskId });
-      }
-    } catch (err) {
-      logger.error({ err, decision }, '任务路由分发失败，fallback 到对话');
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-    }
   }
 
+  /** §17.4: handleChatRoute 逻辑已提取至 flows/route-handlers.ts（systemPrompt/memoryContext/skill/mission 注入逐字保留） */
+  private handleChatRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): void {
+    handleChatRouteImpl(decision, correlationId, pending, this.routeHandlersDeps);
+  }
+
+  /** §17.4: handleTaskRoute 逻辑已提取至 flows/route-handlers.ts */
+  private async handleTaskRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
+    return handleTaskRouteImpl(decision, correlationId, pending, this.routeHandlersDeps);
+  }
+
+  /** §17.4: handleExternalRoute 逻辑已提取至 flows/route-handlers.ts（runtime 优先 + daemon 回退逐字保留） */
   private async handleExternalRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
-    // New path: try RuntimeRegistry first
-    if (this.runtimeRegistry) {
-      const runtime = this.resolveRuntimeForTarget(decision.targetAgent);
-      if (runtime) {
-        return this.executeViaRuntime(runtime, decision, correlationId, pending);
-      }
-    }
-
-    // Legacy path: direct daemon bridge dispatch
-    if (!this.daemonBridge?.isAvailable) {
-      logger.warn({ correlationId }, 'External route requested but daemon not available, fallback to chat');
-      this.reportProgress(pending, 'routing', '外部智能体不可用，转为对话处理...');
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-      return;
-    }
-
-    this.reportProgress(pending, 'dispatching', `正在分发给外部智能体 ${decision.targetAgent}...`);
-
-    const taskId = this.delegationManager.create({
-      sessionId: pending.sessionId,
-      correlationId,
-      targetAgent: '__daemon__',
-      targetKind: 'daemon',
-      userMessage: pending.userMessage,
-      taskType: 'external_code_task',
-      requester: 'brain-route',
-      inputPayload: {
-        message: pending.userMessage,
-        instruction: decision.instruction,
-        contextHints: decision.contextHints,
-        // 13.0：透传 missionId，让外部 agent 知道自己属于哪个 mission
-        ...(decision.missionId ? { missionId: decision.missionId } : {}),
-      },
-      foreground: true,
-    });
-
-    // 记录委托 task ID，供 flusher 清理使用
-    pending.delegationTaskId = taskId;
-
-    // 16.0 P4-C4：daemon 派发点投影 delegate 信封（fire-and-forget 审计影子）
-    postDelegateEnvelope(taskId, {
-      from: resolveLeaderForDelegate(),
-      to: decision.targetAgent,
-      subTaskGoal: pending.userMessage,
-      sessionId: pending.sessionId,
-      scope: { allowTools: ['*'] },
-    });
-
-    const dispatched = await this.daemonBridge.dispatch(taskId, {
-      prompt: pending.userMessage,
-      systemPrompt: decision.instruction,
-    }, decision.targetAgent);
-
-    if (!dispatched) {
-      this.delegationManager.fail(taskId, 'Daemon dispatch failed');
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-      return;
-    }
-
-    if (pending.taskId) {
-      this.taskManager.complete(pending.taskId, { delegatedTo: taskId });
-    }
+    return handleExternalRouteImpl(decision, correlationId, pending, this.routeHandlersDeps);
   }
 
   /** §17.4: resolveRuntimeForTarget 逻辑已提取至 flows/runtime-execution.ts（行为保持） */
@@ -1396,87 +1245,14 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     return executeViaRuntimeImpl(runtime, this.runtimeExecutor, decision, correlationId, pending, deps);
   }
 
+  /** §17.4: handleMultiRoute 逻辑已提取至 flows/route-handlers.ts（并行派发副作用逐字保留） */
   private async handleMultiRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
-    if (!decision.subDispatches || decision.subDispatches.length === 0) {
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-      return;
-    }
-
-    this.reportProgress(pending, 'dispatching', `正在并行分发 ${decision.subDispatches.length} 个子任务...`);
-
-    this.delegationManager.createGroup('multi-' + correlationId, correlationId, pending.sessionId);
-    let hasAny = false;
-
-    for (const sub of decision.subDispatches) {
-      try {
-        const { taskId } = await this.dispatchModuleTaskInternal({
-          sessionId: pending.sessionId,
-          taskType: sub.taskType,
-          requester: 'brain-route-multi',
-          inputPayload: {
-            ...sub.inputPayload,
-            // 13.0：透传 missionId 到子任务
-            ...(decision.missionId ? { missionId: decision.missionId } : {}),
-          },
-          foreground: true,
-          correlationId: genId('sub'),
-        });
-        this.delegationManager.addChildToGroup(correlationId, taskId);
-        hasAny = true;
-      } catch (err) {
-        logger.warn({ err, sub }, '多意图子任务分发失败');
-      }
-    }
-
-    if (!hasAny) {
-      this.delegationManager.removeGroup(correlationId);
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-    }
+    return handleMultiRouteImpl(decision, correlationId, pending, this.routeHandlersDeps);
   }
 
+  /** §17.4: handleWorkspaceRoute 逻辑已提取至 flows/route-handlers.ts（team lead 委托逐字保留） */
   private async handleWorkspaceRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
-    if (!this.workspaceRouter || !decision.targetWorkspaceId) {
-      logger.warn({ correlationId }, '工作区路由不可用或缺少 targetWorkspaceId，降级到对话');
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-      return;
-    }
-
-    const lead = this.workspaceRouter.getTeamLead(decision.targetWorkspaceId);
-    if (!lead) {
-      logger.warn({ correlationId, workspaceId: decision.targetWorkspaceId }, '工作区没有 lead agent，降级到对话');
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-      return;
-    }
-
-    this.reportProgress(pending, 'dispatching', `正在委托给工作区团队 ${lead}...`);
-
-    try {
-      const { taskId } = await this.dispatchModuleTaskInternal({
-        sessionId: pending.sessionId,
-        taskType: 'conversation_turn',
-        requester: 'workspace-route',
-        inputPayload: {
-          message: pending.userMessage,
-          instruction: decision.instruction,
-          workspaceId: decision.targetWorkspaceId,
-          delegationType: 'workspace',
-          // 13.0：透传 missionId 到工作区路由
-          ...(decision.missionId ? { missionId: decision.missionId } : {}),
-        },
-        foreground: true,
-        correlationId,
-      });
-
-      this.workspaceRouter.recordSuccess(pending.userMessage, decision.targetWorkspaceId, decision.intent);
-
-      if (pending.taskId) {
-        this.taskManager.complete(pending.taskId, { delegatedTo: taskId });
-      }
-    } catch (err) {
-      logger.error({ err, decision }, '工作区路由分发失败，降级到对话');
-      this.workspaceRouter.recordFailure(pending.userMessage, decision.targetWorkspaceId, decision.intent);
-      this.handleChatRoute({ ...decision, intent: 'chat', targetAgent: 'conversation' }, correlationId, pending);
-    }
+    return handleWorkspaceRouteImpl(decision, correlationId, pending, this.routeHandlersDeps);
   }
 
   private async dispatchModuleTaskInternal(input: {
