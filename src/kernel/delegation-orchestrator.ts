@@ -30,6 +30,7 @@ import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { attachBrainEventRelay } from './flows/brain-relay.js';
 import { setupRoutingResultHandler } from './flows/routing-result-handler.js';
+import { resolveRuntimeForTarget as resolveRuntimeForTargetImpl, executeViaRuntime as executeViaRuntimeImpl, type RuntimeExecutionDeps } from './flows/runtime-execution.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
@@ -1366,229 +1367,26 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
   }
 
+  /** §17.4: resolveRuntimeForTarget 逻辑已提取至 flows/runtime-execution.ts（行为保持） */
   private resolveRuntimeForTarget(targetAgent: string): AgentRuntime | null {
-    if (!this.runtimeRegistry) return null;
-
-    const providerMap: Record<string, string> = {
-      'claude-code': 'claude_code',
-      'opencode': 'opencode',
-    };
-    const provider = providerMap[targetAgent];
-    if (provider) {
-      return this.runtimeRegistry.get(provider as import('../contracts/agent-runtime.js').RuntimeProvider) ?? null;
-    }
-    return null;
+    return resolveRuntimeForTargetImpl(this.runtimeRegistry, targetAgent);
   }
 
+  /** §17.4: executeViaRuntime 逻辑已提取至 flows/runtime-execution.ts（行为保持，BlockCollector 生命周期副作用逐字保留） */
   private async executeViaRuntime(
     runtime: AgentRuntime,
     decision: RouteDecision,
     correlationId: string,
     pending: PendingRequest,
   ): Promise<void> {
-    this.reportProgress(pending, 'dispatching', `正在通过 ${runtime.name} 执行...`);
-
-    const executionId = genId('exec');
-
-    // Resolve per-agent config (workspace reuse + thinking level)
-    let workspacePath: string | undefined;
-    let thinkingLevel: string | undefined;
-    const workspaceId = decision.targetWorkspaceId;
-    if (workspaceId) {
-      const agentConfig = getDb().prepare(
-        'SELECT prior_work_dir, thinking_level FROM workspace_agents WHERE workspace_id = ? AND agent_name = ? AND enabled = 1 LIMIT 1',
-      ).get(workspaceId, decision.targetAgent) as { prior_work_dir: string | null; thinking_level: string } | undefined;
-      if (agentConfig) {
-        workspacePath = agentConfig.prior_work_dir ?? undefined;
-        thinkingLevel = agentConfig.thinking_level;
-      }
-    }
-
-    const task: ExecutionTask = {
-      executionId,
-      prompt: pending.userMessage,
-      systemPrompt: decision.instruction,
-      sessionId: pending.sessionId,
-      traceId: getCurrentTrace()?.traceId,
-      workspacePath,
-      thinkingLevel,
+    const deps: RuntimeExecutionDeps = {
+      delegationManager: this.delegationManager,
+      streamingFlusher: this.streamingFlusher,
+      reportProgress: (p, status, summary) => this.reportProgress(p, status, summary),
+      sessionManagerFail: (cid, outcome) => this.sessionManager.fail(cid, outcome),
+      sendTaskResultForReview: (fgEntry, p, draft) => this.sendTaskResultForReview(fgEntry, p, draft),
     };
-
-    const delegationId = this.delegationManager.create({
-      sessionId: pending.sessionId,
-      correlationId,
-      targetAgent: runtime.name,
-      targetKind: 'daemon',
-      userMessage: pending.userMessage,
-      taskType: 'runtime_execution',
-      requester: 'brain-route',
-      inputPayload: { message: pending.userMessage, instruction: decision.instruction },
-      foreground: true,
-    });
-
-    // 记录委托 task ID 到 pending，供后续所有清理路径使用
-    pending.delegationTaskId = delegationId;
-
-    // 16.0 P4-C4：runtime 派发点投影 delegate 信封（fire-and-forget 审计影子）
-    postDelegateEnvelope(delegationId, {
-      from: resolveLeaderForDelegate(),
-      to: runtime.name,
-      subTaskGoal: pending.userMessage,
-      sessionId: pending.sessionId,
-      scope: { allowTools: ['*'] },
-    });
-
-    let textAccumulator = '';
-
-    // 对话内联（设计文档/22 期4）：为本次委派创建 BlockCollector——把外部 driver 的
-    // tool_running/completed/failed + thinking_delta + text_delta 归一为内联 block（前端实时渲染工具卡 / 思考 / 正文）。
-    // Phase C：文本也喂 collector（下方 text_delta case 调 onTextDelta），与 task-flow 统一为 block 单源；
-    // 过渡期 stream.text_delta 仍 emit（双写），待前端改读 TextBlock 后删（Commit 4）。
-    // 之前这些事件落入 default:break 被丢弃——正是「外部 agent 委派时工具卡片缺失」的根因。
-    const blockCollector = getOrCreateBlockCollector(delegationId, pending.sessionId, correlationId);
-    // 对话内联（doc 22 期4+）：本轮即一次委派——产出 delegation block（「委派给 X agent」表头卡），
-    // 实时内联 + 落库后刷新保留。终态在各 execution_* 分支用 onDelegationComplete 推进。
-    blockCollector.onDelegationStart({ targetAgent: runtime.name });
-
-    try {
-      const eventSource = this.runtimeExecutor
-        ? this.runtimeExecutor.executeWithCheckpoint(runtime, task)
-        : runtime.execute(task);
-
-      for await (const event of eventSource) {
-        // tool-trace（保留诊断）：runtime/driver 路径（builtin / opencode / claude / 自定义 driver）的
-        // tool_* / thinking_delta AgentEvent 在此被消费——期4 已接入 BlockCollector（下方 switch 新增 case），
-        // 不再落入 default 丢弃。覆盖全部 4 个工具 kind（曾漏掉 builtin-driver 的 tool_pending）。
-        if (
-          event.kind === 'tool_pending' ||
-          event.kind === 'tool_running' ||
-          event.kind === 'tool_completed' ||
-          event.kind === 'tool_failed' ||
-          event.kind === 'thinking_delta'
-        ) {
-          logger.debug(
-            { delegationId, eventKind: event.kind, callId: (event.data as { callId?: string }).callId, name: (event.data as { name?: string }).name, timestamp: event.timestamp },
-            'tool-trace: orchestrator AgentEvent → BlockCollector',
-          );
-        }
-        switch (event.kind) {
-          // 对话内联（设计文档/22 期4）：外部 driver 的思考增量 → thinking block（前端可折叠）+ 累积进 pending.reasoning 供持久化
-          case 'thinking_delta': {
-            const text = event.data.text as string;
-            pending.reasoning = (pending.reasoning ?? '') + text;
-            blockCollector.onReasoningDelta(text);
-            break;
-          }
-          // 工具启动（tool_pending / tool_running）：发 running 态 tool block，按 callId 暂存等 result 配对
-          case 'tool_pending':
-          case 'tool_running': {
-            blockCollector.onToolStart({
-              callId: event.data.callId as string,
-              toolName: event.data.name as string,
-              input: event.data.input,
-              ts: event.timestamp,
-            });
-            break;
-          }
-          // 工具完成（tool_completed / tool_failed）：按 callId 回查 start，组装终态 block + 算耗时
-          case 'tool_completed':
-          case 'tool_failed': {
-            blockCollector.onToolComplete({
-              callId: event.data.callId as string,
-              output: event.data.output as string | undefined,
-              success: event.kind === 'tool_completed',
-              ts: event.timestamp,
-            });
-            break;
-          }
-          case 'text_delta': {
-            const text = event.data.text as string;
-            textAccumulator += text;
-            // 实时同步到 pending，重连时可从中恢复已积累的文本
-            pending.draftResponse = textAccumulator;
-            // 定期持久化到 SQLite，前端断连/刷新后可恢复
-            this.streamingFlusher.onTextAccumulated(delegationId, textAccumulator, pending.reasoning);
-            // 对话内联（doc 22 Phase C）：文本经 collector → emit stream.block text（单一事件族，前端气泡从 TextBlock 渲染）。
-            // 粒度 stream.text_delta 已删（与 task-flow 同步消灭双写）；textAccumulator + flusher 仍保留（持久化事实源）。
-            blockCollector.onTextDelta(text);
-            break;
-          }
-          case 'execution_completed': {
-            const finalText = textAccumulator || (event.data.content as string) || '';
-            pending.draftResponse = finalText;
-            this.streamingFlusher.remove(delegationId);
-            // 委派终态：推进 delegation block 到 completed（产出由下方 text block 承载，summary 省略避免重复）
-            blockCollector.onDelegationComplete({ state: 'completed' });
-            if (workspaceId && task.workspacePath) {
-              getDb().prepare(
-                'UPDATE workspace_agents SET prior_work_dir = ?, prior_session_id = ? WHERE workspace_id = ? AND agent_name = ?',
-              ).run(task.workspacePath, task.sessionId ?? null, workspaceId, decision.targetAgent);
-            }
-            this.sendTaskResultForReview(
-              { correlationId, sessionId: pending.sessionId },
-              pending,
-              finalText,
-            );
-            return;
-          }
-          case 'execution_failed': {
-            const error = (event.data.error as string) || '执行失败';
-            const resumable = event.data.resumable as boolean | undefined;
-            this.streamingFlusher.remove(delegationId);
-            // 委派终态：可恢复→interrupted，否则 failed
-            blockCollector.onDelegationComplete({ state: resumable ? 'interrupted' : 'failed' });
-            this.delegationManager.fail(delegationId, resumable ? `[resumable] ${error}` : error);
-            this.sessionManager.fail(correlationId, {
-              kind: resumable ? 'cancelled' : 'failed',
-              agentName: runtime.name,
-              error: resumable ? `执行中断（可恢复）: ${error}` : error,
-            });
-            return;
-          }
-          case 'execution_cancelled': {
-            this.streamingFlusher.remove(delegationId);
-            // 委派终态：取消→interrupted
-            blockCollector.onDelegationComplete({ state: 'interrupted' });
-            this.delegationManager.fail(delegationId, 'Cancelled');
-            this.sessionManager.fail(correlationId, { kind: 'cancelled', agentName: runtime.name });
-            return;
-          }
-          default:
-            break;
-        }
-      }
-
-      // Generator completed without explicit execution_completed event
-      if (textAccumulator) {
-        pending.draftResponse = textAccumulator;
-        // 委派终态：generator 自然结束且有产出 → completed
-        blockCollector.onDelegationComplete({ state: 'completed' });
-        this.sendTaskResultForReview(
-          { correlationId, sessionId: pending.sessionId },
-          pending,
-          textAccumulator,
-        );
-      } else {
-        this.streamingFlusher.remove(delegationId);
-        // 委派终态：无产出 → failed
-        blockCollector.onDelegationComplete({ state: 'failed' });
-        this.delegationManager.fail(delegationId, 'No output produced');
-        // R14-1：未产出输出 走 finalizeTask 统一入口
-        this.sessionManager.fail(correlationId, { kind: 'failed', agentName: runtime.name, error: '未产出任何输出' });
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error({ correlationId, err }, 'Runtime execution error');
-      this.streamingFlusher.remove(delegationId);
-      // 委派终态：Runtime 异常 → failed
-      blockCollector.onDelegationComplete({ state: 'failed' });
-      this.delegationManager.fail(delegationId, message);
-      // R14-1：Runtime exception 兜底走 finalizeTask 统一入口（含 no_response 通知）
-      this.sessionManager.fail(correlationId, { kind: 'runtime_error', agentName: runtime.name, error: message });
-    }
-    // 对话内联（doc 22）：本委派的 BlockCollector 不再在 finally 释放——dispose + buildBlocks + persistAssistantTurn
-    // 已统一下沉到 SessionManager.persistInlineBlocks()（由 fail()/final.response 路径的 complete() 调用）。
-    // collector 在 runtime 结束后留 registry，直到 turn 终态 complete() 时 dispose 落库。
+    return executeViaRuntimeImpl(runtime, this.runtimeExecutor, decision, correlationId, pending, deps);
   }
 
   private async handleMultiRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): Promise<void> {
