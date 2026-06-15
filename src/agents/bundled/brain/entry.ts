@@ -4,7 +4,7 @@ import { safeSlice } from '../../../utils/safe-slice.js';
 import { C_LEVEL_OBSERVATION_TYPES, renderObservationContext } from './observation-context.js';
 import { renderBoardContext } from './board-context.js';
 import { evaluateCheckpoint } from './checkpoint-handler.js';
-import { evaluateAskUser, evaluateSuperiorReview } from './simple-handlers.js';
+import { evaluateAskUser, evaluateSuperiorReview, evaluateDriftCheck, evaluateVerify } from './simple-handlers.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1210,90 +1210,26 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // ─── 12.0: drift.check.request — 漂移检测 LLM 调用 ───
+  // ─── 12.0: drift.check.request (核心逻辑提取到 simple-handlers.ts，§17.4) ───
   ipc.onMessage('drift.check.request', async (msg: IpcMessage) => {
-    const { anchor, content, checkpointType } = msg.payload as import('../../../kernel/drift-detector.js').DriftCheckRequestPayload;
+    const payload = msg.payload as import('../../../kernel/drift-detector.js').DriftCheckRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
-
     try {
-      const { buildDriftCheckPrompt, parseDriftCheckResult } = await import('../../../kernel/drift-detector.js');
-      const prompt = buildDriftCheckPrompt(anchor, content, checkpointType);
-
-      const result = await llm.current.chat(
-        [{ role: 'user', content: prompt }],
-        {
-          system: '你是语义对齐检测器。只输出 JSON，不要有任何其他文本。',
-          maxTokens: 200,
-          temperature: 0,
-          agent: name,
-          purpose: 'drift_detection',
-          sessionId: undefined,
-          correlationId: trackingId,
-        },
-      );
-
-      const signal = parseDriftCheckResult(result.content, checkpointType);
-      logger.debug({ checkpointType, alignmentScore: signal.alignmentScore, needsIntervention: signal.needsIntervention }, 'brain:drift-check');
+      const signal = await evaluateDriftCheck(payload, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
+      logger.debug({ checkpointType: payload.checkpointType, alignmentScore: signal.alignmentScore }, 'brain:drift-check');
       ipc.send('drift.check.result', 'core', { signal }, trackingId);
     } catch (err) {
-      logger.error({ err, checkpointType }, 'drift.check.request failed');
-      // 失败时返回"不干预"默认值
-      const fallbackSignal = { alignmentScore: 1, needsIntervention: false, checkpointType };
-      ipc.send('drift.check.result', 'core', { signal: fallbackSignal }, trackingId);
+      logger.error({ err }, 'drift.check.request failed');
+      ipc.send('drift.check.result', 'core', { signal: { alignmentScore: 1, needsIntervention: false, checkpointType: payload.checkpointType } }, trackingId);
     }
   });
 
-  // ─── 12.0: verify.request — 独立意图验证（Verify Gate） ───
+  // ─── 12.0: verify.request (核心逻辑提取到 simple-handlers.ts，§17.4) ───
   ipc.onMessage('verify.request', async (msg: IpcMessage) => {
     const { anchor, draftResponse } = msg.payload as { anchor: import('../../../contracts/intent.js').IntentAnchor; draftResponse: string };
     const trackingId = msg.correlationId ?? msg.id;
-
     try {
-      const verifyPrompt = `你是一个独立的意图验证器。你的任务是判断最终回复是否真正解决了用户的问题。
-
-## 用户原始意图
-目标：${anchor.goal}
-约束：${anchor.constraints.length > 0 ? anchor.constraints.join('；') : '无'}
-预期产出类型：${anchor.outputType}
-
-## 待验证的回复
-${safeSlice(draftResponse, 5000)}
-
-## 验证标准
-1. 回复是否直接回答了用户的问题/完成了用户的请求？
-2. 是否违反了用户的约束条件？
-3. 是否有"答非所问"的情况（看似在回答但偏了方向）？
-
-只输出 JSON：{"pass": true/false, "reason": "<一句话判决理由>", "correction": "<修正指导或null>"}`;
-
-      const result = await llm.current.chat(
-        [{ role: 'user', content: verifyPrompt }],
-        {
-          system: '你是独立意图验证器，以对抗性视角审视回复是否真正解决了用户问题。只输出 JSON。',
-          maxTokens: 300,
-          temperature: 0,
-          agent: name,
-          purpose: 'brain_review',
-          modelTier: 'default',
-          sessionId: undefined,
-          correlationId: trackingId,
-        },
-      );
-
-      // 解析验证结果
-      let verdict = { pass: true, reason: '验证通过', correction: undefined as string | undefined };
-      try {
-        const jsonMatch = result.content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          verdict = {
-            pass: Boolean(parsed.pass),
-            reason: typeof parsed.reason === 'string' ? parsed.reason : '未知',
-            correction: typeof parsed.correction === 'string' ? parsed.correction : undefined,
-          };
-        }
-      } catch { /* 解析失败默认通过 */ }
-
+      const verdict = await evaluateVerify(anchor, draftResponse, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
       logger.debug({ pass: verdict.pass, reason: safeSlice(verdict.reason ?? '', 100) }, 'brain:verify');
       ipc.send('verify.result', 'core', { verdict }, trackingId);
     } catch (err) {
