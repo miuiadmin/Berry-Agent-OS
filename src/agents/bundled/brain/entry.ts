@@ -11,6 +11,7 @@ import { evaluateCronReview } from './cron-review-handler.js';
 import { evaluateReview } from './review-handler.js';
 import { setupReviewFeedbackHandler } from './review-feedback-handler.js';
 import { setupDialogueHandler } from './dialogue-handler.js';
+import { createPlanMonitor } from './plan-monitor.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -172,7 +173,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   /** 每 N 次观察触发一次 plan check（§12.5） */
   const PLAN_CHECK_INTERVAL = 5;
   /** 任务 working 状态超过该毫秒数视为"卡住" */
-  const TASK_STALLED_MS = 5 * 60 * 1000;
+  const { checkPlanProgress } = createPlanMonitor({ missionManager, observationRecorder, decisionRecorder, ipc });
 
   /** brain.observe IPC handler 载荷（Kernel 转发来的观察事件） */
   interface BrainObservePayload {
@@ -254,131 +255,6 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    * @param sessionId 触发检查的 session
    * @param taskId 触发检查的 task（仅用于上下文标记，不影响匹配逻辑）
    */
-  function checkPlanProgress(sessionId: string, taskId: string): void {
-    const missions = missionManager.listMissions();
-    if (missions.length === 0) return;
-
-    const now = Date.now();
-    for (const m of missions) {
-      // 只检查 in_progress 的 mission
-      if (m.status !== 'in_progress') continue;
-      const plan = missionManager.readPlan(m.id);
-      if (!plan) continue;
-
-      for (const task of plan.tasks) {
-        if (task.status !== 'working') continue;
-        // updated_at 在 schema 中是 optional，没设过则视为新任务不卡住
-        if (!task.updated_at) continue;
-        const updated = new Date(task.updated_at).getTime();
-        const elapsed = now - updated;
-        if (elapsed < TASK_STALLED_MS) continue;
-
-        // 任务卡住 → 记录 stall 观察（供后续 C 级审核 LLM 参考）
-        const signal = `plan_stalled: task ${task.id} (${task.what}) working for ${Math.round(elapsed / 1000)}s`;
-        observationRecorder.record({
-          sessionId,
-          taskId,
-          observationType: 'agent_event',
-          fromAgent: 'brain',
-          toAgent: task.who,
-          content: signal,
-          priority: 0, // critical — 不被滚动窗口丢弃
-        });
-        logger.info({ sessionId, missionId: m.id, taskId: task.id, elapsedMs: elapsed }, 'brain:plan_stalled');
-      }
-
-      // P9: 检查 squad 信号 — blocker / question 触发干预
-      const squad = missionManager.readSquad(m.id);
-      if (squad) {
-        const unresolvedSignals = squad.signals.filter(s =>
-          (s.type === 'blocker' || s.type === 'question') && !s.resolved,
-        );
-        for (const sig of unresolvedSignals.slice(0, 3)) {
-          const content = `squad_signal: [${sig.type}] ${sig.from}: ${sig.msg}`;
-          observationRecorder.record({
-            sessionId,
-            taskId,
-            observationType: 'agent_event',
-            fromAgent: 'brain',
-            toAgent: sig.from,
-            content,
-            priority: 0, // critical — blocker/question 必须被看到
-          });
-          logger.info({ sessionId, missionId: m.id, signalType: sig.type, from: sig.from }, 'brain:squad_signal_observed');
-
-          // P9 §12.5: 触发 INTERVENE — 找到 sig.from 所在 squad 的 worker，
-          // 通过 EventBus 发 brain.signal_intervention 事件，附带软纠偏 instruction
-          triggerSignalIntervention(m.id, sig, sessionId);
-        }
-      }
-    }
-  }
-
-  /**
-   * P9: 根据 blocker/question signal 触发 INTERVENE（规则化、零 LLM）。
-   *
-   * 冷却机制：同 (missionId, signal.from, signal.msg) 在 5 分钟内只触发一次，
-   * 避免重复干预造成 worker 分心。
-   *
-   * 事件订阅者可以做后续动作（如：kernel 路由 turn.correction 给 worker，
-   * 或 evolution 引擎把常见 blocker 沉淀为 SKILL.md）。
-   */
-  const signalInterventionCooldown = new Map<string, number>();
-  const SIGNAL_INTERVENTION_COOLDOWN_MS = 5 * 60_000;
-
-  function triggerSignalIntervention(
-    missionId: string,
-    signal: { from: string; type: string; msg: string; at: string },
-    sessionIdRef: string,
-  ): void {
-    const cooldownKey = `${missionId}:${signal.from}:${signal.msg}`;
-    const now = Date.now();
-    const lastAt = signalInterventionCooldown.get(cooldownKey) ?? 0;
-    if (now - lastAt < SIGNAL_INTERVENTION_COOLDOWN_MS) return;
-    signalInterventionCooldown.set(cooldownKey, now);
-
-    // 模板化 instruction：告诉 worker 当前信号是什么 + 建议行动
-    const instruction = signal.type === 'blocker'
-      ? `检测到 blocker 信号（来自 ${signal.from}）：${signal.msg.slice(0, 300)}。请评估是否需要调整方案、回报用户，或请 leader 协助。`
-      : `检测到 question 信号（来自 ${signal.from}）：${signal.msg.slice(0, 300)}。请尽快回应，避免阻塞下游 squad。`;
-
-    // 记录决策（供审计和 evolution 学习）
-    try {
-      decisionRecorder.record({
-        sessionId: sessionIdRef,
-        decisionType: 'correction',
-        inputSummary: `squad_signal:[${signal.type}] ${signal.from} in ${missionId}`,
-        outputJson: {
-          action: 'adjust',
-          reason: `p9_signal_intervention:${signal.type}`,
-          instruction: instruction.slice(0, 500),
-          target: signal.from,
-          missionId,
-        },
-      });
-    } catch (err) {
-      logger.warn({ err, missionId, signalType: signal.type }, 'brain: signal intervention decision record failed');
-    }
-
-    // 通过 IPC 发 brain.signal_intervention 给 core（core 侧 re-emit 到 EventBus，
-    // 由 delegation-orchestrator 订阅后注入 turn.correction 软纠偏）。
-    // 注意：Brain 是独立子进程，不能用进程内 EventBus——事件发不到 core 进程。
-    ipc.send('brain.signal_intervention', 'core', {
-      missionId,
-      from: signal.from,
-      signalType: signal.type,
-      signalMsg: signal.msg,
-      instruction,
-      severity: signal.type === 'blocker' ? 'high' : 'medium',
-      createdAt: now,
-    });
-    logger.info({
-      missionId,
-      from: signal.from,
-      signalType: signal.type,
-    }, 'brain:signal_intervention triggered');
-  }
-
   function recallDecisionsBlock(decisionType: string): string {
     const decisions = decisionRecorder.recallForDecision(decisionType, 5);
     if (decisions.length === 0) return '';
