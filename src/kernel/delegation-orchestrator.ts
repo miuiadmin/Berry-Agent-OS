@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import type { AgentManager } from './agent-manager.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { TaskManager } from './task-manager.js';
@@ -10,7 +9,6 @@ import type { SessionManager, PendingRequest } from './session-manager.js';
 import type { TakeoverController } from '../testing/model-takeover.js';
 import { KernelRouter, type AgentIpcLike } from './kernel-router.js';
 import { IpcChannel } from './ipc.js';
-import type { EventPayload } from './event-bus.js';
 import type { CapabilityService } from '../evolution/index.js';
 import type { DaemonBridge } from './daemon-bridge.js';
 import type { MemoryRuntime } from '../memory/index.js';
@@ -18,7 +16,7 @@ import { getDb } from '../memory/index.js';
 import type { IPluginRuntimeV2 } from '../contracts/plugins-v2.js';
 import type { WorkspaceRouter } from './workspace-router.js';
 import type { RuntimeRegistry } from './runtime/runtime-registry.js';
-import type { AgentRuntime, AgentEvent, ExecutionTask } from '../contracts/agent-runtime.js';
+import type { AgentRuntime } from '../contracts/agent-runtime.js';
 import type { RuntimeExecutor } from './runtime/runtime-executor.js';
 import { DelegationManager } from './delegation-manager.js';
 import { DialogueRouter } from './dialogue-router.js';
@@ -64,11 +62,10 @@ import { performDriftCheckAndApprove as performDriftCheckAndApproveImpl, type Dr
 import { onConversationCompleted as onConversationCompletedImpl, dispatchFeedbackExtraction as dispatchFeedbackExtractionImpl, type PostCompletionDeps } from './flows/post-completion.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
-import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
-// 对话内联：审核链工具真相单一源 = BlockCollector。onConversationCompleted 等签名用 ToolBlock[]。
+// 对话内联：审核链工具真相单一源 = BlockCollector（逻辑已提取至 flows/*，主类仅 ToolBlock 类型签名用）。
 import type { ToolBlock } from '../contracts/message-blocks.js';
 /** 13.0 §13.16: TaskHeartbeatManager — 长任务心跳推送 */
-import { getTaskHeartbeatManager, type HeartbeatEntry } from './task-heartbeat-manager.js';
+import { getTaskHeartbeatManager } from './task-heartbeat-manager.js';
 import {
   setupTaskProgressHandler,
   setupTaskAcknowledgeHandlers,
@@ -85,43 +82,31 @@ import {
   setupBusHandlers,
   type ProxyHandlersDeps,
 } from './flows/proxy-handlers.js';
-import { closeTaskWorkspace } from './task-workspace.js';
-import { getAgentHomePath } from './agent-home.js';
 import {
-  buildMissionContextPrompt,
   autoGenerateSquad,
   updatePlanTaskStatus,
   type MissionContextDeps,
 } from './flows/mission-context-builder.js';
-import { classifyLevel } from '../contracts/review.js';
-import { buildAvailableAgentsList } from './agent-registry.js';
 import { getLogger } from '../utils/logger.js';
-import { safeSlice } from '../utils/safe-slice.js';
 import { genId } from '../utils/id.js';
 import { getTracer } from '../observability/tracer.js';
 import { getEventBus } from './event-bus.js';
-import { withTrace, getCurrentTrace } from '../observability/trace-context.js';
+import { withTrace } from '../observability/trace-context.js';
 import { BrainDecisionRecorder } from './brain-decision-recorder.js';
-import { isDelegationTerminal, type DelegationEntry } from '../contracts/delegation.js';
 import type { IpcMessageType, IpcMessage } from './types.js';
 import type { SocketProgressEvent } from '../contracts/socket-protocol.js';
 import type { RouteDecision, RouteResultPayload, RouteRequestPayload } from '../contracts/routing.js';
 import type { PermissionJudgeResultPayload, AgentAskUserPayload, AgentUserReplyPayload } from '../contracts/routing.js';
-import type { DraftResponsePayload, FinalResponsePayload } from '../contracts/messaging.js';
 import type { ReviewResult, TurnRecord } from '../contracts/review.js';
-import type { PermissionRequestPayload, PermissionValidatePayload, PermissionConsumePayload, PermissionAcquirePayload } from '../contracts/permissions.js';
-import type { AgentTaskPayload, AgentTaskResultPayload, TaskAcknowledgePayload, TaskStartedPayload, TaskProgressPayload, TaskTelemetryPayload } from '../contracts/tasks.js';
-import type { CorrectionConstraints } from '../contracts/delegation.js';
+import type { AgentTaskPayload, AgentTaskResultPayload } from '../contracts/tasks.js';
 import type { DangerLevel } from '../utils/types.js';
 import type { ICapabilityBus } from '../bus/contract.js';
 import type { WorldModelRuntime } from './world-model.js';
 import type { SuggestionQueue } from './suggestion-queue.js';
 import { MissionManager } from './mission-manager.js';
 import { StateCache } from './state-cache.js';
-/** 12.0/13.0 VerifyGate — 独立对抗性意图验证（高漂移时触发） */
-import { VerifyGate } from './verify-gate.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
-import { postDelegateEnvelope, postReportEnvelope, postSystemReportEnvelope, postAskEnvelope } from './board-projection.js';
+import { postDelegateEnvelope } from './board-projection.js';
 import { resolveLeaderForDelegate } from './board-repo.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
