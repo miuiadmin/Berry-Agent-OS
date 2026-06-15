@@ -4,6 +4,7 @@ import { safeSlice } from '../../../utils/safe-slice.js';
 import { C_LEVEL_OBSERVATION_TYPES, renderObservationContext } from './observation-context.js';
 import { renderBoardContext } from './board-context.js';
 import { evaluateCheckpoint } from './checkpoint-handler.js';
+import { evaluateAskUser, evaluateSuperiorReview } from './simple-handlers.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1056,40 +1057,16 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // --- Handler 4: agent.ask_user (NEW — review agent's question to user) ---
+  // --- Handler 4: agent.ask_user (核心逻辑提取到 simple-handlers.ts，§17.4) ---
 
   ipc.onMessage('agent.ask_user', async (msg: IpcMessage) => {
     const payload = msg.payload as AgentAskUserPayload;
     const trackingId = msg.correlationId ?? msg.id;
-
-    const systemPrompt = buildAskUserReviewSystemPrompt();
-    const userPrompt = `## 智能体追问\n\n- 任务ID: ${payload.taskId}\n- 问题: ${payload.question}\n${payload.options ? `- 选项: ${payload.options.join(', ')}\n` : ''}${payload.context ? `- 上下文: ${payload.context}` : ''}`;
-
-    const messages: ModelMessage[] = [
-      { role: 'user', content: userPrompt },
-    ];
-
     try {
-      const result = await llm.current.chat(messages, {
-        system: systemPrompt,
-        maxTokens: 1024,
-        temperature: 0.1,
-        agent: name,
-        purpose: 'brain_ask_review',
-        sessionId: payload.sessionId,
-        correlationId: trackingId,
-      });
-
-      const review = parseAskUserReview(result.content);
-      ipc.send('agent.ask_user', 'core', {
-        ...payload,
-        _brainReview: review,
-      }, trackingId);
+      const review = await evaluateAskUser(payload, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
+      ipc.send('agent.ask_user', 'core', { ...payload, _brainReview: review }, trackingId);
     } catch {
-      ipc.send('agent.ask_user', 'core', {
-        ...payload,
-        _brainReview: { approved: true },
-      }, trackingId);
+      ipc.send('agent.ask_user', 'core', { ...payload, _brainReview: { approved: true } }, trackingId);
     }
   });
 
@@ -1119,33 +1096,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // --- Handler 6: superior.review.request (上级审核) ---
+  // --- Handler 6: superior.review.request (核心逻辑提取到 simple-handlers.ts，§17.4) ---
 
   ipc.onMessage('superior.review.request', async (msg: IpcMessage) => {
     const request = msg.payload as SuperiorReviewRequest;
     const trackingId = msg.correlationId ?? msg.id;
-
-    const systemPrompt = buildSuperiorReviewSystemPrompt();
-    const userPrompt = buildSuperiorReviewUserPrompt(request);
-
-    const messages: ModelMessage[] = [
-      { role: 'user', content: userPrompt },
-    ];
-
     try {
-      const result = await llm.current.chat(messages, {
-        system: systemPrompt,
-        maxTokens: 1024,
-        temperature: 0.1,
-        agent: name,
-        purpose: 'superior_review',
-        sessionId: 'system',
-        correlationId: trackingId,
-      });
-
-      const reviewResult = parseSuperiorReviewResult(
-        result.content, request.delegationId, request.superiorId, request.correlationId,
-      );
+      const reviewResult = await evaluateSuperiorReview(request, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
       ipc.send('superior.review.result', 'core', reviewResult, trackingId);
     } catch (err) {
       ipc.send('superior.review.result', 'core', {
