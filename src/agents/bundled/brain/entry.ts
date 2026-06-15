@@ -12,6 +12,7 @@ import { evaluateReview } from './review-handler.js';
 import { setupReviewFeedbackHandler } from './review-feedback-handler.js';
 import { setupDialogueHandler } from './dialogue-handler.js';
 import { createPlanMonitor } from './plan-monitor.js';
+import { createCheckerDispatch } from './checker-dispatch.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -501,80 +502,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   // §17.4 巨石拆解：brain.review.feedback 整组提取到 review-feedback-handler.ts
   setupReviewFeedbackHandler({ db, decisionRecorder, promptVersioning, ipc, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
 
-  /**
-   * 13.0 P10: 派发独立 checker 审核。
-   *
-   * 工作流：
-   *   1. 通过 MissionManager.getCheckerForPlanTask 找到 squad 内 check 角色成员
-   *   2. 如果存在，给 checker agent 发 IPC 消息请它独立审查 worker 的产出
-   *   3. checker 的审查结果通过 brain.signal_intervention 事件回传（processCheckResult 中处理）
-   *
-   * 注意：checker 的 verdict 不会阻塞 review.result；它作为异步信号影响 plan 后续迭代。
-   * 这避免了「checker 卡住 → 主任务挂起」的级联失败。
-   *
-   * @param missionId Mission ID
-   * @param planTaskId 当前 worker 完成的 plan 任务
-   * @param turn 完整 turn 记录（checker 需要的上下文）
-   * @param brainReviewResult 主 Brain 的审核结果（checker 用于对比）
-   * @param parentCorrelationId 父 review 的 correlationId
-   */
-  function dispatchCheckerReview(
-    missionId: string,
-    planTaskId: string,
-    turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: ToolBlock[]; taskDescription?: string },
-    brainReviewResult: ReviewResult,
-    parentCorrelationId: string,
-  ): void {
-    try {
-      const checker = missionManager.getCheckerForPlanTask(missionId, planTaskId);
-      if (!checker) return; // 没有 checker 就不派发
-
-      // 13.0 §11.4: 通过 IPC 发 brain.checker.dispatch 给 core（core 侧 re-emit 到 EventBus）
-      // Kernel 订阅后调 ensureAgent(checker.agent) 启动它，然后转交 review.request 给 checker
-      // 这里不阻塞主 review.result（避免 checker 卡住导致 worker 主任务挂起）
-      // 注意：Brain 是独立子进程，不能用进程内 EventBus——改走 IPC 边界中继。
-      const checkerCorrelationId = genId('check');
-      ipc.send('brain.checker.dispatch', 'core', {
-        missionId,
-        planTaskId,
-        sessionId: turn.sessionId,
-        checkerAgent: checker.agent,
-        checkerOn: checker.on,
-        checkerCorrelationId,
-        parentCorrelationId,
-        workerOutput: turn.draftResponse,
-        workerTask: turn.taskDescription ?? planTaskId,
-        brainVerdict: brainReviewResult.verdict,
-        brainReason: brainReviewResult.reason ?? '',
-      });
-
-      // 记录决策（审计 + 后续 evolution 学习）
-      decisionRecorder.record({
-        sessionId: turn.sessionId,
-        decisionType: 'review',
-        inputSummary: `dispatched checker review for planTaskId=${planTaskId}`,
-        outputJson: {
-          action: 'dispatch_checker',
-          checkerAgent: checker.agent,
-          parentCorrelationId,
-          checkerCorrelationId,
-          brainVerdict: brainReviewResult.verdict,
-          missionId,
-          planTaskId,
-        },
-      });
-
-      logger.info({
-        missionId,
-        planTaskId,
-        checkerAgent: checker.agent,
-        checkerCorrelationId,
-        brainVerdict: brainReviewResult.verdict,
-      }, 'brain:p10 checker review dispatched');
-    } catch (err) {
-      logger.warn({ err, missionId, planTaskId }, 'brain:p10 dispatchCheckerReview failed');
-    }
-  }
+  const dispatchCheckerReview = createCheckerDispatch({ missionManager, decisionRecorder, ipc });
 
   // --- Handler 2: route.request (LLM 调用提取到 route-handler.ts，§17.4) ---
 
