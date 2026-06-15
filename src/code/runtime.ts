@@ -69,23 +69,10 @@ export class CodeRuntime {
     }));
   }
 
-  recordFileChange(taskId: string, filePath: string, action: FileChangeRecord['action'], before?: string, after?: string): string {
-    const id = genId('cfc');
-    this.db.prepare(`
-      INSERT INTO code_file_changes (id, task_id, file_path, action, before_content, after_content, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, taskId, filePath, action, before ?? null, after ?? null, Date.now());
-    return id;
-  }
-
-  recordCommand(taskId: string, command: string, exitCode: number, stdout: string, stderr: string, durationMs: number): string {
-    const id = genId('ccmd');
-    this.db.prepare(`
-      INSERT INTO code_commands (id, task_id, command, exit_code, stdout, stderr, duration_ms, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, taskId, command, exitCode, stdout, stderr, durationMs, Date.now());
-    return id;
-  }
+  // recordFileChange / recordCommand 已在 16.0 §17.8 删除（零调用方）。
+  // code_file_changes / code_commands 表的 DDL 保留——getChangeSummary /
+  // getCommandHistory 仍读这两张表（task-phases 间接消费）。
+  // 注：删了写入方后，这两张表将不再被写入，读取方法保留为未来审计/历史查询接口。
 
   getChangeSummary(taskId: string): ChangeSummary {
     const rows = this.db.prepare(

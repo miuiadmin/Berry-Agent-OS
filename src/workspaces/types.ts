@@ -24,8 +24,4 @@ export interface WorkspaceOverlay {
   mcps: WorkspaceCapability[];
 }
 
-export interface WatcherEvent {
-  type: 'file_changed' | 'file_created' | 'file_deleted';
-  path: string;
-  workspaceId: string;
-}
+// WatcherEvent 已在 16.0 §17.8 随 WorkspaceWatcher 一并删除

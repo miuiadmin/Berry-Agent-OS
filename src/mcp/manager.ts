@@ -1,9 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import {
-  ToolListChangedNotificationSchema,
-  ResourceListChangedNotificationSchema,
-  PromptListChangedNotificationSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import type { EventBus } from '../contracts/infrastructure.js';
 import type { LlmClient } from '../llm/index.js';
@@ -13,8 +9,6 @@ import { metrics } from '../observability/metrics.js';
 import type {
   McpServerConfig,
   McpServerState,
-  McpResource,
-  McpPrompt,
   IMcpManager,
   CircuitState,
 } from './contract.js';
@@ -33,8 +27,7 @@ interface McpServerInstance {
   client: Client | null;
   state: McpServerState;
   tools: string[];
-  resources: McpResource[];
-  prompts: McpPrompt[];
+  // resources/prompts 字段已在 16.0 §17.8 删除（整链路无消费者）
   samplingHandler: SamplingHandler | null;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   reconnectAttempt: number;
@@ -122,40 +115,12 @@ export class McpManager implements IMcpManager {
     }
   }
 
-  listResources(serverName?: string): McpResource[] {
-    if (serverName) return this.servers.get(serverName)?.resources ?? [];
-    return [...this.servers.values()].flatMap(s => s.resources);
-  }
-
-  async readResource(serverName: string, uri: string): Promise<string> {
-    const instance = this.servers.get(serverName);
-    if (!instance?.client) throw new Error(`MCP server "${serverName}" 未连接`);
-    const result = await instance.client.readResource({ uri });
-    const content = result.contents?.[0];
-    if (!content) return '';
-    if ('text' in content) return content.text as string;
-    if ('blob' in content) return `[binary: ${content.mimeType ?? 'unknown'}]`;
-    return '';
-  }
-
-  listPrompts(serverName?: string): McpPrompt[] {
-    if (serverName) return this.servers.get(serverName)?.prompts ?? [];
-    return [...this.servers.values()].flatMap(s => s.prompts);
-  }
-
-  async getPrompt(serverName: string, name: string, args?: Record<string, string>): Promise<string> {
-    const instance = this.servers.get(serverName);
-    if (!instance?.client) throw new Error(`MCP server "${serverName}" 未连接`);
-    const result = await instance.client.getPrompt({ name, arguments: args });
-    return result.messages
-      ?.map(m => {
-        if (typeof m.content === 'string') return m.content;
-        const block = m.content;
-        if (block.type === 'text') return block.text;
-        return `[${block.type}]`;
-      })
-      .join('\n') ?? '';
-  }
+  /**
+   * 注意：MCP resources / prompts 链路已在 16.0 §17.8 删除（铺好未接线、零消费者）。
+   * 底座仅保留 tools（真实工具调用）+ sampling（LLM 采样）。
+   * 若未来需要 resources/prompts API，需重新接入：listResources/listPrompts/getPrompt/
+   * readResource 公共读方法 + refreshResources/refreshPrompts 内部刷新 + capabilities 标记。
+   */
 
   // ─── Connection Lifecycle ──────────────────────────────────────
 
@@ -191,8 +156,6 @@ export class McpManager implements IMcpManager {
 
       this.setupNotificationHandlers(instance);
       await this.refreshTools(instance);
-      await this.refreshResources(instance);
-      await this.refreshPrompts(instance);
 
       instance.state.status = 'connected';
       instance.state.lastConnectedAt = Date.now();
@@ -238,8 +201,6 @@ export class McpManager implements IMcpManager {
     await this.processManager.cleanup(instance.config.name);
     instance.state.status = 'disconnected';
     instance.state.toolCount = 0;
-    instance.state.resourceCount = 0;
-    instance.state.promptCount = 0;
 
     this.eventBus.emit('mcp.disconnected', { serverName: instance.config.name });
   }
@@ -299,16 +260,10 @@ export class McpManager implements IMcpManager {
       await this.refreshTools(instance);
     });
 
-    client.setNotificationHandler(ResourceListChangedNotificationSchema, async () => {
-      await this.refreshResources(instance);
-    });
-
-    client.setNotificationHandler(PromptListChangedNotificationSchema, async () => {
-      await this.refreshPrompts(instance);
-    });
+    // resources / prompts 通知处理已在 16.0 §17.8 删除（整链路无消费者）
   }
 
-  // ─── Tool / Resource / Prompt Refresh ──────────────────────────
+  // ─── Tool Refresh ──────────────────────────────────────────────
 
   private async refreshTools(instance: McpServerInstance): Promise<void> {
     const client = instance.client!;
@@ -338,41 +293,6 @@ export class McpManager implements IMcpManager {
 
     if (added.length > 0 || removed.length > 0) {
       this.emitToolsChanged(instance, added, removed);
-    }
-  }
-
-  private async refreshResources(instance: McpServerInstance): Promise<void> {
-    try {
-      const { resources } = await instance.client!.listResources();
-      instance.resources = resources.map(r => ({
-        serverName: instance.config.name,
-        uri: r.uri,
-        name: r.name,
-        description: r.description,
-        mimeType: r.mimeType,
-      }));
-      instance.state.resourceCount = instance.resources.length;
-    } catch (err) {
-      logger.debug({ serverName: instance.config.name, error: (err as Error).message }, 'refreshResources 失败');
-      instance.resources = [];
-      instance.state.resourceCount = 0;
-    }
-  }
-
-  private async refreshPrompts(instance: McpServerInstance): Promise<void> {
-    try {
-      const { prompts } = await instance.client!.listPrompts();
-      instance.prompts = prompts.map(p => ({
-        serverName: instance.config.name,
-        name: p.name,
-        description: p.description,
-        arguments: p.arguments,
-      }));
-      instance.state.promptCount = instance.prompts.length;
-    } catch (err) {
-      logger.debug({ serverName: instance.config.name, error: (err as Error).message }, 'refreshPrompts 失败');
-      instance.prompts = [];
-      instance.state.promptCount = 0;
     }
   }
 
@@ -408,15 +328,11 @@ export class McpManager implements IMcpManager {
         name: config.name,
         status: 'disconnected',
         toolCount: 0,
-        resourceCount: 0,
-        promptCount: 0,
         lastConnectedAt: null,
         consecutiveFailures: 0,
         circuitState: 'closed',
       },
       tools: [],
-      resources: [],
-      prompts: [],
       samplingHandler: null,
       reconnectTimer: null,
       reconnectAttempt: 0,
@@ -452,11 +368,10 @@ export class McpManager implements IMcpManager {
     });
   }
 
-  private getCapabilities(instance: McpServerInstance): string[] {
+  private getCapabilities(_instance: McpServerInstance): string[] {
+    // resources/prompts 已在 16.0 §17.8 删除；capabilities 仅剩 tools + sampling
     const caps: string[] = ['tools'];
-    if (instance.resources.length > 0) caps.push('resources');
-    if (instance.prompts.length > 0) caps.push('prompts');
-    if (instance.samplingHandler) caps.push('sampling');
+    if (_instance.samplingHandler) caps.push('sampling');
     return caps;
   }
 }

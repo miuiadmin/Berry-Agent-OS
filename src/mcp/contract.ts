@@ -76,31 +76,15 @@ export interface McpServerState {
   status: McpServerStatus;
   error?: string;
   toolCount: number;
-  resourceCount: number;
-  promptCount: number;
+  // resources/prompts 计数已在 16.0 §17.8 删除（整链路无消费者）
   lastConnectedAt: number | null;
   consecutiveFailures: number;
   circuitState: CircuitState;
 }
 
-// ─── Resources & Prompts ────────────────────────────────────────
-
-export interface McpResource {
-  serverName: string;
-  uri: string;
-  name: string;
-  description?: string;
-  mimeType?: string;
-}
-
-export interface McpPrompt {
-  serverName: string;
-  name: string;
-  description?: string;
-  arguments?: Array<{ name: string; description?: string; required?: boolean }>;
-}
-
 // ─── Manager Interface ──────────────────────────────────────────
+// resources/prompts 读方法已在 16.0 §17.8 删除；若未来需要，重新接入时补回
+// listResources/readResource/listPrompts/getPrompt 即可。
 
 export interface IMcpManager {
   start(configs: McpServerConfig[]): Promise<void>;
@@ -109,10 +93,6 @@ export interface IMcpManager {
   getAllStates(): McpServerState[];
   reconnect(name: string): Promise<void>;
   handleConfigReload(configs: McpServerConfig[]): Promise<void>;
-  listResources(serverName?: string): McpResource[];
-  readResource(serverName: string, uri: string): Promise<string>;
-  listPrompts(serverName?: string): McpPrompt[];
-  getPrompt(serverName: string, name: string, args?: Record<string, string>): Promise<string>;
 }
 
 // ─── MCP Event payloads (for EventBus integration) ──────────────

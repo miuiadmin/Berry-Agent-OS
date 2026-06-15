@@ -148,21 +148,9 @@ export class TokenBudgetController {
     };
   }
 
-  getSessionUsage(sessionId: string): TokenUsageSnapshot {
-    return this.getUsage('session', sessionId);
-  }
-
-  getAgentUsage(sessionId: string, agentName: AgentName): TokenUsageSnapshot {
-    return this.getUsage('agent', `${sessionId}:${agentName}`);
-  }
-
-  getTaskUsage(taskId: string): TokenUsageSnapshot {
-    return this.getUsage('task', taskId);
-  }
-
-  getDailyUsage(): TokenUsageSnapshot {
-    return this.getUsage('daily', 'global');
-  }
+  // 注：getSessionUsage/getAgentUsage/getTaskUsage/getDailyUsage 这 4 个便捷封装
+  // 已在 16.0 §17.8 删除（Usage 页走原生 SQL、16.0 不设 token 上限，零外部调用方）。
+  // getUsage 仍保留——被 recordUsage / checkBudget / task-notification.ts:58 活调用。
 
   checkBudget(scope: BudgetScope, scopeId: string): { allowed: boolean; alert?: BudgetAlert } {
     const usage = this.getUsage(scope, scopeId);

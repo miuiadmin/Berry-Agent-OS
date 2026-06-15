@@ -65,5 +65,5 @@ export interface ITokenIssuer {
   issue(params: TokenIssueParams): PermissionToken;
   validate(tokenId: string, binding: TokenBinding): ValidationResult;
   consume(tokenId: string): boolean;
-  findSessionToken(binding: TokenBinding): PermissionToken | null;
+  // findSessionToken 已在 16.0 §17.8 删除（零调用方）
 }

@@ -45,16 +45,7 @@ export type ValidationResult =
   | { valid: true; token: PermissionToken }
   | { valid: false; reason: string };
 
-export interface TokenAuditEntry {
-  id: string;
-  toolName: string;
-  agentName: string;
-  verdict: string;
-  consumed: boolean;
-  createdAt: number;
-  consumedAt: number | null;
-  expiresAt: number;
-}
+// TokenAuditEntry 已在 16.0 §17.8 随 getAuditLog 一并删除
 
 export function computeBindingHash(binding: TokenBinding): string {
   const raw = `${binding.sessionId}|${binding.agentName}|${binding.toolName}|${binding.inputHash}|${binding.cwd ?? ''}`;
@@ -163,39 +154,7 @@ export class TokenIssuer implements ITokenIssuer {
     return result.changes > 0;
   }
 
-  findSessionToken(binding: TokenBinding): PermissionToken | null {
-    const bindingHash = computeBindingHash(binding);
-    const now = Date.now();
-
-    const row = this.db.prepare(`
-      SELECT * FROM permission_tokens
-      WHERE binding_hash = ? AND verdict = 'allow_session' AND consumed = 0 AND expires_at > ?
-      ORDER BY created_at DESC LIMIT 1
-    `).get(bindingHash, now) as Record<string, unknown> | undefined;
-
-    if (!row) return null;
-    return rowToToken(row);
-  }
-
-  getAuditLog(sessionId: string): TokenAuditEntry[] {
-    const rows = this.db.prepare(`
-      SELECT id, tool_name, agent_name, verdict, consumed, created_at, consumed_at, expires_at
-      FROM permission_tokens
-      WHERE session_id = ?
-      ORDER BY created_at ASC
-    `).all(sessionId) as Array<Record<string, unknown>>;
-
-    return rows.map((r) => ({
-      id: r.id as string,
-      toolName: r.tool_name as string,
-      agentName: r.agent_name as string,
-      verdict: r.verdict as string,
-      consumed: (r.consumed as number) === 1,
-      createdAt: r.created_at as number,
-      consumedAt: r.consumed_at as number | null,
-      expiresAt: r.expires_at as number,
-    }));
-  }
+  // findSessionToken / getAuditLog 已在 16.0 §17.8 删除（零调用方）
 }
 
 function rowToToken(row: Record<string, unknown>): PermissionToken {

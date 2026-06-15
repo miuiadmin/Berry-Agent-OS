@@ -1,27 +1,16 @@
 import type Database from 'better-sqlite3';
 import type { AgentHierarchyInfo, ReviewChainEntry } from '../contracts/org-tree.js';
-import { getLogger } from '../utils/logger.js';
 import { reqStr, optStr } from '../db/row-helpers.js';
-
-const logger = getLogger('agent-hierarchy');
 
 const MAX_CHAIN_DEPTH = 20;
 
 export class AgentHierarchy {
   constructor(private readonly db: Database.Database) {}
 
-  setSuperior(agentId: string, superiorId: string | null): void {
-    if (superiorId && !this.validateNoCircularChain(agentId, superiorId)) {
-      throw new Error('Circular chain detected');
-    }
-    try {
-      this.db.prepare('UPDATE workspace_agents SET superior_id = ? WHERE id = ?').run(superiorId, agentId);
-      logger.debug({ agentId, superiorId }, 'Superior set');
-    } catch (err) {
-      logger.error({ err, agentId, superiorId }, 'Failed to set superior');
-      throw err;
-    }
-  }
+  // 注：setSuperior / getSubordinates / getTopLevelAgent / assignToNode /
+  // getAgentsBySubtree / validateNoCircularChain 已在 16.0 §17.8 删除
+  // （superior_id 字段只读不写，这些方法零外部调用方）。
+  // 保留的方法：getSuperior / getReviewChain / isTopLevel / getAgentsByNode（team-tools + workspace-router + superior-review-flow 活调用）
 
   getSuperior(agentId: string): AgentHierarchyInfo | null {
     const row = this.db.prepare(`
@@ -30,14 +19,6 @@ export class AgentHierarchy {
       WHERE a.id = ? AND s.enabled = 1
     `).get(agentId) as Record<string, unknown> | undefined;
     return row ? this.rowToInfo(row) : null;
-  }
-
-  getSubordinates(agentId: string): AgentHierarchyInfo[] {
-    const rows = this.db.prepare(`
-      SELECT * FROM workspace_agents WHERE superior_id = ? AND enabled = 1
-      ORDER BY created_at ASC
-    `).all(agentId) as Array<Record<string, unknown>>;
-    return rows.map(r => this.rowToInfo(r));
   }
 
   getReviewChain(agentId: string): ReviewChainEntry[] {
@@ -68,59 +49,12 @@ export class AgentHierarchy {
     return row ? row.superior_id === null : true;
   }
 
-  getTopLevelAgent(workspaceId: string): AgentHierarchyInfo | null {
-    const row = this.db.prepare(`
-      SELECT * FROM workspace_agents
-      WHERE workspace_id = ? AND role = 'lead' AND superior_id IS NULL AND enabled = 1
-      LIMIT 1
-    `).get(workspaceId) as Record<string, unknown> | undefined;
-    return row ? this.rowToInfo(row) : null;
-  }
-
-  assignToNode(agentId: string, orgNodeId: string): void {
-    try {
-      this.db.prepare('UPDATE workspace_agents SET org_node_id = ? WHERE id = ?').run(orgNodeId, agentId);
-    } catch (err) {
-      logger.error({ err, agentId, orgNodeId }, 'Failed to assign agent to org node');
-      throw err;
-    }
-  }
-
   getAgentsByNode(orgNodeId: string): AgentHierarchyInfo[] {
     const rows = this.db.prepare(`
       SELECT * FROM workspace_agents WHERE org_node_id = ? AND enabled = 1
       ORDER BY role DESC, created_at ASC
     `).all(orgNodeId) as Array<Record<string, unknown>>;
     return rows.map(r => this.rowToInfo(r));
-  }
-
-  getAgentsBySubtree(orgNodeId: string): AgentHierarchyInfo[] {
-    const rows = this.db.prepare(`
-      SELECT wa.* FROM workspace_agents wa
-      INNER JOIN org_nodes n ON wa.org_node_id = n.id
-      WHERE n.path LIKE (SELECT path || '%' FROM org_nodes WHERE id = ?)
-        AND wa.enabled = 1
-      ORDER BY n.depth ASC, wa.role DESC
-    `).all(orgNodeId) as Array<Record<string, unknown>>;
-    return rows.map(r => this.rowToInfo(r));
-  }
-
-  validateNoCircularChain(agentId: string, proposedSuperiorId: string): boolean {
-    if (agentId === proposedSuperiorId) return false;
-
-    let currentId: string | null = proposedSuperiorId;
-    const seen = new Set<string>([agentId]);
-
-    for (let i = 0; i < MAX_CHAIN_DEPTH; i++) {
-      if (!currentId) return true;
-      if (seen.has(currentId)) return false;
-      seen.add(currentId);
-
-      const row = this.db.prepare('SELECT superior_id FROM workspace_agents WHERE id = ?').get(currentId) as { superior_id: string | null } | undefined;
-      currentId = row?.superior_id ?? null;
-    }
-
-    return true;
   }
 
   private rowToInfo(row: Record<string, unknown>): AgentHierarchyInfo {

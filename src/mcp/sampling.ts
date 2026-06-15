@@ -93,10 +93,7 @@ export class SamplingHandler {
 
     logger.debug({ serverName: this.serverName }, 'Sampling handler 已注册');
   }
-
-  resetDepth(): void {
-    this.toolRoundCount = 0;
-  }
+  // resetDepth() 已在 16.0 §17.8 删除（零调用方）；toolRoundCount 仍由 handleCreateMessage 内部维护
 }
 
 // ─── Message Conversion: MCP → agent ──────────────────────

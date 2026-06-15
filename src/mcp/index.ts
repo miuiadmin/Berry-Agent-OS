@@ -4,8 +4,6 @@ export type {
   McpServerState,
   McpServerStatus,
   CircuitState,
-  McpResource,
-  McpPrompt,
   IMcpManager,
   McpOAuthConfig,
   McpSamplingConfig,
