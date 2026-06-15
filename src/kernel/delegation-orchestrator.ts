@@ -50,6 +50,7 @@ import {
   type RouteHandlersDeps,
 } from './flows/route-handlers.js';
 import { setupMissionSubscriptions, type MissionSubscriptionsDeps } from './flows/mission-subscriptions.js';
+import { setupAgentAskUserFlow as setupAgentAskUserFlowImpl } from './flows/ask-user-flow.js';
 import { StreamingFlusher } from './streaming-flusher.js';
 import { ObservationRecorder } from './observation-recorder.js';
 import { getOrCreateBlockCollector, peekBlockCollector } from './block-collector.js';
@@ -1710,67 +1711,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }, reviewTimeoutMs);
   }
 
+  /** §17.4: setupAgentAskUserFlow 逻辑已提取至 flows/ask-user-flow.ts（observationRecorder + markAskingUser + emit ask_user 逐字保留） */
   private setupAgentAskUserFlow(reviewerIpc: AgentIpc): void {
-    reviewerIpc.onMessage('agent.ask_user', (msg: IpcMessage) => {
-      const payload = msg.payload as AgentAskUserPayload & { _brainReview?: { approved: boolean; rewrittenQuestion?: string; autoAnswer?: string } };
-      const correlationId = msg.correlationId!;
-
-      const brainReview = payload._brainReview;
-      if (brainReview && !brainReview.approved && brainReview.autoAnswer) {
-        const agent = this.agentManager.getAgent(msg.from);
-        if (agent) {
-          agent.ipc.send('agent.user_reply', msg.from, {
-            sessionId: payload.sessionId,
-            taskId: payload.taskId,
-            reply: brainReview.autoAnswer,
-          } satisfies AgentUserReplyPayload, correlationId);
-        }
-        return;
-      }
-
-      const question = brainReview?.rewrittenQuestion ?? payload.question;
-
-      this.sessionManager.setPendingAsk(payload.sessionId, {
-        sessionId: payload.sessionId,
-        taskId: payload.taskId,
-        agentName: msg.from,
-        question,
-        correlationId,
-      });
-
-      // 13.0 §3.2/§5.3.3: 将 agent 提问写入 Brain 观察队列（priority=0，critical，永不丢弃）
-      // Brain 审核时需要知道 agent 主动问了用户什么，以判断：
-      // 1. 提问是否合理（该问用户还是自己做决策？）
-      // 2. 提问措辞是否安全（有没有泄露敏感信息？）
-      // 3. 提问频率是否过高（§3.6 场景 H：意图模糊时应先问用户）
-      if (payload.sessionId && this.observationRecorder) {
-        this.observationRecorder.record({
-          sessionId: payload.sessionId,
-          taskId: payload.taskId ?? '',
-          observationType: 'user_interaction',
-          fromAgent: msg.from,
-          content: JSON.stringify({
-            direction: 'agent_ask',
-            question,
-            options: payload.options,
-          }),
-          priority: 0, // §5.3.3: user_interaction = priority 0（critical，永不丢弃）
-        });
-      }
-
-      const entry = this.delegationManager.get(payload.taskId);
-      if (entry) {
-        this.delegationManager.markAskingUser(payload.taskId, question);
-        // P0-B 修复：业务路径不再直写 socket，改为 emit
-        getEventBus().emit('conversation.ask_user', {
-          sessionId: payload.sessionId,
-          taskId: payload.taskId,
-          agent: msg.from,
-          question,
-          options: payload.options,
-          correlationId,
-        });
-      }
+    setupAgentAskUserFlowImpl(reviewerIpc, {
+      agentManager: this.agentManager,
+      sessionManager: this.sessionManager,
+      delegationManager: this.delegationManager,
+      observationRecorder: this.observationRecorder,
     });
   }
 
