@@ -7,6 +7,7 @@ import { evaluateCheckpoint } from './checkpoint-handler.js';
 import { evaluateAskUser, evaluateSuperiorReview, evaluateDriftCheck, evaluateVerify } from './simple-handlers.js';
 import { evaluatePermissionJudge } from './permission-handler.js';
 import { evaluateRoute } from './route-handler.js';
+import { evaluateCronReview } from './cron-review-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1181,67 +1182,22 @@ startResidentAgent(({ name, ipc, llm, db }) => {
       return;
     }
 
-    // ── 复杂/长输出：调用 LLM 审核 ──
+    // ── 复杂/长输出：调用 LLM 审核（核心逻辑提取到 cron-review-handler.ts，§17.4） ──
     try {
-      const cronSystemPrompt = buildCronReviewSystemPrompt();
-      const cronUserPrompt = buildCronReviewUserPrompt(description ?? '', output);
-      const messages: ModelMessage[] = [
-        { role: 'user', content: cronUserPrompt },
-      ];
-
-      const result = await llm.current.chat(messages, {
-        system: cronSystemPrompt,
-        maxTokens: 1024,
-        temperature: 0.2,
-        agent: name,
-        purpose: 'brain_cron_review',
-        sessionId: `cron:${taskId}`,
-      });
-
-      const cronResult = parseCronReviewResult(result.content);
-      logger.info({
-        taskId,
-        verdict: cronResult.verdict,
-        confidence: cronResult.confidence,
-        reason: safeSlice(cronResult.reason, 200),
-      }, 'brain:cron.review LLM verdict');
-
+      const cronResult = await evaluateCronReview(description ?? '', output, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, taskId);
+      logger.info({ taskId, verdict: cronResult.verdict, confidence: cronResult.confidence, reason: safeSlice(cronResult.reason, 200) }, 'brain:cron.review LLM verdict');
       decisionRecorder.record({
-        sessionId: `cron:${taskId}`,
-        decisionType: 'cron_review',
+        sessionId: `cron:${taskId}`, decisionType: 'cron_review',
         inputSummary: safeSlice(description, 500),
-        outputJson: {
-          output: safeSlice(output, 2000),
-          autoApproved: cronResult.verdict === 'approve',
-          llmVerdict: cronResult.verdict,
-          llmReason: safeSlice(cronResult.reason, 500),
-          correctedOutput: cronResult.correctedOutput ? safeSlice(cronResult.correctedOutput, 1000) : undefined,
-          path: 'llm',
-        },
-        confidence: cronResult.confidence,
-        taskId,
+        outputJson: { output: safeSlice(output, 2000), autoApproved: cronResult.verdict === 'approve', llmVerdict: cronResult.verdict, llmReason: safeSlice(cronResult.reason, 500), correctedOutput: cronResult.correctedOutput ? safeSlice(cronResult.correctedOutput, 1000) : undefined, path: 'llm' },
+        confidence: cronResult.confidence, taskId,
       });
-
-      // 如果审核发现问题，通过 IPC 回传给 core（core 侧 re-emit 到 EventBus 供前端展示警告）
       if (cronResult.verdict !== 'approve') {
-        ipc.send('brain.cron_review_flagged', 'core', {
-          taskId,
-          verdict: cronResult.verdict,
-          reason: cronResult.reason,
-          correctedOutput: cronResult.correctedOutput,
-        });
+        ipc.send('brain.cron_review_flagged', 'core', { taskId, verdict: cronResult.verdict, reason: cronResult.reason, correctedOutput: cronResult.correctedOutput });
       }
     } catch (err) {
-      // LLM 失败时降级为规则化通过（不阻塞 cron 流程）
-      logger.warn({ err: (err as Error).message, taskId }, 'brain:cron.review LLM failed, falling back to rule-based');
-      decisionRecorder.record({
-        sessionId: `cron:${taskId}`,
-        decisionType: 'cron_review',
-        inputSummary: safeSlice(description, 500),
-        outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'fallback' },
-        confidence: 0.5,
-        taskId,
-      });
+      logger.warn({ err: (err as Error).message, taskId }, 'brain:cron.review LLM failed, fallback');
+      decisionRecorder.record({ sessionId: `cron:${taskId}`, decisionType: 'cron_review', inputSummary: safeSlice(description, 500), outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'fallback' }, confidence: 0.5, taskId });
     }
   });
 });
