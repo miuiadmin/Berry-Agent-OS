@@ -10,6 +10,7 @@ import { evaluateRoute } from './route-handler.js';
 import { evaluateCronReview } from './cron-review-handler.js';
 import { evaluateReview } from './review-handler.js';
 import { setupReviewFeedbackHandler } from './review-feedback-handler.js';
+import { setupDialogueHandler } from './dialogue-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -823,99 +824,7 @@ startResidentAgent(({ name, ipc, llm, db }) => {
   });
 
   // ─── 11.0: dialogue.observe — 异步监听智能体间对话 ───
-  const dialogueBuffers = new Map<string, { messages: Array<{ from: string; content: string; round: number }>; lastActivity: number }>();
-
-  ipc.onMessage('dialogue.observe', async (msg: IpcMessage) => {
-    const payload = msg.payload as import('../../../contracts/dialogue.js').DialogueObservePayload;
-    const { message, currentRound, sessionId } = payload;
-    const dialogueId = message.dialogueId;
-
-    // 累积对话消息（保留最近 10 条）
-    if (!dialogueBuffers.has(dialogueId)) {
-      dialogueBuffers.set(dialogueId, { messages: [], lastActivity: Date.now() });
-    }
-    const buffer = dialogueBuffers.get(dialogueId)!;
-    buffer.messages.push({ from: message.from, content: safeSlice(message.content, 500), round: currentRound });
-    if (buffer.messages.length > 10) buffer.messages.shift();
-    buffer.lastActivity = Date.now();
-
-    // 规则式干预判断（不调 LLM，保持低成本）
-    let intervention: { instruction: string; reason: string } | null = null;
-
-    // 规则 1：对话轮次过多且无进展
-    // L3: 可配置化，从 agent.json manifest 经 env var 传入
-    const maxObserveRounds = parseInt(process.env.AGENT_OBSERVE_MAX_ROUNDS ?? '8', 10);
-    if (currentRound >= maxObserveRounds) {
-      const recentContents = buffer.messages.slice(-4).map(m => m.content);
-      const hasRepetition = recentContents.some((c, i) =>
-        i > 0 && recentContents[i - 1].slice(0, 100) === c.slice(0, 100),
-      );
-      if (hasRepetition) {
-        intervention = {
-          instruction: '对话陷入循环。请总结已有信息，做出决策或直接回复用户。不要继续追问。',
-          reason: 'dialogue_loop_detected',
-        };
-      }
-    }
-
-    // 规则 2：连续 3 次 needsClarification
-    if (!intervention && buffer.messages.length >= 6) {
-      const lastThreeReplies = buffer.messages.filter(m => m.from !== 'conversation').slice(-3);
-      // 无法直接看到 metadata，但可以检查内容中是否有"不确定"/"需要确认"等模式
-      const uncertainCount = lastThreeReplies.filter(m =>
-        m.content.includes('需要确认') || m.content.includes('不确定') || m.content.includes('请提供更多'),
-      ).length;
-      if (uncertainCount >= 3) {
-        intervention = {
-          instruction: '目标智能体连续表示不确定。考虑直接询问用户获取必要信息，或基于现有信息做出最佳判断。',
-          reason: 'repeated_uncertainty',
-        };
-      }
-    }
-
-    // 发送纠偏（直接通过 IPC 发 turn.correction 给 Conversation，action='adjust' + instruction）
-    if (intervention) {
-      logger.info({ dialogueId, reason: intervention.reason, round: currentRound }, 'brain:dialogue intervention');
-      ipc.send('turn.correction', 'core', {
-        delegationId: dialogueId,
-        action: 'adjust' as const,
-        instruction: intervention.instruction,
-      } satisfies TurnCorrectionPayload, msg.correlationId ?? msg.id);
-    }
-
-    // 12.0: 每 3 轮做语义对齐检测（仅当有 intentAnchor 且无规则式干预时）
-    if (!intervention && currentRound > 0 && currentRound % 3 === 0 && payload.intentAnchor) {
-      try {
-        const { buildDriftCheckPrompt, parseDriftCheckResult } = await import('../../../kernel/drift-detector.js');
-        const recentContent = buffer.messages.slice(-3).map(m => `[${m.from}]: ${m.content}`).join('\n');
-        const prompt = buildDriftCheckPrompt(payload.intentAnchor, recentContent, 'dialogue');
-
-        const result = await llm.current.chat(
-          [{ role: 'user', content: prompt }],
-          { system: '你是语义对齐检测器。只输出 JSON。', maxTokens: 200, temperature: 0, agent: name, purpose: 'drift_detection' },
-        );
-
-        const signal = parseDriftCheckResult(result.content, 'dialogue');
-        if (signal.needsIntervention && signal.alignmentScore < 0.5) {
-          logger.info({ dialogueId, score: signal.alignmentScore, desc: safeSlice(signal.driftDescription, 100) }, 'brain:dialogue semantic drift');
-          ipc.send('turn.correction', 'core', {
-            delegationId: dialogueId,
-            action: 'adjust' as const,
-            instruction: `对话可能偏离了用户原始意图。用户的目标是："${payload.intentAnchor.goal}"。${signal.driftDescription ? `当前问题：${signal.driftDescription}。` : ''}请重新对齐用户意图后继续。`,
-          } satisfies TurnCorrectionPayload, msg.correlationId ?? msg.id);
-        }
-      } catch (err) {
-        logger.debug({ err, dialogueId }, 'dialogue semantic drift check failed, skipping');
-      }
-    }
-
-    // 定期清理过期 buffer（5 分钟无活动）
-    for (const [id, buf] of dialogueBuffers) {
-      if (Date.now() - buf.lastActivity > 5 * 60_000) {
-        dialogueBuffers.delete(id);
-      }
-    }
-  });
+  setupDialogueHandler({ ipc, llm, name });
 
   // ─── 12.0: drift.check.request (核心逻辑提取到 simple-handlers.ts，§17.4) ───
   ipc.onMessage('drift.check.request', async (msg: IpcMessage) => {
