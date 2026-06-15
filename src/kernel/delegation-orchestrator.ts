@@ -53,6 +53,12 @@ import {
 } from './flows/proxy-handlers.js';
 import { closeTaskWorkspace } from './task-workspace.js';
 import { getAgentHomePath } from './agent-home.js';
+import {
+  buildMissionContextPrompt,
+  autoGenerateSquad,
+  updatePlanTaskStatus,
+  type MissionContextDeps,
+} from './flows/mission-context-builder.js';
 import { classifyLevel } from '../contracts/review.js';
 import { buildAvailableAgentsList } from './agent-registry.js';
 import { getLogger } from '../utils/logger.js';
@@ -1196,7 +1202,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         logger.info({ missionId: plan.mission.id, taskCount: plan.tasks.length }, '13.0 mission created from route decision');
 
         // P7: 自动生成 squad 结构 — 基于 plan 中 agent 分配的分组
-        this.autoGenerateSquad(decision.missionId, plan);
+        autoGenerateSquad(this.missionContextDeps, decision.missionId, plan);
       } catch (err) {
         logger.error({ err }, '13.0 mission creation failed, continuing without mission');
       }
@@ -1284,202 +1290,13 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     }
   }
 
-  /**
-   * 13.0 多智能体协作：构造 mission + squad context 文本，注入到 system prompt。
-   * 让 agent 知道自己属于哪个 mission、目标是什么、有哪些任务、当前状态、squad 角色。
-   *
-   * 注入策略（§12.3/§12.6）：
-   * - 优先用 renderContext() 输出 squad 队友 + 未解决信号 + 任务进度（planTaskId + targetAgent 已知时）
-   * - 回退到 readSummary() + squad 列表（仅 missionId 已知时）
-   * - 始终叠加 StateCache 的纠偏/行为笔记
-   *
-   * @param missionId mission ID
-   * @param planTaskId 当前 plan task ID（可选；提供时输出 squad 上下文）
-   * @param targetAgent 目标 agent 名（可选；提供时定位 squad 角色）
-   * @returns 格式化的 mission context 字符串（用于 system prompt 注入）
-   */
-  private buildMissionContextPrompt(
-    missionId: string,
-    planTaskId?: string,
-    targetAgent?: string,
-  ): string | null {
-    if (!this.missionManager) return null;
-    try {
-      // ① 优先：使用 renderContext 输出 squad 队友/角色/信号
-      let contextBlock = '';
-      if (planTaskId && targetAgent) {
-        const richContext = this.missionManager.renderContext(missionId, planTaskId, targetAgent);
-        if (richContext) {
-          contextBlock = `## Mission Context\n\n${richContext}`;
-        }
-      }
-
-      // ② 回退：仅 missionId 时输出 readSummary
-      if (!contextBlock) {
-        const summary = this.missionManager.readSummary(missionId);
-        if (!summary) return null;
-        contextBlock = `## Mission Context\n\n${summary}`;
-      }
-
-      /** §3.8/§5.3.1: 注入 StateCache 中的纠偏指令和行为笔记 */
-      const stateInjections: string[] = [];
-
-      if (this.stateCache) {
-        // 注入纠偏指令（correction namespace，key={sessionId}:{taskId}）
-        // 当前上下文没有明确的 taskId，所以遍历所有 correction keys
-        const correctionKeys = this.stateCache.keys('correction');
-        for (const key of correctionKeys) {
-          const correction = this.stateCache.get<import('./state-cache.js').CorrectionEntry>('correction', key);
-          if (correction) {
-            const severityIcon = correction.severity === 'high' ? '🔴' : correction.severity === 'medium' ? '🟡' : '🟢';
-            stateInjections.push(`${severityIcon} 纠偏指令: ${correction.instruction}`);
-          }
-        }
-
-        // 注入行为笔记（behavior_note namespace）
-        const behaviorKeys = this.stateCache.keys('behavior_note');
-        for (const key of behaviorKeys) {
-          const note = this.stateCache.get<import('./state-cache.js').BehaviorNote>('behavior_note', key);
-          if (note) {
-            stateInjections.push(`📌 行为提醒: ${note.instruction}`);
-          }
-        }
-      }
-
-      let stateContext = '';
-      if (stateInjections.length > 0) {
-        stateContext = '\n\n## Brain 指令（来自监督系统）\n\n' + stateInjections.join('\n');
-      }
-
-      /** P10: squad checker 角色提示（仅在 squad 中有 checker 角色时追加） */
-      let checkerHint = '';
-      const squad = this.missionManager.readSquad(missionId);
-      if (squad && squad.org.squads.some(s => s.members.some(m => m.role === 'check'))) {
-        checkerHint = '\n\n### Checker 角色指引\n如果你是 Squad 中的 Checker（验证者）：独立审查 worker 的产出，关注正确性/完整性/安全性/一致性。发现问题通过 squad tool signal(blocker/question) 报告，不直接修改。验证通过用 signal(done)。';
-      }
-
-      /**
-       * §5.3.11: 注入 HandoffContext（如果存在最近一次交接上下文）。
-       * 接收方 agent 需要看到前任 agent 的工作进展、已读文件、阻塞等信息，
-       * 才能无缝接手任务，而不是从零开始。
-       */
-      let handoffContext = '';
-      if (planTaskId) {
-        const handoffCtx = this.missionManager.readLatestHandoffContextAny(missionId);
-        if (handoffCtx) {
-          const renderedHandoff = this.missionManager.renderHandoffContext(handoffCtx);
-          handoffContext = '\n\n## 任务交接上下文\n\n你是从另一个 Agent 接手的任务。以下是前任的工作状态：\n\n' + renderedHandoff;
-        }
-      }
-
-      return `${contextBlock}\n\n使用 plan 工具（read）查看完整计划，update 更新自己的任务进度。使用 squad 工具管理团队（read/handoff/signal/update_member）。${checkerHint}${handoffContext}${stateContext}`;
-    } catch (err) {
-      logger.warn({ err, missionId }, 'buildMissionContextPrompt 失败');
-      return null;
-    }
-  }
-
-  /**
-   * P7: 自动生成 squad 结构 — 基于 plan 中 agent 分配的分组。
-   *
-   * 规则化方法（零 LLM）：提取 plan 中所有 task 的 who 字段去重，
-   * 每个 unique agent 创建一个 squad，agent 既是 leader 也是执行者。
-   * 适用于 P1 阶段单实例模型。
-   *
-   * @param missionId Mission ID
-   * @param plan 已创建的 plan 对象
-   */
-  private autoGenerateSquad(missionId: string, plan: import('../contracts/mission.js').Plan): void {
-    if (!this.missionManager) return;
-
-    /** 提取去重的 agent 列表 */
-    const agentGroups = new Map<string, import('../contracts/mission.js').MissionTask[]>();
-    for (const task of plan.tasks) {
-      if (!agentGroups.has(task.who)) {
-        agentGroups.set(task.who, []);
-      }
-      agentGroups.get(task.who)!.push(task);
-    }
-
-    /** 只有 1 个 agent 时不创建 squad（无需组织） */
-    if (agentGroups.size < 2) return;
-
-    /** 收集可用的 agent 名列表（用于 P10 checker 分配） */
-    const agentNames = [...agentGroups.keys()];
-
-    try {
-      this.missionManager.initSquad(missionId, []);
-
-      for (let i = 0; i < agentNames.length; i++) {
-        const agent = agentNames[i];
-        const tasks = agentGroups.get(agent)!;
-        const goal = tasks.map(t => t.what).join(', ');
-
-        /** P10: 为每个 squad 分配一个 checker（从其他 agent 中轮询选择） */
-        const checkerIdx = (i + 1) % agentNames.length;
-        const checkerAgent = agentNames[checkerIdx];
-
-        this.missionManager.createSquad(missionId, {
-          name: `${agent} 组`,
-          goal,
-          leader: agent,
-          members: [{
-            agent: checkerAgent,
-            role: 'check',
-            on: `验证 ${agent} 的产出质量`,
-          }],
-        });
-      }
-
-      logger.info({ missionId, squadCount: agentNames.length }, 'P7+P10: auto-generated squad with checkers');
-    } catch (err) {
-      logger.warn({ err, missionId }, 'P7: auto-generate squad failed (non-critical)');
-    }
-  }
-
-  /**
-   * 13.0 多智能体协作：任务完成/失败时同步更新 plan.json 中对应任务的状态。
-   *
-   * §12.6 审核集成 — agent 完成任务后，plan 中对应任务的状态应该自动更新。
-   * 这样 Brain 和其他 agent 通过 plan tool 读取时能看到最新进度。
-   *
-   * @param taskId - agent task ID
-   * @param status - 目标状态 ('done' | 'failed')
-   * @param result - 任务结果文本（可选，成功时填输出摘要，失败时填错误信息）
-   */
-  private updatePlanTaskStatus(taskId: string, status: 'done' | 'failed', result?: string): void {
-    if (!this.missionManager) return;
-    try {
-      const task = this.taskManager?.getTask(taskId);
-      if (!task) return;
-
-      /** 从 agent_task 的 input_payload 中提取 missionId 和 planTaskId */
-      let inputPayload: Record<string, unknown> = {};
-      try {
-        const raw = (task as any).inputPayload ?? (task as any).input_payload;
-        inputPayload = typeof raw === 'string'
-          ? JSON.parse(raw)
-          : raw ?? {};
-      } catch { return; }
-
-      const missionId = inputPayload.missionId as string | undefined;
-      const planTaskId = inputPayload.planTaskId as string | undefined;
-      if (!missionId || !planTaskId) return;
-
-      /** 截断结果文本，避免 plan.json 膨胀 */
-      const truncatedResult = result ? result.slice(0, 500) : undefined;
-
-      this.missionManager.updatePlan(missionId, {
-        task_id: planTaskId,
-        status,
-        result: truncatedResult,
-      });
-
-      logger.info({ missionId, planTaskId, status }, '13.0: plan task status synced on agent completion');
-    } catch (err) {
-      /** plan 更新失败不应影响主流程 — 非关键操作 */
-      logger.warn({ err, taskId, status }, '13.0: plan task status sync failed (non-critical)');
-    }
+  /** 16.0 §17.4: mission 上下文 helper 函数已提取到 flows/mission-context-builder.ts */
+  private get missionContextDeps(): MissionContextDeps {
+    return {
+      missionManager: this.missionManager,
+      stateCache: this._stateCache,
+      taskManager: this.taskManager,
+    };
   }
 
   private handleChatRoute(decision: RouteDecision, correlationId: string, pending: PendingRequest): void {
@@ -1515,7 +1332,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 13.0 多智能体协作：注入 mission context（让 agent 知道自己的 mission 目标 + squad 角色）
     if (decision.missionId) {
-      const missionContext = this.buildMissionContextPrompt(
+      const missionContext = buildMissionContextPrompt(
+        this.missionContextDeps,
         decision.missionId,
         decision.planTaskId,
         decision.targetAgent,
@@ -1999,7 +1817,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
           foreground: input.foreground ?? false,
         });
         this.delegationManager.fail(taskId, (err as Error).message);
-        this.updatePlanTaskStatus(taskId, 'failed', (err as Error).message);
+        updatePlanTaskStatus(this.missionContextDeps, taskId, 'failed', (err as Error).message);
         return { taskId, targetAgent: route.targetAgent };
       }
     }
@@ -2727,7 +2545,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     logger.info({ taskId, agentName, reason: reason?.slice(0, 200), suggestAgent, reRouteDepth: currentDepth }, 'task.reject: Agent 拒绝任务');
 
     // 同步更新 plan task 状态为 failed
-    this.updatePlanTaskStatus(taskId, 'failed', `Agent ${agentName} 拒绝: ${reason}`);
+    updatePlanTaskStatus(this.missionContextDeps, taskId, 'failed', `Agent ${agentName} 拒绝: ${reason}`);
 
     if (currentDepth >= MAX_RE_ROUTE_DEPTH) {
       // 超过 2 次重路由 → 降级处理，通知用户
@@ -2852,7 +2670,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       this.delegationManager.fail(result.taskId, result.error ?? '任务失败');
 
       // 13.0 多智能体协作：任务失败时同步更新 plan.json 中对应任务的状态
-      this.updatePlanTaskStatus(result.taskId, 'failed', result.error);
+      updatePlanTaskStatus(this.missionContextDeps, result.taskId, 'failed', result.error);
 
       // 16.0 P4-C3：失败结果投影 report(status:blocked) 落板（fire-and-forget 审计影子）
       postReportEnvelope(result.taskId, {
@@ -2867,7 +2685,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     // 13.0 多智能体协作：任务成功完成时同步更新 plan.json 中对应任务的状态
     const agentOutput = this.formatAgentResult(agentName, result.outputPayload ?? {});
-    this.updatePlanTaskStatus(result.taskId, 'done', agentOutput);
+    updatePlanTaskStatus(this.missionContextDeps, result.taskId, 'done', agentOutput);
 
     const draftResponse = agentOutput;
     pending.draftResponse = draftResponse;
@@ -2997,7 +2815,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
       // 13.0 §13.21: 超时的 plan task 必须标记 failed，否则永留 working →
       // 级联失效依赖它的任务 → mission 永不终态（与 1804 失败路径一致）
       const timeoutError = `任务执行超时（${targetAgent}）`;
-      this.updatePlanTaskStatus(taskId, 'failed', timeoutError);
+      updatePlanTaskStatus(this.missionContextDeps, taskId, 'failed', timeoutError);
       this.delegationManager.fail(taskId, timeoutError);
       const pending = this.sessionManager.getPending(entry.correlationId);
       if (pending) {
