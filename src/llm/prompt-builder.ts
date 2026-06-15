@@ -28,9 +28,9 @@ export function buildSystemPrompt(options?: { skills?: SkillSummary[]; skillBloc
   const skillLines = skills.map(s => `- ${s.name}: ${s.description}`).join('\n');
   return `${BASE_SYSTEM_PROMPT}
 
-<berry-skills>
+<agent-skills>
 你具备以下技能，可通过 get_skill 工具获取完整执行指令：
 ${skillLines}
-</berry-skills>`;
+</agent-skills>`;
 }
 

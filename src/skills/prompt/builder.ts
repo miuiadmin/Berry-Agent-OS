@@ -110,6 +110,6 @@ export class SkillPromptBuilder {
   }
 
   private wrap(inner: string, _tier: PromptTier): string {
-    return `<berry-skills>\n${inner}\n</berry-skills>`;
+    return `<agent-skills>\n${inner}\n</agent-skills>`;
   }
 }

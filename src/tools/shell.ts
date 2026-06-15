@@ -6,7 +6,7 @@ import { checkBlocklist } from '../safety/index.js';
 import { killTree } from '../utils/kill-tree.js';
 
 const MAX_OUTPUT = 10000;
-const CWD_MARKER = '__BERRY_CWD_MARKER__';
+const CWD_MARKER = '__AGENT_CWD_MARKER__';
 
 let lastCwd: string = homedir();
 

@@ -3,6 +3,8 @@ import type { ToolDefinition, ToolResult } from './types.js';
 
 const MAX_BODY = 20000;
 const TIMEOUT_MS = 15000;
+/** HTTP 请求的 User-Agent（去品牌化：CLAUDE.md 硬规则，标识符/字面量不使用品牌词） */
+const HTTP_USER_AGENT = 'Mozilla/5.0 (compatible; AgentClient/1.0)';
 
 const httpFetchSchema = z.object({
   url: z.string().url().describe('请求的 URL'),
@@ -153,7 +155,7 @@ async function searchDuckDuckGo(query: string, maxResults: number): Promise<Tool
   try {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BerryAgent/1.0)' },
+      headers: { 'User-Agent': HTTP_USER_AGENT },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
@@ -220,7 +222,7 @@ export const webFetchTool: ToolDefinition = {
     try {
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; BerryAgent/1.0)',
+          'User-Agent': HTTP_USER_AGENT,
           'Accept': 'text/html,application/xhtml+xml,*/*',
         },
         signal: AbortSignal.timeout(TIMEOUT_MS),
