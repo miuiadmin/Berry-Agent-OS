@@ -5,6 +5,7 @@ import { C_LEVEL_OBSERVATION_TYPES, renderObservationContext } from './observati
 import { renderBoardContext } from './board-context.js';
 import { evaluateCheckpoint } from './checkpoint-handler.js';
 import { evaluateAskUser, evaluateSuperiorReview, evaluateDriftCheck, evaluateVerify } from './simple-handlers.js';
+import { evaluatePermissionJudge } from './permission-handler.js';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1000,15 +1001,14 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // --- Handler 3: permission.judge (NEW — LLM-based permission approval) ---
+  // --- Handler 3: permission.judge (LLM 调用提取到 permission-handler.ts，§17.4) ---
 
   ipc.onMessage('permission.judge', async (msg: IpcMessage) => {
     const payload = msg.payload as PermissionJudgeRequestPayload;
     const trackingId = msg.correlationId ?? msg.id;
 
+    // systemPrompt 构造（含 recallInsights/recallDecisions 闭包，留在 entry.ts）
     let systemPrompt = getPermissionPrompt();
-
-    // Inject validated system insights for permission decisions
     const permInsights = recallInsightsForDecision(db, 'permission', 3);
     if (permInsights.length > 0) {
       systemPrompt += formatInsightsBlock(permInsights);
@@ -1016,44 +1016,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
     systemPrompt += recallDecisionsBlock('permission');
 
-    const userPrompt = buildPermissionJudgeUserPrompt(
-      payload.toolName,
-      payload.toolInput,
-      payload.dangerLevel,
-      payload.taskContext,
-    );
-
-    const messages: ModelMessage[] = [
-      { role: 'user', content: userPrompt },
-    ];
-
     try {
-      const result = await llm.current.chat(messages, {
-        system: systemPrompt,
-        maxTokens: 1024,
-        temperature: 0.0,
-        agent: name,
-        purpose: 'brain_permission',
-        sessionId: payload.sessionId,
-        correlationId: trackingId,
-      });
-
-      const judgment = parsePermissionJudge(result.content);
-      logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: safeSlice(judgment.reason, 200), dangerLevel: payload.dangerLevel }, 'brain:permission');
-      const judgeResult: PermissionJudgeResultPayload = judgment;
-      ipc.send('permission.judge.result', 'core', judgeResult, trackingId);
-
-      // 13.0 §12: 记录权限决策到 BrainDecisionRecorder
-      decisionRecorder.recordPermissionDecision(
-        payload.sessionId,
-        payload.toolName,
-        judgment as unknown as Record<string, unknown>,
-      );
+      const judgment = await evaluatePermissionJudge(payload, systemPrompt, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
+      logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: safeSlice(judgment.reason, 200) }, 'brain:permission');
+      ipc.send('permission.judge.result', 'core', judgment as PermissionJudgeResultPayload, trackingId);
+      decisionRecorder.recordPermissionDecision(payload.sessionId, payload.toolName, judgment as unknown as Record<string, unknown>);
     } catch (err) {
-      ipc.send('permission.judge.result', 'core', {
-        allowed: false,
-        reason: `权限判断 LLM 失败: ${(err as Error).message}`,
-      } satisfies PermissionJudgeResultPayload, trackingId);
+      ipc.send('permission.judge.result', 'core', { allowed: false, reason: `权限判断 LLM 失败: ${(err as Error).message}` } satisfies PermissionJudgeResultPayload, trackingId);
     }
   });
 
