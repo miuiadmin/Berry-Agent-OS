@@ -251,12 +251,9 @@ export function handleForegroundTaskResult(
     // 终态——否则 entry.state 永驻 delegated/active/reviewing，TaskHeartbeatManager 会持续对已完成
     // task 误发 task.heartbeat（违反状态机不变量：task 完成 ⇒ delegation 收口）。
     // 16.0 §6.5.1：异步任务（无 review）成功 → 板 completed；失败 → delegationManager.fail 投 system report→failed。
-    // complete() 不投板，故成功路径显式 postReport(done) 终态化（防 board 卡 in_progress）。
+    // P5 authority switch：complete() 现投 report(done) 终态化 board（status-transition 派生 delegation.completed），
+    // caller 不再冗余 postReport。
     if (result.ok) {
-      postReportEnvelope(result.taskId, {
-        from: agentName, to: 'leader', status: 'done',
-        summary: formatAgentResult(agentName, result.outputPayload ?? {}), sessionId: fgEntry.sessionId,
-      });
       delegationManager.complete(result.taskId, formatAgentResult(agentName, result.outputPayload ?? {}));
     } else {
       delegationManager.fail(result.taskId, result.error ?? '任务失败');

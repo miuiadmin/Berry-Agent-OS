@@ -40,7 +40,7 @@ import type { ToolBlock } from '../../contracts/message-blocks.js';
 import type { SocketProgressEvent } from '../../contracts/socket-protocol.js';
 import { classifyLevel } from '../../contracts/review.js';
 import { peekBlockCollector } from '../block-collector.js';
-import { postAskEnvelope, postReportEnvelope } from '../board-projection.js';
+import { postAskEnvelope } from '../board-projection.js';
 import { closeTaskWorkspace } from '../task-workspace.js';
 import { getAgentHomePath } from '../agent-home.js';
 import { safeSlice } from '../../utils/safe-slice.js';
@@ -135,13 +135,8 @@ export function approveReviewDegraded(
   });
   const entry = delegationManager.getByCorrelation(correlationId);
   if (entry) {
+    // P5 authority switch：complete() 现投 report(done) 终态化 board（status-transition 派生），caller 不冗余。
     delegationManager.complete(entry.id, draft);
-    // 16.0 §6.5.1+(B)：降级 approve（reviewer 不可用/IPC 失败/超时）→ 板状态 completed。
-    // complete() 不投板，显式 postReport 终态化，防 board 卡 awaiting_review（task-origin 路径）。
-    // conversation-origin 无 board（chat 不投 delegate），entry 多为空 → if 守卫跳过，零副作用。
-    postReportEnvelope(entry.id, {
-      from: entry.targetAgent, to: 'leader', status: 'done', summary: draft, sessionId,
-    });
   }
   sessionManager.complete(correlationId, draft);
 }
@@ -226,16 +221,8 @@ export function handleTaskReviewResult(review: ReviewResult, correlationId: stri
 
   const entry = delegationManager.getByCorrelation(correlationId);
   if (entry) {
+    // P5 authority switch：complete() 现投 report(done) 终态化 board，caller 不冗余 postReport。
     delegationManager.complete(entry.id, response);
-    // 16.0 §6.5.1+(B)：review 裁决 → 板状态机 terminal（awaiting_review → completed[approve/modify]/failed[reject]）。
-    // complete() 不投板（只 fail/interrupt 投），显式 postReport 终态化，防 board 卡 awaiting_review。
-    const isReject = review.verdict === 'reject';
-    postReportEnvelope(entry.id, {
-      from: entry.targetAgent, to: 'leader',
-      status: isReject ? 'blocked' : 'done',
-      summary: isReject ? (review.reason ?? '审核拒绝') : (response ?? ''),
-      sessionId: pending.sessionId,
-    });
   }
 
   // 13.0 §12.6: Brain 审核完成后同步更新 plan.json 中对应任务的状态
