@@ -15,13 +15,15 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { initDb, closeDb } from '../memory/db.js';
+import { initDb, closeDb, getDb } from '../memory/db.js';
 import { initEventBus, getEventBus } from './event-bus.js';
 import {
   postDelegateEnvelope,
   postReportEnvelope,
   postAskEnvelope,
+  postSystemReportEnvelope,
 } from './board-projection.js';
+import { getBoardMeta } from './board-repo.js';
 
 /** 捕获到的 board.message.posted 事件 payload 类型（从 EventMap 推导，保持与契约一致） */
 type BoardMessagePostedPayload = {
@@ -137,5 +139,96 @@ describe('board-projection P5-C2: board.message.posted 事件转发', () => {
     expect(boardPosted[0].messageType).toBe('delegate');
     // delegation.created 不再由 board-projection 派生（避免双 emit）
     expect(delegationCreated).toHaveLength(0);
+  });
+});
+
+/**
+ * §6.5.1 板状态机接线测试（P2-D：delegate 单一事实源 + enter_review/(B) report 时序 + interrupt 解耦）。
+ *
+ * 钉死 P2 三批接线的板状态语义，防未来重构回归：
+ *   - delegate 走 applyBoardStatus（非硬编码 updateBoardMeta）
+ *   - report(done, {enter_review}) → awaiting_review（review 前不提前 completed）
+ *   - review 裁决 approve→completed / reject→failed（awaiting_review → terminal）
+ *   - postSystemReportEnvelope(blocked, {interrupt}) → interrupted（解耦审计 blocked 与状态机 interrupted）
+ *   - 终态板不被迟到信封打回
+ */
+describe('board-projection §6.5.1 状态机接线（P2-D）', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'berry-board-fsm-'));
+    initDb(join(dir, 'test.db'));
+    initEventBus();
+  });
+
+  afterEach(() => {
+    closeDb();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** 插入一行 agent_tasks（board 元数据列由 migration v28 ALTER 补默认值，initBoard 再 UPDATE 覆写） */
+  function insertAgentTask(taskId: string, sessionId: string): void {
+    getDb()
+      .prepare(
+        `INSERT INTO agent_tasks (id, session_id, correlation_id, task_type, requester, target_agent, input_payload)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(taskId, sessionId, 'corr-test', 'test', 'brain', 'code', '{}');
+  }
+
+  it('delegate → in_progress（applyBoardStatus 单一事实源，非硬编码 updateBoardMeta）', () => {
+    insertAgentTask('fsm-1', 's1');
+    postDelegateEnvelope('fsm-1', { from: 'brain', to: 'code', subTaskGoal: '改模块 X', sessionId: 's1' });
+    expect(getBoardMeta('fsm-1')?.boardStatus).toBe('in_progress');
+  });
+
+  it('(B) report(done, {enter_review}) → awaiting_review（report 审计 done 但板等审核，不提前 completed）', () => {
+    insertAgentTask('fsm-2', 's2');
+    postDelegateEnvelope('fsm-2', { from: 'brain', to: 'code', subTaskGoal: '改 Y', sessionId: 's2' });
+    postReportEnvelope('fsm-2', { from: 'code', to: 'leader', status: 'done', summary: '完成', sessionId: 's2' }, { kind: 'enter_review' });
+    expect(getBoardMeta('fsm-2')?.boardStatus).toBe('awaiting_review');
+  });
+
+  it('(B) review approve → completed（awaiting_review → completed）', () => {
+    insertAgentTask('fsm-3', 's3');
+    postDelegateEnvelope('fsm-3', { from: 'brain', to: 'code', subTaskGoal: '改 Z', sessionId: 's3' });
+    postReportEnvelope('fsm-3', { from: 'code', to: 'leader', status: 'done', summary: '完成', sessionId: 's3' }, { kind: 'enter_review' });
+    expect(getBoardMeta('fsm-3')?.boardStatus).toBe('awaiting_review');
+    // review 裁决 approve：默认 postReport(done) → completed
+    postReportEnvelope('fsm-3', { from: 'code', to: 'leader', status: 'done', summary: '完成', sessionId: 's3' });
+    expect(getBoardMeta('fsm-3')?.boardStatus).toBe('completed');
+  });
+
+  it('(B) review reject → failed（awaiting_review → failed）', () => {
+    insertAgentTask('fsm-4', 's4');
+    postDelegateEnvelope('fsm-4', { from: 'brain', to: 'code', subTaskGoal: '改 W', sessionId: 's4' });
+    postReportEnvelope('fsm-4', { from: 'code', to: 'leader', status: 'done', summary: '完成', sessionId: 's4' }, { kind: 'enter_review' });
+    // review 裁决 reject：postReport(blocked) → failed
+    postReportEnvelope('fsm-4', { from: 'code', to: 'leader', status: 'blocked', summary: '审核拒绝', sessionId: 's4' });
+    expect(getBoardMeta('fsm-4')?.boardStatus).toBe('failed');
+  });
+
+  it('interrupt 解耦：postSystemReportEnvelope(blocked, {interrupt}) → interrupted（审计 blocked 但状态机 interrupted，非 failed）', () => {
+    insertAgentTask('fsm-5', 's5');
+    postDelegateEnvelope('fsm-5', { from: 'brain', to: 'code', subTaskGoal: '改 V', sessionId: 's5' });
+    postSystemReportEnvelope('fsm-5', { summary: '执行已取消', sessionId: 's5' }, { kind: 'interrupt' });
+    expect(getBoardMeta('fsm-5')?.boardStatus).toBe('interrupted');
+  });
+
+  it('终态板（interrupted）不被迟到的 delegate 信封打回 in_progress', () => {
+    insertAgentTask('fsm-6', 's6');
+    postDelegateEnvelope('fsm-6', { from: 'brain', to: 'code', subTaskGoal: '改 U', sessionId: 's6' });
+    postSystemReportEnvelope('fsm-6', { summary: '取消', sessionId: 's6' }, { kind: 'interrupt' });
+    expect(getBoardMeta('fsm-6')?.boardStatus).toBe('interrupted');
+    // 迟到的 delegate（applyBoardStatus 终态守卫）不应复活终态板
+    postDelegateEnvelope('fsm-6', { from: 'brain', to: 'code', subTaskGoal: '迟到派发', sessionId: 's6' });
+    expect(getBoardMeta('fsm-6')?.boardStatus).toBe('interrupted');
+  });
+
+  it('genuine fail（无 boardStatusEvent）→ failed：postSystemReportEnvelope(blocked) 默认 blocked→failed', () => {
+    insertAgentTask('fsm-7', 's7');
+    postDelegateEnvelope('fsm-7', { from: 'brain', to: 'code', subTaskGoal: '改 T', sessionId: 's7' });
+    postSystemReportEnvelope('fsm-7', { summary: '任务失败：crash', sessionId: 's7' });
+    expect(getBoardMeta('fsm-7')?.boardStatus).toBe('failed');
   });
 });
