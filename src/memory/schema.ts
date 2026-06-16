@@ -73,7 +73,9 @@ export const CORE_SCHEMA_SQL = `
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     -- 块在消息内的顺序（timeline 按 message.created_at ASC, seq ASC 回放）
     seq INTEGER NOT NULL,
-    block_type TEXT NOT NULL CHECK(block_type IN ('text','thinking','tool','delegation','review')),
+    -- 16.0 §14.5：扩展 'orchestration'（Brain 编排动作）+ 'task_progress'（任务进展卡）——
+    -- 这两类 block 现可持久化（刷新可恢复），不再 live-only。
+    block_type TEXT NOT NULL CHECK(block_type IN ('text','thinking','tool','delegation','review','orchestration','task_progress')),
     -- BlockSchema 序列化后的 JSON（已 redact）
     payload_json TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),

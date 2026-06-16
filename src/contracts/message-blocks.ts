@@ -21,10 +21,12 @@ import type { ReviewVerdict } from './review.js';
 
 /**
  * Block 的 type 判别值。
- * 持久化类型（text/thinking/tool/delegation/review）与 message_blocks.block_type CHECK 约束一致；
- * 'orchestration'（Brain 编排动作）+ 'task_progress'（任务进展卡 §14.5）为 live-only——
- * 实时 stream.block 显示但不落库（故不在 CHECK 内），刷新后不保留。
- * 详见 block-collector.onOrchestration / onTaskProgress。
+ * 持久化类型（text/thinking/tool/delegation/review/orchestration）与 message_blocks.block_type CHECK 约束一致。
+ * 16.0 §14.5：'orchestration'（Brain 编排动作：纠偏/介入/派审）现持久化——入对话记录，刷新后保留
+ * （治理审计可追溯；message_blocks CHECK 迁移已含 orchestration）。
+ * 'task_progress'（任务进展卡 §14.5）仍 live-only——它是 board 状态的 upsert 投影，刷新应从 board 重建
+ * （不入 append-only timeline），故 CHECK 允许但不通过 block 持久化。
+ * 详见 block-collector.onOrchestration（入 timeline）/ onTaskProgress（live-only emit）。
  */
 export type BlockType = 'text' | 'thinking' | 'tool' | 'delegation' | 'review' | 'orchestration' | 'task_progress';
 

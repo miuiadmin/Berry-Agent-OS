@@ -131,7 +131,7 @@ const DelegationBlockCard = memo(function DelegationBlockCard({ block }: { block
  * Brain 编排动作卡（内联编排时间线）：correction 纠偏 / signal_intervention 介入 / checker_dispatch 派审。
  * 与 ToolBlockCard / DelegationBlockCard 视觉对齐——同一行式：图标 + 标签 + 右侧元信息。
  * severity 配色：high=destructive 红 / medium=amber 黄 / low 或无=muted。
- * live-only：编排块不落库，刷新后不保留（见 contracts/message-blocks.ts OrchestrationBlock）。
+ * 16.0 §14.5：编排块现持久化（入 message_blocks），刷新后保留（brain 纠偏/介入留记录，治理审计可追溯）。
  */
 const OrchestrationBlockCard = memo(function OrchestrationBlockCard({ block }: { block: OrchestrationBlock }) {
   const t = useT();

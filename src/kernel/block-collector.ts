@@ -499,7 +499,11 @@ export class BlockCollector {
     if (opts.target) block.target = opts.target;
     if (opts.severity) block.severity = opts.severity;
     if (opts.detail) block.detail = opts.detail;
-    // ⚠️ live-only：只 emit，不 push 进 timeline → buildBlocks 落库时不含编排块（避开 block_type CHECK）
+    // 16.0 §14.5：message_blocks CHECK 迁移后 orchestration 可落库 → 入 timeline 持久化
+    // （brain 纠偏/signal_intervention/checker.dispatch 入对话记录，刷新后保留——治理审计可追溯）。
+    // closeTextSegment 确保 chronological 位（在已关闭的文本段之后），与 tool/delegation 同构。
+    this.closeTextSegment();
+    this.timeline.push(block);
     this.emit({
       sessionId: this.sessionId,
       messageId: this.messageId,

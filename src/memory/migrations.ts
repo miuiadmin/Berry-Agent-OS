@@ -62,6 +62,7 @@ export function runMemoryMigrations(conn: Database.Database): void {
     migrateCreateBrainCorrectionsTable(conn);
     migrateBrainDecisionsAddTaskId(conn);
     migrateCreateUserPreferencesTable(conn);
+    migrateMessageBlocksExpandTypes(conn);
   } finally {
     conn.pragma(`legacy_alter_table = ${previousLegacyAlter ? 'ON' : 'OFF'}`);
   }
@@ -1210,4 +1211,35 @@ function migrateReviewRequestsExpandVerdicts(conn: Database.Database): void {
   // 旧库已存在 'auto_approve_*' 行的：下次落库遇到 CHECK 约束冲突会写入失败，
   // 但 recordAutoApprove 在生产代码无调用方，理论上不会有新行写入。
   void conn;
+}
+
+/**
+ * 16.0 §14.5：message_blocks.block_type CHECK 扩展——加 'orchestration' + 'task_progress'，
+ * 使 Brain 编排动作 block 与任务进展卡（§14.5）可持久化（刷新可恢复，不再 live-only）。
+ *
+ * SQLite 不能直接 ALTER CHECK 约束，需表重建（CREATE new + INSERT 保留数据 + DROP + RENAME）。
+ * 幂等：已迁移（tableSql 含 'task_progress'）则跳过。重建后恢复 2 个索引。
+ */
+function migrateMessageBlocksExpandTypes(conn: Database.Database): void {
+  if (!tableExists(conn, 'message_blocks')) return;
+  const sql = tableSql(conn, 'message_blocks');
+  // 已迁移（CHECK 含 task_progress）则跳过
+  if (sql && sql.includes("'task_progress'")) return;
+  conn.exec(`
+    CREATE TABLE message_blocks_new (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      block_type TEXT NOT NULL CHECK(block_type IN ('text','thinking','tool','delegation','review','orchestration','task_progress')),
+      payload_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      UNIQUE(message_id, seq)
+    );
+    INSERT INTO message_blocks_new (id, message_id, seq, block_type, payload_json, created_at)
+      SELECT id, message_id, seq, block_type, payload_json, created_at FROM message_blocks;
+    DROP TABLE message_blocks;
+    ALTER TABLE message_blocks_new RENAME TO message_blocks;
+    CREATE INDEX IF NOT EXISTS idx_message_blocks_message ON message_blocks(message_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_message_blocks_type ON message_blocks(block_type, created_at);
+  `);
 }
