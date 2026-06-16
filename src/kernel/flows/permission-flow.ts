@@ -13,6 +13,7 @@ import type { DangerLevel } from '../../bus/contract.js';
 import type { PermissionMode } from '../../safety/permissions.js';
 import { genId } from '../../utils/id.js';
 import { getEventBus } from '../event-bus.js';
+import { applyBoardStatus } from '../board-repo.js';
 
 type AgentIpc = { send: (type: IpcMessageType, to: string, payload: unknown, correlationId?: string) => boolean; onMessage: (type: IpcMessageType, handler: (msg: IpcMessage) => void) => void };
 
@@ -51,7 +52,7 @@ export class PermissionFlow {
   private deps: PermissionFlowDeps;
   private pendingJudges = new Map<string, (result: PermissionJudgeResultPayload) => void>();
   private pendingJudgeInputs = new Map<string, { sessionId: string; toolName: string }>();
-  private pendingUserConfirms = new Map<string, { agentIpc: AgentIpc; agentName: string; replyId: string; timer: ReturnType<typeof setTimeout> }>();
+  private pendingUserConfirms = new Map<string, { agentIpc: AgentIpc; agentName: string; replyId: string; timer: ReturnType<typeof setTimeout>; taskId?: string }>();
   private judgeTimestamps: number[] = [];
 
   constructor(deps: PermissionFlowDeps) {
@@ -162,6 +163,7 @@ export class PermissionFlow {
       this.handleUserConfirm({
         agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel,
         brainReason: judge.escalation?.questionToUser ?? (judge.reason || 'Brain 不确定是否批准，需用户确认'),
+        taskId,
       });
       return;
     }
@@ -207,8 +209,11 @@ export class PermissionFlow {
     toolInput: string;
     dangerLevel: DangerLevel | string;
     brainReason: string;
+    taskId?: string;
   }): void {
-    const { agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel, brainReason } = params;
+    const { agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel, brainReason, taskId } = params;
+    // 16.0 §6.5.1/D：L3 危险工具 / uncertain 升级问用户 → 板状态 awaiting_user（无 board 则 no-op）
+    if (taskId) applyBoardStatus(taskId, { kind: 'await_user' });
     getEventBus().emit('permission.user_confirm_needed', {
       requestId,
       sessionId,
@@ -227,7 +232,7 @@ export class PermissionFlow {
         }, replyId);
       }
     }, 300_000);
-    this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId, timer });
+    this.pendingUserConfirms.set(requestId, { agentIpc, agentName, replyId, timer, taskId });
   }
 
   setupHandlers(agentIpc: AgentIpc, agentName: string, isPrimary: boolean): void {
@@ -344,6 +349,7 @@ export class PermissionFlow {
           this.handleUserConfirm({
             agentIpc, agentName, replyId, requestId, sessionId, toolName, toolInput, dangerLevel,
             brainReason: '危险操作，需要用户确认',
+            taskId,
           });
           return;
         } else {
@@ -374,6 +380,8 @@ export class PermissionFlow {
     if (!pending) return false;
     clearTimeout(pending.timer);
     this.pendingUserConfirms.delete(requestId);
+    // 16.0 §6.5.1/D：用户确认结果 → 板状态机 terminal（awaiting_user → user_resumed[允许]/user_rejected[拒绝]）
+    if (pending.taskId) applyBoardStatus(pending.taskId, { kind: allowed ? 'user_resumed' : 'user_rejected' });
     // 批准时必须携带 tokenId：tool-caller 执行层强制要求 tokenId，
     // 无 token 则判定"缺少 permission token"拒绝执行（即使 allowed=true）。
     pending.agentIpc.send('permission.result', pending.agentName,
