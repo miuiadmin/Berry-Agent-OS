@@ -34,6 +34,7 @@ import {
 } from './board-repo.js';
 import { peekBlockCollector } from './block-collector.js';
 import type { BoardMessage, BoardStatusEvent } from '../contracts/board-message.js';
+import type { Block, DelegationBlock } from '../contracts/message-blocks.js';
 import { routeGovernance } from './flows/governance-switch.js';
 
 const logger = getLogger('board-projection');
@@ -85,16 +86,23 @@ function emitBoardMessagePosted(taskId: string, msg: BoardMessage): void {
 }
 
 /**
- * §14.5 任务进展卡投影：board 活动 → getBoardContext → TaskProgressBlock →
- * peekBlockCollector(taskId).onTaskProgress emit（collector 知道 messageId，桥接 board→chat 消息块）。
- * live-only fire-and-forget：无 collector（非 board 或已 dispose）静默跳过，失败 no-op。
+ * 从 board 状态派生任务进展卡的字段（goal/status/leader/members/turnCount/activitySummary）。
+ * §14.5：live emit（emitTaskProgressForBoard）与 timeline 刷新重建（api-routes 富化）共用此推导——
+ * 单一事实源，避免两处 task_progress 派生逻辑分叉。无 board / 失败 → null。
  */
-function emitTaskProgressForBoard(taskId: string): void {
+export function deriveTaskProgressFromBoard(taskId: string): {
+  goal: string;
+  status: string;
+  leader?: string;
+  members: string[];
+  turnCount: number;
+  maxTurns: number;
+  spawnDepth: number;
+  activitySummary: string;
+} | null {
   try {
     const ctx = getBoardContext(taskId, 10);
-    if (!ctx) return;
-    const collector = peekBlockCollector(taskId);
-    if (!collector) return; // 无 collector = 无关联 chat 消息，跳过（非 board 路径或板已 dispose）
+    if (!ctx) return null;
     // 用 governance-switch.routeGovernance 分类近期消息为治理类别（让任务卡显示治理视图，
     // 也让 governance-switch 非闲置——P3 单一 switch 路由真正被消费）
     const counts = { gate: 0, review: 0, escalate: 0, command: 0, none: 0 };
@@ -106,7 +114,7 @@ function emitTaskProgressForBoard(taskId: string): void {
       else if (route.kind === 'command') counts.command++;
       else counts.none++;
     }
-    collector.onTaskProgress({
+    return {
       goal: ctx.meta.goal ?? '(无目标)',
       status: ctx.meta.boardStatus,
       leader: ctx.meta.leader ?? undefined,
@@ -115,10 +123,45 @@ function emitTaskProgressForBoard(taskId: string): void {
       maxTurns: ctx.meta.maxTurns,
       spawnDepth: ctx.meta.spawnDepth,
       activitySummary: `${counts.gate}工具闸 ${counts.review}审核 ${counts.command}纠偏 ${counts.escalate}求助 ${counts.none}发言`,
-    });
+    };
   } catch {
-    // fire-and-forget：任务卡投影失败不影响主路径
+    return null;
   }
+}
+
+/**
+ * §14.5 任务进展卡投影：board 活动 → deriveTaskProgressFromBoard →
+ * peekBlockCollector(taskId).onTaskProgress emit（collector 知道 messageId，桥接 board→chat 消息块）。
+ * live-only fire-and-forget：无 collector（非 board 或已 dispose）静默跳过，失败 no-op。
+ */
+function emitTaskProgressForBoard(taskId: string): void {
+  const collector = peekBlockCollector(taskId);
+  if (!collector) return; // 无 collector = 无关联 chat 消息，跳过（非 board 路径或板已 dispose）
+  const opts = deriveTaskProgressFromBoard(taskId);
+  if (opts) collector.onTaskProgress(opts);
+}
+
+/**
+ * §14.5 timeline 刷新重建：对含 delegation 块的消息，从 board 状态重建 task_progress 块追加到 blocks。
+ * task_progress 是 board 的 upsert 投影（不入 append-only timeline 持久化），刷新时从此处重建——
+ * 让用户刷新对话后任务进展卡仍可见（board 是持久事实源，卡是派生视图）。
+ *
+ * 链接：DelegationBlock.id = board taskId（派发时 delegation.id 即板 id）。
+ * 幂等：消息已含 task_progress（不应有，live-only）则跳过。无 board / 无 delegation 块 → 跳过。
+ */
+export function enrichTimelineWithTaskProgress<T extends { id: string; blocks?: Block[] }>(messages: T[]): T[] {
+  for (const msg of messages) {
+    const blocks = msg.blocks;
+    if (!blocks || blocks.length === 0) continue;
+    if (blocks.some((b) => b.type === 'task_progress')) continue; // 幂等：已有 task_progress 则跳过
+    // 找首个 delegation 块（其 id = board taskId）→ 据板状态重建 task_progress 卡
+    const deleg = blocks.find((b): b is DelegationBlock => b.type === 'delegation');
+    if (!deleg) continue;
+    const opts = deriveTaskProgressFromBoard(deleg.id);
+    if (!opts) continue; // 无 board（任务未建板或板已清）→ 不重建
+    blocks.push({ type: 'task_progress', id: `${msg.id}#taskprog`, ...opts });
+  }
+  return messages;
 }
 
 // ─── delegate 投影：派发点落「指派」信封 ───

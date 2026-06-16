@@ -26,6 +26,7 @@ import {
   getBoardMembers,
   getBoardContext,
 } from '../kernel/board-repo.js';
+import { enrichTimelineWithTaskProgress } from '../kernel/board-projection.js';
 import type { WebServerDependencies } from './types.js';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
@@ -279,6 +280,8 @@ export function createApiRouter(deps: WebServerDependencies) {
   route('GET', '/sessions/:sid/timeline', (_req, res, url, params) => {
     const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);
     const timeline = getTimeline(params.sid, { limit });
+    // §14.5：刷新时为含 delegation 块的消息重建 task_progress 卡（board 是持久源，卡是派生视图）
+    enrichTimelineWithTaskProgress(timeline);
     json(res, timeline);
   });
 
@@ -329,6 +332,8 @@ export function createApiRouter(deps: WebServerDependencies) {
     // 对话内联（doc 22）：state 的消息从新表读（getTimeline），Block[] 平铺为 content（旧字段兼容）
     // 并透传 blocks 供前端内联渲染（thinking/tool/delegation 卡片）。下面 thinkingSteps 时间窗富化逻辑不变。
     const timeline = getTimeline(sessionId, { limit });
+    // §14.5：刷新恢复同样为含 delegation 块的消息重建 task_progress 卡
+    enrichTimelineWithTaskProgress(timeline);
     const rawMessages = timeline.map((m) => ({ ...m, content: extractTextFromBlocks(m.blocks) }));
     // 查询该 session 所有任务（不限 task_type），按时间正序排列。
     // 不使用 finished_at 时间窗口：conversation_turn 可能几百毫秒就结束，
