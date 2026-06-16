@@ -13,7 +13,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentManifest } from '../../manifest.js';
 import type { ModelMessage } from '../../../contracts/model.js';
-import type { RouteResultPayload, PermissionJudgeResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
+import type { RouteResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload } from '../../../contracts/delegation.js';
 import { CORRECTION_LIMITS } from '../../../contracts/delegation.js';
 import {
@@ -39,7 +39,7 @@ import {
   parseCronReviewResult,
 } from './prompts.js';
 import type { IpcMessage } from '../../../kernel/types.js';
-import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../../contracts/routing.js';
+import type { RouteRequestPayload } from '../../../contracts/routing.js';
 import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle.js';
 import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.js';
