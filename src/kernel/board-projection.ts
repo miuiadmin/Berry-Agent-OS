@@ -305,7 +305,12 @@ export function postReportEnvelope(taskId: string, opts: ReportEnvelopeOpts, boa
   safePost(taskId, () => {
     // board 状态机联动（§6.5.1 单一事实源）：经 applyBoardStatus 统一推导 + 校验合法流转。
     // boardStatusEvent 覆盖默认推导（解耦审计 status 与状态机）。
-    applyBoardStatus(taskId, boardStatusEvent ?? { kind: 'report', status: opts.status });
+    const next = applyBoardStatus(taskId, boardStatusEvent ?? { kind: 'report', status: opts.status });
+    // P5 authority switch：首次转终态（next=completed/failed/interrupted，非 null）→ 派生 delegation.* 一次。
+    // status-transition 幂等（后续报告 applyBoardStatus 返 null）→ 无 double-emit。
+    if (next === 'completed' || next === 'failed' || next === 'interrupted') {
+      emitDerivedDelegationLifecycle(taskId, next, opts.summary);
+    }
 
     return {
       id: genId('bmsg'),
@@ -357,6 +362,35 @@ export function deriveDelegationEventFromBoardMessage(msg: BoardMessage): Derive
     case 'partial':
     default:
       return null; // partial = 非终态，不派生 delegation 生命周期事件
+  }
+}
+
+/**
+ * P5 authority switch：board 状态机首次转终态时派生 delegation.* 生命周期事件（单一源）。
+ *
+ * 触发点：postReportEnvelope 内 applyBoardStatus 返回新终态（completed/failed/interrupted，非 null）。
+ * status-transition 幂等——同一 task 的多个终态报告（agent blocked + system fail）只有首个触发派生，
+ * 后续 applyBoardStatus 返 null（已终态）→ 不重复派生（**解决 double-emit**）。
+ *
+ * targetAgent 从 board delegate 消息的 `to` 解析（非 report.from——system report 的 from='system'）。
+ * completed→delegation.completed；failed/interrupted→delegation.failed（interrupt 也是 fail 语义，onTermination 清 scope）。
+ */
+function emitDerivedDelegationLifecycle(taskId: string, terminalStatus: string, errorSummary: string): void {
+  try {
+    // targetAgent：从 board 的 delegate 消息 `to` 解析（delegate 总在板上——dm.create 建 board + postDelegateEnvelope 落 delegate）
+    const ctx = getBoardContext(taskId, 200);
+    const delegateMsg = ctx?.recentMessages.find((m) => m.type === 'delegate') as { to?: string } | undefined;
+    const targetAgent = delegateMsg?.to ?? 'unknown';
+    if (terminalStatus === 'completed') {
+      // durationMs 板内无法精确算（无 entry.createdAt），传 0（仅 display 用，onTermination 不依赖）
+      getEventBus().emit('delegation.completed', { delegationId: taskId, targetAgent, durationMs: 0 });
+    } else {
+      // failed / interrupted → delegation.failed
+      getEventBus().emit('delegation.failed', { delegationId: taskId, targetAgent, error: errorSummary });
+    }
+  } catch (err) {
+    logger.warn({ err, taskId, terminalStatus }, 'board-projection: status-transition 派生 delegation.* 失败');
+    metrics.counter('board_projection_failed_total').inc({ label: 'lifecycle_derive', phase: 'derive_emit' });
   }
 }
 

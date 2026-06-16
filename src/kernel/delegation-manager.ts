@@ -15,7 +15,7 @@ import type {
 } from '../contracts/delegation.js';
 import { isDelegationTerminal, DEFAULT_INTERNAL_BUDGET, DEFAULT_EXTERNAL_BUDGET, CORRECTION_LIMITS } from '../contracts/delegation.js';
 import { getLogger } from '../utils/logger.js';
-import { postSystemReportEnvelope } from './board-projection.js';
+import { postSystemReportEnvelope, postReportEnvelope } from './board-projection.js';
 import { initBoard } from './board-repo.js';
 
 const logger = getLogger('delegation-manager');
@@ -271,11 +271,14 @@ export class DelegationManager {
     // M6: 记录完成耗时，更新 Agent 队列统计（用于后续 ETA 计算）
     this.updateQueueOnComplete(entry.targetAgent, durationMs);
 
-    getEventBus().emit('delegation.completed', {
-      delegationId: id,
-      targetAgent: entry.targetAgent,
-      durationMs,
-    });
+    // P5 authority switch：delegation.completed 不再直 emit——postReportEnvelope(done) 触发 board
+    // status-transition 派生（applyBoardStatus 首次转 completed → emitDerivedDelegationLifecycle → delegation.completed）。
+    // board 单一源；delegation-manager 仅管状态 + queue 统计。
+    try {
+      postReportEnvelope(id, { from: entry.targetAgent, to: 'leader', status: 'done', summary: response, sessionId: entry.sessionId });
+    } catch (err) {
+      logger.warn({ err, delegationId: id }, 'delegation-manager: complete postReport 失败（delegation.completed 派生可能漏）');
+    }
 
     logger.debug({ delegationId: id, durationMs }, 'Delegation completed');
     return true;
@@ -292,18 +295,12 @@ export class DelegationManager {
     // M6: 更新队列统计（减少活跃计数）
     this.updateQueueOnComplete(entry.targetAgent);
 
-    getEventBus().emit('delegation.failed', {
-      delegationId: id,
-      targetAgent: entry.targetAgent,
-      error,
-    });
-
-    // 16.0 §7.5 板即审计：fail 同步投影 system report 信封（best-effort），让 board 忠实镜像所有 fail
-    // 转换——包括不经 orchestrator report 的路径（agent.crashed/task.timeout/sweepStale/guard-terminate/
-    // failByAgent）。不替代权威 delegation.failed emit（状态机仍是权威源）；board 是 best-effort 审计镜像。
+    // P5 authority switch：delegation.failed 不再直 emit——postSystemReportEnvelope(system report) 触发
+    // board status-transition 派生（applyBoardStatus failed → emitDerivedDelegationLifecycle → delegation.failed）。
+    // 覆盖所有 fail 路径（agent.crashed/task.timeout/sweepStale/guard-terminate/failByAgent 都经此 fail()）。
     try {
       postSystemReportEnvelope(id, { summary: `任务失败：${error}`, sessionId: entry.sessionId });
-    } catch { /* best-effort 审计镜像，失败不影响状态机 */ }
+    } catch { /* best-effort：派生+审计镜像，失败不影响状态机（V-2 守护测试把关） */ }
 
     logger.warn({ delegationId: id, error }, 'Delegation failed');
     return true;
@@ -321,18 +318,12 @@ export class DelegationManager {
       // Tolerate if already terminal in TaskManager
     }
 
-    getEventBus().emit('delegation.failed', {
-      delegationId: id,
-      targetAgent: entry.targetAgent,
-      error: reason ?? 'interrupted',
-    });
-
-    // 16.0 §7.5/§6.5.1 板即审计 + 状态机：interrupt 投影 system report 信封（审计记录"执行已取消"，
-    // report.status=blocked）但板状态机走 interrupted 终态（boardStatusEvent 覆盖默认 blocked→failed）。
-    // 解耦审计 status 与板状态——cancel/中断的审计事实是"未完成(blocked)"，但板终态是 interrupted。
+    // P5 authority switch：interrupt 的 delegation.failed 不再直 emit——postSystemReportEnvelope({kind:'interrupt'})
+    // 触发 board status-transition 派生（applyBoardStatus interrupted → emitDerivedDelegationLifecycle → delegation.failed）。
+    // 审计 status=blocked，板终态=interrupted（boardStatusEvent 覆盖），派生 delegation.failed（onTermination 清 scope）。
     try {
       postSystemReportEnvelope(id, { summary: `执行已取消：${reason ?? 'interrupted'}`, sessionId: entry.sessionId }, { kind: 'interrupt' });
-    } catch { /* best-effort 审计镜像 */ }
+    } catch { /* best-effort */ }
 
     logger.info({ delegationId: id, reason }, 'Delegation interrupted');
     return true;

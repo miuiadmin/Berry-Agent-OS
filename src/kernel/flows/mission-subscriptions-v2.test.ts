@@ -16,6 +16,7 @@ import { initEventBus, getEventBus } from '../event-bus.js';
 import { TaskManager } from '../task-manager.js';
 import { DelegationManager } from '../delegation-manager.js';
 import { setupMissionSubscriptions } from './mission-subscriptions.js';
+import { postDelegateEnvelope } from '../board-projection.js';
 import type { PermissionCoordinator } from '../permission-coordinator.js';
 
 describe('V-2 active_scope 清理回归（delegation 终态 → onTermination → clearActiveScope）', () => {
@@ -34,6 +35,13 @@ describe('V-2 active_scope 清理回归（delegation 终态 → onTermination �
       requester: 'brain', targetAgent: 'code', targetKind: 'internal',
       foreground: false, inputPayload: { taskType: 'code_task' },
     });
+  }
+
+  /** mimic production dispatch：dm.create 后 postDelegateEnvelope（板 created→in_progress + 落 delegate 消息，供 status-transition 派生 + targetAgent 解析） */
+  function makeDelegationWithBoard(): string {
+    const id = makeDelegation();
+    postDelegateEnvelope(id, { from: 'brain', to: 'code', subTaskGoal: '改模块 X', sessionId: 's1' });
+    return id;
   }
 
   afterEach(() => {
@@ -57,7 +65,7 @@ describe('V-2 active_scope 清理回归（delegation 终态 → onTermination �
   }
 
   it('delegation.failed → onTermination → clearActiveScope(delegationId)【V-2 防泄漏核心】', () => {
-    const id = makeDelegation();
+    const id = makeDelegationWithBoard();
     const { clearSpy } = setupWithSpy();
     expect(dm.fail(id, 'boom')).toBe(true);
     // V-2 不变量：fail 终态化后 active_scope 必清（否则跨 task 泄漏）
@@ -65,14 +73,14 @@ describe('V-2 active_scope 清理回归（delegation 终态 → onTermination �
   });
 
   it('delegation.completed → onTermination → clearActiveScope（成功路径也清 scope）', () => {
-    const id = makeDelegation();
+    const id = makeDelegationWithBoard();
     const { clearSpy } = setupWithSpy();
     expect(dm.complete(id, 'done')).toBe(true);
     expect(clearSpy).toHaveBeenCalledWith(id);
   });
 
   it('终态后再次 fail（幂等）不重复清（终态守卫）', () => {
-    const id = makeDelegation();
+    const id = makeDelegationWithBoard();
     const { clearSpy } = setupWithSpy();
     dm.fail(id, 'first');
     expect(clearSpy).toHaveBeenCalledTimes(1);
