@@ -1,17 +1,12 @@
 import { startResidentAgent } from '../../resident-agent.js';
 import { getLogger } from '../../../utils/logger.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
-import { buildReviewSystemPrompt } from './review-prompt-builder.js';
 import { evaluateCheckpoint } from './checkpoint-handler.js';
-import { evaluateAskUser, evaluateSuperiorReview, evaluateDriftCheck, evaluateVerify } from './simple-handlers.js';
+import { evaluateAskUser } from './simple-handlers.js';
 import { evaluatePermissionJudge } from './permission-handler.js';
 import { evaluateRoute } from './route-handler.js';
-import { evaluateCronReview } from './cron-review-handler.js';
-import { evaluateReview } from './review-handler.js';
-import { setupReviewFeedbackHandler } from './review-feedback-handler.js';
 import { setupDialogueHandler } from './dialogue-handler.js';
 import { createPlanMonitor } from './plan-monitor.js';
-import { createCheckerDispatch } from './checker-dispatch.js';
 import { setupObserveHandler } from './observe-handler.js';
 import { createBrainHelpers } from './brain-helpers.js';
 import { readFileSync } from 'node:fs';
@@ -19,8 +14,6 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentManifest } from '../../manifest.js';
 import type { ModelMessage } from '../../../contracts/model.js';
-import type { ReviewResult, TurnRecord } from '../../../contracts/review.js';
-import type { ToolBlock } from '../../../contracts/message-blocks.js';
 import type { RouteResultPayload, PermissionJudgeResultPayload, AgentAskUserPayload } from '../../../contracts/routing.js';
 import type { TurnCheckpointPayload, TurnCorrectionPayload } from '../../../contracts/delegation.js';
 import { CORRECTION_LIMITS } from '../../../contracts/delegation.js';
@@ -48,7 +41,6 @@ import {
 } from './prompts.js';
 import type { IpcMessage } from '../../../kernel/types.js';
 import type { RouteRequestPayload, PermissionJudgeRequestPayload } from '../../../contracts/routing.js';
-import type { SuperiorReviewRequest } from '../../../contracts/superior-review.js';
 import { recallInsightsForDecision, formatInsightsBlock } from '../../../kernel/insights-recall.js';
 import { markInsightAdoptedByDecision } from '../../../kernel/insights-lifecycle.js';
 import { BrainDecisionRecorder } from '../../../kernel/brain-decision-recorder.js';
@@ -116,128 +108,13 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    */
   setupObserveHandler({ observationRecorder, checkPlanProgress, ipc });
 
-  // recallDecisionsBlock / getReviewPrompt / getRoutingPrompt / getPermissionPrompt /
-  // acquireReviewSlot / releaseReviewSlot 全部提取到 brain-helpers.ts
-  const { recallDecisionsBlock, getReviewPrompt, getRoutingPrompt, getPermissionPrompt, buildFallbackReviewResult, acquireReviewSlot, releaseReviewSlot } = createBrainHelpers({ decisionRecorder, promptVersioning, fallbackReviewer, name, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
+  // ①②：review 拆给 ②reviewer 后，brain 只用 routing/permission 相关 helper（recallDecisionsBlock/getRoutingPrompt/getPermissionPrompt）
+  const { recallDecisionsBlock, getRoutingPrompt, getPermissionPrompt } = createBrainHelpers({ decisionRecorder, promptVersioning, fallbackReviewer, name, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
 
-  // --- Handler 1: review.request (existing, enhanced with reRoute + concurrency control) ---
-
-  ipc.onMessage('review.request', async (msg: IpcMessage) => {
-    // §5.2.5: 并发审核准入控制 — 等待获取审核 slot
-    await acquireReviewSlot();
-    try {
-    const { turn } = msg.payload as { turn: { sessionId: string; userMessage: string; draftResponse: string; toolCalls: ToolBlock[]; level: 'A' | 'B' | 'C'; missionId?: string; planTaskId?: string; taskDescription?: string; boardTaskId?: string } };
-    const trackingId = msg.correlationId ?? msg.id;
-    // §17.4 续 + ①② 第1步：review systemPrompt 构造已提取到 review-prompt-builder.ts
-    // （worldModel/观察队列/板上下文/insights/mission/历史决策/uncertain 6段注入，行为保持）。
-    const systemPrompt = buildReviewSystemPrompt(turn, {
-      db, observationRecorder, missionManager,
-      getBasePrompt: getReviewPrompt,
-      recallDecisionsBlock,
-    });
-
-    try {
-      // 核心逻辑提取到 review-handler.ts（§17.4 巨石拆解，review.request 最大单块提取）
-      const reviewResult = await evaluateReview(turn as TurnRecord, systemPrompt, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId, buildFallbackReviewResult);
-
-      logger.debug({ level: turn.level, verdict: reviewResult.verdict, reason: safeSlice(reviewResult.reason, 200), hasReRoute: !!reviewResult.reRoute, draftLen: turn.draftResponse?.length }, 'brain:review');
-
-      // 13.0 P10: 派发独立 checker 审核（仅当 squad 里有 check 角色成员时）
-      // 不阻塞主 review.result — checker 的 verdict 通过 brain.signal_intervention 事件异步影响后续 plan
-      if (turn.planTaskId && turn.missionId) {
-        dispatchCheckerReview(turn.missionId, turn.planTaskId, turn, reviewResult, trackingId);
-      }
-
-      ipc.send('review.result', 'core', reviewResult, trackingId);
-
-      // 13.0 §12: 记录审核决策到 BrainDecisionRecorder（供后续进化反馈 + lesson 学习）
-      // 自动对 verdict 做敏感数据脱敏（§3.6 场景 E）
-      decisionRecorder.recordReviewDecision(
-        turn.sessionId,
-        turn.draftResponse ?? turn.userMessage,
-        reviewResult as unknown as Record<string, unknown>,
-        turn.planTaskId ?? trackingId,
-      );
-
-      // 13.0 §12.6: 审核完成后自动 mark plan task done/failed（不阻塞审核主流程）
-      // approve → done；modify → done（带修改后的结果）；reject → failed
-      if (turn.planTaskId && turn.missionId) {
-        try {
-          const isApprove = reviewResult.verdict === 'approve';
-          const isModify = reviewResult.verdict === 'modify';
-          const isReject = reviewResult.verdict === 'reject';
-          if (isApprove || isModify) {
-            const resultText = reviewResult.finalResponse ?? reviewResult.reason ?? '审核通过';
-            missionManager.updatePlan(turn.missionId, {
-              task_id: turn.planTaskId,
-              status: 'done',
-              result: resultText.slice(0, 2000),
-            });
-            logger.debug({ missionId: turn.missionId, planTaskId: turn.planTaskId, verdict: reviewResult.verdict }, 'brain:review auto-marked plan task done');
-          } else if (isReject) {
-            missionManager.updatePlan(turn.missionId, {
-              task_id: turn.planTaskId,
-              status: 'failed',
-              result: (reviewResult.reason ?? '审核拒绝').slice(0, 2000),
-            });
-            logger.debug({ missionId: turn.missionId, planTaskId: turn.planTaskId, verdict: reviewResult.verdict }, 'brain:review auto-marked plan task failed');
-          }
-        } catch (planErr) {
-          // plan 更新失败不阻塞审核主流程 — 记录 warn 让运维追查
-          logger.warn({ err: planErr, missionId: turn.missionId, planTaskId: turn.planTaskId }, 'brain:review plan auto-update failed');
-        }
-      }
-    } catch (err) {
-      // 13.0 §5.2.5 失败降级：Brain LLM 不可用时用 FallbackReviewer 做规则化审查
-      // 不再"批准一切"——用确定性规则（危险命令模式、工具风险分类）兜底
-      logger.warn({ err: (err as Error).message }, 'brain:review LLM call failed, falling back to FallbackReviewer');
-
-      const fallbackReviewResult = buildFallbackReviewResult(turn, 'Brain LLM 不可用');
-      const verdict = fallbackReviewResult.verdict;
-      const reason = fallbackReviewResult.reason;
-      ipc.send('review.result', 'core', fallbackReviewResult, trackingId);
-
-      // 13.0 §12.6 + §13.21: 降级审核也必须标记 plan task，否则 LLM 不可用时
-      // plan task 永不 done/failed → 级联失效 → mission 挂起（与主审核路径一致）
-      if (turn.planTaskId && turn.missionId) {
-        try {
-          const isApprove = verdict === 'approve';
-          const isModify = verdict === 'modify';
-          if (isApprove || isModify) {
-            missionManager.updatePlan(turn.missionId, {
-              task_id: turn.planTaskId,
-              status: 'done',
-              result: (reason ?? '降级审核通过').slice(0, 2000),
-            });
-          } else {
-            missionManager.updatePlan(turn.missionId, {
-              task_id: turn.planTaskId,
-              status: 'failed',
-              result: (reason ?? '降级审核拒绝').slice(0, 2000),
-            });
-          }
-        } catch (planErr) {
-          logger.warn({ err: planErr, missionId: turn.missionId, planTaskId: turn.planTaskId }, 'brain:fallback review plan auto-update failed');
-        }
-      }
-    }
-    } finally {
-      // §5.2.5: 释放审核 slot，唤醒下一个排队者
-      releaseReviewSlot();
-    }
-  });
-
-  // ─── 13.0 §8.6 + §3.1 提示能力: 自我审核反馈 IPC + prompt 自修改闭环 ───
-  // 让前端 / Evolution Engine 把 lesson 写回 brain_decisions，
-  // 并在 lessons 累积到阈值时自动通过 PromptVersioning.propose() 生成新 prompt 版本。
-  // 设计依据：
-  //   - §3.1 "提示"能力：给 agent 建议和引导，让它们越做越好
-  //   - §8.8: Brain 高 severity 纠偏升级为跨 session 偏好
-  //   - §3.9: 软纠偏通过 StateCache 行为注释跨 task 持久
-  // §17.4 巨石拆解：brain.review.feedback 整组提取到 review-feedback-handler.ts
-  setupReviewFeedbackHandler({ db, decisionRecorder, promptVersioning, ipc, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
-
-  const dispatchCheckerReview = createCheckerDispatch({ missionManager, decisionRecorder, ipc });
+  // ①② 议会拆分：review 职能已拆给 ②reviewer agent。brain 不再处理 review——
+  // review.request / review.feedback / checker dispatch / cron.review / superior.review.request
+  // / drift.check.request / verify.request 全由 ②reviewer 接管（见 src/agents/bundled/reviewer/）。
+  // brain 现是纯 orchestrator（routing/permission/command/observe/ask/correction）。
 
   // --- Handler 2: route.request (LLM 调用提取到 route-handler.ts，§17.4) ---
 
@@ -343,117 +220,6 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // --- Handler 6: superior.review.request (核心逻辑提取到 simple-handlers.ts，§17.4) ---
-
-  ipc.onMessage('superior.review.request', async (msg: IpcMessage) => {
-    const request = msg.payload as SuperiorReviewRequest;
-    const trackingId = msg.correlationId ?? msg.id;
-    try {
-      const reviewResult = await evaluateSuperiorReview(request, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
-      ipc.send('superior.review.result', 'core', reviewResult, trackingId);
-    } catch (err) {
-      ipc.send('superior.review.result', 'core', {
-        delegationId: request.delegationId,
-        correlationId: request.correlationId,
-        superiorId: request.superiorId,
-        verdict: 'approve' as const,
-        reason: `Superior review error: ${(err as Error).message}`,
-      }, trackingId);
-    }
-  });
-
-  // ─── 11.0: dialogue.observe — 异步监听智能体间对话 ───
+  // ─── 11.0: dialogue.observe — 异步监听智能体间对话（brain orchestrator 职能，保留）───
   setupDialogueHandler({ ipc, llm, name });
-
-  // ─── 12.0: drift.check.request (核心逻辑提取到 simple-handlers.ts，§17.4) ───
-  ipc.onMessage('drift.check.request', async (msg: IpcMessage) => {
-    const payload = msg.payload as import('../../../kernel/drift-detector.js').DriftCheckRequestPayload;
-    const trackingId = msg.correlationId ?? msg.id;
-    try {
-      const signal = await evaluateDriftCheck(payload, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
-      logger.debug({ checkpointType: payload.checkpointType, alignmentScore: signal.alignmentScore }, 'brain:drift-check');
-      ipc.send('drift.check.result', 'core', { signal }, trackingId);
-    } catch (err) {
-      logger.error({ err }, 'drift.check.request failed');
-      ipc.send('drift.check.result', 'core', { signal: { alignmentScore: 1, needsIntervention: false, checkpointType: payload.checkpointType } }, trackingId);
-    }
-  });
-
-  // ─── 12.0: verify.request (核心逻辑提取到 simple-handlers.ts，§17.4) ───
-  ipc.onMessage('verify.request', async (msg: IpcMessage) => {
-    const { anchor, draftResponse } = msg.payload as { anchor: import('../../../contracts/intent.js').IntentAnchor; draftResponse: string };
-    const trackingId = msg.correlationId ?? msg.id;
-    try {
-      const verdict = await evaluateVerify(anchor, draftResponse, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
-      logger.debug({ pass: verdict.pass, reason: safeSlice(verdict.reason ?? '', 100) }, 'brain:verify');
-      ipc.send('verify.result', 'core', { verdict }, trackingId);
-    } catch (err) {
-      logger.error({ err }, 'verify.request failed');
-      ipc.send('verify.result', 'core', { verdict: { pass: true, reason: '验证服务异常，默认通过' } }, trackingId);
-    }
-  });
-
-  // ─── 13.0 §13.8: cron 任务审核（LLM + 规则双路径） ───
-  // cron.review 由 CronScheduler 在 core 进程发出，经 IPC 边界中继到 Brain 子进程。
-  // 策略：输出短/简单 → 规则化快速通过；输出长/复杂 → LLM 审核
-  // 注意：Brain 是独立子进程，EventBus 是进程内的——必须用 ipc.onMessage 接收，
-  // 而非 getEventBus().on()（后者会因 EventBus 未初始化直接崩，且跨进程也收不到）。
-  ipc.onMessage('cron.review', async (msg: IpcMessage) => {
-    const payload = msg.payload as { taskId: string; description: string; output: string; createdAt: number };
-    const { taskId, description, output } = payload;
-    const outputLen = output?.length ?? 0;
-    const descLen = description?.length ?? 0;
-    logger.info({ taskId, descriptionLen: descLen, outputLen }, 'brain:cron.review received');
-
-    /** 判断是否需要 LLM 审核（基于输出复杂度和长度） */
-    const needsLlmReview = outputLen > 2000 || descLen > 100;
-    /** 快速判定：输出短且无描述时直接规则化通过 */
-    const quickApprove = !needsLlmReview && outputLen <= 500;
-
-    if (quickApprove) {
-      // ── 快速规则化通过（零 LLM） ──
-      decisionRecorder.record({
-        sessionId: `cron:${taskId}`,
-        decisionType: 'cron_review',
-        inputSummary: safeSlice(description, 500),
-        outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'rule_quick' },
-        confidence: 0.9,
-        taskId,
-      });
-      logger.debug({ taskId, outputLen }, 'brain:cron.review quick-approved (rule-based, short output)');
-      return;
-    }
-
-    if (!needsLlmReview) {
-      // ── 中等输出，规则化通过但置信度较低 ──
-      decisionRecorder.record({
-        sessionId: `cron:${taskId}`,
-        decisionType: 'cron_review',
-        inputSummary: safeSlice(description, 500),
-        outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'rule_medium' },
-        confidence: 0.7,
-        taskId,
-      });
-      logger.debug({ taskId, outputLen }, 'brain:cron.review auto-approved (rule-based, medium output)');
-      return;
-    }
-
-    // ── 复杂/长输出：调用 LLM 审核（核心逻辑提取到 cron-review-handler.ts，§17.4） ──
-    try {
-      const cronResult = await evaluateCronReview(description ?? '', output, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, taskId);
-      logger.info({ taskId, verdict: cronResult.verdict, confidence: cronResult.confidence, reason: safeSlice(cronResult.reason, 200) }, 'brain:cron.review LLM verdict');
-      decisionRecorder.record({
-        sessionId: `cron:${taskId}`, decisionType: 'cron_review',
-        inputSummary: safeSlice(description, 500),
-        outputJson: { output: safeSlice(output, 2000), autoApproved: cronResult.verdict === 'approve', llmVerdict: cronResult.verdict, llmReason: safeSlice(cronResult.reason, 500), correctedOutput: cronResult.correctedOutput ? safeSlice(cronResult.correctedOutput, 1000) : undefined, path: 'llm' },
-        confidence: cronResult.confidence, taskId,
-      });
-      if (cronResult.verdict !== 'approve') {
-        ipc.send('brain.cron_review_flagged', 'core', { taskId, verdict: cronResult.verdict, reason: cronResult.reason, correctedOutput: cronResult.correctedOutput });
-      }
-    } catch (err) {
-      logger.warn({ err: (err as Error).message, taskId }, 'brain:cron.review LLM failed, fallback');
-      decisionRecorder.record({ sessionId: `cron:${taskId}`, decisionType: 'cron_review', inputSummary: safeSlice(description, 500), outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'fallback' }, confidence: 0.5, taskId });
-    }
-  });
 });
