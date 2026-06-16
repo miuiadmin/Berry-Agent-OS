@@ -20,6 +20,7 @@
 import { getDb } from '../memory/db.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
+import { metrics } from '../observability/metrics.js';
 import { getEventBus } from './event-bus.js';
 import {
   postBoardMessage,
@@ -40,23 +41,41 @@ import { routeGovernance } from './flows/governance-switch.js';
 const logger = getLogger('board-projection');
 
 /**
- * 通用 fire-and-forget 落板包装：所有投影统一经此，确保 try/catch + 日志一致。
- * 失败仅 debug 日志，不抛异常——现有派发/审核主路径零回归。
+ * 通用落板包装：所有投影统一经此。
+ *
+ * P5 同步必达前置（权威路径可观测化）：DB 写入（postBoardMessage，better-sqlite3 同步写——本身可靠）
+ * 是 board 权威路径，失败须**可见（warn + metric）**，不再 debug 静默吞——P5 权威切换后 board 写失败
+ * = 权威丢失（须告警），审计影子期也不应无声丢。UI emit（board.message.posted / task_progress 投影）
+ * 是 best-effort（前端可刷新拉历史补救），单独 try/catch，不与权威路径耦合。
+ *
+ * 不抛异常——派发/审核主路径零回归（board 仍是审计影子，写失败不阻塞主路径，但可观测）。
  */
 function safePost(taskId: string, build: () => BoardMessage, label: string): void {
+  let msg: BoardMessage;
   try {
-    const msg = build();
+    msg = build();
+  } catch (err) {
+    // 信封构造失败（罕见，如 redact 异常）——warn + metric，不入 emit
+    logger.warn({ err, taskId, label }, `board-projection: ${label} 构造信封失败`);
+    metrics.counter('board_projection_failed_total').inc({ label, phase: 'build' });
+    return;
+  }
+  // ── board DB 写入（权威路径）：失败 warn + metric，不再静默吞 ──
+  try {
     postBoardMessage(taskId, msg);
-    // board 落板成功后 emit 统一的 'board.message.posted'（WsEventBridge 订阅后转发前端看板 UI）。
-    // 注：不再派生 delegation.* 旧事件——delegation-manager/orchestrator/observer/ask-handler 是
-    // 这些生命周期/信号事件的权威源（直 emit），board 派生会造成双 emit（onTermination/
-    // correction-flow 双触发）。P5 board 权威切换后让 delegation-manager 停发 + board 派生恢复。
-    // 统一在此 emit board.message.posted（而非散落各 postXxxEnvelope），遵循「补丁过多即重构」。
+  } catch (err) {
+    logger.warn({ err, taskId, label }, `board-projection: ${label} 落库失败（board 权威路径；P5 切换后此失败=权威丢失，须告警）`);
+    metrics.counter('board_projection_failed_total').inc({ label, phase: 'write' });
+    return; // 落库失败则不 emit（board 没落，emit 投影无意义）
+  }
+  // ── UI emit（best-effort）：board.message.posted（WsEventBridge 转发前端）+ task_progress 投影。
+  // 注：不在此派生 delegation.*（delegation-manager 是当前权威源，直 emit；P5 切换后由 deriveDelegationEventFromBoardMessage 派生）。
+  try {
     emitBoardMessagePosted(taskId, msg);
-    // §14.5 任务进展卡：board 活动 → 投影 task_progress block（live-only，经 block-collector 桥接到 chat 消息）
     emitTaskProgressForBoard(taskId);
   } catch (err) {
-    logger.debug({ err, taskId, label }, `board-projection: ${label} 落板失败（fire-and-forget，不影响主路径）`);
+    // UI 投影失败不影响 board 权威（前端可刷新拉历史补救）——debug 即可
+    logger.debug({ err, taskId, label }, `board-projection: ${label} emit 失败（UI best-effort，不影响 board 权威）`);
   }
 }
 
