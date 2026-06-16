@@ -300,6 +300,43 @@ export function postReportEnvelope(taskId: string, opts: ReportEnvelopeOpts, boa
   }, `report(${opts.status})`);
 }
 
+// ─── P5 enabler：从 board 消息派生 delegation 生命周期事件 ───
+
+/** 从 board report 信封派生的 delegation 生命周期事件（P5 权威切换后供 board 派生 delegation.* 用） */
+export type DerivedDelegationEvent =
+  | { type: 'delegation.completed'; delegationId: string; targetAgent: string }
+  | { type: 'delegation.failed'; delegationId: string; targetAgent: string; error: string };
+
+/**
+ * 从 board report 信封派生 delegation 生命周期事件（P5 enabler，纯函数，可单测）。
+ *
+ * 映射（§3.3 收敛 + §6.5 board 状态机）：agent 的 report(status:done)→delegation.completed；
+ * report(status:blocked/cant_split)→delegation.failed。
+ * system report（from:'system'，fail/interrupt 兜底）+ partial（非终态）→ null（系统报告的
+ * targetAgent 不在消息内，需板上下文派生；partial 非终态不派生）。
+ *
+ * 当前 board 是审计影子（delegation-manager 直 emit delegation.* 为权威源）；P5 权威切换后
+ * delegation-manager 停发，board 据消息经本函数派生 + emit delegation.*（单一事实源收敛）。
+ *
+ * @param msg 板上信封（BoardMessage）
+ * @returns 派生的 delegation 生命周期事件；null=该消息不映射到 delegation 终态
+ */
+export function deriveDelegationEventFromBoardMessage(msg: BoardMessage): DerivedDelegationEvent | null {
+  if (msg.type !== 'report') return null;
+  // system report（from:'system'）的 targetAgent 不在消息内 → 无法从单消息派生（留 P5 板上下文派生）
+  if (msg.from === 'system') return null;
+  switch (msg.status) {
+    case 'done':
+      return { type: 'delegation.completed', delegationId: msg.taskId, targetAgent: msg.from };
+    case 'blocked':
+    case 'cant_split':
+      return { type: 'delegation.failed', delegationId: msg.taskId, targetAgent: msg.from, error: msg.summary };
+    case 'partial':
+    default:
+      return null; // partial = 非终态，不派生 delegation 生命周期事件
+  }
+}
+
 // ─── system report 投影：兜底失败落 from:'system' 的 report ───
 
 export interface SystemReportOpts {
