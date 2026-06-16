@@ -32,6 +32,7 @@ import {
   applyBoardStatus,
   transferLeadership,
   createSubBoard,
+  setBoardLineage,
 } from './board-repo.js';
 import { peekBlockCollector } from './block-collector.js';
 import type { BoardMessage, BoardStatusEvent } from '../contracts/board-message.js';
@@ -213,14 +214,17 @@ export interface DelegateEnvelopeOpts {
  */
 export function postDelegateEnvelope(taskId: string, opts: DelegateEnvelopeOpts): void {
   safePost(taskId, () => {
-    // 幂等初始化板元数据（已存在则 UPDATE 不破坏）
+    // P5 board-existence：dm.create 已基础 init board（created）——此处若已存在则不重 init（避免重置 status）。
     if (!getBoardMeta(taskId)) {
       initBoard(taskId, {
         goal: opts.subTaskGoal,
         leader: opts.from,
-        parentTaskId: opts.parentTaskId,
-        spawnDepth: opts.parentTaskId ? 1 : 0,
       });
+    }
+    // lineage 总是设（即使 board 已由 dm.create 基础 init）——sub-board 的 parent/spawn 不能因 board 已存在而漏。
+    // setBoardLineage 单独 UPDATE parent_task_id + spawn_depth，不重置 board_status（initBoard 会重置，故分开）。
+    if (opts.parentTaskId) {
+      setBoardLineage(taskId, opts.parentTaskId, 1);
     }
     addBoardMember(taskId, opts.to, 'member');
     // 板状态 created → in_progress（首次/再次 delegate 触发）。经 applyBoardStatus 状态机单一事实源

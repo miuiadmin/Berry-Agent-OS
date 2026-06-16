@@ -16,6 +16,7 @@ import type {
 import { isDelegationTerminal, DEFAULT_INTERNAL_BUDGET, DEFAULT_EXTERNAL_BUDGET, CORRECTION_LIMITS } from '../contracts/delegation.js';
 import { getLogger } from '../utils/logger.js';
 import { postSystemReportEnvelope } from './board-projection.js';
+import { initBoard } from './board-repo.js';
 
 const logger = getLogger('delegation-manager');
 
@@ -131,6 +132,15 @@ export class DelegationManager {
 
     this.entries.set(taskId, entry);
     this.correlationIndex.set(params.correlationId, taskId);
+
+    // P5 board-existence：每个 delegation 都有 board（§5.1 task=board 运行时兑现）。
+    // 基础 init（created 状态）；postDelegateEnvelope 后续补设 sub-board lineage + delegate 信封。
+    // try/catch——board 建失败不阻塞 delegation 创建（P5 切换前 board 是审计影子，主路径不依赖）。
+    try {
+      initBoard(taskId, { goal: params.userMessage ?? '(delegation)', leader: params.requester });
+    } catch (err) {
+      logger.debug({ err, taskId }, 'delegation-manager: initBoard 失败（不阻塞 delegation 创建）');
+    }
 
     // M6: 更新 Agent 队列统计 + 计算 ETA
     const queueInfo = this.updateQueueOnCreate(params.targetAgent);

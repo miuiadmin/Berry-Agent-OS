@@ -283,6 +283,18 @@ export function initBoard(taskId: string, opts: {
   addBoardMember(taskId, opts.leader, 'leader');
 }
 
+/**
+ * 设置板的 lineage（parent_task_id + spawn_depth），**不重置 board_status**。
+ *
+ * P5 board-existence：dm.create 基础 init board（created）后，postDelegateEnvelope 须补设 sub-board 的
+ * parent/spawn——但不能重跑 initBoard（会把 in_progress 重置回 created）。故单独 UPDATE 这两列。
+ */
+export function setBoardLineage(taskId: string, parentTaskId: string, spawnDepth: number): void {
+  const db = getDb();
+  db.prepare('UPDATE agent_tasks SET parent_task_id = ?, spawn_depth = ? WHERE id = ?')
+    .run(parentTaskId, spawnDepth, taskId);
+}
+
 /** 单板活跃子板数上限（§16.8 第4道物理闸：防失控板烧机器，默认 8） */
 const MAX_ACTIVE_SUBS = 8;
 
