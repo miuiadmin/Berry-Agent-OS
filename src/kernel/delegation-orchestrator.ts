@@ -107,7 +107,7 @@ import { MissionManager } from './mission-manager.js';
 import { StateCache } from './state-cache.js';
 import { AgentRequestQueue } from './agent-request-queue.js';
 import { postDelegateEnvelope } from './board-projection.js';
-import { resolveLeaderForDelegate } from './board-repo.js';
+import { resolveLeaderForDelegate, applyBoardStatus } from './board-repo.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 
@@ -739,6 +739,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
 
     this.delegationManager.resumeFromUserReply(askState.taskId);
     this.sessionManager.clearPendingAsk(payload.sessionId);
+
+    // 16.0 §6.5.1/D：用户回复 → 板状态 user_resumed（awaiting_user → in_progress，恢复干活）
+    if (askState.taskId) applyBoardStatus(askState.taskId, { kind: 'user_resumed' });
 
     // 13.0 §3.2/§5.3.3: 将用户回复写入 Brain 观察队列（priority=0，critical，永不丢弃）
     // Brain 审核时需要知道用户对 agent 提问的真实回复，以判断 agent 是否正确使用了用户输入。

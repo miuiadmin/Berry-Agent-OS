@@ -23,7 +23,7 @@ import {
   postAskEnvelope,
   postSystemReportEnvelope,
 } from './board-projection.js';
-import { getBoardMeta } from './board-repo.js';
+import { getBoardMeta, applyBoardStatus } from './board-repo.js';
 
 /** 捕获到的 board.message.posted 事件 payload 类型（从 EventMap 推导，保持与契约一致） */
 type BoardMessagePostedPayload = {
@@ -230,5 +230,28 @@ describe('board-projection §6.5.1 状态机接线（P2-D）', () => {
     postDelegateEnvelope('fsm-7', { from: 'brain', to: 'code', subTaskGoal: '改 T', sessionId: 's7' });
     postSystemReportEnvelope('fsm-7', { summary: '任务失败：crash', sessionId: 's7' });
     expect(getBoardMeta('fsm-7')?.boardStatus).toBe('failed');
+  });
+
+  it('await_user：agent 问用户 → awaiting_user（in_progress → awaiting_user）', () => {
+    insertAgentTask('fsm-8', 's8');
+    postDelegateEnvelope('fsm-8', { from: 'brain', to: 'code', subTaskGoal: '改 A', sessionId: 's8' });
+    applyBoardStatus('fsm-8', { kind: 'await_user' });
+    expect(getBoardMeta('fsm-8')?.boardStatus).toBe('awaiting_user');
+  });
+
+  it('user_resumed：用户回复 → in_progress（awaiting_user → in_progress，恢复干活）', () => {
+    insertAgentTask('fsm-9', 's9');
+    postDelegateEnvelope('fsm-9', { from: 'brain', to: 'code', subTaskGoal: '改 B', sessionId: 's9' });
+    applyBoardStatus('fsm-9', { kind: 'await_user' });
+    applyBoardStatus('fsm-9', { kind: 'user_resumed' });
+    expect(getBoardMeta('fsm-9')?.boardStatus).toBe('in_progress');
+  });
+
+  it('user_rejected：用户拒绝 → failed（awaiting_user → failed）', () => {
+    insertAgentTask('fsm-10', 's10');
+    postDelegateEnvelope('fsm-10', { from: 'brain', to: 'code', subTaskGoal: '改 C', sessionId: 's10' });
+    applyBoardStatus('fsm-10', { kind: 'await_user' });
+    applyBoardStatus('fsm-10', { kind: 'user_rejected' });
+    expect(getBoardMeta('fsm-10')?.boardStatus).toBe('failed');
   });
 });

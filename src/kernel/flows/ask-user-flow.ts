@@ -18,6 +18,7 @@ import type { ObservationRecorder } from '../observation-recorder.js';
 import type { IpcMessage, IpcMessageType } from '../types.js';
 import type { AgentAskUserPayload, AgentUserReplyPayload } from '../../contracts/routing.js';
 import { getEventBus } from '../event-bus.js';
+import { applyBoardStatus } from '../board-repo.js';
 
 /** agent.ask_user 流依赖注入 */
 export interface AskUserFlowDeps {
@@ -72,6 +73,10 @@ export function setupAgentAskUserFlow(
       question,
       correlationId,
     });
+
+    // 16.0 §6.5.1/D：agent 问用户 → 板状态 awaiting_user（让前端任务卡显示「等用户输入」，
+    // 板状态机单一事实源；无 board 的 chat 路径 applyBoardStatus 静默 no-op）。
+    if (payload.taskId) applyBoardStatus(payload.taskId, { kind: 'await_user' });
 
     // 13.0 §3.2/§5.3.3: 将 agent 提问写入 Brain 观察队列（priority=0，critical，永不丢弃）
     // Brain 审核时需要知道 agent 主动问了用户什么，以判断：
