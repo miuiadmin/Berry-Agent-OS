@@ -163,7 +163,7 @@ export class AgentRegistry {
   }
 
   validateSystemRoles(): void {
-    const requiredRoles: AgentRole[] = ['reviewer', 'primary', 'orchestrator'];
+    const requiredRoles: AgentRole[] = ['reviewer', 'permission', 'primary', 'orchestrator'];
     for (const role of requiredRoles) {
       const agent = this.getByRole(role);
       if (!agent) {

@@ -479,10 +479,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // ═══ LIFECYCLE ════════════════════════════════════
 
   setup(): void {
-    // ①② 议会拆分后：reviewer=②reviewer（review/superior），orchestrator=brain（routing/permission/command/observe/ask/correction）
+    // ①② 议会拆分后：reviewer=②reviewer（review/superior），orchestrator=brain（routing/command/observe/ask/correction），permission=①permission（权限判断）
     const reviewerAgent = this.registry.requireRole('reviewer');
     const primaryAgent = this.registry.requireRole('primary');
     const orchestratorAgent = this.registry.requireRole('orchestrator');
+    const permissionAgent = this.registry.requireRole('permission');
     const reviewerName = reviewerAgent.manifest.name;
     const primaryName = primaryAgent.manifest.name;
     const brainName = orchestratorAgent.manifest.name;
@@ -490,8 +491,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     const primary = this.agentManager.getAgent(primaryName);
     const reviewer = this.agentManager.getAgent(reviewerName);
     const brain = this.agentManager.getAgent(brainName);
+    const permission = this.agentManager.getAgent(permissionAgent.manifest.name);
 
-    if (!primary || !reviewer || !brain) {
+    if (!primary || !reviewer || !brain || !permission) {
       throw new Error('必要智能体启动失败');
     }
 
@@ -501,7 +503,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     // review 链路（review.request/result）→ ②reviewer；routing 链路（route.result）→ brain
     this.setupReviewFlow(primary.ipc, reviewer.ipc, primaryName, reviewerName);
     this.setupRoutingFlow(brain.ipc);
-    this.permissionFlow.setupJudgeHandler(brain.ipc);
+    // ①②：permission.judge → ①permission agent（权限专员）
+    this.permissionFlow.setupJudgeHandler(permission.ipc);
     // 15.0 机制 D：brain.command 指挥通道 → brain（command 是 brain 职能）
     setupBrainCommandHandler(brain.ipc, {
       agentManager: this.agentManager,

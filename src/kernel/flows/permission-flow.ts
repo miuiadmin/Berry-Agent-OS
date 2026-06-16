@@ -110,16 +110,17 @@ export class PermissionFlow {
 
       this.pendingJudgeInputs.set(correlationId, { sessionId: input.sessionId, toolName: input.toolName });
 
-      const orchestratorAgent = this.deps.registry.requireRole('orchestrator');
-      const brain = this.deps.agentManager.getAgent(orchestratorAgent.manifest.name);
-      if (!brain) {
+      // ①② 议会拆分：permission.judge 派给 ①permission agent（requireRole('permission')）
+      const permissionAgent = this.deps.registry.requireRole('permission');
+      const permission = this.deps.agentManager.getAgent(permissionAgent.manifest.name);
+      if (!permission) {
         clearTimeout(timeout);
         this.pendingJudges.delete(correlationId);
-        resolve({ allowed: false, reason: 'Brain 不可用' });
+        resolve({ allowed: false, reason: 'Permission agent 不可用' });
         return;
       }
 
-      brain.ipc.send('permission.judge', orchestratorAgent.manifest.name, {
+      permission.ipc.send('permission.judge', permissionAgent.manifest.name, {
         sessionId: input.sessionId,
         agentName: input.agentName,
         toolName: input.toolName,

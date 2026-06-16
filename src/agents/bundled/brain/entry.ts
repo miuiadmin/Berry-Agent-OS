@@ -3,7 +3,6 @@ import { getLogger } from '../../../utils/logger.js';
 import { safeSlice } from '../../../utils/safe-slice.js';
 import { evaluateCheckpoint } from './checkpoint-handler.js';
 import { evaluateAskUser } from './simple-handlers.js';
-import { evaluatePermissionJudge } from './permission-handler.js';
 import { evaluateRoute } from './route-handler.js';
 import { setupDialogueHandler } from './dialogue-handler.js';
 import { createPlanMonitor } from './plan-monitor.js';
@@ -108,8 +107,8 @@ startResidentAgent(({ name, ipc, llm, db }) => {
    */
   setupObserveHandler({ observationRecorder, checkPlanProgress, ipc });
 
-  // ①②：review 拆给 ②reviewer 后，brain 只用 routing/permission 相关 helper（recallDecisionsBlock/getRoutingPrompt/getPermissionPrompt）
-  const { recallDecisionsBlock, getRoutingPrompt, getPermissionPrompt } = createBrainHelpers({ decisionRecorder, promptVersioning, fallbackReviewer, name, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
+  // ①②：review/permission 拆给 ②reviewer/①permission 后，brain 只用 routing 相关 helper（recallDecisionsBlock/getRoutingPrompt）
+  const { recallDecisionsBlock, getRoutingPrompt } = createBrainHelpers({ decisionRecorder, promptVersioning, fallbackReviewer, name, defaultPromptA: DEFAULT_PROMPT_A, defaultPromptBc: DEFAULT_PROMPT_BC });
 
   // ①② 议会拆分：review 职能已拆给 ②reviewer agent。brain 不再处理 review——
   // review.request / review.feedback / checker dispatch / cron.review / superior.review.request
@@ -156,30 +155,8 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     }
   });
 
-  // --- Handler 3: permission.judge (LLM 调用提取到 permission-handler.ts，§17.4) ---
-
-  ipc.onMessage('permission.judge', async (msg: IpcMessage) => {
-    const payload = msg.payload as PermissionJudgeRequestPayload;
-    const trackingId = msg.correlationId ?? msg.id;
-
-    // systemPrompt 构造（含 recallInsights/recallDecisions 闭包，留在 entry.ts）
-    let systemPrompt = getPermissionPrompt();
-    const permInsights = recallInsightsForDecision(db, 'permission', 3);
-    if (permInsights.length > 0) {
-      systemPrompt += formatInsightsBlock(permInsights);
-      markInsightAdoptedByDecision(db, 'permission', permInsights.map(i => i.id));
-    }
-    systemPrompt += recallDecisionsBlock('permission');
-
-    try {
-      const judgment = await evaluatePermissionJudge(payload, systemPrompt, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
-      logger.debug({ tool: payload.toolName, allowed: judgment.allowed, reason: safeSlice(judgment.reason, 200) }, 'brain:permission');
-      ipc.send('permission.judge.result', 'core', judgment as PermissionJudgeResultPayload, trackingId);
-      decisionRecorder.recordPermissionDecision(payload.sessionId, payload.toolName, judgment as unknown as Record<string, unknown>);
-    } catch (err) {
-      ipc.send('permission.judge.result', 'core', { allowed: false, reason: `权限判断 LLM 失败: ${(err as Error).message}` } satisfies PermissionJudgeResultPayload, trackingId);
-    }
-  });
+  // ①② 议会拆分：permission.judge 已拆给 ①permission agent（requireRole('permission')）。
+  // brain 不再处理权限判断。
 
   // --- Handler 4: agent.ask_user (核心逻辑提取到 simple-handlers.ts，§17.4) ---
 

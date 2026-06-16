@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // === Agent Roles ===
 
-export const AGENT_ROLES = ['reviewer', 'primary', 'plugin-host', 'orchestrator'] as const;
+export const AGENT_ROLES = ['reviewer', 'permission', 'primary', 'plugin-host', 'orchestrator'] as const;
 export type AgentRole = typeof AGENT_ROLES[number];
 export const AgentRoleSchema = z.enum(AGENT_ROLES);
 

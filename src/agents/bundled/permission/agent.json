@@ -1,0 +1,14 @@
+{
+  "apiVersion": "berry.agent.v1",
+  "name": "permission",
+  "version": "0.2.0",
+  "description": "权限专员——工具调用权限判断（§4.0 议会拆分，从 brain 拆出）",
+  "level": 1,
+  "kind": "resident",
+  "taskTypes": ["brain_permission"],
+  "roles": ["permission"],
+  "source": "bundled",
+  "entry": "entry.ts",
+  "ipcProtocol": "custom",
+  "requiresBrainReview": false
+}
