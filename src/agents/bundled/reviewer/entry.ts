@@ -23,7 +23,7 @@ import { DEFAULT_REVIEW_PROMPT_A, DEFAULT_REVIEW_PROMPT_BC } from '../brain/prom
 import { createBrainHelpers } from '../brain/brain-helpers.js';
 import { createCheckerDispatch } from '../brain/checker-dispatch.js';
 import { setupReviewFeedbackHandler } from '../brain/review-feedback-handler.js';
-import { evaluateSuperiorReview } from '../brain/simple-handlers.js';
+import { evaluateSuperiorReview, evaluateDriftCheck, evaluateVerify } from '../brain/simple-handlers.js';
 import { evaluateCronReview } from '../brain/cron-review-handler.js';
 import { produceReviewResult, type ReviewerReviewContext } from './produce-review.js';
 
@@ -128,6 +128,34 @@ startResidentAgent(({ name, ipc, llm, db }) => {
     } catch (err) {
       logger.warn({ err: (err as Error).message, taskId }, 'reviewer:cron.review LLM failed, fallback');
       decisionRecorder.record({ sessionId: `cron:${taskId}`, decisionType: 'cron_review', inputSummary: safeSlice(description, 500), outputJson: { output: safeSlice(output, 2000), autoApproved: true, path: 'fallback' }, confidence: 0.5, taskId });
+    }
+  });
+
+  // --- Handler: drift.check.request（B/C 审核漂移检测，翻转后从 brain 移植——drift 是 review 决策的一部分）---
+  ipc.onMessage('drift.check.request', async (msg: IpcMessage) => {
+    const payload = msg.payload as import('../../../kernel/drift-detector.js').DriftCheckRequestPayload;
+    const trackingId = msg.correlationId ?? msg.id;
+    try {
+      const signal = await evaluateDriftCheck(payload, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
+      logger.debug({ checkpointType: payload.checkpointType, alignmentScore: signal.alignmentScore }, 'reviewer:drift-check');
+      ipc.send('drift.check.result', 'core', { signal }, trackingId);
+    } catch (err) {
+      logger.error({ err }, 'drift.check.request failed');
+      ipc.send('drift.check.result', 'core', { signal: { alignmentScore: 1, needsIntervention: false, checkpointType: payload.checkpointType } }, trackingId);
+    }
+  });
+
+  // --- Handler: verify.request（高漂移对抗性验证，翻转后从 brain 移植——verify 是 review 决策的一部分）---
+  ipc.onMessage('verify.request', async (msg: IpcMessage) => {
+    const { anchor, draftResponse } = msg.payload as { anchor: import('../../../contracts/intent.js').IntentAnchor; draftResponse: string };
+    const trackingId = msg.correlationId ?? msg.id;
+    try {
+      const verdict = await evaluateVerify(anchor, draftResponse, (m, o) => llm.current.chat(m, o as Parameters<typeof llm.current.chat>[1]), name, trackingId);
+      logger.debug({ pass: verdict.pass, reason: safeSlice(verdict.reason ?? '', 100) }, 'reviewer:verify');
+      ipc.send('verify.result', 'core', { verdict }, trackingId);
+    } catch (err) {
+      logger.error({ err }, 'verify.request failed');
+      ipc.send('verify.result', 'core', { verdict: { pass: true, reason: '验证服务异常，默认通过' } }, trackingId);
     }
   });
 });
