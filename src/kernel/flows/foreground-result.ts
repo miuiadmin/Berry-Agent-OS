@@ -245,25 +245,18 @@ export function handleForegroundTaskResult(
 
   const pending = sessionManager.getPending(fgEntry.correlationId);
 
-  // 16.0 P4-C3：在所有分支之前统一投影 report 信封——不论 foreground/background/group，
-  // 只要 task 结果到达就落板（§7.5 审计载体：板上可重建完整协作链）。
-  // fire-and-forget，不影响现有终态收口逻辑。
-  postReportEnvelope(result.taskId, {
-    from: agentName,
-    to: 'leader',
-    status: result.ok ? 'done' : 'blocked',
-    summary: result.ok ? formatAgentResult(agentName, result.outputPayload ?? {}) : (result.error ?? '任务失败'),
-    sessionId: fgEntry.sessionId,
-  });
-
   if (!pending) {
     // 无 user session pending：fire-and-forget 异步委派（evolution extract_feedback / detect_gap 等
     // 后台学习任务）或 pending 已被并发消费的 race 场景。task 既已结束，delegation entry 必须收口到
     // 终态——否则 entry.state 永驻 delegated/active/reviewing，TaskHeartbeatManager 会持续对已完成
     // task 误发 task.heartbeat（违反状态机不变量：task 完成 ⇒ delegation 收口）。
-    // 同步 foreground 委派有 pending，走下方 review 流程由 delegationManager.complete 收口；
-    // 本分支只补齐无 pending 的收口路径。complete/fail 对已终态 entry 幂等（return false）。
+    // 16.0 §6.5.1：异步任务（无 review）成功 → 板 completed；失败 → delegationManager.fail 投 system report→failed。
+    // complete() 不投板，故成功路径显式 postReport(done) 终态化（防 board 卡 in_progress）。
     if (result.ok) {
+      postReportEnvelope(result.taskId, {
+        from: agentName, to: 'leader', status: 'done',
+        summary: formatAgentResult(agentName, result.outputPayload ?? {}), sessionId: fgEntry.sessionId,
+      });
       delegationManager.complete(result.taskId, formatAgentResult(agentName, result.outputPayload ?? {}));
     } else {
       delegationManager.fail(result.taskId, result.error ?? '任务失败');
@@ -296,11 +289,13 @@ export function handleForegroundTaskResult(
   const draftResponse = agentOutput;
   pending.draftResponse = draftResponse;
 
-  // 16.0 P4-C3：成功结果投影 report(status:done) 落板（fire-and-forget 审计影子，在 sendTaskResultForReview 前）
+  // 16.0 §6.5.1+(B)：成功结果进 review 闸 → 板状态 enter_review（awaiting_review），不提前 completed。
+  // report 信封审计仍记 done；板状态机走 awaiting_review，待 review 裁决（handleTaskReviewResult/
+  // approveReviewDegraded）终态化到 completed/failed。修复 board 在 review 前谎称 completed 的语义问题。
   postReportEnvelope(result.taskId, {
     from: agentName, to: 'leader', status: 'done', summary: draftResponse,
     sessionId: fgEntry.sessionId,
-  });
+  }, { kind: 'enter_review' });
 
   sendTaskResultForReview(fgEntry, pending, draftResponse);
 }
