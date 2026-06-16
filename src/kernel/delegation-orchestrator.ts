@@ -26,7 +26,7 @@ import { SuperiorReviewFlow } from './flows/superior-review-flow.js';
 import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
-import { attachBrainEventRelay } from './flows/brain-relay.js';
+import { attachOrchestratorEventRelay, attachReviewerCronRelay } from './flows/brain-relay.js';
 import { setupRoutingResultHandler } from './flows/routing-result-handler.js';
 import { resolveRuntimeForTarget as resolveRuntimeForTargetImpl, executeViaRuntime as executeViaRuntimeImpl, type RuntimeExecutionDeps } from './flows/runtime-execution.js';
 import {
@@ -479,26 +479,31 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // ═══ LIFECYCLE ════════════════════════════════════
 
   setup(): void {
+    // ①② 议会拆分后：reviewer=②reviewer（review/superior），orchestrator=brain（routing/permission/command/observe/ask/correction）
     const reviewerAgent = this.registry.requireRole('reviewer');
     const primaryAgent = this.registry.requireRole('primary');
+    const orchestratorAgent = this.registry.requireRole('orchestrator');
     const reviewerName = reviewerAgent.manifest.name;
     const primaryName = primaryAgent.manifest.name;
+    const brainName = orchestratorAgent.manifest.name;
 
     const primary = this.agentManager.getAgent(primaryName);
     const reviewer = this.agentManager.getAgent(reviewerName);
+    const brain = this.agentManager.getAgent(brainName);
 
-    if (!primary || !reviewer) {
+    if (!primary || !reviewer || !brain) {
       throw new Error('必要智能体启动失败');
     }
 
-    // 13.0 灵魂版：缓存 Brain IPC 引用，供 proxyDeps 转发 brain.observe IPC
-    this._brainIpc = reviewer.ipc;
+    // ①②：brain.observe 转发 → brain(orchestrator).ipc（observe 是 brain 职能，非 ②reviewer）
+    this._brainIpc = brain.ipc;
 
+    // review 链路（review.request/result）→ ②reviewer；routing 链路（route.result）→ brain
     this.setupReviewFlow(primary.ipc, reviewer.ipc, primaryName, reviewerName);
-    this.setupRoutingFlow(reviewer.ipc);
-    this.permissionFlow.setupJudgeHandler(reviewer.ipc);
-    // 15.0 机制 D：注册 brain.command 指挥通道 handler（Brain 可向任意 Agent 派 execute/inspect/report）
-    setupBrainCommandHandler(reviewer.ipc, {
+    this.setupRoutingFlow(brain.ipc);
+    this.permissionFlow.setupJudgeHandler(brain.ipc);
+    // 15.0 机制 D：brain.command 指挥通道 → brain（command 是 brain 职能）
+    setupBrainCommandHandler(brain.ipc, {
       agentManager: this.agentManager,
       db: getDb(),
       // execute 真实委派：复用 dispatchModuleTask + targetAgentOverride 定向派发到 Brain 指定的 Agent
@@ -511,7 +516,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         return undefined;
       },
     });
-    this.correctionFlow.setup(reviewer.ipc);
+    this.correctionFlow.setup(brain.ipc);
     this.superiorReviewFlow?.setup(reviewer.ipc);
     this.superiorReviewFlow?.setCallbacks({
       onCompleted: (correlationId, modifiedResponse) => {
@@ -521,7 +526,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         this.onSuperiorChainRejected(correlationId, reason);
       },
     });
-    this.setupAgentAskUserFlow(reviewer.ipc);
+    // agent.ask_user（brain 审核提问）→ brain
+    this.setupAgentAskUserFlow(brain.ipc);
     this.permissionFlow.setupHandlers(primary.ipc, primaryName, true);
     setupAuditHandler(primary.ipc, primaryName, this.proxyDeps);
     setupMemoryHandlers(primary.ipc, primaryName, this.proxyDeps);
@@ -529,7 +535,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     setupModelOverrideHandler(primary.ipc, primaryName, this.proxyDeps);
     this.setupTaskHandlers(primary.ipc, primaryName);
     setupTakeoverRouting(primary.ipc, primaryName, this.proxyDeps);
-    setupTakeoverRouting(reviewer.ipc, reviewerName, this.proxyDeps);
+    setupTakeoverRouting(brain.ipc, brainName, this.proxyDeps);
 
     // ─── 11.0 dialogue 路由 ───
     this.dialogueRouter = new DialogueRouter({
@@ -539,7 +545,7 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
         const agent = this.agentManager.getAgent(agentName);
         return agent?.ipc ?? undefined;
       },
-      getBrainIpc: () => reviewer?.ipc ?? undefined,
+      getBrainIpc: () => brain?.ipc ?? undefined,
       // 13.0 灵魂版：将观察队列记录器注入 DialogueRouter，使 dialogue.send/reply 自动写入 brain_observations
       observationRecorder: this.observationRecorder,
     });
@@ -548,9 +554,8 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     this.kernelRouter.setDialogueRouter(this.dialogueRouter);
     this.kernelRouter.setupDialogueRouting(primary.ipc as AgentIpcLike, primaryName);
 
-    // 11.0: Brain 通过 dialogue.observe 监听后可能发 turn.correction 纠偏
-    // 转发给 Conversation Agent 处理（Brain → Core → Conversation）
-    reviewer.ipc.onMessage('turn.correction', (msg: IpcMessage) => {
+    // 11.0: Brain(orchestrator) 通过 dialogue.observe 监听后发 turn.correction 纠偏 → 转发 Conversation
+    brain.ipc.onMessage('turn.correction', (msg: IpcMessage) => {
       const payload = msg.payload as { delegationId: string; action: string; instruction: string };
       // 对于 dialogue 模式的纠偏，转发给 Conversation Agent
       primary.ipc.send('turn.correction', primaryName, payload, msg.correlationId);
@@ -564,7 +569,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
     //      ws-event-bridge 订阅 brain.cron_review_flagged 转发给前端）
     //   - core → brain（outbound）：CronScheduler 在 core 发 cron.review → core 转发 IPC 给 brain 审核
     // 用 WeakSet 去重，Brain 崩溃重启后新 IPC 引用会重新挂载（见 onBrainRegistered）。
-    this.reattachBrainRelay(reviewer.ipc);
+    // ①② 议会拆分：brain 事件中继挂 brain(orchestrator).ipc；cron 中继挂 ②reviewer.ipc
+    this.reattachBrainRelay(brain.ipc);
+    this.reattachReviewerCronRelay(reviewer.ipc);
   }
 
   /**
@@ -573,16 +580,23 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
    * 仅对 brain/reviewer agent 有效，幂等（同一 IPC 不会重复挂载）。
    */
   onBrainRegistered(): void {
-    const reviewer = this.registry.requireRole('reviewer');
-    const agent = this.agentManager.getAgent(reviewer.manifest.name);
-    if (agent?.ipc) {
-      this.reattachBrainRelay(agent.ipc);
-    }
+    // ①②：brain 或 ②reviewer 注册/重启时重挂中继（幂等：WeakSet 去重，未就绪的 ipc 跳过）
+    const brainAgent = this.registry.requireRole('orchestrator');
+    const reviewerAgent = this.registry.requireRole('reviewer');
+    const brain = this.agentManager.getAgent(brainAgent.manifest.name);
+    const reviewer = this.agentManager.getAgent(reviewerAgent.manifest.name);
+    if (brain?.ipc) this.reattachBrainRelay(brain.ipc);
+    if (reviewer?.ipc) this.reattachReviewerCronRelay(reviewer.ipc);
   }
 
-  /** 挂载 Brain 子进程 ↔ core EventBus 的双向事件中继（幂等）——逻辑提取至 flows/brain-relay.ts */
+  /** 挂载 brain(orchestrator) 子进程事件中继（signal_intervention/checker.dispatch，幂等）——①② 后从 brain-relay 拆出 */
   private reattachBrainRelay(brainIpc: IpcChannel): void {
-    attachBrainEventRelay(brainIpc, this.brainRelayIpcs, this.registry);
+    attachOrchestratorEventRelay(brainIpc, this.brainRelayIpcs);
+  }
+
+  /** 挂载 ②reviewer 子进程 cron review 中继（cron_review_flagged inbound + cron.review outbound，幂等） */
+  private reattachReviewerCronRelay(reviewerIpc: IpcChannel): void {
+    attachReviewerCronRelay(reviewerIpc, this.brainRelayIpcs, this.registry);
   }
 
   setupDaemonEvents(): void {

@@ -257,7 +257,8 @@ export class CoreService {
     // 13.0 §13.8: Brain 崩溃重启后需重新挂载跨进程事件中继（cron.review/signal_intervention/checker.dispatch）。
     // 注入回调：agent-manager 检测到 brain 注册 → 调 orchestrator.onBrainRegistered() 刷新 relay。
     this.agentManager.onAgentRegistered = (name: string) => {
-      if (name === 'brain') {
+      // ①②：brain(orchestrator) 或 ②reviewer 注册/重启 → 刷新对应中继（onBrainRegistered 内幂等 + 双 relay）
+      if (name === 'brain' || name === 'reviewer') {
         this.messageRouter?.onBrainRegistered();
       }
     };
