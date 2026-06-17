@@ -29,6 +29,7 @@ import type { EventBus } from './event-bus.js';
 import { getMissionsDir, getMissionDir, getPlanPath, getSquadPath, getTemplatesDir, readJsonFile, writeJsonFile, isoNow } from './flows/mission-paths.js';
 
 import { BUILTIN_TEMPLATES } from './flows/mission-templates-data.js';
+import { executeHandoff, readLatestHandoffContext, readLatestHandoffContextAny, renderHandoffContext } from './flows/mission-handoff.js';
 
 // ─────────────────────────────────────────────────────────────────
 // MissionManager
@@ -472,177 +473,18 @@ export class MissionManager {
     return squadFile;
   }
 
-  /**
-   * 执行交接（from squad → to squad）。
-   *
-   * 如果调用方传入了 sourceContext（HandoffContext），把它一并写到 handoff.content
-   * 让接班的 Agent 在 entry 处读取并拼接到 system prompt。
-   */
-  executeHandoff(
-    missionId: string,
-    fromSquad: string,
-    toSquad: string,
-    what: string,
-    content?: string,
-    sourceContext?: HandoffContext,
-  ): SquadFile | null {
-    const squadFile = this.readSquad(missionId);
-    if (!squadFile) return null;
-
-    // handoff.content 优先使用 sourceContext 的 JSON 序列化（结构化上下文），
-    // 回退到原始 content 字符串。
-    const handoffContent = sourceContext
-      ? JSON.stringify(sourceContext)
-      : (content ?? what);
-
-    // 查找或创建 handoff 条目
-    let handoff = squadFile.handoffs.find(
-      h => h.from === fromSquad && h.to === toSquad && h.status === 'pending',
-    );
-
-    if (handoff) {
-      handoff.status = 'delivered';
-      handoff.content = handoffContent;
-    } else {
-      handoff = {
-        from: fromSquad,
-        to: toSquad,
-        what,
-        status: 'delivered',
-        content: handoffContent,
-      };
-      squadFile.handoffs.push(handoff);
-    }
-
-    writeJsonFile(getSquadPath(missionId), squadFile);
-
-    this.emitEvent('mission.handoff', {
-      missionId,
-      from: fromSquad,
-      to: toSquad,
-      what,
-    });
-
-    return squadFile;
+  /** §16.0 重构：handoff 方法已提取到 flows/mission-handoff.ts（行为保持） */
+  executeHandoff(missionId: string, fromSquad: string, toSquad: string, what: string, content?: string, sourceContext?: HandoffContext): SquadFile | null {
+    return executeHandoff(missionId, fromSquad, toSquad, what, content, sourceContext, (type, payload) => this.emitEvent(type, payload));
   }
-
-  /**
-   * 读取最近一次 from→to 的 handoff，并尝试反序列化为 HandoffContext。
-   * 接班的 Agent 在 entry 处调用此方法，把结构化上下文注入到 system prompt。
-   *
-   * @returns HandoffContext 或 null（没有 handoff / JSON 解析失败）
-   */
   readLatestHandoffContext(missionId: string, fromSquad: string, toSquad: string): HandoffContext | null {
-    const squadFile = this.readSquad(missionId);
-    if (!squadFile) return null;
-
-    // 找到最新的 from→to handoff
-    const candidates = squadFile.handoffs.filter(
-      h => h.from === fromSquad && h.to === toSquad,
-    );
-    if (candidates.length === 0) return null;
-
-    const latest = candidates[candidates.length - 1];
-    if (!latest.content) return null;
-
-    try {
-      return JSON.parse(latest.content) as HandoffContext;
-    } catch {
-      // 内容不是 JSON，回退到字符串透传
-      return {
-        originalInstruction: latest.content,
-        filesRead: [],
-        filesModified: [],
-        agentConversations: [],
-        currentProgress: latest.what,
-        blockers: [],
-        handoffAt: new Date(latest.content ?? '').getTime?.() ?? Date.now(),
-        fromAgent: fromSquad,
-      };
-    }
+    return readLatestHandoffContext(missionId, fromSquad, toSquad);
   }
-
-  /**
-   * §5.3.11: 读取 mission 中最近一次任意 handoff 的上下文。
-   *
-   * 不限定 fromSquad/toSquad — 用于 buildMissionContextPrompt 注入交接信息，
-   * 接收方 agent 只需要看到最新的交接内容即可。
-   *
-   * @param missionId Mission ID
-   * @returns 最近一次 handoff 的 HandoffContext，或 null
-   */
   readLatestHandoffContextAny(missionId: string): HandoffContext | null {
-    const squadFile = this.readSquad(missionId);
-    if (!squadFile || squadFile.handoffs.length === 0) return null;
-
-    const latest = squadFile.handoffs[squadFile.handoffs.length - 1];
-    if (!latest.content) return null;
-
-    try {
-      return JSON.parse(latest.content) as HandoffContext;
-    } catch {
-      return {
-        originalInstruction: latest.content,
-        filesRead: [],
-        filesModified: [],
-        agentConversations: [],
-        currentProgress: latest.what,
-        blockers: [],
-        handoffAt: Date.now(),
-        fromAgent: latest.from,
-      };
-    }
+    return readLatestHandoffContextAny(missionId);
   }
-
-  /**
-   * 把 HandoffContext 渲染为一段 system prompt 文本（便于 Agent 直接拼到 prompt）。
-   */
   renderHandoffContext(ctx: HandoffContext): string {
-    const lines: string[] = [];
-    lines.push(`## 交接上下文（来自 ${ctx.fromAgent}）`);
-    lines.push(`原始指令: ${ctx.originalInstruction}`);
-    lines.push(`当前进度: ${ctx.currentProgress}`);
-
-    if (ctx.intentAnchor) {
-      lines.push(`意图锚: ${ctx.intentAnchor.goal}`);
-      if (ctx.intentAnchor.successCriteria.length > 0) {
-        lines.push(`成功标准: ${ctx.intentAnchor.successCriteria.join('; ')}`);
-      }
-    }
-
-    if (ctx.filesRead.length > 0) {
-      lines.push(`已读文件（避免重复读）:`);
-      for (const f of ctx.filesRead) lines.push(`  - ${f}`);
-    }
-    if (ctx.filesModified.length > 0) {
-      lines.push(`已改文件:`);
-      for (const f of ctx.filesModified) lines.push(`  - ${f.path}${f.diffHash ? ` (${f.diffHash})` : ''}`);
-    }
-
-    if (ctx.agentConversations.length > 0) {
-      lines.push(`与其他 Agent 的对话（最近 ${ctx.agentConversations.length} 条）:`);
-      for (const c of ctx.agentConversations) {
-        lines.push(`  - ${c.with}: ${c.summary}`);
-      }
-    }
-
-    if (ctx.blockers.length > 0) {
-      lines.push(`已知阻塞:`);
-      for (const b of ctx.blockers) {
-        lines.push(`  - ${b.reason}（${b.raisedBy}）`);
-      }
-    }
-
-    if (ctx.scopeSnapshot) {
-      if (ctx.scopeSnapshot.blockPaths.length > 0) {
-        lines.push(`不可访问路径: ${ctx.scopeSnapshot.blockPaths.join(', ')}`);
-      }
-      if (ctx.scopeSnapshot.blockTools.length > 0) {
-        lines.push(`不可用工具: ${ctx.scopeSnapshot.blockTools.join(', ')}`);
-      }
-    }
-
-    return lines.join('\n');
+    return renderHandoffContext(ctx);
   }
 
   /**
