@@ -34,58 +34,14 @@ import { join } from 'node:path';
 
 const logger = getLogger('unified-handlers');
 
-function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
+// §16.0 重构：utility 函数已提取到 handlers-utils.ts
+import { getErrorMessage, requireString, resolveEffectiveMode, requireFields, reply, replyError, VALID_MODES } from './handlers-utils.js';
 
 type HandlerFn = (request: Record<string, unknown>, ctx: MessageContext, services: ServiceContainer) => void | Promise<void>;
 
 interface HandlerDefinition {
   type: string;
   handler: HandlerFn;
-}
-
-// --- Input validation helpers ---
-
-function requireString(request: Record<string, unknown>, field: string): string | undefined {
-  const val = request[field];
-  return typeof val === 'string' && val.length > 0 ? val : undefined;
-}
-
-/** 合法的权限模式集合（用于校验入口传入的 permissionMode） */
-const VALID_MODES: readonly PermissionMode[] = ['ask', 'allow-all', 'deny-all', 'yolo'];
-
-/**
- * 15.0 R2-4：把入口传入的原始 permissionMode 规范化为合法 PermissionMode。
- * 非法/缺省时回退 defaultMode（通常是 config.permissionMode）。
- * 抽到一处是因为 ws/socket/channel 三个入口都要做同样的校验+回退——
- * 收敛进 routeUserMessage 后各入口只需把原始值透传进来。
- */
-function resolveEffectiveMode(raw: string | undefined, defaultMode: PermissionMode): PermissionMode {
-  return raw && (VALID_MODES as readonly string[]).includes(raw)
-    ? raw as PermissionMode
-    : defaultMode;
-}
-
-function requireFields(ctx: MessageContext, request: Record<string, unknown>, fields: string[]): string[] | null {
-  const values: string[] = [];
-  for (const f of fields) {
-    const v = requireString(request, f);
-    if (!v) {
-      ctx.channel!.write(JSON.stringify({ ok: false, error: `缺少 ${f} 参数` }) + '\n');
-      return null;
-    }
-    values.push(v);
-  }
-  return values;
-}
-
-function reply(ctx: MessageContext, data: Record<string, unknown>): void {
-  ctx.channel!.write(JSON.stringify(data) + '\n');
-}
-
-function replyError(ctx: MessageContext, error: string): void {
-  ctx.channel!.write(JSON.stringify({ ok: false, error }) + '\n');
 }
 
 // === Observability Handlers ===
