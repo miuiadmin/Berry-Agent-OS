@@ -13,9 +13,8 @@
  * 文件操作为同步（JSON 文件不大，无需异步 I/O）。
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { getAppHome } from '../utils/paths.js';
 import { genId } from '../utils/id.js';
 import { getLogger } from '../utils/logger.js';
 import type {
@@ -26,56 +25,8 @@ import { MAX_SQUAD_DEPTH, SquadFileSchema, renderMissionContext } from '../contr
 import type { HandoffContext } from '../contracts/delegation.js';
 import type { EventBus } from './event-bus.js';
 
-// ─────────────────────────────────────────────────────────────────
-// 文件路径辅助
-// ─────────────────────────────────────────────────────────────────
-
-/** 获取 missions 根目录 */
-function getMissionsDir(): string {
-  return join(getAppHome(), 'missions');
-}
-
-/** 获取某个 mission 的目录 */
-function getMissionDir(missionId: string): string {
-  return join(getMissionsDir(), missionId);
-}
-
-/** plan.json 路径 */
-function getPlanPath(missionId: string): string {
-  return join(getMissionDir(missionId), 'plan.json');
-}
-
-/** squad.json 路径 */
-function getSquadPath(missionId: string): string {
-  return join(getMissionDir(missionId), 'squad.json');
-}
-
-/** 模板目录路径 */
-function getTemplatesDir(): string {
-  return join(getAppHome(), 'templates', 'mission');
-}
-
-/** JSON 文件安全读取 */
-function readJsonFile<T>(path: string): T | null {
-  try {
-    const raw = readFileSync(path, 'utf-8');
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-/** JSON 文件安全写入（创建目录） */
-function writeJsonFile(path: string, data: unknown): void {
-  const dir = join(path, '..');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-/** ISO 时间戳 */
-function isoNow(): string {
-  return new Date().toISOString();
-}
+// §16.0 重构：file I/O 辅助（路径/读写/时间戳）已提取到 flows/mission-paths.ts
+import { getMissionsDir, getMissionDir, getPlanPath, getSquadPath, getTemplatesDir, readJsonFile, writeJsonFile, isoNow } from './flows/mission-paths.js';
 
 // ─────────────────────────────────────────────────────────────────
 // P11: 内置任务模板（包含 squad 结构）
