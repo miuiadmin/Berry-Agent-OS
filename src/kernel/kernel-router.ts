@@ -39,6 +39,7 @@ import { getEventBus } from './event-bus.js';
 import { getLogger } from '../utils/logger.js';
 import { safeSlice } from '../utils/safe-slice.js';
 import { AgentTimeoutError, AgentCrashError, AgentUnavailableError } from './errors.js';
+import { trackDialogueDirection as trackDialogueDirectionImpl, untrackDialogueDirection as untrackDialogueDirectionImpl } from './flows/dialogue-helpers.js';
 
 const logger = getLogger('kernel-router');
 
@@ -368,36 +369,11 @@ export class KernelRouter {
    * @param dialogueId 对话 ID
    */
   private trackDialogueDirection(from: string, to: string, dialogueId: string): void {
-    const key = `${from}→${to}`;
-    let set = this.activeDialogueDirections.get(key);
-    if (!set) {
-      set = new Set();
-      this.activeDialogueDirections.set(key, set);
-    }
-    set.add(dialogueId);
-    logger.debug({ from, to, dialogueId, activeCount: set.size }, 'KernelRouter: tracked dialogue direction');
+    trackDialogueDirectionImpl(this.activeDialogueDirections, from, to, dialogueId);
   }
 
-  /**
-   * §5.2.3: 清除对话方向追踪。
-   *
-   * 在 dialogue 完成（成功或失败）后调用。从 `from→to` 方向集合中移除 dialogueId。
-   * 集合为空时自动清理 Map entry，避免内存泄漏。
-   *
-   * @param from 发送方 agent
-   * @param to 接收方 agent
-   * @param dialogueId 对话 ID
-   */
   private untrackDialogueDirection(from: string, to: string, dialogueId: string): void {
-    const key = `${from}→${to}`;
-    const set = this.activeDialogueDirections.get(key);
-    if (set) {
-      set.delete(dialogueId);
-      if (set.size === 0) {
-        this.activeDialogueDirections.delete(key);
-      }
-      logger.debug({ from, to, dialogueId, remainingCount: set.size }, 'KernelRouter: untracked dialogue direction');
-    }
+    untrackDialogueDirectionImpl(this.activeDialogueDirections, from, to, dialogueId);
   }
 
   /**
