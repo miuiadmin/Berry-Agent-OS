@@ -16,6 +16,7 @@ import type {
 import { isDelegationTerminal, DEFAULT_INTERNAL_BUDGET, DEFAULT_EXTERNAL_BUDGET, CORRECTION_LIMITS } from '../contracts/delegation.js';
 import { getLogger } from '../utils/logger.js';
 import { postSystemReportEnvelope, postReportEnvelope, wasDelegationLifecycleEmitted, markDelegationLifecycleEmitted } from './board-projection.js';
+import { createGroup as createGroupImpl, addChildToGroup as addChildToGroupImpl, completeChild as completeChildImpl, getGroupByChild as getGroupByChildImpl, removeGroup as removeGroupImpl } from './flows/delegation-groups.js';
 import { initBoard } from './board-repo.js';
 
 const logger = getLogger('delegation-manager');
@@ -375,38 +376,18 @@ export class DelegationManager {
     return [...this.entries.values()];
   }
 
-  // --- Multi-route Group Management ---
+  // --- Multi-route Group Management（§16.0 提取到 flows/delegation-groups.ts）---
 
   createGroup(parentId: string, correlationId: string, sessionId: string): DelegationGroup {
-    const group: DelegationGroup = {
-      parentId,
-      childIds: new Set(),
-      completedResults: new Map(),
-      correlationId,
-      sessionId,
-      createdAt: Date.now(),
-    };
-    this.groups.set(correlationId, group);
-    return group;
+    return createGroupImpl(this.groups, parentId, correlationId, sessionId);
   }
 
   addChildToGroup(correlationId: string, childId: string): void {
-    const group = this.groups.get(correlationId);
-    if (group) {
-      group.childIds.add(childId);
-      this.childToGroupIndex.set(childId, correlationId);
-    }
+    addChildToGroupImpl(this.groups, this.childToGroupIndex, correlationId, childId);
   }
 
   completeChild(correlationId: string, childId: string, agentName: string, response: string): boolean {
-    const group = this.groups.get(correlationId);
-    if (!group) return false;
-
-    group.childIds.delete(childId);
-    group.completedResults.set(childId, { agentName, response });
-    this.childToGroupIndex.delete(childId);
-
-    return group.childIds.size === 0;
+    return completeChildImpl(this.groups, this.childToGroupIndex, correlationId, childId, agentName, response);
   }
 
   getGroup(correlationId: string): DelegationGroup | undefined {
@@ -414,22 +395,11 @@ export class DelegationManager {
   }
 
   getGroupByChild(childId: string): { group: DelegationGroup; correlationId: string } | undefined {
-    const correlationId = this.childToGroupIndex.get(childId);
-    if (!correlationId) return undefined;
-    const group = this.groups.get(correlationId);
-    if (!group) return undefined;
-    return { group, correlationId };
+    return getGroupByChildImpl(this.groups, this.childToGroupIndex, childId);
   }
 
   removeGroup(correlationId: string): DelegationGroup | undefined {
-    const group = this.groups.get(correlationId);
-    if (group) {
-      for (const childId of group.childIds) {
-        this.childToGroupIndex.delete(childId);
-      }
-      this.groups.delete(correlationId);
-    }
-    return group;
+    return removeGroupImpl(this.groups, this.childToGroupIndex, correlationId);
   }
 
   // --- Correction Support ---
