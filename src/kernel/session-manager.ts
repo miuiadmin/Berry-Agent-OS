@@ -16,6 +16,7 @@ import { disposeBlockCollector } from './block-collector.js';
 // 对话内联（doc 22）：消灭持久化双轨制——assistant / user 唯一落库漏斗都走 messages + message_blocks。
 // recoverSessions 的「[系统] 兜底行」也改走 persistAssistantTurn（旧 conversations 写路径已停用）。
 import { persistAssistantTurn, persistUserMessage } from '../memory/message-blocks-repo.js';
+import { persistInlineBlocksImpl, saveUserMessageImpl } from './flows/session-persist.js';
 
 const logger = getLogger('session-manager');
 
@@ -410,41 +411,7 @@ export class SessionManager {
    * @param persistContent 入库文本（含可能的错误标签），同时作为 text block 的 draftResponse
    */
   persistInlineBlocks(pending: PendingRequest, persistContent: string): void {
-    // collector key：委派/daemon/runtime 用 delegationTaskId（delegation-orchestrator:1690 赋值），
-    // 纯 conversation agent（内置）用 taskId（task-flow telemetry 按 payload.taskId 建 collector）
-    const key = pending.delegationTaskId ?? pending.taskId;
-    try {
-      // 有 collector（本轮有 telemetry：流式文本 / 工具 / 思考）→ dispose 取完整 Block[]（thinking→tool→text）
-      let blocks: import('../contracts/message-blocks.js').Block[] | undefined;
-      let messageId: string | undefined;
-      if (key) {
-        const collector = disposeBlockCollector(key);
-        if (collector) {
-          blocks = collector.buildBlocks({
-            reasoning: pending.reasoning,
-            draftResponse: persistContent,
-          });
-          messageId = collector.messageId;
-        }
-      }
-      // 无 collector 或空 blocks（无 taskId / 立即返回未流式 / 错误路径 / 已落库）→ 降级单 text block。
-      // 消灭双轨制后 conversations 不再兜底，此处是 assistant 唯一真相源——必须保证气泡必然落库。
-      // persistContent 真空（不该发生）才跳过，避免空气泡。
-      if ((!blocks || blocks.length === 0) && persistContent) {
-        blocks = [{ type: 'text', text: persistContent }];
-        messageId = genId('msg');
-      }
-      if (blocks && blocks.length > 0 && messageId) {
-        persistAssistantTurn({
-          messageId,
-          sessionId: pending.sessionId,
-          taskId: key,
-          blocks,
-        });
-      }
-    } catch (err) {
-      logger.error({ err, sessionId: pending.sessionId, key }, 'persistInlineBlocks 落 blocks 失败（不阻塞对话收尾）');
-    }
+    persistInlineBlocksImpl(pending, persistContent);
   }
 
   /**
@@ -458,12 +425,7 @@ export class SessionManager {
    * user 消息至少经过一次尝试；中断场景下仍能在 conversation agent 内部二次尝试时落盘）。
    */
   saveUserMessage(sessionId: string, content: string, options: { clientMsgId?: string } = {}): { id: string; deduplicated: boolean } {
-    try {
-      return persistUserMessage({ sessionId, content, clientMsgId: options.clientMsgId });
-    } catch (err) {
-      logger.warn({ err, sessionId, clientMsgId: options.clientMsgId }, 'user 消息入口入库失败，将依赖下游 conversation agent 兜底');
-      return { id: '', deduplicated: false };
-    }
+    return saveUserMessageImpl(sessionId, content, options);
   }
 
   async waitForEvolutionIdle(timeoutMs: number): Promise<boolean> {
