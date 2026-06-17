@@ -221,8 +221,15 @@ export function handleTaskReviewResult(review: ReviewResult, correlationId: stri
 
   const entry = delegationManager.getByCorrelation(correlationId);
   if (entry) {
-    // P5 authority switch：complete() 现投 report(done) 终态化 board，caller 不冗余 postReport。
-    delegationManager.complete(entry.id, response);
+    // P5 authority switch：complete()/fail() 现投 report 终态化 board（status-transition 派生 delegation.*）。
+    // 语义修正：reject → fail()（审核拒绝 = 任务失败），approve/modify → complete()。此前 reject 也调 complete
+    // 是 pre-existing 语义 bug（review 拒绝却 completed）——authority switch 后 complete→delegation.completed
+    // 使其更明显（reject 应 delegation.failed）。plan update 已按 reject→failed（:239），此处对齐。
+    if (review.verdict === 'reject') {
+      delegationManager.fail(entry.id, `Brain review 拒绝: ${review.reason ?? '未通过审核'}`);
+    } else {
+      delegationManager.complete(entry.id, response);
+    }
   }
 
   // 13.0 §12.6: Brain 审核完成后同步更新 plan.json 中对应任务的状态

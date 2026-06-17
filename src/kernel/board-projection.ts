@@ -377,13 +377,15 @@ export function deriveDelegationEventFromBoardMessage(msg: BoardMessage): Derive
  */
 function emitDerivedDelegationLifecycle(taskId: string, terminalStatus: string, errorSummary: string): void {
   try {
-    // targetAgent：从 board 的 delegate 消息 `to` 解析（delegate 总在板上——dm.create 建 board + postDelegateEnvelope 落 delegate）
+    // targetAgent + 委派起始 ts：从 board 的 delegate 消息解析（delegate 总在板上——dm.create 建 board + postDelegateEnvelope 落 delegate）
     const ctx = getBoardContext(taskId, 200);
-    const delegateMsg = ctx?.recentMessages.find((m) => m.type === 'delegate') as { to?: string } | undefined;
+    const delegateMsg = ctx?.recentMessages.find((m) => m.type === 'delegate') as { to?: string; ts?: number } | undefined;
     const targetAgent = delegateMsg?.to ?? 'unknown';
     if (terminalStatus === 'completed') {
-      // durationMs 板内无法精确算（无 entry.createdAt），传 0（仅 display 用，onTermination 不依赖）
-      getEventBus().emit('delegation.completed', { delegationId: taskId, targetAgent, durationMs: 0 });
+      // durationMs 从 board delegate 消息 ts（≈委派起始）到当前（≈终态）近似计算。非 entry.createdAt 精确值，
+      // 但足够 display/ETA 用（onTermination 不依赖）。
+      const durationMs = delegateMsg?.ts ? Date.now() - delegateMsg.ts : 0;
+      getEventBus().emit('delegation.completed', { delegationId: taskId, targetAgent, durationMs });
     } else {
       // failed / interrupted → delegation.failed
       getEventBus().emit('delegation.failed', { delegationId: taskId, targetAgent, error: errorSummary });
