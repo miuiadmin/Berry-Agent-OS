@@ -42,6 +42,21 @@ import { routeGovernance } from './flows/governance-switch.js';
 const logger = getLogger('board-projection');
 
 /**
+ * P5 V-2 兜底去重：已派生 delegation.* 的 (taskId, kind) 集合。
+ *
+ * board status-transition 派生 + delegation-manager 兜底直 emit 共用——确保 delegation.* 必达
+ * （board 写失败时 delegation-manager 兜底），且不双发（Set 去重）。
+ * 进程内 Set（重启清空，但重启后 delegation 已终态，不重新派生——board 仅在新报告时派生）。
+ */
+const emittedDelegationLifecycles = new Set<string>();
+export function wasDelegationLifecycleEmitted(taskId: string, kind: 'completed' | 'failed'): boolean {
+  return emittedDelegationLifecycles.has(`${taskId}:${kind}`);
+}
+export function markDelegationLifecycleEmitted(taskId: string, kind: 'completed' | 'failed'): void {
+  emittedDelegationLifecycles.add(`${taskId}:${kind}`);
+}
+
+/**
  * 通用落板包装：所有投影统一经此。
  *
  * P5 同步必达前置（权威路径可观测化）：DB 写入（postBoardMessage，better-sqlite3 同步写——本身可靠）
@@ -377,6 +392,10 @@ export function deriveDelegationEventFromBoardMessage(msg: BoardMessage): Derive
  */
 function emitDerivedDelegationLifecycle(taskId: string, terminalStatus: string, errorSummary: string): void {
   try {
+    const kind: 'completed' | 'failed' = terminalStatus === 'completed' ? 'completed' : 'failed';
+    // V-2 兜底去重：delegation-manager 可能已兜底直 emit（board 写失败时）→ 跳过防双发
+    if (wasDelegationLifecycleEmitted(taskId, kind)) return;
+    markDelegationLifecycleEmitted(taskId, kind);
     // targetAgent + 委派起始 ts：从 board 的 delegate 消息解析（delegate 总在板上——dm.create 建 board + postDelegateEnvelope 落 delegate）
     const ctx = getBoardContext(taskId, 200);
     const delegateMsg = ctx?.recentMessages.find((m) => m.type === 'delegate') as { to?: string; ts?: number } | undefined;

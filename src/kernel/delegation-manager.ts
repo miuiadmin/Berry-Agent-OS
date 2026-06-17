@@ -15,7 +15,7 @@ import type {
 } from '../contracts/delegation.js';
 import { isDelegationTerminal, DEFAULT_INTERNAL_BUDGET, DEFAULT_EXTERNAL_BUDGET, CORRECTION_LIMITS } from '../contracts/delegation.js';
 import { getLogger } from '../utils/logger.js';
-import { postSystemReportEnvelope, postReportEnvelope } from './board-projection.js';
+import { postSystemReportEnvelope, postReportEnvelope, wasDelegationLifecycleEmitted, markDelegationLifecycleEmitted } from './board-projection.js';
 import { initBoard } from './board-repo.js';
 
 const logger = getLogger('delegation-manager');
@@ -279,6 +279,12 @@ export class DelegationManager {
     } catch (err) {
       logger.warn({ err, delegationId: id }, 'delegation-manager: complete postReport 失败（delegation.completed 派生可能漏）');
     }
+    // V-2 兜底：board 派生失败（DB 写异常→safePost 捕获→无 derive）→ 直 emit delegation.completed。
+    // 用 entry 的 durationMs（精确，非 board 的 delegate.ts 近似值）。
+    if (!wasDelegationLifecycleEmitted(id, 'completed')) {
+      getEventBus().emit('delegation.completed', { delegationId: id, targetAgent: entry.targetAgent, durationMs });
+      markDelegationLifecycleEmitted(id, 'completed');
+    }
 
     logger.debug({ delegationId: id, durationMs }, 'Delegation completed');
     return true;
@@ -301,6 +307,11 @@ export class DelegationManager {
     try {
       postSystemReportEnvelope(id, { summary: `任务失败：${error}`, sessionId: entry.sessionId });
     } catch { /* best-effort：派生+审计镜像，失败不影响状态机（V-2 守护测试把关） */ }
+    // V-2 兜底：board 派生失败（DB 写异常）→ 直 emit delegation.failed（确保 onTermination→clearActiveScope）
+    if (!wasDelegationLifecycleEmitted(id, 'failed')) {
+      getEventBus().emit('delegation.failed', { delegationId: id, targetAgent: entry.targetAgent, error });
+      markDelegationLifecycleEmitted(id, 'failed');
+    }
 
     logger.warn({ delegationId: id, error }, 'Delegation failed');
     return true;
@@ -324,6 +335,11 @@ export class DelegationManager {
     try {
       postSystemReportEnvelope(id, { summary: `执行已取消：${reason ?? 'interrupted'}`, sessionId: entry.sessionId }, { kind: 'interrupt' });
     } catch { /* best-effort */ }
+    // V-2 兜底：board 派生失败（DB 写异常）→ 直 emit delegation.failed
+    if (!wasDelegationLifecycleEmitted(id, 'failed')) {
+      getEventBus().emit('delegation.failed', { delegationId: id, targetAgent: entry.targetAgent, error: reason ?? 'interrupted' });
+      markDelegationLifecycleEmitted(id, 'failed');
+    }
 
     logger.info({ delegationId: id, reason }, 'Delegation interrupted');
     return true;
