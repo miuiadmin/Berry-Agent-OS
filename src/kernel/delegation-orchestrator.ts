@@ -29,6 +29,7 @@ import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { attachOrchestratorEventRelay, attachReviewerCronRelay } from './flows/brain-relay.js';
 import { sendRouteRequestImpl } from './flows/speculative-routing.js';
 import type { SpeculativeRoutingDeps } from './flows/speculative-routing.js';
+import { handleSendUserReply, handleResolveUserPermissionConfirm, handleInterruptSession } from './flows/user-interaction.js';
 import { setupRoutingResultHandler } from './flows/routing-result-handler.js';
 import { resolveRuntimeForTarget as resolveRuntimeForTargetImpl, executeViaRuntime as executeViaRuntimeImpl, type RuntimeExecutionDeps } from './flows/runtime-execution.js';
 import {
@@ -674,45 +675,9 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   }
 
   sendUserReply(payload: AgentUserReplyPayload, correlationId: string): void {
-    const askState = this.sessionManager.getPendingAsk(payload.sessionId);
-    if (!askState) return;
-
-    const agent = this.agentManager.getAgent(askState.agentName);
-    if (!agent) return;
-
-    this.delegationManager.resumeFromUserReply(askState.taskId);
-    this.sessionManager.clearPendingAsk(payload.sessionId);
-
-    // 16.0 §6.5.1/D：用户回复 → 板状态 user_resumed（awaiting_user → in_progress，恢复干活）
-    if (askState.taskId) applyBoardStatus(askState.taskId, { kind: 'user_resumed' });
-
-    // 13.0 §3.2/§5.3.3: 将用户回复写入 Brain 观察队列（priority=0，critical，永不丢弃）
-    // Brain 审核时需要知道用户对 agent 提问的真实回复，以判断 agent 是否正确使用了用户输入。
-    // 这补全了观察队列的 user_interaction 类型覆盖（与 tool_call/tool_result 并列）。
-    if (payload.sessionId && this.observationRecorder) {
-      this.observationRecorder.record({
-        sessionId: payload.sessionId,
-        taskId: payload.taskId ?? askState.taskId ?? '',
-        observationType: 'user_interaction',
-        fromAgent: askState.agentName,
-        content: JSON.stringify({
-          direction: 'user_reply',
-          question: askState.question,
-          reply: payload.reply?.slice(0, 500),
-        }),
-        priority: 0, // §5.3.3: user_interaction = priority 0（critical，永不丢弃）
-      });
-    }
-
-    agent.ipc.send('agent.user_reply', askState.agentName, payload, correlationId);
-
-    // 13.0 §13.5: 发出 user.ask_response 事件 — WS bridge 订阅后转发 user_reply 给前端
-    // 前端可据此关闭「等待用户回复」的 UI 状态（§5.3.5 独立超时闭环）
-    getEventBus().emit('user.ask_response', {
-      sessionId: payload.sessionId,
-      taskId: payload.taskId,
-      correlationId,
-      response: payload.reply,
+    handleSendUserReply(payload, correlationId, {
+      sessionManager: this.sessionManager, delegationManager: this.delegationManager,
+      observationRecorder: this.observationRecorder, agentManager: this.agentManager,
     });
   }
 
@@ -728,31 +693,10 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   }
 
   resolveUserPermissionConfirm(requestId: string, approved: boolean, reason?: string): boolean {
-    // 1. 先签发 token（批准时返回 PermissionToken，拒绝时返回 null）。
-    //    必须在通知 tool-caller 之前完成：resolveUserConfirm 发给 tool-caller 的 permission.result
-    //    需要携带 tokenId，否则 tool-caller 判定"缺少 permission token"拒绝执行（即使已批准）。
-    const token = this.permissionCoordinator.resolve(requestId, {
-      verdict: approved ? 'approved' : 'denied',
-      source: 'user',
-      tokenVerdict: approved ? 'allow_once' : undefined,
-      reason: reason ?? (approved ? '用户确认' : '用户拒绝'),
+    return handleResolveUserPermissionConfirm(requestId, approved, reason, {
+      permissionCoordinator: this.permissionCoordinator, permissionFlow: this.permissionFlow,
+      brainDecisionRecorder: this.brainDecisionRecorder,
     });
-
-    // 2. 再通知 tool-caller（带 tokenId）。token?.id 在拒绝时为 undefined，符合预期。
-    const resolved = this.permissionFlow.resolveUserConfirm(requestId, approved, reason, token?.id);
-    if (!resolved) return false;
-
-    if (!approved && reason) {
-      this.brainDecisionRecorder?.record({
-        sessionId: 'user_permission',
-        decisionType: 'permission',
-        inputSummary: `user denied permission`,
-        outputJson: { denied: true, userReason: reason },
-      });
-      this.brainDecisionRecorder?.updateLesson(requestId, reason);
-    }
-
-    return true;
   }
 
   async dispatchModuleTask(input: {
@@ -769,30 +713,11 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   }
 
   interruptSession(sessionId: string, reason?: string): { interrupted: boolean; taskId?: string; partialResponse?: string } {
-    const activeEntries = this.delegationManager.getActiveForSession(sessionId);
-    if (activeEntries.length === 0) return { interrupted: false };
-
-    for (const entry of activeEntries) {
-      this.delegationManager.interrupt(entry.id, reason ?? 'user interrupt');
-    }
-
-    const primary = activeEntries[0];
-    const pending = this.sessionManager.getPending(primary.correlationId);
-    if (pending) {
-      this.streamingFlusher.remove(pending.delegationTaskId ?? pending.taskId ?? '');
-      // R14-1：中断场景也走 finalizeTask 统一入口
-      this.sessionManager.fail(primary.correlationId, { kind: 'terminated' });
-    }
-
-    // 清理投机执行状态，防止 memory leak 和 stale handoff
-    this.speculativeCorrelations.delete(primary.correlationId);
-    this.pendingHandoffs.delete(primary.correlationId);
-
-    return {
-      interrupted: true,
-      taskId: primary.id,
-      partialResponse: primary.finalResponse,
-    };
+    return handleInterruptSession(sessionId, reason, {
+      delegationManager: this.delegationManager, sessionManager: this.sessionManager,
+      streamingFlusher: this.streamingFlusher,
+      speculativeCorrelations: this.speculativeCorrelations, pendingHandoffs: this.pendingHandoffs,
+    });
   }
 
   sweepStaleTasks(maxAgeMs: number = 600_000): number {
