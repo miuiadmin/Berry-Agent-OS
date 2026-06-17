@@ -30,6 +30,7 @@ import { getMissionsDir, getMissionDir, getPlanPath, getSquadPath, getTemplatesD
 
 import { BUILTIN_TEMPLATES } from './flows/mission-templates-data.js';
 import { executeHandoff, readLatestHandoffContext, readLatestHandoffContextAny, renderHandoffContext } from './flows/mission-handoff.js';
+import { findSquad, findSquadAndMember, readMissionContext, renderMissionContextFor } from './flows/mission-context.js';
 
 // ─────────────────────────────────────────────────────────────────
 // MissionManager
@@ -355,7 +356,7 @@ export class MissionManager {
     // 确定新 squad 的深度
     let depth = 1;
     if (squad.parentSquadId) {
-      const parent = this.findSquad(squadFile.org.squads, squad.parentSquadId);
+      const parent = findSquad(squadFile.org.squads, squad.parentSquadId);
       if (!parent) return null; // 父 squad 不存在
       depth = parent.depth + 1;
 
@@ -386,7 +387,7 @@ export class MissionManager {
 
     // 插入到组织树中
     if (squad.parentSquadId) {
-      const parent = this.findSquad(squadFile.org.squads, squad.parentSquadId);
+      const parent = findSquad(squadFile.org.squads, squad.parentSquadId);
       if (parent) {
         if (!parent.squads) parent.squads = [];
         parent.squads.push(newSquad);
@@ -419,7 +420,7 @@ export class MissionManager {
     const squadFile = this.readSquad(missionId);
     if (!squadFile) return null;
 
-    const squad = this.findSquad(squadFile.org.squads, squadId);
+    const squad = findSquad(squadFile.org.squads, squadId);
     if (!squad) return null;
 
     const member = squad.members.find(m => m.agent === agentName);
@@ -453,7 +454,7 @@ export class MissionManager {
     };
 
     // 写入 squad 内部 signals
-    const squad = this.findSquad(squadFile.org.squads, squadId);
+    const squad = findSquad(squadFile.org.squads, squadId);
     if (squad) {
       squad.signals.push(signal);
     }
@@ -486,120 +487,12 @@ export class MissionManager {
   renderHandoffContext(ctx: HandoffContext): string {
     return renderHandoffContext(ctx);
   }
-
-  /**
-   * §12.3/§12.6: 为指定 (mission, task, agent) 组装 MissionContext —
-   * 用于注入到 Agent 的 system prompt。
-   *
-   * 数据流：
-   *   1. 读 plan.json 拿到 mission 目标和任务列表
-   *   2. 读 squad.json 找到 agentName 所在的 squad 和 role
-   *   3. 抽取队友（不含自己）、已完成任务、进行中任务、未解决信号
-   *   4. 返回 MissionContext 或 null（如果 mission/task/agent 任一找不到）
-   *
-   * @param missionId - Mission ID
-   * @param planTaskId - 当前 plan task ID（t-1, t-2...）
-   * @param agentName - 当前 Agent 类型名（code/learning/skills...）
-   * @returns MissionContext 或 null
-   */
+  /** §16.0 重构：context 渲染已提取到 flows/mission-context.ts（行为保持） */
   readContext(missionId: string, planTaskId: string, agentName: string): MissionContext | null {
-    const plan = this.readPlan(missionId);
-    if (!plan) return null;
-
-    const task = plan.tasks.find(t => t.id === planTaskId);
-    if (!task) return null;
-
-    const squadFile = this.readSquad(missionId);
-
-    // 查找当前 Agent 所在的 squad 和 member
-    let member: SquadMember | null = null;
-    let parentSquad: Squad | null = null;
-    if (squadFile) {
-      const found = this.findSquadAndMember(squadFile.org.squads, agentName);
-      if (found) {
-        member = found.member;
-        parentSquad = found.squad;
-      }
-    }
-
-    // 如果 agent 不在任何 squad 中，给一个默认 work 角色（plan-only 模式）
-    const role: 'lead' | 'work' | 'check' = member?.role ?? 'work';
-    const on = member?.on ?? task.what;
-    const squadGoal = parentSquad?.goal ?? plan.mission.goal;
-
-    // 抽取队友（不含自己）
-    const squadTeammates: MissionContext['squadTeammates'] = [];
-    if (parentSquad) {
-      // members 不含 leader；统一展示
-      for (const m of parentSquad.members) {
-        if (m.agent === agentName) continue;
-        squadTeammates.push({
-          agent: m.agent,
-          role: m.role,
-          on: m.on,
-          status: m.status,
-        });
-      }
-      // 也加上 leader（如果不是自己，且没在 members 里出现过）
-      if (parentSquad.leader !== agentName && !parentSquad.members.some(m => m.agent === parentSquad.leader)) {
-        squadTeammates.push({
-          agent: parentSquad.leader,
-          role: 'lead',
-          on: parentSquad.goal,
-          status: parentSquad.status === 'working' ? 'working' : 'idle',
-        });
-      }
-    }
-
-    // 已完成的前置任务
-    const completedTasks: MissionContext['completedTasks'] = plan.tasks
-      .filter(t => t.status === 'done' && t.id !== planTaskId)
-      .map(t => ({ id: t.id, what: t.what, result: t.result }));
-
-    // 同期进行中的任务
-    const inProgressTasks: MissionContext['inProgressTasks'] = plan.tasks
-      .filter(t => t.status === 'working' && t.id !== planTaskId)
-      .map(t => ({ id: t.id, what: t.what, who: t.who, progress: t.progress }));
-
-    // 未解决信号（blocker / question）
-    const unresolvedSignals: MissionContext['unresolvedSignals'] = [];
-    if (squadFile) {
-      for (const sig of squadFile.signals) {
-        if (sig.resolved) continue;
-        if (sig.type === 'blocker' || sig.type === 'question') {
-          unresolvedSignals.push({
-            from: sig.from,
-            type: sig.type,
-            msg: sig.msg,
-            at: sig.at,
-          });
-        }
-      }
-    }
-
-    return {
-      missionId,
-      goal: plan.mission.goal,
-      currentTaskId: task.id,
-      currentTaskWhat: task.what,
-      squadRole: role,
-      squadOn: on,
-      squadGoal,
-      squadTeammates,
-      completedTasks,
-      inProgressTasks,
-      unresolvedSignals,
-    };
+    return readMissionContext(missionId, planTaskId, agentName, { readPlan: (id) => this.readPlan(id), readSquad: (id) => this.readSquad(id) });
   }
-
-  /**
-   * 渲染 MissionContext 为 system prompt 文本（便利方法，等价于 renderMissionContext）。
-   * 返回 null 表示 missionId/planTaskId/agentName 至少有一个找不到。
-   */
   renderContext(missionId: string, planTaskId: string, agentName: string): string | null {
-    const ctx = this.readContext(missionId, planTaskId, agentName);
-    if (!ctx) return null;
-    return renderMissionContext(ctx);
+    return renderMissionContextFor(missionId, planTaskId, agentName, { readPlan: (id) => this.readPlan(id), readSquad: (id) => this.readSquad(id) });
   }
 
     /**
@@ -607,34 +500,6 @@ export class MissionManager {
    * 注意：squad.leader 不在 members 数组里，所以这里也匹配 leader。
    * 如果 agentName 是 leader，返回一个合成的 {role: 'lead'} member。
    */
-  private findSquadAndMember(
-    squads: Squad[],
-    agentName: string,
-  ): { squad: Squad; member: SquadMember } | null {
-    for (const squad of squads) {
-      // ① 匹配 leader（leader 不在 members 数组里）
-      if (squad.leader === agentName) {
-        return {
-          squad,
-          member: {
-            agent: agentName,
-            role: 'lead',
-            on: squad.goal,
-            status: squad.status === 'working' ? 'working' : 'idle',
-          },
-        };
-      }
-      // ② 匹配 members 列表
-      const member = squad.members.find(m => m.agent === agentName);
-      if (member) return { squad, member };
-      // ③ 递归子 squad
-      if (squad.squads) {
-        const nested = this.findSquadAndMember(squad.squads, agentName);
-        if (nested) return nested;
-      }
-    }
-    return null;
-  }
 
   /**
    * P10: 找到 plan task 所在 squad 的 checker 成员。
@@ -656,7 +521,7 @@ export class MissionManager {
     if (!squadFile) return null;
 
     // 找到 task.who 所在的 squad
-    const found = this.findSquadAndMember(squadFile.org.squads, task.who);
+    const found = findSquadAndMember(squadFile.org.squads, task.who);
     if (!found) return null;
 
     // 在该 squad 的 members（含 leader 合成）里找 check 角色
@@ -676,7 +541,7 @@ export class MissionManager {
   listCheckersForSquad(missionId: string, squadId: string): SquadMember[] {
     const squadFile = this.readSquad(missionId);
     if (!squadFile) return [];
-    const found = this.findSquad(squadFile.org.squads, squadId);
+    const found = findSquad(squadFile.org.squads, squadId);
     if (!found) return [];
     return found.members.filter(m => m.role === 'check');
   }
@@ -894,7 +759,7 @@ export class MissionManager {
     try {
       const squadFile = readJsonFile<unknown>(getSquadPath(missionId)) as SquadFile | null;
       if (!squadFile) return null;
-      const squad = this.findSquad(squadFile.org.squads, squadId);
+      const squad = findSquad(squadFile.org.squads, squadId);
       return squad?.leader ?? null;
     } catch {
       return null;
@@ -904,16 +769,6 @@ export class MissionManager {
   /**
    * 递归查找 squad 树中的指定 squad。
    */
-  private findSquad(squads: Squad[], squadId: string): Squad | null {
-    for (const squad of squads) {
-      if (squad.id === squadId) return squad;
-      if (squad.squads) {
-        const found = this.findSquad(squad.squads, squadId);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
 
   /**
    * 生成 squad ID。
@@ -926,7 +781,7 @@ export class MissionManager {
       return `s-${topCount}`;
     }
     // 子 squad：在父 ID 后加字母后缀
-    const parent = this.findSquad(squads, parentId);
+    const parent = findSquad(squads, parentId);
     if (!parent) return `s-${genId()}`;
     const siblingCount = parent.squads?.length ?? 0;
     const suffix = String.fromCharCode(97 + siblingCount); // a, b, c, ...
