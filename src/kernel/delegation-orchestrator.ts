@@ -27,6 +27,8 @@ import { metrics } from '../observability/metrics.js';
 import { PermissionFlow } from './flows/permission-flow.js';
 import { setupBrainCommandHandler } from './flows/brain-command-handler.js';
 import { attachOrchestratorEventRelay, attachReviewerCronRelay } from './flows/brain-relay.js';
+import { sendRouteRequestImpl } from './flows/speculative-routing.js';
+import type { SpeculativeRoutingDeps } from './flows/speculative-routing.js';
 import { setupRoutingResultHandler } from './flows/routing-result-handler.js';
 import { resolveRuntimeForTarget as resolveRuntimeForTargetImpl, executeViaRuntime as executeViaRuntimeImpl, type RuntimeExecutionDeps } from './flows/runtime-execution.js';
 import {
@@ -647,104 +649,28 @@ export class DelegationOrchestrator implements CorrectionFlowDeps {
   // 见 setupDaemonTaskResultHandlers），与委派路径同构。collector key=taskId（==pending.delegationTaskId），
   // 生命周期由 complete()→persistInlineBlocks 据 key dispose 并落 message_blocks（刷新可恢复）。
 
+  /** §17.4：sendRouteRequest 投机执行路由已提取到 flows/speculative-routing.ts（行为保持） */
   sendRouteRequest(payload: RouteRequestPayload, correlationId: string): void {
-    withTrace('router.sendRouteRequest', () => {
-      // In test/takeover mode, use synchronous Brain routing (preserves test expectations)
-      if (this.takeoverController) {
-        this.sendRouteRequestSync(payload, correlationId);
-        return;
-      }
-
-      // §9.0 Rule-first routing: try FallbackRouter before Brain LLM
-      const ruleDecision = this.fallbackRouter.route(payload.message);
-      if (ruleDecision.intent !== 'chat') {
-        // High confidence rule match (code/skill/plugin) → dispatch directly, skip Brain
-        logger.info({ intent: ruleDecision.intent, target: ruleDecision.targetAgent }, '规则路由命中，跳过 Brain');
-        const pending = this.sessionManager.getPending(correlationId);
-        if (pending) {
-          // 规则路由虽然没有走 Brain LLM，但前端仍需要 progress 事件展示思考过程
-          this.reportProgress(pending, 'thinking', '正在分析意图...');
-          this.brainDecisionRecorder?.recordRouteDecision(pending.sessionId, pending.userMessage, { ...ruleDecision, source: 'rule' } as unknown as Record<string, unknown>, pending.taskId);
-          getEventBus().emit('message.routed', { sessionId: pending.sessionId, taskId: pending.taskId ?? correlationId, targetAgent: ruleDecision.targetAgent, intent: ruleDecision.intent });
-        }
-        this.handleRouteDecision(ruleDecision, correlationId);
-        return;
-      }
-
-      // No rule match → speculative execution: start conversation immediately
-      const pending = this.sessionManager.getPending(correlationId);
-      if (pending) {
-        this.speculativeCorrelations.add(correlationId);
-        const chatDecision: RouteDecision = { intent: 'chat', targetAgent: 'conversation', priority: 'normal', reason: 'speculative: conversation started while Brain routing' };
-        this.handleChatRoute(chatDecision, correlationId, pending);
-      }
-
-      // Send Brain routing in parallel (for learning + possible handoff)
-      const orchestratorAgent = this.registry.requireRole('orchestrator');
-      const orchestratorName = orchestratorAgent.manifest.name;
-      const brain = this.agentManager.getAgent(orchestratorName);
-      if (!brain) {
-        // Brain not available → speculative execution continues as-is
-        this.speculativeCorrelations.delete(correlationId);
-        return;
-      }
-
-      // Enrich context for Brain (memory, world model, suggestions, capabilities)
-      let enrichedPayload = { ...payload };
-
-      const memoryFrame = this.sessionManager.buildMemoryContext(enrichedPayload.sessionId, enrichedPayload.message);
-      if (memoryFrame?.records && memoryFrame.records.length > 0) {
-        const memoryHints = memoryFrame.records.slice(0, 5).map((r: any) => r.summary ?? r.content).join('; ');
-        enrichedPayload = { ...enrichedPayload, sessionContext: (enrichedPayload.sessionContext ?? '') + `\n\n[用户记忆] ${memoryHints}` };
-      }
-
-      if (this.worldModelRef) {
-        const worldSummary = this.worldModelRef.getSummary();
-        if (worldSummary) {
-          enrichedPayload = { ...enrichedPayload, sessionContext: enrichedPayload.sessionContext ? `${enrichedPayload.sessionContext}\n\n[世界模型] ${worldSummary}` : `[世界模型] ${worldSummary}` };
-        }
-      }
-
-      if (this.suggestionQueueRef) {
-        const suggestionsBlock = this.suggestionQueueRef.buildPromptBlock(enrichedPayload.sessionId);
-        if (suggestionsBlock) {
-          enrichedPayload = { ...enrichedPayload, sessionContext: (enrichedPayload.sessionContext ?? '') + suggestionsBlock };
-        }
-      }
-
-      if (this.capabilityBusRef) {
-        const capabilities = this.capabilityBusRef.discover();
-        if (capabilities.length > 0) {
-          const capList = capabilities.slice(0, 30).map(c => `${c.name} (${c.dangerLevel})`).join(', ');
-          enrichedPayload = { ...enrichedPayload, sessionContext: (enrichedPayload.sessionContext ?? '') + `\n\n[可用能力] ${capList}` };
-        }
-      }
-
-      brain.ipc.send('route.request', orchestratorName, enrichedPayload, correlationId);
-
-      // 13.0 VF-2: route.request 超时回退 — Brain LLM 30s 无响应则降级到 FallbackRouter
-      // 防止 LLM 全局故障时用户消息无限期挂起
-      setTimeout(() => {
-        const pending = this.sessionManager.getPending(correlationId);
-        if (pending && !this.speculativeCorrelations.has(correlationId)) {
-          // pending 还在等 routing → 触发降级
-          metrics.counter('routing_llm_fallback_total').inc({ reason: 'timeout' });
-          logger.warn({ correlationId, timeoutMs: 30_000, sessionId: pending.sessionId }, 'routing: Brain LLM 30s 无响应，降级到 FallbackRouter');
-          this.handleRouteFallback(correlationId);
-        }
-      }, 30_000).unref();
-    });
+    sendRouteRequestImpl(payload, correlationId, this.routingDeps);
   }
 
-  private sendRouteRequestSync(payload: RouteRequestPayload, correlationId: string): void {
-    const orchestratorAgent = this.registry.requireRole('orchestrator');
-    const orchestratorName = orchestratorAgent.manifest.name;
-    const brain = this.agentManager.getAgent(orchestratorName);
-    if (!brain) {
-      this.handleRouteFallback(correlationId);
-      return;
-    }
-    brain.ipc.send('route.request', orchestratorName, payload, correlationId);
+  private get routingDeps(): SpeculativeRoutingDeps {
+    return {
+      takeoverController: this.takeoverController,
+      fallbackRouter: this.fallbackRouter,
+      sessionManager: this.sessionManager,
+      brainDecisionRecorder: this.brainDecisionRecorder,
+      registry: this.registry,
+      agentManager: this.agentManager,
+      worldModelRef: this.worldModelRef,
+      suggestionQueueRef: this.suggestionQueueRef,
+      capabilityBusRef: this.capabilityBusRef,
+      speculativeCorrelations: this.speculativeCorrelations,
+      reportProgress: (p, s, sum) => this.reportProgress(p, s, sum),
+      handleRouteDecision: (d, c) => this.handleRouteDecision(d, c),
+      handleChatRoute: (d, c, p) => this.handleChatRoute(d, c, p),
+      handleRouteFallback: (c, u) => this.handleRouteFallback(c, u),
+    };
   }
 
   sendUserReply(payload: AgentUserReplyPayload, correlationId: string): void {
