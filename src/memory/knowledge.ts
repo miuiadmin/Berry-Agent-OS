@@ -1,6 +1,14 @@
 import { getDb } from './db.js';
 import { genId } from '../utils/id.js';
 import { redactSecrets } from '../observability/redaction.js';
+// 确定性合并/冲突裁决（CJK 适配，借鉴 mercury second brain）—— 见 ./knowledge-merge.ts
+import {
+  pickMergeCandidate,
+  pickConflictCandidate,
+  resolveConflictVerdict,
+  pickBetterSummary,
+  type MergeCandidateRow,
+} from './knowledge-merge.js';
 import type {
   AddKnowledgeInput,
   EvidenceKind,
@@ -56,6 +64,53 @@ export function addKnowledge(input: AddKnowledgeInput): KnowledgeEntry {
       values.push(existing.id);
       db.prepare(`UPDATE knowledge SET ${sets.join(', ')} WHERE id = ?`).run(...values);
       return getKnowledge(existing.id)!;
+    }
+
+    // 确定性合并/冲突裁决（见 knowledge-merge.ts）：把「明显同义」「明显极性冲突」在插入时
+    // 即时处理，避免全部压到 LLM consolidateMemories pass（后者保留给用词差异大的深层语义合并）。
+    // 仅在同一 owner + 同 type 的候选集里找，集合有界（maxRecords 量级），在事务内一次性读出。
+    const candidateRows = db.prepare(
+      `SELECT id, summary, detail, confidence, importance, durability, evidence_count
+         FROM knowledge
+        WHERE owner_key = ? AND type = ? AND dismissed = 0
+        ORDER BY updated_at DESC`,
+    ).all(ownerKey, input.type) as MergeCandidateRow[];
+
+    // 2a. 模糊同义合并：token Jaccard ≥ 阈值 且 非冲突 → 强化既有条（confidence 取 max，保强证据）
+    const mergeTarget = pickMergeCandidate(candidateRows, input.summary);
+    if (mergeTarget) {
+      const mergedConfidence = Math.min(1, Math.max(mergeTarget.confidence, confidence));
+      db.prepare(
+        `UPDATE knowledge
+            SET summary = ?, confidence = ?, importance = ?, durability = ?,
+                detail = COALESCE(?, detail), evidence_count = evidence_count + 1,
+                updated_at = ?, last_seen_at = ?
+          WHERE id = ?`,
+      ).run(
+        redactSecrets(pickBetterSummary(mergeTarget.summary, input.summary)),
+        mergedConfidence,
+        Math.max(mergeTarget.importance, input.importance ?? 0.5),
+        Math.max(mergeTarget.durability, input.durability ?? 0.5),
+        input.detail ? redactSecrets(input.detail) : null,
+        now, now,
+        mergeTarget.id,
+      );
+      return getKnowledge(mergeTarget.id)!;
+    }
+
+    // 2b. 极性冲突裁决：同主题、相反极性 → 高 confidence 胜，相等取新（incoming 更新鲜）
+    const conflictTarget = pickConflictCandidate(candidateRows, input.summary);
+    if (conflictTarget) {
+      const verdict = resolveConflictVerdict(conflictTarget.confidence, confidence);
+      if (verdict === 'existing') {
+        // 既有更可信：仅刷新 last_seen（重置陈旧计时），不存入新候选
+        db.prepare(`UPDATE knowledge SET last_seen_at = ?, updated_at = ? WHERE id = ?`).run(now, now, conflictTarget.id);
+        return getKnowledge(conflictTarget.id)!;
+      }
+      // incoming 胜：软删除既有（标记 auto_resolved），继续走下方插入新条目
+      db.prepare(
+        `UPDATE knowledge SET dismissed = 1, superseded_by = 'auto_resolved', updated_at = ? WHERE id = ?`,
+      ).run(now, conflictTarget.id);
     }
 
     const id = genId('kn');

@@ -1,13 +1,43 @@
 import { createLlmClient } from '../llm/index.js';
+import { TokenBudgetController } from '../llm/token-budget.js';
 import { resolveConfig } from '../config/resolver.js';
 import { getConfigPath } from '../utils/paths.js';
 import { addKnowledge, listKnowledge, updateKnowledge, supersedeKnowledge, promoteKnowledge, pruneKnowledge, type AddKnowledgeInput, type KnowledgeType, type EvidenceKind } from './knowledge.js';
+import { getDb } from './db.js';
 import { logEpisode } from './episodes.js';
 import { getLogger } from '../utils/logger.js';
 
 const logger = getLogger('evolution');
 const config = resolveConfig(getConfigPath());
 const llm = createLlmClient(config.llm, { defaultAgent: 'evolution' });
+
+/**
+ * 后台 LLM 活的「每日预算软上限」。
+ * 当日 token 用量达到此比例即跳过后台记忆提取/整理，把剩余预算让给用户可见请求
+ * （借鉴 mercury extractMemory 前先 canAfford(800) 的做法）。
+ * 取 0.8：低于 critical(0.9)/exceeded(1.0)，给用户请求留足余量。
+ */
+const BACKGROUND_DAILY_SOFT_CAP = 0.8;
+
+/**
+ * 当日预算是否还允许跑后台 LLM 活（用量 < 软上限）。
+ *
+ * 构造 TokenBudgetController 是零 I/O（只存 config + db 引用），故每次调用现取现造，
+ * 保证永远读到当前 getDb()（模块级缓存会在测试/重连后指向陈旧 db）。
+ * 复用与主链路相同的控制器：状态全部落 token_usage 表（db 共享），此处只 getUsage
+ * 只读、不 recordUsage、不发告警，无副作用。
+ *
+ * DB 未就绪 / 无预算配置 / 查询异常时一律放行——预算闸门是「尽力保护用户请求」，不是硬阻断。
+ */
+export function backgroundBudgetAllows(): boolean {
+  try {
+    const usage = new TokenBudgetController(getDb(), null, config.budget).getUsage('daily', 'global');
+    return usage.budgetUsedPercent < BACKGROUND_DAILY_SOFT_CAP;
+  } catch (err) {
+    logger.debug({ err: (err as Error).message }, '后台预算查询失败，放行');
+    return true;
+  }
+}
 
 const EXTRACTION_PROMPT = `你是一个记忆提取引擎。分析以下对话，提取可以长期记住的用户知识。
 
@@ -48,6 +78,11 @@ const CONSOLIDATION_PROMPT = `你是一个记忆整理引擎。分析以下知�
 export async function extractMemoriesBatch(
   turns: Array<{ sessionId: string; userMessage: string; assistantResponse: string }>,
 ): Promise<void> {
+  // 后台预算闸门：当日用量接近上限时跳过，把预算让给用户可见请求（见 backgroundBudgetAllows）
+  if (!backgroundBudgetAllows()) {
+    logger.info({ turns: turns.length, cap: BACKGROUND_DAILY_SOFT_CAP }, '当日 token 预算接近上限，跳过批量记忆提取');
+    return;
+  }
   if (turns.length === 1) {
     return extractMemories(turns[0].userMessage, turns[0].assistantResponse, turns[0].sessionId);
   }
@@ -88,6 +123,11 @@ export async function extractMemoriesBatch(
 }
 
 export async function extractMemories(userMessage: string, assistantResponse: string, sessionId: string): Promise<void> {
+  // 后台预算闸门：当日用量接近上限时跳过（记忆提取是 fire-and-forget，可安全延后到下轮）
+  if (!backgroundBudgetAllows()) {
+    logger.info({ sessionId, cap: BACKGROUND_DAILY_SOFT_CAP }, '当日 token 预算接近上限，跳过记忆提取');
+    return;
+  }
   try {
     const prompt = EXTRACTION_PROMPT
       .replace('{user_message}', userMessage)
@@ -121,6 +161,13 @@ export async function extractMemories(userMessage: string, assistantResponse: st
 }
 
 export async function consolidateMemories(): Promise<void> {
+  // 后台预算闸门：当日用量接近上限时跳过 LLM 整理（promote/prune 是纯 SQL，仍可跑）
+  if (!backgroundBudgetAllows()) {
+    logger.info({ cap: BACKGROUND_DAILY_SOFT_CAP }, '当日 token 预算接近上限，跳过 LLM 记忆整理（仅 promote/prune）');
+    promoteKnowledge();
+    pruneKnowledge();
+    return;
+  }
   try {
     const entries = listKnowledge({ scope: 'active' });
     if (entries.length < 3) {
