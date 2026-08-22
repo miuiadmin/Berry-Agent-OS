@@ -21,7 +21,7 @@ const MODULE_EDGES = {
   contracts: [],
   context: ['contracts'],
   session: ['contracts', 'context'],
-  agent: ['contracts', 'context', 'session'],
+  agent: ['contracts'],
   persist: ['contracts', 'context', 'session'],
   llm: ['contracts', 'context'],
   tools: ['contracts', 'context'],

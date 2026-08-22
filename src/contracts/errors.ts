@@ -94,3 +94,7 @@ export const SESSION_SURFACE_OP_INVALID = registerErrorCode('SESSION_SURFACE_OP_
 export const SESSION_FORK_BOUNDARY_INVALID = registerErrorCode('SESSION_FORK_BOUNDARY_INVALID');
 /** persist：write-behind 批量落盘失败（批次保留、自动重试暂停，显式 flush 重试——会话篇 §6 链第 2 步） */
 export const PERSIST_BATCH_WRITE_FAILED = registerErrorCode('PERSIST_BATCH_WRITE_FAILED');
+/** agent：自定义消息角色重复注册或与标准角色（user/assistant/toolResult）冲突（骨架篇 §2.3 显式注册纪律） */
+export const AGENT_ROLE_EXISTS = registerErrorCode('AGENT_ROLE_EXISTS');
+/** agent：continueRun 续入点非法——末消息经 convertToLlm 后必须是 user 或 toolResult（骨架篇 §2.1） */
+export const AGENT_CONTINUE_INVALID = registerErrorCode('AGENT_CONTINUE_INVALID');
