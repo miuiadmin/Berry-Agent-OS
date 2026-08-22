@@ -128,7 +128,7 @@ berry/
 
 - 模块之间**只能依赖**对方的 `contract.ts`、`types.ts`、`index.ts`
 - **禁止**跨边界 import 其他模块的内部实现
-- 插件只能依赖 `@berryagent/plugin-sdk`，不能 import `src/kernel/*`
+- 插件 `entry.ts` 是零 import 的纯 default export（`definePlugin` 仅是宿主侧类型 helper），不能 import `src/kernel/*`
 
 ### 边界检查
 
