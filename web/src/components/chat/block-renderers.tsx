@@ -1,5 +1,5 @@
 /**
- * 对话内联 block 渲染器（设计文档/22）——单气泡时间线。
+ * 对话内联 block 渲染器（设计文档/废弃/22）——单气泡时间线。
  *
  * MessageTimeline 按 message.blocks 数组顺序渲染整条 AI 响应（思考→文字段→工具→文字段…穿插），
  * 对齐 Claude Code / OpenCode 的「工具调用 / 推理嵌在对话里」范式。所有 block 在同一个气泡内按

@@ -60,7 +60,7 @@ export interface ChatMessage {
   error?: string;
   attachments?: ChatAttachment[];
   /**
-   * 对话内联 block（设计文档/22）：tool / thinking / delegation 的内联模型。
+   * 对话内联 block（设计文档/废弃/22）：tool / thinking / delegation 的内联模型。
    * 流式期间由 applyBlock（stream.block 事件）累积；历史/无 block 事件路径由渲染层 displayBlocks 投影兜底。
    * 与 toolCalls/reasoning 并存（兼容期双写）——渲染层优先用 blocks，缺项用旧字段补齐。
    */
@@ -167,7 +167,7 @@ interface ChatState {
   markLastMessageStatus: (status: "sending" | "failed" | "complete") => void;
 
   /**
-   * 应用一个 stream.block 事件到当前流式 assistant 消息（对话内联，设计文档/22）。
+   * 应用一个 stream.block 事件到当前流式 assistant 消息（对话内联，设计文档/废弃/22）。
    * 目标消息：优先 pendingStreamMessageId，回退最后一条 streaming assistant。
    * 用 applyBlockToBlocks 纯 reducer 更新 blocks（text/thinking 追加 delta，tool/delegation upsert）。
    */
@@ -443,7 +443,7 @@ export const useChatStore = create<ChatState>()(
         }),
 
       /**
-       * 应用 stream.block 事件到当前流式消息（对话内联，设计文档/22）。
+       * 应用 stream.block 事件到当前流式消息（对话内联，设计文档/废弃/22）。
        * 与 appendToLast/appendToolCall 同策略定位目标消息（pendingStreamMessageId 优先），
        * 用 applyBlockToBlocks 纯 reducer 不可变更新 blocks。
        */

@@ -1,5 +1,5 @@
 /**
- * 对话内联 Block 模型（前端镜像 src/contracts/message-blocks.ts，设计文档/22）。
+ * 对话内联 Block 模型（前端镜像 src/contracts/message-blocks.ts，设计文档/废弃/22）。
  *
  * 核心理念：对话内容统一为有序 block 数组，对齐 Claude Code（content blocks）/ OpenCode（parts）。
  * 工具调用 / 推理 / 委派不再是消息气泡之外的「平行流」，而是消息内的内联 block。

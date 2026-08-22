@@ -19,7 +19,7 @@ const logger = getLogger('tool-caller');
  * draft.response handler）区分：
  *   - 合成语：不应覆盖流式期间已累积的真实正文，应把错误标签（剥掉 marker）追加到末尾；
  *   - 真实最终草稿 / Brain 改写（无 marker）：正常覆盖。
- * 修「工具调用超限后刷新页面，流式正文被错误语整段覆盖丢失」bug（详见设计文档/22 持久化漏斗）。
+ * 修「工具调用超限后刷新页面，流式正文被错误语整段覆盖丢失」bug（详见设计文档/废弃/22 持久化漏斗）。
  */
 export const SYNTHETIC_FINAL_CONTENT_MARKER = '[tool_loop:synthetic]';
 /** 判定一段 finalContent 是否为 runToolLoop 合成的兜底语（非模型真实输出） */

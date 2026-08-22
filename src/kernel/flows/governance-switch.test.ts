@@ -1,5 +1,5 @@
 /**
- * governance-switch 治理路由单测（设计文档/23 §4 + §9 P3）。
+ * governance-switch 治理路由单测（设计文档/废弃/23 §4 + §9 P3）。
  *
  * 钉死「单一 switch 收敛」契约：每个 BoardMessage.type 路由到正确的治理机制（§4.1 四姿态）。
  * behaviour-parity：同 type → 同 route kind。这是 P3 把 15.0 A/B/C/D 四套 IPC flow

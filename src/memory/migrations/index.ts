@@ -1139,7 +1139,7 @@ const v27RedactBlindSpotScan: Migration = {
 };
 
 /**
- * 16.0 任务板（设计文档/23 §5.1）：agent_tasks 加 board 列。
+ * 16.0 任务板（设计文档/废弃/23 §5.1）：agent_tasks 加 board 列。
  * task_thread + task_members 表由 CORE_SCHEMA_SQL 的 TASK_BOARD_SQL 在 initDb 时 CREATE IF NOT EXISTS，
  * 旧库 ALTER TABLE 补 board 列即可（SQLite ADD COLUMN 幂等安全——列已存在时容错跳过）。
  */

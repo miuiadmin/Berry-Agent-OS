@@ -1,7 +1,7 @@
 /**
  * 任务板仓库（架构升级 16.0 P2）—— BoardMessage 发言流 + 板元数据的 CRUD。
  *
- * 设计文档/23 §5.1：task = board。每块板有：
+ * 设计文档/废弃/23 §5.1：task = board。每块板有：
  *   - 发言 thread（task_thread 表，每条 = 一个 BoardMessage 信封）
  *   - 成员花名册（task_members 表）
  *   - 板元数据（agent_tasks 的 board_* 列）

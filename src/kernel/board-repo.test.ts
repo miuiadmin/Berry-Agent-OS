@@ -1,5 +1,5 @@
 /**
- * board-repo 16.0 任务板存储层测试（设计文档/23 §5.1）。
+ * board-repo 16.0 任务板存储层测试（设计文档/废弃/23 §5.1）。
  *
  * 背景：board-repo 是 16.0 协作的核心存储入口（11 个导出函数），被 board-projection /
  * board-observer / board-tool-request-handler / flows/board-ask-handler / flows/permission-flow /

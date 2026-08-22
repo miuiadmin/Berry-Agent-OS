@@ -1,5 +1,5 @@
 /**
- * 对话内联 Block 收集器（设计文档/22）—— 把一轮对话的 telemetry 实时归一为 Block 模型，
+ * 对话内联 Block 收集器（设计文档/废弃/22）—— 把一轮对话的 telemetry 实时归一为 Block 模型，
  * emit stream.block 事件供前端内联渲染。
  *
  * 收敛点（核心价值）：Berry 有两套工具词表——

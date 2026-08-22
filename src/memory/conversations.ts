@@ -5,7 +5,7 @@ import { redactSecrets } from '../observability/redaction.js';
 /**
  * conversations 表（扁平 text + reasoning）—— **已退役为只读冷归档**。
  *
- * 消灭持久化双轨制（设计文档/22）后，对话内容唯一规范存储是 `messages` + `message_blocks`
+ * 消灭持久化双轨制（设计文档/废弃/22）后，对话内容唯一规范存储是 `messages` + `message_blocks`
  * （见 `./message-blocks-repo.ts`）：
  *   - user 消息活跃漏斗 = `persistUserMessage`
  *   - assistant 消息活跃漏斗 = `persistAssistantTurn`

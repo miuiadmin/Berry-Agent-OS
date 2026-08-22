@@ -1,5 +1,5 @@
 /**
- * 对话内联模型存储层（设计文档/22）—— messages + message_blocks 的读写仓库。
+ * 对话内联模型存储层（设计文档/废弃/22）—— messages + message_blocks 的读写仓库。
  *
  * 这是"工具调用 / MCP / 委派嵌入对话流"在存储侧的唯一落点：一条消息由有序 Block[] 组成，
  * 每个 block 一行（message_blocks.payload_json = BlockSchema 序列化）。

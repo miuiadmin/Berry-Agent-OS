@@ -1,5 +1,5 @@
 /**
- * board-reconciler 孤儿板恢复测试（设计文档/23 §6.5.3）。
+ * board-reconciler 孤儿板恢复测试（设计文档/废弃/23 §6.5.3）。
  *
  * 钉死启动时板孤儿恢复的不变量：in_progress 但 agent_task 已终态 → 标 failed + 系统 report；
  * 活跃板（task 仍 running）不动；幂等（已 failed 不再扫）。

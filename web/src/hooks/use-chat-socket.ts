@@ -232,7 +232,7 @@ export function useChatSocket() {
 
       switch (msg.type) {
         case "block": {
-          // 对话内联（设计文档/22）：stream.block 事件 → 累积到当前流式消息的 blocks。
+          // 对话内联（设计文档/废弃/22）：stream.block 事件 → 累积到当前流式消息的 blocks。
           // applyBlock 内部按 blockId upsert（text/thinking 追加 delta，tool/delegation 整体替换）。
           const bm = msg as Extract<ServerMessage, { type: "block" }>;
           if (bm.blockType === "text" || bm.blockType === "thinking") {

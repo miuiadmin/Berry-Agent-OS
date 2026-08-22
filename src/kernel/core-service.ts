@@ -127,7 +127,7 @@ export class CoreService {
   /**
    * 16.0 P3-A2 任务板纠偏观察器（advisory only）。
    * 定时轻扫所有 in_progress 的板，嗅到 drift/stuck/spawn_explosion 风险时 emit
-   * 'delegation.checkpoint_needed' 让 brain 介入（设计文档/23 §4.2 + §10.1）。
+   * 'delegation.checkpoint_needed' 让 brain 介入（设计文档/废弃/23 §4.2 + §10.1）。
    * lifecycle：startInternal 创建并 .start()，stop() 时 .stop()。详见 board-observer.ts。
    */
   private boardObserver: import('./board-observer.js').BoardObserver | null = null;

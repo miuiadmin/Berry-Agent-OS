@@ -1,7 +1,7 @@
 /**
  * 对话内联 Block 契约 —— 工具调用 / MCP / 委派嵌入对话流的核心类型。
  *
- * 设计目标（见 设计文档/22-对话内联统一.md）：对齐 Claude Code 的 content[] 与 OpenCode 的 parts[]，
+ * 设计目标（见 设计文档/废弃/22-对话内联统一.md）：对齐 Claude Code 的 content[] 与 OpenCode 的 parts[]，
  * 把"一条消息 = 有序 Block 数组"作为前端 / 事件 / 存储 / 渲染共同的事实契约。工具调用、MCP 调用、
  * 子智能体委派都是消息内的 Block，不再作为独立表 / 独立事件 / 独立面板存在。
  *

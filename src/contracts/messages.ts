@@ -244,7 +244,7 @@ export type EventMap = {
   'stream.tool_result': { taskId: string; sessionId: string; toolName: string; result?: unknown; isError?: boolean; durationMs?: number; correlationId?: string };
   'stream.uncertainty': { taskId: string; sessionId: string; reason: string; correlationId?: string };
   /**
-   * 对话内联统一事件族（见 设计文档/22-对话内联统一.md）。
+   * 对话内联统一事件族（见 设计文档/废弃/22-对话内联统一.md）。
    * 收敛 stream.text_delta / stream.tool_call / stream.tool_result / stream.reasoning_delta / agent.dialogue
    * 到单一事件：文本/工具/MCP/委派都是 Block，前端按 blockId 幂等推进、按 blockType 内联渲染。
    * 旧事件保留兼容期（仍可 emit），新链路以 stream.block 为准。
@@ -392,7 +392,7 @@ export type EventMap = {
    *
    * 设计意图：board 写入是 DB 操作（task_thread 表 INSERT），不是 EventBus 事件。
    * board-projection.safePost 在落板成功后 emit 此事件，让前端经 WsEventBridge 实时感知
-   * 「这块板有新发言了」——用于前端看板 UI 刷新（设计文档/23 §9 P5「旧通道降兼容层」）。
+   * 「这块板有新发言了」——用于前端看板 UI 刷新（设计文档/废弃/23 §9 P5「旧通道降兼容层」）。
    *
    * 字段语义：
    *   - taskId：板 id（= delegationId，板与 delegation 1:1）

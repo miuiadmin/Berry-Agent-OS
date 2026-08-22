@@ -1,5 +1,5 @@
 /**
- * Brain 主动看板纠偏（架构升级 16.0 P3-A2）—— 设计文档/23 §4.2 + §10.1。
+ * Brain 主动看板纠偏（架构升级 16.0 P3-A2）—— 设计文档/废弃/23 §4.2 + §10.1。
  *
  * 背景：16.0 任务板已有 delegate/report/command/ask/tool_request 5 种信封的投影（fire-and-forget），
  * 但 brain 目前只在 checkpoint 阶段顺带看板——没有「平时异步轻扫板，发现跑偏主动发 command」的能力。

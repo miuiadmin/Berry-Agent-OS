@@ -24,7 +24,7 @@ export function initDb(path?: string): Database.Database {
   // 这里显式设为 500（~2MB）让 PASSIVE checkpoint 更频繁更小，降低单次 checkpoint 停顿。
   // **不引入应用层写计数器 + jitter**：busy_timeout=5000 让 SQLite 内部用 usleep 指数退避
   // （不烧 CPU）最多等 5s，已比 Hermes 的 1s timeout+2.25s jitter 更强地覆盖写竞争；
-  // 用内建机制即满足需求，符合「架构优雅：已有机制优先」（参见 设计文档/21-架构升级-15.0.md §6/§7）。
+  // 用内建机制即满足需求，符合「架构优雅：已有机制优先」（参见 设计文档/废弃/21-架构升级-15.0.md §6/§7）。
   db.pragma('wal_autocheckpoint = 500');
 
   db.exec(CORE_SCHEMA_SQL);
@@ -35,10 +35,10 @@ export function initDb(path?: string): Database.Database {
   db.exec(CORE_INDEX_SQL);
   runMigrations(db, ALL_MIGRATIONS);
   db.exec(KNOWLEDGE_FTS_SQL);
-  // 对话内联模型 FTS（设计文档/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
+  // 对话内联模型 FTS（设计文档/废弃/22）：独立虚拟表，由 message-blocks-repo 维护（非 external-content）。
   // 不进 ensureFtsConsistency——本表与 message_blocks 非 1:1（仅 text/thinking 子集），行数对比无意义。
   db.exec(MESSAGE_BLOCKS_FTS_SQL);
-  // 16.0 任务板表（设计文档/23 §5.1）：task_thread（发言流）+ task_members（花名册）。
+  // 16.0 任务板表（设计文档/废弃/23 §5.1）：task_thread（发言流）+ task_members（花名册）。
   // agent_tasks 加 board 列由 v28 migration ALTER TABLE 补。
   db.exec(TASK_BOARD_SQL);
   // 启动期 conversations→messages 幂等同步：把冷归档 conversations 里不在 messages 的孤行补进新表。
@@ -79,7 +79,7 @@ function ensureFtsConsistency(db: Database.Database, fts: string, source: string
 }
 
 /**
- * 对话内联 FTS 启动期补齐（设计文档/22）。
+ * 对话内联 FTS 启动期补齐（设计文档/废弃/22）。
  * message_blocks_fts 是独立（非 external-content）虚表，只能手动 DELETE+INSERT 维护。
  * repo 的 appendBlock/patchBlock 增量维护 text/thinking block 的索引；但 migration（v25/v26 回填）
  * 直写 message_blocks 绕过 repo，这些行需在此 catch-up。
@@ -106,7 +106,7 @@ function populateMessageBlocksFts(db: Database.Database): void {
 }
 
 /**
- * 对话内联：启动期幂等同步 conversations → messages（设计文档/22）。
+ * 对话内联：启动期幂等同步 conversations → messages（设计文档/废弃/22）。
  *
  * 为什么需要：消灭双轨制后 messages+message_blocks 是唯一规范存储，conversations 退役为冷归档。
  * 但「迁移时刻」与「服务升级时刻」不同步——v25/v26 一次性迁移只回填它跑那一刻的行，之后若服务

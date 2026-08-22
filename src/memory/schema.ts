@@ -47,7 +47,7 @@ export const CORE_SCHEMA_SQL = `
   -- 工具调用数据在 tool_calls/message_blocks；conversations 已退役为只读冷归档，doc 22）。
   -- client_msg_id UNIQUE 索引由 addConversationsClientMsgIdColumn migration 创建（避免 legacy schema 与新列冲突）
 
-  -- ─── 对话内联模型（设计文档/22）：messages + message_blocks 是对话的唯一规范存储 ───
+  -- ─── 对话内联模型（设计文档/废弃/22）：messages + message_blocks 是对话的唯一规范存储 ───
   -- 取代 6 张分散内容表（conversations / dialogue_messages / agent_chat_messages /
   -- tool_calls / agent_tool_calls / agent_tasks.payload）的"4 层分离病"，对齐
   -- Claude Code 的 content[] 与 OpenCode 的 parts[]：一条消息 = 有序 Block 数组。
@@ -743,7 +743,7 @@ export const CORE_SCHEMA_SQL = `
 
 export const CORE_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_conv_session ON conversations(session_id, created_at);
-  -- ─── 对话内联模型索引（设计文档/22）───
+  -- ─── 对话内联模型索引（设计文档/废弃/22）───
   CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
   -- user 消息 client_msg_id 精确幂等去重（部分唯一索引：仅 client_msg_id 非空行参与）
   CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_msg
@@ -1010,7 +1010,7 @@ export const KNOWLEDGE_FTS_SQL = `
 `;
 
 /**
- * 对话内联模型 FTS（设计文档/22）：单一全文索引，覆盖所有 text/thinking block 的内容，
+ * 对话内联模型 FTS（设计文档/废弃/22）：单一全文索引，覆盖所有 text/thinking block 的内容，
  * 取代 conversations_fts + dialogue_messages_fts + agent_chat_messages_fts 三张分散索引。
  *
  * 独立（非 external-content）FTS：message_blocks.payload_json 是 JSON，无法直接外链单列；
@@ -1029,7 +1029,7 @@ export const MESSAGE_BLOCKS_FTS_SQL = `
 `;
 
 /**
- * 16.0 任务板表（设计文档/23 §5.1）—— BoardMessage 发言流 + 成员花名册。
+ * 16.0 任务板表（设计文档/废弃/23 §5.1）—— BoardMessage 发言流 + 成员花名册。
  * agent_tasks 加 board 列由 migration v28 ALTER TABLE 补（不在此重建表）。
  */
 export const TASK_BOARD_SQL = `

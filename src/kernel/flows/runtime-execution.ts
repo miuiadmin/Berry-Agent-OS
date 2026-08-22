@@ -180,7 +180,7 @@ export async function executeViaRuntime(
 
   let textAccumulator = '';
 
-  // 对话内联（设计文档/22 期4）：为本次委派创建 BlockCollector——把外部 driver 的
+  // 对话内联（设计文档/废弃/22 期4）：为本次委派创建 BlockCollector——把外部 driver 的
   // tool_running/completed/failed + thinking_delta + text_delta 归一为内联 block（前端实时渲染工具卡 / 思考 / 正文）。
   // Phase C：文本也喂 collector（下方 text_delta case 调 onTextDelta），与 task-flow 统一为 block 单源；
   // 过渡期 stream.text_delta 仍 emit（双写），待前端改读 TextBlock 后删（Commit 4）。
@@ -212,7 +212,7 @@ export async function executeViaRuntime(
         );
       }
       switch (event.kind) {
-        // 对话内联（设计文档/22 期4）：外部 driver 的思考增量 → thinking block（前端可折叠）+ 累积进 pending.reasoning 供持久化
+        // 对话内联（设计文档/废弃/22 期4）：外部 driver 的思考增量 → thinking block（前端可折叠）+ 累积进 pending.reasoning 供持久化
         case 'thinking_delta': {
           const text = event.data.text as string;
           pending.reasoning = (pending.reasoning ?? '') + text;

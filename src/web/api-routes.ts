@@ -198,7 +198,7 @@ export function createApiRouter(deps: WebServerDependencies) {
     json(res, { ok: true });
   });
 
-  // --- 16.0 任务板读取（设计文档/23 §14.5）：前端「任务进展卡」从板拉数据 ---
+  // --- 16.0 任务板读取（设计文档/废弃/23 §14.5）：前端「任务进展卡」从板拉数据 ---
   // 返回指定 task 的板完整状态：发言 thread + 元数据 + 成员花名册，可选带 brain 上下文。
   // 路径参数用 :tid（与 :id 区分语义，强调这是「板」维度）；GET 读写分离，无副作用。
   route('GET', '/tasks/:tid/board', (_req, res, url, params) => {
@@ -275,7 +275,7 @@ export function createApiRouter(deps: WebServerDependencies) {
     json(res, timeline);
   });
 
-  // --- 对话内联时间线（设计文档/22）：单端点返回有序 messages + 各自 blocks，替代旧
+  // --- 对话内联时间线（设计文档/废弃/22）：单端点返回有序 messages + 各自 blocks，替代旧
   // conversations + dialogue_messages + agent_tasks.output_payload 三层拼接。前端刷新拉历史用。
   route('GET', '/sessions/:sid/timeline', (_req, res, url, params) => {
     const limit = safeInt(url.searchParams.get('limit'), 200, 1, 500);

@@ -345,7 +345,7 @@ export function setupDaemonTaskResultHandlers(deps: ForegroundResultDeps): void 
     const pending = sessionManager.getPending(entry.correlationId);
     if (!pending?.streaming) return;
 
-    // 对话内联（设计文档/22 期4）：daemon 工具卡片统一走 BlockCollector（与委派 :1697 同构）。
+    // 对话内联（设计文档/废弃/22 期4）：daemon 工具卡片统一走 BlockCollector（与委派 :1697 同构）。
     // collector key=taskId（== pending.delegationTaskId，daemon 派发时已赋值），turn 终态由
     // complete()→persistInlineBlocks 据此 key dispose 并落 message_blocks（刷新可恢复）。
     const collector = getOrCreateBlockCollector(taskId, pending.sessionId, entry.correlationId);
@@ -360,7 +360,7 @@ export function setupDaemonTaskResultHandlers(deps: ForegroundResultDeps): void 
       collector.onTextDelta(event.data.text);
     }
 
-    // 对话内联（设计文档/22 期4）：daemon 工具调用统一走 BlockCollector（onToolStart/onToolComplete），
+    // 对话内联（设计文档/废弃/22 期4）：daemon 工具调用统一走 BlockCollector（onToolStart/onToolComplete），
     // 与委派路径（:1731/:1742）同构——不再缓冲配对 + emit 旧 stream.tool_call。collector 内部按 callId
     // 配对 start/complete（result 先于 call 到达时 fail-open 降级为 unknown 工具）、算 durationMs、
     // emit stream.block（前端 block-renderers 内联渲染）。终态由 persistInlineBlocks 落 message_blocks。
