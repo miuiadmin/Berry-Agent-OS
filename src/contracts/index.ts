@@ -1,31 +1,7 @@
-export * from './memory.js';
-export * from './agents.js';
-export * from './model.js';
-export * from './approvals.js';
-export * from './workspaces.js';
-export * from './code.js';
-export * from './review.js';
-export * from './messaging.js';
-export * from './permissions.js';
-export * from './audit.js';
-export * from './tasks.js';
-export * from './socket-protocol.js';
-export * from './skills.js';
-export * from './routing.js';
-export * from './delegation.js';
-export * from './messages.js';
-export * from './message-blocks.js';
-export * from './board-message.js';
-export * from './plugins-v2.js';
-export * from './plugins-v2.schema.js';
-export * from './org-tree.js';
-export * from './superior-review.js';
-export * from './agent-runtime.js';
-export * from './checkpoint.js';
-export * from './world-model.js';
-export * from './daemon-events.js';
-export * from './daemon-protocol.js';
-export * from './message-schemas.js';
-export * from './kernel-services.js';
-export * from './capabilities.js';
-export * from './dialogue.js';
+/**
+ * L0 contracts — 跨模块公共契约（零依赖层，拓扑检查强制：不得 import 任何其他模块与三方包）。
+ * 词汇纪律见内核篇 §5：新词先进词汇表再用，禁止双词汇漂移。
+ */
+
+export * from './errors.js';
+export * from './events.js';
