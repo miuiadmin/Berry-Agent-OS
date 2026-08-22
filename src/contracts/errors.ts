@@ -80,7 +80,15 @@ export const FS_NOT_OBSERVED = registerErrorCode('FS_NOT_OBSERVED');
 /** fs：写入时文件版本与观察版本不符（并发修改守卫） */
 export const FS_VERSION_CONFLICT = registerErrorCode('FS_VERSION_CONFLICT');
 
-/** session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板） */
+/** session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板；未知事件类型非 ignorable 同用此码） */
 export const SESSION_FORMAT_UNSUPPORTED = registerErrorCode('SESSION_FORMAT_UNSUPPORTED');
 /** session：同一会话同一时刻只允许单写者——第二写者追加即响亮拒绝（第八批 #13 护栏） */
 export const SESSION_WRITE_CONFLICT = registerErrorCode('SESSION_WRITE_CONFLICT');
+/** session：事件 data 含非 JSON 值（undefined/function/symbol/bigint/循环引用），写入前拒绝 */
+export const SESSION_EVENT_DATA_INVALID = registerErrorCode('SESSION_EVENT_DATA_INVALID');
+/** session：单事件 data 体积超护栏（默认 64 KiB，会话篇 §1.2 拍板）——fail-loud 拒绝不吞垃圾 */
+export const SESSION_EVENT_TOO_LARGE = registerErrorCode('SESSION_EVENT_TOO_LARGE');
+/** session：surfaceOp 遮蔽校验失败（区间非法/溯源不完整/引用未来 seq/tool-result 改了 content 之外字段） */
+export const SESSION_SURFACE_OP_INVALID = registerErrorCode('SESSION_SURFACE_OP_INVALID');
+/** session：fork 边界非法（落在 open turn 内——必须落在 turn 闭合之后，会话篇 §5） */
+export const SESSION_FORK_BOUNDARY_INVALID = registerErrorCode('SESSION_FORK_BOUNDARY_INVALID');

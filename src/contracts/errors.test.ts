@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { AppError, CONTEXT_SERVICE_NOT_FOUND, listErrorCodes, registerErrorCode, TOOL_NOT_STARTED } from './errors.js';
-import type { SessionEventEnvelope } from './events.js';
+import type { SessionEvent } from './events.js';
 
 describe('AppError 单基类', () => {
   it('code 为唯一判据：不派生子类，catch 按 code 分派', () => {
@@ -51,22 +51,34 @@ describe('错误码注册表', () => {
       'FS_VERSION_CONFLICT',
       'SESSION_FORMAT_UNSUPPORTED',
       'SESSION_WRITE_CONFLICT',
+      'SESSION_EVENT_DATA_INVALID',
+      'SESSION_EVENT_TOO_LARGE',
+      'SESSION_SURFACE_OP_INVALID',
+      'SESSION_FORK_BOUNDARY_INVALID',
     ]) {
       expect(codes).toContain(expected);
     }
   });
 });
 
-describe('SessionEventEnvelope 基型', () => {
-  it('信封形状钉死：seq/sessionId/time/kind/data（类型层编译期约束，此处冒烟）', () => {
-    const event: SessionEventEnvelope<{ text: string }> = {
-      seq: 0,
-      sessionId: 's-1',
-      time: '2026-08-23T00:00:00.000Z',
-      kind: 'user/message',
+describe('SessionEvent 信封基型', () => {
+  it('信封形状钉死：type/seq/time(毫秒)/data + 可选遮蔽三字段（会话篇 §1.1）', () => {
+    // 类型层编译期约束，此处冒烟：毫秒 time、type 词汇、surfaceOp/sourceEventSeqs 遮蔽溯源
+    const event: SessionEvent<{ text: string }> = {
+      type: 'user/message',
+      seq: 3,
+      time: 1755900000000,
       data: { text: 'hi' },
     };
-    expect(event.seq).toBe(0);
-    expect(event.kind).toBe('user/message');
+    const replace: SessionEvent<{ content: string }> = {
+      type: 'tool/result',
+      seq: 7,
+      time: 1755900001000,
+      data: { content: '重写后的结果' },
+      surfaceOp: { op: 'replace', start: 4, end: 5 },
+      sourceEventSeqs: [4, 5, 6],
+    };
+    expect(event.seq).toBe(3);
+    expect(replace.surfaceOp?.op).toBe('replace');
   });
 });
