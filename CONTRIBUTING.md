@@ -150,7 +150,7 @@ npm run lint:boundaries    # 检查模块边界违规
 
 ### 前端 E2E 测试
 
-使用 **Playwright** 编写前端端到端测试。
+规划中使用 **Playwright** 编写前端端到端测试（Playwright 尚未安装，落地时再补配置与用例，详见 [测试规则](./docs/测试规则.md)）。
 
 ### 禁止模式
 
@@ -229,10 +229,17 @@ npm run typecheck     # TypeScript 类型检查
 interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: object;
-  execute: (input: any) => Promise<any>;
+  /** Zod schema，运行时转 JSON Schema 提供给模型 */
+  inputSchema: z.ZodType;
+  /** 危险等级：'safe' | 'moderate' | 'dangerous'，驱动权限审批 */
+  dangerLevel: DangerLevel;
+  execute: (input: unknown) => Promise<ToolResult>;
+  /** 可选：标记可与同批次其他 parallelizable 工具并发执行 */
+  parallelizable?: boolean;
 }
 ```
+
+定义见 `src/tools/types.ts`。
 
 3. 在 `src/tools/index.ts` 注册
 

@@ -87,4 +87,4 @@ llm:
   model: mimo-v2-pro
 ```
 
-环境变量覆盖优先级：`BERRY_TEST_LIVE_*` > `LLM_*` > 配置文件默认值。
+环境变量覆盖优先级：`APP_TEST_LIVE_*` > `LLM_*` > 配置文件默认值。

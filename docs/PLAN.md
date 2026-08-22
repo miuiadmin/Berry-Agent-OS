@@ -15,9 +15,9 @@ BerryAgent 是一个双重自进化的通用个人助手：
 
 - TypeScript + SQLite。
 - 第一版就是多 Agent 后台服务，不做单进程简化版。
-- `brain-agent` 和 `conversation-agent` 常驻。
-- `learning-agent`、`skills-agent`、`plugin-builder-agent`、`code-agent`、`evolution-agent`、`memory-agent` 和 `skill-tester-agent` 按需拉起。
-- 设计目标中 Level 2 智能体共 7 个，Level 3 智能体共 1 个。
+- `brain-agent`、`conversation-agent`、`permission-agent` 和 `reviewer-agent` 常驻。
+- `learning-agent`、`skills-agent`、`plugin-builder-agent`、`code-agent`、`evolution-agent`、`memory-agent`、`skill-tester-agent` 和 `auditor-agent` 按需拉起。
+- 智能体分级现状（共 12 个）：Level 1 共 3 个（brain / permission / reviewer，常驻），Level 2 共 6 个（按需），Level 3 共 3 个（conversation 常驻 + evolution / memory 按需）。
 - Berry Service 是对外常驻服务。
 - AppCore 是服务内核心运行时，不是 Agent。
 - Agent Manager 负责 Agent 生命周期。
