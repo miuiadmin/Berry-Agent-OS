@@ -366,6 +366,16 @@ describe('fork 种子（前缀 + end-seed 边界）', () => {
     expect(child.events[5]!.seq).toBe(5);
   });
 
+  it('fork 子会话默认不继承父 emit：子事件不触发父观察者（接线由持久化门面注入）', () => {
+    const emitted: SessionEvent[] = [];
+    const parent = new Session({ emit: (e) => emitted.push(e) });
+    parent.append('turn/start', {});
+    parent.append('turn/end', { reason: 'completed' });
+    emitted.length = 0; // 排除构造期事件
+    parent.fork().append('turn/start', {});
+    expect(emitted).toEqual([]); // 父 emit 闭包捕获父实例，继承会让子事件写进父队列
+  });
+
   it('指定边界 fork：消费侧 slice(seedLength) 只见活区', () => {
     // 双 turn 会话：turn1（纯文本）seq 0-3 已闭合，turn2 从 seq 4 起
     const parent = makeChatSession();

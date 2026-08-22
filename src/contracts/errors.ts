@@ -92,3 +92,5 @@ export const SESSION_EVENT_TOO_LARGE = registerErrorCode('SESSION_EVENT_TOO_LARG
 export const SESSION_SURFACE_OP_INVALID = registerErrorCode('SESSION_SURFACE_OP_INVALID');
 /** session：fork 边界非法（落在 open turn 内——必须落在 turn 闭合之后，会话篇 §5） */
 export const SESSION_FORK_BOUNDARY_INVALID = registerErrorCode('SESSION_FORK_BOUNDARY_INVALID');
+/** persist：write-behind 批量落盘失败（批次保留、自动重试暂停，显式 flush 重试——会话篇 §6 链第 2 步） */
+export const PERSIST_BATCH_WRITE_FAILED = registerErrorCode('PERSIST_BATCH_WRITE_FAILED');

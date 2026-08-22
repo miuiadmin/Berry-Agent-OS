@@ -45,6 +45,12 @@ export interface SessionOptions {
   /** origin 缺省 'user'；随 fork/恢复场景显式传入 */
   origin?: SessionHeader['origin'];
   parentSession?: string;
+  /**
+   * 种子边界显式覆盖（恢复路径用）：种子数组可能长于血缘边界（fork 子会话的
+   * 活区事件随种子一起读回），seedLength 仍应以 sessions 表血缘为准。
+   * 缺省 = seed.length。
+   */
+  seedLength?: number;
   delegationDepth?: number;
   /** 单事件 data 体积护栏（字节，默认 64 KiB——会话篇 §1.2 拍板） */
   maxEventBytes?: number;
@@ -80,7 +86,7 @@ export class Session {
     this.header = {
       sessionId: options.sessionId ?? randomUUID(),
       parentSession: options.parentSession,
-      seedLength: options.seed?.length ?? 0,
+      seedLength: options.seedLength ?? options.seed?.length ?? 0,
       origin: options.origin ?? 'user',
       delegationDepth: options.delegationDepth ?? 0,
     };
@@ -237,10 +243,20 @@ export class Session {
   /**
    * fork 种子（会话篇 §5）：以 [0, boundary) 前缀为种子建新会话，
    * 种子收尾追加 session/end-seed 标记边界，读侧 consumers 从 seedLength 起读活区。
+   * 注意：子会话默认不继承父 emit——父 emit 闭包捕获的是父实例，继承会让子会话
+   * 事件写进父的观察者/队列（实测即 cursor 断裂）；持久化接线由 Persistence.forkSession 注入。
    * @param opts.boundary 种子边界（缺省 = 当前日志全长，快照式 fork）
+   * @param opts.emit 子会话活体通知回调（持久化门面注入自引用接线）
    * @throws AppError SESSION_FORK_BOUNDARY_INVALID 边界落在敞开 turn 内或越界
    */
-  fork(opts: { boundary?: number; sessionId?: string; origin?: 'fork' | 'delegation' } = {}): Session {
+  fork(
+    opts: {
+      boundary?: number;
+      sessionId?: string;
+      origin?: 'fork' | 'delegation';
+      emit?: (event: SessionEvent) => void;
+    } = {},
+  ): Session {
     const boundary = opts.boundary ?? this.log.length;
     if (!(Number.isInteger(boundary) && boundary >= 0 && boundary <= this.log.length)) {
       throw new AppError(SESSION_FORK_BOUNDARY_INVALID, `边界越界：${boundary}（日志长度 ${this.log.length}）`);
@@ -269,7 +285,8 @@ export class Session {
       origin: opts.origin ?? 'fork',
       parentSession: this.header.sessionId,
       delegationDepth: this.header.delegationDepth + (opts.origin === 'delegation' ? 1 : 0),
-      emit: this.emitLive,
+      // 不传 this.emitLive：父闭包捕获父实例，继承 = 子事件写进父队列（见上注释）
+      emit: opts.emit,
       maxEventBytes: this.maxEventBytes,
     });
     return child;
