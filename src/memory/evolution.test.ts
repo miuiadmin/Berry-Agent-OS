@@ -7,7 +7,7 @@ import { TokenBudgetController } from '../llm/token-budget.js';
 import { initDb, closeDb, getDb } from './db.js';
 
 /**
- * evolution 后台每日预算软闸门测试（设计文档/03-参考/mercury-v1.2.0-吸纳建议.md §D）。
+ * evolution 后台每日预算软闸门测试（设计文档/废弃/mercury-v1.2.0-吸纳建议.md §D）。
  *
  * backgroundBudgetAllows 读全局 getDb() 的 token_usage 表当日聚合用量，与阈值 0.8 比较。
  * 用 TokenBudgetController.recordUsage（官方播种 API）写入用量，避免裸 SQL 列名漂移。
