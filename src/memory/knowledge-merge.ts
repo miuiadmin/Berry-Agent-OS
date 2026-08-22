@@ -1,7 +1,7 @@
 /**
  * 知识记忆的确定性合并 / 冲突消解 —— 借鉴 mercury second brain，并做 CJK 适配（berry 摘要为中文）。
  *
- * 设计目的（见 设计文档/参考-mercury-v1.2.0-吸纳建议.md §A）：
+ * 设计目的（见 设计文档/03-参考/mercury-v1.2.0-吸纳建议.md §A）：
  * berry 原 `addKnowledge` 只在 summary 完全相等时合并，模糊合并 / 冲突消解全部押在
  * `evolution.ts` 的 LLM `consolidateMemories` pass（且 ≥3 条 active 才跑）。本模块把
  * 「明显同义」和「明显极性冲突」两类用确定性代码在插入时即时处理，零 LLM 成本、即时消解。

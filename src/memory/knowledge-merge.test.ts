@@ -17,7 +17,7 @@ import { initDb, closeDb, getDb } from './db.js';
 /**
  * knowledge-merge 纯函数单元测试 + addKnowledge 集成测试。
  *
- * 覆盖 设计文档/参考-mercury-v1.2.0-吸纳建议.md §A：
+ * 覆盖 设计文档/03-参考/mercury-v1.2.0-吸纳建议.md §A：
  * 插入时确定性模糊合并 + 极性冲突裁决。同时验证 CJK 字面量（POLARITY_PAIRS / CJK_NEGATIONS）
  * 未在写入时损坏——若中文极性词被编码破坏，hasConflict 相关用例会立刻失败。
  */
