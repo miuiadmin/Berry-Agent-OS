@@ -98,3 +98,7 @@ export const PERSIST_BATCH_WRITE_FAILED = registerErrorCode('PERSIST_BATCH_WRITE
 export const AGENT_ROLE_EXISTS = registerErrorCode('AGENT_ROLE_EXISTS');
 /** agent：continueRun 续入点非法——末消息经 convertToLlm 后必须是 user 或 toolResult（骨架篇 §2.1） */
 export const AGENT_CONTINUE_INVALID = registerErrorCode('AGENT_CONTINUE_INVALID');
+/** llm：模型标识格式非法——必须是 "provider/model-id" 形式（首斜杠分割，model-id 可再含斜杠如 openrouter 路径式 id） */
+export const LLM_MODEL_SPEC_INVALID = registerErrorCode('LLM_MODEL_SPEC_INVALID');
+/** llm：模型查无——provider 未注册或其目录中无该 model id（fail-loud，不静默降级到别的模型） */
+export const LLM_MODEL_NOT_FOUND = registerErrorCode('LLM_MODEL_NOT_FOUND');

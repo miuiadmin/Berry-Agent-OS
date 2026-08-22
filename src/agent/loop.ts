@@ -19,7 +19,10 @@ import type {
   LlmTool,
   Message,
   StopReason,
+  StreamFn,
+  StreamFnOptions,
   TextContent,
+  ThinkingLevel,
   ToolResultMessage,
   Usage,
 } from '../contracts/llm.js';
@@ -27,31 +30,9 @@ import type { AgentEventSink, RunStatus } from './events.js';
 import type { AgentMessage } from './messages.js';
 import type { AgentTool, AgentToolCall, AgentToolResult, ToolExecutionMode } from './tools.js';
 
-/* ---------------- 模型层注入面（loop 只认函数签名，骨架篇 §3.1/§5） ---------------- */
-
-/** 思考档位（pi-ai 同构七值；xhigh/max 仅部分模型家族支持） */
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-
-/** StreamFn 每次调用的选项（model 为模型 id 字符串——解析归 llm 模块，loop 不持模型对象） */
-export interface StreamFnOptions {
-  /** 模型 id（llm 模块解析为具体 provider/model；prepareNextTurn 可逐轮替换） */
-  model: string;
-  thinkingLevel?: ThinkingLevel;
-  /** 凭证（getApiKey 回调解析所得；缺省 undefined 由 llm 层走持久化凭证） */
-  apiKey?: string;
-}
-
-/**
- * 模型层注入签名（llm 模块整体替换位）。契约：**永不抛错**——一切失败编码为
- * 返回流的 error 终止事件 + 最终消息 stopReason='error'|'aborted' + errorMessage
- * + diagnostics（contracts/llm.ts AssistantStream 契约注释）。这是 loop 零 try/catch
- * 的契约根基：错误是数据不是异常（骨架篇 §3.1）。
- */
-export type StreamFn = (
-  context: LlmContext,
-  options: StreamFnOptions,
-  signal?: AbortSignal,
-) => AssistantStream | Promise<AssistantStream>;
+// 模型层注入面三类型已上移 contracts/llm.ts（agent 与 llm 的唯一会合点——llm 模块
+// 产出该签名却不可依赖 agent，类型必须住在契约层）；此处再出口保持 agent 消费方兼容
+export type { StreamFn, StreamFnOptions, ThinkingLevel } from '../contracts/llm.js';
 
 /* ---------------- 上下文与回调面 ---------------- */
 

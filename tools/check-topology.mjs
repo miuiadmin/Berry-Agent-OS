@@ -141,8 +141,8 @@ for (const file of collect(srcRoot)) {
       continue;
     }
 
-    // 裸导入
-    const bare = spec.startsWith('@') ? spec : spec.split('/').at(0);
+    // 裸导入：scoped 包归一到 @scope/name（子路径导入按包级白名单放行——同包 subpath 不算新依赖）
+    const bare = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/').at(0);
     if (TEST_ONLY_BARE.has(spec)) {
       if (!isTest) violations.push(`${relative(file)}：vitest 只许出现在测试文件`);
       continue;
