@@ -2,6 +2,8 @@
 
 感谢你对 BerryAgent 项目的关注！本文档将帮助你快速了解项目规范并顺利参与开发。
 
+> ⚠️ **2026-08-22：1.0 重置起草中**。本文描述 old-v2（当前运行代码）的开发流程，照常适用；1.0 落地后随代码重写（[设计文档索引](设计文档/index.md)）。
+
 ## 目录
 
 - [开发环境搭建](#开发环境搭建)
@@ -40,13 +42,13 @@ cd web && npm install && cd ..
 ### 启动开发环境
 
 ```bash
-# 推荐方式：同时启动后端 + 前端
-npm run dev:full
+# 推荐（硬规则：本地开发必须 debug 级别，见 CLAUDE.md）
+npm run dev:debug    # 同时启动后端 + 前端 + debug 日志
 
 # 或分别启动
 npm run dev          # 仅后端（CLI + API，端口 3888）
-npm run dev:debug    # 后端 + debug 日志（可用 --log-level 调整）
 npm run dev:web      # 仅前端（Vite :3889，绑定 0.0.0.0 支持局域网）
+npm run dev:full     # 后端 + 前端，info 级别——仅性能基准 / 噪音压测用
 ```
 
 ### 生产构建
@@ -256,9 +258,9 @@ interface ToolDefinition {
 | `npm install` | 安装后端依赖 |
 | `cd web && npm install` | 安装前端依赖 |
 | `npm run dev` | 启动后端开发（端口 3888） |
-| `npm run dev:debug` | 后端 + debug 日志 |
+| `npm run dev:debug` | 后端 + 前端 + debug 日志（本地开发首选） |
 | `npm run dev:web` | 启动前端开发（端口 3889，绑定 0.0.0.0） |
-| `npm run dev:full` | 同时启动后端 + 前端 |
+| `npm run dev:full` | 后端 + 前端，info 级别（仅性能基准用） |
 | `npm run build:full` | 构建生产版本 |
 | `npm test` | 运行全部测试 |
 | `npm run typecheck` | TypeScript 类型检查 |
