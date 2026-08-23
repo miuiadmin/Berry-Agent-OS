@@ -189,25 +189,37 @@ describe('ctx.llm.complete：三条硬要求', () => {
   });
 });
 
-describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主化）', () => {
-  /** 可控时钟组装（日历日懒重置测试注入步进日期） */
-  function makeBudgetService(budget: number, now: () => Date) {
+describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主化，2026-08-24 第十一批 durable 底账）', () => {
+  /**
+   * 模拟装配层 durable 闭环（服务本层不持有账，只持有闸门机制）：ledger 扮演
+   * 会话日志——onUsage 写侧（组合根在此落 llm/usage durable 事件，只计
+   * background、与聚合口径一致）+ backgroundSpentToday 读侧（persist 聚合查询），
+   * 两侧经同一变量闭合为同一本账。日历日窗口/跨会话聚合语义归 persist 侧测试。
+   */
+  function makeBudgetService(budget: number, ledger: { spent: number } = { spent: 0 }) {
     const faux = fauxProvider({ provider: 'faux-test', models: [{ id: 'm1' }] });
     const runtime = createLlmRuntime({ providers: [faux.provider] });
     const service = createLlmService({
       runtime,
       defaultModel: () => 'faux-test/m1',
       backgroundBudgetTokens: budget,
-      now,
+      // 写侧 seam：组合根经 onUsage 落 llm/usage 事件（此处闭包累计代演装配层）
+      onUsage: (result) => {
+        if (result.priority === 'background') {
+          ledger.spent += result.usage.input + result.usage.output;
+        }
+      },
+      // 读侧 seam：聚合查询注入（真实形态 = persist.spentBackgroundTokensSince 当日窗口）
+      backgroundSpentToday: () => ledger.spent,
     });
     return { faux, service };
   }
 
   it('foreground 恒放行：预算 0 也不拦用户可见请求（priority 显式或缺省同面）', async () => {
-    const { faux, service } = makeBudgetService(0, () => new Date('2026-08-24T10:00:00'));
+    const { faux, service } = makeBudgetService(0, { spent: 1 }); // 账上已有耗用
     faux.setResponses([() => messageOf('stop')]);
     expect(service.canAfford('foreground')).toBe(true);
-    expect(service.canAfford('background')).toBe(false);
+    expect(service.canAfford('background')).toBe(false); // spent 1 ≥ 预算 0
     await expect(service.complete({ messages: [userMsg('x')], priority: 'foreground' })).resolves.toMatchObject({
       message: { stopReason: 'stop' },
     });
@@ -219,7 +231,7 @@ describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主�
   });
 
   it('后台闸门拒发：预算耗尽 → LLM_BUDGET_EXCEEDED 且零请求发出', async () => {
-    const { faux, service } = makeBudgetService(0, () => new Date('2026-08-24T10:00:00'));
+    const { faux, service } = makeBudgetService(0); // 空账零耗，预算 0 即耗尽
     let produced = 0;
     faux.setResponses([
       () => {
@@ -233,14 +245,18 @@ describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主�
     expect(produced).toBe(0); // 拒在发出前——模型层零消耗
   });
 
-  it('成功后台调用入账：首发放行、二发拒发（spent 累计达限额）', async () => {
-    // 预算 1：首发 0<1 放行；faux 按文本重算用量（prompt/response 非空 → in+out ≥ 1）
-    // → 入账后二发 spent≥1 即拒。二发被拒 = 入账已发生的确定性证据。
-    const { faux, service } = makeBudgetService(1, () => new Date('2026-08-24T10:00:00'));
+  it('外部入账驱动闸门：首发放行、经 onUsage 入账后二发拒发（durable 闭环 seam 契约）', async () => {
+    // 预算 1、账上 0：首发放行；faux 按文本重算用量（prompt/response 非空 → in+out ≥ 1）
+    // → onUsage 写侧入账后账面 ≥1，二发即拒。二发被拒 = 写侧 seam 已发生作用的确定性证据。
+    const ledger = { spent: 0 };
+    const { faux, service } = makeBudgetService(1, ledger);
     faux.setResponses([() => messageOf('stop')]);
     const first = await service.complete({ messages: [userMsg('背景摘要任务')], priority: 'background' });
     expect(first.message.stopReason).toBe('stop');
-    expect(service.canAfford('background')).toBe(false); // 入账后闸门关
+    expect(first.priority).toBe('background'); // 计量身份随结果——装配层落事件分道用
+    expect(first.callId).toMatch(/^[0-9a-f-]{36}$/); // settlement 幂等身份（uuid 标准形状）
+    expect(ledger.spent).toBeGreaterThan(0); // 写侧已入账
+    expect(service.canAfford('background')).toBe(false); // 读侧读回同一本账——闸门关
     faux.setResponses([() => messageOf('stop')]);
     await expect(service.complete({ messages: [userMsg('再来一发')], priority: 'background' })).rejects.toMatchObject({
       code: LLM_BUDGET_EXCEEDED,
@@ -252,18 +268,29 @@ describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主�
     });
   });
 
-  it('日历日懒重置：时钟跨天后账归零、后台再放行', async () => {
-    let date = new Date('2026-08-24T23:50:00'); // 当天尾段
-    const { faux, service } = makeBudgetService(1, () => date);
+  it('缺省无装配接线 = 无已耗：backgroundSpentToday 不注入时后台调用不误拦', async () => {
+    // dump-config 纯合成树等无持久化装配面：缺省 () => 0——缺账本不是错，闸门只看限额
+    const faux = fauxProvider({ provider: 'faux-test', models: [{ id: 'm1' }] });
+    const service = createLlmService({
+      runtime: createLlmRuntime({ providers: [faux.provider] }),
+      defaultModel: () => 'faux-test/m1',
+      backgroundBudgetTokens: 100,
+    });
+    expect(service.canAfford('background')).toBe(true);
     faux.setResponses([() => messageOf('stop')]);
-    await service.complete({ messages: [userMsg('耗尽当天预算')], priority: 'background' });
-    expect(service.canAfford('background')).toBe(false);
-    date = new Date('2026-08-25T00:10:00'); // 跨天（本地日历日）
-    expect(service.canAfford('background')).toBe(true); // 懒重置——读时发现日键变了即归零
-    faux.setResponses([() => messageOf('stop')]);
-    await expect(service.complete({ messages: [userMsg('新的一天')], priority: 'background' })).resolves.toMatchObject({
+    await expect(service.complete({ messages: [userMsg('x')], priority: 'background' })).resolves.toMatchObject({
       message: { stopReason: 'stop' },
     });
+  });
+
+  it('计量身份：callId 每次调用唯一、priority 缺省 foreground（两者即 llm/usage 事件字段源）', async () => {
+    const { faux, service } = makeBudgetService(1_000_000);
+    faux.setResponses([() => messageOf('stop'), () => messageOf('stop')]);
+    const a = await service.complete({ messages: [userMsg('一')] });
+    const b = await service.complete({ messages: [userMsg('二')], priority: 'background' });
+    expect(a.priority).toBe('foreground'); // 缺省 = 用户可见面
+    expect(b.priority).toBe('background'); // 显式声明透传
+    expect(a.callId).not.toBe(b.callId); // 每次调用唯一——write-behind 重试去重锚点
   });
 });
 

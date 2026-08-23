@@ -9,9 +9,14 @@
  * 2. 轻量单发就是单发——不起 subagent loop（loop 装配是任务委派的成本，不是摘要/分类的成本）；
  * 3. 复用 resolveModel + retryAssistantCall + StreamFnDefaults——与主对话同一模型解析、
  *    重试语义与请求参数面，插件不另立炉灶。
+ *
+ * 预算闸门底账 durable 化（2026-08-24 第十一批拍板 #1，loopx 读码启发 #1——会话篇 §1.1）：
+ * 花销 = llm/usage durable 事件（onUsage 写侧经组合根落日志），余额 = 注入的聚合查询
+ * （backgroundSpentToday 读侧）——余额不存储、重放推导；原 per-process 内存账形态退役。
  */
 
 import type { AssistantMessage, Message, Usage } from '../contracts/llm.js';
+import { randomUUID } from 'node:crypto';
 import {
   AppError,
   LLM_BUDGET_EXCEEDED,
@@ -52,10 +57,18 @@ export interface CompleteRequest {
   providerNative?: Record<string, unknown>;
 }
 
-/** 单发补全结果：终态消息 + 用量（usage 已过 onUsage 计量回调） */
+/** 单发补全结果：终态消息 + 用量 + 计量身份（usage 已过 onUsage 计量回调） */
 export interface CompleteResult {
   message: AssistantMessage;
   usage: Usage;
+  /**
+   * 本次补全的结算 id（settlement 幂等身份，2026-08-24 第十一批——会话篇 §1.1
+   * llm/usage 事件的 callId 字段源）：每次 complete 调用唯一生成，装配层落
+   * durable 计量事件携此 id——write-behind 重试去重的锚点。
+   */
+  callId: string;
+  /** 本次调用的预算道（装配层落 llm/usage 事件的 priority 字段源） */
+  priority: 'background' | 'foreground';
 }
 
 /** ctx.llm 服务面（骨架篇 §9.3：complete + provider 注册/注销 + canAfford 预算闸门） */
@@ -68,8 +81,10 @@ export interface LlmService {
   complete(req: CompleteRequest): Promise<CompleteResult>;
   /**
    * 预算闸门查询（记忆篇铁律 4 宿主化数据源）：'foreground' 恒 true；'background'
-   * = 当日后台累计 tokens（in+out）< 限额。数据源 = 本服务内部 per-process 内存账
-   * （complete 后台调用自动入账、按本地日历日懒重置）——双开 seam：两进程各持独立账。
+   * = 当日后台累计 tokens（in+out）< 限额。数据源 = 注入的聚合查询
+   * （backgroundSpentToday——底账为会话日志 llm/usage durable 事件的投影，
+   * 2026-08-24 第十一批拍板 #1：花销是事件流事实、余额不存储，重启/双开/审计
+   * 三题一次解；llm 模块不持有账，只持有闸门机制）。
    */
   canAfford(priority: 'background' | 'foreground'): boolean;
 }
@@ -85,18 +100,23 @@ export interface LlmServiceOptions {
   /** 有界重试策略（缺省开 1 次重试——transient 网络抖动兜底，非 loop 级成本） */
   retry?: RetryPolicy;
   /**
-   * 用量计量回调（外部观测 seam——诊断/持久账接线用；内部预算账与此独立、
-   * 由 complete 后台调用自动入账，无需组合根接线）。
+   * 用量计量回调（底账接线 seam——2026-08-24 第十一批后即 canAfford 数据源的
+   * 写侧：组合根在此落 llm/usage durable 事件，read 侧聚合查询注入
+   * backgroundSpentToday，两侧经事件日志闭合为同一本账）。
    * 回调异常被隔离：计量是观测面，不拖垮补全结果本身。
    */
   onUsage?: (result: CompleteResult, modelSpec: string) => void;
   /** 当日后台预算限额 tokens（in+out 合计；缺省 4,000,000——起草值随实测调，骨架篇 §9.3） */
   backgroundBudgetTokens?: number;
   /**
-   * 时钟注入（缺省真实时间）：日历日重置判定的基准。测试注入固定/步进时钟
-   * 驱动跨天重置；生产恒缺省——账的日界取本地时区日历日。
+   * 当日后台已耗查询（缺省 () => 0——无装配接线即无已耗；生产由组合根注入：
+   * 对会话日志 llm/usage 事件的当日时间窗聚合，persist 模块实现）。
+   * 底账 durable 化（2026-08-24 第十一批拍板 #1，loopx 读码启发 #1——余额不存、
+   * 重放推导）：替代原 per-process 内存账——重启不清零、双开各记半边两 seam 当日清除。
+   * write-behind 批落窗口内的最近一笔可能未及落盘（闸门偏松一笔）——与
+   * 「最后一发可略超限额」同语义，预算是软闸门不是安全边界。
    */
-  now?: () => Date;
+  backgroundSpentToday?: () => number;
 }
 
 /** 缺省重试策略：开 1 次重试、500ms 起步指数退避（SDK 级 maxRetries 之外的有界第二层） */
@@ -105,25 +125,8 @@ const DEFAULT_RETRY: RetryPolicy = { enabled: true, maxRetries: 1, baseDelayMs: 
 /** providerNative 内禁入的凭证类键（与参数面 apiKey 同禁——透传槽不做洗白通道） */
 const FORBIDDEN_PROVIDER_NATIVE_KEYS = new Set(['apikey', 'authorization']);
 
-/** 缺省后台预算：当日后台补全 tokens（in+out）限额（起草值，骨架篇 §9.3） */
+/** 缺省后台预算：当日后台补全 tokens（in+out 合计）限额（起草值，骨架篇 §9.3） */
 const DEFAULT_BACKGROUND_BUDGET = 4_000_000;
-
-/** 本地时区日历日键（YYYY-MM-DD——账的日界） */
-function localDayKey(date: Date): string {
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-/**
- * 后台预算账（per-process 内存账）：当日后台补全累计 tokens + 账的日历日键。
- * 懒重置——读写时发现日键不是今天即归零重开（无需定时器）。双开 seam：两进程
- * 各持一份（登记于骨架篇 §9.3，跨进程持久账随真实双开预算需求出现再落）。
- */
-interface BackgroundAccount {
-  dayKey: string;
-  spent: number;
-}
 
 /**
  * 创建 ctx.llm 具名服务（组合根 provide('llm') 的那一行所注对象）。
@@ -131,16 +134,8 @@ interface BackgroundAccount {
 export function createLlmService(options: LlmServiceOptions): LlmService {
   const { runtime, defaults = {}, defaultModel, retry = DEFAULT_RETRY } = options;
   const budget = options.backgroundBudgetTokens ?? DEFAULT_BACKGROUND_BUDGET;
-  const clock = options.now ?? (() => new Date());
-  /** 后台预算账（闭包内私有——canAfford 数据源） */
-  let account: BackgroundAccount = { dayKey: localDayKey(clock()), spent: 0 };
-
-  /** 账对齐到今天（跨天懒重置）后返回当日已耗 */
-  const spentToday = (): number => {
-    const today = localDayKey(clock());
-    if (account.dayKey !== today) account = { dayKey: today, spent: 0 };
-    return account.spent;
-  };
+  // 当日后台已耗 = 注入的聚合查询（底账 = 会话日志 llm/usage 事件投影，缺省无已耗）
+  const spentToday = options.backgroundSpentToday ?? (() => 0);
 
   const canAfford = (priority: 'background' | 'foreground'): boolean =>
     priority === 'foreground' ? true : spentToday() < budget;
@@ -165,8 +160,10 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
           'M1 不支持结构化输出（pi-ai 面无此腿）——schema 随 M2 provider 钩子收口',
         );
       }
-      // 预算闸门（骨架篇 §9.3）：后台调用且当日已耗尽 → 拒发。检查在调用前、入账在
-      // 成功后——最后一发可略超限额（check-then-act 于单发粒度，无并发窗口：JS 单线程）
+      // 预算闸门（骨架篇 §9.3）：后台调用且当日已耗尽 → 拒发。检查在调用前；入账
+      // 在成功后（装配层经 onUsage 落 llm/usage durable 事件）——最后一发可略超限额
+      //（check-then-act 于单发粒度；另 write-behind 批落窗口内的最近一笔闸门可能未见，
+      // 同为「略超」语义——预算是软闸门，不是安全边界）
       if (req.priority === 'background' && !canAfford('background')) {
         throw new AppError(
           LLM_BUDGET_EXCEEDED,
@@ -212,13 +209,15 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
         throw new AppError(LLM_COMPLETE_FAILED, message.errorMessage ?? '单发补全失败（pi-ai 错误终态）');
       }
 
-      const result: CompleteResult = { message, usage: message.usage };
-      // 后台用量入预算账（in+out 合计；懒重置后累加——入账与闸门同账同日键）
-      if (req.priority === 'background') {
-        spentToday();
-        account.spent += message.usage.input + message.usage.output;
-      }
-      // 计量 seam：回调异常隔离（观测面不拖垮补全结果）
+      // 计量身份随结果携带：callId 供装配层落 llm/usage（settlement 幂等），
+      // priority 供事件分道（聚合只计 background）
+      const result: CompleteResult = {
+        message,
+        usage: message.usage,
+        callId: randomUUID(),
+        priority: req.priority ?? 'foreground',
+      };
+      // 计量 seam：回调异常隔离（观测面不拖垮补全结果；底账由装配层在此落 durable）
       try {
         options.onUsage?.(result, modelSpec);
       } catch {

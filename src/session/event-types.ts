@@ -14,7 +14,7 @@ export type SessionEventCategory =
   | 'surface'
   /** 快照事件：组装参数变化时整体重写（request/header） */
   | 'snapshot'
-  /** log-only：落日志即目的（不进表面推导）——approval/*、gate/decision、sandbox/mode，以及 turn 边界与种子标记等结构事件 */
+  /** log-only：落日志即目的（不进表面推导）——approval/*、gate/decision、sandbox/mode、llm/usage，以及 turn 边界与种子标记等结构事件 */
   | 'log-only';
 
 /** 事件类型注册项 */
@@ -135,8 +135,25 @@ export interface SandboxModeData {
   readonly mode: string;
 }
 
+/**
+ * llm/usage 载荷（log-only，2026-08-24 第十一批拍板 #1——会话篇 §1.1）：
+ * ctx.llm.complete 单发补全通道的计量事实。底账 durable 化——花销是事件流事实、
+ * 余额（canAfford）是投影查询不存储；callId = settlement 幂等身份（write-behind
+ * 重试去重锚点）。token 原始值入账，货币折算在投影做（价格表更新不回改历史）。
+ */
+export interface LlmUsageData {
+  /** 本次补全的结算 id（每次 complete 调用唯一——randomUUID） */
+  readonly callId: string;
+  /** 模型标识（"provider/model-id"） */
+  readonly model: string;
+  /** 预算道：'background' 接闸门（当日聚合只计 background） */
+  readonly priority: 'background' | 'foreground';
+  /** 原始用量（in/out token 数——聚合 SUM(input+output)） */
+  readonly usage: { readonly input: number; readonly output: number };
+}
+
 /* ------------------------------------------------------------------ */
-/* 核心清单（首批 13 类，模块加载时注册）                                */
+/* 核心清单（首批 14 类，模块加载时注册）                                */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -157,6 +174,7 @@ export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'approval/decided', category: 'log-only' },
   { type: 'gate/decision', category: 'log-only' },
   { type: 'sandbox/mode', category: 'log-only' },
+  { type: 'llm/usage', category: 'log-only' },
 ];
 
 for (const def of CORE_EVENT_TYPES) {

@@ -157,7 +157,7 @@ describe('事件词汇纪律', () => {
     expect(event.ignorable).toBeUndefined();
   });
 
-  it('核心 13 类词汇全在注册表且格式合规', () => {
+  it('核心 14 类词汇全在注册表且格式合规', () => {
     for (const type of [
       'turn/start',
       'turn/end',
@@ -172,6 +172,7 @@ describe('事件词汇纪律', () => {
       'approval/decided',
       'gate/decision',
       'sandbox/mode',
+      'llm/usage',
     ]) {
       expect(getSessionEventType(type), type).toBeDefined();
     }

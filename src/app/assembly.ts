@@ -24,7 +24,7 @@ import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { loadPlugins } from '../context/loader.js';
-import { Persistence } from '../persist/index.js';
+import { Persistence, localDayStartMs, spentBackgroundTokensSince } from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn } from '../llm/index.js';
 import { createToolPipeline } from '../tools/index.js';
@@ -421,9 +421,24 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     createLlmService({
       runtime: llm,
       defaultModel: () => model,
-      // 外部观测 seam（debug 日志即可观测）；canAfford 预算账在服务内部自动入账，无需接线
-      onUsage: (result, modelSpec) =>
-        ctx.logger.debug('llm.complete 用量入账', { model: modelSpec, totalTokens: result.usage.totalTokens }),
+      // 底账写侧（2026-08-24 第十一批拍板 #1，会话篇 §1.1）：complete 成功即落
+      // llm/usage durable 事件（log-only 计量事实；callId = settlement 幂等身份，
+      // write-behind 重试去重锚点）。session 为活引用——/new 热切换后记到新会话；
+      // 无持久层（诊断装配）只 debug 不落账，读侧聚合缺省 0
+      onUsage: (result, modelSpec) => {
+        session?.append('llm/usage', {
+          callId: result.callId,
+          model: modelSpec,
+          priority: result.priority,
+          usage: { input: result.usage.input, output: result.usage.output },
+        });
+        ctx.logger.debug('llm.complete 用量入账', { model: modelSpec, totalTokens: result.usage.totalTokens });
+      },
+      // 底账读侧：当日后台累计 = llm/usage 事件当日时间窗聚合投影（persist 实现，
+      // 余额不存储——重启不清零、双开经 WAL 各记可见、当日谁花了多少可审计）
+      ...(persistence
+        ? { backgroundSpentToday: () => spentBackgroundTokensSince(persistence.store, localDayStartMs()) }
+        : {}),
     }),
   );
 
