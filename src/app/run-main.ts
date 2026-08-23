@@ -9,6 +9,7 @@ import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage } from '../contracts/llm.js';
 import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
+import { installExitSignals } from './signals.js';
 
 /** 取 run 内最后一条 assistant 消息的文本（text 块拼接；无则 undefined） */
 function lastAssistantText(result: RunResult): string | undefined {
@@ -33,9 +34,19 @@ function lastAssistantText(result: RunResult): string | undefined {
  */
 export async function runOnceMain(message: string, options: RuntimeOptions = {}): Promise<number> {
   const runtime = createBerryRuntime({ ...options, interactive: false });
-  // SIGINT：优雅 abort 当前 run（一次性的信号——resolve 后 run 即终再走关停）
-  const onInterrupt = () => runtime.conversation.requestQuit();
-  process.once('SIGINT', onInterrupt);
+  // 信号编舞（骨架篇 §1.3 全表，与 TUI 入口共用）：SIGINT 首次优雅 abort 当前
+  // run（事件日志留完整痕迹）/ 二次立即 130 / SIGTERM 143 / SIGHUP 129 /
+  // uncaught/unhandled 不吞 exit(1)
+  const signals = installExitSignals({
+    onGracefulQuit: () => runtime.conversation.requestQuit(),
+    onFatal: async (error, kind) => {
+      runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
+        kind,
+        error: error instanceof Error ? error.stack : String(error),
+      });
+      await runtime.persistence?.flush().catch(() => undefined);
+    },
+  });
 
   let code: number;
   try {
@@ -53,8 +64,10 @@ export async function runOnceMain(message: string, options: RuntimeOptions = {})
       code = 0;
     }
   } finally {
-    process.removeListener('SIGINT', onInterrupt);
+    signals.dispose();
     await runtime.shutdown();
   }
-  return code;
+  // 优雅路退出码：SIGINT 首次 = 0；SIGTERM/SIGHUP 采纳记账码（仅覆盖 0——
+  // run 自身失败码 1 优先于信号记账）
+  return code === 0 ? signals.exitCode : code;
 }
