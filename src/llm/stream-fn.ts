@@ -83,11 +83,12 @@ export function createStreamFn(runtime: LlmRuntime, defaults: StreamFnDefaults =
 }
 
 /** 工具描述收口：AgentTool 的 LLM 面字段 → pi-ai Tool（parameters 已是 JSON Schema 对象） */
-function toPiTool(tool: { name: string; description: string; parameters: Record<string, unknown> }): PiTool {
+function toPiTool(tool: { name: string; description: string; parameters: object }): PiTool {
   return {
     name: tool.name,
     description: tool.description,
-    // 类型层面 JSON Schema 对象 → TSchema（运行时同一对象，TypeBox schema 即 JSON Schema）
+    // 类型层面 JSON Schema 对象 → TSchema（运行时同一对象，TypeBox schema 即 JSON Schema；
+    // LlmTool.parameters 为宽收 object——兼容 TypeBox 构建器产物与手写 schema 两种来源）
     parameters: tool.parameters as PiTool['parameters'],
   };
 }

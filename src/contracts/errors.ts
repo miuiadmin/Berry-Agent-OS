@@ -74,11 +74,25 @@ export const TOOL_NOT_STARTED = registerErrorCode('TOOL_NOT_STARTED');
 export const TOOL_OUTCOME_UNKNOWN = registerErrorCode('TOOL_OUTCOME_UNKNOWN');
 /** tools：工具执行超时（三段管道 execute 段的时长上限触发） */
 export const TOOL_TIMEOUT = registerErrorCode('TOOL_TIMEOUT');
+/** tools：参数 schema 校验失败（三段管道入口前置步，不合法参数不进守门/执行段） */
+export const TOOL_ARGUMENTS_INVALID = registerErrorCode('TOOL_ARGUMENTS_INVALID');
+/** tools：守门段拒绝（block 决策短路——结构化拒绝结果直接返回模型，不进执行段） */
+export const TOOL_BLOCKED = registerErrorCode('TOOL_BLOCKED');
+/** tools：守门段监听器自身异常（fail-closed：视为 block，绝不放行） */
+export const TOOL_GATE_FAILED = registerErrorCode('TOOL_GATE_FAILED');
+/** tools：同名工具重复注册（注册表装配错误，响亮失败） */
+export const TOOL_DUPLICATE = registerErrorCode('TOOL_DUPLICATE');
 
 /** fs：观察态 CAS——文件未读过（无观察版本）即拒绝修改（第七批安全四件之一） */
 export const FS_NOT_OBSERVED = registerErrorCode('FS_NOT_OBSERVED');
 /** fs：写入时文件版本与观察版本不符（并发修改守卫） */
 export const FS_VERSION_CONFLICT = registerErrorCode('FS_VERSION_CONFLICT');
+/** fs：目标文件/目录不存在（read/ls/delete 的 fail 形态；read 仍登记 absent 观察） */
+export const FS_NOT_FOUND = registerErrorCode('FS_NOT_FOUND');
+/** fs：目标路径不在可写根内（fence containment 检查失败，防误操作护栏） */
+export const FS_OUTSIDE_WRITABLE_ROOTS = registerErrorCode('FS_OUTSIDE_WRITABLE_ROOTS');
+/** fs：apply_patch 补丁解析或应用失败（格式非法/hunk 不匹配/Add 目标已存在等，message 细说） */
+export const FS_PATCH_FAILED = registerErrorCode('FS_PATCH_FAILED');
 
 /** session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板；未知事件类型非 ignorable 同用此码） */
 export const SESSION_FORMAT_UNSUPPORTED = registerErrorCode('SESSION_FORMAT_UNSUPPORTED');

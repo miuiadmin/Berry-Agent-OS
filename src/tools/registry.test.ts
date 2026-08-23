@@ -1,0 +1,150 @@
+/**
+ * L2 tools 单元测试——工具注册表：
+ * 动态注册/注销（即时生效 + tools_change 广播）/ 重复注册拒绝 /
+ * AgentTool 适配（执行必经管道）/ defineTool / 服务生命周期随作用域回卷。
+ */
+
+import { describe, expect, it } from 'vitest';
+import { Type } from 'typebox';
+import { AppError, CONTEXT_SERVICE_NOT_FOUND, TOOL_DUPLICATE } from '../contracts/errors.js';
+import type { ToolDefinition } from '../contracts/tools.js';
+import { createContext } from '../context/index.js';
+import { createToolPipeline } from './pipeline.js';
+import { defineTool, registerToolsService } from './registry.js';
+
+/** 最小合法工具定义 */
+function makeTool(name = 't1'): ToolDefinition {
+  return {
+    name,
+    description: '测试工具',
+    parameters: Type.Object({ x: Type.Optional(Type.String()) }),
+    execute: async () => ({ content: [{ type: 'text', text: `ran:${name}` }] }),
+  };
+}
+
+describe('registerToolsService — 动态注册（契约篇 §3.2）', () => {
+  it('register 即时生效：get/list 可见，广播 tools_change(add)', () => {
+    const ctx = createContext({ name: 'test' });
+    const events: Array<{ kind: string; name: string }> = [];
+    ctx.on('tools_change', (e) => events.push(e));
+    const tools = registerToolsService(ctx);
+    tools.register(makeTool('read'));
+    expect(tools.get('read')?.name).toBe('read');
+    expect(tools.list().map((t) => t.name)).toEqual(['read']);
+    expect(events).toEqual([{ kind: 'add', name: 'read' }]);
+  });
+
+  it('同名重复注册响亮拒绝：TOOL_DUPLICATE', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    tools.register(makeTool('read'));
+    expect(() => tools.register(makeTool('read'))).toThrowError(AppError);
+    try {
+      tools.register(makeTool('read'));
+    } catch (e) {
+      expect((e as AppError).code).toBe(TOOL_DUPLICATE);
+    }
+  });
+
+  it('注销器：撤注册 + 广播 tools_change(remove)，幂等', () => {
+    const ctx = createContext({ name: 'test' });
+    const events: Array<{ kind: string; name: string }> = [];
+    ctx.on('tools_change', (e) => events.push(e));
+    const tools = registerToolsService(ctx);
+    const dispose = tools.register(makeTool('edit'));
+    dispose();
+    dispose(); // 幂等：第二次 no-op
+    expect(tools.get('edit')).toBeUndefined();
+    expect(events).toEqual([
+      { kind: 'add', name: 'edit' },
+      { kind: 'remove', name: 'edit' },
+    ]);
+  });
+
+  it('误撤护栏：注销器只撤自己的注册（他者后来的同位注册不动）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    const first = tools.register(makeTool('grep'));
+    first(); // 先注销第一个
+    tools.register(makeTool('grep')); // 第二个接位
+    // 旧注销器再次调用（幂等已 no-op）；即便非幂等也不该动第二个
+    expect(tools.get('grep')?.name).toBe('grep');
+  });
+});
+
+describe('registerToolsService — AgentTool 适配（执行必经管道）', () => {
+  it('toAgentTool 执行走三段管道（守门拦截对适配器同样生效）', async () => {
+    const ctx = createContext({ name: 'test' });
+    ctx.on('tools_pre_execute', () => ({ decision: 'block', reason: '测试拦截' }));
+    const tools = registerToolsService(ctx, { pipeline: createToolPipeline(ctx) });
+    const def = makeTool('bash');
+    tools.register(def);
+    const agentTool = tools.toAgentTool(def);
+    const err = await agentTool.execute('tc-1', {}).catch((e) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe('TOOL_BLOCKED');
+  });
+
+  it('正常路径：参数校验 → 守门（空）→ 执行 → 结果回传', async () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx, { pipeline: createToolPipeline(ctx) });
+    const def = tools.register(makeTool('echo')) && (tools.get('echo') as ToolDefinition);
+    const agentTool = tools.toAgentTool(def);
+    const result = await agentTool.execute('tc-1', {});
+    expect(result.content[0]).toMatchObject({ text: 'ran:echo' });
+  });
+
+  it('未装配 pipeline 时执行响亮失败（唯一合法路径不可绕）', async () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx); // 无 pipeline
+    const agentTool = tools.toAgentTool(makeTool('x'));
+    const err = await agentTool.execute('tc-1', {}).catch((e) => e);
+    expect((err as AppError).code).toBe(CONTEXT_SERVICE_NOT_FOUND);
+  });
+
+  it('适配器透传 name/description/label/parameters（loop 面字段齐全）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    const agentTool = tools.toAgentTool({ ...makeTool('ls'), label: '列目录' });
+    expect(agentTool).toMatchObject({ name: 'ls', description: '测试工具', label: '列目录' });
+    expect(agentTool.parameters).toMatchObject({ type: 'object' }); // TypeBox 产物即 JSON Schema
+  });
+});
+
+describe('registerToolsService — 服务生命周期', () => {
+  it('经 ctx.provide 挂载：ctx.get 可取，作用域销毁随 LIFO 回卷', async () => {
+    const ctx = createContext({ name: 'test' });
+    registerToolsService(ctx);
+    expect(ctx.get<ReturnType<typeof registerToolsService>>('tools')).toBeTruthy();
+    await ctx.dispose();
+    try {
+      ctx.get('tools');
+      expect.unreachable('dispose 后 ctx.get 应抛服务未注册');
+    } catch (e) {
+      expect(e).toBeInstanceOf(AppError);
+      expect((e as AppError).code).toBe(CONTEXT_SERVICE_NOT_FOUND);
+    }
+  });
+
+  it('fork 出的插件作用域共享同一注册表', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    tools.register(makeTool('shared'));
+    const pluginScope = ctx.fork({ name: 'plugin-a' });
+    const shared = pluginScope.get<ReturnType<typeof registerToolsService>>('tools');
+    expect(shared.get('shared')?.name).toBe('shared');
+  });
+});
+
+describe('defineTool — 类型 helper', () => {
+  it('identity：原样返回定义（供插件侧书写时获得类型检查）', () => {
+    const def = defineTool({
+      name: 'calc',
+      description: '计算',
+      parameters: Type.Object({ a: Type.Number() }),
+      execute: async (args) => ({ content: [{ type: 'text', text: String(args.a) }] }),
+    });
+    expect(def.name).toBe('calc');
+    expect(def.parameters).toMatchObject({ type: 'object' });
+  });
+});

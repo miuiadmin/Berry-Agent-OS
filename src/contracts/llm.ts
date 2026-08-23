@@ -123,8 +123,8 @@ export type Message = UserMessage | AssistantMessage | ToolResultMessage;
 export interface LlmTool {
   name: string;
   description: string;
-  /** JSON Schema 参数描述（TypeBox 生成的 schema 对象） */
-  parameters: Record<string, unknown>;
+  /** JSON Schema 参数描述（TypeBox 产物或等价 JSON Schema 对象；宽收 object 兼容 TypeBox 构建器类型） */
+  parameters: object;
 }
 
 /** 单次 LLM 请求上下文（StreamFn 第一参数；骨架篇 §3.1） */

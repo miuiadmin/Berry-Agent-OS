@@ -6,3 +6,4 @@
 export * from './errors.js';
 export * from './events.js';
 export * from './llm.js';
+export * from './tools.js';
