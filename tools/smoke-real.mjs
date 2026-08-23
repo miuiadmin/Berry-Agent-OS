@@ -15,6 +15,10 @@
  *   - run 后面：durable 事件里的 tool/call 名称清单（memory_write 是否被模型使用）
  *   - 重开库面：迁移链 v1→v3 就位 + memories 行数 + session_fts 行数（活体镜像）
  *
+ * 第十二批题二起含简报差分追注轮：确定性 memory_write 漂移简报面 → 真请求瀑布
+ * 落 memory/diff durable 事件 + 请求尾注入 memory-diff 角色（探针观察）→ 重开
+ * 库断言事件存活。
+ *
  * 用法：
  *   ANTHROPIC_BASE_URL=http://… ANTHROPIC_AUTH_TOKEN=sk-… \
  *     npx tsx tools/smoke-real.mjs "提示词" [模型id（缺省 glm-5.3）]
@@ -149,6 +153,10 @@ console.log(
 );
 
 let failBoot = !bootMemoryOk || !bootSubagentOk || !bootGoalOk || !service;
+/** 差分轮判定（简报差分追注——主 try 块内赋值，finally 重开库面引用） */
+let diffOk = false;
+/** 差分轮写入条目短 id（重开库面匹配 '+' 条目用） */
+let writtenShortId = '';
 
 try {
   const result = await runtime.conversation.submitOnce(prompt);
@@ -240,9 +248,72 @@ try {
     console.error(`[smoke] goal 轮异常: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  /* ---- memory 简报差分追注轮（第十二批题二——基线漂移 → durable 落账 → 请求尾注入） ---- */
+  // 结构性判定（模型行为只报告不判定）：确定性写一条高置信记忆（走真工具面过
+  // 三段管道）使简报面漂移；下一次真请求的 context_transform 瀑布里 ① durable
+  // 日志落 memory/diff 事件（'+' 条目短 id 匹配）② 请求尾注入 memory-diff 角色
+  // 消息。注入是瞬态（不落日志不进转录，RunResult 不可见）——探针 handler 注册
+  // 序在 memory 插件之后，瀑布所见即差分注入后的请求面（只观察不改写）。
+  try {
+    // 注入探针：记录瀑布里流过的 memory-diff 角色消息内容（注入行 = 插件确定性
+    // 代码产物，非 AI 文本——内容可断言）
+    let sawInjection = '';
+    runtime.ctx.on('context_transform', (messages, next) => {
+      const list = Array.isArray(messages) ? messages : [];
+      for (const m of list) {
+        if (m && typeof m === 'object' && m.role === 'memory-diff' && typeof m.content === 'string') {
+          sawInjection = m.content;
+        }
+      }
+      return next(messages);
+    });
+    const callToolDiff = (name, args) => {
+      const def = runtime.tools.get(name);
+      if (!def) throw new Error(`工具未注册：${name}`);
+      return runtime.tools.toAgentTool(def).execute('smoke-diff', args);
+    };
+    // 写入三条件齐即必入简报面（不靠模型自觉）：kind=preference（简报 kind 优先
+    // 级最高）+ 高置信 + 新鲜 updated_at 过未用排除
+    const writeResult = await callToolDiff('memory_write', {
+      kind: 'preference',
+      summary: '冒烟差分条目：简报面漂移验证（smoke-diff）',
+      content: '冒烟专用记忆条目：用于验证简报差分追注机制的确定性写入。',
+      confidence: 0.95,
+    });
+    writtenShortId = String(writeResult.details?.id ?? '').slice(0, 8);
+    console.log(`[smoke] memory_write 落库 ${writtenShortId ? `✓（短 id ${writtenShortId}）` : '✗（无 details.id）'}`);
+    // 差分请求：真模型请求驱动瀑布（基线已在 boot 物化、此刻面已漂移 → 落账 + 注入）
+    const diffResult = await runtime.conversation.submitOnce(
+      '请直接用一句话回答：你的上下文尾部是否出现了一条记忆差分说明？若有，请引用其中的短 id 标记。',
+    );
+    // durable 面：活跃会话日志里的 memory/diff 事件（last-wins 全量差分）
+    const liveEvents = runtime.session?.events ?? [];
+    const diffEvents = liveEvents.filter((e) => e.type === 'memory/diff');
+    const plusEntry = diffEvents.some((e) => {
+      const entries = Array.isArray(e.data?.entries) ? e.data.entries : [];
+      return entries.some((en) => en?.op === '+' && en.id === writtenShortId);
+    });
+    // 注入面：探针所见 memory-diff 消息须携带本条目引用标记 [m:短id]
+    const injectionHit = sawInjection !== '' && sawInjection.includes(`[m:${writtenShortId}]`);
+    diffOk = writtenShortId !== '' && plusEntry && injectionHit;
+    const lastDiff = diffResult?.messages.at(-1);
+    const diffText =
+      lastDiff && lastDiff.role === 'assistant'
+        ? (lastDiff.content ?? [])
+            .filter((b) => b.type === 'text')
+            .map((b) => b.text)
+            .join('')
+        : '';
+    console.log(
+      `[smoke] 差分事件 ${diffEvents.length} 条（'+' 匹配 ${plusEntry ? '✓' : '✗'}）  注入 ${injectionHit ? '✓' : '✗'}  → ${diffOk ? '✓' : '✗'}  模型回答: ${diffText.slice(0, 120)}`,
+    );
+  } catch (error) {
+    console.error(`[smoke] 差分轮异常: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   console.log(`[smoke] data=${smokeData}  workspace=${smokeWorkspace}`);
   // 会话驱动完成即落库（write-behind 在 shutdown flush——下方 finally 保证）
-  process.exitCode = failBoot || result?.status !== 'completed' || !subagentOk || !goalRoundOk ? 1 : 0;
+  process.exitCode = failBoot || result?.status !== 'completed' || !subagentOk || !goalRoundOk || !diffOk ? 1 : 0;
 } catch (error) {
   console.error(`[smoke] 未预期异常: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
@@ -283,6 +354,16 @@ try {
       `[smoke] goals 表 ${goalRows.length} 行: ${goalRows.map((g) => `${g.status}${g.stop_reason ? `/${g.stop_reason}` : ''} ${g.tokens_used}/${g.token_budget}t`).join('；') || '（无）'}`,
     );
     if (goalRows.length === 0) process.exitCode = 1;
+    // memory/diff 结构面（简报差分追注轮）：durable 事件须存活到重开库（write-behind
+    // 经 shutdown flush 落盘）。全扫会话——不依赖 listSessionIds 次序
+    const allEvents = ids.flatMap((id) => reopened.loadSession(id)?.events ?? []);
+    const persistedDiff = allEvents.filter((e) => e.type === 'memory/diff');
+    const persistedPlus = persistedDiff.some((e) => {
+      const entries = Array.isArray(e.data?.entries) ? e.data.entries : [];
+      return entries.some((en) => en?.op === '+' && en.id === writtenShortId);
+    });
+    console.log(`[smoke] memory/diff 落库 ${persistedDiff.length} 条（冒烟 '+' 条目 ${persistedPlus ? '✓' : '✗'}）`);
+    if (!persistedPlus) process.exitCode = 1;
     await reopened.close();
   } catch (error) {
     console.error(`[smoke] 重开库自检失败: ${error instanceof Error ? error.message : String(error)}`);
