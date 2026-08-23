@@ -111,10 +111,11 @@ describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真�
   it('默认层第二行激活 + 清单段物化：agent 工具进面、subagent/list 段含 provider 名', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
-    // 默认层两行全激活（官方全家桶：memory 首行 + subagent 次行）
+    // 默认层三行全激活（官方全家桶：memory 首行 + subagent 次行 + goal 第三行）
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
       ['memory', 'activated'],
       ['subagent', 'activated'],
+      ['goal', 'activated'],
     ]);
     // 委派工具已进工具面（fs 四件 + memory 五件之后）
     expect(runtime.tools.list().map((t) => t.name)).toContain('agent');

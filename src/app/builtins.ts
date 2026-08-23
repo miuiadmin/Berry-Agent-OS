@@ -10,8 +10,10 @@
  */
 
 import { createMemoryPlugin, type MemoryPluginStoreFace } from '../memory/index.js';
+import { createGoalPlugin } from '../goal/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
+import type { DatabaseConnection } from '../persist/index.js';
 import type { Session } from '../session/session.js';
 import type { BuiltinPluginRegistry } from './composition.js';
 
@@ -19,17 +21,21 @@ import type { BuiltinPluginRegistry } from './composition.js';
 export interface BuiltinRegistryOptions {
   /** Store 公共读脸（memory 内置件闭包注入）；无持久层时不传 */
   readonly store?: MemoryPluginStoreFace;
+  /** SQLite 连接（goal 内置件闭包注入——goals 表物理载体）；无持久层时不传 */
+  readonly goalConnection?: DatabaseConnection;
   /** 工作区根（项目归属键活取值） */
   readonly workspace: () => string;
   /** in-process 真工厂（subagent 内置件闭包注入——app/subagent-factory.ts 产物） */
   readonly subagentFactory?: InProcessChildFactory;
-  /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键） */
+  /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键；goal 取当前会话 id） */
   readonly getSession: () => Session | undefined;
+  /** boot 是否续接既有会话（session_start origin=resume——goal active 行降级触发器） */
+  readonly wasResumed: boolean;
 }
 
 /**
  * 构造内置插件注册表（loadComposition 第二参——`builtin:` 行的唯一解析面）。
- * 时序上后于 Persistence.open（store 是其产物）；迁移链另出（BUILTIN_MIGRATIONS）。
+ * 时序上后于 Persistence.open（store 是其产物）；迁移链另出（assembly 聚合）。
  */
 export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPluginRegistry {
   return {
@@ -47,5 +53,12 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
           }),
         }
       : {}),
+    // goal 内置件（官方默认层第三行，Ring 2 编排域）：连接随 persist 走（缺省
+    // 降级 warn 空转）；wasResumed 触发 boot 降级（active ⇒ needs-resume）
+    'builtin:goal': createGoalPlugin({
+      ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
+      getSessionId: () => opts.getSession()?.header.sessionId,
+      wasResumed: opts.wasResumed,
+    }),
   };
 }

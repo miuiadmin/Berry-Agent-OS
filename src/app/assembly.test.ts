@@ -26,7 +26,10 @@ import { interruptedTurnClosers } from '../session/index.js';
 import { Persistence } from '../persist/index.js';
 // 重开库须带与组合根同链迁移（memory 表族 v2 + session_fts v3——宿主裸开只识 v1，
 // 高版本库拒绝打开是持久层纪律，此处镜像装配面真链）
+// 重开库须带与组合根同链迁移（memory 表族 v2 + session_fts v3 + goals v5——
+// 宿主裸开只识 v1，少一段即拒开；此处镜像装配面真链）
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
+import { GOAL_MIGRATION } from '../goal/index.js';
 import { createBerryRuntime, ConversationDriver } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
@@ -132,8 +135,8 @@ function approveAllBackend(): UiBackend {
 describe('createBerryRuntime 装配面', () => {
   it('fs 四件 + 内置命令注册；sandbox/mode 落库；系统提示词含基座', async () => {
     const runtime = await assemble();
-    // 官方默认层两行（契约篇 §5.1）：memory 首行五件 + subagent 次行委派工具
-    // agent（纵切四起为默认装配现实）
+    // 官方默认层三行（契约篇 §5.1）：memory 首行五件 + subagent 次行委派工具
+    // agent + goal 第三行工具三件（goal 纵切二起为默认装配现实）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'read',
       'write',
@@ -145,6 +148,9 @@ describe('createBerryRuntime 装配面', () => {
       'memory_read',
       'memory_search',
       'agent',
+      'goal_get',
+      'goal_set',
+      'goal_update',
     ]);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
@@ -165,7 +171,7 @@ describe('createBerryRuntime 装配面', () => {
     const runtime = await assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
-    expect(runtime.tools.list()).toHaveLength(5); // fs 四件 + agent（memory 空转；subagent 无持久层照常）
+    expect(runtime.tools.list()).toHaveLength(5); // fs 四件 + agent（memory/goal 空转；subagent 无持久层照常）
   });
 
   it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
@@ -198,7 +204,8 @@ describe('ConversationDriver + durable 接线', () => {
       'assistant/message',
       'turn/end',
     ]);
-    // LLM 请求上下文含系统提示词与工具面（装配接线证据；memory 五件 + agent 为默认装配成员）
+    // LLM 请求上下文含系统提示词与工具面（装配接线证据；memory 五件 + agent +
+    // goal 三件为默认装配成员）
     expect(contexts[0]?.systemPrompt).toContain('terminal-based coding assistant');
     expect(contexts[0]?.tools?.map((t) => t.name)).toEqual([
       'read',
@@ -211,6 +218,9 @@ describe('ConversationDriver + durable 接线', () => {
       'memory_read',
       'memory_search',
       'agent',
+      'goal_get',
+      'goal_set',
+      'goal_update',
     ]);
     // 投影回读
     const projected = deriveMessages(runtime.session!.events);
@@ -339,6 +349,9 @@ describe('ConversationDriver + durable 接线', () => {
       'memory_read',
       'memory_search',
       'agent',
+      'goal_get',
+      'goal_set',
+      'goal_update',
       'echo',
     ]);
     expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
@@ -424,7 +437,10 @@ describe('持久化 round-trip 与命令入口', () => {
     await runtime.conversation.submitOnce('要持久化的问题');
     await runtime.shutdown();
 
-    const reopened = Persistence.open({ path: dbFile, migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION] });
+    const reopened = Persistence.open({
+      path: dbFile,
+      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, GOAL_MIGRATION],
+    });
     try {
       const sessionId = reopened.store.listSessionIds()[0]!;
       const session = reopened.loadSession(sessionId)!;
@@ -632,17 +648,18 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     ]);
     const runtime = await assemble({ streamFn, compositionDir });
 
-    // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent
-    // 两行 + overlay tool-plugin 行均 activated——list 状态行序 = 组合树序）
+    // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent/
+    // goal 三行 + overlay tool-plugin 行均 activated——list 状态行序 = 组合树序）
     expect(runtime.plugins.list()).toEqual([
       { id: 'memory', status: 'activated', name: 'memory' },
       { id: 'subagent', status: 'activated', name: 'subagent' },
+      { id: 'goal', status: 'activated', name: 'goal' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
     // 组合树报告带行（官方默认层打底在前）
-    expect(runtime.composition.rows.map((row) => row.id)).toEqual(['memory', 'subagent', 'tool-plugin']);
-    // 插件工具已进注册表（fs 四件 + memory 五件 + agent 之后）
+    expect(runtime.composition.rows.map((row) => row.id)).toEqual(['memory', 'subagent', 'goal', 'tool-plugin']);
+    // 插件工具已进注册表（fs 四件 + memory 五件 + agent + goal 三件之后）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'read',
       'write',
@@ -654,6 +671,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'memory_read',
       'memory_search',
       'agent',
+      'goal_get',
+      'goal_set',
+      'goal_update',
       'plug-echo',
     ]);
     // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
@@ -823,8 +843,14 @@ describe('/reload 组合树重载', () => {
     //（memory/subagent 为官方默认层两行，每次 reload 照常激活——恒在）
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
-    expect(result.payload).toEqual({ activated: ['memory', 'subagent', 'tool-plugin'], failed: [], skipped: [] });
-    expect(reloadedPayloads).toEqual([{ activated: ['memory', 'subagent', 'tool-plugin'], failed: [], skipped: [] }]);
+    expect(result.payload).toEqual({
+      activated: ['memory', 'subagent', 'goal', 'tool-plugin'],
+      failed: [],
+      skipped: [],
+    });
+    expect(reloadedPayloads).toEqual([
+      { activated: ['memory', 'subagent', 'goal', 'tool-plugin'], failed: [], skipped: [] },
+    ]);
 
     await runtime.conversation.submitOnce('第二问');
     expect(lastEchoText(runtime)).toContain('v2:回声'); // 新代码已生效
@@ -849,7 +875,7 @@ describe('/reload 组合树重载', () => {
       `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    disabled: true\n`,
     );
     const result = await runtime.reload();
-    expect(result.payload).toEqual({ activated: ['memory', 'subagent'], failed: [], skipped: ['tool-plugin'] });
+    expect(result.payload).toEqual({ activated: ['memory', 'subagent', 'goal'], failed: [], skipped: ['tool-plugin'] });
     // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'read',
@@ -862,10 +888,14 @@ describe('/reload 组合树重载', () => {
       'memory_read',
       'memory_search',
       'agent',
+      'goal_get',
+      'goal_set',
+      'goal_update',
     ]);
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
       ['memory', 'activated'],
       ['subagent', 'activated'],
+      ['goal', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -899,7 +929,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.error).toBeUndefined();
-    expect(result.payload?.activated).toEqual(['memory', 'subagent', 'tool-plugin']);
+    expect(result.payload?.activated).toEqual(['memory', 'subagent', 'goal', 'tool-plugin']);
     expect(result.payload?.failed).toEqual(['bad']);
     // 状态面：失败行带着错误码可见（「没生效」不静默）
     const badRow = runtime.plugins.list().find((r) => r.id === 'bad')!;
@@ -966,7 +996,7 @@ describe('/reload 组合树重载', () => {
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['memory', 'subagent', 'tool-plugin'],
+      activated: ['memory', 'subagent', 'goal', 'tool-plugin'],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -1017,6 +1047,7 @@ describe('/reload 组合树重载', () => {
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
       ['memory', 'activated'],
       ['subagent', 'activated'],
+      ['goal', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);

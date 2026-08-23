@@ -22,12 +22,14 @@ function makeDataDir(): string {
 }
 
 /**
- * 装载并滤除官方默认层行（纵切五 memory 首行 + 纵切四 subagent 次行——契约篇
+ * 装载并滤除官方默认层行（memory 首行 + subagent 次行 + goal 第三行——契约篇
  * §5.1）：本文件测 overlay 对账语义（用户层写什么/读回什么），官方行进
  * composition.test 专属测试——两关注点不混断言。
  */
 function userRows(dataDir: string): unknown[] {
-  return loadComposition(dataDir).rows.filter((row) => row.id !== 'memory' && row.id !== 'subagent');
+  return loadComposition(dataDir).rows.filter(
+    (row) => row.id !== 'memory' && row.id !== 'subagent' && row.id !== 'goal',
+  );
 }
 
 /** runner 替身：记录每次调用；可选 scripted 失败（按命令名命中即抛） */
@@ -264,13 +266,13 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     await plugins.install('ok-pkg');
     await plugins.install('dormant-pkg');
     plugins.toggle('dormant-pkg'); // → 禁用
-    // 组合树含官方默认层 memory/subagent 两行（本测试无内置注册表 →
+    // 组合树含官方默认层 memory/subagent/goal 三行（本测试无内置注册表 →
     // unresolved/planned）——滤除只留用户行：本测试锁 applyLoad 映射语义，
     // 官方行装载态在 assembly 全栈锁
     const composition = loadComposition(dataDir);
     const userComposition = {
       ...composition,
-      plan: composition.plan.filter((row) => row.id !== 'memory' && row.id !== 'subagent'),
+      plan: composition.plan.filter((row) => row.id !== 'memory' && row.id !== 'subagent' && row.id !== 'goal'),
     };
 
     plugins.applyLoad(userComposition, {

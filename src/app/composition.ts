@@ -40,6 +40,7 @@ export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>
 const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   { id: 'memory', plugin: 'builtin:memory' },
   { id: 'subagent', plugin: 'builtin:subagent' },
+  { id: 'goal', plugin: 'builtin:goal' },
 ];
 
 /** 组合树装载产物（dump-config 打印 + ctx.plugins.list 数据源） */

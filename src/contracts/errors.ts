@@ -219,3 +219,15 @@ export const SUBAGENT_DEPTH_EXCEEDED = registerErrorCode('SUBAGENT_DEPTH_EXCEEDE
 export const AGENT_DELIVER_AS_UNSUPPORTED = registerErrorCode('AGENT_DELIVER_AS_UNSUPPORTED');
 /** agent：服务未接驱动（组合根 ⑧ attach 前调用——装配序上插件装载 ⑨ 晚于 ⑧，结构上不可达，防御位响亮拒绝而非静默丢消息） */
 export const AGENT_SERVICE_DETACHED = registerErrorCode('AGENT_SERVICE_DETACHED');
+
+/* ------------------------------------------------------------------ */
+/* goal 码族（运行时骨架篇 §6.8 落码注记，2026-08-24 goal 纵切二）      */
+/* —— 状态机转移非法一律响亮拒绝：宁拒绝不静默。                        */
+/* ------------------------------------------------------------------ */
+
+/** goal：goal_set 时本会话已有 active 行（一径：先申报终态或 /goal stop 再重设） */
+export const GOAL_ACTIVE_EXISTS = registerErrorCode('GOAL_ACTIVE_EXISTS');
+/** goal：操作的目标行不存在（goal_update 无行——goal_set 先设定） */
+export const GOAL_NOT_FOUND = registerErrorCode('GOAL_NOT_FOUND');
+/** goal：状态机转移非法（如 needs-resume 态申报终态 / completed 行再 stop——machine.ts 转移表执法） */
+export const GOAL_TRANSITION_INVALID = registerErrorCode('GOAL_TRANSITION_INVALID');
