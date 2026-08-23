@@ -1,9 +1,17 @@
 /**
  * L0 contracts 单元测试——错误码族纪律（内核篇 §5.3）：
- * AppError 形状 / code 分派 / 注册表格式与去重护栏。
+ * AppError 形状 / code 分派 / 注册表格式与去重护栏 / describeError 幂等前缀。
  */
 import { describe, expect, it } from 'vitest';
-import { AppError, CONTEXT_SERVICE_NOT_FOUND, listErrorCodes, registerErrorCode, TOOL_NOT_STARTED } from './errors.js';
+import {
+  AppError,
+  CONTEXT_SERVICE_NOT_FOUND,
+  describeError,
+  listErrorCodes,
+  registerErrorCode,
+  TOOL_ARGUMENTS_INVALID,
+  TOOL_NOT_STARTED,
+} from './errors.js';
 import type { SessionEvent } from './events.js';
 
 describe('AppError 单基类', () => {
@@ -25,6 +33,32 @@ describe('AppError 单基类', () => {
     const root = new Error('root cause');
     const err = new AppError(CONTEXT_SERVICE_NOT_FOUND, '外层', { cause: root });
     expect(err.cause).toBe(root);
+  });
+});
+
+describe('describeError 人读投影', () => {
+  it('AppError 前缀码：`[CODE] message` 形态', () => {
+    expect(describeError(new AppError(TOOL_NOT_STARTED, '工具未开始'))).toBe('[TOOL_NOT_STARTED] 工具未开始');
+  });
+
+  it('message 已带本码前缀时不重复叠加（管道 codedMessage × describeError 幂等）', () => {
+    // tools 管道 throw AppError 时 message 已是 `[CODE] …`（codedMessage），loop
+    // 侧 describeError 再前缀一次 → 历史 bug：`[CODE] [CODE] …` 双前缀进工具结果。
+    // 锁死：前缀幂等——已带本码前缀的 message 原样返回。
+    const message = `[${TOOL_ARGUMENTS_INVALID}] 工具 goal_update 参数校验失败：…`;
+    const rendered = describeError(new AppError(TOOL_ARGUMENTS_INVALID, message));
+    expect(rendered).toBe(message);
+    expect(rendered.match(new RegExp(`\\[${TOOL_ARGUMENTS_INVALID}\\]`, 'g'))).toHaveLength(1);
+  });
+
+  it('message 前缀是「他码」时不剥（码不一致说明前缀是正文一部分，如实保留）', () => {
+    const err = new AppError(TOOL_NOT_STARTED, '[OTHER_CODE] 文本以方括号开头');
+    expect(describeError(err)).toBe('[TOOL_NOT_STARTED] [OTHER_CODE] 文本以方括号开头');
+  });
+
+  it('非 AppError：message/字符串直返', () => {
+    expect(describeError(new Error('plain'))).toBe('plain');
+    expect(describeError('字面量')).toBe('字面量');
   });
 });
 

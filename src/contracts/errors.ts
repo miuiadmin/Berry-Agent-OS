@@ -60,7 +60,10 @@ export function listErrorCodes(): string[] {
  */
 export function describeError(error: unknown): string {
   if (error instanceof AppError) {
-    return `[${error.code}] ${error.message}`;
+    // 前缀幂等：管道侧 codedMessage 已把 `[CODE] ` 织进 message，此处不二叠
+    // （他码前缀是正文一部分，不剥——仅同码前缀去重）
+    const prefix = `[${error.code}] `;
+    return error.message.startsWith(prefix) ? error.message : `${prefix}${error.message}`;
   }
   return error instanceof Error ? error.message : String(error);
 }
