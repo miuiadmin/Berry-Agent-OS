@@ -195,3 +195,17 @@ export const JOB_KIND_DUPLICATE = registerErrorCode('JOB_KIND_DUPLICATE');
 export const JOB_NOT_FOUND = registerErrorCode('JOB_NOT_FOUND');
 /** jobs：围栏鉴权失败——带主 Job 被 非 owner 会话视角请求取消（owner 用 session id 围栏，骨架篇 §6.2） */
 export const JOB_OWNER_MISMATCH = registerErrorCode('JOB_OWNER_MISMATCH');
+
+/* ------------------------------------------------------------------ */
+/* 子代理码族（运行时骨架篇 §6.1 落码注记，2026-08-24 subagent 纵切二） */
+/* ——能力协商是启动前布尔检查：请求的能力 provider 未声明即响亮拒绝。  */
+/* ------------------------------------------------------------------ */
+
+/** subagent：start 引用的 provider 名未注册（清单面 = ctx.subagents.list()） */
+export const SUBAGENT_PROVIDER_NOT_FOUND = registerErrorCode('SUBAGENT_PROVIDER_NOT_FOUND');
+/** subagent：provider 注册撞名（词汇表拒绝静默覆盖——与事件/kind 同纪律） */
+export const SUBAGENT_PROVIDER_DUPLICATE = registerErrorCode('SUBAGENT_PROVIDER_DUPLICATE');
+/** subagent：能力协商失败——请求携带 outputSchema/maxDepth/toolFilter/persona 任一而 provider 未声明对应能力（start 前 fail-loud，不做运行时协商，骨架篇 §6.1【dsh】） */
+export const SUBAGENT_CAPABILITY_UNSUPPORTED = registerErrorCode('SUBAGENT_CAPABILITY_UNSUPPORTED');
+/** subagent：委派深度超帽（子 header.delegationDepth 超 min(请求 maxDepth, 装配默认帽)——§6.5 单调下界执法，fail-loud 子装配即刻销毁） */
+export const SUBAGENT_DEPTH_EXCEEDED = registerErrorCode('SUBAGENT_DEPTH_EXCEEDED');

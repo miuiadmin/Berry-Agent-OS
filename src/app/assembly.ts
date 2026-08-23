@@ -56,7 +56,7 @@ import type { DurableSinks } from './durable.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
-import { createJobsService } from '../subagent/index.js';
+import { createJobsService, createSubagentsService } from '../subagent/index.js';
 import { createPluginsService } from './plugins.js';
 import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
@@ -456,6 +456,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 提供时点在插件装载 ⑨ 前：插件（subagent/process 委派件）inject 即得。 */
   const jobs = createJobsService(ctx);
   ctx.provide('jobs', jobs);
+
+  /* ---- ④d 子代理服务（ctx.subagents，骨架篇 §6.1 落码注记）----
+   * provider 注册表 + 能力协商布尔检查 + background Job 接线（stopReason→终态
+   * 映射唯一持有处）。in-process provider 的每子装配工厂在纵切四随默认插件行
+   * 落地（工厂闭包持 streamFn/父会话/persistence——组合根侧零件，此处不装配）。
+   * 提供时点与 jobs 同理：插件装载 ⑨ 前，委派件 inject 即得。 */
+  const subagents = createSubagentsService(ctx, { jobs });
+  ctx.provide('subagents', subagents);
 
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
   const pipeline: ToolPipelineExecutor = createToolPipeline(ctx, {
