@@ -30,6 +30,7 @@ import type { ReviewLlmFace } from './review.js';
 import { createMemoryTools } from './tools.js';
 import { BRIEFING_SECTION_ID, renderBriefingSection } from './briefing.js';
 import { quoteAsCitation, sanitizeForModel } from './scan.js';
+import { CITATION_INSTRUCTION, citationMarker, parseCitationShortIds, textOfAssistantContent } from './citation.js';
 
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——memory 模块不 import app/tools 实现，拓扑边不越界）。        */
@@ -84,6 +85,9 @@ const MEMORY_CONFIG_SCHEMA = Type.Object({
     Type.Integer({ minimum: 10, description: '容量上限条/owner（缺省 500，溢出进 consolidation 候选）' }),
   ),
   recallTopK: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: '按需检索注入条数（缺省 3）' })),
+  unusedDays: Type.Optional(
+    Type.Integer({ minimum: 1, description: '常驻简报未用排除阈值天（缺省 30——离开常驻面而非删除，检索引用即复活）' }),
+  ),
 });
 
 /** 行配置的解析视图（unknown → 类型化，缺省值不在此填——消费件各持缺省） */
@@ -94,6 +98,7 @@ interface MemoryConfig {
   staleDays?: number;
   maxActivePerOwner?: number;
   recallTopK?: number;
+  unusedDays?: number;
 }
 
 /** 按需检索注入角色名（骨架篇 §2.3 自定义角色——render hidden 不进时间线） */
@@ -170,7 +175,10 @@ async function applyMemoryPlugin(
     prompts.registerSection({
       id: BRIEFING_SECTION_ID,
       render: () => {
-        const brief = store.briefing(ownerKeys());
+        const brief = store.briefing(ownerKeys(), {
+          // 未用排除阈值（§5 效用维度——30 天未用强排除出简报，检索引用复活）
+          ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
+        });
         // 读出消毒（§8.2）：secret 命中条剔除 + 指令样条目引述化（简报行只用
         // summary——消毒在入渲染前完成，briefing.ts 保持纯渲染）
         const sanitized = sanitizeForModel(brief.records);
@@ -219,6 +227,30 @@ async function applyMemoryPlugin(
     }),
   );
 
+  /* ---- ⑤' 引用回写（§6 效用闭环——assistant 文本解析 [m:短id] 回写 usage） ---- */
+  // 与 fts 镜像同一条事件通道、独立订阅：assistant/message 文本上尽力而为解析
+  // 引用标记 → 短 id 前缀解析（零命中忽略 / 多命中歧义忽略 / 恰一命中归属）→
+  // 批量 markUsed。回写只发生在事件流消费侧，不回写事件日志（铁律 1）。
+  ctx.effect(() =>
+    ctx.on('session/event', (payload: unknown) => {
+      try {
+        const event = (payload as { event?: { type?: unknown; data?: unknown } })?.event;
+        if (!event || event.type !== 'assistant/message') return;
+        const text = textOfAssistantContent((event.data as { content?: unknown } | undefined)?.content);
+        const shorts = parseCitationShortIds(text);
+        if (shorts.length === 0) return;
+        const ids = shorts.flatMap((short) => {
+          const matches = store.idsByPrefix(short);
+          return matches.length === 1 ? [matches[0]!] : []; // 歧义/未知一律忽略（尽力而为）
+        });
+        if (ids.length > 0) store.markUsed(ids, Date.now());
+      } catch (err) {
+        // fire-and-forget：回写异常止步日志（usage 是效用计量，非权威事实——不炸事件面）
+        ctx.logger.error('引用回写失败（尽力而为）', { error: describeError(err) });
+      }
+    }),
+  );
+
   /* ---- ⑥ 按需检索：memory-recall 自定义角色 + context_transform 瀑布 handler ---- */
   // 角色注册（模块级注册表，dispose-unregister 使 /reload 重注册安全）：
   // render hidden = 不进时间线（瞬态注入非对话内容）；toLlm → 防注入句式包裹的
@@ -263,12 +295,17 @@ async function applyMemoryPlugin(
       if (sanitized.entries.length === 0) {
         return next(messages);
       }
+      // 注入行带引用标记（§6 引用回写——检索命中是复活的唯一正门：条目离开
+      // 常驻简报后仍可在此被命中，模型引用即 markUsed 刷新活动锚回简报）
       const body = sanitized.entries
-        .map((e) => `- [${e.record.kind}] ${e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary}`)
+        .map(
+          (e) =>
+            `- ${citationMarker(e.record.id)} [${e.record.kind}] ${e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary}`,
+        )
         .join('\n');
       const injection = {
         role: RECALL_ROLE,
-        content: `${RECALL_FRAME_SENTENCE}\n${body}`,
+        content: `${RECALL_FRAME_SENTENCE}\n${CITATION_INSTRUCTION}\n${body}`,
         timestamp: Date.now(),
       };
       return next([...list, injection]);

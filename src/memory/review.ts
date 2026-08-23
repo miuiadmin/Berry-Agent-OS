@@ -18,6 +18,7 @@
 import { Type, Value } from '../contracts/typebox.js';
 import type { AssistantMessage, Message, UserMessage } from '../contracts/llm.js';
 import type { Context } from '../context/types.js';
+import { utilityScore } from './store.js';
 import type { MemoryStore } from './store.js';
 import { guardedAddMemory } from './scan.js';
 
@@ -231,7 +232,8 @@ export async function runReviewOnce(
 
 /**
  * 收集 consolidation 候选（纯查询）：老化（updated_at 距今 > staleDays）∪
- * 容量溢出（active > maxPerOwner 的低分盈余，分数 = confidence × ln(evidence+1)）。
+ * 容量溢出（active > maxPerOwner 的低分盈余，分数 = utilityScore——§5 效用
+ * 维度叠加 usage：高用条目优先保活、零用条目优先整理；与简报排序同一把尺）。
  */
 export function collectConsolidationCandidates(
   store: MemoryStore,
@@ -244,14 +246,10 @@ export function collectConsolidationCandidates(
   const cutoff = now - staleDays * 24 * 60 * 60 * 1000;
   const active = store.list([ownerKey]);
   const stale = active.filter((r) => r.updatedAt < cutoff);
-  // 容量溢出：超出上限的低分盈余（升序 = 最弱先整理）；未溢出为空
+  // 容量溢出：超出上限的低分盈余（升序 = 最弱先整理；utilityScore 含引用因子
+  // ——被反复引用的条目即便低置信也靠 usage 抬分保活）；未溢出为空
   const surplus = Math.max(0, active.length - maxActive);
-  const overflow =
-    surplus > 0
-      ? [...active]
-          .sort((a, b) => a.confidence * Math.log(a.evidenceCount + 1) - b.confidence * Math.log(b.evidenceCount + 1))
-          .slice(0, surplus)
-      : [];
+  const overflow = surplus > 0 ? [...active].sort((a, b) => utilityScore(a) - utilityScore(b)).slice(0, surplus) : [];
   return { stale, overflow };
 }
 
@@ -278,11 +276,12 @@ export async function runConsolidationOnce(
   if (candidates.length === 0) return { candidates: 0, ...counts, skipped: 'empty' };
   if (!deps.llm.canAfford('background')) return { candidates: candidates.length, ...counts, skipped: 'budget' };
 
-  // 候选清单进 prompt（id/kind/summary/分数——不进全文，控 token）
+  // 候选清单进 prompt（id/kind/summary/分数——不进全文，控 token；引用计数
+  // 一并披露——模型判断「该不该整理」时被反复引用的条目应倾向保活）
   const listing = candidates
     .map(
       (r) =>
-        `- id=${r.id} [${r.kind}] ${r.summary}（置信 ${r.confidence.toFixed(2)}，证据 ${r.evidenceCount}，更新于 ${new Date(r.updatedAt).toISOString().slice(0, 10)}）`,
+        `- id=${r.id} [${r.kind}] ${r.summary}（置信 ${r.confidence.toFixed(2)}，证据 ${r.evidenceCount}，引用 ${r.usageCount}，更新于 ${new Date(r.updatedAt).toISOString().slice(0, 10)}）`,
     )
     .join('\n');
   const { message } = await deps.llm.complete({

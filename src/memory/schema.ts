@@ -51,3 +51,19 @@ CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
 END;
 `,
 };
+
+/**
+ * 效用维度两列（记忆篇 §5 效用维度 + §6 引用回写，user_version=4——2026-08-24
+ * 第十二批拍板题一；v4 槽位由本拍板预留、goal 表先行占 v5，故此迁移常驻链中
+ * 排 GOAL_MIGRATION 之前）。存量行回填：usage_count=0（从未被引用）、
+ * last_used_at=NULL（引用从未发生——简报排除判据以活动锚兜底，不误伤新条目）。
+ */
+export const MEMORY_UTILITY_MIGRATION: MigrationSpec = {
+  version: 4,
+  name: 'memory-utility',
+  sql: `
+-- ── 效用维度（「没被用的记忆自然死亡」——离开常驻面而非硬删）────────
+ALTER TABLE memories ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0;  -- 被模型引用次数（引用回写计量面）
+ALTER TABLE memories ADD COLUMN last_used_at INTEGER;  -- 最近被引用时间（Unix 毫秒；NULL=从未）
+`,
+};

@@ -12,7 +12,14 @@ import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import type { ContextScope } from '../context/types.js';
 import { openStore, type Store } from '../persist/index.js';
-import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MemoryStore, SessionFtsIndex, createMemoryPlugin } from './index.js';
+import {
+  MEMORY_MIGRATION,
+  MEMORY_UTILITY_MIGRATION,
+  SESSION_FTS_MIGRATION,
+  MemoryStore,
+  SessionFtsIndex,
+  createMemoryPlugin,
+} from './index.js';
 import type { MemoryPluginStoreFace } from './index.js';
 import { getMessageRoleDefinition } from '../agent/messages.js';
 import type { BuiltinPluginModule } from '../contracts/plugin.js';
@@ -61,7 +68,10 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
     },
     canAfford: () => false,
   });
-  const store: Store = openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION] });
+  const store: Store = openStore({
+    path: ':memory:',
+    migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION],
+  });
   const source: MemoryPluginStoreFace = {
     connection: store.connection,
     listSessionIds: () => Object.keys(logs),
@@ -144,7 +154,7 @@ describe('memory 内置件 apply（全栈接线序）', () => {
     await h.ctx.dispose();
   });
 
-  it('按需检索：命中注入 memory-recall（防注入句式 + kind 优先），空手放行', async () => {
+  it('按需检索：命中注入 memory-recall（防注入句式 + 引用标记 + kind 优先），空手放行', async () => {
     const h = setup();
     const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
     await applyPlugin(plugin, h.ctx, { recallTopK: 1 });
@@ -179,6 +189,8 @@ describe('memory 内置件 apply（全栈接线序）', () => {
     const injected = out.at(-1)!;
     expect(injected.role).toBe('memory-recall'); // 自定义角色已注册且生效
     expect(String(injected.content)).toContain('以下来自历史记忆检索'); // 防注入句式
+    expect(String(injected.content)).toContain('[m:'); // 引用标记随注入行携带（§6 引用回写）
+    expect(String(injected.content)).toContain('若使用上述记忆作答'); // 引用指令句
     expect(String(injected.content)).toContain('误删生产环境数据库'); // kind 优先：failure 胜出（topK=1）
     expect(String(injected.content)).not.toContain('统一用 pnpm'); // 落选条不进注入
 
@@ -195,6 +207,68 @@ describe('memory 内置件 apply（全栈接线序）', () => {
       (final: unknown) => final,
     )) as unknown[];
     expect(pass).toHaveLength(1); // 无追加
+
+    await h.ctx.dispose();
+  });
+
+  it('引用回写：assistant 消息携带 [m:短id] → usage_count 累加（session/event 消费侧）', async () => {
+    const h = setup();
+    const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
+    await applyPlugin(plugin, h.ctx);
+
+    const memory = new MemoryStore(h.store.connection);
+    const inserted = memory.addMemory({
+      ownerKey: 'global',
+      kind: 'fact',
+      summary: '用户的项目代号是 berry',
+      content: '2026-08-24 会话确认。',
+      confidence: 0.9,
+    });
+    if (inserted.outcome !== 'inserted') throw new Error('前置失败');
+    const { id } = inserted.memory;
+    const short = id.slice(0, 8);
+    expect(memory.get(id)!.usageCount).toBe(0);
+
+    // 模型回答文本携带引用标记 → 活体事件流（与真实驱动 durable 接线同信封）
+    h.ctx.emit('session/event', {
+      sessionId: 's9',
+      event: {
+        type: 'assistant/message',
+        seq: 3,
+        time: 1,
+        data: { content: [{ type: 'text', text: `根据历史记忆 [m:${short}]，项目代号确实是 berry。` }] },
+      },
+    });
+    const used = memory.get(id)!;
+    expect(used.usageCount).toBe(1); // 引用回写命中
+    expect(used.lastUsedAt).not.toBeNull();
+
+    // 未知短 id / 非 assistant 事件：零副作用；同条再引一次 = 2（跨消息累计）
+    h.ctx.emit('session/event', {
+      sessionId: 's9',
+      event: {
+        type: 'assistant/message',
+        seq: 4,
+        time: 2,
+        data: { content: [{ type: 'text', text: '参见 [m:00000000]' }] },
+      },
+    });
+    expect(memory.get(id)!.usageCount).toBe(1); // 未知引用不误记
+    h.ctx.emit('session/event', {
+      sessionId: 's9',
+      event: { type: 'user/message', seq: 5, time: 3, data: { content: `[m:${short}]` } },
+    });
+    expect(memory.get(id)!.usageCount).toBe(1); // user 消息不解析（只有模型引用计效用）
+    h.ctx.emit('session/event', {
+      sessionId: 's9',
+      event: {
+        type: 'assistant/message',
+        seq: 6,
+        time: 4,
+        data: { content: [{ type: 'text', text: `再次确认 [m:${short}]。` }] },
+      },
+    });
+    expect(memory.get(id)!.usageCount).toBe(2); // 第二条消息再引用 = 累加
 
     await h.ctx.dispose();
   });

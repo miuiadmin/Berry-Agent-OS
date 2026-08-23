@@ -7,6 +7,7 @@
  */
 
 import type { MemoryRecord } from './store.js';
+import { CITATION_INSTRUCTION, citationMarker } from './citation.js';
 
 /** 常驻简报段 id（具名段词汇面：插件域前缀 memory/） */
 export const BRIEFING_SECTION_ID = 'memory/core';
@@ -28,16 +29,18 @@ const PROMOTION_BRIDGE_LINE =
 
 /**
  * 渲染常驻简报段内容（空库返回 ''——上层物化跳过空段不留空壳分节）。
+ * 每行携带引用标记 `[m:短id]`（§6 引用回写——模型按标记标注引用，插件解析
+ * assistant 文本回写 usage）；引用指令句随框架句式一并注入。
  * @param records briefing() 入选条目（已按优先级排序）
  * @param truncated 是否触限额截断（截断必须可见——ref-7 禁止静默截断）
  */
 export function renderBriefingSection(records: readonly MemoryRecord[], truncated: boolean): string {
   if (records.length === 0) return '';
-  const lines = records.map((r) => `- ${r.summary}`);
+  const lines = records.map((r) => `- ${citationMarker(r.id)} ${r.summary}`);
   if (truncated) {
     // 截断可见 + 指引工具面（memory_read 可看全量——纵切三落工具后此句生效）
     lines.push('- （简报超限额有截断；需要更多可用 memory_read 查看）');
   }
   lines.push(PROMOTION_BRIDGE_LINE);
-  return [SECTION_MARKER, FRAME_SENTENCE, ...lines].join('\n');
+  return [SECTION_MARKER, FRAME_SENTENCE, CITATION_INSTRUCTION, ...lines].join('\n');
 }

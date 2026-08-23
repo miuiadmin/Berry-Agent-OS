@@ -253,10 +253,11 @@ try {
   // 一段即拒开属设计）
   try {
     const { Persistence } = await import('../src/persist/index.js');
+    const { MEMORY_UTILITY_MIGRATION } = await import('../src/memory/index.js');
     const { GOAL_MIGRATION } = await import('../src/goal/index.js');
     const reopened = Persistence.open({
       path: join(smokeData, 'sessions.db'),
-      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, GOAL_MIGRATION],
+      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
     });
     const ids = reopened.store.listSessionIds();
     const firstId = ids[0];

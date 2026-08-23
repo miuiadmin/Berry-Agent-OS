@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createContext } from '../context/index.js';
 import { createLogger } from '../context/logger.js';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import type { ReviewLlmFace } from './review.js';
 import { attachPeriodicReview, collectConsolidationCandidates, runConsolidationOnce, runReviewOnce } from './review.js';
@@ -21,7 +21,9 @@ import { attachPeriodicReview, collectConsolidationCandidates, runConsolidationO
 let db: MemoryStore;
 
 beforeEach(() => {
-  db = new MemoryStore(openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION] }).connection);
+  db = new MemoryStore(
+    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+  );
 });
 
 /** 静默 logger 根作用域（fire-and-forget 通道收行断言） */
@@ -196,6 +198,22 @@ describe('collectConsolidationCandidates（老化 ∪ 容量溢出——纯查�
       maxActivePerOwner: 5,
     });
     expect(miss.overflow).toHaveLength(0);
+  });
+
+  it('效用维度叠加（§5）：同置信同证据下，被引用条目优先保活、零用条目先进整理集', () => {
+    const NOW = 180_000_000_000_000;
+    seed('零用条目', 0.5, NOW - 1000);
+    seed('常用条目', 0.5, NOW - 1000);
+    // 常用条目被引用 5 次（utilityScore ×(1+ln6) ≈ ×2.79 抬分保活）
+    const used = db.list(['global']).find((r) => r.summary === '常用条目')!;
+    for (let i = 0; i < 5; i += 1) db.markUsed([used.id], NOW - i * 1000);
+    const hit = collectConsolidationCandidates(db, 'global', {
+      now: () => NOW,
+      staleDays: 36500,
+      maxActivePerOwner: 1, // 上限 1 → surplus 1 → 零用条目进整理集
+    });
+    expect(hit.overflow.map((r) => r.summary)).toEqual(['零用条目']);
+    expect(hit.overflow[0]!.usageCount).toBe(0);
   });
 });
 

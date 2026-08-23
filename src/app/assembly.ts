@@ -56,7 +56,7 @@ import type { DurableSinks } from './durable.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
-import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { GOAL_MIGRATION } from '../goal/index.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
@@ -454,7 +454,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         // 业务表迁移链聚合（会话篇 §6 统一迁移框架——persist 提供框架不认识业务表）：
         // memory 表族 v2（记忆篇 §3）+ session_fts v3（会话篇 §9 第 7 项定稿）
         // + goals v5（骨架篇 §6.8——v4 已被记忆效用进化拍板预留）
-        migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, GOAL_MIGRATION],
+        migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
         // session/event 活体镜像（契约篇 §2.2 emit 模式行）：SessionEvent 入
         // write-behind 队列后同步上总线，载荷 { sessionId, event } 信封（dsh-11
         // 规则——多会话并存时订阅方必须能从载荷分辨归属）。createSession /

@@ -32,6 +32,10 @@ export interface MemoryRecord {
   readonly content: string;
   readonly confidence: number;
   readonly evidenceCount: number;
+  /** 被模型引用次数（效用维度计量面——引用回写累加，永不归零） */
+  readonly usageCount: number;
+  /** 最近被引用时间（Unix 毫秒；null = 从未被引用） */
+  readonly lastUsedAt: number | null;
   readonly status: MemoryStatus;
   readonly supersededBy: string | null;
   readonly sourceRefs: readonly MemorySourceRef[];
@@ -68,6 +72,8 @@ interface MemoryRow {
   content: string;
   confidence: number;
   evidence_count: number;
+  usage_count: number;
+  last_used_at: number | null;
   status: string;
   superseded_by: string | null;
   source_refs: string;
@@ -91,12 +97,24 @@ function toRecord(row: MemoryRow): MemoryRecord {
     content: row.content,
     confidence: row.confidence,
     evidenceCount: row.evidence_count,
+    usageCount: row.usage_count,
+    lastUsedAt: row.last_used_at,
     status: row.status as MemoryStatus,
     supersededBy: row.superseded_by,
     sourceRefs: refs,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * 效用综合分（公式落码定稿，记忆篇 §5）：confidence × ln(evidence+1) × (1 + ln(usage+1))。
+ * 三因子各有单调增益、对数防刷爆：引用 0 次 = ×1 基线不动（新条目不被惩罚）；
+ * 引用 3 次 ≈ ×2.4；证据与引用独立计功（被引用的强证据条目最难被整理）。
+ * 常驻简报排序（§6）与 consolidation 溢出选取（§5）共用同一把尺。
+ */
+export function utilityScore(record: Pick<MemoryRecord, 'confidence' | 'evidenceCount' | 'usageCount'>): number {
+  return record.confidence * Math.log(record.evidenceCount + 1) * (1 + Math.log(record.usageCount + 1));
 }
 
 /** 合并两份溯源引用（sessionId+seq 去重，保最近 SOURCE_REFS_CAP 条） */
@@ -302,6 +320,35 @@ export class MemoryStore {
   }
 
   /**
+   * 引用回写（§6 效用闭环）：命中条目 usage_count + 1、last_used_at = now。
+   * 由插件在 assistant 消息文本解析出引用标记后批量调用（一条消息对一条记忆
+   * 计一次——去重归调用方）。副作用即「复活」：last_used_at 刷新使 30 天未用
+   * 排除判据重新放行，条目自动回到常驻简报（离开常驻面 ≠ 离开记忆库）。
+   * @param ids 完整条目 id 列表（未知 id 静默无效果——尽力而为）
+   * @param nowMs 回写时间戳（Unix 毫秒）
+   * @returns 实际更新的行数
+   */
+  markUsed(ids: readonly string[], nowMs: number): number {
+    if (ids.length === 0) return 0;
+    const placeholders = ids.map(() => '?').join(', ');
+    const result = this.db
+      .prepare(`UPDATE memories SET usage_count = usage_count + 1, last_used_at = ? WHERE id IN (${placeholders})`)
+      .run(nowMs, ...ids);
+    return result.changes;
+  }
+
+  /**
+   * 短 id 前缀解析（引用回写解析侧）：`[m:8位hex]` → 完整 id 候选。
+   * 零命中 = 未知引用（忽略）；多命中 = 前缀歧义（调用方应全部忽略，防错误归属）；
+   * 恰一命中 = 唯一归属。入参钉死 8 位十六进制（citation 正则同形——双保险）。
+   */
+  idsByPrefix(prefix: string): string[] {
+    if (!/^[0-9a-f]{8}$/.test(prefix)) return [];
+    const rows = this.db.prepare(`SELECT id FROM memories WHERE id LIKE ? || '%'`).all(prefix) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  }
+
+  /**
    * FTS 检索（memory_fts 投影，trigram 分词；仅 active）。查询词逐 token 加引号转义后
    * 空格连接（FTS5 隐式 AND；trigram 下 <3 字符 token 在查询中被忽略）——用户输入的
    * 标点/操作符不可能炸 MATCH 语法。
@@ -326,17 +373,25 @@ export class MemoryStore {
   }
 
   /**
-   * 常驻简报取数（记忆篇 §6 注入通道 1）：owner 匹配的 active 条目，
-   * 排序 = kind 优先级（preference/profile/convention 先）→ confidence × log(evidence+1) 降序；
-   * 条数与字符双限额（maxEntries/maxChars 起草值随实测调，结构不随调）。
-   * @returns 入选条目 + 是否触限额截断（截断可见——ref-7「禁止静默截断」）
+   * 常驻简报取数（记忆篇 §6 注入通道 1 + §5 效用维度）：owner 匹配的 active 条目，
+   * 排序 = kind 优先级（preference/profile/convention 先）→ 效用综合分（utilityScore）
+   * 降序；**30 天未用强排除**（活动锚 = max(last_used_at, updated_at) 距今超
+   * unusedDays 的条目不进简报——排除在 top-N 之外的第二道闸，被检索引用后
+   * markUsed 刷新锚点自动复活）；条数与字符双限额（起草值随实测调，结构不随调）。
+   * 活动锚取两数之 max：新证据（updated_at）与被引用（last_used_at）都算「在用」
+   * ——只看 last_used_at 会误伤从未被引用的新条目，只看 updated_at 则引用保活失效。
+   * @returns 入选条目 + 是否触限额截断（截断可见——ref-7「禁止静默截断」；
+   *          未用排除不是截断，不计入 truncated）
    */
   briefing(
     ownerKeys: readonly string[],
-    opts: { maxEntries?: number; maxChars?: number } = {},
+    opts: { maxEntries?: number; maxChars?: number; unusedDays?: number; now?: () => number } = {},
   ): { records: MemoryRecord[]; truncated: boolean } {
     const maxEntries = opts.maxEntries ?? 20;
     const maxChars = opts.maxChars ?? 2000;
+    const unusedDays = opts.unusedDays ?? 30;
+    const now = opts.now?.() ?? Date.now();
+    const activeCutoff = now - unusedDays * 24 * 60 * 60 * 1000;
     const kindPriority: Record<MemoryKind, number> = {
       preference: 0,
       profile: 1,
@@ -348,11 +403,13 @@ export class MemoryStore {
     };
     const scored = this.activeByOwners(ownerKeys)
       .map(toRecord)
+      // 未用强排除（§5：死 = 离开常驻面，非删除——FTS 检索仍可命中并经引用复活）
+      .filter((r) => Math.max(r.lastUsedAt ?? 0, r.updatedAt) >= activeCutoff)
       .sort((a, b) => {
         const byKind = kindPriority[a.kind] - kindPriority[b.kind];
         if (byKind !== 0) return byKind;
-        // 得分 = confidence × ln(evidence+1)：多次独立证据显著抬升（对数防单条刷爆）
-        return b.confidence * Math.log(b.evidenceCount + 1) - a.confidence * Math.log(a.evidenceCount + 1);
+        // 效用综合分（utilityScore——confidence × ln(evidence+1) × (1 + ln(usage+1))）
+        return utilityScore(b) - utilityScore(a);
       });
     const records: MemoryRecord[] = [];
     let used = 0;

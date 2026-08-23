@@ -35,3 +35,13 @@ export function uuidV7(nowMs: number = Date.now()): string {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+/**
+ * 条目完整 id → 稳定短 id（首段 8 位十六进制——uuid v7 首段恰为 8 字符）。
+ * 用途：引用标记 `[m:短id]`（记忆篇 §6 引用回写——注入面携带、assistant 文本
+ * 解析回写）。500 条/owner 量级下碰撞概率 ~3e-5，且解析侧「多命中即歧义忽略」
+ * 兜底（idsByPrefix），碰撞不产生错误归属。
+ */
+export function shortIdOf(id: string): string {
+  return id.slice(0, 8);
+}

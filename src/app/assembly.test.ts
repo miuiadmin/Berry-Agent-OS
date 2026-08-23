@@ -29,6 +29,7 @@ import { Persistence } from '../persist/index.js';
 // 重开库须带与组合根同链迁移（memory 表族 v2 + session_fts v3 + goals v5——
 // 宿主裸开只识 v1，少一段即拒开；此处镜像装配面真链）
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
+import { MEMORY_UTILITY_MIGRATION } from '../memory/index.js';
 import { GOAL_MIGRATION } from '../goal/index.js';
 import { createBerryRuntime, ConversationDriver } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
@@ -439,7 +440,7 @@ describe('持久化 round-trip 与命令入口', () => {
 
     const reopened = Persistence.open({
       path: dbFile,
-      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, GOAL_MIGRATION],
+      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
     });
     try {
       const sessionId = reopened.store.listSessionIds()[0]!;

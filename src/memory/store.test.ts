@@ -8,14 +8,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, type Store } from '../persist/index.js';
-import { MEMORY_MIGRATION, MemoryStore, projectOwnerKey } from './index.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MemoryStore, projectOwnerKey, utilityScore } from './index.js';
 
 /** 当前测试库（每用例新建 :memory:——迁移框架一次到位后交 DAO） */
 let store: Store;
 let db: MemoryStore;
 
 beforeEach(() => {
-  store = openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION] });
+  store = openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
   db = new MemoryStore(store.connection);
 });
 
@@ -217,16 +217,127 @@ describe('projectOwnerKey（两层归属）', () => {
   });
 });
 
+/* ---------------- 效用维度（§5 + §6 引用回写，user_version=4） ---------------- */
+
+/** 一天毫秒数（未用阈值换算用） */
+const DAY = 24 * 60 * 60 * 1000;
+
+describe('markUsed + idsByPrefix（引用回写 DAO 面）', () => {
+  it('markUsed：usage_count 累加、last_used_at 落值；未知 id 无效果', () => {
+    const out = write({});
+    if (out.outcome !== 'inserted') throw new Error('前置失败');
+    const id = out.memory.id;
+    expect(out.memory.usageCount).toBe(0); // 新条目零引用
+    expect(out.memory.lastUsedAt).toBeNull(); // 从未被引用
+
+    expect(db.markUsed([id], 1000)).toBe(1);
+    const used = db.get(id)!;
+    expect(used.usageCount).toBe(1);
+    expect(used.lastUsedAt).toBe(1000);
+    db.markUsed([id], 2000);
+    expect(db.get(id)!.usageCount).toBe(2); // 累加不覆盖
+    expect(db.get(id)!.lastUsedAt).toBe(2000);
+
+    expect(db.markUsed(['不存在的-id'], 3000)).toBe(0); // 未知 id 静默零效
+    expect(db.markUsed([], 3000)).toBe(0); // 空列表零效
+  });
+
+  it('idsByPrefix：短 id 前缀解析——恰一命中归属；非法前缀拒收', () => {
+    const out = write({});
+    if (out.outcome !== 'inserted') throw new Error('前置失败');
+    const id = out.memory.id;
+    const short = id.slice(0, 8);
+    expect(db.idsByPrefix(short)).toEqual([id]); // 恰一命中
+    expect(db.idsByPrefix('00000000')).toEqual([]); // 零命中（未知引用）
+    // 非法形态拒收（citation 正则同形双保险——大写/短字/非 hex）
+    expect(db.idsByPrefix('ABCDEF12')).toEqual([]);
+    expect(db.idsByPrefix('abc')).toEqual([]);
+    expect(db.idsByPrefix("ab'--")).toEqual([]);
+  });
+});
+
+describe('utilityScore（效用综合分公式钉死）', () => {
+  it('confidence × ln(evidence+1) × (1 + ln(usage+1))：引用 0 = 基线 ×1', () => {
+    const base = { confidence: 0.8, evidenceCount: 3, usageCount: 0 };
+    expect(utilityScore(base)).toBeCloseTo(0.8 * Math.log(4) * 1, 10);
+    const used = { ...base, usageCount: 3 };
+    expect(utilityScore(used)).toBeCloseTo(0.8 * Math.log(4) * (1 + Math.log(4)), 10);
+    // 单调性：confidence / evidence / usage 任一上升分数上升
+    expect(utilityScore({ ...used, usageCount: 9 })).toBeGreaterThan(utilityScore(used));
+    expect(utilityScore({ ...used, evidenceCount: 9 })).toBeGreaterThan(utilityScore(used));
+  });
+});
+
+describe('briefing 效用维度（30 天未用强排除 + 复活 + 排序抬升）', () => {
+  it('未用超阈强排除（活动锚 = max(last_used_at, updated_at)）；新证据保活', () => {
+    const now = 1_800_000_000_000; // 固定时钟（不取墙钟）——addMemory 的 nowMs 控制写入钟，markUsed 控制引用钟
+    const store2 = openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+    const db2 = new MemoryStore(store2.connection);
+    const t40 = now - 40 * DAY;
+    const add = (summary: string, ts: number) =>
+      db2.addMemory({ ownerKey: 'global', kind: 'preference', summary, content: 'c', confidence: 0.7 }, ts);
+    const a = add('四十天前的旧偏好甲', t40);
+    const b = add('四十天前但近期被引用的偏好乙', t40);
+    const c = add('三天前的新偏好丙', now - 3 * DAY);
+    if (a.outcome !== 'inserted' || b.outcome !== 'inserted' || c.outcome !== 'inserted') {
+      throw new Error('前置失败');
+    }
+    // 乙在 5 天前被引用（活动锚 = max(引用, 证据) = 5 天前 → 在 30 天窗内）
+    db2.markUsed([b.memory.id], now - 5 * DAY);
+
+    const brief = db2.briefing(['global'], { now: () => now });
+    const summaries = brief.records.map((r) => r.summary);
+    expect(summaries).not.toContain('四十天前的旧偏好甲'); // 强排除：锚 40 天 > 30 天窗
+    expect(summaries).toContain('四十天前但近期被引用的偏好乙'); // 引用保活
+    expect(summaries).toContain('三天前的新偏好丙'); // 从未被引用的新条目不被误伤
+
+    // 复活链：甲被引用（markUsed 刷锚）→ 回简报；FTS 仍命中排除态条目（离开常驻面 ≠ 离开库）
+    expect(db2.search('四十天前的旧偏好甲', ['global'])).toHaveLength(1);
+    db2.markUsed([a.memory.id], now);
+    expect(db2.briefing(['global'], { now: () => now }).records.map((r) => r.summary)).toContain('四十天前的旧偏好甲');
+    // 未用排除不是截断（truncated 不因排除置位）
+    expect(brief.truncated).toBe(false);
+    store2.close();
+  });
+
+  it('排序抬升：同 confidence/evidence 下，被引用条目排前（utilityScore 同尺）', () => {
+    const outA = write({ summary: '零引用的偏好A' });
+    const outB = write({ summary: '被引用三次的偏好B' });
+    if (outA.outcome !== 'inserted' || outB.outcome !== 'inserted') throw new Error('前置失败');
+    for (let i = 0; i < 3; i += 1) db.markUsed([outB.memory.id], Date.now());
+
+    const brief = db.briefing(['global']);
+    expect(brief.records[0]!.summary).toBe('被引用三次的偏好B'); // usage 抬分压过写入序
+  });
+
+  it('v2→v4 升格：存量库补跑 ALTER 不丢数据、新列就位', () => {
+    // 先按旧链（无 UTILITY）建库写入——再以全链重开 = v2 库升格 v4
+    const path = joinTmp();
+    const s1 = openStore({ path, migrations: [MEMORY_MIGRATION] });
+    const legacy = new MemoryStore(s1.connection);
+    legacy.addMemory({ ownerKey: 'global', kind: 'fact', summary: '升格前条目', content: 'c' });
+    s1.close();
+    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+    const upgraded = new MemoryStore(s2.connection);
+    const rows = upgraded.list(['global']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.usageCount).toBe(0); // 存量行回填缺省：零引用
+    expect(rows[0]!.lastUsedAt).toBeNull();
+    expect(upgraded.briefing(['global']).records.map((r) => r.summary)).toContain('升格前条目');
+    s2.close();
+  });
+});
+
 describe('重开库（迁移幂等 + 数据存活）', () => {
   it('v2 库再开同链不重跑、条目完好', () => {
     write({});
     // :memory: 无法复开——用文件库走一遍迁移幂等 + 数据存活
     const path = joinTmp();
-    const s1 = openStore({ path, migrations: [MEMORY_MIGRATION] });
+    const s1 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
     const file = new MemoryStore(s1.connection);
     file.addMemory({ ownerKey: 'global', kind: 'fact', summary: '文件库条目', content: 'c' });
     s1.close();
-    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION] });
+    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
     const reloaded = new MemoryStore(s2.connection);
     expect(reloaded.list(['global'])).toHaveLength(1);
     expect(reloaded.search('文件库', ['global'])).toHaveLength(1); // FTS 触发器产物跨开存活

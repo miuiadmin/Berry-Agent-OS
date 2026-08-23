@@ -6,9 +6,10 @@
  * 注册表收纳，`builtin:memory` 行激活）。
  */
 
-export { MEMORY_MIGRATION } from './schema.js';
-export { uuidV7 } from './id.js';
+export { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+export { uuidV7, shortIdOf } from './id.js';
 export { BRIEFING_SECTION_ID, renderBriefingSection } from './briefing.js';
+export { CITATION_INSTRUCTION, citationMarker, parseCitationShortIds, textOfAssistantContent } from './citation.js';
 export {
   FUZZY_THRESHOLD,
   POLARITY_OVERLAP_THRESHOLD,
@@ -23,6 +24,7 @@ export {
 export {
   MemoryStore,
   projectOwnerKey,
+  utilityScore,
   type MemoryKind,
   type MemoryStatus,
   type MemorySourceRef,

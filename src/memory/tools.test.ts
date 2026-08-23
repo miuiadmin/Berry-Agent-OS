@@ -9,13 +9,15 @@ import { describe, expect, it } from 'vitest';
 import { Value } from '../contracts/typebox.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
 
 /** 测试环境：真库（ownerKeys 约定首键 = global——装配层约定） */
 function setup() {
-  const store = new MemoryStore(openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION] }).connection);
+  const store = new MemoryStore(
+    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+  );
   const tools = createMemoryTools({ store, ownerKeys: () => ['global'] });
   const byName = (name: string): ToolDefinition => {
     const def = tools.find((t) => t.name === name);

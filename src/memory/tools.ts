@@ -18,6 +18,7 @@ import { Type } from '../contracts/typebox.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
 import { guardedAddMemory, detectSecret, quoteAsCitation, sanitizeForModel } from './scan.js';
 import type { SanitizedEntry } from './scan.js';
+import { citationMarker } from './citation.js';
 import type { MemoryKind, MemoryStore } from './store.js';
 import type { SessionFtsHit } from './session-fts.js';
 
@@ -39,11 +40,15 @@ function textResult(text: string, isError = false, details?: Record<string, unkn
   return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}), ...(details ? { details } : {}) };
 }
 
-/** 单条记忆的展示行（kind 标注 + 溯源 id；指令样条目套引述框架——§8.2） */
+/**
+ * 单条记忆的展示行（引用标记 + kind 标注 + 溯源 id；指令样条目套引述框架——§8.2）。
+ * `[m:短id]` = 引用面（§6 引用回写——模型按标记在回答中标注）；`id=完整id` =
+ * 操作面（memory_forget/restore 的入参用完整 id）——两把钥匙两种面，不混用。
+ */
 function entryLine(entry: SanitizedEntry): string {
   const { record, quoted } = entry;
   const summary = quoted ? quoteAsCitation(record.summary) : record.summary;
-  return `- [${record.kind}] ${summary}（id=${record.id}，置信 ${record.confidence.toFixed(2)}，证据 ${record.evidenceCount}）`;
+  return `- ${citationMarker(record.id)} [${record.kind}] ${summary}（id=${record.id}，置信 ${record.confidence.toFixed(2)}，证据 ${record.evidenceCount}，引用 ${record.usageCount}）`;
 }
 
 /** kind 七值字面量并集（schema 枚举面——TypeBox Union of Literals → JSON Schema anyOf/const） */
