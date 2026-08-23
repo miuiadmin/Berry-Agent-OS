@@ -156,8 +156,9 @@ for (const file of files) {
 /** @type {Array<{ file: string; name: string }>} */
 const durableSites = [];
 for (const file of files) {
-  // 族 3a：显式类型字面量 append（全 src——session.append 是唯一 append 面）
-  for (const m of file.code.matchAll(/\.\s*append\s*\(\s*'([a-z][a-z0-9/-]+)'/g)) {
+  // 族 3a：显式类型字面量 append / appendEvent（session.append = 宿主写面，
+  // ctx.sessions.appendEvent = 插件写面——同一注册表的两个入口都算写点证据）
+  for (const m of file.code.matchAll(/\.\s*append(?:Event)?\s*\(\s*'([a-z][a-z0-9/-]+)'/g)) {
     durableSites.push({ file: file.rel, name: m[1] });
   }
   // 族 3b：信封对象构造（限定 session 模块非声明文件——fork 的 end-seed、恢复 closer）
@@ -193,6 +194,10 @@ const eventUnion = new Set();
 const jiti = createJiti(import.meta.url);
 const events = await jiti.import(fileURLToPath(new URL('../src/contracts/events.ts', import.meta.url)));
 const sessionTypes = await jiti.import(fileURLToPath(new URL('../src/session/event-types.ts', import.meta.url)));
+// 插件注册的 SessionEvent 词汇随其宿主模块导入生效（v1 首例：memory/diff 在
+// src/memory/diff.ts 顶层注册——该文件运行时依赖保持轻量，导入不连锁 SQLite）。
+// 新增插件侧注册模块时在此追加导入，否则族 3 会把其写点误报为注册表外类型。
+await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url)));
 
 /** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
 const liveCatalog = events.LIVE_EVENT_CATALOG;

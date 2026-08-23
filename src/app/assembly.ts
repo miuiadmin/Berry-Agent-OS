@@ -51,6 +51,9 @@ import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { ChannelHost, UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
+import { CORE_EVENT_TYPES } from '../session/event-types.js';
+import { SESSION_CORE_TYPE_FORBIDDEN } from '../contracts/errors.js';
+import type { SessionEvent } from '../contracts/events.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { DurableSinks } from './durable.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
@@ -570,6 +573,28 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * attach 收口（晚绑定同 ④d 先例）。ask/setModel/setThinkingLevel 仍 ⏳ M2。 */
   const agentService = createAgentService(ctx);
   ctx.provide('agent', agentService.face);
+
+  /* ---- ④f 会话事件服务（ctx.sessions，骨架篇 §9.2 落码——最小面 v1）----
+   * 插件落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走活引用
+   * 闭包读当前会话（/new 热切换自动跟随——与 onUsage 同款 late-binding）；无会话
+   * （persist:false 诊断装配）返回 undefined，调用方各自降级。
+   * 核心词汇伪造防护：内核词（user/message 等核心 14 类）的写入权属宿主——归因
+   * （sendUserMessage source）/审批/结算语义全绑在宿主写点，插件经服务面伪造即
+   * SESSION_CORE_TYPE_FORBIDDEN 响亮拒绝（内核边界，契约篇）；插件只许写自注册
+   * 词汇（session.append 侧对未注册类型还有 SESSION_FORMAT_UNSUPPORTED 二道闸）。
+   * 服务必须无条件 provide（即便 persist:false）——inject 是 Kahn 硬依赖，缺供
+   * 即启动断言拒启。 */
+  ctx.provide('sessions', {
+    appendEvent: (type: string, data: unknown): SessionEvent | undefined => {
+      if (CORE_EVENT_TYPES.some((def) => def.type === type)) {
+        throw new AppError(
+          SESSION_CORE_TYPE_FORBIDDEN,
+          `核心事件词汇不允许插件经 ctx.sessions.appendEvent 写入：${type}（内核词写入权属宿主，插件请注册自有词汇）`,
+        );
+      }
+      return session?.append(type, data);
+    },
+  });
 
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
   const pipeline: ToolPipelineExecutor = createToolPipeline(ctx, {

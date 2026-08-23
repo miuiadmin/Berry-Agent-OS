@@ -31,10 +31,15 @@ const PROMOTION_BRIDGE_LINE =
  * 渲染常驻简报段内容（空库返回 ''——上层物化跳过空段不留空壳分节）。
  * 每行携带引用标记 `[m:短id]`（§6 引用回写——模型按标记标注引用，插件解析
  * assistant 文本回写 usage）；引用指令句随框架句式一并注入。
- * @param records briefing() 入选条目（已按优先级排序）
+ * @param records briefing() 入选条目（已按优先级排序；结构面只取 id/summary——
+ *                差分基线纪元（§6 差分追注）以同构 FaceEntry 喂入，渲染与
+ *                基线共享同一条目形态）
  * @param truncated 是否触限额截断（截断必须可见——ref-7 禁止静默截断）
  */
-export function renderBriefingSection(records: readonly MemoryRecord[], truncated: boolean): string {
+export function renderBriefingSection(
+  records: readonly Pick<MemoryRecord, 'id' | 'summary'>[],
+  truncated: boolean,
+): string {
   if (records.length === 0) return '';
   const lines = records.map((r) => `- ${citationMarker(r.id)} ${r.summary}`);
   if (truncated) {

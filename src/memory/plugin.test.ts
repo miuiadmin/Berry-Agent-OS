@@ -1,10 +1,12 @@
 /**
  * L3 memory 集成测试（官方内置件 apply 接线全栈）——真 Context + 真库 + 宿主
- * 服务最小面（tools/prompts 注册表真件；llm 走结构性替身——模型层是 mock 停靠站）。
+ * 服务最小面（tools/prompts/sessions 注册表真件；llm 走结构性替身——模型层是
+ * mock 停靠站）。
  *
  * 锁纵切五接线序：工具五件 / 简报段 / 跨会话索引对账+镜像 / memory-recall 角色
  * 注册 + context_transform 按需检索注入（防注入句式 + kind 优先 + 空手放行）。
- * persist:false 降级（warn 空转零注册）单列。
+ * 差分追注（第十二批题二）：memory-diff 角色 + 基线纪元冻结 / 分叉落账 /
+ * 收敛清账 / 重启撞指纹自愈 / 重放派生不变式。persist:false 降级单列。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -12,6 +14,7 @@ import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import type { ContextScope } from '../context/types.js';
 import { openStore, type Store } from '../persist/index.js';
+import { Session } from '../session/session.js';
 import {
   MEMORY_MIGRATION,
   MEMORY_UTILITY_MIGRATION,
@@ -24,10 +27,15 @@ import type { MemoryPluginStoreFace } from './index.js';
 import { getMessageRoleDefinition } from '../agent/messages.js';
 import type { BuiltinPluginModule } from '../contracts/plugin.js';
 import type { SessionEvent } from '../contracts/events.js';
+import { deriveDiffView, faceFingerprint } from './diff.js';
 
 /* ---------------- 测试基建：宿主服务最小面 ---------------- */
 
-/** 组装产物：tools/prompts 注册表记录面 + llm 替身 + 真库 */
+/**
+ * 组装产物：tools/prompts/sessions 注册面 + llm 替身 + 真库。
+ * sessions 面 = 宿主 ④f 的测试侧形态：活引用绑定真 Session（appendEvent 落
+ * 真事件日志，差分 handler 的懒初始化/清账断言直接读 session.events）。
+ */
 interface Harness {
   /** 根作用域（dispose 回卷验证需要 ContextScope 面） */
   ctx: ContextScope;
@@ -35,13 +43,17 @@ interface Harness {
   toolNames: () => string[];
   /** 已注册段 id → render（apply 经 ctx.get('prompts').registerSection 真注册） */
   sectionIds: () => string[];
+  /** 物化某段内容（装配侧 materialize 的测试等价物——基线纪元在此冻结） */
+  renderSection: (id: string) => string;
+  /** 绑定活跃会话（appendEvent 活引用目标——/new 热切换的测试等价物） */
+  bindSession: (session: Session) => void;
   /** ctx.llm.complete 调用计数（canAfford 恒 false → 周期路闸门关闭） */
   llmCalls: () => number;
   store: Store;
   source: MemoryPluginStoreFace;
 }
 
-/** 建 ctx + 三服务面 + 真库（memory 表族 + session_fts 同链迁移） */
+/** 建 ctx + 四服务面 + 真库（memory 表族 + session_fts 同链迁移） */
 function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const registeredTools = new Set<string>();
@@ -59,6 +71,11 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
       return () => sections.delete(section.id);
     },
   });
+  // 活跃会话活引用（appendEvent 目标 + loadEvents 路由——差分懒初始化读它）
+  let live: Session | undefined;
+  ctx.provide('sessions', {
+    appendEvent: (type: string, data: unknown): SessionEvent | undefined => live?.append(type, data),
+  });
   // llm 服务结构性替身（ReviewLlmFace/complete 面的最小满足）：complete 记调用，
   // canAfford 恒 false——周期 review 在闸门处短路，测试不进后台补全
   ctx.provide('llm', {
@@ -75,12 +92,17 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
   const source: MemoryPluginStoreFace = {
     connection: store.connection,
     listSessionIds: () => Object.keys(logs),
-    loadEvents: (id) => logs[id] ?? [],
+    // 活跃会话读活日志（write-behind 已 flush 的测试等价），其余读预置卷
+    loadEvents: (id) => (live?.header.sessionId === id ? [...live.events] : (logs[id] ?? [])),
   };
   return {
     ctx,
     toolNames: () => [...registeredTools],
     sectionIds: () => [...sections.keys()],
+    renderSection: (id) => sections.get(id)!(),
+    bindSession: (session) => {
+      live = session;
+    },
     llmCalls: () => llm.calls,
     store,
     source,
@@ -176,6 +198,9 @@ describe('memory 内置件 apply（全栈接线序）', () => {
       content: '教训：删除前先备份',
       confidence: 0.8,
     });
+    // 物化简报段 = 基线纪元冻结（装配侧 materialize 的测试等价物）——记忆先在
+    // 库、基线含之，检索测试不再混入差分注入面
+    h.renderSection('memory/core');
 
     // 手动驱动瀑布（loop transformContext 桥的同一路径）：命中查询
     // （trigram 整 token 子串语义：中文无分词，查询串须是目标词的连续子串——
@@ -269,6 +294,153 @@ describe('memory 内置件 apply（全栈接线序）', () => {
       },
     });
     expect(memory.get(id)!.usageCount).toBe(2); // 第二条消息再引用 = 累加
+
+    await h.ctx.dispose();
+  });
+});
+
+/* ---------------- 简报差分追注（§6 完整差分版三件，第十二批题二） ---------------- */
+
+/** 差分测试共件：apply + 真会话绑定 + 基线物化 + 闩就位（首 user 事件） */
+async function setupDiffBaseline(h: Harness, preseed?: (memory: MemoryStore) => void) {
+  const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
+  await applyPlugin(plugin, h.ctx);
+  const memory = new MemoryStore(h.store.connection);
+  preseed?.(memory);
+  const session = new Session();
+  h.bindSession(session);
+  // 基线物化（render = 装配侧物化的等价物）+ 活跃会话闩（首事件先到）
+  const sectionText = h.renderSection('memory/core');
+  h.ctx.emit('session/event', {
+    sessionId: session.header.sessionId,
+    event: { type: 'user/message', seq: 0, time: 1, data: { content: '开始对话' } },
+  });
+  return { memory, session, sectionText };
+}
+
+/** 驱动一次 context_transform（loop transformContext 桥的同一路径） */
+async function runTransform(h: Harness): Promise<Array<{ role: string; content: unknown }>> {
+  return (await h.ctx.waterfall(
+    'context_transform',
+    [{ role: 'user', content: '继续', timestamp: 1 }],
+    (final: unknown) => final,
+  )) as Array<{ role: string; content: unknown }>;
+}
+
+describe('memory 内置件 apply（简报差分追注）', () => {
+  it('分叉落账 + 注入：基线后新条目 → memory/diff 入真会话日志 + memory-diff 注入进请求尾', async () => {
+    const h = setup();
+    const { memory, session } = await setupDiffBaseline(h);
+
+    // 基线后权威面漂移：新条目入库（下轮请求才看见差分）
+    const inserted = memory.addMemory({
+      ownerKey: 'global',
+      kind: 'preference',
+      summary: '新偏好：回答先给结论',
+      content: '2026-08-24 会话确认。',
+      confidence: 0.8,
+    });
+    if (inserted.outcome !== 'inserted') throw new Error('前置失败');
+
+    const out = await runTransform(h);
+    // 差分注入在尾部（本测试无检索命中——查询「继续」不中记忆词）
+    const injected = out.at(-1)!;
+    expect(out).toHaveLength(2);
+    expect(injected.role).toBe('memory-diff');
+    expect(String(injected.content)).toContain('以下为常驻记忆简报自本次基线后的变化'); // 防注入句式
+    expect(String(injected.content)).toContain('+ [m:'); // 新增态 + 引用标记
+    expect(String(injected.content)).toContain('新偏好：回答先给结论');
+
+    // durable 落账（与检索即弃注入的分界）：真会话日志里有一条 memory/diff
+    const diffs = session.events.filter((e) => e.type === 'memory/diff');
+    expect(diffs).toHaveLength(1);
+    expect((diffs[0]!.data as { entries: unknown[] }).entries).toHaveLength(1);
+
+    // 角色定义双面：toLlm → user 消息；render hidden 不进时间线
+    const definition = getMessageRoleDefinition('memory-diff')!;
+    expect(definition.render).toMatchObject({ intent: 'hidden' });
+    expect((definition.toLlm!(injected as never) as { role: string }).role).toBe('user');
+
+    // 幂等：面未再变 → 同视图不追写、注入照常（每请求至多一条）
+    const again = await runTransform(h);
+    expect(session.events.filter((e) => e.type === 'memory/diff')).toHaveLength(1);
+    expect(again.at(-1)!.role).toBe('memory-diff');
+
+    await h.ctx.dispose();
+  });
+
+  it('收敛清账：漂移回基线 → 追写空差分事件（重放视图归零）、不再注入', async () => {
+    const h = setup();
+    const { memory, session } = await setupDiffBaseline(h);
+
+    const inserted = memory.addMemory({
+      ownerKey: 'global',
+      kind: 'fact',
+      summary: '临时事实',
+      content: 'c',
+    });
+    if (inserted.outcome !== 'inserted') throw new Error('前置失败');
+    await runTransform(h); // 落账 [+]
+    expect(session.events.filter((e) => e.type === 'memory/diff')).toHaveLength(1);
+
+    // 面漂移回基线（forget）→ 下一请求清账：entries=[] 追写、注入消失
+    memory.forget(inserted.memory.id);
+    const out = await runTransform(h);
+    const diffs = session.events.filter((e) => e.type === 'memory/diff');
+    expect(diffs).toHaveLength(2); // 清账事件已落
+    expect((diffs[1]!.data as { entries: unknown[] }).entries).toEqual([]);
+    expect(out).toHaveLength(1); // 无注入（原消息放行）
+    // 重放派生与运行时一致（不变式：mirror == deriveDiffView）
+    const view = deriveDiffView([...session.events], (diffs[0]!.data as { baseline: string }).baseline);
+    expect(view).toEqual([]);
+
+    await h.ctx.dispose();
+  });
+
+  it('重启撞指纹自愈：旧纪元残留事件与新基线同指纹 → 首请求落清账事件', async () => {
+    // 预置库 = 恰好等于旧基线面（甲在库）；上进程未清账即退出，日志残留
+    // 同面指纹的差分事件——新进程基线撞指纹，纯 mirror 初始化会漏账，懒初始化
+    // 必须从日志派生才发现「日志视图非空 / 当前面零漂移」并自愈清账
+    const h = setup();
+    let seededId = '';
+    const { session } = await setupDiffBaseline(h, (memory) => {
+      const out = memory.addMemory({ ownerKey: 'global', kind: 'fact', summary: '条目甲', content: 'c' });
+      if (out.outcome === 'inserted') seededId = out.memory.id;
+    });
+    // 基线 = {甲}；手工排进会话日志一条同指纹旧事件（模拟上进程残留）
+    const baselineFp = faceFingerprint([{ id: seededId, kind: 'fact', summary: '条目甲' }]);
+    session.append('memory/diff', {
+      baseline: baselineFp,
+      entries: [{ op: '+', id: 'bbbbbbbb', kind: 'fact', summary: '已消散的条目乙' }],
+    });
+
+    // 当前面 == 基线（无漂移）但日志视图非空 → 首请求自愈：清账事件落、无注入
+    const out = await runTransform(h);
+    const diffs = session.events.filter((e) => e.type === 'memory/diff');
+    expect(diffs.at(-1)!.data).toMatchObject({ entries: [] });
+    expect(out).toHaveLength(1);
+    expect(deriveDiffView([...session.events], baselineFp)).toEqual([]); // 重放归零
+
+    await h.ctx.dispose();
+  });
+
+  it('基线重物化 = 新纪元：旧差分指纹出局，注入随新基线重算', async () => {
+    const h = setup();
+    const { memory } = await setupDiffBaseline(h);
+
+    const inserted = memory.addMemory({
+      ownerKey: 'global',
+      kind: 'fact',
+      summary: '纪元一条',
+      content: 'c',
+    });
+    if (inserted.outcome !== 'inserted') throw new Error('前置失败');
+    await runTransform(h); // 旧纪元落账 [+] + 注入
+
+    // /new 等价物：重新物化基线（面含新条目）→ 指纹换纪元、差分账清零
+    h.renderSection('memory/core');
+    const out = await runTransform(h);
+    expect(out).toHaveLength(1); // 无注入：当前面 == 新基线
 
     await h.ctx.dispose();
   });

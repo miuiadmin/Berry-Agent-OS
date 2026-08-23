@@ -126,6 +126,8 @@ export const SESSION_EVENT_TOO_LARGE = registerErrorCode('SESSION_EVENT_TOO_LARG
 export const SESSION_SURFACE_OP_INVALID = registerErrorCode('SESSION_SURFACE_OP_INVALID');
 /** session：fork 边界非法（落在 open turn 内——必须落在 turn 闭合之后，会话篇 §5） */
 export const SESSION_FORK_BOUNDARY_INVALID = registerErrorCode('SESSION_FORK_BOUNDARY_INVALID');
+/** session：插件经 ctx.sessions.appendEvent 伪造核心事件词汇（user/message 等内核词的写入权属宿主——归因/审批/结算语义绑在宿主写点，插件面只许自注册词汇） */
+export const SESSION_CORE_TYPE_FORBIDDEN = registerErrorCode('SESSION_CORE_TYPE_FORBIDDEN');
 /** persist：write-behind 批量落盘失败（批次保留、自动重试暂停，显式 flush 重试——会话篇 §6 链第 2 步） */
 export const PERSIST_BATCH_WRITE_FAILED = registerErrorCode('PERSIST_BATCH_WRITE_FAILED');
 /** agent：自定义消息角色重复注册或与标准角色（user/assistant/toolResult）冲突（骨架篇 §2.3 显式注册纪律） */

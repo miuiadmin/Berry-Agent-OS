@@ -168,6 +168,29 @@ describe('createBerryRuntime 装配面', () => {
     expect(typeof service!.complete).toBe('function');
   });
 
+  it('sessions 具名服务（ctx.sessions：插件 durable 落点 + 内核词伪造防护，骨架篇 §9.2）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<{ appendEvent(type: string, data: unknown): SessionEvent | undefined }>(
+      'sessions',
+    )!;
+    expect(sessions).toBeTruthy();
+    // 已注册插件词汇可写：落当前活跃会话日志（memory/diff = surface 事件）
+    const ev = sessions.appendEvent('memory/diff', { baseline: 'deadbeefdeadbeef', entries: [] })!;
+    expect(ev.type).toBe('memory/diff');
+    expect(runtime.session!.events.at(-1)).toBe(ev);
+    // 内核词汇伪造防护：核心词的写入权属宿主（归因/审批/结算语义绑宿主写点）
+    for (const core of ['user/message', 'assistant/message', 'tool/call', 'request/header', 'llm/usage']) {
+      expect(() => sessions.appendEvent(core, {})).toThrowError(/核心事件词汇/);
+    }
+    // 未注册词汇：session.append 二道闸（注册即写入许可）
+    expect(() => sessions.appendEvent('nope/void', {})).toThrowError(/未知事件类型/);
+
+    // persist:false：服务仍 provide（inject 硬依赖，缺供即启动断言）但无会话 → undefined 降级
+    const bare = await assemble({ persist: false });
+    const bareSessions = bare.ctx.tryGet<{ appendEvent(t: string, d: unknown): SessionEvent | undefined }>('sessions')!;
+    expect(bareSessions.appendEvent('memory/diff', {})).toBeUndefined();
+  });
+
   it('persist:false 不开库不建会话（dump-config 姿态）', async () => {
     const runtime = await assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();

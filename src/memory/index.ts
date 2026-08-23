@@ -61,4 +61,16 @@ export {
   type ReviewHandle,
 } from './review.js';
 export { SESSION_FTS_MIGRATION, SessionFtsIndex, type SessionFtsHit, type SessionFtsSource } from './session-fts.js';
+export {
+  MEMORY_DIFF_TYPE,
+  briefingFace,
+  faceFingerprint,
+  diffFaces,
+  deriveDiffView,
+  sameDiffView,
+  type MemoryDiffOp,
+  type MemoryDiffEntry,
+  type MemoryDiffData,
+  type FaceEntry,
+} from './diff.js';
 export { createMemoryPlugin, type MemoryPluginDeps, type MemoryPluginStoreFace } from './plugin.js';
