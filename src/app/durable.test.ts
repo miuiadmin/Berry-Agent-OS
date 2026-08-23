@@ -1,0 +1,200 @@
+/**
+ * L5 app — durable 接线测试（映射顺序 + 投影回读 round-trip，真实 Session 无库）。
+ */
+
+import { describe, expect, it } from 'vitest';
+import { Session } from '../session/session.js';
+import { deriveMessages } from '../session/derive.js';
+import type { AgentEvent } from '../agent/events.js';
+import type { AssistantMessage, ToolResultMessage } from '../contracts/llm.js';
+import { createDurableSinks, projectedToAgentMessages } from './durable.js';
+
+/** 零用量 */
+const NO_USAGE = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3 };
+
+/** 文本 assistant 终值 */
+const textAssistant = (text: string): AssistantMessage => ({
+  role: 'assistant',
+  content: [{ type: 'text', text }],
+  usage: NO_USAGE,
+  stopReason: 'stop',
+  timestamp: 1,
+});
+
+/** 带工具调用块的 assistant 终值 */
+const toolCallAssistant = (): AssistantMessage => ({
+  role: 'assistant',
+  content: [
+    { type: 'text', text: '看一下' },
+    { type: 'toolCall', id: 'call-1', name: 'write', arguments: { path: 'a.txt', content: 'x' } },
+  ],
+  usage: NO_USAGE,
+  stopReason: 'toolUse',
+  timestamp: 1,
+});
+
+/** 工具结果消息 */
+const toolResult = (isError = false): ToolResultMessage => ({
+  role: 'toolResult',
+  toolCallId: 'call-1',
+  toolName: 'write',
+  content: [{ type: 'text', text: isError ? '失败：被遮罩' : '写入完成' }],
+  isError,
+  timestamp: 1,
+});
+
+/** 事件类型序列 */
+const types = (events: readonly { type: string }[]) => events.map((e) => e.type);
+
+describe('createDurableSinks：事件 → session.append 映射', () => {
+  it('一个完整 turn 落 turn/start → user/message → assistant/message → tool/call → tool/result → turn/end', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    const events: AgentEvent[] = [
+      { type: 'agent_start' },
+      { type: 'turn_start' },
+      { type: 'message_start', message: { role: 'user', content: '写文件', timestamp: 1 } },
+      { type: 'message_end', message: { role: 'user', content: '写文件', timestamp: 1 } },
+      { type: 'message_start', message: toolCallAssistant() },
+      { type: 'message_end', message: toolCallAssistant() },
+      { type: 'message_start', message: toolResult() },
+      { type: 'message_end', message: toolResult() },
+      { type: 'turn_end', message: toolCallAssistant(), toolResults: [toolResult()] },
+      { type: 'agent_end', status: 'completed', messages: [] },
+    ];
+    for (const event of events) sinks.handle(event);
+
+    expect(types(session.events)).toEqual([
+      'turn/start',
+      'user/message',
+      'assistant/message',
+      'tool/call',
+      'tool/result',
+      'turn/end',
+    ]);
+    // tool/call 的 arguments 落原始字符串（未解析态）
+    const call = session.events[3]!.data as { arguments: string };
+    expect(call.arguments).toBe('{"path":"a.txt","content":"x"}');
+    // turn/end 终态映射：toolUse → completed
+    expect((session.events[5]!.data as { reason: string }).reason).toBe('completed');
+  });
+
+  it('stopReason → TurnEndReason 映射四分支', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    const cases: Array<[AssistantMessage['stopReason'], string]> = [
+      ['stop', 'completed'],
+      ['toolUse', 'completed'],
+      ['length', 'max-tokens'],
+      ['error', 'error'],
+      ['aborted', 'aborted'],
+    ];
+    for (const [stopReason] of cases) {
+      sinks.handle({ type: 'turn_start' });
+      sinks.handle({
+        type: 'turn_end',
+        message: { ...textAssistant('x'), stopReason },
+        toolResults: [],
+      });
+    }
+    const reasons = session.events
+      .filter((e) => e.type === 'turn/end')
+      .map((e) => (e.data as { reason: string }).reason);
+    expect(reasons).toEqual(['completed', 'completed', 'max-tokens', 'error', 'aborted']);
+  });
+
+  it('isError 工具结果携带错误码与首段文本说明', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.handle({ type: 'message_end', message: toolResult(true) });
+    const data = session.events[0]!.data as { error?: { code: string; message?: string } };
+    expect(data.error?.code).toBe('TOOL_ERROR');
+    expect(data.error?.message).toBe('失败：被遮罩');
+  });
+
+  it('token 级与生命周期边界不落 durable（分层纪律）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.handle({ type: 'agent_start' });
+    sinks.handle({ type: 'message_start', message: textAssistant('hi') });
+    sinks.handle({
+      type: 'message_update',
+      message: textAssistant('h'),
+      streamEvent: { type: 'text_delta', contentIndex: 0, delta: 'h', partial: textAssistant('h') },
+    });
+    sinks.handle({ type: 'tool_execution_start', toolCallId: 'c', toolName: 'write', args: {} });
+    sinks.handle({
+      type: 'tool_execution_end',
+      toolCallId: 'c',
+      toolName: 'write',
+      result: { content: [] },
+      isError: false,
+    });
+    sinks.handle({ type: 'agent_end', status: 'completed', messages: [] });
+    expect(session.events).toHaveLength(0);
+  });
+
+  it('gate 与审批 sink 分别落对应事件', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    sinks.gate({ toolCallId: 'c1', decision: 'block', reason: 'carve-out' });
+    sinks.approval.asked({ approvalId: 'a1', summary: '写入 .git/config' });
+    sinks.approval.decided({ approvalId: 'a1', decision: 'unavailable' });
+    expect(types(session.events)).toEqual(['gate/decision', 'approval/asked', 'approval/decided']);
+  });
+});
+
+describe('投影回读 round-trip（append → derive → projectedToAgentMessages）', () => {
+  it('durable 序列投影回 AgentMessage 与原始消息形状一致', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    const user = { role: 'user' as const, content: '写文件', timestamp: 1 };
+    const assistant = toolCallAssistant();
+    const result = toolResult();
+    for (const event of [
+      { type: 'turn_start' },
+      { type: 'message_end', message: user },
+      { type: 'message_end', message: assistant },
+      { type: 'message_end', message: result },
+    ] as AgentEvent[]) {
+      sinks.handle(event);
+    }
+
+    const projected = deriveMessages(session.events);
+    expect(projected.map((m) => m.type)).toEqual(['user', 'assistant', 'toolResult']);
+    // 回读适配：assistant 内联工具调用块由 tool/call 事件还原
+    const roundTrip = projectedToAgentMessages(projected);
+    expect(roundTrip).toHaveLength(3);
+    const back = roundTrip[1] as AssistantMessage;
+    expect(back.role).toBe('assistant');
+    expect(back.content[1]).toEqual({
+      type: 'toolCall',
+      id: 'call-1',
+      name: 'write',
+      arguments: { path: 'a.txt', content: 'x' },
+    });
+    expect(back.usage).toEqual(NO_USAGE);
+    // toolResult 还原
+    const backResult = roundTrip[2] as ToolResultMessage;
+    expect(backResult.toolCallId).toBe('call-1');
+    expect(backResult.isError).toBe(false);
+  });
+
+  it('arguments 解析失败回空对象（与首次落库失败对称）', () => {
+    const session = new Session();
+    session.append('assistant/message', { content: [] });
+    session.append('tool/call', { toolCallId: 'c', name: 'write', arguments: '{broken' });
+    const roundTrip = projectedToAgentMessages(deriveMessages(session.events));
+    const back = roundTrip[0] as AssistantMessage;
+    expect(back.content[0]).toEqual({ type: 'toolCall', id: 'c', name: 'write', arguments: {} });
+  });
+
+  it('缺 usage/stopReason 的投影回读有兜底（不抛错）', () => {
+    const session = new Session();
+    session.append('assistant/message', { content: [{ type: 'text', text: 'hi' }] });
+    const roundTrip = projectedToAgentMessages(deriveMessages(session.events));
+    const back = roundTrip[0] as AssistantMessage;
+    expect(back.stopReason).toBe('stop');
+    expect(back.usage.totalTokens).toBe(0);
+  });
+});

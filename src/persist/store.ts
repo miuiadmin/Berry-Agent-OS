@@ -319,6 +319,18 @@ export class Store {
 
   /* ---------------- 凭证（pi-ai CredentialStore 的 SQLite 承载） ---------------- */
 
+  /** 列全部凭证元数据（不含 data——pi-ai list 契约「不暴露密钥」；app 适配器消费） */
+  listCredentialEntries(): Array<{ provider: string; kind: string; updatedAt: number }> {
+    // updated_at AS updatedAt：SQL 列名映射驼峰返回形状
+    return this.stmt(
+      'SELECT provider, kind, updated_at AS updatedAt FROM credentials ORDER BY provider',
+    ).all() as Array<{
+      provider: string;
+      kind: string;
+      updatedAt: number;
+    }>;
+  }
+
   /** 读凭证（不存在返回 undefined；明文存储——拍板 #4） */
   getCredential(provider: string): { kind: string; data: unknown; updatedAt: number } | undefined {
     const row = this.stmt('SELECT kind, data, updated_at FROM credentials WHERE provider = ?').get(provider) as
@@ -332,15 +344,18 @@ export class Store {
   /**
    * 凭证 read-modify-write（唯一写路径且串行化——pi-ai 关键契约，防并发双刷新）。
    * @param mutator 收当前值（undefined = 无凭证），返回新值（undefined = 删除）
+   * @param opts.kind 凭证类别覆盖（缺省沿用原行 / 新行 'api-key'）——写入 OAuth
+   *   凭证时调用方传 'oauth'，否则 kind 列与 data.type 漂移
    */
   modifyCredential(
     provider: string,
     mutator: (current: unknown) => unknown,
+    opts?: { kind?: string },
   ): { data: unknown; updatedAt: number } | undefined {
     const run = this.db.transaction((p: string) => {
       const row = this.stmt('SELECT kind, data FROM credentials WHERE provider = ?').get(p) as
         { kind: string; data: string } | undefined;
-      const kind = row?.kind ?? 'api-key';
+      const kind = opts?.kind ?? row?.kind ?? 'api-key';
       const next = mutator(row ? JSON.parse(row.data) : undefined);
       if (next === undefined) {
         this.stmt('DELETE FROM credentials WHERE provider = ?').run(p);

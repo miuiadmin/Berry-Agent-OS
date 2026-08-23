@@ -19,6 +19,8 @@ export {
 // pi-ai 注入面类型再出口（app 适配 persist 的两 Store / 插件注册 provider 用）
 export type {
   AuthOperationOptions,
+  Credential,
+  CredentialInfo,
   CredentialStore,
   Model,
   Models,
