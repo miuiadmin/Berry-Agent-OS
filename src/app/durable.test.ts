@@ -221,6 +221,79 @@ describe('投影回读 round-trip（append → derive → projectedToAgentMessag
     expect(backResult.isError).toBe(false);
   });
 
+  it('toolCall 块不双载：写侧 content 滤除内联块，回读恰好出现一次（回归锁）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    for (const event of [
+      { type: 'turn_start' },
+      { type: 'message_end', message: toolCallAssistant() },
+      { type: 'message_end', message: toolResult() },
+    ] as AgentEvent[]) {
+      sinks.handle(event);
+    }
+
+    // durable 侧：assistant/message 的 content 只剩 text（toolCall 唯一承载腿是 tool/call 事件）
+    const assistantEvent = session.events.find((e) => e.type === 'assistant/message')!;
+    const contentTypes = (assistantEvent.data as { content: { type: string }[] }).content.map((b) => b.type);
+    expect(contentTypes).toEqual(['text']);
+
+    // round-trip：回读 assistant 内联块序列 = [text, toolCall]——恰好一次。
+    // 修复前 content 原样保留内联 toolCall + 事件腿再拼一次 = [text, toolCall, toolCall]，
+    // 恢复续跑会把重复 tool_use 发给 provider（2026-08-23 遗漏检查实证）
+    const roundTrip = projectedToAgentMessages(deriveMessages(session.events));
+    const back = roundTrip.find((m) => m.role === 'assistant') as AssistantMessage;
+    const backTypes = back.content.map((b) => b.type);
+    expect(backTypes).toEqual(['text', 'toolCall']);
+    expect(backTypes.filter((t) => t === 'toolCall')).toHaveLength(1);
+  });
+
+  it('旧形状日志防御：投影 content 混入内联 toolCall 时回读滤除（兼容修复前落库的日志）', () => {
+    const session = new Session();
+    // 手工构造修复前的旧形状：assistant/message content 内联 toolCall + tool/call 事件双载
+    session.append('assistant/message', {
+      content: [
+        { type: 'text', text: '看一下' },
+        { type: 'toolCall', id: 'call-1', name: 'write', arguments: { path: 'a.txt', content: 'x' } },
+      ] as never,
+    });
+    session.append('tool/call', { toolCallId: 'call-1', name: 'write', arguments: '{"path":"a.txt"}' });
+    const roundTrip = projectedToAgentMessages(deriveMessages(session.events));
+    const back = roundTrip[0] as AssistantMessage;
+    const calls = back.content.filter((b) => b.type === 'toolCall');
+    expect(calls).toHaveLength(1); // 内联块被滤，只剩事件腿还原的块
+    expect(calls[0]).toEqual({
+      type: 'toolCall',
+      id: 'call-1',
+      name: 'write',
+      arguments: { path: 'a.txt' },
+    });
+  });
+
+  it('超大 tool/call arguments 截断：append 不抛、带尾标记、回读解析回空对象（call 侧同链护栏）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    // 70KiB arguments（写类工具无上限、模型单轮可输出 64k token 的现实形状）：
+    // 无预算时 append 抛 SESSION_EVENT_TOO_LARGE 炸 run——#9 修 a 的对侧腿
+    const big = { path: 'a.txt', content: 'w'.repeat(70 * 1024) };
+    expect(() =>
+      sinks.handle({
+        type: 'message_end',
+        message: {
+          ...toolCallAssistant(),
+          content: [{ type: 'toolCall', id: 'call-1', name: 'write', arguments: big }],
+        },
+      }),
+    ).not.toThrow();
+    const call = session.events[1]!.data as { arguments: string };
+    expect(call.arguments.endsWith('[truncated for durable log]')).toBe(true);
+    // 整事件序列化字节在 64KiB 护栏内
+    expect(Buffer.byteLength(JSON.stringify(session.events[1]!), 'utf8')).toBeLessThan(64 * 1024);
+    // 截断产生的坏 JSON 回读降级为空对象（与首次落库解析失败对称）
+    const roundTrip = projectedToAgentMessages(deriveMessages(session.events));
+    const back = roundTrip[0] as AssistantMessage;
+    expect(back.content[0]).toEqual({ type: 'toolCall', id: 'call-1', name: 'write', arguments: {} });
+  });
+
   it('arguments 解析失败回空对象（与首次落库失败对称）', () => {
     const session = new Session();
     session.append('assistant/message', { content: [] });

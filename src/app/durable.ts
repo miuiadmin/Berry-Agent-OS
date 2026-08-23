@@ -73,10 +73,12 @@ const DURABLE_CONTENT_BUDGET_BYTES = 60 * 1024;
 const TRUNCATED_MARKER = '\n…[truncated for durable log]';
 
 /**
- * durable 内容块全类型（截断器须覆盖三种载荷的块形状：user=text/image、
- * assistant=text/thinking/toolCall、toolResult=text/image）。
+ * durable 内容块类型（截断器覆盖三种载荷块：user=text/image、
+ * assistant=text/thinking、toolResult=text/image）。toolCall **不在其列**：
+ * content 腿不内联 toolCall 块（tool/call 事件是唯一承载腿，双载必在投影
+ * 回读时拼出重复块——会话篇 §1.1，2026-08-23 修）。
  */
-type DurableBlock = TextContent | ThinkingContent | ImageContent | ToolCallBlock;
+type DurableBlock = TextContent | ThinkingContent | ImageContent;
 
 /** 单块 UTF-8 字节度量（截断预算的计量单位；image 按 base64 字符串长度近似） */
 function blockBytes(block: DurableBlock): number {
@@ -87,25 +89,30 @@ function blockBytes(block: DurableBlock): number {
       return Buffer.byteLength(block.thinking, 'utf8');
     case 'image':
       return block.data.length;
-    case 'toolCall':
-      // arguments 来源于模型输出（受输出 token 上限约束，现实不超预算），原样计入
-      return JSON.stringify(block.arguments).length;
   }
 }
 
 /**
- * 内容截断到 durable 预算内（user 的纯字符串形态按整串截；块数组形态：
- * text/thinking 块按剩余预算截字节并加尾标记，image 块放不下时换文本占位
- * ——base64 动辄超预算，保留语义不保像素；toolCall 结构化小块不截）。
+ * 字符串按字节预算截断（超预算加尾标记；不超原样返回）。
+ * user 纯文本整串与 tool/call 的 arguments 字符串共用这一把刀。
+ */
+function budgetString(text: string): string {
+  const size = Buffer.byteLength(text, 'utf8');
+  if (size <= DURABLE_CONTENT_BUDGET_BYTES) return text;
+  // 按字节截（subarray 可能切在多字节字符中间，toString 对坏尾替换 U+FFFD——可接受）
+  const sliced = Buffer.from(text, 'utf8').subarray(0, DURABLE_CONTENT_BUDGET_BYTES).toString('utf8');
+  return sliced + TRUNCATED_MARKER;
+}
+
+/**
+ * 内容截断到 durable 预算内（块数组形态：text/thinking 块按剩余预算截字节
+ * 并加尾标记，image 块放不下时换文本占位——base64 动辄超预算，保留语义不保像素）。
  * 不超预算时原样返回（零成本快路径）。
  */
 function truncateForDurable(content: string | readonly DurableBlock[]): string | readonly DurableBlock[] {
   // 纯字符串形态（user 消息）：整串按字节截
   if (typeof content === 'string') {
-    const size = Buffer.byteLength(content, 'utf8');
-    if (size <= DURABLE_CONTENT_BUDGET_BYTES) return content;
-    const sliced = Buffer.from(content, 'utf8').subarray(0, DURABLE_CONTENT_BUDGET_BYTES).toString('utf8');
-    return sliced + TRUNCATED_MARKER;
+    return budgetString(content);
   }
   // 快路径：总字节在预算内直接通过（绝大多数消息零开销）
   let total = 0;
@@ -120,11 +127,6 @@ function truncateForDurable(content: string | readonly DurableBlock[]): string |
     if (block.type === 'image') {
       // 像素载荷放不进预算 → 文本占位（像素本就不进 durable——事件日志是审计面非媒体库）
       out.push({ type: 'text', text: '[image omitted: durable budget]' });
-      continue;
-    }
-    if (block.type === 'toolCall') {
-      // 结构化小块不截（同形状另落 tool/call 事件，截断会造成两腿不一致）
-      out.push(block);
       continue;
     }
     // text / thinking：按剩余预算截字节
@@ -172,9 +174,12 @@ export function createDurableSinks(session: Session): DurableSinks {
           return;
         }
         if (message.role === 'assistant') {
-          // 消息终态 + 逐工具调用块（arguments 落原始字符串——解析失败留给工具管道）
+          // 消息终态 + 逐工具调用块（arguments 落原始字符串——解析失败留给工具管道）。
+          // content 滤除 toolCall 块：tool/call 事件是工具调用的唯一 durable 承载腿，
+          // content 内联 + 事件双载会在投影回读时拼出重复 toolCall 块（会话篇 §1.1，
+          // 2026-08-23 修）——滤除同时让 text/thinking 不被 toolCall arguments 挤占预算
           session.append('assistant/message', {
-            content: truncateForDurable(message.content),
+            content: truncateForDurable(message.content.filter((block) => block.type !== 'toolCall')),
             usage: message.usage,
             stopReason: message.stopReason,
           });
@@ -183,7 +188,10 @@ export function createDurableSinks(session: Session): DurableSinks {
               session.append('tool/call', {
                 toolCallId: block.id,
                 name: block.name,
-                arguments: JSON.stringify(block.arguments),
+                // arguments 过 durable 预算截断：写类工具参数无上限、模型单轮输出可达
+                // 64k token——call 侧与 result 侧同链可炸 64KiB 护栏（#9 修 a 的对侧腿）；
+                // 截断后读侧 JSON 解析失败回空对象，与首次落库解析失败对称降级
+                arguments: budgetString(JSON.stringify(block.arguments)),
               });
             }
           }
@@ -252,9 +260,14 @@ export function projectedToAgentMessages(projected: readonly ProjectedMessage[])
         });
         break;
       case 'assistant': {
-        // 工具调用块由 tool/call 事件合成（投影分离态）——还原为 assistant 内联块
+        // 工具调用块由 tool/call 事件合成（投影分离态）——还原为 assistant 内联块。
+        // content 里的 toolCall 块防御性滤除：写侧已不内联（§1.1），此过滤只为
+        // 兼容修复前落库的旧形状日志（旧日志内联块 + 事件块重拼 = 重复 tool_use）
+        const inlineBlocks = ((message.content ?? []) as (TextContent | ThinkingContent | ToolCallBlock)[]).filter(
+          (block) => block.type !== 'toolCall',
+        );
         const blocks = [
-          ...((message.content ?? []) as (TextContent | ThinkingContent | ToolCallBlock)[]),
+          ...inlineBlocks,
           ...message.toolCalls.map((call): ToolCallBlock => ({
             type: 'toolCall',
             id: call.toolCallId,
