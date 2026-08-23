@@ -116,6 +116,7 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
   /* ---------------- read：观察登记的唯一天然入口 ---------------- */
   const readTool: ToolDefinition = {
     name: 'read',
+    effect: 'read',
     description:
       '读取文本文件内容。读取即登记观察态：后续 write/edit 需基于本观察（版本不符会被拒绝）。文件不存在时返回错误，但同样登记「不存在」观察（之后 write 即合法创建）。',
     parameters: Type.Object({
@@ -143,6 +144,7 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
   /* ---------------- write：按观察态分派 create/replace ---------------- */
   const writeTool: ToolDefinition = {
     name: 'write',
+    effect: 'write',
     description:
       '写文件（整体替换内容）。运行时按观察态自动分派：文件从未读过且已存在 → 拒绝（先 read）；读过 → 仅当读取后未被修改才允许替换（版本守卫）。写入成功后即更新观察。',
     parameters: Type.Object({
@@ -173,6 +175,7 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
   /* ---------------- edit：apply_patch 补丁（两阶段：全检后写） ---------------- */
   const editTool: ToolDefinition = {
     name: 'edit',
+    effect: 'write',
     description:
       '按 apply_patch 补丁格式编辑文件（支持一次补丁改多个文件：Update File / Add File / Delete File）。Update/Delete 的目标必须先 read 过；全部校验通过后才落盘（跨文件顺序应用，非原子）。',
     parameters: Type.Object({
@@ -231,6 +234,7 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
   /* ---------------- ls：目录列举（不登记观察——不构成内容观察） ---------------- */
   const lsTool: ToolDefinition = {
     name: 'ls',
+    effect: 'read',
     description: '列出目录内容（名称 + 类型）。缺省列工作区根。',
     parameters: Type.Object({
       path: Type.Optional(Type.String({ description: '目录路径（缺省工作区根）' })),

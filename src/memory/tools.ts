@@ -60,6 +60,7 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
   /* ---------------- memory_write：模型主动记（唯一写入口） ---------------- */
   const memoryWrite: ToolDefinition = {
     name: 'memory_write',
+    effect: 'write',
     description:
       '记录一条长期记忆（用户偏好/事实/约定/教训等）。写入会与已有记忆自动合并去重（同义合并、矛盾按置信度裁决）。注意：不要记录任何密钥/token/凭证——写前扫描会直接拒绝。',
     parameters: Type.Object({
@@ -126,6 +127,7 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
   /* ---------------- memory_forget：用户口信软删 ---------------- */
   const memoryForget: ToolDefinition = {
     name: 'memory_forget',
+    effect: 'write',
     description:
       '软删一条记忆（用户说「忘掉这条」时使用；可经 memory_restore 恢复）。条目 id 从 memory_read/memory_search 获取。',
     parameters: Type.Object({
@@ -145,6 +147,7 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
   /* ---------------- memory_restore：恢复软删 ---------------- */
   const memoryRestore: ToolDefinition = {
     name: 'memory_restore',
+    effect: 'write',
     description: '恢复一条软删记忆（用户说「把刚才那条加回来」时使用）。',
     parameters: Type.Object({
       id: Type.String({ minLength: 1 }),
@@ -160,6 +163,7 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
   /* ---------------- memory_read：常驻简报 + 最近变更 + 健康面 ---------------- */
   const memoryRead: ToolDefinition = {
     name: 'memory_read',
+    effect: 'read',
     description:
       '读取当前生效的记忆（常驻简报选摘 + 最近变更清单 + 条目计数）。轻量读面，不做全文检索——检索用 memory_search。',
     parameters: Type.Object({}),
@@ -199,6 +203,7 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
   /* ---------------- memory_search：FTS 检索（唯一跨会话检索入口） ---------------- */
   const memorySearch: ToolDefinition = {
     name: 'memory_search',
+    effect: 'read',
     description:
       '按关键词检索记忆库（中英混排子串匹配）。回答涉及用户偏好/历史教训/项目约定的问题前先检索——记忆比本轮上下文更了解用户。',
     parameters: Type.Object({

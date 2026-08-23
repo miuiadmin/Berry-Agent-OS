@@ -50,14 +50,18 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         // 同名重复注册 = 装配冲突（两行注册同一工具），响亮失败不静默覆盖
         throw new AppError(TOOL_DUPLICATE, `工具重复注册：${def.name}`);
       }
-      tools.set(def.name, def);
+      // 读写性归一（契约篇 §3.1，2026-08-24 第十一批）：未声明 effect 按 'write'
+      // 保守处理——只读类守门策略不放过未声明工具（fail-closed 方向）。存归一副本，
+      // 注销身份护栏随迁到副本（对调用方原对象零改动）。
+      const normalized: ToolDefinition = { ...def, effect: def.effect ?? 'write' };
+      tools.set(def.name, normalized);
       ctx.emit(TOOLS_CHANGE_EVENT, { kind: 'add', name: def.name });
       let done = false;
       return () => {
         if (done) return;
         done = true;
         // 仅当仍是本定义时删除（防误撤他者后来的同位注册——与 provide 同款护栏）
-        if (tools.get(def.name) === def) {
+        if (tools.get(def.name) === normalized) {
           tools.delete(def.name);
           ctx.emit(TOOLS_CHANGE_EVENT, { kind: 'remove', name: def.name });
         }

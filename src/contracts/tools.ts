@@ -113,6 +113,13 @@ export interface ToolDefinition {
   description: string;
   /** JSON Schema 参数描述（TypeBox 产物或等价 JSON Schema 对象） */
   parameters: object;
+  /**
+   * 读写性声明（2026-08-24 第十一批，契约篇 §3.1——loopx 读码启发 #4 最小版）：
+   * 声明面供守门策略统一决策（只读模式拦全部 write、工具子集按 effect 过滤），
+   * 不必逐工具理解 args；执行面强制不变（fence/沙箱/carve-out 照走）。
+   * 注册时归一：缺省按 'write' 保守处理（未知工具不放过只读策略，fail-closed）。
+   */
+  effect?: 'read' | 'write';
   /** 执行时长预算毫秒（缺省用管道默认值；超时替换为结构化 TOOL_TIMEOUT 错误） */
   timeoutMs?: number;
   /** UI 展示标签（缺省用 name） */

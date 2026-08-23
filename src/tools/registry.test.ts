@@ -46,6 +46,19 @@ describe('registerToolsService — 动态注册（契约篇 §3.2）', () => {
     }
   });
 
+  it('effect 读写性归一（第十一批，契约篇 §3.1）：缺省 write 保守，显式声明透传', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    // 未声明 effect：按 'write' 保守归一（只读类守门策略不放过未声明工具）
+    tools.register(makeTool('undeclared'));
+    // 显式声明：原样透传
+    tools.register({ ...makeTool('declared-read'), effect: 'read' });
+    expect(tools.get('undeclared')?.effect).toBe('write');
+    expect(tools.get('declared-read')?.effect).toBe('read');
+    // list() 与守门段入参（GateInput.tool）走同一注册表条目——归一在注册处单点完成
+    expect(tools.list().every((t) => t.effect === 'read' || t.effect === 'write')).toBe(true);
+  });
+
   it('注销器：撤注册 + 广播 tools_change(remove)，幂等', () => {
     const ctx = createContext({ name: 'test' });
     const events: Array<{ kind: string; name: string }> = [];
