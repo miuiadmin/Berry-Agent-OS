@@ -31,7 +31,8 @@ const MODULE_EDGES = {
   memory: ['contracts', 'context', 'session', 'llm', 'persist'],
   scheduler: ['contracts', 'context', 'session', 'agent'],
   mcp: ['contracts', 'context', 'tools'],
-  channels: ['contracts', 'context', 'session', 'agent'],
+  // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
+  channels: ['contracts', 'context', 'agent'],
   app: [
     'contracts',
     'context',

@@ -80,3 +80,13 @@ export function listMessageRoles(): string[] {
 export function isStandardRole(role: string): boolean {
   return STANDARD_ROLES.has(role);
 }
+
+/**
+ * 是否标准三角色消息（AgentMessage 联合消费方的窄化守卫）。
+ * CustomMessage.role 是宽 string（'user' 等字面量结构上可赋给它），
+ * 判负分支无法窄化——守卫取正向：真分支窄化为 Message（user/assistant/
+ * toolResult），假分支窄化为 CustomMessage。
+ */
+export function isStandardMessage(message: AgentMessage): message is Message {
+  return isStandardRole(message.role);
+}
