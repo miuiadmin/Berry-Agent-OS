@@ -26,7 +26,7 @@ const MODULE_EDGES = {
   llm: ['contracts', 'context'],
   tools: ['contracts', 'context'],
   safety: ['contracts', 'context', 'session', 'tools'],
-  skills: ['contracts', 'context', 'tools'],
+  skills: ['contracts', 'context'],
   subagent: ['contracts', 'context', 'agent', 'session'],
   memory: ['contracts', 'context', 'session', 'llm', 'persist'],
   scheduler: ['contracts', 'context', 'session', 'agent'],
@@ -56,7 +56,8 @@ const BARE_IMPORTS = {
   '@earendil-works/pi-ai': ['llm'],
   '@earendil-works/pi-tui': ['channels', 'app'],
   'better-sqlite3': ['persist'],
-  yaml: ['app'],
+  yaml: ['app', 'skills'],
+  ignore: ['skills'],
   jiti: ['context', 'app'],
 };
 const TEST_ONLY_BARE = new Set(['vitest']);
