@@ -12,12 +12,18 @@ import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
 
+/** 监听器登记项：handler + 注册方作用域名（失败归因——记「谁注册的」而非「谁触发的」） */
+interface HandlerEntry {
+  readonly handler: EventHandler;
+  readonly owner: string;
+}
+
 /** 根运行时：跨作用域共享状态（服务注册表 + 事件总线）。仅宿主侧可见，不进插件面。 */
 class ContextRuntime {
   /** 服务表：name → 实现实例（ctx.provide 写入 / ctx.get 读取） */
   readonly services = new Map<string, unknown>();
-  /** 事件总线：事件名 → 监听器列表（注册序即派发序，prepend 插队头部） */
-  readonly handlers = new Map<EventName, EventHandler[]>();
+  /** 事件总线：事件名 → 登记项列表（注册序即派发序，prepend 插队头部；owner 供失败归因） */
+  readonly handlers = new Map<EventName, HandlerEntry[]>();
   /** 根 logger（子作用域 logger 由它派生前缀） */
   readonly rootLogger: Logger;
 
@@ -26,7 +32,7 @@ class ContextRuntime {
   }
 
   /** 取某事件监听器的快照副本（派发期间注册/退订不影响本轮） */
-  snapshot(event: EventName): EventHandler[] {
+  snapshot(event: EventName): HandlerEntry[] {
     return [...(this.handlers.get(event) ?? [])];
   }
 }
@@ -95,11 +101,14 @@ class ContextScopeImpl implements ContextScope {
 
   on(event: EventName, handler: EventHandler, opts?: { prepend?: boolean }): Disposer {
     this.assertActive();
+    // 登记项携带注册方作用域名（归因纪律）：插件 A emit、插件 B 的监听器炸，
+    // 失败日志必须指向 B（契约篇 §1.6「插件名 + 事件名 + 错误 + 栈」的插件名 = 注册方）
+    const entry: HandlerEntry = { handler, owner: this.name };
     const list = this.runtime.handlers.get(event) ?? [];
     if (opts?.prepend) {
-      list.unshift(handler);
+      list.unshift(entry);
     } else {
-      list.push(handler);
+      list.push(entry);
     }
     this.runtime.handlers.set(event, list);
     // on 内部走 effect（契约篇）：退订器入栈，作用域卸载时随 LIFO 自动回卷。
@@ -108,7 +117,8 @@ class ContextScopeImpl implements ContextScope {
     return this.pushEffect(() => {
       const current = this.runtime.handlers.get(event);
       if (!current) return;
-      const index = current.indexOf(handler);
+      // 按注册方作用域 + handler 双重定位退订（同一 handler 可能被多作用域注册）
+      const index = current.findIndex((item) => item.owner === this.name && item.handler === handler);
       if (index >= 0) current.splice(index, 1);
       if (current.length === 0) this.runtime.handlers.delete(event);
     });
@@ -116,48 +126,49 @@ class ContextScopeImpl implements ContextScope {
 
   /**
    * 派发辅助：包装单个监听器，异常隔离 + 异步返回值吞掉（emit 语义）。
-   * 日志纪律（2026-08-23 生态读码补钉 dsh-11）：失败必须带 {event, scope} 与完整
-   * stack——只记 String(err) 等于吞没（pi 生态监听器静默死亡排查无门的实证反例）。
+   * 归因纪律（契约篇 §1.6 + 2026-08-23 独立重读轮 #23 落码）：失败记录**注册方**
+   * 作用域名（entry.owner）——记 emit 方 scope 是归因错列，排查会追错插件；
+   * 载荷完整携带 event/owner/stack，只记 String(err) 等于吞没（pi 生态实证反例）。
    */
-  private fireIsolated(event: EventName, handler: EventHandler, args: unknown[]): void {
+  private fireIsolated(event: EventName, entry: HandlerEntry, args: unknown[]): void {
     try {
-      const returned = handler(...args);
+      const returned = entry.handler(...args);
       if (returned instanceof Promise) {
         returned.catch((err) => {
-          this.logger.error('事件监听器异步失败', { event, scope: this.name, error: errorStack(err) });
+          this.logger.error('事件监听器异步失败', { event, owner: entry.owner, error: errorStack(err) });
         });
       }
     } catch (err) {
-      this.logger.error('事件监听器同步失败', { event, scope: this.name, error: errorStack(err) });
+      this.logger.error('事件监听器同步失败', { event, owner: entry.owner, error: errorStack(err) });
     }
   }
 
   emit(event: EventName, ...args: unknown[]): void {
-    for (const handler of this.runtime.snapshot(event)) {
-      this.fireIsolated(event, handler, args);
+    for (const entry of this.runtime.snapshot(event)) {
+      this.fireIsolated(event, entry, args);
     }
   }
 
   async parallel(event: EventName, ...args: unknown[]): Promise<void> {
-    // 并发语义：等待全部监听器完成；单个失败隔离（catch 记日志），Promise.all 不因此 reject
+    // 并发语义：等待全部监听器完成；单个失败隔离（catch 记日志含注册方归因），Promise.all 不因此 reject
     await Promise.all(
-      this.runtime.snapshot(event).map((handler) =>
+      this.runtime.snapshot(event).map((entry) =>
         Promise.resolve()
-          .then(() => handler(...args))
+          .then(() => entry.handler(...args))
           .catch((err) => {
-            this.logger.error('parallel 监听器失败', { event, scope: this.name, error: errorStack(err) });
+            this.logger.error('parallel 监听器失败', { event, owner: entry.owner, error: errorStack(err) });
           }),
       ),
     );
   }
 
   async serial(event: EventName, ...args: unknown[]): Promise<void> {
-    for (const handler of this.runtime.snapshot(event)) {
+    for (const entry of this.runtime.snapshot(event)) {
       try {
-        await handler(...args);
+        await entry.handler(...args);
       } catch (err) {
-        // 异常隔离：单个失败记日志、继续下一个（保持串行派发不中断）
-        this.logger.error('serial 监听器失败', { event, scope: this.name, error: errorStack(err) });
+        // 异常隔离：单个失败记日志（含注册方归因）、继续下一个（保持串行派发不中断）
+        this.logger.error('serial 监听器失败', { event, owner: entry.owner, error: errorStack(err) });
       }
     }
   }
@@ -166,14 +177,15 @@ class ContextScopeImpl implements ContextScope {
     // 末位参数是链尾 next（骨架篇 §9.1 签名：waterfall(event, ...args, next)）
     const next = argsWithNext.pop() as () => T | Promise<T>;
     const args = argsWithNext;
-    const handlers = this.runtime.snapshot(event);
+    const entries = this.runtime.snapshot(event);
 
     // koa-compose 式委托：dispatch(i) = 执行第 i 个监听器，其 next 参数 = dispatch(i+1)；
     // 监听器不调 next 即短路（返回其返回值）；全部执行完则落到链尾 next()。
+    // waterfall 无异常隔离（契约：抛错按事件契约语义短路——守门 fail-closed 等）
     const dispatch = (index: number): Promise<T> => {
-      if (index >= handlers.length) return Promise.resolve(next());
-      const handler = handlers[index]!;
-      return Promise.resolve(handler(...args, () => dispatch(index + 1)));
+      if (index >= entries.length) return Promise.resolve(next());
+      const entry = entries[index]!;
+      return Promise.resolve(entry.handler(...args, () => dispatch(index + 1)));
     };
     return dispatch(0);
   }
@@ -206,12 +218,17 @@ class ContextScopeImpl implements ContextScope {
   }
 
   fork(opts: { name: string; config?: Record<string, unknown> }): ContextScope {
-    return new ContextScopeImpl(
+    const child = new ContextScopeImpl(
       this.runtime,
       `${this.name}:${opts.name}`,
       opts.config,
       this.runtime.rootLogger.child(`${this.name}:${opts.name}`),
     );
+    // 子作用域销毁接线进父 effect 栈（2026-08-23 独立重读轮 #23 落码）：父/根
+    // dispose 时 LIFO 级联回卷全部子作用域——宿主忘显式 dispose 也兜底；dispose
+    // 幂等（disposed 标记），显式销毁后父侧再调是空操作，双保险无害
+    this.effect(() => () => void child.dispose());
+    return child;
   }
 
   async dispose(): Promise<void> {

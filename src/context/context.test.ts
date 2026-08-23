@@ -279,3 +279,53 @@ describe('stale ctx 护栏', () => {
     await scope.dispose();
   });
 });
+
+describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', () => {
+  /** 捕获 sink：收集 JSON 行供断言（不向 stderr 喷） */
+  function captureSink() {
+    const lines: string[] = [];
+    return { lines, sink: (line: string) => lines.push(line) };
+  }
+
+  it('on 归因：监听器失败日志记注册方作用域名（owner），不记 emit 方', () => {
+    const { lines, sink } = captureSink();
+    // 归因错列场景：root emit、插件 B 的监听器炸——日志必须指向 B
+    const root = createContext({ logger: createLogger({ module: 'test', level: 'debug', sink }) });
+    const pluginB = root.fork({ name: 'plugin-b' });
+    pluginB.on('evt/boom', () => {
+      throw new Error('handler boom');
+    });
+    root.emit('evt/boom');
+    expect(lines).toHaveLength(1);
+    const record = JSON.parse(lines[0]!) as { event: string; owner: string; error: string };
+    expect(record.event).toBe('evt/boom');
+    expect(record.owner).toBe('root:plugin-b'); // 注册方（修复前错记 emit 方 'root'）
+    expect(record.error).toContain('handler boom');
+    expect(record.error).toContain('at '); // 完整 stack 而非 String(err)
+  });
+
+  it('fork 级联回卷：根 dispose 自动回卷子作用域（宿主忘显式 dispose 也兜底）', async () => {
+    const root = silentRoot();
+    const child = root.fork({ name: 'plugin-a' });
+    child.provide('plugin.a.svc', 'v');
+    await root.dispose();
+    // 子作用域已随根回卷：服务注销 + 子作用域进入 stale 态
+    expect(root.tryGet('plugin.a.svc')).toBeUndefined();
+    expect(() => child.provide('late.svc', 1)).toThrowError(AppError);
+    expect(child.signal.aborted).toBe(true);
+  });
+
+  it('logger setLevel 沿子树级联：child 继承创建时快照、父调级后随之', () => {
+    const { lines, sink } = captureSink();
+    const parent = createLogger({ module: 'test', level: 'error', sink });
+    const child = parent.child('mod');
+    child.debug('调级前不可见'); // error 阈值下被过滤
+    expect(lines).toHaveLength(0);
+    parent.setLevel('debug');
+    child.debug('调级后可见'); // 级联生效——不级联则插件日志永远按创建时旧阈值过滤
+    expect(lines).toHaveLength(1);
+    const record = JSON.parse(lines[0]!) as { module: string; msg: string };
+    expect(record.module).toBe('test:mod');
+    expect(record.msg).toBe('调级后可见');
+  });
+});

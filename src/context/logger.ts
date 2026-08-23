@@ -50,6 +50,8 @@ export function createLogger(opts: { module?: string; level?: LogLevel; sink?: L
   const module = opts.module ?? 'app';
   const sink = opts.sink ?? ((line) => process.stderr.write(line + '\n'));
   let threshold = opts.level ?? defaultLevel();
+  /** 子 logger 登记表（setLevel 沿子树级联用；child 创建时登记，2026-08-23 独立重读轮 #23 落码） */
+  const children: Logger[] = [];
 
   const write = (level: LogLevel, message: string, fields?: LogFields): void => {
     if (LEVEL_WEIGHT[level]! > LEVEL_WEIGHT[threshold]!) return;
@@ -63,9 +65,17 @@ export function createLogger(opts: { module?: string; level?: LogLevel; sink?: L
     warn: (m, f) => write('warn', m, f),
     info: (m, f) => write('info', m, f),
     debug: (m, f) => write('debug', m, f),
-    child: (prefix) => createLogger({ module: `${module}:${prefix}`, level: threshold, sink }),
+    child: (prefix) => {
+      // 子 logger 继承创建时刻的阈值快照 + 登记进子树表（此后父 setLevel 会级联覆盖）
+      const child = createLogger({ module: `${module}:${prefix}`, level: threshold, sink });
+      children.push(child);
+      return child;
+    },
     setLevel: (level) => {
       threshold = level;
+      // 沿子树级联：运行时调级必须达全部派生 logger——不级联则调级后插件日志
+      // 仍按创建时的旧阈值过滤（技术栈篇拍板的运维调级面，插件 logger 必须随调）
+      for (const child of children) child.setLevel(level);
     },
   };
 }
