@@ -208,6 +208,16 @@ describe('服务注册表 provide/get', () => {
     await plugin.dispose();
     expect(() => root.get('plugin.a.svc')).toThrowError(/未注册/);
   });
+
+  // 软依赖探测（2026-08-23 生态读码补钉 dsh-4）：缺 = 明确 undefined，禁轮询禁鸭子探测
+  it('tryGet：已注册返回实现；未注册返回 undefined 不抛错', () => {
+    const scope = silentRoot();
+    const off = scope.provide('optional.svc', { n: 7 });
+    expect(scope.tryGet<{ n: number }>('optional.svc')?.n).toBe(7);
+    expect(scope.tryGet('missing.svc')).toBeUndefined();
+    off();
+    expect(scope.tryGet('optional.svc')).toBeUndefined(); // 注销后同样软缺，不抛
+  });
 });
 
 describe('fork 作用域', () => {

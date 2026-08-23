@@ -30,6 +30,14 @@ export interface AgentToolResult<TDetails = unknown> {
   content: (TextContent | ImageContent)[];
   /** 供日志/UI 的结构化明细（不进主上下文） */
   details?: TDetails;
+  /**
+   * 本结果携带错误身份（2026-08-23 生态读码补钉 pi-10/dsh-1）：
+   * true = 结果是错误（失败/拒绝/超时），模型与投影按错误对待；
+   * 缺省 false = 正常结果。此前错误身份只活在 loop 局部变量与 ToolResultMessage
+   * 上，管道合成的错误结果（TOOL_TIMEOUT/TOOL_BLOCKED 等）无法在 result 自身
+   * 声明——durable 持久化与 UI 投影只能靠文本嗅探，是 pi 生态同款病。
+   */
+  isError?: boolean;
   /** 工具执行自身的用量（若可得上报） */
   usage?: Usage;
   /** 本结果引入且自此可用的工具名（契约篇 §3.3：结果驱动的工具挂载） */

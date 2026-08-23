@@ -631,7 +631,7 @@ async function runAndFinalizeToolCall(
         ),
       );
     });
-    isError = false;
+    isError = result.isError === true; // 工具/管道可在结果上自带错误声明（pi-10 补钉：execute 正常返回但声明 isError）
   } catch (error) {
     result = errorToolResult(describeError(error));
     isError = true;
@@ -649,6 +649,7 @@ async function runAndFinalizeToolCall(
         ...result,
         content: after.content ?? result.content,
         details: after.details ?? result.details,
+        isError: after.isError ?? result.isError, // 改写后的结果身份同步（pi-10 补钉：isError 不在合并面时保留原值）
         usage: after.usage ?? result.usage,
         terminate: after.terminate ?? result.terminate,
       };
@@ -668,13 +669,20 @@ function shouldTerminate(finalized: FinalizedCall[]): boolean {
   return finalized.length > 0 && finalized.every((call) => call.result.terminate === true);
 }
 
-/** 合成错误工具结果（固定形态：单文本块 + 空明细） */
+/** 合成错误工具结果（固定形态：单文本块 + 空明细；自带 isError 身份——pi-10 补钉） */
 function errorToolResult(message: string): AgentToolResult {
-  return { content: [{ type: 'text', text: message }], details: {} };
+  return { content: [{ type: 'text', text: message }], details: {}, isError: true };
 }
 
-/** 错误 → 文案（工具结果与拦截说明的统一口径） */
+/**
+ * 错误 → 文案（工具结果与拦截说明的统一口径）。
+ * AppError 携带错误码前缀 `[CODE]`（骨架篇 §3.4：M1 过渡态——结构化 errorCode
+ * 字段是 M2 升级项，此前至少让码进文本，杜绝纯文案吞码）。
+ */
 function describeError(error: unknown): string {
+  if (error instanceof AppError) {
+    return `[${error.code}] ${error.message}`;
+  }
   return error instanceof Error ? error.message : String(error);
 }
 

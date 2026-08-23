@@ -10,7 +10,14 @@ import type { Disposer } from '../context/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
 import { formatSkillInvocation } from '../skills/index.js';
-import type { SkillsService } from '../skills/index.js';
+import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
+
+/** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
+function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
+  return diagnostics
+    .map((d) => `  [${d.type}] ${d.code}：${d.message}${d.path && d.path !== d.code ? `（${d.path}）` : ''}`)
+    .join('\n');
+}
 
 /** 内置命令注册入参（全部是组合根持有的既有件，无新概念） */
 export interface BuiltinCommandsOptions {
@@ -55,12 +62,17 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
       description: '可用技能清单',
       handler: () => {
         const list = skills.list();
+        const diagnostics = skills.diagnostics();
         if (list.length === 0) {
-          ui.notify('无可用技能（发现位置见 dump-config）');
+          // 空清单 + 有诊断 = 发现位置坏了但没人知道——诊断出口必达（ref-3：没生效不静默）
+          const hint = diagnostics.length > 0 ? `\n发现诊断：\n${formatDiagnostics(diagnostics)}` : '';
+          ui.notify(`无可用技能（发现位置见 dump-config）${hint}`);
           return;
         }
         const lines = list.map((skill) => `  /skill:${skill.name} — ${skill.description}`);
-        ui.notify(`可用技能：\n${lines.join('\n')}`);
+        // 诊断随清单附尾：collision/提供方失败直接可见，不需要翻日志
+        const diagLines = diagnostics.length > 0 ? `\n发现诊断：\n${formatDiagnostics(diagnostics)}` : '';
+        ui.notify(`可用技能：\n${lines.join('\n')}${diagLines}`);
       },
     }),
   );

@@ -124,10 +124,17 @@ export class Session {
     deepFreeze(snapshot);
 
     // ③下一步校验（类型已知性 → 遮蔽校验 → 体积护栏）
-    // 写侧对未知类型早拦（读侧同码 SESSION_FORMAT_UNSUPPORTED 整体拒绝）
+    // 写侧对未知类型早拦（读侧同码 SESSION_FORMAT_UNSUPPORTED 整体拒绝）。
+    // ignorable 盖章纪律（2026-08-23 生态读码补钉 dsh-1）：向前兼容位唯一生产者 =
+    // 事件类型注册项——注册即写入许可，append 按注册表统一盖章；调用者不能手填、
+    // 不存在「写侧偶尔忘记 ignorable」的口子（泛化教训：每个向前兼容位必须在
+    // 写路径有一个确定性生产者）。
     const def = getSessionEventType(type);
     if (!def) {
-      throw new AppError(SESSION_FORMAT_UNSUPPORTED, `未知事件类型：${type}（未注册且非 ignorable）`);
+      throw new AppError(
+        SESSION_FORMAT_UNSUPPORTED,
+        `未知事件类型：${type}（未注册——注册即写入许可，向前兼容在注册项声明 ignorable）`,
+      );
     }
     if (options.surfaceOp) {
       this.validateSurfaceOp(type, snapshot, options.surfaceOp, options.sourceEventSeqs);
@@ -140,12 +147,13 @@ export class Session {
       );
     }
 
-    // ④⑤push：seq = log.length 强制连续 0 起
+    // ④⑤push：seq = log.length 强制连续 0 起；ignorable 由注册表盖章（见上）
     const event: SessionEvent = {
       type,
       seq: this.log.length,
       time: options.time ?? Date.now(),
       data: snapshot,
+      ...(def.ignorable ? { ignorable: true } : {}),
       ...(options.surfaceOp ? { surfaceOp: options.surfaceOp } : {}),
       ...(options.sourceEventSeqs ? { sourceEventSeqs: options.sourceEventSeqs } : {}),
     };

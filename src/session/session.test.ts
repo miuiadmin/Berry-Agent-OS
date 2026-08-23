@@ -142,6 +142,21 @@ describe('事件词汇纪律', () => {
     );
   });
 
+  // ignorable 盖章纪律（2026-08-23 生态读码补钉 dsh-1）：向前兼容位唯一生产者 = 注册项
+  it('注册项声明 ignorable → append 盖章写入事件（调用者无法手填）', () => {
+    registerSessionEventType({ type: 'test/ignorable-event', category: 'log-only', ignorable: true });
+    const s = new Session();
+    const event = s.append('test/ignorable-event', { k: 1 });
+    expect(event.ignorable).toBe(true);
+  });
+
+  it('注册项未声明 ignorable → 事件不携带该位（缺省 = 读侧必须认识）', () => {
+    registerSessionEventType({ type: 'test/plain-event', category: 'log-only' });
+    const s = new Session();
+    const event = s.append('test/plain-event', { k: 2 });
+    expect(event.ignorable).toBeUndefined();
+  });
+
   it('核心 13 类词汇全在注册表且格式合规', () => {
     for (const type of [
       'turn/start',

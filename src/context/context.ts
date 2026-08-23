@@ -113,21 +113,27 @@ class ContextScopeImpl implements ContextScope {
     });
   }
 
-  /** 派发辅助：包装单个监听器，异常隔离 + 异步返回值吞掉（emit 语义） */
-  private fireIsolated(handler: EventHandler, args: unknown[]): void {
+  /**
+   * 派发辅助：包装单个监听器，异常隔离 + 异步返回值吞掉（emit 语义）。
+   * 日志纪律（2026-08-23 生态读码补钉 dsh-11）：失败必须带 {event, scope} 与完整
+   * stack——只记 String(err) 等于吞没（pi 生态监听器静默死亡排查无门的实证反例）。
+   */
+  private fireIsolated(event: EventName, handler: EventHandler, args: unknown[]): void {
     try {
       const returned = handler(...args);
       if (returned instanceof Promise) {
-        returned.catch((err) => this.logger.error('事件监听器异步失败', { error: String(err) }));
+        returned.catch((err) => {
+          this.logger.error('事件监听器异步失败', { event, scope: this.name, error: errorStack(err) });
+        });
       }
     } catch (err) {
-      this.logger.error('事件监听器同步失败', { error: String(err) });
+      this.logger.error('事件监听器同步失败', { event, scope: this.name, error: errorStack(err) });
     }
   }
 
   emit(event: EventName, ...args: unknown[]): void {
     for (const handler of this.runtime.snapshot(event)) {
-      this.fireIsolated(handler, args);
+      this.fireIsolated(event, handler, args);
     }
   }
 
@@ -138,7 +144,7 @@ class ContextScopeImpl implements ContextScope {
         Promise.resolve()
           .then(() => handler(...args))
           .catch((err) => {
-            this.logger.error('parallel 监听器失败', { error: String(err) });
+            this.logger.error('parallel 监听器失败', { event, scope: this.name, error: errorStack(err) });
           }),
       ),
     );
@@ -150,7 +156,7 @@ class ContextScopeImpl implements ContextScope {
         await handler(...args);
       } catch (err) {
         // 异常隔离：单个失败记日志、继续下一个（保持串行派发不中断）
-        this.logger.error('serial 监听器失败', { error: String(err) });
+        this.logger.error('serial 监听器失败', { event, scope: this.name, error: errorStack(err) });
       }
     }
   }
@@ -176,6 +182,11 @@ class ContextScopeImpl implements ContextScope {
       throw new AppError(CONTEXT_SERVICE_NOT_FOUND, `服务未注册：${name}`);
     }
     return this.runtime.services.get(name) as T;
+  }
+
+  /** 软依赖探测（骨架篇 §9.1）：未注册返回 undefined 不抛错；语义与纪律见 types.ts 注释 */
+  tryGet<T = unknown>(name: string): T | undefined {
+    return this.runtime.services.has(name) ? (this.runtime.services.get(name) as T) : undefined;
   }
 
   provide<T>(name: string, impl: T): Disposer {
@@ -222,4 +233,9 @@ export function createContext(opts: ContextOptions = {}): ContextScope {
   const runtime = new ContextRuntime(opts.logger);
   const name = opts.name ?? 'root';
   return new ContextScopeImpl(runtime, name, opts.config, runtime.rootLogger.child(name));
+}
+
+/** 异常 → 日志载荷（优先完整 stack；非 Error 值字符串化——与 describeError 文案口径互补） */
+function errorStack(err: unknown): string {
+  return err instanceof Error ? (err.stack ?? String(err)) : String(err);
 }

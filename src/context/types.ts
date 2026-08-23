@@ -43,6 +43,13 @@ export interface Context {
   waterfall<T>(event: EventName, ...argsWithNext: unknown[]): Promise<T>;
   /** 取服务实现；未注册抛 AppError CONTEXT_SERVICE_NOT_FOUND */
   get<T = unknown>(name: string): T;
+  /**
+   * 软依赖探测取服务（2026-08-23 生态读码补钉 dsh-4）：未注册返回 undefined、不抛错。
+   * 与 get 的分工：必需依赖用 get（缺了 = 装配错误，响亮失败）；可选依赖用 tryGet。
+   * 配套纪律（骨架篇 §9.1）：禁轮询重试、禁鸭子探测、禁监听内部注册事件——缺就是
+   * 明确的 undefined，软依赖插件按「无此服务即降级」一次分支处理。
+   */
+  tryGet<T = unknown>(name: string): T | undefined;
   /** 注册服务（写入共享注册表）；返回注销 Disposer，且挂到当前作用域 effect 栈随卸载回卷 */
   provide<T>(name: string, impl: T): Disposer;
   /** 本作用域配置视图（只读快照；组合树解析产物） */

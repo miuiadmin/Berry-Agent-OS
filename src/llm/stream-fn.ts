@@ -54,13 +54,15 @@ const NO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens
  */
 export function createStreamFn(runtime: LlmRuntime, defaults: StreamFnDefaults = {}): StreamFn {
   return (context: LlmContext, options: StreamFnOptions, signal?: AbortSignal): AssistantStream => {
-    // 模型解析失败 → 编码为错误流（永不抛错；AppError 在此转数据）
+    // 模型解析失败 → 编码为错误流（永不抛错；AppError 在此转数据）。
+    // 错误文案携带 [CODE] 前缀（骨架篇 §3.4 M1 过渡态——LLM_* 码族随 provider 包装层成篇）
     let model: Model<string>;
     try {
       model = runtime.resolveModel(options.model);
     } catch (error) {
       const appError = error as AppError;
-      return errorStream(`模型解析失败：${appError.message ?? String(error)}`);
+      const code = appError?.code ? `[${appError.code}] ` : '';
+      return errorStream(`模型解析失败：${code}${appError.message ?? String(error)}`);
     }
 
     // 标准三角色零转换直通（超集兼容子集；引用同一数组，无拷贝）

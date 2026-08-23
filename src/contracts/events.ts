@@ -8,7 +8,7 @@
 
 /**
  * 活体事件名。统一小写斜线式 `'<域>/<动作>'`（如 session/event、tool/finished、
- * approval/decided）。完整清单随各模块 types 收口（35 钩子见插件契约篇 §4）；
+ * approval/decided）。完整清单随各模块 types 收口（35 钩子见插件契约篇 §2.2）；
  * M1 首发仅以字符串词汇约束，各模块落地时在此追加字面量联合。
  */
 export type EventName = string;
