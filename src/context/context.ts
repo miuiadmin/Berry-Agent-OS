@@ -221,19 +221,23 @@ class ContextScopeImpl implements ContextScope {
   async waterfall<T>(event: EventName, ...argsWithNext: unknown[]): Promise<T> {
     this.requireEvent(event, 'waterfall');
     // 末位参数是链尾 next（骨架篇 §9.1 签名：waterfall(event, ...args, next)）
-    const next = argsWithNext.pop() as () => T | Promise<T>;
-    const args = argsWithNext;
+    const next = argsWithNext.pop() as (...finalArgs: unknown[]) => T | Promise<T>;
+    const initialArgs = argsWithNext;
     const entries = this.runtime.snapshot(event);
 
-    // koa-compose 式委托：dispatch(i) = 执行第 i 个监听器，其 next 参数 = dispatch(i+1)；
-    // 监听器不调 next 即短路（返回其返回值）；全部执行完则落到链尾 next()。
+    // koa-compose 式委托：dispatch(i, args) = 以当前 args 执行第 i 个监听器，其 next
+    // 参数 = dispatch(i+1, …)；监听器不调 next 即短路（返回其返回值）；调
+    // next(...newArgs) 即替换下游链的参数（变换传播——context_transform 依赖），
+    // 无参 next() 沿用当前参数；链尾以最终参数调 next(...finalArgs)。
     // waterfall 无异常隔离（契约：抛错按事件契约语义短路——守门 fail-closed 等）
-    const dispatch = (index: number): Promise<T> => {
-      if (index >= entries.length) return Promise.resolve(next());
+    const dispatch = (index: number, args: unknown[]): Promise<T> => {
+      if (index >= entries.length) return Promise.resolve(next(...args));
       const entry = entries[index]!;
-      return Promise.resolve(entry.handler(...args, () => dispatch(index + 1)));
+      return Promise.resolve(
+        entry.handler(...args, (...nextArgs: unknown[]) => dispatch(index + 1, nextArgs.length > 0 ? nextArgs : args)),
+      );
     };
-    return dispatch(0);
+    return dispatch(0, initialArgs);
   }
 
   get<T = unknown>(name: string): T {

@@ -184,6 +184,34 @@ describe('事件四模式', () => {
     expect(result).toBe('gate(x-normal)');
   });
 
+  it('waterfall：next(newArgs) 变换传播——下游收新参数、链尾收最终值（context_transform 依赖；2026-08-24 修：旧实现丢弃 next 参数）', async () => {
+    const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
+    const seen: unknown[][] = [];
+    // 两个变换 handler 链式传播：各 append 一个元素
+    scope.on('evt/w', (args: string[], next: (a: string[]) => Promise<string[]>) => {
+      seen.push([...args]);
+      return next([...args, 'A']);
+    });
+    scope.on('evt/w', (args: string[], next: (a: string[]) => Promise<string[]>) => {
+      seen.push([...args]);
+      return next([...args, 'B']);
+    });
+    const tail = vi.fn((final: string[]) => ['tail', ...final]);
+    const result = await scope.waterfall<string[]>('evt/w', ['init'], tail);
+    // 下游各收到上游变换后的参数；链尾收到最终参数（不是初始值）
+    expect(seen).toEqual([['init'], ['init', 'A']]);
+    expect(tail).toHaveBeenCalledWith(['init', 'A', 'B']); // 链尾收到最终参数（载荷单参——消息数组本身）
+    expect(result).toEqual(['tail', 'init', 'A', 'B']);
+  });
+
+  it('waterfall：无参 next() 沿用当前参数（短路外的零变换直通语义不回归）', async () => {
+    const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
+    scope.on('evt/w', (v: string, next: () => Promise<string>) => next());
+    scope.on('evt/w', (v: string, next: () => Promise<string>) => next());
+    const result = await scope.waterfall<string>('evt/w', 'kept', (final: string) => `tail:${final}`);
+    expect(result).toBe('tail:kept'); // 两层无参 next 后参数原样到达链尾
+  });
+
   it('waterfall：无监听器直接落链尾 next', async () => {
     const scope = scopedRoot([{ name: 'evt/none', mode: 'waterfall' }]);
     const result = await scope.waterfall<number>('evt/none', () => 9);

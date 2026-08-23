@@ -30,6 +30,8 @@ export type EventName =
   | 'plugin/failed'
   | 'plugin/skipped'
   | 'composition/reloaded'
+  | 'prompts_change'
+  | 'context_transform'
   | (string & {});
 
 /**
@@ -114,6 +116,16 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'composition/reloaded',
     mode: 'emit',
     note: '组合树 /reload 全量重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单）',
+  },
+  {
+    name: 'prompts_change',
+    mode: 'emit',
+    note: 'systemPrompt 段集合变更通知（契约篇 §2.2 增补 5 pi-4(a)；载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 插件订阅刷新）',
+  },
+  {
+    name: 'context_transform',
+    mode: 'waterfall',
+    note: 'LLM 请求组装最后关口的消息变换瀑布（契约篇 §2.2 message 层；载荷 = contracts 标准 AgentMessage[]，逐 handler 变换传播——loop transformContext 由组合根桥接到此钩子，按需检索注入走它）',
   },
 ];
 

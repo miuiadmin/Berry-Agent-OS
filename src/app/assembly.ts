@@ -19,6 +19,7 @@ import type { AgentMessage } from '../agent/messages.js';
 import type { AssistantMessage, StreamFn, Usage } from '../contracts/llm.js';
 import { AppError, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
+import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
@@ -449,7 +450,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     session?.append('sandbox/mode', { mode: sandboxMode });
   }
 
-  /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词） ---- */
+  /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词）----
+   * 具名提示词段服务（ctx.prompts，pi-4(a) 拍板）：段注册表宿主拥有，分节序固定 =
+   * 基座 → 技能渐进披露 → 具名段（id 字典序）；render() 仅在重建时点求值物化，
+   * 段内容随快照冻结（禁整串替换与 per-run 重写两毒品形态——契约篇 §1.3 五件） */
+  const prompts = registerPromptsService(ctx);
   const skills = createSkillsService();
   registerSkillsService(ctx, skills);
   const locations = opts.skillLocations ?? defaultSkillLocations(workspace, { homeDir: opts.homeDir, trusted: true });
@@ -458,11 +463,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 系统提示词活视图（/reload 重建）：let 绑定 + rebuild 闭包改写——writeHeader 与
   // loop 上下文经 getter/闭包读当前值（loop 每次模型请求重读 context.systemPrompt，
   // /reload 后新提示词下次请求即见，不需要换 context 对象）
-  let systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills()].filter((part) => part !== '').join('\n');
-  /** 重建系统提示词（/reload 后调）：技能重扫 + 基座重拼（插件提示词段 pi-4 挂账） */
+  let systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills(), prompts.materialize()]
+    .filter((part) => part !== '')
+    .join('\n');
+  /** 重建系统提示词（/reload、/new、段集变更后调）：技能重扫 + 具名段重物化 + 重拼 */
   const rebuildSystemPrompt = (): void => {
     skills.refresh();
-    systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills()].filter((part) => part !== '').join('\n');
+    systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills(), prompts.materialize()]
+      .filter((part) => part !== '')
+      .join('\n');
   };
 
   /* ---- ⑧ 会话驱动（loop 上下文活数组 + steering/followUp 队列） ---- */
@@ -508,6 +517,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       streamFn,
       model,
       convertToLlm: (messages) => defaultConvertToLlm(messages),
+      // context_transform 桥接（契约篇 §2.2 增补 5②，骨架篇 §3.1 既有表述兑现）：
+      // loop 的私有配置回调在此桥为总线瀑布——插件挂按需检索注入不再需要宿主特设
+      // 通道；载荷 = contracts 标准 AgentMessage[]，逐 handler 经 next(newArgs)
+      // 变换传播，链尾以最终参数回调（无监听/全放行 = 原样直通）
+      transformContext: (messages) => ctx.waterfall('context_transform', messages, (final: AgentMessage[]) => final),
     },
     durable: durableForward,
     writeHeader,
@@ -524,6 +538,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     writeHeader?.();
   });
 
+  // prompts_change → 重建系统提示词 + 即时落 header 快照（pi-4(a) 落码形态④，与
+  // tools_change 同族）：段集只在装载//reload 两时点变（注册/注销即广播）；装配层
+  // 同点完成重建——订阅者是观测刷新，不承担重建。writeHeader 内建 diff：段内容
+  // 变了才落 reason=change，没变不污染日志
+  ctx.on(PROMPTS_CHANGE_EVENT, () => {
+    rebuildSystemPrompt();
+    writeHeader?.();
+  });
+
   /* ---- ⑧b 开新会话（/new 热切换）：新 Session + durable 换指 + 时间线重置 ---- */
   const startNewSession = (): Session | undefined => {
     // run 进行中拒绝热切换（时间线正被 loop 引用）；无持久层无事可做
@@ -536,6 +559,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // header 落账状态复位：新会话首快照 reason=initial、diff 基线清零
     headerState.last = undefined;
     headerState.next = 'initial';
+    // /new 重建时点（pi-4(a) 落码形态③）：具名段重物化——简报等段内容随新会话
+    // 快照冻结（旧会话会话内不漂移的对称面：跨会话时点刷新）
+    rebuildSystemPrompt();
     conversation.resetTimeline();
     return fresh;
   };

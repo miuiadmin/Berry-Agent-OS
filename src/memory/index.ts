@@ -7,6 +7,7 @@
 
 export { MEMORY_MIGRATION } from './schema.js';
 export { uuidV7 } from './id.js';
+export { BRIEFING_SECTION_ID, renderBriefingSection } from './briefing.js';
 export {
   FUZZY_THRESHOLD,
   POLARITY_OVERLAP_THRESHOLD,

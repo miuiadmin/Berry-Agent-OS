@@ -619,6 +619,70 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
   });
 
+  it('插件提示词段全栈：ctx.effect 注册 registerSection → systemPrompt 含段内容（分节序固定）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "prompt-plugin";',
+        'export default async function apply(ctx) {',
+        '  const prompts = ctx.get("prompts");',
+        '  // pi-4(a)：注册即 effect——/reload 回卷锚即注销段（prompts_change 随之广播）',
+        '  ctx.effect(() =>',
+        '    prompts.registerSection({ id: "demo/notice", render: () => "插件段内容：记住用中文注释" }),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: prompt-plugin\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn } = scriptedStream([textMessage('收到')]);
+    const runtime = await assemble({ streamFn, compositionDir });
+
+    // 段已进 systemPrompt：分节序固定 = 基座 → 技能 → 具名段（段在基座文案之后）
+    expect(runtime.systemPrompt).toContain('插件段内容：记住用中文注释');
+    expect(runtime.systemPrompt.indexOf('插件段内容：记住用中文注释')).toBeGreaterThan(
+      runtime.systemPrompt.indexOf('terminal-based coding assistant'),
+    );
+    // 段 id 清单面（字典序）
+    const prompts = runtime.ctx.get<{ listSections(): string[] }>('prompts');
+    expect(prompts.listSections()).toEqual(['demo/notice']);
+
+    // 首 run 落的 header initial 快照含段内容（模型可见即落日志）
+    await runtime.conversation.submitOnce('看提示词');
+    const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
+    expect((headers[0]!.data as { systemPrompt: string }).systemPrompt).toContain('插件段内容：记住用中文注释');
+  });
+
+  it('context_transform 桥接：插件挂瀑布注入消息 → 模型请求含注入、日志不含（瞬态面）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "inject-plugin";',
+        'export default async function apply(ctx) {',
+        '  // 按需检索注入形态（记忆篇 §6 通道 2）：瀑布收到 (messages, next)，',
+        '  // 变换后必须调 next 传播——不调即短路（拒改链路语义同样合法）',
+        '  ctx.on("context_transform", (messages, next) =>',
+        '    next([...messages, { role: "user", content: "【检索注入】用户偏好 pnpm", timestamp: 1 }]),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: inject-plugin\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn, contexts } = scriptedStream([textMessage('好的')]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    await runtime.conversation.submitOnce('装包');
+
+    // 模型请求含注入消息（桥接生效——loop transformContext → 总线瀑布）
+    const flat = contexts[0]!.messages.map((m) => JSON.stringify(m)).join('\n');
+    expect(flat).toContain('【检索注入】用户偏好 pnpm');
+    // 瞬态面纪律（记忆篇 §6）：注入只进请求不落日志——事件日志无注入文本
+    const logText = JSON.stringify(runtime.session!.events);
+    expect(logText).not.toContain('【检索注入】');
+  });
+
   it('插件启动断言：失败行非空 → 工厂抛 PLUGIN_LOAD_FAILED 聚合清单（不带病运行）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const pluginDir = writePluginDir(compositionDir, 'export const name = "bad";\nexport default 42;\n');

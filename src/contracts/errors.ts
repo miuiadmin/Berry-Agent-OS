@@ -95,6 +95,11 @@ export const TOOL_GATE_FAILED = registerErrorCode('TOOL_GATE_FAILED');
 /** tools：同名工具重复注册（注册表装配错误，响亮失败） */
 export const TOOL_DUPLICATE = registerErrorCode('TOOL_DUPLICATE');
 
+/** prompts：具名提示词段 id 非法（须小写含 `/` 插件域前缀，如 `memory/core`——防撞宿主自留地；pi-4(a) 拍板，契约篇 §1.3 落码形态①） */
+export const PROMPT_SECTION_INVALID = registerErrorCode('PROMPT_SECTION_INVALID');
+/** prompts：具名提示词段撞名（段 id 已注册——与 TOOL_DUPLICATE 同纪律，拒绝静默覆盖） */
+export const PROMPT_SECTION_DUPLICATE = registerErrorCode('PROMPT_SECTION_DUPLICATE');
+
 /** fs：观察态 CAS——文件未读过（无观察版本）即拒绝修改（第七批安全四件之一） */
 export const FS_NOT_OBSERVED = registerErrorCode('FS_NOT_OBSERVED');
 /** fs：写入时文件版本与观察版本不符（并发修改守卫） */
