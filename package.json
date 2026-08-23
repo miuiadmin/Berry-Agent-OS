@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint:topology": "node tools/check-topology.mjs",
+    "lint:topology": "node tools/check-topology.mjs && node tools/check-events.mjs",
     "format": "prettier --write \"src/**/*.ts\" \"tools/**/*.mjs\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tools/**/*.mjs\""
   },

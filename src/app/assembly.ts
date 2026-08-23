@@ -18,6 +18,8 @@ import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../agent/messages.js';
 import type { AssistantMessage, StreamFn, Usage } from '../contracts/llm.js';
 import { describeError } from '../contracts/errors.js';
+import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
+import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { Persistence } from '../persist/index.js';
@@ -323,7 +325,16 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
   const { channels, ui } = registerChannelServices(ctx);
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
-  const persistence = persistEnabled ? Persistence.open({ path: opts.dbPath ?? dbPath() }) : undefined;
+  const persistence = persistEnabled
+    ? Persistence.open({
+        path: opts.dbPath ?? dbPath(),
+        // session/event 活体镜像（契约篇 §2.2 emit 模式行）：SessionEvent 入
+        // write-behind 队列后同步上总线，载荷 { sessionId, event } 信封（dsh-11
+        // 规则——多会话并存时订阅方必须能从载荷分辨归属）。createSession /
+        // loadSession / forkSession 三路接线统一经此镜像，/new 新会话自动同接线
+        onLiveEvent: (sessionId, event) => ctx.emit('session/event', { sessionId, event }),
+      })
+    : undefined;
   // 启动会话策略（技术栈篇 §5 拍板）：显式 id / 按 cwd 最新 → 续接（loadSession
   // + 恢复协议补齐闭合）；不指定或目标不存在 → 新建。resumed 决定首张 header 的 reason
   let session: Session | undefined;
@@ -437,12 +448,17 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
       }
     : undefined;
 
+  // loop 工具快照的活数组（骨架篇 §9.2 装配层接线义务）：loop 每次模型请求与
+  // 每次 tool call 查找都读 context.tools——原位替换（length=0 + push）即达
+  // loop，含 run 中途；数组引用由装配层持有，tools_change 时在 ⑧ 后接线处刷新
+  const toolView: AgentTool[] = tools.list().map((def) => tools.toAgentTool(def));
+
   const conversation = new ConversationDriver({
     context: {
       systemPrompt,
       // 续接会话：历史投影回读作时间线种子（恢复协议已补齐闭合——投影无敞开 turn）
       messages: session && resumed ? projectedToAgentMessages(session.deriveMessages()) : [],
-      tools: tools.list().map((def) => tools.toAgentTool(def)),
+      tools: toolView,
     },
     loopConfig: {
       streamFn,
@@ -451,6 +467,17 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
     },
     durable: durableForward,
     writeHeader,
+  });
+
+  // tools_change → 刷新 loop 工具快照 + 即时落 request/header 快照（骨架篇 §9.2
+  // 接线义务；会话篇 §1.3 腿 2「仅变化才快照」——writeHeader 内建 diff，toolSchemas
+  // 变了才落 reason=change，run 中途换工具也当场留痕，「模型可见即落日志」）。
+  // 注册在装配期 fs 工具族之后：装配期注册不触发（首张 header 仍由首 run 落）
+  ctx.on(TOOLS_CHANGE_EVENT, () => {
+    const fresh = tools.list().map((def) => tools.toAgentTool(def));
+    toolView.length = 0;
+    toolView.push(...fresh);
+    writeHeader?.();
   });
 
   /* ---- ⑧b 开新会话（/new 热切换）：新 Session + durable 换指 + 时间线重置 ---- */

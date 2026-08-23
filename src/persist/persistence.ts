@@ -12,6 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AppError } from '../contracts/errors.js';
+import type { SessionEvent } from '../contracts/events.js';
 import { Session } from '../session/session.js';
 import type { SessionOptions } from '../session/session.js';
 import { openStore } from './store.js';
@@ -19,8 +20,18 @@ import type { Store, StoreOptions } from './store.js';
 import { WriteBehind } from './write-behind.js';
 import type { WriteBehindOptions } from './write-behind.js';
 
-/** 门面参数（Store 与 WriteBehind 参数合并） */
-export type PersistenceOptions = StoreOptions & WriteBehindOptions;
+/** 门面参数（Store 与 WriteBehind 参数合并 + 活体镜像回调） */
+export type PersistenceOptions = StoreOptions &
+  WriteBehindOptions & {
+    /**
+     * 会话活体事件镜像（契约篇 §2.2 session/event 行的 persist 半边）：
+     * 每个 SessionEvent 入 write-behind 队列**之后**同步回调——组合根用它接
+     * ctx.emit('session/event', { sessionId, event })。
+     * 顺序纪律：先 enqueue（durable 优先）后镜像（观察侧）；观察者异常隔离
+     * 由 ctx.emit 提供，本回调自身不应抛错。
+     */
+    onLiveEvent?: (sessionId: string, event: SessionEvent) => void;
+  };
 
 export class Persistence {
   readonly store: Store;
@@ -29,11 +40,23 @@ export class Persistence {
   readonly incarnation: string;
   /** createSession 附带的会话元数据（cwd/profile——sessions 表登记素材） */
   private readonly sessionMeta = new Map<string, { cwd?: string; profile?: string }>();
+  /** 原始打开参数（活体镜像回调在其中） */
+  private readonly options: PersistenceOptions;
 
   private constructor(store: Store, options: PersistenceOptions) {
     this.store = store;
+    this.options = options;
     this.incarnation = randomUUID();
     this.writeBehind = new WriteBehind(store, this.incarnation, options);
+  }
+
+  /**
+   * 会话活体事件统一落点（三处接线共用）：write-behind 入队（durable 优先）
+   * → 组合根镜像通知（session/event 活体镜像，观察侧）。
+   */
+  private sink(session: Session, event: SessionEvent, meta: { cwd?: string; profile?: string } | undefined): void {
+    this.writeBehind.enqueue(session, event, meta);
+    this.options.onLiveEvent?.(session.header.sessionId, event);
   }
 
   /** 打开（或初始化）持久层（版本门禁失败响亮拒绝） */
@@ -51,7 +74,7 @@ export class Persistence {
     let session!: Session;
     session = new Session({
       ...sessionOpts,
-      emit: (event) => this.writeBehind.enqueue(session, event, this.sessionMeta.get(session.header.sessionId)),
+      emit: (event) => this.sink(session, event, this.sessionMeta.get(session.header.sessionId)),
     });
     if (cwd !== undefined || profile !== undefined) {
       this.sessionMeta.set(session.header.sessionId, { cwd, profile });
@@ -75,7 +98,7 @@ export class Persistence {
     child = parent.fork({
       ...forkOpts,
       emit: (event) =>
-        this.writeBehind.enqueue(child, event, {
+        this.sink(child, event, {
           cwd: cwd ?? inherited?.cwd,
           profile: profile ?? inherited?.profile,
         }),
@@ -105,7 +128,7 @@ export class Persistence {
       origin: row.origin as SessionOptions['origin'],
       parentSession: row.parent_session ?? undefined,
       delegationDepth: row.delegation_depth,
-      emit: (event) => this.writeBehind.enqueue(session, event, this.sessionMeta.get(sessionId)),
+      emit: (event) => this.sink(session, event, this.sessionMeta.get(sessionId)),
     });
     if (row.cwd !== null || row.profile !== null) {
       this.sessionMeta.set(sessionId, { cwd: row.cwd ?? undefined, profile: row.profile ?? undefined });

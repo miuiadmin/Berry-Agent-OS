@@ -20,6 +20,7 @@ import type {
   Usage,
 } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
+import type { SessionEvent } from '../contracts/events.js';
 import { deriveMessages } from '../session/derive.js';
 import { interruptedTurnClosers } from '../session/index.js';
 import { Persistence } from '../persist/index.js';
@@ -237,6 +238,69 @@ describe('ConversationDriver + durable 接线', () => {
     expect(readFileSync(join(workspace, '.git', 'config'), 'utf8')).toBe('新内容\n');
     const decided = runtime.session!.events.find((e) => e.type === 'approval/decided');
     expect((decided!.data as { decision: string }).decision).toBe('approve');
+  });
+
+  it('session/event 活体镜像（契约篇 §2.2）：append 后同步上总线，载荷 { sessionId, event } 信封', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = assemble({ streamFn });
+    const mirrored: Array<{ sessionId: string; event: SessionEvent }> = [];
+    runtime.ctx.on('session/event', (payload: { sessionId: string; event: SessionEvent }) => {
+      mirrored.push(payload);
+    });
+    await runtime.conversation.submitOnce('问');
+    // 镜像与 durable 同序同量（sandbox/mode 在订阅前已落，不重播——历史不是活体）
+    expect(mirrored.map((m) => m.event.type)).toEqual([
+      'request/header',
+      'turn/start',
+      'user/message',
+      'assistant/message',
+      'turn/end',
+    ]);
+    // 信封归属：全部事件带同一 sessionId（dsh-11——多会话并存可分辨）
+    const id = runtime.session!.header.sessionId;
+    expect(mirrored.every((m) => m.sessionId === id)).toBe(true);
+    // 事件本体即 SessionEvent（seq 连续递增，非重制副本）
+    expect(mirrored.map((m) => m.event.seq)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('tools_change 接线（骨架篇 §9.2 装配层义务）：注册即刷新 loop 工具快照 + 即时落 header change 快照', async () => {
+    const { streamFn, contexts } = scriptedStream([
+      textMessage('首轮'),
+      toolCallMessage('echo', { text: '回声' }),
+      textMessage('完成'),
+    ]);
+    const runtime = assemble({ streamFn });
+    await runtime.conversation.submitOnce('第一问');
+    expect(runtime.session!.events.filter((e) => e.type === 'request/header')).toHaveLength(1); // 首轮 initial
+
+    // 装配后动态注册（M2 插件挂载工具的同款路径）：tools_change → 活数组原位刷新
+    let executions = 0;
+    runtime.tools.register({
+      name: 'echo',
+      description: '回声工具（动态注册接线测试）',
+      parameters: {
+        type: 'object',
+        properties: { text: { type: 'string' } },
+        required: ['text'],
+      },
+      execute: async (args) => {
+        executions++;
+        return { content: [{ type: 'text', text: (args as { text: string }).text }] };
+      },
+    });
+
+    // 注册即落 change 快照（不等下一 run 边界——「模型可见即落日志」），
+    // 快照 toolSchemas 已含新工具
+    const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
+    expect(headers.map((h) => (h.data as { reason: string }).reason)).toEqual(['initial', 'change']);
+    const changeData = headers[1]!.data as { toolSchemas: Array<{ name: string }> };
+    expect(changeData.toolSchemas.map((t) => t.name)).toContain('echo');
+
+    // 第二轮：loop 每次模型请求读 context.tools（活数组已刷新）——新工具对模型可见可调用
+    await runtime.conversation.submitOnce('用 echo');
+    expect(contexts[1]?.tools?.map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls', 'echo']);
+    expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
+    expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
   });
 
   it('多轮续跑：第二个 run 复用同一活数组时间线', async () => {

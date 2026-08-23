@@ -13,6 +13,76 @@
  */
 export type EventName = string;
 
+/**
+ * 活体事件目录项（契约篇 §6.3 第 4 条——CI 双向断言的数据源）。
+ * 目录即契约：`mode` 是事件的公开契约组成部分（插件订阅方式依赖它），
+ * 派发点调用的方法必须与目录声明一致（check-events 机械校验）。
+ */
+export interface LiveEventDefinition {
+  /** 事件名（小写斜线式；与派发点字面量/常量值双向比对） */
+  readonly name: string;
+  /** 分派模式——事件的公开契约部分（契约篇 §1「@mode」纪律：dsh 衍生） */
+  readonly mode: 'emit' | 'waterfall' | 'parallel' | 'serial';
+  /** 载荷与语义一句话（含出处标注，供目录生成与插件作者查阅） */
+  readonly note: string;
+  /**
+   * 预留词汇：当前无宿主派发点、但属已拍板词汇表的预留项。
+   * CI「每目录项 ≥1 派发点」方向据此显式豁免——豁免必须声明，不静默
+   * （对应 session 侧 SessionEventTypeDefinition.reserved 同款语义）。
+   */
+  readonly reserved?: boolean;
+}
+
+/**
+ * 总线活体事件目录（契约篇 §2.2 已落码面的全集；SessionEvent durable 词汇
+ * 归 session 模块运行时注册表，两族分开断言）。
+ *
+ * 维护纪律：新增总线事件 = 先在此登记（含 mode/note），再写派发点——
+ * check-events 双向断言保证目录与 src 派发点永不漂移。
+ */
+export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
+  {
+    name: 'session/event',
+    mode: 'emit',
+    note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）',
+  },
+  {
+    name: 'session_shutdown',
+    mode: 'emit',
+    note: '优雅关闭广播（契约篇 §2.2 application 层；载荷 { reason }）',
+  },
+  {
+    name: 'tools_pre_execute',
+    mode: 'waterfall',
+    note: '工具执行前守门瀑布（契约篇 §2.2 tool 层；入参 GateInput → 出参 GateAction）',
+  },
+  {
+    name: 'tools_execute',
+    mode: 'waterfall',
+    note: '工具执行瀑布（契约篇 §2.2 tool 层；可整体替换执行体——M2 随插件加载器开放）',
+  },
+  {
+    name: 'tools_post_execute',
+    mode: 'waterfall',
+    note: '工具执行后审计瀑布（契约篇 §2.2 tool 层；只观察不影响结果）',
+  },
+  {
+    name: 'tools_change',
+    mode: 'emit',
+    note: '工具注册表变更通知（契约篇 §2.2 tool 层；装配层订阅刷新 loop 工具快照——骨架篇 §9.2 接线义务）',
+  },
+  {
+    name: 'approval/answer',
+    mode: 'waterfall',
+    note: '审批应答瀑布（骨架篇 §8.3 ApprovalService 决议面；无应答者 fail-closed）',
+  },
+];
+
+/** 目录查询：按名取定义（含判断某事件是否已知总线活体事件） */
+export function findLiveEvent(name: string): LiveEventDefinition | undefined {
+  return LIVE_EVENT_CATALOG.find((entry) => entry.name === name);
+}
+
 /** 遮蔽指令：改历史的唯一合法形态（会话篇 §2）——新事件携带，在派生表面遮蔽 [start, end] 区间旧节点 */
 export interface SurfaceOp {
   op: 'replace';

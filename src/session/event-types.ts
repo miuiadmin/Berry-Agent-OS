@@ -25,6 +25,12 @@ export interface SessionEventTypeDefinition {
   readonly category: SessionEventCategory;
   /** true = 读侧可以不认识此类型（向前兼容）；缺省 false = 未知即整体拒绝 */
   readonly ignorable?: boolean;
+  /**
+   * 预留词汇：当前无宿主写点、但属已拍板词汇表的预留项（如 todo/write——
+   * 随 M2+ 工作台三件落码）。check-events「每目录项 ≥1 写点」方向据此
+   * 显式豁免（契约篇 §6.3 第 4 条落码注记）——豁免必须声明，不静默。
+   */
+  readonly reserved?: boolean;
 }
 
 /** 类型词汇格式：小写字母/数字/连字符段，至少一个斜线分隔（`<域>/<动作>`） */
@@ -144,7 +150,7 @@ export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'assistant/message', category: 'surface' },
   { type: 'tool/call', category: 'surface' },
   { type: 'tool/result', category: 'surface' },
-  { type: 'todo/write', category: 'surface' },
+  { type: 'todo/write', category: 'surface', reserved: true },
   { type: 'request/header', category: 'snapshot' },
   { type: 'session/end-seed', category: 'log-only' },
   { type: 'approval/asked', category: 'log-only' },
