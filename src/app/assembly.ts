@@ -47,7 +47,7 @@ import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { ChannelHost, UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
-import { createDurableSinks } from './durable.js';
+import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { DurableSinks } from './durable.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
@@ -90,6 +90,11 @@ export interface RuntimeOptions {
   readonly homeDir?: string;
   /** 交互模式（true = 注册审批 answerer 接 ctx.ui；headless run 传 false） */
   readonly interactive?: boolean;
+  /**
+   * 启动会话策略（技术栈篇 §5 拍板）：true = 按 cwd 续接最新会话（TUI 缺省）；
+   * string = 显式续接指定 id；缺省 = 新建（run 一次性语义）。目标不存在回落新建
+   */
+  readonly resumeSession?: boolean | string;
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -98,7 +103,7 @@ export interface BerryRuntime {
   readonly ctx: ContextScope;
   /** 持久层（persist:false 时为 undefined） */
   readonly persistence: Persistence | undefined;
-  /** 会话（persist:false 时为 undefined） */
+  /** 会话（persist:false 时为 undefined；/new 热切换后指向新会话——活取值） */
   readonly session: Session | undefined;
   /** llm 运行时（streamFn 注入测试时仍存在——目录解析面可用） */
   readonly llm: LlmRuntime;
@@ -117,6 +122,8 @@ export interface BerryRuntime {
   readonly skillLocations: readonly SkillLocation[];
   /** 会话驱动（通道宿主面：submit / requestQuit） */
   readonly conversation: ConversationDriver;
+  /** 开新会话（/new）：新 Session + durable 换指 + 时间线重置；无持久层或 run 进行中返回 undefined */
+  newSession(): Session | undefined;
   /** 优雅关停（run 结算 → flush 屏障 → 关库 → ctx 回卷——骨架篇 §1.3 的进程内编排） */
   shutdown(): Promise<void>;
 }
@@ -205,6 +212,26 @@ export class ConversationDriver implements ChannelHost {
   /** 等待在跑的 run 结算（退出序列在 abort 后先等它收尾再 flush） */
   async settle(): Promise<void> {
     await this.runPromise;
+  }
+
+  /** 是否有 run 在跑（/new 会话热切换的准入判据——run 中不换时间线） */
+  get isRunning(): boolean {
+    return this.running;
+  }
+
+  /**
+   * 时间线原位重置（会话热切换 /new 用）：活数组引用不变、内容替换为新种子
+   * （loop 持有的 context.messages 引用持续有效——单一时间线不变式不破），
+   * 首 run 标记复位（新会话要重新落 request/header）。
+   * @returns run 进行中返回 false（拒绝热切换，时间线原样）
+   */
+  resetTimeline(seed: readonly AgentMessage[] = []): boolean {
+    if (this.running) return false;
+    const messages = this.context.messages;
+    messages.length = 0;
+    messages.push(...seed);
+    this.headerWritten = false;
+    return true;
   }
 
   /**
@@ -297,8 +324,44 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
   const persistence = persistEnabled ? Persistence.open({ path: opts.dbPath ?? dbPath() }) : undefined;
-  const session = persistence?.createSession({ cwd: workspace, profile: 'default' });
+  // 启动会话策略（技术栈篇 §5 拍板）：显式 id / 按 cwd 最新 → 续接（loadSession
+  // + 恢复协议补齐闭合）；不指定或目标不存在 → 新建。resumed 决定首张 header 的 reason
+  let session: Session | undefined;
+  let resumed = false;
+  if (persistence) {
+    const targetId =
+      typeof opts.resumeSession === 'string'
+        ? opts.resumeSession
+        : opts.resumeSession === true
+          ? persistence.latestSessionId(workspace)
+          : undefined;
+    if (targetId) {
+      const loaded = persistence.loadSession(targetId);
+      if (loaded) {
+        // 恢复协议语义半边（会话篇 §4）：孤儿配对补 closer——append 即进
+        // write-behind（关停屏障保证落盘），日志闭合后投影才可安全续跑
+        loaded.recoverFromInterruption();
+        session = loaded;
+        resumed = true;
+      }
+      // 目标不存在回落新建：启动策略是「续接优先」不是「必须续接」
+    }
+    session ??= persistence.createSession({ cwd: workspace, profile: 'default' });
+  }
   const durable = session ? createDurableSinks(session) : undefined;
+  // durable 活引用（/new 会话热切换的换指点）：pipeline / 审批服务 / 驱动在构造期
+  // 绑定接线点，经此转发壳读当前会话——热切换不动已建服务的绑定
+  const durableRef: { current: DurableSinks | undefined } = { current: durable };
+  const durableForward: DurableSinks | undefined = durable
+    ? {
+        handle: (event) => durableRef.current?.handle(event),
+        gate: (payload) => durableRef.current?.gate(payload),
+        approval: {
+          asked: (payload) => durableRef.current?.approval.asked(payload),
+          decided: (payload) => durableRef.current?.approval.decided(payload),
+        },
+      }
+    : undefined;
 
   /* ---- ④ llm 运行时（凭证经 persist 适配注入；测试可整体换 streamFn） ---- */
   const llm = createLlmRuntime({
@@ -321,7 +384,7 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
 
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
   const pipeline: ToolPipelineExecutor = createToolPipeline(ctx, {
-    ...(durable ? { onGateDecision: durable.gate } : {}),
+    ...(durableForward ? { onGateDecision: durableForward.gate } : {}),
   });
   const tools = registerToolsService(ctx, { pipeline });
   // fs 工具族（可写根换 safety 推导——替换 tools 模块的 M1 过渡默认）
@@ -332,11 +395,15 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
   /* ---- ⑥ 审批 + 守门行（审批对落 durable） ---- */
   const approval = createApprovalService(ctx, {
     policy: opts.approvalPolicy ?? 'ask',
-    ...(durable ? { sink: durable.approval } : {}),
+    ...(durableForward ? { sink: durableForward.approval } : {}),
   });
   ctx.effect(() => installSafetyGate(ctx, { approval, workspace, mode: () => sandboxMode }));
-  // 沙箱档落 durable（fold：审计回放知道当轮档位）
-  session?.append('sandbox/mode', { mode: sandboxMode });
+  // 沙箱档落 durable（fold：审计回放知道当轮档位）。续接同档不重复落——fold 取
+  // 最后一条，重复事件只污染日志（技术栈篇 §5 启动策略拍板注记）
+  const lastMode = [...(session?.events ?? [])].reverse().find((e) => e.type === 'sandbox/mode');
+  if ((lastMode?.data as { mode?: string } | undefined)?.mode !== sandboxMode) {
+    session?.append('sandbox/mode', { mode: sandboxMode });
+  }
 
   /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词） ---- */
   const skills = createSkillsService();
@@ -347,10 +414,34 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
   const systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills()].filter((part) => part !== '').join('\n');
 
   /* ---- ⑧ 会话驱动（loop 上下文活数组 + steering/followUp 队列） ---- */
+  // request/header 落账闭包（会话篇 §1.3）：仅组装参数变化时落新快照，reason
+  // 三值——续接会话首张 resume、新会话首张 initial、此后变化 change。
+  // session 是活绑定（/new 换指后 append 落到当前会话），闭包不随热切换重造
+  const headerState: { last?: string; next: 'initial' | 'resume' | 'change' } = {
+    next: resumed ? 'resume' : 'initial',
+  };
+  const writeHeader = session
+    ? () => {
+        const payload = {
+          config: { model, sandbox: sandboxMode },
+          systemPrompt,
+          toolSchemas: tools.list().map((def) => ({ name: def.name, parameters: def.parameters })),
+        };
+        const serialized = JSON.stringify(payload);
+        if (serialized === headerState.last) return; // 组装参数未变——不落新快照
+        // 活绑定读取（/new 换指后落当前会话）；writeHeader 存在即持久层存在，
+        // session 事实上恒有值——可选链只为通过 let 联合类型的收窄
+        session?.append('request/header', { ...payload, reason: headerState.next });
+        headerState.last = serialized;
+        headerState.next = 'change';
+      }
+    : undefined;
+
   const conversation = new ConversationDriver({
     context: {
       systemPrompt,
-      messages: [],
+      // 续接会话：历史投影回读作时间线种子（恢复协议已补齐闭合——投影无敞开 turn）
+      messages: session && resumed ? projectedToAgentMessages(session.deriveMessages()) : [],
       tools: tools.list().map((def) => tools.toAgentTool(def)),
     },
     loopConfig: {
@@ -358,20 +449,25 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
       model,
       convertToLlm: (messages) => defaultConvertToLlm(messages),
     },
-    durable,
-    ...(session
-      ? {
-          writeHeader: () => {
-            session.append('request/header', {
-              config: { model, sandbox: sandboxMode },
-              systemPrompt,
-              toolSchemas: tools.list().map((def) => ({ name: def.name, parameters: def.parameters })),
-              reason: 'initial',
-            });
-          },
-        }
-      : {}),
+    durable: durableForward,
+    writeHeader,
   });
+
+  /* ---- ⑧b 开新会话（/new 热切换）：新 Session + durable 换指 + 时间线重置 ---- */
+  const startNewSession = (): Session | undefined => {
+    // run 进行中拒绝热切换（时间线正被 loop 引用）；无持久层无事可做
+    if (!persistence || conversation.isRunning) return undefined;
+    const fresh = persistence.createSession({ cwd: workspace, profile: 'default' });
+    session = fresh;
+    durableRef.current = createDurableSinks(fresh);
+    // 新会话首事件：沙箱档（新会话 fold 从零起步，必落）
+    fresh.append('sandbox/mode', { mode: sandboxMode });
+    // header 落账状态复位：新会话首快照 reason=initial、diff 基线清零
+    headerState.last = undefined;
+    headerState.next = 'initial';
+    conversation.resetTimeline();
+    return fresh;
+  };
 
   /* ---- ⑨ 内置命令（help/quit/skills/skill:<名>） ---- */
   ctx.effect(() =>
@@ -381,6 +477,7 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
       skills,
       quit: () => conversation.requestQuit(),
       submit: (text) => conversation.submit(text),
+      newSession: startNewSession,
     }),
   );
 
@@ -396,7 +493,10 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
   return {
     ctx,
     persistence,
-    session,
+    // 活取值（/new 热切换后指向新会话）——接口上仍是 readonly，实现为 getter
+    get session(): Session | undefined {
+      return session;
+    },
     llm,
     tools,
     channels,
@@ -409,6 +509,7 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
     systemPrompt,
     skillLocations: locations,
     conversation,
+    newSession: startNewSession,
     /** 优雅关停：等 run 结算 → flush 屏障 → 关库 → ctx 回卷（§1.3 编排） */
     async shutdown() {
       await conversation.settle();
@@ -417,6 +518,9 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
       // 异常已被 context 回卷隔离逐条吞噬，不会反向炸关停序列）
       try {
         await persistence?.flush();
+        // session_shutdown 钩子（骨架篇 §1.3 序④ / 契约篇钩子表）：插件最终
+        // 清理挂点——emit 异常隔离，单个清理器失败不拖垮关停
+        if (session) ctx.emit('session_shutdown', { sessionId: session.header.sessionId });
         await persistence?.close();
       } finally {
         await ctx.dispose();

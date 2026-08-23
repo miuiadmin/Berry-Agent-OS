@@ -1,8 +1,9 @@
 /**
  * L5 app — 内置命令与技能命令注册（组合根把宿主能力挂进通道命令面）。
  *
- * M1 内置四件：/help（命令清单）、/quit（优雅退出）、/skills（技能清单）、
- * /skill:<名>（显式激活——§4.5(b) 包装格式作为普通 user 消息提交，loop 开跑）。
+ * M1 内置五件：/help（命令清单）、/quit（优雅退出）、/new（开新会话——TUI 启动
+ * 续接策略的另一面，技术栈篇 §5）、/skills（技能清单）、/skill:<名>（显式激活
+ * ——§4.5(b) 包装格式作为普通 user 消息提交，loop 开跑）。
  * 技能命令按装配期快照逐个注册（skill refresh 仅在装配期跑一次，M1 无动态面）。
  */
 
@@ -31,6 +32,8 @@ export interface BuiltinCommandsOptions {
   readonly quit: () => void;
   /** 普通消息提交（技能激活文本走这条——与用户手打同路径） */
   readonly submit: (text: string) => void;
+  /** 开新会话（/new——组合根热切换；无持久层/run 进行中返回 undefined） */
+  readonly newSession: () => { header: { sessionId: string } } | undefined;
 }
 
 /**
@@ -55,6 +58,19 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
       description: '退出（优雅收尾后离开）',
       handler: () => {
         opts.quit();
+      },
+    }),
+    commands.register({
+      name: 'new',
+      description: '开新会话（当前会话已落库，重启后可续接）',
+      handler: () => {
+        // run 进行中拒绝：组合根热切换在 run 中返回 undefined（时间线正被引用）
+        const fresh = opts.newSession();
+        if (fresh) {
+          ui.notify(`已开新会话（${fresh.header.sessionId.slice(0, 8)}…），继续对话即落在新会话`);
+        } else {
+          ui.notify('现在不能开新会话（run 进行中或无持久层），稍后再试');
+        }
       },
     }),
     commands.register({

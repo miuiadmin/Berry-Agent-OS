@@ -118,6 +118,11 @@ export class Persistence {
     return this.writeBehind.flush(sessionId);
   }
 
+  /** 某工作区最新会话 id（TUI 启动续接策略取数；无匹配 undefined） */
+  latestSessionId(cwd: string): string | undefined {
+    return this.store.latestSessionId(cwd);
+  }
+
   /** revision 指纹（storeIdentity:incarnation:revision——投影缓存跨进程变更检测） */
   revisionString(sessionId: string): string {
     return this.store.revisionString(sessionId, this.incarnation);

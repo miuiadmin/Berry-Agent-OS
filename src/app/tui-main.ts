@@ -10,6 +10,7 @@ import { createTuiChannel } from '../channels/tui.js';
 import { projectedToAgentMessages } from './durable.js';
 import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
+import { installExitSignals } from './signals.js';
 import { ensureDataDir } from './paths.js';
 import { VERSION } from './version.js';
 
@@ -20,37 +21,50 @@ import { VERSION } from './version.js';
  */
 export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   ensureDataDir();
-  const runtime = createBerryRuntime({ ...options, interactive: true });
-  const { conversation, session } = runtime;
+  const runtime = createBerryRuntime({
+    ...options,
+    interactive: true,
+    // TUI 启动策略（技术栈篇 §5 拍板）：缺省续接本工作区最新会话
+    resumeSession: options.resumeSession ?? true,
+  });
+  const { conversation } = runtime;
 
-  // TUI 通道（历史投影经注入回调拉取——通道不依赖 session；无会话时空历史）
+  // TUI 通道（历史投影经注入回调拉取——通道不依赖 session；无会话时空历史）。
+  // runtime.session 是活取值（/new 热切换后指向新会话），不能解构快照
   const tui = createTuiChannel({
     host: conversation,
     commands: runtime.channels.commands,
     rendererFor: (role) => runtime.channels.rendererFor(role),
     title: `Berry ${VERSION}`,
-    history: () => projectedToAgentMessages(session?.deriveMessages() ?? []),
+    history: () => projectedToAgentMessages(runtime.session?.deriveMessages() ?? []),
   });
   runtime.ui.attach(tui.ui());
   // 事件流接线：driver 的 emit 扇出加 TUI 展示半边（durable 半边装配期已接）
   conversation.addDisplay((event) => tui.handle(event));
 
-  // SIGINT（外部中断：kill -INT / 非 raw 终端 Ctrl+C）走同一退出编舞——
-  // requestQuit 先 abort 在跑的 run 再 resolve，后续 settle/flush 关库一个不少
-  // （独立重读轮 #16 复核补钉：此前该分支只在 run-main 落地，TUI 主入口
-  // 外部 SIGINT 走 Node 默认硬死、teardown 序列整体跳过）
-  const onInterrupt = () => conversation.requestQuit();
-  process.once('SIGINT', onInterrupt);
+  // 信号编舞（骨架篇 §1.3 全表）：SIGINT 首次/二次、SIGTERM 143、SIGHUP 129、
+  // uncaught/unhandled 不吞 exit(1)——两入口共用；优雅路本体走 conversation.quit
+  const signals = installExitSignals({
+    onGracefulQuit: () => conversation.requestQuit(),
+    onFatal: async (error, kind) => {
+      runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
+        kind,
+        error: error instanceof Error ? error.stack : String(error),
+      });
+      await runtime.persistence?.flush().catch(() => undefined);
+    },
+  });
 
   tui.start();
   try {
-    // 等待退出请求（Ctrl+D / Ctrl+C / /quit / SIGINT——四路同汇 requestQuit）
+    // 等待退出请求（Ctrl+D / Ctrl+C / /quit / 信号——多路同汇 requestQuit）
     await conversation.quit;
     await conversation.settle();
   } finally {
-    process.removeListener('SIGINT', onInterrupt);
+    signals.dispose();
     tui.stop();
     await runtime.shutdown();
   }
-  return 0;
+  // SIGINT 首次优雅完成 = 0（用户中断不是错误）；SIGTERM/SIGHUP 采纳记账码
+  return signals.exitCode;
 }

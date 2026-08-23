@@ -201,6 +201,41 @@ describe('loadEvents 往返与撕裂尾修复', () => {
   });
 });
 
+describe('latestSessionId（TUI 启动续接取数面，技术栈篇 §5）', () => {
+  it('按 cwd 取最新：同刻并列 rowid 兜底、他 cwd 不掺、无匹配 undefined', () => {
+    const store = openStore({ path: nextPath() });
+    const ws = '/ws/a';
+    // 三个会话：a1/a2/a3 同 cwd 顺序建（created_at 可能同毫秒——rowid 兜底仍保
+    // 时序）、b1 是另一工作区——latest(ws) 必须是最后建的 a3
+    const mk = (id: string, cwd: string | undefined) => store.appendCore({ ...reg(id), cwd }, [ev(0)], 'inc');
+    mk('a1', ws);
+    mk('a2', ws);
+    mk('a3', ws);
+    mk('b1', '/ws/b');
+
+    expect(store.latestSessionId(ws)).toBe('a3');
+    expect(store.latestSessionId('/ws/b')).toBe('b1');
+    expect(store.latestSessionId('/ws/none')).toBeUndefined();
+    store.close();
+  });
+
+  it('created_at 同毫秒并列：rowid 取后建者（DESC, rowid DESC 兜底序）', () => {
+    const store = openStore({ path: nextPath() });
+    const ws = '/ws/tie';
+    const regWs = { ...reg('tie-1'), cwd: ws };
+    // created_at 由 appendCore 内 Date.now() 落——两次紧邻调用可能同毫秒；
+    // 循环多建几个，断言最终 latest = 最后建的那个 id
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const id = `tie-${i}`;
+      ids.push(id);
+      store.appendCore({ ...reg(id), cwd: ws }, [ev(0)], 'inc');
+    }
+    expect(store.latestSessionId(ws)).toBe(ids.at(-1));
+    store.close();
+  });
+});
+
 describe('凭证与模型目录', () => {
   it('凭证 modify 串行 read-modify-write：无中生有、变更、删除', () => {
     const store = openStore({ path: nextPath() });

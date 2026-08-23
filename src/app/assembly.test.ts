@@ -337,3 +337,149 @@ describe('持久化 round-trip 与命令入口', () => {
     expect(code).toBe(0);
   });
 });
+
+/* ---------------- 启动续接与会话热切换（技术栈篇 §5 拍板） ---------------- */
+
+/** 录音 stub UI 后端（/new 通知可见性断言用） */
+function recordingBackend() {
+  const notifies: string[] = [];
+  const backend: UiBackend = {
+    id: 'rec',
+    notify: (text) => notifies.push(text),
+    setStatus: () => {},
+    confirm: async () => true,
+  };
+  return { backend, notifies };
+}
+
+describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', () => {
+  it('resumeSession:true 按 cwd 续接最新：同会话续跑 + 恢复协议闭合 + header reason=resume + 同档不重复落', async () => {
+    const dbFile = join(realpathSync(tmpdir()), `app-resume-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+    const workspace = makeWorkspace();
+    const script1 = scriptedStream([textMessage('第一答')]);
+    // 首程自管生命周期（不经 assemble 登记——shutdown 后让位给续接程）
+    const first = createBerryRuntime({ dbPath: dbFile, workspace, streamFn: script1.streamFn });
+    const firstId = first.session!.header.sessionId;
+    await first.conversation.submitOnce('第一问');
+    // 模拟中断残形：敞开 turn（最后一个 turn/start 后无 turn/end）
+    first.session!.append('turn/start', {});
+    await first.shutdown();
+
+    // 二次启动：同库同 cwd，按最新续接（恢复协议自动补齐闭合）
+    const script2 = scriptedStream([textMessage('续答'), textMessage('再答')]);
+    const second = createBerryRuntime({
+      dbPath: dbFile,
+      workspace,
+      resumeSession: true,
+      streamFn: script2.streamFn,
+    });
+    try {
+      expect(second.session!.header.sessionId).toBe(firstId); // 同一会话续跑
+      // 敞开 turn 已被 closer 闭合（会话篇 §4：中断不是残缺）
+      expect(
+        second.session!.events.some(
+          (e) => e.type === 'turn/end' && (e.data as { reason: string }).reason === 'interrupted',
+        ),
+      ).toBe(true);
+      // 续程首请求：LLM 上下文带历史种子（投影回读 + 新问）
+      await second.conversation.submitOnce('第二问');
+      expect(script2.contexts[0]?.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+      // header 序列：首程 initial + 续程首快照 resume——组装参数未变不多落
+      const headers = second.session!.events.filter((e) => e.type === 'request/header');
+      expect(headers.map((e) => (e.data as { reason: string }).reason)).toEqual(['initial', 'resume']);
+      // sandbox/mode 同档不重复（全日志仅首程一条——fold 取最后，重复只污染日志）
+      expect(second.session!.events.filter((e) => e.type === 'sandbox/mode')).toHaveLength(1);
+      // 第二 run 同 config：不落新快照（会话篇 §1.3 仅变化时落）
+      await second.conversation.submitOnce('第三问');
+      expect(second.session!.events.filter((e) => e.type === 'request/header')).toHaveLength(2);
+      // 投影回读完整（恢复 + 两轮续跑；敞开 turn 无消息腿不贡献投影）
+      const projected = deriveMessages(second.session!.events);
+      expect(projected.map((m) => m.type)).toEqual(['user', 'assistant', 'user', 'assistant', 'user', 'assistant']);
+    } finally {
+      await second.shutdown();
+    }
+  });
+
+  it('resumeSession 指定不存在 id：回落新建（续接优先 ≠ 必须续接）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = assemble({ resumeSession: 'no-such-session', streamFn });
+    expect(runtime.persistence!.latestSessionId(runtime.workspace)).toBeUndefined(); // 前置：库确无此 cwd 会话
+    const result = await runtime.conversation.submitOnce('问');
+    expect(result?.status).toBe('completed');
+    const header = runtime.session!.events.find((e) => e.type === 'request/header')!;
+    expect((header.data as { reason: string }).reason).toBe('initial'); // 回落新建按 initial 记
+  });
+});
+
+describe('/new 会话热切换', () => {
+  it('新会话落新事件、旧会话封存不动、durable 换指生效、通知可见', async () => {
+    const { streamFn } = scriptedStream([textMessage('旧答'), textMessage('新答')]);
+    const runtime = assemble({ streamFn });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    await runtime.conversation.submitOnce('旧问');
+    const oldSession = runtime.session!;
+    const oldId = oldSession.header.sessionId;
+    const oldCount = oldSession.events.length;
+
+    // /new 分发（TUI 命令路由同款入口）
+    const newCmd = runtime.channels.commands.lookup('new');
+    expect(newCmd).toBeDefined();
+    newCmd!.handler('');
+    expect(runtime.session!.header.sessionId).not.toBe(oldId); // 已切到新会话
+    expect(runtime.session!.events.map((e) => e.type)).toEqual(['sandbox/mode']); // 新会话从档位事件起步
+    expect(notifies.some((n) => n.includes('已开新会话'))).toBe(true);
+
+    // 新对话落新会话；旧会话对象不再增长（durable 已换指）
+    await runtime.conversation.submitOnce('新问');
+    expect(
+      runtime.session!.events.some(
+        (e) => e.type === 'user/message' && (e.data as { content: string }).content === '新问',
+      ),
+    ).toBe(true);
+    expect(oldSession.events.length).toBe(oldCount);
+    // 新会话首快照 reason=initial（header 落账状态已随热切换复位）
+    const header = runtime.session!.events.find((e) => e.type === 'request/header')!;
+    expect((header.data as { reason: string }).reason).toBe('initial');
+  });
+
+  it('run 进行中拒绝热切换：会话不变、通知可见、run 照常结算', async () => {
+    // 闸门流：首事件等放行——submitOnce 发出后 run 稳定处于进行中
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const answer = textMessage('慢答');
+    const streamFn: StreamFn = () => ({
+      [Symbol.asyncIterator]() {
+        let delivered = false;
+        return {
+          next: async () => {
+            if (delivered) return Promise.resolve({ value: undefined, done: true as const });
+            await gate;
+            delivered = true;
+            return Promise.resolve({
+              value: { type: 'done', reason: 'stop', message: answer } as AssistantStreamEvent,
+              done: false as const,
+            });
+          },
+        };
+      },
+      result: async () => answer,
+    });
+    const runtime = assemble({ streamFn });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    const pending = runtime.conversation.submitOnce('慢问');
+    expect(runtime.conversation.isRunning).toBe(true); // launch 同步置位——run 已在跑
+    runtime.channels.commands.lookup('new')!.handler(''); // 热切换被拒
+    expect(notifies.some((n) => n.includes('不能开新会话'))).toBe(true);
+    const idBefore = runtime.session!.header.sessionId;
+
+    release();
+    const result = await pending;
+    expect(result?.status).toBe('completed'); // 拒切换不影响在跑 run
+    expect(runtime.session!.header.sessionId).toBe(idBefore); // 会话未变
+  });
+});

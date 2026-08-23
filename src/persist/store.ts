@@ -317,6 +317,18 @@ export class Store {
     return (this.stmt('SELECT id FROM sessions ORDER BY created_at').all() as Array<{ id: string }>).map((r) => r.id);
   }
 
+  /**
+   * 某工作区（cwd）的最新会话 id（TUI 启动续接策略的取数面，技术栈篇 §5）。
+   * created_at 毫秒可同值——同刻并列时 rowid 兜底取后建者（自增近似时序）。
+   * @returns 无匹配返回 undefined
+   */
+  latestSessionId(cwd: string): string | undefined {
+    const row = this.stmt('SELECT id FROM sessions WHERE cwd = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(
+      cwd,
+    ) as { id: string } | undefined;
+    return row?.id;
+  }
+
   /* ---------------- 凭证（pi-ai CredentialStore 的 SQLite 承载） ---------------- */
 
   /** 列全部凭证元数据（不含 data——pi-ai list 契约「不暴露密钥」；app 适配器消费） */
