@@ -13,6 +13,7 @@ import type { Database as DatabaseConnection } from 'better-sqlite3';
 import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { deepFreeze } from '../session/snapshot.js';
+import { normalizeMigrations, type MigrationSpec } from './migrations.js';
 import { APPLICATION_ID, CANONICAL_DDL, SCHEMA_VERSION } from './schema.js';
 
 /** 打开参数 */
@@ -21,6 +22,11 @@ export interface StoreOptions {
   path: string;
   /** 锁等待上限（毫秒，默认 5000——允许双开姿态下的写竞争有界等待） */
   busyTimeoutMs?: number;
+  /**
+   * 业务模块注册的迁移链（统一迁移框架，会话篇 §6 落码形态 2026-08-24）。
+   * 缺省 = 空链（纯基线库）；组合根聚合各模块迁移项传入（如 memory 表族 v2）。
+   */
+  migrations?: readonly MigrationSpec[];
 }
 
 /** sessions 表行（血缘 header + 变更检测） */
@@ -50,11 +56,16 @@ export interface SessionRegistration {
 }
 
 /**
- * 打开（或初始化）一个存储库。
- * 门禁顺序：application_id → user_version → schema 逐对象比对；
- * 任一不匹配拒绝打开（pre-release 不做格式迁移，old-v2 旧库不进此门禁）。
+ * 打开（或初始化/升级）一个存储库。
+ * 门禁顺序：application_id → user_version（升级方向补跑迁移链，降级方向拒绝）→
+ * schema 逐对象比对（基线 DDL ∪ 迁移链产物累积指纹）；任一不匹配拒绝打开
+ * （宁拒绝不误读；old-v2 旧库不进此门禁）。
  */
 export function openStore(options: StoreOptions): Store {
+  // 迁移链先校验排序（装配错误在此即抛，不动任何库文件）
+  const chain = normalizeMigrations(options.migrations ?? [], SCHEMA_VERSION);
+  const latestVersion = chain.length > 0 ? chain[chain.length - 1]!.version : SCHEMA_VERSION;
+
   const db = new Database(options.path);
   // 双开姿态四件之①②：WAL 读写不互斥 + 锁等待有界
   db.pragma(`journal_mode = WAL`);
@@ -67,16 +78,19 @@ export function openStore(options: StoreOptions): Store {
   const isEmpty = tableCount(db) === 0;
 
   if (isEmpty) {
-    // 全新库：建表 + 写入门禁值 + 单例状态行
+    // 全新库：基线 DDL + 迁移链一次到位 + 写入门禁值 + 单例状态行
     db.exec(CANONICAL_DDL);
+    for (const m of chain) {
+      applyMigration(db, m);
+    }
     db.pragma(`application_id = ${APPLICATION_ID}`);
-    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+    db.pragma(`user_version = ${latestVersion}`);
     db.prepare('INSERT INTO store_state (id, store_id, schema_version) VALUES (1, ?, ?)').run(
       randomUUID(),
-      SCHEMA_VERSION,
+      latestVersion,
     );
   } else {
-    // 存量库：双门禁 + schema 比对，任何漂移响亮拒绝
+    // 存量库：application_id 门禁 → 升降级判定 → 补跑缺口 → 累积指纹比对
     if (appId !== APPLICATION_ID) {
       db.close();
       throw new AppError(
@@ -84,18 +98,34 @@ export function openStore(options: StoreOptions): Store {
         `application_id 不匹配（库内 ${appId}，期望 ${APPLICATION_ID}）——不是本产品的库，拒绝打开`,
       );
     }
-    if (userVersion !== SCHEMA_VERSION) {
+    if (userVersion > latestVersion) {
+      // 降级方向（未来库/旧宿主开新库）：宁拒绝不误读，永不自动降级
       db.close();
       throw new AppError(
         SESSION_FORMAT_UNSUPPORTED,
-        `user_version 不匹配（库内 ${userVersion}，期望 ${SCHEMA_VERSION}）——pre-release 不迁移，拒绝打开`,
+        `user_version 高于宿主已知（库内 ${userVersion}，宿主最新 ${latestVersion}）——降级不支持，拒绝打开`,
       );
     }
-    verifySchema(db);
+    for (const m of chain) {
+      if (m.version > userVersion) applyMigration(db, m);
+    }
+    verifySchema(db, chain);
   }
 
   const storeId = (db.prepare('SELECT store_id FROM store_state WHERE id = 1').get() as { store_id: string }).store_id;
   return new Store(db, storeId);
+}
+
+/**
+ * 执行单个迁移：DDL 单事务 + user_version 前进（两步同事务——半迁移状态不可见）。
+ * pre-release 迁移只前进 user_version，不写迁移历史表（指纹比对即完整校验面）。
+ */
+function applyMigration(db: DatabaseConnection, m: MigrationSpec): void {
+  const run = db.transaction(() => {
+    db.exec(m.sql);
+    db.pragma(`user_version = ${m.version}`);
+  });
+  run.immediate();
 }
 
 /** 库内对象计数（判断是否全新库；仅数表，索引等随表建） */
@@ -107,13 +137,17 @@ function tableCount(db: DatabaseConnection): number {
 }
 
 /**
- * schema 逐对象比对：把库内 CREATE 语句与「同版本规范 DDL 在内存库执行后的语句」
- * 各自 normalize 后比对集合——比对的就是执行产物，不吃 SQL 文本缓存的漂移。
+ * schema 逐对象比对：把库内 CREATE 语句与「基线 DDL + 迁移链在内存库执行后的语句」
+ * 各自 normalize 后比对集合——比对的就是执行产物，不吃 SQL 文本缓存的漂移；
+ * 比对覆盖迁移链全部对象（表/索引/触发器，sqlite_master 全量）。
  */
-function verifySchema(db: DatabaseConnection): void {
+function verifySchema(db: DatabaseConnection, chain: readonly MigrationSpec[] = []): void {
   const reference = new Database(':memory:');
   try {
     reference.exec(CANONICAL_DDL);
+    for (const m of chain) {
+      reference.exec(m.sql);
+    }
     const expected = schemaFingerprint(reference);
     const actual = schemaFingerprint(db);
     const missing = [...expected].filter((e) => !actual.has(e));
@@ -170,6 +204,16 @@ export class Store {
       this.statements.set(sql, s);
     }
     return s;
+  }
+
+  /**
+   * 底层连接引用（业务模块 DAO 面，会话篇 §6 迁移框架落码形态 2026-08-24）：
+   * 经统一迁移框架建表的业务模块（如 memory 表族）在此自行 prepared statement——
+   * 物理层与语义层分工：语义在业务模块、编码与连接治理在 persist。
+   * 仅供宿主装配的业务模块使用（事件写入仍走 appendCore 唯一入口，不旁路）。
+   */
+  get connection(): DatabaseConnection {
+    return this.db;
   }
 
   /** 关闭库（调用方保证此前已 flush 全部批次） */

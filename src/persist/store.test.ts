@@ -64,14 +64,14 @@ describe('版本门禁（开库即验，宁拒绝不误读）', () => {
     again.close();
   });
 
-  it('user_version 不匹配拒绝打开', () => {
+  it('user_version 高于宿主已知（降级方向）拒绝打开', () => {
     const path = nextPath();
     openStore({ path }).close();
-    // 直接用 better-sqlite3 篡改门禁值（模拟未来版本库）
+    // 直接用 better-sqlite3 篡改门禁值（模拟未来版本库）——统一迁移框架下归类为降级
     const raw = new Database(path);
     raw.pragma('user_version = 99');
     raw.close();
-    expect(() => openStore({ path })).toThrowError(/user_version 不匹配/);
+    expect(() => openStore({ path })).toThrowError(/降级不支持/);
   });
 
   it('application_id 不匹配拒绝打开（不是本产品的库）', () => {

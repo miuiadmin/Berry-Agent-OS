@@ -7,7 +7,7 @@
  * 永不被物理布局破坏（物理/逻辑分离原则：语义在 session 模块，编码在此）。
  */
 
-/** schema 版本（PRAGMA user_version 门禁值；pre-release 不做迁移，不匹配即拒绝打开） */
+/** schema 基线版本（PRAGMA user_version 门禁值起点；递进经统一迁移框架——migrations.ts，2026-08-24） */
 export const SCHEMA_VERSION = 1;
 
 /** 库身份魔数（PRAGMA application_id 门禁值；随意选定的 32 位正整数，作用=识别「这是本产品的库」） */
@@ -87,5 +87,6 @@ CREATE TABLE model_catalog (
 -- 具体列与更新策略随检索需求定；由 persist 在事件落盘后异步维护
 -- CREATE VIRTUAL TABLE session_fts USING fts5(...);
 
--- ── 8. 记忆库表族（占位，schema 归「记忆与自进化」篇）──────────
+-- ── 8. 记忆库表族：已定稿于[记忆与自进化]篇 §3 ────────────────
+--    （memories + memory_fts；经统一迁移框架进 user_version=2，DDL 归 memory 模块自带）
 `;
