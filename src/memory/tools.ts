@@ -19,6 +19,7 @@ import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
 import { guardedAddMemory, detectSecret, quoteAsCitation, sanitizeForModel } from './scan.js';
 import type { SanitizedEntry } from './scan.js';
 import type { MemoryKind, MemoryStore } from './store.js';
+import type { SessionFtsHit } from './session-fts.js';
 
 /** 工具五件选项（插件装配注入；owner 解析留在装配层——global + 当前项目） */
 export interface MemoryToolsOptions {
@@ -26,6 +27,11 @@ export interface MemoryToolsOptions {
   readonly store: MemoryStore;
   /** 生效归属键（global + project:<hash>；活取值——cwd 变更/多会话时按调取时为准） */
   readonly ownerKeys: () => readonly string[];
+  /**
+   * 跨会话检索面（记忆篇 §10 union 的另一半）：给了 = memory_search 联合检索
+   * session_fts（返回带来源标记）；缺省纯记忆库检索——DAO 独立于工具面可测。
+   */
+  readonly searchSessions?: (query: string, limit: number) => readonly SessionFtsHit[];
 }
 
 /** 纯文本结果快捷构造 */
@@ -205,24 +211,39 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
     name: 'memory_search',
     effect: 'read',
     description:
-      '按关键词检索记忆库（中英混排子串匹配）。回答涉及用户偏好/历史教训/项目约定的问题前先检索——记忆比本轮上下文更了解用户。',
+      '按关键词检索记忆库与历史会话（中英混排子串匹配；记忆条目 + [历史会话] 引用两路联合）。回答涉及用户偏好/历史教训/项目约定的问题前先检索——记忆比本轮上下文更了解用户。',
     parameters: Type.Object({
       query: Type.String({ minLength: 1, maxLength: 200 }),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: '返回条数（缺省 5）' })),
     }),
     execute: async (args) => {
-      const records = store.search(
-        String(args.query),
-        opts.ownerKeys(),
-        typeof args.limit === 'number' ? args.limit : 5,
-      );
+      const query = String(args.query);
+      const limit = typeof args.limit === 'number' ? args.limit : 5;
+      const records = store.search(query, opts.ownerKeys(), limit);
       const sanitized = sanitizeForModel(records);
-      if (sanitized.entries.length === 0) {
-        return textResult('无匹配记忆条目。', false, { hits: 0, blocked: sanitized.blocked });
+      // 跨会话 union（§10）：session_fts 命中行——snippet 过读出扫描（secret 串以
+      // 拦截计数披露不回显），行带 sessionId+seq 定位（模型可提示用户跳转回放）
+      const sessionHits = opts.searchSessions ? opts.searchSessions(query, limit) : [];
+      const sessionLines: string[] = [];
+      let sessionBlocked = 0;
+      for (const hit of sessionHits) {
+        if (detectSecret(hit.snippet) !== undefined) {
+          sessionBlocked += 1;
+          continue;
+        }
+        sessionLines.push(`- [历史会话] ${hit.snippet}（session=${hit.sessionId}，seq=${hit.seq}）`);
       }
-      return textResult(sanitized.entries.map(entryLine).join('\n'), false, {
+      if (sanitized.entries.length === 0 && sessionLines.length === 0) {
+        return textResult('无匹配结果（记忆库与历史会话均未命中）。', false, {
+          hits: 0,
+          sessionHits: 0,
+          blocked: sanitized.blocked + sessionBlocked,
+        });
+      }
+      return textResult([...sanitized.entries.map(entryLine), ...sessionLines].join('\n'), false, {
         hits: sanitized.entries.length,
-        blocked: sanitized.blocked,
+        sessionHits: sessionLines.length,
+        blocked: sanitized.blocked + sessionBlocked,
       });
     },
   };

@@ -28,7 +28,7 @@ const MODULE_EDGES = {
   safety: ['contracts', 'context', 'session', 'tools'],
   skills: ['contracts', 'context'],
   subagent: ['contracts', 'context', 'agent', 'session'],
-  memory: ['contracts', 'context', 'session', 'llm', 'persist'],
+  memory: ['contracts', 'context', 'session', 'llm', 'persist', 'agent'],
   scheduler: ['contracts', 'context', 'session', 'agent'],
   mcp: ['contracts', 'context', 'tools'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面

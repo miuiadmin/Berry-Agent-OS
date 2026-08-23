@@ -33,20 +33,44 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
   return join(dir, file);
 }
 
+/* ---------------- 官方默认层隔离 ---------------- */
+
+/** 官方默认层行 id 集（纵切五起 memory 首行进默认层——契约篇 §5.1） */
+const DEFAULT_LAYER_IDS = new Set(['memory']);
+
+/**
+ * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
+ * dedicated 测试——两关注点不混断言）。无注册表调用 → 官方 builtin: 行为
+ * unresolved（对用户层断言无影响）。
+ */
+function loadUserComposition(dataDir: string): { rows: unknown[]; plan: unknown[] } {
+  const report = loadComposition(dataDir);
+  return {
+    rows: report.rows.filter((row) => !DEFAULT_LAYER_IDS.has(row.id)),
+    plan: report.plan.filter((row) => !DEFAULT_LAYER_IDS.has(row.id)),
+  };
+}
+
 /* ---------------- overlay 装载与拒绝式校验 ---------------- */
 
 describe('overlay 装载与拒绝式校验', () => {
-  it('overlay 不存在 = 空 overlay：零配置首启合法（空树）', () => {
-    const report = loadComposition(makeDataDir());
-    expect(report.rows).toEqual([]);
-    expect(report.plan).toEqual([]);
+  it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
+    const dataDir = makeDataDir();
+    const report = loadComposition(dataDir);
+    // 官方默认层首行 memory（契约篇 §5.1）——无注册表解析 = unresolved（诊断诚实）
+    expect(report.rows).toEqual([{ id: 'memory', plugin: 'builtin:memory' }]);
+    expect(report.plan).toHaveLength(1);
+    expect(report.plan[0]!.id).toBe('memory');
+    expect(report.plan[0]!.unresolved).toContain('保留前缀');
+    // 用户层为空
+    expect(loadUserComposition(dataDir)).toEqual({ rows: [], plan: [] });
   });
 
   it('insert 行带路径引用：行进树、入口解析为该文件绝对路径', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
     writeOverlay(dataDir, `  - id: local\n    plugin: ${entry}\n`);
-    const report = loadComposition(dataDir);
+    const report = loadUserComposition(dataDir);
     expect(report.rows).toEqual([{ id: 'local', plugin: entry }]);
     expect(report.plan).toEqual([{ id: 'local', entry }]);
   });
@@ -98,7 +122,7 @@ describe('禁用解析（挂载休眠）', () => {
     const dataDir = makeDataDir();
     // plugin 指向不存在的裸名——禁用行不要求已装
     writeOverlay(dataDir, '  - id: dormant\n    plugin: never-installed-pkg\n    disabled: true\n');
-    const report = loadComposition(dataDir);
+    const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([{ id: 'dormant', skip: 'disabled' }]);
   });
 
@@ -111,7 +135,7 @@ describe('禁用解析（挂载休眠）', () => {
       `  - id: gated\n    plugin: never-installed\n    disabled: ${process.platform}\n` +
         `  - id: ungated\n    plugin: ${entry}\n    disabled: ${other}\n`,
     );
-    const report = loadComposition(dataDir);
+    const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([
       { id: 'gated', skip: 'platform' }, // 命中当前平台——不解析入口
       { id: 'ungated', entry }, // 他平台门控不生效——照常激活
@@ -132,7 +156,7 @@ describe('插件入口解析', () => {
     expect(resolvePluginEntry('fake-pkg', dataDir)).toBe(join(pkgDir, 'custom-entry.ts'));
     // 经组合树同路径（overlay 裸名行全链路）
     writeOverlay(dataDir, '  - id: p1\n    plugin: fake-pkg\n');
-    expect(loadComposition(dataDir).plan[0]).toEqual({ id: 'p1', entry: join(pkgDir, 'custom-entry.ts') });
+    expect(loadUserComposition(dataDir).plan[0]).toEqual({ id: 'p1', entry: join(pkgDir, 'custom-entry.ts') });
   });
 
   it('无 harness 字段 → 约定目录 extensions/index.ts 回退 → 包根 index.ts 兜底', () => {
@@ -156,11 +180,11 @@ describe('插件入口解析', () => {
   it('未安装裸名行：unresolved 计划行，信息明示永不自动安装', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: missing\n    plugin: absent-pkg\n');
-    const report = loadComposition(dataDir);
+    const report = loadUserComposition(dataDir);
     expect(report.plan).toHaveLength(1);
-    expect(report.plan[0]!.id).toBe('missing');
-    expect(report.plan[0]!.unresolved).toContain('永不自动安装');
-    expect(report.plan[0]!.entry).toBeUndefined();
+    expect((report.plan[0] as { id: string }).id).toBe('missing');
+    expect((report.plan[0] as { unresolved?: string }).unresolved).toContain('永不自动安装');
+    expect((report.plan[0] as { entry?: string }).entry).toBeUndefined();
   });
 });
 
@@ -197,17 +221,17 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
     ];
     saveOverlayRows(dataDir, rows);
     // 装载面（validateRow 拒绝式）原样读回——四行全字段无损失
-    const report = loadComposition(dataDir);
+    const report = loadUserComposition(dataDir);
     expect(report.rows).toEqual(rows);
     // 二次往返（save(load(save))) 仍幂等
-    saveOverlayRows(dataDir, [...report.rows]);
-    expect(loadComposition(dataDir).rows).toEqual(rows);
+    saveOverlayRows(dataDir, [...(report.rows as never[])]);
+    expect(loadUserComposition(dataDir).rows).toEqual(rows);
   });
 
-  it('空行集写回：合法空 overlay（rows: []），装载为空树', () => {
+  it('空行集写回：合法空 overlay（rows: []），用户层为空树（官方层照常打底）', () => {
     const dataDir = makeDataDir();
     saveOverlayRows(dataDir, []);
-    expect(loadComposition(dataDir).rows).toEqual([]);
+    expect(loadUserComposition(dataDir).rows).toEqual([]);
   });
 
   it('toggle 翻转：启用→禁用保留 plugin/config；禁用→启用删键、纯禁用行整行移除', () => {
@@ -219,13 +243,13 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
     );
     // 现禁用行（pure-off，带 plugin）→ 启用：删键保留行
     expect(toggleOverlayRow(dataDir, 'pure-off')).toBe(false);
-    expect(loadComposition(dataDir).rows).toEqual([
+    expect(loadUserComposition(dataDir).rows).toEqual([
       { id: 'live', plugin: entry },
       { id: 'pure-off', plugin: 'p' },
     ]);
     // 再翻 → 禁用：保留 plugin 只置 disabled
     expect(toggleOverlayRow(dataDir, 'pure-off')).toBe(true);
-    expect(loadComposition(dataDir).rows).toEqual([
+    expect(loadUserComposition(dataDir).rows).toEqual([
       { id: 'live', plugin: entry },
       { id: 'pure-off', plugin: 'p', disabled: true },
     ]);
@@ -235,7 +259,7 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
     expect(toggleOverlayRow(dataDir, 'live')).toBe(true); // live → 禁用（保留 plugin）
     expect(toggleOverlayRow(dataDir, 'live')).toBe(false); // 再启回（保留 plugin）
     expect(toggleOverlayRow(dataDir, 'flag-only')).toBe(false); // 纯禁用行 → 启用 = 整行移除
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'live', plugin: entry }]);
+    expect(loadUserComposition(dataDir).rows).toEqual([{ id: 'live', plugin: entry }]);
   });
 
   it('toggle 未知行 id：COMPOSITION_ROW_INVALID 即时即响（不静默写一条无人认领的行）', () => {
@@ -251,7 +275,7 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
   it('upsertOverlayPluginRef：insert 自带 plugin；重装只换 plugin 引用（config/disabled 状态不动）', () => {
     const dataDir = makeDataDir();
     upsertOverlayPluginRef(dataDir, 'fresh', 'some-package');
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'fresh', plugin: 'some-package' }]);
+    expect(loadUserComposition(dataDir).rows).toEqual([{ id: 'fresh', plugin: 'some-package' }]);
     // 已有行带 config/disabled——重装只替换 plugin 引用，启停与配置保留
     writeOverlay(
       dataDir,
@@ -259,9 +283,46 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
         '  - id: pkg\n    plugin: old-name\n    config: { k: v }\n    disabled: true\n',
     );
     upsertOverlayPluginRef(dataDir, 'pkg', 'new-name');
-    expect(loadComposition(dataDir).rows).toEqual([
+    expect(loadUserComposition(dataDir).rows).toEqual([
       { id: 'fresh', plugin: 'some-package' },
       { id: 'pkg', plugin: 'new-name', config: { k: 'v' }, disabled: true },
     ]);
+  });
+});
+
+/* ---------------- builtin: 前缀解析（契约篇 §6.1，纵切五） ---------------- */
+
+describe('builtin: 保留前缀解析', () => {
+  /** 测试替身内置件（形状合法即可——合成面不调 apply） */
+  const stubBuiltin = { name: 'memory-stub', apply: async () => {} };
+
+  it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
+    const dataDir = makeDataDir();
+    writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
+    const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin });
+    expect(report.rows).toEqual([{ id: 'memory', plugin: 'builtin:memory', config: { recallTopK: 5 } }]);
+    expect(report.plan).toEqual([{ id: 'memory', builtin: stubBuiltin, config: { recallTopK: 5 } }]);
+  });
+
+  it('注册表未命中：unresolved 响亮——保留前缀仅官方随包件可用（overlay 不能伪装）', () => {
+    const dataDir = makeDataDir();
+    const report = loadComposition(dataDir, {});
+    expect(report.plan[0]!.unresolved).toContain('不在宿主注册表');
+    expect(report.plan[0]!.unresolved).toContain('保留前缀');
+  });
+
+  it('overlay 替换引用：memory 行 plugin 换本地路径 → 走文件插件解析（builtin 语义可换源）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    writeOverlay(dataDir, `  - id: memory\n    plugin: ${entry}\n`);
+    const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin });
+    expect(report.plan[0]).toEqual({ id: 'memory', entry });
+  });
+
+  it('overlay 禁用 memory 行：非 fixed 行真·可卸（skip，不要求注册表命中）', () => {
+    const dataDir = makeDataDir();
+    writeOverlay(dataDir, '  - id: memory\n    disabled: true\n');
+    const report = loadComposition(dataDir, {});
+    expect(report.plan[0]).toEqual({ id: 'memory', skip: 'disabled' });
   });
 });

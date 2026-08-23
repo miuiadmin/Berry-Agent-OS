@@ -18,17 +18,24 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
-import type { CompositionRow, PluginPlanRow, PluginSkipReason } from '../contracts/plugin.js';
+import type { BuiltinPluginModule, CompositionRow, PluginPlanRow, PluginSkipReason } from '../contracts/plugin.js';
 
 /** overlay 文件名（<数据目录>/overlay.yaml，契约篇 §5.2） */
 export const OVERLAY_FILENAME = 'overlay.yaml';
 
 /**
- * 官方默认层 v1 = 空树（契约篇 §5.1 落码注记）：Ring 2 官方全家桶（memory /
- * scheduler / subagent / …）逐件迁入——框架先行、内容随件落。Ring 0 内核不进
- * 组合树；Ring 1 底座当前仍为组合根硬装配（行树化随首件全家桶迁移一并落，seam）。
+ * 内置插件注册表（契约篇 §6.1）：键 = 完整引用串（`builtin:memory` 式），值 = 宿主
+ * 随包模块引用。组合根装配期构造（store/workspace 等依赖以闭包注入）；`builtin:`
+ * 是保留前缀——注册表是唯一解析面，overlay 不可能引用非官方注册件（查不到即 unresolved）。
  */
-const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [];
+export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>>;
+
+/**
+ * 官方默认层 v1 首件已进（契约篇 §5.1 落码注记）：memory（Ring 2 官方全家桶首件，
+ * 非 fixed 真·可卸——/plugin-toggle memory 即减）。Ring 0 内核不进组合树；Ring 1 底座
+ * 当前仍为组合根硬装配（行树化随全家桶次件迁移一并落，seam）。
+ */
+const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [{ id: 'memory', plugin: 'builtin:memory' }];
 
 /** 组合树装载产物（dump-config 打印 + ctx.plugins.list 数据源） */
 export interface CompositionReport {
@@ -214,11 +221,16 @@ export function resolvePluginEntry(ref: string, dataDir: string): string | undef
   return undefined;
 }
 
+/** `builtin:` 保留前缀（契约篇 §6.1）——入口解析链最先查内置注册表 */
+const BUILTIN_PREFIX = 'builtin:';
+
 /**
  * 装载组合树（合成 + 禁用解析 + 入口解析 → 装载计划）。
  * @param dataDir 数据目录（overlay 与装机子树的根）
+ * @param builtins 内置插件注册表（组合根装配期构造；缺省空表——`builtin:` 行一律
+ * unresolved。dump-config 纯合成面也传同构注册表，树形不因诊断态失真）
  */
-export function loadComposition(dataDir: string): CompositionReport {
+export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry = {}): CompositionReport {
   const rows = mergeRows(DEFAULT_LAYER_ROWS, loadOverlayRows(dataDir));
   const plan: PluginPlanRow[] = [];
   for (const row of rows) {
@@ -233,6 +245,20 @@ export function loadComposition(dataDir: string): CompositionReport {
         COMPOSITION_ROW_INVALID,
         `组合树行 ${row.id}：激活行缺 plugin 引用（insert 行必须自带；替换行不可只留空引用）`,
       );
+    }
+    // builtin: 前缀 = 入口解析链最先查内置注册表（§6.1）；查不到即 unresolved——
+    // 注册表是宿主唯一解析面，overlay 不可能借该前缀伪装官方件身份
+    if (ref.startsWith(BUILTIN_PREFIX)) {
+      const module = builtins[ref];
+      if (module === undefined) {
+        plan.push({
+          id: row.id,
+          unresolved: `内置件「${ref}」不在宿主注册表（builtin: 是保留前缀——仅官方随包件可用）`,
+        });
+      } else {
+        plan.push({ id: row.id, builtin: module, ...(row.config !== undefined ? { config: row.config } : {}) });
+      }
+      continue;
     }
     const entry = resolvePluginEntry(ref, dataDir);
     plan.push({

@@ -43,6 +43,17 @@ export interface PluginModule {
   events?: readonly LiveEventDefinition[];
 }
 
+/**
+ * 官方内置件模块（§6.1 `builtin:` 前缀命名空间，2026-08-24 M2 记忆插件纵切）：
+ * 与 PluginModule 同形，唯 apply 替位 default（宿主随包函数引用，不经 jiti、
+ * 不受插件零 import 规则约束）。组合根内置插件注册表按 `builtin:<name>` 收纳，
+ * 装载管线与文件插件完全同轨（形状/config 校验、Kahn 轮次激活、三生命周期事件）。
+ */
+export interface BuiltinPluginModule extends Omit<PluginModule, 'default'> {
+  /** 入口函数（与 PluginModule.default 同签名——命名差异只为「非模块导出」的语义清晰） */
+  apply: PluginApply;
+}
+
 /** 组合树行（§5.1）：每行 = 一个插件实例，字段级后写胜出合成 */
 export interface CompositionRow {
   /** 行 id：组合树中该插件实例的稳定标识（overlay 按 id 替换/insert/disable 的键） */
@@ -68,13 +79,16 @@ export type PluginSkipReason = 'disabled' | 'platform';
 
 /**
  * 装载计划行（组合树合成产物 → 加载器输入）：三态互斥——
- * 有 entry = 激活行；有 skip = 跳过行（不 import，禁用不要求已装）；有 unresolved = 入口解析失败行。
+ * 有 entry（文件插件）或 builtin（官方内置件）= 激活行；有 skip = 跳过行
+ * （不 import，禁用不要求已装）；有 unresolved = 入口解析失败行。
  */
 export interface PluginPlanRow {
   /** 组合树行 id */
   id: string;
-  /** 入口文件绝对路径（激活行必有） */
+  /** 入口文件绝对路径（文件插件激活行必有；builtin 行无） */
   entry?: string;
+  /** 官方内置件模块引用（`builtin:` 行激活时必有——注册表查得，不经 jiti） */
+  builtin?: BuiltinPluginModule;
   /** 行配置（激活行可有；经插件 schema 校验后注入） */
   config?: Record<string, unknown>;
   /** 跳过原因（有值即不激活） */

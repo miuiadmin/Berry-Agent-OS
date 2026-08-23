@@ -194,7 +194,18 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
     }
     // import + 形状校验 + 自定义事件词汇登记（失败进清单不阻断——其余行仍要出全量诊断）
     try {
-      const mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
+      let mod: Record<string, unknown>;
+      if (row.builtin !== undefined) {
+        // 官方内置件（契约篇 §6.1 `builtin:` 前缀）：宿主随包函数引用，不经 jiti、
+        // 不受插件零 import 约束——包成模块记录后与文件插件走**完全同轨**的形状
+        // 校验/事件登记/轮次激活/生命周期事件管线（apply 替位 default，字段同名转抄）
+        mod = { default: row.builtin.apply };
+        for (const key of ['name', 'inject', 'optionalInject', 'config', 'events'] as const) {
+          if (row.builtin[key] !== undefined) mod[key] = row.builtin[key];
+        }
+      } else {
+        mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
+      }
       const module = validateModuleShape(mod, row.id);
       // 自定义事件词汇登记（§1.1 逃生口）：装载阶段①（一切 apply 之前）统一入册——
       // 跨插件订阅无顺序洞（晚激活提供方的词汇此刻已在注册表）；登记经 effect 挂

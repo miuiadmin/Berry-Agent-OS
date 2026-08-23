@@ -11,6 +11,7 @@
 import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { loadComposition, OVERLAY_FILENAME, type CompositionReport } from './composition.js';
+import { createBuiltinRegistry } from './builtins.js';
 import type { PluginStatusRow } from './composition.js';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { dataDir } from './paths.js';
@@ -80,9 +81,17 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
     // 启动断言失败（插件装载/组合树校验）——诊断面捕获后打印树与清单，不裸抛
     if (err instanceof AppError && (err.code === PLUGIN_LOAD_FAILED || err.code === COMPOSITION_ROW_INVALID)) {
       process.stdout.write(`Berry ${VERSION}\n数据目录：${dataDir()}\n`);
-      // 树尽力打印：纯合成解析零副作用（插件 import 失败也能看到树本身）
+      // 树尽力打印：纯合成解析零副作用（插件 import 失败也能看到树本身）；
+      // 内置注册表同构传入（无 store 诊断态）——builtin: 行解析不失真
       try {
-        process.stdout.write(renderCompositionTree(loadComposition(options.compositionDir ?? dataDir())) + '\n');
+        process.stdout.write(
+          renderCompositionTree(
+            loadComposition(
+              options.compositionDir ?? dataDir(),
+              createBuiltinRegistry({ workspace: () => process.cwd() }),
+            ),
+          ) + '\n',
+        );
       } catch {
         // 合成本身失败——跳过树，错误信息即诊断
       }

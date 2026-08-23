@@ -21,6 +21,15 @@ function makeDataDir(): string {
   return realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plugins-')));
 }
 
+/**
+ * 装载并滤除官方默认层行（纵切五起 memory 首行打底——契约篇 §5.1）：
+ * 本文件测 overlay 对账语义（用户层写什么/读回什么），官方行进 composition.test
+ * 专属测试——两关注点不混断言。
+ */
+function userRows(dataDir: string): unknown[] {
+  return loadComposition(dataDir).rows.filter((row) => row.id !== 'memory');
+}
+
 /** runner 替身：记录每次调用；可选 scripted 失败（按命令名命中即抛） */
 function fakeRunner(failures: Record<string, string> = {}) {
   const calls: Array<{ command: string; args: string[]; cwd: string }> = [];
@@ -56,7 +65,7 @@ describe('install 三源分发', () => {
       },
     ]);
     // 对账写回：overlay 已有该行（裸包名引用）
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'some-pkg', plugin: 'some-pkg' }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg' }]);
   });
 
   it('npm scoped 包名解析：@scope/pkg@1.2 → id=@scope/pkg（不丢 scope 不带版本）', async () => {
@@ -92,7 +101,7 @@ describe('install 三源分发', () => {
     >;
     expect(sources['github.com/foo/bar']).toEqual({ url: 'https://github.com/foo/bar.git', ref: 'v1.2' });
     // overlay 写 clone 目录绝对路径
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'bar', plugin: expectedDir }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'bar', plugin: expectedDir }]);
   });
 
   it('git 源（git@ 形态、无 ref）：默认分支 clone；重复 install 先清目录（幂等不留半装残骸）', async () => {
@@ -130,7 +139,7 @@ describe('install 三源分发', () => {
     expect(calls).toEqual([]); // local = 直引登记，零子进程
     expect(report.source).toBe('local');
     expect(report.pluginRef).toBe(localDir); // 绝对化（resolve 归一）
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'my-plugin', plugin: localDir }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir }]);
 
     // 路径不存在 → COMPOSITION_ROW_INVALID（装不进一条指空的路）
     try {
@@ -155,7 +164,7 @@ describe('install 三源分发', () => {
       expect((err as AppError).message).toContain('ENOENT no such package');
     }
     // 对账不写回——失败装机不落 overlay 行
-    expect(loadComposition(dataDir).rows).toEqual([]);
+    expect(userRows(dataDir)).toEqual([]);
   });
 });
 
@@ -169,9 +178,9 @@ describe('toggle 与 update', () => {
     await plugins.install('some-pkg'); // 装入 + 对账
 
     expect(plugins.toggle('some-pkg')).toBe(true); // → 禁用
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'some-pkg', plugin: 'some-pkg', disabled: true }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg', disabled: true }]);
     expect(plugins.toggle('some-pkg')).toBe(false); // → 启用（删键）
-    expect(loadComposition(dataDir).rows).toEqual([{ id: 'some-pkg', plugin: 'some-pkg' }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg' }]);
   });
 
   it('update 按源分派：npm 重装同名 / git 按原 ref 重克隆 / local no-op', async () => {
@@ -255,9 +264,12 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     await plugins.install('ok-pkg');
     await plugins.install('dormant-pkg');
     plugins.toggle('dormant-pkg'); // → 禁用
+    // 组合树含官方默认层 memory 行（本测试无内置注册表 → unresolved/planned）——
+    // 滤除只留用户行：本测试锁 applyLoad 映射语义，官方行装载态在 assembly 全栈锁
     const composition = loadComposition(dataDir);
+    const userComposition = { ...composition, plan: composition.plan.filter((row) => row.id !== 'memory') };
 
-    plugins.applyLoad(composition, {
+    plugins.applyLoad(userComposition, {
       activated: [{ id: 'ok-pkg', name: 'stub' }],
       failed: [],
       skipped: [{ id: 'dormant-pkg', reason: 'disabled' }],
@@ -268,7 +280,7 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     ]);
 
     // /reload 后再次回灌：同实例新状态（旧状态整体替换——不留陈旧行）
-    plugins.applyLoad(composition, {
+    plugins.applyLoad(userComposition, {
       activated: [],
       failed: [{ id: 'ok-pkg', code: 'PLUGIN_APPLY_FAILED', message: '炸了' }],
       skipped: [{ id: 'dormant-pkg', reason: 'disabled' }],
@@ -281,7 +293,7 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     // boot 前视角 / 装载前行：planned 兜底
     const fresh = createPluginsService({ dataDir, runner });
     expect(fresh.list()).toEqual([]);
-    fresh.applyLoad(composition, emptyLoad);
+    fresh.applyLoad(userComposition, emptyLoad);
     expect(fresh.list().map((row) => [row.id, row.status])).toEqual([
       ['ok-pkg', 'planned'],
       ['dormant-pkg', 'planned'],

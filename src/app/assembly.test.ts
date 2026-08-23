@@ -24,6 +24,9 @@ import type { SessionEvent } from '../contracts/events.js';
 import { deriveMessages } from '../session/derive.js';
 import { interruptedTurnClosers } from '../session/index.js';
 import { Persistence } from '../persist/index.js';
+// 重开库须带与组合根同链迁移（memory 表族 v2 + session_fts v3——宿主裸开只识 v1，
+// 高版本库拒绝打开是持久层纪律，此处镜像装配面真链）
+import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { createBerryRuntime, ConversationDriver } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
@@ -128,7 +131,19 @@ function approveAllBackend(): UiBackend {
 describe('createBerryRuntime 装配面', () => {
   it('fs 四件 + 内置命令注册；sandbox/mode 落库；系统提示词含基座', async () => {
     const runtime = await assemble();
-    expect(runtime.tools.list().map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls']);
+    // 官方默认层首行 memory（契约篇 §5.1）：Ring 2 官方全家桶随默认装配——工具
+    // 面含 memory 五件（纵切五起为默认装配现实）
+    expect(runtime.tools.list().map((t) => t.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'ls',
+      'memory_write',
+      'memory_forget',
+      'memory_restore',
+      'memory_read',
+      'memory_search',
+    ]);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
       expect(commands).toContain(expected);
@@ -181,9 +196,19 @@ describe('ConversationDriver + durable 接线', () => {
       'assistant/message',
       'turn/end',
     ]);
-    // LLM 请求上下文含系统提示词与工具面（装配接线证据）
+    // LLM 请求上下文含系统提示词与工具面（装配接线证据；memory 五件为默认装配成员）
     expect(contexts[0]?.systemPrompt).toContain('terminal-based coding assistant');
-    expect(contexts[0]?.tools?.map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls']);
+    expect(contexts[0]?.tools?.map((t) => t.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'ls',
+      'memory_write',
+      'memory_forget',
+      'memory_restore',
+      'memory_read',
+      'memory_search',
+    ]);
     // 投影回读
     const projected = deriveMessages(runtime.session!.events);
     expect(projected.map((m) => m.type)).toEqual(['user', 'assistant']);
@@ -300,7 +325,18 @@ describe('ConversationDriver + durable 接线', () => {
 
     // 第二轮：loop 每次模型请求读 context.tools（活数组已刷新）——新工具对模型可见可调用
     await runtime.conversation.submitOnce('用 echo');
-    expect(contexts[1]?.tools?.map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls', 'echo']);
+    expect(contexts[1]?.tools?.map((t) => t.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'ls',
+      'memory_write',
+      'memory_forget',
+      'memory_restore',
+      'memory_read',
+      'memory_search',
+      'echo',
+    ]);
     expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
     expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
   });
@@ -384,7 +420,7 @@ describe('持久化 round-trip 与命令入口', () => {
     await runtime.conversation.submitOnce('要持久化的问题');
     await runtime.shutdown();
 
-    const reopened = Persistence.open({ path: dbFile });
+    const reopened = Persistence.open({ path: dbFile, migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION] });
     try {
       const sessionId = reopened.store.listSessionIds()[0]!;
       const session = reopened.loadSession(sessionId)!;
@@ -592,13 +628,28 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     ]);
     const runtime = await assemble({ streamFn, compositionDir });
 
-    // 装载状态面：ctx.plugins 与 runtime.plugins 同源（list 状态 = activated）
-    expect(runtime.plugins.list()).toEqual([{ id: 'tool-plugin', status: 'activated', name: 'tool-plugin' }]);
+    // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory 首行 +
+    // overlay tool-plugin 行均 activated——list 状态行序 = 组合树序）
+    expect(runtime.plugins.list()).toEqual([
+      { id: 'memory', status: 'activated', name: 'memory' },
+      { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
+    ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
-    // 组合树报告带行
-    expect(runtime.composition.rows.map((row) => row.id)).toEqual(['tool-plugin']);
-    // 插件工具已进注册表（fs 四件之后）
-    expect(runtime.tools.list().map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls', 'plug-echo']);
+    // 组合树报告带行（官方默认层打底在前）
+    expect(runtime.composition.rows.map((row) => row.id)).toEqual(['memory', 'tool-plugin']);
+    // 插件工具已进注册表（fs 四件 + memory 五件之后）
+    expect(runtime.tools.list().map((t) => t.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'ls',
+      'memory_write',
+      'memory_forget',
+      'memory_restore',
+      'memory_read',
+      'memory_search',
+      'plug-echo',
+    ]);
     // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
     const paths = runtime.ctx.tryGet<{ dataDir(): string; pluginDataDir(id: string): string }>('paths');
     expect(paths!.dataDir()).toBe(compositionDir);
@@ -644,9 +695,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(runtime.systemPrompt.indexOf('插件段内容：记住用中文注释')).toBeGreaterThan(
       runtime.systemPrompt.indexOf('terminal-based coding assistant'),
     );
-    // 段 id 清单面（字典序）
+    // 段 id 清单面（字典序；memory/core 为官方内置件注册的简报段——空库物化为空串）
     const prompts = runtime.ctx.get<{ listSections(): string[] }>('prompts');
-    expect(prompts.listSections()).toEqual(['demo/notice']);
+    expect(prompts.listSections()).toEqual(['demo/notice', 'memory/core']);
 
     // 首 run 落的 header initial 快照含段内容（模型可见即落日志）
     await runtime.conversation.submitOnce('看提示词');
@@ -762,10 +813,11 @@ describe('/reload 组合树重载', () => {
     expect(lastEchoText(runtime)).toContain('v1:回声');
 
     // 同路径改码（版本标记换 v2）→ reload → 激活行照旧、代码是新求值的
+    //（memory 为官方默认层行，每次 reload 照常激活——首行恒在）
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
-    expect(result.payload).toEqual({ activated: ['tool-plugin'], failed: [], skipped: [] });
-    expect(reloadedPayloads).toEqual([{ activated: ['tool-plugin'], failed: [], skipped: [] }]);
+    expect(result.payload).toEqual({ activated: ['memory', 'tool-plugin'], failed: [], skipped: [] });
+    expect(reloadedPayloads).toEqual([{ activated: ['memory', 'tool-plugin'], failed: [], skipped: [] }]);
 
     await runtime.conversation.submitOnce('第二问');
     expect(lastEchoText(runtime)).toContain('v2:回声'); // 新代码已生效
@@ -777,9 +829,12 @@ describe('/reload 组合树重载', () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
     const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
     writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n`);
-    const { streamFn, contexts } = scriptedStream([textMessage('纯文本应答')]);
+    const { streamFn, contexts } = scriptedStream([textMessage('首答'), textMessage('纯文本应答')]);
     const runtime = await assemble({ streamFn, compositionDir });
     expect(runtime.tools.list().map((t) => t.name)).toContain('plug-echo');
+    // 首请求先落 initial（装载窗口语义：首张 header 由首 run 落——reload 的
+    // change 快照才有 diff 基线）
+    await runtime.conversation.submitOnce('首问');
 
     // overlay 置 disabled → reload → 行变 skipped、工具摘除
     writeFileSync(
@@ -787,9 +842,23 @@ describe('/reload 组合树重载', () => {
       `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    disabled: true\n`,
     );
     const result = await runtime.reload();
-    expect(result.payload).toEqual({ activated: [], failed: [], skipped: ['tool-plugin'] });
-    expect(runtime.tools.list().map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls']);
-    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([['tool-plugin', 'skipped']]);
+    expect(result.payload).toEqual({ activated: ['memory'], failed: [], skipped: ['tool-plugin'] });
+    // 插件工具已摘除（memory 五件为默认装配成员——不受 overlay 禁用影响）
+    expect(runtime.tools.list().map((t) => t.name)).toEqual([
+      'read',
+      'write',
+      'edit',
+      'ls',
+      'memory_write',
+      'memory_forget',
+      'memory_restore',
+      'memory_read',
+      'memory_search',
+    ]);
+    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+      ['memory', 'activated'],
+      ['tool-plugin', 'skipped'],
+    ]);
 
     // tools_change 即时刷新：后续 run 的模型可见工具集已无插件工具
     await runtime.conversation.submitOnce('再问');
@@ -821,7 +890,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.error).toBeUndefined();
-    expect(result.payload?.activated).toEqual(['tool-plugin']);
+    expect(result.payload?.activated).toEqual(['memory', 'tool-plugin']);
     expect(result.payload?.failed).toEqual(['bad']);
     // 状态面：失败行带着错误码可见（「没生效」不静默）
     const badRow = runtime.plugins.list().find((r) => r.id === 'bad')!;
@@ -888,7 +957,7 @@ describe('/reload 组合树重载', () => {
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['tool-plugin'],
+      activated: ['memory', 'tool-plugin'],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -937,6 +1006,7 @@ describe('/reload 组合树重载', () => {
     expect(notifies.some((n) => n.includes('已装入') && n.includes('local'))).toBe(true);
     expect(runtime.tools.list().map((t) => t.name)).toContain('plug-twin');
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+      ['memory', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);

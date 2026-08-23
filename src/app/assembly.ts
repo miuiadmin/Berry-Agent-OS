@@ -54,6 +54,8 @@ import type { Session } from '../session/session.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { DurableSinks } from './durable.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
+import { createBuiltinRegistry } from './builtins.js';
+import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { createPluginsService } from './plugins.js';
 import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
@@ -362,6 +364,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const persistence = persistEnabled
     ? Persistence.open({
         path: opts.dbPath ?? dbPath(),
+        // 业务表迁移链聚合（会话篇 §6 统一迁移框架——persist 提供框架不认识业务表）：
+        // memory 表族 v2（记忆篇 §3）+ session_fts v3（会话篇 §9 第 7 项定稿）
+        migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION],
         // session/event 活体镜像（契约篇 §2.2 emit 模式行）：SessionEvent 入
         // write-behind 队列后同步上总线，载荷 { sessionId, event } 信封（dsh-11
         // 规则——多会话并存时订阅方必须能从载荷分辨归属）。createSession /
@@ -542,25 +547,37 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     writeHeader,
   });
 
+  // 装载窗口（骨架篇 §9.2 注记）：boot ⑨ 与 /reload 的批量装载期间，工具/段注册
+  // 只刷活视图不逐条落 header——装载期中间态非模型可见时点，逐条快照只产噪声且
+  // 窃走首请求的 initial 名分（会话篇 §1.3 腿 2）；窗口收口统一落账（boot 首请求
+  // initial/resume，/reload 收口单张 change）。窗口外的运行时注册仍即时落 change
+  //（「模型可见即落日志」不变）
+  let loadWindow = true;
   // tools_change → 刷新 loop 工具快照 + 即时落 request/header 快照（骨架篇 §9.2
   // 接线义务；会话篇 §1.3 腿 2「仅变化才快照」——writeHeader 内建 diff，toolSchemas
   // 变了才落 reason=change，run 中途换工具也当场留痕，「模型可见即落日志」）。
   // 注册在装配期 fs 工具族之后：装配期注册不触发（首张 header 仍由首 run 落）
-  ctx.on(TOOLS_CHANGE_EVENT, () => {
+  const unwatchToolsChange = ctx.on(TOOLS_CHANGE_EVENT, () => {
     const fresh = tools.list().map((def) => tools.toAgentTool(def));
     toolView.length = 0;
     toolView.push(...fresh);
+    if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
     writeHeader?.();
   });
-
   // prompts_change → 重建系统提示词 + 即时落 header 快照（pi-4(a) 落码形态④，与
   // tools_change 同族）：段集只在装载//reload 两时点变（注册/注销即广播）；装配层
   // 同点完成重建——订阅者是观测刷新，不承担重建。writeHeader 内建 diff：段内容
   // 变了才落 reason=change，没变不污染日志
-  ctx.on(PROMPTS_CHANGE_EVENT, () => {
+  const unwatchPromptsChange = ctx.on(PROMPTS_CHANGE_EVENT, () => {
     rebuildSystemPrompt();
+    if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
     writeHeader?.();
   });
+  /** 退订两个变更监听（关停序在 flush/close 前调用）：ctx 回卷会逐件注销插件工具/ 段（tools_change/prompts_change 随之广播），若库已关监听仍在，会向死连接 append header、重物化简报段——关停期变更非模型可见时点且永不落盘，纯噪声 */
+  const unwatchChangeEvents = (): void => {
+    unwatchToolsChange();
+    unwatchPromptsChange();
+  };
 
   /* ---- ⑧b 开新会话（/new 热切换）：新 Session + durable 换指 + 时间线重置 ---- */
   const startNewSession = (): Session | undefined => {
@@ -597,9 +614,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   ctx.provide('paths', createPathsService(compositionDir));
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
+  // 内置插件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
+  // Store 公共读脸（官方内置件 = 宿主装配特权——跨会话检索读入面，不新开 ctx
+  // 服务名）；persist:false 时无 store，memory 内置件降级空转（warn 进日志）
+  const builtins = createBuiltinRegistry({
+    ...(persistence ? { store: persistence.store } : {}),
+    workspace: () => workspace,
+  });
   // 锚是活绑定（/reload dispose 后重 fork）；composition 同为活绑定（/reload 重装载）
   let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });
-  let composition: CompositionReport = loadComposition(compositionDir);
+  let composition: CompositionReport = loadComposition(compositionDir, builtins);
   plugins.applyLoad(composition, await loadPlugins(pluginAnchor, composition.plan));
   if (plugins.list().some((row) => row.status === 'failed')) {
     const lines = plugins
@@ -617,6 +641,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       `插件启动断言失败（${lines.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
     );
   }
+  // boot 装载窗口收口：此后运行时注册（tools_change/prompts_change）即时落
+  // header change 快照——装载期中间态已被首请求的 initial 快照整体收编
+  loadWindow = false;
 
   /** 组合树全量重载（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面） */
   const reload = async (): Promise<ReloadResult> => {
@@ -625,11 +652,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
     let fresh: CompositionReport;
     try {
-      fresh = loadComposition(compositionDir);
+      fresh = loadComposition(compositionDir, builtins);
     } catch (err) {
       return { error: describeError(err) };
     }
     try {
+      // 装载窗口开启：dispose+装载只刷活视图，收口由下方单张 change 统一落账
+      loadWindow = true;
       await pluginAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
       pluginAnchor = ctx.fork({ name: 'plugins' });
       const load = await loadPlugins(pluginAnchor, fresh.plan);
@@ -649,6 +678,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     } catch (err) {
       // 兜底：loadPlugins 逐行收集不抛，此处只剩 dispose/emit 级异常——进程存活报告
       return { error: describeError(err) };
+    } finally {
+      // 窗口必然收口（成败两路）：此后运行时注册恢复即时落账
+      loadWindow = false;
     }
   };
 
@@ -712,6 +744,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       // 复核——dispose 是资源必达件，不因持久层收尾异常被跳过；dispose 自身
       // 异常已被 context 回卷隔离逐条吞噬，不会反向炸关停序列）
       try {
+        // 变更监听先退订：后续 ctx 回卷逐件注销插件工具/段时的广播不再触发
+        // writeHeader/提示词重建（库未关也不落关停期快照——非模型可见时点）
+        unwatchChangeEvents();
         await persistence?.flush();
         // session_shutdown 钩子（骨架篇 §1.3 序④ / 契约篇钩子表）：插件最终
         // 清理挂点——emit 异常隔离，单个清理器失败不拖垮关停
