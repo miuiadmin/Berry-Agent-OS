@@ -29,3 +29,20 @@ export {
   type MemoryInput,
   type AddMemoryOutcome,
 } from './store.js';
+export {
+  detectSecret,
+  detectInstructionInjection,
+  quoteAsCitation,
+  sanitizeForModel,
+  guardedAddMemory,
+  type SanitizedEntry,
+  type SanitizeResult,
+  type GuardedWriteResult,
+} from './scan.js';
+export {
+  detectCorrection,
+  userTextFromContent,
+  attachCorrectionExtractor,
+  type CorrectionExtractorOptions,
+} from './extract.js';
+export { createMemoryTools, type MemoryToolsOptions } from './tools.js';
