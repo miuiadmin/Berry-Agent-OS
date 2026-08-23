@@ -12,7 +12,7 @@
  */
 
 import { PendingMessageQueue } from '../agent/queue.js';
-import type { AgentEvent, AgentEventSink } from '../agent/events.js';
+import type { AgentEvent, AgentEventSink, RunStatus } from '../agent/events.js';
 import type { AgentContext, AgentLoopConfig, RunResult } from '../agent/loop.js';
 import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../agent/messages.js';
@@ -60,6 +60,7 @@ import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
+import { createAgentService } from './agent-service.js';
 import { createPluginsService } from './plugins.js';
 import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
@@ -209,6 +210,12 @@ export class ConversationDriver implements ChannelHost {
   private readonly displays: AgentEventSink[] = [];
   /** run 取消信号（退出序列 / SIGINT 共用；一次性——abort 即终态） */
   private readonly abortController = new AbortController();
+  /**
+   * run 结算订阅表（骨架篇 §9.3 onRunSettled 的驱动侧半边）：
+   * ctx.agent 服务 attach 时挂入唯一总派发器——隔离责任在服务层，驱动只管
+   * 在每个 run 终结（running 复位后）同步派发一次。
+   */
+  private readonly runSettledListeners = new Set<(settled: { status: RunStatus }) => void>();
   /** request/header 是否已落（会话首个 run 前一次） */
   private headerWritten = false;
   /** 是否有 run 在跑（submit 的 steering/followUp 分流依据） */
@@ -335,15 +342,39 @@ export class ConversationDriver implements ChannelHost {
       return undefined;
     }
     this.running = true;
-    // finally 复位 running：run 终结（含异常）后新 submit 才能再开 run
-    const attempt = this.runTurns(prompts).finally(() => {
+    const attempt = this.runTurns(prompts);
+    // 结算通知序（骨架篇 §9.3 onRunSettled）：finally 先注册先执行——running
+    // 复位先于订阅者派发，订阅回调内 deliver 见到的必是闲时（followUp 开轮
+    // 判定不被 running 卡死）。订阅回调同步执行：goal 续跑等注入即在此点起轮
+    const guarded = attempt.finally(() => {
       this.running = false;
     });
-    this.runPromise = attempt.then(
+    void attempt.then(
+      (result) => this.fireRunSettled(result.status),
+      () => this.fireRunSettled('failed'),
+    );
+    this.runPromise = guarded.then(
       () => undefined,
       () => undefined,
     );
-    return attempt;
+    return guarded;
+  }
+
+  /**
+   * 订阅 run 结算（骨架篇 §9.3 ctx.agent.onRunSettled 的驱动半边）：
+   * 每个 run 终结（含异常兜底合成路）派发一次 status。不承诺恰好一次——
+   * 订阅方须容忍重复（deliver 路由自适应目标状态，§4.1）。
+   */
+  onRunSettled(cb: (settled: { status: RunStatus }) => void): () => void {
+    this.runSettledListeners.add(cb);
+    return () => {
+      this.runSettledListeners.delete(cb);
+    };
+  }
+
+  /** 派发 run 结算（快照遍历——派发中注销/新订不炸迭代；回调异常归服务层隔离壳） */
+  private fireRunSettled(status: RunStatus): void {
+    for (const cb of [...this.runSettledListeners]) cb({ status });
   }
 
   /** run 序列：首 run + followUp 续跑循环；异常兜底合成 error 收尾 */
@@ -531,6 +562,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   });
   ctx.provide('subagents', subagents);
 
+  /* ---- ④e agent 具名服务（ctx.agent，骨架篇 §9.3 落码注记，goal 纵切一）----
+   * 插件注入正门：sendUserMessage（三通道自适应）+ onRunSettled（run 结算订阅
+   * ——goal 续跑触发位）。提供时点在插件装载 ⑨ 前 inject 即得；驱动 ⑧ 构造后
+   * attach 收口（晚绑定同 ④d 先例）。ask/setModel/setThinkingLevel 仍 ⏳ M2。 */
+  const agentService = createAgentService(ctx);
+  ctx.provide('agent', agentService.face);
+
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
   const pipeline: ToolPipelineExecutor = createToolPipeline(ctx, {
     ...(durableForward ? { onGateDecision: durableForward.gate } : {}),
@@ -635,6 +673,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 挂上——此后子代理结算即走结算折叠 + 三通道通知（此前窗口的结算被跳过，
   // 装载期内无委派件可用，结构上不可达）
   onSubagentSettle = createSubagentNotifier({ driver: conversation, getSession: () => session, model });
+  // ④e 晚绑定收口（§9.3）：agent 服务接驱动——此后 sendUserMessage 注入与
+  // onRunSettled 订阅全部生效（⑨ 插件装载晚于此点，inject 'agent' 即得活面）
+  agentService.attach(conversation);
 
   // 装载窗口（骨架篇 §9.2 注记）：boot ⑨ 与 /reload 的批量装载期间，工具/段注册
   // 只刷活视图不逐条落 header——装载期中间态非模型可见时点，逐条快照只产噪声且
