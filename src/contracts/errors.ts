@@ -116,3 +116,9 @@ export const AGENT_CONTINUE_INVALID = registerErrorCode('AGENT_CONTINUE_INVALID'
 export const LLM_MODEL_SPEC_INVALID = registerErrorCode('LLM_MODEL_SPEC_INVALID');
 /** llm：模型查无——provider 未注册或其目录中无该 model id（fail-loud，不静默降级到别的模型） */
 export const LLM_MODEL_NOT_FOUND = registerErrorCode('LLM_MODEL_NOT_FOUND');
+/** safety：请求受限档但本机无可用沙箱后端——fail-closed 拒绝裸跑（骨架篇 §7.1） */
+export const SANDBOX_UNAVAILABLE = registerErrorCode('SANDBOX_UNAVAILABLE');
+/** safety：升权请求非法——非严格变宽档位 / sandbox_permissions 与 justification 未成对 / 理由为空句（骨架篇 §7.4） */
+export const SANDBOX_ESCALATION_INVALID = registerErrorCode('SANDBOX_ESCALATION_INVALID');
+/** safety：sandbox/mode 事件载荷不是三档词汇之一（fold 时 fail-loud——拼错档位静默沿用旧档是 fail-open） */
+export const SANDBOX_MODE_INVALID = registerErrorCode('SANDBOX_MODE_INVALID');

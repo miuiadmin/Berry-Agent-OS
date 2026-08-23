@@ -111,10 +111,10 @@ export interface ApprovalAskedData {
   readonly summary: string;
 }
 
-/** 审批决议载荷（log-only） */
+/** 审批决议载荷（log-only；decision 四值与 ApprovalService outcome 闭集对齐——cancelled/unavailable 也是已完成的决策，审计须区分） */
 export interface ApprovalDecidedData {
   readonly approvalId: string;
-  readonly decision: 'approve' | 'reject';
+  readonly decision: 'approve' | 'reject' | 'cancel' | 'unavailable';
 }
 
 /** 守门决议载荷（log-only；不变式：任何 tool/result 前序必含对应 toolCallId 的 gate/decision） */
