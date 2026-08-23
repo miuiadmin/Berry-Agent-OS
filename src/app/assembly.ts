@@ -55,6 +55,7 @@ import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { DurableSinks } from './durable.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
+import { createSubagentChildFactory } from './subagent-factory.js';
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
@@ -705,11 +706,23 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
   // 内置插件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
-  // Store 公共读脸（官方内置件 = 宿主装配特权——跨会话检索读入面，不新开 ctx
-  // 服务名）；persist:false 时无 store，memory 内置件降级空转（warn 进日志）
+  // 宿主活资源（官方内置件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
+  // 无 store，memory 内置件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
+  // model/活会话引用/父沙箱档/根总线（app/subagent-factory.ts——每子独立装配序）
   const builtins = createBuiltinRegistry({
     ...(persistence ? { store: persistence.store } : {}),
     workspace: () => workspace,
+    subagentFactory: createSubagentChildFactory({
+      ...(persistence ? { persistence } : {}),
+      getSession: () => session,
+      streamFn,
+      model,
+      convertToLlm: (messages) => defaultConvertToLlm(messages),
+      workspace,
+      sandboxMode,
+      rootCtx: ctx,
+    }),
+    getSession: () => session,
   });
   // 锚是活绑定（/reload dispose 后重 fork）；composition 同为活绑定（/reload 重装载）
   let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });

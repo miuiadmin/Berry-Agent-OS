@@ -35,8 +35,8 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（纵切五起 memory 首行进默认层——契约篇 §5.1） */
-const DEFAULT_LAYER_IDS = new Set(['memory']);
+/** 官方默认层行 id 集（纵切五 memory 首行 + 纵切四 subagent 次行——契约篇 §5.1） */
+const DEFAULT_LAYER_IDS = new Set(['memory', 'subagent']);
 
 /**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
@@ -57,11 +57,17 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层首行 memory（契约篇 §5.1）——无注册表解析 = unresolved（诊断诚实）
-    expect(report.rows).toEqual([{ id: 'memory', plugin: 'builtin:memory' }]);
-    expect(report.plan).toHaveLength(1);
+    // 官方默认层两行：memory 首行 + subagent 次行（契约篇 §5.1）——无注册表
+    // 解析 = unresolved（诊断诚实）
+    expect(report.rows).toEqual([
+      { id: 'memory', plugin: 'builtin:memory' },
+      { id: 'subagent', plugin: 'builtin:subagent' },
+    ]);
+    expect(report.plan).toHaveLength(2);
     expect(report.plan[0]!.id).toBe('memory');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
+    expect(report.plan[1]!.id).toBe('subagent');
+    expect(report.plan[1]!.unresolved).toContain('保留前缀');
     // 用户层为空
     expect(loadUserComposition(dataDir)).toEqual({ rows: [], plan: [] });
   });
@@ -299,9 +305,17 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin });
-    expect(report.rows).toEqual([{ id: 'memory', plugin: 'builtin:memory', config: { recallTopK: 5 } }]);
-    expect(report.plan).toEqual([{ id: 'memory', builtin: stubBuiltin, config: { recallTopK: 5 } }]);
+    // 默认层双键全给（subagent 次行同解析——不带 config 的纯净形态对照）
+    const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
+    const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin, 'builtin:subagent': stubSubagent });
+    expect(report.rows).toEqual([
+      { id: 'memory', plugin: 'builtin:memory', config: { recallTopK: 5 } },
+      { id: 'subagent', plugin: 'builtin:subagent' },
+    ]);
+    expect(report.plan).toEqual([
+      { id: 'memory', builtin: stubBuiltin, config: { recallTopK: 5 } },
+      { id: 'subagent', builtin: stubSubagent },
+    ]);
   });
 
   it('注册表未命中：unresolved 响亮——保留前缀仅官方随包件可用（overlay 不能伪装）', () => {

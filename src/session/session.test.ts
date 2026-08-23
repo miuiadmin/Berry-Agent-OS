@@ -6,7 +6,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AppError, SESSION_EVENT_TOO_LARGE } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
-import { Session, deepFreeze, getSessionEventType, interruptedTurnClosers, registerSessionEventType } from './index.js';
+import {
+  Session,
+  deepFreeze,
+  getSessionEventType,
+  interruptedTurnClosers,
+  lastClosedTurnBoundary,
+  registerSessionEventType,
+} from './index.js';
 
 /** 构造一个小会话的标准前缀：turn 0 = user + assistant 纯文本 */
 function makeChatSession(): Session {
@@ -391,6 +398,50 @@ describe('interruptedTurnClosers 恢复（纯函数）', () => {
     // 追加 closers 后幂等（一遍收敛——补 N 个不残留深度）
     for (const closer of closers) s.append(closer.type as never, closer.data);
     expect(interruptedTurnClosers(s.events)).toEqual([]);
+  });
+});
+
+describe('lastClosedTurnBoundary（delegation fork 边界缺省，纯函数）', () => {
+  it('尾部敞开 turn：边界 = 最后闭合 turn 末尾（敞开段事件未定性不进种子）', () => {
+    const s = new Session();
+    s.append('turn/start', {});
+    s.append('user/message', { content: '第一问' });
+    s.append('assistant/message', { content: '第一答' });
+    s.append('turn/end', { reason: 'completed' }); // seq 0-3 闭合段
+    s.append('turn/start', {}); // 委派发生处：turn 敞开
+    s.append('user/message', { content: '第二问' });
+    expect(lastClosedTurnBoundary(s.events)).toBe(4); // 前缀恰含闭合段
+  });
+
+  it('全闭合 / 无 turn 结构 / 空日志：全长（与快照式缺省同值）', () => {
+    const closed = new Session();
+    closed.append('turn/start', {});
+    closed.append('turn/end', { reason: 'completed' });
+    expect(lastClosedTurnBoundary(closed.events)).toBe(2);
+    const noTurn = new Session();
+    noTurn.append('sandbox/mode', { mode: 'workspace-write' });
+    expect(lastClosedTurnBoundary(noTurn.events)).toBe(1);
+    expect(lastClosedTurnBoundary([])).toBe(0);
+  });
+
+  it('病态嵌套（重复 start 半闭合）：余额法只认尾部真敞开段', () => {
+    const s = new Session();
+    s.append('turn/start', {}); // 外层 start 无 end（敞开）
+    s.append('turn/start', {});
+    s.append('turn/end', { reason: 'completed' }); // 内层闭合
+    expect(lastClosedTurnBoundary(s.events)).toBe(0); // 外层起点即边界
+  });
+
+  it('与 fork 联动：敞开日志上 delegation fork 以闭合边界落子（修复前必红）', () => {
+    const s = new Session();
+    s.append('turn/start', {});
+    s.append('user/message', { content: '问' });
+    s.append('turn/end', { reason: 'completed' });
+    s.append('turn/start', {}); // 敞开——委派时点
+    // 修复前：缺省快照边界落在敞开 turn 内 → SESSION_FORK_BOUNDARY_INVALID
+    const child = s.fork({ origin: 'delegation', boundary: lastClosedTurnBoundary(s.events) });
+    expect(child.header.seedLength).toBe(4); // 3 闭合事件 + end-seed
+    expect(child.header.origin).toBe('delegation');
   });
 });
 

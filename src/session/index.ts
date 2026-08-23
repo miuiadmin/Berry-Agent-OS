@@ -28,6 +28,6 @@ export type {
 } from './event-types.js';
 export { deriveMessages, occludedSeqs } from './derive.js';
 export type { ProjectedMessage, ProjectedToolCall } from './derive.js';
-export { interruptedTurnClosers } from './recover.js';
+export { interruptedTurnClosers, lastClosedTurnBoundary } from './recover.js';
 export type { SyntheticCloser } from './recover.js';
 export { snapshotJsonValue, deepFreeze, jsonBytes } from './snapshot.js';

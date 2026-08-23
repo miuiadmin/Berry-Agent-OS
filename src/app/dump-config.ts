@@ -12,10 +12,15 @@ import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { loadComposition, OVERLAY_FILENAME, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
+import { createSubagentChildFactory } from './subagent-factory.js';
 import type { PluginStatusRow } from './composition.js';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { dataDir } from './paths.js';
 import { VERSION } from './version.js';
+import { createContext } from '../context/context.js';
+import { createLlmRuntime, createStreamFn } from '../llm/index.js';
+import { defaultConvertToLlm } from './convert.js';
+import { DEFAULT_MODEL } from './assembly.js';
 
 /**
  * 组合树文本渲染（dump 面共用：纯合成无状态版 + 装载后带状态版）。
@@ -83,12 +88,25 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
       process.stdout.write(`Berry ${VERSION}\n数据目录：${dataDir()}\n`);
       // 树尽力打印：纯合成解析零副作用（插件 import 失败也能看到树本身）；
       // 内置注册表同构传入（无 store 诊断态）——builtin: 行解析不失真
+      // （subagent 真工厂构造全惰性——委派永不发生，占位依赖零副作用）
       try {
         process.stdout.write(
           renderCompositionTree(
             loadComposition(
               options.compositionDir ?? dataDir(),
-              createBuiltinRegistry({ workspace: () => process.cwd() }),
+              createBuiltinRegistry({
+                workspace: () => process.cwd(),
+                subagentFactory: createSubagentChildFactory({
+                  getSession: () => undefined,
+                  streamFn: createStreamFn(createLlmRuntime()),
+                  model: options.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL,
+                  convertToLlm: (messages) => defaultConvertToLlm(messages),
+                  workspace: process.cwd(),
+                  sandboxMode: options.sandboxMode ?? 'workspace-write',
+                  rootCtx: createContext({ name: 'dump-diag' }),
+                }),
+                getSession: () => undefined,
+              }),
             ),
           ) + '\n',
         );

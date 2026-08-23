@@ -10,6 +10,9 @@
  */
 
 import { createMemoryPlugin, type MemoryPluginStoreFace } from '../memory/index.js';
+import { createSubagentPlugin } from './subagent-plugin.js';
+import type { InProcessChildFactory } from '../subagent/inprocess.js';
+import type { Session } from '../session/session.js';
 import type { BuiltinPluginRegistry } from './composition.js';
 
 /** 内置件构造参数（装配期可得的宿主资源；store 缺省 = persist:false 降级空转） */
@@ -18,6 +21,10 @@ export interface BuiltinRegistryOptions {
   readonly store?: MemoryPluginStoreFace;
   /** 工作区根（项目归属键活取值） */
   readonly workspace: () => string;
+  /** in-process 真工厂（subagent 内置件闭包注入——app/subagent-factory.ts 产物） */
+  readonly subagentFactory?: InProcessChildFactory;
+  /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键） */
+  readonly getSession: () => Session | undefined;
 }
 
 /**
@@ -30,5 +37,15 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
       ...(opts.store ? { store: opts.store } : {}),
       workspace: opts.workspace,
     }),
+    // subagent 内置件（官方默认层第二行）：工厂缺省不注册（诊断面可省装配），
+    // 默认装配恒传——组合根 createSubagentChildFactory 闭包活资源
+    ...(opts.subagentFactory
+      ? {
+          'builtin:subagent': createSubagentPlugin({
+            factory: opts.subagentFactory,
+            getSession: opts.getSession,
+          }),
+        }
+      : {}),
   };
 }

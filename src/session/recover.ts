@@ -98,3 +98,31 @@ export function interruptedTurnClosers(events: readonly SessionEvent[]): Synthet
   }
   return closers;
 }
+
+/**
+ * 计算日志的「最后闭合 turn 边界」（会话篇 §5 delegation fork 边界缺省，2026-08-24）。
+ *
+ * 委派天然发生在父 turn 敞开时（agent 工具在 turn 内执行）——敞开 turn 的事件
+ * 尚未定性，不进 delegation 种子。边界取法 = 从尾向前扫 turn 深度：首个深度
+ * 归零点即「父已定性状态」的前缀长度。深度计数纪律与 interruptedTurnClosers
+ * 同源（turn/start +1 / turn/end -1，病态日志只多记敞开、不误判闭合）。
+ *
+ * @param events 物理事件日志（seq 即下标——连续性契约保证）
+ * @returns 闭合前缀长度（无敞开 turn = 全长——与快照式 fork 缺省同值；空日志 = 0）
+ */
+export function lastClosedTurnBoundary(events: readonly SessionEvent[]): number {
+  // 从尾向前累计 turn 配对余额：turn/end 预存一个闭合、turn/start 消费一个；
+  // 余额转负 = 该 start 在尾部方向再无闭合可配——敞开段由此开始，前缀止于其前
+  let balance = 0;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const type = events[i]!.type;
+    if (type === 'turn/end') {
+      balance += 1;
+    } else if (type === 'turn/start') {
+      balance -= 1;
+      if (balance < 0) return i; // 无闭合可配的 start——其位置即闭合前缀长度
+    }
+  }
+  // 全程未转负 = 无敞开段（或空日志）——全长即闭合，与快照式 fork 缺省同值
+  return events.length;
+}

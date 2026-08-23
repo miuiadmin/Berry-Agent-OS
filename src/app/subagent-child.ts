@@ -19,12 +19,25 @@ export interface FlushBarrier {
   flush(sessionId?: string): Promise<void>;
 }
 
+/**
+ * dispose 序列依赖的作用域结构面（emit 通知总线 + dispose 回卷）。
+ * 真工厂传转发体：session_shutdown 发**根总线**（插件 keyed by payload——子 ctx
+ * 上无插件，观察面在根，与 delegation fork 的 session_start 对称）；dispose 落
+ * 子作用域本尊。ContextScope 结构兼容（方法双变），测试直接传真 ctx。
+ */
+export interface ChildScopeFace {
+  /** ② session_shutdown 钩子挂载面 */
+  emit(event: 'session_shutdown', data: { sessionId: string }): void;
+  /** ③ effect LIFO 回卷 */
+  dispose(): Promise<void>;
+}
+
 /** 子会话 dispose 序列构造选项 */
 export interface ChildSessionDisposerOptions {
-  /** 持久层（① session_flush 屏障——子会话事件先落盘再拆装配） */
-  readonly persistence: FlushBarrier;
+  /** 持久层（① session_flush 屏障——子会话事件先落盘再拆装配）；缺省 no-op 屏障（无持久层诊断面） */
+  readonly persistence?: FlushBarrier;
   /** 子装配作用域（② session_shutdown 钩子挂载面；③ dispose 即 effect LIFO 回卷） */
-  readonly childCtx: ContextScope;
+  readonly childCtx: ContextScope | ChildScopeFace;
   /** 子会话 id（flush 定向 + shutdown 载荷） */
   readonly sessionId: string;
 }
@@ -40,7 +53,7 @@ export function createChildSessionDisposer(opts: ChildSessionDisposerOptions): (
     if (disposed) return;
     disposed = true;
     // ① session_flush 屏障：子会话事件全部落盘（结算通知先于本序列——顺序规则）
-    await opts.persistence.flush(opts.sessionId);
+    await opts.persistence?.flush(opts.sessionId);
     // ② session_shutdown 钩子：插件最终清理锚点（契约篇 §2.2 session 层）
     opts.childCtx.emit('session_shutdown', { sessionId: opts.sessionId });
     // ③ effect 回卷：子装配注册的工具/监听/服务 LIFO 级联释放
