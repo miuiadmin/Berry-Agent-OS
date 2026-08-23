@@ -22,7 +22,7 @@ import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { Persistence } from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
-import { createLlmRuntime, createStreamFn } from '../llm/index.js';
+import { createLlmRuntime, createLlmService, createStreamFn } from '../llm/index.js';
 import { createToolPipeline } from '../tools/index.js';
 import { registerToolsService } from '../tools/registry.js';
 import type { ToolsService } from '../tools/registry.js';
@@ -306,6 +306,18 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
     ...(opts.providers ? { providers: opts.providers } : {}),
   });
   const streamFn: StreamFn = opts.streamFn ?? createStreamFn(llm);
+
+  /* ---- ④b llm 具名服务（ctx.llm：插件单发补全唯一合法路径，骨架篇 §9.3——same-flaw 1 兑现） ---- */
+  ctx.provide(
+    'llm',
+    createLlmService({
+      runtime: llm,
+      defaultModel: () => model,
+      // 统一计量账 seam（M2 接 canAfford 数据源）——M1 落 debug 日志即宿主可观测
+      onUsage: (result, modelSpec) =>
+        ctx.logger.debug('llm.complete 用量入账', { model: modelSpec, totalTokens: result.usage.totalTokens }),
+    }),
+  );
 
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
   const pipeline: ToolPipelineExecutor = createToolPipeline(ctx, {

@@ -7,6 +7,13 @@
  */
 export { parseModelSpec, formatModelId, resolveModel, type ModelSpec } from './model-id.js';
 export { createLlmRuntime, type LlmRuntime, type LlmRuntimeOptions } from './runtime.js';
+export {
+  createLlmService,
+  type CompleteRequest,
+  type CompleteResult,
+  type LlmService,
+  type LlmServiceOptions,
+} from './complete.js';
 export { createStreamFn, type StreamFnDefaults } from './stream-fn.js';
 export {
   isContextOverflow,

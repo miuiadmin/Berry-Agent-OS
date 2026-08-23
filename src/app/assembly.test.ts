@@ -134,6 +134,13 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.systemPrompt).toContain('terminal-based coding assistant');
   });
 
+  it('llm 具名服务已 provide（ctx.llm：插件单发补全面，骨架篇 §9.3）', () => {
+    const runtime = assemble();
+    const service = runtime.ctx.tryGet<{ complete(req: { messages: unknown[] }): Promise<unknown> }>('llm');
+    expect(service).toBeTruthy();
+    expect(typeof service!.complete).toBe('function');
+  });
+
   it('persist:false 不开库不建会话（dump-config 姿态）', () => {
     const runtime = assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();

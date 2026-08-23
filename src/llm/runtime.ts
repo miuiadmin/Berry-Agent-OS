@@ -55,6 +55,8 @@ export interface LlmRuntime {
    * @returns 注销函数——调用即从集合移除该 provider（插件卸载路径）
    */
   registerProvider(provider: Provider): () => void;
+  /** 按 id 移除 provider（ctx.llm.unregisterProvider 的底座；缺省 upsert 的对面） */
+  unregisterProvider(id: string): void;
 }
 
 /**
@@ -83,5 +85,6 @@ export function createLlmRuntime(options: LlmRuntimeOptions = {}): LlmRuntime {
         models.deleteProvider(provider.id);
       };
     },
+    unregisterProvider: (id) => models.deleteProvider(id),
   };
 }

@@ -128,6 +128,12 @@ export const AGENT_CONTINUE_INVALID = registerErrorCode('AGENT_CONTINUE_INVALID'
 export const LLM_MODEL_SPEC_INVALID = registerErrorCode('LLM_MODEL_SPEC_INVALID');
 /** llm：模型查无——provider 未注册或其目录中无该 model id（fail-loud，不静默降级到别的模型） */
 export const LLM_MODEL_NOT_FOUND = registerErrorCode('LLM_MODEL_NOT_FOUND');
+/** llm：ctx.llm.complete 参数面携带 apiKey（凭证一律走 CredentialStore 缺省解析——参数面禁 apiKey 是骨架篇 §9.3 硬要求，防 OAuth token 洗白进 string apiKey；providerNative 透传槽内携带同理） */
+export const LLM_COMPLETE_API_KEY_FORBIDDEN = registerErrorCode('LLM_COMPLETE_API_KEY_FORBIDDEN');
+/** llm：ctx.llm.complete 请求结构化输出（schema）——M1 pi-ai 面无结构化输出腿，保留签名位响亮拒绝（精确面随 M2 provider 钩子收口） */
+export const LLM_COMPLETE_SCHEMA_UNSUPPORTED = registerErrorCode('LLM_COMPLETE_SCHEMA_UNSUPPORTED');
+/** llm：ctx.llm.complete 单发补全以错误终态收束（载 pi-ai 错误文案；401/429/超时细码族随 §3.4 M2 载荷定稿一并落） */
+export const LLM_COMPLETE_FAILED = registerErrorCode('LLM_COMPLETE_FAILED');
 /** safety：请求受限档但本机无可用沙箱后端——fail-closed 拒绝裸跑（骨架篇 §7.1） */
 export const SANDBOX_UNAVAILABLE = registerErrorCode('SANDBOX_UNAVAILABLE');
 /** safety：升权请求非法——非严格变宽档位 / sandbox_permissions 与 justification 未成对 / 理由为空句（骨架篇 §7.4） */
