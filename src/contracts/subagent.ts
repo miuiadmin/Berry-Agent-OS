@@ -108,6 +108,23 @@ export interface SubagentProviderInfo {
 }
 
 /**
+ * 结算回调载荷（§6.4 落码注记——service opts.onSettle 的入参）：
+ * background 链 = Job settle → onSettle → execution.dispose（通知先于子所有权释放）；
+ * foreground 链 = onSettle 后 dispose 归调用方。装配层据此做结算折叠（llm/usage）
+ * 与三通道通知（app/notify.ts）。
+ */
+export interface SubagentSettlement {
+  /** 原始请求（background/ownerSessionId 路由键在此） */
+  readonly request: SubagentRequest;
+  /** provider 执行体（id = 幂等身份/callId 候选） */
+  readonly execution: SubagentExecution;
+  /** 结算契约（父收到的全部） */
+  readonly result: SubagentResult;
+  /** background:true 时的 Job 句柄（终态已落；前台 undefined） */
+  readonly job?: JobHandle;
+}
+
+/**
  * ctx.subagents 服务面（骨架篇 §9.2 落码形态；实现见 subagent/service.ts）。
  * 能力协商/Job 映射在服务面统一持有——provider 只见已协商的 SubagentStart。
  */

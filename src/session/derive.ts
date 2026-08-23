@@ -6,6 +6,7 @@
  */
 
 import type { SessionEvent } from '../contracts/events.js';
+import type { MessageSource } from '../contracts/llm.js';
 import type { AssistantMessageData, ToolCallData, ToolResultData, UserMessageData } from './event-types.js';
 
 /** 投影出的工具调用块（挂在 assistant 消息上） */
@@ -21,7 +22,7 @@ export interface ProjectedToolCall {
  * toolResult），llm 模块落码时负责与其请求体类型收口适配。
  */
 export type ProjectedMessage =
-  | { readonly type: 'user'; readonly content: unknown }
+  | { readonly type: 'user'; readonly content: unknown; readonly source?: MessageSource }
   | {
       readonly type: 'assistant';
       /** 模型响应内容块（text 等，不含工具调用） */
@@ -65,7 +66,12 @@ function stepFold(state: FoldState, event: SessionEvent): void {
     case 'user/message': {
       flushAssistant(state);
       const data = event.data as UserMessageData;
-      state.messages.push({ type: 'user', content: data.content });
+      // source 归因原样带出（会话篇 §3.1——缺省不落字段即不进投影，读侧视为 'user'）
+      state.messages.push({
+        type: 'user',
+        content: data.content,
+        ...(data.source !== undefined ? { source: data.source } : {}),
+      });
       return;
     }
     case 'assistant/message': {

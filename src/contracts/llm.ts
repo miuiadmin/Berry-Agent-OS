@@ -71,12 +71,24 @@ export type StopReason = 'pending' | 'stop' | 'length' | 'toolUse' | 'error' | '
 
 /* ---------------- 三角色消息 ---------------- */
 
+/**
+ * user 消息归因词汇（会话篇 §3.1 dsh-8 定稿，五值 + v2 预留）：
+ * 谁把这条消息放进历史——真人输入 / 通道转发 / 插件注入 / 定时投递 / 子代理结算回投。
+ * 前缀型模板串承载 id/name（如 `channel:telegram`、`plugin:memory`）。
+ */
+export type MessageSource = 'user' | 'schedule' | 'subagent-settled' | `channel:${string}` | `plugin:${string}`;
+
 /** 用户消息（content 允许纯文本或图文块数组） */
 export interface UserMessage {
   role: 'user';
   content: string | (TextContent | ImageContent)[];
   /** Unix 毫秒时间戳 */
   timestamp: number;
+  /**
+   * 归因（可选，缺省视为 'user'——pi-ai 值不带此字段即真人/常规输入面）：
+   * 注入方（通道/插件/调度/子代理结算）显式声明，durable 原样落账、投影带出。
+   */
+  source?: MessageSource;
 }
 
 /** 助手消息（流式组装终值；stopReason=error/aborted 时错误即数据，见 AssistantStream） */

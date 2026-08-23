@@ -7,6 +7,7 @@
  */
 
 import { AppError } from '../contracts/errors.js';
+import type { MessageSource } from '../contracts/llm.js';
 
 /** 事件类别三分法（会话篇 §1.1）：决定事件在投影/存储分层中的处理方式 */
 export type SessionEventCategory =
@@ -73,6 +74,8 @@ export type TurnEndReason = 'completed' | 'aborted' | 'blocked' | 'error' | 'max
 /** user/message 载荷：content 为纯文本或内容块数组（块结构随 llm 模块收口） */
 export interface UserMessageData {
   readonly content: unknown;
+  /** 归因（会话篇 §3.1 五值词汇；缺省不落字段——读侧视为 'user'） */
+  readonly source?: MessageSource;
 }
 
 /** assistant/message 载荷：模型响应最终态（usage 为 turn 汇总额，token delta 不落日志） */

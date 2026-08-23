@@ -311,4 +311,31 @@ describe('投影回读 round-trip（append → derive → projectedToAgentMessag
     expect(back.stopReason).toBe('stop');
     expect(back.usage.totalTokens).toBe(0);
   });
+
+  it('user source 归因全链往返：落库带字段 → 投影带字段 → 回读还原；缺省不落字段（§3.1 dsh-8）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    // 带 source（子代理结算通知形态）与不带 source（用户手写）各一条
+    sinks.handle({
+      type: 'message_end',
+      message: { role: 'user', content: '子代理已结算', timestamp: 1, source: 'subagent-settled' },
+    });
+    sinks.handle({ type: 'message_end', message: { role: 'user', content: '手写', timestamp: 2 } });
+
+    // 写侧：带则落、缺省不落（读侧视为 'user'——不落空字段占位）
+    const events = session.events.filter((e) => e.type === 'user/message') as {
+      data: { content: string; source?: string };
+    }[];
+    expect(events).toHaveLength(2);
+    expect(events[0]!.data.source).toBe('subagent-settled');
+    expect(events[1]!.data).not.toHaveProperty('source');
+
+    // 投影 → 回读：source 还原进 UserMessage（恢复续跑后归因不丢）
+    const projected = deriveMessages(session.events);
+    expect(projected[0]).toMatchObject({ type: 'user', source: 'subagent-settled' });
+    expect(projected[1]).not.toHaveProperty('source');
+    const roundTrip = projectedToAgentMessages(projected);
+    expect(roundTrip[0]).toMatchObject({ role: 'user', source: 'subagent-settled' });
+    expect(roundTrip[1]).not.toHaveProperty('source');
+  });
 });

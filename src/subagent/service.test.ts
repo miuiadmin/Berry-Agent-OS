@@ -19,6 +19,7 @@ import type {
   SubagentCapabilities,
   SubagentProvider,
   SubagentResult,
+  SubagentSettlement,
   SubagentStart,
   SubagentsServiceFace,
 } from '../contracts/subagent.js';
@@ -55,7 +56,10 @@ function stubProvider(name = 'stub', capabilities: Partial<SubagentCapabilities>
 }
 
 /** 建服务组装（真 ctx + 真 Job 注册表 + 已注册一个默认 stub——返回面供测试改用） */
-function setup(stub = stubProvider()): {
+function setup(
+  stub = stubProvider(),
+  onSettle?: (settlement: SubagentSettlement) => void,
+): {
   ctx: ContextScope;
   jobs: JobsServiceFace;
   service: SubagentsServiceFace;
@@ -63,7 +67,7 @@ function setup(stub = stubProvider()): {
 } {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const jobs = createJobsService(ctx);
-  const service = createSubagentsService(ctx, { jobs });
+  const service = createSubagentsService(ctx, { jobs, ...(onSettle ? { onSettle } : {}) });
   service.register(stub.provider);
   return { ctx, jobs, service, stub };
 }
@@ -239,5 +243,50 @@ describe('ctx.subagents — background Job 接线（§6.2 一次性两形态）'
     expect(fgStub.disposeCalls()).toBe(1);
     fgStub.settleWith({ output: 'ok', stopReason: 'completed' });
     await expect(run.result).resolves.toMatchObject({ stopReason: 'completed' });
+  });
+});
+
+describe('ctx.subagents — onSettle 结算回调（§6.4 落码注记）', () => {
+  it('background：Job 终态先落（回调内 status 已终态）→ onSettle → dispose（通知先于子所有权释放）', async () => {
+    /** 回调时点观测面：Job 状态 / dispose 计数（顺序规则的同步证据） */
+    let jobStatusAtCallback = '未触发';
+    let disposeAtCallback = -1;
+    const { service, stub } = setup(stubProvider('bg'), (s) => {
+      jobStatusAtCallback = s.job?.status ?? '无 Job';
+      disposeAtCallback = stub.disposeCalls();
+    });
+    const run = service.start({ provider: 'bg', prompt: '后台活', label: '标签', background: true });
+    stub.settleWith({ output: '产物', stopReason: 'completed' });
+    await expect(run.job!.done).resolves.toBe('completed');
+    // 回调时点：Job 已终态（settle 先于 onSettle——折叠/通知基于已落定的终态）
+    expect(jobStatusAtCallback).toBe('completed');
+    // 回调时点：dispose 尚未发生（通知先于释放——§6.4 顺序规则）
+    expect(disposeAtCallback).toBe(0);
+    // 链尾：dispose 已执行（子所有权释放）
+    expect(stub.disposeCalls()).toBe(1);
+  });
+
+  it('foreground：onSettle 照发（结算折叠要用）但 dispose 归调用方（服务不代释放）', async () => {
+    const settlements: SubagentSettlement[] = [];
+    const fgStub = stubProvider('fg2');
+    const { service } = setup(fgStub, (s) => settlements.push(s));
+    const run = service.start({ provider: 'fg2', prompt: '前台活' });
+    fgStub.settleWith({ output: 'ok', stopReason: 'completed' });
+    await run.result;
+    expect(settlements).toHaveLength(1);
+    expect(settlements[0]!.job).toBeUndefined(); // 前台无 Job
+    expect(settlements[0]!.result.stopReason).toBe('completed');
+    expect(fgStub.disposeCalls()).toBe(0); // 服务不代释放——调用方消费 result 后自释放
+  });
+
+  it('onSettle 违约抛错：Job 照常结算、dispose 照常释放（回调隔离——不炸结算链）', async () => {
+    const rogueStub = stubProvider('rogue-cb');
+    const { service } = setup(rogueStub, () => {
+      throw new Error('通知器炸了');
+    });
+    const run = service.start({ provider: 'rogue-cb', prompt: 'x', background: true });
+    rogueStub.settleWith({ output: 'ok', stopReason: 'completed' });
+    await expect(run.job!.done).resolves.toBe('completed');
+    expect(rogueStub.disposeCalls()).toBe(1);
   });
 });

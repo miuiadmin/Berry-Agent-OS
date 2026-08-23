@@ -33,6 +33,7 @@ import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
 import { dumpConfigMain } from './dump-config.js';
 import { PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
+import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -1010,5 +1011,88 @@ describe('/reload 组合树重载', () => {
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
+  });
+});
+
+/* ---------------- subagent 结算通知全栈（纵切三） ---------------- */
+
+describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑）', () => {
+  /** 可控结算的 stub provider（provider 即模型层等价物——全栈其余全真） */
+  function controllableProvider(name: string): {
+    provider: SubagentProvider;
+    settleWith(result: SubagentResult): void;
+  } {
+    let settleWith: (result: SubagentResult) => void = () => {};
+    const result = new Promise<SubagentResult>((resolve) => (settleWith = resolve));
+    const provider: SubagentProvider = {
+      name,
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      start(request) {
+        return { id: `${name}-run`, result, dispose: () => undefined };
+      },
+    };
+    return { provider, settleWith };
+  }
+
+  it('后台结算：llm/usage 折叠落账 + source=subagent-settled 通知唤醒续跑（第二个模型调用可见通知）', async () => {
+    const { streamFn, contexts } = scriptedStream([textMessage('答一'), textMessage('答二')]);
+    const runtime = await assemble({ streamFn });
+    const { provider, settleWith } = controllableProvider('stub-sub');
+    const subagents = runtime.ctx.get<SubagentsServiceFace>('subagents');
+    subagents.register(provider);
+
+    await runtime.conversation.submitOnce('首问');
+    const sessionId = runtime.session!.header.sessionId;
+    expect(contexts).toHaveLength(1);
+
+    // 后台委派（owner = 当前会话）→ 结算（带用量）
+    const run = subagents.start({
+      provider: 'stub-sub',
+      prompt: '审读代码',
+      label: '委派-审读',
+      ownerSessionId: sessionId,
+      background: true,
+    });
+    settleWith({
+      output: '审毕',
+      stopReason: 'completed',
+      usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 150 },
+    });
+    await expect(run.job!.done).resolves.toBe('completed');
+
+    // 通知 followUp 唤醒：第二个模型调用已发生，末条 user 消息即通知（归因在上下文里不丢）
+    await runtime.conversation.settle();
+    expect(contexts).toHaveLength(2);
+    const lastUser = contexts[1]!.messages.at(-1) as { role: string; source?: string; content: string };
+    expect(lastUser.role).toBe('user');
+    expect(lastUser.source).toBe('subagent-settled');
+    expect(lastUser.content).toContain('委派-审读');
+
+    // durable 双事件：llm/usage 折叠（background 道，callId = 子运行 id）+ user/message 带归因
+    const usage = runtime.session!.events.find((e) => e.type === 'llm/usage');
+    expect(usage?.data).toEqual({
+      callId: 'stub-sub-run',
+      model: expect.any(String),
+      priority: 'background',
+      usage: { input: 100, output: 50 },
+    });
+    const notice = runtime.session!.events.find(
+      (e) => e.type === 'user/message' && (e.data as { source?: string }).source === 'subagent-settled',
+    );
+    expect(notice).toBeDefined();
+    expect((notice!.data as { content: string }).content).toContain('委派-审读');
+  });
+
+  it('/new 热切换发 session_start 活体事件（origin=initial，载荷带新会话 id）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    await runtime.conversation.submitOnce('问');
+    /** 活体事件采集（ctx.on——装配期 emit 先于测试订阅，/new 半边可观测） */
+    const starts: { sessionId?: string; origin?: string }[] = [];
+    runtime.ctx.on('session_start', (data) => starts.push(data as { sessionId?: string; origin?: string }));
+    runtime.channels.commands.lookup('new')!.handler('');
+    expect(starts).toHaveLength(1);
+    expect(starts[0]!.sessionId).toBe(runtime.session!.header.sessionId);
+    expect(starts[0]!.origin).toBe('initial');
   });
 });

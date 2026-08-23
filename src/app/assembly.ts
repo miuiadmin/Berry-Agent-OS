@@ -57,6 +57,8 @@ import { createPathsService, loadComposition, type CompositionReport } from './c
 import { createBuiltinRegistry } from './builtins.js';
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
+import type { SubagentSettlement } from '../contracts/subagent.js';
+import { createSubagentNotifier } from './notify.js';
 import { createPluginsService } from './plugins.js';
 import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
@@ -165,6 +167,18 @@ export interface ReloadResult {
   readonly payload?: CompositionReloadedPayload;
 }
 
+/**
+ * 三通道投递选项（骨架篇 §4.1/§6.4 落码面）：发送方只声明意图
+ * （backgroundWake = 后台任务完成唤醒），通道由运行时按目标当前状态选定。
+ */
+export interface DeliverOptions {
+  /** true = 后台唤醒（计入自激预算 maxConsecutiveWakes）；用户手写消息缺省 false 并恢复预算 */
+  readonly backgroundWake?: boolean;
+}
+
+/** 三通道（§4.1）：steer（run 中入队）/ followUp（闲时唤醒开轮）/ inject（只落日志不唤醒） */
+export type DeliverChannel = 'steer' | 'followUp' | 'inject';
+
 /** 会话驱动依赖（组合根装配产物注入） */
 export interface ConversationDriverDeps {
   /** loop 上下文（messages 活数组——历史投影回读 + 新消息追加同一时间线） */
@@ -230,9 +244,9 @@ export class ConversationDriver implements ChannelHost {
     for (const display of this.displays) display(event);
   };
 
-  /** 普通消息提交（通道宿主面）：running 时入 steering 队列，闲时直接开 run */
+  /** 普通消息提交（通道宿主面）：经 deliver 三通道路由（非后台投递——用户手写消息恢复自激预算） */
   submit(text: string): void {
-    void this.launch([{ role: 'user', content: text, timestamp: Date.now() }]);
+    this.deliver({ role: 'user', content: text, timestamp: Date.now() });
   }
 
   /** 退出请求（通道宿主面）：abort 当前 run + resolve 退出 promise */
@@ -243,6 +257,7 @@ export class ConversationDriver implements ChannelHost {
 
   /** headless 单次执行：开一个 run 等终值（命令入口用；与 submit 互斥使用） */
   async submitOnce(text: string): Promise<RunResult | undefined> {
+    this.wakeCount = 0; // 用户手写输入开跑——自激预算恢复（§6.4）
     return this.launch([{ role: 'user', content: text, timestamp: Date.now() }]);
   }
 
@@ -254,6 +269,44 @@ export class ConversationDriver implements ChannelHost {
   /** 是否有 run 在跑（/new 会话热切换的准入判据——run 中不换时间线） */
   get isRunning(): boolean {
     return this.running;
+  }
+
+  /** 自激预算帽（§6.4 maxConsecutiveWakes 默认 3——被后台完成连续唤醒的次数封顶） */
+  private static readonly MAX_CONSECUTIVE_WAKES = 3;
+
+  /** 连续后台唤醒计数（§6.4）：backgroundWake 唤醒 +1；任何非后台投递清零（用户手写恢复） */
+  private wakeCount = 0;
+
+  /**
+   * 三通道投递（§4.1 路由表 + §6.4 落码面）：路由按目标当前状态——
+   * 拆卸中（abort 已触发）→ inject：只落日志/投影 + 展示，不入队不开 run
+   *   （拆卸后队列消息永无人消费，落日志保审计）；
+   * running → steer：入 steering 队列（loop 在 turn 边界注入——同批多条只花一个边界）；
+   * idle + backgroundWake 超预算 → inject 降级（自激链封顶，只留记录不唤醒）；
+   * idle 其余 → followUp：launch 唤醒（非后台投递 = 用户手写消息，预算清零）。
+   * @returns 实际选定的通道（发送方可观测路由结果——诊断/测试面）
+   */
+  deliver(message: AgentMessage, opts?: DeliverOptions): DeliverChannel {
+    const backgroundWake = opts?.backgroundWake === true;
+    if (this.abortController.signal.aborted) return this.inject(message);
+    if (this.running) {
+      this.queue.enqueue(message);
+      return 'steer';
+    }
+    if (backgroundWake && this.wakeCount >= ConversationDriver.MAX_CONSECUTIVE_WAKES) {
+      return this.inject(message);
+    }
+    if (backgroundWake) this.wakeCount += 1;
+    else this.wakeCount = 0;
+    void this.launch([message]);
+    return 'followUp';
+  }
+
+  /** inject 落账：只追加会话日志/投影 + 展示消费者（不开 run、不入队——§4.1 第三通道） */
+  private inject(message: AgentMessage): 'inject' {
+    this.emit({ type: 'message_start', message });
+    this.emit({ type: 'message_end', message });
+    return 'inject';
   }
 
   /**
@@ -399,6 +452,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }
     session ??= persistence.createSession({ cwd: workspace, profile: 'default' });
   }
+  // session_start（契约篇 §2.2 session 层 emit 行，§6.4 落码注记兑现）：
+  // 会话建立/恢复闭合后必发一次——插件初始化会话级状态的锚点；origin 对齐
+  // 首张 header 的 reason 语义（resume = 恢复闭合含崩溃修复，initial = 新建）
+  if (session) {
+    ctx.emit('session_start', { sessionId: session.header.sessionId, origin: resumed ? 'resume' : 'initial' });
+  }
   const durable = session ? createDurableSinks(session) : undefined;
   // durable 活引用（/new 会话热切换的换指点）：pipeline / 审批服务 / 驱动在构造期
   // 绑定接线点，经此转发壳读当前会话——热切换不动已建服务的绑定
@@ -459,10 +518,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   /* ---- ④d 子代理服务（ctx.subagents，骨架篇 §6.1 落码注记）----
    * provider 注册表 + 能力协商布尔检查 + background Job 接线（stopReason→终态
-   * 映射唯一持有处）。in-process provider 的每子装配工厂在纵切四随默认插件行
-   * 落地（工厂闭包持 streamFn/父会话/persistence——组合根侧零件，此处不装配）。
-   * 提供时点与 jobs 同理：插件装载 ⑨ 前，委派件 inject 即得。 */
-  const subagents = createSubagentsService(ctx, { jobs });
+   * 映射唯一持有处）+ onSettle 结算回调（§6.4：结算折叠 + 三通道通知）。
+   * in-process provider 的每子装配工厂在纵切四随默认插件行落地（工厂闭包持
+   * streamFn/父会话/persistence——组合根侧零件，此处不装配）。
+   * 提供时点与 jobs 同理：插件装载 ⑨ 前，委派件 inject 即得。onSettle 经晚绑定
+   * 挂点接线——通知器需要 ⑧ 的驱动与会话，④d 时尚未存在（构造序约束的结构解）。 */
+  let onSubagentSettle: ((settlement: SubagentSettlement) => void) | undefined;
+  const subagents = createSubagentsService(ctx, {
+    jobs,
+    onSettle: (settlement) => onSubagentSettle?.(settlement),
+  });
   ctx.provide('subagents', subagents);
 
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
@@ -565,6 +630,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     writeHeader,
   });
 
+  // ④d onSettle 晚绑定收口（§6.4）：通知器需要驱动 + 活会话引用，驱动 ⑧ 就绪后
+  // 挂上——此后子代理结算即走结算折叠 + 三通道通知（此前窗口的结算被跳过，
+  // 装载期内无委派件可用，结构上不可达）
+  onSubagentSettle = createSubagentNotifier({ driver: conversation, getSession: () => session, model });
+
   // 装载窗口（骨架篇 §9.2 注记）：boot ⑨ 与 /reload 的批量装载期间，工具/段注册
   // 只刷活视图不逐条落 header——装载期中间态非模型可见时点，逐条快照只产噪声且
   // 窃走首请求的 initial 名分（会话篇 §1.3 腿 2）；窗口收口统一落账（boot 首请求
@@ -613,6 +683,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 快照冻结（旧会话会话内不漂移的对称面：跨会话时点刷新）
     rebuildSystemPrompt();
     conversation.resetTimeline();
+    // /new 新会话落定同发 session_start（§6.4 落码注记——触发点之一；origin=initial）
+    ctx.emit('session_start', { sessionId: fresh.header.sessionId, origin: 'initial' });
     return fresh;
   };
 

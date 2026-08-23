@@ -20,6 +20,7 @@
  */
 export type EventName =
   | 'session/event'
+  | 'session_start'
   | 'session_shutdown'
   | 'tools_pre_execute'
   | 'tools_execute'
@@ -67,6 +68,11 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'session/event',
     mode: 'emit',
     note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）',
+  },
+  {
+    name: 'session_start',
+    mode: 'emit',
+    note: '会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话（契约篇 §2.2 session 层；载荷 { sessionId, origin? }——插件初始化会话级状态；骨架篇 §6.4 落码注记）',
   },
   {
     name: 'session_shutdown',
