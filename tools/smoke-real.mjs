@@ -138,7 +138,17 @@ console.log(
   `[smoke] 默认层 subagent 行 ${hasSubagentRow ? '✓' : '✗'}  装载状态 ${subagentStatus ?? '(无)'}  agent 工具${agentToolOk ? '✓' : '✗'}  清单段${listSectionOk ? '✓' : '✗'}`,
 );
 
-let failBoot = !bootMemoryOk || !bootSubagentOk || !service;
+/* ---- goal 官方默认层第三行结构性自检（boot 面，goal 纵切二） ---- */
+const hasGoalRow = runtime.composition.rows.some((row) => row.id === 'goal');
+const goalStatus = runtime.plugins.list().find((row) => row.id === 'goal')?.status;
+const goalTools = ['goal_get', 'goal_set', 'goal_update'];
+const goalToolsOk = goalTools.every((name) => toolNames.includes(name));
+const bootGoalOk = hasGoalRow && goalStatus === 'activated' && goalToolsOk;
+console.log(
+  `[smoke] 默认层 goal 行 ${hasGoalRow ? '✓' : '✗'}  装载状态 ${goalStatus ?? '(无)'}  工具三件${goalToolsOk ? '✓' : '✗'}`,
+);
+
+let failBoot = !bootMemoryOk || !bootSubagentOk || !bootGoalOk || !service;
 
 try {
   const result = await runtime.conversation.submitOnce(prompt);
@@ -183,21 +193,70 @@ try {
   }
   console.log(`[smoke] 委派面 ${subagentOk ? '✓' : '✗'}  子会话 ${childSessionId.slice(0, 8)}…`);
 
+  /* ---- goal 真模型续跑轮（goal 纵切二——设定→推进→终态/续跑注入） ---- */
+  // 结构性判定（模型行为只报告不判定）：① goal_update 工具真被调用过 且终态
+  // completed；或 ② 续跑注入至少发生一次（durable user/message source=plugin:goal）。
+  // 两条任一即「机制通」——模型是否一次做完是行为，机制是否运转是结构。
+  let goalRoundOk = false;
+  try {
+    const callTool = (name, args) => {
+      const def = runtime.tools.get(name);
+      if (!def) throw new Error(`工具未注册：${name}`);
+      return runtime.tools.toAgentTool(def).execute('smoke-goal', args);
+    };
+    const goalStateText = async () => {
+      const result = await callTool('goal_get', {});
+      return result.content[0]?.text ?? '';
+    };
+    await callTool('goal_set', {
+      objective: '在工作区创建 goal-smoke.txt，内容为一行「goal 冒烟完成」',
+      tokenBudget: 50_000,
+    });
+    console.log(`[smoke] goal 已设定:\n${await goalStateText()}`);
+    await runtime.conversation.submitOnce('请推进当前目标：按目标内容做完，然后调用 goal_update 申报完成并附证据。');
+    // 续跑链等待：结算 → 注入 → 新轮 → …… 直到终态或 12 轮上限（真模型轮次
+    // 耗时不定，800ms 间隙 + settle 逐轮探）
+    let goalTerminal = '';
+    for (let round = 0; round < 12; round += 1) {
+      await runtime.conversation.settle();
+      const text = await goalStateText();
+      const statusLine = text.split('\n').find((line) => line.startsWith('状态：')) ?? '';
+      if (/状态：(completed|blocked|stopped)/.test(statusLine)) {
+        goalTerminal = statusLine;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    const sessionEvents = runtime.session?.events ?? [];
+    const injections = sessionEvents.filter(
+      (e) => e.type === 'user/message' && e.data?.source === 'plugin:goal',
+    ).length;
+    const goalUpdateCalled = sessionEvents.some((e) => e.type === 'tool/call' && e.data?.name === 'goal_update');
+    goalRoundOk = (goalTerminal.includes('completed') && goalUpdateCalled) || injections > 0;
+    console.log(
+      `[smoke] goal 终态: ${goalTerminal || '（12 轮内未终——续跑链或预算所致）'}  续跑注入 ${injections} 次  goal_update 调用 ${goalUpdateCalled ? '✓' : '✗'}  → ${goalRoundOk ? '✓' : '✗'}`,
+    );
+  } catch (error) {
+    console.error(`[smoke] goal 轮异常: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   console.log(`[smoke] data=${smokeData}  workspace=${smokeWorkspace}`);
   // 会话驱动完成即落库（write-behind 在 shutdown flush——下方 finally 保证）
-  process.exitCode = failBoot || result?.status !== 'completed' || !subagentOk ? 1 : 0;
+  process.exitCode = failBoot || result?.status !== 'completed' || !subagentOk || !goalRoundOk ? 1 : 0;
 } catch (error) {
   console.error(`[smoke] 未预期异常: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 } finally {
   // 优雅关停：run 结算 → flush 屏障 → 关库 → ctx 回卷（骨架篇 §1.3）
   await runtime.shutdown();
-  // 落库自检：重开库（带全迁移链 v1→v3——纵切五起裸开拒绝 v3 库属设计）读结构面
+  // 落库自检：重开库（带全迁移链 v1→v5——goal 纵切二起 goals 表 v5；裸开少
+  // 一段即拒开属设计）
   try {
     const { Persistence } = await import('../src/persist/index.js');
+    const { GOAL_MIGRATION } = await import('../src/goal/index.js');
     const reopened = Persistence.open({
       path: join(smokeData, 'sessions.db'),
-      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION],
+      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, GOAL_MIGRATION],
     });
     const ids = reopened.store.listSessionIds();
     const firstId = ids[0];
@@ -217,6 +276,12 @@ try {
     const ftsCount = count('SELECT COUNT(*) AS n FROM session_fts');
     const ftsSessions = count('SELECT COUNT(*) AS n FROM session_fts_state');
     console.log(`[smoke] memory 表 ${memoryCount} 条 / session_fts ${ftsCount} 行 / 水位 ${ftsSessions} 会话`);
+    // goal 结构面（goal 纵切二）：goals 表行数 + 终态形态（结构性——主会话单行）
+    const goalRows = db.prepare('SELECT session_id, status, stop_reason, tokens_used, token_budget FROM goals').all();
+    console.log(
+      `[smoke] goals 表 ${goalRows.length} 行: ${goalRows.map((g) => `${g.status}${g.stop_reason ? `/${g.stop_reason}` : ''} ${g.tokens_used}/${g.token_budget}t`).join('；') || '（无）'}`,
+    );
+    if (goalRows.length === 0) process.exitCode = 1;
     await reopened.close();
   } catch (error) {
     console.error(`[smoke] 重开库自检失败: ${error instanceof Error ? error.message : String(error)}`);
