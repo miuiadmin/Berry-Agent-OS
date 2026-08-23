@@ -28,6 +28,8 @@ import { createBerryRuntime, ConversationDriver } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
+import { dumpConfigMain } from './dump-config.js';
+import { PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -97,9 +99,9 @@ afterEach(async () => {
   }
 });
 
-/** 装配 + 登记（全部用例经此入口——统一 options 缺省） */
-function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): BerryRuntime {
-  const runtime = createBerryRuntime({
+/** 装配 + 登记（全部用例经此入口——统一 options 缺省；插件装载使工厂 async） */
+async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): Promise<BerryRuntime> {
+  const runtime = await createBerryRuntime({
     dbPath: ':memory:',
     workspace: makeWorkspace(),
     ...overrides,
@@ -124,8 +126,8 @@ function approveAllBackend(): UiBackend {
 /* ---------------- 装配面 ---------------- */
 
 describe('createBerryRuntime 装配面', () => {
-  it('fs 四件 + 内置命令注册；sandbox/mode 落库；系统提示词含基座', () => {
-    const runtime = assemble();
+  it('fs 四件 + 内置命令注册；sandbox/mode 落库；系统提示词含基座', async () => {
+    const runtime = await assemble();
     expect(runtime.tools.list().map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls']);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
@@ -135,28 +137,28 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.systemPrompt).toContain('terminal-based coding assistant');
   });
 
-  it('llm 具名服务已 provide（ctx.llm：插件单发补全面，骨架篇 §9.3）', () => {
-    const runtime = assemble();
+  it('llm 具名服务已 provide（ctx.llm：插件单发补全面，骨架篇 §9.3）', async () => {
+    const runtime = await assemble();
     const service = runtime.ctx.tryGet<{ complete(req: { messages: unknown[] }): Promise<unknown> }>('llm');
     expect(service).toBeTruthy();
     expect(typeof service!.complete).toBe('function');
   });
 
-  it('persist:false 不开库不建会话（dump-config 姿态）', () => {
-    const runtime = assemble({ persist: false });
+  it('persist:false 不开库不建会话（dump-config 姿态）', async () => {
+    const runtime = await assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
     expect(runtime.tools.list()).toHaveLength(4); // 装配照常完整
   });
 
-  it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', () => {
+  it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
     const home = mkdtempSync(join(realpathSync(tmpdir()), 'app-skill-'));
     mkdirSync(join(home, '.berry', 'skills', 'demo'), { recursive: true });
     writeFileSync(
       join(home, '.berry', 'skills', 'demo', 'SKILL.md'),
       '---\nname: demo\ndescription: 演示技能\n---\n\n演示指令体\n',
     );
-    const runtime = assemble({ homeDir: home });
+    const runtime = await assemble({ homeDir: home });
     expect(runtime.skills.list().map((s) => s.name)).toEqual(['demo']);
     expect(runtime.systemPrompt).toContain('<name>demo</name>');
     expect(runtime.channels.commands.lookup('skill:demo')).toBeDefined();
@@ -168,7 +170,7 @@ describe('createBerryRuntime 装配面', () => {
 describe('ConversationDriver + durable 接线', () => {
   it('submitOnce 单轮：request/header + turn + 消息全落库；投影回读两条', async () => {
     const { streamFn, contexts } = scriptedStream([textMessage('你好，完成')]);
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     const result = await runtime.conversation.submitOnce('做点什么');
     expect(result?.status).toBe('completed');
     expect(types(runtime)).toEqual([
@@ -195,7 +197,7 @@ describe('ConversationDriver + durable 接线', () => {
       toolCallMessage('write', { path: '.git/config', content: '篡改' }),
       textMessage('被拦下了'),
     ]);
-    const runtime = assemble({ streamFn, workspace });
+    const runtime = await assemble({ streamFn, workspace });
 
     const result = await runtime.conversation.submitOnce('改 git 配置');
     expect(result?.status).toBe('completed');
@@ -230,7 +232,7 @@ describe('ConversationDriver + durable 接线', () => {
       toolCallMessage('write', { path: '.git/config', content: '新内容\n' }),
       textMessage('改好了'),
     ]);
-    const runtime = assemble({ streamFn, workspace, interactive: true });
+    const runtime = await assemble({ streamFn, workspace, interactive: true });
     runtime.ui.attach(approveAllBackend());
 
     const result = await runtime.conversation.submitOnce('改 git 配置');
@@ -242,7 +244,7 @@ describe('ConversationDriver + durable 接线', () => {
 
   it('session/event 活体镜像（契约篇 §2.2）：append 后同步上总线，载荷 { sessionId, event } 信封', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     const mirrored: Array<{ sessionId: string; event: SessionEvent }> = [];
     runtime.ctx.on('session/event', (payload: { sessionId: string; event: SessionEvent }) => {
       mirrored.push(payload);
@@ -269,7 +271,7 @@ describe('ConversationDriver + durable 接线', () => {
       toolCallMessage('echo', { text: '回声' }),
       textMessage('完成'),
     ]);
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     await runtime.conversation.submitOnce('第一问');
     expect(runtime.session!.events.filter((e) => e.type === 'request/header')).toHaveLength(1); // 首轮 initial
 
@@ -305,7 +307,7 @@ describe('ConversationDriver + durable 接线', () => {
 
   it('多轮续跑：第二个 run 复用同一活数组时间线', async () => {
     const { streamFn, contexts } = scriptedStream([textMessage('第一答'), textMessage('第二答')]);
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     await runtime.conversation.submitOnce('第一问');
     await runtime.conversation.submitOnce('第二问');
     // 第二次 LLM 调用可见完整历史（活数组单一时间线）
@@ -316,7 +318,7 @@ describe('ConversationDriver + durable 接线', () => {
 
   it('emit 回调违约：catch 补 turn_end，durable 日志无敞开 turn（#9 修复 b）', async () => {
     const { streamFn } = scriptedStream([textMessage('永远到不了的回答')]);
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     // 展示消费者在首个 message_end（user 消息定稿）处一次性违约（模拟 durable
     // append 失败等回调契约破坏——emit 无隔离，异常沿 loop 上抛到驱动 catch）
     let violated = false;
@@ -378,7 +380,7 @@ describe('持久化 round-trip 与命令入口', () => {
     const workspace = makeWorkspace();
     const { streamFn } = scriptedStream([textMessage('存下来的回答')]);
     // 手动管理生命周期（不经 assemble 登记——本用例自管关停顺序）
-    const runtime = createBerryRuntime({ dbPath: dbFile, workspace, streamFn });
+    const runtime = await createBerryRuntime({ dbPath: dbFile, workspace, streamFn });
     await runtime.conversation.submitOnce('要持久化的问题');
     await runtime.shutdown();
 
@@ -422,7 +424,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
     const workspace = makeWorkspace();
     const script1 = scriptedStream([textMessage('第一答')]);
     // 首程自管生命周期（不经 assemble 登记——shutdown 后让位给续接程）
-    const first = createBerryRuntime({ dbPath: dbFile, workspace, streamFn: script1.streamFn });
+    const first = await createBerryRuntime({ dbPath: dbFile, workspace, streamFn: script1.streamFn });
     const firstId = first.session!.header.sessionId;
     await first.conversation.submitOnce('第一问');
     // 模拟中断残形：敞开 turn（最后一个 turn/start 后无 turn/end）
@@ -431,7 +433,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
 
     // 二次启动：同库同 cwd，按最新续接（恢复协议自动补齐闭合）
     const script2 = scriptedStream([textMessage('续答'), textMessage('再答')]);
-    const second = createBerryRuntime({
+    const second = await createBerryRuntime({
       dbPath: dbFile,
       workspace,
       resumeSession: true,
@@ -466,7 +468,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
 
   it('resumeSession 指定不存在 id：回落新建（续接优先 ≠ 必须续接）', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
-    const runtime = assemble({ resumeSession: 'no-such-session', streamFn });
+    const runtime = await assemble({ resumeSession: 'no-such-session', streamFn });
     expect(runtime.persistence!.latestSessionId(runtime.workspace)).toBeUndefined(); // 前置：库确无此 cwd 会话
     const result = await runtime.conversation.submitOnce('问');
     expect(result?.status).toBe('completed');
@@ -478,7 +480,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
 describe('/new 会话热切换', () => {
   it('新会话落新事件、旧会话封存不动、durable 换指生效、通知可见', async () => {
     const { streamFn } = scriptedStream([textMessage('旧答'), textMessage('新答')]);
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
     await runtime.conversation.submitOnce('旧问');
@@ -531,7 +533,7 @@ describe('/new 会话热切换', () => {
       },
       result: async () => answer,
     });
-    const runtime = assemble({ streamFn });
+    const runtime = await assemble({ streamFn });
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
 
@@ -545,5 +547,100 @@ describe('/new 会话热切换', () => {
     const result = await pending;
     expect(result?.status).toBe('completed'); // 拒切换不影响在跑 run
     expect(runtime.session!.header.sessionId).toBe(idBefore); // 会话未变
+  });
+});
+
+/* ---------------- ⑨b 插件装载（组合树 + 加载器全栈） ---------------- */
+
+/** 写一个目录形态的 fixture 插件（约定入口 index.ts），返回插件目录路径 */
+function writePluginDir(compositionDir: string, source: string): string {
+  const pluginDir = join(compositionDir, 'my-plugin');
+  mkdirSync(pluginDir, { recursive: true });
+  writeFileSync(join(pluginDir, 'index.ts'), source);
+  return pluginDir;
+}
+
+describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
+  it('overlay 插件全栈：工具经 ctx.effect 注册 → 装配后可见可执行；paths/plugins 服务就位', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "tool-plugin";',
+        'export default async function apply(ctx, config) {',
+        '  const tools = ctx.get("tools");',
+        '  // 契约篇 §3.2：注册即 effect——apply 回卷时注册随之撤销',
+        '  ctx.effect(() =>',
+        '    tools.register({',
+        '      name: "plug-echo",',
+        '      description: "插件注册的回声工具（装载全栈测试）",',
+        '      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },',
+        '      execute: async (args) => ({ content: [{ type: "text", text: `${config.tag}:${args.text}` }] }),',
+        '    }),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    config:\n      tag: 装载\n`,
+    );
+
+    const { streamFn, contexts } = scriptedStream([
+      toolCallMessage('plug-echo', { text: '回声' }),
+      textMessage('完成'),
+    ]);
+    const runtime = await assemble({ streamFn, compositionDir });
+
+    // 装载状态面：ctx.plugins 与 runtime.plugins 同源（list 状态 = activated）
+    expect(runtime.plugins.list()).toEqual([{ id: 'tool-plugin', status: 'activated', name: 'tool-plugin' }]);
+    expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
+    // 组合树报告带行
+    expect(runtime.composition.rows.map((row) => row.id)).toEqual(['tool-plugin']);
+    // 插件工具已进注册表（fs 四件之后）
+    expect(runtime.tools.list().map((t) => t.name)).toEqual(['read', 'write', 'edit', 'ls', 'plug-echo']);
+    // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
+    const paths = runtime.ctx.tryGet<{ dataDir(): string; pluginDataDir(id: string): string }>('paths');
+    expect(paths!.dataDir()).toBe(compositionDir);
+    expect(paths!.pluginDataDir('tool-plugin')).toBe(join(compositionDir, 'plugins', 'tool-plugin'));
+
+    // 首 run：工具对模型可见（⑨b 注册经 ⑧ 接线原位刷新了 loop 快照）+ 真走三段管道
+    await runtime.conversation.submitOnce('用插件工具');
+    expect(contexts[0]?.tools?.map((t) => t.name)).toContain('plug-echo');
+    expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
+    const projected = deriveMessages(runtime.session!.events);
+    expect(projected.map((m) => m.type)).toEqual(['user', 'assistant', 'toolResult', 'assistant']);
+    // 装配期注册的 header：一张 initial、toolSchemas 已含插件工具（快照内容正确）
+    const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
+    expect(headers).toHaveLength(1);
+    expect((headers[0]!.data as { reason: string }).reason).toBe('initial');
+    expect((headers[0]!.data as { toolSchemas: Array<{ name: string }> }).toolSchemas.map((t) => t.name)).toContain(
+      'plug-echo',
+    );
+  });
+
+  it('插件启动断言：失败行非空 → 工厂抛 PLUGIN_LOAD_FAILED 聚合清单（不带病运行）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(compositionDir, 'export const name = "bad";\nexport default 42;\n');
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: bad\n    plugin: ${pluginDir}\n`);
+
+    // 不经 assemble 登记（工厂抛出即无 runtime 可关停）
+    const attempt = createBerryRuntime({
+      dbPath: ':memory:',
+      workspace: makeWorkspace(),
+      compositionDir,
+    });
+    await expect(attempt).rejects.toMatchObject({ code: PLUGIN_LOAD_FAILED });
+    await expect(attempt).rejects.toThrowError(/bad/); // 行 id 进聚合清单（归因）
+  });
+
+  it('dump-config 失败路径：打印合成树 + 失败清单退出码 1；空树成功路径退出码 0', async () => {
+    const badDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(badDir, 'export const name = "bad";\nexport default 42;\n');
+    writeFileSync(join(badDir, 'overlay.yaml'), `rows:\n  - id: bad\n    plugin: ${pluginDir}\n`);
+    expect(await dumpConfigMain({ compositionDir: badDir, persist: false })).toBe(1);
+
+    const emptyDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    expect(await dumpConfigMain({ compositionDir: emptyDir, persist: false })).toBe(0);
   });
 });

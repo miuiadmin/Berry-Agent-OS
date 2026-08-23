@@ -76,6 +76,27 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     mode: 'waterfall',
     note: '审批应答瀑布（骨架篇 §8.3 ApprovalService 决议面；无应答者 fail-closed）',
   },
+  {
+    name: 'plugin/activated',
+    mode: 'emit',
+    note: '插件行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name }——组合树行 id + 插件声明名；加载器 boot 逐行必发）',
+  },
+  {
+    name: 'plugin/failed',
+    mode: 'emit',
+    note: '插件行失败（载荷 { id, code, message }——PLUGIN_ 码族；启动断言据此响亮列出，不静默跳过）',
+  },
+  {
+    name: 'plugin/skipped',
+    mode: 'emit',
+    note: '插件行跳过（载荷 { id, reason }——reason: disabled 静态禁用 / platform 平台门控；目录信任略过随信任门落地补）',
+  },
+  {
+    name: 'composition/reloaded',
+    mode: 'emit',
+    note: '组合树 /reload 全量重载完成（预留——随 /reload 纵切落码，契约篇 §1.3）',
+    reserved: true,
+  },
 ];
 
 /** 目录查询：按名取定义（含判断某事件是否已知总线活体事件） */

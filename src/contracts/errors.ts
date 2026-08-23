@@ -140,3 +140,23 @@ export const SANDBOX_UNAVAILABLE = registerErrorCode('SANDBOX_UNAVAILABLE');
 export const SANDBOX_ESCALATION_INVALID = registerErrorCode('SANDBOX_ESCALATION_INVALID');
 /** safety：sandbox/mode 事件载荷不是三档词汇之一（fold 时 fail-loud——拼错档位静默沿用旧档是 fail-open） */
 export const SANDBOX_MODE_INVALID = registerErrorCode('SANDBOX_MODE_INVALID');
+
+/* ------------------------------------------------------------------ */
+/* 插件加载器码族（契约篇 §6.2 落码 2026-08-23 M2 加载器本体纵切）——     */
+/* 逐行失败进启动断言清单（§1.6 apply 抛错即响，不静默跳过不带病运行）。 */
+/* ------------------------------------------------------------------ */
+
+/** plugin：模块 import 失败（jiti 转译/执行入口文件抛错——语法错、依赖缺等） */
+export const PLUGIN_LOAD_FAILED = registerErrorCode('PLUGIN_LOAD_FAILED');
+/** plugin：模块形状非法（default 非函数 / name 缺失或非字符串 / inject/optionalInject 非 string[] / config schema 非法——契约篇 §1.1/§1.2 单形状纪律） */
+export const PLUGIN_SHAPE_INVALID = registerErrorCode('PLUGIN_SHAPE_INVALID');
+/** plugin：组合树行 config 未通过插件声明的 schema（启动一次性校验失败即响，契约篇 §1.2） */
+export const PLUGIN_CONFIG_INVALID = registerErrorCode('PLUGIN_CONFIG_INVALID');
+/** plugin：inject 依赖无法满足（缺提供方或依赖环——轮次激活零进展即判，即刻响亮并列 pending 清单，不做墙上钟超时） */
+export const PLUGIN_INJECT_UNRESOLVED = registerErrorCode('PLUGIN_INJECT_UNRESOLVED');
+/** plugin：apply 执行抛错（message 载原始错误；作用域 LIFO 回卷半途注册，失败行不留残骸） */
+export const PLUGIN_APPLY_FAILED = registerErrorCode('PLUGIN_APPLY_FAILED');
+/** plugin：组合树行引用的插件入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
+export const PLUGIN_ENTRY_UNRESOLVED = registerErrorCode('PLUGIN_ENTRY_UNRESOLVED');
+/** composition：组合树行 schema 违规（overlay 缺 id / 字段类型错 / 未知字段 / fixed 行被禁用——pre-release 拒绝式，契约篇 §6.5） */
+export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');

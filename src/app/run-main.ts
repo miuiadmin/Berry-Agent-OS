@@ -33,7 +33,7 @@ function lastAssistantText(result: RunResult): string | undefined {
  * @returns 进程退出码
  */
 export async function runOnceMain(message: string, options: RuntimeOptions = {}): Promise<number> {
-  const runtime = createBerryRuntime({ ...options, interactive: false });
+  const runtime = await createBerryRuntime({ ...options, interactive: false });
   // 信号编舞（骨架篇 §1.3 全表，与 TUI 入口共用）：SIGINT 首次优雅 abort 当前
   // run（事件日志留完整痕迹）/ 二次立即 130 / SIGTERM 143 / SIGHUP 129 /
   // uncaught/unhandled 不吞 exit(1)

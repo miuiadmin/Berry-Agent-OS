@@ -1,0 +1,239 @@
+/**
+ * L1 context — 插件加载器本体（插件契约篇 §1：jiti 直载 + 虚拟注入 + 轮次激活）。
+ *
+ * 职责单子（「怎么装」；「装什么/在哪」归 app 组合树模块）：
+ * 1. **jiti 免编译直载 .ts/.js**（§1.2【pi】），宿主核心包与 typebox 以虚拟模块
+ *    注入防双实例（插件 peerDependencies 声明、禁自装 typebox）；
+ * 2. **形状校验**（§1.1 单形状钉死 + §1.2 named export 三件——PLUGIN_SHAPE_INVALID）；
+ * 3. **行 config 启动一次性校验**（插件声明 schema，PLUGIN_CONFIG_INVALID）；
+ * 4. **inject 依赖驱动轮次激活（Kahn 式，§1.2 落码注记②）**：逐轮扫描、全就绪即激活
+ *    （激活完成即可 provide 服务供后续轮取用）；整轮零进展仍有 pending = 缺提供方或
+ *    依赖环，即刻响亮失败列 pending 清单（无墙上钟超时）；
+ * 5. **per-plugin fork 作用域**：独立 effect 栈（卸载/LIFO 回卷基底）、config 冻结视图、
+ *    logger 前缀（`app:<行id>`——失败归因）；apply 抛错即回卷本作用域再进失败清单
+ *    （§1.6 不留残骸、不静默跳过）；
+ * 6. **生命周期事件逐行必发**（§2.2 增补 1：plugin/activated / failed / skipped——
+ *    「扩展没生效」从 pull 诊断升级为 push 事件面）。
+ *
+ * jiti `moduleCache: false` 是 /reload 两条缓存纪律（§1.3 补钉②）的 v1 基底：
+ * 每次 import 全依赖图重新求值——毒化模块与「模块图半坏」结构上不可能跨加载存活。
+ */
+
+import { createJiti } from 'jiti';
+import * as typeboxRoot from 'typebox';
+import * as typeboxCompile from 'typebox/compile';
+import * as typeboxValue from 'typebox/value';
+import * as contractsFace from '../contracts/index.js';
+import {
+  AppError,
+  PLUGIN_APPLY_FAILED,
+  PLUGIN_CONFIG_INVALID,
+  PLUGIN_ENTRY_UNRESOLVED,
+  PLUGIN_INJECT_UNRESOLVED,
+  PLUGIN_LOAD_FAILED,
+  PLUGIN_SHAPE_INVALID,
+  describeError,
+} from '../contracts/errors.js';
+import type {
+  PluginActivatedPayload,
+  PluginFailedPayload,
+  PluginLoadResult,
+  PluginModule,
+  PluginPlanRow,
+  PluginSkippedPayload,
+} from '../contracts/plugin.js';
+import type { Context, ContextScope } from './types.js';
+
+/**
+ * 形状校验后的模块视图：default 已确认是函数，ctx 参数在此收窄为真实 Context
+ * （contracts 侧 PluginApply 的 ctx 是结构占位——零依赖层不引 context 类型）。
+ */
+type ValidatedModule = Omit<PluginModule, 'default'> & {
+  default: (ctx: Context, config?: Readonly<Record<string, unknown>>) => unknown;
+};
+
+/**
+ * 创建插件装载用 jiti 实例。
+ *
+ * 虚拟注入映射（契约篇 §1.2 落码注记①）：`berryagent`（宿主公共面 = contracts
+ * 公共导出——AppError/错误码/事件常量与目录/typebox 再导出；名即宿主 npm 包名）
+ * + typebox 三入口（宿主实例注入——双实例防线，pi 生态 Static 双实例实证反例）。
+ */
+function createPluginJiti() {
+  return createJiti(import.meta.url, {
+    moduleCache: false,
+    // 插件代码统一走 jiti 转译一条路径（native import 无法解析虚拟模块——防行为分叉）
+    tryNative: false,
+    virtualModules: {
+      berryagent: contractsFace,
+      typebox: typeboxRoot,
+      'typebox/value': typeboxValue,
+      'typebox/compile': typeboxCompile,
+    },
+  });
+}
+
+/**
+ * 模块形状校验（§1.1/§1.2 单形状纪律）：default 函数 / name 非空字符串 /
+ * inject 与 optionalInject string[] / config 为对象形 schema——违例即
+ * PLUGIN_SHAPE_INVALID（dsh postmortem 0001：混形状丢元数据，一条代码路径不分派）。
+ *
+ * named export 判定一律走自有属性（Object.hasOwn）：jiti 对 default-only 模块
+ * 的命名空间会让任意属性读取穿透到 default 函数本身（其 name 位是函数名）——
+ * 不设防时「缺 name export」会被函数名顶替蒙混过关（回归锁：形状校验用例）。
+ */
+function validateModuleShape(mod: Record<string, unknown>, id: string): ValidatedModule {
+  if (typeof mod['default'] !== 'function') {
+    throw new AppError(
+      PLUGIN_SHAPE_INVALID,
+      `${id}：default export 非函数——插件唯一形状 export default async function apply(ctx, config)（契约篇 §1.1）`,
+    );
+  }
+  const name = Object.hasOwn(mod, 'name') ? mod['name'] : undefined;
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new AppError(
+      PLUGIN_SHAPE_INVALID,
+      `${id}：named export name 缺失或非非空字符串（行 id/日志归因标识，契约篇 §1.2）`,
+    );
+  }
+  for (const key of ['inject', 'optionalInject'] as const) {
+    if (!Object.hasOwn(mod, key)) continue;
+    const value = mod[key];
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+      throw new AppError(PLUGIN_SHAPE_INVALID, `${id}：named export ${key} 必须是 string[]（服务名清单，契约篇 §1.2）`);
+    }
+  }
+  const config = Object.hasOwn(mod, 'config') ? mod['config'] : undefined;
+  if (config !== undefined && (typeof config !== 'object' || config === null || Array.isArray(config))) {
+    throw new AppError(
+      PLUGIN_SHAPE_INVALID,
+      `${id}：named export config 必须是 JSON Schema 对象（TypeBox 生成或手写，契约篇 §1.2）`,
+    );
+  }
+  // 形状已验：default 收窄为真实签名（Record<string,unknown> → 契约形，单点转换）
+  return mod as unknown as ValidatedModule;
+}
+
+/**
+ * 装载插件（组合根装配期调用；输入 = 组合树合成的装载计划行）。
+ *
+ * 返回三态清单；failed 非空时由组合根启动断言拒绝启动（§1.6 apply 抛错即响——
+ * 本函数自身不抛：逐行失败收集进清单，单行失败不阻断其余行装载诊断）。
+ */
+export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanRow[]): Promise<PluginLoadResult> {
+  const activated: PluginActivatedPayload[] = [];
+  const failed: PluginFailedPayload[] = [];
+  const skipped: PluginSkippedPayload[] = [];
+
+  /* ---- ① 跳过行 / 解析失败行：不 import（禁用行不要求已装——挂载休眠精神） ---- */
+  const pending: Array<{ row: PluginPlanRow; module: ValidatedModule }> = [];
+  const jiti = createPluginJiti();
+  for (const row of rows) {
+    if (row.skip) {
+      skipped.push({ id: row.id, reason: row.skip });
+      root.emit('plugin/skipped', { id: row.id, reason: row.skip });
+      continue;
+    }
+    if (row.unresolved !== undefined) {
+      failed.push({ id: row.id, code: PLUGIN_ENTRY_UNRESOLVED, message: row.unresolved });
+      root.emit('plugin/failed', { id: row.id, code: PLUGIN_ENTRY_UNRESOLVED, message: row.unresolved });
+      continue;
+    }
+    // import + 形状校验（失败进清单不阻断——其余行仍要出全量诊断）
+    try {
+      const mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
+      pending.push({ row, module: validateModuleShape(mod, row.id) });
+    } catch (err) {
+      const payload = {
+        id: row.id,
+        code: err instanceof AppError ? err.code : PLUGIN_LOAD_FAILED,
+        message: err instanceof AppError ? err.message : `入口 import 失败：${describeError(err)}`,
+      };
+      failed.push(payload);
+      root.emit('plugin/failed', payload);
+    }
+  }
+
+  /* ---- ② 轮次激活（Kahn 式）：inject 全就绪即激活，激活即可供后续轮 ---- */
+  let progress = true;
+  while (pending.length > 0 && progress) {
+    progress = false;
+    for (let i = 0; i < pending.length;) {
+      const item = pending[i]!;
+      const missing = (item.module.inject ?? []).filter((name) => root.tryGet(name) === undefined);
+      if (missing.length > 0) {
+        i += 1; // 依赖未就绪——留待后续轮（由更晚激活的行 provide）
+        continue;
+      }
+      pending.splice(i, 1);
+      await activateOne(root, item.row, item.module, activated, failed);
+      progress = true;
+    }
+  }
+
+  /* ---- ③ 零进展即无解：缺提供方或依赖环，逐行响亮（不做墙上钟等待） ----
+   * 缺失清单与 pending 清单并列——两成因不预判（未激活模块将提供什么无从得知），
+   * 人看两份清单即可分辨：缺失名全在 pending 的 inject 里 = 环；否则 = 缺提供方。 */
+  for (const item of pending) {
+    const missing = (item.module.inject ?? []).filter((name) => root.tryGet(name) === undefined);
+    const payload = {
+      id: item.row.id,
+      code: PLUGIN_INJECT_UNRESOLVED,
+      message:
+        `inject 依赖无法满足（缺失：${missing.length > 0 ? missing.join('、') : '（无）'}；` +
+        `pending 行：${pending.map((p) => p.row.id).join('、')}——缺提供方或依赖环，即刻响亮失败）`,
+    };
+    failed.push(payload);
+    root.emit('plugin/failed', payload);
+  }
+
+  return { activated, failed, skipped };
+}
+
+/** 激活单行：config 校验 → fork 作用域 → apply → 生命周期事件；apply 抛错即回卷 */
+async function activateOne(
+  root: ContextScope,
+  row: PluginPlanRow,
+  module: ValidatedModule,
+  activated: PluginActivatedPayload[],
+  failed: PluginFailedPayload[],
+): Promise<void> {
+  const fail = (code: string, message: string): void => {
+    failed.push({ id: row.id, code, message });
+    root.emit('plugin/failed', { id: row.id, code, message });
+  };
+
+  // 行 config 启动一次性校验（§1.2：schema 声明 + 校验 + 注入唯一样本）
+  if (module.config) {
+    const value = row.config ?? {};
+    let ok = false;
+    try {
+      ok = typeboxValue.Value.Check(module.config, value);
+    } catch {
+      ok = false; // schema 自身非法（Value 抛错）与校验不过同路——启动即响
+    }
+    if (!ok) {
+      // typebox 1.x 错误载荷字段是 instancePath（JSON 指针）——首错位置进诊断
+      const first = [...typeboxValue.Value.Errors(module.config, value)].at(0);
+      const loc = first ? first.instancePath || first.schemaPath || '(根)' : '(根)';
+      const detail = first ? `${loc}：${first.message}` : 'schema 校验失败';
+      fail(PLUGIN_CONFIG_INVALID, `行 config 未通过插件声明的 schema——${detail}`);
+      return;
+    }
+  }
+
+  const scope = root.fork({ name: row.id, ...(row.config !== undefined ? { config: row.config } : {}) });
+  try {
+    await module.default(scope, scope.config);
+    // name 与行 id 不一致：不拒绝（两者本就不同物），warn 留痕防归因混淆
+    if (module.name !== row.id) {
+      root.logger.warn('插件声明 name 与组合树行 id 不一致', { rowId: row.id, name: module.name });
+    }
+    activated.push({ id: row.id, name: module.name });
+    root.emit('plugin/activated', { id: row.id, name: module.name });
+  } catch (err) {
+    // apply 抛错即响（§1.6）：先回卷本作用域半途注册（LIFO——失败行不留残骸），再进失败清单
+    await scope.dispose();
+    fail(PLUGIN_APPLY_FAILED, `apply 执行抛错（本作用域注册已回卷）：${describeError(err)}`);
+  }
+}

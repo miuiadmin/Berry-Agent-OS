@@ -17,11 +17,12 @@ import type { AgentContext, AgentLoopConfig, RunResult } from '../agent/loop.js'
 import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../agent/messages.js';
 import type { AssistantMessage, StreamFn, Usage } from '../contracts/llm.js';
-import { describeError } from '../contracts/errors.js';
+import { AppError, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
+import { loadPlugins } from '../context/loader.js';
 import { Persistence } from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn } from '../llm/index.js';
@@ -51,10 +52,17 @@ import type { ChannelHost, UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { DurableSinks } from './durable.js';
+import {
+  createPathsService,
+  createPluginsService,
+  loadComposition,
+  type CompositionReport,
+  type PluginsService,
+} from './composition.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
-import { dbPath } from './paths.js';
+import { dataDir, dbPath } from './paths.js';
 
 /** 缺省模型（Anthropic-first 拍板；APP_MODEL env 或 RuntimeOptions.model 覆盖） */
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5';
@@ -97,6 +105,11 @@ export interface RuntimeOptions {
    * string = 显式续接指定 id；缺省 = 新建（run 一次性语义）。目标不存在回落新建
    */
   readonly resumeSession?: boolean | string;
+  /**
+   * 组合树目录（overlay.yaml 与插件装机子树的根；缺省 dataDir()——
+   * 测试注入临时目录，与生产路径完全同构）
+   */
+  readonly compositionDir?: string;
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -115,6 +128,10 @@ export interface BerryRuntime {
   readonly ui: UiService;
   readonly skills: SkillsService;
   readonly approval: ApprovalService;
+  /** 组合树装载产物（合成行集 + 装载计划——dump-config / 诊断面） */
+  readonly composition: CompositionReport;
+  /** 插件管理服务（ctx.plugins 同一实例——list 最小面） */
+  readonly plugins: PluginsService;
   /** 生效组合（诊断输出用） */
   readonly model: string;
   readonly workspace: string;
@@ -310,9 +327,11 @@ export class ConversationDriver implements ChannelHost {
 /**
  * 组装 Berry 运行时（组合根唯一入口；三个命令入口共用）。
  * 装配顺序即依赖序：ctx → channels → persist → llm → tools → safety → skills
- * → 命令 → 驱动。全部注册走 ctx.provide/on/effect——作用域 dispose 即整体回卷。
+ * → 命令 → 插件装载（⑨b，组合树 Ring 2/3 行）→ 驱动。全部注册走
+ * ctx.provide/on/effect——作用域 dispose 即整体回卷。
+ * async：插件装载（jiti import + apply）是异步序列（契约篇 §1）。
  */
-export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
+export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<BerryRuntime> {
   const workspace = opts.workspace ?? process.cwd();
   const model = opts.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL;
   const sandboxMode = opts.sandboxMode ?? 'workspace-write';
@@ -508,6 +527,32 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
     }),
   );
 
+  /* ---- ⑨b 组合树 + 插件装载（契约篇 §5.1/§1：Ring 2/3 行走树；Ring 0/1 仍硬装配，树化 seam） ----
+   * 服务全部就位后再装插件（inject 依赖驱动轮次激活——宿主服务首轮即全就绪）；
+   * 插件注册的工具经 ⑧ 已接线的 tools_change 原位刷新 loop 工具快照（含 run 中途）。
+   * 失败行非空 = 启动断言拒绝启动（§1.6 apply 抛错即响、不带病运行）：先收尾
+   * 持久层再回卷 ctx，然后抛全量失败清单。 */
+  const compositionDir = opts.compositionDir ?? dataDir();
+  ctx.provide('paths', createPathsService(compositionDir));
+  const composition = loadComposition(compositionDir);
+  const pluginLoad = await loadPlugins(ctx, composition.plan);
+  // plugins 服务单实例：ctx.plugins 与 runtime.plugins 必须同源（list 状态面唯一）
+  const plugins = createPluginsService(composition, pluginLoad);
+  ctx.provide('plugins', plugins);
+  if (pluginLoad.failed.length > 0) {
+    const lines = pluginLoad.failed.map((item) => `  - [${item.code}] ${item.id}：${item.message}`);
+    try {
+      await persistence?.flush();
+      await persistence?.close();
+    } finally {
+      await ctx.dispose();
+    }
+    throw new AppError(
+      PLUGIN_LOAD_FAILED,
+      `插件启动断言失败（${pluginLoad.failed.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
+    );
+  }
+
   /* ---- ⑩ 交互模式：审批 answerer 接 ctx.ui（headless 无应答者 = fail-closed） ---- */
   if (opts.interactive) {
     ctx.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
@@ -530,6 +575,8 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
     ui,
     skills,
     approval,
+    composition,
+    plugins,
     model,
     workspace,
     sandboxMode,

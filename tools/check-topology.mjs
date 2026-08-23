@@ -53,7 +53,10 @@ const MODULE_EDGES = {
 
 /** 裸导入白名单：包名 → 允许引用它的模块（node:* 与测试专用包单独放行） */
 const BARE_IMPORTS = {
-  typebox: ['contracts', 'tools', 'skills', 'safety', 'app'],
+  // context = 插件加载器（虚拟注入映射构造 + 行 config schema 校验 Value 面——契约篇 §1.2 落码注记③）
+  typebox: ['contracts', 'context', 'tools', 'skills', 'safety', 'app'],
+  // berryagent = 加载器注入的虚拟模块名（非 npm 包；loader.test fixture 源码内的合法引用面）
+  berryagent: ['context'],
   '@earendil-works/pi-ai': ['llm'],
   '@earendil-works/pi-tui': ['channels', 'app'],
   'better-sqlite3': ['persist'],

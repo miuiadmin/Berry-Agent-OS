@@ -21,7 +21,7 @@ import { VERSION } from './version.js';
  */
 export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   ensureDataDir();
-  const runtime = createBerryRuntime({
+  const runtime = await createBerryRuntime({
     ...options,
     interactive: true,
     // TUI 启动策略（技术栈篇 §5 拍板）：缺省续接本工作区最新会话
