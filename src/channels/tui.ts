@@ -96,7 +96,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   editorContainer.addChild(editor);
   /** 底部提示行（快捷键说明，装配期固定） */
   const footerText = new Text(
-    opts.title ? ` ${opts.title} — Enter 发送 / / 命令 / Ctrl+D 退出` : ' Enter 发送 / / 命令 / Ctrl+D 退出',
+    opts.title
+      ? ` ${opts.title} — Enter 发送 / / 命令 / Ctrl+D·Ctrl+C 退出`
+      : ' Enter 发送 / / 命令 / Ctrl+D·Ctrl+C 退出',
   );
 
   const layoutRoot = new VStack([
@@ -185,9 +187,12 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // 普通消息不本地回显——loop 对 user 消息发 message_start，渲染单一来源是事件流
     opts.host.submit(trimmed);
   };
-  // Ctrl+D 全局拦截面（pi-tui Editor 无专用回调；经原始输入监听 + 键解析识别）
+  // Ctrl+D / Ctrl+C 全局拦截面（pi-tui Editor 无专用回调；经原始输入监听 + 键解析识别）。
+  // raw mode 下 Ctrl+C 不产生 SIGINT 信号而是输入字节——在此拦下与 Ctrl+D 同走优雅退出
+  const quitKeys = new Set(['ctrl+d', 'ctrl+c']);
   tui.addInputListener((data) => {
-    if (parseKey(data) === 'ctrl+d') {
+    const key = parseKey(data);
+    if (key !== undefined && quitKeys.has(key)) {
       opts.host.requestQuit();
       return { consume: true };
     }

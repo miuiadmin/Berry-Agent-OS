@@ -35,11 +35,22 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   // 事件流接线：driver 的 emit 扇出加 TUI 展示半边（durable 半边装配期已接）
   conversation.addDisplay((event) => tui.handle(event));
 
+  // SIGINT（外部中断：kill -INT / 非 raw 终端 Ctrl+C）走同一退出编舞——
+  // requestQuit 先 abort 在跑的 run 再 resolve，后续 settle/flush 关库一个不少
+  // （独立重读轮 #16 复核补钉：此前该分支只在 run-main 落地，TUI 主入口
+  // 外部 SIGINT 走 Node 默认硬死、teardown 序列整体跳过）
+  const onInterrupt = () => conversation.requestQuit();
+  process.once('SIGINT', onInterrupt);
+
   tui.start();
-  // 等待退出请求（Ctrl+D 或 /quit——requestQuit 已同时 abort 在跑的 run）
-  await conversation.quit;
-  await conversation.settle();
-  tui.stop();
-  await runtime.shutdown();
+  try {
+    // 等待退出请求（Ctrl+D / Ctrl+C / /quit / SIGINT——四路同汇 requestQuit）
+    await conversation.quit;
+    await conversation.settle();
+  } finally {
+    process.removeListener('SIGINT', onInterrupt);
+    tui.stop();
+    await runtime.shutdown();
+  }
   return 0;
 }

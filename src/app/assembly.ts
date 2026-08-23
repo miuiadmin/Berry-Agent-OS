@@ -157,7 +157,7 @@ export class ConversationDriver implements ChannelHost {
   /** 最近一次 launch 的完成信号（settle 等待用） */
   private runPromise: Promise<void> = Promise.resolve();
   private quitResolve!: () => void;
-  /** 退出请求 promise（TUI Ctrl+D / SIGINT resolve——命令入口 await 它） */
+  /** 退出请求 promise（TUI Ctrl+D/Ctrl+C、run 入口 SIGINT resolve——命令入口 await 它） */
   readonly quit: Promise<void> = new Promise((resolve) => {
     this.quitResolve = resolve;
   });
