@@ -2,7 +2,7 @@
 /**
  * 真模型端到端冒烟（dev 工具，不入产品码——拓扑门禁只扫 src/，与测试文件同豁免口径）。
  *
- * 用途：M1 验收形态「真模型端到端」的可重复冒烟。走 **真插件注册面**——
+ * 用途：M1/M2 验收形态「真模型端到端」的可重复冒烟。走 **真插件注册面**——
  * runtime.llm.registerProvider 注册一个 Anthropic 兼容代理 provider（Claude Code
  * 同款环境约定 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN），与 M2 provider 插件
  * 将来走的 seam 完全一致（顺带实证注册面 + 模型解析 + streamFn 每调用解析）。
@@ -10,12 +10,18 @@
  * pi-ai 内置 anthropic provider 不认 ANTHROPIC_BASE_URL（baseUrl 烧死在目录里），
  * 故代理场景必须自定义 provider——这正是 registerProvider 存在的理由。
  *
+ * M2-6 起含 memory 官方默认层结构性自检（模型行为只报告不判定）：
+ *   - boot 面：组合树首行 memory activated / 工具九件（fs 四 + memory 五）
+ *   - run 后面：durable 事件里的 tool/call 名称清单（memory_write 是否被模型使用）
+ *   - 重开库面：迁移链 v1→v3 就位 + memories 行数 + session_fts 行数（活体镜像）
+ *
  * 用法：
  *   ANTHROPIC_BASE_URL=http://… ANTHROPIC_AUTH_TOKEN=sk-… \
  *     npx tsx tools/smoke-real.mjs "提示词" [模型id（缺省 glm-5.3）]
  *
  * 环境变量（全部可选）：
- *   SMOKE_DATA_DIR   数据目录（缺省 mktemp 临时目录——不污染 ~/.berry）
+ *   SMOKE_DATA_DIR   数据目录（缺省 mktemp 临时目录——不污染 ~/.berry；
+ *                    复用同目录可冒烟跨会话记忆/检索/召回链）
  *   SMOKE_WORKSPACE  工作区（缺省 mktemp 临时目录）
  *
  * 安全纪律：凭证只从环境读取、绝不回显；输出零脱敏需求。
@@ -25,6 +31,7 @@ import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBerryRuntime } from '../src/app/assembly.js';
+import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../src/memory/index.js';
 import { createProvider } from '@earendil-works/pi-ai';
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy';
 
@@ -90,7 +97,8 @@ const provider = createProvider({
 
 /* ---------------- 装配 + 注册 + 单轮 ---------------- */
 
-const runtime = createBerryRuntime({
+// M2-4 起工厂 async（⑨b 装载 awaits）——boot 即完成官方默认层 memory 首行装载
+const runtime = await createBerryRuntime({
   model: `${providerId}/${modelId}`,
   dbPath: join(smokeData, 'sessions.db'),
   workspace: smokeWorkspace,
@@ -104,10 +112,32 @@ runtime.llm.registerProvider(provider);
 const service = runtime.ctx.tryGet('llm');
 console.log(`[smoke] provider 注册 ✓  ctx.llm 服务 ${service ? '✓' : '✗（缺 provide）'}`);
 
+/* ---- memory 官方默认层结构性自检（boot 面） ---- */
+// 行存在看 composition.rows；激活状态看 plugins.list()（装载回灌的有状态面）
+const hasMemoryRow = runtime.composition.rows.some((row) => row.id === 'memory');
+const memoryStatus = runtime.plugins.list().find((row) => row.id === 'memory')?.status;
+const toolNames = runtime.tools.list().map((def) => def.name);
+const memoryTools = ['memory_write', 'memory_forget', 'memory_restore', 'memory_read', 'memory_search'];
+const toolsOk = memoryTools.every((name) => toolNames.includes(name));
+const bootMemoryOk = hasMemoryRow && memoryStatus === 'activated' && toolsOk;
+console.log(
+  `[smoke] 默认层 memory 行 ${hasMemoryRow ? '✓' : '✗'}  装载状态 ${memoryStatus ?? '(无)'}  工具 ${toolNames.length} 件（memory 五件${toolsOk ? '✓' : '✗'}）`,
+);
+// 简报段（空库物化跳过——有记忆才进 systemPrompt；此处只报告不判定）
+console.log(
+  `[smoke] systemPrompt 含记忆简报段: ${runtime.systemPrompt.includes('以下来自历史记忆') ? '✓' : '（空库跳过，属预期）'}`,
+);
+
+let failBoot = !bootMemoryOk || !service;
+
 try {
   const result = await runtime.conversation.submitOnce(prompt);
-  const types = (runtime.session?.events ?? []).map((e) => e.type);
+  const events = runtime.session?.events ?? [];
+  const types = events.map((e) => e.type);
   console.log(`[smoke] 事件序: ${types.join(' → ')}`);
+  // 模型实际用了哪些工具（行为只报告不判定——冒烟不替模型背书）
+  const toolCalls = events.filter((e) => e.type === 'tool/call').map((e) => String(e.data?.name ?? '?'));
+  console.log(`[smoke] 工具调用: ${toolCalls.length ? toolCalls.join(', ') : '（无）'}`);
   const last = result?.messages.at(-1);
   const text =
     last && last.role === 'assistant'
@@ -119,21 +149,31 @@ try {
   console.log(`[smoke] status=${result?.status}  回答: ${text.slice(0, 300)}`);
   console.log(`[smoke] data=${smokeData}  workspace=${smokeWorkspace}`);
   // 会话驱动完成即落库（write-behind 在 shutdown flush——下方 finally 保证）
-  process.exitCode = result?.status === 'completed' ? 0 : 1;
+  process.exitCode = failBoot || result?.status !== 'completed' ? 1 : 0;
 } catch (error) {
   console.error(`[smoke] 未预期异常: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 } finally {
   // 优雅关停：run 结算 → flush 屏障 → 关库 → ctx 回卷（骨架篇 §1.3）
   await runtime.shutdown();
-  // 落库自检：重开库读事件数（崩溃恢复链的读侧）
+  // 落库自检：重开库（带全迁移链 v1→v3——纵切五起裸开拒绝 v3 库属设计）读结构面
   try {
     const { Persistence } = await import('../src/persist/index.js');
-    const reopened = Persistence.open({ path: join(smokeData, 'sessions.db') });
+    const reopened = Persistence.open({
+      path: join(smokeData, 'sessions.db'),
+      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION],
+    });
     const ids = reopened.store.listSessionIds();
     const firstId = ids[0];
     const events = firstId ? (reopened.loadSession(firstId)?.events ?? []) : [];
     console.log(`[smoke] 重开库: ${ids.length} 会话 / ${events.length} 事件`);
+    // memory 结构面：memories 表行数（提取即时路+工具写路径）+ session_fts 行数（活体镜像）
+    const db = reopened.store.connection;
+    const count = (sql) => db.prepare(sql).get().n;
+    const memoryCount = count('SELECT COUNT(*) AS n FROM memories');
+    const ftsCount = count('SELECT COUNT(*) AS n FROM session_fts');
+    const ftsSessions = count('SELECT COUNT(*) AS n FROM session_fts_state');
+    console.log(`[smoke] memory 表 ${memoryCount} 条 / session_fts ${ftsCount} 行 / 水位 ${ftsSessions} 会话`);
     await reopened.close();
   } catch (error) {
     console.error(`[smoke] 重开库自检失败: ${error instanceof Error ? error.message : String(error)}`);
