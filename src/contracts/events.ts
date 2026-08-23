@@ -32,6 +32,7 @@ export type EventName =
   | 'composition/reloaded'
   | 'prompts_change'
   | 'context_transform'
+  | 'job_settled'
   | (string & {});
 
 /**
@@ -126,6 +127,11 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'context_transform',
     mode: 'waterfall',
     note: 'LLM 请求组装最后关口的消息变换瀑布（契约篇 §2.2 message 层；载荷 = contracts 标准 AgentMessage[]，逐 handler 变换传播——loop transformContext 由组合根桥接到此钩子，按需检索注入走它）',
+  },
+  {
+    name: 'job_settled',
+    mode: 'emit',
+    note: '后台任务到达终态（契约篇 §2.2 应用层；载荷 {id, kind, terminal, label?, output?, error?}——结算副作用广播，订阅方据此决定三通道唤醒）',
   },
 ];
 

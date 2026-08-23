@@ -56,6 +56,7 @@ import type { DurableSinks } from './durable.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
+import { createJobsService } from '../subagent/index.js';
 import { createPluginsService } from './plugins.js';
 import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
@@ -447,6 +448,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }),
   );
 
+  /* ---- ④c Job 注册表（ctx.jobs，骨架篇 §6.2 落码注记）----
+   * 后台任务/一次性后台委派的进程内登记项（subagent 模块提供实现）：状态机
+   * running→stopping→唯一终态，first-wins 结算，done 永不 reject。生命周期挂根
+   * 作用域 effect（dispose 兜底 fire-and-forget 排空）；关停主路径在 shutdown 里
+   * persistence.close 前显式 await drain()——executor 结算路可能仍写子会话事件。
+   * 提供时点在插件装载 ⑨ 前：插件（subagent/process 委派件）inject 即得。 */
+  const jobs = createJobsService(ctx);
+  ctx.provide('jobs', jobs);
+
   /* ---- ⑤ 工具注册表 + 三段管道（gate/decision 落 durable） ---- */
   const pipeline: ToolPipelineExecutor = createToolPipeline(ctx, {
     ...(durableForward ? { onGateDecision: durableForward.gate } : {}),
@@ -747,6 +757,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         // 变更监听先退订：后续 ctx 回卷逐件注销插件工具/段时的广播不再触发
         // writeHeader/提示词重建（库未关也不落关停期快照——非模型可见时点）
         unwatchChangeEvents();
+        // Job 排空主路径（骨架篇 §6.2）：全量 cancel + await 全部结算——子代理等
+        // 后台任务的 executor 在结算路里可能还要写子会话事件，必须在 flush 屏障
+        // 前收口（作用域回卷的 fire-and-forget 兜底只管异常路径，见 jobs.ts）
+        await jobs.drain();
         await persistence?.flush();
         // session_shutdown 钩子（骨架篇 §1.3 序④ / 契约篇钩子表）：插件最终
         // 清理挂点——emit 异常隔离，单个清理器失败不拖垮关停

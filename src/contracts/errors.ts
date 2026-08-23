@@ -181,3 +181,17 @@ export const EVENT_DUPLICATE = registerErrorCode('EVENT_DUPLICATE');
 export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
 /** plugin：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
 export const PLUGIN_INSTALL_FAILED = registerErrorCode('PLUGIN_INSTALL_FAILED');
+
+/* ------------------------------------------------------------------ */
+/* Job 注册表码族（运行时骨架篇 §6.2 落码注记，2026-08-24 subagent 纵切一） */
+/* ——kind 词汇与事件词汇同纪律：显式注册、未注册即响亮拒绝。            */
+/* ------------------------------------------------------------------ */
+
+/** jobs：创建 Job 用了未注册的 kind（内置 'subagent'/'process'；插件自定义须先 registerKind——反模式 #4「宁拒绝不静默丢」对偶面） */
+export const JOB_KIND_UNKNOWN = registerErrorCode('JOB_KIND_UNKNOWN');
+/** jobs：JobKind 登记撞名（与内置或已登记 kind 重名——词汇表拒绝静默覆盖） */
+export const JOB_KIND_DUPLICATE = registerErrorCode('JOB_KIND_DUPLICATE');
+/** jobs：按 id 操纵的 Job 不存在（已结算条目不删除，仅终态后不可再变——NOT_FOUND 即 id 拼错或未创建过） */
+export const JOB_NOT_FOUND = registerErrorCode('JOB_NOT_FOUND');
+/** jobs：围栏鉴权失败——带主 Job 被 非 owner 会话视角请求取消（owner 用 session id 围栏，骨架篇 §6.2） */
+export const JOB_OWNER_MISMATCH = registerErrorCode('JOB_OWNER_MISMATCH');
