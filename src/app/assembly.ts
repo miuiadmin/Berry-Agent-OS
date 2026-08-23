@@ -17,6 +17,7 @@ import type { AgentContext, AgentLoopConfig, RunResult } from '../agent/loop.js'
 import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../agent/messages.js';
 import type { AssistantMessage, StreamFn, Usage } from '../contracts/llm.js';
+import { describeError } from '../contracts/errors.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { Persistence } from '../persist/index.js';
@@ -250,7 +251,9 @@ export class ConversationDriver implements ChannelHost {
         content: [],
         usage: NO_USAGE,
         stopReason: 'error',
-        errorMessage: error instanceof Error ? error.message : String(error),
+        // 错误文案走统一口径（[CODE] 前缀进文本——骨架篇 §3.4 M1 过渡态），
+        // 与 loop 工具结果 / stream-fn 流错误三处同款，杜绝 app 兜底吞码（生态读码 pi-2 补钉）
+        errorMessage: describeError(error),
         timestamp: Date.now(),
       };
       this.emit({ type: 'message_start', message });

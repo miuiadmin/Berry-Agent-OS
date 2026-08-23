@@ -53,6 +53,18 @@ export function listErrorCodes(): string[] {
   return [...registry].sort();
 }
 
+/**
+ * 错误 → 统一文案口径（loop 工具结果 / app run 级兜底共用，杜绝各处手拼格式分叉）。
+ * AppError 携带错误码前缀 `[CODE]`（运行时骨架篇 §3.4：M1 过渡态——结构化
+ * errorCode 字段是 M2 升级项，此前至少让码进文本，杜绝纯文案吞码）。
+ */
+export function describeError(error: unknown): string {
+  if (error instanceof AppError) {
+    return `[${error.code}] ${error.message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 /* ------------------------------------------------------------------ */
 /* 首批注册码——仅收录规范已拍板命名的码，后续模块落地时随用随注册。 */
 /* 命名出处：内核篇 §5.3 / 会话篇 §4（恢复合成）/ 第七批（fs CAS）。 */

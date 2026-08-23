@@ -10,7 +10,7 @@
  * 工具执行辅助函数内的 catch 是「错误编码为数据」（error toolResult），不是异常控制流。
  */
 
-import { AGENT_CONTINUE_INVALID, AppError } from '../contracts/errors.js';
+import { AGENT_CONTINUE_INVALID, AppError, describeError } from '../contracts/errors.js';
 import type {
   AssistantMessage,
   AssistantStream,
@@ -672,18 +672,6 @@ function shouldTerminate(finalized: FinalizedCall[]): boolean {
 /** 合成错误工具结果（固定形态：单文本块 + 空明细；自带 isError 身份——pi-10 补钉） */
 function errorToolResult(message: string): AgentToolResult {
   return { content: [{ type: 'text', text: message }], details: {}, isError: true };
-}
-
-/**
- * 错误 → 文案（工具结果与拦截说明的统一口径）。
- * AppError 携带错误码前缀 `[CODE]`（骨架篇 §3.4：M1 过渡态——结构化 errorCode
- * 字段是 M2 升级项，此前至少让码进文本，杜绝纯文案吞码）。
- */
-function describeError(error: unknown): string {
-  if (error instanceof AppError) {
-    return `[${error.code}] ${error.message}`;
-  }
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** 终值 → toolResult 消息（content 空值归一，杜绝 null 进转录与 provider 载荷） */
