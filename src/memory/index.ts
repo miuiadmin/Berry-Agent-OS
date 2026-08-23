@@ -46,3 +46,14 @@ export {
   type CorrectionExtractorOptions,
 } from './extract.js';
 export { createMemoryTools, type MemoryToolsOptions } from './tools.js';
+export {
+  runReviewOnce,
+  runConsolidationOnce,
+  collectConsolidationCandidates,
+  attachPeriodicReview,
+  type ReviewLlmFace,
+  type PeriodicReviewOptions,
+  type ReviewReport,
+  type ConsolidationReport,
+  type ReviewHandle,
+} from './review.js';

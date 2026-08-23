@@ -415,13 +415,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   });
   const streamFn: StreamFn = opts.streamFn ?? createStreamFn(llm);
 
-  /* ---- ④b llm 具名服务（ctx.llm：插件单发补全唯一合法路径，骨架篇 §9.3——same-flaw 1 兑现） ---- */
+  /* ---- ④b llm 具名服务（ctx.llm：插件单发补全唯一合法路径 + canAfford 预算闸门，骨架篇 §9.3） ---- */
   ctx.provide(
     'llm',
     createLlmService({
       runtime: llm,
       defaultModel: () => model,
-      // 统一计量账 seam（M2 接 canAfford 数据源）——M1 落 debug 日志即宿主可观测
+      // 外部观测 seam（debug 日志即可观测）；canAfford 预算账在服务内部自动入账，无需接线
       onUsage: (result, modelSpec) =>
         ctx.logger.debug('llm.complete 用量入账', { model: modelSpec, totalTokens: result.usage.totalTokens }),
     }),

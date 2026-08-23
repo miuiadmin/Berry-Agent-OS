@@ -290,6 +290,18 @@ export class MemoryStore {
   }
 
   /**
+   * 老化降置信（§5 consolidation 落地件）：confidence × factor（下限 0 保底）。
+   * 不刷新 updated_at——降权不是新证据，老化判定基准（最后证据时间）不动，
+   * 反复 decay 不会把条目「洗新」出老化候选集。
+   */
+  decayConfidence(id: string, factor: number): boolean {
+    const result = this.db
+      .prepare(`UPDATE memories SET confidence = MAX(0, confidence * ?) WHERE id = ?`)
+      .run(factor, id);
+    return result.changes > 0;
+  }
+
+  /**
    * FTS 检索（memory_fts 投影，trigram 分词；仅 active）。查询词逐 token 加引号转义后
    * 空格连接（FTS5 隐式 AND；trigram 下 <3 字符 token 在查询中被忽略）——用户输入的
    * 标点/操作符不可能炸 MATCH 语法。

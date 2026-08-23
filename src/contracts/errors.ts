@@ -139,6 +139,8 @@ export const LLM_COMPLETE_API_KEY_FORBIDDEN = registerErrorCode('LLM_COMPLETE_AP
 export const LLM_COMPLETE_SCHEMA_UNSUPPORTED = registerErrorCode('LLM_COMPLETE_SCHEMA_UNSUPPORTED');
 /** llm：ctx.llm.complete 单发补全以错误终态收束（载 pi-ai 错误文案；401/429/超时细码族随 §3.4 M2 载荷定稿一并落） */
 export const LLM_COMPLETE_FAILED = registerErrorCode('LLM_COMPLETE_FAILED');
+/** llm：后台预算闸门拒发——complete(priority:'background') 且 !canAfford（当日后台累计 tokens 已达限额；记忆周期路捕获即「跳过本轮、下个周期再试」，骨架篇 §9.3） */
+export const LLM_BUDGET_EXCEEDED = registerErrorCode('LLM_BUDGET_EXCEEDED');
 /** safety：请求受限档但本机无可用沙箱后端——fail-closed 拒绝裸跑（骨架篇 §7.1） */
 export const SANDBOX_UNAVAILABLE = registerErrorCode('SANDBOX_UNAVAILABLE');
 /** safety：升权请求非法——非严格变宽档位 / sandbox_permissions 与 justification 未成对 / 理由为空句（骨架篇 §7.4） */

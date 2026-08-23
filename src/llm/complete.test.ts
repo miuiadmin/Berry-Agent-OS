@@ -12,6 +12,7 @@ import type {
   SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import {
+  LLM_BUDGET_EXCEEDED,
   LLM_COMPLETE_API_KEY_FORBIDDEN,
   LLM_COMPLETE_FAILED,
   LLM_COMPLETE_SCHEMA_UNSUPPORTED,
@@ -185,6 +186,84 @@ describe('ctx.llm.complete：三条硬要求', () => {
     await expect(rejection).rejects.toBeInstanceOf(AppError);
     await expect(rejection).rejects.toMatchObject({ code: LLM_COMPLETE_FAILED });
     expect(calls).toBe(1); // 配额类不可重试——立即收束
+  });
+});
+
+describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主化）', () => {
+  /** 可控时钟组装（日历日懒重置测试注入步进日期） */
+  function makeBudgetService(budget: number, now: () => Date) {
+    const faux = fauxProvider({ provider: 'faux-test', models: [{ id: 'm1' }] });
+    const runtime = createLlmRuntime({ providers: [faux.provider] });
+    const service = createLlmService({
+      runtime,
+      defaultModel: () => 'faux-test/m1',
+      backgroundBudgetTokens: budget,
+      now,
+    });
+    return { faux, service };
+  }
+
+  it('foreground 恒放行：预算 0 也不拦用户可见请求（priority 显式或缺省同面）', async () => {
+    const { faux, service } = makeBudgetService(0, () => new Date('2026-08-24T10:00:00'));
+    faux.setResponses([() => messageOf('stop')]);
+    expect(service.canAfford('foreground')).toBe(true);
+    expect(service.canAfford('background')).toBe(false);
+    await expect(service.complete({ messages: [userMsg('x')], priority: 'foreground' })).resolves.toMatchObject({
+      message: { stopReason: 'stop' },
+    });
+    // 不带 priority 的调用 = 用户可见面（默认前景）——同不拦
+    faux.setResponses([() => messageOf('stop')]);
+    await expect(service.complete({ messages: [userMsg('x')] })).resolves.toMatchObject({
+      message: { stopReason: 'stop' },
+    });
+  });
+
+  it('后台闸门拒发：预算耗尽 → LLM_BUDGET_EXCEEDED 且零请求发出', async () => {
+    const { faux, service } = makeBudgetService(0, () => new Date('2026-08-24T10:00:00'));
+    let produced = 0;
+    faux.setResponses([
+      () => {
+        produced += 1;
+        return messageOf('stop');
+      },
+    ]);
+    await expect(service.complete({ messages: [userMsg('x')], priority: 'background' })).rejects.toMatchObject({
+      code: LLM_BUDGET_EXCEEDED,
+    });
+    expect(produced).toBe(0); // 拒在发出前——模型层零消耗
+  });
+
+  it('成功后台调用入账：首发放行、二发拒发（spent 累计达限额）', async () => {
+    // 预算 1：首发 0<1 放行；faux 按文本重算用量（prompt/response 非空 → in+out ≥ 1）
+    // → 入账后二发 spent≥1 即拒。二发被拒 = 入账已发生的确定性证据。
+    const { faux, service } = makeBudgetService(1, () => new Date('2026-08-24T10:00:00'));
+    faux.setResponses([() => messageOf('stop')]);
+    const first = await service.complete({ messages: [userMsg('背景摘要任务')], priority: 'background' });
+    expect(first.message.stopReason).toBe('stop');
+    expect(service.canAfford('background')).toBe(false); // 入账后闸门关
+    faux.setResponses([() => messageOf('stop')]);
+    await expect(service.complete({ messages: [userMsg('再来一发')], priority: 'background' })).rejects.toMatchObject({
+      code: LLM_BUDGET_EXCEEDED,
+    });
+    // 拒发不影响前景面（铁律 4：用户可见请求永远优先）
+    faux.setResponses([() => messageOf('stop')]);
+    await expect(service.complete({ messages: [userMsg('前台照常')] })).resolves.toMatchObject({
+      message: { stopReason: 'stop' },
+    });
+  });
+
+  it('日历日懒重置：时钟跨天后账归零、后台再放行', async () => {
+    let date = new Date('2026-08-24T23:50:00'); // 当天尾段
+    const { faux, service } = makeBudgetService(1, () => date);
+    faux.setResponses([() => messageOf('stop')]);
+    await service.complete({ messages: [userMsg('耗尽当天预算')], priority: 'background' });
+    expect(service.canAfford('background')).toBe(false);
+    date = new Date('2026-08-25T00:10:00'); // 跨天（本地日历日）
+    expect(service.canAfford('background')).toBe(true); // 懒重置——读时发现日键变了即归零
+    faux.setResponses([() => messageOf('stop')]);
+    await expect(service.complete({ messages: [userMsg('新的一天')], priority: 'background' })).resolves.toMatchObject({
+      message: { stopReason: 'stop' },
+    });
   });
 });
 
