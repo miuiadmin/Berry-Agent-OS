@@ -362,6 +362,35 @@ describe('interruptedTurnClosers 恢复（纯函数）', () => {
       expect(tr.isError).toBe(true);
     }
   });
+
+  it('复合形状：孤儿 tool/call + 后续正常闭合 turn + 尾部敞开 turn → 孤儿穿透闭合不被吞（#9 修复 c）', () => {
+    // 复刻 app 层回调违约的病态日志：turn1 的 tool/call 落账后 run 异常、
+    // 无 tool/result 也无 turn/end；随后新 turn 正常闭合；最后又一个 turn 敞开崩溃
+    const s = new Session();
+    s.append('turn/start', {});
+    s.append('tool/call', { toolCallId: 'tc-orphan', name: 'read', arguments: '{}' });
+    // 后续正常 turn（旧实现 pending.clear() 在此吞掉孤儿——修复后须穿透）
+    s.append('turn/start', {});
+    s.append('tool/call', { toolCallId: 'tc-ok', name: 'write', arguments: '{}' });
+    s.append('tool/result', { toolCallId: 'tc-ok', content: 'ok' });
+    s.append('turn/end', { reason: 'completed' });
+    // 尾部敞开 turn（崩溃点）
+    s.append('turn/start', {});
+
+    const closers = interruptedTurnClosers(s.events);
+    expect(closers.map((c) => c.type)).toEqual(['tool/result', 'turn/end', 'turn/end']);
+    // 孤儿拿到合成错误终态（TOOL_NOT_STARTED）——静默吞没 = 恢复协议失守
+    const orphan = closers[0]!.data as { toolCallId: string; error?: { code: string } };
+    expect(orphan.toolCallId).toBe('tc-orphan');
+    expect(orphan.error?.code).toBe('TOOL_NOT_STARTED');
+    // 两个 turn/end = 深度计数补足两个敞开 turn（turn1 + 尾部 turn）
+    for (const closer of closers.slice(1)) {
+      expect((closer.data as { reason: string }).reason).toBe('interrupted');
+    }
+    // 追加 closers 后幂等（一遍收敛——补 N 个不残留深度）
+    for (const closer of closers) s.append(closer.type as never, closer.data);
+    expect(interruptedTurnClosers(s.events)).toEqual([]);
+  });
 });
 
 describe('fork 种子（前缀 + end-seed 边界）', () => {

@@ -21,9 +21,11 @@ import type {
 } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
 import { deriveMessages } from '../session/derive.js';
+import { interruptedTurnClosers } from '../session/index.js';
 import { Persistence } from '../persist/index.js';
-import { createBerryRuntime } from './assembly.js';
+import { createBerryRuntime, ConversationDriver } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
+import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -239,6 +241,61 @@ describe('ConversationDriver + durable 接线', () => {
     expect(contexts[1]?.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
     const projected = deriveMessages(runtime.session!.events);
     expect(projected.map((m) => m.type)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+
+  it('emit 回调违约：catch 补 turn_end，durable 日志无敞开 turn（#9 修复 b）', async () => {
+    const { streamFn } = scriptedStream([textMessage('永远到不了的回答')]);
+    const runtime = assemble({ streamFn });
+    // 展示消费者在首个 message_end（user 消息定稿）处一次性违约（模拟 durable
+    // append 失败等回调契约破坏——emit 无隔离，异常沿 loop 上抛到驱动 catch）
+    let violated = false;
+    runtime.conversation.addDisplay((event) => {
+      if (event.type === 'message_end' && !violated) {
+        violated = true;
+        throw new Error('展示回调炸了');
+      }
+    });
+
+    const result = await runtime.conversation.submitOnce('会炸的问题');
+    expect(result?.status).toBe('failed');
+    // 修 b 前缺 turn/end：日志留敞开 turn，恢复协议对「孤儿+后续正常 turn」失据
+    expect(types(runtime)).toEqual([
+      'sandbox/mode',
+      'request/header',
+      'turn/start',
+      'user/message',
+      'assistant/message',
+      'turn/end',
+    ]);
+    // 日志闭合 → 恢复协议零活儿（turn 必闭合纪律，会话篇 §1.4）
+    expect(interruptedTurnClosers(runtime.session!.events)).toEqual([]);
+  });
+});
+
+describe('ConversationDriver 防御（直接构造）', () => {
+  it('writeHeader 抛错不卡死：running 复位后新 run 可开（#23 小修③）', async () => {
+    // 直接构造驱动（不经组合根）：writeHeader 是注入面，可显式抛错。
+    // streamFn 永抛——本用例只关心 run 编排不因首件失败永久卡 running
+    const driver = new ConversationDriver({
+      context: { systemPrompt: '', messages: [], tools: [] },
+      loopConfig: {
+        streamFn: () => {
+          throw new Error('模型不可用');
+        },
+        model: 'test/model',
+        convertToLlm: defaultConvertToLlm,
+      },
+      writeHeader: () => {
+        throw new Error('header 落库失败');
+      },
+    });
+    // 第一次 run：writeHeader 抛 → 走统一 catch 合成 error 收尾（修 ③ 前是
+    // running=true 后裸调抛错——attempt 未创建、finally 永不复位、永久卡死）
+    const first = await driver.submitOnce('第一句');
+    expect(first?.status).toBe('failed');
+    // running 已复位：第二次能开新 run（修 ③ 前会入队返回 undefined 挂死）
+    const second = await driver.submitOnce('第二句');
+    expect(second?.status).toBe('failed');
   });
 });
 

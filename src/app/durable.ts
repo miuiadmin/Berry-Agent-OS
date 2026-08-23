@@ -61,6 +61,93 @@ function firstText(content: readonly (TextContent | ImageContent)[]): string | u
 }
 
 /**
+ * durable 内容预算（字节）：session 事件护栏 64KiB 扣除事件元数据（type/seq/
+ * toolCallId/error 头部）后的内容可用上限。写侧截断是护栏矛盾的宿主单点解——
+ * fs read 上限 256KiB > 会话护栏 64KiB，若不在落账前截断，读大文件必在
+ * append 抛 SESSION_EVENT_TOO_LARGE 并沿 emit 上抛炸掉整个 run
+ * （独立重读轮 #9 复核坐实，2026-08-23 修）。
+ */
+const DURABLE_CONTENT_BUDGET_BYTES = 60 * 1024;
+
+/** 截断尾标记（读侧可识别「内容被 durable 预算裁过」——投影/模型侧语义损失显式化） */
+const TRUNCATED_MARKER = '\n…[truncated for durable log]';
+
+/**
+ * durable 内容块全类型（截断器须覆盖三种载荷的块形状：user=text/image、
+ * assistant=text/thinking/toolCall、toolResult=text/image）。
+ */
+type DurableBlock = TextContent | ThinkingContent | ImageContent | ToolCallBlock;
+
+/** 单块 UTF-8 字节度量（截断预算的计量单位；image 按 base64 字符串长度近似） */
+function blockBytes(block: DurableBlock): number {
+  switch (block.type) {
+    case 'text':
+      return Buffer.byteLength(block.text, 'utf8');
+    case 'thinking':
+      return Buffer.byteLength(block.thinking, 'utf8');
+    case 'image':
+      return block.data.length;
+    case 'toolCall':
+      // arguments 来源于模型输出（受输出 token 上限约束，现实不超预算），原样计入
+      return JSON.stringify(block.arguments).length;
+  }
+}
+
+/**
+ * 内容截断到 durable 预算内（user 的纯字符串形态按整串截；块数组形态：
+ * text/thinking 块按剩余预算截字节并加尾标记，image 块放不下时换文本占位
+ * ——base64 动辄超预算，保留语义不保像素；toolCall 结构化小块不截）。
+ * 不超预算时原样返回（零成本快路径）。
+ */
+function truncateForDurable(content: string | readonly DurableBlock[]): string | readonly DurableBlock[] {
+  // 纯字符串形态（user 消息）：整串按字节截
+  if (typeof content === 'string') {
+    const size = Buffer.byteLength(content, 'utf8');
+    if (size <= DURABLE_CONTENT_BUDGET_BYTES) return content;
+    const sliced = Buffer.from(content, 'utf8').subarray(0, DURABLE_CONTENT_BUDGET_BYTES).toString('utf8');
+    return sliced + TRUNCATED_MARKER;
+  }
+  // 快路径：总字节在预算内直接通过（绝大多数消息零开销）
+  let total = 0;
+  for (const block of content) {
+    total += blockBytes(block);
+  }
+  if (total <= DURABLE_CONTENT_BUDGET_BYTES) return [...content];
+
+  const out: DurableBlock[] = [];
+  let budget = DURABLE_CONTENT_BUDGET_BYTES;
+  for (const block of content) {
+    if (block.type === 'image') {
+      // 像素载荷放不进预算 → 文本占位（像素本就不进 durable——事件日志是审计面非媒体库）
+      out.push({ type: 'text', text: '[image omitted: durable budget]' });
+      continue;
+    }
+    if (block.type === 'toolCall') {
+      // 结构化小块不截（同形状另落 tool/call 事件，截断会造成两腿不一致）
+      out.push(block);
+      continue;
+    }
+    // text / thinking：按剩余预算截字节
+    const text = block.type === 'text' ? block.text : block.thinking;
+    const size = Buffer.byteLength(text, 'utf8');
+    if (size <= budget) {
+      out.push(block);
+      budget -= size;
+      continue;
+    }
+    if (budget > 0) {
+      // 按字节截（subarray 可能切在多字节字符中间，toString 对坏尾替换 U+FFFD——可接受）
+      const sliced = Buffer.from(text, 'utf8').subarray(0, budget).toString('utf8');
+      const marked = sliced + TRUNCATED_MARKER;
+      out.push(block.type === 'text' ? { type: 'text', text: marked } : { type: 'thinking', thinking: marked });
+      budget = 0;
+    }
+    // 预算耗尽后的剩余 text/thinking 块整块丢弃（尾标记已声明截断事实）
+  }
+  return out;
+}
+
+/**
  * 组装 durable 接线面。session.append 的抛错（如载荷不可 JSON 化）直接上抛——
  * 按「回调违约由 app 装配层兜底」纪律，由会话驱动统一合成 error 收尾。
  */
@@ -81,13 +168,13 @@ export function createDurableSinks(session: Session): DurableSinks {
         // 插件期若引入自定义角色，须先扩事件词汇再在此接线（未覆盖≠驳回）
         if (!isStandardMessage(message)) return;
         if (message.role === 'user') {
-          session.append('user/message', { content: message.content });
+          session.append('user/message', { content: truncateForDurable(message.content) });
           return;
         }
         if (message.role === 'assistant') {
           // 消息终态 + 逐工具调用块（arguments 落原始字符串——解析失败留给工具管道）
           session.append('assistant/message', {
-            content: message.content,
+            content: truncateForDurable(message.content),
             usage: message.usage,
             stopReason: message.stopReason,
           });
@@ -105,7 +192,7 @@ export function createDurableSinks(session: Session): DurableSinks {
         // toolResult：isError 携带通用错误码 + 首段文本说明（durable 写码不写长文）
         session.append('tool/result', {
           toolCallId: message.toolCallId,
-          content: message.content,
+          content: truncateForDurable(message.content),
           ...(message.isError ? { error: { code: TOOL_ERROR_CODE, message: firstText(message.content) } } : {}),
         });
         return;

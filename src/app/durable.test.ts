@@ -142,6 +142,47 @@ describe('createDurableSinks：事件 → session.append 映射', () => {
     sinks.approval.decided({ approvalId: 'a1', decision: 'unavailable' });
     expect(types(session.events)).toEqual(['gate/decision', 'approval/asked', 'approval/decided']);
   });
+
+  it('超大 tool/result 内容截断到 durable 预算内：append 不抛、尾标记显式（#9 修复 a）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    // 70KiB 文本结果（fs read 上限 256KiB 的现实形状）：> 60KiB durable 预算、
+    // < 64KiB 会话护栏——若无写侧截断，append 抛 SESSION_EVENT_TOO_LARGE 沿 emit
+    // 上抛炸掉整个 run（fs.ts:94 与 session.ts 护栏的矛盾，宿主侧单点解）
+    const big = 'x'.repeat(70 * 1024);
+    expect(() =>
+      sinks.handle({ type: 'message_end', message: { ...toolResult(), content: [{ type: 'text', text: big }] } }),
+    ).not.toThrow();
+    const data = session.events[0]!.data as { content: { type: string; text: string }[] };
+    // 截断后带尾标记（读侧可识别语义损失）
+    expect(data.content[0]!.text.endsWith('[truncated for durable log]')).toBe(true);
+    // 整事件序列化字节在 64KiB 护栏内
+    expect(Buffer.byteLength(JSON.stringify(session.events[0]!), 'utf8')).toBeLessThan(64 * 1024);
+  });
+
+  it('超大 user 纯文本与 image 块同样走截断（字符串整串截 / image 换文本占位）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    // user 纯字符串形态：整串截断
+    sinks.handle({
+      type: 'message_end',
+      message: { role: 'user', content: 'y'.repeat(70 * 1024), timestamp: 1 },
+    });
+    const user = session.events[0]!.data as { content: string };
+    expect(user.content.endsWith('[truncated for durable log]')).toBe(true);
+    // image 块超预算：换文本占位（像素不进 durable——审计面非媒体库）
+    sinks.handle({
+      type: 'message_end',
+      message: {
+        role: 'user',
+        content: [{ type: 'image', data: 'z'.repeat(70 * 1024), mimeType: 'image/png' }],
+        timestamp: 1,
+      },
+    });
+    const image = session.events[1]!.data as { content: { type: string; text?: string }[] };
+    expect(image.content[0]!.type).toBe('text');
+    expect(image.content[0]!.text).toBe('[image omitted: durable budget]');
+  });
 });
 
 describe('投影回读 round-trip（append → derive → projectedToAgentMessages）', () => {

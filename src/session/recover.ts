@@ -25,6 +25,13 @@ export interface SyntheticCloser {
  *   → TOOL_NOT_STARTED（可安全重试）
  * - 有 gate/decision 前序（守门已放行）→ 已启动未结算 → TOOL_OUTCOME_UNKNOWN（须核验外部状态）
  * - 敞开 turn（最后一个 turn/start 后无 turn/end）→ 补 turn/end{reason:'interrupted'}
+ *
+ * 两条防御纪律（独立重读轮 #9 修复 c，2026-08-23）：
+ * - turn 深度计数而非布尔——病态日志（重复 turn/start 无 end）也只多记敞开、
+ *   不误判闭合；
+ * - 孤儿 tool/call 不因后续 turn/end 清算——「turn 正常闭合即内部自洽」在
+ *   app 层回调违约时会失守（tool/call 落账后 run 异常、无 turn_end、后续新
+ *   turn 正常闭合），孤儿只能由配对的 tool/result 消费，兜底合成终态而非静默吞没。
  * @param events 物理事件日志（loadStored 读出的原始顺序）
  * @returns 待追加 closers（先 tool/result 后 turn/end）；日志本就闭合时为空数组
  */
@@ -33,8 +40,9 @@ export function interruptedTurnClosers(events: readonly SessionEvent[]): Synthet
   // 复用最后真实事件的 time（空日志不会走到恢复——空日志即无闭合需求，返回空）
   const time = events.length > 0 ? events[events.length - 1]!.time : 0;
 
-  let turnOpen = false;
-  /** 未结算的 tool/call（toolCallId → 调用信息） */
+  /** turn 嵌套深度（turn/start +1 / turn/end -1 到 0 为止——负数属病态日志钳回 0） */
+  let turnDepth = 0;
+  /** 未结算的 tool/call（toolCallId → 调用信息）；只被配对 tool/result 消费，不跨 turn 清算 */
   const pending = new Map<string, ToolCallData>();
   /** 已见 gate/decision 的 toolCallId 集合（allow/mutate 均视为已放行启动） */
   const gated = new Set<string>();
@@ -42,11 +50,10 @@ export function interruptedTurnClosers(events: readonly SessionEvent[]): Synthet
   for (const event of events) {
     switch (event.type) {
       case 'turn/start':
-        turnOpen = true;
+        turnDepth += 1;
         break;
       case 'turn/end':
-        turnOpen = false;
-        pending.clear(); // turn 正常闭合即内部自洽，残余 pending 不跨 turn 追究
+        turnDepth = Math.max(0, turnDepth - 1);
         break;
       case 'tool/call': {
         const data = event.data as ToolCallData;
@@ -81,8 +88,11 @@ export function interruptedTurnClosers(events: readonly SessionEvent[]): Synthet
     closers.push({ type: 'tool/result', data, time });
   }
 
-  // 敞开 turn → 补闭合终态
-  if (turnOpen) {
+  // 敞开 turn（深度 >0 = 每个 turn/start 欠一个 turn/end）→ 按深度逐个补闭合终态。
+  // 补 N 个而非 1 个：恢复须一遍收敛——只补 1 个时深度仍 >0，第二遍恢复会再补，
+  // 违反 recoverFromInterruption 的幂等承诺；投影不消费 turn 边界（derive 忽略），
+  // 补足的闭合事件无语义副作用
+  for (let i = 0; i < turnDepth; i += 1) {
     const data: { reason: TurnEndReason } = { reason: 'interrupted' };
     closers.push({ type: 'turn/end', data, time });
   }

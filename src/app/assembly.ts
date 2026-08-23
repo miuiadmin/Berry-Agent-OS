@@ -217,10 +217,6 @@ export class ConversationDriver implements ChannelHost {
       return undefined;
     }
     this.running = true;
-    if (!this.headerWritten) {
-      this.headerWritten = true;
-      this.writeHeader?.(); // 会话首个 run 前落 request/header（组装参数证据腿）
-    }
     // finally 复位 running：run 终结（含异常）后新 submit 才能再开 run
     const attempt = this.runTurns(prompts).finally(() => {
       this.running = false;
@@ -237,6 +233,14 @@ export class ConversationDriver implements ChannelHost {
     const hooks = { emit: this.emit, signal: this.abortController.signal };
     let result: RunResult | undefined;
     try {
+      // 会话首 run 前落 request/header（组装参数证据腿）。挪进 try 是卡死窗口
+      // 修复（独立重读轮 #23 复核）：原在 launch 的 running=true 之后、runTurns
+      // 调用之前裸调——writeHeader 抛错时 finally 复位永不执行（attempt 未创建），
+      // running 永久卡死 + void launch() 拒绝无人处理；try 内抛错走统一 catch
+      if (!this.headerWritten) {
+        this.headerWritten = true;
+        this.writeHeader?.();
+      }
       result = await startRun(prompts, this.context, this.config, hooks);
       // run 自然停：余量排队消息全量捞出续跑（followUp 唤醒）
       while (!this.abortController.signal.aborted && this.queue.hasItems()) {
@@ -258,6 +262,10 @@ export class ConversationDriver implements ChannelHost {
       };
       this.emit({ type: 'message_start', message });
       this.emit({ type: 'message_end', message });
+      // turn_end 必发（独立重读轮 #9 修复 b）：与 loop 自身 error 路径（loop 零重试
+      // 短路处）同款纪律——catch 若只发 agent_end 不发 turn_end，日志留下敞开 turn，
+      // 恢复协议对「孤儿 tool/call + 后续正常 turn」的复合形状判定失据
+      this.emit({ type: 'turn_end', message, toolResults: [] });
       this.emit({ type: 'agent_end', status: 'failed', messages: [message] });
       result = {
         status: 'failed',
@@ -392,9 +400,15 @@ export function createBerryRuntime(opts: RuntimeOptions = {}): BerryRuntime {
     /** 优雅关停：等 run 结算 → flush 屏障 → 关库 → ctx 回卷（§1.3 编排） */
     async shutdown() {
       await conversation.settle();
-      await persistence?.flush();
-      await persistence?.close();
-      await ctx.dispose();
+      // try/finally：flush/close 任一失败也要 ctx.dispose 回卷（独立重读轮 #16
+      // 复核——dispose 是资源必达件，不因持久层收尾异常被跳过；dispose 自身
+      // 异常已被 context 回卷隔离逐条吞噬，不会反向炸关停序列）
+      try {
+        await persistence?.flush();
+        await persistence?.close();
+      } finally {
+        await ctx.dispose();
+      }
     },
   };
 }

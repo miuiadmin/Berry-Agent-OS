@@ -85,7 +85,8 @@ class ContextScopeImpl implements ContextScope {
         disposer();
       } catch (err) {
         // 回卷异常隔离：单个清理失败不阻断其余回卷，但必须留痕
-        this.logger.error('effect 回卷异常', { scope: this.name, error: String(err) });
+        // （errorStack 而非 String——独立重读轮 #23 复核：e021620 漏的第四处丢栈点）
+        this.logger.error('effect 回卷异常', { scope: this.name, error: errorStack(err) });
       }
     };
     this.effects.push(once);
