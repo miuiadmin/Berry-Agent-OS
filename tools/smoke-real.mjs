@@ -128,7 +128,17 @@ console.log(
   `[smoke] systemPrompt 含记忆简报段: ${runtime.systemPrompt.includes('以下来自历史记忆') ? '✓' : '（空库跳过，属预期）'}`,
 );
 
-let failBoot = !bootMemoryOk || !service;
+/* ---- subagent 官方默认层次行结构性自检（boot 面，纵切四） ---- */
+const hasSubagentRow = runtime.composition.rows.some((row) => row.id === 'subagent');
+const subagentStatus = runtime.plugins.list().find((row) => row.id === 'subagent')?.status;
+const agentToolOk = toolNames.includes('agent');
+const listSectionOk = runtime.systemPrompt.includes('可用子代理类型');
+const bootSubagentOk = hasSubagentRow && subagentStatus === 'activated' && agentToolOk && listSectionOk;
+console.log(
+  `[smoke] 默认层 subagent 行 ${hasSubagentRow ? '✓' : '✗'}  装载状态 ${subagentStatus ?? '(无)'}  agent 工具${agentToolOk ? '✓' : '✗'}  清单段${listSectionOk ? '✓' : '✗'}`,
+);
+
+let failBoot = !bootMemoryOk || !bootSubagentOk || !service;
 
 try {
   const result = await runtime.conversation.submitOnce(prompt);
@@ -147,9 +157,35 @@ try {
           .join('')
       : '(无 assistant 文本)';
   console.log(`[smoke] status=${result?.status}  回答: ${text.slice(0, 300)}`);
+
+  /* ---- subagent service 级真模型委派轮（纵切四——委派面冒烟，模型行为不判定） ---- */
+  // 经 ctx.subagents 服务面前台委派（与插件委派工具同 provider 同工厂——真流真工具
+  // 真结算）；子任务要求真用 ls 工具（工具过子管道守门）。
+  let subagentOk = false;
+  let childSessionId = '';
+  try {
+    const subagents = runtime.ctx.get('subagents');
+    const run = subagents.start({
+      provider: 'in-process',
+      prompt: '调用 ls 工具查看工作区目录内容，然后用一条完整的消息报告你看到了什么。',
+      label: '冒烟委派',
+    });
+    childSessionId = run.id;
+    const settled = await run.result;
+    run.dispose();
+    const childText = settled.output ?? '';
+    console.log(
+      `[smoke] 委派结算: stopReason=${settled.stopReason}  汇报 ${childText.length} 字: ${childText.slice(0, 160)}`,
+    );
+    subagentOk = settled.stopReason === 'completed' && childText.trim() !== '';
+  } catch (error) {
+    console.error(`[smoke] 委派轮异常: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  console.log(`[smoke] 委派面 ${subagentOk ? '✓' : '✗'}  子会话 ${childSessionId.slice(0, 8)}…`);
+
   console.log(`[smoke] data=${smokeData}  workspace=${smokeWorkspace}`);
   // 会话驱动完成即落库（write-behind 在 shutdown flush——下方 finally 保证）
-  process.exitCode = failBoot || result?.status !== 'completed' ? 1 : 0;
+  process.exitCode = failBoot || result?.status !== 'completed' || !subagentOk ? 1 : 0;
 } catch (error) {
   console.error(`[smoke] 未预期异常: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
@@ -167,6 +203,13 @@ try {
     const firstId = ids[0];
     const events = firstId ? (reopened.loadSession(firstId)?.events ?? []) : [];
     console.log(`[smoke] 重开库: ${ids.length} 会话 / ${events.length} 事件`);
+    // subagent 面（纵切四）：委派子会话须落库且 origin='delegation'（结构性判定，
+    // 不判内容——子汇报文本由上方委派轮已报告）
+    const delegationIds = ids.filter((id) => reopened.loadSession(id)?.header.origin === 'delegation');
+    console.log(
+      `[smoke] 委派子会话落库 ${delegationIds.length ? '✓' : '✗'}（${delegationIds.length} 个 origin=delegation）`,
+    );
+    if (delegationIds.length === 0) process.exitCode = 1;
     // memory 结构面：memories 表行数（提取即时路+工具写路径）+ session_fts 行数（活体镜像）
     const db = reopened.store.connection;
     const count = (sql) => db.prepare(sql).get().n;
