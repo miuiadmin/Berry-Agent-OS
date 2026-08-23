@@ -12,6 +12,7 @@
  */
 
 import type { TSchema } from './typebox.js';
+import type { LiveEventDefinition } from './events.js';
 
 /**
  * 插件唯一合法形状（§1.1）：一种函数，钉死。
@@ -20,7 +21,7 @@ import type { TSchema } from './typebox.js';
 export type PluginApply = (ctx: never, config?: Readonly<Record<string, unknown>>) => void | Promise<void>;
 
 /**
- * 插件模块的运行时契约（§1.2 named export 三件 + default）。
+ * 插件模块的运行时契约（§1.2 named export 四件 + default）。
  * 加载器按此做形状校验（PLUGIN_SHAPE_INVALID），不做声明合并、不分派多形状。
  */
 export interface PluginModule {
@@ -34,6 +35,12 @@ export interface PluginModule {
   optionalInject?: readonly string[];
   /** 配置 JSON Schema（TypeBox 生成或手写）：组合树行 config 据此启动时一次性校验 */
   config?: TSchema;
+  /**
+   * 自定义活体事件声明（§1.1 逃生口，2026-08-23 M2 /reload 纵切）：name/mode/note
+   * 三必填、name 小写含 `/`（防撞宿主词汇域）。加载器在装载阶段①（一切 apply 之前）
+   * 统一登记——跨插件订阅无顺序洞；词汇集运行期恒定（boot//reload 两时点外不增不减）。
+   */
+  events?: readonly LiveEventDefinition[];
 }
 
 /** 组合树行（§5.1）：每行 = 一个插件实例，字段级后写胜出合成 */

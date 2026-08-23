@@ -14,6 +14,10 @@
  *    - 每个派发点 type 必在 union 词汇；union 每型 ≥1 派发点。
  * 3. SessionEvent durable 写点（session 模块运行时注册表）：
  *    - 非 reserved 目录项 ≥1 写点；每个写点类型必在目录。
+ * 4. EventName 联合字面量 ↔ 总线目录（契约篇 §1.1 收口的类型面）：
+ *    - 联合字面量成员 ⊆ 目录名集（类型面不承认目录外词汇）；
+ *    - 目录名集 ⊆ 联合字面量成员（目录新增名忘进联合 CI 即红）。
+ *    （(string & {}) 逃生口不参与——它保住「自定义事件显式注册」的字符串面。）
  *
  * 已知豁免（显式，不静默）：
  * - 动态 append（recoverFromInterruption 的 closer.type——静态不可解析）：
@@ -81,8 +85,12 @@ for (const file of files) {
 /* 族 1：总线活体事件站点（on/emit/waterfall/parallel/serial）           */
 /* ------------------------------------------------------------------ */
 
-/** 事件词汇名格式：小写段 + 下划线/斜线（排除 SIGINT 等信号名——signals 的 surface.on 不在本词汇域） */
-const EVENT_NAME_FORMAT = /^[a-z][a-z0-9_-]*(\/[a-z][a-z0-9_-]*)*$/;
+/**
+ * 事件词汇名格式：小写段 + 至少一个分隔符（斜线 = 域/动作插件域、下划线 = 宿主
+ * 自留地）——单词名（data/error/close 等裸 EventEmitter 回调、SIGINT 等信号名）
+ * 不在词汇域，天然排除（契约篇 §1.1 命名纪律的机械面）。
+ */
+const EVENT_NAME_FORMAT = /^[a-z][a-z0-9_-]*(?:[/_][a-z][a-z0-9_-]*)+$/;
 
 /**
  * @typedef {{ file: string; method: string; name: string; kind: 'dispatch' | 'subscribe'; resolvable: boolean }} BusSite
@@ -158,6 +166,24 @@ for (const file of files) {
       durableSites.push({ file: file.rel, name: m[1] });
     }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* 族 4：EventName 联合字面量（类型面——源码文本提取，含注释剔除）        */
+/* ------------------------------------------------------------------ */
+
+/** @type {Set<string>} */
+const eventUnion = new Set();
+{
+  const EVENTS_DECL = 'src/contracts/events.ts';
+  const decl = files.find((f) => f.rel === EVENTS_DECL);
+  if (!decl) throw new Error(`声明文件缺失：${EVENTS_DECL}`);
+  // 从 `export type EventName =` 起截到首个 `;` 收集 `| '字面量'` 成员；
+  // (string & {}) 逃生口无字面量形态，天然不参与
+  const head = decl.code.slice(decl.code.indexOf('export type EventName'));
+  const body = head.slice(0, head.indexOf(';'));
+  for (const m of body.matchAll(/\|\s*'([^']+)'/g)) eventUnion.add(m[1]);
+  if (eventUnion.size === 0) throw new Error(`EventName 联合解析为空——检查 ${EVENTS_DECL} 定义形态`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -243,6 +269,18 @@ for (const def of sessionCatalog) {
   }
 }
 
+// ---- 族 4：EventName 联合字面量 ↔ 总线目录（§1.1 类型面/运行时面同源） ----
+for (const name of eventUnion) {
+  if (!liveByName.has(name)) {
+    v(`[EventName] 联合字面量「${name}」不在 LIVE_EVENT_CATALOG——目录是唯一事实源，类型面不得承认目录外词汇`);
+  }
+}
+for (const entry of liveCatalog) {
+  if (!eventUnion.has(entry.name)) {
+    v(`[EventName] 目录事件「${entry.name}」未进 EventName 联合——目录新增名须同步联合（补全/拼写校验面才可用）`);
+  }
+}
+
 // ---- 汇总 ----
 if (violations.length > 0) {
   console.error(`check-events：${violations.length} 处目录/派发点漂移`);
@@ -250,5 +288,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-events ✓ 总线 ${liveCatalog.length} 项 / AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类，三族双向一致`,
+  `check-events ✓ 总线 ${liveCatalog.length} 项 / AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量，四族双向一致`,
 );

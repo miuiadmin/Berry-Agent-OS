@@ -52,17 +52,14 @@ import type { ChannelHost, UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { DurableSinks } from './durable.js';
-import {
-  createPathsService,
-  createPluginsService,
-  loadComposition,
-  type CompositionReport,
-  type PluginsService,
-} from './composition.js';
+import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
+import { createPluginsService } from './plugins.js';
+import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { dataDir, dbPath } from './paths.js';
+import type { CompositionReloadedPayload } from '../contracts/events.js';
 
 /** 缺省模型（Anthropic-first 拍板；APP_MODEL env 或 RuntimeOptions.model 覆盖） */
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5';
@@ -128,9 +125,9 @@ export interface BerryRuntime {
   readonly ui: UiService;
   readonly skills: SkillsService;
   readonly approval: ApprovalService;
-  /** 组合树装载产物（合成行集 + 装载计划——dump-config / 诊断面） */
+  /** 组合树装载产物（合成行集 + 装载计划——dump-config / 诊断面；/reload 后活取值） */
   readonly composition: CompositionReport;
-  /** 插件管理服务（ctx.plugins 同一实例——list 最小面） */
+  /** 插件管理服务（ctx.plugins 同一实例——list/install/toggle/update 有状态面） */
   readonly plugins: PluginsService;
   /** 生效组合（诊断输出用） */
   readonly model: string;
@@ -143,8 +140,25 @@ export interface BerryRuntime {
   readonly conversation: ConversationDriver;
   /** 开新会话（/new）：新 Session + durable 换指 + 时间线重置；无持久层或 run 进行中返回 undefined */
   newSession(): Session | undefined;
+  /**
+   * 组合树全量重载（/reload，契约篇 §1.3 落码形态）：run 进行中被拒（busy）；
+   * overlay 校验失败不动旧装配（error）；成功 = 锚 dispose → 重装 → 系统提示词
+   * 重建 → composition/reloaded 派发（payload 三份行 id 清单）。失败行逐行报告
+   * 不杀进程（boot 与 /reload 两面失败语义之 /reload 半边）。
+   */
+  reload(): Promise<ReloadResult>;
   /** 优雅关停（run 结算 → flush 屏障 → 关库 → ctx 回卷——骨架篇 §1.3 的进程内编排） */
   shutdown(): Promise<void>;
+}
+
+/** /reload 结果（成功载荷 + 两类拒绝/失败回执——TUI 薄壳直显，不二次判型） */
+export interface ReloadResult {
+  /** run 进行中被拒（与 /new 同准入判据——旧装配与进程原样保留） */
+  readonly busy?: boolean;
+  /** overlay/装载期异常（进程存活；message 走 describeError 统一口径） */
+  readonly error?: string;
+  /** 成功载荷（composition/reloaded 事件同款三份行 id 清单） */
+  readonly payload?: CompositionReloadedPayload;
 }
 
 /** 会话驱动依赖（组合根装配产物注入） */
@@ -327,8 +341,8 @@ export class ConversationDriver implements ChannelHost {
 /**
  * 组装 Berry 运行时（组合根唯一入口；三个命令入口共用）。
  * 装配顺序即依赖序：ctx → channels → persist → llm → tools → safety → skills
- * → 命令 → 插件装载（⑨b，组合树 Ring 2/3 行）→ 驱动。全部注册走
- * ctx.provide/on/effect——作用域 dispose 即整体回卷。
+ * → 插件装载（⑨，组合树 Ring 2/3 行）→ 命令（⑨b，闭包引用 plugins/reload——
+ * 须后于装载声明）→ 驱动。全部注册走 ctx.provide/on/effect——作用域 dispose 即整体回卷。
  * async：插件装载（jiti import + apply）是异步序列（契约篇 §1）。
  */
 export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<BerryRuntime> {
@@ -441,7 +455,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const locations = opts.skillLocations ?? defaultSkillLocations(workspace, { homeDir: opts.homeDir, trusted: true });
   skills.registerProvider(createLocalSkillsProvider({ locations }));
   skills.refresh();
-  const systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills()].filter((part) => part !== '').join('\n');
+  // 系统提示词活视图（/reload 重建）：let 绑定 + rebuild 闭包改写——writeHeader 与
+  // loop 上下文经 getter/闭包读当前值（loop 每次模型请求重读 context.systemPrompt，
+  // /reload 后新提示词下次请求即见，不需要换 context 对象）
+  let systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills()].filter((part) => part !== '').join('\n');
+  /** 重建系统提示词（/reload 后调）：技能重扫 + 基座重拼（插件提示词段 pi-4 挂账） */
+  const rebuildSystemPrompt = (): void => {
+    skills.refresh();
+    systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills()].filter((part) => part !== '').join('\n');
+  };
 
   /* ---- ⑧ 会话驱动（loop 上下文活数组 + steering/followUp 队列） ---- */
   // request/header 落账闭包（会话篇 §1.3）：仅组装参数变化时落新快照，reason
@@ -474,7 +496,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   const conversation = new ConversationDriver({
     context: {
-      systemPrompt,
+      // getter 活视图：/reload 重建后 loop 每次模型请求取到新提示词
+      get systemPrompt() {
+        return systemPrompt;
+      },
       // 续接会话：历史投影回读作时间线种子（恢复协议已补齐闭合——投影无敞开 turn）
       messages: session && resumed ? projectedToAgentMessages(session.deriveMessages()) : [],
       tools: toolView,
@@ -515,32 +540,31 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     return fresh;
   };
 
-  /* ---- ⑨ 内置命令（help/quit/skills/skill:<名>） ---- */
-  ctx.effect(() =>
-    registerBuiltinCommands({
-      commands: channels.commands,
-      ui,
-      skills,
-      quit: () => conversation.requestQuit(),
-      submit: (text) => conversation.submit(text),
-      newSession: startNewSession,
-    }),
-  );
-
-  /* ---- ⑨b 组合树 + 插件装载（契约篇 §5.1/§1：Ring 2/3 行走树；Ring 0/1 仍硬装配，树化 seam） ----
+  /* ---- ⑨ 组合树 + 插件装载（契约篇 §5.1/§1：Ring 2/3 行走树；Ring 0/1 仍硬装配，树化 seam） ----
    * 服务全部就位后再装插件（inject 依赖驱动轮次激活——宿主服务首轮即全就绪）；
    * 插件注册的工具经 ⑧ 已接线的 tools_change 原位刷新 loop 工具快照（含 run 中途）。
-   * 失败行非空 = 启动断言拒绝启动（§1.6 apply 抛错即响、不带病运行）：先收尾
-   * 持久层再回卷 ctx，然后抛全量失败清单。 */
+   *
+   * 卸载基底 = 插件锚作用域（§1.3 落码形态①）：全体插件 scope 自锚 fork、自定义
+   * 事件词汇挂锚 effect——锚 dispose 即 LIFO 级联回卷一切插件注册（工具/监听/服务/
+   * 词汇），/reload 的卸载半边由此成立；重锚 = ctx.fork 再派生（注册表同根共享）。
+   * jiti moduleCache:false 是两条缓存纪律的 v1 基底（重装即全依赖图重求值）。
+   * plugins 服务 provide 一次（§1.3 服务集恒定）：boot 与 /reload 经 applyLoad 就地
+   * 更新状态，热应用期间服务引用永不断链。
+   * 失败行两面语义（§1.6）：boot = 启动断言拒绝启动（先收尾持久层再回卷 ctx，抛全量
+   * 清单）；/reload = 逐行响亮报告、进程存活（local 源「改动 + /reload 即见」环）。 */
   const compositionDir = opts.compositionDir ?? dataDir();
   ctx.provide('paths', createPathsService(compositionDir));
-  const composition = loadComposition(compositionDir);
-  const pluginLoad = await loadPlugins(ctx, composition.plan);
-  // plugins 服务单实例：ctx.plugins 与 runtime.plugins 必须同源（list 状态面唯一）
-  const plugins = createPluginsService(composition, pluginLoad);
+  const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
-  if (pluginLoad.failed.length > 0) {
-    const lines = pluginLoad.failed.map((item) => `  - [${item.code}] ${item.id}：${item.message}`);
+  // 锚是活绑定（/reload dispose 后重 fork）；composition 同为活绑定（/reload 重装载）
+  let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });
+  let composition: CompositionReport = loadComposition(compositionDir);
+  plugins.applyLoad(composition, await loadPlugins(pluginAnchor, composition.plan));
+  if (plugins.list().some((row) => row.status === 'failed')) {
+    const lines = plugins
+      .list()
+      .filter((row) => row.status === 'failed')
+      .map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
     try {
       await persistence?.flush();
       await persistence?.close();
@@ -549,9 +573,58 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }
     throw new AppError(
       PLUGIN_LOAD_FAILED,
-      `插件启动断言失败（${pluginLoad.failed.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
+      `插件启动断言失败（${lines.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
     );
   }
+
+  /** 组合树全量重载（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面） */
+  const reload = async (): Promise<ReloadResult> => {
+    // run 进行中拒绝（与 /new 同准入判据——loop 正引用工具快照与提示词，不换装配）
+    if (conversation.isRunning) return { busy: true };
+    // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
+    let fresh: CompositionReport;
+    try {
+      fresh = loadComposition(compositionDir);
+    } catch (err) {
+      return { error: describeError(err) };
+    }
+    try {
+      await pluginAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
+      pluginAnchor = ctx.fork({ name: 'plugins' });
+      const load = await loadPlugins(pluginAnchor, fresh.plan);
+      composition = fresh;
+      plugins.applyLoad(fresh, load); // 同实例就地更新（失败行进 list 状态面——进程存活）
+      rebuildSystemPrompt();
+      // 组装参数变化经 writeHeader 内建 diff 落 reason=change 快照（仅变化才落——
+      // 提示词/工具面变了才写，没变不污染日志；无持久层为 no-op）
+      writeHeader?.();
+      const payload: CompositionReloadedPayload = {
+        activated: load.activated.map((item) => item.id),
+        failed: load.failed.map((item) => item.id),
+        skipped: load.skipped.map((item) => item.id),
+      };
+      ctx.emit('composition/reloaded', payload);
+      return { payload };
+    } catch (err) {
+      // 兜底：loadPlugins 逐行收集不抛，此处只剩 dispose/emit 级异常——进程存活报告
+      return { error: describeError(err) };
+    }
+  };
+
+  /* ---- ⑨b 内置命令（help/quit/new/skills/skill:<名> + 插件管理五件/reload） ----
+   * 依赖 ⑨ 的 plugins 服务与 reload 闭包——必须在其后注册（引用先声明）。 */
+  ctx.effect(() =>
+    registerBuiltinCommands({
+      commands: channels.commands,
+      ui,
+      skills,
+      quit: () => conversation.requestQuit(),
+      submit: (text) => conversation.submit(text),
+      newSession: startNewSession,
+      plugins, // ctx.plugins 服务（⑨ provide——命令壳与宿主同源）
+      reload, // 组合根 reload 闭包（⑨ 定义——busy/error/payload 三面）
+    }),
+  );
 
   /* ---- ⑩ 交互模式：审批 answerer 接 ctx.ui（headless 无应答者 = fail-closed） ---- */
   if (opts.interactive) {
@@ -575,15 +648,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     ui,
     skills,
     approval,
-    composition,
+    // 活取值（/reload 重装载后指向新树）——接口上仍是 readonly，实现为 getter
+    get composition(): CompositionReport {
+      return composition;
+    },
     plugins,
     model,
     workspace,
     sandboxMode,
-    systemPrompt,
+    // 活取值（/reload 重建系统提示词后取新值）
+    get systemPrompt(): string {
+      return systemPrompt;
+    },
     skillLocations: locations,
     conversation,
     newSession: startNewSession,
+    reload,
     /** 优雅关停：等 run 结算 → flush 屏障 → 关库 → ctx 回卷（§1.3 编排） */
     async shutdown() {
       await conversation.settle();

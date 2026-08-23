@@ -15,9 +15,10 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
-import type { CompositionRow, PluginLoadResult, PluginPlanRow, PluginSkipReason } from '../contracts/plugin.js';
+import type { CompositionRow, PluginPlanRow, PluginSkipReason } from '../contracts/plugin.js';
 
 /** overlay 文件名（<数据目录>/overlay.yaml，契约篇 §5.2） */
 export const OVERLAY_FILENAME = 'overlay.yaml';
@@ -43,8 +44,9 @@ const ROW_KEYS = new Set(['id', 'plugin', 'config', 'disabled', 'fixed']);
 /**
  * 读并校验 overlay 行集（文件不存在 = 空 overlay——首启零配置即合法）。
  * YAML 顶层必须是 `{ rows: [...] }`；行字段逐个校验类型。
+ * 公开导出（写回操作与装机服务的对账读取面共用同一拒绝式校验）。
  */
-function loadOverlayRows(dataDir: string): CompositionRow[] {
+export function loadOverlayRows(dataDir: string): CompositionRow[] {
   const overlayPath = join(dataDir, OVERLAY_FILENAME);
   if (!existsSync(overlayPath)) return [];
   let doc: unknown;
@@ -165,7 +167,7 @@ function resolveSkip(disabled: boolean | string | undefined): PluginSkipReason |
 }
 
 /** 判定路径形态引用（显式 ./ ../ 前缀或绝对路径）；裸名 = 装入子树的包名 */
-function isPathReference(ref: string): boolean {
+export function isPathReference(ref: string): boolean {
   return isAbsolute(ref) || ref.startsWith('./') || ref.startsWith('../');
 }
 
@@ -291,23 +293,7 @@ export interface PluginStatusRow {
   readonly reason?: PluginSkipReason;
 }
 
-/** 插件管理最小服务（ctx.plugins——§1.5：reconciliation 进程内服务；install/toggle/update ⏳ 后续纵切） */
-export interface PluginsService {
-  /** 装载状态清单（组合树行序；装配枚举唯一事实源 = 组合树，禁扫 node_modules 推断） */
-  list(): readonly PluginStatusRow[];
-}
-
-/** 建插件管理服务实例（组合根 provide 'plugins' 用；装载结果快照注入） */
-export function createPluginsService(composition: CompositionReport, load: PluginLoadResult): PluginsService {
-  const byId = new Map<string, PluginStatusRow>();
-  for (const item of load.activated) byId.set(item.id, { id: item.id, status: 'activated', name: item.name });
-  for (const item of load.failed)
-    byId.set(item.id, { id: item.id, status: 'failed', code: item.code, message: item.message });
-  for (const item of load.skipped) byId.set(item.id, { id: item.id, status: 'skipped', reason: item.reason });
-  return {
-    list: () => composition.plan.map((row) => byId.get(row.id) ?? { id: row.id, status: 'planned' as const }),
-  };
-}
+/** 插件管理服务面（ctx.plugins，§1.5 表尾）——有状态单例的实现移驻 ./plugins.ts（2026-08-23 /reload 纵切：install/toggle/update 落码） */
 
 /** 目录存在且非空判定（dump-config 判断装机子树是否在用的展示辅助） */
 export function pluginInstallRootExists(dataDir: string): boolean {
@@ -317,4 +303,97 @@ export function pluginInstallRootExists(dataDir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/* ---------------------------------------------------------------------------------- */
+/* overlay 写回（ctx.plugins install/toggle 的持久化半边，2026-08-23 M2 /reload 纵切）。 */
+/* 原子写走 persist 公共件（§1.5.1(b)）；往返纪律（§6.3）：写面只序列化 overlay 合法    */
+/* 字段（id/plugin/config/disabled——fixed 属官方层永不出现在写面），装载面 validateRow  */
+/* 拒绝式同构——parse→stringify→parse 零字段损失（往返测试锁）。                         */
+/* ---------------------------------------------------------------------------------- */
+
+/**
+ * overlay 行集写回（原子写）。调用方保证行已过校验（本模块内部产物或已验证形态）。
+ */
+export function saveOverlayRows(dataDir: string, rows: readonly CompositionRow[]): void {
+  const doc = {
+    rows: rows.map((row) => ({
+      id: row.id,
+      ...(row.plugin !== undefined ? { plugin: row.plugin } : {}),
+      ...(row.config !== undefined ? { config: row.config } : {}),
+      ...(row.disabled !== undefined ? { disabled: row.disabled } : {}),
+    })),
+  };
+  writeAtomicFile(join(dataDir, OVERLAY_FILENAME), stringifyYaml(doc));
+}
+
+/**
+ * overlay 行禁用状态翻转（ctx.plugins.toggle 持久化半边，契约篇 §1.5 表尾）。
+ * - 现启用 → 禁用：overlay 行 disabled 置 true（保留既有 plugin/config）；行只在
+ *   官方层时插一行 `{ id, disabled: true }` 替换（字段级后写胜出）。
+ * - 现禁用 → 启用：删 disabled 键（显式 `disabled: false` 是非法形态——validateRow
+ *   拒绝，删键即唯一启用语义）；删键后仅剩 `{ id }` 的纯禁用行整行移除（空替换行无意义）。
+ * - 未知行 id（overlay 与官方层皆无）/ fixed 行禁用 = COMPOSITION_ROW_INVALID 即时即响
+ *   （fixed 不可禁用在合成期也会响，这里提前到写回时——不留「写完下次启动才炸」的陷阱）。
+ * @returns 翻转后的禁用状态（true = 现已禁用）
+ */
+export function toggleOverlayRow(dataDir: string, id: string): boolean {
+  const rows = loadOverlayRows(dataDir);
+  const overlayRow = rows.find((row) => row.id === id);
+  const defaultRow = DEFAULT_LAYER_ROWS.find((row) => row.id === id);
+  if (!overlayRow && !defaultRow) {
+    throw new AppError(
+      COMPOSITION_ROW_INVALID,
+      `toggle：未知行 id「${id}」（overlay 与官方默认层皆无此行——清单以组合树为准，勿凭记忆拼 id）`,
+    );
+  }
+  if (defaultRow?.fixed && (!overlayRow || overlayRow.disabled === undefined)) {
+    // fixed 行当前未禁用、翻转将禁用 = 安全栈强制点被关——拒绝（已在 overlay 禁用的
+    // fixed 行理论到不了这里：合成期即响；防御性同拒）
+    throw new AppError(
+      COMPOSITION_ROW_INVALID,
+      `toggle：fixed 行「${id}」是安全栈强制点，不可禁用——只能替换其策略槽位内的行（契约篇 §5.1）`,
+    );
+  }
+  if (overlayRow !== undefined && overlayRow.disabled !== undefined) {
+    // 现禁用 → 启用：删键；纯禁用行（无 plugin/config 可言）整行移除
+    const next: CompositionRow[] = [];
+    for (const row of rows) {
+      if (row.id !== id) {
+        next.push(row);
+        continue;
+      }
+      const rest = { ...row };
+      delete rest.disabled;
+      if (rest.plugin === undefined && rest.config === undefined) continue;
+      next.push(rest);
+    }
+    saveOverlayRows(dataDir, next);
+    return false;
+  }
+  // 现启用 → 禁用：overlay 行保留 plugin/config 只置 disabled；官方层行插替换行
+  if (overlayRow !== undefined) {
+    saveOverlayRows(
+      dataDir,
+      rows.map((row) => (row.id === id ? { ...row, disabled: true } : row)),
+    );
+  } else {
+    saveOverlayRows(dataDir, [...rows, { id, disabled: true }]);
+  }
+  return true;
+}
+
+/**
+ * install 写回 overlay 行（ctx.plugins.install 持久化半边）：行存在则只替换 plugin
+ * 引用（保留 config/disabled——重装不改变启停与配置状态），不存在则 insert
+ * （自带 plugin——insert 行硬要求）。id 由装机服务按源推导（npm=包名 / git=repo 名 /
+ * local=目录或文件名）；pluginRef 形态按源（npm 裸包名 / local+git 绝对路径，§6.1）。
+ */
+export function upsertOverlayPluginRef(dataDir: string, id: string, pluginRef: string): void {
+  const rows = loadOverlayRows(dataDir);
+  const exists = rows.some((row) => row.id === id);
+  const next = exists
+    ? rows.map((row) => (row.id === id ? { ...row, plugin: pluginRef } : row))
+    : [...rows, { id, plugin: pluginRef }];
+  saveOverlayRows(dataDir, next);
 }

@@ -13,7 +13,9 @@
  *    logger 前缀（`app:<行id>`——失败归因）；apply 抛错即回卷本作用域再进失败清单
  *    （§1.6 不留残骸、不静默跳过）；
  * 6. **生命周期事件逐行必发**（§2.2 增补 1：plugin/activated / failed / skipped——
- *    「扩展没生效」从 pull 诊断升级为 push 事件面）。
+ *    「扩展没生效」从 pull 诊断升级为 push 事件面）；
+ * 7. **自定义事件词汇装载期登记**（§1.1 逃生口）：行 named export events 在一切
+ *    apply 之前经 registerLiveEvent 入注册表（挂 root/锚作用域 effect——卸载即注销）。
  *
  * jiti `moduleCache: false` 是 /reload 两条缓存纪律（§1.3 补钉②）的 v1 基底：
  * 每次 import 全依赖图重新求值——毒化模块与「模块图半坏」结构上不可能跨加载存活。
@@ -34,6 +36,7 @@ import {
   PLUGIN_SHAPE_INVALID,
   describeError,
 } from '../contracts/errors.js';
+import { registerLiveEvent } from './context.js';
 import type {
   PluginActivatedPayload,
   PluginFailedPayload,
@@ -42,6 +45,7 @@ import type {
   PluginPlanRow,
   PluginSkippedPayload,
 } from '../contracts/plugin.js';
+import type { LiveEventDefinition } from '../contracts/events.js';
 import type { Context, ContextScope } from './types.js';
 
 /**
@@ -75,8 +79,9 @@ function createPluginJiti() {
 
 /**
  * 模块形状校验（§1.1/§1.2 单形状纪律）：default 函数 / name 非空字符串 /
- * inject 与 optionalInject string[] / config 为对象形 schema——违例即
- * PLUGIN_SHAPE_INVALID（dsh postmortem 0001：混形状丢元数据，一条代码路径不分派）。
+ * inject 与 optionalInject string[] / config 为对象形 schema / events 为
+ * LiveEventDefinition 数组——违例即 PLUGIN_SHAPE_INVALID（dsh postmortem 0001：
+ * 混形状丢元数据，一条代码路径不分派）。
  *
  * named export 判定一律走自有属性（Object.hasOwn）：jiti 对 default-only 模块
  * 的命名空间会让任意属性读取穿透到 default 函数本身（其 name 位是函数名）——
@@ -110,15 +115,63 @@ function validateModuleShape(mod: Record<string, unknown>, id: string): Validate
       `${id}：named export config 必须是 JSON Schema 对象（TypeBox 生成或手写，契约篇 §1.2）`,
     );
   }
+  const events = Object.hasOwn(mod, 'events') ? mod['events'] : undefined;
+  if (
+    events !== undefined &&
+    (!Array.isArray(events) || events.some((item) => typeof item !== 'object' || item === null))
+  ) {
+    throw new AppError(
+      PLUGIN_SHAPE_INVALID,
+      `${id}：named export events 必须是 LiveEventDefinition[]（自定义事件声明清单，契约篇 §1.2 第四件）`,
+    );
+  }
   // 形状已验：default 收窄为真实签名（Record<string,unknown> → 契约形，单点转换）
   return mod as unknown as ValidatedModule;
 }
 
+/** 自定义事件名格式：小写段 + 至少一个 `/`（防撞宿主词汇域——session_shutdown 类无斜线名是宿主目录自留地） */
+const CUSTOM_EVENT_NAME_FORMAT = /^[a-z][a-z0-9-]*(\/[a-z][a-z0-9-]*)+$/;
+
 /**
- * 装载插件（组合根装配期调用；输入 = 组合树合成的装载计划行）。
+ * 逐条校验自定义事件声明（§1.1 逃生口的装载期门槛）：name/mode/note 三必填、
+ * name 小写含 `/`——违例即 PLUGIN_SHAPE_INVALID（与模块形状同码族：声明面非法）。
+ * 撞名检查不在此做（registerLiveEvent 运行时 EVENT_DUPLICATE——两行声明同名在
+ * 逐行登记时才暴露）。
+ */
+function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id: string): void {
+  if (!defs) return;
+  for (const def of defs) {
+    if (typeof def.name !== 'string' || !CUSTOM_EVENT_NAME_FORMAT.test(def.name)) {
+      throw new AppError(
+        PLUGIN_SHAPE_INVALID,
+        `${id}：events 声明「${String(def.name)}」名字非法——须小写且含 /（如 my-plugin/done；防撞宿主词汇域，契约篇 §1.1）`,
+      );
+    }
+    if (def.mode !== 'emit' && def.mode !== 'waterfall' && def.mode !== 'parallel' && def.mode !== 'serial') {
+      throw new AppError(
+        PLUGIN_SHAPE_INVALID,
+        `${id}：events 声明「${def.name}」mode 非法（${String(def.mode)}）——四模式 emit/waterfall/parallel/serial 之一（mode 是事件公开契约）`,
+      );
+    }
+    if (typeof def.note !== 'string' || def.note.length === 0) {
+      throw new AppError(
+        PLUGIN_SHAPE_INVALID,
+        `${id}：events 声明「${def.name}」缺 note（一句话语义——目录生成与插件作者查阅用）`,
+      );
+    }
+  }
+}
+
+/**
+ * 装载插件（组合根装配期与 /reload 调用；输入 = 组合树合成的装载计划行）。
  *
- * 返回三态清单；failed 非空时由组合根启动断言拒绝启动（§1.6 apply 抛错即响——
- * 本函数自身不抛：逐行失败收集进清单，单行失败不阻断其余行装载诊断）。
+ * root 参数应传**插件锚作用域**（组合根 `ctx.fork('plugins')` 产物）：全体插件
+ * 作用域自锚派生、自定义事件词汇挂锚 effect——锚 dispose 即 LIFO 级联回卷一切
+ * 插件注册（/reload 的卸载基底，契约篇 §1.3 落码形态①）。
+ *
+ * 返回三态清单；failed 非空时由调用方决定语义——boot 启动断言拒绝启动，/reload
+ * 逐行响亮报告不杀进程（本函数自身不抛：逐行失败收集进清单，单行失败不阻断
+ * 其余行装载诊断）。
  */
 export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanRow[]): Promise<PluginLoadResult> {
   const activated: PluginActivatedPayload[] = [];
@@ -139,10 +192,18 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
       root.emit('plugin/failed', { id: row.id, code: PLUGIN_ENTRY_UNRESOLVED, message: row.unresolved });
       continue;
     }
-    // import + 形状校验（失败进清单不阻断——其余行仍要出全量诊断）
+    // import + 形状校验 + 自定义事件词汇登记（失败进清单不阻断——其余行仍要出全量诊断）
     try {
       const mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
-      pending.push({ row, module: validateModuleShape(mod, row.id) });
+      const module = validateModuleShape(mod, row.id);
+      // 自定义事件词汇登记（§1.1 逃生口）：装载阶段①（一切 apply 之前）统一入册——
+      // 跨插件订阅无顺序洞（晚激活提供方的词汇此刻已在注册表）；登记经 effect 挂
+      // 锚作用域（/reload 卸载锚即 LIFO 注销词汇，撞名 EVENT_DUPLICATE 在此暴露）
+      validateEventDefs(module.events, row.id);
+      for (const def of module.events ?? []) {
+        root.effect(() => registerLiveEvent(root, def));
+      }
+      pending.push({ row, module });
     } catch (err) {
       const payload = {
         id: row.id,

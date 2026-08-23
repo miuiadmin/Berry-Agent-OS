@@ -4,20 +4,65 @@
  * M1 内置五件：/help（命令清单）、/quit（优雅退出）、/new（开新会话——TUI 启动
  * 续接策略的另一面，技术栈篇 §5）、/skills（技能清单）、/skill:<名>（显式激活
  * ——§4.5(b) 包装格式作为普通 user 消息提交，loop 开跑）。
+ * M2 插件管理五件（2026-08-23 /reload 纵切，技术栈篇 §5 插件管理命令面）：
+ * /plugins（清单）、/plugin-install、/plugin-toggle、/plugin-update、/reload——
+ * 全部是 ctx.plugins 服务与组合根 reload 的薄壳（对账逻辑不进壳面，§1.5），
+ * install/update 后自动链 /reload（对账与组合正交——壳负责把两步串起来）。
  * 技能命令按装配期快照逐个注册（skill refresh 仅在装配期跑一次，M1 无动态面）。
  */
 
 import type { Disposer } from '../context/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
+import { describeError } from '../contracts/errors.js';
 import { formatSkillInvocation } from '../skills/index.js';
 import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
+import type { PluginsService } from './plugins.js';
+import type { ReloadResult } from './assembly.js';
+import type { PluginStatusRow } from './composition.js';
 
 /** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
 function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
   return diagnostics
     .map((d) => `  [${d.type}] ${d.code}：${d.message}${d.path && d.path !== d.code ? `（${d.path}）` : ''}`)
     .join('\n');
+}
+
+/** 插件状态行 → 人读文本（failed/skipped 附原因——「没生效」必须可见，同 ref-3） */
+function formatPluginRow(row: PluginStatusRow): string {
+  switch (row.status) {
+    case 'activated':
+      return `  ✓ ${row.id}（${row.name ?? '未具名'}）`;
+    case 'failed':
+      return `  ✖ ${row.id}：${row.code} ${row.message ?? ''}`;
+    case 'skipped':
+      return `  · ${row.id}（跳过：${row.reason}）`;
+    default:
+      // planned = 装载前视角（boot 前 / 服务刚建）——正常 TUI 里看不到，防御呈现
+      return `  ○ ${row.id}（planned——尚未装载）`;
+  }
+}
+
+/**
+ * /reload 三面结果统一通知（busy / error / payload——组合根 reload 语义直译，
+ * 壳只转述不解释；error 面附「原组合仍在运行」——预检后装的设计保证，见 §1.3 落码形态）。
+ */
+function notifyReloadResult(ui: UiService, result: ReloadResult): void {
+  if (result.busy === true) {
+    ui.notify('现在不能重载（run 进行中），稍后再试');
+    return;
+  }
+  if (result.error !== undefined) {
+    ui.notify(`重载失败：${result.error}\n（原组合仍在运行——修正 overlay 后再试）`);
+    return;
+  }
+  const payload = result.payload;
+  if (payload === undefined) return; // 三面互斥完备，此处不可达——类型收窄守卫
+  const parts = [`激活 ${payload.activated.length}`];
+  // 失败行点名（id 级）——与 boot 期拒启清单同信息量；跳过行通常多（禁用面）不点名
+  if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
+  parts.push(`跳过 ${payload.skipped.length}`);
+  ui.notify(`组合已重载：${parts.join('，')}`);
 }
 
 /** 内置命令注册入参（全部是组合根持有的既有件，无新概念） */
@@ -34,6 +79,10 @@ export interface BuiltinCommandsOptions {
   readonly submit: (text: string) => void;
   /** 开新会话（/new——组合根热切换；无持久层/run 进行中返回 undefined） */
   readonly newSession: () => { header: { sessionId: string } } | undefined;
+  /** 插件管理服务（/plugins 清单与 install/toggle/update——对账逻辑全在服务，壳只转述） */
+  readonly plugins: PluginsService;
+  /** 组合树重载（/reload 主体——组合根闭包；装配动作不进壳面） */
+  readonly reload: () => Promise<ReloadResult>;
 }
 
 /**
@@ -89,6 +138,80 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         // 诊断随清单附尾：collision/提供方失败直接可见，不需要翻日志
         const diagLines = diagnostics.length > 0 ? `\n发现诊断：\n${formatDiagnostics(diagnostics)}` : '';
         ui.notify(`可用技能：\n${lines.join('\n')}${diagLines}`);
+      },
+    }),
+  );
+
+  /* ---- M2 插件管理五件（/reload 纵切）——全部是 ctx.plugins 与组合根 reload 的薄壳 ---- */
+
+  disposers.push(
+    commands.register({
+      name: 'plugins',
+      description: '插件清单（组合树行 + 装载状态）',
+      handler: () => {
+        const rows = opts.plugins.list();
+        if (rows.length === 0) {
+          ui.notify('组合树无插件行（默认层为空）——/plugin-install <ref> 装入第一件');
+          return;
+        }
+        const lines = rows.map(formatPluginRow);
+        ui.notify(
+          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装入 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
+        );
+      },
+    }),
+    commands.register({
+      name: 'plugin-install',
+      description: '装机 <npm 包名|git URL|本地路径> [git ref] 并重载',
+      handler: async (args) => {
+        const tokens = args.trim().split(/\s+/).filter(Boolean);
+        const ref = tokens[0];
+        if (ref === undefined) {
+          ui.notify('用法：/plugin-install <npm 包名 | git URL | 本地路径> [git ref]');
+          return;
+        }
+        const gitRef = tokens[1];
+        // 服务失败（PLUGIN_INSTALL_FAILED 等）向上抛——通道壳兜底为通知，不崩界面
+        const report = await opts.plugins.install(ref, gitRef !== undefined ? { gitRef } : undefined);
+        ui.notify(`${report.id} 已装入（${report.source} 源）：${report.message}`);
+        // 对账与组合正交——install 只写 overlay，壳链 /reload 才热应用（§1.5 表尾）
+        notifyReloadResult(ui, await opts.reload());
+      },
+    }),
+    commands.register({
+      name: 'plugin-toggle',
+      description: '翻转插件禁用状态 <id> 并重载',
+      handler: async (args) => {
+        const id = args.trim().split(/\s+/)[0];
+        if (!id) {
+          ui.notify('用法：/plugin-toggle <id>（id 见 /plugins）');
+          return;
+        }
+        const disabled = opts.plugins.toggle(id); // 未知 id / fixed 行 → 抛，壳兜底
+        ui.notify(`${id} 已${disabled ? '禁用' : '启用'}——重载生效中`);
+        notifyReloadResult(ui, await opts.reload()); // 禁用翻转同样要对账→热应用两步
+      },
+    }),
+    commands.register({
+      name: 'plugin-update',
+      description: '按源更新插件 <id> 并重载',
+      handler: async (args) => {
+        const id = args.trim().split(/\s+/)[0];
+        if (!id) {
+          ui.notify('用法：/plugin-update <id>（id 见 /plugins）');
+          return;
+        }
+        const report = await opts.plugins.update(id); // npm 重装 / git 重克隆 / local no-op
+        ui.notify(`${report.id} 更新完成（${report.source} 源）：${report.message}`);
+        // 磁上已是新码——与 install 同理链 /reload 才可见（local no-op 也无害：等价一次 /reload）
+        notifyReloadResult(ui, await opts.reload());
+      },
+    }),
+    commands.register({
+      name: 'reload',
+      description: '重载组合树（overlay / 插件代码改动后生效）',
+      handler: async () => {
+        notifyReloadResult(ui, await opts.reload());
       },
     }),
   );

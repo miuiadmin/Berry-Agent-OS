@@ -15,6 +15,7 @@ import { createContext } from './context.js';
 import { loadPlugins } from './loader.js';
 import type { ContextScope } from './types.js';
 import {
+  EVENT_DUPLICATE,
   PLUGIN_APPLY_FAILED,
   PLUGIN_CONFIG_INVALID,
   PLUGIN_INJECT_UNRESOLVED,
@@ -370,5 +371,137 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
       'activated:ok',
     ]);
     expect(root.tryGet('ok-svc')).toBe(true);
+  });
+});
+
+/* ---------------- 自定义事件词汇（events 第四件，§1.1 逃生口） ---------------- */
+
+describe('loadPlugins 自定义事件词汇登记', () => {
+  it('跨插件订阅无顺序洞：订阅行在前、声明行在后——词汇装载期入册，on 不炸、派发端到端送达', async () => {
+    const dir = makeFixtureDir();
+    const listener = writePlugin(
+      dir,
+      'listener.ts',
+      [
+        'export const name = "listener";',
+        'export default async function apply(ctx) {',
+        '  ctx.on("emitter/done", (payload: { n: number }) => {',
+        '    ctx.provide("listener-saw", payload.n);',
+        '  });',
+        '}',
+      ].join('\n'),
+    );
+    const emitter = writePlugin(
+      dir,
+      'emitter.ts',
+      [
+        'export const name = "emitter";',
+        'export const events = [{ name: "emitter/done", mode: "emit", note: "完成后通知" }];',
+        'export default async function apply(ctx) {',
+        '  ctx.emit("emitter/done", { n: 7 });',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    // 行序故意把订阅者放前、声明行放后——词汇在装载阶段①（一切 apply 之前）统一入册，
+    // 订阅者的 on 不因声明行更晚激活而炸 EVENT_UNKNOWN（跨插件订阅无顺序洞回归锁）
+    const result = await loadPlugins(root, [
+      { id: 'listener', entry: listener },
+      { id: 'emitter', entry: emitter },
+    ]);
+
+    expect(result.failed).toEqual([]);
+    expect(result.activated).toHaveLength(2);
+    expect(root.tryGet('listener-saw')).toBe(7); // on 在册通过 + emit 送达
+  });
+
+  it('events 声明非法（name 无 /、mode 非四值、缺 note）三例皆 PLUGIN_SHAPE_INVALID，apply 从未执行', async () => {
+    const dir = makeFixtureDir();
+    const noSlash = writePlugin(
+      dir,
+      'no-slash.ts',
+      [
+        'export const name = "no-slash";',
+        'export const events = [{ name: "noslash", mode: "emit", note: "x" }];',
+        'export default async function apply(ctx) { ctx.provide("no-slash-leak", true); }',
+      ].join('\n'),
+    );
+    const badMode = writePlugin(
+      dir,
+      'bad-mode.ts',
+      [
+        'export const name = "bad-mode";',
+        'export const events = [{ name: "bad/mode", mode: "fire", note: "x" }];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const noNote = writePlugin(
+      dir,
+      'no-note.ts',
+      [
+        'export const name = "no-note";',
+        'export const events = [{ name: "no/note", mode: "emit" }];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [
+      { id: 'no-slash', entry: noSlash },
+      { id: 'bad-mode', entry: badMode },
+      { id: 'no-note', entry: noNote },
+    ]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed.map((item) => [item.id, item.code])).toEqual([
+      ['no-slash', PLUGIN_SHAPE_INVALID],
+      ['bad-mode', PLUGIN_SHAPE_INVALID],
+      ['no-note', PLUGIN_SHAPE_INVALID],
+    ]);
+    expect(root.tryGet('no-slash-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
+  });
+
+  it('撞名：两行声明同名 / 撞宿主目录名皆 EVENT_DUPLICATE——词汇表拒绝静默覆盖，先到者照常激活', async () => {
+    const dir = makeFixtureDir();
+    const first = writePlugin(
+      dir,
+      'twice-a.ts',
+      [
+        'export const name = "twice-a";',
+        'export const events = [{ name: "twice/evt", mode: "emit", note: "先到" }];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const second = writePlugin(
+      dir,
+      'twice-b.ts',
+      [
+        'export const name = "twice-b";',
+        'export const events = [{ name: "twice/evt", mode: "emit", note: "后到" }];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // 撞宿主目录名须选「格式合法且在目录」的名字（plugin/activated 含斜线小写合法）；
+    // tools_change 类无斜线名先被格式检查拦下——宿主自留地由格式纪律防住，到不了撞名检查
+    const catalogClash = writePlugin(
+      dir,
+      'catalog-clash.ts',
+      [
+        'export const name = "catalog-clash";',
+        'export const events = [{ name: "plugin/activated", mode: "emit", note: "撞宿主目录名" }];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [
+      { id: 'twice-a', entry: first },
+      { id: 'twice-b', entry: second },
+      { id: 'catalog-clash', entry: catalogClash },
+    ]);
+
+    expect(result.activated.map((item) => item.id)).toEqual(['twice-a']); // 先到者词汇入册、照常激活
+    expect(result.failed.map((item) => [item.id, item.code])).toEqual([
+      ['twice-b', EVENT_DUPLICATE],
+      ['catalog-clash', EVENT_DUPLICATE],
+    ]);
   });
 });

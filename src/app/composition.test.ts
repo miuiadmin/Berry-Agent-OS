@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
 import { loadComposition, resolvePluginEntry } from './composition.js';
-import { createPathsService, createPluginsService } from './composition.js';
+import { createPathsService, saveOverlayRows, toggleOverlayRow, upsertOverlayPluginRef } from './composition.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -166,7 +166,7 @@ describe('插件入口解析', () => {
 
 /* ---------------- 目录服务与插件管理服务 ---------------- */
 
-describe('目录服务（ctx.paths）与插件管理服务（ctx.plugins）', () => {
+describe('目录服务（ctx.paths）', () => {
   it('pluginDataDir 首取即建目录、幂等缓存；dataDir 返回根', () => {
     const dataDir = makeDataDir();
     const paths = createPathsService(dataDir);
@@ -178,31 +178,90 @@ describe('目录服务（ctx.paths）与插件管理服务（ctx.plugins）', ()
     // 再取同路径（幂等，不重复 mkdir 抛错）
     expect(paths.pluginDataDir('memory')).toBe(first);
   });
+});
 
-  it('plugins.list：装载结果映射 + planned 兜底，行序 = 组合树行序', () => {
+/* ---------------- overlay 写回（install/toggle 持久化半边，§6.3 往返硬规则） ---------------- */
+
+describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPluginRef', () => {
+  it('往返零字段损失：save→load 深相等（parse→stringify→parse 幂等，含 config 嵌套值）', () => {
+    const dataDir = makeDataDir();
+    const rows = [
+      { id: 'bare-pkg', plugin: 'some-package' },
+      {
+        id: 'with-config',
+        plugin: './local',
+        config: { port: 8080, label: '你好: world', nested: { list: [1, 'two', true] } },
+      },
+      { id: 'gated', plugin: 'x', disabled: 'win32' },
+      { id: 'off', plugin: 'y', disabled: true },
+    ];
+    saveOverlayRows(dataDir, rows);
+    // 装载面（validateRow 拒绝式）原样读回——四行全字段无损失
+    const report = loadComposition(dataDir);
+    expect(report.rows).toEqual(rows);
+    // 二次往返（save(load(save))) 仍幂等
+    saveOverlayRows(dataDir, [...report.rows]);
+    expect(loadComposition(dataDir).rows).toEqual(rows);
+  });
+
+  it('空行集写回：合法空 overlay（rows: []），装载为空树', () => {
+    const dataDir = makeDataDir();
+    saveOverlayRows(dataDir, []);
+    expect(loadComposition(dataDir).rows).toEqual([]);
+  });
+
+  it('toggle 翻转：启用→禁用保留 plugin/config；禁用→启用删键、纯禁用行整行移除', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
     writeOverlay(
       dataDir,
-      `  - id: ok\n    plugin: ${entry}\n` + '  - id: dormant\n    plugin: p\n    disabled: true\n',
+      `  - id: live\n    plugin: ${entry}\n` + '  - id: pure-off\n    plugin: p\n    disabled: true\n',
     );
-    const composition = loadComposition(dataDir);
-    // 装载结果最小面（真装载行为在 loader.test——此处只验映射）
-    const load: PluginLoadResult = {
-      activated: [{ id: 'ok', name: 'stub' }],
-      failed: [],
-      skipped: [{ id: 'dormant', reason: 'disabled' }],
-    };
-    const plugins = createPluginsService(composition, load);
-    expect(plugins.list()).toEqual([
-      { id: 'ok', status: 'activated', name: 'stub' },
-      { id: 'dormant', status: 'skipped', reason: 'disabled' },
+    // 现禁用行（pure-off，带 plugin）→ 启用：删键保留行
+    expect(toggleOverlayRow(dataDir, 'pure-off')).toBe(false);
+    expect(loadComposition(dataDir).rows).toEqual([
+      { id: 'live', plugin: entry },
+      { id: 'pure-off', plugin: 'p' },
     ]);
-    // 装载前视角（如 dump-config 纯合成路径）——planned 兜底
-    const planned = createPluginsService(composition, { activated: [], failed: [], skipped: [] });
-    expect(planned.list().map((row) => [row.id, row.status])).toEqual([
-      ['ok', 'planned'],
-      ['dormant', 'planned'],
+    // 再翻 → 禁用：保留 plugin 只置 disabled
+    expect(toggleOverlayRow(dataDir, 'pure-off')).toBe(true);
+    expect(loadComposition(dataDir).rows).toEqual([
+      { id: 'live', plugin: entry },
+      { id: 'pure-off', plugin: 'p', disabled: true },
+    ]);
+    // live 行不带 plugin 字段的纯禁用路径：先手工写一行只含 id+disabled 的行
+    writeOverlay(dataDir, `  - id: live\n    plugin: ${entry}\n` + '  - id: flag-only\n    disabled: true\n');
+    // 等等——flag-only 是 insert 行但无 plugin：装载面本就拒绝；写回面删键后应整行移除
+    expect(toggleOverlayRow(dataDir, 'live')).toBe(true); // live → 禁用（保留 plugin）
+    expect(toggleOverlayRow(dataDir, 'live')).toBe(false); // 再启回（保留 plugin）
+    expect(toggleOverlayRow(dataDir, 'flag-only')).toBe(false); // 纯禁用行 → 启用 = 整行移除
+    expect(loadComposition(dataDir).rows).toEqual([{ id: 'live', plugin: entry }]);
+  });
+
+  it('toggle 未知行 id：COMPOSITION_ROW_INVALID 即时即响（不静默写一条无人认领的行）', () => {
+    const dataDir = makeDataDir();
+    try {
+      toggleOverlayRow(dataDir, 'ghost');
+      expect.unreachable('未知 id 应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+    }
+  });
+
+  it('upsertOverlayPluginRef：insert 自带 plugin；重装只换 plugin 引用（config/disabled 状态不动）', () => {
+    const dataDir = makeDataDir();
+    upsertOverlayPluginRef(dataDir, 'fresh', 'some-package');
+    expect(loadComposition(dataDir).rows).toEqual([{ id: 'fresh', plugin: 'some-package' }]);
+    // 已有行带 config/disabled——重装只替换 plugin 引用，启停与配置保留
+    writeOverlay(
+      dataDir,
+      '  - id: fresh\n    plugin: some-package\n' +
+        '  - id: pkg\n    plugin: old-name\n    config: { k: v }\n    disabled: true\n',
+    );
+    upsertOverlayPluginRef(dataDir, 'pkg', 'new-name');
+    expect(loadComposition(dataDir).rows).toEqual([
+      { id: 'fresh', plugin: 'some-package' },
+      { id: 'pkg', plugin: 'new-name', config: { k: 'v' }, disabled: true },
     ]);
   });
 });

@@ -8,10 +8,29 @@
 
 /**
  * 活体事件名。统一小写斜线式 `'<域>/<动作>'`（如 session/event、tool/finished、
- * approval/decided）。完整清单随各模块 types 收口（35 钩子见插件契约篇 §2.2）；
- * M1 首发仅以字符串词汇约束，各模块落地时在此追加字面量联合。
+ * approval/decided）。
+ *
+ * 收口形态（契约篇 §1.1，2026-08-23 M2 /reload 纵切）：目录字面量联合 +
+ * `(string & {})` 自定义事件逃生口——目录字面量给插件作者 IDE 自动补全与
+ * 拼写校验，`(string & {})` 保住「自定义事件须显式注册」的字符串面；
+ * 运行时裁判是 context 的事件注册表（目录 ∪ 装载期 customs），未注册名
+ * 在 on/emit/waterfall/parallel/serial 五面抛 EVENT_UNKNOWN。
+ * 联合与 LIVE_EVENT_CATALOG 名集由 check-events 第四族双向断言——
+ * 目录新增名忘进联合（或反之）CI 即红，两处永不漂移。
  */
-export type EventName = string;
+export type EventName =
+  | 'session/event'
+  | 'session_shutdown'
+  | 'tools_pre_execute'
+  | 'tools_execute'
+  | 'tools_post_execute'
+  | 'tools_change'
+  | 'approval/answer'
+  | 'plugin/activated'
+  | 'plugin/failed'
+  | 'plugin/skipped'
+  | 'composition/reloaded'
+  | (string & {});
 
 /**
  * 活体事件目录项（契约篇 §6.3 第 4 条——CI 双向断言的数据源）。
@@ -94,10 +113,19 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'composition/reloaded',
     mode: 'emit',
-    note: '组合树 /reload 全量重载完成（预留——随 /reload 纵切落码，契约篇 §1.3）',
-    reserved: true,
+    note: '组合树 /reload 全量重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单）',
   },
 ];
+
+/** composition/reloaded 载荷：三态行 id 清单（/reload 后订阅方可对账「实际跑的是什么」） */
+export interface CompositionReloadedPayload {
+  /** 激活成功的行 id */
+  readonly activated: readonly string[];
+  /** 失败的行 id（/reload 逐行响亮报告、不杀进程——成功行照常运行） */
+  readonly failed: readonly string[];
+  /** 跳过的行 id */
+  readonly skipped: readonly string[];
+}
 
 /** 目录查询：按名取定义（含判断某事件是否已知总线活体事件） */
 export function findLiveEvent(name: string): LiveEventDefinition | undefined {

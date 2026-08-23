@@ -5,13 +5,28 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { AppError } from '../contracts/errors.js';
-import { createContext } from './context.js';
+import { createContext, registerLiveEvent } from './context.js';
 import { createLogger } from './logger.js';
 import type { ContextScope } from './types.js';
 
 /** 静默 logger：测试不向 stderr 喷日志（异常隔离用例会走 error 通道） */
 function silentRoot() {
   return createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+}
+
+/**
+ * 带自定义词汇的测试根作用域（2026-08-23 词汇执法落码后）：createContext 产物
+ * 只含目录词汇，用例里的自定义事件名须先经 registerLiveEvent 登记（装载器在
+ * 真实路径对插件 events 声明做同样的事）。
+ */
+function scopedRoot(
+  events: ReadonlyArray<{ name: string; mode: 'emit' | 'waterfall' | 'parallel' | 'serial' }>,
+): ContextScope {
+  const scope = silentRoot();
+  for (const evt of events) {
+    registerLiveEvent(scope, { name: evt.name, mode: evt.mode, note: '测试词汇' });
+  }
+  return scope;
 }
 
 describe('effect 生命周期', () => {
@@ -50,7 +65,7 @@ describe('effect 生命周期', () => {
 
 describe('事件四模式', () => {
   it('emit：全部监听器触发；单个同步失败隔离、不中断其余', () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/x', mode: 'emit' }]);
     const ok = vi.fn();
     scope.on('evt/x', () => {
       throw new Error('boom');
@@ -61,26 +76,26 @@ describe('事件四模式', () => {
   });
 
   it('on 返回的 Disposer 可退订；作用域 dispose 自动退订', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/x', mode: 'emit' }]);
     const handler = vi.fn();
     const off = scope.on('evt/x', handler);
     off();
     scope.emit('evt/x');
     expect(handler).not.toHaveBeenCalled();
 
-    const scope2 = silentRoot();
+    const scope2 = scopedRoot([{ name: 'evt/y', mode: 'emit' }]);
     const handler2 = vi.fn();
     scope2.on('evt/y', handler2);
     await scope2.dispose();
     // dispose 后根上再 emit（新作用域共享总线）：已退订的监听器不再触发
-    const other = silentRoot();
+    const other = scopedRoot([{ name: 'evt/y', mode: 'emit' }]);
     other.on('evt/y', () => {});
     other.emit('evt/y');
     expect(handler2).not.toHaveBeenCalled();
   });
 
   it('emit 基线：无异常路径下单监听器确实被触发（防空跑假阳性）', () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/base', mode: 'emit' }]);
     const handler = vi.fn();
     scope.on('evt/base', handler);
     scope.emit('evt/base', 'x');
@@ -88,7 +103,8 @@ describe('事件四模式', () => {
   });
 
   it('prepend 插队：先于普通注册执行', async () => {
-    const scope = silentRoot();
+    // 本用例经 serial 派发等序（serial 语义：注册序 = 执行序）——evt/x 按 serial 登记
+    const scope = scopedRoot([{ name: 'evt/x', mode: 'serial' }]);
     const order: string[] = [];
     scope.on('evt/x', () => order.push('normal'));
     scope.on('evt/x', () => order.push('prepended'), { prepend: true });
@@ -97,7 +113,7 @@ describe('事件四模式', () => {
   });
 
   it('serial：按注册序串行执行，失败隔离不阻断后续', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/s', mode: 'serial' }]);
     const order: number[] = [];
     scope.on('evt/s', () => order.push(1));
     scope.on('evt/s', () => {
@@ -113,7 +129,7 @@ describe('事件四模式', () => {
   });
 
   it('parallel：全部触发且等待完成，失败隔离', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/p', mode: 'parallel' }]);
     const seen: number[] = [];
     scope.on('evt/p', async () => {
       await new Promise((r) => setTimeout(r, 5));
@@ -130,7 +146,7 @@ describe('事件四模式', () => {
   });
 
   it('waterfall：监听器调 next 委托下游，链尾 next 兜底', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
     const visited: string[] = []; // 显式留痕：防「零监听器空跑」假阳性
     scope.on('evt/w', (_value: number, next: () => Promise<number>) => {
       visited.push('h1');
@@ -146,7 +162,7 @@ describe('事件四模式', () => {
   });
 
   it('waterfall：监听器不调 next 即短路，其返回值为最终值', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
     const downstream = vi.fn();
     scope.on('evt/w', (value: number, next: () => unknown) => `intercepted:${value}`);
     scope.on('evt/w', downstream);
@@ -156,7 +172,7 @@ describe('事件四模式', () => {
   });
 
   it('waterfall：prepend 拦截器先执行（工具管道守门段依赖）', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/w', mode: 'waterfall' }]);
     scope.on('evt/w', (v: string, next: () => unknown) => `${v}-normal`);
     scope.on(
       'evt/w',
@@ -169,7 +185,7 @@ describe('事件四模式', () => {
   });
 
   it('waterfall：无监听器直接落链尾 next', async () => {
-    const scope = silentRoot();
+    const scope = scopedRoot([{ name: 'evt/none', mode: 'waterfall' }]);
     const result = await scope.waterfall<number>('evt/none', () => 9);
     expect(result).toBe(9);
   });
@@ -222,7 +238,7 @@ describe('服务注册表 provide/get', () => {
 
 describe('fork 作用域', () => {
   it('子作用域共享事件总线与服务表，effect 栈独立（LIFO 各自回卷）', async () => {
-    const root = silentRoot();
+    const root = scopedRoot([{ name: 'evt/shared', mode: 'emit' }]);
     const order: string[] = [];
     root.effect(() => () => order.push('root'));
     const a = root.fork({ name: 'a' });
@@ -291,6 +307,7 @@ describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', (
     const { lines, sink } = captureSink();
     // 归因错列场景：root emit、插件 B 的监听器炸——日志必须指向 B
     const root = createContext({ logger: createLogger({ module: 'test', level: 'debug', sink }) });
+    registerLiveEvent(root, { name: 'evt/boom', mode: 'emit', note: '测试词汇' });
     const pluginB = root.fork({ name: 'plugin-b' });
     pluginB.on('evt/boom', () => {
       throw new Error('handler boom');
@@ -327,5 +344,85 @@ describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', (
     const record = JSON.parse(lines[0]!) as { module: string; msg: string };
     expect(record.module).toBe('test:mod');
     expect(record.msg).toBe('调级后可见');
+  });
+});
+
+describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵切）', () => {
+  it('五面未注册名一律 EVENT_UNKNOWN——拼错名从「监听器永不触发的静默死亡」变响亮失败', async () => {
+    const scope = silentRoot(); // 仅目录词汇，evt/typo 未登记
+    // on 是同步面：直接抛
+    try {
+      scope.on('evt/typo', () => {});
+      expect.unreachable('on 未注册名应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_UNKNOWN');
+    }
+    // 派发四面是 async 方法（同步抛会化成 rejection）——统一 async 包装后断言拒绝
+    for (const dispatch of [
+      () => scope.emit('evt/typo'),
+      () => scope.parallel('evt/typo'),
+      () => scope.serial('evt/typo'),
+      () => scope.waterfall('evt/typo', () => 1),
+    ]) {
+      await expect(async () => dispatch()).rejects.toMatchObject({ code: 'EVENT_UNKNOWN' });
+    }
+  });
+
+  it('派发方法与声明 mode 不一致抛 EVENT_MODE_MISMATCH（mode 是事件公开契约）', async () => {
+    const scope = silentRoot();
+    registerLiveEvent(scope, { name: 'emit/only', mode: 'emit', note: '测试词汇' });
+    await expect(async () => scope.serial('emit/only')).rejects.toMatchObject({ code: 'EVENT_MODE_MISMATCH' });
+    registerLiveEvent(scope, { name: 'wf/only', mode: 'waterfall', note: '测试词汇' });
+    await expect(async () => scope.emit('wf/only')).rejects.toMatchObject({ code: 'EVENT_MODE_MISMATCH' });
+  });
+
+  it('registerLiveEvent 撞名抛 EVENT_DUPLICATE——custom 互撞与撞目录名同罪', () => {
+    const scope = silentRoot();
+    registerLiveEvent(scope, { name: 'dup/name', mode: 'emit', note: '测试词汇' });
+    try {
+      registerLiveEvent(scope, { name: 'dup/name', mode: 'emit', note: '测试词汇' });
+      expect.unreachable('custom 互撞应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_DUPLICATE');
+    }
+    try {
+      registerLiveEvent(scope, { name: 'tools_change', mode: 'emit', note: '撞目录名' });
+      expect.unreachable('撞目录名应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_DUPLICATE');
+    }
+  });
+
+  it('注销器摘词后派发回归 EVENT_UNKNOWN（词汇表成员资格实时生效）', async () => {
+    const scope = silentRoot();
+    const off = registerLiveEvent(scope, { name: 'temp/evt', mode: 'emit', note: '测试词汇' });
+    scope.on('temp/evt', () => {}); // 词汇在册——on 不抛即通过
+    off();
+    await expect(async () => scope.emit('temp/evt')).rejects.toMatchObject({ code: 'EVENT_UNKNOWN' });
+  });
+
+  it('锚作用域 dispose 级联注销装载期词汇（/reload 卸载基底回归锁）', async () => {
+    const anchor = silentRoot();
+    const pluginScope = anchor.fork({ name: 'p' });
+    // 加载器形态：词汇登记经 effect 挂派生作用域栈（装载阶段①的真实接线方式）
+    pluginScope.effect(() => registerLiveEvent(anchor, { name: 'p/done', mode: 'emit', note: '测试词汇' }));
+    anchor.emit('p/done'); // 词汇在册——派发不抛即通过（无监听器为合法 no-op）
+    await anchor.dispose(); // 锚回卷 → 级联回卷子作用域 → 词汇随 effect LIFO 注销
+    // 派发面无 stale 护栏（emit 不查 disposed）——词汇已摘即应响 EVENT_UNKNOWN
+    try {
+      anchor.emit('p/done');
+      expect.unreachable('dispose 后词汇应已注销');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_UNKNOWN');
+    }
+  });
+
+  it('registerLiveEvent 拒绝仿造作用域（CONTEXT_DISPOSED——登记通道只认 createContext/fork 产物）', () => {
+    try {
+      registerLiveEvent({} as ContextScope, { name: 'fake/evt', mode: 'emit', note: '测试词汇' });
+      expect.unreachable('仿造作用域应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_DISPOSED');
+    }
   });
 });

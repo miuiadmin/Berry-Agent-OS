@@ -160,3 +160,17 @@ export const PLUGIN_APPLY_FAILED = registerErrorCode('PLUGIN_APPLY_FAILED');
 export const PLUGIN_ENTRY_UNRESOLVED = registerErrorCode('PLUGIN_ENTRY_UNRESOLVED');
 /** composition：组合树行 schema 违规（overlay 缺 id / 字段类型错 / 未知字段 / fixed 行被禁用——pre-release 拒绝式，契约篇 §6.5） */
 export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');
+
+/* ------------------------------------------------------------------ */
+/* 事件词汇执法码族（契约篇 §1.1，2026-08-23 M2 /reload 纵切）——        */
+/* 「显式注册」的运行时半边：拼错事件名不再静默 no-op。                  */
+/* ------------------------------------------------------------------ */
+
+/** events：on/emit/waterfall/parallel/serial 五面遇到未注册事件名（目录 ∪ 装载期 customs 之外——拼错名 = 监听器永不触发的静默死亡，改为响亮失败） */
+export const EVENT_UNKNOWN = registerErrorCode('EVENT_UNKNOWN');
+/** events：自定义事件登记撞名（与目录或已登记 custom 重名——词汇表拒绝静默覆盖，契约篇 §1.2 events 第四件） */
+export const EVENT_DUPLICATE = registerErrorCode('EVENT_DUPLICATE');
+/** events：派发方法与事件声明的 mode 不一致（mode 是事件公开契约的一部分——插件侧静态 CI 罩不住，运行时执法） */
+export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
+/** plugin：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
+export const PLUGIN_INSTALL_FAILED = registerErrorCode('PLUGIN_INSTALL_FAILED');
