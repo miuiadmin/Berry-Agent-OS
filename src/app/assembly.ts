@@ -7,7 +7,7 @@
  * 可写根）→ skills（本地 provider + refresh）→ 插件装载 → 内置命令。
  *
  * 2026-08-24 应用面第一纵切（契约篇 §5.4 规范先行）：**对话应用装配本体迁
- * `builtin:chat` 内置件**（默认层首行）——会话选择/续接、durable 绑定、
+ * `builtin:chat` 官方件**（默认层首行）——会话选择/续接、durable 绑定、
  * request/header 差分化、ConversationDriver 构造、ctx.agent provide 全在件内；
  * 组合根不再直装对话，只持活引用槽（session/durable/driver/chat 控制面）与
  * 装配层接线（tools_change/prompts_change 刷新、/new 编排、/reload、信号与
@@ -454,9 +454,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   ctx.provide('paths', createPathsService(compositionDir));
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
-  // 内置插件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
-  // 宿主活资源（官方内置件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
-  // 无 store，memory 内置件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
+  // 官方件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
+  // 宿主活资源（官方件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
+  // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
   // model/活会话引用/父沙箱档/根总线（app/subagent-factory.ts——每子独立装配序）；
   // chat 件收会话选择/驱动/ctx.agent 四件（app/chat-plugin.ts）——无条件注入，
   // 无持久层时件自降级空转（装载面完好——dump-config 诊断树不断链）。

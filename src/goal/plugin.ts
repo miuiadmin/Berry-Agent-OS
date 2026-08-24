@@ -1,5 +1,5 @@
 /**
- * L3 goal — 官方内置件（骨架篇 §6.8 `builtin:goal`，Ring 2 编排域官方件）。
+ * L3 goal — 官方件（骨架篇 §6.8 `builtin:goal`，Ring 2 编排域官方件）。
  *
  * 长目标续跑：**没有新循环机器**——持久 goal 状态（goals 表）+ run 结算边界
  * 注入提示词（onRunSettled → ctx.agent.sendUserMessage 三通道路由）+ 预算刹车
@@ -17,14 +17,14 @@
  * needs-resume。wasResumed 为惰性取值（应用面第一纵切）：chat 对话应用件（默认
  * 层首行）装载时绑定会话并回写旗标，goal 轮次激活必晚于它——apply 期首读必得
  * 居值；一次性旗标（bootDemotionArmed）保证 /reload 重激活不误降级（/reload
- * 复用同一内置件实例，闭包旗标跨重载存活）。
+ * 复用同一官方件实例，闭包旗标跨重载存活）。
  *
  * 'agent' 走 optionalInject（应用面第一纵切）：chat 件未装载/诊断装配
  * （persist:false）时无 ctx.agent——③续跑触发降级停用（warn），④预算刹车保留
  * 记账与刹停、仅跳过收尾注入；①工具②/goal 命令不受影响（inject 硬依赖只剩
  * tools/channels/ui——内核恒供）。
  *
- * persist:false 降级：无连接即 warn 空转（同 memory 内置件——诊断面行可见、
+ * persist:false 降级：无连接即 warn 空转（同 memory 官方件——诊断面行可见、
  * 装载成功，语义诚实）。
  */
 
@@ -76,7 +76,7 @@ interface SessionEventEnvelope {
   readonly event?: { readonly type?: unknown; readonly data?: unknown };
 }
 
-/** 内置件构造依赖（装配期闭包注入——官方内置件 = 宿主装配特权） */
+/** 官方件构造依赖（装配期闭包注入——官方件 = 宿主装配特权） */
 export interface GoalPluginDeps {
   /** SQLite 连接（goals 表物理载体）；缺省 = persist:false 降级 warn 空转 */
   readonly connection?: DatabaseConnection;
@@ -91,7 +91,7 @@ export interface GoalPluginDeps {
 }
 
 /**
- * 构造 goal 内置件（builtins 注册表 `builtin:goal` 行）。
+ * 构造 goal 官方件（builtins 注册表 `builtin:goal` 行）。
  */
 export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
   // boot 降级一次性旗标：armed 恒 true 起步，首次 apply 读 wasResumed() 惰性值
@@ -113,13 +113,13 @@ export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
 }
 
 /**
- * 内置件 apply 本体（接线序：boot 降级 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
+ * 官方件 apply 本体（接线序：boot 降级 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
  * 异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
  */
 async function applyGoalPlugin(ctx: Context, deps: GoalPluginDeps, consumeBootDemotion: () => boolean): Promise<void> {
   // persist:false 降级：无物理层即无 goal（状态/记账/续跑全依赖 goals 表）——warn 空转
   if (!deps.connection) {
-    ctx.logger.warn('无持久层（persist:false）——goal 内置件空转：工具/命令/续跑/预算刹车均不注册');
+    ctx.logger.warn('无持久层（persist:false）——goal 官方件空转：工具/命令/续跑/预算刹车均不注册');
     return;
   }
   const store = new GoalStore(deps.connection);

@@ -1,5 +1,5 @@
 /**
- * L3 memory 集成测试（官方内置件 apply 接线全栈）——真 Context + 真库 + 宿主
+ * L3 memory 集成测试（官方件 apply 接线全栈）——真 Context + 真库 + 宿主
  * 服务最小面（tools/prompts/sessions 注册表真件；llm 走结构性替身——模型层是
  * mock 停靠站）。
  *
@@ -123,7 +123,7 @@ function applyPlugin(
   return plugin.apply(ctx as never, config) as Promise<void>;
 }
 
-describe('memory 内置件 apply（persist:false 降级）', () => {
+describe('memory 官方件 apply（persist:false 降级）', () => {
   it('无 store：warn 空转——零注册零抛（dump-config 诊断面诚实）', async () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
     const plugin = createMemoryPlugin({ workspace: () => '/w' });
@@ -134,7 +134,7 @@ describe('memory 内置件 apply（persist:false 降级）', () => {
 
 /* ---------------- 全栈接线 ---------------- */
 
-describe('memory 内置件 apply（全栈接线序）', () => {
+describe('memory 官方件 apply（全栈接线序）', () => {
   it('工具五件 + 简报段真注册；dispose 回卷整体注销（effect LIFO）', async () => {
     const h = setup();
     const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
@@ -327,7 +327,7 @@ async function runTransform(h: Harness): Promise<Array<{ role: string; content: 
   )) as Array<{ role: string; content: unknown }>;
 }
 
-describe('memory 内置件 apply（简报差分追注）', () => {
+describe('memory 官方件 apply（简报差分追注）', () => {
   it('分叉落账 + 注入：基线后新条目 → memory/diff 入真会话日志 + memory-diff 注入进请求尾', async () => {
     const h = setup();
     const { memory, session } = await setupDiffBaseline(h);

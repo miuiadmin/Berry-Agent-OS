@@ -24,7 +24,7 @@ import type { BuiltinPluginModule, CompositionRow, PluginPlanRow, PluginSkipReas
 export const OVERLAY_FILENAME = 'overlay.yaml';
 
 /**
- * 内置插件注册表（契约篇 §6.1）：键 = 完整引用串（`builtin:memory` 式），值 = 宿主
+ * 官方件注册表（契约篇 §6.1）：键 = 完整引用串（`builtin:memory` 式），值 = 宿主
  * 随包模块引用。组合根装配期构造（store/workspace 等依赖以闭包注入）；`builtin:`
  * 是保留前缀——注册表是唯一解析面，overlay 不可能引用非官方注册件（查不到即 unresolved）。
  */
@@ -230,13 +230,13 @@ export function resolvePluginEntry(ref: string, dataDir: string): string | undef
   return undefined;
 }
 
-/** `builtin:` 保留前缀（契约篇 §6.1）——入口解析链最先查内置注册表 */
+/** `builtin:` 保留前缀（契约篇 §6.1）——入口解析链最先查官方件注册表 */
 const BUILTIN_PREFIX = 'builtin:';
 
 /**
  * 装载组合树（合成 + 禁用解析 + 入口解析 → 装载计划）。
  * @param dataDir 数据目录（overlay 与装机子树的根）
- * @param builtins 内置插件注册表（组合根装配期构造；缺省空表——`builtin:` 行一律
+ * @param builtins 官方件注册表（组合根装配期构造；缺省空表——`builtin:` 行一律
  * unresolved。dump-config 纯合成面也传同构注册表，树形不因诊断态失真）
  */
 export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry = {}): CompositionReport {
@@ -255,14 +255,14 @@ export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry
         `组合树行 ${row.id}：激活行缺 plugin 引用（insert 行必须自带；替换行不可只留空引用）`,
       );
     }
-    // builtin: 前缀 = 入口解析链最先查内置注册表（§6.1）；查不到即 unresolved——
+    // builtin: 前缀 = 入口解析链最先查官方件注册表（§6.1）；查不到即 unresolved——
     // 注册表是宿主唯一解析面，overlay 不可能借该前缀伪装官方件身份
     if (ref.startsWith(BUILTIN_PREFIX)) {
       const module = builtins[ref];
       if (module === undefined) {
         plan.push({
           id: row.id,
-          unresolved: `内置件「${ref}」不在宿主注册表（builtin: 是保留前缀——仅官方随包件可用）`,
+          unresolved: `官方件「${ref}」不在宿主注册表（builtin: 是保留前缀——仅官方随包件可用）`,
         });
       } else {
         plan.push({ id: row.id, builtin: module, ...(row.config !== undefined ? { config: row.config } : {}) });

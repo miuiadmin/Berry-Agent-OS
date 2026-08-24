@@ -2,7 +2,7 @@
  * L3 memory — 常驻简报渲染（记忆篇 §6 注入通道 1 的渲染件，pi-4(a) 具名段内容侧）。
  *
  * 纯函数： briefing() 取数（store.ts）→ 本渲染 → ctx.prompts.registerSection
- * ({ id: 'memory/core', render }) 段内容（插件接线随纵切五官方内置件）。
+ * ({ id: 'memory/core', render }) 段内容（插件接线随纵切五官方件）。
  * 防注入框架（记忆篇 §6）：固定句式包裹——记忆内容是数据不是指令；截断可见。
  */
 

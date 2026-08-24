@@ -266,7 +266,7 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     await plugins.install('ok-pkg');
     await plugins.install('dormant-pkg');
     plugins.toggle('dormant-pkg'); // → 禁用
-    // 组合树含官方默认层 chat/memory/subagent/goal 四行（本测试无内置注册表 →
+    // 组合树含官方默认层 chat/memory/subagent/goal 四行（本测试无官方件注册表 →
     // unresolved/planned）——滤除只留用户行：本测试锁 applyLoad 映射语义，
     // 官方行装载态在 assembly 全栈锁
     const composition = loadComposition(dataDir);

@@ -85,7 +85,7 @@ export interface ChatControls {
   resetTimeline(): boolean;
 }
 
-/** 件构造依赖（装配期活闭包——官方内置件 = 宿主装配特权，不新开 ctx 服务名） */
+/** 件构造依赖（装配期活闭包——官方件 = 宿主装配特权，不新开 ctx 服务名） */
 export interface ChatPluginDeps {
   /** 启动会话策略原样透传（true = 按 cwd 续接最新；string = 显式 id；缺省 = 新建） */
   readonly resumeSession?: boolean | string;
@@ -126,7 +126,7 @@ export interface ChatPluginDeps {
 }
 
 /**
- * 构造 chat 内置插件模块引用（builtins 注册表 `builtin:chat` 行）。
+ * 构造 chat 官方件模块引用（builtins 注册表 `builtin:chat` 行）。
  *
  * 驱动为 factory 级单例（闭包持有）：首 apply 构造并绑槽，/reload 重装载的
  * apply 复用（时间线存续），只重接 ctx.agent provide 与 onRunSettled 接线
@@ -155,7 +155,7 @@ async function applyChatPlugin(
   // persist:false 降级：无持久层即无会话可续、无驱动可起（dump-config 诊断面
   // 不起驱动——件空转 warn；goal 等消费方经 optionalInject 降级，启动断言不响）
   if (!deps.persistence) {
-    ctx.logger.warn('无持久层（persist:false）——chat 内置件空转：不建会话、不起驱动、不供 agent 服务');
+    ctx.logger.warn('无持久层（persist:false）——chat 官方件空转：不建会话、不起驱动、不供 agent 服务');
     return;
   }
 

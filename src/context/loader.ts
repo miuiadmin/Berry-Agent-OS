@@ -196,7 +196,7 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
     try {
       let mod: Record<string, unknown>;
       if (row.builtin !== undefined) {
-        // 官方内置件（契约篇 §6.1 `builtin:` 前缀）：宿主随包函数引用，不经 jiti、
+        // 官方件（契约篇 §6.1 `builtin:` 前缀）：宿主随包函数引用，不经 jiti、
         // 不受插件零 import 约束——包成模块记录后与文件插件走**完全同轨**的形状
         // 校验/事件登记/轮次激活/生命周期事件管线（apply 替位 default，字段同名转抄）
         mod = { default: row.builtin.apply };

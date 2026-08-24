@@ -1,5 +1,5 @@
 /**
- * L5 app — goal 内置件全栈测试（纵切二：默认第三行 + 工具三件 + /goal 命令 +
+ * L5 app — goal 官方件全栈测试（纵切二：默认第三行 + 工具三件 + /goal 命令 +
  * 续跑触发 + 预算刹车 + boot 降级）。
  *
  * mock 只停在模型层（scripted streamFn），其余全真：真装配（默认层 goal 行 +
@@ -145,7 +145,7 @@ function userTexts(context: LlmContext): string[] {
 
 /* ---------------- 用例 ---------------- */
 
-describe('goal 内置件全栈：工具三件 + schema 执法', () => {
+describe('goal 官方件全栈：工具三件 + schema 执法', () => {
   it('默认层第三行激活 + 工具三件进面（goal_get/goal_set/goal_update）', async () => {
     const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toContainEqual(['goal', 'activated']);
@@ -306,7 +306,7 @@ describe('boot 降级 + /goal 命令族 + /reload 不双降（跨进程真库文
     expect(notifies.some((n) => n.includes('重新激活'))).toBe(true);
     expect(await goalText(second)).toContain('状态：active');
 
-    // /reload：复用同一内置件实例重跑 apply——一次性 boot 旗标已解除，不误降级
+    // /reload：复用同一官方件实例重跑 apply——一次性 boot 旗标已解除，不误降级
     const reloaded = await second.reload();
     expect(reloaded.payload?.activated).toContain('goal');
     expect(await goalText(second)).toContain('状态：active');

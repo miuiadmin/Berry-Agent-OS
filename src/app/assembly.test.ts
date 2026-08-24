@@ -753,7 +753,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(runtime.systemPrompt.indexOf('插件段内容：记住用中文注释')).toBeGreaterThan(
       runtime.systemPrompt.indexOf('terminal-based coding assistant'),
     );
-    // 段 id 清单面（字典序；memory/core 简报段 + subagent/list 清单段为官方内置件
+    // 段 id 清单面（字典序；memory/core 简报段 + subagent/list 清单段为官方件
     // 注册——memory 空库物化为空串、subagent 单 provider 物化一行清单）
     const prompts = runtime.ctx.get<{ listSections(): string[] }>('prompts');
     expect(prompts.listSections()).toEqual(['demo/notice', 'memory/core', 'subagent/list']);

@@ -1,7 +1,7 @@
 /**
  * subagent 模块 — in-process provider（骨架篇 §6.1「每子独立装配 dsh-10」+ 纵切二落码注记）。
  *
- * 子会话 = 同进程新 loop 实例。**装配本体在工厂回调**（app/内置件闭包注入——本模块
+ * 子会话 = 同进程新 loop 实例。**装配本体在工厂回调**（app/官方件闭包注入——本模块
  * 不反向依赖组合根，只依赖 agent 公开的 RunResult 型）：工厂内 createContext + 工具
  * 管道 + 守门 + 审批 never + persistence.forkSession(origin:'delegation') + startRun。
  * 硬规则：禁止子代理共享根 ctx 管道后靠调用期识别 caller——per-child 隔离装配解决。
@@ -47,7 +47,7 @@ export interface InProcessChild {
   dispose(): Promise<void> | void;
 }
 
-/** 每子装配工厂（app/内置件闭包注入——subagent 模块不反向依赖组合根） */
+/** 每子装配工厂（app/官方件闭包注入——subagent 模块不反向依赖组合根） */
 export type InProcessChildFactory = (opts: InProcessChildFactoryOptions) => InProcessChild;
 
 /** provider 组装选项 */

@@ -2,7 +2,7 @@
  * L3 memory 公共面——跨模块只许 import 本文件（拓扑白名单边：memory→persist 经 index）。
  *
  * 纵切一：表族迁移项 + 合并管线纯函数 + MemoryStore DAO；
- * 纵切五：session_fts 迁移/索引 + 官方内置件模块（createMemoryPlugin——组合根内置
+ * 纵切五：session_fts 迁移/索引 + 官方件模块（createMemoryPlugin——组合根内置
  * 注册表收纳，`builtin:memory` 行激活）。
  */
 

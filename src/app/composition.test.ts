@@ -306,7 +306,7 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
 /* ---------------- builtin: 前缀解析（契约篇 §6.1，纵切五） ---------------- */
 
 describe('builtin: 保留前缀解析', () => {
-  /** 测试替身内置件（形状合法即可——合成面不调 apply） */
+  /** 测试替身官方件（形状合法即可——合成面不调 apply） */
   const stubBuiltin = { name: 'memory-stub', apply: async () => {} };
 
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {

@@ -1,5 +1,5 @@
 /**
- * L5 app — subagent 内置插件（契约篇 §6.1 `builtin:subagent`；骨架篇 §6.1 纵切四注记）。
+ * L5 app — subagent 官方件（契约篇 §6.1 `builtin:subagent`；骨架篇 §6.1 纵切四注记）。
  *
  * 官方默认层第二行（Ring 2 真·可卸——卸掉即无委派能力，核心循环不破）。
  * 三注册全挂 ctx.effect（装载锚 dispose 即 LIFO 回卷，/plugin-toggle 同语义）：
@@ -20,7 +20,7 @@ import { createInProcessProvider } from '../subagent/inprocess.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { Session } from '../session/session.js';
 
-/** 内置件构造依赖（装配期活闭包——真工厂零件 + 会话活引用） */
+/** 官方件构造依赖（装配期活闭包——真工厂零件 + 会话活引用） */
 export interface SubagentPluginDeps {
   /** in-process 真工厂（app/subagent-factory.ts 组合根闭包产物） */
   readonly factory: InProcessChildFactory;
@@ -36,7 +36,7 @@ const SUBAGENT_CONFIG_SCHEMA = Type.Object({
   maxDepth: Type.Optional(Type.Number({ minimum: 1, maximum: 10 })),
 });
 
-/** 内置件配置（经 typebox 校验后的落码形态） */
+/** 官方件配置（经 typebox 校验后的落码形态） */
 type SubagentConfig = { tokenBudget?: number; maxDepth?: number };
 
 /** 工具注册面（ctx.get('tools') 的最小结构面——与 memory 插件同款局部面） */
@@ -53,7 +53,7 @@ interface PromptsRegisterFace {
 const AGENT_TOOL_NAME = 'agent';
 
 /**
- * 构造 subagent 内置插件模块引用（builtins 注册表 `builtin:subagent` 行）。
+ * 构造 subagent 官方件模块引用（builtins 注册表 `builtin:subagent` 行）。
  *
  * @param deps 真工厂 + 活会话引用
  * @returns BuiltinPluginModule（与文件插件 named export 同形——装载管线完全同轨）
@@ -68,7 +68,7 @@ export function createSubagentPlugin(deps: SubagentPluginDeps): BuiltinPluginMod
   };
 }
 
-/** 内置件 apply 本体（三注册——全部挂 ctx.effect 随装载锚回卷） */
+/** 官方件 apply 本体（三注册——全部挂 ctx.effect 随装载锚回卷） */
 async function applySubagentPlugin(ctx: Context, cfg: SubagentConfig, deps: SubagentPluginDeps): Promise<void> {
   const subagents = ctx.get<SubagentsServiceFace>('subagents');
   const tools = ctx.get<ToolsRegisterFace>('tools');

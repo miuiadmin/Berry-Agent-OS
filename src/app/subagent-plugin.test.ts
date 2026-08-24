@@ -1,5 +1,5 @@
 /**
- * L5 app — subagent 内置件全栈测试（纵切四：默认插件行 + 委派工具 + 真工厂）。
+ * L5 app — subagent 官方件全栈测试（纵切四：默认插件行 + 委派工具 + 真工厂）。
  *
  * mock 只停在模型层（scripted streamFn 父子同源），其余全真：真装配（默认层
  * subagent 行激活）、真委派工具（agent 经三段管道）、真工厂（每子独立 ctx +
@@ -112,7 +112,7 @@ async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}
 
 /* ---------------- 全栈用例 ---------------- */
 
-describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真工厂）', () => {
+describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真工厂）', () => {
   it('默认层第二行激活 + 清单段物化：agent 工具进面、subagent/list 段含 provider 名', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
