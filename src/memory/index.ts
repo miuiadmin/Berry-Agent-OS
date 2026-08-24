@@ -32,8 +32,9 @@ export {
   type MemoryInput,
   type AddMemoryOutcome,
 } from './store.js';
-// canonical 工作区根（§3 project 键的哈希入参——git commondir 归并，第十四批 A 组）
-export { canonicalWorkspaceRoot } from './workspace.js';
+// canonical 工作区根已收编宿主 context（2026-08-25 检索族纵切批——记忆篇 §3
+// 挂账「三处同源」兑现：memory owner_key / skills 信任判定 / 未来 project 域键；
+// 从 context/index.js 导入，本模块不再转出）
 export {
   detectSecret,
   detectInstructionInjection,

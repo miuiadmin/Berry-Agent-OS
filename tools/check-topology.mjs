@@ -66,7 +66,7 @@ const BARE_IMPORTS = {
   '@earendil-works/pi-tui': ['channels', 'app'],
   'better-sqlite3': ['persist'],
   yaml: ['app', 'skills'],
-  ignore: ['skills'],
+  ignore: ['skills', 'tools'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切；与 skills 同语义各自实现，第三消费者出现再议共享）
   jiti: ['context', 'app'],
 };
 const TEST_ONLY_BARE = new Set(['vitest']);

@@ -1,14 +1,15 @@
 /**
- * L3 memory 单元测试（canonical 工作区根推导——记忆篇 §3 project 键定义，
- * 第十四批 A 组）：主仓库 / worktree（gitdir 指针 + commondir 归并）/ 子目录
- * 向上找 / 非 git 回退 / 进程内缓存。真临时目录 fixture，无 mock。
+ * L1 context 单元测试（canonical 工作区根推导——记忆篇 §3 project 键定义，
+ * 第十四批 A 组；2026-08-25 检索族纵切批收编宿主 context + project-aliases
+ * 重定向）：主仓库 / worktree（gitdir 指针 + commondir 归并）/ 子目录向上找 /
+ * 非 git 回退 / 进程内缓存 / 别名重定向与缓存失效。真临时目录 fixture，无 mock。
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { canonicalWorkspaceRoot } from './workspace.js';
+import { canonicalWorkspaceRoot, setProjectAliases } from './workspace.js';
 
 /** 测试根（整树 afterAll 清理） */
 let root: string;
@@ -69,5 +70,29 @@ describe('canonicalWorkspaceRoot（git commondir 归并——防 worktree/子目
     const again = join(root, 'main', 'packages');
     expect(canonicalWorkspaceRoot(again)).toBe(main);
     expect(canonicalWorkspaceRoot(again)).toBe(main); // 二次走缓存
+  });
+});
+
+describe('project-aliases 重定向（检索族纵切批——解非 git 回退脆性）', () => {
+  // 进程级表状态：每用例后还原空表，防污染同进程其他测试文件
+  afterEach(() => setProjectAliases({}));
+
+  it('现根命中别名 → 返回记账根（旧 project 键续用，零数据迁移）；未命中原样', () => {
+    const moved = join(root, 'moved-project'); // 「现根」：目录改名后的新位置
+    const ledger = join(root, 'old-path'); // 「记账根」：旧记忆键的哈希入参
+    mkdirSync(moved, { recursive: true });
+    setProjectAliases({ [moved]: ledger });
+    expect(canonicalWorkspaceRoot(moved)).toBe(ledger); // 命中重定向
+    const untouched = join(root, 'plain', 'nested'); // 既有用例目录（无别名）
+    expect(canonicalWorkspaceRoot(untouched)).toBe(untouched); // 未命中不受影响
+  });
+
+  it('别名重设即清探测缓存（旧缓存不得盖过新表）', () => {
+    const dir = join(root, 'alias-cache-probe');
+    mkdirSync(dir, { recursive: true });
+    expect(canonicalWorkspaceRoot(dir)).toBe(dir); // 表前求值——进缓存
+    const ledger = join(root, 'ledger-2');
+    setProjectAliases({ [dir]: ledger });
+    expect(canonicalWorkspaceRoot(dir)).toBe(ledger); // 缓存已被清，走新表
   });
 });

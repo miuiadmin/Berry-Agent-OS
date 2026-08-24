@@ -13,5 +13,7 @@ export type { ObservedState, WriteIntent } from './observed.js';
 export { ObservedFiles, resolveWriteIntent, requireObservedForEdit, statVersion } from './observed.js';
 export type { FsToolsOptions, FsTools } from './fs.js';
 export { createFsTools } from './fs.js';
+export type { SearchToolsOptions, SearchTools } from './search.js';
+export { createSearchTools, globToRegExp } from './search.js';
 export type { PatchOperation, PatchLine } from './apply-patch.js';
 export { parseApplyPatch, applyUpdateLines, addLinesToContent } from './apply-patch.js';

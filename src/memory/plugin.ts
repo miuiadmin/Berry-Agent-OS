@@ -23,7 +23,7 @@ import type { DatabaseConnection } from '../persist/index.js';
 import { registerMessageRole } from '../agent/messages.js';
 import { MemoryStore, projectOwnerKey } from './store.js';
 import type { MemoryKind } from './store.js';
-import { canonicalWorkspaceRoot } from './workspace.js';
+import { canonicalWorkspaceRoot } from '../context/index.js';
 import { SessionFtsIndex } from './session-fts.js';
 import { attachCorrectionExtractor } from './extract.js';
 import { attachPeriodicReview } from './review.js';

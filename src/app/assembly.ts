@@ -32,6 +32,7 @@ import { registerToolsService } from '../tools/registry.js';
 import type { ToolsService } from '../tools/registry.js';
 import type { ToolPipelineExecutor } from '../tools/index.js';
 import { createFsTools } from '../tools/fs.js';
+import { createSearchTools } from '../tools/search.js';
 import {
   APPROVAL_ANSWER_EVENT,
   createApprovalService,
@@ -70,8 +71,46 @@ import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { dataDir, dbPath } from './paths.js';
+import { setProjectAliases } from '../context/workspace.js';
 import type { CompositionReloadedPayload } from '../contracts/events.js';
+
+/**
+ * 装载 project-aliases 表（记忆篇 §3 挂账——canonical 根重定向的物理面，
+ * 2026-08-25 检索族纵切批兑现）。文件形如 { "<现根绝对路径>": "<记账根绝对路径>" }，
+ * 键值均字符串；进程级一次设置（组合根 ①b），表换即清探测缓存。
+ *
+ * 容错口径：文件缺失或不可读 = 常态，零日志返回空表（别名表是可选逃生
+ * 通道，缺它一切照旧）；读到内容但解析失败/形状不对 = warn 一次后整表
+ * 丢弃——半张表比没表更难排查，不拒启只留痕。
+ */
+function loadProjectAliases(dir: string, warn: (message: string) => void): Record<string, string> {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, 'project-aliases.json'), 'utf8');
+  } catch {
+    return {}; // 缺失/不可读：零日志空表
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      warn('project-aliases.json 形状不对（须为 { 绝对路径: 绝对路径 } 对象），整表忽略');
+      return {};
+    }
+    for (const value of Object.values(parsed)) {
+      if (typeof value !== 'string') {
+        warn('project-aliases.json 存在非字符串值（须为绝对路径），整表忽略');
+        return {};
+      }
+    }
+    return Object.fromEntries(Object.entries(parsed));
+  } catch (err) {
+    warn(`project-aliases.json 解析失败，整表忽略：${describeError(err)}`);
+    return {};
+  }
+}
 
 /** 缺省模型（Anthropic-first 拍板；APP_MODEL env 或 RuntimeOptions.model 覆盖） */
 export const DEFAULT_MODEL = 'anthropic/claude-sonnet-5';
@@ -191,6 +230,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   /* ---- ① 根作用域（模块加载器/插件 fork 的锚） ---- */
   const ctx = createContext({ name: 'app' });
+
+  /* ---- ①b project-aliases 表装载（canonical 根重定向——context 宿主原语，
+   * 记忆篇 §3 挂账随检索族纵切批兑现）：须早于任何 ownerKey/信任判定求值。
+   * 文件缺失 = 常态零日志；存在但坏 JSON/形状不对 = warn 一次 + 空表（别名表
+   * 是用户逃生通道，坏配置不拒启） ---- */
+  setProjectAliases(loadProjectAliases(dataDir(), ctx.logger.warn.bind(ctx.logger)));
 
   /* ---- ② 通道与 UI 服务 ---- */
   const { channels, ui } = registerChannelServices(ctx);
@@ -336,10 +381,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     onGateDecision: durableForward.gate,
   });
   const tools = registerToolsService(ctx, { pipeline });
-  // fs 工具族（可写根换 safety 推导——替换 tools 模块的 M1 过渡默认）
+  // fs 工具族 + 检索族（可写根换 safety 推导——替换 tools 模块的 M1 过渡默认；
+  // find/grep 只读族无 fence 需求——读任意位置允许，与 read 工具同口径）
   const writableRoots = createRootsProvider({ workspace, entries: DEFAULT_CARVE_OUT_ENTRIES });
   const fsTools = createFsTools({ writableRoots, workspace: () => workspace });
-  for (const def of fsTools.tools) tools.register(def);
+  const searchTools = createSearchTools({ workspace: () => workspace });
+  for (const def of [...fsTools.tools, ...searchTools.tools]) tools.register(def);
 
   /* ---- ⑥ 审批 + 守门行（审批对绑转发壳，件绑定后落 durable） ---- */
   const approval = createApprovalService(ctx, {

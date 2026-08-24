@@ -144,6 +144,8 @@ describe('createBerryRuntime 装配面', () => {
       'write',
       'edit',
       'ls',
+      'find',
+      'grep',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -196,7 +198,7 @@ describe('createBerryRuntime 装配面', () => {
     const runtime = await assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
-    expect(runtime.tools.list()).toHaveLength(5); // fs 四件 + agent（memory/goal 空转；subagent 无持久层照常）
+    expect(runtime.tools.list()).toHaveLength(7); // fs 四件 + find/grep + agent（memory/goal 空转；subagent 无持久层照常）
   });
 
   it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
@@ -237,6 +239,8 @@ describe('ConversationDriver + durable 接线', () => {
       'write',
       'edit',
       'ls',
+      'find',
+      'grep',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -368,6 +372,8 @@ describe('ConversationDriver + durable 接线', () => {
       'write',
       'edit',
       'ls',
+      'find',
+      'grep',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -697,6 +703,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'write',
       'edit',
       'ls',
+      'find',
+      'grep',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -918,6 +926,8 @@ describe('/reload 组合树重载', () => {
       'write',
       'edit',
       'ls',
+      'find',
+      'grep',
       'memory_write',
       'memory_forget',
       'memory_restore',

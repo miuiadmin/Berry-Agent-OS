@@ -29,6 +29,7 @@ import type { ToolPipelineExecutor } from '../tools/index.js';
 import { registerToolsService } from '../tools/registry.js';
 import type { ToolsService } from '../tools/registry.js';
 import { createFsTools } from '../tools/fs.js';
+import { createSearchTools } from '../tools/search.js';
 import type { ContextScope } from '../context/types.js';
 
 /** 真工厂依赖（组合根活闭包——全部随装配层状态活取值） */
@@ -97,11 +98,11 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
     const tools: ToolsService = registerToolsService(childCtx, { pipeline });
     const writableRoots = createRootsProvider({ workspace: deps.workspace, entries: DEFAULT_CARVE_OUT_ENTRIES });
     const fsTools = createFsTools({ writableRoots, workspace: () => deps.workspace });
+    const searchTools = createSearchTools({ workspace: () => deps.workspace });
     // §6.3 工具子集：include 名单外的工具不进子装配（声明即执法，不装再拦）
+    const allTools = [...fsTools.tools, ...searchTools.tools];
     const selected =
-      request.toolFilter !== undefined
-        ? fsTools.tools.filter((def) => request.toolFilter!.includes(def.name))
-        : fsTools.tools;
+      request.toolFilter !== undefined ? allTools.filter((def) => request.toolFilter!.includes(def.name)) : allTools;
     for (const def of selected) tools.register(def);
 
     /* ---- ⑤ 审批 never + 守门行（子代理无人值守：升权确定性拒绝；档位 = 父快照常量）---- */
