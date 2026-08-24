@@ -35,7 +35,7 @@ export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>
  * 非 fixed 真·可卸——/plugin-toggle memory 即减）。Ring 0 内核不进组合树；Ring 1 底座
  * 当前仍为组合根硬装配（行树化随全家桶次件迁移一并落，seam）。
  */
-// 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：memory 首行 + subagent 次行
+// 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：chat 首行 + memory/subagent/goal 顺移
 // （均非 fixed——overlay 可卸/可禁，卸掉仅失对应能力，核心循环不破）
 const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 首行 = chat 对话应用件（契约篇 §5.4 应用面第一纵切）：对话是应用不是内核
