@@ -18,7 +18,7 @@
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { Session } from '../session/session.js';
-import type { ConversationDriver } from './conversation.js';
+import type { ConversationDriver } from '../chat/index.js';
 
 /** 通知正文 output/diagnostic 摘录上限（字符）——通知是唤醒线索非产物载体 */
 const EXCERPT_LIMIT = 4000;

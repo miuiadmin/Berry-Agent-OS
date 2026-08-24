@@ -11,7 +11,7 @@
  */
 
 import { createTuiChannel } from '../channels/tui.js';
-import { projectedToAgentMessages } from './durable.js';
+import { projectedToAgentMessages } from '../chat/index.js';
 import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import type { ChannelHost } from '../channels/types.js';

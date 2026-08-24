@@ -1,5 +1,5 @@
 /**
- * L5 app — durable 接线测试（映射顺序 + 投影回读 round-trip，真实 Session 无库）。
+ * L4 chat — durable 接线测试（映射顺序 + 投影回读 round-trip，真实 Session 无库）。
  */
 
 import { describe, expect, it } from 'vitest';

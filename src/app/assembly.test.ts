@@ -32,7 +32,7 @@ import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { MEMORY_UTILITY_MIGRATION } from '../memory/index.js';
 import { GOAL_MIGRATION } from '../goal/index.js';
 import { createBerryRuntime } from './assembly.js';
-import { ConversationDriver } from './conversation.js';
+import { ConversationDriver } from '../chat/index.js';
 import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';

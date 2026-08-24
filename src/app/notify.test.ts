@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { Session } from '../session/session.js';
 import type { SubagentExecution, SubagentRequest, SubagentResult, SubagentSettlement } from '../contracts/subagent.js';
-import type { ConversationDriver, DeliverChannel, DeliverOptions } from './conversation.js';
+import type { ConversationDriver, DeliverChannel, DeliverOptions } from '../chat/index.js';
 import { createSubagentNotifier, formatSettlementNotice } from './notify.js';
 
 /* ---------------- 测试基建 ---------------- */

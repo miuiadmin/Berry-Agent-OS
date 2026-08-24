@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, AssistantStream, AssistantStreamEvent, StreamFn } from '../contracts/llm.js';
-import { ConversationDriver } from './conversation.js';
+import { ConversationDriver } from '../chat/index.js';
 import { defaultConvertToLlm } from './convert.js';
 
 /* ---------------- 测试基建 ---------------- */

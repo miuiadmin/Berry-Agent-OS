@@ -1,10 +1,10 @@
 /**
- * L5 app — 会话驱动（ConversationDriver：活数组 + 队列的通道宿主面 + run 编排）。
+ * L4 chat — 会话驱动（ConversationDriver：活数组 + 队列的通道宿主面 + run 编排）。
  *
- * 2026-08-24 应用面第一纵切自 assembly.ts 迁出（契约篇 §5.4 件本体①）：驱动
- * 构造归 `builtin:chat` 对话应用件，本文件只承载驱动本体——assembly（组合根）
- * 与 chat-plugin（件）及双入口共同引用，独立成文件防装配环（assembly 经
- * builtins 引 chat-plugin，chat-plugin 引驱动类型，不得反向）。
+ * 2026-08-24 应用面第一纵切自 assembly.ts 迁出（契约篇 §5.4 件本体①）、同日
+ * 铭牌批入册 src/chat/ 件聚落：驱动构造归 `builtin:chat` 对话应用官方件，本文件
+ * 只承载驱动本体——assembly（组合根）与 plugin（件）及双入口共同引用，独立成
+ * 文件防装配环（assembly 经 builtins 引件，件引驱动类型，不得反向）。
  *
  * submit 在 running 时入 steering 队列、闲时直接开 run；run 自然停后余量按
  * followUp 续跑；loop 级异常在此合成 error 收尾（骨架篇：run 级兜底在 app

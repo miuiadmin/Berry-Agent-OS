@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：16 模块单向 DAG——2026-08-24 第十六批 goal 入册）。
+ * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：17 模块单向 DAG——第十六批 goal 入册、2026-08-24 铭牌批 chat 件聚落入册）。
  *
  * 两条规则：
  * 1. 相对导入只允许走显式白名单边（模块 → 可依赖模块集合）；同模块内部互引自由。
@@ -28,6 +28,8 @@ const MODULE_EDGES = {
   safety: ['contracts', 'context', 'session', 'tools'],
   skills: ['contracts', 'context'],
   subagent: ['contracts', 'context', 'agent', 'session'],
+  // chat = 对话应用官方件聚落（铭牌批入册；不 import llm——StreamFn 经 contracts 注入）
+  chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety'],
   memory: ['contracts', 'context', 'session', 'llm', 'persist', 'agent'],
   goal: ['contracts', 'context', 'persist'],
   scheduler: ['contracts', 'context', 'session', 'agent'],
@@ -50,6 +52,7 @@ const MODULE_EDGES = {
     'scheduler',
     'mcp',
     'channels',
+    'chat',
   ],
 };
 

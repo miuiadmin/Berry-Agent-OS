@@ -21,7 +21,7 @@ import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } f
 import { AppError, AGENT_DELIVER_AS_UNSUPPORTED } from '../contracts/errors.js';
 import { createBerryRuntime } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
-import type { AgentServiceFace, RunSettled } from './chat-plugin.js';
+import type { AgentServiceFace, RunSettled } from '../chat/index.js';
 
 /* ---------------- 测试基建（与 subagent-plugin.test 同款） ---------------- */
 

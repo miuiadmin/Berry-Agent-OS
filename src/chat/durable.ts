@@ -1,5 +1,5 @@
 /**
- * L5 app — durable 事件接线（组合根专属职责：活体事件 → 会话事件日志的映射）。
+ * L4 chat — durable 事件接线（对话应用件本体：活体事件 → 会话事件日志的映射——铭牌批随件迁入聚落）。
  *
  * 三件东西：
  * ① createDurableSinks：loop 的 AgentEvent → session.append（消息级组装结果 +

@@ -15,7 +15,7 @@ import type { AgentMessage } from '../agent/messages.js';
 import { startRun } from '../agent/loop.js';
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage, Message, StreamFn } from '../contracts/llm.js';
-import { createDurableSinks } from './durable.js';
+import { createDurableSinks } from '../chat/index.js';
 import { createChildSessionDisposer, type FlushBarrier } from './subagent-child.js';
 import type { InProcessChild, InProcessChildFactory } from '../subagent/inprocess.js';
 import { Session, lastClosedTurnBoundary } from '../session/index.js';
