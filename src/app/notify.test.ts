@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import { Session } from '../session/session.js';
 import type { SubagentExecution, SubagentRequest, SubagentResult, SubagentSettlement } from '../contracts/subagent.js';
-import type { ConversationDriver, DeliverChannel, DeliverOptions } from './assembly.js';
+import type { ConversationDriver, DeliverChannel, DeliverOptions } from './conversation.js';
 import { createSubagentNotifier, formatSettlementNotice } from './notify.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -65,7 +65,7 @@ function settlement(
 /** 组装通知器（session 为活引用——测试内直改闭包变量模拟 /new 热切换） */
 function makeNotifier(session: Session | undefined) {
   const { driver, calls } = recordingDriver();
-  const notifier = createSubagentNotifier({ driver, getSession: () => session, model: 'test/model' });
+  const notifier = createSubagentNotifier({ getDriver: () => driver, getSession: () => session, model: 'test/model' });
   return { notifier, calls };
 }
 
@@ -132,6 +132,19 @@ describe('三通道通知路由', () => {
     const { notifier, calls } = makeNotifier(undefined);
     notifier(settlement());
     expect(calls).toHaveLength(0);
+  });
+
+  it('无驱动（chat 件未装载的防御位）：不通知；折叠仍落（记账不依赖对话循环）', () => {
+    const session = new Session();
+    const { calls } = recordingDriver();
+    const notifier = createSubagentNotifier({
+      getDriver: () => undefined,
+      getSession: () => session,
+      model: 'test/model',
+    });
+    notifier(settlement());
+    expect(calls).toHaveLength(0);
+    expect(session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
   });
 });
 

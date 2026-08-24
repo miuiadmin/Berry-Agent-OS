@@ -216,14 +216,13 @@ export const SUBAGENT_CAPABILITY_UNSUPPORTED = registerErrorCode('SUBAGENT_CAPAB
 export const SUBAGENT_DEPTH_EXCEEDED = registerErrorCode('SUBAGENT_DEPTH_EXCEEDED');
 
 /* ------------------------------------------------------------------ */
-/* agent 服务码族（运行时骨架篇 §9.3 ctx.agent 落码注记，2026-08-24 goal 纵切一） */
-/* ——sendUserMessage 是插件注入正门：预留位与未接线窗口一律响亮拒绝。 */
+/* agent 服务码族（运行时骨架篇 §9.3 ctx.agent，2026-08-24 goal 纵切一；  */
+/* 2026-08-24 应用面第一纵切起服务与驱动同件同生命周期——无游离态，      */
+/* DETACHED 码退役）——sendUserMessage 是插件注入正门：预留位一律响亮拒绝。 */
 /* ------------------------------------------------------------------ */
 
 /** agent：sendUserMessage 显式携带 deliverAs（'steer'/'inject' 定向投递为 M2+ 预留位——缺省三通道自适应即全部现行业务所需，显式指定即拒不做半实现） */
 export const AGENT_DELIVER_AS_UNSUPPORTED = registerErrorCode('AGENT_DELIVER_AS_UNSUPPORTED');
-/** agent：服务未接驱动（组合根 ⑧ attach 前调用——装配序上插件装载 ⑨ 晚于 ⑧，结构上不可达，防御位响亮拒绝而非静默丢消息） */
-export const AGENT_SERVICE_DETACHED = registerErrorCode('AGENT_SERVICE_DETACHED');
 
 /* ------------------------------------------------------------------ */
 /* goal 码族（运行时骨架篇 §6.8 落码注记，2026-08-24 goal 纵切二）      */

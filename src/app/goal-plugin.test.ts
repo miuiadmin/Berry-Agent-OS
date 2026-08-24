@@ -218,10 +218,10 @@ describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链�
     const runtime = await assemble({ streamFn });
     await callTool(runtime, 'goal_set', { objective: '写完 goal 全栈测试', tokenBudget: 100000 });
 
-    await runtime.conversation.submitOnce('开始');
+    await runtime.conversation!.submitOnce('开始');
     // 续跑是结算后的闲时唤醒（异步于 submitOnce 决议）——自旋等第二个请求出现
     await spinUntil(() => contexts.length >= 2, '续跑注入开轮');
-    await runtime.conversation.settle();
+    await runtime.conversation!.settle();
 
     // 注入内容：续跑提示词携带目标原文 + 纪律四件（反缩水/完成审计/阻塞三轮/预算尽≠完成）
     const injected = userTexts(contexts[1]!).join('\n');
@@ -243,8 +243,8 @@ describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链�
     // 预算尽形态：tokenBudget 1000、首答 usage 1500 → 刹停发生在结算前（见刹车用例）
     // 此处直接人工停：stopped 行结算后不续
     await callTool(runtime, 'goal_update', { status: 'blocked', note: '阻塞' });
-    await runtime.conversation.submitOnce('问题');
-    await runtime.conversation.settle();
+    await runtime.conversation!.submitOnce('问题');
+    await runtime.conversation!.settle();
     expect(contexts).toHaveLength(1); // 无续跑注入
   });
 });
@@ -257,9 +257,9 @@ describe('goal 预算刹车全栈：usage 累计 ≥ 帽 → 刹停 + 当轮收�
     const runtime = await assemble({ streamFn });
     await callTool(runtime, 'goal_set', { objective: '预算内做完', tokenBudget: 1000 });
 
-    await runtime.conversation.submitOnce('开工');
+    await runtime.conversation!.submitOnce('开工');
     await spinUntil(() => contexts.length >= 2, '刹车收尾 steer 开轮');
-    await runtime.conversation.settle();
+    await runtime.conversation!.settle();
 
     // 刹停已落库：stopped/budget + 记账定格 1500
     const text = await goalText(runtime);
@@ -318,8 +318,8 @@ describe('boot 降级 + /goal 命令族 + /reload 不双降（跨进程真库文
     const final = await goalText(second);
     expect(final).toContain('状态：stopped（原因：user）');
     // 停后结算不续跑（stopped 行——续跑三条件用例已锁，此处锁状态面）
-    await second.conversation.submitOnce('再问');
-    await second.conversation.settle();
+    await second.conversation!.submitOnce('再问');
+    await second.conversation!.settle();
   });
 });
 

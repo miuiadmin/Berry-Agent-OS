@@ -38,6 +38,9 @@ export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>
 // 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：memory 首行 + subagent 次行
 // （均非 fixed——overlay 可卸/可禁，卸掉仅失对应能力，核心循环不破）
 const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
+  // 首行 = chat 对话应用件（契约篇 §5.4 应用面第一纵切）：对话是应用不是内核
+  //（命题 §3.5）——Ring 2 真·可卸，overlay 禁用即首启无对话循环、宿主照启
+  { id: 'chat', plugin: 'builtin:chat' },
   { id: 'memory', plugin: 'builtin:memory' },
   { id: 'subagent', plugin: 'builtin:subagent' },
   { id: 'goal', plugin: 'builtin:goal' },

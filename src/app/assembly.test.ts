@@ -31,7 +31,8 @@ import { Persistence } from '../persist/index.js';
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { MEMORY_UTILITY_MIGRATION } from '../memory/index.js';
 import { GOAL_MIGRATION } from '../goal/index.js';
-import { createBerryRuntime, ConversationDriver } from './assembly.js';
+import { createBerryRuntime } from './assembly.js';
+import { ConversationDriver } from './conversation.js';
 import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
@@ -218,7 +219,7 @@ describe('ConversationDriver + durable 接线', () => {
   it('submitOnce 单轮：request/header + turn + 消息全落库；投影回读两条', async () => {
     const { streamFn, contexts } = scriptedStream([textMessage('你好，完成')]);
     const runtime = await assemble({ streamFn });
-    const result = await runtime.conversation.submitOnce('做点什么');
+    const result = await runtime.conversation!.submitOnce('做点什么');
     expect(result?.status).toBe('completed');
     expect(types(runtime)).toEqual([
       'sandbox/mode',
@@ -261,7 +262,7 @@ describe('ConversationDriver + durable 接线', () => {
     ]);
     const runtime = await assemble({ streamFn, workspace });
 
-    const result = await runtime.conversation.submitOnce('改 git 配置');
+    const result = await runtime.conversation!.submitOnce('改 git 配置');
     expect(result?.status).toBe('completed');
     // 文件未被改动（审批拒绝链全程生效）
     expect(readFileSync(join(workspace, '.git', 'config'), 'utf8')).toBe('原内容\n');
@@ -297,7 +298,7 @@ describe('ConversationDriver + durable 接线', () => {
     const runtime = await assemble({ streamFn, workspace, interactive: true });
     runtime.ui.attach(approveAllBackend());
 
-    const result = await runtime.conversation.submitOnce('改 git 配置');
+    const result = await runtime.conversation!.submitOnce('改 git 配置');
     expect(result?.status).toBe('completed');
     expect(readFileSync(join(workspace, '.git', 'config'), 'utf8')).toBe('新内容\n');
     const decided = runtime.session!.events.find((e) => e.type === 'approval/decided');
@@ -311,7 +312,7 @@ describe('ConversationDriver + durable 接线', () => {
     runtime.ctx.on('session/event', (payload: { sessionId: string; event: SessionEvent }) => {
       mirrored.push(payload);
     });
-    await runtime.conversation.submitOnce('问');
+    await runtime.conversation!.submitOnce('问');
     // 镜像与 durable 同序同量（sandbox/mode 在订阅前已落，不重播——历史不是活体）
     expect(mirrored.map((m) => m.event.type)).toEqual([
       'request/header',
@@ -334,7 +335,7 @@ describe('ConversationDriver + durable 接线', () => {
       textMessage('完成'),
     ]);
     const runtime = await assemble({ streamFn });
-    await runtime.conversation.submitOnce('第一问');
+    await runtime.conversation!.submitOnce('第一问');
     expect(runtime.session!.events.filter((e) => e.type === 'request/header')).toHaveLength(1); // 首轮 initial
 
     // 装配后动态注册（M2 插件挂载工具的同款路径）：tools_change → 活数组原位刷新
@@ -361,7 +362,7 @@ describe('ConversationDriver + durable 接线', () => {
     expect(changeData.toolSchemas.map((t) => t.name)).toContain('echo');
 
     // 第二轮：loop 每次模型请求读 context.tools（活数组已刷新）——新工具对模型可见可调用
-    await runtime.conversation.submitOnce('用 echo');
+    await runtime.conversation!.submitOnce('用 echo');
     expect(contexts[1]?.tools?.map((t) => t.name)).toEqual([
       'read',
       'write',
@@ -385,8 +386,8 @@ describe('ConversationDriver + durable 接线', () => {
   it('多轮续跑：第二个 run 复用同一活数组时间线', async () => {
     const { streamFn, contexts } = scriptedStream([textMessage('第一答'), textMessage('第二答')]);
     const runtime = await assemble({ streamFn });
-    await runtime.conversation.submitOnce('第一问');
-    await runtime.conversation.submitOnce('第二问');
+    await runtime.conversation!.submitOnce('第一问');
+    await runtime.conversation!.submitOnce('第二问');
     // 第二次 LLM 调用可见完整历史（活数组单一时间线）
     expect(contexts[1]?.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
     const projected = deriveMessages(runtime.session!.events);
@@ -399,14 +400,14 @@ describe('ConversationDriver + durable 接线', () => {
     // 展示消费者在首个 message_end（user 消息定稿）处一次性违约（模拟 durable
     // append 失败等回调契约破坏——emit 无隔离，异常沿 loop 上抛到驱动 catch）
     let violated = false;
-    runtime.conversation.addDisplay((event) => {
+    runtime.conversation!.addDisplay((event) => {
       if (event.type === 'message_end' && !violated) {
         violated = true;
         throw new Error('展示回调炸了');
       }
     });
 
-    const result = await runtime.conversation.submitOnce('会炸的问题');
+    const result = await runtime.conversation!.submitOnce('会炸的问题');
     expect(result?.status).toBe('failed');
     // 修 b 前缺 turn/end：日志留敞开 turn，恢复协议对「孤儿+后续正常 turn」失据
     expect(types(runtime)).toEqual([
@@ -458,7 +459,7 @@ describe('持久化 round-trip 与命令入口', () => {
     const { streamFn } = scriptedStream([textMessage('存下来的回答')]);
     // 手动管理生命周期（不经 assemble 登记——本用例自管关停顺序）
     const runtime = await createBerryRuntime({ dbPath: dbFile, workspace, streamFn });
-    await runtime.conversation.submitOnce('要持久化的问题');
+    await runtime.conversation!.submitOnce('要持久化的问题');
     await runtime.shutdown();
 
     const reopened = Persistence.open({
@@ -506,7 +507,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
     // 首程自管生命周期（不经 assemble 登记——shutdown 后让位给续接程）
     const first = await createBerryRuntime({ dbPath: dbFile, workspace, streamFn: script1.streamFn });
     const firstId = first.session!.header.sessionId;
-    await first.conversation.submitOnce('第一问');
+    await first.conversation!.submitOnce('第一问');
     // 模拟中断残形：敞开 turn（最后一个 turn/start 后无 turn/end）
     first.session!.append('turn/start', {});
     await first.shutdown();
@@ -528,7 +529,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
         ),
       ).toBe(true);
       // 续程首请求：LLM 上下文带历史种子（投影回读 + 新问）
-      await second.conversation.submitOnce('第二问');
+      await second.conversation!.submitOnce('第二问');
       expect(script2.contexts[0]?.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
       // header 序列：首程 initial + 续程首快照 resume——组装参数未变不多落
       const headers = second.session!.events.filter((e) => e.type === 'request/header');
@@ -536,7 +537,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
       // sandbox/mode 同档不重复（全日志仅首程一条——fold 取最后，重复只污染日志）
       expect(second.session!.events.filter((e) => e.type === 'sandbox/mode')).toHaveLength(1);
       // 第二 run 同 config：不落新快照（会话篇 §1.3 仅变化时落）
-      await second.conversation.submitOnce('第三问');
+      await second.conversation!.submitOnce('第三问');
       expect(second.session!.events.filter((e) => e.type === 'request/header')).toHaveLength(2);
       // 投影回读完整（恢复 + 两轮续跑；敞开 turn 无消息腿不贡献投影）
       const projected = deriveMessages(second.session!.events);
@@ -550,7 +551,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ resumeSession: 'no-such-session', streamFn });
     expect(runtime.persistence!.latestSessionId(runtime.workspace)).toBeUndefined(); // 前置：库确无此 cwd 会话
-    const result = await runtime.conversation.submitOnce('问');
+    const result = await runtime.conversation!.submitOnce('问');
     expect(result?.status).toBe('completed');
     const header = runtime.session!.events.find((e) => e.type === 'request/header')!;
     expect((header.data as { reason: string }).reason).toBe('initial'); // 回落新建按 initial 记
@@ -563,7 +564,7 @@ describe('/new 会话热切换', () => {
     const runtime = await assemble({ streamFn });
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
-    await runtime.conversation.submitOnce('旧问');
+    await runtime.conversation!.submitOnce('旧问');
     const oldSession = runtime.session!;
     const oldId = oldSession.header.sessionId;
     const oldCount = oldSession.events.length;
@@ -577,7 +578,7 @@ describe('/new 会话热切换', () => {
     expect(notifies.some((n) => n.includes('已开新会话'))).toBe(true);
 
     // 新对话落新会话；旧会话对象不再增长（durable 已换指）
-    await runtime.conversation.submitOnce('新问');
+    await runtime.conversation!.submitOnce('新问');
     expect(
       runtime.session!.events.some(
         (e) => e.type === 'user/message' && (e.data as { content: string }).content === '新问',
@@ -617,8 +618,8 @@ describe('/new 会话热切换', () => {
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
 
-    const pending = runtime.conversation.submitOnce('慢问');
-    expect(runtime.conversation.isRunning).toBe(true); // launch 同步置位——run 已在跑
+    const pending = runtime.conversation!.submitOnce('慢问');
+    expect(runtime.conversation!.isRunning).toBe(true); // launch 同步置位——run 已在跑
     runtime.channels.commands.lookup('new')!.handler(''); // 热切换被拒
     expect(notifies.some((n) => n.includes('不能开新会话'))).toBe(true);
     const idBefore = runtime.session!.header.sessionId;
@@ -675,6 +676,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent/
     // goal 三行 + overlay tool-plugin 行均 activated——list 状态行序 = 组合树序）
     expect(runtime.plugins.list()).toEqual([
+      { id: 'chat', status: 'activated', name: 'chat' },
       { id: 'memory', status: 'activated', name: 'memory' },
       { id: 'subagent', status: 'activated', name: 'subagent' },
       { id: 'goal', status: 'activated', name: 'goal' },
@@ -682,7 +684,13 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
     // 组合树报告带行（官方默认层打底在前）
-    expect(runtime.composition.rows.map((row) => row.id)).toEqual(['memory', 'subagent', 'goal', 'tool-plugin']);
+    expect(runtime.composition.rows.map((row) => row.id)).toEqual([
+      'chat',
+      'memory',
+      'subagent',
+      'goal',
+      'tool-plugin',
+    ]);
     // 插件工具已进注册表（fs 四件 + memory 五件 + agent + goal 三件之后）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'read',
@@ -706,7 +714,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(paths!.pluginDataDir('tool-plugin')).toBe(join(compositionDir, 'plugins', 'tool-plugin'));
 
     // 首 run：工具对模型可见（⑨b 注册经 ⑧ 接线原位刷新了 loop 快照）+ 真走三段管道
-    await runtime.conversation.submitOnce('用插件工具');
+    await runtime.conversation!.submitOnce('用插件工具');
     expect(contexts[0]?.tools?.map((t) => t.name)).toContain('plug-echo');
     expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
     const projected = deriveMessages(runtime.session!.events);
@@ -751,7 +759,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(prompts.listSections()).toEqual(['demo/notice', 'memory/core', 'subagent/list']);
 
     // 首 run 落的 header initial 快照含段内容（模型可见即落日志）
-    await runtime.conversation.submitOnce('看提示词');
+    await runtime.conversation!.submitOnce('看提示词');
     const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
     expect((headers[0]!.data as { systemPrompt: string }).systemPrompt).toContain('插件段内容：记住用中文注释');
   });
@@ -775,7 +783,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
 
     const { streamFn, contexts } = scriptedStream([textMessage('好的')]);
     const runtime = await assemble({ streamFn, compositionDir });
-    await runtime.conversation.submitOnce('装包');
+    await runtime.conversation!.submitOnce('装包');
 
     // 模型请求含注入消息（桥接生效——loop transformContext → 总线瀑布）
     const flat = contexts[0]!.messages.map((m) => JSON.stringify(m)).join('\n');
@@ -860,7 +868,7 @@ describe('/reload 组合树重载', () => {
       reloadedPayloads.push(payload);
     });
 
-    await runtime.conversation.submitOnce('第一问');
+    await runtime.conversation!.submitOnce('第一问');
     expect(lastEchoText(runtime)).toContain('v1:回声');
 
     // 同路径改码（版本标记换 v2）→ reload → 激活行照旧、代码是新求值的
@@ -868,15 +876,15 @@ describe('/reload 组合树重载', () => {
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['memory', 'subagent', 'goal', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'tool-plugin'],
       failed: [],
       skipped: [],
     });
     expect(reloadedPayloads).toEqual([
-      { activated: ['memory', 'subagent', 'goal', 'tool-plugin'], failed: [], skipped: [] },
+      { activated: ['chat', 'memory', 'subagent', 'goal', 'tool-plugin'], failed: [], skipped: [] },
     ]);
 
-    await runtime.conversation.submitOnce('第二问');
+    await runtime.conversation!.submitOnce('第二问');
     expect(lastEchoText(runtime)).toContain('v2:回声'); // 新代码已生效
     // plugins 服务同实例就地更新（§1.3 服务集恒定——reload 前后 ctx 拿到同一个）
     expect(runtime.ctx.tryGet('plugins')).toBe(runtime.plugins);
@@ -891,7 +899,7 @@ describe('/reload 组合树重载', () => {
     expect(runtime.tools.list().map((t) => t.name)).toContain('plug-echo');
     // 首请求先落 initial（装载窗口语义：首张 header 由首 run 落——reload 的
     // change 快照才有 diff 基线）
-    await runtime.conversation.submitOnce('首问');
+    await runtime.conversation!.submitOnce('首问');
 
     // overlay 置 disabled → reload → 行变 skipped、工具摘除
     writeFileSync(
@@ -899,7 +907,11 @@ describe('/reload 组合树重载', () => {
       `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    disabled: true\n`,
     );
     const result = await runtime.reload();
-    expect(result.payload).toEqual({ activated: ['memory', 'subagent', 'goal'], failed: [], skipped: ['tool-plugin'] });
+    expect(result.payload).toEqual({
+      activated: ['chat', 'memory', 'subagent', 'goal'],
+      failed: [],
+      skipped: ['tool-plugin'],
+    });
     // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'read',
@@ -917,6 +929,7 @@ describe('/reload 组合树重载', () => {
       'goal_update',
     ]);
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+      ['chat', 'activated'],
       ['memory', 'activated'],
       ['subagent', 'activated'],
       ['goal', 'activated'],
@@ -924,7 +937,7 @@ describe('/reload 组合树重载', () => {
     ]);
 
     // tools_change 即时刷新：后续 run 的模型可见工具集已无插件工具
-    await runtime.conversation.submitOnce('再问');
+    await runtime.conversation!.submitOnce('再问');
     expect(contexts.at(-1)?.tools?.map((t) => t.name)).not.toContain('plug-echo');
 
     // header 内建 diff：工具面变了 → 第二张快照 reason=change 且不含插件工具
@@ -953,7 +966,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.error).toBeUndefined();
-    expect(result.payload?.activated).toEqual(['memory', 'subagent', 'goal', 'tool-plugin']);
+    expect(result.payload?.activated).toEqual(['chat', 'memory', 'subagent', 'goal', 'tool-plugin']);
     expect(result.payload?.failed).toEqual(['bad']);
     // 状态面：失败行带着错误码可见（「没生效」不静默）
     const badRow = runtime.plugins.list().find((r) => r.id === 'bad')!;
@@ -961,7 +974,7 @@ describe('/reload 组合树重载', () => {
     expect(badRow.code).toMatch(/^PLUGIN_/);
     expect(runtime.tools.list().map((t) => t.name)).toContain('plug-echo'); // 成功行照常
     // 进程存活：会话还能继续跑
-    const answer = await runtime.conversation.submitOnce('还活着吗');
+    const answer = await runtime.conversation!.submitOnce('还活着吗');
     expect(answer?.status).toBe('completed');
   });
 
@@ -1013,14 +1026,14 @@ describe('/reload 组合树重载', () => {
     });
     const runtime = await assemble({ streamFn, compositionDir });
 
-    const pending = runtime.conversation.submitOnce('慢问');
-    expect(runtime.conversation.isRunning).toBe(true);
+    const pending = runtime.conversation!.submitOnce('慢问');
+    expect(runtime.conversation!.isRunning).toBe(true);
     expect(await runtime.reload()).toEqual({ busy: true }); // run 中拒绝
 
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['memory', 'subagent', 'goal', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'tool-plugin'],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -1069,6 +1082,7 @@ describe('/reload 组合树重载', () => {
     expect(notifies.some((n) => n.includes('已装入') && n.includes('local'))).toBe(true);
     expect(runtime.tools.list().map((t) => t.name)).toContain('plug-twin');
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+      ['chat', 'activated'],
       ['memory', 'activated'],
       ['subagent', 'activated'],
       ['goal', 'activated'],
@@ -1105,7 +1119,7 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     const subagents = runtime.ctx.get<SubagentsServiceFace>('subagents');
     subagents.register(provider);
 
-    await runtime.conversation.submitOnce('首问');
+    await runtime.conversation!.submitOnce('首问');
     const sessionId = runtime.session!.header.sessionId;
     expect(contexts).toHaveLength(1);
 
@@ -1125,7 +1139,7 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     await expect(run.job!.done).resolves.toBe('completed');
 
     // 通知 followUp 唤醒：第二个模型调用已发生，末条 user 消息即通知（归因在上下文里不丢）
-    await runtime.conversation.settle();
+    await runtime.conversation!.settle();
     expect(contexts).toHaveLength(2);
     const lastUser = contexts[1]!.messages.at(-1) as { role: string; source?: string; content: string };
     expect(lastUser.role).toBe('user');
@@ -1150,7 +1164,7 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
   it('/new 热切换发 session_start 活体事件（origin=initial，载荷带新会话 id）', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
-    await runtime.conversation.submitOnce('问');
+    await runtime.conversation!.submitOnce('问');
     /** 活体事件采集（ctx.on——装配期 emit 先于测试订阅，/new 半边可观测） */
     const starts: { sessionId?: string; origin?: string }[] = [];
     runtime.ctx.on('session_start', (data) => starts.push(data as { sessionId?: string; origin?: string }));

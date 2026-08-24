@@ -35,8 +35,8 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（memory 首行 + subagent 次行 + goal 第三行——契约篇 §5.1） */
-const DEFAULT_LAYER_IDS = new Set(['memory', 'subagent', 'goal']);
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行——契约篇 §5.1/§5.4） */
+const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal']);
 
 /**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
@@ -57,20 +57,24 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层三行：memory 首行 + subagent 次行 + goal 第三行（契约篇 §5.1）
+    // 官方默认层四行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // subagent 第三行 + goal 第四行（契约篇 §5.1/§5.4）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
+      { id: 'chat', plugin: 'builtin:chat' },
       { id: 'memory', plugin: 'builtin:memory' },
       { id: 'subagent', plugin: 'builtin:subagent' },
       { id: 'goal', plugin: 'builtin:goal' },
     ]);
-    expect(report.plan).toHaveLength(3);
-    expect(report.plan[0]!.id).toBe('memory');
+    expect(report.plan).toHaveLength(4);
+    expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
-    expect(report.plan[1]!.id).toBe('subagent');
+    expect(report.plan[1]!.id).toBe('memory');
     expect(report.plan[1]!.unresolved).toContain('保留前缀');
-    expect(report.plan[2]!.id).toBe('goal');
+    expect(report.plan[2]!.id).toBe('subagent');
     expect(report.plan[2]!.unresolved).toContain('保留前缀');
+    expect(report.plan[3]!.id).toBe('goal');
+    expect(report.plan[3]!.unresolved).toContain('保留前缀');
     // 用户层为空
     expect(loadUserComposition(dataDir)).toEqual({ rows: [], plan: [] });
   });
@@ -308,20 +312,24 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    // 默认层三键全给（subagent/goal 行同解析——不带 config 的纯净形态对照）
+    // 默认层四键全给（chat/subagent/goal 行同解析——不带 config 的纯净形态对照）
+    const stubChat = { name: 'chat-stub', apply: async () => {} };
     const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
     const stubGoal = { name: 'goal-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
+      'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
       'builtin:subagent': stubSubagent,
       'builtin:goal': stubGoal,
     });
     expect(report.rows).toEqual([
+      { id: 'chat', plugin: 'builtin:chat' },
       { id: 'memory', plugin: 'builtin:memory', config: { recallTopK: 5 } },
       { id: 'subagent', plugin: 'builtin:subagent' },
       { id: 'goal', plugin: 'builtin:goal' },
     ]);
     expect(report.plan).toEqual([
+      { id: 'chat', builtin: stubChat },
       { id: 'memory', builtin: stubBuiltin, config: { recallTopK: 5 } },
       { id: 'subagent', builtin: stubSubagent },
       { id: 'goal', builtin: stubGoal },
@@ -340,13 +348,14 @@ describe('builtin: 保留前缀解析', () => {
     const entry = writeEntryFile(dataDir);
     writeOverlay(dataDir, `  - id: memory\n    plugin: ${entry}\n`);
     const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin });
-    expect(report.plan[0]).toEqual({ id: 'memory', entry });
+    // chat 行（首行）此注册表未给 → unresolved 占 plan[0]；memory 行在 plan[1]
+    expect(report.plan[1]).toEqual({ id: 'memory', entry });
   });
 
   it('overlay 禁用 memory 行：非 fixed 行真·可卸（skip，不要求注册表命中）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    disabled: true\n');
     const report = loadComposition(dataDir, {});
-    expect(report.plan[0]).toEqual({ id: 'memory', skip: 'disabled' });
+    expect(report.plan[1]).toEqual({ id: 'memory', skip: 'disabled' });
   });
 });

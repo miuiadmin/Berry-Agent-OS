@@ -34,11 +34,21 @@ function lastAssistantText(result: RunResult): string | undefined {
  */
 export async function runOnceMain(message: string, options: RuntimeOptions = {}): Promise<number> {
   const runtime = await createBerryRuntime({ ...options, interactive: false });
+  // 可卸语义（应用面第一纵切）：chat 件未装载即无对话循环——run 语义性失败
+  //（退出码 1 + stderr 示明；/plugins 面向用户提示查装配）
+  if (runtime.conversation === undefined) {
+    process.stderr.write(
+      '对话应用未装载（builtin:chat 被禁用或 persist:false）——run 无对话循环可执行；/plugins 查看装配。\n',
+    );
+    await runtime.shutdown();
+    return 1;
+  }
+  const conversation = runtime.conversation;
   // 信号编舞（骨架篇 §1.3 全表，与 TUI 入口共用）：SIGINT 首次优雅 abort 当前
   // run（事件日志留完整痕迹）/ 二次立即 130 / SIGTERM 143 / SIGHUP 129 /
   // uncaught/unhandled 不吞 exit(1)
   const signals = installExitSignals({
-    onGracefulQuit: () => runtime.conversation.requestQuit(),
+    onGracefulQuit: () => conversation.requestQuit(),
     onFatal: async (error, kind) => {
       runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
         kind,
@@ -50,7 +60,7 @@ export async function runOnceMain(message: string, options: RuntimeOptions = {})
 
   let code: number;
   try {
-    const result = await runtime.conversation.submitOnce(message);
+    const result = await conversation.submitOnce(message);
     if (!result) {
       // 防御：quit 已触发时 submitOnce 转队列返回 undefined——按中断处理
       process.stderr.write('已中断\n');

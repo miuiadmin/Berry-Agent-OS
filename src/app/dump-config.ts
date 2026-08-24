@@ -88,7 +88,8 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
       process.stdout.write(`Berry ${VERSION}\n数据目录：${dataDir()}\n`);
       // 树尽力打印：纯合成解析零副作用（插件 import 失败也能看到树本身）；
       // 内置注册表同构传入（无 store 诊断态）——builtin: 行解析不失真
-      // （subagent 真工厂构造全惰性——委派永不发生，占位依赖零副作用）
+      //（subagent 真工厂构造全惰性——委派永不发生，占位依赖零副作用；chat 为
+      // 纯树合成的占位件——apply 永不跑，只需注册表键在）
       try {
         process.stdout.write(
           renderCompositionTree(
@@ -106,8 +107,14 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
                   rootCtx: createContext({ name: 'dump-diag' }),
                 }),
                 getSession: () => undefined,
-                // 诊断面无会话——boot 降级永不触发（wasResumed:false 占位）
-                wasResumed: false,
+                // 诊断面无会话——boot 降级永不触发（惰性取值恒 false 占位）
+                wasResumed: () => false,
+                // chat 占位件：纯树合成只查注册表键（形状/装载均不发生）——
+                // apply 为空实现占位，构造期零副作用
+                chat: {
+                  name: 'chat',
+                  apply: async () => undefined,
+                },
               }),
             ),
           ) + '\n',

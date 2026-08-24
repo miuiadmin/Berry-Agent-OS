@@ -14,9 +14,15 @@
  *    + 同步注入收尾提示（忙时 steer——当轮收尾交代下一步，非硬断）。
  *
  * 激活态不持久化（§6.7 拍板）：boot 续接（origin=resume）即把 active 行降级
- * needs-resume。session_start 在插件装载之前发出（boot 时序事实）——降级不订阅
- * 事件，走构造闭包 wasResumed 旗标；一次性旗标（bootDemotionArmed）保证
- * /reload 重激活不误降级（/reload 复用同一内置件实例，闭包旗标跨重载存活）。
+ * needs-resume。wasResumed 为惰性取值（应用面第一纵切）：chat 对话应用件（默认
+ * 层首行）装载时绑定会话并回写旗标，goal 轮次激活必晚于它——apply 期首读必得
+ * 居值；一次性旗标（bootDemotionArmed）保证 /reload 重激活不误降级（/reload
+ * 复用同一内置件实例，闭包旗标跨重载存活）。
+ *
+ * 'agent' 走 optionalInject（应用面第一纵切）：chat 件未装载/诊断装配
+ * （persist:false）时无 ctx.agent——③续跑触发降级停用（warn），④预算刹车保留
+ * 记账与刹停、仅跳过收尾注入；①工具②/goal 命令不受影响（inject 硬依赖只剩
+ * tools/channels/ui——内核恒供）。
  *
  * persist:false 降级：无连接即 warn 空转（同 memory 内置件——诊断面行可见、
  * 装载成功，语义诚实）。
@@ -53,7 +59,7 @@ interface ChannelsCommandFace {
   }): Disposer;
 }
 
-/** ctx.agent 服务最小面（agent-service.ts AgentServiceFace 的结构子集） */
+/** ctx.agent 服务最小面（chat-plugin.ts AgentServiceFace 的结构子集） */
 interface AgentServiceFace {
   sendUserMessage(content: string, opts?: { readonly source?: string; readonly backgroundWake?: boolean }): void;
   onRunSettled(cb: (settled: { readonly status: 'completed' | 'aborted' | 'failed' }) => void): Disposer;
@@ -76,23 +82,30 @@ export interface GoalPluginDeps {
   readonly connection?: DatabaseConnection;
   /** 当前会话 id 活取值（/new 热切换后自动跟新会话走） */
   readonly getSessionId: () => string | undefined;
-  /** boot 是否续接既有会话（session_start origin=resume 语义）——active 行降级触发器 */
-  readonly wasResumed: boolean;
+  /**
+   * boot 是否续接既有会话（session_start origin=resume 语义）——active 行降级
+   * 触发器。惰性取值：chat 件（默认层首行）装载绑定会话后才回写真值，goal
+   * 轮次激活必晚于绑定，apply 期首读必得居值
+   */
+  readonly wasResumed: () => boolean;
 }
 
 /**
  * 构造 goal 内置件（builtins 注册表 `builtin:goal` 行）。
  */
 export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
-  // boot 降级一次性旗标：进程 boot 后首次 apply 执行降级即解除——/reload 复用
-  // 同一模块实例重跑 apply，旗标已 false 不误降级（§6.7「/reload 不误降级」）
-  let bootDemotionArmed = deps.wasResumed;
+  // boot 降级一次性旗标：armed 恒 true 起步，首次 apply 读 wasResumed() 惰性值
+  // 并解除——/reload 复用同一模块实例重跑 apply，旗标已 false 不误降级
+  //（§6.7「/reload 不误降级」）
+  let bootDemotionArmed = true;
   return {
     name: 'goal',
-    inject: ['tools', 'channels', 'agent', 'ui'],
+    // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）
+    inject: ['tools', 'channels', 'ui'],
+    optionalInject: ['agent'],
     apply: (ctx: Context) =>
       applyGoalPlugin(ctx, deps, () => {
-        const armed = bootDemotionArmed;
+        const armed = bootDemotionArmed && deps.wasResumed();
         bootDemotionArmed = false;
         return armed;
       }),
@@ -135,24 +148,30 @@ async function applyGoalPlugin(ctx: Context, deps: GoalPluginDeps, consumeBootDe
     }),
   );
 
-  /* ---- ③ 续跑触发：run 结算边界（completed 且 active 且预算未尽才续）---- */
-  const agent = ctx.get<AgentServiceFace>('agent');
-  ctx.effect(() =>
-    agent.onRunSettled((settled) => {
-      try {
-        const sessionId = deps.getSessionId();
-        if (sessionId === undefined) return;
-        const goal = store.get(sessionId);
-        if (goal === undefined || !shouldContinueGoal(goal, settled.status)) return;
-        // backgroundWake：计入自激预算 maxConsecutiveWakes=3——连续自动续跑
-        // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录
-        agent.sendUserMessage(renderContinuationPrompt(goal), { source: 'plugin:goal', backgroundWake: true });
-      } catch (err) {
-        // 续跑触发异常止步日志（结算通知链不受插件违约影响——服务层另有隔离壳）
-        ctx.logger.error('goal 续跑触发失败', { error: describeError(err) });
-      }
-    }),
-  );
+  /* ---- ③ 续跑触发：run 结算边界（completed 且 active 且预算未尽才续）----
+   * ctx.agent 走 optionalInject：chat 件未装载/诊断装配时缺供——续跑触发降级
+   * 停用（warn），预算刹车 ④ 独立保留 */
+  const agent = ctx.tryGet<AgentServiceFace>('agent');
+  if (agent === undefined) {
+    ctx.logger.warn('ctx.agent 未提供（chat 件未装载或诊断装配）——goal 续跑触发降级停用（工具/命令/预算刹车不受影响）');
+  } else {
+    ctx.effect(() =>
+      agent.onRunSettled((settled) => {
+        try {
+          const sessionId = deps.getSessionId();
+          if (sessionId === undefined) return;
+          const goal = store.get(sessionId);
+          if (goal === undefined || !shouldContinueGoal(goal, settled.status)) return;
+          // backgroundWake：计入自激预算 maxConsecutiveWakes=3——连续自动续跑
+          // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录
+          agent.sendUserMessage(renderContinuationPrompt(goal), { source: 'plugin:goal', backgroundWake: true });
+        } catch (err) {
+          // 续跑触发异常止步日志（结算通知链不受插件违约影响——服务层另有隔离壳）
+          ctx.logger.error('goal 续跑触发失败', { error: describeError(err) });
+        }
+      }),
+    );
+  }
 
   /* ---- ④ 预算刹车：assistant/message usage 累计，≥ 帽即刹停 + 收尾注入 ---- */
   ctx.effect(() =>
@@ -174,11 +193,12 @@ async function applyGoalPlugin(ctx: Context, deps: GoalPluginDeps, consumeBootDe
         const goal = store.addUsage(sessionId, delta, Date.now());
         if (goal === undefined || goal.tokensUsed < goal.tokenBudget) return;
         // 刹停（幂等护栏：WHERE status='active'）+ 同步收尾注入（忙时 steer——
-        // 模型当轮收尾交代下一步；预算尽≠完成，提示词如实示态）
+        // 模型当轮收尾交代下一步；预算尽≠完成，提示词如实示态）。agent 缺供
+        //（chat 件未装载）只跳过注入——记账与刹停是数据面，不依赖对话循环
         store.stopByBudget(sessionId, goal.tokensUsed, Date.now());
         const stopped = store.get(sessionId);
         if (stopped !== undefined) {
-          agent.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'plugin:goal' });
+          agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'plugin:goal' });
         }
       } catch (err) {
         // fire-and-forget 纪律：刹车异常止步日志，绝不上抛进事件派发面

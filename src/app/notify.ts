@@ -18,7 +18,7 @@
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { Session } from '../session/session.js';
-import type { ConversationDriver } from './assembly.js';
+import type { ConversationDriver } from './conversation.js';
 
 /** 通知正文 output/diagnostic 摘录上限（字符）——通知是唤醒线索非产物载体 */
 const EXCERPT_LIMIT = 4000;
@@ -42,8 +42,12 @@ export function formatSettlementNotice(settlement: SubagentSettlement): string {
 
 /** 通知器构造选项 */
 export interface SubagentNotifierOptions {
-  /** 会话驱动（三通道投递面） */
-  readonly driver: ConversationDriver;
+  /**
+   * 会话驱动活取值（三通道投递面——chat 对话应用件的活句柄）。结算只发生在
+   * run 运行期，无对话循环即无委派即无结算，undefined 为结构性不可达的防御位
+   * （chat 件未装载/诊断装配时防御性跳过投递——结算折叠独立，不受影响）
+   */
+  readonly getDriver: () => ConversationDriver | undefined;
   /** 当前会话活引用（/new 热切换后读到新会话——闭包不随切换重造） */
   readonly getSession: () => Session | undefined;
   /** 子模型标识（llm/usage 计量事件的 model 腿——结算契约不带模型名，装配层注入） */
@@ -70,8 +74,10 @@ export function createSubagentNotifier(opts: SubagentNotifierOptions): (settleme
       });
     }
     // ② 三通道通知：前台不通知（父正 await result）；owner 路由键不匹配（/new 已
-    // 切走）即丢弃——通知只投给仍持有该子的会话
-    if (!settlement.request.background || session === undefined) return;
+    // 切走）即丢弃——通知只投给仍持有该子的会话；驱动缺失（chat 件未装载的防御
+    // 位）同样跳过投递
+    const driver = opts.getDriver();
+    if (!settlement.request.background || session === undefined || driver === undefined) return;
     const owner = settlement.request.ownerSessionId;
     if (owner !== undefined && owner !== session.header.sessionId) return;
     const message: UserMessage = {
@@ -80,6 +86,6 @@ export function createSubagentNotifier(opts: SubagentNotifierOptions): (settleme
       timestamp: Date.now(),
       source: 'subagent-settled',
     };
-    opts.driver.deliver(message, { backgroundWake: true });
+    driver.deliver(message, { backgroundWake: true });
   };
 }

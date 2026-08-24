@@ -12,7 +12,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
+import { createContext } from '../context/context.js';
+import type { ContextScope } from '../context/types.js';
+import { createInProcessProvider } from '../subagent/inprocess.js';
 import { deriveMessages } from '../session/derive.js';
+import { defaultConvertToLlm } from './convert.js';
+import { createSubagentChildFactory } from './subagent-factory.js';
 import { createBerryRuntime } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
 
@@ -111,8 +116,9 @@ describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真�
   it('默认层第二行激活 + 清单段物化：agent 工具进面、subagent/list 段含 provider 名', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
-    // 默认层三行全激活（官方全家桶：memory 首行 + subagent 次行 + goal 第三行）
+    // 默认层四行全激活（官方全家桶：chat 首行 + memory 次行 + subagent 第三行 + goal 第四行）
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+      ['chat', 'activated'],
       ['memory', 'activated'],
       ['subagent', 'activated'],
       ['goal', 'activated'],
@@ -140,7 +146,7 @@ describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真�
       starts.push(data);
     });
 
-    const answer = await runtime.conversation.submitOnce('帮我审读');
+    const answer = await runtime.conversation!.submitOnce('帮我审读');
     expect(answer?.status).toBe('completed');
     // 三次模型调用 = 父问 → 子答 → 父汇总（嵌套形态：子在父的工具执行内）
     expect(contexts).toHaveLength(3);
@@ -174,7 +180,7 @@ describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真�
       textMessage('后台子答'),
     ]);
     const runtime = await assemble({ streamFn });
-    const answer = await runtime.conversation.submitOnce('去调研');
+    const answer = await runtime.conversation!.submitOnce('去调研');
     expect(answer?.status).toBe('completed');
     // 工具立即返回：结果文本含任务 id（不等待子结算）
     const toolResults = deriveMessages(runtime.session!.events).filter((m) => m.type === 'toolResult');
@@ -211,7 +217,7 @@ describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真�
       textMessage('父收尾'),
     ]);
     const runtime = await assemble({ streamFn, compositionDir, workspace });
-    const answer = await runtime.conversation.submitOnce('跑一个');
+    const answer = await runtime.conversation!.submitOnce('跑一个');
     expect(answer?.status).toBe('completed');
     // 工具结果：未完成 + max-tokens + 帽文案（diagnostic 优先预算解释）
     const toolResults = deriveMessages(runtime.session!.events).filter((m) => m.type === 'toolResult');
@@ -220,25 +226,39 @@ describe('subagent 内置件全栈（纵切四：默认行 + agent 工具 + 真�
     expect(text).toContain('token 预算帽触顶');
   });
 
-  it('persist:false 降级：无持久层委派照常（内存子会话）；缺省子提示词兜底', async () => {
-    const { streamFn, contexts } = scriptedStream([
-      toolCallMessage('agent', { prompt: '诊断面任务' }),
-      textMessage('子答（内存面）'),
-      textMessage('父收尾'),
-    ]);
-    const runtime = await assemble({ streamFn, persist: false });
-    expect(runtime.persistence).toBeUndefined();
+  it('无持久层工厂路径：内存子会话照跑 + 缺省子提示词兜底 + delegation 生命周期事件照发', async () => {
+    // persist:false 全栈 run 面随 chat 纵切退役（件自降级空转无驱动——run 不可达），
+    // 但工厂的无持久层路径仍是真代码（诊断面/未来无库宿主）：改由工厂直测覆盖。
+    // 无 persona 请求位 → 缺省子提示词兜底（静态 DEFAULT_CHILD_PROMPT）。
+    const { streamFn, contexts } = scriptedStream([textMessage('子答（内存面）')]);
+    /** 根总线（session_start/session_shutdown keyed 面——与装配层 ROOT 同角色） */
+    const rootCtx: ContextScope = createContext({ name: 'subagent-factory-nodb' });
     const starts: Array<{ sessionId: string; origin: string }> = [];
-    runtime.ctx.on('session_start', (payload: unknown) => {
-      const data = payload as { sessionId: string; origin: string };
-      starts.push(data);
+    rootCtx.on('session_start', (payload: unknown) => {
+      starts.push(payload as { sessionId: string; origin: string });
     });
-    const answer = await runtime.conversation.submitOnce('诊断面委派');
-    expect(answer?.status).toBe('completed');
-    expect(contexts).toHaveLength(3);
-    // 无 persona 请求位 → 缺省子提示词兜底（静态 DEFAULT_CHILD_PROMPT）
-    expect(contexts[1]!.systemPrompt).toContain('被委派的子代理');
-    // 内存子会话不落库——但生命周期事件面不豁免（session_start delegation 照发）
+    const factory = createSubagentChildFactory({
+      // persist 双缺：无父会话（getSession 恒 undefined）+ 无 persistence
+      // → 降级内存 Session（origin 'delegation'）
+      getSession: () => undefined,
+      streamFn,
+      model: 'test/model',
+      convertToLlm: defaultConvertToLlm,
+      workspace: makeTempDir('app-subplug-nodb-'),
+      sandboxMode: 'workspace-write',
+      rootCtx,
+    });
+    const provider = createInProcessProvider({ factory });
+    // SubagentStart 面（provider/background 已在服务面剥离——provider 只见任务本体）
+    const execution = provider.start({ prompt: '诊断面任务' });
+    const result = await execution.result;
+    expect(result.stopReason).toBe('completed');
+    expect(result.output).toBe('子答（内存面）');
+    // 子完整一轮模型调用（内存会话照跑——持久层只影响落库不影响循环）
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]!.systemPrompt).toContain('被委派的子代理');
+    // 内存子会话不落库——但生命周期事件面不豁免（session_start delegation 照发根总线）
     expect(starts.some((s) => s.origin === 'delegation')).toBe(true);
+    await execution.dispose();
   });
 });
