@@ -9,7 +9,7 @@
  */
 
 import type { Context, Disposer } from '../context/types.js';
-import { guardedAddMemory } from './scan.js';
+import { guardedAddMemory, isPollutedTranscript } from './scan.js';
 import type { MemoryStore } from './store.js';
 
 /**
@@ -99,6 +99,14 @@ export function attachCorrectionExtractor(ctx: Context, opts: CorrectionExtracto
       if (envelope?.event?.type !== 'user/message') return;
       const text = userTextFromContent((envelope.event.data as { content?: unknown } | undefined)?.content);
       if (text === '') return;
+      // §4.1 资格检查（与周期路 runReviewOnce 同一函数，零特判）：污染文本整段
+      // 拒收——不消毒不降权，污染会话不配产出可信记忆。v1 判据空集恒放行。
+      if (isPollutedTranscript(text)) {
+        ctx.logger.warn('即时路提取文本污染（§4.1 资格检查）——本轮跳过', {
+          sessionId: envelope.sessionId,
+        });
+        return;
+      }
       const excerpt = detectCorrection(text);
       if (!excerpt) return;
 

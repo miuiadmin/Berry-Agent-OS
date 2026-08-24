@@ -13,7 +13,13 @@ import { openStore } from '../persist/index.js';
 import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import type { ReviewLlmFace } from './review.js';
-import { attachPeriodicReview, collectConsolidationCandidates, runConsolidationOnce, runReviewOnce } from './review.js';
+import {
+  attachPeriodicReview,
+  collectConsolidationCandidates,
+  mergeReasonPasses,
+  runConsolidationOnce,
+  runReviewOnce,
+} from './review.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -248,7 +254,8 @@ describe('runConsolidationOnce（合并组 + 降权应用——走既有路径�
     const decay = db.list(['global']).find((r) => r.kind === 'insight')!;
     const { llm, calls } = scriptedLlm([
       JSON.stringify({
-        merges: [{ keepId: keep.id, dropIds: [drop.id] }],
+        // reason 点名具体重叠（'pnpm' 在两摘要里）——理由护栏放行
+        merges: [{ keepId: keep.id, dropIds: [drop.id], reason: 'both entries prefer pnpm as the package manager' }],
         decays: [{ id: decay.id, factor: 0.5 }],
       }),
     ]);
@@ -277,7 +284,7 @@ describe('runConsolidationOnce（合并组 + 降权应用——走既有路径�
       .sort();
     const ghost = scriptedLlm([
       JSON.stringify({
-        merges: [{ keepId: 'ghost-id', dropIds: ['also-ghost'] }],
+        merges: [{ keepId: 'ghost-id', dropIds: ['also-ghost'], reason: 'ghost entries overlap' }],
         decays: [{ id: 'ghost-id', factor: 0.1 }],
       }),
     ]);
@@ -318,6 +325,74 @@ describe('runConsolidationOnce（合并组 + 降权应用——走既有路径�
     );
     expect(r2.skipped).toBe('budget');
     expect(broke.calls).toHaveLength(0);
+  });
+
+  it('理由护栏 + 血缘继承（第十四批 A 组）：分类学理由整组驳回 drops 不执行；点名重叠组应用且 drop 溯源过继 keep', async () => {
+    // 给 drop 条补独立溯源：同 summary 重写走 exact 合并——refs 追加、老化基准不动
+    const drop0 = db.list(['global']).find((r) => r.summary === '包管理器用 pnpm')!;
+    db.addMemory(
+      {
+        ownerKey: 'global',
+        kind: 'fact',
+        summary: '包管理器用 pnpm',
+        content: '补一条带溯源的证据。',
+        confidence: 0.6,
+        sourceRefs: [{ sessionId: 'seed-sess', seq: 42 }],
+      },
+      NOW - 95 * 24 * 3600 * 1000,
+    );
+    expect(db.get(drop0.id)!.sourceRefs).toEqual([{ sessionId: 'seed-sess', seq: 42 }]); // exact 追加达成
+    const keep = db.list(['global']).find((r) => r.summary === '用户偏好 pnpm')!;
+    const drop = db.get(drop0.id)!;
+
+    // 第一轮：纯分类学理由（元语言词汇不在摘要文本里，token 交集 0）→ 整组驳回
+    const bad = scriptedLlm([
+      JSON.stringify({
+        merges: [{ keepId: keep.id, dropIds: [drop.id], reason: 'similar topics can be merged' }],
+        decays: [],
+      }),
+    ]);
+    const r1 = await runConsolidationOnce(
+      { store: db, llm: bad.llm, logger: createLogger({ module: 't' }) },
+      { now: () => NOW },
+    );
+    expect(r1.mergedGroups).toBe(0);
+    expect(db.get(drop.id)!.status).toBe('active'); // drops 不单独执行——组是原子
+    expect(db.get(keep.id)!.evidenceCount).toBe(1);
+
+    // 第二轮：理由点名重叠词（pnpm）→ 应用；drop 的溯源过继给 keep（条目消亡溯源不死）
+    const good = scriptedLlm([
+      JSON.stringify({
+        merges: [{ keepId: keep.id, dropIds: [drop.id], reason: '两条都说 pnpm' }],
+        decays: [],
+      }),
+    ]);
+    const r2 = await runConsolidationOnce(
+      { store: db, llm: good.llm, logger: createLogger({ module: 't' }) },
+      { now: () => NOW },
+    );
+    expect(r2.mergedGroups).toBe(1);
+    expect(db.get(drop.id)!.status).toBe('dismissed');
+    const keepAfter = db.get(keep.id)!;
+    expect(keepAfter.evidenceCount).toBe(2); // canonical 重走管线：exact 自合并 +1
+    expect(keepAfter.sourceRefs).toContainEqual({ sessionId: 'seed-sess', seq: 42 }); // 过继
+  });
+});
+
+describe('mergeReasonPasses（理由护栏判据——纯函数）', () => {
+  it('点名具体重叠（中/英词均计）→ 放行', () => {
+    expect(mergeReasonPasses('both say pnpm', ['用户偏好 pnpm', '包管理器用 pnpm'])).toBe(true);
+    expect(mergeReasonPasses('两条都提到 pnpm 与包管理', ['用户偏好 pnpm', '包管理器用 pnpm'])).toBe(true);
+  });
+
+  it('纯分类学断言（元语言词汇不在摘要里）→ 驳回', () => {
+    expect(mergeReasonPasses('similar topics', ['用户偏好 pnpm', '包管理器用 pnpm'])).toBe(false);
+    expect(mergeReasonPasses('同类内容可合并', ['用户偏好 pnpm', '包管理器用 pnpm'])).toBe(false);
+  });
+
+  it('空/纯符号理由 → 驳回（分词为空集）', () => {
+    expect(mergeReasonPasses('---', ['用户偏好 pnpm'])).toBe(false);
+    expect(mergeReasonPasses('', ['用户偏好 pnpm'])).toBe(false);
   });
 });
 
@@ -395,6 +470,40 @@ describe('attachPeriodicReview（session/event 计数触发全栈）', () => {
     ctx.emit('session/event', envelope('turn/end')); // 下一周期正常触发
     await handle.idle();
     expect(started).toBe(2);
+    handle.dispose();
+  });
+
+  it('consolidation 变更短路 + anchor（第十四批 A 组）：零摄入跳过、刚摄入等聚集窗、窗口过后跑', async () => {
+    const { ctx } = captureRoot();
+    // 可控时钟：seed 条目 T0 写入；起始时钟拨到 200 天后（老化候选成立）
+    const T0 = 1_700_000_000_000;
+    let clock = T0 + 200 * 24 * 3600 * 1000;
+    db.addMemory({ ownerKey: 'global', kind: 'fact', summary: '老条目', content: 'c', confidence: 0.7 }, T0);
+    // review 产物 []（或非数组——耗尽后重复末项，均零写动）；consolidation 建议空对象零写动
+    const { llm, calls } = scriptedLlm(['[]', '{}']);
+    const handle = attachPeriodicReview(ctx, { store: db, llm, turnThreshold: 1, now: () => clock });
+    /** consolidation 调用计数（与 review 按 systemPrompt 区分） */
+    const consCalls = () => calls.filter((c) => (c.systemPrompt ?? '').includes('consolidation')).length;
+
+    ctx.emit('session/event', envelope('user/message', { content: 'hi' }));
+    ctx.emit('session/event', envelope('turn/end')); // 第一轮：从未跑过（基线 -1）+ 已老化 → consolidation 跑
+    await handle.idle();
+    expect(consCalls()).toBe(1);
+
+    ctx.emit('session/event', envelope('turn/end')); // 第二轮：上一轮零写动、水位不变 → 短路
+    await handle.idle();
+    expect(consCalls()).toBe(1);
+
+    // 新摄入（时刻 = clock）→ 水位变化；下一拍 anchor 未满（clock - 水位 = 0）→ 等
+    db.addMemory({ ownerKey: 'global', kind: 'fact', summary: '新摄入', content: 'c' }, clock);
+    ctx.emit('session/event', envelope('turn/end')); // 第三轮：anchor 拦
+    await handle.idle();
+    expect(consCalls()).toBe(1);
+
+    clock += 10 * 60 * 1000; // 拨钟过锚间隔（缺省 5 分钟）
+    ctx.emit('session/event', envelope('turn/end')); // 第四轮：水位已变 + anchor 过 → 跑
+    await handle.idle();
+    expect(consCalls()).toBe(2);
     handle.dispose();
   });
 });

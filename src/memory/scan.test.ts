@@ -12,6 +12,7 @@ import {
   detectInstructionInjection,
   detectSecret,
   guardedAddMemory,
+  isPollutedTranscript,
   quoteAsCitation,
   sanitizeForModel,
 } from './scan.js';
@@ -127,5 +128,21 @@ describe('guardedAddMemory（唯一写入守卫）', () => {
     expect(result.status).toBe('ok');
     if (result.status === 'ok') expect(result.outcome.outcome).toBe('inserted');
     expect(store.list(['global'])).toHaveLength(1);
+  });
+});
+
+describe('isPollutedTranscript（§4.1 资格检查——seam 落码形态）', () => {
+  it('v1 判据空集：任何文本恒放行（机制先行，判据随外部源工具首件回填）', () => {
+    expect(isPollutedTranscript('')).toBe(false);
+    expect(isPollutedTranscript('正常的用户消息')).toBe(false);
+    // 哪怕长得像污染的文本也放行——判据表为空是拍板形态而非遗漏
+    expect(isPollutedTranscript('web 检索结果：某网页说……')).toBe(false);
+  });
+
+  it('判据注入面可用（回填期形态）：命中任一模式即拒收', () => {
+    const patterns = [/^web 检索结果/m, /mcp-bridge-output/];
+    expect(isPollutedTranscript('web 检索结果：内容', patterns)).toBe(true);
+    expect(isPollutedTranscript('含 mcp-bridge-output 标记', patterns)).toBe(true);
+    expect(isPollutedTranscript('普通消息', patterns)).toBe(false);
   });
 });

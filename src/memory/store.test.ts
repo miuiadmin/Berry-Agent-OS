@@ -87,11 +87,28 @@ describe('addMemory 三分支持落库', () => {
   });
 
   it('极性冲突新胜：旧条 dismissed(auto_resolved)、新条继承双方证据计数', () => {
-    write({ summary: '用户喜欢自动提交', confidence: 0.6 });
-    const out = write({ summary: '用户不喜欢自动提交', confidence: 0.6 }); // 相等 → 新胜
+    write({
+      summary: '用户喜欢自动提交',
+      confidence: 0.6,
+      sourceRefs: [
+        { sessionId: 'old1', seq: 1 },
+        { sessionId: 'old1', seq: 2 },
+      ],
+    });
+    const out = write({
+      summary: '用户不喜欢自动提交',
+      confidence: 0.6, // 相等 → 新胜
+      sourceRefs: [{ sessionId: 'new1', seq: 9 }],
+    });
     expect(out.outcome).toBe('superseded');
     if (out.outcome !== 'superseded') return;
     expect(out.memory.evidenceCount).toBe(2); // 旧 1 + 新 1
+    // 血缘继承（第十四批 A 组）：新条 source_refs = 旧条并集 ∪ 新入参（条目消亡溯源不死）
+    expect(out.memory.sourceRefs).toEqual([
+      { sessionId: 'old1', seq: 1 },
+      { sessionId: 'old1', seq: 2 },
+      { sessionId: 'new1', seq: 9 },
+    ]);
     const old = db.get(out.supersededId)!;
     expect(old.status).toBe('dismissed');
     expect(old.supersededBy).toBe('auto_resolved');
@@ -124,6 +141,39 @@ describe('addMemory 三分支持落库', () => {
   it('空 summary/content 拒收（写入面自防御）', () => {
     expect(() => write({ summary: '  ' })).toThrowError(/不得为空/);
     expect(() => write({ content: '' })).toThrowError(/不得为空/);
+  });
+});
+
+describe('intakeWatermark（摄入水位——consolidation 变更短路判据）', () => {
+  it('空 owner 返回 null（与 0 可区分）；写入后 = max(updated_at)', () => {
+    expect(db.intakeWatermark('global')).toBeNull();
+    write({});
+    const w = db.intakeWatermark('global');
+    expect(typeof w).toBe('number');
+    // 再写一条更晚的（nowMs 注入后写）——水位取最大
+    db.addMemory(
+      {
+        ownerKey: 'global',
+        kind: 'fact',
+        summary: '更晚的一条',
+        content: '内容',
+      },
+      1_800_000_000_000,
+    );
+    expect(db.intakeWatermark('global')).toBe(1_800_000_000_000);
+  });
+
+  it('恰只捕捉摄入：decay 与 markUsed 不动水位', () => {
+    write({});
+    const w0 = db.intakeWatermark('global')!;
+    db.decayConfidence(db.list(['global'])[0]!.id, 0.5);
+    db.markUsed([db.list(['global'])[0]!.id], w0 + 100_000);
+    expect(db.intakeWatermark('global')).toBe(w0); // 整理与引用不重开合并窗
+  });
+
+  it('owner 隔离：水位按 owner 查询', () => {
+    write({ ownerKey: 'global' });
+    expect(db.intakeWatermark('project:other')).toBeNull();
   });
 });
 

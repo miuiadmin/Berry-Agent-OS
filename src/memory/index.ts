@@ -32,6 +32,8 @@ export {
   type MemoryInput,
   type AddMemoryOutcome,
 } from './store.js';
+// canonical 工作区根（§3 project 键的哈希入参——git commondir 归并，第十四批 A 组）
+export { canonicalWorkspaceRoot } from './workspace.js';
 export {
   detectSecret,
   detectInstructionInjection,
@@ -54,6 +56,7 @@ export {
   runConsolidationOnce,
   collectConsolidationCandidates,
   attachPeriodicReview,
+  mergeReasonPasses,
   type ReviewLlmFace,
   type PeriodicReviewOptions,
   type ReviewReport,

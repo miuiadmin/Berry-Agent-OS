@@ -130,6 +130,15 @@ function mergeRefs(a: readonly MemorySourceRef[], b: readonly MemorySourceRef[])
   return JSON.stringify(merged.slice(-SOURCE_REFS_CAP));
 }
 
+/** 行内 source_refs JSON 文本 → 引用数组（脏数据防御为空——与 toRecord 同语义） */
+function parseRefs(json: string): MemorySourceRef[] {
+  try {
+    return JSON.parse(json) as MemorySourceRef[];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * 项目归属键：'project:<根路径哈希>'（两层归属——global + 项目，Hermes 实证）。
  * @param cwd 项目根绝对路径
@@ -196,13 +205,21 @@ export class MemoryStore {
       );
       if (conflict) {
         if (confidence >= conflict.confidence) {
-          // 新胜：旧条 dismissed（auto_resolved）、新条入库并继承双方证据计数
+          // 新胜：旧条 dismissed（auto_resolved）、新条入库并继承双方证据计数与
+          // 双方 source_refs 并集（血缘继承——条目消亡溯源不死，第十四批 A 组）
           this.db
             .prepare(
               `UPDATE memories SET status = 'dismissed', superseded_by = 'auto_resolved', updated_at = ? WHERE id = ?`,
             )
             .run(nowMs, conflict.id);
-          const record = this.insert(input, confidence, conflict.evidence_count + 1, nowMs, conflict.id);
+          const record = this.insert(
+            input,
+            confidence,
+            conflict.evidence_count + 1,
+            nowMs,
+            conflict.id,
+            parseRefs(conflict.source_refs),
+          );
           return { outcome: 'superseded', memory: record, supersededId: conflict.id };
         }
         // 旧胜（高 confidence 在库）：候选驳回——矛盾不增证据，静默落 rejected 供调用方观测
@@ -229,12 +246,7 @@ export class MemoryStore {
                source_refs = ?, updated_at = ?
          WHERE id = ?`,
       )
-      .run(
-        candidateConfidence,
-        mergeRefs(JSON.parse(row.source_refs) as MemorySourceRef[], input.sourceRefs ?? []),
-        nowMs,
-        row.id,
-      );
+      .run(candidateConfidence, mergeRefs(parseRefs(row.source_refs), input.sourceRefs ?? []), nowMs, row.id);
     const memory = this.get(row.id);
     if (!memory) throw new Error(`合并后读回失败（${row.id}）——事务内不可达，防御断言`);
     return { outcome: 'merged', memory, via };
@@ -247,6 +259,8 @@ export class MemoryStore {
     evidenceCount: number,
     nowMs: number,
     supersedeOf?: string,
+    /** 血缘继承：极性新胜时旧条的全部溯源引用（与新入参 refs 去重并集后落列） */
+    inheritedRefs?: readonly MemorySourceRef[],
   ): MemoryRecord {
     const id = uuidV7(nowMs);
     this.db
@@ -265,7 +279,8 @@ export class MemoryStore {
         evidenceCount,
         // 新条目非终态：superseded_by 仅在被替代时写；此处登记「替代了谁」不入列（终态来源语义）
         null,
-        JSON.stringify(input.sourceRefs ?? []),
+        // 有继承面时并集（mergeRefs 去重 + 50 条上限同罩），否则新入参原样
+        inheritedRefs ? mergeRefs(inheritedRefs, input.sourceRefs ?? []) : JSON.stringify(input.sourceRefs ?? []),
         nowMs,
         nowMs,
       );
@@ -273,6 +288,18 @@ export class MemoryStore {
     const memory = this.get(id);
     if (!memory) throw new Error(`插入后读回失败（${id}）——事务内不可达，防御断言`);
     return memory;
+  }
+
+  /**
+   * 摄入水位（§5 consolidation 变更短路判据，第十四批 A 组）：owner 内活跃与
+   * 终态条目的 `max(updated_at)`。恰只捕捉「摄入」——insert/merge 皆刷
+   * updated_at，而 decay（刻意不刷）与 markUsed（只动 usage 列）都不动——
+   * 整理与引用不重开合并窗。空 owner 返回 null（与 0 可区分：从未有任何条目）。
+   */
+  intakeWatermark(ownerKey: string): number | null {
+    const row = this.db.prepare('SELECT MAX(updated_at) AS w FROM memories WHERE owner_key = ?').get(ownerKey) as
+      { w: number | null } | undefined;
+    return row?.w ?? null;
   }
 
   /** 单条读取（含 dismissed/superseded——审计与恢复面要看全量状态） */

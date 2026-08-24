@@ -49,7 +49,9 @@ describe('renderBriefingSection（记忆篇 §6 通道 1 渲染件）', () => {
     // 晋升桥指路（记忆篇 §9 纵切五）：条目非空即附——显式动作、需用户确认
     expect(out).toContain('SKILL.md');
     expect(out).toContain('需用户确认');
-    expect(out.split('\n')).toHaveLength(6); // 标记 + 句式 + 指令 + 2 条 + 桥行——无多余空行
+    // 时序声明（第十四批 A 组）：写入与整理不回响本回合——防「刚写入即生效」回声
+    expect(out).toContain('不改变本回合行为');
+    expect(out.split('\n')).toHaveLength(7); // 标记 + 框架句 + 时序句 + 指令 + 2 条 + 桥行——无多余空行
   });
   it('截断可见：truncated = true 追加截断提示行', () => {
     const out = renderBriefingSection([rec('a')], true);

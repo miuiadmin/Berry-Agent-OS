@@ -9,7 +9,9 @@
  * consolidation（低频 LLM，互补不替代确定性合并）：老化（>90 天）与容量溢出
  * （>500/owner）候选交模型建议合并对/降权表 → 应用走既有路径（合并 = addMemory
  * 规则 + forget 'llm:<id>'；降权 = decayConfidence）——不静默删除（删除只有用户
- * explicit forget）。
+ * explicit forget）。触发带变更短路 + 锚间隔（§5 触发与护栏，第十四批 A 组）：
+ * 零新摄入不烧 LLM、刚摄入等聚集；合并建议须点名具体重叠（理由护栏），
+ * drop 条溯源并集过继给存活条（血缘继承）。
  *
  * 尽力而为纪律：提取产物 TypeBox 校验、失败条目丢弃不重试；一切异常止步于日志
  * （周期路是后台整理，炸 run = 设计错误）。schema 面用宿主 typebox 再导出（防双实例）。
@@ -20,7 +22,8 @@ import type { AssistantMessage, Message, UserMessage } from '../contracts/llm.js
 import type { Context } from '../context/types.js';
 import { utilityScore } from './store.js';
 import type { MemoryStore } from './store.js';
-import { guardedAddMemory } from './scan.js';
+import { guardedAddMemory, isPollutedTranscript } from './scan.js';
+import { tokenize } from './merge.js';
 
 /** 周期路依赖的 llm 服务最小面（ctx.get('llm') 即满足——结构类型窄化便于测试注入脚本模型） */
 export interface ReviewLlmFace {
@@ -51,14 +54,19 @@ export interface PeriodicReviewOptions {
   readonly staleDays?: number;
   /** 容量上限条/owner（缺省 500；溢出低分条目进 consolidation 候选） */
   readonly maxActivePerOwner?: number;
+  /**
+   * consolidation 触发锚间隔（毫秒，缺省 5 分钟）：距最新摄入不足此值时
+   * 整理等下拍——给同批变更留聚集窗口（review 产物先攒后并，第十四批 A 组）
+   */
+  readonly consolidationAnchorMs?: number;
   /** 时钟注入（缺省 Date.now——老化判定与测试用） */
   readonly now?: () => number;
 }
 
 /** 单轮 review 报告（尽力而为的观测面——日志/diagnostics 用） */
 export interface ReviewReport {
-  /** 触发与否（预算不足/空转录 = 不触发） */
-  readonly skipped?: 'budget' | 'empty';
+  /** 触发与否（预算不足/空转录/转录污染 = 不触发） */
+  readonly skipped?: 'budget' | 'empty' | 'polluted';
   /** 模型产出且通过校验的候选数 */
   readonly candidates: number;
   /** 各候选入合并管线的四态计数 */
@@ -112,6 +120,8 @@ const ConsolidationSchema = Type.Object({
     Type.Object({
       keepId: Type.String({ minLength: 1 }),
       dropIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 20 }),
+      // 合并理由（必填，第十四批 A 组）：护栏判据面——须点名具体重叠词而非分类学断言
+      reason: Type.String({ minLength: 1, maxLength: 500 }),
     }),
     { maxItems: 50 },
   ),
@@ -124,11 +134,29 @@ const ConsolidationSchema = Type.Object({
   ),
 });
 
-/** consolidation prompt（候选清单交模型判同义/降权） */
+/** consolidation prompt（候选清单交模型判同义/降权；reason 须引用条目里的原词） */
 const CONSOLIDATION_SYSTEM_PROMPT = `You are a memory consolidation engine. Given candidate memory entries (aged or overflow), propose:
-1. merges: groups of entries saying the same thing — pick the best one as keepId, list redundant ones as dropIds;
+1. merges: groups of entries saying the same thing — pick the best one as keepId, list redundant ones as dropIds, and give a "reason" that QUOTES the specific overlapping words present in the entries (a taxonomic label like "similar topics" is NOT a valid reason);
 2. decays: entries that look stale/no longer relevant (but not mergeable) — suggest a confidence factor 0.1..1 to multiply.
-Rules: never propose deleting entries (soft state only via merges); output pure JSON (no prose): {"merges":[{"keepId":"...","dropIds":["..."]}],"decays":[{"id":"...","factor":0.6}]}; use [] / omit groups you are not confident about.`;
+Rules: never propose deleting entries (soft state only via merges); output pure JSON (no prose): {"merges":[{"keepId":"...","dropIds":["..."],"reason":"both say <quote>"}],"decays":[{"id":"...","factor":0.6}]}; use [] / omit groups you are not confident about.`;
+
+/**
+ * 合并理由护栏（§5 触发与护栏，第十四批 A 组）：理由分词后与待合并条目摘要的
+ * token 交集 ≥ 1 才算「点名具体重叠」——纯分类学理由（「similar topics」「同类
+ * 可合并」）的元语言词汇恰不在摘要文本里，交集为 0 即驳回。分词复用三分支同
+ * 一切词器（单一事实源——中英同形处理）。
+ * @param reason 模型给出的合并理由
+ * @param summaries keep 与各 drop 条的摘要（比较面）
+ */
+export function mergeReasonPasses(reason: string, summaries: readonly string[]): boolean {
+  const reasonTokens = tokenize(reason);
+  if (reasonTokens.size === 0) return false;
+  const textTokens = tokenize(summaries.join(' '));
+  for (const token of reasonTokens) {
+    if (textTokens.has(token)) return true;
+  }
+  return false;
+}
 
 /* ---------------- 模型文本 → JSON 尽力而为解析 ---------------- */
 
@@ -192,6 +220,12 @@ export async function runReviewOnce(
   const counts = { candidates: 0, inserted: 0, merged: 0, superseded: 0, rejected: 0, blocked: 0 };
   const visible = transcript.filter((m) => m.role === 'user' || m.role === 'assistant');
   if (visible.length === 0) return { ...counts, skipped: 'empty' };
+  // §4.1 资格检查（与即时路同一函数，零特判）：污染转录整段拒收——不消毒不降权，
+  // 污染会话不配产出可信记忆。v1 判据空集恒放行（机制先行，随外部源工具回填）。
+  if (isPollutedTranscript(visible.map((m) => textOfContent(m.content)).join('\n'))) {
+    deps.logger.warn('周期 review 转录污染（§4.1 资格检查）——本轮跳过');
+    return { ...counts, skipped: 'polluted' };
+  }
   if (!deps.llm.canAfford('background')) return { ...counts, skipped: 'budget' };
 
   const { message } = await deps.llm.complete({
@@ -310,15 +344,23 @@ export async function runConsolidationOnce(
       .map((id) => byId.get(id))
       .filter((r): r is NonNullable<typeof r> => r !== undefined && r.id !== keep.id);
     if (drops.length === 0) continue;
-    // canonical = keep 条原文重走合并管线（exact 自合并：证据 +1、refs 保序），
-    // 随后 drop 条按 'llm:<keepId>' 软删——schema 的 superseded_by='llm:<id>' 值即此来源
+    // 理由护栏（§5 触发与护栏，第十四批 A 组）：reason 未点名具体重叠（token
+    // 交集 0——分类学断言的元语言词汇不在摘要里）→ 整组驳回，drops 不单独执行
+    //（组是被应用或被忽略的原子）
+    if (!mergeReasonPasses(group.reason, [keep.summary, ...drops.map((d) => d.summary)])) {
+      deps.logger.debug('consolidation 合并组理由未点名重叠——整组忽略', { keepId: keep.id });
+      continue;
+    }
+    // canonical = keep 条原文重走合并管线（exact 自合并：证据 +1）；sourceRefs
+    // 传 keep ∪ drops 并集——被合并条目的溯源过继给存活条（血缘继承：条目
+    // 消亡，溯源不死），mergeRefs 去重 + 50 条上限在 store 侧同罩
     const result = guardedAddMemory(deps.store, {
       ownerKey,
       kind: keep.kind,
       summary: keep.summary,
       content: keep.content,
       confidence: keep.confidence,
-      sourceRefs: keep.sourceRefs,
+      sourceRefs: [keep, ...drops].flatMap((r) => r.sourceRefs),
     });
     if (result.status === 'ok') {
       for (const drop of drops) deps.store.forget(drop.id, `llm:${keep.id}`);
@@ -389,6 +431,9 @@ export function attachPeriodicReview(ctx: Context, opts: PeriodicReviewOptions):
   const toolCallThreshold = opts.toolCallThreshold ?? 15;
   const windowMessages = opts.windowMessages ?? 40;
   const ownerKey = opts.ownerKey ?? 'global';
+  // consolidation 触发锚间隔（缺省 5 分钟起草值——§5 触发与护栏）
+  const anchorMs = opts.consolidationAnchorMs ?? 5 * 60 * 1000;
+  const now = opts.now ?? Date.now;
 
   /** 滚动转录缓冲（最近 windowMessages 条 surface 消息——per-process 插件态） */
   const buffer: Message[] = [];
@@ -396,6 +441,13 @@ export function attachPeriodicReview(ctx: Context, opts: PeriodicReviewOptions):
   let toolCalls = 0;
   let inFlight: Promise<void> | undefined;
   let disposed = false;
+  /**
+   * 上次 consolidation 跑完时的摄入水位（owner 内 max(updated_at)，§5 变更
+   * 短路判据）。-1 = 从未跑过——首轮允许（存量老条目理应得到一次整理）。
+   * 跑完重查而非取跑前值：consolidation 自身写动（canonical 重写/forget 都刷
+   * updated_at）计入下一轮基线，不会把自身写动误判为「新摄入」。
+   */
+  let lastMergedWatermark = -1;
 
   const deps = { store: opts.store, llm: opts.llm, ownerKey, logger: ctx.logger };
   const consolidationOpts = {
@@ -414,9 +466,22 @@ export function attachPeriodicReview(ctx: Context, opts: PeriodicReviewOptions):
         const transcript = buffer.slice(-windowMessages);
         const review = await runReviewOnce(deps, transcript);
         ctx.logger.debug('周期 review 收尾', { ...review });
-        const consolidation = await runConsolidationOnce(deps, consolidationOpts);
-        if (consolidation.candidates > 0 || consolidation.skipped) {
-          ctx.logger.debug('consolidation 收尾', { ...consolidation });
+        // consolidation 变更短路 + anchor（§5 触发与护栏，第十四批 A 组）：
+        // 计数阈值是节拍器不是理由——每拍先比摄入水位，零新摄入即整腿跳过
+        //（零 LLM 消耗）；有新摄入但距最新摄入不足锚间隔等下拍（同批变更
+        // 聚集窗口）。review 腿不受影响——转录是其输入，与库状态无关。
+        const watermark = opts.store.intakeWatermark(ownerKey) ?? 0;
+        if (watermark !== lastMergedWatermark && now() - watermark >= anchorMs) {
+          const consolidation = await runConsolidationOnce(deps, consolidationOpts);
+          // 新基线 = 跑完后的水位（consolidation 自身写动计入）
+          lastMergedWatermark = opts.store.intakeWatermark(ownerKey) ?? 0;
+          if (consolidation.candidates > 0 || consolidation.skipped) {
+            ctx.logger.debug('consolidation 收尾', { ...consolidation });
+          }
+        } else {
+          ctx.logger.debug('consolidation 跳过', {
+            reason: watermark === lastMergedWatermark ? 'no-intake' : 'anchor',
+          });
         }
       } catch (err) {
         // 尽力而为：LLM_BUDGET_EXCEEDED（检查与调用间竞态）与其他失败一并跳过本轮

@@ -23,6 +23,7 @@ import type { DatabaseConnection } from '../persist/index.js';
 import { registerMessageRole } from '../agent/messages.js';
 import { MemoryStore, projectOwnerKey } from './store.js';
 import type { MemoryKind } from './store.js';
+import { canonicalWorkspaceRoot } from './workspace.js';
 import { SessionFtsIndex } from './session-fts.js';
 import { attachCorrectionExtractor } from './extract.js';
 import { attachPeriodicReview } from './review.js';
@@ -96,6 +97,12 @@ const MEMORY_CONFIG_SCHEMA = Type.Object({
   maxActivePerOwner: Type.Optional(
     Type.Integer({ minimum: 10, description: '容量上限条/owner（缺省 500，溢出进 consolidation 候选）' }),
   ),
+  consolidationAnchorMs: Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      description: 'consolidation 触发锚间隔毫秒（缺省 300000——距最新摄入不足此值等下拍，同批变更聚集窗口）',
+    }),
+  ),
   recallTopK: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: '按需检索注入条数（缺省 3）' })),
   unusedDays: Type.Optional(
     Type.Integer({ minimum: 1, description: '常驻简报未用排除阈值天（缺省 30——离开常驻面而非删除，检索引用即复活）' }),
@@ -109,6 +116,7 @@ interface MemoryConfig {
   windowMessages?: number;
   staleDays?: number;
   maxActivePerOwner?: number;
+  consolidationAnchorMs?: number;
   recallTopK?: number;
   unusedDays?: number;
 }
@@ -175,8 +183,10 @@ async function applyMemoryPlugin(
   // Store 公共读脸的本地窄化引用（守卫后的属性窄化不进闭包——差分 handler 闭包用）
   const storeFace = deps.store;
   const fts = new SessionFtsIndex(deps.store.connection);
-  /** 生效归属键（首键 = 写入 owner：global——tools.ts 装配约定） */
-  const ownerKeys = (): string[] => ['global', projectOwnerKey(deps.workspace())];
+  /** 生效归属键（首键 = 写入 owner：global——tools.ts 装配约定）。project 键
+   *  哈希入参 = canonical 工作区根（§3，第十四批 A 组）：git commondir 归并——
+   *  同一仓库的主目录/worktree/子目录同键，防裂库；非 git 目录回退字面 cwd */
+  const ownerKeys = (): string[] => ['global', projectOwnerKey(canonicalWorkspaceRoot(deps.workspace()))];
 
   /* ---- ① 工具五件（tools.register 即 tools_change 原位刷新 loop 快照） ---- */
   const tools = ctx.get<ToolsRegisterFace>('tools');
@@ -228,6 +238,7 @@ async function applyMemoryPlugin(
     ...(cfg.windowMessages !== undefined ? { windowMessages: cfg.windowMessages } : {}),
     ...(cfg.staleDays !== undefined ? { staleDays: cfg.staleDays } : {}),
     ...(cfg.maxActivePerOwner !== undefined ? { maxActivePerOwner: cfg.maxActivePerOwner } : {}),
+    ...(cfg.consolidationAnchorMs !== undefined ? { consolidationAnchorMs: cfg.consolidationAnchorMs } : {}),
   });
   ctx.effect(() => () => review.dispose());
 

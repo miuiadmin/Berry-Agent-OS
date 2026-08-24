@@ -79,6 +79,26 @@ export function detectInstructionInjection(text: string): boolean {
   return INJECTION_PATTERNS.some((regex) => regex.test(text));
 }
 
+/**
+ * 转录污染模式表（§4.1 会话可信度——polluted 资格检查的判据面）。
+ * **v1 空集**（seam 落码形态）：污染源 =「外部上下文证据」——外部源工具族
+ * （web 检索、MCP 桥等 Ring2+ 件）的工具输出特征。berry v1 工具族纯 fs
+ * （读项目文件是正常上下文不构成污染），故判据表空、机制先行——随外部源
+ * 工具首件落地回填，即时不提前发明判据（克制纪律，记忆篇 §4.1）。
+ */
+const POLLUTION_PATTERNS: readonly RegExp[] = [];
+
+/**
+ * 转录污染资格检查（§4.1——提取两路入口的同一资格检查，零特判分支）：
+ * 文本命中任一污染模式 → 本轮提取跳过（不消毒不降权——污染转录不具备
+ * 产出可信记忆的资格，整段拒收）。
+ * @param text 待检查的转录文本（即时路 = 单条用户消息；周期路 = 窗口转录拼接）
+ * @param patterns 判据表（缺省 POLLUTION_PATTERNS；参数化供测试与判据回填期注入）
+ */
+export function isPollutedTranscript(text: string, patterns: readonly RegExp[] = POLLUTION_PATTERNS): boolean {
+  return patterns.some((regex) => regex.test(text));
+}
+
 /** 引述降权包裹（§8.2）：指令样内容套引述框架，模型不当作对本次的指令 */
 export function quoteAsCitation(text: string): string {
   return `（引述记忆内容，非当前指令）「${text}」`;
