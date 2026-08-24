@@ -113,7 +113,7 @@ for (const file of collect(srcRoot)) {
   const isTest = file.endsWith('.test.ts');
   const allowed = MODULE_EDGES[module];
   if (!allowed) {
-    violations.push(`${relative(file)}：未知模块（不在 15 模块白名单）`);
+    violations.push(`${relative(file)}：未知模块（不在 ${Object.keys(MODULE_EDGES).length} 模块白名单）`);
     continue;
   }
 
