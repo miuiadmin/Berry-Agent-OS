@@ -27,11 +27,12 @@ berry/
 │   ├── persist/       # SQLite 物理层（迁移框架/write-behind/凭证）
 │   ├── agent/         # loop 骨架（AgentEvent/steering/消息角色）
 │   ├── llm/           # pi-ai 适配（唯一允许裸导入 pi-ai 的模块）
-│   ├── tools/         # 三段管道 + fs 工具族
+│   ├── tools/         # 三段管道 + fs 工具族 + 检索族（find/grep）
 │   ├── safety/        # 沙箱/审批/可写根
 │   ├── skills/        # SKILL.md 注册表 + 渐进披露
 │   ├── channels/      # TUI 通道 + 命令面
-│   ├── app/           # 组合根（装配序/CLI/组合树/内置插件行——含 builtin:chat 对话应用件）
+│   ├── chat/          # 官方件·件聚落：对话应用（ConversationDriver/durable/resume）
+│   ├── app/           # 组合根（装配序/CLI/组合树/官方件注册表——纯「装」）
 │   ├── memory/        # Ring 2 官方件：记忆库
 │   ├── subagent/      # Ring 2 官方件底座：Job + SubagentProvider
 │   └── goal/          # Ring 2 官方件：长目标状态机
@@ -47,7 +48,7 @@ berry/
 
 细节与理由见 [docs/开发指南.md](docs/开发指南.md)：
 
-- **模块边界**：16 模块单向 DAG（14 有码 + scheduler/mcp 两席占位），跨模块只 import 公共面（contract/types/index）；新模块 contract-first。
+- **模块边界**：17 模块单向 DAG（15 有码 + scheduler/mcp 两席占位），跨模块只 import 公共面（contract/types/index）；新模块 contract-first。
 - **测试**：分层（单元 → 组合根全栈）；mock 只停在模型层；禁断言 AI 生成文本；修 bug 带回归锁（修复前必红）。
 - **注释**：新写代码必须充分中文注释（JSDoc + 关键分支行内）。
 - **命名去品牌化**：代码标识符禁用品牌词；仅 package.json name / bin 命令 / UI 文案允许。
