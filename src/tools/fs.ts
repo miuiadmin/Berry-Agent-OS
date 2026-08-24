@@ -68,9 +68,13 @@ async function canonicalize(abs: string): Promise<string> {
   }
 }
 
-/** child 是否位于 root 内（相等或隔分隔符的前缀，防 /root 与 /root-evil 误判） */
+/** child 是否位于 root 内（相等或隔分隔符的前缀，防 /root 与 /root-evil 误判；
+ * 根为文件系统根 sep（danger-full-access 的全盘根，safety 推导返回 [sep]）时
+ * 任意绝对路径皆命中——与 safety/roots isInsideRoot 同款特判（不 cross-import
+ * 防 safety→tools 已有反向依赖成环）） */
 function isInside(child: string, root: string): boolean {
-  return child === root || child.startsWith(root + sep);
+  const prefix = root === sep ? sep : root + sep;
+  return child === root || child.startsWith(prefix);
 }
 
 /** 当前盘上指纹（size:mtimeMs）；文件不存在返回 undefined */

@@ -39,12 +39,13 @@ function rig(opts: { mode: SandboxMode; answer?: 'approve' | 'reject'; pre?: (ws
     });
   }
 
-  // 工具注册表 + 真管道 + fs 工具族（fence 数据源随档位切换，模拟 app 装配）
+  // 工具注册表 + 真管道 + fs 工具族（fence 数据源 = 真推导函数随档位切换——
+  // 与 app 装配同源；2026-08-25 修前此处靠三元自模拟 read-only 空根）
   const service = registerToolsService(ctx, { pipeline: createToolPipeline(ctx) });
   installSafetyGate(ctx, { approval, workspace: ws, mode: () => mode });
   const fsTools = createFsTools({
     workspace: () => ws,
-    writableRoots: () => (mode === 'read-only' ? [] : deriveWritableRoots(ws)),
+    writableRoots: () => deriveWritableRoots(ws, mode),
   });
   for (const def of fsTools.tools) service.register(def);
 

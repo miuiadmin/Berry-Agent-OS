@@ -40,9 +40,11 @@ export interface SandboxPolicy {
   readonly writableRoots?: readonly string[];
 }
 
-/** 策略实际生效的可写根列表（缺省推导；两个后端与 fs fence 共用同一来源） */
+/** 策略实际生效的可写根列表（缺省按档位推导；两个后端与 fs fence 共用同一来源。
+ * read-only 档空根——Seatbelt read-only profile 本就全拒写（不吃根列表）、
+ * Bwrap 空根即无 rw bind（2026-08-25 mode 升一等输入后两后端语义同源收紧）） */
 export function resolvePolicyRoots(policy: SandboxPolicy): readonly string[] {
-  return policy.writableRoots ?? deriveWritableRoots(policy.workspaceRoot);
+  return policy.writableRoots ?? deriveWritableRoots(policy.workspaceRoot, policy.mode);
 }
 
 /** 后端强制完整性（如实上报，上层裁决；Windows ACL 受限令牌将是 partial 先例） */

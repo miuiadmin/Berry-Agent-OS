@@ -23,7 +23,7 @@ import type { Persistence } from '../persist/index.js';
 import type { SandboxMode } from '../safety/index.js';
 import { createApprovalService } from '../safety/approval.js';
 import { installSafetyGate } from '../safety/gate.js';
-import { createRootsProvider, DEFAULT_CARVE_OUT_ENTRIES } from '../safety/index.js';
+import { createRootsProvider } from '../safety/index.js';
 import { createToolPipeline } from '../tools/index.js';
 import type { ToolPipelineExecutor } from '../tools/index.js';
 import { registerToolsService } from '../tools/registry.js';
@@ -96,7 +96,8 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
     /* ---- ④ 子工具管道 + fs 工具族（toolFilter include 名单过滤，缺省全量）---- */
     const pipeline: ToolPipelineExecutor = createToolPipeline(childCtx, { onGateDecision: sinks.gate });
     const tools: ToolsService = registerToolsService(childCtx, { pipeline });
-    const writableRoots = createRootsProvider({ workspace: deps.workspace, entries: DEFAULT_CARVE_OUT_ENTRIES });
+    // 可写根走 safety 档位推导（与主装配同源；父档闭包快照见 ⑤ 注记）
+    const writableRoots = createRootsProvider({ workspace: deps.workspace, mode: () => deps.sandboxMode });
     const fsTools = createFsTools({ writableRoots, workspace: () => deps.workspace });
     const searchTools = createSearchTools({ workspace: () => deps.workspace });
     // §6.3 工具子集：include 名单外的工具不进子装配（声明即执法，不装再拦）

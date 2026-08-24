@@ -31,9 +31,10 @@ export const OVERLAY_FILENAME = 'overlay.yaml';
 export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>>;
 
 /**
- * 官方默认层 v1 首件已进（契约篇 §5.1 落码注记）：memory（Ring 2 官方全家桶首件，
- * 非 fixed 真·可卸——/plugin-toggle memory 即减）。Ring 0 内核不进组合树；Ring 1 底座
- * 当前仍为组合根硬装配（行树化随全家桶次件迁移一并落，seam）。
+ * 官方默认层四行现状（契约篇 §5.1 落码注记随铭牌批更新）：chat（首行，对话
+ * 应用件）/ memory / subagent / goal——均 Ring 2 真·可卸（overlay 可禁用，
+ * 卸掉仅失对应能力，核心循环不破）。Ring 0 内核不进组合树；Ring 1 底座当前
+ * 仍为组合根硬装配（行树化随 exec 纵切批落，seam——第十六批题五终态宣言）。
  */
 // 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：chat 首行 + memory/subagent/goal 顺移
 // （均非 fixed——overlay 可卸/可禁，卸掉仅失对应能力，核心循环不破）

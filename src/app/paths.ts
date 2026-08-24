@@ -7,7 +7,7 @@
 
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /** 数据目录（`APP_DATA_DIR` env 覆盖 → 缺省 `~/.berry`） */
 export function dataDir(): string {
@@ -19,9 +19,13 @@ export function dbPath(): string {
   return process.env['APP_DB_PATH'] ?? join(dataDir(), 'sessions.db');
 }
 
-/** 确保数据目录存在（幂等；首次启动建档——库文件由 SQLite 自建，此处只管目录） */
-export function ensureDataDir(): string {
-  const dir = dataDir();
+/** 确保库文件父目录存在（幂等 recursive mkdir；库文件由 SQLite 自建，此处只管目录）。
+ * 建档点定死「库文件父目录」而非数据目录：缺省路径下二者同一目录，显式
+ * APP_DB_PATH / 测试注入路径同样覆盖到位（2026-08-25 修——原 ensureDataDir
+ * 只建数据目录，显式库路径父目录不存在仍 ENOENT；深读 workflow 实证缺口）。
+ * 三入口共用的唯一建档点，经组合根 ③ 落地。 */
+export function ensureDbDir(file: string): string {
+  const dir = dirname(file);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

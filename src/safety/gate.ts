@@ -88,7 +88,7 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
     for (const rawPath of extractWritePaths(input.tool.name, input.args)) {
       // 与 fence 同源的 canonical 化（相对锚 workspace、解析符号链）
       const absPath = canonicalPath(resolvePath(workspace, rawPath));
-      const verdict = resolveWritability(absPath, deriveWritableRoots(workspace), carveTable);
+      const verdict = resolveWritability(absPath, deriveWritableRoots(workspace, mode), carveTable);
       if (verdict.allowed || verdict.kind !== 'carve-out') {
         // 放行 / 根外（outside-roots 是 fence 的拒绝面，本行不重复拦）
         continue;

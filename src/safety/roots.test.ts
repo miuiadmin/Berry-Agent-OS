@@ -5,7 +5,7 @@
 
 import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   absolutize,
@@ -18,6 +18,7 @@ import {
   type CarveOutEntry,
   type CarveOutNode,
 } from './roots.js';
+import type { SandboxMode, WritableRootsInput } from './types.js';
 
 /** 造一个真临时工作区（直接 canonical 化——macOS mkdtemp 给的是 /var/... 非真实前缀） */
 function makeWorkspace(): string {
@@ -39,15 +40,25 @@ describe('canonicalPath', () => {
   });
 });
 
-describe('deriveWritableRoots', () => {
-  it('包含 workspace + /tmp + tmpdir（canonical 去重）', () => {
+describe('deriveWritableRoots（mode 一等输入——2026-08-25 修）', () => {
+  it('workspace-write：workspace + /tmp + tmpdir（canonical 去重）', () => {
     const ws = makeWorkspace();
-    const roots = deriveWritableRoots(ws);
+    const roots = deriveWritableRoots(ws, 'workspace-write');
     expect(roots).toContain(canonicalPath(ws));
     expect(roots).toContain(canonicalPath('/tmp')); // macOS 上真实位置是 /private/tmp
     expect(roots).toContain(canonicalPath(tmpdir()));
     // 去重：tmpdir 在多数 CI 环境就是 /tmp，集合不该有重复
     expect(new Set(roots).size).toBe(roots.length);
+  });
+
+  it('read-only：空根（fence 拦一切写——修前恒三根档位无效，回归锁）', () => {
+    const ws = makeWorkspace();
+    expect(deriveWritableRoots(ws, 'read-only')).toEqual([]);
+  });
+
+  it('danger-full-access：全盘单根 [sep]（isInsideRoot 分隔符特判的唯一全覆盖根）', () => {
+    const ws = makeWorkspace();
+    expect(deriveWritableRoots(ws, 'danger-full-access')).toEqual([sep]);
   });
 });
 
@@ -90,7 +101,7 @@ describe('buildCarveOutTable + resolveWritability 层叠判定', () => {
 
   it('无条目：根内放行、根外 outside-roots', () => {
     const ws = makeWorkspace();
-    const roots = deriveWritableRoots(ws);
+    const roots = deriveWritableRoots(ws, 'workspace-write');
     expect(resolveWritability(join(ws, 'a.txt'), roots, table(ws, []))).toEqual({ allowed: true });
     const verdict = resolveWritability('/etc/passwd', roots, table(ws, []));
     expect(verdict).toMatchObject({ allowed: false, kind: 'outside-roots' });
@@ -99,7 +110,11 @@ describe('buildCarveOutTable + resolveWritability 层叠判定', () => {
   it('deny 条目遮罩根内子树：carve-out 拒绝并带命中条目', () => {
     const ws = makeWorkspace();
     const entries: CarveOutEntry[] = [{ pattern: '.git', effect: 'deny', note: '版本库' }];
-    const verdict = resolveWritability(join(ws, '.git', 'config'), deriveWritableRoots(ws), table(ws, entries));
+    const verdict = resolveWritability(
+      join(ws, '.git', 'config'),
+      deriveWritableRoots(ws, 'workspace-write'),
+      table(ws, entries),
+    );
     expect(verdict.allowed).toBe(false);
     if (!verdict.allowed && verdict.kind === 'carve-out') {
       expect(verdict.matched?.entry.pattern).toBe('.git');
@@ -116,7 +131,7 @@ describe('buildCarveOutTable + resolveWritability 层叠判定', () => {
       { pattern: 'build/out', effect: 'allow' },
     ];
     const t = table(ws, entries);
-    const roots = deriveWritableRoots(ws);
+    const roots = deriveWritableRoots(ws, 'workspace-write');
     // build/x → 父 deny 命中（子 allow 管不到更浅的路径）
     expect(resolveWritability(join(ws, 'build', 'x'), roots, t)).toMatchObject({ allowed: false, kind: 'carve-out' });
     // build/out/y → 子 allow 更深，赢回可写
@@ -131,7 +146,11 @@ describe('buildCarveOutTable + resolveWritability 层叠判定', () => {
       { pattern: 'secret.env', effect: 'allow' },
       { pattern: 'secret.env', effect: 'deny' },
     ];
-    const verdict = resolveWritability(join(ws, 'secret.env'), deriveWritableRoots(ws), table(ws, entries));
+    const verdict = resolveWritability(
+      join(ws, 'secret.env'),
+      deriveWritableRoots(ws, 'workspace-write'),
+      table(ws, entries),
+    );
     expect(verdict).toMatchObject({ allowed: false, kind: 'carve-out' });
   });
 
@@ -149,13 +168,22 @@ describe('buildCarveOutTable + resolveWritability 层叠判定', () => {
 describe('createRootsProvider / absolutize', () => {
   it('provider 返回 canonical 化可写根（与沙箱 profile 同源）', () => {
     const ws = makeWorkspace();
-    const provider = createRootsProvider({ workspace: ws });
-    expect(provider()).toEqual(deriveWritableRoots(canonicalPath(ws)));
+    const provider = createRootsProvider({ workspace: ws, mode: () => 'workspace-write' });
+    expect(provider()).toEqual(deriveWritableRoots(ws, 'workspace-write'));
+  });
+
+  it('provider 随 mode getter 切档：降 read-only 即空根（fence 立即收紧——回归锁）', () => {
+    const ws = makeWorkspace();
+    let mode: SandboxMode = 'workspace-write';
+    const provider = createRootsProvider({ workspace: ws, mode: () => mode });
+    expect(provider().length).toBeGreaterThan(0);
+    mode = 'read-only';
+    expect(provider()).toEqual([]);
   });
 
   it('absolutize：相对路径锚 workspace、绝对路径原样（均 canonical 化）', () => {
     const ws = makeWorkspace();
-    const input = { workspace: ws };
+    const input: WritableRootsInput = { workspace: ws, mode: () => 'workspace-write' };
     expect(absolutize(input, 'a/b.txt')).toBe(canonicalPath(join(ws, 'a', 'b.txt')));
     expect(absolutize(input, join(ws, 'c.txt'))).toBe(canonicalPath(join(ws, 'c.txt')));
   });

@@ -16,7 +16,6 @@ import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import type { ChannelHost } from '../channels/types.js';
 import { installExitSignals } from './signals.js';
-import { ensureDataDir } from './paths.js';
 import { VERSION } from './version.js';
 
 /**
@@ -25,7 +24,7 @@ import { VERSION } from './version.js';
  * @returns 进程退出码（正常退出恒 0——用户离开不是错误）
  */
 export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
-  ensureDataDir();
+  // 数据目录建档已收编 createBerryRuntime ③（三入口共用单点）——此处不再早调
   const runtime = await createBerryRuntime({
     ...options,
     interactive: true,

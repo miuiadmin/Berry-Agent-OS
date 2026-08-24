@@ -6,7 +6,7 @@
  * 多轮续跑、命令面注册。
  */
 
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -481,6 +481,20 @@ describe('持久化 round-trip 与命令入口', () => {
       expect(session.events.some((e) => e.type === 'request/header')).toBe(true);
     } finally {
       await reopened.close();
+    }
+  });
+
+  it('库路径父目录不存在也能启动（ensureDbDir 建档——2026-08-25 修前 berry run 全新机器 ENOENT）', async () => {
+    // 深层不存在的父目录：缺省数据目录与显式 APP_DB_PATH 两种首启形态的公共不变量
+    const base = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-mkdir-')));
+    const dbFile = join(base, 'deep', 'nested', 'sessions.db');
+    const { streamFn } = scriptedStream([textMessage('首启回答')]);
+    const runtime = await createBerryRuntime({ dbPath: dbFile, workspace: makeWorkspace(), streamFn });
+    try {
+      expect(existsSync(dbFile)).toBe(true); // 父目录被组合根 ③ 建档，SQLite 落库成功
+      await runtime.conversation!.submitOnce('首启问题');
+    } finally {
+      await runtime.shutdown();
     }
   });
 

@@ -1,7 +1,8 @@
 /**
  * L5 app — subagent 官方件（契约篇 §6.1 `builtin:subagent`；骨架篇 §6.1 纵切四注记）。
  *
- * 官方默认层第二行（Ring 2 真·可卸——卸掉即无委派能力，核心循环不破）。
+ * 官方默认层第三行（chat 首行、memory 次行之后；Ring 2 真·可卸——卸掉即无
+ * 委派能力，核心循环不破）。
  * 三注册全挂 ctx.effect（装载锚 dispose 即 LIFO 回卷，/plugin-toggle 同语义）：
  * ① in-process provider 进 ctx.subagents（真工厂闭包经 deps 注入）；
  * ② 委派工具 `agent` 进 ctx.tools（tools_change 原位刷新即模型可见）——provider 名

@@ -6,7 +6,6 @@
  */
 
 import type { RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from './sandbox.js';
-import type { CarveOutEntry } from './roots.js';
 
 /** 三档文件效果词汇（骨架篇 §7.1）：只管文件效果，网络与进程可见性显式排除在词汇外 */
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -51,10 +50,13 @@ export interface SandboxBackend {
   probe?(timeoutMs: number): boolean;
 }
 
-/** 可写根推导输入（骨架篇 §7.3：writableRoots 唯一推导函数 + carve-out 例外表） */
+/** 可写根推导输入（骨架篇 §7.3：writableRoots 唯一推导函数——fs fence 与沙箱 profile 共用）
+ * 2026-08-25 修订：mode 升为一等输入（原实现 mode 无关恒返回 workspace 三根，
+ * read-only 档 fence 实际不拦写——深读 workflow 实证缺口）；原 entries 字段删除
+ * （carve-out 属守门行（SafetyGateOptions.entries）的审批面，传入根推导是死参数）。 */
 export interface WritableRootsInput {
   /** 工作区根（会话不可变 cwd） */
   readonly workspace: string;
-  /** carve-out 例外条目（层叠：父可写/子拒绝/孙再可写） */
-  readonly entries?: readonly CarveOutEntry[];
+  /** 当前生效档位取值器（与守门行同款 getter 形态——每次 fence 检查取最新） */
+  readonly mode: () => SandboxMode;
 }

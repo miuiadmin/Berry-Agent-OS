@@ -10,7 +10,7 @@
 import { readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
-import type { WritableRootsInput } from './types.js';
+import type { SandboxMode, WritableRootsInput } from './types.js';
 
 /** carve-out 例外条目：pattern 相对 workspace（或以 / 起的绝对路径）；层叠=最具体（最长路径）匹配胜出 */
 export interface CarveOutEntry {
@@ -42,12 +42,25 @@ export function canonicalPath(path: string): string {
 }
 
 /**
- * workspace-write 档的可写根列表（canonical 化去重）：workspace + /tmp +
- * os.tmpdir()。read-only 档无根（空列表）。这是 fs fence 与 Seatbelt
- * profile 的共同数据源。
+ * 按档位推导可写根列表（canonical 化去重）——「某档是什么意思」的唯一 home：
+ * - workspace-write：workspace + /tmp + os.tmpdir()；
+ * - read-only：空列表（fence 拒全量写——2026-08-25 修订：原实现 mode 无关，
+ *   read-only 档 fence 实际不拦写，深读 workflow 实证缺口后 mode 升为一等输入）；
+ * - danger-full-access：文件系统根 [sep]（全盘可写——配合 fence 侧 isInside 的
+ *   根分隔符特判，'/' 前缀即全命中）。
+ * 这是 fs fence 与沙箱 profile（Seatbelt/Bwrap）的共同数据源。
  */
-export function deriveWritableRoots(workspace: string): string[] {
+export function deriveWritableRoots(workspace: string, mode: SandboxMode): string[] {
+  if (mode === 'read-only') return [];
+  if (mode === 'danger-full-access') return [sep];
   return [...new Set([workspace, '/tmp', tmpdir()].map(canonicalPath))];
+}
+
+/** child 是否位于 root 内（相等或隔分隔符的前缀，防 /root 与 /root-evil 误判；
+ * 根为文件系统根 sep（danger-full-access 的全盘根）时任意绝对路径皆命中） */
+export function isInsideRoot(child: string, root: string): boolean {
+  const prefix = root === sep ? sep : root + sep;
+  return child === root || child.startsWith(prefix);
 }
 
 /**
@@ -137,18 +150,20 @@ export function resolveWritability(
       return node.effect === 'deny' ? { allowed: false, kind: 'carve-out', matched: node } : { allowed: true };
     }
   }
-  // 根 containment：相等或隔分隔符前缀（防 /root-evil 误判）
-  const inRoots = roots.some((root) => absPath === root || absPath.startsWith(root + sep));
+  // 根 containment：相等或隔分隔符前缀（防 /root-evil 误判；全盘根见 isInsideRoot）
+  const inRoots = roots.some((root) => isInsideRoot(absPath, root));
   return inRoots ? { allowed: true } : { allowed: false, kind: 'outside-roots' };
 }
 
 /**
  * 组装 fs 工具族的 writableRoots provider（app 装配层接线：替换 tools/fs
- * 的 M1 过渡默认）。返回的根列表已 canonical 化，与沙箱 profile 同源。
+ * 的 M1 过渡默认）。返回的根列表按当前档位推导（mode getter 每次 fence
+ * 检查取最新——read-only 空根 / danger 全盘根 / workspace-write 三根），
+ * 已 canonical 化，与沙箱 profile 同源。
  */
 export function createRootsProvider(input: WritableRootsInput): () => string[] {
   const workspace = canonicalPath(input.workspace);
-  return () => deriveWritableRoots(workspace);
+  return () => deriveWritableRoots(workspace, input.mode());
 }
 
 /** 绝对化工具：相对路径锚 workspace、绝对路径原样（供守门行预检用） */

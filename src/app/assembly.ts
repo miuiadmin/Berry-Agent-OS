@@ -37,7 +37,6 @@ import {
   APPROVAL_ANSWER_EVENT,
   createApprovalService,
   createRootsProvider,
-  DEFAULT_CARVE_OUT_ENTRIES,
   installSafetyGate,
 } from '../safety/index.js';
 import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode } from '../safety/index.js';
@@ -73,7 +72,7 @@ import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dataDir, dbPath } from './paths.js';
+import { dataDir, dbPath, ensureDbDir } from './paths.js';
 import { setProjectAliases } from '../context/workspace.js';
 import type { CompositionReloadedPayload } from '../contracts/events.js';
 
@@ -241,9 +240,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const { channels, ui } = registerChannelServices(ctx);
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
+  // 首启建档（paths.ts ensureDbDir）：库文件父目录须先在——三入口共用的唯一
+  // 建档点（幂等 mkdir recursive；TUI 入口原早调已收编至此单点。建档对象是
+  // 实际库路径的父目录：缺省 = 数据目录，显式注入/APP_DB_PATH 同样覆盖。
+  // 2026-08-25 修：原先仅 TUI 入口建档，全新机器 berry run 在 Persistence.open
+  // 即 ENOENT——深读 workflow 实证缺口）。persist:false 诊断面保持零副作用不建。
+  const resolvedDbPath = opts.dbPath ?? dbPath();
+  if (persistEnabled && resolvedDbPath !== ':memory:') ensureDbDir(resolvedDbPath);
   const persistence = persistEnabled
     ? Persistence.open({
-        path: opts.dbPath ?? dbPath(),
+        path: resolvedDbPath,
         // 业务表迁移链聚合（会话篇 §6 统一迁移框架——persist 提供框架不认识业务表）：
         // memory 表族 v2（记忆篇 §3）+ session_fts v3（会话篇 §9 第 7 项定稿）
         // + goals v5（骨架篇 §6.8——v4 已被记忆效用进化拍板预留）
@@ -352,7 +358,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   /* ---- ④e ctx.agent 具名服务（骨架篇 §9.3）——已随驱动迁 `builtin:chat` 件 ----
    * 服务与驱动同件同生命周期（件 apply 即 provide；/reload 销锚随件回卷、重装
    * 重建）。chat 行居默认层首行 → 轮次激活先于一切消费方（goal 等 inject
-   * 'agent' 结构性取得，晚绑定 attach 挂点退役——app/chat-plugin.ts）。 */
+   * 'agent' 结构性取得，晚绑定 attach 挂点退役——件聚落 src/chat/plugin.ts）。 */
 
   /* ---- ④f 会话事件服务（ctx.sessions，骨架篇 §9.2 落码——最小面 v1）----
    * 插件落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走活引用
@@ -381,9 +387,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     onGateDecision: durableForward.gate,
   });
   const tools = registerToolsService(ctx, { pipeline });
-  // fs 工具族 + 检索族（可写根换 safety 推导——替换 tools 模块的 M1 过渡默认；
-  // find/grep 只读族无 fence 需求——读任意位置允许，与 read 工具同口径）
-  const writableRoots = createRootsProvider({ workspace, entries: DEFAULT_CARVE_OUT_ENTRIES });
+  // fs 工具族 + 检索族（可写根走 safety 档位推导——mode getter 形态与守门行
+  // 同源：read-only 空根拒全量写、danger 全盘根、workspace-write 三根；原
+  // entries 死参已删——carve-out 属守门行审批面。find/grep 只读族无 fence
+  // 需求——读任意位置允许，与 read 工具同口径）
+  const writableRoots = createRootsProvider({ workspace, mode: () => sandboxMode });
   const fsTools = createFsTools({ writableRoots, workspace: () => workspace });
   const searchTools = createSearchTools({ workspace: () => workspace });
   for (const def of [...fsTools.tools, ...searchTools.tools]) tools.register(def);
@@ -505,7 +513,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 宿主活资源（官方件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
   // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
   // model/活会话引用/父沙箱档/根总线（app/subagent-factory.ts——每子独立装配序）；
-  // chat 件收会话选择/驱动/ctx.agent 四件（app/chat-plugin.ts）——无条件注入，
+  // chat 件收会话选择/驱动/ctx.agent 四件（件聚落 src/chat/plugin.ts）——无条件注入，
   // 无持久层时件自降级空转（装载面完好——dump-config 诊断树不断链）。
   const builtins = createBuiltinRegistry({
     ...(persistence ? { store: persistence.store } : {}),

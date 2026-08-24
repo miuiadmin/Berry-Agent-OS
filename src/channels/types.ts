@@ -9,9 +9,10 @@
 import type { AgentMessage } from '../agent/messages.js';
 import type { Disposer } from '../context/types.js';
 
-/** 宿主面：通道把用户输入交回宿主（app 装配层把它接到三通道注入与命令面） */
+/** 宿主面：通道把用户输入交回宿主（TUI 入口把它接到对话驱动的 submit——
+ * running 时入 steering 队列、闲时开 run；装配与命令面见 app/channels 服务） */
 export interface ChannelHost {
-  /** 普通用户消息（已排除斜杠命令；宿主接 agent.sendUserMessage） */
+  /** 普通用户消息（已排除斜杠命令；宿主接对话驱动 submit） */
   submit(text: string): void;
   /** 请求退出（Ctrl+D / quit 命令等）——宿主执行优雅退出序列（骨架篇 §1.3） */
   requestQuit(): void;

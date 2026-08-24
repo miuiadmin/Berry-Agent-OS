@@ -1,5 +1,6 @@
 /**
- * L5 app — CLI 入口（技术栈篇 §5：极简三命令，手写 argv，~50 行纪律）。
+ * L5 app — CLI 入口（技术栈篇 §5：极简三命令，手写 argv——第九批拍板 #15
+ * 不引 commander；解析本体见 parseArgs，本文件含帮助文案与入口分派）。
  *
  *   berry                  无参 = TUI 进入对话（默认命令，产品主入口）
  *   berry run "<message>"  单次执行：一轮对话 → stdout 输出结果
@@ -34,7 +35,7 @@ interface ParsedArgs {
   debug: boolean;
 }
 
-/** 手写 argv 解析（~50 行纪律的一部分：不引 commander，第九批拍板 #15） */
+/** 手写 argv 解析（不引 commander——第九批拍板 #15；旗标仅 --debug 一个） */
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   let debug = false;
