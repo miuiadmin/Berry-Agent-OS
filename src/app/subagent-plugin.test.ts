@@ -150,7 +150,7 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     expect(answer?.status).toBe('completed');
     // 三次模型调用 = 父问 → 子答 → 父汇总（嵌套形态：子在父的工具执行内）
     expect(contexts).toHaveLength(3);
-    // 子装配证据①：toolFilter include 过滤——子工具面只 read（缺省全量 fs 四件的对照）
+    // 子装配证据①：toolFilter include 过滤——子工具面只 read（缺省全量 fs 四件+检索两件的对照）
     expect(contexts[1]!.tools?.map((t) => t.name)).toEqual(['read']);
     // 子装配证据②：persona 覆盖缺省子提示词
     expect(contexts[1]!.systemPrompt).toContain('你是资深审读员');

@@ -152,7 +152,15 @@ console.log(
   `[smoke] 默认层 goal 行 ${hasGoalRow ? '✓' : '✗'}  装载状态 ${goalStatus ?? '(无)'}  工具三件${goalToolsOk ? '✓' : '✗'}`,
 );
 
-let failBoot = !bootMemoryOk || !bootSubagentOk || !bootGoalOk || !service;
+/* ---- Ring 1 检索族结构性自检（boot 面，2026-08-25 检索族纵切） ---- */
+// 七件套检索两件（find/grep）+ fs 四件在场；bash 随 exec 纵切不在列
+const searchTools = ['find', 'grep'];
+const fsTools = ['read', 'write', 'edit', 'ls'];
+const searchOk = searchTools.every((name) => toolNames.includes(name));
+const fsOk = fsTools.every((name) => toolNames.includes(name));
+console.log(`[smoke] Ring 1 工具面  fs 四件${fsOk ? '✓' : '✗'}  检索两件${searchOk ? '✓' : '✗'}（bash 随 exec 纵切）`);
+
+let failBoot = !bootMemoryOk || !bootSubagentOk || !bootGoalOk || !searchOk || !fsOk || !service;
 /** 差分轮判定（简报差分追注——主 try 块内赋值，finally 重开库面引用） */
 let diffOk = false;
 /** 差分轮写入条目短 id（重开库面匹配 '+' 条目用） */
