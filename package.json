@@ -1,7 +1,7 @@
 {
   "name": "berryagent",
   "version": "1.0.0-alpha.0",
-  "description": "Berry Agent OS — 跑 AI 应用的个人操作系统（1.0 重置线；设计见 设计文档/01-规范/）",
+  "description": "Berry Agent OS — 跑 AI 应用的个人操作系统（TypeScript + SQLite + pi-ai；文档见 docs/）",
   "type": "module",
   "private": true,
   "bin": {
