@@ -115,7 +115,12 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
         },
         Date.now(),
       );
-      if (hit !== undefined) return next();
+      if (hit !== undefined) {
+        // 免问仍可审计：放行来源标注进 gate/decision reason（第二十四批题1a
+        // 接线批——GateInput.allowReason → pipeline 透传，骨架篇 §8.4 粘性第 4 条）
+        input.allowReason = `allowlist:${hit.index}`;
+        return next();
+      }
     }
 
     for (const rawPath of extractWritePaths(input.tool.name, input.args)) {

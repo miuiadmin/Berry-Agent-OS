@@ -25,6 +25,7 @@ import type {
   AgentToolResult,
   ExecuteInput,
   GateAction,
+  GateInput,
   GateDecisionPayload,
   GateDecisionSink,
   TextContent,
@@ -130,7 +131,7 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
 
     /* ---- 第一段：守门（fail-closed；block 短路不进执行段） ---- */
     // 可变入参：mutate 决策就地改写 args + 置 mutated；链尾 next 返回 undefined = 全链放行
-    const gateInput = { tool: def, args, callId: toolCallId, mutated: false };
+    const gateInput: GateInput = { tool: def, args, callId: toolCallId, mutated: false };
     let gateOutcome: GateAction | undefined;
     try {
       gateOutcome = await ctx.waterfall<GateAction | undefined>(TOOL_PRE_EXECUTE_EVENT, gateInput, () => undefined);
@@ -150,7 +151,13 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
       throw new AppError(TOOL_BLOCKED, codedMessage(TOOL_BLOCKED, gateOutcome.reason));
     }
     // 放行/改参：mutated 标志由改参的守门者维护，汇总进 durable 决策
-    recordGate({ toolCallId, decision: gateInput.mutated ? 'mutate' : 'allow', reason: 'ok' });
+    // 放行来源透传（第二十四批题1a）：守门者免问放行时标注（如 allowlist:<序>），
+    // 否则 'ok'——免问仍可审计（骨架篇 §8.4 粘性第 4 条：只有免问放行、无静默放行）
+    recordGate({
+      toolCallId,
+      decision: gateInput.mutated ? 'mutate' : 'allow',
+      reason: gateInput.allowReason ?? 'ok',
+    });
 
     /* ---- 第二段：执行（around-dispatch；链尾默认实现 = 超时预算 + execute） ---- */
     const executeInput: ExecuteInput = { tool: def, args, callId: toolCallId, signal, onUpdate };

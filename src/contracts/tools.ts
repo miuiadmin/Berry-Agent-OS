@@ -161,6 +161,12 @@ export interface GateInput {
   callId: string;
   /** 链上已有守门者改写过 args（管道汇总 mutate 决策用，守门者置 true） */
   mutated: boolean;
+  /**
+   * 放行来源标注（可变：守门者免问放行时置——如 `allowlist:<条目序>`；
+   * 第二十四批题1a：免问仍可审计，gate/decision 的 reason 不再统一 'ok'。
+   * 缺省不置 = 无标注（pipeline 落 'ok'）。
+   */
+  allowReason?: string;
 }
 
 /** 守门决策（守门监听器的返回值） */

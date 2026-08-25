@@ -45,9 +45,13 @@ function rig(opts: {
     });
   }
 
+  // 守门决议收集器（gate/decision durable 事件的模拟接线条——免问放行可审计断言用）
+  const gateDecisions: { toolCallId: string; decision: string; reason: string }[] = [];
   // 工具注册表 + 真管道 + fs 工具族（fence 数据源 = 真推导函数随档位切换——
   // 与 app 装配同源；2026-08-25 修前此处靠三元自模拟 read-only 空根）
-  const service = registerToolsService(ctx, { pipeline: createToolPipeline(ctx) });
+  const service = registerToolsService(ctx, {
+    pipeline: createToolPipeline(ctx, { onGateDecision: (d) => gateDecisions.push(d) }),
+  });
   installSafetyGate(ctx, { approval, workspace: ws, mode: () => mode, allowlist: opts.allowlist });
   const fsTools = createFsTools({
     workspace: () => ws,
@@ -60,7 +64,7 @@ function rig(opts: {
     const def = service.get(name)!;
     return service.toAgentTool(def).execute('call-1', args);
   };
-  return { ws, run, asked, decided, setMode: (m: SandboxMode) => (mode = m) };
+  return { ws, run, asked, decided, gateDecisions, setMode: (m: SandboxMode) => (mode = m) };
 }
 
 /** 异步工具调用抛错断言 */
@@ -191,7 +195,7 @@ describe('两端档位分工（不归守门行管）', () => {
 
 describe('allowlist 免问（第二十四批题1a——advisory 只影响问不问）', () => {
   it('命中路径前缀条目：carve-out 命中也免问直接放行（asked 空）', async () => {
-    const { ws, run, asked } = rig({
+    const { ws, run, asked, gateDecisions } = rig({
       mode: 'workspace-write',
       answer: 'reject', // 应答者拒绝也无妨——根本不该问
       pre: (w) => mkdirSync(join(w, '.git')),
@@ -202,6 +206,8 @@ describe('allowlist 免问（第二十四批题1a——advisory 只影响问不�
     await run('write', { path: '.git/pre-commit', content: '#!/bin/sh\n' });
     expect(asked).toHaveLength(0);
     expect(existsSync(join(ws, '.git', 'pre-commit'))).toBe(true);
+    // 免问仍可审计：gate/decision reason 标注来源（allowlist:<序>——接线批 Commit A）
+    expect(gateDecisions).toEqual([{ toolCallId: 'call-1', decision: 'allow', reason: 'allowlist:0' }]);
   });
 
   it('未命中（前缀不覆盖）照问；TTL 过期回落 ask', async () => {

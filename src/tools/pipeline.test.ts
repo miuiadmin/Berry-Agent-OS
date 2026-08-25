@@ -73,6 +73,19 @@ describe('createToolPipeline — 守门段（tools_pre_execute）', () => {
     expect(result.content[0]).toMatchObject({ type: 'text', text: 'echo:{"msg":"hi"}' });
   });
 
+  it('allowReason 透传（免问放行可审计——第二十四批题1a接线批）：守门者标注进 gate/decision', async () => {
+    const ctx = createContext({ name: 'test' });
+    const decisions: GateDecisionPayload[] = [];
+    ctx.on('tools_pre_execute', (input, next) => {
+      input.allowReason = 'allowlist:0';
+      return next();
+    });
+    const run = createToolPipeline(ctx, { onGateDecision: (d) => decisions.push(d) });
+    const result = await run(echoTool(), 'tc-1', { msg: 'hi' });
+    expect(result.content[0]).toMatchObject({ type: 'text', text: 'echo:{"msg":"hi"}' });
+    expect(decisions).toEqual([{ toolCallId: 'tc-1', decision: 'allow', reason: 'allowlist:0' }]);
+  });
+
   it('mutate 决策就地改参：执行段看到改后参数', async () => {
     const ctx = createContext({ name: 'test' });
     const decisions: GateDecisionPayload[] = [];
