@@ -3,9 +3,9 @@
  * 服务最小面（tools/prompts/sessions 注册表真件；llm 走结构性替身——模型层是
  * mock 停靠站）。
  *
- * 锁纵切五接线序：工具五件 / 简报段 / 跨会话索引对账+镜像 / memory-recall 角色
+ * 锁纵切五接线序：工具五件 / 简报段 / 跨会话索引对账+镜像 / memory/recall 角色
  * 注册 + context_transform 按需检索注入（防注入句式 + kind 优先 + 空手放行）。
- * 差分追注（第十二批题二）：memory-diff 角色 + 基线纪元冻结 / 分叉落账 /
+ * 差分追注（第十二批题二）：memory/diff 角色 + 基线纪元冻结 / 分叉落账 /
  * 收敛清账 / 重启撞指纹自愈 / 重放派生不变式。persist:false 降级单列。
  */
 
@@ -24,7 +24,7 @@ import {
   createMemoryPlugin,
 } from './index.js';
 import type { MemoryPluginStoreFace } from './index.js';
-import { getMessageRoleDefinition } from '../agent/messages.js';
+import { getMessageRoleDefinition } from '../contracts/messages.js';
 import type { BuiltinPluginModule } from '../contracts/plugin.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { deriveDiffView, faceFingerprint } from './diff.js';
@@ -176,7 +176,7 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     await h.ctx.dispose();
   });
 
-  it('按需检索：命中注入 memory-recall（防注入句式 + 引用标记 + kind 优先），空手放行', async () => {
+  it('按需检索：命中注入 memory/recall（防注入句式 + 引用标记 + kind 优先），空手放行', async () => {
     const h = setup();
     const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
     await applyPlugin(plugin, h.ctx, { recallTopK: 1 });
@@ -212,7 +212,7 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     )) as Array<{ role: string; content: unknown; timestamp: number }>;
     expect(out).toHaveLength(2); // 原消息 + 至多一条注入
     const injected = out.at(-1)!;
-    expect(injected.role).toBe('memory-recall'); // 自定义角色已注册且生效
+    expect(injected.role).toBe('memory/recall'); // 自定义角色已注册且生效
     expect(String(injected.content)).toContain('以下来自历史记忆检索'); // 防注入句式
     expect(String(injected.content)).toContain('[m:'); // 引用标记随注入行携带（§6 引用回写）
     expect(String(injected.content)).toContain('若使用上述记忆作答'); // 引用指令句
@@ -220,7 +220,7 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     expect(String(injected.content)).not.toContain('统一用 pnpm'); // 落选条不进注入
 
     // 角色定义双面：toLlm → UserMessage（模型只见 user 消息）；render hidden（不进时间线）
-    const definition = getMessageRoleDefinition('memory-recall')!;
+    const definition = getMessageRoleDefinition('memory/recall')!;
     const llmMessage = definition.toLlm!(injected as never) as { role: string };
     expect(llmMessage.role).toBe('user');
     expect(definition.render).toMatchObject({ intent: 'hidden' });
@@ -328,7 +328,7 @@ async function runTransform(h: Harness): Promise<Array<{ role: string; content: 
 }
 
 describe('memory 官方件 apply（简报差分追注）', () => {
-  it('分叉落账 + 注入：基线后新条目 → memory/diff 入真会话日志 + memory-diff 注入进请求尾', async () => {
+  it('分叉落账 + 注入：基线后新条目 → memory/diff 入真会话日志 + memory/diff 注入进请求尾', async () => {
     const h = setup();
     const { memory, session } = await setupDiffBaseline(h);
 
@@ -346,7 +346,7 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     // 差分注入在尾部（本测试无检索命中——查询「继续」不中记忆词）
     const injected = out.at(-1)!;
     expect(out).toHaveLength(2);
-    expect(injected.role).toBe('memory-diff');
+    expect(injected.role).toBe('memory/diff');
     expect(String(injected.content)).toContain('以下为常驻记忆简报自本次基线后的变化'); // 防注入句式
     expect(String(injected.content)).toContain('+ [m:'); // 新增态 + 引用标记
     expect(String(injected.content)).toContain('新偏好：回答先给结论');
@@ -357,14 +357,14 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     expect((diffs[0]!.data as { entries: unknown[] }).entries).toHaveLength(1);
 
     // 角色定义双面：toLlm → user 消息；render hidden 不进时间线
-    const definition = getMessageRoleDefinition('memory-diff')!;
+    const definition = getMessageRoleDefinition('memory/diff')!;
     expect(definition.render).toMatchObject({ intent: 'hidden' });
     expect((definition.toLlm!(injected as never) as { role: string }).role).toBe('user');
 
     // 幂等：面未再变 → 同视图不追写、注入照常（每请求至多一条）
     const again = await runTransform(h);
     expect(session.events.filter((e) => e.type === 'memory/diff')).toHaveLength(1);
-    expect(again.at(-1)!.role).toBe('memory-diff');
+    expect(again.at(-1)!.role).toBe('memory/diff');
 
     await h.ctx.dispose();
   });

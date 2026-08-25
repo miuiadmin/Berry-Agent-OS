@@ -24,7 +24,7 @@
 
 import { AppError, AGENT_DELIVER_AS_UNSUPPORTED, describeError } from '../contracts/errors.js';
 import type { UserMessage, MessageSource, Message, StreamFn } from '../contracts/llm.js';
-import type { AgentMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { RunStatus } from '../agent/events.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';

@@ -15,7 +15,7 @@
  * 循环、宿主照启（装/守/存职能与命令面完好）。
  */
 
-import type { AgentMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { StreamFn } from '../contracts/llm.js';
 import { AppError, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
@@ -568,6 +568,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   ctx.provide('paths', createPathsService(compositionDir));
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
+  /**
+   * convertToLm 未注册角色丢弃的 debug 上报（#16 拍板 (c)——蒸发陷阱留痕）：
+   * 第三方注入自造角色名曾是全静默过滤（无错无日志），此处接根 logger 让丢弃
+   * 一目了然。注册角色的 toLlm:null 是设计内过滤，不走上报（免刷日志）。
+   */
+  const reportDroppedRole = (role: string): void => {
+    ctx.logger.debug(
+      `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——插件面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
+    );
+  };
   // 官方件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
   // 宿主活资源（官方件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
   // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
@@ -583,7 +593,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       getSession: () => session,
       streamFn,
       model,
-      convertToLlm: (messages) => defaultConvertToLlm(messages),
+      convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
       workspace,
       sandboxMode,
       rootCtx: ctx,
@@ -598,7 +608,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       model,
       sandboxMode,
       streamFn,
-      convertToLlm: (messages) => defaultConvertToLlm(messages),
+      convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
       transformContext,
       getSystemPrompt: () => systemPrompt,
       tools,

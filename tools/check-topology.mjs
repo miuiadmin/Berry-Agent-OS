@@ -31,7 +31,7 @@ const MODULE_EDGES = {
   subagent: ['contracts', 'context', 'agent', 'session'],
   // chat = 对话应用官方件聚落（铭牌批入册；不 import llm——StreamFn 经 contracts 注入）
   chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety'],
-  memory: ['contracts', 'context', 'session', 'llm', 'persist', 'agent'],
+  memory: ['contracts', 'context', 'session', 'persist'],
   goal: ['contracts', 'context', 'persist'],
   // exec = 工具族件聚落（第 18 模块，2026-08-25 exec 纵切；tools 不 import exec——
   // bash def 在组合根注册，检索族双装配点先例）

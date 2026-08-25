@@ -16,7 +16,7 @@
  *   - 重开库面：迁移链 v1→v3 就位 + memories 行数 + session_fts 行数（活体镜像）
  *
  * 第十二批题二起含简报差分追注轮：确定性 memory_write 漂移简报面 → 真请求瀑布
- * 落 memory/diff durable 事件 + 请求尾注入 memory-diff 角色（探针观察）→ 重开
+ * 落 memory/diff durable 事件 + 请求尾注入 memory/diff 角色（探针观察）→ 重开
  * 库断言事件存活。
  *
  * 用法：
@@ -259,17 +259,17 @@ try {
   /* ---- memory 简报差分追注轮（第十二批题二——基线漂移 → durable 落账 → 请求尾注入） ---- */
   // 结构性判定（模型行为只报告不判定）：确定性写一条高置信记忆（走真工具面过
   // 三段管道）使简报面漂移；下一次真请求的 context_transform 瀑布里 ① durable
-  // 日志落 memory/diff 事件（'+' 条目短 id 匹配）② 请求尾注入 memory-diff 角色
+  // 日志落 memory/diff 事件（'+' 条目短 id 匹配）② 请求尾注入 memory/diff 角色
   // 消息。注入是瞬态（不落日志不进转录，RunResult 不可见）——探针 handler 注册
   // 序在 memory 插件之后，瀑布所见即差分注入后的请求面（只观察不改写）。
   try {
-    // 注入探针：记录瀑布里流过的 memory-diff 角色消息内容（注入行 = 插件确定性
+    // 注入探针：记录瀑布里流过的 memory/diff 角色消息内容（注入行 = 插件确定性
     // 代码产物，非 AI 文本——内容可断言）
     let sawInjection = '';
     runtime.ctx.on('context_transform', (messages, next) => {
       const list = Array.isArray(messages) ? messages : [];
       for (const m of list) {
-        if (m && typeof m === 'object' && m.role === 'memory-diff' && typeof m.content === 'string') {
+        if (m && typeof m === 'object' && m.role === 'memory/diff' && typeof m.content === 'string') {
           sawInjection = m.content;
         }
       }
@@ -301,7 +301,7 @@ try {
       const entries = Array.isArray(e.data?.entries) ? e.data.entries : [];
       return entries.some((en) => en?.op === '+' && en.id === writtenShortId);
     });
-    // 注入面：探针所见 memory-diff 消息须携带本条目引用标记 [m:短id]
+    // 注入面：探针所见 memory/diff 消息须携带本条目引用标记 [m:短id]
     const injectionHit = sawInjection !== '' && sawInjection.includes(`[m:${writtenShortId}]`);
     diffOk = writtenShortId !== '' && plusEntry && injectionHit;
     const lastDiff = diffResult?.messages.at(-1);

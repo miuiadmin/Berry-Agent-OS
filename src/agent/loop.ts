@@ -27,7 +27,7 @@ import type {
   Usage,
 } from '../contracts/llm.js';
 import type { AgentEventSink, RunStatus } from './events.js';
-import type { AgentMessage } from './messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { AgentTool, AgentToolCall, AgentToolResult, ToolExecutionMode } from './tools.js';
 
 // 模型层注入面三类型已上移 contracts/llm.ts（agent 与 llm 的唯一会合点——llm 模块

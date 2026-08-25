@@ -18,6 +18,8 @@ import {
 } from '../contracts/errors.js';
 import { LIVE_EVENT_CATALOG } from '../contracts/events.js';
 import type { EventName, LiveEventDefinition } from '../contracts/events.js';
+import { registerPluginMessageRole } from '../contracts/messages.js';
+import type { MessageRoleDefinition } from '../contracts/messages.js';
 import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
@@ -279,6 +281,16 @@ class ContextScopeImpl implements ContextScope {
     };
     // 挂 effect 栈：作用域卸载时随 LIFO 回卷；返回值供插件手动提前撤销
     return this.pushEffect(unregister);
+  }
+
+  /**
+   * 注册自定义消息角色（骨架篇 §2.3 插件面）：桥接 contracts 注册表（域名
+   * 前缀校验/撞名拒绝在彼处），注销器挂本作用域 effect 栈——/reload 卸载即
+   * 角色随插件回卷，重装重注册（dispose-unregister 与消息角色渲染面同款安全）。
+   */
+  registerMessageRole(name: string, definition: MessageRoleDefinition): Disposer {
+    this.assertActive();
+    return this.pushEffect(registerPluginMessageRole(name, definition));
   }
 
   fork(opts: { name: string; config?: Record<string, unknown> }): ContextScope {

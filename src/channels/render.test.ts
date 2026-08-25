@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { registerMessageRole } from '../agent/messages.js';
-import type { AgentMessage, CustomMessage } from '../agent/messages.js';
+import { registerHostMessageRole } from '../contracts/messages.js';
+import type { AgentMessage, CustomMessage } from '../contracts/messages.js';
 import type { AssistantMessage, ToolResultMessage, UserMessage } from '../contracts/llm.js';
 import {
   assistantText,
@@ -142,10 +142,10 @@ describe('renderAgentMessage 自定义渲染器优先', () => {
 
 describe('renderAgentMessage 自定义角色（render intent）', () => {
   it('hidden → 空行；label 定制；未注册角色按角色名兜底', () => {
-    const unregisterHidden = registerMessageRole('t-hidden-x', {
+    const unregisterHidden = registerHostMessageRole('t-hidden-x', {
       render: { intent: 'hidden' },
     });
-    const unregisterLabeled = registerMessageRole('t-labeled-x', {
+    const unregisterLabeled = registerHostMessageRole('t-labeled-x', {
       render: { intent: 'status', label: '提醒' },
     });
     try {

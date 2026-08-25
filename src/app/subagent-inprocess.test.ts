@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import type { AssistantMessage, AssistantStream, AssistantStreamEvent, Message, Usage } from '../contracts/llm.js';
-import type { AgentMessage } from '../agent/index.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import { startRun, type AgentEvent, type StreamFn } from '../agent/index.js';
 import { Session } from '../session/session.js';
 import { createToolPipeline } from '../tools/pipeline.js';

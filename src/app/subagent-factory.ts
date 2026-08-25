@@ -11,7 +11,7 @@
  */
 
 import { createContext } from '../context/context.js';
-import type { AgentMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import { startRun } from '../agent/loop.js';
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage, Message, StreamFn } from '../contracts/llm.js';

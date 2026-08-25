@@ -6,7 +6,7 @@
  * 通道后端对话照样完成。
  */
 
-import type { AgentMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { Disposer } from '../context/types.js';
 
 /** 宿主面：通道把用户输入交回宿主（TUI 入口把它接到对话驱动的 submit——

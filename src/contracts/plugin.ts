@@ -15,6 +15,7 @@
 
 import type { TSchema } from './typebox.js';
 import type { LiveEventDefinition } from './events.js';
+import type { MessageRoleDefinition } from './messages.js';
 
 /**
  * 插件面 logger 最小结构（context.Logger 的结构子集——contracts 零依赖层
@@ -64,6 +65,13 @@ export interface PluginContext {
   tryGet<T = unknown>(name: string): T | undefined;
   /** 注册自有具名服务供他插件 inject 消费；返回注销函数（随作用域回卷） */
   provide<T>(name: string, impl: T): () => void;
+  /**
+   * 注册自定义消息角色（骨架篇 §2.3——插件面）：角色名必含 `/` 域前缀
+   * （`memory/recall` 式）；格式非法 AGENT_ROLE_INVALID、撞名/撞标准角色
+   * AGENT_ROLE_EXISTS。挂作用域 effect 栈随卸载自动回卷（与 on/provide 同
+   * 纪律）；返回值供提前手动注销。官方件同走此面（官方非特权）。
+   */
+  registerMessageRole(name: string, definition: MessageRoleDefinition): () => void;
   /** 本作用域配置视图（只读快照；组合树行 config 经插件 schema 校验后冻结） */
   readonly config: Readonly<Record<string, unknown>>;
   /** 带作用域前缀的子 logger */

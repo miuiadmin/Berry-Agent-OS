@@ -7,8 +7,8 @@
  * 着色由通道壳决定。
  */
 
-import type { AgentMessage } from '../agent/messages.js';
-import { getMessageRoleDefinition, isStandardMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
+import { getMessageRoleDefinition, isStandardMessage } from '../contracts/messages.js';
 import type { AgentToolResult } from '../contracts/tools.js';
 import type { AssistantMessage, ImageContent, TextContent, ToolResultMessage, UserMessage } from '../contracts/llm.js';
 import type { RendererDefinition } from './types.js';

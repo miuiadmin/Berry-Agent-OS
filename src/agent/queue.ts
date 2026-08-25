@@ -6,7 +6,7 @@
  * （会话日志层操作，loop 完全无感知）。
  */
 
-import type { AgentMessage } from './messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 
 /**
  * 排空点注入策略：

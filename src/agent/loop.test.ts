@@ -22,13 +22,11 @@ import {
   type AgentEvent,
   type AgentEventSink,
   type AgentLoopConfig,
-  type AgentMessage,
   type AgentTool,
   type StreamFn,
   type StreamFnOptions,
 } from './index.js';
-import type { CustomMessage } from './messages.js';
-import { listMessageRoles, registerMessageRole } from './messages.js';
+import type { AgentMessage, CustomMessage } from '../contracts/messages.js';
 import { PendingMessageQueue } from './queue.js';
 
 /* ---------------- 测试基建：消息 / 合成流 / 脚本化 StreamFn ---------------- */
@@ -714,37 +712,6 @@ describe('continueRun 续跑', () => {
     );
     expect(result.status).toBe('completed');
     expect(calls[0]?.context.messages.at(-1)).toMatchObject({ role: 'user', content: '注入指令' });
-  });
-});
-
-/* ---------------- 自定义角色注册表 ---------------- */
-
-describe('消息角色注册表', () => {
-  it('注册 / 枚举 / 注销后可复用名称（二次注销无害）', () => {
-    const unregister = registerMessageRole('test-note', { render: { intent: 'status', label: '注' } });
-    expect(listMessageRoles()).toContain('test-note');
-    unregister();
-    expect(listMessageRoles()).not.toContain('test-note');
-    unregister(); // 二次注销无害（防误注销后来者）
-    const unregisterAgain = registerMessageRole('test-note', {});
-    unregisterAgain();
-  });
-
-  it('与标准角色同名：拒绝（AGENT_ROLE_EXISTS）', () => {
-    let error: unknown;
-    try {
-      registerMessageRole('user', {});
-    } catch (reason) {
-      error = reason;
-    }
-    expect(error).toBeInstanceOf(AppError);
-    expect((error as AppError).code).toBe('AGENT_ROLE_EXISTS');
-  });
-
-  it('重复注册同名自定义角色：拒绝', () => {
-    const unregister = registerMessageRole('test-dup', {});
-    expect(() => registerMessageRole('test-dup', {})).toThrowError(AppError);
-    unregister();
   });
 });
 

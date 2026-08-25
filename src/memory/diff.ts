@@ -10,7 +10,7 @@
  *    data = 全量差分（相对基线，非增量）+ 基线指纹——重放取最后一条即得视图
  *    （last-wins，与 todo/write「全量快照非增量」同构）；
  * 3. 请求尾差分注入 = 日志的纯函数派生：context_transform handler 注入
- *    `memory-diff` 自定义角色消息（与 memory-recall 同族，hidden 不进时间线）。
+ *    `memory/diff` 自定义角色消息（与 memory/recall 同族，hidden 不进时间线）。
  *
  * 本文件运行时依赖保持轻量（store 仅类型引用）——check-events 经 jiti 导入
  * 本模块触发词汇注册，不连锁拉起 better-sqlite3。

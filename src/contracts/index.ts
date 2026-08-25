@@ -7,6 +7,7 @@
 export * from './errors.js';
 export * from './events.js';
 export * from './llm.js';
+export * from './messages.js';
 export * from './tools.js';
 export * from './plugin.js';
 export * from './typebox.js';

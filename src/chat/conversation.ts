@@ -15,7 +15,7 @@ import { PendingMessageQueue } from '../agent/queue.js';
 import type { AgentEvent, AgentEventSink, RunStatus } from '../agent/events.js';
 import type { AgentContext, AgentLoopConfig, RunResult } from '../agent/loop.js';
 import { startRun } from '../agent/loop.js';
-import type { AgentMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { AssistantMessage, Usage } from '../contracts/llm.js';
 import { describeError } from '../contracts/errors.js';
 import type { DurableSinks } from './durable.js';

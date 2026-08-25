@@ -143,6 +143,8 @@ export const SESSION_CORE_TYPE_FORBIDDEN = registerErrorCode('SESSION_CORE_TYPE_
 export const PERSIST_BATCH_WRITE_FAILED = registerErrorCode('PERSIST_BATCH_WRITE_FAILED');
 /** agent：自定义消息角色重复注册或与标准角色（user/assistant/toolResult）冲突（骨架篇 §2.3 显式注册纪律） */
 export const AGENT_ROLE_EXISTS = registerErrorCode('AGENT_ROLE_EXISTS');
+/** agent：自定义消息角色名格式非法——插件面必含 / 域前缀、宿主面无 / 单段（骨架篇 §2.3 落码注记双入口纪律） */
+export const AGENT_ROLE_INVALID = registerErrorCode('AGENT_ROLE_INVALID');
 /** agent：continueRun 续入点非法——末消息经 convertToLlm 后必须是 user 或 toolResult（骨架篇 §2.1） */
 export const AGENT_CONTINUE_INVALID = registerErrorCode('AGENT_CONTINUE_INVALID');
 /** llm：模型标识格式非法——必须是 "provider/model-id" 形式（首斜杠分割，model-id 可再含斜杠如 openrouter 路径式 id） */

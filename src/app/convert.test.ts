@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { registerMessageRole } from '../agent/messages.js';
-import type { AgentMessage } from '../agent/messages.js';
+import { registerHostMessageRole } from '../contracts/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import { defaultConvertToLlm } from './convert.js';
 
 const now = 1_750_000_000_000;
@@ -26,10 +26,10 @@ describe('defaultConvertToLlm', () => {
   });
 
   it('自定义角色走注册的 toLlm 定义（单条与多条映射）', () => {
-    const disposeA = registerMessageRole('t-conv-a', {
+    const disposeA = registerHostMessageRole('t-conv-a', {
       toLlm: (m) => ({ role: 'user', content: `[a] ${String(m.content)}`, timestamp: now }),
     });
-    const disposeB = registerMessageRole('t-conv-b', {
+    const disposeB = registerHostMessageRole('t-conv-b', {
       toLlm: (m) => [
         { role: 'user', content: `[b1] ${String(m.content)}`, timestamp: now },
         { role: 'user', content: '[b2] 附注', timestamp: now },
@@ -48,7 +48,7 @@ describe('defaultConvertToLlm', () => {
   });
 
   it('未注册转换 / toLlm 返回 null 的角色过滤丢弃', () => {
-    const disposeHidden = registerMessageRole('t-conv-hidden', { toLlm: () => null });
+    const disposeHidden = registerHostMessageRole('t-conv-hidden', { toLlm: () => null });
     try {
       const out = defaultConvertToLlm([
         { role: 'user', content: '保留', timestamp: now },
@@ -65,5 +65,28 @@ describe('defaultConvertToLlm', () => {
   it('空输入与全过滤输入均返回空数组', () => {
     expect(defaultConvertToLlm([])).toEqual([]);
     expect(defaultConvertToLlm([{ role: 't-conv-none', content: 1, timestamp: now }])).toEqual([]);
+  });
+
+  it('#16 回归锁：未注册角色丢弃触发 onDrop（携带角色名——蒸发陷阱有痕迹）', () => {
+    const dropped: string[] = [];
+    const out = defaultConvertToLlm([{ role: 't-conv-evaporate', content: 'x', timestamp: now }], (role) => {
+      dropped.push(role);
+    });
+    expect(out).toEqual([]);
+    expect(dropped).toEqual(['t-conv-evaporate']); // 角色名上报——不再全静默
+  });
+
+  it('#16 回归锁：注册角色的 toLlm:null 是设计内过滤——不触发 onDrop', () => {
+    const dropped: string[] = [];
+    const dispose = registerHostMessageRole('t-conv-bydesign', { toLlm: () => null });
+    try {
+      const out = defaultConvertToLlm([{ role: 't-conv-bydesign', content: 'y', timestamp: now }], (role) => {
+        dropped.push(role);
+      });
+      expect(out).toEqual([]);
+      expect(dropped).toEqual([]); // bash 执行记录类显式丢弃免刷日志
+    } finally {
+      dispose();
+    }
   });
 });

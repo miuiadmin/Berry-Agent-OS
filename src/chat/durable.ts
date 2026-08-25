@@ -14,8 +14,8 @@
  */
 
 import type { AgentEvent } from '../agent/events.js';
-import type { AgentMessage } from '../agent/messages.js';
-import { isStandardMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
+import { isStandardMessage } from '../contracts/messages.js';
 import type { StopReason, TextContent, ToolCallBlock, Usage } from '../contracts/llm.js';
 import type { ImageContent, ThinkingContent, ToolResultMessage, UserMessage } from '../contracts/llm.js';
 import type { GateDecisionPayload, GateDecisionSink } from '../contracts/tools.js';

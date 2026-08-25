@@ -7,7 +7,7 @@
  */
 
 import type { AssistantMessage, AssistantStreamEvent, ToolResultMessage } from '../contracts/llm.js';
-import type { AgentMessage } from './messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { AgentToolResult } from './tools.js';
 
 /** run 终态三值（骨架篇 §2.6 scaffold-first 钉死；suspended 留 v2 seam） */

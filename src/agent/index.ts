@@ -22,15 +22,6 @@ export {
   type RunResult,
 } from './loop.js';
 export {
-  type AgentMessage,
-  type CustomMessage,
-  type MessageRoleDefinition,
-  registerMessageRole,
-  getMessageRoleDefinition,
-  listMessageRoles,
-  isStandardRole,
-} from './messages.js';
-export {
   type ToolExecutionMode,
   type AgentToolCall,
   type AgentToolResult,

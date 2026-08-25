@@ -27,8 +27,8 @@ import {
 } from '@earendil-works/pi-tui';
 import { ProcessTerminal } from '@earendil-works/pi-tui';
 import type { AgentEvent } from '../agent/events.js';
-import type { AgentMessage } from '../agent/messages.js';
-import { isStandardMessage } from '../agent/messages.js';
+import type { AgentMessage } from '../contracts/messages.js';
+import { isStandardMessage } from '../contracts/messages.js';
 import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, renderAgentMessage } from './render.js';
 import { createPromptQueue } from './prompt.js';
 import type { CommandRegistry } from './commands.js';

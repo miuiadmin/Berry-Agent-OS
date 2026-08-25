@@ -5,6 +5,7 @@
  * （ctx.tools / ctx.sessions / …）由对应模块落地时挂到本接口的扩展视图上。
  */
 import type { EventName } from '../contracts/events.js';
+import type { MessageRoleDefinition } from '../contracts/messages.js';
 import type { Logger } from './logger.js';
 
 /** 清理函数：effect / on / provide 的返回值，调用即回卷该注册 */
@@ -52,6 +53,13 @@ export interface Context {
   tryGet<T = unknown>(name: string): T | undefined;
   /** 注册服务（写入共享注册表）；返回注销 Disposer，且挂到当前作用域 effect 栈随卸载回卷 */
   provide<T>(name: string, impl: T): Disposer;
+  /**
+   * 注册自定义消息角色（骨架篇 §2.3 插件面——ctx 承诺面的兑现，2026-08-25）：
+   * 角色名必含 `/` 域前缀（memory/recall 式）；挂作用域 effect 栈随卸载回卷
+   * （与 on/provide 同纪律）。宿主自留角色（无 / 单段名）走 contracts 的
+   * registerHostMessageRole 直调，不经本面。
+   */
+  registerMessageRole(name: string, definition: MessageRoleDefinition): Disposer;
   /** 本作用域配置视图（只读快照；组合树解析产物） */
   readonly config: Readonly<Record<string, unknown>>;
   /** 带作用域前缀的子 logger */
