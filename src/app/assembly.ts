@@ -51,6 +51,9 @@ import { SKILLS_CHANGE_EVENT } from '../skills/index.js';
 // 声明式子代理发现位置（agents/*.md——尾刀落码，subagent 官方件消费）
 import { defaultAgentLocations } from './agents-md.js';
 import type { AgentLocation } from './agents-md.js';
+// 项目指令文件四层发现（骨架篇 §7.3 instructions 段——尾刀落码）
+import { defaultInstructionLocations, discoverInstructions, renderInstructions } from './instructions.js';
+import type { InstructionLocation } from './instructions.js';
 import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
@@ -159,6 +162,8 @@ export interface RuntimeOptions {
   readonly skillLocations?: readonly SkillLocation[];
   /** 声明式子代理发现位置（缺省 defaultAgentLocations；测试注入 fixture 目录） */
   readonly agentLocations?: readonly AgentLocation[];
+  /** 指令文件发现位置（缺省 defaultInstructionLocations 四层；测试注入 fixture 目录） */
+  readonly instructionLocations?: readonly InstructionLocation[];
   /** 主目录（技能缺省位置推导用；缺省 os.homedir()——测试注入） */
   readonly homeDir?: string;
   /** 交互模式（true = 注册审批 answerer 接 ctx.ui；headless run 传 false） */
@@ -686,6 +691,20 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   promptsHost.registerHostSection({
     id: 'environment',
     render: () => renderEnvironmentSection({ mode: () => sandboxMode, workspaceRoot: () => workspace }),
+  });
+  // 项目指令文件段（骨架篇 §7.3 四层发现——宿主自留地第二段）：render 仅重建
+  // 时点求值 = 每次重建重读文件（改 AGENTS.md 后 /reload 生效——快照语义）；
+  // 发现位置装配期定死（workspace + homeDir 测试缝，skills/agents 同款形态）
+  const instructionLocations =
+    opts.instructionLocations ?? defaultInstructionLocations(workspace, { homeDir: opts.homeDir });
+  promptsHost.registerHostSection({
+    id: 'instructions',
+    render: () => {
+      // 截断等诊断转发宿主 logger（warn 面可见——不静默吞护栏触发）
+      const found = discoverInstructions(instructionLocations);
+      for (const diagnostic of found.diagnostics) ctx.logger.warn(`[instructions] ${diagnostic.message}`);
+      return renderInstructions(found.sections);
+    },
   });
   // 提供方链变更广播桥（契约篇 §2.2 增补 6，#17 收口）：服务保持纯（不持 ctx），
   // 组合根经 onProvidersChange 桥接总线——广播与 provide 收在同一时点，无窗口期

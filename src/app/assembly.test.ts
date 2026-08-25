@@ -951,8 +951,15 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     // 段 id 清单面（字典序；memory/core 简报段 + subagent/list 清单段为官方件
     // 注册——memory 空库物化为空串、subagent 单 provider 物化一行清单）
     const prompts = runtime.ctx.get<{ listSections(): string[] }>('prompts');
-    // environment = 宿主自留地段（exec 纵切——无 / 单段 id 排插件域段之前，字典序）
-    expect(prompts.listSections()).toEqual(['demo/notice', 'environment', 'memory/core', 'subagent/list']);
+    // environment = 宿主自留地段（exec 纵切——无 / 单段 id 排插件域段之前，字典序）；
+    // instructions = 宿主自留地第二段（尾刀四层发现——工作区无指令文件时物化空串）
+    expect(prompts.listSections()).toEqual([
+      'demo/notice',
+      'environment',
+      'instructions',
+      'memory/core',
+      'subagent/list',
+    ]);
 
     // 首 run 落的 header initial 快照含段内容（模型可见即落日志）
     await runtime.conversation!.submitOnce('看提示词');
