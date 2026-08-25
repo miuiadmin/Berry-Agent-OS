@@ -18,6 +18,7 @@ import { describeError } from '../contracts/errors.js';
 import { formatSkillInvocation } from '../skills/index.js';
 import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
 import type { PluginsService } from './plugins.js';
+import type { AllowlistStore } from './allowlist-store.js';
 import type { ReloadResult } from './assembly.js';
 import type { PluginStatusRow } from './composition.js';
 
@@ -79,6 +80,8 @@ export interface BuiltinCommandsOptions {
   readonly submit: (text: string) => void;
   /** 开新会话（/new——组合根热切换；无持久层/run 进行中返回 undefined） */
   readonly newSession: () => { header: { sessionId: string } } | undefined;
+  /** 跨会话 allowlist 存储（/allowlist 枚举与撤销面——接线批 Commit B） */
+  readonly allowlist: AllowlistStore;
   /** 插件管理服务（/plugins 清单与 install/toggle/update——对账逻辑全在服务，壳只转述） */
   readonly plugins: PluginsService;
   /** 组合树重载（/reload 主体——组合根闭包；装配动作不进壳面） */
@@ -131,6 +134,43 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         // 投影本体在 usage.ts（组合根闭包绑库连接）——壳只转述；诊断面无持久层
         // 时闭包返回说明文本，同样经通知呈现
         ui.notify(opts.usage());
+      },
+    }),
+    commands.register({
+      name: 'allowlist',
+      description: '跨会话免问清单：枚举 / 撤销（advisory——只影响问不问，deny 不在此）',
+      handler: (args) => {
+        // /allowlist rm <序号> 撤销；裸 /allowlist 枚举（过期态如实标注——过期条目
+        // 已回落问，提示清理）。写入面（「始终允许」推荐规则）随审批增补二批接。
+        const parts = args.trim().split(/\s+/).filter(Boolean);
+        if (parts[0] === 'rm' || parts[0] === 'remove') {
+          const index = Number(parts[1]);
+          if (!Number.isInteger(index) || index < 1) {
+            ui.notify('用法：/allowlist rm <序号>（序号见 /allowlist）');
+            return;
+          }
+          ui.notify(opts.allowlist.remove(index - 1) ? `已撤销条目 ${index}` : `无此序号：${index}`);
+          return;
+        }
+        const entries = opts.allowlist.list();
+        if (entries.length === 0) {
+          ui.notify('allowlist 空（0 条）——条目来源：审批「始终允许」（增补二批接）或手编 <数据目录>/allowlist.json');
+          return;
+        }
+        const now = Date.now();
+        const lines = entries.map((entry, i) => {
+          const expired = entry.expiresAt !== undefined && now >= entry.expiresAt;
+          const ttl =
+            entry.expiresAt === undefined
+              ? '永久'
+              : expired
+                ? `⚠ 已过期（回落问——可 rm 清理）`
+                : `至 ${new Date(entry.expiresAt).toISOString()}`;
+          return `  ${i + 1}. ${entry.tool}  ${entry.pattern || '（整名匹配）'}（${ttl}）`;
+        });
+        ui.notify(
+          `allowlist（${entries.length} 条——免问面，deny 不在此面）：\n${lines.join('\n')}\n撤销：/allowlist rm <序号>`,
+        );
       },
     }),
     commands.register({

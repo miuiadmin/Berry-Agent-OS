@@ -82,6 +82,7 @@ import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
+import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -636,7 +637,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     policy: opts.approvalPolicy ?? 'ask',
     sink: durableForward.approval,
   });
-  ctx.effect(() => installSafetyGate(ctx, { approval, workspace, mode: () => sandboxMode }));
+  // 跨会话 allowlist 用户配置层（第二十四批题1a 接线批 Commit B）：<数据目录>/
+  // allowlist.json 原子写；活数组交给守门行同一引用，/allowlist 命令的 add/remove
+  // 原地改零重装。损坏/缺省 = 空表起步（warn——隔离 ≠ 静默；allowlist 是增益面
+  // 非事实源，不炸启动）。诊断面（dump-config :memory:）容忍此读侧副作用。
+  const allowlist = new AllowlistStore(join(dataDir(), 'allowlist.json'), {
+    warn: (message) => ctx.logger.warn(message),
+  });
+  ctx.effect(() =>
+    installSafetyGate(ctx, { approval, workspace, mode: () => sandboxMode, allowlist: allowlist.entries }),
+  );
   // sandbox 档首落随会话边界进 chat 件（③b stampSandboxFacts——内核有数据，
   // 应用有时点；续接同档不重复落的 diff 语义内建于盖章函数）
 
@@ -911,6 +921,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       usage: persistence
         ? () => formatUsagePanel(persistence.store.connection)
         : () => '用量面板不可用（诊断面无持久层——persist:false）',
+      // /allowlist 取数面（接线批 Commit B）：跨会话免问清单的枚举/撤销
+      allowlist,
     }),
   );
 
