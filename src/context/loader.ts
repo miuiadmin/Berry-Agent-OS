@@ -22,6 +22,7 @@
  */
 
 import { createJiti } from 'jiti';
+import { dirname } from 'node:path';
 import * as typeboxRoot from 'typebox';
 import * as typeboxCompile from 'typebox/compile';
 import * as typeboxValue from 'typebox/value';
@@ -146,6 +147,15 @@ function validateModuleShape(mod: Record<string, unknown>, id: string): Validate
       `named export events 必须是 LiveEventDefinition[]（自定义事件声明清单，契约篇 §1.2 第四件）`,
     );
   }
+  // skills 第六件（§1.2，2026-08-26 技能包插件纵切）：相对包根的目录路径清单，
+  // 与 inject 同形 string[]（不用 glob——清单短、显式优于模式匹配）
+  const skills = Object.hasOwn(mod, 'skills') ? mod['skills'] : undefined;
+  if (skills !== undefined && (!Array.isArray(skills) || skills.some((item) => typeof item !== 'string'))) {
+    throw new AppError(
+      PLUGIN_SHAPE_INVALID,
+      `named export skills 必须是 string[]（自带技能目录清单，相对插件包根，契约篇 §1.2 第六件）`,
+    );
+  }
   // 形状已验：default 收窄为真实签名（Record<string,unknown> → 契约形，单点转换）
   return mod as unknown as ValidatedModule;
 }
@@ -184,6 +194,41 @@ function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id:
 }
 
 /**
+ * 行级技能注册信息（loadPlugins 桥接回调入参——技能包插件，契约篇 §1.2 第六件）。
+ *
+ * 拓扑 seam（2026-08-26 冷读裁决）：context 不引 skills 模块（拓扑边只有
+ * skills→context）——context 只定义本结构，组合根注入回调在此结构上桥接
+ * skills 服务（createPackageSkillsProvider + registerProvider）。
+ */
+export interface PluginSkillsInfo {
+  /** 组合树行 id（诊断归因） */
+  readonly id: string;
+  /** 插件声明 name（provider id 溯源） */
+  readonly name: string;
+  /**
+   * 插件包根（skills 相对路径解析锚点）= 入口文件所在目录；builtin 行（宿主
+   * 随包函数件）无磁盘锚点 = undefined——回调侧跳过注册（官方纯技能包件真
+   * 出现时随其纵切开）
+   */
+  readonly packageRoot?: string;
+  /** skills named export 声明的目录清单（相对 packageRoot，原样透传） */
+  readonly dirs: readonly string[];
+  /** 行作用域（回调应把注册挂此 effect——行失败//reload 回卷即注销，技能是行资产） */
+  readonly scope: ContextScope;
+}
+
+/** loadPlugins 可选参数（v1 仅技能注册回调——后续跨模块桥接需求同形扩展） */
+export interface LoadPluginsOptions {
+  /**
+   * 行级技能注册回调：加载器在**行作用域 fork 后、apply 之前**逐声明行调用
+   * （登记位冷读裁决——与 events 的装载阶段①早登记不同位：skills 无跨插件
+   * 订阅顺序洞，无早登记收益只有失败残留风险）。回调契约：**不得抛错**（内部
+   * 问题应记日志/走诊断面）；抛错将按 apply 失败同路回卷杀行。
+   */
+  registerSkills?: (info: PluginSkillsInfo) => void;
+}
+
+/**
  * 装载插件（组合根装配期与 /reload 调用；输入 = 组合树合成的装载计划行）。
  *
  * root 参数应传**插件锚作用域**（组合根 `ctx.fork('plugins')` 产物）：全体插件
@@ -194,7 +239,11 @@ function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id:
  * 逐行响亮报告不杀进程（本函数自身不抛：逐行失败收集进清单，单行失败不阻断
  * 其余行装载诊断）。
  */
-export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanRow[]): Promise<PluginLoadResult> {
+export async function loadPlugins(
+  root: ContextScope,
+  rows: readonly PluginPlanRow[],
+  opts?: LoadPluginsOptions,
+): Promise<PluginLoadResult> {
   const activated: PluginActivatedPayload[] = [];
   const failed: PluginFailedPayload[] = [];
   const skipped: PluginSkippedPayload[] = [];
@@ -221,7 +270,7 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
         // 不受插件零 import 约束——包成模块记录后与文件插件走**完全同轨**的形状
         // 校验/事件登记/轮次激活/生命周期事件管线（apply 替位 default，字段同名转抄）
         mod = { default: row.builtin.apply };
-        for (const key of ['name', 'inject', 'optionalInject', 'config', 'events'] as const) {
+        for (const key of ['name', 'inject', 'optionalInject', 'config', 'events', 'skills'] as const) {
           if (row.builtin[key] !== undefined) mod[key] = row.builtin[key];
         }
       } else {
@@ -260,7 +309,7 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
         continue;
       }
       pending.splice(i, 1);
-      await activateOne(root, item.row, item.module, activated, failed);
+      await activateOne(root, item.row, item.module, activated, failed, opts);
       progress = true;
     }
   }
@@ -284,13 +333,14 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
   return { activated, failed, skipped };
 }
 
-/** 激活单行：config 校验 → fork 作用域 → apply → 生命周期事件；apply 抛错即回卷 */
+/** 激活单行：config 校验 → fork 作用域 → （技能注册回调）→ apply → 生命周期事件；apply 抛错即回卷 */
 async function activateOne(
   root: ContextScope,
   row: PluginPlanRow,
   module: ValidatedModule,
   activated: PluginActivatedPayload[],
   failed: PluginFailedPayload[],
+  opts?: LoadPluginsOptions,
 ): Promise<void> {
   const fail = (code: string, message: string): void => {
     failed.push({ id: row.id, code, message });
@@ -318,6 +368,19 @@ async function activateOne(
 
   const scope = root.fork({ name: row.id, ...(row.config !== undefined ? { config: row.config } : {}) });
   try {
+    // 技能目录注册（契约篇 §1.2 第六件；登记位 = 冷读裁决的「行作用域 fork 后
+    // apply 之前」）：技能是行资产——apply 抛错走下方 catch 的 scope.dispose()
+    // 连带回卷回调挂上的注册 effect，/reload 锚级联回卷同理，失败行不留技能残骸。
+    // 空清单/未注入回调（老调用方）不调——纯技能包（default 空实现）照常走完激活
+    if (module.skills !== undefined && module.skills.length > 0 && opts?.registerSkills !== undefined) {
+      opts.registerSkills({
+        id: row.id,
+        name: module.name,
+        packageRoot: row.entry !== undefined ? dirname(row.entry) : undefined,
+        dirs: module.skills,
+        scope,
+      });
+    }
     await module.default(scope, scope.config);
     // name 与行 id 不一致：不拒绝（两者本就不同物），warn 留痕防归因混淆
     if (module.name !== row.id) {

@@ -117,6 +117,15 @@ export interface PluginModule {
    * 统一登记——跨插件订阅无顺序洞；词汇集运行期恒定（boot//reload 两时点外不增不减）。
    */
   events?: readonly LiveEventDefinition[];
+  /**
+   * 插件自带技能目录清单（§1.2 第六件，2026-08-25 第二十二批即刻批① + 2026-08-26
+   * 冷读闸回写）：相对**插件包根**（= 入口文件所在目录）的路径数组（如 `["./skills"]`，
+   * 不用 glob）。加载器在行作用域 fork 后、apply 之前经注册回调桥接 skills 服务
+   * package 层（context 不引 skills——组合根注入回调，拓扑 seam）；目录缺失产
+   * `package-missing` warning 诊断不杀行。纯技能包 = 本字段 + name + default 空
+   * 实现三件零逻辑即合法插件形态（superpowers 式技能生态直通）。
+   */
+  skills?: readonly string[];
 }
 
 /**

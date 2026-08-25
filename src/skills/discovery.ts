@@ -15,7 +15,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import ignore from 'ignore';
 import { parseSkillMd } from './skill-md.js';
 import type { Dirent } from 'node:fs';
@@ -203,6 +203,57 @@ export function createLocalSkillsProvider(opts: LocalSkillsProviderOptions): Ski
       const diagnostics: SkillDiagnostic[] = [];
       for (const location of opts.locations) {
         const result = scanSkillLocation(location);
+        skills.push(...result.skills);
+        diagnostics.push(...result.diagnostics);
+      }
+      return { skills, diagnostics };
+    },
+  };
+}
+
+/** 包层技能 provider 选项（技能包插件——契约篇 §1.2 named export 第六件） */
+export interface PackageSkillsProviderOptions {
+  /** 插件声明 name（provider id = `package:<name>`，诊断溯源） */
+  readonly pluginName: string;
+  /** 插件包根（skills 声明相对路径的解析锚点 = 入口文件所在目录） */
+  readonly packageRoot: string;
+  /** skills named export 声明的技能目录清单（相对 packageRoot；空数组 = 零技能零诊断） */
+  readonly dirs: readonly string[];
+}
+
+/**
+ * 包层技能 provider（技能包插件工厂，2026-08-26 技能包插件纵切）。
+ *
+ * 每个声明了 `skills` 的插件行一个实例（组合根经 loadPlugins 注册回调桥接——
+ * 拓扑 seam：context 不引 skills 模块）。list() 每次现扫：
+ * - 目录存在 → 复用 scanSkillLocation 以 `source: 'package'` 扫描（gitignore
+ *   语义、SKILL.md 技能根判定等与 project/user 层同规）；
+ * - 目录缺失 → `package-missing` warning 诊断（声明了却缺失是真异常，与
+ *   project/user 层「缺目录是常态刻意静默」相反）——不杀行：行主体可用就
+ *   不因技能目录缺失回卷，禁用 plugin/skipped（会破「激活行集合 === 非禁用行
+ *   − 已发 skipped」运行时不变式）。
+ *
+ * 优先级：provider 注册序即合并优先序（first-wins 不读 source 字段）——
+ * local-fs（装配序 ⑦）先注册、插件行（装配序 ⑨）后注册，包内技能恒居最低层。
+ */
+export function createPackageSkillsProvider(opts: PackageSkillsProviderOptions): SkillsProvider {
+  return {
+    id: `package:${opts.pluginName}`,
+    list() {
+      const skills: Skill[] = [];
+      const diagnostics: SkillDiagnostic[] = [];
+      for (const dir of opts.dirs) {
+        const abs = resolve(opts.packageRoot, dir);
+        if (!existsSync(abs)) {
+          diagnostics.push({
+            type: 'warning',
+            code: 'package-missing',
+            message: `插件「${opts.pluginName}」声明的技能目录不存在：${dir}`,
+            path: abs,
+          });
+          continue;
+        }
+        const result = scanSkillLocation({ dir: abs, source: 'package' });
         skills.push(...result.skills);
         diagnostics.push(...result.diagnostics);
       }

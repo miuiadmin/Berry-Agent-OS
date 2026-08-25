@@ -23,9 +23,18 @@ export {
   formatSkillInvocation,
 } from './skill-md.js';
 
-/* 本地 FS 发现（契约篇 §4.4） */
-export type { LocalSkillsProviderOptions, DefaultSkillLocationsOptions } from './discovery.js';
-export { scanSkillLocation, createLocalSkillsProvider, defaultSkillLocations } from './discovery.js';
+/* 本地 FS 发现（契约篇 §4.4）+ 包层 provider（技能包插件，§1.2 第六件） */
+export type {
+  LocalSkillsProviderOptions,
+  DefaultSkillLocationsOptions,
+  PackageSkillsProviderOptions,
+} from './discovery.js';
+export {
+  scanSkillLocation,
+  createLocalSkillsProvider,
+  createPackageSkillsProvider,
+  defaultSkillLocations,
+} from './discovery.js';
 
 /* 注册表 + 渐进披露清单 + ctx 挂载（骨架篇 §9.2） */
 export { renderAvailableSkills, createSkillsService, registerSkillsService } from './registry.js';

@@ -23,7 +23,7 @@ import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
-import { loadPlugins } from '../context/loader.js';
+import { loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
 import { Persistence, localDayStartMs, spentBackgroundTokensSince } from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn } from '../llm/index.js';
@@ -46,6 +46,7 @@ import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode 
 import { createBashTool, registerExecService, renderEnvironmentSection } from '../exec/index.js';
 import {
   createLocalSkillsProvider,
+  createPackageSkillsProvider,
   createSkillsService,
   defaultSkillLocations,
   registerSkillsService,
@@ -680,7 +681,30 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 锚是活绑定（/reload dispose 后重 fork）；composition 同为活绑定（/reload 重装载）
   let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });
   let composition: CompositionReport = loadComposition(compositionDir, builtins);
-  plugins.applyLoad(composition, await loadPlugins(pluginAnchor, composition.plan));
+  // 插件技能注册回调（契约篇 §1.2 第六件；拓扑 seam 落码形态——context 不引
+  // skills，组合根在此桥接）：loadPlugins 在行作用域 fork 后、apply 之前逐声明行
+  // 回调。桥接三件：包层 provider 工厂（skills 模块产）+ registerProvider（追加序
+  // 即优先序——local-fs 装配序 ⑦ 已先注册，包内技能恒居最低层，用户本地永远压过
+  // 包内）+ 挂行作用域 effect（行失败 / /reload 锚回卷即注销——技能是行资产）。
+  // registerProvider → skills_change → 重建管线自然刷新，此处不另发 refresh
+  //（双发 = 每插件双份全量重扫）。回调契约不抛错：factory/registerProvider 均纯装配
+  const registerPluginSkills = (info: PluginSkillsInfo): void => {
+    if (info.packageRoot === undefined) {
+      // builtin 行（宿主函数件）无磁盘锚点——官方纯技能包件真出现时随其纵切开
+      ctx.logger.warn('builtin 件声明 skills 暂不支持注册（无包根锚点）', { plugin: info.name, row: info.id });
+      return;
+    }
+    const provider = createPackageSkillsProvider({
+      pluginName: info.name,
+      packageRoot: info.packageRoot,
+      dirs: info.dirs,
+    });
+    info.scope.effect(() => skills.registerProvider(provider));
+  };
+  plugins.applyLoad(
+    composition,
+    await loadPlugins(pluginAnchor, composition.plan, { registerSkills: registerPluginSkills }),
+  );
   if (plugins.list().some((row) => row.status === 'failed')) {
     const lines = plugins
       .list()
@@ -732,7 +756,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       loadWindow = true;
       await pluginAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
       pluginAnchor = ctx.fork({ name: 'plugins' });
-      const load = await loadPlugins(pluginAnchor, fresh.plan);
+      const load = await loadPlugins(pluginAnchor, fresh.plan, { registerSkills: registerPluginSkills });
       composition = fresh;
       plugins.applyLoad(fresh, load); // 同实例就地更新（失败行进 list 状态面——进程存活）
       rebuildSystemPrompt();

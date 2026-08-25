@@ -42,6 +42,9 @@ export type SkillDiagnosticCode =
   | 'invalid-metadata' // name/description 校验不过（技能仍加载，随 pi 宽容度）
   | 'list-failed' // 目录列举失败
   | 'provider-failed' // provider.list() 抛异常（整提供方跳过，不断流）
+  | 'package-missing' // 插件声明的技能目录缺失（package 层专用，2026-08-26 技能包插件纵切：
+  //   声明了却缺失是真异常——与 project/user 层「缺目录是常态刻意静默」相反，故发声；
+  //   warning 不杀行，行主体可用就不因技能目录缺失回卷）
   | 'collision'; // 同名冲突落选（§4.4 first-wins 诊断）
 
 /** 技能加载诊断（warning = 单点问题不断流；collision = 同名落选记录） */

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createContext } from './context.js';
 import { loadPlugins } from './loader.js';
+import type { PluginSkillsInfo } from './loader.js';
 import type { ContextScope } from './types.js';
 import {
   EVENT_DUPLICATE,
@@ -559,5 +560,173 @@ describe('loadPlugins 自定义事件词汇登记', () => {
       ['twice-b', EVENT_DUPLICATE],
       ['catalog-clash', EVENT_DUPLICATE],
     ]);
+  });
+});
+
+/* ---------------- 技能目录注册回调（§1.2 第六件，2026-08-26 技能包插件纵切） ---------------- */
+
+describe('loadPlugins 技能目录注册回调', () => {
+  it('回调时序：行作用域 fork 后、apply 之前——回调先于 apply 收到完整行信息', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'skillpack.ts',
+      [
+        "export const name = 'skillpack';",
+        "export const skills = ['./skills'];",
+        'export default async function apply(ctx) {',
+        '  ctx.provide("skillpack-apply-ran", true);',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const seen: PluginSkillsInfo[] = [];
+    const result = await loadPlugins(root, [{ id: 'skillpack', entry }], {
+      registerSkills: (info) => {
+        // 时序锚点：回调时 apply 尚未执行（fork 后 apply 前的登记位——冷读裁决）
+        seen.push(info);
+        expect(root.tryGet('skillpack-apply-ran')).toBeUndefined();
+      },
+    });
+
+    expect(result.failed).toEqual([]);
+    expect(result.activated).toEqual([{ id: 'skillpack', name: 'skillpack' }]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.id).toBe('skillpack');
+    expect(seen[0]!.packageRoot).toBe(dir); // 包根 = 入口文件所在目录
+    expect(seen[0]!.dirs).toEqual(['./skills']);
+    expect(seen[0]!.scope).toBeTruthy(); // 行作用域已 fork（回调可挂 effect）
+    expect(root.tryGet('skillpack-apply-ran')).toBe(true); // apply 事后确实跑了
+  });
+
+  it('apply 抛错回卷：回调挂行作用域的 effect 随 dispose 回卷（技能是行资产，失败不留残骸）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'boom.ts',
+      [
+        "export const name = 'boom';",
+        "export const skills = ['./skills'];",
+        'export default async function apply() {',
+        '  throw new Error("boom");',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    let registered = false;
+    let cleaned = false;
+    const result = await loadPlugins(root, [{ id: 'boom', entry }], {
+      registerSkills: (info) => {
+        registered = true;
+        // 模拟组合根桥接：包层 provider 注册挂行作用域 effect（注销器即回卷证据）
+        info.scope.effect(() => () => {
+          cleaned = true;
+        });
+      },
+    });
+
+    expect(registered).toBe(true); // 回调确实发生（fork 后 apply 前）
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_FAILED);
+    expect(cleaned).toBe(true); // apply 抛错 → scope.dispose() → 注册 effect LIFO 回卷
+  });
+
+  it('未注入回调：skills 声明行照常激活（老调用方兼容面——回调是可选参数）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'nohook.ts',
+      [
+        "export const name = 'nohook';",
+        "export const skills = ['./skills'];",
+        'export default async function apply(ctx) {',
+        '  ctx.provide("nohook-ran", true);',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'nohook', entry }]);
+
+    expect(result.failed).toEqual([]);
+    expect(result.activated).toEqual([{ id: 'nohook', name: 'nohook' }]);
+    expect(root.tryGet('nohook-ran')).toBe(true);
+  });
+
+  it('纯技能包最小形态：name + skills + default 空实现三件零逻辑即合法插件', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'pure.ts',
+      [
+        "export const name = 'pure';",
+        "export const skills = ['./skills'];",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    let called = false;
+    const result = await loadPlugins(root, [{ id: 'pure', entry }], {
+      registerSkills: () => {
+        called = true;
+      },
+    });
+
+    expect(result.failed).toEqual([]);
+    expect(result.activated).toEqual([{ id: 'pure', name: 'pure' }]);
+    expect(called).toBe(true); // 空实现也走技能注册（纯技能包的唯一起作用面）
+  });
+
+  it('skills 非 string[]：PLUGIN_SHAPE_INVALID，apply 不执行', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'badskills.ts',
+      [
+        "export const name = 'badskills';",
+        "export const skills = './skills';",
+        'export default async function apply(ctx) {',
+        '  ctx.provide("badskills-leak", true);',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'badskills', entry }]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]!.code).toBe(PLUGIN_SHAPE_INVALID);
+    expect(result.failed[0]!.message).toContain('skills');
+    expect(root.tryGet('badskills-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
+  });
+
+  it('builtin 行声明 skills：回调收到 packageRoot undefined（宿主函数件无磁盘锚点）', async () => {
+    const root = makeRoot();
+    const seen: PluginSkillsInfo[] = [];
+    const result = await loadPlugins(
+      root,
+      [
+        {
+          id: 'builtin-demo',
+          builtin: {
+            name: 'demo',
+            skills: ['./skills'],
+            apply: async (ctx) => {
+              ctx.provide('builtin-demo-ran', true);
+            },
+          },
+        },
+      ],
+      {
+        registerSkills: (info) => {
+          seen.push(info);
+        },
+      },
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(result.activated).toEqual([{ id: 'builtin-demo', name: 'demo' }]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.packageRoot).toBeUndefined(); // builtin 行无入口文件——组合根侧跳过注册
+    expect(root.tryGet('builtin-demo-ran')).toBe(true);
   });
 });
