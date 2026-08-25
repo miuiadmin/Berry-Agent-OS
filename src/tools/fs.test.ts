@@ -84,6 +84,58 @@ describe('read — 观察登记入口', () => {
   });
 });
 
+describe('read 图片分支 — 多模态内容块（§5.1 尾刀增量）', () => {
+  /** 最小合法 1×1 PNG（base64 直解——不需要真渲染，只需字节形态稳定） */
+  const PNG_1PX_BASE64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+  it('png 读为 image 块（text 元信息 + image base64）+ 登记 present 观察', async () => {
+    const t = freshTools();
+    const abs = join(workspace, 'pic.png');
+    await writeFile(abs, Buffer.from(PNG_1PX_BASE64, 'base64'));
+    const result = await t.read.execute({ path: 'pic.png' }, { toolCallId: 'tc' });
+    expect(result.content).toHaveLength(2);
+    expect(result.content[0]).toMatchObject({ type: 'text' });
+    expect(result.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png', data: PNG_1PX_BASE64 });
+    expect(result.details).toMatchObject({ image: true, mimeType: 'image/png' });
+    // 观察语义不分内容型：图片读后同样登记（后续 edit/delete 守卫照走）
+    expect(t.fs.observed.get(abs)?.state).toBe('present');
+  });
+
+  it('大写扩展名 .PNG 同样识别（判定前 toLowerCase）', async () => {
+    const t = freshTools();
+    await writeFile(join(workspace, 'PIC.PNG'), Buffer.from(PNG_1PX_BASE64, 'base64'));
+    const result = await t.read.execute({ path: 'PIC.PNG' }, { toolCallId: 'tc' });
+    expect(result.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+  });
+
+  it('webp/jpg/jpeg/gif 各映射正确 MIME', async () => {
+    const t = freshTools();
+    for (const [ext, mime] of [
+      ['webp', 'image/webp'],
+      ['jpg', 'image/jpeg'],
+      ['jpeg', 'image/jpeg'],
+      ['gif', 'image/gif'],
+    ] as const) {
+      const name = `x.${ext}`;
+      await writeFile(join(workspace, name), Buffer.from(PNG_1PX_BASE64, 'base64'));
+      const result = await t.read.execute({ path: name }, { toolCallId: 'tc' });
+      expect(result.content[1], ext).toMatchObject({ type: 'image', mimeType: mime });
+    }
+  });
+
+  it('超限：isError 结果面拒绝不截断（fail-loud 指路压缩）', async () => {
+    const t = freshTools({ maxImageBytes: 8 }); // 注入小上限
+    await writeFile(join(workspace, 'huge.png'), Buffer.from(PNG_1PX_BASE64, 'base64'));
+    const result = await t.read.execute({ path: 'huge.png' }, { toolCallId: 'tc' });
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain('压缩');
+    expect(result.details).toMatchObject({ rejected: 'too-large' });
+    // 拒绝读 ≠ 观察成立：未登记（模型没看过内容，后续写守卫不因此放行）
+    expect(t.fs.observed.get(join(workspace, 'huge.png'))).toBeUndefined();
+  });
+});
+
 describe('write — 观察态 CAS 分派', () => {
   it('未读已存在 → FS_NOT_OBSERVED（先 read 再写）', async () => {
     const t = freshTools();

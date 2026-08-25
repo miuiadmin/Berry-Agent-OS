@@ -15,7 +15,7 @@
  * 写失败一种。
  */
 
-import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { Type } from 'typebox';
@@ -37,7 +37,23 @@ export interface FsToolsOptions {
   workspace?: () => string;
   /** read 截断上限字节（缺省 256 KiB；超大文件截断提示，全文走 spill 策略插件） */
   maxReadBytes?: number;
+  /** read 图片分支文件上限字节（缺省 5 MiB；超限 isError 结果面拒绝不截断——
+   * base64 截断 = 损坏图片无意义，fail-loud 指路压缩/裁剪后重读） */
+  maxImageBytes?: number;
 }
+
+/**
+ * 图片扩展名 → MIME 类型（read 多模态分支识别表，契约篇 §5.1 Ring 1 条
+ * 2026-08-26 尾刀增量）。按扩展名识别而非魔数嗅探：工具语义是「读给模型看」，
+ * 伪图片文件由模型侧自然暴露，不为它加嗅探器（新概念判据不足）。
+ */
+const IMAGE_MIME_BY_EXT: Readonly<Record<string, string>> = {
+  ['.png']: 'image/png',
+  ['.jpg']: 'image/jpeg',
+  ['.jpeg']: 'image/jpeg',
+  ['.gif']: 'image/gif',
+  ['.webp']: 'image/webp',
+};
 
 /** fs 工具族产物：工具定义 + 共享观察表（装配层可借它做诊断/测试断言） */
 export interface FsTools {
@@ -96,6 +112,7 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
   const workspace = opts.workspace ?? (() => process.cwd());
   const writableRoots = opts.writableRoots ?? (() => [workspace(), tmpdir()]); // M1 过渡默认；safety 落成后换其推导
   const maxReadBytes = opts.maxReadBytes ?? 256 * 1024;
+  const maxImageBytes = opts.maxImageBytes ?? 5 * 1024 * 1024;
   const observed = new ObservedFiles();
 
   /** 用户给出的路径 → 绝对路径（相对路径锚 workspace） */
@@ -122,7 +139,7 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
     name: 'read',
     effect: 'read',
     description:
-      '读取文本文件内容。读取即登记观察态：后续 write/edit 需基于本观察（版本不符会被拒绝）。文件不存在时返回错误，但同样登记「不存在」观察（之后 write 即合法创建）。',
+      '读取文件内容。文本文件返回 UTF-8 文本；图片文件（png/jpg/jpeg/gif/webp）返回 image 内容块（模型可直接看图）。读取即登记观察态：后续 write/edit 需基于本观察（版本不符会被拒绝）。文件不存在时返回错误，但同样登记「不存在」观察（之后 write 即合法创建）。',
     parameters: Type.Object({
       path: Type.String({ description: '文件路径（相对路径锚工作区根）' }),
     }),
@@ -133,6 +150,35 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
         // 不存在 = 错误结果 + 登记 absent 观察（调用失败但观察语义成立：模型看过「这里没有文件」）
         observed.observeAbsent(abs);
         throw new AppError(FS_NOT_FOUND, `[FS_NOT_FOUND] 文件不存在：${abs}`);
+      }
+      // 图片分支（§5.1 尾刀增量）：按扩展名识别 → image 块（base64 + mimeType）。
+      // 不走 maxReadBytes 文本护栏——图片自有界（pipeline 输出护栏「只钳文本」既定；
+      // durable 面 image 放不下换文本占位亦是既有防线）。
+      const imageMime = IMAGE_MIME_BY_EXT[extname(abs).toLowerCase()];
+      if (imageMime !== undefined) {
+        const raw = await readFile(abs); // Buffer（不带编码——二进制原样）
+        if (raw.byteLength > maxImageBytes) {
+          // 超限 = 可预期输入问题（fetch 非 2xx 同款哲学）：isError 结果面拒绝，
+          // 模型可自纠正（压缩/裁剪后重读或放弃）；不 throw 不截断
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `图片过大：${abs}（${raw.byteLength} 字节 > 上限 ${maxImageBytes} 字节）。请压缩或裁剪后重读。`,
+              },
+            ],
+            isError: true,
+            details: { path: abs, bytes: raw.byteLength, limit: maxImageBytes, image: true, rejected: 'too-large' },
+          };
+        }
+        observed.observePresent(abs, version);
+        return {
+          content: [
+            { type: 'text', text: `${abs}（图片 ${imageMime}，${raw.byteLength} 字节）` },
+            { type: 'image', data: raw.toString('base64'), mimeType: imageMime },
+          ],
+          details: { path: abs, bytes: raw.byteLength, mimeType: imageMime, image: true },
+        };
       }
       const raw = await readFile(abs, 'utf8');
       const truncated = Buffer.byteLength(raw, 'utf8') > maxReadBytes;
