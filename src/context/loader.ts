@@ -63,17 +63,41 @@ type ValidatedModule = Omit<PluginModule, 'default'> & {
  * 公共导出——AppError/错误码/事件常量与目录/typebox 再导出；名即宿主 npm 包名）
  * + typebox 三入口（宿主实例注入——双实例防线，pi 生态 Static 双实例实证反例）。
  */
+/**
+ * 虚拟模块面键集（单一来源）：装载期 jiti 注入的宿主实例模块名。
+ * 用途有二——virtualModules 构造 + import 失败错误的可用面提示（探针 #12：
+ * 第三方按 npm 子路径直觉写 `berryagent/typebox` 撞错时，错误必须自带合法路）。
+ */
+const VIRTUAL_MODULE_KEYS = ['berryagent', 'typebox', 'typebox/value', 'typebox/compile'] as const;
+
+/**
+ * import 失败错误的虚拟面提示：消息形如「Cannot find module …」时附可用面清单。
+ * 虚拟模块只在 jiti 装载期存在——第三方 IDE/文档看不到它，猜错是常态而非例外。
+ */
+function virtualModuleHint(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  if (!/Cannot find module|ERR_MODULE_NOT_FOUND|PACKAGE_PATH_NOT_EXPORTED/.test(text)) return '';
+  const faces = VIRTUAL_MODULE_KEYS.map((k) => `'${k}'`).join('、');
+  return `（可用虚拟模块面：${faces}——宿主公共面与 typebox 经装载期虚拟注入，子路径不解析；契约篇 §1.2）`;
+}
+
 function createPluginJiti() {
   return createJiti(import.meta.url, {
     moduleCache: false,
     // 插件代码统一走 jiti 转译一条路径（native import 无法解析虚拟模块——防行为分叉）
     tryNative: false,
-    virtualModules: {
-      berryagent: contractsFace,
-      typebox: typeboxRoot,
-      'typebox/value': typeboxValue,
-      'typebox/compile': typeboxCompile,
-    },
+    virtualModules: Object.fromEntries(
+      VIRTUAL_MODULE_KEYS.map((key) => [
+        key,
+        key === 'berryagent'
+          ? contractsFace
+          : key === 'typebox'
+            ? typeboxRoot
+            : key === 'typebox/value'
+              ? typeboxValue
+              : typeboxCompile,
+      ]),
+    ),
   });
 }
 
@@ -216,7 +240,8 @@ export async function loadPlugins(root: ContextScope, rows: readonly PluginPlanR
       const payload = {
         id: row.id,
         code: err instanceof AppError ? err.code : PLUGIN_LOAD_FAILED,
-        message: err instanceof AppError ? err.message : `入口 import 失败：${describeError(err)}`,
+        message:
+          err instanceof AppError ? err.message : `入口 import 失败：${describeError(err)}${virtualModuleHint(err)}`,
       };
       failed.push(payload);
       root.emit('plugin/failed', payload);

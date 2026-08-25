@@ -306,6 +306,32 @@ describe('loadPlugins 形状校验与 import 失败', () => {
     expect(result.failed[0]!.code).toBe(PLUGIN_LOAD_FAILED);
     expect(result.failed[0]!.message).toContain('broken'); // 行 id 进诊断（归因）
   });
+
+  it('虚拟面子路径猜错：import 失败消息附可用面清单（探针 #12 回归锁）', async () => {
+    const dir = makeFixtureDir();
+    // npm 子路径直觉写法——虚拟面只有裸键，子路径不解析。
+    // 注意 Type 必须**实际使用**：jiti 转译会丢弃未使用的 import（对照实验实证），
+    // 不用的话错误被静默剥掉、插件假性激活。
+    const entry = writePlugin(
+      dir,
+      'subpath.ts',
+      [
+        'export const name = "subpath";',
+        'import { Type } from "berryagent/typebox";',
+        'export const config = Type.Object({ probe: Type.Optional(Type.String()) });',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'subpath', entry }]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed[0]!.code).toBe(PLUGIN_LOAD_FAILED);
+    // 错误自带合法路：四键清单 + 指出虚拟注入不解析子路径
+    expect(result.failed[0]!.message).toContain(`'berryagent'`);
+    expect(result.failed[0]!.message).toContain(`'typebox/value'`);
+    expect(result.failed[0]!.message).toContain('子路径不解析');
+  });
 });
 
 /* ---------------- apply 抛错回卷与生命周期事件 ---------------- */
