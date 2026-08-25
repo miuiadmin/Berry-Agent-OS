@@ -24,6 +24,7 @@ import { createWebPlugin } from '../web/index.js';
 import type { WebPluginOverrides } from '../web/index.js';
 import { createToolsPlugin, type ToolsPluginDeps } from '../tools/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
+import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
 import type { Session } from '../session/session.js';
@@ -48,6 +49,11 @@ export interface BuiltinRegistryOptions {
   readonly workspace: () => string;
   /** in-process 真工厂（subagent 官方件闭包注入——app/subagent-factory.ts 产物） */
   readonly subagentFactory?: InProcessChildFactory;
+  /**
+   * 声明式子代理发现位置（缺省 defaultAgentLocations——assembly 以 workspace
+   * 同源 + homeDir 测试缝注入，镜像 skills 装配形态；组合根全栈测试传 fixture 目录）
+   */
+  readonly agentLocations?: readonly AgentLocation[];
   /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键；goal 取当前会话 id） */
   readonly getSession: () => Session | undefined;
   /** boot 是否续接既有会话（session_start origin=resume——goal active 行降级触发器）。惰性取值：chat 件（首行）装载绑定会话后回写，goal apply 期读必居值 */
@@ -80,6 +86,7 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
           'builtin:subagent': createSubagentPlugin({
             factory: opts.subagentFactory,
             getSession: opts.getSession,
+            ...(opts.agentLocations ? { agentLocations: opts.agentLocations } : {}),
           }),
         }
       : {}),

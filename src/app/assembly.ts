@@ -48,6 +48,9 @@ import {
 } from '../skills/index.js';
 import type { SkillLocation, SkillsService } from '../skills/index.js';
 import { SKILLS_CHANGE_EVENT } from '../skills/index.js';
+// 声明式子代理发现位置（agents/*.md——尾刀落码，subagent 官方件消费）
+import { defaultAgentLocations } from './agents-md.js';
+import type { AgentLocation } from './agents-md.js';
 import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
@@ -154,6 +157,8 @@ export interface RuntimeOptions {
   readonly streamFn?: StreamFn;
   /** 技能发现位置（缺省 defaultSkillLocations；测试注入临时目录） */
   readonly skillLocations?: readonly SkillLocation[];
+  /** 声明式子代理发现位置（缺省 defaultAgentLocations；测试注入 fixture 目录） */
+  readonly agentLocations?: readonly AgentLocation[];
   /** 主目录（技能缺省位置推导用；缺省 os.homedir()——测试注入） */
   readonly homeDir?: string;
   /** 交互模式（true = 注册审批 answerer 接 ctx.ui；headless run 传 false） */
@@ -550,6 +555,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // fetchImpl/lookup 假实现，mock 停在外部边界非中间层）
     webOverrides: opts.webOverrides,
     workspace: () => workspace,
+    // 声明式子代理发现位置（镜像 skills ⑥⑦ 形态：workspace 同源 + homeDir 测试缝）
+    agentLocations: opts.agentLocations ?? defaultAgentLocations(workspace, { homeDir: opts.homeDir, trusted: true }),
     subagentFactory: createSubagentChildFactory({
       ...(persistence ? { persistence } : {}),
       getSession: () => session,

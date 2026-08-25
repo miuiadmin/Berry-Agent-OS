@@ -62,6 +62,13 @@ export interface SubagentStart {
   readonly toolFilter?: readonly string[];
   /** 人格/系统提示覆盖（需 provider 声明 persona） */
   readonly persona?: string;
+  /**
+   * 子模型标识覆盖（声明式 agent frontmatter model——契约篇 §4.4 声明式子代理
+   * 落码注记③）。**不进能力协商面**：v1 单实现族（in-process 家族）恒支持
+   * （工厂兜底缺省模型）；外部 provider 收编件出现时再裁加能力位。
+   * 格式与装配缺省模型同源（`provider/model-id`）。
+   */
+  readonly model?: string;
 }
 
 /** provider 执行体（start 产物——dispose 幂等；服务面包装为 SubagentRun） */
@@ -78,6 +85,9 @@ export interface SubagentExecution {
 export interface SubagentProvider {
   /** provider 名（ctx.subagents.register 撞名即拒） */
   readonly name: string;
+  /** 人读描述（声明式 agent = 文件 frontmatter description；披露段清单行用。
+   * 内建 provider 缺省 undefined——清单段只列名+能力位） */
+  readonly description?: string;
   /** 能力声明（四布尔——协商数据源） */
   readonly capabilities: SubagentCapabilities;
   /** 启动一次性子运行（请求已过服务面能力协商检查） */
@@ -105,6 +115,8 @@ export interface SubagentRun extends SubagentExecution {
 export interface SubagentProviderInfo {
   readonly name: string;
   readonly capabilities: SubagentCapabilities;
+  /** 人读描述（声明式 agent 披露依据；内建 provider 缺省） */
+  readonly description?: string;
 }
 
 /**

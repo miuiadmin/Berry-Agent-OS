@@ -58,6 +58,19 @@ export interface InProcessProviderOptions {
   readonly tokenBudget?: number;
   /** 委派深度默认帽（与请求 maxDepth 取 min 执法；缺省 3） */
   readonly maxDepth?: number;
+  /**
+   * provider 名覆盖（声明式 agent 桥用——frontmatter name；缺省 'in-process'）。
+   * 服务面按名路由，声明式 agent 每文件一个 named provider。
+   */
+  readonly name?: string;
+  /** 人读描述（声明式 agent = 文件 description；披露段清单行用；缺省省略） */
+  readonly description?: string;
+  /**
+   * 请求合并钩子（声明式 agent 桥的固定注入位）：start 收到的请求先过本钩子
+   * 再进工厂——桥侧把文件正文写 persona、tools 交集写 toolFilter、model 覆盖
+   * 写 model。能力协商在服务面（合并前的原始请求上）已过，合并只收窄不改宽。
+   */
+  readonly mergeRequest?: (request: SubagentStart) => SubagentStart;
 }
 
 /** 空用量基线（onUsage 从未上报时结算省略 usage 段——外部报不上则省的同形） */
@@ -111,10 +124,13 @@ export function createInProcessProvider(opts: InProcessProviderOptions): Subagen
   const defaultMaxDepth = opts.maxDepth ?? 3;
 
   const provider: SubagentProvider = {
-    name: 'in-process',
+    name: opts.name ?? 'in-process',
+    ...(opts.description !== undefined ? { description: opts.description } : {}),
     capabilities: { outputSchema: false, depthLimit: true, toolFilter: true, persona: true },
 
     start(request: SubagentStart): SubagentExecution {
+      // 声明式 agent 桥的固定注入（合并只收窄不改宽——见 InProcessProviderOptions.mergeRequest 注记）
+      const effectiveRequest = opts.mergeRequest !== undefined ? opts.mergeRequest(request) : request;
       // 取消单源：dispose / Job cancel / 预算帽触顶都只 abort 这一个控制器
       const controller = new AbortController();
       /** 累计用量（EMPTY 基线起步；从未上报则结算省略 usage） */
@@ -130,10 +146,10 @@ export function createInProcessProvider(opts: InProcessProviderOptions): Subagen
       };
 
       // 每子独立装配（dsh-10）：工厂闭包持父 Session/persistence/管道零件
-      const child = opts.factory({ request, signal: controller.signal, onUsage });
+      const child = opts.factory({ request: effectiveRequest, signal: controller.signal, onUsage });
 
       // 深度执法（§6.5）：fork 后子 header 已带单调深度——超帽即毁，不留半活子
-      const effectiveMaxDepth = Math.min(request.maxDepth ?? Number.POSITIVE_INFINITY, defaultMaxDepth);
+      const effectiveMaxDepth = Math.min(effectiveRequest.maxDepth ?? Number.POSITIVE_INFINITY, defaultMaxDepth);
       if (child.session.header.delegationDepth > effectiveMaxDepth) {
         void Promise.resolve(child.dispose()).catch(() => undefined); // 销毁失败不掩拒因（日志面归工厂）
         throw new AppError(

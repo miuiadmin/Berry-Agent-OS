@@ -97,7 +97,11 @@ export function createSubagentsService(
     },
 
     list(): readonly SubagentProviderInfo[] {
-      return [...providers.values()].map((provider) => ({ name: provider.name, capabilities: provider.capabilities }));
+      return [...providers.values()].map((provider) => ({
+        name: provider.name,
+        capabilities: provider.capabilities,
+        ...(provider.description !== undefined ? { description: provider.description } : {}),
+      }));
     },
 
     start(request: SubagentRequest): SubagentRun {

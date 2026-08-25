@@ -67,15 +67,19 @@ function syntheticStream(message: AssistantMessage, signal?: AbortSignal) {
   };
 }
 
-/** 脚本化 StreamFn（按调用序取响应；记录请求上下文——父子同源交替记录） */
+/** 脚本化 StreamFn（按调用序取响应；记录请求上下文与模型——父子同源交替记录） */
 function scriptedStream(responses: AssistantMessage[]) {
   const contexts: LlmContext[] = [];
-  const streamFn: StreamFn = (context: LlmContext, _options: StreamFnOptions, signal?: AbortSignal) => {
+  /** 每次模型调用的 model 标识（StreamFnOptions.model——声明式 agent 的 frontmatter
+   * model 覆盖经子工厂透传，在此观测） */
+  const models: string[] = [];
+  const streamFn: StreamFn = (context: LlmContext, options: StreamFnOptions, signal?: AbortSignal) => {
     contexts.push(context);
+    models.push(options.model);
     const message = responses[Math.min(contexts.length - 1, responses.length - 1)]!;
     return syntheticStream(message, signal);
   };
-  return { streamFn, contexts };
+  return { streamFn, contexts, models };
 }
 
 /** 自旋等待（微任务级——同步 scripted 流即触即达） */
@@ -266,5 +270,72 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     // 内存子会话不落库——但生命周期事件面不豁免（session_start delegation 照发根总线）
     expect(starts.some((s) => s.origin === 'delegation')).toBe(true);
     await execution.dispose();
+  });
+
+  /* ---------------- 声明式子代理（agents/*.md——尾刀三） ---------------- */
+
+  /** 声明式 fixture 目录：一份好文件 + 三份边界文件（坏 YAML/撞内建名/非法工具名） */
+  const makeAgentsFixture = (): string => {
+    const dir = makeTempDir('app-subplug-agents-');
+    writeFileSync(
+      join(dir, 'reviewer.md'),
+      [
+        '---',
+        'name: reviewer',
+        'description: 资深代码审读员',
+        'tools:',
+        '  - read',
+        '  - grep',
+        "model: 'test/child-model'",
+        '---',
+        '你是资深审读员，逐行审查。',
+      ].join('\n'),
+    );
+    // 坏文件：description 缺失 → warning 跳过（不炸装配）
+    writeFileSync(join(dir, 'broken.md'), '---\n---\n正文无元数据');
+    // 撞内建 provider 名 → 坏文件语义跳过（不炸 SUBAGENT_PROVIDER_DUPLICATE）
+    writeFileSync(join(dir, 'in-process.md'), '---\ndescription: 撞名件\n---\n正文');
+    // 工具名字符集外（中文基名）→ provider 注册但无 agent_<name> 工具
+    writeFileSync(join(dir, '审读员.md'), '---\ndescription: 中文名件\n---\n正文');
+    return dir;
+  };
+
+  it('声明式装配面：agent_<name> 静态工具进面；坏文件/撞名/非法名只跳过不炸装配；清单段含 description', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn, agentLocations: [{ dir: makeAgentsFixture(), source: 'project' }] });
+    // 官方件照常激活（边界文件未炸装配）
+    expect(runtime.plugins.list().find((r) => r.id === 'subagent')?.status).toBe('activated');
+    // 静态工具在场：通用 agent + 声明式 agent_reviewer；三份边界文件零工具
+    const names = runtime.tools.list().map((t) => t.name);
+    expect(names).toContain('agent');
+    expect(names).toContain('agent_reviewer');
+    expect(names).not.toContain('agent_broken');
+    expect(names).not.toContain('agent_in-process');
+    expect(names.some((n) => n.startsWith('agent_审'))).toBe(false);
+    // 静态工具 description = 文件 description（模型选择依据）+ 用法说明
+    const tool = runtime.tools.list().find((t) => t.name === 'agent_reviewer')!;
+    expect(tool.description).toContain('资深代码审读员');
+    // 清单披露段：声明式 provider 行带 description（in-process 通用行无此位）
+    expect(runtime.systemPrompt).toContain('reviewer：资深代码审读员');
+  });
+
+  it('声明式全栈委派：静态工具路由 named provider → persona=正文 / 工具=frontmatter / 模型=frontmatter', async () => {
+    // 消费序：[0] 父 toolCall(agent_reviewer) → [1] 子 turn（审读员人格答）→ [2] 父汇总
+    const { streamFn, contexts, models } = scriptedStream([
+      toolCallMessage('agent_reviewer', { prompt: '审读这份设计' }),
+      textMessage('审毕：无阻塞项'),
+      textMessage('父汇总完成'),
+    ]);
+    const runtime = await assemble({ streamFn, agentLocations: [{ dir: makeAgentsFixture(), source: 'project' }] });
+    const answer = await runtime.conversation!.submitOnce('帮我审读');
+    expect(answer?.status).toBe('completed');
+    expect(contexts).toHaveLength(3);
+    // mergeRequest 三腿在真装配里生效：正文写 persona、tools 写工具子集、model 覆盖
+    expect(contexts[1]!.systemPrompt).toBe('你是资深审读员，逐行审查。'); // 正文恒覆盖（非拼接缺省）
+    expect(contexts[1]!.tools?.map((t) => t.name)).toEqual(['read', 'grep']);
+    expect(models[1]).toBe('test/child-model'); // 子模型覆盖（父用缺省 test 流模型）
+    // 汇报文本回父面（静态工具前台路与通用 agent 同一结算链）
+    const toolResults = deriveMessages(runtime.session!.events).filter((m) => m.type === 'toolResult');
+    expect(JSON.stringify(toolResults[0])).toContain('审毕：无阻塞项');
   });
 });

@@ -121,7 +121,8 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
      * 与 durable session/event 镜像同总线，载荷 sessionId 即归属键）---- */
     deps.rootCtx.emit('session_start', { sessionId: session.header.sessionId, origin: 'delegation' });
 
-    /* ---- ⑦ 一次性驱动（persona ?? 静态缺省；emit 两路 = durable 落账 + usage 上报）---- */
+    /* ---- ⑦ 一次性驱动（persona ?? 静态缺省；model 覆盖 = 声明式 agent frontmatter；
+           emit 两路 = durable 落账 + usage 上报）---- */
     const run = (): Promise<RunResult> =>
       startRun(
         [{ role: 'user', content: request.prompt, timestamp: Date.now() }],
@@ -130,7 +131,7 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
           messages: [],
           tools: tools.list().map((def) => tools.toAgentTool(def)),
         },
-        { streamFn: deps.streamFn, model: deps.model, convertToLlm: deps.convertToLlm },
+        { streamFn: deps.streamFn, model: request.model ?? deps.model, convertToLlm: deps.convertToLlm },
         {
           signal,
           emit: (event) => {
