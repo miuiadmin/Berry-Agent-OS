@@ -64,6 +64,13 @@ export interface SessionRegistration {
  * 门禁顺序：application_id → user_version（升级方向补跑迁移链，降级方向拒绝）→
  * schema 逐对象比对（基线 DDL ∪ 迁移链产物累积指纹）；任一不匹配拒绝打开
  * （宁拒绝不误读；old-v2 旧库不进此门禁）。
+ *
+ * 双开冷启动原子性（探矿轮八 #25，2026-08-25）：初始化/门禁段整体包在
+ * BEGIN IMMEDIATE 单写事务里——判定（空库与否）与写入同事务，外部连接
+ * 永远只见「空库」或「完整库」，半初始化状态不可见；后到进程经 BEGIN
+ * IMMEDIATE 的标准锁等待（busy_timeout 有界）串行进入，随后按完整库走
+ * 门禁路径。WAL 切换本身不能进事务，其锁通道又不吃 busy_timeout（SQLite
+ * 固有——遇对方持锁 1ms 即 BUSY），用幂等探测 + 短退避重试兜微秒级切换窗。
  */
 export function openStore(options: StoreOptions): Store {
   // 迁移链先校验排序（装配错误在此即抛，不动任何库文件）。
@@ -74,49 +81,74 @@ export function openStore(options: StoreOptions): Store {
   const latestVersion = chain.length > 0 ? chain[chain.length - 1]!.version : SCHEMA_VERSION;
 
   const db = new Database(options.path);
-  // 双开姿态四件之①②：WAL 读写不互斥 + 锁等待有界
-  db.pragma(`journal_mode = WAL`);
+  // 双开姿态四件之①②：WAL 读写不互斥 + 锁等待有界。
+  // 顺序铁律（#25）：busy_timeout 必须最先设置——后续一切写操作（含初始化
+  // 事务的 BEGIN IMMEDIATE）的锁等待才有界。
   db.pragma(`busy_timeout = ${options.busyTimeoutMs ?? 5000}`);
-  // 拍板：synchronous=FULL（批量事务落盘强度优先）
+  // WAL 幂等探测：读当前模式不加锁；已是 wal 则跳过设置（幂等路径无锁需求）。
+  if ((db.pragma('journal_mode', { simple: true }) as string) !== 'wal') {
+    // 真切换需独占访问，且其锁通道不吃 busy_timeout——双开冷启动时后到者
+    // 可能撞上先到者微秒级的切换窗。短退避重试（5→15→45→135ms）覆盖之；
+    // 对方长持锁（非切换窗）最终仍响亮抛 BUSY，不做无限等待。
+    for (let attempt = 0; ; attempt++) {
+      try {
+        db.pragma('journal_mode = WAL');
+        break;
+      } catch (err) {
+        if (attempt >= 4 || !String((err as Error).message).includes('database is locked')) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 * 3 ** attempt); // 同步退避（openStore 是同步 API）
+      }
+    }
+  }
+  // 拍板：synchronous=FULL（批量事务落盘强度优先；连接级设置，不涉库锁）
   db.pragma('synchronous = FULL');
 
-  const appId = db.pragma('application_id', { simple: true }) as number;
-  const userVersion = db.pragma('user_version', { simple: true }) as number;
-  const isEmpty = tableCount(db) === 0;
+  // 初始化/门禁/升级段：单写事务（BEGIN IMMEDIATE 开场）。better-sqlite3
+  // 事务内抛错自动回滚；applyMigration 的嵌套事务以 savepoint 实现，安全。
+  const init = db.transaction(() => {
+    const appId = db.pragma('application_id', { simple: true }) as number;
+    const userVersion = db.pragma('user_version', { simple: true }) as number;
+    const isEmpty = tableCount(db) === 0;
 
-  if (isEmpty) {
-    // 全新库：基线 DDL + 迁移链一次到位 + 写入门禁值 + 单例状态行
-    db.exec(CANONICAL_DDL);
-    for (const m of chain) {
-      applyMigration(db, m);
-    }
-    db.pragma(`application_id = ${APPLICATION_ID}`);
-    db.pragma(`user_version = ${latestVersion}`);
-    db.prepare('INSERT INTO store_state (id, store_id, schema_version) VALUES (1, ?, ?)').run(
-      randomUUID(),
-      latestVersion,
-    );
-  } else {
-    // 存量库：application_id 门禁 → 升降级判定 → 补跑缺口 → 累积指纹比对
-    if (appId !== APPLICATION_ID) {
-      db.close();
-      throw new AppError(
-        SESSION_FORMAT_UNSUPPORTED,
-        `application_id 不匹配（库内 ${appId}，期望 ${APPLICATION_ID}）——不是本产品的库，拒绝打开`,
+    if (isEmpty) {
+      // 全新库：基线 DDL + 迁移链一次到位 + 写入门禁值 + 单例状态行
+      db.exec(CANONICAL_DDL);
+      for (const m of chain) {
+        applyMigration(db, m);
+      }
+      db.pragma(`application_id = ${APPLICATION_ID}`);
+      db.pragma(`user_version = ${latestVersion}`);
+      db.prepare('INSERT INTO store_state (id, store_id, schema_version) VALUES (1, ?, ?)').run(
+        randomUUID(),
+        latestVersion,
       );
+    } else {
+      // 存量库：application_id 门禁 → 升降级判定 → 补跑缺口 → 累积指纹比对
+      if (appId !== APPLICATION_ID) {
+        throw new AppError(
+          SESSION_FORMAT_UNSUPPORTED,
+          `application_id 不匹配（库内 ${appId}，期望 ${APPLICATION_ID}）——不是本产品的库，拒绝打开`,
+        );
+      }
+      if (userVersion > latestVersion) {
+        // 降级方向（未来库/旧宿主开新库）：宁拒绝不误读，永不自动降级
+        throw new AppError(
+          SESSION_FORMAT_UNSUPPORTED,
+          `user_version 高于宿主已知（库内 ${userVersion}，宿主最新 ${latestVersion}）——降级不支持，拒绝打开`,
+        );
+      }
+      for (const m of chain) {
+        if (m.version > userVersion) applyMigration(db, m);
+      }
+      verifySchema(db, chain);
     }
-    if (userVersion > latestVersion) {
-      // 降级方向（未来库/旧宿主开新库）：宁拒绝不误读，永不自动降级
-      db.close();
-      throw new AppError(
-        SESSION_FORMAT_UNSUPPORTED,
-        `user_version 高于宿主已知（库内 ${userVersion}，宿主最新 ${latestVersion}）——降级不支持，拒绝打开`,
-      );
-    }
-    for (const m of chain) {
-      if (m.version > userVersion) applyMigration(db, m);
-    }
-    verifySchema(db, chain);
+  });
+  try {
+    init.immediate();
+  } catch (err) {
+    // 门禁拒绝（AppError）或真锁冲突：关连接再上抛——调用方拿到干净错误面
+    db.close();
+    throw err;
   }
 
   const storeId = (db.prepare('SELECT store_id FROM store_state WHERE id = 1').get() as { store_id: string }).store_id;

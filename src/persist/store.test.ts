@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
 import Database from 'better-sqlite3';
@@ -96,6 +97,36 @@ describe('版本门禁（开库即验，宁拒绝不误读）', () => {
     raw2.exec('ALTER TABLE sessions ADD COLUMN extra_col TEXT'); // 表变形
     raw2.close();
     expectCode(() => openStore({ path: path2 }), SESSION_FORMAT_UNSUPPORTED);
+  });
+
+  // 探矿轮八 #25 回归锁（2026-08-25 Hermes 移植撞墙）：双开冷启动竞态——
+  // 两进程同时初始化同一新库，后到者在 journal_mode=WAL 首切（需写锁）上
+  // 撞 BUSY 裸崩：切换锁通道不吃 busy_timeout，且初始化段无原子性（后到者
+  // 可读到半初始化库走错门禁路径）。修法=幂等探测 + 短退避重试 + 初始化段
+  // BEGIN IMMEDIATE 单写事务。构造确定性形态：worker 线程里另一连接以默认
+  // rollback 模式持写锁 100ms 后释放（模拟先到进程的切换/初始化写窗口，
+  // < 退避预算 5+15+45+135ms）。必须用 worker 线程：openStore 的同步退避会
+  // 阻塞主线程事件循环，同线程的 setTimeout 释放永远无法触发（伪死锁）。
+  it('对方持锁时开新库：WAL 切换重试 + 初始化事务等待——不裸崩 BUSY（双开冷启动）', async () => {
+    const path = nextPath();
+    const holder = new Worker(
+      `const { parentPort, workerData } = require('node:worker_threads');
+       const Database = require('better-sqlite3');
+       const db = new Database(workerData.path); // 默认 rollback 模式（新库尚未 WAL）
+       db.exec('BEGIN IMMEDIATE;'); // 拿 RESERVED 写锁，不建表（建表并提交会让库
+       // 变非空——openStore 会被版本门禁正确拒绝，测的就不是等待语义了）
+       parentPort.postMessage('locked');
+       setTimeout(() => { db.exec('COMMIT'); db.close(); parentPort.postMessage('released'); }, workerData.holdMs);`,
+      { eval: true, workerData: { path, holdMs: 100 } },
+    );
+    try {
+      await new Promise((r) => holder.once('message', (m: string) => m === 'locked' && r(null)));
+      const store = openStore({ path }); // 修前：WAL 首切零等待 SQLITE_BUSY 裸抛
+      expect(store.storeId).toMatch(/^[0-9a-f-]{36}$/);
+      store.close();
+    } finally {
+      await holder.terminate();
+    }
   });
 });
 
