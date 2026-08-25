@@ -12,6 +12,10 @@
 
 import type { ImageContent, TextContent, Usage } from './llm.js';
 
+/* 内容块类型再导出（AgentToolResult.content 的构成件——工具件层组结果用；
+ * 2026-08-26 随 64KiB 输出护栏接线导出：tools/pipeline 组截断注记块引用） */
+export type { TextContent, ImageContent };
+
 /* ------------------------------------------------------------------ */
 /* 一、AgentTool 族（loop 执行面；agent/tools.ts 再出口保持兼容）        */
 /* ------------------------------------------------------------------ */

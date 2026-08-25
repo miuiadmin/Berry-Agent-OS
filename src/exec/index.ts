@@ -11,7 +11,7 @@
  */
 
 /* spawn 管道（原语执行——bash 工具件与服务共用） */
-export { runArgv, classifyDenials, OUTPUT_BUDGET_BYTES } from './spawn.js';
+export { runArgv, classifyDenials, OUTPUT_BUDGET_BYTES, killTree } from './spawn.js';
 export type { RunArgvOptions, RunResult } from './spawn.js';
 
 /* 子进程环境白名单（契约篇 §1.2 E 组执法面②） */

@@ -17,6 +17,8 @@
  */
 
 import { Value } from 'typebox/value';
+import { writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { AppError, TOOL_ARGUMENTS_INVALID, TOOL_BLOCKED, TOOL_GATE_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import { TOOL_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT, TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import type {
@@ -25,6 +27,7 @@ import type {
   GateAction,
   GateDecisionPayload,
   GateDecisionSink,
+  TextContent,
   ToolCtx,
   ToolDefinition,
   ToolUpdateCallback,
@@ -51,6 +54,55 @@ export type ToolPipelineExecutor = (
 /** 组装 `[CODE] message` 形态的错误文本（码随 message 进入工具结果） */
 function codedMessage(code: string, message: string): string {
   return `[${code}] ${message}`;
+}
+
+/**
+ * 缺省输出护栏预算（64KiB——对齐会话护栏；契约篇 §3.1 后处理段承诺、
+ * §6.6 冷读 #8 裁决随 mcp 第一刀兑现：护栏是管道属性，全部工具受益）。
+ */
+export const OUTPUT_GUARD_BYTES = 64 * 1024;
+
+/** spill 文件序号（模块级自增——文件名在 tmpdir 内唯一即可） */
+let spillSeq = 0;
+
+/**
+ * 取字节缓冲尾部至多 maxBytes 字节（UTF-8 安全：起点落在多字节字符中间则
+ * 前移过续字节——与 exec 件 tailUtf8 同纪律，tools 不 import exec〔方向反〕）。
+ */
+function tailBytes(buf: Buffer, maxBytes: number): string {
+  if (maxBytes <= 0) return '';
+  let start = Math.max(0, buf.length - maxBytes);
+  while (start > 0 && start < buf.length && (buf[start]! & 0xc0) === 0x80) start++;
+  return buf.subarray(start).toString('utf8');
+}
+
+/**
+ * 缺省后处理链尾：输出护栏（64KiB 保尾截断 + 超限 spill 全文外溢临时文件）。
+ * - 只钳文本 content；图片等其余 content 原样保留（自有界）；
+ * - spill 写 tmpdir（OS 回收，无 GC 面积），写失败降级为仅截断（不 throw——
+ *   护栏自身故障不该炸掉正常结果）；
+ * - 监听器若已改写 result（本段是链尾缺省，waterfall 语义下监听器先于链尾），
+ *   链尾对改写后结果同样执法。
+ */
+async function applyDefaultOutputGuard(result: AgentToolResult, callId: string): Promise<void> {
+  const textParts = result.content.filter((part): part is TextContent => part.type === 'text');
+  const full = textParts.map((part) => part.text).join('\n');
+  const totalBytes = Buffer.byteLength(full, 'utf8');
+  if (totalBytes <= OUTPUT_GUARD_BYTES) return;
+
+  // spill 全文（尽力而为）：文件名只留安全字符，防 callId 形态未知的路径注入
+  spillSeq += 1;
+  const safeCallId = callId.replace(/[^A-Za-z0-9_-]/g, '_');
+  const spillPath = `${tmpdir()}/spill-${safeCallId}-${spillSeq}.txt`;
+  let spilled = true;
+  try {
+    await writeFile(spillPath, full, 'utf8');
+  } catch {
+    spilled = false; // tmp 满等故障：截断照做，路径不承诺
+  }
+  const tail = tailBytes(Buffer.from(full, 'utf8'), OUTPUT_GUARD_BYTES);
+  const note = `\n\n[输出 ${totalBytes} 字节超 64KiB 上限，已保尾截断${spilled ? `；全文外溢至 ${spillPath}` : ''}]`;
+  result.content = [...result.content.filter((part) => part.type !== 'text'), { type: 'text', text: `${tail}${note}` }];
 }
 
 /**
@@ -130,7 +182,10 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
 
     /* ---- 第三段：后处理（可就地改写 result：裁剪/spill/usage） ---- */
     const postInput = { tool: def, args, callId: toolCallId, result };
-    await ctx.waterfall<undefined>(TOOL_POST_EXECUTE_EVENT, postInput, () => undefined);
+    await ctx.waterfall<undefined>(TOOL_POST_EXECUTE_EVENT, postInput, async () => {
+      // 链尾缺省 = 输出护栏（§3.1/§6.6：64KiB 保尾 + spill——管道属性，全部工具受益）
+      await applyDefaultOutputGuard(postInput.result, toolCallId);
+    });
     return postInput.result;
   };
 }

@@ -11,7 +11,7 @@
  * 注销器同时撤注册表条目（幂等）。
  */
 
-import { AppError, CONTEXT_SERVICE_NOT_FOUND, TOOL_DUPLICATE } from '../contracts/errors.js';
+import { AppError, CONTEXT_SERVICE_NOT_FOUND, TOOL_DESCRIPTION_REJECTED, TOOL_DUPLICATE } from '../contracts/errors.js';
 import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import type { Disposer } from '../context/types.js';
@@ -28,6 +28,25 @@ export interface ToolRegistryOptions {
 }
 
 /**
+ * v1 注入模式最小词表（契约篇 §3.2 描述扫描——2026-08-26 轮九 #27 修法）。
+ * 描述是进模型上下文的文本：`curl … | sh` 形态 = 让模型照描述执行任意下载，
+ * 是描述面执行漏洞（轮九实证：外部服务器描述原样注册即可被调）。
+ * 词表随真实生态扩充——规范只钉「注册面扫描」这个位置，不在此堆正则。
+ */
+const DESCRIPTION_INJECTION_PATTERNS: readonly RegExp[] = [/\b(curl|wget)\b[^\n|]*\|[^\n]*\b(ba|z|da)?sh\b/i];
+
+/**
+ * 扫描工具描述是否命中注入模式（注册面统一防线——任何来源的工具同一执法）。
+ * @returns 命中的模式串（用于错误归因）；干净描述返回 undefined
+ */
+export function scanToolDescription(description: string): string | undefined {
+  for (const pattern of DESCRIPTION_INJECTION_PATTERNS) {
+    if (pattern.test(description)) return pattern.source;
+  }
+  return undefined;
+}
+
+/**
  * 组装工具注册表并挂进 ctx（provide('tools')，随作用域回卷）。
  * app 装配层调用一次；插件作用域经 ctx.get 共享同一注册表。
  */
@@ -40,6 +59,15 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       if (tools.has(def.name)) {
         // 同名重复注册 = 装配冲突（两行注册同一工具），响亮失败不静默覆盖
         throw new AppError(TOOL_DUPLICATE, `工具重复注册：${def.name}`);
+      }
+      // 描述扫描（契约篇 §3.2，2026-08-26）：任何来源的工具同一防线——
+      // 第三方插件与 MCP 外部工具的风险同源，防线在树上不在枝上
+      const injectionHit = scanToolDescription(def.description);
+      if (injectionHit !== undefined) {
+        throw new AppError(
+          TOOL_DESCRIPTION_REJECTED,
+          `工具描述命中注入模式（/${injectionHit}/）：${def.name}——描述是进模型上下文的文本，拒绝注册`,
+        );
       }
       // 读写性归一（契约篇 §3.1，2026-08-24 第十一批）：未声明 effect 按 'write'
       // 保守处理——只读类守门策略不放过未声明工具（fail-closed 方向）。存归一副本，

@@ -103,6 +103,11 @@ export const TOOL_BLOCKED = registerErrorCode('TOOL_BLOCKED');
 export const TOOL_GATE_FAILED = registerErrorCode('TOOL_GATE_FAILED');
 /** tools：同名工具重复注册（注册表装配错误，响亮失败） */
 export const TOOL_DUPLICATE = registerErrorCode('TOOL_DUPLICATE');
+/** tools：工具描述命中注入模式拒绝注册（注册面描述扫描，契约篇 §3.2/§6.6——描述是进模型上下文的文本，管道进 shell 形态 = 描述面执行漏洞） */
+export const TOOL_DESCRIPTION_REJECTED = registerErrorCode('TOOL_DESCRIPTION_REJECTED');
+
+/** mcp：connect 期一码收口（spawn 失败/握手失败/startup 超时/相对路径 command——契约篇 §6.6；运行期服务器错误是数据不升 AppError） */
+export const MCP_CONNECT_FAILED = registerErrorCode('MCP_CONNECT_FAILED');
 
 /** prompts：具名提示词段 id 非法（须小写含 `/` 插件域前缀，如 `memory/core`——防撞宿主自留地；pi-4(a) 拍板，契约篇 §1.3 落码形态①） */
 export const PROMPT_SECTION_INVALID = registerErrorCode('PROMPT_SECTION_INVALID');

@@ -1,14 +1,17 @@
 /**
  * L2 tools 单元测试——三段管道全语义面：
- * 参数校验 / 守门（allow·mutate·block·fail-closed）/ 执行段（超时·接管）/ 后处理改写。
+ * 参数校验 / 守门（allow·mutate·block·fail-closed）/ 执行段（超时·接管）/ 后处理改写 /
+ * 输出护栏（64KiB 保尾截断 + spill——契约篇 §3.1，随 mcp 第一刀兑现，全部工具受益）。
  */
 
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { Type } from 'typebox';
 import { AppError, TOOL_ARGUMENTS_INVALID, TOOL_BLOCKED, TOOL_GATE_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
-import type { AgentToolResult, GateDecisionPayload, ToolDefinition } from '../contracts/tools.js';
+import type { AgentToolResult, GateDecisionPayload, TextContent, ToolDefinition } from '../contracts/tools.js';
 import { createContext } from '../context/index.js';
-import { createToolPipeline } from './pipeline.js';
+import { createToolPipeline, OUTPUT_GUARD_BYTES } from './pipeline.js';
 
 /** 标准测试工具：echo 回显 args（执行段真实跑到的证据） */
 function echoTool(overrides: Partial<ToolDefinition> = {}): ToolDefinition {
@@ -277,5 +280,102 @@ describe('createToolPipeline — 后处理段（tools_post_execute）', () => {
     const run = createToolPipeline(ctx, { onGateDecision: (d) => decisions.push(d) });
     await run(echoTool(), 'tc-7', { msg: 'hi' });
     expect(decisions).toEqual([{ toolCallId: 'tc-7', decision: 'allow', reason: 'ok' }]);
+  });
+});
+
+describe('createToolPipeline — 输出护栏（缺省链尾 64KiB，契约篇 §3.1/§6.6）', () => {
+  /** 产出指定全文文本的工具（execute 直返——护栏在链尾，对执行段产物执法） */
+  function bigOutputTool(text: string): ToolDefinition {
+    return {
+      name: 'flood',
+      description: '产出大文本',
+      parameters: Type.Object({}),
+      execute: async () => ({ content: [{ type: 'text', text }] }),
+    };
+  }
+
+  /** 清理本组用例落下的 spill 文件（callId 受控 → 文件名前缀可预测） */
+  function sweepSpills(callId: string): void {
+    const prefix = `spill-${callId.replace(/[^A-Za-z0-9_-]/g, '_')}-`;
+    for (const f of readdirSync(tmpdir())) {
+      if (f.startsWith(prefix)) rmSync(`${tmpdir()}/${f}`);
+    }
+  }
+
+  /** 取结果首块文本（护栏用例的断言面——经守卫收窄避开 ImageContent 分支） */
+  function firstText(result: AgentToolResult): string {
+    const part = result.content.find((p): p is TextContent => p.type === 'text');
+    return part?.text ?? '';
+  }
+
+  it('超预算：保尾截断 + spill 全文外溢 + 注记含总字节数与路径', async () => {
+    // 头部界标（前 12 字节）注定被截；尾部界标必须在保尾段里幸存
+    const full = `头部界标${'x'.repeat(66_560)}尾部界标`;
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx);
+    const result = await run(bigOutputTool(full), 'tc-guard-a', {});
+    const text = firstText(result);
+    // 头部被截（保尾方向——丢头留尾，错误信息通常在尾部）
+    expect(text).not.toContain('头部界标');
+    // 尾部幸存 + 截断注记（总字节数 + 外溢路径）
+    expect(text).toContain('尾部界标');
+    expect(text).toMatch(/超 64KiB 上限，已保尾截断；全文外溢至 .+spill-tc-guard-a-\d+\.txt/);
+    expect(text).toContain(`${Buffer.byteLength(full, 'utf8')} 字节`);
+    // spill 文件 = 原始全文（两头界标都在——截断只影响工具结果不影响外溢）
+    const spillName = readdirSync(tmpdir()).find((f) => f.startsWith('spill-tc-guard-a-'));
+    expect(spillName).toBeTruthy();
+    expect(readFileSync(`${tmpdir()}/${spillName}`, 'utf8')).toBe(full);
+    sweepSpills('tc-guard-a');
+  });
+
+  it('UTF-8 安全：截断点落在多字节字符中间则跳过被切字符（不产替换符）', async () => {
+    // 精确构造：totalBytes = 100 + 3 + 65534 = 65637，保尾起点 = 101——
+    // 恰好落在「中」（E4 B8 AD）的第 2 字节 B8（续字节）上。
+    // 纪律（与 exec 件 tailUtf8 同款）：起点跳过剩余续字节到下一字符边界——
+    // 被切字符整个丢弃（至多 3 字节损耗），解码不产 U+FFFD 乱码。
+    const full = `${'A'.repeat(100)}中${'B'.repeat(OUTPUT_GUARD_BYTES - 2)}`;
+    expect(Buffer.byteLength(full, 'utf8')).toBe(65_637); // 构造自检（改动护栏常量时此处先红）
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx);
+    const result = await run(bigOutputTool(full), 'tc-guard-b', {});
+    const text = firstText(result);
+    // 若不跳续字节：B8 AD 起头会解码成替换符——此断言即红
+    expect(text.startsWith('B')).toBe(true);
+    // 全文解码无替换符（护栏产出的必须是合法 UTF-8 文本）
+    expect(text).not.toContain('�');
+    sweepSpills('tc-guard-b');
+  });
+
+  it('预算内：原样返回（无注记、无 spill 文件）', async () => {
+    const full = '可控输出'.repeat(100); // 1200 字节，远低于预算
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx);
+    const result = await run(bigOutputTool(full), 'tc-guard-c', {});
+    expect(result.content).toEqual([{ type: 'text', text: full }]);
+    expect(readdirSync(tmpdir()).some((f) => f.startsWith('spill-tc-guard-c-'))).toBe(false);
+  });
+
+  it('远端形态 JSON Schema（MCP inputSchema 直传，非 typebox 构造）：前置步照拦照放', async () => {
+    // MCP 工具的 parameters 来自外部服务器声明——纯 JSON 对象（无 typebox 符号面）。
+    // 管道护栏对任何来源的 schema 同一执法：非法参数在守门段之前即拒。
+    const remoteSchema = {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+    } as unknown as ToolDefinition['parameters'];
+    const tool: ToolDefinition = {
+      name: 'mcp__demo__read',
+      description: '远端工具',
+      parameters: remoteSchema,
+      execute: async (args) => ({ content: [{ type: 'text', text: `读到 ${(args as { path: string }).path}` }] }),
+    };
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx);
+    // 非法（类型违远端声明）→ 前置步 TOOL_ARGUMENTS_INVALID，不触执行段
+    const err = await run(tool, 'tc-1', { path: 123 }).catch((e) => e);
+    expect(codeOf(err)).toBe(TOOL_ARGUMENTS_INVALID);
+    // 合法 → 直通执行
+    const ok = await run(tool, 'tc-2', { path: '/etc/hosts' });
+    expect(ok.content[0]).toMatchObject({ text: '读到 /etc/hosts' });
   });
 });

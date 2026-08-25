@@ -67,6 +67,8 @@ import { createPathsService, loadComposition, type CompositionReport } from './c
 import { loadOfficialApps, assertAppComponents } from './app-registry.js';
 import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
+import { createMcpSpawner } from './mcp-spawn.js';
+import { killTree } from '../exec/index.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createTickRunner } from './scheduler-runner.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
@@ -636,8 +638,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       isAgentBusy: () => driverRef.current?.isRunning ?? false,
       lastUserMessageAt,
     },
-    ...(persistence ? { store: persistence.store } : {}),
-    ...(persistence ? { goalConnection: persistence.store.connection } : {}),
+    // mcp 件闭包（契约篇 §6.6 冷读 #1：spawn/kill 组装上提组合根——
+    // spawnServer 在 app/mcp-spawn.ts，killTree 自 exec 公开面；登记簿根
+    // 钉数据目录，与 overlay 同根不随会话漂移）
+    mcpDeps: {
+      spawnServer: createMcpSpawner(dataDir()),
+      killTree,
+      dataDir: dataDir(),
+    },
     workspace: () => workspace,
     subagentFactory: createSubagentChildFactory({
       ...(persistence ? { persistence } : {}),

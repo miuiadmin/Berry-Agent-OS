@@ -13,6 +13,8 @@ import type { RuntimeOptions } from './assembly.js';
 import { loadComposition, OVERLAY_FILENAME, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
+import { createMcpSpawner } from './mcp-spawn.js';
+import { killTree } from '../exec/index.js';
 import type { PluginStatusRow } from './composition.js';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { dataDir } from './paths.js';
@@ -126,6 +128,13 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
                 chat: {
                   name: 'chat',
                   apply: async () => undefined,
+                },
+                // mcp 件闭包同构（构造零副作用——spawner 只返回闭包不 spawn；
+                // 诊断面 apply 永不跑，登记簿/子进程均不触）
+                mcpDeps: {
+                  spawnServer: createMcpSpawner(dataDir()),
+                  killTree,
+                  dataDir: dataDir(),
                 },
               }),
             ),

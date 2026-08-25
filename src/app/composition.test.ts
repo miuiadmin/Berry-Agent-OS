@@ -35,8 +35,8 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行——契约篇 §5.1/§5.4） */
-const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler']);
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行——契约篇 §5.1/§5.4/§6.6） */
+const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp']);
 
 /**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
@@ -57,17 +57,18 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层五行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
-    // subagent 第三行 + goal 第四行 + scheduler 第五行（tick 第一刀——契约篇 §5.1/§5.4）
-    // ——无注册表解析 = unresolved（诊断诚实）
+    // 官方默认层六行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行（客户端桥
+    // 第一刀——契约篇 §5.1/§5.4/§6.6）——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
       { id: 'memory', plugin: 'builtin:memory' },
       { id: 'subagent', plugin: 'builtin:subagent' },
       { id: 'goal', plugin: 'builtin:goal' },
       { id: 'scheduler', plugin: 'builtin:scheduler' },
+      { id: 'mcp', plugin: 'builtin:mcp' },
     ]);
-    expect(report.plan).toHaveLength(5);
+    expect(report.plan).toHaveLength(6);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -78,6 +79,8 @@ describe('overlay 装载与拒绝式校验', () => {
     expect(report.plan[3]!.unresolved).toContain('保留前缀');
     expect(report.plan[4]!.id).toBe('scheduler');
     expect(report.plan[4]!.unresolved).toContain('保留前缀');
+    expect(report.plan[5]!.id).toBe('mcp');
+    expect(report.plan[5]!.unresolved).toContain('保留前缀');
     // 用户层为空
     expect(loadUserComposition(dataDir)).toEqual({ rows: [], plan: [] });
   });
@@ -315,17 +318,19 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    // 默认层五键全给（chat/subagent/goal/scheduler 行同解析——不带 config 的纯净形态对照）
+    // 默认层六键全给（chat/subagent/goal/scheduler/mcp 行同解析——不带 config 的纯净形态对照）
     const stubChat = { name: 'chat-stub', apply: async () => {} };
     const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
     const stubGoal = { name: 'goal-stub', apply: async () => {} };
     const stubScheduler = { name: 'scheduler-stub', apply: async () => {} };
+    const stubMcp = { name: 'mcp-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
       'builtin:subagent': stubSubagent,
       'builtin:goal': stubGoal,
       'builtin:scheduler': stubScheduler,
+      'builtin:mcp': stubMcp,
     });
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -333,6 +338,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'subagent', plugin: 'builtin:subagent' },
       { id: 'goal', plugin: 'builtin:goal' },
       { id: 'scheduler', plugin: 'builtin:scheduler' },
+      { id: 'mcp', plugin: 'builtin:mcp' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', builtin: stubChat },
@@ -340,6 +346,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'subagent', builtin: stubSubagent },
       { id: 'goal', builtin: stubGoal },
       { id: 'scheduler', builtin: stubScheduler },
+      { id: 'mcp', builtin: stubMcp },
     ]);
   });
 

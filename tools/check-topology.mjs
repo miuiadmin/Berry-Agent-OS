@@ -37,7 +37,9 @@ const MODULE_EDGES = {
   // bash def 在组合根注册，检索族双装配点先例）
   exec: ['contracts', 'context', 'safety', 'tools'],
   scheduler: ['contracts', 'context', 'persist'],
-  mcp: ['contracts', 'context', 'tools'],
+  // mcp = stdio-only 客户端桥（2026-08-26 第一刀，契约篇 §6.6）：spawn/kill 经
+  // 组合根闭包注入（app/mcp-spawn.ts）——结构上不见 exec/tools（冷读 #1）
+  mcp: ['contracts', 'context'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
   channels: ['contracts', 'context', 'agent'],
   app: [

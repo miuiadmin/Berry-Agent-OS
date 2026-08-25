@@ -18,6 +18,8 @@ import { createMemoryPlugin, type MemoryPluginStoreFace, migrations as memoryMig
 import { createGoalPlugin, migrations as goalMigrations } from '../goal/index.js';
 import { createSchedulerPlugin, migrations as schedulerMigrations } from '../scheduler/index.js';
 import type { SchedulerPluginDeps } from '../scheduler/index.js';
+import { createMcpPlugin } from '../mcp/index.js';
+import type { McpPluginDeps } from '../mcp/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
@@ -33,6 +35,8 @@ export interface BuiltinRegistryOptions {
   readonly goalConnection?: DatabaseConnection;
   /** scheduler 件闭包依赖束（gate 判据 + runner——组合根活资源，席 13 第一刀；connection 由 goalConnection 同源注入不在此列） */
   readonly schedulerDeps?: Omit<SchedulerPluginDeps, 'connection'>;
+  /** mcp 件闭包依赖束（spawnServer 组装 = app/mcp-spawn.ts 产物 + exec killTree + 数据目录——契约篇 §6.6 冷读 #1 上提组合根） */
+  readonly mcpDeps: McpPluginDeps;
   /** 工作区根（项目归属键活取值） */
   readonly workspace: () => string;
   /** in-process 真工厂（subagent 官方件闭包注入——app/subagent-factory.ts 产物） */
@@ -91,6 +95,10 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
           }),
         }
       : {}),
+    // mcp 官方件（官方默认层第六行，stdio-only 客户端桥第一刀——契约篇 §6.6）：
+    // spawn/kill 经闭包注入（组合根 app/mcp-spawn.ts——mcp 结构上不见 exec）；
+    // servers 空时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）
+    'builtin:mcp': createMcpPlugin(opts.mcpDeps),
   };
 }
 

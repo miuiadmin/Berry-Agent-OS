@@ -108,8 +108,11 @@ function tailUtf8(buf: Buffer, maxBytes: number): string {
  * 按进程组纪律终结进程树（骨架篇 §7.6 进程组纪律，pi-7）：
  * POSIX 用 killpg 负 pid（spawn 时 detached 建组）；Windows 用 taskkill /T。
  * 失败静默（进程可能已退出——close 事件自会结算）。
+ *
+ * 2026-08-26 导出（mcp 第一刀冷读 #1 裁决）：调用方 = 组合根闭包
+ * （app/mcp-spawn.ts——mcp 件经闭包收 killTree，结构上不见 exec）。
  */
-function killTree(pid: number | undefined, childPidAlive: () => boolean): void {
+export function killTree(pid: number | undefined, childPidAlive: () => boolean): void {
   if (pid === undefined) return;
   if (process.platform === 'win32') {
     // Windows：按树终结（/T 含子进程；/F 强制——超时路径不Graceful）
