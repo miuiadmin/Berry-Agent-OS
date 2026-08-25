@@ -189,6 +189,20 @@ describe('createBerryRuntime 装配面', () => {
     // 未注册词汇：session.append 二道闸（注册即写入许可）
     expect(() => sessions.appendEvent('nope/void', {})).toThrowError(/未知事件类型/);
 
+    // #19 收口回归锁（插件面钥匙——2026-08-25 Hermes 探针收口）：作用域经
+    // ctx.registerSessionEventType 注册自有词汇 → appendEvent 即可写（此前第三方
+    // 写任何自有词汇必撞「未知事件类型」——有门没钥匙）；核心词在注册侧先拦；
+    // 作用域 dispose → 词汇随插件卸载回卷（/reload 重装重注册语义），写侧恢复拒绝
+    const scope = runtime.ctx.fork({ name: 't-plugin' });
+    expect(() => scope.registerSessionEventType({ type: 'user/message', category: 'surface' })).toThrowError(
+      /核心事件类型/,
+    );
+    scope.registerSessionEventType({ type: 't-probe/note', category: 'log-only' });
+    const noted = sessions.appendEvent('t-probe/note', { text: '探针' })!;
+    expect(noted.type).toBe('t-probe/note');
+    await scope.dispose();
+    expect(() => sessions.appendEvent('t-probe/note', {})).toThrowError(/未知事件类型/);
+
     // persist:false：服务仍 provide（inject 硬依赖，缺供即启动断言）但无会话 → undefined 降级
     const bare = await assemble({ persist: false });
     const bareSessions = bare.ctx.tryGet<{ appendEvent(t: string, d: unknown): SessionEvent | undefined }>('sessions')!;

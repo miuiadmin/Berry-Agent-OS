@@ -16,6 +16,7 @@
 import type { TSchema } from './typebox.js';
 import type { LiveEventDefinition } from './events.js';
 import type { MessageRoleDefinition } from './messages.js';
+import type { SessionEventTypeDefinition } from './session-events.js';
 
 /**
  * 插件面 logger 最小结构（context.Logger 的结构子集——contracts 零依赖层
@@ -72,6 +73,14 @@ export interface PluginContext {
    * 纪律）；返回值供提前手动注销。官方件同走此面（官方非特权）。
    */
   registerMessageRole(name: string, definition: MessageRoleDefinition): () => void;
+  /**
+   * 注册插件自有会话事件词汇（会话篇 §2.1——appendEvent 的钥匙）：type 小写
+   * 斜线式 `<域>/<动作>`；核心词拒注册 SESSION_CORE_TYPE_FORBIDDEN（内核词
+   * 写入权属宿主）；surface 类别词汇负有投影折叠形态声明义务（v1 规范钉死）。
+   * 挂作用域 effect 栈随卸载自动回卷（/reload 重装重注册）；返回值供提前
+   * 手动注销。注册成功后 ctx.sessions.appendEvent(type, data) 即可写。
+   */
+  registerSessionEventType(def: SessionEventTypeDefinition): () => void;
   /** 本作用域配置视图（只读快照；组合树行 config 经插件 schema 校验后冻结） */
   readonly config: Readonly<Record<string, unknown>>;
   /** 带作用域前缀的子 logger */

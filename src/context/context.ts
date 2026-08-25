@@ -20,6 +20,8 @@ import { LIVE_EVENT_CATALOG } from '../contracts/events.js';
 import type { EventName, LiveEventDefinition } from '../contracts/events.js';
 import { registerPluginMessageRole } from '../contracts/messages.js';
 import type { MessageRoleDefinition } from '../contracts/messages.js';
+import { registerPluginSessionEventType } from '../contracts/session-events.js';
+import type { SessionEventTypeDefinition } from '../contracts/session-events.js';
 import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
 import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
@@ -291,6 +293,17 @@ class ContextScopeImpl implements ContextScope {
   registerMessageRole(name: string, definition: MessageRoleDefinition): Disposer {
     this.assertActive();
     return this.pushEffect(registerPluginMessageRole(name, definition));
+  }
+
+  /**
+   * 注册插件自有会话事件词汇（会话篇 §2.1 插件面，#19 收口）：桥接 contracts
+   * 注册表（核心词拒绝/格式校验在彼处），注销器挂本作用域 effect 栈——/reload
+   * 卸载即词汇随插件回卷、重装重注册（与 registerMessageRole 同款安全：
+   * jiti moduleCache:false 下裸模块级注册会撞重复注册，插件面必须作用域化）。
+   */
+  registerSessionEventType(def: SessionEventTypeDefinition): Disposer {
+    this.assertActive();
+    return this.pushEffect(registerPluginSessionEventType(def));
   }
 
   fork(opts: { name: string; config?: Record<string, unknown> }): ContextScope {

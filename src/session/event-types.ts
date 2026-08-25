@@ -1,72 +1,27 @@
 /**
- * L1 session — durable 事件类型注册表（会话篇 §1.1 核心事件词汇）。
+ * L1 session — durable 事件类型：核心词汇 data 载荷类型 + 注册表再导出。
  *
- * 与错误码同纪律（内核篇 §5.3）：词汇显式注册、运行时可枚举、CI 可校验。
- * 核心清单之外，插件可经 registerSessionEventType 显式注册扩展类型——
- * 未知类型且非 ignorable，读侧整体拒绝（SESSION_FORMAT_UNSUPPORTED）。
+ * 2026-08-25 Hermes 探针 #19 收口（会话篇 §2.1 落码注记）：注册表与
+ * SessionEventTypeDefinition 单一来源已迁 contracts/session-events.ts
+ * （berryagent 虚拟面随之可取——第三方经 ctx.registerSessionEventType 注册
+ * 自有词汇）。本文件保留：
+ * - 核心事件词汇的 data 载荷接口（session 模块内部消费面：session/derive/
+ *   recover 与 persist/chat 的载荷引用——载荷形状是会话模块的知识，不迁）；
+ * - 注册表函数与类型的再导出（session/index.ts 及既有消费面零改动——
+ *   check-events.mjs 对本文件的 jiti 导入路径不变）。
  */
 
-import { AppError } from '../contracts/errors.js';
+export {
+  registerSessionEventType,
+  registerPluginSessionEventType,
+  getSessionEventType,
+  listSessionEventTypes,
+  isCoreSessionEventType,
+  CORE_EVENT_TYPES,
+} from '../contracts/session-events.js';
+export type { SessionEventTypeDefinition, SessionEventCategory } from '../contracts/session-events.js';
+
 import type { MessageSource } from '../contracts/llm.js';
-
-/** 事件类别三分法（会话篇 §1.1）：决定事件在投影/存储分层中的处理方式 */
-export type SessionEventCategory =
-  /** 表面事件：构成派生表面（模型历史投影输入）——user/message、assistant/message、tool/call、tool/result、todo/write */
-  | 'surface'
-  /** 快照事件：组装参数变化时整体重写（request/header） */
-  | 'snapshot'
-  /** log-only：落日志即目的（不进表面推导）——approval/*、gate/decision、sandbox/mode、llm/usage，以及 turn 边界与种子标记等结构事件 */
-  | 'log-only';
-
-/** 事件类型注册项 */
-export interface SessionEventTypeDefinition {
-  /** 事件类型词汇，小写斜线式 `<域>/<动作>` */
-  readonly type: string;
-  /** 类别三分法归属 */
-  readonly category: SessionEventCategory;
-  /** true = 读侧可以不认识此类型（向前兼容）；缺省 false = 未知即整体拒绝 */
-  readonly ignorable?: boolean;
-  /**
-   * 预留词汇：当前无宿主写点、但属已拍板词汇表的预留项（如 todo/write——
-   * 随 M2+ 工作台三件落码）。check-events「每目录项 ≥1 写点」方向据此
-   * 显式豁免（契约篇 §6.3 第 4 条落码注记）——豁免必须声明，不静默。
-   */
-  readonly reserved?: boolean;
-}
-
-/** 类型词汇格式：小写字母/数字/连字符段，至少一个斜线分隔（`<域>/<动作>`） */
-const TYPE_FORMAT = /^[a-z][a-z0-9-]*(\/[a-z][a-z0-9-]*)+$/;
-
-/** 已注册事件类型表（type → 定义） */
-const registry = new Map<string, SessionEventTypeDefinition>();
-
-/**
- * 注册一个事件类型（插件扩展入口；核心清单在下方模块加载时已全量注册）。
- * 重复注册或格式非法直接抛错——事件词汇必须在装配期钉死，不留运行时漂移。
- */
-export function registerSessionEventType(def: SessionEventTypeDefinition): void {
-  if (!TYPE_FORMAT.test(def.type)) {
-    throw new AppError('SESSION_FORMAT_UNSUPPORTED', `事件类型格式非法：${def.type}（应为小写斜线式 <域>/<动作>）`);
-  }
-  if (registry.has(def.type)) {
-    throw new AppError('SESSION_FORMAT_UNSUPPORTED', `事件类型重复注册：${def.type}`);
-  }
-  registry.set(def.type, def);
-}
-
-/** 查询类型定义；未注册返回 undefined（调用方按 ignorable 语义决定拒绝与否） */
-export function getSessionEventType(type: string): SessionEventTypeDefinition | undefined {
-  return registry.get(type);
-}
-
-/** 枚举全部已注册事件类型（CI 校验 / 诊断输出用） */
-export function listSessionEventTypes(): SessionEventTypeDefinition[] {
-  return [...registry.values()].sort((a, b) => a.type.localeCompare(b.type));
-}
-
-/* ------------------------------------------------------------------ */
-/* 核心事件词汇 data 载荷类型（字段出处：会话篇 §1.1）                  */
-/* ------------------------------------------------------------------ */
 
 /** turn/end 终态枚举（三套终态枚举的会话层之锚） */
 export type TurnEndReason = 'completed' | 'aborted' | 'blocked' | 'error' | 'max-tokens' | 'interrupted';
@@ -159,33 +114,4 @@ export interface LlmUsageData {
   readonly priority: 'background' | 'foreground';
   /** 原始用量（in/out token 数——聚合 SUM(input+output)） */
   readonly usage: { readonly input: number; readonly output: number };
-}
-
-/* ------------------------------------------------------------------ */
-/* 核心清单（首批 14 类，模块加载时注册）                                */
-/* ------------------------------------------------------------------ */
-
-/**
- * 核心事件类型词汇。类别归属依据会话篇 §1.1 三分法；turn/start、turn/end、
- * session/end-seed 属结构标记（不进表面推导），归 log-only。
- */
-export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
-  { type: 'turn/start', category: 'log-only' },
-  { type: 'turn/end', category: 'log-only' },
-  { type: 'user/message', category: 'surface' },
-  { type: 'assistant/message', category: 'surface' },
-  { type: 'tool/call', category: 'surface' },
-  { type: 'tool/result', category: 'surface' },
-  { type: 'todo/write', category: 'surface', reserved: true },
-  { type: 'request/header', category: 'snapshot' },
-  { type: 'session/end-seed', category: 'log-only' },
-  { type: 'approval/asked', category: 'log-only' },
-  { type: 'approval/decided', category: 'log-only' },
-  { type: 'gate/decision', category: 'log-only' },
-  { type: 'sandbox/mode', category: 'log-only' },
-  { type: 'llm/usage', category: 'log-only' },
-];
-
-for (const def of CORE_EVENT_TYPES) {
-  registerSessionEventType(def);
 }

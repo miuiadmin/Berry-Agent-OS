@@ -18,7 +18,9 @@
 
 import { createHash } from 'node:crypto';
 import type { SessionEvent } from '../contracts/events.js';
-import { registerSessionEventType } from '../session/event-types.js';
+// 词汇注册宿主面直调 contracts 单一来源（2026-08-25 #19 收口随迁；官方件随包
+// 代码模块顶层注册，组合无关——旧日志可读性不随组合树行装载漂移）
+import { registerSessionEventType } from '../contracts/session-events.js';
 import type { MemoryStore } from './store.js';
 import type { MemoryKind } from './store.js';
 import { shortIdOf } from './id.js';

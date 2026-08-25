@@ -56,7 +56,7 @@ import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
-import { CORE_EVENT_TYPES } from '../session/event-types.js';
+import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { SESSION_CORE_TYPE_FORBIDDEN } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { createDurableSinks, CHAT_APP_ID } from '../chat/index.js';
@@ -414,7 +414,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 即启动断言拒启。 */
   ctx.provide('sessions', {
     appendEvent: (type: string, data: unknown): SessionEvent | undefined => {
-      if (CORE_EVENT_TYPES.some((def) => def.type === type)) {
+      // 核心词判据单一来源（contracts——注册侧同尺，两道闸一道判据）
+      if (isCoreSessionEventType(type)) {
         throw new AppError(
           SESSION_CORE_TYPE_FORBIDDEN,
           `核心事件词汇不允许插件经 ctx.sessions.appendEvent 写入：${type}（内核词写入权属宿主，插件请注册自有词汇）`,

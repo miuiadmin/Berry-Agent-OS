@@ -6,6 +6,7 @@
  */
 import type { EventName } from '../contracts/events.js';
 import type { MessageRoleDefinition } from '../contracts/messages.js';
+import type { SessionEventTypeDefinition } from '../contracts/session-events.js';
 import type { Logger } from './logger.js';
 
 /** 清理函数：effect / on / provide 的返回值，调用即回卷该注册 */
@@ -60,6 +61,14 @@ export interface Context {
    * registerHostMessageRole 直调，不经本面。
    */
   registerMessageRole(name: string, definition: MessageRoleDefinition): Disposer;
+  /**
+   * 注册插件自有会话事件词汇（会话篇 §2.1 插件面——ctx.sessions.appendEvent
+   * 的钥匙，2026-08-25 Hermes 探针 #19 收口）：核心词拒注册
+   * SESSION_CORE_TYPE_FORBIDDEN；挂作用域 effect 栈随卸载回卷（与
+   * registerMessageRole 同纪律）。宿主面 registerSessionEventType 模块级
+   * 直调（官方件随包代码，组合无关），不经本面。
+   */
+  registerSessionEventType(def: SessionEventTypeDefinition): Disposer;
   /** 本作用域配置视图（只读快照；组合树解析产物） */
   readonly config: Readonly<Record<string, unknown>>;
   /** 带作用域前缀的子 logger */
