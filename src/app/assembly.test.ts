@@ -38,7 +38,7 @@ import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
 import { dumpConfigMain } from './dump-config.js';
-import { PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
+import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -845,7 +845,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     const runtime = await assemble({ streamFn, compositionDir });
 
     // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent/
-    // goal 三行 + scheduler 第五行 + mcp 第六行 + overlay tool-plugin 行均
+    // goal 三行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化——
+    // boot 于 ring1Anchor 装载、状态同面可见〕 + overlay tool-plugin 行均
     // activated——list 状态行序 = 组合树序）
     expect(runtime.plugins.list()).toEqual([
       { id: 'chat', status: 'activated', name: 'chat' },
@@ -854,6 +855,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       { id: 'goal', status: 'activated', name: 'goal' },
       { id: 'scheduler', status: 'activated', name: 'scheduler' },
       { id: 'mcp', status: 'activated', name: 'mcp' },
+      { id: 'tools', status: 'activated', name: 'tools' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
@@ -865,6 +867,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'goal',
       'scheduler',
       'mcp',
+      'tools',
       'tool-plugin',
     ]);
     // 插件工具已进注册表（fs 四件 + memory 五件 + agent + goal 三件之后）
@@ -1139,6 +1142,7 @@ describe('/reload 组合树重载', () => {
       ['goal', 'activated'],
       ['scheduler', 'activated'],
       ['mcp', 'activated'],
+      ['tools', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -1302,9 +1306,84 @@ describe('/reload 组合树重载', () => {
       ['goal', 'activated'],
       ['scheduler', 'activated'],
       ['mcp', 'activated'],
+      ['tools', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
+  });
+});
+
+/* ---------------- Ring 1 行树化（tools 第七行——契约篇 §5.1 节奏表落码） ---------------- */
+
+describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义', () => {
+  it('boot 拒启：overlay 禁用 tools 行 → COMPOSITION_ROW_INVALID 聚合清单（拒启先收尾持久层再回卷）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-ring1-')));
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: tools\n    disabled: true\n');
+    const { streamFn } = scriptedStream([textMessage('不会到这')]);
+    // 拒启面手动 try/catch（assemble 助手只登记成功面——失败面无 runtimes 可收）
+    const err = await createBerryRuntime({
+      dbPath: ':memory:',
+      workspace: makeWorkspace(),
+      compositionDir,
+      streamFn,
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(AppError);
+    expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+    expect((err as AppError).message).toContain('Ring 1 必备行断言失败');
+    expect((err as AppError).message).toContain('tools');
+    expect((err as AppError).message).toContain('替换行引用'); // 拒启事实带修法指引
+  });
+
+  it('/reload Ring 1 行变更：载荷报告 ring1RestartRequired + tools 服务不回卷（同实例同工具面）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-ring1-reload-')));
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    const toolsBefore = runtime.ctx.get<{}>('tools');
+    const namesBefore = runtime.tools.list().map((t) => t.name);
+    const reloadedPayloads: unknown[] = [];
+    runtime.ctx.on('composition/reloaded', (payload: unknown) => {
+      reloadedPayloads.push(payload);
+    });
+
+    // overlay 给 tools 行加 config——行合成字段变化（Ring 1 行仅 boot 生效）
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: tools\n    config: { maxBytes: 1 }\n');
+    const result = await runtime.reload();
+
+    // 报告面：ring1RestartRequired 点名 tools；activated 清单不含 tools（Ring 2 重装载面）
+    expect(result.payload).toMatchObject({ ring1RestartRequired: ['tools'] });
+    expect(result.payload?.activated).not.toContain('tools');
+    expect(reloadedPayloads).toEqual([
+      {
+        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp'],
+        failed: [],
+        skipped: [],
+        ring1RestartRequired: ['tools'],
+      },
+    ]);
+    // 不回卷语义：ring1Anchor 不在 reload dispose 面——tools 服务同一实例、工具面原样
+    expect(runtime.ctx.get('tools')).toBe(toolsBefore);
+    expect(runtime.tools.list().map((t) => t.name)).toEqual(namesBefore);
+    // 行状态面：tools 行仍 activated（沿用 boot 装载结果 = 运行时真值）
+    expect(runtime.plugins.list().find((r) => r.id === 'tools')).toMatchObject({ status: 'activated' });
+  });
+
+  it('对照面：/reload 无 Ring 1 行变更 → 载荷不带 ring1RestartRequired 字段（不虚报）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-ring1-noop-')));
+    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n`);
+    const { streamFn } = scriptedStream([textMessage('答'), textMessage('答')]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    const reloadedPayloads: unknown[] = [];
+    runtime.ctx.on('composition/reloaded', (payload: unknown) => {
+      reloadedPayloads.push(payload);
+    });
+
+    const result = await runtime.reload();
+    expect('ring1RestartRequired' in (result.payload ?? {})).toBe(false);
+    expect(reloadedPayloads[0]).not.toHaveProperty('ring1RestartRequired');
   });
 });
 

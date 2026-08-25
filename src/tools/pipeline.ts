@@ -31,9 +31,14 @@ import type {
   TextContent,
   ToolCtx,
   ToolDefinition,
+  ToolPipelineExecutor,
   ToolUpdateCallback,
 } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
+
+// 类型真身已安家 contracts（Ring 1 行树化批——服务面 executor 携带，宿主消费方
+// 只依赖契约层）；此处再导出维持本模块既有导入面
+export type { ToolPipelineExecutor } from '../contracts/tools.js';
 
 /** 管道选项（createToolPipeline 一次性注入，app 装配层负责） */
 export interface ToolPipelineOptions {
@@ -42,15 +47,6 @@ export interface ToolPipelineOptions {
   /** 默认执行预算毫秒（缺省 60s；def.timeoutMs 逐工具覆盖；0 = 不设预算） */
   defaultTimeoutMs?: number;
 }
-
-/** 管道执行器：包装一个 ToolDefinition 的执行全路径 */
-export type ToolPipelineExecutor = (
-  def: ToolDefinition,
-  toolCallId: string,
-  args: Record<string, unknown>,
-  signal?: AbortSignal,
-  onUpdate?: ToolUpdateCallback,
-) => Promise<AgentToolResult>;
 
 /** 组装 `[CODE] message` 形态的错误文本（码随 message 进入工具结果） */
 function codedMessage(code: string, message: string): string {

@@ -166,6 +166,16 @@ describe('registerToolsService — AgentTool 适配（执行必经管道）', ()
     expect((err as AppError).code).toBe(CONTEXT_SERVICE_NOT_FOUND);
   });
 
+  it('executor 服务面反射（Ring 1 行树化批）：装配即暴露管道本体、缺省 undefined——bash 与 ctx.exec 同源的单一事实点', () => {
+    // 无管道诊断形态：executor = undefined（组合根据此拒启不带管道的替换件实现）
+    const bare = createContext({ name: 'test' });
+    expect(registerToolsService(bare).executor).toBeUndefined();
+    // 装配形态：服务携带 executor = 同一管道函数（引用同一——换管道换全套）
+    const withPipe = createContext({ name: 'test' });
+    const pipeline = createToolPipeline(withPipe);
+    expect(registerToolsService(withPipe, { pipeline }).executor).toBe(pipeline);
+  });
+
   it('适配器透传 name/description/label/parameters（loop 面字段齐全）', () => {
     const ctx = createContext({ name: 'test' });
     const tools = registerToolsService(ctx);

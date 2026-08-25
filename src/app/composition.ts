@@ -32,13 +32,17 @@ export const OVERLAY_FILENAME = 'overlay.yaml';
 export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>>;
 
 /**
- * 官方默认层四行现状（契约篇 §5.1 落码注记随铭牌批更新）：chat（首行，对话
- * 应用件）/ memory / subagent / goal——均 Ring 2 真·可卸（overlay 可禁用，
- * 卸掉仅失对应能力，核心循环不破）。Ring 0 内核不进组合树；Ring 1 底座当前
- * 仍为组合根硬装配（行树化随 exec 纵切批落，seam——第十六批题五终态宣言）。
+ * 官方默认层行集现状（契约篇 §5.1 落码注记随铭牌批更新）：chat（首行，对话
+ * 应用件）/ memory / subagent / goal / scheduler / mcp——均 Ring 2 真·可卸
+ * （overlay 可禁用，卸掉仅失对应能力，核心循环不破）；tools（第七行）=
+ * Ring 1 行树化起算行（2026-08-26 契约篇 §5.1 节奏表第一刀）——**Ring 1
+ * 必备行**，overlay 禁用即启动断言拒启（缺它核心循环必破，非可卸）。Ring 0
+ * 内核不进组合树；Ring 1 其余行（channels/skills/llm/persist/safety 策略行）
+ * 仍为组合根硬装配，随各自纵切逐行入列。
  */
 // 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：chat 首行 + memory/subagent/goal/
-// scheduler/mcp 顺移（均非 fixed——overlay 可卸/可禁，卸掉仅失对应能力，核心循环不破）
+// scheduler/mcp 顺移 + tools（Ring 1 行树化起算行——行序是展示/装载叙事，Ring
+// 归属不依行序：Ring 1 行经宿主装配期独立锚装载，装载序由 inject 驱动 Kahn）
 const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 首行 = chat 对话应用件（契约篇 §5.4 应用面第一纵切）：对话是应用不是内核
   //（命题 §3.5）——Ring 2 真·可卸，overlay 禁用即首启无对话循环、宿主照启
@@ -52,7 +56,95 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 第六行 = mcp 客户端桥（契约篇 §6.6 第一刀，stdio-only）：外部工具生态接
   // 入——servers 空时惰性无害；卸掉即无 MCP 外部工具，核心循环不破
   { id: 'mcp', plugin: 'builtin:mcp' },
+  // 第七行 = tools 行（Ring 1 行树化起算，2026-08-26 契约篇 §5.1 节奏表）：
+  // 三段管道 + ctx.tools 服务 + fs/检索工具族入列——Ring 1 必备行非可卸
+  //（启动断言第二断言类；缺省层替换语义：overlay 可换实现引用不可禁用）
+  { id: 'tools', plugin: 'builtin:tools' },
 ];
+
+/**
+ * Ring 1 必备行 id 清单（契约篇 §5.1 行树化批「第二断言类」——tools 行起算，
+ * 后续行树化纵切逐行累加：channels/skills/llm/persist/safety 策略行）。
+ * 判据：卸掉该行首启核心循环「问→做→守→存」必破 = Ring 1（内核边界篇 §5.1
+ * 一句话判据在装载面的投影）；fixed 词条不动（其定义 = 安全栈强制点行）。
+ */
+export const RING1_REQUIRED_ROW_IDS: readonly string[] = ['tools'];
+
+/** Ring 1 必备行断言违规（启动拒绝的事实清单——missing/disabled/platform/unresolved） */
+export interface Ring1Violation {
+  /** 组合树行 id */
+  readonly id: string;
+  /** 违规类别：行缺失（结构性）/ overlay 禁用 / 平台门控 / 引用解析失败 */
+  readonly kind: 'missing' | 'disabled' | 'platform' | 'unresolved';
+  /** 人读事实（拒启清单逐行打印） */
+  readonly detail: string;
+}
+
+/**
+ * Ring 1 必备行断言（契约篇 §5.1 行树化批钉死的「第二断言类」——现码第一类
+ * 断言只查 failed 行、skipped 静默，本断言补 Ring 1 面）：overlay 禁用/平台
+ * 门控/行缺失/引用解析失败一律拒启。纯函数返回违规全集（调用方格式化与收尾
+ * 拒启——组合根 refuseBoot 先 flush/close 持久层再回卷 ctx）。
+ */
+export function assertRing1Required(report: CompositionReport): readonly Ring1Violation[] {
+  const violations: Ring1Violation[] = [];
+  for (const id of RING1_REQUIRED_ROW_IDS) {
+    const row = report.rows.find((candidate) => candidate.id === id);
+    if (row === undefined) {
+      violations.push({
+        id,
+        kind: 'missing',
+        detail: '组合树无此行（官方默认层缺失——结构性错误，Ring 1 必备行不可抹除）',
+      });
+      continue;
+    }
+    const planRow = report.plan.find((candidate) => candidate.id === id);
+    if (planRow?.skip === 'disabled') {
+      violations.push({
+        id,
+        kind: 'disabled',
+        detail:
+          'Ring 1 必备行被 overlay 禁用——卸掉它首启核心循环必破（契约篇 §5.1 行树化批）；如需换实现请替换行引用而非禁用',
+      });
+      continue;
+    }
+    if (planRow?.skip === 'platform') {
+      violations.push({
+        id,
+        kind: 'platform',
+        detail: `Ring 1 必备行被平台门控禁用（${process.platform}）——Ring 1 行无平台豁免语义`,
+      });
+      continue;
+    }
+    if (planRow !== undefined && planRow.unresolved !== undefined) {
+      violations.push({
+        id,
+        kind: 'unresolved',
+        detail: `Ring 1 必备行引用解析失败：${planRow.unresolved}`,
+      });
+    }
+  }
+  return violations;
+}
+
+/**
+ * Ring 1 行合成结果差异（/reload 报告面，契约篇 §5.1 /reload 语义）：对比装载
+ * 前后同 id 行的合成字段（plugin/config/disabled）——任一变化即该行需重启
+ * 生效。Ring 1 行不回卷不重装载（仅 boot 生效），变化只能报告不能热应用。
+ * @returns 需重启生效的行 id 清单（空 = 无变化）
+ */
+export function diffRing1Rows(before: CompositionReport, after: CompositionReport): readonly string[] {
+  const changed: string[] = [];
+  for (const id of RING1_REQUIRED_ROW_IDS) {
+    // 行合成字段全量序列化比对（字段级后写胜出的合成产物，键序确定）
+    const snapshot = (report: CompositionReport): string | undefined => {
+      const row = report.rows.find((candidate) => candidate.id === id);
+      return row === undefined ? undefined : JSON.stringify(row);
+    };
+    if (snapshot(before) !== snapshot(after)) changed.push(id);
+  }
+  return changed;
+}
 
 /** 组合树装载产物（dump-config 打印 + ctx.plugins.list 数据源） */
 export interface CompositionReport {

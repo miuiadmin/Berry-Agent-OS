@@ -144,6 +144,13 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
                   killTree,
                   dataDir: dataDir(),
                 },
+                // tools 件闭包占位（Ring 1 行树化批——诊断面 apply 永不跑，占位
+                // 闭包零副作用；可写根给空推导器，注册表键在即树形不失真）
+                toolsDeps: {
+                  gateSink: () => undefined,
+                  writableRoots: () => [],
+                  workspace: () => process.cwd(),
+                },
               }),
             ),
           ) + '\n',

@@ -126,7 +126,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'composition/reloaded',
     mode: 'emit',
-    note: '组合树 /reload 全量重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单）',
+    note: '组合树 /reload 全量重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕）',
   },
   {
     name: 'prompts_change',
@@ -158,6 +158,12 @@ export interface CompositionReloadedPayload {
   readonly failed: readonly string[];
   /** 跳过的行 id */
   readonly skipped: readonly string[];
+  /**
+   * Ring 1 行合成结果变化清单（Ring 1 行树化批，契约篇 §5.1 /reload 语义）：
+   * Ring 1 行挂独立装载锚、/reload 不回卷不重装载（仅 boot 生效）——行引用/
+   * 配置/禁用状态变了只能报告「需重启生效」，不静默吞。空/缺省 = 无 Ring 1 变化
+   */
+  readonly ring1RestartRequired?: readonly string[];
 }
 
 /** 目录查询：按名取定义（含判断某事件是否已知总线活体事件） */

@@ -13,7 +13,15 @@ import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
 import { loadComposition, resolvePluginEntry } from './composition.js';
-import { createPathsService, saveOverlayRows, toggleOverlayRow, upsertOverlayPluginRef } from './composition.js';
+import {
+  assertRing1Required,
+  diffRing1Rows,
+  RING1_REQUIRED_ROW_IDS,
+  createPathsService,
+  saveOverlayRows,
+  toggleOverlayRow,
+  upsertOverlayPluginRef,
+} from './composition.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -35,8 +43,8 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行——契约篇 §5.1/§5.4/§6.6） */
-const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp']);
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕——契约篇 §5.1/§5.4/§6.6） */
+const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tools']);
 
 /**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
@@ -57,9 +65,10 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层六行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // 官方默认层七行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
     // subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行（客户端桥
-    // 第一刀——契约篇 §5.1/§5.4/§6.6）——无注册表解析 = unresolved（诊断诚实）
+    // 第一刀）+ tools 第七行（Ring 1 行树化起算行——契约篇 §5.1 节奏表）
+    // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
       { id: 'memory', plugin: 'builtin:memory' },
@@ -67,8 +76,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'goal', plugin: 'builtin:goal' },
       { id: 'scheduler', plugin: 'builtin:scheduler' },
       { id: 'mcp', plugin: 'builtin:mcp' },
+      { id: 'tools', plugin: 'builtin:tools' },
     ]);
-    expect(report.plan).toHaveLength(6);
+    expect(report.plan).toHaveLength(7);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -81,6 +91,8 @@ describe('overlay 装载与拒绝式校验', () => {
     expect(report.plan[4]!.unresolved).toContain('保留前缀');
     expect(report.plan[5]!.id).toBe('mcp');
     expect(report.plan[5]!.unresolved).toContain('保留前缀');
+    expect(report.plan[6]!.id).toBe('tools');
+    expect(report.plan[6]!.unresolved).toContain('保留前缀');
     // 用户层为空
     expect(loadUserComposition(dataDir)).toEqual({ rows: [], plan: [] });
   });
@@ -331,12 +343,13 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    // 默认层六键全给（chat/subagent/goal/scheduler/mcp 行同解析——不带 config 的纯净形态对照）
+    // 默认层七键全给（chat/subagent/goal/scheduler/mcp/tools 行同解析——不带 config 的纯净形态对照）
     const stubChat = { name: 'chat-stub', apply: async () => {} };
     const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
     const stubGoal = { name: 'goal-stub', apply: async () => {} };
     const stubScheduler = { name: 'scheduler-stub', apply: async () => {} };
     const stubMcp = { name: 'mcp-stub', apply: async () => {} };
+    const stubTools = { name: 'tools-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -344,6 +357,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:goal': stubGoal,
       'builtin:scheduler': stubScheduler,
       'builtin:mcp': stubMcp,
+      'builtin:tools': stubTools,
     });
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -352,6 +366,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'goal', plugin: 'builtin:goal' },
       { id: 'scheduler', plugin: 'builtin:scheduler' },
       { id: 'mcp', plugin: 'builtin:mcp' },
+      { id: 'tools', plugin: 'builtin:tools' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', builtin: stubChat },
@@ -360,6 +375,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'goal', builtin: stubGoal },
       { id: 'scheduler', builtin: stubScheduler },
       { id: 'mcp', builtin: stubMcp },
+      { id: 'tools', builtin: stubTools },
     ]);
   });
 
@@ -384,5 +400,75 @@ describe('builtin: 保留前缀解析', () => {
     writeOverlay(dataDir, '  - id: memory\n    disabled: true\n');
     const report = loadComposition(dataDir, {});
     expect(report.plan[1]).toEqual({ id: 'memory', skip: 'disabled' });
+  });
+});
+
+/* ---------------- Ring 1 必备行断言与差异（行树化批，契约篇 §5.1 节奏表） ---------------- */
+
+describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
+  /** 全七行 stub 注册表（健康形态——行行可解析） */
+  const stubRegistry = () => ({
+    'builtin:chat': { name: 'chat-stub', apply: async () => {} },
+    'builtin:memory': { name: 'memory-stub', apply: async () => {} },
+    'builtin:subagent': { name: 'subagent-stub', apply: async () => {} },
+    'builtin:goal': { name: 'goal-stub', apply: async () => {} },
+    'builtin:scheduler': { name: 'scheduler-stub', apply: async () => {} },
+    'builtin:mcp': { name: 'mcp-stub', apply: async () => {} },
+    'builtin:tools': { name: 'tools-stub', apply: async () => {} },
+  });
+
+  it('起算清单：RING1_REQUIRED_ROW_IDS = [tools]（后续行树化纵切逐行累加）', () => {
+    expect(RING1_REQUIRED_ROW_IDS).toEqual(['tools']);
+  });
+
+  it('健康树：全行可解析 → 零违规', () => {
+    const dataDir = makeDataDir();
+    expect(assertRing1Required(loadComposition(dataDir, stubRegistry()))).toEqual([]);
+  });
+
+  it('overlay 禁用 tools 行：kind=disabled 违规（Ring 1 行不可卸——换实现走引用替换）', () => {
+    const dataDir = makeDataDir();
+    writeOverlay(dataDir, '  - id: tools\n    disabled: true\n');
+    const violations = assertRing1Required(loadComposition(dataDir, stubRegistry()));
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({ id: 'tools', kind: 'disabled' });
+    expect(violations[0]!.detail).toContain('替换行引用');
+  });
+
+  it('平台门控禁用 tools 行：kind=platform 违规（Ring 1 行无平台豁免语义）', () => {
+    const dataDir = makeDataDir();
+    writeOverlay(dataDir, `  - id: tools\n    disabled: ${process.platform}\n`);
+    const violations = assertRing1Required(loadComposition(dataDir, stubRegistry()));
+    expect(violations[0]).toMatchObject({ id: 'tools', kind: 'platform' });
+  });
+
+  it('引用解析失败：kind=unresolved 违规（注册表未命中也是拒启事由）', () => {
+    const dataDir = makeDataDir();
+    // 空注册表：builtin:tools 不在 → tools 行 unresolved（第一类断言看不见、第二类拒启）
+    const violations = assertRing1Required(loadComposition(dataDir, {}));
+    expect(violations[0]).toMatchObject({ id: 'tools', kind: 'unresolved' });
+  });
+
+  it('行缺失：kind=missing 违规（官方默认层结构性缺失——合成面正常不可达，断言函数单点兜底）', () => {
+    // 直接构造缺行报告（loadComposition 必含默认层七行——missing 只在默认层
+    // 定义漂移时出现；纯函数面单测锁死该分支的拒启事实）
+    const report = loadComposition(makeDataDir(), stubRegistry());
+    const mutilated = {
+      rows: report.rows.filter((row) => row.id !== 'tools'),
+      plan: report.plan.filter((row) => row.id !== 'tools'),
+    };
+    const violations = assertRing1Required(mutilated);
+    expect(violations[0]).toMatchObject({ id: 'tools', kind: 'missing' });
+    expect(violations[0]!.detail).toContain('结构性错误');
+  });
+
+  it('diffRing1Rows：无变化 → []；行 config 变化 → [tools]（/reload 报告「需重启生效」）', () => {
+    const dataDir = makeDataDir();
+    const registry = stubRegistry();
+    const before = loadComposition(dataDir, registry);
+    expect(diffRing1Rows(before, loadComposition(dataDir, registry))).toEqual([]);
+    // overlay 给 tools 行加 config——合成字段变化 → 该行需重启生效
+    writeOverlay(dataDir, '  - id: tools\n    config: { maxBytes: 1 }\n');
+    expect(diffRing1Rows(before, loadComposition(dataDir, registry))).toEqual(['tools']);
   });
 });

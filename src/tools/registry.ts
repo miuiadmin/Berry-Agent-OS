@@ -55,6 +55,9 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
   const tools = new Map<string, ToolDefinition>();
 
   const service: ToolsService = {
+    // 管道执行器随服务携带（Ring 1 行树化批）：bash 工具与 ctx.exec 两层并存
+    // 时经它同源——无管道诊断形态为 undefined（toAgentTool 执行响亮失败）
+    executor: opts.pipeline,
     register(def) {
       if (tools.has(def.name)) {
         // 同名重复注册 = 装配冲突（两行注册同一工具），响亮失败不静默覆盖

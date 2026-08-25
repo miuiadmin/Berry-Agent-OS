@@ -23,8 +23,9 @@ function makeDataDir(): string {
 
 /**
  * 装载并滤除官方默认层行（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 +
- * scheduler 第五行 + mcp 第六行——契约篇 §5.1/§6.6）：本文件测 overlay 对账语义
- * （用户层写什么/读回什么），官方行进 composition.test 专属测试——两关注点不混断言。
+ * scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕——契约篇 §5.1/§6.6）：
+ * 本文件测 overlay 对账语义（用户层写什么/读回什么），官方行进 composition.test
+ * 专属测试——两关注点不混断言。
  */
 function userRows(dataDir: string): unknown[] {
   return loadComposition(dataDir).rows.filter(
@@ -34,7 +35,8 @@ function userRows(dataDir: string): unknown[] {
       row.id !== 'subagent' &&
       row.id !== 'goal' &&
       row.id !== 'scheduler' &&
-      row.id !== 'mcp',
+      row.id !== 'mcp' &&
+      row.id !== 'tools',
   );
 }
 
@@ -272,9 +274,9 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     await plugins.install('ok-pkg');
     await plugins.install('dormant-pkg');
     plugins.toggle('dormant-pkg'); // → 禁用
-    // 组合树含官方默认层 chat/memory/subagent/goal 四行（本测试无官方件注册表 →
-    // unresolved/planned）——滤除只留用户行：本测试锁 applyLoad 映射语义，
-    // 官方行装载态在 assembly 全栈锁
+    // 组合树含官方默认层 chat/memory/subagent/goal/scheduler/mcp/tools 七行（本
+    // 测试无官方件注册表 → unresolved/planned）——滤除只留用户行：本测试锁
+    // applyLoad 映射语义，官方行装载态在 assembly 全栈锁
     const composition = loadComposition(dataDir);
     const userComposition = {
       ...composition,
@@ -285,7 +287,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'subagent' &&
           row.id !== 'goal' &&
           row.id !== 'scheduler' &&
-          row.id !== 'mcp',
+          row.id !== 'mcp' &&
+          row.id !== 'tools',
       ),
     };
 

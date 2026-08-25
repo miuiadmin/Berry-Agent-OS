@@ -83,11 +83,30 @@ export interface AgentTool {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 管道执行器（三段管道的包装面——Ring 1 行树化批 2026-08-26 类型安家 contracts：
+ * 服务面携带它，宿主消费方〔exec 服务等〕与行替换件同源同过守门）。
+ * 类型单一来源在此，tools/pipeline 再导出（实现注释见彼处）。
+ */
+export type ToolPipelineExecutor = (
+  def: ToolDefinition,
+  toolCallId: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+  onUpdate?: ToolUpdateCallback,
+) => Promise<AgentToolResult>;
+
+/**
  * ctx.tools 服务面（契约篇 §1.5 服务行 + §1.2 注记④——类型单一来源住 contracts，
  * 2026-08-25 Hermes 探针 #11 落码；tools 模块实现之，第三方经
  * `ctx.get<ToolsService>('tools')` 取全类型）。
  */
 export interface ToolsService {
+  /**
+   * 管道执行器（三段管道包装面——Ring 1 行树化批：件 apply 构造并随服务携带）。
+   * undefined = 无管道诊断形态（toAgentTool 的执行响亮失败——装配缺陷不留静默）。
+   * bash 工具与 ctx.exec 服务两层并存时经它同源：行替换件换了管道，两层一起换。
+   */
+  readonly executor: ToolPipelineExecutor | undefined;
   /** 注册工具（即时生效；返回注销器，幂等）。同名注册 = TOOL_DUPLICATE 响亮失败——替换唯一合法路径是组合树行级操作 */
   register(def: ToolDefinition): () => void;
   /** 按名查找（未注册返回 undefined——调用方决定 fail 形态） */

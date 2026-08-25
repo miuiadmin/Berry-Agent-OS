@@ -117,8 +117,6 @@ export interface ChatPluginDeps {
   readonly transformContext: (messages: AgentMessage[]) => Promise<AgentMessage[]>;
   /** 系统提示词活视图（/reload、/new 重建后取新值——writeHeader 与 loop 各时点求值） */
   readonly getSystemPrompt: () => string;
-  /** 工具注册表服务（writeHeader 的 toolSchemas 腿 + toolView 首帧——内核单例，随 reload 不变） */
-  readonly tools: ToolsService;
   /** loop 工具快照活数组（组合根分配、件填充首帧、组合根 tools_change 订阅原位刷新） */
   readonly toolView: AgentTool[];
   /** 会话换指回调（组合根 let session 槽 + resumed 旗标一次性回写） */
@@ -152,6 +150,10 @@ export function createChatPlugin(deps: ChatPluginDeps): BuiltinPluginModule {
 
   return {
     name: 'chat',
+    // Ring 1 行树化批（2026-08-26）：tools 服务改经 ctx 取（tools 行已挂
+    // ring1Anchor 先装载，apply 期取必居值）——装载序由 inject 声明驱动，
+    // Kahn 轮次自然排后，不再按值闭包注入
+    inject: ['tools'],
     apply: (ctx: PluginContext) => applyChatPlugin(ctx, deps, headerState, driver, (d) => (driver = d)),
   };
 }
@@ -164,6 +166,10 @@ async function applyChatPlugin(
   driver: ConversationDriver | undefined,
   setDriver: (driver: ConversationDriver) => void,
 ): Promise<void> {
+  // 工具注册表服务（Ring 1 行树化批：tools 行挂 ring1Anchor 先装载，apply 期
+  // 取必居值；inject 声明已让加载器 Kahn 保证在场——writeHeader 的 toolSchemas
+  // 腿与 toolView 首帧两用点共用本取值）
+  const tools = ctx.get<ToolsService>('tools');
   // persist:false 降级：无持久层即无会话可续、无驱动可起（dump-config 诊断面
   // 不起驱动——件空转 warn；goal 等消费方经 optionalInject 降级，启动断言不响）
   if (!deps.persistence) {
@@ -229,7 +235,7 @@ async function applyChatPlugin(
     const payload = {
       config: { model: deps.model, sandbox: deps.sandboxMode },
       systemPrompt: deps.getSystemPrompt(),
-      toolSchemas: deps.tools.list().map((def) => ({ name: def.name, parameters: def.parameters })),
+      toolSchemas: tools.list().map((def) => ({ name: def.name, parameters: def.parameters })),
     };
     const serialized = JSON.stringify(payload);
     if (serialized === headerState.last) return; // 组装参数未变——不落新快照
@@ -246,7 +252,7 @@ async function applyChatPlugin(
   // loop 工具快照首帧（活数组组合根分配——装载窗口内后续插件工具经组合根
   // tools_change 订阅原位刷新，件只填首帧 fs 族）
   deps.toolView.length = 0;
-  deps.toolView.push(...deps.tools.list().map((def) => deps.tools.toAgentTool(def)));
+  deps.toolView.push(...tools.list().map((def) => tools.toAgentTool(def)));
   const fresh = new ConversationDriverClass({
     context: {
       // getter 活视图：/reload 重建后 loop 每次模型请求取到新提示词

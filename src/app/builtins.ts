@@ -20,6 +20,7 @@ import { createSchedulerPlugin, migrations as schedulerMigrations } from '../sch
 import type { SchedulerPluginDeps } from '../scheduler/index.js';
 import { createMcpPlugin } from '../mcp/index.js';
 import type { McpPluginDeps } from '../mcp/index.js';
+import { createToolsPlugin, type ToolsPluginDeps } from '../tools/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
@@ -37,6 +38,8 @@ export interface BuiltinRegistryOptions {
   readonly schedulerDeps?: Omit<SchedulerPluginDeps, 'connection'>;
   /** mcp 件闭包依赖束（spawnServer 组装 = app/mcp-spawn.ts 产物 + exec killTree + 数据目录——契约篇 §6.6 冷读 #1 上提组合根） */
   readonly mcpDeps: McpPluginDeps;
+  /** tools 件闭包依赖束（Ring 1 行树化批——管道 gate 落点/可写根推导器〔safety 同源产物，宿主构造〕/工作区活取值） */
+  readonly toolsDeps: ToolsPluginDeps;
   /** 工作区根（项目归属键活取值） */
   readonly workspace: () => string;
   /** in-process 真工厂（subagent 官方件闭包注入——app/subagent-factory.ts 产物） */
@@ -99,6 +102,11 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // spawn/kill 经闭包注入（组合根 app/mcp-spawn.ts——mcp 结构上不见 exec）；
     // servers 空时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）
     'builtin:mcp': createMcpPlugin(opts.mcpDeps),
+    // tools 官方件（第七行 = Ring 1 行树化起算行，契约篇 §5.1 节奏表——**必备行**
+    // 非 Ring 2 可卸：overlay 禁用即启动断言拒启；可换实现引用不可禁用）：
+    // 三段管道 + ctx.tools 服务 + fs/检索工具族。恒注册（缺注即 unresolved——
+    // Ring 1 必备行断言拒启，诊断树也须见到此行）
+    'builtin:tools': createToolsPlugin(opts.toolsDeps),
   };
 }
 
