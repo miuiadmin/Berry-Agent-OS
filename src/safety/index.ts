@@ -74,3 +74,5 @@ export { APPROVAL_ANSWER_EVENT, createApprovalService } from './approval.js';
 /* 守门固定行（骨架篇 §8.1/§8.5） */
 export type { SafetyGateOptions } from './gate.js';
 export { DEFAULT_CARVE_OUT_ENTRIES, installSafetyGate } from './gate.js';
+export { matchAllowlist } from './allowlist.js';
+export type { AllowlistEntry, AllowlistInput, AllowlistMatch } from './allowlist.js';

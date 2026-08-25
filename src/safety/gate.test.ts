@@ -1,8 +1,9 @@
 /**
  * L3 safety 测试 — 守门固定行（骨架篇 §8.1/§8.5）。
  * 集成走真 tools 三段管道 + 真 fs 工具族：守门行 prepend 首位，carve-out
- * 命中走审批（allowed-once 放行 / 其余 block 带 §7.4 统一文案）；两端档位
- * （read-only / danger-full-access）不归本行管的分工也在此验证。
+ * 命中走审批（allowed-once 放行 / 其余 block 带 §7.4 统一文案）；read-only 档
+ * 不归本行管（fence 拒全量写）；danger 档 carve-out 照走（第二十四批题2a）
+ * 与 allowlist 免问（题1a）也在此验证。
  */
 
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -12,13 +13,18 @@ import { describe, expect, it } from 'vitest';
 import { AppError, FS_OUTSIDE_WRITABLE_ROOTS, TOOL_BLOCKED } from '../contracts/errors.js';
 import { createContext } from '../context/index.js';
 import { createFsTools, createToolPipeline, registerToolsService } from '../tools/index.js';
-import { createApprovalService, installSafetyGate, type ApprovalDecisionSink } from './index.js';
+import { createApprovalService, installSafetyGate, type ApprovalDecisionSink, type AllowlistEntry } from './index.js';
 import { deriveWritableRoots } from './roots.js';
 import type { SandboxMode } from './types.js';
 
 /** 集成测试装置：真 ctx + 真管道 + 真 fs 工具族 + 守门行 + 可控 answerer。
  * pre 回调在守门行安装前跑（carve-out glob「装配期展开」语义要求文件先在）。 */
-function rig(opts: { mode: SandboxMode; answer?: 'approve' | 'reject'; pre?: (ws: string) => void }) {
+function rig(opts: {
+  mode: SandboxMode;
+  answer?: 'approve' | 'reject';
+  pre?: (ws: string) => void;
+  allowlist?: readonly AllowlistEntry[];
+}) {
   const ws = mkdtempSync(join(tmpdir(), 'safety-gate-'));
   opts.pre?.(ws);
   const ctx = createContext({ name: 'test' });
@@ -42,7 +48,7 @@ function rig(opts: { mode: SandboxMode; answer?: 'approve' | 'reject'; pre?: (ws
   // 工具注册表 + 真管道 + fs 工具族（fence 数据源 = 真推导函数随档位切换——
   // 与 app 装配同源；2026-08-25 修前此处靠三元自模拟 read-only 空根）
   const service = registerToolsService(ctx, { pipeline: createToolPipeline(ctx) });
-  installSafetyGate(ctx, { approval, workspace: ws, mode: () => mode });
+  installSafetyGate(ctx, { approval, workspace: ws, mode: () => mode, allowlist: opts.allowlist });
   const fsTools = createFsTools({
     workspace: () => ws,
     writableRoots: () => deriveWritableRoots(ws, mode),
@@ -141,13 +147,37 @@ describe('两端档位分工（不归守门行管）', () => {
     expect(asked).toHaveLength(0); // 本行不发起审批——fence 已管
   });
 
-  it('danger-full-access：本行跳过，carve-out 也不拦（全放行档）', async () => {
+  it('danger-full-access：carve-out 照走（第二十四批题2a——修复前本行全放行），拒 → block', async () => {
+    const { ws, run, asked, decided } = rig({
+      mode: 'danger-full-access',
+      answer: 'reject',
+      pre: (w) => mkdirSync(join(w, '.git')),
+    });
+    // 回归锁：修复前 danger 档直接落盘不问；拍板后「用户选 danger」≠「敏感元数据静默可写」
+    await expectToolError(() => run('write', { path: '.git/config', content: '[core]' }), TOOL_BLOCKED);
+    expect(existsSync(join(ws, '.git', 'config'))).toBe(false);
+    expect(asked).toHaveLength(1);
+    expect(decided).toEqual([{ approvalId: asked[0]!.approvalId, decision: 'reject' }]);
+  });
+
+  it('danger-full-access：carve-out 审批放行 → 落盘成功（正常路径不受影响）', async () => {
     const { ws, run, asked } = rig({
       mode: 'danger-full-access',
+      answer: 'approve',
       pre: (w) => mkdirSync(join(w, '.git')),
     });
     await run('write', { path: '.git/config', content: '[core]' });
     expect(existsSync(join(ws, '.git', 'config'))).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('danger-full-access：非敏感路径照旧直通（carve-out 只遮罩例外表）', async () => {
+    const { ws, run, asked } = rig({
+      mode: 'danger-full-access',
+      pre: (w) => mkdirSync(join(w, 'notes')),
+    });
+    await run('write', { path: 'notes/a.md', content: 'x' });
+    expect(existsSync(join(ws, 'notes', 'a.md'))).toBe(true);
     expect(asked).toHaveLength(0);
   });
 
@@ -155,6 +185,44 @@ describe('两端档位分工（不归守门行管）', () => {
     const { run, asked, setMode } = rig({ mode: 'workspace-write', answer: 'approve' });
     setMode('read-only');
     await expectToolError(() => run('write', { path: '.git/config', content: '[core]' }), FS_OUTSIDE_WRITABLE_ROOTS);
+    expect(asked).toHaveLength(0);
+  });
+});
+
+describe('allowlist 免问（第二十四批题1a——advisory 只影响问不问）', () => {
+  it('命中路径前缀条目：carve-out 命中也免问直接放行（asked 空）', async () => {
+    const { ws, run, asked } = rig({
+      mode: 'workspace-write',
+      answer: 'reject', // 应答者拒绝也无妨——根本不该问
+      pre: (w) => mkdirSync(join(w, '.git')),
+      allowlist: [{ tool: 'write', pattern: '.git' }],
+    });
+    // 新文件走 createIfAbsent（观察态 CAS——已读未读的分派不受本行影响；
+    // write 工具不建父目录，直接落 .git 根下一层新文件）
+    await run('write', { path: '.git/pre-commit', content: '#!/bin/sh\n' });
+    expect(asked).toHaveLength(0);
+    expect(existsSync(join(ws, '.git', 'pre-commit'))).toBe(true);
+  });
+
+  it('未命中（前缀不覆盖）照问；TTL 过期回落 ask', async () => {
+    const stale: AllowlistEntry = { tool: 'write', pattern: '.git', expiresAt: 1 };
+    const { run, asked } = rig({
+      mode: 'workspace-write',
+      answer: 'approve',
+      pre: (w) => mkdirSync(join(w, '.git')),
+      allowlist: [{ tool: 'write', pattern: 'docs' }, stale],
+    });
+    await run('write', { path: '.git/config', content: '[core]' });
+    expect(asked).toHaveLength(1); // 两条都不命中——照问（approve 放行）
+  });
+
+  it('danger 档同样免问（allowlist 与档位正交——用户显式选择优先于 carve-out 问）', async () => {
+    const { run, asked } = rig({
+      mode: 'danger-full-access',
+      pre: (w) => mkdirSync(join(w, '.git')),
+      allowlist: [{ tool: 'write', pattern: '.git' }],
+    });
+    await run('write', { path: '.git/config', content: '[core]' });
     expect(asked).toHaveLength(0);
   });
 });

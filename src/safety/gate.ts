@@ -21,6 +21,7 @@ import type { ApprovalService } from './approval.js';
 import type { SandboxMode } from './types.js';
 import { buildCarveOutTable, canonicalPath, deriveWritableRoots, type CarveOutEntry } from './roots.js';
 import { resolveWritability } from './roots.js';
+import { matchAllowlist, type AllowlistEntry } from './allowlist.js';
 import { escalationHintMarker, sandboxDenialMarker } from './sandbox.js';
 
 /** 内置默认 carve-out 条目（骨架篇 §7.3 例示：.git 转只读 + .env 类遮罩） */
@@ -41,6 +42,13 @@ export interface SafetyGateOptions {
   readonly mode: () => SandboxMode;
   /** carve-out 例外条目（缺省内置 .git/.env 条目；传 [] 显式关闭） */
   readonly entries?: readonly CarveOutEntry[];
+  /**
+   * 跨会话 allowlist（第二十四批题1a——advisory 免问面）：命中即跳过 carve-out
+   * 升权审批直接放行本行。只影响「问不问」：fence/根推导/执行段照走，deny 面
+   * （carve-out 拒绝）不受影响。条目落用户配置层（storage/命令面随接线批落地，
+   * 装配注入活数组引用——TTL 过期由引擎逐调用判定）。缺省无 = 功能关闭。
+   */
+  readonly allowlist?: readonly AllowlistEntry[];
 }
 
 /**
@@ -82,8 +90,33 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
     next: () => Promise<GateAction | undefined>,
   ): Promise<GateAction | undefined> => {
     const mode = opts.mode();
-    // 两端档位不归本行管：read-only 由 fence 拒全量写（根为空）、danger 全放行
-    if (mode !== 'workspace-write') return next();
+    // read-only 档不归本行管（fence 拒全量写——根为空）；danger 档 carve-out
+    // 照走（第二十四批题2a：「用户选了 danger」≠「敏感元数据静默可写」——CC
+    // bypass 档免疫实证；例外表装配期钉死零运行时成本）
+    if (mode === 'read-only') return next();
+
+    // allowlist 免问（第二十四批题1a）：命中即跳过 carve-out 升权审批直接放行
+    // 本行（advisory——只影响问不问；fence/根推导/执行段照走）。免问仍可审计：
+    // gate/decision reason=allowlist:<条目序> 的标注需 contracts GateInput 扩
+    // 字段 + pipeline reason 透传，随接线批落地（当前 pipeline 放行统一 reason=ok）
+    if (opts.allowlist !== undefined && opts.allowlist.length > 0) {
+      const hit = matchAllowlist(
+        opts.allowlist,
+        {
+          tool: input.tool.name,
+          writePaths: extractWritePaths(input.tool.name, input.args).map((p) =>
+            canonicalPath(resolvePath(workspace, p)),
+          ),
+          bashCommand:
+            input.tool.name === 'bash' && typeof input.args['command'] === 'string'
+              ? (input.args['command'] as string)
+              : undefined,
+          workspace,
+        },
+        Date.now(),
+      );
+      if (hit !== undefined) return next();
+    }
 
     for (const rawPath of extractWritePaths(input.tool.name, input.args)) {
       // 与 fence 同源的 canonical 化（相对锚 workspace、解析符号链）
