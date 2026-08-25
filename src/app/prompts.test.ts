@@ -1,7 +1,7 @@
 /**
  * L5 app 单元测试（ctx.prompts 具名提示词段服务）——id 校验三码 / 字典序物化 /
- * render 抛错占位不杀 / 注册注销广播 / disposer 护栏。真根作用域（createContext），
- * 无 mock。
+ * render 抛错占位不杀 / 注册注销广播 / disposer 护栏 / 宿主半边通道双入口
+ * 拆分（exec 纵切）。真根作用域（createContext），无 mock。
  */
 
 import { describe, expect, it } from 'vitest';
@@ -9,11 +9,11 @@ import { AppError, PROMPT_SECTION_DUPLICATE, PROMPT_SECTION_INVALID } from '../c
 import { createContext } from '../context/index.js';
 import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 
-/** 建一个挂好 prompts 服务的根作用域（每用例独立） */
+/** 建一个挂好 prompts 服务的根作用域（每用例独立；host = 宿主半边通道） */
 function setup() {
   const ctx = createContext({ name: 'test-prompts' });
-  const service = registerPromptsService(ctx);
-  return { ctx, service };
+  const { service, host } = registerPromptsService(ctx);
+  return { ctx, service, host };
 }
 
 /** 断言抛错码（错误码是唯一判据） */
@@ -119,5 +119,34 @@ describe('服务注册面（ctx.get）', () => {
   it("provide('prompts')——插件经 ctx.get 取同实例", () => {
     const { ctx, service } = setup();
     expect(ctx.get('prompts')).toBe(service);
+  });
+});
+
+describe('宿主半边通道（exec 纵切拆分——无 `/` 单段 id 是宿主自留地）', () => {
+  it('插件面注册无 / id = PROMPT_SECTION_INVALID（宿主词汇面对插件不可注册）', () => {
+    const { service } = setup();
+    expectCode(() => service.registerSection({ id: 'environment', render: () => 'x' }), PROMPT_SECTION_INVALID);
+  });
+  it('宿主面注册无 / id 合法，与插件段同表同字典序物化', () => {
+    const { service, host } = setup();
+    host.registerHostSection({ id: 'environment', render: () => '环境段' });
+    service.registerSection({ id: 'memory/core', render: () => '记忆段' });
+    expect(service.listSections()).toEqual(['environment', 'memory/core']);
+    expect(service.materialize()).toBe('环境段\n\n记忆段');
+  });
+  it('宿主面注册含 / id = PROMPT_SECTION_INVALID（域前缀形属插件词汇面）', () => {
+    const { host } = setup();
+    expectCode(() => host.registerHostSection({ id: 'memory/core', render: () => 'x' }), PROMPT_SECTION_INVALID);
+  });
+  it('宿主段注销走 disposer，广播同款；插件面不可达 host 通道', () => {
+    const { ctx, service, host } = setup();
+    const seen: string[][] = [];
+    ctx.on(PROMPTS_CHANGE_EVENT, (ids: string[]) => seen.push([...ids]));
+    const dispose = host.registerHostSection({ id: 'environment', render: () => 'x' });
+    expect(seen.at(-1)).toEqual(['environment']);
+    dispose();
+    expect(service.listSections()).toEqual([]);
+    // 宿主通道不在 ctx.prompts 服务对象上——插件经 ctx.get 拿不到（类型面即缺）
+    expect('registerHostSection' in (ctx.get('prompts') as object)).toBe(false);
   });
 });

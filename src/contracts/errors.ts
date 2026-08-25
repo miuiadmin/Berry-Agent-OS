@@ -120,6 +120,11 @@ export const FS_OUTSIDE_WRITABLE_ROOTS = registerErrorCode('FS_OUTSIDE_WRITABLE_
 /** fs：apply_patch 补丁解析或应用失败（格式非法/hunk 不匹配/Add 目标已存在等，message 细说） */
 export const FS_PATCH_FAILED = registerErrorCode('FS_PATCH_FAILED');
 
+/** exec：子进程未启动（spawn 即败——ENOENT/EACCES/E2BIG 等，message 携 cause.code；绝不折算 exit 1。失败二分「未启动 ≠ 退出非零」见骨架篇 §9.3，pi-7 教训） */
+export const EXEC_SPAWN_FAILED = registerErrorCode('EXEC_SPAWN_FAILED');
+/** exec：env.inherit 名单命中凭证族（后缀 _API_KEY 等）或宿主保留前缀（ANTHROPIC_/OPENAI_/APP_）——机器堵名单走私，显式 set 值不在此列（契约篇 §1.2 E 组执法面②） */
+export const EXEC_ENV_FORBIDDEN = registerErrorCode('EXEC_ENV_FORBIDDEN');
+
 /** session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板；未知事件类型非 ignorable 同用此码） */
 export const SESSION_FORMAT_UNSUPPORTED = registerErrorCode('SESSION_FORMAT_UNSUPPORTED');
 /** session：同一会话同一时刻只允许单写者——第二写者追加即响亮拒绝（第八批 #13 护栏） */

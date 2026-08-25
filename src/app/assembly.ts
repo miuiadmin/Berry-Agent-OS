@@ -37,9 +37,13 @@ import {
   APPROVAL_ANSWER_EVENT,
   createApprovalService,
   createRootsProvider,
+  createSandboxService,
   installSafetyGate,
 } from '../safety/index.js';
 import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode } from '../safety/index.js';
+// exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
+// environment 披露段——组合根双装配点注册（检索族先例）
+import { createBashTool, registerExecService, renderEnvironmentSection } from '../exec/index.js';
 import {
   createLocalSkillsProvider,
   createSkillsService,
@@ -442,11 +446,28 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // sandbox 档首落随会话边界进 chat 件（③b stampSandboxFacts——内核有数据，
   // 应用有时点；续接同档不重复落的 diff 语义内建于盖章函数）
 
+  /* ---- ⑥b exec 件聚落（第 18 模块，2026-08-25 exec 纵切）----
+   * 沙箱 confine 服务此前零组合根装配（safety 落码时无消费方——exec 双面即
+   * 首批消费方，接线债本批收口）。bash 工具件在审批服务之后注册：升权两参数
+   * 是 requestEscalation 的首个消费者（依赖 approval 实例）；ctx.exec 服务同
+   * 管道同沙箱——服务调用不旁路守门与落账（内部名 exec 不进模型词汇表）。 */
+  const sandbox = createSandboxService();
+  ctx.provide('sandbox', sandbox);
+  tools.register(createBashTool({ sandbox, approval, mode: () => sandboxMode, workspaceRoot: workspace }));
+  registerExecService(ctx, { pipeline, sandbox, mode: () => sandboxMode, workspaceRoot: workspace });
+
   /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词）----
    * 具名提示词段服务（ctx.prompts，pi-4(a) 拍板）：段注册表宿主拥有，分节序固定 =
    * 基座 → 技能渐进披露 → 具名段（id 字典序）；render() 仅在重建时点求值物化，
    * 段内容随快照冻结（禁整串替换与 per-run 重写两毒品形态——契约篇 §1.3 五件） */
-  const prompts = registerPromptsService(ctx);
+  const { service: prompts, host: promptsHost } = registerPromptsService(ctx);
+  // environment 披露段（骨架篇 §7.3——exec 刀配套披露）：宿主自留地首例，
+  // 走宿主半边通道（无 `/` 单段 id；插件面注册此类 id 即拒）。快照语义：
+  // render 时现取档位/工作区——boot / /reload / /new 重建时点物化新值
+  promptsHost.registerHostSection({
+    id: 'environment',
+    render: () => renderEnvironmentSection({ mode: () => sandboxMode, workspaceRoot: () => workspace }),
+  });
   const skills = createSkillsService();
   registerSkillsService(ctx, skills);
   const locations = opts.skillLocations ?? defaultSkillLocations(workspace, { homeDir: opts.homeDir, trusted: true });

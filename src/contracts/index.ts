@@ -13,3 +13,4 @@ export * from './typebox.js';
 export * from './jobs.js';
 export * from './subagent.js';
 export * from './app.js';
+export * from './exec.js';

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：17 模块单向 DAG——第十六批 goal 入册、2026-08-24 铭牌批 chat 件聚落入册）。
+ * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：18 模块单向 DAG——第十六批 goal 入册、
+ * 2026-08-24 铭牌批 chat 件聚落入册、2026-08-25 exec 纵切入册）。
  *
  * 两条规则：
  * 1. 相对导入只允许走显式白名单边（模块 → 可依赖模块集合）；同模块内部互引自由。
@@ -32,6 +33,9 @@ const MODULE_EDGES = {
   chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety'],
   memory: ['contracts', 'context', 'session', 'llm', 'persist', 'agent'],
   goal: ['contracts', 'context', 'persist'],
+  // exec = 工具族件聚落（第 18 模块，2026-08-25 exec 纵切；tools 不 import exec——
+  // bash def 在组合根注册，检索族双装配点先例）
+  exec: ['contracts', 'context', 'safety', 'tools'],
   scheduler: ['contracts', 'context', 'session', 'agent'],
   mcp: ['contracts', 'context', 'tools'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
@@ -49,6 +53,7 @@ const MODULE_EDGES = {
     'subagent',
     'memory',
     'goal',
+    'exec',
     'scheduler',
     'mcp',
     'channels',
@@ -59,7 +64,7 @@ const MODULE_EDGES = {
 /** 裸导入白名单：包名 → 允许引用它的模块（node:* 与测试专用包单独放行） */
 const BARE_IMPORTS = {
   // context = 插件加载器（虚拟注入映射构造 + 行 config schema 校验 Value 面——契约篇 §1.2 落码注记③）
-  typebox: ['contracts', 'context', 'tools', 'skills', 'safety', 'app'],
+  typebox: ['contracts', 'context', 'tools', 'skills', 'safety', 'app', 'exec'],
   // berryagent = 加载器注入的虚拟模块名（非 npm 包；loader.test fixture 源码内的合法引用面）
   berryagent: ['context'],
   '@earendil-works/pi-ai': ['llm'],
