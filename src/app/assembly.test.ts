@@ -292,7 +292,14 @@ describe('createBerryRuntime 装配面', () => {
       '---\nname: demo\ndescription: 演示技能\n---\n\n演示指令体\n',
     );
     const runtime = await assemble({ homeDir: home });
-    expect(runtime.skills.list().map((s) => s.name)).toEqual(['demo']);
+    // 出厂样例技能随包恒可见（§4.4 ⑤——repo 根 skills/ 三件，拍板 17），本测试
+    // 临时 home 下 user 层零技能 → 清单 = 出厂三件 + 注入的 demo（user 层压过出厂）
+    expect(runtime.skills.list().map((s) => s.name)).toEqual([
+      'demo',
+      'commit-checklist',
+      'plugin-quickstart',
+      'troubleshooting',
+    ]);
     expect(runtime.systemPrompt).toContain('<name>demo</name>');
     expect(runtime.channels.commands.lookup('skill:demo')).toBeDefined();
   });

@@ -4,9 +4,10 @@
  * + 渐进披露清单渲染 + 默认发现位置。真文件系统 fixtures。
  */
 
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createLocalSkillsProvider,
@@ -15,6 +16,7 @@ import {
   renderAvailableSkills,
   scanSkillLocation,
 } from './index.js';
+import { parseSkillMd } from './skill-md.js';
 import type { Skill, SkillDiagnostic, SkillsProvider } from './types.js';
 
 /** 本次测试的临时根目录（afterEach 清理；null = 尚未创建） */
@@ -294,21 +296,66 @@ describe('renderAvailableSkills（渐进披露清单 §4.3）', () => {
   });
 });
 
-describe('defaultSkillLocations（§4.4 三处落地）', () => {
-  it('受信工作区：project 位置在列且最高优先', () => {
-    const locations = defaultSkillLocations('/ws/project', { trusted: true, homeDir: '/fake-home' });
+describe('defaultSkillLocations（§4.4 发现位置落地）', () => {
+  it('受信工作区：project 位置在列且最高优先；出厂层置末位', () => {
+    const locations = defaultSkillLocations('/ws/project', {
+      trusted: true,
+      homeDir: '/fake-home',
+      factoryRoot: '/factory',
+    });
     expect(locations).toEqual([
       { dir: '/ws/project/.agents/skills', source: 'project' },
       { dir: '/fake-home/.berry/skills', source: 'user' },
       { dir: '/fake-home/.agents/skills', source: 'user' },
       { dir: '/fake-home/.claude/skills', source: 'user' },
+      { dir: '/factory/skills', source: 'package' },
     ]);
   });
 
-  it('未受信工作区：不扫 project 层（防恶意仓库）', () => {
-    const locations = defaultSkillLocations('/ws/project', { trusted: false, homeDir: '/fake-home' });
+  it('未受信工作区：不扫 project 层（防恶意仓库）；出厂层不受信任判定影响', () => {
+    const locations = defaultSkillLocations('/ws/project', {
+      trusted: false,
+      homeDir: '/fake-home',
+      factoryRoot: '/factory',
+    });
     expect(locations.every((l) => l.source !== 'project')).toBe(true);
-    expect(locations).toHaveLength(3);
+    expect(locations).toHaveLength(4);
+    // 出厂层 = 宿主信任（与官方件注册表同源分发），恒扫描
+    expect(locations[locations.length - 1]).toEqual({ dir: '/factory/skills', source: 'package' });
+  });
+});
+
+describe('出厂技能层（§4.4 ⑤——样例技能随包分发，拍板 17）', () => {
+  it('factoryRoot 目录扫描可见技能（目录缺失 = 常态静默零诊断）', () => {
+    const root = makeRoot();
+    // fixture：出厂根下放一个技能
+    mkdirSync(join(root, 'skills', 'demo-skill'), { recursive: true });
+    writeFileSync(
+      join(root, 'skills', 'demo-skill', 'SKILL.md'),
+      '---\nname: demo-skill\ndescription: 演示\n---\n\n正文\n',
+    );
+    const provider = createLocalSkillsProvider({ locations: [{ dir: join(root, 'skills'), source: 'package' }] });
+    const result = provider.list();
+    expect(result.skills.map((s) => s.name)).toEqual(['demo-skill']);
+    expect(result.skills[0]?.source).toBe('package');
+    // 缺失目录：静默（常态非异常——与 project/user 层一致）
+    const empty = createLocalSkillsProvider({ locations: [{ dir: join(root, 'no-such'), source: 'package' }] });
+    expect(empty.list()).toEqual({ skills: [], diagnostics: [] });
+  });
+
+  it('repo 根出厂样例三件解析通过（出厂内容回归锁——格式坏在 CI 抓出）', () => {
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const names = ['commit-checklist', 'plugin-quickstart', 'troubleshooting'];
+    for (const name of names) {
+      const filePath = join(repoRoot, 'skills', name, 'SKILL.md');
+      const content = readFileSync(filePath, 'utf8');
+      const { skill, diagnostics } = parseSkillMd(content, filePath, 'package');
+      expect(diagnostics, `${name} 诊断应为空`).toEqual([]);
+      expect(skill?.name).toBe(name);
+      expect(skill?.description.length ?? 0).toBeGreaterThan(0);
+      // 正文非空（指令体是技能的实体）
+      expect(skill?.content.trim().length ?? 0).toBeGreaterThan(0);
+    }
   });
 });
 

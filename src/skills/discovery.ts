@@ -15,7 +15,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import ignore from 'ignore';
 import { parseSkillMd } from './skill-md.js';
 import type { Dirent } from 'node:fs';
@@ -268,14 +269,27 @@ export interface DefaultSkillLocationsOptions {
   readonly trusted?: boolean;
   /** 主目录覆盖（缺省 os.homedir()；测试注入用） */
   readonly homeDir?: string;
+  /** 宿主出厂技能根覆盖（缺省从本模块位置上推包根；测试注入固定值用） */
+  readonly factoryRoot?: string;
 }
 
 /**
- * §4.4 发现位置清单的 M1 落地面（三处；包内约定目录与 resources_discover
- * 钩子属 package 层/插件期，随插件基建落地）：
+ * 宿主出厂技能根（§4.4 ⑤）：本模块位于 `<包根>/src|dist/skills/`，上推两级
+ * 即包根——src（tsx 直跑）与 dist（tsc 产物）双形态同构，`<包根>/skills/`
+ * 恒为随包分发的出厂技能目录。缺省惰性求值一次并缓存（模块生命周期内
+ * 包根不变）。
+ */
+const factorySkillRoot: string = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * §4.4 发现位置清单的落地面（五处）：
  * ① workspace/.agents/skills（project 层，需目录信任）；
  * ② ~/.berry/skills（用户全局，无需信任）；
- * ③ ~/.agents/skills 与 ~/.claude/skills（跨库生态复用，user 层）。
+ * ③ ~/.agents/skills 与 ~/.claude/skills（跨库生态复用，user 层）；
+ * ④ 插件自带技能（package 层经 provider 桥，不在本清单——装配序 ⑨ 注册）；
+ * ⑤ `<包根>/skills/`（宿主出厂技能，package 层目录扫描——样例技能 2-3 个
+ *   进 v1 拍板 17；与官方件注册表同源分发 = 宿主信任，无需目录信任判定，
+ *   恒扫描；置末位 = local-fs 内最低优先，用户同名技能恒压过出厂件）。
  */
 export function defaultSkillLocations(workspace: string, opts?: DefaultSkillLocationsOptions): SkillLocation[] {
   const home = opts?.homeDir ?? homedir();
@@ -289,5 +303,7 @@ export function defaultSkillLocations(workspace: string, opts?: DefaultSkillLoca
   // ③ 跨库目录（agentskills.io 生态两目录原生扫描）
   locations.push({ dir: join(home, '.agents', 'skills'), source: 'user' });
   locations.push({ dir: join(home, '.claude', 'skills'), source: 'user' });
+  // ⑤ 宿主出厂技能（末位最低优先；目录缺失 = 常态静默，与其他目录层一致）
+  locations.push({ dir: join(opts?.factoryRoot ?? factorySkillRoot, 'skills'), source: 'package' });
   return locations;
 }
