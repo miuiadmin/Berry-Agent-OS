@@ -283,6 +283,35 @@ describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主�
     });
   });
 
+  it('canAfford app 维（契约篇 §5.4 底账统一三维）：未声明恒放行 / 声明按 app 账 / foreground 恒放行', () => {
+    // app 维 seam：appBudget = 清单声明面（装配层从 apps/*.app.yaml 折出），
+    // appSpentToday = 会话域投影（persist JOIN sessions on app）
+    const faux = fauxProvider({ provider: 'faux-test', models: [{ id: 'm1' }] });
+    const service = createLlmService({
+      runtime: createLlmRuntime({ providers: [faux.provider] }),
+      defaultModel: () => 'faux-test/m1',
+      backgroundBudgetTokens: 100, // 全局账几乎打满——app 维不得回退用全局账
+      backgroundSpentToday: () => 99,
+      appBudget: (app) => (app === 'hermes' ? 2_000_000 : undefined),
+      appSpentToday: (app) => (app === 'hermes' ? 1_999_999 : 0),
+    });
+    // 带 app 未声明预算 = 恒放行（不适用全局账——app 维独立判据）
+    expect(service.canAfford('background', 'unknown/app')).toBe(true);
+    // 声明且未超 = 放行；声明且超 = 拒（全局账打满不传染 app 维）
+    expect(service.canAfford('background', 'hermes')).toBe(true);
+    // foreground 恒放行（带 app 也不拦——前台不硬断）
+    expect(service.canAfford('foreground', 'hermes')).toBe(true);
+
+    const tight = createLlmService({
+      runtime: createLlmRuntime({ providers: [faux.provider] }),
+      defaultModel: () => 'faux-test/m1',
+      appBudget: (app) => (app === 'hermes' ? 100 : undefined),
+      appSpentToday: (app) => (app === 'hermes' ? 100 : 0),
+    });
+    expect(tight.canAfford('background', 'hermes')).toBe(false); // app 账打满 → 拒新跑
+    expect(tight.canAfford('background')).toBe(true); // 无 app 走全局账（未接线 = 0 < 缺省）
+  });
+
   it('计量身份：callId 每次调用唯一、priority 缺省 foreground（两者即 llm/usage 事件字段源）', async () => {
     const { faux, service } = makeBudgetService(1_000_000);
     faux.setResponses([() => messageOf('stop'), () => messageOf('stop')]);

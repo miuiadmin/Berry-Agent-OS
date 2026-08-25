@@ -38,6 +38,12 @@ import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import type { ConversationDriver } from './conversation.js';
 import { ConversationDriver as ConversationDriverClass } from './conversation.js';
 
+/**
+ * 对话应用 id（apps/chat.app.yaml 清单的 id——会话域打标、resume 域查询、
+ * request/header 载荷腿共用同一字面量；默认入口期 chat 兼任默认应用，第十七批）。
+ */
+export const CHAT_APP_ID = 'chat';
+
 /* ------------------------------------------------------------------ */
 /* ctx.agent 服务面（自 agent-service.ts 迁入——attach 退役后服务与     */
 /* 驱动同件构造，无游离态；类型面公开导出不变，消费方局部结构面免改动） */
@@ -173,7 +179,9 @@ async function applyChatPlugin(
     typeof deps.resumeSession === 'string'
       ? deps.resumeSession
       : deps.resumeSession === true
-        ? persistence.latestSessionId(deps.workspace)
+        ? // chat 域含 NULL 存量回退（契约篇 §5.4 冷读裁决）：NULL = builtin:chat 落地前
+          // 的存量会话，默认入口的域含历史全量（存量不回填但续接不弃养）
+          persistence.latestSessionId(deps.workspace, { app: CHAT_APP_ID, includeNullApp: true })
         : undefined;
   let session: Session | undefined;
   let resumed = false;
@@ -186,14 +194,16 @@ async function applyChatPlugin(
     }
     // 目标不存在回落新建：启动策略是「续接优先」不是「必须续接」
   }
-  session ??= persistence.createSession({ cwd: deps.workspace, profile: 'default' });
+  // 新建会话打标 chat 域（默认启动即 app='chat'——血缘显式打标，不做投影推断）
+  session ??= persistence.createSession({ cwd: deps.workspace, profile: 'default', app: CHAT_APP_ID });
 
   // 组合根槽位回写（let session / resumed 旗标——llm onUsage、ctx.sessions、
   // goal wasResumed 等组合根闭包经此读当前值；goal 轮次激活晚于本 apply，读必定居值）
   deps.bindSession(session, resumed);
   // ② durable 接线（boot 会话三路 sink 绑进组合根活引用槽——转发壳已就位，
-  // pipeline 守门/审批对在构造期绑壳，此刻起落账到当前会话）
-  deps.durableRef.current = createDurableSinks(session);
+  // pipeline 守门/审批对在构造期绑壳，此刻起落账到当前会话；model 腿供
+  // llm/usage 前台折叠的回退值——底账统一，契约篇 §5.4）
+  deps.durableRef.current = createDurableSinks(session, { model: deps.model });
   // session_start（契约篇 §2.2 session 层 emit 行）：会话建立/恢复闭合后必发
   // 一次——插件初始化会话级状态的锚点；origin 对齐首张 header 的 reason 语义
   //（resume = 恢复闭合含崩溃修复，initial = 新建）。装载序上本事件先于一切
@@ -217,7 +227,9 @@ async function applyChatPlugin(
     };
     const serialized = JSON.stringify(payload);
     if (serialized === headerState.last) return; // 组装参数未变——不落新快照
-    current.append('request/header', { ...payload, reason: headerState.next });
+    // app 腿在序列化基线之外追加（会话域打标的载荷腿——会话内恒定，不参与 diff；
+    // 与 sessions.app 同源，血缘显式打标的证据腿，契约篇 §5.4）
+    current.append('request/header', { ...payload, app: CHAT_APP_ID, reason: headerState.next });
     headerState.last = serialized;
     headerState.next = 'change';
   };

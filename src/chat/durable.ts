@@ -152,8 +152,11 @@ function truncateForDurable(content: string | readonly DurableBlock[]): string |
 /**
  * 组装 durable 接线面。session.append 的抛错（如载荷不可 JSON 化）直接上抛——
  * 按「回调违约由 app 装配层兜底」纪律，由会话驱动统一合成 error 收尾。
+ *
+ * @param options.model 装配期模型标识（"provider/model-id"）——llm/usage 前台折叠
+ *   的 model 腿回退值（消息自带 model 缺席时使用；与结算通知器注入同源）
  */
-export function createDurableSinks(session: Session): DurableSinks {
+export function createDurableSinks(session: Session, options: { model?: string } = {}): DurableSinks {
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
       case 'turn_start':
@@ -182,11 +185,26 @@ export function createDurableSinks(session: Session): DurableSinks {
           // content 滤除 toolCall 块：tool/call 事件是工具调用的唯一 durable 承载腿，
           // content 内联 + 事件双载会在投影回读时拼出重复 toolCall 块（会话篇 §1.1，
           // 2026-08-23 修）——滤除同时让 text/thinking 不被 toolCall arguments 挤占预算
-          session.append('assistant/message', {
+          const appended = session.append('assistant/message', {
             content: truncateForDurable(message.content.filter((block) => block.type !== 'toolCall')),
             usage: message.usage,
             stopReason: message.stopReason,
           });
+          // 底账统一真实请求（2026-08-25 应用面第二纵切拍板，契约篇 §5.4）：主 loop
+          // 前台花销同落 llm/usage（foreground 道）——此前只 complete 单发进账，前台
+          // 主对话花销不进任何账（canAfford「自然成立」证伪的冷读硬伤修复）。
+          // origin!=='delegation' 守卫防双重计数：delegation 子会话花销由结算折叠
+          // （app/notify.ts——折进父会话 background 道）覆盖，子会话不再自折一笔。
+          // callId = 轮身份（assistant/message 事件的 seq——write-behind 重试去重锚点，
+          // 同会话内天然唯一且幂等）
+          if (message.usage !== undefined && session.header.origin !== 'delegation') {
+            session.append('llm/usage', {
+              callId: `turn:${session.header.sessionId}:${appended.seq}`,
+              model: message.model ?? options.model ?? 'unknown',
+              priority: 'foreground',
+              usage: { input: message.usage.input, output: message.usage.output },
+            });
+          }
           for (const block of message.content) {
             if (block.type === 'toolCall') {
               session.append('tool/call', {

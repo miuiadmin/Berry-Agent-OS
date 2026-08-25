@@ -112,6 +112,12 @@ export interface RequestHeaderData {
   readonly systemPrompt: string;
   readonly toolSchemas: readonly unknown[];
   readonly reason: 'initial' | 'resume' | 'change';
+  /**
+   * 会话应用域标记（契约篇 §5.4 第二纵切——与 sessions.app 同源的载荷腿：
+   * 血缘显式打标的证据腿，读侧投影不依赖 sessions 行也能从事件流看出归属）。
+   * NULL 域（存量会话/未打标）不落字段。
+   */
+  readonly app?: string;
 }
 
 /** 审批请求载荷（log-only：落日志即目的） */

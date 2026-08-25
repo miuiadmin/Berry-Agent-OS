@@ -64,6 +64,18 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         `沙箱档：${runtime.sandboxMode}`,
         `审批档：${runtime.approval.policyMode}`,
         renderCompositionTree(runtime.composition, runtime.plugins.list()),
+        // 应用面（契约篇 §5.4 第二纵切——官方清单装载 + 组件在场断言产物）：
+        // 缺场应用带缺失组件清单（应用级隔离不拒启，诊断走此面）
+        `应用（${runtime.apps.size}）：${
+          [...runtime.apps.values()]
+            .map((m) => {
+              const missing = runtime.appGaps.get(m.id);
+              return missing !== undefined
+                ? `${m.id}[${m.label}]（缺组件：${missing.join('、')}）`
+                : `${m.id}[${m.label}]`;
+            })
+            .join('、') || '（无）'
+        }`,
         `工具（${runtime.tools.list().length}）：${runtime.tools
           .list()
           .map((t) => t.name)

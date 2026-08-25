@@ -13,6 +13,10 @@
  * 预算闸门底账 durable 化（2026-08-24 第十一批拍板 #1，loopx 读码启发 #1——会话篇 §1.1）：
  * 花销 = llm/usage durable 事件（onUsage 写侧经组合根落日志），余额 = 注入的聚合查询
  * （backgroundSpentToday 读侧）——余额不存储、重放推导；原 per-process 内存账形态退役。
+ *
+ * 底账统一真实请求（2026-08-25 应用面第二纵切拍板，契约篇 §5.4）：主 loop 前台花销
+ * 经 chat durable 折叠同落 llm/usage（foreground 道——落点在 chat/durable.ts 非 complete，
+ * 此处只持有闸门）；canAfford 升三维 (当日, priority, app)——app 维 = 会话域投影归集。
  */
 
 import type { AssistantMessage, Message, Usage } from '../contracts/llm.js';
@@ -53,6 +57,13 @@ export interface CompleteRequest {
    * 用户可见请求永远优先（铁律 4 原文）。
    */
   priority?: 'background' | 'foreground';
+  /**
+   * 应用域标记（契约篇 §5.4 底账统一第三维，2026-08-25 纵切二落码）：
+   * 调用方携当前会话域（无会话的后台 job 取 job 归属应用），后台闸门按应用账
+   * 判——未声明 budget 的应用恒放行。入账侧不读本字段（花销按 sessions.app
+   * 会话域投影归集，payload 不加 appId）；前台调用忽略此字段（恒放行）。
+   */
+  app?: string;
   /** provider 原生参数透传槽——平铺展开进 pi-ai 请求参数（具名键之后，可覆盖）；钩子审计面 M2 落（骨架篇 §3.4） */
   providerNative?: Record<string, unknown>;
 }
@@ -85,8 +96,15 @@ export interface LlmService {
    * （backgroundSpentToday——底账为会话日志 llm/usage durable 事件的投影，
    * 2026-08-24 第十一批拍板 #1：花销是事件流事实、余额不存储，重启/双开/审计
    * 三题一次解；llm 模块不持有账，只持有闸门机制）。
+   *
+   * 第三维 app（契约篇 §5.4 应用面第二纵切，2026-08-25 底账统一拍板）：
+   * 会话域投影归集——花销按 sessions.app 归集到应用名下当日账。调用语义：
+   * 查询方带当前会话域（后台 job 无会话时取 job 归属）；**未声明 budget 的
+   * 应用恒 true**（无预算 = 不闸，全局缺省限额只作用于 background 道全局账）。
+   * 超限执法只落 background（后台拒新跑）；foreground 恒放行花销照进账
+   * （可见性走 /usage 计量投影面，不硬断）。
    */
-  canAfford(priority: 'background' | 'foreground'): boolean;
+  canAfford(priority: 'background' | 'foreground', app?: string): boolean;
 }
 
 /** 服务构造选项 */
@@ -117,6 +135,20 @@ export interface LlmServiceOptions {
    * 「最后一发可略超限额」同语义，预算是软闸门不是安全边界。
    */
   backgroundSpentToday?: () => number;
+  /**
+   * 应用预算查询（canAfford 第三维数据源；缺省恒 undefined = 未声明）：
+   * app id → 该应用清单声明的 budget.dailyTokens。生产由组合根注入
+   * （应用注册表闭包——装载期官方清单 + 未来第三方清单合流）。
+   * 未声明的应用恒 true 不闸（无预算 = 不闸，全局限额只管全局账）。
+   */
+  appBudget?: (app: string) => number | undefined;
+  /**
+   * 应用域当日后台已耗查询（缺省 () => 0——无装配接线即无已耗；生产由组合根注入：
+   * 会话日志 llm/usage 事件按 sessions.app 会话域投影的当日聚合，persist 模块实现）。
+   * 与 backgroundSpentToday 同底账不同切面：全局账按 time 全局过滤，应用账
+   * 额外 JOIN sessions 按域归集（底账事件载荷不加 appId——域归属是会话行属性）。
+   */
+  appSpentToday?: (app: string) => number;
 }
 
 /** 缺省重试策略：开 1 次重试、500ms 起步指数退避（SDK 级 maxRetries 之外的有界第二层） */
@@ -136,9 +168,24 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
   const budget = options.backgroundBudgetTokens ?? DEFAULT_BACKGROUND_BUDGET;
   // 当日后台已耗 = 注入的聚合查询（底账 = 会话日志 llm/usage 事件投影，缺省无已耗）
   const spentToday = options.backgroundSpentToday ?? (() => 0);
+  // 应用面三维（缺省 = 无声明无已耗：canAfford(app) 恒 true——诊断装配形态）
+  const appBudget = options.appBudget ?? (() => undefined);
+  const appSpentToday = options.appSpentToday ?? (() => 0);
 
-  const canAfford = (priority: 'background' | 'foreground'): boolean =>
-    priority === 'foreground' ? true : spentToday() < budget;
+  /**
+   * 预算闸门（三维）：
+   * - foreground 恒 true（用户可见请求永远优先，铁律 4 原文——前台不硬断）；
+   * - background 无 app：全局账（当日全局 background 累计 < 全局限额）；
+   * - background 带 app：应用未声明 budget 恒 true（无预算不闸）；声明了则按
+   *   应用域当日归集账比较（会话域投影——底账同源，切面不同）。
+   */
+  const canAfford = (priority: 'background' | 'foreground', app?: string): boolean => {
+    if (priority === 'foreground') return true;
+    if (app === undefined) return spentToday() < budget;
+    const declared = appBudget(app);
+    if (declared === undefined) return true;
+    return appSpentToday(app) < declared;
+  };
 
   return {
     registerProvider: (provider) => runtime.registerProvider(provider),
@@ -160,14 +207,17 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
           'M1 不支持结构化输出（pi-ai 面无此腿）——schema 随 M2 provider 钩子收口',
         );
       }
-      // 预算闸门（骨架篇 §9.3）：后台调用且当日已耗尽 → 拒发。检查在调用前；入账
-      // 在成功后（装配层经 onUsage 落 llm/usage durable 事件）——最后一发可略超限额
-      //（check-then-act 于单发粒度；另 write-behind 批落窗口内的最近一笔闸门可能未见，
-      // 同为「略超」语义——预算是软闸门，不是安全边界）
-      if (req.priority === 'background' && !canAfford('background')) {
+      // 预算闸门（骨架篇 §9.3 + 契约篇 §5.4 三维）：后台调用且当日已耗尽 → 拒发。
+      // 检查在调用前；入账在成功后（装配层经 onUsage 落 llm/usage durable 事件）——
+      // 最后一发可略超限额（check-then-act 于单发粒度；另 write-behind 批落窗口内的
+      // 最近一笔闸门可能未见，同为「略超」语义——预算是软闸门，不是安全边界）。
+      // 带 app = 应用账判据（未声明恒放行）；不带 = 全局账。
+      if (req.priority === 'background' && !canAfford('background', req.app)) {
         throw new AppError(
           LLM_BUDGET_EXCEEDED,
-          `当日后台预算已耗尽（限额 ${budget} tokens）——用户可见请求永远优先，后台任务下个周期再试`,
+          req.app !== undefined
+            ? `应用 ${req.app} 当日后台预算已耗尽——用户可见请求永远优先，后台任务下个周期再试`
+            : `当日后台预算已耗尽（限额 ${budget} tokens）——用户可见请求永远优先，后台任务下个周期再试`,
         );
       }
       // 透传槽同样禁凭证类键：不做 apiKey → providerNative.apiKey 的洗白通道

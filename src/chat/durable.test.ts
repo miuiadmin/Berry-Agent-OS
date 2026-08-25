@@ -68,15 +68,34 @@ describe('createDurableSinks：事件 → session.append 映射', () => {
       'turn/start',
       'user/message',
       'assistant/message',
+      // 底账统一（契约篇 §5.4）：主循环前台道折叠——usage 落账紧跟 assistant 终值
+      'llm/usage',
       'tool/call',
       'tool/result',
       'turn/end',
     ]);
     // tool/call 的 arguments 落原始字符串（未解析态）
-    const call = session.events[3]!.data as { arguments: string };
+    const call = session.events[4]!.data as { arguments: string };
     expect(call.arguments).toBe('{"path":"a.txt","content":"x"}');
     // turn/end 终态映射：toolUse → completed
-    expect((session.events[5]!.data as { reason: string }).reason).toBe('completed');
+    expect((session.events[6]!.data as { reason: string }).reason).toBe('completed');
+  });
+
+  it('底账统一不双计：delegation 会话不自折前台道（子会话花销只经结算折叠进父账）', () => {
+    // delegation 子会话：assistant 用量不落 llm/usage——它的账由父会话的
+    // subagent 结算折叠（background 道，callId = 子运行 id）统一入账，
+    // 自折一道 + 结算一道 = 双计，守卫在 origin 上（契约篇 §5.4 底账统一）
+    const delegation = new Session({ origin: 'delegation' });
+    createDurableSinks(delegation).handle({ type: 'message_end', message: textAssistant('子跑完') });
+    expect(delegation.events.filter((e) => e.type === 'llm/usage')).toHaveLength(0);
+    // 对照：非 delegation 会话（主循环/独立跑）自折前台道
+    const normal = new Session({ origin: 'user' });
+    createDurableSinks(normal).handle({ type: 'message_end', message: textAssistant('主循环答') });
+    const folds = normal.events.filter((e) => e.type === 'llm/usage');
+    expect(folds).toHaveLength(1);
+    const data = folds[0]!.data as { priority: string; usage: { input: number; output: number } };
+    expect(data.priority).toBe('foreground');
+    expect(data.usage).toEqual({ input: 1, output: 2 });
   });
 
   it('stopReason → TurnEndReason 映射四分支', () => {
@@ -284,10 +303,11 @@ describe('投影回读 round-trip（append → derive → projectedToAgentMessag
         },
       }),
     ).not.toThrow();
-    const call = session.events[1]!.data as { arguments: string };
+    const call = session.events.find((e) => e.type === 'tool/call')!.data as { arguments: string };
     expect(call.arguments.endsWith('[truncated for durable log]')).toBe(true);
     // 整事件序列化字节在 64KiB 护栏内
-    expect(Buffer.byteLength(JSON.stringify(session.events[1]!), 'utf8')).toBeLessThan(64 * 1024);
+    const callEvent = session.events.find((e) => e.type === 'tool/call')!;
+    expect(Buffer.byteLength(JSON.stringify(callEvent), 'utf8')).toBeLessThan(64 * 1024);
     // 截断产生的坏 JSON 回读降级为空对象（与首次落库解析失败对称）
     const roundTrip = projectedToAgentMessages(deriveMessages(session.events));
     const back = roundTrip[0] as AssistantMessage;

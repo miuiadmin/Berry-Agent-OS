@@ -22,6 +22,53 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+describe('应用域打标（契约篇 §5.4 第二纵切——sessions.app 列 v6）', () => {
+  it('createSession 打标 round-trip：sessions 行落 app，重开库 loadSession 元数据不丢', async () => {
+    const path = join(dir, 'app-tag.db');
+    const p = Persistence.open({ path });
+    const hers = p.createSession({ cwd: '/w/hermes', app: 'hermes' });
+    const bare = p.createSession({ cwd: '/w/bare' }); // 不打标 = NULL（存量/未声明域）
+    hers.append('turn/start', {});
+    hers.append('turn/end', { reason: 'completed' }); // fork 边界须落在 turn 闭合之后
+    bare.append('turn/start', {});
+    await p.flush();
+    // 物理行：打标落列、不打标 NULL（不回填——NULL 域语义保留）
+    expect(p.store.sessionRow(hers.header.sessionId)!.app).toBe('hermes');
+    expect(p.store.sessionRow(bare.header.sessionId)!.app).toBeNull();
+    await p.close();
+
+    // 重开库：loadSession 恢复元数据（fork 继承要靠它）
+    const p2 = Persistence.open({ path });
+    const resumed = p2.loadSession(hers.header.sessionId)!;
+    resumed.append('turn/start', {});
+    resumed.append('turn/end', { reason: 'completed' });
+    await p2.flush();
+    const forked = p2.forkSession(resumed); // fork 缺省继承父域
+    forked.append('turn/start', {});
+    await p2.flush();
+    expect(p2.store.sessionRow(forked.header.sessionId)!.app).toBe('hermes');
+    await p2.close();
+  });
+
+  it('latestSessionId 域两形：chat 域含 NULL 存量（不弃养），严格域只认本域', async () => {
+    const p = Persistence.open({ path: join(dir, 'app-domain.db') });
+    // 同 cwd 三个会话：NULL 存量（旧）、chat、hermes——创建序即 created_at 序
+    const legacy = p.createSession({ cwd: '/w' });
+    const chat = p.createSession({ cwd: '/w', app: 'chat' });
+    const hers = p.createSession({ cwd: '/w', app: 'hermes' });
+    for (const s of [legacy, chat, hers]) s.append('turn/start', {});
+    await p.flush();
+
+    // chat 域含 NULL：最新是 hermes（后建）但不在域内 → 域内最新 = chat
+    expect(p.latestSessionId('/w', { app: 'chat', includeNullApp: true })).toBe(chat.header.sessionId);
+    // 严格域（第三方）：只认本域，不吞 NULL 也不吞他域
+    expect(p.latestSessionId('/w', { app: 'hermes' })).toBe(hers.header.sessionId);
+    // 无域 = 全域原行为（TUI 续接兜底）
+    expect(p.latestSessionId('/w')).toBe(hers.header.sessionId);
+    await p.close();
+  });
+});
+
 describe('onLiveEvent 活体镜像（三路接线）', () => {
   it('create/fork：append 即回调（sessionId + 事件信封），durable 落库不受影响', async () => {
     const seen: Array<{ sessionId: string; type: string; seq: number }> = [];

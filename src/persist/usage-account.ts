@@ -23,6 +23,17 @@ const SUM_BACKGROUND_SQL = `
     AND time >= ?
 `;
 
+/** 应用域聚合语句（canAfford 第三维 app——会话域投影归集：JOIN sessions 按 app 列过滤） */
+const SUM_BACKGROUND_APP_SQL = `
+  SELECT COALESCE(SUM(json_extract(e.data, '$.usage.input') + json_extract(e.data, '$.usage.output')), 0) AS spent
+  FROM events e
+  JOIN sessions s ON e.session_id = s.id
+  WHERE e.type = 'llm/usage'
+    AND json_extract(e.data, '$.priority') = 'background'
+    AND e.time >= ?
+    AND s.app = ?
+`;
+
 /**
  * 当日（自 sinceMs 起）后台补全累计 tokens（in+out 合计——与闸门限额同口径）。
  *
@@ -32,9 +43,17 @@ const SUM_BACKGROUND_SQL = `
  *   「最后一发可略超限额」同语义，预算是软闸门不是安全边界；
  * - 跨会话天然成立：events 表单库带 session_id，聚合按 type+time 全局过滤
  *   （双开另一进程的花销经 WAL 落盘后同样可见）。
+ *
+ * @param app 应用域（可选项——给出即按会话域投影归集：花销按 sessions.app 归集
+ *   到当日各会话所属应用名下。底账 log-only 事件载荷不加 appId——域归属是
+ *   会话行的属性，不是每笔花销的属性）
  */
-export function spentBackgroundTokensSince(store: Store, sinceMs: number): number {
-  const row = store.connection.prepare(SUM_BACKGROUND_SQL).get(sinceMs) as { spent: number } | undefined;
+export function spentBackgroundTokensSince(store: Store, sinceMs: number, app?: string): number {
+  if (app === undefined) {
+    const row = store.connection.prepare(SUM_BACKGROUND_SQL).get(sinceMs) as { spent: number } | undefined;
+    return row?.spent ?? 0;
+  }
+  const row = store.connection.prepare(SUM_BACKGROUND_APP_SQL).get(sinceMs, app) as { spent: number } | undefined;
   return row?.spent ?? 0;
 }
 

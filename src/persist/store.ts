@@ -14,7 +14,7 @@ import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '..
 import type { SessionEvent } from '../contracts/events.js';
 import { deepFreeze } from '../session/snapshot.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
-import { APPLICATION_ID, CANONICAL_DDL, SCHEMA_VERSION } from './schema.js';
+import { APPLICATION_ID, CANONICAL_DDL, SCHEMA_VERSION, SESSION_APP_COLUMN_MIGRATION } from './schema.js';
 
 /** 打开参数 */
 export interface StoreOptions {
@@ -42,6 +42,8 @@ export interface SessionRow {
   profile: string | null;
   incarnation: string;
   revision: number;
+  /** 应用域标记（v6 列——NULL = 存量会话 user 态，存量不回填；契约篇 §5.4） */
+  app: string | null;
 }
 
 /** appendCore 需要的会话登记信息（首次写入时落 sessions 行） */
@@ -53,6 +55,8 @@ export interface SessionRegistration {
   delegationDepth: number;
   cwd?: string;
   profile?: string;
+  /** 应用域标记（血缘显式打标——缺省 NULL；fork 经 Persistence 继承父域） */
+  app?: string;
 }
 
 /**
@@ -62,8 +66,11 @@ export interface SessionRegistration {
  * （宁拒绝不误读；old-v2 旧库不进此门禁）。
  */
 export function openStore(options: StoreOptions): Store {
-  // 迁移链先校验排序（装配错误在此即抛，不动任何库文件）
-  const chain = normalizeMigrations(options.migrations ?? [], SCHEMA_VERSION);
+  // 迁移链先校验排序（装配错误在此即抛，不动任何库文件）。
+  // 内核表迁移（sessions 是内核表——DDL 演进直归 persist，业务调用方不感知）：
+  // persist 自注入，与业务迁移项合并排序。版本空间共享——内核占用 v6（sessions
+  // +app 列），业务模块声明面不得撞号（normalizeMigrations 严格递增校验即执法面）
+  const chain = normalizeMigrations([...(options.migrations ?? []), SESSION_APP_COLUMN_MIGRATION], SCHEMA_VERSION);
   const latestVersion = chain.length > 0 ? chain[chain.length - 1]!.version : SCHEMA_VERSION;
 
   const db = new Database(options.path);
@@ -264,8 +271,8 @@ export class Store {
       // sessions 行：首次登记（ON CONFLICT 静默——header 以首次登记为准，血缘不改写）
       this.stmt(
         `INSERT INTO sessions (id, schema_version, created_at, cwd, origin, parent_session, seed_length,
-           delegation_depth, profile, incarnation, revision)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+           delegation_depth, profile, incarnation, revision, app)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
          ON CONFLICT(id) DO NOTHING`,
       ).run(
         reg.sessionId,
@@ -278,6 +285,7 @@ export class Store {
         reg.delegationDepth,
         reg.profile ?? null,
         incarnation,
+        reg.app ?? null,
       );
       // revision 前进：incarnation 变更（新进程接管）= 复位边界，revision 重计 1
       const next =
@@ -364,12 +372,25 @@ export class Store {
   /**
    * 某工作区（cwd）的最新会话 id（TUI 启动续接策略的取数面，技术栈篇 §5）。
    * created_at 毫秒可同值——同刻并列时 rowid 兜底取后建者（自增近似时序）。
+   *
+   * 应用域过滤（契约篇 §5.4 第二纵切——冷读裁决两形）：
+   * - chat 域（默认入口）`includeNullApp: true`：`app IS NULL OR app = 'chat'`
+   *   ——NULL 是 builtin:chat 落地前的存量会话，对话应用续接它们（存量不回填、
+   *   但默认入口的域含历史全量）；
+   * - 第三方应用严格域：仅 `app = <id>`——不吞他域会话。
    * @returns 无匹配返回 undefined
    */
-  latestSessionId(cwd: string): string | undefined {
-    const row = this.stmt('SELECT id FROM sessions WHERE cwd = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(
-      cwd,
-    ) as { id: string } | undefined;
+  latestSessionId(cwd: string, domain?: { app: string; includeNullApp?: boolean }): string | undefined {
+    if (domain === undefined) {
+      const row = this.stmt('SELECT id FROM sessions WHERE cwd = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(
+        cwd,
+      ) as { id: string } | undefined;
+      return row?.id;
+    }
+    const clause = domain.includeNullApp === true ? '(app IS NULL OR app = ?)' : 'app = ?';
+    const row = this.stmt(
+      `SELECT id FROM sessions WHERE cwd = ? AND ${clause} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).get(cwd, domain.app) as { id: string } | undefined;
     return row?.id;
   }
 

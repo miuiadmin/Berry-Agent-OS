@@ -7,6 +7,8 @@
  * 永不被物理布局破坏（物理/逻辑分离原则：语义在 session 模块，编码在此）。
  */
 
+import type { MigrationSpec } from './migrations.js';
+
 /** schema 基线版本（PRAGMA user_version 门禁值起点；递进经统一迁移框架——migrations.ts，2026-08-24） */
 export const SCHEMA_VERSION = 1;
 
@@ -90,3 +92,22 @@ CREATE TABLE model_catalog (
 -- ── 8. 记忆库表族：已定稿于[记忆与自进化]篇 §3 ────────────────
 --    （memories + memory_fts；经统一迁移框架进 user_version=2，DDL 归 memory 模块自带）
 `;
+
+/**
+ * v6 迁移：sessions 表 +`app` 列（契约篇 §5.4 应用面第二纵切——会话域打标）。
+ *
+ * 版本序裁决（2026-08-25 应用面冷读）：v6 = 此迁移**单独一迁不夹带**（列迁移
+ * 非「新表」）；scheduler jobs 表顺移 v7；tenant 列随服务器形态存储纵切。
+ * sessions 是内核表——此迁移 DDL 直归 persist 迁移链而非件静态声明面
+ * （memory/goal 等业务表走各自模块声明，组合根聚合）。
+ *
+ * 语义：NULL = 存量会话（builtin:chat 落地前的 user 态，**存量不回填**）；新建
+ * 会话打标归属——默认启动即 app='chat'（chat 兼任默认入口期），显式 /app 进入
+ * 与 delegation fork 按各自域（血缘显式打标，与 origin: 'delegation' 同构，
+ * 不做纯投影推断）。
+ */
+export const SESSION_APP_COLUMN_MIGRATION: MigrationSpec = {
+  version: 6,
+  name: 'sessions-app-column',
+  sql: 'ALTER TABLE sessions ADD COLUMN app TEXT',
+};

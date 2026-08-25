@@ -229,6 +229,8 @@ describe('ConversationDriver + durable 接线', () => {
       'turn/start',
       'user/message',
       'assistant/message',
+      // 底账统一（契约篇 §5.4）：主循环前台道折叠，紧跟 assistant 终值
+      'llm/usage',
       'turn/end',
     ]);
     // LLM 请求上下文含系统提示词与工具面（装配接线证据；memory 五件 + agent +
@@ -251,6 +253,9 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_set',
       'goal_update',
     ]);
+    // request/header 载荷带应用域腿（血缘显式打标的证据面——契约篇 §5.4）
+    const header = runtime.session!.events.find((e) => e.type === 'request/header');
+    expect((header?.data as { app?: string }).app).toBe('chat');
     // 投影回读
     const projected = deriveMessages(runtime.session!.events);
     expect(projected.map((m) => m.type)).toEqual(['user', 'assistant']);
@@ -323,13 +328,15 @@ describe('ConversationDriver + durable 接线', () => {
       'turn/start',
       'user/message',
       'assistant/message',
+      // 底账统一：前台道折叠经活体镜像同样可见（事件流事实）
+      'llm/usage',
       'turn/end',
     ]);
     // 信封归属：全部事件带同一 sessionId（dsh-11——多会话并存可分辨）
     const id = runtime.session!.header.sessionId;
     expect(mirrored.every((m) => m.sessionId === id)).toBe(true);
     // 事件本体即 SessionEvent（seq 连续递增，非重制副本）
-    expect(mirrored.map((m) => m.event.seq)).toEqual([1, 2, 3, 4, 5]);
+    expect(mirrored.map((m) => m.event.seq)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('tools_change 接线（骨架篇 §9.2 装配层义务）：注册即刷新 loop 工具快照 + 即时落 header change 快照', async () => {
@@ -422,6 +429,8 @@ describe('ConversationDriver + durable 接线', () => {
       'turn/start',
       'user/message',
       'assistant/message',
+      // 底账统一（契约篇 §5.4）：主循环前台道折叠，紧跟 assistant 终值
+      'llm/usage',
       'turn/end',
     ]);
     // 日志闭合 → 恢复协议零活儿（turn 必闭合纪律，会话篇 §1.4）
@@ -1170,9 +1179,18 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     expect(lastUser.source).toBe('subagent-settled');
     expect(lastUser.content).toContain('委派-审读');
 
-    // durable 双事件：llm/usage 折叠（background 道，callId = 子运行 id）+ user/message 带归因
-    const usage = runtime.session!.events.find((e) => e.type === 'llm/usage');
-    expect(usage?.data).toEqual({
+    // durable 双事件：llm/usage 折叠（background 道，callId = 子运行 id）+ user/message 带归因。
+    // 底账统一（契约篇 §5.4）：主循环 turn 先自折 foreground 道，结算再折 background 道——
+    // 两道并存不冲突，find 只认 background 的折叠才是结算产物
+    const usageEvents = runtime.session!.events.filter((e) => e.type === 'llm/usage');
+    const foreground = usageEvents.find((e) => (e.data as { priority: string }).priority === 'foreground');
+    expect(foreground?.data).toMatchObject({
+      callId: expect.stringMatching(/^turn:/),
+      priority: 'foreground',
+      usage: { input: NO_USAGE.input, output: NO_USAGE.output },
+    });
+    const background = usageEvents.find((e) => (e.data as { priority: string }).priority === 'background');
+    expect(background?.data).toEqual({
       callId: 'stub-sub-run',
       model: expect.any(String),
       priority: 'background',

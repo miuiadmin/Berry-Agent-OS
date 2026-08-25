@@ -38,8 +38,8 @@ export class Persistence {
   readonly writeBehind: WriteBehind;
   /** 本进程生命周期 UUID（revision 复位边界；跨进程变更检测的一半） */
   readonly incarnation: string;
-  /** createSession 附带的会话元数据（cwd/profile——sessions 表登记素材） */
-  private readonly sessionMeta = new Map<string, { cwd?: string; profile?: string }>();
+  /** createSession 附带的会话元数据（cwd/profile/app——sessions 表登记素材） */
+  private readonly sessionMeta = new Map<string, { cwd?: string; profile?: string; app?: string }>();
   /** 原始打开参数（活体镜像回调在其中） */
   private readonly options: PersistenceOptions;
 
@@ -54,7 +54,11 @@ export class Persistence {
    * 会话活体事件统一落点（三处接线共用）：write-behind 入队（durable 优先）
    * → 组合根镜像通知（session/event 活体镜像，观察侧）。
    */
-  private sink(session: Session, event: SessionEvent, meta: { cwd?: string; profile?: string } | undefined): void {
+  private sink(
+    session: Session,
+    event: SessionEvent,
+    meta: { cwd?: string; profile?: string; app?: string } | undefined,
+  ): void {
     this.writeBehind.enqueue(session, event, meta);
     this.options.onLiveEvent?.(session.header.sessionId, event);
   }
@@ -66,18 +70,19 @@ export class Persistence {
 
   /**
    * 新建会话并接线持久化：Session 的活体事件直达 write-behind 队列。
-   * @param opts Session 构造参数 + cwd/profile（会话登记元数据，落 sessions 表）
+   * @param opts Session 构造参数 + cwd/profile/app（会话登记元数据，落 sessions 表；
+   *   app = 应用域打标——默认启动即 'chat'，契约篇 §5.4 冷读裁决）
    */
-  createSession(opts: SessionOptions & { cwd?: string; profile?: string } = {}): Session {
-    const { cwd, profile, ...sessionOpts } = opts;
+  createSession(opts: SessionOptions & { cwd?: string; profile?: string; app?: string } = {}): Session {
+    const { cwd, profile, app, ...sessionOpts } = opts;
     // 闭包经变量引用自身：首个事件总在构造返回之后才发生，赋值先于首次 emit
     let session!: Session;
     session = new Session({
       ...sessionOpts,
       emit: (event) => this.sink(session, event, this.sessionMeta.get(session.header.sessionId)),
     });
-    if (cwd !== undefined || profile !== undefined) {
-      this.sessionMeta.set(session.header.sessionId, { cwd, profile });
+    if (cwd !== undefined || profile !== undefined || app !== undefined) {
+      this.sessionMeta.set(session.header.sessionId, { cwd, profile, app });
     }
     return session;
   }
@@ -85,13 +90,14 @@ export class Persistence {
   /**
    * fork 出子会话并接线持久化（Session.fork 默认不带 emit——接线责任在此）。
    * 子会话种子事件（seq < seedLength）首次入队时由 write-behind 物理复制到子会话名下。
-   * @param opts Session.fork 参数 + cwd/profile（子会话登记元数据，缺省继承父会话）
+   * @param opts Session.fork 参数 + cwd/profile/app（子会话登记元数据，缺省继承父会话——
+   *   **app 血缘继承**：delegation fork 归属随创建时血缘落定，不运行时推断）
    */
   forkSession(
     parent: Session,
-    opts: Parameters<Session['fork']>[0] & { cwd?: string; profile?: string } = {},
+    opts: Parameters<Session['fork']>[0] & { cwd?: string; profile?: string; app?: string } = {},
   ): Session {
-    const { cwd, profile, ...forkOpts } = opts;
+    const { cwd, profile, app, ...forkOpts } = opts;
     const inherited = this.sessionMeta.get(parent.header.sessionId);
     // 同 createSession 的自引用手法：子会话首事件总在构造返回之后
     let child!: Session;
@@ -101,6 +107,7 @@ export class Persistence {
         this.sink(child, event, {
           cwd: cwd ?? inherited?.cwd,
           profile: profile ?? inherited?.profile,
+          app: app ?? inherited?.app,
         }),
     });
     return child;
@@ -130,8 +137,12 @@ export class Persistence {
       delegationDepth: row.delegation_depth,
       emit: (event) => this.sink(session, event, this.sessionMeta.get(sessionId)),
     });
-    if (row.cwd !== null || row.profile !== null) {
-      this.sessionMeta.set(sessionId, { cwd: row.cwd ?? undefined, profile: row.profile ?? undefined });
+    if (row.cwd !== null || row.profile !== null || row.app !== null) {
+      this.sessionMeta.set(sessionId, {
+        cwd: row.cwd ?? undefined,
+        profile: row.profile ?? undefined,
+        app: row.app ?? undefined,
+      });
     }
     return session;
   }
@@ -141,9 +152,12 @@ export class Persistence {
     return this.writeBehind.flush(sessionId);
   }
 
-  /** 某工作区最新会话 id（TUI 启动续接策略取数；无匹配 undefined） */
-  latestSessionId(cwd: string): string | undefined {
-    return this.store.latestSessionId(cwd);
+  /**
+   * 某工作区最新会话 id（TUI 启动续接策略取数；无匹配 undefined）。
+   * 应用域过滤透传 store（chat 域含 NULL 存量回退 / 第三方严格域——契约篇 §5.4）。
+   */
+  latestSessionId(cwd: string, domain?: { app: string; includeNullApp?: boolean }): string | undefined {
+    return this.store.latestSessionId(cwd, domain);
   }
 
   /** revision 指纹（storeIdentity:incarnation:revision——投影缓存跨进程变更检测） */

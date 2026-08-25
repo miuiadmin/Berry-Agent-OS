@@ -1,6 +1,6 @@
 /**
- * L1 persist 单元测试（统一迁移框架半边）——链校验 / 全新库一次到位 / 存量补跑 /
- * 降级拒绝 / 指纹含触发器。hermetic：临时目录建库，用后即清。
+ * L1 persist 单元测试（统一迁移框架半边）——链校验 / 全新库一次到位 / 内核迁移
+ * 自注入 / 存量补跑 / 降级拒绝 / 指纹含触发器。hermetic：临时目录建库，用后即清。
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openStore } from './index.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
+import { SESSION_APP_COLUMN_MIGRATION } from './schema.js';
 
 /** 临时库目录（全文件共享，结束后整体清除） */
 let dir: string;
@@ -24,12 +25,19 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** 最小可用迁移项素材（不动业务表——框架测试只关心框架行为；表名随版本变防链内冲突） */
+/**
+ * 最小可用迁移项素材（不动业务表——框架测试只关心框架行为；表名随版本变防链内冲突）。
+ * 版本一律取内核之上（内核 v6 恒自注入链尾参排——见下方内核迁移组用例），
+ * 业务缺口模拟才可能与内核共存于同一条链。
+ */
 const spec = (version: number, name = `m${version}`): MigrationSpec => ({
   version,
   name,
   sql: `CREATE TABLE mig_${'x'.repeat(version - 1)} (a INTEGER) STRICT;`,
 });
+
+/** 内核自注入迁移的版本号（当前 = sessions +app 列，v6）——链尾期望的锚点 */
+const KERNEL_VERSION = SESSION_APP_COLUMN_MIGRATION.version;
 
 describe('normalizeMigrations 链校验（装配期即抛，不动库）', () => {
   it('version 必须大于基线且为整数', () => {
@@ -57,43 +65,84 @@ describe('normalizeMigrations 链校验（装配期即抛，不动库）', () =>
 describe('全新库：基线 + 迁移链一次到位', () => {
   it('user_version 直达链尾，迁移对象全部建立', () => {
     const path = nextPath();
-    const store = openStore({ path, migrations: [spec(2)] });
+    const store = openStore({ path, migrations: [spec(KERNEL_VERSION + 1)] });
     store.close();
     const raw = new Database(path);
     const uv = raw.pragma('user_version', { simple: true });
-    const hasMig = raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'mig_x'").get() as { n: number };
+    const hasMig = raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'mig_xxxxxx'").get() as {
+      n: number;
+    };
     raw.close();
-    expect(uv).toBe(2);
+    expect(uv).toBe(KERNEL_VERSION + 1);
     expect(hasMig.n).toBe(1);
   });
 
-  it('多级链一次到位（2 → 3）', () => {
+  it('多级链一次到位（7 → 8）', () => {
     const path = nextPath();
-    openStore({ path, migrations: [spec(2), spec(3)] }).close();
+    openStore({ path, migrations: [spec(KERNEL_VERSION + 1), spec(KERNEL_VERSION + 2)] }).close();
     const raw = new Database(path);
-    expect(raw.pragma('user_version', { simple: true })).toBe(3);
+    expect(raw.pragma('user_version', { simple: true })).toBe(KERNEL_VERSION + 2);
     raw.close();
   });
 });
 
-describe('存量库：按缺口补跑（只前进）', () => {
-  it('v1 库带链重开 → 补跑至 v2，基线数据完好', () => {
+describe('内核迁移自注入（sessions 是内核表——DDL 演进不归业务调用方感知）', () => {
+  it('空链开库也达内核链尾：uv = 内核版本，sessions 带 app 列', () => {
     const path = nextPath();
-    // 先以空链开一个 v1 库并写一条基线数据
-    const v1 = openStore({ path });
-    v1.appendCore(
+    openStore({ path }).close();
+    const raw = new Database(path);
+    expect(raw.pragma('user_version', { simple: true })).toBe(KERNEL_VERSION);
+    const cols = (raw.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>).map((c) => c.name);
+    raw.close();
+    expect(cols).toContain('app');
+  });
+
+  it('业务迁移撞内核版本号 = 装配期拒绝（版本空间共享，严格递增执法）', () => {
+    const path = nextPath();
+    expect(() =>
+      openStore({
+        path,
+        migrations: [{ version: KERNEL_VERSION, name: 'claim-kernel-slot', sql: 'CREATE TABLE k (a INTEGER) STRICT;' }],
+      }),
+    ).toThrowError(/重复/);
+  });
+
+  it('旧形态库（无 app 列、旧版本号）重开 = 内核缺口补跑到位', () => {
+    const path = nextPath();
+    openStore({ path }).close();
+    // 原生退回旧形态：撤 app 列 + 回拨 user_version（模拟内核迁移落地前的库）
+    const rewind = new Database(path);
+    rewind.exec('ALTER TABLE sessions DROP COLUMN app');
+    rewind.pragma('user_version = 1');
+    rewind.close();
+    const reopened = openStore({ path });
+    reopened.close();
+    const raw = new Database(path);
+    expect(raw.pragma('user_version', { simple: true })).toBe(KERNEL_VERSION);
+    const cols = (raw.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>).map((c) => c.name);
+    raw.close();
+    expect(cols).toContain('app');
+  });
+});
+
+describe('存量库：按缺口补跑（只前进）', () => {
+  it('内核基线库带链重开 → 补跑业务缺口，基线数据完好', () => {
+    const path = nextPath();
+    // 先以空链开一个基线库（内核链尾）并写一条基线数据
+    const base = openStore({ path });
+    base.appendCore(
       { sessionId: 'sess-mig', origin: 'user', seedLength: 0, delegationDepth: 0 },
       [{ type: 'user/message', seq: 0, time: 1755900000000, data: { content: '基线数据' } }],
       'inc-1',
     );
-    v1.close();
-    // 带链重开：补跑迁移
-    const v2 = openStore({ path, migrations: [spec(2)] });
-    v2.close();
+    base.close();
+    // 带链重开：补跑业务迁移（内核已在位，只补其上缺口）
+    const grown = openStore({ path, migrations: [spec(KERNEL_VERSION + 1)] });
+    grown.close();
     const raw = new Database(path);
-    expect(raw.pragma('user_version', { simple: true })).toBe(2);
+    expect(raw.pragma('user_version', { simple: true })).toBe(KERNEL_VERSION + 1);
     const events = raw.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number };
-    const mig = raw.prepare('SELECT COUNT(*) AS n FROM mig_x').get() as { n: number };
+    const mig = raw.prepare('SELECT COUNT(*) AS n FROM mig_xxxxxx').get() as { n: number };
     raw.close();
     expect(events.n).toBe(1); // 迁移不碰基线数据
     expect(mig.n).toBe(0);
@@ -101,17 +150,17 @@ describe('存量库：按缺口补跑（只前进）', () => {
 
   it('链尾版本已到 = 不重跑（幂等重开）', () => {
     const path = nextPath();
-    openStore({ path, migrations: [spec(2)] }).close();
+    openStore({ path, migrations: [spec(KERNEL_VERSION + 1)] }).close();
     // 再开一次同链：无补跑、无报错
-    expect(() => openStore({ path, migrations: [spec(2)] })).not.toThrow();
+    expect(() => openStore({ path, migrations: [spec(KERNEL_VERSION + 1)] })).not.toThrow();
   });
 });
 
 describe('降级方向：宁拒绝不误读', () => {
   it('库内版本高于宿主链尾 = 拒绝打开', () => {
     const path = nextPath();
-    openStore({ path, migrations: [spec(2)] }).close();
-    // 宿主不带链（只知 v1）去开 v2 库
+    openStore({ path, migrations: [spec(KERNEL_VERSION + 1)] }).close();
+    // 宿主不带业务链（只知内核链尾）去开更高版本的库
     expect(() => openStore({ path })).toThrowError(/降级不支持/);
   });
 });

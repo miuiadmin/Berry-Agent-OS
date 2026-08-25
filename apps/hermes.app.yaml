@@ -1,0 +1,19 @@
+# 官方应用清单：hermes（Hermes-Agent 移植首件——参考源码/hermes-agent v2026.5.16，MIT）
+#
+# 移植策略（映射表 A-E 五桶）：Hermes 内核六件（loop/state/subagent/llm/loader/
+# gateway）整件不搬——宿主等价物更强；移植面 = 策略层与平台配方。v1 纵切一 =
+# 纯清单包压测「清单文件唯一源」机制本身：无自有行为件（src/hermes/ 件聚落待
+# 有自有行为时再建），组件先与 chat 同构（官方全家桶），随纵切推进逐步分化
+# （exec 第 18 席 → BaseEnvironment 配方 → smart-approval 档……）。
+#
+# budget 声明即压测 canAfford app 维：hermes 域后台账达 2M tokens 拒新跑
+# （超限执法只落 background——前台不硬断，花销照进账）。
+id: hermes
+label: Hermes
+components:
+  - builtin:chat
+  - builtin:memory
+  - builtin:subagent
+  - builtin:goal
+budget:
+  dailyTokens: 2000000

@@ -54,10 +54,12 @@ import type { Session } from '../session/session.js';
 import { CORE_EVENT_TYPES } from '../session/event-types.js';
 import { SESSION_CORE_TYPE_FORBIDDEN } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
-import { createDurableSinks } from '../chat/index.js';
+import { createDurableSinks, CHAT_APP_ID } from '../chat/index.js';
 import type { DurableSinks, ConversationDriver, ChatControls } from '../chat/index.js';
 import { createChatPlugin } from '../chat/index.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
+import { loadOfficialApps, assertAppComponents } from './app-registry.js';
+import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
@@ -177,6 +179,16 @@ export interface BerryRuntime {
   readonly composition: CompositionReport;
   /** 插件管理服务（ctx.plugins 同一实例——list/install/toggle/update 有状态面） */
   readonly plugins: PluginsService;
+  /**
+   * 官方应用清单（装载期解析——id → 清单；契约篇 §5.4 第二纵切。第三方面随
+   * ctx.plugins install 装机期发现面挂账，出现即并入此表口径）
+   */
+  readonly apps: ReadonlyMap<string, AppManifest>;
+  /**
+   * 应用组件缺场表（id → 缺失装载身份串清单——在场断言产物；空表 = 全完整）。
+   * 诊断出口（dump-config + debug 日志）；/reload 后活取值（组合树换装缺场可变）
+   */
+  readonly appGaps: ReadonlyMap<string, readonly string[]>;
   /** 生效组合（诊断输出用） */
   readonly model: string;
   readonly workspace: string;
@@ -252,7 +264,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         path: resolvedDbPath,
         // 业务表迁移链聚合（会话篇 §6 统一迁移框架——persist 提供框架不认识业务表）：
         // memory 表族 v2（记忆篇 §3）+ session_fts v3（会话篇 §9 第 7 项定稿）
-        // + goals v5（骨架篇 §6.8——v4 已被记忆效用进化拍板预留）
+        // + goals v5（骨架篇 §6.8——v4 已被记忆效用进化拍板预留）。
+        // sessions.app 列 v6 由 persist 自注入（内核表迁移——openStore 内部并入链，
+        // 业务调用方不感知；契约篇 §5.4 应用面第二纵切会话域打标）
         migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
         // session/event 活体镜像（契约篇 §2.2 emit 模式行）：SessionEvent 入
         // write-behind 队列后同步上总线，载荷 { sessionId, event } 信封（dsh-11
@@ -293,6 +307,20 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       target.append('sandbox/mode', { mode: sandboxMode });
     }
   };
+
+  /* ---- ③c 官方应用清单装载（契约篇 §5.4 应用面第二纵切）----
+   * 官方清单 = 宿主包内静态已知（仓库根 apps/*.app.yaml），装载期直接解析——
+   * 解析/校验失败 = 启动断言拒启（官方件随包，坏 = 发版事故，宁拒绝不误读）；
+   * 第三方清单 glob 发现面挂账随 ctx.plugins install。预算表随清单构建
+   * （canAfford app 维数据源——④b llm 服务闭包读它，装载序上先行）。 */
+  const officialApps = loadOfficialApps();
+  /** 应用预算表（id → budget.dailyTokens；未入表 = 未声明 = 恒 true 不闸） */
+  const appBudgets = new Map<string, number>();
+  for (const [id, manifest] of officialApps) {
+    if (manifest.budget?.dailyTokens !== undefined) {
+      appBudgets.set(id, manifest.budget.dailyTokens);
+    }
+  }
   /** context_transform 桥（契约篇 §2.2 增补 5②）：loop 私有回调桥为根总线瀑布——根 ctx 恒存活（插件监听集随 /reload 更替），驱动绑此桥跨重装载稳定 */
   const transformContext = (messages: AgentMessage[]): Promise<AgentMessage[]> =>
     ctx.waterfall('context_transform', messages, (final: AgentMessage[]) => final);
@@ -327,6 +355,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       // 余额不存储——重启不清零、双开经 WAL 各记可见、当日谁花了多少可审计）
       ...(persistence
         ? { backgroundSpentToday: () => spentBackgroundTokensSince(persistence.store, localDayStartMs()) }
+        : {}),
+      // canAfford 第三维 app 数据源（契约篇 §5.4 第二纵切）：预算表 = ③c 官方清单
+      // budget.dailyTokens（未声明恒 true）；应用域已耗 = llm/usage 事件按
+      // sessions.app 会话域投影的当日聚合（底账同源不同切面，persist 实现）
+      appBudget: (app: string) => appBudgets.get(app),
+      ...(persistence
+        ? {
+            appSpentToday: (app: string) => spentBackgroundTokensSince(persistence.store, localDayStartMs(), app),
+          }
         : {}),
     }),
   );
@@ -474,10 +511,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // run 进行中拒绝热切换（时间线正被 loop 引用）；无持久层/无驱动（件未装载）无事可做
     const driver = driverRef.current;
     if (!persistence || driver === undefined || driver.isRunning) return undefined;
-    const fresh = persistence.createSession({ cwd: workspace, profile: 'default' });
+    // /new 新会话仍落 chat 域（默认入口期——/app 前台进入是第三纵切，届时按显式域打标）
+    const fresh = persistence.createSession({ cwd: workspace, profile: 'default', app: CHAT_APP_ID });
     session = fresh;
     resumedFlag = false;
-    durableRef.current = createDurableSinks(fresh);
+    durableRef.current = createDurableSinks(fresh, { model });
     // 新会话首事件：sandbox 档（新会话 fold 从零起步，必落——dedup 内建等价无条件落）
     stampSandboxFacts(fresh);
     // header 落账状态复位：新会话首快照 reason=initial、diff 基线清零
@@ -586,6 +624,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     getSession: () => session,
     model,
   });
+  // 应用组件在场断言（契约篇 §5.4——装载期 post-apply 时点，组合树已合成）：
+  // 缺场 = 应用级隔离不拒启（清单是声明面，声明了没装 = 用户裁量非发行事故），
+  // 诊断出口 = debug 日志 + runtime.appGaps（dump-config 打印）；/reload 后重算
+  let appGaps = assertAppComponents(officialApps, composition);
+  for (const [id, missing] of appGaps) {
+    ctx.logger.debug('应用组件缺场（应用级隔离）', { app: id, missing });
+  }
   // boot 装载窗口收口：此后运行时注册（tools_change/prompts_change）即时落
   // header change 快照——装载期中间态已被首请求的 initial 快照整体收编
   loadWindow = false;
@@ -610,6 +655,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       composition = fresh;
       plugins.applyLoad(fresh, load); // 同实例就地更新（失败行进 list 状态面——进程存活）
       rebuildSystemPrompt();
+      // 应用组件在场断言随重装载重算（组合树换装后缺场集可变——活取值面）
+      appGaps = assertAppComponents(officialApps, fresh);
       // 组装参数变化经 writeHeader 内建 diff 落 reason=change 快照（仅变化才落——
       // 提示词/工具面变了才写，没变不污染日志；件未装载或无持久层为 no-op）
       chatRef.current?.writeHeader();
@@ -673,6 +720,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       return composition;
     },
     plugins,
+    /** 官方应用清单（③c 装载期解析——静态数据，不随 /reload 变） */
+    apps: officialApps,
+    // 活取值（/reload 重装载后按新组合树重算）——接口上仍是 readonly，实现为 getter
+    get appGaps(): ReadonlyMap<string, readonly string[]> {
+      return appGaps;
+    },
     model,
     workspace,
     sandboxMode,

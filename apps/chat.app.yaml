@@ -1,0 +1,15 @@
+# 官方应用清单：对话应用（契约篇 §5.4 应用面第二纵切——清单文件是应用包唯一源）
+#
+# 对话是应用不是内核（核心命题篇 §3.5）：本清单把官方全家桶四件声明为对话应用的
+# 组件——components 按装载身份串解析（builtin:<name>，匹配键 = 组合树行 plugin
+# 字段的值域），在场断言装载期执行、缺场 = 应用级隔离不拒启。
+#
+# 默认入口期（第十七批拍板）：chat 兼任默认启动应用——会话打标 app='chat'、
+# resume 域查询含 NULL 存量回退；代码智能体应用落地后默认应用切换。
+id: chat
+label: 对话
+components:
+  - builtin:chat
+  - builtin:memory
+  - builtin:subagent
+  - builtin:goal

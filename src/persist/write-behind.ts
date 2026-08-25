@@ -56,7 +56,7 @@ export class WriteBehind {
    * 首次入队时若库内尚无本会话事件，把种子物理复制到子会话名下——子会话事件流
    * 因此自包含且 seq 连续（会话篇 §5：消费者读侧 events.slice(seedLength)）。
    */
-  enqueue(session: Session, event: SessionEvent, meta?: { cwd?: string; profile?: string }): void {
+  enqueue(session: Session, event: SessionEvent, meta?: { cwd?: string; profile?: string; app?: string }): void {
     const sessionId = session.header.sessionId;
     const queue = this.pending.get(sessionId);
     if (queue) {
@@ -175,7 +175,10 @@ export class WriteBehind {
 }
 
 /** Session → 首刷登记素材 */
-function registrationOf(session: Session, meta?: { cwd?: string; profile?: string }): SessionRegistration {
+function registrationOf(
+  session: Session,
+  meta?: { cwd?: string; profile?: string; app?: string },
+): SessionRegistration {
   return {
     sessionId: session.header.sessionId,
     origin: session.header.origin,
@@ -184,5 +187,6 @@ function registrationOf(session: Session, meta?: { cwd?: string; profile?: strin
     delegationDepth: session.header.delegationDepth,
     cwd: meta?.cwd,
     profile: meta?.profile,
+    app: meta?.app,
   };
 }

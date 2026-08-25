@@ -235,3 +235,13 @@ export const GOAL_ACTIVE_EXISTS = registerErrorCode('GOAL_ACTIVE_EXISTS');
 export const GOAL_NOT_FOUND = registerErrorCode('GOAL_NOT_FOUND');
 /** goal：状态机转移非法（如 needs-resume 态申报终态 / completed 行再 stop——machine.ts 转移表执法） */
 export const GOAL_TRANSITION_INVALID = registerErrorCode('GOAL_TRANSITION_INVALID');
+
+/* ------------------------------------------------------------------ */
+/* 应用面码族（契约篇 §5.4 应用面第二纵切，2026-08-25——清单文件唯一源   */
+/* 的校验面：清单坏 = 宁拒绝不误读，与组合树行校验同纪律）。            */
+/* ------------------------------------------------------------------ */
+
+/** apps：应用清单校验失败（schema 拒绝式——未知字段/缺 id/label、components 空集、id 形状不合法等；message 载位置与首错路径） */
+export const APP_INVALID = registerErrorCode('APP_INVALID');
+/** apps：应用 id 撞名（官方裸名是保留字——第三方强制含 `/` 域前缀正是防撞官方裸名的碰撞域，契约篇 §5.4 冷读钉死） */
+export const APP_DUPLICATE = registerErrorCode('APP_DUPLICATE');
