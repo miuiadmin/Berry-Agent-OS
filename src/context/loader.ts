@@ -91,28 +91,25 @@ function validateModuleShape(mod: Record<string, unknown>, id: string): Validate
   if (typeof mod['default'] !== 'function') {
     throw new AppError(
       PLUGIN_SHAPE_INVALID,
-      `${id}：default export 非函数——插件唯一形状 export default async function apply(ctx, config)（契约篇 §1.1）`,
+      `default export 非函数——插件唯一形状 export default async function apply(ctx, config)（契约篇 §1.1）`,
     );
   }
   const name = Object.hasOwn(mod, 'name') ? mod['name'] : undefined;
   if (typeof name !== 'string' || name.length === 0) {
-    throw new AppError(
-      PLUGIN_SHAPE_INVALID,
-      `${id}：named export name 缺失或非非空字符串（行 id/日志归因标识，契约篇 §1.2）`,
-    );
+    throw new AppError(PLUGIN_SHAPE_INVALID, `named export name 缺失或非非空字符串（行 id/日志归因标识，契约篇 §1.2）`);
   }
   for (const key of ['inject', 'optionalInject'] as const) {
     if (!Object.hasOwn(mod, key)) continue;
     const value = mod[key];
     if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
-      throw new AppError(PLUGIN_SHAPE_INVALID, `${id}：named export ${key} 必须是 string[]（服务名清单，契约篇 §1.2）`);
+      throw new AppError(PLUGIN_SHAPE_INVALID, `named export ${key} 必须是 string[]（服务名清单，契约篇 §1.2）`);
     }
   }
   const config = Object.hasOwn(mod, 'config') ? mod['config'] : undefined;
   if (config !== undefined && (typeof config !== 'object' || config === null || Array.isArray(config))) {
     throw new AppError(
       PLUGIN_SHAPE_INVALID,
-      `${id}：named export config 必须是 JSON Schema 对象（TypeBox 生成或手写，契约篇 §1.2）`,
+      `named export config 必须是 JSON Schema 对象（TypeBox 生成或手写，契约篇 §1.2）`,
     );
   }
   const events = Object.hasOwn(mod, 'events') ? mod['events'] : undefined;
@@ -122,7 +119,7 @@ function validateModuleShape(mod: Record<string, unknown>, id: string): Validate
   ) {
     throw new AppError(
       PLUGIN_SHAPE_INVALID,
-      `${id}：named export events 必须是 LiveEventDefinition[]（自定义事件声明清单，契约篇 §1.2 第四件）`,
+      `named export events 必须是 LiveEventDefinition[]（自定义事件声明清单，契约篇 §1.2 第四件）`,
     );
   }
   // 形状已验：default 收窄为真实签名（Record<string,unknown> → 契约形，单点转换）
@@ -144,19 +141,19 @@ function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id:
     if (typeof def.name !== 'string' || !CUSTOM_EVENT_NAME_FORMAT.test(def.name)) {
       throw new AppError(
         PLUGIN_SHAPE_INVALID,
-        `${id}：events 声明「${String(def.name)}」名字非法——须小写且含 /（如 my-plugin/done；防撞宿主词汇域，契约篇 §1.1）`,
+        `events 声明「${String(def.name)}」名字非法——须小写且含 /（如 my-plugin/done；防撞宿主词汇域，契约篇 §1.1）`,
       );
     }
     if (def.mode !== 'emit' && def.mode !== 'waterfall' && def.mode !== 'parallel' && def.mode !== 'serial') {
       throw new AppError(
         PLUGIN_SHAPE_INVALID,
-        `${id}：events 声明「${def.name}」mode 非法（${String(def.mode)}）——四模式 emit/waterfall/parallel/serial 之一（mode 是事件公开契约）`,
+        `events 声明「${def.name}」mode 非法（${String(def.mode)}）——四模式 emit/waterfall/parallel/serial 之一（mode 是事件公开契约）`,
       );
     }
     if (typeof def.note !== 'string' || def.note.length === 0) {
       throw new AppError(
         PLUGIN_SHAPE_INVALID,
-        `${id}：events 声明「${def.name}」缺 note（一句话语义——目录生成与插件作者查阅用）`,
+        `events 声明「${def.name}」缺 note（一句话语义——目录生成与插件作者查阅用）`,
       );
     }
   }

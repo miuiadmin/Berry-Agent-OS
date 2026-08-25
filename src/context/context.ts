@@ -9,6 +9,7 @@
 import {
   AppError,
   CONTEXT_DISPOSED,
+  CONTEXT_EFFECT_INVALID,
   CONTEXT_SERVICE_EXISTS,
   CONTEXT_SERVICE_NOT_FOUND,
   EVENT_DUPLICATE,
@@ -95,6 +96,19 @@ class ContextScopeImpl implements ContextScope {
   effect(fn: () => Disposer): Disposer {
     this.assertActive();
     const disposer = fn(); // 立即执行注册（抛错 = 插件启动失败，直接上抛）
+    // Disposer 形状注册期执法（2026-08-25 Hermes 探针 #13）：非函数返回值若放行
+    // 入栈，要到作用域回卷期才以裸 TypeError 爆炸（栈指向此处不指调用方插件）。
+    // jiti 直载的插件代码无类型护栏——文档化契约（fn 返回值入栈）必须运行时校验
+    // 补位；常见病灶 = ctx.effect(() => d())（把已有 disposer 包进新箭头——注册
+    // 即注销 + undefined 入栈），错误信息点名该习语。
+    if (typeof disposer !== 'function') {
+      throw new AppError(
+        CONTEXT_EFFECT_INVALID,
+        `ctx.effect 回调必须返回函数（Disposer）——实际返回 ${disposer === undefined ? 'undefined' : typeof disposer}。` +
+          `若已持有 disposer，正确写法是直接传入：ctx.effect(d) 或把注册放进回调体 ctx.effect(() => register(…))；` +
+          `ctx.effect(() => d()) 会在注册时立即执行 d（副作用即撤销）并把 undefined 入栈`,
+      );
+    }
     return this.pushEffect(disposer);
   }
 

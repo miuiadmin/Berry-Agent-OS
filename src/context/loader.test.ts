@@ -457,7 +457,37 @@ describe('loadPlugins 自定义事件词汇登记', () => {
       ['bad-mode', PLUGIN_SHAPE_INVALID],
       ['no-note', PLUGIN_SHAPE_INVALID],
     ]);
+    // 归因单源：行 id 只在失败信封（item.id）与清单格式出现，消息体内不再重复
+    // 前缀（探针 #14 回归锁——曾出现「hermes-core：hermes-core：」双前缀）
+    for (const item of result.failed) {
+      expect(item.message.startsWith(`${item.id}：`)).toBe(false);
+    }
     expect(root.tryGet('no-slash-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
+  });
+
+  it('effect 回调返回非函数：装载期即失败并带正确习语指引（探针 #13——jiti 无类型护栏的运行时补位）', async () => {
+    const dir = makeFixtureDir();
+    // 病灶习语：const d = …; ctx.effect(() => d())——注册即注销 + undefined 入栈
+    const entry = writePlugin(
+      dir,
+      'bad-effect.ts',
+      [
+        'export const name = "bad-effect";',
+        'export default async function apply(ctx) {',
+        '  const d = ctx.effect(() => () => {}); // 先正常注册拿一个 disposer',
+        '  ctx.effect(() => d()); // 病灶：立即执行 d（撤销上一个注册）且返回 undefined',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'bad-effect', entry }]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_FAILED);
+    // 指引链路：apply 失败消息内含 CONTEXT_EFFECT_INVALID 码与正确习语
+    expect(result.failed[0]!.message).toContain('CONTEXT_EFFECT_INVALID');
+    expect(result.failed[0]!.message).toContain('ctx.effect(d)');
   });
 
   it('撞名：两行声明同名 / 撞宿主目录名皆 EVENT_DUPLICATE——词汇表拒绝静默覆盖，先到者照常激活', async () => {

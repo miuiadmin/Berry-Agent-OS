@@ -79,6 +79,12 @@ export const CONTEXT_SERVICE_NOT_FOUND = registerErrorCode('CONTEXT_SERVICE_NOT_
 export const CONTEXT_SERVICE_EXISTS = registerErrorCode('CONTEXT_SERVICE_EXISTS');
 /** context：作用域已销毁后仍调用其 API（stale ctx 护栏，/reload 必然配套） */
 export const CONTEXT_DISPOSED = registerErrorCode('CONTEXT_DISPOSED');
+/**
+ * context：ctx.effect 回调返回值不是函数（Disposer 契约违规）。
+ * 注册期即拒而非回卷期爆炸——jiti 直载的插件代码无类型护栏，文档化的
+ * 「fn 返回值入栈」契约必须配运行时校验补位（2026-08-25 Hermes 探针 #13）。
+ */
+export const CONTEXT_EFFECT_INVALID = registerErrorCode('CONTEXT_EFFECT_INVALID');
 /** contracts：错误码注册表自身的护栏违规（格式/重复） */
 export const CONTRACT_BAD_ERROR_CODE = registerErrorCode('CONTRACT_BAD_ERROR_CODE');
 export const CONTRACT_DUPLICATE_ERROR_CODE = registerErrorCode('CONTRACT_DUPLICATE_ERROR_CODE');

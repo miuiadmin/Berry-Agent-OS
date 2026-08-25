@@ -40,6 +40,25 @@ describe('effect 生命周期', () => {
     expect(order).toEqual([3, 2, 1]);
   });
 
+  it('effect 回调返回非函数：注册期即拒（CONTEXT_EFFECT_INVALID），不延迟到回卷期爆炸（探针 #13 回归锁）', () => {
+    const scope = silentRoot();
+    // 病灶习语：把已有 disposer 包进新箭头——fn 返回 undefined
+    const disposer = () => {};
+    expect(() => scope.effect(() => (disposer(), undefined) as unknown as () => void)).toThrowError(AppError);
+    try {
+      scope.effect(() => undefined as unknown as () => void);
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      expect((err as AppError).code).toBe('CONTEXT_EFFECT_INVALID');
+      // 错误信息点名正确习语（第三方无类型护栏——运行时指引是唯一帮助面）
+      expect((err as AppError).message).toContain('ctx.effect(d)');
+    }
+    // 坏注册未入栈：作用域照常可用、dispose 干净（不再有裸 TypeError）
+    let cleaned = false;
+    scope.effect(() => () => (cleaned = true));
+    return scope.dispose().then(() => expect(cleaned).toBe(true));
+  });
+
   it('手动调用 Disposer 幂等，且从回卷栈中摘除（dispose 不重复执行）', async () => {
     const scope = silentRoot();
     let count = 0;
