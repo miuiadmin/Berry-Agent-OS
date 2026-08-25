@@ -29,3 +29,4 @@ export { scanSkillLocation, createLocalSkillsProvider, defaultSkillLocations } f
 
 /* 注册表 + 渐进披露清单 + ctx 挂载（骨架篇 §9.2） */
 export { renderAvailableSkills, createSkillsService, registerSkillsService } from './registry.js';
+export { SKILLS_CHANGE_EVENT } from './types.js';

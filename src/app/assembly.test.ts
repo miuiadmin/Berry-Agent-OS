@@ -674,6 +674,57 @@ function writePluginDir(compositionDir: string, source: string): string {
 }
 
 describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
+  it('插件技能提供方 boot 装载即进渐进披露（#17 回归锁——skills_change 接线前必红：装机即隐身）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-skill-')));
+    // 物化技能正文（契约篇 §4.4 FS 假设钉死：filePath 必须真实可读——hub 类
+    // provider「安装即落盘」的映像），provider 管发现
+    const skillDir = join(compositionDir, 'installed-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: plug-probe-skill\ndescription: 插件提供方技能（装载即披露回归锁）。\n---\n\n正文。\n',
+    );
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "skill-plugin";',
+        'export const inject = ["skills"];',
+        'export default async function apply(ctx) {',
+        '  const skills = ctx.get("skills");',
+        '  ctx.effect(() =>',
+        '    skills.registerProvider({',
+        '      id: "plug-probe",',
+        '      list: () => ({',
+        '        skills: [{',
+        '          name: "plug-probe-skill",',
+        '          description: "插件提供方技能（装载即披露回归锁）。",',
+        '          content: "正文。",',
+        `          filePath: ${JSON.stringify(join(skillDir, 'SKILL.md'))},`,
+        `          baseDir: ${JSON.stringify(skillDir)},`,
+        '          source: "package",',
+        '          disableModelInvocation: false,',
+        '        }],',
+        '        diagnostics: [],',
+        '      }),',
+        '    }),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: skill-plugin\n    plugin: ${pluginDir}\n`);
+    const runtime = await assemble({ compositionDir });
+    try {
+      // 装载后无需 /reload /new：skills_change → rebuildSystemPrompt 即时接线
+      expect(runtime.systemPrompt).toContain('<name>plug-probe-skill</name>');
+      // 且服务面可取（refresh 已随 rebuild 发生）
+      expect(
+        runtime.ctx.get<{ get(n: string): { filePath: string } }>('skills').get('plug-probe-skill')?.filePath,
+      ).toBe(join(skillDir, 'SKILL.md'));
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it('overlay 插件全栈：工具经 ctx.effect 注册 → 装配后可见可执行；paths/plugins 服务就位', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const pluginDir = writePluginDir(

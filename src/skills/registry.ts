@@ -9,6 +9,7 @@
 
 import { realpathSync } from 'node:fs';
 import type { Context, Disposer } from '../context/types.js';
+import { SKILLS_CHANGE_EVENT } from './types.js';
 import type { Skill, SkillDiagnostic, SkillsProvider, SkillsService } from './types.js';
 
 /** 安全 realpath（失败原样返回——去重尽力而为，不因怪路径断流） */
@@ -61,10 +62,24 @@ export function renderAvailableSkills(skills: readonly Skill[]): string {
 /**
  * 组装技能服务。服务构造后为空快照——装配层须 registerProvider(本地
  * provider) 后 refresh() 才有内容（启动断言的技能面在此之后检查）。
+ *
+ * 提供方链变更广播（契约篇 §2.2 增补 6，2026-08-25 #17 收口）：onProvidersChange
+ * 回调在 registerProvider 与注销时触发，载荷 = 现行 provider id 清单（注册序）。
+ * 服务保持纯（不持 ctx）——装配层经此回调桥接 ctx.emit(SKILLS_CHANGE_EVENT)，
+ * 装配层订阅重建系统提示词，插件热注册技能来源即时可见（此前装机即隐身：
+ * 可见性依赖 /reload //new 或无关插件注册 prompt 段捎带 rebuild 的偶然耦合）。
+ *
+ * @param opts.onProvidersChange 提供方链变更回调（缺省不广播——纯测试场景）
  */
-export function createSkillsService(): SkillsService {
+export function createSkillsService(opts?: {
+  onProvidersChange?: (providerIds: readonly string[]) => void;
+}): SkillsService {
   /** 提供方链（注册序即优先序） */
   const providers: SkillsProvider[] = [];
+  /** 提供方链变更通知（id 清单快照——注册/注销后现行序） */
+  const notifyChange = (): void => {
+    opts?.onProvidersChange?.(providers.map((provider) => provider.id));
+  };
   /** 最近一次 refresh 的合并快照（list/get/render/diagnostics 的数据源） */
   let snapshot: { skills: readonly Skill[]; diagnostics: readonly SkillDiagnostic[] } = {
     skills: [],
@@ -121,12 +136,14 @@ export function createSkillsService(): SkillsService {
   const service: SkillsService = {
     registerProvider(provider) {
       providers.push(provider);
+      notifyChange(); // 链变更即广播（skills_change——装配层订阅重建提示词）
       let done = false;
       return () => {
         if (done) return;
         done = true;
         const index = providers.indexOf(provider);
         if (index >= 0) providers.splice(index, 1);
+        notifyChange(); // 注销同广播（幂等注销不触发——done 闸）
       };
     },
 

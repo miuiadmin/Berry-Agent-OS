@@ -311,3 +311,32 @@ describe('defaultSkillLocations（§4.4 三处落地）', () => {
     expect(locations).toHaveLength(3);
   });
 });
+
+describe('createSkillsService（变更广播——契约篇 §2.2 增补 6，#17 回归锁）', () => {
+  /** 造一个最小 provider fixture（id 可指定） */
+  const providerOf = (id: string): SkillsProvider => ({
+    id,
+    list: () => ({ skills: [], diagnostics: [] as SkillDiagnostic[] }),
+  });
+
+  it('registerProvider/注销各触发一次 onProvidersChange，载荷 = 现行 id 清单（注册序）', () => {
+    const events: string[][] = [];
+    const service = createSkillsService({
+      onProvidersChange: (ids) => events.push([...ids]),
+    });
+    const disposeA = service.registerProvider(providerOf('prov-a'));
+    const disposeB = service.registerProvider(providerOf('prov-b'));
+    expect(events).toEqual([['prov-a'], ['prov-a', 'prov-b']]); // 注册序快照
+    disposeA();
+    expect(events.at(-1)).toEqual(['prov-b']); // 注销后现行链
+    disposeB();
+    expect(events.at(-1)).toEqual([]);
+    disposeB(); // 幂等注销不再触发
+    expect(events).toHaveLength(4); // 注册×2 + 注销×2，幂等注销零事件
+  });
+
+  it('缺省不广播（纯测试场景零负担）', () => {
+    const service = createSkillsService();
+    expect(() => service.registerProvider(providerOf('prov-silent'))).not.toThrow();
+  });
+});

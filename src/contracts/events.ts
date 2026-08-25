@@ -32,6 +32,7 @@ export type EventName =
   | 'plugin/skipped'
   | 'composition/reloaded'
   | 'prompts_change'
+  | 'skills_change'
   | 'context_transform'
   | 'job_settled'
   | (string & {});
@@ -131,6 +132,11 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'prompts_change',
     mode: 'emit',
     note: 'systemPrompt 段集合变更通知（契约篇 §2.2 增补 5 pi-4(a)；载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 插件订阅刷新）',
+  },
+  {
+    name: 'skills_change',
+    mode: 'emit',
+    note: '技能提供方链变更通知（契约篇 §2.2 增补 6，2026-08-25 探矿轮六 #17；载荷 = 现行 provider id 清单注册序；registerProvider/注销即广播——与 tools_change/prompts_change 同族第 3 件：装配层订阅重建系统提示词，插件技能热可见）',
   },
   {
     name: 'context_transform',

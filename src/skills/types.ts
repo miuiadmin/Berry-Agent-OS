@@ -17,9 +17,15 @@ export interface Skill {
   readonly name: string;
   /** 技能描述（≤1024 必填；渐进披露清单的一行成本） */
   readonly description: string;
-  /** 正文指令文档（Markdown；frontmatter 之后的全部内容） */
+  /** 正文指令文档（Markdown；frontmatter 之后的全部内容）。消费面 = 显式激活
+   *  （`/skill:name` 全文包装注入，formatSkillInvocation——不走 FS）；渐进披露路径
+   *  模型自主 read 文件，不读本字段——两路径分界即本字段的去留依据（留，消费者明确） */
   readonly content: string;
-  /** SKILL.md 绝对路径（清单 location 字段；模型据此 read 全文） */
+  /** SKILL.md 绝对路径（清单 location 字段；模型据此 read 全文）。
+   *  **FS 假设钉死（契约篇 §4.4 注记，2026-08-25 #18 拍板）**：必须真实存在且模型
+   *  可 read——渐进披露（模型自动路径）的硬前提；远端/虚拟来源（hub registry、
+   *  内存技能库等）须自物化落盘再提供（「安装即落盘」——provider 管发现，安装
+   *  落盘是提供方自己的事），不为虚拟来源开专用 read 通道 */
   readonly filePath: string;
   /** 技能目录（filePath 父目录；技能内相对路径按此解析） */
   readonly baseDir: string;
@@ -59,7 +65,13 @@ export interface SkillDiagnostic {
   };
 }
 
-/** 技能提供方（骨架篇 §9.2 ctx.skills.registerProvider；本地 FS 为默认 provider） */
+/** 技能提供方变更事件名（契约篇 §2.2 增补 6；registerProvider/注销即广播，载荷 = 现行 provider id 清单注册序） */
+export const SKILLS_CHANGE_EVENT = 'skills_change' as const;
+
+/** 技能提供方（骨架篇 §9.2 ctx.skills.registerProvider；本地 FS 为默认 provider）。
+ *  **契约钉死 FS 假设（契约篇 §4.4 注记）**：list() 返回的 Skill.filePath 必须真实
+ *  存在且模型可 read——远端/虚拟来源须自物化落盘再提供（hub「安装即落盘」同款），
+ *  不为虚拟来源开专用 read 通道（清单直出 content 违反渐进披露 O(1) 纪律） */
 export interface SkillsProvider {
   /** 提供方 id（诊断溯源；如 'local-fs'） */
   readonly id: string;

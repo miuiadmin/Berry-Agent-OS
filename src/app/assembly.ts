@@ -51,6 +51,7 @@ import {
   registerSkillsService,
 } from '../skills/index.js';
 import type { SkillLocation, SkillsService } from '../skills/index.js';
+import { SKILLS_CHANGE_EVENT } from '../skills/index.js';
 import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
@@ -468,7 +469,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     id: 'environment',
     render: () => renderEnvironmentSection({ mode: () => sandboxMode, workspaceRoot: () => workspace }),
   });
-  const skills = createSkillsService();
+  // 提供方链变更广播桥（契约篇 §2.2 增补 6，#17 收口）：服务保持纯（不持 ctx），
+  // 组合根经 onProvidersChange 桥接总线——广播与 provide 收在同一时点，无窗口期
+  const skills = createSkillsService({
+    onProvidersChange: (providerIds) => ctx.emit(SKILLS_CHANGE_EVENT, { providers: providerIds }),
+  });
   registerSkillsService(ctx, skills);
   const locations = opts.skillLocations ?? defaultSkillLocations(workspace, { homeDir: opts.homeDir, trusted: true });
   skills.registerProvider(createLocalSkillsProvider({ locations }));
@@ -519,10 +524,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
     chatRef.current?.writeHeader();
   });
-  /** 退订两个变更监听（关停序在 flush/close 前调用）：ctx 回卷会逐件注销插件工具/ 段（tools_change/prompts_change 随之广播），若库已关监听仍在，会向死连接 append header、重物化简报段——关停期变更非模型可见时点且永不落盘，纯噪声 */
+  // skills_change → 重建系统提示词 + 即时落 header 快照（契约篇 §2.2 增补 6，
+  // 变更事件族第 3 件，与 prompts_change 同构）：provider 链变更（插件热注册/
+  // 卸载技能来源）即时重建——渐进披露随 rebuildSystemPrompt 内的 skills.refresh()
+  // 重扫。单一机制收口（树干原则）：boot ⑨ 装载窗口内事件照发、重建即时幂等
+  // （窗口收口由 header 落账闸统一），不加收口补丁——此前插件技能提供方
+  // 装机即隐身，可见性靠 /reload //new 或无关插件注册段捎带 rebuild 的偶然耦合
+  const unwatchSkillsChange = ctx.on(SKILLS_CHANGE_EVENT, () => {
+    rebuildSystemPrompt();
+    if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
+    chatRef.current?.writeHeader();
+  });
+  /** 退订三个变更监听（关停序在 flush/close 前调用）：ctx 回卷会逐件注销插件工具/ 段/技能提供方（tools_change/prompts_change/skills_change 随之广播），若库已关监听仍在，会向死连接 append header、重物化简报段——关停期变更非模型可见时点且永不落盘，纯噪声 */
   const unwatchChangeEvents = (): void => {
     unwatchToolsChange();
     unwatchPromptsChange();
+    unwatchSkillsChange();
   };
 
   /* ---- ⑧b 开新会话（/new 热切换）：新 Session + durable 换指 + 时间线重置 ----
