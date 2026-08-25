@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
@@ -212,7 +212,7 @@ describe('插件入口解析', () => {
 describe('目录服务（ctx.paths）', () => {
   it('pluginDataDir 首取即建目录、幂等缓存；dataDir 返回根', () => {
     const dataDir = makeDataDir();
-    const paths = createPathsService(dataDir);
+    const paths = createPathsService(dataDir, process.cwd());
     expect(paths.dataDir()).toBe(dataDir);
     const first = paths.pluginDataDir('memory');
     expect(first).toBe(join(dataDir, 'plugins', 'memory'));
@@ -220,6 +220,19 @@ describe('目录服务（ctx.paths）', () => {
     expect(existsSync(first)).toBe(true);
     // 再取同路径（幂等，不重复 mkdir 抛错）
     expect(paths.pluginDataDir('memory')).toBe(first);
+  });
+
+  it('workspaceRoot() = canonical 工作区根（git 仓库内回 git 根；永不 undefined）', () => {
+    const dataDir = makeDataDir();
+    // 测试进程 cwd 在 berry git 仓库内——canonical 推导必回仓库根（含本仓库真实路径断言）
+    const paths = createPathsService(dataDir, process.cwd());
+    const root = paths.workspaceRoot();
+    expect(typeof root).toBe('string');
+    expect(root.length).toBeGreaterThan(0);
+    expect(existsSync(join(root, '.git'))).toBe(true);
+    // 非 git 目录回退 resolved cwd（兜底口径——永不 undefined）
+    const fallback = createPathsService(dataDir, dataDir);
+    expect(fallback.workspaceRoot()).toBe(resolve(dataDir));
   });
 });
 

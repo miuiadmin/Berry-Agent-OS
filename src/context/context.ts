@@ -71,15 +71,24 @@ class ContextScopeImpl implements ContextScope {
   private readonly controller = new AbortController();
   private readonly configView: Readonly<Record<string, unknown>>;
   readonly logger: Logger;
+  /** 本插件组合树行 id（loader fork 时注入；根/宿主作用域 undefined——契约篇 §1.5 核心行） */
+  readonly rowId: string | undefined;
   /** 是否已销毁——销毁后注册类 API 一律拒绝（stale ctx 护栏） */
   private disposed = false;
 
-  constructor(runtime: ContextRuntime, name: string, config: Record<string, unknown> | undefined, logger: Logger) {
+  constructor(
+    runtime: ContextRuntime,
+    name: string,
+    config: Record<string, unknown> | undefined,
+    logger: Logger,
+    rowId?: string,
+  ) {
     this.runtime = runtime;
     this.name = name;
     // 配置只读快照：浅冻结防插件改写组合树产物（深结构由配置层保证不可变）
     this.configView = Object.freeze({ ...(config ?? {}) });
     this.logger = logger;
+    this.rowId = rowId;
   }
 
   get config(): Readonly<Record<string, unknown>> {
@@ -306,12 +315,14 @@ class ContextScopeImpl implements ContextScope {
     return this.pushEffect(registerPluginSessionEventType(def));
   }
 
-  fork(opts: { name: string; config?: Record<string, unknown> }): ContextScope {
+  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string }): ContextScope {
     const child = new ContextScopeImpl(
       this.runtime,
       `${this.name}:${opts.name}`,
       opts.config,
       this.runtime.rootLogger.child(`${this.name}:${opts.name}`),
+      // 行 id 缺省继承父作用域（显式注入优先）——插件内任意深度 fork 保持行归属
+      opts.rowId ?? this.rowId,
     );
     // 登记内部通道（registerLiveEvent 经 WeakMap 找根运行时——fork 产物同样可作锚）
     scopeRuntimes.set(child, this.runtime);

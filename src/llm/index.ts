@@ -15,6 +15,8 @@ export {
   type LlmServiceOptions,
 } from './complete.js';
 export { createStreamFn, type StreamFnDefaults } from './stream-fn.js';
+/** 第五键 berryagent/llm 注入物（pi-ai provider 工厂族背书导出，契约篇 §1.2 注记①） */
+export { providerApiFace } from './provider-face.js';
 export {
   isContextOverflow,
   isRecoverableLength,

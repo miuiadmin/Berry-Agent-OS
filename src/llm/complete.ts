@@ -19,7 +19,7 @@
  * 此处只持有闸门）；canAfford 升三维 (当日, priority, app)——app 维 = 会话域投影归集。
  */
 
-import type { AssistantMessage, Message, Usage } from '../contracts/llm.js';
+import type { AssistantMessage, Message, ModelInfo, Usage } from '../contracts/llm.js';
 import { randomUUID } from 'node:crypto';
 import {
   AppError,
@@ -29,6 +29,7 @@ import {
   LLM_COMPLETE_FAILED,
 } from '../contracts/errors.js';
 import type { LlmRuntime } from './runtime.js';
+import { formatModelId } from './model-id.js';
 import type { StreamFnDefaults } from './stream-fn.js';
 import { retryAssistantCall, type RetryPolicy } from './recovery.js';
 import type { Message as PiMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
@@ -82,12 +83,21 @@ export interface CompleteResult {
   priority: 'background' | 'foreground';
 }
 
-/** ctx.llm 服务面（骨架篇 §9.3：complete + provider 注册/注销 + canAfford 预算闸门） */
+/** ctx.llm 服务面（骨架篇 §9.3：complete + provider 注册/注销 + 模型目录只读投影 + canAfford 预算闸门） */
 export interface LlmService {
   /** 注册/替换 provider（按 id upsert）；返回注销函数（插件卸载路径） */
   registerProvider(provider: Parameters<LlmRuntime['registerProvider']>[0]): () => void;
   /** 按 id 移除 provider */
   unregisterProvider(id: string): void;
+  /**
+   * 模型目录只读投影（2026-08-26 挖矿批 P0-1，骨架篇 §9.3——四包实证的 provider
+   * 插件枚举需求）：pi-ai Models 接口包装（与主对话同一 Models 实例——registerProvider
+   * 增补即刻可见），不新开特权口（pi-11：宿主数据不开放读面 = 生态直读私有格式的起点）。
+   * 投影形 ModelInfo：传输/配置面（baseUrl/headers 等）不披露。
+   */
+  listModels(provider?: string): ModelInfo[];
+  /** 单模型查询（listModels 的点查形态，同表同账；id = "provider/model-id" 全形） */
+  getModel(id: string): ModelInfo | undefined;
   /** 单发受托管补全（本文件主角） */
   complete(req: CompleteRequest): Promise<CompleteResult>;
   /**
@@ -187,9 +197,32 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
     return appSpentToday(app) < declared;
   };
 
+  /** pi-ai Model → ModelInfo 投影（listModels/getModel 同一映射，同表同账） */
+  const toModelInfo = (m: ReturnType<LlmRuntime['listModels']>[number]): ModelInfo => ({
+    id: formatModelId(m.provider, m.id),
+    name: m.name,
+    provider: m.provider,
+    reasoning: m.reasoning,
+    input: [...m.input],
+    contextWindow: m.contextWindow,
+    maxTokens: m.maxTokens,
+  });
+
   return {
     registerProvider: (provider) => runtime.registerProvider(provider),
     unregisterProvider: (id) => runtime.unregisterProvider(id),
+
+    // 模型目录只读投影（P0-1）：pi-ai Model → ModelInfo 字段子集直通——id 组
+    // "provider/model-id" 全形（resolveModel 同名可解析），传输/配置面不披露
+    listModels(provider?: string): ModelInfo[] {
+      return runtime.listModels(provider).map(toModelInfo);
+    },
+    // 点查复用同一投影（同表同账）；全形 id 不在目录 = undefined（点查语义——
+    // 不抛 LLM_MODEL_NOT_FOUND，那是 resolveModel 发补全请求时的 fail-loud 面）
+    getModel(id: string): ModelInfo | undefined {
+      const found = runtime.listModels().find((m) => formatModelId(m.provider, m.id) === id);
+      return found === undefined ? undefined : toModelInfo(found);
+    },
 
     canAfford,
 

@@ -18,3 +18,5 @@ export { normalizeMigrations } from './migrations.js';
 export type { MigrationSpec } from './migrations.js';
 /** 连接类型再导出（better-sqlite3 归 persist 独占——业务模块经此取类型，不裸依赖） */
 export type { DatabaseConnection } from './connection-type.js';
+/** 第六键 berryagent/sqlite 注入物工厂（插件自管库——同实例 + 主库拒开，契约篇 §1.2 注记①） */
+export { createPluginSqliteFace, type PluginSqliteFace } from './plugin-sqlite.js';

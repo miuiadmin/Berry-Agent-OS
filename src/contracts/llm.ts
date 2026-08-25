@@ -148,6 +148,30 @@ export interface LlmContext {
 
 /* ---------------- 模型层调用接缝（agent 与 llm 在此会合） ---------------- */
 
+/**
+ * 模型目录只读投影（ctx.llm.listModels()/getModel() 返回形——2026-08-26 挖矿批
+ * P0-1，骨架篇 §9.3）：pi-ai Model 的插件友好子集——枚举/展示/能力判别所需字段
+ * 直通，传输与 provider 配置面（baseUrl/headers/samplingParams/compat）不披露
+ * （宿主数据只经 ctx 服务面，契约篇 §1.5——provider 插件要的是「有哪些模型」
+ * 而非「怎么连到它们」）。
+ */
+export interface ModelInfo {
+  /** 模型标识（"provider/model-id" 全形——resolveModel 可解析的同一名） */
+  readonly id: string;
+  /** 展示名（人类可读） */
+  readonly name: string;
+  /** 所属 provider id（目录分组用） */
+  readonly provider: string;
+  /** 是否推理模型（思考档位面可用性判据） */
+  readonly reasoning: boolean;
+  /** 输入模态清单 */
+  readonly input: readonly ('text' | 'image')[];
+  /** 上下文窗口（tokens） */
+  readonly contextWindow: number;
+  /** 单请求输出上限（tokens） */
+  readonly maxTokens: number;
+}
+
 /** 思考档位（pi-ai 同构七值；xhigh/max 仅部分模型家族支持） */
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 

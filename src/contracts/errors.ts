@@ -188,6 +188,10 @@ export const PLUGIN_INJECT_UNRESOLVED = registerErrorCode('PLUGIN_INJECT_UNRESOL
 export const PLUGIN_APPLY_FAILED = registerErrorCode('PLUGIN_APPLY_FAILED');
 /** plugin：组合树行引用的插件入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
 export const PLUGIN_ENTRY_UNRESOLVED = registerErrorCode('PLUGIN_ENTRY_UNRESOLVED');
+/** plugin：import 来源门禁越界（依赖图说明符不在白名单三道——虚拟面六键 / node: 内建 / 插件目录树内；jiti transform 全图静态扫描执法，契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） */
+export const PLUGIN_IMPORT_FORBIDDEN = registerErrorCode('PLUGIN_IMPORT_FORBIDDEN');
+/** plugin：第六键 berryagent/sqlite 包装拒开主库（自管库路径命中解析后主库绝对路径即抛——与 IMPORT_FORBIDDEN 分立：一管 import 门禁、一管库句柄门禁，契约篇 §1.2 注记①） */
+export const PLUGIN_MAIN_DB_FORBIDDEN = registerErrorCode('PLUGIN_MAIN_DB_FORBIDDEN');
 /** composition：组合树行 schema 违规（overlay 缺 id / 字段类型错 / 未知字段 / fixed 行被禁用——pre-release 拒绝式，契约篇 §6.5） */
 export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');
 

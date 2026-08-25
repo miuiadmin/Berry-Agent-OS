@@ -21,8 +21,10 @@
  * 每次 import 全依赖图重新求值——毒化模块与「模块图半坏」结构上不可能跨加载存活。
  */
 
-import { createJiti } from 'jiti';
-import { dirname } from 'node:path';
+import { createJiti, type TransformOptions, type TransformResult } from 'jiti';
+import { createRequire, isBuiltin } from 'node:module';
+import { realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import * as typeboxRoot from 'typebox';
 import * as typeboxCompile from 'typebox/compile';
 import * as typeboxValue from 'typebox/value';
@@ -32,6 +34,7 @@ import {
   PLUGIN_APPLY_FAILED,
   PLUGIN_CONFIG_INVALID,
   PLUGIN_ENTRY_UNRESOLVED,
+  PLUGIN_IMPORT_FORBIDDEN,
   PLUGIN_INJECT_UNRESOLVED,
   PLUGIN_LOAD_FAILED,
   PLUGIN_SHAPE_INVALID,
@@ -68,8 +71,19 @@ type ValidatedModule = Omit<PluginModule, 'default'> & {
  * 虚拟模块面键集（单一来源）：装载期 jiti 注入的宿主实例模块名。
  * 用途有二——virtualModules 构造 + import 失败错误的可用面提示（探针 #12：
  * 第三方按 npm 子路径直觉写 `berryagent/typebox` 撞错时，错误必须自带合法路）。
+ * 2026-08-26 挖矿批 P0-2 扩六键：+`berryagent/llm`（pi-ai provider 工厂族背书，
+ * llm 模块 provider-face 注入）+`berryagent/sqlite`（宿主同实例 better-sqlite3
+ * 包装，persist 模块 plugin-sqlite 注入——主库路径 fail-loud 拒开）。注入物由
+ * 组合根参数传入（本模块不 import llm/persist——拓扑边 context→contracts 不变）。
  */
-const VIRTUAL_MODULE_KEYS = ['berryagent', 'typebox', 'typebox/value', 'typebox/compile'] as const;
+const VIRTUAL_MODULE_KEYS = [
+  'berryagent',
+  'typebox',
+  'typebox/value',
+  'typebox/compile',
+  'berryagent/llm',
+  'berryagent/sqlite',
+] as const;
 
 /**
  * import 失败错误的虚拟面提示：消息形如「Cannot find module …」时附可用面清单。
@@ -82,11 +96,109 @@ function virtualModuleHint(err: unknown): string {
   return `（可用虚拟模块面：${faces}——宿主公共面与 typebox 经装载期虚拟注入，子路径不解析；契约篇 §1.2）`;
 }
 
-function createPluginJiti() {
+/* ---------------- import 来源门禁（契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） ---------------- */
+
+/**
+ * 当前装载行的插件目录树根（realpath 归一）：装载循环串行设置/清理（await
+ * jiti.import 期间无并发——boot 与 /reload 不并发是装配序前提），transform 全图
+ * 扫描据此裁决树内外。builtin 行不经 jiti，期间恒 undefined（不拦）。
+ */
+let currentTreeRoot: string | undefined;
+
+/** 默认转译实例：只借公开 `.transform` 方法链默认 TS 转译（guard 通过后照常转译——零内部路径依赖） */
+const plainJiti = createJiti(import.meta.url);
+
+/**
+ * 静态说明符提取正则：import 声明 / export-from / 动态 import 字面量 / require
+ * 字面量 / 裸 import。type-only import 同样被抓（源码面统一纪律——解析对账不等
+ * 使用）；注释中的示例 import 也会被抓（过度拦截面——注释里写越界 import 本就
+ * 该清理，消息自带合法路指路，接受）。
+ */
+const SPECIFIER_RE =
+  /(?:import|export)\s+[^'";]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|require\s*\(\s*['"]([^'"]+)['"]\s*\)|import\s*['"]([^'"]+)['"]/g;
+
+/** 提取源码中全部静态说明符（matchAll 四捕获组按序取首个命中） */
+function extractSpecifiers(source: string): string[] {
+  const out: string[] = [];
+  for (const m of source.matchAll(SPECIFIER_RE)) {
+    const s = m[1] ?? m[2] ?? m[3] ?? m[4];
+    if (s !== undefined) out.push(s);
+  }
+  return out;
+}
+
+/** realpath 容错：目标不存在（尚未创建的新库/新文件）或不可达时回退字面绝对路径 */
+function realpathIfPossible(absolutePath: string): string {
+  try {
+    return realpathSync(absolutePath);
+  } catch {
+    return absolutePath;
+  }
+}
+
+/** 判定路径是否落在插件目录树内（等值 = 树根本身，罕见但等价于树内） */
+function insideTree(p: string, treeRoot: string): boolean {
+  return p === treeRoot || p.startsWith(treeRoot + sep);
+}
+
+/**
+ * 白名单三道裁决（契约篇 §1.2 注记⑤）：虚拟面六键 → `node:`/裸内建 → 插件
+ * 目录树内。返回 undefined = 放行；string = 拒载原因（进错误消息）。
+ * 相对/绝对路径按导入文件位置解析；裸包名经 createRequire 从导入文件位置解析
+ * （node 真实解析语义）——realpath 归一后验落树：自捆 node_modules 即树内放行，
+ * 解析上逃到宿主侧/全局或不可解析即拒（symlink 归一同规，别名逃逸同拦）。
+ */
+function adjudicateImport(specifier: string, fromDir: string, treeRoot: string): string | undefined {
+  // 第一道：虚拟面六键（防御式——虚拟模块 import 通常由 jiti 短路不经 transform）
+  if ((VIRTUAL_MODULE_KEYS as readonly string[]).includes(specifier)) return undefined;
+  // 第二道：显式 node: 前缀与裸 Node 内建（fs/path/crypto…——isBuiltin 视同 node: 放行）
+  if (specifier.startsWith('node:') || isBuiltin(specifier)) return undefined;
+  // 第三道：插件目录树内
+  if (specifier.startsWith('./') || specifier.startsWith('../') || isAbsolute(specifier)) {
+    const target = realpathIfPossible(resolve(fromDir, specifier));
+    return insideTree(target, treeRoot) ? undefined : `相对路径解析逃逸出插件目录树（${specifier} → ${target}）`;
+  }
+  try {
+    const resolved = createRequire(join(fromDir, 'noop.js')).resolve(specifier);
+    const target = realpathIfPossible(resolved);
+    return insideTree(target, treeRoot) ? undefined : `包解析逃逸出插件目录树（${specifier} → ${target}）`;
+  } catch {
+    return `不可解析（${specifier}——拼写错或未自捆：插件自身依赖须随 node_modules 自捆分发，契约篇 §6.1）`;
+  }
+}
+
+/**
+ * 执法 transform（§1.2 执法面②，spike 实证形态）：jiti 全依赖图每文件过检
+ * （moduleCache:false 保证无缓存旁路）——先扫说明符，违规即抛
+ * PLUGIN_IMPORT_FORBIDDEN（transform 抛错先于 eval——模块永不求值，副作用零触达）；
+ * 合法后链 plainJiti 默认转译。currentTreeRoot undefined（builtin 行/防御路径）
+ * 时不拦照转——真实文件装载路径必设。
+ */
+function guardTransform(opts: TransformOptions): TransformResult {
+  const treeRoot = currentTreeRoot;
+  if (treeRoot !== undefined && opts.filename !== undefined) {
+    for (const specifier of extractSpecifiers(opts.source ?? '')) {
+      const violation = adjudicateImport(specifier, dirname(opts.filename), treeRoot);
+      if (violation !== undefined) {
+        throw new AppError(
+          PLUGIN_IMPORT_FORBIDDEN,
+          `import 越界：${specifier}——${violation}（文件 ${opts.filename}）。` +
+            `白名单三道：虚拟面六键（${VIRTUAL_MODULE_KEYS.map((k) => `'${k}'`).join('、')}）/ node: 内建 / 插件目录树内；` +
+            `宿主类型与工厂经虚拟面取（契约篇 §1.2 注记⑤）`,
+        );
+      }
+    }
+  }
+  return { code: plainJiti.transform(opts) };
+}
+
+function createPluginJiti(faces: LoadPluginsOptions['virtualFaces']) {
   return createJiti(import.meta.url, {
     moduleCache: false,
     // 插件代码统一走 jiti 转译一条路径（native import 无法解析虚拟模块——防行为分叉）
     tryNative: false,
+    // import 来源门禁：全图扫描执法（违规即拒载，合法链默认转译）
+    transform: guardTransform,
     virtualModules: Object.fromEntries(
       VIRTUAL_MODULE_KEYS.map((key) => [
         key,
@@ -96,7 +208,11 @@ function createPluginJiti() {
             ? typeboxRoot
             : key === 'typebox/value'
               ? typeboxValue
-              : typeboxCompile,
+              : key === 'typebox/compile'
+                ? typeboxCompile
+                : key === 'berryagent/llm'
+                  ? (faces?.llm ?? {})
+                  : (faces?.sqlite ?? {}),
       ]),
     ),
   });
@@ -217,7 +333,7 @@ export interface PluginSkillsInfo {
   readonly scope: ContextScope;
 }
 
-/** loadPlugins 可选参数（v1 仅技能注册回调——后续跨模块桥接需求同形扩展） */
+/** loadPlugins 可选参数（技能注册回调 + 虚拟面注入物——后续跨模块桥接需求同形扩展） */
 export interface LoadPluginsOptions {
   /**
    * 行级技能注册回调：加载器在**行作用域 fork 后、apply 之前**逐声明行调用
@@ -226,6 +342,18 @@ export interface LoadPluginsOptions {
    * 问题应记日志/走诊断面）；抛错将按 apply 失败同路回卷杀行。
    */
   registerSkills?: (info: PluginSkillsInfo) => void;
+  /**
+   * 第五/六键虚拟面注入物（P0-2，契约篇 §1.2 注记①）：组合根参数注入——
+   * context 模块不 import llm/persist（拓扑护栏），类型面在此收窄为结构最小形。
+   * 缺省注入空对象（键恒在虚拟面，import 不炸 Cannot find；面为空插件自查）；
+   * 生产组合根必传真面（assembly 装配序 ⑨）。
+   */
+  virtualFaces?: {
+    /** 第五键注入物（llm 模块 providerApiFace——pi-ai provider 工厂族背书导出） */
+    readonly llm?: object;
+    /** 第六键注入物（persist 模块 createPluginSqliteFace 产物——同实例 + 主库拒开包装） */
+    readonly sqlite?: { openDatabase(path: string, options?: { readonly?: boolean }): unknown };
+  };
 }
 
 /**
@@ -250,7 +378,7 @@ export async function loadPlugins(
 
   /* ---- ① 跳过行 / 解析失败行：不 import（禁用行不要求已装——挂载休眠精神） ---- */
   const pending: Array<{ row: PluginPlanRow; module: ValidatedModule }> = [];
-  const jiti = createPluginJiti();
+  const jiti = createPluginJiti(opts?.virtualFaces);
   for (const row of rows) {
     if (row.skip) {
       skipped.push({ id: row.id, reason: row.skip });
@@ -274,7 +402,14 @@ export async function loadPlugins(
           if (row.builtin[key] !== undefined) mod[key] = row.builtin[key];
         }
       } else {
-        mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
+        // import 门禁树根 = 本行入口所在目录（realpath 归一）：await 期间 transform
+        // 全图扫描据此裁决树内外；finally 清空防跨行串染（串行装载保证无竞态）
+        currentTreeRoot = realpathIfPossible(dirname(row.entry!));
+        try {
+          mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
+        } finally {
+          currentTreeRoot = undefined;
+        }
       }
       const module = validateModuleShape(mod, row.id);
       // 自定义事件词汇登记（§1.1 逃生口）：装载阶段①（一切 apply 之前）统一入册——
@@ -366,7 +501,7 @@ async function activateOne(
     }
   }
 
-  const scope = root.fork({ name: row.id, ...(row.config !== undefined ? { config: row.config } : {}) });
+  const scope = root.fork({ name: row.id, rowId: row.id, ...(row.config !== undefined ? { config: row.config } : {}) });
   try {
     // 技能目录注册（契约篇 §1.2 第六件；登记位 = 冷读裁决的「行作用域 fork 后
     // apply 之前」）：技能是行资产——apply 抛错走下方 catch 的 scope.dispose()

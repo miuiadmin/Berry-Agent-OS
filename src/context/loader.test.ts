@@ -7,7 +7,7 @@
  * （拓扑白名单边），fixture 不引宿主内部实现（零 import 面，契约篇 §3）。
  */
 
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,6 +19,7 @@ import {
   EVENT_DUPLICATE,
   PLUGIN_APPLY_FAILED,
   PLUGIN_CONFIG_INVALID,
+  PLUGIN_IMPORT_FORBIDDEN,
   PLUGIN_INJECT_UNRESOLVED,
   PLUGIN_LOAD_FAILED,
   PLUGIN_SHAPE_INVALID,
@@ -106,6 +107,32 @@ describe('loadPlugins 虚拟注入与激活', () => {
     expect(marker!['greeting']).toBe('你好');
     expect(marker!['configFrozen']).toBe(true);
     expect(marker!['configIsRowConfig']).toBe(true);
+  });
+
+  it('ctx.rowId：装载器手持注入组合树行 id（件数据目录键正规获取口，P0-1）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'rowid.ts',
+      [
+        "export const name = 'rowid-probe';",
+        'export default async function apply(ctx) {',
+        '  // 行 id 直读 + 插件内再 fork 的子作用域继承（行身份随 fork 深度保持）',
+        '  const child = ctx.fork({ name: "inner" });',
+        '  ctx.provide("rowid-probe", { own: ctx.rowId, childSees: child.rowId });',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    // 根/宿主作用域 rowId = undefined（无行归属）
+    expect(root.rowId).toBeUndefined();
+    const result = await loadPlugins(root, [{ id: 'the-row-id', entry }]);
+
+    expect(result.failed).toEqual([]);
+    const probe = root.tryGet<{ own: string | undefined; childSees: string | undefined }>('rowid-probe');
+    // loader fork 注入行 id（可与插件声明 name 不同物——行 id 是组合树身份）
+    expect(probe!.own).toBe('the-row-id');
+    expect(probe!.childSees).toBe('the-row-id');
   });
 
   it('行 config 未过插件 schema：PLUGIN_CONFIG_INVALID，apply 不执行（无服务泄漏）', async () => {
@@ -308,11 +335,11 @@ describe('loadPlugins 形状校验与 import 失败', () => {
     expect(result.failed[0]!.message).toContain('broken'); // 行 id 进诊断（归因）
   });
 
-  it('虚拟面子路径猜错：import 失败消息附可用面清单（探针 #12 回归锁）', async () => {
+  it('虚拟面子路径猜错：import 门禁先拦，消息附六键白名单清单（探针 #12 回归锁 + P0-2 执法面）', async () => {
     const dir = makeFixtureDir();
-    // npm 子路径直觉写法——虚拟面只有裸键，子路径不解析。
-    // 注意 Type 必须**实际使用**：jiti 转译会丢弃未使用的 import（对照实验实证），
-    // 不用的话错误被静默剥掉、插件假性激活。
+    // npm 子路径直觉写法——虚拟面只有精确键，子路径既不在白名单也不可解析。
+    // P0-2 起 transform 门禁先于 jiti 解析拦下（原 Cannot find → 现更早更准的
+    // PLUGIN_IMPORT_FORBIDDEN，消息自带合法路——探针 #12 诉求在新形态下满足）
     const entry = writePlugin(
       dir,
       'subpath.ts',
@@ -327,11 +354,260 @@ describe('loadPlugins 形状校验与 import 失败', () => {
     const result = await loadPlugins(root, [{ id: 'subpath', entry }]);
 
     expect(result.activated).toEqual([]);
-    expect(result.failed[0]!.code).toBe(PLUGIN_LOAD_FAILED);
-    // 错误自带合法路：四键清单 + 指出虚拟注入不解析子路径
+    expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+    // 错误自带合法路：六键白名单清单（含扩键后的 berryagent/llm、berryagent/sqlite）
     expect(result.failed[0]!.message).toContain(`'berryagent'`);
     expect(result.failed[0]!.message).toContain(`'typebox/value'`);
-    expect(result.failed[0]!.message).toContain('子路径不解析');
+    expect(result.failed[0]!.message).toContain(`'berryagent/llm'`);
+    expect(result.failed[0]!.message).toContain(`'berryagent/sqlite'`);
+  });
+});
+
+/* ---------------- import 来源门禁执法（P0-2，契约篇 §1.2 执法面②） ---------------- */
+
+describe('loadPlugins import 来源门禁', () => {
+  /** 在宿主 node_modules 内造 fixture 目录（用后必删）——构造「解析祖先链上逃到宿主侧」的真实威胁形态 */
+  function makeFixtureInsideHostTree(): string {
+    return mkdtempSync(join(realpathSync(process.cwd()), 'node_modules', '.gate-fixture-'));
+  }
+
+  /** 清理 node_modules 内 fixture（递归强删——mkdtemp 目录归本测试所有） */
+  function cleanupFixture(dir: string): void {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  it('宿主侧依赖上逃拒载：jiti 解析到宿主 node_modules = 树外（模块永不求值）', async () => {
+    const dir = makeFixtureInsideHostTree();
+    try {
+      // 顶层副作用标记：门禁在 transform 期抛错（先于 eval）——拒载时标记必不触达
+      const entry = writePlugin(
+        dir,
+        'steal-host.ts',
+        [
+          'export const name = "steal-host";',
+          'im' + "port { createJiti } from 'jiti';",
+          '(globalThis as Record<string, unknown>).__stealHostEvaluated = true;',
+          'export default async function apply() { void createJiti; }',
+        ].join('\n'),
+      );
+      const root = makeRoot();
+      const result = await loadPlugins(root, [{ id: 'steal-host', entry }]);
+
+      expect(result.activated).toEqual([]);
+      expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+      expect(result.failed[0]!.message).toContain('jiti');
+      expect(result.failed[0]!.message).toContain('包解析逃逸出插件目录树');
+      // 求值前拦截：副作用标记零触达（spike ② 的进程内复证）
+      expect((globalThis as Record<string, unknown>).__stealHostEvaluated).toBeUndefined();
+      delete (globalThis as Record<string, unknown>).__stealHostEvaluated;
+    } finally {
+      cleanupFixture(dir);
+    }
+  });
+
+  it('不可解析裸名拒载：消息指路自捆分发（拼写错与未安装同路）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'ghost-dep.ts',
+      [
+        'export const name = "ghost-dep";',
+        // 说明符拆段防拓扑检查器误扫（fixture 必然含越界字面量——join 求值后完整）
+        'im' + "port { x } from 'never-exists-anywhere';",
+        'export default async function apply() { void x; }',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'ghost-dep', entry }]);
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+    expect(result.failed[0]!.message).toContain('不可解析');
+    expect(result.failed[0]!.message).toContain('自捆');
+  });
+
+  it('解析对账不等使用：import 了但未使用的越界说明符同样拒载', async () => {
+    const dir = makeFixtureInsideHostTree();
+    try {
+      // jiti 转译会丢弃未使用 import（对照实验实证）——门禁在转译前扫源码，
+      // 声明即拦（type-only import 同纪律：源码面统一，不留「未使用即豁免」旁门）
+      const entry = writePlugin(
+        dir,
+        'unused-bind.ts',
+        [
+          'export const name = "unused-bind";',
+          'im' + "port { createJiti } from 'jiti';",
+          'export default async function apply() {}',
+        ].join('\n'),
+      );
+      const root = makeRoot();
+      const result = await loadPlugins(root, [{ id: 'unused-bind', entry }]);
+
+      expect(result.activated).toEqual([]);
+      expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+    } finally {
+      cleanupFixture(dir);
+    }
+  });
+
+  it('自捆依赖放行：插件目录树内 node_modules 的包正常 import（正门用例）', async () => {
+    const dir = makeFixtureDir();
+    // 造自捆包：fixture/node_modules/self-dep（树内解析——第三道白名单的正路形态）
+    mkdirSync(join(dir, 'node_modules', 'self-dep'), { recursive: true });
+    writeFileSync(
+      join(dir, 'node_modules', 'self-dep', 'package.json'),
+      JSON.stringify({ name: 'self-dep', version: '1.0.0', type: 'module' }),
+    );
+    writeFileSync(join(dir, 'node_modules', 'self-dep', 'index.js'), 'export const marker = "self-dep-ok";\n');
+    const entry = writePlugin(
+      dir,
+      'bundled.ts',
+      [
+        'export const name = "bundled";',
+        'im' + "port { marker } from 'self-dep';",
+        'export default async function apply(ctx) { ctx.provide("bundled-marker", { marker }); }',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'bundled', entry }]);
+
+    expect(result.failed).toEqual([]);
+    expect(result.activated).toEqual([{ id: 'bundled', name: 'bundled' }]);
+    expect(root.tryGet<{ marker: string }>('bundled-marker')!.marker).toBe('self-dep-ok');
+  });
+
+  it('相对路径树内放行 + 子文件逃逸拒载：全图扫描不只看入口（moduleCache:false 对账兜底）', async () => {
+    // 树内 helper 正常引用（helper 再引裸内建——嵌套文件同过门禁）
+    const okDir = makeFixtureDir();
+    writePlugin(
+      okDir,
+      'helper.ts',
+      ["import { join } from 'node:path';\nexport const combined = join('a', 'b');\n"].join(''),
+    );
+    const okEntry = writePlugin(
+      okDir,
+      'uses-helper.ts',
+      [
+        'export const name = "uses-helper";',
+        'im' + "port { combined } from './helper.ts';",
+        'export default async function apply(ctx) { ctx.provide("helper-marker", { combined }); }',
+      ].join('\n'),
+    );
+    const okRoot = makeRoot();
+    const okResult = await loadPlugins(okRoot, [{ id: 'uses-helper', entry: okEntry }]);
+    expect(okResult.failed).toEqual([]);
+    expect(okRoot.tryGet<{ combined: string }>('helper-marker')!.combined).toBe(join('a', 'b'));
+
+    // 子文件相对路径跳出树根（../../ 指向 tmpdir 层的诱饵文件）——入口干净、依赖脏，同样拒
+    const badDir = makeFixtureDir();
+    // 子文件源码同样拆段防误扫（逃逸说明符 ../../../outside-dep.js 是执法测试的道具）
+    writePlugin(
+      badDir,
+      'evil-helper.ts',
+      ['im' + "port { x } from '../../../outside-dep.js';\nexport const x2 = x;\n"].join(''),
+    );
+    const badEntry = writePlugin(
+      badDir,
+      'uses-evil.ts',
+      [
+        'export const name = "uses-evil";',
+        'im' + "port { x2 } from './evil-helper.ts';",
+        'export default async function apply() { void x2; }',
+      ].join('\n'),
+    );
+    const badRoot = makeRoot();
+    const badResult = await loadPlugins(badRoot, [{ id: 'uses-evil', entry: badEntry }]);
+    expect(badResult.activated).toEqual([]);
+    expect(badResult.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+    expect(badResult.failed[0]!.message).toContain('相对路径解析逃逸出插件目录树');
+    expect(badResult.failed[0]!.message).toContain('evil-helper');
+  });
+
+  it('node: 显式与裸内建放行：fs/path/crypto 等宿主运行时直用合法', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'natives.ts',
+      [
+        'export const name = "natives";',
+        "import { join } from 'node:path';",
+        "import { isBuiltin } from 'node:module';",
+        'im' + "port { basename } from 'path';", // 裸内建（无 node: 前缀）——插件允许的形态
+        'export default async function apply(ctx) {',
+        '  ctx.provide("natives-marker", { joined: join("x", "y"), builtin: isBuiltin("path"), base: basename("/a/b.ts") });',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'natives', entry }]);
+
+    expect(result.failed).toEqual([]);
+    const marker = root.tryGet<Record<string, unknown>>('natives-marker')!;
+    expect(marker['joined']).toBe(join('x', 'y'));
+    expect(marker['builtin']).toBe(true);
+    expect(marker['base']).toBe('b.ts');
+  });
+
+  it('第五/六键注入物端到端：virtualFaces 传入即经 berryagent/llm、berryagent/sqlite 取得', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'faces.ts',
+      [
+        'export const name = "faces";',
+        "import { createProvider, hasApi } from 'berryagent/llm';",
+        "import { openDatabase } from 'berryagent/sqlite';",
+        'export default async function apply(ctx) {',
+        '  ctx.provide("faces-marker", {',
+        '    provider: createProvider({ id: "fake" }),',
+        '    guard: hasApi({} as never, "fake"),',
+        '    db: openDatabase(":memory:"),',
+        '  });',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'faces', entry }], {
+      virtualFaces: {
+        llm: {
+          createProvider: (options: { id: string }) => ({ kind: 'provider', ...options }),
+          hasApi: () => true,
+        },
+        sqlite: { openDatabase: (path: string) => ({ kind: 'db', path }) },
+      },
+    });
+
+    expect(result.failed).toEqual([]);
+    const marker = root.tryGet<Record<string, unknown>>('faces-marker')!;
+    expect(marker['provider']).toEqual({ kind: 'provider', id: 'fake' });
+    expect(marker['guard']).toBe(true);
+    expect(marker['db']).toEqual({ kind: 'db', path: ':memory:' });
+  });
+
+  it('virtualFaces 缺省：两键恒在虚拟面（import 不炸），面为空由插件自查', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'empty-faces.ts',
+      [
+        'export const name = "empty-faces";',
+        "import * as llmFace from 'berryagent/llm';",
+        "import * as sqliteFace from 'berryagent/sqlite';",
+        'export default async function apply(ctx) {',
+        '  ctx.provide("empty-faces-marker", {',
+        '    llmKeys: Object.keys(llmFace).length,',
+        '    sqliteKeys: Object.keys(sqliteFace).length,',
+        '  });',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'empty-faces', entry }]);
+
+    expect(result.failed).toEqual([]);
+    const marker = root.tryGet<Record<string, unknown>>('empty-faces-marker')!;
+    expect(marker['llmKeys']).toBe(0);
+    expect(marker['sqliteKeys']).toBe(0);
   });
 });
 

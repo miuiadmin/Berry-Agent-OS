@@ -6,7 +6,7 @@
  * 多轮续跑、命令面注册。
  */
 
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -208,6 +208,72 @@ describe('createBerryRuntime 装配面', () => {
     const bare = await assemble({ persist: false });
     const bareSessions = bare.ctx.tryGet<{ appendEvent(t: string, d: unknown): SessionEvent | undefined }>('sessions')!;
     expect(bareSessions.appendEvent('memory/diff', {})).toBeUndefined();
+  });
+
+  it('sessions 读面（P0-1 只读投影：currentSessionId + eventsOfType 写读同规，会话篇 §3.2）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<{
+      appendEvent(type: string, data: unknown): SessionEvent | undefined;
+      currentSessionId(): string | undefined;
+      eventsOfType(type: string): SessionEvent[];
+    }>('sessions')!;
+    // currentSessionId 与 sessionId 信封同源（活引用闭包）
+    expect(sessions.currentSessionId()).toBe(runtime.session!.header.sessionId);
+
+    // eventsOfType：已注册词汇过滤枚举（内存活日志投影——append 即见，零迟滞）
+    sessions.appendEvent('memory/diff', { baseline: 'aa', entries: [] });
+    const diffs = sessions.eventsOfType('memory/diff');
+    expect(diffs.length).toBeGreaterThanOrEqual(1);
+    expect(diffs.every((e) => e.type === 'memory/diff')).toBe(true);
+
+    // 写读同规回归锁：撞未注册词同抛 SESSION_FORMAT_UNSUPPORTED（读侧静默空数组
+    // = 拼错事件名的无声死，禁止——此前读面不存在，此测试锁的是新增读闸行为）
+    expect(() => sessions.eventsOfType('nope/void')).toThrowError(/未知事件类型/);
+    // 核心词不禁读（已注册即返回——读不伪造宿主语义；此处断言可读且有内容）
+    const sandboxFacts = sessions.eventsOfType('sandbox/mode');
+    expect(sandboxFacts.length).toBeGreaterThanOrEqual(1);
+
+    // persist:false 无会话：currentSessionId undefined + 已注册词汇空枚举（不炸）
+    const bare = await assemble({ persist: false });
+    const bareSessions = bare.ctx.tryGet<{
+      currentSessionId(): string | undefined;
+      eventsOfType(type: string): SessionEvent[];
+    }>('sessions')!;
+    expect(bareSessions.currentSessionId()).toBeUndefined();
+    expect(bareSessions.eventsOfType('memory/diff')).toEqual([]);
+    // 无会话时未注册词照抛（词汇闸与会话无关——注册表是全局事实）
+    expect(() => bareSessions.eventsOfType('nope/void')).toThrowError(/未知事件类型/);
+  });
+
+  it('llm 模型目录只读投影（P0-1：listModels/getModel——ModelInfo 投影面）', async () => {
+    const runtime = await assemble();
+    const service = runtime.ctx.tryGet<{
+      listModels(provider?: string): Array<{ id: string; provider: string; contextWindow: number }>;
+      getModel(id: string): { id: string } | undefined;
+    }>('llm')!;
+    // faux provider 目录非空；id 为 provider/model 全形；传输/配置面字段不在投影
+    const all = service.listModels();
+    expect(all.length).toBeGreaterThan(0);
+    for (const m of all) {
+      expect(m.id).toContain('/');
+      expect(m.provider.length).toBeGreaterThan(0);
+      expect(m.contextWindow).toBeGreaterThan(0);
+    }
+    expect(Object.keys(all[0]!).sort()).toEqual([
+      'contextWindow',
+      'id',
+      'input',
+      'maxTokens',
+      'name',
+      'provider',
+      'reasoning',
+    ]);
+    // 点查：全形 id 命中同投影；不在目录 = undefined（点查语义，不抛）
+    const first = all[0]!;
+    expect(service.getModel(first.id)!.id).toBe(first.id);
+    expect(service.getModel('nope/never-exists')).toBeUndefined();
+    // provider 过滤参数可用（同目录同账切面）
+    expect(service.listModels(first.provider).every((m) => m.provider === first.provider)).toBe(true);
   });
 
   it('persist:false 不开库不建会话（dump-config 姿态）', async () => {
@@ -926,10 +992,31 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     const badDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const pluginDir = writePluginDir(badDir, 'export const name = "bad";\nexport default 42;\n');
     writeFileSync(join(badDir, 'overlay.yaml'), `rows:\n  - id: bad\n    plugin: ${pluginDir}\n`);
-    expect(await dumpConfigMain({ compositionDir: badDir, persist: false })).toBe(1);
+    // 不传 persist——:memory: 全装配同构（P0-3）：显式 persist:false 会绕开持久层
+    // 全真跑，正是诊断面要禁的侧门（P0-3 批主请求，2026-08-26）
+    expect(await dumpConfigMain({ compositionDir: badDir })).toBe(1);
 
     const emptyDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    expect(await dumpConfigMain({ compositionDir: emptyDir, persist: false })).toBe(0);
+    expect(await dumpConfigMain({ compositionDir: emptyDir })).toBe(0);
+  });
+
+  it('dump-config 主库零落盘（P0-3 回归锁）：:memory: 全装配后数据目录无任何 SQLite 库文件', async () => {
+    // 钉独立数据目录（dumpConfigMain 不收 dataDir 参数——路径面统一走 APP_DATA_DIR
+    // env，与生产同构）；finally 还原，防污染真实 ~/.berry 与兄弟用例
+    const dataRoot = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-dump-')));
+    const prev = process.env['APP_DATA_DIR'];
+    process.env['APP_DATA_DIR'] = dataRoot;
+    try {
+      expect(await dumpConfigMain({})).toBe(0);
+      // 全装配真跑过（装载器执法/config 校验/Kahn 激活全在内存库上执行）……
+      // 而磁盘数据目录里任何形态的 SQLite 库文件都不存在（主库零落盘——
+      // 目录创建类副作用被容忍，库文件写入不允许）
+      const leftBehind = readdirSync(dataRoot).filter((f) => /\.db(-wal|-shm)?$/i.test(f));
+      expect(leftBehind).toEqual([]);
+    } finally {
+      if (prev === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prev;
+    }
   });
 });
 

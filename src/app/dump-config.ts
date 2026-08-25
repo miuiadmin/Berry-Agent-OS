@@ -1,11 +1,16 @@
 /**
  * L5 app — `berry dump-config` 组合树诊断（打印实际生效装配，不跑对话）。
  *
- * persist:false（不开库不建会话——诊断面零副作用）；凭证配置状态不在此列
- * （需要读库，走 run 面的后续诊断命令——M1 不做）。输出人读文本：
- * 组合树逐行带装载状态（activated/failed/skipped/unresolved）——「我到底跑的
- * 是什么」的一屏答案（契约篇 §5.1）。插件装载失败 = 启动断言在组合根抛出，
- * 此处捕获后尽力先打印纯合成的树（零副作用解析）再列失败清单，退出码 1。
+ * :memory: 同构（技术栈篇 §5 同构纪律，2026-08-26 挖矿批 P0-3）：诊断面禁 fork
+ * 侧门——复用 createBerryRuntime 同一入口、改传 `dbPath=':memory:'` 走**全量
+ * 装配**（装载器执法/config 校验/Kahn 激活/插件 apply 全跑）后打印。「不落库」=
+ * 会话主库零写入磁盘（内存库写入即弃）；数据目录侧副作用在场（目录创建类动作
+ * 被容忍）。诊断的价值 = 报告真实装载会走到的路——侧门诊断 = 组合树漂移的开端。
+ * 凭证配置状态不在此列（需要读真库，走 run 面的后续诊断命令——M1 不做）。输出
+ * 人读文本：组合树逐行带装载状态（activated/failed/skipped/unresolved）——
+ * 「我到底跑的是什么」的一屏答案（契约篇 §5.1）。插件装载失败 = 启动断言在
+ * 组合根抛出，此处捕获后尽力先打印纯合成的树（零副作用解析——仅打印形态合成，
+ * 失败兜底语义维持）再列失败清单，退出码 1。
  */
 
 import { createBerryRuntime } from './assembly.js';
@@ -56,7 +61,10 @@ function renderCompositionTree(composition: CompositionReport, statuses?: readon
  */
 export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<number> {
   try {
-    const runtime = await createBerryRuntime({ ...options, interactive: false, persist: false });
+    // :memory: 同构（P0-3）：persist 不传（缺省 true——持久层在场，凭证/预算投影
+    // /memory 件全真跑），库路径锁 ':memory:'（内存库写入即弃 = 主库零落盘；
+    // ensureDbDir 对 ':memory:' 既有跳过判定同源——不建数据库目录）
+    const runtime = await createBerryRuntime({ ...options, interactive: false, dbPath: ':memory:' });
     try {
       const lines = [
         `Berry ${VERSION}`,

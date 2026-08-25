@@ -18,6 +18,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
+import { canonicalWorkspaceRoot } from '../context/workspace.js';
 import type { BuiltinPluginModule, CompositionRow, PluginPlanRow, PluginSkipReason } from '../contracts/plugin.js';
 
 /** overlay 文件名（<数据目录>/overlay.yaml，契约篇 §5.2） */
@@ -295,19 +296,27 @@ export interface PathsService {
   /** 数据目录根（组合树/overlay/装机子树所在） */
   dataDir(): string;
   /**
+   * canonical 工作区根（2026-08-26 挖矿批 P0-1）：context 模块 commondir 归并
+   * 既有能力再导出——多个检索/文件类插件需要锚定工作区而不许读 env 猜 cwd。
+   * 兜底口径：git 根找不到回退 resolved cwd，**永不返回 undefined**；
+   * project-aliases 重定向可能使根偏离 cwd 直觉位（canonical 归并语义，宿主单点裁定）。
+   */
+  workspaceRoot(): string;
+  /**
    * 插件数据根：`<数据目录>/plugins/<id>/`（首取即建目录，幂等缓存）。
    * 插件代码原生可写（进程内全权限受信，§1.4 不经 fence）；模型工具写入 =
    * outside-roots 拒绝面（§1.5.1(a) 拍板——插件数据目录是插件自身治理域，
-   * 模型直写即绕过其治理的暗门）。
+   * 模型直写即绕过其治理的暗门）。id 取 ctx.rowId（正规获取口——禁自推行 id）。
    */
   pluginDataDir(id: string): string;
 }
 
-/** 建目录服务实例（组合根 provide 'paths' 用） */
-export function createPathsService(dataDir: string): PathsService {
+/** 建目录服务实例（组合根 provide 'paths' 用；workspace = 装配工作区，canonical 推导锚点） */
+export function createPathsService(dataDir: string, workspace: string): PathsService {
   const created = new Set<string>();
   return {
     dataDir: () => dataDir,
+    workspaceRoot: () => canonicalWorkspaceRoot(workspace),
     pluginDataDir(id: string): string {
       const dir = join(dataDir, 'plugins', id);
       if (!created.has(dir)) {

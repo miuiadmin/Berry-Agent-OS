@@ -71,6 +71,14 @@ export interface Context {
   registerSessionEventType(def: SessionEventTypeDefinition): Disposer;
   /** 本作用域配置视图（只读快照；组合树解析产物） */
   readonly config: Readonly<Record<string, unknown>>;
+  /**
+   * 本插件组合树行 id（2026-08-26 挖矿批 P0-1，契约篇 §1.5 核心行）：件数据目录
+   * 键的正规获取口（ctx.paths.pluginDataDir(ctx.rowId)）——loader 手持注入，插件
+   * 禁从插件名/目录名自推（行 id 可改名，双键一桥见契约篇 §1.5 表尾）。根/宿主
+   * 作用域 undefined；插件作用域内再 fork 的子作用域继承父行 id（行身份随深度
+   * 保持——任意嵌套的插件代码都能拿到自己的行归属）。
+   */
+  readonly rowId: string | undefined;
   /** 带作用域前缀的子 logger */
   readonly logger: Logger;
   /** 生命周期信号：作用域销毁时 abort——长任务/定时器的取消依据 */
@@ -82,8 +90,12 @@ export interface Context {
  * 组合根 createContext 建根作用域；插件加载器 fork 出插件作用域（共享注册表与事件总线）。
  */
 export interface ContextScope extends Context {
-  /** 派生子作用域：共享服务注册表与事件总线，独立 effect 栈 / signal / config / logger 前缀 */
-  fork(opts: { name: string; config?: Record<string, unknown> }): ContextScope;
+  /**
+   * 派生子作用域：共享服务注册表与事件总线，独立 effect 栈 / signal / config /
+   * logger 前缀。rowId 缺省继承父作用域（行身份随 fork 深度保持）；装载器为
+   * 插件行 fork 时显式传入行 id。
+   */
+  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string }): ContextScope;
   /** 销毁本作用域：LIFO 回卷全部 effect → abort signal。根作用域销毁 = 停机序列的一环 */
   dispose(): Promise<void>;
 }

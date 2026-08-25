@@ -24,9 +24,9 @@ import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
-import { Persistence, localDayStartMs, spentBackgroundTokensSince } from '../persist/index.js';
+import { Persistence, createPluginSqliteFace, localDayStartMs, spentBackgroundTokensSince } from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
-import { createLlmRuntime, createLlmService, createStreamFn } from '../llm/index.js';
+import { createLlmRuntime, createLlmService, createStreamFn, providerApiFace } from '../llm/index.js';
 import { createToolPipeline } from '../tools/index.js';
 import { registerToolsService } from '../tools/registry.js';
 import type { ToolsService } from '../tools/registry.js';
@@ -57,8 +57,9 @@ import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
+import { getSessionEventType } from '../session/index.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
-import { SESSION_CORE_TYPE_FORBIDDEN } from '../contracts/errors.js';
+import { SESSION_CORE_TYPE_FORBIDDEN, SESSION_FORMAT_UNSUPPORTED } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { createDurableSinks, CHAT_APP_ID } from '../chat/index.js';
 import type { DurableSinks, ConversationDriver, ChatControls } from '../chat/index.js';
@@ -410,16 +411,21 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 重建）。chat 行居默认层首行 → 轮次激活先于一切消费方（goal 等 inject
    * 'agent' 结构性取得，晚绑定 attach 挂点退役——件聚落 src/chat/plugin.ts）。 */
 
-  /* ---- ④f 会话事件服务（ctx.sessions，骨架篇 §9.2 落码——最小面 v1）----
-   * 插件落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走活引用
-   * 闭包读当前会话（chat 件绑定后生效——/new 热切换自动跟随，与 onUsage 同款
-   * late-binding）；无会话（诊断装配或 chat 件未装载）返回 undefined，调用方各自降级。
+  /* ---- ④f 会话事件服务（ctx.sessions，骨架篇 §9.2 落码）----
+   * 写面：插件落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走
+   * 活引用闭包读当前会话（chat 件绑定后生效——/new 热切换自动跟随，与 onUsage
+   * 同款 late-binding）；无会话（诊断装配或 chat 件未装载）返回 undefined，调用方各自降级。
+   * 读面（2026-08-26 挖矿批 P0-1，会话篇 §3.2「当前会话只读投影」定形）：两读法
+   * 锚定**当前会话**（与 sessionId 信封同源）——currentSessionId() 无会话返回
+   * undefined；eventsOfType(type) 读**内存活日志**过滤枚举（与 appendEvent 同账
+   * 零迟滞，write-behind 迟滞不影响读；返回过滤副本——append-only 不失效）。
+   * 写读同规（B1 收口）：撞未注册词与写侧**同抛 SESSION_FORMAT_UNSUPPORTED**——
+   * 读侧静默空数组 = 拼错事件名的无声死，禁止。
    * 核心词汇伪造防护：内核词（user/message 等核心 14 类）的写入权属宿主——归因
    *（sendUserMessage source）/审批/结算语义全绑在宿主写点，插件经服务面伪造即
-   * SESSION_CORE_TYPE_FORBIDDEN 响亮拒绝（内核边界，契约篇）；插件只许写自注册
-   * 词汇（session.append 侧对未注册类型还有 SESSION_FORMAT_UNSUPPORTED 二道闸）。
-   * 服务必须无条件 provide（即便 persist:false）——inject 是 Kahn 硬依赖，缺供
-   * 即启动断言拒启。 */
+   * SESSION_CORE_TYPE_FORBIDDEN 响亮拒绝（内核边界，契约篇）；读面核心词不禁
+   *（已注册即返回——读不伪造任何宿主语义）。服务必须无条件 provide（即便
+   * persist:false）——inject 是 Kahn 硬依赖，缺供即启动断言拒启。 */
   ctx.provide('sessions', {
     appendEvent: (type: string, data: unknown): SessionEvent | undefined => {
       // 核心词判据单一来源（contracts——注册侧同尺，两道闸一道判据）
@@ -430,6 +436,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         );
       }
       return session?.append(type, data);
+    },
+    currentSessionId: (): string | undefined => session?.header.sessionId,
+    eventsOfType: (type: string): SessionEvent[] => {
+      // 写读同规：未注册词读侧同抛（读侧静默空数组 = 拼错事件名的无声死）
+      if (getSessionEventType(type) === undefined) {
+        throw new AppError(
+          SESSION_FORMAT_UNSUPPORTED,
+          `未知事件类型：${type}（eventsOfType 读侧同抛——请先经 ctx.registerSessionEventType 注册词汇）`,
+        );
+      }
+      // 读源钉死 = 内存活日志（与 appendEvent 同账零迟滞）；无会话 = 空枚举
+      const current = session;
+      return current === undefined ? [] : current.events.filter((e) => e.type === type);
     },
   });
 
@@ -591,7 +610,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 失败行两面语义（§1.6）：boot = 启动断言拒绝启动（先收尾持久层再回卷 ctx，抛全量
    * 清单）；/reload = 逐行响亮报告、进程存活（local 源「改动 + /reload 即见」环）。 */
   const compositionDir = opts.compositionDir ?? dataDir();
-  ctx.provide('paths', createPathsService(compositionDir));
+  ctx.provide('paths', createPathsService(compositionDir, workspace));
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
   /**
@@ -689,6 +708,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 锚是活绑定（/reload dispose 后重 fork）；composition 同为活绑定（/reload 重装载）
   let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });
   let composition: CompositionReport = loadComposition(compositionDir, builtins);
+  // 虚拟面第五/六键注入物（P0-2，契约篇 §1.2 注记①）：参数注入加载器——
+  // context 不 import llm/persist（拓扑护栏）。第六键拒开基准 = resolvedDbPath
+  //（APP_DB_PATH 覆盖已计入，与 Persistence 开库同源）；persist:false 形态下路径
+  // 仍可算、比对语义照常成立（真开库时才比对）。boot 与 /reload 共用同一份
+  //（两工厂产物均无状态——llm 面是纯 re-export，sqlite 面只闭包主库路径）
+  const virtualFaces = {
+    llm: providerApiFace,
+    sqlite: createPluginSqliteFace(resolvedDbPath),
+  };
   // 插件技能注册回调（契约篇 §1.2 第六件；拓扑 seam 落码形态——context 不引
   // skills，组合根在此桥接）：loadPlugins 在行作用域 fork 后、apply 之前逐声明行
   // 回调。桥接三件：包层 provider 工厂（skills 模块产）+ registerProvider（追加序
@@ -711,7 +739,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   plugins.applyLoad(
     composition,
-    await loadPlugins(pluginAnchor, composition.plan, { registerSkills: registerPluginSkills }),
+    await loadPlugins(pluginAnchor, composition.plan, { registerSkills: registerPluginSkills, virtualFaces }),
   );
   if (plugins.list().some((row) => row.status === 'failed')) {
     const lines = plugins
@@ -764,7 +792,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       loadWindow = true;
       await pluginAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
       pluginAnchor = ctx.fork({ name: 'plugins' });
-      const load = await loadPlugins(pluginAnchor, fresh.plan, { registerSkills: registerPluginSkills });
+      const load = await loadPlugins(pluginAnchor, fresh.plan, { registerSkills: registerPluginSkills, virtualFaces });
       composition = fresh;
       plugins.applyLoad(fresh, load); // 同实例就地更新（失败行进 list 状态面——进程存活）
       rebuildSystemPrompt();
