@@ -30,10 +30,41 @@ const NO_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tota
 export interface DeliverOptions {
   /** true = 后台唤醒（计入自激预算 maxConsecutiveWakes）；用户手写消息缺省 false 并恢复预算 */
   readonly backgroundWake?: boolean;
+  /**
+   * run 级工具白名单（第二十四批题3a——无人值守收窄投影）：仅当实际开起的 run
+   * 批**全部**为 backgroundWake 消息时生效（用户消息混批 = 用户在场，不收窄）；
+   * 多消息各自的 filter 取交集（窄者赢）。steer 入队消息不生效（工具面随开跑
+   * 时批已定）。守门段照常运行——收窄的是模型感知面，不是执法面。
+   */
+  readonly toolFilter?: readonly string[];
 }
 
 /** 三通道（§4.1）：steer（run 中入队）/ followUp（闲时唤醒开轮）/ inject（只落日志不唤醒） */
 export type DeliverChannel = 'steer' | 'followUp' | 'inject';
+
+/** 投递元数据（deliver 携带、驱动按消息引用挂靠——收窄判定输入） */
+export interface DeliverMeta {
+  readonly backgroundWake: boolean;
+  readonly toolFilter?: readonly string[];
+}
+
+/**
+ * 纯 backgroundWake 批的工具白名单判定（第二十四批题3a，纯函数——驱动消费 +
+ * 单测直接覆盖）：批内任一非 backgroundWake 消息（用户在场）→ undefined
+ * （不收窄）；全 wake 批取各自 toolFilter 的交集（窄者赢——未携带 filter 的
+ * wake 消息不构成否决）；无任何 filter → undefined。空批 → undefined。
+ */
+export function resolveWakeToolAllowList(metas: readonly (DeliverMeta | undefined)[]): Set<string> | undefined {
+  const filters: (readonly string[])[] = [];
+  for (const meta of metas) {
+    if (meta?.backgroundWake !== true) return undefined;
+    if (meta.toolFilter !== undefined) filters.push(meta.toolFilter);
+  }
+  if (filters.length === 0) return undefined;
+  let allow = new Set<string>(filters[0]!);
+  for (const filter of filters.slice(1)) allow = new Set<string>(filter.filter((name) => allow.has(name)));
+  return allow;
+}
 
 /** 会话驱动依赖（chat 件装配产物注入） */
 export interface ConversationDriverDeps {
@@ -65,6 +96,12 @@ export class ConversationDriver {
   /** run 取消信号（退出序列 / SIGINT 共用；一次性——abort 即终态） */
   private readonly abortController = new AbortController();
   /**
+   * 投递元数据（按消息引用挂靠）：队列只存 AgentMessage 契约面，投递选项是
+   * 驱动侧关注点——纯 backgroundWake 批的工具收窄判定依据（第二十四批题3a）。
+   * 生命周期：deliver 时写入；批消费（开 run / steering 取数 / resetTimeline）时清除。
+   */
+  private readonly deliverMeta = new Map<AgentMessage, DeliverMeta>();
+  /**
    * run 结算订阅表（骨架篇 §9.3 onRunSettled 的驱动侧半边）：
    * ctx.agent 服务挂入总派发器（件内构造）——隔离责任在服务层，驱动只管
    * 在每个 run 终结（running 复位后）同步派发一次。
@@ -87,10 +124,11 @@ export class ConversationDriver {
     this.durable = deps.durable;
     this.writeHeader = deps.writeHeader;
     // steering 取数口驱动自持：仅 running 期供给（run 间隙的余量走 launch 的
-    // followUp 循环，不经此口——两路取数同一条队列，分流点在时机不在通道）
+    // followUp 循环，不经此口——两路取数同一条队列，分流点在时机不在通道）。
+    // 取出即清投递元数据（steering 路不收窄——工具面随开跑时批已定）
     this.config = {
       ...deps.loopConfig,
-      getSteeringMessages: async () => (this.running ? this.queue.drain() : []),
+      getSteeringMessages: async () => (this.running ? this.consumeMeta(this.queue.drain()) : []),
       getFollowUpMessages: async () => [],
     };
   }
@@ -139,6 +177,28 @@ export class ConversationDriver {
   /** 连续后台唤醒计数（§6.4）：backgroundWake 唤醒 +1；任何非后台投递清零（用户手写恢复） */
   private wakeCount = 0;
 
+  /** 批消费的元数据清理（steering 取数口共用——只清不读，返回原批） */
+  private consumeMeta(batch: readonly AgentMessage[]): AgentMessage[] {
+    for (const message of batch) this.deliverMeta.delete(message);
+    return [...batch];
+  }
+
+  /**
+   * run 上下文投影（第二十四批题3a）：收窄批返回工具面过滤后的浅拷贝上下文
+   * （messages 活数组引用不变——时间线单一不变式不破；基础上下文的 tools
+   * 数组不受影响——后续 run 恢复全量）。元数据消费即清。
+   */
+  private contextForBatch(batch: readonly AgentMessage[]): AgentContext {
+    const metas = batch.map((message) => {
+      const meta = this.deliverMeta.get(message);
+      this.deliverMeta.delete(message);
+      return meta;
+    });
+    const allow = resolveWakeToolAllowList(metas);
+    if (allow === undefined || this.context.tools === undefined) return this.context;
+    return { ...this.context, tools: this.context.tools.filter((tool) => allow.has(tool.name)) };
+  }
+
   /**
    * 三通道投递（§4.1 路由表 + §6.4 落码面）：路由按目标当前状态——
    * 拆卸中（abort 已触发）→ inject：只落日志/投影 + 展示，不入队不开 run
@@ -150,8 +210,11 @@ export class ConversationDriver {
    */
   deliver(message: AgentMessage, opts?: DeliverOptions): DeliverChannel {
     const backgroundWake = opts?.backgroundWake === true;
+    // 收窄投影仅对 backgroundWake 消息有意义（用户消息不携带）
+    const toolFilter = backgroundWake ? opts?.toolFilter : undefined;
     if (this.abortController.signal.aborted) return this.inject(message);
     if (this.running) {
+      this.deliverMeta.set(message, { backgroundWake, toolFilter });
       this.queue.enqueue(message);
       return 'steer';
     }
@@ -160,6 +223,7 @@ export class ConversationDriver {
     }
     if (backgroundWake) this.wakeCount += 1;
     else this.wakeCount = 0;
+    this.deliverMeta.set(message, { backgroundWake, toolFilter });
     void this.launch([message]);
     return 'followUp';
   }
@@ -183,6 +247,8 @@ export class ConversationDriver {
     messages.length = 0;
     messages.push(...seed);
     this.headerWritten = false;
+    // 时间线重置时旧投递元数据随之作废（防跨会话泄漏引用）
+    this.deliverMeta.clear();
     return true;
   }
 
@@ -244,12 +310,12 @@ export class ConversationDriver {
         this.headerWritten = true;
         this.writeHeader?.();
       }
-      result = await startRun(prompts, this.context, this.config, hooks);
+      result = await startRun(prompts, this.contextForBatch(prompts), this.config, hooks);
       // run 自然停：余量排队消息全量捞出续跑（followUp 唤醒）
       while (!this.abortController.signal.aborted && this.queue.hasItems()) {
         const batch: AgentMessage[] = [];
         while (this.queue.hasItems()) batch.push(...this.queue.drain());
-        result = await startRun(batch, this.context, this.config, hooks);
+        result = await startRun(batch, this.contextForBatch(batch), this.config, hooks);
       }
     } catch (error) {
       // 回调违约（loop 零 try/catch 的对价）：合成 error 消息补齐事件序列

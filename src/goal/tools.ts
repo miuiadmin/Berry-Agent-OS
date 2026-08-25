@@ -29,6 +29,8 @@ function renderGoal(goal: GoalRecord): string {
     `目标：${goal.objective}`,
     `状态：${goal.status}${goal.stopReason !== null ? `（原因：${goal.stopReason}）` : ''}`,
     `预算：已用 ${goal.tokensUsed} / ${goal.tokenBudget} tokens`,
+    // 开洞申请如实示态（第二十四批题3a）：用户 /goal 面可见模型申报的写面需求
+    `续跑工具面：${goal.needsWrite ? '已申报写面开洞（needsWrite——续跑轮全量工具）' : '只读收紧（read 类 + goal_get/goal_update）'}`,
   ];
   if (goal.evidence !== null) lines.push(`证据/原因：${goal.evidence}`);
   lines.push(`创建：${new Date(goal.createdAt).toISOString()}；更新：${new Date(goal.updatedAt).toISOString()}`);
@@ -80,12 +82,19 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
         maximum: 100_000_000,
         description: '目标 token 预算帽（主循环累计；耗尽即刹停收尾，不等于完成）',
       }),
+      needsWrite: Type.Optional(
+        Type.Boolean({
+          description:
+            '写面开洞申请：目标需要写文件/执行命令时显式申报 true（用户 /goal 面可见）——续跑轮获得全量工具；缺省 false = 无人值守续跑轮只读（检索/阅读类可用），靠读做不到时再申报重设',
+        }),
+      ),
     }),
     execute: async (args) => {
       const sessionId = deps.getSessionId();
       if (sessionId === undefined) return textResult('无会话上下文（persist:false 或未建立会话）——goal 不可用。', true);
       const objective = String(args.objective);
       const tokenBudget = Number(args.tokenBudget);
+      const needsWrite = args.needsWrite === true;
       const current = deps.store.get(sessionId);
       // active 行占位即拒（一径：先 goal_update 申报终态或 /goal stop，再重设）
       if (!canSetGoal(current)) {
@@ -95,7 +104,7 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
         );
       }
       const now = Date.now();
-      deps.store.setActive(sessionId, objective, tokenBudget, now);
+      deps.store.setActive(sessionId, objective, tokenBudget, needsWrite, now);
       const goal = deps.store.get(sessionId)!;
       const replaced = current !== undefined ? `（已覆盖旧目标的 ${current.status} 行）` : '';
       return textResult(`目标已设定并激活${replaced}。\n${renderGoal(goal)}`);

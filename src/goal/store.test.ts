@@ -6,20 +6,23 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openStore, type Store } from '../persist/index.js';
-import { GOAL_MIGRATION, GoalStore } from './index.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { migrations as goalMigrations, GOAL_MIGRATION, GoalStore } from './index.js';
 
 /** 当前测试库（每用例新建 :memory:——迁移一次到位后交 DAO） */
 let store: Store;
 let db: GoalStore;
 
 beforeEach(() => {
-  store = openStore({ path: ':memory:', migrations: [GOAL_MIGRATION] });
+  store = openStore({ path: ':memory:', migrations: goalMigrations });
   db = new GoalStore(store.connection);
 });
 
 describe('setActive / get：设定与读回', () => {
   it('新插：全字段落库（active / 记账 0 / 证据与终态时间戳空）', () => {
-    db.setActive('s1', '完成 goal 纵切', 5000, 100);
+    db.setActive('s1', '完成 goal 纵切', 5000, false, 100);
     const goal = db.get('s1')!;
     expect(goal).toBeDefined();
     expect(goal.sessionId).toBe('s1');
@@ -36,18 +39,18 @@ describe('setActive / get：设定与读回', () => {
 
   it('无行 get 返回 undefined；每会话单行互不串（session_id 主键）', () => {
     expect(db.get('sX')).toBeUndefined();
-    db.setActive('s1', '目标甲', 1000, 100);
-    db.setActive('s2', '目标乙', 2000, 200);
+    db.setActive('s1', '目标甲', 1000, false, 100);
+    db.setActive('s2', '目标乙', 2000, false, 200);
     expect(db.get('s1')!.objective).toBe('目标甲');
     expect(db.get('s2')!.objective).toBe('目标乙');
   });
 
   it('重设复位：completed 行再 setActive → 状态/记账/证据/终态时间戳全复位换新', () => {
-    db.setActive('s1', '旧目标', 1000, 100);
+    db.setActive('s1', '旧目标', 1000, false, 100);
     db.settleDeclared('s1', 'completed', '旧证据', 200);
     db.addUsage('s1', 300, 250);
     // 终态行重设（调用侧已过 canSetGoal——completed 可设）
-    db.setActive('s1', '新目标', 9000, 300);
+    db.setActive('s1', '新目标', 9000, false, 300);
     const goal = db.get('s1')!;
     expect(goal.objective).toBe('新目标');
     expect(goal.tokenBudget).toBe(9000);
@@ -61,7 +64,7 @@ describe('setActive / get：设定与读回', () => {
 
 describe('addUsage：预算记账', () => {
   it('累加并返回更新后的行（读改写同语句——无并发窗口）', () => {
-    db.setActive('s1', '目标', 5000, 100);
+    db.setActive('s1', '目标', 5000, false, 100);
     const first = db.addUsage('s1', 100, 200)!;
     expect(first.tokensUsed).toBe(100);
     const second = db.addUsage('s1', 250, 300)!;
@@ -76,21 +79,21 @@ describe('addUsage：预算记账', () => {
 
 describe('转移方法：状态机落库半边', () => {
   it('demoteToNeedsResume：active 降级；非 active 行不动（WHERE 护栏）', () => {
-    db.setActive('s1', '目标', 1000, 100);
+    db.setActive('s1', '目标', 1000, false, 100);
     db.demoteToNeedsResume('s1', 200);
     expect(db.get('s1')!.status).toBe('needs-resume');
     // needs-resume 再降：no-op（不产生非法双降级形态）
     db.demoteToNeedsResume('s1', 300);
     expect(db.get('s1')!.status).toBe('needs-resume');
     // completed 行降级：WHERE 守卫拦下
-    db.setActive('s2', '另一目标', 1000, 100);
+    db.setActive('s2', '另一目标', 1000, false, 100);
     db.settleDeclared('s2', 'completed', '证据', 200);
     db.demoteToNeedsResume('s2', 300);
     expect(db.get('s2')!.status).toBe('completed');
   });
 
   it('reactivate：needs-resume ⇒ active（人类重新授权）', () => {
-    db.setActive('s1', '目标', 1000, 100);
+    db.setActive('s1', '目标', 1000, false, 100);
     db.demoteToNeedsResume('s1', 200);
     db.reactivate('s1', 300);
     const goal = db.get('s1')!;
@@ -99,14 +102,14 @@ describe('转移方法：状态机落库半边', () => {
   });
 
   it('settleDeclared：completed/blocked 落 evidence 与终态时间戳', () => {
-    db.setActive('s1', '目标', 1000, 100);
+    db.setActive('s1', '目标', 1000, false, 100);
     db.settleDeclared('s1', 'completed', '逐需求证据齐备', 200);
     let goal = db.get('s1')!;
     expect(goal.status).toBe('completed');
     expect(goal.evidence).toBe('逐需求证据齐备');
     expect(goal.settledAt).toBe(200);
     // blocked 同面（重设后再试另一半）
-    db.setActive('s1', '目标二', 1000, 300);
+    db.setActive('s1', '目标二', 1000, false, 300);
     db.settleDeclared('s1', 'blocked', '依赖服务连续三轮不可用', 400);
     goal = db.get('s1')!;
     expect(goal.status).toBe('blocked');
@@ -114,7 +117,7 @@ describe('转移方法：状态机落库半边', () => {
   });
 
   it('stopByUser：⇒ stopped/user', () => {
-    db.setActive('s1', '目标', 1000, 100);
+    db.setActive('s1', '目标', 1000, false, 100);
     db.stopByUser('s1', 200);
     const goal = db.get('s1')!;
     expect(goal.status).toBe('stopped');
@@ -123,7 +126,7 @@ describe('转移方法：状态机落库半边', () => {
   });
 
   it('stopByBudget：⇒ stopped/budget + 记账定格；已停行幂等 no-op（WHERE 守卫）', () => {
-    db.setActive('s1', '目标', 1000, 100);
+    db.setActive('s1', '目标', 1000, false, 100);
     db.addUsage('s1', 1200, 150);
     db.stopByBudget('s1', 1200, 200);
     const stopped = db.get('s1')!;
@@ -135,5 +138,38 @@ describe('转移方法：状态机落库半边', () => {
     const again = db.get('s1')!;
     expect(again.tokensUsed).toBe(1200);
     expect(again.updatedAt).toBe(200); // 连时间戳都没动
+  });
+});
+
+describe('needsWrite（第二十四批题3a——续跑轮工具面开洞申请位）', () => {
+  it('缺省 false；申报 true 落库读回；重设复位换新值', () => {
+    db.setActive('s1', '只读目标', 1000, false, 100);
+    expect(db.get('s1')!.needsWrite).toBe(false);
+    db.settleDeclared('s1', 'completed', '证据', 200);
+    db.setActive('s1', '写面目标', 2000, true, 300);
+    const goal = db.get('s1')!;
+    expect(goal.needsWrite).toBe(true);
+    expect(goal.objective).toBe('写面目标');
+    expect(goal.status).toBe('active');
+  });
+
+  it('v5 旧库升 v8：ALTER 补列，既有行 needs_write 缺省 0（收紧语义）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'goal-needs-write-'));
+    const path = join(dir, 'g.db');
+    // 只带 v5 建旧库 + 原生 SQL 落一行（旧形态无 needs_write 列）
+    const old = openStore({ path, migrations: [GOAL_MIGRATION] });
+    old.connection
+      .prepare(
+        `INSERT INTO goals (session_id, objective, token_budget, tokens_used, status, created_at, updated_at)
+         VALUES ('s1', '旧目标', 1000, 0, 'active', 1, 1)`,
+      )
+      .run();
+    old.close();
+    // 重开带全迁移链 → v8 ALTER 生效，旧行读回 needsWrite=false
+    const upgraded = openStore({ path, migrations: goalMigrations });
+    const goal = new GoalStore(upgraded.connection).get('s1')!;
+    expect(goal.objective).toBe('旧目标');
+    expect(goal.needsWrite).toBe(false);
+    upgraded.close();
   });
 });

@@ -29,7 +29,7 @@
  */
 
 import { describeError } from '../contracts/errors.js';
-import type { ToolsService } from '../contracts/tools.js';
+import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
@@ -112,6 +112,22 @@ export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
  * 官方件 apply 本体（接线序：boot 降级 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
  * 异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
  */
+
+/**
+ * 续跑轮工具面投影（第二十四批题3a，骨架篇 §6.8 拍板落码）：
+ * read 类工具全保（检索/阅读照常）+ goal_get/goal_update 显式保留（结算件——
+ * 续跑轮必须能查态与申报终态，否则 goal 永远无法自然收束；两件自身 effect
+ * 均为 write，靠名单显式保留而非 effect 过滤自然命中）；write/exec 类与
+ * goal_set（轮中重设无意义）全部收走。模型感知面 = 白名单（不可见即不可调）。
+ */
+function wakeToolFilter(defs: readonly ToolDefinition[]): string[] {
+  const names = new Set<string>(['goal_get', 'goal_update']);
+  for (const def of defs) {
+    if (def.effect === 'read') names.add(def.name);
+  }
+  return [...names];
+}
+
 async function applyGoalPlugin(
   ctx: PluginContext,
   deps: GoalPluginDeps,
@@ -163,8 +179,19 @@ async function applyGoalPlugin(
           const goal = store.get(sessionId);
           if (goal === undefined || !shouldContinueGoal(goal, settled.status)) return;
           // backgroundWake：计入自激预算 maxConsecutiveWakes=3——连续自动续跑
-          // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录
-          agent.sendUserMessage(renderContinuationPrompt(goal), { source: 'plugin:goal', backgroundWake: true });
+          // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录。
+          // 第二十四批题3a：无人值守续跑轮工具面收窄（needsWrite 未申报时）——
+          // 机制级投影非提示词劝阻（letta token 扫描被绕过删除的反面教训）：
+          // read 类工具 + goal_get/goal_update（结算件必须在场，否则续跑轮永远
+          // 无法申报终态）；goal_set/goal_update 自身 effect 均为 write，靠名单
+          // 显式保留而非 effect 过滤自然命中。开洞：goal_set 申报 needsWrite
+          // 即不携带 toolFilter（续跑轮全量工具面）。
+          const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.list());
+          agent.sendUserMessage(renderContinuationPrompt(goal), {
+            source: 'plugin:goal',
+            backgroundWake: true,
+            ...(toolFilter !== undefined ? { toolFilter } : {}),
+          });
         } catch (err) {
           // 续跑触发异常止步日志（结算通知链不受插件违约影响——服务层另有隔离壳）
           ctx.logger.error('goal 续跑触发失败', { error: describeError(err) });

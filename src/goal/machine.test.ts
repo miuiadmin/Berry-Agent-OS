@@ -20,6 +20,7 @@ function row(status: GoalStatus): GoalRecord {
     status,
     stopReason: status === 'stopped' ? 'budget' : null,
     evidence: status === 'completed' || status === 'blocked' ? '证据' : null,
+    needsWrite: false,
     createdAt: 1,
     updatedAt: 2,
     settledAt: status === 'completed' || status === 'blocked' || status === 'stopped' ? 3 : null,

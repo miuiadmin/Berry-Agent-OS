@@ -19,6 +19,7 @@ interface GoalRow {
   status: string;
   stop_reason: string | null;
   evidence: string | null;
+  needs_write: number;
   created_at: number;
   updated_at: number;
   settled_at: number | null;
@@ -34,6 +35,7 @@ function toRecord(row: GoalRow): GoalRecord {
     status: row.status as GoalStatus,
     stopReason: row.stop_reason as GoalRecord['stopReason'],
     evidence: row.evidence,
+    needsWrite: row.needs_write === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     settledAt: row.settled_at,
@@ -57,13 +59,13 @@ export class GoalStore {
 
   /**
    * goal_set 落库（insert-or-replace 语义）：无行插入；既有行（调用侧已保证
-   * 非 active）整体重设——objective/预算换新、tokens_used 归零、回到 active。
+   * 非 active）整体重设——objective/预算/开洞申请换新、tokens_used 归零、回到 active。
    */
-  setActive(sessionId: string, objective: string, tokenBudget: number, now: number): void {
+  setActive(sessionId: string, objective: string, tokenBudget: number, needsWrite: boolean, now: number): void {
     this.connection
       .prepare(
-        `INSERT INTO goals (session_id, objective, token_budget, tokens_used, status, stop_reason, evidence, created_at, updated_at, settled_at)
-         VALUES (?, ?, ?, 0, 'active', NULL, NULL, ?, ?, NULL)
+        `INSERT INTO goals (session_id, objective, token_budget, tokens_used, status, stop_reason, evidence, needs_write, created_at, updated_at, settled_at)
+         VALUES (?, ?, ?, 0, 'active', NULL, NULL, ?, ?, ?, NULL)
          ON CONFLICT(session_id) DO UPDATE SET
            objective = excluded.objective,
            token_budget = excluded.token_budget,
@@ -71,10 +73,11 @@ export class GoalStore {
            status = 'active',
            stop_reason = NULL,
            evidence = NULL,
+           needs_write = excluded.needs_write,
            updated_at = excluded.updated_at,
            settled_at = NULL`,
       )
-      .run(sessionId, objective, tokenBudget, now, now);
+      .run(sessionId, objective, tokenBudget, needsWrite ? 1 : 0, now, now);
   }
 
   /** /goal resume：needs-resume ⇒ active（时间戳与状态复位） */

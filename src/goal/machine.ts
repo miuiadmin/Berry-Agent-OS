@@ -27,6 +27,8 @@ export interface GoalRecord {
   readonly stopReason: 'budget' | 'user' | null;
   /** completed 申报证据 / blocked 阻塞原因；其余状态为 null */
   readonly evidence: string | null;
+  /** 续跑轮工具面开洞申请（第二十四批题3a）：true = goal_set 申报需要写/执行，续跑轮不收窄工具面 */
+  readonly needsWrite: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
   /** 终态落点时间戳；进行态（active/needs-resume）为 null */

@@ -55,6 +55,12 @@ export interface SendUserMessageOptions {
   readonly source?: MessageSource;
   /** true = 自激唤醒（计入自激预算 maxConsecutiveWakes——闲时 followUp 前 check、超帽降级 inject）；缺省 false（用户手写语义恢复预算） */
   readonly backgroundWake?: boolean;
+  /**
+   * run 级工具白名单（第二十四批题3a——无人值守收窄投影，仅 backgroundWake 投递
+   * 携带才有意义）：实际开起的 run 批全为 wake 消息时生效，多源取交集；用户消息
+   * 混批不收窄。见 ConversationDriver.DeliverOptions.toolFilter。
+   */
+  readonly toolFilter?: readonly string[];
   /** 定向投递（'steer'/'inject'）——M2+ 预留位，显式携带即 AGENT_DELIVER_AS_UNSUPPORTED */
   readonly deliverAs?: 'steer' | 'inject';
 }
@@ -311,7 +317,10 @@ function provideAgentService(ctx: PluginContext, driver: ConversationDriver): vo
         timestamp: Date.now(),
         ...(opts.source !== undefined ? { source: opts.source } : {}),
       };
-      driver.deliver(message, { backgroundWake: opts.backgroundWake === true });
+      driver.deliver(message, {
+        backgroundWake: opts.backgroundWake === true,
+        toolFilter: opts.toolFilter,
+      });
     },
     onRunSettled(cb) {
       subscribers.add(cb);

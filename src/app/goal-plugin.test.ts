@@ -229,10 +229,46 @@ describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链�
     expect(injected).toContain('写完 goal 全栈测试');
     expect(injected).toContain('反缩水');
     expect(injected).toContain('预算尽');
+    // 第二十四批题3a：续跑轮（纯 backgroundWake 批）工具面收窄——结算件
+    // （goal_get/goal_update）在场，goal_set 与写面工具收走，收窄批 ⊆ 全量批
+    const fullNames = (contexts[0]!.tools ?? []).map((t) => t.name);
+    const wakeNames = (contexts[1]!.tools ?? []).map((t) => t.name);
+    expect(wakeNames).toContain('goal_update');
+    expect(wakeNames).toContain('goal_get');
+    expect(wakeNames).not.toContain('goal_set');
+    if (fullNames.includes('bash')) expect(wakeNames).not.toContain('bash');
+    for (const name of wakeNames) expect(fullNames).toContain(name);
     // 申报已落库：completed + 证据；链停在 3 个请求（不再续跑）
     const text = await goalText(runtime);
     expect(text).toContain('状态：completed');
     expect(text).toContain('逐需求证据齐备');
+    expect(contexts).toHaveLength(3);
+  });
+
+  it('needsWrite 开洞：goal_set 申报后续跑轮不收窄（全量工具面含 goal_set）', async () => {
+    const { streamFn, contexts } = scriptedStream([
+      textMessage('首轮答'),
+      toolCallMessage('goal_update', { status: 'completed', evidence: '写面目标收口（测试脚本申报）' }),
+      textMessage('收口答'),
+    ]);
+    const runtime = await assemble({ streamFn });
+    await callTool(runtime, 'goal_set', {
+      objective: '需要写文件的长目标',
+      tokenBudget: 100000,
+      needsWrite: true,
+    });
+
+    await runtime.conversation!.submitOnce('开始');
+    await spinUntil(() => contexts.length >= 2, '续跑注入开轮');
+    await runtime.conversation!.settle();
+
+    // 开洞：续跑轮全量工具面（含 goal_set——未收窄）+ /goal 面如实示态
+    const wakeNames = (contexts[1]!.tools ?? []).map((t) => t.name);
+    expect(wakeNames).toContain('goal_set');
+    expect(wakeNames).toContain('goal_update');
+    const text = await goalText(runtime);
+    expect(text).toContain('已申报写面开洞');
+    expect(text).toContain('状态：completed');
     expect(contexts).toHaveLength(3);
   });
 
