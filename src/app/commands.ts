@@ -83,6 +83,8 @@ export interface BuiltinCommandsOptions {
   readonly plugins: PluginsService;
   /** 组合树重载（/reload 主体——组合根闭包；装配动作不进壳面） */
   readonly reload: () => Promise<ReloadResult>;
+  /** 用量面板取数（/usage——投影本体在 usage.ts，组合根闭包绑库连接；壳只转述） */
+  readonly usage: () => string;
 }
 
 /**
@@ -120,6 +122,15 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         } else {
           ui.notify('现在不能开新会话（run 进行中或无持久层），稍后再试');
         }
+      },
+    }),
+    commands.register({
+      name: 'usage',
+      description: '用量面板：今日/近 7 日 tokens、会话 top、模型分布、goal 预算',
+      handler: () => {
+        // 投影本体在 usage.ts（组合根闭包绑库连接）——壳只转述；诊断面无持久层
+        // 时闭包返回说明文本，同样经通知呈现
+        ui.notify(opts.usage());
       },
     }),
     commands.register({

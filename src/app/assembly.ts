@@ -77,6 +77,7 @@ import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
+import { formatUsagePanel } from './usage.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { dataDir, dbPath, ensureDbDir } from './paths.js';
@@ -738,6 +739,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       newSession: startNewSession,
       plugins, // ctx.plugins 服务（⑨ provide——命令壳与宿主同源）
       reload, // 组合根 reload 闭包（⑨ 定义——busy/error/payload 三面）
+      // /usage 取数闭包：绑持久层活连接（诊断面无库时给说明行——面板零写入，
+      // 库连接在关停序列中先于命令面注销而 close，通道壳兜底为通知）
+      usage: persistence
+        ? () => formatUsagePanel(persistence.store.connection)
+        : () => '用量面板不可用（诊断面无持久层——persist:false）',
     }),
   );
 
