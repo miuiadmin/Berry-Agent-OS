@@ -42,7 +42,10 @@ export type EventName =
  * 派发点调用的方法必须与目录声明一致（check-events 机械校验）。
  */
 export interface LiveEventDefinition {
-  /** 事件名（小写斜线式；与派发点字面量/常量值双向比对） */
+  /**
+   * 事件名（斜线 = 插件自定义域、无斜线 = 宿主自留地——命名空间分域规则，
+   * 与 §1.5 prompt 段同款；与派发点字面量/常量值双向比对）。
+   */
   readonly name: string;
   /** 分派模式——事件的公开契约部分（契约篇 §1「@mode」纪律：dsh 衍生） */
   readonly mode: 'emit' | 'waterfall' | 'parallel' | 'serial';
