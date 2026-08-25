@@ -6,6 +6,13 @@
  * 注册表收纳，`builtin:memory` 行激活）。
  */
 
+import type { MigrationSpec } from '../persist/index.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+import { SESSION_FTS_MIGRATION } from './session-fts.js';
+
+/** 件自带迁移链（v2 表族 + v3 session_fts + v4 效用列——组合根机械聚合的标准名，tick 第一刀同批改造） */
+export const migrations: MigrationSpec[] = [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION];
+
 export { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
 export { uuidV7, shortIdOf } from './id.js';
 export { BRIEFING_SECTION_ID, renderBriefingSection } from './briefing.js';

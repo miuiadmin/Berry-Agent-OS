@@ -36,7 +36,7 @@ export type BuiltinPluginRegistry = Readonly<Record<string, BuiltinPluginModule>
  * 卸掉仅失对应能力，核心循环不破）。Ring 0 内核不进组合树；Ring 1 底座当前
  * 仍为组合根硬装配（行树化随 exec 纵切批落，seam——第十六批题五终态宣言）。
  */
-// 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：chat 首行 + memory/subagent/goal 顺移
+// 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：chat 首行 + memory/subagent/goal/scheduler 顺移
 // （均非 fixed——overlay 可卸/可禁，卸掉仅失对应能力，核心循环不破）
 const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 首行 = chat 对话应用件（契约篇 §5.4 应用面第一纵切）：对话是应用不是内核
@@ -45,6 +45,9 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   { id: 'memory', plugin: 'builtin:memory' },
   { id: 'subagent', plugin: 'builtin:subagent' },
   { id: 'goal', plugin: 'builtin:goal' },
+  // 第五行 = scheduler tick 任务面（内核边界篇 §4.1 席 13 第一刀）：jobs 表 +
+  // /tick 命令 + 只读子进程单发——卸掉即无任务面，核心循环不破
+  { id: 'scheduler', plugin: 'builtin:scheduler' },
 ];
 
 /** 组合树装载产物（dump-config 打印 + ctx.plugins.list 数据源） */

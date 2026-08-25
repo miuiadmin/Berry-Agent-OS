@@ -36,7 +36,7 @@ const MODULE_EDGES = {
   // exec = 工具族件聚落（第 18 模块，2026-08-25 exec 纵切；tools 不 import exec——
   // bash def 在组合根注册，检索族双装配点先例）
   exec: ['contracts', 'context', 'safety', 'tools'],
-  scheduler: ['contracts', 'context', 'session', 'agent'],
+  scheduler: ['contracts', 'context', 'persist'],
   mcp: ['contracts', 'context', 'tools'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
   channels: ['contracts', 'context', 'agent'],

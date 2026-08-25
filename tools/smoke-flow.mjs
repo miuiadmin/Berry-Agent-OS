@@ -14,8 +14,7 @@
 
 import { join } from 'node:path';
 import { Persistence } from '../src/persist/index.js';
-import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION } from '../src/memory/index.js';
-import { GOAL_MIGRATION } from '../src/goal/index.js';
+import { collectBuiltinMigrations } from '../src/app/builtins.js';
 
 /**
  * 跑完整冒烟流（五轮 + 重开库自检）。全程打印 [smoke] 前缀报告；结构性判定
@@ -220,12 +219,12 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
   } finally {
     // 优雅关停：run 结算 → flush 屏障 → 关库 → ctx 回卷（骨架篇 §1.3）
     await runtime.shutdown();
-    // 落库自检：重开库（带全迁移链 v1→v5）
+    // 落库自检：重开库（collectBuiltinMigrations 全链——新增带表件自动跟进，此处零改动）
     let reopenOk = true;
     try {
       const reopened = Persistence.open({
         path: join(smokeData, 'sessions.db'),
-        migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
+        migrations: collectBuiltinMigrations(),
       });
       const ids = reopened.store.listSessionIds();
       const firstId = ids[0];

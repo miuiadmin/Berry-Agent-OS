@@ -7,13 +7,20 @@
  *
  * 依赖注入走闭包（官方件 = 宿主装配特权）：Store 公共读脸等宿主资源在
  * 构造期传入，不新开 ctx 服务名。
+ *
+ * 迁移聚合（会话篇 §6 静态声明面，tick 第一刀兑现第十六批题十五目标态）：
+ * 本文件 = 带表件的唯一注册点——行注册与 `migrations` 标准名 import 同文件
+ * 追加，`collectBuiltinMigrations()` 供 assembly 拼业务链（此后每加带表件
+ * assembly 零改动）。
  */
 
-import { createMemoryPlugin, type MemoryPluginStoreFace } from '../memory/index.js';
-import { createGoalPlugin } from '../goal/index.js';
+import { createMemoryPlugin, type MemoryPluginStoreFace, migrations as memoryMigrations } from '../memory/index.js';
+import { createGoalPlugin, migrations as goalMigrations } from '../goal/index.js';
+import { createSchedulerPlugin, migrations as schedulerMigrations } from '../scheduler/index.js';
+import type { SchedulerPluginDeps } from '../scheduler/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
-import type { DatabaseConnection } from '../persist/index.js';
+import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
 import type { Session } from '../session/session.js';
 import type { BuiltinPluginModule } from '../contracts/plugin.js';
 import type { BuiltinPluginRegistry } from './composition.js';
@@ -22,8 +29,10 @@ import type { BuiltinPluginRegistry } from './composition.js';
 export interface BuiltinRegistryOptions {
   /** Store 公共读脸（memory 官方件闭包注入）；无持久层时不传 */
   readonly store?: MemoryPluginStoreFace;
-  /** SQLite 连接（goal 官方件闭包注入——goals 表物理载体）；无持久层时不传 */
+  /** SQLite 连接（goal/scheduler 官方件闭包注入——goals/jobs 表物理载体）；无持久层时不传 */
   readonly goalConnection?: DatabaseConnection;
+  /** scheduler 件闭包依赖束（gate 判据 + runner——组合根活资源，席 13 第一刀；connection 由 goalConnection 同源注入不在此列） */
+  readonly schedulerDeps?: Omit<SchedulerPluginDeps, 'connection'>;
   /** 工作区根（项目归属键活取值） */
   readonly workspace: () => string;
   /** in-process 真工厂（subagent 官方件闭包注入——app/subagent-factory.ts 产物） */
@@ -42,7 +51,8 @@ export interface BuiltinRegistryOptions {
 
 /**
  * 构造官方件注册表（loadComposition 第二参——`builtin:` 行的唯一解析面）。
- * 时序上后于 Persistence.open（store 是其产物）；迁移链另出（assembly 聚合）。
+ * 时序上后于 Persistence.open（store 是其产物）；迁移链另出（本文件
+ * collectBuiltinMigrations——assembly 聚合）。
  */
 export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPluginRegistry {
   return {
@@ -70,5 +80,21 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
       getSessionId: () => opts.getSession()?.header.sessionId,
       wasResumed: opts.wasResumed,
     }),
+    // scheduler 官方件（官方默认层第五行，tick 第一刀——内核边界篇 §4.1 席 13）：
+    // 连接与 gate 判据/runner 全闭包注入（spawn 组装在 app/scheduler-runner.ts）；
+    // 无持久层时空转，无 runner（诊断装配）时 /tick run 报不可用、表面照常
+    ...(opts.schedulerDeps
+      ? {
+          'builtin:scheduler': createSchedulerPlugin({
+            ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
+            ...opts.schedulerDeps,
+          }),
+        }
+      : {}),
   };
+}
+
+/** 全部带表官方件的迁移链（assembly 拼业务链的唯一来源——新带表件在本函数追加一项） */
+export function collectBuiltinMigrations(): MigrationSpec[] {
+  return [...memoryMigrations, ...goalMigrations, ...schedulerMigrations];
 }

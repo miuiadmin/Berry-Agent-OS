@@ -65,10 +65,9 @@ import { createChatPlugin } from '../chat/index.js';
 import { createPathsService, loadComposition, type CompositionReport } from './composition.js';
 import { loadOfficialApps, assertAppComponents } from './app-registry.js';
 import type { AppManifest } from '../contracts/app.js';
-import { createBuiltinRegistry } from './builtins.js';
+import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
-import { GOAL_MIGRATION } from '../goal/index.js';
+import { createTickRunner } from './scheduler-runner.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
@@ -163,6 +162,11 @@ export interface RuntimeOptions {
    * 测试注入临时目录，与生产路径完全同构）
    */
   readonly compositionDir?: string;
+  /**
+   * tick 单发 runner 覆盖（scheduler 件闭包注入——缺省 createTickRunner 真
+   * spawn；测试注入假 runner 记 prompt 断言触发链，不真起子进程）
+   */
+  readonly tickRunner?: (prompt: string) => Promise<import('../scheduler/index.js').TickRunResult>;
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -269,11 +273,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     ? Persistence.open({
         path: resolvedDbPath,
         // 业务表迁移链聚合（会话篇 §6 统一迁移框架——persist 提供框架不认识业务表）：
-        // memory 表族 v2（记忆篇 §3）+ session_fts v3（会话篇 §9 第 7 项定稿）
-        // + goals v5（骨架篇 §6.8——v4 已被记忆效用进化拍板预留）。
-        // sessions.app 列 v6 由 persist 自注入（内核表迁移——openStore 内部并入链，
-        // 业务调用方不感知；契约篇 §5.4 应用面第二纵切会话域打标）
-        migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
+        // 静态声明面机械聚合（tick 第一刀兑现第十六批题十五目标态）——memory v2-v4
+        // + goals v5 + jobs v7 全出自官方件注册表文件的 collectBuiltinMigrations，
+        // 此后每加带表件本调用零改动。sessions.app 列 v6 由 persist 自注入（内核
+        // 表迁移——openStore 内部并入链，业务调用方不感知）
+        migrations: collectBuiltinMigrations(),
         // session/event 活体镜像（契约篇 §2.2 emit 模式行）：SessionEvent 入
         // write-behind 队列后同步上总线，载荷 { sessionId, event } 信封（dsh-11
         // 规则——多会话并存时订阅方必须能从载荷分辨归属）。createSession /
@@ -602,8 +606,35 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
   // model/活会话引用/父沙箱档/根总线（app/subagent-factory.ts——每子独立装配序）；
   // chat 件收会话选择/驱动/ctx.agent 四件（件聚落 src/chat/plugin.ts）——无条件注入，
-  // 无持久层时件自降级空转（装载面完好——dump-config 诊断树不断链）。
+  // 无持久层时件自降级空转（装载面完好——dump-config 诊断树不断链）；
+  // scheduler 件收 gate 判据两闭包 + runner（spawn 组装在 app/scheduler-runner.ts
+  // ——argv 公式 + env set 注入 + 10 分钟超时，席 13 第一刀）
+  const tickRunner =
+    opts.tickRunner ??
+    createTickRunner({
+      dataDir: dataDir(),
+      dbPath: resolvedDbPath,
+    });
+  /** gate 判据②：当前会话最近 user/message 时刻（会话活对象内存直读——
+   * append 即在，write-behind 零滞后；跨进程的「别打架」不归 gate 管，那是
+   * reserve 抢占的职责，两护栏分工） */
+  const lastUserMessageAt = (): number | null => {
+    const events = session?.events;
+    if (events === undefined) return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i]!;
+      if (event.type === 'user/message') return event.time;
+    }
+    return null;
+  };
   const builtins = createBuiltinRegistry({
+    ...(persistence ? { store: persistence.store } : {}),
+    ...(persistence ? { goalConnection: persistence.store.connection } : {}),
+    schedulerDeps: {
+      runJob: tickRunner,
+      isAgentBusy: () => driverRef.current?.isRunning ?? false,
+      lastUserMessageAt,
+    },
     ...(persistence ? { store: persistence.store } : {}),
     ...(persistence ? { goalConnection: persistence.store.connection } : {}),
     workspace: () => workspace,

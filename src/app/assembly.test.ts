@@ -31,6 +31,7 @@ import { Persistence } from '../persist/index.js';
 import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
 import { MEMORY_UTILITY_MIGRATION } from '../memory/index.js';
 import { GOAL_MIGRATION } from '../goal/index.js';
+import { SCHEDULER_MIGRATION } from '../scheduler/index.js';
 import { createBerryRuntime } from './assembly.js';
 import { ConversationDriver } from '../chat/index.js';
 import type { BerryRuntime } from './assembly.js';
@@ -496,7 +497,13 @@ describe('持久化 round-trip 与命令入口', () => {
 
     const reopened = Persistence.open({
       path: dbFile,
-      migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, GOAL_MIGRATION],
+      migrations: [
+        MEMORY_MIGRATION,
+        SESSION_FTS_MIGRATION,
+        MEMORY_UTILITY_MIGRATION,
+        GOAL_MIGRATION,
+        SCHEDULER_MIGRATION,
+      ],
     });
     try {
       const sessionId = reopened.store.listSessionIds()[0]!;
@@ -771,12 +778,13 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     const runtime = await assemble({ streamFn, compositionDir });
 
     // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent/
-    // goal 三行 + overlay tool-plugin 行均 activated——list 状态行序 = 组合树序）
+    // goal 三行 + scheduler 第五行 + overlay tool-plugin 行均 activated——list 状态行序 = 组合树序）
     expect(runtime.plugins.list()).toEqual([
       { id: 'chat', status: 'activated', name: 'chat' },
       { id: 'memory', status: 'activated', name: 'memory' },
       { id: 'subagent', status: 'activated', name: 'subagent' },
       { id: 'goal', status: 'activated', name: 'goal' },
+      { id: 'scheduler', status: 'activated', name: 'scheduler' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
@@ -786,6 +794,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'memory',
       'subagent',
       'goal',
+      'scheduler',
       'tool-plugin',
     ]);
     // 插件工具已进注册表（fs 四件 + memory 五件 + agent + goal 三件之后）
@@ -977,12 +986,12 @@ describe('/reload 组合树重载', () => {
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'tool-plugin'],
       failed: [],
       skipped: [],
     });
     expect(reloadedPayloads).toEqual([
-      { activated: ['chat', 'memory', 'subagent', 'goal', 'tool-plugin'], failed: [], skipped: [] },
+      { activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'tool-plugin'], failed: [], skipped: [] },
     ]);
 
     await runtime.conversation!.submitOnce('第二问');
@@ -1009,7 +1018,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler'],
       failed: [],
       skipped: ['tool-plugin'],
     });
@@ -1037,6 +1046,7 @@ describe('/reload 组合树重载', () => {
       ['memory', 'activated'],
       ['subagent', 'activated'],
       ['goal', 'activated'],
+      ['scheduler', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -1070,7 +1080,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.error).toBeUndefined();
-    expect(result.payload?.activated).toEqual(['chat', 'memory', 'subagent', 'goal', 'tool-plugin']);
+    expect(result.payload?.activated).toEqual(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'tool-plugin']);
     expect(result.payload?.failed).toEqual(['bad']);
     // 状态面：失败行带着错误码可见（「没生效」不静默）
     const badRow = runtime.plugins.list().find((r) => r.id === 'bad')!;
@@ -1137,7 +1147,7 @@ describe('/reload 组合树重载', () => {
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'tool-plugin'],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -1190,6 +1200,7 @@ describe('/reload 组合树重载', () => {
       ['memory', 'activated'],
       ['subagent', 'activated'],
       ['goal', 'activated'],
+      ['scheduler', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);

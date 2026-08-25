@@ -22,13 +22,14 @@ function makeDataDir(): string {
 }
 
 /**
- * 装载并滤除官方默认层行（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行——契约篇
- * §5.1）：本文件测 overlay 对账语义（用户层写什么/读回什么），官方行进
- * composition.test 专属测试——两关注点不混断言。
+ * 装载并滤除官方默认层行（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 +
+ * scheduler 第五行——契约篇 §5.1）：本文件测 overlay 对账语义（用户层写什么/读回什么），
+ * 官方行进 composition.test 专属测试——两关注点不混断言。
  */
 function userRows(dataDir: string): unknown[] {
   return loadComposition(dataDir).rows.filter(
-    (row) => row.id !== 'chat' && row.id !== 'memory' && row.id !== 'subagent' && row.id !== 'goal',
+    (row) =>
+      row.id !== 'chat' && row.id !== 'memory' && row.id !== 'subagent' && row.id !== 'goal' && row.id !== 'scheduler',
   );
 }
 
@@ -273,7 +274,12 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     const userComposition = {
       ...composition,
       plan: composition.plan.filter(
-        (row) => row.id !== 'chat' && row.id !== 'memory' && row.id !== 'subagent' && row.id !== 'goal',
+        (row) =>
+          row.id !== 'chat' &&
+          row.id !== 'memory' &&
+          row.id !== 'subagent' &&
+          row.id !== 'goal' &&
+          row.id !== 'scheduler',
       ),
     };
 

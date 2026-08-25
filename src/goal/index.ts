@@ -6,6 +6,12 @@
  * 拓扑边：goal → contracts/context/persist。
  */
 
+import type { MigrationSpec } from '../persist/index.js';
+import { GOAL_MIGRATION } from './schema.js';
+
+/** 件自带迁移链（v5 goals 表——组合根机械聚合的标准名，tick 第一刀同批改造） */
+export const migrations: MigrationSpec[] = [GOAL_MIGRATION];
+
 export { GOAL_MIGRATION } from './schema.js';
 export { GoalStore } from './store.js';
 export { canSetGoal, canResumeGoal, canStopGoal, canUpdateGoal, shouldContinueGoal } from './machine.js';
