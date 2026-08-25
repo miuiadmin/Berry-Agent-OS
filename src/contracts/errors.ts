@@ -130,6 +130,20 @@ export const EXEC_SPAWN_FAILED = registerErrorCode('EXEC_SPAWN_FAILED');
 /** exec：env.inherit 名单命中凭证族（后缀 _API_KEY 等）或宿主保留前缀（ANTHROPIC_/OPENAI_/APP_）——机器堵名单走私，显式 set 值不在此列（契约篇 §1.2 E 组执法面②） */
 export const EXEC_ENV_FORBIDDEN = registerErrorCode('EXEC_ENV_FORBIDDEN');
 
+/* ------------------------------------------------------------------ */
+/* web 码族（内核篇 §5.3，2026-08-26 web 刀规范先行——四码封顶不膨胀：  */
+/* 字节超顶是截断标注、HTTP 非 2xx 是 isError 结果面，两者永不立码）。  */
+/* ------------------------------------------------------------------ */
+
+/** web：URL 非法（非 http/https 协议、畸形 URL、重定向 Location 不可解析——契约篇 §1.5.2 卫生件①） */
+export const WEB_URL_INVALID = registerErrorCode('WEB_URL_INVALID');
+/** web：目标地址命中私网/保留段清单（IANA 特殊用途注册表全收——DNS 解析全部地址逐一过检；SSRF fence 核心） */
+export const WEB_PRIVATE_TARGET = registerErrorCode('WEB_PRIVATE_TARGET');
+/** web：重定向超 5 跳上限（每跳重过私网+协议校验后仍到不了终点——契约篇 §1.5.2 卫生件②） */
+export const WEB_REDIRECT_LIMIT = registerErrorCode('WEB_REDIRECT_LIMIT');
+/** web：网络层失败（DNS 解析失败/连接拒绝/超时/TLS 错误等——message 载底层原因） */
+export const WEB_FETCH_FAILED = registerErrorCode('WEB_FETCH_FAILED');
+
 /** session：会话格式/版本不支持（升级后的旧库拒绝打开，不迁移，会话篇拍板；未知事件类型非 ignorable 同用此码） */
 export const SESSION_FORMAT_UNSUPPORTED = registerErrorCode('SESSION_FORMAT_UNSUPPORTED');
 /** session：同一会话同一时刻只允许单写者——第二写者追加即响亮拒绝（第八批 #13 护栏） */

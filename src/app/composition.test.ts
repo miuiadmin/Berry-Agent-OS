@@ -43,8 +43,8 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕——契约篇 §5.1/§5.4/§6.6） */
-const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tools']);
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行——契约篇 §5.1/§5.4/§6.6/§1.5.2） */
+const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tools', 'web']);
 
 /**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
@@ -65,9 +65,10 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层七行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // 官方默认层八行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
     // subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行（客户端桥
     // 第一刀）+ tools 第七行（Ring 1 行树化起算行——契约篇 §5.1 节奏表）
+    // + web 第八行（web 刀一批三件——契约篇 §1.5.2）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -77,8 +78,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'scheduler', plugin: 'builtin:scheduler' },
       { id: 'mcp', plugin: 'builtin:mcp' },
       { id: 'tools', plugin: 'builtin:tools' },
+      { id: 'web', plugin: 'builtin:web' },
     ]);
-    expect(report.plan).toHaveLength(7);
+    expect(report.plan).toHaveLength(8);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -343,13 +345,14 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    // 默认层七键全给（chat/subagent/goal/scheduler/mcp/tools 行同解析——不带 config 的纯净形态对照）
+    // 默认层八键全给（chat/subagent/goal/scheduler/mcp/tools/web 行同解析——不带 config 的纯净形态对照）
     const stubChat = { name: 'chat-stub', apply: async () => {} };
     const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
     const stubGoal = { name: 'goal-stub', apply: async () => {} };
     const stubScheduler = { name: 'scheduler-stub', apply: async () => {} };
     const stubMcp = { name: 'mcp-stub', apply: async () => {} };
     const stubTools = { name: 'tools-stub', apply: async () => {} };
+    const stubWeb = { name: 'web-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -358,6 +361,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:scheduler': stubScheduler,
       'builtin:mcp': stubMcp,
       'builtin:tools': stubTools,
+      'builtin:web': stubWeb,
     });
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -367,6 +371,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'scheduler', plugin: 'builtin:scheduler' },
       { id: 'mcp', plugin: 'builtin:mcp' },
       { id: 'tools', plugin: 'builtin:tools' },
+      { id: 'web', plugin: 'builtin:web' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', builtin: stubChat },
@@ -376,6 +381,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'scheduler', builtin: stubScheduler },
       { id: 'mcp', builtin: stubMcp },
       { id: 'tools', builtin: stubTools },
+      { id: 'web', builtin: stubWeb },
     ]);
   });
 
@@ -406,7 +412,7 @@ describe('builtin: 保留前缀解析', () => {
 /* ---------------- Ring 1 必备行断言与差异（行树化批，契约篇 §5.1 节奏表） ---------------- */
 
 describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
-  /** 全七行 stub 注册表（健康形态——行行可解析） */
+  /** 全八行 stub 注册表（健康形态——行行可解析） */
   const stubRegistry = () => ({
     'builtin:chat': { name: 'chat-stub', apply: async () => {} },
     'builtin:memory': { name: 'memory-stub', apply: async () => {} },
@@ -415,6 +421,7 @@ describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
     'builtin:scheduler': { name: 'scheduler-stub', apply: async () => {} },
     'builtin:mcp': { name: 'mcp-stub', apply: async () => {} },
     'builtin:tools': { name: 'tools-stub', apply: async () => {} },
+    'builtin:web': { name: 'web-stub', apply: async () => {} },
   });
 
   it('起算清单：RING1_REQUIRED_ROW_IDS = [tools]（后续行树化纵切逐行累加）', () => {

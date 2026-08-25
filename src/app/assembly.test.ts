@@ -157,6 +157,7 @@ describe('createBerryRuntime 装配面', () => {
       'goal_get',
       'goal_set',
       'goal_update',
+      'fetch',
     ]);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
@@ -280,7 +281,7 @@ describe('createBerryRuntime 装配面', () => {
     const runtime = await assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
-    expect(runtime.tools.list()).toHaveLength(8); // fs 四件 + find/grep + bash + agent（memory/goal 空转；subagent 无持久层照常）
+    expect(runtime.tools.list()).toHaveLength(9); // fs 四件 + find/grep + bash + agent + fetch（memory/goal 空转；subagent 无持久层照常）
   });
 
   it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
@@ -335,6 +336,7 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_get',
       'goal_set',
       'goal_update',
+      'fetch',
     ]);
     // request/header 载荷带应用域腿（血缘显式打标的证据面——契约篇 §5.4）
     const header = runtime.session!.events.find((e) => e.type === 'request/header');
@@ -474,6 +476,7 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_get',
       'goal_set',
       'goal_update',
+      'fetch',
       'echo',
     ]);
     expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
@@ -856,6 +859,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       { id: 'scheduler', status: 'activated', name: 'scheduler' },
       { id: 'mcp', status: 'activated', name: 'mcp' },
       { id: 'tools', status: 'activated', name: 'tools' },
+      { id: 'web', status: 'activated', name: 'web' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
@@ -868,6 +872,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'scheduler',
       'mcp',
       'tools',
+      'web',
       'tool-plugin',
     ]);
     // 插件工具已进注册表（fs 四件 + memory 五件 + agent + goal 三件之后）
@@ -888,6 +893,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'goal_get',
       'goal_set',
       'goal_update',
+      'fetch',
       'plug-echo',
     ]);
     // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
@@ -1080,12 +1086,16 @@ describe('/reload 组合树重载', () => {
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'tool-plugin'],
       failed: [],
       skipped: [],
     });
     expect(reloadedPayloads).toEqual([
-      { activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tool-plugin'], failed: [], skipped: [] },
+      {
+        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'tool-plugin'],
+        failed: [],
+        skipped: [],
+      },
     ]);
 
     await runtime.conversation!.submitOnce('第二问');
@@ -1112,7 +1122,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web'],
       failed: [],
       skipped: ['tool-plugin'],
     });
@@ -1134,6 +1144,7 @@ describe('/reload 组合树重载', () => {
       'goal_get',
       'goal_set',
       'goal_update',
+      'fetch',
     ]);
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],
@@ -1143,6 +1154,7 @@ describe('/reload 组合树重载', () => {
       ['scheduler', 'activated'],
       ['mcp', 'activated'],
       ['tools', 'activated'],
+      ['web', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -1183,6 +1195,7 @@ describe('/reload 组合树重载', () => {
       'goal',
       'scheduler',
       'mcp',
+      'web',
       'tool-plugin',
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
@@ -1251,7 +1264,7 @@ describe('/reload 组合树重载', () => {
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'tool-plugin'],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -1307,6 +1320,7 @@ describe('/reload 组合树重载', () => {
       ['scheduler', 'activated'],
       ['mcp', 'activated'],
       ['tools', 'activated'],
+      ['web', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
@@ -1357,7 +1371,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
     expect(result.payload?.activated).not.toContain('tools');
     expect(reloadedPayloads).toEqual([
       {
-        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp'],
+        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web'],
         failed: [],
         skipped: [],
         ring1RestartRequired: ['tools'],
@@ -1476,5 +1490,31 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     expect(starts).toHaveLength(1);
     expect(starts[0]!.sessionId).toBe(runtime.session!.header.sessionId);
     expect(starts[0]!.origin).toBe('initial');
+  });
+});
+
+describe('web 件全栈（默认层第八行：fetch 工具 + ctx.fetch 服务同一管道）', () => {
+  it('模型面工具在册 + 服务面经真三段管道落 gate/decision 账 + caller 归因进 durable', async () => {
+    // 外部边界注入（webOverrides → builtins → 件构造缝）：fetch/lookup 假实现，
+    // 管道/守门/落账/组合树全真——mock 只停在出网边界
+    const runtime = await assemble({
+      webOverrides: {
+        fetchImpl: async () => new Response('全栈正文', { status: 200, headers: { 'content-type': 'text/plain' } }),
+        lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      },
+    });
+    // 模型面：默认层第八行 web 件注册 fetch 工具（进模型词汇表）
+    expect(runtime.tools.list().map((t) => t.name)).toContain('fetch');
+    // 服务面：ctx.fetch 走真管道（守门决议 durable 落账——「不旁路」的组合根证据）
+    const service = runtime.ctx.get<{
+      fetch(url: string, opts?: { caller?: string }): Promise<{ status: number; text: string }>;
+    }>('fetch');
+    const result = await service.fetch('https://ok.example/x', { caller: 'probe-plugin' });
+    expect(result.status).toBe(200);
+    expect(result.text).toBe('全栈正文');
+    const gateEvents = (runtime.session?.events ?? []).filter((e) => e.type === 'gate/decision');
+    expect(gateEvents).toHaveLength(1);
+    expect((gateEvents[0]!.data as { toolCallId?: string }).toolCallId).toMatch(/^fetch-/);
+    expect((gateEvents[0]!.data as { decision?: string }).decision).toBe('allow');
   });
 });

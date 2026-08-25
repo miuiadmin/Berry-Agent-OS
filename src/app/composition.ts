@@ -60,6 +60,10 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 三段管道 + ctx.tools 服务 + fs/检索工具族入列——Ring 1 必备行非可卸
   //（启动断言第二断言类；缺省层替换语义：overlay 可换实现引用不可禁用）
   { id: 'tools', plugin: 'builtin:tools' },
+  // 第八行 = web 行（契约篇 §1.5.2 web 刀，Ring 2 真·可卸库角色行）：fetch
+  // 工具 + ctx.fetch 服务 + SSRF 五卫生件一批三件——卸掉即无 fetch 能力，
+  // 核心循环不破；admin 行（第二十六批拍板）顺居其后为第九行
+  { id: 'web', plugin: 'builtin:web' },
 ];
 
 /**

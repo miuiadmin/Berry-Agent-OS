@@ -174,6 +174,11 @@ export interface RuntimeOptions {
    * spawn；测试注入假 runner 记 prompt 断言触发链，不真起子进程）
    */
   readonly tickRunner?: (prompt: string) => Promise<import('../scheduler/index.js').TickRunResult>;
+  /**
+   * web 件依赖覆盖（生产零参——真 fetch/真 DNS/件级限流单例；组合根全栈
+   * 测试注入 fetchImpl/lookup——服务与工具同一卫生件的回归锁在此层验）
+   */
+  readonly webOverrides?: import('../web/index.js').WebPluginOverrides;
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -541,6 +546,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       writableRoots: createRootsProvider({ workspace, mode: () => sandboxMode }),
       workspace: () => workspace,
     },
+    // web 件测试注入缝（生产零参——真 fetch/真 DNS；组合根全栈测试注入
+    // fetchImpl/lookup 假实现，mock 停在外部边界非中间层）
+    webOverrides: opts.webOverrides,
     workspace: () => workspace,
     subagentFactory: createSubagentChildFactory({
       ...(persistence ? { persistence } : {}),

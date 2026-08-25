@@ -40,6 +40,11 @@ const MODULE_EDGES = {
   // mcp = stdio-only 客户端桥（2026-08-26 第一刀，契约篇 §6.6）：spawn/kill 经
   // 组合根闭包注入（app/mcp-spawn.ts）——结构上不见 exec/tools（冷读 #1）
   mcp: ['contracts', 'context'],
+  // web = 官方 web 件聚落（2026-08-26 web 刀，契约篇 §1.5.2）：fetch 工具 +
+  // ctx.fetch 原语 + SSRF 五卫生件——工具注册经 ctx.get('tools') 服务面、管道
+  // 经 ToolsService.executor（类型住 contracts）、schema 经 contracts typebox
+  // 再导出面——零 tools/exec import（mcp 最窄边同款）
+  web: ['contracts', 'context'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
   channels: ['contracts', 'context', 'agent'],
   app: [
@@ -58,6 +63,7 @@ const MODULE_EDGES = {
     'exec',
     'scheduler',
     'mcp',
+    'web',
     'channels',
     'chat',
   ],
