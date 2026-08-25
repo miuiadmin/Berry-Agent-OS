@@ -48,7 +48,7 @@ berry/
 
 细节与理由见 [docs/开发指南.md](docs/开发指南.md)：
 
-- **模块边界**：17 模块单向 DAG（15 有码 + scheduler/mcp 两席占位），跨模块只 import 公共面（contract/types/index）；新模块 contract-first。
+- **模块边界**：18 模块单向 DAG（17 有码 + mcp 一席占位），跨模块只 import 公共面（contract/types/index）；新模块 contract-first。
 - **测试**：分层（单元 → 组合根全栈）；mock 只停在模型层；禁断言 AI 生成文本；修 bug 带回归锁（修复前必红）。
 - **注释**：新写代码必须充分中文注释（JSDoc + 关键分支行内）。
 - **命名去品牌化**：代码标识符禁用品牌词；仅 package.json name / bin 命令 / UI 文案允许。
