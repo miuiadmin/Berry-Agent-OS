@@ -197,6 +197,10 @@ const sessionTypes = await jiti.import(fileURLToPath(new URL('../src/session/eve
 // 插件注册的 SessionEvent 词汇随其宿主模块导入生效（v1 首例：memory/diff 在
 // src/memory/diff.ts 顶层注册——该文件运行时依赖保持轻量，导入不连锁 SQLite）。
 // 新增插件侧注册模块时在此追加导入，否则族 3 会把其写点误报为注册表外类型。
+// 双入口纪律（2026-08-25 #19 收口）：此机制只覆盖宿主面（模块级 registerSessionEventType
+// 直调）——插件面 ctx.registerSessionEventType 注册发生在 apply 运行时、CI 静态不可
+// 见。官方件词汇一律走宿主面模块注册（会话篇 §2.1 注记），改走插件面会在族 3 撞
+// 误报且无模块可导入——那不是闸坏了，是纪律破了。
 await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url)));
 
 /** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
