@@ -3,11 +3,21 @@
  * effect LIFO 回卷 / 事件四模式（含异常隔离与 prepend）/ provide-get /
  * stale ctx 护栏 / signal / config 只读 / fork 作用域隔离与共享。
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { AppError } from '../contracts/errors.js';
+import type { PluginContext } from '../contracts/plugin.js';
 import { createContext, registerLiveEvent } from './context.js';
 import { createLogger } from './logger.js';
-import type { ContextScope } from './types.js';
+import type { Context, ContextScope } from './types.js';
+
+/**
+ * 类型面锁（探针 #11，契约篇 §1.2 注记④）：宿主 Context 必须结构性覆盖
+ * contracts 声明的 PluginContext——插件作者经虚拟面拿到的类型承诺即本面。
+ * 漂移（宿主改签名忘同步 contracts，或反向）在此编译期即红，不待第三方撞墙。
+ * 双向锁：PluginContext 的 logger 面收窄自宿主 Logger——收得过窄同样红。
+ */
+expectTypeOf<Context>().toExtend<PluginContext>();
+expectTypeOf<Context['logger']>().toExtend<PluginContext['logger']>();
 
 /** 静默 logger：测试不向 stderr 喷日志（异常隔离用例会走 error 通道） */
 function silentRoot() {

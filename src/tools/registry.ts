@@ -12,23 +12,14 @@
  */
 
 import { AppError, CONTEXT_SERVICE_NOT_FOUND, TOOL_DUPLICATE } from '../contracts/errors.js';
-import type { AgentTool, ToolDefinition } from '../contracts/tools.js';
+import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import type { Disposer } from '../context/types.js';
 import type { Context } from '../context/types.js';
 import type { ToolPipelineExecutor } from './pipeline.js';
 
-/** ctx.tools 服务面（插件经 ctx.get<ToolsService>('tools') 取用） */
-export interface ToolsService {
-  /** 注册工具（即时生效；返回注销器，幂等） */
-  register(def: ToolDefinition): Disposer;
-  /** 按名查找（未注册返回 undefined——调用方决定 fail 形态） */
-  get(name: string): ToolDefinition | undefined;
-  /** 全量快照（次序 = 注册序；请求组装/诊断用） */
-  list(): ToolDefinition[];
-  /** loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态） */
-  toAgentTool(def: ToolDefinition): AgentTool;
-}
+/** ctx.tools 服务面（契约篇 §1.5 服务行；接口单一来源在 contracts——本文件实现） */
+export type { ToolsService } from '../contracts/tools.js';
 
 /** 注册表选项 */
 export interface ToolRegistryOptions {

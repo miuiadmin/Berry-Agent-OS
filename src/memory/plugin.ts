@@ -15,10 +15,11 @@
 import { Type } from '../contracts/typebox.js';
 import { describeError } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
-import type { ToolDefinition } from '../contracts/tools.js';
+import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { UserMessage } from '../contracts/llm.js';
-import type { Context, Disposer } from '../context/types.js';
-import type { BuiltinPluginModule } from '../contracts/plugin.js';
+import type { PromptsService } from '../contracts/app.js';
+import type { Context } from '../context/types.js';
+import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { registerMessageRole } from '../agent/messages.js';
 import { MemoryStore, projectOwnerKey } from './store.js';
@@ -38,17 +39,8 @@ import type { FaceEntry, MemoryDiffEntry } from './diff.js';
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——memory 模块不 import app/tools 实现，拓扑边不越界）。        */
 /* 宿主 provide 的 'tools'/'prompts'/'llm' 服务结构性满足以下接口。                       */
+/* tools/prompts 两面类型单一来源在 contracts（§1.2 注记④）——其余窄面保留局部声明。      */
 /* ---------------------------------------------------------------------------------- */
-
-/** 工具注册面（tools 服务最小面：插件贡献动词的唯一入口） */
-interface ToolsRegisterFace {
-  register(def: ToolDefinition): Disposer;
-}
-
-/** 提示词段注册面（prompts 服务最小面，pi-4(a) 具名段） */
-interface PromptsRegisterFace {
-  registerSection(section: { id: string; render(): string }): Disposer;
-}
 
 /**
  * 会话事件服务最小面（ctx.sessions v1，骨架篇 §9.2 落码——插件落 durable
@@ -158,7 +150,7 @@ export function createMemoryPlugin(deps: MemoryPluginDeps): BuiltinPluginModule 
     name: 'memory',
     inject: ['tools', 'prompts', 'llm', 'sessions'],
     config: MEMORY_CONFIG_SCHEMA,
-    apply: (ctx: Context, config?: Readonly<Record<string, unknown>>) =>
+    apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) =>
       applyMemoryPlugin(ctx, config as MemoryConfig | undefined, deps),
   };
 }
@@ -168,7 +160,7 @@ export function createMemoryPlugin(deps: MemoryPluginDeps): BuiltinPluginModule 
  * 全部注册挂 ctx.effect；异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
  */
 async function applyMemoryPlugin(
-  ctx: Context,
+  ctx: PluginContext,
   config: MemoryConfig | undefined,
   deps: MemoryPluginDeps,
 ): Promise<void> {
@@ -189,7 +181,7 @@ async function applyMemoryPlugin(
   const ownerKeys = (): string[] => ['global', projectOwnerKey(canonicalWorkspaceRoot(deps.workspace()))];
 
   /* ---- ① 工具五件（tools.register 即 tools_change 原位刷新 loop 快照） ---- */
-  const tools = ctx.get<ToolsRegisterFace>('tools');
+  const tools = ctx.get<ToolsService>('tools');
   for (const def of createMemoryTools({
     store,
     ownerKeys,
@@ -208,7 +200,7 @@ async function applyMemoryPlugin(
   let baselineFingerprint = '';
   /** 本纪元已落账的差分视图（undefined = 未从日志派生初始化） */
   let diffMirror: MemoryDiffEntry[] | undefined;
-  const prompts = ctx.get<PromptsRegisterFace>('prompts');
+  const prompts = ctx.get<PromptsService>('prompts');
   ctx.effect(() =>
     prompts.registerSection({
       id: BRIEFING_SECTION_ID,

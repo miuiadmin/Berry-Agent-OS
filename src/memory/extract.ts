@@ -8,7 +8,8 @@
  * 与工具面完全同路，没有旁门。
  */
 
-import type { Context, Disposer } from '../context/types.js';
+import type { Disposer } from '../context/types.js';
+import type { PluginContext } from '../contracts/plugin.js';
 import { guardedAddMemory, isPollutedTranscript } from './scan.js';
 import type { MemoryStore } from './store.js';
 
@@ -88,7 +89,7 @@ export interface CorrectionExtractorOptions {
  * 事件载荷 = { sessionId, event }（dsh-11 信封规则）——多会话并存时以信封
  * sessionId 溯源，不以事件体自证。
  */
-export function attachCorrectionExtractor(ctx: Context, opts: CorrectionExtractorOptions): Disposer {
+export function attachCorrectionExtractor(ctx: PluginContext, opts: CorrectionExtractorOptions): Disposer {
   const ownerKey = opts.ownerKey ?? 'global';
   const confidence = opts.confidence ?? DEFAULT_CONFIDENCE;
 

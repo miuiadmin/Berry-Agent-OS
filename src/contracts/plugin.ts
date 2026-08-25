@@ -6,19 +6,78 @@
  * 2. 组合树行（CompositionRow——§5.1 空根 + 官方默认层 + 用户 overlay）；
  * 3. 装载计划与生命周期载荷（PluginPlanRow / Plugin*Payload——§2.2 增补 1 事件组）。
  *
- * 注意：PluginModule.default 的 ctx 参数在此只做结构占位（contracts 不依赖
- * context 模块——拓扑零依赖层）；插件作者取完整类型经宿主公共面 `berryagent`
- * 的再导出（加载器虚拟注入），运行时校验只查形状（函数/字符串/schema）。
+ * PluginContext（§1.2 落码注记④，2026-08-25 Hermes 探针 #11 落码）：插件作者
+ * 看到的 ctx 核心面在**此**声明（不再 never 占位）——第三方经 `berryagent`
+ * 虚拟面取完整类型；宿主 context 模块的 Context 结构性覆盖本面（vitest
+ * expect-type 编译期锁，漂移即红）。服务面（tools/prompts/…）不在 ctx 上，
+ * 经 get<ToolsService>('tools') 等取用（接口同住 contracts）。
  */
 
 import type { TSchema } from './typebox.js';
 import type { LiveEventDefinition } from './events.js';
 
 /**
- * 插件唯一合法形状（§1.1）：一种函数，钉死。
- * 同步或异步初始化均可；接收 ctx（作用域 fork 产物）与经 schema 校验后的只读配置。
+ * 插件面 logger 最小结构（context.Logger 的结构子集——contracts 零依赖层
+ * 不引 context 模块；宿主 Logger 字段更宽，结构性可赋值到本面）。
  */
-export type PluginApply = (ctx: never, config?: Readonly<Record<string, unknown>>) => void | Promise<void>;
+export interface PluginLogger {
+  /** 最低优先级诊断（dev 缺省开；纪律红线：只在 debug 出现的行为必须另有 durable 面） */
+  debug(message: string, fields?: Record<string, unknown>): void;
+  /** 常规运行信息 */
+  info(message: string, fields?: Record<string, unknown>): void;
+  /** 异常但可继续（降级/回退路径） */
+  warn(message: string, fields?: Record<string, unknown>): void;
+  /** 失败留痕（不中断的回卷异常等） */
+  error(message: string, fields?: Record<string, unknown>): void;
+}
+
+/**
+ * 事件处理器：参数由事件发布方约定；返回值仅 waterfall 采用（与 context
+ * 模块 EventHandler 同形——在此独立声明保持零依赖）。
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 处理器参数形态由各事件定义方收口
+export type PluginEventHandler = (...args: any[]) => any;
+
+/**
+ * 插件运行时核心 API（骨架篇 §9.1 的插件视图——§1.2 注记④）。
+ * 宿主 Context 结构性覆盖本面；服务解析后经 get<T>() 取具体服务接口。
+ */
+export interface PluginContext {
+  /** 注册可逆副作用：立即执行 fn，其返回的清理函数入栈；作用域销毁按 LIFO 自动回卷 */
+  effect(fn: () => () => void): () => void;
+  /** 订阅事件；返回退订函数（随作用域卸载自动退订）；prepend 插队首位（守门拦截器用） */
+  on(event: string, handler: PluginEventHandler, opts?: { prepend?: boolean }): () => void;
+  /** 广播事件：全部监听器触发；单个失败隔离（记 error 日志，不中断其余） */
+  emit(event: string, ...args: unknown[]): void;
+  /** 并发触发全部监听器并等待完成；异常隔离同 emit */
+  parallel(event: string, ...args: unknown[]): Promise<void>;
+  /** 按注册序串行触发全部监听器；异常隔离（失败记日志、继续下一个） */
+  serial(event: string, ...args: unknown[]): Promise<void>;
+  /**
+   * 瀑布链：末位参数 next 是链尾委托；每个监听器收到 (...args, next)，
+   * 必须调用 next() 才继续下游——不调即短路（工具管道三段依赖此语义）。
+   */
+  waterfall<T>(event: string, ...argsWithNext: unknown[]): Promise<T>;
+  /** 取服务实现；未注册抛 CONTEXT_SERVICE_NOT_FOUND（必需依赖——缺即装配错误） */
+  get<T = unknown>(name: string): T;
+  /** 软依赖探测取服务：未注册返回 undefined、不抛错（禁轮询/鸭子探测——缺即降级分支） */
+  tryGet<T = unknown>(name: string): T | undefined;
+  /** 注册自有具名服务供他插件 inject 消费；返回注销函数（随作用域回卷） */
+  provide<T>(name: string, impl: T): () => void;
+  /** 本作用域配置视图（只读快照；组合树行 config 经插件 schema 校验后冻结） */
+  readonly config: Readonly<Record<string, unknown>>;
+  /** 带作用域前缀的子 logger */
+  readonly logger: PluginLogger;
+  /** 生命周期信号：作用域销毁时 abort——长任务/定时器的取消依据 */
+  readonly signal: AbortSignal;
+}
+
+/**
+ * 插件唯一合法形状（§1.1）：一种函数，钉死。
+ * 同步或异步初始化均可；接收 ctx（PluginContext——§1.2 注记④ 实类型面）与
+ * 经 schema 校验后的只读配置。
+ */
+export type PluginApply = (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) => void | Promise<void>;
 
 /**
  * 插件模块的运行时契约（§1.2 named export 四件 + default）。

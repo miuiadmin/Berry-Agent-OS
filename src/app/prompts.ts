@@ -13,7 +13,11 @@
  */
 
 import { AppError, PROMPT_SECTION_DUPLICATE, PROMPT_SECTION_INVALID } from '../contracts/errors.js';
-import type { Context, Disposer } from '../context/types.js';
+import type { PromptSection, PromptsService } from '../contracts/app.js';
+import type { Context } from '../context/types.js';
+
+/** 具名段/服务面类型单一来源在 contracts（§1.2 注记④）——本文件实现之，再出口保持既有消费面 */
+export type { PromptSection, PromptsService } from '../contracts/app.js';
 
 /** prompts_change 事件名常量（派发点与装配层订阅共用——check-events 字面量比对） */
 export const PROMPTS_CHANGE_EVENT = 'prompts_change';
@@ -23,31 +27,6 @@ export const PROMPTS_CHANGE_EVENT = 'prompts_change';
  * 与自定义事件名同形约束，防撞宿主自留地——宿主段永不走本词汇）。
  */
 const SECTION_ID_FORMAT = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*$/;
-
-/** 具名提示词段（插件贡献面——id 域前缀 + 内容渲染函数） */
-export interface PromptSection {
-  /** 段 id：`<插件域>/<段名>` 小写（非法 = PROMPT_SECTION_INVALID） */
-  readonly id: string;
-  /** 内容渲染：仅在重建时点求值一次，产物随快照冻结（抛错不杀重建——渲染诊断占位） */
-  render(): string;
-}
-
-/** 具名提示词段服务面（ctx.prompts，契约篇 §1.5 表） */
-export interface PromptsService {
-  /**
-   * 注册具名段；返回注销 Disposer（挂调用方作用域 effect 由插件侧负责）。
-   * 注册/注销均广播 prompts_change（载荷 = 现行段 id 清单，字典序）。
-   */
-  registerSection(section: PromptSection): Disposer;
-  /** 现行段 id 清单（字典序——载荷与诊断面同源） */
-  listSections(): readonly string[];
-  /**
-   * 具名段物化（id 字典序拼接，段间空行分隔）：render() 抛错 = 插件 bug，
-   * 宿主捕获后渲染诊断占位 + log error，不杀重建（与失败行不杀进程同根）。
-   * 无段返回 ''（调用方 filter 掉——不产生空分节）。
-   */
-  materialize(): string;
-}
 
 /**
  * 建段注册表并挂进 ctx（provide('prompts')）。组合根装配期调用一次；

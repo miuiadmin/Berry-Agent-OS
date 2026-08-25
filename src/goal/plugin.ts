@@ -29,8 +29,8 @@
  */
 
 import { describeError } from '../contracts/errors.js';
-import type { ToolDefinition } from '../contracts/tools.js';
-import type { BuiltinPluginModule } from '../contracts/plugin.js';
+import type { ToolsService } from '../contracts/tools.js';
+import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { GoalStore } from './store.js';
@@ -42,12 +42,8 @@ import { createGoalTools } from './tools.js';
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——goal 模块不 import app/channels 实现，拓扑边不越界）。       */
 /* 宿主 provide 的 'tools'/'channels'/'agent'/'ui' 服务结构性满足以下接口。              */
+/* tools 面类型单一来源在 contracts（§1.2 注记④）——channels/agent/ui 窄面保留局部。     */
 /* ---------------------------------------------------------------------------------- */
-
-/** 工具注册面（tools 服务最小面：插件贡献动词的唯一入口） */
-interface ToolsRegisterFace {
-  register(def: ToolDefinition): Disposer;
-}
 
 /** 命令注册面（channels 服务最小面——CommandDefinition 的结构子集） */
 interface ChannelsCommandFace {
@@ -103,7 +99,7 @@ export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
     // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）
     inject: ['tools', 'channels', 'ui'],
     optionalInject: ['agent'],
-    apply: (ctx: Context) =>
+    apply: (ctx: PluginContext) =>
       applyGoalPlugin(ctx, deps, () => {
         const armed = bootDemotionArmed && deps.wasResumed();
         bootDemotionArmed = false;
@@ -116,7 +112,11 @@ export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
  * 官方件 apply 本体（接线序：boot 降级 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
  * 异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
  */
-async function applyGoalPlugin(ctx: Context, deps: GoalPluginDeps, consumeBootDemotion: () => boolean): Promise<void> {
+async function applyGoalPlugin(
+  ctx: PluginContext,
+  deps: GoalPluginDeps,
+  consumeBootDemotion: () => boolean,
+): Promise<void> {
   // persist:false 降级：无物理层即无 goal（状态/记账/续跑全依赖 goals 表）——warn 空转
   if (!deps.connection) {
     ctx.logger.warn('无持久层（persist:false）——goal 官方件空转：工具/命令/续跑/预算刹车均不注册');
@@ -131,7 +131,7 @@ async function applyGoalPlugin(ctx: Context, deps: GoalPluginDeps, consumeBootDe
   }
 
   /* ---- ① 工具三件（目标内容在模型）---- */
-  const tools = ctx.get<ToolsRegisterFace>('tools');
+  const tools = ctx.get<ToolsService>('tools');
   for (const def of createGoalTools({ store, getSessionId: deps.getSessionId })) {
     ctx.effect(() => tools.register(def));
   }

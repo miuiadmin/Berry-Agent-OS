@@ -78,6 +78,22 @@ export interface AgentTool {
 /* 二、工具管道契约（插件契约篇 §3.1——工具执行唯一合法路径）            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * ctx.tools 服务面（契约篇 §1.5 服务行 + §1.2 注记④——类型单一来源住 contracts，
+ * 2026-08-25 Hermes 探针 #11 落码；tools 模块实现之，第三方经
+ * `ctx.get<ToolsService>('tools')` 取全类型）。
+ */
+export interface ToolsService {
+  /** 注册工具（即时生效；返回注销器，幂等）。同名注册 = TOOL_DUPLICATE 响亮失败——替换唯一合法路径是组合树行级操作 */
+  register(def: ToolDefinition): () => void;
+  /** 按名查找（未注册返回 undefined——调用方决定 fail 形态） */
+  get(name: string): ToolDefinition | undefined;
+  /** 全量快照（次序 = 注册序；请求组装/诊断用） */
+  list(): ToolDefinition[];
+  /** loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态） */
+  toAgentTool(def: ToolDefinition): AgentTool;
+}
+
 /** 守门段活体事件名（dsh 借词，契约篇 §2.2 表钉死下划线形态） */
 export const TOOL_PRE_EXECUTE_EVENT = 'tools_pre_execute';
 /** 执行段活体事件名 */

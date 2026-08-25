@@ -27,7 +27,7 @@ import type { UserMessage, MessageSource, Message, StreamFn } from '../contracts
 import type { AgentMessage } from '../agent/messages.js';
 import type { RunStatus } from '../agent/events.js';
 import type { AgentTool } from '../contracts/tools.js';
-import type { BuiltinPluginModule } from '../contracts/plugin.js';
+import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { Session } from '../session/session.js';
 import type { Persistence } from '../persist/index.js';
@@ -146,13 +146,13 @@ export function createChatPlugin(deps: ChatPluginDeps): BuiltinPluginModule {
 
   return {
     name: 'chat',
-    apply: (ctx: Context) => applyChatPlugin(ctx, deps, headerState, driver, (d) => (driver = d)),
+    apply: (ctx: PluginContext) => applyChatPlugin(ctx, deps, headerState, driver, (d) => (driver = d)),
   };
 }
 
 /** 件 apply 本体（boot 全量接线；/reload 重装载走复用支线） */
 async function applyChatPlugin(
-  ctx: Context,
+  ctx: PluginContext,
   deps: ChatPluginDeps,
   headerState: { last?: string; next: 'initial' | 'resume' | 'change' },
   driver: ConversationDriver | undefined,
@@ -283,7 +283,7 @@ async function applyChatPlugin(
  * 注销（旧 apply 的派发器在锚 dispose 时退订，不泄漏不重复派发）。已持旧
  * face 引用的消费方不受回卷影响——face 闭包持有驱动单例，续跑注入持续可用。
  */
-function provideAgentService(ctx: Context, driver: ConversationDriver): void {
+function provideAgentService(ctx: PluginContext, driver: ConversationDriver): void {
   /** onRunSettled 订阅表（派发快照遍历——派发中注销/新订不炸迭代） */
   const subscribers = new Set<(settled: RunSettled) => void>();
   /** 单订阅者派发壳（违约隔离：抛错 logger 吞掉，不断结算链） */

@@ -110,3 +110,34 @@ export function validateAppManifest(raw: unknown, where: string): AppManifest {
   }
   return raw as AppManifest;
 }
+
+/* ------------------------------------------------------------------ */
+/* prompts 服务面（契约篇 §1.5 服务行 + §1.2 注记④——类型单一来源住     */
+/* contracts，2026-08-25 Hermes 探针 #11 落码；app/prompts.ts 实现之，  */
+/* 第三方经 ctx.get<PromptsService>('prompts') 取全类型）              */
+/* ------------------------------------------------------------------ */
+
+/** 具名提示词段（pi-4(a) 拍板）：id 小写含 `/` 插件域前缀（宿主自留地为无 `/`） */
+export interface PromptSection {
+  /** 段 id（插件域前缀防撞；分节序按 id 字典序——/reload 稳定） */
+  readonly id: string;
+  /** 内容渲染：仅在重建时点求值一次，产物随快照冻结（抛错不杀重建——渲染诊断占位） */
+  render(): string;
+}
+
+/** ctx.prompts 服务面（注册 systemPrompt 具名追加段） */
+export interface PromptsService {
+  /**
+   * 注册具名段；返回注销函数（挂调用方作用域 effect 由插件侧负责）。
+   * 注册/注销均广播 prompts_change（载荷 = 现行段 id 清单，字典序）。
+   */
+  registerSection(section: PromptSection): () => void;
+  /** 现行段 id 清单（字典序——载荷与诊断面同源） */
+  listSections(): readonly string[];
+  /**
+   * 具名段物化（id 字典序拼接，段间空行分隔）：render() 抛错 = 插件 bug，
+   * 宿主捕获后渲染诊断占位 + log error，不杀重建（与失败行不杀进程同根）。
+   * 无段返回 ''（调用方 filter 掉——不产生空分节）。
+   */
+  materialize(): string;
+}

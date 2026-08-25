@@ -13,9 +13,10 @@
  */
 
 import { Type } from '../contracts/typebox.js';
-import type { ToolDefinition, AgentToolResult } from '../contracts/tools.js';
-import type { BuiltinPluginModule } from '../contracts/plugin.js';
-import type { Context, Disposer } from '../context/types.js';
+import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
+import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { PromptsService } from '../contracts/app.js';
+import type { Context } from '../context/types.js';
 import type { SubagentsServiceFace, SubagentRun } from '../contracts/subagent.js';
 import { createInProcessProvider } from '../subagent/inprocess.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
@@ -40,16 +41,6 @@ const SUBAGENT_CONFIG_SCHEMA = Type.Object({
 /** 官方件配置（经 typebox 校验后的落码形态） */
 type SubagentConfig = { tokenBudget?: number; maxDepth?: number };
 
-/** 工具注册面（ctx.get('tools') 的最小结构面——与 memory 插件同款局部面） */
-interface ToolsRegisterFace {
-  register(def: ToolDefinition): Disposer;
-}
-
-/** 提示词段注册面（prompts 服务最小面，pi-4(a) 具名段——与 memory 插件同款） */
-interface PromptsRegisterFace {
-  registerSection(section: { id: string; render(): string }): Disposer;
-}
-
 /** 委派工具名（模型调用词汇——静态绑定 in-process 的单实例） */
 const AGENT_TOOL_NAME = 'agent';
 
@@ -64,16 +55,16 @@ export function createSubagentPlugin(deps: SubagentPluginDeps): BuiltinPluginMod
     name: 'subagent',
     inject: ['tools', 'prompts', 'subagents'],
     config: SUBAGENT_CONFIG_SCHEMA,
-    apply: (ctx: Context, config?: Readonly<Record<string, unknown>>) =>
+    apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) =>
       applySubagentPlugin(ctx, (config ?? {}) as SubagentConfig, deps),
   };
 }
 
 /** 官方件 apply 本体（三注册——全部挂 ctx.effect 随装载锚回卷） */
-async function applySubagentPlugin(ctx: Context, cfg: SubagentConfig, deps: SubagentPluginDeps): Promise<void> {
+async function applySubagentPlugin(ctx: PluginContext, cfg: SubagentConfig, deps: SubagentPluginDeps): Promise<void> {
   const subagents = ctx.get<SubagentsServiceFace>('subagents');
-  const tools = ctx.get<ToolsRegisterFace>('tools');
-  const prompts = ctx.get<PromptsRegisterFace>('prompts');
+  const tools = ctx.get<ToolsService>('tools');
+  const prompts = ctx.get<PromptsService>('prompts');
 
   /* ---- ① in-process provider（真工厂 + 配置帽）---- */
   const provider = createInProcessProvider({

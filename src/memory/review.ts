@@ -19,7 +19,7 @@
 
 import { Type, Value } from '../contracts/typebox.js';
 import type { AssistantMessage, Message, UserMessage } from '../contracts/llm.js';
-import type { Context } from '../context/types.js';
+import type { PluginContext } from '../contracts/plugin.js';
 import { utilityScore } from './store.js';
 import type { MemoryStore } from './store.js';
 import { guardedAddMemory, isPollutedTranscript } from './scan.js';
@@ -213,7 +213,7 @@ function tryParse(text: string): unknown {
  * 不订阅不计数——计数/触发归 attachPeriodicReview（本函数纯编排，测试面友好）。
  */
 export async function runReviewOnce(
-  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: Context['logger'] },
+  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: PluginContext['logger'] },
   transcript: readonly Message[],
 ): Promise<ReviewReport> {
   // 计数器内部可变、出口一次性冻结成报告（readonly 报告面不允许逐字段 +=）
@@ -294,7 +294,7 @@ export function collectConsolidationCandidates(
  * 只处理模型返回且 schema 通过的建议；建议里不存在的 id 忽略（尽力而为）。
  */
 export async function runConsolidationOnce(
-  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: Context['logger'] },
+  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: PluginContext['logger'] },
   opts: { staleDays?: number; maxActivePerOwner?: number; now?: () => number } = {},
 ): Promise<ConsolidationReport> {
   const ownerKey = deps.ownerKey ?? 'global';
@@ -426,7 +426,7 @@ export interface ReviewHandle {
  * 「review → consolidation 检查」后台任务。fire-and-forget：异常止步日志。
  * 同时至多一轮在飞（inFlight 防抖——高频会话不堆后台任务）。
  */
-export function attachPeriodicReview(ctx: Context, opts: PeriodicReviewOptions): ReviewHandle {
+export function attachPeriodicReview(ctx: PluginContext, opts: PeriodicReviewOptions): ReviewHandle {
   const turnThreshold = opts.turnThreshold ?? 10;
   const toolCallThreshold = opts.toolCallThreshold ?? 15;
   const windowMessages = opts.windowMessages ?? 40;
