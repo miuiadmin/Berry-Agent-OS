@@ -725,7 +725,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * - affectedSessionCounts：受影响会话计数取数面——flush 屏障内嵌（write-behind
    *   尾部对查询不可见）+ Store 全库精确聚合（latestSessionId 同族宿主侧直查）；
    * - emitUninstalled：卸载成功尾双落地——总线广播 + 当前会话流落账
-   *   （plugins/uninstalled 核心词，无路由会话时总线面单落地）。 */
+   *   （plugin/uninstalled 核心词，无路由会话时总线面单落地）。 */
   const plugins = createPluginsService({
     dataDir: compositionDir,
     loadEntry: (entry) => importPluginEntry(createPluginJiti(virtualFaces), entry),
@@ -741,8 +741,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         }
       : {}),
     emitUninstalled: (data) => {
-      ctx.emit('plugins/uninstalled', data);
-      registry.routed()?.session.append('plugins/uninstalled', data);
+      ctx.emit('plugin/uninstalled', data);
+      registry.routed()?.session.append('plugin/uninstalled', data);
     },
   });
   ctx.provide('plugins', plugins);

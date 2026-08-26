@@ -676,4 +676,50 @@ describe('uninstall 双相四段', () => {
     // 段①已执行（删行先行）——行虽删，防线拦住了 rmSync（声明死与物删除两段独立）
     expect(loadOverlayRows(dataDir)).toEqual([]);
   });
+
+  it('SF-8 残迹收尾：execute 行不在·全无残迹 = no-op 速报不抛（不造未知行错误）', async () => {
+    const dataDir = makeDataDir();
+    const { runner } = fakeRunner();
+    const plugins = createPluginsService({ dataDir, runner });
+    // inspect 相对未知行照旧响亮（人检视打错 id 该报错）
+    try {
+      await plugins.uninstall('ghost', { mode: 'inspect' });
+      expect.unreachable('inspect 未知行应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+    }
+    // execute 相：行不在且无可推导残迹（无 npm 装机物/无 git 源记录/无数据域裁决）→ no-op
+    const report = await plugins.uninstall('ghost', { mode: 'execute', dataAction: 'keep' });
+    expect(report).toMatchObject({ id: 'ghost', outcome: 'no-op', installRemoved: 'none', dataRemoved: false });
+  });
+
+  it('SF-8 残迹收尾：行不在但 git 残迹在（目录+源记录）→ 只重跑清理段收敛 + 源记录同批删', async () => {
+    const dataDir = makeDataDir();
+    const { runner } = fakeRunner();
+    const plugins = createPluginsService({ dataDir, runner });
+    // 模拟上次卸载段①已删行、段②中断：git 装机目录与 sources.json 记录俱在
+    const gitRoot = join(dataDir, 'plugins', 'git');
+    const relDir = join('example.com', 'group', 'demo');
+    mkdirSync(join(gitRoot, relDir), { recursive: true });
+    writeFileSync(join(gitRoot, relDir, 'index.ts'), 'export default () => {};\n');
+    writeFileSync(
+      join(gitRoot, 'sources.json'),
+      `${JSON.stringify({ [relDir]: { url: 'https://example.com/group/demo.git', ref: 'main' } }, null, 2)}\n`,
+    );
+
+    const report = await plugins.uninstall('demo', { mode: 'execute', dataAction: 'keep' });
+    expect(report).toMatchObject({
+      id: 'demo',
+      outcome: 'residual',
+      source: 'git',
+      installRemoved: 'removed',
+      dataRemoved: false,
+    });
+    // 残迹清干净：目录删 + 源记录删（N-10 同律——防 update 幽灵复活）
+    expect(existsSync(join(gitRoot, relDir))).toBe(false);
+    expect(JSON.parse(readFileSync(join(gitRoot, 'sources.json'), 'utf8'))).toEqual({});
+    // 再跑一次 = 全无残迹 no-op（重入收敛闭环）
+    const again = await plugins.uninstall('demo', { mode: 'execute', dataAction: 'keep' });
+    expect(again.outcome).toBe('no-op');
+  });
 });

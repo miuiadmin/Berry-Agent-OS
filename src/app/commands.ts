@@ -109,15 +109,20 @@ function formatUninstallReport(report: UninstallReport): string {
     );
   }
   for (const warning of report.warnings) lines.push(`  ⚠ ${warning}`);
-  lines.push('确认执行：/plugin uninstall <id> [--purge-data]（默认保留数据域）');
+  lines.push('确认执行：/plugin-uninstall <id> --confirm [--purge-data]（默认保留数据域）');
   return lines.join('\n');
 }
 
-/** execute 回执 → 人读文本（四段执行事实的壳面转述） */
+/** execute 回执 → 人读文本（四段执行事实的壳面转述；outcome 三态如实呈现） */
 function formatUninstallExec(report: UninstallExecReport): string {
-  const lines = [
-    `已卸载 ${report.id}（${report.source} 源 · 数据域${report.dataAction === 'purge' ? '已清除' : '保留'}）`,
-  ];
+  if (report.outcome === 'no-op') {
+    return `无动作 ${report.id}：行不在且无可推导残迹（已卸载过或从未安装）`;
+  }
+  const head =
+    report.outcome === 'residual'
+      ? `残迹收尾 ${report.id}（行不在——上次卸载的段间残迹已清理）`
+      : `已卸载 ${report.id}（${report.source} 源 · 数据域${report.dataAction === 'purge' ? '已清除' : '保留'}）`;
+  const lines = [head];
   const installFace =
     report.installRemoved === 'removed'
       ? '装机物已删'
@@ -125,6 +130,7 @@ function formatUninstallExec(report: UninstallExecReport): string {
         ? `装机物保留（共享：${report.sharedRows.join('、')}）`
         : '无装机物';
   lines.push(`  ${installFace}`);
+  if (report.dataRemoved) lines.push('  数据域已清除');
   if (report.restoresDefault === true) lines.push('  官方默认层同 id 行已回露出（恢复出厂态）');
   return lines.join('\n');
 }
@@ -382,7 +388,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         }
         const lines = rows.map(formatPluginRow);
         ui.notify(
-          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装入 · /plugin uninstall 卸载 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
+          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装入 · /plugin-uninstall 卸载 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
         );
       },
     }),
@@ -433,29 +439,35 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         notifyReloadResult(ui, await opts.reload());
       },
     }),
-    /* 卸载 execute 相唯一入口（human-only，契约篇 §3.4 第二刀）：先 inspect 打印
-     * 报告再 execute——同一命令一次走完（报告与执行原子呈现，人已看过警示才落刀）；
-     * --purge-data 旗标裁决数据域（省缺 keep = Docker 卷律）。服务错误（Ring 1
-     * 拒卸/未知 id 等）上抛——通道壳兜底为通知，不崩界面。 */
+    /* 卸载 execute 相唯一入口（human-only，契约篇 §3.4 第二刀；连字符族形对齐
+     * /plugin-install 系——SF-6）：**两段式确认步**（SF-5：「人 execute 前已看」
+     * 须是机制非断言）——裸调 = inspect 渲染报告 + 确认指引，不执行；人显式打出
+     * 第二条命令（--confirm）才 execute——确认 = 人手打 --confirm 这一动作本身。
+     * --purge-data 只裁决确认后的 dataAction（省缺 keep = Docker 卷律），不跳确认。
+     * 服务错误（Ring 1 拒卸/未知 id 等）上抛——通道壳兜底为通知，不崩界面。 */
     commands.register({
-      name: 'plugin',
-      description: '卸载插件 <id>（先检视后执行；--purge-data 清数据域）并重载',
+      name: 'plugin-uninstall',
+      description: '卸载插件 <id>：先检视，--confirm 执行（--purge-data 清数据域）并重载',
       handler: async (args) => {
         const tokens = args.trim().split(/\s+/).filter(Boolean);
-        const sub = tokens[0];
-        const id = tokens[1];
-        if (sub !== 'uninstall' || id === undefined) {
-          ui.notify('用法：/plugin uninstall <id> [--purge-data]（id 见 /plugins；先检视后执行）');
+        const id = tokens[0];
+        if (id === undefined) {
+          ui.notify('用法：/plugin-uninstall <id> [--confirm] [--purge-data]（id 见 /plugins；先检视后执行）');
           return;
         }
-        const purgeData = tokens.slice(2).includes('--purge-data');
-        ui.notify(formatUninstallReport(await opts.plugins.uninstall(id, { mode: 'inspect' })));
+        const purgeData = tokens.slice(1).includes('--purge-data');
+        // 第一段（裸调）：只检视渲染——报告即裁决依据，确认指引在报告尾行
+        if (!tokens.slice(1).includes('--confirm')) {
+          ui.notify(formatUninstallReport(await opts.plugins.uninstall(id, { mode: 'inspect' })));
+          return;
+        }
+        // 第二段（--confirm）：execute + 回执 + 链 reload（删行只改组合树文件——
+        // 壳链 /reload 才热应用，与 install 同构两步）
         const exec = await opts.plugins.uninstall(id, {
           mode: 'execute',
           dataAction: purgeData ? 'purge' : 'keep',
         });
         ui.notify(formatUninstallExec(exec));
-        // 删行/禁用只改组合树文件——壳链 /reload 才热应用（与 install 同构两步）
         notifyReloadResult(ui, await opts.reload());
       },
     }),
