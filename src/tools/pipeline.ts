@@ -35,6 +35,8 @@ import type {
   ToolUpdateCallback,
 } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
+import { runInCallerChain } from '../context/chain.js';
+import { toolOwnerOf } from './registry.js';
 
 // 类型真身已安家 contracts（Ring 1 行树化批——服务面 executor 携带，宿主消费方
 // 只依赖契约层）；此处再导出维持本模块既有导入面
@@ -200,11 +202,18 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
 
     /* ---- 第二段：执行（around-dispatch；链尾默认实现 = 超时预算 + execute） ---- */
     const executeInput: ExecuteInput = { tool: def, args, callId: toolCallId, signal, onUpdate: guardedUpdate };
+    // caller 链写点之二（会话篇 §5.1 导入者归因，P1-1）：工具体按注册归属包裹——
+    // 插件工具体内的一切共享服务面调用（如 createSession 的 importer 落账）归注册
+    // 插件。宿主/builtin 工具无归属不包（链保持无身份，读点 'host' 兜底——不造
+    // 假身份链）。两处调用点共用同一 execOwned，包裹点唯一不分裂
+    const owner = toolOwnerOf(def);
     const timedExecute = async (): Promise<AgentToolResult> => {
       const timeoutMs = def.timeoutMs ?? defaultTimeoutMs;
       const toolCtx: ToolCtx = { toolCallId, signal, onUpdate: guardedUpdate };
+      const execOwned = () =>
+        owner === undefined ? def.execute(args, toolCtx) : runInCallerChain(owner, () => def.execute(args, toolCtx));
       if (!timeoutMs || timeoutMs <= 0) {
-        return def.execute(args, toolCtx); // 0 = 显式不设预算（少数长任务工具自管取消）
+        return execOwned(); // 0 = 显式不设预算（少数长任务工具自管取消）
       }
       // 预算竞速：超时先到即抛 TOOL_TIMEOUT（原 execute 继续跑但结果弃置——loop 侧
       // accepting 护栏会忽略其迟到 onUpdate；取消传播靠 signal，M1 不强杀 promise）
@@ -219,7 +228,7 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
         );
       });
       try {
-        return await Promise.race([def.execute(args, toolCtx), timeoutPromise]);
+        return await Promise.race([execOwned(), timeoutPromise]);
       } finally {
         clearTimeout(timer);
       }

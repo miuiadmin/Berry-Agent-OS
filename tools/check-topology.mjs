@@ -126,7 +126,11 @@ function importSpecifiers(source) {
     /import\s+[^'"]*?from\s*['"]([^'"]+)['"]/g,
     /export\s+[^'"]*?from\s*['"]([^'"]+)['"]/g,
     /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-    /import\s*['"]([^'"]+)['"]/g,
+    // 副作用导入（import 'x.css'）。lookbehind 排除 import 前是引号/单词字符的形态：
+    // 否则代码与注释里的字符串字面量 'import'（如 origin='import'）会被误判为
+    // 副作用导入（2026-08-27 P1-1 落码撞上，16 处全误报——真副作用导入的
+    // import 前只可能是行首/分号/花括号/空白）
+    /(?<![\w'"])import\s*['"]([^'"]+)['"]/g,
   ];
   for (const pattern of patterns) {
     for (const match of source.matchAll(pattern)) specifiers.push(match[1]);

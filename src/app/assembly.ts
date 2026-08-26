@@ -77,13 +77,17 @@ import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
-import { getSessionEventType } from '../session/index.js';
+import { getSessionEventType, snapshotJsonValue, jsonBytes } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
+import { chainCaller } from '../context/chain.js';
 import {
   EVENT_HANDLER_TIMEOUT,
+  PERSIST_BATCH_WRITE_FAILED,
   PLUGIN_EVENT_RATE,
   SESSION_CORE_TYPE_FORBIDDEN,
+  SESSION_EVENT_DATA_INVALID,
+  SESSION_EVENT_TOO_LARGE,
   SESSION_FORMAT_UNSUPPORTED,
   SESSION_SURFACE_OP_INVALID,
 } from '../contracts/errors.js';
@@ -262,6 +266,14 @@ export interface RuntimeOptions {
    * session.append 成功之后（只对成功写扣费）。测试面注小桶验证执法路径。
    */
   readonly sessionRateLimit?: { capacity: number; perMinute: number };
+  /**
+   * 会话增生令牌桶（缺省容量 10 / 5 每分钟——会话篇 §5.1 洪水上界，2026-08-27
+   * P1-1）：**进程级全局桶**，createSession 与 fork 同桶计费——每会话帽（100k 事件
+   * × 64KiB）不约束会话数，失控插件无界开新会话即无界写盘，上界必须进程级。
+   * PLUGIN_EVENT_RATE 一码三面之三（emit scope 键 / sessions 会话键 / 增生进程键，
+   * message 带面名可分辨）。正常迁移/回退一次一调用，10/min 缺省帽碰不到。
+   */
+  readonly sessionSpawnRateLimit?: { capacity: number; perMinute: number };
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -610,7 +622,138 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       );
     }
   };
+  /* ---- 会话增生桶（会话篇 §5.1 洪水上界，2026-08-27 P1-1）----
+   * 进程级全局令牌桶：createSession 与 fork 同桶——每会话帽（100k × 64KiB）不
+   * 约束会话数，失控插件无界开新会话即无界写盘，上界必须进程级。PLUGIN_EVENT_RATE
+   * 一码三面之三（emit scope 键 / sessions 会话键 / 增生进程键），message 带面名。 */
+  const sessionSpawnRate = new RateLimiter(opts.sessionSpawnRateLimit ?? { capacity: 10, perMinute: 5 });
+  /** 增生桶键：进程单桶常量键（区别于 emit 的 scope 键与写面的会话键） */
+  const SPAWN_BUCKET_KEY = 'session-spawn';
+  /** 导入种子总量帽（卫生闸第三道——单会话事件数上界，与活体会话同尺 10 万） */
+  const IMPORT_SEED_TOTAL_LIMIT = 100_000;
+  /** 导入种子单事件体积帽（卫生闸第二道——与活体 append 的 64KiB 同尺；种子不走
+   * append（构造器直接入账），体积闸必须在服务面前置） */
+  const IMPORT_EVENT_BYTES_LIMIT = 64 * 1024;
+  /** 增生计费（两面共用）：物理写盘动作之前扣令牌（拒绝时不产生半套状态），桶空 fail-loud */
+  const chargeSpawn = (face: string): void => {
+    if (!sessionSpawnRate.tryCharge(SPAWN_BUCKET_KEY)) {
+      throw new AppError(
+        PLUGIN_EVENT_RATE,
+        `ctx.sessions.${face} 会话增生超频（进程级——createSession 与 fork 同桶计费）` +
+          `：护栏 ${sessionSpawnRate.params.perMinute} 次/分钟（令牌桶：突发上限 ${sessionSpawnRate.params.capacity}、` +
+          `回填 ${sessionSpawnRate.params.perMinute}/min；fail-loud 非静默丢弃，会话篇 §5.1 洪水上界）`,
+      );
+    }
+  };
   ctx.provide('sessions', {
+    /**
+     * 导入会话（会话篇 §5.1，2026-08-27 P1-1）：origin='import' 钉死无参数
+     * （闭集归因——导入语义不开放给调用方）；四道卫生闸洗外部种子 → durable
+     * 承诺（ensureSeeded + flush 屏障）→ 返回 sessionId 不返回活引用。
+     * 顺序纪律：卫生闸（纯校验零副作用）→ 增生计费 → 构造落库——非法数据
+     * 不耗配额（与 register 查重先过同理），拒绝时不产生半套状态。
+     */
+    createSession: async (opts: { seed: readonly SessionEvent[] }): Promise<string> => {
+      // persist:false 诊断装配 = durable 承诺物理不可履行（码族随语义族走——与
+      // 批落失败同族；不返回空转 sessionId：导入面返回的 id 指向空壳 = 承诺谎报）
+      if (persistence === undefined) {
+        throw new AppError(
+          PERSIST_BATCH_WRITE_FAILED,
+          'createSession 在 persist:false 诊断装配下不可用（导入 = durable 承诺——物理不可履行即响亮拒绝，不返回空转 sessionId）',
+        );
+      }
+      // 闸三（总量帽，会话级）：零遍历成本先拒——100k × 64KiB 是单会话洪水上界
+      if (opts.seed.length > IMPORT_SEED_TOTAL_LIMIT) {
+        throw new AppError(
+          SESSION_EVENT_TOO_LARGE,
+          `导入种子 ${opts.seed.length} 条超会话总量帽 ${IMPORT_SEED_TOTAL_LIMIT}（会话篇 §5.1 卫生闸第三道）`,
+        );
+      }
+      // 闸一+二+四（逐事件）：data JSON 性快照 / time 有限数值 / 64KiB 体积 /
+      // 信封剥除 + ignorable 按注册表重盖章——外部数据是平展事实流，宿主侧
+      // 信封字段（surfaceOp/sourceEventSeqs/ignorable）一律不信不透传。核心词
+      // 放行（导入的历史天然含 user/message——红线例外即 importer 归因的理由）；
+      // seq 连续性归构造时 validateSeed 既有闸（此处不重复执法）
+      const cleaned: SessionEvent[] = [];
+      for (let i = 0; i < opts.seed.length; i++) {
+        const event = opts.seed[i]!;
+        const snapshot = snapshotJsonValue(event.data, `seed[${i}].data`); // JSON 性（非 JSON 值抛 DATA_INVALID）
+        if (typeof event.time !== 'number' || !Number.isFinite(event.time)) {
+          throw new AppError(
+            SESSION_EVENT_DATA_INVALID,
+            `导入种子 seed[${i}].time 非有限数值（收到 ${String(event.time)}——时间戳必须是有限毫秒数）`,
+          );
+        }
+        const size = jsonBytes(snapshot);
+        if (size > IMPORT_EVENT_BYTES_LIMIT) {
+          throw new AppError(
+            SESSION_EVENT_TOO_LARGE,
+            `导入种子 seed[${i}]（type=${event.type}）data 体积 ${size}B 超护栏 ${IMPORT_EVENT_BYTES_LIMIT}B（与活体事件同尺）`,
+          );
+        }
+        const def = getSessionEventType(event.type);
+        // 闸四重盖章素材 + 未知词在此响亮（validateSeed 兜底执法，此处消息带位置）
+        if (def === undefined) {
+          throw new AppError(
+            SESSION_FORMAT_UNSUPPORTED,
+            `导入种子含未注册事件类型：${event.type}（seed[${i}]——注册即写入许可，请先经 ctx.registerSessionEventType 注册词汇）`,
+          );
+        }
+        cleaned.push({
+          type: event.type,
+          seq: event.seq,
+          time: event.time,
+          data: snapshot,
+          ...(def.ignorable ? { ignorable: true } : {}), // 重盖章：向前兼容位唯一生产者 = 注册表
+        });
+      }
+      chargeSpawn('createSession'); // 增生计费：先于物理动作（洪水面 = 写盘）
+      // cwd/app 继承调用链会话（无路由落点回落 workspace——导入件在工具/apply 段
+      // 调用时天然锚定归属会话）；importer 归因 = 调用链 caller 推导（宿主推导非
+      // 插件自报——装载器/工具管道两边界已归一，无链 = 宿主自身 'host'）
+      const anchor = registry.routed();
+      const inherited = anchor !== undefined ? persistence.metaOf(anchor.session.header.sessionId) : undefined;
+      const session = persistence.createSession({
+        seed: cleaned,
+        origin: 'import',
+        cwd: inherited?.cwd ?? workspace,
+        profile: 'default',
+        app: inherited?.app,
+        importer: chainCaller() ?? 'host',
+      });
+      // 敞开 turn 恢复协议兜底（与 loadSession 恢复同款）：导入流尾可能停在 turn
+      // 中间——closers 经 append 进 write-behind 队列，随下方屏障一并落盘
+      session.recoverFromInterruption();
+      // durable 承诺双保险：显式种子落库（幻影 id 防线）+ flush 屏障（崩溃窗内
+      // 「导入成功返回但数据未入库」不可接受）
+      await persistence.ensureSeeded(session);
+      await persistence.flush(session.header.sessionId);
+      return session.header.sessionId;
+    },
+    /**
+     * fork 露头（会话篇 §5.2，2026-08-27 P1-1）：以调用链当前会话的前缀为种子
+     * 分叉——回退正路（checkpoint-rewind 实证）= fork + openSession 切换后写。
+     * 锚 = registry.routed()（无路由落点返回 undefined 降级，与 appendEvent 同款）；
+     * 服务口 ensureSeeded + flush 同 durable 承诺（不返回幻影 id——惰性复制仅
+     * 宿主内部 forkSession 维持）；与 createSession 同一进程级增生桶计费。
+     */
+    fork: async (boundary?: number): Promise<string | undefined> => {
+      if (persistence === undefined) {
+        throw new AppError(
+          PERSIST_BATCH_WRITE_FAILED,
+          'fork 在 persist:false 诊断装配下不可用（前缀定格 = durable 承诺——物理不可履行即响亮拒绝）',
+        );
+      }
+      const entry = registry.routed();
+      if (entry === undefined) return undefined; // 无路由落点降级（不耗配额）
+      chargeSpawn('fork'); // 同桶：fork 每次物理复制父前缀，洪水面与导入同源
+      // cwd/profile/app 继承父会话由 forkSession 内部处理；boundary 落在敞开
+      // turn 内由 Session.fork 抛 SESSION_FORK_BOUNDARY_INVALID
+      const child = persistence.forkSession(entry.session, boundary !== undefined ? { boundary } : {});
+      await persistence.ensureSeeded(child);
+      await persistence.flush(child.header.sessionId);
+      return child.header.sessionId;
+    },
     appendEvent: (type: string, data: unknown): SessionEvent | undefined => {
       // 核心词判据单一来源（contracts——注册侧同尺，两道闸一道判据）
       if (isCoreSessionEventType(type)) {

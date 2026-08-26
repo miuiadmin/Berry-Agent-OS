@@ -14,7 +14,13 @@ import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '..
 import type { EventQueryOptions, EventQueryResult, EventQueryRow, SessionEvent } from '../contracts/events.js';
 import { deepFreeze } from '../session/snapshot.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
-import { APPLICATION_ID, CANONICAL_DDL, SCHEMA_VERSION, SESSION_APP_COLUMN_MIGRATION } from './schema.js';
+import {
+  APPLICATION_ID,
+  CANONICAL_DDL,
+  SCHEMA_VERSION,
+  SESSION_APP_COLUMN_MIGRATION,
+  SESSION_IMPORTER_COLUMN_MIGRATION,
+} from './schema.js';
 
 /** 打开参数 */
 export interface StoreOptions {
@@ -57,6 +63,8 @@ export interface SessionRegistration {
   profile?: string;
   /** 应用域标记（血缘显式打标——缺省 NULL；fork 经 Persistence 继承父域） */
   app?: string;
+  /** 导入者归因（v10 列，会话篇 §5.1 冷读闸补）：origin='import' 行服务面强制非空（调用方插件名或 'host'） */
+  importer?: string;
 }
 
 /**
@@ -76,8 +84,13 @@ export function openStore(options: StoreOptions): Store {
   // 迁移链先校验排序（装配错误在此即抛，不动任何库文件）。
   // 内核表迁移（sessions 是内核表——DDL 演进直归 persist，业务调用方不感知）：
   // persist 自注入，与业务迁移项合并排序。版本空间共享——内核占用 v6（sessions
-  // +app 列），业务模块声明面不得撞号（normalizeMigrations 严格递增校验即执法面）
-  const chain = normalizeMigrations([...(options.migrations ?? []), SESSION_APP_COLUMN_MIGRATION], SCHEMA_VERSION);
+  // +app 列）与 v10（sessions +importer 列，会话篇 §5.1 导入者归因；v8/v9 已被
+  // goal-needs-write / scheduler-jobs-v9 业务件占用），业务模块声明面不得撞号
+  // （normalizeMigrations 严格递增校验即执法面）
+  const chain = normalizeMigrations(
+    [...(options.migrations ?? []), SESSION_APP_COLUMN_MIGRATION, SESSION_IMPORTER_COLUMN_MIGRATION],
+    SCHEMA_VERSION,
+  );
   const latestVersion = chain.length > 0 ? chain[chain.length - 1]!.version : SCHEMA_VERSION;
 
   const db = new Database(options.path);
@@ -342,11 +355,12 @@ export class Store {
           event.ignorable ? 1 : 0,
         );
       }
-      // sessions 行：首次登记（ON CONFLICT 静默——header 以首次登记为准，血缘不改写）
+      // sessions 行：首次登记（ON CONFLICT 静默——header 以首次登记为准，血缘不改写；
+      // importer 随首次登记落定——ensureSeeded 直写路径先于活体 enqueue，归因不丢）
       this.stmt(
         `INSERT INTO sessions (id, schema_version, created_at, cwd, origin, parent_session, seed_length,
-           delegation_depth, profile, incarnation, revision, app)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+           delegation_depth, profile, incarnation, revision, app, importer)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
          ON CONFLICT(id) DO NOTHING`,
       ).run(
         reg.sessionId,
@@ -360,6 +374,7 @@ export class Store {
         reg.profile ?? null,
         incarnation,
         reg.app ?? null,
+        reg.importer ?? null,
       );
       // revision 前进：incarnation 变更（新进程接管）= 复位边界，revision 重计 1
       const next =

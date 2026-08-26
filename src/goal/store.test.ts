@@ -156,7 +156,9 @@ describe('needsWrite（第二十四批题3a——续跑轮工具面开洞申请�
   it('v5 旧库升 v8：ALTER 补列，既有行 needs_write 缺省 0（收紧语义）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'goal-needs-write-'));
     const path = join(dir, 'g.db');
-    // 只带 v5 建旧库 + 原生 SQL 落一行（旧形态无 needs_write 列）
+    // 只带 v5 建旧库 + 原生 SQL 落一行（旧形态无 needs_write 列）。注意：开库
+    // 自带内核链（v6/v10），先经活连接退回 v5 旧形态（撤内核列 + 回拨 uv）——
+    // 否则 uv 已越过 v8，全链重开不补跑 v8（指纹断言拒绝）
     const old = openStore({ path, migrations: [GOAL_MIGRATION] });
     old.connection
       .prepare(
@@ -164,8 +166,11 @@ describe('needsWrite（第二十四批题3a——续跑轮工具面开洞申请�
          VALUES ('s1', '旧目标', 1000, 0, 'active', 1, 1)`,
       )
       .run();
+    old.connection.exec('ALTER TABLE sessions DROP COLUMN importer');
+    old.connection.exec('ALTER TABLE sessions DROP COLUMN app');
+    old.connection.pragma('user_version = 5');
     old.close();
-    // 重开带全迁移链 → v8 ALTER 生效，旧行读回 needsWrite=false
+    // 重开带全迁移链 → 内核缺口（v6/v10）与业务缺口（v8）同补，旧行读回 needsWrite=false
     const upgraded = openStore({ path, migrations: goalMigrations });
     const goal = new GoalStore(upgraded.connection).get('s1')!;
     expect(goal.objective).toBe('旧目标');

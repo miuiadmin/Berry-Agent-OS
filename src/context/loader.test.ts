@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createContext } from './context.js';
 import { loadPlugins } from './loader.js';
+import { chainCaller } from './chain.js';
 import type { PluginSkillsInfo } from './loader.js';
 import type { ContextScope } from './types.js';
 import {
@@ -1102,5 +1103,43 @@ describe('loadPlugins 技能目录注册回调', () => {
 
     expect(result.failed).toEqual([]); // 多余 named export 不算形状违规（宽容面）——只是不被读
     expect(seen[0]!.packageRoot).toBe(dir); // 入口路径推导胜出（模块键被忽略）
+  });
+});
+
+/* ---------------- caller 链装载器写点（会话篇 §5.1 导入者归因，P1-1） ---------------- */
+
+describe('装载器 apply 边界的 caller 链（插件身份已知的第一写点）', () => {
+  it('apply 段内经宿主服务读链 = 本行插件 id；装载器自身代码不在链上', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'caller-probe.ts',
+      [
+        "export const name = 'caller-probe';",
+        'export default async function apply(ctx) {',
+        "  const probe = ctx.get<(label: string) => string | undefined>('caller-probe');",
+        '  ctx.effect(() => () => {});', // 注册侧不在链上的对照探针见下
+        '  await Promise.resolve();', // 跨 tick 仍在链上（异步下游继承）
+        "  ctx.provide('probe-result', { applyTime: probe('apply') });",
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    // 宿主探针服务：实现闭包在宿主侧读链——归因面真实路径（服务面看不到调用方，
+    // 身份靠装载器边界进入 ALS）
+    const reads: Array<{ label: string; caller: string | undefined }> = [];
+    root.provide('caller-probe', (label: string) => {
+      const caller = chainCaller();
+      reads.push({ label, caller });
+      return caller;
+    });
+    const result = await loadPlugins(root, [{ id: 'row-caller-id', entry }]);
+
+    expect(result.failed).toEqual([]);
+    // apply 段（含跨 tick）：本行 id
+    expect(reads.find((r) => r.label === 'apply')).toEqual({ label: 'apply', caller: 'row-caller-id' });
+    // 装载器自身（激活完成后宿主侧读）：不在链上——注册回调/生命周期 emit 不落插件账
+    expect(chainCaller()).toBeUndefined();
+    expect(root.tryGet('probe-result')).toEqual({ applyTime: 'row-caller-id' });
   });
 });

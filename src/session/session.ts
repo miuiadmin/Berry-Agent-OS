@@ -30,8 +30,12 @@ export interface SessionHeader {
   readonly parentSession?: string;
   /** 种子前缀事件数（含源前缀 + 收尾的 session/end-seed；非 fork = 0） */
   readonly seedLength: number;
-  /** 会话来源：用户新建 / fork / 委派 / 恢复 */
-  readonly origin: 'user' | 'fork' | 'delegation' | 'resume';
+  /**
+   * 会话来源：用户新建 / fork / 委派 / 恢复 / 导入。
+   * 闭集管理（会话篇 §5.1）：插件不可自定义——服务面 createSession 无 origin 参数
+   * （钉死 'import'）、fork 面钉死 'fork'，四值各自宿主写点，结构上无入参面。
+   */
+  readonly origin: 'user' | 'fork' | 'delegation' | 'resume' | 'import';
   /** 委派链深度（防无限递归委派的护栏计数） */
   readonly delegationDepth: number;
 }

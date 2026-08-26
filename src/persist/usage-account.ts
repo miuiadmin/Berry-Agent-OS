@@ -14,16 +14,22 @@
 
 import type { Store } from './store.js';
 
-/** 聚合语句（调用频次 = canAfford 检查频次，prepare 开销可忽略——不走缓存面） */
+/** 聚合语句（调用频次 = canAfford 检查频次，prepare 开销可忽略——不走缓存面）。
+ *  origin='import' 会话级排除（会话篇 §5.1，2026-08-27 P1-1）：导入的历史花销
+ *  不是本机真实消耗（预算底账按 origin 排除、查询面不排除）——全表版因此
+ *  带 JOIN sessions（原无 JOIN 的全表扫描在排除语义下必须有会话行可查）。 */
 const SUM_BACKGROUND_SQL = `
-  SELECT COALESCE(SUM(json_extract(data, '$.usage.input') + json_extract(data, '$.usage.output')), 0) AS spent
-  FROM events
-  WHERE type = 'llm/usage'
-    AND json_extract(data, '$.priority') = 'background'
-    AND time >= ?
+  SELECT COALESCE(SUM(json_extract(e.data, '$.usage.input') + json_extract(e.data, '$.usage.output')), 0) AS spent
+  FROM events e
+  JOIN sessions s ON e.session_id = s.id
+  WHERE e.type = 'llm/usage'
+    AND json_extract(e.data, '$.priority') = 'background'
+    AND e.time >= ?
+    AND s.origin != 'import'
 `;
 
-/** 应用域聚合语句（canAfford 第三维 app——会话域投影归集：JOIN sessions 按 app 列过滤） */
+/** 应用域聚合语句（canAfford 第三维 app——会话域投影归集：JOIN sessions 按 app 列过滤；
+ *  origin='import' 排除同上） */
 const SUM_BACKGROUND_APP_SQL = `
   SELECT COALESCE(SUM(json_extract(e.data, '$.usage.input') + json_extract(e.data, '$.usage.output')), 0) AS spent
   FROM events e
@@ -32,6 +38,7 @@ const SUM_BACKGROUND_APP_SQL = `
     AND json_extract(e.data, '$.priority') = 'background'
     AND e.time >= ?
     AND s.app = ?
+    AND s.origin != 'import'
 `;
 
 /**

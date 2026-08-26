@@ -446,3 +446,47 @@ describe('createToolPipeline — 后处理段挂起时钟', () => {
     expect((result.content[0] as TextContent).text).toContain('+post');
   });
 });
+
+/* ---------------- caller 链执行段写点（会话篇 §5.1 导入者归因，P1-1） ---------------- */
+
+describe('工具体按注册归属进 caller 链（toolOwnerOf 旁表 + 执行段包裹）', () => {
+  it('链上注册的工具：执行段内 chainCaller = 注册者；无链注册的工具：执行段无身份（host 兜底）', async () => {
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx);
+    const { registerToolsService } = await import('./registry.js');
+    const { runInCallerChain } = await import('../context/chain.js');
+    const { chainCaller } = await import('../context/chain.js');
+    const service = registerToolsService(ctx);
+    // 归属探针工具：execute 体（同步段 + await 后）读链——工具体内调共享服务面的真实形态
+    const probeTool = (name: string): ToolDefinition => ({
+      name,
+      description: '读 caller 链',
+      parameters: Type.Object({}),
+      effect: 'read',
+      execute: async () => {
+        const syncRead = chainCaller();
+        await Promise.resolve();
+        return { content: [{ type: 'text', text: `${syncRead}|${chainCaller()}` }] };
+      },
+    });
+    // 插件注册（装载器 apply 段形态：runInCallerChain 罩注册——旁表记账）
+    const disposeOwned = runInCallerChain('plugin-owned', () => service.register(probeTool('owned-probe')));
+    // 宿主注册（无链——旁表不记，执行段保持无身份）
+    service.register(probeTool('host-probe'));
+
+    const owned = await run(
+      (await service.list()).find((d) => d.name === 'owned-probe')!,
+      'tc-owned',
+      {},
+    );
+    const host = await run(
+      (await service.list()).find((d) => d.name === 'host-probe')!,
+      'tc-host',
+      {},
+    );
+    const textOf = (r: AgentToolResult) => (r.content[0] as TextContent).text;
+    expect(textOf(owned)).toBe('plugin-owned|plugin-owned'); // 同步段与 await 后都在注册者链上
+    expect(textOf(host)).toBe('undefined|undefined'); // 宿主工具不造假身份链——读点 'host' 兜底
+    disposeOwned();
+  });
+});

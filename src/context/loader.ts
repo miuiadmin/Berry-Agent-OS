@@ -46,6 +46,7 @@ import {
   describeError,
 } from '../contracts/errors.js';
 import { registerLiveEvent } from './context.js';
+import { runInCallerChain } from './chain.js';
 import type {
   PluginActivatedPayload,
   PluginFailedPayload,
@@ -695,15 +696,19 @@ async function activateOne(
       }, applyTimeoutMs);
     });
     let applyPromise: Promise<unknown>;
+    // caller 链写点之一（会话篇 §5.1 导入者归因，P1-1）：apply 段内的一切共享服务面
+    // 调用（如 createSession 的 importer 落账）归本插件。只罩 apply 调用——装载器
+    // 自身的注册回调/词表收割/生命周期 emit 是宿主行为，不落插件账。worker 行只罩
+    // 宿主半（RPC 不跨 ALS——worker 桥帧带身份随该批挂账，与 sessionId 锚同款）
     if (item.kind === 'main') {
-      applyPromise = Promise.resolve(item.module.default(scope, scope.config));
+      applyPromise = runInCallerChain(row.id, () => Promise.resolve(item.module.default(scope, scope.config)));
     } else {
       // 阶段①保证 worker 行必配 workerLoader——此兜底不可达，防御式响亮不静默
       const loader = opts?.workerLoader;
       if (loader === undefined) {
         throw new AppError(PLUGIN_LOAD_FAILED, 'worker 行激活时装载器缺席（装载管线不变量被破坏——不可达防御路径）');
       }
-      applyPromise = loader.apply(row, scope, { signal: cancelCtl.signal });
+      applyPromise = runInCallerChain(row.id, () => loader.apply(row, scope, { signal: cancelCtl.signal }));
     }
     applyPromise.catch(() => {}); // 竞速败方迟到 reject 兜底（多订阅不影响 race 正常传播）
     try {

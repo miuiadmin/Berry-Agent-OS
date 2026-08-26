@@ -361,13 +361,14 @@ describe('briefing 效用维度（30 天未用强排除 + 复活 + 排序抬升�
   });
 
   it('v2→v4 升格：存量库补跑 ALTER 不丢数据、新列就位', () => {
-    // 模拟「旧宿主建的 v2 库」：旧宿主不知内核 v6——现宿主开库（自带 app 列、
-    // uv 直达 6）后经 store.connection 退回 v2 形态（撤 app 列 + 回拨 user_version），
-    // 再以全链重开 = 业务缺口（v4）与内核缺口（v6）同补
+    // 模拟「旧宿主建的 v2 库」：旧宿主不知内核 v6/v10——现宿主开库（自带 app +
+    // importer 列，uv 直达 10）后经 store.connection 退回 v2 形态（撤两列 + 回拨
+    // user_version），再以全链重开 = 业务缺口（v4）与内核缺口（v6/v10）同补
     const path = joinTmp();
     const s1 = openStore({ path, migrations: [MEMORY_MIGRATION] });
     const legacy = new MemoryStore(s1.connection);
     legacy.addMemory({ ownerKey: 'global', kind: 'fact', summary: '升格前条目', content: 'c' });
+    s1.connection.exec('ALTER TABLE sessions DROP COLUMN importer');
     s1.connection.exec('ALTER TABLE sessions DROP COLUMN app');
     s1.connection.pragma('user_version = 2');
     s1.close();

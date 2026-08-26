@@ -120,3 +120,25 @@ describe('openTurnDepth 配对深度投影（调度闸门 busy 判据）', () =>
     expect(openTurnDepth(orphan)).toBe(1);
   });
 });
+
+describe('origin=import 会话级排除（会话篇 §5.1——预算底账排除、查询面不排除）', () => {
+  it('导入会话的 llm/usage 花销不计入预算底账；同账活体会话照计', () => {
+    const store = openStore({ path: join(dir, 'import-exclude.db') }) as Store;
+    // 活体会话（origin='user'）：窗内 background 40
+    store.appendCore(reg('sess-live'), [usageEvent(0, 1_000, usageData(40, 0, 'background'))], 'inc-1');
+    // 导入会话（origin='import'，importer 归因在场）：窗内 background 500——历史花销非本机真实消耗
+    store.appendCore(
+      { sessionId: 'sess-imported', origin: 'import', seedLength: 0, delegationDepth: 0, importer: 'fx-importer' },
+      [usageEvent(0, 1_100, usageData(500, 0, 'background'))],
+      'inc-2',
+    );
+
+    expect(spentBackgroundTokensSince(store, 1_000)).toBe(40); // 只计活体会话
+    // 查询面不排除：同表直查（events_query 面）两笔都在——底账排除只影响预算闸门口径
+    const rows = store.connection.prepare(`SELECT COUNT(*) AS n FROM events WHERE type = 'llm/usage'`).get() as {
+      n: number;
+    };
+    expect(rows.n).toBe(2);
+    store.close();
+  });
+});

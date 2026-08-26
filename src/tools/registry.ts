@@ -34,12 +34,30 @@ import {
 import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import { RateLimiter } from '../context/rate-limit.js';
+import { chainCaller } from '../context/chain.js';
 import type { Disposer } from '../context/types.js';
 import type { Context } from '../context/types.js';
 import type { ToolPipelineExecutor } from './pipeline.js';
 
 /** ctx.tools 服务面（契约篇 §1.5 服务行；接口单一来源在 contracts——本文件实现） */
 export type { ToolsService } from '../contracts/tools.js';
+
+/**
+ * 工具归属旁表（P1-1 导入者归因，会话篇 §5.1）：normalized 定义 → 注册者插件名。
+ * 注册时从 caller 链记（装载器 apply 段内注册 = runInCallerChain 罩着，身份天然
+ * 已知；宿主/builtin 直注册无链不记 = 'host' 兜底）——归因由宿主推导，插件无
+ * 自报入参面、不可伪造。WeakMap 键 = normalized 副本（管道执行收到的即它），
+ * 注销后无引用自然 GC，无需显式清理。模块级单表：键是对象身份，跨实例无冲突。
+ */
+const toolOwners = new WeakMap<ToolDefinition, string>();
+
+/**
+ * 查工具注册归属（管道执行段包裹 runInCallerChain 的取数口）。
+ * 未记（宿主/builtin/测试直注册）返回 undefined——调用方兜底 'host'。
+ */
+export function toolOwnerOf(def: ToolDefinition): string | undefined {
+  return toolOwners.get(def);
+}
 
 /** 注册表选项 */
 export interface ToolRegistryOptions {
@@ -186,6 +204,10 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         );
       }
       layer.set(def.name, normalized);
+      // 归属旁表记账（P1-1）：注册时链上有插件身份才记——装载器 apply 段注册
+      // 自然带身份；宿主/builtin 直注册无链不记（toolOwnerOf 查 miss → 'host'）
+      const owner = chainCaller();
+      if (owner !== undefined) toolOwners.set(normalized, owner);
       totalAdds += 1;
       // 载荷带域键 = 域层变更（装配层只刷该域的面）；缺省 = 全局层变更（刷全部）
       ctx.emit(TOOLS_CHANGE_EVENT, {

@@ -56,22 +56,58 @@ export class WriteBehind {
    * 首次入队时若库内尚无本会话事件，把种子物理复制到子会话名下——子会话事件流
    * 因此自包含且 seq 连续（会话篇 §5：消费者读侧 events.slice(seedLength)）。
    */
-  enqueue(session: Session, event: SessionEvent, meta?: { cwd?: string; profile?: string; app?: string }): void {
+  enqueue(
+    session: Session,
+    event: SessionEvent,
+    meta?: { cwd?: string; profile?: string; app?: string; importer?: string },
+  ): void {
     const sessionId = session.header.sessionId;
     const queue = this.pending.get(sessionId);
     if (queue) {
       queue.push(event);
     } else {
-      const seedLength = session.header.seedLength;
-      const needsSeedCopy = seedLength > 0 && this.store.countEvents(sessionId) === 0;
       // 种子（若有且未落盘）在前，活事件随后——批内即保持 seq 连续
-      const initial = needsSeedCopy ? [...session.events.slice(0, seedLength)] : [];
+      const initial = this.pendingSeed(session) ?? [];
       initial.push(event);
       this.pending.set(sessionId, initial);
       this.registrations.set(sessionId, registrationOf(session, meta));
     }
     if (!this.paused) {
       this.scheduleFlush();
+    }
+  }
+
+  /**
+   * 未落盘种子（若有）：seedLength > 0 且库内尚无本会话事件时返回种子快照，
+   * 否则 null。enqueue 首队复制与 ensureSeeded 显式落库的共用判定（会话篇 §5.1
+   * 「seedLength 语义钉死」——导入 seedLength = 种子全长，本判定天然覆盖）。
+   */
+  private pendingSeed(session: Session): SessionEvent[] | null {
+    const seedLength = session.header.seedLength;
+    if (seedLength === 0) {
+      return null;
+    }
+    return this.store.countEvents(session.header.sessionId) === 0 ? [...session.events.slice(0, seedLength)] : null;
+  }
+
+  /**
+   * 显式触发种子物理落库（会话篇 §5.1「落库即时性」——导入 = durable 承诺）。
+   * fork 的种子复制是惰性的（首队时承担，委派时序保证子会话必有活体事件）；
+   * 导入无此预期（用户可能导入后不续聊），故服务面在返回前显式调本方法：
+   * 先排空该会话待写队列（若种子已在队列头则随批落盘），仍未落盘则直写——
+   * appendCore 唯一物理写口不旁路，sessions 行随首片登记（含 importer 归因）。
+   * 失败上抛（导入承诺语义：durable 不可履行时调用方必须看到）。
+   */
+  async ensureSeeded(
+    session: Session,
+    meta?: { cwd?: string; profile?: string; app?: string; importer?: string },
+  ): Promise<void> {
+    const sessionId = session.header.sessionId;
+    // 显式路径与 flush 同款：排空队列重试（paused 不阻——显式调用是恢复机会）
+    await this.drainSession(sessionId);
+    const seed = this.pendingSeed(session);
+    if (seed) {
+      this.store.appendCore(registrationOf(session, meta), seed, this.incarnation);
     }
   }
 
@@ -185,7 +221,7 @@ export class WriteBehind {
 /** Session → 首刷登记素材 */
 function registrationOf(
   session: Session,
-  meta?: { cwd?: string; profile?: string; app?: string },
+  meta?: { cwd?: string; profile?: string; app?: string; importer?: string },
 ): SessionRegistration {
   return {
     sessionId: session.header.sessionId,
@@ -196,5 +232,7 @@ function registrationOf(
     cwd: meta?.cwd,
     profile: meta?.profile,
     app: meta?.app,
+    // 导入者归因（会话篇 §5.1 冷读闸补）：origin='import' 行服务面强制非空
+    importer: meta?.importer,
   };
 }

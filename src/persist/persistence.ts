@@ -38,8 +38,8 @@ export class Persistence {
   readonly writeBehind: WriteBehind;
   /** 本进程生命周期 UUID（revision 复位边界；跨进程变更检测的一半） */
   readonly incarnation: string;
-  /** createSession 附带的会话元数据（cwd/profile/app——sessions 表登记素材） */
-  private readonly sessionMeta = new Map<string, { cwd?: string; profile?: string; app?: string }>();
+  /** createSession 附带的会话元数据（cwd/profile/app/importer——sessions 表登记素材） */
+  private readonly sessionMeta = new Map<string, { cwd?: string; profile?: string; app?: string; importer?: string }>();
   /** 原始打开参数（活体镜像回调在其中） */
   private readonly options: PersistenceOptions;
 
@@ -57,7 +57,7 @@ export class Persistence {
   private sink(
     session: Session,
     event: SessionEvent,
-    meta: { cwd?: string; profile?: string; app?: string } | undefined,
+    meta: { cwd?: string; profile?: string; app?: string; importer?: string } | undefined,
   ): void {
     this.writeBehind.enqueue(session, event, meta);
     this.options.onLiveEvent?.(session.header.sessionId, event);
@@ -71,20 +71,31 @@ export class Persistence {
   /**
    * 新建会话并接线持久化：Session 的活体事件直达 write-behind 队列。
    * @param opts Session 构造参数 + cwd/profile/app（会话登记元数据，落 sessions 表；
-   *   app = 应用域打标——默认启动即 'chat'，契约篇 §5.4 冷读裁决）
+   *   app = 应用域打标——默认启动即 'chat'，契约篇 §5.4 冷读裁决）+ importer
+   *   （导入者归因，v8 列——导入面服务面强制非空，普通新建不传）
    */
-  createSession(opts: SessionOptions & { cwd?: string; profile?: string; app?: string } = {}): Session {
-    const { cwd, profile, app, ...sessionOpts } = opts;
+  createSession(
+    opts: SessionOptions & { cwd?: string; profile?: string; app?: string; importer?: string } = {},
+  ): Session {
+    const { cwd, profile, app, importer, ...sessionOpts } = opts;
     // 闭包经变量引用自身：首个事件总在构造返回之后才发生，赋值先于首次 emit
     let session!: Session;
     session = new Session({
       ...sessionOpts,
       emit: (event) => this.sink(session, event, this.sessionMeta.get(session.header.sessionId)),
     });
-    if (cwd !== undefined || profile !== undefined || app !== undefined) {
-      this.sessionMeta.set(session.header.sessionId, { cwd, profile, app });
+    if (cwd !== undefined || profile !== undefined || app !== undefined || importer !== undefined) {
+      this.sessionMeta.set(session.header.sessionId, { cwd, profile, app, importer });
     }
     return session;
+  }
+
+  /**
+   * 显式触发种子物理落库（会话篇 §5.1「落库即时性」——导入 = durable 承诺的
+   * persist 半边）。服务面薄转发到 write-behind.ensureSeeded；失败上抛（承诺语义）。
+   */
+  ensureSeeded(session: Session): Promise<void> {
+    return this.writeBehind.ensureSeeded(session, this.sessionMeta.get(session.header.sessionId));
   }
 
   /**
@@ -150,6 +161,15 @@ export class Persistence {
   /** 屏障：某会话（缺省全部）待写批次落盘完成（失败 reject，批次保留） */
   flush(sessionId?: string): Promise<void> {
     return this.writeBehind.flush(sessionId);
+  }
+
+  /**
+   * 会话登记元数据只读取数口（P1-1 会话写入面 v2）：cwd/app 继承与 importer
+   * 回查的服务面取数——sessionMeta 是本类私有账（防装配层双账），经此窄口外读。
+   * 仅本进程登记/恢复过的会话有值（读库前的纯内存查询，零 SQL）。
+   */
+  metaOf(sessionId: string): { cwd?: string; profile?: string; app?: string; importer?: string } | undefined {
+    return this.sessionMeta.get(sessionId);
   }
 
   /**

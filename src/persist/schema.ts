@@ -111,3 +111,22 @@ export const SESSION_APP_COLUMN_MIGRATION: MigrationSpec = {
   name: 'sessions-app-column',
   sql: 'ALTER TABLE sessions ADD COLUMN app TEXT',
 };
+
+/**
+ * v10 迁移：sessions 表 +`importer` 列（会话写入面 v2，会话篇 §5.1 冷读闸补——
+ * 导入者归因）。
+ *
+ * 版本序说明：v8/v9 已被业务件占用（goal-needs-write / scheduler-jobs-v9）——
+ * user_version 链全局唯一，本列顺移 v10（迁移框架只认严格递增，缺号补位无意义）。
+ *
+ * 语义：核心词伪造窗口（种子可含核心词=红线例外）必须配可审计的溯源账——
+ * origin='import' 行 importer 非空（服务面强制落调用方插件名；宿主内部导入器
+ * 落 'host'）。与 appendWithSurfaceOp「归因强制 plugin: 前缀」同纪律。
+ * 存量行 NULL（非导入会话无此维度，不回填）。sessions 是内核表——v6 先例
+ * 同款：迁移 DDL 直归 persist 迁移链。
+ */
+export const SESSION_IMPORTER_COLUMN_MIGRATION: MigrationSpec = {
+  version: 10,
+  name: 'sessions-importer-column',
+  sql: 'ALTER TABLE sessions ADD COLUMN importer TEXT',
+};

@@ -38,9 +38,13 @@ import {
   APP_NOT_FOUND,
   APP_SHUTDOWN_QUIESCE_VIOLATED,
   COMPOSITION_ROW_INVALID,
+  PERSIST_BATCH_WRITE_FAILED,
   PLUGIN_EVENT_RATE,
   PLUGIN_LOAD_FAILED,
+  SESSION_EVENT_DATA_INVALID,
+  SESSION_EVENT_TOO_LARGE,
 } from '../contracts/errors.js';
+import { runInCallerChain } from '../context/chain.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -2102,6 +2106,240 @@ describe('S6 关停序（abort-all / quiesce 断言——骨架篇 §1.3 S6 形�
     } finally {
       // 恢复现场：afterEach 的兜底关停不再撞假条目（正常走完）
       (runtime.drivers.entries as Map<string, never>).delete(fakeId);
+    }
+  });
+});
+
+/* ---------------- 会话写入面 v2（会话篇 §5.1/§5.2，2026-08-27 P1-1） ---------------- */
+
+/** 导入面服务子集（结构子集接口——消费件同款取用法） */
+interface SessionsSpawnFace {
+  createSession(opts: { seed: readonly SessionEvent[] }): Promise<string>;
+  fork(boundary?: number): Promise<string | undefined>;
+}
+
+/** 合法最小种子（闭合 turn + 核心词——导入流天然形态） */
+function closedSeed(): SessionEvent[] {
+  return [
+    Object.freeze({ type: 'turn/start', seq: 0, time: 1_000, data: Object.freeze({}) }),
+    Object.freeze({
+      type: 'user/message',
+      seq: 1,
+      time: 1_001,
+      data: Object.freeze({ content: '导入的第一句', source: 'import' }),
+    }),
+    Object.freeze({ type: 'turn/end', seq: 2, time: 1_002, data: Object.freeze({}) }),
+  ];
+}
+
+/** 物理库 sessions 行直读（origin/importer/cwd/app 归因断言） */
+function sessionRowOf(
+  runtime: BerryRuntime,
+  sessionId: string,
+): { origin: string; importer: string | null; cwd: string | null; app: string | null } {
+  return runtime
+    .persistence!.store.connection.prepare('SELECT origin, importer, cwd, app FROM sessions WHERE id = ?')
+    .get(sessionId) as { origin: string; importer: string | null; cwd: string | null; app: string | null };
+}
+
+describe('createSession 导入面（origin=import 钉死 + 四道卫生闸 + durable 承诺）', () => {
+  it('全链：origin/importer 落行、种子物理落库可收养（loadSession 命中——非幻影 id）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    const id = await sessions.createSession({ seed: closedSeed() });
+
+    // origin='import' 钉死 + 无链调用 importer='host' 兜底 + cwd/app 继承前台会话
+    const row = sessionRowOf(runtime, id);
+    expect(row.origin).toBe('import');
+    expect(row.importer).toBe('host');
+    expect(row.cwd).toBe(runtime.workspace);
+    // durable 承诺：物理事件全量在库（非幻影 id——收养路径 loadSession 命中）
+    const loaded = runtime.persistence!.loadSession(id);
+    expect(loaded).toBeTruthy();
+    expect(loaded!.events.map((e) => e.type)).toEqual(['turn/start', 'user/message', 'turn/end']);
+    // 读回走 queryEvents 同账（读面不排除导入会话）
+    const query = await runtime.ctx.tryGet<{
+      queryEvents(q: {
+        sessionIds?: string[];
+        types?: string[];
+        sinceMs?: number;
+        limit?: number;
+      }): Promise<{ rows: unknown[] }>;
+    }>('sessions')!;
+    const result = await query.queryEvents({ sessionIds: [id], limit: 10 });
+    expect(result.rows.length).toBe(3);
+  });
+
+  it('caller 归因：链上调用 importer=链身份（装载器/工具管道两写点的读点取数）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    const id = await runInCallerChain('fx-migrator', () => sessions.createSession({ seed: closedSeed() }));
+    expect(sessionRowOf(runtime, id).importer).toBe('fx-migrator');
+  });
+
+  it('persist:false 诊断装配 = durable 承诺物理不可履行，响亮拒绝（不返回空转 id）', async () => {
+    const bare = await assemble({ persist: false });
+    const sessions = bare.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    await expect(sessions.createSession({ seed: closedSeed() })).rejects.toMatchObject({
+      code: PERSIST_BATCH_WRITE_FAILED,
+    });
+    await expect(sessions.fork()).rejects.toMatchObject({ code: PERSIST_BATCH_WRITE_FAILED });
+  });
+
+  it('卫生闸①：data 非 JSON 值拒绝；time 非有限数值拒绝（SESSION_EVENT_DATA_INVALID）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    // 非 JSON：bigint（JSON.stringify 抛）
+    const badData = [
+      Object.freeze({ type: 'turn/start', seq: 0, time: 1, data: Object.freeze({ big: 1n }) }),
+    ] as unknown as SessionEvent[];
+    await expect(sessions.createSession({ seed: badData })).rejects.toMatchObject({ code: SESSION_EVENT_DATA_INVALID });
+    // time 非有限：NaN / 字符串
+    const badTime = [
+      Object.freeze({ type: 'turn/start', seq: 0, time: Number.NaN, data: Object.freeze({}) }),
+    ] as unknown as SessionEvent[];
+    await expect(sessions.createSession({ seed: badTime })).rejects.toMatchObject({ code: SESSION_EVENT_DATA_INVALID });
+    const badTime2 = [
+      Object.freeze({ type: 'turn/start', seq: 0, time: '1000', data: Object.freeze({}) }),
+    ] as unknown as SessionEvent[];
+    await expect(sessions.createSession({ seed: badTime2 })).rejects.toMatchObject({
+      code: SESSION_EVENT_DATA_INVALID,
+    });
+  });
+
+  it('卫生闸②③：单事件 64KiB 体积帽 + 种子总量帽 10 万（SESSION_EVENT_TOO_LARGE）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    // 64KiB+：超体积护栏（与活体 append 同尺）
+    const huge = 'x'.repeat(64 * 1024 + 1);
+    const oversize = [
+      Object.freeze({ type: 'turn/start', seq: 0, time: 1, data: Object.freeze({ big: huge }) }),
+    ] as unknown as SessionEvent[];
+    await expect(sessions.createSession({ seed: oversize })).rejects.toMatchObject({ code: SESSION_EVENT_TOO_LARGE });
+    // 总量帽：100_001 条轻事件——闸三零遍历先拒
+    const flood: SessionEvent[] = [];
+    for (let i = 0; i < 100_001; i++) {
+      flood.push({ type: 'turn/start', seq: i, time: 1, data: {} });
+    }
+    await expect(sessions.createSession({ seed: flood })).rejects.toMatchObject({ code: SESSION_EVENT_TOO_LARGE });
+  });
+
+  it('卫生闸④：信封字段剥除（surfaceOp/sourceEventSeqs 不透传）+ ignorable 按注册表重盖章', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    // 带 surfaceOp/sourceEventSeqs/伪 ignorable 的种子：外部数据是平展事实流，
+    // 宿主侧信封字段一律剥除；memory/diff 注册面 ignorable 缺省 false → 重盖章无此位
+    const poisoned = [
+      Object.freeze({
+        type: 'turn/start',
+        seq: 0,
+        time: 1,
+        data: Object.freeze({}),
+        surfaceOp: { op: 'replace', start: 0, end: 0 },
+        sourceEventSeqs: [0],
+        ignorable: true,
+      }),
+      Object.freeze({
+        type: 'memory/diff',
+        seq: 1,
+        time: 2,
+        data: Object.freeze({ baseline: 'aa', entries: [] }),
+        ignorable: true, // 伪盖章：memory/diff 注册非 ignorable——重盖章后应无此位
+      }),
+    ] as unknown as SessionEvent[];
+    const id = await sessions.createSession({ seed: poisoned });
+    const events = runtime.persistence!.loadSession(id)!.events;
+    // 信封剥除：两条事件均无 surfaceOp/sourceEventSeqs
+    expect(events.every((e) => e.surfaceOp === undefined && e.sourceEventSeqs === undefined)).toBe(true);
+    // 重盖章：memory/diff 非 ignorable → ignorable 位被剥（外部 true 不透传）
+    expect(events[1]!.ignorable).toBeUndefined();
+  });
+
+  it('未知事件词拒绝（注册即写入许可）；种子 seq 断裂归构造时 validateSeed 既有闸', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    const unknownWord = [
+      Object.freeze({ type: 'nope/void', seq: 0, time: 1, data: Object.freeze({}), ignorable: true }),
+    ] as unknown as SessionEvent[];
+    await expect(sessions.createSession({ seed: unknownWord })).rejects.toThrowError(/未注册事件类型/);
+    // seq 断裂：闸④重盖章剥掉 ignorable → validateSeed 拒（服务面不重复执法）
+    const broken = [
+      Object.freeze({ type: 'turn/start', seq: 5, time: 1, data: Object.freeze({}) }),
+    ] as unknown as SessionEvent[];
+    await expect(sessions.createSession({ seed: broken })).rejects.toThrowError(/seq 断裂/);
+  });
+
+  it('敞开 turn 恢复协议兜底：种子尾停在 turn 中间 → 合成 closer 随屏障落库', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    const openTail = [
+      Object.freeze({ type: 'turn/start', seq: 0, time: 1_000, data: Object.freeze({}) }),
+      Object.freeze({
+        type: 'user/message',
+        seq: 1,
+        time: 1_001,
+        data: Object.freeze({ content: '半截', source: 'import' }),
+      }),
+    ] as unknown as SessionEvent[];
+    const id = await sessions.createSession({ seed: openTail });
+    const types = runtime.persistence!.loadSession(id)!.events.map((e) => e.type);
+    // 投影可安全续跑：日志闭合（turn/end 或等价 closer 已补）
+    expect(interruptedTurnClosers).toBeTruthy();
+    expect(types[types.length - 1]).toBe('turn/end');
+  });
+});
+
+describe('fork 露头（事件前缀种子分叉 + durable 承诺同款）', () => {
+  it('全链：返回 id 物理可收养、前缀=父事件、origin=fork、end-seed 边界标记', async () => {
+    const runtime = await assemble();
+    // 父会话先有活体事件（appendEvent 走当前路由锚）
+    const appendFace = runtime.ctx.tryGet<{ appendEvent(t: string, d: unknown): SessionEvent | undefined }>(
+      'sessions',
+    )!;
+    appendFace.appendEvent('memory/diff', { baseline: 'aa', entries: [] });
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    const parentId = runtime.session!.header.sessionId;
+    const childId = await sessions.fork();
+
+    expect(childId).toBeTruthy();
+    expect(childId).not.toBe(parentId);
+    const row = sessionRowOf(runtime, childId!);
+    expect(row.origin).toBe('fork');
+    // durable 承诺：物理行在（非幻影 id）——收养路径 loadSession 命中
+    const child = runtime.persistence!.loadSession(childId!);
+    expect(child).toBeTruthy();
+    const types = child!.events.map((e) => e.type);
+    // 种子 = 父前缀（含 memory/diff）+ end-seed 边界标记
+    expect(types).toContain('memory/diff');
+    expect(types[types.length - 1]).toBe('session/end-seed');
+    expect(child!.header.parentSession).toBe(parentId);
+  });
+
+  it('boundary 落在敞开 turn 内 = SESSION_FORK_BOUNDARY_INVALID（Session.fork 既有执法）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+    // 前台日志尾部补一条 turn/start（无 end）→ 以全长为边界 = 切在敞开 turn 内
+    runtime.session!.append('turn/start', {});
+    const boundary = runtime.session!.events.length;
+    await expect(sessions.fork(boundary)).rejects.toThrowError(/敞开 turn/);
+  });
+});
+
+describe('会话增生桶（洪水上界：createSession 与 fork 同一进程级令牌桶）', () => {
+  it('小桶注入：容量耗尽后两面同桶 fail-loud（PLUGIN_EVENT_RATE 一码三面之三）', async () => {
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const runtime = await assemble({ sessionSpawnRateLimit: { capacity: 1, perMinute: 1 } });
+      const sessions = runtime.ctx.tryGet<SessionsSpawnFace>('sessions')!;
+      // 第一发过（容量 1）
+      await sessions.createSession({ seed: closedSeed() });
+      // 第二发 fork 撞桶：同桶不同面——message 带面名（fork）可分辨
+      await expect(sessions.fork()).rejects.toMatchObject({
+        code: PLUGIN_EVENT_RATE,
+        message: expect.stringContaining('fork'),
+      });
+    } finally {
+      spy.mockRestore();
     }
   });
 });
