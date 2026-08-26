@@ -115,6 +115,15 @@ export function workerEntryUrl(selfUrl: string): URL {
 }
 
 /**
+ * 本桥模块自带的 worker 同伴入口（组合根/舰队装配用）：按 bootstrap 自身形态
+ * 判别（dev/TS 源 → 同目录 worker.ts；编译产物 → worker.js）。「worker 住在
+ * bootstrap 旁」这条位置知识只在 bridge 模块内自描述——外部装配不重复推导。
+ */
+export function bridgeWorkerUrl(): URL {
+  return workerEntryUrl(import.meta.url);
+}
+
+/**
  * 起一个 worker 域：spawn 子进程 + 宿主端点 + 六处理方一次性注册。
  * worker exit（崩溃/被杀）→ 端点 dispose「worker 退出」——在途调用全数
  * WORKER_EXITED 结算，后续调用即刻拒绝（监督面的判据源之一）。
@@ -169,6 +178,12 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   // watchdog kill 的执法归因（exit 通知透出——观测锚⑨「心跳超时」打点数据源；
   // 自崩溃恒 undefined：code 即事实，不虚构归因）
   let killReason: string | undefined;
+
+  // worker 内未捕获异常：Node 把 'error' 事件投给 Worker 对象——无监听器则按
+  // EventEmitter 语义冒泡主进程 uncaughtException（worker 崩溃反杀宿主 = 违背
+  // 故障域分域本义）。吸收冒泡；exit 事件随后到达走域死回卷 + 死亡结算全流程
+  //（诊断归因经 onExit 的 code 呈现，此处无需重复）。
+  worker.on('error', () => {});
 
   // worker 崩溃/被杀/资源超限 = 域死：端点收尾（在途全结算 WORKER_EXITED）+
   // 该域全部行作用域回卷（契约篇 §1.7「worker 死 = 作用域 dispose」宿主侧：

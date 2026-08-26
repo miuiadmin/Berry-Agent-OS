@@ -58,6 +58,13 @@ export interface PluginsService {
   update(id: string): Promise<UpdateReport>;
   /** boot 与 /reload 后装配方回灌最新装载结果（同实例就地更新——服务集恒定） */
   applyLoad(composition: CompositionReport, load: PluginLoadResult): void;
+  /**
+   * 运行时单行失败状态面（契约篇 §1.7 死亡结算——worker 域意外退出时行转
+   * failed）：装载后的运行期失败路径；boot/reload 装载失败走 applyLoad 三态
+   * 清单不经此面（事件广播由调用方/fleet 负责，此处只保 list 状态源不漂移）。
+   * 未知行 no-op（行不在最近装载清单 = 非本服务管辖）。
+   */
+  markFailed(id: string, code: string, message: string): void;
 }
 
 /** install 结果（TUI 直显的人读报告） */
@@ -105,6 +112,13 @@ export function createPluginsService(opts: { dataDir: string; runner?: InstallRu
 
     list() {
       return plan.map((row) => byId.get(row.id) ?? { id: row.id, status: 'planned' as const });
+    },
+
+    markFailed(id, code, message) {
+      // 仅更新已入清单的行（planned/activated/skipped 均可转——域死不挑前态）；
+      // 整行替换为 failed 形态（与 applyLoad 失败分支同形——面收敛一个形态）
+      if (!byId.has(id)) return;
+      byId.set(id, { id, status: 'failed', code, message });
     },
 
     async install(ref, installOpts) {
