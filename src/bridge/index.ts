@@ -11,5 +11,5 @@
 export { BridgeEndpoint } from './session.js';
 export type { BridgePort, BridgeHandler, BridgeEndpointOptions } from './session.js';
 export { startWorkerRealm } from './worker.js';
-export { spawnWorkerDomain, makeRowLoader } from './bootstrap.js';
+export { spawnWorkerDomain, makeRowLoader, workerEntryUrl } from './bootstrap.js';
 export type { WorkerDomain, WorkerDomainOptions } from './bootstrap.js';

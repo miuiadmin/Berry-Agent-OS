@@ -51,10 +51,30 @@ export interface WorkerDomainOptions {
   readonly env?: Readonly<Record<string, string>>;
   /** 插件锚作用域（宿主侧 get/emit 的落点——svc-invoke 的服务解析源） */
   readonly root: ContextScope;
-  /** 工具服务（缺省时 tools-register/tool-run 响亮失败——未装配工具面的裁剪形态） */
+  /** 工具服务（缺省懒解析 root 的 'tools' 服务——Ring 1 装载序里工具行可能晚于 worker 行激活，捕获期解析会拿到 undefined） */
   readonly tools?: ToolsService;
   /** svc.load 在途超时（毫秒，缺省 60s——jiti 全图转译 + import 的合理上限） */
   readonly loadTimeoutMs?: number;
+  /** 心跳节律（毫秒；设置即宿主端点起探针——K3-c 监督编舞的配置面，端点机制见 session.ts） */
+  readonly heartbeatMs?: number;
+  /** 连续丢拍阈值（缺省沿用端点 3） */
+  readonly heartbeatMissLimit?: number;
+  /** 冻结判定回调（心跳缺失——terminate 决策在调用方〔装配层〕，端点只报事实） */
+  readonly onFreeze?: (info: { missed: number }) => void;
+  /**
+   * 域退出通知（死亡结算挂钩，契约篇 §1.7「不自动重启 + 失败结算」）：意外死亡
+   * （崩溃/被杀/resourceLimits 超限/watchdog kill）才回调——terminate 主动收尾
+   * 不叫（那条路是编舞既知终点非事故）。**域死回卷（绑定行作用域 dispose）已
+   * 在本模块内先行完成**后回调；装配层在此挂诊断广播与 operator 可见面。
+   * rows = 死亡时点仍挂在本域的行 id 清单（归因面）；reason 仅 kill 执法路径
+   * 携带（自崩溃无执法归因——code 即事实）。
+   */
+  readonly onExit?: (info: {
+    readonly workerId: string;
+    readonly code: number;
+    readonly rows: readonly string[];
+    readonly reason?: string;
+  }) => void;
 }
 
 /** worker 域句柄（宿主侧唯一操作面） */
@@ -70,10 +90,28 @@ export interface WorkerDomain {
   /** 宿主半激活（loadPlugins activateOne 消费——经 makeRowLoader 包装） */
   applyRow(row: PluginPlanRow, scope: ContextScope, opts?: { signal?: AbortSignal }): Promise<void>;
   /**
-   * 域收尾：端点 dispose（在途全结算 WORKER_EXITED）→ worker terminate。
-   * 行级卸载不走这里（行作用域回卷 → svc.unload 联动），域级退出才用。
+   * 域收尾（**刻意收尾**——编舞既知终点非事故）：端点 dispose（在途全结算
+   * WORKER_EXITED）→ worker terminate。不触发 onExit、不做域死回卷（行作用域
+   * 随锚/行回卷自行收）。行级卸载不走这里，域级退出（/reload/关停）才用。
    */
   terminate(reason?: string): void;
+  /**
+   * watchdog 杀域（**意外死亡路径**——心跳冻结/resourceLimits 超限等的执法收尾）：
+   * 硬 terminate 但按域死结算——exit 监听器走端点 dispose + 域死回卷 + onExit
+   * 通知全流程（与自崩溃同路：terminate 是编舞终点，kill 是监督执法）。reason
+   * 随 exit 通知透出（归因面——观测锚⑨「心跳超时」的打点数据源）。
+   */
+  kill(reason: string): void;
+}
+
+/**
+ * 宿主半入口的 worker 同伴 URL：按宿主半自身形态判别——TS 源形态（dev/测试）
+ * → 同目录 worker.ts，编译产物形态 → worker.js。execArgv 未显式传时 Node
+ * worker 自动继承父进程参数：dev 下 tsx 预载链延续（worker 直跑 TS 源）、
+ * build 下父进程无预载参数（缺省即对）——两种形态零配置自适应。
+ */
+export function workerEntryUrl(selfUrl: string): URL {
+  return new URL(selfUrl.endsWith('.ts') ? './worker.ts' : './worker.js', selfUrl);
 }
 
 /**
@@ -83,7 +121,7 @@ export interface WorkerDomain {
  */
 export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const workerId = opts.workerId ?? `worker-${randomUUID().slice(0, 8)}`;
-  const workerUrl = opts.workerUrl ?? new URL('./worker.js', import.meta.url);
+  const workerUrl = opts.workerUrl ?? workerEntryUrl(import.meta.url);
   const worker = new Worker(workerUrl, {
     workerData: { workerId },
     ...(opts.execArgv !== undefined ? { execArgv: [...opts.execArgv] } : {}),
@@ -101,6 +139,10 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   let endpoint!: BridgeEndpoint;
   endpoint = new BridgeEndpoint(worker, {
     origin: { workerId },
+    // 心跳三件透传（未设置即不起探针——机制住 session.ts，编舞住 fleet/装配层）
+    heartbeatMs: opts.heartbeatMs,
+    heartbeatMissLimit: opts.heartbeatMissLimit,
+    onFreeze: opts.onFreeze,
     // 宿主 onTell：log 上行分发到行作用域 logger（级别面全保留——宿主统一过滤）
     onTell: (event, payload) => {
       if (event !== 'log') return;
@@ -121,8 +163,42 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     },
   });
 
-  // worker 崩溃/被杀 = 域死：端点收尾（在途全结算 WORKER_EXITED）
-  worker.on('exit', () => endpoint.dispose('worker 退出（exit 事件）——在途调用按域死结算'));
+  // 主动收尾标记：terminate 先置位再 terminate——exit 处理据此区分「编舞既知
+  // 终点」（不叫 onExit）与「意外死亡」（叫 onExit——死亡结算挂钩）
+  let terminated = false;
+  // watchdog kill 的执法归因（exit 通知透出——观测锚⑨「心跳超时」打点数据源；
+  // 自崩溃恒 undefined：code 即事实，不虚构归因）
+  let killReason: string | undefined;
+
+  // worker 崩溃/被杀/资源超限 = 域死：端点收尾（在途全结算 WORKER_EXITED）+
+  // 该域全部行作用域回卷（契约篇 §1.7「worker 死 = 作用域 dispose」宿主侧：
+  // 宿主物化注册〔provide 代理/事件订阅/工具注册 disposer〕随行作用域 LIFO
+  // 回卷收走；行作用域回卷触发的 svc.unload 联动因端点已 dispose 即拒、
+  // catch 静默——非合作死亡的正确性不依赖 worker 配合，反模式 #4）
+  worker.on('exit', (code) => {
+    endpoint.dispose('worker 退出（exit 事件）——在途调用按域死结算');
+    const rowIds = [...bindings.keys()];
+    const rollbacks = [...rowIds].reverse().map((rowId) => {
+      const binding = bindings.get(rowId);
+      bindings.delete(rowId);
+      return binding?.scope.dispose().catch(() => {}) ?? Promise.resolve(); // 回卷异常不阻断其余行
+    });
+    metaCache.clear();
+    // 回卷全落定后才通知（onExit 契约「回卷已先行完成」——dispose 是异步面，
+    // allSettled 汇合；单行回卷异常不 withhold 死亡结算）
+    void Promise.allSettled(rollbacks).then(() => {
+      if (!terminated) {
+        opts.onExit?.({ workerId, code, rows: rowIds, ...(killReason !== undefined ? { reason: killReason } : {}) });
+      }
+    });
+  });
+
+  /**
+   * 工具服务解析：显式注入优先，缺省懒解析 root 的 'tools' 服务（调用时点解析
+   * 而非捕获时点——Ring 1 装载序里工具行可能晚于 worker 行激活，boot 期捕获会
+   * 拿到 undefined 假裁剪形态；服务集两时点恒定不变式下运行期解析恒定）。
+   */
+  const resolveTools = (): ToolsService | undefined => opts.tools ?? opts.root.tryGet<ToolsService>('tools');
 
   const requireBinding = (rowId: string, surface: string): RowBinding => {
     const binding = bindings.get(rowId);
@@ -156,7 +232,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     /* worker 行工具注册：声明面本地落注册表，execute 翻译为 tool-invoke 桥接
      * 调用（signal 透传 + timeoutMs 预算随行——超时本地结算发 cancel 让 worker 停工） */
     .handle('host', 'tools-register', ([rowIdArg, metaArg, domainArg]) => {
-      const tools = opts.tools;
+      const tools = resolveTools();
       if (tools === undefined) {
         throw new AppError(
           BRIDGE_METHOD_NOT_FOUND,
@@ -172,7 +248,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
         timeoutMs?: number;
         label?: string;
       };
-      requireBinding(rowId, 'tools-register');
+      const binding = requireBinding(rowId, 'tools-register');
       const def: ToolDefinition = {
         name: meta.name,
         description: meta.description,
@@ -186,7 +262,10 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
             ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
           }),
       };
-      tools.register(def, domainArg !== undefined ? { domain: String(domainArg) } : undefined);
+      const unregister = tools.register(def, domainArg !== undefined ? { domain: String(domainArg) } : undefined);
+      // 行级清理：register 返回的注销器挂行作用域 effect——行回卷（apply 失败/
+      // /reload/域死 exit 回卷）同步摘除注册（真注册表 remove + tools_change 广播）
+      binding.scope.effect(() => () => unregister());
     })
     /* worker 调宿主服务：锚作用域 get 后方法分派（AppError 家族保码回 worker） */
     .handle('host', 'svc-invoke', ([nameArg, methodArg, argsArg]) => {
@@ -199,7 +278,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     })
     /* worker 便捷面 run 的宿主终端：宿主工具走真管道（schema→守门→执行唯一实现） */
     .handle('host', 'tool-run', ([nameArg, argsArg], signal) => {
-      const tools = opts.tools;
+      const tools = resolveTools();
       if (tools === undefined) {
         throw new AppError(BRIDGE_METHOD_NOT_FOUND, 'tool-run：本装配面未提供工具服务（裁剪形态）');
       }
@@ -250,7 +329,15 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
       return endpoint.call('svc', 'apply', [row.id, row.config ?? {}, presence], { signal: callOpts?.signal });
     },
     terminate(reason) {
+      terminated = true; // exit 处理据此跳过意外死亡通知（主动收尾非事故）
       endpoint.dispose(reason ?? '域收尾（terminate）');
+      void worker.terminate();
+    },
+    kill(reason) {
+      // 不置 terminated——kill 是监督执法不是编舞终点：exit 处理走意外死亡
+      // 全流程（端点 dispose 幂等 + 域死回卷 + onExit 携 reason 通知）
+      killReason = reason;
+      endpoint.dispose(`watchdog 杀域：${reason}`);
       void worker.terminate();
     },
   };

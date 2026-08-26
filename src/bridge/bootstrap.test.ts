@@ -22,7 +22,7 @@ import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import { loadPlugins } from '../context/loader.js';
 import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
-import { spawnWorkerDomain, makeRowLoader, type WorkerDomain } from './bootstrap.js';
+import { spawnWorkerDomain, makeRowLoader, workerEntryUrl, type WorkerDomain } from './bootstrap.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -66,19 +66,28 @@ export default async function apply(ctx) {
 }
 `;
 
-/** 最小工具服务桩：register 记录 + get 查回（桥接工具注册的宿主物化断言面） */
+/**
+ * 最小工具服务桩：register 记录 + get 查回 + 注销器记录（桥接工具注册的宿主
+ * 物化断言面——register 返回注销器是真 ToolsService 契约面，行回卷摘除断言用）
+ */
 class FakeTools {
   readonly defs = new Map<string, ToolDefinition>();
-  register(def: ToolDefinition): void {
+  /** 已摘除的工具名序列（行回卷联动的观测面） */
+  readonly removed: string[] = [];
+  register(def: ToolDefinition): () => void {
     this.defs.set(def.name, def);
+    return () => {
+      this.defs.delete(def.name);
+      this.removed.push(def.name);
+    };
   }
   get(name: string): ToolDefinition | undefined {
     return this.defs.get(name);
   }
 }
 
-/** 轮询直到谓词为真（unload 联动等异步到达面的确定性等待） */
-async function until(predicate: () => Promise<boolean>, ms = 5_000): Promise<void> {
+/** 轮询直到谓词为真（unload 联动等异步到达面的确定性等待；谓词可同步可异步） */
+async function until(predicate: () => boolean | Promise<boolean>, ms = 5_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < ms) {
     if (await predicate()) return;
@@ -108,6 +117,8 @@ let root: ContextScope;
 let tools: FakeTools;
 let fixtureDir: string;
 let workerEntry: string;
+/** 共享域意外死亡记录（it5 断言主动收尾不落此——事故面观测） */
+const unexpectedExits: Array<{ workerId: string; code: number; rows: readonly string[] }> = [];
 
 beforeAll(async () => {
   fixtureDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'bridge-host-')));
@@ -124,6 +135,8 @@ beforeAll(async () => {
     workerUrl: WORKER_URL,
     workerId: 'e2e-worker',
     execArgv: ['--import=tsx'],
+    // 共享域意外死亡观测面（正常用例流不该有意外死亡——it5 terminate 是主动收尾）
+    onExit: (info) => unexpectedExits.push(info),
   });
   // 等域就绪：svc.load 探活（handler 挂好前 ask 会被丢弃——探到即全就绪）
   await until(
@@ -210,7 +223,17 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
     });
   });
 
-  it('terminate 域死：在途调用以 BRIDGE_WORKER_EXITED 结算、后续调用即刻拒绝', async () => {
+  it('工具注册随行回卷摘除：register 注销器挂行作用域 effect——scope.dispose 即摘', async () => {
+    await domain.load({ id: 'w6', entry: workerEntry, runtime: 'worker' });
+    const scope = root.fork({ name: 'w6', rowId: 'w6' });
+    await domain.applyRow({ id: 'w6', runtime: 'worker', config: { slot: 'r' } }, scope);
+    expect(tools.get('fx/wt')).toBeDefined();
+    await scope.dispose();
+    await until(async () => tools.removed.includes('fx/wt'));
+    expect(tools.get('fx/wt')).toBeUndefined();
+  });
+
+  it('terminate 域死：在途调用以 BRIDGE_WORKER_EXITED 结算、后续调用即刻拒绝；主动收尾不叫 onExit（非事故）', async () => {
     await domain.load({ id: 'w5', entry: workerEntry, runtime: 'worker' });
     const scope = root.fork({ name: 'w5', rowId: 'w5' });
     await domain.applyRow({ id: 'w5', runtime: 'worker', config: { slot: 'd' } }, scope);
@@ -222,5 +245,45 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
     // 端点已 dispose：新调用即刻拒绝
     const refused = await rejection(domain.endpoint.call('svc', 'invoke', ['w5', 'fx/taps-d', 'add', []]));
     expect(refused.code).toBe(BRIDGE_WORKER_EXITED);
+    // 等 exit 事件处理跑完（terminate 异步）——主动收尾不触发意外死亡通知
+    await domain.worker.terminate();
+    expect(unexpectedExits).toEqual([]);
+  });
+
+  it('意外死亡（绕过 terminate 直杀 worker）：行作用域回卷 + onExit 归因（rows 带行 id）', async () => {
+    // 独立第二域：共享域已在上一用例 terminate——域死回卷语义需要活域观测
+    const exits: Array<{ workerId: string; code: number; rows: readonly string[] }> = [];
+    const domain2 = spawnWorkerDomain({
+      root,
+      tools: tools as unknown as ToolsService,
+      workerUrl: WORKER_URL,
+      workerId: 'e2e-worker-2',
+      execArgv: ['--import=tsx'],
+      onExit: (info) => exits.push(info),
+    });
+    await until(
+      () =>
+        domain2.endpoint.call('svc', 'load', [{ id: '__probe__', entry: workerEntry }]).then(
+          () => true,
+          () => false,
+        ),
+      20_000,
+    );
+    await domain2.load({ id: 'wx', entry: workerEntry, runtime: 'worker' });
+    const scope = root.fork({ name: 'wx', rowId: 'wx' });
+    await domain2.applyRow({ id: 'wx', runtime: 'worker', config: { slot: 'x' } }, scope);
+    expect(root.tryGet('fx/taps-x')).toBeDefined();
+    // 绕过 domain.terminate（不置主动标记）直杀底层 worker = 模拟意外死亡
+    await domain2.worker.terminate();
+    // 域死回卷：宿主物化随行作用域消失 + onExit 一次性归因
+    await until(() => exits.length > 0);
+    expect(exits[0]!.rows).toEqual(['wx']);
+    expect(exits[0]!.workerId).toBe('e2e-worker-2');
+    await until(() => root.tryGet('fx/taps-x') === undefined);
+  });
+
+  it('workerEntryUrl：按宿主半自身形态判别 worker 同伴入口（.ts 源 → worker.ts / 编译产物 → worker.js）', () => {
+    expect(workerEntryUrl('file:///repo/dist/bridge/bootstrap.js').href).toBe('file:///repo/dist/bridge/worker.js');
+    expect(workerEntryUrl('file:///repo/src/bridge/bootstrap.ts').href).toBe('file:///repo/src/bridge/worker.ts');
   });
 });
