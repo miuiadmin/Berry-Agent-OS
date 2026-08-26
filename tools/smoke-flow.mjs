@@ -59,12 +59,17 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
     `[smoke] 默认层 goal 行 ${hasGoalRow ? '✓' : '✗'}  装载状态 ${goalStatus ?? '(无)'}  工具三件${goalToolsOk ? '✓' : '✗'}`,
   );
 
+  // S2 组合域分片后工具面两层：检索族留全局层（caller 无关纯机制），fs 四件
+  // 随 chat 件 open() 注册进本会话域层——boot 判定必须走域面 listFor（sessionId
+  // = 默认会话头），全局 list() 查不到 fs 四名是分片语义非缺失（规范钉死）
+  const sessionKey = runtime.session?.header?.sessionId;
+  const domainToolNames = sessionKey ? runtime.tools.listFor(sessionKey).map((def) => def.name) : [];
   const searchTools = ['find', 'grep'];
   const fsTools = ['read', 'write', 'edit', 'ls'];
   const searchOk = searchTools.every((name) => toolNames.includes(name));
-  const fsOk = fsTools.every((name) => toolNames.includes(name));
+  const fsOk = fsTools.every((name) => domainToolNames.includes(name));
   console.log(
-    `[smoke] Ring 1 工具面  fs 四件${fsOk ? '✓' : '✗'}  检索两件${searchOk ? '✓' : '✗'}（bash 随 exec 纵切）`,
+    `[smoke] Ring 1 工具面  fs 四件（域面 ${sessionKey ? sessionKey.slice(0, 8) + '…' : '无会话键'}）${fsOk ? '✓' : '✗'}  检索两件${searchOk ? '✓' : '✗'}（bash 随 exec 纵切）`,
   );
 
   const failBoot = !bootMemoryOk || !bootSubagentOk || !bootGoalOk || !searchOk || !fsOk || !service;
@@ -134,7 +139,11 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
       };
       await callTool('goal_set', {
         objective: '在工作区创建 goal-smoke.txt，内容为一行「goal 冒烟完成」',
-        tokenBudget: 50_000,
+        // 预算裕度必须远大于链实耗（约 5 万）：贴近实耗会出现「录制时未刹 / 回放
+        // 时被刹」的临界漂移——刹车收尾注入会多发一次计划外模型调用，金样按调用
+        // 序消费即错位发散（2026-08-27 回放 19/20 发散的实锤根因）。刹车边界行为
+        // 由 goal 件单元测试覆盖，冒烟流只验端到端接线，不压预算边界。
+        tokenBudget: 200_000,
       });
       console.log(`[smoke] goal 已设定:\n${await goalStateText()}`);
       await runtime.conversation.submitOnce('请推进当前目标：按目标内容做完，然后调用 goal_update 申报完成并附证据。');

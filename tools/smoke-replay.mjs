@@ -104,6 +104,11 @@ const runtime = await createBerryRuntime({
   dbPath: join(smokeData, 'sessions.db'),
   workspace: smokeWorkspace,
   homeDir: mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-home-')),
+  // 组合树目录显式隔离：缺省会回落真实 ~/.berry（dataDir() 不认 homeDir——
+  // paths.ts 只读 APP_DATA_DIR env），用户装机历史（探矿 overlay 行）一旦存在
+  // 即污染回放装配、破坏确定性。临时目录不存在 = 空 overlay，composition 侧
+  // existsSync 全防御零炸（2026-08-27 金样轨确定性封口）
+  compositionDir: join(smokeData, 'composition'),
 });
 
 const flow = await runSmokeFlow({ runtime, prompt: meta.prompt, smokeData });

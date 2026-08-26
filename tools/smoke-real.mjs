@@ -173,6 +173,9 @@ const runtime = await createBerryRuntime({
   workspace: smokeWorkspace,
   // homeDir 指到空目录：技能扫描零噪音（隔离 old-v2 存量 ~/.berry/skills）
   homeDir: mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-home-')),
+  // 组合树目录显式隔离（与 smoke-replay 同款）：缺省回落真实 ~/.berry——用户
+  // 装机历史（overlay 行）会污染录制装配，金样与回放从此两读两漂
+  compositionDir: join(smokeData, 'composition'),
 });
 
 // 真插件面注册（M2 provider 插件同 seam）；resolveModel 每调用解析——注册后即生效。
