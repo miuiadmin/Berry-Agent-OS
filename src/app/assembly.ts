@@ -51,6 +51,7 @@ import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode 
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
 import { registerExecService, renderEnvironmentSection } from '../exec/index.js';
+import { createBridgeFleet, type BridgeFleet } from './bridge-fleet.js';
 import {
   createLocalSkillsProvider,
   createPackageSkillsProvider,
@@ -663,6 +664,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   ctx.provide('paths', createPathsService(compositionDir, workspace));
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
+  /* worker 域舰队登记簿（契约篇 §1.7 K3-c）：各锚舰队建好后登记，拒启/关停
+   * 收编遍历此簿——refuseBoot 定义先于舰队建立（装载期拒启路径），登记簿
+   * 声明提前、引用延后，TDZ 安全（早期拒启时点簿为空 = 无域可收） */
+  const fleets: BridgeFleet[] = [];
   /**
    * convertToLm 丢弃诊断上报（#16 拍板 (c) + 隔离案一第一刀 #2）：
    * ①未注册角色（无 reason）——蒸发陷阱留痕（可能是插件未装，debug 级）；
@@ -676,9 +681,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         : `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——插件面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
     );
   };
-  /** 拒启收尾（Ring 1 与 Ring 2 启动断言同形）：先收尾持久层再回卷 ctx，抛聚合清单 */
+  /** 拒启收尾（Ring 1 与 Ring 2 启动断言同形）：先收 worker 域舰队再收尾持久层再回卷 ctx，抛聚合清单 */
   const refuseBoot = async (code: string, message: string): Promise<never> => {
     try {
+      // worker 域先收（登记簿遍历——早期拒启时点簿空即无域可收；拒启不留孤儿进程）
+      for (const f of fleets) f.terminateAll(`boot 拒启收尾（${code}）`);
       await persistence?.flush();
       await persistence?.close();
     } finally {
@@ -858,8 +865,26 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // Ring 1 行装载（独立锚：fork 自根 ctx、注册表同根共享——ring1 provide 对
   // ⑥b/⑧/⑨ 与后续装载行全局可见；锚永不重 fork，/reload 不动它）
   const ring1Anchor = ctx.fork({ name: 'ring1' });
+  // worker 域监督编舞值（契约篇 §1.7 K3-c 宿主全局缺省，两舰队共用）：
+  // 心跳 15s 节律 × 3 拍缺省 ≈ 45s 冻结判定（同步死循环/事件循环冻结可判可杀；
+  // CPU 燃烧如实收窄不可判——打点照登）；JS 堆 512MB = 预算内存维度宿主缺省
+  //（只限引擎堆非安全墙；应用清单 budget 内存键随刀三规范先行后分应用细配）
+  // worker 监督编舞 + 死亡结算状态回写（markFailed——域死行在 ctx.plugins.list
+  // 状态源同步转 failed，与 plugin/failed 事件广播同一时点）
+  const workerChoreography = {
+    heartbeatMs: 15_000,
+    resourceLimits: { maxOldGenerationSizeMb: 512 },
+    markFailed: plugins.markFailed,
+  };
+  // worker 域舰队·Ring 1 面（每 worker 行一域）：Ring 1 缺省全 builtin 行（恒
+  // main 域），workerLoader 在此只为替换行保留同管线资格；锚永不重 fork——
+  // 本舰队只在进程关停收编（/reload 不动 Ring 1）
+  const ring1Fleet = createBridgeFleet({ root: ctx, anchor: () => ring1Anchor, ...workerChoreography });
+  fleets.push(ring1Fleet); // 登记簿收录（refuseBoot/关停收编遍历面）
   const ring1Plan = composition.plan.filter((row) => RING1_REQUIRED_ROW_IDS.includes(row.id));
-  const ring1Load = await loadPlugins(ring1Anchor, ring1Plan, { virtualFaces });
+  const ring1Load = await loadPlugins(ring1Anchor, ring1Plan, { virtualFaces, workerLoader: ring1Fleet.loader });
+  // Kahn 零进展残留行的孤儿域清割（行已进失败清单——防漏是舰队的存在理由）
+  ring1Fleet.reapUnapplied('Ring 1 装载收口（Kahn 残留行清割）');
   if (ring1Load.failed.length > 0) {
     const lines = ring1Load.failed.map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
     await refuseBoot(
@@ -1078,11 +1103,18 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 锚是活绑定（/reload dispose 后重 fork）；Ring 2 装载计划 = 全树剔除 Ring 1
   // 必备行（④e 已装载——双装载即 TOOL_DUPLICATE 事态，结构上排除）
   let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });
+  // worker 域舰队·Ring 2/3 面（与插件锚同寿命）：/reload 先 terminateAll 再随
+  // 新锚重装载（舰队对象复用——登记簿已空、计数器累积 = 装机计数观测锚⑩）
+  const pluginFleet = createBridgeFleet({ root: ctx, anchor: () => pluginAnchor, ...workerChoreography });
+  fleets.push(pluginFleet); // 登记簿收录（refuseBoot/关停收编遍历面——/reload 单收本舰队不动 Ring 1）
   const ring2Plan = composition.plan.filter((row) => !RING1_REQUIRED_ROW_IDS.includes(row.id));
   const ring2Load = await loadPlugins(pluginAnchor, ring2Plan, {
     registerSkills: registerPluginSkills,
     virtualFaces,
+    workerLoader: pluginFleet.loader,
   });
+  // Kahn 残留行孤儿域清割（同 Ring 1 面防漏语义）
+  pluginFleet.reapUnapplied('Ring 2/3 装载收口（Kahn 残留行清割）');
   // 装载结果合并回灌（ctx.plugins.list 唯一事实源 = 组合树全行——Ring 1 行状态
   // 同面可见；/reload 后 Ring 1 行沿用 boot 装载结果 = 运行时真值：行仍激活中）
   plugins.applyLoad(composition, {
@@ -1137,6 +1169,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     try {
       // 装载窗口开启：dispose+装载只刷活视图，收口由下方单张 change 统一落账
       loadWindow = true;
+      // worker 域先于锚收编（契约篇 §1.7 /reload 编舞：terminate → 锚回卷 →
+      // 重装载——行作用域随锚 LIFO 回卷，unload 联动因端点已 dispose 静默吸收
+      // 是预期态；Ring 1 面不动——/reload 只换 Ring 2/3）
+      pluginFleet.terminateAll('/reload 域收编');
       await pluginAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
       pluginAnchor = ctx.fork({ name: 'plugins' });
       // Ring 2/3 计划 = 新树剔除 Ring 1 必备行（ring1Anchor 永不重装载——双装
@@ -1300,6 +1336,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         // 后台任务的 executor 在结算路里可能还要写子会话事件，必须在 flush 屏障
         // 前收口（作用域回卷的 fire-and-forget 兜底只管异常路径，见 jobs.ts）
         await jobs.drain();
+        // worker 域收编（契约篇 §1.7 关停编舞：jobs drain 之后、persistence.close
+        // 之前——域死回卷/在途结算不再产生待落盘面；两舰队同批，与 ctx LIFO 同段）
+        ring1Fleet.terminateAll('进程关停域收编');
+        pluginFleet.terminateAll('进程关停域收编');
         await persistence?.flush();
         // session_shutdown 钩子（骨架篇 §1.3 序⑤ / 契约篇钩子表，S1 全条目化）：
         // 全部条目（含退役保留者——迟到结算已收口）各发一次，统一在 flush 之后

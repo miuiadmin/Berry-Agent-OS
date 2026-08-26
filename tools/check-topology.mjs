@@ -76,6 +76,9 @@ const MODULE_EDGES = {
     'mcp',
     'web',
     'compaction',
+    // bridge = worker 域舰队（K3-c 组合根接线——app/bridge-fleet.ts 收编
+    // spawnWorkerDomain 为 WorkerRowLoader + 监督/关停编舞，契约篇 §1.7）
+    'bridge',
     'channels',
     'chat',
   ],

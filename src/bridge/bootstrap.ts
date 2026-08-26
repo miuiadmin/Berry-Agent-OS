@@ -55,7 +55,7 @@ export interface WorkerDomainOptions {
   readonly tools?: ToolsService;
   /** svc.load 在途超时（毫秒，缺省 60s——jiti 全图转译 + import 的合理上限） */
   readonly loadTimeoutMs?: number;
-  /** 心跳节律（毫秒；设置即宿主端点起探针——K3-c 监督编舞的配置面，端点机制见 session.ts） */
+  /** 心跳节律（毫秒；**首次 svc.load 成功后起表**——boot 窗〔tsx 编译/模块装载〕ping 无应答属正常不计拍，该窗由 loadTimeoutMs 监督；运行期冻结由本探针执法，K3-c 监督编舞的配置面，端点机制见 session.ts） */
   readonly heartbeatMs?: number;
   /** 连续丢拍阈值（缺省沿用端点 3） */
   readonly heartbeatMissLimit?: number;
@@ -148,8 +148,8 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   let endpoint!: BridgeEndpoint;
   endpoint = new BridgeEndpoint(worker, {
     origin: { workerId },
-    // 心跳三件透传（未设置即不起探针——机制住 session.ts，编舞住 fleet/装配层）
-    heartbeatMs: opts.heartbeatMs,
+    // 心跳 missLimit/onFreeze 先挂（探针不在此起——boot 窗不计数，见下方
+    // domain.load 成功后的起表点；机制住 session.ts，编舞分窗在此）
     heartbeatMissLimit: opts.heartbeatMissLimit,
     onFreeze: opts.onFreeze,
     // 宿主 onTell：log 上行分发到行作用域 logger（级别面全保留——宿主统一过滤）
@@ -178,6 +178,8 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   // watchdog kill 的执法归因（exit 通知透出——观测锚⑨「心跳超时」打点数据源；
   // 自崩溃恒 undefined：code 即事实，不虚构归因）
   let killReason: string | undefined;
+  // 心跳是否已起表（首次 svc.load 成功起表——防多行共域重复起表）
+  let heartbeatArmed = false;
 
   // worker 内未捕获异常：Node 把 'error' 事件投给 Worker 对象——无监听器则按
   // EventEmitter 语义冒泡主进程 uncaughtException（worker 崩溃反杀宿主 = 违背
@@ -321,6 +323,13 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
           { timeoutMs: opts.loadTimeoutMs ?? 60_000 },
         )
         .then((meta) => {
+          // 心跳起表点（一次性）：首次装载成功 = 域就绪（处理方挂好 + 事件循环
+          // 活）。boot 窗的 ping 无应答属冷启正常，不计拍——该窗由 load 超时
+          // 监督；此后运行期冻结才归本探针执法（两窗分工，K3-c 监督编舞）
+          if (opts.heartbeatMs !== undefined && !heartbeatArmed) {
+            heartbeatArmed = true;
+            endpoint.startHeartbeat(opts.heartbeatMs);
+          }
           metaCache.set(row.id, meta);
           return meta;
         });

@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import type { PluginPlanRow } from '../contracts/plugin.js';
-import { BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
+import { BRIDGE_HANDLER_FAILED, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
 import { createBridgeFleet } from './bridge-fleet.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -24,13 +24,36 @@ import { createBridgeFleet } from './bridge-fleet.js';
 const WORKER_URL = new URL('../bridge/worker.ts', import.meta.url);
 
 /** fleet fixture 插件：provide 一个 ping 服务（名按 config.slot 参数化防串扰）；
+ * burn 真死循环（心跳 watchdog 用——事件循环冻结后结构性不可协作取消）；
  * config.crash 真 → apply 返还后异步抛 uncaught（worker 线程崩 = 自崩溃最真形态
  * ——fleet 不暴露域句柄，直杀不可达；uncaught 异步异常默认终结 worker 线程） */
 const FX_PLUGIN = `
 export const name = 'fleet-fx';
 export default async function apply(ctx, config) {
-  ctx.provide('fleet/taps-' + config.slot, { ping: () => 'pong' });
+  ctx.provide('fleet/taps-' + config.slot, {
+    ping: () => 'pong',
+    burn: () => { while (true) {} },
+  });
   if (config.crash) setTimeout(() => { throw new Error('模拟 worker 自崩溃'); }, 10);
+}
+`;
+
+/** apply 即抛 fixture（apply 失败防漏路：行进失败清单 + 域即刻刻意收尾不留孤儿） */
+const FX_APPLY_THROW = `
+export const name = 'fleet-fx-throw';
+export default async function apply() { throw new Error('boom-on-purpose'); }
+`;
+
+/** 慢启 fixture：模块体同步占线 300ms（装载求值期占死 worker 事件循环——
+ * pong 无应答即丢拍）。心跳监督只在装载成功后武装（boot 期超时归
+ * loadTimeoutMs 司职）——本 fixture 即「boot 不武装」回归锁：慢装载
+ * 不得被 watchdog 误杀（慢机杀好域，全量套件负载下实测翻车形态） */
+const FX_SLOW_BOOT = `
+export const name = 'fleet-slow-boot';
+const busyUntil = Date.now() + 300;
+while (Date.now() < busyUntil) {}
+export default async function apply(ctx, config) {
+  ctx.provide('fleet/taps-' + config.slot, { ping: () => 'pong' });
 }
 `;
 
@@ -129,12 +152,72 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     expect(marked[0]).toMatchObject({ id: 'w1', code: BRIDGE_WORKER_EXITED });
     // 广播词汇：与装载失败同一观测词汇（宁可死得响亮）
     expect(broadcast[0]).toMatchObject({ id: 'w1', code: BRIDGE_WORKER_EXITED });
-    expect(fleet.stats().live).toBe(0);
+    // 归因计数：自崩溃（无执法归因）→ crashed 计 1、心跳面不动
+    expect(fleet.stats()).toMatchObject({ live: 0, crashed: 1, heartbeatFreezes: 0 });
 
     // 坏 entry 装载失败防漏：load reject + 域即刻刻意收尾（不留孤儿进程）
     const badRow: PluginPlanRow = { id: 'bad', entry: join(dir, 'nope.ts'), runtime: 'worker' };
     await expect(fleet.loader.load(badRow)).rejects.toBeTruthy();
     expect(fleet.stats()).toMatchObject({ live: 0, terminated: 1 }); // 装载失败即收、不入册
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('apply 失败防漏：worker 侧 apply 抛错 → 行失败保码 + 域即刻刻意收尾（live 归零）', async () => {
+    const { root, anchor, dir } = setupFixture('fleet-apply-throw');
+    const throwEntry = join(dir, 'fx-throw.ts');
+    writeFileSync(throwEntry, FX_APPLY_THROW);
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+    });
+    await fleet.loader.load({ id: 'b1', entry: throwEntry, runtime: 'worker' });
+    const scope = anchor.fork({ name: 'b1', rowId: 'b1' });
+    // worker 侧非 AppError 抛错 → 信封归一 BRIDGE_HANDLER_FAILED 保码回宿主
+    expect(await rejectionCode(fleet.loader.apply({ id: 'b1', entry: throwEntry, runtime: 'worker' }, scope))).toBe(
+      BRIDGE_HANDLER_FAILED,
+    );
+    // 防漏：行已失败，域不留（apply 失败即收——非等 reap）
+    expect(fleet.stats()).toMatchObject({ live: 0, terminated: 1 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('心跳 watchdog：同步死循环冻结 → kill → 在途结算 + 归因心跳缺失 + heartbeatFreezes 计数（动机用例）', async () => {
+    const { root, anchor, fxEntry, dir } = setupFixture('fleet-heartbeat');
+    const marked: Array<{ id: string; code: string; message: string }> = [];
+    const broadcast: Array<{ id: string; code?: string; message?: string }> = [];
+    anchor.on('plugin/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
+    // 50ms 节律 × 2 拍 ≈ 100ms 判冻——紧密同步循环结构性不可协作取消，watchdog 兜底
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+      heartbeatMs: 50,
+      heartbeatMissLimit: 2,
+      markFailed: (id, code, message) => marked.push({ id, code, message }),
+    });
+    await fleet.loader.load({ id: 'hb', entry: fxEntry, runtime: 'worker' });
+    const scope = anchor.fork({ name: 'hb', rowId: 'hb' });
+    await fleet.loader.apply({ id: 'hb', entry: fxEntry, runtime: 'worker', config: { slot: 'w' } }, scope);
+    const taps = root.get<Record<string, () => Promise<string>>>('fleet/taps-w');
+    // 域活证明（先 ping 后烧——排除「域从未活过」的假冻结）
+    await expect(taps.ping!()).resolves.toBe('pong');
+    // 点燃死循环：worker 事件循环冻结，ping 无应答。catch 立即挂接——kill 时
+    // 端点 dispose 结算在途调用，早于本用例的断言面（防未处理拒绝）
+    const inflight = taps.burn!().catch((e: unknown) => e);
+    await until(() => marked.length > 0 && broadcast.length > 0);
+    // kill 执法归因随结算透出（观测锚⑨「心跳超时」打点数据源）
+    expect(marked[0]).toMatchObject({ id: 'hb', code: BRIDGE_WORKER_EXITED });
+    expect(marked[0]!.message).toContain('心跳缺失');
+    expect(broadcast[0]).toMatchObject({ id: 'hb', code: BRIDGE_WORKER_EXITED });
+    // 在途 burn 调用按域死结算（watchdog kill → 端点 dispose → WORKER_EXITED）
+    expect(((await inflight) as { code?: string }).code).toBe(BRIDGE_WORKER_EXITED);
+    // 归因计数：执法路径计心跳冻结、不计 crashed（防双计）
+    expect(fleet.stats()).toMatchObject({ heartbeatFreezes: 1, crashed: 0, live: 0 });
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });
