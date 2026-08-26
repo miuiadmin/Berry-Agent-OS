@@ -18,7 +18,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
-import { AppError, AGENT_DELIVER_AS_UNSUPPORTED } from '../contracts/errors.js';
+import {
+  AppError,
+  AGENT_DELIVER_AS_UNSUPPORTED,
+  AGENT_SESSION_INACTIVE,
+  AGENT_SESSION_KEY_REQUIRED,
+} from '../contracts/errors.js';
 import { createBerryRuntime } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
 import type { AgentServiceFace, RunSettled } from '../chat/index.js';
@@ -197,11 +202,19 @@ describe('ctx.agent 具名服务（件内构造，attach 退役）', () => {
     expect(second).toHaveLength(1);
   });
 
-  it('自激预算：backgroundWake 连续唤醒第 4 次降级 inject（不开新 run）', async () => {
+  it('自激预算：backgroundWake 连续唤醒第 4 次降级 inject（不开新 run；缺显式键即 AGENT_SESSION_KEY_REQUIRED）', async () => {
     const { streamFn, contexts } = scriptedStream([textMessage('答')]);
     const { runtime, agent } = await assemble({ streamFn });
+    // S1 执法：backgroundWake 不依赖调用链语境——缺显式键即拒（三级解析序不适用于无人值守路）
+    try {
+      agent.sendUserMessage('无键唤醒', { source: 'plugin:goal', backgroundWake: true });
+      expect.unreachable('应当抛错');
+    } catch (err) {
+      expect((err as AppError).code).toBe(AGENT_SESSION_KEY_REQUIRED);
+    }
+    const sessionId = runtime.session!.header.sessionId;
     for (let i = 1; i <= 4; i += 1) {
-      agent.sendUserMessage(`自激 ${i} 号`, { source: 'plugin:goal', backgroundWake: true });
+      agent.sendUserMessage(`自激 ${i} 号`, { source: 'plugin:goal', backgroundWake: true, session: sessionId });
       await runtime.conversation!.settle();
     }
     // 前 3 次各开一 run（3 次模型调用），第 4 次超帽 inject 只落日志
@@ -280,5 +293,115 @@ describe('应用面第一纵切（可卸语义 + 行序 + 空转）', () => {
     const chatRow = runtime.plugins.list().find((row) => row.id === 'chat');
     expect(chatRow?.status).toBe('activated');
     expect(runtime.plugins.list().filter((row) => row.status === 'failed')).toHaveLength(0);
+  });
+});
+
+/* ---------------- 用例：S1 多驱动注册表（durable 键控总根因刀验收） ---------------- */
+
+describe('S1 多驱动注册表（registry/front 键控路由）', () => {
+  it('open 第二驱动：双会话并存各归各——事件/账/seq 互不串，open 即切前台聚焦', async () => {
+    const { streamFn, contexts } = scriptedStream([textMessage('答甲'), textMessage('答乙')]);
+    const { runtime } = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const first = registry.focused()!;
+    expect(first).toBeDefined();
+    const second = registry.open()!;
+    expect(second).not.toBe(first);
+    expect(registry.entries.size).toBe(2);
+    // open 即切前台聚焦（新会话拿走输入与展示）
+    expect(registry.focus.sessionId).toBe(second.session.header.sessionId);
+    expect(runtime.session!.header.sessionId).toBe(second.session.header.sessionId);
+
+    // 双驱动先后各跑一 run（旧驱动引用仍活——多会话并存不是换防）
+    await first.driver.submitOnce('问甲');
+    await second.driver.submitOnce('问乙');
+    expect(contexts.length).toBe(2);
+    // 各归各：user/assistant/llm/usage 落各自会话（调用链路由不串账）
+    for (const entry of [first, second]) {
+      const types = entry.session.events.map((e) => e.type);
+      expect(types).toContain('user/message');
+      expect(types).toContain('assistant/message');
+      expect(types).toContain('llm/usage');
+      // seq 连续：0..n 无撞号（会话事件日志单写者不变式——S1 的存在理由）
+      expect(entry.session.events.map((e) => e.seq)).toEqual(entry.session.events.map((_, i) => i));
+    }
+    // 互不串：first 会话不含乙的问句、second 会话不含甲的问句
+    expect(JSON.stringify(first.session.events)).not.toContain('问乙');
+    expect(JSON.stringify(second.session.events)).not.toContain('问甲');
+  });
+
+  it('/new 语义（open + retire）：退役条目保留——显式键 INACTIVE、投递降 inject、quit 不 resolve', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const { runtime, agent } = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const previous = registry.focused()!;
+    const previousId = previous.session.header.sessionId;
+    const opened = registry.open()!;
+    expect(registry.retire(previousId)).toBe(true);
+
+    // 条目保留（durable 会话不删——防 seq 撞号），retire 幂等（再退 false）
+    expect(registry.entries.size).toBe(2);
+    expect(registry.retire(previousId)).toBe(false);
+    // 显式键投递退役会话：AGENT_SESSION_INACTIVE（「退役即停摆」——调用方按码容错）
+    try {
+      agent.sendUserMessage('迟到唤醒', { backgroundWake: true, session: previousId });
+      expect.unreachable('应当抛错');
+    } catch (err) {
+      expect((err as AppError).code).toBe(AGENT_SESSION_INACTIVE);
+    }
+    // 驱动层直投：降 inject（只落日志保审计不开 run）
+    const channel = previous.driver.deliver({ role: 'user', content: '迟到投递', timestamp: 1 });
+    expect(channel).toBe('inject');
+    expect(previous.session.events.filter((e) => e.type === 'user/message')).toHaveLength(1);
+    // 退役 ≠ 退出：quit promise 不 resolve（防 /new 误触发 TUI 退出），前台转接新驱动
+    let quitResolved = false;
+    void previous.driver.quit.then(() => {
+      quitResolved = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(quitResolved).toBe(false);
+    expect(runtime.conversation).toBe(opened.driver);
+  });
+
+  it('open 幂等防御：resume 已在表会话返回同条目（不建第二 Session 双写者）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const { runtime } = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const first = registry.focused()!;
+    const second = registry.open()!;
+    // 聚焦已切走，显式 resume 首会话：同条目返回 + 聚焦切回，不新建
+    const again = registry.open({ resume: first.session.header.sessionId })!;
+    expect(again).toBe(first);
+    expect(registry.entries.size).toBe(2);
+    expect(registry.focus.sessionId).toBe(first.session.header.sessionId);
+    expect(runtime.conversation).toBe(first.driver);
+    void second;
+  });
+
+  it('front 转接：addDisplay 先于 open 注册——新驱动事件可达、submit 路由前台聚焦', async () => {
+    const { streamFn } = scriptedStream([textMessage('答一'), textMessage('答二')]);
+    const { runtime } = await assemble({ streamFn });
+    const front = runtime.front;
+    const seen: string[] = [];
+    front.addDisplay((event) => {
+      seen.push(event.type);
+    });
+    const first = runtime.drivers.focused()!;
+
+    // 前台聚焦首驱动：front.submit 路由到位 + 事件经转接表回流
+    front.submit('问一');
+    await first.driver.settle();
+    expect(seen).toContain('message_end');
+    expect(first.session.events.filter((e) => e.type === 'user/message').map((e) => e.data)).toHaveLength(1);
+
+    // open 新驱动：同一 display 消费者自动转接（TUI 零重接不断流），submit 随聚焦走
+    seen.length = 0;
+    const second = runtime.drivers.open()!;
+    front.submit('问二');
+    await second.driver.settle();
+    expect(seen).toContain('message_end');
+    expect(second.session.events.filter((e) => e.type === 'user/message')).toHaveLength(1);
+    expect(first.session.events.filter((e) => e.type === 'user/message')).toHaveLength(1);
   });
 });

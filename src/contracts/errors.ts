@@ -259,6 +259,10 @@ export const SUBAGENT_DEPTH_EXCEEDED = registerErrorCode('SUBAGENT_DEPTH_EXCEEDE
 
 /** agent：sendUserMessage 显式携带 deliverAs（'steer'/'inject' 定向投递为 M2+ 预留位——缺省三通道自适应即全部现行业务所需，显式指定即拒不做半实现） */
 export const AGENT_DELIVER_AS_UNSUPPORTED = registerErrorCode('AGENT_DELIVER_AS_UNSUPPORTED');
+/** agent：sendUserMessage 显式 session 键查无活驱动（多驱动路由 façade——键指向的会话已退役或不存在；调用方按码容错跳过即「退役即停摆」语义，骨架篇 §9.3 / 契约篇 §5.4 第 6 条 S1） */
+export const AGENT_SESSION_INACTIVE = registerErrorCode('AGENT_SESSION_INACTIVE');
+/** agent：backgroundWake 投递未带显式 session 键（后台触发不依赖调用链语义——结构性执法防链/focus 兜底静默错投，第二十四批题8B must-fix 的机器背书，骨架篇 §9.3） */
+export const AGENT_SESSION_KEY_REQUIRED = registerErrorCode('AGENT_SESSION_KEY_REQUIRED');
 
 /* ------------------------------------------------------------------ */
 /* goal 码族（运行时骨架篇 §6.8 落码注记，2026-08-24 goal 纵切二）      */

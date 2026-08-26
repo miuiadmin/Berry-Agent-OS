@@ -537,6 +537,7 @@ describe('ConversationDriver 防御（直接构造）', () => {
     // 直接构造驱动（不经组合根）：writeHeader 是注入面，可显式抛错。
     // streamFn 永抛——本用例只关心 run 编排不因首件失败永久卡 running
     const driver = new ConversationDriver({
+      sessionId: 'test-session',
       context: { systemPrompt: '', messages: [], tools: [] },
       loopConfig: {
         streamFn: () => {
@@ -974,10 +975,10 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       [
         'export const name = "inject-plugin";',
         'export default async function apply(ctx) {',
-        '  // 按需检索注入形态（记忆篇 §6 通道 2）：瀑布收到 (messages, next)，',
-        '  // 变换后必须调 next 传播——不调即短路（拒改链路语义同样合法）',
-        '  ctx.on("context_transform", (messages, next) =>',
-        '    next([...messages, { role: "user", content: "【检索注入】用户偏好 pnpm", timestamp: 1 }]),',
+        '  // 按需检索注入形态（记忆篇 §6 通道 2）：瀑布收到 (messages, sessionId, next)，',
+        '  // 变换后必须调 next 传播且逐参透传（单参调用会丢归属键——S1 双参契约）',
+        '  ctx.on("context_transform", (messages, sessionId, next) =>',
+        '    next([...messages, { role: "user", content: "【检索注入】用户偏好 pnpm", timestamp: 1 }], sessionId),',
         '  );',
         '}',
       ].join('\n'),

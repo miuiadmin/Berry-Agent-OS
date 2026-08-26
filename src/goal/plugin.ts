@@ -5,6 +5,11 @@
  * 注入提示词（onRunSettled → ctx.agent.sendUserMessage 三通道路由）+ 预算刹车
  * （session/event 镜像过滤 assistant/message 累计）三个已有原语的组合。
  *
+ * S1 键控改造：结算/记账/注入全部按**归属会话**路由（settled.sessionId 直查
+ * goals 表、信封 sessionId 直查、sendUserMessage 显式键）——多驱动并存各归各；
+ * 退役会话容错 = AGENT_SESSION_INACTIVE 仅此码降 debug（③ 续跑 / ④ 收尾注入
+ * 两处同口径——旧会话停摆是 /new 的语义结果非故障）。
+ *
  * 装配接线（全部挂 ctx.effect，装载锚 dispose 即 LIFO 回卷）：
  * ① 工具三件（goal_get/goal_set/goal_update）进 ctx.tools；
  * ② 命令 /goal（查状态）/goal resume/goal stop 进 ctx.channels——激活权在人类；
@@ -28,7 +33,7 @@
  * 装载成功，语义诚实）。
  */
 
-import { describeError } from '../contracts/errors.js';
+import { AppError, AGENT_SESSION_INACTIVE, describeError } from '../contracts/errors.js';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { Context, Disposer } from '../context/types.js';
@@ -55,10 +60,22 @@ interface ChannelsCommandFace {
   }): Disposer;
 }
 
-/** ctx.agent 服务最小面（chat-plugin.ts AgentServiceFace 的结构子集） */
+/** ctx.agent 服务最小面（chat/plugin.ts AgentServiceFace 的结构子集） */
 interface AgentServiceFace {
-  sendUserMessage(content: string, opts?: { readonly source?: string; readonly backgroundWake?: boolean }): void;
-  onRunSettled(cb: (settled: { readonly status: 'completed' | 'aborted' | 'failed' }) => void): Disposer;
+  sendUserMessage(
+    content: string,
+    opts?: {
+      readonly source?: string;
+      readonly backgroundWake?: boolean;
+      /** 显式会话键（S1 三级解析序之首——多驱动路由的目标会话 id） */
+      readonly session?: string;
+      readonly toolFilter?: readonly string[];
+    },
+  ): void;
+  /** 结算载荷含归属 sessionId（S1 增维——订阅全局单份、run 多驱动各自） */
+  onRunSettled(
+    cb: (settled: { readonly status: 'completed' | 'aborted' | 'failed'; readonly sessionId: string }) => void,
+  ): Disposer;
 }
 
 /** ui 通知面（命令回执的唯一出口——/goal 系列人读结果） */
@@ -146,6 +163,25 @@ async function applyGoalPlugin(
     if (sessionId !== undefined) store.demoteToNeedsResume(sessionId, Date.now());
   }
 
+  /* ---- ⓪b 续接降级事件面（S1 结构化）：session_start origin=resume 订阅 ----
+   * boot ⓪ 依赖装载行序（chat 首行先开驱动、goal 后装载），只能覆盖进程启动
+   * 一次；进程内再开续接会话（未来 /resume 或多应用打开）走事件面——chat 件
+   * open() 恒发 session_start（含 origin），此处按载荷会话直查直降。两者幂等
+   * 互补：boot 时 goal 尚未订阅（错过该次事件，⓪ 兜住）；此后事件必达。
+   * demoteToNeedsResume 自身幂等（仅 active 行生效），双路同发不重复降级 */
+  ctx.effect(() =>
+    ctx.on('session_start', (payload: unknown) => {
+      try {
+        const envelope = payload as { sessionId?: unknown; origin?: unknown };
+        if (envelope?.origin !== 'resume' || typeof envelope?.sessionId !== 'string') return;
+        store.demoteToNeedsResume(envelope.sessionId, Date.now());
+      } catch (err) {
+        // fire-and-forget 纪律：降级异常止步日志，不上抛进事件派发面
+        ctx.logger.error('goal 续接降级失败', { error: describeError(err) });
+      }
+    }),
+  );
+
   /* ---- ① 工具三件（目标内容在模型）---- */
   const tools = ctx.get<ToolsService>('tools');
   for (const def of createGoalTools({ store, getSessionId: deps.getSessionId })) {
@@ -174,9 +210,9 @@ async function applyGoalPlugin(
     ctx.effect(() =>
       agent.onRunSettled((settled) => {
         try {
-          const sessionId = deps.getSessionId();
-          if (sessionId === undefined) return;
-          const goal = store.get(sessionId);
+          // S1 键控：按结算载荷归属会话直查（不再依赖装配闭包单值——多驱动
+          // 各归各续跑，/new 换新不误伤旧会话目标，旧会话结算迟到照常触发其续跑）
+          const goal = store.get(settled.sessionId);
           if (goal === undefined || !shouldContinueGoal(goal, settled.status)) return;
           // backgroundWake：计入自激预算 maxConsecutiveWakes=3——连续自动续跑
           // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录。
@@ -187,11 +223,23 @@ async function applyGoalPlugin(
           // 显式保留而非 effect 过滤自然命中。开洞：goal_set 申报 needsWrite
           // 即不携带 toolFilter（续跑轮全量工具面）。
           const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.list());
-          agent.sendUserMessage(renderContinuationPrompt(goal), {
-            source: 'plugin:goal',
-            backgroundWake: true,
-            ...(toolFilter !== undefined ? { toolFilter } : {}),
-          });
+          try {
+            agent.sendUserMessage(renderContinuationPrompt(goal), {
+              source: 'plugin:goal',
+              backgroundWake: true,
+              session: settled.sessionId,
+              ...(toolFilter !== undefined ? { toolFilter } : {}),
+            });
+          } catch (err) {
+            // S1 退役容错：目标会话已退役（/new 换新后旧会话结算迟到）→
+            // AGENT_SESSION_INACTIVE 仅此码降 debug——旧会话停摆是 /new 的
+            // 语义结果非故障；其余异常照外层 error 口径
+            if (err instanceof AppError && err.code === AGENT_SESSION_INACTIVE) {
+              ctx.logger.debug('goal 续跑跳过：归属会话已退役', { sessionId: settled.sessionId });
+            } else {
+              throw err;
+            }
+          }
         } catch (err) {
           // 续跑触发异常止步日志（结算通知链不受插件违约影响——服务层另有隔离壳）
           ctx.logger.error('goal 续跑触发失败', { error: describeError(err) });
@@ -206,8 +254,9 @@ async function applyGoalPlugin(
       try {
         const envelope = payload as SessionEventEnvelope;
         if (typeof envelope?.sessionId !== 'string' || envelope.event?.type !== 'assistant/message') return;
-        const sessionId = deps.getSessionId();
-        if (sessionId === undefined || envelope.sessionId !== sessionId) return;
+        // S1 键控：信封会话直查（不再比对前台聚焦单值）——多会话并存时各会话
+        // 目标各自记账，互不串账互不漏账
+        const sessionId = envelope.sessionId;
         // 只对 active 行记账（needs-resume/stopped/终态不再累计——刹停后的收尾
         // 轮花销不属于本目标预算；先判状态再累加，读改写间无并发窗口）
         const current = store.get(sessionId);
@@ -225,7 +274,16 @@ async function applyGoalPlugin(
         store.stopByBudget(sessionId, goal.tokensUsed, Date.now());
         const stopped = store.get(sessionId);
         if (stopped !== undefined) {
-          agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'plugin:goal' });
+          try {
+            agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'plugin:goal', session: sessionId });
+          } catch (err) {
+            // S1 退役容错：目标会话已退役——收尾注入无处可投仅记 debug（与 ③ 同口径）
+            if (err instanceof AppError && err.code === AGENT_SESSION_INACTIVE) {
+              ctx.logger.debug('goal 收尾注入跳过：归属会话已退役', { sessionId });
+            } else {
+              throw err;
+            }
+          }
         }
       } catch (err) {
         // fire-and-forget 纪律：刹车异常止步日志，绝不上抛进事件派发面

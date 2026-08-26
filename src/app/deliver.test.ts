@@ -68,6 +68,7 @@ function makeDriver(responses: string[] = []): Harness {
     return syntheticStream(textMessage(text));
   };
   const driver = new ConversationDriver({
+    sessionId: 'test-session',
     context: { systemPrompt: '', messages: [], tools: [] },
     loopConfig: { streamFn, model: 'test/model', convertToLlm: defaultConvertToLlm },
   });
@@ -107,6 +108,7 @@ describe('deliver 三通道路由（§4.1 状态机）', () => {
       return syntheticStream(textMessage('答二'));
     };
     const driver = new ConversationDriver({
+      sessionId: 'test-session',
       context: { systemPrompt: '', messages: [], tools: [] },
       loopConfig: { streamFn, model: 'test/model', convertToLlm: defaultConvertToLlm },
     });

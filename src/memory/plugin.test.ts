@@ -202,12 +202,13 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     // 库、基线含之，检索测试不再混入差分注入面
     h.renderSection('memory/core');
 
-    // 手动驱动瀑布（loop transformContext 桥的同一路径）：命中查询
+    // 手动驱动瀑布（loop transformContext 桥的同一路径；S1 双参——归属键随批传入）：命中查询
     // （trigram 整 token 子串语义：中文无分词，查询串须是目标词的连续子串——
     // 「生产环境」是两条记忆 summary 的公共子串，池含两条，排序见 kind）
     const out = (await h.ctx.waterfall(
       'context_transform',
       [{ role: 'user', content: '生产环境', timestamp: 1 }],
+      's-transform',
       (final: unknown) => final,
     )) as Array<{ role: string; content: unknown; timestamp: number }>;
     expect(out).toHaveLength(2); // 原消息 + 至多一条注入
@@ -229,6 +230,7 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     const pass = (await h.ctx.waterfall(
       'context_transform',
       [{ role: 'user', content: '完全无关的天气问题', timestamp: 1 }],
+      's-transform',
       (final: unknown) => final,
     )) as unknown[];
     expect(pass).toHaveLength(1); // 无追加
@@ -318,11 +320,12 @@ async function setupDiffBaseline(h: Harness, preseed?: (memory: MemoryStore) => 
   return { memory, session, sectionText };
 }
 
-/** 驱动一次 context_transform（loop transformContext 桥的同一路径） */
-async function runTransform(h: Harness): Promise<Array<{ role: string; content: unknown }>> {
+/** 驱动一次 context_transform（loop transformContext 桥的同一路径；S1 双参——归属键随批传入） */
+async function runTransform(h: Harness, sessionId: string): Promise<Array<{ role: string; content: unknown }>> {
   return (await h.ctx.waterfall(
     'context_transform',
     [{ role: 'user', content: '继续', timestamp: 1 }],
+    sessionId,
     (final: unknown) => final,
   )) as Array<{ role: string; content: unknown }>;
 }
@@ -342,7 +345,7 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     });
     if (inserted.outcome !== 'inserted') throw new Error('前置失败');
 
-    const out = await runTransform(h);
+    const out = await runTransform(h, session.header.sessionId);
     // 差分注入在尾部（本测试无检索命中——查询「继续」不中记忆词）
     const injected = out.at(-1)!;
     expect(out).toHaveLength(2);
@@ -362,7 +365,7 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     expect((definition.toLlm!(injected as never) as { role: string }).role).toBe('user');
 
     // 幂等：面未再变 → 同视图不追写、注入照常（每请求至多一条）
-    const again = await runTransform(h);
+    const again = await runTransform(h, session.header.sessionId);
     expect(session.events.filter((e) => e.type === 'memory/diff')).toHaveLength(1);
     expect(again.at(-1)!.role).toBe('memory/diff');
 
@@ -380,12 +383,12 @@ describe('memory 官方件 apply（简报差分追注）', () => {
       content: 'c',
     });
     if (inserted.outcome !== 'inserted') throw new Error('前置失败');
-    await runTransform(h); // 落账 [+]
+    await runTransform(h, session.header.sessionId); // 落账 [+]
     expect(session.events.filter((e) => e.type === 'memory/diff')).toHaveLength(1);
 
     // 面漂移回基线（forget）→ 下一请求清账：entries=[] 追写、注入消失
     memory.forget(inserted.memory.id);
-    const out = await runTransform(h);
+    const out = await runTransform(h, session.header.sessionId);
     const diffs = session.events.filter((e) => e.type === 'memory/diff');
     expect(diffs).toHaveLength(2); // 清账事件已落
     expect((diffs[1]!.data as { entries: unknown[] }).entries).toEqual([]);
@@ -415,7 +418,7 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     });
 
     // 当前面 == 基线（无漂移）但日志视图非空 → 首请求自愈：清账事件落、无注入
-    const out = await runTransform(h);
+    const out = await runTransform(h, session.header.sessionId);
     const diffs = session.events.filter((e) => e.type === 'memory/diff');
     expect(diffs.at(-1)!.data).toMatchObject({ entries: [] });
     expect(out).toHaveLength(1);
@@ -426,7 +429,7 @@ describe('memory 官方件 apply（简报差分追注）', () => {
 
   it('基线重物化 = 新纪元：旧差分指纹出局，注入随新基线重算', async () => {
     const h = setup();
-    const { memory } = await setupDiffBaseline(h);
+    const { memory, session } = await setupDiffBaseline(h);
 
     const inserted = memory.addMemory({
       ownerKey: 'global',
@@ -435,11 +438,11 @@ describe('memory 官方件 apply（简报差分追注）', () => {
       content: 'c',
     });
     if (inserted.outcome !== 'inserted') throw new Error('前置失败');
-    await runTransform(h); // 旧纪元落账 [+] + 注入
+    await runTransform(h, session.header.sessionId); // 旧纪元落账 [+] + 注入
 
     // /new 等价物：重新物化基线（面含新条目）→ 指纹换纪元、差分账清零
     h.renderSection('memory/core');
-    const out = await runTransform(h);
+    const out = await runTransform(h, session.header.sessionId);
     expect(out).toHaveLength(1); // 无注入：当前面 == 新基线
 
     await h.ctx.dispose();

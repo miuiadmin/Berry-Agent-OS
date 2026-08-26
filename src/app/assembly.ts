@@ -9,10 +9,16 @@
  * 2026-08-24 应用面第一纵切（契约篇 §5.4 规范先行）：**对话应用装配本体迁
  * `builtin:chat` 官方件**（默认层首行）——会话选择/续接、durable 绑定、
  * request/header 差分化、ConversationDriver 构造、ctx.agent provide 全在件内；
- * 组合根不再直装对话，只持活引用槽（session/durable/driver/chat 控制面）与
- * 装配层接线（tools_change/prompts_change 刷新、/new 编排、/reload、信号与
- * 关停）。对话是应用不是内核（命题 §3.5）——overlay 禁用 chat 件即首启无对话
+ * 对话是应用不是内核（命题 §3.5）——overlay 禁用 chat 件即首启无对话
  * 循环、宿主照启（装/守/存职能与命令面完好）。
+ *
+ * 2026-08-26 S1 durable 键控总根因刀（多应用并行第一纵切，骨架篇 §9.3）：
+ * 组合根四单槽（session/resumedFlag/durableRef + driverRef/chatRef）整体退役
+ * 为 **DriverRegistry**（Map<sessionId, DriverEntry> + 前台聚焦指针——chat 件
+ * 工厂 createChatPlugin 产物，组合根分配、件填充与消费）；全局绑定面（onUsage
+ * 计量/ctx.sessions 缺省路由/管道守门与审批落账/子代理 fork 源/goal 工具命令面）
+ * 全部改键控路由（调用链 → 注册表 → 前台聚焦）；/new = open 新条目 + 退役旧
+ * 条目；TUI 持 FrontHost façade 跨 /new 稳定。
  */
 
 import type { AgentMessage } from '../contracts/messages.js';
@@ -62,8 +68,7 @@ import { getSessionEventType } from '../session/index.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { SESSION_CORE_TYPE_FORBIDDEN, SESSION_FORMAT_UNSUPPORTED } from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
-import { createDurableSinks, CHAT_APP_ID } from '../chat/index.js';
-import type { DurableSinks, ConversationDriver, ChatControls } from '../chat/index.js';
+import type { DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
 import { createChatPlugin } from '../chat/index.js';
 import {
   createPathsService,
@@ -229,12 +234,25 @@ export interface BerryRuntime {
   /** 技能发现位置（dump-config 诊断输出用） */
   readonly skillLocations: readonly SkillLocation[];
   /**
-   * 会话驱动（通道宿主面：submit / requestQuit）——chat 对话应用件的活句柄：
+   * 会话驱动（通道宿主面：submit / requestQuit）——**前台聚焦条目投影**（活取值）：
    * 件装载即就绪；persist:false 诊断装配或 overlay 禁用 chat 件时为 undefined
-   * （宿主照启——命令面/插件管理完好，无对话循环）
+   * （宿主照启——命令面/插件管理完好，无对话循环）。跨 /new 稳定的完整面见
+   * drivers / front 两字段
    */
   readonly conversation: ConversationDriver | undefined;
-  /** 开新会话（/new）：新 Session + durable 换指 + 时间线重置；无持久层、无驱动或 run 进行中返回 undefined */
+  /**
+   * 会话驱动注册表（S1 单真相——Map<sessionId, DriverEntry> + 前台聚焦指针 +
+   * open/retire/focused/chained/routed）。恒在：persist:false 或 chat 件未装载时
+   * 恒空表；S3 /app 前台切换消费 open 面
+   */
+  readonly drivers: DriverRegistry;
+  /**
+   * 前台宿主 façade（S1）：submit/requestQuit/settle 随前台聚焦路由 + 退出聚合
+   * promise + 展示转接——TUI 起屏持它一次即跨 /new 稳定。恒在：无驱动形态
+   * submit 静默、requestQuit 直接聚合退（壳照启可退）
+   */
+  readonly front: FrontHost;
+  /** 开新会话（/new）：registry.open 一条龙 + 旧聚焦条目退役；无持久层或聚焦驱动 run 进行中返回 undefined */
   newSession(): Session | undefined;
   /**
    * 组合树全量重载（/reload，契约篇 §1.3 落码形态）：run 进行中被拒（busy）；
@@ -308,36 +326,33 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       })
     : undefined;
 
-  /* ---- ③b 会话/durable/驱动/件控制面 四活引用槽（应用面第一纵切） ----
-   * 会话选择与驱动构造在 `builtin:chat` 件 apply（默认层首行装载即就绪）；
-   * 组合根持槽 + durable 转发壳：已建服务（llm onUsage / ctx.sessions / 管道
-   * 守门 sink / 审批 sink）构造期绑壳或闭包读槽，件绑定后即刻生效；/new 换指
-   * 写同一活引用槽，不动已建服务的绑定（late-binding 既有先例的延伸）。 */
-  let session: Session | undefined;
-  /** boot 是否续接（goal 降级触发器读它——chat 件（首行）先装载，goal 轮次激活必晚于回写） */
-  let resumedFlag = false;
-  /** durable 活引用槽（boot 绑定与 /new 换指都写这里） */
-  const durableRef: { current: DurableSinks | undefined } = { current: undefined };
-  // durable 转发壳（无条件存在——件未装载/无持久层时三路皆 no-op，与今日
-  // persist:false 同款降级）：管道守门与审批对构造期绑壳，落账永远到当前会话
-  const durableForward: DurableSinks = {
-    handle: (event) => durableRef.current?.handle(event),
-    gate: (payload) => durableRef.current?.gate(payload),
-    approval: {
-      asked: (payload) => durableRef.current?.approval.asked(payload),
-      decided: (payload) => durableRef.current?.approval.decided(payload),
-    },
-  };
-  /** 会话驱动活句柄槽（chat 件构造后写入；runtime 面 / reload busy 判据 / 双入口读它） */
-  const driverRef: { current: ConversationDriver | undefined } = { current: undefined };
-  /** chat 件控制面槽（writeHeader/resetHeaderState/resetTimeline——件 apply 末写入） */
-  const chatRef: { current: ChatControls | undefined } = { current: undefined };
+  /* ---- ③b 会话路由基建（S1 durable 键控总根因刀，骨架篇 §9.3）----
+   * 四单槽（session/resumedFlag/durableRef + driverRef/chatRef）整体退役为
+   * chat 件 DriverRegistry（⑨ 装配点创建——Map<sessionId, DriverEntry> + 前台
+   * 聚焦指针；本段早期闭包对 registry 的引用全为运行期调用，TDZ 安全）。本段
+   * 只留三件：工具快照活数组（唯一须按值先行的分配）、sandbox 盖章、durable
+   * 转发壳——壳已收窄为 gate/approval 两路（handle 半边随驱动直绑退役：管道
+   * 守门/审批对的落账路由 = 调用链 → 注册表 → 前台聚焦，registry.routed()）。 */
+  // loop 工具快照的活数组（组合根分配、chat 件每次 open 填帧）：loop 每次模型
+  // 请求与每次 tool call 查找都读 context.tools——原位替换（length=0 + push）即达
+  // loop，含 run 中途；tools_change 时在 ⑧ 接线处刷新（per-driver 化是 S2 域）
+  const toolView: AgentTool[] = [];
   /** sandbox 档事实盖章（内核守门面数据 + dedup 内建；件在会话边界调时点——内核有数据，应用有时点） */
   const stampSandboxFacts = (target: Session): void => {
     const last = [...target.events].reverse().find((e) => e.type === 'sandbox/mode');
     if ((last?.data as { mode?: string } | undefined)?.mode !== sandboxMode) {
       target.append('sandbox/mode', { mode: sandboxMode });
     }
+  };
+  // durable 转发壳（S1 收窄）：管道守门与审批对构造期绑壳，落账路由走 registry
+  //（惰性引用——⑨ 创建；gate/approval 只在 run 运行期触发，届时 registry 必已就位）。
+  // 件未装载/无持久层时 routed() 恒 undefined——三路皆 no-op，与 persist:false 同款降级
+  const durableForward: Omit<DurableSinks, 'handle'> = {
+    gate: (payload) => registry.routed()?.durable.gate(payload),
+    approval: {
+      asked: (payload) => registry.routed()?.durable.approval.asked(payload),
+      decided: (payload) => registry.routed()?.durable.approval.decided(payload),
+    },
   };
 
   /* ---- ③c 官方应用清单装载（契约篇 §5.4 应用面第二纵切）----
@@ -353,9 +368,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       appBudgets.set(id, manifest.budget.dailyTokens);
     }
   }
-  /** context_transform 桥（契约篇 §2.2 增补 5②）：loop 私有回调桥为根总线瀑布——根 ctx 恒存活（插件监听集随 /reload 更替），驱动绑此桥跨重装载稳定 */
-  const transformContext = (messages: AgentMessage[]): Promise<AgentMessage[]> =>
-    ctx.waterfall('context_transform', messages, (final: AgentMessage[]) => final);
+  /** context_transform 桥（契约篇 §2.2 增补 5② + S1 双参）：loop 私有回调桥为根
+   * 总线瀑布——根 ctx 恒存活（插件监听集随 /reload 更替），驱动绑此桥跨重装载
+   * 稳定；sessionId 作第二种子穿透给 handler（差分/检索按归属会话路由） */
+  const transformContext = (messages: AgentMessage[], sessionId: string): Promise<AgentMessage[]> =>
+    ctx.waterfall('context_transform', messages, sessionId, (final: AgentMessage[]) => final);
 
   /* ---- ④ llm 运行时（凭证经 persist 适配注入；测试可整体换 streamFn） ---- */
   const llm = createLlmRuntime({
@@ -372,16 +389,24 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       defaultModel: () => model,
       // 底账写侧（2026-08-24 第十一批拍板 #1，会话篇 §1.1）：complete 成功即落
       // llm/usage durable 事件（log-only 计量事实；callId = settlement 幂等身份，
-      // write-behind 重试去重锚点）。session 为活引用闭包（chat 件绑定后生效——
-      // /new 热切换后记到新会话）；无会话（诊断装配/件未装载）只 debug 不落账
+      // write-behind 重试去重锚点）。S1 键控（骨架篇 §9.3「读点=ctx.llm onUsage」
+      // 语义定案）：调用链命中条目才落账——无链无键**不落 focus**只 debug（timer
+      // 面/诊断面去向显式化；此前「落到恰好活着的会话」错账归零）
       onUsage: (result, modelSpec) => {
-        session?.append('llm/usage', {
-          callId: result.callId,
+        const entry = registry.chained();
+        if (entry !== undefined) {
+          entry.session.append('llm/usage', {
+            callId: result.callId,
+            model: modelSpec,
+            priority: result.priority,
+            usage: { input: result.usage.input, output: result.usage.output },
+          });
+        }
+        ctx.logger.debug('llm.complete 用量入账', {
           model: modelSpec,
-          priority: result.priority,
-          usage: { input: result.usage.input, output: result.usage.output },
+          totalTokens: result.usage.totalTokens,
+          ...(entry !== undefined ? { session: entry.session.header.sessionId } : { session: '(无链不落账)' }),
         });
-        ctx.logger.debug('llm.complete 用量入账', { model: modelSpec, totalTokens: result.usage.totalTokens });
       },
       // 底账读侧：当日后台累计 = llm/usage 事件当日时间窗聚合投影（persist 实现，
       // 余额不存储——重启不清零、双开经 WAL 各记可见、当日谁花了多少可审计）
@@ -431,10 +456,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   /* ---- ④f 会话事件服务（ctx.sessions，骨架篇 §9.2 落码）----
    * 写面：插件落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走
-   * 活引用闭包读当前会话（chat 件绑定后生效——/new 热切换自动跟随，与 onUsage
-   * 同款 late-binding）；无会话（诊断装配或 chat 件未装载）返回 undefined，调用方各自降级。
+   * 缺省路由闭包（S1：调用链 → 注册表 → 前台聚焦——registry.routed()；run 期
+   * 插件工具落在归属会话，命令面落在聚焦会话）；无路由落点（诊断装配或 chat
+   * 件未装载）返回 undefined，调用方各自降级。
    * 读面（2026-08-26 挖矿批 P0-1，会话篇 §3.2「当前会话只读投影」定形）：两读法
-   * 锚定**当前会话**（与 sessionId 信封同源）——currentSessionId() 无会话返回
+   * 锚定**当前会话**（与 sessionId 信封同源）——currentSessionId() 无落点返回
    * undefined；eventsOfType(type) 读**内存活日志**过滤枚举（与 appendEvent 同账
    * 零迟滞，write-behind 迟滞不影响读；返回过滤副本——append-only 不失效）。
    * 写读同规（B1 收口）：撞未注册词与写侧**同抛 SESSION_FORMAT_UNSUPPORTED**——
@@ -453,9 +479,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
           `核心事件词汇不允许插件经 ctx.sessions.appendEvent 写入：${type}（内核词写入权属宿主，插件请注册自有词汇）`,
         );
       }
-      return session?.append(type, data);
+      return registry.routed()?.session.append(type, data);
     },
-    currentSessionId: (): string | undefined => session?.header.sessionId,
+    currentSessionId: (): string | undefined => registry.routed()?.session.header.sessionId,
     eventsOfType: (type: string): SessionEvent[] => {
       // 写读同规：未注册词读侧同抛（读侧静默空数组 = 拼错事件名的无声死）
       if (getSessionEventType(type) === undefined) {
@@ -464,9 +490,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
           `未知事件类型：${type}（eventsOfType 读侧同抛——请先经 ctx.registerSessionEventType 注册词汇）`,
         );
       }
-      // 读源钉死 = 内存活日志（与 appendEvent 同账零迟滞）；无会话 = 空枚举
-      const current = session;
-      return current === undefined ? [] : current.events.filter((e) => e.type === type);
+      // 读源钉死 = 内存活日志（与 appendEvent 同账零迟滞）；无落点 = 空枚举
+      const current = registry.routed();
+      return current === undefined ? [] : current.session.events.filter((e) => e.type === type);
     },
   });
 
@@ -501,10 +527,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }
     throw new AppError(code, message);
   };
-  // loop 工具快照的活数组（组合根分配、chat 件填首帧）：loop 每次模型请求与
-  // 每次 tool call 查找都读 context.tools——原位替换（length=0 + push）即达
-  // loop，含 run 中途；tools_change 时在 ⑧ 接线处刷新
-  const toolView: AgentTool[] = [];
+  // loop 工具快照活数组已上移 ③b（S1——chat 件 open 与早期闭包都按值引用它，
+  // 是唯一须先于官方件注册表在场的分配）；tools_change 刷新接线在 ⑧
   // 官方件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
   // 宿主活资源（官方件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
   // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
@@ -520,24 +544,51 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       dataDir: dataDir(),
       dbPath: resolvedDbPath,
     });
-  /** gate 判据②：当前会话最近 user/message 时刻（会话活对象内存直读——
-   * append 即在，write-behind 零滞后；跨进程的「别打架」不归 gate 管，那是
-   * reserve 抢占的职责，两护栏分工） */
+  /** gate 判据②：全注册表最近 user/message 时刻（S1 升格——多驱动并存时取全部
+   * 会话最大值，含退役保留者〔其活日志仍在内存〕；会话活对象内存直读——append
+   * 即在，write-behind 零滞后；跨进程的「别打架」不归 gate 管，那是 reserve
+   * 抢占的职责，两护栏分工） */
   const lastUserMessageAt = (): number | null => {
-    const events = session?.events;
-    if (events === undefined) return null;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const event = events[i]!;
-      if (event.type === 'user/message') return event.time;
+    let latest: number | null = null;
+    for (const entry of registry.entries.values()) {
+      const events = entry.session.events;
+      for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i]!;
+        if (event.type === 'user/message') {
+          if (latest === null || event.time > latest) latest = event.time;
+          break;
+        }
+      }
     }
-    return null;
+    return latest;
   };
+  /* ---- chat 件 bundle（S1 工厂化，契约篇 §5.4 第 6 条 S1 射面）----
+   * createChatPlugin 产物 = {module, registry, front}：注册表由组合根此处分配、
+   * chat 件负责填充与消费（单真相）。早期闭包（③b 转发壳 / ④b onUsage /
+   * ④f sessions / 调度判据）对 registry 的引用全部运行期才调用——TDZ 安全。 */
+  const chatBundle = createChatPlugin({
+    ...(persistence ? { persistence } : {}),
+    resumeSession: opts.resumeSession,
+    rootCtx: ctx,
+    workspace,
+    model,
+    sandboxMode,
+    streamFn,
+    convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
+    transformContext,
+    getSystemPrompt: () => systemPrompt,
+    toolView,
+    stampSandboxFacts,
+  });
+  /** 会话驱动注册表（S1 单真相——Map<sessionId, DriverEntry> + 前台聚焦指针） */
+  const registry = chatBundle.registry;
   const builtins = createBuiltinRegistry({
     ...(persistence ? { store: persistence.store } : {}),
     ...(persistence ? { goalConnection: persistence.store.connection } : {}),
     schedulerDeps: {
       runJob: tickRunner,
-      isAgentBusy: () => driverRef.current?.isRunning ?? false,
+      // S1 升格：任一驱动在跑即 busy（多会话并存——单槽投影退役）
+      isAgentBusy: () => [...registry.entries.values()].some((entry) => entry.driver.isRunning),
       lastUserMessageAt,
     },
     // mcp 件闭包（契约篇 §6.6 冷读 #1：spawn/kill 组装上提组合根——
@@ -564,7 +615,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     agentLocations: opts.agentLocations ?? defaultAgentLocations(workspace, { homeDir: opts.homeDir, trusted: true }),
     subagentFactory: createSubagentChildFactory({
       ...(persistence ? { persistence } : {}),
-      getSession: () => session,
+      // fork 源读点④（骨架篇 §9.3）：链 → 注册表 → 前台聚焦——子工厂在父 tool
+      // call 链内调 getSession（链在场=父会话），命令面/程序面调用落聚焦
+      getSession: () => registry.routed()?.session,
       streamFn,
       model,
       convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
@@ -572,33 +625,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       sandboxMode,
       rootCtx: ctx,
     }),
-    getSession: () => session,
-    // boot 降级触发器活取值（goal apply 期读——chat 件（首行）先装载，读必居值）
-    wasResumed: () => resumedFlag,
-    chat: createChatPlugin({
-      ...(persistence ? { persistence } : {}),
-      resumeSession: opts.resumeSession,
-      workspace,
-      model,
-      sandboxMode,
-      streamFn,
-      convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
-      transformContext,
-      getSystemPrompt: () => systemPrompt,
-      toolView,
-      // 会话槽回写（let session / resumed 旗标——llm onUsage、ctx.sessions、
-      // goal wasResumed 等组合根闭包经此读当前值）
-      bindSession: (next, resumed) => {
-        session = next;
-        resumedFlag = resumed;
-      },
-      getSession: () => session,
-      durableRef,
-      durableForward,
-      driverRef,
-      chatRef,
-      stampSandboxFacts,
-    }),
+    // goal 工具三件//goal 命令的会话归属（同 routed 路由：run 期链内=归属会话，
+    // TUI 命令面=聚焦会话）
+    getSession: () => registry.routed()?.session,
+    // boot 降级触发器活取值（goal apply 期读——chat 件（首行）先装载，读必居值；
+    // S1：聚焦条目的 resumed 投影——运行期 resume 走 goal 的 session_start 订阅）
+    wasResumed: () => registry.focused()?.resumed ?? false,
+    // chat 件 bundle（S1 工厂化）：注册表/前台宿主由件构造、组合根在此分配持有
+    //（早期闭包 ③b/④b/④f 惰性引用 registry——TDZ 安全：全部运行期才调用）
+    chat: chatBundle.module,
   });
   // 虚拟面第五/六键注入物（P0-2，契约篇 §1.2 注记①）：参数注入加载器——
   // context 不 import llm/persist（拓扑护栏）。第六键拒开基准 = resolvedDbPath
@@ -738,17 +773,25 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // initial/resume，/reload 收口单张 change）。窗口外的运行时注册仍即时落 change
   //（「模型可见即落日志」不变）
   let loadWindow = true;
+  /** 非退役条目统一落 header 快照（S1：tools/prompts/skills 变更与 /reload 收口
+   * 共用——遍历注册表；退役会话不再 run，change 快照是纯噪声故跳过。writeHeader
+   * 内建 diff，组装参数未变不落；注册表空〔件未装载/persist:false〕自然 no-op） */
+  const writeHeadersAll = (): void => {
+    for (const entry of registry.entries.values()) {
+      if (!entry.retired) entry.controls.writeHeader();
+    }
+  };
   // tools_change → 刷新 loop 工具快照 + 即时落 request/header 快照（骨架篇 §9.2
   // 接线义务；会话篇 §1.3 腿 2「仅变化才快照」——writeHeader 内建 diff，toolSchemas
   // 变了才落 reason=change，run 中途换工具也当场留痕）。注册在装配期 fs 工具族
-  // 之后：装配期注册不触发（首张 header 仍由首 run 落）；chat 件未装载时 chatRef
+  // 之后：装配期注册不触发（首张 header 仍由首 run 落）；chat 件未装载时注册表
   // 空——数组照刷（无 run 即无模型可见性），header 落账自然跳过
   const unwatchToolsChange = ctx.on(TOOLS_CHANGE_EVENT, () => {
     const fresh = tools.list().map((def) => tools.toAgentTool(def));
     toolView.length = 0;
     toolView.push(...fresh);
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
-    chatRef.current?.writeHeader();
+    writeHeadersAll();
   });
   // prompts_change → 重建系统提示词 + 即时落 header 快照（pi-4(a) 落码形态④，与
   // tools_change 同族）：段集只在装载//reload 两时点变（注册/注销即广播）；装配层
@@ -757,7 +800,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const unwatchPromptsChange = ctx.on(PROMPTS_CHANGE_EVENT, () => {
     rebuildSystemPrompt();
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
-    chatRef.current?.writeHeader();
+    writeHeadersAll();
   });
   // skills_change → 重建系统提示词 + 即时落 header 快照（契约篇 §2.2 增补 6，
   // 变更事件族第 3 件，与 prompts_change 同构）：provider 链变更（插件热注册/
@@ -768,7 +811,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const unwatchSkillsChange = ctx.on(SKILLS_CHANGE_EVENT, () => {
     rebuildSystemPrompt();
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
-    chatRef.current?.writeHeader();
+    writeHeadersAll();
   });
   /** 退订三个变更监听（关停序在 flush/close 前调用）：ctx 回卷会逐件注销插件工具/ 段/技能提供方（tools_change/prompts_change/skills_change 随之广播），若库已关监听仍在，会向死连接 append header、重物化简报段——关停期变更非模型可见时点且永不落盘，纯噪声 */
   const unwatchChangeEvents = (): void => {
@@ -777,29 +820,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     unwatchSkillsChange();
   };
 
-  /* ---- ⑧b 开新会话（/new 热切换）：新 Session + durable 换指 + 时间线重置 ----
-   * 编排留组合根（与 /reload 同族——全为宿主资源调度），件内状态（header 差分
-   * 基线/时间线）经 chatRef 控制面复位。 */
+  /* ---- ⑧b 开新会话（/new，S1）：registry.open 一条龙 + 旧聚焦条目退役 ----
+   * 编排留组合根（与 /reload 同族——全为宿主资源调度）：会话创建/durable 直连/
+   * session_start/盖章/header 名分/驱动构造全在 chat 件工厂 open() 内化；旧
+   * 条目退役但 session/durable 保留（迟到结算继续落原会话账——防 seq 撞号），
+   * 驱动停摆（投递降 inject、续跑 INACTIVE——「退役即停摆」）。 */
   const startNewSession = (): Session | undefined => {
-    // run 进行中拒绝热切换（时间线正被 loop 引用）；无持久层/无驱动（件未装载）无事可做
-    const driver = driverRef.current;
-    if (!persistence || driver === undefined || driver.isRunning) return undefined;
-    // /new 新会话仍落 chat 域（默认入口期——/app 前台进入是第三纵切，届时按显式域打标）
-    const fresh = persistence.createSession({ cwd: workspace, profile: 'default', app: CHAT_APP_ID });
-    session = fresh;
-    resumedFlag = false;
-    durableRef.current = createDurableSinks(fresh, { model });
-    // 新会话首事件：sandbox 档（新会话 fold 从零起步，必落——dedup 内建等价无条件落）
-    stampSandboxFacts(fresh);
-    // header 落账状态复位：新会话首快照 reason=initial、diff 基线清零
-    chatRef.current?.resetHeaderState();
+    // 无持久层（诊断面）无事可做；聚焦驱动 run 进行中拒绝（时间线正被 loop 引用）
+    if (!persistence || registry.focused()?.driver.isRunning) return undefined;
+    const previous = registry.focused();
+    const opened = registry.open();
+    if (opened === undefined) return undefined;
+    if (previous !== undefined && previous !== opened) registry.retire(previous.session.header.sessionId);
     // /new 重建时点（pi-4(a) 落码形态③）：具名段重物化——简报等段内容随新会话
     // 快照冻结（旧会话会话内不漂移的对称面：跨会话时点刷新）
     rebuildSystemPrompt();
-    driver.resetTimeline();
-    // /new 新会话落定同发 session_start（§6.4 落码注记——触发点之一；origin=initial）
-    ctx.emit('session_start', { sessionId: fresh.header.sessionId, origin: 'initial' });
-    return fresh;
+    return opened.session;
   };
 
   /* ---- ⑨ 组合树装载（Ring 2/3 行走树；Ring 1 行已在 ④e 独立锚装载——树化批） ----
@@ -811,8 +847,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 事件词汇挂锚 effect——锚 dispose 即 LIFO 级联回卷一切插件注册（工具/监听/服务/
    * 词汇），/reload 的卸载半边由此成立；重锚 = ctx.fork 再派生（注册表同根共享）。
    * ring1Anchor 不在回卷面（Ring 1 行不回卷，契约篇 §5.1 /reload 语义）。chat 件
-   * 的驱动为件内单例——重装载 apply 复用驱动（时间线存续），只重接 provide 与
-   * 结算接线。jiti moduleCache:false 是两条缓存纪律的 v1 基底（重装即全依赖图
+   * 的驱动注册表为工厂级（S1）——重装载 apply 复用全部条目（时间线存续），只
+   * 重接 provide 服务面。jiti moduleCache:false 是两条缓存纪律的 v1 基底（重装即全依赖图
    * 重求值）。plugins 服务 provide 在 ④e 一次（§1.3 服务集恒定）：boot 与
    * /reload 经 applyLoad 就地更新状态，热应用期间服务引用永不断链。
    * 失败行两面语义（§1.6）：boot = 启动断言拒绝启动（先收尾持久层再回卷 ctx，抛全量
@@ -862,12 +898,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       `插件启动断言失败（${lines.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
     );
   }
-  // ④d onSettle 晚绑定收口（§6.4）：通知器需要驱动 + 活会话引用——chat 件
-  //（默认层首行）装载即驱动就绪，此处挂上此后子代理结算即走结算折叠 + 三通道
-  // 通知（装载窗口内无委派件可用，此前窗口结算结构上不可达）
+  // ④d onSettle 晚绑定收口（§6.4）：通知器按注册表解析归属条目——S1 键控
+  //（ownerSessionId 显式键 ?? 调用链——迟到结算折进原会话账，不随前台聚焦错投）
   onSubagentSettle = createSubagentNotifier({
-    getDriver: () => driverRef.current,
-    getSession: () => session,
+    resolveEntry: (sessionId) => registry.entries.get(sessionId),
     model,
   });
   // 应用组件在场断言（契约篇 §5.4——装载期 post-apply 时点，组合树已合成）：
@@ -883,8 +917,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   /** 组合树全量重载（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面） */
   const reload = async (): Promise<ReloadResult> => {
-    // run 进行中拒绝（与 /new 同准入判据——loop 正引用工具快照与提示词，不换装配）
-    if (driverRef.current?.isRunning) return { busy: true };
+    // run 进行中拒绝（与 /new 同准入判据——loop 正引用工具快照与提示词，不换装配；
+    // S1：任一非退役驱动在跑即 busy——多会话并存时全树装配不换）
+    if ([...registry.entries.values()].some((entry) => !entry.retired && entry.driver.isRunning)) {
+      return { busy: true };
+    }
     // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
     let fresh: CompositionReport;
     try {
@@ -919,7 +956,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       appGaps = assertAppComponents(officialApps, fresh);
       // 组装参数变化经 writeHeader 内建 diff 落 reason=change 快照（仅变化才落——
       // 提示词/工具面变了才写，没变不污染日志；件未装载或无持久层为 no-op）
-      chatRef.current?.writeHeader();
+      writeHeadersAll();
       const payload: CompositionReloadedPayload = {
         activated: load.activated.map((item) => item.id),
         failed: load.failed.map((item) => item.id),
@@ -945,8 +982,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       commands: channels.commands,
       ui,
       skills,
-      quit: () => driverRef.current?.requestQuit(),
-      submit: (text) => driverRef.current?.submit(text),
+      // quit/submit 前台聚焦活路由（S1——/new 换驱动后命令面直达新聚焦；quit 路
+      // 的驱动 quit resolve 带动前台退出聚合 promise，TUI 等待位不断流；注册表空
+      //〔件未装载/persist:false〕no-op——命令面仍在，对话循环不在）
+      quit: () => registry.focused()?.driver.requestQuit(),
+      submit: (text) => registry.focused()?.driver.submit(text),
       newSession: startNewSession,
       plugins, // ctx.plugins 服务（⑨ provide——命令壳与宿主同源）
       reload, // 组合根 reload 闭包（⑨ 定义——busy/error/payload 三面）
@@ -972,10 +1012,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   return {
     ctx,
     persistence,
-    // 活取值（/new 热切换后指向新会话；chat 件未装载时恒 undefined）——接口上
-    // 仍是 readonly，实现为 getter
+    // 活取值（前台聚焦条目投影——/new 后指向新会话；chat 件未装载时恒 undefined）
     get session(): Session | undefined {
-      return session;
+      return registry.focused()?.session;
     },
     llm,
     tools,
@@ -1002,15 +1041,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       return systemPrompt;
     },
     skillLocations: locations,
-    // 活取值（chat 件装载后即驱动单例——诊断装配/overlay 禁用两形为 undefined）
+    // 活取值（前台聚焦条目投影——chat 件装载后即首个驱动；诊断装配/overlay 禁用两形为 undefined）
     get conversation(): ConversationDriver | undefined {
-      return driverRef.current;
+      return registry.focused()?.driver;
     },
+    // S1 注册表与前台宿主（恒在——空表/no-op 形见接口注释）
+    drivers: registry,
+    front: chatBundle.front,
     newSession: startNewSession,
     reload,
-    /** 优雅关停：等 run 结算 → flush 屏障 → 关库 → ctx 回卷（§1.3 编排） */
+    /** 优雅关停：等全部驱动结算 → flush 屏障 → 全部条目 session_shutdown → 关库 → ctx 回卷（§1.3 编排，S1 全条目化） */
     async shutdown() {
-      await driverRef.current?.settle();
+      // 全部驱动结算（含退役保留者——迟到 run 收尾；从未起跑/已结算者即回）
+      await Promise.allSettled([...registry.entries.values()].map((entry) => entry.driver.settle()));
       // try/finally：flush/close 任一失败也要 ctx.dispose 回卷（独立重读轮 #16
       // 复核——dispose 是资源必达件，不因持久层收尾异常被跳过；dispose 自身
       // 异常已被 context 回卷隔离逐条吞噬，不会反向炸关停序列）
@@ -1023,9 +1066,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         // 前收口（作用域回卷的 fire-and-forget 兜底只管异常路径，见 jobs.ts）
         await jobs.drain();
         await persistence?.flush();
-        // session_shutdown 钩子（骨架篇 §1.3 序⑤ / 契约篇钩子表）：插件最终
-        // 清理挂点——emit 异常隔离，单个清理器失败不拖垮关停
-        if (session) ctx.emit('session_shutdown', { sessionId: session.header.sessionId });
+        // session_shutdown 钩子（骨架篇 §1.3 序⑤ / 契约篇钩子表，S1 全条目化）：
+        // 全部条目（含退役保留者——迟到结算已收口）各发一次，统一在 flush 之后
+        //（插件清理器不再产生待落盘事件）；emit 异常隔离，单个清理器失败不拖垮关停
+        for (const entry of registry.entries.values()) {
+          ctx.emit('session_shutdown', { sessionId: entry.session.header.sessionId });
+        }
         await persistence?.close();
       } finally {
         await ctx.dispose();

@@ -86,6 +86,7 @@ function makeDriver() {
   const contexts: LlmContext[] = [];
   const baseTools = [...TOOLS];
   const driver = new ConversationDriver({
+    sessionId: 'test-session',
     context: { messages: [], tools: baseTools },
     loopConfig: {
       streamFn: recordingStream(contexts),

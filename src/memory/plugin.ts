@@ -302,48 +302,54 @@ async function applyMemoryPlugin(
     render: { intent: 'hidden', label: '记忆差分' },
   });
   ctx.effect(() =>
-    ctx.on('context_transform', async (messages: unknown, next: (...args: unknown[]) => unknown) => {
-      try {
-        // 纪元懒初始化：从日志派生 mirror（重启撞指纹的旧账在此自愈——首请求
-        // 若发现 delta 与日志视图不一致即落收敛事件清账；/new 新会话日志为空
-        // 天然零账）。闩未就位（理论不可达——首请求前必有事件先到）按空日志防御。
-        if (diffMirror === undefined) {
-          diffMirror =
-            activeSessionId !== undefined
-              ? deriveDiffView(storeFace.loadEvents(activeSessionId), baselineFingerprint)
-              : [];
+    // S1 双参形状：waterfall 第二参 = 归属会话 id（transformContext 桥传入）——
+    // handler 逐参透传 next（单参调用会丢 sessionId，waterfall 兜底 `nextArgs.length
+    // > 0 ? nextArgs : args` 只保首参），差分/检索两 handler 同款纪律
+    ctx.on(
+      'context_transform',
+      async (messages: unknown, sessionId: unknown, next: (...args: unknown[]) => unknown) => {
+        try {
+          // 纪元懒初始化：从日志派生 mirror（重启撞指纹的旧账在此自愈——首请求
+          // 若发现 delta 与日志视图不一致即落收敛事件清账；/new 新会话日志为空
+          // 天然零账）。闩未就位（理论不可达——首请求前必有事件先到）按空日志防御。
+          if (diffMirror === undefined) {
+            diffMirror =
+              activeSessionId !== undefined
+                ? deriveDiffView(storeFace.loadEvents(activeSessionId), baselineFingerprint)
+                : [];
+          }
+          const { face: current } = briefingFace(store, ownerKeys(), {
+            ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
+          });
+          // 全量差分（相对基线，非增量）——净变化为零 = 空差分（+后- 漂移回基线
+          // 自然清零，无需逐事件累计）
+          const delta = diffFaces(baselineFace, current);
+          // 变则落账（durable 是差分与检索即弃注入的分界：权威修正可回放）、
+          // 不变不追写（含收敛清账事件 entries=[]——落了才让重放视图同步归零）
+          if (!sameDiffView(delta, diffMirror)) {
+            sessions.appendEvent('memory/diff', { baseline: baselineFingerprint, entries: delta });
+            diffMirror = delta;
+          }
+          if (delta.length === 0) {
+            return next(messages, sessionId);
+          }
+          // 请求尾注入（memory/diff 自定义角色——瞬态：不落日志、不进转录）；
+          // 行携带 [m:短id] 引用标记（条目短 id 与标记同面——引用回写闭环可用）
+          const body = delta.map((e) => `${e.op} [m:${e.id}] [${e.kind}] ${e.summary}`).join('\n');
+          const injection = {
+            role: DIFF_ROLE,
+            content: `${DIFF_FRAME_SENTENCE}\n${CITATION_INSTRUCTION}\n${body}`,
+            timestamp: Date.now(),
+          };
+          const list = Array.isArray(messages) ? messages : [];
+          return next([...list, injection], sessionId);
+        } catch (err) {
+          // 铁律 3：差分是长进与便利，不是循环的一拍——失败放行原请求，止步日志
+          ctx.logger.error('简报差分追注失败（放行原请求）', { error: describeError(err) });
+          return next(messages, sessionId);
         }
-        const { face: current } = briefingFace(store, ownerKeys(), {
-          ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
-        });
-        // 全量差分（相对基线，非增量）——净变化为零 = 空差分（+后- 漂移回基线
-        // 自然清零，无需逐事件累计）
-        const delta = diffFaces(baselineFace, current);
-        // 变则落账（durable 是差分与检索即弃注入的分界：权威修正可回放）、
-        // 不变不追写（含收敛清账事件 entries=[]——落了才让重放视图同步归零）
-        if (!sameDiffView(delta, diffMirror)) {
-          sessions.appendEvent('memory/diff', { baseline: baselineFingerprint, entries: delta });
-          diffMirror = delta;
-        }
-        if (delta.length === 0) {
-          return next(messages);
-        }
-        // 请求尾注入（memory/diff 自定义角色——瞬态：不落日志、不进转录）；
-        // 行携带 [m:短id] 引用标记（条目短 id 与标记同面——引用回写闭环可用）
-        const body = delta.map((e) => `${e.op} [m:${e.id}] [${e.kind}] ${e.summary}`).join('\n');
-        const injection = {
-          role: DIFF_ROLE,
-          content: `${DIFF_FRAME_SENTENCE}\n${CITATION_INSTRUCTION}\n${body}`,
-          timestamp: Date.now(),
-        };
-        const list = Array.isArray(messages) ? messages : [];
-        return next([...list, injection]);
-      } catch (err) {
-        // 铁律 3：差分是长进与便利，不是循环的一拍——失败放行原请求，止步日志
-        ctx.logger.error('简报差分追注失败（放行原请求）', { error: describeError(err) });
-        return next(messages);
-      }
-    }),
+      },
+    ),
   );
 
   /* ---- ⑥ 按需检索：memory/recall 自定义角色 + context_transform 瀑布 handler ---- */
@@ -360,48 +366,52 @@ async function applyMemoryPlugin(
   });
   const recallTopK = cfg.recallTopK ?? 3;
   ctx.effect(() =>
-    ctx.on('context_transform', async (messages: unknown, next: (...args: unknown[]) => unknown) => {
-      // 当轮 query = 最后一条 user 消息文本（无 user 消息即放行——非对话请求不检索）
-      const list = Array.isArray(messages) ? messages : [];
-      const lastUser = [...list].reverse().find((m): m is { role: string; content: unknown } => {
-        if (typeof m !== 'object' || m === null) return false;
-        const role = (m as { role?: unknown }).role;
-        return role === 'user';
-      });
-      const query =
-        lastUser && typeof lastUser.content === 'string' ? lastUser.content.slice(0, RECALL_QUERY_MAX_CHARS) : '';
-      if (query === '') {
-        return next(messages);
-      }
-      // 候选池取 k×5，按 kind 优先级（failure/insight/fact 先）稳定排序后截 top-k；
-      // 命中才注入——空手放行不产注入消息（每请求至多一条，单 handler 单追加）
-      const pool = store.search(query, ownerKeys(), recallTopK * RECALL_POOL_FACTOR);
-      const ranked = pool
-        .map((record, rank) => ({ record, rank }))
-        .sort((a, b) => {
-          const byKind = RECALL_KIND_PRIORITY[a.record.kind] - RECALL_KIND_PRIORITY[b.record.kind];
-          return byKind !== 0 ? byKind : a.rank - b.rank;
-        })
-        .slice(0, recallTopK)
-        .map((item) => item.record);
-      const sanitized = sanitizeForModel(ranked);
-      if (sanitized.entries.length === 0) {
-        return next(messages);
-      }
-      // 注入行带引用标记（§6 引用回写——检索命中是复活的唯一正门：条目离开
-      // 常驻简报后仍可在此被命中，模型引用即 markUsed 刷新活动锚回简报）
-      const body = sanitized.entries
-        .map(
-          (e) =>
-            `- ${citationMarker(e.record.id)} [${e.record.kind}] ${e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary}`,
-        )
-        .join('\n');
-      const injection = {
-        role: RECALL_ROLE,
-        content: `${RECALL_FRAME_SENTENCE}\n${CITATION_INSTRUCTION}\n${body}`,
-        timestamp: Date.now(),
-      };
-      return next([...list, injection]);
-    }),
+    // S1 双参形状：同 ⑤''——sessionId 逐参透传 next（防 waterfall 单参兜底丢键）
+    ctx.on(
+      'context_transform',
+      async (messages: unknown, sessionId: unknown, next: (...args: unknown[]) => unknown) => {
+        // 当轮 query = 最后一条 user 消息文本（无 user 消息即放行——非对话请求不检索）
+        const list = Array.isArray(messages) ? messages : [];
+        const lastUser = [...list].reverse().find((m): m is { role: string; content: unknown } => {
+          if (typeof m !== 'object' || m === null) return false;
+          const role = (m as { role?: unknown }).role;
+          return role === 'user';
+        });
+        const query =
+          lastUser && typeof lastUser.content === 'string' ? lastUser.content.slice(0, RECALL_QUERY_MAX_CHARS) : '';
+        if (query === '') {
+          return next(messages, sessionId);
+        }
+        // 候选池取 k×5，按 kind 优先级（failure/insight/fact 先）稳定排序后截 top-k；
+        // 命中才注入——空手放行不产注入消息（每请求至多一条，单 handler 单追加）
+        const pool = store.search(query, ownerKeys(), recallTopK * RECALL_POOL_FACTOR);
+        const ranked = pool
+          .map((record, rank) => ({ record, rank }))
+          .sort((a, b) => {
+            const byKind = RECALL_KIND_PRIORITY[a.record.kind] - RECALL_KIND_PRIORITY[b.record.kind];
+            return byKind !== 0 ? byKind : a.rank - b.rank;
+          })
+          .slice(0, recallTopK)
+          .map((item) => item.record);
+        const sanitized = sanitizeForModel(ranked);
+        if (sanitized.entries.length === 0) {
+          return next(messages, sessionId);
+        }
+        // 注入行带引用标记（§6 引用回写——检索命中是复活的唯一正门：条目离开
+        // 常驻简报后仍可在此被命中，模型引用即 markUsed 刷新活动锚回简报）
+        const body = sanitized.entries
+          .map(
+            (e) =>
+              `- ${citationMarker(e.record.id)} [${e.record.kind}] ${e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary}`,
+          )
+          .join('\n');
+        const injection = {
+          role: RECALL_ROLE,
+          content: `${RECALL_FRAME_SENTENCE}\n${CITATION_INSTRUCTION}\n${body}`,
+          timestamp: Date.now(),
+        };
+        return next([...list, injection], sessionId);
+      },
+    ),
   );
 }

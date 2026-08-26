@@ -141,7 +141,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'context_transform',
     mode: 'waterfall',
-    note: 'LLM 请求组装最后关口的消息变换瀑布（契约篇 §2.2 message 层；载荷 = contracts 标准 AgentMessage[]，逐 handler 变换传播——loop transformContext 由组合根桥接到此钩子，按需检索注入走它）',
+    note: 'LLM 请求组装最后关口的消息变换瀑布（契约篇 §2.2 message 层；载荷 = contracts 标准 AgentMessage[]，逐 handler 变换传播——loop transformContext 由组合根桥接到此钩子，按需检索注入走它。S1 双参：第二参 = 归属会话 id（transformContext 桥随批传入），handler 须 next(messages, sessionId) 逐参透传——waterfall 兜底仅保首参，单参调用丢键）',
   },
   {
     name: 'job_settled',

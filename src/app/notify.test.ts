@@ -1,15 +1,17 @@
 /**
- * L5 app — 子代理结算通知器单元测试（骨架篇 §6.4 落码注记，subagent 纵切三）。
+ * L5 app — 子代理结算通知器单元测试（骨架篇 §6.4 落码注记，subagent 纵切三；S1 键控随迁）。
  *
  * 真件：真 Session（append 落事件即观测面）+ formatSettlementNotice 纯函数；
  * driver 用记录替身（通知器的端口半边——三通道路由行为由 deliver.test.ts 锁）。
- * 锁行为面：结算折叠（llm/usage 形状/跳过条件）/ 通知路由（background·owner·
- * 会话在位三条件）/ 通知文案结构（label 兜底/失败族正文/截断）。
+ * 锁行为面：归属解析（ownerSessionId 显式键 → 调用链 → 无处即跳）/ 结算折叠
+ * （llm/usage 形状/跳过条件）/ 通知路由（background·条目在位两条件）/ 通知
+ * 文案结构（label 兜底/失败族正文/截断）。
  */
 import { describe, expect, it } from 'vitest';
 import { Session } from '../session/session.js';
 import type { SubagentExecution, SubagentRequest, SubagentResult, SubagentSettlement } from '../contracts/subagent.js';
-import type { ConversationDriver, DeliverChannel, DeliverOptions } from '../chat/index.js';
+import type { ConversationDriver, DeliverChannel, DeliverOptions, DriverEntry } from '../chat/index.js';
+import { runInSessionChain } from '../context/chain.js';
 import { createSubagentNotifier, formatSettlementNotice } from './notify.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -37,7 +39,22 @@ function recordingDriver(): { driver: ConversationDriver; calls: DeliverCall[] }
   return { driver, calls };
 }
 
-/** 结算载荷构造（缺省 = 后台 + 有用量 + 无主） */
+/** 注册表替身（entries 直查——与 assembly 接线 resolveEntry: entries.get 同款） */
+function makeRegistry(): { notifier: (s: SubagentSettlement) => void; entries: Map<string, DriverEntry> } {
+  const entries = new Map<string, DriverEntry>();
+  const notifier = createSubagentNotifier({ resolveEntry: (sessionId) => entries.get(sessionId), model: 'test/model' });
+  return { notifier, entries };
+}
+
+/** 建一条已注册条目（记录 driver + 真 session——折叠/投递两个观测面都齐） */
+function registerEntry(entries: Map<string, DriverEntry>): { entry: DriverEntry; calls: DeliverCall[] } {
+  const { driver, calls } = recordingDriver();
+  const entry = { session: new Session(), driver, retired: false } as unknown as DriverEntry;
+  entries.set(entry.session.header.sessionId, entry);
+  return { entry, calls };
+}
+
+/** 结算载荷构造（缺省 = 后台 + 有用量 + 无显式键） */
 function settlement(
   overrides: Partial<{ result: Partial<SubagentResult>; background: boolean; ownerSessionId?: string }> = {},
 ): SubagentSettlement {
@@ -62,21 +79,14 @@ function settlement(
   return { request, execution, result };
 }
 
-/** 组装通知器（session 为活引用——测试内直改闭包变量模拟 /new 热切换） */
-function makeNotifier(session: Session | undefined) {
-  const { driver, calls } = recordingDriver();
-  const notifier = createSubagentNotifier({ getDriver: () => driver, getSession: () => session, model: 'test/model' });
-  return { notifier, calls };
-}
-
 /* ---------------- 用例 ---------------- */
 
-describe('结算折叠（llm/usage 计量事件）', () => {
-  it('有用量：并入当前会话一条 background 道 llm/usage（callId = execution.id）', () => {
-    const session = new Session();
-    const { notifier } = makeNotifier(session);
-    notifier(settlement());
-    const usageEvents = session.events.filter((e) => e.type === 'llm/usage');
+describe('归属解析 + 结算折叠（llm/usage 计量事件）', () => {
+  it('显式键命中：并入该会话一条 background 道 llm/usage（callId = execution.id）', () => {
+    const { notifier, entries } = makeRegistry();
+    const { entry } = registerEntry(entries);
+    notifier(settlement({ ownerSessionId: entry.session.header.sessionId }));
+    const usageEvents = entry.session.events.filter((e) => e.type === 'llm/usage');
     expect(usageEvents).toHaveLength(1);
     expect(usageEvents[0]!.data).toEqual({
       callId: 'child-session-1',
@@ -86,24 +96,50 @@ describe('结算折叠（llm/usage 计量事件）', () => {
     });
   });
 
-  it('无用量（外部 provider 报不上）：折叠跳过，不落空事件', () => {
-    const session = new Session();
-    const { notifier } = makeNotifier(session);
-    notifier(settlement({ result: { usage: undefined } }));
-    expect(session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(0);
+  it('无显式键、调用链在场：折进链会话（in-process 结算回调运行于父 tool call 链）', () => {
+    const { notifier, entries } = makeRegistry();
+    const { entry } = registerEntry(entries);
+    runInSessionChain(entry.session.header.sessionId, () => notifier(settlement()));
+    expect(entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
   });
 
-  it('无会话（persist:false 诊断面）：折叠跳过不抛', () => {
-    const { notifier } = makeNotifier(undefined);
+  it('显式键优先于调用链（键 ≠ 链时随键走——归属不由调用语境僭越）', () => {
+    const { notifier, entries } = makeRegistry();
+    const owner = registerEntry(entries);
+    const chained = registerEntry(entries);
+    runInSessionChain(chained.entry.session.header.sessionId, () =>
+      notifier(settlement({ ownerSessionId: owner.entry.session.header.sessionId })),
+    );
+    expect(owner.entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
+    expect(chained.entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(0);
+  });
+
+  it('无键无链：不折叠不投递不抛（测试面无 ALS 语境——结构性防御位）', () => {
+    const { notifier, entries } = makeRegistry();
+    registerEntry(entries);
     expect(() => notifier(settlement())).not.toThrow();
+  });
+
+  it('键查无条目（会话未开/已整体卸载）：折叠跳过（无处落账）', () => {
+    const { notifier, entries } = makeRegistry();
+    const { entry } = registerEntry(entries);
+    notifier(settlement({ ownerSessionId: 'sess-不在表' }));
+    expect(entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(0);
+  });
+
+  it('无用量（外部 provider 报不上）：折叠跳过，不落空事件', () => {
+    const { notifier, entries } = makeRegistry();
+    const { entry } = registerEntry(entries);
+    notifier(settlement({ ownerSessionId: entry.session.header.sessionId, result: { usage: undefined } }));
+    expect(entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(0);
   });
 });
 
 describe('三通道通知路由', () => {
-  it('background + owner 匹配（或缺省无主）：投递 source=subagent-settled 的 user 消息（backgroundWake 计自激预算）', () => {
-    const session = new Session();
-    const { notifier, calls } = makeNotifier(session);
-    notifier(settlement({ ownerSessionId: session.header.sessionId }));
+  it('background + 归属命中：投递 source=subagent-settled 的 user 消息（backgroundWake 计自激预算）', () => {
+    const { notifier, entries } = makeRegistry();
+    const { entry, calls } = registerEntry(entries);
+    notifier(settlement({ ownerSessionId: entry.session.header.sessionId }));
     expect(calls).toHaveLength(1);
     expect(calls[0]!.source).toBe('subagent-settled');
     expect(calls[0]!.backgroundWake).toBe(true);
@@ -112,39 +148,26 @@ describe('三通道通知路由', () => {
     expect(calls[0]!.content).toContain('completed');
   });
 
-  it('owner 不匹配（/new 已切走）：通知丢弃——折叠仍落（记账不随路由丢）', () => {
-    const session = new Session();
-    const { notifier, calls } = makeNotifier(session);
-    notifier(settlement({ ownerSessionId: 'sess-旧会话' }));
-    expect(calls).toHaveLength(0);
-    expect(session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
-  });
-
   it('前台委派：不通知（父正 await result——注入即重复）；折叠仍落', () => {
-    const session = new Session();
-    const { notifier, calls } = makeNotifier(session);
-    notifier(settlement({ background: false }));
+    const { notifier, entries } = makeRegistry();
+    const { entry, calls } = registerEntry(entries);
+    notifier(settlement({ background: false, ownerSessionId: entry.session.header.sessionId }));
     expect(calls).toHaveLength(0);
-    expect(session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
+    expect(entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
   });
 
-  it('无会话：不通知（无路由键也无投递意义）', () => {
-    const { notifier, calls } = makeNotifier(undefined);
-    notifier(settlement());
-    expect(calls).toHaveLength(0);
+  it('退役条目照折照投（通知器不判 retired——停摆降级 inject 是驱动侧语义，路由不断）', () => {
+    const { notifier, entries } = makeRegistry();
+    const { entry, calls } = registerEntry(entries);
+    entry.retired = true;
+    notifier(settlement({ ownerSessionId: entry.session.header.sessionId }));
+    expect(calls).toHaveLength(1);
+    expect(entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
   });
 
-  it('无驱动（chat 件未装载的防御位）：不通知；折叠仍落（记账不依赖对话循环）', () => {
-    const session = new Session();
-    const { calls } = recordingDriver();
-    const notifier = createSubagentNotifier({
-      getDriver: () => undefined,
-      getSession: () => session,
-      model: 'test/model',
-    });
-    notifier(settlement());
-    expect(calls).toHaveLength(0);
-    expect(session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
+  it('无归属（无键无链）：不通知（无处可投）', () => {
+    const { notifier } = makeRegistry();
+    expect(() => notifier(settlement())).not.toThrow();
   });
 });
 

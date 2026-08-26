@@ -18,7 +18,18 @@ import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import type { AssistantMessage, Usage } from '../contracts/llm.js';
 import { describeError } from '../contracts/errors.js';
+import { runInSessionChain } from '../context/chain.js';
 import type { DurableSinks } from './durable.js';
+
+/**
+ * run 结算载荷（骨架篇 §9.3 ctx.agent.onRunSettled）：sessionId = 结算 run 的
+ * 归属会话（S1 增维——订阅是全局单份、run 是多驱动各自的，消费方按 sessionId
+ * 路由，goal 直查该会话 goals 表不再依赖装配闭包单值）。
+ */
+export interface RunSettled {
+  readonly status: RunStatus;
+  readonly sessionId: string;
+}
 
 /** 零用量（error 合成消息用） */
 const NO_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
@@ -68,6 +79,8 @@ export function resolveWakeToolAllowList(metas: readonly (DeliverMeta | undefine
 
 /** 会话驱动依赖（chat 件装配产物注入） */
 export interface ConversationDriverDeps {
+  /** 归属会话 id（S1 多驱动路由键——调用链作用域包裹与 RunSettled 载荷的取值源） */
+  readonly sessionId: string;
   /** loop 上下文（messages 活数组——历史投影回读 + 新消息追加同一时间线） */
   readonly context: AgentContext;
   /** loop 配置基座（streamFn/model/convertToLlm；steering 取数口由驱动补齐） */
@@ -87,6 +100,8 @@ export interface ConversationDriverDeps {
 export class ConversationDriver {
   /** 待注入消息队列（running 期 = steering 逐条；run 间隙 = followUp 全量） */
   private readonly queue = new PendingMessageQueue();
+  /** 归属会话 id（S1 多驱动路由键——调用链包裹与 RunSettled 载荷取值源） */
+  private readonly sessionId: string;
   private readonly context: AgentContext;
   private readonly config: AgentLoopConfig;
   private readonly durable: DurableSinks | undefined;
@@ -104,9 +119,10 @@ export class ConversationDriver {
   /**
    * run 结算订阅表（骨架篇 §9.3 onRunSettled 的驱动侧半边）：
    * ctx.agent 服务挂入总派发器（件内构造）——隔离责任在服务层，驱动只管
-   * 在每个 run 终结（running 复位后）同步派发一次。
+   * 在每个 run 终结（running 复位后）同步派发一次。载荷含归属 sessionId
+   * （S1——多驱动下订阅方按其路由）。
    */
-  private readonly runSettledListeners = new Set<(settled: { status: RunStatus }) => void>();
+  private readonly runSettledListeners = new Set<(settled: RunSettled) => void>();
   /** request/header 是否已落（会话首个 run 前一次） */
   private headerWritten = false;
   /** 是否有 run 在跑（submit 的 steering/followUp 分流依据） */
@@ -120,6 +136,7 @@ export class ConversationDriver {
   });
 
   constructor(deps: ConversationDriverDeps) {
+    this.sessionId = deps.sessionId;
     this.context = deps.context;
     this.durable = deps.durable;
     this.writeHeader = deps.writeHeader;
@@ -153,6 +170,17 @@ export class ConversationDriver {
   requestQuit(): void {
     this.abortController.abort();
     this.quitResolve();
+  }
+
+  /**
+   * 退役（S1 /new 换新驱动）：仅 abort 不 resolve quit promise——此后一切投递
+   * 走 inject 通道（只落日志保审计不开 run），迟到结算照常发（fireRunSettled
+   * 不受 abort 静默）。与 requestQuit 的差异：退役是「会话停摆」不是「进程退出」
+   * ——前台退出聚合（frontQuit）只认 requestQuit，退役驱动的 quit promise
+   * 永不 resolve，防 /new 误触发 TUI 退出。
+   */
+  retire(): void {
+    this.abortController.abort();
   }
 
   /** headless 单次执行：开一个 run 等终值（命令入口用；与 submit 互斥使用） */
@@ -262,16 +290,20 @@ export class ConversationDriver {
       return undefined;
     }
     this.running = true;
-    const attempt = this.runTurns(prompts);
+    // 调用链会话作用域写点①（骨架篇 §9.3 机制定案）：runTurns 整链包裹本驱动会话
+    // ——工具执行/管道 sink/context_transform 桥/事件落账全链自然继承归属语境
+    const attempt = runInSessionChain(this.sessionId, () => this.runTurns(prompts));
     // 结算通知序（骨架篇 §9.3 onRunSettled）：finally 先注册先执行——running
     // 复位先于订阅者派发，订阅回调内 deliver 见到的必是闲时（followUp 开轮
     // 判定不被 running 卡死）。订阅回调同步执行：goal 续跑等注入即在此点起轮
     const guarded = attempt.finally(() => {
       this.running = false;
     });
+    // 调用链会话作用域写点②：结算回调显式重包——attempt.then 的注册点在包裹区外
+    // （launch 自身可能运行于任意调用链语境），重包为不依赖包裹形状的确定位
     void attempt.then(
-      (result) => this.fireRunSettled(result.status),
-      () => this.fireRunSettled('failed'),
+      (result) => runInSessionChain(this.sessionId, () => this.fireRunSettled(result.status)),
+      () => runInSessionChain(this.sessionId, () => this.fireRunSettled('failed')),
     );
     this.runPromise = guarded.then(
       () => undefined,
@@ -282,10 +314,10 @@ export class ConversationDriver {
 
   /**
    * 订阅 run 结算（骨架篇 §9.3 ctx.agent.onRunSettled 的驱动半边）：
-   * 每个 run 终结（含异常兜底合成路）派发一次 status。不承诺恰好一次——
-   * 订阅方须容忍重复（deliver 路由自适应目标状态，§4.1）。
+   * 每个 run 终结（含异常兜底合成路）派发一次 status + 归属 sessionId。不承诺
+   * 恰好一次——订阅方须容忍重复（deliver 路由自适应目标状态，§4.1）。
    */
-  onRunSettled(cb: (settled: { status: RunStatus }) => void): () => void {
+  onRunSettled(cb: (settled: RunSettled) => void): () => void {
     this.runSettledListeners.add(cb);
     return () => {
       this.runSettledListeners.delete(cb);
@@ -294,7 +326,8 @@ export class ConversationDriver {
 
   /** 派发 run 结算（快照遍历——派发中注销/新订不炸迭代；回调异常归服务层隔离壳） */
   private fireRunSettled(status: RunStatus): void {
-    for (const cb of [...this.runSettledListeners]) cb({ status });
+    const settled: RunSettled = { status, sessionId: this.sessionId };
+    for (const cb of [...this.runSettledListeners]) cb(settled);
   }
 
   /** run 序列：首 run + followUp 续跑循环；异常兜底合成 error 收尾 */

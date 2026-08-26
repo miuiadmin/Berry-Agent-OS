@@ -369,3 +369,54 @@ describe('persist:false 降级：goal 空转', () => {
     expect(await runtime.channels.commands.dispatch('/goal')).toBe('unknown');
   });
 });
+
+/* ---------------- 用例：S1 键控（结算/记账按归属会话各归各） ---------------- */
+
+describe('S1 键控：goal 结算/降级按归属会话路由', () => {
+  it('双驱动各持目标：A 的续跑只进 A 时间线，B 目标不受 A 结算牵连', async () => {
+    // 消费序：A 首轮 → A 续跑轮 → B 首轮（末条兜底重复无碍）
+    const { streamFn, contexts } = scriptedStream([textMessage('答A1'), textMessage('答A2'), textMessage('答B1')]);
+    const runtime = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const first = registry.focused()!;
+    // goal_set 走聚焦路由（直接调工具无调用链——落前台聚焦会话）
+    await callTool(runtime, 'goal_set', { objective: '甲目标', tokenBudget: 100000 });
+    const second = registry.open()!;
+    await callTool(runtime, 'goal_set', { objective: '乙目标', tokenBudget: 100000 });
+
+    // A 跑完一轮（结算 completed）→ 续跑注入只进 A 时间线（显式键 = settled.sessionId）
+    await first.driver.submitOnce('甲开始');
+    await spinUntil(() => contexts.length >= 2, 'A 续跑注入开轮');
+    await first.driver.settle();
+    const aInjected = first.session.events.filter(
+      (e) => e.type === 'user/message' && (e.data as { source?: string }).source === 'plugin:goal',
+    );
+    expect(aInjected.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(aInjected)).toContain('甲目标');
+
+    // B 跑一轮：自己的目标在、A 的续跑提示词不串入 B 时间线
+    await second.driver.submitOnce('乙开始');
+    await second.driver.settle();
+    expect(JSON.stringify(second.session.events)).not.toContain('甲目标');
+    expect(JSON.stringify(first.session.events)).not.toContain('乙目标');
+
+    // 各会话目标行独立可查（goal_get 走聚焦——幂等 open 切回）
+    registry.open({ resume: first.session.header.sessionId });
+    expect(await goalText(runtime)).toContain('甲目标');
+    registry.open({ resume: second.session.header.sessionId });
+    expect(await goalText(runtime)).toContain('乙目标');
+  });
+
+  it('⓪b 续接降级事件面：session_start origin=resume → 该会话 active 行降 needs-resume', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    await callTool(runtime, 'goal_set', { objective: '跨进程目标', tokenBudget: 100000 });
+    expect(await goalText(runtime)).toContain('状态：active');
+    // 进程内再开续接会话的等价物（chat 件 open 恒发 session_start——goal 事件面订阅）
+    runtime.ctx.emit('session_start', { sessionId: runtime.session!.header.sessionId, origin: 'resume' });
+    expect(await goalText(runtime)).toContain('状态：needs-resume');
+    // 非 resume 起源不触发降级路径（新开不是续接——状态保持，不抛不炸）
+    runtime.ctx.emit('session_start', { sessionId: runtime.session!.header.sessionId, origin: 'new' });
+    expect(await goalText(runtime)).toContain('状态：needs-resume');
+  });
+});
