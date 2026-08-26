@@ -157,6 +157,14 @@ export interface CompositionRow {
   disabled?: boolean | string;
   /** 官方默认层安全栈强制点标记：用户 overlay 不可 disable（仅官方层行可携带） */
   fixed?: boolean;
+  /**
+   * 运行域（契约篇 §1.7，2026-08-26 第二十七批刀二）：缺省 'main' = 同进程装载
+   * （现行唯一路径）；'worker' = worker 分域装载（装载校验过界 + apply 在 worker
+   * 域执行——**声明面零变化**：同一份插件代码/配置/事件声明，仅执行域不同，
+   * 调用面允许异步收窄〔同步收窄清单见规范〕）。'external'（案三外部进程域）
+   * 是预留词未开闸——值域校验只认 main/worker。
+   */
+  runtime?: 'main' | 'worker';
 }
 
 /** 跳过原因词汇（§2.2 增补 1：disabled 静态禁用 / platform 平台门控；目录信任略过随信任门补） */
@@ -180,6 +188,11 @@ export interface PluginPlanRow {
   skip?: PluginSkipReason;
   /** 入口解析失败原因（加载器永不自动安装——进启动断言指引安装） */
   unresolved?: string;
+  /**
+   * 运行域（CompositionRow.runtime 透传——worker 行在加载器里走分域装载管线：
+   * 装载校验过界 + apply 于 worker 域执行，契约篇 §1.7）
+   */
+  runtime?: 'main' | 'worker';
 }
 
 /**

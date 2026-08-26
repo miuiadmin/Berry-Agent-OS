@@ -18,6 +18,7 @@ import {
   diffRing1Rows,
   RING1_REQUIRED_ROW_IDS,
   createPathsService,
+  loadOverlayRows,
   saveOverlayRows,
   toggleOverlayRow,
   upsertOverlayPluginRef,
@@ -156,6 +157,79 @@ describe('overlay 装载与拒绝式校验', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: x\n    plugin: p\n    disabled: maybe\n');
     expect(() => loadComposition(dataDir)).toThrowError(/disabled 必须是 true 或平台名/);
+  });
+});
+
+/* ---------------- runtime 运行域字段（第二十七批刀二 K3-b1，契约篇 §1.7） ---------------- */
+
+describe('runtime 运行域字段', () => {
+  it('insert 行 runtime: worker：进树且计划行透传（声明面零变化，执行域换轨）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: worker\n`);
+    const report = loadUserComposition(dataDir);
+    expect(report.rows).toEqual([{ id: 'demo', plugin: entry, runtime: 'worker' }]);
+    expect(report.plan).toEqual([{ id: 'demo', entry, runtime: 'worker' }]);
+  });
+
+  it('runtime 显式 main：与缺省同义（合法值域之一，不制造第二形态）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: main\n`);
+    const report = loadUserComposition(dataDir);
+    expect(report.plan).toEqual([{ id: 'demo', entry, runtime: 'main' }]);
+  });
+
+  it('值域拒绝式：external（案三预留词未开闸）与非法类型一律 COMPOSITION_ROW_INVALID', () => {
+    const reserved = makeDataDir();
+    const entry = writeEntryFile(reserved);
+    writeOverlay(reserved, `  - id: demo\n    plugin: ${entry}\n    runtime: external\n`);
+    expect(() => loadComposition(reserved)).toThrowError(/runtime 必须是 'main' 或 'worker'/);
+
+    const badType = makeDataDir();
+    const entry2 = writeEntryFile(badType);
+    writeOverlay(badType, `  - id: demo\n    plugin: ${entry2}\n    runtime: 3\n`);
+    expect(() => loadComposition(badType)).toThrowError(/runtime 必须是 'main' 或 'worker'/);
+  });
+
+  it('builtin 官方行声明 worker：机器执法即响（官方随包件恒 main 域，§1.7）', () => {
+    const dataDir = makeDataDir();
+    // 替换官方层 memory 行只改 runtime——字段合法但 builtin 执法面拦截
+    // （注册表须命中才走到执法点：unresolved 行在拦截之前分流）
+    writeOverlay(dataDir, '  - id: memory\n    runtime: worker\n');
+    const officialStub = { name: 'memory-stub', apply: async () => {} };
+    try {
+      loadComposition(dataDir, { 'builtin:memory': officialStub });
+      expect.unreachable('builtin 行声明 worker 必须即响');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+      expect((err as AppError).message).toContain('builtin 官方件不可声明 runtime: worker');
+    }
+  });
+
+  it('写回往返零字段损失：runtime 随行序列化（parse→stringify→parse 幂等）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    saveOverlayRows(dataDir, [
+      { id: 'demo', plugin: entry, runtime: 'worker' },
+      { id: 'plain', plugin: entry },
+    ]);
+    const reloaded = loadOverlayRows(dataDir);
+    expect(reloaded).toEqual([
+      { id: 'demo', plugin: entry, runtime: 'worker' },
+      { id: 'plain', plugin: entry },
+    ]);
+  });
+
+  it('toggle 禁用→启用：runtime 字段存续（纯 runtime 替换行不误删）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    saveOverlayRows(dataDir, [{ id: 'demo', plugin: entry, runtime: 'worker', config: { k: 1 } }]);
+    toggleOverlayRow(dataDir, 'demo'); // → 禁用
+    toggleOverlayRow(dataDir, 'demo'); // → 启用（删 disabled 键，runtime/config 存续）
+    const row = loadOverlayRows(dataDir).find((r) => r.id === 'demo');
+    expect(row).toEqual({ id: 'demo', plugin: entry, runtime: 'worker', config: { k: 1 } });
   });
 });
 

@@ -164,7 +164,7 @@ export interface CompositionReport {
 }
 
 /** overlay 允许的行字段全集（未知字段拒绝式——§6.5 pre-release 纪律） */
-const ROW_KEYS = new Set(['id', 'plugin', 'config', 'disabled', 'fixed']);
+const ROW_KEYS = new Set(['id', 'plugin', 'config', 'disabled', 'fixed', 'runtime']);
 
 /**
  * 读并校验 overlay 行集（文件不存在 = 空 overlay——首启零配置即合法）。
@@ -238,11 +238,20 @@ function validateRow(raw: unknown, where: string): CompositionRow {
       `${where}：fixed 只能出现在官方默认层（安全栈强制点），overlay 不可设置`,
     );
   }
+  const runtime = record['runtime'];
+  if (runtime !== undefined && runtime !== 'main' && runtime !== 'worker') {
+    // 'external'（案三外部进程域）是预留词未开闸——显式点名防误配
+    throw new AppError(
+      COMPOSITION_ROW_INVALID,
+      `${where}：runtime 必须是 'main' 或 'worker'（当前值：${String(runtime)}；'external' 为案三预留词未开闸，契约篇 §1.7）`,
+    );
+  }
   return {
     id,
     ...(plugin !== undefined ? { plugin } : {}),
     ...(config !== undefined ? { config: config as Record<string, unknown> } : {}),
     ...(disabled !== undefined ? { disabled: disabled as boolean | string } : {}),
+    ...(runtime !== undefined ? { runtime: runtime as 'main' | 'worker' } : {}),
   };
 }
 
@@ -279,6 +288,7 @@ function mergeRows(defaultRows: readonly CompositionRow[], overlayRows: readonly
       ...(overlay.plugin !== undefined ? { plugin: overlay.plugin } : {}),
       ...(overlay.config !== undefined ? { config: overlay.config } : {}),
       ...(overlay.disabled !== undefined ? { disabled: overlay.disabled } : {}),
+      ...(overlay.runtime !== undefined ? { runtime: overlay.runtime } : {}),
     });
   }
   return order.map((id) => byId.get(id)!);
@@ -374,6 +384,14 @@ export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry
           unresolved: `官方件「${ref}」不在宿主注册表（builtin: 是保留前缀——仅官方随包件可用）`,
         });
       } else {
+        // 机器执法（§1.7，第二十七批刀二）：builtin 官方随包件恒 main 域——随包
+        // 件零分域收益（不额外买隔离），声明 worker = 配置面错误即响
+        if (row.runtime === 'worker') {
+          throw new AppError(
+            COMPOSITION_ROW_INVALID,
+            `组合树行 ${row.id}：builtin 官方件不可声明 runtime: worker（官方随包件恒 main 域执行，契约篇 §1.7）`,
+          );
+        }
         plan.push({ id: row.id, builtin: module, ...(row.config !== undefined ? { config: row.config } : {}) });
       }
       continue;
@@ -387,6 +405,7 @@ export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry
             unresolved: `插件「${ref}」入口无法解析（<数据目录>/plugins/node_modules/ 下未安装或无入口文件）——加载器永不自动安装，请先安装`,
           }),
       ...(row.config !== undefined ? { config: row.config } : {}),
+      ...(row.runtime !== undefined ? { runtime: row.runtime } : {}),
     });
   }
   return { rows, plan };
@@ -462,8 +481,8 @@ export function pluginInstallRootExists(dataDir: string): boolean {
 /* ---------------------------------------------------------------------------------- */
 /* overlay 写回（ctx.plugins install/toggle 的持久化半边，2026-08-23 M2 /reload 纵切）。 */
 /* 原子写走 persist 公共件（§1.5.1(b)）；往返纪律（§6.3）：写面只序列化 overlay 合法    */
-/* 字段（id/plugin/config/disabled——fixed 属官方层永不出现在写面），装载面 validateRow  */
-/* 拒绝式同构——parse→stringify→parse 零字段损失（往返测试锁）。                         */
+/* 字段（id/plugin/config/disabled/runtime——fixed 属官方层永不出现在写面），装载面      */
+/* validateRow 拒绝式同构——parse→stringify→parse 零字段损失（往返测试锁）。             */
 /* ---------------------------------------------------------------------------------- */
 
 /**
@@ -476,6 +495,7 @@ export function saveOverlayRows(dataDir: string, rows: readonly CompositionRow[]
       ...(row.plugin !== undefined ? { plugin: row.plugin } : {}),
       ...(row.config !== undefined ? { config: row.config } : {}),
       ...(row.disabled !== undefined ? { disabled: row.disabled } : {}),
+      ...(row.runtime !== undefined ? { runtime: row.runtime } : {}),
     })),
   };
   writeAtomicFile(join(dataDir, OVERLAY_FILENAME), stringifyYaml(doc));
@@ -519,7 +539,7 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
       }
       const rest = { ...row };
       delete rest.disabled;
-      if (rest.plugin === undefined && rest.config === undefined) continue;
+      if (rest.plugin === undefined && rest.config === undefined && rest.runtime === undefined) continue;
       next.push(rest);
     }
     saveOverlayRows(dataDir, next);
