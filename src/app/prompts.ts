@@ -109,12 +109,14 @@ export function registerPromptsService(ctx: Context): { service: PromptsService;
       return [...sections.keys()].sort();
     },
 
-    materialize() {
+    materialize(sessionId) {
       const ordered = [...sections.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const parts: string[] = [];
       for (const section of ordered) {
         try {
-          const text = section.render();
+          // 语境参数透传（S2 契约篇 §1.3 落码形态①）：会话键控段（记忆简报）
+          // 用 sessionId 冻结该会话基线；undefined = 诊断物化（不冻结）
+          const text = section.render(sessionId);
           // 渲染产物为空 = 段当前无内容（如记忆库空）：跳过而非留空壳分节
           if (text.trim() !== '') parts.push(text);
         } catch (err) {

@@ -13,6 +13,12 @@
  * 计算目标内容，全部通过后才逐文件写入——语义错误（定位失败/未读/CAS 冲突）
  * 全部前置暴露，非原子窗口（骨架篇声明：跨文件顺序应用、无回滚）只剩物理
  * 写失败一种。
+ *
+ * 写串行链（S2 骨架篇 §7.5②，2026-08-26）：全部写路径（write 全段 / edit 两
+ * 阶段全段）经 per-canonical-path 模块级链互斥——多驱动/子代理并发写同一物理
+ * 文件时，后到写者的 stat→CAS 在前驱落盘后才跑，观察指纹必然过期而被拒，不
+ * 再有「两写者都通过 CAS、后写覆盖先写」的静默丢失。链与实例无关（物理路径
+ * 全局唯一），详见 serializeWrites 注记。
  */
 
 import { basename, dirname, extname, isAbsolute, join, resolve as resolvePath, sep } from 'node:path';
@@ -101,6 +107,56 @@ async function currentVersion(abs: string): Promise<string | undefined> {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err; // EACCES 等真实 I/O 错误照常上抛（工具失败）
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 写串行链（S2 骨架篇 §7.5②——per-canonical-path 全局写互斥）          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * per-canonical-path 写串行链尾（**模块级**——跨 createFsTools 实例共享：多驱动
+ * 各持一套 fs 族、子代理每子一套，但物理文件系统只有一块；链的粒度是物理路径，
+ * 不挂任何注册表/实例，挂实例即漏互斥）。键 = canonical 绝对路径；值 = 最近写
+ * 操作的占位 promise（已 settle 的旧值等价于「空闲」，故 map 自清不影响语义）。
+ */
+const writeChains = new Map<string, Promise<void>>();
+
+/**
+ * 写操作互斥段（S2 冷读修死形态——「同步原子段安装占位链尾」，互斥为零-await 安装）：
+ *
+ * 1. **同步原子段（零 await）**：捕获全部涉及路径的当前链尾 + 将自身**占位**安装
+ *    为各路径新链尾（多路径共享同一占位对象——edit/rm 跨文件时的全序锚）；
+ * 2. 等待前驱（Promise.all——等待边恒指向安装更早者，图无环，无死锁）；
+ * 3. 执行操作本体；
+ * 4. settle 占位（无论成败——锁即释放，操作自身的错误原样上抛调用方）+ 值等价
+ *    自清（某路径链尾仍是本占位即删键，防 Map 随路径集合无界增长）。
+ *
+ * 互斥原理：执行期各路径链尾恒为本操作占位——并发到达者在自己的原子段读到的是
+ * 「链尾已占」而非「已 settle 的旧值」，必然排在本操作之后。此前的「await 汇合
+ * 后回写链尾」形态互斥为零（执行期链尾仍是旧值，并发者读作空闲直接放行）。
+ *
+ * @param paths 本次操作涉及的 canonical 路径全集（write 单路径；edit 补丁多路径）
+ * @param op 操作本体（互斥段内执行；覆盖 stat→CAS→writeFile→观察回填全段）
+ */
+export async function serializeWrites<T>(paths: readonly string[], op: () => Promise<T>): Promise<T> {
+  // 占位 promise：resolver 手持，settle 时机完全归本函数的 finally
+  let release!: () => void;
+  const placeholder: Promise<void> = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // 同步原子段：先捕获前驱、再安装占位——两步之间零 await，并发者不可能插入
+  const priors = paths.map((p) => writeChains.get(p) ?? Promise.resolve());
+  for (const p of paths) writeChains.set(p, placeholder);
+  try {
+    await Promise.all(priors);
+    return await op();
+  } finally {
+    release(); // settle 占位：等待者放行（本操作的成败与之无关）
+    // 值等价自清：链尾仍指本占位才删（并发者已把自己的占位装上时不动他者）
+    for (const p of paths) {
+      if (writeChains.get(p) === placeholder) writeChains.delete(p);
+    }
   }
 }
 
@@ -203,22 +259,28 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
     }),
     execute: async (args) => {
       const abs = resolveTarget(args.path as string);
-      await assertWritable(abs);
-      const current = await currentVersion(abs);
-      // CAS 分派：未读→create-if-absent；absent 观察→create；present 观察→版本守卫
-      const intent = resolveWriteIntent(observed.get(abs), current === undefined ? undefined : { version: current });
-      await writeFile(abs, args.content as string, 'utf8');
-      // 写后回填观察：刚写入的内容即最新事实版本（立即 stat 防 mtime 精度假冲突）
-      const after = await currentVersion(abs);
-      if (after !== undefined) observed.observePresent(abs, after);
-      return textResult(
-        `已写入 ${abs}（${intent.kind === 'create-if-absent' ? '新建' : '替换'}，${Buffer.byteLength(args.content as string, 'utf8')} 字节）`,
-        {
-          path: abs,
-          kind: intent.kind,
-          bytes: Buffer.byteLength(args.content as string, 'utf8'),
-        },
-      );
+      // 键推导先行（S2 §7.5②）：fence 与 canonical 化在链外完成——链键与物理
+      // 写目标同为本操作定死的 canonical 路径（writeFile 落 canonical 目标：
+      // 写真实位置而非符号链拼写；观察键维持用户拼写 abs——read/write 同拼写
+      // 一致，跨拼写别名是既有语义不在本刀扩面）
+      const canonical = await assertWritable(abs);
+      return serializeWrites([canonical], async () => {
+        const current = await currentVersion(canonical);
+        // CAS 分派：未读→create-if-absent；absent 观察→create；present 观察→版本守卫
+        const intent = resolveWriteIntent(observed.get(abs), current === undefined ? undefined : { version: current });
+        await writeFile(canonical, args.content as string, 'utf8');
+        // 写后回填观察：刚写入的内容即最新事实版本（立即 stat 防 mtime 精度假冲突）
+        const after = await currentVersion(canonical);
+        if (after !== undefined) observed.observePresent(abs, after);
+        return textResult(
+          `已写入 ${abs}（${intent.kind === 'create-if-absent' ? '新建' : '替换'}，${Buffer.byteLength(args.content as string, 'utf8')} 字节）`,
+          {
+            path: abs,
+            kind: intent.kind,
+            bytes: Buffer.byteLength(args.content as string, 'utf8'),
+          },
+        );
+      });
     },
   };
 
@@ -236,47 +298,59 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
     }),
     execute: async (args) => {
       const ops = parseApplyPatch(args.patch as string);
-      /** 阶段一产物：通过全部校验、目标内容已就绪的待应用操作 */
-      const planned: Array<{ op: PatchOperation; abs: string; content?: string }> = [];
+      // 键推导先行（S2 §7.5②）：逐 op fence + canonical 化在链外完成——本补丁
+      // 涉及的全部 canonical 路径即链键全集（Set 去重；fence 每文件单独过防
+      // 补丁夹带根外目标的既有纪律不变）
+      const targets = new Map<string, { op: PatchOperation; abs: string }>();
       for (const op of ops) {
         const abs = resolveTarget(op.path);
-        await assertWritable(abs); // fence：每个涉及文件单独过（防补丁夹带根外目标）
-        const current = await currentVersion(abs);
-        const currentRef = current === undefined ? undefined : { version: current };
-        if (op.kind === 'update') {
-          // 编辑守卫：必须已读（present）且指纹一致；内容在阶段一就计算（定位失败前置暴露）
-          requireObservedForEdit(observed.get(abs), currentRef);
-          const source = await readFile(abs, 'utf8');
-          planned.push({ op, abs, content: applyUpdateLines(abs, source, op.lines) });
-        } else if (op.kind === 'add') {
-          if (currentRef !== undefined) {
-            throw new AppError(
-              FS_PATCH_FAILED,
-              `[FS_PATCH_FAILED] *** Add File: ${abs} 目标已存在——修改已有文件请用 Update File`,
-            );
+        const canonical = await assertWritable(abs);
+        targets.set(canonical, { op, abs });
+      }
+      // 两阶段全段入链：阶段一的读-CAS-算内容与阶段二的顺序落盘在同一互斥段内
+      //（阶段间窗口的并发写会让「已校验内容」过期——全段互斥才闭合）
+      return serializeWrites([...targets.keys()], async () => {
+        /** 阶段一产物：通过全部校验、目标内容已就绪的待应用操作 */
+        const planned: Array<{ op: PatchOperation; abs: string; canonical: string; content?: string }> = [];
+        for (const [canonical, { op, abs }] of targets) {
+          const current = await currentVersion(canonical);
+          const currentRef = current === undefined ? undefined : { version: current };
+          if (op.kind === 'update') {
+            // 编辑守卫：必须已读（present）且指纹一致；内容在阶段一就计算（定位失败前置暴露）
+            requireObservedForEdit(observed.get(abs), currentRef);
+            const source = await readFile(canonical, 'utf8');
+            planned.push({ op, abs, canonical, content: applyUpdateLines(abs, source, op.lines) });
+          } else if (op.kind === 'add') {
+            if (currentRef !== undefined) {
+              throw new AppError(
+                FS_PATCH_FAILED,
+                `[FS_PATCH_FAILED] *** Add File: ${abs} 目标已存在——修改已有文件请用 Update File`,
+              );
+            }
+            planned.push({ op, abs, canonical, content: addLinesToContent(op.lines) });
+          } else {
+            // 删除守卫与 edit 同款：删它之前必须读过它（知道删的是什么）
+            requireObservedForEdit(observed.get(abs), currentRef);
+            planned.push({ op, abs, canonical });
           }
-          planned.push({ op, abs, content: addLinesToContent(op.lines) });
-        } else {
-          // 删除守卫与 edit 同款：删它之前必须读过它（知道删的是什么）
-          requireObservedForEdit(observed.get(abs), currentRef);
-          planned.push({ op, abs });
         }
-      }
-      /* 阶段二：顺序应用（无回滚——语义错误已在阶段一全部暴露，此处只剩物理写失败） */
-      const summary: string[] = [];
-      for (const item of planned) {
-        if (item.op.kind === 'delete') {
-          await rm(item.abs);
-          summary.push(`deleted ${item.op.path}`);
-          continue;
+        /* 阶段二：顺序应用（无回滚——语义错误已在阶段一全部暴露，此处只剩物理写失败；
+           写目标/观察回填同 write 工具口径：物理走 canonical，观察键走用户拼写） */
+        const summary: string[] = [];
+        for (const item of planned) {
+          if (item.op.kind === 'delete') {
+            await rm(item.canonical);
+            summary.push(`deleted ${item.op.path}`);
+            continue;
+          }
+          await writeFile(item.canonical, item.content!, 'utf8');
+          const after = await currentVersion(item.canonical);
+          if (after !== undefined) observed.observePresent(item.abs, after);
+          summary.push(`${item.op.kind === 'add' ? 'added' : 'updated'} ${item.op.path}`);
         }
-        await writeFile(item.abs, item.content!, 'utf8');
-        const after = await currentVersion(item.abs);
-        if (after !== undefined) observed.observePresent(item.abs, after);
-        summary.push(`${item.op.kind === 'add' ? 'added' : 'updated'} ${item.op.path}`);
-      }
-      return textResult(`补丁已应用（${summary.length} 个操作）：\n${summary.join('\n')}`, {
-        operations: summary,
+        return textResult(`补丁已应用（${summary.length} 个操作）：\n${summary.join('\n')}`, {
+          operations: summary,
+        });
       });
     },
   };

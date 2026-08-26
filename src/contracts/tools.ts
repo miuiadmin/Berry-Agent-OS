@@ -107,12 +107,27 @@ export interface ToolsService {
    * bash 工具与 ctx.exec 服务两层并存时经它同源：行替换件换了管道，两层一起换。
    */
   readonly executor: ToolPipelineExecutor | undefined;
-  /** 注册工具（即时生效；返回注销器，幂等）。同名注册 = TOOL_DUPLICATE 响亮失败——替换唯一合法路径是组合树行级操作 */
-  register(def: ToolDefinition): () => void;
-  /** 按名查找（未注册返回 undefined——调用方决定 fail 形态） */
+  /**
+   * 注册工具（即时生效；返回注销器，幂等）。同名注册 = TOOL_DUPLICATE 响亮失败——
+   * 替换唯一合法路径是组合树行级操作。
+   *
+   * 两层注册表（S2 契约篇 §3.2）：缺省注册进**全局层**（全部会话可见）；携带
+   * `domain` 键注册进**域层**（仅该域会话经 listFor 可见——组合域 = 应用清单声明
+   * 的工具面运行时投影，v1 域键 = sessionId）。域键**装配期定型、禁调用链推断**
+   * （dsh-10 边界三判）。查重**双向对称**：域层注册查全局层 ∪ 本域；全局层注册查
+   * 全局层 ∪ **全部活域**（防 mcp 异步后到同名与域层工具在 listFor 面出双名）。
+   */
+  register(def: ToolDefinition, opts?: { readonly domain?: string }): () => void;
+  /** 按名查找（**全局层同口径**——只查全局层；未注册返回 undefined，调用方决定 fail 形态） */
   get(name: string): ToolDefinition | undefined;
-  /** 全量快照（次序 = 注册序；请求组装/诊断用） */
+  /** 全局层全量快照（次序 = 注册序；诊断面/无会话语境的消费方用） */
   list(): ToolDefinition[];
+  /**
+   * 域视角全量快照 = 全局层 ∪ 该域层（次序 = 全局注册序在前、域注册序在后；
+   * S2 契约篇 §3.2）。会话侧消费方（驱动工具面/续跑收窄/子装配派生）一律走
+   * 此口——域键 v1 = sessionId。未知域键 = 空域层，只返回全局层（合法形态）。
+   */
+  listFor(domain: string): ToolDefinition[];
   /** loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态） */
   toAgentTool(def: ToolDefinition): AgentTool;
 }

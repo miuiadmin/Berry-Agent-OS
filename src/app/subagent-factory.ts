@@ -4,10 +4,11 @@
  * 组合根闭包零件：`createSubagentChildFactory(deps)` 把装配层的活资源（streamFn/
  * model/活会话引用/persistence/父沙箱档位/根总线）闭包进 `InProcessChildFactory`。
  * 每子装配序（dsh-10 隔离纪律）：独立 createContext（**fresh 不 fork 根**——共享
- * 注册表的 fork 会把子 provide 写穿到根）→ 子工具管道 + fs 工具族（toolFilter
- * include 过滤）→ 审批 never + 守门行（父档**快照**——§6.5 委托时点常量闭包）→
- * forkSession(origin:'delegation')（无父/无持久层降级内存 Session）→ 根总线发
- * session_start → startRun 一次性驱动 → dispose = 纵切三序列（shutdown 转发根总线）。
+ * 注册表的 fork 会把子 provide 写穿到根）→ 子工具管道 + 工具面派生（父注册表
+ * 可见面滤排除集 + 自建 fs 族，toolFilter include 过滤）→ 审批 never + 守门行（父
+ * 档**快照**——§6.5 委托时点常量闭包）→ forkSession(origin:'delegation')（无父/
+ * 无持久层降级内存 Session）→ 根总线发 session_start → startRun 一次性驱动 →
+ * dispose = 纵切三序列（shutdown 转发根总线）。
  */
 
 import { createContext } from '../context/context.js';
@@ -29,7 +30,6 @@ import type { ToolPipelineExecutor } from '../tools/index.js';
 import { registerToolsService } from '../tools/registry.js';
 import type { ToolsService } from '../tools/registry.js';
 import { createFsTools } from '../tools/fs.js';
-import { createSearchTools } from '../tools/search.js';
 import type { ContextScope } from '../context/types.js';
 
 /** 真工厂依赖（组合根活闭包——全部随装配层状态活取值） */
@@ -57,6 +57,13 @@ const DEFAULT_CHILD_PROMPT = [
   '你是被委派的子代理：接收一条任务指令，用可用工具完成任务，最后用一条完整的文本消息汇报结果。',
   '你的汇报文本会被原样交回委派方——把结论写在最后那条消息里，不要省略关键细节。',
 ].join('\n');
+
+/** 子装配派生排除集（S2 契约篇 §5.4 第 6 条）：read/write/edit/ls 的 execute
+ *  闭包绑**父驱动观察态**（fs 观察态 per-driver 语义——子必须自建零观察起步）；
+ *  bash 的闭包绑父侧审批服务（子审批 never 的确定性拒绝会被父交互审批绕过，
+ *  拍板 #17 排除）。名单外的全局层 def（find/grep、memory 五件、fetch 等）无
+ *  会话状态（dsh-10 边界三判①），原样复用。 */
+const CHILD_TOOL_EXCLUSION = new Set(['read', 'write', 'edit', 'ls', 'bash']);
 
 /** 无持久层的 no-op flush 屏障（诊断面子会话仅内存——序列形状保持三步） */
 const NOOP_BARRIER: FlushBarrier = {
@@ -93,15 +100,24 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
     /* ---- ③ durable 接线（子会话事件日志——与主装配同款映射）---- */
     const sinks = createDurableSinks(session);
 
-    /* ---- ④ 子工具管道 + fs 工具族（toolFilter include 名单过滤，缺省全量）---- */
+    /* ---- ④ 子工具面 = 派生 + 自建 fs（S2 契约篇 §5.4 第 6 条子装配派生）----
+     * 派生腿：父注册表取「父可见面」——父会话在场 = listFor(父会话)（全局层 ∪
+     * 父域；父域里的 fs 四名被排除集滤掉），无父会话（persist:false 诊断形态）
+     * = list() 全局层同口径——滤排除集五名得 derived defs。复用 def 经**子**
+     * 注册表 toAgentTool 重绑子管道（三段守门走子档：审批 never + 父档快照），
+     * 父注册表零写穿（childCtx fresh 注册表——派生只是 def 复制）。
+     * 自建腿：createFsTools 零观察起步（子装配新语界，与父观察态互不可见）。
+     * toolFilter include 名单对全集过滤（§6.3 声明即执法，不装再拦）。 */
     const pipeline: ToolPipelineExecutor = createToolPipeline(childCtx, { onGateDecision: sinks.gate });
     const tools: ToolsService = registerToolsService(childCtx, { pipeline });
     // 可写根走 safety 档位推导（与主装配同源；父档闭包快照见 ⑤ 注记）
     const writableRoots = createRootsProvider({ workspace: deps.workspace, mode: () => deps.sandboxMode });
     const fsTools = createFsTools({ writableRoots, workspace: () => deps.workspace });
-    const searchTools = createSearchTools({ workspace: () => deps.workspace });
-    // §6.3 工具子集：include 名单外的工具不进子装配（声明即执法，不装再拦）
-    const allTools = [...fsTools.tools, ...searchTools.tools];
+    // 父注册表经根 ctx 取（delegate 工具执行时 Ring 1 tools 行必在场——boot 必备行）
+    const parentTools = deps.rootCtx.get<ToolsService>('tools');
+    const derivedFace = parent !== undefined ? parentTools.listFor(parent.header.sessionId) : parentTools.list();
+    const derived = derivedFace.filter((def) => !CHILD_TOOL_EXCLUSION.has(def.name));
+    const allTools = [...derived, ...fsTools.tools];
     const selected =
       request.toolFilter !== undefined ? allTools.filter((def) => request.toolFilter!.includes(def.name)) : allTools;
     for (const def of selected) tools.register(def);

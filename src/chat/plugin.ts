@@ -45,6 +45,7 @@ import type { ToolsService } from '../tools/registry.js';
 import type { SandboxMode } from '../safety/index.js';
 import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
+import { createFsTools } from '../tools/fs.js';
 import type { ConversationDriver, RunSettled } from './conversation.js';
 import { ConversationDriver as ConversationDriverClass } from './conversation.js';
 
@@ -107,8 +108,14 @@ export interface DriverEntry {
   readonly resumed: boolean;
   /** 会话驱动（run 编排 + 通道宿主面） */
   readonly driver: ConversationDriver;
-  /** 件控制面（收窄为 writeHeader——/new 各复位全随 open() 新条目内化） */
+  /** 件控制面（writeHeader 落账 + refreshTools/rematerialize 两刷新口——组合根 ⑧ 接线遍历调用） */
   readonly controls: ChatControls;
+  /**
+   * 本条目域层工具注销器集合（S2 fs 迁域：fs 四名带本会话域键注册进 tools
+   * 注册表域层；retire 回卷——「退役即停摆」的工具面半边，防注册表域层随
+   * /new 泄漏累积）
+   */
+  readonly disposeDomainTools: () => void;
   /** request/header 落账状态（per-entry——差分基线与首快照名分互不串档） */
   readonly headerState: { last?: string; next: 'initial' | 'resume' | 'change' };
   /** 是否已退役（true = 停摆：投递降 inject、续跑 INACTIVE、open 同 id 幂等返回） */
@@ -188,6 +195,16 @@ export interface ChatRuntime {
 export interface ChatControls {
   /** 落 request/header 快照（diff 语义内建——仅组装参数变化才落；/reload 收口与窗口外变更走此口） */
   writeHeader(): void;
+  /**
+   * 重算本条目 loop 工具快照（S2 per-entry——`listFor(本会话)` 原位刷新）。
+   * tools_change 载荷带域键 = 只该域条目刷新；缺省 = 全局层变更全部条目刷新
+   */
+  refreshTools(): void;
+  /**
+   * 重物化本条目系统提示词（S2 per-entry——prompts/skills 变更与 /reload 时点，
+   * 全部非退役条目各自重物化；/new 不再全局 rebuild——open 即新纪元）
+   */
+  rematerialize(): void;
 }
 
 /** 件构造依赖（装配期活闭包——官方件 = 宿主装配特权，不新开 ctx 服务名） */
@@ -214,10 +231,20 @@ export interface ChatPluginDeps {
    * 差分/检索等 handler 可按归属会话路由落账
    */
   readonly transformContext: (messages: AgentMessage[], sessionId: string) => Promise<AgentMessage[]>;
-  /** 系统提示词活视图（/reload、/new 重建后取新值——writeHeader 与 loop 各时点求值） */
-  readonly getSystemPrompt: () => string;
-  /** loop 工具快照活数组（组合根分配、件每次 open 填帧、组合根 tools_change 订阅原位刷新——per-driver 化是 S2 域） */
-  readonly toolView: AgentTool[];
+  /**
+   * 系统提示词物化器（S2 per-entry 替换 getSystemPrompt 全局活视图——契约篇
+   * §1.3 落码形态①）：`[基座, 技能渐进披露, 具名段]` 在**本条目时点**求值拼接。
+   * 每条目 open 各自物化（新纪元）；prompts/skills 变更与 /reload 重物化全部
+   * 非退役条目。sessionId 透传 prompts.materialize（会话键控段冻结该会话基线）；
+   * 缺省 = 诊断物化（dump-config 等）
+   */
+  readonly materializeSystemPrompt: (sessionId?: string) => string;
+  /**
+   * 可写根推导器（S2 fs 迁域随迁 deps——safety/roots 同源产物宿主构造注入）：
+   * 本条目 fs 族 fence 数据源。观察态 per-driver 语义：每驱动一套 createFsTools
+   * （「读过什么」互不可见——A 读过不代表 B 盲写合法）
+   */
+  readonly writableRoots: () => string[];
   /** sandbox 档事实盖章（内核守门面实现——dedup 内建；件在每次会话边界调用） */
   readonly stampSandboxFacts: (session: Session) => void;
   /**
@@ -410,13 +437,43 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         next: resumed ? 'resume' : 'initial',
       };
 
+      /* -- fs 工具族域注册（S2 契约篇 §3.2：观察态 per-driver——每驱动一套
+         createFsTools 带本会话域键注册进 tools 注册表**域层**；dispose 挂
+         本条目由 retire 回卷。可写根推导器随迁本件 deps（与守门行同源产物） -- */
+      const fsTools = createFsTools({ writableRoots: deps.writableRoots, workspace: () => deps.workspace });
+      const sessionId = session.header.sessionId;
+      const fsDisposers = fsTools.tools.map((def) => tools.register(def, { domain: sessionId }));
+      const disposeDomainTools = (): void => {
+        for (const dispose of fsDisposers) dispose();
+      };
+
+      /* -- per-entry loop 工具快照（S2：`listFor(本会话)` = 全局层 ∪ 本域 fs 四名；
+         活数组原位刷新（length=0 + push）即达 loop，含 run 中途；组合根 ⑧
+         tools_change 订阅按载荷域键路由到 refreshTools -- */
+      const toolView: AgentTool[] = [];
+      const refreshTools = (): void => {
+        const fresh = tools.listFor(sessionId).map((def) => tools.toAgentTool(def));
+        toolView.length = 0;
+        toolView.push(...fresh);
+      };
+      refreshTools();
+
+      /* -- per-entry 系统提示词（S2：open 物化新纪元——串与记忆基线同时点同面
+         冻结；rematerialize 是 prompts/skills 变更与 /reload 的重物化口） -- */
+      let systemPrompt = deps.materializeSystemPrompt(sessionId);
+      const rematerialize = (): void => {
+        systemPrompt = deps.materializeSystemPrompt(sessionId);
+      };
+
       /* -- request/header 差分化闭包（会话篇 §1.3：仅组装参数变化才落新快照） -- */
-      // 落账直用本条目 session（S1 per-entry——不再读全局活槽，条目间基线互不串档）
+      // 落账直用本条目 session（S1 per-entry——不再读全局活槽，条目间基线互不串档）；
+      // 两腿读本条目面（S2）：systemPrompt = 本条目物化串；toolSchemas = listFor
+      //（域视角——含本会话 fs 四名）
       const writeHeader = (): void => {
         const payload = {
           config: { model: deps.model, sandbox: deps.sandboxMode },
-          systemPrompt: deps.getSystemPrompt(),
-          toolSchemas: tools.list().map((def) => ({ name: def.name, parameters: def.parameters })),
+          systemPrompt,
+          toolSchemas: tools.listFor(sessionId).map((def) => ({ name: def.name, parameters: def.parameters })),
         };
         const serialized = JSON.stringify(payload);
         if (serialized === headerState.last) return; // 组装参数未变——不落新快照
@@ -430,19 +487,15 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       /* -- 驱动构造（活数组上下文 + steering/followUp 共用队列 + 调用链包裹） -- */
       // 续接会话：历史投影回读作时间线种子（恢复协议已补齐闭合——投影无敞开 turn）
       const messages: AgentMessage[] = resumed ? projectedToAgentMessages(session.deriveMessages()) : [];
-      // loop 工具快照填帧（活数组组合根分配——装载窗口内后续插件工具经组合根
-      // tools_change 订阅原位刷新；per-driver 化是 S2 域，S1 全条目共享同一快照）
-      deps.toolView.length = 0;
-      deps.toolView.push(...tools.list().map((def) => tools.toAgentTool(def)));
       const driver = new ConversationDriverClass({
-        sessionId: session.header.sessionId,
+        sessionId,
         context: {
-          // getter 活视图：/reload 重建后 loop 每次模型请求取到新提示词
+          // getter 活视图：rematerialize 重物化后 loop 每次模型请求取到新串
           get systemPrompt() {
-            return deps.getSystemPrompt();
+            return systemPrompt;
           },
           messages,
-          tools: deps.toolView,
+          tools: toolView, // 本条目活数组（refreshTools 原位刷新）
         },
         loopConfig: {
           streamFn: deps.streamFn,
@@ -466,7 +519,8 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         durable,
         resumed,
         driver,
-        controls: { writeHeader },
+        controls: { writeHeader, refreshTools, rematerialize },
+        disposeDomainTools,
         headerState,
         retired: false,
       };
@@ -489,6 +543,9 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // run 中退役=正被 loop 引用的时间线强行 abort，留给编排层显式抉择）
       if (entry.driver.isRunning) return false;
       entry.retired = true;
+      // 域层工具回卷（S2：fs 四名从 tools 注册表域层撤出——退役即停摆的工具面
+      // 半边；session/durable 保留的原语义不变，迟到结算照落原会话账）
+      entry.disposeDomainTools();
       // 仅 abort 不 resolve quit（会话停摆≠进程退出——前台退出聚合只认 requestQuit）
       entry.driver.retire();
       return true;

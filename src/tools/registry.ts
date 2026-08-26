@@ -2,10 +2,21 @@
  * L2 tools — 工具注册表（ctx.tools 服务；插件契约篇 §3.2 动态注册）。
  *
  * 职责：
- * - register(ToolDefinition) → Disposer：即时生效（刷新注册表 → 广播
+ * - register(ToolDefinition, opts?) → Disposer：即时生效（刷新注册表 → 广播
  *   tools_change → 下次模型请求即见新工具；无需 reload）；
  * - 把 ToolDefinition 适配成 loop 面的 AgentTool（execute = 三段管道）；
  * - defineTool 类型 helper（插件侧获得参数/结果类型推断）。
+ *
+ * 两层注册表（S2 契约篇 §3.2，2026-08-26）：
+ * - 全局层：单表 Map（缺省注册面——全部会话可见）；
+ * - 域层：`Map<域键, Map<name, def>>`（携带 `domain` 键注册——组合域 = 应用
+ *   清单声明的工具面运行时投影；v1 域键 = sessionId interim）。
+ * - 查重**双向对称**：域层注册查「全局层 ∪ 本域」；全局层注册查「全局层 ∪
+ *   全部活域」——防 mcp 后台异步落全局层与已注册域层同名，listFor 面出双名。
+ * - 注册表本体**随组合根构造存续**（本服务挂 ring1 锚，/reload 不回卷）；
+ *   域层条目生死挂调用方（chat 件 DriverEntry——open 注册、retire 回卷）。
+ * - tools_change 载荷 `{ kind, name, domain? }`：带键 = 域层变更（只影响该域
+ *   的 listFor 面）；缺省 = 全局层变更（影响全部域的 listFor 面）。
  *
  * 注册经 ctx.provide('tools', …) 挂进服务注册表，随作用域 LIFO 回卷；
  * 注销器同时撤注册表条目（幂等）。
@@ -51,18 +62,16 @@ export function scanToolDescription(description: string): string | undefined {
  * app 装配层调用一次；插件作用域经 ctx.get 共享同一注册表。
  */
 export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {}): ToolsService {
-  /** 工具表：name → 定义（Map 保注册序） */
+  /** 全局层：name → 定义（Map 保注册序——全部会话可见的注册面） */
   const tools = new Map<string, ToolDefinition>();
+  /** 域层：域键 → (name → 定义)（组合域分片——仅该域 listFor 面可见；Map 保注册序） */
+  const domains = new Map<string, Map<string, ToolDefinition>>();
 
   const service: ToolsService = {
     // 管道执行器随服务携带（Ring 1 行树化批）：bash 工具与 ctx.exec 两层并存
     // 时经它同源——无管道诊断形态为 undefined（toAgentTool 执行响亮失败）
     executor: opts.pipeline,
-    register(def) {
-      if (tools.has(def.name)) {
-        // 同名重复注册 = 装配冲突（两行注册同一工具），响亮失败不静默覆盖
-        throw new AppError(TOOL_DUPLICATE, `工具重复注册：${def.name}`);
-      }
+    register(def, registerOpts) {
       // 描述扫描（契约篇 §3.2，2026-08-26）：任何来源的工具同一防线——
       // 第三方插件与 MCP 外部工具的风险同源，防线在树上不在枝上
       const injectionHit = scanToolDescription(def.description);
@@ -76,26 +85,75 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       // 保守处理——只读类守门策略不放过未声明工具（fail-closed 方向）。存归一副本，
       // 注销身份护栏随迁到副本（对调用方原对象零改动）。
       const normalized: ToolDefinition = { ...def, effect: def.effect ?? 'write' };
-      tools.set(def.name, normalized);
-      ctx.emit(TOOLS_CHANGE_EVENT, { kind: 'add', name: def.name });
+      const domainKey = registerOpts?.domain;
+      let layer: Map<string, ToolDefinition>;
+      if (domainKey !== undefined) {
+        // 域层注册：查重 = 全局层 ∪ 本域（双向对称的域侧半边）
+        const existing = domains.get(domainKey);
+        layer = existing !== undefined ? existing : new Map();
+        if (existing === undefined) domains.set(domainKey, layer);
+        if (tools.has(def.name) || layer.has(def.name)) {
+          throw new AppError(
+            TOOL_DUPLICATE,
+            `工具重复注册：${def.name}（域 ${domainKey}；与全局层或本域已有工具同名）`,
+          );
+        }
+      } else {
+        // 全局层注册：查重 = 全局层 ∪ **全部活域**（双向对称的全局侧半边——mcp
+        // 后台异步落全局层晚于驱动域注册是真实时序，单向查重会在 listFor 面出双名）
+        for (const [key, layerTools] of domains) {
+          if (layerTools.has(def.name)) {
+            throw new AppError(
+              TOOL_DUPLICATE,
+              `工具重复注册：${def.name}（与活域 ${key} 的域层工具同名——全局层注册须避开全部活域）`,
+            );
+          }
+        }
+        if (tools.has(def.name)) {
+          throw new AppError(TOOL_DUPLICATE, `工具重复注册：${def.name}`);
+        }
+        layer = tools;
+      }
+      layer.set(def.name, normalized);
+      // 载荷带域键 = 域层变更（装配层只刷该域的面）；缺省 = 全局层变更（刷全部）
+      ctx.emit(TOOLS_CHANGE_EVENT, {
+        kind: 'add',
+        name: def.name,
+        ...(domainKey !== undefined ? { domain: domainKey } : {}),
+      });
       let done = false;
       return () => {
         if (done) return;
         done = true;
         // 仅当仍是本定义时删除（防误撤他者后来的同位注册——与 provide 同款护栏）
-        if (tools.get(def.name) === normalized) {
-          tools.delete(def.name);
-          ctx.emit(TOOLS_CHANGE_EVENT, { kind: 'remove', name: def.name });
+        if (layer.get(def.name) === normalized) {
+          layer.delete(def.name);
+          // 域层清空即拆层（活域集合收缩——全局层查重的遍历面随之收窄）
+          if (layer !== tools && layer.size === 0 && domains.get(domainKey!) === layer) {
+            domains.delete(domainKey!);
+          }
+          ctx.emit(TOOLS_CHANGE_EVENT, {
+            kind: 'remove',
+            name: def.name,
+            ...(domainKey !== undefined ? { domain: domainKey } : {}),
+          });
         }
       };
     },
 
     get(name) {
+      // 全局层同口径：只查全局层（域层工具按名直达 = 绕过组合域投影，不开此面）
       return tools.get(name);
     },
 
     list() {
       return [...tools.values()];
+    },
+
+    listFor(domainKey) {
+      // 域视角 = 全局层 ∪ 该域层（未知域键 = 空域层，只返回全局层——合法形态）
+      const layer = domains.get(domainKey);
+      return layer === undefined ? [...tools.values()] : [...tools.values(), ...layer.values()];
     },
 
     toAgentTool(def) {

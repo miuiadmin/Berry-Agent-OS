@@ -15,7 +15,7 @@ import {
   FS_PATCH_FAILED,
   FS_VERSION_CONFLICT,
 } from '../contracts/errors.js';
-import { createFsTools } from './fs.js';
+import { createFsTools, serializeWrites } from './fs.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 
 /** 测试工作区（beforeAll 建临时目录；writableRoots 只放它，fence 判定可控） */
@@ -384,5 +384,81 @@ describe('ls — 目录列举', () => {
     const t = freshTools();
     const err = await t.ls.execute({ path: 'no-such-dir' }, { toolCallId: 'tc' }).catch((e) => e);
     expect(codeOf(err)).toBe(FS_NOT_FOUND);
+  });
+});
+
+describe('写串行链 + 观察态 per-driver（S2 骨架篇 §7.5②/§7.5①——多驱动并存的地基）', () => {
+  /** 互斥探针：执行期并发计数（>1 = 重叠即互斥破）+ 进出事件序 */
+  function probe(events: string[], tag: string): () => Promise<string> {
+    let inside = 0;
+    return async () => {
+      inside++;
+      if (inside > 1) events.push(`OVERLAP:${tag}`);
+      events.push(`enter:${tag}`);
+      await new Promise((r) => setTimeout(r, 10));
+      events.push(`exit:${tag}`);
+      inside--;
+      return tag;
+    };
+  }
+
+  it('占位链尾互斥：同路径并发操作严格串行（先安装先执行，执行期零重叠）', async () => {
+    const events: string[] = [];
+    const p = join(workspace, 'chain-mutex.txt');
+    const [a, b] = await Promise.all([
+      serializeWrites([p], probe(events, 'a')),
+      serializeWrites([p], probe(events, 'b')),
+    ]);
+    expect(a).toBe('a');
+    expect(b).toBe('b');
+    // 严格交替 + 零重叠：b 的等待边恒指 a 的占位（安装序 = 执行序）
+    expect(events).toEqual(['enter:a', 'exit:a', 'enter:b', 'exit:b']);
+  });
+
+  it('多路径共享占位：edit 式跨文件操作与单路径写经共享路径互斥（安装序全序，无死锁）', async () => {
+    const events: string[] = [];
+    const pa = join(workspace, 'chain-a.txt');
+    const pb = join(workspace, 'chain-b.txt');
+    const [multi, single] = await Promise.all([
+      serializeWrites([pa, pb], probe(events, 'multi')),
+      serializeWrites([pb], probe(events, 'single')),
+    ]);
+    expect([multi, single]).toEqual(['multi', 'single']);
+    // single 的前驱 = multi 在 pb 上的占位：multi 完整退出后才进
+    expect(events).toEqual(['enter:multi', 'exit:multi', 'enter:single', 'exit:single']);
+  });
+
+  it('互斥跨实例：两套 fs 族（两驱动形态）同路径并发写——恰一成一败，败者 FS_VERSION_CONFLICT', async () => {
+    const t1 = freshTools();
+    const t2 = freshTools();
+    const rel = 'cross-instance.txt';
+    await writeFile(join(workspace, rel), 'v1', 'utf8');
+    await t1.read.execute({ path: rel }, { toolCallId: 'tc' });
+    await t2.read.execute({ path: rel }, { toolCallId: 'tc' });
+    await tick(); // mtime 前进——两实例观察指纹齐指 v1
+    const results = await Promise.allSettled([
+      t1.write.execute({ path: rel, content: 'w1' }, { toolCallId: 'tc1' }),
+      t2.write.execute({ path: rel, content: 'w2' }, { toolCallId: 'tc2' }),
+    ]);
+    // 先进链尾者胜（物理落盘 + 自己的观察回填）；后进者的 CAS 比对停在 v1 → 冲突
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(codeOf((rejected[0] as PromiseRejectedResult).reason)).toBe(FS_VERSION_CONFLICT);
+    const final = await readFile(join(workspace, rel), 'utf8');
+    expect(['w1', 'w2']).toContain(final);
+  });
+
+  it('观察态 per-driver：A 读过的文件 B 盲写 → FS_NOT_OBSERVED（读不过户——各驱动各账）', async () => {
+    const t1 = freshTools();
+    const t2 = freshTools();
+    const rel = 'blind-write.txt';
+    await writeFile(join(workspace, rel), '内容', 'utf8');
+    await t1.read.execute({ path: rel }, { toolCallId: 'tc' });
+    const err = await t2.write.execute({ path: rel, content: '盲写' }, { toolCallId: 'tc' }).catch((e) => e);
+    expect(codeOf(err)).toBe(FS_NOT_OBSERVED);
+    // B 自己读过即可写（各账闭环）
+    await t2.read.execute({ path: rel }, { toolCallId: 'tc' });
+    await t2.write.execute({ path: rel, content: 'B 的合法写' }, { toolCallId: 'tc' });
+    expect(await readFile(join(workspace, rel), 'utf8')).toBe('B 的合法写');
   });
 });

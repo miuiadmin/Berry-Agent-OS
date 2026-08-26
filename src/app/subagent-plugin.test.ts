@@ -16,6 +16,7 @@ import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import { createInProcessProvider } from '../subagent/inprocess.js';
 import { deriveMessages } from '../session/derive.js';
+import { registerToolsService } from '../tools/registry.js';
 import { defaultConvertToLlm } from './convert.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createBerryRuntime } from './assembly.js';
@@ -243,6 +244,9 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     const { streamFn, contexts } = scriptedStream([textMessage('子答（内存面）')]);
     /** 根总线（session_start/session_shutdown keyed 面——与装配层 ROOT 同角色） */
     const rootCtx: ContextScope = createContext({ name: 'subagent-factory-nodb' });
+    // 父工具注册表（S2 派生腿契约：委派时父注册表必在场——Ring 1 tools 行的
+    // 测试等价物；诊断面无管道不执行派生工具，服务在即可）
+    registerToolsService(rootCtx, {});
     const starts: Array<{ sessionId: string; origin: string }> = [];
     rootCtx.on('session_start', (payload: unknown) => {
       starts.push(payload as { sessionId: string; origin: string });
@@ -330,9 +334,10 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     const answer = await runtime.conversation!.submitOnce('帮我审读');
     expect(answer?.status).toBe('completed');
     expect(contexts).toHaveLength(3);
-    // mergeRequest 三腿在真装配里生效：正文写 persona、tools 写工具子集、model 覆盖
+    // mergeRequest 三腿在真装配里生效：正文写 persona、tools 写工具子集、model 覆盖。
+    // 工具序 = 派生腿在前（grep——父注册表全局层 def 复用）+ 自建 fs 腿在后（read）
     expect(contexts[1]!.systemPrompt).toBe('你是资深审读员，逐行审查。'); // 正文恒覆盖（非拼接缺省）
-    expect(contexts[1]!.tools?.map((t) => t.name)).toEqual(['read', 'grep']);
+    expect(contexts[1]!.tools?.map((t) => t.name)).toEqual(['grep', 'read']);
     expect(models[1]).toBe('test/child-model'); // 子模型覆盖（父用缺省 test 流模型）
     // 汇报文本回父面（静态工具前台路与通用 agent 同一结算链）
     const toolResults = deriveMessages(runtime.session!.events).filter((m) => m.type === 'toolResult');

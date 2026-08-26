@@ -210,6 +210,89 @@ describe('registerToolsService — 服务生命周期', () => {
   });
 });
 
+describe('registerToolsService — 两层注册表（S2 契约篇 §3.2：工具面组合域分片）', () => {
+  it('域层注册：listFor = 全局层 ∪ 本域；别域与本域互不可见，裸 list 只含全局层', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    tools.register(makeTool('find')); // 全局层
+    tools.register(makeTool('read'), { domain: 'sess-a' }); // A 域
+    tools.register(makeTool('write'), { domain: 'sess-b' }); // B 域
+
+    // 裸 list = 全局层口径（dump-config 诊断面）
+    expect(tools.list().map((t) => t.name)).toEqual(['find']);
+    // A 域视角：全局 + A 域（B 的 write 不可见——观察态 per-driver 的注册面投影）
+    expect(tools.listFor('sess-a').map((t) => t.name)).toEqual(['find', 'read']);
+    // B 域视角同理；未知域键 = 空域层（只返回全局层，合法形态）
+    expect(tools.listFor('sess-b').map((t) => t.name)).toEqual(['find', 'write']);
+    expect(tools.listFor('no-such-domain').map((t) => t.name)).toEqual(['find']);
+    // get 只查全局层（按名直达 = 绕过组合域投影，不开此面）
+    expect(tools.get('read')).toBeUndefined();
+    expect(tools.get('find')?.name).toBe('find');
+  });
+
+  it('查重双向对称：域层注册查全局∪本域；全局层注册查全局∪全部活域（mcp 异步落全局层场景）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    tools.register(makeTool('fetch')); // 全局层已有 fetch
+    tools.register(makeTool('read'), { domain: 'sess-a' });
+
+    // 域侧半边：撞全局层名 → 拒
+    try {
+      tools.register(makeTool('fetch'), { domain: 'sess-a' });
+      expect.unreachable('应抛 TOOL_DUPLICATE');
+    } catch (e) {
+      expect((e as AppError).code).toBe(TOOL_DUPLICATE);
+    }
+    // 域侧半边：撞本域名 → 拒
+    try {
+      tools.register(makeTool('read'), { domain: 'sess-a' });
+      expect.unreachable('应抛 TOOL_DUPLICATE');
+    } catch (e) {
+      expect((e as AppError).code).toBe(TOOL_DUPLICATE);
+    }
+    // 域侧另半边：与**别域**同名不撞（A/B 各自一套 fs 四名是 S2 常态）
+    expect(() => tools.register(makeTool('read'), { domain: 'sess-b' })).not.toThrow();
+
+    // 全局侧半边：撞任一**活域**名 → 拒（mcp 后台异步落全局层晚于驱动域注册——
+    // 单向查重会在 listFor 面出双名，双向对称封死；read 现存于活域 sess-a/b）
+    try {
+      tools.register(makeTool('read'));
+      expect.unreachable('应抛 TOOL_DUPLICATE');
+    } catch (e) {
+      expect((e as AppError).code).toBe(TOOL_DUPLICATE);
+    }
+  });
+
+  it('tools_change 载荷域路由：域层变更带 domain 键、全局层变更缺省', () => {
+    const ctx = createContext({ name: 'test' });
+    const events: Array<{ kind: string; name: string; domain?: string }> = [];
+    ctx.on('tools_change', (e) => events.push(e));
+    const tools = registerToolsService(ctx);
+    tools.register(makeTool('read'), { domain: 'sess-a' });
+    tools.register(makeTool('find'));
+    expect(events).toEqual([
+      { kind: 'add', name: 'read', domain: 'sess-a' },
+      { kind: 'add', name: 'find' },
+    ]);
+  });
+
+  it('域层清空即拆层：注销后全局层可注册同名（活域集合收缩——retire 语义的注册面半边）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    const dispose = tools.register(makeTool('grep'), { domain: 'sess-a' });
+    // 活域在场：全局层同名仍拒
+    try {
+      tools.register(makeTool('grep'));
+      expect.unreachable('应抛 TOOL_DUPLICATE');
+    } catch (e) {
+      expect((e as AppError).code).toBe(TOOL_DUPLICATE);
+    }
+    dispose(); // 域条目注销 → 域空 → 拆层
+    expect(() => tools.register(makeTool('grep'))).not.toThrow();
+    expect(tools.listFor('sess-a').map((t) => t.name)).toEqual(['grep']); // 现在来自全局层
+  });
+});
+
 describe('defineTool — 类型 helper', () => {
   it('identity：原样返回定义（供插件侧书写时获得类型检查）', () => {
     const def = defineTool({

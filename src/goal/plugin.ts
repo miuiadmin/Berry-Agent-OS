@@ -222,7 +222,9 @@ async function applyGoalPlugin(
           // 无法申报终态）；goal_set/goal_update 自身 effect 均为 write，靠名单
           // 显式保留而非 effect 过滤自然命中。开洞：goal_set 申报 needsWrite
           // 即不携带 toolFilter（续跑轮全量工具面）。
-          const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.list());
+          // S2 域视角：wake 名单从「该会话可见面」投影（listFor = 全局层 ∪ 该会话
+          // 域层——fs 四名等 per-driver 工具照常进白名单筛选，别家驱动域不掺入）
+          const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.listFor(settled.sessionId));
           try {
             agent.sendUserMessage(renderContinuationPrompt(goal), {
               source: 'plugin:goal',

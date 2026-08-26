@@ -86,7 +86,9 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
             })
             .join('、') || '（无）'
         }`,
-        `工具（${runtime.tools.list().length}）：${runtime.tools
+        // 工具行 = 全局层口径（S2 两层注册表）：per-session 域层条目（fs 四名随
+        // chat 件驱动 open 注册）不在此列——诊断面无活驱动，域层恒空
+        `工具（全局层 ${runtime.tools.list().length}）：${runtime.tools
           .list()
           .map((t) => t.name)
           .join('、')}`,
@@ -145,10 +147,9 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
                   dataDir: dataDir(),
                 },
                 // tools 件闭包占位（Ring 1 行树化批——诊断面 apply 永不跑，占位
-                // 闭包零副作用；可写根给空推导器，注册表键在即树形不失真）
+                // 闭包零副作用；检索族 workspace 锚在，注册表键在即树形不失真）
                 toolsDeps: {
                   gateSink: () => undefined,
-                  writableRoots: () => [],
                   workspace: () => process.cwd(),
                 },
               }),

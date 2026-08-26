@@ -121,8 +121,14 @@ export function validateAppManifest(raw: unknown, where: string): AppManifest {
 export interface PromptSection {
   /** 段 id（插件域前缀防撞；分节序按 id 字典序——/reload 稳定） */
   readonly id: string;
-  /** 内容渲染：仅在重建时点求值一次，产物随快照冻结（抛错不杀重建——渲染诊断占位） */
-  render(): string;
+  /**
+   * 内容渲染：仅在重建时点求值一次，产物随快照冻结（抛错不杀重建——渲染诊断占位）。
+   *
+   * 语境参数（S2，契约篇 §1.3 落码形态①）：`sessionId` = 本次物化归属的会话键——
+   * 会话键控段（如记忆简报）用它冻结**该会话**的基线（多驱动并存各归各纪元）；
+   * `undefined` = 诊断物化（无会话语界——只渲染内容，不冻结任何基线）。
+   */
+  render(sessionId?: string): string;
 }
 
 /** ctx.prompts 服务面（注册 systemPrompt 具名追加段） */
@@ -138,6 +144,9 @@ export interface PromptsService {
    * 具名段物化（id 字典序拼接，段间空行分隔）：render() 抛错 = 插件 bug，
    * 宿主捕获后渲染诊断占位 + log error，不杀重建（与失败行不杀进程同根）。
    * 无段返回 ''（调用方 filter 掉——不产生空分节）。
+   *
+   * `sessionId` 透传给各段 render（语境参数——会话键控段冻结该会话基线；
+   * 缺省 = 诊断物化，不冻结）。
    */
-  materialize(): string;
+  materialize(sessionId?: string): string;
 }

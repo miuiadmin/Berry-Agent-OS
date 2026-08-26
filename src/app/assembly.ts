@@ -26,7 +26,7 @@ import type { StreamFn } from '../contracts/llm.js';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
-import type { AgentTool } from '../contracts/tools.js';
+import type { ToolsService } from '../tools/registry.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
@@ -39,7 +39,6 @@ import {
 } from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn, providerApiFace } from '../llm/index.js';
-import type { ToolsService } from '../tools/registry.js';
 import {
   APPROVAL_ANSWER_EVENT,
   createApprovalService,
@@ -354,13 +353,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 四单槽（session/resumedFlag/durableRef + driverRef/chatRef）整体退役为
    * chat 件 DriverRegistry（⑨ 装配点创建——Map<sessionId, DriverEntry> + 前台
    * 聚焦指针；本段早期闭包对 registry 的引用全为运行期调用，TDZ 安全）。本段
-   * 只留三件：工具快照活数组（唯一须按值先行的分配）、sandbox 盖章、durable
-   * 转发壳——壳已收窄为 gate/approval 两路（handle 半边随驱动直绑退役：管道
-   * 守门/审批对的落账路由 = 调用链 → 注册表 → 前台聚焦，registry.routed()）。 */
-  // loop 工具快照的活数组（组合根分配、chat 件每次 open 填帧）：loop 每次模型
-  // 请求与每次 tool call 查找都读 context.tools——原位替换（length=0 + push）即达
-  // loop，含 run 中途；tools_change 时在 ⑧ 接线处刷新（per-driver 化是 S2 域）
-  const toolView: AgentTool[] = [];
+   * 只留两件：sandbox 盖章、durable 转发壳——壳已收窄为 gate/approval 两路
+   * （handle 半边随驱动直绑退役：管道守门/审批对的落账路由 = 调用链 → 注册表
+   * → 前台聚焦，registry.routed()）。loop 工具快照与系统提示词均 per-entry
+   * （S2：chat 件 open 各自构造活数组与物化串——不再有组合根级共享单份）。 */
   /** sandbox 档事实盖章（内核守门面数据 + dedup 内建；件在会话边界调时点——内核有数据，应用有时点） */
   const stampSandboxFacts = (target: Session): void => {
     const last = [...target.events].reverse().find((e) => e.type === 'sandbox/mode');
@@ -521,10 +517,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   /* ---- ④e 组合树装载前置 + Ring 1 行树化（契约篇 §5.1 节奏表第一刀：tools 行起算） ----
    * Ring 1 必备行挂**独立装载锚**（ring1Anchor——宿主装配期专用锚，与插件锚
    * 分离：/reload 只 dispose 插件锚，Ring 1 行不被动不回卷，仅 boot 生效）。
-   * tools 行产物（ctx.tools 服务 + 三段管道 + fs/检索工具族）是 ⑥b exec、
-   * ⑧ 工具快照接线、⑨ chat 件的先行依赖——组合树装载与官方件注册表因之整体
-   * 前置到宿主装配期；chat 件对 tools 的依赖改经 ctx.get（件 inject 声明驱动
-   * Kahn 轮次，apply 期取必居值）。 */
+   * tools 行产物（ctx.tools 服务 + 三段管道 + 检索族；fs 族 S2 已迁 chat 件域
+   * 注册）是 ⑥b exec、⑧ 工具快照接线、⑨ chat 件的先行依赖——组合树装载与
+   * 官方件注册表因之整体前置到宿主装配期；chat 件对 tools 的依赖改经 ctx.get
+   * （件 inject 声明驱动 Kahn 轮次，apply 期取必居值）。 */
   const compositionDir = opts.compositionDir ?? dataDir();
   ctx.provide('paths', createPathsService(compositionDir, workspace));
   const plugins = createPluginsService({ dataDir: compositionDir });
@@ -552,8 +548,6 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }
     throw new AppError(code, message);
   };
-  // loop 工具快照活数组已上移 ③b（S1——chat 件 open 与早期闭包都按值引用它，
-  // 是唯一须先于官方件注册表在场的分配）；tools_change 刷新接线在 ⑧
   // 官方件注册表（契约篇 §6.1 `builtin:` 前缀唯一解析面）：官方随包件闭包注入
   // 宿主活资源（官方件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
   // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
@@ -597,6 +591,21 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * createChatPlugin 产物 = {module, registry, front}：注册表由组合根此处分配、
    * chat 件负责填充与消费（单真相）。早期闭包（③b 转发壳 / ④b onUsage /
    * ④f sessions / 调度判据）对 registry 的引用全部运行期才调用——TDZ 安全。 */
+  /**
+   * 系统提示词物化器（S2 per-entry，契约篇 §1.3 落码形态①）：`[基座, 技能渐进
+   * 披露, 具名段]` 在调用时点求值拼接。全局 let + rebuild 退役——每条目 open
+   * 各自物化（串与记忆基线**同时点同面**冻结，多会话纪元互不串档）；skills/
+   * prompts 两 const 在 ④g/⑦ 构造、晚于本箭头——闭包内引用，调用必在装载期
+   * 后（chat 件 ring2 apply 的 open 最早），无 TDZ。sessionId 透传具名段
+   * materialize（会话键控段冻结该会话基线）；缺省 = 诊断物化（dump-config）。
+   */
+  const materializeSystemPrompt = (sessionId?: string): string =>
+    [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills(), prompts.materialize(sessionId)]
+      .filter((part) => part !== '')
+      .join('\n');
+  /** 可写根推导器（safety/roots 同源产物——S2 fs 迁域随 chat 件走：主驱动 fs
+   * 族的 fence 数据源；与守门行同源单点接线，chat/subagent 两消费面同款构造） */
+  const rootsProvider = createRootsProvider({ workspace, mode: () => sandboxMode });
   const chatBundle = createChatPlugin({
     ...(persistence ? { persistence } : {}),
     resumeSession: opts.resumeSession,
@@ -607,8 +616,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     streamFn,
     convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
     transformContext,
-    getSystemPrompt: () => systemPrompt,
-    toolView,
+    materializeSystemPrompt,
+    writableRoots: rootsProvider,
     stampSandboxFacts,
     // tick 入口记账道声明（--background argv → run 入口 → 此处；缺省前台道）
     ...(opts.usagePriority !== undefined ? { usagePriority: opts.usagePriority } : {}),
@@ -637,12 +646,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       killTree,
       dataDir: dataDir(),
     },
-    // tools 件闭包（Ring 1 行树化批）：gate/decision durable 落点绑转发壳
-    //（件绑定后落账生效）；可写根推导器 = safety/roots 同源产物（tools 不
-    // import safety——拓扑单向，fence 与守门行两层正交同源由宿主单点接线）
+    // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
+    //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
+    // deps（rootsProvider——见 chatBundle 接线处）
     toolsDeps: {
       gateSink: durableForward.gate,
-      writableRoots: createRootsProvider({ workspace, mode: () => sandboxMode }),
       workspace: () => workspace,
     },
     // web 件测试注入缝（生产零参——真 fetch/真 DNS；组合根全栈测试注入
@@ -721,9 +729,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   }
 
   /* ---- ⑤ 工具面（Ring 1 行树化批起 = builtin:tools 件在 ④e 装载，本段仅存指针） ----
-   * 三段管道 + ctx.tools 服务 + fs 工具族/检索族的原硬装配已整体入列组合树
-   * 第七行（src/tools/plugin.ts——apply 于 ring1Anchor）；守门行仍在 ⑥ 经
-   * tools_pre_execute 事件 prepend 占首位（管道无关接线，见 gate.ts）。 */
+   * 三段管道 + ctx.tools 服务 + 检索族的原硬装配已整体入列组合树第七行
+   * （src/tools/plugin.ts——apply 于 ring1Anchor；fs 族 S2 迁 chat 件域注册）；
+   * 守门行仍在 ⑥ 经 tools_pre_execute 事件 prepend 占首位（管道无关接线，见 gate.ts）。 */
 
   /* ---- ⑥ 审批 + 守门行（审批对绑转发壳，件绑定后落 durable） ---- */
   const approval = createApprovalService(ctx, {
@@ -788,23 +796,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const locations = opts.skillLocations ?? defaultSkillLocations(workspace, { homeDir: opts.homeDir, trusted: true });
   skills.registerProvider(createLocalSkillsProvider({ locations }));
   skills.refresh();
-  // 系统提示词活视图（/reload 重建）：let 绑定 + rebuild 闭包改写——chat 件的
-  // header 落账与 loop 上下文经 getter 读当前值（loop 每次模型请求重读
-  // context.systemPrompt，/reload 后新提示词下次请求即见）
-  let systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills(), prompts.materialize()]
-    .filter((part) => part !== '')
-    .join('\n');
-  /** 重建系统提示词（/reload、/new、段集变更后调）：技能重扫 + 具名段重物化 + 重拼 */
-  const rebuildSystemPrompt = (): void => {
-    skills.refresh();
-    systemPrompt = [SYSTEM_PROMPT_BASE, skills.renderAvailableSkills(), prompts.materialize()]
-      .filter((part) => part !== '')
-      .join('\n');
-  };
+  // 系统提示词全局 let + rebuild 已退役（S2 契约篇 §1.3 落码形态①）：物化器
+  // materializeSystemPrompt 在 chatBundle 接线处定义（每条目 open 各自物化/
+  // 变更时点全部非退役条目重物化），本段不再持有进程级单份串
 
   /* ---- ⑧ 装载层接线（骨架篇 §9.2 装配层接线义务——刷新 loop 活视图；驱动本体随 chat 件走） ---- */
-  // loop 工具快照的活数组在 ④e 分配（Ring 1 行树化批——组合树装载前置后须先于
-  // 官方件注册表在场）；本段只做变更监听接线
+  // loop 工具快照与系统提示词均 per-entry（S2）：本段不再持有组合根级共享快照，
+  // 只做变更监听接线——事件载荷路由到条目控制面（refreshTools/rematerialize）
   // 装载窗口（骨架篇 §9.2 注记）：boot ⑨ 与 /reload 的批量装载期间，工具/段注册
   // 只刷活视图不逐条落 header——装载期中间态非模型可见时点，逐条快照只产噪声且
   // 窃走首请求的 initial 名分（会话篇 §1.3 腿 2）；窗口收口统一落账（boot 首请求
@@ -819,35 +817,47 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       if (!entry.retired) entry.controls.writeHeader();
     }
   };
+  /** 全条目重物化系统提示词（S2：技能重扫一次 + 全部非退役条目各自重物化——
+   * prompts/skills 变更与 /reload 收口共用；/new 不走此路〔open 即新纪元〕） */
+  const rematerializeAll = (): void => {
+    skills.refresh();
+    for (const entry of registry.entries.values()) {
+      if (!entry.retired) entry.controls.rematerialize();
+    }
+  };
   // tools_change → 刷新 loop 工具快照 + 即时落 request/header 快照（骨架篇 §9.2
   // 接线义务；会话篇 §1.3 腿 2「仅变化才快照」——writeHeader 内建 diff，toolSchemas
-  // 变了才落 reason=change，run 中途换工具也当场留痕）。注册在装配期 fs 工具族
-  // 之后：装配期注册不触发（首张 header 仍由首 run 落）；chat 件未装载时注册表
-  // 空——数组照刷（无 run 即无模型可见性），header 落账自然跳过
-  const unwatchToolsChange = ctx.on(TOOLS_CHANGE_EVENT, () => {
-    const fresh = tools.list().map((def) => tools.toAgentTool(def));
-    toolView.length = 0;
-    toolView.push(...fresh);
-    if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
-    writeHeadersAll();
+  // 变了才落 reason=change，run 中途换工具也当场留痕）。S2 域路由：载荷带 domain
+  // 键 = 域层变更只刷该域条目（chat 件 open 注册 fs 时即此形）；缺省 = 全局层变更
+  // 刷全部条目（memory/exec/web/mcp 等行注册）。chat 件未装载时注册表空——自然
+  // no-op（无条目即无快照面）
+  const unwatchToolsChange = ctx.on(TOOLS_CHANGE_EVENT, (payload: unknown) => {
+    const domain = (payload as { domain?: unknown } | undefined)?.domain;
+    const domainKey = typeof domain === 'string' ? domain : undefined;
+    for (const entry of registry.entries.values()) {
+      if (entry.retired) continue;
+      if (domainKey !== undefined && entry.session.header.sessionId !== domainKey) continue;
+      entry.controls.refreshTools();
+      if (!loadWindow) entry.controls.writeHeader();
+    }
   });
-  // prompts_change → 重建系统提示词 + 即时落 header 快照（pi-4(a) 落码形态④，与
+  // prompts_change → 全条目重物化 + 即时落 header 快照（pi-4(a) 落码形态④，与
   // tools_change 同族）：段集只在装载//reload 两时点变（注册/注销即广播）；装配层
-  // 同点完成重建——订阅者是观测刷新，不承担重建。writeHeader 内建 diff：段内容
+  // 同点完成重物化——订阅者是观测刷新，不承担重建。writeHeader 内建 diff：段内容
   // 变了才落 reason=change，没变不污染日志
   const unwatchPromptsChange = ctx.on(PROMPTS_CHANGE_EVENT, () => {
-    rebuildSystemPrompt();
+    rematerializeAll();
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
     writeHeadersAll();
   });
-  // skills_change → 重建系统提示词 + 即时落 header 快照（契约篇 §2.2 增补 6，
+  // skills_change → 全条目重物化 + 即时落 header 快照（契约篇 §2.2 增补 6，
   // 变更事件族第 3 件，与 prompts_change 同构）：provider 链变更（插件热注册/
-  // 卸载技能来源）即时重建——渐进披露随 rebuildSystemPrompt 内的 skills.refresh()
-  // 重扫。单一机制收口（树干原则）：boot ⑨ 装载窗口内事件照发、重建即时幂等
+  // 卸载技能来源）即时重物化——渐进披露随 rematerializeAll 内的 skills.refresh()
+  // 重扫。单一机制收口（树干原则）：boot ⑨ 装载窗口内事件照发、重物化即时幂等
   // （窗口收口由 header 落账闸统一），不加收口补丁——此前插件技能提供方
   // 装机即隐身，可见性靠 /reload //new 或无关插件注册段捎带 rebuild 的偶然耦合
   const unwatchSkillsChange = ctx.on(SKILLS_CHANGE_EVENT, () => {
-    rebuildSystemPrompt();
+    rematerializeAll();
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
     writeHeadersAll();
   });
@@ -867,12 +877,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 无持久层（诊断面）无事可做；聚焦驱动 run 进行中拒绝（时间线正被 loop 引用）
     if (!persistence || registry.focused()?.driver.isRunning) return undefined;
     const previous = registry.focused();
+    // 技能重扫先行（/new 重建时点的技能面半边——原 rebuildSystemPrompt 内含的
+    // refresh 保留；提示词半边随 open 即新纪元物化，不再全局 rebuild）
+    skills.refresh();
     const opened = registry.open();
     if (opened === undefined) return undefined;
     if (previous !== undefined && previous !== opened) registry.retire(previous.session.header.sessionId);
-    // /new 重建时点（pi-4(a) 落码形态③）：具名段重物化——简报等段内容随新会话
-    // 快照冻结（旧会话会话内不漂移的对称面：跨会话时点刷新）
-    rebuildSystemPrompt();
     return opened.session;
   };
 
@@ -989,7 +999,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         failed: [...ring1Load.failed, ...load.failed],
         skipped: [...ring1Load.skipped, ...load.skipped],
       }); // 同实例就地更新（失败行进 list 状态面——进程存活）
-      rebuildSystemPrompt();
+      rematerializeAll();
       // 应用组件在场断言随重装载重算（组合树换装后缺场集可变——活取值面）
       appGaps = assertAppComponents(officialApps, fresh);
       // 组装参数变化经 writeHeader 内建 diff 落 reason=change 快照（仅变化才落——
@@ -1074,9 +1084,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     model,
     workspace,
     sandboxMode,
-    // 活取值（/reload 重建系统提示词后取新值）
+    // 活取值（S2 诊断物化：无会话语境的 systemPrompt 投影——条目各自的串在
+    // 各自 header/loop 面，此处仅供 dump-config 等诊断打印字符量级）
     get systemPrompt(): string {
-      return systemPrompt;
+      return materializeSystemPrompt();
     },
     skillLocations: locations,
     // 活取值（前台聚焦条目投影——chat 件装载后即首个驱动；诊断装配/overlay 禁用两形为 undefined）

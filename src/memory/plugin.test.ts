@@ -43,8 +43,9 @@ interface Harness {
   toolNames: () => string[];
   /** 已注册段 id → render（apply 经 ctx.get('prompts').registerSection 真注册） */
   sectionIds: () => string[];
-  /** 物化某段内容（装配侧 materialize 的测试等价物——基线纪元在此冻结） */
-  renderSection: (id: string) => string;
+  /** 物化某段内容（装配侧 materialize 的测试等价物——带 sessionId 即冻结该会话
+   *  的差分基线纪元；缺省 = 诊断物化只渲染不冻结，S2 per-session 契约） */
+  renderSection: (id: string, sessionId?: string) => string;
   /** 绑定活跃会话（appendEvent 活引用目标——/new 热切换的测试等价物） */
   bindSession: (session: Session) => void;
   /** ctx.llm.complete 调用计数（canAfford 恒 false → 周期路闸门关闭） */
@@ -57,7 +58,7 @@ interface Harness {
 function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const registeredTools = new Set<string>();
-  const sections = new Map<string, () => string>();
+  const sections = new Map<string, (sessionId?: string) => string>();
   const llm = { calls: 0 };
   ctx.provide('tools', {
     register: (def: { name: string }) => {
@@ -66,7 +67,7 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
     },
   });
   ctx.provide('prompts', {
-    registerSection: (section: { id: string; render(): string }) => {
+    registerSection: (section: { id: string; render(sessionId?: string): string }) => {
       sections.set(section.id, section.render);
       return () => sections.delete(section.id);
     },
@@ -99,7 +100,7 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
     ctx,
     toolNames: () => [...registeredTools],
     sectionIds: () => [...sections.keys()],
-    renderSection: (id) => sections.get(id)!(),
+    renderSection: (id, sessionId) => sections.get(id)!(sessionId),
     bindSession: (session) => {
       live = session;
     },
@@ -198,9 +199,9 @@ describe('memory 官方件 apply（全栈接线序）', () => {
       content: '教训：删除前先备份',
       confidence: 0.8,
     });
-    // 物化简报段 = 基线纪元冻结（装配侧 materialize 的测试等价物）——记忆先在
-    // 库、基线含之，检索测试不再混入差分注入面
-    h.renderSection('memory/core');
+    // 物化简报段 = 基线纪元冻结（带本测试会话键——记忆先在库、基线含之，
+    // 检索测试不再混入差分注入面）
+    h.renderSection('memory/core', 's-transform');
 
     // 手动驱动瀑布（loop transformContext 桥的同一路径；S1 双参——归属键随批传入）：命中查询
     // （trigram 整 token 子串语义：中文无分词，查询串须是目标词的连续子串——
@@ -311,8 +312,9 @@ async function setupDiffBaseline(h: Harness, preseed?: (memory: MemoryStore) => 
   preseed?.(memory);
   const session = new Session();
   h.bindSession(session);
-  // 基线物化（render = 装配侧物化的等价物）+ 活跃会话闩（首事件先到）
-  const sectionText = h.renderSection('memory/core');
+  // 基线物化（render 带会话键 = 装配侧 open 物化的等价物——冻结**该会话**纪元）；
+  // 首事件照发（fts 镜像消费——差分闩已随 S2 退役，不再承担日志读取键）
+  const sectionText = h.renderSection('memory/core', session.header.sessionId);
   h.ctx.emit('session/event', {
     sessionId: session.header.sessionId,
     event: { type: 'user/message', seq: 0, time: 1, data: { content: '开始对话' } },
@@ -440,10 +442,46 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     if (inserted.outcome !== 'inserted') throw new Error('前置失败');
     await runTransform(h, session.header.sessionId); // 旧纪元落账 [+] + 注入
 
-    // /new 等价物：重新物化基线（面含新条目）→ 指纹换纪元、差分账清零
-    h.renderSection('memory/core');
+    // /new 等价物：重新物化基线（带同会话键——面含新条目）→ 指纹换纪元、差分账清零
+    h.renderSection('memory/core', session.header.sessionId);
     const out = await runTransform(h, session.header.sessionId);
     expect(out).toHaveLength(1); // 无注入：当前面 == 新基线
+
+    await h.ctx.dispose();
+  });
+
+  it('S2 双会话差分各归各：后开会话的重物化不覆写先开会话基线（全局单值互染的回归锁）', async () => {
+    const h = setup();
+    const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
+    await applyPlugin(plugin, h.ctx);
+    const memory = new MemoryStore(h.store.connection);
+    // 甲在库 → A open 冻结基线 {甲} → B open 前甲被 forget → B 基线 = {}
+    // （HEAD 全局单值下 B 的 render 会覆写 A 的基线——A 的差分随之错账；本测试锁死 per-session 语义）
+    const seeded = memory.addMemory({ ownerKey: 'global', kind: 'fact', summary: '条目甲', content: 'c' });
+    if (seeded.outcome !== 'inserted') throw new Error('前置失败');
+    const sessionA = new Session();
+    h.bindSession(sessionA);
+    h.renderSection('memory/core', sessionA.header.sessionId); // A 纪元：基线 {甲}
+    memory.forget(seeded.memory.id); // 面漂移——只对基线含甲的 A 构成差分
+    const sessionB = new Session();
+    h.bindSession(sessionB);
+    h.renderSection('memory/core', sessionB.header.sessionId); // B 纪元：基线 {} == 当前面
+
+    // A 首请求：差分 [-甲] 注入 + 落账进 **A 的**日志（差分落账经 sessions 活引用——
+    // 生产面由 registry 链内路由到各自的会话，harness 以 transform 前 re-bind 等价模拟）
+    h.bindSession(sessionA);
+    const outA = await runTransform(h, sessionA.header.sessionId);
+    expect(outA).toHaveLength(2);
+    expect(outA.at(-1)!.role).toBe('memory/diff');
+    expect(String(outA.at(-1)!.content)).toContain('- [m:'); // 消失态条目（A 的基线仍含甲）
+    expect(sessionA.events.filter((e) => e.type === 'memory/diff')).toHaveLength(1); // 落账归 A
+    expect(sessionB.events).toHaveLength(0); // B 的日志零污染
+
+    // B 首请求：B 基线 == 当前面 → 无差分、无落账、无注入（A 的纪元不影响 B）
+    h.bindSession(sessionB);
+    const outB = await runTransform(h, sessionB.header.sessionId);
+    expect(outB).toHaveLength(1);
+    expect(sessionB.events).toHaveLength(0);
 
     await h.ctx.dispose();
   });

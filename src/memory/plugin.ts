@@ -191,27 +191,37 @@ async function applyMemoryPlugin(
   }
 
   /* ---- ② 常驻简报段（render 仅重建时点求值——随会话冻结，prompt cache 友好） ---- */
-  // 差分基线纪元（§6 差分追注）：render 物化简报即冻结基线——面 + 指纹 +
-  // mirror 置空（纪元边界；首请求由 handler 从日志重派生，防重启撞指纹漏账）。
-  // 重建时点（boot / /reload / /new）render 重跑 = 新纪元物化，旧差分事件
-  // 因指纹出局自动清零。
-  let baselineFace: readonly FaceEntry[] = [];
-  let baselineFingerprint = '';
-  /** 本纪元已落账的差分视图（undefined = 未从日志派生初始化） */
-  let diffMirror: MemoryDiffEntry[] | undefined;
+  // 差分基线纪元（§6 差分追注 + S2 per-session 键控，契约篇 §1.3 落码形态①）：
+  // render(sessionId) 物化简报即冻结**该会话**的基线——面 + 指纹 + mirror 置空
+  // （纪元边界；首请求由 handler 从日志重派生，防重启撞指纹漏账）。多驱动并存
+  // 各归各纪元：A 会话物化不覆盖 B 会话的基线。诊断物化（sessionId undefined，
+  // dump-config）只渲染不立纪元。重建时点（boot / /reload / 段集变更）render
+  // 重跑 = 新纪元物化，旧差分事件因指纹出局自动清零。
+  interface SessionEpoch {
+    /** 基线面（render 时点冻结——差分的比较左值） */
+    face: readonly FaceEntry[];
+    /** 基线指纹（差分落账载荷 + 旧账出局判定） */
+    fingerprint: string;
+    /** 本纪元已落账的差分视图（undefined = 未从日志派生初始化） */
+    mirror: MemoryDiffEntry[] | undefined;
+  }
+  /** 会话差分纪元表：sessionId → 纪元（per-session 闭包单值退役——多会话差分
+   * 各归各；退役会话无新请求即无新读写，滞留条目无害） */
+  const epochs = new Map<string, SessionEpoch>();
   const prompts = ctx.get<PromptsService>('prompts');
   ctx.effect(() =>
     prompts.registerSection({
       id: BRIEFING_SECTION_ID,
-      render: () => {
+      render: (sessionId) => {
         // 面 = briefing 取数 → 消毒引述化（与差分 handler 共用 briefingFace——
         // 基线与当前面同一定义，单一事实源）
         const { face, truncated } = briefingFace(store, ownerKeys(), {
           ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
         });
-        baselineFace = face;
-        baselineFingerprint = faceFingerprint(face);
-        diffMirror = undefined;
+        // 会话语界在场才立纪元（诊断物化 undefined = 只渲染不冻结）
+        if (sessionId !== undefined) {
+          epochs.set(sessionId, { face, fingerprint: faceFingerprint(face), mirror: undefined });
+        }
         return renderBriefingSection(face, truncated);
       },
     }),
@@ -234,9 +244,6 @@ async function applyMemoryPlugin(
   ctx.effect(() => () => review.dispose());
 
   /* ---- ⑤ 跨会话索引：激活期对账（尽力而为）+ session/event 活体镜像增量 ---- */
-  // 活跃会话 id 闩（差分 handler 懒初始化的日志读取键）：session/event 信封
-  // 携带 sessionId——首请求前必有 user/message 事件先到，闩必已就位
-  let activeSessionId: string | undefined;
   try {
     fts.synchronize(deps.store);
   } catch (err) {
@@ -250,7 +257,6 @@ async function applyMemoryPlugin(
       try {
         const envelope = payload as { sessionId?: unknown; event?: SessionEvent };
         if (typeof envelope?.sessionId !== 'string' || !envelope.event) return;
-        activeSessionId = envelope.sessionId;
         fts.indexEvent(envelope.sessionId, envelope.event);
       } catch (err) {
         // fire-and-forget 纪律：索引异常止步日志，绝不上抛进事件派发面
@@ -309,26 +315,33 @@ async function applyMemoryPlugin(
       'context_transform',
       async (messages: unknown, sessionId: unknown, next: (...args: unknown[]) => unknown) => {
         try {
-          // 纪元懒初始化：从日志派生 mirror（重启撞指纹的旧账在此自愈——首请求
-          // 若发现 delta 与日志视图不一致即落收敛事件清账；/new 新会话日志为空
-          // 天然零账）。闩未就位（理论不可达——首请求前必有事件先到）按空日志防御。
-          if (diffMirror === undefined) {
-            diffMirror =
-              activeSessionId !== undefined
-                ? deriveDiffView(storeFace.loadEvents(activeSessionId), baselineFingerprint)
-                : [];
+          // 纪元键 = waterfall 第二参（S1 双参形状的语义兑现）：多驱动各归各——
+          // 差分只与本会话 open 时冻结的基线比对，不与他会的互染
+          const key = typeof sessionId === 'string' ? sessionId : undefined;
+          let epoch = key !== undefined ? epochs.get(key) : undefined;
+          if (epoch === undefined) {
+            // 未立纪元到达（诊断物化路径 / 无键防御——open 物化后注册序不应发生）：
+            // 空基线起步，差分退化为全量面（不丢账，只是基线语义降级）
+            epoch = { face: [], fingerprint: '', mirror: undefined };
+            if (key !== undefined) epochs.set(key, epoch);
+          }
+          // 纪元懒初始化：从本会话日志派生 mirror（重启撞指纹的旧账在此自愈——
+          // 首请求若发现 delta 与日志视图不一致即落收敛事件清账；新会话日志为空
+          // 天然零账）
+          if (epoch.mirror === undefined) {
+            epoch.mirror = key !== undefined ? deriveDiffView(storeFace.loadEvents(key), epoch.fingerprint) : [];
           }
           const { face: current } = briefingFace(store, ownerKeys(), {
             ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
           });
           // 全量差分（相对基线，非增量）——净变化为零 = 空差分（+后- 漂移回基线
           // 自然清零，无需逐事件累计）
-          const delta = diffFaces(baselineFace, current);
+          const delta = diffFaces(epoch.face, current);
           // 变则落账（durable 是差分与检索即弃注入的分界：权威修正可回放）、
           // 不变不追写（含收敛清账事件 entries=[]——落了才让重放视图同步归零）
-          if (!sameDiffView(delta, diffMirror)) {
-            sessions.appendEvent('memory/diff', { baseline: baselineFingerprint, entries: delta });
-            diffMirror = delta;
+          if (!sameDiffView(delta, epoch.mirror)) {
+            sessions.appendEvent('memory/diff', { baseline: epoch.fingerprint, entries: delta });
+            epoch.mirror = delta;
           }
           if (delta.length === 0) {
             return next(messages, sessionId);

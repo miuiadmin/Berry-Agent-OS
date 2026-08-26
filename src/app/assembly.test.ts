@@ -134,12 +134,10 @@ describe('createBerryRuntime 装配面', () => {
   it('fs 四件 + 内置命令注册；sandbox/mode 落库；系统提示词含基座', async () => {
     const runtime = await assemble();
     // 官方默认层三行（契约篇 §5.1）：memory 首行五件 + subagent 次行委派工具
-    // agent + goal 第三行工具三件（goal 纵切二起为默认装配现实）
-    expect(runtime.tools.list().map((t) => t.name)).toEqual([
-      'read',
-      'write',
-      'edit',
-      'ls',
+    // agent + goal 第三行工具三件（goal 纵切二起为默认装配现实）。
+    // S2 两层注册表：fs 四件随 chat 件驱动 open 落**域层**（本会话键）——会话
+    // 可见面 = listFor(本会话) = 全局层 + 域层；裸 list() 只余全局层（诊断口径）
+    expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
       'bash',
@@ -153,6 +151,10 @@ describe('createBerryRuntime 装配面', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'read',
+      'write',
+      'edit',
+      'ls',
     ]);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
@@ -276,7 +278,9 @@ describe('createBerryRuntime 装配面', () => {
     const runtime = await assemble({ persist: false });
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
-    expect(runtime.tools.list()).toHaveLength(9); // fs 四件 + find/grep + bash + agent + fetch（memory/goal 空转；subagent 无持久层照常）
+    // S2 后全局层口径：fs 四件迁域层（无驱动即无域工具——persist:false 不开
+    // 驱动）；memory/goal 空转；剩 find/grep/bash/agent/fetch 五件
+    expect(runtime.tools.list().map((t) => t.name)).toEqual(['find', 'grep', 'bash', 'agent', 'fetch']);
   });
 
   it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
@@ -319,13 +323,9 @@ describe('ConversationDriver + durable 接线', () => {
       'turn/end',
     ]);
     // LLM 请求上下文含系统提示词与工具面（装配接线证据；memory 五件 + agent +
-    // goal 三件为默认装配成员）
+    // goal 三件为默认装配成员）。S2 顺序 = listFor 面：全局层在前 + fs 域层在后
     expect(contexts[0]?.systemPrompt).toContain('terminal-based coding assistant');
     expect(contexts[0]?.tools?.map((t) => t.name)).toEqual([
-      'read',
-      'write',
-      'edit',
-      'ls',
       'find',
       'grep',
       'bash',
@@ -339,6 +339,10 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'read',
+      'write',
+      'edit',
+      'ls',
     ]);
     // request/header 载荷带应用域腿（血缘显式打标的证据面——契约篇 §5.4）
     const header = runtime.session!.events.find((e) => e.type === 'request/header');
@@ -459,13 +463,10 @@ describe('ConversationDriver + durable 接线', () => {
     const changeData = headers[1]!.data as { toolSchemas: Array<{ name: string }> };
     expect(changeData.toolSchemas.map((t) => t.name)).toContain('echo');
 
-    // 第二轮：loop 每次模型请求读 context.tools（活数组已刷新）——新工具对模型可见可调用
+    // 第二轮：loop 每次模型请求读 context.tools（活数组已刷新）——新工具对模型可见可调用。
+    // S2 顺序 = listFor 面：全局层（动态 echo 追加在全局层尾）在前 + fs 域层在后
     await runtime.conversation!.submitOnce('用 echo');
     expect(contexts[1]?.tools?.map((t) => t.name)).toEqual([
-      'read',
-      'write',
-      'edit',
-      'ls',
       'find',
       'grep',
       'bash',
@@ -480,6 +481,10 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_update',
       'fetch',
       'echo',
+      'read',
+      'write',
+      'edit',
+      'ls',
     ]);
     expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
     expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
@@ -751,6 +756,81 @@ describe('/new 会话热切换', () => {
   });
 });
 
+/* ---------------- S2 多驱动工具面（组合域分片全栈） ---------------- */
+
+describe('S2 多驱动工具面（组合域分片：双驱动隔离零泄漏 + retire 拆层 + /new 冻结）', () => {
+  /** fs 四名（域层恒在 listFor 尾部——chat 件 open 域注册） */
+  const FS_NAMES = ['read', 'write', 'edit', 'ls'];
+
+  it('双驱动各域各套 fs：实例隔离（观察表 per-driver 投影）、全局层零泄漏、retire 拆层他域不动、/reload 后活域存续', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    const entryA = runtime.drivers.focused()!;
+    const aId = entryA.session.header.sessionId;
+    // 直接 open（不走 /new——不退役 A）：双驱动并存形态（S3 /app 前台切换的目标面）
+    const entryB = runtime.drivers.open()!;
+    const bId = entryB.session.header.sessionId;
+    expect(bId).not.toBe(aId);
+
+    // 两域视角各含 fs 四名；裸 list（全局层）零 fs——域层零泄漏
+    const faceA = runtime.tools.listFor(aId);
+    const faceB = runtime.tools.listFor(bId);
+    expect(faceA.map((t) => t.name).filter((n) => FS_NAMES.includes(n))).toEqual(FS_NAMES);
+    expect(faceB.map((t) => t.name).filter((n) => FS_NAMES.includes(n))).toEqual(FS_NAMES);
+    expect(runtime.tools.list().some((t) => FS_NAMES.includes(t.name))).toBe(false);
+    // 实例隔离：A/B 的 read 是两个 def 实例（观察态 per-driver 的注册面投影——读不过户）
+    expect(faceA.find((t) => t.name === 'read')).not.toBe(faceB.find((t) => t.name === 'read'));
+
+    // A retire（退役即停摆的工具面半边）：A 域拆层 fs 消隐、B 面分毫不动
+    expect(runtime.drivers.retire(aId)).toBe(true);
+    expect(runtime.drivers.entries.get(aId)!.retired).toBe(true);
+    expect(runtime.tools.listFor(aId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
+    expect(
+      runtime.tools
+        .listFor(bId)
+        .map((t) => t.name)
+        .filter((n) => FS_NAMES.includes(n)),
+    ).toEqual(FS_NAMES);
+
+    // /reload 后活域存续：注册表本体随 Ring 1 锚不回卷、域层条目挂 DriverEntry
+    //（retire 已拆的 A 域不复活；B 域四名齐全）
+    const reloaded = await runtime.reload();
+    expect(reloaded.payload).toBeDefined();
+    expect(
+      runtime.tools
+        .listFor(bId)
+        .map((t) => t.name)
+        .filter((n) => FS_NAMES.includes(n)),
+    ).toEqual(FS_NAMES);
+    expect(runtime.tools.listFor(aId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
+  });
+
+  it('/new 冻结：旧条目退役（域拆层、条目保留）、新条目新域新会话起步', async () => {
+    const { streamFn } = scriptedStream([textMessage('旧答'), textMessage('新答')]);
+    const runtime = await assemble({ streamFn });
+    const oldId = runtime.session!.header.sessionId;
+    const oldEntry = runtime.drivers.focused()!;
+
+    const newSession = runtime.newSession();
+    expect(newSession).toBeDefined();
+    const newId = newSession!.header.sessionId;
+    expect(newId).not.toBe(oldId);
+    // 旧条目：retired 标记在 + 保留在注册表（迟到结算继续落原会话账）
+    expect(runtime.drivers.entries.get(oldId)!.retired).toBe(true);
+    expect(runtime.drivers.entries.get(oldId)).toBe(oldEntry);
+    // 旧域已拆层（「冻结」的工具面半边——退役会话不再 run，工具面消隐防泄漏累积）
+    expect(runtime.tools.listFor(oldId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
+    // 新域就位：新会话视角 fs 四名齐全 + 聚焦已切新条目
+    expect(
+      runtime.tools
+        .listFor(newId)
+        .map((t) => t.name)
+        .filter((n) => FS_NAMES.includes(n)),
+    ).toEqual(FS_NAMES);
+    expect(runtime.drivers.focused()!.session.header.sessionId).toBe(newId);
+  });
+});
+
 /* ---------------- ⑨b 插件装载（组合树 + 加载器全栈） ---------------- */
 
 /** 写一个目录形态的 fixture 插件（约定入口 index.ts），返回插件目录路径 */
@@ -872,12 +952,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'web',
       'tool-plugin',
     ]);
-    // 插件工具已进注册表（fs 四件 + memory 五件 + agent + goal 三件之后）
-    expect(runtime.tools.list().map((t) => t.name)).toEqual([
-      'read',
-      'write',
-      'edit',
-      'ls',
+    // 插件工具已进注册表（S2：全局层在前 + fs 域层在后——本会话可见面）
+    expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
       'bash',
@@ -892,6 +968,10 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'goal_update',
       'fetch',
       'plug-echo',
+      'read',
+      'write',
+      'edit',
+      'ls',
     ]);
     // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
     const paths = runtime.ctx.tryGet<{ dataDir(): string; pluginDataDir(id: string): string }>('paths');
@@ -1130,12 +1210,9 @@ describe('/reload 组合树重载', () => {
       failed: [],
       skipped: ['tool-plugin'],
     });
-    // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）
-    expect(runtime.tools.list().map((t) => t.name)).toEqual([
-      'read',
-      'write',
-      'edit',
-      'ls',
+    // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）。
+    // S2：fs 域层挂活驱动 DriverEntry——跨 /reload 存续（本会话可见面照旧含 fs 四件）
+    expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
       'bash',
@@ -1149,6 +1226,10 @@ describe('/reload 组合树重载', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'read',
+      'write',
+      'edit',
+      'ls',
     ]);
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],
