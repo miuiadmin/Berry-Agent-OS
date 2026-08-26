@@ -236,6 +236,23 @@ export const PLUGIN_MAIN_DB_FORBIDDEN = registerErrorCode('PLUGIN_MAIN_DB_FORBID
 export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');
 
 /* ------------------------------------------------------------------ */
+/* 桥接协议码族（契约篇 §1.7 错误面，2026-08-26 第二十七批刀二）——      */
+/* carrier 级失败模式：AppError 家族词过界保码（信封 {code,message}）， */
+/* 非家族异常入桶码；五码全部有消费者（bridge 模块），不预造。          */
+/* ------------------------------------------------------------------ */
+
+/** bridge：调用方主动取消的本地结算（AbortSignal 永不过界——取消消息化 + 桩本地立即结算不等对端往返；迟到 result 由迟到丢弃分支吸收，契约篇 §1.7） */
+export const BRIDGE_CANCELLED = registerErrorCode('BRIDGE_CANCELLED');
+/** bridge：对端域死亡（worker exit/terminate 或本端 dispose——在途出站调用一律以此结算；宿主侧即「域死结算」的调用面） */
+export const BRIDGE_WORKER_EXITED = registerErrorCode('BRIDGE_WORKER_EXITED');
+/** bridge：在途 ask 超时（监督面「在途 ask 超时」判据的执行面；超时与取消同路径——本地结算 + 发 cancel 让对端停工） */
+export const BRIDGE_CALL_TIMEOUT = registerErrorCode('BRIDGE_CALL_TIMEOUT');
+/** bridge：ask 的 service/method 无处理方（拼写错或声明面收窄——宁响亮不静默，对称 EVENT_UNKNOWN 纪律在 RPC 面的对偶） */
+export const BRIDGE_METHOD_NOT_FOUND = registerErrorCode('BRIDGE_METHOD_NOT_FOUND');
+/** bridge：处理器抛出非 AppError 异常的信封桶（家族词保码过界、非家族词统一入桶——对端回卷为 AppError 后按码分派不受影响） */
+export const BRIDGE_HANDLER_FAILED = registerErrorCode('BRIDGE_HANDLER_FAILED');
+
+/* ------------------------------------------------------------------ */
 /* 事件词汇执法码族（契约篇 §1.1，2026-08-23 M2 /reload 纵切）——        */
 /* 「显式注册」的运行时半边：拼错事件名不再静默 no-op。                  */
 /* ------------------------------------------------------------------ */

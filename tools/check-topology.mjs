@@ -45,6 +45,10 @@ const MODULE_EDGES = {
   // 经 ToolsService.executor（类型住 contracts）、schema 经 contracts typebox
   // 再导出面——零 tools/exec import（mcp 最窄边同款）
   web: ['contracts', 'context'],
+  // bridge = 桥接协议 v0 端点（2026-08-26 第二十七批刀二 K3-a，契约篇 §1.7）：
+  // 纯机制（两侧同构 BridgeEndpoint）——生命周期监督住组合根；K3-b worker
+  // bootstrap 落地时按需扩 context 边（装载器私有件）
+  bridge: ['contracts'],
   // compaction = 长会话压缩官方件（2026-08-26 纵切，会话篇 §2 增补七条）：策略
   // 纯函数 + durable 四词宿主注册 + 件本体。服务全经 ctx 取（sessions/llm/
   // agent——运行时零跨模块 import）；session 边是 ProjectedMessage/SessionEvent
