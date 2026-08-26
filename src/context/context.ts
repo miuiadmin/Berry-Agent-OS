@@ -10,6 +10,7 @@ import {
   AppError,
   CONTEXT_DISPOSED,
   CONTEXT_EFFECT_INVALID,
+  CONTEXT_EFFECT_LIMIT,
   CONTEXT_SERVICE_EXISTS,
   CONTEXT_SERVICE_NOT_FOUND,
   EVENT_DUPLICATE,
@@ -25,6 +26,7 @@ import { registerPluginSessionEventType } from '../contracts/session-events.js';
 import type { SessionEventTypeDefinition } from '../contracts/session-events.js';
 import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
+import { RateLimiter } from './rate-limit.js';
 import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
 
 /** 监听器登记项：handler + 注册方作用域名（失败归因——记「谁注册的」而非「谁触发的」） */
@@ -33,20 +35,15 @@ interface HandlerEntry {
   readonly owner: string;
 }
 
-/**
- * 事件派发频率令牌桶（契约篇 §1.6 时钟族，2026-08-27 刀〇a）：tokens 按墙上钟
- * 以 perMinute 速率回填至上限 capacity；每次派发扣 1，桶空即执法（fail-loud）。
- * 桶空 ≠ 拒绝一切：等回填即可再发——「速率护栏」语义而非「总量帽」。
- */
-interface RateBucket {
-  tokens: number;
-  /** 上次回填时点（Date.now() 毫秒） */
-  last: number;
-}
-
 /** 频率护栏缺省参数：1000 次/分钟 + 1000 突发余量（研究 §2.2 #14 建议值） */
 const DEFAULT_RATE_CAPACITY = 1000;
 const DEFAULT_RATE_PER_MINUTE = 1000;
+/**
+ * per-scope 在册 effect 计数帽（契约篇 §1.6 资源护栏族 #9，2026-08-27 刀〇b）：
+ * context 注册族（effect/on/provide 注销器/registerMessageRole/
+ * registerSessionEventType/fork 级联）全走 pushEffect 单点，一条钟罩全族。
+ */
+const EFFECT_LIMIT = 10_000;
 /** 单条 effect 回卷竞速时钟缺省（毫秒）——挂起 disposer 超此即放弃等待 */
 const DEFAULT_DISPOSE_TIMEOUT_MS = 1000;
 
@@ -72,20 +69,32 @@ class ContextRuntime {
   readonly liveEvents = new Map<string, LiveEventDefinition>();
   /** 根 logger（子作用域 logger 由它派生前缀） */
   readonly rootLogger: Logger;
-  /** per-scope 派发频率桶（键 = 派发方作用域名；宿主根作用域同表执法） */
-  readonly rateBuckets = new Map<string, RateBucket>();
-  /** per-scope 派发累计计数（打点面，B2 P5——只增不清零，诊断面读） */
+  /**
+   * 根作用域名（B-1 冷读裁决，契约篇 §1.6 刀〇b）：宿主根作用域派发**免计费**——
+   * durable→总线的 session/event 镜像与 tools_change 变更广播都在 root 面派发，
+   * root 桶实为全部会话全部流量的复用汇（合法子代理舰队即触顶），触顶时
+   * PLUGIN_EVENT_RATE 会在宿主写路径内爆炸（persistence sink → session.append）。
+   * 插件永不持有 root 作用域（fork 派生新名——带 `:` 不可能等于 rootName）。
+   */
+  readonly rootName: string;
+  /** per-scope 派发频率桶（键 = 派发方作用域名；root 键免扣费） */
+  readonly limiter: RateLimiter;
+  /** per-scope 派发累计计数（打点面，B2 P5——只增不清零，诊断面读；root 照计） */
   readonly eventStats = new Map<string, number>();
-  /** 令牌桶参数（createContext 注入；测试面小桶，生产面缺省） */
-  readonly rateCapacity: number;
-  readonly ratePerMinute: number;
   /** 单条 effect 回卷竞速时钟（毫秒）——dispose 路径用（见 ContextScopeImpl.dispose） */
   readonly disposeTimeoutMs: number;
 
-  constructor(logger?: Logger, rateLimit?: { capacity: number; perMinute: number }, disposeTimeoutMs?: number) {
+  constructor(
+    rootName: string,
+    logger?: Logger,
+    rateLimit?: { capacity: number; perMinute: number },
+    disposeTimeoutMs?: number,
+  ) {
+    this.rootName = rootName;
     this.rootLogger = logger ?? createLogger({ module: 'context' });
-    this.rateCapacity = rateLimit?.capacity ?? DEFAULT_RATE_CAPACITY;
-    this.ratePerMinute = rateLimit?.perMinute ?? DEFAULT_RATE_PER_MINUTE;
+    this.limiter = new RateLimiter(
+      rateLimit ?? { capacity: DEFAULT_RATE_CAPACITY, perMinute: DEFAULT_RATE_PER_MINUTE },
+    );
     this.disposeTimeoutMs = disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS;
     for (const def of LIVE_EVENT_CATALOG) this.liveEvents.set(def.name, def);
   }
@@ -99,28 +108,19 @@ class ContextRuntime {
    * 派发方计费：扣令牌（桶空抛 PLUGIN_EVENT_RATE）+ 累计打点。
    * 四派发模式（emit/parallel/serial/waterfall）入口统一走此——词汇执法
    * （requireEvent）先行，频率执法在后（拼错名的诊断优先于限流噪音）。
+   * B-1 root 豁免（刀〇b）：宿主根作用域派发只计打点不扣桶——镜像/变更广播
+   * 等宿主基础设施流量不占插件频率配额（归因对象是插件作用域的派发行为）。
    */
   chargeEvent(scopeName: string, event: EventName): void {
-    const now = Date.now();
-    let bucket = this.rateBuckets.get(scopeName);
-    if (bucket === undefined) {
-      bucket = { tokens: this.rateCapacity, last: now };
-      this.rateBuckets.set(scopeName, bucket);
-    } else {
-      // 按流逝时间回填令牌（夹在 capacity——突发余量语义）
-      const refill = ((now - bucket.last) / 60_000) * this.ratePerMinute;
-      bucket.tokens = Math.min(this.rateCapacity, bucket.tokens + refill);
-      bucket.last = now;
-    }
-    if (bucket.tokens < 1) {
+    this.eventStats.set(scopeName, (this.eventStats.get(scopeName) ?? 0) + 1);
+    if (scopeName === this.rootName) return; // root 免计费（打点照计——负载数据完整）
+    if (!this.limiter.tryCharge(scopeName)) {
       throw new AppError(
         PLUGIN_EVENT_RATE,
-        `作用域 ${scopeName} 事件派发超频（事件 ${event}）——护栏 ${this.rateCapacity} 次/分钟` +
-          `（令牌桶：突发上限 ${this.rateCapacity}、回填 ${this.ratePerMinute}/min；fail-loud 非静默丢弃，契约篇 §1.6）`,
+        `作用域 ${scopeName} 事件派发超频（事件 ${event}）——护栏 ${this.limiter.params.capacity} 次/分钟` +
+          `（令牌桶：突发上限 ${this.limiter.params.capacity}、回填 ${this.limiter.params.perMinute}/min；fail-loud 非静默丢弃，契约篇 §1.6）`,
       );
     }
-    bucket.tokens -= 1;
-    this.eventStats.set(scopeName, (this.eventStats.get(scopeName) ?? 0) + 1);
   }
 }
 
@@ -196,12 +196,24 @@ class ContextScopeImpl implements ContextScope {
   /**
    * 入栈一个已就绪的 Disposer 并返回幂等包装（手动调用与 dispose 回卷双保险，只跑一次）。
    *
+   * 注册计数帽（契约篇 §1.6 资源护栏族 #9，2026-08-27 刀〇b）：在册 effect 合计
+   * 达 10^4 抛 CONTEXT_EFFECT_LIMIT——context 注册族（effect/on/provide 注销器/
+   * registerMessageRole/registerSessionEventType/fork 级联）全过此单点，一条钟罩
+   * 全族；计数基准 = 活注册（once 内 splice 即减、dispose 回卷即减），非历史累计。
+   *
    * 异步 disposer 支持（CR-2-F8，契约篇 §1.6 dispose 语义升级）：disposer 返回
    * thenable 时，once 把它包装为「结算后吞掉异常」的 promise 返回——dispose 循环
    * await 此返回值即等待异步清理完成；手动调用面（返回值被 Disposer 类型收窄为
    * void、调用方忽略）是 fire-and-forget，reject 已在包装内记日志不外泄。
    */
   private pushEffect(disposer: Disposer): Disposer {
+    if (this.effects.length >= EFFECT_LIMIT) {
+      throw new AppError(
+        CONTEXT_EFFECT_LIMIT,
+        `作用域 ${this.name} 在册 effect 达上限 ${EFFECT_LIMIT}（context 注册族：effect/on/provide/` +
+          `registerMessageRole/registerSessionEventType/fork 级联——计数基准为活注册，注销/回卷即减；契约篇 §1.6 资源护栏族 #9）`,
+      );
+    }
     let done = false;
     const once = (): void | Promise<void> => {
       if (done) return;
@@ -474,8 +486,8 @@ class ContextScopeImpl implements ContextScope {
  * 插件作用域一律由根/父作用域 fork 派生，不直接调用本函数。
  */
 export function createContext(opts: ContextOptions = {}): ContextScope {
-  const runtime = new ContextRuntime(opts.logger, opts.rateLimit, opts.disposeTimeoutMs);
   const name = opts.name ?? 'root';
+  const runtime = new ContextRuntime(name, opts.logger, opts.rateLimit, opts.disposeTimeoutMs);
   const scope = new ContextScopeImpl(runtime, name, opts.config, runtime.rootLogger.child(name));
   scopeRuntimes.set(scope, runtime);
   return scope;

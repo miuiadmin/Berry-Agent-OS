@@ -218,8 +218,10 @@ export const PLUGIN_APPLY_TIMEOUT = registerErrorCode('PLUGIN_APPLY_TIMEOUT');
 /**
  * plugin：per-scope 事件派发频率超限（缺省 1000 次/分钟令牌桶——契约篇 §1.6
  * 事件频率护栏：失控插件高频派发会撑爆监听器面与 durable 落点，超限 fail-loud
- * 抛错而非静默丢弃；按**派发方**作用域分桶，宿主根作用域同桶执法）。
- * 2026-08-27 刀〇a。
+ * 抛错而非静默丢弃；按**派发方**作用域分桶；宿主根作用域免计费——B-1 冷读
+ * 裁决：root 桶实为全部会话流量的复用汇〔session/event 镜像 + tools_change
+ * 广播〕，计费会在宿主写路径内自杀，插件永不持有 root 作用域〔fork 派生新名〕。
+ * 刀〇a 落码 / 刀〇b 修正注记）。
  */
 export const PLUGIN_EVENT_RATE = registerErrorCode('PLUGIN_EVENT_RATE');
 /** plugin：组合树行引用的插件入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
@@ -315,3 +317,19 @@ export const GOAL_TRANSITION_INVALID = registerErrorCode('GOAL_TRANSITION_INVALI
 export const APP_INVALID = registerErrorCode('APP_INVALID');
 /** apps：应用 id 撞名（官方裸名是保留字——第三方强制含 `/` 域前缀正是防撞官方裸名的碰撞域，契约篇 §5.4 冷读钉死） */
 export const APP_DUPLICATE = registerErrorCode('APP_DUPLICATE');
+
+/* ------------------------------------------------------------------ */
+/* 资源护栏族码族（契约篇 §1.6，2026-08-27 刀〇b——总量/频率失控面，与    */
+/* 时钟族〔挂起〕正交。执法统一 fail-loud；例外两条不立码：#11 进度流是  */
+/* 数据面丢弃 + 单条 warn、#13 切片是物理层多事务语义〔PERSIST_BATCH_    */
+/* WRITE_FAILED 语义不变〕。                                            */
+/* ------------------------------------------------------------------ */
+
+/** context：作用域在册 effect 合计达上限（10^4——context 注册族 effect/on/provide 注销器/registerMessageRole/registerSessionEventType/fork 级联全走 pushEffect 单点一条钟罩全族；计数基准 = 活注册，手动注销/回卷即减非历史累计） */
+export const CONTEXT_EFFECT_LIMIT = registerErrorCode('CONTEXT_EFFECT_LIMIT');
+/** tools：两层注册表（全局层+域层）合计件数达上限（10^3——良性行为距阈值两个数量级，超限 = 失控或泄漏） */
+export const TOOL_REGISTRY_LIMIT = registerErrorCode('TOOL_REGISTRY_LIMIT');
+/** tools：register/unregister 变更频率超限（容量 120 / 回填 600 每分钟全局令牌桶——每次变更触 tools_change ≤64KiB 快照，高频注册武器化 header 快照〔R4〕；容量吃下单次 /reload 全量重注册突发，回填 10 op/s 撑热迭代不触顶） */
+export const TOOL_REGISTRY_RATE = registerErrorCode('TOOL_REGISTRY_RATE');
+/** jobs：per-owner running 态并发达上限（16——帽在 createEntry 单点执法罩住一切 kind：subagent 委派/exec 后台/第三方 kind 同受；undefined owner = operator 直控面同规共桶） */
+export const JOB_CONCURRENCY_LIMIT = registerErrorCode('JOB_CONCURRENCY_LIMIT');

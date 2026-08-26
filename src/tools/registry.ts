@@ -27,10 +27,13 @@ import {
   CONTEXT_SERVICE_NOT_FOUND,
   TOOL_DESCRIPTION_REJECTED,
   TOOL_DUPLICATE,
+  TOOL_REGISTRY_LIMIT,
+  TOOL_REGISTRY_RATE,
   TOOL_TIMEOUT_INVALID,
 } from '../contracts/errors.js';
 import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
+import { RateLimiter } from '../context/rate-limit.js';
 import type { Disposer } from '../context/types.js';
 import type { Context } from '../context/types.js';
 import type { ToolPipelineExecutor } from './pipeline.js';
@@ -61,6 +64,20 @@ const DESCRIPTION_INJECTION_PATTERNS: readonly RegExp[] = [/\b(curl|wget)\b[^\n|
 export const TOOL_TIMEOUT_FLOOR_MS = 1000;
 
 /**
+ * 两层注册表合计件数帽（契约篇 §1.6 资源护栏族 #10①，2026-08-27 刀〇b）：
+ * 全局层 + 全部域层求和。良性行为距阈值两个数量级（官方全家桶 ~10¹ 量级），
+ * 超限 = 失控或泄漏，fail-loud 拒绝而非静默顶住。
+ */
+const REGISTRY_TOTAL_LIMIT = 1_000;
+/**
+ * register/unregister 变更频率桶（#10②）：容量 120 吃下单次 /reload 全量重注册
+ * 突发（MCP 在场 ~60-80 op）；回填 600/min = 10 op/s 持续供给，热迭代
+ * （30-40s 一 reload + 会话开关注册）不触顶，武器化（>10/s 持续）容量耗尽即拦。
+ * 全局键——registry 无 scope 概念（冷读确认，不为频率帽引入 scope）。
+ */
+const REGISTRY_RATE: Readonly<{ capacity: number; perMinute: number }> = { capacity: 120, perMinute: 600 };
+
+/**
  * 扫描工具描述是否命中注入模式（注册面统一防线——任何来源的工具同一执法）。
  * @returns 命中的模式串（用于错误归因）；干净描述返回 undefined
  */
@@ -83,6 +100,8 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
   /** 注册面打点（B2 P5）：开机以来累计注册/注销次数（高频注册武器化监控数据源） */
   let totalAdds = 0;
   let totalRemoves = 0;
+  /** 变更频率桶（#10②）：register 侧 fail-loud 先于变更；unregister 侧见注销器内注 */
+  const changeRate = new RateLimiter(REGISTRY_RATE);
 
   const service: ToolsService = {
     // 管道执行器随服务携带（Ring 1 行树化批）：bash 工具与 ctx.exec 两层并存
@@ -146,6 +165,26 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         }
         layer = tools;
       }
+      /* ---- 资源护栏族 #10 双帽（契约篇 §1.6，2026-08-27 刀〇b）----
+       * 查重等既有拒绝先过（不消耗频率配额——拼错重试不被限流噪音掩盖），
+       * 双帽随后、layer.set 之前：任一拒绝都不留半套注册状态。 */
+      // ①总量帽：两层注册表合计（失控或泄漏——良性行为距阈值两个数量级）
+      let registered = tools.size;
+      for (const domainLayer of domains.values()) registered += domainLayer.size;
+      if (registered >= REGISTRY_TOTAL_LIMIT) {
+        throw new AppError(
+          TOOL_REGISTRY_LIMIT,
+          `工具注册表合计已达上限 ${REGISTRY_TOTAL_LIMIT}（全局层 ${tools.size} + 域层 ${registered - tools.size}；契约篇 §1.6 资源护栏族 #10）`,
+        );
+      }
+      // ②变更频率帽：register/unregister 合计令牌桶（R4 高频注册武器化 header 快照）
+      if (!changeRate.tryCharge('registry')) {
+        throw new AppError(
+          TOOL_REGISTRY_RATE,
+          `工具注册/注销变更超频：${def.name}（令牌桶：突发上限 ${REGISTRY_RATE.capacity}、回填 ${REGISTRY_RATE.perMinute}/min；` +
+            `每次变更触 tools_change 快照广播，fail-loud 拒绝非静默丢弃——热迭代节奏不受影响，契约篇 §1.6 #10）`,
+        );
+      }
       layer.set(def.name, normalized);
       totalAdds += 1;
       // 载荷带域键 = 域层变更（装配层只刷该域的面）；缺省 = 全局层变更（刷全部）
@@ -171,6 +210,16 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
             name: def.name,
             ...(domainKey !== undefined ? { domain: domainKey } : {}),
           });
+          /* 变更频率帽 unregister 侧计费（#10②）：删除与广播先行、计费殿后——
+           * 注销器可能在作用域回卷路径跑（dispose 内同步循环），此处抛错会被
+           * 回卷异常隔离吞成日志，若计费在先则「删除没做成但配额已耗」留下
+           * 半套状态；殿后则不变式完整（集变更即快照），桶满仅记 error。 */
+          if (!changeRate.tryCharge('registry')) {
+            ctx.logger.error(
+              `工具注册/注销变更超频（unregister 侧：${def.name}）——桶容量 ${REGISTRY_RATE.capacity}/回填 ${REGISTRY_RATE.perMinute} 每 min，` +
+                `本次已照常删除广播（回卷路径计费只记不阻）；后续 register 将被 fail-loud 拒绝（契约篇 §1.6 #10）`,
+            );
+          }
         }
       };
     },

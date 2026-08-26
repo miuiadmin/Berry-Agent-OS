@@ -129,21 +129,29 @@ export class WriteBehind {
     try {
       this.store.appendCore(reg, batch, this.incarnation);
     } catch (cause) {
-      // 保留批次（放回队首）+ 暂停自动重试：显式 flush 才会再试
+      /* 部分写裁剪（契约篇 §1.6 资源护栏族 #13，2026-08-27 刀〇b——**强制不变式**）：
+       * appendCore 片化后已提交片保持 durable（部分写如实），库内 max(seq) 是
+       * 部分写事实源——只回队首未写部分。全批原样回放会撞片首 cursor 连续性
+       * 校验 SESSION_WRITE_CONFLICT，该会话队列永久卡死（m-5 冷读死锁陷阱）。 */
       this.paused = true;
       if (this.timer) {
         clearTimeout(this.timer);
         this.timer = null;
       }
-      const queue = this.pending.get(sessionId);
-      if (queue) {
-        queue.unshift(...batch);
-      } else {
-        this.pending.set(sessionId, batch);
+      const writtenUpto = this.store.maxSeq(sessionId);
+      const remainder = writtenUpto === undefined ? batch : batch.filter((event) => event.seq > writtenUpto);
+      const written = batch.length - remainder.length;
+      if (remainder.length > 0) {
+        const queue = this.pending.get(sessionId);
+        if (queue) {
+          queue.unshift(...remainder);
+        } else {
+          this.pending.set(sessionId, remainder);
+        }
       }
       const err = new AppError(
         PERSIST_BATCH_WRITE_FAILED,
-        `批量落盘失败（会话 ${sessionId}，${batch.length} 事件已保留待重试）`,
+        `批量落盘失败（会话 ${sessionId}，已写 ${written} 条、剩 ${remainder.length} 条保留待重试）`,
         { cause },
       );
       this.onError?.(err);

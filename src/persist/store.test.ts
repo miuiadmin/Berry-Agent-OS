@@ -178,6 +178,31 @@ describe('appendCore（cursor 连续性 + 单事务 + revision）', () => {
     expect(rev.split(':')).toHaveLength(3);
     store.close();
   });
+
+  // 切片写入（契约篇 §1.6 资源护栏族 #13，2026-08-27 刀〇b）
+  it('切片：501 事件按 500 条界切两片顺序提交，全量 durable 无 cursor 冲突', () => {
+    const store = openStore({ path: nextPath() });
+    const r = reg('s-slice');
+    const batch = Array.from({ length: 501 }, (_, i) => ev(i));
+    const revision = store.appendCore(r, batch, 'inc-1');
+    // 500 条界 → 两片（500+1）；每片独立事务各前进一次 revision
+    expect(revision).toBe(2);
+    const stored = store.loadEvents('s-slice');
+    expect(stored).toHaveLength(501);
+    expect(stored.map((e) => e.seq)).toEqual(Array.from({ length: 501 }, (_, i) => i));
+    expect(store.maxSeq('s-slice')).toBe(500); // maxSeq = 部分写事实源面（write-behind 裁剪依据）
+    store.close();
+  });
+
+  it('切片字节界：单条超 4MiB 独占一片，后续事件另起一片', () => {
+    const store = openStore({ path: nextPath() });
+    const r = reg('s-slice-bytes');
+    const fat = { content: 'x'.repeat(4 * 1024 * 1024 + 512) }; // 首条即超字节界（首条必进片）
+    const revision = store.appendCore(r, [ev(0, 'user/message', fat), ev(1)], 'inc-1');
+    expect(revision).toBe(2); // 两条各占一片
+    expect(store.loadEvents('s-slice-bytes')).toHaveLength(2);
+    store.close();
+  });
 });
 
 describe('loadEvents 往返与撕裂尾修复', () => {

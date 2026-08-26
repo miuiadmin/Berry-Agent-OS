@@ -4,9 +4,16 @@
  * AgentTool 适配（执行必经管道）/ defineTool / 服务生命周期随作用域回卷。
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Type } from 'typebox';
-import { AppError, CONTEXT_SERVICE_NOT_FOUND, TOOL_DESCRIPTION_REJECTED, TOOL_DUPLICATE } from '../contracts/errors.js';
+import {
+  AppError,
+  CONTEXT_SERVICE_NOT_FOUND,
+  TOOL_DESCRIPTION_REJECTED,
+  TOOL_DUPLICATE,
+  TOOL_REGISTRY_LIMIT,
+  TOOL_REGISTRY_RATE,
+} from '../contracts/errors.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import { createContext } from '../context/index.js';
 import { createToolPipeline } from './pipeline.js';
@@ -82,6 +89,63 @@ describe('registerToolsService — 动态注册（契约篇 §3.2）', () => {
     tools.register(makeTool('grep')); // 第二个接位
     // 旧注销器再次调用（幂等已 no-op）；即便非幂等也不该动第二个
     expect(tools.get('grep')?.name).toBe('grep');
+  });
+});
+
+describe('registerToolsService — 注册表护栏（契约篇 §1.6 资源护栏族 #10，刀〇b）', () => {
+  it('总量帽：两层注册表合计 1000，第 1001 个响亮拒绝 TOOL_REGISTRY_LIMIT', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    // 频率帽（容量 120）会先拦高速注册——拨快时钟喂回填（600/min → 每 10s 回 100 令牌），
+    // 让本用例确定性抵达总量边界而非撞频率桶
+    let fakeNow = Date.now();
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+    try {
+      for (let i = 0; i < 1_000; i++) {
+        if (i % 100 === 0 && i > 0) fakeNow += 10_000;
+        tools.register(makeTool(`t-${i}`));
+      }
+      expect(tools.list()).toHaveLength(1_000);
+      fakeNow += 60_000; // 频率桶回满：确保第 1001 个撞的是总量帽
+      try {
+        tools.register(makeTool('t-over'));
+        expect.unreachable('应当抛错');
+      } catch (e) {
+        expect((e as AppError).code).toBe(TOOL_REGISTRY_LIMIT);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('频率帽：register/unregister 合计变更 121 次即拒（容量 120）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    const events: Array<{ kind: string; name: string }> = [];
+    // 时钟冻结（回填 = 0）保证确定性：恰好 120 发令牌耗尽，第 121 发拒绝
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const disposes: Array<() => void> = [];
+      for (let i = 0; i < 120; i++) {
+        disposes.push(tools.register(makeTool(`t-${i}`)));
+      }
+      expect(tools.list()).toHaveLength(120);
+      // 桶已空后注销照常完成（计费殿后、桶满只记 error 不阻——回卷路径不变式）：
+      // 删除 + tools_change(remove) 广播先行，注销器绝不因桶空抛错
+      ctx.on('tools_change', (e) => events.push(e));
+      disposes[0]!();
+      expect(tools.get('t-0')).toBeUndefined();
+      expect(events).toEqual([{ kind: 'remove', name: 't-0' }]);
+      // 第 121 发变更（register 侧）响亮拒绝
+      try {
+        tools.register(makeTool('t-rate'));
+        expect.unreachable('应当抛错');
+      } catch (e) {
+        expect((e as AppError).code).toBe(TOOL_REGISTRY_RATE);
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

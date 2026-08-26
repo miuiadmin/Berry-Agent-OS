@@ -180,6 +180,46 @@ describe('write-behind 失败语义（响亮失败，不静默丢批）', () => 
     await wb.close();
     store.close();
   });
+
+  // 部分写裁剪（契约篇 §1.6 资源护栏族 #13 **强制不变式**，2026-08-27 刀〇b）：
+  // appendCore 片化后「已提交片保持 durable」——失败回队只回未写部分（库内
+  // maxSeq 是事实源）。修前全批原样回放，重试批首 seq 撞片首 cursor 连续性
+  // 校验 SESSION_WRITE_CONFLICT，该会话队列永久卡死（m-5 冷读死锁陷阱）。
+  it('部分写裁剪：片失败只回队未写部分，flush 重试不撞 cursor（不重不丢）', async () => {
+    // 替身形态：首次 appendCore 真写批前缀（模拟片 1 已提交）后抛错（模拟片 2 失败）
+    const real = Persistence.open({ path: nextPath(), windowMs: 60_000 });
+    const store = real.store;
+    const origAppend = store.appendCore.bind(store);
+    let failedOnce = false;
+    (store as unknown as { appendCore: Store['appendCore'] }).appendCore = (r, batch, inc) => {
+      if (!failedOnce) {
+        failedOnce = true;
+        origAppend(r, batch.slice(0, 2), inc); // 片 1：前缀真提交（部分写如实）
+        throw new Error('模拟片 2 失败');
+      }
+      return origAppend(r, batch, inc);
+    };
+    const onError = vi.fn();
+    const wb = new WriteBehind(store, 'inc-test', { windowMs: 20, onError });
+    const session = new Session({ sessionId: 's-partial' });
+    for (let i = 0; i < 4; i++) {
+      wb.enqueue(session, session.append('user/message', { content: `p${i}` }));
+    }
+    await sleep(60); // 窗口触发：前缀 2 条已 durable、后 2 条保留待重试
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]![0].code).toBe(PERSIST_BATCH_WRITE_FAILED);
+    expect(onError.mock.calls[0]![0].message).toContain('已写 2 条'); // 裁剪面如实上报
+    expect(store.loadEvents('s-partial')).toHaveLength(2); // 片 1 durable 保持
+    expect(wb.isPaused).toBe(true);
+
+    // 显式 flush 重试（故障已移除）：只重 seq>1 尾部——修前此处撞 cursor 永久卡死
+    await wb.flush();
+    const stored = store.loadEvents('s-partial');
+    expect(stored.map((e) => (e.data as { content: string }).content)).toEqual(['p0', 'p1', 'p2', 'p3']);
+    expect(stored.map((e) => e.seq)).toEqual([0, 1, 2, 3]); // 不重不丢
+    await wb.close();
+    store.close();
+  });
 });
 
 describe('顺序保证', () => {

@@ -12,6 +12,7 @@ import { createLogger } from '../context/logger.js';
 import type { ContextScope } from '../context/types.js';
 import {
   CONTEXT_DISPOSED,
+  JOB_CONCURRENCY_LIMIT,
   JOB_KIND_DUPLICATE,
   JOB_KIND_UNKNOWN,
   JOB_NOT_FOUND,
@@ -204,6 +205,37 @@ describe('Job 注册表 — owner 围栏', () => {
     c.settle('completed');
     expect(jobs.get(c.handle.id)?.status).toBe('completed');
     expect(jobs.list()).toHaveLength(1);
+  });
+});
+
+describe('Job 注册表 — per-owner 并发帽（契约篇 §1.6 资源护栏族 #12，刀〇b）', () => {
+  it('同 owner 16 并发为帽：第 17 个响亮拒绝；结算释放槽位后可再造', async () => {
+    const { jobs } = setup();
+    // 16 个挂起 Job（create 手动持有结算权——不落终态即占槽）
+    const controllers = Array.from({ length: 16 }, () => jobs.create({ kind: 'subagent', ownerSessionId: 's-owner' }));
+    await expectCode(JOB_CONCURRENCY_LIMIT, () => jobs.create({ kind: 'subagent', ownerSessionId: 's-owner' }));
+    // run 入口同规（帽在 createEntry 单点执法罩两入口）
+    await expectCode(JOB_CONCURRENCY_LIMIT, () =>
+      jobs.run({ kind: 'process', ownerSessionId: 's-owner' }, async () => undefined),
+    );
+    // 另一 owner 互不影响（per-owner 隔离——失控舰队只困自己会话）
+    jobs.create({ kind: 'subagent', ownerSessionId: 's-other' });
+    // 结算释放槽位（帽限并发不限总量）：settle 一个后可再造一个
+    controllers[0]!.settle('completed');
+    const refill = jobs.create({ kind: 'subagent', ownerSessionId: 's-owner' });
+    expect(refill.handle.status).toBe('running');
+    // 复用后再次满员：继续拒绝
+    await expectCode(JOB_CONCURRENCY_LIMIT, () => jobs.create({ kind: 'subagent', ownerSessionId: 's-owner' }));
+  });
+
+  it('operator 直控面（无 owner）同规共桶：16 个第 17 拒，有主面不受 operator 桶影响', async () => {
+    const { jobs } = setup();
+    for (let i = 0; i < 16; i++) {
+      jobs.create({ kind: 'process' }); // 无 ownerSessionId = operator 直控面
+    }
+    await expectCode(JOB_CONCURRENCY_LIMIT, () => jobs.create({ kind: 'process' }));
+    // 有主面走自己的桶（单一规则无特权分支，但桶按 owner 分键）
+    jobs.create({ kind: 'process', ownerSessionId: 's-x' });
   });
 });
 

@@ -1,8 +1,8 @@
 /**
  * L1 persist — SQLite 存储核（会话篇 §6 物理层的实现）。
  *
- * 职责：版本门禁（开库即验，宁拒绝不误读）、appendCore（单事务批量写入 +
- * cursor 连续性校验 + revision 前进）、loadEvents（读 + 撕裂尾截断修复）、
+ * 职责：版本门禁（开库即验，宁拒绝不误读）、appendCore（切片多事务批量写入 +
+ * cursor 连续性校验 + revision 前进——#13）、loadEvents（读 + 撕裂尾截断修复）、
  * 凭证 read-modify-write 串行化、模型目录 CRUD。
  * 全部 better-sqlite3 同步 API——进程内无并发竞争，跨进程经 BEGIN IMMEDIATE 仲裁。
  */
@@ -223,6 +223,15 @@ function normalizeSql(sql: string): string {
     .trim();
 }
 
+/**
+ * appendCore 切片参数（契约篇 §1.6 资源护栏族 #13，2026-08-27 刀〇b）：
+ * 500 条或累计序列化字节 4MiB 先到者切片多事务顺序提交——better-sqlite3 同步
+ * 写长阻塞 event loop 的切片（B3 §9 P6'）。字节计量取自 INSERT 序列化产物
+ * 本身（物理层零额外序列化税——预序列化一次，切片与 INSERT 同用）。
+ */
+const APPEND_SLICE_MAX_ROWS = 500;
+const APPEND_SLICE_MAX_BYTES = 4 * 1024 * 1024;
+
 /** 存储库句柄（构造只经 openStore——门禁必须先过） */
 export class Store {
   readonly storeId: string;
@@ -262,39 +271,72 @@ export class Store {
 
   /**
    * 批量写入一个会话的事件（write-behind 链第 4-5 步）。
-   * BEGIN IMMEDIATE 单事务：cursor 连续性校验（断裂 = 第二写者/误用，响亮拒绝）
-   * → 批量 insert → sessions 行登记 → revision 前进（incarnation 变更即复位为 1）。
-   * 事务原子性即「批量写失败回滚」——物理删除两例外之一，无需额外代码。
+   *
+   * 切片语义（#13，2026-08-27 刀〇b）：内部按 500 条或累计序列化字节 4MiB
+   * 先到者切片，逐片独立 BEGIN IMMEDIATE 事务顺序提交（cursor 连续性校验
+   * 逐片自洽——后片起点自然衔接前片落定的 max(seq)）；每片事务内做
+   * insert → sessions 行登记 → revision 前进（incarnation 变更即复位为 1）。
+   * 片失败 = 已提交片保持 durable（**部分写如实**）、错误穿透上抛——
+   * 调用方（write-behind）按库内 maxSeq 裁剪重试面，只重未写部分。
+   *
    * @param incarnation 本进程生命周期 UUID（revision 复位边界）
-   * @returns 前进后的 revision
+   * @returns 前进后的 revision（= 最后一片落定的值；切片使 revision 按事务数前进）
    */
   appendCore(reg: SessionRegistration, batch: readonly SessionEvent[], incarnation: string): number {
     if (batch.length === 0) {
       return this.currentRevision(reg.sessionId);
     }
+    // 预序列化一次（切片字节计量与 INSERT 同用——零额外序列化税）
+    const jsons = batch.map((event) => JSON.stringify(event.data));
+    let revision = 0;
+    for (let start = 0; start < batch.length;) {
+      // 切片边界：从 start 起累计至 500 条或 4MiB（首条必进片——单条超界独占一片）
+      let end = start + 1;
+      let bytes = Buffer.byteLength(jsons[start]!, 'utf8');
+      while (end < batch.length && end - start < APPEND_SLICE_MAX_ROWS && bytes < APPEND_SLICE_MAX_BYTES) {
+        bytes += Buffer.byteLength(jsons[end]!, 'utf8');
+        end += 1;
+      }
+      revision = this.appendSlice(reg, batch.slice(start, end), jsons.slice(start, end), incarnation);
+      start = end;
+    }
+    return revision;
+  }
+
+  /**
+   * 单片事务：cursor 连续性校验（片首 seq 必须 = 已存 max(seq)+1——同会话单写者
+   * 护栏，双开姿态第③件；切片场景下后片衔接前片落定的 max）→ 批量 insert →
+   * sessions 行登记 → revision 前进。片内原子（失败整片回滚，已提交片不受影响）。
+   */
+  private appendSlice(
+    reg: SessionRegistration,
+    events: readonly SessionEvent[],
+    jsons: readonly string[],
+    incarnation: string,
+  ): number {
     const run = this.db.transaction(() => {
-      // cursor 校验：新批起始 seq 必须等于已存 max(seq)+1（同会话单写者护栏，双开姿态第③件）
       const tail = this.stmt('SELECT COALESCE(MAX(seq), -1) AS m FROM events WHERE session_id = ?').get(
         reg.sessionId,
       ) as { m: number };
       const expectedStart = tail.m + 1;
-      if (batch[0]!.seq !== expectedStart) {
+      if (events[0]!.seq !== expectedStart) {
         throw new AppError(
           SESSION_WRITE_CONFLICT,
-          `cursor 断裂：批起始 seq=${batch[0]!.seq}，库内 max(seq)+1=${expectedStart}（会话 ${reg.sessionId}）`,
+          `cursor 断裂：片起始 seq=${events[0]!.seq}，库内 max(seq)+1=${expectedStart}（会话 ${reg.sessionId}）`,
         );
       }
       const insert = this.stmt(
         `INSERT INTO events (session_id, seq, type, time, data, source_event_seqs, surface_op, ignorable)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      for (const event of batch) {
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i]!;
         insert.run(
           reg.sessionId,
           event.seq,
           event.type,
           event.time,
-          JSON.stringify(event.data),
+          jsons[i]!, // 预序列化产物（appendCore 一次算、切片与 INSERT 同用）
           event.sourceEventSeqs ? encodeSeqs(event.sourceEventSeqs) : null,
           event.surfaceOp ? JSON.stringify(event.surfaceOp) : null,
           event.ignorable ? 1 : 0,
@@ -332,6 +374,17 @@ export class Store {
     });
     // immediate：BEGIN IMMEDIATE（双开姿态第②件：写竞争经事务互斥仲裁）
     return run.immediate() as number;
+  }
+
+  /**
+   * 库内最大 seq（#13 部分写事实源）：appendCore 片失败后，已提交片的落定边界
+   * 从库本身读取——write-behind 以此裁剪重试面（只重未写部分），不靠错误携带
+   * 状态。无事件返回 undefined。
+   */
+  maxSeq(sessionId: string): number | undefined {
+    const row = this.stmt('SELECT MAX(seq) AS m FROM events WHERE session_id = ?').get(sessionId) as
+      { m: number | null } | undefined;
+    return row === undefined || row.m === null ? undefined : row.m;
   }
 
   /** 当前 revision（会话未登记返回 0） */

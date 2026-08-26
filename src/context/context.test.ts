@@ -551,9 +551,22 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     });
   }
 
+  /**
+   * 计费锚点重铸（刀〇b B-1 root 豁免）：宿主根作用域派发免计费后，计费断言
+   * 一律锚在 fork 作用域上（插件永不持有 root——fork 派生新名是结构性保证）。
+   * 词汇注册锚在宿主根上（runtime 全体作用域共享——fork 与 root 同词汇表）。
+   */
+  function tinyBucketHostAndFork(): {
+    host: ReturnType<typeof tinyBucketRoot>;
+    scope: ReturnType<typeof tinyBucketRoot>;
+  } {
+    const host = tinyBucketRoot();
+    return { host, scope: host.fork({ name: 'charger' }) };
+  }
+
   it('桶满 fail-loud：PLUGIN_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', async () => {
-    const scope = tinyBucketRoot();
-    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    const { host, scope } = tinyBucketHostAndFork();
+    registerLiveEvent(host, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
     const seen: number[] = [];
     scope.on('test/evt', (n: number) => seen.push(n));
     scope.emit('test/evt', 1);
@@ -575,8 +588,8 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
   });
 
   it('四派发模式统一计费：waterfall 派发同样占桶（执法面不分模式）', async () => {
-    const scope = tinyBucketRoot();
-    registerLiveEvent(scope, { name: 'test/chain', mode: 'waterfall', note: '测试词汇' });
+    const { host, scope } = tinyBucketHostAndFork();
+    registerLiveEvent(host, { name: 'test/chain', mode: 'waterfall', note: '测试词汇' });
     // 耗掉 3 令牌
     await scope.waterfall('test/chain', () => 'ok');
     await scope.waterfall('test/chain', () => 'ok');
@@ -600,8 +613,30 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     expect(() => scope.emit('test/evt', 'host-ok')).not.toThrow();
   });
 
+  it('B-1 root 豁免（刀〇b 冷读裁决）：宿主根作用域派发免计费、打点照计——镜像/tools_change 大流量不触顶', () => {
+    // 回归锁：durable→总线的 session/event 镜像与 tools_change 变更广播都在
+    // root 面派发（assembly onLiveEvent / registry 两写点）——豁免前 root 桶是
+    // 全部会话流量的复用汇，合法子代理舰队即触顶且 PLUGIN_EVENT_RATE 在宿主
+    // 写路径内爆炸（persistence sink → session.append）
+    const scope = tinyBucketRoot(); // 容量仅 3
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    const seen: number[] = [];
+    scope.on('test/evt', (n: number) => seen.push(n));
+    // 远超容量的宿主面流量：不抛（豁免）、全送达
+    for (let i = 0; i < 50; i++) scope.emit('test/evt', i);
+    expect(seen.length).toBe(50);
+    // 打点照计：root 免扣桶不免计量（负载数据完整）
+    expect(eventDispatchStats(scope).get('root')).toBe(50);
+    // 同根下插件作用域照常计费（豁免半径 = root 名，不含 fork 派生名）
+    const plugin = scope.fork({ name: 'still-charged' });
+    plugin.emit('test/evt', 1);
+    plugin.emit('test/evt', 2);
+    plugin.emit('test/evt', 3);
+    expect(() => plugin.emit('test/evt', 4)).toThrowError(AppError);
+  });
+
   it('词汇执法先行于频率执法：拼错名报 EVENT_UNKNOWN 而非限流噪音', () => {
-    const scope = tinyBucketRoot();
+    const { scope } = tinyBucketHostAndFork();
     try {
       scope.emit('not/registered' as never);
       expect.unreachable('未注册词汇应抛');
@@ -621,5 +656,45 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     const stats = eventDispatchStats(scope);
     expect(stats.get('root:p1')).toBe(2);
     expect(stats.get('root')).toBe(1);
+  });
+});
+
+describe('注册计数帽（§1.6 资源护栏族 #9，2026-08-27 刀〇b）', () => {
+  it('在册 effect 达 10^4 抛 CONTEXT_EFFECT_LIMIT；注销即减（活注册基准非历史累计）', () => {
+    const scope = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+    // 前 10^4 个注册合法（一条箭头函数 disposer 即一条在册 effect）
+    const disposers: Array<() => void> = [];
+    for (let i = 0; i < 10_000; i++) {
+      disposers.push(scope.effect(() => () => {}));
+    }
+    // 第 10^4+1 条：CONTEXT_EFFECT_LIMIT fail-loud
+    try {
+      scope.effect(() => () => {});
+      expect.unreachable('超帽注册应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_EFFECT_LIMIT');
+    }
+    // 手动注销两条即腾出两条额度（活注册基准）
+    disposers.pop()!();
+    disposers.pop()!();
+    expect(() => scope.effect(() => () => {})).not.toThrow();
+    expect(() => scope.effect(() => () => {})).not.toThrow();
+    expect(() => scope.effect(() => () => {})).toThrowError(AppError);
+  });
+
+  it('注册族同钟：on/provide/registerMessageRole 同占额度（pushEffect 单点执法）', () => {
+    const scope = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    // effect 先耗 9_999 条（帽缺省钉 10^4，不可注入——按缺省帽构造边界）
+    for (let i = 0; i < 9_999; i++) scope.effect(() => () => {});
+    // on 内部走 effect：第 10_000 条合法占满
+    scope.on('test/evt', () => {});
+    // provide 的注销器同样入栈：第 10_001 条撞帽
+    try {
+      scope.provide('svc-x', {});
+      expect.unreachable('provide 超帽应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_EFFECT_LIMIT');
+    }
   });
 });

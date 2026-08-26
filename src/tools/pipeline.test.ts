@@ -12,6 +12,7 @@ import { AppError, TOOL_ARGUMENTS_INVALID, TOOL_BLOCKED, TOOL_GATE_FAILED, TOOL_
 import type { AgentToolResult, GateDecisionPayload, TextContent, ToolDefinition } from '../contracts/tools.js';
 import { TOOL_POST_EXECUTE_EVENT } from '../contracts/tools.js';
 import { createContext } from '../context/index.js';
+import { createLogger } from '../context/logger.js';
 import { createToolPipeline, OUTPUT_GUARD_BYTES } from './pipeline.js';
 
 /** 标准测试工具：echo 回显 args（执行段真实跑到的证据） */
@@ -274,6 +275,31 @@ describe('createToolPipeline — 执行段（tools_execute）', () => {
     expect(seen).toEqual(['tc-42']);
     expect(result.content[0]).toMatchObject({ text: 'done' });
     expect(updates[0]?.content[0]).toMatchObject({ text: '进度 50%' });
+  });
+});
+
+describe('createToolPipeline — 进度流硬帽（契约篇 §1.6 资源护栏族 #11，刀〇b）', () => {
+  it('onUpdate 累计 10^4 为帽：首 10^4 送达、超帽丢弃 + 单条 warn、结果不受影响', async () => {
+    // 内存 sink 捕获 warn 行（验证「首条丢弃单条 warn」不逐条刷屏）
+    const warnLines: string[] = [];
+    const ctx = createContext({
+      name: 'test',
+      logger: createLogger({ module: 'test', level: 'warn', sink: (l) => warnLines.push(l) }),
+    });
+    const delivered: AgentToolResult[] = [];
+    const tool = echoTool({
+      execute: async (_args, tctx) => {
+        for (let i = 0; i < 10_002; i++) {
+          tctx.onUpdate?.({ content: [{ type: 'text', text: `进度 ${i}` }] });
+        }
+        return { content: [{ type: 'text', text: 'done' }] };
+      },
+    });
+    const run = createToolPipeline(ctx);
+    const result = await run(tool, 'tc-cap', { msg: 'hi' }, undefined, (partial) => delivered.push(partial));
+    expect(delivered).toHaveLength(10_000); // 恰好帽值条送达，其后丢弃
+    expect(result.content[0]).toMatchObject({ text: 'done' }); // 数据面丢弃非错误面——工具照常结算
+    expect(warnLines.filter((l) => l.includes('进度流达上限'))).toHaveLength(1); // 单条 warn
   });
 });
 

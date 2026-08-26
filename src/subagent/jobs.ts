@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AppError,
   CONTEXT_DISPOSED,
+  JOB_CONCURRENCY_LIMIT,
   JOB_KIND_DUPLICATE,
   JOB_KIND_UNKNOWN,
   JOB_NOT_FOUND,
@@ -78,6 +79,15 @@ function viewOf(entry: JobEntry): JobView {
 const BUILTIN_KINDS: readonly string[] = ['subagent', 'process'];
 
 /**
+ * per-owner running 态并发帽（契约篇 §1.6 资源护栏族 #12，2026-08-27 刀〇b）：
+ * 帽在 createEntry 单点执法罩住一切 kind（subagent 委派/exec 后台/第三方 kind
+ * 同受）；undefined owner = operator 直控面同规共桶（单一规则无特权分支）。
+ * 帽限并发不限总量——drain 语义不变（排空后可再造）。常驻 job 是否计帽挂
+ * exec 后台刀裁决（kind='process' 词汇已埋未落码）。
+ */
+const OWNER_CONCURRENCY_LIMIT = 16;
+
+/**
  * 创建 Job 注册表（组合根 provide('jobs') 的那一行所注对象）。
  *
  * @param scope 根作用域——生命周期挂点（dispose 兜底回卷）与 logger 来源
@@ -91,6 +101,12 @@ export function createJobsService(
   const logger: Logger = scope.logger;
   /** 全量条目表（含已结算——终态条目不删除，仅不可再变；NOT_FOUND 即 id 拼错/未建过） */
   const byId = new Map<string, JobEntry>();
+  /**
+   * per-owner running 态计数（#12 并发帽的 O(1) 计数面）：键 = ownerSessionId
+   * ?? ''（undefined owner = operator 直控面同规共桶）；createEntry 加一、
+   * first-wins settle 减一（终态即释放槽位——无 TOCTOU：settle 是唯一写口）。
+   */
+  const runningByOwner = new Map<string, number>();
   /** 已注册 kind 词汇表（种子内置两枚 + registerKind 增量） */
   const kinds = new Set<string>(BUILTIN_KINDS);
   /** 注册表是否已随作用域回卷（回卷后 create/registerKind 响亮拒绝——stale 护栏同 ctx） */
@@ -142,6 +158,12 @@ export function createJobsService(
     entry.status = terminal;
     entry.settledDetail = Object.freeze({ terminal, ...(detail ?? {}) });
     entry.doneResolve(terminal);
+    // 并发帽槽位释放（#12）：first-wins 唯一写口在此减一（stopping 不减——
+    // 取消请求非结算，槽位占用到终态；帽限的是真并发非登记量）
+    const ownerKey = entry.ownerSessionId ?? '';
+    const remaining = (runningByOwner.get(ownerKey) ?? 0) - 1;
+    if (remaining > 0) runningByOwner.set(ownerKey, remaining);
+    else runningByOwner.delete(ownerKey);
     logger.debug('Job 结算', { id: entry.id, kind: entry.kind, terminal, ownerSessionId: entry.ownerSessionId });
     // 结算副作用广播（契约篇 §2.2 应用层）：载荷按契约钉死的五段形状，
     // 缺省字段不占位（undefined 键进 JSON 会丢，显式构造保形状干净）
@@ -165,6 +187,18 @@ export function createJobsService(
   const createEntry = (opts: JobCreateOptions): JobController => {
     assertActive();
     assertKind(opts.kind);
+    // per-owner 并发帽（#12）：createEntry 单点执法罩住 run/create 两入口与一切
+    // kind——失控子代理舰队在同一 owner 下即在此拦（16 并发上限，帽限并发
+    // 不限总量；结算即释放）。fail-loud 拒绝新条目，存量照跑（drain 不受影响）。
+    const ownerKey = opts.ownerSessionId ?? '';
+    const running = runningByOwner.get(ownerKey) ?? 0;
+    if (running >= OWNER_CONCURRENCY_LIMIT) {
+      throw new AppError(
+        JOB_CONCURRENCY_LIMIT,
+        `owner ${opts.ownerSessionId ?? '(operator 直控面)'} 运行中 Job 已达上限 ${OWNER_CONCURRENCY_LIMIT}` +
+          `（帽限并发不限总量：结算即释放槽位；契约篇 §1.6 资源护栏族 #12）`,
+      );
+    }
     const id = randomUUID();
     let doneResolve!: (terminal: JobTerminal) => void;
     // done 永不 reject：executor 侧异常由 run 糖转 failed 终态，promise 侧只剩 resolve
@@ -183,6 +217,7 @@ export function createJobsService(
       done,
     };
     byId.set(id, entry);
+    runningByOwner.set(ownerKey, running + 1); // 并发帽槽位占用（#12——settle 减一）
     logger.debug('Job 创建', { id, kind: opts.kind, ownerSessionId: opts.ownerSessionId, label: opts.label });
     /** 活句柄：直接处置权（创建方持有，cancel 不走围栏——围栏管的是间接服务面）。
      * 显式带 getter 构造（不可展开 viewOf——spread 会当场求值 getter，句柄状态被冻死） */

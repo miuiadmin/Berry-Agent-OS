@@ -9,7 +9,7 @@
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AssistantMessage,
   AssistantStream,
@@ -33,7 +33,7 @@ import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
 import { dumpConfigMain } from './dump-config.js';
-import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
+import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_EVENT_RATE, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -206,6 +206,39 @@ describe('createBerryRuntime 装配面', () => {
     const bare = await assemble({ persist: false });
     const bareSessions = bare.ctx.tryGet<{ appendEvent(t: string, d: unknown): SessionEvent | undefined }>('sessions')!;
     expect(bareSessions.appendEvent('memory/diff', {})).toBeUndefined();
+  });
+
+  it('sessions 写面频率护栏（契约篇 §1.6 资源护栏族 #14，刀〇b）：按目标会话令牌桶 fail-loud', async () => {
+    // 小桶注入（容量 3）+ 时钟冻结（回填 = 0）——确定性触顶；生产缺省 2000/1000 每分钟
+    const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const runtime = await assemble({ sessionRateLimit: { capacity: 3, perMinute: 60 } });
+      const sessions = runtime.ctx.tryGet<{ appendEvent(t: string, d: unknown): SessionEvent | undefined }>(
+        'sessions',
+      )!;
+      for (let i = 0; i < 3; i++) {
+        expect(sessions.appendEvent('memory/diff', { baseline: 'aa', entries: [] })).toBeTruthy();
+      }
+      // 第 4 发撞桶：fail-loud——message 带面名（appendEvent）与目标会话键（两面包可分辨）
+      try {
+        sessions.appendEvent('memory/diff', { baseline: 'bb', entries: [] });
+        expect.unreachable('应当抛错');
+      } catch (e) {
+        expect((e as AppError).code).toBe(PLUGIN_EVENT_RATE);
+        expect((e as AppError).message).toContain('appendEvent');
+        expect((e as AppError).message).toContain(runtime.session!.header.sessionId);
+      }
+      // 执法先于计费：未注册词在 session.append 内先抛（不占令牌、码可分辨非护栏）
+      try {
+        sessions.appendEvent('nope/void', {});
+        expect.unreachable('应当抛错');
+      } catch (e) {
+        expect((e as AppError).code).not.toBe(PLUGIN_EVENT_RATE);
+        expect((e as Error).message).toContain('未知事件类型');
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('sessions 读面（P0-1 只读投影：currentSessionId + eventsOfType 写读同规，会话篇 §3.2）', async () => {

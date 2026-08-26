@@ -30,6 +30,7 @@ import type { ToolsService } from '../tools/registry.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
+import { RateLimiter } from '../context/rate-limit.js';
 import {
   Persistence,
   createPluginSqliteFace,
@@ -74,6 +75,7 @@ import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import {
   EVENT_HANDLER_TIMEOUT,
+  PLUGIN_EVENT_RATE,
   SESSION_CORE_TYPE_FORBIDDEN,
   SESSION_FORMAT_UNSUPPORTED,
   SESSION_SURFACE_OP_INVALID,
@@ -225,6 +227,13 @@ export interface RuntimeOptions {
    * 生产面用缺省。
    */
   readonly transformTimeoutMs?: number;
+  /**
+   * ctx.sessions 写面频率护栏（缺省容量 2000 / 1000 每分钟——契约篇 §1.6
+   * 资源护栏族 #14，2026-08-27 刀〇b）：按**目标会话**令牌桶（归因 = 插件写
+   * 落在归属会话），appendEvent / appendWithSurfaceOp 两口统一计费；计费在
+   * session.append 成功之后（只对成功写扣费）。测试面注小桶验证执法路径。
+   */
+  readonly sessionRateLimit?: { capacity: number; perMinute: number };
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -526,7 +535,24 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    *（sendUserMessage source）/审批/结算语义全绑在宿主写点，插件经服务面伪造即
    * SESSION_CORE_TYPE_FORBIDDEN 响亮拒绝（内核边界，契约篇）；读面核心词不禁
    *（已注册即返回——读不伪造任何宿主语义）。服务必须无条件 provide（即便
-   * persist:false）——inject 是 Kahn 硬依赖，缺供即启动断言拒启。 */
+   * persist:false）——inject 是 Kahn 硬依赖，缺供即启动断言拒启。
+   * 写面频率护栏（#14，2026-08-27 刀〇b）：按目标会话令牌桶（容量 2000 /
+   * 1000 每分钟，RuntimeOptions.sessionRateLimit 可调）——归因裁决：服务面无
+   * scope 键，目标会话（registry.routed）即天然键（插件写落在归属会话，失控
+   * 洪水淹没的就是该会话）。计费在 session.append 成功之后（只对成功写扣费
+   * ——未注册词/核心词执法先抛，不扣令牌）；宿主自身 durable 写点不经此面。 */
+  const sessionRate = new RateLimiter(opts.sessionRateLimit ?? { capacity: 2000, perMinute: 1000 });
+  /** 写面计费（两口共用）：session.append 成功返回后扣令牌，桶空 fail-loud */
+  const chargeSessionWrite = (sessionId: string, face: string): void => {
+    if (!sessionRate.tryCharge(sessionId)) {
+      throw new AppError(
+        PLUGIN_EVENT_RATE,
+        `ctx.sessions.${face} 写入超频（会话 ${sessionId}——按目标会话计费）` +
+          `：护栏 ${sessionRate.params.perMinute} 次/分钟（令牌桶：突发上限 ${sessionRate.params.capacity}、` +
+          `回填 ${sessionRate.params.perMinute}/min；fail-loud 非静默丢弃，契约篇 §1.6 #14）`,
+      );
+    }
+  };
   ctx.provide('sessions', {
     appendEvent: (type: string, data: unknown): SessionEvent | undefined => {
       // 核心词判据单一来源（contracts——注册侧同尺，两道闸一道判据）
@@ -536,7 +562,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
           `核心事件词汇不允许插件经 ctx.sessions.appendEvent 写入：${type}（内核词写入权属宿主，插件请注册自有词汇）`,
         );
       }
-      return registry.routed()?.session.append(type, data);
+      const entry = registry.routed();
+      if (entry === undefined) return undefined;
+      const event = entry.session.append(type, data); // 成功写先落账（执法先于计费：未注册词在 append 内先抛）
+      chargeSessionWrite(entry.session.header.sessionId, 'appendEvent');
+      return event;
     },
     currentSessionId: (): string | undefined => registry.routed()?.session.header.sessionId,
     eventsOfType: (type: string): SessionEvent[] => {
@@ -601,6 +631,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         surfaceOp: { op: 'replace', start: surfaceOp.start, end: surfaceOp.end },
         sourceEventSeqs: [...carrier.sourceEventSeqs],
       });
+      chargeSessionWrite(current.session.header.sessionId, 'appendWithSurfaceOp'); // #14：成功写计费（flush 屏障在其后）
       await persistence?.flush();
       return event;
     },

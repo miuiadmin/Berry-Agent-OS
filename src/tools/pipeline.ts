@@ -69,6 +69,17 @@ export const OUTPUT_GUARD_BYTES = 64 * 1024;
 let spillSeq = 0;
 
 /**
+ * 单工具调用进度流硬帽（契约篇 §1.6 资源护栏族 #11，2026-08-27 刀〇b）：
+ * onUpdate 累计 10^4 条为帽，超帽丢弃后续进度 + 首条丢弃单条 warn（计数进
+ * 文案不逐条刷屏）。执法点在管道 onUpdate 包装层（管道有 logger；loop 的
+ * accepting/结算后 ignoring 语义零改动）。数据面丢弃非插件错误面——工具本体
+ * 照常结算，结果不受影响。合法触帽预期：流式工具（exec 逐 chunk onUpdate）
+ * 长命令单次调用即可超帽——渐进冻结（TUI 实时输出停滞）是预期行为非 bug，
+ * 10^4 ≈ 60ms/块 × 100 分钟级 chunk 流，超出者接受冻结。
+ */
+const PROGRESS_UPDATE_LIMIT = 10_000;
+
+/**
  * 取字节缓冲尾部至多 maxBytes 字节（UTF-8 安全：起点落在多字节字符中间则
  * 前移过续字节——与 exec 件 tailUtf8 同纪律，tools 不 import exec〔方向反〕）。
  */
@@ -120,6 +131,31 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
   const recordGate: GateDecisionSink = opts.onGateDecision ?? (() => {});
 
   return async function runToolPipeline(def, toolCallId, args, signal, onUpdate) {
+    /* ---- 前置步：进度流护栏包装（#11——两消费面同源：executeInput 与 toolCtx） ---- */
+    const guardedUpdate: ToolUpdateCallback | undefined =
+      onUpdate === undefined
+        ? undefined
+        : (() => {
+            let count = 0;
+            let warned = false;
+            return (update: AgentToolResult) => {
+              if (count >= PROGRESS_UPDATE_LIMIT) {
+                // 首条丢弃单条 warn（不逐条刷屏）——数据面渐进冻结，结果不受影响
+                if (!warned) {
+                  warned = true;
+                  ctx.logger.warn(
+                    `工具 ${def.name} 进度流达上限 ${PROGRESS_UPDATE_LIMIT} 条，后续 onUpdate 丢弃` +
+                      `（结果不受影响；长命令流式输出接受渐进冻结，契约篇 §1.6 #11）`,
+                    { callId: toolCallId },
+                  );
+                }
+                return;
+              }
+              count += 1;
+              onUpdate(update);
+            };
+          })();
+
     /* ---- 前置步：参数 schema 校验（TypeBox Value；语法不合法不进守门） ---- */
     if (!Value.Check(def.parameters as Parameters<typeof Value.Check>[0], args)) {
       const problems = [...Value.Errors(def.parameters as Parameters<typeof Value.Check>[0], args)]
@@ -163,10 +199,10 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
     });
 
     /* ---- 第二段：执行（around-dispatch；链尾默认实现 = 超时预算 + execute） ---- */
-    const executeInput: ExecuteInput = { tool: def, args, callId: toolCallId, signal, onUpdate };
+    const executeInput: ExecuteInput = { tool: def, args, callId: toolCallId, signal, onUpdate: guardedUpdate };
     const timedExecute = async (): Promise<AgentToolResult> => {
       const timeoutMs = def.timeoutMs ?? defaultTimeoutMs;
-      const toolCtx: ToolCtx = { toolCallId, signal, onUpdate };
+      const toolCtx: ToolCtx = { toolCallId, signal, onUpdate: guardedUpdate };
       if (!timeoutMs || timeoutMs <= 0) {
         return def.execute(args, toolCtx); // 0 = 显式不设预算（少数长任务工具自管取消）
       }
