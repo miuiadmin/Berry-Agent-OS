@@ -156,6 +156,18 @@ describe('discoverAgentMds（扫描 + first-wins）', () => {
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]!.message).toContain('first-wins');
   });
+
+  it('编码不可判定（GBK 无标签）= 跳过该文件 + 诊断（P1-3 缺口④ prompt 面读者）', () => {
+    const dir = makeTempDir('agents-md-gbk-');
+    // '测试' 的 GBK 字节——非 win32 本地标签恒空 → ④lossy：跳过不入册
+    writeFileSync(join(dir, 'broken.md'), Buffer.from([0xb2, 0xe2, 0xca, 0xd4]));
+    writeFileSync(join(dir, 'fine.md'), '---\ndescription: 可读\n---\n正文');
+    const { definitions, diagnostics } = discoverAgentMds([{ dir, source: 'user' }]);
+    expect(definitions.map((d) => d.name)).toEqual(['fine']); // 坏件跳过、好件照常
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]!.message).toContain('编码无法判定');
+    expect(diagnostics[0]!.message).toContain('broken.md');
+  });
 });
 
 /* ---------------- mergeRequestForAgentMd ---------------- */

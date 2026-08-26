@@ -19,6 +19,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ignore from 'ignore';
 import { parseSkillMd } from './skill-md.js';
+import { decodeText, peekLocalCodepageLabels } from '../context/index.js';
 import type { Dirent } from 'node:fs';
 import type { Skill, SkillDiagnostic, SkillLocation, SkillSourceLevel, SkillsProvider } from './types.js';
 
@@ -91,14 +92,15 @@ function prefixIgnorePattern(line: string, prefix: string): string | null {
   return negated ? `!${prefixed}` : prefixed;
 }
 
-/** 读单个 SKILL.md 文件并解析（读失败 → read-failed 诊断） */
+/** 读单个 SKILL.md 文件并解析（读失败 → read-failed 诊断；编码不可判定 →
+ * decode-failed 诊断跳过——prompt 面纪律：绝不静默 mojibake 进系统提示词） */
 function loadSkillFile(
   filePath: string,
   source: SkillSourceLevel,
 ): { skill: Skill | null; diagnostics: SkillDiagnostic[] } {
-  let raw: string;
+  let raw: Buffer;
   try {
-    raw = readFileSync(filePath, 'utf-8');
+    raw = readFileSync(filePath); // Buffer——解码决策后置（骨架篇 §7.5）
   } catch (err) {
     return {
       skill: null,
@@ -112,7 +114,22 @@ function loadSkillFile(
       ],
     };
   }
-  return parseSkillMd(raw, filePath, source);
+  // 决策树同步 peek 本地标签（骨架篇 §7.5 射面总账——prompt 面读者）
+  const decoded = decodeText(raw, { localLabel: peekLocalCodepageLabels().ansi });
+  if (decoded.method === 'lossy') {
+    return {
+      skill: null,
+      diagnostics: [
+        {
+          type: 'warning',
+          code: 'decode-failed',
+          message: `SKILL.md 编码无法判定（非 UTF-8 且本地码页不匹配）——跳过。判定过程：${decoded.diagnostics}`,
+          path: filePath,
+        },
+      ],
+    };
+  }
+  return parseSkillMd(decoded.text, filePath, source);
 }
 
 /** 扫描结果（skills 按发现顺序；同名优先级裁决在服务层） */

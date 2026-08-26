@@ -77,6 +77,21 @@ describe('instructions 四层发现（骨架篇 §7.3）', () => {
     // 截断后总长 = 上限 + 标注（内容本体不超限多少）
     expect(Buffer.byteLength(sections[0]!.content)).toBeLessThan(64 * 1024 + 200);
   });
+
+  it('编码无法判定（GBK 无标签）= 跳过该候选 + 诊断 + 后备名接住（P1-3 缺口④ prompt 面读者）', () => {
+    const dir = makeTempDir('instr-gbk-');
+    // '测试' 的 GBK 字节——非 win32 本地标签恒空 → ④lossy：跳过不入段
+    writeFileSync(join(dir, 'AGENTS.md'), Buffer.from([0xb2, 0xe2, 0xca, 0xd4]));
+    writeFileSync(join(dir, 'CLAUDE.md'), '兼容名可读内容');
+    const { sections, diagnostics } = discoverInstructions([
+      { dir, files: ['AGENTS.md', 'CLAUDE.md'], source: 'project' },
+    ]);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]!.message).toContain('编码无法判定');
+    expect(diagnostics[0]!.message).toContain('AGENTS.md');
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.content).toBe('兼容名可读内容'); // 不阻断——后备名照常接住
+  });
 });
 
 /* ---------------- 组合根全栈 ---------------- */

@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { decodeText, peekLocalCodepageLabels } from '../context/index.js';
 
 /** 单文件硬顶（字节）——会话事件护栏同量级；超限截断带标注 + warn 诊断 */
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
@@ -93,15 +94,27 @@ export function discoverInstructions(locations: readonly InstructionLocation[]):
         });
         continue;
       }
-      if (raw.length > MAX_INSTRUCTION_BYTES) {
+      // 解码决策树（骨架篇 §7.5 射面总账——prompt 面读者：同步 peek 本地标签，
+      // 装配序预热已保证 win32 标签在册；非 win32 恒 null）。lossy = 跳过 +
+      // warn 诊断仍试后备名——prompt 面不抛错不阻断，绝不静默 mojibake 进
+      // 系统提示词（标注的转码可入段，猜测的乱码不可）
+      const decoded = decodeText(raw, { localLabel: peekLocalCodepageLabels().ansi });
+      if (decoded.method === 'lossy') {
+        diagnostics.push({
+          message: `${filePath}：编码无法判定（非 UTF-8 且本地码页不匹配）——跳过该候选不入段。判定过程：${decoded.diagnostics}`,
+        });
+        continue;
+      }
+      const contentBuf = Buffer.from(decoded.text, 'utf8');
+      if (contentBuf.length > MAX_INSTRUCTION_BYTES) {
         // 截断以字节为界（utf8 尾字节可能劈开多字节字符——替换符收尾可接受）
-        const content = `${raw.subarray(0, MAX_INSTRUCTION_BYTES).toString('utf8')}\n\n[已截断：文件超 ${MAX_INSTRUCTION_BYTES / 1024}KiB 上限]`;
+        const content = `${contentBuf.subarray(0, MAX_INSTRUCTION_BYTES).toString('utf8')}\n\n[已截断：文件超 ${MAX_INSTRUCTION_BYTES / 1024}KiB 上限]`;
         sections.push({ filePath, content });
         diagnostics.push({
           message: `${filePath}：超 ${MAX_INSTRUCTION_BYTES / 1024}KiB 上限——已截断入段（${location.source} 层）`,
         });
       } else {
-        sections.push({ filePath, content: raw.toString('utf8') });
+        sections.push({ filePath, content: decoded.text });
       }
       break; // first-wins：本层已取到文件，不再试后备名
     }

@@ -32,6 +32,7 @@ import {
   validateEscalationArgs,
 } from '../safety/index.js';
 import { classifyDenials, runArgv } from './spawn.js';
+import { resolveBash } from './bash-path.js';
 
 /** 超时缺省（毫秒）——骨架篇 §7.6 */
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -171,7 +172,10 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
       }
 
       /* ---- 沙箱包装（danger 透传；受限档 confine；fail-closed 不裸跑） ---- */
-      const baseArgv = ['bash', '-c', req.command] as const;
+      // bash 可执行发现序四级（骨架篇 §7.6——挖矿 B11 缺口③：裸名 'bash' 在
+      // win32 撞 System32 WSL 启动器陷阱）；解析在 confine 之前（首参定型后
+      // 再包装）；全序皆空 = EXEC_SPAWN_FAILED fail-loud 列已探测位
+      const baseArgv = [resolveBash(), '-c', req.command];
       let argv: string[];
       let enforcement: SandboxMeta['enforcement'];
       let denialSignatures: readonly string[] = [];
@@ -201,11 +205,30 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
       /* ---- 结果组装（denied 分类 + 统一标记；退出非零 isError） ---- */
       const denied = classifyDenials(run.stderr, denialSignatures);
       const sandbox: SandboxMeta = { mode: effective, denied, enforcement };
+      // 非静默纪律（骨架篇 §7.6 输出编码）：非 UTF-8 终判的流在流段落开头加
+      // 标注行——「标注的转码」不是「静默错猜」（details 面经 ...run 展开自带）
+      const streamNote = (stream: 'stdout' | 'stderr'): string => {
+        const enc = run.outputEncoding[stream];
+        if (enc === 'utf-8') return '';
+        return enc.endsWith('-lossy')
+          ? `[${stream} 按 ${enc.slice(0, -'-lossy'.length)} 有损解码——存在无法按该编码解释的字节]`
+          : `[${stream} 按本地编码 ${enc} 转码解码]`;
+      };
       const lines: string[] = [];
       if (clampedNote !== '') lines.push(clampedNote);
       lines.push(run.signal !== undefined ? `signal: ${run.signal}` : `exit code: ${run.exitCode}`);
-      if (run.stdout !== '') lines.push('', '--- stdout ---', run.stdout);
-      if (run.stderr !== '') lines.push('', '--- stderr ---', run.stderr);
+      if (run.stdout !== '') {
+        lines.push('', '--- stdout ---');
+        const note = streamNote('stdout');
+        if (note !== '') lines.push(note);
+        lines.push(run.stdout);
+      }
+      if (run.stderr !== '') {
+        lines.push('', '--- stderr ---');
+        const note = streamNote('stderr');
+        if (note !== '') lines.push(note);
+        lines.push(run.stderr);
+      }
       if (run.truncated) lines.push('', '（输出超出 60 KiB 预算已保尾截断——tail 可见，head 已弃）');
       if (denied.length > 0) {
         lines.push(

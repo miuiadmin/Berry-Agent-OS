@@ -38,6 +38,8 @@ export interface Skill {
 /** 诊断码（稳定词汇；warning 不断流，collision 记录 first-wins 落选者） */
 export type SkillDiagnosticCode =
   | 'read-failed' // SKILL.md 读取失败（权限等）
+  | 'decode-failed' // SKILL.md 编码不可判定（非 UTF-8 且本地码页不匹配——跳过，
+  //   绝不静默 mojibake 进系统提示词；骨架篇 §7.5 射面总账，2026-08-27 P1-3）
   | 'parse-failed' // YAML frontmatter 解析失败
   | 'invalid-metadata' // name/description 校验不过（技能仍加载，随 pi 宽容度）
   | 'list-failed' // 目录列举失败

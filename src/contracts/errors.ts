@@ -132,6 +132,10 @@ export const FS_NOT_FOUND = registerErrorCode('FS_NOT_FOUND');
 export const FS_OUTSIDE_WRITABLE_ROOTS = registerErrorCode('FS_OUTSIDE_WRITABLE_ROOTS');
 /** fs：apply_patch 补丁解析或应用失败（格式非法/hunk 不匹配/Add 目标已存在等，message 细说） */
 export const FS_PATCH_FAILED = registerErrorCode('FS_PATCH_FAILED');
+/** fs：edit 前置读遇非 UTF-8 终局拒改（决策树判为本地码页/BOM 非 UTF-8 族——防 mojibake 读入回写毁档；转档走 bash + iconv。骨架篇 §7.5，P1-3 挖矿 B11） */
+export const FS_DECODE_NON_UTF8 = registerErrorCode('FS_DECODE_NON_UTF8');
+/** fs：read 终段不可判定（既非 UTF-8 亦非本地码页可严格解码；含 encoding 逃生参数显式标签 strict 失败——消息携 hex 前缀与判定路径，模型可带 encoding 重读。骨架篇 §7.5，P1-3 挖矿 B11） */
+export const FS_DECODE_UNDECIDABLE = registerErrorCode('FS_DECODE_UNDECIDABLE');
 
 /** exec：子进程未启动（spawn 即败——ENOENT/EACCES/E2BIG 等，message 携 cause.code；绝不折算 exit 1。失败二分「未启动 ≠ 退出非零」见骨架篇 §9.3，pi-7 教训） */
 export const EXEC_SPAWN_FAILED = registerErrorCode('EXEC_SPAWN_FAILED');

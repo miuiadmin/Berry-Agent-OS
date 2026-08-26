@@ -1033,7 +1033,13 @@ export function spawnRunner(
   opts: { cwd: string; timeoutMs?: number },
 ): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    // windowsHide 统一纪律（骨架篇 §7.6，P1-3——win32 CREATE_NO_WINDOW）；
+    // npm/git/子 berry 输出恒 UTF-8 属编码豁免面，chunk.toString() 缺省不涉决策树
+    const child = spawn(command, args, {
+      cwd: opts.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     // 滚动尾窗累加器（truncated 标记截断是否发生过——消息头标注用）
     const stdout = { text: '', truncated: false };
     const stderr = { text: '', truncated: false };

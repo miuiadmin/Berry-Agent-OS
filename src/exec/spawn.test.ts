@@ -8,8 +8,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { AppError, EXEC_SPAWN_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
-import { classifyDenials, runArgv, OUTPUT_BUDGET_BYTES } from './spawn.js';
+import { classifyDenials, runArgv, killTree, OUTPUT_BUDGET_BYTES } from './spawn.js';
 
 /** 断言拒绝码（错误码是唯一判据） */
 async function expectRejectCode(fn: () => Promise<unknown>, code: string): Promise<AppError> {
@@ -113,5 +114,76 @@ describe('classifyDenials（stderr 按后端签名分类）', () => {
     ]);
     expect(classifyDenials('just a warning', ['Operation not permitted'])).toEqual([]);
     expect(classifyDenials('anything', [])).toEqual([]);
+  });
+});
+
+describe('输出编码（决策树 spawn 半边，P1-3 挖矿 B11 缺口④）', () => {
+  it('干净 UTF-8 输出 = 双流终判 utf-8（快路零探测）', async () => {
+    const run = await runArgv(['bash', '-c', 'echo 你好']);
+    expect(run.outputEncoding).toEqual({ stdout: 'utf-8', stderr: 'utf-8' });
+    expect(run.stdout).toContain('你好');
+  });
+
+  it('GBK 字节输出（非 win32 无标签）= 有损终态 + utf-8-lossy 标注（非静默纪律）', async () => {
+    // printf 直出 '测试' 的 GBK 字节 B2 E2 CA D4——非 win32 本地标签恒空，落④有损
+    const run = await runArgv(['bash', '-c', "printf '\\xb2\\xe2\\xca\\xd4'"]);
+    expect(run.exitCode).toBe(0);
+    expect(run.outputEncoding.stdout).toBe('utf-8-lossy');
+    // 有损文本含替换符（绝不静默伪装成成功解码）
+    expect(run.stdout).toContain('�');
+  });
+
+  it('双流独立判定：stdout UTF-8 + stderr GBK 字节 → 两流终判分叉', async () => {
+    const run = await runArgv(['bash', '-c', "echo ok; printf '\\xb2\\xe2\\xca\\xd4' >&2"]);
+    expect(run.outputEncoding.stdout).toBe('utf-8');
+    expect(run.outputEncoding.stderr).toBe('utf-8-lossy');
+  });
+});
+
+describe('killTree win32 腿形状（deps 注入缝——POSIX CI 上锁形状）', () => {
+  /** 假 spawn：记参序 + 微任务内即报 close（win32KillTree 的 await 随之走完） */
+  function fakeSpawnRecorder(calls: string[][]): typeof import('node:child_process').spawn {
+    return ((program: string, args: readonly string[]) => {
+      calls.push([program, ...args]);
+      const fake = new EventEmitter();
+      queueMicrotask(() => fake.emit('close', 0));
+      return fake as unknown as import('node:child_process').ChildProcess;
+    }) as unknown as typeof import('node:child_process').spawn;
+  }
+
+  /** killTree win32 腿异步收尾等待口（生产面 fire-and-forget；测试等它走完再断言） */
+  async function killTreeAsync(pid: number, deps: Parameters<typeof killTree>[2]): Promise<void> {
+    killTree(pid, () => false, deps);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  it('快照全集多 /PID 单发 + /T 竞态带（MSYS fork 孤儿不漏杀）', async () => {
+    const calls: string[][] = [];
+    await killTreeAsync(4242, {
+      platform: 'win32',
+      spawnKill: fakeSpawnRecorder(calls),
+      enumerateTree: async (root) => [root, 100, 200],
+    });
+    expect(calls).toHaveLength(1); // 单发
+    expect(calls[0]).toEqual(['taskkill', '/T', '/F', '/PID', '4242', '/PID', '100', '/PID', '200']);
+  });
+
+  it('枚举失败回退裸 taskkill /T /PID root（等价旧行为，绝不空手而归）', async () => {
+    const calls: string[][] = [];
+    await killTreeAsync(777, {
+      platform: 'win32',
+      spawnKill: fakeSpawnRecorder(calls),
+      enumerateTree: async () => {
+        throw new Error('PowerShell 缺席');
+      },
+    });
+    expect(calls[0]).toEqual(['taskkill', '/T', '/F', '/PID', '777']);
+  });
+
+  it('POSIX 腿零 spawn（killpg 走 process.kill——进程组即树等价物）', async () => {
+    const calls: string[][] = [];
+    // pid 大到不存在 → process.kill 抛（catch 静默）；断言只看无 taskkill 发出
+    await killTreeAsync(999999, { platform: 'darwin', spawnKill: fakeSpawnRecorder(calls) });
+    expect(calls).toHaveLength(0);
   });
 });

@@ -37,6 +37,7 @@ import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { createPluginJiti, importPluginEntry, loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
 import { RateLimiter } from '../context/rate-limit.js';
+import { resolveLocalCodepageLabels } from '../context/index.js';
 import {
   Persistence,
   createPluginSqliteFace,
@@ -400,6 +401,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 文件缺失 = 常态零日志；存在但坏 JSON/形状不对 = warn 一次 + 空表（别名表
    * 是用户逃生通道，坏配置不拒启） ---- */
   setProjectAliases(loadProjectAliases(dataDir(), ctx.logger.warn.bind(ctx.logger)));
+
+  /* ---- ①c 码页标签预热（骨架篇 §7.5 射面总账，P1-3 挖矿 B11 缺口④）：
+   * prompt 面三读者（instructions/agents-md/SKILL.md 发现）是同步链，标签
+   * 只能同步 peek——win32 上先在此探一次注册表（两发 reg query，几十毫秒，
+   * 进程内缓存此后永免），三读者与 spawn/read 两半边共享同一缓存；非 win32
+   * 即时返回空对零开销 ---- */
+  await resolveLocalCodepageLabels();
 
   /* ---- ② 通道与 UI 服务 ---- */
   const { channels, ui } = registerChannelServices(ctx, {

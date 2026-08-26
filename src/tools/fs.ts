@@ -25,8 +25,18 @@ import { basename, dirname, extname, isAbsolute, join, resolve as resolvePath, s
 import { tmpdir } from 'node:os';
 import { readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { Type } from 'typebox';
-import { AppError, FS_NOT_FOUND, FS_OUTSIDE_WRITABLE_ROOTS, FS_PATCH_FAILED } from '../contracts/errors.js';
+import {
+  AppError,
+  FS_DECODE_NON_UTF8,
+  FS_DECODE_UNDECIDABLE,
+  FS_NOT_FOUND,
+  FS_OUTSIDE_WRITABLE_ROOTS,
+  FS_PATCH_FAILED,
+  TOOL_ARGUMENTS_INVALID,
+} from '../contracts/errors.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
+import { decodeText, peekLocalCodepageLabels, resolveLocalCodepageLabels } from '../context/index.js';
+import type { DecodedText } from '../context/index.js';
 import { addLinesToContent, applyUpdateLines, parseApplyPatch } from './apply-patch.js';
 import type { PatchOperation } from './apply-patch.js';
 import { ObservedFiles, resolveWriteIntent, requireObservedForEdit, statVersion } from './observed.js';
@@ -161,6 +171,32 @@ export async function serializeWrites<T>(paths: readonly string[], op: () => Pro
 }
 
 /**
+ * read/edit 前置读共用：原始字节 → 决策树（read 半边 ACP 标签；两段式懒探测，
+ * 骨架篇 §7.5——挖矿 B11 缺口④ read 半边）。
+ * 干净 UTF-8 零探测开销；仅终判 lossy 时异步探一次码页重解码（非 win32
+ * 探测即时空对——lossy 终态不变）。显式标签（read encoding 逃生参数）给出
+ * 即由 decodeText 内部跳过本地标签路；标签合法性在守门段前置校验（调用点）。
+ */
+async function decodeFileText(raw: Buffer, explicitLabel?: string): Promise<DecodedText> {
+  const withLabel = (ansi: string | null): DecodedText =>
+    decodeText(raw, {
+      localLabel: ansi,
+      ...(explicitLabel !== undefined ? { explicitLabel } : {}),
+    });
+  const quick = withLabel(peekLocalCodepageLabels().ansi);
+  if (quick.method !== 'lossy') return quick;
+  return withLabel((await resolveLocalCodepageLabels()).ansi);
+}
+
+/** 终态文本保头截断（至多 maxBytes 字节 UTF-8；截点落在多字节字符中间时
+ * 回退到该字符起点——丢一个不完整字符，不产 U+FFFD 乱码尾巴） */
+function headUtf8(buf: Buffer, maxBytes: number): string {
+  let end = Math.min(buf.length, maxBytes);
+  while (end > 0 && (buf[end]! & 0xc0) === 0x80) end--;
+  return buf.subarray(0, end).toString('utf8');
+}
+
+/**
  * 组装 fs 工具族（read / write / edit / ls）。
  * 观察表由本函数创建并在族内共享——「读过的文件」是工具族级状态。
  */
@@ -195,9 +231,15 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
     name: 'read',
     effect: 'read',
     description:
-      '读取文件内容。文本文件返回 UTF-8 文本；图片文件（png/jpg/jpeg/gif/webp）返回 image 内容块（模型可直接看图）。读取即登记观察态：后续 write/edit 需基于本观察（版本不符会被拒绝）。文件不存在时返回错误，但同样登记「不存在」观察（之后 write 即合法创建）。',
+      '读取文件内容。文本按解码决策树处理：UTF-8 直读；带 BOM 的 UTF-16 或本地码页文件（如 GBK）转码为 UTF-8 视图并在尾部标注（edit 不适用此类文件，改写用 write 全文替换）；无法判定编码时报错，此时可用 encoding 参数显式指定。图片文件（png/jpg/jpeg/gif/webp）返回 image 内容块（模型可直接看图）。读取即登记观察态：后续 write/edit 需基于本观察（版本不符会被拒绝）。文件不存在时返回错误，但同样登记「不存在」观察（之后 write 即合法创建）。',
     parameters: Type.Object({
       path: Type.String({ description: '文件路径（相对路径锚工作区根）' }),
+      encoding: Type.Optional(
+        Type.String({
+          description:
+            '显式编码标签（逃生参数，缺省自动判定）：文件非 UTF-8 且自动判定失败时，用 ICU 标签（如 gbk/big5/shift_jis/utf-16le）直接严格解码；仍失败则报错',
+        }),
+      ),
     }),
     execute: async (args) => {
       const abs = resolveTarget(args.path as string);
@@ -236,14 +278,49 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
           details: { path: abs, bytes: raw.byteLength, mimeType: imageMime, image: true },
         };
       }
-      const raw = await readFile(abs, 'utf8');
-      const truncated = Buffer.byteLength(raw, 'utf8') > maxReadBytes;
-      const content = truncated ? Buffer.from(raw, 'utf8').subarray(0, maxReadBytes).toString('utf8') : raw;
+      // 文本分支：原始字节读入（readFile('utf8') 硬编码退役——编码决策后置，
+      // 挖矿 B11 缺口④ read 半边）；显式标签先行守门段校验（非法/不支持 =
+      // 参数可修复错误，结构化拒——骨架篇 §7.5 逃生参数形态）
+      const explicitEncoding = args.encoding as string | undefined;
+      if (explicitEncoding !== undefined) {
+        try {
+          new TextDecoder(explicitEncoding);
+        } catch {
+          throw new AppError(
+            TOOL_ARGUMENTS_INVALID,
+            `[TOOL_ARGUMENTS_INVALID] encoding 不是合法的编码标签：${explicitEncoding}（须为 ICU 标签，如 gbk/big5/shift_jis/utf-16le）`,
+          );
+        }
+      }
+      const raw = await readFile(abs); // Buffer（不带编码——二进制原样，解码后置）
+      const decoded = await decodeFileText(raw, explicitEncoding);
+      if (decoded.method === 'lossy') {
+        // 终段不可判定：fail-loud 拒收（绝不静默 mojibake 进上下文）——
+        // 指路逃生参数重读；显式标签 strict 失败同码（骨架篇 §7.5）
+        throw new AppError(
+          FS_DECODE_UNDECIDABLE,
+          `[FS_DECODE_UNDECIDABLE] 文件编码无法判定（UTF-8 与本地码页均不匹配）——如确知编码请带 encoding 参数重读（ICU 标签，如 gbk/big5/shift_jis）。判定过程：${decoded.diagnostics}`,
+        );
+      }
+      // 预算锚 = 终态文本 UTF-8 字节（骨架篇 §7.6——解码在先、截断在后）
+      const truncated = Buffer.byteLength(decoded.text, 'utf8') > maxReadBytes;
+      const content = truncated ? headUtf8(Buffer.from(decoded.text, 'utf8'), maxReadBytes) : decoded.text;
       observed.observePresent(abs, version);
-      return textResult(
-        truncated ? `${content}\n…（已截断至 ${maxReadBytes} 字节，完整内容请分段读取或走外溢策略）` : content,
-        { path: abs, bytes: Buffer.byteLength(raw, 'utf8'), truncated },
-      );
+      // 非静默纪律（骨架篇 §7.5）：非 UTF-8 终判（BOM 族直解/本地码页命中）
+      // = 转码视图——content 尾部 in-band 标注 + details.encoding 双面（模型
+      // 只见 content，标注必须进 content 才可见；write 全文替换 = 显式整档
+      // 转码通道，CAS 已守）
+      const transcoded = decoded.encoding !== 'utf-8';
+      const truncNote = truncated ? `\n…（已截断至 ${maxReadBytes} 字节，完整内容请分段读取或走外溢策略）` : '';
+      const tailNote = transcoded
+        ? `\n…（本文件为 ${decoded.encoding} 编码，已转码为 UTF-8 视图；edit 不适用于本文件，改写请用 write 全文替换——将按 UTF-8 落盘）`
+        : '';
+      return textResult(`${content}${truncNote}${tailNote}`, {
+        path: abs,
+        bytes: Buffer.byteLength(decoded.text, 'utf8'),
+        truncated,
+        ...(transcoded ? { encoding: decoded.encoding } : {}),
+      });
     },
   };
 
@@ -318,8 +395,20 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
           if (op.kind === 'update') {
             // 编辑守卫：必须已读（present）且指纹一致；内容在阶段一就计算（定位失败前置暴露）
             requireObservedForEdit(observed.get(abs), currentRef);
-            const source = await readFile(canonical, 'utf8');
-            planned.push({ op, abs, canonical, content: applyUpdateLines(abs, source, op.lines) });
+            // 前置读走同一棵决策树（read 半边 ACP 标签；两段式懒探测）——
+            // 非 UTF-8 终局一律拒改：BOM 直解/本地码页命中 → FS_DECODE_NON_UTF8、
+            // 终段不可判定 → FS_DECODE_UNDECIDABLE（防 mojibake 转码回写毁档；
+            // 改写通道 = read 转码视图后 write 全文替换，骨架篇 §7.5）
+            const raw = await readFile(canonical); // Buffer——解码决策后置（同 read）
+            const decoded = await decodeFileText(raw);
+            if (decoded.method !== 'utf8') {
+              const code = decoded.method === 'lossy' ? FS_DECODE_UNDECIDABLE : FS_DECODE_NON_UTF8;
+              throw new AppError(
+                code,
+                `[${code}] 文件非 UTF-8 编码（终判 ${decoded.encoding}）——edit 不接受非 UTF-8 文件（防转码回写毁档）；如需改写请 read 后用 write 全文替换（将按 UTF-8 落盘）。判定过程：${decoded.diagnostics}`,
+              );
+            }
+            planned.push({ op, abs, canonical, content: applyUpdateLines(abs, decoded.text, op.lines) });
           } else if (op.kind === 'add') {
             if (currentRef !== undefined) {
               throw new AppError(

@@ -16,6 +16,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { SubagentStart } from '../contracts/subagent.js';
+import { decodeText, peekLocalCodepageLabels } from '../context/index.js';
 
 /** 声明式子代理定义（解析产物——纯数据，subagent 侧 provider 工厂消费） */
 export interface AgentMdDefinition {
@@ -212,7 +213,16 @@ export function discoverAgentMds(locations: readonly AgentLocation[]): {
     for (const entry of [...entries].sort((a, b) => (a.name < b.name ? -1 : 1))) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       const filePath = join(location.dir, entry.name);
-      const result = parseAgentMd(readFileSync(filePath, 'utf8'), filePath);
+      // 解码决策树（骨架篇 §7.5 射面总账——prompt 面读者，同步 peek 本地标签）：
+      // lossy = 诊断跳过该文件——绝不静默 mojibake 进 persona（转码可入，乱码不可）
+      const decoded = decodeText(readFileSync(filePath), { localLabel: peekLocalCodepageLabels().ansi });
+      if (decoded.method === 'lossy') {
+        diagnostics.push({
+          message: `${filePath}：编码无法判定（非 UTF-8 且本地码页不匹配）——跳过该子代理文件。判定过程：${decoded.diagnostics}`,
+        });
+        continue;
+      }
+      const result = parseAgentMd(decoded.text, filePath);
       diagnostics.push(...result.diagnostics);
       if (result.definition === null) continue;
       if (seen.has(result.definition.name)) {

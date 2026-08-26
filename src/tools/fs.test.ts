@@ -9,11 +9,14 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AppError,
+  FS_DECODE_NON_UTF8,
+  FS_DECODE_UNDECIDABLE,
   FS_NOT_FOUND,
   FS_NOT_OBSERVED,
   FS_OUTSIDE_WRITABLE_ROOTS,
   FS_PATCH_FAILED,
   FS_VERSION_CONFLICT,
+  TOOL_ARGUMENTS_INVALID,
 } from '../contracts/errors.js';
 import { createFsTools, serializeWrites } from './fs.js';
 import type { ToolDefinition } from '../contracts/tools.js';
@@ -133,6 +136,73 @@ describe('read 图片分支 — 多模态内容块（§5.1 尾刀增量）', () 
     expect(result.details).toMatchObject({ rejected: 'too-large' });
     // 拒绝读 ≠ 观察成立：未登记（模型没看过内容，后续写守卫不因此放行）
     expect(t.fs.observed.get(join(workspace, 'huge.png'))).toBeUndefined();
+  });
+});
+
+describe('read/edit 编码决策树 — read 半边（P1-3 挖矿 B11 缺口④，骨架篇 §7.5）', () => {
+  /** '测试' 的 GBK 字节（B2 E2 CA D4）——writeFile 不带编码直落原始字节 */
+  const GBK_BYTES = Buffer.from([0xb2, 0xe2, 0xca, 0xd4]);
+
+  it('GBK 文件 + encoding 逃生参数 = 转码视图：content 尾注 + details.encoding 双面', async () => {
+    const t = freshTools();
+    const abs = join(workspace, 'gbk-with-label.txt');
+    await writeFile(abs, GBK_BYTES);
+    const result = await t.read.execute({ path: 'gbk-with-label.txt', encoding: 'gbk' }, { toolCallId: 'tc' });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('测试'); // 转码成功——正文可读
+    expect(text).toContain('gbk 编码'); // in-band 尾注（模型只见 content，标注必须进 content）
+    expect(result.details).toMatchObject({ encoding: 'gbk' });
+    // 读成立 = 观察登记（转码视图也是合法观察——但 edit 仍拒改，见下）
+    expect(t.fs.observed.get(abs)?.state).toBe('present');
+  });
+
+  it('GBK 文件无标签（非 win32 本地标签恒空）→ FS_DECODE_UNDECIDABLE 响亮失败', async () => {
+    const t = freshTools();
+    await writeFile(join(workspace, 'gbk-no-label.txt'), GBK_BYTES);
+    const err = await t.read.execute({ path: 'gbk-no-label.txt' }, { toolCallId: 'tc' }).catch((e) => e);
+    expect(codeOf(err)).toBe(FS_DECODE_UNDECIDABLE);
+    expect((err as AppError).message).toContain('encoding 参数'); // 指路逃生参数
+  });
+
+  it('非法编码标签 = 守门段 TOOL_ARGUMENTS_INVALID（参数可修复错误，不碰文件）', async () => {
+    const t = freshTools();
+    await writeFile(join(workspace, 'any.txt'), 'plain', 'utf8');
+    const err = await t.read
+      .execute({ path: 'any.txt', encoding: 'definitely-not-an-encoding' }, { toolCallId: 'tc' })
+      .catch((e) => e);
+    expect(codeOf(err)).toBe(TOOL_ARGUMENTS_INVALID);
+  });
+
+  it('edit 拒改非 UTF-8 文件两终局：BOM 直解 → FS_DECODE_NON_UTF8；无标签 GBK → FS_DECODE_UNDECIDABLE（防转码回写毁档）', async () => {
+    // 终局一：UTF-16LE BOM 文件——read 走 BOM 直解成观察，edit 重解码 method 'bom'
+    const t1 = freshTools();
+    await writeFile(join(workspace, 'utf16-edit-guard.txt'), Buffer.from([0xff, 0xfe, 0x41, 0x00])); // BOM + 'A'
+    await t1.read.execute({ path: 'utf16-edit-guard.txt' }, { toolCallId: 'tc' });
+    const err1 = await t1.edit
+      .execute(
+        {
+          patch: ['*** Begin Patch', '*** Update File: utf16-edit-guard.txt', '-A', '+B', '*** End Patch'].join('\n'),
+        },
+        { toolCallId: 'tc' },
+      )
+      .catch((e) => e);
+    expect(codeOf(err1)).toBe(FS_DECODE_NON_UTF8);
+    expect((err1 as AppError).message).toContain('write 全文替换'); // 指路显式转码通道
+
+    // 终局二：GBK 文件带标签读成观察——edit 重解码不带标签（非 win32 本地标签
+    // 恒空）落④lossy → UNDECIDABLE；观察成立也拦（防「读得过」绕过）
+    const t2 = freshTools();
+    await writeFile(join(workspace, 'gbk-edit-guard.txt'), GBK_BYTES);
+    await t2.read.execute({ path: 'gbk-edit-guard.txt', encoding: 'gbk' }, { toolCallId: 'tc' });
+    const err2 = await t2.edit
+      .execute(
+        {
+          patch: ['*** Begin Patch', '*** Update File: gbk-edit-guard.txt', '-测试', '+改', '*** End Patch'].join('\n'),
+        },
+        { toolCallId: 'tc' },
+      )
+      .catch((e) => e);
+    expect(codeOf(err2)).toBe(FS_DECODE_UNDECIDABLE);
   });
 });
 

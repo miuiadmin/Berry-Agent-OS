@@ -85,7 +85,11 @@ const run = (tool: ReturnType<typeof makeTool>['tool'], args: Record<string, unk
   tool.execute(args, tctx) as Promise<{
     content: Array<{ type: string; text: string }>;
     isError?: boolean;
-    details: { exitCode: number | null; sandbox: { mode: string; denied: string[]; enforcement: string } };
+    details: {
+      exitCode: number | null;
+      sandbox: { mode: string; denied: string[]; enforcement: string };
+      outputEncoding: { stdout: string; stderr: string };
+    };
   }>;
 
 describe('cwd 前缀判定（canonical 化后须落 workspaceRoot 内）', () => {
@@ -266,5 +270,17 @@ describe('结果面基础', () => {
     );
     expect(partials.join('')).toContain('streaming');
     expect(partials.some((p) => p.startsWith('[stdout]'))).toBe(true);
+  });
+
+  it('非 UTF-8 输出 = 有损标注行随流标注（spawn 半边非静默纪律，P1-3 缺口④）', async () => {
+    const { tool } = makeTool();
+    // printf 直出 '测试' 的 GBK 字节——非 win32 无本地标签落④有损：
+    // 标注行紧跟 --- stdout --- 之后（in-band；模型只见 content）
+    const result = await run(tool, { command: "printf '\\xb2\\xe2\\xca\\xd4'" });
+    const text = result.content[0]!.text;
+    expect(text).toContain('--- stdout ---');
+    expect(text).toContain('有损解码');
+    // details.outputEncoding 双流终判随 ...run 展开自动携带
+    expect(result.details.outputEncoding).toMatchObject({ stdout: 'utf-8-lossy', stderr: 'utf-8' });
   });
 });

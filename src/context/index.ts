@@ -12,6 +12,11 @@ export type { RateLimitParams } from './rate-limit.js';
 // canonical 工作区根（宿主共享原语——memory owner_key / skills 信任判定 /
 // 未来 project 域键三处同源；project-aliases 重定向解非 git 回退脆性）
 export { canonicalWorkspaceRoot, setProjectAliases } from './workspace.js';
+// 文本解码决策树 + 码页探测器（骨架篇 §7.5/§7.6，P1-3 挖矿 B11——tools/
+// exec/skills/app 四消费面的公共底座件：fs read/edit 前置读、spawn 两流
+// 终段解码、prompt 面读者三处同一棵树）
+export { decodeText, peekLocalCodepageLabels, resolveLocalCodepageLabels } from './encoding.js';
+export type { DecodedText, DecodeTextOptions, LocalCodepageLabels } from './encoding.js';
 // 调用链会话作用域 + 调用方身份链（多应用并行 S1——骨架篇 §9.3 机制定案；chat 驱动边界写 / app 全局绑定面读；
 // caller 链 = 会话篇 §5.1 导入者归因——装载器/工具管道边界写，sessions 服务面读）
 export { runInSessionChain, chainSessionId, runInCallerChain, chainCaller } from './chain.js';

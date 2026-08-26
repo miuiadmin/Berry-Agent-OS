@@ -38,6 +38,9 @@ export function createMcpSpawner(dataDir: string): (config: McpServerConfig) => 
           cwd: dataDir,
           env: buildChildEnv(process.env, { set: config.env } as ExecEnvTable),
           stdio: ['pipe', 'pipe', 'pipe'],
+          // windowsHide 统一纪律（骨架篇 §7.6，P1-3——win32 CREATE_NO_WINDOW
+          // 防子进程闪窗；MCP stdio 输出恒 UTF-8 属编码豁免面，不涉决策树）
+          windowsHide: true,
           // POSIX 建进程组（detached）——killTree killpg 树杀的前提；Windows
           // 由 killTree 走 taskkill /T，spawn 侧无对应动作
           ...(process.platform !== 'win32' ? { detached: true } : {}),

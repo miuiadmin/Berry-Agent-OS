@@ -55,6 +55,7 @@ function toExecResult(run: RunResult, sandbox: ExecResult['sandbox']): ExecResul
     stderr: run.stderr,
     truncated: run.truncated,
     durationMs: run.durationMs,
+    outputEncoding: run.outputEncoding,
     ...(run.signal !== undefined ? { signal: run.signal } : {}),
     sandbox,
   };

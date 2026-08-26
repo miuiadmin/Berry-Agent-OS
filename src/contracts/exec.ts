@@ -72,6 +72,12 @@ export interface ExecResult {
   readonly truncated: boolean;
   /** 执行时长毫秒（spawn 到 close） */
   readonly durationMs: number;
+  /**
+   * 按流独立的编码终判（骨架篇 §7.6 输出编码，2026-08-27 P1-3）：'utf-8' |
+   * '<本地标签>'（OEM 码页严格命中） | '<标签>-lossy'（终段有损——存在无法
+   * 解释的字节）；两流各自判定（bash 内建 UTF-8 + 原生命令 OEM 分叉是常态）
+   */
+  readonly outputEncoding: { readonly stdout: string; readonly stderr: string };
   /** 子进程被信号杀死时的信号名（正常退出为 undefined） */
   readonly signal?: string;
   /** 沙箱元数据（与 bash 工具同构） */
