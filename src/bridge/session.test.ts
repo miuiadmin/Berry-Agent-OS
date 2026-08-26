@@ -109,13 +109,13 @@ describe('BridgeEndpoint：取消消息化（PoC ④ 桩语义回归锁）', () 
     let inboundSignal: AbortSignal | undefined;
     b.handle('slow', 'run', (_args, signal) => {
       inboundSignal = signal;
-      // 协作式处理器：守 signal 契约，但故意迟 150ms 才收尾——
-      // 若结算在对端往返之后，本地结算断言（<150ms）必失败
+      // 协作式处理器：守 signal 契约，但故意迟 500ms 才收尾——
+      // 若结算在对端往返之后，本地结算断言（<400ms）必失败
       return new Promise((resolve) => {
         signal.addEventListener(
           'abort',
           () => {
-            setTimeout(() => resolve({ stopped: true }), 150);
+            setTimeout(() => resolve({ stopped: true }), 500);
           },
           { once: true },
         );
@@ -127,8 +127,9 @@ describe('BridgeEndpoint：取消消息化（PoC ④ 桩语义回归锁）', () 
     const t0 = Date.now();
     ac.abort();
     const err = (await caught) as AppError;
-    // 本地结算不等对端往返（对端 150ms 后才回 result——这里必须远小于它）
-    expect(Date.now() - t0).toBeLessThan(150);
+    // 本地结算不等对端往返（对端 500ms 后才回 result——本地路径是同步监听器
+    // + 微任务，400ms 上界给调度留足裕度仍远小于对端延迟）
+    expect(Date.now() - t0).toBeLessThan(400);
     expect(err).toBeInstanceOf(AppError);
     expect(err.code).toBe('BRIDGE_CANCELLED');
     // 对端入站调用随后被 cancel 掐断（signal 契约翻译）
@@ -236,11 +237,14 @@ describe('BridgeEndpoint：心跳冻结检测', () => {
   it('对端活体应答 ping → 不冻结（必答语义走真往返）', async () => {
     const freezes: unknown[] = [];
     const { a } = makePair({
+      // missLimit=8：冻结需连续 9 拍无 pong（≈45ms 完全阻塞）——负载尖峰下
+      // 偶发排队不至假冻结；而窗口 100ms = 20 拍 > 9，持续哑场仍会触发，
+      // 断言保持非平凡
       heartbeatMs: 5,
-      heartbeatMissLimit: 2,
+      heartbeatMissLimit: 8,
       onFreeze: () => freezes.push(1),
     });
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 100));
     expect(freezes.length).toBe(0);
     a.stopHeartbeat();
   });
