@@ -12,7 +12,7 @@
  */
 
 import type { DatabaseConnection } from '../persist/index.js';
-import type { JobRecord } from './types.js';
+import type { JobRecord, RunReason } from './types.js';
 
 /** add 结果词汇：新增成功 / 同名拒（主键即身份，改错走 rm + add） */
 export type AddJobOutcome = 'added' | 'duplicate';
@@ -23,23 +23,29 @@ export type ReserveOutcome = 'reserved' | 'missing' | 'lost-race';
 /** 任务名词法（用户面词汇——禁空白/斜杠/前导连字符，防命令面解析歧义） */
 export const JOB_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-/** 行查询 SQL（列 AS 别名映射 camelCase——goal 表族同款） */
+/** 行查询 SQL（列 AS 别名映射 camelCase——goal 表族同款；v9 三列随行读出） */
 const SELECT_COLUMNS = `name, prompt, cwd, schedule, last_run_at AS lastRunAt,
-                        created_at AS createdAt, updated_at AS updatedAt`;
+                        created_at AS createdAt, updated_at AS updatedAt,
+                        last_run_reason AS lastRunReason, session_id AS sessionId,
+                        last_session_id AS lastSessionId`;
 
 /** jobs 表 DAO（连接注入——goal 件 GoalStore 同构） */
 export class JobsStore {
   constructor(private readonly connection: DatabaseConnection) {}
 
-  /** 新增任务（cwd/schedule 第一刀不设——字段为第二刀预留；同名拒） */
-  add(name: string, prompt: string, now: number): AddJobOutcome {
+  /**
+   * 新增任务（同名拒）。schedule 为可选触发声明**原样串**（调用方已过
+   * parseSchedule 执法——本层不重复解析，存原样保人读；null = 仅手动触发）。
+   */
+  add(name: string, prompt: string, now: number, schedule: string | null = null): AddJobOutcome {
     try {
       this.connection
         .prepare(
-          `INSERT INTO jobs (name, prompt, cwd, schedule, last_run_at, created_at, updated_at)
-           VALUES (?, ?, NULL, NULL, NULL, ?, ?)`,
+          `INSERT INTO jobs (name, prompt, cwd, schedule, last_run_at, created_at, updated_at,
+                             last_run_reason, session_id, last_session_id)
+           VALUES (?, ?, NULL, ?, NULL, ?, ?, NULL, NULL, NULL)`,
         )
-        .run(name, prompt, now, now);
+        .run(name, prompt, schedule, now, now);
       return 'added';
     } catch (err) {
       // UNIQUE 约束 = 同名拒（唯一预期异常；其余异常如实上抛）
@@ -70,13 +76,43 @@ export class JobsStore {
    * 执行前抢占：条件更新推进 last_run_at，赢家获得 spawn 权。
    * 读当前行值作比对键再原子更新（IS ?——绑定 null 即 IS NULL，null/值通吃）；
    * 两步间被他进程抢先时 WHERE 失败 changes=0 让路。
+   * @param reason 触发记因（v9 列——'manual' 手动 / 'scheduled' 到点）
    */
-  reserveRun(name: string, now: number): ReserveOutcome {
+  reserveRun(name: string, now: number, reason: RunReason): ReserveOutcome {
     const current = this.get(name);
     if (current === undefined) return 'missing';
     const changes = this.connection
-      .prepare(`UPDATE jobs SET last_run_at = ?, updated_at = ? WHERE name = ? AND last_run_at IS ?`)
-      .run(now, now, name, current.lastRunAt).changes;
+      .prepare(
+        `UPDATE jobs SET last_run_at = ?, last_run_reason = ?, updated_at = ?
+         WHERE name = ? AND last_run_at IS ?`,
+      )
+      .run(now, reason, now, name, current.lastRunAt).changes;
     return changes === 1 ? 'reserved' : 'lost-race';
+  }
+
+  /**
+   * once 迟到记因（due 判定 missed 路写——**不推进 last_run_at**：没触发就
+   * 不该动触发时刻，只把「为何没跑」记进 last_run_reason 供 list/诊断可见）。
+   */
+  markMissed(name: string, now: number): void {
+    this.connection.prepare(`UPDATE jobs SET last_run_reason = 'missed', updated_at = ? WHERE name = ?`).run(now, name);
+  }
+
+  /**
+   * 回写最近会话归属（v9 列 last_session_id——K2-c 编排层在子进程会话建行后
+   * 回写；任务↔会话精确归属标记，durable 事件流之外的行级索引面）。
+   */
+  recordLastSession(name: string, sessionId: string, now: number): void {
+    this.connection
+      .prepare(`UPDATE jobs SET last_session_id = ?, updated_at = ? WHERE name = ?`)
+      .run(sessionId, now, name);
+  }
+
+  /**
+   * 声明会话投递目标（v9 列 session_id——投递二值拍板①：null = 子进程单发；
+   * K2-c 命令面写入，此处只收 DAO 写路）。
+   */
+  setSessionTarget(name: string, sessionId: string | null, now: number): void {
+    this.connection.prepare(`UPDATE jobs SET session_id = ?, updated_at = ? WHERE name = ?`).run(sessionId, now, name);
   }
 }

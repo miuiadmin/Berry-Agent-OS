@@ -1,9 +1,9 @@
 /**
- * L3 scheduler — jobs 表 DDL（会话篇 §6 迁移链 v7，tick 第一刀）。
+ * L3 scheduler — jobs 表 DDL（会话篇 §6 迁移链 v7 + v8，tick 第一刀/第二刀）。
  *
  * DDL 文本归 scheduler 模块自带、经 persist 统一迁移框架执行（纪律同
  * memory/goal 表族——persist 提供框架不认识业务表）。v6 = sessions `+app`
- * 列（内核迁移，persist 自注入），v7 = 本表。
+ * 列（内核迁移，persist 自注入），v7 = 建表，v8 = 第二刀三列。
  *
  * 第一刀语义：schedule 字段**存而不执法**（第二刀定时触发的落点）；
  * RunRecord 不建表——durable 事件流即过程留痕（子进程 berry run 会话）。
@@ -26,5 +26,28 @@ CREATE TABLE jobs (
   created_at  INTEGER NOT NULL,   -- 建行时刻（Unix 毫秒）
   updated_at  INTEGER NOT NULL    -- 改行时刻（Unix 毫秒）
 ) STRICT;
+`,
+};
+
+/**
+ * v9 迁移：第二刀三列（内核边界篇 §4.1 席 13 第二刀——触发记因 + 任务↔会话归属标记）。
+ *
+ * 版本序说明：v8 已被 goal 件（goal-needs-write）占用——user_version 链全局唯一，
+ * 本刀顺移 v9（缺号补位无意义，迁移框架只认严格递增）。
+ *
+ * - `last_run_reason`：最近一次触发记因（'manual' 手动 / 'scheduled' 到点 /
+ *   'missed' once 迟到超窗记因不跑）——list 面与诊断可见「上次为何跑/为何没跑」；
+ * - `session_id`：会话投递目标声明（NULL = 子进程单发无归属——投递二值拍板①；
+ *   会话投递路的归属键，K2-c 命令面写入）；
+ * - `last_session_id`：最近一次触发实际跑出的会话 id（子进程会话——K2-c 回写，
+ *   任务↔会话精确归属标记，第一刀挂账的本刀兑现）。
+ */
+export const SCHEDULER_V9_MIGRATION: MigrationSpec = {
+  version: 9,
+  name: 'scheduler-jobs-v9',
+  sql: `
+ALTER TABLE jobs ADD COLUMN last_run_reason TEXT;
+ALTER TABLE jobs ADD COLUMN session_id TEXT;
+ALTER TABLE jobs ADD COLUMN last_session_id TEXT;
 `,
 };

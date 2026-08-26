@@ -14,7 +14,7 @@ export interface JobRecord {
   readonly prompt: string;
   /** 执行目录（NULL = 宿主启动目录；第一刀 add 不设） */
   readonly cwd: string | null;
-  /** 触发声明（第一刀存而不执法） */
+  /** 触发声明原样串（三形状 once@/every@/daily@——add 时已过 parse 执法；NULL = 仅手动） */
   readonly schedule: string | null;
   /** 最近触发时刻（Unix 毫秒；从未跑过 = null——抢占比对键） */
   readonly lastRunAt: number | null;
@@ -22,7 +22,16 @@ export interface JobRecord {
   readonly createdAt: number;
   /** 改行时刻（Unix 毫秒） */
   readonly updatedAt: number;
+  /** 最近触发记因（'manual' / 'scheduled' / 'missed'——v9 列，从未判定 = null） */
+  readonly lastRunReason: string | null;
+  /** 会话投递目标声明（NULL = 子进程单发无归属——投递二值拍板①，v9 列） */
+  readonly sessionId: string | null;
+  /** 最近触发实际跑出的会话 id（v9 列——任务↔会话精确归属标记，K2-c 回写） */
+  readonly lastSessionId: string | null;
 }
+
+/** 触发记因词汇（last_run_reason 列的合法值——手动 / 到点 / once 迟到记因不跑） */
+export type RunReason = 'manual' | 'scheduled' | 'missed';
 
 /** runner 结果面（exec RunResult 结构子集——exitCode/stdout/stderr/durationMs） */
 export interface TickRunResult {

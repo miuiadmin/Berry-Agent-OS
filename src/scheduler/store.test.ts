@@ -2,24 +2,24 @@
  * L3 scheduler — jobs 表 DAO 集成测试（JobsStore，经 persist 迁移框架建表后
  * 真库 :memory: SQLite，无 mock——goal 表族同款）。逐方法语义 + **执行前抢占
  * 三态**（reserve-then-run：reserved/missing/lost-race——冷读 #1 裁决的
- * 护栏语义在此锁死）。
+ * 护栏语义在此锁死）+ v9 三列（记因/归属）读写。
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openStore, type Store } from '../persist/index.js';
-import { JobsStore, SCHEDULER_MIGRATION, JOB_NAME_PATTERN } from './index.js';
+import { JobsStore, migrations, JOB_NAME_PATTERN } from './index.js';
 
-/** 当前测试库（每用例新建 :memory:——迁移一次到位后交 DAO） */
+/** 当前测试库（每用例新建 :memory:——迁移链 v7+v9 一次到位后交 DAO） */
 let store: Store;
 let db: JobsStore;
 
 beforeEach(() => {
-  store = openStore({ path: ':memory:', migrations: [SCHEDULER_MIGRATION] });
+  store = openStore({ path: ':memory:', migrations });
   db = new JobsStore(store.connection);
 });
 
 describe('add / get / list / remove：任务行 CRUD', () => {
-  it('新插：全字段落库（cwd/schedule/lastRunAt 为 NULL——第二刀预留位）', () => {
+  it('新插（无 schedule）：预留位全 NULL——v9 三列亦 NULL', () => {
     expect(db.add('daily-report', '总结今日进度', 1000)).toBe('added');
     const job = db.get('daily-report')!;
     expect(job).toBeDefined();
@@ -30,6 +30,15 @@ describe('add / get / list / remove：任务行 CRUD', () => {
     expect(job.lastRunAt).toBeNull();
     expect(job.createdAt).toBe(1000);
     expect(job.updatedAt).toBe(1000);
+    // v9 三列缺省 NULL（记因/归属未涉）
+    expect(job.lastRunReason).toBeNull();
+    expect(job.sessionId).toBeNull();
+    expect(job.lastSessionId).toBeNull();
+  });
+
+  it('带 schedule 新插：原样串落库（DAO 不解析——执法在命令层 parseSchedule）', () => {
+    expect(db.add('briefing', '每日简报', 1000, 'daily@08:30')).toBe('added');
+    expect(db.get('briefing')!.schedule).toBe('daily@08:30');
   });
 
   it('同名拒（主键即身份——duplicate 不改原行）', () => {
@@ -62,24 +71,27 @@ describe('add / get / list / remove：任务行 CRUD', () => {
   });
 });
 
-describe('reserveRun：执行前抢占（reserve-then-run 三态）', () => {
+describe('reserveRun：执行前抢占（reserve-then-run 三态 + v9 记因）', () => {
   it('任务不存在 → missing', () => {
-    expect(db.reserveRun('ghost', 1000)).toBe('missing');
+    expect(db.reserveRun('ghost', 1000, 'manual')).toBe('missing');
   });
 
-  it('首次抢占 reserved：last_run_at NULL → 推进 + updated_at 跟进', () => {
+  it('首次抢占 reserved：last_run_at NULL → 推进 + 记因同笔落列', () => {
     db.add('a', 'p', 100);
-    expect(db.reserveRun('a', 5000)).toBe('reserved');
+    expect(db.reserveRun('a', 5000, 'scheduled')).toBe('reserved');
     const job = db.get('a')!;
     expect(job.lastRunAt).toBe(5000);
     expect(job.updatedAt).toBe(5000);
+    expect(job.lastRunReason).toBe('scheduled');
   });
 
-  it('再次手动触发合法：新 last_run_at 为新比对键（手动连跑两次是用户裁量）', () => {
+  it('再次手动触发合法：新 last_run_at 为新比对键（手动连跑两次是用户裁量；记因随笔换）', () => {
     db.add('a', 'p', 100);
-    expect(db.reserveRun('a', 1000)).toBe('reserved');
-    expect(db.reserveRun('a', 2000)).toBe('reserved'); // get 拿到 1000 → 条件更新成功
-    expect(db.get('a')!.lastRunAt).toBe(2000);
+    expect(db.reserveRun('a', 1000, 'scheduled')).toBe('reserved');
+    expect(db.reserveRun('a', 2000, 'manual')).toBe('reserved'); // get 拿到 1000 → 条件更新成功
+    const job = db.get('a')!;
+    expect(job.lastRunAt).toBe(2000);
+    expect(job.lastRunReason).toBe('manual');
   });
 
   it('lost-race：读值后他方抢先（旧比对键条件更新 changes=0 让路）', () => {
@@ -87,12 +99,37 @@ describe('reserveRun：执行前抢占（reserve-then-run 三态）', () => {
     // 编排双进程竞写：进程 B 先读行（拿到 NULL 比对键）……
     const expected = db.get('a')!.lastRunAt; // null
     // ……进程 A 抢先抢占成功……
-    expect(db.reserveRun('a', 1111)).toBe('reserved');
+    expect(db.reserveRun('a', 1111, 'manual')).toBe('reserved');
     // ……进程 B 携旧比对键条件更新——changes=0 让路（token 未花，正确）
     const changes = store.connection
-      .prepare(`UPDATE jobs SET last_run_at = ?, updated_at = ? WHERE name = ? AND last_run_at IS ?`)
-      .run(2222, 2222, 'a', expected).changes;
+      .prepare(
+        `UPDATE jobs SET last_run_at = ?, last_run_reason = ?, updated_at = ?
+         WHERE name = ? AND last_run_at IS ?`,
+      )
+      .run(2222, 'manual', 2222, 'a', expected).changes;
     expect(changes).toBe(0);
     expect(db.get('a')!.lastRunAt).toBe(1111); // A 的推进不被 B 覆写
+  });
+});
+
+describe('v9 三列写路：missed 记因 + 会话归属', () => {
+  it('markMissed：记因落列但不推进 last_run_at（没触发就不动触发时刻）', () => {
+    db.add('a', 'p', 100, 'once@2099-01-01T00:00');
+    db.markMissed('a', 500);
+    const job = db.get('a')!;
+    expect(job.lastRunReason).toBe('missed');
+    expect(job.lastRunAt).toBeNull(); // 关键：未推进
+    expect(job.updatedAt).toBe(500);
+  });
+
+  it('recordLastSession / setSessionTarget：归属两列独立读写', () => {
+    db.add('a', 'p', 100);
+    db.recordLastSession('a', 'sess-1', 200);
+    expect(db.get('a')!.lastSessionId).toBe('sess-1');
+    db.setSessionTarget('a', 'sess-target', 300);
+    expect(db.get('a')!.sessionId).toBe('sess-target');
+    // 解绑（null 回写——投递二值的另一边）
+    db.setSessionTarget('a', null, 400);
+    expect(db.get('a')!.sessionId).toBeNull();
   });
 });

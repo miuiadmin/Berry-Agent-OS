@@ -24,14 +24,9 @@ import type { SessionEvent } from '../contracts/events.js';
 import { deriveMessages } from '../session/derive.js';
 import { interruptedTurnClosers } from '../session/index.js';
 import { Persistence } from '../persist/index.js';
-// 重开库须带与组合根同链迁移（memory 表族 v2 + session_fts v3——宿主裸开只识 v1，
-// 高版本库拒绝打开是持久层纪律，此处镜像装配面真链）
-// 重开库须带与组合根同链迁移（memory 表族 v2 + session_fts v3 + goals v5——
-// 宿主裸开只识 v1，少一段即拒开；此处镜像装配面真链）
-import { MEMORY_MIGRATION, SESSION_FTS_MIGRATION } from '../memory/index.js';
-import { MEMORY_UTILITY_MIGRATION } from '../memory/index.js';
-import { GOAL_MIGRATION, GOAL_NEEDS_WRITE_MIGRATION } from '../goal/index.js';
-import { SCHEDULER_MIGRATION } from '../scheduler/index.js';
+// 重开库须带与组合根同链迁移（collectBuiltinMigrations 机械聚合——与装配
+// 同源，此后加带表件零改动跟随；宿主裸开只识 v1，少一段即拒开）
+import { collectBuiltinMigrations } from './builtins.js';
 import { createBerryRuntime } from './assembly.js';
 import { ConversationDriver } from '../chat/index.js';
 import type { BerryRuntime } from './assembly.js';
@@ -574,14 +569,8 @@ describe('持久化 round-trip 与命令入口', () => {
 
     const reopened = Persistence.open({
       path: dbFile,
-      migrations: [
-        MEMORY_MIGRATION,
-        SESSION_FTS_MIGRATION,
-        MEMORY_UTILITY_MIGRATION,
-        GOAL_MIGRATION,
-        GOAL_NEEDS_WRITE_MIGRATION,
-        SCHEDULER_MIGRATION,
-      ],
+      // 机械聚合链（collectBuiltinMigrations——与装配同源，此后加带表件零改动跟随）
+      migrations: collectBuiltinMigrations(),
     });
     try {
       const sessionId = reopened.store.listSessionIds()[0]!;

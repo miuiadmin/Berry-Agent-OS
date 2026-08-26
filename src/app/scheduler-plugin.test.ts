@@ -157,6 +157,41 @@ describe('scheduler 官方件全栈：装载与命令面', () => {
     expect(await runtime.channels.commands.dispatch('/tick add onlyname')).toBe('ok');
     expect(notifies.at(-1)).toContain('用法：/tick add');
   });
+
+  it('add 带合法 schedule：原样串落库 + 回执含触发行 + list 可见（K2-b）', async () => {
+    const runtime = await assemble();
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    expect(await runtime.channels.commands.dispatch('/tick add morning daily@08:30 早间简报')).toBe('ok');
+    expect(notifies.at(-1)).toContain('任务已新增：morning');
+    expect(notifies.at(-1)).toContain('触发：daily@08:30');
+    // 行级断言：jobs 表真库原样串
+    const row = runtime
+      .persistence!.store.connection.prepare(`SELECT schedule FROM jobs WHERE name = 'morning'`)
+      .get() as { schedule: string | null };
+    expect(row.schedule).toBe('daily@08:30');
+
+    expect(await runtime.channels.commands.dispatch('/tick list')).toBe('ok');
+    expect(notifies.at(-1)).toContain('morning');
+    expect(notifies.at(-1)).toContain('daily@08:30');
+  });
+
+  it('add 带坏 schedule：当场拒（词法执法——坏串不入库）', async () => {
+    const runtime = await assemble();
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    expect(await runtime.channels.commands.dispatch('/tick add bad daily@25:00 指令')).toBe('ok');
+    expect(notifies.at(-1)).toContain('schedule 不合法');
+    // 无 schedule 前缀的第二词是普通 prompt——不误吃
+    expect(await runtime.channels.commands.dispatch('/tick add ok 正常指令')).toBe('ok');
+    expect(notifies.at(-1)).toContain('prompt：正常指令');
+
+    // schedule 在场但 prompt 缺席 → 用法回执（schedule 被吃掉后 prompt 为空）
+    expect(await runtime.channels.commands.dispatch('/tick add nope daily@08:30')).toBe('ok');
+    expect(notifies.at(-1)).toContain('用法：/tick add');
+  });
 });
 
 describe('scheduler 官方件全栈：触发链（gate → 抢占 → runner）', () => {

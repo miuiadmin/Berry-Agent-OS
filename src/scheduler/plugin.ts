@@ -23,6 +23,7 @@ import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js'
 import type { Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { discoveryGates, WAKE_CHAIN_CAP, type DiscoveryGateDecision } from './gates.js';
+import { looksLikeSchedule, parseSchedule } from './schedule.js';
 import { JobsStore, JOB_NAME_PATTERN } from './store.js';
 import type { JobRecord, TickRunResult } from './types.js';
 
@@ -98,7 +99,7 @@ async function applySchedulerPlugin(ctx: PluginContext, deps: SchedulerPluginDep
     ctx.get<ChannelsCommandFace>('channels').registerCommand({
       name: 'tick',
       description:
-        'tick 任务面：/tick add <name> <prompt...> 新增（同名拒）| /tick list 清单 | /tick rm <name> 删除 | /tick run <name> 手动触发（只读子进程单发）',
+        'tick 任务面：/tick add <name> [schedule] <prompt...> 新增（schedule = once@<ISO>/every@<n>[mhd]/daily@HH:MM，可省）| /tick list 清单 | /tick rm <name> 删除 | /tick run <name> 手动触发（只读子进程单发）',
       source: 'plugin',
       handler: (args) => handleTickCommand(args.trim(), { store, deps, ui }),
     }),
@@ -134,47 +135,74 @@ function handleTickCommand(args: string, opts: TickCommandOpts): void {
       handleRun(rest, opts);
       return;
     case '':
-      ui.notify('用法：/tick add <name> <prompt...> | /tick list | /tick rm <name> | /tick run <name>');
+      ui.notify('用法：/tick add <name> [schedule] <prompt...> | /tick list | /tick rm <name> | /tick run <name>');
       return;
     default:
       ui.notify(
-        `未知子命令：${sub}——用法：/tick add <name> <prompt...> | /tick list | /tick rm <name> | /tick run <name>`,
+        `未知子命令：${sub}——用法：/tick add <name> [schedule] <prompt...> | /tick list | /tick rm <name> | /tick run <name>`,
       );
   }
 }
 
-/** /tick add：首空白分界 name/prompt；词法执法 + 同名拒回执 */
+/**
+ * /tick add：首空白分界 name/prompt；第二词若形如 schedule 声明（once@/
+ * every@/daily@ 前缀嗅探）则吃作可选触发参数——`/tick add <name> [schedule] <prompt...>`。
+ * schedule 词法当场执法（坏串拒入库——存库的都是过闸好串）。
+ */
 function handleAdd(rest: string, opts: TickCommandOpts): void {
   const trimmed = rest.trim();
-  const spaceAt = trimmed.indexOf(' ');
-  const name = spaceAt === -1 ? trimmed : trimmed.slice(0, spaceAt);
-  const prompt = spaceAt === -1 ? '' : trimmed.slice(spaceAt + 1).trim();
+  const firstSpace = trimmed.indexOf(' ');
+  const name = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
+  let remainder = firstSpace === -1 ? '' : trimmed.slice(firstSpace + 1).trim();
+  // 可选 schedule：第二词前缀嗅探（looksLikeSchedule 三前缀——不形如声明则整体是 prompt）
+  let schedule: string | null = null;
+  const secondSpace = remainder.indexOf(' ');
+  const secondWord = secondSpace === -1 ? remainder : remainder.slice(0, secondSpace);
+  if (looksLikeSchedule(secondWord)) {
+    schedule = secondWord;
+    remainder = secondSpace === -1 ? '' : remainder.slice(secondSpace + 1).trim();
+  }
+  const prompt = remainder;
   if (!JOB_NAME_PATTERN.test(name) || prompt === '') {
-    opts.ui.notify('用法：/tick add <name> <prompt...>（name 限字母数字连字符下划线、不以连字符开头；prompt 非空）');
+    opts.ui.notify(
+      '用法：/tick add <name> [schedule] <prompt...>（name 限字母数字连字符下划线、不以连字符开头；prompt 非空）',
+    );
     return;
   }
-  const outcome = opts.store.add(name, prompt, Date.now());
+  // schedule 词法执法（null = 仅手动触发，跳过）
+  if (schedule !== null) {
+    const parsed = parseSchedule(schedule, Date.now());
+    if (!parsed.ok) {
+      opts.ui.notify(`schedule 不合法：${parsed.error}`);
+      return;
+    }
+  }
+  const outcome = opts.store.add(name, prompt, Date.now(), schedule);
   if (outcome === 'duplicate') {
     opts.ui.notify(`任务已存在：${name}（同名拒——改错先 /tick rm ${name} 再 add）`);
     return;
   }
-  opts.ui.notify(`任务已新增：${name}\nprompt：${prompt}`);
+  const scheduleLine = schedule === null ? '触发：仅手动' : `触发：${schedule}（OS 定时注册随 K2-d 落地）`;
+  opts.ui.notify(`任务已新增：${name}\n${scheduleLine}\nprompt：${prompt}`);
 }
 
-/** /tick list：任务清单人读投影（name + 最近触发 + prompt 首行截断） */
+/** /tick list：任务清单人读投影（name + schedule + 最近触发与记因 + prompt 首行截断） */
 function handleList(opts: TickCommandOpts): void {
   const jobs = opts.store.list();
   if (jobs.length === 0) {
-    opts.ui.notify('（无 tick 任务——/tick add <name> <prompt...> 新增）');
+    opts.ui.notify('（无 tick 任务——/tick add <name> [schedule] <prompt...> 新增）');
     return;
   }
   const lines = jobs.map((job) => {
+    const schedule = job.schedule ?? '（仅手动）';
     const lastRun = job.lastRunAt === null ? '未跑过' : new Date(job.lastRunAt).toISOString();
+    // 记因注记（manual/scheduled/missed——v8 列；未跑过时缺省空）
+    const reason = job.lastRunReason === null ? '' : `〔${job.lastRunReason}〕`;
     // prompt 首行截断（多行 prompt 只示首行 60 字——清单面紧凑，全文在 add 回执）
     const preview = job.prompt.split('\n')[0]!.slice(0, 60);
-    return `  ${job.name}  ${lastRun}  ${preview}`;
+    return `  ${job.name}  ${schedule}  ${lastRun}${reason}  ${preview}`;
   });
-  opts.ui.notify(`tick 任务（${jobs.length} 个，schedule 待第二刀执法——当前全手动触发）：\n${lines.join('\n')}`);
+  opts.ui.notify(`tick 任务（${jobs.length} 个，OS 定时注册随 K2-d 落地——到点判定已执法）：\n${lines.join('\n')}`);
 }
 
 /** /tick rm：删除回执（删到/不存在两态） */
@@ -216,8 +244,8 @@ function handleRun(rest: string, opts: TickCommandOpts): void {
     ui.notify(renderGateRefusal(decision, name));
     return;
   }
-  // 抢占：changes=1 才花钱（token 不可逆——reserve-then-run）
-  const reserved = store.reserveRun(name, Date.now());
+  // 抢占：changes=1 才花钱（token 不可逆——reserve-then-run）；手动路记因 manual
+  const reserved = store.reserveRun(name, Date.now(), 'manual');
   if (reserved === 'lost-race') {
     ui.notify(`任务 ${name} 刚被并发触发（另一 berry 进程已抢占）——本侧让路不重跑。`);
     return;
