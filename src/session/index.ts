@@ -10,6 +10,8 @@ export {
   getSessionEventType,
   listSessionEventTypes,
   CORE_EVENT_TYPES,
+  usageLedgerBuckets,
+  ledgerModel,
 } from './event-types.js';
 export type {
   SessionEventTypeDefinition,
@@ -25,6 +27,7 @@ export type {
   ApprovalDecidedData,
   GateDecisionData,
   SandboxModeData,
+  LlmUsageData,
 } from './event-types.js';
 export { deriveMessages, occludedSeqs } from './derive.js';
 export type { ProjectedMessage, ProjectedToolCall } from './derive.js';

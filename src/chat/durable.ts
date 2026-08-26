@@ -22,6 +22,7 @@ import type { GateDecisionPayload, GateDecisionSink } from '../contracts/tools.j
 import type { Session } from '../session/session.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import type { TurnEndReason } from '../session/event-types.js';
+import { usageLedgerBuckets, ledgerModel } from '../session/event-types.js';
 import type { ApprovalDecisionSink } from '../safety/approval.js';
 
 /** 组合根持有的 durable 接线面（loop emit 的持久化半边 + 两个结构化 sink） */
@@ -210,9 +211,14 @@ export function createDurableSinks(
           if (message.usage !== undefined && session.header.origin !== 'delegation') {
             session.append('llm/usage', {
               callId: `turn:${session.header.sessionId}:${appended.seq}`,
-              model: message.model ?? options.model ?? 'unknown',
+              // model 口径统一（P1-5）：实录优先——provider+model 拼全形，请求标识
+              // 兜底（修偏前落裸 model id——与 complete 写点两种口径）
+              model: ledgerModel(message, options.model),
               priority: options.usagePriority ?? 'foreground',
-              usage: { input: message.usage.input, output: message.usage.output },
+              // 全桶入账（会话篇 §1.1 P1-5 修偏，挖矿 B3）：usageLedgerBuckets
+              // 归一——此前手写 {input,output} 裁掉 cacheRead/cacheWrite，读侧
+              // /usage 面板（四桶总和）与底账长期两张皮
+              usage: usageLedgerBuckets(message.usage),
             });
           }
           for (const block of message.content) {

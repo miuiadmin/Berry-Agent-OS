@@ -73,7 +73,8 @@ function settlement(
   const result: SubagentResult = {
     output: '审毕，无阻塞项',
     stopReason: 'completed',
-    usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, totalTokens: 150 },
+    // 全桶形态（P1-5 修偏回归锁）：cache 桶 + 上报拆分桶齐备——折叠腿必须原样入账
+    usage: { input: 100, output: 50, cacheRead: 700, cacheWrite: 40, cacheWrite1h: 10, reasoning: 5, totalTokens: 195 },
     ...overrides.result,
   };
   return { request, execution, result };
@@ -88,11 +89,13 @@ describe('归属解析 + 结算折叠（llm/usage 计量事件）', () => {
     notifier(settlement({ ownerSessionId: entry.session.header.sessionId }));
     const usageEvents = entry.session.events.filter((e) => e.type === 'llm/usage');
     expect(usageEvents).toHaveLength(1);
+    // 全桶入账（P1-5 修偏，挖矿 B3——notify 折叠腿是三审漏数的第四写点）：
+    // cacheRead/cacheWrite 必落、上报拆分桶随行、totalTokens/cost 滤除
     expect(usageEvents[0]!.data).toEqual({
       callId: 'child-session-1',
       model: 'test/model',
       priority: 'background',
-      usage: { input: 100, output: 50 },
+      usage: { input: 100, output: 50, cacheRead: 700, cacheWrite: 40, cacheWrite1h: 10, reasoning: 5 },
     });
   });
 
@@ -176,7 +179,8 @@ describe('formatSettlementNotice 文案结构', () => {
     const text = formatSettlementNotice(settlement());
     expect(text).toContain('「委派-审读」');
     expect(text).toContain('已完成');
-    expect(text).toContain('150 tokens');
+    // 夹具 totalTokens=195（供应商上报的派生值，独立于桶值——通知文案读它）
+    expect(text).toContain('195 tokens');
     expect(text).toContain('审毕，无阻塞项');
   });
 

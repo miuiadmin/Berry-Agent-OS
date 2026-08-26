@@ -19,6 +19,7 @@ import type { SubagentSettlement } from '../contracts/subagent.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { DriverEntry } from '../chat/index.js';
 import { chainSessionId } from '../context/chain.js';
+import { usageLedgerBuckets } from '../session/index.js';
 
 /** 通知正文 output/diagnostic 摘录上限（字符）——通知是唤醒线索非产物载体 */
 const EXCERPT_LIMIT = 4000;
@@ -72,7 +73,9 @@ export function createSubagentNotifier(opts: SubagentNotifierOptions): (settleme
         callId: settlement.execution.id,
         model: opts.model,
         priority: 'background',
-        usage: { input: usage.input, output: usage.output },
+        // 全桶入账（会话篇 §1.1 P1-5 修偏）：结算折叠腿与 complete/前台 loop
+        // 两写点共用归一函数——cache 桶不再被裁（挖矿 B3 三审漏数的第四写点）
+        usage: usageLedgerBuckets(usage),
       });
     }
     // ② 三通道通知：前台不通知（父正 await result）；归属未解析出（无链无键）

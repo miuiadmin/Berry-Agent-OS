@@ -93,9 +93,67 @@ describe('createDurableSinks：事件 → session.append 映射', () => {
     createDurableSinks(normal).handle({ type: 'message_end', message: textAssistant('主循环答') });
     const folds = normal.events.filter((e) => e.type === 'llm/usage');
     expect(folds).toHaveLength(1);
-    const data = folds[0]!.data as { priority: string; usage: { input: number; output: number } };
+    const data = folds[0]!.data as {
+      priority: string;
+      usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    };
     expect(data.priority).toBe('foreground');
-    expect(data.usage).toEqual({ input: 1, output: 2 });
+    // NO_USAGE 夹具零 cache——四桶齐落（P1-5 全桶入账后 usage 恒四桶起）
+    expect(data.usage).toEqual({ input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it('底账全桶入账（P1-5 修偏回归锁）：cache 桶必落、上报桶随行、派生/折算桶滤除', () => {
+    // 修偏前写点手写 {input,output}——cacheRead/cacheWrite 被裁，读侧 /usage 面板
+    //（四桶总和）与底账两张皮（挖矿 B3）；归一函数 usageLedgerBuckets 是单一事实源
+    const session = new Session({ origin: 'user' });
+    createDurableSinks(session).handle({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '带缓存的轮' }],
+        usage: {
+          input: 100,
+          output: 50,
+          cacheRead: 1200,
+          cacheWrite: 80,
+          cacheWrite1h: 30,
+          reasoning: 12,
+          totalTokens: 1430,
+          cost: { total: 0.01 },
+        },
+        stopReason: 'stop',
+        timestamp: 1,
+      },
+    });
+    const data = session.events.find((e) => e.type === 'llm/usage')!.data as { usage: Record<string, unknown> };
+    expect(data.usage).toEqual({
+      input: 100,
+      output: 50,
+      cacheRead: 1200,
+      cacheWrite: 80,
+      cacheWrite1h: 30,
+      reasoning: 12,
+    });
+  });
+
+  it('底账 model 口径统一（P1-5）：实录 provider+model 拼全形优先于装配缺省', () => {
+    // 修偏前落裸 message.model（无 provider 前缀）——与 complete 写点的请求全形
+    // 两种口径混在同一底账（挖矿即刻批②观察项）
+    const session = new Session({ origin: 'user' });
+    createDurableSinks(session, { model: 'anthropic/default-model' }).handle({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        model: 'claude-sonnet-5',
+        provider: 'anthropic',
+        content: [{ type: 'text', text: '实录模型' }],
+        usage: NO_USAGE,
+        stopReason: 'stop',
+        timestamp: 1,
+      },
+    });
+    const data = session.events.find((e) => e.type === 'llm/usage')!.data as { model: string };
+    expect(data.model).toBe('anthropic/claude-sonnet-5');
   });
 
   it('usagePriority 落账：background 会话声明 → llm/usage priority=background（tick 链路回归锁）', () => {

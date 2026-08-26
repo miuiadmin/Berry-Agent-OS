@@ -45,8 +45,9 @@ import {
   SESSION_EVENT_DATA_INVALID,
   SESSION_EVENT_TOO_LARGE,
 } from '../contracts/errors.js';
-import { runInCallerChain } from '../context/chain.js';
+import { runInCallerChain, runInSessionChain } from '../context/chain.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
+import { fauxProvider, type LlmService } from '../llm/index.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -708,6 +709,49 @@ describe('ConversationDriver + durable 接线', () => {
     ]);
     // 日志闭合 → 恢复协议零活儿（turn 必闭合纪律，会话篇 §1.4）
     expect(interruptedTurnClosers(runtime.session!.events)).toEqual([]);
+  });
+});
+
+describe('ctx.llm.complete 底账（P1-5 全桶入账 + model 口径统一）', () => {
+  it('complete 写点：usage 四桶+上报桶原样落 llm/usage，model 拼全形（faux 真路径）', async () => {
+    // faux 走真 pi-ai streamSimple 路径（mock 只停在模型层）；faux 会把路由
+    // provider+model 盖章进响应——ledgerModel 拼全形 'faux-ledger/m1'
+    const faux = fauxProvider({ provider: 'faux-ledger', models: [{ id: 'm1' }] });
+    faux.setResponses([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        usage: {
+          input: 100,
+          output: 50,
+          cacheRead: 700,
+          cacheWrite: 40,
+          cacheWrite1h: 10,
+          reasoning: 5,
+          totalTokens: 195,
+        },
+        stopReason: 'stop',
+        timestamp: 1,
+      } as unknown as Parameters<typeof faux.setResponses>[0][number],
+    ]);
+    const runtime = await assemble({ providers: [faux.provider], model: 'faux-ledger/m1' });
+    const llm = runtime.ctx.get<LlmService>('llm');
+    const sessionId = runtime.session!.header.sessionId;
+    // S1 键控：onUsage 落账只认调用链命中条目——包进 boot 会话链（生产同构）
+    await runInSessionChain({ sessionId }, () =>
+      llm.complete({ messages: [{ role: 'user', content: '问', timestamp: 1 }] }),
+    );
+    const events = runtime.session!.events.filter((e) => e.type === 'llm/usage');
+    expect(events).toHaveLength(1);
+    // faux 恒以自身估算覆盖 scripted usage（withUsageEstimate——必带 totalTokens/cost），
+    // 恰好提供「供应商上报派生/折算桶」的真路径样本：断言键集 = 四桶恰好齐、
+    // 派生（totalTokens）与折算（cost）滤除——值断言归 event-types/durable 两测试
+    const data = events[0]!.data as { model: string; priority: string; usage: Record<string, number> };
+    expect(data.model).toBe('faux-ledger/m1'); // 实录 provider+model 拼全形（口径由 ledgerModel 统一保证）
+    expect(data.priority).toBe('foreground'); // 缺省前台道（canAfford 只闸 background）
+    expect(Object.keys(data.usage).sort()).toEqual(['cacheRead', 'cacheWrite', 'input', 'output']);
+    expect(data.usage.input!).toBeGreaterThan(0);
+    expect(data.usage.output!).toBeGreaterThan(0);
   });
 });
 
@@ -2034,14 +2078,16 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     expect(foreground?.data).toMatchObject({
       callId: expect.stringMatching(/^turn:/),
       priority: 'foreground',
-      usage: { input: NO_USAGE.input, output: NO_USAGE.output },
+      // NO_USAGE 夹具零 cache——四桶齐落（P1-5 全桶入账后 usage 恒四桶起）
+      usage: { input: NO_USAGE.input, output: NO_USAGE.output, cacheRead: 0, cacheWrite: 0 },
     });
     const background = usageEvents.find((e) => (e.data as { priority: string }).priority === 'background');
     expect(background?.data).toEqual({
       callId: 'stub-sub-run',
       model: expect.any(String),
       priority: 'background',
-      usage: { input: 100, output: 50 },
+      // 结算折叠腿同归一函数：四桶齐落 + totalTokens（夹具 150）滤除
+      usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 },
     });
     const notice = runtime.session!.events.find(
       (e) => e.type === 'user/message' && (e.data as { source?: string }).source === 'subagent-settled',

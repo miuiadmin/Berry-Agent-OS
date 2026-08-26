@@ -21,7 +21,7 @@ export {
 } from '../contracts/session-events.js';
 export type { SessionEventTypeDefinition, SessionEventCategory } from '../contracts/session-events.js';
 
-import type { MessageSource } from '../contracts/llm.js';
+import type { MessageSource, Usage } from '../contracts/llm.js';
 
 /** turn/end 终态枚举（三套终态枚举的会话层之锚） */
 export type TurnEndReason = 'completed' | 'aborted' | 'blocked' | 'error' | 'max-tokens' | 'interrupted';
@@ -108,12 +108,68 @@ export interface SandboxModeData {
 export interface LlmUsageData {
   /** 本次补全的结算 id（每次 complete 调用唯一——randomUUID） */
   readonly callId: string;
-  /** 模型标识（"provider/model-id"） */
+  /** 模型标识（"provider/model-id"）——实录优先：响应携带的模型优先，请求标识兜底，'unknown' 兜底（两路写点同律） */
   readonly model: string;
   /** 预算道：'background' 接闸门（当日聚合只计 background） */
   readonly priority: 'background' | 'foreground';
-  /** 原始用量（in/out token 数——聚合 SUM(input+output)） */
-  readonly usage: { readonly input: number; readonly output: number };
+  /**
+   * 原始用量全桶（2026-08-27 P1-5 底账扩桶修偏，会话篇 §1.1——三写点曾同裁
+   * 两桶丢 cacheRead/cacheWrite）：四桶必落（pi-ai Usage 四必填）；cacheWrite1h/
+   * reasoning 供应商上报才落；totalTokens（派生）与 cost（折算）不入账——
+   * 派生与折算归投影（「token 原始值入账，货币折算在投影做」律的执行修偏）。
+   */
+  readonly usage: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    /** cacheWrite 中 1h 保留的子集（仅 Anthropic 上报拆分——缺省省略字段） */
+    readonly cacheWrite1h?: number;
+    /** 推理 token 子集（已含于 output；供应商不报则缺省省略字段） */
+    readonly reasoning?: number;
+  };
+}
+
+/**
+ * llm/usage 底账桶归一（会话篇 §1.1 全桶入账）：从 llm 层 Usage 原始对象
+ * 提取事件载荷形状——四必填桶直拷，两可选桶（cacheWrite1h/reasoning）上报才
+ * 落字段，totalTokens/cost 滤除（派生与折算归投影）。三处写点（schema 定义
+ * 侧 / complete 单发写点 / 前台 loop 写点）共用本函数 = 裁桶不可能再发生的
+ * 单一事实源——修偏前两写点各自手写 `{input,output}` 正是挖矿 B3 抓的病灶。
+ *
+ * @param usage llm 层一次调用的原始用量（pi-ai 同构 Usage）
+ * @returns llm/usage 事件 data.usage 字段的归一形状
+ */
+export function usageLedgerBuckets(usage: Usage): LlmUsageData['usage'] {
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    ...(usage.cacheWrite1h !== undefined ? { cacheWrite1h: usage.cacheWrite1h } : {}),
+    ...(usage.reasoning !== undefined ? { reasoning: usage.reasoning } : {}),
+  };
+}
+
+/**
+ * llm/usage 底账 model 归一（会话篇 §1.1——"provider/model-id" 全形实录优先）：
+ * 响应消息自带 provider+model 时拼全形（实录）；只带 model 落半形；两者皆缺走
+ * 请求兜底标识；再缺 'unknown'。两路写点（complete 单发/前台 loop）共用本函数
+ * = model 口径单一事实源——修偏前 complete 写请求标识、loop 写裸 model id，
+ * 同一底账两种口径（挖矿即刻批②观察项，P1-5 收编）。
+ *
+ * @param message 响应终值消息（provider/model 均为可选元数据腿）
+ * @param fallback 请求侧模型标识兜底（装配缺省/会话模型，"provider/model-id" 全形）
+ * @returns llm/usage 事件 data.model 字段的归一值
+ */
+export function ledgerModel(
+  message: { readonly model?: string; readonly provider?: string },
+  fallback?: string,
+): string {
+  if (message.provider !== undefined && message.model !== undefined) {
+    return `${message.provider}/${message.model}`;
+  }
+  return message.model ?? fallback ?? 'unknown';
 }
 
 /**

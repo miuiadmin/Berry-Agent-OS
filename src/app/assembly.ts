@@ -77,7 +77,13 @@ import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
-import { getSessionEventType, snapshotJsonValue, jsonBytes } from '../session/index.js';
+import {
+  getSessionEventType,
+  snapshotJsonValue,
+  jsonBytes,
+  usageLedgerBuckets,
+  ledgerModel,
+} from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { chainCaller } from '../context/chain.js';
@@ -532,9 +538,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       if (entry !== undefined) {
         entry.session.append('llm/usage', {
           callId: result.callId,
-          model: modelSpec,
+          // model 口径统一（2026-08-27 P1-5 收编观察项）：实录优先——响应消息
+          // provider+model 拼全形，请求标识兜底（与 chat durable 前台写点同律）
+          model: ledgerModel(result.message, modelSpec),
           priority: result.priority,
-          usage: { input: result.usage.input, output: result.usage.output },
+          // 全桶入账（会话篇 §1.1 P1-5 修偏）：usageLedgerBuckets 归一——cacheRead/
+          // cacheWrite 必落，cacheWrite1h/reasoning 上报才落，totalTokens/cost 滤除
+          usage: usageLedgerBuckets(result.usage),
         });
       }
       ctx.logger.debug('llm.complete 用量入账', {
