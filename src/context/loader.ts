@@ -10,8 +10,8 @@
  *    （激活完成即可 provide 服务供后续轮取用）；整轮零进展仍有 pending = 缺提供方或
  *    依赖环，即刻响亮失败列 pending 清单（无墙上钟超时）；
  * 5. **per-plugin fork 作用域**：独立 effect 栈（卸载/LIFO 回卷基底）、config 冻结视图、
- *    logger 前缀（`app:<行id>`——失败归因）；apply 抛错即回卷本作用域再进失败清单
- *    （§1.6 不留残骸、不静默跳过）；
+ *    logger 前缀（`app:<行id>`——失败归因）；apply 抛错或挂起超时（§1.6 时钟族
+ *    缺省 10s）即回卷本作用域再进失败清单（§1.6 不留残骸、不静默跳过）；
  * 6. **生命周期事件逐行必发**（§2.2 增补 1：plugin/activated / failed / skipped——
  *    「扩展没生效」从 pull 诊断升级为 push 事件面）；
  * 7. **自定义事件词汇装载期登记**（§1.1 逃生口）：行 named export events 在一切
@@ -32,6 +32,7 @@ import * as contractsFace from '../contracts/index.js';
 import {
   AppError,
   PLUGIN_APPLY_FAILED,
+  PLUGIN_APPLY_TIMEOUT,
   PLUGIN_CONFIG_INVALID,
   PLUGIN_ENTRY_UNRESOLVED,
   PLUGIN_IMPORT_FORBIDDEN,
@@ -343,6 +344,14 @@ export interface LoadPluginsOptions {
    */
   registerSkills?: (info: PluginSkillsInfo) => void;
   /**
+   * apply 挂起时钟（毫秒，缺省 10_000——契约篇 §1.6 时钟族之一，2026-08-27
+   * 刀〇a）：apply 永不 resolve 且已返还控制 = 与抛错同族的故障语义，超时按
+   * PLUGIN_APPLY_TIMEOUT 收尾（先回卷本作用域再进失败清单）。只罩 apply 段——
+   * import/形状校验/轮次激活不在此钟内（inject 零进展即刻判，无墙上钟）。
+   * 测试面注小值验证超时路径；生产面用缺省。
+   */
+  applyTimeoutMs?: number;
+  /**
    * 第五/六键虚拟面注入物（P0-2，契约篇 §1.2 注记①）：组合根参数注入——
    * context 模块不 import llm/persist（拓扑护栏），类型面在此收窄为结构最小形。
    * 缺省注入空对象（键恒在虚拟面，import 不炸 Cannot find；面为空插件自查）；
@@ -468,7 +477,11 @@ export async function loadPlugins(
   return { activated, failed, skipped };
 }
 
-/** 激活单行：config 校验 → fork 作用域 → （技能注册回调）→ apply → 生命周期事件；apply 抛错即回卷 */
+/**
+ * 激活单行：config 校验 → fork 作用域 → （技能注册回调）→ apply → 生命周期事件。
+ * apply 抛错或挂起超时（§1.6 时钟族，2026-08-27 刀〇a：缺省 10s）都即回卷——
+ * 失败行不留残骸；applyMs 打点（fork→apply 返回墙钟差）随 activated 载荷上行。
+ */
 async function activateOne(
   root: ContextScope,
   row: PluginPlanRow,
@@ -477,6 +490,7 @@ async function activateOne(
   failed: PluginFailedPayload[],
   opts?: LoadPluginsOptions,
 ): Promise<void> {
+  const applyTimeoutMs = opts?.applyTimeoutMs ?? 10_000;
   const fail = (code: string, message: string): void => {
     failed.push({ id: row.id, code, message });
     root.emit('plugin/failed', { id: row.id, code, message });
@@ -516,16 +530,44 @@ async function activateOne(
         scope,
       });
     }
-    await module.default(scope, scope.config);
+    // apply 挂起时钟（§1.6 时钟族之一，2026-08-27 刀〇a）：永不 resolve 且已
+    // 返还控制 = 故障语义，竞速超时按 PLUGIN_APPLY_TIMEOUT 收尾。迟到结算
+    // 兜底：竞速败方的 apply promise 挂 catch 吞掉——超时后它才 reject 不进
+    // unhandledRejection（正常路径的 reject 在此之前已赢出竞速进下方 catch）
+    const startedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clock = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new AppError(PLUGIN_APPLY_TIMEOUT, `apply 挂起超 ${applyTimeoutMs}ms 未返还（挂起与抛错同族，按故障收尾）`),
+          ),
+        applyTimeoutMs,
+      );
+    });
+    const applyPromise = Promise.resolve(module.default(scope, scope.config));
+    applyPromise.catch(() => {}); // 竞速败方迟到 reject 兜底（多订阅不影响 race 正常传播）
+    try {
+      await Promise.race([applyPromise, clock]);
+    } finally {
+      clearTimeout(timer);
+    }
     // name 与行 id 不一致：不拒绝（两者本就不同物），warn 留痕防归因混淆
     if (module.name !== row.id) {
       root.logger.warn('插件声明 name 与组合树行 id 不一致', { rowId: row.id, name: module.name });
     }
-    activated.push({ id: row.id, name: module.name });
-    root.emit('plugin/activated', { id: row.id, name: module.name });
+    activated.push({ id: row.id, name: module.name, applyMs: Date.now() - startedAt });
+    root.emit('plugin/activated', { id: row.id, name: module.name, applyMs: Date.now() - startedAt });
   } catch (err) {
-    // apply 抛错即响（§1.6）：先回卷本作用域半途注册（LIFO——失败行不留残骸），再进失败清单
+    // apply 抛错/挂起超时即响（§1.6）：先回卷本作用域半途注册（LIFO——失败行不
+    // 留残骸；回卷自身的挂起由 dispose 竞速时钟兜），再进失败清单。码面两分：
+    // 挂起超时 = PLUGIN_APPLY_TIMEOUT（专用码）；执行抛错一律 PLUGIN_APPLY_FAILED
+    // （注册表钉死语义——不透传内部码，原始错误进 message，两类失败一眼可分）
     await scope.dispose();
-    fail(PLUGIN_APPLY_FAILED, `apply 执行抛错（本作用域注册已回卷）：${describeError(err)}`);
+    const isTimeout = err instanceof AppError && err.code === PLUGIN_APPLY_TIMEOUT;
+    fail(
+      isTimeout ? PLUGIN_APPLY_TIMEOUT : PLUGIN_APPLY_FAILED,
+      `${isTimeout ? 'apply 挂起超时' : 'apply 执行抛错'}（本作用域注册已回卷）：${describeError(err)}`,
+    );
   }
 }

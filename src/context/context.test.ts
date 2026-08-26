@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { AppError } from '../contracts/errors.js';
 import type { PluginContext } from '../contracts/plugin.js';
-import { createContext, registerLiveEvent } from './context.js';
+import { createContext, eventDispatchStats, registerLiveEvent } from './context.js';
 import { createLogger } from './logger.js';
 import type { Context, ContextScope } from './types.js';
 
@@ -481,5 +481,145 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
     } catch (err) {
       expect((err as AppError).code).toBe('CONTEXT_DISPOSED');
     }
+  });
+});
+
+describe('dispose 语义升级（CR-2-F8 + §1.6 时钟族，2026-08-27 刀〇a）', () => {
+  it('异步 disposer 被 dispose 等待：Disposer 契约型不变，返回 thenable 即等其结算', async () => {
+    const scope = silentRoot();
+    const done: string[] = [];
+    // 异步清理：500ms 后标记完成——旧实现（同步循环不等待）会在它结算前就跑完 dispose
+    scope.effect(
+      () => () =>
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            done.push('async-clean');
+            resolve();
+          }, 30);
+        }) as unknown as void,
+    );
+    scope.effect(() => () => done.push('sync-clean'));
+    await scope.dispose();
+    // 同步条（LIFO 先弹）先执行；异步条被等待到结算后才继续——两序都在 dispose 返回前完成
+    expect(done).toEqual(['sync-clean', 'async-clean']);
+  });
+
+  it('挂起 disposer 触发回卷竞速时钟：超时弃等继续下一条，整树回卷不卡死（§1.6 时钟缺省 1s，此处注小值）', async () => {
+    const scope = createContext({
+      logger: createLogger({ module: 'test', level: 'silent' }),
+      disposeTimeoutMs: 20, // 小钟：20ms 即放弃等待
+    });
+    const done: string[] = [];
+    // 永挂 disposer（永不 resolve——挂起转化条款的目标形态）
+    scope.effect(() => () => new Promise<void>(() => {}) as unknown as void);
+    scope.effect(() => () => done.push('after-hang'));
+    const startedAt = Date.now();
+    await scope.dispose();
+    // 挂起条被放弃后，下一条照常回卷；总时长受小钟约束（< 1s，远小于 vitest 默认 5s）
+    expect(done).toEqual(['after-hang']);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('fork 级联回卷被父 dispose 等待（子树异步清理完成后父才继续）', async () => {
+    const scope = silentRoot();
+    const done: string[] = [];
+    const child = scope.fork({ name: 'child' });
+    child.effect(
+      () => () =>
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            done.push('child-clean');
+            resolve();
+          }, 30);
+        }) as unknown as void,
+    );
+    scope.effect(() => () => done.push('parent-clean'));
+    await scope.dispose();
+    // LIFO 序：parent-clean（后注册先弹）→ 级联 disposer（child.dispose）；
+    // 验证点 = 级联被**等待**——dispose 返回时子树异步清理已结算（旧实现不等待，
+    // child-clean 会缺席）
+    expect(done).toEqual(['parent-clean', 'child-clean']);
+  });
+});
+
+describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', () => {
+  /** 小桶根作用域：容量 3、每分钟回填 6 万（≈ 即时回满——回落语义可测） */
+  function tinyBucketRoot() {
+    return createContext({
+      logger: createLogger({ module: 'test', level: 'silent' }),
+      rateLimit: { capacity: 3, perMinute: 60_000 },
+    });
+  }
+
+  it('桶满 fail-loud：PLUGIN_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', async () => {
+    const scope = tinyBucketRoot();
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    const seen: number[] = [];
+    scope.on('test/evt', (n: number) => seen.push(n));
+    scope.emit('test/evt', 1);
+    scope.emit('test/evt', 2);
+    scope.emit('test/evt', 3); // 容量 3：至此桶空
+    expect(seen).toEqual([1, 2, 3]);
+    expect(() => scope.emit('test/evt', 4)).toThrowError(AppError);
+    try {
+      scope.emit('test/evt', 5);
+    } catch (err) {
+      expect((err as AppError).code).toBe('PLUGIN_EVENT_RATE');
+    }
+    // 超限那次未送达（fail-loud ≠ 静默丢弃——抛错即拒发）
+    expect(seen).toEqual([1, 2, 3]);
+    // 回填：perMinute 6 万 → 1ms 回满 1 令牌以上，稍候即恢复
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    scope.emit('test/evt', 6);
+    expect(seen).toEqual([1, 2, 3, 6]);
+  });
+
+  it('四派发模式统一计费：waterfall 派发同样占桶（执法面不分模式）', async () => {
+    const scope = tinyBucketRoot();
+    registerLiveEvent(scope, { name: 'test/chain', mode: 'waterfall', note: '测试词汇' });
+    // 耗掉 3 令牌
+    await scope.waterfall('test/chain', () => 'ok');
+    await scope.waterfall('test/chain', () => 'ok');
+    await scope.waterfall('test/chain', () => 'ok');
+    // 第 4 次 waterfall 派发撞桶
+    await expect(scope.waterfall('test/chain', () => 'ok')).rejects.toMatchObject({
+      code: 'PLUGIN_EVENT_RATE',
+    });
+  });
+
+  it('per-scope 分桶：插件作用域打满不影响宿主根作用域（失控隔离半径 = 单作用域）', () => {
+    const scope = tinyBucketRoot();
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    const plugin = scope.fork({ name: 'naughty' });
+    // 插件作用域 3 连发打满自己的桶
+    plugin.emit('test/evt', 1);
+    plugin.emit('test/evt', 2);
+    plugin.emit('test/evt', 3);
+    expect(() => plugin.emit('test/evt', 4)).toThrowError(AppError);
+    // 宿主根作用域独立桶：照常可发
+    expect(() => scope.emit('test/evt', 'host-ok')).not.toThrow();
+  });
+
+  it('词汇执法先行于频率执法：拼错名报 EVENT_UNKNOWN 而非限流噪音', () => {
+    const scope = tinyBucketRoot();
+    try {
+      scope.emit('not/registered' as never);
+      expect.unreachable('未注册词汇应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_UNKNOWN');
+    }
+  });
+
+  it('打点面：eventDispatchStats 按作用域累计派发数（B2 P5——只增不清零，诊断面读）', async () => {
+    const scope = tinyBucketRoot();
+    registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
+    registerLiveEvent(scope, { name: 'test/chain', mode: 'waterfall', note: '测试词汇' });
+    const plugin = scope.fork({ name: 'p1' });
+    plugin.emit('test/evt', 1);
+    plugin.emit('test/evt', 2);
+    await scope.waterfall('test/chain', () => 'ok');
+    const stats = eventDispatchStats(scope);
+    expect(stats.get('root:p1')).toBe(2);
+    expect(stats.get('root')).toBe(1);
   });
 });

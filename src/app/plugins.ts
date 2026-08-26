@@ -93,7 +93,9 @@ export function createPluginsService(opts: { dataDir: string; runner?: InstallRu
   return {
     applyLoad(composition, load) {
       const next = new Map<string, PluginStatusRow>();
-      for (const item of load.activated) next.set(item.id, { id: item.id, status: 'activated', name: item.name });
+      // applyMs 打点随 activated 载荷上行（B2 P5：loader 计时 → 诊断面展示；/reload 后行整替）
+      for (const item of load.activated)
+        next.set(item.id, { id: item.id, status: 'activated', name: item.name, applyMs: item.applyMs });
       for (const item of load.failed)
         next.set(item.id, { id: item.id, status: 'failed', code: item.code, message: item.message });
       for (const item of load.skipped) next.set(item.id, { id: item.id, status: 'skipped', reason: item.reason });

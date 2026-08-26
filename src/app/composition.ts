@@ -443,6 +443,8 @@ export interface PluginStatusRow {
   readonly message?: string;
   /** skipped 时的原因 */
   readonly reason?: PluginSkipReason;
+  /** activated 时的 apply 耗时打点（毫秒，B2 P5 打点先行，2026-08-27 刀〇a——诊断面展示启动开销，不参与控制流） */
+  readonly applyMs?: number;
 }
 
 /** 插件管理服务面（ctx.plugins，§1.5 表尾）——有状态单例的实现移驻 ./plugins.ts（2026-08-23 /reload 纵切：install/toggle/update 落码） */

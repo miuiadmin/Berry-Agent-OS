@@ -33,7 +33,8 @@ function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
 function formatPluginRow(row: PluginStatusRow): string {
   switch (row.status) {
     case 'activated':
-      return `  ✓ ${row.id}（${row.name ?? '未具名'}）`;
+      // applyMs 打点（B2 P5，刀〇a）：启动开销随清单可见——慢件一眼定位，阈值调校供数
+      return `  ✓ ${row.id}（${row.name ?? '未具名'}${row.applyMs !== undefined ? ` · apply ${row.applyMs}ms` : ''}）`;
     case 'failed':
       return `  ✖ ${row.id}：${row.code} ${row.message ?? ''}`;
     case 'skipped':

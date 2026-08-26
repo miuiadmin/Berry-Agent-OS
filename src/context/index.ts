@@ -2,7 +2,7 @@
  * L1 context — 插件运行时模块出口（内核五件之一）。
  * 对外只暴露类型与工厂：实现类不导出（跨模块只能走 Context/ContextScope 契约面）。
  */
-export { createContext, registerLiveEvent } from './context.js';
+export { createContext, eventDispatchStats, registerLiveEvent } from './context.js';
 export { loadPlugins } from './loader.js';
 export { createLogger } from './logger.js';
 // canonical 工作区根（宿主共享原语——memory owner_key / skills 信任判定 /

@@ -130,6 +130,12 @@ export interface ToolsService {
   listFor(domain: string): ToolDefinition[];
   /** loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态） */
   toAgentTool(def: ToolDefinition): AgentTool;
+  /**
+   * 注册面打点（B2 P5 打点先行，2026-08-27 刀〇a）：registered = 现存件数
+   * （全局层 + 全部域层）；totalAdds/totalRemoves = 开机以来累计注册/注销次数
+   * （高频注册武器化监控的数据源——阈值执法随护栏族另批，本面只出数）。
+   */
+  stats(): { registered: number; totalAdds: number; totalRemoves: number };
 }
 
 /** 守门段活体事件名（dsh 借词，契约篇 §2.2 表钉死下划线形态） */

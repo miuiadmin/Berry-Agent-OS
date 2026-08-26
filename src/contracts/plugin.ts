@@ -182,10 +182,17 @@ export interface PluginPlanRow {
   unresolved?: string;
 }
 
-/** plugin/activated 载荷：{ 组合树行 id, 插件声明名 } */
+/**
+ * plugin/activated 载荷：{ 组合树行 id, 插件声明名, apply 耗时打点 }。
+ * applyMs（B2 P5 打点先行，2026-08-27 刀〇a）：装载器激活计时（fork→apply 返回
+ * 的墙钟差）——诊断面（/plugins、dump-config）展示每插件启动开销，为后续阈值
+ * 调校供数据，不参与任何控制流。
+ */
 export interface PluginActivatedPayload {
   readonly id: string;
   readonly name: string;
+  /** apply 耗时（毫秒，含技能注册回调；不含 import/形状校验——那是装载期不是激活期） */
+  readonly applyMs: number;
 }
 
 /** plugin/failed 载荷：{ 组合树行 id, 错误码（PLUGIN_ 族）, 错误信息 } */

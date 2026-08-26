@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { Type } from 'typebox';
 import { AppError, TOOL_ARGUMENTS_INVALID, TOOL_BLOCKED, TOOL_GATE_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import type { AgentToolResult, GateDecisionPayload, TextContent, ToolDefinition } from '../contracts/tools.js';
+import { TOOL_POST_EXECUTE_EVENT } from '../contracts/tools.js';
 import { createContext } from '../context/index.js';
 import { createToolPipeline, OUTPUT_GUARD_BYTES } from './pipeline.js';
 
@@ -390,5 +391,32 @@ describe('createToolPipeline — 输出护栏（缺省链尾 64KiB，契约篇 �
     // 合法 → 直通执行
     const ok = await run(tool, 'tc-2', { path: '/etc/hosts' });
     expect(ok.content[0]).toMatchObject({ text: '读到 /etc/hosts' });
+  });
+});
+
+/* ---------------- post 段挂起时钟（§1.6 时钟族，2026-08-27 刀〇a） ---------------- */
+
+describe('createToolPipeline — 后处理段挂起时钟', () => {
+  it('post 监听器永不 resolve：整段竞速小钟触发 TOOL_TIMEOUT（错误是数据现径——loop 侧编码 isError）', async () => {
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx, { postTimeoutMs: 30 }); // 小钟：生产缺省 5s
+    // 挂起监听器：进 post 段后永不调 next（挂起转化条款的目标形态）
+    ctx.on(TOOL_POST_EXECUTE_EVENT, () => new Promise<never>(() => {}));
+    const err = await run(echoTool(), 'tc-hang', { msg: 'hi' }).catch((e) => e);
+    expect(codeOf(err)).toBe(TOOL_TIMEOUT);
+    expect((err as AppError).message).toContain('后处理段挂起');
+  });
+
+  it('正常后处理不受钟影响：监听器在钟内完成，结果照常回传', async () => {
+    const ctx = createContext({ name: 'test' });
+    const run = createToolPipeline(ctx, { postTimeoutMs: 5_000 });
+    ctx.on(TOOL_POST_EXECUTE_EVENT, async (input: { result: AgentToolResult }, next: () => Promise<undefined>) => {
+      // 异步改写（模拟真实钩子的异步工作）——5s 钟内完成
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      (input.result.content[0] as TextContent).text += '+post';
+      return next();
+    });
+    const result = await run(echoTool(), 'tc-ok', { msg: 'hi' });
+    expect((result.content[0] as TextContent).text).toContain('+post');
   });
 });

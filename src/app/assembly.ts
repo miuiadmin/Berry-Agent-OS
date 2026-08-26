@@ -73,6 +73,7 @@ import { getSessionEventType } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import {
+  EVENT_HANDLER_TIMEOUT,
   SESSION_CORE_TYPE_FORBIDDEN,
   SESSION_FORMAT_UNSUPPORTED,
   SESSION_SURFACE_OP_INVALID,
@@ -217,6 +218,13 @@ export interface RuntimeOptions {
    * 测试注入 fetchImpl/lookup——服务与工具同一卫生件的回归锁在此层验）
    */
   readonly webOverrides?: import('../web/index.js').WebPluginOverrides;
+  /**
+   * context_transform 消费点挂起时钟（毫秒，缺省 5000——契约篇 §1.6 时钟族，
+   * 2026-08-27 刀〇a）：桥上钩子挂起视为故障，超时抛 EVENT_HANDLER_TIMEOUT
+   * 上抛走 run failed 现径（loop 零 try/catch 纪律）。测试面注小值验证超时路径；
+   * 生产面用缺省。
+   */
+  readonly transformTimeoutMs?: number;
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
@@ -395,9 +403,35 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   }
   /** context_transform 桥（契约篇 §2.2 增补 5② + S1 双参）：loop 私有回调桥为根
    * 总线瀑布——根 ctx 恒存活（插件监听集随 /reload 更替），驱动绑此桥跨重装载
-   * 稳定；sessionId 作第二种子穿透给 handler（差分/检索按归属会话路由） */
-  const transformContext = (messages: AgentMessage[], sessionId: string): Promise<AgentMessage[]> =>
-    ctx.waterfall('context_transform', messages, sessionId, (final: AgentMessage[]) => final);
+   * 稳定；sessionId 作第二种子穿透给 handler（差分/检索按归属会话路由）。
+   * 挂起时钟（§1.6 时钟族，2026-08-27 刀〇a）：钩子永不 resolve 且已返还控制 =
+   * 故障语义，整链竞速 transformTimeoutMs（缺省 5s）——超时抛
+   * EVENT_HANDLER_TIMEOUT 上抛（loop 零 try/catch 纪律 → run failed 现径）；
+   * 迟到结算挂 catch 兜底不进 unhandledRejection。 */
+  const transformTimeoutMs = opts.transformTimeoutMs ?? 5_000;
+  const transformContext = (messages: AgentMessage[], sessionId: string): Promise<AgentMessage[]> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clock = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new AppError(
+              EVENT_HANDLER_TIMEOUT,
+              `context_transform 钩子挂起超 ${transformTimeoutMs}ms（挂起与抛错同族，run 按失败收尾）`,
+            ),
+          ),
+        transformTimeoutMs,
+      );
+    });
+    const waterfallPromise = ctx.waterfall<AgentMessage[]>(
+      'context_transform',
+      messages,
+      sessionId,
+      (final: AgentMessage[]) => final,
+    );
+    waterfallPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
+    return Promise.race([waterfallPromise, clock]).finally(() => clearTimeout(timer));
+  };
 
   /* ---- ④ llm 运行时（凭证经 persist 适配注入；测试可整体换 streamFn） ---- */
   const llm = createLlmRuntime({

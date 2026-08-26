@@ -22,7 +22,13 @@
  * 注销器同时撤注册表条目（幂等）。
  */
 
-import { AppError, CONTEXT_SERVICE_NOT_FOUND, TOOL_DESCRIPTION_REJECTED, TOOL_DUPLICATE } from '../contracts/errors.js';
+import {
+  AppError,
+  CONTEXT_SERVICE_NOT_FOUND,
+  TOOL_DESCRIPTION_REJECTED,
+  TOOL_DUPLICATE,
+  TOOL_TIMEOUT_INVALID,
+} from '../contracts/errors.js';
 import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import type { Disposer } from '../context/types.js';
@@ -47,6 +53,14 @@ export interface ToolRegistryOptions {
 const DESCRIPTION_INJECTION_PATTERNS: readonly RegExp[] = [/\b(curl|wget)\b[^\n|]*\|[^\n]*\b(ba|z|da)?sh\b/i];
 
 /**
+ * 插件面注册 timeoutMs 下限（毫秒——契约篇 §1.6 注册预算下限，2026-08-27 刀〇a）：
+ * 正数过小钳至此值（存归一副本），<= 0 拒绝（TOOL_TIMEOUT_INVALID）。
+ * 「0 = 自管取消」语义保留给宿主内部合成 def（exec 内部 def 不经注册面——
+ * 事实豁免通道，冷读 CR-2-F9 裁决）。
+ */
+export const TOOL_TIMEOUT_FLOOR_MS = 1000;
+
+/**
  * 扫描工具描述是否命中注入模式（注册面统一防线——任何来源的工具同一执法）。
  * @returns 命中的模式串（用于错误归因）；干净描述返回 undefined
  */
@@ -66,6 +80,9 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
   const tools = new Map<string, ToolDefinition>();
   /** 域层：域键 → (name → 定义)（组合域分片——仅该域 listFor 面可见；Map 保注册序） */
   const domains = new Map<string, Map<string, ToolDefinition>>();
+  /** 注册面打点（B2 P5）：开机以来累计注册/注销次数（高频注册武器化监控数据源） */
+  let totalAdds = 0;
+  let totalRemoves = 0;
 
   const service: ToolsService = {
     // 管道执行器随服务携带（Ring 1 行树化批）：bash 工具与 ctx.exec 两层并存
@@ -81,10 +98,25 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
           `工具描述命中注入模式（/${injectionHit}/）：${def.name}——描述是进模型上下文的文本，拒绝注册`,
         );
       }
+      // 注册面预算下限执法（§1.6 时钟族之四，2026-08-27 刀〇a）：<= 0 拒绝——
+      // 拒绝式而非钳到 0：钳制会静默改变行为（插件以为 0 = 无预算，长任务被杀
+      // 还以为自管取消有效）。0 的自管取消语义保留给宿主内部合成 def（不经本面）
+      if (def.timeoutMs !== undefined && def.timeoutMs <= 0) {
+        throw new AppError(
+          TOOL_TIMEOUT_INVALID,
+          `工具 ${def.name} timeoutMs <= 0（${def.timeoutMs}）——插件面注册不许自管取消语义；` +
+            `不设预算请省略该字段（走管道缺省 60s），正数过小将钳至 ${TOOL_TIMEOUT_FLOOR_MS}ms 下限`,
+        );
+      }
       // 读写性归一（契约篇 §3.1，2026-08-24 第十一批）：未声明 effect 按 'write'
       // 保守处理——只读类守门策略不放过未声明工具（fail-closed 方向）。存归一副本，
-      // 注销身份护栏随迁到副本（对调用方原对象零改动）。
-      const normalized: ToolDefinition = { ...def, effect: def.effect ?? 'write' };
+      // 注销身份护栏随迁到副本（对调用方原对象零改动）；timeoutMs 正数过小同副
+      // 本钳至下限（§1.6：500ms 类微小预算 = 变相自杀钟，钳而非拒——值仍合法）。
+      const normalized: ToolDefinition = {
+        ...def,
+        effect: def.effect ?? 'write',
+        ...(def.timeoutMs !== undefined ? { timeoutMs: Math.max(def.timeoutMs, TOOL_TIMEOUT_FLOOR_MS) } : {}),
+      };
       const domainKey = registerOpts?.domain;
       let layer: Map<string, ToolDefinition>;
       if (domainKey !== undefined) {
@@ -115,6 +147,7 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         layer = tools;
       }
       layer.set(def.name, normalized);
+      totalAdds += 1;
       // 载荷带域键 = 域层变更（装配层只刷该域的面）；缺省 = 全局层变更（刷全部）
       ctx.emit(TOOLS_CHANGE_EVENT, {
         kind: 'add',
@@ -128,6 +161,7 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         // 仅当仍是本定义时删除（防误撤他者后来的同位注册——与 provide 同款护栏）
         if (layer.get(def.name) === normalized) {
           layer.delete(def.name);
+          totalRemoves += 1;
           // 域层清空即拆层（活域集合收缩——全局层查重的遍历面随之收窄）
           if (layer !== tools && layer.size === 0 && domains.get(domainKey!) === layer) {
             domains.delete(domainKey!);
@@ -175,6 +209,13 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
           return pipeline(def, toolCallId, args, signal, onUpdate);
         },
       };
+    },
+
+    stats() {
+      // 现存件数 = 全局层 + 全部域层求和（不缓存——查询低频且各层 Map 已是常量级遍历）
+      let registered = tools.size;
+      for (const layer of domains.values()) registered += layer.size;
+      return { registered, totalAdds, totalRemoves };
     },
   };
 

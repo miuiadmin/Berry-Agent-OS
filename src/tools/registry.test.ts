@@ -305,3 +305,53 @@ describe('defineTool — 类型 helper', () => {
     expect(def.parameters).toMatchObject({ type: 'object' });
   });
 });
+
+/* ---------------- 注册面预算下限（§1.6 时钟族之四，2026-08-27 刀〇a） ---------------- */
+
+describe('registerToolsService — timeoutMs 预算下限执法', () => {
+  it('timeoutMs <= 0 拒绝：TOOL_TIMEOUT_INVALID 响亮失败（0 的自管取消语义不经注册面）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    for (const bad of [0, -1]) {
+      const def = makeTool('bad-budget');
+      (def as { timeoutMs?: number }).timeoutMs = bad;
+      try {
+        tools.register(def);
+        expect.unreachable(`timeoutMs=${bad} 应被拒绝`);
+      } catch (err) {
+        expect((err as AppError).code).toBe('TOOL_TIMEOUT_INVALID');
+      }
+    }
+    // 拒绝后未入表（响亮失败不留半成品）
+    expect(tools.get('bad-budget')).toBeUndefined();
+  });
+
+  it('正数过小钳至 1000ms 下限（存归一副本——对调用方原对象零改动）', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    const def = makeTool('tiny-budget');
+    (def as { timeoutMs?: number }).timeoutMs = 500;
+    tools.register(def);
+    expect(tools.get('tiny-budget')!.timeoutMs).toBe(1000);
+    expect((def as { timeoutMs?: number }).timeoutMs).toBe(500); // 原对象不被改写
+    // 合法大值照常透传
+    const big = makeTool('big-budget');
+    (big as { timeoutMs?: number }).timeoutMs = 600_000;
+    tools.register(big);
+    expect(tools.get('big-budget')!.timeoutMs).toBe(600_000);
+  });
+
+  it('stats() 打点（B2 P5）：registered 现存数 / totalAdds/totalRemoves 累计——注册注销两走各计', async () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    expect(tools.stats()).toEqual({ registered: 0, totalAdds: 0, totalRemoves: 0 });
+    const unregister = tools.register(makeTool('s1'));
+    tools.register(makeTool('s2'));
+    expect(tools.stats()).toEqual({ registered: 2, totalAdds: 2, totalRemoves: 0 });
+    unregister();
+    expect(tools.stats()).toEqual({ registered: 1, totalAdds: 2, totalRemoves: 1 });
+    // 幂等注销不重复计数
+    unregister();
+    expect(tools.stats().totalRemoves).toBe(1);
+  });
+});

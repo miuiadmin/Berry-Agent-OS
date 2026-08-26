@@ -15,6 +15,7 @@ import {
   EVENT_DUPLICATE,
   EVENT_MODE_MISMATCH,
   EVENT_UNKNOWN,
+  PLUGIN_EVENT_RATE,
 } from '../contracts/errors.js';
 import { LIVE_EVENT_CATALOG } from '../contracts/events.js';
 import type { EventName, LiveEventDefinition } from '../contracts/events.js';
@@ -30,6 +31,28 @@ import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } fr
 interface HandlerEntry {
   readonly handler: EventHandler;
   readonly owner: string;
+}
+
+/**
+ * 事件派发频率令牌桶（契约篇 §1.6 时钟族，2026-08-27 刀〇a）：tokens 按墙上钟
+ * 以 perMinute 速率回填至上限 capacity；每次派发扣 1，桶空即执法（fail-loud）。
+ * 桶空 ≠ 拒绝一切：等回填即可再发——「速率护栏」语义而非「总量帽」。
+ */
+interface RateBucket {
+  tokens: number;
+  /** 上次回填时点（Date.now() 毫秒） */
+  last: number;
+}
+
+/** 频率护栏缺省参数：1000 次/分钟 + 1000 突发余量（研究 §2.2 #14 建议值） */
+const DEFAULT_RATE_CAPACITY = 1000;
+const DEFAULT_RATE_PER_MINUTE = 1000;
+/** 单条 effect 回卷竞速时钟缺省（毫秒）——挂起 disposer 超此即放弃等待 */
+const DEFAULT_DISPOSE_TIMEOUT_MS = 1000;
+
+/** 判定值是否 thenable（异步 disposer 识别——Disposer 契约型 () => void，运行时宽收） */
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === 'object' && value !== null && typeof (value as PromiseLike<unknown>).then === 'function';
 }
 
 /** 作用域 → 根运行时（宿主侧事件词汇登记的内部通道；插件面 ContextScope 无此入口——运行期词汇恒定的结构保证） */
@@ -49,9 +72,21 @@ class ContextRuntime {
   readonly liveEvents = new Map<string, LiveEventDefinition>();
   /** 根 logger（子作用域 logger 由它派生前缀） */
   readonly rootLogger: Logger;
+  /** per-scope 派发频率桶（键 = 派发方作用域名；宿主根作用域同表执法） */
+  readonly rateBuckets = new Map<string, RateBucket>();
+  /** per-scope 派发累计计数（打点面，B2 P5——只增不清零，诊断面读） */
+  readonly eventStats = new Map<string, number>();
+  /** 令牌桶参数（createContext 注入；测试面小桶，生产面缺省） */
+  readonly rateCapacity: number;
+  readonly ratePerMinute: number;
+  /** 单条 effect 回卷竞速时钟（毫秒）——dispose 路径用（见 ContextScopeImpl.dispose） */
+  readonly disposeTimeoutMs: number;
 
-  constructor(logger?: Logger) {
+  constructor(logger?: Logger, rateLimit?: { capacity: number; perMinute: number }, disposeTimeoutMs?: number) {
     this.rootLogger = logger ?? createLogger({ module: 'context' });
+    this.rateCapacity = rateLimit?.capacity ?? DEFAULT_RATE_CAPACITY;
+    this.ratePerMinute = rateLimit?.perMinute ?? DEFAULT_RATE_PER_MINUTE;
+    this.disposeTimeoutMs = disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS;
     for (const def of LIVE_EVENT_CATALOG) this.liveEvents.set(def.name, def);
   }
 
@@ -59,14 +94,47 @@ class ContextRuntime {
   snapshot(event: EventName): HandlerEntry[] {
     return [...(this.handlers.get(event) ?? [])];
   }
+
+  /**
+   * 派发方计费：扣令牌（桶空抛 PLUGIN_EVENT_RATE）+ 累计打点。
+   * 四派发模式（emit/parallel/serial/waterfall）入口统一走此——词汇执法
+   * （requireEvent）先行，频率执法在后（拼错名的诊断优先于限流噪音）。
+   */
+  chargeEvent(scopeName: string, event: EventName): void {
+    const now = Date.now();
+    let bucket = this.rateBuckets.get(scopeName);
+    if (bucket === undefined) {
+      bucket = { tokens: this.rateCapacity, last: now };
+      this.rateBuckets.set(scopeName, bucket);
+    } else {
+      // 按流逝时间回填令牌（夹在 capacity——突发余量语义）
+      const refill = ((now - bucket.last) / 60_000) * this.ratePerMinute;
+      bucket.tokens = Math.min(this.rateCapacity, bucket.tokens + refill);
+      bucket.last = now;
+    }
+    if (bucket.tokens < 1) {
+      throw new AppError(
+        PLUGIN_EVENT_RATE,
+        `作用域 ${scopeName} 事件派发超频（事件 ${event}）——护栏 ${this.rateCapacity} 次/分钟` +
+          `（令牌桶：突发上限 ${this.rateCapacity}、回填 ${this.ratePerMinute}/min；fail-loud 非静默丢弃，契约篇 §1.6）`,
+      );
+    }
+    bucket.tokens -= 1;
+    this.eventStats.set(scopeName, (this.eventStats.get(scopeName) ?? 0) + 1);
+  }
 }
 
 /** context 模块实现类（Context 接口文档见 types.ts，此处只注释实现要点） */
 class ContextScopeImpl implements ContextScope {
   private readonly runtime: ContextRuntime;
   private readonly name: string;
-  /** effect 栈：注册序入栈，dispose 时逆序回卷（LIFO） */
-  private readonly effects: Disposer[] = [];
+  /**
+   * effect 栈：注册序入栈，dispose 时逆序回卷（LIFO）。内部宽型——once 包装
+   * 可返回异步清理的 promise（CR-2-F8 dispose 语义升级，2026-08-27 刀〇a）：
+   * Disposer 契约型仍是 () => void（手动调用面忽略返回值），但 disposer 返回
+   * thenable 时 dispose 路径等待其结算。对外（effect 返回值）仍收窄 Disposer。
+   */
+  private readonly effects: Array<() => void | Promise<void>> = [];
   /** 作用域控制器：dispose 时 abort，对外只暴露 signal */
   private readonly controller = new AbortController();
   private readonly configView: Readonly<Record<string, unknown>>;
@@ -125,16 +193,33 @@ class ContextScopeImpl implements ContextScope {
     return this.pushEffect(disposer);
   }
 
-  /** 入栈一个已就绪的 Disposer 并返回幂等包装（手动调用与 dispose 回卷双保险，只跑一次） */
+  /**
+   * 入栈一个已就绪的 Disposer 并返回幂等包装（手动调用与 dispose 回卷双保险，只跑一次）。
+   *
+   * 异步 disposer 支持（CR-2-F8，契约篇 §1.6 dispose 语义升级）：disposer 返回
+   * thenable 时，once 把它包装为「结算后吞掉异常」的 promise 返回——dispose 循环
+   * await 此返回值即等待异步清理完成；手动调用面（返回值被 Disposer 类型收窄为
+   * void、调用方忽略）是 fire-and-forget，reject 已在包装内记日志不外泄。
+   */
   private pushEffect(disposer: Disposer): Disposer {
     let done = false;
-    const once: Disposer = () => {
+    const once = (): void | Promise<void> => {
       if (done) return;
       done = true;
       const index = this.effects.indexOf(once);
       if (index >= 0) this.effects.splice(index, 1);
       try {
-        disposer();
+        const returned = disposer();
+        if (isThenable(returned)) {
+          // 异步清理：结算异常记日志隔离（回卷异常隔离对异步同样成立），
+          // dispose 路径拿到的是这个已吞异常的 promise——竞速超时与之正交
+          return Promise.resolve(returned).then(
+            (): void => {},
+            (err) => {
+              this.logger.error('effect 回卷异步异常', { scope: this.name, error: errorStack(err) });
+            },
+          );
+        }
       } catch (err) {
         // 回卷异常隔离：单个清理失败不阻断其余回卷，但必须留痕
         // （errorStack 而非 String——独立重读轮 #23 复核：e021620 漏的第四处丢栈点）
@@ -214,6 +299,7 @@ class ContextScopeImpl implements ContextScope {
 
   emit(event: EventName, ...args: unknown[]): void {
     this.requireEvent(event, 'emit');
+    this.runtime.chargeEvent(this.name, event); // 频率护栏（§1.6）：桶空 fail-loud
     for (const entry of this.runtime.snapshot(event)) {
       this.fireIsolated(event, entry, args);
     }
@@ -221,6 +307,7 @@ class ContextScopeImpl implements ContextScope {
 
   async parallel(event: EventName, ...args: unknown[]): Promise<void> {
     this.requireEvent(event, 'parallel');
+    this.runtime.chargeEvent(this.name, event); // 频率护栏（§1.6）：桶空 fail-loud
     // 并发语义：等待全部监听器完成；单个失败隔离（catch 记日志含注册方归因），Promise.all 不因此 reject
     await Promise.all(
       this.runtime.snapshot(event).map((entry) =>
@@ -235,6 +322,7 @@ class ContextScopeImpl implements ContextScope {
 
   async serial(event: EventName, ...args: unknown[]): Promise<void> {
     this.requireEvent(event, 'serial');
+    this.runtime.chargeEvent(this.name, event); // 频率护栏（§1.6）：桶空 fail-loud
     for (const entry of this.runtime.snapshot(event)) {
       try {
         await entry.handler(...args);
@@ -247,6 +335,7 @@ class ContextScopeImpl implements ContextScope {
 
   async waterfall<T>(event: EventName, ...argsWithNext: unknown[]): Promise<T> {
     this.requireEvent(event, 'waterfall');
+    this.runtime.chargeEvent(this.name, event); // 频率护栏（§1.6）：桶空 fail-loud
     // 末位参数是链尾 next（骨架篇 §9.1 签名：waterfall(event, ...args, next)）
     const next = argsWithNext.pop() as (...finalArgs: unknown[]) => T | Promise<T>;
     const initialArgs = argsWithNext;
@@ -328,17 +417,52 @@ class ContextScopeImpl implements ContextScope {
     scopeRuntimes.set(child, this.runtime);
     // 子作用域销毁接线进父 effect 栈（2026-08-23 独立重读轮 #23 落码）：父/根
     // dispose 时 LIFO 级联回卷全部子作用域——宿主忘显式 dispose 也兜底；dispose
-    // 幂等（disposed 标记），显式销毁后父侧再调是空操作，双保险无害
-    this.effect(() => () => void child.dispose());
+    // 幂等（disposed 标记），显式销毁后父侧再调是空操作，双保险无害。
+    // disposer 直接返回 child.dispose() 的 promise（不 void 丢弃——CR-2-F8）：
+    // 父 dispose 循环经 once 拿到它并逐条等待，子树整树回卷被父侧等待（每条
+    // 各自竞速 disposeTimeoutMs——深层级联的最坏总时长 = 深度 × 时钟，正常
+    // 清理毫秒级返回不触发钟）
+    this.effect(() => () => child.dispose());
     return child;
   }
 
+  /**
+   * 销毁本作用域：LIFO 回卷全部 effect → abort signal。根作用域销毁 = 停机序列的一环。
+   *
+   * dispose 语义升级（CR-2-F8，契约篇 §1.6 时钟族前提，2026-08-27 刀〇a）：
+   * 逐条 **await** disposer（此前同步循环只触发不等待——异步清理被跳过，回卷
+   * 时钟无从谈起）；单条与竞速时钟 race（缺省 1s），挂起的 disposer 超时记
+   * warn 放弃等待继续下一条——一条挂起不阻塞整树回卷（挂起 disposer 的迟到
+   * 结算已由 once 包装吞异常，无 unhandledRejection 面）。
+   */
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     // LIFO 回卷：逆序弹出并执行；单个失败已由 once 包装隔离记录
     while (this.effects.length > 0) {
-      this.effects.pop()!();
+      const once = this.effects.pop()!;
+      const returned = once();
+      if (returned === undefined) continue; // 同步 disposer：无等待面
+      // 异步 disposer：与回卷时钟竞速（timedOut 标记区分胜者——超时即弃等下一条）
+      let timedOut = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const clock = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, this.runtime.disposeTimeoutMs);
+      });
+      try {
+        await Promise.race([returned, clock]);
+        if (timedOut) {
+          this.logger.warn('effect 回卷竞速超时（挂起 disposer，放弃等待继续下一条）', {
+            scope: this.name,
+            timeoutMs: this.runtime.disposeTimeoutMs,
+          });
+        }
+      } finally {
+        clearTimeout(timer);
+      }
     }
     // 全部回卷后再 abort——监听器/副作用清理完成，长任务此刻感知取消
     this.controller.abort();
@@ -350,11 +474,21 @@ class ContextScopeImpl implements ContextScope {
  * 插件作用域一律由根/父作用域 fork 派生，不直接调用本函数。
  */
 export function createContext(opts: ContextOptions = {}): ContextScope {
-  const runtime = new ContextRuntime(opts.logger);
+  const runtime = new ContextRuntime(opts.logger, opts.rateLimit, opts.disposeTimeoutMs);
   const name = opts.name ?? 'root';
   const scope = new ContextScopeImpl(runtime, name, opts.config, runtime.rootLogger.child(name));
   scopeRuntimes.set(scope, runtime);
   return scope;
+}
+
+/**
+ * 读事件派发打点（B2 P5 打点先行，2026-08-27 刀〇a）：per-scope 累计派发计数
+ * （键 = 作用域名，含宿主根作用域）。诊断面（dump-config / /plugins）展示用——
+ * 每插件「发了多少事件」的负载数据，为护栏族阈值调校供数；只读快照，不参与控制流。
+ */
+export function eventDispatchStats(scope: ContextScope): ReadonlyMap<string, number> {
+  const runtime = scopeRuntimes.get(scope);
+  return runtime === undefined ? new Map() : runtime.eventStats;
 }
 
 /**

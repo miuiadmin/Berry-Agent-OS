@@ -18,6 +18,7 @@ import type { ContextScope } from './types.js';
 import {
   EVENT_DUPLICATE,
   PLUGIN_APPLY_FAILED,
+  PLUGIN_APPLY_TIMEOUT,
   PLUGIN_CONFIG_INVALID,
   PLUGIN_IMPORT_FORBIDDEN,
   PLUGIN_INJECT_UNRESOLVED,
@@ -98,7 +99,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
     const result = await loadPlugins(root, [{ id: 'happy', entry, config: { greeting: '你好' } }]);
 
     expect(result.failed).toEqual([]);
-    expect(result.activated).toEqual([{ id: 'happy', name: 'happy' }]);
+    expect(result.activated).toMatchObject([{ id: 'happy', name: 'happy' }]);
     // 虚拟注入三面全通：宿主错误面可用 / typebox 构 schema（宿主 Value 同实例校验通过才走到 apply）/ config 冻结视图
     const marker = root.tryGet<Record<string, unknown>>('happy-marker');
     expect(marker).toBeTruthy();
@@ -472,7 +473,7 @@ describe('loadPlugins import 来源门禁', () => {
     const result = await loadPlugins(root, [{ id: 'bundled', entry }]);
 
     expect(result.failed).toEqual([]);
-    expect(result.activated).toEqual([{ id: 'bundled', name: 'bundled' }]);
+    expect(result.activated).toMatchObject([{ id: 'bundled', name: 'bundled' }]);
     expect(root.tryGet<{ marker: string }>('bundled-marker')!.marker).toBe('self-dep-ok');
   });
 
@@ -677,6 +678,47 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
   });
 });
 
+/* ---------------- apply 挂起时钟（§1.6 时钟族，2026-08-27 刀〇a） ---------------- */
+
+describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
+  it('apply 永不 resolve：竞速小钟触发——回卷半途注册后按挂起超时进失败清单，迟到 reject 不进 unhandledRejection', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'hang.ts',
+      [
+        'export const name = "hang";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("hang-svc", { on: true });',
+        '  ctx.effect(() => () => { (globalThis).__hangCleaned = true; });',
+        '  await new Promise(() => {}); // 永挂：挂起转化条款的目标形态',
+        '}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    // 小钟 30ms（生产缺省 10s——挂起语义不随时钟值变）
+    const result = await loadPlugins(root, [{ id: 'hang', entry }], { applyTimeoutMs: 30 });
+
+    expect(result.activated).toEqual([]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_TIMEOUT);
+    expect(result.failed[0]!.message).toContain('30ms');
+    // 失败行不留残骸：半途 provide 已回卷、effect 清理已执行
+    expect(root.tryGet('hang-svc')).toBeUndefined();
+    expect((globalThis as Record<string, unknown>)['__hangCleaned']).toBe(true);
+  });
+
+  it('applyMs 打点随 activated 载荷上行（B2 P5——非负计时，诊断面展示启动开销）', async () => {
+    const dir = makeFixtureDir();
+    const ok = writePlugin(dir, 'fast.ts', 'export const name = "fast";\nexport default async function apply() {}\n');
+    const root = makeRoot();
+    const result = await loadPlugins(root, [{ id: 'fast', entry: ok }]);
+
+    expect(result.activated).toHaveLength(1);
+    expect(result.activated[0]!.applyMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
 /* ---------------- 自定义事件词汇（events 第四件，§1.1 逃生口） ---------------- */
 
 describe('loadPlugins 自定义事件词汇登记', () => {
@@ -866,7 +908,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     });
 
     expect(result.failed).toEqual([]);
-    expect(result.activated).toEqual([{ id: 'skillpack', name: 'skillpack' }]);
+    expect(result.activated).toMatchObject([{ id: 'skillpack', name: 'skillpack' }]);
     expect(seen).toHaveLength(1);
     expect(seen[0]!.id).toBe('skillpack');
     expect(seen[0]!.packageRoot).toBe(dir); // 包根 = 入口文件所在目录
@@ -924,7 +966,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     const result = await loadPlugins(root, [{ id: 'nohook', entry }]);
 
     expect(result.failed).toEqual([]);
-    expect(result.activated).toEqual([{ id: 'nohook', name: 'nohook' }]);
+    expect(result.activated).toMatchObject([{ id: 'nohook', name: 'nohook' }]);
     expect(root.tryGet('nohook-ran')).toBe(true);
   });
 
@@ -948,7 +990,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     });
 
     expect(result.failed).toEqual([]);
-    expect(result.activated).toEqual([{ id: 'pure', name: 'pure' }]);
+    expect(result.activated).toMatchObject([{ id: 'pure', name: 'pure' }]);
     expect(called).toBe(true); // 空实现也走技能注册（纯技能包的唯一起作用面）
   });
 
@@ -1000,7 +1042,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     );
 
     expect(result.failed).toEqual([]);
-    expect(result.activated).toEqual([{ id: 'builtin-demo', name: 'demo' }]);
+    expect(result.activated).toMatchObject([{ id: 'builtin-demo', name: 'demo' }]);
     expect(seen).toHaveLength(1);
     expect(seen[0]!.packageRoot).toBeUndefined(); // builtin 行无入口文件——组合根侧跳过注册
     expect(root.tryGet('builtin-demo-ran')).toBe(true);

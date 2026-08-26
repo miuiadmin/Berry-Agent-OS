@@ -108,4 +108,16 @@ export interface ContextOptions {
   config?: Record<string, unknown>;
   /** 注入 logger（缺省自建，级别走 APP_LOG_LEVEL / dev=debug） */
   logger?: Logger;
+  /**
+   * 事件派发频率护栏（契约篇 §1.6 时钟族，2026-08-27 刀〇a）：per-scope 令牌桶，
+   * 缺省 { capacity: 1000, perMinute: 1000 }——桶满（连续 1000 次无间隔）即抛
+   * PLUGIN_EVENT_RATE；按令牌速率回填。测试面注小桶验证执法，生产面用缺省。
+   */
+  rateLimit?: { capacity: number; perMinute: number };
+  /**
+   * 单条 effect 回卷竞速时钟（毫秒，缺省 1000——契约篇 §1.6 时钟族：dispose 逐条
+   * await disposer，挂起的 disposer 超此时钟即放弃等待继续下一条；子树级联回卷
+   * 每条同帽）。测试面注小值验证超时路径。
+   */
+  disposeTimeoutMs?: number;
 }

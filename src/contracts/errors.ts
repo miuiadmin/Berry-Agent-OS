@@ -105,6 +105,14 @@ export const TOOL_GATE_FAILED = registerErrorCode('TOOL_GATE_FAILED');
 export const TOOL_DUPLICATE = registerErrorCode('TOOL_DUPLICATE');
 /** tools：工具描述命中注入模式拒绝注册（注册面描述扫描，契约篇 §3.2/§6.6——描述是进模型上下文的文本，管道进 shell 形态 = 描述面执行漏洞） */
 export const TOOL_DESCRIPTION_REJECTED = registerErrorCode('TOOL_DESCRIPTION_REJECTED');
+/**
+ * tools：注册面 timeoutMs 非法（<= 0——契约篇 §1.6 注册预算下限：插件面注册
+ * 不许自管取消语义；「0 = 不设预算」保留给宿主内部合成 def（不经注册面）。
+ * 拒绝式而非钳到 0：钳制会静默改变行为（插件以为无预算，长任务被杀还以为自管
+ * 取消有效）——fail-loud。正数过小（< 1000ms）另钳至下限（存归一副本，不拒）。
+ * 2026-08-27 刀〇a。
+ */
+export const TOOL_TIMEOUT_INVALID = registerErrorCode('TOOL_TIMEOUT_INVALID');
 
 /** mcp：connect 期一码收口（spawn 失败/握手失败/startup 超时/相对路径 command——契约篇 §6.6；运行期服务器错误是数据不升 AppError） */
 export const MCP_CONNECT_FAILED = registerErrorCode('MCP_CONNECT_FAILED');
@@ -200,6 +208,20 @@ export const PLUGIN_CONFIG_INVALID = registerErrorCode('PLUGIN_CONFIG_INVALID');
 export const PLUGIN_INJECT_UNRESOLVED = registerErrorCode('PLUGIN_INJECT_UNRESOLVED');
 /** plugin：apply 执行抛错（message 载原始错误；作用域 LIFO 回卷半途注册，失败行不留残骸） */
 export const PLUGIN_APPLY_FAILED = registerErrorCode('PLUGIN_APPLY_FAILED');
+/**
+ * plugin：apply 挂起超时（缺省 10s——契约篇 §1.6 挂起转化条款时钟族之一：异步
+ * 挂起与抛错同族，永不 resolve 且已返还控制按故障收尾；超时先回卷本作用域再进
+ * 失败清单，迟到 reject 由装载器吞掉不进 unhandledRejection）。
+ * 2026-08-27 刀〇a（隔离案一第二刀上半）。
+ */
+export const PLUGIN_APPLY_TIMEOUT = registerErrorCode('PLUGIN_APPLY_TIMEOUT');
+/**
+ * plugin：per-scope 事件派发频率超限（缺省 1000 次/分钟令牌桶——契约篇 §1.6
+ * 事件频率护栏：失控插件高频派发会撑爆监听器面与 durable 落点，超限 fail-loud
+ * 抛错而非静默丢弃；按**派发方**作用域分桶，宿主根作用域同桶执法）。
+ * 2026-08-27 刀〇a。
+ */
+export const PLUGIN_EVENT_RATE = registerErrorCode('PLUGIN_EVENT_RATE');
 /** plugin：组合树行引用的插件入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
 export const PLUGIN_ENTRY_UNRESOLVED = registerErrorCode('PLUGIN_ENTRY_UNRESOLVED');
 /** plugin：import 来源门禁越界（依赖图说明符不在白名单三道——虚拟面六键 / node: 内建 / 插件目录树内；jiti transform 全图静态扫描执法，契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） */
@@ -220,6 +242,14 @@ export const EVENT_UNKNOWN = registerErrorCode('EVENT_UNKNOWN');
 export const EVENT_DUPLICATE = registerErrorCode('EVENT_DUPLICATE');
 /** events：派发方法与事件声明的 mode 不一致（mode 是事件公开契约的一部分——插件侧静态 CI 罩不住，运行时执法） */
 export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
+/**
+ * events：waterfall 钩子消费点挂起超时（缺省 5s——契约篇 §1.6 时钟族：loop
+ * context_transform 消费点的桥钟；超时 reject 上抛走既有收尾路径〔loop 零
+ * try/catch 纪律 → run failed〕。与 EVENT_ 族同前缀：执法对象都是事件词汇面）。
+ * 工具管道 post 段同语义超时复用 TOOL_TIMEOUT（错误是数据、进 isError 结果面，
+ * 码族随结果面走）。2026-08-27 刀〇a。
+ */
+export const EVENT_HANDLER_TIMEOUT = registerErrorCode('EVENT_HANDLER_TIMEOUT');
 /** plugin：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
 export const PLUGIN_INSTALL_FAILED = registerErrorCode('PLUGIN_INSTALL_FAILED');
 

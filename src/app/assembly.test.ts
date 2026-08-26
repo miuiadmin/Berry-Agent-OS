@@ -1015,8 +1015,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent/
     // goal 三行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化——
     // boot 于 ring1Anchor 装载、状态同面可见〕 + overlay tool-plugin 行均
-    // activated——list 状态行序 = 组合树序）
-    expect(runtime.plugins.list()).toEqual([
+    // activated——list 状态行序 = 组合树序；applyMs 为装载计时（刀〇a 打点面）
+    // 值不定，用 toMatchObject 不断言精确数）
+    expect(runtime.plugins.list()).toMatchObject([
       { id: 'chat', status: 'activated', name: 'chat' },
       { id: 'memory', status: 'activated', name: 'memory' },
       { id: 'subagent', status: 'activated', name: 'subagent' },
@@ -1154,6 +1155,32 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     // 瞬态面纪律（记忆篇 §6）：注入只进请求不落日志——事件日志无注入文本
     const logText = JSON.stringify(runtime.session!.events);
     expect(logText).not.toContain('【检索注入】');
+  });
+
+  it('context_transform 桥钟：插件钩子挂起 → EVENT_HANDLER_TIMEOUT、run 按失败收尾（§1.6 时钟族，刀〇a）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "hang-transform";',
+        'export default async function apply(ctx) {',
+        '  // 挂起转化条款目标形态（契约篇 §1.6）：进瀑布后永不调 next 也不返回——',
+        '  // 挂起与抛错同族，整链竞速桥钟后按故障收尾',
+        '  ctx.on("context_transform", () => new Promise(() => {}));',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: hang-transform\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn } = scriptedStream([textMessage('到不了的回答')]);
+    // transformTimeoutMs 小钟（30ms）：生产缺省 5s——测试不等真钟
+    const runtime = await assemble({ streamFn, compositionDir, transformTimeoutMs: 30 });
+    const result = await runtime.conversation!.submitOnce('会挂起的问题');
+
+    // loop 零 try/catch 纪律：钩子超时沿 transformContext 上抛进 runTurns 统一 catch
+    expect(result?.status).toBe('failed');
+    // 码进文本（describeError 统一口径 [CODE] 前缀——杜绝 app 兜底吞码）
+    expect(result?.errorMessage).toContain('[EVENT_HANDLER_TIMEOUT]');
   });
 
   it('插件启动断言：失败行非空 → 工厂抛 PLUGIN_LOAD_FAILED 聚合清单（不带病运行）', async () => {

@@ -385,11 +385,12 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     };
 
     plugins.applyLoad(userComposition, {
-      activated: [{ id: 'ok-pkg', name: 'stub' }],
+      activated: [{ id: 'ok-pkg', name: 'stub', applyMs: 1 }],
       failed: [],
       skipped: [{ id: 'dormant-pkg', reason: 'disabled' }],
     });
-    expect(plugins.list()).toEqual([
+    // applyMs 为装载计时（刀〇a 打点面）——activated 行带值，toMatchObject 不断言精确数
+    expect(plugins.list()).toMatchObject([
       { id: 'ok-pkg', status: 'activated', name: 'stub' },
       { id: 'dormant-pkg', status: 'skipped', reason: 'disabled' },
     ]);

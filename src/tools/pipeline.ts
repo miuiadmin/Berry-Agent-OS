@@ -46,6 +46,12 @@ export interface ToolPipelineOptions {
   onGateDecision?: GateDecisionSink;
   /** 默认执行预算毫秒（缺省 60s；def.timeoutMs 逐工具覆盖；0 = 不设预算） */
   defaultTimeoutMs?: number;
+  /**
+   * 后处理段挂起时钟（毫秒，缺省 5000——契约篇 §1.6 时钟族，2026-08-27 刀〇a）：
+   * post 段监听器挂起视为故障，超时抛 TOOL_TIMEOUT 走「错误是数据」现径（loop
+   * catch 编码 isError 结果）。测试面注小值验证超时路径；生产面用缺省。
+   */
+  postTimeoutMs?: number;
 }
 
 /** 组装 `[CODE] message` 形态的错误文本（码随 message 进入工具结果） */
@@ -110,6 +116,7 @@ async function applyDefaultOutputGuard(result: AgentToolResult, callId: string):
  */
 export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {}): ToolPipelineExecutor {
   const defaultTimeoutMs = opts.defaultTimeoutMs ?? 60_000;
+  const postTimeoutMs = opts.postTimeoutMs ?? 5_000;
   const recordGate: GateDecisionSink = opts.onGateDecision ?? (() => {});
 
   return async function runToolPipeline(def, toolCallId, args, signal, onUpdate) {
@@ -183,12 +190,36 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
     };
     const result = await ctx.waterfall<AgentToolResult>(TOOL_EXECUTE_EVENT, executeInput, timedExecute);
 
-    /* ---- 第三段：后处理（可就地改写 result：裁剪/spill/usage） ---- */
+    /* ---- 第三段：后处理（可就地改写 result：裁剪/spill/usage）----
+     * 挂起时钟（§1.6 时钟族，2026-08-27 刀〇a）：post 段监听器挂起视为故障，
+     * 整段竞速 postTimeoutMs（缺省 5s）——超时抛 TOOL_TIMEOUT 走「错误是数据」
+     * 现径（loop runAndFinalizeToolCall catch 编码 isError 结果返回模型；监听器
+     * 迟到 reject 挂 catch 兜底不进 unhandledRejection）。守门/执行段不设此钟：
+     * 守门 fail-closed 依赖抛错穿透（语义已足），执行段预算归 def.timeoutMs。 */
     const postInput = { tool: def, args, callId: toolCallId, result };
-    await ctx.waterfall<undefined>(TOOL_POST_EXECUTE_EVENT, postInput, async () => {
+    let postTimer: ReturnType<typeof setTimeout> | undefined;
+    const postClock = new Promise<never>((_, reject) => {
+      postTimer = setTimeout(
+        () =>
+          reject(
+            new AppError(
+              TOOL_TIMEOUT,
+              codedMessage(TOOL_TIMEOUT, `工具 ${def.name} 后处理段挂起超 ${postTimeoutMs}ms（post 监听器或输出护栏）`),
+            ),
+          ),
+        postTimeoutMs,
+      );
+    });
+    const postPromise = ctx.waterfall<undefined>(TOOL_POST_EXECUTE_EVENT, postInput, async () => {
       // 链尾缺省 = 输出护栏（§3.1/§6.6：64KiB 保尾 + spill——管道属性，全部工具受益）
       await applyDefaultOutputGuard(postInput.result, toolCallId);
     });
+    postPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
+    try {
+      await Promise.race([postPromise, postClock]);
+    } finally {
+      clearTimeout(postTimer);
+    }
     return postInput.result;
   };
 }
