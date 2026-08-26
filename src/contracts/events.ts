@@ -31,6 +31,13 @@ export type EventName =
   | 'plugin/failed'
   | 'plugin/skipped'
   | 'composition/reloaded'
+  | 'worker/spawned'
+  | 'worker/froze'
+  | 'worker/oom'
+  | 'echo/tick'
+  | 'echo/par'
+  | 'echo/ser'
+  | 'echo/wf'
   | 'prompts_change'
   | 'skills_change'
   | 'context_transform'
@@ -127,6 +134,42 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'composition/reloaded',
     mode: 'emit',
     note: '组合树 /reload 全量重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕）',
+  },
+  {
+    name: 'worker/spawned',
+    mode: 'emit',
+    note: 'worker 域 spawn 即派发（契约篇 §1.7 观测锚⑩ 装机计数事件面，第二十七批刀三；载荷 { rowId, workerId }——每行一域，fleet 在装载锚总线派发；订阅方据此计量装机/运维面板）',
+  },
+  {
+    name: 'worker/froze',
+    mode: 'emit',
+    note: 'worker 域心跳冻结判定（契约篇 §1.7 观测锚⑨ 心跳超时事件面，第二十七批刀三；载荷 { rowId, workerId, missed }——watchdog kill 前派发；CPU 燃烧如实收窄不可判，本事件只覆盖事件循环冻结族）',
+  },
+  {
+    name: 'worker/oom',
+    mode: 'emit',
+    note: 'worker 域内存超限死亡归因（契约篇 §1.7 观测锚⑤ 内存超限事件面，第二十七批刀三；载荷 { rowId, workerId, diagnostic }——resourceLimits.maxOldGenerationSizeMb 超限死的 error 事件签名命中时随域死结算派发；diagnostic = 原始错误消息）',
+  },
+  {
+    name: 'echo/tick',
+    mode: 'emit',
+    reserved: true,
+    note: 'Echo 金样事件词汇（契约篇 §1.7 金样应用，第二十七批刀三——测试资产：宿主/测试侧 emit、echo.ts 行内订阅；双拓扑 parity 测试的事件往返载荷。reserved 声明依据：派发点在测试面〔echo.test.ts〕非产品宿主——check-events 扫描面排除 .test.ts，产品 src 恒无派发点，豁免显式不静默）',
+  },
+  {
+    name: 'echo/par',
+    mode: 'parallel',
+    note: 'Echo 金样收窄面探针词·parallel（契约篇 §1.7 金样应用，第二十七批刀三——测试资产：echo.ts 收窄探针以正确模式派发，主域真跑通〔ok〕vs worker 桩 BRIDGE_SURFACE_NARROWED 的差分判据；零订阅者，载荷无语义）',
+  },
+  {
+    name: 'echo/ser',
+    mode: 'serial',
+    note: 'Echo 金样收窄面探针词·serial（同 echo/par——测试资产：收窄清单 v1 逐项核的差分判据；零订阅者，载荷无语义）',
+  },
+  {
+    name: 'echo/wf',
+    mode: 'waterfall',
+    note: 'Echo 金样收窄面探针词·waterfall（同 echo/par——测试资产：收窄清单 v1 逐项核的差分判据；零订阅者，链尾 next 原样透传）',
   },
   {
     name: 'prompts_change',

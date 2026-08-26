@@ -60,6 +60,7 @@ export interface BridgeFleetOptions {
     readonly code: number;
     readonly rows: readonly string[];
     readonly reason?: string;
+    readonly diagnostic?: string;
   }) => void;
 }
 
@@ -78,8 +79,15 @@ export interface BridgeFleet {
   reapUnapplied(reason: string): number;
   /** 全域刻意收尾（/reload/关停编舞——不走死亡结算）；返回收编数 */
   terminateAll(reason: string): number;
-  /** 观测打点：spawned/crashed/heartbeatFreezes/terminated 累计、live 现存 */
-  stats(): { spawned: number; live: number; crashed: number; heartbeatFreezes: number; terminated: number };
+  /** 观测打点：spawned/ooms/crashed/heartbeatFreezes/terminated 累计、live 现存（ooms = crashed 的内存超限归因子集） */
+  stats(): {
+    spawned: number;
+    live: number;
+    crashed: number;
+    ooms: number;
+    heartbeatFreezes: number;
+    terminated: number;
+  };
 }
 
 /**
@@ -90,9 +98,10 @@ export interface BridgeFleet {
 export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
   /** 行 id → 域登记项（一行一域） */
   const entries = new Map<string, FleetEntry>();
-  /** 观测打点计数器（观测锚⑨⑩——装机计数 spawned、心跳超时 heartbeatFreezes） */
+  /** 观测打点计数器（观测锚⑨⑩——装机计数 spawned、心跳超时 heartbeatFreezes；⑤ ooms = crashed 的内存超限归因子集） */
   let spawned = 0;
   let crashed = 0;
+  let ooms = 0;
   let heartbeatFreezes = 0;
   let terminated = 0;
 
@@ -118,6 +127,8 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
               ...(opts.heartbeatMissLimit !== undefined ? { heartbeatMissLimit: opts.heartbeatMissLimit } : {}),
               onFreeze: (info: { missed: number }) => {
                 heartbeatFreezes += 1; // 观测锚⑨ 打点（kill 后 exit 通知带 reason 不再计 crashed——防双计）
+                // 观测锚⑨ 事件面：kill 前派发（订阅方先见冻结归因再见死亡结算）
+                opts.anchor().emit('worker/froze', { rowId: row.id, workerId: `w:${row.id}`, missed: info.missed });
                 self.kill(`心跳缺失（连续 ${info.missed} 拍无应答）——同步死循环或事件循环冻结，watchdog 杀域`);
               },
             }
@@ -127,6 +138,12 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         onExit: (info) => {
           entries.delete(row.id);
           if (info.reason === undefined) crashed += 1; // 无执法归因 = 自崩溃（kill 路径已计 heartbeatFreezes）
+          // 观测锚⑤ 内存超限归因：error 事件签名命中（probe-oom 实证——exit code
+          // 与普通崩溃同码，签名是唯一判据）→ ooms 计数 + worker/oom 事件
+          if (info.diagnostic !== undefined && info.diagnostic.includes('reaching memory limit')) {
+            ooms += 1; // crashed 的归因子集（维度正交——既计 crashed 又计 ooms）
+            opts.anchor().emit('worker/oom', { rowId: row.id, workerId: info.workerId, diagnostic: info.diagnostic });
+          }
           for (const id of info.rows) {
             const detail = info.reason !== undefined ? `，归因：${info.reason}` : '';
             const message = `worker 域意外退出（code ${info.code}${detail}）——域死回卷已完成，不自动重启（宁可死得响亮，契约篇 §1.7）`;
@@ -140,6 +157,8 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       self = domain;
       entries.set(row.id, { domain, applied: false });
       spawned += 1; // 观测锚⑩ 装机计数
+      // 观测锚⑩ 事件面：spawn 即派发（订阅方计量装机——boot//reload 各 worker 行一发）
+      opts.anchor().emit('worker/spawned', { rowId: row.id, workerId: `w:${row.id}` });
       return domain.load(row).catch((err: unknown) => {
         // 装载失败防漏：行已进失败清单，域即刻刻意收尾（无死亡结算——编舞既知终点）
         entries.delete(row.id);
@@ -198,7 +217,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       return count;
     },
     stats() {
-      return { spawned, live: entries.size, crashed, heartbeatFreezes, terminated };
+      return { spawned, live: entries.size, crashed, ooms, heartbeatFreezes, terminated };
     },
   };
 }

@@ -48,7 +48,10 @@ function renderCompositionTree(composition: CompositionReport, statuses?: readon
         : status
           ? `${status.status}`
           : 'planned';
-    return `  - ${row.id}：${tag}  ${row.entry ?? ''}`;
+    // runtime 标记（第二十七批刀二/三）：worker 域行显式标注——「这行跑在哪个
+    // 故障域」是组合树诊断的一等信息公开（main 缺省不带标记）
+    const runtimeTag = row.runtime === 'worker' ? '@worker ' : '';
+    return `  - ${row.id}：${runtimeTag}${tag}  ${row.entry ?? ''}`;
   });
   const head = `组合树（${composition.rows.length} 行；官方默认层 + ${OVERLAY_FILENAME} 后写胜出）：`;
   return lines.length > 0 ? [head, ...lines].join('\n') : `${head}\n  （空树——无插件行）`;

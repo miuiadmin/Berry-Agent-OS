@@ -67,13 +67,16 @@ export interface WorkerDomainOptions {
    * 不叫（那条路是编舞既知终点非事故）。**域死回卷（绑定行作用域 dispose）已
    * 在本模块内先行完成**后回调；装配层在此挂诊断广播与 operator 可见面。
    * rows = 死亡时点仍挂在本域的行 id 清单（归因面）；reason 仅 kill 执法路径
-   * 携带（自崩溃无执法归因——code 即事实）。
+   * 携带（自崩溃无执法归因——code 即事实）；diagnostic = worker 'error' 事件
+   * 的原始错误（构造名: 消息——自崩溃异常/内存超限签名，观测锚⑤判据源；
+   * 无 error 事件即缺省不携带）。
    */
   readonly onExit?: (info: {
     readonly workerId: string;
     readonly code: number;
     readonly rows: readonly string[];
     readonly reason?: string;
+    readonly diagnostic?: string;
   }) => void;
 }
 
@@ -106,9 +109,9 @@ export interface WorkerDomain {
 
 /**
  * 宿主半入口的 worker 同伴 URL：按宿主半自身形态判别——TS 源形态（dev/测试）
- * → 同目录 worker.ts，编译产物形态 → worker.js。execArgv 未显式传时 Node
- * worker 自动继承父进程参数：dev 下 tsx 预载链延续（worker 直跑 TS 源）、
- * build 下父进程无预载参数（缺省即对）——两种形态零配置自适应。
+ * → 同目录 worker.ts，编译产物形态 → worker.js。TS 形态下 worker 预载参数见
+ * spawnWorkerDomain 的 execArgv 自适应（tsx 补载）；编译产物形态零参数即对
+ * ——两种形态零配置自适应。
  */
 export function workerEntryUrl(selfUrl: string): URL {
   return new URL(selfUrl.endsWith('.ts') ? './worker.ts' : './worker.js', selfUrl);
@@ -133,7 +136,16 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const workerUrl = opts.workerUrl ?? workerEntryUrl(import.meta.url);
   const worker = new Worker(workerUrl, {
     workerData: { workerId },
-    ...(opts.execArgv !== undefined ? { execArgv: [...opts.execArgv] } : {}),
+    // TS 源形态零配置自适应：Node type-stripping 不重写 .js→.ts 指示符，
+    // 直跑 TS 源必 MODULE_NOT_FOUND——须有 tsx 预载链。dev（tsx 直跑）经
+    // execArgv 继承自然延续；vitest 变换进程 execArgv 无 tsx，故 TS 形态且
+    // 调用方未显式传参时自补 --import=tsx（TS 形态只在 dev/test 出现、tsx
+    // 恒为在场 devDep；编译产物形态不进此分支零参数；显式注入面优先不受影响）
+    ...(opts.execArgv !== undefined
+      ? { execArgv: [...opts.execArgv] }
+      : workerUrl.pathname.endsWith('.ts')
+        ? { execArgv: ['--import=tsx'] }
+        : {}),
     ...(opts.resourceLimits !== undefined ? { resourceLimits: { ...opts.resourceLimits } } : {}),
     ...(opts.env !== undefined ? { env: { ...opts.env } } : {}),
   });
@@ -183,9 +195,15 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
 
   // worker 内未捕获异常：Node 把 'error' 事件投给 Worker 对象——无监听器则按
   // EventEmitter 语义冒泡主进程 uncaughtException（worker 崩溃反杀宿主 = 违背
-  // 故障域分域本义）。吸收冒泡；exit 事件随后到达走域死回卷 + 死亡结算全流程
-  //（诊断归因经 onExit 的 code 呈现，此处无需重复）。
-  worker.on('error', () => {});
+  // 故障域分域本义）。吸收冒泡；exit 事件随后到达走域死回卷 + 死亡结算全流程。
+  // 同时收编为诊断面（观测锚⑤判据源，刀三）：存档原始错误（构造名: 消息），
+  // 随 onExit.diagnostic 透出——自崩溃第一手异常/内存超限签名（probe-oom 实证
+  // 签名 "Worker terminated due to reaching memory limit"，exit code 与普通崩溃
+  // 同码 1，签名是唯一判据）
+  let lastWorkerError: string | undefined;
+  worker.on('error', (err) => {
+    lastWorkerError = `${err.constructor.name}: ${err.message}`;
+  });
 
   // worker 崩溃/被杀/资源超限 = 域死：端点收尾（在途全结算 WORKER_EXITED）+
   // 该域全部行作用域回卷（契约篇 §1.7「worker 死 = 作用域 dispose」宿主侧：
@@ -205,7 +223,13 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     // allSettled 汇合；单行回卷异常不 withhold 死亡结算）
     void Promise.allSettled(rollbacks).then(() => {
       if (!terminated) {
-        opts.onExit?.({ workerId, code, rows: rowIds, ...(killReason !== undefined ? { reason: killReason } : {}) });
+        opts.onExit?.({
+          workerId,
+          code,
+          rows: rowIds,
+          ...(killReason !== undefined ? { reason: killReason } : {}),
+          ...(lastWorkerError !== undefined ? { diagnostic: lastWorkerError } : {}),
+        });
       }
     });
   });

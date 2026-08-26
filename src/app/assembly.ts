@@ -23,7 +23,13 @@
 
 import type { AgentMessage } from '../contracts/messages.js';
 import type { StreamFn } from '../contracts/llm.js';
-import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
+import {
+  APP_SHUTDOWN_QUIESCE_VIOLATED,
+  AppError,
+  COMPOSITION_ROW_INVALID,
+  PLUGIN_LOAD_FAILED,
+  describeError,
+} from '../contracts/errors.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { ToolsService } from '../tools/registry.js';
@@ -1181,6 +1187,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       const load = await loadPlugins(pluginAnchor, ring2Fresh, {
         registerSkills: registerPluginSkills,
         virtualFaces,
+        // worker 行重装载同缝（boot ⑨ 同款）：舰队对象复用（terminateAll 已清
+        // 登记），漏传此缝 = worker 行在 /reload 静默落 failed「装载器未注入」
+        workerLoader: pluginFleet.loader,
       });
       composition = fresh;
       // 合并回灌（Ring 1 行沿用 boot 装载结果 = 运行时真值：行仍激活中）
@@ -1321,14 +1330,32 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     front: chatBundle.front,
     newSession: startNewSession,
     reload,
-    /** 优雅关停：等全部驱动结算 → flush 屏障 → 全部条目 session_shutdown → 关库 → ctx 回卷（§1.3 编排，S1 全条目化） */
+    /** 优雅关停：abort-all → 等全部驱动结算（quiesce 断言）→ flush 屏障 → 全部条目 session_shutdown → 关库 → ctx 回卷（§1.3 多驱动版编排 + S6 形态⑤，S1 全条目化） */
     async shutdown() {
+      // abort-all（§1.3 N>1 序① / S6 形态⑤）：对全部条目调 driver.retire（仅
+      // abort——不经 registry.retire 的 busy 拒/退役标记/域回卷三件）——防不经
+      // requestQuit 前置扇出的直接调用路（测试收尾/fatal 路后续）在跑 run 挂死
+      // settle；停摆不 resolve quit（退出聚合只认 requestQuit，关停扇出不误触）
+      for (const entry of registry.entries.values()) entry.driver.retire();
       // 全部驱动结算（含退役保留者——迟到 run 收尾；从未起跑/已结算者即回）
       await Promise.allSettled([...registry.entries.values()].map((entry) => entry.driver.settle()));
       // try/finally：flush/close 任一失败也要 ctx.dispose 回卷（独立重读轮 #16
       // 复核——dispose 是资源必达件，不因持久层收尾异常被跳过；dispose 自身
       // 异常已被 context 回卷隔离逐条吞噬，不会反向炸关停序列）
       try {
+        // quiesce 断言（§1.3 N>1 序② / S6 形态⑤）：全 settle 后仍有非退役驱动
+        // isRunning = 关停序写点漂移（settle 与 running 复位的配对被破）——拒进
+        // flush（防「flush 时仍有在写者」撕裂尾；断言是防不是治，正确性兜底是
+        // 恢复协议）。放 try 内：抛出走 finally ctx 回卷（资源必达件不因断言跳过）
+        const stillRunning = [...registry.entries.values()].filter((entry) => !entry.retired && entry.driver.isRunning);
+        if (stillRunning.length > 0) {
+          throw new AppError(
+            APP_SHUTDOWN_QUIESCE_VIOLATED,
+            `关停 quiesce 断言失败：${stillRunning.length} 个非退役驱动仍在跑（${stillRunning
+              .map((entry) => entry.session.header.sessionId.slice(0, 8))
+              .join('、')}）`,
+          );
+        }
         // 变更监听先退订：后续 ctx 回卷逐件注销插件工具/段时的广播不再触发
         // writeHeader/提示词重建（库未关也不落关停期快照——非模型可见时点）
         unwatchChangeEvents();
