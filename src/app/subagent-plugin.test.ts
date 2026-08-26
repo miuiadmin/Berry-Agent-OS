@@ -164,7 +164,8 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     expect(answer?.status).toBe('completed');
     // 三次模型调用 = 父问 → 子答 → 父汇总（嵌套形态：子在父的工具执行内）
     expect(contexts).toHaveLength(3);
-    // 子装配证据①：toolFilter include 过滤——子工具面只 read（缺省全量 fs 四件+检索两件的对照）
+    // 子装配证据①：toolFilter include 过滤——子工具面只 read（缺省全量 =
+    // 全局层派生 + 自建 fs 四名，见下方域键升级批结构默认断言）
     expect(contexts[1]!.tools?.map((t) => t.name)).toEqual(['read']);
     // 子装配证据②：persona 覆盖缺省子提示词
     expect(contexts[1]!.systemPrompt).toContain('你是资深审读员');
@@ -289,9 +290,9 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
       starts.push(payload as { sessionId: string; origin: string });
     });
     const factory = createSubagentChildFactory({
-      // persist 双缺：无父会话（getSession 恒 undefined）+ 无 persistence
+      // persist 双缺：无父驱动（getParent 恒 undefined）+ 无 persistence
       // → 降级内存 Session（origin 'delegation'）
-      getSession: () => undefined,
+      getParent: () => undefined,
       streamFn,
       model: 'test/model',
       convertToLlm: defaultConvertToLlm,
@@ -379,5 +380,25 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     // 汇报文本回父面（静态工具前台路与通用 agent 同一结算链）
     const toolResults = deriveMessages(runtime.session!.events).filter((m) => m.type === 'toolResult');
     expect(JSON.stringify(toolResults[0])).toContain('审毕：无阻塞项');
+  });
+
+  it('子装配缺省全量面（域键升级批·排除集退役回归）：全局层派生 + 自建 fs 四名，父驱动层内容零漏入', async () => {
+    // 无 toolFilter——子面缺省全量。结构默认断言：fs 四名恰一份（自建腿）——
+    // 父驱动层同名 def（含 bash）若漏入派生面即双名/多 Bash，排除集退役后靠
+    // 三层结构保证（listFor(父 app) 不含驱动层）非名单过滤（CHILD_TOOL_EXCLUSION 已删）
+    const { streamFn, contexts } = scriptedStream([
+      toolCallMessage('agent', { prompt: '全量面任务' }),
+      textMessage('子答'),
+      textMessage('父汇总'),
+    ]);
+    const runtime = await assemble({ streamFn });
+    await runtime.conversation!.submitOnce('委派一个全量面任务');
+    const names = contexts[1]!.tools!.map((t) => t.name);
+    // 自建腿 fs 四名 + 全局派生腿检索两件在场
+    for (const n of ['read', 'write', 'edit', 'ls', 'find', 'grep']) expect(names).toContain(n);
+    // 排除集退役回归锁：全量面无双名（父驱动层 def 漏入即 read×2）+ bash 零出现
+    //（bash 住驱动层——子代理无驱动层，结构上不进派生面）
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain('bash');
   });
 });

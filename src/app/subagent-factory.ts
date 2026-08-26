@@ -4,8 +4,9 @@
  * 组合根闭包零件：`createSubagentChildFactory(deps)` 把装配层的活资源（streamFn/
  * model/活会话引用/persistence/父沙箱档位/根总线）闭包进 `InProcessChildFactory`。
  * 每子装配序（dsh-10 隔离纪律）：独立 createContext（**fresh 不 fork 根**——共享
- * 注册表的 fork 会把子 provide 写穿到根）→ 子工具管道 + 工具面派生（父注册表
- * 可见面滤排除集 + 自建 fs 族，toolFilter include 过滤）→ 审批 never + 守门行（父
+ * 注册表的 fork 会把子 provide 写穿到根）→ 子工具管道 + 工具面派生（域键升级批：
+ * 父注册表应用域视角 listFor(父 app)——驱动层内容结构上不在面，排除集随三层
+ * 解缠退役；自建 fs 族，toolFilter include 过滤）→ 审批 never + 守门行（父
  * 档**快照**——§6.5 委托时点常量闭包）→ forkSession(origin:'delegation')（无父/
  * 无持久层降级内存 Session）→ 根总线发 session_start → startRun 一次性驱动 →
  * dispose = 纵切三序列（shutdown 转发根总线）。
@@ -37,8 +38,9 @@ import type { ContextScope } from '../context/types.js';
 export interface SubagentFactoryDeps {
   /** 持久层（forkSession + 定向 flush 屏障）；persist:false 诊断面 undefined */
   readonly persistence?: Persistence;
-  /** 父会话活引用（/new 换指后读到新会话——委派即 fork 当前会话） */
-  readonly getSession: () => Session | undefined;
+  /** 父驱动活取值（域键升级批：session 与 appId 原子同取——见 SubagentParent；
+   *  /new 换指后读到新驱动——委派即 fork 当前会话；persist:false 诊断面 undefined） */
+  readonly getParent: () => SubagentParent | undefined;
   /** 子模型流（与父驱动同源 streamFn——同凭证同 provider 层） */
   readonly streamFn: StreamFn;
   /** 子模型标识（llm/usage 折叠 model 腿同源） */
@@ -59,12 +61,15 @@ const DEFAULT_CHILD_PROMPT = [
   '你的汇报文本会被原样交回委派方——把结论写在最后那条消息里，不要省略关键细节。',
 ].join('\n');
 
-/** 子装配派生排除集（S2 契约篇 §5.4 第 6 条）：read/write/edit/ls 的 execute
- *  闭包绑**父驱动观察态**（fs 观察态 per-driver 语义——子必须自建零观察起步）；
- *  bash 的闭包绑父侧审批服务（子审批 never 的确定性拒绝会被父交互审批绕过，
- *  拍板 #17 排除）。名单外的全局层 def（find/grep、memory 五件、fetch 等）无
- *  会话状态（dsh-10 边界三判①），原样复用。 */
-const CHILD_TOOL_EXCLUSION = new Set(['read', 'write', 'edit', 'ls', 'bash']);
+/** 父驱动活取值形状（域键升级批：session 与 appId 单次路由原子取——派生腿
+ *  `listFor(父 app)` 需要应用域键，fork 源需要会话；两值同源防两次 routed()
+ *  调用间聚焦漂移的读撕裂） */
+export interface SubagentParent {
+  /** 父会话活引用（fork 源——委派即 fork 当前会话） */
+  readonly session: Session;
+  /** 父会话所属应用域键（子装配派生面 = listFor(本键)） */
+  readonly appId: string;
+}
 
 /** 无持久层的 no-op flush 屏障（诊断面子会话仅内存——序列形状保持三步） */
 const NOOP_BARRIER: FlushBarrier = {
@@ -89,22 +94,24 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
      * 敞开时（agent 工具在 turn 内执行），敞开段事件未定性不进种子。
      * 无父会话（persist:false）或无持久层：降级内存 Session（诊断面子代理仍可跑，
      * delegationDepth=1 语义 = 深度为 0 的虚拟父委出一层） */
-    const parent = deps.getSession();
+    const parent = deps.getParent();
     const session =
       parent !== undefined && deps.persistence !== undefined
-        ? deps.persistence.forkSession(parent, {
+        ? deps.persistence.forkSession(parent.session, {
             origin: 'delegation',
-            boundary: lastClosedTurnBoundary(parent.events),
+            boundary: lastClosedTurnBoundary(parent.session.events),
           })
         : new Session({ origin: 'delegation', delegationDepth: 1 });
 
     /* ---- ③ durable 接线（子会话事件日志——与主装配同款映射）---- */
     const sinks = createDurableSinks(session);
 
-    /* ---- ④ 子工具面 = 派生 + 自建 fs（S2 契约篇 §5.4 第 6 条子装配派生）----
-     * 派生腿：父注册表取「父可见面」——父会话在场 = listFor(父会话)（全局层 ∪
-     * 父域；父域里的 fs 四名被排除集滤掉），无父会话（persist:false 诊断形态）
-     * = list() 全局层同口径——滤排除集五名得 derived defs。复用 def 经**子**
+    /* ---- ④ 子工具面 = 派生 + 自建 fs（契约篇 §5.4 域键升级批·排除集结构化退役）----
+     * 派生腿：父注册表取「父应用域视角」——父驱动在场 = listFor(父会话所属 app)
+     * （全局层 ∪ 应用域[父 app]；驱动层内容〔fs 四名 + bash〕结构上不在本面——
+     * 「−内核固定词五名」排除集随三层解缠退役，拍板 #17 从减法维护变结构默认：
+     * bash 住驱动层、子代理无驱动层）。无父（persist:false 诊断形态）= list()
+     * 全局层同口径——全局层本就不含驱动层内容，两路径语义同构。复用 def 经**子**
      * 注册表 toAgentTool 重绑子管道（三段守门走子档：审批 never + 父档快照），
      * 父注册表零写穿（childCtx fresh 注册表——派生只是 def 复制）。
      * 自建腿：createFsTools 零观察起步（子装配新语界，与父观察态互不可见）。
@@ -116,8 +123,7 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
     const fsTools = createFsTools({ writableRoots, workspace: () => deps.workspace });
     // 父注册表经根 ctx 取（delegate 工具执行时 Ring 1 tools 行必在场——boot 必备行）
     const parentTools = deps.rootCtx.get<ToolsService>('tools');
-    const derivedFace = parent !== undefined ? parentTools.listFor(parent.header.sessionId) : parentTools.list();
-    const derived = derivedFace.filter((def) => !CHILD_TOOL_EXCLUSION.has(def.name));
+    const derived = parent !== undefined ? parentTools.listFor(parent.appId) : parentTools.list();
     const allTools = [...derived, ...fsTools.tools];
     const selected =
       request.toolFilter !== undefined ? allTools.filter((def) => request.toolFilter!.includes(def.name)) : allTools;

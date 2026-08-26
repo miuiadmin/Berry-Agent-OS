@@ -994,7 +994,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    */
   const subagentChildFactory = createSubagentChildFactory({
     ...(persistence ? { persistence } : {}),
-    getSession: () => registry.routed()?.session,
+    // 父驱动活取值（域键升级批：session 与 appId 单次 routed() 原子取——派生腿
+    // 读 listFor(父 app) 需要应用域键，fork 源需要会话；getParent 缺席 = persist:false
+    // 诊断形态，派生腿回落 list() 全局层）
+    getParent: () => {
+      const entry = registry.routed();
+      return entry === undefined ? undefined : { session: entry.session, appId: entry.appId };
+    },
     streamFn,
     model,
     convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
@@ -1290,16 +1296,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   // tools_change → 刷新 loop 工具快照 + 即时落 request/header 快照（骨架篇 §9.2
   // 接线义务；会话篇 §1.3 腿 2「仅变化才快照」——writeHeader 内建 diff，toolSchemas
-  // 变了才落 reason=change，run 中途换工具也当场留痕）。S2 域路由：载荷带 domain
-  // 键 = 域层变更只刷该域条目（chat 件 open 注册 fs 时即此形）；缺省 = 全局层变更
-  // 刷全部条目（memory/exec/web/mcp 等行注册）。chat 件未装载时注册表空——自然
-  // no-op（无条目即无快照面）
+  // 变了才落 reason=change，run 中途换工具也当场留痕）。**两键路由（域键升级批）**：
+  // 载荷带 `driver`（sessionId）= 驱动层变更只刷该驱动条目（chat 件 open 注册 fs+bash
+  // 时即此形）；带 `domain`（appId）= 应用域层变更刷该应用全部条目（v1 空层无住客，
+  // 清单投影批起有流量）；缺省 = 全局层变更刷全部条目（memory/exec/web/mcp 等行
+  // 注册）。chat 件未装载时注册表空——自然 no-op（无条目即无快照面）
   const unwatchToolsChange = ctx.on(TOOLS_CHANGE_EVENT, (payload: unknown) => {
-    const domain = (payload as { domain?: unknown } | undefined)?.domain;
-    const domainKey = typeof domain === 'string' ? domain : undefined;
+    const change = payload as { domain?: unknown; driver?: unknown } | undefined;
+    const domainKey = typeof change?.domain === 'string' ? change.domain : undefined;
+    const driverKey = typeof change?.driver === 'string' ? change.driver : undefined;
     for (const entry of registry.entries.values()) {
       if (entry.retired) continue;
-      if (domainKey !== undefined && entry.session.header.sessionId !== domainKey) continue;
+      // 窄键优先：driver 单条目 > domain 该应用全部条目 > 全部（驱动层注册只发
+      // driver 键、应用域层只发 domain 键——emit 面保证两键不同带，此处防御序仍定）
+      if (driverKey !== undefined) {
+        if (entry.session.header.sessionId !== driverKey) continue;
+      } else if (domainKey !== undefined && entry.appId !== domainKey) continue;
       entry.controls.refreshTools();
       if (!loadWindow) entry.controls.writeHeader();
     }

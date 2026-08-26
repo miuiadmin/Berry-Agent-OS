@@ -128,7 +128,7 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
           createBuiltinRegistry({
             workspace: () => process.cwd(),
             subagentFactory: createSubagentChildFactory({
-              getSession: () => undefined,
+              getParent: () => undefined,
               streamFn: createStreamFn(createLlmRuntime()),
               model: options.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL,
               convertToLlm: (messages) => defaultConvertToLlm(messages),

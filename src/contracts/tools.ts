@@ -111,23 +111,40 @@ export interface ToolsService {
    * 注册工具（即时生效；返回注销器，幂等）。同名注册 = TOOL_DUPLICATE 响亮失败——
    * 替换唯一合法路径是组合树行级操作。
    *
-   * 两层注册表（S2 契约篇 §3.2）：缺省注册进**全局层**（全部会话可见）；携带
-   * `domain` 键注册进**域层**（仅该域会话经 listFor 可见——组合域 = 应用清单声明
-   * 的工具面运行时投影，v1 域键 = sessionId）。域键**装配期定型、禁调用链推断**
-   * （dsh-10 边界三判）。查重**双向对称**：域层注册查全局层 ∪ 本域；全局层注册查
-   * 全局层 ∪ **全部活域**（防 mcp 异步后到同名与域层工具在 listFor 面出双名）。
+   * 三层注册表（域键升级批，契约篇 §5.4「域键升级（appId 批）射面细化」）：
+   * - 缺省注册进**全局层**（caller 无关纯机制，全部会话可见）；
+   * - 携 `domain` 键注册进**应用域层**（键 = appId——组合域 = 应用清单声明的工具
+   *   工具面运行时投影的本义归宿；首批住客随清单投影批到达，v1 空层）；
+   * - 携 `driver` 键注册进**驱动层**（键 = sessionId——fs 四名 + bash 的归宿：
+   *   它们不是应用清单声明的，是驱动基建〔观察态 per-driver + 升权闭包绑本驱动
+   *   approval〕）。**驱动层注册须双键同携**（`driver` + `domain`=本驱动 appId）——
+   *   碰撞域界定需要；缺 domain = APP_INVALID 响亮拒。
+   * - 域归属**装配期定型、禁调用链推断**（dsh-10 边界三判）。查重碰撞域三层推广
+   *   （「任何单一组合面内不得双名」——组合面 = 一个 toolView 的组成集）：全局层
+   *   注册查全局 ∪ 全部应用域 ∪ 全部活驱动层；应用域[A] 注册查全局 ∪ 应用域[A] ∪
+   *   app=A 的活驱动层；驱动层注册查全局 ∪ 应用域[本 app] ∪ 驱动层[本 sessionId]。
+   *   跨应用同名合法（永不同面）。
    */
-  register(def: ToolDefinition, opts?: { readonly domain?: string }): () => void;
+  register(def: ToolDefinition, opts?: { readonly domain?: string; readonly driver?: string }): () => void;
   /** 按名查找（**全局层同口径**——只查全局层；未注册返回 undefined，调用方决定 fail 形态） */
   get(name: string): ToolDefinition | undefined;
   /** 全局层全量快照（次序 = 注册序；诊断面/无会话语境的消费方用） */
   list(): ToolDefinition[];
   /**
-   * 域视角全量快照 = 全局层 ∪ 该域层（次序 = 全局注册序在前、域注册序在后；
-   * S2 契约篇 §3.2）。会话侧消费方（驱动工具面/续跑收窄/子装配派生）一律走
-   * 此口——域键 v1 = sessionId。未知域键 = 空域层，只返回全局层（合法形态）。
+   * 应用域视角全量快照 = 全局层 ∪ 该应用域层（次序 = 全局注册序在前、应用域注册序
+   * 在后；键 = appId——域键升级批键义升级，参数从 sessionId 改 appId）。子装配
+   * 派生（子代理工具面）即此面——驱动层内容（fs 四名 + bash）结构上不在本面，
+   * 「−内核固定词五名」排除集随之退役。未知应用键 = 空应用域层，只返回全局层。
    */
-  listFor(domain: string): ToolDefinition[];
+  listFor(app: string): ToolDefinition[];
+  /**
+   * 驱动组成面 = 全局层 ∪ 本驱动应用域层 ∪ 本驱动层（域键升级批新增——组成面不能
+   * 只活在 chat 件 open 的局部算式里，goal 续跑 wakeToolFilter 等运行期消费方需要
+   * 同一投影）。键 = sessionId（注册表自持「驱动层条目 → 双键」登记，消费方只传
+   * 一个键）。未知 sessionId（子代理会话/退役条目/persist:false 诊断形态）= 无
+   * 驱动语境，返回全局层（与 list() 同口径的诚实回落）。
+   */
+  compositionFor(sessionId: string): ToolDefinition[];
   /**
    * loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态）。
    *

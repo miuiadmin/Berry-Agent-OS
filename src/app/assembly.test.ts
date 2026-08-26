@@ -19,6 +19,7 @@ import type {
   StreamFnOptions,
   Usage,
 } from '../contracts/llm.js';
+import type { ToolDefinition } from '../contracts/tools.js';
 import type { UiBackend } from '../channels/types.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { deriveMessages } from '../session/derive.js';
@@ -146,9 +147,10 @@ describe('createBerryRuntime 装配面', () => {
     const runtime = await assemble();
     // 官方默认层三行（契约篇 §5.1）：memory 首行五件 + subagent 次行委派工具
     // agent + goal 第三行工具三件（goal 纵切二起为默认装配现实）。
-    // S2 两层注册表：fs 四件随 chat 件驱动 open 落**域层**（本会话键）——会话
-    // 可见面 = listFor(本会话) = 全局层 + 域层；裸 list() 只余全局层（诊断口径）
-    expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
+    // 三层注册表（域键升级批）：fs 四名 + bash 随 chat 件驱动 open 落**驱动层**
+    //（本会话键）——会话组成面 = compositionFor(本会话) = 全局层 ∪ 应用域层 ∪
+    // 驱动层；裸 list() 只余全局层（诊断口径）
+    expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
       'memory_write',
@@ -1068,11 +1070,11 @@ describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / deleg
 
 /* ---------------- S2 多驱动工具面（组合域分片全栈） ---------------- */
 
-describe('S2 多驱动工具面（组合域分片：双驱动隔离零泄漏 + retire 拆层 + /new 冻结）', () => {
-  /** fs 四名（域层恒在 listFor 尾部——chat 件 open 域注册） */
+describe('S2 多驱动工具面（三层注册表：双驱动隔离零泄漏 + retire 拆层 + /new 冻结）', () => {
+  /** fs 四名（驱动层恒在 compositionFor 尾部——chat 件 open 驱动层注册） */
   const FS_NAMES = ['read', 'write', 'edit', 'ls'];
 
-  it('双驱动各域各套 fs：实例隔离（观察表 per-driver 投影）、全局层零泄漏、retire 拆层他域不动、/reload 后活域存续', async () => {
+  it('双驱动各层各套 fs：实例隔离（观察表 per-driver 投影）、全局层零泄漏、retire 拆层他层不动、/reload 后活层存续', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
     const entryA = runtime.drivers.focused()!;
@@ -1082,40 +1084,40 @@ describe('S2 多驱动工具面（组合域分片：双驱动隔离零泄漏 + r
     const bId = entryB.session.header.sessionId;
     expect(bId).not.toBe(aId);
 
-    // 两域视角各含 fs 四名；裸 list（全局层）零 fs——域层零泄漏
-    const faceA = runtime.tools.listFor(aId);
-    const faceB = runtime.tools.listFor(bId);
+    // 两驱动组成面各含 fs 四名；裸 list（全局层）零 fs——驱动层零泄漏
+    const faceA = runtime.tools.compositionFor(aId);
+    const faceB = runtime.tools.compositionFor(bId);
     expect(faceA.map((t) => t.name).filter((n) => FS_NAMES.includes(n))).toEqual(FS_NAMES);
     expect(faceB.map((t) => t.name).filter((n) => FS_NAMES.includes(n))).toEqual(FS_NAMES);
     expect(runtime.tools.list().some((t) => FS_NAMES.includes(t.name))).toBe(false);
     // 实例隔离：A/B 的 read 是两个 def 实例（观察态 per-driver 的注册面投影——读不过户）
     expect(faceA.find((t) => t.name === 'read')).not.toBe(faceB.find((t) => t.name === 'read'));
 
-    // A retire（退役即停摆的工具面半边）：A 域拆层 fs 消隐、B 面分毫不动
+    // A retire（退役即停摆的工具面半边）：A 驱动层拆层 fs 消隐、B 面分毫不动
     expect(runtime.drivers.retire(aId)).toBe(true);
     expect(runtime.drivers.entries.get(aId)!.retired).toBe(true);
-    expect(runtime.tools.listFor(aId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
+    expect(runtime.tools.compositionFor(aId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
     expect(
       runtime.tools
-        .listFor(bId)
+        .compositionFor(bId)
         .map((t) => t.name)
         .filter((n) => FS_NAMES.includes(n)),
     ).toEqual(FS_NAMES);
 
-    // /reload 后活域存续：注册表本体随 Ring 1 锚不回卷、域层条目挂 DriverEntry
-    //（retire 已拆的 A 域不复活；B 域四名齐全）
+    // /reload 后活层存续：注册表本体随 Ring 1 锚不回卷、驱动层条目挂 DriverEntry
+    //（retire 已拆的 A 层不复活；B 层四名齐全）
     const reloaded = await runtime.reload();
     expect(reloaded.payload).toBeDefined();
     expect(
       runtime.tools
-        .listFor(bId)
+        .compositionFor(bId)
         .map((t) => t.name)
         .filter((n) => FS_NAMES.includes(n)),
     ).toEqual(FS_NAMES);
-    expect(runtime.tools.listFor(aId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
+    expect(runtime.tools.compositionFor(aId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
   });
 
-  it('/new 冻结：旧条目退役（域拆层、条目保留）、新条目新域新会话起步', async () => {
+  it('/new 冻结：旧条目退役（驱动层拆层、条目保留）、新条目新层新会话起步', async () => {
     const { streamFn } = scriptedStream([textMessage('旧答'), textMessage('新答')]);
     const runtime = await assemble({ streamFn });
     const oldId = runtime.session!.header.sessionId;
@@ -1128,16 +1130,78 @@ describe('S2 多驱动工具面（组合域分片：双驱动隔离零泄漏 + r
     // 旧条目：retired 标记在 + 保留在注册表（迟到结算继续落原会话账）
     expect(runtime.drivers.entries.get(oldId)!.retired).toBe(true);
     expect(runtime.drivers.entries.get(oldId)).toBe(oldEntry);
-    // 旧域已拆层（「冻结」的工具面半边——退役会话不再 run，工具面消隐防泄漏累积）
-    expect(runtime.tools.listFor(oldId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
-    // 新域就位：新会话视角 fs 四名齐全 + 聚焦已切新条目
+    // 旧驱动层已拆层（「冻结」的工具面半边——退役会话不再 run，工具面消隐防泄漏累积）
+    expect(runtime.tools.compositionFor(oldId).some((t) => FS_NAMES.includes(t.name))).toBe(false);
+    // 新层就位：新会话组成面 fs 四名齐全 + 聚焦已切新条目
     expect(
       runtime.tools
-        .listFor(newId)
+        .compositionFor(newId)
         .map((t) => t.name)
         .filter((n) => FS_NAMES.includes(n)),
     ).toEqual(FS_NAMES);
     expect(runtime.drivers.focused()!.session.header.sessionId).toBe(newId);
+  });
+
+  it('tools_change 三态路由（域键升级批）：driver 键刷单条目 / domain 键刷该应用全部 / 缺省刷全部；退役条目不刷', async () => {
+    const { streamFn } = scriptedStream([textMessage('答'), textMessage('答二')]);
+    const runtime = await assemble({ streamFn });
+    const aId = runtime.session!.header.sessionId;
+    // A 先跑一轮落 initial（writeHeader 差分化的对照锚——后续变更张才有 diff 基准）
+    await runtime.conversation!.submitOnce('第一问');
+    runtime.drivers.open(); // 双驱动（同属 chat 应用——boot 缺省 app）
+    const bId = runtime.drivers.focused()!.session.header.sessionId;
+    /** 某会话 request/header 张数（tools_change 即时落账的观测面——差分化：首张 initial，后续变更 change） */
+    const headerCount = (id: string): number =>
+      runtime.drivers.entries.get(id)!.session.events.filter((e) => e.type === 'request/header').length;
+    /** 某会话末张 header 的工具名集 */
+    const lastTools = (id: string): string[] =>
+      (
+        runtime.drivers.entries
+          .get(id)!
+          .session.events.filter((e) => e.type === 'request/header')
+          .at(-1)!.data as { toolSchemas: Array<{ name: string }> }
+      ).toolSchemas.map((t) => t.name);
+    /** 最小合法 def（三态注册共用） */
+    const def = (name: string): ToolDefinition => ({
+      name,
+      description: '三态路由测试工具',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    });
+    // 相对基线（open 时驱动层注册可能已落 header——只断言增量，不断言绝对数）
+    const baseA = headerCount(aId);
+    const baseB = headerCount(bId);
+    const appKey = runtime.drivers.entries.get(bId)!.appId; // 双驱动同应用键
+    expect(lastTools(aId)).not.toContain('drv-b'); // 前置锚：A 末张无 B 的驱动层工具
+
+    // ① driver 键：B 驱动层注册 → 只 B 落新张（A 不动——chat 件 open 注册 fs+bash 同款路径）
+    runtime.tools.register(def('drv-b'), { driver: bId, domain: appKey });
+    expect(headerCount(aId)).toBe(baseA);
+    expect(headerCount(bId)).toBe(baseB + 1);
+    expect(lastTools(bId)).toContain('drv-b');
+
+    // ② domain 键：应用域层注册 → 该应用全部非退役条目各落一张（A、B 同属 chat）
+    runtime.tools.register(def('app-x'), { domain: appKey });
+    expect(headerCount(aId)).toBe(baseA + 1);
+    expect(headerCount(bId)).toBe(baseB + 2);
+    expect(lastTools(aId)).toContain('app-x');
+    expect(lastTools(bId)).toContain('app-x');
+
+    // ③ 缺省：全局层注册 → 全部非退役条目各落一张
+    runtime.tools.register(def('glob-1'));
+    expect(headerCount(aId)).toBe(baseA + 2);
+    expect(headerCount(bId)).toBe(baseB + 3);
+
+    // ④ 退役条目不刷：retire A 后再全局注册 → 只 B 落（退役会话的 change 快照是纯噪声）
+    runtime.drivers.retire(aId);
+    runtime.tools.register(def('glob-2'));
+    expect(headerCount(aId)).toBe(baseA + 2);
+    expect(headerCount(bId)).toBe(baseB + 4);
+
+    // B 末张快照已含四件新名（驱动层 + 应用域层 + 全局层两件）
+    for (const n of ['drv-b', 'app-x', 'glob-1', 'glob-2']) {
+      expect(lastTools(bId)).toContain(n);
+    }
   });
 });
 
@@ -1267,8 +1331,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'admin',
       'tool-plugin',
     ]);
-    // 插件工具已进注册表（S2：全局层在前 + fs 域层在后——本会话可见面）
-    expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
+    // 插件工具已进注册表（域键升级批：全局层在前 + fs 驱动层在后——本会话组成面）
+    expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
       'memory_write',
@@ -1601,10 +1665,11 @@ describe('/reload 组合树重载', () => {
       skipped: ['tool-plugin'],
     });
     // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）。
-    // S2：fs 域层挂活驱动 DriverEntry——跨 /reload 存续（本会话可见面照旧含 fs 四件）。
-    // agent_hermes 前移到 grep 后：/reload 重装载插件工具重新追加在其后（Map 注册
-    // 序——幸存者在前），delegable 注册只在 boot、跨 /reload 存续（应用注册表不动）
-    expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
+    // 域键升级批：fs 驱动层挂活驱动 DriverEntry——跨 /reload 存续（本会话组成面
+    // 照旧含 fs 四件）。agent_hermes 前移到 grep 后：/reload 重装载插件工具重新
+    // 追加在其后（Map 注册序——幸存者在前），delegable 注册只在 boot、跨 /reload
+    // 存续（应用注册表不动）
+    expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
       'agent_hermes',

@@ -713,9 +713,9 @@ describe('S5 审批守门归属（fresh 作用域三件 + answerer 标签 + bash
     // 互不串：A 账无 B 的理由、B 账无 A 的理由
     expect(JSON.stringify(a.session.events)).not.toContain('B 的升权理由');
     expect(JSON.stringify(b.session.events)).not.toContain('A 的升权理由');
-    // bash 域注册面：两驱动可见面各含 bash（S5 迁域后域层随驱动落）
-    expect(runtime.tools.listFor(aId).map((d) => d.name)).toContain('bash');
-    expect(runtime.tools.listFor(bId).map((d) => d.name)).toContain('bash');
+    // bash 驱动层注册面：两驱动组成面各含 bash（域键升级批——驱动层随驱动落）
+    expect(runtime.tools.compositionFor(aId).map((d) => d.name)).toContain('bash');
+    expect(runtime.tools.compositionFor(bId).map((d) => d.name)).toContain('bash');
     // 全局层退役：裸 list() 无 bash（诊断口径——无驱动语境面）
     expect(runtime.tools.list().map((d) => d.name)).not.toContain('bash');
   });

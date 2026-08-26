@@ -193,6 +193,12 @@ export type FrontDisplaySink = (envelope: SessionEventEnvelope) => void;
 export interface DriverEntry {
   /** 归属会话（活对象——事件活日志/投影读数共用） */
   readonly session: Session;
+  /**
+   * 本条目应用域键（域键升级批，契约篇 §5.4「域键升级（appId 批）射面细化」）：
+   * open 时从 open({app}) 定型（缺省 chat 域；存量 NULL 会话 resume 按投影入 chat
+   * 域）。tools_change 应用键路由比对与 fs+bash 驱动层注册的第二键同源此字段。
+   */
+  readonly appId: string;
   /** 本会话 durable 三路 sink（直连——handle 半边不经任何转发壳，随条目生死） */
   readonly durable: DurableSinks;
   /** 本条目是否续接既有会话（boot resume 判定——goal 降级触发器等消费） */
@@ -329,8 +335,10 @@ export interface ChatControls {
   /** 落 request/header 快照（diff 语义内建——仅组装参数变化才落；/reload 收口与窗口外变更走此口） */
   writeHeader(): void;
   /**
-   * 重算本条目 loop 工具快照（S2 per-entry——`listFor(本会话)` 原位刷新）。
-   * tools_change 载荷带域键 = 只该域条目刷新；缺省 = 全局层变更全部条目刷新
+   * 重算本条目 loop 工具快照（S2 per-entry——**组成面** `compositionFor(本会话)`
+   * 原位刷新；域键升级批从 listFor 改组成面读）。tools_change 载荷带 driver 键 =
+   * 只该驱动条目刷新；带 domain 键 = 该应用全部条目刷新；缺省 = 全局层变更全部
+   * 条目刷新
    */
   refreshTools(): void;
   /**
@@ -755,11 +763,13 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         );
       }
 
-      /* -- fs + bash 工具族域注册（S2 fs 四件 / S5 bash 迁域——骨架篇 exec 节
-         「bash 注册面迁域」：升权两参数闭包绑**本驱动 approval**〔多驱动下 bash
-         升权 ask 落发起 run 的会话，全局 def 闭包绑全局 approval 的归属错挂就此
-         闭合〕；dispose 挂本条目由 retire 回卷。可写根推导器随迁本件 deps
-         （与守门行同源产物） -- */
+      /* -- fs + bash 工具族驱动层注册（S2 fs 四件 / S5 bash 迁域 + 域键升级批：
+         域键解缠——fs+bash 落**驱动层**（键 = sessionId），不是应用清单声明的、
+         是驱动基建〔观察态 per-driver + 升权闭包绑本驱动 approval〕；双键同携
+         （driver + domain=本驱动 appId）界定碰撞域。升权两参数闭包绑**本驱动
+         approval**〔多驱动下 bash 升权 ask 落发起 run 的会话，全局 def 闭包绑
+         全局 approval 的归属错挂就此闭合〕；dispose 挂本条目由 retire 回卷。
+         可写根推导器随迁本件 deps（与守门行同源产物） -- */
       const fsTools = createFsTools({ writableRoots: deps.writableRoots, workspace: () => deps.workspace });
       const bashDef = createBashTool({
         sandbox: deps.sandbox,
@@ -770,23 +780,27 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         // 词干条目在升权裁决免问面消费，§8.4 增补 2 落码形态③）
         allowlist: deps.allowlist(),
       });
-      const domainDisposers = [...fsTools.tools, bashDef].map((def) => tools.register(def, { domain: sessionId }));
+      const domainDisposers = [...fsTools.tools, bashDef].map((def) =>
+        tools.register(def, { driver: sessionId, domain: appId }),
+      );
       const disposeDomainTools = (): void => {
         for (const dispose of domainDisposers) dispose();
       };
 
-      /* -- per-entry loop 工具快照（S2：`listFor(本会话)` = 全局层 ∪ 本域 fs+bash
-         五名；S5 冷读闸 F2：toAgentTool 显式绑本驱动管道——不传则绑死服务构造时
-         全局管道、per-driver 三件零流量静默空转；活数组原位刷新即达 loop，含 run
-         中途；组合根 ⑧ tools_change 订阅按载荷域键路由到 refreshTools --
+      /* -- per-entry loop 工具快照（S2：**组成面** = 全局层 ∪ 应用域[本 app] ∪
+         驱动层[本会话]——域键升级批从 `listFor(本会话)` 改读 compositionFor（读面
+         键义升级后 listFor 键是 appId，fs+bash 住驱动层）；S5 冷读闸 F2：toAgentTool
+         显式绑本驱动管道——不传则绑死服务构造时全局管道、per-driver 三件零流量
+         静默空转；活数组原位刷新即达 loop，含 run 中途；组合根 ⑧ tools_change
+         订阅按载荷 driver/domain 两键路由到 refreshTools --
          应用工具白名单（第三纵切 agent.toolFilter）：include 名单过滤——与
          SubagentStart.toolFilter 同语义，应用声明它的工具面（不在名单即不暴露） */
       const appToolFilter = app?.agent?.toolFilter;
       /** 本驱动可见 def 清单（白名单过滤后）——loop 快照与 header 快照同一来源 */
       const visibleDefs = () =>
         appToolFilter === undefined
-          ? tools.listFor(sessionId)
-          : tools.listFor(sessionId).filter((def) => appToolFilter.includes(def.name));
+          ? tools.compositionFor(sessionId)
+          : tools.compositionFor(sessionId).filter((def) => appToolFilter.includes(def.name));
       const toolView: AgentTool[] = [];
       const refreshTools = (): void => {
         const fresh = visibleDefs().map((def) => tools.toAgentTool(def, { pipeline: driverPipeline }));
@@ -865,6 +879,7 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       });
       const entry: DriverEntry = {
         session,
+        appId,
         durable,
         resumed,
         driver,

@@ -59,17 +59,18 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
     `[smoke] 默认层 goal 行 ${hasGoalRow ? '✓' : '✗'}  装载状态 ${goalStatus ?? '(无)'}  工具三件${goalToolsOk ? '✓' : '✗'}`,
   );
 
-  // S2 组合域分片后工具面两层：检索族留全局层（caller 无关纯机制），fs 四件
-  // 随 chat 件 open() 注册进本会话域层——boot 判定必须走域面 listFor（sessionId
-  // = 默认会话头），全局 list() 查不到 fs 四名是分片语义非缺失（规范钉死）
+  // 三层注册表（域键升级批）：检索族留全局层（caller 无关纯机制），fs 四件
+  // 随 chat 件 open() 注册进本会话驱动层——boot 判定必须走组成面
+  // compositionFor（sessionId = 默认会话头），全局 list() 查不到 fs 四名是
+  // 三层语义非缺失（规范钉死）；listFor(appId) 键义已升应用域——不再用会话键调
   const sessionKey = runtime.session?.header?.sessionId;
-  const domainToolNames = sessionKey ? runtime.tools.listFor(sessionKey).map((def) => def.name) : [];
+  const domainToolNames = sessionKey ? runtime.tools.compositionFor(sessionKey).map((def) => def.name) : [];
   const searchTools = ['find', 'grep'];
   const fsTools = ['read', 'write', 'edit', 'ls'];
   const searchOk = searchTools.every((name) => toolNames.includes(name));
   const fsOk = fsTools.every((name) => domainToolNames.includes(name));
   console.log(
-    `[smoke] Ring 1 工具面  fs 四件（域面 ${sessionKey ? sessionKey.slice(0, 8) + '…' : '无会话键'}）${fsOk ? '✓' : '✗'}  检索两件${searchOk ? '✓' : '✗'}（bash 随 exec 纵切）`,
+    `[smoke] Ring 1 工具面  fs 四件（组成面 ${sessionKey ? sessionKey.slice(0, 8) + '…' : '无会话键'}）${fsOk ? '✓' : '✗'}  检索两件${searchOk ? '✓' : '✗'}（bash 随 exec 纵切）`,
   );
 
   const failBoot = !bootMemoryOk || !bootSubagentOk || !bootGoalOk || !searchOk || !fsOk || !service;

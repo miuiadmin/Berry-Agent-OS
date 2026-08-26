@@ -7,22 +7,30 @@
  * - 把 ToolDefinition 适配成 loop 面的 AgentTool（execute = 三段管道）；
  * - defineTool 类型 helper（插件侧获得参数/结果类型推断）。
  *
- * 两层注册表（S2 契约篇 §3.2，2026-08-26）：
- * - 全局层：单表 Map（缺省注册面——全部会话可见）；
- * - 域层：`Map<域键, Map<name, def>>`（携带 `domain` 键注册——组合域 = 应用
- *   清单声明的工具面运行时投影；v1 域键 = sessionId interim）。
- * - 查重**双向对称**：域层注册查「全局层 ∪ 本域」；全局层注册查「全局层 ∪
- *   全部活域」——防 mcp 后台异步落全局层与已注册域层同名，listFor 面出双名。
+ * 三层注册表（域键升级批，契约篇 §5.4「域键升级（appId 批）射面细化」，2026-08-27；
+ * S2 两层模型的解缠升级——「域键升 appId」实为解缠非改名）：
+ * - 全局层：单表 Map（缺省注册面——caller 无关纯机制，全部会话可见）；
+ * - 应用域层：`Map<appId, Map<name, def>>`（`domain` 键注册——组合域 = 应用清单
+ *   声明的工具面运行时投影的本义归宿；v1 空层，首批住客随清单投影批到达）；
+ * - 驱动层：`Map<sessionId, Map<name, def>>`（`driver` + `domain` 双键注册——
+ *   fs 四名 + bash 的诚实归宿：观察态 per-driver + 升权闭包绑本驱动 approval，
+ *   它们不是应用清单声明的，是驱动基建）。
+ * - 查重碰撞域三层推广（「任何单一组合面内不得双名」——组合面 = 一个 toolView
+ *   的组成集）：全局层注册查「全局 ∪ 全部应用域 ∪ 全部活驱动层」（全局进一切面）；
+ *   应用域[A] 注册查「全局 ∪ 应用域[A] ∪ app=A 的活驱动层」；驱动层注册（双键）
+ *   查「全局 ∪ 应用域[本 app] ∪ 驱动层[本 sessionId]」。跨应用同名合法（永不同面）。
  * - 注册表本体**随组合根构造存续**（本服务挂 ring1 锚，/reload 不回卷）；
- *   域层条目生死挂调用方（chat 件 DriverEntry——open 注册、retire 回卷）。
- * - tools_change 载荷 `{ kind, name, domain? }`：带键 = 域层变更（只影响该域
- *   的 listFor 面）；缺省 = 全局层变更（影响全部域的 listFor 面）。
+ *   驱动层条目生死挂调用方（chat 件 DriverEntry——open 注册、retire 回卷）。
+ * - tools_change 载荷 `{ kind, name, domain?, driver? }`：`domain`（appId）=
+ *   应用域层变更（刷该应用全部非退役条目）；`driver`（sessionId）= 驱动层变更
+ *   （刷单条目）；缺省 = 全局层变更（刷全部条目）。
  *
  * 注册经 ctx.provide('tools', …) 挂进服务注册表，随作用域 LIFO 回卷；
  * 注销器同时撤注册表条目（幂等）。
  */
 
 import {
+  APP_INVALID,
   AppError,
   CONTEXT_SERVICE_NOT_FOUND,
   TOOL_DESCRIPTION_REJECTED,
@@ -82,9 +90,9 @@ const DESCRIPTION_INJECTION_PATTERNS: readonly RegExp[] = [/\b(curl|wget)\b[^\n|
 export const TOOL_TIMEOUT_FLOOR_MS = 1000;
 
 /**
- * 两层注册表合计件数帽（契约篇 §1.6 资源护栏族 #10①，2026-08-27 刀〇b）：
- * 全局层 + 全部域层求和。良性行为距阈值两个数量级（官方全家桶 ~10¹ 量级），
- * 超限 = 失控或泄漏，fail-loud 拒绝而非静默顶住。
+ * 三层注册表合计件数帽（契约篇 §1.6 资源护栏族 #10①，2026-08-27 刀〇b）：
+ * 全局层 + 全部应用域层 + 全部驱动层求和。良性行为距阈值两个数量级（官方全家桶
+ * ~10¹ 量级），超限 = 失控或泄漏，fail-loud 拒绝而非静默顶住。
  */
 const REGISTRY_TOTAL_LIMIT = 1_000;
 /**
@@ -113,8 +121,12 @@ export function scanToolDescription(description: string): string | undefined {
 export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {}): ToolsService {
   /** 全局层：name → 定义（Map 保注册序——全部会话可见的注册面） */
   const tools = new Map<string, ToolDefinition>();
-  /** 域层：域键 → (name → 定义)（组合域分片——仅该域 listFor 面可见；Map 保注册序） */
-  const domains = new Map<string, Map<string, ToolDefinition>>();
+  /** 应用域层：appId → (name → 定义)（组合域分片——v1 空层，仅 listFor(appId) 面可见；Map 保注册序） */
+  const appDomains = new Map<string, Map<string, ToolDefinition>>();
+  /** 驱动层：sessionId → (name → 定义)（fs 四名 + bash 的驱动基建分片——仅组成面可见；Map 保注册序） */
+  const driverLayers = new Map<string, Map<string, ToolDefinition>>();
+  /** 驱动层归属旁账：sessionId → appId（驱动层注册双键时记——组成面计算与「app=A 的活驱动层」碰撞域界定的键源） */
+  const driverApps = new Map<string, string>();
   /** 注册面打点（B2 P5）：开机以来累计注册/注销次数（高频注册武器化监控数据源） */
   let totalAdds = 0;
   let totalRemoves = 0;
@@ -155,26 +167,69 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         ...(def.timeoutMs !== undefined ? { timeoutMs: Math.max(def.timeoutMs, TOOL_TIMEOUT_FLOOR_MS) } : {}),
       };
       const domainKey = registerOpts?.domain;
+      const driverKey = registerOpts?.driver;
       let layer: Map<string, ToolDefinition>;
-      if (domainKey !== undefined) {
-        // 域层注册：查重 = 全局层 ∪ 本域（双向对称的域侧半边）
-        const existing = domains.get(domainKey);
+      if (driverKey !== undefined) {
+        // 驱动层注册（fs 四名 + bash 的归宿）：须双键同携——driver（sessionId）+
+        // domain（本驱动 appId），碰撞域界定需要（查「全局 ∪ 应用域[本 app] ∪
+        // 驱动层[本 sessionId]」缺一不可算）；缺 domain = 调用方装配缺陷，响亮拒
+        if (domainKey === undefined) {
+          throw new AppError(
+            APP_INVALID,
+            `驱动层注册须双键同携：${def.name}（driver: ${driverKey}）缺 domain（本驱动 appId）——` +
+              `碰撞域界定需要，契约篇 §5.4 域键升级（appId 批）射面细化`,
+          );
+        }
+        const existing = driverLayers.get(driverKey);
         layer = existing !== undefined ? existing : new Map();
-        if (existing === undefined) domains.set(domainKey, layer);
+        if (existing === undefined) {
+          driverLayers.set(driverKey, layer);
+          driverApps.set(driverKey, domainKey);
+        }
+        // 碰撞域 = 全局层 ∪ 应用域[本 app] ∪ 驱动层[本 sessionId]（三层执法形状）
+        if (tools.has(def.name) || appDomains.get(domainKey)?.has(def.name) || layer.has(def.name)) {
+          throw new AppError(
+            TOOL_DUPLICATE,
+            `工具重复注册：${def.name}（驱动层 ${driverKey}〔app ${domainKey}〕；与全局层/应用域/本驱动层已有工具同名）`,
+          );
+        }
+      } else if (domainKey !== undefined) {
+        // 应用域层注册（组合域本义归宿）：碰撞域 = 全局层 ∪ 应用域[A] ∪ app=A 的
+        // 活驱动层（应用域工具进该应用全部驱动的组成面——与任一驱动层条目同名
+        // 即同面双名，照拒）
+        const existing = appDomains.get(domainKey);
+        layer = existing !== undefined ? existing : new Map();
+        if (existing === undefined) appDomains.set(domainKey, layer);
+        for (const [sid, driverLayer] of driverLayers) {
+          if (driverApps.get(sid) === domainKey && driverLayer.has(def.name)) {
+            throw new AppError(
+              TOOL_DUPLICATE,
+              `工具重复注册：${def.name}（应用域 ${domainKey}；与该应用活驱动 ${sid} 的驱动层工具同名）`,
+            );
+          }
+        }
         if (tools.has(def.name) || layer.has(def.name)) {
           throw new AppError(
             TOOL_DUPLICATE,
-            `工具重复注册：${def.name}（域 ${domainKey}；与全局层或本域已有工具同名）`,
+            `工具重复注册：${def.name}（应用域 ${domainKey}；与全局层或本应用域已有工具同名）`,
           );
         }
       } else {
-        // 全局层注册：查重 = 全局层 ∪ **全部活域**（双向对称的全局侧半边——mcp
-        // 后台异步落全局层晚于驱动域注册是真实时序，单向查重会在 listFor 面出双名）
-        for (const [key, layerTools] of domains) {
+        // 全局层注册：碰撞域 = 全局层 ∪ 全部应用域 ∪ 全部活驱动层（全局进一切
+        // 组合面——mcp 后台异步落全局层晚于驱动 open 注册是真实时序，任何面双名都拒）
+        for (const [key, layerTools] of appDomains) {
           if (layerTools.has(def.name)) {
             throw new AppError(
               TOOL_DUPLICATE,
-              `工具重复注册：${def.name}（与活域 ${key} 的域层工具同名——全局层注册须避开全部活域）`,
+              `工具重复注册：${def.name}（与应用域 ${key} 的工具同名——全局层注册须避开全部应用域）`,
+            );
+          }
+        }
+        for (const [key, layerTools] of driverLayers) {
+          if (layerTools.has(def.name)) {
+            throw new AppError(
+              TOOL_DUPLICATE,
+              `工具重复注册：${def.name}（与活驱动 ${key} 的驱动层工具同名——全局层注册须避开全部活驱动层）`,
             );
           }
         }
@@ -186,13 +241,14 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       /* ---- 资源护栏族 #10 双帽（契约篇 §1.6，2026-08-27 刀〇b）----
        * 查重等既有拒绝先过（不消耗频率配额——拼错重试不被限流噪音掩盖），
        * 双帽随后、layer.set 之前：任一拒绝都不留半套注册状态。 */
-      // ①总量帽：两层注册表合计（失控或泄漏——良性行为距阈值两个数量级）
+      // ①总量帽：三层注册表合计（失控或泄漏——良性行为距阈值两个数量级）
       let registered = tools.size;
-      for (const domainLayer of domains.values()) registered += domainLayer.size;
+      for (const appLayer of appDomains.values()) registered += appLayer.size;
+      for (const driverLayer of driverLayers.values()) registered += driverLayer.size;
       if (registered >= REGISTRY_TOTAL_LIMIT) {
         throw new AppError(
           TOOL_REGISTRY_LIMIT,
-          `工具注册表合计已达上限 ${REGISTRY_TOTAL_LIMIT}（全局层 ${tools.size} + 域层 ${registered - tools.size}；契约篇 §1.6 资源护栏族 #10）`,
+          `工具注册表合计已达上限 ${REGISTRY_TOTAL_LIMIT}（全局层 ${tools.size} + 分片层 ${registered - tools.size}；契约篇 §1.6 资源护栏族 #10）`,
         );
       }
       // ②变更频率帽：register/unregister 合计令牌桶（R4 高频注册武器化 header 快照）
@@ -209,11 +265,13 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       const owner = chainCaller();
       if (owner !== undefined) toolOwners.set(normalized, owner);
       totalAdds += 1;
-      // 载荷带域键 = 域层变更（装配层只刷该域的面）；缺省 = 全局层变更（刷全部）
+      // 载荷键分流：driver（sessionId）= 驱动层变更（刷单条目）；domain（appId）=
+      // 应用域层变更（刷该应用全部条目）；缺省 = 全局层变更（刷全部）。
+      // 驱动层注册只发 driver 键（不带 domain——防路由双判）
       ctx.emit(TOOLS_CHANGE_EVENT, {
         kind: 'add',
         name: def.name,
-        ...(domainKey !== undefined ? { domain: domainKey } : {}),
+        ...(driverKey !== undefined ? { driver: driverKey } : domainKey !== undefined ? { domain: domainKey } : {}),
       });
       let done = false;
       return () => {
@@ -223,14 +281,19 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         if (layer.get(def.name) === normalized) {
           layer.delete(def.name);
           totalRemoves += 1;
-          // 域层清空即拆层（活域集合收缩——全局层查重的遍历面随之收窄）
-          if (layer !== tools && layer.size === 0 && domains.get(domainKey!) === layer) {
-            domains.delete(domainKey!);
+          // 分片层清空即拆层（活层集合收缩——全局层/应用域层查重的遍历面随之收窄）
+          if (layer !== tools && layer.size === 0) {
+            if (driverKey !== undefined && driverLayers.get(driverKey) === layer) {
+              driverLayers.delete(driverKey);
+              driverApps.delete(driverKey); // 归属旁账随层同灭（防悬空 sessionId→appId）
+            } else if (domainKey !== undefined && appDomains.get(domainKey) === layer) {
+              appDomains.delete(domainKey);
+            }
           }
           ctx.emit(TOOLS_CHANGE_EVENT, {
             kind: 'remove',
             name: def.name,
-            ...(domainKey !== undefined ? { domain: domainKey } : {}),
+            ...(driverKey !== undefined ? { driver: driverKey } : domainKey !== undefined ? { domain: domainKey } : {}),
           });
           /* 变更频率帽 unregister 侧计费（#10②）：删除与广播先行、计费殿后——
            * 注销器可能在作用域回卷路径跑（dispose 内同步循环），此处抛错会被
@@ -255,10 +318,24 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       return [...tools.values()];
     },
 
-    listFor(domainKey) {
-      // 域视角 = 全局层 ∪ 该域层（未知域键 = 空域层，只返回全局层——合法形态）
-      const layer = domains.get(domainKey);
+    listFor(appId) {
+      // 应用域视角 = 全局层 ∪ 该应用域层（键义升级：参数从 sessionId 改 appId——
+      // 组合域读面本义归位；驱动层内容结构上不在本面 = 子装配排除集退役的机制源）。
+      // 未知应用键 = 空应用域层，只返回全局层（合法形态）
+      const layer = appDomains.get(appId);
       return layer === undefined ? [...tools.values()] : [...tools.values(), ...layer.values()];
+    },
+
+    compositionFor(sessionId) {
+      // 驱动组成面 = 全局层 ∪ 本驱动应用域层 ∪ 本驱动层（域键升级批新增读面——
+      // goal 续跑 wakeToolFilter 等运行期消费方与 chat 件 open 同一投影）。
+      // 归属旁账查无（子代理会话/退役条目/persist:false 诊断形态）= 无驱动语境
+      // → 全局层口径（与 list() 同源回落——诊断面不虚假拼装驱动面）
+      const appId = driverApps.get(sessionId);
+      if (appId === undefined) return [...tools.values()];
+      const appLayer = appDomains.get(appId);
+      const driverLayer = driverLayers.get(sessionId);
+      return [...tools.values(), ...(appLayer?.values() ?? []), ...(driverLayer?.values() ?? [])];
     },
 
     toAgentTool(def, bindOpts) {
@@ -285,9 +362,10 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
     },
 
     stats() {
-      // 现存件数 = 全局层 + 全部域层求和（不缓存——查询低频且各层 Map 已是常量级遍历）
+      // 现存件数 = 全局层 + 全部应用域层 + 全部驱动层求和（不缓存——查询低频且各层 Map 已是常量级遍历）
       let registered = tools.size;
-      for (const layer of domains.values()) registered += layer.size;
+      for (const layer of appDomains.values()) registered += layer.size;
+      for (const layer of driverLayers.values()) registered += layer.size;
       return { registered, totalAdds, totalRemoves };
     },
   };
