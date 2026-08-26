@@ -189,6 +189,12 @@ export type PluginSkipReason = 'disabled' | 'platform';
 export interface PluginPlanRow {
   /** 组合树行 id */
   id: string;
+  /**
+   * 组合树行插件引用透传（装载身份串——组合树 `CompositionRow.plugin` 原样，
+   * 含 `builtin:` 前缀串）。激活行与未解析行携带（归因完整）；skip 行不带。
+   * 应用内存预算（budget.memoryMb）经它与清单 components 字面比对命中 worker 行（join 键）。
+   */
+  plugin?: string;
   /** 入口文件绝对路径（文件插件激活行必有；builtin 行无） */
   entry?: string;
   /** 官方件模块引用（`builtin:` 行激活时必有——注册表查得，不经 jiti） */

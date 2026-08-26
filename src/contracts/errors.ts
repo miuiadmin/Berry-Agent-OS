@@ -338,6 +338,8 @@ export const GOAL_TRANSITION_INVALID = registerErrorCode('GOAL_TRANSITION_INVALI
 export const APP_INVALID = registerErrorCode('APP_INVALID');
 /** apps：应用 id 撞名（官方裸名是保留字——第三方强制含 `/` 域前缀正是防撞官方裸名的碰撞域，契约篇 §5.4 冷读钉死） */
 export const APP_DUPLICATE = registerErrorCode('APP_DUPLICATE');
+/** apps：进入面未知应用 id（CLI `--app` / TUI `/app <id>`——注册表查无即此码；第三纵切，契约篇 §5.4） */
+export const APP_NOT_FOUND = registerErrorCode('APP_NOT_FOUND');
 /** app：关停序 quiesce 断言失败——全 settle 后仍有非退役驱动 isRunning（内核篇 §5.3 / 骨架篇 §1.3 S6 形态⑤：防「flush 时仍有在写者」的撕裂尾，断言是防不是治，正确性兜底是恢复协议） */
 export const APP_SHUTDOWN_QUIESCE_VIOLATED = registerErrorCode('APP_SHUTDOWN_QUIESCE_VIOLATED');
 

@@ -65,12 +65,35 @@ export const AppManifestSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
-    /** 授权申请（装载期与守门行 grants 交集；v1 schema 仅收 writableRoots——approval? 键语义随第三纵切再钉） */
+    /** 授权申请（装载期与守门行 grants 交集；approval 键随第三纵切收——§5.4 第 4 条） */
     grants: Type.Optional(
       Type.Object(
         {
           /** 申请的可写根（绝对路径；与 safety 守门行安装面交集后生效） */
           writableRoots: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+          /**
+           * 审批预设槽位申请（第二十四批案 C）：应用申请 (sandboxMode, approvalPolicy)
+           * 打包预设，装配层解析为两 knob 装配参数。词汇镜像 safety 面
+           * SandboxMode / ApprovalPolicyMode（contracts 不依赖 safety——DAG 反向；
+           * 装配点类型收窄双保险）。优先序 = 显式旗标 > 应用预设 > 全局缺省。
+           */
+          approval: Type.Optional(
+            Type.Object(
+              {
+                /** 沙箱档预设（'read-only' | 'workspace-write' | 'danger-full-access'） */
+                sandboxMode: Type.Optional(
+                  Type.Union([
+                    Type.Literal('read-only'),
+                    Type.Literal('workspace-write'),
+                    Type.Literal('danger-full-access'),
+                  ]),
+                ),
+                /** 审批策略预设（'ask' | 'never'） */
+                approvalPolicy: Type.Optional(Type.Union([Type.Literal('ask'), Type.Literal('never')])),
+              },
+              { additionalProperties: false },
+            ),
+          ),
         },
         { additionalProperties: false },
       ),
@@ -81,6 +104,13 @@ export const AppManifestSchema = Type.Object(
         {
           /** 当日 tokens 限额（in+out 合计；跨运行聚合 = subagent per-child tokenBudget 的日聚合版） */
           dailyTokens: Type.Integer({ minimum: 1 }),
+          /**
+           * 内存维度预算（MB，正整数）：应用组件命中 worker 行时装载期映射
+           * resourceLimits.maxOldGenerationSizeMb（Node 原生执法）；多应用共享
+           * 组件取最严（min）；main 域组件无硬执行面（声明性）。缺省 = 宿主
+           * 全局 512MB 兜底。
+           */
+          memoryMb: Type.Optional(Type.Integer({ minimum: 1 })),
         },
         { additionalProperties: false },
       ),

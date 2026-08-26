@@ -49,6 +49,16 @@ export interface BridgeFleetOptions {
   /** resourceLimits 宿主全局缺省（预算内存维度——只限 JS 堆，非安全墙） */
   readonly resourceLimits?: Readonly<Record<string, number>>;
   /**
+   * 按行资源限覆盖（第三纵切 budget.memoryMb 落码形态，契约篇 §5.4 第 5 条）：
+   * worker 行装载时先问此钩子——键 = 行 plugin 装载身份串（与组件在场断言同键），
+   * 返回值优先于全局缺省；undefined = 回落 opts.resourceLimits。应用内存预算的
+   * per-row 映射位（多应用共享组件由装配层先行取严 min，本件不重复裁决）。
+   */
+  readonly rowResourceLimits?: (row: {
+    readonly id: string;
+    readonly plugin?: string;
+  }) => Readonly<Record<string, number>> | undefined;
+  /**
    * 运行时行失败回写面（ctx.plugins.markFailed 注入物——契约篇 §1.7 死亡
    * 结算：plugin/failed 事件广播 + list 状态源同步转 failed，两件同一时点）。
    * 事件归本舰队、状态归插件管理服务——分工不重不漏。
@@ -108,6 +118,10 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
   const loader: WorkerRowLoader = {
     /* worker 半装载 = spawn 专属域 + 委托 domain.load（boot 解析即 spawn） */
     load(row) {
+      // 按行资源限优先（应用内存预算 per-row 映射——预算是申请面，装配层已取严）；
+      // 钩子未命中/未启用回落宿主全局缺省（undefined = 不设限，与原语义同）
+      const rowLimits = opts.rowResourceLimits !== undefined ? opts.rowResourceLimits(row) : undefined;
+      const resourceLimits = rowLimits ?? opts.resourceLimits;
       // onFreeze 闭包需引用域自身（spawn 后才存在）——先声明后接线的同款两步
       let self!: WorkerDomain;
       const domain = spawnWorkerDomain({
@@ -117,7 +131,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         // 域 id 用行 id 归因（诊断面：日志/事件信封可直查组合树行）
         workerId: `w:${row.id}`,
         ...(opts.execArgv !== undefined ? { execArgv: opts.execArgv } : {}),
-        ...(opts.resourceLimits !== undefined ? { resourceLimits: opts.resourceLimits } : {}),
+        ...(resourceLimits !== undefined ? { resourceLimits } : {}),
         ...(opts.loadTimeoutMs !== undefined ? { loadTimeoutMs: opts.loadTimeoutMs } : {}),
         // 心跳监督编舞（契约篇 §1.7）：冻结 → watchdog 杀域（kill 走意外死亡
         // 全流程——域死回卷 + plugin/failed 结算；terminate 是编舞终点不适用）

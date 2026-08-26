@@ -318,4 +318,42 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('行级资源限映射（第三纵切 budget.memoryMb）：rowResourceLimits 按行命中优先于全局——钩子值真达 spawn（Node 原生执法）', async () => {
+    const { root, anchor, dir } = setupFixture('fleet-row-oom');
+    const oomEntry = join(dir, 'fx-oom.ts');
+    writeFileSync(oomEntry, FX_OOM);
+    /** 死亡结算记录（行限 48MB 触顶走意外死亡全流程——与全局限同一条链） */
+    const marked: Array<{ id: string; code: string; message: string }> = [];
+    const oomEvents: Array<{ rowId: string; workerId: string; diagnostic: string }> = [];
+    anchor.on('worker/oom', (p: { rowId: string; workerId: string; diagnostic: string }) => oomEvents.push(p));
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+      // 全局缺省刻意宽（512MB）：本用例只有行钩子命中才收紧——OOM 发生本身
+      // 即证明钩子值到达 spawn（否则按全局 512MB 增长面跑不完）
+      resourceLimits: { maxOldGenerationSizeMb: 512 },
+      // 应用内存预算真实形态：清单 components 串（plugin 引用）→ 行限映射
+      rowResourceLimits: (row) => (row.plugin === 'acme/oomy' ? { maxOldGenerationSizeMb: 48 } : undefined),
+      markFailed: (id, code, message) => marked.push({ id, code, message }),
+    });
+    // 行携带 plugin 引用（PluginPlanRow.plugin 透传——join 键在场上）
+    const row: PluginPlanRow = { id: 'oomrow', plugin: 'acme/oomy', entry: oomEntry, runtime: 'worker' };
+    await fleet.loader.load(row);
+    const scope = anchor.fork({ name: 'oomrow', rowId: 'oomrow' });
+    await fleet.loader.apply({ ...row, config: { slot: 'oomrow' } }, scope);
+    const taps = root.get<Record<string, () => Promise<unknown>>>('fleet/taps-oomrow');
+    const inflight = taps.grow!().catch((e: unknown) => e);
+    await until(() => marked.length > 0 && oomEvents.length > 0);
+    // 行限执法与全局限同一结算链：BRIDGE_WORKER_EXITED + 内存超限签名 + ooms 归因
+    expect(marked[0]).toMatchObject({ id: 'oomrow', code: BRIDGE_WORKER_EXITED });
+    expect(marked[0]!.message).toContain('reaching memory limit');
+    expect(oomEvents[0]).toMatchObject({ rowId: 'oomrow', workerId: 'w:oomrow' });
+    expect(((await inflight) as { code?: string }).code).toBe(BRIDGE_WORKER_EXITED);
+    expect(fleet.stats()).toMatchObject({ live: 0, crashed: 1, ooms: 1 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

@@ -412,13 +412,22 @@ export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry
             `组合树行 ${row.id}：builtin 官方件不可声明 runtime: worker（官方随包件恒 main 域执行，契约篇 §1.7）`,
           );
         }
-        plan.push({ id: row.id, builtin: module, ...(row.config !== undefined ? { config: row.config } : {}) });
+        plan.push({
+          id: row.id,
+          // 引用透传（装载身份串）：应用内存预算 join 键——与清单 components 字面同域
+          plugin: ref,
+          builtin: module,
+          ...(row.config !== undefined ? { config: row.config } : {}),
+        });
       }
       continue;
     }
     const entry = resolvePluginEntry(ref, dataDir);
     plan.push({
       id: row.id,
+      // 引用透传（装载身份串）：应用内存预算 join 键——激活/未解析两态都带
+      //（未解析行不装载无消费面，带上无妨且归因完整）
+      plugin: ref,
       ...(entry !== undefined
         ? { entry }
         : {

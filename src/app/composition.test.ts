@@ -120,7 +120,8 @@ describe('overlay 装载与拒绝式校验', () => {
     writeOverlay(dataDir, `  - id: local\n    plugin: ${entry}\n`);
     const report = loadUserComposition(dataDir);
     expect(report.rows).toEqual([{ id: 'local', plugin: entry }]);
-    expect(report.plan).toEqual([{ id: 'local', entry }]);
+    // plugin 引用透传（第三纵切 join 键：应用内存预算按行命中 worker 行）
+    expect(report.plan).toEqual([{ id: 'local', plugin: entry, entry }]);
   });
 
   it('未知字段 / 缺 id / 顶层形状错：COMPOSITION_ROW_INVALID 拒绝式（不误读）', () => {
@@ -172,7 +173,7 @@ describe('runtime 运行域字段', () => {
     writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: worker\n`);
     const report = loadUserComposition(dataDir);
     expect(report.rows).toEqual([{ id: 'demo', plugin: entry, runtime: 'worker' }]);
-    expect(report.plan).toEqual([{ id: 'demo', entry, runtime: 'worker' }]);
+    expect(report.plan).toEqual([{ id: 'demo', plugin: entry, entry, runtime: 'worker' }]);
   });
 
   it('runtime 显式 main：与缺省同义（合法值域之一，不制造第二形态）', () => {
@@ -180,7 +181,7 @@ describe('runtime 运行域字段', () => {
     const entry = writeEntryFile(dataDir);
     writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: main\n`);
     const report = loadUserComposition(dataDir);
-    expect(report.plan).toEqual([{ id: 'demo', entry, runtime: 'main' }]);
+    expect(report.plan).toEqual([{ id: 'demo', plugin: entry, entry, runtime: 'main' }]);
   });
 
   it('值域拒绝式：external（案三预留词未开闸）与非法类型一律 COMPOSITION_ROW_INVALID', () => {
@@ -258,8 +259,8 @@ describe('禁用解析（挂载休眠）', () => {
     );
     const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([
-      { id: 'gated', skip: 'platform' }, // 命中当前平台——不解析入口
-      { id: 'ungated', entry }, // 他平台门控不生效——照常激活
+      { id: 'gated', skip: 'platform' }, // 命中当前平台——不解析入口（skip 行不带 plugin）
+      { id: 'ungated', plugin: entry, entry }, // 他平台门控不生效——照常激活
     ]);
   });
 });
@@ -277,7 +278,11 @@ describe('插件入口解析', () => {
     expect(resolvePluginEntry('fake-pkg', dataDir)).toBe(join(pkgDir, 'custom-entry.ts'));
     // 经组合树同路径（overlay 裸名行全链路）
     writeOverlay(dataDir, '  - id: p1\n    plugin: fake-pkg\n');
-    expect(loadUserComposition(dataDir).plan[0]).toEqual({ id: 'p1', entry: join(pkgDir, 'custom-entry.ts') });
+    expect(loadUserComposition(dataDir).plan[0]).toEqual({
+      id: 'p1',
+      plugin: 'fake-pkg',
+      entry: join(pkgDir, 'custom-entry.ts'),
+    });
   });
 
   it('无 harness 字段 → 约定目录 extensions/index.ts 回退 → 包根 index.ts 兜底', () => {
@@ -306,6 +311,8 @@ describe('插件入口解析', () => {
     expect((report.plan[0] as { id: string }).id).toBe('missing');
     expect((report.plan[0] as { unresolved?: string }).unresolved).toContain('永不自动安装');
     expect((report.plan[0] as { entry?: string }).entry).toBeUndefined();
+    // 未解析行也带 plugin 引用（归因完整——join 键在场上，无消费面而已）
+    expect((report.plan[0] as { plugin?: string }).plugin).toBe('absent-pkg');
   });
 });
 
@@ -468,16 +475,16 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'admin', plugin: 'builtin:admin' },
     ]);
     expect(report.plan).toEqual([
-      { id: 'chat', builtin: stubChat },
-      { id: 'memory', builtin: stubBuiltin, config: { recallTopK: 5 } },
-      { id: 'subagent', builtin: stubSubagent },
-      { id: 'goal', builtin: stubGoal },
-      { id: 'scheduler', builtin: stubScheduler },
-      { id: 'mcp', builtin: stubMcp },
-      { id: 'tools', builtin: stubTools },
-      { id: 'web', builtin: stubWeb },
-      { id: 'compaction', builtin: stubCompaction },
-      { id: 'admin', builtin: stubAdmin },
+      { id: 'chat', plugin: 'builtin:chat', builtin: stubChat },
+      { id: 'memory', plugin: 'builtin:memory', builtin: stubBuiltin, config: { recallTopK: 5 } },
+      { id: 'subagent', plugin: 'builtin:subagent', builtin: stubSubagent },
+      { id: 'goal', plugin: 'builtin:goal', builtin: stubGoal },
+      { id: 'scheduler', plugin: 'builtin:scheduler', builtin: stubScheduler },
+      { id: 'mcp', plugin: 'builtin:mcp', builtin: stubMcp },
+      { id: 'tools', plugin: 'builtin:tools', builtin: stubTools },
+      { id: 'web', plugin: 'builtin:web', builtin: stubWeb },
+      { id: 'compaction', plugin: 'builtin:compaction', builtin: stubCompaction },
+      { id: 'admin', plugin: 'builtin:admin', builtin: stubAdmin },
     ]);
   });
 
@@ -494,7 +501,7 @@ describe('builtin: 保留前缀解析', () => {
     writeOverlay(dataDir, `  - id: memory\n    plugin: ${entry}\n`);
     const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin });
     // chat 行（首行）此注册表未给 → unresolved 占 plan[0]；memory 行在 plan[1]
-    expect(report.plan[1]).toEqual({ id: 'memory', entry });
+    expect(report.plan[1]).toEqual({ id: 'memory', plugin: entry, entry });
   });
 
   it('overlay 禁用 memory 行：非 fixed 行真·可卸（skip，不要求注册表命中）', () => {

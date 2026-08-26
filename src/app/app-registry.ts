@@ -19,8 +19,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { AppError, APP_DUPLICATE, APP_INVALID } from '../contracts/errors.js';
+import { AppError, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
 import { validateAppManifest, type AppManifest } from '../contracts/app.js';
+import type { SubagentStart } from '../contracts/subagent.js';
 import type { CompositionReport } from './composition.js';
 
 /**
@@ -105,4 +106,51 @@ export function assertAppComponents(
     if (missing.length > 0) gaps.set(id, missing);
   }
   return gaps;
+}
+
+/**
+ * 进入面应用解析（第三纵切，契约篇 §5.4 第 2 条）：CLI `--app` / TUI `/app <id>`
+ * 的 id → 清单解析。查无 = APP_NOT_FOUND（message 披露在册可用清单——自助排错，
+ * 与虚拟面撞错附清单同纪律）；查有即返回清单（进入路径自行做组件在场检查——
+ * 缺场应用走应用级隔离语义，不在此码）。
+ *
+ * @param apps 官方清单表（loadOfficialApps 产物）
+ * @param id 应用 id（进入面用户输入）
+ */
+export function resolveApp(apps: ReadonlyMap<string, AppManifest>, id: string): AppManifest {
+  const manifest = apps.get(id);
+  if (manifest !== undefined) return manifest;
+  const available = [...apps.keys()].join('、');
+  throw new AppError(
+    APP_NOT_FOUND,
+    `未知应用：${id}${available === '' ? '（在册应用：无——组合树空装或清单目录空）' : `（在册应用：${available}）`}`,
+  );
+}
+
+/**
+ * delegable 应用的委派请求合并钩子（第三纵切，契约篇 §5.4 第 2 条委派形态）：
+ * 把清单 agent 段作为静态半边注入委派请求——语义与声明式 agents/*.md 同款
+ * （inprocess.mergeRequest 消费）：persona 钉死（应用人格是身份不是偏好）、
+ * toolFilter 交集（两侧白名单同时执法——请求未给名单 = 全量 → 用清单名单）、
+ * model 覆盖（装配默认位钉死引擎）。合并只收窄不改宽，能力协商在合并前已过。
+ *
+ * @param manifest 应用清单（agent 段缺席 = 恒等合并——纯清单应用委派裸跑）
+ */
+export function mergeRequestForApp(manifest: AppManifest): (request: SubagentStart) => SubagentStart {
+  const agent = manifest.agent;
+  if (agent === undefined) return (request) => request;
+  return (request) => ({
+    ...request,
+    ...(agent.persona !== undefined ? { persona: agent.persona } : {}),
+    ...(agent.toolFilter !== undefined
+      ? {
+          // 请求侧未给名单 = 全量 → 用清单名单；给了 = 交集（两侧白名单同时执法）
+          toolFilter:
+            request.toolFilter === undefined
+              ? agent.toolFilter
+              : agent.toolFilter.filter((tool) => request.toolFilter!.includes(tool)),
+        }
+      : {}),
+    ...(agent.model !== undefined ? { model: agent.model } : {}),
+  });
 }

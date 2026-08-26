@@ -8,9 +8,15 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppError, APP_DUPLICATE, APP_INVALID } from '../contracts/errors.js';
+import { AppError, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
 import { validateAppManifest } from '../contracts/app.js';
-import { assertAppComponents, loadOfficialApps, OFFICIAL_APPS_DIR } from './app-registry.js';
+import {
+  assertAppComponents,
+  loadOfficialApps,
+  mergeRequestForApp,
+  OFFICIAL_APPS_DIR,
+  resolveApp,
+} from './app-registry.js';
 import type { CompositionReport } from './composition.js';
 
 /** 最小合法清单素材（逐用例覆写单字段造坏形状） */
@@ -60,6 +66,35 @@ describe('validateAppManifest：schema 拒绝式校验', () => {
   it('budget.dailyTokens 非正整数拒（0 / 小数 / 字符串）', () => {
     for (const bad of [0, 1.5, '1000']) {
       expectCode(() => validateAppManifest({ ...base, budget: { dailyTokens: bad } }, '测试'), APP_INVALID);
+    }
+  });
+
+  it('grants.approval 收键（第三纵切）：两 knob 合法词汇通过、词汇外值拒', () => {
+    // 合法：档位与审批策略各取一值（词汇镜像 safety 面 SandboxMode/ApprovalPolicyMode）
+    const m = validateAppManifest(
+      { ...base, grants: { approval: { sandboxMode: 'read-only', approvalPolicy: 'never' } } },
+      '测试',
+    );
+    expect(m.grants?.approval?.sandboxMode).toBe('read-only');
+    expect(m.grants?.approval?.approvalPolicy).toBe('never');
+    // 词汇外值拒绝（沙箱档/策略两维同纪律——拒绝式不宽容）
+    expectCode(
+      () => validateAppManifest({ ...base, grants: { approval: { sandboxMode: 'full' } } }, '测试'),
+      APP_INVALID,
+    );
+    expectCode(
+      () => validateAppManifest({ ...base, grants: { approval: { approvalPolicy: 'always' } } }, '测试'),
+      APP_INVALID,
+    );
+    // 未知子键拒绝（additionalProperties: false 全层贯穿）
+    expectCode(() => validateAppManifest({ ...base, grants: { approval: { roots: ['/tmp'] } } }, '测试'), APP_INVALID);
+  });
+
+  it('budget.memoryMb 收键（第三纵切补第二纵切欠账）：正整数通过、非正/小数拒', () => {
+    const m = validateAppManifest({ ...base, budget: { dailyTokens: 1000, memoryMb: 256 } }, '测试');
+    expect(m.budget?.memoryMb).toBe(256);
+    for (const bad of [0, -1, 1.5, '256']) {
+      expectCode(() => validateAppManifest({ ...base, budget: { memoryMb: bad } }, '测试'), APP_INVALID);
     }
   });
 
@@ -183,5 +218,55 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
       [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
     );
     expect(assertAppComponents(apps, comp).size).toBe(0);
+  });
+});
+
+/* ---------------- 第三纵切：进入面解析 + 委派合并钩子 ---------------- */
+
+describe('resolveApp：进入面 id 解析（CLI --app / TUI /app <id>）', () => {
+  const apps = new Map([
+    ['chat', { id: 'chat', label: '对话', components: ['builtin:chat'] }],
+    ['hermes', { id: 'hermes', label: 'Hermes', components: ['builtin:chat'] }],
+  ]) as Parameters<typeof resolveApp>[0];
+
+  it('查有返回清单；查无 = APP_NOT_FOUND 且 message 披露在册清单（自助排错）', () => {
+    expect(resolveApp(apps, 'hermes').id).toBe('hermes');
+    const err = expectCode(() => resolveApp(apps, 'no-such'), APP_NOT_FOUND);
+    expect(err.message).toContain('no-such');
+    expect(err.message).toContain('chat、hermes'); // 在册清单随错披露
+  });
+
+  it('空注册表 = 无——组合树空装语义的说明面（不是静默空串）', () => {
+    const err = expectCode(() => resolveApp(new Map(), 'x'), APP_NOT_FOUND);
+    expect(err.message).toContain('在册应用：无');
+  });
+});
+
+describe('mergeRequestForApp：delegable 委派请求合并钩子（与 agents/*.md 同语义）', () => {
+  /** 基准请求（请求侧自由半边——合并只收窄不改宽） */
+  const request = { prompt: '干活' } as Parameters<ReturnType<typeof mergeRequestForApp>>[0];
+
+  it('无 agent 段 = 恒等合并（纯清单应用委派裸跑）', () => {
+    const merge = mergeRequestForApp({ id: 'x', label: 'X', components: ['builtin:chat'] });
+    expect(merge(request)).toEqual(request);
+  });
+
+  it('persona 钉死 + model 覆盖 + toolFilter 交集（请求未给名单 = 用清单名单）', () => {
+    const merge = mergeRequestForApp({
+      id: 'x',
+      label: 'X',
+      components: ['builtin:chat'],
+      agent: { persona: '应用人格', model: 'probe/model-x', toolFilter: ['read', 'grep', 'bash'] },
+    });
+    // 请求未给 toolFilter → 全量 → 用清单名单
+    expect(merge(request)).toMatchObject({
+      persona: '应用人格',
+      model: 'probe/model-x',
+      toolFilter: ['read', 'grep', 'bash'],
+    });
+    // 请求给了名单 → 交集（两侧白名单同时执法）
+    const narrowed = merge({ ...request, toolFilter: ['read', 'write'], persona: '请求人格' } as typeof request);
+    expect(narrowed.toolFilter).toEqual(['read']); // 交集；write 不在清单即被裁
+    expect(narrowed.persona).toBe('应用人格'); // persona 钉死——请求人格被清单覆盖
   });
 });
