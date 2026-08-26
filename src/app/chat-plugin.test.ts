@@ -384,8 +384,9 @@ describe('S1 多驱动注册表（registry/front 键控路由）', () => {
     const { runtime } = await assemble({ streamFn });
     const front = runtime.front;
     const seen: string[] = [];
-    front.addDisplay((event) => {
-      seen.push(event.type);
+    // S3 信封化：front 展示消费者收 {sessionId, event} 信封（转接层补本会话键）
+    front.addDisplay((envelope) => {
+      seen.push(envelope.event.type);
     });
     const first = runtime.drivers.focused()!;
 
@@ -403,5 +404,183 @@ describe('S1 多驱动注册表（registry/front 键控路由）', () => {
     expect(seen).toContain('message_end');
     expect(second.session.events.filter((e) => e.type === 'user/message')).toHaveLength(1);
     expect(first.session.events.filter((e) => e.type === 'user/message')).toHaveLength(1);
+  });
+});
+
+/* ---------------- 用例：S3 前台切换与退出扇出（契约篇 §5.4 S3 射面） ---------------- */
+
+/** 挂起流（start 后挂起直到 release/abort——run 中切换与退出扇出的在飞形态） */
+function pendingStream() {
+  let release!: () => void;
+  /** 完成门闩（显式 release 才放行 done） */
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const message = textMessage('慢答');
+  // signal 是第三个位置参数（contracts/llm.ts StreamFn 签名），不在 options 里
+  const streamFn: StreamFn = (_context: LlmContext, _options: StreamFnOptions, signal?: AbortSignal) => ({
+    [Symbol.asyncIterator]() {
+      let index = 0;
+      const events = [{ type: 'start' as const, partial: { ...message, content: [] } }];
+      return {
+        next: async () => {
+          if (index < events.length) return { value: events[index++]!, done: false as const };
+          // 挂起直到显式 release 或 abort（abort → error 终止事件编码 aborted——
+          // 对齐 pi StreamFn「永不抛错、abort 编码进流内 error 事件」契约；真
+          // provider 同语义）。已 abort 的 signal 事件只发一次、事后挂监听收不到
+          // ——先短路再进 race。
+          if (signal?.aborted) {
+            return {
+              value: {
+                type: 'error' as const,
+                reason: 'aborted' as const,
+                error: { ...message, stopReason: 'aborted' },
+              },
+              done: false as const,
+            };
+          }
+          await Promise.race([
+            gate,
+            ...(signal !== undefined
+              ? [
+                  new Promise<never>((_, reject) =>
+                    signal.addEventListener('abort', () => reject(new Error('aborted'))),
+                  ),
+                ]
+              : []),
+          ]).catch(() => undefined);
+          if (signal?.aborted) {
+            // race 后再核一次（事件触发的 abort 也在这一侧收口——统一 error 终止形）
+            return {
+              value: {
+                type: 'error' as const,
+                reason: 'aborted' as const,
+                error: { ...message, stopReason: 'aborted' },
+              },
+              done: false as const,
+            };
+          }
+          return { value: { type: 'done' as const, reason: 'stop', message }, done: false as const };
+        },
+      };
+    },
+    result: async () => message,
+  });
+  return { streamFn, release };
+}
+
+describe('S3 前台切换程序面（switchTo / onFocusChange 三写点 / 同值零通知）', () => {
+  it('三写点各通知恰一次、同值写零通知；退役/查无 false', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const { runtime } = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const first = registry.focused()!;
+    const aId = first.session.header.sessionId;
+    const notifications: string[] = [];
+    const dispose = registry.onFocusChange((id) => notifications.push(id));
+
+    // 同值写零通知（switchTo 到已聚焦会话 = 无变化，防无谓清屏重画）
+    expect(registry.switchTo(aId)).toBe(true);
+    expect(notifications).toHaveLength(0);
+
+    // 写点一：open 新开
+    const second = registry.open()!;
+    const bId = second.session.header.sessionId;
+    expect(notifications).toEqual([bId]);
+
+    // 写点三：switchTo 活条目即切
+    expect(registry.switchTo(aId)).toBe(true);
+    expect(notifications).toEqual([bId, aId]);
+
+    // 写点二：open 幂等命中既有条目（同 id 再 open 也切 focus，也是写点）
+    const again = registry.open({ resume: bId });
+    expect(again).toBe(second);
+    expect(notifications).toEqual([bId, aId, bId]);
+
+    // 退役/查无 false（switchTo 守同一活条目判据——/app 清单只列活条目）
+    expect(registry.switchTo('查无的会话键')).toBe(false);
+    registry.retire(aId);
+    expect(registry.switchTo(aId)).toBe(false);
+    dispose();
+  });
+});
+
+describe('S3 信封转接（双驱动事件各带归属键——互不绞屏的数据前提）', () => {
+  it('双驱动先后 run：事件信封 sessionId 各归各、无键漂移', async () => {
+    const { streamFn } = scriptedStream([textMessage('答甲'), textMessage('答乙')]);
+    const { runtime } = await assemble({ streamFn });
+    const front = runtime.front;
+    const envelopes: { sessionId: string; type: string }[] = [];
+    front.addDisplay((envelope) => envelopes.push({ sessionId: envelope.sessionId, type: envelope.event.type }));
+    const first = runtime.drivers.focused()!;
+    const aId = first.session.header.sessionId;
+
+    // A（聚焦）先跑一轮：事件即时转接路（信封带 A 键）
+    front.submit('问甲');
+    await first.driver.settle();
+    const second = runtime.drivers.open()!; // focus 切 B（open 语义含聚焦）
+    const bId = second.session.header.sessionId;
+    front.submit('问乙');
+    await second.driver.settle();
+
+    // B 跑时 A 的迟到事件也照达（后台信封仍带 A 键——审计面）；此处 B 在跑，
+    // A 已结算完——直接断言两路键各归各
+    const aTypes = envelopes.filter((e) => e.sessionId === aId).map((e) => e.type);
+    const bTypes = envelopes.filter((e) => e.sessionId === bId).map((e) => e.type);
+    expect(aTypes).toContain('message_end'); // A 的 run 事件经即时转接路（带 A 键）
+    expect(bTypes).toContain('message_end'); // B 的 run 事件经 open 全量转接路（带 B 键）
+    // 无键漂移：全部信封键 ∈ {A, B}（转接闭包捕获各驱动自己的会话键）
+    expect(envelopes.every((e) => e.sessionId === aId || e.sessionId === bId)).toBe(true);
+  });
+
+  it('非聚焦者事件照达（切走后旧会话 run 在飞——后台事件仍带本会话键）', async () => {
+    const { streamFn, release } = pendingStream();
+    const { runtime } = await assemble({ streamFn });
+    const front = runtime.front;
+    const envelopes: { sessionId: string; type: string }[] = [];
+    front.addDisplay((envelope) => envelopes.push({ sessionId: envelope.sessionId, type: envelope.event.type }));
+    const first = runtime.drivers.focused()!;
+    const aId = first.session.header.sessionId;
+
+    // A 开跑（挂起流——run 在飞中）
+    front.submit('慢问');
+    await spinUntil(() => first.driver.isRunning, 'A 在飞');
+    // 开 B（A 变非聚焦——open 不退役、A 的 run 照跑）
+    const second = runtime.drivers.open()!;
+    const bId = second.session.header.sessionId;
+    expect(front.focus.sessionId).toBe(bId); // open 语义含聚焦
+    release(); // 放行 A 的流终值
+    await first.driver.settle();
+
+    // A 的事件在非聚焦态照达（信封带 A 键——TUI 侧据此落摘要行/切入重画）
+    const aTypes = envelopes.filter((e) => e.sessionId === aId).map((e) => e.type);
+    expect(aTypes).toContain('agent_end'); // 迟到结算照达（审计面）
+    expect(aTypes).toContain('message_end');
+    expect(envelopes.every((e) => e.sessionId === aId || e.sessionId === bId)).toBe(true);
+    void second;
+  });
+});
+
+describe('S3 退出扇出（requestQuit 从聚焦单路扩为全部活驱动 abort）', () => {
+  it('双活驱动同时在飞 quit：全部被 abort、settle 必达不挂死', async () => {
+    const { streamFn, release } = pendingStream();
+    const { runtime, agent } = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const a = registry.focused()!;
+    const b = registry.open()!; // focus=B；A 驻留后台
+
+    // 双驱动同时在飞：B 经前台聚焦 submit、A 经显式键后台投递（多驱动并行的本义场景）
+    front_submit: {
+      runtime.front.submit('问 B');
+      await spinUntil(() => b.driver.isRunning, 'B 在飞');
+      agent.sendUserMessage('问 A', { session: a.session.header.sessionId });
+      await spinUntil(() => a.driver.isRunning, 'A 在飞');
+    }
+    // 优雅退出：聚焦者 B 走 requestQuit 全语义 + A 直接 abort（扇出）
+    runtime.front.requestQuit();
+    await runtime.front.settle(); // 扇出后必达——不挂死等后台 run 自然跑完
+    expect(a.driver.isRunning).toBe(false);
+    expect(b.driver.isRunning).toBe(false);
+    void release; // gate 已无消费者（abort 路已短路）——防御位不调
   });
 });

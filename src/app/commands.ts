@@ -81,6 +81,26 @@ export interface BuiltinCommandsOptions {
   readonly submit: (text: string) => void;
   /** 开新会话（/new——组合根热切换；无持久层/run 进行中返回 undefined） */
   readonly newSession: () => { header: { sessionId: string } } | undefined;
+  /**
+   * 多会话前台面（/app——S3：清单/切换/开新驻留；组合根闭包绑 chat 件注册表）。
+   * list 只列活条目（退役只给计数——清单看活路，停摆看账本）；switchTo 是
+   * registry 程序面直通（零准入拒）；open 语义含聚焦（开完即切到新会话）。
+   */
+  readonly apps: {
+    /** 活条目清单（开启序）+ 停摆条目计数 */
+    list(): {
+      readonly active: ReadonlyArray<{
+        readonly sessionId: string;
+        readonly running: boolean;
+        readonly focused: boolean;
+      }>;
+      readonly retiredCount: number;
+    };
+    /** 切前台（switchTo 程序面直通——退役/查无 false） */
+    switchTo(sessionId: string): boolean;
+    /** 开新驱动不退役旧的（registry.open 直调；无持久层 undefined） */
+    open(): { readonly sessionId: string } | undefined;
+  };
   /** 跨会话 allowlist 存储（/allowlist 枚举与撤销面——接线批 Commit B） */
   readonly allowlist: AllowlistStore;
   /** 插件管理服务（/plugins 清单与 install/toggle/update——对账逻辑全在服务，壳只转述） */
@@ -126,6 +146,61 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         } else {
           ui.notify('现在不能开新会话（run 进行中或无持久层），稍后再试');
         }
+      },
+    }),
+    commands.register({
+      name: 'app',
+      description: '多会话前台：清单 / 切换 <序号|id前缀> / 开新驻留（/app new）',
+      handler: (args) => {
+        const arg = args.trim();
+        /* ---- 动词三：/app new = 开新+驻留+聚焦（加而观之）——不退役旧驱动，无 busy 拒 ---- */
+        if (arg === 'new') {
+          const opened = opts.apps.open();
+          if (opened) {
+            ui.notify(`已开会话 ${opened.sessionId.slice(0, 8)}…（旧会话驻留后台，/app 随时切回）`);
+          } else {
+            ui.notify('现在不能开新会话（无持久层），稍后再试');
+          }
+          return;
+        }
+        const { active, retiredCount } = opts.apps.list();
+        /* ---- 动词一：裸调 = 活条目清单（●聚焦 / ⧗后台工作中 / ·空闲 + 停摆计数） ---- */
+        if (arg === '') {
+          if (active.length === 0) {
+            ui.notify('无活动会话（对话应用未装载或 persist:false）——输入不会得到应答');
+            return;
+          }
+          const lines = active.map((entry, i) => {
+            const badge = entry.focused ? '●聚焦' : entry.running ? '⧗后台工作中' : '·空闲';
+            return `  ${i + 1}. ${entry.sessionId.slice(0, 8)} ${badge}`;
+          });
+          const retiredLine = retiredCount > 0 ? `\n（另有 ${retiredCount} 个已停摆会话——账本可查，清单不列）` : '';
+          ui.notify(
+            `活动会话（${active.length}）：\n${lines.join('\n')}${retiredLine}\n切换 /app <序号|id前缀> · 开新 /app new`,
+          );
+          return;
+        }
+        /* ---- 动词二：切换——双寻址（序号按当次清单，id 前缀是稳定键防序号漂移错切） ---- */
+        let target: string | undefined;
+        if (/^\d+$/.test(arg)) {
+          target = active[Number(arg) - 1]?.sessionId;
+          if (target === undefined) {
+            ui.notify(`无此序号：${arg}（序号见 /app 清单——条目开合间会漂移，id 前缀更稳）`);
+            return;
+          }
+        } else {
+          const hits = active.filter((entry) => entry.sessionId.startsWith(arg));
+          if (hits.length === 0) {
+            ui.notify(`无此会话：${arg}（/app 查看清单）`);
+            return;
+          }
+          if (hits.length > 1) {
+            ui.notify(`歧义前缀：${arg} 命中 ${hits.length} 个会话（多打几位再试）`);
+            return;
+          }
+          target = hits[0]!.sessionId;
+        }
+        ui.notify(opts.apps.switchTo(target) ? `已切换到 ${target.slice(0, 8)}…` : '切换失败（会话已停摆）');
       },
     }),
     commands.register({

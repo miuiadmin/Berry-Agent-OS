@@ -48,14 +48,28 @@ export interface TuiChannelOptions {
   readonly terminal?: Terminal;
   /** 标题行文案（缺省不渲染标题） */
   readonly title?: string;
-  /** 历史投影拉取（start 时渲染一遍；app 注入 session.deriveMessages 类回调） */
-  readonly history?: () => readonly AgentMessage[];
+  /** 历史投影拉取（S3 按会话键取：undefined = 当前聚焦〔起屏路，壳闭包解析〕；repaint 重画显式带键——通道不持注册表，宿主注入闭包路由） */
+  readonly history?: (sessionId?: string) => readonly AgentMessage[];
+  /** 条目运行态查询（S3 切入在飞会话判据——状态行/流式占位槽；退役条目宿主侧按 idle 呈现；通道不持注册表） */
+  readonly entryStatus?: (sessionId: string) => 'running' | 'idle' | undefined;
 }
 
 /** TUI 通道面（app 组合根持有） */
 export interface TuiChannel {
-  /** 活体事件入口（组合根把 loop 的 AgentEventSink 直连到这里） */
+  /** 活体事件入口（**聚焦者专用**——S3 信封分流后，宿主壳只把聚焦会话的事件路由到这里） */
   handle(event: AgentEvent): void;
+  /**
+   * 非聚焦活动摘要入口（S3 信封分流的后台腿——宿主壳拆信封后路由到这里：
+   * 后台活条目与退役条目统一走摘要行，agent_start/agent_end 落一行，message/tool
+   * 事件不进正文——互不绞屏执法；退役条目迟到事件以此保持「审计面可见」）。
+   */
+  handleActivity(sessionId: string, event: AgentEvent): void;
+  /**
+   * 清屏重画到目标会话（S3 focus 变化驱动信号）：复位流式槽（防孤儿引用持已摘除
+   * 容器）→ 清消息流 → 历史投影重画（按会话键拉）→ 状态行/在飞占位槽按
+   * entryStatus 设定。undefined = 无聚焦（防御位：空历史 + 状态行清）。
+   */
+  repaint(sessionId: string | undefined): void;
   /** 启动时渲染历史投影（拉投影经注入回调——通道不依赖 session） */
   renderHistory(messages: readonly AgentMessage[]): void;
   /** 本通道的 UI 后端（接 ctx.ui 聚合器 attach） */
@@ -209,6 +223,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         tui.requestRender();
         break;
       case 'agent_end':
+        // 防漏关（S3）：在飞占位槽开着一轮无 message_end 即结束（abort 中断路）
+        // ——空终值关槽（closeStreaming 内 filter 空串，零追加行）
+        if (streaming) closeStreaming('', []);
         statusText.setText('');
         statusText.invalidate();
         tui.requestRender();
@@ -270,8 +287,49 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // select/setWidget 不支持——ctx.ui 聚合器按 §4.3 降级规则处理
   };
 
+  /* ---- 非聚焦活动摘要（S3 信封分流后台腿） ---- */
+  const handleActivity = (sessionId: string, event: AgentEvent): void => {
+    const short = sessionId.slice(0, 8);
+    switch (event.type) {
+      case 'agent_start':
+        appendLines([`⧗ 会话 ${short} 后台工作中`]);
+        break;
+      case 'agent_end':
+        appendLines([`✓ 会话 ${short} 后台完成`]);
+        break;
+      default:
+        break; // message/tool 事件不进正文（正文只属聚焦者——互不绞屏执法）
+    }
+  };
+
+  /* ---- 清屏重画（S3 focus 变化驱动信号） ---- */
+  /** 按会话键拉历史并渲染（repaint 重画与 start 起屏两路共用——单一历史渲染路径） */
+  const renderHistoryInto = (sessionId: string | undefined): void => {
+    const history = opts.history ? opts.history(sessionId) : [];
+    for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
+  };
+  const repaint = (sessionId: string | undefined): void => {
+    // 复位顺序先于清空：streaming 槽引用的容器随 messages.clear() 一并摘除，
+    // 先置 null 防孤儿引用继续 setText 到已弃容器
+    streaming = null;
+    messages.clear();
+    messages.invalidate();
+    renderHistoryInto(sessionId);
+    // 在飞两态语义（S3 冷读 must-fix）：切入时已完结的消息经历史投影补齐（上面
+    // renderHistoryInto）；切入时仍在流式的消息（message_start 已错过、终值在
+    // 任何投影里都不存在）——开空流式占位槽，后续 message_update 的 partial 是
+    // 全量快照、直推整块替换即自然续流（无需 message_start）
+    const running = sessionId !== undefined && opts.entryStatus?.(sessionId) === 'running';
+    if (running) openStreaming();
+    statusText.setText(running ? ' ● 工作中' : '');
+    statusText.invalidate();
+    tui.requestRender();
+  };
+
   return {
     handle,
+    handleActivity,
+    repaint,
     renderHistory(history) {
       for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
     },
@@ -279,10 +337,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       return backend;
     },
     start() {
-      if (opts.history) {
-        const history = opts.history();
-        for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
-      }
+      // 起屏历史：undefined = 当前聚焦（壳闭包解析——boot 路 focus 通知早于订阅，
+      // 初始渲染不走 repaint 而走本路；此后 focus 变化全走 repaint 显式键）
+      renderHistoryInto(undefined);
       tui.setFocus(editor);
       tui.start();
     },

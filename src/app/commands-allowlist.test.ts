@@ -46,6 +46,8 @@ function rig() {
     quit: () => {},
     submit: () => {},
     newSession: () => undefined,
+    // /app 面最小桩（S3——本测试不触及多会话命令，空清单形）
+    apps: { list: () => ({ active: [], retiredCount: 0 }), switchTo: () => false, open: () => undefined },
     plugins: {} as unknown as Parameters<typeof registerBuiltinCommands>[0]['plugins'],
     reload: (() => undefined) as unknown as Parameters<typeof registerBuiltinCommands>[0]['reload'],
     usage: () => '',

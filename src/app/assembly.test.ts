@@ -844,6 +844,79 @@ describe('/new 会话热切换', () => {
   });
 });
 
+/* ---------------- S3 /app 多会话前台（三动词全栈，契约篇 §5.4） ---------------- */
+
+describe('/app 多会话前台（S3：new 驻留聚焦 / 清单徽标 / 双寻址切换）', () => {
+  it('new：开新+驻留+聚焦——旧条目不退役、focus 换指、通知可见', async () => {
+    const { streamFn } = scriptedStream([textMessage('旧答')]);
+    const runtime = await assemble({ streamFn });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    await runtime.conversation!.submitOnce('旧问');
+    const oldId = runtime.session!.header.sessionId;
+
+    runtime.channels.commands.lookup('app')!.handler('new');
+    const newId = runtime.front.focus.sessionId!;
+    expect(newId).toBeDefined();
+    expect(newId).not.toBe(oldId); // 聚焦已切新（open 语义含聚焦）
+    expect(runtime.drivers.entries.get(oldId)?.retired).toBe(false); // 驻留不退役（与 /new 对照）
+    expect(notifies.some((n) => n.startsWith('已开会话'))).toBe(true);
+    // 新会话从档位事件起步（空白档——与 /new 新会话同形）；旧会话事件账不动
+    expect(runtime.drivers.entries.get(newId)!.session.events.map((e) => e.type)).toEqual(['sandbox/mode']);
+    expect(
+      runtime.drivers.entries
+        .get(oldId)!
+        .session.events.some((e) => e.type === 'user/message' && (e.data as { content: string }).content === '旧问'),
+    ).toBe(true);
+  });
+
+  it('裸调清单徽标如实 + 序号/前缀双寻址切换 + 零命中/越界/停摆各失败形', async () => {
+    const { streamFn } = scriptedStream([textMessage('答一')]);
+    const runtime = await assemble({ streamFn });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    await runtime.conversation!.submitOnce('问一');
+    const firstId = runtime.session!.header.sessionId;
+
+    runtime.channels.commands.lookup('app')!.handler('new'); // 开第二个（聚焦后者）
+    const secondId = runtime.front.focus.sessionId!;
+
+    // 裸调清单：两条活动、徽标各如实（●聚焦/·空闲）
+    notifies.length = 0;
+    runtime.channels.commands.lookup('app')!.handler('');
+    const listing = notifies.join('\n');
+    expect(listing).toContain('活动会话（2）');
+    expect(listing).toContain('●聚焦');
+    expect(listing).toContain('·空闲');
+
+    // 序号寻址：1 → 切回首会话（序号按当次清单）
+    runtime.channels.commands.lookup('app')!.handler('1');
+    expect(runtime.front.focus.sessionId).toBe(firstId);
+    // 前缀寻址：完整 id 唯一命中 → 切回次会话
+    runtime.channels.commands.lookup('app')!.handler(secondId);
+    expect(runtime.front.focus.sessionId).toBe(secondId);
+
+    // 零命中前缀 / 越界序号：各自报错、focus 不动
+    runtime.channels.commands.lookup('app')!.handler('zzzz-no-such');
+    runtime.channels.commands.lookup('app')!.handler('9');
+    expect(runtime.front.focus.sessionId).toBe(secondId);
+    expect(notifies.some((n) => n.includes('无此会话'))).toBe(true);
+    expect(notifies.some((n) => n.includes('无此序号'))).toBe(true);
+
+    // 退役一条后：裸调出现停摆计数行；退役条目退出寻址面（前缀零命中）
+    expect(runtime.drivers.retire(firstId)).toBe(true); // 非聚焦非在跑——合法退役
+    notifies.length = 0;
+    runtime.channels.commands.lookup('app')!.handler('');
+    expect(notifies.join('\n')).toContain('已停摆会话');
+    runtime.channels.commands.lookup('app')!.handler(firstId); // 已退役 → 不在 active 清单 → 零命中
+    expect(runtime.front.focus.sessionId).toBe(secondId); // 未切动
+    expect(notifies.some((n) => n.includes('无此会话'))).toBe(true);
+    // 退役/查无 false 的程序面（命令层「切换失败」是 list→switchTo 间竞态防御位，
+    // 命令面不可确定性触达——契约断言落在 registry 直调）
+    expect(runtime.drivers.switchTo(firstId)).toBe(false);
+  });
+});
+
 /* ---------------- S2 多驱动工具面（组合域分片全栈） ---------------- */
 
 describe('S2 多驱动工具面（组合域分片：双驱动隔离零泄漏 + retire 拆层 + /new 冻结）', () => {

@@ -1130,6 +1130,33 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       quit: () => registry.focused()?.driver.requestQuit(),
       submit: (text) => registry.focused()?.driver.submit(text),
       newSession: startNewSession,
+      // /app 多会话前台面（S3——组合根闭包绑 chat 件注册表；命令壳只做清单
+      // 格式化与双寻址解析，路由原语全在 registry 程序面）
+      apps: {
+        list() {
+          const focusId = registry.focus.sessionId;
+          let retiredCount = 0;
+          const active: { sessionId: string; running: boolean; focused: boolean }[] = [];
+          for (const entry of registry.entries.values()) {
+            const sessionId = entry.session.header.sessionId;
+            if (entry.retired) {
+              retiredCount += 1;
+              continue;
+            }
+            active.push({
+              sessionId,
+              running: entry.driver.isRunning,
+              focused: sessionId === focusId,
+            });
+          }
+          return { active, retiredCount };
+        },
+        switchTo: (sessionId) => registry.switchTo(sessionId),
+        open: () => {
+          const entry = registry.open();
+          return entry === undefined ? undefined : { sessionId: entry.session.header.sessionId };
+        },
+      },
       plugins, // ctx.plugins 服务（⑨ provide——命令壳与宿主同源）
       reload, // 组合根 reload 闭包（⑨ 定义——busy/error/payload 三面）
       // /usage 取数闭包：绑持久层活连接（诊断面无库时给说明行——面板零写入，

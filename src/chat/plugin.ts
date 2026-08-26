@@ -20,6 +20,16 @@
  *   dispatch/subscribers/face 工厂级（跨 /reload 存续），/reload 重装载只重
  *   provide 服务面（驱动与时间线存续——重装载是插件面变更，不是会话变更）。
  *
+ * 2026-08-26 S3 TUI 多会话呈现刀（契约篇 §5.4 S3 射面，冷读 12 条回写后形态）：
+ * - **展示信封**：front.addDisplay 收 `{sessionId, event}` 信封——转接层补本会话
+ *   键（驱动面 AgentEventSink 保持裸事件），信封在宿主壳接线处即拆开分流。
+ * - **切换程序面**：registry.switchTo（活条目即切、零准入拒）+ onFocusChange
+ *   （通知机制落 registry=focus 指针所在处；三写点通知：open 新开/open 幂等命中/
+ *   switchTo，同值写零通知）。
+ * - **退出扇出**：requestQuit 从「只路由聚焦驱动」扩为 abort 扇出全部活驱动
+ *   （/app new 使「退出时有后台 run」成常态——settle/shutdown 必达不挂死）；
+ *   settle 同步扇出（等全部活驱动 run 结算）。
+ *
  * 会话选择属对话应用（无对话运行则无会话——「哪段对话续接」是应用行为，事件
  * 日志机制才是内核）；sandbox 档事实是宿主守门面，盖章函数由组合根注入、件在
  * 会话边界时点调用（内核有数据，应用有时点）。
@@ -34,7 +44,7 @@ import {
 } from '../contracts/errors.js';
 import type { UserMessage, MessageSource, Message, StreamFn } from '../contracts/llm.js';
 import type { AgentMessage } from '../contracts/messages.js';
-import type { AgentEventSink } from '../agent/events.js';
+import type { AgentEvent, AgentEventSink } from '../agent/events.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { ContextScope, Disposer } from '../context/types.js';
@@ -103,6 +113,21 @@ export interface AgentServiceFace {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 展示信封（S3 契约篇 §5.4：归属是宿主展示层概念，不进 loop 契约）——
+ * 驱动裸事件 + 本会话键。FrontHost 转接驱动时内部包一层补键；信封在宿主壳
+ * 接线处即拆开分流（聚焦者全渲染 / 非聚焦者摘要行），channels 层不见此类型。
+ */
+export interface SessionEventEnvelope {
+  /** 事件归属会话（转接层补键——驱动 emit 裸事件无归属概念） */
+  readonly sessionId: string;
+  /** loop 活体事件（十型零动） */
+  readonly event: AgentEvent;
+}
+
+/** 前台展示消费者（S3：收信封——驱动面 `AgentEventSink` 保持裸事件，两界在转接层缝合） */
+export type FrontDisplaySink = (envelope: SessionEventEnvelope) => void;
+
+/**
  * 注册表条目：一个已开驱动 + 它的全部会话资产。
  * retired 后 session/durable **保留**（迟到结算继续落原会话账——防新会话
  * 接管后旧结算写错账/seq 撞号），驱动仅停摆（投递降 inject 只留审计）。
@@ -162,23 +187,48 @@ export interface DriverRegistry {
    * （切换是 open 的职责，调用方编排先后序）。
    */
   retire(sessionId: string): boolean;
+  /**
+   * 切前台（S3 契约篇 §5.4）：活条目在场即切 focus（通知订阅者）；退役/查无
+   * false。**零准入拒**——不 abort 不动 run，run 中切入切出均合法（与 /new 的
+   * busy 拒对照：切换纯展示路由，run 各自时间线不受影响）。
+   */
+  switchTo(sessionId: string): boolean;
+  /**
+   * 订阅 focus 变化（S3：通知机制落 registry——focus 指针所在处，FrontHost 纯
+   * 委托）。三写点各通知恰一次：open 新开 / open 幂等命中既有条目 / switchTo；
+   * **同值写零通知**（切到已聚焦会话 = 无变化，防无谓清屏重画）。Disposer 注销。
+   */
+  onFocusChange(cb: (sessionId: string) => void): Disposer;
 }
 
 /**
- * 前台宿主 façade（S1——通道宿主面 + 展示/结算/退出三腿的聚焦路由）：
- * TUI 起屏持它一次即跨 /new 稳定（不随驱动对象更替断流）；无驱动形态
- * （overlay 禁用/persist:false）submit 静默、requestQuit 直接聚合退、settle 即回。
+ * 前台宿主 façade（S1——通道宿主面 + 展示/结算/退出三腿的聚焦路由；S3 信封化
+ * + 退出扇出）：TUI 起屏持它一次即跨 /new 稳定（不随驱动对象更替断流）；无驱动
+ * 形态（overlay 禁用/persist:false）submit 静默、requestQuit 直接聚合退、settle 即回。
  */
 export interface FrontHost {
   /** 普通用户消息（路由前台聚焦驱动的 submit；无驱动 no-op） */
   submit(text: string): void;
-  /** 请求退出（路由前台聚焦驱动 requestQuit；无驱动直接 resolve 聚合 promise——壳照启可退） */
+  /**
+   * 前台聚焦指针只读视图（S3：registry focus 的纯委托——宿主壳信封分流判据
+   * `envelope.sessionId === front.focus.sessionId` 读这里，不经手 registry）
+   */
+  readonly focus: { readonly sessionId: string | undefined };
+  /**
+   * 请求退出（S3 退出扇出：聚焦驱动 requestQuit + **其余活驱动直接 abort**——
+   * /app new 使「退出时有后台 run」成常态，abort 扇出后 settle/shutdown 必达；
+   * 无驱动直接 resolve 聚合 promise——壳照启可退）。
+   */
   requestQuit(): void;
   /** 退出聚合 promise（任一驱动 requestQuit 即 resolve——/quit 命令路/TUI 信号路同汇） */
   readonly quit: Promise<void>;
-  /** 注册展示消费者（记入转接表 + 当前聚焦驱动；后续 open 的新驱动全量转接） */
-  addDisplay(sink: AgentEventSink): void;
-  /** 等待前台聚焦驱动在跑的 run 结算（退出序列收尾用；无驱动即回） */
+  /**
+   * 注册展示消费者（S3 信封化：收 `{sessionId, event}` 信封——记入转接表 + 当前
+   * 聚焦驱动即时转接；后续 open 的新驱动全量转接。非聚焦条目〔后台活/退役迟到〕
+   * 的事件照达——宿主壳拆信封分流，摘要行即审计面）。
+   */
+  addDisplay(sink: FrontDisplaySink): void;
+  /** 等待**全部活驱动**在跑的 run 结算（S3 扇出：退出序列收尾等所有活 run；无活条目即回） */
   settle(): Promise<void>;
 }
 
@@ -277,6 +327,27 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
   const entries = new Map<string, DriverEntry>();
   /** 前台聚焦指针（可变属性槽——open 切换；类型面经 DriverRegistry.focus 只读暴露） */
   const focusState: { sessionId: string | undefined } = { sessionId: undefined };
+  /**
+   * focus 变化订阅表（S3：通知机制落 registry=focus 指针所在处，防跨 façade
+   * 隐藏耦合——open 写点在 registry 内，订阅集也归 registry；工厂级跨 /reload 存续）
+   */
+  const focusListeners = new Set<(sessionId: string) => void>();
+  /**
+   * focus 写点统一路（S3 三写点共用：open 新开 / open 幂等命中 / switchTo）——
+   * **同值写零通知**（切到已聚焦会话 = 无变化，防 TUI 无谓清屏重画）；订阅者
+   * 违约隔离（与 onRunSettled dispatch 同款——坏订阅不断通知链）。
+   */
+  const setFocus = (next: string): void => {
+    if (focusState.sessionId === next) return;
+    focusState.sessionId = next;
+    for (const cb of [...focusListeners]) {
+      try {
+        cb(next);
+      } catch (err) {
+        deps.rootCtx.logger.error('registry.onFocusChange 订阅者违约（已隔离）', { error: describeError(err) });
+      }
+    }
+  };
 
   /** onRunSettled 订阅表（工厂级——face 跨 /reload 存续，goal 等消费方重 apply 重订阅不重造表） */
   const subscribers = new Set<(settled: RunSettled) => void>();
@@ -356,8 +427,11 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
   };
 
   /* ---- 前台宿主 façade（工厂级——TUI 持有一次跨 /new 稳定） ---- */
-  /** 前台展示消费者转接表（TUI 起屏注册；open 新驱动时全量转接——退役驱动保留自己的一份，迟到事件仍可见=审计面） */
-  const frontDisplays: AgentEventSink[] = [];
+  /**
+   * 前台展示消费者转接表（S3 信封化：收信封的 sink；open 新驱动时全量转接——
+   * 转接闭包补本会话键，退役驱动保留自己的一份，迟到事件仍达=审计面）
+   */
+  const frontDisplays: FrontDisplaySink[] = [];
   let resolveFrontQuit!: () => void;
   /** 前台退出聚合 promise：任一驱动 requestQuit 即 resolve（驱动 quit 挂接见 open） */
   const frontQuit: Promise<void> = new Promise((resolve) => {
@@ -365,20 +439,37 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
   });
   const front: FrontHost = {
     submit: (text) => registry.focused()?.driver.submit(text),
+    // registry 焦点指针的只读委托视图（壳分流判据读这里——对象同源，零拷贝）
+    focus: focusState,
     requestQuit: () => {
-      const driver = registry.focused()?.driver;
-      if (driver !== undefined) {
-        driver.requestQuit(); // 驱动路：quit resolve → 聚合 promise 随之 resolve
+      const focused = registry.focused();
+      if (focused !== undefined) {
+        focused.driver.requestQuit(); // 聚焦驱动：requestQuit 全语义（abort + resolve quit → 聚合 promise 随之 resolve）
       } else {
         resolveFrontQuit(); // 壳形态（无对话循环）：无驱动可等——直接聚合退
+      }
+      // S3 退出扇出（冷读 must-fix）：其余活驱动直接 abort——复用 driver.retire
+      // 的「仅 abort 不 resolve quit」形态（退出聚合只认聚焦者 requestQuit）；
+      // 不标 entry.retired（退出是进程收尾不是会话停摆，迟到结算照落原会话账）。
+      // 扇出后 front.settle / shutdown 的 allSettled 必达——后台 run 不再被等成挂死
+      for (const entry of entries.values()) {
+        if (!entry.retired && entry !== focused) entry.driver.retire();
       }
     },
     quit: frontQuit,
     addDisplay: (sink) => {
       frontDisplays.push(sink);
-      registry.focused()?.driver.addDisplay(sink);
+      // 即时转接当前聚焦驱动（转接闭包捕获当时聚焦 id——信封补键在转接层）
+      const current = registry.focused();
+      if (current !== undefined) {
+        const sid = current.session.header.sessionId;
+        current.driver.addDisplay((event) => sink({ sessionId: sid, event }));
+      }
     },
-    settle: () => registry.focused()?.driver.settle() ?? Promise.resolve(),
+    // S3 扇出：等全部活驱动的 run 结算（退出序列在 abort 后先等它们收尾再 flush）
+    settle: async () => {
+      await Promise.all([...entries.values()].filter((e) => !e.retired).map((e) => e.driver.settle()));
+    },
   };
 
   /* ---- 注册表本体（open 一条龙 / retire / 三取数口） ---- */
@@ -415,7 +506,7 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // 重开同 id 会造出第二个 Session 实例（单写者护栏/seq 连续性全破），结构上必须挡
       if (targetId !== undefined && entries.has(targetId)) {
         const existing = entries.get(targetId)!;
-        focusState.sessionId = existing.session.header.sessionId;
+        setFocus(existing.session.header.sessionId); // S3 写点之二：幂等命中也是 focus 写点（同值零通知）
         return existing;
       }
       // 恢复协议语义半边（会话篇 §4）：孤儿配对补 closer——append 即进 write-behind
@@ -546,11 +637,13 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // 结算派发接线（永久订阅——dispatch 工厂级恒活；退役条目的迟到结算照发，
       // 载荷带归属 sessionId，goal 等消费方按码容错跳过）
       driver.onRunSettled(dispatch);
-      // 前台转接：既有展示消费者全量接入新驱动 + 退出聚合挂接（任一驱动退即 resolve）
-      for (const sink of frontDisplays) driver.addDisplay(sink);
+      // 前台转接：既有展示消费者全量接入新驱动（S3 信封化——转接闭包补本会话键）
+      // + 退出聚合挂接（任一驱动退即 resolve）
+      for (const sink of frontDisplays) driver.addDisplay((event) => sink({ sessionId, event }));
       void driver.quit.then(() => resolveFrontQuit());
-      // 前台聚焦切换（最后一步——此前一切就绪，聚焦后 TUI 路由即达新驱动）
-      focusState.sessionId = session.header.sessionId;
+      // 前台聚焦切换（最后一步——此前一切就绪，聚焦后 TUI 路由即达新驱动；
+      // S3 写点之一：open 新开，经 setFocus 通知订阅者）
+      setFocus(sessionId);
       return entry;
     },
     retire(sessionId) {
@@ -567,6 +660,21 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // 仅 abort 不 resolve quit（会话停摆≠进程退出——前台退出聚合只认 requestQuit）
       entry.driver.retire();
       return true;
+    },
+    switchTo(sessionId) {
+      // 退役/查无 false（/app 清单只列活条目——这里守住同一判据）
+      const entry = entries.get(sessionId);
+      if (entry === undefined || entry.retired) return false;
+      // 零准入拒：不动 run（切入正在跑的条目合法——TUI 侧在飞占位槽续流），
+      // 切换纯展示路由；S3 写点之三：经 setFocus 通知（同值零通知）
+      setFocus(sessionId);
+      return true;
+    },
+    onFocusChange(cb) {
+      focusListeners.add(cb);
+      return () => {
+        focusListeners.delete(cb);
+      };
     },
   };
 

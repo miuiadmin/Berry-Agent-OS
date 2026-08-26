@@ -50,12 +50,32 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
         error: err instanceof Error ? err.stack : String(err),
       }),
     title: `Berry ${VERSION}`,
-    history: () => projectedToAgentMessages(runtime.session?.deriveMessages() ?? []),
+    // S3 按会话键取历史：undefined = 当前聚焦（起屏路——boot 路 focus 通知早于
+    // 订阅，初始渲染由 start 走此语义）；repaint 重画显式带键
+    history: (sessionId) => {
+      const id = sessionId ?? front.focus.sessionId;
+      const entry = id === undefined ? undefined : runtime.drivers.entries.get(id);
+      return projectedToAgentMessages(entry?.session.deriveMessages() ?? []);
+    },
+    // S3 条目运行态（切入在飞会话的占位槽/状态行判据；退役条目 isRunning 恒 false → idle）
+    entryStatus: (sessionId) => {
+      const entry = runtime.drivers.entries.get(sessionId);
+      return entry === undefined ? undefined : entry.driver.isRunning ? 'running' : 'idle';
+    },
   });
   runtime.ui.attach(tui.ui());
-  // 事件流接线：front 转接表 → 当前聚焦驱动（durable 半边装配期已接；后续
-  // open 的新驱动经转接表自动获得此展示消费者——多驱动切换不断流）
-  front.addDisplay((event) => tui.handle(event));
+  // S3 信封分流（宿主壳 = 信封拆开点，channels 不见信封概念）：聚焦者走全渲染、
+  // 非聚焦者（后台活条目 + 退役条目迟到事件）走摘要行——互不绞屏的执法接线
+  front.addDisplay((envelope) => {
+    if (envelope.sessionId === front.focus.sessionId) {
+      tui.handle(envelope.event);
+    } else {
+      tui.handleActivity(envelope.sessionId, envelope.event);
+    }
+  });
+  // S3 focus 变化重画（三写点通知：open 新开 / open 幂等命中 / switchTo——同值
+  // 零通知）：清屏 + 目标会话历史重画 + 在飞占位槽按 entryStatus 续流
+  const disposeFocusSubscription = runtime.drivers.onFocusChange((sessionId) => tui.repaint(sessionId));
   // 可卸提示：无对话循环时示明现状（命令面仍可用——/plugins 可查、/reload 可试）
   if (runtime.conversation === undefined) {
     runtime.ui.notify(
@@ -78,11 +98,13 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
 
   tui.start();
   try {
-    // 等待退出请求（Ctrl+D / Ctrl+C / /quit / 信号——多路同汇 front.requestQuit）
+    // 等待退出请求（Ctrl+D / Ctrl+C / /quit / 信号——多路同汇 front.requestQuit；
+    // S3 退出扇出：requestQuit 已 abort 全部活驱动，settle 等各 run 收尾即回）
     await front.quit;
     await front.settle();
   } finally {
     signals.dispose();
+    disposeFocusSubscription(); // S3 focus 订阅注销（壳生命周期，非插件锚）
     tui.stop();
     await runtime.shutdown();
   }
