@@ -12,7 +12,7 @@ import {
   SANDBOX_UNAVAILABLE,
 } from '../contracts/errors.js';
 import type { SandboxBackend } from './types.js';
-import { bwrapArgs, bwrapReadOnlyArgs, createBwrapBackend } from './bwrap.js';
+import { bwrapArgs, createBwrapBackend } from './bwrap.js';
 import { seatbeltProfile, seatbeltReadOnlyProfile, createSeatbeltBackend } from './seatbelt.js';
 import {
   ESCALATION_TARGETS,
@@ -296,6 +296,20 @@ describe('Seatbelt 后端（纯函数 profile 生成）', () => {
     expect(profile).toContain('(deny file-write*)');
   });
 
+  it('read-only + 显式根（e1 宿主形态）：刚需根照常放行；缺省 read-only 字节不变', () => {
+    // 字段覆盖契约恢复生效：修复前 mode 分支吃不到显式根——宿主 read-only 档
+    // 数据目录建库被拒（真机冒烟实证 SQLITE_CANTOPEN）
+    const rooted = seatbeltProfile({
+      mode: 'read-only',
+      workspaceRoot: '/ws',
+      writableRoots: ['/data/.berry'],
+    });
+    expect(rooted).toContain('(allow file-write* (subpath "/data/.berry"))');
+    expect(rooted).toContain('(deny file-write*)'); // 基座拒写保留（其余全拒）
+    // 子进程缺省 read-only（无显式根）＝ 纯拒写基座——统一前后零漂移回归锚
+    expect(seatbeltProfile({ mode: 'read-only', workspaceRoot: '/ws' })).toBe(seatbeltReadOnlyProfile());
+  });
+
   it('SBPL 字符串转义：根路径含引号与反斜杠不破语法', () => {
     const profile = seatbeltProfile({
       mode: 'workspace-write',
@@ -330,8 +344,10 @@ describe('Seatbelt 后端（纯函数 profile 生成）', () => {
 });
 
 describe('bwrap 后端（纯函数参数生成）', () => {
-  it('read-only：只读根视图 + 虚拟设备 + tmpfs /tmp', () => {
-    const args = bwrapReadOnlyArgs();
+  it('read-only 缺省（无显式根）：只读根视图 + 虚拟设备 + tmpfs /tmp——统一前后字节不变', () => {
+    // 子进程 read-only 档缺省推导空根——形态与统一前的 bwrapReadOnlyArgs 全同
+    //（两档统一消费 resolvePolicyRoots 的回归锚：子进程既有行为零漂移）
+    const args = bwrapArgs({ mode: 'read-only', workspaceRoot: '/ws' });
     expect(args).toEqual([
       '--ro-bind',
       '/',
@@ -345,6 +361,15 @@ describe('bwrap 后端（纯函数参数生成）', () => {
       '--tmpfs',
       '/tmp',
     ]);
+  });
+
+  it('read-only + 显式根（e1 宿主形态）：刚需根真实 bind（字段覆盖契约恢复生效）', () => {
+    // 修复前 mode 分支吃不到显式根——宿主 read-only 档数据目录建库被拒（真机
+    // 冒烟实证）；统一后两档同等消费 writableRoots
+    const args = bwrapArgs({ mode: 'read-only', workspaceRoot: '/ws', writableRoots: ['/data/.berry', '/db/dir'] });
+    const bindTargets = args.filter((_, i) => args[i - 1] === '--bind');
+    expect(bindTargets).toEqual(['/data/.berry', '/db/dir']); // 刚需根照常放行
+    expect(args).toContain('--tmpfs'); // /tmp 恒 tmpfs（临时面不留痕不变式）
   });
 
   it('workspace-write：非 /tmp 根真实 bind；/tmp 保持 tmpfs（不真实 bind）', () => {

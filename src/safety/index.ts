@@ -54,13 +54,8 @@ export {
 } from './sandbox.js';
 
 /* 平台后端（骨架篇 §7.2：Seatbelt 首发 / bwrap 其次） */
-export {
-  seatbeltReadOnlyProfile,
-  seatbeltWorkspaceWriteProfile,
-  seatbeltProfile,
-  createSeatbeltBackend,
-} from './seatbelt.js';
-export { bwrapReadOnlyArgs, bwrapWorkspaceWriteArgs, bwrapArgs, createBwrapBackend } from './bwrap.js';
+export { seatbeltReadOnlyProfile, seatbeltProfile, createSeatbeltBackend } from './seatbelt.js';
+export { bwrapArgs, createBwrapBackend } from './bwrap.js';
 
 /* 审批服务（骨架篇 §8.3） */
 export type {

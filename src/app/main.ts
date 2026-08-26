@@ -8,6 +8,7 @@
  *                          闸→抢占→跑→归属回写；tick-main 主流程）
  *   berry dump-config      打印实际生效组合树（诊断面）
  *   旗标：--version / --help / --debug（日志提级）/ --read-only（run 限定只读档）
+ *         / --sandbox-host（run 限定宿主沙箱 wrapper——e1，技术栈篇 §5）
  *
  * 命令面即产品契约（输出保持稳定）；三命令分别接 tui-main / run-main /
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
@@ -17,6 +18,7 @@ import { tuiMain } from './tui-main.js';
 import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
 import { dumpConfigMain } from './dump-config.js';
+import { relaunchUnderHostSandbox } from './host-sandbox.js';
 
 /** 帮助文案（命令面 = 产品契约，输出保持稳定） */
 const HELP = `Berry ${VERSION} — 插件式智能体运行时
@@ -37,7 +39,13 @@ const HELP = `Berry ${VERSION} — 插件式智能体运行时
   --app <id>   run 子命令限定：以应用身份单发（会话域/装配默认位/审批预设随清单
                生效；与 --tick 互斥——tick 是任务行身份，应用身份另属清单）
   --no-plugins 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
-               ——坏插件锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）`;
+               ——坏插件锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
+  --sandbox-host run 子命令限定：宿主进程套 OS 沙箱 wrapper（macOS seatbelt / Linux bwrap）
+               ——检出后 CLI 重 exec 自身，本进程连同全部插件跑在沙箱内。
+               可写面 = 档位根 ∪ 数据目录（~/.berry：库与凭证必须可写）。
+               诚实边界：①策略并集粒度——数据目录内部互害关不住；②非网络沙箱
+               ——出网默认放行（LLM API 刚需）；③seatbelt profile 非稳定公开接口，
+               随 macOS 漂移；④Windows 无后端——fail-closed 拒跑（退出码 1）`;
 
 /** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
 interface ParsedArgs {
@@ -54,6 +62,8 @@ interface ParsedArgs {
   app: string | undefined;
   /** 安全模式（--no-plugins，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
   noPlugins: boolean;
+  /** e1 宿主沙箱包裹（--sandbox-host，技术栈篇 §5 第二十八批题 3A）：run 限定，wrapper 重 exec */
+  sandboxHost: boolean;
 }
 
 /**
@@ -69,6 +79,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let noPlugins = false;
   let tick: string | undefined;
   let app: string | undefined;
+  let sandboxHost = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--debug') {
@@ -92,17 +103,21 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 安全模式对 TUI/run/dump-config 语义化（boot 形态面）；tick 唤起不透传
       //（自动化入口无「救援」语义——安全模式救的是交互面，tick 子进程恒全树）
       noPlugins = true;
+    } else if (arg === '--sandbox-host') {
+      // e1 宿主沙箱（技术栈篇 §5 第二十八批题 3A）：只对 run 语义化——wrapper
+      // 重 exec 在 run case 执法；TUI/dump-config 收到时无害忽略（同 --read-only 律）
+      sandboxHost = true;
     } else {
       positional.push(arg);
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly, background, tick, app, noPlugins };
+  return { command, args: rest, debug, readOnly, background, tick, app, noPlugins, sandboxHost };
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, app, noPlugins } = parseArgs(argv);
+  const { command, args, readOnly, background, tick, app, noPlugins, sandboxHost } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
@@ -127,6 +142,15 @@ function main(argv: string[]): number {
             process.stderr.write('用法：berry run --tick <任务名> [--read-only] [--background]\n');
             return 2;
           }
+          // e1 宿主沙箱包裹：用法校验先行（快失败不浪费 wrapper spawn），剥旗标
+          // 重 exec 后内层 argv 再入此分支照常走 tick 形态（旗标已剥不递归）
+          if (sandboxHost) {
+            return relaunchUnderHostSandbox(
+              process.argv,
+              process.cwd(),
+              readOnly ? ('read-only' as const) : 'workspace-write',
+            );
+          }
           // 旗标显式值优先；tick-main 兜底缺省（read-only + background——
           // 与 /tick run spawn 公式同款任务面档）
           return tickMain(tick, {
@@ -146,6 +170,15 @@ function main(argv: string[]): number {
         if (!message) {
           process.stderr.write('用法：berry run "<message>" [--read-only] [--background] [--app <id>]\n');
           return 2;
+        }
+        // e1 宿主沙箱包裹（同 tick 分支）：用法校验后、装配前重 exec——内层进程
+        // 于 wrapper 下走完装配与单发，退出码透传
+        if (sandboxHost) {
+          return relaunchUnderHostSandbox(
+            process.argv,
+            process.cwd(),
+            readOnly ? ('read-only' as const) : 'workspace-write',
+          );
         }
         // --read-only → sandboxMode read-only（tick 任务面同入口——技术栈篇 §5；
         // headless 无应答者，审批天然 fail-closed，无需另设审批旗标）

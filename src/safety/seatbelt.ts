@@ -14,25 +14,22 @@ function sbplString(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
 
-/** read-only 档 SBPL：全默认放行 + 拒写 + /dev/null 例外（大量 CLI 静默写 /dev/null） */
+/** read-only 基座 SBPL：全默认放行 + 拒写 + /dev/null 例外（大量 CLI 静默写 /dev/null） */
 export function seatbeltReadOnlyProfile(): string {
   return ['(version 1)', '(allow default)', '(deny file-write*)', '(allow file-write* (literal "/dev/null"))'].join(
     '\n',
   );
 }
 
-/** workspace-write 档 SBPL：read-only 基础上逐根追加 subpath 放行 */
-export function seatbeltWorkspaceWriteProfile(policy: SandboxPolicy): string {
-  // 可写根与 fs fence 同源（resolvePolicyRoots 缺省走 deriveWritableRoots）
+/** 按策略生成 SBPL profile（纯函数）。两档统一消费 resolvePolicyRoots——缺省按
+ * 档位推导（read-only 空根 = 纯拒写、workspace-write 工作区根族），**writableRoots
+ * 显式覆盖在两档同等生效**（字段契约本义；e1 宿主 read-only 档携数据目录刚需根
+ * 即走此路——2026-08-27 真机冒烟实证原 mode 分支吃不到显式根，宿主建库被拒） */
+export function seatbeltProfile(policy: SandboxPolicy): string {
   const allows = resolvePolicyRoots(policy)
     .map((root) => `(allow file-write* (subpath ${sbplString(root)}))`)
     .join('\n');
-  return `${seatbeltReadOnlyProfile()}\n${allows}`;
-}
-
-/** 按策略生成 SBPL profile（两档各一形态；纯函数） */
-export function seatbeltProfile(policy: SandboxPolicy): string {
-  return policy.mode === 'workspace-write' ? seatbeltWorkspaceWriteProfile(policy) : seatbeltReadOnlyProfile();
+  return allows ? `${seatbeltReadOnlyProfile()}\n${allows}` : seatbeltReadOnlyProfile();
 }
 
 /**

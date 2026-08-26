@@ -126,11 +126,11 @@ function importSpecifiers(source) {
     /import\s+[^'"]*?from\s*['"]([^'"]+)['"]/g,
     /export\s+[^'"]*?from\s*['"]([^'"]+)['"]/g,
     /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-    // 副作用导入（import 'x.css'）。lookbehind 排除 import 前是引号/单词字符的形态：
-    // 否则代码与注释里的字符串字面量 'import'（如 origin='import'）会被误判为
-    // 副作用导入（2026-08-27 P1-1 落码撞上，16 处全误报——真副作用导入的
-    // import 前只可能是行首/分号/花括号/空白）
-    /(?<![\w'"])import\s*['"]([^'"]+)['"]/g,
+    // 副作用导入（import 'x.css'）——行首语句位锚定：真副作用导入是语句，必在行首
+    //（允缩进）。两轮误报教训：字符串字面量里的 import 词面会被吞——'import'/
+    // origin='import'（引号前置，2026-08-27 P1-1 撞上 16 处）、argv 数组 '--import'
+    //（连字符前置同样放过了旧 lookbehind，同日 e1 落码撞上）——行锚定一并根治
+    /^[ \t]*import\s*['"]([^'"]+)['"]/gm,
   ];
   for (const pattern of patterns) {
     for (const match of source.matchAll(pattern)) specifiers.push(match[1]);
