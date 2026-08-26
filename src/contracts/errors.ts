@@ -238,7 +238,7 @@ export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALI
 /* ------------------------------------------------------------------ */
 /* 桥接协议码族（契约篇 §1.7 错误面，2026-08-26 第二十七批刀二）——      */
 /* carrier 级失败模式：AppError 家族词过界保码（信封 {code,message}）， */
-/* 非家族异常入桶码；五码全部有消费者（bridge 模块），不预造。          */
+/* 非家族异常入桶码；六码全部有消费者（bridge 模块），不预造。          */
 /* ------------------------------------------------------------------ */
 
 /** bridge：调用方主动取消的本地结算（AbortSignal 永不过界——取消消息化 + 桩本地立即结算不等对端往返；迟到 result 由迟到丢弃分支吸收，契约篇 §1.7） */
@@ -251,6 +251,8 @@ export const BRIDGE_CALL_TIMEOUT = registerErrorCode('BRIDGE_CALL_TIMEOUT');
 export const BRIDGE_METHOD_NOT_FOUND = registerErrorCode('BRIDGE_METHOD_NOT_FOUND');
 /** bridge：处理器抛出非 AppError 异常的信封桶（家族词保码过界、非家族词统一入桶——对端回卷为 AppError 后按码分派不受影响） */
 export const BRIDGE_HANDLER_FAILED = registerErrorCode('BRIDGE_HANDLER_FAILED');
+/** bridge：worker 域 v1 同步收窄面（parallel/serial/waterfall/registerMessageRole/registerSessionEventType 等桩上直接 throw——收窄清单入册契约篇 §1.7，宁响亮不静默假实现） */
+export const BRIDGE_SURFACE_NARROWED = registerErrorCode('BRIDGE_SURFACE_NARROWED');
 
 /* ------------------------------------------------------------------ */
 /* 事件词汇执法码族（契约篇 §1.1，2026-08-23 M2 /reload 纵切）——        */

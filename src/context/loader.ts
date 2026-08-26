@@ -16,6 +16,10 @@
  *    「扩展没生效」从 pull 诊断升级为 push 事件面）；
  * 7. **自定义事件词汇装载期登记**（§1.1 逃生口）：行 named export events 在一切
  *    apply 之前经 registerLiveEvent 入注册表（挂 root/锚作用域 effect——卸载即注销）。
+ * 8. **worker 行两半装载**（契约篇 §1.7，2026-08-26 第二十七批刀二）：runtime:
+ *    'worker' 行经注入的 WorkerRowLoader（bridge 模块实现，拓扑 seam——本模块
+ *    只定义结构不引 bridge）在 worker 域完成 import/校验，元数据过界后与 main 行
+ *    同管线混排（事件登记/Kahn 轮次/config 校验/生命周期事件不分域）。
  *
  * jiti `moduleCache: false` 是 /reload 两条缓存纪律（§1.3 补钉②）的 v1 基底：
  * 每次 import 全依赖图重新求值——毒化模块与「模块图半坏」结构上不可能跨加载存活。
@@ -56,13 +60,18 @@ import type { Context, ContextScope } from './types.js';
 /**
  * 形状校验后的模块视图：default 已确认是函数，ctx 参数在此收窄为真实 Context
  * （contracts 侧 PluginApply 的 ctx 是结构占位——零依赖层不引 context 类型）。
+ * 导出（第二十七批刀二 K3-b2）：worker 半 bootstrap 复用同一校验与类型
+ * （worker 域自有 loader 模块实例——本类型两侧各持一份，结构同源）。
  */
-type ValidatedModule = Omit<PluginModule, 'default'> & {
+export type ValidatedModule = Omit<PluginModule, 'default'> & {
   default: (ctx: Context, config?: Readonly<Record<string, unknown>>) => unknown;
 };
 
 /**
- * 创建插件装载用 jiti 实例。
+ * 创建插件装载用 jiti 实例。导出（第二十七批刀二 K3-b2）：worker 半 bootstrap
+ * 在 worker realm 建同构实例（虚拟注入映射两 realm 各持一份——函数不可过界，
+ * 注入物必须 realm 本地构造；v1 worker 域虚拟面第五/六键为空对象面，与
+ * loadPlugins 缺省行为同构，后续按需开面）。
  *
  * 虚拟注入映射（契约篇 §1.2 落码注记①）：`berryagent`（宿主公共面 = contracts
  * 公共导出——AppError/错误码/事件常量与目录/typebox 再导出；名即宿主 npm 包名）
@@ -193,7 +202,7 @@ function guardTransform(opts: TransformOptions): TransformResult {
   return { code: plainJiti.transform(opts) };
 }
 
-function createPluginJiti(faces: LoadPluginsOptions['virtualFaces']) {
+export function createPluginJiti(faces?: LoadPluginsOptions['virtualFaces']) {
   return createJiti(import.meta.url, {
     moduleCache: false,
     // 插件代码统一走 jiti 转译一条路径（native import 无法解析虚拟模块——防行为分叉）
@@ -220,6 +229,24 @@ function createPluginJiti(faces: LoadPluginsOptions['virtualFaces']) {
 }
 
 /**
+ * 单行入口 import（两半共用，第二十七批刀二 K3-b2）：设置 import 门禁树根 →
+ * jiti import → finally 清空（防跨行串染；串行装载保证无竞态——boot 与 /reload
+ * 不并发是装配序前提）。导出供 worker 半复用：currentTreeRoot 是**模块实例级**
+ * 全局——worker realm 自持 loader 模块实例，树根状态按 realm 隔离不与主域互扰。
+ */
+export async function importPluginEntry(
+  jiti: ReturnType<typeof createPluginJiti>,
+  entry: string,
+): Promise<Record<string, unknown>> {
+  currentTreeRoot = realpathIfPossible(dirname(entry));
+  try {
+    return (await jiti.import(entry)) as Record<string, unknown>;
+  } finally {
+    currentTreeRoot = undefined;
+  }
+}
+
+/**
  * 模块形状校验（§1.1/§1.2 单形状纪律）：default 函数 / name 非空字符串 /
  * inject 与 optionalInject string[] / config 为对象形 schema / events 为
  * LiveEventDefinition 数组——违例即 PLUGIN_SHAPE_INVALID（dsh postmortem 0001：
@@ -228,8 +255,11 @@ function createPluginJiti(faces: LoadPluginsOptions['virtualFaces']) {
  * named export 判定一律走自有属性（Object.hasOwn）：jiti 对 default-only 模块
  * 的命名空间会让任意属性读取穿透到 default 函数本身（其 name 位是函数名）——
  * 不设防时「缺 name export」会被函数名顶替蒙混过关（回归锁：形状校验用例）。
+ *
+ * 导出（K3-b2）：worker 半在 worker realm 复用同一校验（形状纪律单实现，
+ * 两 realm 各跑一份——声明面校验过界即此）。
  */
-function validateModuleShape(mod: Record<string, unknown>, id: string): ValidatedModule {
+export function validateModuleShape(mod: Record<string, unknown>, id: string): ValidatedModule {
   if (typeof mod['default'] !== 'function') {
     throw new AppError(
       PLUGIN_SHAPE_INVALID,
@@ -285,8 +315,10 @@ const CUSTOM_EVENT_NAME_FORMAT = /^[a-z][a-z0-9-]*(\/[a-z][a-z0-9-]*)+$/;
  * name 小写含 `/`——违例即 PLUGIN_SHAPE_INVALID（与模块形状同码族：声明面非法）。
  * 撞名检查不在此做（registerLiveEvent 运行时 EVENT_DUPLICATE——两行声明同名在
  * 逐行登记时才暴露）。
+ *
+ * 导出（K3-b2）：worker 半在 worker realm 复用同一校验——声明面纪律单实现。
  */
-function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id: string): void {
+export function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id: string): void {
   if (!defs) return;
   for (const def of defs) {
     if (typeof def.name !== 'string' || !CUSTOM_EVENT_NAME_FORMAT.test(def.name)) {
@@ -334,6 +366,60 @@ export interface PluginSkillsInfo {
   readonly scope: ContextScope;
 }
 
+/**
+ * worker 行装载元数据（第二十七批刀二 K3-b2）：worker 半在 worker realm 完成
+ * jiti import + 形状/事件声明校验后，**过界回宿主**的纯数据面（JSON 可编码——
+ * 函数/config schema 例外：schema 是声明数据可克隆，default 不可过界故不回传）。
+ * 宿主半据此走与 main 行同轨的管线：事件词汇登记（registerLiveEvent 防跨域
+ * EVENT_UNKNOWN）/ Kahn 轮次（inject 名单照读）/ config Value.Check / 生命周期
+ * 事件——「装载管线两半拆分」的契约面。
+ */
+export interface WorkerModuleMeta {
+  /** 插件声明 name（worker 半形状校验后转抄——宿主侧 activated 载荷与 warn 用） */
+  readonly name: string;
+  /** 硬依赖服务清单（与 PluginModule.inject 同义——Kahn 轮次照此排布） */
+  readonly inject?: readonly string[];
+  /** 软依赖服务清单（同 PluginModule.optionalInject） */
+  readonly optionalInject?: readonly string[];
+  /** 配置 JSON Schema（结构化克隆无损过界——typebox schema 无函数/symbol 键，PoC 证） */
+  readonly config?: object;
+  /** 自定义事件声明（宿主侧统一登记——跨插件订阅无顺序洞与 main 行同一纪律） */
+  readonly events?: readonly LiveEventDefinition[];
+  /** 技能目录清单（宿主侧技能注册回调照走——技能是行资产与执行域无关） */
+  readonly skills?: readonly string[];
+}
+
+/**
+ * worker 行装载器（拓扑 seam，第二十七批刀二 K3-b2）：bridge 模块实现、组合根
+ * 注入——context 不 import bridge（拓扑边 context→contracts 不变，与
+ * registerSkills 回调同构的「context 只定义结构、组合根桥接」先例）。
+ *
+ * load = worker 半（spawn worker → jiti import → 形状/事件校验 → 元数据过界）；
+ * apply = 宿主半（fork 行作用域后把 apply 委托进 worker 域执行——opts.signal
+ * 是 loadPlugins 竞速时钟的取消通道，worker 侧桩 ctx 收到 abort 即停止等待）。
+ */
+export interface WorkerRowLoader {
+  /**
+   * worker 半装载：对单行完成 import + 校验，返回过界元数据。失败抛 AppError
+   * （PLUGIN_ 族码照携——过界保码），loadPlugins 按与 main 行同路进失败清单。
+   */
+  load(row: PluginPlanRow): Promise<WorkerModuleMeta>;
+  /**
+   * 宿主半激活委托：在行作用域 fork 后调用（与 main 行 module.default(scope,…)
+   * 同位——同一竞速时钟罩着）。resolve = worker 侧 apply 返还；抛错/超时由
+   * loadPlugins 统一收尾（回卷作用域 + 进失败清单）。
+   */
+  apply(row: PluginPlanRow, scope: ContextScope, opts?: { signal?: AbortSignal }): Promise<void>;
+}
+
+/**
+ * 装载管线 pending 项（第二十七批刀二）：main 行持校验后模块（同进程 apply）、
+ * worker 行持过界元数据（apply 委托 worker 域）——判别联合，轮次/激活按 kind 分派。
+ */
+type PendingItem =
+  | { row: PluginPlanRow; kind: 'main'; module: ValidatedModule }
+  | { row: PluginPlanRow; kind: 'worker'; meta: WorkerModuleMeta };
+
 /** loadPlugins 可选参数（技能注册回调 + 虚拟面注入物——后续跨模块桥接需求同形扩展） */
 export interface LoadPluginsOptions {
   /**
@@ -363,6 +449,13 @@ export interface LoadPluginsOptions {
     /** 第六键注入物（persist 模块 createPluginSqliteFace 产物——同实例 + 主库拒开包装） */
     readonly sqlite?: { openDatabase(path: string, options?: { readonly?: boolean }): unknown };
   };
+  /**
+   * worker 行装载器（第二十七批刀二 K3-b2，拓扑 seam）：bridge 模块注入。缺省
+   * 未注入时 runtime:'worker' 行按 PLUGIN_LOAD_FAILED 进失败清单（worker 域能力
+   * 未装配——如未来某裁剪面）；注入后 worker 行与 main 行同管线混排（Kahn 轮次
+   * 不分域——服务消费方对执行域无感知）。
+   */
+  workerLoader?: WorkerRowLoader;
 }
 
 /**
@@ -386,7 +479,10 @@ export async function loadPlugins(
   const skipped: PluginSkippedPayload[] = [];
 
   /* ---- ① 跳过行 / 解析失败行：不 import（禁用行不要求已装——挂载休眠精神） ---- */
-  const pending: Array<{ row: PluginPlanRow; module: ValidatedModule }> = [];
+  // 两域混排的 pending（第二十七批刀二）：main 行持校验后模块（同进程 apply）；
+  // worker 行持过界元数据（apply 委托 workerLoader 进 worker 域执行）。Kahn 轮次
+  // 与激活按 kind 分派——服务消费方对提供方执行域无感知（provide 面经桥接同构）
+  const pending: PendingItem[] = [];
   const jiti = createPluginJiti(opts?.virtualFaces);
   for (const row of rows) {
     if (row.skip) {
@@ -397,6 +493,41 @@ export async function loadPlugins(
     if (row.unresolved !== undefined) {
       failed.push({ id: row.id, code: PLUGIN_ENTRY_UNRESOLVED, message: row.unresolved });
       root.emit('plugin/failed', { id: row.id, code: PLUGIN_ENTRY_UNRESOLVED, message: row.unresolved });
+      continue;
+    }
+    // worker 行（契约篇 §1.7）：装载校验在 worker 半完成、元数据过界；宿主侧照走
+    // 同一管线——事件词汇登记（防跨域 EVENT_UNKNOWN）+ pending 混排。builtin 行
+    // 不可声明 worker（组合树已机器执法），此处防御性兜底同语义拒载
+    if (row.runtime === 'worker') {
+      if (row.builtin !== undefined || opts?.workerLoader === undefined) {
+        const payload = {
+          id: row.id,
+          code: PLUGIN_LOAD_FAILED,
+          message:
+            row.builtin !== undefined
+              ? 'builtin 官方件不可声明 runtime: worker（官方随包件恒 main 域执行，契约篇 §1.7）'
+              : 'runtime: worker 行装载失败：worker 装载器未注入（本装配面未启用 worker 域能力，契约篇 §1.7）',
+        };
+        failed.push(payload);
+        root.emit('plugin/failed', payload);
+        continue;
+      }
+      try {
+        const meta = await opts.workerLoader.load(row);
+        validateEventDefs(meta.events, row.id);
+        for (const def of meta.events ?? []) {
+          root.effect(() => registerLiveEvent(root, def));
+        }
+        pending.push({ row, kind: 'worker', meta });
+      } catch (err) {
+        const payload = {
+          id: row.id,
+          code: err instanceof AppError ? err.code : PLUGIN_LOAD_FAILED,
+          message: err instanceof AppError ? err.message : `worker 域装载失败：${describeError(err)}`,
+        };
+        failed.push(payload);
+        root.emit('plugin/failed', payload);
+      }
       continue;
     }
     // import + 形状校验 + 自定义事件词汇登记（失败进清单不阻断——其余行仍要出全量诊断）
@@ -411,14 +542,9 @@ export async function loadPlugins(
           if (row.builtin[key] !== undefined) mod[key] = row.builtin[key];
         }
       } else {
-        // import 门禁树根 = 本行入口所在目录（realpath 归一）：await 期间 transform
-        // 全图扫描据此裁决树内外；finally 清空防跨行串染（串行装载保证无竞态）
-        currentTreeRoot = realpathIfPossible(dirname(row.entry!));
-        try {
-          mod = (await jiti.import(row.entry!)) as Record<string, unknown>;
-        } finally {
-          currentTreeRoot = undefined;
-        }
+        // import 门禁树根 = 入口所在目录（realpath 归一）——设置/求值/清空三步
+        // 收口在 importPluginEntry（第二十七批刀二：worker 半同用此件）
+        mod = await importPluginEntry(jiti, row.entry!);
       }
       const module = validateModuleShape(mod, row.id);
       // 自定义事件词汇登记（§1.1 逃生口）：装载阶段①（一切 apply 之前）统一入册——
@@ -428,7 +554,7 @@ export async function loadPlugins(
       for (const def of module.events ?? []) {
         root.effect(() => registerLiveEvent(root, def));
       }
-      pending.push({ row, module });
+      pending.push({ row, kind: 'main', module });
     } catch (err) {
       const payload = {
         id: row.id,
@@ -447,13 +573,14 @@ export async function loadPlugins(
     progress = false;
     for (let i = 0; i < pending.length;) {
       const item = pending[i]!;
-      const missing = (item.module.inject ?? []).filter((name) => root.tryGet(name) === undefined);
+      const inject = item.kind === 'main' ? item.module.inject : item.meta.inject;
+      const missing = (inject ?? []).filter((name) => root.tryGet(name) === undefined);
       if (missing.length > 0) {
         i += 1; // 依赖未就绪——留待后续轮（由更晚激活的行 provide）
         continue;
       }
       pending.splice(i, 1);
-      await activateOne(root, item.row, item.module, activated, failed, opts);
+      await activateOne(root, item, activated, failed, opts);
       progress = true;
     }
   }
@@ -462,7 +589,8 @@ export async function loadPlugins(
    * 缺失清单与 pending 清单并列——两成因不预判（未激活模块将提供什么无从得知），
    * 人看两份清单即可分辨：缺失名全在 pending 的 inject 里 = 环；否则 = 缺提供方。 */
   for (const item of pending) {
-    const missing = (item.module.inject ?? []).filter((name) => root.tryGet(name) === undefined);
+    const inject = item.kind === 'main' ? item.module.inject : item.meta.inject;
+    const missing = (inject ?? []).filter((name) => root.tryGet(name) === undefined);
     const payload = {
       id: item.row.id,
       code: PLUGIN_INJECT_UNRESOLVED,
@@ -481,15 +609,25 @@ export async function loadPlugins(
  * 激活单行：config 校验 → fork 作用域 → （技能注册回调）→ apply → 生命周期事件。
  * apply 抛错或挂起超时（§1.6 时钟族，2026-08-27 刀〇a：缺省 10s）都即回卷——
  * 失败行不留残骸；applyMs 打点（fork→apply 返回墙钟差）随 activated 载荷上行。
+ *
+ * 两域分派（第二十七批刀二）：main 行 = module.default(scope, config) 同进程调
+ * 用；worker 行 = workerLoader.apply(row, scope, {signal}) 委托 worker 域执行
+ * （宿主半只等结算——声明的 config schema/技能清单从过界元数据取，同名同义）。
+ * 竞速时钟同罩两域：worker 侧超时 abort 经 signal 传给桥接层（本地结算不等
+ * worker 迟到回执——与 PoC cancel 语义同族）。
  */
 async function activateOne(
   root: ContextScope,
-  row: PluginPlanRow,
-  module: ValidatedModule,
+  item: PendingItem,
   activated: PluginActivatedPayload[],
   failed: PluginFailedPayload[],
   opts?: LoadPluginsOptions,
 ): Promise<void> {
+  const row = item.row;
+  // 声明面来源按域分派（结构同源——worker 侧元数据是同一 named export 的转抄）
+  const schema = item.kind === 'main' ? item.module.config : (item.meta.config as typeboxRoot.TSchema | undefined);
+  const skills = item.kind === 'main' ? item.module.skills : item.meta.skills;
+  const declaredName = item.kind === 'main' ? item.module.name : item.meta.name;
   const applyTimeoutMs = opts?.applyTimeoutMs ?? 10_000;
   const fail = (code: string, message: string): void => {
     failed.push({ id: row.id, code, message });
@@ -497,17 +635,17 @@ async function activateOne(
   };
 
   // 行 config 启动一次性校验（§1.2：schema 声明 + 校验 + 注入唯一样本）
-  if (module.config) {
+  if (schema) {
     const value = row.config ?? {};
     let ok = false;
     try {
-      ok = typeboxValue.Value.Check(module.config, value);
+      ok = typeboxValue.Value.Check(schema, value);
     } catch {
       ok = false; // schema 自身非法（Value 抛错）与校验不过同路——启动即响
     }
     if (!ok) {
       // typebox 1.x 错误载荷字段是 instancePath（JSON 指针）——首错位置进诊断
-      const first = [...typeboxValue.Value.Errors(module.config, value)].at(0);
+      const first = [...typeboxValue.Value.Errors(schema, value)].at(0);
       const loc = first ? first.instancePath || first.schemaPath || '(根)' : '(根)';
       const detail = first ? `${loc}：${first.message}` : 'schema 校验失败';
       fail(PLUGIN_CONFIG_INVALID, `行 config 未通过插件声明的 schema——${detail}`);
@@ -521,31 +659,44 @@ async function activateOne(
     // apply 之前」）：技能是行资产——apply 抛错走下方 catch 的 scope.dispose()
     // 连带回卷回调挂上的注册 effect，/reload 锚级联回卷同理，失败行不留技能残骸。
     // 空清单/未注入回调（老调用方）不调——纯技能包（default 空实现）照常走完激活
-    if (module.skills !== undefined && module.skills.length > 0 && opts?.registerSkills !== undefined) {
+    if (skills !== undefined && skills.length > 0 && opts?.registerSkills !== undefined) {
       opts.registerSkills({
         id: row.id,
-        name: module.name,
+        name: declaredName,
         packageRoot: row.entry !== undefined ? dirname(row.entry) : undefined,
-        dirs: module.skills,
+        dirs: skills,
         scope,
       });
     }
     // apply 挂起时钟（§1.6 时钟族之一，2026-08-27 刀〇a）：永不 resolve 且已
     // 返还控制 = 故障语义，竞速超时按 PLUGIN_APPLY_TIMEOUT 收尾。迟到结算
     // 兜底：竞速败方的 apply promise 挂 catch 吞掉——超时后它才 reject 不进
-    // unhandledRejection（正常路径的 reject 在此之前已赢出竞速进下方 catch）
+    // unhandledRejection（正常路径的 reject 在此之前已赢出竞速进下方 catch）。
+    // cancelCtl（刀二）：超时同刻 abort——worker 行经 workerLoader.apply 的
+    // opts.signal 下沉到桥接层，宿主侧本地结算不等 worker 迟到回执（main 行
+    // 不消费此信号，纯本地竞速同前）
     const startedAt = Date.now();
+    const cancelCtl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const clock = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () =>
-          reject(
-            new AppError(PLUGIN_APPLY_TIMEOUT, `apply 挂起超 ${applyTimeoutMs}ms 未返还（挂起与抛错同族，按故障收尾）`),
-          ),
-        applyTimeoutMs,
-      );
+      timer = setTimeout(() => {
+        cancelCtl.abort();
+        reject(
+          new AppError(PLUGIN_APPLY_TIMEOUT, `apply 挂起超 ${applyTimeoutMs}ms 未返还（挂起与抛错同族，按故障收尾）`),
+        );
+      }, applyTimeoutMs);
     });
-    const applyPromise = Promise.resolve(module.default(scope, scope.config));
+    let applyPromise: Promise<unknown>;
+    if (item.kind === 'main') {
+      applyPromise = Promise.resolve(item.module.default(scope, scope.config));
+    } else {
+      // 阶段①保证 worker 行必配 workerLoader——此兜底不可达，防御式响亮不静默
+      const loader = opts?.workerLoader;
+      if (loader === undefined) {
+        throw new AppError(PLUGIN_LOAD_FAILED, 'worker 行激活时装载器缺席（装载管线不变量被破坏——不可达防御路径）');
+      }
+      applyPromise = loader.apply(row, scope, { signal: cancelCtl.signal });
+    }
     applyPromise.catch(() => {}); // 竞速败方迟到 reject 兜底（多订阅不影响 race 正常传播）
     try {
       await Promise.race([applyPromise, clock]);
@@ -553,11 +704,11 @@ async function activateOne(
       clearTimeout(timer);
     }
     // name 与行 id 不一致：不拒绝（两者本就不同物），warn 留痕防归因混淆
-    if (module.name !== row.id) {
-      root.logger.warn('插件声明 name 与组合树行 id 不一致', { rowId: row.id, name: module.name });
+    if (declaredName !== row.id) {
+      root.logger.warn('插件声明 name 与组合树行 id 不一致', { rowId: row.id, name: declaredName });
     }
-    activated.push({ id: row.id, name: module.name, applyMs: Date.now() - startedAt });
-    root.emit('plugin/activated', { id: row.id, name: module.name, applyMs: Date.now() - startedAt });
+    activated.push({ id: row.id, name: declaredName, applyMs: Date.now() - startedAt });
+    root.emit('plugin/activated', { id: row.id, name: declaredName, applyMs: Date.now() - startedAt });
   } catch (err) {
     // apply 抛错/挂起超时即响（§1.6）：先回卷本作用域半途注册（LIFO——失败行不
     // 留残骸；回卷自身的挂起由 dispose 竞速时钟兜），再进失败清单。码面两分：
