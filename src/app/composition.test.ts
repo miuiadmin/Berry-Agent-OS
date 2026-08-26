@@ -44,7 +44,7 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20） */
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4） */
 const DEFAULT_LAYER_IDS = new Set([
   'chat',
   'memory',
@@ -55,6 +55,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'tools',
   'web',
   'compaction',
+  'admin',
 ]);
 
 /**
@@ -76,10 +77,11 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层八行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // 官方默认层十行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
     // subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行（客户端桥
     // 第一刀）+ tools 第七行（Ring 1 行树化起算行——契约篇 §5.1 节奏表）
-    // + web 第八行（web 刀一批三件——契约篇 §1.5.2）
+    // + web 第八行（web 刀一批三件——契约篇 §1.5.2）+ compaction 第九行
+    // + admin 第十行（平台管理面第一刀——契约篇 §3.4）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -91,8 +93,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'tools', plugin: 'builtin:tools' },
       { id: 'web', plugin: 'builtin:web' },
       { id: 'compaction', plugin: 'builtin:compaction' },
+      { id: 'admin', plugin: 'builtin:admin' },
     ]);
-    expect(report.plan).toHaveLength(9);
+    expect(report.plan).toHaveLength(10);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -430,7 +433,7 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    // 默认层八键全给（chat/subagent/goal/scheduler/mcp/tools/web 行同解析——不带 config 的纯净形态对照）
+    // 默认层十键全给（chat/subagent/goal/scheduler/mcp/tools/web/admin 行同解析——不带 config 的纯净形态对照）
     const stubChat = { name: 'chat-stub', apply: async () => {} };
     const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
     const stubGoal = { name: 'goal-stub', apply: async () => {} };
@@ -439,6 +442,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubTools = { name: 'tools-stub', apply: async () => {} };
     const stubWeb = { name: 'web-stub', apply: async () => {} };
     const stubCompaction = { name: 'compaction-stub', apply: async () => {} };
+    const stubAdmin = { name: 'admin-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -449,6 +453,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:tools': stubTools,
       'builtin:web': stubWeb,
       'builtin:compaction': stubCompaction,
+      'builtin:admin': stubAdmin,
     });
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -460,6 +465,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'tools', plugin: 'builtin:tools' },
       { id: 'web', plugin: 'builtin:web' },
       { id: 'compaction', plugin: 'builtin:compaction' },
+      { id: 'admin', plugin: 'builtin:admin' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', builtin: stubChat },
@@ -471,6 +477,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'tools', builtin: stubTools },
       { id: 'web', builtin: stubWeb },
       { id: 'compaction', builtin: stubCompaction },
+      { id: 'admin', builtin: stubAdmin },
     ]);
   });
 

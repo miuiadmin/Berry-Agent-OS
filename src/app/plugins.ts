@@ -24,6 +24,7 @@ import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_INSTALL_FAILED } from '../contracts/errors.js';
 import type { PluginLoadResult, PluginPlanRow } from '../contracts/plugin.js';
 import {
+  derivePluginRowSource,
   isPathReference,
   loadOverlayRows,
   toggleOverlayRow,
@@ -111,7 +112,16 @@ export function createPluginsService(opts: { dataDir: string; runner?: InstallRu
     },
 
     list() {
-      return plan.map((row) => byId.get(row.id) ?? { id: row.id, status: 'planned' as const });
+      // source 在 list 时从组合树 plan 行现推导（契约篇 §3.4 第一刀，2026-08-27）：
+      // 计划行的位置事实非装载态——applyLoad 不必存、planned/failed 行同带。
+      // planned 兜底行与已装载行统一走 enrichment，面收敛一个形态
+      return plan.map((row) => {
+        const loaded = byId.get(row.id);
+        const source = derivePluginRowSource(row, dataDir);
+        return loaded === undefined
+          ? { id: row.id, status: 'planned' as const, ...(source !== undefined ? { source } : {}) }
+          : { ...loaded, ...(source !== undefined ? { source } : {}) };
+      });
     },
 
     markFailed(id, code, message) {

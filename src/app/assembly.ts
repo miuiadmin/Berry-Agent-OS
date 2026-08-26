@@ -87,7 +87,7 @@ import {
   SESSION_FORMAT_UNSUPPORTED,
   SESSION_SURFACE_OP_INVALID,
 } from '../contracts/errors.js';
-import type { SessionEvent } from '../contracts/events.js';
+import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
 import { createChatPlugin } from '../chat/index.js';
 import {
@@ -99,7 +99,7 @@ import {
   RING1_REQUIRED_ROW_IDS,
   type CompositionReport,
 } from './composition.js';
-import { loadOfficialApps, assertAppComponents } from './app-registry.js';
+import { loadOfficialApps, assertAppComponents, resolveApp, mergeRequestForApp } from './app-registry.js';
 import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
 import { createMcpSpawner } from './mcp-spawn.js';
@@ -107,7 +107,8 @@ import { killTree } from '../exec/index.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createTickRunner } from './scheduler-runner.js';
 import { createTickOsRegistrar } from './tick-register.js';
-import { createJobsService, createSubagentsService } from '../subagent/index.js';
+import { createJobsService, createSubagentsService, createInProcessProvider } from '../subagent/index.js';
+import { createAgentTool } from './subagent-plugin.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
 import { createPluginsService } from './plugins.js';
@@ -206,6 +207,12 @@ export interface RuntimeOptions {
    * 目标不存在回落新建
    */
   readonly resumeSession?: boolean | string;
+  /**
+   * CLI --app 应用 id（第三纵切进入面，契约篇 §5.4 第 2 条 / 技术栈篇 §5）：
+   * boot 即进入该应用域（会话打标/严格域续接/agent 装配默认位/审批预设）。
+   * 查无 = APP_NOT_FOUND（在册清单在 message 披露）；缺省不传 = 默认应用（chat 域）
+   */
+  readonly app?: string;
   /**
    * 组合树目录（overlay.yaml 与插件装机子树的根；缺省 dataDir()——
    * 测试注入临时目录，与生产路径完全同构）
@@ -400,11 +407,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * （handle 半边随驱动直绑退役：管道守门/审批对的落账路由 = 调用链 → 注册表
    * → 前台聚焦，registry.routed()）。loop 工具快照与系统提示词均 per-entry
    * （S2：chat 件 open 各自构造活数组与物化串——不再有组合根级共享单份）。 */
-  /** sandbox 档事实盖章（内核守门面数据 + dedup 内建；件在会话边界调时点——内核有数据，应用有时点） */
-  const stampSandboxFacts = (target: Session): void => {
+  /** sandbox 档事实盖章（内核守门面数据 + dedup 内建；件在会话边界调时点——内核有数据，应用有时点。
+   * mode = 本驱动效值（第三纵切：应用审批预设生效时按预设落事实），缺省全局档） */
+  const stampSandboxFacts = (target: Session, mode: SandboxMode = sandboxMode): void => {
     const last = [...target.events].reverse().find((e) => e.type === 'sandbox/mode');
-    if ((last?.data as { mode?: string } | undefined)?.mode !== sandboxMode) {
-      target.append('sandbox/mode', { mode: sandboxMode });
+    if ((last?.data as { mode?: string } | undefined)?.mode !== mode) {
+      target.append('sandbox/mode', { mode });
     }
   };
   // durable 转发壳（S1 收窄）：管道守门与审批对构造期绑壳，落账路由走 registry
@@ -424,11 +432,26 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 第三方清单 glob 发现面挂账随 ctx.plugins install。预算表随清单构建
    * （canAfford app 维数据源——④b llm 服务闭包读它，装载序上先行）。 */
   const officialApps = loadOfficialApps();
+  /* -- CLI --app 进入面解析（第三纵切）：boot 即进入的非缺省应用。查无 =
+   * APP_NOT_FOUND（在册清单在 message 披露）——官方清单装载后、一切装配前
+   * 先解析（进入错 id 不该走到起驱动那步才失败）。 */
+  const bootApp = opts.app === undefined ? undefined : resolveApp(officialApps, opts.app);
   /** 应用预算表（id → budget.dailyTokens；未入表 = 未声明 = 恒 true 不闸） */
   const appBudgets = new Map<string, number>();
+  /** 应用内存预算表（装载身份串 → 最严 memoryMb；第三纵切补第二纵切欠账——worker 行 resourceLimits 映射数据源） */
+  const appMemoryMb = new Map<string, number>();
   for (const [id, manifest] of officialApps) {
     if (manifest.budget?.dailyTokens !== undefined) {
       appBudgets.set(id, manifest.budget.dailyTokens);
+    }
+    // 内存预算按组件收键：多应用共享组件取最严（min——预算是申请面，从严不从宽）。
+    // main 域组件命中此表无消费面（resourceLimits 是 worker 专属——惰性声明，诚实边界）
+    const mb = manifest.budget?.memoryMb;
+    if (mb !== undefined) {
+      for (const ref of manifest.components) {
+        const prev = appMemoryMb.get(ref);
+        if (prev === undefined || mb < prev) appMemoryMb.set(ref, mb);
+      }
     }
   }
   /** context_transform 桥（契约篇 §2.2 增补 5② + S1 双参）：loop 私有回调桥为根
@@ -666,6 +689,18 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     },
     /** 模型历史投影只读（增补 7 装配缺口第 2 件——插件读当前会话投影走此面，禁自扫原始流绕投影） */
     deriveMessages: (): ProjectedMessage[] => registry.routed()?.session.deriveMessages() ?? [],
+    /**
+     * 跨会话有界时间窗查询（会话篇 §3.4 单原语，2026-08-27 刀 1）——sanctioned
+     * 直读事实表（不派生状态不攒第二份账）：管理面 events_query 工具与 uninstall
+     * 受影响会话数反查的公共取数面。读物理库（write-behind 未 flush 尾部不可见
+     * ——迟滞披露条），需精确可传 flushFirst: true（屏障内嵌参数不新开插件面
+     * flush API）。persist:false 诊断装配 = 返空降级（deriveMessages 空数组同款）。
+     */
+    queryEvents: async (query: EventQueryOptions): Promise<EventQueryResult> => {
+      if (persistence === undefined) return { rows: [], truncated: false };
+      if (query.flushFirst === true) await persistence.flush(); // 屏障先于查询（全量 flush——查询本身跨会话）
+      return persistence.queryEvents(query);
+    },
   });
 
   /* ---- ④e 组合树装载前置 + Ring 1 行树化（契约篇 §5.1 节奏表第一刀：tools 行起算） ----
@@ -766,6 +801,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   /** 可写根推导器（safety/roots 同源产物——S2 fs 迁域随 chat 件走：主驱动 fs
    * 族的 fence 数据源；与守门行同源单点接线，chat/subagent 两消费面同款构造） */
   const rootsProvider = createRootsProvider({ workspace, mode: () => sandboxMode });
+  /**
+   * in-process 子装配工厂（subagent 件与 delegable 应用注册共用同一实例——
+   * 每子独立装配 dsh-10，委派目标形态差异只在 mergeRequest 静态半边）。
+   * fork 源读点④（骨架篇 §9.3）：链 → 注册表 → 前台聚焦——子工厂在父 tool
+   * call 链内调 getSession（链在场=父会话），命令面/程序面调用落聚焦。
+   */
+  const subagentChildFactory = createSubagentChildFactory({
+    ...(persistence ? { persistence } : {}),
+    getSession: () => registry.routed()?.session,
+    streamFn,
+    model,
+    convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
+    workspace,
+    sandboxMode,
+    rootCtx: ctx,
+  });
   /** 沙箱 confine 服务（S5 bash 迁域上提至此：chat deps 需要 sandbox 实例作
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
    * 挂 ⑥b 原位不动） */
@@ -773,6 +824,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const chatBundle = createChatPlugin({
     ...(persistence ? { persistence } : {}),
     resumeSession: opts.resumeSession,
+    // CLI --app 进入面（第三纵切）：boot 首驱动即该应用域；显式档标记供审批
+    // 预设优先序（显式旗标 > 应用预设 > 全局缺省——opts.sandboxMode 在场性即显式性）
+    ...(bootApp !== undefined ? { app: bootApp } : {}),
+    ...(opts.sandboxMode !== undefined ? { sandboxModeExplicit: true } : {}),
     rootCtx: ctx,
     workspace,
     model,
@@ -841,18 +896,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     workspace: () => workspace,
     // 声明式子代理发现位置（镜像 skills ⑥⑦ 形态：workspace 同源 + homeDir 测试缝）
     agentLocations: opts.agentLocations ?? defaultAgentLocations(workspace, { homeDir: opts.homeDir, trusted: true }),
-    subagentFactory: createSubagentChildFactory({
-      ...(persistence ? { persistence } : {}),
-      // fork 源读点④（骨架篇 §9.3）：链 → 注册表 → 前台聚焦——子工厂在父 tool
-      // call 链内调 getSession（链在场=父会话），命令面/程序面调用落聚焦
-      getSession: () => registry.routed()?.session,
-      streamFn,
-      model,
-      convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
-      workspace,
-      sandboxMode,
-      rootCtx: ctx,
-    }),
+    // in-process 子装配工厂（subagent 件与 delegable 应用注册共用同一实例——
+    // 每子独立装配 dsh-10，委派目标形态差异只在 mergeRequest 静态半边）
+    subagentFactory: subagentChildFactory,
     // goal 工具三件//goal 命令的会话归属（同 routed 路由：run 期链内=归属会话，
     // TUI 命令面=聚焦会话）
     getSession: () => registry.routed()?.session,
@@ -895,12 +941,20 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // worker 域监督编舞值（契约篇 §1.7 K3-c 宿主全局缺省，两舰队共用）：
   // 心跳 15s 节律 × 3 拍缺省 ≈ 45s 冻结判定（同步死循环/事件循环冻结可判可杀；
   // CPU 燃烧如实收窄不可判——打点照登）；JS 堆 512MB = 预算内存维度宿主缺省
-  //（只限引擎堆非安全墙；应用清单 budget 内存键随刀三规范先行后分应用细配）
+  //（只限引擎堆非安全墙；分应用细配 = rowResourceLimits——应用清单 budget.memoryMb
+  // 随第三纵切收键，见下方钩子注记）
   // worker 监督编舞 + 死亡结算状态回写（markFailed——域死行在 ctx.plugins.list
   // 状态源同步转 failed，与 plugin/failed 事件广播同一时点）
   const workerChoreography = {
     heartbeatMs: 15_000,
     resourceLimits: { maxOldGenerationSizeMb: 512 },
+    // 按行覆盖（第三纵切 budget.memoryMb 落码形态）：应用组件命中的 worker 行
+    // 按清单限值执行（键 = 行 plugin 装载身份串，与组件在场断言同键）；未命中
+    // 回落全局 512MB。多应用共享组件已在 appMemoryMb 构建时取严（min）
+    rowResourceLimits: (row: { readonly plugin?: string }): { maxOldGenerationSizeMb: number } | undefined => {
+      const mb = row.plugin !== undefined ? appMemoryMb.get(row.plugin) : undefined;
+      return mb !== undefined ? { maxOldGenerationSizeMb: mb } : undefined;
+    },
     markFailed: plugins.markFailed,
   };
   // worker 域舰队·Ring 1 面（每 worker 行一域）：Ring 1 缺省全 builtin 行（恒
@@ -977,7 +1031,25 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // render 时现取档位/工作区——boot / /reload / /new 重建时点物化新值
   promptsHost.registerHostSection({
     id: 'environment',
-    render: () => renderEnvironmentSection({ mode: () => sandboxMode, workspaceRoot: () => workspace }),
+    render: () => {
+      // 插件装载计数（environment 第五件，契约篇 §3.4）：缺省不注入即无此行——
+      // environment 段先于装载物化，boot ⑨ 收口的重物化才让计数非零（B-1 落码
+      // 义务）。render 时现取 = 快照语义（重建时点冻结）
+      const pluginCounts = () => {
+        const rows = plugins.list();
+        return {
+          total: rows.length,
+          activated: rows.filter((r) => r.status === 'activated').length,
+          failed: rows.filter((r) => r.status === 'failed').length,
+          skipped: rows.filter((r) => r.status === 'skipped').length,
+        };
+      };
+      return renderEnvironmentSection({
+        mode: () => sandboxMode,
+        workspaceRoot: () => workspace,
+        pluginCounts,
+      });
+    },
   });
   // 项目指令文件段（骨架篇 §7.3 四层发现——宿主自留地第二段）：render 仅重建
   // 时点求值 = 每次重建重读文件（改 AGENTS.md 后 /reload 生效——快照语义）；
@@ -1116,8 +1188,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   //（双发 = 每插件双份全量重扫）。回调契约不抛错：factory/registerProvider 均纯装配
   const registerPluginSkills = (info: PluginSkillsInfo): void => {
     if (info.packageRoot === undefined) {
-      // builtin 行（宿主函数件）无磁盘锚点——官方纯技能包件真出现时随其纵切开
-      ctx.logger.warn('builtin 件声明 skills 暂不支持注册（无包根锚点）', { plugin: info.name, row: info.id });
+      // builtin 行（宿主函数件）默认无磁盘锚点——未自述 packageRoot 的 builtin
+      // 件仍不可注册技能（契约篇 §3.4 两来源：builtin 自述〔admin 件先例〕/
+      // 文件插件 entry 推导；两来源皆无才落此分支）
+      ctx.logger.warn('builtin 件声明 skills 但未自述 packageRoot，暂不支持注册', { plugin: info.name, row: info.id });
       return;
     }
     const provider = createPackageSkillsProvider({
@@ -1172,6 +1246,51 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   for (const [id, missing] of appGaps) {
     ctx.logger.debug('应用组件缺场（应用级隔离）', { app: id, missing });
   }
+  /* -- delegable 应用自动注册（第三纵切，契约篇 §5.4 第 2 条委派形态）--
+     镜像声明式子代理桥：in-process 机器 + mergeRequest 清单填充 + agent_<id>
+     静态工具。缺场应用不注册（应用级隔离一致性——前台不可进入的应用同样不可
+     委派）；与声明式 agent 文件撞名 = warn 跳过不炸装配（用户文件取到官方
+     应用 id 是可预见的用户行为，同 subagent 件 reservedNames 纪律）。注册锚 =
+     boot 组合根：清单静态已知不随 /reload 重算，provider 表工厂级跨 /reload
+     存续（④d 服务面同款）——/reload 只换插件面，应用注册表不动。 */
+  for (const [id, manifest] of officialApps) {
+    if (manifest.entry?.delegable !== true || appGaps.has(id)) continue;
+    if (subagents.list().some((info) => info.name === id)) {
+      ctx.logger.warn(`应用 ${id}：与既有子代理 provider 撞名（声明式 agent 文件同名？）——跳过 delegable 注册`);
+      continue;
+    }
+    subagents.register(
+      createInProcessProvider({
+        factory: subagentChildFactory,
+        name: id,
+        description: manifest.label,
+        mergeRequest: mergeRequestForApp(manifest),
+      }),
+    );
+    // 静态工具 agent_<id>（id 不合工具名字符集 = 只注册 provider 不注册工具）
+    if (/^[A-Za-z0-9_-]+$/.test(id)) {
+      if (tools.get(`agent_${id}`) === undefined) {
+        tools.register(
+          createAgentTool({
+            subagents,
+            getSession: () => registry.routed()?.session,
+            agentName: id,
+            providerName: id,
+            staticDescription: manifest.label,
+          }),
+        );
+      }
+    } else {
+      ctx.logger.warn(
+        `应用 ${id}：id 不合工具名字符集（字母/数字/_/-）——delegable provider 已注册但无 agent_${id} 工具`,
+      );
+    }
+  }
+  // boot 装载收口重物化（B-1，与 /reload 收口对称——契约篇 §3.4 落码义务）：
+  // chat 件首会话 open() 早于装载收口，其 systemPrompt 首物化时点 plugins.list()
+  // 尚空（applyLoad 合并回灌在后）——environment 插件计数行恒缺席。收口处补
+  // 一次全段重物化，装载结果（含 environment 第五件计数）即时入首请求快照
+  rematerializeAll();
   // boot 装载窗口收口：此后运行时注册（tools_change/prompts_change）即时落
   // header change 快照——装载期中间态已被首请求的 initial 快照整体收编
   loadWindow = false;
@@ -1283,6 +1402,36 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         open: () => {
           const entry = registry.open();
           return entry === undefined ? undefined : { sessionId: entry.session.header.sessionId };
+        },
+        /* -- 第三纵切进入面：/app <id> 应用进入。available = 在册且组件齐备的
+         * 应用（缺场应用不披露——应用级隔离的清单面镜像，诊断走 dump-config）；
+         * enter = 解析 + 缺场拒 + open({app})（会话打标/装配默认位/审批预设随
+         * open 一条龙）。返回面带 ok 判别——命令壳只格式化不判错。 */
+        available: () =>
+          [...officialApps.values()]
+            .filter((manifest) => !appGaps.has(manifest.id))
+            .map((manifest) => ({ id: manifest.id, label: manifest.label })),
+        enter: (appId: string): { ok: true; sessionId: string } | { ok: false; error: string } => {
+          const manifest = officialApps.get(appId);
+          if (manifest === undefined) {
+            const ids = [...officialApps.keys()].join('、');
+            return {
+              ok: false,
+              error: `未知应用：${appId}${ids === '' ? '（在册应用：无）' : `（在册应用：${ids}）`}`,
+            };
+          }
+          const missing = appGaps.get(appId);
+          if (missing !== undefined) {
+            return {
+              ok: false,
+              error: `应用 ${appId} 组件缺场（${missing.join('、')}）——应用级隔离，不可进入；dump-config 查诊断`,
+            };
+          }
+          const entry = registry.open({ app: manifest });
+          if (entry === undefined) {
+            return { ok: false, error: '现在不能进入（无持久层），稍后再试' };
+          }
+          return { ok: true, sessionId: entry.session.header.sessionId };
         },
       },
       plugins, // ctx.plugins 服务（⑨ provide——命令壳与宿主同源）

@@ -1047,4 +1047,60 @@ describe('loadPlugins 技能目录注册回调', () => {
     expect(seen[0]!.packageRoot).toBeUndefined(); // builtin 行无入口文件——组合根侧跳过注册
     expect(root.tryGet('builtin-demo-ran')).toBe(true);
   });
+
+  // packageRoot 桥两来源钉死（契约篇 §3.4 两处钉死，2026-08-27 admin 刀）：
+  // builtin 件自述 packageRoot 生效（admin 件先例）；文件插件模块带 packageRoot
+  // 键被忽略（包根恒走入口路径推导——暗道不存在）
+  it('builtin 自述 packageRoot：回调收到自述锚点（admin 件形态）', async () => {
+    const root = makeRoot();
+    const seen: PluginSkillsInfo[] = [];
+    const result = await loadPlugins(
+      root,
+      [
+        {
+          id: 'builtin-selfroot',
+          builtin: {
+            name: 'selfroot',
+            skills: ['./skills/admin'],
+            packageRoot: '/anchor/admin',
+            apply: async () => {},
+          },
+        },
+      ],
+      {
+        registerSkills: (info) => {
+          seen.push(info);
+        },
+      },
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.packageRoot).toBe('/anchor/admin'); // 自述锚点原样透传（import.meta.url 位置事实）
+    expect(seen[0]!.dirs).toEqual(['./skills/admin']);
+  });
+
+  it('文件插件模块带 packageRoot 键：被忽略（包根恒走 entry 推导——暗道不存在）', async () => {
+    const dir = makeFixtureDir();
+    const entry = writePlugin(
+      dir,
+      'fakeroot.ts',
+      [
+        "export const name = 'fakeroot';",
+        "export const skills = ['./skills'];",
+        "export const packageRoot = '/should/be/ignored';",
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    const root = makeRoot();
+    const seen: PluginSkillsInfo[] = [];
+    const result = await loadPlugins(root, [{ id: 'fakeroot', entry }], {
+      registerSkills: (info) => {
+        seen.push(info);
+      },
+    });
+
+    expect(result.failed).toEqual([]); // 多余 named export 不算形状违规（宽容面）——只是不被读
+    expect(seen[0]!.packageRoot).toBe(dir); // 入口路径推导胜出（模块键被忽略）
+  });
 });

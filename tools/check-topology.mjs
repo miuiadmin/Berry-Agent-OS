@@ -56,6 +56,11 @@ const MODULE_EDGES = {
   // agent——运行时零跨模块 import）；session 边是 ProjectedMessage/SessionEvent
   // 类型面（memory→session 类型边同款）
   compaction: ['contracts', 'context', 'session'],
+  // admin = 平台管理面官方件（2026-08-27 契约篇 §3.4 第一刀，默认层第十行）：
+  // plugins_list/events_query 两只读工具 + 管理 Skill 随件携带。工具/服务全经
+  // ctx.get 运行时取（结构子集类型本地收窄）——零跨模块 import，contracts
+  // 单边（mcp/web 最窄边再窄一档：连 context 类型都不引用）
+  admin: ['contracts'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
   channels: ['contracts', 'context', 'agent'],
   app: [
@@ -76,6 +81,10 @@ const MODULE_EDGES = {
     'mcp',
     'web',
     'compaction',
+    // admin = 平台管理面官方件（2026-08-27 契约篇 §3.4 第一刀）：只读两工具
+    // 全走 ctx.get 运行时服务面（tools/sessions/plugins），零跨模块 import——
+    // contracts 单边即足（比 mcp/web 窄边更窄：无 context 依赖）
+    'admin',
     // bridge = worker 域舰队（K3-c 组合根接线——app/bridge-fleet.ts 收编
     // spawnWorkerDomain 为 WorkerRowLoader + 监督/关停编舞，契约篇 §1.7）
     'bridge',

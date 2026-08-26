@@ -355,9 +355,11 @@ export interface PluginSkillsInfo {
   /** 插件声明 name（provider id 溯源） */
   readonly name: string;
   /**
-   * 插件包根（skills 相对路径解析锚点）= 入口文件所在目录；builtin 行（宿主
-   * 随包函数件）无磁盘锚点 = undefined——回调侧跳过注册（官方纯技能包件真
-   * 出现时随其纵切开）
+   * 插件包根（skills 相对路径解析锚点），两来源同一字段（契约篇 §3.4 第一刀
+   * 细化段，2026-08-27 刀 1）：文件插件 = 入口文件所在目录（推导）；builtin 行
+   * = 件模块自述 packageRoot（import.meta.url 求值的位置事实，仅 builtin 行
+   * 生效——文件插件模块带此键被忽略）。undefined = 无锚可判（builtin 件未
+   * 自述）——回调侧跳过注册并告警
    */
   readonly packageRoot?: string;
   /** skills named export 声明的目录清单（相对 packageRoot，原样透传） */
@@ -660,10 +662,16 @@ async function activateOne(
     // 连带回卷回调挂上的注册 effect，/reload 锚级联回卷同理，失败行不留技能残骸。
     // 空清单/未注入回调（老调用方）不调——纯技能包（default 空实现）照常走完激活
     if (skills !== undefined && skills.length > 0 && opts?.registerSkills !== undefined) {
+      // 包根两来源（契约篇 §3.4 第一刀细化段）：builtin 行优先取件模块自述
+      // packageRoot（import.meta.url 求值的位置事实）；文件插件恒走入口路径
+      // 推导——jiti 模块对象上即使带 packageRoot 键也在此被忽略（暗道不存在，
+      // 自述键只挂 BuiltinPluginModule 类型面、不入 validateModuleShape）
+      const packageRoot =
+        row.builtin !== undefined ? row.builtin.packageRoot : row.entry !== undefined ? dirname(row.entry) : undefined;
       opts.registerSkills({
         id: row.id,
         name: declaredName,
-        packageRoot: row.entry !== undefined ? dirname(row.entry) : undefined,
+        packageRoot,
         dirs: skills,
         scope,
       });

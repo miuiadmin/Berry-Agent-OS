@@ -36,3 +36,31 @@ describe('renderEnvironmentSection（四件披露）', () => {
     expect(text2).toContain('danger-full-access');
   });
 });
+
+describe('renderEnvironmentSection（第五件：插件装载计数——契约篇 §3.4 admin 刀）', () => {
+  it('pluginCounts 注入：计数行呈现（总数/activated/failed/skipped + plugins_list 指引）', () => {
+    const text = renderEnvironmentSection({
+      mode: () => 'workspace-write',
+      workspaceRoot: () => '/tmp/ws',
+      pluginCounts: () => ({ total: 10, activated: 8, failed: 1, skipped: 1 }),
+    });
+    expect(text).toContain('插件 10 行：activated 8 · failed 1 · skipped 1');
+    expect(text).toContain('plugins_list');
+  });
+  it('pluginCounts 缺省：无插件计数行（向后兼容——旧装配面零变化）', () => {
+    const text = renderEnvironmentSection({ mode: () => 'read-only', workspaceRoot: () => '/tmp/ws' });
+    expect(text).not.toContain('插件');
+  });
+  it('计数为幂等取值：render 两次同值（访问器无副作用，快照语义）', () => {
+    let calls = 0;
+    const accessor = () => {
+      calls++;
+      return { total: 3, activated: 3, failed: 0, skipped: 0 };
+    };
+    const t1 = renderEnvironmentSection({ mode: () => 'read-only', workspaceRoot: () => '/w', pluginCounts: accessor });
+    const t2 = renderEnvironmentSection({ mode: () => 'read-only', workspaceRoot: () => '/w', pluginCounts: accessor });
+    expect(t1).toContain('插件 3 行：activated 3 · failed 0 · skipped 0');
+    expect(t2).toContain('插件 3 行：activated 3 · failed 0 · skipped 0');
+    expect(calls).toBe(2); // 每次 render 各取一次（无缓存无副作用）
+  });
+});

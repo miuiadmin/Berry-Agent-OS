@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AppError } from '../contracts/errors.js';
-import type { SessionEvent } from '../contracts/events.js';
+import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import { Session } from '../session/session.js';
 import type { SessionOptions } from '../session/session.js';
 import { openStore } from './store.js';
@@ -158,6 +158,15 @@ export class Persistence {
    */
   latestSessionId(cwd: string, domain?: { app: string; includeNullApp?: boolean }): string | undefined {
     return this.store.latestSessionId(cwd, domain);
+  }
+
+  /**
+   * 跨会话有界时间窗查询（会话篇 §3.4）——门面薄转发到 Store 读方法。
+   * 迟滞披露：读物理库、未 flush 尾部不可见；屏障参数（flushFirst）归服务面
+   * （ctx.sessions 组合根闭包调本门面 flush 后再查），本层不内嵌屏障。
+   */
+  queryEvents(opts: EventQueryOptions): EventQueryResult {
+    return this.store.queryEvents(opts);
   }
 
   /** revision 指纹（storeIdentity:incarnation:revision——投影缓存跨进程变更检测） */

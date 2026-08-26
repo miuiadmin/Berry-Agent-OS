@@ -339,3 +339,120 @@ describe('双开姿态（同库两实例）', () => {
     b.close();
   });
 });
+
+/* ---------------- queryEvents（会话篇 §3.4 单原语物理半边） ---------------- */
+
+describe('queryEvents（跨会话有界查询：序/游标/时间窗/types/app/limit）', () => {
+  /** 构造已落库的多会话素材：s-a（app=chat）与 s-b（app=codex，无 app 断言对照之外形） */
+  function seed(): Store {
+    const store = openStore({ path: nextPath() });
+    // 时间轴：ev(seq) 的 time = 1755900000000 + seq（ev 助手钉死）——闭区间端点
+    // 断言用 base+2 / base+4 这类可列值
+    store.appendCore({ ...reg('s-a'), app: 'chat' }, [ev(0), ev(1), ev(2), ev(3), ev(4)], 'inc');
+    store.appendCore(
+      { ...reg('s-b'), app: 'codex' },
+      [ev(0, 'llm/usage', { tokens: 1 }), ev(5, 'user/message')],
+      'inc',
+    );
+    return store;
+  }
+
+  it('全量查询：time DESC + (session_id, seq) DESC tie-break；data 原样反序列化', () => {
+    const store = seed();
+    const result = store.queryEvents({});
+    // 手算期望序（s-b 素材 = seq0/llm/usage + seq5/user/message，共 7 行）：
+    // 同刻并列按 session_id DESC（'s-b' > 's-a'）→ s-b 在前
+    const keys = result.rows.map((r) => [r.time, r.sessionId, r.seq]);
+    expect(keys).toEqual([
+      [1755900000005, 's-b', 5],
+      [1755900000004, 's-a', 4],
+      [1755900000003, 's-a', 3],
+      [1755900000002, 's-a', 2],
+      [1755900000001, 's-a', 1],
+      [1755900000000, 's-b', 0],
+      [1755900000000, 's-a', 0],
+    ]);
+    // data 原样（不截断不包装）：首行是 s-b/seq5 的 user/message {content:'hi'}
+    expect(result.rows[0]).toMatchObject({ sessionId: 's-b', seq: 5, type: 'user/message', data: { content: 'hi' } });
+    expect(result.nextCursor).toBeUndefined(); // 全量取尽
+    expect(result.truncated).toBe(false);
+    store.close();
+  });
+
+  it('时间窗含端点闭区间：since/until 边界值行都在页内', () => {
+    const store = seed();
+    const base = 1755900000000;
+    // [base+2, base+4] 闭区间：端点 2 与 4 都含
+    const result = store.queryEvents({ sinceMs: base + 2, untilMs: base + 4 });
+    expect(result.rows.map((r) => [r.sessionId, r.seq])).toEqual([
+      ['s-a', 4],
+      ['s-a', 3],
+      ['s-a', 2],
+    ]);
+    store.close();
+  });
+
+  it('types 是数据条件非断言：查未注册/不存在的词返回空集不抛', () => {
+    const store = seed();
+    const result = store.queryEvents({ types: ['no/such-vocab', 'gone/plugin/word'] });
+    expect(result.rows).toEqual([]);
+    expect(result.truncated).toBe(false);
+    // 正常过滤维：llm/usage 只在 s-b 有一行（seq 0）
+    const usage = store.queryEvents({ types: ['llm/usage'] });
+    expect(usage.rows.map((r) => [r.sessionId, r.seq])).toEqual([['s-b', 0]]);
+    // 空数组 = 无过滤（与 undefined 同义——「不过滤」而非「匹配零行」）
+    expect(store.queryEvents({ types: [] }).rows).toHaveLength(7);
+    store.close();
+  });
+
+  it('app 维过滤（JOIN sessions.app）：只取 chat 会话事件', () => {
+    const store = seed();
+    const result = store.queryEvents({ app: 'chat' });
+    expect(result.rows.every((r) => r.sessionId === 's-a')).toBe(true);
+    expect(result.rows).toHaveLength(5);
+    // app 无匹配 = 空集（数据条件语义）
+    expect(store.queryEvents({ app: 'nope' }).rows).toEqual([]);
+    store.close();
+  });
+
+  it('sessionId 单会话细查（退化用法）', () => {
+    const store = seed();
+    const result = store.queryEvents({ sessionId: 's-b' });
+    expect(result.rows.map((r) => r.seq)).toEqual([5, 0]);
+    store.close();
+  });
+
+  it('limit 钳制与 truncated 标注：超帽钳到 1000 置真；页未取尽也置真', () => {
+    const store = seed();
+    // limit 超帽：直接钳到 1000（本素材仅 7 行——钳制事实由 truncated 表达）
+    const clamped = store.queryEvents({ limit: 100000 });
+    expect(clamped.truncated).toBe(true); // clamped 成立（即使全行都进了页）
+    expect(clamped.rows).toHaveLength(7);
+    // 页未取尽：limit 3 → 8 行中取 3，nextCursor 指向页尾行
+    const paged = store.queryEvents({ limit: 3 });
+    expect(paged.rows).toHaveLength(3);
+    expect(paged.nextCursor).toEqual({ time: 1755900000003, sessionId: 's-a', seq: 3 });
+    expect(paged.truncated).toBe(true);
+    // limit 0/负数 = 钳到 1（页大小下限）
+    expect(store.queryEvents({ limit: 0 }).rows).toHaveLength(1);
+    store.close();
+  });
+
+  it('组合游标分页：逐页回传 nextCursor 全量翻完不重不漏（游标不漂）', () => {
+    const store = seed();
+    const collected: Array<[string, number]> = [];
+    let cursor: { time: number; sessionId: string; seq: number } | undefined;
+    let pages = 0;
+    do {
+      const page = store.queryEvents({ limit: 3, ...(cursor !== undefined ? { cursor } : {}) });
+      collected.push(...page.rows.map((r) => [r.sessionId, r.seq] as [string, number]));
+      cursor = page.nextCursor;
+      pages++;
+      expect(pages).toBeLessThan(10); // 防御：游标不动即死循环
+    } while (cursor !== undefined);
+    // 7 行 / 页 3 = 3 页；全量序与一次性查询完全一致（不重不漏）
+    expect(pages).toBe(3);
+    expect(collected).toEqual(store.queryEvents({}).rows.map((r) => [r.sessionId, r.seq] as [string, number]));
+    store.close();
+  });
+});

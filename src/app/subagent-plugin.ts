@@ -158,8 +158,10 @@ interface AgentToolOptions {
  * 委派工具定义（双形态：通用 v1 / 声明式静态）。
  * effect 归 'read'：委派本身不触盘，子的写走子管道自己的守门（父 read-only 档
  * 委派的子同样 read-only——§6.5 快照语义；归 'write' 会误杀只读研究委派）。
+ * 导出面（第三纵切）：delegable 应用的 `agent_<id>` 静态工具复用本构造
+ * （组合根 boot 注册——与声明式 agents/*.md 同形态）。
  */
-function createAgentTool(opts: AgentToolOptions): ToolDefinition {
+export function createAgentTool(opts: AgentToolOptions): ToolDefinition {
   const isStatic = opts.agentName !== undefined;
   // 声明式形态：persona/toolFilter 由文件固定（mergeRequest 收窄执法）——参数面
   // 不暴露这两个位（模型给了也会被合并收窄，索性不误导）；prompt/label/background

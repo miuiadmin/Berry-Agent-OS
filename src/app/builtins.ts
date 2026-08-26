@@ -23,6 +23,7 @@ import type { McpPluginDeps } from '../mcp/index.js';
 import { createWebPlugin } from '../web/index.js';
 import type { WebPluginOverrides } from '../web/index.js';
 import { createCompactionPlugin } from '../compaction/index.js';
+import { createAdminPlugin } from '../admin/index.js';
 import { createToolsPlugin, type ToolsPluginDeps } from '../tools/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
 import type { AgentLocation } from './agents-md.js';
@@ -123,6 +124,11 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // 零宿主资源闭包（服务全经 ctx 取——web 同款最简形态）；恒注册（卸行靠
     // overlay 禁用——件停用后旧压缩日志仍可读，词汇宿主面注册不随行漂移）
     'builtin:compaction': createCompactionPlugin(),
+    // admin 官方件（第十行，契约篇 §3.4 平台管理面第一刀，2026-08-27）：只读面
+    // 两工具（plugins_list/events_query）+ 管理 Skill 同件携带（packageRoot 自述
+    // 锚）。零宿主资源闭包（tools/sessions/plugins 三键全经 ctx 取）；恒注册
+    //（卸行靠 overlay 禁用——写类动词随第二刀导线）
+    'builtin:admin': createAdminPlugin(),
     // tools 官方件（第七行 = Ring 1 行树化起算行，契约篇 §5.1 节奏表——**必备行**
     // 非 Ring 2 可卸：overlay 禁用即启动断言拒启；可换实现引用不可禁用）：
     // 三段管道 + ctx.tools 服务 + fs/检索工具族。恒注册（缺注即 unresolved——

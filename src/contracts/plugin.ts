@@ -137,6 +137,17 @@ export interface PluginModule {
 export interface BuiltinPluginModule extends Omit<PluginModule, 'default'> {
   /** 入口函数（与 PluginModule.default 同签名——命名差异只为「非模块导出」的语义清晰） */
   apply: PluginApply;
+  /**
+   * 包根锚点自述（2026-08-27 刀 1，契约篇 §3.4 第一刀细化段——builtin 件技能
+   * 携带的桥接锚）：**仅 builtin 行生效的宿主侧扩展**——jiti 装载的文件插件
+   * 模块对象上即使带此键也被加载器忽略（不入 validateModuleShape、不对第三方
+   * 开放——包根可指插件目录外的暗道不存在），故挂本类型面而非 PluginModule
+   * （named export 契约六件不动）。值由模块自身 `import.meta.url` 运行时求值
+   * （dirname）——与文件插件的入口路径推导同为**位置事实而非声明**，结构上
+   * 不可能漂；loader 技能桥优先取自述、无则回落入口推导（同一
+   * PluginSkillsInfo.packageRoot 字段两来源，非两套机制）。
+   */
+  packageRoot?: string;
 }
 
 /** 组合树行（§5.1）：每行 = 一个插件实例，字段级后写胜出合成 */

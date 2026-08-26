@@ -156,6 +156,8 @@ describe('createBerryRuntime 装配面', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'plugins_list',
+      'events_query',
       'read',
       'write',
       'edit',
@@ -406,8 +408,16 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
     // S2 后全局层口径：fs 四件迁域层（无驱动即无域工具——persist:false 不开
-    // 驱动）；memory/goal 空转；剩 find/grep/bash/agent/fetch 五件
-    expect(runtime.tools.list().map((t) => t.name)).toEqual(['find', 'grep', 'agent', 'fetch']);
+    // 驱动）；memory/goal 空转；admin 件两工具经 ctx 取服务恒在（sessions
+    // 降级返空）——剩 find/grep/agent/fetch/plugins_list/events_query 七件
+    expect(runtime.tools.list().map((t) => t.name)).toEqual([
+      'find',
+      'grep',
+      'agent',
+      'fetch',
+      'plugins_list',
+      'events_query',
+    ]);
   });
 
   it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
@@ -420,11 +430,13 @@ describe('createBerryRuntime 装配面', () => {
     const runtime = await assemble({ homeDir: home });
     // 出厂样例技能随包恒可见（§4.4 ⑤——repo 根 skills/ 三件，拍板 17），本测试
     // 临时 home 下 user 层零技能 → 清单 = 出厂三件 + 注入的 demo（user 层压过出厂）
+    // + admin 件随件技能（builtin 自述 packageRoot 桥——契约篇 §3.4，随第十行装载）
     expect(runtime.skills.list().map((s) => s.name)).toEqual([
       'demo',
       'commit-checklist',
       'plugin-quickstart',
       'troubleshooting',
+      'admin',
     ]);
     expect(runtime.systemPrompt).toContain('<name>demo</name>');
     expect(runtime.channels.commands.lookup('skill:demo')).toBeDefined();
@@ -465,6 +477,8 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'plugins_list',
+      'events_query',
       'read',
       'write',
       'edit',
@@ -606,6 +620,8 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'plugins_list',
+      'events_query',
       'echo',
       'read',
       'write',
@@ -1139,6 +1155,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       { id: 'tools', status: 'activated', name: 'tools' },
       { id: 'web', status: 'activated', name: 'web' },
       { id: 'compaction', status: 'activated', name: 'compaction' },
+      { id: 'admin', status: 'activated', name: 'admin' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
@@ -1153,6 +1170,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'tools',
       'web',
       'compaction',
+      'admin',
       'tool-plugin',
     ]);
     // 插件工具已进注册表（S2：全局层在前 + fs 域层在后——本会话可见面）
@@ -1169,6 +1187,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'plugins_list',
+      'events_query',
       'plug-echo',
       'read',
       'write',
@@ -1238,6 +1258,24 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     await runtime.conversation!.submitOnce('看提示词');
     const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
     expect((headers[0]!.data as { systemPrompt: string }).systemPrompt).toContain('插件段内容：记住用中文注释');
+  });
+
+  // B-1 回归锁（admin 刀，契约篇 §3.4 落码义务）：chat 件首会话 open() 的
+  // systemPrompt 首物化早于 ⑨ 装载收口——无收口补物化时首物化点 plugins.list()
+  // 恒空，environment 第五件计数在首请求快照里冻结为「插件 0 行」。锁：initial
+  // header 的 systemPrompt 计数必须非零且 activated === total（默认层全激活）。
+  // 修前必红验证法：注释掉 boot 收口的 rematerializeAll()（assembly ⑨ 尾）。
+  it('boot 装载收口重物化：首 header 的插件计数非零（无收口补物化时恒 0 必红）', async () => {
+    const { streamFn } = scriptedStream([textMessage('好')]);
+    const runtime = await assemble({ streamFn });
+    await runtime.conversation!.submitOnce('问');
+    const header = runtime.session!.events.find((e) => e.type === 'request/header');
+    const sp = (header!.data as { systemPrompt: string }).systemPrompt;
+    const m = /插件 (\d+) 行：activated (\d+)/.exec(sp);
+    expect(m).not.toBeNull();
+    // total > 0（默认装配 = 十行——修前此处取到 0 即红）；activated === total（默认全激活）
+    expect(Number(m![1])).toBeGreaterThan(0);
+    expect(Number(m![2])).toBe(Number(m![1]));
   });
 
   it('context_transform 桥接：插件挂瀑布注入消息 → 模型请求含注入、日志不含（瞬态面）', async () => {
@@ -1399,13 +1437,35 @@ describe('/reload 组合树重载', () => {
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'tool-plugin'],
+      activated: [
+        'chat',
+        'memory',
+        'subagent',
+        'goal',
+        'scheduler',
+        'mcp',
+        'web',
+        'compaction',
+        'admin',
+        'tool-plugin',
+      ],
       failed: [],
       skipped: [],
     });
     expect(reloadedPayloads).toEqual([
       {
-        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'tool-plugin'],
+        activated: [
+          'chat',
+          'memory',
+          'subagent',
+          'goal',
+          'scheduler',
+          'mcp',
+          'web',
+          'compaction',
+          'admin',
+          'tool-plugin',
+        ],
         failed: [],
         skipped: [],
       },
@@ -1435,7 +1495,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'admin'],
       failed: [],
       skipped: ['tool-plugin'],
     });
@@ -1454,6 +1514,8 @@ describe('/reload 组合树重载', () => {
       'goal_set',
       'goal_update',
       'fetch',
+      'plugins_list',
+      'events_query',
       'read',
       'write',
       'edit',
@@ -1470,6 +1532,7 @@ describe('/reload 组合树重载', () => {
       ['tools', 'activated'],
       ['web', 'activated'],
       ['compaction', 'activated'],
+      ['admin', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -1512,6 +1575,7 @@ describe('/reload 组合树重载', () => {
       'mcp',
       'web',
       'compaction',
+      'admin',
       'tool-plugin',
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
@@ -1580,7 +1644,18 @@ describe('/reload 组合树重载', () => {
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'tool-plugin'],
+      activated: [
+        'chat',
+        'memory',
+        'subagent',
+        'goal',
+        'scheduler',
+        'mcp',
+        'web',
+        'compaction',
+        'admin',
+        'tool-plugin',
+      ],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -1638,6 +1713,7 @@ describe('/reload 组合树重载', () => {
       ['tools', 'activated'],
       ['web', 'activated'],
       ['compaction', 'activated'],
+      ['admin', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
@@ -1688,7 +1764,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
     expect(result.payload?.activated).not.toContain('tools');
     expect(reloadedPayloads).toEqual([
       {
-        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction'],
+        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'admin'],
         failed: [],
         skipped: [],
         ring1RestartRequired: ['tools'],

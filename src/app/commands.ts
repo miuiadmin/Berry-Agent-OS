@@ -29,19 +29,22 @@ function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
     .join('\n');
 }
 
-/** 插件状态行 → 人读文本（failed/skipped 附原因——「没生效」必须可见，同 ref-3） */
+/** 插件状态行 → 人读文本（failed/skipped 附原因——「没生效」必须可见，同 ref-3；
+ * source = 行来源（builtin/npm/git/local，契约篇 §3.4 list 现场推导）一并呈现 */
 function formatPluginRow(row: PluginStatusRow): string {
+  // 来源段缺省省略（推导不出 = 来源未知，不占行宽）
+  const source = row.source !== undefined ? ` · ${row.source}` : '';
   switch (row.status) {
     case 'activated':
       // applyMs 打点（B2 P5，刀〇a）：启动开销随清单可见——慢件一眼定位，阈值调校供数
-      return `  ✓ ${row.id}（${row.name ?? '未具名'}${row.applyMs !== undefined ? ` · apply ${row.applyMs}ms` : ''}）`;
+      return `  ✓ ${row.id}（${row.name ?? '未具名'}${source}${row.applyMs !== undefined ? ` · apply ${row.applyMs}ms` : ''}）`;
     case 'failed':
-      return `  ✖ ${row.id}：${row.code} ${row.message ?? ''}`;
+      return `  ✖ ${row.id}${source}：${row.code} ${row.message ?? ''}`;
     case 'skipped':
-      return `  · ${row.id}（跳过：${row.reason}）`;
+      return `  · ${row.id}${source}（跳过：${row.reason}）`;
     default:
       // planned = 装载前视角（boot 前 / 服务刚建）——正常 TUI 里看不到，防御呈现
-      return `  ○ ${row.id}（planned——尚未装载）`;
+      return `  ○ ${row.id}${source}（planned——尚未装载）`;
   }
 }
 
@@ -100,6 +103,19 @@ export interface BuiltinCommandsOptions {
     switchTo(sessionId: string): boolean;
     /** 开新驱动不退役旧的（registry.open 直调；无持久层 undefined） */
     open(): { readonly sessionId: string } | undefined;
+    /**
+     * 在册可用应用（第三纵切进入面）：组件齐备的在册清单（缺场应用不披露——
+     * 应用级隔离的清单面镜像），/app 裸清单尾部披露用
+     */
+    available(): ReadonlyArray<{ readonly id: string; readonly label: string }>;
+    /**
+     * 应用进入（第三纵切）：开新会话域 + 聚焦（open({app}) 一条龙——会话打标/
+     * agent 装配默认位/审批预设随 open 生效）。ok:false + error = 未知 id /
+     * 组件缺场隔离 / 无持久层——命令壳只格式化
+     */
+    enter(
+      appId: string,
+    ): { readonly ok: true; readonly sessionId: string } | { readonly ok: false; readonly error: string };
   };
   /** 跨会话 allowlist 存储（/allowlist 枚举与撤销面——接线批 Commit B） */
   readonly allowlist: AllowlistStore;
@@ -150,7 +166,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     }),
     commands.register({
       name: 'app',
-      description: '多会话前台：清单 / 切换 <序号|id前缀> / 开新驻留（/app new）',
+      description: '多会话前台：清单 / 切换 <序号|id前缀> / 开新 / 进入应用（/app <应用id> [首条消息]）',
       handler: (args) => {
         const arg = args.trim();
         /* ---- 动词三：/app new = 开新+驻留+聚焦（加而观之）——不退役旧驱动，无 busy 拒 ---- */
@@ -161,6 +177,24 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           } else {
             ui.notify('现在不能开新会话（无持久层），稍后再试');
           }
+          return;
+        }
+        /* ---- 动词〇（第三纵切）：清单 id 精确命中 = 应用进入——优先于会话寻址 ----
+         * 应用 id 词汇域与会话 id 前缀不相交（应用 id 无会话 id 字符），先后即
+         * 无歧义；命中即 enter（开新域+聚焦），尾部 args 作为首条用户消息直接
+         * 提交（与用户手打同路径——进入与开跑不打两段） */
+        const firstSpace = arg.indexOf(' ');
+        const appArg = firstSpace === -1 ? arg : arg.slice(0, firstSpace);
+        const firstMessage = firstSpace === -1 ? '' : arg.slice(firstSpace + 1).trim();
+        const appHit = opts.apps.available().find((a) => a.id === appArg);
+        if (appHit !== undefined) {
+          const entered = opts.apps.enter(appHit.id);
+          if (!entered.ok) {
+            ui.notify(`进入失败：${entered.error}`);
+            return;
+          }
+          ui.notify(`已进入应用 ${appHit.label}（会话 ${entered.sessionId.slice(0, 8)}…）`);
+          if (firstMessage !== '') opts.submit(firstMessage);
           return;
         }
         const { active, retiredCount } = opts.apps.list();
@@ -175,8 +209,14 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
             return `  ${i + 1}. ${entry.sessionId.slice(0, 8)} ${badge}`;
           });
           const retiredLine = retiredCount > 0 ? `\n（另有 ${retiredCount} 个已停摆会话——账本可查，清单不列）` : '';
+          // 可用应用披露（第三纵切）：缺场应用不披露（应用级隔离的清单面镜像）
+          const available = opts.apps.available();
+          const appLine =
+            available.length > 0
+              ? `\n可用应用：${available.map((a) => a.id).join('、')} —— 进入 /app <id> [首条消息]`
+              : '';
           ui.notify(
-            `活动会话（${active.length}）：\n${lines.join('\n')}${retiredLine}\n切换 /app <序号|id前缀> · 开新 /app new`,
+            `活动会话（${active.length}）：\n${lines.join('\n')}${retiredLine}\n切换 /app <序号|id前缀> · 开新 /app new${appLine}`,
           );
           return;
         }

@@ -62,13 +62,19 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   { id: 'tools', plugin: 'builtin:tools' },
   // 第八行 = web 行（契约篇 §1.5.2 web 刀，Ring 2 真·可卸库角色行）：fetch
   // 工具 + ctx.fetch 服务 + SSRF 五卫生件一批三件——卸掉即无 fetch 能力，
-  // 核心循环不破；compaction 行（第九行）紧随其后，admin 行顺居第十（挂账）
+  // 核心循环不破
   { id: 'web', plugin: 'builtin:web' },
   // 第九行 = compaction 行（内核边界篇席 20，会话篇 §2 增补七条——Ring 2 真·
   // 可卸后台角色行）：长会话压缩 durable 五步 + 两段式触发 + 重播种接线。
   // 零宿主资源闭包（服务全经 ctx 取）；卸掉即无自动压缩，核心循环不破
   //（曾压缩过的旧日志可读性不随行装载漂移——词汇宿主面注册）
   { id: 'compaction', plugin: 'builtin:compaction' },
+  // 第十行 = admin 行（契约篇 §3.4 平台管理面第一刀，2026-08-27——Ring 2 真·
+  // 可卸只读管理件）：plugins_list/events_query 两只读工具 + ctx.sessions
+  // 跨会话有界查询消费 + 管理 Skill 同件携带（包根自述锚）。写类动词
+  // （install/uninstall/configure/reload）随第二刀导线；卸掉即无管理面
+  // 工具，核心循环不破
+  { id: 'admin', plugin: 'builtin:admin' },
 ];
 
 /**
@@ -462,6 +468,14 @@ export function createPathsService(dataDir: string, workspace: string): PathsSer
   };
 }
 
+/**
+ * 单行来源（ctx.plugins.list 的 source 字段，2026-08-27 刀 1——契约篇 §3.4
+ * 第一刀细化段）：从组合树 plan 行推导（builtin 标记 → builtin / entry 落
+ * git 装机子树 → git / 落 npm 装机子树 → npm / 其余路径 → local）。
+ * unresolved 行无锚可判 = 缺省不带。
+ */
+export type PluginRowSource = 'builtin' | 'npm' | 'git' | 'local';
+
 /** 单行装载状态（ctx.plugins.list 返回形） */
 export interface PluginStatusRow {
   /** 组合树行 id */
@@ -478,6 +492,23 @@ export interface PluginStatusRow {
   readonly reason?: PluginSkipReason;
   /** activated 时的 apply 耗时打点（毫秒，B2 P5 打点先行，2026-08-27 刀〇a——诊断面展示启动开销，不参与控制流） */
   readonly applyMs?: number;
+  /** 行来源（list 时从组合树 plan 行现推导——计划行的位置事实非装载态） */
+  readonly source?: PluginRowSource;
+}
+
+/**
+ * 从组合树 plan 行推导行来源（ctx.plugins.list / admin 件 plugins_list 共用）。
+ * @param row 组合树计划行（entry/builtin 二元判据）
+ * @param dataDir 组合目录（装机子树根 `<dataDir>/plugins/` 的前缀判定锚）
+ */
+export function derivePluginRowSource(row: PluginPlanRow, dataDir: string): PluginRowSource | undefined {
+  if (row.builtin !== undefined) return 'builtin';
+  if (row.entry === undefined) return undefined; // unresolved 行：无锚可判（不带 source）
+  const gitRoot = `${join(dataDir, 'plugins', 'git')}/`;
+  const npmRoot = `${join(dataDir, 'plugins', 'node_modules')}/`;
+  if (row.entry.startsWith(gitRoot)) return 'git';
+  if (row.entry.startsWith(npmRoot)) return 'npm';
+  return 'local'; // 其余路径 = local 直引（含测试 fixture 目录）
 }
 
 /** 插件管理服务面（ctx.plugins，§1.5 表尾）——有状态单例的实现移驻 ./plugins.ts（2026-08-23 /reload 纵切：install/toggle/update 落码） */

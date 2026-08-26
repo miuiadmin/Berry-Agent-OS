@@ -241,3 +241,75 @@ export interface SessionEvent<T = unknown> {
   /** 遮蔽溯源：被遮蔽节点 + 依据事件的完整 seq 列表（只能引用更早的 seq） */
   readonly sourceEventSeqs?: number[];
 }
+
+/* ---------------- 跨会话有界查询（会话篇 §3.4，2026-08-27 刀 1） ---------------- */
+
+/**
+ * 组合游标 = 上页最旧一行的排序键三元组（[会话与存储]篇 §3.4 分页协议）。
+ * 序 = time DESC、tie-break (sessionId, seq) DESC（最新优先往回翻）；下一页
+ * 取排序意义上严格更旧者——新事件落在已翻过侧，天然不漂。
+ */
+export interface EventQueryCursor {
+  /** 上页最旧一行的 time（毫秒 epoch） */
+  readonly time: number;
+  /** 上页最旧一行的会话 id */
+  readonly sessionId: string;
+  /** 上页最旧一行的会话内序号 */
+  readonly seq: number;
+}
+
+/**
+ * queryEvents 过滤与分页参数（挂 ctx.sessions 插件面，单原语）。
+ * 判定句（与 eventsOfType 刻意相反）：types 在本面是**数据条件**——查未注册
+ * 或已消失的词返回空不抛（uninstall 受影响会话数反查的恰是「已不在注册表
+ * 里的词」）；词作**类型**（eventsOfType 读法）撞未注册才是断言错必抛。
+ */
+export interface EventQueryOptions {
+  /** 时间窗下界（毫秒 epoch，含端点闭区间）；缺省无下界 */
+  readonly sinceMs?: number;
+  /** 时间窗上界（毫秒 epoch，含端点闭区间）；缺省无上界 */
+  readonly untilMs?: number;
+  /** 事件类型过滤维（数据条件非词汇断言——空集合法，见类型注释） */
+  readonly types?: readonly string[];
+  /** 应用维：过滤 sessions.app 列（存储层 JOIN sessions 实现） */
+  readonly app?: string;
+  /** 会话维：单会话细查 = 同一原语的退化用法，不开第二原语 */
+  readonly sessionId?: string;
+  /** 页大小：缺省 200、硬帽 1000（超帽钳到帽且 truncated 置真） */
+  readonly limit?: number;
+  /** 分页游标 = 上页最旧一行（向更旧方向翻页） */
+  readonly cursor?: EventQueryCursor;
+  /**
+   * true = 服务内先 flush 屏障再查询（缺省 false）。读的是物理库——write-behind
+   * 批落未 flush 的尾部不可见；需要含最新尾部的精确查询置 true（迟滞披露条，
+   * 会话篇 §3.4——屏障以参数内嵌，不新开插件面 flush API）。
+   */
+  readonly flushFirst?: boolean;
+}
+
+/** 查询结果行（物理事实表行的直读形态；data 原样 JSON、服务面不截断——呈现截断归工具层） */
+export interface EventQueryRow {
+  /** 所属会话 id */
+  readonly sessionId: string;
+  /** 会话内连续序号 */
+  readonly seq: number;
+  /** 事件类型词汇 */
+  readonly type: string;
+  /** 毫秒时间戳 */
+  readonly time: number;
+  /** 载荷（JSON 反序列化原样） */
+  readonly data: unknown;
+}
+
+/** queryEvents 返回形 */
+export interface EventQueryResult {
+  /** 本页行（按 time DESC、(sessionId, seq) DESC 稳定序） */
+  readonly rows: readonly EventQueryRow[];
+  /** 下一页游标（还有更旧行可翻时给出 = 本页最旧一行；无更旧页缺省） */
+  readonly nextCursor?: EventQueryCursor;
+  /**
+   * 「本页不是全部」总标注：请求 limit 超硬帽被钳制、或本页之外仍有更旧行
+   * （即 nextCursor 在场）任一成立即 true——模型面的粗粒度提示位。
+   */
+  readonly truncated: boolean;
+}

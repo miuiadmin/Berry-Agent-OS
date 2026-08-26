@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import type { Database as DatabaseConnection } from 'better-sqlite3';
 import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '../contracts/errors.js';
-import type { SessionEvent } from '../contracts/events.js';
+import type { EventQueryOptions, EventQueryResult, EventQueryRow, SessionEvent } from '../contracts/events.js';
 import { deepFreeze } from '../session/snapshot.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
 import { APPLICATION_ID, CANONICAL_DDL, SCHEMA_VERSION, SESSION_APP_COLUMN_MIGRATION } from './schema.js';
@@ -477,6 +477,94 @@ export class Store {
       `SELECT id FROM sessions WHERE cwd = ? AND ${clause} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
     ).get(cwd, domain.app) as { id: string } | undefined;
     return row?.id;
+  }
+
+  /* ---------------- 跨会话有界查询（会话篇 §3.4，2026-08-27 刀 1） ---------------- */
+
+  /** queryEvents 页大小缺省值（会话篇 §3.4） */
+  static readonly EVENT_QUERY_DEFAULT_LIMIT = 200;
+  /** queryEvents 页大小硬帽（超帽钳到帽且 truncated 置真——会话篇 §3.4） */
+  static readonly EVENT_QUERY_MAX_LIMIT = 1000;
+
+  /**
+   * 跨会话有界时间窗查询（会话篇 §3.4 唯一原语的物理半边；latestSessionId 的
+   * 内核表读脸同族—— sanctioned 直读事实表，不派生状态不攒第二份账）。
+   *
+   * 序 = time DESC、tie-break (session_id, seq) DESC（日志捞取语义：最新优先
+   * 往回翻）；分页用组合游标不用 offset——write-behind 落库期间新事件插到前端，
+   * offset 会漂、游标不漂（游标向更旧翻，新事件落在已翻过侧天然不可见）。
+   *
+   * types 是数据条件非词汇断言（判定句见 contracts/events.ts）：查未注册或
+   * 已消失的词返回空不抛。迟滞披露：读物理库，未 flush 尾部不可见——屏障
+   * 参数（flushFirst）归服务面（ctx.sessions），本层不管。
+   *
+   * 索引维持「真实量级再加」裁决：v1 无 time 索引，顺序扫 + LIMIT 在单
+   * operator 量级毫秒级；行数上六位数或延迟可感知时 idx_events_time 随迁移链前进。
+   */
+  queryEvents(opts: EventQueryOptions): EventQueryResult {
+    // 页大小钳制（缺省 200 / 硬帽 1000；超帽钳到帽——exec/tool.ts timeoutMs 钳制同款）
+    const requested = opts.limit ?? Store.EVENT_QUERY_DEFAULT_LIMIT;
+    const limit = Math.min(Math.max(Math.floor(requested), 1), Store.EVENT_QUERY_MAX_LIMIT);
+    const clamped = requested > Store.EVENT_QUERY_MAX_LIMIT;
+
+    // 动态 WHERE 装配（条件全组合可列，stmt 缓存按 SQL 文本键控天然复用）
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.sinceMs !== undefined) {
+      where.push('e.time >= ?'); // 含端点闭区间（下界）
+      params.push(opts.sinceMs);
+    }
+    if (opts.untilMs !== undefined) {
+      where.push('e.time <= ?'); // 含端点闭区间（上界）
+      params.push(opts.untilMs);
+    }
+    if (opts.types !== undefined && opts.types.length > 0) {
+      // 空数组 = 无过滤（与 undefined 同义——「不过滤此维」而非「匹配零行」）
+      where.push(`e.type IN (${opts.types.map(() => '?').join(', ')})`);
+      params.push(...opts.types);
+    }
+    if (opts.sessionId !== undefined) {
+      where.push('e.session_id = ?');
+      params.push(opts.sessionId);
+    }
+    // app 维走 sessions 列（JOIN sessions）；仅声明 app 时才引入 JOIN
+    const join = opts.app !== undefined ? 'JOIN sessions s ON s.id = e.session_id' : '';
+    if (opts.app !== undefined) {
+      where.push('s.app = ?');
+      params.push(opts.app);
+    }
+    // 组合游标：下一页 = 排序意义上严格更旧于游标行（DESC 三段比较直写 SQL）
+    if (opts.cursor !== undefined) {
+      where.push('(e.time < ? OR (e.time = ? AND (e.session_id < ? OR (e.session_id = ? AND e.seq < ?))))');
+      params.push(opts.cursor.time, opts.cursor.time, opts.cursor.sessionId, opts.cursor.sessionId, opts.cursor.seq);
+    }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    // 多取一行探测更旧页（nextCursor 判据）——探测行不进本页
+    const sql = `SELECT e.session_id AS sessionId, e.seq, e.type, e.time, e.data FROM events e ${join} ${whereSql} ORDER BY e.time DESC, e.session_id DESC, e.seq DESC LIMIT ${limit + 1}`;
+    const raw = this.stmt(sql).all(...(params as never[])) as Array<{
+      sessionId: string;
+      seq: number;
+      type: string;
+      time: number;
+      data: string;
+    }>;
+    const hasMore = raw.length > limit;
+    const page = hasMore ? raw.slice(0, limit) : raw;
+    const rows: EventQueryRow[] = page.map((r) => ({
+      sessionId: r.sessionId,
+      seq: r.seq,
+      type: r.type,
+      time: r.time,
+      data: JSON.parse(r.data) as unknown, // 载荷原样反序列化——呈现截断归工具层
+    }));
+    const last = page.at(-1);
+    return {
+      rows,
+      ...(hasMore && last !== undefined
+        ? { nextCursor: { time: last.time, sessionId: last.sessionId, seq: last.seq } }
+        : {}),
+      truncated: clamped || hasMore, // 「本页不是全部」总标注：钳制或更旧页任一成立
+    };
   }
 
   /* ---------------- 凭证（pi-ai CredentialStore 的 SQLite 承载） ---------------- */
