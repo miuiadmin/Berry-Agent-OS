@@ -62,8 +62,13 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   { id: 'tools', plugin: 'builtin:tools' },
   // 第八行 = web 行（契约篇 §1.5.2 web 刀，Ring 2 真·可卸库角色行）：fetch
   // 工具 + ctx.fetch 服务 + SSRF 五卫生件一批三件——卸掉即无 fetch 能力，
-  // 核心循环不破；admin 行（第二十六批拍板）顺居其后为第九行
+  // 核心循环不破；compaction 行（第九行）紧随其后，admin 行顺居第十（挂账）
   { id: 'web', plugin: 'builtin:web' },
+  // 第九行 = compaction 行（内核边界篇席 20，会话篇 §2 增补七条——Ring 2 真·
+  // 可卸后台角色行）：长会话压缩 durable 五步 + 两段式触发 + 重播种接线。
+  // 零宿主资源闭包（服务全经 ctx 取）；卸掉即无自动压缩，核心循环不破
+  //（曾压缩过的旧日志可读性不随行装载漂移——词汇宿主面注册）
+  { id: 'compaction', plugin: 'builtin:compaction' },
 ];
 
 /**

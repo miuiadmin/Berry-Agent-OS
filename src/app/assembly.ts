@@ -70,8 +70,13 @@ import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import type { Session } from '../session/session.js';
 import { getSessionEventType } from '../session/index.js';
+import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
-import { SESSION_CORE_TYPE_FORBIDDEN, SESSION_FORMAT_UNSUPPORTED } from '../contracts/errors.js';
+import {
+  SESSION_CORE_TYPE_FORBIDDEN,
+  SESSION_FORMAT_UNSUPPORTED,
+  SESSION_SURFACE_OP_INVALID,
+} from '../contracts/errors.js';
 import type { SessionEvent } from '../contracts/events.js';
 import type { DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
 import { createChatPlugin } from '../chat/index.js';
@@ -512,6 +517,61 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       const current = registry.routed();
       return current === undefined ? [] : current.session.events.filter((e) => e.type === type);
     },
+    /**
+     * 遮蔽载体宿主代写（会话篇 §2 增补 6，compaction 纵切装配缺口第 1 件）：
+     * 插件携 surfaceOp 的 user/message 载体经宿主写权落账——核心词 user/message
+     * 插件不可伪造（appendEvent 拒），遮蔽注入是唯一例外通道且四执法点在此收口：
+     * ①载体型单边（仅 user/message——assistant/tool 词写权属 loop，非载体）；
+     * ②必带遮蔽（无 surfaceOp 的注入一律走 sendUserMessage 归因正门）；
+     * ③归因强制 plugin: 前缀（宿主代写 = 插件行为，归因必须落在插件名上）；
+     * ④依据在列补验（冷读 M-5：sourceEventSeqs 须含区间外至少一笔——遮蔽依据
+     *   本身被遮 = 遮后不可考；区间覆盖半边由 Session.validateSurfaceOp 执法）。
+     * 写入即 flush（边缘纪律 3 宿主级落法）：遮蔽载体是模型可见性变更，flush
+     * 屏障先于返回——崩溃窗内「载体丢而重播种已做」的内存/日志分叉收窄到屏障内。
+     */
+    appendWithSurfaceOp: async (carrier: {
+      readonly type: string;
+      readonly data: { readonly content: unknown; readonly source: string };
+      readonly surfaceOp: { readonly op: 'replace'; readonly start: number; readonly end: number };
+      readonly sourceEventSeqs: readonly number[];
+    }): Promise<SessionEvent | undefined> => {
+      if (carrier.type !== 'user/message') {
+        throw new AppError(
+          SESSION_CORE_TYPE_FORBIDDEN,
+          `appendWithSurfaceOp 载体型单边：仅受理 user/message（收到 ${carrier.type}——assistant/tool 词写权属 loop，插件遮蔽载体只有 user/message 一型）`,
+        );
+      }
+      const { surfaceOp } = carrier;
+      if (!surfaceOp || surfaceOp.op !== 'replace') {
+        throw new AppError(
+          SESSION_SURFACE_OP_INVALID,
+          'appendWithSurfaceOp 必带 replace 型 surfaceOp（无遮蔽的注入请走 sendUserMessage 归因正门）',
+        );
+      }
+      if (typeof carrier.data.source !== 'string' || !carrier.data.source.startsWith('plugin:')) {
+        throw new AppError(
+          SESSION_SURFACE_OP_INVALID,
+          `appendWithSurfaceOp 归因强制 plugin: 前缀（收到 ${String(carrier.data.source)}——宿主代写是插件行为，归因必须落在插件名上）`,
+        );
+      }
+      const hasOutsideBasis = carrier.sourceEventSeqs.some((seq) => seq < surfaceOp.start || seq > surfaceOp.end);
+      if (!hasOutsideBasis) {
+        throw new AppError(
+          SESSION_SURFACE_OP_INVALID,
+          `溯源依据在列：sourceEventSeqs 须含区间 [${surfaceOp.start},${surfaceOp.end}] 外至少一笔（遮蔽依据本身被遮 = 遮后不可考）`,
+        );
+      }
+      const current = registry.routed();
+      if (current === undefined) return undefined;
+      const event = current.session.append('user/message', carrier.data, {
+        surfaceOp: { op: 'replace', start: surfaceOp.start, end: surfaceOp.end },
+        sourceEventSeqs: [...carrier.sourceEventSeqs],
+      });
+      await persistence?.flush();
+      return event;
+    },
+    /** 模型历史投影只读（增补 7 装配缺口第 2 件——插件读当前会话投影走此面，禁自扫原始流绕投影） */
+    deriveMessages: (): ProjectedMessage[] => registry.routed()?.session.deriveMessages() ?? [],
   });
 
   /* ---- ④e 组合树装载前置 + Ring 1 行树化（契约篇 §5.1 节奏表第一刀：tools 行起算） ----

@@ -88,6 +88,14 @@ export interface AgentServiceFace {
   sendUserMessage(content: string | UserMessage['content'], opts?: SendUserMessageOptions): void;
   /** 订阅 run 结算（每个 run 终结派发一次；载荷含归属 sessionId——多驱动下订阅方按其路由；Disposer 注销——挂 ctx.effect 即随插件回卷） */
   onRunSettled(cb: (settled: RunSettled) => void): Disposer;
+  /**
+   * 闲时重播种（compaction 纵切装配缺口第 4 件——会话篇 §2 增补 3）：以当前
+   * 投影重建目标会话驱动时间线（resetTimeline 原位原语）。驱动时间线是内存活
+   * 数组（open/resume 仅播种一次），遮蔽生效必须显式重播种——「投影天然生效」
+   * 是虚假前提（冷读 B-1）。run 进行中 / 条目缺位 / 已退役返回 false（调用方
+   * 记账 pendingReseed 下次 run 边界重试）。
+   */
+  reseedTimeline(sessionId: string): boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -334,6 +342,16 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       return () => {
         subscribers.delete(cb);
       };
+    },
+    reseedTimeline(sessionId) {
+      // 条目缺位 / 已退役：停摆会话无时间线可播（false = 调用方记账重试）
+      const entry = entries.get(sessionId);
+      if (entry === undefined || entry.retired) {
+        return false;
+      }
+      // 投影 → AgentMessage 播种（与 open/resume 播种同一转换源——单一转换源纪律）；
+      // resetTimeline 原位原语：run 进行中拒改（false），闲时活数组原位重置
+      return entry.driver.resetTimeline(projectedToAgentMessages(entry.session.deriveMessages()));
     },
   };
 

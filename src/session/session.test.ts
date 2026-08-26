@@ -242,6 +242,45 @@ describe('surfaceOp 遮蔽校验', () => {
     ).toThrowError(/区间非法/);
   });
 
+  // 配对不切断断言回归锁（边缘纪律 1，compaction 纵切宿主执法——写测试构造
+  // 场景时撞出「误杀 tool/result 单点自遮蔽特例」的真 bug，本组三测锁死）
+  it('区间起点落在 tool/result 上（call 留区间外）= 切断配对拒绝', () => {
+    const s = new Session();
+    appendToolTurn(s);
+    // 日志：0 turn/start / 1 user / 2 assistant / 3 tool/call / 4 tool/result / 5 assistant / 6 turn/end
+    expect(() =>
+      s.append(
+        'user/message',
+        { content: '压缩摘要' },
+        { surfaceOp: { op: 'replace', start: 4, end: 5 }, sourceEventSeqs: [4, 5] },
+      ),
+    ).toThrowError(/切断了 tool 配对/);
+  });
+
+  it('区间终点落在 tool/call 上（result 留区间外）= 切断配对拒绝', () => {
+    const s = new Session();
+    appendToolTurn(s);
+    expect(() =>
+      s.append(
+        'user/message',
+        { content: '压缩摘要' },
+        { surfaceOp: { op: 'replace', start: 2, end: 3 }, sourceEventSeqs: [2, 3] },
+      ),
+    ).toThrowError(/切断了 tool 配对/);
+  });
+
+  it('整体含入配对（call+result 都在区间内）通过——切点不在配对中间', () => {
+    const s = new Session();
+    appendToolTurn(s);
+    // [3,4] = tool/call + tool/result 整对遮蔽：合法（起点非 tool/result、终点非 tool/call）
+    s.append(
+      'user/message',
+      { content: '压缩摘要', source: 'plugin:compaction' },
+      { surfaceOp: { op: 'replace', start: 3, end: 4 }, sourceEventSeqs: [3, 4, 5] },
+    );
+    expect(s.deriveMessages().map((m) => m.type)).not.toContain('toolResult');
+  });
+
   it('tool/result 的 replace：只改 content 通过，动 toolCallId 拒绝', () => {
     const s = new Session();
     appendToolTurn(s);

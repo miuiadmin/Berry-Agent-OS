@@ -243,6 +243,94 @@ describe('createBerryRuntime 装配面', () => {
     expect(() => bareSessions.eventsOfType('nope/void')).toThrowError(/未知事件类型/);
   });
 
+  it('sessions 遮蔽写面（appendWithSurfaceOp 宿主代写四执法点 + deriveMessages 投影读面，compaction 纵切）', async () => {
+    const runtime = await assemble();
+    const sessions = runtime.ctx.tryGet<{
+      appendEvent(type: string, data: unknown): SessionEvent | undefined;
+      appendWithSurfaceOp(carrier: {
+        readonly type: string;
+        readonly data: { readonly content: unknown; readonly source: string };
+        readonly surfaceOp: { readonly op: 'replace'; readonly start: number; readonly end: number };
+        readonly sourceEventSeqs: readonly number[];
+      }): Promise<SessionEvent | undefined>;
+      deriveMessages(): Array<{ type: string; content?: unknown }>;
+    }>('sessions')!;
+    // 造两条可遮蔽事件（sandbox/mode 已占 seq0；本两条 = seq1/seq2）
+    sessions.appendEvent('memory/diff', { baseline: 'aa', entries: [] });
+    sessions.appendEvent('memory/diff', { baseline: 'bb', entries: [] });
+
+    // 执法点 ①：载体型单边——仅受理 user/message（assistant 词写权属 loop）
+    await expect(
+      sessions.appendWithSurfaceOp({
+        type: 'assistant/message',
+        data: { content: 'x', source: 'plugin:t' },
+        surfaceOp: { op: 'replace', start: 1, end: 2 },
+        sourceEventSeqs: [0, 1, 2],
+      }),
+    ).rejects.toThrowError(/载体型单边/);
+
+    // 执法点 ②：必带 replace 型 surfaceOp（无遮蔽注入走 sendUserMessage 归因正门）
+    await expect(
+      sessions.appendWithSurfaceOp({
+        type: 'user/message',
+        data: { content: 'x', source: 'plugin:t' },
+        surfaceOp: undefined,
+        sourceEventSeqs: [1],
+      } as never),
+    ).rejects.toThrowError(/必带 replace 型 surfaceOp/);
+
+    // 执法点 ③：归因强制 plugin: 前缀（宿主代写是插件行为，归因落在插件名上）
+    await expect(
+      sessions.appendWithSurfaceOp({
+        type: 'user/message',
+        data: { content: 'x', source: 'user' },
+        surfaceOp: { op: 'replace', start: 1, end: 2 },
+        sourceEventSeqs: [0, 1, 2],
+      }),
+    ).rejects.toThrowError(/归因强制 plugin:/);
+
+    // 执法点 ④：依据在列——sourceEventSeqs 须含区间外至少一笔（依据≠被遮蔽节点）
+    await expect(
+      sessions.appendWithSurfaceOp({
+        type: 'user/message',
+        data: { content: 'x', source: 'plugin:t' },
+        surfaceOp: { op: 'replace', start: 1, end: 2 },
+        sourceEventSeqs: [1, 2], // 全在区间内
+      }),
+    ).rejects.toThrowError(/溯源依据在列/);
+
+    // 合法路径：遮 [1,2] + 依据含区间外 seq0 → 落账 + 投影读面生效
+    const carrier = await sessions.appendWithSurfaceOp({
+      type: 'user/message',
+      data: { content: '压缩摘要', source: 'plugin:compaction' },
+      surfaceOp: { op: 'replace', start: 1, end: 2 },
+      sourceEventSeqs: [0, 1, 2],
+    });
+    expect(carrier).toBeDefined();
+    expect(carrier!.surfaceOp).toMatchObject({ start: 1, end: 2 });
+    expect(runtime.session!.events.at(-1)).toBe(carrier);
+    // deriveMessages 投影读面：载体可见（user 型 + 摘要内容）
+    const msgs = sessions.deriveMessages();
+    const carrierMsg = msgs.find((m) => m.type === 'user' && JSON.stringify(m.content).includes('压缩摘要'));
+    expect(carrierMsg).toBeDefined();
+
+    // persist:false 无会话：合法载体也返回 undefined 降级（与 appendEvent 同规）
+    const bare = await assemble({ persist: false });
+    const bareSessions = bare.ctx.tryGet<{
+      appendWithSurfaceOp(carrier: unknown): Promise<SessionEvent | undefined>;
+      deriveMessages(): unknown[];
+    }>('sessions')!;
+    expect(
+      await bareSessions.appendWithSurfaceOp({
+        type: 'user/message',
+        data: { content: 'x', source: 'plugin:t' },
+        surfaceOp: { op: 'replace', start: 0, end: 0 },
+        sourceEventSeqs: [0, 1], // 1 = 区间外依据（形状合法——执法四点全过后才到无落点降级）
+      } as never),
+    ).toBeUndefined();
+    expect(bareSessions.deriveMessages()).toEqual([]);
+  });
+
   it('llm 模型目录只读投影（P0-1：listModels/getModel——ModelInfo 投影面）', async () => {
     const runtime = await assemble();
     const service = runtime.ctx.tryGet<{
@@ -937,6 +1025,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       { id: 'mcp', status: 'activated', name: 'mcp' },
       { id: 'tools', status: 'activated', name: 'tools' },
       { id: 'web', status: 'activated', name: 'web' },
+      { id: 'compaction', status: 'activated', name: 'compaction' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
@@ -950,6 +1039,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'mcp',
       'tools',
       'web',
+      'compaction',
       'tool-plugin',
     ]);
     // 插件工具已进注册表（S2：全局层在前 + fs 域层在后——本会话可见面）
@@ -1170,13 +1260,13 @@ describe('/reload 组合树重载', () => {
     writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'tool-plugin'],
       failed: [],
       skipped: [],
     });
     expect(reloadedPayloads).toEqual([
       {
-        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'tool-plugin'],
+        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'tool-plugin'],
         failed: [],
         skipped: [],
       },
@@ -1206,7 +1296,7 @@ describe('/reload 组合树重载', () => {
     );
     const result = await runtime.reload();
     expect(result.payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction'],
       failed: [],
       skipped: ['tool-plugin'],
     });
@@ -1240,6 +1330,7 @@ describe('/reload 组合树重载', () => {
       ['mcp', 'activated'],
       ['tools', 'activated'],
       ['web', 'activated'],
+      ['compaction', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -1281,6 +1372,7 @@ describe('/reload 组合树重载', () => {
       'scheduler',
       'mcp',
       'web',
+      'compaction',
       'tool-plugin',
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
@@ -1349,7 +1441,7 @@ describe('/reload 组合树重载', () => {
     release();
     await pending;
     expect((await runtime.reload()).payload).toEqual({
-      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'tool-plugin'],
+      activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction', 'tool-plugin'],
       failed: [],
       skipped: [],
     }); // run 结束后放行
@@ -1406,6 +1498,7 @@ describe('/reload 组合树重载', () => {
       ['mcp', 'activated'],
       ['tools', 'activated'],
       ['web', 'activated'],
+      ['compaction', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
@@ -1456,7 +1549,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
     expect(result.payload?.activated).not.toContain('tools');
     expect(reloadedPayloads).toEqual([
       {
-        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web'],
+        activated: ['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'web', 'compaction'],
         failed: [],
         skipped: [],
         ring1RestartRequired: ['tools'],

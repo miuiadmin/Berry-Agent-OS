@@ -20,11 +20,17 @@ export interface ProjectedToolCall {
 /**
  * 模型历史投影的消息形状——结构对齐 pi-ai AgentMessage 联合（user / assistant /
  * toolResult），llm 模块落码时负责与其请求体类型收口适配。
+ *
+ * seq 锚（2026-08-26 compaction 纵切补）：每型带锚事件 seq（user/assistant =
+ * 各自 message 事件 seq；toolResult = tool/result 事件 seq）——遮蔽写者
+ * （compaction / 未来 prune）从消息序映射回事件 seq 区间的唯一通用途径；
+ * 不带它则写者只能自扫原始流 = 绕投影的第二份账（会话篇 §3.1 单一转换源）。
  */
 export type ProjectedMessage =
-  | { readonly type: 'user'; readonly content: unknown; readonly source?: MessageSource }
+  | { readonly type: 'user'; readonly seq: number; readonly content: unknown; readonly source?: MessageSource }
   | {
       readonly type: 'assistant';
+      readonly seq: number;
       /** 模型响应内容块（text 等，不含工具调用） */
       readonly content: unknown;
       /** 同一响应内发起的工具调用（由 tool/call 事件合成进本消息） */
@@ -34,6 +40,7 @@ export type ProjectedMessage =
     }
   | {
       readonly type: 'toolResult';
+      readonly seq: number;
       readonly toolCallId: string;
       readonly toolName: string;
       readonly arguments?: string;
@@ -46,6 +53,8 @@ interface FoldState {
   messages: ProjectedMessage[];
   /** 当前打开的 assistant 消息缓冲：assistant/message 开缓冲，遇到 user/message 或 tool/result 先冲刷 */
   openAssistant: {
+    /** 锚事件 seq（assistant/message 事件——投影消息的 seq 来源） */
+    seq: number;
     content: unknown;
     usage?: unknown;
     stopReason?: string;
@@ -69,6 +78,7 @@ function stepFold(state: FoldState, event: SessionEvent): void {
       // source 归因原样带出（会话篇 §3.1——缺省不落字段即不进投影，读侧视为 'user'）
       state.messages.push({
         type: 'user',
+        seq: event.seq,
         content: data.content,
         ...(data.source !== undefined ? { source: data.source } : {}),
       });
@@ -79,6 +89,7 @@ function stepFold(state: FoldState, event: SessionEvent): void {
       flushAssistant(state);
       const data = event.data as AssistantMessageData;
       state.openAssistant = {
+        seq: event.seq,
         content: data.content,
         usage: data.usage,
         stopReason: data.stopReason,
@@ -90,7 +101,7 @@ function stepFold(state: FoldState, event: SessionEvent): void {
       const data = event.data as ToolCallData;
       // 工具调用归属同响应的 assistant 消息；若无打开缓冲（日志残缺），补一个空缓冲兜底
       if (!state.openAssistant) {
-        state.openAssistant = { content: [], toolCalls: [] };
+        state.openAssistant = { seq: event.seq, content: [], toolCalls: [] };
       }
       state.openAssistant.toolCalls.push({
         type: 'toolCall',
@@ -109,6 +120,7 @@ function stepFold(state: FoldState, event: SessionEvent): void {
       state.pendingCalls.delete(data.toolCallId);
       state.messages.push({
         type: 'toolResult',
+        seq: event.seq,
         toolCallId: data.toolCallId,
         toolName: call?.name ?? '',
         arguments: call?.arguments,
@@ -133,6 +145,7 @@ function flushAssistant(state: FoldState): void {
   const buf = state.openAssistant;
   state.messages.push({
     type: 'assistant',
+    seq: buf.seq,
     content: buf.content,
     toolCalls: buf.toolCalls,
     usage: buf.usage,

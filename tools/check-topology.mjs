@@ -45,6 +45,11 @@ const MODULE_EDGES = {
   // 经 ToolsService.executor（类型住 contracts）、schema 经 contracts typebox
   // 再导出面——零 tools/exec import（mcp 最窄边同款）
   web: ['contracts', 'context'],
+  // compaction = 长会话压缩官方件（2026-08-26 纵切，会话篇 §2 增补七条）：策略
+  // 纯函数 + durable 四词宿主注册 + 件本体。服务全经 ctx 取（sessions/llm/
+  // agent——运行时零跨模块 import）；session 边是 ProjectedMessage/SessionEvent
+  // 类型面（memory→session 类型边同款）
+  compaction: ['contracts', 'context', 'session'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
   channels: ['contracts', 'context', 'agent'],
   app: [
@@ -64,6 +69,7 @@ const MODULE_EDGES = {
     'scheduler',
     'mcp',
     'web',
+    'compaction',
     'channels',
     'chat',
   ],

@@ -43,8 +43,18 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行——契约篇 §5.1/§5.4/§6.6/§1.5.2） */
-const DEFAULT_LAYER_IDS = new Set(['chat', 'memory', 'subagent', 'goal', 'scheduler', 'mcp', 'tools', 'web']);
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20） */
+const DEFAULT_LAYER_IDS = new Set([
+  'chat',
+  'memory',
+  'subagent',
+  'goal',
+  'scheduler',
+  'mcp',
+  'tools',
+  'web',
+  'compaction',
+]);
 
 /**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
@@ -79,8 +89,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'mcp', plugin: 'builtin:mcp' },
       { id: 'tools', plugin: 'builtin:tools' },
       { id: 'web', plugin: 'builtin:web' },
+      { id: 'compaction', plugin: 'builtin:compaction' },
     ]);
-    expect(report.plan).toHaveLength(8);
+    expect(report.plan).toHaveLength(9);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -353,6 +364,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubMcp = { name: 'mcp-stub', apply: async () => {} };
     const stubTools = { name: 'tools-stub', apply: async () => {} };
     const stubWeb = { name: 'web-stub', apply: async () => {} };
+    const stubCompaction = { name: 'compaction-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -362,6 +374,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:mcp': stubMcp,
       'builtin:tools': stubTools,
       'builtin:web': stubWeb,
+      'builtin:compaction': stubCompaction,
     });
     expect(report.rows).toEqual([
       { id: 'chat', plugin: 'builtin:chat' },
@@ -372,6 +385,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'mcp', plugin: 'builtin:mcp' },
       { id: 'tools', plugin: 'builtin:tools' },
       { id: 'web', plugin: 'builtin:web' },
+      { id: 'compaction', plugin: 'builtin:compaction' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', builtin: stubChat },
@@ -382,6 +396,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'mcp', builtin: stubMcp },
       { id: 'tools', builtin: stubTools },
       { id: 'web', builtin: stubWeb },
+      { id: 'compaction', builtin: stubCompaction },
     ]);
   });
 
@@ -422,6 +437,7 @@ describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
     'builtin:mcp': { name: 'mcp-stub', apply: async () => {} },
     'builtin:tools': { name: 'tools-stub', apply: async () => {} },
     'builtin:web': { name: 'web-stub', apply: async () => {} },
+    'builtin:compaction': { name: 'compaction-stub', apply: async () => {} },
   });
 
   it('起算清单：RING1_REQUIRED_ROW_IDS = [tools]（后续行树化纵切逐行累加）', () => {

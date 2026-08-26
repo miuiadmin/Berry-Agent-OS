@@ -202,6 +202,8 @@ const sessionTypes = await jiti.import(fileURLToPath(new URL('../src/session/eve
 // 见。官方件词汇一律走宿主面模块注册（会话篇 §2.1 注记），改走插件面会在族 3 撞
 // 误报且无模块可导入——那不是闸坏了，是纪律破了。
 await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url)));
+// compaction 四词同款（src/compaction/events.ts——宿主面顶层注册，轻依赖）
+await jiti.import(fileURLToPath(new URL('../src/compaction/events.ts', import.meta.url)));
 
 /** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
 const liveCatalog = events.LIVE_EVENT_CATALOG;

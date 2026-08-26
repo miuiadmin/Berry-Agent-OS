@@ -200,6 +200,25 @@ export class Session {
         `溯源不完整：sourceEventSeqs 未覆盖被遮蔽区间 seq ${[...required].sort((a, b) => a - b).join(', ')}`,
       );
     }
+    // 配对不切断断言（会话篇 §2 边缘纪律 1——切点永不落在 tool 配对中间）：
+    // 区间首事件是 tool/result ⇒ 其配对 tool/call（紧邻前一事件）必在区间外 = 切断；
+    // 区间末事件是 tool/call ⇒ 其配对 tool/result（紧邻后一事件）必在区间外 = 切断。
+    // 恢复时投影出无 result 的 call / 无 call 的 result 都是 loop 侧必炸形态
+    // （pi 出生 7 天重写的直接教训）——宿主级不变式，任何遮蔽写者统一受保护。
+    // 豁免：type==='tool/result' 的单点自遮蔽 replace 是既有合法特例（下方
+    // 「只改 content」校验全权管辖——op.start 即 op.end 即目标本身，非切断）。
+    if (type !== 'tool/result' && this.log[op.start]!.type === 'tool/result') {
+      throw new AppError(
+        SESSION_SURFACE_OP_INVALID,
+        `遮蔽区间起点 seq ${op.start} 是 tool/result——切断了 tool 配对（区间应整体含入或排除配对，边缘纪律 1）`,
+      );
+    }
+    if (this.log[op.end]!.type === 'tool/call') {
+      throw new AppError(
+        SESSION_SURFACE_OP_INVALID,
+        `遮蔽区间终点 seq ${op.end} 是 tool/call——切断了 tool 配对（区间应整体含入或排除配对，边缘纪律 1）`,
+      );
+    }
     // tool/result 的 replace 限定只能改 content（toolCallId/error/meta 均不得变）
     if (type === 'tool/result') {
       if (op.start !== op.end) {

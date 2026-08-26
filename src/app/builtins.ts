@@ -22,6 +22,7 @@ import { createMcpPlugin } from '../mcp/index.js';
 import type { McpPluginDeps } from '../mcp/index.js';
 import { createWebPlugin } from '../web/index.js';
 import type { WebPluginOverrides } from '../web/index.js';
+import { createCompactionPlugin } from '../compaction/index.js';
 import { createToolsPlugin, type ToolsPluginDeps } from '../tools/index.js';
 import { createSubagentPlugin } from './subagent-plugin.js';
 import type { AgentLocation } from './agents-md.js';
@@ -117,6 +118,11 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // SSRF 五卫生件一批三件——零宿主资源闭包（最简官方件形态）；恒注册
     //（config.fetch:false 只关模型面工具，服务面恒在——「有但省」变体二）
     'builtin:web': createWebPlugin(opts.webOverrides),
+    // compaction 官方件（第九行，内核边界篇席 20——会话篇 §2 增补七条）：长会话
+    // 压缩 durable 五步 + 两段式触发（onRunSettled 判阈 / reseedTimeline 重播种）。
+    // 零宿主资源闭包（服务全经 ctx 取——web 同款最简形态）；恒注册（卸行靠
+    // overlay 禁用——件停用后旧压缩日志仍可读，词汇宿主面注册不随行漂移）
+    'builtin:compaction': createCompactionPlugin(),
     // tools 官方件（第七行 = Ring 1 行树化起算行，契约篇 §5.1 节奏表——**必备行**
     // 非 Ring 2 可卸：overlay 禁用即启动断言拒启；可换实现引用不可禁用）：
     // 三段管道 + ctx.tools 服务 + fs/检索工具族。恒注册（缺注即 unresolved——
