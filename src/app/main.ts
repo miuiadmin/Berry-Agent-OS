@@ -33,7 +33,9 @@ const HELP = `Berry ${VERSION} — 插件式智能体运行时
   --debug      进程日志提级到 debug
   --read-only  run 子命令限定：只读档单发（sandboxMode read-only——tick 任务面复用同入口）
   --background run 子命令限定：llm/usage 记账入后台道（tick 唤起入口声明——canAfford 读的账）
-  --tick <名>  run 子命令限定：到点编排形态（prompt 取自任务行；与位置参数互斥）`;
+  --tick <名>  run 子命令限定：到点编排形态（prompt 取自任务行；与位置参数互斥）
+  --no-plugins 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
+               ——坏插件锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）`;
 
 /** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
 interface ParsedArgs {
@@ -46,6 +48,8 @@ interface ParsedArgs {
   background: boolean;
   /** run 子命令到点编排形态（取值旗标——值为任务名；undefined = 普通单发） */
   tick: string | undefined;
+  /** 安全模式（--no-plugins，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
+  noPlugins: boolean;
 }
 
 /**
@@ -58,6 +62,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let debug = false;
   let readOnly = false;
   let background = false;
+  let noPlugins = false;
   let tick: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -74,22 +79,28 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 取值旗标：下一参数即任务名；缺席为用法错（空串占位让 run case 执法）
       tick = argv[i + 1] ?? '';
       i += 1;
+    } else if (arg === '--no-plugins') {
+      // 安全模式对 TUI/run/dump-config 语义化（boot 形态面）；tick 唤起不透传
+      //（自动化入口无「救援」语义——安全模式救的是交互面，tick 子进程恒全树）
+      noPlugins = true;
     } else {
       positional.push(arg);
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly, background, tick };
+  return { command, args: rest, debug, readOnly, background, tick, noPlugins };
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick } = parseArgs(argv);
+  const { command, args, readOnly, background, tick, noPlugins } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
       case '':
-        return tuiMain();
+        // 安全模式主场景就是 TUI：坏插件锁死启动时起最小内核壳（无驱动形态
+        // 壳照启可退）——命令面/插件管理完好，修 overlay 后 /reload 恢复全树
+        return tuiMain({ ...(noPlugins ? { noPlugins: true } : {}) });
       case '--help':
       case '-h':
         process.stdout.write(HELP + '\n');
@@ -122,13 +133,16 @@ function main(argv: string[]): number {
         // headless 无应答者，审批天然 fail-closed，无需另设审批旗标）
         // --background → llm/usage 记账入 background 道（tick 唤起入口声明——
         // 席 13 第二刀：否则 tick 花 foreground 道、闸读 background 道，空转）
+        // --no-plugins → 无驱动一等态：run 无对话循环可执行，语义性失败退出码 1
         return runOnceMain(message, {
           ...(readOnly ? { sandboxMode: 'read-only' as const } : {}),
           ...(background ? { usagePriority: 'background' as const } : {}),
+          ...(noPlugins ? { noPlugins: true } : {}),
         });
       }
       case 'dump-config':
-        return dumpConfigMain();
+        // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）
+        return dumpConfigMain({ ...(noPlugins ? { noPlugins: true } : {}) });
       default:
         process.stderr.write(`未知命令：${command}\n\n${HELP}\n`);
         return 2;

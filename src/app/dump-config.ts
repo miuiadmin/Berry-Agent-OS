@@ -15,7 +15,7 @@
 
 import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
-import { loadComposition, OVERLAY_FILENAME, type CompositionReport } from './composition.js';
+import { loadComposition, OVERLAY_FILENAME, safeModeComposition, type CompositionReport } from './composition.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createMcpSpawner } from './mcp-spawn.js';
@@ -76,6 +76,11 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         `模型：${runtime.model}`,
         `沙箱档：${runtime.sandboxMode}`,
         `审批档：${runtime.approval.policyMode}`,
+        // 安全模式可见面（--no-plugins 同径）：一行声明本树是安全模式产物——
+        // Ring 2/3 跳过不是树坏是旗标使然，operator 一眼可辨
+        ...(options.noPlugins
+          ? ['安全模式（--no-plugins）：Ring 2/3 全跳过——boot 拒启自救位（/reload 读盘不受旗标影响）']
+          : []),
         renderCompositionTree(runtime.composition, runtime.plugins.list()),
         // 应用面（契约篇 §5.4 第二纵切——官方清单装载 + 组件在场断言产物）：
         // 缺场应用带缺失组件清单（应用级隔离不拒启，诊断走此面）
@@ -118,46 +123,47 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
       //（subagent 真工厂构造全惰性——委派永不发生，占位依赖零副作用；chat 为
       // 纯树合成的占位件——apply 永不跑，只需注册表键在）
       try {
+        const synthetic = loadComposition(
+          options.compositionDir ?? dataDir(),
+          createBuiltinRegistry({
+            workspace: () => process.cwd(),
+            subagentFactory: createSubagentChildFactory({
+              getSession: () => undefined,
+              streamFn: createStreamFn(createLlmRuntime()),
+              model: options.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL,
+              convertToLlm: (messages) => defaultConvertToLlm(messages),
+              workspace: process.cwd(),
+              sandboxMode: options.sandboxMode ?? 'workspace-write',
+              rootCtx: createContext({ name: 'dump-diag' }),
+            }),
+            getSession: () => undefined,
+            // 诊断面无会话——boot 降级永不触发（惰性取值恒 false 占位）
+            wasResumed: () => false,
+            // chat 占位件：纯树合成只查注册表键（形状/装载均不发生）——
+            // apply 为空实现占位，构造期零副作用
+            chat: {
+              name: 'chat',
+              apply: async () => undefined,
+            },
+            // mcp 件闭包同构（构造零副作用——spawner 只返回闭包不 spawn；
+            // 诊断面 apply 永不跑，登记簿/子进程均不触）
+            mcpDeps: {
+              spawnServer: createMcpSpawner(dataDir()),
+              killTree,
+              dataDir: dataDir(),
+            },
+            // tools 件闭包占位（Ring 1 行树化批——诊断面 apply 永不跑，占位
+            // 闭包零副作用；检索族 workspace 锚在，注册表键在即树形不失真）
+            toolsDeps: {
+              gateSink: () => undefined,
+              workspace: () => process.cwd(),
+            },
+          }),
+        );
+        // 安全模式同径（--no-plugins）：失败兜底树同样只保 Ring 1 行——诊断面
+        // 报告「实际生效装配」，全量树在此形态下根本不会生效
         process.stdout.write(
-          renderCompositionTree(
-            loadComposition(
-              options.compositionDir ?? dataDir(),
-              createBuiltinRegistry({
-                workspace: () => process.cwd(),
-                subagentFactory: createSubagentChildFactory({
-                  getSession: () => undefined,
-                  streamFn: createStreamFn(createLlmRuntime()),
-                  model: options.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL,
-                  convertToLlm: (messages) => defaultConvertToLlm(messages),
-                  workspace: process.cwd(),
-                  sandboxMode: options.sandboxMode ?? 'workspace-write',
-                  rootCtx: createContext({ name: 'dump-diag' }),
-                }),
-                getSession: () => undefined,
-                // 诊断面无会话——boot 降级永不触发（惰性取值恒 false 占位）
-                wasResumed: () => false,
-                // chat 占位件：纯树合成只查注册表键（形状/装载均不发生）——
-                // apply 为空实现占位，构造期零副作用
-                chat: {
-                  name: 'chat',
-                  apply: async () => undefined,
-                },
-                // mcp 件闭包同构（构造零副作用——spawner 只返回闭包不 spawn；
-                // 诊断面 apply 永不跑，登记簿/子进程均不触）
-                mcpDeps: {
-                  spawnServer: createMcpSpawner(dataDir()),
-                  killTree,
-                  dataDir: dataDir(),
-                },
-                // tools 件闭包占位（Ring 1 行树化批——诊断面 apply 永不跑，占位
-                // 闭包零副作用；检索族 workspace 锚在，注册表键在即树形不失真）
-                toolsDeps: {
-                  gateSink: () => undefined,
-                  workspace: () => process.cwd(),
-                },
-              }),
-            ),
-          ) + '\n',
+          renderCompositionTree(options.noPlugins ? safeModeComposition(synthetic) : synthetic) + '\n',
         );
       } catch {
         // 合成本身失败——跳过树，错误信息即诊断

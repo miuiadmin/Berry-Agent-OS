@@ -95,6 +95,7 @@ import {
   loadComposition,
   assertRing1Required,
   diffRing1Rows,
+  safeModeComposition,
   RING1_REQUIRED_ROW_IDS,
   type CompositionReport,
 } from './composition.js';
@@ -210,6 +211,14 @@ export interface RuntimeOptions {
    * 测试注入临时目录，与生产路径完全同构）
    */
   readonly compositionDir?: string;
+  /**
+   * 安全模式（技术栈篇 §5 `--no-plugins`，2026-08-27 落码）：boot 组合树空装
+   * ——默认层与 overlay 全跳过，只保 Ring 1 硬装配行（RING1_REQUIRED_ROW_IDS，
+   * 否则 assertRing1Required 拒启）。boot 拒启自救位：坏插件锁死启动时经此旗标
+   * 起最小内核（无驱动一等态：TUI 壳照启可退 / run 语义性失败）→ 修 overlay →
+   * /reload 不受本旗标影响（fresh 读盘不过滤——救援环一进程内闭环）
+   */
+  readonly noPlugins?: boolean;
   /**
    * 本进程主 loop 花销记账道（缺省 'foreground'）。tick 唤起入口声明
    * 'background'（CLI `run --background` → 此处 → chat 件 durable 落账——
@@ -858,6 +867,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   // 组合树合成（overlay 后写胜出）。composition 是活绑定（/reload 重装载换树）
   let composition: CompositionReport = loadComposition(compositionDir, builtins);
+  // 安全模式（--no-plugins，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
+  // ——Ring 2/3 全跳过（官方默认层与 overlay 一视同仁）。只作用 boot：/reload
+  // 的 fresh 读盘不过滤（救援环——boot 安全模式 → 修 overlay → /reload 恢复
+  // 全树，进程内闭环，见 reload 内注记）
+  if (opts.noPlugins) composition = safeModeComposition(composition);
   // Ring 1 必备行断言·第一面（契约篇 §5.1 行树化批「第二断言类」）：合成产物
   // 里的 Ring 1 行被 overlay 禁用/平台门控/解析失败即拒启（列举全部缺失行）
   const ring1Violations = assertRing1Required(composition);
@@ -1165,6 +1179,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
     let fresh: CompositionReport;
     try {
+      // 安全模式旗标刻意不进本路径（技术栈篇 §5 救援环）：boot --no-plugins 起的
+      // 最小内核在此读回全量树——修好 overlay 后 /reload 即恢复，无需重启进程
       fresh = loadComposition(compositionDir, builtins);
     } catch (err) {
       return { error: describeError(err) };

@@ -163,6 +163,20 @@ export interface CompositionReport {
   readonly plan: readonly PluginPlanRow[];
 }
 
+/**
+ * 安全模式组合树过滤（技术栈篇 §5 `--no-plugins`，第二十六批拍板 ③）：只保
+ * Ring 1 硬装配行——默认层与 overlay 的其余行全部跳过（一视同仁，不是「只跳
+ * overlay」）。boot 合成期与 dump-config 失败兜底树两消费点共用（诊断面报告
+ * 的必须是「实际生效装配」）。/reload 不经此过滤（救援环语义：boot 安全模式
+ * → 修 overlay → /reload 正常读盘恢复全树——一进程内闭环，无需重启）。
+ */
+export function safeModeComposition(report: CompositionReport): CompositionReport {
+  return {
+    rows: report.rows.filter((row) => RING1_REQUIRED_ROW_IDS.includes(row.id)),
+    plan: report.plan.filter((row) => RING1_REQUIRED_ROW_IDS.includes(row.id)),
+  };
+}
+
 /** overlay 允许的行字段全集（未知字段拒绝式——§6.5 pre-release 纪律） */
 const ROW_KEYS = new Set(['id', 'plugin', 'config', 'disabled', 'fixed', 'runtime']);
 
