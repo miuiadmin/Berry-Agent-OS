@@ -186,7 +186,8 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   }
 
   /* ---- ⑦ 跑一轮（boot 已开好目标条目——两路在此合流为同一个调用） ---- */
-  // 信号编舞（骨架篇 §1.3 全表，与 run 入口共用）：SIGINT 首次优雅 abort
+  // 信号编舞（骨架篇 §1.3 全表，与 run 入口共用；S6 形态④注记：tick runner 恒
+  // 单驱动——两 kind 同走 requestQuit 全序列，无分档面）：SIGINT 首次优雅 abort
   // 当前 run / 二次立即 130 / SIGTERM 143 / SIGHUP 129 / uncaught 不吞 exit(1)
   const signals = installExitSignals({
     onGracefulQuit: () => entry.driver.requestQuit(),

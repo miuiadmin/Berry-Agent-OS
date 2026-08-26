@@ -56,10 +56,11 @@ const emptyCommands = {
   list: () => [],
 } as unknown as CommandRegistry;
 
-/** 空宿主（submit/requestQuit 不应被触达——触达即断言失败） */
+/** 空宿主（submit/requestQuit/interrupt 不应被触达——触达即断言失败） */
 const strictHost: ChannelHost = {
   submit: () => expect.unreachable('本测试不应提交消息'),
   requestQuit: () => expect.unreachable('本测试不应请求退出'),
+  interrupt: () => expect.unreachable('本测试不应请求中断'),
 };
 
 /** 零用量（AssistantMessage 构造腿） */

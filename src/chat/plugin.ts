@@ -250,6 +250,16 @@ export interface FrontHost {
    * 无驱动直接 resolve 聚合 promise——壳照启可退）。
    */
   requestQuit(): void;
+  /**
+   * 用户中断分档路由（S6 形态④：Ctrl+C 多驱动语义——骨架篇 §1.3 S6 段）：
+   * 判活（非退役）条目数 N≥2 → 聚焦驱动 `interrupt()`（abort 在飞 run、不退
+   * OS；idle 时 no-op **不回落 requestQuit**）；N≤1 → `requestQuit()`（单驱动
+   * 维持原语义：首次 SIGINT = 优雅退出全序列）。分档单点在此——channels 薄层
+   * 与外部信号入口不知驱动数，两路同汇本面。
+   * @returns 被打断 run 的结算 promise（idle/单驱动路即回——外部 SIGINT 路
+   *          旗标「了结」判据，形态⑥）
+   */
+  interrupt(): Promise<void>;
   /** 退出聚合 promise（任一驱动 requestQuit 即 resolve——/quit 命令路/TUI 信号路同汇） */
   readonly quit: Promise<void>;
   /**
@@ -510,6 +520,24 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       for (const entry of entries.values()) {
         if (!entry.retired && entry !== focused) entry.driver.retire();
       }
+    },
+    // S6 形态④：Ctrl+C 分档——N≥2 打断聚焦驱动当前 run（不退 OS）、N≤1 维持
+    // requestQuit 原语义。interrupt 返回被打断 run 的 settle（idle 即回）——
+    // 外部 SIGINT 路拿它作旗标「了结」判据（形态⑥：了结即复位，二次 130 只在
+    // run 未结算窗口内成立）
+    interrupt: () => {
+      const active = [...entries.values()].filter((e) => !e.retired);
+      if (active.length >= 2) {
+        const focused = registry.focused();
+        // 分档条件成立但聚焦缺位（竞态窗口）/聚焦 idle：no-op 即回，不回落
+        // requestQuit（形态④钉死——多驱动形态 Ctrl+C 永不退 OS）
+        if (focused === undefined) return Promise.resolve();
+        return focused.driver.interrupt();
+      }
+      // N≤1（含无驱动壳形态）：维持单驱动原语义（首次中断 = 优雅退出全序列；
+      // requestQuit 壳形态直接聚合退）；了结语义上退出序列自会收尾，即回即可
+      front.requestQuit();
+      return Promise.resolve();
     },
     quit: frontQuit,
     addDisplay: (sink) => {

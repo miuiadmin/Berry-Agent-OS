@@ -50,6 +50,12 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
         error: err instanceof Error ? err.stack : String(err),
       }),
     title: `Berry ${VERSION}`,
+    // S6 形态⑦提示行两态：起屏时点已有多会话条目（resume 多开）= 多驱动文案
+    // （运行中 /app new 后不重绘——提示行是辅助面，分档语义恒由 front.interrupt 承载）
+    quitHint:
+      [...runtime.drivers.entries.values()].filter((e) => !e.retired).length >= 2
+        ? 'Ctrl+C 打断 / Ctrl+D·/quit 退出'
+        : undefined,
     // S3 按会话键取历史：undefined = 当前聚焦（起屏路——boot 路 focus 通知早于
     // 订阅，初始渲染由 start 走此语义）；repaint 重画显式带键
     history: (sessionId) => {
@@ -83,10 +89,23 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     );
   }
 
-  // 信号编舞（骨架篇 §1.3 全表）：SIGINT 首次/二次、SIGTERM 143、SIGHUP 129、
-  // uncaught/unhandled 不吞 exit(1)——两入口共用；优雅路本体走 front 退出信号
+  // 信号编舞（骨架篇 §1.3 全表 + S6 形态④信号分种类）：SIGINT 首次经
+  // front.interrupt 分档（多驱动 = 打断聚焦 run 不退 OS、单驱动 = requestQuit
+  // 全序列）/ 二次 130 / SIGTERM·SIGHUP 恒 requestQuit（143/129 记账不变）/
+  // uncaught/unhandled 不吞 exit(1)——两入口共用
   const signals = installExitSignals({
-    onGracefulQuit: () => front.requestQuit(),
+    onGracefulQuit: (kind) => {
+      if (kind === 'interrupt') {
+        // S6 形态⑥：interrupt 请求随被打断 run 结算而了结——了结时清急停旗标
+        // （run 未结算窗口内二次 SIGINT 才 130 硬退）；terminate 路自带退出序列
+        void front
+          .interrupt()
+          .catch(() => undefined)
+          .then(() => signals.acknowledgeQuitRequest());
+      } else {
+        front.requestQuit();
+      }
+    },
     onFatal: async (error, kind) => {
       runtime.ctx.logger.error(`致命异常（${kind}），尽力落盘后退出`, {
         kind,

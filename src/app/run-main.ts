@@ -44,7 +44,8 @@ export async function runOnceMain(message: string, options: RuntimeOptions = {})
     return 1;
   }
   const conversation = runtime.conversation;
-  // 信号编舞（骨架篇 §1.3 全表，与 TUI 入口共用）：SIGINT 首次优雅 abort 当前
+  // 信号编舞（骨架篇 §1.3 全表，与 TUI 入口共用；S6 形态④注记：run 入口恒单驱动
+  // ——两 kind 同走 requestQuit 全序列，无分档面）：SIGINT 首次优雅 abort 当前
   // run（事件日志留完整痕迹）/ 二次立即 130 / SIGTERM 143 / SIGHUP 129 /
   // uncaught/unhandled 不吞 exit(1)
   const signals = installExitSignals({

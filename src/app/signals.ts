@@ -22,10 +22,18 @@ export interface SignalSurface {
 /** 致命异常种类（Node 两个全局钩子的名字——记日志用） */
 export type FatalKind = 'uncaughtException' | 'unhandledRejection';
 
+/** 优雅退出请求种类（S6 形态④信号分种类）：SIGINT 可分档（多驱动 interrupt）；
+ * SIGTERM/SIGHUP 是进程管理器要求退出——恒全序列 requestQuit，不可「不退 OS」 */
+export type GracefulQuitKind = 'interrupt' | 'terminate';
+
 /** 安装参数（全部可注入——两个入口仅 onGracefulQuit/onFatal 不同） */
 export interface ExitSignalsOptions {
-  /** 优雅退出请求（首次 SIGINT/SIGTERM/SIGHUP——接会话驱动 requestQuit） */
-  readonly onGracefulQuit: () => void;
+  /**
+   * 优雅退出请求（首次 SIGINT/SIGTERM/SIGHUP——接会话驱动 requestQuit）。
+   * kind：'interrupt' = SIGINT（入口可分档投 front.interrupt）；'terminate' =
+   * SIGTERM/SIGHUP（恒 requestQuit 全序列，退出码 143/129 记账不变）
+   */
+  readonly onGracefulQuit: (kind: GracefulQuitKind) => void;
   /** 致命异常处理（记日志 + 尽力 flush；本模块限时等待后必 exit(1)） */
   readonly onFatal: (error: unknown, kind: FatalKind) => void | Promise<void>;
   /** 信号面（缺省 process） */
@@ -34,13 +42,21 @@ export interface ExitSignalsOptions {
   readonly fatalTimeoutMs?: number;
 }
 
-/** 安装产物（入口持有：退出码记账 + 卸载） */
+/** 安装产物（入口持有：退出码记账 + 急停旗标了结口 + 卸载） */
 export interface ExitSignalsHandle {
   /**
    * 优雅路退出码（0 / SIGTERM 143 / SIGHUP 129）——入口在自身正常退出码为 0 时
    * 采用它（SIGINT 首次 = 0：用户中断不是错误，规范钉死）
    */
   readonly exitCode: number;
+  /**
+   * 急停旗标了结口（S6 形态⑥）：旗标语义 = 「在身的未了结退出请求」——interrupt
+   * 路的请求随被打断 run 结算而了结（入口在 front.interrupt() 返回的 settle
+   * promise 了结时调本口复位旗标）；了结后下次 SIGINT 又是首次语义，run 未结算
+   * 窗口内二次 SIGINT 才 130 硬退（「连续两次」的真语义）。terminate 路进程本就
+   * 走退出序列，复位无意义不涉及。
+   */
+  acknowledgeQuitRequest(): void;
   /** 卸载全部监听（入口 finally 里调——正常收尾后不再响应信号编舞） */
   dispose(): void;
 }
@@ -67,15 +83,17 @@ export function installExitSignals(opts: ExitSignalsOptions): ExitSignalsHandle 
   /**
    * 首次信号：转优雅退出请求并记账退出码。
    * @param gracefulExit 优雅路完成的退出码（SIGINT 0 / SIGTERM 143 / SIGHUP 129）
+   * @param kind 请求种类（S6 形态④：SIGINT=interrupt 可分档、SIGTERM/SIGHUP=terminate 恒全序列）
    * @param immediateExit 二次按下的立即退出码（仅 SIGINT=130——用户坚持现在走）
    */
-  const onSignal = (gracefulExit: number, immediateExit?: number): void => {
+  const onSignal = (gracefulExit: number, kind: GracefulQuitKind, immediateExit?: number): void => {
     // SIGINT 二次 = 不等优雅序列；SIGTERM/SIGHUP 重复到达保持幂等
-    // （requestQuit 可重入）——规范未钉的部分取保守侧
+    // （requestQuit 可重入）——规范未钉的部分取保守侧。旗标 = 在身的未了结
+    // 退出请求（S6 形态⑥：interrupt 路随 run 结算了结复位——见 acknowledgeQuitRequest）
     if (immediateExit !== undefined && quitRequested) surface.exit(immediateExit);
     quitRequested = true;
     recordedExitCode = gracefulExit;
-    opts.onGracefulQuit();
+    opts.onGracefulQuit(kind);
   };
 
   /** 致命异常：限时等 onFatal（日志 + 尽力 flush）后必 exit(1)——不吞 */
@@ -91,9 +109,9 @@ export function installExitSignals(opts: ExitSignalsOptions): ExitSignalsHandle 
   };
 
   // SIGINT 首次优雅完成 = 0（用户中断不是错误，规范钉死）；二次 130 立即
-  const onInterrupt = () => onSignal(0, 130);
-  const onTerminate = () => onSignal(143);
-  const onHangup = () => onSignal(129);
+  const onInterrupt = () => onSignal(0, 'interrupt', 130);
+  const onTerminate = () => onSignal(143, 'terminate');
+  const onHangup = () => onSignal(129, 'terminate');
   const onUncaught = onFatalExit('uncaughtException');
   const onUnhandled = onFatalExit('unhandledRejection');
 
@@ -106,6 +124,11 @@ export function installExitSignals(opts: ExitSignalsOptions): ExitSignalsHandle 
   return {
     get exitCode(): number {
       return recordedExitCode;
+    },
+    // 急停旗标了结（S6 形态⑥：interrupt 路随被打断 run 结算调用——复位后下次
+    // SIGINT 又是首次语义；幂等安全，无在身请求时 no-op）
+    acknowledgeQuitRequest(): void {
+      quitRequested = false;
     },
     dispose(): void {
       surface.removeListener('SIGINT', onInterrupt);

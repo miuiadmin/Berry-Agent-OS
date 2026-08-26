@@ -33,7 +33,13 @@ import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
 import { dumpConfigMain } from './dump-config.js';
-import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_EVENT_RATE, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
+import {
+  AppError,
+  APP_SHUTDOWN_QUIESCE_VIOLATED,
+  COMPOSITION_ROW_INVALID,
+  PLUGIN_EVENT_RATE,
+  PLUGIN_LOAD_FAILED,
+} from '../contracts/errors.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -1827,5 +1833,90 @@ describe('web 件全栈（默认层第八行：fetch 工具 + ctx.fetch 服务�
     expect(gateEvents).toHaveLength(1);
     expect((gateEvents[0]!.data as { toolCallId?: string }).toolCallId).toMatch(/^fetch-/);
     expect((gateEvents[0]!.data as { decision?: string }).decision).toBe('allow');
+  });
+});
+
+/* ---------------- S6 关停序：abort-all + quiesce 断言（形态⑤） ---------------- */
+
+/** 挂起流：start 后挂起直到 abort（abort → error{aborted} 终止事件；result 带 abort 编码） */
+function pendingAbortStream(): { streamFn: StreamFn } {
+  const message = textMessage('慢答');
+  const streamFn: StreamFn = (_context: LlmContext, _options: StreamFnOptions, signal?: AbortSignal) => ({
+    [Symbol.asyncIterator]() {
+      let at = 0;
+      const events = [{ type: 'start' as const, partial: { ...message, content: [] } }];
+      return {
+        next: async () => {
+          if (at < events.length) return { value: events[at++]!, done: false as const };
+          // 挂起直到 abort（loop 把 hooks.signal 透传为第三位参数）——已 abort
+          // 短路先判（signal 事件只发一次，事后挂监听收不到）
+          if (signal?.aborted) return abortEventOf(message);
+          await new Promise((resolve) => {
+            signal?.addEventListener('abort', resolve, { once: true });
+          });
+          return abortEventOf(message);
+        },
+      };
+    },
+    // result() 契约（loop 收口以它为准）：abort 编码进返回消息的 stopReason
+    result: async () => (signal?.aborted ? { ...message, stopReason: 'aborted' } : message),
+  });
+  return { streamFn };
+}
+
+/** abort 终止事件（error 流事件编码 reason:'aborted'——loop 终值映射 aborted 的输入形） */
+const abortEventOf = (message: AssistantMessage) => ({
+  value: {
+    type: 'error' as const,
+    reason: 'aborted' as const,
+    error: { ...message, stopReason: 'aborted' as const },
+  },
+  done: false as const,
+});
+
+describe('S6 关停序（abort-all / quiesce 断言——骨架篇 §1.3 S6 形态⑤）', () => {
+  it('直接 shutdown（不经 requestQuit 前置扇出）：abort-all 打断在飞 run 不挂死', async () => {
+    const { streamFn } = pendingAbortStream();
+    const runtime = await assemble({ streamFn });
+    const conversation = runtime.conversation!;
+    void conversation.submitOnce('慢问'); // fire-and-forget 开跑（run 结果走事件流）
+    // 微任务自旋等 run 真在飞（挂起流已开）
+    for (let i = 0; i < 200 && !conversation.isRunning; i += 1) await Promise.resolve();
+    expect(conversation.isRunning).toBe(true);
+
+    // 直接关停（测试收尾/fatal 路后续的形态——无 requestQuit 前置扇出）：修复前
+    // shutdown 的 settle 等挂起流永不到来 → 本测试超时红；修复后 abort-all
+    // （开头全条目 driver.retire 仅 abort）打断在飞轮，关停序列正常走完
+    await runtime.shutdown();
+    expect(conversation.isRunning).toBe(false);
+  });
+
+  it('quiesce 断言：全 settle 后仍有非退役驱动 isRunning → shutdown 拒进 flush（APP_SHUTDOWN_QUIESCE_VIOLATED）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    // 塞假活条目（模拟「settle 与 running 复位配对被破」的写点漂移——isRunning
+    // 恒 true 的假驱动；形状补全 controls/注销器 no-op——quiesce 拒绝路径的
+    // finally ctx 回卷会触发变更监听遍历条目，缺面即隔离日志噪音）
+    const fakeId = 'fake-session-quiesce';
+    const fakeEntry = {
+      session: { header: { sessionId: fakeId } },
+      driver: { isRunning: true, retire: () => {}, settle: () => Promise.resolve() },
+      controls: { refreshTools: () => {}, rematerialize: () => {}, writeHeader: () => {} },
+      disposeDomainTools: () => {},
+      disposeScope: () => {},
+      resumed: false,
+      durable: { handle: () => {} },
+      headerState: { next: 'initial' },
+      retired: false,
+    } as never;
+    (runtime.drivers.entries as Map<string, never>).set(fakeId, fakeEntry);
+
+    try {
+      // 断言是防不是治：拒进 flush（防「flush 时仍有在写者」撕裂尾）——AppError 携码
+      await expect(runtime.shutdown()).rejects.toMatchObject({ code: APP_SHUTDOWN_QUIESCE_VIOLATED });
+    } finally {
+      // 恢复现场：afterEach 的兜底关停不再撞假条目（正常走完）
+      (runtime.drivers.entries as Map<string, never>).delete(fakeId);
+    }
   });
 });

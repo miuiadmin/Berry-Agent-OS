@@ -32,28 +32,28 @@ function fakeSurface() {
   return { surface, listeners, exitCalls };
 }
 
-/** 装配一套编舞 + 收账器（每用例独立） */
+/** 装配一套编舞 + 收账器（每用例独立；onGracefulQuit 记录 kind——S6 信号分种类断言依据） */
 function rig(surface: SignalSurface) {
-  const quits: number[] = [];
+  const kinds: string[] = [];
   const fatals: Array<{ kind: string; error: unknown }> = [];
   const handle = installExitSignals({
-    onGracefulQuit: () => quits.push(quits.length),
+    onGracefulQuit: (kind) => kinds.push(kind),
     onFatal: (error, kind) => {
       fatals.push({ kind, error });
       return Promise.resolve();
     },
     surface,
   });
-  return { handle, quits, fatals };
+  return { handle, kinds, fatals };
 }
 
 describe('installExitSignals（骨架篇 §1.3 信号表）', () => {
-  it('SIGINT 首次：转优雅退出请求，退出码记账 0，不直接 exit', () => {
+  it('SIGINT 首次：转优雅退出请求（kind=interrupt），退出码记账 0，不直接 exit', () => {
     const { surface, listeners, exitCalls } = fakeSurface();
-    const { handle, quits } = rig(surface);
+    const { handle, kinds } = rig(surface);
 
     listeners.get('SIGINT')!();
-    expect(quits).toHaveLength(1); // requestQuit 恰好一次
+    expect(kinds).toEqual(['interrupt']); // S6 形态④：SIGINT 可分档（多驱动 interrupt）
     expect(exitCalls).toEqual([]); // 优雅路由入口自然走完，不在此处 exit
     expect(handle.exitCode).toBe(0); // SIGINT 首次优雅完成 = 0（用户中断不是错误）
   });
@@ -67,22 +67,22 @@ describe('installExitSignals（骨架篇 §1.3 信号表）', () => {
     expect(exitCalls).toEqual([130]);
   });
 
-  it('SIGTERM：视同首次走优雅 + 退出码记账 143', () => {
+  it('SIGTERM：视同首次走优雅（kind=terminate——恒全序列不可分档）+ 退出码记账 143', () => {
     const { surface, listeners, exitCalls } = fakeSurface();
-    const { handle, quits } = rig(surface);
+    const { handle, kinds } = rig(surface);
 
     listeners.get('SIGTERM')!();
-    expect(quits).toHaveLength(1);
+    expect(kinds).toEqual(['terminate']); // S6 形态④：进程管理器要求退出——不可「不退 OS」
     expect(exitCalls).toEqual([]);
     expect(handle.exitCode).toBe(143);
   });
 
-  it('SIGHUP：视同首次走优雅 + 退出码记账 129', () => {
+  it('SIGHUP：视同首次走优雅（kind=terminate）+ 退出码记账 129', () => {
     const { surface, listeners } = fakeSurface();
-    const { handle, quits } = rig(surface);
+    const { handle, kinds } = rig(surface);
 
     listeners.get('SIGHUP')!();
-    expect(quits).toHaveLength(1);
+    expect(kinds).toEqual(['terminate']);
     expect(handle.exitCode).toBe(129);
   });
 
@@ -131,5 +131,38 @@ describe('installExitSignals（骨架篇 §1.3 信号表）', () => {
     handle.dispose();
     expect(listeners.size).toBe(0);
     expect(exitCalls).toEqual([]);
+  });
+});
+
+describe('急停旗标了结（S6 形态⑥——acknowledgeQuitRequest）', () => {
+  it('旗标 = 在身的未了结退出请求：interrupt 路结算后 acknowledge → 下次 SIGINT 又是首次语义', () => {
+    const { surface, listeners, exitCalls } = fakeSurface();
+    const { handle, kinds } = rig(surface);
+
+    listeners.get('SIGINT')!(); // 首次：interrupt 请求在身
+    handle.acknowledgeQuitRequest(); // 入口在 front.interrupt() 的 settle 了结时调——请求已了结
+    listeners.get('SIGINT')!(); // 又是首次：优雅 interrupt（非 130 硬退）
+    expect(kinds).toEqual(['interrupt', 'interrupt']);
+    expect(exitCalls).toEqual([]); // 无硬退——「连续两次」的真语义 = run 未结算窗口内的两次
+  });
+
+  it('未了结窗口内二次 SIGINT：仍 130 立即硬退（acknowledge 缺席即旧语义）', () => {
+    const { surface, listeners, exitCalls } = fakeSurface();
+    rig(surface);
+
+    listeners.get('SIGINT')!(); // 首次：interrupt 在身（run 尚未结算——acknowledge 未被调）
+    listeners.get('SIGINT')!(); // 窗口期内第二次：用户坚持现在走
+    expect(exitCalls).toEqual([130]);
+  });
+
+  it('terminate 路无了结语义：SIGTERM 后 acknowledge 不改变幂等重入（quits 照常）', () => {
+    const { surface, listeners, exitCalls } = fakeSurface();
+    const { handle, kinds } = rig(surface);
+
+    listeners.get('SIGTERM')!();
+    handle.acknowledgeQuitRequest(); // terminate 路进程本就走退出序列——复位无意义（容错 no-op）
+    listeners.get('SIGTERM')!(); // 重复到达保持幂等（requestQuit 可重入）
+    expect(kinds).toEqual(['terminate', 'terminate']);
+    expect(exitCalls).toEqual([]); // SIGTERM 无 130 快捷（幂等重入非硬退）
   });
 });

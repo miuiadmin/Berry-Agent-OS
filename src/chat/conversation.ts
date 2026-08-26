@@ -184,8 +184,15 @@ export class ConversationDriver {
   private readonly onCallbackError: ((err: unknown, source: string) => void) | undefined;
   /** 展示消费者（TUI handle；headless 无）——emit 扇出的非持久化半边 */
   private readonly displays: AgentEventSink[] = [];
-  /** run 取消信号（退出序列 / SIGINT 共用；一次性——abort 即终态） */
-  private readonly abortController = new AbortController();
+  /** 驱动级停摆旗标（S6 形态①：quit/retire 置位；一次性——置位后一切投递转 inject、launch 拒绝） */
+  private dismantled = false;
+  /**
+   * 在飞轮的取消控制器（S6 形态① per-run）：每轮 startRun 前新建（beginRun）——
+   * interrupt 只 abort 当轮、打断后捎跑的续批换新控制器（被打断不传染后续批）；
+   * 停摆（dismantle）级联 abort 它。runTurns 结束后残留的已完控制器 abort 为
+   * no-op，无害。idle 时 undefined 语义等价（已完控制器）。
+   */
+  private runAbort: AbortController = new AbortController();
   /**
    * 投递元数据（按消息引用挂靠）：队列只存 AgentMessage 契约面，投递选项是
    * 驱动侧关注点——纯 backgroundWake 批的工具收窄判定依据（第二十四批题3a）。
@@ -252,21 +259,43 @@ export class ConversationDriver {
     this.deliver({ role: 'user', content: text, timestamp: Date.now() });
   }
 
-  /** 退出请求（通道宿主面）：abort 当前 run + resolve 退出 promise */
+  /** 退出请求（通道宿主面）：停摆当前 run + resolve 退出 promise */
   requestQuit(): void {
-    this.abortController.abort();
+    this.dismantle();
     this.quitResolve();
   }
 
   /**
-   * 退役（S1 /new 换新驱动）：仅 abort 不 resolve quit promise——此后一切投递
+   * 退役（S1 /new 换新驱动）：仅停摆不 resolve quit promise——此后一切投递
    * 走 inject 通道（只落日志保审计不开 run），迟到结算照常发（fireRunSettled
-   * 不受 abort 静默）。与 requestQuit 的差异：退役是「会话停摆」不是「进程退出」
+   * 不受停摆静默）。与 requestQuit 的差异：退役是「会话停摆」不是「进程退出」
    * ——前台退出聚合（frontQuit）只认 requestQuit，退役驱动的 quit promise
    * 永不 resolve，防 /new 误触发 TUI 退出。
    */
   retire(): void {
-    this.abortController.abort();
+    this.dismantle();
+  }
+
+  /** 停摆（quit/retire 共用，S6 形态①）：置一次性旗标 + 级联 abort 在飞轮控制器 */
+  private dismantle(): void {
+    this.dismantled = true;
+    this.runAbort.abort();
+  }
+
+  /**
+   * 打断当前 run（S6 形态①：多驱动 Ctrl+C 语义——骨架篇 §1.3 S6 段）：abort
+   * 在飞轮控制器 + **清空当时 steering 队列**（打断前余量 drain 后走 inject 落
+   * 审计——可见、不跑；打断 = 弃当前批次）、**不停摆**——run 终态 aborted、
+   * isRunning 复位、后续 submit 正常开新 run、quit promise 不 resolve（「不退
+   * OS」的机制兑现）。打断后窗口期新输入由 followUp 循环正常捎跑（循环判据
+   * 只看停摆不看取消，形态②）。
+   * @returns 被打断 run 的结算 promise（idle 即回——外部 SIGINT 路旗标了结判据，形态⑥）
+   */
+  interrupt(): Promise<void> {
+    this.runAbort.abort();
+    // 打断前余量落审计（consumeMeta 清元数据 + inject 落投影与展示）
+    for (const message of this.consumeMeta(this.queue.drain())) this.inject(message);
+    return this.runPromise;
   }
 
   /** headless 单次执行：开一个 run 等终值（命令入口用；与 submit 互斥使用） */
@@ -326,7 +355,7 @@ export class ConversationDriver {
     const backgroundWake = opts?.backgroundWake === true;
     // 收窄投影仅对 backgroundWake 消息有意义（用户消息不携带）
     const toolFilter = backgroundWake ? opts?.toolFilter : undefined;
-    if (this.abortController.signal.aborted) return this.inject(message);
+    if (this.dismantled) return this.inject(message);
     if (this.running) {
       this.deliverMeta.set(message, { backgroundWake, toolFilter });
       this.queue.enqueue(message);
@@ -392,7 +421,7 @@ export class ConversationDriver {
    * @returns 闲时启动的 run 终值；running 时的提交返回 undefined（结果经事件流）
    */
   private async launch(prompts: AgentMessage[]): Promise<RunResult | undefined> {
-    if (this.running || this.abortController.signal.aborted) {
+    if (this.running || this.dismantled) {
       for (const message of prompts) this.queue.enqueue(message);
       return undefined;
     }
@@ -454,9 +483,14 @@ export class ConversationDriver {
     }
   }
 
+  /** 开一轮 startRun 前换新 run 控制器（S6 形态①：interrupt 打断当轮；捎跑续批换新——被打断不传染后续批） */
+  private beginRun(): AbortSignal {
+    this.runAbort = new AbortController();
+    return this.runAbort.signal;
+  }
+
   /** run 序列：首 run + followUp 续跑循环（每次 startRun 过 runWithRetry 检查点）；异常兜底合成 error 收尾 */
   private async runTurns(prompts: AgentMessage[]): Promise<RunResult> {
-    const hooks = { emit: this.emit, signal: this.abortController.signal };
     let result: RunResult | undefined;
     try {
       // 会话首 run 前落 request/header（组装参数证据腿）。挪进 try 是卡死窗口
@@ -467,13 +501,15 @@ export class ConversationDriver {
         this.headerWritten = true;
         this.writeHeader?.();
       }
-      result = await this.runWithRetry(prompts, hooks);
+      result = await this.runWithRetry(prompts, { emit: this.emit, signal: this.beginRun() });
       // run 自然停：余量排队消息全量捞出续跑（followUp 唤醒——followUp 轮的
-      // error 同样过检查点重试，骨架篇 §3.2 前置债①「检查点 = 每次 startRun 返回后」）
-      while (!this.abortController.signal.aborted && this.queue.hasItems()) {
+      // error 同样过检查点重试，骨架篇 §3.2 前置债①「检查点 = 每次 startRun 返回后」）。
+      // 循环判据只看停摆不看取消（S6 形态②）：interrupt 打断当轮后窗口期新输入
+      // 照常捎跑（换新控制器）；打断前余量已在 interrupt 时点清空，不在此消费
+      while (!this.dismantled && this.queue.hasItems()) {
         const batch: AgentMessage[] = [];
         while (this.queue.hasItems()) batch.push(...this.queue.drain());
-        result = await this.runWithRetry(batch, hooks);
+        result = await this.runWithRetry(batch, { emit: this.emit, signal: this.beginRun() });
       }
     } catch (error) {
       // 回调违约（loop 零 try/catch 的对价）：合成 error 消息补齐事件序列
@@ -536,9 +572,13 @@ export class ConversationDriver {
       // 投影重播种（私有路径：只重建活数组——错误 assistant 已不进投影，续入
       // 上下文末消息回到 user/toolResult）
       this.reseedTimelineFromProjection();
-      // 退避（挂驱动 abort signal——requestQuit/retire 即取消，零新增机制）
-      if (await sleepCancellable(delayMs, this.abortController.signal)) {
+      // 退避（挂本轮 run 控制器——interrupt/requestQuit/retire 即取消，零新增机制）
+      if (await sleepCancellable(delayMs, hooks.signal)) {
         this.appendRetryFact(attempt, delayMs, 'aborted', errorMessage);
+        // 取消终值统一（S6 形态③）：退避窗被打断不再返回上次 error result 落
+        // failed——主动取消的 run 终值一律 aborted（durable 事实已落本行
+        // llm/retry{phase:'aborted'}，此处只统一终态面）
+        result = { ...result, status: 'aborted', stopReason: 'aborted' };
         break;
       }
       // followUp 合流：退避期入队消息与续入同批（deliverMeta 保留——backgroundWake

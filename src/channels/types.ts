@@ -16,6 +16,12 @@ export interface ChannelHost {
   submit(text: string): void;
   /** 请求退出（Ctrl+D / quit 命令等）——宿主执行优雅退出序列（骨架篇 §1.3） */
   requestQuit(): void;
+  /**
+   * 用户中断（S6 形态④：Ctrl+C 专用路——与 Ctrl+D 分流）：宿主分档——多驱动
+   * 形态打断聚焦驱动当前 run（不退 OS）、单驱动维持 requestQuit 语义。通道
+   * 不知驱动数（薄层纪律），分档单点在前台宿主（骨架篇 §1.3 S6 段④）。
+   */
+  interrupt(): void;
 }
 
 /** 通知级别（notify 一次性通知；非交互原语纯活体层不落日志） */

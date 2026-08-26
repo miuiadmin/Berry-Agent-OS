@@ -436,3 +436,200 @@ describe('retryBackoffDelay（S4 前置债①——指数 + 等比半幅抖动�
     }
   });
 });
+
+/* ---------------- S6 信号多驱动化：驱动级取消模型 ---------------- */
+
+/**
+ * 立即完成的流迭代器（done 终态——续轮/失败脚本用）。
+ * 事件面最小合法：单 start + 单 done（start 与 done 之间无增量——loop 消费同构）。
+ */
+function doneIterator(message: AssistantMessage) {
+  const events = [
+    { type: 'start' as const, partial: { ...message, content: [] } },
+    { type: 'done' as const, reason: 'stop' as const, message },
+  ];
+  return {
+    [Symbol.asyncIterator]() {
+      let at = 0;
+      return {
+        next: () =>
+          at < events.length
+            ? Promise.resolve({ value: events[at++]!, done: false as const })
+            : Promise.resolve({ value: undefined, done: true as const }),
+      };
+    },
+    result: async () => message,
+  };
+}
+
+/** abort 终止事件（error 流事件编码 reason:'aborted'——loop 终值映射 aborted 的输入形） */
+const abortEvent = (message: AssistantMessage) => ({
+  value: {
+    type: 'error' as const,
+    reason: 'aborted' as const,
+    error: { ...message, stopReason: 'aborted' as const },
+  },
+  done: false as const,
+});
+
+/**
+ * 挂起流（S6 驱动级测试）：首轮挂起直到 abort（abort → error{reason:'aborted'}
+ * 终止事件——对齐 loop「StreamFn 编码 aborted」契约）；续轮（打断后捎跑的新
+ * run——换新控制器）立即正常完成。同一 streamFn 覆盖「被打断 + 打断后再跑」
+ * 两段语义，记录每次模型调用上下文。
+ */
+function pendingOnceStream(calls: LlmContext[]): StreamFn {
+  return (context: LlmContext, _options: StreamFnOptions, signal?: AbortSignal) => {
+    calls.push(context);
+    if (calls.length > 1) return doneIterator(okAssistant('续答'));
+    const message = okAssistant('慢答');
+    return {
+      [Symbol.asyncIterator]() {
+        let at = 0;
+        const events = [{ type: 'start' as const, partial: { ...message, content: [] } }];
+        return {
+          next: async () => {
+            if (at < events.length) return { value: events[at++]!, done: false as const };
+            // 挂起直到 abort（startRun 把 hooks.signal 透传为第三位参数）——
+            // 已 abort 短路先判（signal 事件只发一次，事后挂监听收不到）
+            if (signal?.aborted) return abortEvent(message);
+            await new Promise((resolve) => {
+              signal?.addEventListener('abort', resolve, { once: true });
+            });
+            return abortEvent(message);
+          },
+        };
+      },
+      // result() 契约（loop 收口以它为准）：abort 编码进返回消息的 stopReason
+      //——loop 终态短路（stopReason 'aborted' → RunStatus aborted）读的是这里
+      result: async () => (signal?.aborted ? { ...message, stopReason: 'aborted' } : message),
+    };
+  };
+}
+
+/** 装配 S6 测试驱动（真 Session durable + 挂起流；记录模型调用上下文） */
+function makeS6Driver() {
+  const session = new Session();
+  const calls: LlmContext[] = [];
+  const driver = new ConversationDriver({
+    sessionId: 's6-session',
+    context: { messages: [], tools: [] },
+    loopConfig: { streamFn: pendingOnceStream(calls), model: 'test/model', convertToLlm: minimalConvert },
+    durable: createDurableSinks(session),
+    session,
+  });
+  return { driver, session, calls };
+}
+
+/** 宏任务一拍（挂起流的在飞窗口需要真实事件循环推进） */
+const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
+
+describe('ConversationDriver 驱动级取消模型（S6 形态①②③）', () => {
+  it('run 中 interrupt：aborted 终态 + isRunning 复位 + quit 不 resolve + 后续 submit 开新 run', async () => {
+    const { driver, session, calls } = makeS6Driver();
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    const pending = driver.submitOnce('慢问');
+    await tick(); // 等 run 真在飞（挂起流已开）
+    expect(driver.isRunning).toBe(true);
+
+    // interrupt：abort 在飞轮 + 清余量 + 不停摆
+    const quitDone: boolean[] = [];
+    void driver.quit.then(() => quitDone.push(true));
+    await driver.interrupt(); // 等被打断 run 结算（interrupt 返回 runPromise）
+    const result = await pending;
+    expect(result?.status).toBe('aborted'); // 形态③：主动取消终值统一 aborted
+    expect(result?.stopReason).toBe('aborted');
+    expect(driver.isRunning).toBe(false);
+    expect(settled).toEqual(['aborted']);
+    await tick();
+    expect(quitDone).toHaveLength(0); // 「不退 OS」的机制兑现：quit promise 不 resolve
+    expect(session.events.some((e) => e.type === 'user/message')).toBe(true); // 打断不吞账——开场问句已 durable
+
+    // 后续 submit 正常开新 run（换新控制器——被打断不传染，形态②）
+    driver.submit('打断后再问');
+    await driver.settle();
+    expect(calls.length).toBe(2);
+    expect(settled).toEqual(['aborted', 'completed']); // 新 run 正常完成
+  });
+
+  it('打断前 steering 余量：interrupt 时点清空 → inject 落审计（可见、不跑）', async () => {
+    const { driver, session, calls } = makeS6Driver();
+    const pending = driver.submitOnce('慢问');
+    await tick(); // run 在飞
+    driver.submit('排队中的插话'); // running → steer 入队（打断前余量）
+    await driver.interrupt();
+    await pending;
+
+    expect(calls.length).toBe(1); // 余量不捎跑（interrupt 已清空——「弃当前批次」）
+    // 余量走 inject：只落日志保审计（message_start/end → durable user/message）
+    const userEvents = session.events.filter((e) => e.type === 'user/message');
+    expect(userEvents).toHaveLength(2); // 开场问句 + 被弃置的插话（审计不断流）
+    // 队列确已清空：驱动闲时——后续无幽灵续跑
+    await tick();
+    expect(driver.isRunning).toBe(false);
+    expect(calls.length).toBe(1);
+  });
+
+  it('打断后窗口期新输入：followUp 循环捎跑（循环判据只看停摆——形态②）', async () => {
+    const { driver, calls } = makeS6Driver();
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('慢问');
+    await tick(); // run 在飞（挂起流）
+    const interruptSettled = driver.interrupt(); // 不等结算——窗口期紧接新输入
+    driver.submit('打断后的新输入'); // running 仍真 → steer 入队
+    await interruptSettled; // runPromise 涵盖捎跑批（同一 launch 的 followUp 循环）
+
+    expect(calls.length).toBe(2); // 捎跑批真开了（换新控制器——被打断不传染）
+    const secondBatch = (calls[1]!.messages as Array<{ role: string; content: unknown }>)
+      .filter((m) => m.role === 'user')
+      .map((m) => (typeof m.content === 'string' ? m.content : ''));
+    expect(secondBatch).toContain('打断后的新输入');
+    expect(settled).toEqual(['completed']); // 终值如实 = 最后批完整（形态③：间隙窗不改判）
+  });
+
+  it('退避窗 interrupt：aborted 落账 + 终值统一 aborted + 不停摆（S6 形态③验证）', async () => {
+    // 首跑 transient 失败 → 长退避中 interrupt：requestQuit 同款 abort 路，但驱动不停摆
+    const session = new Session();
+    let call = 0;
+    const driver = new ConversationDriver({
+      sessionId: 's6-backoff',
+      context: { messages: [], tools: [] },
+      loopConfig: {
+        // 首轮立即失败（transient）触发退避；续轮（打断后新 run）正常完成
+        streamFn: () => {
+          call += 1;
+          return doneIterator(call === 1 ? errorAssistant('retryable-mark: x') : okAssistant('续答'));
+        },
+        model: 'test/model',
+        convertToLlm: minimalConvert,
+      },
+      durable: createDurableSinks(session),
+      session,
+      isTransientError: (m) => (m.errorMessage ?? '').includes('retryable-mark'),
+      retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 60_000 }, // 长退避——退避中被打断
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    const pending = driver.submitOnce('问');
+    await tick(); // 首跑已失败、退避中
+    await driver.interrupt();
+    const result = await pending;
+
+    expect(result?.status).toBe('aborted'); // 形态③：退避窗被打断 → aborted（非 failed）
+    expect(settled).toEqual(['aborted']);
+    expect(session.events.filter((e) => e.type === 'llm/retry').map((e) => (e.data as LlmRetryData).phase)).toContain(
+      'aborted',
+    );
+    // 不停摆：quit 不 resolve + 后续 submit 开新 run
+    let quitResolved = false;
+    void driver.quit.then(() => {
+      quitResolved = true;
+    });
+    driver.submit('打断后再问');
+    await driver.settle();
+    expect(quitResolved).toBe(false);
+    expect(settled).toEqual(['aborted', 'completed']);
+  });
+});

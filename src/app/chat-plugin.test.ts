@@ -464,7 +464,7 @@ function pendingStream() {
         },
       };
     },
-    result: async () => message,
+    result: async () => (signal?.aborted ? { ...message, stopReason: 'aborted' } : message),
   });
   return { streamFn, release };
 }
@@ -582,6 +582,54 @@ describe('S3 退出扇出（requestQuit 从聚焦单路扩为全部活驱动 abo
     expect(a.driver.isRunning).toBe(false);
     expect(b.driver.isRunning).toBe(false);
     void release; // gate 已无消费者（abort 路已短路）——防御位不调
+  });
+});
+
+describe('S6 Ctrl+C 分档（FrontHost.interrupt 多驱动打断 / 单驱动维持 requestQuit）', () => {
+  it('双驱动在飞 interrupt：聚焦被打断 aborted、兄弟不受扰照常完成、quit 不 resolve', async () => {
+    const { streamFn, release } = pendingStream();
+    const { runtime, agent } = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const a = registry.focused()!;
+    const b = registry.open()!; // focus=B
+
+    // 双驱动同时在飞（S3 退出扇出同款场景——本用例改走 interrupt 分档）
+    const bResult = b.driver.submitOnce('问 B');
+    await spinUntil(() => b.driver.isRunning, 'B 在飞');
+    const aResult = a.driver.submitOnce('问 A'); // 驱动引用活——直接开跑（非聚焦后台 run）
+    await spinUntil(() => a.driver.isRunning, 'A 在飞');
+
+    // interrupt（SIGINT 分档路）：只打断聚焦 B——A 的流不被触碰（仍挂起）
+    let quitDone = false;
+    void runtime.front.quit.then(() => {
+      quitDone = true;
+    });
+    await runtime.front.interrupt();
+    expect(b.driver.isRunning).toBe(false); // B 已被打断结算
+    expect(a.driver.isRunning).toBe(true); // 兄弟不受扰——「不退 OS」也「不打扰邻居」
+    const bFinal = await bResult;
+    expect(bFinal?.status).toBe('aborted'); // 形态③：主动取消终值统一 aborted
+
+    // 放行 A 的流：兄弟 run 正常完成（completed 如实）
+    release();
+    await a.driver.settle();
+    const aFinal = await aResult;
+    expect(aFinal?.status).toBe('completed');
+    expect(quitDone).toBe(false); // interrupt 不触发退出聚合（只有 requestQuit 才退 OS）
+  });
+
+  it('单驱动（N≤1）interrupt：维持原语义 = requestQuit（quit resolve）', async () => {
+    const { streamFn } = pendingStream();
+    const { runtime } = await assemble({ streamFn });
+    const only = runtime.drivers.focused()!;
+    runtime.front.submit('慢问');
+    await spinUntil(() => only.driver.isRunning, '唯一驱动在飞');
+
+    // N≤1 分档：SIGINT 在单驱动形态 = 退出请求（Ctrl+C 退 OS 的传统语义）
+    runtime.front.interrupt();
+    await runtime.front.quit; // requestQuit 路——退出聚合 resolve（此为分档判据本体）
+    await runtime.front.settle(); // run 结算是 settle 面（quit resolve 先于收尾属正常序）
+    expect(only.driver.isRunning).toBe(false);
   });
 });
 

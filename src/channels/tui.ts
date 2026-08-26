@@ -53,6 +53,8 @@ export interface TuiChannelOptions {
   readonly history?: (sessionId?: string) => readonly AgentMessage[];
   /** 条目运行态查询（S3 切入在飞会话判据——状态行/流式占位槽；退役条目宿主侧按 idle 呈现；通道不持注册表） */
   readonly entryStatus?: (sessionId: string) => 'running' | 'idle' | undefined;
+  /** 退出键提示文案（S6 形态⑦：宿主按起屏时点驱动数分档——多驱动「Ctrl+C 打断 / Ctrl+D·/quit 退出」、单驱动缺省「Ctrl+D·Ctrl+C 退出」） */
+  readonly quitHint?: string;
 }
 
 /** TUI 通道面（app 组合根持有） */
@@ -111,11 +113,13 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const editor = new Editor(tui, EDITOR_THEME);
   const editorContainer = new Container();
   editorContainer.addChild(editor);
-  /** 底部提示行（快捷键说明，装配期固定） */
+  /** 底部提示行（快捷键说明，装配期固定）。S6 形态⑦：quitHint 由构造方按
+   * 起屏时点驱动数分档传入（多驱动「Ctrl+C 打断」/ 单驱动「Ctrl+D·Ctrl+C
+   * 退出」）——通道不知驱动数，文案判据在宿主侧 */
   const footerText = new Text(
     opts.title
-      ? ` ${opts.title} — Enter 发送 / / 命令 / Ctrl+D·Ctrl+C 退出`
-      : ' Enter 发送 / / 命令 / Ctrl+D·Ctrl+C 退出',
+      ? ` ${opts.title} — Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`
+      : ` Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`,
   );
 
   const layoutRoot = new VStack([
@@ -208,12 +212,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     opts.host.submit(trimmed);
   };
   // Ctrl+D / Ctrl+C 全局拦截面（pi-tui Editor 无专用回调；经原始输入监听 + 键解析识别）。
-  // raw mode 下 Ctrl+C 不产生 SIGINT 信号而是输入字节——在此拦下与 Ctrl+D 同走优雅退出
+  // raw mode 下两键不产生信号而是输入字节——在此拦下分流（S6 形态④）：Ctrl+C 走
+  // 宿主 interrupt（多驱动 = 打断聚焦 run 不退 OS，分档单点在 FrontHost）、
+  // Ctrl+D 恒 requestQuit（退出命令键位不变）
   const quitKeys = new Set(['ctrl+d', 'ctrl+c']);
   tui.addInputListener((data) => {
     const key = parseKey(data);
     if (key !== undefined && quitKeys.has(key)) {
-      opts.host.requestQuit();
+      if (key === 'ctrl+c') opts.host.interrupt();
+      else opts.host.requestQuit();
       return { consume: true };
     }
     return undefined;
