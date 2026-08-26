@@ -57,8 +57,15 @@ const UNIT_MS: Record<'m' | 'h' | 'd', number> = {
  * 解析 schedule 声明串（存库原样串的执法面——add 当场校验，坏串拒入库）。
  * @param text 声明串（如 `daily@08:30` / `every@2h` / `once@2026-09-01T09:00`）
  * @param now 判定「现在」（once@ 过去时刻 = 配置错误当场拒）
+ * @param options.allowPast true = 容忍 once@ 过去时刻（K2-c：tick 到点编排
+ *   重解析存量行时时刻已过是正常态——done/missed 判定的前提；过去与否的
+ *   时机裁决交还 evaluateDue，词法层只管串形。缺省 false = add 面严格拒）
  */
-export function parseSchedule(text: string, now: number): ScheduleParse {
+export function parseSchedule(
+  text: string,
+  now: number,
+  options: { readonly allowPast?: boolean } = {},
+): ScheduleParse {
   const matchEvery = EVERY_RE.exec(text);
   if (matchEvery !== null) {
     const n = Number(matchEvery[1]);
@@ -85,7 +92,9 @@ export function parseSchedule(text: string, now: number): ScheduleParse {
     if (Number.isNaN(at)) {
       return { ok: false, error: `once@ 时刻不合法：${iso}（ISO 8601，如 once@2026-09-01T09:00）` };
     }
-    if (at <= now) {
+    // 过去时刻拒是 add 面策略（配置错误当场拒）非词法——tick 重解析路
+    // allowPast 放行，让 evaluateDue 裁 done/missed/fire-in-grace
+    if (at <= now && options.allowPast !== true) {
       return { ok: false, error: `once@ 时刻已过（${iso}）——一次性任务须指向未来` };
     }
     return { ok: true, schedule: { kind: 'once', at } };

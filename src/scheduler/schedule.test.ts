@@ -77,6 +77,18 @@ describe('parseSchedule：once@<ISO>', () => {
     expect(parseSchedule('once@', now).ok).toBe(false);
   });
 
+  it('allowPast：tick 重解析路容忍过去时刻（时机裁决交还 evaluateDue——K2-c）', () => {
+    const now = Date.parse('2026-08-26T12:00:00');
+    const past = parseSchedule('once@2026-08-25T09:00', now, { allowPast: true });
+    expect(past.ok).toBe(true);
+    if (past.ok) {
+      expect(past.schedule.kind).toBe('once');
+      expect((past.schedule as { at: number }).at).toBe(Date.parse('2026-08-25T09:00'));
+    }
+    // 词法坏串不因 allowPast 放行——容忍的只是时机不是串形
+    expect(parseSchedule('once@not-a-date', now, { allowPast: true }).ok).toBe(false);
+  });
+
   it('未知前缀 → 人读错误（三形状提示）', () => {
     const result = parseSchedule('weekly@mon', 1);
     expect(result.ok).toBe(false);
