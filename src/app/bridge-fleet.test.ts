@@ -221,4 +221,35 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('boot 不武装：装载期事件循环被模块求值占死 300ms → 不误杀（心跳只在装载成功后武装）', async () => {
+    const { root, anchor, dir } = setupFixture('fleet-slow-boot');
+    const slowEntry = join(dir, 'fx-slow.ts');
+    writeFileSync(slowEntry, FX_SLOW_BOOT);
+    /** 死亡结算记录（若误杀即非空——断言恒空） */
+    const marked: Array<{ id: string; code: string; message: string }> = [];
+    // 节律 50ms × 2 拍：装载若被心跳监督覆盖，150ms 即判冻杀域（模块占线
+    // 300ms > 150ms 判冻窗）——修复前本用例在 await load 处即 reject
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+      heartbeatMs: 50,
+      heartbeatMissLimit: 2,
+      markFailed: (id, code, message) => marked.push({ id, code, message }),
+    });
+    // 慢装载成功返还（boot 期超时归 loadTimeoutMs 60s 司职——50/100/150ms 的
+    // 丢拍不是冻结：事件循环尚未承诺应答）
+    await fleet.loader.load({ id: 'sb', entry: slowEntry, runtime: 'worker' });
+    const scope = anchor.fork({ name: 'sb', rowId: 'sb' });
+    await fleet.loader.apply({ id: 'sb', entry: slowEntry, runtime: 'worker', config: { slot: 'sb' } }, scope);
+    const taps = root.get<Record<string, () => Promise<string>>>('fleet/taps-sb');
+    await expect(taps.ping!()).resolves.toBe('pong');
+    // 武装后正常运行：零误杀、零死亡结算、域活
+    expect(marked).toHaveLength(0);
+    expect(fleet.stats()).toMatchObject({ live: 1, heartbeatFreezes: 0, crashed: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
