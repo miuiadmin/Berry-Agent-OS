@@ -145,8 +145,8 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     /** markFailed 注入物记录桩（PluginsService 结构面——状态回写语义的被测出口） */
     const marked: Array<{ id: string; code: string; message: string }> = [];
     /** plugin/failed 广播记录（anchor 上真 on 订阅——fleet 死亡结算的词汇面） */
-    const broadcast: Array<{ id: string; code?: string }> = [];
-    anchor.on('plugin/failed', (payload: { id: string; code?: string }) => broadcast.push(payload));
+    const broadcast: Array<{ id: string; code?: string; message?: string }> = [];
+    anchor.on('plugin/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
     const fleet = createBridgeFleet({
       root,
       anchor: () => anchor,
@@ -168,6 +168,11 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     expect(marked[0]).toMatchObject({ id: 'w1', code: BRIDGE_WORKER_EXITED });
     // 广播词汇：与装载失败同一观测词汇（宁可死得响亮）
     expect(broadcast[0]).toMatchObject({ id: 'w1', code: BRIDGE_WORKER_EXITED });
+    // 诊断面终点（契约篇 §1.7 结算消息携带 diagnostic）：自崩溃第一手异常
+    // （fixture 抛「模拟 worker 自崩溃」→ worker error 存档 → onExit.diagnostic）
+    // 缀入结算消息直达 operator 可见面——广播与回写同一字符串同源
+    expect(marked[0]!.message).toContain('模拟 worker 自崩溃');
+    expect(broadcast[0]!.message).toContain('模拟 worker 自崩溃');
     // 归因计数：自崩溃（无执法归因）→ crashed 计 1、心跳面不动
     expect(fleet.stats()).toMatchObject({ live: 0, crashed: 1, heartbeatFreezes: 0 });
 
@@ -298,6 +303,9 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     await until(() => marked.length > 0 && oomEvents.length > 0);
     // 意外死亡结算：BRIDGE_WORKER_EXITED 保码（宁可死得响亮）
     expect(marked[0]).toMatchObject({ id: 'oom', code: BRIDGE_WORKER_EXITED });
+    // 诊断面终点（契约篇 §1.7 结算消息携带 diagnostic）：内存超限签名同样
+    // 缀入结算消息——markFailed 回写即 operator 可见（不只知 code 1）
+    expect(marked[0]!.message).toContain('reaching memory limit');
     // 观测锚⑤：diagnostic = worker error 事件原始错误（构造名: 消息），
     // 签名串「reaching memory limit」命中即内存超限归因（probe-oom 实证）
     expect(oomEvents[0]).toMatchObject({ rowId: 'oom', workerId: 'w:oom' });

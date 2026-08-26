@@ -146,7 +146,11 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           }
           for (const id of info.rows) {
             const detail = info.reason !== undefined ? `，归因：${info.reason}` : '';
-            const message = `worker 域意外退出（code ${info.code}${detail}）——域死回卷已完成，不自动重启（宁可死得响亮，契约篇 §1.7）`;
+            // 诊断面终点（契约篇 §1.7 结算消息携带 diagnostic）：第一手错误缀入
+            // 结算消息——plugin/failed 广播与 markFailed 回写同一字符串，operator
+            // 看 plugins.list() 行状态即见原始异常/内存超限签名，不只知 code 1
+            const diag = info.diagnostic !== undefined ? `，diagnostic：${info.diagnostic}` : '';
+            const message = `worker 域意外退出（code ${info.code}${detail}${diag}）——域死回卷已完成，不自动重启（宁可死得响亮，契约篇 §1.7）`;
             // 事件广播（观测面）+ 状态回写（list 状态源不漂移）同一时点落定
             opts.anchor().emit('plugin/failed', { id, code: BRIDGE_WORKER_EXITED, message });
             opts.markFailed?.(id, BRIDGE_WORKER_EXITED, message);
