@@ -91,6 +91,7 @@ import { createMcpSpawner } from './mcp-spawn.js';
 import { killTree } from '../exec/index.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createTickRunner } from './scheduler-runner.js';
+import { createTickOsRegistrar } from './tick-register.js';
 import { createJobsService, createSubagentsService } from '../subagent/index.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
@@ -201,6 +202,12 @@ export interface RuntimeOptions {
    * spawn；测试注入假 runner 记 prompt 断言触发链，不真起子进程）
    */
   readonly tickRunner?: (prompt: string) => Promise<import('../scheduler/index.js').TickRunResult>;
+  /**
+   * OS 定时注册器覆盖（scheduler 件闭包注入——缺省 createTickOsRegistrar
+   * 真系统操作〔darwin launchd / Linux crontab〕；测试注入假注册器断言
+   * enable/disable 命令链，不动真系统注册面）
+   */
+  readonly osTickRegistrar?: import('./tick-register.js').TickOsRegistrar;
   /**
    * web 件依赖覆盖（生产零参——真 fetch/真 DNS/件级限流单例；组合根全栈
    * 测试注入 fetchImpl/lookup——服务与工具同一卫生件的回归锁在此层验）
@@ -554,11 +561,17 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // chat 件收会话选择/驱动/ctx.agent 四件（件聚落 src/chat/plugin.ts）——无条件注入，
   // 无持久层时件自降级空转（装载面完好——dump-config 诊断树不断链）；
   // scheduler 件收 gate 判据两闭包 + runner（spawn 组装在 app/scheduler-runner.ts
-  // ——argv 公式 + env set 注入 + 10 分钟超时，席 13 第一刀）；
-  // tools 件收管道 gate 落点 + safety 同源可写根推导器（Ring 1 行树化批）
+  // ——argv 公式 + env set 注入 + 10 分钟超时，席 13 第一刀）+ OS 定时注册器
+  //（app/tick-register.ts——launchd/crontab 注册，K2-d；件经闭包收面不见 exec）
   const tickRunner =
     opts.tickRunner ??
     createTickRunner({
+      dataDir: dataDir(),
+      dbPath: resolvedDbPath,
+    });
+  const osTickRegistrar =
+    opts.osTickRegistrar ??
+    createTickOsRegistrar({
       dataDir: dataDir(),
       dbPath: resolvedDbPath,
     });
@@ -607,6 +620,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     ...(persistence ? { goalConnection: persistence.store.connection } : {}),
     schedulerDeps: {
       runJob: tickRunner,
+      osRegistrar: osTickRegistrar,
       // busy 判据（第二刀④）：turn/start·turn/end 配对深度投影——跨进程有效
       //（driverRef 进程内布尔退役）；persist:false 无账可读 = 0（诊断面不拦）
       turnDepth: persistence ? () => openTurnDepth(persistence.store) : () => 0,

@@ -15,6 +15,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
+import type { PluginContext } from '../contracts/plugin.js';
+import { JobsStore } from '../scheduler/store.js';
+import { createSchedulerPlugin } from '../scheduler/plugin.js';
+import { openStore } from '../persist/index.js';
+import { collectBuiltinMigrations } from './builtins.js';
 import { createBerryRuntime } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
 
@@ -77,6 +82,44 @@ function fakeRunner() {
     return { exitCode: 0, stdout: '第 1 行\n第 2 行\n结果一切正常', stderr: '', durationMs: 1200 };
   };
   return { runJob, prompts };
+}
+
+/**
+ * 假 OS 注册器（K2-d——注册器边界注入：记录三面调用 + 受控回执；
+ * 真注册器的平台/文件/系统命令面在 tick-register.test.ts 独立覆盖，
+ * 此处只测件面转发、回执拼接与缺席降级）。
+ */
+function fakeOsRegistrar() {
+  const calls: { op: 'register' | 'unregister' | 'isRegistered'; name: string }[] = [];
+  const registered = new Set<string>();
+  /** 受控槽：非空时 register 用此人读回执（测失败转发） */
+  let nextRegisterResult: { ok: boolean; message: string } | null = null;
+  const registrar = {
+    async register(job: { name: string }) {
+      calls.push({ op: 'register', name: job.name });
+      if (nextRegisterResult !== null) {
+        const result = nextRegisterResult;
+        nextRegisterResult = null;
+        return result;
+      }
+      registered.add(job.name);
+      return { ok: true, message: `已注册 OS 定时（launchd）：/LaunchAgents/tick.${job.name}.plist` };
+    },
+    async unregister(name: string) {
+      calls.push({ op: 'unregister', name });
+      registered.delete(name);
+      return { ok: true, message: `已注销 OS 定时并删除 /LaunchAgents/tick.${name}.plist` };
+    },
+    async isRegistered(name: string) {
+      calls.push({ op: 'isRegistered', name });
+      return registered.has(name);
+    },
+    /** 测试侧控制面（非 TickOsRegistrar 面——注入失败回执） */
+    __failNextRegister(result: { ok: boolean; message: string }) {
+      nextRegisterResult = result;
+    },
+  };
+  return { registrar, calls };
 }
 
 /** 本用例运行时登记（afterEach 统一关停防句柄泄漏） */
@@ -246,5 +289,141 @@ describe('scheduler 官方件全栈：触发链（gate → 抢占 → runner）'
       .persistence!.store.connection.prepare(`SELECT last_run_at FROM jobs WHERE name = 'once'`)
       .get() as { last_run_at: number | null };
     expect(row.last_run_at).toBeGreaterThan(0);
+  });
+});
+
+describe('scheduler 官方件全栈：OS 定时注册命令链（K2-d enable|disable）', () => {
+  it('enable：任务行读出 → 注册器收 job → 成功回执附注册器 message', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    await runtime.channels.commands.dispatch('/tick add morning daily@08:30 早间简报');
+    expect(await runtime.channels.commands.dispatch('/tick enable morning')).toBe('ok');
+    expect(notifies.at(-1)).toContain('已注册 OS 定时（morning）');
+    expect(notifies.at(-1)).toContain('/LaunchAgents/tick.morning.plist'); // 注册器回执人读直用
+    // 注册器收到的是真任务行（name + schedule 原样串）
+    expect(os.calls).toContainEqual({ op: 'register', name: 'morning' });
+  });
+
+  it('enable 注册器失败回执：转发「注册失败」前缀（如 schedule 不支持当前平台）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    await runtime.channels.commands.dispatch('/tick add poll every@2h 轮询');
+    os.registrar.__failNextRegister({ ok: false, message: 'cron 形态暂只支持 daily@HH:MM（当前 every@2h）' });
+    expect(await runtime.channels.commands.dispatch('/tick enable poll')).toBe('ok');
+    expect(notifies.at(-1)).toContain('注册失败（poll）');
+    expect(notifies.at(-1)).toContain('daily@HH:MM');
+  });
+
+  it('enable 不存在任务：missing 回执（不到注册器）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    expect(await runtime.channels.commands.dispatch('/tick enable ghost')).toBe('ok');
+    expect(notifies.at(-1)).toContain('任务不存在：ghost');
+    expect(os.calls).toEqual([]); // 注册器未被触
+  });
+
+  it('disable：注销回执；空名用法回执', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    expect(await runtime.channels.commands.dispatch('/tick disable morning')).toBe('ok');
+    expect(notifies.at(-1)).toContain('已注销（morning）');
+    expect(os.calls).toContainEqual({ op: 'unregister', name: 'morning' });
+
+    expect(await runtime.channels.commands.dispatch('/tick enable')).toBe('ok');
+    expect(notifies.at(-1)).toContain('用法：/tick enable <name>');
+  });
+
+  it('rm 联动注销：删到时注册器收 unregister（防幽灵行——行没了 OS 还在到点白触发）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    await runtime.channels.commands.dispatch('/tick add morning daily@08:30 简报');
+    expect(await runtime.channels.commands.dispatch('/tick rm morning')).toBe('ok');
+    expect(notifies.at(-1)).toContain('任务已删除：morning');
+    expect(notifies.at(-1)).toContain('OS 定时：已注销'); // 联动回执附行
+    expect(os.calls).toContainEqual({ op: 'unregister', name: 'morning' });
+  });
+
+  it('list：OS 注册态逐行探测（已注册/未注册两态）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({ osTickRegistrar: os.registrar });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    await runtime.channels.commands.dispatch('/tick add a daily@08:00 任务甲');
+    await runtime.channels.commands.dispatch('/tick add b daily@09:00 任务乙');
+    await runtime.channels.commands.dispatch('/tick enable a');
+    expect(await runtime.channels.commands.dispatch('/tick list')).toBe('ok');
+    const listing = notifies.at(-1)!;
+    expect(listing).toContain('OS 定时注册 /tick enable');
+    expect(listing).toContain('a  daily@08:00  OS 已注册');
+    expect(listing).toContain('b  daily@09:00  未注册');
+  });
+});
+
+describe('scheduler 件级：osRegistrar 缺席防御面（诊断形态）', () => {
+  // 组合根恒构造真注册器（与缺省真 runner 先例同构）——缺席面只在件级出现
+  //（未来诊断装配形态）；「单元模块测试 → 组合根全栈」分层的单元侧，假 ctx
+  // 停在件边界（logger/effect/get 三面），jobs 表仍真库。
+  it('enable/disable 报不可用；list 示「－」；rm 无联动行', async () => {
+    const store = openStore({ path: ':memory:', migrations: collectBuiltinMigrations() });
+    try {
+      const jobs = new JobsStore(store.connection);
+      jobs.add('a', '任务', Date.now(), 'daily@08:00');
+      const notifies: string[] = [];
+      const commands: { name: string; handler: (args: string) => void | Promise<void> }[] = [];
+      // 最小假 ctx：三面（logger 空转 / effect 即装 / get 按 services 名分派）
+      const ctx = {
+        logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+        effect: (dispose: () => void) => {
+          dispose();
+          return () => {};
+        },
+        get: (key: string) =>
+          key === 'channels'
+            ? {
+                registerCommand: (cmd: { name: string; handler: (args: string) => void | Promise<void> }) => {
+                  commands.push(cmd);
+                  return () => {};
+                },
+              }
+            : { notify: (text: string) => notifies.push(text) },
+      } as unknown as PluginContext;
+      const plugin = createSchedulerPlugin({
+        connection: store.connection,
+        turnDepth: () => 0,
+        lastUserMessageAt: () => null,
+        backgroundAffordable: () => true,
+        // osRegistrar 故意缺席——防御面：其余子命令不受影响
+      });
+      await plugin.apply(ctx);
+      const tick = commands.find((cmd) => cmd.name === 'tick')!;
+
+      await tick.handler('enable a');
+      expect(notifies.at(-1)).toContain('OS 注册面未装配');
+      await tick.handler('disable a');
+      expect(notifies.at(-1)).toContain('OS 注册面未装配');
+
+      await tick.handler('list');
+      expect(notifies.at(-1)).toContain('a  daily@08:00  －');
+
+      await tick.handler('rm a');
+      expect(notifies.at(-1)).toBe('任务已删除：a'); // 无 OS 联动行
+    } finally {
+      store.close();
+    }
   });
 });

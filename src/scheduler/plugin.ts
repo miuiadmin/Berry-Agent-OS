@@ -46,6 +46,20 @@ interface UiNotifyFace {
   notify(message: string): void;
 }
 
+/**
+ * OS 定时注册面最小面（结构类型窄化——实现在组合根 app/tick-register.ts，
+ * 件不 import app〔L3→L5 逆向边在结构上消失，runJob 先例同构〕）。
+ * 回执 {ok, message} 人读直用——件面不做二次措辞。
+ */
+export interface OsRegistrarFace {
+  /** 注册/覆盖注册（读任务行的 schedule 翻译 launchd/crontab 语义） */
+  register(job: JobRecord): Promise<{ readonly ok: boolean; readonly message: string }>;
+  /** 注销（未注册 = 幂等回执非错误） */
+  unregister(name: string): Promise<{ readonly ok: boolean; readonly message: string }>;
+  /** 是否已注册（list 行探测） */
+  isRegistered(name: string): Promise<boolean>;
+}
+
 /** 官方件构造依赖（装配期闭包注入——官方件 = 宿主装配特权） */
 export interface SchedulerPluginDeps {
   /** SQLite 连接（jobs 表物理载体）；缺省 = persist:false 降级 warn 空转 */
@@ -73,6 +87,12 @@ export interface SchedulerPluginDeps {
    * 驱动闭包计数，v1 数据面进程内内存态）
    */
   readonly wakeCount?: () => number | null;
+  /**
+   * OS 定时注册面（K2-d——launchd/crontab 注册器在组合根 app/tick-register.ts，
+   * 闭包注入；缺省（诊断装配）= /tick enable·disable 报不可用，其余子命令
+   * 不受影响，runJob 先例同构）
+   */
+  readonly osRegistrar?: OsRegistrarFace;
   /** 判定时钟（缺省 Date.now——测试注入冻结） */
   readonly now?: () => number;
 }
@@ -99,7 +119,7 @@ async function applySchedulerPlugin(ctx: PluginContext, deps: SchedulerPluginDep
     ctx.get<ChannelsCommandFace>('channels').registerCommand({
       name: 'tick',
       description:
-        'tick 任务面：/tick add <name> [schedule] <prompt...> 新增（schedule = once@<ISO>/every@<n>[mhd]/daily@HH:MM，可省）| /tick list 清单 | /tick rm <name> 删除 | /tick run <name> 手动触发（只读子进程单发）',
+        'tick 任务面：/tick add <name> [schedule] <prompt...> 新增（schedule = once@<ISO>/every@<n>[mhd]/daily@HH:MM，可省）| /tick list 清单 | /tick rm <name> 删除 | /tick run <name> 手动触发（只读子进程单发）| /tick enable|disable <name> OS 定时注册/注销（launchd/crontab）',
       source: 'plugin',
       handler: (args) => handleTickCommand(args.trim(), { store, deps, ui }),
     }),
@@ -113,8 +133,12 @@ interface TickCommandOpts {
   readonly ui: UiNotifyFace;
 }
 
-/** /tick 命令体（args 四子命令分派） */
-function handleTickCommand(args: string, opts: TickCommandOpts): void {
+/** 用法串（子命令空/未知共用——单一事实源） */
+const TICK_USAGE =
+  '用法：/tick add <name> [schedule] <prompt...> | /tick list | /tick rm <name> | /tick run <name> | /tick enable|disable <name>（OS 定时注册）';
+
+/** /tick 命令体（args 子命令分派；async——enable/disable/list 含注册器往返） */
+async function handleTickCommand(args: string, opts: TickCommandOpts): Promise<void> {
   const { store, deps, ui } = opts;
   // 子命令分词：首词子命令，余量整体传子命令（add 的 prompt 取余量含空格）
   const spaceAt = args.indexOf(' ');
@@ -126,21 +150,25 @@ function handleTickCommand(args: string, opts: TickCommandOpts): void {
       handleAdd(rest, opts);
       return;
     case 'list':
-      handleList(opts);
+      await handleList(opts);
       return;
     case 'rm':
-      handleRemove(rest, opts);
+      await handleRemove(rest, opts);
       return;
     case 'run':
       handleRun(rest, opts);
       return;
+    case 'enable':
+      await handleToggle(rest, opts, 'enable');
+      return;
+    case 'disable':
+      await handleToggle(rest, opts, 'disable');
+      return;
     case '':
-      ui.notify('用法：/tick add <name> [schedule] <prompt...> | /tick list | /tick rm <name> | /tick run <name>');
+      ui.notify(TICK_USAGE);
       return;
     default:
-      ui.notify(
-        `未知子命令：${sub}——用法：/tick add <name> [schedule] <prompt...> | /tick list | /tick rm <name> | /tick run <name>`,
-      );
+      ui.notify(`未知子命令：${sub}——${TICK_USAGE}`);
   }
 }
 
@@ -182,37 +210,82 @@ function handleAdd(rest: string, opts: TickCommandOpts): void {
     opts.ui.notify(`任务已存在：${name}（同名拒——改错先 /tick rm ${name} 再 add）`);
     return;
   }
-  const scheduleLine = schedule === null ? '触发：仅手动' : `触发：${schedule}（OS 定时注册随 K2-d 落地）`;
+  const scheduleLine =
+    schedule === null ? '触发：仅手动' : `触发：${schedule}（到点执行：/tick enable ${name} 注册 OS 定时）`;
   opts.ui.notify(`任务已新增：${name}\n${scheduleLine}\nprompt：${prompt}`);
 }
 
-/** /tick list：任务清单人读投影（name + schedule + 最近触发与记因 + prompt 首行截断） */
-function handleList(opts: TickCommandOpts): void {
+/** /tick list：任务清单人读投影（name + schedule + OS 注册态 + 最近触发与记因 + prompt 首行截断） */
+async function handleList(opts: TickCommandOpts): Promise<void> {
   const jobs = opts.store.list();
   if (jobs.length === 0) {
     opts.ui.notify('（无 tick 任务——/tick add <name> [schedule] <prompt...> 新增）');
     return;
   }
-  const lines = jobs.map((job) => {
+  // OS 注册态逐行探测（注册器缺席 = 全部「－」——诊断面不炸）
+  const registered = await Promise.all(
+    jobs.map(async (job) => (opts.deps.osRegistrar ? opts.deps.osRegistrar.isRegistered(job.name) : false)),
+  );
+  const lines = jobs.map((job, index) => {
     const schedule = job.schedule ?? '（仅手动）';
+    const osState = opts.deps.osRegistrar === undefined ? '－' : registered[index] ? 'OS 已注册' : '未注册';
     const lastRun = job.lastRunAt === null ? '未跑过' : new Date(job.lastRunAt).toISOString();
-    // 记因注记（manual/scheduled/missed——v8 列；未跑过时缺省空）
+    // 记因注记（manual/scheduled/missed——v9 列；未跑过时缺省空）
     const reason = job.lastRunReason === null ? '' : `〔${job.lastRunReason}〕`;
     // prompt 首行截断（多行 prompt 只示首行 60 字——清单面紧凑，全文在 add 回执）
     const preview = job.prompt.split('\n')[0]!.slice(0, 60);
-    return `  ${job.name}  ${schedule}  ${lastRun}${reason}  ${preview}`;
+    return `  ${job.name}  ${schedule}  ${osState}  ${lastRun}${reason}  ${preview}`;
   });
-  opts.ui.notify(`tick 任务（${jobs.length} 个，OS 定时注册随 K2-d 落地——到点判定已执法）：\n${lines.join('\n')}`);
+  opts.ui.notify(`tick 任务（${jobs.length} 个——OS 定时注册 /tick enable <name>）：\n${lines.join('\n')}`);
 }
 
-/** /tick rm：删除回执（删到/不存在两态） */
-function handleRemove(rest: string, opts: TickCommandOpts): void {
+/** /tick rm：删除回执（删到/不存在两态）；删到时联动注销 OS 注册（防幽灵行——行没了 OS 还在到点白触发） */
+async function handleRemove(rest: string, opts: TickCommandOpts): Promise<void> {
   const name = rest.trim();
   if (name === '') {
     opts.ui.notify('用法：/tick rm <name>');
     return;
   }
-  opts.ui.notify(opts.store.remove(name) ? `任务已删除：${name}` : `任务不存在：${name}`);
+  if (!opts.store.remove(name)) {
+    opts.ui.notify(`任务不存在：${name}`);
+    return;
+  }
+  // 联动注销（注册器缺席跳过——诊断面；未注册幂等回执非错误）
+  if (opts.deps.osRegistrar !== undefined) {
+    const result = await opts.deps.osRegistrar.unregister(name);
+    opts.ui.notify(`任务已删除：${name}\nOS 定时：${result.message}`);
+    return;
+  }
+  opts.ui.notify(`任务已删除：${name}`);
+}
+
+/**
+ * /tick enable|disable：OS 定时注册/注销（K2-d——注册器在组合根，件经闭包
+ * 收面；schedule 缺席与 once 生命周期的拒因在注册器内裁，回执人读直用）。
+ */
+async function handleToggle(rest: string, opts: TickCommandOpts, action: 'enable' | 'disable'): Promise<void> {
+  const { store, deps, ui } = opts;
+  const name = rest.trim();
+  if (name === '') {
+    ui.notify(`用法：/tick ${action} <name>`);
+    return;
+  }
+  if (deps.osRegistrar === undefined) {
+    ui.notify(`OS 注册面未装配（诊断形态无系统操作面）——/tick ${action} 不可用；其余子命令不受影响。`);
+    return;
+  }
+  if (action === 'disable') {
+    const result = await deps.osRegistrar.unregister(name);
+    ui.notify(result.ok ? `已注销（${name}）：\n${result.message}` : `注销失败（${name}）：${result.message}`);
+    return;
+  }
+  const job = store.get(name);
+  if (job === undefined) {
+    ui.notify(`任务不存在：${name}（/tick list 查看）`);
+    return;
+  }
+  const result = await deps.osRegistrar.register(job);
+  ui.notify(result.ok ? `已注册 OS 定时（${name}）：\n${result.message}` : `注册失败（${name}）：${result.message}`);
 }
 
 /**
