@@ -8,6 +8,10 @@
 #
 # budget 声明即压测 canAfford app 维：hermes 域后台账达 2M tokens 拒新跑
 # （超限执法只落 background——前台不硬断，花销照进账）。
+#
+# 第三纵切起 hermes 兼任 delegable 压测件：entry.delegable = 委派目标自动
+# 注册（boot 组合根 in-process provider + agent_hermes 静态工具——模型经
+# /app hermes 同一份清单委派 Hermes 执行一次性任务）。
 id: hermes
 label: Hermes
 components:
@@ -15,5 +19,7 @@ components:
   - builtin:memory
   - builtin:subagent
   - builtin:goal
+entry:
+  delegable: true
 budget:
   dailyTokens: 2000000

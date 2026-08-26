@@ -47,6 +47,7 @@ import type { AgentMessage } from '../contracts/messages.js';
 import type { AgentEvent, AgentEventSink } from '../agent/events.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { AppManifest } from '../contracts/app.js';
 import type { ContextScope, Disposer } from '../context/types.js';
 import { chainSessionId } from '../context/chain.js';
 import { createContext } from '../context/context.js';
@@ -240,8 +241,10 @@ export interface DriverRegistry {
    * 驱动构造→前台转接→切 focus）。同 id 活条目幂等返回（防 Map.set 覆盖泄漏
    * 订阅/双写者）；无持久层返回 undefined（persist:false 防御位）。
    * @param options.resume true = 按 cwd 续接最新；string = 显式 id 续接；缺省 = 新建
+   * @param options.app 应用清单（第三纵切进入面——/app <id> 进入与 CLI --app 两路；
+   *   缺省 = chat 域。生效面 = 会话打标 / 严格域续接 / agent 装配默认位 / 审批预设）
    */
-  open(options?: { readonly resume?: boolean | string }): DriverEntry | undefined;
+  open(options?: { readonly resume?: boolean | string; readonly app?: AppManifest }): DriverEntry | undefined;
   /**
    * 退役条目（/new 换新后的旧条目停摆）：retired=true + driver.retire()（仅
    * abort——quit promise 不 resolve，防误触前台退出聚合）。聚焦驱动 run 中拒绝
@@ -341,6 +344,12 @@ export interface ChatControls {
 export interface ChatPluginDeps {
   /** 启动会话策略原样透传（true = 按 cwd 续接最新；string = 显式 id；缺省 = 新建） */
   readonly resumeSession?: boolean | string;
+  /**
+   * CLI --app 解析产物（第三纵切进入面）：本进程启动即进入的非缺省应用清单。
+   * boot 首驱动以此开域（会话打标/严格域续接/agent 装配默认位/审批预设）；
+   * 运行期 /app <id> 进入走 open({app}) per-open 路径（互不混用——/app new 恒 chat 域）
+   */
+  readonly app?: AppManifest;
   /** 持久层（缺省 = persist:false 诊断面——件降级空转，不起驱动不供 agent） */
   readonly persistence?: Persistence;
   /** 根作用域（S1：open 运行于 /new 等任意时点——插件 apply ctx 已随 /reload 回卷，Ring 1 服务/总线 emit/logger 恒走根） */
@@ -351,6 +360,12 @@ export interface ChatPluginDeps {
   readonly model: string;
   /** 沙箱档（request/header 快照 config 腿） */
   readonly sandboxMode: SandboxMode;
+  /**
+   * 沙箱档显式标记（第三纵切 grants.approval 优先序）：CLI/装配显式设档
+   *（--read-only 等）时 true——应用审批预设**不覆盖**显式档（预设是申请不是
+   * 夺权）。缺省 false = 档位来自全局缺省，应用预设可生效。
+   */
+  readonly sandboxModeExplicit?: boolean;
   /** streamFn（loop 配置——组合根 ④ 产物） */
   readonly streamFn: StreamFn;
   /**
@@ -381,8 +396,8 @@ export interface ChatPluginDeps {
    * （「读过什么」互不可见——A 读过不代表 B 盲写合法）
    */
   readonly writableRoots: () => string[];
-  /** sandbox 档事实盖章（内核守门面实现——dedup 内建；件在每次会话边界调用） */
-  readonly stampSandboxFacts: (session: Session) => void;
+  /** sandbox 档事实盖章（内核守门面实现——dedup 内建；件在每次会话边界调用；mode = 本驱动效值，缺省全局档） */
+  readonly stampSandboxFacts: (session: Session, mode?: SandboxMode) => void;
   /**
    * 本进程主 loop 花销记账道（缺省 'foreground'）。tick 唤起入口（argv
    * --background）声明 'background'——席 13 第二刀 blocker 修：tick 子进程
@@ -620,15 +635,23 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // Ring 1 工具服务经根取（open 可能运行于 /new 等运行期时点——apply ctx 早随
       // /reload 回卷；ring1Anchor 永存，根 get 恒居值）
       const tools = deps.rootCtx.get<ToolsService>('tools');
+      /* -- 应用域钉定（第三纵切进入面）：per-open 清单优先（/app <id> 进入），
+           缺省 chat 域。appId 是会话打标 / 严格域续接 / header app 腿的同一数据源 -- */
+      const app = options.app;
+      const appId = app?.id ?? CHAT_APP_ID;
 
       /* -- 会话选择（技术栈篇 §5：显式 id / 按 cwd 最新 → 续接；回落新建） -- */
       const targetId =
         typeof options.resume === 'string'
           ? options.resume
           : options.resume === true
-            ? // chat 域含 NULL 存量回退（契约篇 §5.4 冷读裁决）：NULL = builtin:chat 落地前
-              // 的存量会话，默认入口的域含历史全量（存量不回填但续接不弃养）
-              persistence.latestSessionId(deps.workspace, { app: CHAT_APP_ID, includeNullApp: true })
+            ? // 域查询：chat 域含 NULL 存量回退（契约篇 §5.4 冷读裁决——NULL =
+              // builtin:chat 落地前的存量会话，默认入口的域含历史全量）；第三方
+              // 应用严格域无回退（别家的会话不认领——血缘显式打标的读侧镜像）
+              persistence.latestSessionId(deps.workspace, {
+                app: appId,
+                includeNullApp: appId === CHAT_APP_ID,
+              })
             : undefined;
       // 幂等防御：目标 id 已是注册表条目（活/退役）即不重开——返回既有 + 切 focus。
       // 重开同 id 会造出第二个 Session 实例（单写者护栏/seq 连续性全破），结构上必须挡
@@ -650,12 +673,22 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         }
         // 目标不存在回落新建：启动策略是「续接优先」不是「必须续接」
       }
-      // 新建会话打标 chat 域（默认启动即 app='chat'——血缘显式打标，不做投影推断）
-      session ??= persistence.createSession({ cwd: deps.workspace, profile: 'default', app: CHAT_APP_ID });
+      // 新建会话打标本应用域（血缘显式打标，不做投影推断——契约篇 §5.4 第 3 条）
+      session ??= persistence.createSession({ cwd: deps.workspace, profile: 'default', app: appId });
+
+      /* -- 应用装配默认位 + 审批预设（第三纵切）：进入即生效的静态半边 --
+         优先序 = 显式旗标 > 应用预设 > 全局缺省（§5.4 第 4 条：预设是申请不是
+         夺权——CLI --read-only 等显式档不被应用预设覆盖；approvalPolicy 的显式
+         位即 deps.approvalPolicy 在场性，sandboxMode 因 deps 恒有值另走显式标记） */
+      const preset = app?.grants?.approval;
+      const effectiveSandboxMode: SandboxMode =
+        deps.sandboxModeExplicit === true ? deps.sandboxMode : (preset?.sandboxMode ?? deps.sandboxMode);
+      const effectiveApprovalPolicy: ApprovalPolicyMode = deps.approvalPolicy ?? preset?.approvalPolicy ?? 'ask';
+      const effectiveModel = app?.agent?.model ?? deps.model;
 
       /* -- durable 接线（S1 直连：handle/gate/approval 三路全绑本会话——不经转发壳；model 腿供 llm/usage 前台折叠回退值；usagePriority = tick 入口记账道声明） -- */
       const durable = createDurableSinks(session, {
-        model: deps.model,
+        model: effectiveModel,
         ...(deps.usagePriority !== undefined ? { usagePriority: deps.usagePriority } : {}),
       });
       // session_start（契约篇 §2.2 session 层 emit 行）：会话建立/恢复闭合后必发
@@ -667,8 +700,9 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         origin: resumed ? 'resume' : 'initial',
       });
       // sandbox 档事实盖章（内核守门面数据 + 应用会话边界时点；dedup 内建——
-      // 续接同档不重复落，事件序稳定：session_start → sandbox/mode）
-      deps.stampSandboxFacts(session);
+      // 续接同档不重复落，事件序稳定：session_start → sandbox/mode）。
+      // 第三纵切：档值 = 本驱动效值（应用审批预设生效时按预设落事实——五点同源）
+      deps.stampSandboxFacts(session, effectiveSandboxMode);
       // 首张 header 名分（续接会话 resume / 新会话 initial——此后变化 change）
       const headerState: { last?: string; next: 'initial' | 'resume' | 'change' } = {
         next: resumed ? 'resume' : 'initial',
@@ -687,18 +721,20 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // 织入（§8.4 增补 2 落码形态③：answerer 应答 always 时写 allowlist 条目，
       // 组合根接 AllowlistStore.add——幂等；缺省不传 = always 面关闭）
       const approval = createApprovalService(driverScope, {
-        policy: deps.approvalPolicy ?? 'ask',
+        // 审批档 = 本驱动效值（应用预设 > 全局——显式旗标已在效值计算时胜出）
+        policy: effectiveApprovalPolicy,
         sink: durable.approval,
-        ownership: { sessionId, appId: CHAT_APP_ID },
+        ownership: { sessionId, appId },
         ...(deps.persistAllowlist !== undefined ? { persistAllowlist: deps.persistAllowlist } : {}),
       });
       // 守门行：同机制 / 同 allowlist 活数组同源 / 同推导器——「每份 gate 语义
-      // 等价全局」的 v1 落地（per-session 换档面落地日须重新成立一次）
+      // 等价全局」的 v1 落地（per-session 换档面落地日须重新成立一次）；
+      // 档值 = 本驱动效值（第三纵切：应用预设生效时本会话守门按预设档走）
       driverScope.effect(() =>
         installSafetyGate(driverScope, {
           approval,
           workspace: deps.workspace,
-          mode: () => deps.sandboxMode,
+          mode: () => effectiveSandboxMode,
           allowlist: deps.allowlist(),
         }),
       );
@@ -728,7 +764,7 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       const bashDef = createBashTool({
         sandbox: deps.sandbox,
         approval,
-        mode: () => deps.sandboxMode,
+        mode: () => effectiveSandboxMode,
         workspaceRoot: deps.workspace,
         // 同一活数组同源（与守门行 deps.allowlist() 同取值器——「始终允许」bash
         // 词干条目在升权裁决免问面消费，§8.4 增补 2 落码形态③）
@@ -742,37 +778,52 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       /* -- per-entry loop 工具快照（S2：`listFor(本会话)` = 全局层 ∪ 本域 fs+bash
          五名；S5 冷读闸 F2：toAgentTool 显式绑本驱动管道——不传则绑死服务构造时
          全局管道、per-driver 三件零流量静默空转；活数组原位刷新即达 loop，含 run
-         中途；组合根 ⑧ tools_change 订阅按载荷域键路由到 refreshTools -- */
+         中途；组合根 ⑧ tools_change 订阅按载荷域键路由到 refreshTools --
+         应用工具白名单（第三纵切 agent.toolFilter）：include 名单过滤——与
+         SubagentStart.toolFilter 同语义，应用声明它的工具面（不在名单即不暴露） */
+      const appToolFilter = app?.agent?.toolFilter;
+      /** 本驱动可见 def 清单（白名单过滤后）——loop 快照与 header 快照同一来源 */
+      const visibleDefs = () =>
+        appToolFilter === undefined
+          ? tools.listFor(sessionId)
+          : tools.listFor(sessionId).filter((def) => appToolFilter.includes(def.name));
       const toolView: AgentTool[] = [];
       const refreshTools = (): void => {
-        const fresh = tools.listFor(sessionId).map((def) => tools.toAgentTool(def, { pipeline: driverPipeline }));
+        const fresh = visibleDefs().map((def) => tools.toAgentTool(def, { pipeline: driverPipeline }));
         toolView.length = 0;
         toolView.push(...fresh);
       };
       refreshTools();
 
       /* -- per-entry 系统提示词（S2：open 物化新纪元——串与记忆基线同时点同面
-         冻结；rematerialize 是 prompts/skills 变更与 /reload 的重物化口） -- */
-      let systemPrompt = deps.materializeSystemPrompt(sessionId);
+         冻结；rematerialize 是 prompts/skills 变更与 /reload 的重物化口） --
+         应用人格追加段（第三纵切 agent.persona）：物化产物尾部追加——rematerialize
+         边界后同样追加（应用人格不随 /reload 丢失；与 Profile 追加段同构形态） */
+      const appPersona = app?.agent?.persona;
+      const withAppPersona = (base: string): string =>
+        appPersona === undefined ? base : base === '' ? appPersona : `${base}\n\n${appPersona}`;
+      let systemPrompt = withAppPersona(deps.materializeSystemPrompt(sessionId));
       const rematerialize = (): void => {
-        systemPrompt = deps.materializeSystemPrompt(sessionId);
+        systemPrompt = withAppPersona(deps.materializeSystemPrompt(sessionId));
       };
 
       /* -- request/header 差分化闭包（会话篇 §1.3：仅组装参数变化才落新快照） -- */
       // 落账直用本条目 session（S1 per-entry——不再读全局活槽，条目间基线互不串档）；
-      // 两腿读本条目面（S2）：systemPrompt = 本条目物化串；toolSchemas = listFor
-      //（域视角——含本会话 fs 四名）
+      // 两腿读本条目面（S2）：systemPrompt = 本条目物化串；toolSchemas = 本驱动
+      // 可见面（域视角含本会话 fs 四名；应用白名单过滤后——header 是「模型实际
+      // 拿到什么」的证据快照，与 loop 快照同源，不记未过滤全集）
       const writeHeader = (): void => {
         const payload = {
-          config: { model: deps.model, sandbox: deps.sandboxMode },
+          // 组装参数快照 = 本驱动效值（应用装配默认位/审批预设生效即如实落账）
+          config: { model: effectiveModel, sandbox: effectiveSandboxMode },
           systemPrompt,
-          toolSchemas: tools.listFor(sessionId).map((def) => ({ name: def.name, parameters: def.parameters })),
+          toolSchemas: visibleDefs().map((def) => ({ name: def.name, parameters: def.parameters })),
         };
         const serialized = JSON.stringify(payload);
         if (serialized === headerState.last) return; // 组装参数未变——不落新快照
         // app 腿在序列化基线之外追加（会话域打标的载荷腿——会话内恒定，不参与 diff；
         // 与 sessions.app 同源，血缘显式打标的证据腿，契约篇 §5.4）
-        session.append('request/header', { ...payload, app: CHAT_APP_ID, reason: headerState.next });
+        session.append('request/header', { ...payload, app: appId, reason: headerState.next });
         headerState.last = serialized;
         headerState.next = 'change';
       };
@@ -792,7 +843,7 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         },
         loopConfig: {
           streamFn: deps.streamFn,
-          model: deps.model,
+          model: effectiveModel,
           convertToLlm: deps.convertToLlm,
           // context_transform 桥（契约篇 §2.2 增补 5② + S1 双参）：loop 私有配置
           // 回调桥为根总线瀑布，sessionId 随批穿透给 handler（差分/检索按会话路由）
@@ -890,8 +941,11 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         ctx.provide('agent', face);
         return;
       }
-      // boot 全量：开首个驱动（会话策略经 deps 透传）+ 挂服务面
-      registry.open({ resume: deps.resumeSession });
+      // boot 全量：开首个驱动（会话策略与应用域经 deps 透传——CLI --app 进入面）+ 挂服务面
+      registry.open({
+        ...(deps.resumeSession !== undefined ? { resume: deps.resumeSession } : {}),
+        ...(deps.app !== undefined ? { app: deps.app } : {}),
+      });
       ctx.provide('agent', face);
     },
   };

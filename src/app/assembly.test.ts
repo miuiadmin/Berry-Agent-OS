@@ -35,6 +35,7 @@ import { runOnceMain } from './run-main.js';
 import { dumpConfigMain } from './dump-config.js';
 import {
   AppError,
+  APP_NOT_FOUND,
   APP_SHUTDOWN_QUIESCE_VIOLATED,
   COMPOSITION_ROW_INVALID,
   PLUGIN_EVENT_RATE,
@@ -158,6 +159,7 @@ describe('createBerryRuntime 装配面', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'agent_hermes', // delegable 应用自动注册（第三纵切，boot 组合根——hermes 声明 entry.delegable）
       'read',
       'write',
       'edit',
@@ -410,6 +412,7 @@ describe('createBerryRuntime 装配面', () => {
     // S2 后全局层口径：fs 四件迁域层（无驱动即无域工具——persist:false 不开
     // 驱动）；memory/goal 空转；admin 件两工具经 ctx 取服务恒在（sessions
     // 降级返空）——剩 find/grep/agent/fetch/plugins_list/events_query 七件
+    // + agent_hermes（delegable 自动注册，boot 组合根——无驱动语境也在全局层）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'find',
       'grep',
@@ -417,6 +420,7 @@ describe('createBerryRuntime 装配面', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'agent_hermes',
     ]);
   });
 
@@ -479,6 +483,7 @@ describe('ConversationDriver + durable 接线', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'agent_hermes',
       'read',
       'write',
       'edit',
@@ -622,6 +627,7 @@ describe('ConversationDriver + durable 接线', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'agent_hermes',
       'echo',
       'read',
       'write',
@@ -972,6 +978,66 @@ describe('/app 多会话前台（S3：new 驻留聚焦 / 清单徽标 / 双寻�
   });
 });
 
+/* ---------------- 应用前台入口（第三纵切：boot --app + /app <id> 进入 + delegable） ---------------- */
+
+describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / delegable 自动注册）', () => {
+  /** header 快照载荷（request/header 事件 data——组装参数 + app 腿） */
+  const headerPayload = (runtime: BerryRuntime): { app?: string } =>
+    runtime.session!.events.find((e) => e.type === 'request/header')!.data as never;
+
+  it('boot --app hermes：默认会话即 hermes 域——header app 腿打标（CLI run --app 形态）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ app: 'hermes', streamFn });
+    await runtime.conversation!.submitOnce('问'); // request/header 懒落——首 run 物化
+    expect(headerPayload(runtime).app).toBe('hermes');
+  });
+
+  it('boot --app 查无：APP_NOT_FOUND 拒启 + message 披露在册清单（自助排错）', async () => {
+    // resolveApp 早于装载抛错——无运行时可泄漏，直捕断言（rejects 谓词不重复起装配）
+    const err = (await assemble({ app: 'no-such' }).catch((e: unknown) => e)) as AppError;
+    expect(err).toBeInstanceOf(AppError);
+    expect(err.code).toBe(APP_NOT_FOUND);
+    expect(err.message).toContain('no-such');
+    expect(err.message).toContain('chat、hermes'); // 在册清单随错披露
+  });
+
+  it('/app <id> [首条消息]：应用进入 + 聚焦切换 + 尾随消息落应用域（chat 域不串）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答'), textMessage('答二')]);
+    const runtime = await assemble({ streamFn });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    await runtime.conversation!.submitOnce('问'); // chat 域先有一条（聚焦在 chat）
+    const bootId = runtime.session!.header.sessionId;
+
+    runtime.channels.commands.lookup('app')!.handler('hermes 首条消息');
+    const enteredId = runtime.front.focus.sessionId!;
+    expect(enteredId).not.toBe(bootId); // 聚焦已切应用域
+    expect(notifies.some((n) => n.includes('已进入应用'))).toBe(true);
+    // 尾随消息经 submit 走聚焦路由 → 落在应用域会话（与手打同一通道，无专用路径）
+    await runtime.conversation!.settle();
+    const enteredEvents = runtime.drivers.entries.get(enteredId)!.session.events;
+    expect(
+      enteredEvents.some((e) => e.type === 'user/message' && (e.data as { content: string }).content === '首条消息'),
+    ).toBe(true);
+    // chat 域账不动（消息没走错门）
+    expect(JSON.stringify(runtime.drivers.entries.get(bootId)!.session.events)).not.toContain('首条消息');
+  });
+
+  it('裸调清单披露可用应用行；delegable 应用双注册（provider 表 + agent_<id> 静态工具）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    runtime.channels.commands.lookup('app')!.handler('');
+    // 可用应用披露行（在册且组件齐备——chat/hermes 默认树全在场；缺场应用不披露）
+    expect(notifies.join('\n')).toContain('可用应用：chat、hermes');
+    // delegable 自动注册（boot 组合根）：hermes 声明 entry.delegable → 双面
+    const subagents = runtime.ctx.get<SubagentsServiceFace>('subagents');
+    expect(subagents.list().map((info) => info.name)).toContain('hermes');
+    expect(runtime.tools.get('agent_hermes')).toBeDefined();
+  });
+});
+
 /* ---------------- S2 多驱动工具面（组合域分片全栈） ---------------- */
 
 describe('S2 多驱动工具面（组合域分片：双驱动隔离零泄漏 + retire 拆层 + /new 冻结）', () => {
@@ -1190,6 +1256,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'plugins_list',
       'events_query',
       'plug-echo',
+      'agent_hermes', // delegable 注册在 ⑨ 装载后——overlay 插件工具之后、fs 域层之前
       'read',
       'write',
       'edit',
@@ -1500,10 +1567,13 @@ describe('/reload 组合树重载', () => {
       skipped: ['tool-plugin'],
     });
     // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）。
-    // S2：fs 域层挂活驱动 DriverEntry——跨 /reload 存续（本会话可见面照旧含 fs 四件）
+    // S2：fs 域层挂活驱动 DriverEntry——跨 /reload 存续（本会话可见面照旧含 fs 四件）。
+    // agent_hermes 前移到 grep 后：/reload 重装载插件工具重新追加在其后（Map 注册
+    // 序——幸存者在前），delegable 注册只在 boot、跨 /reload 存续（应用注册表不动）
     expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
+      'agent_hermes',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -1608,7 +1678,7 @@ describe('/reload 组合树重载', () => {
     expect(runtime.composition.rows).toEqual(rowsBefore); // 树报告未换
   });
 
-  it('run 进行中拒绝重载（与 /new 同准入判据）', async () => {
+  it('run 进行中排队重载（刀 2：结算后自动排水；串行链防双装载竞态）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
     const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
     writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n`);
@@ -1639,10 +1709,11 @@ describe('/reload 组合树重载', () => {
 
     const pending = runtime.conversation!.submitOnce('慢问');
     expect(runtime.conversation!.isRunning).toBe(true);
-    expect(await runtime.reload()).toEqual({ busy: true }); // run 中拒绝
+    expect(await runtime.reload()).toEqual({ queued: true }); // run 中排队（刀 2：不再拒绝）
 
     release();
     await pending;
+    // run 结算回调自动排水排队的 reload（串行链在其后）——显式再 reload 拿同款载荷
     expect((await runtime.reload()).payload).toEqual({
       activated: [
         'chat',
@@ -1770,9 +1841,11 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
         ring1RestartRequired: ['tools'],
       },
     ]);
-    // 不回卷语义：ring1Anchor 不在 reload dispose 面——tools 服务同一实例、工具面原样
+    // 不回卷语义：ring1Anchor 不在 reload dispose 面——tools 服务同一实例、工具面原样。
+    // 序不敏感比对（sort 双侧）：/reload 重装载使插件工具重注册到 agent_hermes
+    // 之后（Map 注册序漂移），工具面集合不变才是本断言的本体
     expect(runtime.ctx.get('tools')).toBe(toolsBefore);
-    expect(runtime.tools.list().map((t) => t.name)).toEqual(namesBefore);
+    expect([...runtime.tools.list().map((t) => t.name)].sort()).toEqual([...namesBefore].sort());
     // 行状态面：tools 行仍 activated（沿用 boot 装载结果 = 运行时真值）
     expect(runtime.plugins.list().find((r) => r.id === 'tools')).toMatchObject({ status: 'activated' });
   });

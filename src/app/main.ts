@@ -34,6 +34,8 @@ const HELP = `Berry ${VERSION} — 插件式智能体运行时
   --read-only  run 子命令限定：只读档单发（sandboxMode read-only——tick 任务面复用同入口）
   --background run 子命令限定：llm/usage 记账入后台道（tick 唤起入口声明——canAfford 读的账）
   --tick <名>  run 子命令限定：到点编排形态（prompt 取自任务行；与位置参数互斥）
+  --app <id>   run 子命令限定：以应用身份单发（会话域/装配默认位/审批预设随清单
+               生效；与 --tick 互斥——tick 是任务行身份，应用身份另属清单）
   --no-plugins 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
                ——坏插件锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）`;
 
@@ -48,14 +50,16 @@ interface ParsedArgs {
   background: boolean;
   /** run 子命令到点编排形态（取值旗标——值为任务名；undefined = 普通单发） */
   tick: string | undefined;
+  /** run 子命令应用身份（第三纵切，取值旗标——值为应用 id；undefined = 对话应用域） */
+  app: string | undefined;
   /** 安全模式（--no-plugins，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
   noPlugins: boolean;
 }
 
 /**
  * 手写 argv 解析（不引 commander——第九批拍板 #15）。
- * `--tick` 是取值旗标：吃掉紧随其后的一个参数作任务名（与位置参数互斥在
- * run case 执法——解析层只负责取值）。
+ * `--tick` / `--app` 是取值旗标：吃掉紧随其后的一个参数作值（与位置参数的
+ * 互斥在 run case 执法——解析层只负责取值）。
  */
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
@@ -64,6 +68,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let background = false;
   let noPlugins = false;
   let tick: string | undefined;
+  let app: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--debug') {
@@ -79,6 +84,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 取值旗标：下一参数即任务名；缺席为用法错（空串占位让 run case 执法）
       tick = argv[i + 1] ?? '';
       i += 1;
+    } else if (arg === '--app') {
+      // 取值旗标同款：下一参数即应用 id；缺席为用法错（空串占位让 run case 执法）
+      app = argv[i + 1] ?? '';
+      i += 1;
     } else if (arg === '--no-plugins') {
       // 安全模式对 TUI/run/dump-config 语义化（boot 形态面）；tick 唤起不透传
       //（自动化入口无「救援」语义——安全模式救的是交互面，tick 子进程恒全树）
@@ -88,18 +97,19 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly, background, tick, noPlugins };
+  return { command, args: rest, debug, readOnly, background, tick, app, noPlugins };
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, noPlugins } = parseArgs(argv);
+  const { command, args, readOnly, background, tick, app, noPlugins } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
       case '':
         // 安全模式主场景就是 TUI：坏插件锁死启动时起最小内核壳（无驱动形态
-        // 壳照启可退）——命令面/插件管理完好，修 overlay 后 /reload 恢复全树
+        // 壳照启可退）——命令面/插件管理完好，修 overlay 后 /reload 恢复全树；
+        // --app 对 TUI 不透传（TUI 的应用面是 /app <id> 命令——交互进入非进程身份）
         return tuiMain({ ...(noPlugins ? { noPlugins: true } : {}) });
       case '--help':
       case '-h':
@@ -113,7 +123,7 @@ function main(argv: string[]): number {
         // --tick 到点编排形态：prompt 取自任务行，位置参数不得混入（混入即
         // 用法错——静默忽略哪个都会失真）
         if (tick !== undefined) {
-          if (!tick || args.length > 0) {
+          if (!tick || args.length > 0 || app !== undefined) {
             process.stderr.write('用法：berry run --tick <任务名> [--read-only] [--background]\n');
             return 2;
           }
@@ -124,9 +134,17 @@ function main(argv: string[]): number {
             ...(background ? { usagePriority: 'background' as const } : {}),
           });
         }
+        // --app 与 --tick 互斥：tick 是任务行身份（prompt 归属任务面），应用身份
+        // 另属清单——两者并给时静默择一会失真，用法错明示
+        if (app !== undefined) {
+          if (!app) {
+            process.stderr.write('用法：berry run --app <应用id> "<message>" [--read-only] [--background]\n');
+            return 2;
+          }
+        }
         const message = args.join(' ');
         if (!message) {
-          process.stderr.write('用法：berry run "<message>" [--read-only] [--background]\n');
+          process.stderr.write('用法：berry run "<message>" [--read-only] [--background] [--app <id>]\n');
           return 2;
         }
         // --read-only → sandboxMode read-only（tick 任务面同入口——技术栈篇 §5；
@@ -134,9 +152,12 @@ function main(argv: string[]): number {
         // --background → llm/usage 记账入 background 道（tick 唤起入口声明——
         // 席 13 第二刀：否则 tick 花 foreground 道、闸读 background 道，空转）
         // --no-plugins → 无驱动一等态：run 无对话循环可执行，语义性失败退出码 1
+        // --app → 以应用身份单发（第三纵切：assembly 组合根 resolveApp 解析清单
+        //——查无 = APP_NOT_FOUND，message 披露在册可用清单）
         return runOnceMain(message, {
           ...(readOnly ? { sandboxMode: 'read-only' as const } : {}),
           ...(background ? { usagePriority: 'background' as const } : {}),
+          ...(app !== undefined ? { app } : {}),
           ...(noPlugins ? { noPlugins: true } : {}),
         });
       }

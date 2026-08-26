@@ -26,7 +26,8 @@ import {
 } from '../contracts/errors.js';
 import { createBerryRuntime } from './assembly.js';
 import type { BerryRuntime } from './assembly.js';
-import type { AgentServiceFace, RunSettled } from '../chat/index.js';
+import type { AgentServiceFace, RunSettled, DriverEntry } from '../chat/index.js';
+import type { AppManifest } from '../contracts/app.js';
 
 /* ---------------- 测试基建（与 subagent-plugin.test 同款） ---------------- */
 
@@ -717,5 +718,102 @@ describe('S5 审批守门归属（fresh 作用域三件 + answerer 标签 + bash
     expect(runtime.tools.listFor(bId).map((d) => d.name)).toContain('bash');
     // 全局层退役：裸 list() 无 bash（诊断口径——无驱动语境面）
     expect(runtime.tools.list().map((d) => d.name)).not.toContain('bash');
+  });
+});
+
+/* ---------------- 用例：应用面第三纵切（open({app}) 应用进入面） ---------------- */
+
+describe('第三纵切：open({app}) 应用进入面（装配默认位 + 审批预设 + 严格域续接）', () => {
+  /** 探针清单：agent 三默认位 + 审批预设全带（chat-plugin 层全栈可观测面） */
+  const probeApp: AppManifest = {
+    id: 'probe-x',
+    label: '探针应用',
+    components: ['builtin:chat'],
+    agent: { model: 'probe/model-x', persona: '你是探针应用人格', toolFilter: ['read'] },
+    grants: { approval: { sandboxMode: 'read-only', approvalPolicy: 'never' } },
+  };
+
+  /** header 快照载荷（request/header 事件——组装参数 + app 腿） */
+  const headerPayload = (
+    entry: DriverEntry,
+  ): { config: { model: string; sandbox: string }; app: string; toolSchemas: Array<{ name: string }> } =>
+    entry.session.events.find((e) => e.type === 'request/header')!.data as never;
+
+  it('五点同源生效：会话打标 / header 效值 / 档位事实 / persona 追加 / 工具白名单', async () => {
+    const { streamFn, contexts } = scriptedStream([textMessage('探针答')]);
+    const { runtime } = await assemble({ streamFn });
+    const entry = runtime.drivers.open({ app: probeApp })!;
+    expect(entry).toBeDefined();
+
+    // 档位事实盖章 = 本驱动效值（open 即落——sandbox/mode 事实按预设档，非全局缺省）
+    const fact = entry.session.events.find((e) => e.type === 'sandbox/mode')!.data as { mode: string };
+    expect(fact.mode).toBe('read-only');
+
+    // 首请求：header 快照落效值 + persona 尾部追加 + model 效值进 loop
+    await entry.driver.submitOnce('探针问');
+    // ① 会话域打标 + ② header 组装参数快照 = 效值（预设 read-only / 清单 model）
+    const payload = headerPayload(entry);
+    expect(payload.app).toBe('probe-x');
+    expect(payload.config).toEqual({ model: 'probe/model-x', sandbox: 'read-only' });
+    // 工具白名单：header toolSchemas 只剩 read（include 名单过滤——域面 fs 四名被裁三名）
+    expect(payload.toolSchemas.map((t) => t.name)).toEqual(['read']);
+    expect(contexts.length).toBe(1);
+    expect(contexts[0]!.systemPrompt).toContain('你是探针应用人格');
+  });
+
+  it('预设优先序：显式旗标 > 应用预设（--read-only 显式档不被预设夺权）', async () => {
+    const { streamFn } = scriptedStream([textMessage('答'), textMessage('答二')]);
+    // CLI --read-only 形态 = 装配显式设档（sandboxModeExplicit）——预设的
+    // danger-full-access 不覆盖（预设是申请不是夺权，契约篇 §5.4 第 4 条）
+    const { runtime } = await assemble({ streamFn, sandboxMode: 'read-only' });
+    const dangerApp: AppManifest = {
+      ...probeApp,
+      grants: { approval: { sandboxMode: 'danger-full-access' } },
+    };
+    const entry = runtime.drivers.open({ app: dangerApp })!;
+    // 首请求后读 header（request/header 懒落——首个 run 才物化）
+    await entry.driver.submitOnce('问');
+    const payload = headerPayload(entry);
+    expect(payload.config.sandbox).toBe('read-only'); // 显式旗标胜出
+    const fact = entry.session.events.find((e) => e.type === 'sandbox/mode')!.data as { mode: string };
+    expect(fact.mode).toBe('read-only'); // 档位事实同样按效值（五点同源）
+  });
+
+  it('严格域续接：chat 域 boot 不认领应用域会话；应用域 resume 续接本域最新', async () => {
+    const dbFile = join(makeTempDir('app-domain-'), 'domain.sqlite');
+    const ws = makeTempDir('app-domain-ws-'); // 两程共用 workspace（续接按 cwd 锚定）
+    // RT1：boot 建会话 S1（chat 域）+ open 探针域建 S2（全局更新）。
+    // 首程自管生命周期（不经 assemble 登记——shutdown 后让位给续接程，与启动
+    // 续接策略测试同款纪律：防 afterEach 二次 shutdown）
+    const s1 = scriptedStream([textMessage('答')]);
+    const rt1 = await createBerryRuntime({
+      dbPath: dbFile,
+      workspace: ws,
+      streamFn: s1.streamFn,
+    });
+    const s1Id = rt1.session!.header.sessionId;
+    const appEntry = rt1.drivers.open({ app: probeApp })!;
+    const s2Id = appEntry.session.header.sessionId;
+    expect(s2Id).not.toBe(s1Id);
+    await rt1.shutdown();
+
+    // RT2 同库 boot（resume:true 续接最新）：续的是 S1（chat 域最新）——不认领
+    // 全局更新的 S2（别家域会话不进默认入口，血缘显式打标的读侧镜像）
+    const s2 = scriptedStream([textMessage('续答')]);
+    const { runtime: rt2 } = await assemble({
+      streamFn: s2.streamFn,
+      dbPath: dbFile,
+      workspace: ws,
+      resumeSession: true,
+    });
+    expect(rt2.session!.header.sessionId).toBe(s1Id);
+    // 探针域 resume:true → 续接 S2（本域最新，非新建）
+    const resumed = rt2.drivers.open({ app: probeApp, resume: true })!;
+    expect(resumed.session.header.sessionId).toBe(s2Id);
+    // 另一应用域（probe-y）resume:true → 本域空 = 新建（不认领任何既有域）
+    const otherApp: AppManifest = { ...probeApp, id: 'probe-y' };
+    const fresh = rt2.drivers.open({ app: otherApp, resume: true })!;
+    expect(fresh.session.header.sessionId).not.toBe(s1Id);
+    expect(fresh.session.header.sessionId).not.toBe(s2Id);
   });
 });
