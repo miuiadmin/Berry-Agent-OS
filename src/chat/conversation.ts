@@ -398,8 +398,13 @@ export class ConversationDriver {
     }
     this.running = true;
     // 调用链会话作用域写点①（骨架篇 §9.3 机制定案）：runTurns 整链包裹本驱动会话
-    // ——工具执行/管道 sink/context_transform 桥/事件落账全链自然继承归属语境
-    const attempt = runInSessionChain(this.sessionId, () => this.runTurns(prompts));
+    // ——工具执行/管道 sink/context_transform 桥/事件落账全链自然继承归属语境。
+    // background 列（S5）：开起批全部 backgroundWake 即 background（与 toolFilter
+    // 收窄同款批语义——元数据缺失〔submit 直入〕视同用户消息）；此处只读不删，
+    // 元数据消费删除留给 contextForBatch；run 中途 steering 不翻级，下一 run 定型
+    const background =
+      prompts.length > 0 && prompts.every((message) => this.deliverMeta.get(message)?.backgroundWake === true);
+    const attempt = runInSessionChain({ sessionId: this.sessionId, background }, () => this.runTurns(prompts));
     // 结算通知序（骨架篇 §9.3 onRunSettled）：finally 先注册先执行——running
     // 复位先于订阅者派发，订阅回调内 deliver 见到的必是闲时（followUp 开轮
     // 判定不被 running 卡死）。订阅回调同步执行：goal 续跑等注入即在此点起轮
@@ -407,10 +412,12 @@ export class ConversationDriver {
       this.running = false;
     });
     // 调用链会话作用域写点②：结算回调显式重包——attempt.then 的注册点在包裹区外
-    // （launch 自身可能运行于任意调用链语境），重包为不依赖包裹形状的确定位
+    // （launch 自身可能运行于任意调用链语境），重包为不依赖包裹形状的确定位；
+    // background 闭包继承本 run 批值（订阅者起的后台续跑在下一 run 边界重新定型）
     void attempt.then(
-      (result) => runInSessionChain(this.sessionId, () => this.fireRunSettled(result.status)),
-      () => runInSessionChain(this.sessionId, () => this.fireRunSettled('failed')),
+      (result) =>
+        runInSessionChain({ sessionId: this.sessionId, background }, () => this.fireRunSettled(result.status)),
+      () => runInSessionChain({ sessionId: this.sessionId, background }, () => this.fireRunSettled('failed')),
     );
     this.runPromise = guarded.then(
       () => undefined,

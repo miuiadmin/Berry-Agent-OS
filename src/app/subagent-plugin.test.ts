@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
 import { createContext } from '../context/context.js';
+import { chainSessionId } from '../context/chain.js';
 import type { ContextScope } from '../context/types.js';
 import { createInProcessProvider } from '../subagent/inprocess.js';
 import { deriveMessages } from '../session/derive.js';
@@ -182,6 +183,40 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     const childProjected = deriveMessages(childSession!.events);
     expect(childProjected.map((m) => m.type)).toEqual(['user', 'assistant']); // 子完整一轮
     // 子结算后子装配已释放（前台路 run.dispose 即释放——此处经 shutdown 前提下不再需要）
+  });
+
+  it('S5 链写点③：子 run 边界包本子会话——子 streamFn 时点 chainSessionId = 子会话 id（冷读闸 F3）', async () => {
+    // 消费序：[0] 父 turn1 toolCall(agent) → [1] 子 turn → [2] 父收尾。
+    // 每次模型调用时点记录 chainSessionId()：父两调 = 父会话（launch 链包裹）；
+    // 子调 = **子会话**——startRun 边界的 runInSessionChain 包裹使子内经链取数的
+    // 消费面（deliver 默认路由 / usage 折叠 / 审批 priority）全数归子。修复前
+    // （startRun 无包裹）子调继承父链——chains[1] = 父会话 id，本断言必红。
+    const base = scriptedStream([
+      toolCallMessage('agent', { prompt: '子任务' }),
+      textMessage('子答'),
+      textMessage('父收尾'),
+    ]);
+    const chains: Array<string | undefined> = [];
+    const streamFn: StreamFn = (context, options, signal) => {
+      chains.push(chainSessionId());
+      return base.streamFn(context, options, signal);
+    };
+    const runtime = await assemble({ streamFn });
+    const delegationStarts: string[] = [];
+    runtime.ctx.on('session_start', (payload: unknown) => {
+      const data = payload as { sessionId: string; origin?: string };
+      if (data.origin === 'delegation') delegationStarts.push(data.sessionId);
+    });
+    const answer = await runtime.conversation!.submitOnce('委派一个');
+    expect(answer?.status).toBe('completed');
+    expect(chains).toHaveLength(3); // 父问 → 子答 → 父收尾
+    expect(delegationStarts).toHaveLength(1);
+    // 父两调在父链上；子调在子链上（≠ 父——归因不串账）
+    const parentId = runtime.session!.header.sessionId;
+    expect(chains[0]).toBe(parentId);
+    expect(chains[2]).toBe(parentId);
+    expect(chains[1]).toBe(delegationStarts[0]);
+    expect(chains[1]).not.toBe(parentId);
   });
 
   it('后台路：background:true 立即返回任务 id；job 注册表结算 completed + 通知注入父会话', async () => {

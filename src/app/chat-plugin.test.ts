@@ -584,3 +584,90 @@ describe('S3 退出扇出（requestQuit 从聚焦单路扩为全部活驱动 abo
     void release; // gate 已无消费者（abort 路已短路）——防御位不调
   });
 });
+
+describe('S5 审批守门归属（fresh 作用域三件 + answerer 标签 + bash 域注册）', () => {
+  /** 带升权参数的 bash toolCall（read-only 档下触发审批 ask） */
+  const bashEscalation = (justification: string): AssistantMessage => ({
+    role: 'assistant',
+    content: [
+      {
+        type: 'toolCall',
+        id: `call-bash-${justification}`,
+        name: 'bash',
+        arguments: { command: 'pwd', sandbox_permissions: 'workspace-write', justification },
+      },
+    ],
+    usage: NO_USAGE,
+    stopReason: 'toolUse',
+    timestamp: 1,
+  });
+
+  it('双驱动 bash 升权各落各账：answerer 弹窗带 [chat·短id] 标签、approval 对落各自会话（F1+F2+迁域三合一）', async () => {
+    // 脚本序：[0] A turn1（bash 升权）→ [1] A turn2（收尾）→ [2] B turn1 → [3] B turn2
+    const { streamFn } = scriptedStream([
+      bashEscalation('A 的升权理由'),
+      textMessage('A 收尾'),
+      bashEscalation('B 的升权理由'),
+      textMessage('B 收尾'),
+    ]);
+    const { runtime } = await assemble({
+      streamFn,
+      approvalPolicy: 'ask',
+      sandboxMode: 'read-only',
+      interactive: true, // deps.confirm 注入开关（fresh 作用域 answerer 的接线前提——F1）
+    });
+    // 假交互通道：记录 confirm 弹窗文本、恒拒绝（拒绝路 = 不真跑 bash，纯审批面）
+    const prompts: string[] = [];
+    runtime.ui.attach({
+      id: 'test-confirm',
+      notify: () => {},
+      setStatus: () => {},
+      confirm: async (message) => {
+        prompts.push(message);
+        return false;
+      },
+    });
+
+    const registry = runtime.drivers;
+    const a = registry.focused()!;
+    const aId = a.session.header.sessionId;
+    await a.driver.submitOnce('跑 A');
+    expect(prompts).toHaveLength(1); // answerer 真接线（修复前 fresh 作用域无 answerer →
+    // ask = unavailable，confirm 零调用，工具结果为 unavailable 文案——本断言必红）
+    // 弹窗标签：[chat·A 短id] + #approvalId 短形 + summary + 理由 + 批准问句
+    expect(prompts[0]).toContain(`[chat·${aId.slice(0, 8)}]`);
+    expect(prompts[0]).toMatch(/#[0-9a-f]{4}/);
+    expect(prompts[0]).toContain('沙箱升权 read-only → workspace-write');
+    expect(prompts[0]).toContain('A 的升权理由');
+    expect(prompts[0]).toContain('批准？');
+    // A 账：审批对（asked + decided(reject)）落 A 会话 durable
+    const aTypes = a.session.events.map((e) => e.type);
+    expect(aTypes).toContain('approval/asked');
+    expect(aTypes).toContain('approval/decided');
+    const aDecided = a.session.events.find((e) => e.type === 'approval/decided')!;
+    expect((aDecided.data as { decision: string }).decision).toBe('reject');
+    // 拒绝传导：工具结果 isError + 拒绝文案（升权被拒路径不走沙箱真执行）
+    const aTool = JSON.stringify(a.session.events);
+    expect(aTool).toContain('升权审批被拒');
+
+    // 开 B 驱动：同款 bash 升权——标签换 B 短id、审批对落 B 账（各归各不串台）
+    const b = registry.open()!;
+    const bId = b.session.header.sessionId;
+    await b.driver.submitOnce('跑 B');
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain(`[chat·${bId.slice(0, 8)}]`);
+    expect(prompts[1]).toContain('B 的升权理由');
+    expect(prompts[1]).not.toContain(`[chat·${aId.slice(0, 8)}]`);
+    const bTypes = b.session.events.map((e) => e.type);
+    expect(bTypes).toContain('approval/asked');
+    expect(bTypes).toContain('approval/decided');
+    // 互不串：A 账无 B 的理由、B 账无 A 的理由
+    expect(JSON.stringify(a.session.events)).not.toContain('B 的升权理由');
+    expect(JSON.stringify(b.session.events)).not.toContain('A 的升权理由');
+    // bash 域注册面：两驱动可见面各含 bash（S5 迁域后域层随驱动落）
+    expect(runtime.tools.listFor(aId).map((d) => d.name)).toContain('bash');
+    expect(runtime.tools.listFor(bId).map((d) => d.name)).toContain('bash');
+    // 全局层退役：裸 list() 无 bash（诊断口径——无驱动语境面）
+    expect(runtime.tools.list().map((d) => d.name)).not.toContain('bash');
+  });
+});

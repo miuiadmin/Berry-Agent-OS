@@ -49,15 +49,40 @@ import type { AgentTool } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { ContextScope, Disposer } from '../context/types.js';
 import { chainSessionId } from '../context/chain.js';
+import { createContext } from '../context/context.js';
 import type { Session } from '../session/session.js';
 import type { Persistence } from '../persist/index.js';
 import type { ToolsService } from '../tools/registry.js';
-import type { SandboxMode } from '../safety/index.js';
+import { createToolPipeline } from '../tools/pipeline.js';
+import type { SandboxMode, SandboxService } from '../safety/index.js';
+import type { ApprovalPolicyMode, ApprovalRequest } from '../safety/types.js';
+import { APPROVAL_ANSWER_EVENT, createApprovalService } from '../safety/approval.js';
+import { installSafetyGate } from '../safety/gate.js';
+import type { AllowlistEntry } from '../safety/allowlist.js';
+import { createBashTool } from '../exec/tool.js';
 import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import { createFsTools } from '../tools/fs.js';
 import type { ConversationDriver, RunSettled } from './conversation.js';
 import { ConversationDriver as ConversationDriverClass } from './conversation.js';
+
+/**
+ * 审批弹窗文本（S5 契约篇审批归属行）：归属标签 + approvalId 短形 + 优先级
+ * 标记（background 时）——多驱动单输入框下的防串答锚点。根 approval（exec/fetch
+ * 服务路）无 ownership，调用方自行拼朴素文本（v1 已知形态）。
+ */
+function formatApprovalPrompt(req: ApprovalRequest): string {
+  const parts: string[] = [];
+  if (req.ownership !== undefined) {
+    const app = req.ownership.appId ?? 'app';
+    parts.push(`[${app}·${req.ownership.sessionId.slice(0, 8)}]`);
+  }
+  if (req.approvalId !== undefined) parts.push(`#${req.approvalId.slice(0, 4)}`);
+  if (req.priority === 'background') parts.push('〔后台〕');
+  parts.push(req.summary);
+  if (req.reason !== undefined && req.reason !== '') parts.push(req.reason);
+  return `${parts.join(' ')}\n批准？`;
+}
 
 /**
  * 对话应用 id（apps/chat.app.yaml 清单的 id——会话域打标、resume 域查询、
@@ -144,11 +169,16 @@ export interface DriverEntry {
   /** 件控制面（writeHeader 落账 + refreshTools/rematerialize 两刷新口——组合根 ⑧ 接线遍历调用） */
   readonly controls: ChatControls;
   /**
-   * 本条目域层工具注销器集合（S2 fs 迁域：fs 四名带本会话域键注册进 tools
-   * 注册表域层；retire 回卷——「退役即停摆」的工具面半边，防注册表域层随
-   * /new 泄漏累积）
+   * 本条目域层工具注销器集合（S2 fs 迁域 + S5 bash 迁域：fs 四名 + bash 五名带
+   * 本会话域键注册进 tools 注册表域层；retire 回卷——「退役即停摆」的工具面
+   * 半边，防注册表域层随 /new 泄漏累积）
    */
   readonly disposeDomainTools: () => void;
+  /**
+   * 本条目 fresh 装配作用域回卷器（S5：审批/守门行/管道/answerer 四件挂 fresh
+   * ctx——retire 时 dispose 一次回卷；session/durable 保留的原语义不变）
+   */
+  readonly disposeScope: () => void;
   /** request/header 落账状态（per-entry——差分基线与首快照名分互不串档） */
   readonly headerState: { last?: string; next: 'initial' | 'resume' | 'change' };
   /** 是否已退役（true = 停摆：投递降 inject、续跑 INACTIVE、open 同 id 幂等返回） */
@@ -318,6 +348,25 @@ export interface ChatPluginDeps {
    * （详见 chat/durable.ts createDurableSinks 同名参数注记）
    */
   readonly usagePriority?: 'background' | 'foreground';
+  /**
+   * 审批档（S5 契约篇审批归属行：组合根 `opts.approvalPolicy`〔CLI 旗标唯一
+   * 来源〕同值经 deps 传入——v1 全驱动同档，per-app 档面挂应用面后续纵切）。
+   */
+  readonly approvalPolicy?: ApprovalPolicyMode;
+  /**
+   * 审批应答面（S5 冷读闸 F1：fresh 作用域 answerer 绑的 confirm——组合根
+   * `opts.interactive` 时注入 ui.confirm；缺省不传 = 本驱动 ask 全线
+   * unavailable〔fail-closed〕，与 headless 无 answerer 纪律同构）。
+   */
+  readonly confirm?: (text: string) => Promise<boolean>;
+  /** 沙箱服务（S5 bash 迁域：def 构造原料——confine 纯包装面，与 ctx.exec 同源实例） */
+  readonly sandbox: SandboxService;
+  /**
+   * 跨会话 allowlist 活数组取值器（S5：守门行 per-driver 同源——返回组合根
+   * AllowlistStore 的同一活数组引用，/allowlist 命令原地改零重装；与根守门行
+   * 同一数据源 = 「每份 gate 语义等价全局」的 v1 前提）。
+   */
+  readonly allowlist: () => readonly AllowlistEntry[];
 }
 
 /**
@@ -552,22 +601,71 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         next: resumed ? 'resume' : 'initial',
       };
 
-      /* -- fs 工具族域注册（S2 契约篇 §3.2：观察态 per-driver——每驱动一套
-         createFsTools 带本会话域键注册进 tools 注册表**域层**；dispose 挂
-         本条目由 retire 回卷。可写根推导器随迁本件 deps（与守门行同源产物） -- */
-      const fsTools = createFsTools({ writableRoots: deps.writableRoots, workspace: () => deps.workspace });
       const sessionId = session.header.sessionId;
-      const fsDisposers = fsTools.tools.map((def) => tools.register(def, { domain: sessionId }));
+
+      /* -- S5 fresh 装配作用域（契约篇 §5.4 第 6 条④形态钉死）：本驱动审批/
+           守门行/管道/answerer 四件挂 fresh ctx——fresh 不 fork 根，fresh runtime
+           的行表与服务表完全隔离（隔离即过滤的极限形态：本驱动管道的 waterfall
+           只见本作用域行，与根全局三件〔exec/fetch 服务路〕各守各面无串台）；
+           retire 经 dispose 一次回卷。subagent-factory 每子独立装配的驱动级推广 -- */
+      const driverScope = createContext({ name: `chat-driver:${sessionId.slice(0, 8)}` });
+      // 审批实例：ownership 闭包织入（装配期——answerer 标签渲染源）+ sink 直连
+      // 本会话 durable（S1 直连三路的 approval 路随批收口）
+      const approval = createApprovalService(driverScope, {
+        policy: deps.approvalPolicy ?? 'ask',
+        sink: durable.approval,
+        ownership: { sessionId, appId: CHAT_APP_ID },
+      });
+      // 守门行：同机制 / 同 allowlist 活数组同源 / 同推导器——「每份 gate 语义
+      // 等价全局」的 v1 落地（per-session 换档面落地日须重新成立一次）
+      driverScope.effect(() =>
+        installSafetyGate(driverScope, {
+          approval,
+          workspace: deps.workspace,
+          mode: () => deps.sandboxMode,
+          allowlist: deps.allowlist(),
+        }),
+      );
+      // 管道实例：onGateDecision 直连本会话 durable（gate 落账随驱动归属——
+      // 不经组合根转发壳，两服务面〔exec/fetch〕继续走全局管道）
+      const driverPipeline = createToolPipeline(driverScope, { onGateDecision: durable.gate });
+      // answerer（S5 冷读闸 F1 修死）：ask 的 waterfall 派发在传入 ctx 的 runtime
+      // 上——fresh 作用域必须同作用域注册 answerer，否则本驱动 ask 全线
+      // unavailable。ui.confirm 经 deps 注入；弹窗标签/approvalId 短形/优先级
+      // 标记在 formatApprovalPrompt 内消费 ownership 载荷
+      if (deps.confirm !== undefined) {
+        const confirm = deps.confirm;
+        driverScope.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
+          const answer = await confirm(formatApprovalPrompt(req));
+          // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
+          return answer ? 'approve' : 'reject';
+        });
+      }
+
+      /* -- fs + bash 工具族域注册（S2 fs 四件 / S5 bash 迁域——骨架篇 exec 节
+         「bash 注册面迁域」：升权两参数闭包绑**本驱动 approval**〔多驱动下 bash
+         升权 ask 落发起 run 的会话，全局 def 闭包绑全局 approval 的归属错挂就此
+         闭合〕；dispose 挂本条目由 retire 回卷。可写根推导器随迁本件 deps
+         （与守门行同源产物） -- */
+      const fsTools = createFsTools({ writableRoots: deps.writableRoots, workspace: () => deps.workspace });
+      const bashDef = createBashTool({
+        sandbox: deps.sandbox,
+        approval,
+        mode: () => deps.sandboxMode,
+        workspaceRoot: deps.workspace,
+      });
+      const domainDisposers = [...fsTools.tools, bashDef].map((def) => tools.register(def, { domain: sessionId }));
       const disposeDomainTools = (): void => {
-        for (const dispose of fsDisposers) dispose();
+        for (const dispose of domainDisposers) dispose();
       };
 
-      /* -- per-entry loop 工具快照（S2：`listFor(本会话)` = 全局层 ∪ 本域 fs 四名；
-         活数组原位刷新（length=0 + push）即达 loop，含 run 中途；组合根 ⑧
-         tools_change 订阅按载荷域键路由到 refreshTools -- */
+      /* -- per-entry loop 工具快照（S2：`listFor(本会话)` = 全局层 ∪ 本域 fs+bash
+         五名；S5 冷读闸 F2：toAgentTool 显式绑本驱动管道——不传则绑死服务构造时
+         全局管道、per-driver 三件零流量静默空转；活数组原位刷新即达 loop，含 run
+         中途；组合根 ⑧ tools_change 订阅按载荷域键路由到 refreshTools -- */
       const toolView: AgentTool[] = [];
       const refreshTools = (): void => {
-        const fresh = tools.listFor(sessionId).map((def) => tools.toAgentTool(def));
+        const fresh = tools.listFor(sessionId).map((def) => tools.toAgentTool(def, { pipeline: driverPipeline }));
         toolView.length = 0;
         toolView.push(...fresh);
       };
@@ -641,6 +739,7 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         driver,
         controls: { writeHeader, refreshTools, rematerialize },
         disposeDomainTools,
+        disposeScope: () => driverScope.dispose(),
         headerState,
         retired: false,
       };
@@ -665,9 +764,12 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // run 中退役=正被 loop 引用的时间线强行 abort，留给编排层显式抉择）
       if (entry.driver.isRunning) return false;
       entry.retired = true;
-      // 域层工具回卷（S2：fs 四名从 tools 注册表域层撤出——退役即停摆的工具面
-      // 半边；session/durable 保留的原语义不变，迟到结算照落原会话账）
+      // 域层工具回卷（S2 fs + S5 bash：五名从 tools 注册表域层撤出——退役即停摆
+      // 的工具面半边；session/durable 保留的原语义不变，迟到结算照落原会话账）
       entry.disposeDomainTools();
+      // fresh 装配作用域回卷（S5：审批/守门行/管道/answerer 四件一次撤出——
+      // 退役驱动的管道不再拦任何执行，作用域行表随 dispose 清空）
+      entry.disposeScope();
       // 仅 abort 不 resolve quit（会话停摆≠进程退出——前台退出聚合只认 requestQuit）
       entry.driver.retire();
       return true;

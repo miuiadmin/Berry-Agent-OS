@@ -14,6 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Context, Disposer } from '../context/types.js';
+import { chainBackground } from '../context/chain.js';
 import type { ApprovalOutcome, ApprovalPolicyMode, ApprovalRequest } from './types.js';
 
 /** answerer 监听的活体事件名（waterfall 语义：短路返回 ApprovalAnswer 三值，调 next() = 本行不接） */
@@ -44,6 +45,12 @@ export interface ApprovalServiceOptions {
   readonly policy?: ApprovalPolicyMode;
   /** durable 审批对接线（缺省不落——测试/无会话场景；app 装配层接 session.append） */
   readonly sink?: ApprovalDecisionSink;
+  /**
+   * 归属闭包（S5 骨架篇 §8.3：装配期织入 ask 载荷的 ownership 标签——
+   * chat 件 open() 传本驱动 {sessionId, appId}；组合根全局实例不传 = 无标签，
+   * exec/fetch 服务路的弹窗无标签属 v1 已知形态）
+   */
+  readonly ownership?: { readonly sessionId: string; readonly appId?: string };
 }
 
 /** outcome → durable 决议值映射（allowed-once 落日志记 approve——「批了这一次」） */
@@ -76,6 +83,15 @@ export function createApprovalService(ctx: Context, opts: ApprovalServiceOptions
       // 审批对第一腿：请求落日志（turn-enclosed 的开头）
       sink.asked({ approvalId, summary: req.summary });
 
+      // S5 归属织入（骨架篇 §8.3）：ownership 装配期闭包 + priority 调用链取数 +
+      // approvalId——三者都是 answerer 的消费面，守门/执行机制不按它们分支
+      const enriched: ApprovalRequest = {
+        ...req,
+        approvalId,
+        ...(opts.ownership !== undefined ? { ownership: opts.ownership } : {}),
+        priority: chainBackground() ? 'background' : 'interactive',
+      };
+
       let outcome: ApprovalOutcome;
       if (policy === 'never') {
         // never：确定性拒绝，不派发 answerer（无人值守姿态没有「问谁」）
@@ -84,7 +100,7 @@ export function createApprovalService(ctx: Context, opts: ApprovalServiceOptions
         // ask：waterfall 派发——answerer 短路返回三值；全链无人应答 = undefined
         const answer = await ctx.waterfall<'approve' | 'reject' | 'cancel' | undefined>(
           APPROVAL_ANSWER_EVENT,
-          req,
+          enriched,
           () => undefined,
         );
         outcome =

@@ -128,8 +128,14 @@ export interface ToolsService {
    * 此口——域键 v1 = sessionId。未知域键 = 空域层，只返回全局层（合法形态）。
    */
   listFor(domain: string): ToolDefinition[];
-  /** loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态） */
-  toAgentTool(def: ToolDefinition): AgentTool;
+  /**
+   * loop 面适配：包一层三段管道的 AgentTool（薄适配器，无状态）。
+   *
+   * 执行绑定面（S5 契约篇 §5.4 第 6 条④冷读闸 F2 修死）：缺省绑服务构造时的
+   * 全局管道；驱动侧传 `{pipeline}` 显式绑**本驱动管道**（fresh 作用域三段——
+   * per-driver 守门/审批/落账的执行入口）。toAgentTool 仍是唯一包装位，执法点不裂。
+   */
+  toAgentTool(def: ToolDefinition, opts?: { readonly pipeline?: ToolPipelineExecutor }): AgentTool;
   /**
    * 注册面打点（B2 P5 打点先行，2026-08-27 刀〇a）：registered = 现存件数
    * （全局层 + 全部域层）；totalAdds/totalRemoves = 开机以来累计注册/注销次数

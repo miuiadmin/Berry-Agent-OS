@@ -239,8 +239,10 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       return layer === undefined ? [...tools.values()] : [...tools.values(), ...layer.values()];
     },
 
-    toAgentTool(def) {
-      const pipeline = opts.pipeline;
+    toAgentTool(def, bindOpts) {
+      // 执行绑定面（S5 冷读闸 F2）：显式注入优先（驱动 fresh 作用域管道），
+      // 缺省回落服务构造时的全局管道——既有调用点（子工厂/诊断面）零改动
+      const pipeline = bindOpts?.pipeline ?? opts.pipeline;
       return {
         name: def.name,
         description: def.description,

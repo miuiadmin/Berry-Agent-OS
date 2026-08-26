@@ -29,12 +29,13 @@ const MODULE_EDGES = {
   safety: ['contracts', 'context', 'session', 'tools'],
   skills: ['contracts', 'context'],
   subagent: ['contracts', 'context', 'agent', 'session'],
-  // chat = 对话应用官方件聚落（铭牌批入册；不 import llm——StreamFn 经 contracts 注入）
-  chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety'],
+  // chat = 对话应用官方件聚落（铭牌批入册；不 import llm——StreamFn 经 contracts 注入；
+  // exec 边 = S5 bash 迁域——createBashTool def 随 open() 会话域注册）
+  chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety', 'exec'],
   memory: ['contracts', 'context', 'session', 'persist'],
   goal: ['contracts', 'context', 'persist'],
   // exec = 工具族件聚落（第 18 模块，2026-08-25 exec 纵切；tools 不 import exec——
-  // bash def 在组合根注册，检索族双装配点先例）
+  // bash def 随 chat 件 open() 会话域注册（S5 迁域），检索族双装配点先例）
   exec: ['contracts', 'context', 'safety', 'tools'],
   scheduler: ['contracts', 'context', 'persist'],
   // mcp = stdio-only 客户端桥（2026-08-26 第一刀，契约篇 §6.6）：spawn/kill 经

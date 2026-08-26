@@ -12,6 +12,7 @@
  */
 
 import { createContext } from '../context/context.js';
+import { runInSessionChain } from '../context/chain.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { startRun } from '../agent/loop.js';
 import type { RunResult } from '../agent/loop.js';
@@ -138,27 +139,34 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
     deps.rootCtx.emit('session_start', { sessionId: session.header.sessionId, origin: 'delegation' });
 
     /* ---- ⑦ 一次性驱动（persona ?? 静态缺省；model 覆盖 = 声明式 agent frontmatter；
-           emit 两路 = durable 落账 + usage 上报）---- */
+           emit 两路 = durable 落账 + usage 上报）----
+     * 链写点③（S5 冷读闸 F3，骨架篇 §9.3）：startRun 边界包裹子会话——无此包裹
+     * 则子内工具执行继承委派工具所在父 run 的链，子内 goal 落账/审批归属全数错挂
+     * 父账。background 缺省 false（开起批是委派 prompt 非 backgroundWake 词汇；
+     * 子代理审批 never 不派发，此列对子装配自身无消费面——服务的是「子链内
+     * 经全局绑定面回读」的归因正确性）。 */
     const run = (): Promise<RunResult> =>
-      startRun(
-        [{ role: 'user', content: request.prompt, timestamp: Date.now() }],
-        {
-          systemPrompt: request.persona ?? DEFAULT_CHILD_PROMPT,
-          messages: [],
-          tools: tools.list().map((def) => tools.toAgentTool(def)),
-        },
-        { streamFn: deps.streamFn, model: request.model ?? deps.model, convertToLlm: deps.convertToLlm },
-        {
-          signal,
-          emit: (event) => {
-            sinks.handle(event);
-            // assistant 消息结算即上报用量（provider 预算帽唯一数据源——纵切二同款）
-            if (event.type === 'message_end' && event.message.role === 'assistant') {
-              const usage = (event.message as AssistantMessage).usage;
-              if (usage) onUsage(usage);
-            }
+      runInSessionChain({ sessionId: session.header.sessionId }, () =>
+        startRun(
+          [{ role: 'user', content: request.prompt, timestamp: Date.now() }],
+          {
+            systemPrompt: request.persona ?? DEFAULT_CHILD_PROMPT,
+            messages: [],
+            tools: tools.list().map((def) => tools.toAgentTool(def)),
           },
-        },
+          { streamFn: deps.streamFn, model: request.model ?? deps.model, convertToLlm: deps.convertToLlm },
+          {
+            signal,
+            emit: (event) => {
+              sinks.handle(event);
+              // assistant 消息结算即上报用量（provider 预算帽唯一数据源——纵切二同款）
+              if (event.type === 'message_end' && event.message.role === 'assistant') {
+                const usage = (event.message as AssistantMessage).usage;
+                if (usage) onUsage(usage);
+              }
+            },
+          },
+        ),
       );
 
     /* ---- ⑧ dispose 序列（纵切三 helper）：flush 屏障 → shutdown（根总线 keyed）→ 回卷 ---- */

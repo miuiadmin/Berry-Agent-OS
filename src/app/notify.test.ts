@@ -99,7 +99,7 @@ describe('归属解析 + 结算折叠（llm/usage 计量事件）', () => {
   it('无显式键、调用链在场：折进链会话（in-process 结算回调运行于父 tool call 链）', () => {
     const { notifier, entries } = makeRegistry();
     const { entry } = registerEntry(entries);
-    runInSessionChain(entry.session.header.sessionId, () => notifier(settlement()));
+    runInSessionChain({ sessionId: entry.session.header.sessionId }, () => notifier(settlement()));
     expect(entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);
   });
 
@@ -107,7 +107,7 @@ describe('归属解析 + 结算折叠（llm/usage 计量事件）', () => {
     const { notifier, entries } = makeRegistry();
     const owner = registerEntry(entries);
     const chained = registerEntry(entries);
-    runInSessionChain(chained.entry.session.header.sessionId, () =>
+    runInSessionChain({ sessionId: chained.entry.session.header.sessionId }, () =>
       notifier(settlement({ ownerSessionId: owner.entry.session.header.sessionId })),
     );
     expect(owner.entry.session.events.filter((e) => e.type === 'llm/usage')).toHaveLength(1);

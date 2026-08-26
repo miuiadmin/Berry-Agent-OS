@@ -50,7 +50,7 @@ import {
 import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode } from '../safety/index.js';
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
-import { createBashTool, registerExecService, renderEnvironmentSection } from '../exec/index.js';
+import { registerExecService, renderEnvironmentSection } from '../exec/index.js';
 import {
   createLocalSkillsProvider,
   createPackageSkillsProvider,
@@ -744,6 +744,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   /** 可写根推导器（safety/roots 同源产物——S2 fs 迁域随 chat 件走：主驱动 fs
    * 族的 fence 数据源；与守门行同源单点接线，chat/subagent 两消费面同款构造） */
   const rootsProvider = createRootsProvider({ workspace, mode: () => sandboxMode });
+  /** 沙箱 confine 服务（S5 bash 迁域上提至此：chat deps 需要 sandbox 实例作
+   * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
+   * 挂 ⑥b 原位不动） */
+  const sandbox = createSandboxService();
   const chatBundle = createChatPlugin({
     ...(persistence ? { persistence } : {}),
     resumeSession: opts.resumeSession,
@@ -762,6 +766,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     stampSandboxFacts,
     // tick 入口记账道声明（--background argv → run 入口 → 此处；缺省前台道）
     ...(opts.usagePriority !== undefined ? { usagePriority: opts.usagePriority } : {}),
+    // S5 审批守门归属批：驱动 fresh 作用域三件的原料随 deps 注入——
+    // approvalPolicy（CLI 旗标唯一来源，v1 全驱动同档）/ confirm（interactive
+    // 时 ui.confirm——fresh 作用域 answerer 绑它；headless 不传 = fail-closed）/
+    // sandbox + allowlist（bash def 构造原料 + 守门行同源活数组）
+    ...(opts.approvalPolicy !== undefined ? { approvalPolicy: opts.approvalPolicy } : {}),
+    ...(opts.interactive ? { confirm: (text: string) => ui.confirm(text) } : {}),
+    sandbox,
+    allowlist: () => allowlist.entries,
   });
   /** 会话驱动注册表（S1 单真相——Map<sessionId, DriverEntry> + 前台聚焦指针） */
   const registry = chatBundle.registry;
@@ -892,14 +904,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // sandbox 档首落随会话边界进 chat 件（③b stampSandboxFacts——内核有数据，
   // 应用有时点；续接同档不重复落的 diff 语义内建于盖章函数）
 
-  /* ---- ⑥b exec 件聚落（第 18 模块，2026-08-25 exec 纵切）----
-   * 沙箱 confine 服务此前零组合根装配（safety 落码时无消费方——exec 双面即
-   * 首批消费方，接线债本批收口）。bash 工具件在审批服务之后注册：升权两参数
-   * 是 requestEscalation 的首个消费者（依赖 approval 实例）；ctx.exec 服务同
-   * 管道同沙箱——服务调用不旁路守门与落账（内部名 exec 不进模型词汇表）。 */
-  const sandbox = createSandboxService();
+  /* ---- ⑥b exec 件聚落（第 18 模块，2026-08-25 exec 纵切；S5 bash 迁域 2026-08-26）----
+   * 沙箱 confine 服务实例已在 chatBundle 前上提构造（S5 bash 迁域——chat 件
+   * open() 构造 bash def 需要 sandbox 原料，构造点先于本段；provide 挂本段
+   * 原位）。bash 工具件全局层注册**退役**：随 chat 件 open() 会话域注册（升权
+   * 闭包绑本驱动 approval——骨架篇 exec 节「bash 注册面迁域」）；全局层退役后
+   * 诊断面（dump-config 无驱动语境）无 bash 属正确投影。ctx.exec 服务保留：
+   * 走全局管道（无驱动语境面——与 ctx.fetch 同形，服务调用不旁路守门与落账，
+   * 内部名 exec 不进模型词汇表）。 */
   ctx.provide('sandbox', sandbox);
-  tools.register(createBashTool({ sandbox, approval, mode: () => sandboxMode, workspaceRoot: workspace }));
   registerExecService(ctx, { pipeline, sandbox, mode: () => sandboxMode, workspaceRoot: workspace });
 
   /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词）----
@@ -1216,7 +1229,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }),
   );
 
-  /* ---- ⑩ 交互模式：审批 answerer 接 ctx.ui（headless 无应答者 = fail-closed） ---- */
+  /* ---- ⑩ 交互模式：根审批 answerer 接 ctx.ui（headless 无应答者 = fail-closed） ----
+   * 本 answerer 服务**根** approval（ctx.exec/ctx.fetch 服务路的 ask——全局三件
+   * 消费面）；这些 ask 无 ownership/approvalId 标签（无驱动语境）= v1 已知形态
+   * （S5 契约篇审批归属行注记——F9）。主应用驱动的 ask 走驱动 fresh 作用域的
+   * answerer（带 [app·会话] 标签）——fresh 不 fork 根，两路 emit 各归各 scope，
+   * 无瀑布交叠。 */
   if (opts.interactive) {
     ctx.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
       const answer = await ui.confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`);

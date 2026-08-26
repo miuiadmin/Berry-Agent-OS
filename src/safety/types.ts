@@ -22,7 +22,13 @@ export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unava
 /** answerer（审批应答者）的三值决策——通道插件在 approval/answer waterfall 上短路返回 */
 export type ApprovalAnswer = 'approve' | 'reject' | 'cancel';
 
-/** 审批请求（骨架篇 §8.4：含 reason、请求方、目标动作摘要——审计自包含） */
+/**
+ * 审批请求（骨架篇 §8.4：含 reason、请求方、目标动作摘要——审计自包含）。
+ *
+ * S5 归属三字段（骨架篇 §8.3「归属与优先级」）：调用方只填原有四字段，三字段
+ * 由 approval 服务在 ask 内织入——answerer（审批应答者）的本职消费面，守门/
+ * 执行机制不按它们分支（dsh-10 边界）。
+ */
 export interface ApprovalRequest {
   /** 目标动作摘要（人可读一行；升权场景含目标档与理由） */
   readonly summary: string;
@@ -32,6 +38,12 @@ export interface ApprovalRequest {
   readonly toolName?: string;
   /** 关联的工具调用 id（有则记录） */
   readonly toolCallId?: string;
+  /** 挂起身份（服务 ask 织入——多驱动单输入框下 TUI 弹窗显示短形防串答） */
+  readonly approvalId?: string;
+  /** 归属标签（实例构造期织入——answerer 渲染 `[app·会话短id]` 前缀的载荷源） */
+  readonly ownership?: { readonly sessionId: string; readonly appId?: string };
+  /** 出队优先级（ask 时调用链取数的运行期元数据——answerer 两级出队参考） */
+  readonly priority?: 'interactive' | 'background';
 }
 
 /** 沙箱后端统一接口（后端是可替换插件行；seam 与强制点在内核） */

@@ -247,6 +247,29 @@ describe('registerToolsService — AgentTool 适配（执行必经管道）', ()
     expect(agentTool).toMatchObject({ name: 'ls', description: '测试工具', label: '列目录' });
     expect(agentTool.parameters).toMatchObject({ type: 'object' }); // TypeBox 产物即 JSON Schema
   });
+
+  it('S5 参数化绑定：toAgentTool(def, {pipeline}) 显式管道优先——per-driver 三件的执法点（冷读闸 F2）', async () => {
+    // 全局注册表挂全局管道（无守门行——放行）；驱动 fresh 作用域挂自己的管道
+    // 与守门行（block 决策）。参数化注入 = 执行走驱动管道被拦；缺省回落 = 走
+    // 服务构造时全局管道放行。修复前（绑死 opts.pipeline）驱动拦截永不触发。
+    const globalCtx = createContext({ name: 'test' });
+    const tools = registerToolsService(globalCtx, { pipeline: createToolPipeline(globalCtx) });
+    const def = makeTool('bash');
+    tools.register(def);
+    const driverCtx = createContext({ name: 'driver' });
+    driverCtx.on('tools_pre_execute', () => ({ decision: 'block', reason: '驱动域拦截' }));
+    const driverPipeline = createToolPipeline(driverCtx);
+    // 显式注入：驱动守门行生效（TOOL_BLOCKED + 驱动域文案）
+    const bound = tools.toAgentTool(def, { pipeline: driverPipeline });
+    const blocked = await bound.execute('tc-1', {}).catch((e) => e);
+    expect(blocked).toBeInstanceOf(AppError);
+    expect((blocked as AppError).code).toBe('TOOL_BLOCKED');
+    expect((blocked as AppError).message).toContain('驱动域拦截');
+    // 缺省回落：全局管道（无行）照常放行——子注册表等既有路径零影响
+    const fallback = tools.toAgentTool(def);
+    const result = await fallback.execute('tc-2', {});
+    expect(result.content[0]).toMatchObject({ text: 'ran:bash' });
+  });
 });
 
 describe('registerToolsService — 服务生命周期', () => {

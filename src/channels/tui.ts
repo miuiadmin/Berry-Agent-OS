@@ -29,6 +29,7 @@ import { ProcessTerminal } from '@earendil-works/pi-tui';
 import type { AgentEvent } from '../agent/events.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { isStandardMessage } from '../contracts/messages.js';
+import { chainBackground } from '../context/chain.js';
 import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, renderAgentMessage } from './render.js';
 import { createPromptQueue } from './prompt.js';
 import type { CommandRegistry } from './commands.js';
@@ -182,11 +183,13 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     },
   });
 
-  /* ---- 输入路由：提问答案 > 斜杠命令 > 普通消息 ---- */
+  /* ---- 输入路由：斜杠命令 > 提问答案 > 普通消息（S5 序翻转——冷读 F5）----
+   * 命令期 prompt 可达：prompt 占屏时 /quit 等逃生命令仍可派发（不被在身
+   * 提问吞掉——ask 的取消收场由 prompts.cancelAll 兜底）；prompt 期的非命令
+   * 输入才消费为答案。 */
   editor.onSubmit = (text: string): void => {
     const trimmed = text.trim();
     if (!trimmed) return; // 空提交忽略（防误触；退出走 Ctrl+D）
-    if (prompts.handleSubmit(trimmed)) return;
     // 命令在通道本地派发（命令错误兜底为通知，不崩界面）；命令无时间线事件，本地回显
     if (trimmed.startsWith('/')) {
       appendLines([`❯ ${trimmed}`]);
@@ -200,6 +203,7 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         });
       return;
     }
+    if (prompts.handleSubmit(trimmed)) return;
     // 普通消息不本地回显——loop 对 user 消息发 message_start，渲染单一来源是事件流
     opts.host.submit(trimmed);
   };
@@ -277,12 +281,22 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       tui.requestRender();
     },
     async confirm(message) {
-      const answer = await prompts.ask(`${message} [y/n]`);
+      // priority 随链取数（S5 后台 run 的确认降级排队——契约篇 §5.4）；取消收场
+      // 的 undefined 按 false（fail-closed：不批准 = 安全缺省）
+      const answer = await prompts.ask(`${message} [y/n]`, {
+        priority: chainBackground() ? 'background' : 'interactive',
+      });
+      if (answer === undefined) return false;
       const parsed = /^(y|yes|是)$/i.test(answer.trim());
       return parsed; // 未识别按 false（fail-closed，与技术栈篇 §4.3 精神一致）
     },
     async input(message, ioOpts?: InputOptions) {
-      return prompts.ask(ioOpts?.placeholder ? `${message}（${ioOpts.placeholder}）` : message);
+      // priority 同 confirm；取消收场的 undefined 归一为 ''（UiService.input 的
+      // 「无输入」既有语义——消费方零新分支）
+      const answer = await prompts.ask(ioOpts?.placeholder ? `${message}（${ioOpts.placeholder}）` : message, {
+        priority: chainBackground() ? 'background' : 'interactive',
+      });
+      return answer ?? '';
     },
     // select/setWidget 不支持——ctx.ui 聚合器按 §4.3 降级规则处理
   };

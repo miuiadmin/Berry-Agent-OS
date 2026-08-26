@@ -140,7 +140,6 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
-      'bash',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -155,6 +154,7 @@ describe('createBerryRuntime 装配面', () => {
       'write',
       'edit',
       'ls',
+      'bash',
     ]);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
@@ -401,7 +401,7 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.session).toBeUndefined();
     // S2 后全局层口径：fs 四件迁域层（无驱动即无域工具——persist:false 不开
     // 驱动）；memory/goal 空转；剩 find/grep/bash/agent/fetch 五件
-    expect(runtime.tools.list().map((t) => t.name)).toEqual(['find', 'grep', 'bash', 'agent', 'fetch']);
+    expect(runtime.tools.list().map((t) => t.name)).toEqual(['find', 'grep', 'agent', 'fetch']);
   });
 
   it('技能发现注入：SKILL.md 落临时位置后进系统提示词 + /skill 命令注册', async () => {
@@ -449,7 +449,6 @@ describe('ConversationDriver + durable 接线', () => {
     expect(contexts[0]?.tools?.map((t) => t.name)).toEqual([
       'find',
       'grep',
-      'bash',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -464,6 +463,7 @@ describe('ConversationDriver + durable 接线', () => {
       'write',
       'edit',
       'ls',
+      'bash',
     ]);
     // request/header 载荷带应用域腿（血缘显式打标的证据面——契约篇 §5.4）
     const header = runtime.session!.events.find((e) => e.type === 'request/header');
@@ -590,7 +590,6 @@ describe('ConversationDriver + durable 接线', () => {
     expect(contexts[1]?.tools?.map((t) => t.name)).toEqual([
       'find',
       'grep',
-      'bash',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -606,6 +605,7 @@ describe('ConversationDriver + durable 接线', () => {
       'write',
       'edit',
       'ls',
+      'bash',
     ]);
     expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
     expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
@@ -1153,7 +1153,6 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
-      'bash',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -1169,6 +1168,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'write',
       'edit',
       'ls',
+      'bash',
     ]);
     // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
     const paths = runtime.ctx.tryGet<{ dataDir(): string; pluginDataDir(id: string): string }>('paths');
@@ -1438,7 +1438,6 @@ describe('/reload 组合树重载', () => {
     expect(runtime.tools.listFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
-      'bash',
       'memory_write',
       'memory_forget',
       'memory_restore',
@@ -1453,6 +1452,7 @@ describe('/reload 组合树重载', () => {
       'write',
       'edit',
       'ls',
+      'bash',
     ]);
     expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],
