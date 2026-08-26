@@ -30,6 +30,7 @@ export type EventName =
   | 'plugin/activated'
   | 'plugin/failed'
   | 'plugin/skipped'
+  | 'plugins/uninstalled'
   | 'composition/reloaded'
   | 'worker/spawned'
   | 'worker/froze'
@@ -129,6 +130,11 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'plugin/skipped',
     mode: 'emit',
     note: '插件行跳过（载荷 { id, reason }——reason: disabled 静态禁用 / platform 平台门控；目录信任略过随信任门落地补）',
+  },
+  {
+    name: 'plugins/uninstalled',
+    mode: 'emit',
+    note: '插件行卸载完成（契约篇 §3.4 第二刀，2026-08-27 刀 2；载荷 { id, source, dataAction, affected? }——四段执行成功尾的总线广播与 durable 落账双落地；复数域 = 管理面词汇〔与 plugins_* 工具族同源命名〕，单数 plugin/ 族是装载管线结果词——两族刻意分域）',
   },
   {
     name: 'composition/reloaded',

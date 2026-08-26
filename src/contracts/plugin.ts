@@ -223,6 +223,13 @@ export interface PluginActivatedPayload {
   readonly name: string;
   /** apply 耗时（毫秒，含技能注册回调；不含 import/形状校验——那是装载期不是激活期） */
   readonly applyMs: number;
+  /**
+   * 本 boot 装载期声明的自定义事件词名清单（契约篇 §3.4 第二刀，2026-08-27
+   * 刀 2——词表三档的 live 档来源）：装载阶段①登记词汇处顺带收割名字随载荷
+   * 上行；undefined = 未声明任何自定义事件。uninstall 检视对 activated 行优先
+   * 读本档（活词表优先于 data.json 账本——同一次装载的真值）。不参与控制流。
+   */
+  readonly events?: readonly string[];
 }
 
 /** plugin/failed 载荷：{ 组合树行 id, 错误码（PLUGIN_ 族）, 错误信息 } */

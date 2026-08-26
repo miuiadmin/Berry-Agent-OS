@@ -126,6 +126,11 @@ export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'sandbox/mode', category: 'log-only' },
   { type: 'llm/usage', category: 'log-only' },
   { type: 'llm/retry', category: 'log-only' },
+  // 卸载落账（契约篇 §3.4 第二刀，2026-08-27 刀 2）：宿主写点（组合根
+  // emitUninstalled——uninstall 真身住 Ring 0「装」职能），核心词身份自动拒
+  // 插件面注册/伪造（SESSION_CORE_TYPE_FORBIDDEN 双闸同判据）；复数域 = 管理面
+  // 词汇，与活体目录 plugins/uninstalled 同词双落地（总线 + 会话流）
+  { type: 'plugins/uninstalled', category: 'log-only' },
 ];
 
 /** 核心词集合（插件面拒注册的判据——含 reserved 预留词，核心族一体保护） */

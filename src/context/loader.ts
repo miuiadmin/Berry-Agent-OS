@@ -715,8 +715,19 @@ async function activateOne(
     if (declaredName !== row.id) {
       root.logger.warn('插件声明 name 与组合树行 id 不一致', { rowId: row.id, name: declaredName });
     }
-    activated.push({ id: row.id, name: declaredName, applyMs: Date.now() - startedAt });
-    root.emit('plugin/activated', { id: row.id, name: declaredName, applyMs: Date.now() - startedAt });
+    // 词表收割（契约篇 §3.4 第二刀 live 档）：装载阶段①已 validateEventDefs——
+    // 此处只取名字清单随 activated 载荷上行（applyMs 同刻单点取值，push 与 emit
+    // 同一对象）；uninstall 检视据此对 activated 行优先读本 boot 活词表
+    const applyMs = Date.now() - startedAt;
+    const eventNames = (item.kind === 'main' ? item.module.events : item.meta.events)?.map((def) => def.name) ?? [];
+    const payload: PluginActivatedPayload = {
+      id: row.id,
+      name: declaredName,
+      applyMs,
+      ...(eventNames.length > 0 ? { events: eventNames } : {}), // 空清单不带键（undefined = 未声明，消费面 ?? [] 归一）
+    };
+    activated.push(payload);
+    root.emit('plugin/activated', payload);
   } catch (err) {
     // apply 抛错/挂起超时即响（§1.6）：先回卷本作用域半途注册（LIFO——失败行不
     // 留残骸；回卷自身的挂起由 dispose 竞速时钟兜），再进失败清单。码面两分：

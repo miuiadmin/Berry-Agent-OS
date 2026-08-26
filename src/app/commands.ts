@@ -17,7 +17,7 @@ import type { UiService } from '../channels/types.js';
 import { describeError } from '../contracts/errors.js';
 import { formatSkillInvocation } from '../skills/index.js';
 import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
-import type { PluginsService } from './plugins.js';
+import type { PluginsService, UninstallExecReport, UninstallReport } from './plugins.js';
 import type { AllowlistStore } from './allowlist-store.js';
 import type { ReloadResult } from './assembly.js';
 import type { PluginStatusRow } from './composition.js';
@@ -49,12 +49,13 @@ function formatPluginRow(row: PluginStatusRow): string {
 }
 
 /**
- * /reload 三面结果统一通知（busy / error / payload——组合根 reload 语义直译，
+ * /reload 三面结果统一通知（queued / error / payload——组合根 reload 语义直译，
  * 壳只转述不解释；error 面附「原组合仍在运行」——预检后装的设计保证，见 §1.3 落码形态）。
  */
 function notifyReloadResult(ui: UiService, result: ReloadResult): void {
-  if (result.busy === true) {
-    ui.notify('现在不能重载（run 进行中），稍后再试');
+  if (result.queued === true) {
+    // 刀 2 排队语义：run 进行中不拒——结算后自动执行，结果另行通知
+    ui.notify('run 进行中——重载已排队，本次 run 结束后自动执行');
     return;
   }
   if (result.error !== undefined) {
@@ -68,6 +69,64 @@ function notifyReloadResult(ui: UiService, result: ReloadResult): void {
   if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
   parts.push(`跳过 ${payload.skipped.length}`);
   ui.notify(`组合已重载：${parts.join('，')}`);
+}
+
+/** 字节数 → 人读体积（KiB/MiB 两档——inspect 报告的数据域体积行） */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/** inspect 报告 → 人读文本（契约篇 §3.4 第二刀：execute 前的级联警示承载面——
+ * 词表三档 / 受影响会话逐词点名 / 共享行说明全量呈现，人看过才裁决） */
+function formatUninstallReport(report: UninstallReport): string {
+  const lines: string[] = [
+    `卸载检视 ${report.id}（${report.source} 源 · ${report.status}）：`,
+    `  引用：${report.pluginRef}`,
+  ];
+  if (report.installPath !== undefined) lines.push(`  装机物：${report.installPath}`);
+  if (report.sharedRows.length > 0) {
+    lines.push(`  ⚠ 装机物共享行：${report.sharedRows.join('、')}（execute 将跳删装机物）`);
+  }
+  lines.push(
+    `  数据域：${report.dataDir}${report.dataBytes !== undefined ? `（约 ${formatBytes(report.dataBytes)}）` : '（无）'}`,
+  );
+  if (report.events.origin === 'live' || report.events.origin === 'ledger') {
+    lines.push(
+      report.events.names.length > 0
+        ? `  自定义事件词（${report.events.origin} 档）：${report.events.names.join('、')}`
+        : `  自定义事件词（${report.events.origin} 档）：无`,
+    );
+  } else {
+    lines.push(`  ⚠ 自定义事件词：无法枚举——${report.events.note ?? '原因未知'}`);
+  }
+  if (report.affectedSessions !== undefined) {
+    const entries = Object.entries(report.affectedSessions).filter(([, n]) => n > 0);
+    lines.push(
+      entries.length > 0
+        ? `  ⚠ 受影响会话：${entries.map(([word, n]) => `${word} ×${n}`).join('、')}`
+        : '  受影响会话：无',
+    );
+  }
+  for (const warning of report.warnings) lines.push(`  ⚠ ${warning}`);
+  lines.push('确认执行：/plugin uninstall <id> [--purge-data]（默认保留数据域）');
+  return lines.join('\n');
+}
+
+/** execute 回执 → 人读文本（四段执行事实的壳面转述） */
+function formatUninstallExec(report: UninstallExecReport): string {
+  const lines = [
+    `已卸载 ${report.id}（${report.source} 源 · 数据域${report.dataAction === 'purge' ? '已清除' : '保留'}）`,
+  ];
+  const installFace =
+    report.installRemoved === 'removed'
+      ? '装机物已删'
+      : report.installRemoved === 'shared'
+        ? `装机物保留（共享：${report.sharedRows.join('、')}）`
+        : '无装机物';
+  lines.push(`  ${installFace}`);
+  if (report.restoresDefault === true) lines.push('  官方默认层同 id 行已回露出（恢复出厂态）');
+  return lines.join('\n');
 }
 
 /** 内置命令注册入参（全部是组合根持有的既有件，无新概念） */
@@ -323,7 +382,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         }
         const lines = rows.map(formatPluginRow);
         ui.notify(
-          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装入 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
+          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装入 · /plugin uninstall 卸载 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
         );
       },
     }),
@@ -371,6 +430,32 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         const report = await opts.plugins.update(id); // npm 重装 / git 重克隆 / local no-op
         ui.notify(`${report.id} 更新完成（${report.source} 源）：${report.message}`);
         // 磁上已是新码——与 install 同理链 /reload 才可见（local no-op 也无害：等价一次 /reload）
+        notifyReloadResult(ui, await opts.reload());
+      },
+    }),
+    /* 卸载 execute 相唯一入口（human-only，契约篇 §3.4 第二刀）：先 inspect 打印
+     * 报告再 execute——同一命令一次走完（报告与执行原子呈现，人已看过警示才落刀）；
+     * --purge-data 旗标裁决数据域（省缺 keep = Docker 卷律）。服务错误（Ring 1
+     * 拒卸/未知 id 等）上抛——通道壳兜底为通知，不崩界面。 */
+    commands.register({
+      name: 'plugin',
+      description: '卸载插件 <id>（先检视后执行；--purge-data 清数据域）并重载',
+      handler: async (args) => {
+        const tokens = args.trim().split(/\s+/).filter(Boolean);
+        const sub = tokens[0];
+        const id = tokens[1];
+        if (sub !== 'uninstall' || id === undefined) {
+          ui.notify('用法：/plugin uninstall <id> [--purge-data]（id 见 /plugins；先检视后执行）');
+          return;
+        }
+        const purgeData = tokens.slice(2).includes('--purge-data');
+        ui.notify(formatUninstallReport(await opts.plugins.uninstall(id, { mode: 'inspect' })));
+        const exec = await opts.plugins.uninstall(id, {
+          mode: 'execute',
+          dataAction: purgeData ? 'purge' : 'keep',
+        });
+        ui.notify(formatUninstallExec(exec));
+        // 删行/禁用只改组合树文件——壳链 /reload 才热应用（与 install 同构两步）
         notifyReloadResult(ui, await opts.reload());
       },
     }),

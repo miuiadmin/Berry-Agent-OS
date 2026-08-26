@@ -456,3 +456,36 @@ describe('queryEvents（跨会话有界查询：序/游标/时间窗/types/app/l
     store.close();
   });
 });
+
+describe('affectedSessionCounts（按词聚合受影响会话数：uninstall 级联警示取数面，契约篇 §3.4 第二刀）', () => {
+  /** 构造三会话素材：同一插件词在两会话出现（DISTINCT 计 2 非 3），另一词仅一会话 */
+  function seed(): Store {
+    const store = openStore({ path: nextPath() });
+    // s-a 与 s-b 各含 2 行 demo/thing（同会话重复行 DISTINCT 只计 1）；s-c 只有无关注的词
+    store.appendCore({ ...reg('s-a') }, [ev(0, 'demo/thing'), ev(1, 'demo/thing'), ev(2)], 'inc');
+    store.appendCore({ ...reg('s-b') }, [ev(0, 'demo/thing'), ev(1, 'other/word')], 'inc');
+    store.appendCore({ ...reg('s-c') }, [ev(0)], 'inc');
+    return store;
+  }
+
+  it('COUNT(DISTINCT session_id) 按词分组：同会话重复行计 1，跨会话累计', () => {
+    const store = seed();
+    expect(store.affectedSessionCounts(['demo/thing', 'other/word'])).toEqual({
+      'demo/thing': 2, // s-a + s-b（s-a 内两行不重复计）
+      'other/word': 1, // 仅 s-b
+    });
+    store.close();
+  });
+
+  it('未注册/不存在的词：零计不抛（数据条件非断言，queryEvents 同判）', () => {
+    const store = seed();
+    expect(store.affectedSessionCounts(['no/such-word'])).toEqual({}); // GROUP BY 无匹配行 → 键缺席
+    store.close();
+  });
+
+  it('空词表恒空对象（无聚合对象，与「匹配零行」无歧义）', () => {
+    const store = seed();
+    expect(store.affectedSessionCounts([])).toEqual({});
+    store.close();
+  });
+});

@@ -35,7 +35,7 @@ import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { ToolsService } from '../tools/registry.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
-import { loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
+import { createPluginJiti, importPluginEntry, loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import {
   Persistence,
@@ -88,7 +88,7 @@ import {
   SESSION_SURFACE_OP_INVALID,
 } from '../contracts/errors.js';
 import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
-import type { DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
+import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
 import { createChatPlugin } from '../chat/index.js';
 import {
   createPathsService,
@@ -323,20 +323,25 @@ export interface BerryRuntime {
   /** 开新会话（/new）：registry.open 一条龙 + 旧聚焦条目退役；无持久层或聚焦驱动 run 进行中返回 undefined */
   newSession(): Session | undefined;
   /**
-   * 组合树全量重载（/reload，契约篇 §1.3 落码形态）：run 进行中被拒（busy）；
-   * overlay 校验失败不动旧装配（error）；成功 = 锚 dispose → 重装 → 系统提示词
-   * 重建 → composition/reloaded 派发（payload 三份行 id 清单）。失败行逐行报告
-   * 不杀进程（boot 与 /reload 两面失败语义之 /reload 半边）。
+   * 组合树全量重载（/reload，契约篇 §1.3 落码形态）：run 进行中**排队不拒绝**
+   *（2026-08-27 刀 2 改排队——单槽 coalesce：置 reloadPending 返 {queued:true}，
+   * run 结算回调见全闲即自动排水执行；排队的 reload 失败不重排，错误经 ui.notify
+   * 报请求方）；overlay 校验失败不动旧装配（error）；成功 = 锚 dispose → 重装 →
+   * 系统提示词重建 → composition/reloaded 派发（payload 三份行 id 清单）。失败行
+   * 逐行报告不杀进程（boot 与 /reload 两面失败语义之 /reload 半边）。
    */
   reload(): Promise<ReloadResult>;
   /** 优雅关停（run 结算 → flush 屏障 → 关库 → ctx 回卷——骨架篇 §1.3 的进程内编排） */
   shutdown(): Promise<void>;
 }
 
-/** /reload 结果（成功载荷 + 两类拒绝/失败回执——TUI 薄壳直显，不二次判型） */
+/** /reload 结果（成功载荷 + 排队/失败回执——TUI 薄壳直显，不二次判型） */
 export interface ReloadResult {
-  /** run 进行中被拒（与 /new 同准入判据——旧装配与进程原样保留） */
-  readonly busy?: boolean;
+  /**
+   * run 进行中已排队（2026-08-27 刀 2：busy 拒绝改排队——单槽 coalesce，已排队
+   * 再排 no-op；run 结算回调见全闲自动排水执行，结果经 ui.notify 报请求方）
+   */
+  readonly queued?: true;
   /** overlay/装载期异常（进程存活；message 走 describeError 统一口径） */
   readonly error?: string;
   /** 成功载荷（composition/reloaded 事件同款三份行 id 清单） */
@@ -712,7 +717,34 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * （件 inject 声明驱动 Kahn 轮次，apply 期取必居值）。 */
   const compositionDir = opts.compositionDir ?? dataDir();
   ctx.provide('paths', createPathsService(compositionDir, workspace));
-  const plugins = createPluginsService({ dataDir: compositionDir });
+  /* 插件管理服务注入边（契约篇 §3.4 第二刀，2026-08-27 刀 2）：三个闭包引用的
+   * persistence/virtualFaces/registry 均在本行之后才声明——TDZ 安全（闭包只在
+   * install/update/uninstall 运行期被调，彼时装配已完成全部初始化）。
+   * - loadEntry：词表账本收割面——与装载管线同一 jiti 工厂同一 import 门禁
+   *   （virtualFaces + guardTransform），一次性装载读 name/events 词名；
+   * - affectedSessionCounts：受影响会话计数取数面——flush 屏障内嵌（write-behind
+   *   尾部对查询不可见）+ Store 全库精确聚合（latestSessionId 同族宿主侧直查）；
+   * - emitUninstalled：卸载成功尾双落地——总线广播 + 当前会话流落账
+   *   （plugins/uninstalled 核心词，无路由会话时总线面单落地）。 */
+  const plugins = createPluginsService({
+    dataDir: compositionDir,
+    loadEntry: (entry) => importPluginEntry(createPluginJiti(virtualFaces), entry),
+    // persist:false 诊断装配不注入——服务面按缺省省略受影响会话计数（queryEvents 空降级同款）
+    ...(persistEnabled
+      ? {
+          affectedSessionCounts: async (types: readonly string[]) => {
+            const p = persistence; // const 拷贝收窄（闭包内 TS 不追外层条件式）
+            if (p === undefined) return {};
+            await p.flush();
+            return p.store.affectedSessionCounts(types);
+          },
+        }
+      : {}),
+    emitUninstalled: (data) => {
+      ctx.emit('plugins/uninstalled', data);
+      registry.routed()?.session.append('plugins/uninstalled', data);
+    },
+  });
   ctx.provide('plugins', plugins);
   /* worker 域舰队登记簿（契约篇 §1.7 K3-c）：各锚舰队建好后登记，拒启/关停
    * 收编遍历此簿——refuseBoot 定义先于舰队建立（装载期拒启路径），登记簿
@@ -1295,12 +1327,58 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // header change 快照——装载期中间态已被首请求的 initial 快照整体收编
   loadWindow = false;
 
-  /** 组合树全量重载（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面） */
-  const reload = async (): Promise<ReloadResult> => {
-    // run 进行中拒绝（与 /new 同准入判据——loop 正引用工具快照与提示词，不换装配；
-    // S1：任一非退役驱动在跑即 busy——多会话并存时全树装配不换）
+  /* ---- /reload 排队机制（契约篇 §3.4 第二刀，2026-08-27 刀 2）：busy 改单槽 coalesce ----
+   * run 进行中的 reload 不再拒绝：置 reloadPending 返 {queued:true}（已排队再排
+   * no-op），run 结算回调见**全闲**（任一非退役驱动 isRunning 即留待下次结算）
+   * 自动排水执行。排水内竞速新 run（reload 又返 queued）= 静默重新置 pending；
+   * 排水失败不重排（错误经 ui.notify 报请求方——通知文案与 commands.ts
+   * notifyReloadResult 同口径，此处内联：commands 已 import 本模块 ReloadResult
+   * 类型，反向 import 成环）。
+   * 订阅面 = chat 件 ctx.agent.onRunSettled（工厂级订阅表跨 /reload 存续——订阅
+   * 一次恒活）；chat 件可能 boot 装载失败/经 /reload 才上线：惰性武装
+   *（once-guard，boot ⑨ 后与 busy 分支两处尝试；chat 未装载 = 无驱动 = 永不
+   * busy = 排队面天然不需要，武装不成功静默无害）。 */
+  let reloadPending = false;
+  let reloadHookArmed = false;
+  const armRunSettledHook = (): void => {
+    if (reloadHookArmed) return;
+    const agent = ctx.tryGet<AgentServiceFace>('agent');
+    if (agent === undefined) return; // chat 件未上线——boot 收口与 busy 分支两处再试
+    reloadHookArmed = true;
+    agent.onRunSettled(() => {
+      if (!reloadPending) return;
+      // 排水条件 = 全闲：本驱动已结算，其余非退役驱动也须不在跑（多会话并存）
+      if ([...registry.entries.values()].some((entry) => !entry.retired && entry.driver.isRunning)) return;
+      reloadPending = false; // 先清再执行：失败不重排，竞速 queued 在结果面重置
+      void reload().then((result) => {
+        if (result.queued === true) {
+          reloadPending = true; // 排水瞬间又有 run 起跑——留待该 run 结算再排（静默）
+          return;
+        }
+        if (result.error !== undefined) {
+          ui.notify(`排队的重载失败：${result.error}\n（原组合仍在运行——修正 overlay 后再试）`);
+          return;
+        }
+        const payload = result.payload;
+        if (payload !== undefined) {
+          const parts = [`激活 ${payload.activated.length}`];
+          if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
+          parts.push(`跳过 ${payload.skipped.length}`);
+          ui.notify(`排队的重载已执行：${parts.join('，')}`);
+        }
+      });
+    });
+  };
+
+  /** 组合树全量重载单次执行体（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面） */
+  const reloadOnce = async (): Promise<ReloadResult> => {
+    // run 进行中排队（刀 2 改排队不拒绝；loop 正引用工具快照与提示词，装配不换；
+    // S1：任一非退役驱动在跑即排队——多会话并存时全树装配不换。单槽 coalesce：
+    // 已排队再排 no-op；chat 件若此刻才上线顺手武装结算钩子）
     if ([...registry.entries.values()].some((entry) => !entry.retired && entry.driver.isRunning)) {
-      return { busy: true };
+      reloadPending = true;
+      armRunSettledHook();
+      return { queued: true };
     }
     // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
     let fresh: CompositionReport;
@@ -1362,6 +1440,20 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       loadWindow = false;
     }
   };
+  /* /reload 串行链（刀 2）：并发调用（TUI 手动 + 排队排水自动）按序执行、各拿
+   * 各的结果——排水竞速手动 reload 不再产生双 dispose/双装载竞态；排队在链上的
+   * 调用真正轮到时才做 busy 判定（run 仍在跑则照常置 pending 返 queued）。 */
+  let reloadChain: Promise<unknown> = Promise.resolve();
+  const reload = (): Promise<ReloadResult> => {
+    const run = reloadChain.then(reloadOnce);
+    reloadChain = run.then(
+      () => undefined,
+      () => undefined, // 失败吸收进链（错误已由各调用方的结果面承载——链永不断流）
+    );
+    return run;
+  };
+  // boot ⑨ 收口武装结算钩子（chat 件已装载则一次成功；装载失败留待 busy 分支再试）
+  armRunSettledHook();
 
   /* ---- ⑨b 内置命令（help/quit/new/skills/skill:<名> + 插件管理五件/reload） ----
    * 依赖 ⑨ 的 plugins 服务与 reload 闭包——必须在其后注册（引用先声明）。

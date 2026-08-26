@@ -479,6 +479,25 @@ export class Store {
     return row?.id;
   }
 
+  /**
+   * 按事件词聚合「含该词事件的会话数」（uninstall 级联警示的取数面，契约篇
+   * §3.4 第二刀，2026-08-27 刀 2）：`COUNT(DISTINCT session_id) … WHERE type IN`
+   * 按词分组——全库精确聚合无行式帽（latestSessionId 内核表读脸同族：宿主侧
+   * Store 直查合法；插件面 queryEvents 保持行式有帽不动——模型面工具与宿主
+   * 服务各用各的原语面，面不通）。
+   *
+   * types 是数据条件非词汇断言（判据同 queryEvents）：未注册/已消失的词返回
+   * 零计不抛（GROUP BY 无匹配行即不出现在结果里）。迟滞披露同款：读物理库，
+   * write-behind 未 flush 尾部不可见——屏障归调用侧（assembly 注入闭包内先
+   * flush 再聚合，与 ctx.sessions.queryEvents 的 flushFirst 同纪律）。
+   */
+  affectedSessionCounts(types: readonly string[]): Record<string, number> {
+    if (types.length === 0) return {}; // 空词表 = 无聚合对象（「匹配零行」与「不过滤」在此无歧义——结果恒空）
+    const sql = `SELECT type, COUNT(DISTINCT session_id) AS n FROM events WHERE type IN (${types.map(() => '?').join(', ')}) GROUP BY type`;
+    const rows = this.stmt(sql).all(...(types as never[])) as Array<{ type: string; n: number }>;
+    return Object.fromEntries(rows.map((row) => [row.type, row.n]));
+  }
+
   /* ---------------- 跨会话有界查询（会话篇 §3.4，2026-08-27 刀 1） ---------------- */
 
   /** queryEvents 页大小缺省值（会话篇 §3.4） */

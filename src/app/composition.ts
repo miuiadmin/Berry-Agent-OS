@@ -625,3 +625,52 @@ export function upsertOverlayPluginRef(dataDir: string, id: string, pluginRef: s
     : [...rows, { id, plugin: pluginRef }];
   saveOverlayRows(dataDir, next);
 }
+
+/**
+ * uninstall 写回半边①（ctx.plugins.uninstall 三源文件行的持久化半边，契约篇
+ * §3.4 第二刀——与 toggleOverlayRow 同构的行集操作）：整行移除 overlay 行。
+ * 「重装对账即恢复」由此免费获得——overlay 行没了，install 的 upsert 会重写；
+ * 移除替换行会让官方默认层同 id 行重新露出（后写胜出随行消失，回出厂态）。
+ * 行不在 overlay = no-op（调用方已保证行存在于 overlay 或官方层；纯官方层
+ * builtin 行走 disableOverlayRow 不走本面）。Ring 1 / fixed 拒卸在服务面先裁。
+ */
+export function removeOverlayRow(dataDir: string, id: string): void {
+  const rows = loadOverlayRows(dataDir);
+  if (!rows.some((row) => row.id === id)) return;
+  saveOverlayRows(
+    dataDir,
+    rows.filter((row) => row.id !== id),
+  );
+}
+
+/**
+ * uninstall 写回半边②（builtin 行卸载的持久化半边）：overlay 禁用行落盘——
+ * **幂等硬禁用**，非 toggle 翻转（已禁用行保持禁用；platform 门控字符串也
+ * 统一收严为 true——本机视角声明死）。代码随包物理不可删，声明死即禁用死；
+ * 重装 = toggle 回（启用删键，纯禁用行整行移除）。调用方保证行 id 存在于
+ * overlay 或官方层、且非 Ring 1 / fixed 行。
+ */
+export function disableOverlayRow(dataDir: string, id: string): void {
+  const rows = loadOverlayRows(dataDir);
+  const existing = rows.find((row) => row.id === id);
+  if (existing?.disabled === true) return; // 已硬禁用——幂等 no-op
+  const next = existing
+    ? rows.map((row) => (row.id === id ? { ...row, disabled: true as const } : row))
+    : [...rows, { id, disabled: true as const }];
+  saveOverlayRows(dataDir, next);
+}
+
+/**
+ * 行位置双查（overlay 行 + 官方默认层行，契约篇 §3.4 第二刀 uninstall 的
+ * 存在性判据）：行现状 = overlay 行先出（后写胜出语义的读半边），官方层行
+ * 供 builtin 归属与「卸替换行回出厂态」判定。两者皆无 = 调用方按未知行拒绝。
+ */
+export function findRowLocation(
+  dataDir: string,
+  id: string,
+): { overlay?: CompositionRow; defaultRow?: CompositionRow } {
+  return {
+    overlay: loadOverlayRows(dataDir).find((row) => row.id === id),
+    defaultRow: DEFAULT_LAYER_ROWS.find((row) => row.id === id),
+  };
+}
