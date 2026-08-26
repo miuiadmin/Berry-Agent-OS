@@ -57,6 +57,22 @@ export default async function apply(ctx, config) {
 }
 `;
 
+/** OOM fixture（观测锚⑤ 回归锁）：grow 无界分配 V8 old-space——48MB 堆上限
+ * 触顶即 worker 'error' 事件（"Worker terminated due to reaching memory
+ * limit" 签名）+ exit code 1（probe-oom.mjs 实证：与普通崩溃同码，签名是
+ * 唯一判据——归因面不得依赖 exit code） */
+const FX_OOM = `
+export const name = 'fleet-oom';
+export default async function apply(ctx, config) {
+  ctx.provide('fleet/taps-' + config.slot, {
+    grow: () => {
+      const junk = [];
+      for (;;) junk.push(new Array(100_000).fill('x'));
+    },
+  });
+}
+`;
+
 /** 轮询直到谓词为真（死亡结算等异步到达面的确定性等待；谓词可同步可异步） */
 async function until(predicate: () => boolean | Promise<boolean>, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -249,6 +265,48 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     // 武装后正常运行：零误杀、零死亡结算、域活
     expect(marked).toHaveLength(0);
     expect(fleet.stats()).toMatchObject({ live: 1, heartbeatFreezes: 0, crashed: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('OOM 归因（观测锚⑤）：堆超限死 → worker/oom 事件携 diagnostic 签名 + ooms 归因计数（probe-oom 实证形态）', async () => {
+    const { root, anchor, dir } = setupFixture('fleet-oom');
+    const oomEntry = join(dir, 'fx-oom.ts');
+    writeFileSync(oomEntry, FX_OOM);
+    /** 死亡结算记录（markFailed 注入物——OOM 域死走意外死亡全流程） */
+    const marked: Array<{ id: string; code: string; message: string }> = [];
+    /** worker/oom 事件记录（观测锚⑤ 事件面——签名归因的广播词汇） */
+    const oomEvents: Array<{ rowId: string; workerId: string; diagnostic: string }> = [];
+    anchor.on('worker/oom', (p: { rowId: string; workerId: string; diagnostic: string }) => oomEvents.push(p));
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+      // 48MB 堆上限（probe-oom.mjs 实证档位：增长面秒级触顶，不拖慢套件）
+      resourceLimits: { maxOldGenerationSizeMb: 48 },
+      markFailed: (id, code, message) => marked.push({ id, code, message }),
+    });
+    await fleet.loader.load({ id: 'oom', entry: oomEntry, runtime: 'worker' });
+    const scope = anchor.fork({ name: 'oom', rowId: 'oom' });
+    await fleet.loader.apply({ id: 'oom', entry: oomEntry, runtime: 'worker', config: { slot: 'oom' } }, scope);
+    const taps = root.get<Record<string, () => Promise<unknown>>>('fleet/taps-oom');
+    // 点燃堆增长：V8 old-space 触顶 → worker 'error' 事件（内存超限签名）→ exit
+    // code 1（与普通崩溃同码——签名是唯一判据）。catch 立即挂接（域死时在途
+    // 调用按 WORKER_EXITED 结算，早于断言面）
+    const inflight = taps.grow!().catch((e: unknown) => e);
+    await until(() => marked.length > 0 && oomEvents.length > 0);
+    // 意外死亡结算：BRIDGE_WORKER_EXITED 保码（宁可死得响亮）
+    expect(marked[0]).toMatchObject({ id: 'oom', code: BRIDGE_WORKER_EXITED });
+    // 观测锚⑤：diagnostic = worker error 事件原始错误（构造名: 消息），
+    // 签名串「reaching memory limit」命中即内存超限归因（probe-oom 实证）
+    expect(oomEvents[0]).toMatchObject({ rowId: 'oom', workerId: 'w:oom' });
+    expect(oomEvents[0]!.diagnostic).toContain('reaching memory limit');
+    // 在途 grow 按域死结算（WORKER_EXITED——非超时非取消）
+    expect(((await inflight) as { code?: string }).code).toBe(BRIDGE_WORKER_EXITED);
+    // 归因计数：意外死亡 crashed=1 且 ooms=1（crashed 的内存超限归因子集，
+    // 维度正交——既计 crashed 又计 ooms）；心跳面不动
+    expect(fleet.stats()).toMatchObject({ live: 0, crashed: 1, ooms: 1, heartbeatFreezes: 0 });
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });

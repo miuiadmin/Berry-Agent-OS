@@ -14,7 +14,10 @@
     "declaration": true,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "paths": {
+      "berryagent": ["./src/contracts/index.ts"]
+    }
   },
   "include": ["src"]
 }
