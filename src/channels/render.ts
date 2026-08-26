@@ -80,13 +80,26 @@ function renderCustom(role: string, content: unknown): string[] {
 /**
  * 消息渲染总入口：自定义渲染器优先（按角色注册的后写胜出者），
  * 回落内置形态。返回空数组 = 该消息不展示。
+ *
+ * 渲染器异常隔离（契约篇 §1.6 监听器异常隔离在渲染面的执法，隔离案一第一刀
+ * #1——消 P15/P16 进程退出级）：自定义 render 抛错被捕获并上报诊断回调，
+ * 该消息回落内置形态——事件流与历史渲染两条路径共用本入口，一处包裹全覆盖。
+ * @param onRendererError 渲染器异常诊断回调（角色名归因；装配层接 logger.error）
  */
 export function renderAgentMessage(
   message: AgentMessage,
   rendererFor?: (role: string) => RendererDefinition | undefined,
+  onRendererError?: (err: unknown, role: string) => void,
 ): string[] {
   const custom = rendererFor?.(message.role);
-  if (custom) return custom.render(message);
+  if (custom) {
+    try {
+      return custom.render(message);
+    } catch (err) {
+      // 坏渲染器不杀进程：上报后回落内置形态（诊断不丢，事件流不毒）
+      onRendererError?.(err, message.role);
+    }
+  }
 
   // 正向守卫窄化：真分支 = 标准三角色，假分支 = CustomMessage（render intent）
   if (isStandardMessage(message)) {

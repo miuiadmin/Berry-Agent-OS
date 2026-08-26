@@ -19,7 +19,7 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { basename, dirname, join, parse, resolve } from 'node:path';
+import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_INSTALL_FAILED } from '../contracts/errors.js';
 import type { PluginLoadResult, PluginPlanRow } from '../contracts/plugin.js';
@@ -123,6 +123,9 @@ export function createPluginsService(opts: { dataDir: string; runner?: InstallRu
       if (source === 'git') {
         const parsed = parseGitUrl(ref);
         const absDir = join(dataDir, 'plugins', 'git', parsed.relDir);
+        // 纵深防线（P33 第二道）：段净化之后仍强制校验归一路径在 git 子树内——
+        // rmSync 前的最后一道闸，未来 parse 漂移也不可穿越出装机子树
+        assertInsideGitRoot(dataDir, absDir);
         // 幂等：先清 clone 目录（重装/半装残骸都不留），父目录补齐（git 只建末级）
         rmSync(absDir, { recursive: true, force: true });
         mkdirSync(dirname(absDir), { recursive: true });
@@ -172,6 +175,9 @@ export function createPluginsService(opts: { dataDir: string; runner?: InstallRu
       }
       const gitRoot = join(dataDir, 'plugins', 'git');
       if (ref.startsWith(`${gitRoot}/`)) {
+        // 纵深防线（P33 第二道）：overlay 手改/污染的 plugin 引用同受越界校验——
+        // `gitRoot/../escape` 形态字面 startsWith 命中但归一后已在子树外
+        assertInsideGitRoot(dataDir, ref);
         // git 源：删目录按原 ref 重克隆（sources.json 是 ref 的唯一存放处）
         const relDir = ref.slice(gitRoot.length + 1);
         const record = loadGitSources(dataDir)[relDir];
@@ -255,15 +261,45 @@ function parseGitUrl(url: string): GitUrlParts {
     }
   }
   const segments = (path ?? '').split('/').filter((seg) => seg.length > 0);
-  if (!host || segments.length < 2) {
+  // 段净化（P33 第一道，隔离案一第一刀 #15）：host 与每个路径段都必须是
+  // 「纯文件名形态」——字符集白名单 [A-Za-z0-9._-] 且禁 `.`/`..` 相对段。
+  // 修复前 `git@..:../..` 可拼出 relDir `../../..`，install 的幂等 rmSync
+  // 会整删数据目录父级（全清单唯一「今日即炸」数据破坏活漏洞）；教训泛化：
+  // 防了注入（数组参数 + `--` 分隔）≠ 防了穿越（`..` 段的路径语义面）
+  if (!host || !isSafePathSegment(host) || segments.length < 2 || segments.some((seg) => !isSafePathSegment(seg))) {
     throw new AppError(
       COMPOSITION_ROW_INVALID,
-      `install：git URL 形态无法拆解：${url}（期望 git@host:owner/repo.git 或 https://host/owner/repo.git）`,
+      `install：git URL 形态无法拆解或含不安全段：${url}（期望 git@host:owner/repo.git 或 https://host/owner/repo.git；各段仅限字母/数字/._- 且禁 . 与 ..）`,
     );
   }
   const repo = segments[segments.length - 1]!.replace(/\.git$/, '');
   const first = segments[0]!;
   return { repo, relDir: `${host}/${first}/${repo}` };
+}
+
+/** git URL 段白名单字符集（防 `..`/路径分隔符/特殊字符构造穿越——B3 §10-4） */
+const GIT_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
+
+/** 单段安全判定：字符集合法且非 `.`/`..`（相对段 join 后会穿越出目标子树） */
+function isSafePathSegment(segment: string): boolean {
+  return GIT_SEGMENT_RE.test(segment) && segment !== '.' && segment !== '..';
+}
+
+/**
+ * 越界防线（P33 第二道，纵深防御）：clone 目录经 resolve 归一后必须严格落在
+ * `<数据目录>/plugins/git/` 子树**内**（子树根本身也不许——那是 sources.json 所在地）。
+ * 段净化（第一道）拦 URL 形态；本防线拦「归一后越界」的一切路径来源——
+ * install 的 parse 产物与 update 的 overlay 引用（手改/污染面）同受校验。
+ */
+function assertInsideGitRoot(dataDir: string, dir: string): void {
+  const root = resolve(join(dataDir, 'plugins', 'git'));
+  const target = resolve(dir);
+  if (!target.startsWith(`${root}${sep}`)) {
+    throw new AppError(
+      COMPOSITION_ROW_INVALID,
+      `install/update：clone 目录越界（${dir} 归一为 ${target}，须在 ${root} 子树内）——路径穿越拒绝`,
+    );
+  }
 }
 
 /* ---------------- git 源登记（sources.json——update 重克隆的 ref 依据） ---------------- */
@@ -305,27 +341,65 @@ function saveGitSource(dataDir: string, relDir: string, record: GitSourceRecord)
 
 /* ---------------- 装机子进程执行 ---------------- */
 
-/** 真装机执行器：spawn 子进程，非零退出抛错（含输出尾行——诊断直达） */
-function spawnRunner(command: string, args: readonly string[], opts: { cwd: string }): Promise<void> {
+/** 装机子进程硬顶（毫秒）——P32：npm/git 卡死不再永挂（缺省 5 分钟） */
+const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** 单流输出滚动尾窗上限（字符计）——P32：装机输出无界积累的帽，保尾部为诊断 */
+const INSTALL_OUTPUT_CAP = 1024 * 1024;
+
+/**
+ * 真装机执行器：spawn 子进程，非零退出抛错（含输出尾行——诊断直达）。
+ * P32 两道护栏（隔离案一第一刀 #16）：① 超时硬顶——到点 SIGKILL 强杀
+ * （'close' 随后到达统一收尾，不再永挂）；② stdout/stderr 各 1MiB 滚动
+ * 尾窗——超帽从头部丢弃（失败尾行是诊断要点），截断发生即在错误消息标注。
+ * @param opts.timeoutMs 超时覆盖（测试注入用；缺省 5 分钟）
+ */
+export function spawnRunner(
+  command: string,
+  args: readonly string[],
+  opts: { cwd: string; timeoutMs?: number },
+): Promise<void> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
+    // 滚动尾窗累加器（truncated 标记截断是否发生过——消息头标注用）
+    const stdout = { text: '', truncated: false };
+    const stderr = { text: '', truncated: false };
+    const appendCapped = (acc: { text: string; truncated: boolean }, chunk: Buffer): void => {
+      acc.text += chunk.toString();
+      if (acc.text.length > INSTALL_OUTPUT_CAP) {
+        acc.text = acc.text.slice(-INSTALL_OUTPUT_CAP);
+        acc.truncated = true;
+      }
+    };
+    child.stdout.on('data', (chunk: Buffer) => appendCapped(stdout, chunk));
+    child.stderr.on('data', (chunk: Buffer) => appendCapped(stderr, chunk));
+    // 超时硬顶：SIGKILL 后 'close' 到达走 timedOut 分支（清钟防泄漏）
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, opts.timeoutMs ?? INSTALL_TIMEOUT_MS);
+    const clearTimer = (): void => clearTimeout(timer);
     // spawn 级失败（命令不存在等）与退出非零同路归一
-    child.on('error', (err) => reject(err));
+    child.on('error', (err) => {
+      clearTimer();
+      reject(err);
+    });
     child.on('close', (code) => {
+      clearTimer();
+      if (timedOut) {
+        reject(new Error(`装机子进程超时（${opts.timeoutMs ?? INSTALL_TIMEOUT_MS}ms）已强杀：${command}`));
+        return;
+      }
       if (code === 0) {
         resolvePromise();
         return;
       }
-      const tail = (stderr.trim() || stdout.trim()).split('\n').slice(-5).join('\n');
-      reject(new Error(`退出码 ${code}${tail.length > 0 ? `\n${tail}` : ''}`));
+      const source = stderr.text.trim() || stdout.text.trim();
+      const head = source.length > 0 && (stderr.truncated || stdout.truncated) ? '[输出超限已截断，保尾部]\n' : '';
+      const tail = source.split('\n').slice(-5).join('\n');
+      const body = tail.length > 0 ? `\n${head}${tail}` : '';
+      reject(new Error(`退出码 ${code}${body}`));
     });
   });
 }

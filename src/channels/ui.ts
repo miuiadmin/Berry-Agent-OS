@@ -22,8 +22,18 @@ export function parseBooleanAnswer(text: string): boolean | undefined {
   return undefined;
 }
 
-/** 组装 ctx.ui 聚合器 */
-export function createUiService(): UiService {
+/** 组装 ctx.ui 聚合器（隔离案一第一刀 #3：广播循环逐后端异常隔离，消 P19——坏后端不毒调用方、不截断后续后端） */
+export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' | 'setStatus') => void }): UiService {
+  /** 广播异常诊断回调（装配层接 logger——「没生效必须有信号」纪律） */
+  const onError = opts?.onError;
+  /** 单后端调用隔离壳：抛错上报后继续——广播语义是「尽力达全部通道」非事务 */
+  const callIsolated = (op: 'notify' | 'setStatus', invoke: () => void): void => {
+    try {
+      invoke();
+    } catch (err) {
+      onError?.(err, op);
+    }
+  };
   /** 在线后端（接入序即优先序） */
   const backends: UiBackend[] = [];
 
@@ -59,8 +69,8 @@ export function createUiService(): UiService {
   };
 
   const service: UiService = {
-    notify(message: string, opts?: NotifyOptions) {
-      for (const backend of backends) backend.notify(message, opts);
+    notify(message: string, notifyOpts?: NotifyOptions) {
+      for (const backend of backends) callIsolated('notify', () => backend.notify(message, notifyOpts));
     },
 
     async confirm(message: string) {
@@ -82,7 +92,7 @@ export function createUiService(): UiService {
     },
 
     setStatus(status: string) {
-      for (const backend of backends) backend.setStatus(status);
+      for (const backend of backends) callIsolated('setStatus', () => backend.setStatus(status));
     },
 
     setWidget(node: unknown) {

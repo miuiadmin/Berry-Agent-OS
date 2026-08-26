@@ -80,6 +80,47 @@ describe('UiService 非交互原语', () => {
   });
 });
 
+describe('UiService 广播异常隔离（隔离案一第一刀 #3 回归锁）', () => {
+  /** 抛错后端：notify/setStatus 均抛（模拟坏通道壳） */
+  function throwingBackend(id: string): UiBackend {
+    return {
+      id,
+      notify: () => {
+        throw new Error(`${id} notify 坏了`);
+      },
+      setStatus: () => {
+        throw new Error(`${id} setStatus 坏了`);
+      },
+    };
+  }
+
+  it('坏后端抛错 → 不毒调用方、不截断后续后端 + onError 携操作名上报', () => {
+    const seen: { err: unknown; op: string }[] = [];
+    const ui = createUiService({ onError: (err, op) => seen.push({ err, op }) });
+    const good = stubBackend('good');
+    // 修复前：首个坏后端抛错直接穿透 notify 调用方（P19），good 后端收不到
+    ui.attach(throwingBackend('bad'));
+    ui.attach(good.backend);
+    expect(() => ui.notify('广播', { level: 'error' })).not.toThrow(); // 调用方免疫
+    expect(() => ui.setStatus('忙碌')).not.toThrow();
+    expect(good.calls).toEqual([
+      { op: 'notify', message: '广播' },
+      { op: 'setStatus', message: '忙碌' },
+    ]); // 坏后端在前不截断后续后端——广播是「尽力达全部通道」
+    expect(seen.map((s) => s.op)).toEqual(['notify', 'setStatus']); // 诊断不静默
+    expect(String((seen[0]!.err as Error).message)).toContain('notify 坏了');
+  });
+
+  it('无 onError 回调时隔离照常（缺省静默隔离不炸）', () => {
+    const ui = createUiService();
+    const good = stubBackend('solo-good');
+    ui.attach(throwingBackend('bad'));
+    ui.attach(good.backend);
+    expect(() => ui.notify('x')).not.toThrow();
+    expect(good.calls).toEqual([{ op: 'notify', message: 'x' }]);
+  });
+});
+
 describe('UiService 阻塞原语直连', () => {
   it('confirm / input / select 直达首个支持的后端（接入序即优先序）', async () => {
     const ui = createUiService();

@@ -55,10 +55,17 @@ export function registerUiService(ctx: Context, service: UiService): Disposer {
   return ctx.provide('ui', service);
 }
 
-/** 便捷装配：组两个服务并挂进 ctx（app 组合根单入口用；随作用域自动回卷） */
-export function registerChannelServices(ctx: Context): { channels: ChannelsServiceEntity; ui: UiService } {
+/**
+ * 便捷装配：组两个服务并挂进 ctx（app 组合根单入口用；随作用域自动回卷）。
+ * @param opts.onUiError UI 广播异常诊断回调（隔离案一第一刀 #3——组合根接
+ *   ctx.logger，坏后端异常「有信号」不静默吞）
+ */
+export function registerChannelServices(
+  ctx: Context,
+  opts?: { onUiError?: (err: unknown, op: 'notify' | 'setStatus') => void },
+): { channels: ChannelsServiceEntity; ui: UiService } {
   const channels = createChannelsService();
-  const ui = createUiService();
+  const ui = createUiService({ onError: opts?.onUiError });
   registerChannelsService(ctx, channels);
   registerUiService(ctx, ui);
   return { channels, ui };

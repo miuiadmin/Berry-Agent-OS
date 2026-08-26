@@ -43,6 +43,12 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     host: front,
     commands: runtime.channels.commands,
     rendererFor: (role) => runtime.channels.rendererFor(role),
+    // 渲染器异常诊断（隔离案一第一刀 #1）：坏渲染器回落内置形态 + 根 logger 留痕
+    // （含角色归因与栈）——事件流与历史渲染两路径的进程退出级穿透（P15/P16）由此闭合
+    onRendererError: (err, role) =>
+      runtime.ctx.logger.error(`渲染器异常已隔离（角色 ${role}，已回落内置形态）`, {
+        error: err instanceof Error ? err.stack : String(err),
+      }),
     title: `Berry ${VERSION}`,
     history: () => projectedToAgentMessages(runtime.session?.deriveMessages() ?? []),
   });

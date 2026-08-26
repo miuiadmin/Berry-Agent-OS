@@ -140,6 +140,52 @@ describe('renderAgentMessage 自定义渲染器优先', () => {
   });
 });
 
+describe('renderAgentMessage 渲染器异常隔离（隔离案一第一刀 #1 回归锁）', () => {
+  it('坏渲染器抛错 → 回落内置形态 + onRendererError 携错误与角色名上报', () => {
+    const seen: { err: unknown; role: string }[] = [];
+    const boom = new Error('渲染器坏了');
+    const renderers = new Map<string, RendererDefinition>([
+      [
+        'user',
+        {
+          role: 'user',
+          render: () => {
+            throw boom;
+          },
+        },
+      ],
+    ]);
+    const rendererFor = (role: string) => renderers.get(role);
+    // 修复前：异常直接穿透 renderAgentMessage 抛出（P15/P16 进程退出级）
+    const lines = renderAgentMessage(userMsg('回落正文'), rendererFor, (err, role) => {
+      seen.push({ err, role });
+    });
+    expect(lines).toEqual(['❯ 回落正文']); // 内置形态兜底——消息不丢
+    expect(seen).toEqual([{ err: boom, role: 'user' }]); // 诊断不静默
+  });
+
+  it('正常渲染器不受隔离壳影响；无回调时回落照常（缺省可省参）', () => {
+    const renderers = new Map<string, RendererDefinition>([
+      ['user', { role: 'user', render: () => ['[自定义] 正常'] }],
+    ]);
+    const rendererFor = (role: string) => renderers.get(role);
+    expect(renderAgentMessage(userMsg('hi'), rendererFor)).toEqual(['[自定义] 正常']);
+    // 无诊断回调 + 坏渲染器：回落照常、不炸（回调可选）
+    const bad = new Map<string, RendererDefinition>([
+      [
+        'user',
+        {
+          role: 'user',
+          render: () => {
+            throw new Error('x');
+          },
+        },
+      ],
+    ]);
+    expect(renderAgentMessage(userMsg('兜底'), (role) => bad.get(role))).toEqual(['❯ 兜底']);
+  });
+});
+
 describe('renderAgentMessage 自定义角色（render intent）', () => {
   it('hidden → 空行；label 定制；未注册角色按角色名兜底', () => {
     const unregisterHidden = registerHostMessageRole('t-hidden-x', {

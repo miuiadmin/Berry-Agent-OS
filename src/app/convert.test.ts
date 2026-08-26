@@ -89,4 +89,35 @@ describe('defaultConvertToLlm', () => {
       dispose();
     }
   });
+
+  it('隔离案一第一刀 #2 回归锁：toLlm 抛错 → 按丢弃收尾 + onDrop 携原因上报（run 不被穿透杀掉）', () => {
+    const dropped: { role: string; reason?: string }[] = [];
+    const boom = new Error('转换器炸了');
+    const dispose = registerHostMessageRole('t-conv-broken', {
+      toLlm: () => {
+        throw boom;
+      },
+    });
+    try {
+      // 修复前：异常穿透 defaultConvertToLlm 抛出（P14 run 级穿透——「永不
+      // throw」自述违约）；修复后：坏转换器只蒸发自己的消息，其余透传不受影响
+      const out = defaultConvertToLlm(
+        [
+          { role: 'user', content: '前一条', timestamp: now },
+          { role: 't-conv-broken', content: '坏消息', timestamp: now },
+          { role: 'user', content: '后一条', timestamp: now },
+        ],
+        (role, reason) => dropped.push({ role, reason }),
+      );
+      expect(out).toHaveLength(2); // 前后两条 user 均透传——只有坏条目被丢
+      expect((out[0] as { content: string }).content).toBe('前一条');
+      expect((out[1] as { content: string }).content).toBe('后一条');
+      // 上报分界：角色名 + 「toLlm 抛错」原因（区别于未注册角色的裸角色名）
+      expect(dropped).toHaveLength(1);
+      expect(dropped[0]!.role).toBe('t-conv-broken');
+      expect(dropped[0]!.reason).toContain('toLlm 抛错');
+    } finally {
+      dispose();
+    }
+  });
 });

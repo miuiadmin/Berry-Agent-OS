@@ -89,6 +89,14 @@ export interface ConversationDriverDeps {
   readonly durable?: DurableSinks;
   /** 会话首 run 前落 request/header 快照（chat 件闭包——驱动不知道快照内容） */
   readonly writeHeader?: () => void;
+  /**
+   * 驱动面回调异常诊断（隔离案一第一刀 #4——结构脆弱补强，消 P8'：
+   * onRunSettled 订阅方抛错逐条隔离上报，一个坏订阅不毒后续订阅/驱动本体。
+   * 当前唯一注册者已自带隔离壳；本防线保护的是未来的裸注册者）。
+   * @param err 回调抛出的原始错误
+   * @param source 回调来源标签（'onRunSettled'——日志归因用）
+   */
+  readonly onCallbackError?: (err: unknown, source: string) => void;
 }
 
 /**
@@ -106,6 +114,8 @@ export class ConversationDriver {
   private readonly config: AgentLoopConfig;
   private readonly durable: DurableSinks | undefined;
   private readonly writeHeader: (() => void) | undefined;
+  /** 驱动面回调异常诊断（onRunSettled 逐条隔离的上报口；缺省静默隔离） */
+  private readonly onCallbackError: ((err: unknown, source: string) => void) | undefined;
   /** 展示消费者（TUI handle；headless 无）——emit 扇出的非持久化半边 */
   private readonly displays: AgentEventSink[] = [];
   /** run 取消信号（退出序列 / SIGINT 共用；一次性——abort 即终态） */
@@ -140,6 +150,7 @@ export class ConversationDriver {
     this.context = deps.context;
     this.durable = deps.durable;
     this.writeHeader = deps.writeHeader;
+    this.onCallbackError = deps.onCallbackError;
     // steering 取数口驱动自持：仅 running 期供给（run 间隙的余量走 launch 的
     // followUp 循环，不经此口——两路取数同一条队列，分流点在时机不在通道）。
     // 取出即清投递元数据（steering 路不收窄——工具面随开跑时批已定）
@@ -324,10 +335,20 @@ export class ConversationDriver {
     };
   }
 
-  /** 派发 run 结算（快照遍历——派发中注销/新订不炸迭代；回调异常归服务层隔离壳） */
+  /**
+   * 派发 run 结算（快照遍历——派发中注销/新订不炸迭代；逐回调异常隔离：
+   * 抛错的订阅上报诊断后继续派发，§1.6 监听器异常隔离纪律在驱动面的执法）。
+   */
   private fireRunSettled(status: RunStatus): void {
     const settled: RunSettled = { status, sessionId: this.sessionId };
-    for (const cb of [...this.runSettledListeners]) cb(settled);
+    for (const cb of [...this.runSettledListeners]) {
+      try {
+        cb(settled);
+      } catch (err) {
+        // 坏订阅只蒸发自己这一次通知，不毒后续订阅与驱动本体
+        this.onCallbackError?.(err, 'onRunSettled');
+      }
+    }
   }
 
   /** run 序列：首 run + followUp 续跑循环；异常兜底合成 error 收尾 */

@@ -299,7 +299,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   setProjectAliases(loadProjectAliases(dataDir(), ctx.logger.warn.bind(ctx.logger)));
 
   /* ---- ② 通道与 UI 服务 ---- */
-  const { channels, ui } = registerChannelServices(ctx);
+  const { channels, ui } = registerChannelServices(ctx, {
+    // UI 广播异常诊断（隔离案一第一刀 #3）：坏后端异常经根 logger 留痕——
+    // 广播循环逐后端隔离，单后端抛错不毒调用方、不截断后续通道
+    onUiError: (err, op) =>
+      ctx.logger.error(`UI 广播异常已隔离（${op}）`, { error: err instanceof Error ? err.stack : String(err) }),
+  });
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
   // 首启建档（paths.ts ensureDbDir）：库文件父目录须先在——三入口共用的唯一
@@ -508,13 +513,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const plugins = createPluginsService({ dataDir: compositionDir });
   ctx.provide('plugins', plugins);
   /**
-   * convertToLm 未注册角色丢弃的 debug 上报（#16 拍板 (c)——蒸发陷阱留痕）：
-   * 第三方注入自造角色名曾是全静默过滤（无错无日志），此处接根 logger 让丢弃
-   * 一目了然。注册角色的 toLlm:null 是设计内过滤，不走上报（免刷日志）。
+   * convertToLm 丢弃诊断上报（#16 拍板 (c) + 隔离案一第一刀 #2）：
+   * ①未注册角色（无 reason）——蒸发陷阱留痕（可能是插件未装，debug 级）；
+   * ②toLlm 抛错（带 reason）——插件 bug 已发生，按丢弃收尾不穿透杀 run。
+   * 注册角色的 toLlm:null 是设计内过滤，不上报（免刷日志）。
    */
-  const reportDroppedRole = (role: string): void => {
+  const reportDroppedRole = (role: string, reason?: string): void => {
     ctx.logger.debug(
-      `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——插件面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
+      reason !== undefined
+        ? `convertToLm 丢弃消息：${role}（${reason}）`
+        : `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——插件面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
     );
   };
   /** 拒启收尾（Ring 1 与 Ring 2 启动断言同形）：先收尾持久层再回卷 ctx，抛聚合清单 */

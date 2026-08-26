@@ -42,6 +42,8 @@ export interface TuiChannelOptions {
   readonly commands: CommandRegistry;
   /** 角色渲染器查找（ctx.channels.rendererFor；缺省用内置渲染） */
   readonly rendererFor?: (role: string) => RendererDefinition | undefined;
+  /** 渲染器异常诊断回调（隔离案一第一刀 #1——坏渲染器回落内置形态并留痕；app 注入 logger） */
+  readonly onRendererError?: (err: unknown, role: string) => void;
   /** 终端注入（缺省 ProcessTerminal；测试/特殊终端用） */
   readonly terminal?: Terminal;
   /** 标题行文案（缺省不渲染标题） */
@@ -219,7 +221,7 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         if (isStandardMessage(event.message) && event.message.role === 'assistant') {
           openStreaming();
         } else {
-          appendLines(renderAgentMessage(event.message, opts.rendererFor));
+          appendLines(renderAgentMessage(event.message, opts.rendererFor, opts.onRendererError));
         }
         break;
       case 'message_update':
@@ -271,7 +273,7 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   return {
     handle,
     renderHistory(history) {
-      for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor));
+      for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
     },
     ui() {
       return backend;
@@ -279,7 +281,7 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     start() {
       if (opts.history) {
         const history = opts.history();
-        for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor));
+        for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
       }
       tui.setFocus(editor);
       tui.start();

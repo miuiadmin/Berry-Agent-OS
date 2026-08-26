@@ -21,11 +21,18 @@ import { getMessageRoleDefinition, isStandardMessage } from '../contracts/messag
 /**
  * 默认 LLM 边界转换（app 装配层注入 loop 的 convertToLlm）。
  * @param messages 会话转录（AgentMessage 级全量）
- * @param onDrop 未注册角色丢弃的诊断回调（角色名入参——装配层接 debug 日志；
- *   注册角色的显式 null 丢弃不触发）
+ * @param onDrop 丢弃诊断回调（装配层接 debug 日志）：
+ *   ① 未注册角色（角色名入参）——「本该注册却没注册」的可疑丢弃；
+ *   ② 注册角色的 toLlm 抛错（角色名 + 原因入参，隔离案一第一刀 #2——
+ *     契约篇 §1.6 监听器异常隔离在转换面的执法，消 P14 run 级穿透：
+ *     抛错的 toLlm 按丢弃收尾，本函数「永不 throw」的自述由此成立）。
+ *   注册角色的 toLlm:null 是设计内过滤，不触发回调（免刷日志）。
  * @returns 模型可见消息序列（标准角色引用直通，无拷贝）
  */
-export function defaultConvertToLlm(messages: readonly AgentMessage[], onDrop?: (role: string) => void): Message[] {
+export function defaultConvertToLlm(
+  messages: readonly AgentMessage[],
+  onDrop?: (role: string, reason?: string) => void,
+): Message[] {
   const out: Message[] = [];
   for (const message of messages) {
     // 正向守卫窄化：真分支 = 标准三角色（直通），假分支 = CustomMessage（走定义）
@@ -39,7 +46,15 @@ export function defaultConvertToLlm(messages: readonly AgentMessage[], onDrop?: 
       onDrop?.(message.role);
       continue;
     }
-    const converted = definition.toLlm?.(message) ?? null;
+    let converted: Message | Message[] | null;
+    try {
+      converted = definition.toLlm?.(message) ?? null;
+    } catch (err) {
+      // toLlm 抛错 = 插件 bug：按「未注册角色」同路丢弃 + 原因留痕——
+      // 一个坏转换器只蒸发自己的消息，不穿透杀掉整个 run（§1.6 纪律）
+      onDrop?.(message.role, `toLlm 抛错（已丢弃该条）：${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
     if (converted === null) continue; // 显式丢弃 → 模型不可见
     out.push(...(Array.isArray(converted) ? converted : [converted]));
   }

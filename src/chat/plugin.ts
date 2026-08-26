@@ -444,6 +444,12 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         },
         durable, // 直连本会话（S1——转发壳只剩组合根侧 gate/approval 两路）
         writeHeader,
+        // 驱动面回调异常诊断（隔离案一第一刀 #4）：onRunSettled 逐条隔离上报——
+        // 坏订阅不毒后续订阅与驱动本体，异常经根 logger 留痕（含栈）
+        onCallbackError: (err, source) =>
+          deps.rootCtx.logger.error(`驱动面回调异常已隔离（${source}）`, {
+            error: err instanceof Error ? err.stack : String(err),
+          }),
       });
       const entry: DriverEntry = {
         session,

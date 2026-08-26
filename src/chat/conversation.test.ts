@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions } from '../contracts/llm.js';
 import type { AgentTool } from '../contracts/tools.js';
-import { ConversationDriver, resolveWakeToolAllowList } from './conversation.js';
+import { ConversationDriver, resolveWakeToolAllowList, type ConversationDriverDeps } from './conversation.js';
 
 /* ---------------- 纯函数：批白名单判定 ---------------- */
 
@@ -82,7 +82,7 @@ function recordingStream(contexts: LlmContext[]): StreamFn {
 }
 
 /** 装配最小驱动（真 loop + 脚本模型层——工具面投影走真实 startRun 路径） */
-function makeDriver() {
+function makeDriver(overrides: Partial<ConversationDriverDeps> = {}) {
   const contexts: LlmContext[] = [];
   const baseTools = [...TOOLS];
   const driver = new ConversationDriver({
@@ -105,6 +105,7 @@ function makeDriver() {
               },
         ),
     },
+    ...overrides,
   });
   return { driver, contexts, baseTools };
 }
@@ -136,5 +137,44 @@ describe('ConversationDriver 收窄投影（第二十四批题3a）', () => {
     await driver.settle();
     expect(contexts[1]!.tools ?? []).toHaveLength(5);
     expect(contexts).toHaveLength(2);
+  });
+});
+
+describe('ConversationDriver 回调异常隔离（隔离案一第一刀 #4 回归锁）', () => {
+  it('onRunSettled 订阅方抛错 → 后续订阅照常收 + run 正常结算 + onCallbackError 携来源上报', async () => {
+    const seen: { err: unknown; source: string }[] = [];
+    const boom = new Error('订阅方 1 坏了');
+    const { driver } = makeDriver({
+      onCallbackError: (err, source) => seen.push({ err, source }),
+    });
+    const received: string[] = [];
+    driver.onRunSettled(() => {
+      throw boom; // 先注册的坏订阅——修复前会穿透 fireRunSettled 毒掉 run 收尾
+    });
+    driver.onRunSettled((settled) => received.push(settled.status));
+
+    // 修复后：坏订阅只蒸发自己这一次通知，run 照常完成、好订阅照常收
+    driver.submit('你好');
+    await driver.settle();
+    expect(received).toEqual(['completed']); // 后续订阅不被截断
+    expect(seen).toEqual([{ err: boom, source: 'onRunSettled' }]); // 诊断归因不静默
+    // 驱动存活：第二次 run 照常起（隔离不留暗伤）
+    const received2: string[] = [];
+    driver.onRunSettled((s) => received2.push(s.status));
+    driver.submit('再来');
+    await driver.settle();
+    expect(received2).toEqual(['completed']); // 第二次 run 的结算
+  });
+
+  it('无 onCallbackError 注入时隔离照常（缺省静默隔离不炸 run 收尾）', async () => {
+    const { driver } = makeDriver();
+    const received: string[] = [];
+    driver.onRunSettled(() => {
+      throw new Error('无人接管的坏订阅');
+    });
+    driver.onRunSettled((s) => received.push(s.status));
+    driver.submit('x');
+    await driver.settle(); // 修复前：坏订阅抛错穿透 run 收尾（settle 拒绝）；修复后正常落定
+    expect(received).toEqual(['completed']);
   });
 });

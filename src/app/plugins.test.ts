@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_INSTALL_FAILED } from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
-import { createPluginsService, type InstallRunner } from './plugins.js';
+import { createPluginsService, spawnRunner, type InstallRunner } from './plugins.js';
 import { loadComposition } from './composition.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -262,6 +262,94 @@ describe('toggle 与 update', () => {
       expect((err as AppError).code).toBe(PLUGIN_INSTALL_FAILED);
       expect((err as AppError).message).toContain('sources.json');
     }
+  });
+});
+
+/* ---------------- 装机面安全（隔离案一第一刀：P33 路径穿越 + P32 子进程护栏） ---------------- */
+
+describe('装机面安全（隔离案一第一刀 #15/#16）', () => {
+  /**
+   * 独立沙箱：root 下建 data 数据目录与 canary 哨兵——穿越 rmSync 若可达，
+   * `git@..:../..` 形态归一后落在 root 本身，哨兵必被抹掉（红转绿的爆炸半径证明）。
+   */
+  function makeSandbox(): { root: string; dataDir: string; canary: string } {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plugins-sec-')));
+    const dataDir = join(root, 'data');
+    mkdirSync(dataDir, { recursive: true });
+    const canary = join(root, 'canary.txt');
+    writeFileSync(canary, '数据目录父级哨兵——穿越删除若可达必先抹掉我');
+    return { root, dataDir, canary };
+  }
+
+  it('P33 表驱动子弹：穿越/不安全段 URL 全拒（COMPOSITION_ROW_INVALID），哨兵完好', async () => {
+    // 修复前 `git@..:../..` 拼出 relDir `../../..` → install 幂等 rmSync 整删数据目录父级
+    const bullets = [
+      'git@..:../..', // host 与路径段全是 ..——最烈形态（修复前可整删家园）
+      'git@..:a/b', // host 为 ..（relDir=../a/b 逃出 git 子树）
+      'git@host:../escape.git', // 首路径段 ..
+      'git@github.com:foo/../bar.git', // 中段 ..
+      'git@github.com:fo o/bar.git', // 段内空格（字符集白名单外）
+      'https://github.com/foo/bar%2E%2E.git', // 编码形态 ..（%2E%2E）——字符集白名单连带拦住
+    ];
+    for (const url of bullets) {
+      const { dataDir, canary } = makeSandbox();
+      const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+      try {
+        await plugins.install(url);
+        expect.unreachable(`穿越子弹应拒：${url}`);
+      } catch (err) {
+        expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+      }
+      expect(existsSync(canary)).toBe(true); // 数据目录父级哨兵完好
+    }
+  });
+
+  it('P33 纵深（update 面）：overlay 手改 plugin 引用越界——拒绝且目标目录完好', async () => {
+    const { dataDir } = makeSandbox();
+    // 手改 overlay：plugin 指向字面 git 子树内、归一后子树外（模拟污染的 overlay 行）。
+    // 注意不可用 join 拼——join 会词法归一掉 `..`，恶意形态须手工拼串原样落盘
+    const escapeDir = join(dataDir, 'plugins', 'escape');
+    mkdirSync(escapeDir, { recursive: true });
+    writeFileSync(join(escapeDir, 'victim.txt'), '越界 rmSync 的潜在受害者');
+    const maliciousRef = `${join(dataDir, 'plugins', 'git')}/../escape`;
+    const { saveOverlayRows } = await import('./composition.js');
+    saveOverlayRows(dataDir, [{ id: 'evil', plugin: maliciousRef }]);
+    // sources.json 同键合谋（两份主机文件都指向越界键——防线按归一路径执法不看字面）
+    const gitDir = join(dataDir, 'plugins', 'git');
+    mkdirSync(gitDir, { recursive: true });
+    writeFileSync(join(gitDir, 'sources.json'), JSON.stringify({ '../escape': { url: 'git@h:o/r.git' } }));
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+
+    try {
+      await plugins.update('evil');
+      expect.unreachable('越界引用应拒');
+    } catch (err) {
+      expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+      expect((err as AppError).message).toContain('越界');
+    }
+    expect(existsSync(join(escapeDir, 'victim.txt'))).toBe(true); // 目标目录完好
+  });
+
+  it('P32 超时硬顶：卡死子进程被强杀，拒绝消息带超时说明（修复前永挂）', async () => {
+    await expect(
+      spawnRunner(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: process.cwd(), timeoutMs: 200 }),
+    ).rejects.toThrow(/超时.*强杀/u);
+  });
+
+  it('P32 输出滚动尾窗：超 1MiB 截断保尾，失败消息含标注与尾部标记', async () => {
+    // 子进程写完留 600ms 排空窗再退出——process.exit 不等写队列，立刻退会连
+    // 未冲刷输出一并丢掉（Node 语义），截断分支需要子进程活着把 3MiB 流完
+    const script =
+      'process.stderr.write("a".repeat(3 * 1024 * 1024) + "TAILMARK"); setTimeout(() => process.exit(1), 600)';
+    const err = await spawnRunner(process.execPath, ['-e', script], { cwd: process.cwd() }).then(
+      () => undefined,
+      (e: Error) => e,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toContain('退出码 1');
+    expect(err!.message).toContain('已截断'); // 截断标注如实呈现
+    expect(err!.message).toContain('TAILMARK'); // 尾部保诊断
+    expect(err!.message.length).toBeLessThan(2 * 1024 * 1024); // 无界积累已封顶
   });
 });
 
