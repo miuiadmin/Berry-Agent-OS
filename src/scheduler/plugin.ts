@@ -22,7 +22,7 @@ import { describeError } from '../contracts/errors.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import type { Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
-import { discoveryGates, type DiscoveryGateDecision } from './gates.js';
+import { discoveryGates, WAKE_CHAIN_CAP, type DiscoveryGateDecision } from './gates.js';
 import { JobsStore, JOB_NAME_PATTERN } from './store.js';
 import type { JobRecord, TickRunResult } from './types.js';
 
@@ -55,10 +55,23 @@ export interface SchedulerPluginDeps {
    * /tick run 报不可用，表操作不受影响
    */
   readonly runJob?: (prompt: string) => Promise<TickRunResult>;
-  /** 对话驱动是否在跑（gate 判据①——组合根 driverRef 活引用） */
-  readonly isAgentBusy: () => boolean;
-  /** 当前会话最近 user/message 时刻（gate 判据②——events SQL 投影，无则 null） */
+  /**
+   * 敞开 turn 深度（gate 判据①——第二刀④：driverRef 进程内布尔退役，数据面
+   * = events 表 turn/start·turn/end 配对投影，跨进程有效；组合根闭包注入）
+   */
+  readonly turnDepth: () => number;
+  /** 当前会话最近 user/message 时刻（gate 判据②——定时子进程路恒 null 退化） */
   readonly lastUserMessageAt: () => number | null;
+  /**
+   * 当日后台道预算是否可负担（gate 判据③——= ctx.llm.canAfford('background')
+   * 同一闭包，同一底账不建第二套账；never-unbounded 律 tick 入口执法）
+   */
+  readonly backgroundAffordable: () => boolean;
+  /**
+   * 同链自激唤醒连击数（gate 判据④——手动路不适用传 null；会话投递路注入
+   * 驱动闭包计数，v1 数据面进程内内存态）
+   */
+  readonly wakeCount?: () => number | null;
   /** 判定时钟（缺省 Date.now——测试注入冻结） */
   readonly now?: () => number;
 }
@@ -190,10 +203,13 @@ function handleRun(rest: string, opts: TickCommandOpts): void {
     ui.notify(`任务不存在：${name}（/tick list 查看）`);
     return;
   }
-  // gate：别跟用户打架（纯函数——两判据闭包注入数据）
+  // gate：统一闸门四判据（busy 配对投影 / recent_user_msg / canAfford / 自激预算）
+  // ——定时/事件/手动三触发同一纯函数（席 13④）；手动路 wakeCount 不适用传 null
   const decision = discoveryGates({
-    agentBusy: deps.isAgentBusy(),
+    turnDepth: deps.turnDepth(),
     lastUserMessageAt: deps.lastUserMessageAt(),
+    backgroundAffordable: deps.backgroundAffordable(),
+    wakeCount: deps.wakeCount?.() ?? null,
     now: (deps.now ?? Date.now)(),
   });
   if (!decision.ok) {
@@ -218,10 +234,16 @@ function handleRun(rest: string, opts: TickCommandOpts): void {
     .catch((err: unknown) => ui.notify(`任务 ${name} 运行失败：${describeError(err)}`));
 }
 
-/** gate 拒绝回执（人读——两判据各自说明） */
+/** gate 拒绝回执（人读——四判据各自说明） */
 function renderGateRefusal(decision: DiscoveryGateDecision, name: string): string {
   if (decision.reason === 'agent_busy') {
     return `任务 ${name} 未触发：agent 正在跑（等本轮结算后再 /tick run——防抢上下文）。`;
+  }
+  if (decision.reason === 'over_budget') {
+    return `任务 ${name} 未触发：当日后台道预算已尽（canAfford 拒——无人值守烧钱顶，见 /usage）。`;
+  }
+  if (decision.reason === 'wake_cap') {
+    return `任务 ${name} 未触发：自激唤醒连击已达上限（连续 ${WAKE_CHAIN_CAP} 次后台唤醒——防自旋，用户说句话即复位）。`;
   }
   return `任务 ${name} 未触发：你刚发过消息（30 秒内对话可能即将开跑——稍后再 /tick run）。`;
 }

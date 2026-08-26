@@ -66,5 +66,7 @@ export function createTickRunner(opts: TickRunnerOptions): (prompt: string) => P
   }
   const env = buildChildEnv(hostEnv, { set });
   const timeoutMs = opts.timeoutMs ?? TICK_TIMEOUT_MS;
-  return (prompt: string) => runArgv([...baseArgv, 'run', '--read-only', prompt], { env, timeoutMs });
+  // --background：tick 子进程的轮记账入后台道（席 13 第二刀 blocker 修——
+  // canAfford 读 background 道，tick 烧的钱必须进同一本账才被闸见）
+  return (prompt: string) => runArgv([...baseArgv, 'run', '--read-only', '--background', prompt], { env, timeoutMs });
 }

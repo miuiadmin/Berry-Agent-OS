@@ -98,6 +98,23 @@ describe('createDurableSinks：事件 → session.append 映射', () => {
     expect(data.usage).toEqual({ input: 1, output: 2 });
   });
 
+  it('usagePriority 落账：background 会话声明 → llm/usage priority=background（tick 链路回归锁）', () => {
+    // tick 子进程经 run --background → RuntimeOptions.usagePriority → 本参数——
+    // 花销必须落 background 道才能被 canAfford('background') 的闸门读到（席 13 第二刀 blocker 修）
+    const session = new Session({ origin: 'user' });
+    createDurableSinks(session, { usagePriority: 'background' }).handle({
+      type: 'message_end',
+      message: textAssistant('无人值守轮'),
+    });
+    const data = session.events.find((e) => e.type === 'llm/usage')!.data as { priority: string };
+    expect(data.priority).toBe('background');
+    // 对照：缺省（不声明）仍是前台道——宿主前台轮与 tick 轮天然分流
+    const foreground = new Session({ origin: 'user' });
+    createDurableSinks(foreground).handle({ type: 'message_end', message: textAssistant('有人值守轮') });
+    const fdata = foreground.events.find((e) => e.type === 'llm/usage')!.data as { priority: string };
+    expect(fdata.priority).toBe('foreground');
+  });
+
   it('stopReason → TurnEndReason 映射四分支', () => {
     const session = new Session();
     const sinks = createDurableSinks(session);

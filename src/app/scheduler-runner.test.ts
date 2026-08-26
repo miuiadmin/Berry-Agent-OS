@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 describe('createTickRunner：argv 公式（宿主即主入口进程假设）', () => {
-  it('基座 argv + [run, --read-only, prompt] 拼尾——两形态同式', async () => {
+  it('基座 argv + [run, --read-only, --background, prompt] 拼尾——两形态同式', async () => {
     // 装包（dist）形态：argv = [node, main.js]
     const distRunner = createTickRunner({
       dataDir: '/data',
@@ -43,7 +43,8 @@ describe('createTickRunner：argv 公式（宿主即主入口进程假设）', (
     });
     await distRunner('巡检仓库状态');
     expect(runArgvMock).toHaveBeenCalledWith(
-      ['/usr/bin/node', '/opt/berry/dist/app/main.js', 'run', '--read-only', '巡检仓库状态'],
+      // --background：tick 轮记账入后台道（席 13 第二刀 blocker 修——canAfford 读的账）
+      ['/usr/bin/node', '/opt/berry/dist/app/main.js', 'run', '--read-only', '--background', '巡检仓库状态'],
       expect.objectContaining({ timeoutMs: TICK_TIMEOUT_MS }),
     );
 
@@ -62,6 +63,7 @@ describe('createTickRunner：argv 公式（宿主即主入口进程假设）', (
       '/repo/src/app/main.ts',
       'run',
       '--read-only',
+      '--background',
       'hi',
     ]);
   });
@@ -71,8 +73,8 @@ describe('createTickRunner：argv 公式（宿主即主入口进程假设）', (
     await runner('p');
     const argv = runArgvMock.mock.calls[0]![0]!;
     expect(argv[0]).toBe(process.execPath);
-    // 去掉尾三段（run/--read-only/prompt）后，[1:] 段 = 当下 process.argv.slice(1)
-    expect(argv.slice(1, -3)).toEqual(process.argv.slice(1));
+    // 去掉尾四段（run/--read-only/--background/prompt）后，[1:] 段 = 当下 process.argv.slice(1)
+    expect(argv.slice(1, -4)).toEqual(process.argv.slice(1));
   });
 
   it('timeoutMs 显式覆盖（缺省 10 分钟——模型流挂死护栏）', async () => {

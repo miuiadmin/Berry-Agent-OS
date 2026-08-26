@@ -62,3 +62,26 @@ export function localDayStartMs(now: Date = new Date()): number {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   return d.getTime();
 }
+
+/** turn 配对深度聚合语句（调度闸门 busy 判据——内核边界篇 §4.1 席 13 第二刀④） */
+const TURN_DEPTH_SQL = `
+  SELECT COALESCE(SUM(CASE type WHEN 'turn/start' THEN 1 WHEN 'turn/end' THEN -1 ELSE 0 END), 0) AS depth
+  FROM events
+`;
+
+/**
+ * 全库敞开 turn 深度（turn/start 计 +1、turn/end 计 -1；> 0 = 有轮在跑）。
+ *
+ * 调度闸门 busy 判据的数据面（席 13④：driverRef 进程内布尔 → 本投影——
+ * 跨进程有效，双开进程互相可见，与底账同源）。三个可靠性缺口为拍板已知
+ * 边界（冷读 CR-1-3.1 三缺口声明，非 bug）：
+ * - turn 间空档（followUp 余量/steering 排空中）投影读闲——由 reserve-then-run
+ *   抢占兑底而非投影；
+ * - write-behind ≤200ms 迟滞——刚开的轮可能未及落盘（闸门偏松一轮），同理；
+ * - 崩溃孤儿未闭合 turn/start 永久计敞开——重开的会话由恢复合成 turn/end
+ *   兜底闭合，无人再打开的会话永久让路（接受为已知边界）。
+ */
+export function openTurnDepth(store: Store): number {
+  const row = store.connection.prepare(TURN_DEPTH_SQL).get() as { depth: number } | undefined;
+  return row?.depth ?? 0;
+}

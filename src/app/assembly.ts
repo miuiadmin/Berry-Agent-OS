@@ -30,7 +30,13 @@ import type { AgentTool } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
 import { loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
-import { Persistence, createPluginSqliteFace, localDayStartMs, spentBackgroundTokensSince } from '../persist/index.js';
+import {
+  Persistence,
+  createPluginSqliteFace,
+  localDayStartMs,
+  openTurnDepth,
+  spentBackgroundTokensSince,
+} from '../persist/index.js';
 import type { LlmRuntime, Provider } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn, providerApiFace } from '../llm/index.js';
 import type { ToolsService } from '../tools/registry.js';
@@ -184,6 +190,12 @@ export interface RuntimeOptions {
    * 测试注入临时目录，与生产路径完全同构）
    */
   readonly compositionDir?: string;
+  /**
+   * 本进程主 loop 花销记账道（缺省 'foreground'）。tick 唤起入口声明
+   * 'background'（CLI `run --background` → 此处 → chat 件 durable 落账——
+   * 席 13 第二刀：tick 烧的钱进 background 道，canAfford 才读得到）
+   */
+  readonly usagePriority?: 'background' | 'foreground';
   /**
    * tick 单发 runner 覆盖（scheduler 件闭包注入——缺省 createTickRunner 真
    * spawn；测试注入假 runner 记 prompt 断言触发链，不真起子进程）
@@ -387,48 +399,46 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const streamFn: StreamFn = opts.streamFn ?? createStreamFn(llm);
 
   /* ---- ④b llm 具名服务（ctx.llm：插件单发补全唯一合法路径 + canAfford 预算闸门，骨架篇 §9.3） ---- */
-  ctx.provide(
-    'llm',
-    createLlmService({
-      runtime: llm,
-      defaultModel: () => model,
-      // 底账写侧（2026-08-24 第十一批拍板 #1，会话篇 §1.1）：complete 成功即落
-      // llm/usage durable 事件（log-only 计量事实；callId = settlement 幂等身份，
-      // write-behind 重试去重锚点）。S1 键控（骨架篇 §9.3「读点=ctx.llm onUsage」
-      // 语义定案）：调用链命中条目才落账——无链无键**不落 focus**只 debug（timer
-      // 面/诊断面去向显式化；此前「落到恰好活着的会话」错账归零）
-      onUsage: (result, modelSpec) => {
-        const entry = registry.chained();
-        if (entry !== undefined) {
-          entry.session.append('llm/usage', {
-            callId: result.callId,
-            model: modelSpec,
-            priority: result.priority,
-            usage: { input: result.usage.input, output: result.usage.output },
-          });
-        }
-        ctx.logger.debug('llm.complete 用量入账', {
+  const llmService = createLlmService({
+    runtime: llm,
+    defaultModel: () => model,
+    // 底账写侧（2026-08-24 第十一批拍板 #1，会话篇 §1.1）：complete 成功即落
+    // llm/usage durable 事件（log-only 计量事实；callId = settlement 幂等身份，
+    // write-behind 重试去重锚点）。S1 键控（骨架篇 §9.3「读点=ctx.llm onUsage」
+    // 语义定案）：调用链命中条目才落账——无链无键**不落 focus**只 debug（timer
+    // 面/诊断面去向显式化；此前「落到恰好活着的会话」错账归零）
+    onUsage: (result, modelSpec) => {
+      const entry = registry.chained();
+      if (entry !== undefined) {
+        entry.session.append('llm/usage', {
+          callId: result.callId,
           model: modelSpec,
-          totalTokens: result.usage.totalTokens,
-          ...(entry !== undefined ? { session: entry.session.header.sessionId } : { session: '(无链不落账)' }),
+          priority: result.priority,
+          usage: { input: result.usage.input, output: result.usage.output },
         });
-      },
-      // 底账读侧：当日后台累计 = llm/usage 事件当日时间窗聚合投影（persist 实现，
-      // 余额不存储——重启不清零、双开经 WAL 各记可见、当日谁花了多少可审计）
-      ...(persistence
-        ? { backgroundSpentToday: () => spentBackgroundTokensSince(persistence.store, localDayStartMs()) }
-        : {}),
-      // canAfford 第三维 app 数据源（契约篇 §5.4 第二纵切）：预算表 = ③c 官方清单
-      // budget.dailyTokens（未声明恒 true）；应用域已耗 = llm/usage 事件按
-      // sessions.app 会话域投影的当日聚合（底账同源不同切面，persist 实现）
-      appBudget: (app: string) => appBudgets.get(app),
-      ...(persistence
-        ? {
-            appSpentToday: (app: string) => spentBackgroundTokensSince(persistence.store, localDayStartMs(), app),
-          }
-        : {}),
-    }),
-  );
+      }
+      ctx.logger.debug('llm.complete 用量入账', {
+        model: modelSpec,
+        totalTokens: result.usage.totalTokens,
+        ...(entry !== undefined ? { session: entry.session.header.sessionId } : { session: '(无链不落账)' }),
+      });
+    },
+    // 底账读侧：当日后台累计 = llm/usage 事件当日时间窗聚合投影（persist 实现，
+    // 余额不存储——重启不清零、双开经 WAL 各记可见、当日谁花了多少可审计）
+    ...(persistence
+      ? { backgroundSpentToday: () => spentBackgroundTokensSince(persistence.store, localDayStartMs()) }
+      : {}),
+    // canAfford 第三维 app 数据源（契约篇 §5.4 第二纵切）：预算表 = ③c 官方清单
+    // budget.dailyTokens（未声明恒 true）；应用域已耗 = llm/usage 事件按
+    // sessions.app 会话域投影的当日聚合（底账同源不同切面，persist 实现）
+    appBudget: (app: string) => appBudgets.get(app),
+    ...(persistence
+      ? {
+          appSpentToday: (app: string) => spentBackgroundTokensSince(persistence.store, localDayStartMs(), app),
+        }
+      : {}),
+  });
+  ctx.provide('llm', llmService);
 
   /* ---- ④c Job 注册表（ctx.jobs，骨架篇 §6.2 落码注记）----
    * 后台任务/一次性后台委派的进程内登记项（subagent 模块提供实现）：状态机
@@ -587,6 +597,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     getSystemPrompt: () => systemPrompt,
     toolView,
     stampSandboxFacts,
+    // tick 入口记账道声明（--background argv → run 入口 → 此处；缺省前台道）
+    ...(opts.usagePriority !== undefined ? { usagePriority: opts.usagePriority } : {}),
   });
   /** 会话驱动注册表（S1 单真相——Map<sessionId, DriverEntry> + 前台聚焦指针） */
   const registry = chatBundle.registry;
@@ -595,9 +607,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     ...(persistence ? { goalConnection: persistence.store.connection } : {}),
     schedulerDeps: {
       runJob: tickRunner,
-      // S1 升格：任一驱动在跑即 busy（多会话并存——单槽投影退役）
-      isAgentBusy: () => [...registry.entries.values()].some((entry) => entry.driver.isRunning),
+      // busy 判据（第二刀④）：turn/start·turn/end 配对深度投影——跨进程有效
+      //（driverRef 进程内布尔退役）；persist:false 无账可读 = 0（诊断面不拦）
+      turnDepth: persistence ? () => openTurnDepth(persistence.store) : () => 0,
       lastUserMessageAt,
+      // canAfford 判据（第二刀④ never-unbounded 执法）：同一底账同一闸——
+      // 复用 ④b 服务闭包（spend ledger = 日志投影，不建第二套账）
+      backgroundAffordable: persistence ? () => llmService.canAfford('background') : () => true,
     },
     // mcp 件闭包（契约篇 §6.6 冷读 #1：spawn/kill 组装上提组合根——
     // spawnServer 在 app/mcp-spawn.ts，killTree 自 exec 公开面；登记簿根

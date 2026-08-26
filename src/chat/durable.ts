@@ -155,8 +155,17 @@ function truncateForDurable(content: string | readonly DurableBlock[]): string |
  *
  * @param options.model 装配期模型标识（"provider/model-id"）——llm/usage 前台折叠
  *   的 model 腿回退值（消息自带 model 缺席时使用；与结算通知器注入同源）
+ * @param options.usagePriority 本会话主 loop 花销的记账道（缺省 'foreground'）。
+ *   tick 唤起入口声明 background 归属（内核边界篇 §4.1 席 13 第二刀、骨架篇
+ *   §8.7 blocker 修）：argv --background → run 入口 → runtime 选项 → 此处。
+ *   否则 tick 子进程花 foreground 道、闸读 background 道，never-unbounded
+ *   执法恒空转。整进程会话级声明（tick 子进程整个会话都是无人值守轮）；
+ *   宿主前台风暴轮与 tick 子进程轮同一会话时各记各道（事件按笔归属，天然分流）
  */
-export function createDurableSinks(session: Session, options: { model?: string } = {}): DurableSinks {
+export function createDurableSinks(
+  session: Session,
+  options: { model?: string; usagePriority?: 'background' | 'foreground' } = {},
+): DurableSinks {
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
       case 'turn_start':
@@ -191,8 +200,9 @@ export function createDurableSinks(session: Session, options: { model?: string }
             stopReason: message.stopReason,
           });
           // 底账统一真实请求（2026-08-25 应用面第二纵切拍板，契约篇 §5.4）：主 loop
-          // 前台花销同落 llm/usage（foreground 道）——此前只 complete 单发进账，前台
-          // 主对话花销不进任何账（canAfford「自然成立」证伪的冷读硬伤修复）。
+          // 前台花销同落 llm/usage（缺省 foreground 道）——此前只 complete 单发进账，
+          // 前台主对话花销不进任何账（canAfford「自然成立」证伪的冷读硬伤修复）。
+          // tick 唤起会话声明 background 道（第二刀 blocker 修——见函数头注记）。
           // origin!=='delegation' 守卫防双重计数：delegation 子会话花销由结算折叠
           // （app/notify.ts——折进父会话 background 道）覆盖，子会话不再自折一笔。
           // callId = 轮身份（assistant/message 事件的 seq——write-behind 重试去重锚点，
@@ -201,7 +211,7 @@ export function createDurableSinks(session: Session, options: { model?: string }
             session.append('llm/usage', {
               callId: `turn:${session.header.sessionId}:${appended.seq}`,
               model: message.model ?? options.model ?? 'unknown',
-              priority: 'foreground',
+              priority: options.usagePriority ?? 'foreground',
               usage: { input: message.usage.input, output: message.usage.output },
             });
           }

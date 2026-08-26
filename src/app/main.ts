@@ -27,7 +27,8 @@ const HELP = `Berry ${VERSION} — 插件式智能体运行时
   --version    输出版本号
   --help       本帮助
   --debug      进程日志提级到 debug
-  --read-only  run 子命令限定：只读档单发（sandboxMode read-only——tick 任务面复用同入口）`;
+  --read-only  run 子命令限定：只读档单发（sandboxMode read-only——tick 任务面复用同入口）
+  --background run 子命令限定：llm/usage 记账入后台道（tick 唤起入口声明——canAfford 读的账）`;
 
 /** 解析结果：首个非旗标参数为子命令，其余顺次为参数 */
 interface ParsedArgs {
@@ -36,13 +37,16 @@ interface ParsedArgs {
   debug: boolean;
   /** run 子命令只读档（tick 子进程复用同入口——技术栈篇 §5） */
   readOnly: boolean;
+  /** run 子命令后台记账道（tick 子进程复用同入口——席 13 第二刀 blocker 修） */
+  background: boolean;
 }
 
-/** 手写 argv 解析（不引 commander——第九批拍板 #15；旗标 --debug/--read-only 两个） */
+/** 手写 argv 解析（不引 commander——第九批拍板 #15；旗标 --debug/--read-only/--background 三个） */
 function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   let debug = false;
   let readOnly = false;
+  let background = false;
   for (const arg of argv) {
     if (arg === '--debug') {
       debug = true;
@@ -50,17 +54,20 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (arg === '--read-only') {
       // 只读档对 run 语义化；TUI 入口收到时无害忽略（TUI 档位另有 /sandbox 命令面）
       readOnly = true;
+    } else if (arg === '--background') {
+      // 后台记账道对 run 语义化（tick 唤起入口声明）；TUI 入口收到时无害忽略
+      background = true;
     } else {
       positional.push(arg);
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly };
+  return { command, args: rest, debug, readOnly, background };
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly } = parseArgs(argv);
+  const { command, args, readOnly, background } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
@@ -77,12 +84,17 @@ function main(argv: string[]): number {
       case 'run': {
         const message = args.join(' ');
         if (!message) {
-          process.stderr.write('用法：berry run "<message>" [--read-only]\n');
+          process.stderr.write('用法：berry run "<message>" [--read-only] [--background]\n');
           return 2;
         }
         // --read-only → sandboxMode read-only（tick 任务面同入口——技术栈篇 §5；
         // headless 无应答者，审批天然 fail-closed，无需另设审批旗标）
-        return runOnceMain(message, readOnly ? { sandboxMode: 'read-only' } : {});
+        // --background → llm/usage 记账入 background 道（tick 唤起入口声明——
+        // 席 13 第二刀：否则 tick 花 foreground 道、闸读 background 道，空转）
+        return runOnceMain(message, {
+          ...(readOnly ? { sandboxMode: 'read-only' as const } : {}),
+          ...(background ? { usagePriority: 'background' as const } : {}),
+        });
       }
       case 'dump-config':
         return dumpConfigMain();

@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionEvent } from '../contracts/events.js';
-import { openStore, localDayStartMs, spentBackgroundTokensSince } from './index.js';
+import { openStore, localDayStartMs, spentBackgroundTokensSince, openTurnDepth } from './index.js';
 import type { Store } from './store.js';
 
 /** 临时库目录（全文件共享，结束后整体清除） */
@@ -78,5 +78,45 @@ describe('localDayStartMs 日界', () => {
     expect(day).toBe(new Date(2026, 7, 24, 0, 0, 0, 0).getTime());
     const next = localDayStartMs(new Date(2026, 7, 25, 0, 10)); // 跨天十分钟后
     expect(next).toBe(day + 24 * 60 * 60 * 1000); // 日界前移一天
+  });
+});
+
+/** 构造 turn 边界裸事件（busy 判据数据面——直接喂 appendCore，不经 Session 逻辑层） */
+function turnEvent(seq: number, time: number, kind: 'turn/start' | 'turn/end'): SessionEvent {
+  return Object.freeze({ type: kind, seq, time, data: Object.freeze({}) });
+}
+
+describe('openTurnDepth 配对深度投影（调度闸门 busy 判据）', () => {
+  it('start 计 +1、end 计 -1、全库跨会话合计——敞开 > 0、闭合归零', () => {
+    const store = openStore({ path: join(dir, 'turn-depth.db') }) as Store;
+    // 会话 A：一轮完整闭合 + 一轮敞开在跑
+    store.appendCore(
+      reg('sess-a'),
+      [
+        turnEvent(0, 1_000, 'turn/start'),
+        turnEvent(1, 1_100, 'turn/end'),
+        turnEvent(2, 1_200, 'turn/start'), // 第二轮未闭合
+      ],
+      'inc-a',
+    );
+    // 会话 B（另一进程双开的敞开轮——跨进程可见恰是本判据的存在理由）
+    store.appendCore(reg('sess-b'), [turnEvent(0, 1_300, 'turn/start')], 'inc-b');
+    expect(openTurnDepth(store)).toBe(2);
+
+    // 两轮各补 end：全部闭合 → 归零
+    store.appendCore(reg('sess-a'), [turnEvent(3, 1_400, 'turn/end')], 'inc-a');
+    store.appendCore(reg('sess-b'), [turnEvent(1, 1_500, 'turn/end')], 'inc-b');
+    expect(openTurnDepth(store)).toBe(0);
+  });
+
+  it('空库 / 无 turn 事件的库 → 0；孤儿 start 永久计敞开（崩溃边界——拍板已知）', () => {
+    const empty = openStore({ path: join(dir, 'turn-empty.db') }) as Store;
+    expect(openTurnDepth(empty)).toBe(0);
+
+    // 崩溃孤儿：turn/start 落盘后进程消亡，无 turn/end 兜底——投影永久读忙
+    //（已知边界非 bug：重开的会话由恢复合成 turn/end 闭合，无人再打开的会话让路）
+    const orphan = openStore({ path: join(dir, 'turn-orphan.db') }) as Store;
+    orphan.appendCore(reg('s'), [turnEvent(0, 1, 'turn/start')], 'inc');
+    expect(openTurnDepth(orphan)).toBe(1);
   });
 });

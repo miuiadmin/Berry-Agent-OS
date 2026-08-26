@@ -220,6 +220,13 @@ export interface ChatPluginDeps {
   readonly toolView: AgentTool[];
   /** sandbox 档事实盖章（内核守门面实现——dedup 内建；件在每次会话边界调用） */
   readonly stampSandboxFacts: (session: Session) => void;
+  /**
+   * 本进程主 loop 花销记账道（缺省 'foreground'）。tick 唤起入口（argv
+   * --background）声明 'background'——席 13 第二刀 blocker 修：tick 子进程
+   * 轮入 background 道，canAfford 读的账才收到 tick 烧的钱。进程会话级声明
+   * （详见 chat/durable.ts createDurableSinks 同名参数注记）
+   */
+  readonly usagePriority?: 'background' | 'foreground';
 }
 
 /**
@@ -382,8 +389,11 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // 新建会话打标 chat 域（默认启动即 app='chat'——血缘显式打标，不做投影推断）
       session ??= persistence.createSession({ cwd: deps.workspace, profile: 'default', app: CHAT_APP_ID });
 
-      /* -- durable 接线（S1 直连：handle/gate/approval 三路全绑本会话——不经转发壳；model 腿供 llm/usage 前台折叠回退值） -- */
-      const durable = createDurableSinks(session, { model: deps.model });
+      /* -- durable 接线（S1 直连：handle/gate/approval 三路全绑本会话——不经转发壳；model 腿供 llm/usage 前台折叠回退值；usagePriority = tick 入口记账道声明） -- */
+      const durable = createDurableSinks(session, {
+        model: deps.model,
+        ...(deps.usagePriority !== undefined ? { usagePriority: deps.usagePriority } : {}),
+      });
       // session_start（契约篇 §2.2 session 层 emit 行）：会话建立/恢复闭合后必发
       // 一次——经根 ctx emit（总线 runtime 共享，插件锚 on 互通；装载序上 boot 路
       // 本事件先于一切消费方插件的 plugin/activated，与组合根直发形态等价）。
