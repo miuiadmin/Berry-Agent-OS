@@ -163,6 +163,23 @@ export interface ConversationDriverDeps {
    * @param source 回调来源标签（'onRunSettled'——日志归因用）
    */
   readonly onCallbackError?: (err: unknown, source: string) => void;
+  /**
+   * 用户输入变换钩子（契约篇 §2.2 增补 7②，2026-08-27 P1-2 兑现）：装配层把
+   * 根总线 user_input waterfall + 挂起钟包装注入（sessionId 由 chat 件闭包
+   * 绑定——与 loopConfig.transformContext 同款注入形态）。驱动在批消费位
+   * 逐条过变换（斜杠展开/模板替换/技能命令扩展），变换替换引用时迁移
+   * deliverMeta（backgroundWake 计道、toolFilter 收窄跟随）。缺省无变换直通。
+   * 失败/挂起超时上抛 → runTurns catch 合成 error 收尾（响亮不吞）。
+   */
+  readonly transformInput?: (message: AgentMessage) => Promise<AgentMessage>;
+  /**
+   * turn_stopping 钩子（契约篇 §2.2 增补 7①，2026-08-27 P1-2 兑现）：每次
+   * runWithRetry 结算后派发（载荷 { sessionId, stopReason }，含 catch 合成
+   * error 路）；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由
+   * followUp 循环消费——零新返回值）。驱动侧异常吞（经 onCallbackError
+   * 上报）——run 已结算，征询器故障不改写历史结果、不拖死停机路径。
+   */
+  readonly onTurnStopping?: (payload: { sessionId: string; stopReason: string }) => Promise<void>;
 }
 
 /**
@@ -214,6 +231,10 @@ export class ConversationDriver {
   private readonly session: Session | undefined;
   /** 瞬态错误判定（S4——装配注入的桶表 transient 位；缺省恒 false 保守直通） */
   private readonly isTransientError: (message: AssistantMessage) => boolean;
+  /** 用户输入变换（增补 7②——装配桥注入，缺省无变换直通） */
+  private readonly transformInput: ((message: AgentMessage) => Promise<AgentMessage>) | undefined;
+  /** turn_stopping 派发（增补 7①——装配桥注入，缺省不派发） */
+  private readonly onTurnStopping: ((payload: { sessionId: string; stopReason: string }) => Promise<void>) | undefined;
   /** 会话层重试策略（S4——缺省 enabled/3 次/1s 起） */
   private readonly retryPolicy: DriverRetryPolicy;
   /** 最近一次 launch 的完成信号（settle 等待用） */
@@ -232,13 +253,20 @@ export class ConversationDriver {
     this.onCallbackError = deps.onCallbackError;
     this.session = deps.session;
     this.isTransientError = deps.isTransientError ?? (() => false);
+    this.transformInput = deps.transformInput;
+    this.onTurnStopping = deps.onTurnStopping;
     this.retryPolicy = deps.retryPolicy ?? DEFAULT_RETRY_POLICY;
     // steering 取数口驱动自持：仅 running 期供给（run 间隙的余量走 launch 的
     // followUp 循环，不经此口——两路取数同一条队列，分流点在时机不在通道）。
-    // 取出即清投递元数据（steering 路不收窄——工具面随开跑时批已定）
+    // 取出即清投递元数据（steering 路不收窄——工具面随开跑时批已定）；
+    // turn 边界 steer 注入位同样是 user_input 批消费位（增补 7② 第四路——
+    // run 进行中插话的消息也过变换，本就是 async 位无同步阻塞问题）
     this.config = {
       ...deps.loopConfig,
-      getSteeringMessages: async () => (this.running ? this.consumeMeta(this.queue.drain()) : []),
+      getSteeringMessages: async () => {
+        if (!this.running) return [];
+        return this.transformBatch(this.consumeMeta(this.queue.drain()));
+      },
       getFollowUpMessages: async () => [],
     };
   }
@@ -340,6 +368,51 @@ export class ConversationDriver {
     const allow = resolveWakeToolAllowList(metas);
     if (allow === undefined || this.context.tools === undefined) return this.context;
     return { ...this.context, tools: this.context.tools.filter((tool) => allow.has(tool.name)) };
+  }
+
+  /**
+   * 批消费位统一变换（契约篇 §2.2 增补 7②，2026-08-27 P1-2）：进模型 run 批
+   * 的消息逐条过 user_input waterfall（斜杠展开/模板替换/技能命令扩展）。
+   * 三处调用点 = runWithRetry 入口（覆盖 launch 首批与 followUp 续批两路）/
+   * 重试 drain 批 / getSteeringMessages（turn 边界 steer 注入位——该路
+   * consumeMeta 已清元数据，迁移自然为空操作）。
+   * **元数据迁移硬规则**：变换替换消息引用时 deliverMeta 随迁 re-key
+   * （backgroundWake 预算计道、toolFilter 收窄跟随新引用——否则断线）。
+   * 变换失败/挂起超时直接上抛 → runTurns catch 合成 error 收尾。
+   */
+  private async transformBatch(batch: readonly AgentMessage[]): Promise<AgentMessage[]> {
+    if (this.transformInput === undefined || batch.length === 0) return [...batch];
+    const out: AgentMessage[] = [];
+    for (const message of batch) {
+      const transformed = await this.transformInput(message);
+      // 引用替换 → 元数据迁移（引用不变 = 原键有效，无操作）
+      if (transformed !== message) {
+        const meta = this.deliverMeta.get(message);
+        if (meta !== undefined) {
+          this.deliverMeta.delete(message);
+          this.deliverMeta.set(transformed, meta);
+        }
+      }
+      out.push(transformed);
+    }
+    return out;
+  }
+
+  /**
+   * turn_stopping 派发（契约篇 §2.2 增补 7①，2026-08-27 P1-2）：每次
+   * runWithRetry 结算后、followUp 循环复查前（runTurns 两调用点）+ catch
+   * 合成 error 终值后。全部 stopReason 都发（是否续跑由决策方自判——handler
+   * 内 deliver 投递即续跑）；dismantled 跳过（停摆会话无续跑可言）；驱动侧
+   * 异常吞 + onCallbackError 上报——run 已结算，征询器故障不改写历史结果。
+   */
+  private async notifyStopping(result: RunResult): Promise<void> {
+    if (this.dismantled || this.onTurnStopping === undefined) return;
+    try {
+      // stopReason 缺席（run 无 assistant 调用的异常态）以 'error' 诚实缺省
+      await this.onTurnStopping({ sessionId: this.sessionId, stopReason: result.stopReason ?? 'error' });
+    } catch (err) {
+      this.onCallbackError?.(err, 'turn_stopping');
+    }
   }
 
   /**
@@ -502,6 +575,9 @@ export class ConversationDriver {
         this.writeHeader?.();
       }
       result = await this.runWithRetry(prompts, { emit: this.emit, signal: this.beginRun() });
+      // turn_stopping（增补 7①）：结算后、followUp 循环复查前派发——续跑决策
+      // 的 handler 在此投递（deliver → steer 队列 → 下方 while 消费）
+      await this.notifyStopping(result);
       // run 自然停：余量排队消息全量捞出续跑（followUp 唤醒——followUp 轮的
       // error 同样过检查点重试，骨架篇 §3.2 前置债①「检查点 = 每次 startRun 返回后」）。
       // 循环判据只看停摆不看取消（S6 形态②）：interrupt 打断当轮后窗口期新输入
@@ -510,6 +586,7 @@ export class ConversationDriver {
         const batch: AgentMessage[] = [];
         while (this.queue.hasItems()) batch.push(...this.queue.drain());
         result = await this.runWithRetry(batch, { emit: this.emit, signal: this.beginRun() });
+        await this.notifyStopping(result); // followUp 轮结算同样派发（回到循环复查）
       }
     } catch (error) {
       // 回调违约（loop 零 try/catch 的对价）：合成 error 消息补齐事件序列
@@ -536,6 +613,10 @@ export class ConversationDriver {
         stopReason: 'error',
         errorMessage: message.errorMessage,
       };
+      // turn_stopping catch 路（增补 7①）：合成 error 终值同样派发（全部
+      // stopReason 都发——回调违约也该被续跑决策方看见；notifyStopping 自判
+      // dismantled 跳过）
+      await this.notifyStopping(result);
     }
     return result;
   }
@@ -554,7 +635,10 @@ export class ConversationDriver {
     batch: AgentMessage[],
     hooks: { emit: AgentEventSink; signal: AbortSignal },
   ): Promise<RunResult> {
-    let result = await startRun(batch, this.contextForBatch(batch), this.config, hooks);
+    // 批消费位变换（增补 7②）：本入口覆盖 launch 首批与 followUp 续批两路——
+    // 进 startRun 前逐条过 user_input（含元数据迁移），失败上抛走 catch 合成 error
+    const initial = await this.transformBatch(batch);
+    let result = await startRun(initial, this.contextForBatch(initial), this.config, hooks);
     let attempt = 0;
     while (this.shouldRetryRun(result)) {
       const errorMessage = this.lastErrorText(result);
@@ -582,9 +666,10 @@ export class ConversationDriver {
         break;
       }
       // followUp 合流：退避期入队消息与续入同批（deliverMeta 保留——backgroundWake
-      // 的工具收窄在续入批继续生效）
-      const next: AgentMessage[] = [];
-      while (this.queue.hasItems()) next.push(...this.queue.drain());
+      // 的工具收窄在续入批继续生效）；重试 drain 批同样过 user_input 变换（第三路）
+      const drained: AgentMessage[] = [];
+      while (this.queue.hasItems()) drained.push(...this.queue.drain());
+      const next = await this.transformBatch(drained);
       result = await startRun(next, this.contextForBatch(next), this.config, hooks);
     }
     return result;

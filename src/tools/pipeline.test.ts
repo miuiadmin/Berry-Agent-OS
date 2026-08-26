@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { Type } from 'typebox';
 import { AppError, TOOL_ARGUMENTS_INVALID, TOOL_BLOCKED, TOOL_GATE_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import type { AgentToolResult, GateDecisionPayload, TextContent, ToolDefinition } from '../contracts/tools.js';
-import { TOOL_POST_EXECUTE_EVENT } from '../contracts/tools.js';
+import { TOOL_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT } from '../contracts/tools.js';
 import { createContext } from '../context/index.js';
 import { createLogger } from '../context/logger.js';
 import { createToolPipeline, OUTPUT_GUARD_BYTES } from './pipeline.js';
@@ -488,5 +488,67 @@ describe('工具体按注册归属进 caller 链（toolOwnerOf 旁表 + 执行�
     expect(textOf(owned)).toBe('plugin-owned|plugin-owned'); // 同步段与 await 后都在注册者链上
     expect(textOf(host)).toBe('undefined|undefined'); // 宿主工具不造假身份链——读点 'host' 兜底
     disposeOwned();
+  });
+});
+
+describe('createToolPipeline — callOrigin 调用面判别（P1-2 增补 7③）', () => {
+  /**
+   * 三段各捕获一次 callOrigin：守门段走 tools_pre_execute、执行段走 execute
+   * 入参、后处理段走 tools_post_execute——第 6 参逐段透传，缺省调用不置键。
+   */
+  function originProbe(ctx: ReturnType<typeof createContext>) {
+    const seen: Array<{ stage: string; callOrigin?: string; hasKey: boolean }> = [];
+    ctx.on('tools_pre_execute', (input, next) => {
+      seen.push({ stage: 'gate', callOrigin: input.callOrigin, hasKey: 'callOrigin' in input });
+      return next();
+    });
+    // 执行段载荷 = tools_execute 瀑布信封（ExecuteInput）——around-dispatch，
+    // def.execute 直参是 (args, toolCtx)，面别判别词在信封不在直参
+    ctx.on(TOOL_EXECUTE_EVENT, (input, next) => {
+      seen.push({
+        stage: 'exec',
+        callOrigin: (input as { callOrigin?: string }).callOrigin,
+        hasKey: 'callOrigin' in input,
+      });
+      return next();
+    });
+    ctx.on(TOOL_POST_EXECUTE_EVENT, (input, next) => {
+      seen.push({ stage: 'post', callOrigin: input.callOrigin, hasKey: 'callOrigin' in input });
+      return next();
+    });
+    return { seen, tool: echoTool() };
+  }
+
+  it("origin='model' → 三段 Input 各携带（loop 模型工具路的显式判别词）", async () => {
+    const ctx = createContext({ name: 'test' });
+    const { seen, tool } = originProbe(ctx);
+    const run = createToolPipeline(ctx);
+    await run(tool, 'tc-origin-1', { msg: 'hi' }, undefined, undefined, 'model');
+    expect(seen).toEqual([
+      { stage: 'gate', callOrigin: 'model', hasKey: true },
+      { stage: 'exec', callOrigin: 'model', hasKey: true },
+      { stage: 'post', callOrigin: 'model', hasKey: true },
+    ]);
+  });
+
+  it("origin='service' → 三段同样携带（宿主服务面复入——exec/web fetch 先例）", async () => {
+    const ctx = createContext({ name: 'test' });
+    const { seen, tool } = originProbe(ctx);
+    const run = createToolPipeline(ctx);
+    await run(tool, 'tc-origin-2', { msg: 'hi' }, undefined, undefined, 'service');
+    expect(seen.every((row) => row.callOrigin === 'service' && row.hasKey)).toBe(true);
+    expect(seen).toHaveLength(3);
+  });
+
+  it('缺省（历史调用点零改动）→ 三段均不置键（undefined ≠ 未知面词汇化）', async () => {
+    const ctx = createContext({ name: 'test' });
+    const { seen, tool } = originProbe(ctx);
+    const run = createToolPipeline(ctx);
+    await run(tool, 'tc-origin-3', { msg: 'hi' });
+    expect(seen).toEqual([
+      { stage: 'gate', callOrigin: undefined, hasKey: false },
+      { stage: 'exec', callOrigin: undefined, hasKey: false },
+      { stage: 'post', callOrigin: undefined, hasKey: false },
+    ]);
   });
 });

@@ -356,7 +356,9 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
               `[CONTEXT_SERVICE_NOT_FOUND] 工具管道未装配（registerToolsService 缺 pipeline 选项）`,
             );
           }
-          return pipeline(def, toolCallId, args, signal, onUpdate);
+          // origin='model'（P1-2 增补 7③）：loop 模型工具路的显式判别词——
+          // 守门行按面别分叉（模型面 vs 服务面）不靠名字嗅探
+          return pipeline(def, toolCallId, args, signal, onUpdate, 'model');
         },
       };
     },

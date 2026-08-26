@@ -86,6 +86,11 @@ export interface AgentTool {
  * 管道执行器（三段管道的包装面——Ring 1 行树化批 2026-08-26 类型安家 contracts：
  * 服务面携带它，宿主消费方〔exec 服务等〕与行替换件同源同过守门）。
  * 类型单一来源在此，tools/pipeline 再导出（实现注释见彼处）。
+ * 第 6 参 origin（2026-08-27 P1-2，契约篇 §2.2 增补 7③ + §3.1 callOrigin 条）：
+ * 调用面类别闭集——'model'（loop 模型工具路，toAgentTool 包装显式传）/
+ * 'service'（宿主服务面复入——exec/web fetch 服务两调用点传）；缺省 undefined
+ * = 未知面（诊断形态等），三 Input 的 callOrigin 随之缺席。**是调用面类别而非
+ * 调用者身份**——不触 GateInput caller 禁令（§3.1 dsh-10 + 第二十三批终裁）。
  */
 export type ToolPipelineExecutor = (
   def: ToolDefinition,
@@ -93,7 +98,18 @@ export type ToolPipelineExecutor = (
   args: Record<string, unknown>,
   signal?: AbortSignal,
   onUpdate?: ToolUpdateCallback,
+  origin?: ToolCallOrigin,
 ) => Promise<AgentToolResult>;
+
+/**
+ * 工具调用面类别（P1-2 增补 7③——§3.1「callOrigin 调用面类别」条的值域）：
+ * - 'model'：模型工具调用（loop 经 toAgentTool 包装进管道）；
+ * - 'service'：宿主服务面复入（exec 服务/web fetch 服务在同一管道执行——
+ *   守门行按面别分叉〔如服务路不按模型工具面审批〕的显式判别词，取代
+ *   对合成 def 名的字符串嗅探）。
+ * 同一会话同一 agent 的服务复入同样走 'service'——面别差异，非主体差异。
+ */
+export type ToolCallOrigin = 'model' | 'service';
 
 /**
  * ctx.tools 服务面（契约篇 §1.5 服务行 + §1.2 注记④——类型单一来源住 contracts，
@@ -230,6 +246,12 @@ export interface GateInput {
    * 缺省不置 = 无标注（pipeline 落 'ok'）。
    */
   allowReason?: string;
+  /**
+   * 调用面类别（P1-2 增补 7③——管道从执行器第 6 参透传；'model' 模型工具
+   * 调用 / 'service' 宿主服务面复入，缺省 undefined = 未知面）。守门按它
+   * 分叉是面别差异（合法），按 caller/session 分叉是主体差异（§3.1 禁令）。
+   */
+  callOrigin?: ToolCallOrigin;
 }
 
 /** 守门决策（守门监听器的返回值） */
@@ -249,6 +271,8 @@ export interface ExecuteInput {
   callId: string;
   signal?: AbortSignal;
   onUpdate?: ToolUpdateCallback;
+  /** 调用面类别（P1-2 增补 7③——同 GateInput.callOrigin，管道透传） */
+  callOrigin?: ToolCallOrigin;
 }
 
 /** 后处理段入参（可变对象——改写 result 靠就地改写字段） */
@@ -258,6 +282,8 @@ export interface PostInput {
   callId: string;
   /** 工具结果（可变：裁剪/spill/usage 改写就地作用于本对象） */
   result: AgentToolResult;
+  /** 调用面类别（P1-2 增补 7③——同 GateInput.callOrigin，管道透传） */
+  callOrigin?: ToolCallOrigin;
 }
 
 /**

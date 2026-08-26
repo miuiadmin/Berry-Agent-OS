@@ -41,6 +41,8 @@ export type EventName =
   | 'echo/wf'
   | 'prompts_change'
   | 'skills_change'
+  | 'user_input'
+  | 'turn_stopping'
   | 'context_transform'
   | 'job_settled'
   | (string & {});
@@ -139,7 +141,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'composition/reloaded',
     mode: 'emit',
-    note: '组合树 /reload 全量重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕）',
+    note: '组合树重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕。2026-08-27 P1-2：boot 与 /reload 两时点同发——boot 路在装载收口重物化后派发，boot 时点插件 apply 期已订阅故能听到；观测/工作树类插件可作「组合树就绪」信号）',
   },
   {
     name: 'worker/spawned',
@@ -191,6 +193,16 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'context_transform',
     mode: 'waterfall',
     note: 'LLM 请求组装最后关口的消息变换瀑布（契约篇 §2.2 message 层；载荷 = contracts 标准 AgentMessage[]，逐 handler 变换传播——loop transformContext 由组合根桥接到此钩子，按需检索注入走它。S1 双参：第二参 = 归属会话 id（transformContext 桥随批传入），handler 须 next(messages, sessionId) 逐参透传——waterfall 兜底仅保首参，单参调用丢键）',
+  },
+  {
+    name: 'user_input',
+    mode: 'waterfall',
+    note: '用户输入进模型 run 前的消息级变换瀑布（契约篇 §2.2 message 层增补 7②，2026-08-27 P1-2 兑现：斜杠展开/模板替换/技能命令扩展；载荷双参 (message, sessionId)——与 context_transform 同款多驱动归属参数，handler 须 next(message, sessionId) 逐参透传。派发点 = 全部批消费位（run 入口/followUp drain/重试 drain/turn 边界 steer 注入），凡不进 run 批的 inject 审计路不过；消费点竞速挂起钟 5s）',
+  },
+  {
+    name: 'turn_stopping',
+    mode: 'serial',
+    note: '模型 run 结算后逐个征询是否续跑（契约篇 §2.2 turn 层增补 7①，2026-08-27 P1-2 兑现：载荷 { sessionId, stopReason }；每次 runWithRetry 结算后、followUp 循环复查前派发，全部 stopReason 都发、dismantled 跳过；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由循环消费——零新返回值）；消费点竞速挂起钟 5s）',
   },
   {
     name: 'job_settled',

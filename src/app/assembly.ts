@@ -266,6 +266,18 @@ export interface RuntimeOptions {
    */
   readonly transformTimeoutMs?: number;
   /**
+   * user_input 消费点挂起时钟（毫秒，缺省 5000——契约篇 §1.6 时钟族 + §2.2
+   * 增补 7②，2026-08-27 P1-2）：批消费位逐条竞速，超时抛 EVENT_HANDLER_TIMEOUT
+   * 上抛走 run failed 现径。测试面注小值验证超时路径。
+   */
+  readonly inputTimeoutMs?: number;
+  /**
+   * turn_stopping 消费点挂起时钟（毫秒，缺省 5000——同上，增补 7①）：超时抛
+   * EVENT_HANDLER_TIMEOUT——驱动侧经 onCallbackError 吞并上报（run 已结算，
+   * 征询器故障不改写历史结果、不拖死停机路径）。
+   */
+  readonly stoppingTimeoutMs?: number;
+  /**
    * ctx.sessions 写面频率护栏（缺省容量 2000 / 1000 每分钟——契约篇 §1.6
    * 资源护栏族 #14，2026-08-27 刀〇b）：按**目标会话**令牌桶（归因 = 插件写
    * 落在归属会话），appendEvent / appendWithSurfaceOp 两口统一计费；计费在
@@ -507,6 +519,54 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     );
     waterfallPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
     return Promise.race([waterfallPromise, clock]).finally(() => clearTimeout(timer));
+  };
+
+  /* ---- user_input / turn_stopping 两桥（契约篇 §2.2 增补 7①②，2026-08-27 P1-2
+   * 兑现——与 transformContext 桥同形态：根总线 + 挂起钟 + sessionId 参数化） ---- */
+  const inputTimeoutMs = opts.inputTimeoutMs ?? 5_000;
+  /** user_input：单条消息变换瀑布（驱动批消费位逐条调用；失败/超时上抛 → run failed） */
+  const transformInput = (message: AgentMessage, sessionId: string): Promise<AgentMessage> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clock = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new AppError(
+              EVENT_HANDLER_TIMEOUT,
+              `user_input 钩子挂起超 ${inputTimeoutMs}ms（挂起与抛错同族，run 按失败收尾）`,
+            ),
+          ),
+        inputTimeoutMs,
+      );
+    });
+    const waterfallPromise = ctx.waterfall<AgentMessage>(
+      'user_input',
+      message,
+      sessionId,
+      (final: AgentMessage) => final,
+    );
+    waterfallPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
+    return Promise.race([waterfallPromise, clock]).finally(() => clearTimeout(timer));
+  };
+  const stoppingTimeoutMs = opts.stoppingTimeoutMs ?? 5_000;
+  /** turn_stopping：run 结算征询 serial（超时 reject——驱动侧吞并经 onCallbackError 上报） */
+  const onTurnStopping = (payload: { sessionId: string; stopReason: string }): Promise<void> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clock = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new AppError(
+              EVENT_HANDLER_TIMEOUT,
+              `turn_stopping 钩子挂起超 ${stoppingTimeoutMs}ms（run 已结算，放弃等待不拖死停机）`,
+            ),
+          ),
+        stoppingTimeoutMs,
+      );
+    });
+    const serialPromise = ctx.serial('turn_stopping', payload);
+    serialPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
+    return Promise.race([serialPromise, clock]).finally(() => clearTimeout(timer));
   };
 
   /* ---- ④ llm 运行时（凭证经 persist 适配注入；测试可整体换 streamFn） ---- */
@@ -1039,6 +1099,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     isTransientError: (message) => llmService.classifyError(message) === 'transient',
     convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
     transformContext,
+    // user_input / turn_stopping 两桥（契约篇 §2.2 增补 7①②，2026-08-27 P1-2
+    // 兑现）：同 transformContext 形态——根总线 + 挂起钟，sessionId 参数化
+    // 由 chat 件闭包绑定到各驱动
+    transformInput,
+    onTurnStopping,
     materializeSystemPrompt,
     writableRoots: rootsProvider,
     stampSandboxFacts,
@@ -1501,6 +1566,20 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // boot 装载窗口收口：此后运行时注册（tools_change/prompts_change）即时落
   // header change 快照——装载期中间态已被首请求的 initial 快照整体收编
   loadWindow = false;
+
+  // composition/reloaded boot 路（契约篇 §2.2 增补 1/7④，2026-08-27 P1-2 补齐）：
+  // 词汇注释「boot 与 /reload 两时点」自始为承诺面——boot 装载收口后同款载荷
+  // 派发。时点依据：装载器激活序 = apply 先于 loadPlugins 返回，插件 apply 期
+  // 已订阅故能听到本事件（无「订阅晚于事件」空窗）。payload = Ring 1 + Ring 2/3
+  // 两批装载结果合并三清单（id 面）；boot 即 Ring 1 生效时点，无
+  // ring1RestartRequired 键（与 /reload 路的差异仅此一项）。git-worktree 插件
+  // 墙 #3 可以此作「组合树就绪」信号（ready 级）。
+  const bootPayload: CompositionReloadedPayload = {
+    activated: [...ring1Load.activated, ...ring2Load.activated].map((item) => item.id),
+    failed: [...ring1Load.failed, ...ring2Load.failed].map((item) => item.id),
+    skipped: [...ring1Load.skipped, ...ring2Load.skipped].map((item) => item.id),
+  };
+  ctx.emit('composition/reloaded', bootPayload);
 
   /* ---- /reload 排队机制（契约篇 §3.4 第二刀，2026-08-27 刀 2）：busy 改单槽 coalesce ----
    * run 进行中的 reload 不再拒绝：置 reloadPending 返 {queued:true}（已排队再排

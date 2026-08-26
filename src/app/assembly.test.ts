@@ -1542,6 +1542,118 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(result?.errorMessage).toContain('[EVENT_HANDLER_TIMEOUT]');
   });
 
+  it('user_input 桥接（P1-2 增补 7②）：插件挂瀑布变换用户消息 → 模型请求含变换体、原文本不进请求', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "input-transform";',
+        'export default async function apply(ctx) {',
+        '  // user_input 瀑布双参 (message, sessionId)：变换后调 next 逐参透传',
+        '  // （与 context_transform 的 S1 双参契约同款——单参调用丢归属键）',
+        '  ctx.on("user_input", (m, s, next) =>',
+        '    next({ ...m, content: "【已变换】" + String(m.content) }, s),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: input-transform\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn, contexts } = scriptedStream([textMessage('好的')]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    await runtime.conversation!.submitOnce('原始问题');
+
+    // 变换体进模型请求（桥接生效——transformBatch → 总线瀑布）
+    const flat = contexts[0]!.messages.map((m) => JSON.stringify(m)).join('\n');
+    expect(flat).toContain('【已变换】原始问题');
+    expect(flat).not.toContain('"原始问题"'); // 替换语义非追加：原文本不进请求
+  });
+
+  it('user_input 桥钟（§1.6 时钟族）：插件钩子挂起 → EVENT_HANDLER_TIMEOUT、run 按失败收尾', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "hang-input";',
+        'export default async function apply(ctx) {',
+        '  // 挂起与抛错同族（增补 7② 失败语义）：进瀑布后永不调 next——',
+        '  // 竞速桥钟后 run 按失败收尾（响亮不吞）',
+        '  ctx.on("user_input", () => new Promise(() => {}));',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: hang-input\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn } = scriptedStream([textMessage('到不了的回答')]);
+    // inputTimeoutMs 小钟（30ms）：生产缺省 5s——测试不等真钟
+    const runtime = await assemble({ streamFn, compositionDir, inputTimeoutMs: 30 });
+    const result = await runtime.conversation!.submitOnce('会挂起的问题');
+
+    expect(result?.status).toBe('failed');
+    expect(result?.errorMessage).toContain('[EVENT_HANDLER_TIMEOUT]');
+  });
+
+  it('turn_stopping 桥钟（增补 7① 失败语义）：serial 挂起 → 超时不拖死停机、run 结果不被改写', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "hang-stopping";',
+        'export default async function apply(ctx) {',
+        '  // 征询器挂起：run 已结算——驱动侧吞 + onCallbackError 上报，不改写历史结果',
+        '  ctx.on("turn_stopping", () => new Promise(() => {}));',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: hang-stopping\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    // stoppingTimeoutMs 小钟（30ms）：生产缺省 5s
+    const runtime = await assemble({ streamFn, compositionDir, stoppingTimeoutMs: 30 });
+    const result = await runtime.conversation!.submitOnce('问');
+
+    // run 正常完成（completed）——turn_stopping 桥超时 reject 被驱动吞掉，
+    // 不拖死 run 收尾、不改写已结算的结果
+    expect(result?.status).toBe('completed');
+  });
+
+  it('composition/reloaded boot 路（增补 1/7④）：装载收口后派发——apply 期订阅可听到、无 ring1RestartRequired', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const markPath = join(compositionDir, 'boot-reloaded.json');
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'import { writeFileSync } from "node:fs";',
+        'export const name = "boot-signal";',
+        `const MARK_PATH = ${JSON.stringify(markPath)};`,
+        'export default async function apply(ctx) {',
+        '  // apply 期订阅（装载器激活序 = apply 先于装载收口）：boot 派发时已在听——',
+        '  // 「订阅晚于事件」空窗不存在，这是 boot 路可派发的时序依据',
+        '  ctx.on("composition/reloaded", (payload) => writeFileSync(MARK_PATH, JSON.stringify(payload)));',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: boot-signal\n    plugin: ${pluginDir}\n`);
+
+    const { streamFn } = scriptedStream([textMessage('好')]);
+    await assemble({ streamFn, compositionDir });
+
+    // boot 路派发已到达（收口即派发——assemble 返回时事件已过）
+    expect(existsSync(markPath)).toBe(true);
+    const payload = JSON.parse(readFileSync(markPath, 'utf8')) as {
+      activated: string[];
+      failed: string[];
+      skipped: string[];
+      ring1RestartRequired?: string[];
+    };
+    // 三清单合并自 Ring 1 + Ring 2/3 两批：默认层全行 + 本插件行在场
+    expect(payload.activated).toContain('boot-signal');
+    expect(payload.activated).toContain('memory');
+    expect(payload.failed).toEqual([]);
+    // boot 即 Ring 1 生效时点——无 ring1RestartRequired 键（与 /reload 路的唯一差异）
+    expect(payload.ring1RestartRequired).toBeUndefined();
+  });
+
   it('插件启动断言：失败行非空 → 工厂抛 PLUGIN_LOAD_FAILED 聚合清单（不带病运行）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const pluginDir = writePluginDir(compositionDir, 'export const name = "bad";\nexport default 42;\n');

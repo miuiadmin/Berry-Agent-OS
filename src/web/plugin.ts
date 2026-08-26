@@ -97,7 +97,15 @@ function applyWebPlugin(
       }
       // 内部 toolCallId（durable gate/decision 落账关联键）+ caller 归因入管道载荷
       const toolCallId = `fetch-${randomUUID()}`;
-      await executor(def, toolCallId, { url, ...(opts.caller ? { caller: opts.caller } : {}) }, opts.signal);
+      // origin='service'（P1-2 增补 7③）：宿主服务面复入的显式判别词（同 exec 服务）
+      await executor(
+        def,
+        toolCallId,
+        { url, ...(opts.caller ? { caller: opts.caller } : {}) },
+        opts.signal,
+        undefined,
+        'service',
+      );
       return captured!; // execute 已跑即必写（异常路径走 throw 不会到这）
     },
   };

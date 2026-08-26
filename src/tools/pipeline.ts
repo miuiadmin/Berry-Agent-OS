@@ -132,7 +132,7 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
   const postTimeoutMs = opts.postTimeoutMs ?? 5_000;
   const recordGate: GateDecisionSink = opts.onGateDecision ?? (() => {});
 
-  return async function runToolPipeline(def, toolCallId, args, signal, onUpdate) {
+  return async function runToolPipeline(def, toolCallId, args, signal, onUpdate, origin) {
     /* ---- 前置步：进度流护栏包装（#11——两消费面同源：executeInput 与 toolCtx） ---- */
     const guardedUpdate: ToolUpdateCallback | undefined =
       onUpdate === undefined
@@ -172,7 +172,14 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
 
     /* ---- 第一段：守门（fail-closed；block 短路不进执行段） ---- */
     // 可变入参：mutate 决策就地改写 args + 置 mutated；链尾 next 返回 undefined = 全链放行
-    const gateInput: GateInput = { tool: def, args, callId: toolCallId, mutated: false };
+    // callOrigin 随执行器第 6 参透传（P1-2 增补 7③——面别判别词，undefined = 未知面不置键）
+    const gateInput: GateInput = {
+      tool: def,
+      args,
+      callId: toolCallId,
+      mutated: false,
+      ...(origin !== undefined ? { callOrigin: origin } : {}),
+    };
     let gateOutcome: GateAction | undefined;
     try {
       gateOutcome = await ctx.waterfall<GateAction | undefined>(TOOL_PRE_EXECUTE_EVENT, gateInput, () => undefined);
@@ -201,7 +208,15 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
     });
 
     /* ---- 第二段：执行（around-dispatch；链尾默认实现 = 超时预算 + execute） ---- */
-    const executeInput: ExecuteInput = { tool: def, args, callId: toolCallId, signal, onUpdate: guardedUpdate };
+    // callOrigin 透传（P1-2 增补 7③——三段同词，执行段接管者可按面别替换逻辑）
+    const executeInput: ExecuteInput = {
+      tool: def,
+      args,
+      callId: toolCallId,
+      signal,
+      onUpdate: guardedUpdate,
+      ...(origin !== undefined ? { callOrigin: origin } : {}),
+    };
     // caller 链写点之二（会话篇 §5.1 导入者归因，P1-1）：工具体按注册归属包裹——
     // 插件工具体内的一切共享服务面调用（如 createSession 的 importer 落账）归注册
     // 插件。宿主/builtin 工具无归属不包（链保持无身份，读点 'host' 兜底——不造
@@ -241,7 +256,14 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
      * 现径（loop runAndFinalizeToolCall catch 编码 isError 结果返回模型；监听器
      * 迟到 reject 挂 catch 兜底不进 unhandledRejection）。守门/执行段不设此钟：
      * 守门 fail-closed 依赖抛错穿透（语义已足），执行段预算归 def.timeoutMs。 */
-    const postInput = { tool: def, args, callId: toolCallId, result };
+    // callOrigin 透传（P1-2 增补 7③——后处理段同词：审计/裁剪可按面别分叉）
+    const postInput = {
+      tool: def,
+      args,
+      callId: toolCallId,
+      result,
+      ...(origin !== undefined ? { callOrigin: origin } : {}),
+    };
     let postTimer: ReturnType<typeof setTimeout> | undefined;
     const postClock = new Promise<never>((_, reject) => {
       postTimer = setTimeout(

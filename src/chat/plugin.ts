@@ -391,6 +391,18 @@ export interface ChatPluginDeps {
    */
   readonly transformContext: (messages: AgentMessage[], sessionId: string) => Promise<AgentMessage[]>;
   /**
+   * user_input 桥（契约篇 §2.2 增补 7②，2026-08-27 P1-2：经根总线 waterfall +
+   * 挂起钟——桥本体用根 ctx 恒存活，与 transformContext 同款注入形态）。驱动
+   * 在批消费位逐条调用；sessionId 由件闭包绑定给 handler（多驱动归属参数）
+   */
+  readonly transformInput: (message: AgentMessage, sessionId: string) => Promise<AgentMessage>;
+  /**
+   * turn_stopping 桥（契约篇 §2.2 增补 7①，2026-08-27 P1-2：经根总线 serial +
+   * 挂起钟）：每次 runWithRetry 结算后派发（载荷 { sessionId, stopReason }）；
+   * 续跑 = handler 内经会话面 deliver 投递（零新返回值）
+   */
+  readonly onTurnStopping: (payload: { sessionId: string; stopReason: string }) => Promise<void>;
+  /**
    * 系统提示词物化器（S2 per-entry 替换 getSystemPrompt 全局活视图——契约篇
    * §1.3 落码形态①）：`[基座, 技能渐进披露, 具名段]` 在**本条目时点**求值拼接。
    * 每条目 open 各自物化（新纪元）；prompts/skills 变更与 /reload 重物化全部
@@ -863,6 +875,10 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
           // 回调桥为根总线瀑布，sessionId 随批穿透给 handler（差分/检索按会话路由）
           transformContext: (batch) => deps.transformContext(batch, session.header.sessionId),
         },
+        // user_input / turn_stopping 两钩子桥（增补 7①②，P1-2 兑现）：sessionId
+        // 由件闭包绑定（与 transformContext 同款形态）——驱动的批消费位只管调
+        transformInput: (message) => deps.transformInput(message, session.header.sessionId),
+        onTurnStopping: (payload) => deps.onTurnStopping(payload),
         durable, // 直连本会话（S1——转发壳只剩组合根侧 gate/approval 两路）
         // S4 会话层 auto-retry 三注入：session（倒扫/重播种/落账三消费位——
         // 无持久层件面 session 缺席时重试自动关闭）、transient 判定器（桶表

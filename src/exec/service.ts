@@ -140,7 +140,9 @@ export function registerExecService(ctx: Context, opts: ExecServiceOptions): Exe
       // 守门 block / 超时 / 校验失败一律 throw AppError——原语调用方是宿主侧
       // 代码，异常面比文本面更有用（与模型工具面的结构化拒绝刻意不对称）
       const toolCallId = `exec-${randomUUID()}`;
-      await opts.pipeline(def, toolCallId, pipelineArgs, callOpts.signal);
+      // origin='service'（P1-2 增补 7③）：宿主服务面复入的显式判别词——守门行
+      // 按面别分叉不靠合成名 'exec' 嗅探
+      await opts.pipeline(def, toolCallId, pipelineArgs, callOpts.signal, undefined, 'service');
       return captured!; // execute 已跑即必写（block/异常路径走 throw 不会到这）
     },
   };

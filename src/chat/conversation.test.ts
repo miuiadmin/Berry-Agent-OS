@@ -633,3 +633,128 @@ describe('ConversationDriver 驱动级取消模型（S6 形态①②③）', () 
     expect(settled).toEqual(['aborted', 'completed']);
   });
 });
+
+/* ---------------- P1-2 事件目录兑现批：user_input / turn_stopping（驱动半边） ---------------- */
+
+describe('ConversationDriver user_input 批消费位变换（P1-2 增补 7②）', () => {
+  it('run 入口路：transformInput 变换体进模型请求、原文本被替换（非追加）', async () => {
+    const calls: LlmContext[] = [];
+    const driver = new ConversationDriver({
+      sessionId: 'transform-session',
+      context: { messages: [], tools: [] },
+      loopConfig: {
+        streamFn: scriptedStream([okAssistant('答')], calls),
+        model: 'test/model',
+        convertToLlm: minimalConvert,
+      },
+      // 变换返回新引用 + 新文本（引用替换 + 内容替换双重路径同锁）
+      transformInput: async (m) =>
+        m.role === 'user' ? { ...m, content: '【已变换】' + String((m as { content: unknown }).content) } : m,
+    });
+    driver.submit('原始问题');
+    await driver.settle();
+
+    const userTexts = (calls[0]!.messages as Array<{ role: string; content: unknown }>)
+      .filter((m) => m.role === 'user')
+      .map((m) => String(m.content));
+    expect(userTexts).toContain('【已变换】原始问题'); // 变换体进请求
+    expect(userTexts).not.toContain('原始问题'); // 原文本不进（替换语义，非追加）
+  });
+
+  it('引用替换 → deliverMeta 迁移：退避期 wake 的工具收窄在续入批继续生效（修前必红）', async () => {
+    const session = new Session();
+    const calls: LlmContext[] = [];
+    const driver = new ConversationDriver({
+      sessionId: 'wake-rekey',
+      context: { messages: [], tools: TOOLS },
+      loopConfig: {
+        streamFn: scriptedStream([errorAssistant('retryable-mark: x'), okAssistant('恢复')], calls),
+        model: 'test/model',
+        convertToLlm: minimalConvert,
+      },
+      durable: createDurableSinks(session),
+      session,
+      isTransientError: (m) => (m.errorMessage ?? '').includes('retryable-mark'),
+      retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 50 },
+      // 恒返回新引用（浅拷贝）：deliverMeta 键迁移路径的唯一形态——引用不变时
+      // 原键天然有效，本用例锁的就是替换后 re-key
+      transformInput: async (m) => ({ ...m }),
+    });
+    driver.submit('跑后台');
+    await new Promise((resolve) => setTimeout(resolve, 10)); // 首跑失败落定、退避中
+    driver.deliver(
+      { role: 'user', content: '后台续命', timestamp: 2 },
+      { backgroundWake: true, toolFilter: ['read_file'] },
+    );
+    await driver.settle();
+
+    // 修前必红：transformBatch 无 re-key → deliverMeta.get(新引用) 缺失 → 收窄
+    // 元数据丢失 → 续入批工具面回全量（本断言取到 TOOLS 五件即红）
+    expect((calls[1]!.tools ?? []).map((t) => t.name)).toEqual(['read_file']);
+  });
+
+  it('失败语义（响亮不吞）：transformInput 抛错 → run 按失败收尾、错误进 errorMessage', async () => {
+    const boom = new Error('user_input 变换炸了');
+    const { driver } = makeRetryDriver([okAssistant('到不了的回答')], {
+      transformInput: async () => {
+        throw boom;
+      },
+    });
+    const result = await driver.submitOnce('会失败的问题');
+
+    expect(result?.status).toBe('failed'); // 钩子失败 = run 无法进行——上抛走 runTurns 统一 catch
+    expect(result?.errorMessage).toContain('user_input 变换炸了');
+  });
+});
+
+describe('ConversationDriver turn_stopping 派发（P1-2 增补 7①）', () => {
+  it('runWithRetry 结算后恰好一次（S4 重试中间态不派发）+ sessionId/stopReason 透传', async () => {
+    const payloads: Array<{ sessionId: string; stopReason: string }> = [];
+    const { driver } = makeRetryDriver([errorAssistant('retryable-mark: x'), okAssistant('恢复')], {
+      onTurnStopping: async (p) => {
+        payloads.push({ ...p });
+      },
+    });
+    driver.submit('你好');
+    await driver.settle();
+
+    // 首跑失败 + 重试成功 = 同一个 runWithRetry：结算后派发一次；中间 error
+    // 态不派发（派发点在结算后不在每次模型调用后）
+    expect(payloads).toEqual([{ sessionId: 'retry-session', stopReason: 'stop' }]);
+  });
+
+  it('失败语义（吞不拖死）：handler 抛错 → onCallbackError 携来源上报，run 结果不被改写', async () => {
+    const seen: { err: unknown; source: string }[] = [];
+    const boom = new Error('征询器坏了');
+    const settled: string[] = [];
+    const { driver } = makeRetryDriver([okAssistant('答')], {
+      onTurnStopping: async () => {
+        throw boom;
+      },
+      onCallbackError: (err, source) => seen.push({ err, source }),
+    });
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle(); // 驱动侧吞：征询器故障不拖死 run 收尾
+
+    expect(seen).toEqual([{ err: boom, source: 'turn_stopping' }]); // 诊断归因不静默
+    expect(settled).toEqual(['completed']); // run 已结算——故障不改写历史结果
+  });
+
+  it('catch 合成终值路：runTurns 兜底 error 结算同样派发（stopReason=error 诚实可见）', async () => {
+    const payloads: Array<{ sessionId: string; stopReason: string }> = [];
+    const { driver } = makeRetryDriver([okAssistant('到不了的回答')], {
+      // runTurns catch 触发器：批消费位变换上抛 → 合成 error 终值 → turn_stopping 照派
+      transformInput: async () => {
+        throw new Error('user_input 钩子上抛');
+      },
+      onTurnStopping: async (p) => {
+        payloads.push({ ...p });
+      },
+    });
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(payloads).toEqual([{ sessionId: 'retry-session', stopReason: 'error' }]);
+  });
+});
