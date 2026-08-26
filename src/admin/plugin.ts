@@ -1,24 +1,28 @@
 /**
- * L4 admin — 官方件 `builtin:admin`（契约篇 §3.4 平台管理面第一刀，2026-08-27，
- * 默认层第十行，Ring 2 真·可卸）。
+ * L4 admin — 官方件 `builtin:admin`（契约篇 §3.4 平台管理面，2026-08-27 刀 1+
+ * 刀 3，默认层第十行，Ring 2 真·可卸）。
  *
- * 第一刀 = 只读面两工具（「禁注册无身动词」——两件都是既有服务面的文本化
- * 呈现，不造第二数据源）：
+ * 刀 1 = 只读面两工具（「禁注册无身动词」——既有服务面的文本化呈现，不造第二
+ * 数据源）：
  * - `plugins_list`：装载态一览（ctx.plugins.list + 组合树行 source 推导）；
  * - `events_query`：跨会话 durable 事件有界查询（ctx.sessions.queryEvents——
  *   会话篇 §3.4 单原语的工具层壳：ISO 8601 转毫秒、data 摘要截断、flushFirst
  *   恒置 true）。
  *
- * 写类动词（install/uninstall/configure/reload）随第二刀导线（三档分级中档
- * 审批对/激活类 human-only 不在本刀）；uninstall 服务本体独立小刀（第十八批）。
+ * 刀 3 = 写类动词六词导线（契约篇 §3.4 刀 2 工具族与 Skill 兑现条）：五写词
+ * （install/update/toggle/configure/reload——生命周期档审批对恒经人手，机制
+ * 形态见 ./write-tools.ts 模块头）+ `plugins_uninstall_inspect`（read——双相
+ * 卸载的模型面，执行权在人）。服务面导线同批：configure/requestReload 落
+ * src/app/plugins.ts（本件只消费不实现）。
  *
  * 管理操作知识 = 同件携带 Skill `./skills/admin`（§4.1 纯知识注入——它教
  * 方法，动词住工具）。builtin 件无入口文件路径，包根以 packageRoot 自述
  * （import.meta.url 位置事实——契约篇 §3.4 两处钉死，仅 builtin 行生效）。
  *
  * 拓扑最小边（mcp/web 同款窄边）：全部依赖经 ctx.get 运行时服务面取
- * （tools/sessions/plugins 三键都是宿主 ④/④e 序无条件 provide），零跨模块
- * import——服务面的结构子集类型在本文件本地收窄（不 import 宿主实现类型）。
+ * （tools/sessions/plugins/approval 四键都是宿主装配序无条件 provide 的服务，
+ * approval 在 ⑥ 审批段早于 ⑨ 插件装载——fork 级联可见），零跨模块 import
+ * ——服务面的结构子集类型在本文件与 write-tools.ts 本地收窄。
  */
 
 import { dirname } from 'node:path';
@@ -28,6 +32,16 @@ import type { EventQueryCursor, EventQueryOptions, EventQueryResult } from '../c
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
 import { Type } from '../contracts/typebox.js';
+import {
+  createPluginsConfigureTool,
+  createPluginsInstallTool,
+  createPluginsReloadTool,
+  createPluginsToggleTool,
+  createPluginsUninstallInspectTool,
+  createPluginsUpdateTool,
+  type ApprovalAskFace,
+  type PluginsManageFace,
+} from './write-tools.js';
 
 /**
  * ctx.plugins.list() 单行的结构子集（admin 件消费面收窄——宿主实现类型在 app
@@ -227,19 +241,31 @@ export function createEventsQueryTool(sessions: SessionsQueryFace): ToolDefiniti
 export function createAdminPlugin(): BuiltinPluginModule {
   return {
     name: 'admin',
-    // 硬依赖三键全为宿主 ④/④e 序无条件 provide 的服务（tools 由 Ring 1 行
-    // 独立锚先行装载）——缺供即装配断言，诊断树也须见到此行
-    inject: ['tools', 'sessions', 'plugins'],
+    // 硬依赖四键全为宿主装配序无条件 provide 的服务（tools 由 Ring 1 行独立锚
+    // 先行装载；approval 在 ⑥ 审批段——写类动词的审批对面）——缺供即装配断言，
+    // 诊断树也须见到此行
+    inject: ['tools', 'sessions', 'plugins', 'approval'],
     skills: ['./skills/admin'],
     packageRoot: dirname(fileURLToPath(import.meta.url)),
     apply: (ctx: PluginContext): void => {
       const tools = ctx.get<ToolsService>('tools');
-      const plugins = ctx.get<PluginsListFace>('plugins');
+      // 刀 1 只读面：清单 + 事件查询（结构子集类型收窄见各 face 定义）
+      const pluginsRead = ctx.get<PluginsListFace>('plugins');
       const sessions = ctx.get<SessionsQueryFace>('sessions');
-      // 注册即 effect：两工具挂行作用域，/reload 锚回卷或行失败连带回卷撤件
-      ctx.effect(() => tools.register(createPluginsListTool(plugins)));
+      // 刀 3 写面：管理动词五写词 + 卸载检视（审批对面 = 根审批服务——fork
+      // 级联可见；asked/decided 双腿落 durable 由审批服务承载）
+      const pluginsManage = ctx.get<PluginsManageFace>('plugins');
+      const approval = ctx.get<ApprovalAskFace>('approval');
+      // 注册即 effect：八工具挂行作用域，/reload 锚回卷或行失败连带回卷撤件
+      ctx.effect(() => tools.register(createPluginsListTool(pluginsRead)));
       ctx.effect(() => tools.register(createEventsQueryTool(sessions)));
-      ctx.logger.debug('admin 件只读面两工具已注册（plugins_list / events_query）');
+      ctx.effect(() => tools.register(createPluginsInstallTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsUpdateTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsToggleTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsConfigureTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsReloadTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsUninstallInspectTool(pluginsManage)));
+      ctx.logger.debug('admin 件八工具已注册（只读两件 + 写类五件 + 卸载检视一件）');
     },
   };
 }

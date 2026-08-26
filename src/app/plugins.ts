@@ -32,7 +32,14 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, parse, relative, resolve, sep } from 'node:path';
 import { writeAtomicFile } from '../persist/index.js';
-import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_FIXED_ROW, PLUGIN_INSTALL_FAILED } from '../contracts/errors.js';
+import {
+  AppError,
+  COMPOSITION_ROW_INVALID,
+  PLUGIN_CONFIG_INVALID,
+  PLUGIN_FIXED_ROW,
+  PLUGIN_INSTALL_FAILED,
+} from '../contracts/errors.js';
+import { Value as typeboxValue, type TSchema } from '../contracts/typebox.js';
 import type { CompositionRow, PluginLoadResult, PluginPlanRow } from '../contracts/plugin.js';
 import {
   derivePluginRowSource,
@@ -45,6 +52,7 @@ import {
   resolvePluginEntry,
   toggleOverlayRow,
   upsertOverlayPluginRef,
+  writeOverlayRowConfig,
   type CompositionReport,
   type PluginRowSource,
   type PluginStatusRow,
@@ -90,6 +98,20 @@ export interface PluginsService {
     id: string,
     opts: { readonly mode: 'execute'; readonly dataAction: 'keep' | 'purge' },
   ): Promise<UninstallExecReport>;
+  /**
+   * 行配置写入（契约篇 §3.4 刀 2 工具族条——configure 服务面导线）：patch 顶层键
+   * 整值替换（与 overlay 字段级后写胜出同族语义，不引入深合并），合并后完整 config
+   * 经插件声明 schema 校验（复用装载期同 schema）才落 overlay。schema 不可得行
+   * （failed/disabled/unresolved/worker 域）拒写并提示先装载——跳过校验降级与
+   * 「错配置防 boot 拒启」目标相反。**不自动链 reload**（动词单职责——链式用法
+   * 由调用方显式走 requestReload）。
+   */
+  configure(id: string, patch: Readonly<Record<string, unknown>>): Promise<ConfigureReport>;
+  /**
+   * 重载请求投递（同条导线——reload 真身住组合根，服务面只投递）：排队语义宿主
+   * 侧承载（run 进行中排队、run 结算后自动排水），件不自带重建权。
+   */
+  requestReload(): Promise<ReloadOutcome>;
   /** boot 与 /reload 后装配方回灌最新装载结果（同实例就地更新——服务集恒定） */
   applyLoad(composition: CompositionReport, load: PluginLoadResult): void;
   /**
@@ -200,6 +222,32 @@ export interface UninstallExecReport {
   readonly restoresDefault?: true;
 }
 
+/* ---------------- configure / requestReload 导线（契约篇 §3.4 刀 2 工具族条） ---------------- */
+
+/** configure 结果（TUI/模型面直显的人读报告） */
+export interface ConfigureReport {
+  /** 组合树行 id */
+  readonly id: string;
+  /** 合并后的完整行配置（顶层键整值替换的产物——回显确认面） */
+  readonly config: Readonly<Record<string, unknown>>;
+  /** 本次写入的顶层键集（patch 的键——整值替换语义的显式可见面） */
+  readonly appliedKeys: readonly string[];
+  /** Ring 1 行提示：行不随 /reload 热装载，写盘后须重启生效（不静默吞——与 /reload 报告同纪律） */
+  readonly ring1RestartRequired: boolean;
+  /** 一句话结果（人读；提示重载/重启后生效——不自动链） */
+  readonly message: string;
+}
+
+/**
+ * 重载请求回执三态（requestReload 服务面导线形态）：宿主侧 ReloadResult 的
+ * 服务面投影——queued（run 进行中已排队，结算后自动执行）/ done（成功，failed
+ * 为失败行 id 清单——进程存活逐行报告）/ error（overlay 校验失败等，旧装配未动）。
+ */
+export type ReloadOutcome =
+  | { readonly status: 'queued' }
+  | { readonly status: 'done'; readonly failed: readonly string[] }
+  | { readonly status: 'error'; readonly message: string };
+
 /**
  * 建插件管理服务实例。
  * @param opts.dataDir 数据目录（overlay 与装机子树的根）
@@ -209,6 +257,8 @@ export interface UninstallExecReport {
  *        Store 并内嵌 flush 屏障；缺省 = 无持久层诊断面，检视省略计数）
  * @param opts.emitUninstalled 卸载完成事件投递（assembly 注入：总线 emit +
  *        当前会话流 append 双落地；缺省 = 服务单测不落事件）
+ * @param opts.requestReload 重载请求投递面（刀 3 导线：assembly 注入组合根
+ *        reload 闭包的适配器——排队语义宿主侧承载；缺省 = 诊断面拒投递）
  */
 export function createPluginsService(opts: {
   dataDir: string;
@@ -216,6 +266,7 @@ export function createPluginsService(opts: {
   loadEntry?: EntryLoader;
   affectedSessionCounts?: (types: readonly string[]) => Promise<Record<string, number>> | Record<string, number>;
   emitUninstalled?: (data: UninstalledEventData) => void;
+  requestReload?: () => Promise<ReloadOutcome>;
 }): PluginsService {
   const dataDir = opts.dataDir;
   const runner = opts.runner ?? spawnRunner;
@@ -659,6 +710,135 @@ export function createPluginsService(opts: {
 
     /** 双相卸载（实现在上方 uninstallImpl 函数声明——overload 返回联合的形态约束） */
     uninstall: uninstallImpl,
+
+    /**
+     * 行配置写入（契约篇 §3.4 刀 2 工具族条——configure 服务面导线）。
+     * 执行序：行定位（装载计划 = 唯一事实源）→ 状态门（schema 不可得行拒写：
+     * disabled 挂载休眠 / unresolved 未装 / worker 域结构不可得 / 非 activated）
+     * → 声明 schema 读取（builtin 行 = 官方注册表模块引用零装载；文件行 =
+     * loadEntry 一次性 jiti 装载读 named export config——与词表收割同信任前提
+     * 同门禁）→ 合并（顶层键整值替换）→ 校验（复用装载期同 schema，错配置
+     * 不落盘防 boot 拒启陷阱）→ overlay 整值写回。
+     */
+    async configure(id, patch) {
+      // 空 patch 无语义（整值替换语义下空集不是合法变更）——响亮拒绝防误调造空替换行
+      const appliedKeys = Object.keys(patch);
+      if (appliedKeys.length === 0) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          'configure：patch 键集为空（顶层键整值替换——要改哪些键就带哪些键，空集不是变更）',
+        );
+      }
+      const row = plan.find((candidate) => candidate.id === id);
+      const { overlay, defaultRow } = findRowLocation(dataDir, id);
+      if (row === undefined || (overlay === undefined && defaultRow === undefined)) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `configure：未知行 id「${id}」（组合树无此行——清单以 /plugins 或 plugins_list 为准，勿凭记忆拼 id）`,
+        );
+      }
+      // 状态门四拒（spec：schema 不可得行拒写并提示先装载——跳过校验降级与
+      // 「错配置防 boot 拒启」目标相反）：
+      if (row.skip !== undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `configure：行「${id}」已禁用（${row.skip === 'disabled' ? '静态禁用' : '平台门控'}·挂载休眠）——先启用（/plugin-toggle 或 plugins_toggle）再配置`,
+        );
+      }
+      if (row.unresolved !== undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `configure：行「${id}」入口未解析（${row.unresolved}）——先安装（/plugin-install 或 plugins_install）再配置`,
+        );
+      }
+      if (row.runtime === 'worker') {
+        // worker 行的生效 schema 在 worker 域（过界元数据）——宿主侧重装载读到
+        // 的是另一实例，配置校验的权威面结构不可得：诚实拒写优于跨域猜测
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `configure：行「${id}」是 worker 域行——其生效 config schema 在 worker 侧结构不可得，请直接编辑 overlay.yaml 后 /reload`,
+        );
+      }
+      const status = byId.get(id)?.status;
+      if (status !== 'activated') {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `configure：行「${id}」未激活（当前状态：${status ?? 'planned'}）——先让行装载成功（修失败原因或 /reload）再配置`,
+        );
+      }
+      // 声明 schema 读取：builtin 行 = 官方注册表模块引用（plan 行直挂，零装载）；
+      // 文件行 = 注入的 loadEntry 一次性装载（词表收割同款面）
+      let schema: TSchema | undefined;
+      if (row.builtin !== undefined) {
+        schema = row.builtin.config;
+      } else {
+        if (opts.loadEntry === undefined || row.entry === undefined) {
+          throw new AppError(
+            COMPOSITION_ROW_INVALID,
+            `configure：行「${id}」的配置校验面不可用（无入口装载面——宿主未注入 loadEntry）——拒写`,
+          );
+        }
+        const ns = await opts.loadEntry(row.entry);
+        if (Object.hasOwn(ns, 'config')) schema = ns.config as TSchema;
+      }
+      // 合并（顶层键整值替换）+ 校验（装载期同 schema：typebox Check，抛错与不过同路）。
+      // 合并基线 = overlay 行 config 的新鲜读（findRowLocation 每次 loadOverlayRows）：
+      // plan 行是 applyLoad 回灌的陈旧快照，连续 configure 不经 reload 时用旧基线整替
+      // 会丢前次写入的键；overlay 无 config 键时回退 plan 行 config（= 官方默认层
+      // config，代码随包不随运行期变）
+      const current = overlay?.config ?? row.config ?? {};
+      const merged = { ...current, ...patch };
+      if (schema !== undefined) {
+        let ok = false;
+        try {
+          ok = typeboxValue.Check(schema, merged);
+        } catch {
+          ok = false; // schema 自身非法与校验不过同路（与 loader 装载期口径一致）
+        }
+        if (!ok) {
+          const first = (() => {
+            try {
+              return [...typeboxValue.Errors(schema, merged)].at(0);
+            } catch {
+              return undefined;
+            }
+          })();
+          const loc = first ? first.instancePath || first.schemaPath || '(根)' : '(根)';
+          const detail = first ? `${loc}：${first.message}` : 'schema 校验失败';
+          throw new AppError(
+            PLUGIN_CONFIG_INVALID,
+            `configure：合并后 config 未通过插件声明 schema——${detail}（本次未写入，现配置不变）`,
+          );
+        }
+      }
+      writeOverlayRowConfig(dataDir, id, merged);
+      const ring1RestartRequired = RING1_REQUIRED_ROW_IDS.includes(id);
+      return {
+        id,
+        config: merged,
+        appliedKeys,
+        ring1RestartRequired,
+        message:
+          `配置已写入 overlay（顶层键整值替换：${appliedKeys.join('、')}）——` +
+          (ring1RestartRequired
+            ? 'Ring 1 行不随 /reload 热装载，须重启生效'
+            : '重载（/reload 或 plugins_reload）后生效'),
+      };
+    },
+
+    /**
+     * 重载请求投递（刀 3 导线——真身在组合根 reload 闭包）：服务面零自有状态，
+     * 只经注入闭包转发。排队语义在宿主侧（run 进行中排队、结算后自动排水）。
+     */
+    async requestReload() {
+      if (opts.requestReload === undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          'requestReload：宿主未注入重载请求面（诊断装配无 /reload——本面不可用）',
+        );
+      }
+      return await opts.requestReload();
+    },
   };
 }
 

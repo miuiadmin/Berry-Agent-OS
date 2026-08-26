@@ -9,16 +9,29 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_FIXED_ROW, PLUGIN_INSTALL_FAILED } from '../contracts/errors.js';
+import {
+  AppError,
+  COMPOSITION_ROW_INVALID,
+  PLUGIN_CONFIG_INVALID,
+  PLUGIN_FIXED_ROW,
+  PLUGIN_INSTALL_FAILED,
+} from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
+import { Type } from '../contracts/typebox.js';
 import {
   createPluginsService,
   spawnRunner,
+  type ConfigureReport,
   type EntryLoader,
   type InstallRunner,
+  type ReloadOutcome,
   type UninstalledEventData,
 } from './plugins.js';
 import { loadComposition, loadOverlayRows } from './composition.js';
+// 升权词汇单一归宿锁的两极（admin 件镜像常量 ↔ safety 权威词表）：admin 边只有
+// contracts 不开 admin→safety——app 是两侧唯一合法会师点，锁测试住本文件
+import { PRIVILEGE_REQUEST_TARGETS } from '../admin/write-tools.js';
+import { ESCALATION_TARGETS } from '../safety/sandbox.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -721,5 +734,248 @@ describe('uninstall 双相四段', () => {
     // 再跑一次 = 全无残迹 no-op（重入收敛闭环）
     const again = await plugins.uninstall('demo', { mode: 'execute', dataAction: 'keep' });
     expect(again.outcome).toBe('no-op');
+  });
+});
+
+/* ---------------- configure / requestReload（契约篇 §3.4 刀 2 工具族条） ---------------- */
+
+describe('configure 行配置写入', () => {
+  /**
+   * 造一个带声明 config schema 的 local 插件行并置为 activated（configure 的
+   * 状态门要求行装载成功）。loadEntry 替身返回 config named export——与词表
+   * 收割同注入边同信任前提。
+   */
+  function setupConfigurable(
+    dataDir: string,
+    configSchema?: object,
+  ): { localDir: string; loadEntry: EntryLoader; plugins: ReturnType<typeof createPluginsService> } {
+    const localDir = join(dataDir, 'my-plugin');
+    mkdirSync(localDir);
+    writeFileSync(join(localDir, 'index.ts'), 'export const name = "my-plugin";\nexport default () => {};\n');
+    const loadEntry: EntryLoader = async () => ({
+      name: 'my-plugin',
+      ...(configSchema !== undefined ? { config: configSchema } : {}),
+    });
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    return { localDir, loadEntry, plugins };
+  }
+
+  /** applyLoad 全激活一行（configure 状态门的前置） */
+  function activate(plugins: ReturnType<typeof createPluginsService>, dataDir: string, id: string): void {
+    plugins.applyLoad(loadComposition(dataDir), {
+      activated: [{ id, name: id, applyMs: 1 }],
+      failed: [],
+      skipped: [],
+    });
+  }
+
+  it('happy path 文件行：schema 校验过 → overlay 写整值 config；回执带合并后全量与键清单', async () => {
+    const dataDir = makeDataDir();
+    const schema = Type.Object({ apiKey: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) });
+    const { localDir, plugins } = setupConfigurable(dataDir, schema);
+    await plugins.install(localDir);
+    activate(plugins, dataDir, 'my-plugin');
+
+    const report: ConfigureReport = await plugins.configure('my-plugin', { limit: 5 });
+
+    expect(report.appliedKeys).toEqual(['limit']);
+    expect(report.config).toEqual({ limit: 5 });
+    expect(report.ring1RestartRequired).toBe(false); // Ring 2 行
+    expect(report.message).toContain('plugins_reload');
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, config: { limit: 5 } }]);
+  });
+
+  it('连续 configure 不经 reload：第二次合并不丢第一次写入的键（回归锁——陈旧 plan 基线 bug）', async () => {
+    const dataDir = makeDataDir();
+    const schema = Type.Object({ apiKey: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) });
+    const { localDir, plugins } = setupConfigurable(dataDir, schema);
+    await plugins.install(localDir);
+    activate(plugins, dataDir, 'my-plugin'); // 此后 plan 冻结（无再回灌）
+
+    await plugins.configure('my-plugin', { limit: 5 });
+    // 修复前：第二次 merge 基线取 plan 行陈旧 config（{}）→ 整替掉 limit
+    const second = await plugins.configure('my-plugin', { apiKey: 'sk-1' });
+    expect(second.config).toEqual({ limit: 5, apiKey: 'sk-1' });
+    // 整值替换语义：列出键被替换、未列出键保持
+    const third = await plugins.configure('my-plugin', { limit: 9 });
+    expect(third.config).toEqual({ limit: 9, apiKey: 'sk-1' });
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, config: { limit: 9, apiKey: 'sk-1' } }]);
+  });
+
+  it('builtin 行：schema 走官方注册表模块引用零装载（不注入 loadEntry 也成立）+ 纯默认层行插替换行不写 plugin 键', async () => {
+    const dataDir = makeDataDir();
+    const builtin = {
+      name: 'memory',
+      apply: () => {},
+      config: Type.Object({ depth: Type.Optional(Type.Number()) }),
+    };
+    // 组合树解析需官方件注册表——注入 fake 注册表（loadComposition 第二参）
+    const plugins = createPluginsService({
+      dataDir,
+      runner: fakeRunner().runner,
+      // 刻意不注入 loadEntry：builtin 行 schema 来自 plan 行直挂的模块引用
+    });
+    plugins.applyLoad(loadComposition(dataDir, { 'builtin:memory': builtin }), {
+      activated: [{ id: 'memory', name: 'memory', applyMs: 1 }],
+      failed: [],
+      skipped: [],
+    });
+
+    const report = await plugins.configure('memory', { depth: 3 });
+    expect(report.config).toEqual({ depth: 3 });
+    // 行不在 overlay → writeOverlayRowConfig 插替换行（省略 plugin = 沿用官方层引用）
+    expect(loadOverlayRows(dataDir)).toEqual([{ id: 'memory', config: { depth: 3 } }]);
+  });
+
+  it('Ring 1 行（tools）：可配置但回执注明不随 /reload 热装载须重启', async () => {
+    const dataDir = makeDataDir();
+    const builtin = {
+      name: 'tools',
+      apply: () => {},
+      config: Type.Object({ maxBytes: Type.Optional(Type.Number()) }),
+    };
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+    plugins.applyLoad(loadComposition(dataDir, { 'builtin:tools': builtin }), {
+      activated: [{ id: 'tools', name: 'tools', applyMs: 1 }],
+      failed: [],
+      skipped: [],
+    });
+    const report = await plugins.configure('tools', { maxBytes: 4096 });
+    expect(report.ring1RestartRequired).toBe(true);
+    expect(report.message).toContain('重启');
+  });
+
+  it('schema 校验不过：PLUGIN_CONFIG_INVALID 带 instancePath 首错定位 + 不落盘（现配置不变）', async () => {
+    const dataDir = makeDataDir();
+    const schema = Type.Object({ port: Type.Number() });
+    const { localDir, plugins } = setupConfigurable(dataDir, schema);
+    await plugins.install(localDir);
+    activate(plugins, dataDir, 'my-plugin');
+
+    try {
+      await plugins.configure('my-plugin', { port: 'not-a-number' });
+      expect.unreachable('schema 违规应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe(PLUGIN_CONFIG_INVALID);
+      expect((err as AppError).message).toContain('/port'); // instancePath 首错定位
+      expect((err as AppError).message).toContain('未写入');
+    }
+    // 错配置不落盘：overlay 行无 config 键
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir }]);
+  });
+
+  it('四道状态门全拒写（COMPOSITION_ROW_INVALID）：空 patch / 未知行 / 已禁用 / 未激活', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, plugins } = setupConfigurable(dataDir);
+    await plugins.install(localDir);
+
+    // 空 patch：整值替换语义下空集不是变更
+    await expect(plugins.configure('my-plugin', {})).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+    });
+    // 未知行
+    await expect(plugins.configure('ghost', { a: 1 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+    });
+
+    // 已禁用（挂载休眠）：先提示启用
+    plugins.toggle('my-plugin'); // → 禁用
+    plugins.applyLoad(loadComposition(dataDir), { activated: [], failed: [], skipped: [] });
+    await expect(plugins.configure('my-plugin', { a: 1 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('已禁用'),
+    });
+    plugins.toggle('my-plugin'); // → 启用（回测试基线）
+
+    // 未激活（boot 前视角 planned / 装载失败 failed 均拒）
+    plugins.applyLoad(loadComposition(dataDir), {
+      activated: [],
+      failed: [{ id: 'my-plugin', code: 'PLUGIN_APPLY_FAILED', message: '炸了' }],
+      skipped: [],
+    });
+    await expect(plugins.configure('my-plugin', { a: 1 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('未激活'),
+    });
+  });
+
+  it('入口未解析行拒写（手写 overlay 指不存在的 local 目录）——提示先安装', async () => {
+    const dataDir = makeDataDir();
+    writeFileSync(
+      join(dataDir, 'overlay.yaml'),
+      `rows:\n  - id: ghost-local\n    plugin: ${join(dataDir, 'no-such-dir')}\n`,
+    );
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+    plugins.applyLoad(loadComposition(dataDir), { activated: [], failed: [], skipped: [] });
+    await expect(plugins.configure('ghost-local', { a: 1 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('未解析'),
+    });
+  });
+
+  it('worker 域行诚实拒写：生效 schema 在 worker 侧结构不可得，指引直改 overlay.yaml', async () => {
+    const dataDir = makeDataDir();
+    const localDir = join(dataDir, 'wrk-plugin');
+    mkdirSync(localDir);
+    writeFileSync(join(localDir, 'index.ts'), 'export const name = "wrk";\nexport default () => {};\n');
+    writeFileSync(
+      join(dataDir, 'overlay.yaml'),
+      `rows:\n  - id: wrk-plugin\n    plugin: ${localDir}\n    runtime: worker\n`,
+    );
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+    plugins.applyLoad(loadComposition(dataDir), {
+      activated: [{ id: 'wrk-plugin', name: 'wrk', applyMs: 1 }],
+      failed: [],
+      skipped: [],
+    });
+    await expect(plugins.configure('wrk-plugin', { a: 1 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('worker'),
+    });
+  });
+
+  it('文件行无 loadEntry 注入（配置校验面不可用）：诚实拒写', async () => {
+    const dataDir = makeDataDir();
+    const localDir = join(dataDir, 'my-plugin');
+    mkdirSync(localDir);
+    writeFileSync(join(localDir, 'index.ts'), 'export const name = "my-plugin";\nexport default () => {};\n');
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner }); // 无 loadEntry
+    await plugins.install(localDir);
+    activate(plugins, dataDir, 'my-plugin');
+    await expect(plugins.configure('my-plugin', { a: 1 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('不可用'),
+    });
+  });
+});
+
+describe('requestReload 导线', () => {
+  it('缺省（诊断装配）：宿主未注入重载面 → COMPOSITION_ROW_INVALID 响亮拒绝', async () => {
+    const plugins = createPluginsService({ dataDir: makeDataDir(), runner: fakeRunner().runner });
+    await expect(plugins.requestReload()).rejects.toMatchObject({ code: COMPOSITION_ROW_INVALID });
+  });
+
+  it('注入闭包三态透传：queued / done（含失败清单）/ error 原样回传（服务面零自有状态）', async () => {
+    const outcomes: ReloadOutcome[] = [
+      { status: 'queued' },
+      { status: 'done', failed: ['bad-row'] },
+      { status: 'error', message: 'overlay 解析失败' },
+    ];
+    let call = 0;
+    const plugins = createPluginsService({
+      dataDir: makeDataDir(),
+      runner: fakeRunner().runner,
+      // 注入替身按调用序回放三态（服务面零自有状态只透传——三态各自原样到达）
+      requestReload: async () => outcomes[call++]!,
+    });
+    expect(await plugins.requestReload()).toEqual({ status: 'queued' });
+    expect(await plugins.requestReload()).toEqual({ status: 'done', failed: ['bad-row'] });
+    expect(await plugins.requestReload()).toEqual({ status: 'error', message: 'overlay 解析失败' });
+  });
+});
+
+describe('升权目标档词汇单一归宿（admin 写类动词 ↔ safety 权威词表）', () => {
+  it('admin 镜像常量 ≡ safety ESCALATION_TARGETS（两侧漂移即红；admin 不开 admin→safety 边）', () => {
+    expect([...PRIVILEGE_REQUEST_TARGETS]).toEqual([...ESCALATION_TARGETS]);
   });
 });

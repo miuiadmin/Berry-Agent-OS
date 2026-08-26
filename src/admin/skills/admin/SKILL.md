@@ -1,20 +1,23 @@
 ---
 name: admin
-description: 平台管理面只读工具的操作知识：plugins_list 看插件装载态、events_query 跨会话查 durable 事件日志（时间窗/类型/应用过滤与分页）。回答「装了什么插件」「最近发生了什么/某插件写过什么事件」类管理审计问题时的用法与边界。
+description: 平台管理面工具的操作知识：只读两件（plugins_list 看插件装载态、events_query 跨会话查 durable 事件日志）+ 写类动词六件（安装/更新/启停/配置/重载五写词——审批对形态与 install→reload 链式用法；卸载检视——报告后指引人工执行）。回答「装了什么插件」「怎么装/禁用/改配置某插件」「最近发生了什么」类管理运维问题时的用法与边界。
 ---
 
-# 管理面只读查询（第一刀）
+# 管理面工具（只读两件 + 写类六件）
 
-你手上有两个只读管理工具（均无副作用、无需审批）。本技能教用法与选择判据。
+你手上有八个管理工具：两件只读（无副作用、无需审批）、五件写类（改变插件组合——**恒需审批**）、一件卸载检视（只读但服务于卸载流程）。本技能教用法、审批形态与流程编排。
 
-## plugins_list：插件装载态一览
+## 只读两件
+
+### plugins_list：插件装载态一览
 
 - 无参数。返回组合树全部行：状态（`activated` / `failed` / `skipped` / `planned`）、来源（`builtin` / `npm` / `git` / `local`）、失败原因、apply 耗时。
 - 适用问题：「装了哪些插件」「某插件加载失败的原因」「装载耗时谁最慢」。
 - `planned` 行 = 尚未装载或入口解析失败（unresolved）——overlay 引用了不存在/未安装的插件时行停在此态。
 - 状态清单的唯一事实源是组合树；本工具只是它的文本化呈现，不会出现「工具说装了但实际没装」的分裂。
+- **写类动词动手前先看它**——行 id 以清单为准，勿凭记忆拼 id。
 
-## events_query：跨会话事件日志查询
+### events_query：跨会话事件日志查询
 
 直接读 durable 事件事实表（唯一事实源），**不是**投影——适合审计、统计、反查历史。
 
@@ -35,7 +38,58 @@ description: 平台管理面只读工具的操作知识：plugins_list 看插件
 - 末尾若给出 `nextCursor` = 还有更旧的事件，回传它继续翻；翻完为止。
 - `types` 过滤结果为空时先核对拼写；已卸载插件的事件类型查空是正常语义（词没了、事件还在库里，但你的过滤词必须与库中存的 type 字面一致）。
 
-## 边界（第一刀刻意不做的）
+## 写类五件：审批对形态（所有写词通用）
 
-- 只有读。安装/卸载/启停/改配置/重载等写类动词**尚未开通**——不要尝试调用不存在的管理写工具，指引用户走 `/plugin-install`、`/plugin-toggle`、`/reload` 等命令面。
-- 本技能只覆盖上述两工具；写类动词的操作知识将随其工具上线另行补充。
+`plugins_install` / `plugins_update` / `plugins_toggle` / `plugins_configure` / `plugins_reload` 改变插件组合，**每次调用恒经人手审批**——参数面必带审批对：
+
+- `sandbox_permissions`：授权目标档，`workspace-write` 或 `danger-full-access`（别值会被参数校验拒绝）。
+- `justification`：一句话理由——弹窗里给人看的，说明**做什么与为什么**（空串非法）。
+
+行为语义：
+
+- 人批（allowed-once）→ 动作执行；拒绝/取消/无人应答 → 返回 isError 结果，**动作未发生**。
+- 拒绝是最终的：不要就同一请求重试；向用户说明被拒情况，用户可自己走命令面（`/plugin-install`、`/plugin-toggle`、`/reload` 等始终可用）。
+- 无头/无人值守环境无人应答 → unavailable，同样未执行。
+
+## 流程编排：install→reload 链式用法（核心心智模型）
+
+五个写词**每个只做一段**，落盘与生效分离——动词单职责，链式可见：
+
+```
+plugins_list            （看现状，拿准确行 id）
+   ↓
+plugins_install / plugins_update / plugins_toggle / plugins_configure
+   ↓（只写 overlay，未生效——回执里会说明）
+plugins_reload          （重载组合树，一切落盘变更在此生效）
+   ↓
+plugins_list            （验证：状态是否如期）
+```
+
+- **装好 ≠ 生效**：install/update/toggle/configure 的回执都提示「重载后生效」——改完组合树，调 `plugins_reload` 收尾。
+- `plugins_reload` 在 run 进行中不拒绝而是**排队**（回执说明已排队）：run 结算后自动执行，结果经通知送达——收到 queued 不要再发。
+- 重载有失败行时进程存活、旧注册已回卷：`plugins_list` 看逐行原因（多为 overlay 配置错或插件装坏），修复后再 reload。
+- **Ring 1 行例外**（当前 = tools）：其 plugin/config 变更不随 /reload 热装载，回执会注明须重启进程——如实转告用户，不要反复 reload 空转。
+
+各词要点：
+
+| 工具 | 关键参数 | 语义 |
+|------|----------|------|
+| `plugins_install` | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + overlay 写回；行 id 由源推导（npm=包名 / git=repo 名 / local=目录名） |
+| `plugins_update` | `id` | npm 重装 / git 按原 ref 重克隆 / local 改动即见 |
+| `plugins_toggle` | `id` | 启停翻转；Ring 1 必备行与 fixed 行禁用即拒（设计行为） |
+| `plugins_configure` | `id` + `config`（patch 对象） | **顶层键整值替换**：要改哪些键就带哪些键，未列出的键保持现值，不做深合并；经插件声明 schema 校验，不过即拒且不落盘；禁用/未装/未激活行拒写 |
+| `plugins_reload` | 无（仅审批对） | 全树卸载重装；排队语义见上 |
+
+## plugins_uninstall_inspect：卸载检视（执行权在人）
+
+卸载是两段式，**你只做前半**：
+
+1. `plugins_uninstall_inspect(id)` → 只读预检报告：行现状、装机物与共享行、数据域体积、自定义事件词与受影响会话数、级联警示（非 ignorable 词已落历史会话时会有「会话变砖」强警示——呈报时原样转达，不要淡化）。
+2. 把报告呈给用户，**由用户执行** `/plugin-uninstall <id> --confirm`（加 `--purge-data` 连数据域清除，默认保留）。你没有卸载执行动词——这不是能力缺口，是三档分级的设计：卸载执行权恒在人。
+
+Ring 1 底座行拒卸是设计行为（换实现走 install 同 id 覆盖引用）。
+
+## 边界
+
+- 上述工具全集随 admin 件在场；admin 件被禁用则全部不可用（用命令面替代）。
+- 会话/数据/凭证类管理（清库、备份、改密）不在此面——指引用户看运维手册。

@@ -725,7 +725,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * - affectedSessionCounts：受影响会话计数取数面——flush 屏障内嵌（write-behind
    *   尾部对查询不可见）+ Store 全库精确聚合（latestSessionId 同族宿主侧直查）；
    * - emitUninstalled：卸载成功尾双落地——总线广播 + 当前会话流落账
-   *   （plugin/uninstalled 核心词，无路由会话时总线面单落地）。 */
+   *   （plugin/uninstalled 核心词，无路由会话时总线面单落地）；
+   * - requestReload：重载请求投递面（刀 3 导线——契约篇 §3.4 刀 2 工具族条：
+   *   reload 真身住组合根，服务面只投递）。reload 闭包在本行之后声明——箭头
+   *   懒求值 TDZ 安全（与上方三闭包同律：只在运行期被调，彼时装配已收口）；
+   *   ReloadResult → ReloadOutcome 映射在此（三态投影：queued/done/error）。 */
   const plugins = createPluginsService({
     dataDir: compositionDir,
     loadEntry: (entry) => importPluginEntry(createPluginJiti(virtualFaces), entry),
@@ -743,6 +747,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     emitUninstalled: (data) => {
       ctx.emit('plugin/uninstalled', data);
       registry.routed()?.session.append('plugin/uninstalled', data);
+    },
+    requestReload: async () => {
+      const result = await reload();
+      if (result.queued === true) return { status: 'queued' as const };
+      if (result.error !== undefined) return { status: 'error' as const, message: result.error };
+      return { status: 'done' as const, failed: result.payload?.failed ?? [] };
     },
   });
   ctx.provide('plugins', plugins);

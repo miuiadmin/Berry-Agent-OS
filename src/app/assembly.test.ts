@@ -159,6 +159,12 @@ describe('createBerryRuntime 装配面', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'plugins_install',
+      'plugins_update',
+      'plugins_toggle',
+      'plugins_configure',
+      'plugins_reload',
+      'plugins_uninstall_inspect',
       'agent_hermes', // delegable 应用自动注册（第三纵切，boot 组合根——hermes 声明 entry.delegable）
       'read',
       'write',
@@ -410,8 +416,8 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.persistence).toBeUndefined();
     expect(runtime.session).toBeUndefined();
     // S2 后全局层口径：fs 四件迁域层（无驱动即无域工具——persist:false 不开
-    // 驱动）；memory/goal 空转；admin 件两工具经 ctx 取服务恒在（sessions
-    // 降级返空）——剩 find/grep/agent/fetch/plugins_list/events_query 七件
+    // 驱动）；memory/goal 空转；admin 件八工具经 ctx 取服务恒在（sessions
+    // 降级返空）——剩 find/grep/agent/fetch + admin 八件共十二件
     // + agent_hermes（delegable 自动注册，boot 组合根——无驱动语境也在全局层）
     expect(runtime.tools.list().map((t) => t.name)).toEqual([
       'find',
@@ -420,6 +426,12 @@ describe('createBerryRuntime 装配面', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'plugins_install',
+      'plugins_update',
+      'plugins_toggle',
+      'plugins_configure',
+      'plugins_reload',
+      'plugins_uninstall_inspect',
       'agent_hermes',
     ]);
   });
@@ -483,6 +495,12 @@ describe('ConversationDriver + durable 接线', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'plugins_install',
+      'plugins_update',
+      'plugins_toggle',
+      'plugins_configure',
+      'plugins_reload',
+      'plugins_uninstall_inspect',
       'agent_hermes',
       'read',
       'write',
@@ -627,6 +645,12 @@ describe('ConversationDriver + durable 接线', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'plugins_install',
+      'plugins_update',
+      'plugins_toggle',
+      'plugins_configure',
+      'plugins_reload',
+      'plugins_uninstall_inspect',
       'agent_hermes',
       'echo',
       'read',
@@ -1255,6 +1279,12 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'plugins_install',
+      'plugins_update',
+      'plugins_toggle',
+      'plugins_configure',
+      'plugins_reload',
+      'plugins_uninstall_inspect',
       'plug-echo',
       'agent_hermes', // delegable 注册在 ⑨ 装载后——overlay 插件工具之后、fs 域层之前
       'read',
@@ -1586,6 +1616,12 @@ describe('/reload 组合树重载', () => {
       'fetch',
       'plugins_list',
       'events_query',
+      'plugins_install',
+      'plugins_update',
+      'plugins_toggle',
+      'plugins_configure',
+      'plugins_reload',
+      'plugins_uninstall_inspect',
       'read',
       'write',
       'edit',

@@ -627,6 +627,42 @@ export function upsertOverlayPluginRef(dataDir: string, id: string, pluginRef: s
 }
 
 /**
+ * configure 写回半边（ctx.plugins.configure 持久化，契约篇 §3.4 刀 2 工具族
+ * 条）：行 config 整体写入 overlay（patch 顶层键整值替换已在服务面合并成完整
+ * config——本面只落整值）。与 toggleOverlayRow 同构的行集操作：
+ * - 行在 overlay → config 键整替（保留 plugin/disabled/runtime）；
+ * - 行只在官方默认层 → 插替换行 `{ id, config }`（省略 plugin = 沿用官方层引用）；
+ * - 空对象入参 = 删 config 键（与「启用删 disabled 键」同律：空值不留键）；
+ *   删键后仅剩 `{ id }` 的纯替换行整行移除。
+ * 调用方保证 id 存在于 overlay 或官方层、且 config 已过插件声明 schema 校验
+ * （校验归服务面——本面只管落盘，与装机/翻转写面同分工）。
+ */
+export function writeOverlayRowConfig(dataDir: string, id: string, config: Record<string, unknown>): void {
+  const rows = loadOverlayRows(dataDir);
+  const hasKeys = Object.keys(config).length > 0;
+  const overlayRow = rows.find((row) => row.id === id);
+  if (overlayRow === undefined) {
+    if (!hasKeys) return; // 空 patch 落纯默认层行 = no-op（不造空替换行）
+    saveOverlayRows(dataDir, [...rows, { id, config }]);
+    return;
+  }
+  const next: CompositionRow[] = [];
+  for (const row of rows) {
+    if (row.id !== id) {
+      next.push(row);
+      continue;
+    }
+    const rest = { ...row };
+    delete rest.config;
+    if (hasKeys) rest.config = config;
+    // 仅剩 id 的纯替换行无意义（删键即回退官方层默认 config）——整行移除
+    if (rest.plugin === undefined && rest.disabled === undefined && rest.runtime === undefined) continue;
+    next.push(rest);
+  }
+  saveOverlayRows(dataDir, next);
+}
+
+/**
  * uninstall 写回半边①（ctx.plugins.uninstall 三源文件行的持久化半边，契约篇
  * §3.4 第二刀——与 toggleOverlayRow 同构的行集操作）：整行移除 overlay 行。
  * 「重装对账即恢复」由此免费获得——overlay 行没了，install 的 upsert 会重写；
