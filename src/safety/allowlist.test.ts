@@ -8,7 +8,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { matchAllowlist, type AllowlistEntry, type AllowlistInput } from './allowlist.js';
+import { commandStem, matchAllowlist, type AllowlistEntry, type AllowlistInput } from './allowlist.js';
 import { canonicalPath } from './roots.js';
 
 /** 真临时工作区（canonical 前缀判定用真路径——macOS /var→/private/var 符号链归一） */
@@ -104,6 +104,32 @@ describe('bash 命令词干族（剥壳语义全集 v1）', () => {
   it('pattern 形状执法：空 / 超两词 = 条目无效不命中', () => {
     expect(matchAllowlist([entry('')], bashInput('git status'), NOW)).toBeUndefined();
     expect(matchAllowlist([entry('git status --porcelain')], bashInput('git status'), NOW)).toBeUndefined();
+  });
+});
+
+describe('commandStem 草案生成器（§8.4 增补 2——与判定同源同实现）', () => {
+  it('干净命令 → 词干 ≤2 词（主命令 [子命令]；形参不进词干）', () => {
+    expect(commandStem('git status')).toBe('git status');
+    expect(commandStem('git')).toBe('git');
+    expect(commandStem('git status --porcelain')).toBeUndefined(); // flag 即无词干（无害三件除外）
+    expect(commandStem('git status --help')).toBe('git status');
+    expect(commandStem('ls src/lib')).toBe('ls src/lib'); // 第二词非 flag 即纳入词干（v1 词法面不分子命令/形参——草案即从命令剥出，判定对齐自然命中）
+    expect(commandStem('/usr/bin/git status')).toBe('git status'); // 绝对路径取 basename
+  });
+
+  it('剥壳：环境变量前缀 / shell 包装穿透一层（与判定面同源）', () => {
+    expect(commandStem('FOO=1 git status')).toBe('git status');
+    expect(commandStem("sh -c 'git status'")).toBe('git status');
+    expect(commandStem('bash -lc "git status"')).toBe('git status');
+  });
+
+  it('不可判定 → undefined：剥不出干净词干即无草案（「始终允许」选项不呈现）', () => {
+    expect(commandStem('echo hi && rm -rf /')).toBeUndefined();
+    expect(commandStem('echo hi | tee x')).toBeUndefined();
+    expect(commandStem('echo $(rm -rf /)')).toBeUndefined();
+    expect(commandStem('echo "two words"')).toBeUndefined();
+    expect(commandStem('git -C /other status')).toBeUndefined();
+    expect(commandStem('')).toBeUndefined();
   });
 });
 

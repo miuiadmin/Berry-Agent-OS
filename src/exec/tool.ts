@@ -22,9 +22,11 @@ import type { ToolDefinition, AgentToolResult } from '../contracts/tools.js';
 import type { SandboxMeta } from '../contracts/exec.js';
 import { canonicalPath, isInsideRoot } from '../safety/roots.js';
 import type { ApprovalService } from '../safety/approval.js';
-import type { SandboxMode, SandboxService } from '../safety/index.js';
+import type { AllowlistEntry, SandboxMode, SandboxService } from '../safety/index.js';
 import {
+  commandStem,
   escalationHintMarker,
+  matchAllowlist,
   requestEscalation,
   sandboxDenialMarker,
   validateEscalationArgs,
@@ -46,6 +48,12 @@ export interface BashToolOptions {
   readonly mode: () => SandboxMode;
   /** 会话工作区根（canonical 绝对路径——cwd 前缀判定锚点） */
   readonly workspaceRoot: string;
+  /**
+   * 跨会话 allowlist（§8.4 增补 2 落码形态③）：bash 族的唯一消费点在升权
+   * 裁决前查表（「始终允许」词干条目命中 → workspace-write 目标免问直接升档；
+   * danger 目标恒问）。装配注入活数组引用，TTL 过期由引擎逐调用判定。
+   */
+  readonly allowlist?: readonly AllowlistEntry[];
 }
 
 /**
@@ -115,7 +123,7 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
       const clamped = Math.min(requested, MAX_TIMEOUT_MS);
       const clampedNote = requested > MAX_TIMEOUT_MS ? `[注：timeoutMs 超上限，已钳制到 ${MAX_TIMEOUT_MS}ms]` : '';
 
-      /* ---- 升权裁决（§7.4：成对校验 → 审批 → allowed-once 只授予当次） ---- */
+      /* ---- 升权裁决（§7.4 + §8.4 增补 2：成对校验 → allowlist 免问 → 审批 → allowed-once 只授予当次） ---- */
       let effective: SandboxMode = opts.mode();
       if (req.sandbox_permissions !== undefined || req.justification !== undefined) {
         const valid = validateEscalationArgs({
@@ -123,27 +131,43 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
           sandboxPermissions: req.sandbox_permissions,
           justification: req.justification,
         });
-        const outcome = await requestEscalation(opts.approval, {
-          ...valid,
-          current: effective,
-          toolName: 'bash',
-          toolCallId: tctx.toolCallId,
-        });
-        if (outcome !== 'allowed-once') {
-          // 拒绝/取消/无人应答：统一标记 + 同回合升权提示（§7.4 统一文案）
-          const sandbox: SandboxMeta = { mode: effective, denied: [], enforcement: 'none' };
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `${sandboxDenialMarker(effective)} 升权审批被拒（${outcome}）。${escalationHintMarker()}`,
-              },
-            ],
-            isError: true,
-            details: { sandbox },
-          };
+        // 「始终允许」免问复查（§8.4 增补 2 落码形态②③）：bash 族 allowlist 的
+        // 唯一消费点在此——workspace-write 目标且命令词干命中条目即免审批直接
+        // 升档（advisory：只影响问不问，confine/执行段照走）。danger-full-access
+        // 是 safetyLevel 高位 v1 刻度，allowlist 免问不适用（落码形态②恒问边界）。
+        const allowlistHit =
+          valid.target === 'workspace-write' &&
+          opts.allowlist !== undefined &&
+          matchAllowlist(opts.allowlist, { tool: 'bash', bashCommand: req.command }, Date.now()) !== undefined;
+        if (allowlistHit) {
+          effective = valid.target; // 词干条目授权：免审批升档仅本次（allowed-once 语义同源）
+        } else {
+          // 推荐规则草案（落码形态①）：bash 草案 = 剥壳词干，仅 workspace-write
+          // 目标携带；剥不出干净词干（管道/flag/引号…）= 无草案，选项不呈现
+          const stem = valid.target === 'workspace-write' ? commandStem(req.command) : undefined;
+          const outcome = await requestEscalation(opts.approval, {
+            ...valid,
+            current: effective,
+            toolName: 'bash',
+            toolCallId: tctx.toolCallId,
+            ...(stem !== undefined ? { suggestedEntry: { tool: 'bash', pattern: stem } } : {}),
+          });
+          if (outcome !== 'allowed-once') {
+            // 拒绝/取消/无人应答：统一标记 + 同回合升权提示（§7.4 统一文案）
+            const sandbox: SandboxMeta = { mode: effective, denied: [], enforcement: 'none' };
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `${sandboxDenialMarker(effective)} 升权审批被拒（${outcome}）。${escalationHintMarker()}`,
+                },
+              ],
+              isError: true,
+              details: { sandbox },
+            };
+          }
+          effective = valid.target; // allowed-once：目标档仅本次调用生效
         }
-        effective = valid.target; // allowed-once：目标档仅本次调用生效
       }
 
       /* ---- 沙箱包装（danger 透传；受限档 confine；fail-closed 不裸跑） ---- */

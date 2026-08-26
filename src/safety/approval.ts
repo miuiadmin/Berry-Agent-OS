@@ -15,9 +15,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Context, Disposer } from '../context/types.js';
 import { chainBackground } from '../context/chain.js';
-import type { ApprovalOutcome, ApprovalPolicyMode, ApprovalRequest } from './types.js';
+import type { ApprovalOutcome, ApprovalPolicyMode, ApprovalRequest, AllowlistDraft } from './types.js';
 
-/** answerer 监听的活体事件名（waterfall 语义：短路返回 ApprovalAnswer 三值，调 next() = 本行不接） */
+/** answerer 监听的活体事件名（waterfall 语义：短路返回 ApprovalAnswer 四值，调 next() = 本行不接） */
 export const APPROVAL_ANSWER_EVENT = 'approval/answer';
 
 /** 审批对落 durable 的形态（与 session 事件 approval/asked + approval/decided 一一对应） */
@@ -28,8 +28,13 @@ export interface ApprovalDecisionSink {
   decided(payload: { readonly approvalId: string; readonly decision: ApprovalDecisionValue }): void;
 }
 
-/** durable 决议四值（与 session ApprovalDecidedData.decision 对齐：approve/reject/cancel/unavailable） */
-export type ApprovalDecisionValue = 'approve' | 'reject' | 'cancel' | 'unavailable';
+/**
+ * durable 决议五值（2026-08-27「始终允许」批扩 'always'——与应答闭集 + unavailable
+ * 对齐：approve = 批一次、always = 授权常驻写条目，审计语义不同不合并；
+ * 无草案 always 视同 approve 落账——decision 记有效行为，'always' 值仅当
+ * 条目真实写入时使用）
+ */
+export type ApprovalDecisionValue = 'approve' | 'reject' | 'cancel' | 'unavailable' | 'always';
 
 /** ctx.approval 服务面（插件经 ctx.get<ApprovalService>('approval') 取用） */
 export interface ApprovalService {
@@ -51,13 +56,21 @@ export interface ApprovalServiceOptions {
    * exec/fetch 服务路的弹窗无标签属 v1 已知形态）
    */
   readonly ownership?: { readonly sessionId: string; readonly appId?: string };
+  /**
+   * 「始终允许」条目写入回调（骨架篇 §8.4 增补 2 落码形态③织入位）：answerer
+   * 返回 'always' 且载荷带草案时调用——装配层接 AllowlistStore.add（幂等）。
+   * 缺省不传 = always 面关闭（视同 approve，零副作用）。
+   */
+  readonly persistAllowlist?: (draft: AllowlistDraft) => void;
 }
 
-/** outcome → durable 决议值映射（allowed-once 落日志记 approve——「批了这一次」） */
-function outcomeToDecision(outcome: ApprovalOutcome): ApprovalDecisionValue {
+/**
+ * outcome → durable 决议值映射。allowed-once 落日志记 approve——「批了这一次」；
+ * always 单列（第二参数，条目真实写入时的决议值——与 approve 审计语义不同）。
+ */
+function outcomeToDecision(outcome: ApprovalOutcome, alwaysWritten: boolean): ApprovalDecisionValue {
+  if (outcome === 'allowed-once') return alwaysWritten ? 'always' : 'approve';
   switch (outcome) {
-    case 'allowed-once':
-      return 'approve';
     case 'rejected':
       return 'reject';
     case 'cancelled':
@@ -93,29 +106,42 @@ export function createApprovalService(ctx: Context, opts: ApprovalServiceOptions
       };
 
       let outcome: ApprovalOutcome;
+      // always 是否真实写入条目（决议落账值分流：真写入才落 'always'——§8.4 增补 2 落码形态⑤）
+      let alwaysWritten = false;
       if (policy === 'never') {
         // never：确定性拒绝，不派发 answerer（无人值守姿态没有「问谁」）
         outcome = 'rejected';
       } else {
-        // ask：waterfall 派发——answerer 短路返回三值；全链无人应答 = undefined
-        const answer = await ctx.waterfall<'approve' | 'reject' | 'cancel' | undefined>(
+        // ask：waterfall 派发——answerer 短路返回四值；全链无人应答 = undefined
+        const answer = await ctx.waterfall<'approve' | 'reject' | 'cancel' | 'always' | undefined>(
           APPROVAL_ANSWER_EVENT,
           enriched,
           () => undefined,
         );
-        outcome =
-          answer === 'approve'
-            ? 'allowed-once'
-            : answer === 'reject'
-              ? 'rejected'
-              : answer === 'cancel'
-                ? 'cancelled'
-                : // 无人应答 fail-closed：unavailable 不是「稍后再试」，是本次不放行
-                  'unavailable';
+        if (answer === 'always') {
+          // 「始终允许」（骨架篇 §8.4 增补 2）：批准本次 + 授权写跨会话条目。
+          // 载荷无草案 = answerer 面本不该呈现该选项，防御收口视同 approve
+          // （零草案零副作用——§8.3 钉死）；写入回调未装配同口径。
+          if (enriched.suggestedEntry !== undefined && opts.persistAllowlist !== undefined) {
+            opts.persistAllowlist(enriched.suggestedEntry);
+            alwaysWritten = true;
+          }
+          outcome = 'allowed-once';
+        } else {
+          outcome =
+            answer === 'approve'
+              ? 'allowed-once'
+              : answer === 'reject'
+                ? 'rejected'
+                : answer === 'cancel'
+                  ? 'cancelled'
+                  : // 无人应答 fail-closed：unavailable 不是「稍后再试」，是本次不放行
+                    'unavailable';
+        }
       }
 
       // 审批对第二腿：决议落日志（与 asked 同 turn 内；回放恢复不重问的依据）
-      sink.decided({ approvalId, decision: outcomeToDecision(outcome) });
+      sink.decided({ approvalId, decision: outcomeToDecision(outcome, alwaysWritten) });
       return outcome;
     },
   };

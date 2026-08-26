@@ -87,6 +87,54 @@ describe('createApprovalService — ask 策略（默认）', () => {
   });
 });
 
+describe('createApprovalService — 「始终允许」（§8.4 增补 2）', () => {
+  it('always + 草案 + 写入回调：条目写入 + outcome allowed-once + durable 记 always', async () => {
+    const ctx = createContext({ name: 'test' });
+    const { sink, asked, decided } = pairSink();
+    const persisted: { tool: string; pattern: string }[] = [];
+    const approval = createApprovalService(ctx, {
+      sink,
+      persistAllowlist: (draft) => persisted.push(draft),
+    });
+    answerer(ctx, 'always');
+    const outcome = await approval.ask({
+      summary: '测试：词干授权',
+      suggestedEntry: { tool: 'bash', pattern: 'git status' },
+    });
+    expect(outcome).toBe('allowed-once'); // outcome 闭集不变——条目写入是副作用不是新终值
+    expect(persisted).toEqual([{ tool: 'bash', pattern: 'git status' }]);
+    expect(decided).toEqual([{ approvalId: asked[0]!.approvalId, decision: 'always' }]);
+  });
+
+  it('always 但载荷无草案：视同 approve（零副作用，durable 记 approve——防御收口）', async () => {
+    const ctx = createContext({ name: 'test' });
+    const { sink, asked, decided } = pairSink();
+    const persisted: { tool: string; pattern: string }[] = [];
+    const approval = createApprovalService(ctx, {
+      sink,
+      persistAllowlist: (draft) => persisted.push(draft),
+    });
+    answerer(ctx, 'always');
+    const outcome = await approval.ask({ summary: '测试：无草案 always' });
+    expect(outcome).toBe('allowed-once');
+    expect(persisted).toEqual([]); // 无草案零写入
+    expect(decided).toEqual([{ approvalId: asked[0]!.approvalId, decision: 'approve' }]);
+  });
+
+  it('always 有草案但未装配写入回调：同口径视同 approve', async () => {
+    const ctx = createContext({ name: 'test' });
+    const { sink, decided } = pairSink();
+    const approval = createApprovalService(ctx, { sink });
+    answerer(ctx, 'always');
+    const outcome = await approval.ask({
+      summary: '测试：无回调',
+      suggestedEntry: { tool: 'write', pattern: '/tmp/x' },
+    });
+    expect(outcome).toBe('allowed-once');
+    expect(decided[0]!.decision).toBe('approve'); // 未真实写入不落 always
+  });
+});
+
 describe('createApprovalService — never 策略', () => {
   it('确定性拒绝：不派发 answerer，直接 rejected', async () => {
     const ctx = createContext({ name: 'test' });

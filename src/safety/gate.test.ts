@@ -14,16 +14,18 @@ import { AppError, FS_OUTSIDE_WRITABLE_ROOTS, TOOL_BLOCKED } from '../contracts/
 import { createContext } from '../context/index.js';
 import { createFsTools, createToolPipeline, registerToolsService } from '../tools/index.js';
 import { createApprovalService, installSafetyGate, type ApprovalDecisionSink, type AllowlistEntry } from './index.js';
-import { deriveWritableRoots } from './roots.js';
+import { canonicalPath, deriveWritableRoots } from './roots.js';
 import type { SandboxMode } from './types.js';
 
 /** 集成测试装置：真 ctx + 真管道 + 真 fs 工具族 + 守门行 + 可控 answerer。
  * pre 回调在守门行安装前跑（carve-out glob「装配期展开」语义要求文件先在）。 */
 function rig(opts: {
   mode: SandboxMode;
-  answer?: 'approve' | 'reject';
+  answer?: 'approve' | 'reject' | 'always';
   pre?: (ws: string) => void;
   allowlist?: readonly AllowlistEntry[];
+  /** always 应答的条目写入回调（活数组联动测试——装配 persistAllowlist） */
+  persist?: (draft: { tool: string; pattern: string }) => void;
 }) {
   const ws = mkdtempSync(join(tmpdir(), 'safety-gate-'));
   opts.pre?.(ws);
@@ -37,10 +39,19 @@ function rig(opts: {
     asked: (p) => asked.push(p),
     decided: (p) => decided.push(p),
   };
-  const approval = createApprovalService(ctx, { sink });
+  const approval = createApprovalService(ctx, {
+    sink,
+    ...(opts.persist !== undefined ? { persistAllowlist: opts.persist } : {}),
+  });
+  // answerer 收到的 ask 载荷（草案透传断言用——无条件捕获零选项面）
+  const answerReqs: { summary?: string; suggestedEntry?: { tool: string; pattern: string } }[] = [];
   if (opts.answer) {
     ctx.on('approval/answer', (req: unknown, next: () => unknown) => {
-      if ((req as { summary?: string }).summary?.includes('carve-out')) return opts.answer;
+      const r = req as { summary?: string; suggestedEntry?: { tool: string; pattern: string } };
+      if (r.summary?.includes('carve-out')) {
+        answerReqs.push(r);
+        return opts.answer;
+      }
       return next();
     });
   }
@@ -64,7 +75,7 @@ function rig(opts: {
     const def = service.get(name)!;
     return service.toAgentTool(def).execute('call-1', args);
   };
-  return { ws, run, asked, decided, gateDecisions, setMode: (m: SandboxMode) => (mode = m) };
+  return { ws, run, service, asked, decided, gateDecisions, answerReqs, setMode: (m: SandboxMode) => (mode = m) };
 }
 
 /** 异步工具调用抛错断言 */
@@ -230,5 +241,83 @@ describe('allowlist 免问（第二十四批题1a——advisory 只影响问不�
     });
     await run('write', { path: '.git/config', content: '[core]' });
     expect(asked).toHaveLength(0);
+  });
+});
+
+describe('「始终允许」写入面（§8.4 增补 2——草案/复查/收窄三面）', () => {
+  it('carve-out 审批载荷携带推荐规则草案：fs = 该次写目标的精确 canonical 路径', async () => {
+    const { ws, run, asked, answerReqs } = rig({
+      mode: 'workspace-write',
+      answer: 'approve',
+      pre: (w) => mkdirSync(join(w, '.git')),
+    });
+    await run('write', { path: '.git/config', content: '[core]' });
+    expect(asked).toHaveLength(1);
+    // 落码形态①：不取 commondir——「批这一次」不升格「常驻写全仓」
+    expect(answerReqs[0]!.suggestedEntry).toEqual({
+      tool: 'write',
+      pattern: canonicalPath(join(ws, '.git/config')),
+    });
+  });
+
+  it('多路径 edit 部分覆盖前缀条目：开头全量判定 miss（诚实），循环内单元素复查让覆盖路径免问', async () => {
+    // 前缀条目只覆盖 .git/hooks（用户 /allowlist add 手写）；补丁同时写
+    // .git/hooks/a（覆盖）与 .git/config（不覆盖）——all-or-nothing 开头判定
+    // miss，循环内复查（单元素 writePaths）救回覆盖路径：只问 config 一次
+    const { ws, run, asked } = rig({
+      mode: 'workspace-write',
+      answer: 'approve',
+      allowlist: [{ tool: 'edit', pattern: '.git/hooks' }],
+      pre: (w) => mkdirSync(join(w, '.git/hooks'), { recursive: true }),
+    });
+    const patch = [
+      '*** Begin Patch',
+      '*** Add File: .git/hooks/a',
+      '+#!/bin/sh',
+      '*** Add File: .git/new-hook',
+      '+#!/bin/sh',
+      '*** End Patch',
+    ].join('\n');
+    await run('edit', { patch });
+    expect(existsSync(join(ws, '.git', 'new-hook'))).toBe(true);
+    // 复查面（落码形态④）：覆盖路径免问，未覆盖路径照问——asked 恰一次且是 new-hook
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.summary).toContain('new-hook');
+  });
+
+  it('逐路径授权诚实句：路径 1 的 always 条目不覆盖路径 2（精确路径条目——asked 两次）', async () => {
+    const entries: AllowlistEntry[] = [];
+    const { run, asked, decided } = rig({
+      mode: 'workspace-write',
+      answer: 'always',
+      allowlist: entries,
+      persist: (draft) => entries.push(draft),
+      pre: (w) => mkdirSync(join(w, '.git')),
+    });
+    const patch = ['*** Begin Patch', '*** Add File: .git/a', '+x', '*** Add File: .git/b', '+y', '*** End Patch'].join(
+      '\n',
+    );
+    await run('edit', { patch });
+    // 冷读 F2 裁决：精确路径条目只覆盖路径 a——路径 b 不因 a 的 always 免问
+    expect(asked).toHaveLength(2);
+    // 条目真实写入 + 两次决议都落 always（两次都真写入）
+    expect(entries).toHaveLength(2);
+    expect(decided.map((d) => d.decision)).toEqual(['always', 'always']);
+  });
+
+  it('判定收窄 fs 族：bash 工具名不消费 allowlist（放行 reason 回落 ok——F6(b) 彻底版）', async () => {
+    const { run, service, gateDecisions } = rig({
+      mode: 'workspace-write',
+      allowlist: [{ tool: 'bash', pattern: 'git' }],
+    });
+    // 假 bash 工具（三段管道照走——gate 只见 tool.name 与 args）
+    service.register({
+      name: 'bash',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    } as never);
+    await run('bash', { command: 'git status' });
+    // 收窄前此处是 allowlist:0（纯标注无行为效果——误导性冗余）；收窄后回落 ok
+    expect(gateDecisions).toEqual([{ toolCallId: 'call-1', decision: 'allow', reason: 'ok' }]);
   });
 });

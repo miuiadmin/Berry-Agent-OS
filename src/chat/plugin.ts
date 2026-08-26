@@ -55,7 +55,7 @@ import type { Persistence } from '../persist/index.js';
 import type { ToolsService } from '../tools/registry.js';
 import { createToolPipeline } from '../tools/pipeline.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
-import type { ApprovalPolicyMode, ApprovalRequest } from '../safety/types.js';
+import type { AllowlistDraft, ApprovalPolicyMode, ApprovalRequest } from '../safety/types.js';
 import { APPROVAL_ANSWER_EVENT, createApprovalService } from '../safety/approval.js';
 import { installSafetyGate } from '../safety/gate.js';
 import type { AllowlistEntry } from '../safety/allowlist.js';
@@ -82,6 +82,38 @@ function formatApprovalPrompt(req: ApprovalRequest): string {
   parts.push(req.summary);
   if (req.reason !== undefined && req.reason !== '') parts.push(req.reason);
   return `${parts.join(' ')}\n批准？`;
+}
+
+/**
+ * 审批应答三态归一（§8.4 增补 2 落码形态③⑥）：select 原语在场且载荷带推荐
+ * 规则草案 → 三选（F10 文案纪律：明示条目内容与永久性）；否则降级 confirm
+ * 两态（降级通道无法表达三选时「始终允许」不呈现——呈现纪律）。'' 无效答案
+ * 保守 reject：授权面宁可重问不可放行（fail-closed 同判）。导出供回归锁直测。
+ */
+export async function answerApproval(
+  req: ApprovalRequest,
+  primitives: {
+    readonly confirm: (text: string) => Promise<boolean>;
+    readonly select?: (message: string, choices: readonly { value: string; label: string }[]) => Promise<string>;
+  },
+): Promise<'approve' | 'reject' | 'always'> {
+  const { select } = primitives;
+  if (req.suggestedEntry !== undefined && select !== undefined) {
+    const entry = req.suggestedEntry;
+    const answer = await select(formatApprovalPrompt(req), [
+      { value: 'approve', label: '仅批准本次' },
+      {
+        value: 'always',
+        label: `始终允许（条目 ${entry.tool} ${entry.pattern}——跨会话永久生效，可经 /allowlist 移除）`,
+      },
+      { value: 'reject', label: '拒绝' },
+    ]);
+    if (answer === 'approve' || answer === 'always') return answer;
+    if (answer === 'reject') return 'reject';
+    // ''（通道无法表达三选或输入无效）：**降级 confirm 两态**——「始终允许」
+    // 不呈现（呈现纪律），但 approve/reject 决不因降级丢失（宁可重问不可静默拒）
+  }
+  return (await primitives.confirm(formatApprovalPrompt(req))) ? 'approve' : 'reject';
 }
 
 /**
@@ -369,6 +401,19 @@ export interface ChatPluginDeps {
    * unavailable〔fail-closed〕，与 headless 无 answerer 纪律同构）。
    */
   readonly confirm?: (text: string) => Promise<boolean>;
+  /**
+   * 三选原语（§8.4 增补 2 落码形态⑥——TUI 审批三态化的 select 面）：组合根
+   * `opts.interactive` 时注入 ui.select（结构同 UiChoice——chat 件不依赖
+   * channels 类型面，与 confirm 同注入风格）。缺省不传 = 载荷带草案也降级
+   * confirm 两态（降级通道无法表达三选时「始终允许」不呈现——呈现纪律）。
+   */
+  readonly select?: (message: string, choices: readonly { value: string; label: string }[]) => Promise<string>;
+  /**
+   * 「始终允许」条目写入面（§8.4 增补 2 落码形态③织入位）：answerer 返回
+   * always 且载荷带草案时经 approval 服务回调——组合根接 AllowlistStore.add
+   * （幂等）。缺省不传 = 本驱动 always 面关闭（视同 approve，零副作用）。
+   */
+  readonly persistAllowlist?: (draft: AllowlistDraft) => void;
   /** 沙箱服务（S5 bash 迁域：def 构造原料——confine 纯包装面，与 ctx.exec 同源实例） */
   readonly sandbox: SandboxService;
   /**
@@ -638,11 +683,14 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
            retire 经 dispose 一次回卷。subagent-factory 每子独立装配的驱动级推广 -- */
       const driverScope = createContext({ name: `chat-driver:${sessionId.slice(0, 8)}` });
       // 审批实例：ownership 闭包织入（装配期——answerer 标签渲染源）+ sink 直连
-      // 本会话 durable（S1 直连三路的 approval 路随批收口）
+      // 本会话 durable（S1 直连三路的 approval 路随批收口）+ persistAllowlist
+      // 织入（§8.4 增补 2 落码形态③：answerer 应答 always 时写 allowlist 条目，
+      // 组合根接 AllowlistStore.add——幂等；缺省不传 = always 面关闭）
       const approval = createApprovalService(driverScope, {
         policy: deps.approvalPolicy ?? 'ask',
         sink: durable.approval,
         ownership: { sessionId, appId: CHAT_APP_ID },
+        ...(deps.persistAllowlist !== undefined ? { persistAllowlist: deps.persistAllowlist } : {}),
       });
       // 守门行：同机制 / 同 allowlist 活数组同源 / 同推导器——「每份 gate 语义
       // 等价全局」的 v1 落地（per-session 换档面落地日须重新成立一次）
@@ -663,11 +711,12 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
       // 标记在 formatApprovalPrompt 内消费 ownership 载荷
       if (deps.confirm !== undefined) {
         const confirm = deps.confirm;
-        driverScope.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
-          const answer = await confirm(formatApprovalPrompt(req));
-          // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
-          return answer ? 'approve' : 'reject';
-        });
+        const select = deps.select;
+        driverScope.on(APPROVAL_ANSWER_EVENT, (req: ApprovalRequest, _next: () => unknown) =>
+          // 三态归一（草案在场 + select 在场 → 三选；降级 confirm 两态）在
+          // answerApproval 纯函数内——回归锁见 plugin.test.ts
+          answerApproval(req, { confirm, ...(select !== undefined ? { select } : {}) }),
+        );
       }
 
       /* -- fs + bash 工具族域注册（S2 fs 四件 / S5 bash 迁域——骨架篇 exec 节
@@ -681,6 +730,9 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         approval,
         mode: () => deps.sandboxMode,
         workspaceRoot: deps.workspace,
+        // 同一活数组同源（与守门行 deps.allowlist() 同取值器——「始终允许」bash
+        // 词干条目在升权裁决免问面消费，§8.4 增补 2 落码形态③）
+        allowlist: deps.allowlist(),
       });
       const domainDisposers = [...fsTools.tools, bashDef].map((def) => tools.register(def, { domain: sessionId }));
       const disposeDomainTools = (): void => {

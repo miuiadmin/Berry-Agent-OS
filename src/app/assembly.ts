@@ -794,6 +794,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // sandbox + allowlist（bash def 构造原料 + 守门行同源活数组）
     ...(opts.approvalPolicy !== undefined ? { approvalPolicy: opts.approvalPolicy } : {}),
     ...(opts.interactive ? { confirm: (text: string) => ui.confirm(text) } : {}),
+    // 「始终允许」三态化两件（§8.4 增补 2 落码形态③⑥）：select = ui.select
+    // 三选原语（interactive 时注入；缺省降级 confirm 两态不呈现 always）；
+    // persistAllowlist = AllowlistStore.add 面（幂等去重）
+    ...(opts.interactive
+      ? { select: (m: string, c: readonly { value: string; label: string }[]) => ui.select(m, c) }
+      : {}),
+    persistAllowlist: (draft) => allowlist.add(draft),
     sandbox,
     allowlist: () => allowlist.entries,
   });
@@ -1294,8 +1301,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 本 answerer 服务**根** approval（ctx.exec/ctx.fetch 服务路的 ask——全局三件
    * 消费面）；这些 ask 无 ownership/approvalId 标签（无驱动语境）= v1 已知形态
    * （S5 契约篇审批归属行注记——F9）。主应用驱动的 ask 走驱动 fresh 作用域的
-   * answerer（带 [app·会话] 标签）——fresh 不 fork 根，两路 emit 各归各 scope，
-   * 无瀑布交叠。 */
+   * answerer（带 [app·会话] 标签 + 「始终允许」三态化）——fresh 不 fork 根，两路
+   * emit 各归各 scope，无瀑布交叠。根路**不三态化**：requestEscalation 唯一调用
+   * 点在 bash 工具件（绑驱动 approval），根路 ask 恒无草案载荷——三选分支是
+   * 死码（「无消费者的匹配器不预造」判据，与 gate 层判定收窄 fs 族同源裁决）。 */
   if (opts.interactive) {
     ctx.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
       const answer = await ui.confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`);

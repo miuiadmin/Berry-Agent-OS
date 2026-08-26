@@ -21,7 +21,7 @@ import type { ApprovalService } from './approval.js';
 import type { SandboxMode } from './types.js';
 import { buildCarveOutTable, canonicalPath, deriveWritableRoots, type CarveOutEntry } from './roots.js';
 import { resolveWritability } from './roots.js';
-import { matchAllowlist, type AllowlistEntry } from './allowlist.js';
+import { matchAllowlist, FS_WRITE_TOOLS, type AllowlistEntry } from './allowlist.js';
 import { escalationHintMarker, sandboxDenialMarker } from './sandbox.js';
 
 /** 内置默认 carve-out 条目（骨架篇 §7.3 例示：.git 转只读 + .env 类遮罩） */
@@ -98,8 +98,13 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
     // allowlist 免问（第二十四批题1a）：命中即跳过 carve-out 升权审批直接放行
     // 本行（advisory——只影响问不问；fence/根推导/执行段照走）。免问仍可审计：
     // gate/decision reason=allowlist:<条目序> 的标注需 contracts GateInput 扩
-    // 字段 + pipeline reason 透传，随接线批落地（当前 pipeline 放行统一 reason=ok）
-    if (opts.allowlist !== undefined && opts.allowlist.length > 0) {
+    // 字段 + pipeline reason 透传，随接线批落地（当前 pipeline 放行统一 reason=ok）。
+    // 判定收窄 fs 族（§8.4 增补 2 落码形态③「F6(b) 彻底版」，2026-08-27）：
+    // write/edit 是唯一在 gate 层有审批面可免的工具族——bash 的消费点在 exec
+    // 升权裁决（tool.ts），整名族消费者出现（web 域粒度扩族）时再回 gate；
+    // 此前 bash/整名命中是纯标注无行为效果（误导性冗余，「无消费者的匹配器
+    // 不预造」同判据）。
+    if (opts.allowlist !== undefined && opts.allowlist.length > 0 && FS_WRITE_TOOLS.has(input.tool.name)) {
       const hit = matchAllowlist(
         opts.allowlist,
         {
@@ -107,10 +112,6 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
           writePaths: extractWritePaths(input.tool.name, input.args).map((p) =>
             canonicalPath(resolvePath(workspace, p)),
           ),
-          bashCommand:
-            input.tool.name === 'bash' && typeof input.args['command'] === 'string'
-              ? (input.args['command'] as string)
-              : undefined,
           workspace,
         },
         Date.now(),
@@ -126,6 +127,18 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
     for (const rawPath of extractWritePaths(input.tool.name, input.args)) {
       // 与 fence 同源的 canonical 化（相对锚 workspace、解析符号链）
       const absPath = canonicalPath(resolvePath(workspace, rawPath));
+      // 「始终允许」批量复查（§8.4 增补 2 落码形态④）：同一次调用的多路径循环
+      // 里，前一路径的 always 已把条目写入活数组——本路径 ask 前复查一次
+      // （单元素 writePaths，与开头全量判定有意不同粒度：carve-out 循环本就
+      // 逐路径独立判定，全量输入在精确路径条目下恒 miss = 死码〔冷读 F1〕）
+      if (opts.allowlist !== undefined && opts.allowlist.length > 0 && FS_WRITE_TOOLS.has(input.tool.name)) {
+        const recheck = matchAllowlist(
+          opts.allowlist,
+          { tool: input.tool.name, writePaths: [absPath], workspace },
+          Date.now(),
+        );
+        if (recheck !== undefined) continue; // 被新条目覆盖：免重复弹窗
+      }
       const verdict = resolveWritability(absPath, deriveWritableRoots(workspace, mode), carveTable);
       if (verdict.allowed || verdict.kind !== 'carve-out') {
         // 放行 / 根外（outside-roots 是 fence 的拒绝面，本行不重复拦）
@@ -138,6 +151,9 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
         reason: `carve-out：${node.entry.pattern}${node.entry.note ? `（${node.entry.note}）` : ''}；${mode} 档下此路径默认只读`,
         toolName: input.tool.name,
         toolCallId: input.callId,
+        // 推荐规则候选（§8.4 增补 2 落码形态①）：fs 草案 = 该次写目标的精确
+        // canonical 路径（不取 commondir——「批这一次」不升格「常驻写全仓」）
+        suggestedEntry: { tool: input.tool.name, pattern: absPath },
       });
       if (outcome !== 'allowed-once') {
         // 拒绝/取消/无人应答：block（denial marker + 升权 hint 是 §7.4 统一文案）

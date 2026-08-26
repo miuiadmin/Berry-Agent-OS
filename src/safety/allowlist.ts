@@ -24,8 +24,8 @@
 import { basename, resolve as resolvePath, sep } from 'node:path';
 import { canonicalPath } from './roots.js';
 
-/** fs 写路径工具族（与 gate.extractWritePaths 认知的写意图工具同源） */
-const FS_WRITE_TOOLS: ReadonlySet<string> = new Set(['write', 'edit']);
+/** fs 写路径工具族（与 gate.extractWritePaths 认知的写意图工具同源；导出供守门行判定收窄共用——§8.4 增补 2 落码形态③） */
+export const FS_WRITE_TOOLS: ReadonlySet<string> = new Set(['write', 'edit']);
 
 /** allowlist 条目（用户配置层 JSON 的行形状） */
 export interface AllowlistEntry {
@@ -110,26 +110,19 @@ const WRAPPERS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh
 const WRAPPER_C_OPTION = /^-[a-z]*c[a-z]*$/;
 
 /**
- * bash 族判定（骨架篇 §8.4 增补 3「剥壳语义全集」的 v1 落码）：
- * 1. 剥环境变量前缀赋值（FOO=bar cmd → cmd）；
- * 2. shell 包装穿透**一层**（sh -c '…' / bash -lc '…' → 内层；不递归）；
- * 3. 不可判定即 miss：管道/串接/重定向/命令替换/换行/残留引号；
- * 4. 主命令取 basename（/usr/bin/git → git）；pattern ≤2 词（命令 [子命令]）；
- * 5. 剩余参数保守判定：任何 flag（- 开头，全局无害三件 --help/-h/--version 除外）
- *    即 miss——v1 无「已知 flag 白名单」，随接线批以真实命令谱定稿；git 的
- *    -C/-c/--git-dir/--work-tree（换仓走私）被本条自然覆盖。
+ * 剥壳取主命令词干（≤2 词：命令 [子命令]）——「始终允许」bash 草案生成器
+ * （骨架篇 §8.4 增补 2 落码形态①：与 matchesCommandStem 同源同实现——
+ * 剥壳全集共享，判定的保守原则在此同样生效）。
+ * 不可判定（管道/串接/重定向/命令替换/换行/残留引号/flag——全局无害三件除外）
+ * 返回 undefined：剥不出干净词干即无草案，「始终允许」选项不呈现。
  */
-function matchesCommandStem(pattern: string, command: string): boolean {
-  // pattern 解析：≤2 词（命令 [子命令]）；超长/空 = 条目无效
-  const patternTokens = pattern.trim().split(/\s+/).filter(Boolean);
-  if (patternTokens.length === 0 || patternTokens.length > 2) return false;
-
+export function commandStem(command: string): string | undefined {
   // 剥壳：环境变量前缀赋值 + shell 包装穿透一层
   let tokens = command.trim().split(/\s+/).filter(Boolean);
   while (tokens.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=\S*$/.test(tokens[0]!)) {
     tokens = tokens.slice(1);
   }
-  if (tokens.length === 0) return false;
+  if (tokens.length === 0) return undefined;
   const head = basename(tokens[0]!);
   if (WRAPPERS.has(head)) {
     // 找 -c 类选项后的 payload 词（选项序列之后的第一个非选项词）
@@ -152,21 +145,41 @@ function matchesCommandStem(pattern: string, command: string): boolean {
       tokens = payload.split(/\s+/).filter(Boolean);
     }
   }
-  if (tokens.length === 0) return false;
+  if (tokens.length === 0) return undefined;
 
-  // 不可判定：命令全文任一危险字符 / 残留引号 → 照问
+  // 不可判定：命令全文任一危险字符 / 残留引号 → 无词干（草案不生成）
   const peeled = tokens.join(' ');
-  if (INDETERMINATE.test(peeled) || QUOTES.test(peeled)) return false;
+  if (INDETERMINATE.test(peeled) || QUOTES.test(peeled)) return undefined;
 
-  // 主命令 + （可选）子命令对齐
-  const cmd = basename(tokens[0]!);
-  if (cmd !== patternTokens[0]) return false;
-  if (patternTokens.length === 2 && tokens[1] !== patternTokens[1]) return false;
-
-  // 剩余参数保守判定：flag 即 miss（--help/-h/--version 三件无害除外）
-  const rest = tokens.slice(patternTokens.length);
+  // 剩余参数保守判定：flag 即无词干（--help/-h/--version 三件无害除外）
+  const rest = tokens.slice(1);
   for (const arg of rest) {
-    if (arg.startsWith('-') && arg !== '--help' && arg !== '-h' && arg !== '--version') return false;
+    if (arg.startsWith('-') && arg !== '--help' && arg !== '-h' && arg !== '--version') return undefined;
   }
-  return true;
+
+  // 词干 = 主命令 [子命令]（≤2 词；子命令存在且非 flag 才纳入）
+  const cmd = basename(tokens[0]!);
+  const sub = tokens[1];
+  return sub !== undefined && !sub.startsWith('-') ? `${cmd} ${sub}` : cmd;
+}
+
+/**
+ * bash 族判定（骨架篇 §8.4 增补 3「剥壳语义全集」的 v1 落码）：
+ * 剥壳与不可判定全权委托 commandStem（同源同实现——「始终允许」草案生成
+ * 与本判定共用同一套剥壳全集，双实现漂移结构性不可能）；本函数只做
+ * pattern（≤2 词）对词干的**逐词前缀对齐**——pattern 单词（如 `git`）
+ * 匹配「该命令 + 任意非 flag 形参」（`git status` 命中 `git` 条目），
+ * 双词条目（`git push`）要求词干恰好两词且逐词相等。
+ */
+function matchesCommandStem(pattern: string, command: string): boolean {
+  // pattern 解析：≤2 词（命令 [子命令]）；超长/空 = 条目无效
+  const patternTokens = pattern.trim().split(/\s+/).filter(Boolean);
+  if (patternTokens.length === 0 || patternTokens.length > 2) return false;
+
+  const stem = commandStem(command);
+  if (stem === undefined) return false; // 剥不出干净词干（不可判定）即 miss
+
+  const stemTokens = stem.split(' ');
+  if (patternTokens.length > stemTokens.length) return false;
+  return patternTokens.every((token, i) => token === stemTokens[i]);
 }

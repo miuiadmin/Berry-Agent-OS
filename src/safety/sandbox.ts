@@ -20,7 +20,14 @@ import {
 } from '../contracts/errors.js';
 import type { Disposer } from '../context/types.js';
 import type { Context } from '../context/types.js';
-import type { ApprovalOutcome, ApprovalRequest, ConfinedSandboxMode, SandboxBackend, SandboxMode } from './types.js';
+import type {
+  AllowlistDraft,
+  ApprovalOutcome,
+  ApprovalRequest,
+  ConfinedSandboxMode,
+  SandboxBackend,
+  SandboxMode,
+} from './types.js';
 import { deriveWritableRoots } from './roots.js';
 // 平台链引用（函数体内才调用，无顶层互调——与后端文件的双向引用安全）
 import { createSeatbeltBackend } from './seatbelt.js';
@@ -288,6 +295,12 @@ export interface EscalationApprovalInput extends ValidEscalation {
   /** 发起升权的工具名/调用 id（有则随审批记录） */
   readonly toolName?: string;
   readonly toolCallId?: string;
+  /**
+   * 推荐规则候选（骨架篇 §8.4 增补 2 落码形态①③）：bash 升权的「始终允许」
+   * 草案（命令词干），仅 workspace-write 目标携带——danger-full-access 是
+   * safetyLevel 高位 v1 刻度，恒不带草案（落码形态② danger 恒问边界）。
+   */
+  readonly suggestedEntry?: AllowlistDraft;
 }
 
 /**
@@ -304,5 +317,6 @@ export function requestEscalation(
     reason: `目标档 ${input.target}；理由：${input.justification}`,
     toolName: input.toolName,
     toolCallId: input.toolCallId,
+    ...(input.suggestedEntry !== undefined ? { suggestedEntry: input.suggestedEntry } : {}),
   });
 }

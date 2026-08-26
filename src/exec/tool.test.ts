@@ -46,13 +46,13 @@ function fakeSandbox() {
   return { sandbox, policies };
 }
 
-/** 审批假件：ask 可编程应答（缺省 allowed-once） */
+/** 审批假件：ask 可编程应答（缺省 allowed-once）；捕获完整载荷（草案断言用） */
 function fakeApproval(outcome: 'allowed-once' | 'rejected' = 'allowed-once') {
-  const asked: string[] = [];
+  const asked: { summary: string; suggestedEntry?: { tool: string; pattern: string } }[] = [];
   const approval = {
     policyMode: 'ask',
-    ask: async (req: { summary: string }): Promise<'allowed-once' | 'rejected'> => {
-      asked.push(req.summary);
+    ask: async (req: { summary: string; suggestedEntry?: { tool: string; pattern: string } }) => {
+      asked.push(req);
       return outcome;
     },
   } as unknown as ApprovalService;
@@ -60,7 +60,11 @@ function fakeApproval(outcome: 'allowed-once' | 'rejected' = 'allowed-once') {
 }
 
 /** 组装被测工具 + 假件（mode 缺省 workspace-write） */
-function makeTool(overrides?: { mode?: () => SandboxMode; approvalOutcome?: 'allowed-once' | 'rejected' }) {
+function makeTool(overrides?: {
+  mode?: () => SandboxMode;
+  approvalOutcome?: 'allowed-once' | 'rejected';
+  allowlist?: readonly { tool: string; pattern: string }[];
+}) {
   const sb = fakeSandbox();
   const ap = fakeApproval(overrides?.approvalOutcome ?? 'allowed-once');
   const tool = createBashTool({
@@ -68,6 +72,7 @@ function makeTool(overrides?: { mode?: () => SandboxMode; approvalOutcome?: 'all
     approval: ap.approval,
     mode: overrides?.mode ?? (() => 'workspace-write'),
     workspaceRoot: workspace,
+    ...(overrides?.allowlist !== undefined ? { allowlist: overrides.allowlist } : {}),
   });
   return { tool, policies: sb.policies, asked: ap.asked };
 }
@@ -159,6 +164,65 @@ describe('升权两参数（成对非空词汇——首个消费者）', () => {
     const next = await run(tool, { command: 'echo again' });
     expect(policies.at(-1)?.mode).toBe('read-only');
     expect(next.details.sandbox.mode).toBe('read-only');
+  });
+});
+
+describe('升权 × allowlist 免问（§8.4 增补 2——bash 族唯一消费点）', () => {
+  it('workspace-write 目标 + 词干命中条目：免问直接升档（allowed-once 语义同源）', async () => {
+    const { tool, policies, asked } = makeTool({
+      mode: () => 'read-only',
+      allowlist: [{ tool: 'bash', pattern: 'git' }],
+    });
+    const result = await run(tool, {
+      command: 'git status',
+      sandbox_permissions: 'workspace-write',
+      justification: '测试词干授权',
+    });
+    expect(asked).toHaveLength(0); // 免审批
+    expect(policies.at(-1)?.mode).toBe('workspace-write'); // 仍按目标档包装（advisory 只免问）
+    expect(result.details.sandbox.mode).toBe('workspace-write');
+    expect(result.details.exitCode).toBe(0); // 命令真实执行
+  });
+
+  it('danger 目标恒问：条目在场也照审批（落码形态② danger 恒问边界）', async () => {
+    const { tool, asked } = makeTool({
+      allowlist: [{ tool: 'bash', pattern: 'git' }],
+    });
+    await run(tool, {
+      command: 'git status',
+      sandbox_permissions: 'danger-full-access',
+      justification: '测试 danger 恒问',
+    });
+    expect(asked).toHaveLength(1);
+  });
+
+  it('草案透传：workspace-write 目标带剥壳词干；剥不出（管道）即无草案', async () => {
+    const { tool, asked } = makeTool({ mode: () => 'read-only' });
+    await run(tool, {
+      command: 'echo clean',
+      sandbox_permissions: 'workspace-write',
+      justification: '测试草案',
+    });
+    expect(asked[0]!.suggestedEntry).toEqual({ tool: 'bash', pattern: 'echo clean' });
+    await run(tool, {
+      command: 'echo dirty | tee x',
+      sandbox_permissions: 'workspace-write',
+      justification: '测试无草案',
+    });
+    expect(asked[1]!.suggestedEntry).toBeUndefined(); // 不可判定 → 选项不呈现
+  });
+
+  it('词干不匹配条目：照问（pattern 双词 vs 命令子命令不同）', async () => {
+    const { tool, asked } = makeTool({
+      mode: () => 'read-only',
+      allowlist: [{ tool: 'bash', pattern: 'git push' }],
+    });
+    await run(tool, {
+      command: 'git status',
+      sandbox_permissions: 'workspace-write',
+      justification: '测试不匹配',
+    });
+    expect(asked).toHaveLength(1);
   });
 });
 

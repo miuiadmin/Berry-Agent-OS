@@ -19,8 +19,28 @@ export type ApprovalPolicyMode = 'ask' | 'never';
 /** 审批结局闭集（骨架篇 §8.3 钉死；allowed-once 只授予当次调用） */
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
 
-/** answerer（审批应答者）的三值决策——通道插件在 approval/answer waterfall 上短路返回 */
-export type ApprovalAnswer = 'approve' | 'reject' | 'cancel';
+/**
+ * answerer（审批应答者）的四值决策——通道插件在 approval/answer waterfall 上短路返回。
+ * 'always'（2026-08-27「始终允许」批，骨架篇 §8.3）= 批准本次 + 授权写跨会话
+ * allowlist 条目：载荷必须携带 suggestedEntry 草案才呈现该选项（无草案 =
+ * answerer 面不出现「始终允许」）；safety 侧收到无草案的 always 视同 approve
+ * （防御收口——写入面零草案零副作用）。
+ */
+export type ApprovalAnswer = 'approve' | 'reject' | 'cancel' | 'always';
+
+/**
+ * 推荐规则候选（骨架篇 §8.4 增补 2「审批推荐规则」）：由请求动作生成的
+ * allowlist 条目草案——用户选「始终允许」即按此形状写入用户配置层。
+ * 生成规则（落码形态①）：fs 族 = 该次写目标的精确 canonical 路径；
+ * bash 族 = 剥壳词干（≤2 词，剥不出干净词干即无草案）；高位动作
+ * （升权目标 danger-full-access）不携带。
+ */
+export interface AllowlistDraft {
+  /** 目标工具名（宿主面统一词汇——与 AllowlistEntry.tool 同源） */
+  readonly tool: string;
+  /** 条目模式：fs = 精确 canonical 路径 / bash = 剥壳词干 */
+  readonly pattern: string;
+}
 
 /**
  * 审批请求（骨架篇 §8.4：含 reason、请求方、目标动作摘要——审计自包含）。
@@ -44,6 +64,12 @@ export interface ApprovalRequest {
   readonly ownership?: { readonly sessionId: string; readonly appId?: string };
   /** 出队优先级（ask 时调用链取数的运行期元数据——answerer 两级出队参考） */
   readonly priority?: 'interactive' | 'background';
+  /**
+   * 推荐规则候选（骨架篇 §8.4 增补 2）：在场时 answerer 呈现「始终允许」三选；
+   * 用户选 always → 按此草案写用户配置层 allowlist（approval 服务经
+   * persistAllowlist 回调落地）。高位动作不携带（选项不出现）。
+   */
+  readonly suggestedEntry?: AllowlistDraft;
 }
 
 /** 沙箱后端统一接口（后端是可替换插件行；seam 与强制点在内核） */

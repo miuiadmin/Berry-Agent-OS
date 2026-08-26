@@ -81,10 +81,10 @@ export interface ApprovalAskedData {
   readonly summary: string;
 }
 
-/** 审批决议载荷（log-only；decision 四值与 ApprovalService outcome 闭集对齐——cancelled/unavailable 也是已完成的决策，审计须区分） */
+/** 审批决议载荷（log-only；decision 五值与应答闭集 + unavailable 对齐——2026-08-27 扩 'always'：授权常驻写 allowlist 条目，与 approve「批一次」审计语义不同；cancelled/unavailable 也是已完成的决策，审计须区分） */
 export interface ApprovalDecidedData {
   readonly approvalId: string;
-  readonly decision: 'approve' | 'reject' | 'cancel' | 'unavailable';
+  readonly decision: 'approve' | 'reject' | 'cancel' | 'unavailable' | 'always';
 }
 
 /** 守门决议载荷（log-only；不变式：任何 tool/result 前序必含对应 toolCallId 的 gate/decision） */
