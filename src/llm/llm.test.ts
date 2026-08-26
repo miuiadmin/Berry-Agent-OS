@@ -8,12 +8,14 @@ import { describe, expect, it } from 'vitest';
 import { fauxAssistantMessage, fauxProvider } from '@earendil-works/pi-ai';
 import type { SimpleStreamOptions } from '@earendil-works/pi-ai';
 import type { Context as PiContext } from '@earendil-works/pi-ai';
-import { LLM_MODEL_NOT_FOUND, LLM_MODEL_SPEC_INVALID, AppError } from '../contracts/errors.js';
+import { LLM_INFLIGHT_LIMIT, LLM_MODEL_NOT_FOUND, LLM_MODEL_SPEC_INVALID, AppError } from '../contracts/errors.js';
 import type { AssistantMessage, AssistantStreamEvent, LlmContext, Message, UserMessage } from '../contracts/llm.js';
 import {
+  classifyAssistantError,
   createLlmRuntime,
   createStreamFn,
   formatModelId,
+  InFlightTracker,
   isContextOverflow,
   isRetryableAssistantError,
   parseModelSpec,
@@ -279,5 +281,116 @@ describe('恢复零件包装', () => {
     );
     expect(calls).toBe(1);
     expect(final.stopReason).toBe('error');
+  });
+});
+
+/* ---------------- S4 前置债：错误桶表 + 在飞帽 ---------------- */
+
+describe('classifyAssistantError（S4 桶表——全仓唯一一份分桶）', () => {
+  /** 错误终态消息工厂（桶表输入面） */
+  const errorMessageOf = (errorMessage: string, errorCode?: string): AssistantMessage =>
+    ({
+      role: 'assistant',
+      content: [],
+      usage: NO_USAGE,
+      stopReason: 'error',
+      errorMessage,
+      ...(errorCode !== undefined ? { errorCode } : {}),
+      timestamp: 1,
+    }) as AssistantMessage;
+
+  it('① errorCode 码优先：LLM_INFLIGHT_LIMIT → transient（文案不参与判定）', () => {
+    expect(classifyAssistantError(errorMessageOf('任意文案', 'LLM_INFLIGHT_LIMIT'))).toBe('transient');
+  });
+
+  it('② 溢出分类位：显式溢出文案（Anthropic 式）→ overflow（只分类不消费）', () => {
+    // 显式报错正则（约 21 家 provider 族）；静默溢出需 contextWindow 入参——
+    // 桶表判定面不带窗口（窗口在溢出兜底纵切处注入），此处只锁显式腿
+    expect(classifyAssistantError(errorMessageOf('prompt is too long: 213462 tokens > 200000 maximum'))).toBe(
+      'overflow',
+    );
+  });
+
+  it('③ 配额文案族 → quota（在 transient 正则之前测——429/rate limit 不落此桶）', () => {
+    for (const text of ['insufficient_quota: billing hard limit', 'Monthly usage limit reached', 'quota exceeded']) {
+      expect(classifyAssistantError(errorMessageOf(text))).toBe('quota');
+    }
+    expect(classifyAssistantError(errorMessageOf('429 rate limited'))).not.toBe('quota');
+  });
+
+  it('④⑤ transient 正则 / 保守默认：fetch failed → transient；未知 → non-retryable', () => {
+    expect(classifyAssistantError(errorMessageOf('fetch failed'))).toBe('transient');
+    expect(classifyAssistantError(errorMessageOf('request timeout after 60000ms'))).toBe('transient');
+    expect(classifyAssistantError(errorMessageOf('invalid api key'))).toBe('non-retryable');
+  });
+});
+
+describe('InFlightTracker（S4 前置债③——per-provider 计数器）', () => {
+  it('达帽返 null；释放后名额归还可再取', () => {
+    const tracker = new InFlightTracker(1);
+    const slot = tracker.tryAcquire('p');
+    expect(slot).not.toBeNull();
+    expect(tracker.tryAcquire('p')).toBeNull(); // 帽 1 已占
+    slot!.release();
+    expect(tracker.tryAcquire('p')).not.toBeNull(); // 归还后可再取
+  });
+
+  it('release 幂等：双释放不吐双名额（迭代 return() + result() 双路径只生效一次）', () => {
+    const tracker = new InFlightTracker(1);
+    const slot = tracker.tryAcquire('p')!;
+    slot.release();
+    slot.release();
+    const again = tracker.tryAcquire('p');
+    expect(again).not.toBeNull();
+    again!.release();
+    expect(tracker.tryAcquire('p')).not.toBeNull(); // 仍只有 1 个名额
+  });
+
+  it('per-provider 独立计数（互不挤占）', () => {
+    const tracker = new InFlightTracker(1);
+    expect(tracker.tryAcquire('a')).not.toBeNull();
+    expect(tracker.tryAcquire('b')).not.toBeNull(); // 另一 provider 不受 a 占用影响
+    expect(tracker.tryAcquire('a')).toBeNull();
+  });
+
+  it('max<=0 = 不限：恒成功（NOOP 名额，release 无操作）', () => {
+    const tracker = new InFlightTracker(0);
+    for (let i = 0; i < 5; i++) {
+      const slot = tracker.tryAcquire('p');
+      expect(slot).not.toBeNull();
+      slot!.release();
+    }
+  });
+});
+
+describe('createStreamFn 在飞帽（S4 前置债③——达帽显式拒绝）', () => {
+  it('达帽：错误流带 errorCode=LLM_INFLIGHT_LIMIT（无 start、result() 终值 error）', async () => {
+    const { runtime } = makeFauxRuntime();
+    const tracker = new InFlightTracker(1);
+    const streamFn = createStreamFn(runtime, {}, tracker);
+    const occupied = tracker.tryAcquire('faux-test'); // 预占唯一名额
+    expect(occupied).not.toBeNull();
+    const stream = await streamFn({ messages: [userMsg('hi')] }, { model: 'faux-test/m1' });
+    const events = await drainStream(stream);
+    expect(events).toHaveLength(1); // 单 error 终止事件——无 start
+    expect(events[0]?.type).toBe('error');
+    const final = await stream.result();
+    expect(final.stopReason).toBe('error');
+    expect(final.errorCode).toBe(LLM_INFLIGHT_LIMIT);
+    expect(final.errorMessage).toContain(`[${LLM_INFLIGHT_LIMIT}]`);
+    occupied!.release();
+  });
+
+  it('正常路：流消费完释放名额（第二次调用可通过——达帽错误流也走 result() 幂等释放）', async () => {
+    const { faux, runtime } = makeFauxRuntime();
+    faux.setResponses([capturingFactory([], '一'), capturingFactory([], '二')]);
+    const streamFn = createStreamFn(runtime, {}, new InFlightTracker(1));
+    const first = await streamFn({ messages: [userMsg('a')] }, { model: 'faux-test/m1' });
+    await drainStream(first);
+    await first.result(); // 串行消费完（for-await return + result 双路径幂等）
+    const second = await streamFn({ messages: [userMsg('b')] }, { model: 'faux-test/m1' });
+    const events = await drainStream(second);
+    expect(events.at(-1)?.type).toBe('done'); // 名额已归还不被拒
+    await second.result();
   });
 });

@@ -27,11 +27,13 @@ import {
   LLM_COMPLETE_API_KEY_FORBIDDEN,
   LLM_COMPLETE_SCHEMA_UNSUPPORTED,
   LLM_COMPLETE_FAILED,
+  LLM_INFLIGHT_LIMIT,
 } from '../contracts/errors.js';
 import type { LlmRuntime } from './runtime.js';
 import { formatModelId } from './model-id.js';
 import type { StreamFnDefaults } from './stream-fn.js';
-import { retryAssistantCall, type RetryPolicy } from './recovery.js';
+import type { InFlightTracker } from './inflight.js';
+import { classifyAssistantError, type ErrorBucket, retryAssistantCall, type RetryPolicy } from './recovery.js';
 import type { Message as PiMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
 
 /** 单发补全请求（插件侧唯一参数面——apiKey 禁入是运行时护栏不是类型约定） */
@@ -115,6 +117,12 @@ export interface LlmService {
    * （可见性走 /usage 计量投影面，不硬断）。
    */
   canAfford(priority: 'background' | 'foreground', app?: string): boolean;
+  /**
+   * 错误桶判定（S4 前置债批——全仓唯一一份桶表 recovery.ts classifyAssistantError
+   * 的服务面公开位）：chat 件等宿主内消费方经 ctx 取用（chat 拓扑边不含 llm，
+   * 判定器经服务面注入驱动——「插件侧禁写第二份分桶」的执法前提是宿主面可得）。
+   */
+  classifyError(message: AssistantMessage): ErrorBucket;
 }
 
 /** 服务构造选项 */
@@ -123,6 +131,13 @@ export interface LlmServiceOptions {
   runtime: LlmRuntime;
   /** 请求参数默认值（与 createStreamFn 共用同一份——重试/采样档位全宿主一致） */
   defaults?: StreamFnDefaults;
+  /**
+   * per-provider 在飞计数器（S4 前置债批——与 createStreamFn 共享同一份：
+   * 两出口同源计数「per-provider」名实相符。complete 路达帽**同拒**：
+   * produce 返回 LLM_INFLIGHT_LIMIT 错误终态 → pi-ai 正则归 non-retryable
+   * 上抛 LLM_COMPLETE_FAILED——过载期单发失败由调用方自然重试，不造排队口子。
+   */
+  tracker?: InFlightTracker;
   /** 会话当前模型缺省（函数面：运行时可变，M2 ctx.agent.setModel 接管后随之） */
   defaultModel: () => string;
   /** 有界重试策略（缺省开 1 次重试——transient 网络抖动兜底，非 loop 级成本） */
@@ -164,6 +179,9 @@ export interface LlmServiceOptions {
 /** 缺省重试策略：开 1 次重试、500ms 起步指数退避（SDK 级 maxRetries 之外的有界第二层） */
 const DEFAULT_RETRY: RetryPolicy = { enabled: true, maxRetries: 1, baseDelayMs: 500 };
 
+/** 零用量（达帽错误终态合成用——同 stream-fn 的 errorStream 惯例） */
+const NO_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
+
 /** providerNative 内禁入的凭证类键（与参数面 apiKey 同禁——透传槽不做洗白通道） */
 const FORBIDDEN_PROVIDER_NATIVE_KEYS = new Set(['apikey', 'authorization']);
 
@@ -174,7 +192,7 @@ const DEFAULT_BACKGROUND_BUDGET = 4_000_000;
  * 创建 ctx.llm 具名服务（组合根 provide('llm') 的那一行所注对象）。
  */
 export function createLlmService(options: LlmServiceOptions): LlmService {
-  const { runtime, defaults = {}, defaultModel, retry = DEFAULT_RETRY } = options;
+  const { runtime, defaults = {}, defaultModel, retry = DEFAULT_RETRY, tracker } = options;
   const budget = options.backgroundBudgetTokens ?? DEFAULT_BACKGROUND_BUDGET;
   // 当日后台已耗 = 注入的聚合查询（底账 = 会话日志 llm/usage 事件投影，缺省无已耗）
   const spentToday = options.backgroundSpentToday ?? (() => 0);
@@ -211,6 +229,9 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
   return {
     registerProvider: (provider) => runtime.registerProvider(provider),
     unregisterProvider: (id) => runtime.unregisterProvider(id),
+
+    // 错误桶判定（S4）：recovery 桶表直通——全仓唯一一份分桶的公开消费位
+    classifyError: (message: AssistantMessage) => classifyAssistantError(message),
 
     // 模型目录只读投影（P0-1）：pi-ai Model → ModelInfo 字段子集直通——id 组
     // "provider/model-id" 全形（resolveModel 同名可解析），传输/配置面不披露
@@ -280,8 +301,26 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
       // 硬要求 2：单发不 loop——一次 streamSimple + 有界 transient 重试（硬要求 3 的 retryAssistantCall）
       const message = await retryAssistantCall(
         async () => {
-          const stream = runtime.models.streamSimple(model, piContext, piOptions);
-          return (await stream.result()) as unknown as AssistantMessage;
+          // 在飞帽（S4 前置债③）：与主循环路同源计数；达帽同拒——错误终态带
+          // errorCode，经 pi-ai 正则归 non-retryable 即刻上抛（不造排队口子）
+          const slot = tracker?.tryAcquire(model.provider) ?? null;
+          if (slot === null && tracker !== undefined) {
+            return {
+              role: 'assistant',
+              content: [],
+              usage: NO_USAGE,
+              stopReason: 'error',
+              errorMessage: `[${LLM_INFLIGHT_LIMIT}] 在飞请求达帽（provider=${model.provider}）：过载期单发失败，调用方稍后自然重试`,
+              errorCode: LLM_INFLIGHT_LIMIT,
+              timestamp: Date.now(),
+            } as AssistantMessage;
+          }
+          try {
+            const stream = runtime.models.streamSimple(model, piContext, piOptions);
+            return (await stream.result()) as unknown as AssistantMessage;
+          } finally {
+            slot?.release(); // result() 即流终结：单发消费面只走这一条路，finally 必达
+          }
         },
         retry,
         req.signal,

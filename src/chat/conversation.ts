@@ -19,7 +19,59 @@ import type { AgentMessage } from '../contracts/messages.js';
 import type { AssistantMessage, Usage } from '../contracts/llm.js';
 import { describeError } from '../contracts/errors.js';
 import { runInSessionChain } from '../context/chain.js';
+import type { Session } from '../session/session.js';
 import type { DurableSinks } from './durable.js';
+import { projectedToAgentMessages } from './durable.js';
+import type { LlmRetryData } from '../session/event-types.js';
+
+/**
+ * 会话层重试策略（S4 前置债批，骨架篇 §3.2 会话层行⑦——结构同构 pi-ai
+ * RetryPolicy；驱动不 import llm 模块〔拓扑纪律：chat 边不含 llm〕，判定器经
+ * deps.isTransientError 注入）。缺省 {enabled, 3, 1000}。
+ */
+export interface DriverRetryPolicy {
+  /** 总开关（关 = 错误直通不重试） */
+  readonly enabled: boolean;
+  /** 重试帽（transient 错误的最大重试次数） */
+  readonly maxRetries: number;
+  /** 指数退避基延迟（毫秒）——delay = base·2^(n-1)·(0.5+random·0.5) */
+  readonly baseDelayMs: number;
+}
+
+/** 驱动缺省重试策略（骨架篇 §3.2 会话层行⑦：enabled/3 次/1s 起） */
+const DEFAULT_RETRY_POLICY: DriverRetryPolicy = { enabled: true, maxRetries: 3, baseDelayMs: 1000 };
+
+/**
+ * 指数退避 + 等比半幅抖动（骨架篇 §3.2 会话层行③）：抖动因子 ∈[0.5,1]——
+ * 多驱动并发同源错误时错峰打散（因子区间比 pi-ai provider 层 [0.75,1] 更宽，
+ * 打散更强；下界 >0 不会零延迟）。导出供单测覆盖区间断言。
+ */
+export function retryBackoffDelay(attempt: number, baseDelayMs: number): number {
+  const exponential = baseDelayMs * 2 ** (attempt - 1);
+  return Math.round(exponential * (0.5 + Math.random() * 0.5));
+}
+
+/**
+ * 可取消睡眠：resolve false = 睡满（继续）；true = 被 abort 打断（退避取消路）。
+ * 已 abort 的 signal 事件只发一次——先短路再挂监听（S3 同款教训）。
+ */
+function sleepCancellable(ms: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(true);
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(false);
+    }, ms);
+    signal.addEventListener('abort', onAbort);
+  });
+}
 
 /**
  * run 结算载荷（骨架篇 §9.3 ctx.agent.onRunSettled）：sessionId = 结算 run 的
@@ -87,6 +139,20 @@ export interface ConversationDriverDeps {
   readonly loopConfig: Omit<AgentLoopConfig, 'getSteeringMessages' | 'getFollowUpMessages'>;
   /** durable 接线（无持久层装配时缺省） */
   readonly durable?: DurableSinks;
+  /**
+   * 会话只读写面（S4 前置债批——重试三消费：events 倒扫取遮蔽区间 /
+   * deriveMessages 私有重播种种子 / llm/retry 落账+信封遮蔽）。缺省（无持久层
+   * 装配）时 auto-retry 随之关闭——遮蔽与落账是重试的构成要件，无日志无重试。
+   */
+  readonly session?: Session;
+  /**
+   * 瞬态错误判定（S4——llm/recovery 桶表 transient 判定经装配注入：chat 拓扑
+   * 边不含 llm，判定器走 ctx.llm.classifyError 服务面）。缺省 = 恒 false
+   * （不判定即不重试——保守直通，测试装配可显式关）。
+   */
+  readonly isTransientError?: (message: AssistantMessage) => boolean;
+  /** 会话层重试策略（缺省 enabled/3 次/1s 起——装配处可覆写） */
+  readonly retryPolicy?: DriverRetryPolicy;
   /** 会话首 run 前落 request/header 快照（chat 件闭包——驱动不知道快照内容） */
   readonly writeHeader?: () => void;
   /**
@@ -137,6 +203,12 @@ export class ConversationDriver {
   private headerWritten = false;
   /** 是否有 run 在跑（submit 的 steering/followUp 分流依据） */
   private running = false;
+  /** 会话只读写面（S4 重试三消费；无持久层装配时 undefined——重试随之关闭） */
+  private readonly session: Session | undefined;
+  /** 瞬态错误判定（S4——装配注入的桶表 transient 位；缺省恒 false 保守直通） */
+  private readonly isTransientError: (message: AssistantMessage) => boolean;
+  /** 会话层重试策略（S4——缺省 enabled/3 次/1s 起） */
+  private readonly retryPolicy: DriverRetryPolicy;
   /** 最近一次 launch 的完成信号（settle 等待用） */
   private runPromise: Promise<void> = Promise.resolve();
   private quitResolve!: () => void;
@@ -151,6 +223,9 @@ export class ConversationDriver {
     this.durable = deps.durable;
     this.writeHeader = deps.writeHeader;
     this.onCallbackError = deps.onCallbackError;
+    this.session = deps.session;
+    this.isTransientError = deps.isTransientError ?? (() => false);
+    this.retryPolicy = deps.retryPolicy ?? DEFAULT_RETRY_POLICY;
     // steering 取数口驱动自持：仅 running 期供给（run 间隙的余量走 launch 的
     // followUp 循环，不经此口——两路取数同一条队列，分流点在时机不在通道）。
     // 取出即清投递元数据（steering 路不收窄——工具面随开跑时批已定）
@@ -278,17 +353,38 @@ export class ConversationDriver {
    * 时间线原位重置（会话热切换 /new 用）：活数组引用不变、内容替换为新种子
    * （loop 持有的 context.messages 引用持续有效——单一时间线不变式不破），
    * 首 run 标记复位（新会话要重新落 request/header）。
-   * @returns run 进行中返回 false（拒绝热切换，时间线原样）
+   * @returns run 进行中返回 false（拒绝热切换，时间线原样）——守卫只管**外部**
+   *          热切换调用方（/new 类）；run 内重试走 reseedTimelineFromProjection
+   *          私有路径（同一写者的时序内动作不受守卫管辖，S4 冷读闸拆分）
    */
   resetTimeline(seed: readonly AgentMessage[] = []): boolean {
     if (this.running) return false;
-    const messages = this.context.messages;
-    messages.length = 0;
-    messages.push(...seed);
+    this.replaceTimeline(seed);
     this.headerWritten = false;
     // 时间线重置时旧投递元数据随之作废（防跨会话泄漏引用）
     this.deliverMeta.clear();
     return true;
+  }
+
+  /**
+   * 活数组原位替换（重播种共同原语：外部 resetTimeline 与 run 内重试共用——
+   * 只动 timeline 内容，不碰 headerWritten / deliverMeta〔那是热切换语义〕）。
+   */
+  private replaceTimeline(seed: readonly AgentMessage[]): void {
+    const messages = this.context.messages;
+    messages.length = 0;
+    messages.push(...seed);
+  }
+
+  /**
+   * 投影重播种（S4 重试路径——compaction 增补 1 教训的「活数组不重播种遮蔽
+   * 不生效」半边）：从当前投影（已含遮蔽语义——错误 assistant 及伴生组不进
+   * 投影）重建活数组。**不清 deliverMeta**（退避期入队的 backgroundWake 元数据
+   * 须保留，续入合批继续收窄工具面）、**不复位 headerWritten**（续入 writeHeader
+   * 由差分语义天然幂等）。
+   */
+  private reseedTimelineFromProjection(): void {
+    this.replaceTimeline(projectedToAgentMessages(this.session!.deriveMessages()));
   }
 
   /**
@@ -351,7 +447,7 @@ export class ConversationDriver {
     }
   }
 
-  /** run 序列：首 run + followUp 续跑循环；异常兜底合成 error 收尾 */
+  /** run 序列：首 run + followUp 续跑循环（每次 startRun 过 runWithRetry 检查点）；异常兜底合成 error 收尾 */
   private async runTurns(prompts: AgentMessage[]): Promise<RunResult> {
     const hooks = { emit: this.emit, signal: this.abortController.signal };
     let result: RunResult | undefined;
@@ -364,12 +460,13 @@ export class ConversationDriver {
         this.headerWritten = true;
         this.writeHeader?.();
       }
-      result = await startRun(prompts, this.contextForBatch(prompts), this.config, hooks);
-      // run 自然停：余量排队消息全量捞出续跑（followUp 唤醒）
+      result = await this.runWithRetry(prompts, hooks);
+      // run 自然停：余量排队消息全量捞出续跑（followUp 唤醒——followUp 轮的
+      // error 同样过检查点重试，骨架篇 §3.2 前置债①「检查点 = 每次 startRun 返回后」）
       while (!this.abortController.signal.aborted && this.queue.hasItems()) {
         const batch: AgentMessage[] = [];
         while (this.queue.hasItems()) batch.push(...this.queue.drain());
-        result = await startRun(batch, this.contextForBatch(batch), this.config, hooks);
+        result = await this.runWithRetry(batch, hooks);
       }
     } catch (error) {
       // 回调违约（loop 零 try/catch 的对价）：合成 error 消息补齐事件序列
@@ -398,5 +495,130 @@ export class ConversationDriver {
       };
     }
     return result;
+  }
+
+  /**
+   * 单次 run + 检查点重试（S4 前置债①——骨架篇 §3.2 会话层行落码主体）：
+   * startRun 返回后查末轮 result——error 收尾 + 末消息 assistant error + 桶判定
+   * transient + attempt < 帽 → 遮蔽续入循环。attempt 生命周期 = 本方法调用
+   * （每次 startRun 新计数——成功复位/新 run 新名额，防跨 turn 累积吃名额）。
+   *
+   * 重试全程 run 未终结：isRunning 全程 true（TUI「工作中」自然覆盖，零新
+   * AgentEvent 型）；重试与 followUp 合流——退避醒来 drain 队列，新消息与
+   * 续入 startRun 同批带上（空批 = 无人插话的纯续入）。
+   */
+  private async runWithRetry(
+    batch: AgentMessage[],
+    hooks: { emit: AgentEventSink; signal: AbortSignal },
+  ): Promise<RunResult> {
+    let result = await startRun(batch, this.contextForBatch(batch), this.config, hooks);
+    let attempt = 0;
+    while (this.shouldRetryRun(result)) {
+      const errorMessage = this.lastErrorText(result);
+      // 达帽放弃：末次错误随行落 exhausted（错误 assistant 保留呈现——中间失败
+      // 已被遮蔽，最终失败可见）
+      if (attempt >= this.retryPolicy.maxRetries) {
+        this.appendRetryFact(attempt, 0, 'exhausted', errorMessage);
+        break;
+      }
+      attempt += 1;
+      const delayMs = retryBackoffDelay(attempt, this.retryPolicy.baseDelayMs);
+      // 遮蔽 + scheduled 落账一次 append 完成（llm/retry 信封携带 surfaceOp——
+      // 会话篇 §2 第二消费者）。倒扫失败（形态异常）= 保守放弃：错误已保留直通
+      if (!this.occludeFailedAssistant(attempt, delayMs, errorMessage)) break;
+      // 投影重播种（私有路径：只重建活数组——错误 assistant 已不进投影，续入
+      // 上下文末消息回到 user/toolResult）
+      this.reseedTimelineFromProjection();
+      // 退避（挂驱动 abort signal——requestQuit/retire 即取消，零新增机制）
+      if (await sleepCancellable(delayMs, this.abortController.signal)) {
+        this.appendRetryFact(attempt, delayMs, 'aborted', errorMessage);
+        break;
+      }
+      // followUp 合流：退避期入队消息与续入同批（deliverMeta 保留——backgroundWake
+      // 的工具收窄在续入批继续生效）
+      const next: AgentMessage[] = [];
+      while (this.queue.hasItems()) next.push(...this.queue.drain());
+      result = await startRun(next, this.contextForBatch(next), this.config, hooks);
+    }
+    return result;
+  }
+
+  /**
+   * 重试判定四条全过才重试（骨架篇 §3.2 会话层行①前半）：策略开 + session
+   * 在场（无日志无重试——遮蔽与落账是构成要件）+ error 收尾 + 末消息 assistant
+   * error 归 transient 桶（经装配注入的判定器；quota/overflow/non-retryable
+   * 均不占重试名额——overflow 动作挂溢出兜底纵切）。
+   */
+  private shouldRetryRun(result: RunResult): boolean {
+    if (!this.retryPolicy.enabled || this.session === undefined) return false;
+    if (result.stopReason !== 'error') return false;
+    const last = this.lastAssistantError(result);
+    return last !== undefined && this.isTransientError(last);
+  }
+
+  /** 末消息是否 assistant 错误终态（CustomMessage.role 宽 string 不窄化——stopReason 成员判据窄出 assistant） */
+  private lastAssistantError(result: RunResult): AssistantMessage | undefined {
+    const last = result.messages[result.messages.length - 1];
+    if (last === undefined || last.role !== 'assistant' || !('stopReason' in last)) return undefined;
+    return last.stopReason === 'error' ? last : undefined;
+  }
+
+  /** 末条错误说明提取（llm/retry 载荷的 errorMessage 腿） */
+  private lastErrorText(result: RunResult): string | undefined {
+    return this.lastAssistantError(result)?.errorMessage;
+  }
+
+  /**
+   * 遮蔽错误 assistant + 落 llm/retry scheduled（一次 append，S4——会话篇 §2）：
+   * 倒扫日志找最后一条 assistant/message 作区间起点，区间尾取当前日志高水位
+   * （盖住流中断终值消息伴生续落的 tool/call——无配对 tool/result 的悬空 toolUse
+   * 不进续入上下文；垫底的 turn/end、llm/usage 对投影是 no-op 一并入区间无害）。
+   * @returns false = 形态异常保守放弃（无 session 由 shouldRetryRun 先拦，不到这）
+   */
+  private occludeFailedAssistant(attempt: number, delayMs: number, errorMessage: string | undefined): boolean {
+    const session = this.session!;
+    const events = session.events;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i]!;
+      if (event.type === 'assistant/message') {
+        const start = event.seq;
+        const end = events.length - 1;
+        // 溯源完整性（validateSurfaceOp）：sourceEventSeqs 须全列被遮蔽区间
+        const sourceEventSeqs: number[] = [];
+        for (let seq = start; seq <= end; seq++) sourceEventSeqs.push(seq);
+        const data: LlmRetryData = {
+          attempt,
+          maxAttempts: this.retryPolicy.maxRetries,
+          delayMs,
+          phase: 'scheduled',
+          ...(errorMessage !== undefined ? { errorMessage } : {}),
+        };
+        // 信封携带 surfaceOp：log-only 词不进投影 fold（无内容载体、纯删除语义），
+        // derive occludedSeqs 按信封字段扫不分类型——落账与遮蔽一次完成
+        session.append('llm/retry', data, { surfaceOp: { op: 'replace', start, end }, sourceEventSeqs });
+        return true;
+      }
+      // 垫底事件继续向前扫（伴生 tool/call / turn 边界 / 计量笔账）
+      if (event.type === 'tool/call' || event.type === 'turn/end' || event.type === 'llm/usage') continue;
+      return false; // 形态异常（user 等内容事件在 assistant 之后）——保守放弃
+    }
+    return false;
+  }
+
+  /** llm/retry aborted/exhausted 落账（无遮蔽随行——scheduled 已遮蔽过） */
+  private appendRetryFact(
+    attempt: number,
+    delayMs: number,
+    phase: 'aborted' | 'exhausted',
+    errorMessage: string | undefined,
+  ): void {
+    const data: LlmRetryData = {
+      attempt,
+      maxAttempts: this.retryPolicy.maxRetries,
+      delayMs,
+      phase,
+      ...(errorMessage !== undefined ? { errorMessage } : {}),
+    };
+    this.session?.append('llm/retry', data);
   }
 }

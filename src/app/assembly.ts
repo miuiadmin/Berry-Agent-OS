@@ -38,8 +38,8 @@ import {
   openTurnDepth,
   spentBackgroundTokensSince,
 } from '../persist/index.js';
-import type { LlmRuntime, Provider } from '../llm/index.js';
-import { createLlmRuntime, createLlmService, createStreamFn, providerApiFace } from '../llm/index.js';
+import type { LlmRuntime, Provider, StreamFnDefaults } from '../llm/index.js';
+import { createLlmRuntime, createLlmService, createStreamFn, InFlightTracker, providerApiFace } from '../llm/index.js';
 import {
   APPROVAL_ANSWER_EVENT,
   createApprovalService,
@@ -177,6 +177,11 @@ export interface RuntimeOptions {
   readonly providers?: readonly Provider[];
   /** StreamFn 覆盖（测试注入 scripted 流；缺省由 llm 运行时组装） */
   readonly streamFn?: StreamFn;
+  /**
+   * StreamFn 请求参数默认值（S4 前置债批——重试/采样档位 + per-provider 在飞帽
+   * 上限 maxInFlightPerProvider：0 = 不限，缺省 4；完整键面见 llm 模块定义）
+   */
+  readonly defaults?: StreamFnDefaults;
   /** 技能发现位置（缺省 defaultSkillLocations；测试注入临时目录） */
   readonly skillLocations?: readonly SkillLocation[];
   /** 声明式子代理发现位置（缺省 defaultAgentLocations；测试注入 fixture 目录） */
@@ -447,11 +452,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     ...(persistence ? { credentials: createCredentialStore(persistence.store) } : {}),
     ...(opts.providers ? { providers: opts.providers } : {}),
   });
-  const streamFn: StreamFn = opts.streamFn ?? createStreamFn(llm);
+  // S4 前置债③：per-provider 在飞计数器——装配处构造一份，streamFn（主循环路）
+  // 与 ctx.llm.complete（单发路）共享同一份，「per-provider」名实相符。上限来自
+  // opts（缺省 4，0 = 不限）——StreamFnDefaults.maxInFlightPerProvider 同名键语义。
+  const maxInFlight = opts.defaults?.maxInFlightPerProvider ?? 4;
+  const inflight = maxInFlight > 0 ? new InFlightTracker(maxInFlight) : undefined;
+  const streamFn: StreamFn = opts.streamFn ?? createStreamFn(llm, opts.defaults, inflight);
 
   /* ---- ④b llm 具名服务（ctx.llm：插件单发补全唯一合法路径 + canAfford 预算闸门，骨架篇 §9.3） ---- */
   const llmService = createLlmService({
     runtime: llm,
+    // S4 前置债③：与 streamFn 同一份计数器（两出口同源——达帽 complete 路同拒）
+    ...(inflight !== undefined ? { tracker: inflight } : {}),
+    ...(opts.defaults !== undefined ? { defaults: opts.defaults } : {}),
     defaultModel: () => model,
     // 底账写侧（2026-08-24 第十一批拍板 #1，会话篇 §1.1）：complete 成功即落
     // llm/usage durable 事件（log-only 计量事实；callId = settlement 幂等身份，
@@ -739,6 +752,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     model,
     sandboxMode,
     streamFn,
+    // S4 会话层 turn 级 auto-retry 的 transient 判定器：llm 服务桶表直通
+    // （classifyError === 'transient'——chat 拓扑边不含 llm，判定器经服务面注入）
+    isTransientError: (message) => llmService.classifyError(message) === 'transient',
     convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
     transformContext,
     materializeSystemPrompt,

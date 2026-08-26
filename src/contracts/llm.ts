@@ -105,6 +105,13 @@ export interface AssistantMessage {
   provider?: string;
   /** stopReason=error/aborted 时的错误说明（错误三件套之二） */
   errorMessage?: string;
+  /**
+   * 错误码（错误三件套之四——S4 提前兑现，骨架篇 §3.4）：宿主合成错误携带
+   * LLM_ 码（如 LLM_INFLIGHT_LIMIT 帽拒绝）；provider 真错误码归一挂 M2
+   * （pi-ai 错误对象→码）。桶表（llm/recovery）判定时在场码优先、文案兜底——
+   * 摆脱 [CODE] 文本前缀约定的机器判定位。
+   */
+  errorCode?: string;
   /** 脱敏诊断（错误三件套之三；恢复与审计用） */
   diagnostics?: unknown[];
 }

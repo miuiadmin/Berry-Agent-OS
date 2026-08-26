@@ -22,6 +22,7 @@ import {
 import type { AssistantMessage, Message } from '../contracts/llm.js';
 import { createLlmRuntime } from './runtime.js';
 import { createLlmService } from './complete.js';
+import { InFlightTracker } from './inflight.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -354,5 +355,47 @@ describe('ctx.llm.complete：计量 seam 与 provider 注册面', () => {
     service.registerProvider(extra.provider);
     service.unregisterProvider('faux-extra');
     expect(() => runtime.resolveModel('faux-extra/e1')).toThrowError(AppError);
+  });
+});
+
+describe('ctx.llm.complete：在飞帽（S4 前置债③——complete 路达帽同拒）', () => {
+  /** 带帽服务组装（帽 1——预占即达帽） */
+  function makeCappedService() {
+    const faux = fauxProvider({ provider: 'faux-test', models: [{ id: 'm1' }] });
+    const runtime = createLlmRuntime({ providers: [faux.provider] });
+    const tracker = new InFlightTracker(1);
+    const service = createLlmService({ runtime, defaultModel: () => 'faux-test/m1', tracker });
+    return { faux, runtime, tracker, service };
+  }
+
+  it('达帽：LLM_COMPLETE_FAILED 上抛且文案携带在飞帽说明（同拒不排队，M2 前由调用方自然重试）', async () => {
+    const { faux, tracker, service } = makeCappedService();
+    faux.setResponses([() => messageOf('stop')]); // 即使脚本就绪也不该被消费
+    const occupied = tracker.tryAcquire('faux-test'); // 预占唯一名额
+    expect(occupied).not.toBeNull();
+    await expect(service.complete({ messages: [userMsg('x')] })).rejects.toMatchObject({
+      code: LLM_COMPLETE_FAILED,
+    });
+    occupied!.release();
+  });
+
+  it('释放后重试即成功（达帽是瞬态：槽归还后 complete 正常直通）+ 成功路径名额即取即还', async () => {
+    const { faux, tracker, service } = makeCappedService();
+    const occupied = tracker.tryAcquire('faux-test');
+    occupied!.release();
+    faux.setResponses([() => messageOf('stop')]);
+    const result = await service.complete({ messages: [userMsg('x')] });
+    expect(result.message.stopReason).toBe('stop');
+    // 成功路径 finally 释放——下一次调用仍可取到名额（不泄漏）
+    faux.setResponses([() => messageOf('stop')]);
+    const second = await service.complete({ messages: [userMsg('y')] });
+    expect(second.message.stopReason).toBe('stop');
+    expect(tracker.tryAcquire('faux-test')).not.toBeNull(); // 名额干净
+  });
+
+  it('classifyError 服务面：桶表直通（chat 件 transient 判定的注入源）', () => {
+    const { service } = makeCappedService();
+    expect(service.classifyError(messageOf('error', { errorMessage: 'fetch failed' }) as never)).toBe('transient');
+    expect(service.classifyError(messageOf('error', { errorMessage: 'insufficient_quota' }) as never)).toBe('quota');
   });
 });

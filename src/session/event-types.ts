@@ -115,3 +115,25 @@ export interface LlmUsageData {
   /** 原始用量（in/out token 数——聚合 SUM(input+output)） */
   readonly usage: { readonly input: number; readonly output: number };
 }
+
+/**
+ * llm/retry 载荷（log-only，S4 前置债批 2026-08-26——会话篇 §1.1）：会话层
+ * turn 级 auto-retry 的 durable 事实（「只在 debug 出现的分支其行为必须同时是
+ * durable 事件」红线在恢复路径的执法）。**遮蔽随本事件信封携带**：scheduled
+ * 次的 append 可带 surfaceOp（信封级字段任何类型可携带，derive occludedSeqs
+ * 按字段扫）——一次 append 同时完成落账与错误 assistant 单点遮蔽（会话篇 §2
+ * 第二消费者）。写入者 = 驱动 runTurns 重试循环（chat 件——前缀 llm/ 表语义域
+ * 非模块属地，核心词宿主注册）。
+ */
+export interface LlmRetryData {
+  /** 本轮第几次重试（1 起——第 0 次是原始失败本身，不落本词） */
+  readonly attempt: number;
+  /** 重试帽（RetryPolicy.maxRetries） */
+  readonly maxAttempts: number;
+  /** 抖动后实延迟（毫秒——审计可辨多驱动共振打散效果） */
+  readonly delayMs: number;
+  /** 生命周期相位：scheduled=退避排定（本条可携遮蔽）/ aborted=退避中被取消 / exhausted=达帽放弃 */
+  readonly phase: 'scheduled' | 'aborted' | 'exhausted';
+  /** 触发重试的错误说明（exhausted 随行末次错误；scheduled 也携带供审计） */
+  readonly errorMessage?: string;
+}

@@ -125,6 +125,7 @@ export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'gate/decision', category: 'log-only' },
   { type: 'sandbox/mode', category: 'log-only' },
   { type: 'llm/usage', category: 'log-only' },
+  { type: 'llm/retry', category: 'log-only' },
 ];
 
 /** 核心词集合（插件面拒注册的判据——含 reserved 预留词，核心族一体保护） */

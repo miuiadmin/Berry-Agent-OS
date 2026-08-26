@@ -186,6 +186,8 @@ export const LLM_COMPLETE_SCHEMA_UNSUPPORTED = registerErrorCode('LLM_COMPLETE_S
 export const LLM_COMPLETE_FAILED = registerErrorCode('LLM_COMPLETE_FAILED');
 /** llm：后台预算闸门拒发——complete(priority:'background') 且 !canAfford（当日后台累计 tokens 已达限额；记忆周期路捕获即「跳过本轮、下个周期再试」，骨架篇 §9.3） */
 export const LLM_BUDGET_EXCEEDED = registerErrorCode('LLM_BUDGET_EXCEEDED');
+/** llm：per-provider 在飞请求达帽（S4 前置债批，骨架篇 §3.2/§3.4——多驱动并发背压；归 transient 桶：并发压力自解，会话层退避后槽已释放；complete 单发路达帽同拒上抛、调用方自然重试） */
+export const LLM_INFLIGHT_LIMIT = registerErrorCode('LLM_INFLIGHT_LIMIT');
 /** safety：请求受限档但本机无可用沙箱后端——fail-closed 拒绝裸跑（骨架篇 §7.1） */
 export const SANDBOX_UNAVAILABLE = registerErrorCode('SANDBOX_UNAVAILABLE');
 /** safety：升权请求非法——非严格变宽档位 / sandbox_permissions 与 justification 未成对 / 理由为空句（骨架篇 §7.4） */

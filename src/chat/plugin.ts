@@ -42,7 +42,7 @@ import {
   AGENT_SESSION_KEY_REQUIRED,
   describeError,
 } from '../contracts/errors.js';
-import type { UserMessage, MessageSource, Message, StreamFn } from '../contracts/llm.js';
+import type { AssistantMessage, UserMessage, MessageSource, Message, StreamFn } from '../contracts/llm.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import type { AgentEvent, AgentEventSink } from '../agent/events.js';
 import type { AgentTool } from '../contracts/tools.js';
@@ -281,6 +281,12 @@ export interface ChatPluginDeps {
   readonly sandboxMode: SandboxMode;
   /** streamFn（loop 配置——组合根 ④ 产物） */
   readonly streamFn: StreamFn;
+  /**
+   * 瞬态错误判定（S4 前置债批——llm/recovery 桶表 transient 位经装配注入：
+   * chat 拓扑边不含 llm，判定器走 ctx.llm.classifyError 服务面）。缺省恒
+   * false（驱动 auto-retry 关闭——诊断装配/旧装配形态直通）。
+   */
+  readonly isTransientError?: (message: AssistantMessage) => boolean;
   /** convertToLlm（loop 配置——组合根 convert 产物） */
   readonly convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   /**
@@ -615,6 +621,11 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
           transformContext: (batch) => deps.transformContext(batch, session.header.sessionId),
         },
         durable, // 直连本会话（S1——转发壳只剩组合根侧 gate/approval 两路）
+        // S4 会话层 auto-retry 三注入：session（倒扫/重播种/落账三消费位——
+        // 无持久层件面 session 缺席时重试自动关闭）、transient 判定器（桶表
+        // transient 位——缺省恒 false 直通）、策略（缺省 enabled/3/1s）
+        session,
+        isTransientError: deps.isTransientError,
         writeHeader,
         // 驱动面回调异常诊断（隔离案一第一刀 #4）：onRunSettled 逐条隔离上报——
         // 坏订阅不毒后续订阅与驱动本体，异常经根 logger 留痕（含栈）
