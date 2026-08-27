@@ -9,14 +9,15 @@ import { describe, expect, it } from 'vitest';
 import { Value } from '../contracts/typebox.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
 
 /** 测试环境：真库（ownerKeys 约定首键 = global——装配层约定） */
 function setup() {
   const store = new MemoryStore(
-    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] })
+      .connection,
   );
   const tools = createMemoryTools({ store, ownerKeys: () => ['global'] });
   const byName = (name: string): ToolDefinition => {
@@ -40,8 +41,8 @@ function details(result: { details?: unknown }): Record<string, unknown> {
   return (result.details ?? {}) as Record<string, unknown>;
 }
 
-describe('工具五件形状', () => {
-  it('五件齐、名称固定（§7 表）', () => {
+describe('工具九件形状', () => {
+  it('九件齐、名称固定（§7 表——第三十二批 5→9）', () => {
     const { tools } = setup();
     expect(tools.map((t) => t.name)).toEqual([
       'memory_write',
@@ -49,6 +50,10 @@ describe('工具五件形状', () => {
       'memory_restore',
       'memory_read',
       'memory_search',
+      'memory_freeze',
+      'memory_unfreeze',
+      'memory_ttl',
+      'memory_access_log',
     ]);
   });
 });
@@ -207,5 +212,151 @@ describe('memory_search（FTS 检索）', () => {
     const result = await run('memory_search', { query: 'token 记录' });
     expect(text(result)).toContain('无匹配'); // 唯一命中条已被消毒剔除
     expect(details(result)).toMatchObject({ blocked: 1 });
+  });
+
+  it('检索命中记 op=search 流水（§3 持有面——只记流水不进聚合）', async () => {
+    const { run, store } = setup();
+    store.addMemory({ ownerKey: 'global', kind: 'fact', summary: 'sqlite ABI 教训', content: 'x' });
+    await run('memory_search', { query: 'sqlite' });
+    expect(store.accessLog({ op: 'search' })).toHaveLength(1);
+    expect(store.accessLog({ op: 'search' })[0]!.sessionId).toBeNull(); // 工具上下文无会话键
+  });
+});
+
+/* ---------------- 持有面四件（第三十二批 §3） ---------------- */
+
+describe('memory_write ttlDays + memory_ttl（留存策略）', () => {
+  it('write 带 ttlDays 落库：策略与钟就位', async () => {
+    const { run, store } = setup();
+    await run('memory_write', { kind: 'fact', summary: '临时阶段约定', content: 'x', ttlDays: 30 });
+    const row = store.list(['global'])[0]!;
+    expect(row.ttlDays).toBe(30);
+    expect(row.expiresAt).not.toBeNull();
+  });
+
+  it('memory_ttl 设/清策略（days=null 永久）；未知 id 报错', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'fact', summary: '临时事实', content: 'x' });
+    const id = details(written)['id'] as string;
+
+    const set = await run('memory_ttl', { id, days: 7 });
+    expect(text(set)).toContain('已设置留存策略');
+    expect(store.get(id)!.ttlDays).toBe(7);
+
+    const clear = await run('memory_ttl', { id, days: null });
+    expect(text(clear)).toContain('已清除留存策略');
+    expect(store.get(id)!.ttlDays).toBeNull();
+
+    expect((await run('memory_ttl', { id: 'nope', days: 7 })).isError).toBe(true);
+  });
+
+  it('schema 执法：days 越界（0 / 3651 / 1.5）过不了 Value.Check', () => {
+    const { byName } = setup();
+    const schema = byName('memory_ttl').parameters;
+    for (const days of [0, 3651, 1.5]) {
+      expect(Value.Check(schema as Parameters<typeof Value.Check>[0], { id: 'x', days })).toBe(false);
+    }
+    expect(Value.Check(schema as Parameters<typeof Value.Check>[0], { id: 'x', days: 1 })).toBe(true);
+    expect(Value.Check(schema as Parameters<typeof Value.Check>[0], { id: 'x', days: null })).toBe(true);
+  });
+});
+
+describe('memory_freeze / memory_unfreeze / forget 拒冻结（frozen 豁免面）', () => {
+  it('冻结 → forget 拒（指路 unfreeze）；解冻后可删', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'preference', summary: '永远记住这条', content: 'x' });
+    const id = details(written)['id'] as string;
+
+    const froze = await run('memory_freeze', { id });
+    expect(text(froze)).toContain('已冻结');
+    expect(store.get(id)!.frozen).toBe(true);
+
+    // 冻结条拒删（免覆写义）——isError + 指路解冻
+    const denied = await run('memory_forget', { id });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain('memory_unfreeze');
+    expect(store.get(id)!.status).toBe('active');
+
+    await run('memory_unfreeze', { id });
+    expect(store.get(id)!.frozen).toBe(false);
+    const forgot = await run('memory_forget', { id });
+    expect(text(forgot)).toContain('已软删');
+  });
+
+  it('未知 id：两件均 isError', async () => {
+    const { run } = setup();
+    expect((await run('memory_freeze', { id: 'nope' })).isError).toBe(true);
+    expect((await run('memory_unfreeze', { id: 'nope' })).isError).toBe(true);
+  });
+});
+
+describe('memory_read 带 id（条目详情 + 版本链）', () => {
+  it('详情面：状态/冻结/留存/计量 + 版本链 r{rev} [cause] 行', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'preference', summary: '版本链样例', content: '初版' });
+    const id = details(written)['id'] as string;
+    // 同摘要再写 → merge；再老化降权 → decay（链上三版）
+    await run('memory_write', { kind: 'preference', summary: '版本链样例', content: '第二证据' });
+    store.decayConfidence(id, 0.8);
+
+    const detail = text(await run('memory_read', { id }));
+    expect(detail).toContain('状态：active（永久）');
+    expect(detail).toContain('— 版本链（3 版）—');
+    expect(detail).toContain('r1 [insert]');
+    expect(detail).toContain('r2 [merge]');
+    expect(detail).toContain('r3 [decay]');
+    // 冻结后状态行披露 frozen
+    await run('memory_freeze', { id });
+    const frozenDetail = text(await run('memory_read', { id }));
+    expect(frozenDetail).toContain('（frozen 冻结）');
+  });
+
+  it('健康面含 frozen/expired 计数；简报行含冻结常驻披露', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'fact', summary: '冻结计数样', content: 'x' });
+    const id = details(written)['id'] as string;
+    await run('memory_freeze', { id });
+    // 直写一条已过期钟行（工具面无钟入口可即时过期——用 DAO 造过期物化）
+    const short = store.addMemory(
+      {
+        ownerKey: 'global',
+        kind: 'fact',
+        summary: '过期计数样',
+        content: 'x',
+        ttlDays: 1,
+      },
+      1,
+    );
+    if (short.outcome !== 'inserted') throw new Error('前置失败');
+    store.sweepExpired(Date.now() + 24 * 3600_000 * 2);
+
+    const body = text(await run('memory_read', {}));
+    expect(body).toContain('frozen 1');
+    expect(body).toContain('expired 1');
+    expect(body).toContain('含冻结常驻 1');
+    expect(details(await run('memory_read', {}))).toMatchObject({ frozenActive: 1, expiredCount: 1 });
+  });
+});
+
+describe('memory_access_log（访问流水 + 被用聚合）', () => {
+  it('流水行 + top 段：cite/search 双源可见、top 空有占位', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'fact', summary: '访问样例条', content: 'x' });
+    const id = details(written)['id'] as string;
+    store.markUsed([id], Date.now(), 's1'); // cite 源
+    await run('memory_search', { query: '访问样例' }); // search 源
+
+    const body = text(await run('memory_access_log', { op: 'cite' }));
+    expect(body).toContain('cite');
+    expect(body).toContain('访问样例条（引用 1 次）'); // top 段
+    const all = text(await run('memory_access_log', {}));
+    expect(all).toContain('search');
+    expect(details(await run('memory_access_log', {}))).toMatchObject({ rows: 2, top: 1 });
+  });
+
+  it('op/sinceHours/limit 过滤透传查询面', async () => {
+    const { run } = setup();
+    const body = text(await run('memory_access_log', { op: 'recall', sinceHours: 24, limit: 10 }));
+    expect(body).toContain('（窗口内无流水）'); // 过滤后空集走占位行
   });
 });

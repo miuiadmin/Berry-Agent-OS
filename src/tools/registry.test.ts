@@ -97,7 +97,7 @@ describe('registerToolsService — 注册表护栏（契约篇 §1.6 资源护�
   it('总量帽：两层注册表合计 1000，第 1001 个响亮拒绝 TOOL_REGISTRY_LIMIT', () => {
     const ctx = createContext({ name: 'test' });
     const tools = registerToolsService(ctx);
-    // 频率帽（容量 120）会先拦高速注册——拨快时钟喂回填（600/min → 每 10s 回 100 令牌），
+    // 频率帽（容量 240）会先拦高速注册——拨快时钟喂回填（600/min → 每 10s 回 100 令牌），
     // 让本用例确定性抵达总量边界而非撞频率桶
     let fakeNow = Date.now();
     const spy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
@@ -119,25 +119,25 @@ describe('registerToolsService — 注册表护栏（契约篇 §1.6 资源护�
     }
   });
 
-  it('频率帽：register/unregister 合计变更 121 次即拒（容量 120）', () => {
+  it('频率帽：register/unregister 合计变更 241 次即拒（容量 240）', () => {
     const ctx = createContext({ name: 'test' });
     const tools = registerToolsService(ctx);
     const events: Array<{ kind: string; name: string }> = [];
-    // 时钟冻结（回填 = 0）保证确定性：恰好 120 发令牌耗尽，第 121 发拒绝
+    // 时钟冻结（回填 = 0）保证确定性：恰好 240 发令牌耗尽，第 241 发拒绝
     const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     try {
       const disposes: Array<() => void> = [];
-      for (let i = 0; i < 120; i++) {
+      for (let i = 0; i < 240; i++) {
         disposes.push(tools.register(makeTool(`t-${i}`)));
       }
-      expect(tools.list()).toHaveLength(120);
+      expect(tools.list()).toHaveLength(240);
       // 桶已空后注销照常完成（计费殿后、桶满只记 error 不阻——回卷路径不变式）：
       // 删除 + tools_change(remove) 广播先行，注销器绝不因桶空抛错
       ctx.on('tools_change', (e) => events.push(e));
       disposes[0]!();
       expect(tools.get('t-0')).toBeUndefined();
       expect(events).toEqual([{ kind: 'remove', name: 't-0' }]);
-      // 第 121 发变更（register 侧）响亮拒绝
+      // 第 241 发变更（register 侧）响亮拒绝
       try {
         tools.register(makeTool('t-rate'));
         expect.unreachable('应当抛错');

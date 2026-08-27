@@ -43,16 +43,23 @@ const PROMOTION_BRIDGE_LINE =
  *                差分基线纪元（§6 差分追注）以同构 FaceEntry 喂入，渲染与
  *                基线共享同一条目形态）
  * @param truncated 是否触限额截断（截断必须可见——ref-7 禁止静默截断）
+ * @param frozenBlocked 冻结常驻被消毒剔除数（§3 frozen 剔除可见注记——恒驻条目
+ *                     因历史敏感串不入展示面时点名条数，不静默；缺省 0 不渲染）
  */
 export function renderBriefingSection(
   records: readonly Pick<MemoryRecord, 'id' | 'summary'>[],
   truncated: boolean,
+  frozenBlocked = 0,
 ): string {
-  if (records.length === 0) return '';
+  if (records.length === 0 && frozenBlocked === 0) return '';
   const lines = records.map((r) => `- ${citationMarker(r.id)} ${r.summary}`);
   if (truncated) {
     // 截断可见 + 指引工具面（memory_read 可看全量——纵切三落工具后此句生效）
     lines.push('- （简报超限额有截断；需要更多可用 memory_read 查看）');
+  }
+  if (frozenBlocked > 0) {
+    // 冻结剔除可见：恒驻义被消毒拦截的部分点名披露（内容不回显——拦截计数同律）
+    lines.push(`- （另有 ${frozenBlocked} 条冻结记忆因含历史敏感串未展示——可用 memory_read 查看元信息）`);
   }
   lines.push(PROMOTION_BRIDGE_LINE);
   // 框架句 + 时序声明 + 引用指令 + 条目行（时序声明紧随框架句——同属「读出的

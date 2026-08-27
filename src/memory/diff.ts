@@ -67,6 +67,9 @@ export interface FaceEntry {
  * 取简报权威面（基线物化与差分计算的共同面定义——单一事实源）：
  * briefing() 取数 → sanitizeForModel 消毒（secret 命中剔除 / 指令样引述化）。
  * 基线（render 时点）与当前面（handler 每请求）都走本函数——两侧差异即差分。
+ * frozen 剔除可见（§3，第三十二批）：store 报 frozenCount 常驻数，消毒后存活
+ * 数与常驻数之差 = 被剔除的冻结行数（frozenBlocked）——渲染层据此出注记行，
+ * 「恒驻但被消毒拦截」不静默。注记数不进指纹面（渲染文案不换基线纪元）。
  * @param store 记忆库 DAO
  * @param ownerKeys 生效归属键（global + 当前项目）
  * @param opts.unusedDays 未用排除阈值天（透传 briefing——插件配置项）
@@ -75,7 +78,7 @@ export function briefingFace(
   store: Pick<MemoryStore, 'briefing'>,
   ownerKeys: readonly string[],
   opts: { unusedDays?: number } = {},
-): { face: FaceEntry[]; truncated: boolean } {
+): { face: FaceEntry[]; truncated: boolean; frozenBlocked: number } {
   const brief = store.briefing(ownerKeys, opts.unusedDays !== undefined ? { unusedDays: opts.unusedDays } : {});
   const sanitized = sanitizeForModel(brief.records);
   const face: FaceEntry[] = sanitized.entries.map((e) => ({
@@ -83,7 +86,11 @@ export function briefingFace(
     kind: e.record.kind,
     summary: e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary,
   }));
-  return { face, truncated: brief.truncated };
+  // 冻结常驻被消毒剔除数 = store 报的常驻数 - 消毒后存活的冻结数（blocked 全集
+  // 不用——非冻结行被剔除走既有拦截计数路径，与 frozen 注记分账）
+  const frozenAlive = sanitized.entries.filter((e) => e.record.frozen).length;
+  const frozenBlocked = Math.max(0, brief.frozenCount - frozenAlive);
+  return { face, truncated: brief.truncated, frozenBlocked };
 }
 
 /**

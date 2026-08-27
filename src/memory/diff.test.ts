@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '../contracts/events.js';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MemoryStore } from './index.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION, MemoryStore } from './index.js';
 import { MEMORY_DIFF_TYPE, briefingFace, deriveDiffView, diffFaces, faceFingerprint, sameDiffView } from './diff.js';
 import type { FaceEntry, MemoryDiffEntry } from './diff.js';
 import { getSessionEventType } from '../session/event-types.js';
@@ -119,7 +119,10 @@ describe('sameDiffView（追加判据）', () => {
 describe('briefingFace（基线与当前面的共同定义）', () => {
   it('briefing 取数 → 消毒引述化：secret 命中剔除、指令样引述、短面只留 id/kind/summary', () => {
     const store = new MemoryStore(
-      openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+      openStore({
+        path: ':memory:',
+        migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
+      }).connection,
     );
     store.addMemory({ ownerKey: 'global', kind: 'fact', summary: '正常条目', content: '内容' });
     store.addMemory({ ownerKey: 'global', kind: 'fact', summary: 'token = ' + 'a'.repeat(24), content: 'c' });
@@ -132,7 +135,10 @@ describe('briefingFace（基线与当前面的共同定义）', () => {
   });
   it('owner 范围隔离（空 owner = 空面）', () => {
     const store = new MemoryStore(
-      openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+      openStore({
+        path: ':memory:',
+        migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
+      }).connection,
     );
     store.addMemory({ ownerKey: 'global', kind: 'fact', summary: 's', content: 'c' });
     expect(briefingFace(store, []).face).toEqual([]);

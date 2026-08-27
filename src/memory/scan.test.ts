@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import type { MemoryRecord } from './store.js';
 import {
@@ -20,7 +20,8 @@ import {
 /** 真 :memory: 记忆库（表族已建） */
 function newStore(): MemoryStore {
   return new MemoryStore(
-    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] })
+      .connection,
   );
 }
 
@@ -41,6 +42,9 @@ function fakeRecord(over: Partial<MemoryRecord>): MemoryRecord {
     sourceRefs: [],
     createdAt: 1,
     updatedAt: 1,
+    frozen: false,
+    ttlDays: null,
+    expiresAt: null,
     ...over,
   };
 }

@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createContext } from '../context/index.js';
 import { createLogger } from '../context/logger.js';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import type { ReviewLlmFace } from './review.js';
 import {
@@ -28,7 +28,8 @@ let db: MemoryStore;
 
 beforeEach(() => {
   db = new MemoryStore(
-    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] })
+      .connection,
   );
 });
 
@@ -437,6 +438,31 @@ describe('attachPeriodicReview（session/event 计数触发全栈）', () => {
     for (let i = 0; i < 6; i += 1) ctx.emit('session/event', envelope('tool/call'));
     await new Promise((r) => setTimeout(r, 0));
     expect(calls).toHaveLength(1); // dispose 后零新调用
+  });
+
+  it('TTL 清扫随拍先行（§3 持有面，第三十二批）：fire 即物化过期行、frozen 跳过', async () => {
+    const { ctx } = captureRoot();
+    const { llm } = scriptedLlm(['[]']);
+    // 两条 1 天 TTL：一条冻结（免过期）、一条裸钟（到点物化）
+    const dead = db.addMemory(
+      { ownerKey: 'global', kind: 'fact', summary: '到期临时条', content: 'x', ttlDays: 1 },
+      Date.now() - 2 * 24 * 3600_000,
+    );
+    const kept = db.addMemory(
+      { ownerKey: 'global', kind: 'fact', summary: '冻结免过期条', content: 'x', ttlDays: 1 },
+      Date.now() - 2 * 24 * 3600_000,
+    );
+    if (dead.outcome !== 'inserted' || kept.outcome !== 'inserted') throw new Error('前置失败');
+    db.setFrozen(kept.memory.id, true);
+
+    const handle = attachPeriodicReview(ctx, { store: db, llm, turnThreshold: 1 });
+    ctx.emit('session/event', envelope('turn/end')); // fire：清扫先于 review/consolidation 两腿
+    await handle.idle();
+    expect(db.get(dead.memory.id)!.status).toBe('expired'); // 物化持久在库（可审计）
+    expect(db.get(dead.memory.id)!.supersededBy).toBe('ttl');
+    expect(db.get(kept.memory.id)!.status).toBe('active'); // frozen 跳过
+    expect(db.list(['global'])).toHaveLength(1); // 可见面只剩冻结条
+    handle.dispose();
   });
 
   it('在飞防抖：一轮未收尾时阈值再达不叠发（收尾后下个周期再试）', async () => {

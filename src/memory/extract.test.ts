@@ -7,14 +7,15 @@ import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/index.js';
 import { createLogger } from '../context/logger.js';
 import { openStore } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
 import { MemoryStore } from './store.js';
 import { attachCorrectionExtractor, detectCorrection, userTextFromContent } from './extract.js';
 
 /** 真 :memory: 记忆库 */
 function newStore(): MemoryStore {
   return new MemoryStore(
-    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] }).connection,
+    openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] })
+      .connection,
   );
 }
 

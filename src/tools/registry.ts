@@ -96,12 +96,14 @@ export const TOOL_TIMEOUT_FLOOR_MS = 1000;
  */
 const REGISTRY_TOTAL_LIMIT = 1_000;
 /**
- * register/unregister 变更频率桶（#10②）：容量 120 吃下单次 /reload 全量重注册
- * 突发（MCP 在场 ~60-80 op）；回填 600/min = 10 op/s 持续供给，热迭代
- * （30-40s 一 reload + 会话开关注册）不触顶，武器化（>10/s 持续）容量耗尽即拦。
+ * register/unregister 变更频率桶（#10②）：容量 240 吃下 boot + 两连 /reload 的
+ * 合法重注册序列（官方件全量 ~35 工具 → 每波注销+重注 ~70 op，MCP 在场另计；
+ * 2026-08-27 memory 持有面 5→9 后实测该序列 ≈175 op 顶穿旧容 120，随量调参）；
+ * 回填 600/min = 10 op/s 持续供给，热迭代（30-40s 一 reload + 会话开关注册）
+ * 不触顶，武器化（>10/s 持续）容量耗尽即拦。
  * 全局键——registry 无 scope 概念（冷读确认，不为频率帽引入 scope）。
  */
-const REGISTRY_RATE: Readonly<{ capacity: number; perMinute: number }> = { capacity: 120, perMinute: 600 };
+const REGISTRY_RATE: Readonly<{ capacity: number; perMinute: number }> = { capacity: 240, perMinute: 600 };
 
 /**
  * 扫描工具描述是否命中注入模式（注册面统一防线——任何来源的工具同一执法）。

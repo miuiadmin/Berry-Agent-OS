@@ -1183,6 +1183,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // web 件测试注入缝（生产零参——真 fetch/真 DNS；组合根全栈测试注入
     // fetchImpl/lookup 假实现，mock 停在外部边界非中间层）
     webOverrides: opts.webOverrides,
+    // 可写根活取值（memory 件文件命令面落盘判定——第三十二批；chatBundle 的
+    // fs 可写根同源：同一 rootsProvider，文件命令与 fs 工具族同一物理边界）
+    writableRoots: rootsProvider,
     workspace: () => workspace,
     // 声明式子代理发现位置（镜像 skills ⑥⑦ 形态：workspace 同源 + homeDir 测试缝）
     agentLocations: opts.agentLocations ?? defaultAgentLocations(workspace, { homeDir: opts.homeDir, trusted: true }),

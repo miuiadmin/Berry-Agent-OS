@@ -3,17 +3,24 @@
  *
  * 纵切一：表族迁移项 + 合并管线纯函数 + MemoryStore DAO；
  * 纵切五：session_fts 迁移/索引 + 官方件模块（createMemoryPlugin——组合根内置
- * 注册表收纳，`builtin:memory` 行激活）。
+ * 注册表收纳，`builtin:memory` 行激活）；
+ * 第三十二批：持有面（版本链/TTL/Frozen/访问日志/文件导入导出——schema v11 +
+ * store 语义 + io 编排 + 工具面 5→9）。
  */
 
 import type { MigrationSpec } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
 import { SESSION_FTS_MIGRATION } from './session-fts.js';
 
-/** 件自带迁移链（v2 表族 + v3 session_fts + v4 效用列——组合根机械聚合的标准名，tick 第一刀同批改造） */
-export const migrations: MigrationSpec[] = [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION];
+/** 件自带迁移链（v2 表族 + v3 session_fts + v4 效用列 + v11 持有面三件——组合根机械聚合的标准名，tick 第一刀同批改造） */
+export const migrations: MigrationSpec[] = [
+  MEMORY_MIGRATION,
+  SESSION_FTS_MIGRATION,
+  MEMORY_UTILITY_MIGRATION,
+  MEMORY_HOLDING_MIGRATION,
+];
 
-export { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION } from './schema.js';
+export { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION } from './schema.js';
 export { uuidV7, shortIdOf } from './id.js';
 export { BRIEFING_SECTION_ID, renderBriefingSection } from './briefing.js';
 export { CITATION_INSTRUCTION, citationMarker, parseCitationShortIds, textOfAssistantContent } from './citation.js';
@@ -34,11 +41,29 @@ export {
   utilityScore,
   type MemoryKind,
   type MemoryStatus,
+  type MemoryAccessOp,
+  type MemoryVersionCause,
   type MemorySourceRef,
   type MemoryRecord,
+  type MemoryVersionSummary,
+  type MemoryVersionSnapshot,
+  type MemoryAccessRow,
+  type AccessLogQuery,
   type MemoryInput,
   type AddMemoryOutcome,
+  type RestoreOutcome,
+  type SetTtlOutcome,
+  type MemoryExportRow,
 } from './store.js';
+export {
+  exportMemoryText,
+  writeExportFile,
+  importMemoryText,
+  readImportFile,
+  isPathInsideRoots,
+  type ExportHeader,
+  type ImportReport,
+} from './io.js';
 // canonical 工作区根已收编宿主 context（2026-08-25 检索族纵切批——记忆篇 §3
 // 挂账「三处同源」兑现：memory owner_key / skills 信任判定 / 未来 project 域键；
 // 从 context/index.js 导入，本模块不再转出）

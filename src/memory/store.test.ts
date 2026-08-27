@@ -8,14 +8,24 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, type Store } from '../persist/index.js';
-import { MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MemoryStore, projectOwnerKey, utilityScore } from './index.js';
+import {
+  MEMORY_MIGRATION,
+  MEMORY_UTILITY_MIGRATION,
+  MEMORY_HOLDING_MIGRATION,
+  MemoryStore,
+  projectOwnerKey,
+  utilityScore,
+} from './index.js';
 
 /** 当前测试库（每用例新建 :memory:——迁移框架一次到位后交 DAO） */
 let store: Store;
 let db: MemoryStore;
 
 beforeEach(() => {
-  store = openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+  store = openStore({
+    path: ':memory:',
+    migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
+  });
   db = new MemoryStore(store.connection);
 });
 
@@ -182,15 +192,16 @@ describe('forget / restore（软删与恢复）', () => {
     const out = write({});
     if (out.outcome !== 'inserted') return;
     const id = out.memory.id;
-    expect(db.forget(id)).toBe(true);
+    expect(db.forget(id)).toBe('ok');
     expect(db.list(['global'])).toHaveLength(0);
     expect(db.get(id)?.status).toBe('dismissed');
     expect(db.get(id)?.supersededBy).toBe('user');
-    expect(db.restore(id)).toBe(true);
+    expect(db.restore(id)).toEqual({ restored: true });
     expect(db.get(id)?.status).toBe('active');
     expect(db.get(id)?.supersededBy).toBeNull();
-    // 不存在的 id → false 不抛
-    expect(db.forget('nope')).toBe(false);
+    // 不存在的 id → 'missing' 不抛
+    expect(db.forget('nope')).toBe('missing');
+    expect(db.restore('nope')).toEqual({ restored: false, reason: 'missing' });
   });
 
   it('软删后 FTS 检索不再命中', () => {
@@ -321,7 +332,10 @@ describe('utilityScore（效用综合分公式钉死）', () => {
 describe('briefing 效用维度（30 天未用强排除 + 复活 + 排序抬升）', () => {
   it('未用超阈强排除（活动锚 = max(last_used_at, updated_at)）；新证据保活', () => {
     const now = 1_800_000_000_000; // 固定时钟（不取墙钟）——addMemory 的 nowMs 控制写入钟，markUsed 控制引用钟
-    const store2 = openStore({ path: ':memory:', migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+    const store2 = openStore({
+      path: ':memory:',
+      migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
+    });
     const db2 = new MemoryStore(store2.connection);
     const t40 = now - 40 * DAY;
     const add = (summary: string, ts: number) =>
@@ -360,24 +374,32 @@ describe('briefing 效用维度（30 天未用强排除 + 复活 + 排序抬升�
     expect(brief.records[0]!.summary).toBe('被引用三次的偏好B'); // usage 抬分压过写入序
   });
 
-  it('v2→v4 升格：存量库补跑 ALTER 不丢数据、新列就位', () => {
+  it('v2→v4→v11 升格：存量库补跑 ALTER 不丢数据、新列就位', () => {
     // 模拟「旧宿主建的 v2 库」：旧宿主不知内核 v6/v10——现宿主开库（自带 app +
     // importer 列，uv 直达 10）后经 store.connection 退回 v2 形态（撤两列 + 回拨
-    // user_version），再以全链重开 = 业务缺口（v4）与内核缺口（v6/v10）同补
+    // user_version），再以全链重开 = 业务缺口（v4/v11）与内核缺口（v6/v10）同补。
+    // 旧宿主写行 = 裸 SQL（现 store 代码依赖 v11 列，不能跑在 v2 形态上——测试
+    // 模拟的是「旧版本宿主」，当然用旧版本时代的写路径形态）
     const path = joinTmp();
     const s1 = openStore({ path, migrations: [MEMORY_MIGRATION] });
-    const legacy = new MemoryStore(s1.connection);
-    legacy.addMemory({ ownerKey: 'global', kind: 'fact', summary: '升格前条目', content: 'c' });
+    const legacyTs = Date.now(); // 现行写入时点（简报 30 天未用排除不误伤）
+    s1.connection.exec(
+      `INSERT INTO memories (id, owner_key, kind, summary, content, confidence, evidence_count, status, source_refs, created_at, updated_at)
+       VALUES ('legacy-0001', 'global', 'fact', '升格前条目', 'c', 0.5, 1, 'active', '[]', ${legacyTs}, ${legacyTs})`,
+    );
     s1.connection.exec('ALTER TABLE sessions DROP COLUMN importer');
     s1.connection.exec('ALTER TABLE sessions DROP COLUMN app');
     s1.connection.pragma('user_version = 2');
     s1.close();
-    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] });
     const upgraded = new MemoryStore(s2.connection);
     const rows = upgraded.list(['global']);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.usageCount).toBe(0); // 存量行回填缺省：零引用
     expect(rows[0]!.lastUsedAt).toBeNull();
+    expect(rows[0]!.frozen).toBe(false); // v11 持有面三列回填：未冻结
+    expect(rows[0]!.ttlDays).toBeNull(); // 无 TTL——存量条目行为零变
+    expect(rows[0]!.expiresAt).toBeNull();
     expect(upgraded.briefing(['global']).records.map((r) => r.summary)).toContain('升格前条目');
     s2.close();
   });
@@ -388,11 +410,11 @@ describe('重开库（迁移幂等 + 数据存活）', () => {
     write({});
     // :memory: 无法复开——用文件库走一遍迁移幂等 + 数据存活
     const path = joinTmp();
-    const s1 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+    const s1 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] });
     const file = new MemoryStore(s1.connection);
     file.addMemory({ ownerKey: 'global', kind: 'fact', summary: '文件库条目', content: 'c' });
     s1.close();
-    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION] });
+    const s2 = openStore({ path, migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION] });
     const reloaded = new MemoryStore(s2.connection);
     expect(reloaded.list(['global'])).toHaveLength(1);
     expect(reloaded.search('文件库', ['global'])).toHaveLength(1); // FTS 触发器产物跨开存活

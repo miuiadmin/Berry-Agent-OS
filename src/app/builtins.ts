@@ -47,6 +47,11 @@ export interface BuiltinRegistryOptions {
   readonly webOverrides?: WebPluginOverrides;
   /** tools 件闭包依赖束（Ring 1 行树化批——管道 gate 落点/可写根推导器〔safety 同源产物，宿主构造〕/工作区活取值） */
   readonly toolsDeps: ToolsPluginDeps;
+  /**
+   * 可写根活取值（memory 官方件文件命令面——/memory-export|import 落盘判定源；
+   * assembly rootsProvider 同源产物，第三十二批）。缺省不传 = 文件命令面不注册
+   */
+  readonly writableRoots?: () => readonly string[];
   /** 工作区根（项目归属键活取值） */
   readonly workspace: () => string;
   /** in-process 真工厂（subagent 官方件闭包注入——app/subagent-factory.ts 产物） */
@@ -78,6 +83,8 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     'builtin:memory': createMemoryPlugin({
       ...(opts.store ? { store: opts.store } : {}),
       workspace: opts.workspace,
+      // 文件命令面（§3 持有面）：可写根闭包注入——缺省不传即命令面降级不注册
+      ...(opts.writableRoots ? { writableRoots: opts.writableRoots } : {}),
     }),
     // subagent 官方件（官方默认层第三行）：工厂缺省不注册（诊断面可省装配），
     // 默认装配恒传——组合根 createSubagentChildFactory 闭包活资源

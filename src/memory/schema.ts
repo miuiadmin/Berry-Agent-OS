@@ -67,3 +67,58 @@ ALTER TABLE memories ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0;  -- 被�
 ALTER TABLE memories ADD COLUMN last_used_at INTEGER;  -- 最近被引用时间（Unix 毫秒；NULL=从未）
 `,
 };
+
+/**
+ * 持有面纵切（记忆篇 §3 持有面块，user_version=11——2026-08-27 第三十二批：
+ * 条目级版本链 / TTL / Frozen / 访问日志五件，表族半边）。存量行回填
+ * frozen=0、ttl_days=NULL、expires_at=NULL——**存量条目无 TTL，行为零变**
+ * （读面谓词对 NULL 钟恒放行）；版本链与访问日志不回填历史（存量条目现行值
+ * 即隐式基线，历史不可重建不伪造）。
+ *
+ * 语义分工（§3）：主表 = 现行值权威，memory_versions = append-only 内容面
+ * 快照链（单事务双写），memory_access = 效用流水（聚合列 usage_count 的
+ * 可查询审计面——聚合只随 cite，recall/search 只记流水）。
+ */
+export const MEMORY_HOLDING_MIGRATION: MigrationSpec = {
+  version: 11,
+  name: 'memory-holding',
+  sql: `
+-- ── 持有面三列（memories 表 ALTER）──────────────────────────
+-- frozen：冻结位（恒简报/免 TTL/免合并覆写/免整理——§5/§6）；「冻结」= 豁免+恒驻义
+ALTER TABLE memories ADD COLUMN frozen INTEGER NOT NULL DEFAULT 0;
+-- ttl_days：留存策略天数（NULL=永久缺省）；标记/续期以此重算。与 expires_at 双列
+-- 非冗余：clock = 策略 + 续期时点，时点未另存故不可从策略单独推导
+ALTER TABLE memories ADD COLUMN ttl_days INTEGER;
+-- expires_at：过期钟（Unix 毫秒，NULL=不过期）；标记/续期时点写、清扫物化时清
+--（判定源唯一交接给 status='expired'——软终态非删除，restore 可复活）
+ALTER TABLE memories ADD COLUMN expires_at INTEGER;
+
+-- ── 条目级版本链（append-only；主表现行值权威，内容面变更单事务双写）──────
+CREATE TABLE memory_versions (
+  id              TEXT PRIMARY KEY,      -- uuid v7
+  memory_id       TEXT NOT NULL,         -- 归属条目
+  revision        INTEGER NOT NULL,      -- 条目内递增（1 起 = 插入即落首版；与 sessions 表同概念同词）
+  owner_key       TEXT NOT NULL,         -- 以下六列 = 快照内容面，与触发清单严格同集
+  kind            TEXT NOT NULL,
+  summary         TEXT NOT NULL,
+  content         TEXT NOT NULL,
+  confidence      REAL NOT NULL,
+  evidence_count  INTEGER NOT NULL,
+  cause           TEXT NOT NULL,         -- 'insert'|'merge'|'decay'|'rollback'（闭集；机器判定词，与人读 reason 分词）
+  created_at      INTEGER NOT NULL       -- 快照落账时间（Unix 毫秒）
+) STRICT;
+
+CREATE INDEX idx_versions_memory ON memory_versions (memory_id, revision);
+
+-- ── 访问日志（聚合列 usage_count/last_used_at 的流水化审计面）──────────
+CREATE TABLE memory_access (
+  id          TEXT PRIMARY KEY,      -- uuid v7
+  memory_id   TEXT NOT NULL,
+  op          TEXT NOT NULL,         -- 'recall'（按需检索注入）| 'search'（工具检索命中）| 'cite'（引用回写）
+  session_id  TEXT,                  -- 发生会话；search 行恒 NULL（ToolCtx 无会话键——扩面挂第二消费者）
+  ts          INTEGER NOT NULL       -- Unix 毫秒
+) STRICT;
+
+CREATE INDEX idx_access_memory_ts ON memory_access (memory_id, ts);  -- 窗口清扫按 ts 全表扫可接受（90 天窗口量级）
+`,
+};

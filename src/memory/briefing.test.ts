@@ -24,6 +24,9 @@ function rec(summary: string, id = '0a1b2c3d-0000-7000-8000-000000000000'): Memo
     sourceRefs: [],
     createdAt: 0,
     updatedAt: 0,
+    frozen: false,
+    ttlDays: null,
+    expiresAt: null,
   };
 }
 
@@ -56,6 +59,16 @@ describe('renderBriefingSection（记忆篇 §6 通道 1 渲染件）', () => {
   it('截断可见：truncated = true 追加截断提示行', () => {
     const out = renderBriefingSection([rec('a')], true);
     expect(out).toContain('截断');
+  });
+  it('frozen 剔除可见（§3 第三十二批）：frozenBlocked > 0 渲染注记行；空库但常驻被剔仍有壳', () => {
+    const out = renderBriefingSection([rec('a')], false, 2);
+    expect(out).toContain('2 条冻结记忆因含历史敏感串未展示');
+    // 全剔场景：records 空但 frozenBlocked > 0 → 仍渲染框架 + 注记（恒驻义不静默消失）
+    const onlyBlocked = renderBriefingSection([], false, 1);
+    expect(onlyBlocked).not.toBe('');
+    expect(onlyBlocked).toContain('1 条冻结记忆因含历史敏感串未展示');
+    // 缺省 0：无注记行（既有行为零变）
+    expect(renderBriefingSection([rec('a')], false)).not.toContain('冻结记忆');
   });
   it('段 id 词汇面固定（具名段注册用）', () => {
     expect(BRIEFING_SECTION_ID).toBe('memory/core');

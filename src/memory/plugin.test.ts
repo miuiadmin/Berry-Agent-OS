@@ -7,9 +7,14 @@
  * 注册 + context_transform 按需检索注入（防注入句式 + kind 优先 + 空手放行）。
  * 差分追注（第十二批题二）：memory/diff 角色 + 基线纪元冻结 / 分叉落账 /
  * 收敛清账 / 重启撞指纹自愈 / 重放派生不变式。persist:false 降级单列。
+ * 持有面追注（第三十二批）：/memory-export、/memory-import 命令面——注册 /
+ * 可写根 fence / 导出落盘 + 幂等导入回执。
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import type { ContextScope } from '../context/types.js';
@@ -18,6 +23,7 @@ import { Session } from '../session/session.js';
 import {
   MEMORY_MIGRATION,
   MEMORY_UTILITY_MIGRATION,
+  MEMORY_HOLDING_MIGRATION,
   SESSION_FTS_MIGRATION,
   MemoryStore,
   SessionFtsIndex,
@@ -43,6 +49,12 @@ interface Harness {
   toolNames: () => string[];
   /** 已注册段 id → render（apply 经 ctx.get('prompts').registerSection 真注册） */
   sectionIds: () => string[];
+  /** 已注册命令名集（writableRoots 注入时 channels.registerCommand 真注册） */
+  commandNames: () => string[];
+  /** 驱动一条命令（/memory-export 等人读面——回执走 ui.notify 流水断言） */
+  runCommand: (name: string, args: string) => Promise<void>;
+  /** ui.notify 回执流水（命令面人读结果断言面） */
+  uiNotifications: () => string[];
   /** 物化某段内容（装配侧 materialize 的测试等价物——带 sessionId 即冻结该会话
    *  的差分基线纪元；缺省 = 诊断物化只渲染不冻结，S2 per-session 契约） */
   renderSection: (id: string, sessionId?: string) => string;
@@ -54,11 +66,13 @@ interface Harness {
   source: MemoryPluginStoreFace;
 }
 
-/** 建 ctx + 四服务面 + 真库（memory 表族 + session_fts 同链迁移） */
+/** 建 ctx + 六服务面 + 真库（memory 表族 + session_fts 同链迁移） */
 function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const registeredTools = new Set<string>();
   const sections = new Map<string, (sessionId?: string) => string>();
+  const commands = new Map<string, (args: string) => void | Promise<void>>();
+  const notifications: string[] = [];
   const llm = { calls: 0 };
   ctx.provide('tools', {
     register: (def: { name: string }) => {
@@ -70,6 +84,18 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
     registerSection: (section: { id: string; render(sessionId?: string): string }) => {
       sections.set(section.id, section.render);
       return () => sections.delete(section.id);
+    },
+  });
+  // channels/ui 服务面（第三十二批命令面——文件导出导入命令注册与回执）
+  ctx.provide('channels', {
+    registerCommand: (cmd: { name: string; handler(args: string): void | Promise<void> }) => {
+      commands.set(cmd.name, cmd.handler);
+      return () => commands.delete(cmd.name);
+    },
+  });
+  ctx.provide('ui', {
+    notify: (message: string) => {
+      notifications.push(message);
     },
   });
   // 活跃会话活引用（appendEvent 目标 + loadEvents 路由——差分懒初始化读它）
@@ -88,7 +114,7 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
   });
   const store: Store = openStore({
     path: ':memory:',
-    migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION],
+    migrations: [MEMORY_MIGRATION, SESSION_FTS_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
   });
   const source: MemoryPluginStoreFace = {
     connection: store.connection,
@@ -100,6 +126,13 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
     ctx,
     toolNames: () => [...registeredTools],
     sectionIds: () => [...sections.keys()],
+    commandNames: () => [...commands.keys()],
+    runCommand: async (name, args) => {
+      const handler = commands.get(name);
+      if (!handler) throw new Error(`命令未注册：${name}`);
+      await handler(args);
+    },
+    uiNotifications: () => [...notifications],
     renderSection: (id, sessionId) => sections.get(id)!(sessionId),
     bindSession: (session) => {
       live = session;
@@ -136,12 +169,22 @@ describe('memory 官方件 apply（persist:false 降级）', () => {
 /* ---------------- 全栈接线 ---------------- */
 
 describe('memory 官方件 apply（全栈接线序）', () => {
-  it('工具五件 + 简报段真注册；dispose 回卷整体注销（effect LIFO）', async () => {
+  it('工具九件 + 简报段真注册；dispose 回卷整体注销（effect LIFO）', async () => {
     const h = setup();
     const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w' });
     await applyPlugin(plugin, h.ctx);
 
-    expect(h.toolNames()).toEqual(['memory_write', 'memory_forget', 'memory_restore', 'memory_read', 'memory_search']);
+    expect(h.toolNames()).toEqual([
+      'memory_write',
+      'memory_forget',
+      'memory_restore',
+      'memory_read',
+      'memory_search',
+      'memory_freeze',
+      'memory_unfreeze',
+      'memory_ttl',
+      'memory_access_log',
+    ]);
     expect(h.sectionIds()).toEqual(['memory/core']);
     // 周期路闸门关闭（canAfford false）：不触 complete
     expect(h.llmCalls()).toBe(0);
@@ -150,6 +193,7 @@ describe('memory 官方件 apply（全栈接线序）', () => {
     await h.ctx.dispose();
     expect(h.toolNames()).toEqual([]);
     expect(h.sectionIds()).toEqual([]);
+    expect(h.commandNames()).toEqual([]); // writableRoots 未注入 = 命令面本未注册
   });
 
   it('跨会话索引：激活对账全量建 + session/event 镜像增量进检索面', async () => {
@@ -484,5 +528,120 @@ describe('memory 官方件 apply（简报差分追注）', () => {
     expect(sessionB.events).toHaveLength(0);
 
     await h.ctx.dispose();
+  });
+});
+
+/* ---------------- 文件导出导入命令面（§3 持有面第五件，第三十二批） ---------------- */
+
+/** 命令面测试临时目录（文件真落盘——afterAll 清理） */
+let cmdTmpDir: string | undefined;
+afterAll(() => {
+  if (cmdTmpDir) rmSync(cmdTmpDir, { recursive: true, force: true });
+});
+
+describe('memory 官方件 apply（命令面 /memory-export、/memory-import）', () => {
+  it('writableRoots 注入 → 两命令注册；dispose 回卷注销；未注入 = 不注册', async () => {
+    const h = setup();
+    const plugin = createMemoryPlugin({ store: h.source, workspace: () => '/w', writableRoots: () => ['/w'] });
+    await applyPlugin(plugin, h.ctx);
+    expect(h.commandNames()).toEqual(['memory-export', 'memory-import']);
+    await h.ctx.dispose();
+    expect(h.commandNames()).toEqual([]);
+
+    // 未注入：命令面本未注册（其余面不受影响——诊断装配降级一致）
+    const h2 = setup();
+    const plain = createMemoryPlugin({ store: h2.source, workspace: () => '/w' });
+    await applyPlugin(plain, h2.ctx);
+    expect(h2.commandNames()).toEqual([]);
+    expect(h2.toolNames()).toHaveLength(9); // 工具面照常
+    await h2.ctx.dispose();
+  });
+
+  it('导出写 fence：目标不在可写根内 → 拒写回执、零落盘', async () => {
+    const h = setup();
+    cmdTmpDir ??= mkdtempSync(join(tmpdir(), 'memory-cmd-test-'));
+    const plugin = createMemoryPlugin({
+      store: h.source,
+      workspace: () => cmdTmpDir!,
+      writableRoots: () => [cmdTmpDir!],
+    });
+    await applyPlugin(plugin, h.ctx);
+    new MemoryStore(h.store.connection).addMemory({
+      ownerKey: 'global',
+      kind: 'fact',
+      summary: 'fence 样例条',
+      content: 'x',
+    });
+
+    // 相对路径 .. 逃出工作区根 → 不在可写根内
+    await h.runCommand('memory-export', '../escape.jsonl');
+    expect(h.uiNotifications().join('\n')).toContain('拒写');
+    expect(existsSync(join(cmdTmpDir!, '..', 'escape.jsonl'))).toBe(false);
+    await h.ctx.dispose();
+  });
+
+  it('导出落盘（缺省名在工作区根）+ 导入幂等回执 + 明文警示在场', async () => {
+    const h = setup();
+    cmdTmpDir ??= mkdtempSync(join(tmpdir(), 'memory-cmd-test-'));
+    const plugin = createMemoryPlugin({
+      store: h.source,
+      workspace: () => cmdTmpDir!,
+      writableRoots: () => [cmdTmpDir!],
+    });
+    await applyPlugin(plugin, h.ctx);
+    const memory = new MemoryStore(h.store.connection);
+    memory.addMemory({ ownerKey: 'global', kind: 'fact', summary: '导出样例条', content: '内容' });
+
+    // 缺省名导出（时间戳名——回执里拿实际路径）
+    await h.runCommand('memory-export', '');
+    const exportMsg = h.uiNotifications().at(-1)!;
+    expect(exportMsg).toContain('已导出 1 条');
+    expect(exportMsg).toContain('⚠ 明文 JSON'); // 文件去向警示句
+    const exportedPath = /到 (.+)\n/.exec(exportMsg)![1]!;
+    expect(existsSync(exportedPath)).toBe(true);
+    const lines = readFileSync(exportedPath, 'utf8')
+      .split('\n')
+      .filter((l) => l.trim() !== '');
+    expect(lines).toHaveLength(2); // header + 1 行
+
+    // 幂等导入回执：同库再导 → 新入 0 / 跳过 1
+    await h.runCommand('memory-import', exportedPath);
+    const importMsg = h.uiNotifications().at(-1)!;
+    expect(importMsg).toContain('新入 0');
+    expect(importMsg).toContain('已存在跳过 1');
+
+    // 空参数用法提示 + 不存在文件失败回执（不抛）
+    await h.runCommand('memory-import', '');
+    expect(h.uiNotifications().at(-1)).toContain('用法');
+    await h.runCommand('memory-import', join(cmdTmpDir!, 'no-such-file.jsonl'));
+    expect(h.uiNotifications().at(-1)).toContain('导入失败');
+    await h.ctx.dispose();
+  });
+
+  it('跨库导入真恢复：导出文件进另一空库 → 新入回执 + 条目可检索（迁移面语义）', async () => {
+    const h = setup();
+    cmdTmpDir ??= mkdtempSync(join(tmpdir(), 'memory-cmd-test-'));
+    const plugin = createMemoryPlugin({
+      store: h.source,
+      workspace: () => cmdTmpDir!,
+      writableRoots: () => [cmdTmpDir!],
+    });
+    await applyPlugin(plugin, h.ctx);
+    const memory = new MemoryStore(h.store.connection);
+    memory.addMemory({ ownerKey: 'global', kind: 'preference', summary: '跨库迁移条', content: '内容' });
+    const target = join(cmdTmpDir!, 'migrate.jsonl');
+    await h.runCommand('memory-export', 'migrate.jsonl');
+    expect(existsSync(target)).toBe(true);
+
+    // 第二个空库（另一 Store 连接）导入同文件——恢复式直插
+    const h2 = setup();
+    const target2 = new MemoryStore(h2.store.connection);
+    const text = readFileSync(target, 'utf8');
+    // 直接走 io 编排件（第二个 harness 不再装插件——编排件已由命令面测试覆盖）
+    const { importMemoryText } = await import('./io.js');
+    expect(importMemoryText(target2, text)).toMatchObject({ imported: 1 });
+    expect(target2.search('跨库迁移', ['global'])).toHaveLength(1);
+    await h.ctx.dispose();
+    await h2.ctx.dispose();
   });
 });

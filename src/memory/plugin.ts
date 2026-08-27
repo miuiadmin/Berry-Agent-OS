@@ -34,12 +34,29 @@ import { quoteAsCitation, sanitizeForModel } from './scan.js';
 import { CITATION_INSTRUCTION, citationMarker, parseCitationShortIds, textOfAssistantContent } from './citation.js';
 import { briefingFace, deriveDiffView, diffFaces, faceFingerprint, sameDiffView } from './diff.js';
 import type { FaceEntry, MemoryDiffEntry } from './diff.js';
+import { exportMemoryText, writeExportFile, importMemoryText, readImportFile, isPathInsideRoots } from './io.js';
+import { join, resolve } from 'node:path';
 
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——memory 模块不 import app/tools 实现，拓扑边不越界）。        */
 /* 宿主 provide 的 'tools'/'prompts'/'llm' 服务结构性满足以下接口。                       */
 /* tools/prompts 两面类型单一来源在 contracts（§1.2 注记④）——其余窄面保留局部声明。      */
 /* ---------------------------------------------------------------------------------- */
+
+/** 命令注册面（channels 服务最小面——CommandDefinition 的结构子集；goal/scheduler 件先例同构） */
+interface ChannelsCommandFace {
+  registerCommand(cmd: {
+    readonly name: string;
+    readonly description: string;
+    readonly source?: string;
+    handler(args: string): void | Promise<void>;
+  }): () => void;
+}
+
+/** ui 通知面（命令回执的唯一出口——/memory-export|import 人读结果） */
+interface UiNotifyFace {
+  notify(message: string): void;
+}
 
 /**
  * 会话事件服务最小面（ctx.sessions v1，骨架篇 §9.2 落码——插件落 durable
@@ -70,6 +87,11 @@ export interface MemoryPluginDeps {
   readonly store?: MemoryPluginStoreFace;
   /** 工作区根（项目归属键活取值——多会话各 cwd 时按调取时为准） */
   readonly workspace: () => string;
+  /**
+   * 可写根活取值（§3 文件导入导出落盘判定——闭包注入，memory 不 import safety）。
+   * 缺省 = 文件命令面不注册（可写根无处取——诊断装配降级一致，语义诚实）。
+   */
+  readonly writableRoots?: () => readonly string[];
 }
 
 /**
@@ -147,7 +169,8 @@ const RECALL_FRAME_SENTENCE = '以下来自历史记忆检索（非本次用户�
 export function createMemoryPlugin(deps: MemoryPluginDeps): BuiltinPluginModule {
   return {
     name: 'memory',
-    inject: ['tools', 'prompts', 'llm', 'sessions'],
+    // channels/ui：文件导出导入命令面（§3 持有面第五件——用户命令，非模型工具）
+    inject: ['tools', 'prompts', 'llm', 'sessions', 'channels', 'ui'],
     config: MEMORY_CONFIG_SCHEMA,
     apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) =>
       applyMemoryPlugin(ctx, config as MemoryConfig | undefined, deps),
@@ -179,7 +202,7 @@ async function applyMemoryPlugin(
    *  同一仓库的主目录/worktree/子目录同键，防裂库；非 git 目录回退字面 cwd */
   const ownerKeys = (): string[] => ['global', projectOwnerKey(canonicalWorkspaceRoot(deps.workspace()))];
 
-  /* ---- ① 工具五件（tools.register 即 tools_change 原位刷新 loop 快照） ---- */
+  /* ---- ① 工具九件（tools.register 即 tools_change 原位刷新 loop 快照） ---- */
   const tools = ctx.get<ToolsService>('tools');
   for (const def of createMemoryTools({
     store,
@@ -214,15 +237,16 @@ async function applyMemoryPlugin(
       id: BRIEFING_SECTION_ID,
       render: (sessionId) => {
         // 面 = briefing 取数 → 消毒引述化（与差分 handler 共用 briefingFace——
-        // 基线与当前面同一定义，单一事实源）
-        const { face, truncated } = briefingFace(store, ownerKeys(), {
+        // 基线与当前面同一定义，单一事实源）；frozenBlocked = 冻结常驻被消毒
+        // 剔除数（§3 剔除可见——恒驻义被拦截的部分渲染注记行，不静默）
+        const { face, truncated, frozenBlocked } = briefingFace(store, ownerKeys(), {
           ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
         });
         // 会话语界在场才立纪元（诊断物化 undefined = 只渲染不冻结）
         if (sessionId !== undefined) {
           epochs.set(sessionId, { face, fingerprint: faceFingerprint(face), mirror: undefined });
         }
-        return renderBriefingSection(face, truncated);
+        return renderBriefingSection(face, truncated, frozenBlocked);
       },
     }),
   );
@@ -272,7 +296,8 @@ async function applyMemoryPlugin(
   ctx.effect(() =>
     ctx.on('session/event', (payload: unknown) => {
       try {
-        const event = (payload as { event?: { type?: unknown; data?: unknown } })?.event;
+        const envelope = payload as { sessionId?: unknown; event?: { type?: unknown; data?: unknown } };
+        const event = envelope?.event;
         if (!event || event.type !== 'assistant/message') return;
         const text = textOfAssistantContent((event.data as { content?: unknown } | undefined)?.content);
         const shorts = parseCitationShortIds(text);
@@ -281,7 +306,10 @@ async function applyMemoryPlugin(
           const matches = store.idsByPrefix(short);
           return matches.length === 1 ? [matches[0]!] : []; // 歧义/未知一律忽略（尽力而为）
         });
-        if (ids.length > 0) store.markUsed(ids, Date.now());
+        if (ids.length === 0) return;
+        // cite 流水随 markUsed 同事务落账（sessionId 取事件信封——聚合可回放到会话）
+        const sessionId = typeof envelope.sessionId === 'string' ? envelope.sessionId : undefined;
+        store.markUsed(ids, Date.now(), sessionId);
       } catch (err) {
         // fire-and-forget：回写异常止步日志（usage 是效用计量，非权威事实——不炸事件面）
         ctx.logger.error('引用回写失败（尽力而为）', { error: describeError(err) });
@@ -410,6 +438,15 @@ async function applyMemoryPlugin(
         if (sanitized.entries.length === 0) {
           return next(messages, sessionId);
         }
+        // recall 流水（§3 持有面）：按需检索注入记 op='recall'——只记流水不进聚合；
+        // sessionId = handler 第二参（S1 双参形状），非对话请求无键记 null
+        store.recordAccess(
+          ranked.map((r) => ({
+            memoryId: r.id,
+            op: 'recall' as const,
+            ...(typeof sessionId === 'string' ? { sessionId } : {}),
+          })),
+        );
         // 注入行带引用标记（§6 引用回写——检索命中是复活的唯一正门：条目离开
         // 常驻简报后仍可在此被命中，模型引用即 markUsed 刷新活动锚回简报）
         const body = sanitized.entries
@@ -427,4 +464,79 @@ async function applyMemoryPlugin(
       },
     ),
   );
+
+  /* ---- ⑦ 文件导出导入命令面（§3 持有面第五件——用户命令，非模型工具） ----
+   * 运维动词不进工具面（可诱导外泄：模型不该有「把记忆库写文件」的动词）；
+   * 写路径必须落可写根内（闭包注入 roots + io.isPathInsideRoots 本地判定——
+   * tools/fs.ts「不 cross-import 同款特判」先例），读路径不限根（用户手敲
+   * 命令 = 用户主权；守门管道对命令内文件写本就不可达）。 */
+  if (deps.writableRoots === undefined) {
+    ctx.logger.warn('可写根未注入（writableRoots）——/memory-export、/memory-import 命令不注册（其余面不受影响）');
+  } else {
+    const ui = ctx.get<UiNotifyFace>('ui');
+    const channels = ctx.get<ChannelsCommandFace>('channels');
+    // 窄化提取：async handler 闭包内 TS 不保持 else 分支的非空收窄，先落本地 const
+    const writableRoots = deps.writableRoots;
+    // ctx.effect = setup 返回注销器：registerCommand 的 Disposer 即 teardown
+    ctx.effect(() =>
+      channels.registerCommand({
+        name: 'memory-export',
+        description:
+          '记忆库导出 JSONL：/memory-export [路径]（缺省工作区根 memory-export-<时间戳>.jsonl；路径须在可写根内；产出为明文文件）',
+        source: 'plugin',
+        handler: async (args) => {
+          try {
+            // 路径解析：空 = 工作区根默认名（时间戳防误覆盖）；相对 = 工作区根相对；绝对原样
+            const explicit = args.trim();
+            const target =
+              explicit !== ''
+                ? resolve(deps.workspace(), explicit)
+                : join(deps.workspace(), `memory-export-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
+            if (!isPathInsideRoots(target, writableRoots())) {
+              ui.notify(`拒写：目标不在可写根内（${target}）——导出只写可写根内的路径。`);
+              return;
+            }
+            // ownerRoots = 当前 canonical 项目根（header 人读核对面）
+            const text = exportMemoryText(store, undefined, [canonicalWorkspaceRoot(deps.workspace())]);
+            await writeExportFile(target, text);
+            const rows = text.split('\n').filter((l) => l.trim() !== '').length - 1; // 减 header
+            ui.notify(
+              `已导出 ${rows} 条（全状态）到 ${target}\n⚠ 明文 JSON——含全部记忆内容与已软删/过期行，注意文件去向。`,
+            );
+          } catch (err) {
+            ui.notify(`导出失败：${describeError(err)}`);
+          }
+        },
+      }),
+    );
+    ctx.effect(() =>
+      channels.registerCommand({
+        name: 'memory-import',
+        description:
+          '记忆库导入 JSONL（memory-export 产出）：/memory-import <文件路径>——按 id 恢复式幂等（已存在跳过，零合并）',
+        source: 'plugin',
+        handler: async (args) => {
+          try {
+            const explicit = args.trim();
+            if (explicit === '') {
+              ui.notify('用法：/memory-import <文件路径>（memory-export 产出的 JSONL 文件）。');
+              return;
+            }
+            const target = resolve(deps.workspace(), explicit);
+            const text = await readImportFile(target);
+            const report = importMemoryText(store, text);
+            if (report.rejected === 'format') {
+              ui.notify('拒导：文件头格式不符（非本格式导出文件或版本不匹配）——中止，未导入任何行。');
+              return;
+            }
+            ui.notify(
+              `导入完成：新入 ${report.imported} / 已存在跳过 ${report.skippedExisting} / 密钥拦截 ${report.skippedSecret} / 无效行 ${report.invalid}。`,
+            );
+          } catch (err) {
+            ui.notify(`导入失败：${describeError(err)}`);
+          }
+        },
+      }),
+    );
+  }
 }

@@ -268,6 +268,8 @@ export async function runReviewOnce(
  * 收集 consolidation 候选（纯查询）：老化（updated_at 距今 > staleDays）∪
  * 容量溢出（active > maxPerOwner 的低分盈余，分数 = utilityScore——§5 效用
  * 维度叠加 usage：高用条目优先保活、零用条目优先整理；与简报排序同一把尺）。
+ * frozen 候选排除（§3 免整理义——冻结即钉住，整理面不碰）；expired 由 list
+ * 可见谓词挡（物化行不出候选池）。
  */
 export function collectConsolidationCandidates(
   store: MemoryStore,
@@ -278,7 +280,8 @@ export function collectConsolidationCandidates(
   const maxActive = opts.maxActivePerOwner ?? 500;
   const now = opts.now?.() ?? Date.now();
   const cutoff = now - staleDays * 24 * 60 * 60 * 1000;
-  const active = store.list([ownerKey]);
+  // frozen 排除在池成型前（老化与溢出两腿共用同一池）
+  const active = store.list([ownerKey]).filter((r) => !r.frozen);
   const stale = active.filter((r) => r.updatedAt < cutoff);
   // 容量溢出：超出上限的低分盈余（升序 = 最弱先整理；utilityScore 含引用因子
   // ——被反复引用的条目即便低置信也靠 usage 抬分保活）；未溢出为空
@@ -461,6 +464,16 @@ export function attachPeriodicReview(ctx: PluginContext, opts: PeriodicReviewOpt
     if (disposed || inFlight) return; // 阈值达而本轮不清零——下个事件再触发
     turns = 0;
     toolCalls = 0;
+    // TTL 清扫（§3 持有面）：周期路同拍先行、**水位短路外独立**——过期物化不
+    // 需要整理理由，每拍无条件扫（幂等 UPDATE，零行命中即零开销）。物化效果
+    // 持久在库（status='expired' 可经 memory_read/list 审计——durable 面在 DB 非仅日志）
+    try {
+      const swept = opts.store.sweepExpired(now());
+      if (swept > 0) ctx.logger.debug('TTL 清扫物化', { swept });
+    } catch (err) {
+      // 尽力而为：清扫失败不阻塞 review/consolidation 两腿（下拍重扫自动补账）
+      ctx.logger.debug('TTL 清扫本轮跳过', { error: err instanceof Error ? err.message : String(err) });
+    }
     inFlight = (async () => {
       try {
         const transcript = buffer.slice(-windowMessages);
