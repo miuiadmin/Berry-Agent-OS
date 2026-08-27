@@ -1233,7 +1233,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 心跳 15s 节律 × 3 拍缺省 ≈ 45s 冻结判定（同步死循环/事件循环冻结可判可杀；
   // CPU 燃烧如实收窄不可判——打点照登）；JS 堆 512MB = 预算内存维度宿主缺省
   //（只限引擎堆非安全墙；分应用细配 = rowResourceLimits——应用清单 budget.memoryMb
-  // 随第三纵切收键，见下方钩子注记）
+  // 已于第三纵切收键消费〔2026-08-27〕，见下方钩子注记）
   // worker 监督编舞 + 死亡结算状态回写（markFailed——域死行在 ctx.plugins.list
   // 状态源同步转 failed，与 plugin/failed 事件广播同一时点）
   const workerChoreography = {

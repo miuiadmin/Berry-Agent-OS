@@ -12,7 +12,10 @@
  * npm 包名 = 组合树行 plugin 字段的值域）匹配激活行；缺场 = 应用级隔离
  * （应用不可用但宿主照启——与「失败行 boot 拒启」的失败语义刻意分层：清单是
  * 声明面，声明了没装的组件是用户裁量不是发行事故）。诊断出口 = dump-config
- * 打印 + debug 日志（app/* 事件词汇随第三纵切 /app 面）。
+ * 打印 + debug 日志（app/* 自有事件词汇 2026-08-27 再议裁决：v1 不落——进入
+ * 事实已由三面承载〔sessions 表 app 列 durable / request·header 载荷 app 腿
+ * durable / /app notify 交互面——契约篇 §5.4 同名裁决〕，重开触发 = 首个需
+ * 实时感知应用装载态的插件消费者）。
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';

@@ -35,13 +35,13 @@ export const AppManifestSchema = Type.Object(
      * 缺场 = 应用级隔离（不拒启），诊断走 dump-config + debug 日志。
      */
     components: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-    /** 代理装配默认位（v1 惯性数据——消费点在第三纵切 /app 前台入口） */
+    /** 代理装配默认位（model/persona/toolFilter 已于第三纵切落码消费——chat 件 open 装配；skills 键已收未消费） */
     agent: Type.Optional(
       Type.Object(
         {
           /** 缺省模型标识（"provider/model-id"） */
           model: Type.Optional(Type.String({ minLength: 1 })),
-          /** 人格提示词（对应面 SubagentStart.persona——第二纵切无消费点，第三纵切接） */
+          /** 人格提示词（对应面 SubagentStart.persona——第三纵切起消费于 chat 件 open 装配） */
           persona: Type.Optional(Type.String()),
           /** 工具白名单（对应面 SubagentStart.toolFilter——工具名数组） */
           toolFilter: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
@@ -51,7 +51,7 @@ export const AppManifestSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
-    /** 启动面声明（三形态：前台 /app、委派 delegable、后台 jobs——第三纵切消费） */
+    /** 启动面声明（三形态：前台 /app 与委派 delegable 已消费；后台 jobs 消费面挂账——见 background 注） */
     entry: Type.Optional(
       Type.Object(
         {
@@ -59,17 +59,17 @@ export const AppManifestSchema = Type.Object(
           command: Type.Optional(Type.String({ minLength: 1 })),
           /** 是否可被委派启动（true = 自动注册为委派目标） */
           delegable: Type.Optional(Type.Boolean()),
-          /** 是否可作为后台 job 常驻 */
+          /** 是否可作为后台 job 常驻（消费面挂账：清单→job 启动导线 v1 未接，接线窗 = 真实后台应用需求 / ctx.schedule 落地） */
           background: Type.Optional(Type.Boolean()),
         },
         { additionalProperties: false },
       ),
     ),
-    /** 授权申请（装载期与守门行 grants 交集；approval 键随第三纵切收——§5.4 第 4 条） */
+    /** 授权申请（装载期与守门行 grants 交集；approval 预设槽位已收键〔第二十四批案 C〕——§5.4 第 4 条；writableRoots 交集导线 v1 挂账，随 D2 或首个真实第三方应用清单接线） */
     grants: Type.Optional(
       Type.Object(
         {
-          /** 申请的可写根（绝对路径；与 safety 守门行安装面交集后生效） */
+          /** 申请的可写根（绝对路径；与 safety 守门行安装面交集后生效——交集导线 v1 未接，挂账见上） */
           writableRoots: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
           /**
            * 审批预设槽位申请（第二十四批案 C）：应用申请 (sandboxMode, approvalPolicy)
