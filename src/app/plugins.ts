@@ -57,7 +57,9 @@ import {
   findRowLocation,
   isPathReference,
   loadOverlayRows,
+  pluginDataDirOf,
   removeOverlayRow,
+  RESERVED_SUBTREE_NAMES,
   RING1_REQUIRED_ROW_IDS,
   resolvePluginEntry,
   toggleOverlayRow,
@@ -462,7 +464,7 @@ export function createPluginsService(opts: {
     const dataRoot = pluginDataDirOf(dataDir, id);
     let dataRemoved = false;
     if (dataAction === 'purge' && existsSync(dataRoot)) {
-      assertSafeDataRootId(id); // 撞保留子树名的数据根拒绝删（rmSync 误吞装机子树）
+      // 保留名闸已在 pluginDataDirOf 取址时收口（dataRoot 构造行）；此处只剩子树防线
       assertInsideSubtree(join(dataDir, 'plugins'), dataRoot, 'uninstall：数据根'); // 数据根必在 plugins/ 子树内
       rmSync(dataRoot, { recursive: true, force: true });
       dataRemoved = true;
@@ -534,7 +536,7 @@ export function createPluginsService(opts: {
     // 段③（残迹版）：数据域 purge 裁决同正常路径（防线同款双闸）
     let dataRemoved = false;
     if (dataAction === 'purge' && dataRootExists) {
-      assertSafeDataRootId(id);
+      // 保留名闸已在 pluginDataDirOf 取址时收口；子树防线维持（防线同款双闸）
       assertInsideSubtree(join(dataDir, 'plugins'), dataRoot, 'uninstall：数据根');
       rmSync(dataRoot, { recursive: true, force: true });
       dataRemoved = true;
@@ -1173,12 +1175,7 @@ interface PluginDataDescriptor {
   readonly cacheSubdir?: string;
 }
 
-/** 件数据根（<数据目录>/plugins/<行id>/——与 ctx.paths.pluginDataDir 同一布局） */
-function pluginDataDirOf(dataDir: string, id: string): string {
-  return join(dataDir, 'plugins', id);
-}
-
-/** 词表账本路径（件数据根内 data.json） */
+/** 词表账本路径（件数据根内 data.json；pluginDataDirOf 自 composition 单源取址含保留名闸） */
 function dataJsonPath(dataDir: string, id: string): string {
   return join(pluginDataDirOf(dataDir, id), 'data.json');
 }
@@ -1209,27 +1206,12 @@ function readDataDescriptor(dataDir: string, id: string): PluginDataDescriptor |
   }
 }
 
-/**
- * plugins/ 直下装机子树保留名对（单一来源）：git = git 源克隆子树、
- * node_modules = npm 装机子树。两消费点——assertSafeDataRootId（数据根
- * 写/删双闸防撞名）与 sweepPluginTmpDirs（扫龄跳过装机子树）。布局知识
- * 单源（契约篇 §1.5 tmp 钉位细则④），新增保留名只改此处。
+/*
+ * 数据根布局原语 pluginDataDirOf 与保留名对 RESERVED_SUBTREE_NAMES 已下沉
+ * composition.ts（2026-08-27 复盘批收口——paths 服务同文件、方向不倒）：
+ * 保留名闸住 pluginDataDirOf 单点，本文件 install 收割写 / uninstall purge /
+ * 检视取址全走该函数即全闸，不再需要本地副本与显式断言。
  */
-export const RESERVED_SUBTREE_NAMES: readonly string[] = ['git', 'node_modules'];
-
-/**
- * 件数据根保留名防线：行 id 撞装机子树名（git / node_modules）= 件数据根路径
- * 与装机子树同径——写账本会污染 sources.json 邻域、purge 会整删装机子树。
- * install 收割写与 uninstall purge 删两路同拒（rmSync 误吞装机子树 = 数据破坏）。
- */
-function assertSafeDataRootId(id: string): void {
-  if (RESERVED_SUBTREE_NAMES.includes(id)) {
-    throw new AppError(
-      COMPOSITION_ROW_INVALID,
-      `行 id「${id}」撞装机子树保留名（plugins/${id}）——件数据根与装机子树布局冲突，拒绝操作`,
-    );
-  }
-}
 
 /** tmp 扫龄阈值（毫秒）= 7 天常数，不开旋钮（无 env 无 config——契约篇 §1.5 tmp 钉位细则③） */
 const TMP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1354,7 +1336,7 @@ async function refreshLedger(
   } catch {
     declaredEvents = null; // 收割失败不阻断装机——检视面 unknown 档警示兜底
   }
-  assertSafeDataRootId(id);
+  // 保留名闸已收口于 pluginDataDirOf（下行取址即闸——撞名行在 mkdir 前抛）
   mkdirSync(pluginDataDirOf(opts.dataDir, id), { recursive: true });
   writeAtomicFile(
     dataJsonPath(opts.dataDir, id),

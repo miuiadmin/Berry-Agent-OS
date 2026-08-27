@@ -460,6 +460,32 @@ export interface PathsService {
   pluginDataDir(id: string): string;
 }
 
+/**
+ * plugins/ 直下装机子树保留名对（单一来源）：git = git 源克隆子树、
+ * node_modules = npm 装机子树。消费点——pluginDataDirOf 闸（数据根取址
+ * 全消费面）与 tmp 扫龄跳过（plugins.ts）。布局知识单源（契约篇 §1.5
+ * tmp 钉位细则④ + §3.4 落码注记补①），新增保留名只改此处。
+ */
+export const RESERVED_SUBTREE_NAMES: readonly string[] = ['git', 'node_modules'];
+
+/**
+ * 件数据根布局原语（`<dataDir>/plugins/<id>`）——唯一的件数据根取址通道。
+ * 内建保留名闸：行 id 撞装机子树名（git / node_modules）时数据根路径与
+ * 装机子树同径，任何写（mkdir / 账本）与删（purge rmSync）都会误吞装机
+ * 子树，故取址本身即拒（COMPOSITION_ROW_INVALID）。闸住本函数 = install
+ * 收割写 / uninstall purge / ctx.paths.pluginDataDir 公共面 / 检视报告
+ * 取址全消费面结构覆盖（2026-08-27 复盘批收口：原公共面自复刻 join 零闸）。
+ */
+export function pluginDataDirOf(dataDir: string, id: string): string {
+  if (RESERVED_SUBTREE_NAMES.includes(id)) {
+    throw new AppError(
+      COMPOSITION_ROW_INVALID,
+      `行 id「${id}」撞装机子树保留名（plugins/${id}）——件数据根与装机子树布局冲突，拒绝操作`,
+    );
+  }
+  return join(dataDir, 'plugins', id);
+}
+
 /** 建目录服务实例（组合根 provide 'paths' 用；workspace = 装配工作区，canonical 推导锚点） */
 export function createPathsService(dataDir: string, workspace: string): PathsService {
   const created = new Set<string>();
@@ -467,7 +493,7 @@ export function createPathsService(dataDir: string, workspace: string): PathsSer
     dataDir: () => dataDir,
     workspaceRoot: () => canonicalWorkspaceRoot(workspace),
     pluginDataDir(id: string): string {
-      const dir = join(dataDir, 'plugins', id);
+      const dir = pluginDataDirOf(dataDir, id); // 布局与保留名闸同源单点（复盘批收口——不再自复刻 join）
       if (!created.has(dir)) {
         mkdirSync(dir, { recursive: true });
         created.add(dir);

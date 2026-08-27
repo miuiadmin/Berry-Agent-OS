@@ -12,12 +12,15 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
-import { loadComposition, resolvePluginEntry } from './composition.js';
 import {
   assertRing1Required,
   diffRing1Rows,
   RING1_REQUIRED_ROW_IDS,
   createPathsService,
+  loadComposition,
+  pluginDataDirOf,
+  resolvePluginEntry,
+  RESERVED_SUBTREE_NAMES,
   loadOverlayRows,
   saveOverlayRows,
   toggleOverlayRow,
@@ -329,6 +332,29 @@ describe('目录服务（ctx.paths）', () => {
     expect(existsSync(first)).toBe(true);
     // 再取同路径（幂等，不重复 mkdir 抛错）
     expect(paths.pluginDataDir('memory')).toBe(first);
+  });
+
+  it('数据根保留名闸收口 pluginDataDirOf 单点：撞装机子树名即拒（公共面/收割写/删根同径）', () => {
+    const dataDir = makeDataDir();
+    const paths = createPathsService(dataDir, process.cwd());
+    // 保留名对逐名验：原语直接取址抛 COMPOSITION_ROW_INVALID（布局闸单点）
+    for (const reserved of RESERVED_SUBTREE_NAMES) {
+      let thrown: unknown;
+      try {
+        pluginDataDirOf(dataDir, reserved);
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(AppError);
+      expect((thrown as AppError).code).toBe(COMPOSITION_ROW_INVALID);
+      // 公共面 ctx.paths.pluginDataDir 同闸（曾自复刻 join 零闸——复盘批收口的口子）
+      expect(() => paths.pluginDataDir(reserved)).toThrow(AppError);
+    }
+    // 拒绝不落痕迹：撞名取址失败后不建任何目录（mkdir 前抛）
+    expect(existsSync(join(dataDir, 'plugins', 'git'))).toBe(false);
+    // 合法 id 原语面 = 纯路径拼接（不建目录——建目录是服务面首取职责）
+    expect(pluginDataDirOf(dataDir, 'memory')).toBe(join(dataDir, 'plugins', 'memory'));
+    expect(existsSync(join(dataDir, 'plugins', 'memory'))).toBe(false);
   });
 
   it('workspaceRoot() = canonical 工作区根（git 仓库内回 git 根；永不 undefined）', () => {
