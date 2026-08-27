@@ -116,8 +116,9 @@ function lastAssistantText(result: RunResult): string {
 }
 
 /**
- * 创建 in-process provider（v1 能力面：depthLimit/toolFilter/persona 声明支持，
- * outputSchema 不声明——pi-ai 无结构化输出腿，LLM_COMPLETE_SCHEMA_UNSUPPORTED 同源事实）。
+ * 创建 in-process provider（v1 能力面：depthLimit/toolFilter/persona/context 声明支持，
+ * outputSchema 不声明——pi-ai 无结构化输出腿，LLM_COMPLETE_SCHEMA_UNSUPPORTED 同源事实；
+ * context 位 = 第三十一批 context 腿，工厂侧父投影尾轮裁切承接）。
  */
 export function createInProcessProvider(opts: InProcessProviderOptions): SubagentProvider {
   const tokenBudget = opts.tokenBudget ?? 100_000;
@@ -126,7 +127,7 @@ export function createInProcessProvider(opts: InProcessProviderOptions): Subagen
   const provider: SubagentProvider = {
     name: opts.name ?? 'in-process',
     ...(opts.description !== undefined ? { description: opts.description } : {}),
-    capabilities: { outputSchema: false, depthLimit: true, toolFilter: true, persona: true },
+    capabilities: { outputSchema: false, depthLimit: true, toolFilter: true, persona: true, context: true },
 
     start(request: SubagentStart): SubagentExecution {
       // 声明式 agent 桥的固定注入（合并只收窄不改宽——见 InProcessProviderOptions.mergeRequest 注记）

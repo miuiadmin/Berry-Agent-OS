@@ -138,6 +138,18 @@ async function applySubagentPlugin(ctx: PluginContext, cfg: SubagentConfig, deps
   );
 }
 
+/**
+ * context 请求位参数面（第三十一批 context 腿——两形态共用）：携带父会话尾轮
+ * 上下文，父闭合边界投影裁尾 N 轮（user 消息边界）作子首请求种子。帽在工厂侧
+ * min(请求值, 20) 钳制（schema 不硬拒——钳制语义写进 description）。
+ */
+const CONTEXT_PARAM = Type.Optional(
+  Type.Object(
+    { recentTurns: Type.Number({ minimum: 1, description: '携带的父会话尾轮数（超过装配帽 20 按 20 封顶）' }) },
+    { description: '携带父会话尾轮上下文作子首请求种子（父闭合边界内裁尾 N 轮）' },
+  ),
+);
+
 /** 委派工具构造选项 */
 interface AgentToolOptions {
   readonly subagents: SubagentsServiceFace;
@@ -165,7 +177,7 @@ export function createAgentTool(opts: AgentToolOptions): ToolDefinition {
   const isStatic = opts.agentName !== undefined;
   // 声明式形态：persona/toolFilter 由文件固定（mergeRequest 收窄执法）——参数面
   // 不暴露这两个位（模型给了也会被合并收窄，索性不误导）；prompt/label/background
-  // /maxDepth 与通用形态同语义
+  // /maxDepth/context 与通用形态同语义（context/maxDepth 不被文件钉死故不收窄）
   return {
     name: isStatic ? `agent_${opts.agentName}` : AGENT_TOOL_NAME,
     label: isStatic ? `委派 ${opts.agentName}` : '委派子代理',
@@ -185,6 +197,7 @@ export function createAgentTool(opts: AgentToolOptions): ToolDefinition {
           label: Type.Optional(Type.String({ description: '人读标签（任务列表/通知显示）' })),
           background: Type.Optional(Type.Boolean({ description: 'true = 后台执行（立即返回任务 id，结算自动通知）' })),
           maxDepth: Type.Optional(Type.Number({ description: '委派深度上限（缺省 3）' })),
+          context: CONTEXT_PARAM,
         })
       : Type.Object({
           prompt: Type.String({ description: '任务指令（子代理的唯一输入——写清目标与边界，它是独立上下文）' }),
@@ -195,6 +208,7 @@ export function createAgentTool(opts: AgentToolOptions): ToolDefinition {
           ),
           persona: Type.Optional(Type.String({ description: '子代理系统提示覆盖（人格/角色设定）' })),
           maxDepth: Type.Optional(Type.Number({ description: '委派深度上限（缺省 3）' })),
+          context: CONTEXT_PARAM,
         }),
     effect: 'read',
     execute: async (args, tctx): Promise<AgentToolResult> => {
@@ -207,6 +221,7 @@ export function createAgentTool(opts: AgentToolOptions): ToolDefinition {
         toolFilter?: string[];
         persona?: string;
         maxDepth?: number;
+        context?: { recentTurns: number };
       };
       const ownerSessionId = opts.getSession()?.header.sessionId;
       const run: SubagentRun = opts.subagents.start({
@@ -218,6 +233,7 @@ export function createAgentTool(opts: AgentToolOptions): ToolDefinition {
         ...(req.toolFilter !== undefined ? { toolFilter: req.toolFilter } : {}),
         ...(req.persona !== undefined ? { persona: req.persona } : {}),
         ...(req.maxDepth !== undefined ? { maxDepth: req.maxDepth } : {}),
+        ...(req.context !== undefined ? { context: req.context } : {}),
         ...(req.background === true ? { background: true } : {}),
       });
 
@@ -263,6 +279,7 @@ function renderProviderList(subagents: SubagentsServiceFace): string {
       info.capabilities.toolFilter ? '工具子集' : null,
       info.capabilities.persona ? '人格' : null,
       info.capabilities.depthLimit ? '深度帽' : null,
+      info.capabilities.context ? '上下文' : null,
     ].filter((part) => part !== null);
     // description = 声明式 agent 的模型选择依据（通用 in-process 无此位）
     return `- ${info.name}${info.description !== undefined ? `：${info.description}` : ''}${

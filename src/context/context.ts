@@ -29,8 +29,9 @@ import type { Logger } from './logger.js';
 import { RateLimiter } from './rate-limit.js';
 import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
 
-/** 监听器登记项：handler + 注册方作用域名（失败归因——记「谁注册的」而非「谁触发的」） */
-interface HandlerEntry {
+/** 监听器登记项：handler + 注册方作用域名（失败归因——记「谁注册的」而非「谁触发的」）。
+ * 第三十一批随守门行传导导出（宿主侧专用：snapshotHandlers/appendHandlers 两出口的载荷型）。 */
+export interface HandlerEntry {
   readonly handler: EventHandler;
   readonly owner: string;
 }
@@ -501,6 +502,48 @@ export function createContext(opts: ContextOptions = {}): ContextScope {
 export function eventDispatchStats(scope: ContextScope): ReadonlyMap<string, number> {
   const runtime = scopeRuntimes.get(scope);
   return runtime === undefined ? new Map() : runtime.eventStats;
+}
+
+/**
+ * 宿主侧监听器枚举出口（2026-08-27 第三十一批守门行传导——骨架篇 §6.1「守门行传导 +
+ * context 腿」条）：取某作用域树在某事件上的监听器登记项快照（含 owner 归因）。
+ *
+ * **宿主专用**：插件面结构不可达（依赖图白名单三道——插件 import 不到 context 模块，
+ * 虚拟面六键不含本函数），「context 无监听器枚举 API」缺口在宿主侧收口。返回数组是
+ * 副本（与派发期 snapshot 同款——调用方迭代期间注册/退订不影响本次结果）。
+ *
+ * @param scope 作用域（根 ctx 或其 fork 产物——fork 共享同一 runtime，取到的是整树行集）
+ * @param event 事件名
+ */
+export function snapshotHandlers(scope: ContextScope, event: EventName): HandlerEntry[] {
+  const runtime = scopeRuntimes.get(scope);
+  return runtime === undefined ? [] : runtime.snapshot(event);
+}
+
+/**
+ * 宿主侧监听器写入出口（守门行传导的落链半边）：把带原 owner 的登记项**直写**目标
+ * 作用域的 handlers Map——不走 `on()`（on() 会把 owner 记成目标作用域名，原插件名
+ * 归因丢失；且会挂 effect 栈使子回卷误撤根行——传导是引用非归属）。
+ *
+ * 生命周期：目标作用域通常是 fresh 子 ctx（自身 runtime 的 root）——其 dispose 后
+ * runtime 整体无引用随 GC，传导行不需 effect 注销器（子的 dispose 不回卷根行是拍板
+ * 语义；已出膛的子持旧 handler 引用照跑到收工）。
+ *
+ * @param scope 目标作用域（fresh 子 ctx）
+ * @param event 事件名（waterfall 三段词汇——目录既有词，无词汇面变化）
+ * @param entries 登记项集（snapshotHandlers 产物经调用方过滤）
+ */
+export function appendHandlers(scope: ContextScope, event: EventName, entries: readonly HandlerEntry[]): void {
+  const runtime = scopeRuntimes.get(scope);
+  if (runtime === undefined) {
+    throw new AppError(CONTEXT_DISPOSED, 'appendHandlers：未知作用域（须为 createContext/fork 产物）');
+  }
+  const existing = runtime.handlers.get(event);
+  if (existing === undefined) {
+    runtime.handlers.set(event, [...entries]);
+  } else {
+    existing.push(...entries);
+  }
 }
 
 /**

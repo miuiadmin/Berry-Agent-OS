@@ -2,7 +2,8 @@
  * L1 context — 插件运行时模块出口（内核五件之一）。
  * 对外只暴露类型与工厂：实现类不导出（跨模块只能走 Context/ContextScope 契约面）。
  */
-export { createContext, eventDispatchStats, registerLiveEvent } from './context.js';
+export { createContext, eventDispatchStats, registerLiveEvent, snapshotHandlers, appendHandlers } from './context.js';
+export type { HandlerEntry } from './context.js';
 export { loadPlugins } from './loader.js';
 export { createLogger } from './logger.js';
 // 令牌桶频率护栏共用件（契约篇 §1.6——emit 侧 per-scope 桶与本文件外 sessions

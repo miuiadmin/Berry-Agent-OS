@@ -135,6 +135,9 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
               workspace: process.cwd(),
               sandboxMode: options.sandboxMode ?? 'workspace-write',
               rootCtx: createContext({ name: 'dump-diag' }),
+              // 守门行传导判据占位（第三十一批必传面）：诊断面装载不发生、根总线
+              // 恒空——空锚/空集即传导恒零行，与「委派永不发生」同语义
+              gateRowFilter: { anchors: [], mainRows: () => new Set<string>() },
             }),
             getSession: () => undefined,
             // chat 占位件：纯树合成只查注册表键（形状/装载均不发生）——

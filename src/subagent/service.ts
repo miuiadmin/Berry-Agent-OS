@@ -3,7 +3,7 @@
  *
  * 服务面统一持有三件事（provider 只见已协商的 SubagentStart）：
  * 1. **能力协商布尔检查**（start 前 fail-loud——请求携带 outputSchema/maxDepth/
- *    toolFilter/persona 任一而 provider 未声明对应能力 → SUBAGENT_CAPABILITY_UNSUPPORTED，
+ *    toolFilter/persona/context 任一而 provider 未声明对应能力 → SUBAGENT_CAPABILITY_UNSUPPORTED，
  *    不做运行时协商【dsh】）；
  * 2. **background 模式 Job 接线**（§6.2 一次性两形态）：background:true →
  *    ctx.jobs.create(kind='subagent') 立即返回 job 句柄；stopReason → Job 终态映射
@@ -40,7 +40,8 @@ function stopReasonToJobTerminal(stopReason: SubagentStopReason): JobTerminal {
   return 'failed'; // error / max-tokens / refusal 及扩展词汇一律失败族
 }
 
-/** 请求面四能力位 → 能力声明键（协商检查的映射表：请求带字段 ⇔ provider 声明布尔） */
+/** 请求面五能力位 → 能力声明键（协商检查的映射表：请求带字段 ⇔ provider 声明布尔；
+ * context 位 = 第三十一批 context 腿） */
 const CAPABILITY_KEYS: readonly {
   readonly requestField: keyof SubagentStart & keyof SubagentRequest;
   readonly capability: keyof SubagentProvider['capabilities'];
@@ -49,6 +50,7 @@ const CAPABILITY_KEYS: readonly {
   { requestField: 'maxDepth', capability: 'depthLimit' },
   { requestField: 'toolFilter', capability: 'toolFilter' },
   { requestField: 'persona', capability: 'persona' },
+  { requestField: 'context', capability: 'context' },
 ];
 
 /**

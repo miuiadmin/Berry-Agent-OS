@@ -2,7 +2,7 @@
  * L0 contracts — 子代理委派类型（运行时骨架篇 §6.1 钉死 + 纵切二落码注记，2026-08-24）。
  *
  * 子代理 = 一次性后台/前台委派的受控子运行（subagent 模块托管）：
- * - provider 契约：四布尔能力声明 + start → 执行体；能力协商 = **启动时布尔检查**
+ * - provider 契约：五布尔能力声明 + start → 执行体；能力协商 = **启动时布尔检查**
  *   （请求的能力 provider 未声明 → start 前 fail-loud，不做运行时协商）【dsh】；
  * - 子中间过程**永不进父上下文**：父只收到结算契约（SubagentResult）【dsh】；
  * - in-process provider 经工厂回调装配（每子独立装配 dsh-10——见 subagent/inprocess.ts）。
@@ -11,7 +11,7 @@ import type { Usage } from './llm.js';
 import type { JobHandle } from './jobs.js';
 
 /**
- * provider 能力声明（四布尔，声明式——§6.1 钉死）。
+ * provider 能力声明（五布尔，声明式——§6.1 钉死；context 位 = 第三十一批）。
  * 请求面携带对应字段而 provider 未声明 → start 前 SUBAGENT_CAPABILITY_UNSUPPORTED。
  */
 export interface SubagentCapabilities {
@@ -23,6 +23,8 @@ export interface SubagentCapabilities {
   readonly toolFilter: boolean;
   /** 支持自定义人格/系统提示（请求 persona） */
   readonly persona: boolean;
+  /** 支持携带父会话尾轮投影上下文（请求 context——第三十一批 context 腿） */
+  readonly context: boolean;
 }
 
 /**
@@ -69,6 +71,13 @@ export interface SubagentStart {
    * 格式与装配缺省模型同源（`provider/model-id`）。
    */
   readonly model?: string;
+  /**
+   * 携带父会话尾轮投影上下文（第三十一批 context 腿，需 provider 声明 context）：
+   * in-process 实现 = fork 种子边界（lastClosedTurnBoundary）之内的投影裁尾
+   * recentTurns 轮（user 消息边界），作子首请求 LLM 消息种子——durable 有上文、
+   * 模型看见的豁口收口。缺省不携带（messages 仍空种子）。
+   */
+  readonly context?: { readonly recentTurns: number };
 }
 
 /** provider 执行体（start 产物——dispose 幂等；服务面包装为 SubagentRun） */
@@ -88,7 +97,7 @@ export interface SubagentProvider {
   /** 人读描述（声明式 agent = 文件 frontmatter description；披露段清单行用。
    * 内建 provider 缺省 undefined——清单段只列名+能力位） */
   readonly description?: string;
-  /** 能力声明（四布尔——协商数据源） */
+  /** 能力声明（五布尔——协商数据源） */
   readonly capabilities: SubagentCapabilities;
   /** 启动一次性子运行（请求已过服务面能力协商检查） */
   start(request: SubagentStart): SubagentExecution;

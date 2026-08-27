@@ -7,21 +7,26 @@
  * 注册表的 fork 会把子 provide 写穿到根）→ 子工具管道 + 工具面派生（域键升级批：
  * 父注册表应用域视角 listFor(父 app)——驱动层内容结构上不在面，排除集随三层
  * 解缠退役；自建 fs 族，toolFilter include 过滤）→ 审批 never + 守门行（父
- * 档**快照**——§6.5 委托时点常量闭包）→ forkSession(origin:'delegation')（无父/
- * 无持久层降级内存 Session）→ 根总线发 session_start → startRun 一次性驱动 →
+ * 档**快照**——§6.5 委托时点常量闭包）+ **守门行传导**（第三十一批 P1-4：
+ * 根总线插件行 pre+post 两段委托时点快照 append 进子链——owner 前缀 + main
+ * 行集判据、固定行/worker 行排除）→ forkSession(origin:'delegation')（无父/
+ * 无持久层降级内存 Session）→ 根总线发 session_start → startRun 一次性驱动
+ * （context 腿：请求携带 context 时父闭合边界投影尾 N 轮作消息种子）→
  * dispose = 纵切三序列（shutdown 转发根总线）。
  */
 
-import { createContext } from '../context/context.js';
+import { createContext, snapshotHandlers, appendHandlers } from '../context/context.js';
 import { runInSessionChain } from '../context/chain.js';
 import type { AgentMessage } from '../contracts/messages.js';
+import { TOOL_POST_EXECUTE_EVENT, TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import { startRun } from '../agent/loop.js';
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage, Message, StreamFn } from '../contracts/llm.js';
-import { createDurableSinks } from '../chat/index.js';
+import { createDurableSinks, projectedToAgentMessages } from '../chat/index.js';
 import { createChildSessionDisposer, type FlushBarrier } from './subagent-child.js';
 import type { InProcessChild, InProcessChildFactory } from '../subagent/inprocess.js';
-import { Session, lastClosedTurnBoundary } from '../session/index.js';
+import { Session, lastClosedTurnBoundary, deriveMessages } from '../session/index.js';
+import type { ProjectedMessage } from '../session/index.js';
 import type { Persistence } from '../persist/index.js';
 import type { SandboxMode } from '../safety/index.js';
 import { createApprovalService } from '../safety/approval.js';
@@ -51,8 +56,42 @@ export interface SubagentFactoryDeps {
   readonly workspace: string;
   /** 父沙箱档位（§6.5 快照语义：委托时点的父档，子装配内常量） */
   readonly sandboxMode: SandboxMode;
-  /** 根总线（session_start/session_shutdown 的 keyed 通知面——插件在根作用域） */
+  /** 根总线（session_start/session_shutdown 的 keyed 通知面——插件在根作用域；
+   *  亦为守门行传导的快照源） */
   readonly rootCtx: ContextScope;
+  /**
+   * 守门行传导判据（2026-08-27 第三十一批 P1-4——骨架篇 §6.1「守门行传导 +
+   * context 腿」条）：`anchors` = 插件装载锚的 owner **完整前缀集**（`'app:plugins:'`
+   * 形——装配层从 fork 起名处构造，静态两锚）；`mainRows` = main 插件行 id 集
+   * **活取**（每次委派取一次 = 委托时点快照；worker 行排除——桥转发器是 emit
+   * 签名形态，进 waterfall 不调 next 即吞链）。固定行（owner = 根名）无锚前缀
+   * 结构性排除——子代理审批 never 无人值守语义不被根面交互审批冒破。
+   */
+  readonly gateRowFilter: {
+    readonly anchors: readonly string[];
+    readonly mainRows: () => ReadonlySet<string>;
+  };
+}
+
+/** context 腿尾轮装配帽（骨架篇 §6.1：N = min(请求值, 装配缺省帽 20 轮)） */
+const CONTEXT_TURN_CAP = 20;
+
+/**
+ * 投影裁尾 N 轮（context 腿——user 消息边界裁切）：从尾向前找第 N 个 user
+ * 投影，从它起取；user 边界数不足 N 时全量（不足即全给，无中间截断歧义）。
+ *
+ * @param projected 闭合边界内的父会话投影
+ * @param turns     请求轮数（调用方已过 min 帽）
+ */
+function tailTurns(projected: readonly ProjectedMessage[], turns: number): ProjectedMessage[] {
+  let seen = 0;
+  for (let i = projected.length - 1; i >= 0; i -= 1) {
+    if (projected[i]!.type === 'user') {
+      seen += 1;
+      if (seen >= turns) return projected.slice(i);
+    }
+  }
+  return [...projected];
 }
 
 /** 子代理缺省系统提示词（静态——persona 请求位未携带时兜底） */
@@ -95,11 +134,15 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
      * 无父会话（persist:false）或无持久层：降级内存 Session（诊断面子代理仍可跑，
      * delegationDepth=1 语义 = 深度为 0 的虚拟父委出一层） */
     const parent = deps.getParent();
+    // 闭合边界单点（fork 种子与 context 腿投影**同源**——第三十一批冷读 #3 修死：
+    // 委派发生在父 turn 敞开时，敞开段未定性不进种子也不进模型可见面，
+    // 「模型可见 ⊆ durable 种子」不变式保持）
+    const closedBoundary = parent !== undefined ? lastClosedTurnBoundary(parent.session.events) : 0;
     const session =
       parent !== undefined && deps.persistence !== undefined
         ? deps.persistence.forkSession(parent.session, {
             origin: 'delegation',
-            boundary: lastClosedTurnBoundary(parent.session.events),
+            boundary: closedBoundary,
           })
         : new Session({ origin: 'delegation', delegationDepth: 1 });
 
@@ -140,9 +183,45 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
       }),
     );
 
+    /* ---- ⑤b 守门行传导（第三十一批 P1-4：委托时点快照传导——骨架篇 §6.1
+     * 「守门行传导 + context 腿」条）----
+     * 根总线插件行 pre+post 两段 append 进子链（子固定行之后、按根链注册序）——
+     * 挖矿 B10「固定行进得了子管道、开放行进不去」的不对称收口。判据 = owner
+     * 完整前缀 ∈ 锚集 + 行 id ∈ main 集（worker 行排除；固定行 owner = 根名
+     * 结构性排除——子审批 never 不被根面交互审批冒破）。传导的是 handler 引用
+     * 非重注册：闭包仍捕根作用域（读根服务行为正确）、owner 保真
+     * （appendHandlers 直写不走 on()——on() 会把 owner 记成子作用域名）、
+     * 子 dispose 不回卷根行。委托时点冻结：此后根链变化（/reload 等）不影响
+     * 本子，新委派取新链。execute 段不传导（拍板题 2——替换执行体风险大）。 */
+    {
+      const { anchors, mainRows } = deps.gateRowFilter;
+      for (const event of [TOOL_PRE_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT] as const) {
+        const entries = snapshotHandlers(deps.rootCtx, event).filter((entry) => {
+          const anchor = anchors.find((prefix) => entry.owner.startsWith(prefix));
+          return anchor !== undefined && mainRows().has(entry.owner.slice(anchor.length));
+        });
+        if (entries.length > 0) appendHandlers(childCtx, event, entries);
+      }
+    }
+
     /* ---- ⑥ delegation fork 上总线：session_start（插件 keyed 初始化子会话态——
      * 与 durable session/event 镜像同总线，载荷 sessionId 即归属键）---- */
     deps.rootCtx.emit('session_start', { sessionId: session.header.sessionId, origin: 'delegation' });
+
+    /* context 腿（第三十一批）：请求携带 context 时，②同源闭合边界之内的父投影
+     * 裁尾 N 轮（user 消息边界，min 请求值/装配帽 20）经 projectedToAgentMessages
+     * 作子首请求 LLM 消息种子——durable 有上文、模型看见的豁口收口。子会话日志
+     * 不双写父前缀（fork 种子已落）。缺省不携带；无父（persist:false 诊断面）
+     * 降级空种子（诊断面本无上下文可带）。 */
+    const seedMessages: AgentMessage[] =
+      request.context !== undefined && parent !== undefined
+        ? projectedToAgentMessages(
+            tailTurns(
+              deriveMessages(parent.session.events.slice(0, closedBoundary)),
+              Math.min(request.context.recentTurns, CONTEXT_TURN_CAP),
+            ),
+          )
+        : [];
 
     /* ---- ⑦ 一次性驱动（persona ?? 静态缺省；model 覆盖 = 声明式 agent frontmatter；
            emit 两路 = durable 落账 + usage 上报）----
@@ -157,7 +236,7 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
           [{ role: 'user', content: request.prompt, timestamp: Date.now() }],
           {
             systemPrompt: request.persona ?? DEFAULT_CHILD_PROMPT,
-            messages: [],
+            messages: seedMessages,
             tools: tools.list().map((def) => tools.toAgentTool(def)),
           },
           { streamFn: deps.streamFn, model: request.model ?? deps.model, convertToLlm: deps.convertToLlm },

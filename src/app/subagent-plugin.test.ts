@@ -5,13 +5,15 @@
  * subagent 行激活）、真委派工具（agent 经三段管道）、真工厂（每子独立 ctx +
  * 工具管道 + 守门 + forkSession）、真结算链（provider → job → 通知）。
  * 父子共用同一 streamFn——contexts 按调用序即父子交替记录（嵌套调用的形态证据）。
+ * 守门行传导 + context 腿回归锁（第三十一批 P1-4）在本文件尾段。
  */
 
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
+import { TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import { createContext } from '../context/context.js';
 import { chainSessionId } from '../context/chain.js';
 import type { ContextScope } from '../context/types.js';
@@ -299,6 +301,10 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
       workspace: makeTempDir('app-subplug-nodb-'),
       sandboxMode: 'workspace-write',
       rootCtx,
+      // 传导判据占位（第三十一批必传面）：无父诊断面不发生传导——空锚/空集
+      // 与装配层占位同语义（本测试 rootCtx 虽有 session_start 行但锚集为空，
+      // 守门两段传导恒零行）
+      gateRowFilter: { anchors: [], mainRows: () => new Set<string>() },
     });
     const provider = createInProcessProvider({ factory });
     // SubagentStart 面（provider/background 已在服务面剥离——provider 只见任务本体）
@@ -400,5 +406,342 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
     //（bash 住驱动层——子代理无驱动层，结构上不进派生面）
     expect(new Set(names).size).toBe(names.length);
     expect(names).not.toContain('bash');
+  });
+});
+
+/* ---------------- 守门行传导 + context 腿（第三十一批 P1-4 回归锁） ---------------- */
+
+/** 守门段入参形状（测试侧收形——owner/判据见 subagent-factory ⑤b） */
+interface PreGateInput {
+  readonly tool: { readonly name: string };
+  args: Record<string, unknown>;
+  mutated: boolean;
+}
+
+/**
+ * 传导测试插件 fixture：组合目录写 overlay（一行 conduction-gate）+ 插件目录。
+ * 插件行为：pre 守门行 block `conduction-block` / 就地改参 `conduction-probe`
+ * （x 追加标记——mutate 契约 = 就地改属性，rebind input.args 不达执行段）+
+ * 注册两探针工具（effect 'read'——子安全门读类放行，拦截归因唯一来自插件行）。
+ */
+function makeConductionComposition(): { compositionDir: string } {
+  const compositionDir = makeTempDir('app-cond-');
+  const pluginDir = join(compositionDir, 'conduction-plugin');
+  mkdirSync(pluginDir, { recursive: true });
+  writeFileSync(
+    join(pluginDir, 'index.ts'),
+    [
+      'export const name = "conduction-gate";',
+      'export default async function apply(ctx) {',
+      '  ctx.effect(() =>',
+      '    ctx.on("tools_pre_execute", (input, next) => {',
+      '      if (input.tool.name === "conduction-block") {',
+      '        return { decision: "block", reason: "插件行策略：conduction-block 禁用" };',
+      '      }',
+      '      if (input.tool.name === "conduction-probe") {',
+      '        input.args.x = input.args.x + "·经插件行改写";',
+      '        input.mutated = true;',
+      '      }',
+      '      return next();',
+      '    }),',
+      '  );',
+      '  const tools = ctx.get("tools");',
+      '  ctx.effect(() =>',
+      '    tools.register({',
+      '      name: "conduction-probe",',
+      '      description: "回显 x 参数（传导 mutate 探针）",',
+      '      parameters: { type: "object", properties: { x: { type: "string" } }, required: ["x"] },',
+      '      effect: "read",',
+      '      execute: async (args) => ({ content: [{ type: "text", text: `探针=${args.x}` }] }),',
+      '    }),',
+      '  );',
+      '  ctx.effect(() =>',
+      '    tools.register({',
+      '      name: "conduction-block",',
+      '      description: "注定被插件行拦下的探针",',
+      '      parameters: { type: "object", properties: {} },',
+      '      effect: "read",',
+      '      execute: async () => ({ content: [{ type: "text", text: "不该执行到这里" }] }),',
+      '    }),',
+      '  );',
+      '}',
+    ].join('\n'),
+  );
+  writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: conduction-gate\n    plugin: ${pluginDir}\n`);
+  return { compositionDir };
+}
+
+describe('守门行传导 + context 腿（第三十一批 P1-4 回归锁）', () => {
+  it('插件行 block 传导：子链拦下 conduction-block（gate 决策落子会话账）+ 固定行零触达（传导前必红）', async () => {
+    const { compositionDir } = makeConductionComposition();
+    // 消费序：[0] 父 toolCall(agent) → [1] 子 toolCall(conduction-block) →
+    // [2] 子收尾（见拦截 isError 结果）→ [3] 父收尾
+    const { streamFn } = scriptedStream([
+      toolCallMessage('agent', { prompt: '子任务A', toolFilter: ['conduction-probe', 'conduction-block'] }),
+      toolCallMessage('conduction-block', {}),
+      textMessage('子已见拦截'),
+      textMessage('父收尾'),
+    ]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    // 固定行触达计数（owner=根名 'app' 的监听器——传导判据结构性排除的半边）：
+    // 只数子侧工具（conduction-* 前缀）——父侧 agent 调用照走根链不在此列
+    const fixedRowChildToolHits: string[] = [];
+    runtime.ctx.on(TOOL_PRE_EXECUTE_EVENT, (input: PreGateInput) => {
+      if (input.tool.name.startsWith('conduction-')) fixedRowChildToolHits.push(input.tool.name);
+    });
+    const delegationStarts: string[] = [];
+    runtime.ctx.on('session_start', (payload: unknown) => {
+      const data = payload as { sessionId: string; origin?: string };
+      if (data.origin === 'delegation') delegationStarts.push(data.sessionId);
+    });
+
+    const answer = await runtime.conversation!.submitOnce('委派探测A');
+    expect(answer?.status).toBe('completed');
+    expect(delegationStarts).toHaveLength(1);
+    // 子会话账：插件行 block 决策 durable 落账（reason 带插件行策略文案）
+    const child = runtime.persistence!.loadSession(delegationStarts[0]!)!;
+    const decisions = child.events
+      .filter((e) => e.type === 'gate/decision')
+      .map((e) => e.data as { decision: string; reason: string });
+    expect(decisions.some((d) => d.decision === 'block' && d.reason.includes('插件行策略'))).toBe(true);
+    // 拦截经 isError 结果回模型（block 文案进子工具结果——工具真体零执行）
+    const childToolResults = deriveMessages(child.events).filter((m) => m.type === 'toolResult');
+    expect(JSON.stringify(childToolResults)).toContain('插件行策略');
+    expect(JSON.stringify(childToolResults)).not.toContain('不该执行到这里');
+    // 固定行（owner=根名）零触达：根链监听器没被传导进子链——子审批 never
+    // 无人值守语义不被根面交互审批冒破
+    expect(fixedRowChildToolHits).toEqual([]);
+  });
+
+  it('插件行 mutate 传导：就地改参达子执行段（探针回显带改写标记）+ mutate 决策落账', async () => {
+    const { compositionDir } = makeConductionComposition();
+    const { streamFn } = scriptedStream([
+      toolCallMessage('agent', { prompt: '子任务B', toolFilter: ['conduction-probe'] }),
+      toolCallMessage('conduction-probe', { x: '原始' }),
+      textMessage('子收尾'),
+      textMessage('父收尾'),
+    ]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    const delegationStarts: string[] = [];
+    runtime.ctx.on('session_start', (payload: unknown) => {
+      const data = payload as { sessionId: string; origin?: string };
+      if (data.origin === 'delegation') delegationStarts.push(data.sessionId);
+    });
+
+    const answer = await runtime.conversation!.submitOnce('委派探测B');
+    expect(answer?.status).toBe('completed');
+    const child = runtime.persistence!.loadSession(delegationStarts[0]!)!;
+    // mutate 决策 durable 落账（守门段改参汇总进决策面）
+    const decisions = child.events.filter((e) => e.type === 'gate/decision').map((e) => e.data as { decision: string });
+    expect(decisions.some((d) => d.decision === 'mutate')).toBe(true);
+    // 改参到达执行段：探针回显的 x 已带插件行标记（就地改写——执行段同引用所见）
+    const childToolResults = deriveMessages(child.events).filter((m) => m.type === 'toolResult');
+    expect(JSON.stringify(childToolResults)).toContain('探针=原始·经插件行改写');
+  });
+
+  it('context 腿：父闭合边界投影作子首请求种子——尾轮进、敞开段不进、轮数不足全量', async () => {
+    // 消费序：[0] 父 turn1 收尾 → [1] 父 turn2 toolCall(agent 带 context) →
+    // [2] 子首请求（种子观测点）→ [3] 父收尾
+    const { streamFn, contexts } = scriptedStream([
+      textMessage('第一轮结论：AAA 可行'),
+      toolCallMessage('agent', { prompt: '接手BBB', context: { recentTurns: 2 } }),
+      textMessage('子答BBB完毕'),
+      textMessage('父收尾'),
+    ]);
+    const runtime = await assemble({ streamFn });
+    await runtime.conversation!.submitOnce('第一问AAA');
+    await runtime.conversation!.submitOnce('现在委派处理BBB');
+    // 子首请求 = 尾轮种子 + 子自身 prompt：
+    // - turn1（唯一闭合轮）user/assistant 全进（recentTurns=2 超界 → 不足全量）
+    // - turn2 敞开段 user 消息（'现在委派处理BBB'）不进（委派发生在本 turn 内——
+    //   lastClosedTurnBoundary 排除）
+    const childMessages = JSON.stringify(contexts[2]!.messages);
+    expect(childMessages).toContain('第一问AAA');
+    expect(childMessages).toContain('第一轮结论：AAA 可行');
+    expect(childMessages).not.toContain('现在委派处理BBB');
+    expect(childMessages).toContain('接手BBB');
+  });
+
+  it('/reload 后新委派取新链：行卸载即传导消失（第一次被拦、重载后放行）', async () => {
+    // blocker 插件只拦 'ls'（子自建 fs 腿——不依赖插件工具，卸载后探针仍在）
+    const compositionDir = makeTempDir('app-cond-reload-');
+    const pluginDir = join(compositionDir, 'reload-gate');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'index.ts'),
+      [
+        'export const name = "reload-gate";',
+        'export default async function apply(ctx) {',
+        '  ctx.effect(() =>',
+        '    ctx.on("tools_pre_execute", (input, next) => {',
+        '      if (input.tool.name === "ls") {',
+        '        return { decision: "block", reason: "reload 批次策略：ls 暂禁" };',
+        '      }',
+        '      return next();',
+        '    }),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: reload-gate\n    plugin: ${pluginDir}\n`);
+    const workspace = makeTempDir('app-cond-reload-ws-');
+    // 八段消费序：委派一 [0..3]（子被拦）→ overlay 清行 + reload → 委派二 [4..7]（放行）
+    const { streamFn } = scriptedStream([
+      toolCallMessage('agent', { prompt: '列目录A' }),
+      toolCallMessage('ls', { path: workspace }),
+      textMessage('子A收尾'),
+      textMessage('父A收尾'),
+      toolCallMessage('agent', { prompt: '列目录B' }),
+      toolCallMessage('ls', { path: workspace }),
+      textMessage('子B收尾'),
+      textMessage('父B收尾'),
+    ]);
+    const runtime = await assemble({ streamFn, compositionDir, workspace });
+    const delegationStarts: string[] = [];
+    runtime.ctx.on('session_start', (payload: unknown) => {
+      const data = payload as { sessionId: string; origin?: string };
+      if (data.origin === 'delegation') delegationStarts.push(data.sessionId);
+    });
+
+    await runtime.conversation!.submitOnce('第一次委派');
+    expect(delegationStarts).toHaveLength(1);
+    const childA = runtime.persistence!.loadSession(delegationStarts[0]!)!;
+    const childADecisions = childA.events
+      .filter((e) => e.type === 'gate/decision')
+      .map((e) => e.data as { decision: string; reason: string });
+    expect(childADecisions.some((d) => d.decision === 'block' && d.reason.includes('reload 批次策略'))).toBe(true);
+
+    // overlay 清行 → /reload（fresh 读盘）→ 插件行锚级回卷、新组合树无此行
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows: []\n');
+    await runtime.reload();
+    expect(runtime.plugins.list().map((r) => r.id)).not.toContain('reload-gate');
+
+    await runtime.conversation!.submitOnce('第二次委派');
+    expect(delegationStarts).toHaveLength(2);
+    const childB = runtime.persistence!.loadSession(delegationStarts[1]!)!;
+    const childBDecisions = childB.events
+      .filter((e) => e.type === 'gate/decision')
+      .map((e) => e.data as { decision: string; reason: string });
+    // 新链零拦截 + ls 真放行（allow 决策在场；无 block）。子会话 = fork 含父
+    // 前缀种子（父的 agent 工具结果也在 toolResult 面里）——只断言无拦截文案
+    expect(childBDecisions.some((d) => d.decision === 'block')).toBe(false);
+    expect(childBDecisions.some((d) => d.decision === 'allow')).toBe(true);
+    const childBToolResults = deriveMessages(childB.events).filter((m) => m.type === 'toolResult');
+    expect(JSON.stringify(childBToolResults)).not.toContain('reload 批次策略');
+  });
+
+  it('传导判据排除面（工厂直测）：固定行 owner 与非 main 集行不进子链；main 行为正控', async () => {
+    const { streamFn, contexts } = scriptedStream([toolCallMessage('probe', {}), textMessage('子答')]);
+    // 手搭根总线（镜像装配层字面量：根 'app' + 锚 'plugins' fork + 行 fork——
+    // owner 全链名即 'app:plugins:<行id>'）
+    const rootCtx: ContextScope = createContext({ name: 'app' });
+    const rootTools = registerToolsService(rootCtx, {});
+    rootTools.register({
+      name: 'probe',
+      description: '传导探针（回显固定标记）',
+      parameters: { type: 'object', properties: {} },
+      effect: 'read',
+      execute: async () => ({ content: [{ type: 'text', text: '探针原始结果' }] }),
+    });
+    const anchor = rootCtx.fork({ name: 'plugins' });
+    const mainRow = anchor.fork({ name: 'gate-row' });
+    // 有锚前缀但不在 main 集（worker 行形态——桥转发器吞链，判据排除）
+    const workerLike = anchor.fork({ name: 'bridge-worker-row' });
+    const rootSeen: string[] = [];
+    const workerSeen: string[] = [];
+    // 固定行形态：owner = 根名 'app'（无锚前缀——结构性排除）
+    rootCtx.on(TOOL_PRE_EXECUTE_EVENT, () => rootSeen.push('root'));
+    workerLike.on(TOOL_PRE_EXECUTE_EVENT, () => workerSeen.push('worker'));
+    // main 行（正控）：block probe——证明子链确实收到了 main 行传导
+    mainRow.on(TOOL_PRE_EXECUTE_EVENT, (input: PreGateInput, next: () => Promise<undefined>) => {
+      if (input.tool.name === 'probe') {
+        return { decision: 'block' as const, reason: '插件行拦：传导正控' };
+      }
+      return next();
+    });
+    const factory = createSubagentChildFactory({
+      getParent: () => undefined,
+      streamFn,
+      model: 'test/model',
+      convertToLlm: defaultConvertToLlm,
+      workspace: makeTempDir('app-cond-excl-'),
+      sandboxMode: 'workspace-write',
+      rootCtx,
+      gateRowFilter: { anchors: ['app:plugins:'], mainRows: () => new Set(['gate-row']) },
+    });
+    const provider = createInProcessProvider({ factory });
+    const execution = provider.start({ prompt: '探测', toolFilter: ['probe'] });
+    const result = await execution.result;
+    expect(result.stopReason).toBe('completed');
+    // 正控：main 行进子链（probe 被拦——子第二轮请求可见拦截文案）
+    expect(JSON.stringify(contexts[1]!.messages)).toContain('插件行拦：传导正控');
+    // 排除面：固定行与 worker 形态行零触达（会被传导的只有 main 行——二者计数恒空）
+    expect(rootSeen).toEqual([]);
+    expect(workerSeen).toEqual([]);
+    await execution.dispose();
+  });
+
+  it('委托时点快照冻结：子装配后再注册的行不进该子；新委派取新链；行卸载后再放行', async () => {
+    // 六段消费序：子A [0,1]（快照空 → 放行）→ 注册 block 行 → 子B [2,3]（新链被拦）
+    // → 撤销注册 → 子C [4,5]（再放行）
+    const { streamFn, contexts } = scriptedStream([
+      toolCallMessage('probe', {}),
+      textMessage('子答A'),
+      toolCallMessage('probe', {}),
+      textMessage('子答B'),
+      toolCallMessage('probe', {}),
+      textMessage('子答C'),
+    ]);
+    const rootCtx: ContextScope = createContext({ name: 'app' });
+    const rootTools = registerToolsService(rootCtx, {});
+    rootTools.register({
+      name: 'probe',
+      description: '传导探针（回显固定标记）',
+      parameters: { type: 'object', properties: {} },
+      effect: 'read',
+      execute: async () => ({ content: [{ type: 'text', text: '探针原始结果' }] }),
+    });
+    const mainRow = rootCtx.fork({ name: 'plugins' }).fork({ name: 'gate-row' });
+    const factory = createSubagentChildFactory({
+      getParent: () => undefined,
+      streamFn,
+      model: 'test/model',
+      convertToLlm: defaultConvertToLlm,
+      workspace: makeTempDir('app-cond-freeze-'),
+      sandboxMode: 'workspace-write',
+      rootCtx,
+      gateRowFilter: { anchors: ['app:plugins:'], mainRows: () => new Set(['gate-row']) },
+    });
+    const provider = createInProcessProvider({ factory });
+
+    // 子A：装配时行上无监听器（快照空）——probe 放行
+    const execA = provider.start({ prompt: '任务A', toolFilter: ['probe'] });
+    // A 出膛后再注册 block（provider.start 内工厂同步调——快照已在装配时冻结）
+    const off = mainRow.on(TOOL_PRE_EXECUTE_EVENT, (input: PreGateInput, next: () => Promise<undefined>) => {
+      if (input.tool.name === 'probe') {
+        return { decision: 'block' as const, reason: '后注册拦' };
+      }
+      return next();
+    });
+    const resultA = await execA.result;
+    expect(resultA.stopReason).toBe('completed');
+    // 冻结证据：A 运行期间注册的行未加入 A 的链（probe 真执行——回显进 A 第二轮）
+    expect(JSON.stringify(contexts[1]!.messages)).toContain('探针原始结果');
+    await execA.dispose();
+
+    // 子B：新委派取新链（含后注册行）——probe 被拦
+    const execB = provider.start({ prompt: '任务B', toolFilter: ['probe'] });
+    const resultB = await execB.result;
+    expect(resultB.stopReason).toBe('completed');
+    expect(JSON.stringify(contexts[3]!.messages)).toContain('后注册拦');
+    await execB.dispose();
+
+    // 行卸载（on disposer——/reload 锚级回卷的单行等价物）→ 子C 再放行
+    off();
+    const execC = provider.start({ prompt: '任务C', toolFilter: ['probe'] });
+    const resultC = await execC.result;
+    expect(resultC.stopReason).toBe('completed');
+    expect(JSON.stringify(contexts[5]!.messages)).toContain('探针原始结果');
+    await execC.dispose();
   });
 });

@@ -46,7 +46,14 @@ function stubProvider(name = 'stub', capabilities: Partial<SubagentCapabilities>
   });
   const provider: SubagentProvider = {
     name,
-    capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false, ...capabilities },
+    capabilities: {
+      outputSchema: false,
+      depthLimit: false,
+      toolFilter: false,
+      persona: false,
+      context: false,
+      ...capabilities,
+    },
     start(request) {
       started.push(request);
       return { id: `run-${started.length}`, result, dispose: () => (disposeCount += 1) };
@@ -102,7 +109,13 @@ describe('ctx.subagents — 注册与查找', () => {
     const { service } = setup();
     service.register(stubProvider('cap', { depthLimit: true }).provider);
     const info = service.list().find((p) => p.name === 'cap');
-    expect(info?.capabilities).toEqual({ outputSchema: false, depthLimit: true, toolFilter: false, persona: false });
+    expect(info?.capabilities).toEqual({
+      outputSchema: false,
+      depthLimit: true,
+      toolFilter: false,
+      persona: false,
+      context: false,
+    });
   });
 });
 
@@ -216,7 +229,7 @@ describe('ctx.subagents — background Job 接线（§6.2 一次性两形态）'
     let rejectWith: (err: Error) => void = () => {};
     const rogue: SubagentProvider = {
       name: 'rogue',
-      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false, context: false },
       start() {
         return {
           id: 'rogue-1',

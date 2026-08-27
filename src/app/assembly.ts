@@ -1092,6 +1092,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     workspace,
     sandboxMode,
     rootCtx: ctx,
+    // 守门行传导判据（第三十一批 P1-4）：anchors = 根名 + 锚 fork 名拼成的 owner
+    // 完整前缀（根名 'app' = :398、锚 fork 'ring1'/'plugins' = :1219/:1491 三处
+    // 字面量的镜像——/reload 重建锚同名，前缀恒定）；mainRows 活取组合树非 worker
+    // 行 id（let composition 捕获——/reload 重赋后活取自动见新树；disabled 行
+    // 不在装载序、快照天然不含，无需再滤）
+    gateRowFilter: {
+      anchors: ['app:plugins:', 'app:ring1:'],
+      mainRows: () => new Set(composition.rows.filter((row) => row.runtime !== 'worker').map((row) => row.id)),
+    },
   });
   /** 沙箱 confine 服务（S5 bash 迁域上提至此：chat deps 需要 sandbox 实例作
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
