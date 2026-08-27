@@ -20,24 +20,31 @@ npm run format:check      # Prettier
 
 ```
 berry/
-├── src/
+├── src/               # 22 模块单向 DAG（lint:topology 门禁钉死；内核=最小装载器托纯机制代理）
 │   ├── contracts/     # L0 公共契约（错误码/事件/工具/插件契约/typebox 再导出）
 │   ├── context/       # L1 运行时基座（作用域/事件总线/服务注册表/logger）+ 插件加载器
 │   ├── session/       # 会话事件日志（append-only + 投影）
 │   ├── persist/       # SQLite 物理层（迁移框架/write-behind/凭证）
 │   ├── agent/         # loop 骨架（AgentEvent/steering/消息角色）
 │   ├── llm/           # pi-ai 适配（唯一允许裸导入 pi-ai 的模块）
-│   ├── tools/         # 三段管道 + fs 工具族 + 检索族（find/grep）
-│   ├── safety/        # 沙箱/审批/可写根
+│   ├── tools/         # 三段管道 + 三层注册表 + fs 工具族 + 检索族（find/grep）
+│   ├── safety/        # 沙箱/审批/可写根/allowlist 免问
 │   ├── skills/        # SKILL.md 注册表 + 渐进披露
 │   ├── channels/      # TUI 通道 + 命令面
+│   ├── exec/          # Ring 1 官方件·件聚落：spawn 管道 + bash 工具 + ctx.exec
 │   ├── chat/          # 官方件·件聚落：对话应用（ConversationDriver/durable/resume）
-│   ├── app/           # 组合根（装配序/CLI/组合树/官方件注册表——纯「装」）
-│   ├── memory/        # Ring 2 官方件：记忆库
+│   ├── memory/        # Ring 2 官方件：记忆库（含持有面五件）
 │   ├── subagent/      # Ring 2 官方件底座：Job + SubagentProvider
-│   └── goal/          # Ring 2 官方件：长目标状态机
+│   ├── goal/          # Ring 2 官方件：长目标状态机
+│   ├── scheduler/     # Ring 2 官方件：定时任务（/tick）
+│   ├── mcp/           # Ring 2 官方件：MCP 客户端桥
+│   ├── web/           # Ring 2 官方件：fetch + SSRF 卫生件
+│   ├── compaction/    # Ring 2 官方件：长会话压缩
+│   ├── admin/         # Ring 2 官方件：平台管理面工具
+│   ├── app/           # 组合根（装配序/CLI/组合树/官方件注册表——纯「装」）
+│   └── bridge/        # 官方件：worker 域舰队（进程隔离）
 ├── docs/              # 公开文档（架构/使用/插件开发/开发指南/运维）
-└── tools/             # check-topology / check-events / smoke-real
+└── tools/             # check-topology / check-events / smoke-real / golden
 ```
 
 ## 四门禁（提交前提）
