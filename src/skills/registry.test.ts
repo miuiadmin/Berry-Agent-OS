@@ -212,22 +212,68 @@ describe('createSkillsService（合并语义）', () => {
     expect(service.list()).toHaveLength(2);
   });
 
-  it('provider.list() 抛异常 → provider-failed 警告，其余提供方不受影响', () => {
+  it('provider 运行期退化抛错 → refresh 降 provider-failed 警告，其余提供方不受影响', () => {
     const dir = makeRoot();
     writeSkill(dir, 'alpha');
     const service = createSkillsService();
+    // 注册时点健康（首调过 B12 形状断言），注册后内部状态翻转——模拟运行期退化
+    let healthy = true;
     service.registerProvider({
       id: 'broken',
       list: () => {
-        throw new Error('炸了');
+        if (!healthy) throw new Error('炸了');
+        return { skills: [], diagnostics: [] };
       },
     });
     service.registerProvider(createLocalSkillsProvider({ locations: [{ dir, source: 'user' }] }));
+    healthy = false; // 翻转为运行期退化（注册时点已过——退到 refresh 期由 merge 守卫降级）
     const { skills, diagnostics } = service.refresh();
     expect(skills.map((s) => s.name)).toEqual(['alpha']);
     expect(diagnostics).toEqual([
       expect.objectContaining({ type: 'warning', code: 'provider-failed', path: 'broken' }),
     ]);
+  });
+
+  it('B12 注册首炸即拒：list() 首调抛错 → registerProvider 抛 SKILLS_PROVIDER_INVALID 且不入链', () => {
+    const service = createSkillsService();
+    let caught: (Error & { code?: string }) | undefined;
+    try {
+      service.registerProvider({
+        id: 'broken',
+        list: () => {
+          throw new Error('炸了');
+        },
+      });
+    } catch (err) {
+      caught = err as Error & { code?: string };
+    }
+    // 码与报文双断言（AppError 报文本身不含码前缀——码在 err.code）
+    expect(caught?.code).toBe('SKILLS_PROVIDER_INVALID');
+    expect(caught?.message).toMatch(/首调 list\(\) 即抛错——炸了/);
+    // 未入链：空链 refresh 无 provider-failed 警告（若残留条目此处会现警告）
+    const { skills, diagnostics } = service.refresh();
+    expect(skills).toEqual([]);
+    expect(diagnostics).toEqual([]);
+  });
+
+  it('B12 退化形各腿：list 非函数 / 缺键 / 元素粗验——注册时点即拒（报文含 provider id 归因）', () => {
+    const service = createSkillsService();
+    // 腿一：list 不是函数
+    expect(() => service.registerProvider({ id: 'not-fn', list: undefined as unknown as () => never })).toThrowError(
+      /not-fn 形状不合：list 不是函数/,
+    );
+    // 腿二：返回缺 skills/diagnostics 数组键
+    expect(() => service.registerProvider({ id: 'no-keys', list: () => ({}) as never })).toThrowError(
+      /no-keys 形状不合：返回缺 skills 数组/,
+    );
+    // 腿三：skills 元素缺 name/description/filePath 串键
+    expect(() =>
+      service.registerProvider({ id: 'bad-elem', list: () => ({ skills: [{ name: 'x' }], diagnostics: [] }) as never }),
+    ).toThrowError(/bad-elem 形状不合：skills\[0\] 缺 name\/description\/filePath 串键/);
+    // 腿四：diagnostics 元素缺三键
+    expect(() =>
+      service.registerProvider({ id: 'bad-diag', list: () => ({ skills: [], diagnostics: [{}] }) as never }),
+    ).toThrowError(/bad-diag 形状不合：diagnostics\[0\] 缺 type\/code\/message 键/);
   });
 
   it('registerProvider 注销器：摘除后 refresh 不再包含其技能（幂等）', () => {

@@ -116,7 +116,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     });
     // 行 r1：完整 load+apply（宿主物化 provide 服务）
     await fleet.loader.load({ id: 'r1', entry: fxEntry, runtime: 'worker' });
-    const scope1 = anchor.fork({ name: 'r1', rowId: 'r1' });
+    const scope1 = anchor.fork({ name: 'r1', rowId: 'r1', builtinRow: false });
     await fleet.loader.apply({ id: 'r1', entry: fxEntry, runtime: 'worker', config: { slot: 'a' } }, scope1);
     // 行 r2：只 load 不 apply（模拟 Kahn 零进展残留——孤儿域待清割）
     await fleet.loader.load({ id: 'r2', entry: fxEntry, runtime: 'worker' });
@@ -156,7 +156,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     });
     // 行 w1 装载自崩插件（apply 返还后 uncaught 异步异常 → worker 线程自崩溃）
     await fleet.loader.load({ id: 'w1', entry: fxEntry, runtime: 'worker' });
-    const scope1 = anchor.fork({ name: 'w1', rowId: 'w1' });
+    const scope1 = anchor.fork({ name: 'w1', rowId: 'w1', builtinRow: false });
     await fleet.loader.apply(
       { id: 'w1', entry: fxEntry, runtime: 'worker', config: { slot: 'd', crash: true } },
       scope1,
@@ -195,7 +195,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       execArgv: ['--import=tsx'],
     });
     await fleet.loader.load({ id: 'b1', entry: throwEntry, runtime: 'worker' });
-    const scope = anchor.fork({ name: 'b1', rowId: 'b1' });
+    const scope = anchor.fork({ name: 'b1', rowId: 'b1', builtinRow: false });
     // worker 侧非 AppError 抛错 → 信封归一 BRIDGE_HANDLER_FAILED 保码回宿主
     expect(await rejectionCode(fleet.loader.apply({ id: 'b1', entry: throwEntry, runtime: 'worker' }, scope))).toBe(
       BRIDGE_HANDLER_FAILED,
@@ -222,7 +222,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
     await fleet.loader.load({ id: 'hb', entry: fxEntry, runtime: 'worker' });
-    const scope = anchor.fork({ name: 'hb', rowId: 'hb' });
+    const scope = anchor.fork({ name: 'hb', rowId: 'hb', builtinRow: false });
     await fleet.loader.apply({ id: 'hb', entry: fxEntry, runtime: 'worker', config: { slot: 'w' } }, scope);
     const taps = root.get<Record<string, () => Promise<string>>>('fleet/taps-w');
     // 域活证明（先 ping 后烧——排除「域从未活过」的假冻结）
@@ -263,7 +263,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     // 慢装载成功返还（boot 期超时归 loadTimeoutMs 60s 司职——50/100/150ms 的
     // 丢拍不是冻结：事件循环尚未承诺应答）
     await fleet.loader.load({ id: 'sb', entry: slowEntry, runtime: 'worker' });
-    const scope = anchor.fork({ name: 'sb', rowId: 'sb' });
+    const scope = anchor.fork({ name: 'sb', rowId: 'sb', builtinRow: false });
     await fleet.loader.apply({ id: 'sb', entry: slowEntry, runtime: 'worker', config: { slot: 'sb' } }, scope);
     const taps = root.get<Record<string, () => Promise<string>>>('fleet/taps-sb');
     await expect(taps.ping!()).resolves.toBe('pong');
@@ -293,7 +293,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
     await fleet.loader.load({ id: 'oom', entry: oomEntry, runtime: 'worker' });
-    const scope = anchor.fork({ name: 'oom', rowId: 'oom' });
+    const scope = anchor.fork({ name: 'oom', rowId: 'oom', builtinRow: false });
     await fleet.loader.apply({ id: 'oom', entry: oomEntry, runtime: 'worker', config: { slot: 'oom' } }, scope);
     const taps = root.get<Record<string, () => Promise<unknown>>>('fleet/taps-oom');
     // 点燃堆增长：V8 old-space 触顶 → worker 'error' 事件（内存超限签名）→ exit
@@ -342,7 +342,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     // 行携带 plugin 引用（PluginPlanRow.plugin 透传——join 键在场上）
     const row: PluginPlanRow = { id: 'oomrow', plugin: 'acme/oomy', entry: oomEntry, runtime: 'worker' };
     await fleet.loader.load(row);
-    const scope = anchor.fork({ name: 'oomrow', rowId: 'oomrow' });
+    const scope = anchor.fork({ name: 'oomrow', rowId: 'oomrow', builtinRow: false });
     await fleet.loader.apply({ ...row, config: { slot: 'oomrow' } }, scope);
     const taps = root.get<Record<string, () => Promise<unknown>>>('fleet/taps-oomrow');
     const inflight = taps.grow!().catch((e: unknown) => e);

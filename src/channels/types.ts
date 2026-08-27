@@ -7,7 +7,12 @@
  */
 
 import type { AgentMessage } from '../contracts/messages.js';
+import type { CommandCompletionItem, CommandDefinition } from '../contracts/channels.js';
 import type { Disposer } from '../context/types.js';
+
+// 再导出下沉两符号（2026-08-27 第三十三批 P2-1 M4：类型面迁 contracts，
+// 旧消费面 import 路径不变——SkillsProvider 五符号下沉同构）
+export type { CommandDefinition, CommandCompletionItem } from '../contracts/channels.js';
 
 /** 宿主面：通道把用户输入交回宿主（TUI 入口把它接到对话驱动的 submit——
  * running 时入 steering 队列、闲时开 run；装配与命令面见 app/channels 服务） */
@@ -24,8 +29,12 @@ export interface ChannelHost {
   interrupt(): void;
 }
 
-/** 通知级别（notify 一次性通知；非交互原语纯活体层不落日志） */
-export type NotifyLevel = 'info' | 'warn' | 'error';
+/**
+ * 通知级别（notify 一次性通知；非交互原语纯活体层不落日志）。四值（2026-08-27
+ * 第三十三批 P2-1 补 'success'——操作成功回执此前只能借 info 档）；通道不识别
+ * success 档时向 info 归一（技术栈篇 §4.3 降级规则）。
+ */
+export type NotifyLevel = 'info' | 'success' | 'warn' | 'error';
 
 /** notify 选项 */
 export interface NotifyOptions {
@@ -83,18 +92,6 @@ export interface UiService {
   setWidget(node: unknown | null): void;
   /** 通道后端接入/摘除（通道 start/stop 时调用；返回摘除器） */
   attach(backend: UiBackend): Disposer;
-}
-
-/** 斜杠命令定义（骨架篇 §9.3 ctx.channels.registerCommand） */
-export interface CommandDefinition {
-  /** 命令名（不含 '/'；技能命令用 'skill:<name>' 形态，契约篇 §4.5） */
-  readonly name: string;
-  /** 一句话说明（/help 清单展示） */
-  readonly description: string;
-  /** 来源标记（'builtin' | 'skill' | 'plugin'；缺省 'builtin'） */
-  readonly source?: string;
-  /** 命令体（args 为命令名后的剩余文本；抛错由通道壳兜底为通知） */
-  handler(args: string): void | Promise<void>;
 }
 
 /**

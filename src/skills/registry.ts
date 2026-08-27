@@ -10,7 +10,7 @@
 import { realpathSync } from 'node:fs';
 import type { Context, Disposer } from '../context/types.js';
 import { chainCaller } from '../context/chain.js';
-import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
+import { AppError, COMPOSITION_ROW_INVALID, SKILLS_PROVIDER_INVALID } from '../contracts/errors.js';
 import type { RowAppProbe } from '../contracts/plugin.js';
 import { SKILLS_CHANGE_EVENT } from './types.js';
 import type { Skill, SkillDiagnostic, SkillsProvider, SkillsService } from './types.js';
@@ -21,6 +21,59 @@ function realPath(p: string): string {
     return realpathSync(p);
   } catch {
     return p;
+  }
+}
+
+/**
+ * 注册时点首调形状断言（B12，2026-08-27 第三十三批 P2-1）：对 provider.list()
+ * 做一次性形状校验——返回值两键在场（skills/diagnostics 均为数组）+ 元素粗验
+ * （技能 name/description/filePath 三串键、诊断 type/code/message 三键）。
+ * 防注册时点两路静默：① 返回退化形（缺键）此前要到首次 refresh 才以裸
+ * TypeError 炸（栈指向 merge 不指插件，行已 failed 清单难归因）；② list()
+ * 自身抛错此前 refresh 期才降 provider-failed 警告——「装上了但永远空」在
+ * 注册时点无感。只在注册入口调一次，不随 refresh 重复——运行期退化形由
+ * merge 的数组守卫降 warning。注册入口抛错即行 failed（装载器 apply 帧）。
+ */
+function assertProviderShape(provider: SkillsProvider): void {
+  /** 统一报错出口（provider id 进报文帮归因） */
+  const fail = (why: string): never => {
+    throw new AppError(SKILLS_PROVIDER_INVALID, `技能提供方 ${provider.id} 形状不合：${why}`);
+  };
+  if (typeof provider?.list !== 'function') fail('list 不是函数');
+  let result: ReturnType<SkillsProvider['list']>;
+  try {
+    result = provider.list();
+  } catch (err) {
+    // 内联 throw（不走 fail）：definite-assignment 分析不认 never 返回的 helper
+    // 调用，catch 内须经 throw 直接落出才能判 result 已赋
+    throw new AppError(
+      SKILLS_PROVIDER_INVALID,
+      `技能提供方 ${provider.id} 形状不合：首调 list() 即抛错——${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (result === null || typeof result !== 'object') {
+    fail(`list() 返回 ${result === null ? 'null' : typeof result}（须 { skills, diagnostics }）`);
+  }
+  const shape = result as { skills?: unknown; diagnostics?: unknown };
+  if (!Array.isArray(shape.skills)) fail('返回缺 skills 数组');
+  if (!Array.isArray(shape.diagnostics)) fail('返回缺 diagnostics 数组');
+  for (const [index, skill] of (shape.skills as unknown[]).entries()) {
+    if (skill === null || typeof skill !== 'object') fail(`skills[${index}] 非对象`);
+    const record = skill as Record<string, unknown>;
+    if (
+      typeof record.name !== 'string' ||
+      typeof record.description !== 'string' ||
+      typeof record.filePath !== 'string'
+    ) {
+      fail(`skills[${index}] 缺 name/description/filePath 串键`);
+    }
+  }
+  for (const [index, diagnostic] of (shape.diagnostics as unknown[]).entries()) {
+    if (diagnostic === null || typeof diagnostic !== 'object') fail(`diagnostics[${index}] 非对象`);
+    const record = diagnostic as Record<string, unknown>;
+    if (typeof record.type !== 'string' || typeof record.code !== 'string' || typeof record.message !== 'string') {
+      fail(`diagnostics[${index}] 缺 type/code/message 键`);
+    }
   }
 }
 
@@ -116,6 +169,18 @@ export function createSkillsService(opts?: {
         });
         continue;
       }
+      // 运行期退化形守卫（B12 注册时点断言的运行期腿）：list() 返回形在注册后
+      // 退化（provider 内部状态翻转等）——skills/diagnostics 任一非数组都会以
+      // 裸 TypeError 炸整个 refresh，降为单提供方 warning 不断流
+      if (!Array.isArray(result.skills) || !Array.isArray(result.diagnostics)) {
+        warnings.push({
+          type: 'warning',
+          code: 'provider-failed',
+          message: `技能提供方 ${provider.id} 返回形退化（skills/diagnostics 须为数组），本轮跳过`,
+          path: provider.id,
+        });
+        continue;
+      }
       warnings.push(...result.diagnostics);
       for (const skill of result.skills) {
         // symlink 去重：同一真实文件经多位置出现 → 只保留首个（不算冲突）
@@ -156,6 +221,10 @@ export function createSkillsService(opts?: {
             `（provider 全局注入系统提示词、无域层，防全局漏注入破坏应用隔离；契约篇 §5.1 D1 注册面路由）`,
         );
       }
+      // 注册时点首调形状断言（B12）：退化 provider 在此即拒（行 failed），不留给
+      // 首次 refresh 以裸 TypeError 炸。断言必须先于 providers.push——providers
+      // 是服务闭包状态不在行 effect 栈上，push 后抛错会残留条目
+      assertProviderShape(provider);
       providers.push(provider);
       notifyChange(); // 链变更即广播（skills_change——装配层订阅重建提示词）
       let done = false;

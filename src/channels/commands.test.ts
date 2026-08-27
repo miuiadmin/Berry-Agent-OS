@@ -80,6 +80,51 @@ describe('CommandRegistry.register', () => {
   });
 });
 
+describe('CommandRegistry.onChange（注册面变更通知，M4 autocomplete 投影重建）', () => {
+  it('注册胜出/后写胜出/注销摘除三时点触发；幂等注销与被顶替者注销不触发', () => {
+    const registry = createCommandRegistry();
+    let fired = 0;
+    registry.onChange(() => {
+      fired++;
+    });
+    const disposeA = registry.register(cmd('dup'));
+    expect(fired).toBe(1); // 注册胜出
+    const disposeB = registry.register(cmd('dup')); // 后写胜出（同名胜出也须重投影）
+    expect(fired).toBe(2);
+    disposeA(); // 被顶替者注销——表未变，不触发
+    expect(fired).toBe(2);
+    disposeB(); // 现任摘除——触发
+    expect(fired).toBe(3);
+    disposeB(); // 幂等注销——不触发
+    expect(fired).toBe(3);
+  });
+
+  it('退订器摘除后不再触发', () => {
+    const registry = createCommandRegistry();
+    let fired = 0;
+    const off = registry.onChange(() => {
+      fired++;
+    });
+    off();
+    registry.register(cmd('late'));
+    expect(fired).toBe(0);
+  });
+
+  it('监听器异常隔离：炸掉的监听器不拖垮注册路径，其余监听器照常收到', () => {
+    const registry = createCommandRegistry();
+    const seen: string[] = [];
+    registry.onChange(() => {
+      throw new Error('投影重建失败');
+    });
+    registry.onChange(() => {
+      seen.push('alive');
+    });
+    expect(() => registry.register(cmd('survive'))).not.toThrow();
+    expect(seen).toEqual(['alive']);
+    expect(registry.lookup('survive')).toBeDefined(); // 注册本身成功
+  });
+});
+
 describe('CommandRegistry.dispatch', () => {
   it('三种结果：非命令 / 未知名 / 已派发', async () => {
     const registry = createCommandRegistry();

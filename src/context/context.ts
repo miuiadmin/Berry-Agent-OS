@@ -12,6 +12,7 @@ import {
   CONTEXT_EFFECT_INVALID,
   CONTEXT_EFFECT_LIMIT,
   CONTEXT_SERVICE_EXISTS,
+  CONTEXT_SERVICE_NAME_INVALID,
   CONTEXT_SERVICE_NOT_FOUND,
   EVENT_DUPLICATE,
   EVENT_MODE_MISMATCH,
@@ -39,6 +40,11 @@ export interface HandlerEntry {
 /** 频率护栏缺省参数：1000 次/分钟 + 1000 突发余量（研究 §2.2 #14 建议值） */
 const DEFAULT_RATE_CAPACITY = 1000;
 const DEFAULT_RATE_PER_MINUTE = 1000;
+/**
+ * 服务名单段字符集（provide 两段式分级的共用段形，契约篇 §1.5）：小写字母
+ * 起头，小写字母/数字/连字符——官方单段名与第三方 `域/名` 两段各自同此形。
+ */
+const SERVICE_NAME_SEGMENT = /^[a-z][a-z0-9-]*$/;
 /**
  * per-scope 在册 effect 计数帽（契约篇 §1.6 资源护栏族 #9，2026-08-27 刀〇b）：
  * context 注册族（effect/on/provide 注销器/registerMessageRole/
@@ -142,6 +148,14 @@ class ContextScopeImpl implements ContextScope {
   readonly logger: Logger;
   /** 本插件组合树行 id（loader fork 时注入；根/宿主作用域 undefined——契约篇 §1.5 核心行） */
   readonly rowId: string | undefined;
+  /**
+   * 行籍旗标（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
+   * true = 官方名位（宿主根作用域 + 行籍为官方的行——官方默认层行 / 承袭官方
+   * 默认层 id 的替换行），provide 只收单段小写名；false = 第三方行，provide 必含
+   * 恰一 `/` 域前缀。fork 级联继承（与 rowId 同律 `opts.builtinRow ?? this.builtinRow`），
+   * 插件内任意深度 fork 保持行归属。
+   */
+  readonly builtinRow: boolean;
   /** 是否已销毁——销毁后注册类 API 一律拒绝（stale ctx 护栏） */
   private disposed = false;
 
@@ -151,6 +165,7 @@ class ContextScopeImpl implements ContextScope {
     config: Record<string, unknown> | undefined,
     logger: Logger,
     rowId?: string,
+    builtinRow?: boolean,
   ) {
     this.runtime = runtime;
     this.name = name;
@@ -158,6 +173,8 @@ class ContextScopeImpl implements ContextScope {
     this.configView = Object.freeze({ ...(config ?? {}) });
     this.logger = logger;
     this.rowId = rowId;
+    // 行籍缺省 false（第三方）——根构造显式传 true，行 fork 由 loader 按行籍注入
+    this.builtinRow = builtinRow ?? false;
   }
 
   get config(): Readonly<Record<string, unknown>> {
@@ -172,6 +189,36 @@ class ContextScopeImpl implements ContextScope {
   private assertActive(): void {
     if (this.disposed) {
       throw new AppError(CONTEXT_DISPOSED, `作用域 ${this.name} 已销毁，禁止继续注册副作用`);
+    }
+  }
+
+  /**
+   * 服务名两段式分级校验（契约篇 §1.5，2026-08-27 第三十三批 P2-1）：
+   * 官方名位（行籍 builtinRow = 宿主根作用域 + 官方行/承袭官方 id 的行）只收
+   * 单段小写名（`^[a-z][a-z0-9-]*$`，无斜杠）——单段名结构性专属官方名位，
+   * 第三方无法凭单段名遮蔽宿主词；第三方行必含恰一 `/` 域前缀（`厂商/服务名`
+   * 两段各自同字符集）。与 CONTEXT_SERVICE_EXISTS 分立：一管名字形状、一管
+   * 重复注册。worker 域物化服务同经 provide（bridge svc-register），执法自动
+   * 覆盖两域。
+   */
+  private assertServiceName(name: string): void {
+    /** 定位后缀（作用域名 + 行 id——报错可归因到行） */
+    const where = `——作用域 ${this.name}${this.rowId !== undefined ? `（行 ${this.rowId}）` : ''}`;
+    if (this.builtinRow) {
+      if (!SERVICE_NAME_SEGMENT.test(name)) {
+        throw new AppError(
+          CONTEXT_SERVICE_NAME_INVALID,
+          `官方名位服务名须单段小写字母/数字/连字符（如 'agent'/'fetch'）：${name} ${where}`,
+        );
+      }
+      return;
+    }
+    const parts = name.split('/');
+    if (parts.length !== 2 || !SERVICE_NAME_SEGMENT.test(parts[0]!) || !SERVICE_NAME_SEGMENT.test(parts[1]!)) {
+      throw new AppError(
+        CONTEXT_SERVICE_NAME_INVALID,
+        `第三方行服务名须含恰一 '/' 域前缀（如 'acme/store'，两段各为小写字母/数字/连字符）：${name} ${where}`,
+      );
     }
   }
 
@@ -383,6 +430,7 @@ class ContextScopeImpl implements ContextScope {
 
   provide<T>(name: string, impl: T): Disposer {
     this.assertActive();
+    this.assertServiceName(name);
     if (this.runtime.services.has(name)) {
       // 同名重复注册 = 组合树装配错误（两行 provide 同一服务），响亮失败而非后写覆盖
       throw new AppError(CONTEXT_SERVICE_EXISTS, `服务重复注册：${name}`);
@@ -417,7 +465,7 @@ class ContextScopeImpl implements ContextScope {
     return this.pushEffect(registerPluginSessionEventType(def));
   }
 
-  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string }): ContextScope {
+  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string; builtinRow?: boolean }): ContextScope {
     const child = new ContextScopeImpl(
       this.runtime,
       `${this.name}:${opts.name}`,
@@ -425,6 +473,8 @@ class ContextScopeImpl implements ContextScope {
       this.runtime.rootLogger.child(`${this.name}:${opts.name}`),
       // 行 id 缺省继承父作用域（显式注入优先）——插件内任意深度 fork 保持行归属
       opts.rowId ?? this.rowId,
+      // 行籍旗标同律级联（loader 按行籍显式注入；插件内再 fork 继承行籍）
+      opts.builtinRow ?? this.builtinRow,
     );
     // 登记内部通道（registerLiveEvent 经 WeakMap 找根运行时——fork 产物同样可作锚）
     scopeRuntimes.set(child, this.runtime);
@@ -489,7 +539,9 @@ class ContextScopeImpl implements ContextScope {
 export function createContext(opts: ContextOptions = {}): ContextScope {
   const name = opts.name ?? 'root';
   const runtime = new ContextRuntime(name, opts.logger, opts.rateLimit, opts.disposeTimeoutMs);
-  const scope = new ContextScopeImpl(runtime, name, opts.config, runtime.rootLogger.child(name));
+  // 根作用域行籍 = 官方名位（宿主 provide 单段小写名的自留地；行 fork 由
+  // loader 按行籍注入覆盖——契约篇 §1.5 provide 两段式分级）
+  const scope = new ContextScopeImpl(runtime, name, opts.config, runtime.rootLogger.child(name), undefined, true);
   scopeRuntimes.set(scope, runtime);
   return scope;
 }

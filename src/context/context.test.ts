@@ -251,12 +251,12 @@ describe('事件四模式', () => {
 describe('服务注册表 provide/get', () => {
   it('注册后可取用；注销后取用抛 CONTEXT_SERVICE_NOT_FOUND', () => {
     const scope = silentRoot();
-    const off = scope.provide('demo.svc', { hello: () => 'hi' });
-    expect(scope.get<{ hello: () => string }>('demo.svc').hello()).toBe('hi');
+    const off = scope.provide('demo-svc', { hello: () => 'hi' });
+    expect(scope.get<{ hello: () => string }>('demo-svc').hello()).toBe('hi');
     off();
-    expect(() => scope.get('demo.svc')).toThrowError(AppError);
+    expect(() => scope.get('demo-svc')).toThrowError(AppError);
     try {
-      scope.get('demo.svc');
+      scope.get('demo-svc');
     } catch (err) {
       expect((err as AppError).code).toBe('CONTEXT_SERVICE_NOT_FOUND');
     }
@@ -264,9 +264,9 @@ describe('服务注册表 provide/get', () => {
 
   it('同名重复注册抛 CONTEXT_SERVICE_EXISTS', () => {
     const scope = silentRoot();
-    scope.provide('demo.dup', 1);
+    scope.provide('demo-dup', 1);
     try {
-      scope.provide('demo.dup', 2);
+      scope.provide('demo-dup', 2);
       expect.unreachable('重复注册应抛错');
     } catch (err) {
       expect((err as AppError).code).toBe('CONTEXT_SERVICE_EXISTS');
@@ -276,20 +276,70 @@ describe('服务注册表 provide/get', () => {
   it('作用域 dispose 自动注销其注册的服务', async () => {
     const root = silentRoot();
     const plugin = root.fork({ name: 'plugin-a' });
-    plugin.provide('plugin.a.svc', 'value');
-    expect(root.get('plugin.a.svc')).toBe('value');
+    plugin.provide('plugin-a-svc', 'value');
+    expect(root.get('plugin-a-svc')).toBe('value');
     await plugin.dispose();
-    expect(() => root.get('plugin.a.svc')).toThrowError(/未注册/);
+    expect(() => root.get('plugin-a-svc')).toThrowError(/未注册/);
   });
 
   // 软依赖探测（2026-08-23 生态读码补钉 dsh-4）：缺 = 明确 undefined，禁轮询禁鸭子探测
   it('tryGet：已注册返回实现；未注册返回 undefined 不抛错', () => {
     const scope = silentRoot();
-    const off = scope.provide('optional.svc', { n: 7 });
-    expect(scope.tryGet<{ n: number }>('optional.svc')?.n).toBe(7);
-    expect(scope.tryGet('missing.svc')).toBeUndefined();
+    const off = scope.provide('optional-svc', { n: 7 });
+    expect(scope.tryGet<{ n: number }>('optional-svc')?.n).toBe(7);
+    expect(scope.tryGet('missing-svc')).toBeUndefined();
     off();
-    expect(scope.tryGet('optional.svc')).toBeUndefined(); // 注销后同样软缺，不抛
+    expect(scope.tryGet('optional-svc')).toBeUndefined(); // 注销后同样软缺，不抛
+  });
+});
+
+describe('provide 服务名两段式分级（契约篇 §1.5，2026-08-27 第三十三批 P2-1）', () => {
+  it('官方名位（根作用域）：单段小写名通过；斜杠形/非法字符拒', () => {
+    const root = silentRoot();
+    root.provide('agent', 1); // 单段小写——官方自留地
+    root.provide('fetch-2', 2); // 连字符/数字合法
+    for (const bad of ['acme/store', 'Agent', 'a_b', 'demo.svc', '']) {
+      try {
+        root.provide(bad, 1);
+        expect.unreachable(`官方名位应拒 ${bad}`);
+      } catch (err) {
+        expect((err as AppError).code).toBe('CONTEXT_SERVICE_NAME_INVALID');
+      }
+    }
+  });
+
+  it('第三方行（fork builtinRow:false）：恰一 / 域前缀通过；单段名/多斜杠/非法段拒', () => {
+    const root = silentRoot();
+    const third = root.fork({ name: 'row-x', rowId: 'row-x', builtinRow: false });
+    third.provide('acme/store', 1); // 恰一斜杠两段——第三方正形
+    third.provide('fx/taps-1', 2); // 段内连字符数字合法
+    for (const bad of ['agent', 'acme/store/extra', 'Acme/store', 'acme/', '/store', 'acme//store']) {
+      try {
+        third.provide(bad, 1);
+        expect.unreachable(`第三方行应拒 ${bad}`);
+      } catch (err) {
+        expect((err as AppError).code).toBe('CONTEXT_SERVICE_NAME_INVALID');
+      }
+    }
+  });
+
+  it('行籍旗标 fork 级联：官方行内再 fork 保持官方名位；报文带行 id 归因', () => {
+    const root = silentRoot();
+    // 官方行 fork 后插件内再 fork——行籍级联继承（与 rowId 同律）
+    const officialDeep = root.fork({ name: 'plugin-c', rowId: 'chat', builtinRow: true }).fork({ name: 'inner' });
+    expect(officialDeep.builtinRow).toBe(true);
+    officialDeep.provide('agent', 1); // 深层官方名位仍收单段名
+    // 第三方行内再 fork 同理保持第三方
+    const thirdDeep = root.fork({ name: 'plugin-d', rowId: 'plug-x', builtinRow: false }).fork({ name: 'inner' });
+    expect(thirdDeep.builtinRow).toBe(false);
+    try {
+      thirdDeep.provide('agent', 1);
+      expect.unreachable('第三方深层 fork 应拒单段名');
+    } catch (err) {
+      const appErr = err as AppError;
+      expect(appErr.code).toBe('CONTEXT_SERVICE_NAME_INVALID');
+      expect(appErr.message).toContain('plug-x'); // 报文带行 id——装载期可归因到行
+    }
   });
 });
 
@@ -335,7 +385,7 @@ describe('stale ctx 护栏', () => {
     for (const attempt of [
       () => scope.effect(() => () => {}),
       () => scope.on('evt/x', () => {}),
-      () => scope.provide('svc.after', 1),
+      () => scope.provide('svc-after', 1),
     ]) {
       try {
         attempt();
@@ -381,11 +431,11 @@ describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', (
   it('fork 级联回卷：根 dispose 自动回卷子作用域（宿主忘显式 dispose 也兜底）', async () => {
     const root = silentRoot();
     const child = root.fork({ name: 'plugin-a' });
-    child.provide('plugin.a.svc', 'v');
+    child.provide('plugin-a-svc', 'v');
     await root.dispose();
     // 子作用域已随根回卷：服务注销 + 子作用域进入 stale 态
-    expect(root.tryGet('plugin.a.svc')).toBeUndefined();
-    expect(() => child.provide('late.svc', 1)).toThrowError(AppError);
+    expect(root.tryGet('plugin-a-svc')).toBeUndefined();
+    expect(() => child.provide('late-svc', 1)).toThrowError(AppError);
     expect(child.signal.aborted).toBe(true);
   });
 

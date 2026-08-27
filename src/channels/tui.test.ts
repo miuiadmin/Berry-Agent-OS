@@ -160,3 +160,21 @@ describe('S3 repaint 清屏重画（focus 变化驱动）', () => {
     expect(terminal.frames.join('')).toContain('在飞会话的续流内容'); // 终值落正文可见
   });
 });
+
+describe('notify 级别前缀（NotifyLevel 四值，success 档 2026-08-27 P2-1 新增）', () => {
+  it('四档各落各行：info ℹ / success ✔ / warn ⚠ / error ✖；缺省 info', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    const backend = tui.ui();
+    backend.notify('普通消息');
+    backend.notify('成功消息', { level: 'success' });
+    backend.notify('警告消息', { level: 'warn' });
+    backend.notify('错误消息', { level: 'error' });
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('ℹ 普通消息');
+    expect(all).toContain('✔ 成功消息'); // success 档新前缀（此前不存在该级别）
+    expect(all).toContain('⚠ 警告消息');
+    expect(all).toContain('✖ 错误消息');
+  });
+});

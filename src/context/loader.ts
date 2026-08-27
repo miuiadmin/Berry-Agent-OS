@@ -481,6 +481,12 @@ export async function loadPlugins(
   const failed: PluginFailedPayload[] = [];
   const skipped: PluginSkippedPayload[] = [];
 
+  /* ---- 行籍集（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
+   * 官方名位判据 = 行引用为 builtin（row.builtin 在场）∪ 行 id 承袭官方默认层
+   * （替换官方行的第三方行——换实现不换名位，与工具行「替换唯一合法路径」同
+   * 精神）。从同一合成行清单自含构造；fork 时作 builtinRow 旗标注入行作用域。 */
+  const officialRowIds = new Set(rows.filter((row) => row.builtin !== undefined).map((row) => row.id));
+
   /* ---- ① 跳过行 / 解析失败行：不 import（禁用行不要求已装——挂载休眠精神） ---- */
   // 两域混排的 pending（第二十七批刀二）：main 行持校验后模块（同进程 apply）；
   // worker 行持过界元数据（apply 委托 workerLoader 进 worker 域执行）。Kahn 轮次
@@ -583,7 +589,7 @@ export async function loadPlugins(
         continue;
       }
       pending.splice(i, 1);
-      await activateOne(root, item, activated, failed, opts);
+      await activateOne(root, item, activated, failed, opts, officialRowIds);
       progress = true;
     }
   }
@@ -625,6 +631,8 @@ async function activateOne(
   activated: PluginActivatedPayload[],
   failed: PluginFailedPayload[],
   opts?: LoadPluginsOptions,
+  /** 官方名位行 id 集（loadPlugins 从行清单自含构造——行籍判据第二支） */
+  officialRowIds?: ReadonlySet<string>,
 ): Promise<void> {
   const row = item.row;
   // 声明面来源按域分派（结构同源——worker 侧元数据是同一 named export 的转抄）
@@ -656,7 +664,15 @@ async function activateOne(
     }
   }
 
-  const scope = root.fork({ name: row.id, rowId: row.id, ...(row.config !== undefined ? { config: row.config } : {}) });
+  // 行籍旗标（契约篇 §1.5 provide 两段式分级）：行引用为 builtin ∪ 行 id 承袭
+  // 官方默认层（替换官方行的第三方行）= 官方名位（provide 单段名自留地）
+  const builtinRow = row.builtin !== undefined || (officialRowIds?.has(row.id) ?? false);
+  const scope = root.fork({
+    name: row.id,
+    rowId: row.id,
+    builtinRow,
+    ...(row.config !== undefined ? { config: row.config } : {}),
+  });
   try {
     // 技能目录注册（契约篇 §1.2 第六件；登记位 = 冷读裁决的「行作用域 fork 后
     // apply 之前」）：技能是行资产——apply 抛错走下方 catch 的 scope.dispose()

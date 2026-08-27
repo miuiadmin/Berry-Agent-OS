@@ -33,13 +33,15 @@ function snap(value: unknown, path: string, ancestors: Set<object>): unknown {
     }
     return value;
   }
+  // undefined 单列（2026-08-27 第三十三批 P2-1）：成因句帮定位——可选链取值/
+  // 条件展开把 undefined 织进载荷是最常见病灶（顶层 'data' 与数组下标
+  // 'data.items[2]' 同报，path 全程可读）；JSON.stringify 对 undefined 属性静默
+  // 丢键、稀疏数组变 null——durable 事件不可走「序列化时碰运气」路线
+  if (value === undefined) {
+    throw dataInvalid(path, 'undefined（展开对象携带了未定义字段——检查可选链/条件展开）');
+  }
   // 显式拒绝的非 JSON 类型
-  if (
-    typeof value === 'undefined' ||
-    typeof value === 'function' ||
-    typeof value === 'symbol' ||
-    typeof value === 'bigint'
-  ) {
+  if (typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint') {
     throw dataInvalid(path, `不允许的值类型：${typeof value}`);
   }
   // 对象/数组：类实例（Date/Map/Set/自定义类）原型非 Object/Array 原型，拒绝

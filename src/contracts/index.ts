@@ -16,3 +16,5 @@ export * from './jobs.js';
 export * from './subagent.js';
 export * from './app.js';
 export * from './exec.js';
+export * from './skills.js';
+export * from './channels.js';

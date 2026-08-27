@@ -99,6 +99,14 @@ describe('data 快照校验（步骤①）', () => {
     expect(() => s.append('user/message', loop)).toThrowError(/循环引用/);
   });
 
+  it('undefined 单列报文：报文带 path 定位与成因句（检查可选链/条件展开）', () => {
+    const s = new Session();
+    // 条件展开漏删键的典型形：{ ...(x && { a }) } 在 x 为 undefined 时展开进 undefined
+    expect(() => s.append('user/message', { items: [1, 2, undefined] })).toThrowError(
+      /items\[2\].*undefined（展开对象携带了未定义字段——检查可选链\/条件展开）/,
+    );
+  });
+
   it('合法纯 JSON 深嵌套通过', () => {
     const s = new Session();
     s.append('user/message', {

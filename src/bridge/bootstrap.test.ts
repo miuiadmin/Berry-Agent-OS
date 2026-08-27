@@ -179,7 +179,7 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   it('load → applyRow：宿主 provide 物化 + 代理方法过桥往返（直连面——词汇已由上例入册）', async () => {
     const meta = await domain.load({ id: 'w1', entry: workerEntry, runtime: 'worker' });
     expect(meta.name).toBe('fx-worker');
-    const scope = root.fork({ name: 'w1', rowId: 'w1' });
+    const scope = root.fork({ name: 'w1', rowId: 'w1', builtinRow: false });
     // 行 config 走 applyRow 的 row 参数（与 loadPlugins activateOne 同源——slot 决定服务名）
     await domain.applyRow({ id: 'w1', runtime: 'worker', config: { slot: 'a' } }, scope);
     // 宿主侧物化：锚作用域可见（main 域消费方 Kahn inject 的判据源）
@@ -193,7 +193,7 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
 
   it('工具注册宿主物化：def 落桩注册表 + execute 过桥回 worker 执行体', async () => {
     await domain.load({ id: 'w3', entry: workerEntry, runtime: 'worker' });
-    const scope = root.fork({ name: 'w3', rowId: 'w3' });
+    const scope = root.fork({ name: 'w3', rowId: 'w3', builtinRow: false });
     await domain.applyRow({ id: 'w3', runtime: 'worker', config: { slot: 't' } }, scope);
     // 声明面物化：注册表拿到 def（execute 是宿主侧 thunk——非函数克隆而是桥接翻译）
     const def = tools.get('fx/wt');
@@ -209,7 +209,7 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
 
   it('行回卷联动：行作用域 dispose → 宿主绑定清 + svc.unload 到达（worker 行状态自清）', async () => {
     await domain.load({ id: 'w4', entry: workerEntry, runtime: 'worker' });
-    const scope = root.fork({ name: 'w4', rowId: 'w4' });
+    const scope = root.fork({ name: 'w4', rowId: 'w4', builtinRow: false });
     await domain.applyRow({ id: 'w4', runtime: 'worker', config: { slot: 'u' } }, scope);
     await scope.dispose();
     // 卸载联动是 fire-and-forget——轮询等 worker 侧行状态清（服务不可达）
@@ -225,7 +225,7 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
 
   it('工具注册随行回卷摘除：register 注销器挂行作用域 effect——scope.dispose 即摘', async () => {
     await domain.load({ id: 'w6', entry: workerEntry, runtime: 'worker' });
-    const scope = root.fork({ name: 'w6', rowId: 'w6' });
+    const scope = root.fork({ name: 'w6', rowId: 'w6', builtinRow: false });
     await domain.applyRow({ id: 'w6', runtime: 'worker', config: { slot: 'r' } }, scope);
     expect(tools.get('fx/wt')).toBeDefined();
     await scope.dispose();
@@ -235,7 +235,7 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
 
   it('terminate 域死：在途调用以 BRIDGE_WORKER_EXITED 结算、后续调用即刻拒绝；主动收尾不叫 onExit（非事故）', async () => {
     await domain.load({ id: 'w5', entry: workerEntry, runtime: 'worker' });
-    const scope = root.fork({ name: 'w5', rowId: 'w5' });
+    const scope = root.fork({ name: 'w5', rowId: 'w5', builtinRow: false });
     await domain.applyRow({ id: 'w5', runtime: 'worker', config: { slot: 'd' } }, scope);
     // 挂起在途调用（hang 永不结算）→ terminate → 域死结算
     const inflight = root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/taps-d')!['hang']!();
@@ -270,7 +270,7 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
       20_000,
     );
     await domain2.load({ id: 'wx', entry: workerEntry, runtime: 'worker' });
-    const scope = root.fork({ name: 'wx', rowId: 'wx' });
+    const scope = root.fork({ name: 'wx', rowId: 'wx', builtinRow: false });
     await domain2.applyRow({ id: 'wx', runtime: 'worker', config: { slot: 'x' } }, scope);
     expect(root.tryGet('fx/taps-x')).toBeDefined();
     // 绕过 domain.terminate（不置主动标记）直杀底层 worker = 模拟意外死亡

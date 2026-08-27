@@ -79,6 +79,13 @@ export interface Context {
    * 保持——任意嵌套的插件代码都能拿到自己的行归属）。
    */
   readonly rowId: string | undefined;
+  /**
+   * 行籍旗标（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
+   * true = 官方名位（宿主根作用域 + 官方行/承袭官方默认层 id 的替换行）——
+   * provide 只收单段小写名；false = 第三方行——provide 必含恰一 `/` 域前缀。
+   * 插件作用域内再 fork 的子作用域继承父行籍（行归属随深度保持，rowId 同律）。
+   */
+  readonly builtinRow: boolean;
   /** 带作用域前缀的子 logger */
   readonly logger: Logger;
   /** 生命周期信号：作用域销毁时 abort——长任务/定时器的取消依据 */
@@ -93,9 +100,10 @@ export interface ContextScope extends Context {
   /**
    * 派生子作用域：共享服务注册表与事件总线，独立 effect 栈 / signal / config /
    * logger 前缀。rowId 缺省继承父作用域（行身份随 fork 深度保持）；装载器为
-   * 插件行 fork 时显式传入行 id。
+   * 插件行 fork 时显式传入行 id。builtinRow（行籍旗标，契约篇 §1.5 provide
+   * 两段式分级）同律级联——官方行 true / 第三方行 false，决定 provide 名形。
    */
-  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string }): ContextScope;
+  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string; builtinRow?: boolean }): ContextScope;
   /** 销毁本作用域：LIFO 回卷全部 effect → abort signal。根作用域销毁 = 停机序列的一环 */
   dispose(): Promise<void>;
 }

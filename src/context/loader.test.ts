@@ -86,7 +86,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
         "export const name = 'happy';",
         'export const config = Type.Object({ greeting: Type.String() });',
         'export default async function apply(ctx, rowConfig) {',
-        '  ctx.provide("happy-marker", {',
+        '  ctx.provide("fx/happy-marker", {',
         '    appErrorUsable: typeof AppError === "function" && new AppError("TEST_CODE", "x") instanceof Error,',
         '    schemaFromVirtualTypebox: typeof config === "object" && config !== null,',
         '    greeting: rowConfig.greeting,',
@@ -102,7 +102,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
     expect(result.failed).toEqual([]);
     expect(result.activated).toMatchObject([{ id: 'happy', name: 'happy' }]);
     // 虚拟注入三面全通：宿主错误面可用 / typebox 构 schema（宿主 Value 同实例校验通过才走到 apply）/ config 冻结视图
-    const marker = root.tryGet<Record<string, unknown>>('happy-marker');
+    const marker = root.tryGet<Record<string, unknown>>('fx/happy-marker');
     expect(marker).toBeTruthy();
     expect(marker!['appErrorUsable']).toBe(true);
     expect(marker!['schemaFromVirtualTypebox']).toBe(true);
@@ -117,11 +117,11 @@ describe('loadPlugins 虚拟注入与激活', () => {
       dir,
       'rowid.ts',
       [
-        "export const name = 'rowid-probe';",
+        "export const name = 'fx/rowid-probe';",
         'export default async function apply(ctx) {',
         '  // 行 id 直读 + 插件内再 fork 的子作用域继承（行身份随 fork 深度保持）',
         '  const child = ctx.fork({ name: "inner" });',
-        '  ctx.provide("rowid-probe", { own: ctx.rowId, childSees: child.rowId });',
+        '  ctx.provide("fx/rowid-probe", { own: ctx.rowId, childSees: child.rowId });',
         '}',
       ].join('\n'),
     );
@@ -131,7 +131,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
     const result = await loadPlugins(root, [{ id: 'the-row-id', entry }]);
 
     expect(result.failed).toEqual([]);
-    const probe = root.tryGet<{ own: string | undefined; childSees: string | undefined }>('rowid-probe');
+    const probe = root.tryGet<{ own: string | undefined; childSees: string | undefined }>('fx/rowid-probe');
     // loader fork 注入行 id（可与插件声明 name 不同物——行 id 是组合树身份）
     expect(probe!.own).toBe('the-row-id');
     expect(probe!.childSees).toBe('the-row-id');
@@ -147,7 +147,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
         "export const name = 'schema';",
         'export const config = Type.Object({ port: Type.Number() });',
         'export default async function apply(ctx) {',
-        '  ctx.provide("schema-leak", { ran: true });',
+        '  ctx.provide("fx/schema-leak", { ran: true });',
         '}',
       ].join('\n'),
     );
@@ -158,7 +158,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]!.code).toBe(PLUGIN_CONFIG_INVALID);
     expect(result.failed[0]!.message).toContain('port'); // 首个错误路径进诊断
-    expect(root.tryGet('schema-leak')).toBeUndefined(); // apply 未执行——无残骸
+    expect(root.tryGet('fx/schema-leak')).toBeUndefined(); // apply 未执行——无残骸
   });
 
   it('optionalInject 缺席不阻塞：tryGet 探测得 undefined，照常激活', async () => {
@@ -170,7 +170,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
         "export const name = 'soft';",
         "export const optionalInject = ['absent-service'];",
         'export default async function apply(ctx) {',
-        '  ctx.provide("soft-probe", { absent: ctx.tryGet("absent-service") });',
+        '  ctx.provide("fx/soft-probe", { absent: ctx.tryGet("absent-service") });',
         '}',
       ].join('\n'),
     );
@@ -179,7 +179,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toHaveLength(1);
-    expect(root.tryGet<{ absent: unknown }>('soft-probe')!.absent).toBeUndefined();
+    expect(root.tryGet<{ absent: unknown }>('fx/soft-probe')!.absent).toBeUndefined();
   });
 });
 
@@ -193,10 +193,10 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
       'consumer.ts',
       [
         "export const name = 'consumer';",
-        "export const inject = ['kahn-svc'];",
+        "export const inject = ['fx/kahn-svc'];",
         'export default async function apply(ctx) {',
-        '  const svc = ctx.get("kahn-svc");',
-        '  ctx.provide("consumer-saw", { value: svc.value });',
+        '  const svc = ctx.get("fx/kahn-svc");',
+        '  ctx.provide("fx/consumer-saw", { value: svc.value });',
         '}',
       ].join('\n'),
     );
@@ -206,7 +206,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
       [
         "export const name = 'provider';",
         'export default async function apply(ctx) {',
-        '  ctx.provide("kahn-svc", { value: 42 });',
+        '  ctx.provide("fx/kahn-svc", { value: 42 });',
         '}',
       ].join('\n'),
     );
@@ -219,7 +219,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
     ]);
 
     expect(result.failed).toEqual([]);
-    expect(root.tryGet<{ value: number }>('consumer-saw')!.value).toBe(42);
+    expect(root.tryGet<{ value: number }>('fx/consumer-saw')!.value).toBe(42);
     // 激活顺序：提供者先于消费者（轮次激活语义），事件序与清单序一致
     expect(result.activated.map((item) => item.id)).toEqual(['provider', 'consumer']);
     expect(events.filter((e) => e.kind === 'activated').map((e) => (e.payload as PluginActivatedPayload).id)).toEqual([
@@ -237,7 +237,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
         "export const name = 'waiter';",
         "export const inject = ['no-such-service'];",
         'export default async function apply(ctx) {',
-        '  ctx.provide("waiter-ran", true);',
+        '  ctx.provide("fx/waiter-ran", true);',
         '}',
       ].join('\n'),
     );
@@ -248,7 +248,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]!.code).toBe(PLUGIN_INJECT_UNRESOLVED);
     expect(result.failed[0]!.message).toContain('no-such-service');
-    expect(root.tryGet('waiter-ran')).toBeUndefined(); // 未激活——无残骸
+    expect(root.tryGet('fx/waiter-ran')).toBeUndefined(); // 未激活——无残骸
   });
 
   it('依赖环：双方 PLUGIN_INJECT_UNRESOLVED，诊断指明疑似依赖环', async () => {
@@ -258,8 +258,8 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
       'cyc-a.ts',
       [
         "export const name = 'cyc-a';",
-        "export const inject = ['cyc-b-svc'];",
-        'export default async function apply(ctx) { ctx.provide("cyc-a-svc", true); }',
+        "export const inject = ['fx/cyc-b-svc'];",
+        'export default async function apply(ctx) { ctx.provide("fx/cyc-a-svc", true); }',
       ].join('\n'),
     );
     const b = writePlugin(
@@ -267,8 +267,8 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
       'cyc-b.ts',
       [
         "export const name = 'cyc-b';",
-        "export const inject = ['cyc-a-svc'];",
-        'export default async function apply(ctx) { ctx.provide("cyc-b-svc", true); }',
+        "export const inject = ['fx/cyc-a-svc'];",
+        'export default async function apply(ctx) { ctx.provide("fx/cyc-b-svc", true); }',
       ].join('\n'),
     );
     const root = makeRoot();
@@ -297,7 +297,7 @@ describe('loadPlugins 形状校验与 import 失败', () => {
     const noName = writePlugin(
       dir,
       'no-name.ts',
-      ['export default async function apply(ctx) { ctx.provide("no-name-leak", true); }'].join('\n'),
+      ['export default async function apply(ctx) { ctx.provide("fx/no-name-leak", true); }'].join('\n'),
     );
     const badInject = writePlugin(
       dir,
@@ -323,7 +323,7 @@ describe('loadPlugins 形状校验与 import 失败', () => {
       ['no-name', PLUGIN_SHAPE_INVALID],
       ['bad-inject', PLUGIN_SHAPE_INVALID],
     ]);
-    expect(root.tryGet('no-name-leak')).toBeUndefined(); // 形状不过——apply 从未执行
+    expect(root.tryGet('fx/no-name-leak')).toBeUndefined(); // 形状不过——apply 从未执行
   });
 
   it('入口语法错误：PLUGIN_LOAD_FAILED（非 AppError 的 import 异常也归一入清单）', async () => {
@@ -467,7 +467,7 @@ describe('loadPlugins import 来源门禁', () => {
       [
         'export const name = "bundled";',
         'im' + "port { marker } from 'self-dep';",
-        'export default async function apply(ctx) { ctx.provide("bundled-marker", { marker }); }',
+        'export default async function apply(ctx) { ctx.provide("fx/bundled-marker", { marker }); }',
       ].join('\n'),
     );
     const root = makeRoot();
@@ -475,7 +475,7 @@ describe('loadPlugins import 来源门禁', () => {
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toMatchObject([{ id: 'bundled', name: 'bundled' }]);
-    expect(root.tryGet<{ marker: string }>('bundled-marker')!.marker).toBe('self-dep-ok');
+    expect(root.tryGet<{ marker: string }>('fx/bundled-marker')!.marker).toBe('self-dep-ok');
   });
 
   it('相对路径树内放行 + 子文件逃逸拒载：全图扫描不只看入口（moduleCache:false 对账兜底）', async () => {
@@ -492,13 +492,13 @@ describe('loadPlugins import 来源门禁', () => {
       [
         'export const name = "uses-helper";',
         'im' + "port { combined } from './helper.ts';",
-        'export default async function apply(ctx) { ctx.provide("helper-marker", { combined }); }',
+        'export default async function apply(ctx) { ctx.provide("fx/helper-marker", { combined }); }',
       ].join('\n'),
     );
     const okRoot = makeRoot();
     const okResult = await loadPlugins(okRoot, [{ id: 'uses-helper', entry: okEntry }]);
     expect(okResult.failed).toEqual([]);
-    expect(okRoot.tryGet<{ combined: string }>('helper-marker')!.combined).toBe(join('a', 'b'));
+    expect(okRoot.tryGet<{ combined: string }>('fx/helper-marker')!.combined).toBe(join('a', 'b'));
 
     // 子文件相对路径跳出树根（../../ 指向 tmpdir 层的诱饵文件）——入口干净、依赖脏，同样拒
     const badDir = makeFixtureDir();
@@ -536,7 +536,7 @@ describe('loadPlugins import 来源门禁', () => {
         "import { isBuiltin } from 'node:module';",
         'im' + "port { basename } from 'path';", // 裸内建（无 node: 前缀）——插件允许的形态
         'export default async function apply(ctx) {',
-        '  ctx.provide("natives-marker", { joined: join("x", "y"), builtin: isBuiltin("path"), base: basename("/a/b.ts") });',
+        '  ctx.provide("fx/natives-marker", { joined: join("x", "y"), builtin: isBuiltin("path"), base: basename("/a/b.ts") });',
         '}',
       ].join('\n'),
     );
@@ -544,7 +544,7 @@ describe('loadPlugins import 来源门禁', () => {
     const result = await loadPlugins(root, [{ id: 'natives', entry }]);
 
     expect(result.failed).toEqual([]);
-    const marker = root.tryGet<Record<string, unknown>>('natives-marker')!;
+    const marker = root.tryGet<Record<string, unknown>>('fx/natives-marker')!;
     expect(marker['joined']).toBe(join('x', 'y'));
     expect(marker['builtin']).toBe(true);
     expect(marker['base']).toBe('b.ts');
@@ -560,7 +560,7 @@ describe('loadPlugins import 来源门禁', () => {
         "import { createProvider, hasApi } from 'berryagent/llm';",
         "import { openDatabase } from 'berryagent/sqlite';",
         'export default async function apply(ctx) {',
-        '  ctx.provide("faces-marker", {',
+        '  ctx.provide("fx/faces-marker", {',
         '    provider: createProvider({ id: "fake" }),',
         '    guard: hasApi({} as never, "fake"),',
         '    db: openDatabase(":memory:"),',
@@ -580,7 +580,7 @@ describe('loadPlugins import 来源门禁', () => {
     });
 
     expect(result.failed).toEqual([]);
-    const marker = root.tryGet<Record<string, unknown>>('faces-marker')!;
+    const marker = root.tryGet<Record<string, unknown>>('fx/faces-marker')!;
     expect(marker['provider']).toEqual({ kind: 'provider', id: 'fake' });
     expect(marker['guard']).toBe(true);
     expect(marker['db']).toEqual({ kind: 'db', path: ':memory:' });
@@ -596,7 +596,7 @@ describe('loadPlugins import 来源门禁', () => {
         "import * as llmFace from 'berryagent/llm';",
         "import * as sqliteFace from 'berryagent/sqlite';",
         'export default async function apply(ctx) {',
-        '  ctx.provide("empty-faces-marker", {',
+        '  ctx.provide("fx/empty-faces-marker", {',
         '    llmKeys: Object.keys(llmFace).length,',
         '    sqliteKeys: Object.keys(sqliteFace).length,',
         '  });',
@@ -607,7 +607,7 @@ describe('loadPlugins import 来源门禁', () => {
     const result = await loadPlugins(root, [{ id: 'empty-faces', entry }]);
 
     expect(result.failed).toEqual([]);
-    const marker = root.tryGet<Record<string, unknown>>('empty-faces-marker')!;
+    const marker = root.tryGet<Record<string, unknown>>('fx/empty-faces-marker')!;
     expect(marker['llmKeys']).toBe(0);
     expect(marker['sqliteKeys']).toBe(0);
   });
@@ -624,7 +624,7 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
       [
         'export const name = "boom";',
         'export default async function apply(ctx) {',
-        '  ctx.provide("boom-svc", { on: true });',
+        '  ctx.provide("fx/boom-svc", { on: true });',
         '  ctx.effect(() => () => { (globalThis).__boomCleaned = true; });',
         '  throw new Error("apply 炸了");',
         '}',
@@ -638,7 +638,7 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
     expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_FAILED);
     expect(result.failed[0]!.message).toContain('apply 炸了');
     // 失败行不留残骸（§1.6）：半途 provide 已回卷、effect 清理已执行
-    expect(root.tryGet('boom-svc')).toBeUndefined();
+    expect(root.tryGet('fx/boom-svc')).toBeUndefined();
     expect((globalThis as Record<string, unknown>)['__boomCleaned']).toBe(true);
   });
 
@@ -647,9 +647,10 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
     const ok = writePlugin(
       dir,
       'ok.ts',
-      ['export const name = "ok";', 'export default async function apply(ctx) { ctx.provide("ok-svc", true); }'].join(
-        '\n',
-      ),
+      [
+        'export const name = "ok";',
+        'export default async function apply(ctx) { ctx.provide("fx/ok-svc", true); }',
+      ].join('\n'),
     );
     const offEntry = writePlugin(
       dir,
@@ -675,7 +676,7 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
       'failed:ghost',
       'activated:ok',
     ]);
-    expect(root.tryGet('ok-svc')).toBe(true);
+    expect(root.tryGet('fx/ok-svc')).toBe(true);
   });
 });
 
@@ -690,7 +691,7 @@ describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
       [
         'export const name = "hang";',
         'export default async function apply(ctx) {',
-        '  ctx.provide("hang-svc", { on: true });',
+        '  ctx.provide("fx/hang-svc", { on: true });',
         '  ctx.effect(() => () => { (globalThis).__hangCleaned = true; });',
         '  await new Promise(() => {}); // 永挂：挂起转化条款的目标形态',
         '}',
@@ -705,7 +706,7 @@ describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
     expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_TIMEOUT);
     expect(result.failed[0]!.message).toContain('30ms');
     // 失败行不留残骸：半途 provide 已回卷、effect 清理已执行
-    expect(root.tryGet('hang-svc')).toBeUndefined();
+    expect(root.tryGet('fx/hang-svc')).toBeUndefined();
     expect((globalThis as Record<string, unknown>)['__hangCleaned']).toBe(true);
   });
 
@@ -732,7 +733,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
         'export const name = "listener";',
         'export default async function apply(ctx) {',
         '  ctx.on("emitter/done", (payload: { n: number }) => {',
-        '    ctx.provide("listener-saw", payload.n);',
+        '    ctx.provide("fx/listener-saw", payload.n);',
         '  });',
         '}',
       ].join('\n'),
@@ -758,7 +759,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toHaveLength(2);
-    expect(root.tryGet('listener-saw')).toBe(7); // on 在册通过 + emit 送达
+    expect(root.tryGet('fx/listener-saw')).toBe(7); // on 在册通过 + emit 送达
   });
 
   it('events 声明非法（name 无 /、mode 非四值、缺 note）三例皆 PLUGIN_SHAPE_INVALID，apply 从未执行', async () => {
@@ -769,7 +770,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
       [
         'export const name = "no-slash";',
         'export const events = [{ name: "noslash", mode: "emit", note: "x" }];',
-        'export default async function apply(ctx) { ctx.provide("no-slash-leak", true); }',
+        'export default async function apply(ctx) { ctx.provide("fx/no-slash-leak", true); }',
       ].join('\n'),
     );
     const badMode = writePlugin(
@@ -808,7 +809,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
     for (const item of result.failed) {
       expect(item.message.startsWith(`${item.id}：`)).toBe(false);
     }
-    expect(root.tryGet('no-slash-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
+    expect(root.tryGet('fx/no-slash-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
   });
 
   it('effect 回调返回非函数：装载期即失败并带正确习语指引（探针 #13——jiti 无类型护栏的运行时补位）', async () => {
@@ -894,7 +895,7 @@ describe('loadPlugins 技能目录注册回调', () => {
         "export const name = 'skillpack';",
         "export const skills = ['./skills'];",
         'export default async function apply(ctx) {',
-        '  ctx.provide("skillpack-apply-ran", true);',
+        '  ctx.provide("fx/skillpack-apply-ran", true);',
         '}',
       ].join('\n'),
     );
@@ -904,7 +905,7 @@ describe('loadPlugins 技能目录注册回调', () => {
       registerSkills: (info) => {
         // 时序锚点：回调时 apply 尚未执行（fork 后 apply 前的登记位——冷读裁决）
         seen.push(info);
-        expect(root.tryGet('skillpack-apply-ran')).toBeUndefined();
+        expect(root.tryGet('fx/skillpack-apply-ran')).toBeUndefined();
       },
     });
 
@@ -915,7 +916,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     expect(seen[0]!.packageRoot).toBe(dir); // 包根 = 入口文件所在目录
     expect(seen[0]!.dirs).toEqual(['./skills']);
     expect(seen[0]!.scope).toBeTruthy(); // 行作用域已 fork（回调可挂 effect）
-    expect(root.tryGet('skillpack-apply-ran')).toBe(true); // apply 事后确实跑了
+    expect(root.tryGet('fx/skillpack-apply-ran')).toBe(true); // apply 事后确实跑了
   });
 
   it('apply 抛错回卷：回调挂行作用域的 effect 随 dispose 回卷（技能是行资产，失败不留残骸）', async () => {
@@ -959,7 +960,7 @@ describe('loadPlugins 技能目录注册回调', () => {
         "export const name = 'nohook';",
         "export const skills = ['./skills'];",
         'export default async function apply(ctx) {',
-        '  ctx.provide("nohook-ran", true);',
+        '  ctx.provide("fx/nohook-ran", true);',
         '}',
       ].join('\n'),
     );
@@ -968,7 +969,7 @@ describe('loadPlugins 技能目录注册回调', () => {
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toMatchObject([{ id: 'nohook', name: 'nohook' }]);
-    expect(root.tryGet('nohook-ran')).toBe(true);
+    expect(root.tryGet('fx/nohook-ran')).toBe(true);
   });
 
   it('纯技能包最小形态：name + skills + default 空实现三件零逻辑即合法插件', async () => {
@@ -1004,7 +1005,7 @@ describe('loadPlugins 技能目录注册回调', () => {
         "export const name = 'badskills';",
         "export const skills = './skills';",
         'export default async function apply(ctx) {',
-        '  ctx.provide("badskills-leak", true);',
+        '  ctx.provide("fx/badskills-leak", true);',
         '}',
       ].join('\n'),
     );
@@ -1015,7 +1016,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]!.code).toBe(PLUGIN_SHAPE_INVALID);
     expect(result.failed[0]!.message).toContain('skills');
-    expect(root.tryGet('badskills-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
+    expect(root.tryGet('fx/badskills-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
   });
 
   it('builtin 行声明 skills：回调收到 packageRoot undefined（宿主函数件无磁盘锚点）', async () => {
@@ -1120,7 +1121,7 @@ describe('装载器 apply 边界的 caller 链（插件身份已知的第一写�
         "  const probe = ctx.get<(label: string) => string | undefined>('caller-probe');",
         '  ctx.effect(() => () => {});', // 注册侧不在链上的对照探针见下
         '  await Promise.resolve();', // 跨 tick 仍在链上（异步下游继承）
-        "  ctx.provide('probe-result', { applyTime: probe('apply') });",
+        "  ctx.provide('fx/probe-result', { applyTime: probe('apply') });",
         '}',
       ].join('\n'),
     );
@@ -1140,6 +1141,6 @@ describe('装载器 apply 边界的 caller 链（插件身份已知的第一写�
     expect(reads.find((r) => r.label === 'apply')).toEqual({ label: 'apply', caller: 'row-caller-id' });
     // 装载器自身（激活完成后宿主侧读）：不在链上——注册回调/生命周期 emit 不落插件账
     expect(chainCaller()).toBeUndefined();
-    expect(root.tryGet('probe-result')).toEqual({ applyTime: 'row-caller-id' });
+    expect(root.tryGet('fx/probe-result')).toEqual({ applyTime: 'row-caller-id' });
   });
 });

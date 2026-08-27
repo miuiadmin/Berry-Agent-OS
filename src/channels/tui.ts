@@ -13,6 +13,7 @@
  */
 
 import {
+  CombinedAutocompleteProvider,
   Container,
   Editor,
   ScrollView,
@@ -22,6 +23,7 @@ import {
   parseKey,
   type Component,
   type EditorTheme,
+  type SlashCommand,
   type Terminal,
   type TUI,
 } from '@earendil-works/pi-tui';
@@ -55,6 +57,12 @@ export interface TuiChannelOptions {
   readonly entryStatus?: (sessionId: string) => 'running' | 'idle' | undefined;
   /** 退出键提示文案（S6 形态⑦：宿主按起屏时点驱动数分档——多驱动「Ctrl+C 打断 / Ctrl+D·/quit 退出」、单驱动缺省「Ctrl+D·Ctrl+C 退出」） */
   readonly quitHint?: string;
+  /**
+   * 工作区根（M4 命令/文件补全接线，2026-08-27 第三十三批）：传入即武装
+   * editor autocomplete（命令名补全 + 参数补全 + `@` 文件补全，经 pi-tui
+   * CombinedAutocompleteProvider——basePath 用）；缺省不武装（测试/无终端面）。
+   */
+  readonly workspace?: string;
 }
 
 /** TUI 通道面（app 组合根持有） */
@@ -96,8 +104,8 @@ const EDITOR_THEME: EditorTheme = {
   },
 };
 
-/** 级别 → 通知行前缀 */
-const NOTIFY_PREFIX: Record<NotifyLevel, string> = { info: 'ℹ', warn: '⚠', error: '✖' };
+/** 级别 → 通知行前缀（success 档 2026-08-27 第三十三批 P2-1 新增） */
+const NOTIFY_PREFIX: Record<NotifyLevel, string> = { info: 'ℹ', success: '✔', warn: '⚠', error: '✖' };
 
 /** 组装 TUI 通道 */
 export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
@@ -111,6 +119,40 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   /** 状态行（setStatus 更新；空串 = 空） */
   const statusText = new Text('');
   const editor = new Editor(tui, EDITOR_THEME);
+  // M4 补全接线（2026-08-27 第三十三批）：workspace 传入即武装 autocomplete——
+  // 命令名补全 + 参数补全 + `@` 文件补全三合一（pi-tui CombinedAutocompleteProvider，
+  // basePath = 工作区根）。命令清单是 provider 构造参数静态快照，注册面任何变动
+  // （boot 命令注册 / /reload 重注册 / 技能命令重扫）须重投影——订阅
+  // commands.onChange 自动重建（与 skills_change 同构：注册表自持通知，宿主不编
+  // 排时点）；参数补全回调闭包内实时 lookup（重装后的命令体即取即用）。
+  if (opts.workspace !== undefined) {
+    /** 命令注册表 → pi-tui SlashCommand 投影（名字清单快照 + 实时参数回调） */
+    const projectCommands = (): SlashCommand[] =>
+      opts.commands.list().map((cmd) => ({
+        name: cmd.name, // pi-tui 匹配用裸名（不含 '/' 前缀——输入侧已剥离）
+        description: cmd.description,
+        ...(cmd.argumentHint !== undefined ? { argumentHint: cmd.argumentHint } : {}),
+        ...(cmd.getArgumentCompletions !== undefined
+          ? {
+              // 参数回调实时查注册表（/reload 后重注册的命令体即取即用）；readonly
+              // 数组转 mutable（pi-tui 面非 readonly）
+              getArgumentCompletions: async (
+                prefix: string,
+              ): Promise<{ value: string; label: string; description?: string }[] | null> => {
+                const current = opts.commands.lookup(cmd.name);
+                const items = await current?.getArgumentCompletions?.(prefix);
+                return items && items.length > 0 ? items.map((item) => ({ ...item })) : null;
+              },
+            }
+          : {}),
+      }));
+    /** 重装 provider（构造时一次 + 每次 onChange；setAutocompleteProvider 为可选 API 防御调用） */
+    const installAutocomplete = (): void => {
+      editor.setAutocompleteProvider?.(new CombinedAutocompleteProvider(projectCommands(), opts.workspace!));
+    };
+    installAutocomplete();
+    opts.commands.onChange(installAutocomplete);
+  }
   const editorContainer = new Container();
   editorContainer.addChild(editor);
   /** 底部提示行（快捷键说明，装配期固定）。S6 形态⑦：quitHint 由构造方按

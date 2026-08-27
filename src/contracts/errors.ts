@@ -77,6 +77,14 @@ export function describeError(error: unknown): string {
 export const CONTEXT_SERVICE_NOT_FOUND = registerErrorCode('CONTEXT_SERVICE_NOT_FOUND');
 /** context：ctx.provide 同名服务重复注册（组合树装配错误，响亮失败不静默覆盖） */
 export const CONTEXT_SERVICE_EXISTS = registerErrorCode('CONTEXT_SERVICE_EXISTS');
+/**
+ * context：ctx.provide 服务名形状不合（两段式分级，契约篇 §1.5，2026-08-27
+ * 第三十三批 P2-1）。与 CONTEXT_SERVICE_EXISTS 分立——一管名字形状、一管重复
+ * 注册。官方名位（宿主根作用域 + 行籍为官方的行）只收单段小写名（无斜杠）；
+ * 第三方行必含恰一 `/` 域前缀（`厂商/服务名` 两段各自同字符集）——两段式使
+ * 单段名在任一碰撞域结构性专属官方名位，第三方无法凭单段名遮蔽宿主词。
+ */
+export const CONTEXT_SERVICE_NAME_INVALID = registerErrorCode('CONTEXT_SERVICE_NAME_INVALID');
 /** context：作用域已销毁后仍调用其 API（stale ctx 护栏，/reload 必然配套） */
 export const CONTEXT_DISPOSED = registerErrorCode('CONTEXT_DISPOSED');
 /**
@@ -245,6 +253,15 @@ export const PLUGIN_MAIN_DB_FORBIDDEN = registerErrorCode('PLUGIN_MAIN_DB_FORBID
 export const PLUGIN_FIXED_ROW = registerErrorCode('PLUGIN_FIXED_ROW');
 /** composition：组合树行 schema 违规（overlay 缺 id / 字段类型错 / 未知字段 / fixed 行被禁用——pre-release 拒绝式，契约篇 §6.5） */
 export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');
+/**
+ * skills：registerProvider 注册时点首调形状断言不过（骨架篇 §9.2，2026-08-27
+ * 第三十三批 P2-1 B12）。防注册时点两路静默：① provider.list() 返回退化形
+ * （缺 skills/diagnostics 键/元素非对象）——此前要到首次 refresh 才以裸
+ * TypeError 炸（栈指向 merge 不指插件）；② list() 本身抛错——此前 refresh 期
+ * 降 provider-failed 警告，「装上了但永远空」注册时点无感。断言只在注册入口
+ * 一次（不随 refresh 重复）；运行期退化形由 refresh 的数组守卫降 warning。
+ */
+export const SKILLS_PROVIDER_INVALID = registerErrorCode('SKILLS_PROVIDER_INVALID');
 
 /* ------------------------------------------------------------------ */
 /* 桥接协议码族（契约篇 §1.7 错误面，2026-08-26 第二十七批刀二）——      */

@@ -16,6 +16,7 @@ import { createTuiChannel } from '../channels/tui.js';
 import { projectedToAgentMessages } from '../chat/index.js';
 import { createBerryRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
+import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
 import { VERSION } from './version.js';
 
@@ -50,6 +51,10 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
         error: err instanceof Error ? err.stack : String(err),
       }),
     title: `Berry ${VERSION}`,
+    // M4 补全接线（2026-08-27 第三十三批）：工作区根传通道武装 autocomplete（命令
+    // 名/参数/@ 文件三合一补全）；canonical 根自 ctx.paths 取（通道不读 env 猜
+    // cwd）。persist:false 等无 paths 服务面 = 不武装（补全是辅助面非硬依赖）
+    workspace: runtime.ctx.tryGet<PathsService>('paths')?.workspaceRoot(),
     // S6 形态⑦提示行两态：起屏时点已有多会话条目（resume 多开）= 多驱动文案
     // （运行中 /app new 后不重绘——提示行是辅助面，分档语义恒由 front.interrupt 承载）
     quitHint:
