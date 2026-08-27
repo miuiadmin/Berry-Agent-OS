@@ -29,7 +29,17 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { basename, dirname, join, parse, relative, resolve, sep } from 'node:path';
 import { writeAtomicFile } from '../persist/index.js';
 import {
@@ -1200,17 +1210,114 @@ function readDataDescriptor(dataDir: string, id: string): PluginDataDescriptor |
 }
 
 /**
+ * plugins/ 直下装机子树保留名对（单一来源）：git = git 源克隆子树、
+ * node_modules = npm 装机子树。两消费点——assertSafeDataRootId（数据根
+ * 写/删双闸防撞名）与 sweepPluginTmpDirs（扫龄跳过装机子树）。布局知识
+ * 单源（契约篇 §1.5 tmp 钉位细则④），新增保留名只改此处。
+ */
+export const RESERVED_SUBTREE_NAMES: readonly string[] = ['git', 'node_modules'];
+
+/**
  * 件数据根保留名防线：行 id 撞装机子树名（git / node_modules）= 件数据根路径
  * 与装机子树同径——写账本会污染 sources.json 邻域、purge 会整删装机子树。
  * install 收割写与 uninstall purge 删两路同拒（rmSync 误吞装机子树 = 数据破坏）。
  */
 function assertSafeDataRootId(id: string): void {
-  if (id === 'git' || id === 'node_modules') {
+  if (RESERVED_SUBTREE_NAMES.includes(id)) {
     throw new AppError(
       COMPOSITION_ROW_INVALID,
       `行 id「${id}」撞装机子树保留名（plugins/${id}）——件数据根与装机子树布局冲突，拒绝操作`,
     );
   }
+}
+
+/** tmp 扫龄阈值（毫秒）= 7 天常数，不开旋钮（无 env 无 config——契约篇 §1.5 tmp 钉位细则③） */
+const TMP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** ENOENT/ENOTDIR 判定：双进程同扫竞态的「他者已删」形态——视为成功不 warn（契约④ 删除幂等） */
+function isVanished(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/**
+ * 件临时空间扫龄（boot 一次；契约篇 §1.5 tmp 钉位细则④⑤）：扫
+ * `plugins/<id>/tmp/` 全体件数据根（含已卸载件残留根），删 mtime 过阈值
+ * （7 天）的文件并自底向上剪空目录（含 tmp 本体——消费者按需
+ * mkdirSync recursive 再造）。安全件：入口 lstat 判真目录（tmp 本身是
+ * 链接则不进——防逃逸）；目录内 Dirent 不跟随符号链接（链接本体当文件
+ * unlink、永不触目标）；只进 tmp/ 子树——数据根其余内容（data.json/
+ * 自管库）永不触碰。best-effort：单件失败 warn 继续、ENOENT/ENOTDIR
+ * 静默容忍；plugins/ 目录整体缺失 = 静默 no-op（全新机器首启）。
+ * 返回删除文件数（诊断口径，含剪除目录前其内的文件）。
+ */
+export function sweepPluginTmpDirs(dataDir: string, logger?: { warn: (msg: string) => void }): number {
+  let names: string[];
+  try {
+    names = readdirSync(join(dataDir, 'plugins'));
+  } catch {
+    return 0; // plugins/ 不存在或不可读——首启常态，静默跳过
+  }
+  const deadline = Date.now() - TMP_MAX_AGE_MS;
+  let removed = 0;
+
+  /**
+   * 单目录自底向上扫：过期文件删除、真子目录递归后空则剪。
+   * 返回本目录是否「全部子项已消失」——true 则父层可剪本目录。
+   */
+  const sweepDir = (dir: string): boolean => {
+    let allGone = true;
+    for (const item of readdirSync(dir, { withFileTypes: true })) {
+      const child = join(dir, item.name);
+      try {
+        if (item.isDirectory()) {
+          // Dirent 基于 lstat——符号链接目录此处 isDirectory()=false，走文件分支
+          if (sweepDir(child)) {
+            try {
+              rmdirSync(child);
+            } catch (err) {
+              if (!isVanished(err)) allGone = false; // ENOTEMPTY（并发写入）= 子目录仍在
+            }
+          } else allGone = false;
+        } else {
+          // 文件与符号链接同路：mtime 取 lstat（链接本体），过期即删本体
+          if (lstatSync(child).mtimeMs < deadline) {
+            unlinkSync(child);
+            removed++;
+          } else allGone = false;
+        }
+      } catch (err) {
+        if (isVanished(err)) continue; // 他进程同扫已删 = 成功
+        logger?.warn(`件 tmp 扫龄单件失败（跳过继续）：${child}：${(err as Error).message}`);
+        allGone = false;
+      }
+    }
+    return allGone;
+  };
+
+  for (const id of names) {
+    if (RESERVED_SUBTREE_NAMES.includes(id)) continue; // 装机子树非数据根——永不触碰
+    const tmpDir = join(pluginDataDirOf(dataDir, id), 'tmp');
+    let st;
+    try {
+      st = lstatSync(tmpDir);
+    } catch {
+      continue; // 无 tmp 子目录的件数据根 = 常态
+    }
+    if (!st.isDirectory()) continue; // tmp 为链接/文件形态：不进（防符号链接逃逸，契约⑤）
+    try {
+      if (sweepDir(tmpDir)) {
+        try {
+          rmdirSync(tmpDir); // 空 tmp 本体剪除——失败容忍（非义务动作）
+        } catch {
+          /* 非空（并发写入）或已删皆可 */
+        }
+      }
+    } catch (err) {
+      if (!isVanished(err)) logger?.warn(`件 tmp 扫龄失败（跳过该数据根）：${tmpDir}：${(err as Error).message}`);
+    }
+  }
+  return removed;
 }
 
 /**

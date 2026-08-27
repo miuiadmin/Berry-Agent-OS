@@ -5,7 +5,18 @@
  * 等价于模型层的 faux provider）；overlay 读写/组合树装载全真（临时目录真文件）。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lutimesSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -21,6 +32,7 @@ import { Type } from '../contracts/typebox.js';
 import {
   createPluginsService,
   spawnRunner,
+  sweepPluginTmpDirs,
   type ConfigureReport,
   type EntryLoader,
   type InstallRunner,
@@ -977,5 +989,114 @@ describe('requestReload 导线', () => {
 describe('升权目标档词汇单一归宿（admin 写类动词 ↔ safety 权威词表）', () => {
   it('admin 镜像常量 ≡ safety ESCALATION_TARGETS（两侧漂移即红；admin 不开 admin→safety 边）', () => {
     expect([...PRIVILEGE_REQUEST_TARGETS]).toEqual([...ESCALATION_TARGETS]);
+  });
+});
+
+describe('tmp 扫龄（契约篇 §1.5 tmp 钉位细则）', () => {
+  /** 回拨 mtime 至 8 天前（阈值 7 天——安全过线；秒精度，utimes/lutimes 语义） */
+  const OLD = (Date.now() - 8 * 86400_000) / 1000;
+
+  it('过期删、新鲜留；只进 tmp/ 子树——data.json 与 tmp 外旧文件永不触碰', () => {
+    const dataDir = makeDataDir();
+    const root = join(dataDir, 'plugins', 'demo');
+    mkdirSync(join(root, 'tmp'), { recursive: true });
+    mkdirSync(join(root, 'cache'), { recursive: true });
+    writeFileSync(join(root, 'tmp', 'old.bin'), 'x');
+    writeFileSync(join(root, 'tmp', 'fresh.bin'), 'x');
+    writeFileSync(join(root, 'cache', 'ancient.bin'), 'x'); // tmp 外旧文件——非扫龄对象
+    writeFileSync(join(root, 'data.json'), '{}');
+    utimesSync(join(root, 'tmp', 'old.bin'), OLD, OLD);
+    utimesSync(join(root, 'cache', 'ancient.bin'), OLD, OLD);
+    utimesSync(join(root, 'data.json'), OLD, OLD);
+
+    const removed = sweepPluginTmpDirs(dataDir);
+    expect(removed).toBe(1);
+    expect(existsSync(join(root, 'tmp', 'old.bin'))).toBe(false);
+    expect(existsSync(join(root, 'tmp', 'fresh.bin'))).toBe(true);
+    expect(existsSync(join(root, 'cache', 'ancient.bin'))).toBe(true); // tmp 外不删
+    expect(existsSync(join(root, 'data.json'))).toBe(true); // 账本永不触碰
+  });
+
+  it('装机子树保留名（git/node_modules）永不扫——同名单常量两消费点', () => {
+    const dataDir = makeDataDir();
+    const nmTmp = join(dataDir, 'plugins', 'node_modules', 'pkg', 'tmp');
+    const gitTmp = join(dataDir, 'plugins', 'git', 'host', 'x', 'tmp');
+    mkdirSync(nmTmp, { recursive: true });
+    mkdirSync(gitTmp, { recursive: true });
+    writeFileSync(join(nmTmp, 'old.bin'), 'x');
+    writeFileSync(join(gitTmp, 'old.bin'), 'x');
+    utimesSync(join(nmTmp, 'old.bin'), OLD, OLD);
+    utimesSync(join(gitTmp, 'old.bin'), OLD, OLD);
+
+    expect(sweepPluginTmpDirs(dataDir)).toBe(0);
+    expect(existsSync(join(nmTmp, 'old.bin'))).toBe(true);
+    expect(existsSync(join(gitTmp, 'old.bin'))).toBe(true);
+  });
+
+  it('符号链接：本体当文件删（lutimes 回拨本体）、目标永不触碰；tmp 本体是链接则整根不进', () => {
+    const dataDir = makeDataDir();
+    const outside = join(dataDir, 'outside'); // 数据根外的「逃逸目标」
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'victim.bin'), 'x');
+    utimesSync(join(outside, 'victim.bin'), OLD, OLD); // 目标自身已过期——删了即证明逃逸
+
+    // 形态一：tmp 内的符号链接（指文件）
+    const root1 = join(dataDir, 'plugins', 'a');
+    mkdirSync(join(root1, 'tmp'), { recursive: true });
+    symlinkSync(join(outside, 'victim.bin'), join(root1, 'tmp', 'link.bin'));
+    lutimesSync(join(root1, 'tmp', 'link.bin'), OLD, OLD);
+
+    // 形态二：tmp 内的符号链接目录（Dirent 不跟随——走文件分支删本体）
+    const dirTarget = join(dataDir, 'outside-dir');
+    mkdirSync(dirTarget, { recursive: true });
+    writeFileSync(join(dirTarget, 'keep.bin'), 'x');
+    const root2 = join(dataDir, 'plugins', 'b');
+    mkdirSync(join(root2, 'tmp'), { recursive: true });
+    symlinkSync(dirTarget, join(root2, 'tmp', 'link-dir'));
+    lutimesSync(join(root2, 'tmp', 'link-dir'), OLD, OLD);
+
+    // 形态三：tmp 本体即符号链接（入口 lstat 判真目录——链接整根不进）
+    const root3 = join(dataDir, 'plugins', 'c');
+    mkdirSync(root3, { recursive: true });
+    const linkedTmp = join(dataDir, 'outside-tmp');
+    mkdirSync(join(linkedTmp, 'deep'), { recursive: true });
+    writeFileSync(join(linkedTmp, 'deep', 'old.bin'), 'x');
+    utimesSync(join(linkedTmp, 'deep', 'old.bin'), OLD, OLD);
+    symlinkSync(linkedTmp, join(root3, 'tmp'));
+
+    expect(sweepPluginTmpDirs(dataDir)).toBe(2); // 两条链接本体（非目标内容）
+    expect(existsSync(join(outside, 'victim.bin'))).toBe(true); // 目标存活
+    expect(existsSync(join(dirTarget, 'keep.bin'))).toBe(true);
+    expect(existsSync(join(linkedTmp, 'deep', 'old.bin'))).toBe(true); // 链接 tmp 整根未进
+  });
+
+  it('空目录自底向上剪除（含 tmp 本体）；新鲜文件在任何层保住整链', () => {
+    const dataDir = makeDataDir();
+    const goneRoot = join(dataDir, 'plugins', 'gone');
+    mkdirSync(join(goneRoot, 'tmp', 'a', 'b'), { recursive: true });
+    writeFileSync(join(goneRoot, 'tmp', 'a', 'b', 'old.bin'), 'x');
+    utimesSync(join(goneRoot, 'tmp', 'a', 'b', 'old.bin'), OLD, OLD);
+
+    const stayRoot = join(dataDir, 'plugins', 'stay');
+    mkdirSync(join(stayRoot, 'tmp', 'a', 'b'), { recursive: true });
+    writeFileSync(join(stayRoot, 'tmp', 'a', 'fresh.bin'), 'x'); // 中层新鲜——保住 a 及以下整链
+
+    expect(sweepPluginTmpDirs(dataDir)).toBe(1);
+    expect(existsSync(join(goneRoot, 'tmp'))).toBe(false); // 空链剪到底（tmp 本体含）
+    expect(existsSync(join(stayRoot, 'tmp', 'a', 'fresh.bin'))).toBe(true);
+    expect(existsSync(join(stayRoot, 'tmp'))).toBe(true);
+  });
+
+  it('plugins/ 目录缺失 = 静默 no-op；重复扫幂等（双进程同扫竞态面）', () => {
+    const dataDir = makeDataDir(); // 未建 plugins/
+    expect(sweepPluginTmpDirs(dataDir)).toBe(0);
+
+    const root = join(dataDir, 'plugins', 'demo');
+    mkdirSync(join(root, 'tmp'), { recursive: true });
+    writeFileSync(join(root, 'tmp', 'old.bin'), 'x');
+    utimesSync(join(root, 'tmp', 'old.bin'), OLD, OLD);
+    expect(sweepPluginTmpDirs(dataDir)).toBe(1);
+    expect(sweepPluginTmpDirs(dataDir)).toBe(0); // 第二扫：空目录已剪、无残留无异常
+    expect(existsSync(join(root, 'tmp'))).toBe(false);
   });
 });

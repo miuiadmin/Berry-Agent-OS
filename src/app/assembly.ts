@@ -122,7 +122,7 @@ import { createJobsService, createSubagentsService, createInProcessProvider } fr
 import { createAgentTool } from './subagent-plugin.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
-import { createPluginsService } from './plugins.js';
+import { createPluginsService, sweepPluginTmpDirs } from './plugins.js';
 import type { PluginsService } from './plugins.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
@@ -424,7 +424,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 2026-08-25 修：原先仅 TUI 入口建档，全新机器 berry run 在 Persistence.open
   // 即 ENOENT——深读 workflow 实证缺口）。persist:false 诊断面保持零副作用不建。
   const resolvedDbPath = opts.dbPath ?? dbPath();
-  if (persistEnabled && resolvedDbPath !== ':memory:') ensureDbDir(resolvedDbPath);
+  if (persistEnabled && resolvedDbPath !== ':memory:') {
+    ensureDbDir(resolvedDbPath);
+    // 件临时空间扫龄（契约篇 §1.5 tmp 钉位细则④）：boot 装载前同步一次、
+    // 与 ensureDbDir 同一零副作用闸（:memory: 诊断路不扫——删也是落盘）；
+    // best-effort（函数内单件失败 warn 不抛），不阻装配。
+    sweepPluginTmpDirs(dataDir(), ctx.logger);
+  }
   const persistence = persistEnabled
     ? Persistence.open({
         path: resolvedDbPath,
