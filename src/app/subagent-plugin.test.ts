@@ -467,7 +467,11 @@ function makeConductionComposition(): { compositionDir: string } {
       '}',
     ].join('\n'),
   );
-  writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: conduction-gate\n    plugin: ${pluginDir}\n`);
+  // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）
+  writeFileSync(
+    join(compositionDir, 'overlay.yaml'),
+    `rows:\n  - id: conduction-gate\n    plugin: ${pluginDir}\n    app: chat\n`,
+  );
   return { compositionDir };
 }
 
@@ -583,7 +587,11 @@ describe('守门行传导 + context 腿（第三十一批 P1-4 回归锁）', ()
         '}',
       ].join('\n'),
     );
-    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: reload-gate\n    plugin: ${pluginDir}\n`);
+    // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: reload-gate\n    plugin: ${pluginDir}\n    app: chat\n`,
+    );
     const workspace = makeTempDir('app-cond-reload-ws-');
     // 八段消费序：委派一 [0..3]（子被拦）→ overlay 清行 + reload → 委派二 [4..7]（放行）
     const { streamFn } = scriptedStream([

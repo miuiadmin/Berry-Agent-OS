@@ -24,7 +24,7 @@ import {
   loadOverlayRows,
   saveOverlayRows,
   toggleOverlayRow,
-  upsertOverlayPluginRef,
+  insertOverlayRow,
   writeOverlayRowConfig,
 } from './composition.js';
 
@@ -63,12 +63,22 @@ const DEFAULT_LAYER_IDS = new Set([
 ]);
 
 /**
+ * 测试面在册应用集（chat/hermes 两官方清单——触发①取值域）。D2 触发②开闸后
+ * 第三方行必须带 app 键，语义测试（runtime/禁用/解析）统一挂 chat；空集缺省
+ * 只在执法测试显式传（裸调不传清单集 = 任何 app 行都过不了触发①）。
+ */
+const KNOWN_APPS = new Set(['chat', 'hermes']);
+
+/**
  * 装载并滤除官方默认层行：overlay/入口解析语义测试只断言用户层（官方行进
  * dedicated 测试——两关注点不混断言）。无注册表调用 → 官方 builtin: 行为
  * unresolved（对用户层断言无影响）。
  */
-function loadUserComposition(dataDir: string): { rows: unknown[]; plan: unknown[] } {
-  const report = loadComposition(dataDir);
+function loadUserComposition(
+  dataDir: string,
+  knownAppIds: ReadonlySet<string> = KNOWN_APPS,
+): { rows: unknown[]; plan: unknown[] } {
+  const report = loadComposition(dataDir, {}, knownAppIds);
   return {
     rows: report.rows.filter((row) => !DEFAULT_LAYER_IDS.has(row.id)),
     plan: report.plan.filter((row) => !DEFAULT_LAYER_IDS.has(row.id)),
@@ -118,13 +128,14 @@ describe('overlay 装载与拒绝式校验', () => {
     expect(loadUserComposition(dataDir)).toEqual({ rows: [], plan: [] });
   });
 
-  it('insert 行带路径引用：行进树、入口解析为该文件绝对路径', () => {
+  it('insert 行带路径引用：行进树、入口解析为该文件绝对路径（第三方行带 app 键）', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
-    writeOverlay(dataDir, `  - id: local\n    plugin: ${entry}\n`);
+    writeOverlay(dataDir, `  - id: local\n    plugin: ${entry}\n    app: chat\n`);
     const report = loadUserComposition(dataDir);
-    expect(report.rows).toEqual([{ id: 'local', plugin: entry }]);
+    expect(report.rows).toEqual([{ id: 'local', plugin: entry, app: 'chat' }]);
     // plugin 引用透传（第三纵切 join 键：应用内存预算按行命中 worker 行）
+    // 计划行不携带 app 键（合成行按 id 联查——D1 注记）
     expect(report.plan).toEqual([{ id: 'local', plugin: entry, entry }]);
   });
 
@@ -174,16 +185,16 @@ describe('runtime 运行域字段', () => {
   it('insert 行 runtime: worker：进树且计划行透传（声明面零变化，执行域换轨）', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
-    writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: worker\n`);
+    writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: worker\n    app: chat\n`);
     const report = loadUserComposition(dataDir);
-    expect(report.rows).toEqual([{ id: 'demo', plugin: entry, runtime: 'worker' }]);
+    expect(report.rows).toEqual([{ id: 'demo', plugin: entry, runtime: 'worker', app: 'chat' }]);
     expect(report.plan).toEqual([{ id: 'demo', plugin: entry, entry, runtime: 'worker' }]);
   });
 
   it('runtime 显式 main：与缺省同义（合法值域之一，不制造第二形态）', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
-    writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: main\n`);
+    writeOverlay(dataDir, `  - id: demo\n    plugin: ${entry}\n    runtime: main\n    app: chat\n`);
     const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([{ id: 'demo', plugin: entry, entry, runtime: 'main' }]);
   });
@@ -244,10 +255,10 @@ describe('runtime 运行域字段', () => {
 /* ---------------- 禁用解析与挂载休眠 ---------------- */
 
 describe('禁用解析（挂载休眠）', () => {
-  it('disabled:true 跳过行不解析入口：插件未安装也不失败', () => {
+  it('disabled:true 跳过行不解析入口：插件未安装也不失败（禁用行同样过触发②执法）', () => {
     const dataDir = makeDataDir();
-    // plugin 指向不存在的裸名——禁用行不要求已装
-    writeOverlay(dataDir, '  - id: dormant\n    plugin: never-installed-pkg\n    disabled: true\n');
+    // plugin 指向不存在的裸名——禁用行不要求已装；第三方行带 app（执法全行统一）
+    writeOverlay(dataDir, '  - id: dormant\n    plugin: never-installed-pkg\n    disabled: true\n    app: chat\n');
     const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([{ id: 'dormant', skip: 'disabled' }]);
   });
@@ -258,8 +269,8 @@ describe('禁用解析（挂载休眠）', () => {
     const other = process.platform === 'win32' ? 'linux' : 'win32';
     writeOverlay(
       dataDir,
-      `  - id: gated\n    plugin: never-installed\n    disabled: ${process.platform}\n` +
-        `  - id: ungated\n    plugin: ${entry}\n    disabled: ${other}\n`,
+      `  - id: gated\n    plugin: never-installed\n    disabled: ${process.platform}\n    app: chat\n` +
+        `  - id: ungated\n    plugin: ${entry}\n    disabled: ${other}\n    app: chat\n`,
     );
     const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([
@@ -280,8 +291,8 @@ describe('插件入口解析', () => {
     writeEntryFile(pkgDir, 'custom-entry.ts');
 
     expect(resolvePluginEntry('fake-pkg', dataDir)).toBe(join(pkgDir, 'custom-entry.ts'));
-    // 经组合树同路径（overlay 裸名行全链路）
-    writeOverlay(dataDir, '  - id: p1\n    plugin: fake-pkg\n');
+    // 经组合树同路径（overlay 裸名行全链路——第三方裸名行同样带 app 键）
+    writeOverlay(dataDir, '  - id: p1\n    plugin: fake-pkg\n    app: chat\n');
     expect(loadUserComposition(dataDir).plan[0]).toEqual({
       id: 'p1',
       plugin: 'fake-pkg',
@@ -309,7 +320,7 @@ describe('插件入口解析', () => {
 
   it('未安装裸名行：unresolved 计划行，信息明示永不自动安装', () => {
     const dataDir = makeDataDir();
-    writeOverlay(dataDir, '  - id: missing\n    plugin: absent-pkg\n');
+    writeOverlay(dataDir, '  - id: missing\n    plugin: absent-pkg\n    app: chat\n');
     const report = loadUserComposition(dataDir);
     expect(report.plan).toHaveLength(1);
     expect((report.plan[0] as { id: string }).id).toBe('missing');
@@ -374,26 +385,28 @@ describe('目录服务（ctx.paths）', () => {
 
 /* ---------------- overlay 写回（install/toggle 持久化半边，§6.3 往返硬规则） ---------------- */
 
-describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPluginRef', () => {
+describe('overlay 写回：saveOverlayRows / toggleOverlayRow / insertOverlayRow', () => {
   it('往返零字段损失：save→load 深相等（parse→stringify→parse 幂等，含 config 嵌套值）', () => {
     const dataDir = makeDataDir();
     const rows = [
-      { id: 'bare-pkg', plugin: 'some-package' },
+      { id: 'bare-pkg', plugin: 'some-package', app: 'chat' },
       {
         id: 'with-config',
         plugin: './local',
+        app: 'chat',
         config: { port: 8080, label: '你好: world', nested: { list: [1, 'two', true] } },
       },
-      { id: 'gated', plugin: 'x', disabled: 'win32' },
-      { id: 'off', plugin: 'y', disabled: true },
+      { id: 'gated', plugin: 'x', app: 'chat', disabled: 'win32' },
+      { id: 'off', plugin: 'y', app: 'chat', disabled: true },
     ];
     saveOverlayRows(dataDir, rows);
-    // 装载面（validateRow 拒绝式）原样读回——四行全字段无损失
-    const report = loadUserComposition(dataDir);
-    expect(report.rows).toEqual(rows);
+    // 写读面（validateRow 拒绝式）原样读回——四行全字段无损失（往返纪律只关
+    // 写读保真，合成/挂载执法面另测；D2 触发②后第三方行往返同携 app 键）
+    const loaded = loadOverlayRows(dataDir);
+    expect(loaded).toEqual(rows);
     // 二次往返（save(load(save))) 仍幂等
-    saveOverlayRows(dataDir, [...(report.rows as never[])]);
-    expect(loadUserComposition(dataDir).rows).toEqual(rows);
+    saveOverlayRows(dataDir, [...loaded]);
+    expect(loadOverlayRows(dataDir)).toEqual(rows);
   });
 
   it('空行集写回：合法空 overlay（rows: []），用户层为空树（官方层照常打底）', () => {
@@ -407,27 +420,31 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
     const entry = writeEntryFile(dataDir);
     writeOverlay(
       dataDir,
-      `  - id: live\n    plugin: ${entry}\n` + '  - id: pure-off\n    plugin: p\n    disabled: true\n',
+      `  - id: live\n    plugin: ${entry}\n    app: chat\n` +
+        '  - id: pure-off\n    plugin: p\n    app: chat\n    disabled: true\n',
     );
     // 现禁用行（pure-off，带 plugin）→ 启用：删键保留行
     expect(toggleOverlayRow(dataDir, 'pure-off')).toBe(false);
-    expect(loadUserComposition(dataDir).rows).toEqual([
-      { id: 'live', plugin: entry },
-      { id: 'pure-off', plugin: 'p' },
+    expect(loadOverlayRows(dataDir)).toEqual([
+      { id: 'live', plugin: entry, app: 'chat' },
+      { id: 'pure-off', plugin: 'p', app: 'chat' },
     ]);
     // 再翻 → 禁用：保留 plugin 只置 disabled
     expect(toggleOverlayRow(dataDir, 'pure-off')).toBe(true);
-    expect(loadUserComposition(dataDir).rows).toEqual([
-      { id: 'live', plugin: entry },
-      { id: 'pure-off', plugin: 'p', disabled: true },
+    expect(loadOverlayRows(dataDir)).toEqual([
+      { id: 'live', plugin: entry, app: 'chat' },
+      { id: 'pure-off', plugin: 'p', app: 'chat', disabled: true },
     ]);
     // live 行不带 plugin 字段的纯禁用路径：先手工写一行只含 id+disabled 的行
-    writeOverlay(dataDir, `  - id: live\n    plugin: ${entry}\n` + '  - id: flag-only\n    disabled: true\n');
+    writeOverlay(
+      dataDir,
+      `  - id: live\n    plugin: ${entry}\n    app: chat\n` + '  - id: flag-only\n    disabled: true\n',
+    );
     // 等等——flag-only 是 insert 行但无 plugin：装载面本就拒绝；写回面删键后应整行移除
     expect(toggleOverlayRow(dataDir, 'live')).toBe(true); // live → 禁用（保留 plugin）
     expect(toggleOverlayRow(dataDir, 'live')).toBe(false); // 再启回（保留 plugin）
     expect(toggleOverlayRow(dataDir, 'flag-only')).toBe(false); // 纯禁用行 → 启用 = 整行移除
-    expect(loadUserComposition(dataDir).rows).toEqual([{ id: 'live', plugin: entry }]);
+    expect(loadOverlayRows(dataDir)).toEqual([{ id: 'live', plugin: entry, app: 'chat' }]);
   });
 
   it('toggle 未知行 id：COMPOSITION_ROW_INVALID 即时即响（不静默写一条无人认领的行）', () => {
@@ -440,20 +457,16 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / upsertOverlayPlu
     }
   });
 
-  it('upsertOverlayPluginRef：insert 自带 plugin；重装只换 plugin 引用（config/disabled 状态不动）', () => {
+  it('insertOverlayRow：纯追加挂载行（mount 持久化半边——撞名在服务面先裁，本面不悄悄改既有行）', () => {
     const dataDir = makeDataDir();
-    upsertOverlayPluginRef(dataDir, 'fresh', 'some-package');
-    expect(loadUserComposition(dataDir).rows).toEqual([{ id: 'fresh', plugin: 'some-package' }]);
-    // 已有行带 config/disabled——重装只替换 plugin 引用，启停与配置保留
-    writeOverlay(
-      dataDir,
-      '  - id: fresh\n    plugin: some-package\n' +
-        '  - id: pkg\n    plugin: old-name\n    config: { k: v }\n    disabled: true\n',
-    );
-    upsertOverlayPluginRef(dataDir, 'pkg', 'new-name');
-    expect(loadUserComposition(dataDir).rows).toEqual([
-      { id: 'fresh', plugin: 'some-package' },
-      { id: 'pkg', plugin: 'new-name', config: { k: 'v' }, disabled: true },
+    // 首挂：空 overlay 追加 {id, plugin, app, config}（mount 全字段形态）
+    insertOverlayRow(dataDir, { id: 'fresh', plugin: 'some-package', app: 'chat', config: { k: 1 } });
+    expect(loadOverlayRows(dataDir)).toEqual([{ id: 'fresh', plugin: 'some-package', app: 'chat', config: { k: 1 } }]);
+    // 追加不触碰既有行（第二应用挂载 = 第二行，同包两行共存——D2 多应用挂载形态）
+    insertOverlayRow(dataDir, { id: 'second', plugin: 'some-package', app: 'hermes' });
+    expect(loadOverlayRows(dataDir)).toEqual([
+      { id: 'fresh', plugin: 'some-package', app: 'chat', config: { k: 1 } },
+      { id: 'second', plugin: 'some-package', app: 'hermes' },
     ]);
   });
 });
@@ -522,11 +535,13 @@ describe('builtin: 保留前缀解析', () => {
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
   });
 
-  it('overlay 替换引用：memory 行 plugin 换本地路径 → 走文件插件解析（builtin 语义可换源）', () => {
+  it('overlay 替换引用：memory 行 plugin 换本地路径 → 走文件插件解析（D2 后 = 换实现+换母体，行须带 app）', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
-    writeOverlay(dataDir, `  - id: memory\n    plugin: ${entry}\n`);
-    const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin });
+    // 触发②开闸后：替换官方层 id 的第三方行按 app 键归区（契约篇 §5.1 分区
+    // 规则——换实现 + 换母体）；不带 app 的第三方替换行即触发②拒绝
+    writeOverlay(dataDir, `  - id: memory\n    plugin: ${entry}\n    app: chat\n`);
+    const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin }, KNOWN_APPS);
     // chat 行（首行）此注册表未给 → unresolved 占 plan[0]；memory 行在 plan[1]
     expect(report.plan[1]).toEqual({ id: 'memory', plugin: entry, entry });
   });
@@ -662,7 +677,23 @@ describe('行 app 键：挂载目标两档执法', () => {
     expectRowInvalid(dataDir, new Set(['chat']), '官方件行（builtin:memory）不可携带 app');
   });
 
-  it('合法 app 行：在册 id + 第三方引用 → 行进树携带 app（触发②〔第三方行缺省挂系统拒〕随 D2 装机两态同批落）', () => {
+  it('触发②：第三方行缺省挂系统即拒——D2 开闸（install 不再写行，系统组合 v1 官方专属）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    // 路径引用形（local）：第三方行籍随行引用形（非 builtin: 前缀即第三方）
+    writeOverlay(dataDir, `  - id: rogue\n    plugin: ${entry}\n`);
+    expectRowInvalid(dataDir, new Set(['chat']), '缺省挂系统');
+    // npm 裸名引用形同判；禁用行同样执法（潜伏配置预先即拒）
+    writeOverlay(dataDir, '  - id: rogue-npm\n    plugin: some-pkg\n    disabled: true\n');
+    expectRowInvalid(dataDir, new Set(['chat']), '缺省挂系统');
+    // 官方行缺省挂系统 = 合法形态（对照——执法只对第三方行籍）
+    writeOverlay(dataDir, '  - id: memory\n    config: { k: 1 }\n');
+    expect(loadComposition(dataDir, {}, new Set(['chat'])).rows.find((r) => r.id === 'memory')).toMatchObject({
+      id: 'memory',
+    });
+  });
+
+  it('合法 app 行：在册 id + 第三方引用 → 行进树携带 app（计划行不带 app——合成行按 id 联查）', () => {
     const dataDir = makeDataDir();
     const entry = writeEntryFile(dataDir);
     writeOverlay(dataDir, `  - id: my-thing\n    plugin: ${entry}\n    app: chat\n`);

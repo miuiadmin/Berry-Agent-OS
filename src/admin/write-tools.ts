@@ -1,8 +1,10 @@
 /**
- * L4 admin — 管理件写类动词六工具（契约篇 §3.4 刀 2 工具族与 Skill 兑现条，
- * 2026-08-27 刀 3 落码；默认层 admin 行内注册，effect:'write' 五词 + read 一词）。
+ * L4 admin — 管理件写类动词八工具（契约篇 §3.4 刀 2 工具族与 Skill 兑现条，
+ * 2026-08-27 刀 3 落码；默认层 admin 行内注册，effect:'write' 七词 + read 一词。
+ * D2 装机两态批（2026-08-27 第三十批）扩 mount/unmount 两词——写行类模型可用，
+ * install 随两态改仓库态〔不写组合行〕，update/uninstall_inspect 键域迁装机 id）。
  *
- * 三档分级的落码形态：本文件五写词全走「生命周期档」——参数面强制审批对
+ * 三档分级的落码形态：本文件写词全走「生命周期档」——参数面强制审批对
  * （sandbox_permissions + justification 成对非空，schema 必填钉死）→ 值校验 →
  * approval.ask（asked/decided 双腿落 durable 由审批服务免费承载）→
  * allowed-once 才调服务面。**生命周期档复用 bash 升权闭包先例的四件套机制
@@ -42,11 +44,18 @@ export interface ApprovalAskFace {
   }): Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>;
 }
 
-/** install/update 回执的结构子集（InstallReport/UpdateReport 本地收窄） */
+/** install 回执的结构子集（InstallReport 本地收窄——D2 仓库态：无行写入） */
 export interface InstallReportView {
   readonly id: string;
   readonly source: string;
   readonly pluginRef: string;
+  readonly message: string;
+}
+
+/** update 回执的结构子集（UpdateReport 本地收窄——D2 键域 = 装机 id，无 pluginRef） */
+export interface UpdateReportView {
+  readonly id: string;
+  readonly source: string;
   readonly message: string;
 }
 
@@ -65,15 +74,14 @@ export type ReloadOutcomeView =
   | { readonly status: 'done'; readonly failed: readonly string[] }
   | { readonly status: 'error'; readonly message: string };
 
-/** uninstall inspect 报告的结构子集（UninstallReport 本地收窄） */
+/** uninstall inspect 报告的结构子集（UninstallReport 本地收窄——D2 键域 = 装机 id） */
 export interface UninstallReportView {
   readonly id: string;
   readonly source: string;
-  readonly status: string;
   readonly pluginRef: string;
-  readonly installPath?: string;
-  readonly sharedRows: readonly string[];
-  readonly dataDir: string;
+  readonly installPath: string;
+  readonly mountedRows: readonly string[];
+  readonly dataRoots: readonly string[];
   readonly dataBytes?: number;
   readonly events: {
     readonly origin: 'live' | 'ledger' | 'unknown';
@@ -84,11 +92,32 @@ export interface UninstallReportView {
   readonly warnings: readonly string[];
 }
 
+/** mount 回执的结构子集（MountReport 本地收窄） */
+export interface MountReportView {
+  readonly id: string;
+  readonly app: string;
+  readonly source: string;
+  readonly pluginRef: string;
+  readonly message: string;
+}
+
+/** unmount 回执的结构子集（UnmountReport 本地收窄） */
+export interface UnmountReportView {
+  readonly id: string;
+  readonly warnings: readonly string[];
+  readonly message: string;
+}
+
 /** ctx.plugins 服务面的写动词结构子集（与 plugin.ts 只读面同收窄纪律） */
 export interface PluginsManageFace {
   install(ref: string, opts?: { gitRef?: string }): Promise<InstallReportView>;
   toggle(id: string): boolean;
-  update(id: string): Promise<InstallReportView>;
+  update(id: string): Promise<UpdateReportView>;
+  mount(
+    installId: string,
+    opts?: { app?: string; config?: Record<string, unknown>; rowId?: string },
+  ): Promise<MountReportView>;
+  unmount(rowId: string): Promise<UnmountReportView>;
   configure(id: string, patch: Readonly<Record<string, unknown>>): Promise<ConfigureReportView>;
   requestReload(): Promise<ReloadOutcomeView>;
   uninstall(id: string, opts: { readonly mode: 'inspect' }): Promise<UninstallReportView>;
@@ -99,7 +128,7 @@ function textResult(text: string): AgentToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-/** 审批对参数的 schema 形态（五写词共用——必填钉死「成对」） */
+/** 审批对参数的 schema 形态（全部写词共用——必填钉死「成对」） */
 function pairParameters() {
   return {
     sandbox_permissions: Type.String({
@@ -110,7 +139,7 @@ function pairParameters() {
 }
 
 /**
- * 生命周期档统一闸（五写词共用的执行前置）：值校验（∈ 目标档闭集——单一归宿
+ * 生命周期档统一闸（全部写词共用的执行前置）：值校验（∈ 目标档闭集——单一归宿
  * 词汇）→ approval.ask（durable 双腿由审批服务承载）。allowed-once → 放行；
  * 其余三态 → isError 结果面返回（拒绝是最终的——同回合不重试）。
  * @returns 放行返回 undefined；拦截返回 isError 结果（调用方直接 return）
@@ -151,14 +180,15 @@ async function requestLifecycleApproval(
 }
 
 /**
- * 构造 `plugins_install` 工具（装机三源分发 + overlay 对账写回——不自动热应用）。
- * 装好只是落盘；生效须显式链 plugins_reload（动词单职责——链式可见）。
+ * 构造 `plugins_install` 工具（装机三源分发 + provenance 落账——仓库态，不写组合行）。
+ * 装好 = 入仓待挂，对宿主运行时零生效；生效须显式链 plugins_mount → plugins_reload
+ * （两态批：install 零行无物可热应用，不再链 reload）。
  */
 export function createPluginsInstallTool(plugins: PluginsManageFace, approval: ApprovalAskFace): ToolDefinition {
   return {
     name: 'plugins_install',
     description:
-      '安装插件（三源：npm 包名 / git URL / 本地路径）并写进组合树 overlay。只落盘不热应用——装好后须再调 plugins_reload 才生效。需审批（sandbox_permissions + justification 必填）。',
+      '安装插件（三源：npm 包名 / git URL / 本地路径）到装机仓库并落 provenance 账。仓库态零生效——不写组合树行、不进装载序；生效须再调 plugins_mount 挂载到应用。需审批（sandbox_permissions + justification 必填）。',
     parameters: Type.Object({
       source: Type.String({
         description: '插件来源：npm spec（如 pkg@^2）/ git URL（git@… 或 https://….git）/ 本地路径（./ ../ 绝对路径）',
@@ -172,7 +202,7 @@ export function createPluginsInstallTool(plugins: PluginsManageFace, approval: A
       const denied = await requestLifecycleApproval(approval, {
         toolName: 'plugins_install',
         action: 'plugins_install',
-        detail: `安装插件 ${req.source}`,
+        detail: `安装插件 ${req.source}（仓库态，不生效）`,
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
@@ -182,22 +212,125 @@ export function createPluginsInstallTool(plugins: PluginsManageFace, approval: A
       return textResult(
         [
           `${report.message}`,
-          `行 id：${report.id}（${report.source} 源 · 引用 ${report.pluginRef}）`,
-          '已写 overlay——尚未生效：下一步调 plugins_reload 重载组合树。',
+          `装机 id：${report.id}（${report.source} 源 · 引用 ${report.pluginRef}）——已在仓库待挂。`,
+          `仓库态零生效：下一步调 plugins_mount（install_id=${report.id}，app 必填）写组合行，再 plugins_reload 生效。`,
         ].join('\n'),
       );
     },
   };
 }
 
-/** 构造 `plugins_update` 工具（按源分派更新：npm 重装 / git 重克隆 / local 对账 no-op）。 */
+/**
+ * 构造 `plugins_mount` 工具（写组合行 = 挂载生效动词——D2 两态批新增）。
+ * 吃装机 id（provenance 账本键）；挂载目标 = 应用 id（v1 第三方件必须挂应用，
+ * 系统层官方专属）；行 id 缺省 = 装机推导 id。写行后热应用链 = plugins_reload。
+ */
+export function createPluginsMountTool(plugins: PluginsManageFace, approval: ApprovalAskFace): ToolDefinition {
+  return {
+    name: 'plugins_mount',
+    description:
+      '挂载已装机插件到应用（写组合树行 = 生效动词）：install 只入仓库，本动词写行挂载。挂载目标应用必填（v1 第三方件必须挂应用，不可挂系统层）；行 id 缺省 = 装机 id。写行后须 plugins_reload 生效。需审批（sandbox_permissions + justification 必填）。',
+    parameters: Type.Object({
+      installId: Type.String({
+        description: '装机 id（plugins_install 回执或 plugins_list 的 installed-unmounted 行——以账本为准）',
+      }),
+      app: Type.String({ description: '挂载目标应用 id（如 builtin:chat——v1 第三方件必须挂应用）' }),
+      rowId: Type.Optional(
+        Type.String({ description: '组合树行 id 显式命名（缺省 = 装机 id；同包第二次挂载〔第二应用〕必带防撞名）' }),
+      ),
+      config: Type.Optional(
+        Type.Record(Type.String(), Type.Unknown(), {
+          description: '行配置（可选，经插件声明 schema 校验——校验不过即拒、不落盘）',
+        }),
+      ),
+      ...pairParameters(),
+    }),
+    effect: 'write',
+    async execute(args, tctx): Promise<AgentToolResult> {
+      const req = args as {
+        installId: string;
+        app: string;
+        rowId?: string;
+        config?: Record<string, unknown>;
+        sandbox_permissions: string;
+        justification: string;
+      };
+      // 可选 config 的空对象先响（参数面可修复错误——不带进审批弹窗浪费一次人批）
+      if (req.config !== undefined && Object.keys(req.config).length === 0) {
+        throw new AppError(TOOL_ARGUMENTS_INVALID, 'config 键集为空——要配置哪些键就带哪些键，不配置则省略 config');
+      }
+      const denied = await requestLifecycleApproval(approval, {
+        toolName: 'plugins_mount',
+        action: 'plugins_mount',
+        detail: `挂载插件 ${req.installId} 到应用 ${req.app}${req.rowId !== undefined ? `（行 id ${req.rowId}）` : ''}`,
+        sandboxPermissions: req.sandbox_permissions,
+        justification: req.justification,
+        toolCallId: tctx?.toolCallId,
+      });
+      if (denied !== undefined) return denied;
+      const report = await plugins.mount(req.installId, {
+        app: req.app,
+        ...(req.rowId !== undefined ? { rowId: req.rowId } : {}),
+        ...(req.config !== undefined ? { config: req.config } : {}),
+      });
+      return textResult(
+        [
+          `${report.message}`,
+          `行 ${report.id}：挂应用 ${report.app}（${report.source} 源 · 引用 ${report.pluginRef}）。`,
+          '行已写但尚未装载：调 plugins_reload 生效。',
+        ].join('\n'),
+      );
+    },
+  };
+}
+
+/**
+ * 构造 `plugins_unmount` 工具（删行保码——mount 对偶，D2 两态批新增）。
+ * 吃组合树行 id；装机物与 provenance 账本保留（重挂走 plugins_mount）；
+ * 受影响会话警示走 uninstall inspect 同款呈现。
+ */
+export function createPluginsUnmountTool(plugins: PluginsManageFace, approval: ApprovalAskFace): ToolDefinition {
+  return {
+    name: 'plugins_unmount',
+    description:
+      '摘除插件挂载（删组合树行，保装机物与账本——重挂走 plugins_mount）。吃组合树行 id；受影响会话警示随回执呈报。临时停用保配置走 plugins_toggle，移出组合树才用本动词。写行后须 plugins_reload 生效。需审批（sandbox_permissions + justification 必填）。',
+    parameters: Type.Object({
+      rowId: Type.String({ description: '组合树行 id（以 plugins_list 为准）' }),
+      ...pairParameters(),
+    }),
+    effect: 'write',
+    async execute(args, tctx): Promise<AgentToolResult> {
+      const req = args as { rowId: string; sandbox_permissions: string; justification: string };
+      const denied = await requestLifecycleApproval(approval, {
+        toolName: 'plugins_unmount',
+        action: 'plugins_unmount',
+        detail: `摘除插件挂载 ${req.rowId}（删行保码）`,
+        sandboxPermissions: req.sandbox_permissions,
+        justification: req.justification,
+        toolCallId: tctx?.toolCallId,
+      });
+      if (denied !== undefined) return denied;
+      const report = await plugins.unmount(req.rowId);
+      const lines = [
+        `${report.message}`,
+        `行 ${report.id} 已删——装机物保留在仓库（installed-unmounted 态），重挂走 plugins_mount。`,
+      ];
+      // 受影响会话警示逐条呈报（词表 unknown 档 = 最坏假设的既定文案，直接透传）
+      for (const warning of report.warnings) lines.push(`警示：${warning}`);
+      lines.push('调 plugins_reload 生效。');
+      return textResult(lines.join('\n'));
+    },
+  };
+}
+
+/** 构造 `plugins_update` 工具（按源分派更新：npm 重装 / git 重克隆 / local no-op——键域 = 装机 id）。 */
 export function createPluginsUpdateTool(plugins: PluginsManageFace, approval: ApprovalAskFace): ToolDefinition {
   return {
     name: 'plugins_update',
     description:
-      '更新插件行：npm 源重装解析新版本 / git 源按原 ref 重克隆 / local 源改动即见（仅刷新词表账本）。更新后须 plugins_reload 生效。需审批（sandbox_permissions + justification 必填）。',
+      '更新已装机插件（键域 = 装机 id，非组合树行 id——仓库态未挂载件同样可更新）：npm 源重装解析新版本 / git 源按原 ref 重克隆 / local 源改动即见（仅刷新账本）。更新后须 plugins_reload 生效。需审批（sandbox_permissions + justification 必填）。',
     parameters: Type.Object({
-      id: Type.String({ description: '组合树行 id（以 plugins_list 为准）' }),
+      id: Type.String({ description: '装机 id（以 plugins_list 为准——含 installed-unmounted 态行）' }),
       ...pairParameters(),
     }),
     effect: 'write',
@@ -206,7 +339,7 @@ export function createPluginsUpdateTool(plugins: PluginsManageFace, approval: Ap
       const denied = await requestLifecycleApproval(approval, {
         toolName: 'plugins_update',
         action: 'plugins_update',
-        detail: `更新插件行 ${req.id}`,
+        detail: `更新已装机插件 ${req.id}`,
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
@@ -338,20 +471,22 @@ export function createPluginsUninstallInspectTool(plugins: PluginsManageFace): T
   return {
     name: 'plugins_uninstall_inspect',
     description:
-      '卸载预检（只读零副作用）：行现状、装机物、数据域体积、自定义事件词与受影响会话数、级联警示。卸载执行权在人——检视后指引 /plugin-uninstall <id> --confirm 执行。',
+      '卸载预检（只读零副作用，键域 = 装机 id 非行 id）：装机物、全部挂载行（含各应用挂载行）、数据域体积、自定义事件词与受影响会话数、级联警示。卸载 = 删装机物 + 全部挂载行 + 数据域；执行权在人——检视后指引 /plugin-uninstall <装机id> --confirm 执行。',
     parameters: Type.Object({
-      id: Type.String({ description: '组合树行 id（以 plugins_list 为准）' }),
+      id: Type.String({ description: '装机 id（以 plugins_list 为准——卸载删的是装机物与全部挂载行，非单行）' }),
     }),
     effect: 'read',
     async execute(args): Promise<AgentToolResult> {
       const report = await plugins.uninstall(String((args as { id: string }).id), { mode: 'inspect' });
       const lines: string[] = [
-        `卸载预检——行 ${report.id}（${report.source} 源 · 现状态 ${report.status} · 引用 ${report.pluginRef}）：`,
-        report.installPath !== undefined ? `- 装机物：${report.installPath}` : '- 装机物：无（代码随包或用户自有目录）',
-        report.sharedRows.length > 0
-          ? `- 装机物被共享：${report.sharedRows.join('、')}（执行时跳删装机物）`
-          : '- 装机物无共享行（执行时删除）',
-        `- 数据域：${report.dataDir}${report.dataBytes !== undefined ? `（体积 ${report.dataBytes} 字节，默认保留；--purge-data 才删）` : '（不存在）'}`,
+        `卸载预检——装机 ${report.id}（${report.source} 源 · 引用 ${report.pluginRef}）：`,
+        `- 装机物：${report.installPath}`,
+        report.mountedRows.length > 0
+          ? `- 全部挂载行：${report.mountedRows.join('、')}（执行时同批删——卸载是装机级动作）`
+          : '- 挂载行：无（仓库态件——纯卸码零组合树变更）',
+        report.dataRoots.length > 0
+          ? `- 数据域：${report.dataRoots.join('、')}${report.dataBytes !== undefined ? `（合计 ${report.dataBytes} 字节，默认保留；--purge-data 才删）` : ''}`
+          : '- 数据域：无',
         `- 自定义事件词（${report.events.origin} 档）：${report.events.names.length > 0 ? report.events.names.join('、') : '（无）'}`,
       ];
       if (report.affectedSessions !== undefined) {

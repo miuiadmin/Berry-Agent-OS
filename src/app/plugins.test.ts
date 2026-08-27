@@ -1,8 +1,14 @@
 /**
- * L5 app — 插件管理服务测试（ctx.plugins install/toggle/update，契约篇 §1.5 表尾落码）。
+ * L5 app — 插件管理服务测试（ctx.plugins install/mount/unmount/toggle/update，
+ * 契约篇 §6.1 装机两态 + §1.5 表尾落码）。
  *
- * 纪律对照：装机子进程执行器是**注入边**（mock 只停在这一层——它就是外部进程面，
- * 等价于模型层的 faux provider）；overlay 读写/组合树装载全真（临时目录真文件）。
+ * D2 两态语义（2026-08-27 第三十批）：install = 仓库态零行写入（代码进装机
+ * 子树 + provenance 全源账本落账）；mount = 写组合行生效动词（行带 app 键）；
+ * unmount = 删行保码；update/uninstall 键域 = 装机推导 id（非组合树行 id）。
+ *
+ * 纪律对照：装机子进程执行器 / 入口一次性装载 / git commit 采集是**注入边**
+ * （mock 只停在这一层——它们就是外部进程面，等价于模型层的 faux provider）；
+ * overlay 读写 / provenance 账本 / 组合树装载全真（临时目录真文件）。
  */
 
 import {
@@ -12,7 +18,6 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -24,7 +29,6 @@ import {
   AppError,
   COMPOSITION_ROW_INVALID,
   PLUGIN_CONFIG_INVALID,
-  PLUGIN_FIXED_ROW,
   PLUGIN_INSTALL_FAILED,
 } from '../contracts/errors.js';
 import type { PluginLoadResult } from '../contracts/plugin.js';
@@ -52,6 +56,17 @@ function makeDataDir(): string {
   return realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plugins-')));
 }
 
+/** 在册应用 id 集（组合树 app 键取值域——官方两应用，与 composition.test 同值域） */
+const KNOWN_APPS = new Set(['chat', 'hermes']);
+
+/**
+ * 装载组合树（knownAppIds 恒传——挂载行带 app 键，bare 调用在有第三方行时
+ * 会触发①未知应用 id 误炸；本文件装载只为行对账，不为执法面测试）
+ */
+function loadCompositionFor(dataDir: string): ReturnType<typeof loadComposition> {
+  return loadComposition(dataDir, {}, KNOWN_APPS);
+}
+
 /**
  * 装载并滤除官方默认层行（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 +
  * scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕+ web 第八行 +
@@ -60,7 +75,7 @@ function makeDataDir(): string {
  * ——两关注点不混断言。
  */
 function userRows(dataDir: string): unknown[] {
-  return loadComposition(dataDir).rows.filter(
+  return loadCompositionFor(dataDir).rows.filter(
     (row) =>
       row.id !== 'chat' &&
       row.id !== 'memory' &&
@@ -75,6 +90,14 @@ function userRows(dataDir: string): unknown[] {
   );
 }
 
+/** 读 provenance 全源账本（D2 两态——`<数据目录>/plugins/sources.json`） */
+function readLedger(dataDir: string): Record<string, Record<string, unknown>> {
+  return JSON.parse(readFileSync(join(dataDir, 'plugins', 'sources.json'), 'utf8')) as Record<
+    string,
+    Record<string, unknown>
+  >;
+}
+
 /** runner 替身：记录每次调用；可选 scripted 失败（按命令名命中即抛） */
 function fakeRunner(failures: Record<string, string> = {}) {
   const calls: Array<{ command: string; args: string[]; cwd: string }> = [];
@@ -86,22 +109,26 @@ function fakeRunner(failures: Record<string, string> = {}) {
   return { calls, runner };
 }
 
+/** git commit 采集替身（provenance 精确版本注入边——免真 git 仓） */
+const fakeCommit: (dir: string) => Promise<string | undefined> = async () => 'deadbeef1234';
+
 /** 最小装载结果（applyLoad 测试面） */
 const emptyLoad: PluginLoadResult = { activated: [], failed: [], skipped: [] };
 
-/* ---------------- install 三源分发 ---------------- */
+/* ---------------- install 三源分发（仓库态：零行写入 + provenance 落账） ---------------- */
 
-describe('install 三源分发', () => {
-  it('npm 源：--prefix 装机子树 + --legacy-peer-deps --omit=peer，overlay 写裸包名', async () => {
+describe('install 三源分发（D2 仓库态）', () => {
+  it('npm 源：--prefix 装机子树 + provenance 落账；**不写组合行 = 零生效**，报告指引 mount', async () => {
     const dataDir = makeDataDir();
     const { calls, runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
 
     const report = await plugins.install('some-pkg@^2.1.0');
 
     expect(report.id).toBe('some-pkg'); // npm spec 剥版本段
     expect(report.source).toBe('npm');
-    expect(report.pluginRef).toBe('some-pkg'); // overlay 行 plugin = 裸包名（走子树解析）
+    expect(report.pluginRef).toBe('some-pkg'); // npm 装机引用 = 裸包名（mount 写行时沿用）
+    expect(report.message).toContain('/plugin-mount'); // 断头路指引：装了没挂 = 不可用
     expect(calls).toEqual([
       {
         command: 'npm',
@@ -109,22 +136,50 @@ describe('install 三源分发', () => {
         cwd: dataDir,
       },
     ]);
-    // 对账写回：overlay 已有该行（裸包名引用）
-    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg' }]);
+    // 仓库态零行：install 不写 overlay（写行生效是 mount 的独立动词）
+    expect(userRows(dataDir)).toEqual([]);
+    // provenance 落账：键 = 装机物定位串（node_modules/<pkg>），记录含原始 spec
+    expect(readLedger(dataDir)).toEqual({
+      'node_modules/some-pkg': {
+        source: 'npm',
+        ref: 'some-pkg@^2.1.0',
+        id: 'some-pkg',
+        installedAt: expect.any(String) as string,
+      },
+    });
+  });
+
+  it('npm 精确版本落账：package.json version + .package-lock.json integrity（dist-tag 不算凭证，落盘的才算）', async () => {
+    const dataDir = makeDataDir();
+    // 预置装机产物形态（fake runner 不真装——readNpmPin 在 runner 后读盘）
+    const pkgDir = join(dataDir, 'plugins', 'node_modules', 'some-pkg');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ version: '2.1.3' }));
+    writeFileSync(
+      join(dataDir, 'plugins', '.package-lock.json'),
+      JSON.stringify({ packages: { 'node_modules/some-pkg': { integrity: 'sha512-abc=' } } }),
+    );
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: fakeCommit });
+
+    await plugins.install('some-pkg@^2');
+
+    expect(readLedger(dataDir)['node_modules/some-pkg']).toMatchObject({
+      version: '2.1.3',
+      integrity: 'sha512-abc=',
+    });
   });
 
   it('npm scoped 包名解析：@scope/pkg@1.2 → id=@scope/pkg（不丢 scope 不带版本）', async () => {
     const dataDir = makeDataDir();
-    const { runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: fakeCommit });
     const report = await plugins.install('@scope/pkg@1.2.3');
     expect(report.id).toBe('@scope/pkg');
   });
 
-  it('git 源（https .git 尾）：clone 到 host/首段/repo 分层目录，sources.json 记源，overlay 写绝对路径', async () => {
+  it('git 源（https .git 尾）：clone 到 host/首段/repo 分层目录，provenance 记源含 commit（注入采集面）', async () => {
     const dataDir = makeDataDir();
     const { calls, runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
 
     const report = await plugins.install('https://github.com/foo/bar.git', { gitRef: 'v1.2' });
 
@@ -139,20 +194,35 @@ describe('install 三源分发', () => {
         cwd: dataDir,
       },
     ]);
-    // 源登记：update 重克隆的 ref 依据
-    const sources = JSON.parse(readFileSync(join(dataDir, 'plugins', 'git', 'sources.json'), 'utf8')) as Record<
-      string,
-      unknown
-    >;
-    expect(sources['github.com/foo/bar']).toEqual({ url: 'https://github.com/foo/bar.git', ref: 'v1.2' });
-    // overlay 写 clone 目录绝对路径
-    expect(userRows(dataDir)).toEqual([{ id: 'bar', plugin: expectedDir }]);
+    // 全源账本落账：键 git/<relDir>，ref+gitRef+commit 双落（update 按账本重走）
+    expect(readLedger(dataDir)).toEqual({
+      'git/github.com/foo/bar': {
+        source: 'git',
+        ref: 'https://github.com/foo/bar.git',
+        gitRef: 'v1.2',
+        id: 'bar',
+        commit: 'deadbeef1234',
+        installedAt: expect.any(String) as string,
+      },
+    });
+    expect(userRows(dataDir)).toEqual([]); // 仓库态零行
+  });
+
+  it('git commit 采集失败容忍：记录缺 commit 键（ref 锁定仍是凭证面——缺席只降精度不阻断）', async () => {
+    const dataDir = makeDataDir();
+    const plugins = createPluginsService({
+      dataDir,
+      runner: fakeRunner().runner,
+      gitCommitOf: async () => undefined,
+    });
+    await plugins.install('https://github.com/foo/bar.git');
+    expect(Object.hasOwn(readLedger(dataDir)['git/github.com/foo/bar']!, 'commit')).toBe(false);
   });
 
   it('git 源（git@ 形态、无 ref）：默认分支 clone；重复 install 先清目录（幂等不留半装残骸）', async () => {
     const dataDir = makeDataDir();
     const { calls, runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: async () => undefined });
 
     await plugins.install('git@gitlab.example.com:group/sub/repo.git');
     // git@ 形态拆解：host / 首路径段 group / repo（深层组取首段防撞名）
@@ -170,12 +240,12 @@ describe('install 三源分发', () => {
     expect(existsSync(join(target, 'stale.txt'))).toBe(false); // rmSync 先清生效
   });
 
-  it('local 源：绝对化写 overlay 不拷贝；路径不存在即时即响', async () => {
+  it('local 源：直引落 provenance 零子进程；路径不存在即时即响', async () => {
     const dataDir = makeDataDir();
     const { calls, runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
-    // 真建本地插件目录（local 面零子进程——calls 必须为空）；绝对路径是最稳的测试形态
-    // （相对形态按进程 cwd 解析，测试 cwd 即仓库根不可控）
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
+    // 真建本地插件目录（local 面零子进程——calls 必须为空）；绝对路径是最稳的测试
+    // 形态（相对形态按进程 cwd 解析，测试 cwd 即仓库根不可控）
     const localDir = join(dataDir, 'my-plugin');
     mkdirSync(localDir);
 
@@ -184,7 +254,11 @@ describe('install 三源分发', () => {
     expect(calls).toEqual([]); // local = 直引登记，零子进程
     expect(report.source).toBe('local');
     expect(report.pluginRef).toBe(localDir); // 绝对化（resolve 归一）
-    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir }]);
+    expect(userRows(dataDir)).toEqual([]); // 仓库态零行
+    // local 键 = 绝对路径本身（账本键 → 装机物路径的往返一致性：local 原样返回）
+    expect(readLedger(dataDir)).toEqual({
+      [localDir]: { source: 'local', ref: localDir, id: 'my-plugin', installedAt: expect.any(String) as string },
+    });
 
     // 路径不存在 → COMPOSITION_ROW_INVALID（装不进一条指空的路）
     try {
@@ -195,10 +269,10 @@ describe('install 三源分发', () => {
     }
   });
 
-  it('装机子进程失败：统一 PLUGIN_INSTALL_FAILED，message 载命令与原因', async () => {
+  it('装机子进程失败：统一 PLUGIN_INSTALL_FAILED，message 载命令与原因；账本不落（失败不记装机）', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner({ npm: '退出码 1\nENOENT no such package' });
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
 
     try {
       await plugins.install('ghost-pkg');
@@ -208,38 +282,232 @@ describe('install 三源分发', () => {
       expect((err as AppError).message).toContain('npm install');
       expect((err as AppError).message).toContain('ENOENT no such package');
     }
-    // 对账不写回——失败装机不落 overlay 行
+    // 失败装机零落账：行不写、provenance 不记
     expect(userRows(dataDir)).toEqual([]);
+    expect(existsSync(join(dataDir, 'plugins', 'sources.json'))).toBe(false);
   });
 });
 
-/* ---------------- toggle / update ---------------- */
+/* ---------------- mount / unmount（两态生效动词） ---------------- */
 
-describe('toggle 与 update', () => {
-  it('toggle 翻转 overlay 禁用状态（持久化半边语义在 composition.test 已锁——此处验服务面回传）', async () => {
+describe('mount / unmount（两态生效动词）', () => {
+  /**
+   * 造一个 local 插件目录（install 三源里唯一零子进程面——测试最稳形态）：
+   * 真建 index.ts（resolvePluginEntry 解析依据）+ 可选 loadEntry 替身收割
+   * name/events/config（注入边 mock 纪律——与 runner 同层）。
+   */
+  function setupLocalPlugin(
+    dataDir: string,
+    opts: { events?: Array<{ name: string }>; config?: object } = {},
+  ): { localDir: string; loadEntry: EntryLoader; emitted: UninstalledEventData[] } {
+    const localDir = join(dataDir, 'my-plugin');
+    mkdirSync(localDir);
+    writeFileSync(join(localDir, 'index.ts'), 'export const name = "my-plugin";\nexport default () => {};\n');
+    const loadEntry: EntryLoader = async () => ({
+      name: 'my-plugin',
+      ...(opts.events !== undefined ? { events: opts.events } : {}),
+      ...(opts.config !== undefined ? { config: opts.config } : {}),
+    });
+    const emitted: UninstalledEventData[] = [];
+    return { localDir, loadEntry, emitted };
+  }
+
+  it('mount happy path：写行带 app 键生效；报告载目标与 pluginRef，提示 /reload', async () => {
     const dataDir = makeDataDir();
-    const { runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
-    await plugins.install('some-pkg'); // 装入 + 对账
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir);
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await plugins.install(localDir);
 
-    expect(plugins.toggle('some-pkg')).toBe(true); // → 禁用
-    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg', disabled: true }]);
-    expect(plugins.toggle('some-pkg')).toBe(false); // → 启用（删键）
-    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg' }]);
+    const report = await plugins.mount('my-plugin', { app: 'chat' });
+
+    expect(report).toMatchObject({ id: 'my-plugin', app: 'chat', source: 'local', pluginRef: localDir });
+    expect(report.message).toContain('/reload');
+    // 行写回：plugin 沿用装机推导（local 绝对路径），app 键落地
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, app: 'chat' }]);
+    // 装机物与账本保留（unmount 后重挂的本钱）
+    expect(readLedger(dataDir)[localDir]).toBeDefined();
   });
 
-  it('update 按源分派：npm 重装同名 / git 按原 ref 重克隆 / local no-op', async () => {
+  it('mount 挂载目标必填：系统组合 v1 官方专属——无 app 即拒（第三方挂系统无正路）', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir);
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await plugins.install(localDir);
+    await expect(plugins.mount('my-plugin')).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('--app'),
+    });
+  });
+
+  it('mount 未知装机 id / 同 id 歧义（账本唯一事实源——缺失与多条皆响亮）', async () => {
+    const dataDir = makeDataDir();
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: fakeCommit });
+    await expect(plugins.mount('ghost', { app: 'chat' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('未知装机 id'),
+    });
+    // 歧义：npm 包 some-pkg + git repo 同名 some-pkg 两条记录
+    await plugins.install('some-pkg');
+    await plugins.install('https://github.com/x/some-pkg.git');
+    await expect(plugins.mount('some-pkg', { app: 'chat' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('歧义'),
+    });
+  });
+
+  it('mount 同包两应用：rowId 显式命名第二行（行 id 是行键不是包键）+ 词表账本补齐行数据根', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir, { events: [{ name: 'demo/one' }] });
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await plugins.install(localDir);
+
+    await plugins.mount('my-plugin', { app: 'chat' });
+    const second = await plugins.mount('my-plugin', { app: 'hermes', rowId: 'my-plugin-2' });
+
+    expect(second.id).toBe('my-plugin-2'); // 行 id = 显式命名（非装机 id）
+    expect(userRows(dataDir)).toEqual([
+      { id: 'my-plugin', plugin: localDir, app: 'chat' },
+      { id: 'my-plugin-2', plugin: localDir, app: 'hermes' },
+    ]);
+    // 自定义行 id 词表账本对齐：uninstall 检视词表档不缺角（行数据根也有 data.json）
+    expect(existsSync(join(dataDir, 'plugins', 'my-plugin-2', 'data.json'))).toBe(true);
+  });
+
+  it('mount 撞名双层拒：overlay 同 id 行 / 官方默认层同 id 行（replace-via-mount 皆拒）', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir);
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
+    // overlay 撞名
+    await expect(plugins.mount('my-plugin', { app: 'hermes' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('已被占用'),
+    });
+    // 官方默认层撞名（rowId 命中官方行 id）
+    await expect(plugins.mount('my-plugin', { app: 'chat', rowId: 'memory' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('官方默认层'),
+    });
+  });
+
+  it('mount config 校验：schema 过则随行落盘；不过/未声明/校验面不可得皆拒不写（防 boot 拒启陷阱）', async () => {
+    const dataDir = makeDataDir();
+    const schema = Type.Object({ limit: Type.Number() });
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir, { config: schema });
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await plugins.install(localDir);
+
+    // 合法 config：随行落盘
+    await plugins.mount('my-plugin', { app: 'chat', config: { limit: 5 } });
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, app: 'chat', config: { limit: 5 } }]);
+
+    // schema 不过：拒且不写行（配置面不变——重挂不携带即可）
+    await plugins.unmount('my-plugin');
+    await expect(plugins.mount('my-plugin', { app: 'chat', config: { limit: 'x' } })).rejects.toMatchObject({
+      code: PLUGIN_CONFIG_INVALID,
+    });
+    expect(userRows(dataDir)).toEqual([]);
+
+    // 插件未声明 config schema：携带即拒（装载面不可校验）
+    const bare = makeDataDir();
+    const bareSetup = setupLocalPlugin(bare); // 无 config 声明
+    const barePlugins = createPluginsService({
+      dataDir: bare,
+      runner: fakeRunner().runner,
+      loadEntry: bareSetup.loadEntry,
+    });
+    await barePlugins.install(bareSetup.localDir);
+    await expect(barePlugins.mount('my-plugin', { app: 'chat', config: { a: 1 } })).rejects.toMatchObject({
+      code: PLUGIN_CONFIG_INVALID,
+      message: expect.stringContaining('未声明'),
+    });
+
+    // 校验面不可得（宿主未注入 loadEntry）：拒绝带非空 config 的写——宁拒不误读
+    const noEntry = createPluginsService({ dataDir: bare, runner: fakeRunner().runner });
+    await expect(noEntry.mount('my-plugin', { app: 'chat', config: { a: 1 } })).rejects.toMatchObject({
+      code: PLUGIN_CONFIG_INVALID,
+    });
+  });
+
+  it('unmount：删行保码——行删·装机物与账本留；重挂可再走 mount', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir);
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
+
+    const report = await plugins.unmount('my-plugin');
+
+    expect(report.id).toBe('my-plugin');
+    expect(report.message).toContain('重挂');
+    expect(userRows(dataDir)).toEqual([]); // 行删
+    expect(readLedger(dataDir)[localDir]).toBeDefined(); // 账本留（装机物同理——local 本就直引）
+
+    // 重挂：mount 再走一遍（删行保码的兑现）
+    await plugins.mount('my-plugin', { app: 'hermes' });
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, app: 'hermes' }]);
+  });
+
+  it('unmount 未知行 / 官方默认层行：响亮拒绝（官方行不可卸挂载）', async () => {
+    const dataDir = makeDataDir();
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+    await expect(plugins.unmount('ghost')).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('overlay 无此行'),
+    });
+    await expect(plugins.unmount('memory')).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('官方默认层行不可卸挂载'),
+    });
+  });
+
+  it('unmount 受影响会话警示：词表账本档 + 注入计数逐词点名（uninstall inspect 同款推导）', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalPlugin(dataDir, { events: [{ name: 'demo/one' }] });
+    const plugins = createPluginsService({
+      dataDir,
+      runner: fakeRunner().runner,
+      loadEntry,
+      affectedSessionCounts: async () => ({ 'demo/one': 3 }),
+    });
+    await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
+
+    const report = await plugins.unmount('my-plugin');
+    expect(report.warnings.some((w) => w.includes('demo/one') && w.includes('3'))).toBe(true);
+  });
+});
+
+/* ---------------- toggle / update（update 键域 = 装机 id） ---------------- */
+
+describe('toggle 与 update', () => {
+  it('toggle 翻转挂载行禁用状态（持久化半边语义在 composition.test 已锁——此处验服务面回传）', async () => {
+    const dataDir = makeDataDir();
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: fakeCommit });
+    await plugins.install('some-pkg');
+    await plugins.mount('some-pkg', { app: 'chat' }); // toggle 吃行——两态下先挂载
+
+    expect(plugins.toggle('some-pkg')).toBe(true); // → 禁用
+    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg', app: 'chat', disabled: true }]);
+    expect(plugins.toggle('some-pkg')).toBe(false); // → 启用（删键）
+    expect(userRows(dataDir)).toEqual([{ id: 'some-pkg', plugin: 'some-pkg', app: 'chat' }]);
+  });
+
+  it('update 按源分派（键域 = 装机 id——仓库态未挂载件同样可更新）：npm 重装 / git 按账本 ref 重克隆 / local no-op', async () => {
     const dataDir = makeDataDir();
     const localDir = join(dataDir, 'my-plugin');
     mkdirSync(localDir);
     const { calls, runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
     await plugins.install('some-pkg');
     await plugins.install('https://github.com/foo/bar.git', { gitRef: 'v1' });
     await plugins.install(localDir);
+    // 零挂载——D2 键域迁装机 id 后 update 不再依赖行在场
+    expect(userRows(dataDir)).toEqual([]);
     calls.length = 0; // 装机调用已断言过——update 阶段从零记
 
-    // npm 源：重装同名（重新解析版本）
+    // npm 源：按账本原 ref 重装（重新解析版本）
     const npmReport = await plugins.update('some-pkg');
     expect(npmReport.source).toBe('npm');
     expect(calls.at(-1)).toEqual({
@@ -248,7 +516,7 @@ describe('toggle 与 update', () => {
       cwd: dataDir,
     });
 
-    // git 源：删目录按原 ref 重克隆（branch=v1 来自 sources.json，非记忆）
+    // git 源：删目录按账本 gitRef 重克隆（branch=v1 来自 provenance 记录，非记忆）
     const gitDir = join(dataDir, 'plugins', 'git', 'github.com', 'foo', 'bar');
     mkdirSync(gitDir, { recursive: true });
     writeFileSync(join(gitDir, 'old-checkout.txt'), '旧检出');
@@ -261,7 +529,7 @@ describe('toggle 与 update', () => {
     });
     expect(existsSync(join(gitDir, 'old-checkout.txt'))).toBe(false); // 先删后克隆
 
-    // local 源：no-op（零子进程）
+    // local 源：no-op（零子进程）——但账本仍重收割（词表随磁盘代码漂移对齐）
     const localCallsBefore = calls.length;
     const localReport = await plugins.update('my-plugin');
     expect(localReport.source).toBe('local');
@@ -269,33 +537,24 @@ describe('toggle 与 update', () => {
     expect(calls.length).toBe(localCallsBefore);
   });
 
-  it('update 未知行 id：COMPOSITION_ROW_INVALID', async () => {
+  it('update 未知装机 id：COMPOSITION_ROW_INVALID（键域已迁——行 id 不再是 update 的钥匙）', async () => {
     const dataDir = makeDataDir();
-    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
-    try {
-      await plugins.update('ghost');
-      expect.unreachable('未知 id 应抛');
-    } catch (err) {
-      expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
-    }
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: fakeCommit });
+    await expect(plugins.update('ghost')).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('未知装机 id'),
+    });
   });
 
-  it('update git 目录无源记录（手放目录）：PLUGIN_INSTALL_FAILED 指引重装', async () => {
+  it('update 歧义：同 id 多条装机记录（同包多源）——点名记录键，不做「猜一条」', async () => {
     const dataDir = makeDataDir();
-    // 手放一个 git 目录 + overlay 直指（绕过 install——sources.json 无记录）
-    const gitDir = join(dataDir, 'plugins', 'git', 'github.com', 'foo', 'hand');
-    mkdirSync(gitDir, { recursive: true });
-    const { saveOverlayRows } = await import('./composition.js');
-    saveOverlayRows(dataDir, [{ id: 'hand', plugin: gitDir }]);
-    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
-
-    try {
-      await plugins.update('hand');
-      expect.unreachable('无源记录应抛');
-    } catch (err) {
-      expect((err as AppError).code).toBe(PLUGIN_INSTALL_FAILED);
-      expect((err as AppError).message).toContain('sources.json');
-    }
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: fakeCommit });
+    await plugins.install('some-pkg');
+    await plugins.install('https://github.com/x/some-pkg.git');
+    await expect(plugins.update('some-pkg')).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('歧义'),
+    });
   });
 });
 
@@ -327,7 +586,11 @@ describe('装机面安全（隔离案一第一刀 #15/#16）', () => {
     ];
     for (const url of bullets) {
       const { dataDir, canary } = makeSandbox();
-      const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+      const plugins = createPluginsService({
+        dataDir,
+        runner: fakeRunner().runner,
+        gitCommitOf: async () => undefined,
+      });
       try {
         await plugins.install(url);
         expect.unreachable(`穿越子弹应拒：${url}`);
@@ -338,21 +601,20 @@ describe('装机面安全（隔离案一第一刀 #15/#16）', () => {
     }
   });
 
-  it('P33 纵深（update 面）：overlay 手改 plugin 引用越界——拒绝且目标目录完好', async () => {
+  it('P33 纵深（update 面）：账本定位串手改越界——拒绝且目标目录完好、记录不被误清', async () => {
     const { dataDir } = makeSandbox();
-    // 手改 overlay：plugin 指向字面 git 子树内、归一后子树外（模拟污染的 overlay 行）。
-    // 注意不可用 join 拼——join 会词法归一掉 `..`，恶意形态须手工拼串原样落盘
+    // 手改全源账本：定位串带字面 `../`（归一后逃出 git 子树——模拟污染的
+    // sources.json）。注意不可用 join 拼——join 会词法归一掉 `..`，恶意形态须
+    // 手工拼串原样落盘。防线按归一路径执法不看字面。
     const escapeDir = join(dataDir, 'plugins', 'escape');
     mkdirSync(escapeDir, { recursive: true });
     writeFileSync(join(escapeDir, 'victim.txt'), '越界 rmSync 的潜在受害者');
-    const maliciousRef = `${join(dataDir, 'plugins', 'git')}/../escape`;
-    const { saveOverlayRows } = await import('./composition.js');
-    saveOverlayRows(dataDir, [{ id: 'evil', plugin: maliciousRef }]);
-    // sources.json 同键合谋（两份主机文件都指向越界键——防线按归一路径执法不看字面）
-    const gitDir = join(dataDir, 'plugins', 'git');
-    mkdirSync(gitDir, { recursive: true });
-    writeFileSync(join(gitDir, 'sources.json'), JSON.stringify({ '../escape': { url: 'git@h:o/r.git' } }));
-    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+    mkdirSync(join(dataDir, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(dataDir, 'plugins', 'sources.json'),
+      JSON.stringify({ 'git/../escape': { source: 'git', ref: 'git@h:o/r.git', id: 'evil' } }),
+    );
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner, gitCommitOf: async () => undefined });
 
     try {
       await plugins.update('evil');
@@ -362,6 +624,8 @@ describe('装机面安全（隔离案一第一刀 #15/#16）', () => {
       expect((err as AppError).message).toContain('越界');
     }
     expect(existsSync(join(escapeDir, 'victim.txt'))).toBe(true); // 目标目录完好
+    // 账本记录不被误清（防线先于删目录与删记录——失败路径零副作用）
+    expect(readLedger(dataDir)['git/../escape']).toBeDefined();
   });
 
   it('P32 超时硬顶：卡死子进程被强杀，拒绝消息带超时说明（修复前永挂）', async () => {
@@ -387,20 +651,21 @@ describe('装机面安全（隔离案一第一刀 #15/#16）', () => {
   });
 });
 
-/* ---------------- list 与 applyLoad（有状态单例） ---------------- */
+/* ---------------- list 与 applyLoad（有状态单例 + 仓库态差集） ---------------- */
 
 describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', () => {
   it('applyLoad 回灌装载状态：activated/failed/skipped 映射 + planned 兜底 + 行序 = 组合树序', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
     await plugins.install('ok-pkg');
+    await plugins.mount('ok-pkg', { app: 'chat' }); // 两态：装载态清单吃行——先挂载
     await plugins.install('dormant-pkg');
+    await plugins.mount('dormant-pkg', { app: 'chat' });
     plugins.toggle('dormant-pkg'); // → 禁用
-    // 组合树含官方默认层 chat/memory/subagent/goal/scheduler/mcp/tools/web/
-    // compaction/admin 十行（本测试无官方件注册表 → unresolved/planned）——滤除
+    // 组合树含官方默认层十行（本测试无官方件注册表 → unresolved/planned）——滤除
     // 只留用户行：本测试锁 applyLoad 映射语义，官方行装载态在 assembly 全栈锁
-    const composition = loadComposition(dataDir);
+    const composition = loadCompositionFor(dataDir);
     const userComposition = {
       ...composition,
       plan: composition.plan.filter(
@@ -440,24 +705,54 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
       ['dormant-pkg', 'skipped'],
     ]);
 
-    // boot 前视角 / 装载前行：planned 兜底
+    // boot 前视角：plan 空（装载未发生）——仓库态差集仍按账本可见（全部装机
+    // 物呈现 installed-unmounted——applyLoad 回灌合成行后差集才收敛；真装配
+    // 序里 applyLoad 紧随 boot，此窗口仅测试面可见）
     const fresh = createPluginsService({ dataDir, runner });
-    expect(fresh.list()).toEqual([]);
+    expect(fresh.list()).toEqual([
+      { id: 'dormant-pkg', status: 'installed-unmounted', source: 'npm' },
+      { id: 'ok-pkg', status: 'installed-unmounted', source: 'npm' },
+    ]);
     fresh.applyLoad(userComposition, emptyLoad);
     expect(fresh.list().map((row) => [row.id, row.status])).toEqual([
       ['ok-pkg', 'planned'],
       ['dormant-pkg', 'planned'],
     ]);
   });
+
+  it('list 仓库态差集（installed-unmounted）：装了没挂不可静默——挂载后差集收敛、卸挂后回露', async () => {
+    const dataDir = makeDataDir();
+    const { runner } = fakeRunner();
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
+    await plugins.install('some-pkg');
+
+    // 仓库态件（无 plan 也可见——差集按账本算，与装载态无关）
+    expect(plugins.list()).toEqual([{ id: 'some-pkg', status: 'installed-unmounted', source: 'npm' }]);
+
+    // 挂载 + 回灌：行进 plan（planned 兜底；fake runner 未真装 → 入口 unresolved，
+    // source 推导缺席是事实呈现），差集收敛（同包归一键已挂载）
+    await plugins.mount('some-pkg', { app: 'chat' });
+    plugins.applyLoad(loadCompositionFor(dataDir), emptyLoad);
+    const mounted = plugins.list().filter((row) => row.id === 'some-pkg');
+    expect(mounted).toEqual([{ id: 'some-pkg', status: 'planned' }]);
+    expect(plugins.list().some((row) => row.status === 'installed-unmounted')).toBe(false);
+
+    // 卸挂载：行删（plan 不再含）→ 差集回露（装机面断头路警示位）
+    await plugins.unmount('some-pkg');
+    plugins.applyLoad(loadCompositionFor(dataDir), emptyLoad);
+    expect(plugins.list().filter((row) => row.id === 'some-pkg')).toEqual([
+      { id: 'some-pkg', status: 'installed-unmounted', source: 'npm' },
+    ]);
+  });
 });
 
-/* ---------------- uninstall 双相四段（契约篇 §3.4 第二刀） ---------------- */
+/* ---------------- uninstall 双相四段（契约篇 §3.4 第二刀；键域 = 装机 id） ---------------- */
 
 describe('uninstall 双相四段', () => {
   /**
-   * 造一带词表账本的 local 插件行（install 三源里唯一零子进程面——测试最稳形态）：
-   * 真建 index.ts（resolvePluginEntry 解析依据）+ 注入 loadEntry 替身收割
-   * name/events（注入边 mock 纪律——与 runner 同层）。
+   * 造一带词表账本的 local 插件装机（install 三源里唯一零子进程面——测试最稳
+   * 形态）：真建 index.ts（resolvePluginEntry 解析依据）+ 注入 loadEntry 替身
+   * 收割 name/events（注入边 mock 纪律——与 runner 同层）。
    */
   function setupLocalPlugin(
     dataDir: string,
@@ -497,7 +792,7 @@ describe('uninstall 双相四段', () => {
     expect(before.events).toEqual({ origin: 'ledger', names: ['demo/one', 'demo/two'] });
 
     // applyLoad 回灌活词表 → live 档优先（activated 载荷 events 收割）
-    const composition = loadComposition(dataDir);
+    const composition = loadCompositionFor(dataDir);
     plugins.applyLoad(composition, {
       activated: [{ id: 'my-plugin', name: 'my-plugin', applyMs: 1, events: ['demo/one', 'demo/two'] }],
       failed: [],
@@ -505,21 +800,28 @@ describe('uninstall 双相四段', () => {
     });
     const live = await plugins.uninstall('my-plugin', { mode: 'inspect' });
     expect(live.events).toEqual({ origin: 'live', names: ['demo/one', 'demo/two'] });
-    expect(live.status).toBe('activated'); // 行现状随装载态
 
-    // 账本损坏（坏 JSON）→ unknown 档（损坏注记）
+    // 账本损坏（坏 JSON）→ unknown 档（损坏注记）；活档在场时恒优先，故用未
+    // applyLoad 的实例验账本档读径（同盘不同服务——账本是磁盘事实非内存态）
     writeFileSync(join(dataDir, 'plugins', 'my-plugin', 'data.json'), '{oops');
-    const corrupt = createPluginsService({ dataDir, runner });
-    const corruptView = await corrupt.uninstall('my-plugin', { mode: 'inspect' });
+    const corruptService = createPluginsService({ dataDir, runner });
+    const corruptView = await corruptService.uninstall('my-plugin', { mode: 'inspect' });
     expect(corruptView.events.origin).toBe('unknown');
     expect(corruptView.events.note).toContain('损坏');
 
-    // 账本前存量行（手写 overlay 无账本文件）→ unknown 档（早于账本注记）
-    const legacyDir = join(dataDir, 'legacy-plugin');
+    // 账本前存量装机（手写 provenance 记录无 data.json——pre-D2/手账形态）→
+    // unknown 档（早于账本注记）
+    const legacyData = makeDataDir();
+    const legacyDir = join(legacyData, 'legacy-plugin');
     mkdirSync(legacyDir);
     writeFileSync(join(legacyDir, 'index.ts'), 'export const name = "legacy";\nexport default () => {};\n');
-    writeFileSync(join(dataDir, 'overlay.yaml'), `rows:\n  - id: legacy-plugin\n    plugin: ${legacyDir}\n`);
-    const legacyView = await corrupt.uninstall('legacy-plugin', { mode: 'inspect' });
+    mkdirSync(join(legacyData, 'plugins'), { recursive: true });
+    writeFileSync(
+      join(legacyData, 'plugins', 'sources.json'),
+      JSON.stringify({ [legacyDir]: { source: 'local', ref: legacyDir, id: 'legacy-plugin' } }),
+    );
+    const legacyPlugins = createPluginsService({ dataDir: legacyData, runner });
+    const legacyView = await legacyPlugins.uninstall('legacy-plugin', { mode: 'inspect' });
     expect(legacyView.events.origin).toBe('unknown');
     expect(legacyView.events.note).toContain('早于词表账本');
 
@@ -552,6 +854,7 @@ describe('uninstall 双相四段', () => {
       },
     });
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' }); // 挂载行在场——mountedRows 可见
     // 数据域塞一个文件（体积行可见）
     writeFileSync(join(dataDir, 'plugins', 'my-plugin', 'cache.bin'), 'x'.repeat(2048));
 
@@ -560,135 +863,126 @@ describe('uninstall 双相四段', () => {
     expect(report.id).toBe('my-plugin');
     expect(report.source).toBe('local');
     expect(report.pluginRef).toBe(localDir);
-    expect(report.installPath).toBeUndefined(); // local 无装机物
-    expect(report.dataDir).toBe(join(dataDir, 'plugins', 'my-plugin'));
+    expect(report.installPath).toBe(localDir); // local 装机物 = 引用路径本身（执行时不删）
+    expect(report.mountedRows).toEqual(['my-plugin']);
+    expect(report.dataRoots).toEqual([join(dataDir, 'plugins', 'my-plugin')]);
     expect(report.dataBytes).toBeGreaterThanOrEqual(2048);
     expect(report.affectedSessions).toEqual({ 'demo/one': 3 }); // flush 屏障由装配闭包内嵌——服务面只见注入结果
     expect(affectedCalls).toEqual([['demo/one']]);
     expect(report.warnings.some((w) => w.includes('demo/one') && w.includes('3'))).toBe(true); // 逐词点名强警示
-    // 零副作用：overlay 行在、数据域在
-    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir }]);
+    // 零副作用：overlay 行在、数据域在、账本在
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, app: 'chat' }]);
     expect(existsSync(join(dataDir, 'plugins', 'my-plugin', 'data.json'))).toBe(true);
+    expect(readLedger(dataDir)[localDir]).toBeDefined();
 
     // unknown 档 = 最坏假设警示（无注入计数 → affectedSessions 省略）
     const noLedger = createPluginsService({ dataDir, runner });
+    writeFileSync(join(dataDir, 'plugins', 'my-plugin', 'data.json'), '{oops');
     const unknownRow = await noLedger.uninstall('my-plugin', { mode: 'inspect' });
     expect(unknownRow.affectedSessions).toBeUndefined();
   });
 
-  it('execute local 源：删 overlay 行 · 不删用户目录 · keep 留数据域 / purge 删件数据根含账本', async () => {
+  it('execute local 源：删全部挂载行 · 不删用户目录 · keep 留数据域 / purge 删件数据根含账本', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
     const { localDir, loadEntry, emitted } = setupLocalPlugin(dataDir, []);
-    const plugins = createPluginsService({ dataDir, runner, loadEntry, emitUninstalled: (d) => emitted.push(d) });
+    const plugins = createPluginsService({
+      dataDir,
+      runner,
+      loadEntry,
+      emitUninstalled: (d) => emitted.push(d),
+    });
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
 
-    // keep（Docker 卷律缺省）：行删、用户目录在、数据域留
+    // keep（Docker 卷律缺省）：行删、用户目录在、数据域留、账本清
     const keep = await plugins.uninstall('my-plugin', { mode: 'execute', dataAction: 'keep' });
     expect(keep).toMatchObject({
       id: 'my-plugin',
       source: 'local',
+      outcome: 'uninstalled',
       dataAction: 'keep',
       installRemoved: 'none',
+      mountedRows: ['my-plugin'],
       dataRemoved: false,
     });
     expect(keep.restoresDefault).toBeUndefined(); // 无默认层同 id 行
     expect(userRows(dataDir)).toEqual([]); // 段①删行
     expect(existsSync(localDir)).toBe(true); // local = 用户自有目录永不删
     expect(existsSync(join(dataDir, 'plugins', 'my-plugin', 'data.json'))).toBe(true); // 数据域留
+    expect(readLedger(dataDir)[localDir]).toBeUndefined(); // 段②账本记录同批清（N-10 账实同批律）
     expect(emitted).toEqual([{ id: 'my-plugin', source: 'local', dataAction: 'keep' }]); // 段④信封（词表空 → 无 affected 键）
 
-    // purge：重装后清数据域（账本随根整删）
+    // purge：重装重挂后清数据域（账本随根整删）
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
     const purge = await plugins.uninstall('my-plugin', { mode: 'execute', dataAction: 'purge' });
     expect(purge.dataRemoved).toBe(true);
     expect(existsSync(join(dataDir, 'plugins', 'my-plugin'))).toBe(false);
     expect(emitted.at(-1)).toEqual({ id: 'my-plugin', source: 'local', dataAction: 'purge' });
   });
 
-  it('execute npm 源：装机物删除 + 子树防线；同包共享行跳删点名、末引用行卸载才真删', async () => {
+  it('execute npm 源：多应用挂载行同批删 + 装机物删除 + 账本清（uninstall 是装机级动作）', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
     await plugins.install('some-pkg');
     const pkgDir = join(dataDir, 'plugins', 'node_modules', 'some-pkg'); // fakeRunner 不真装——手建模拟
     mkdirSync(pkgDir, { recursive: true });
     writeFileSync(join(pkgDir, 'index.js'), 'module.exports = {}');
-    // 同包第二行（共享引用——归一路径相同）
-    writeFileSync(
-      join(dataDir, 'overlay.yaml'),
-      `rows:\n  - id: some-pkg\n    plugin: some-pkg\n  - id: alias-row\n    plugin: some-pkg\n`,
-    );
+    // 同包两应用挂载（行 id 唯一——第二行显式命名）
+    await plugins.mount('some-pkg', { app: 'chat' });
+    await plugins.mount('some-pkg', { app: 'hermes', rowId: 'some-pkg-2' });
 
-    // 共享面：跳删装机物 + 点名共享行
-    const sharedInspect = await plugins.uninstall('some-pkg', { mode: 'inspect' });
-    expect(sharedInspect.sharedRows).toEqual(['alias-row']);
-    expect(sharedInspect.warnings.some((w) => w.includes('alias-row'))).toBe(true);
-    const sharedExec = await plugins.uninstall('some-pkg', { mode: 'execute', dataAction: 'keep' });
-    expect(sharedExec).toMatchObject({ installRemoved: 'shared', sharedRows: ['alias-row'] });
-    expect(existsSync(pkgDir)).toBe(true); // 跳删——末引用行仍在用
+    // inspect 先看全集：mountedRows 两行、dataRoots 含两数据根
+    const inspect = await plugins.uninstall('some-pkg', { mode: 'inspect' });
+    expect(inspect.mountedRows).toEqual(['some-pkg', 'some-pkg-2']);
+    expect(inspect.installPath).toBe(pkgDir);
+    expect(inspect.dataRoots).toEqual([join(dataDir, 'plugins', 'some-pkg'), join(dataDir, 'plugins', 'some-pkg-2')]);
 
-    // 末引用行卸载：真删装机物（子树防线内——node_modules 子树）
-    const removed = await plugins.uninstall('alias-row', { mode: 'execute', dataAction: 'keep' });
-    expect(removed.installRemoved).toBe('removed');
-    expect(existsSync(pkgDir)).toBe(false);
-
-    // 替换行卸载回出厂态：overlay 行盖默认层同 id 行（如 memory），卸载后默认行回露出
-    await plugins.install('some-pkg'); // 行已删——重装复行
-    mkdirSync(pkgDir, { recursive: true });
-    writeFileSync(join(dataDir, 'overlay.yaml'), `rows:\n  - id: memory\n    plugin: some-pkg\n`);
-    const restore = await plugins.uninstall('memory', { mode: 'execute', dataAction: 'keep' });
-    expect(restore.source).toBe('npm'); // 有效引用 overlay 先出（后写胜出）
-    expect(restore.restoresDefault).toBe(true); // 官方默认层 memory 行回露出
-    expect(existsSync(pkgDir)).toBe(false);
+    // execute：两行同批删 + 装机物删（node_modules 子树防线内）+ 账本清
+    const exec = await plugins.uninstall('some-pkg', { mode: 'execute', dataAction: 'keep' });
+    expect(exec).toMatchObject({
+      id: 'some-pkg',
+      source: 'npm',
+      outcome: 'uninstalled',
+      installRemoved: 'removed',
+      mountedRows: ['some-pkg', 'some-pkg-2'],
+    });
     expect(loadOverlayRows(dataDir)).toEqual([]); // 行删净
+    expect(existsSync(pkgDir)).toBe(false);
+    expect(readLedger(dataDir)).toEqual({}); // 账本清空
   });
 
-  it('builtin 行：幂等硬禁用落盘（代码随包不可删）+ 段④信封 source=builtin', async () => {
+  it('builtin / Ring 1 行结构上不可达：装机 id 键域到不了官方行（provenance 只记三源装机物）', async () => {
     const dataDir = makeDataDir();
-    const { runner } = fakeRunner();
-    const emitted: UninstalledEventData[] = [];
-    const plugins = createPluginsService({ dataDir, runner, emitUninstalled: (d) => emitted.push(d) });
-
-    const exec = await plugins.uninstall('memory', { mode: 'execute', dataAction: 'keep' });
-    expect(exec).toMatchObject({ id: 'memory', source: 'builtin', dataAction: 'keep', installRemoved: 'none' });
-    expect(loadOverlayRows(dataDir)).toEqual([{ id: 'memory', disabled: true }]); // 硬禁用行落盘
-
-    // 幂等：重复卸载不叠行、不翻回（toggle 的翻转语义不可用于此——禁用死即禁用死）
-    await plugins.uninstall('memory', { mode: 'execute', dataAction: 'keep' });
-    expect(loadOverlayRows(dataDir)).toEqual([{ id: 'memory', disabled: true }]);
-    expect(emitted.map((e) => e.source)).toEqual(['builtin', 'builtin']);
+    const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
+    // 官方行（builtin:memory）/ Ring 1 行（tools）皆无装机记录——键域即防线
+    await expect(plugins.uninstall('memory', { mode: 'inspect' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('未知装机 id'),
+    });
+    await expect(plugins.uninstall('tools', { mode: 'inspect' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('未知装机 id'),
+    });
+    await expect(plugins.uninstall('ghost-row', { mode: 'inspect' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+    });
   });
 
-  it('Ring 1 必备行拒卸（PLUGIN_FIXED_ROW 回归锁）+ 未知行 id 拒绝', async () => {
-    const dataDir = makeDataDir();
-    const { runner } = fakeRunner();
-    const plugins = createPluginsService({ dataDir, runner });
-
-    try {
-      await plugins.uninstall('tools', { mode: 'inspect' });
-      expect.unreachable('Ring 1 行卸载应抛');
-    } catch (err) {
-      expect((err as AppError).code).toBe(PLUGIN_FIXED_ROW);
-      expect((err as AppError).message).toContain('install'); // 指引换实现走覆盖引用
-    }
-    try {
-      await plugins.uninstall('ghost-row', { mode: 'inspect' });
-      expect.unreachable('未知行应抛');
-    } catch (err) {
-      expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
-    }
-  });
-
-  it('装机物越界防线：overlay 手改 npm 引用带穿越段（..）——rmSync 前子树校验拒删', async () => {
+  it('装机物越界防线：账本定位串手改穿越段（../）——rmSync 前子树校验拒删，记录不误清', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
     const plugins = createPluginsService({ dataDir, runner });
-    // npm 裸名引用带穿越段：installPath 拼出 node_modules 之外的目录（plugins/ 本体）
+    // npm 引用带穿越段的账本记录：installPath 拼出 node_modules 之外的目录
     const pluginsRoot = join(dataDir, 'plugins');
     mkdirSync(pluginsRoot, { recursive: true });
     writeFileSync(join(pluginsRoot, 'keep.txt'), '保命文件');
-    writeFileSync(join(dataDir, 'overlay.yaml'), `rows:\n  - id: evil\n    plugin: '..'\n`);
+    writeFileSync(
+      join(pluginsRoot, 'sources.json'),
+      JSON.stringify({ 'node_modules/../..': { source: 'npm', ref: 'evil', id: 'evil' } }),
+    );
 
     try {
       await plugins.uninstall('evil', { mode: 'execute', dataAction: 'keep' });
@@ -698,31 +992,77 @@ describe('uninstall 双相四段', () => {
       expect((err as AppError).message).toContain('越界');
     }
     expect(existsSync(join(pluginsRoot, 'keep.txt'))).toBe(true); // 越界目标完好
-    // 段①已执行（删行先行）——行虽删，防线拦住了 rmSync（声明死与物删除两段独立）
-    expect(loadOverlayRows(dataDir)).toEqual([]);
+    // 防线先于段②删记录——账本记录保留（失败路径零副作用，人可修复账本后重试）
+    expect(readLedger(dataDir)['node_modules/../..']).toBeDefined();
   });
 
-  it('SF-8 残迹收尾：execute 行不在·全无残迹 = no-op 速报不抛（不造未知行错误）', async () => {
+  it('SF-8 残迹收尾：execute 账本无记录·全无残迹 = no-op 速报不抛（不造未知行错误）', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
     const plugins = createPluginsService({ dataDir, runner });
-    // inspect 相对未知行照旧响亮（人检视打错 id 该报错）
+    // inspect 相对未知装机 id 照旧响亮（人检视打错 id 该报错）
     try {
       await plugins.uninstall('ghost', { mode: 'inspect' });
-      expect.unreachable('inspect 未知行应抛');
+      expect.unreachable('inspect 未知装机 id 应抛');
     } catch (err) {
       expect((err as AppError).code).toBe(COMPOSITION_ROW_INVALID);
     }
-    // execute 相：行不在且无可推导残迹（无 npm 装机物/无 git 源记录/无数据域裁决）→ no-op
+    // execute 相：账本无记录且无可推导残迹（无 npm 装机物/无数据域裁决）→ no-op
     const report = await plugins.uninstall('ghost', { mode: 'execute', dataAction: 'keep' });
     expect(report).toMatchObject({ id: 'ghost', outcome: 'no-op', installRemoved: 'none', dataRemoved: false });
   });
 
-  it('SF-8 残迹收尾：行不在但 git 残迹在（目录+源记录）→ 只重跑清理段收敛 + 源记录同批删', async () => {
+  it('SF-8 残迹收尾：pre-D2 遗产装机（npm 物 + 产物行俱在、无账本记录）→ 残迹路径收敛', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
     const plugins = createPluginsService({ dataDir, runner });
-    // 模拟上次卸载段①已删行、段②中断：git 装机目录与 sources.json 记录俱在
+    // 模拟 pre-D2 install 产物：npm 装机目录 + overlay 行（D2 前 install 写行）
+    // 俱在、provenance 无记录（账本反查结构性 miss）
+    const pkgDir = join(dataDir, 'plugins', 'node_modules', 'some-pkg');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, 'index.js'), 'module.exports = {}');
+    writeFileSync(
+      join(dataDir, 'overlay.yaml'),
+      `rows:\n  - id: some-pkg\n    plugin: some-pkg\n  - id: alias-row\n    plugin: some-pkg\n`,
+    );
+
+    const report = await plugins.uninstall('some-pkg', { mode: 'execute', dataAction: 'keep' });
+    expect(report).toMatchObject({
+      id: 'some-pkg',
+      outcome: 'residual',
+      source: 'npm',
+      installRemoved: 'removed',
+      dataRemoved: false,
+    });
+    // 残迹清干净：遗产行（归一路径反查同删——悬空行只会造触发②启动失败）+ 装机物
+    expect(loadOverlayRows(dataDir)).toEqual([]);
+    expect(existsSync(pkgDir)).toBe(false);
+    // 再跑一次 = 全无残迹 no-op（重入收敛闭环）
+    const again = await plugins.uninstall('some-pkg', { mode: 'execute', dataAction: 'keep' });
+    expect(again.outcome).toBe('no-op');
+  });
+
+  it('SF-8 残迹收尾：替换官方行的遗产行卸载 → restoresDefault（默认层同 id 行回露出）', async () => {
+    const dataDir = makeDataDir();
+    const { runner } = fakeRunner();
+    const plugins = createPluginsService({ dataDir, runner });
+    // pre-D2 替换形态：overlay 行盖默认层同 id 行（id: memory · plugin: some-pkg）
+    const pkgDir = join(dataDir, 'plugins', 'node_modules', 'some-pkg');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, 'index.js'), 'module.exports = {}');
+    writeFileSync(join(dataDir, 'overlay.yaml'), `rows:\n  - id: memory\n    plugin: some-pkg\n`);
+
+    const restore = await plugins.uninstall('some-pkg', { mode: 'execute', dataAction: 'keep' });
+    expect(restore).toMatchObject({ outcome: 'residual', source: 'npm', restoresDefault: true });
+    expect(loadOverlayRows(dataDir)).toEqual([]); // 行删净
+    // 默认层 memory 行回露出（官方 builtin:memory 重新生效——回出厂态）
+    expect(loadCompositionFor(dataDir).rows.some((row) => row.id === 'memory')).toBe(true);
+  });
+
+  it('旧 git 子树账本懒迁移：首次读折叠进全源账本 + 旧文件退役；update 按折叠记录走', async () => {
+    const dataDir = makeDataDir();
+    const { calls, runner } = fakeRunner();
+    // pre-D2 形态：git 源登记在 plugins/git/sources.json（D2 前的源账本位置）
     const gitRoot = join(dataDir, 'plugins', 'git');
     const relDir = join('example.com', 'group', 'demo');
     mkdirSync(join(gitRoot, relDir), { recursive: true });
@@ -731,21 +1071,34 @@ describe('uninstall 双相四段', () => {
       join(gitRoot, 'sources.json'),
       `${JSON.stringify({ [relDir]: { url: 'https://example.com/group/demo.git', ref: 'main' } }, null, 2)}\n`,
     );
+    const plugins = createPluginsService({ dataDir, runner, gitCommitOf: fakeCommit });
 
-    const report = await plugins.uninstall('demo', { mode: 'execute', dataAction: 'keep' });
-    expect(report).toMatchObject({
-      id: 'demo',
-      outcome: 'residual',
-      source: 'git',
-      installRemoved: 'removed',
-      dataRemoved: false,
+    // 首次账本读（list 差集面即触发懒迁移）：折叠 + 写回 + 删旧文件
+    expect(plugins.list()).toContainEqual({ id: 'demo', status: 'installed-unmounted', source: 'git' });
+    expect(readLedger(dataDir)).toEqual({
+      [`git/${relDir}`]: {
+        source: 'git',
+        ref: 'https://example.com/group/demo.git',
+        gitRef: 'main',
+        id: 'demo',
+      },
     });
-    // 残迹清干净：目录删 + 源记录删（N-10 同律——防 update 幽灵复活）
-    expect(existsSync(join(gitRoot, relDir))).toBe(false);
-    expect(JSON.parse(readFileSync(join(gitRoot, 'sources.json'), 'utf8'))).toEqual({});
-    // 再跑一次 = 全无残迹 no-op（重入收敛闭环）
-    const again = await plugins.uninstall('demo', { mode: 'execute', dataAction: 'keep' });
-    expect(again.outcome).toBe('no-op');
+    expect(existsSync(join(gitRoot, 'sources.json'))).toBe(false); // 旧账退役
+
+    // 折叠记录可续用：update 按账本 gitRef 重克隆（URL 重 parse 推导 id 往返一致）
+    await plugins.update('demo');
+    expect(calls.at(-1)).toEqual({
+      command: 'git',
+      args: [
+        'clone',
+        '--branch',
+        'main',
+        '--',
+        'https://example.com/group/demo.git',
+        join(gitRoot, ...relDir.split('/')),
+      ],
+      cwd: dataDir,
+    });
   });
 });
 
@@ -753,9 +1106,10 @@ describe('uninstall 双相四段', () => {
 
 describe('configure 行配置写入', () => {
   /**
-   * 造一个带声明 config schema 的 local 插件行并置为 activated（configure 的
-   * 状态门要求行装载成功）。loadEntry 替身返回 config named export——与词表
-   * 收割同注入边同信任前提。
+   * 造一个带声明 config schema 的 local 插件**挂载行**并置为 activated
+   * （configure 的状态门要求行装载成功；两态下行由 mount 写——install 只入
+   * 仓库态）。loadEntry 替身返回 config named export——与词表收割同注入边
+   * 同信任前提。
    */
   function setupConfigurable(
     dataDir: string,
@@ -774,7 +1128,7 @@ describe('configure 行配置写入', () => {
 
   /** applyLoad 全激活一行（configure 状态门的前置） */
   function activate(plugins: ReturnType<typeof createPluginsService>, dataDir: string, id: string): void {
-    plugins.applyLoad(loadComposition(dataDir), {
+    plugins.applyLoad(loadCompositionFor(dataDir), {
       activated: [{ id, name: id, applyMs: 1 }],
       failed: [],
       skipped: [],
@@ -786,6 +1140,7 @@ describe('configure 行配置写入', () => {
     const schema = Type.Object({ apiKey: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) });
     const { localDir, plugins } = setupConfigurable(dataDir, schema);
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
     activate(plugins, dataDir, 'my-plugin');
 
     const report: ConfigureReport = await plugins.configure('my-plugin', { limit: 5 });
@@ -794,7 +1149,7 @@ describe('configure 行配置写入', () => {
     expect(report.config).toEqual({ limit: 5 });
     expect(report.ring1RestartRequired).toBe(false); // Ring 2 行
     expect(report.message).toContain('plugins_reload');
-    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, config: { limit: 5 } }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, app: 'chat', config: { limit: 5 } }]);
   });
 
   it('连续 configure 不经 reload：第二次合并不丢第一次写入的键（回归锁——陈旧 plan 基线 bug）', async () => {
@@ -802,6 +1157,7 @@ describe('configure 行配置写入', () => {
     const schema = Type.Object({ apiKey: Type.Optional(Type.String()), limit: Type.Optional(Type.Number()) });
     const { localDir, plugins } = setupConfigurable(dataDir, schema);
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
     activate(plugins, dataDir, 'my-plugin'); // 此后 plan 冻结（无再回灌）
 
     await plugins.configure('my-plugin', { limit: 5 });
@@ -811,7 +1167,9 @@ describe('configure 行配置写入', () => {
     // 整值替换语义：列出键被替换、未列出键保持
     const third = await plugins.configure('my-plugin', { limit: 9 });
     expect(third.config).toEqual({ limit: 9, apiKey: 'sk-1' });
-    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, config: { limit: 9, apiKey: 'sk-1' } }]);
+    expect(userRows(dataDir)).toEqual([
+      { id: 'my-plugin', plugin: localDir, app: 'chat', config: { limit: 9, apiKey: 'sk-1' } },
+    ]);
   });
 
   it('builtin 行：schema 走官方注册表模块引用零装载（不注入 loadEntry 也成立）+ 纯默认层行插替换行不写 plugin 键', async () => {
@@ -827,7 +1185,7 @@ describe('configure 行配置写入', () => {
       runner: fakeRunner().runner,
       // 刻意不注入 loadEntry：builtin 行 schema 来自 plan 行直挂的模块引用
     });
-    plugins.applyLoad(loadComposition(dataDir, { 'builtin:memory': builtin }), {
+    plugins.applyLoad(loadComposition(dataDir, { 'builtin:memory': builtin }, KNOWN_APPS), {
       activated: [{ id: 'memory', name: 'memory', applyMs: 1 }],
       failed: [],
       skipped: [],
@@ -847,7 +1205,7 @@ describe('configure 行配置写入', () => {
       config: Type.Object({ maxBytes: Type.Optional(Type.Number()) }),
     };
     const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
-    plugins.applyLoad(loadComposition(dataDir, { 'builtin:tools': builtin }), {
+    plugins.applyLoad(loadComposition(dataDir, { 'builtin:tools': builtin }, KNOWN_APPS), {
       activated: [{ id: 'tools', name: 'tools', applyMs: 1 }],
       failed: [],
       skipped: [],
@@ -862,6 +1220,7 @@ describe('configure 行配置写入', () => {
     const schema = Type.Object({ port: Type.Number() });
     const { localDir, plugins } = setupConfigurable(dataDir, schema);
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
     activate(plugins, dataDir, 'my-plugin');
 
     try {
@@ -873,13 +1232,14 @@ describe('configure 行配置写入', () => {
       expect((err as AppError).message).toContain('未写入');
     }
     // 错配置不落盘：overlay 行无 config 键
-    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir }]);
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', plugin: localDir, app: 'chat' }]);
   });
 
   it('四道状态门全拒写（COMPOSITION_ROW_INVALID）：空 patch / 未知行 / 已禁用 / 未激活', async () => {
     const dataDir = makeDataDir();
     const { localDir, plugins } = setupConfigurable(dataDir);
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
 
     // 空 patch：整值替换语义下空集不是变更
     await expect(plugins.configure('my-plugin', {})).rejects.toMatchObject({
@@ -892,7 +1252,7 @@ describe('configure 行配置写入', () => {
 
     // 已禁用（挂载休眠）：先提示启用
     plugins.toggle('my-plugin'); // → 禁用
-    plugins.applyLoad(loadComposition(dataDir), { activated: [], failed: [], skipped: [] });
+    plugins.applyLoad(loadCompositionFor(dataDir), emptyLoad);
     await expect(plugins.configure('my-plugin', { a: 1 })).rejects.toMatchObject({
       code: COMPOSITION_ROW_INVALID,
       message: expect.stringContaining('已禁用'),
@@ -900,7 +1260,7 @@ describe('configure 行配置写入', () => {
     plugins.toggle('my-plugin'); // → 启用（回测试基线）
 
     // 未激活（boot 前视角 planned / 装载失败 failed 均拒）
-    plugins.applyLoad(loadComposition(dataDir), {
+    plugins.applyLoad(loadCompositionFor(dataDir), {
       activated: [],
       failed: [{ id: 'my-plugin', code: 'PLUGIN_APPLY_FAILED', message: '炸了' }],
       skipped: [],
@@ -915,10 +1275,10 @@ describe('configure 行配置写入', () => {
     const dataDir = makeDataDir();
     writeFileSync(
       join(dataDir, 'overlay.yaml'),
-      `rows:\n  - id: ghost-local\n    plugin: ${join(dataDir, 'no-such-dir')}\n`,
+      `rows:\n  - id: ghost-local\n    plugin: ${join(dataDir, 'no-such-dir')}\n    app: chat\n`,
     );
     const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
-    plugins.applyLoad(loadComposition(dataDir), { activated: [], failed: [], skipped: [] });
+    plugins.applyLoad(loadCompositionFor(dataDir), emptyLoad);
     await expect(plugins.configure('ghost-local', { a: 1 })).rejects.toMatchObject({
       code: COMPOSITION_ROW_INVALID,
       message: expect.stringContaining('未解析'),
@@ -932,10 +1292,10 @@ describe('configure 行配置写入', () => {
     writeFileSync(join(localDir, 'index.ts'), 'export const name = "wrk";\nexport default () => {};\n');
     writeFileSync(
       join(dataDir, 'overlay.yaml'),
-      `rows:\n  - id: wrk-plugin\n    plugin: ${localDir}\n    runtime: worker\n`,
+      `rows:\n  - id: wrk-plugin\n    plugin: ${localDir}\n    app: chat\n    runtime: worker\n`,
     );
     const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner });
-    plugins.applyLoad(loadComposition(dataDir), {
+    plugins.applyLoad(loadCompositionFor(dataDir), {
       activated: [{ id: 'wrk-plugin', name: 'wrk', applyMs: 1 }],
       failed: [],
       skipped: [],
@@ -953,6 +1313,7 @@ describe('configure 行配置写入', () => {
     writeFileSync(join(localDir, 'index.ts'), 'export const name = "my-plugin";\nexport default () => {};\n');
     const plugins = createPluginsService({ dataDir, runner: fakeRunner().runner }); // 无 loadEntry
     await plugins.install(localDir);
+    await plugins.mount('my-plugin', { app: 'chat' });
     activate(plugins, dataDir, 'my-plugin');
     await expect(plugins.configure('my-plugin', { a: 1 })).rejects.toMatchObject({
       code: COMPOSITION_ROW_INVALID,

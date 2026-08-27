@@ -60,7 +60,8 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
   it('同一份 authored 码在 main/worker 两域行为收敛', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'echo-')));
     // overlay 两行：同一入口、slot 参数化防撞名（服务/工具名按 slot 分岔——
-    // 真注册表查重执法面与跨用例隔离，两行互不知晓互不碰撞）
+    // 真注册表查重执法面与跨用例隔离，两行互不知晓互不碰撞）。app: chat——
+    // 触发② 执法下第三方行必挂应用（chat 为在册官方应用；worker 行同语义）
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
       [
@@ -68,10 +69,12 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
         '  - id: echo-main',
         `    plugin: ${ECHO_ENTRY}`,
         '    runtime: main',
+        '    app: chat',
         '    config: { slot: main }',
         '  - id: echo-worker',
         `    plugin: ${ECHO_ENTRY}`,
         '    runtime: worker',
+        '    app: chat',
         '    config: { slot: worker }',
         '',
       ].join('\n'),
@@ -87,9 +90,11 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
       expect(statuses.find((r) => r.id === 'echo-main')).toMatchObject({ status: 'activated' });
       expect(statuses.find((r) => r.id === 'echo-worker')).toMatchObject({ status: 'activated' });
 
-      // ② 工具经注册表可执行：声明面双行都在（worker 行声明面本地、execute 过桥）
-      const toolMain = runtime.tools.get('echo/echo-main');
-      const toolWorker = runtime.tools.get('echo/echo-worker');
+      // ② 工具经注册表可执行：声明面双行都在（worker 行声明面本地、execute 过桥）。
+      // 行挂 app: chat（触发②）→ 工具落 chat 应用域层——get 全局面不查域层，
+      // 按应用域视角取（D1 域层路由口径）
+      const toolMain = runtime.tools.listFor('chat').find((t) => t.name === 'echo/echo-main');
+      const toolWorker = runtime.tools.listFor('chat').find((t) => t.name === 'echo/echo-worker');
       expect(toolMain).toBeDefined();
       expect(toolWorker).toBeDefined();
       const rMain = await toolMain!.execute({ text: 'hi-main' }, { toolCallId: 'echo:test:main' });
@@ -142,9 +147,11 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
       expect(runtime.ctx.get<MainTaps>('echo/taps-main')).not.toBe(mainTaps);
       // worker 旧 RPC 代理随域收编不可达（端点 dispose 后调用即刻拒绝）
       await expect(workerTaps.echo('x')).rejects.toMatchObject({ code: BRIDGE_WORKER_EXITED });
-      // 重装后双行工具仍可执行（双拓扑重装载收敛——含 main 行注册摘除/重注册）
+      // 重装后双行工具仍可执行（双拓扑重装载收敛——含 main 行注册摘除/重注册）。
+      // 应用域层口径取具（行挂 app: chat——同 ② 取具面）
       const rWorker2 = await runtime.tools
-        .get('echo/echo-worker')!
+        .listFor('chat')
+        .find((t) => t.name === 'echo/echo-worker')!
         .execute({ text: 'hi-again' }, { toolCallId: 'echo:test:again' });
       expect(rWorker2).toMatchObject({ content: [{ type: 'text', text: 'hi-again' }] });
     } finally {

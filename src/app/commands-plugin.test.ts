@@ -90,29 +90,31 @@ function rig(reports: { inspect: UninstallReport; exec: UninstallExecReport }) {
   return { get, notes, calls, reloadCount: () => reloadCount, dispose };
 }
 
-/** 标准检视报告（live 档词 + 受影响会话 + 一条警示——报告面呈现断言用） */
+/** 标准检视报告（live 档词 + 挂载行 + 受影响会话 + 一条警示——报告面呈现断言用；
+ * D2 键域全字段：装机物路径 / 挂载行全集 / 数据根与体积） */
 const INSPECT: UninstallReport = {
   id: 'demo',
-  status: 'active',
   source: 'npm',
   pluginRef: 'demo-pkg',
-  dataDir: '/tmp/x/plugins/demo',
+  installPath: '/tmp/x/plugins/node_modules/demo',
+  mountedRows: ['demo'],
+  dataRoots: ['/tmp/x/plugins/demo'],
+  dataBytes: 2048,
   events: { origin: 'live', names: ['demo/thing'] },
   affectedSessions: { 'demo/thing': 3 },
-  sharedRows: [],
   warnings: ['共享词点名：demo/thing ×3 个会话'],
-} as unknown as UninstallReport;
+};
 
-/** 标准 execute 回执（无装机物形） */
+/** 标准 execute 回执（正常四段走完 · 数据域保留） */
 const EXEC: UninstallExecReport = {
   id: 'demo',
   source: 'npm',
   outcome: 'uninstalled',
   dataAction: 'keep',
-  installRemoved: 'none',
-  sharedRows: [],
+  installRemoved: 'removed',
+  mountedRows: ['demo'],
   dataRemoved: false,
-} as unknown as UninstallExecReport;
+};
 
 describe('/plugin-uninstall 命令面（第二刀：human-only execute 唯一入口的壳）', () => {
   it('用法面：缺 id 只提示用法，不触服务不重载', async () => {

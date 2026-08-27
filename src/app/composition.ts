@@ -382,23 +382,40 @@ export function resolvePluginEntry(ref: string, dataDir: string): string | undef
 const BUILTIN_PREFIX = 'builtin:';
 
 /**
- * 行挂载目标键执法（契约篇 §5.1 挂载目标两档，D1 清单投影批 2026-08-27）：
- * 携带 app 键的行过三道触发，任一命中即 COMPOSITION_ROW_INVALID 拒绝式即响——
+ * 行挂载目标键执法（契约篇 §5.1 挂载目标两档，D1 清单投影批 2026-08-27；触发②
+ * 随 D2 装机两态开闸，2026-08-27）：四触发全集单点执法，任一命中即
+ * COMPOSITION_ROW_INVALID 拒绝式即响——
  * - 触发①（未知应用 id）：app 值不在在册应用清单集（清单是应用身份唯一源——
  *   app 键指向不存在应用的行是配置面错误，不是可降级缺件）；
+ * - 触发②（第三方行缺省挂系统）：不带 app 键的第三方行拒绝——判源 = 行引用形
+ *   （plugin 非 `builtin:` 前缀即第三方行，与触发④同源判据）。系统组合 v1 官方
+ *   专属：第三方全局件 = 绕过应用隔离的后门（授权面全部失锚）。开闸前提已随
+ *   本批就位：install 两态化不再写行（新装机零行），旧 install 产物行属
+ *   pre-release 破坏面（重挂带 app 或删行——commit 信息载迁移路径）；
  * - 触发③（Ring 1 必备行带 app）：Ring 1 行是系统组合必备行（换实现可、换
  *   母体不可——卸掉核心循环必破的行没有「挂到某应用」的语义）；
  * - 触发④（官方引用行带 app）：官方件母体恒系统组合（判源 = 行引用形——合成
  *   产物 plugin 带 `builtin:` 前缀即官方行；overlay 替换行省略 plugin 沿用官方
  *   层引用，合成后同为 builtin 前缀，判源不需特判「省略」形态）。
- * 触发②（第三方行缺省挂系统拒）不在此列——随 D2 装机两态同批落：现行 install
- * 产物全是无 app 的第三方行，先行执法 = 既有用户 boot 即拒（装机两态〔装完零
- * 生效〕才是触发②的前提，分批纪律见路线图两节奏风险）。
  * 全行统一执法（disabled 行含）：潜伏配置预先即拒，不留「toggle 启用才炸」陷阱。
  */
 function assertRowAppTargets(rows: readonly CompositionRow[], knownAppIds: ReadonlySet<string>): void {
   for (const row of rows) {
-    if (row.app === undefined) continue;
+    // 行籍判据（触发②④共用）：plugin 省略（合成沿用官方层）或 `builtin:` 前缀
+    // = 官方行；其余引用形（npm 裸名 / git·local 路径）= 第三方行——籍随行引用
+    // 形不随包身世（契约篇 §5.1 执法形态全集）
+    const official = row.plugin === undefined || row.plugin.startsWith(BUILTIN_PREFIX);
+    if (row.app === undefined) {
+      // 触发②：第三方行缺省挂系统拒（D2 开闸——前提 = install 不再写行）
+      if (!official) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `组合树行 ${row.id}：第三方行（${row.plugin}）缺省挂系统——系统组合 v1 官方专属，第三方件必须挂应用` +
+            `（行加 app: <应用id> 重挂；装机两态下 install 不再写行，旧产物行请清除重挂。契约篇 §5.1 触发②）`,
+        );
+      }
+      continue;
+    }
     if (!knownAppIds.has(row.app)) {
       throw new AppError(
         COMPOSITION_ROW_INVALID,
@@ -413,7 +430,8 @@ function assertRowAppTargets(rows: readonly CompositionRow[], knownAppIds: Reado
         `组合树行 ${row.id}：Ring 1 必备行不可携带 app 键（Ring 1 = 系统组合必备行，非挂载目标——契约篇 §5.1）`,
       );
     }
-    if (row.plugin !== undefined && row.plugin.startsWith(BUILTIN_PREFIX)) {
+    // 触发④：官方行籍判据同上（省略沿用 = builtin 前缀合成后同判）
+    if (official) {
       throw new AppError(
         COMPOSITION_ROW_INVALID,
         `组合树行 ${row.id}：官方件行（${row.plugin}）不可携带 app 键——官方件母体恒系统组合（契约篇 §5.1）`,
@@ -521,12 +539,13 @@ export interface PathsService {
 }
 
 /**
- * plugins/ 直下装机子树保留名对（单一来源）：git = git 源克隆子树、
- * node_modules = npm 装机子树。消费点——pluginDataDirOf 闸（数据根取址
- * 全消费面）与 tmp 扫龄跳过（plugins.ts）。布局知识单源（契约篇 §1.5
- * tmp 钉位细则④ + §3.4 落码注记补①），新增保留名只改此处。
+ * plugins/ 直下保留名对（单一来源）：git = git 源克隆子树、node_modules = npm
+ * 装机子树、sources.json = provenance 全源账本文件（D2 两态，2026-08-27——
+ * 数据根撞账本文件 = purge 会吞账本，同撞子树同级防线）。消费点——
+ * pluginDataDirOf 闸（数据根取址全消费面）与 tmp 扫龄跳过（plugins.ts）。
+ * 布局知识单源（契约篇 §1.5 tmp 钉位细则④ + §3.4 落码注记补①），新增保留名只改此处。
  */
-export const RESERVED_SUBTREE_NAMES: readonly string[] = ['git', 'node_modules'];
+export const RESERVED_SUBTREE_NAMES: readonly string[] = ['git', 'node_modules', 'sources.json'];
 
 /**
  * 件数据根布局原语（`<dataDir>/plugins/<id>`）——唯一的件数据根取址通道。
@@ -573,10 +592,14 @@ export type PluginRowSource = 'builtin' | 'npm' | 'git' | 'local';
 
 /** 单行装载状态（ctx.plugins.list 返回形） */
 export interface PluginStatusRow {
-  /** 组合树行 id */
+  /** 组合树行 id；installed-unmounted 态 = 装机推导 id（仓库态件无行——账本差集条目） */
   readonly id: string;
-  /** 状态：activated / failed / skipped /（加载前视角的）planned */
-  readonly status: 'activated' | 'failed' | 'skipped' | 'planned';
+  /**
+   * 状态：activated / failed / skipped /（加载前视角的）planned / installed-unmounted
+   * （D2 装机两态 2026-08-27：装机后未挂的仓库态件——数据源 = provenance 账本 ∖
+   * 组合树行差集，按同包归一键算非行 id，契约篇 §6.1 可见性）
+   */
+  readonly status: 'activated' | 'failed' | 'skipped' | 'planned' | 'installed-unmounted';
   /** 插件声明名（activated 时已知） */
   readonly name?: string;
   /** failed 时的错误码（PLUGIN_ 族） */
@@ -702,18 +725,16 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
 }
 
 /**
- * install 写回 overlay 行（ctx.plugins.install 持久化半边）：行存在则只替换 plugin
- * 引用（保留 config/disabled——重装不改变启停与配置状态），不存在则 insert
- * （自带 plugin——insert 行硬要求）。id 由装机服务按源推导（npm=包名 / git=repo 名 /
- * local=目录或文件名）；pluginRef 形态按源（npm 裸包名 / local+git 绝对路径，§6.1）。
+ * mount 写行面（ctx.plugins.mount 持久化半边，契约篇 §6.1 装机/挂载两态批
+ * 2026-08-27）：追加挂载行 `{id, plugin, app?, config?}`——纯 insert 语义（无
+ * 替换分支：撞名在服务面先裁 COMPOSITION_ROW_INVALID，本面不悄悄改既有行——
+ * 与旧 install 写面 upsertOverlayPluginRef 的「同 id 换引用」语义刻意分流，
+ * 挂载是用户显式组合面动作）。行字段完整性由服务面负责（plugin 引用按源推导、
+ * app 必填执法〔第三方挂系统 v1 拒〕、config 已过 schema 校验）。
  */
-export function upsertOverlayPluginRef(dataDir: string, id: string, pluginRef: string): void {
+export function insertOverlayRow(dataDir: string, row: CompositionRow): void {
   const rows = loadOverlayRows(dataDir);
-  const exists = rows.some((row) => row.id === id);
-  const next = exists
-    ? rows.map((row) => (row.id === id ? { ...row, plugin: pluginRef } : row))
-    : [...rows, { id, plugin: pluginRef }];
-  saveOverlayRows(dataDir, next);
+  saveOverlayRows(dataDir, [...rows, row]);
 }
 
 /**

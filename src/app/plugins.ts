@@ -4,24 +4,32 @@
  * 有状态单例：list/install/toggle/update/uninstall 同一实例，boot 与 /reload 经
  * applyLoad 就地更新装载状态——provide 一次恒定（§1.3 服务集不变式保持）。
  *
- * install 三源分发（§6.1）：
+ * install 三源分发（§6.1）——D2 装机两态（2026-08-27 第三十批）：install = 仓库态
+ * （代码进装机子树 + provenance 落账，**不写组合行 = 零生效**——不进装载序、不解析
+ * 入口、零注册面；写行生效 = 独立动词 mount）：
  * - npm（裸 spec）：装 `<数据目录>/plugins/node_modules/` 子树（--legacy-peer-deps
- *   --omit=peer 防 peer 冲突），overlay 行 plugin 写裸包名（resolvePluginEntry 走子树解析）；
+ *   --omit=peer 防 peer 冲突）——pluginRef 裸包名（mount 写行时消费，resolvePluginEntry 走子树解析）；
  * - git（git@… / https://….git）：clone 到 `<数据目录>/plugins/git/<host>/<首路径段>/<repo 名>`
- *   分层防撞名，ref 经 opts 锁定；源 URL/ref 记入 sources.json（update 重克隆的依据）；
- *   overlay 行 plugin 写 clone 目录绝对路径；
- * - local（./ ../ 绝对路径）：直引不拷贝，overlay 行 plugin 写绝对路径——改动 + /reload 即见。
+ *   分层防撞名，ref 经 opts 锁定——pluginRef = clone 目录绝对路径；
+ * - local（./ ../ 绝对路径）：直引不拷贝——pluginRef = 绝对路径，改动 + /reload 即见。
  *
- * install 只对账写回、不自动热应用——热应用 = 调用方 /reload（对账与组合正交，§1.5 表尾）。
+ * provenance 全源账本（`<数据目录>/plugins/sources.json`，键 = 装机物定位串）：
+ * { source, ref（装机原始引用）, id（装机推导 id）, 精确版本（npm version+integrity /
+ * git commit——dist-tag 不算凭证）, 装机时间 }——「组合树 = 装配枚举、账本 = 装机
+ * 枚举」双源的物理面（第十四批立项、D2 落码）；update/uninstall 键域迁装机 id
+ * （账本反查）、list 差集可见性（installed-unmounted）同源。旧 git 子树
+ * sources.json 一次性折叠迁移（loadProvenance 惰性迁移 + 旧文件退役，无双轨）。
  * 装机子进程失败统一 PLUGIN_INSTALL_FAILED（message 载命令与输出尾行）。
  * dry-run/rollback seam 保留未实现（§1.5 表注记）。
  *
- * uninstall 双相四段（契约篇 §3.4 第二刀，2026-08-27 刀 2）：inspect = 零副作用
- * 只读预检（行现状 + 装机物 + 同包共享行 + 数据域 + 词表三档 + 受影响会话数）；
- * execute = ①删行（文件行 removeOverlayRow / builtin 行禁用落盘 / Ring 1 拒卸）
- * ②装机物必删+同包引用计数（归一路径比对）③数据域 keep|purge（Docker 卷律默认
- * 留）④成功尾 plugin/uninstalled 双落地（总线 + 会话流，经注入回调）。execute
- * 唯一入口 = TUI /plugin uninstall（human-only——服务面不注册模型工具）。
+ * uninstall 双相四段（契约篇 §3.4 第二刀，2026-08-27 刀 2；**D2 键域迁装机 id**
+ * ——同批两态修订）：**吃装机 id 非 行 id**（行 id 可任意命名、同包多行——行 id
+ * 是行键不是包键）。inspect = 零副作用只读预检（装机物 + 全部挂载行 + 数据域 +
+ * 词表三档 + 受影响会话数）；execute = ①删**全部**挂载行（含各 app 键行——归一
+ * 路径反查，天然兼容多应用挂载）②装机物必删 + 账本记录同批清（local 不删〔用户
+ * 自有目录〕）③数据域 keep|purge（Docker 卷律默认留）④成功尾 plugin/uninstalled
+ * 双落地（总线 + 会话流，经注入回调）。execute 唯一入口 = TUI /plugin uninstall
+ * （human-only——服务面不注册模型工具）。
  *
  * 词表账本（同刀）：install/update 时经注入的 loadEntry 一次性 jiti 装载收割
  * name + events 词名，落件数据根 data.json（双键一桥宿主写面首建——第十八批
@@ -46,14 +54,12 @@ import {
   AppError,
   COMPOSITION_ROW_INVALID,
   PLUGIN_CONFIG_INVALID,
-  PLUGIN_FIXED_ROW,
   PLUGIN_INSTALL_FAILED,
 } from '../contracts/errors.js';
 import { Value as typeboxValue, type TSchema } from '../contracts/typebox.js';
 import type { CompositionRow, PluginLoadResult, PluginPlanRow } from '../contracts/plugin.js';
 import {
   derivePluginRowSource,
-  disableOverlayRow,
   findRowLocation,
   isPathReference,
   loadOverlayRows,
@@ -63,7 +69,7 @@ import {
   RING1_REQUIRED_ROW_IDS,
   resolvePluginEntry,
   toggleOverlayRow,
-  upsertOverlayPluginRef,
+  insertOverlayRow,
   writeOverlayRowConfig,
   type CompositionReport,
   type PluginRowSource,
@@ -84,27 +90,57 @@ export interface PluginsService {
   /** 装载状态清单（组合树行序；装载前视角的行 = planned 兜底） */
   list(): readonly PluginStatusRow[];
   /**
-   * 装机（三源分发按 ref 形态自动判定）+ overlay 对账写回。不自动热应用——
-   * 热应用 = 调用方 /reload（TUI 薄壳命令链 install→reload）。
+   * 装机（三源分发按 ref 形态自动判定）——**D2 仓库态**：只进装机子树 + provenance
+   * 落账，**不写组合行 = 零生效**（install→reload 旧链废止——零行无物可热应用）。
+   * 写行生效 = mount（挂载动词）；热应用 = 调用方 /reload（命令面 mount→reload 链）。
    * @param ref npm spec / git URL / 本地路径三形之一
    * @param opts gitRef 锁定分支或 tag（仅 git 源生效）
    */
   install(ref: string, opts?: { gitRef?: string }): Promise<InstallReport>;
   /** 禁用状态翻转（overlay 行 disabled 置 true / 删键）。@returns 翻转后禁用状态 */
   toggle(id: string): boolean;
-  /** 按源分派更新：npm 重装同名 / git 删目录按原 ref 重克隆 / local no-op（改动即见）；三源通尾重收割词表账本 */
+  /**
+   * 按源分派更新——**键域 = 装机 id**（D2 迁包键：两态后 overlay 无行的仓库态件
+   * 也可更新；账本反查装机物与原始 spec）：npm 按装机 spec 重装 / git 删目录按
+   * 账本原 ref 重克隆 / local no-op（改动即见）；三源通尾重收割词表账本 +
+   * provenance 精确版本刷新。
+   */
   update(id: string): Promise<UpdateReport>;
   /**
-   * 双相卸载——inspect 相（契约篇 §3.4 第二刀）：零副作用只读预检（行现状 +
-   * 装机物 + 同包共享行 + 数据域体积 + 词表三档 + 受影响会话计数 + 级联强警示）。
-   * 人 execute 前已看；模型面消费本相（plugins_uninstall_inspect 随管理刀排期）。
+   * 挂载（D2 写行动词，契约篇 §6.1 两态——「插件独立不生效」的机制化另一半）：
+   * 吃**装机推导 id**——账本反查装机物，写一条 overlay 组合行使其生效。行 id
+   * 缺省 = 装机推导 id、`rowId` 显式命名位（行 id 是行键不是包键——同包第二应用
+   * 挂载必经显式命名，缺省行 id 的全树唯一性不可破）。撞名（overlay ∨ 官方默认
+   * 层已有同 id 行）拒绝式 `COMPOSITION_ROW_INVALID`。`app` v1 必填（系统组合
+   * v1 官方专属——显式挂系统 = 准入制放开后的预留 seam，v1 不可达）。pluginRef
+   * 按源沿用装机推导（npm 裸包名 / git·local 绝对路径）。config 位承载显式行
+   * 配置（带 config 时经插件声明 schema 校验——校验面不可得拒写，与 configure
+   * 同纪律）。**不自动链 reload**（动词单职责——命令面 mount→reload）。
+   */
+  mount(
+    installId: string,
+    opts?: { app?: string; config?: Record<string, unknown>; rowId?: string },
+  ): Promise<MountReport>;
+  /**
+   * 卸挂载（D2 删行动词）：吃**行 id**——删 overlay 行保码（装机物与账本不动、
+   * 行 config 随行删；重挂回装机推导 config 缺省——mount 的 config 位承载显式
+   * 重配）。受影响会话警示走 uninstall inspect 同款（词表三档 + 受影响会话计数）。
+   * **不自动链 reload**（动词单职责——命令面 unmount→reload）。
+   */
+  unmount(rowId: string): Promise<UnmountReport>;
+  /**
+   * 双相卸载——inspect 相（契约篇 §3.4 第二刀；D2 键域迁装机 id）：零副作用只读
+   * 预检（装机物 + 全部挂载行 + 数据域体积 + 词表三档 + 受影响会话计数 + 级联强
+   * 警示）。人 execute 前已看；模型面消费本相（plugins_uninstall_inspect 随管理刀排期）。
+   * @param id 装机推导 id（非行 id——D2 键域迁移）
    */
   uninstall(id: string, opts: { readonly mode: 'inspect' }): Promise<UninstallReport>;
   /**
-   * 双相卸载——execute 相：四段执行（删行 → 装机物+引用计数 → 数据域处置 →
-   * 成功尾事件双落地）。human-only 落法：execute 唯一入口 = TUI /plugin uninstall
-   * 命令薄壳（服务面不注册模型工具）；dataAction 省缺不可——keep|purge 由命令
-   * 旗标裁决（省缺 = keep 是命令面语义，服务面必须显式）。
+   * 双相卸载——execute 相：四段执行（删全部挂载行 → 装机物+账本记录 → 数据域
+   * 处置 → 成功尾事件双落地）。human-only 落法：execute 唯一入口 = TUI /plugin
+   * uninstall 命令薄壳（服务面不注册模型工具）；dataAction 省缺不可——keep|purge
+   * 由命令面旗标裁决（省缺 = keep 是命令面语义，服务面必须显式）。
+   * @param id 装机推导 id（非行 id——D2 键域迁移）
    */
   uninstall(
     id: string,
@@ -135,14 +171,37 @@ export interface PluginsService {
   markFailed(id: string, code: string, message: string): void;
 }
 
-/** install 结果（TUI 直显的人读报告） */
+/** install 结果（TUI 直显的人读报告——D2 仓库态：无行写入，报告指引 mount） */
 export interface InstallReport {
-  /** 本次写进 overlay 的行 id（npm=包名 / git=repo 名 / local=目录或文件名） */
+  /** 装机推导 id（npm=包名 / git=repo 名 / local=目录或文件名——mount 吃此 id） */
   readonly id: string;
   readonly source: PluginSource;
-  /** 写进 overlay 行的 plugin 引用（npm 裸包名 / local+git 绝对路径） */
+  /** 装机引用（npm 裸包名 / local+git 绝对路径——mount 写行时沿用的 pluginRef） */
   readonly pluginRef: string;
-  /** 一句话结果（人读；TUI 打印后提示 /reload 生效） */
+  /** 一句话结果（人读；TUI 打印后提示挂载动词 + mount→reload 生效链） */
+  readonly message: string;
+}
+
+/** mount 结果（写行事实 + 热应用提示） */
+export interface MountReport {
+  /** 写成的组合树行 id（缺省 = 装机推导 id；显式命名 = rowId 实参） */
+  readonly id: string;
+  /** 挂载目标应用 id（v1 恒在——第三方件必须挂应用） */
+  readonly app: string;
+  readonly source: PluginSource;
+  /** 行 plugin 引用（npm 裸包名 / git·local 绝对路径——按源沿用装机推导） */
+  readonly pluginRef: string;
+  /** 一句话结果（人读；提示 /reload 或命令面自动链） */
+  readonly message: string;
+}
+
+/** unmount 结果（删行事实 + 受影响会话警示承载） */
+export interface UnmountReport {
+  /** 已删的 overlay 行 id */
+  readonly id: string;
+  /** 受影响会话警示（uninstall inspect 同款——词表 unknown 档最坏假设 + 逐词点名） */
+  readonly warnings: readonly string[];
+  /** 一句话结果（人读；装机物与账本保留——重挂走 mount） */
   readonly message: string;
 }
 
@@ -183,22 +242,20 @@ export interface DeclaredEventsInfo {
   readonly note?: string;
 }
 
-/** 卸载检视报告（inspect 相产物——零副作用只读预检；级联强警示的承载面） */
+/** 卸载检视报告（inspect 相产物——零副作用只读预检；级联强警示的承载面；**D2 键域 = 装机 id**） */
 export interface UninstallReport {
-  /** 组合树行 id */
+  /** 装机推导 id（provenance 账本反查的键——非行 id） */
   readonly id: string;
-  /** 行来源（builtin/npm/git/local——有效引用 overlay 先出后写胜出） */
+  /** 行来源（npm/git/local——账本记录的 source） */
   readonly source: PluginRowSource;
-  /** 现装载状态（activated/failed/skipped/planned——list 同源） */
-  readonly status: PluginStatusRow['status'];
-  /** 行 plugin 引用原样（builtin:xxx / 裸包名 / 绝对路径） */
+  /** 装机引用（npm 裸包名 / git·local 绝对路径——按源沿用装机推导） */
   readonly pluginRef: string;
-  /** 装机物路径（npm 子树 / git clone 目录 / local 引用路径〔不删〕；builtin 无） */
-  readonly installPath?: string;
-  /** 同装机物共享行 id（归一路径命中——execute 将跳删装机物并点名；禁用行也计：禁用≠卸载） */
-  readonly sharedRows: readonly string[];
-  /** 件数据根路径（<数据目录>/plugins/<行id>/） */
-  readonly dataDir: string;
+  /** 装机物路径（npm 子树 / git clone 目录 / local 引用路径〔不删〕） */
+  readonly installPath: string;
+  /** 全部挂载行 id（含各 app 键行——execute 段① 将同批删；禁用行也计：禁用≠卸载） */
+  readonly mountedRows: readonly string[];
+  /** 件数据根路径全集（装机 id 根 ∪ 各挂载行根——purge 的处置对象） */
+  readonly dataRoots: readonly string[];
   /** 数据域体积（字节；目录不存在 = undefined——无数据域） */
   readonly dataBytes?: number;
   /** 词表三档 */
@@ -211,22 +268,24 @@ export interface UninstallReport {
 
 /** 卸载执行回执（execute 相产物——四段执行后的事实） */
 export interface UninstallExecReport {
+  /** 装机推导 id（非行 id） */
   readonly id: string;
-  /** 行来源四分类（残迹收尾 = 按残迹推导：npm/git 装机物在推其源，纯数据域推 local） */
+  /** 行来源（npm/git/local；残迹收尾 = 按残迹推导：npm 装机物在推 npm，纯数据域推 local） */
   readonly source: PluginRowSource;
   /**
    * 执行结局三态（SF-8 残迹收尾律）：uninstalled = 正常四段走完；residual =
-   * 行不在但可推导残迹在（上次卸载段间失败的重入收敛）——只重跑清理段；
-   * no-op = 行不在且无残迹（已卸载过 / 从未安装——不造未知行错误，速报事实）。
+   * 账本无记录但可推导残迹在（pre-D2 遗产装机 / 上次卸载段间失败的重入收敛）
+   * ——只重跑清理段；no-op = 账本无记录且无残迹（已卸载过 / 从未安装——不造
+   * 未知装机 id 错误，速报事实）。
    */
   readonly outcome: 'uninstalled' | 'residual' | 'no-op';
   /** 数据域处置事实 */
   readonly dataAction: 'keep' | 'purge';
-  /** 装机物处置：removed 已删 / shared 跳删（共享）/ none 无装机物可删（local/builtin/缺目录） */
-  readonly installRemoved: 'removed' | 'shared' | 'none';
-  /** 共享行 id（installRemoved='shared' 时点名） */
-  readonly sharedRows: readonly string[];
-  /** 数据域是否已删（purge 且目录存在） */
+  /** 装机物处置：removed 已删 / none 无装机物可删（local/缺目录——local 账本仍清） */
+  readonly installRemoved: 'removed' | 'none';
+  /** 已删的全部挂载行 id（含各 app 键行——多应用挂载同批清） */
+  readonly mountedRows: readonly string[];
+  /** 数据域是否已删（purge 且任一数据根存在） */
   readonly dataRemoved: boolean;
   /** 受影响会话计数（随事件信封同源；无则省略） */
   readonly affectedSessions?: Readonly<Record<string, number>>;
@@ -271,6 +330,8 @@ export type ReloadOutcome =
  *        当前会话流 append 双落地；缺省 = 服务单测不落事件）
  * @param opts.requestReload 重载请求投递面（刀 3 导线：assembly 注入组合根
  *        reload 闭包的适配器——排队语义宿主侧承载；缺省 = 诊断面拒投递）
+ * @param opts.gitCommitOf git 装机物 commit 取数面（provenance 精确版本——
+ *        rev-parse HEAD；缺省真 spawn 捕获，测试注入替身；失败容忍记缺省）
  */
 export function createPluginsService(opts: {
   dataDir: string;
@@ -279,12 +340,23 @@ export function createPluginsService(opts: {
   affectedSessionCounts?: (types: readonly string[]) => Promise<Record<string, number>> | Record<string, number>;
   emitUninstalled?: (data: UninstalledEventData) => void;
   requestReload?: () => Promise<ReloadOutcome>;
+  gitCommitOf?: (dir: string) => Promise<string | undefined>;
 }): PluginsService {
   const dataDir = opts.dataDir;
   const runner = opts.runner ?? spawnRunner;
+  // git 精确版本采集缺省真身（provenance commit 字段）：可注入替身（测试免真
+  // git 仓）；缺省 spawn rev-parse HEAD 捕获 stdout——失败容忍记缺省（ref 锁定
+  // 仍是凭证面，commit 缺席只降精度不阻断装机）
+  const gitCommitOf = opts.gitCommitOf ?? defaultGitCommitOf;
   /** 装载状态（applyLoad 回灌；boot 前空表） */
   let byId = new Map<string, PluginStatusRow>();
   let plan: readonly PluginPlanRow[] = [];
+  /**
+   * 合成行全集（applyLoad 回灌；boot 前空表）：仓库态差集的归一键源。plan 行
+   * 不代劳——禁用行在 plan 里只有 {id, skip} 不带 plugin 引用（挂载休眠不解析
+   * 入口），差集若按 plan 算会把「挂了但禁用」误报成「装了没挂」。
+   */
+  let compositionRows: readonly CompositionRow[] = [];
   /**
    * per-row 活词表（词表三档 live 档，契约篇 §3.4 第二刀）：applyLoad 从
    * activated 载荷 events 字段收割（undefined = 声明零词，?? [] 归一）；activated
@@ -294,49 +366,40 @@ export function createPluginsService(opts: {
   let liveEventsById = new Map<string, readonly string[]>();
 
   /**
-   * 卸载目标解析（双相共用前置）：行位置双查（overlay 先出后写胜出）→ Ring 1/
-   * fixed 拒卸 → 有效引用分类 → 装机物路径。词表与计数在调用侧按相取用。
-   * **行不在返 undefined 不抛**（SF-8 残迹收尾律）：inspect 相调用方显式抛未知行错
-   * （人检视打错 id 该响亮）；execute 相走残迹收尾/ no-op——段间部分失败后重跑
-   * 不被「未知行」卡死，残迹仍可收敛。
+   * 卸载目标解析（双相共用前置，D2 键域迁装机 id）：账本反查装机物（装机 id →
+   * 唯一 provenance 记录）→ 装机物路径 → **全部挂载行**（归一路径反查——含各
+   * app 键行与禁用行，天然兼容多应用挂载；禁用 ≠ 卸载，行在即挂载态）。词表与
+   * 计数在调用侧按相取用。
+   * **账本无记录返 undefined 不抛**（SF-8 残迹收尾律）：inspect 相调用方显式抛
+   * 未知装机 id 错（人检视打错 id 该响亮）；execute 相走残迹收尾 / no-op——段间
+   * 部分失败后重跑不被「未知 id」卡死，残迹仍可收敛。同装机 id 多条记录（同
+   * repo 名不同 host 等）= 键歧义，响亮点名（卸载面不做「猜一条」）。
+   * Ring 1 / fixed 守卫随行锚同灭：装机 id 结构上到不了官方行（provenance 只记
+   * 三源装机物，builtin 行不装机）。
    */
   const resolveUninstallTarget = (
-    id: string,
+    installId: string,
   ):
     | {
+        key: string;
+        record: ProvenanceRecord;
         source: PluginRowSource;
-        ref: string;
-        status: PluginStatusRow['status'];
-        installPath?: string;
-        defaultRowExists: boolean;
+        installPath: string;
+        mountedRows: CompositionRow[];
       }
     | undefined => {
-    const { overlay, defaultRow } = findRowLocation(dataDir, id);
-    if (overlay === undefined && defaultRow === undefined) return undefined;
-    if (RING1_REQUIRED_ROW_IDS.includes(id) || defaultRow?.fixed === true) {
-      // Ring 1 必备行 / fixed 安全栈强制点：卸掉即首启核心循环必破（内核边界篇
-      // §5.1 一句话判据）——换实现走 install 同 id 覆盖引用，不是卸载
-      throw new AppError(
-        PLUGIN_FIXED_ROW,
-        `uninstall：行「${id}」是 Ring 1 必备行（或 fixed 安全栈强制点），不可卸载——` +
-          `如需换实现请 install 同 id 覆盖引用（契约篇 §5.1 缺省层替换语义）`,
-      );
-    }
-    const ref = overlay?.plugin ?? defaultRow?.plugin;
-    if (ref === undefined) {
+    const hits = provenanceById(dataDir, installId);
+    if (hits.length === 0) return undefined;
+    if (hits.length > 1) {
       throw new AppError(
         COMPOSITION_ROW_INVALID,
-        `uninstall：行「${id}」无插件引用（纯禁用行无默认层对应——此形态应在合成期被拒绝，请检查 overlay）`,
+        `uninstall：装机 id「${installId}」对应 ${hits.length} 条装机物（${hits.map(([k]) => k).join('、')}）——` +
+          `同包多装机物不可凭 id 消歧（行 id 是行键不是包键的同族纪律），请先卸载多余装机物再执行`,
       );
     }
-    const source = classifyRefSource(ref, dataDir);
-    return {
-      source,
-      ref,
-      status: byId.get(id)?.status ?? 'planned',
-      installPath: installArtifactPath(dataDir, source, ref),
-      defaultRowExists: defaultRow !== undefined,
-    };
+    const [key, record] = hits[0]!;
+    const installPath = artifactPathOfKey(dataDir, key, record.source);
+    return { key, record, source: record.source, installPath, mountedRows: mountedRowsFor(dataDir, installPath) };
   };
 
   /** 词表三档合一（双相共用）：activated 行 live 档优先，其余行唯一来源账本，无账本 unknown */
@@ -369,14 +432,14 @@ export function createPluginsService(opts: {
   };
 
   /**
-   * uninstall 双相服务（契约篇 §3.4 第二刀，2026-08-27 刀 2）——接口 overload 的
-   * 实现体（对象字面量直挂双 overload 返回联合不可赋值，故走函数声明形态）。
-   * inspect = 零副作用预检（报告给人裁决）；execute = 四段执行序：
-   * ①删行（builtin 行 disableOverlayRow 幂等硬禁用，其余 removeOverlayRow）
-   * ②装机物必删 + 同包引用计数（归一路径比对；剩余引用 >0 = 跳删+点名；local
-   * 不删〔用户自有目录〕/ builtin 无装机物）③数据域处置 = dataAction 裁决
-   * （keep = Docker 卷律缺省；purge = 删件数据根整目录含账本）④成功尾
-   * plugin/uninstalled 双落地（总线 + 当前会话流，注入闭包承载）。
+   * uninstall 双相服务（契约篇 §3.4 第二刀，2026-08-27 刀 2；**D2 键域迁装机
+   * id**）——接口 overload 的实现体（对象字面量直挂双 overload 返回联合不可赋值，
+   * 故走函数声明形态）。inspect = 零副作用预检（报告给人裁决）；execute = 四段
+   * 执行序：①删**全部**挂载行（含各 app 键行——多应用挂载同批清）②装机物必删
+   * + 账本记录同批清（local 不删〔用户自有目录〕但记录仍清）③数据域处置 =
+   * dataAction 裁决（keep = Docker 卷律缺省；purge = 删各数据根整目录含词表
+   * 账本）④成功尾 plugin/uninstalled 双落地（总线 + 当前会话流，注入闭包承载）。
+   * 词表与受影响会话计数在段① 前一次性取数（purge 路径先删后读会丢账本档）。
    */
   async function uninstallImpl(id: string, phase: { readonly mode: 'inspect' }): Promise<UninstallReport>;
   async function uninstallImpl(
@@ -388,32 +451,34 @@ export function createPluginsService(opts: {
     phase: { readonly mode: 'inspect' } | { readonly mode: 'execute'; readonly dataAction: 'keep' | 'purge' },
   ): Promise<UninstallReport | UninstallExecReport> {
     const target = resolveUninstallTarget(id);
-    // 同包引用计数：删装机物前反查 overlay 剩余行（减去目标行自身；禁用行也计入
-    // ——禁用 ≠ 卸载，代码仍在盘上仍可能再启用）
-    const sharedRows =
-      target?.installPath !== undefined
-        ? sharedPackageRows(dataDir, id, target.installPath)
-        : { rows: [] as CompositionRow[] };
+    // 词表与受影响会话先取（段① 前——purge 路径先删后读会丢账本档；装机 id 无行
+    // 状态，活档仅在缺省挂载〔行 id === 装机 id〕且已激活时可达，其余走账本档）
+    const events = declaredEventsFor(id, byId.get(id)?.status ?? 'planned');
+    const affectedSessions = await affectedCountsFor(events);
 
     if (phase.mode !== 'execute') {
       // ---- inspect 相：零副作用预检——只读不写，报告 = execute 将做的事 ----
       if (target === undefined) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `uninstall：未知行 id「${id}」（overlay 与官方默认层皆无此行——清单以组合树为准，勿凭记忆拼 id）`,
+          `uninstall：未知装机 id「${id}」（provenance 账本无此记录——未装或已卸；清单以 /plugins 或 plugins_list 为准，勿凭记忆拼 id）`,
         );
       }
-      const events = declaredEventsFor(id, target.status);
-      const affectedSessions = await affectedCountsFor(events);
-      const dataBytes = dirSizeBytes(pluginDataDirOf(dataDir, id));
+      // 数据域全集 = 装机 id 数据根（install 收割账本所在）∪ 各挂载行数据根
+      //（自定义行 id 的运行期数据根）；Set 去重（缺省挂载行 id === 装机 id 同径）
+      const dataRoots = dataRootsOf(dataDir, id, target.mountedRows);
+      let dataBytes: number | undefined = undefined;
+      for (const root of dataRoots) {
+        const bytes = dirSizeBytes(root);
+        if (bytes !== undefined) dataBytes = (dataBytes ?? 0) + bytes;
+      }
       return {
         id,
         source: target.source,
-        status: target.status,
-        pluginRef: target.ref,
-        ...(target.installPath !== undefined ? { installPath: target.installPath } : {}),
-        sharedRows: sharedRows.rows.map((row) => row.id),
-        dataDir: pluginDataDirOf(dataDir, id),
+        pluginRef: target.record.source === 'npm' ? target.record.id : target.installPath,
+        installPath: target.installPath,
+        mountedRows: target.mountedRows.map((row) => row.id),
+        dataRoots,
         ...(dataBytes !== undefined ? { dataBytes } : {}),
         events,
         ...(affectedSessions !== undefined ? { affectedSessions } : {}),
@@ -422,56 +487,49 @@ export function createPluginsService(opts: {
           source: target.source,
           events,
           affectedSessions,
-          sharedRowIds: sharedRows.rows.map((row) => row.id),
+          // D2：全部挂载行随卸载同删——「共享跳删」形态消灭（空集传参保 buildWarnings 签名）
+          sharedRowIds: [],
         }),
       };
     }
 
     // ---- execute 相：四段执行序 ----
     const dataAction = phase.dataAction ?? 'keep'; // 类型面必填；运行期兜底 keep（Docker 卷律）
-    // SF-8 残迹收尾律：行不在 ≠ 错——上次卸载段间失败的重入收敛面（只重跑清理段）
-    // + 已卸/未装的 no-op 速报（不造未知行错误）；inspect 相已在上面显式抛
-    if (target === undefined) return await residualCleanup(id, dataAction);
-    // 段①：声明死——builtin 行不可删（代码随包），幂等硬禁用落盘；overlay 行删行
-    //（默认层同 id 行〔若有〕随行消失重新露出 = 恢复出厂态）
-    if (target.source === 'builtin') {
-      disableOverlayRow(dataDir, id);
-    } else {
-      removeOverlayRow(dataDir, id);
+    // SF-8 残迹收尾律：账本无记录 ≠ 错——上次卸载段间失败的重入收敛面（只重跑
+    // 清理段）+ 已卸/未装的 no-op 速报（不造未知装机 id 错误）；inspect 相已在上面显式抛
+    if (target === undefined) return await residualCleanup(id, dataAction, affectedSessions);
+    const dataRoots = dataRootsOf(dataDir, id, target.mountedRows);
+    // 段①：删全部挂载行（含各 app 键行——多应用挂载同批清）；行 id 撞官方默认层
+    // 的替换行删除后默认层同 id 行重新露出 = 恢复出厂态
+    let restoresDefault = false;
+    for (const row of target.mountedRows) {
+      if (findRowLocation(dataDir, row.id).defaultRow !== undefined) restoresDefault = true;
+      removeOverlayRow(dataDir, row.id);
     }
-    // 段②：装机物必删——同包引用计数裁决（npm/git 才有装机物；local 是用户
-    // 自有目录不删；共享则跳删留待最后一个引用行卸载时删）
-    let installRemoved: 'removed' | 'shared' | 'none' = 'none';
-    if (
-      target.installPath !== undefined &&
-      (target.source === 'npm' || target.source === 'git') &&
-      sharedRows.rows.length === 0 &&
-      existsSync(target.installPath)
-    ) {
+    // 段②：装机物必删 + 账本记录同批清（N-10 账实同批律：装机物删了记录留着 =
+    // 账实漂移，mount 反查会让幽灵装机物复活；local 是用户自有目录不删——删
+    // 用户的工作目录不是 uninstall 的事，但账本记录仍清）
+    let installRemoved: 'removed' | 'none' = 'none';
+    if ((target.source === 'npm' || target.source === 'git') && existsSync(target.installPath)) {
       // 越界防线（与 install 同款纵深第二道）：rmSync 前强制归一校验在装机子树内
-      //（npm → plugins/node_modules / git → plugins/git），防 overlay 手改污染
+      //（npm → plugins/node_modules / git → plugins/git），防账本手改污染
       assertInsideInstallSubtree(dataDir, target.source, target.installPath);
       rmSync(target.installPath, { recursive: true, force: true });
-      // git 装机物同批删 sources.json 对应 relDir 记录（N-10：写面有存无删即账实
-      // 漂移——update 重克隆按记录找 ref，残记录会让幽灵行复活）
-      if (target.source === 'git')
-        removeGitSource(dataDir, relative(join(dataDir, 'plugins', 'git'), target.installPath));
       installRemoved = 'removed';
-    } else if (sharedRows.rows.length > 0) {
-      installRemoved = 'shared';
     }
-    // 段③：数据域处置——purge 才删（件数据根整目录含词表账本；keep = Docker 卷律）
-    const dataRoot = pluginDataDirOf(dataDir, id);
+    removeProvenanceRecord(dataDir, target.key);
+    // 段③：数据域处置——purge 才删（各数据根整目录含词表账本；keep = Docker 卷律）
     let dataRemoved = false;
-    if (dataAction === 'purge' && existsSync(dataRoot)) {
-      // 保留名闸已在 pluginDataDirOf 取址时收口（dataRoot 构造行）；此处只剩子树防线
-      assertInsideSubtree(join(dataDir, 'plugins'), dataRoot, 'uninstall：数据根'); // 数据根必在 plugins/ 子树内
-      rmSync(dataRoot, { recursive: true, force: true });
-      dataRemoved = true;
+    if (dataAction === 'purge') {
+      for (const root of dataRoots) {
+        if (!existsSync(root)) continue;
+        // 保留名闸已在 pluginDataDirOf 取址时收口（dataRoots 构造行）；子树防线维持
+        assertInsideSubtree(join(dataDir, 'plugins'), root, 'uninstall：数据根');
+        rmSync(root, { recursive: true, force: true });
+        dataRemoved = true;
+      }
     }
     // 段④：成功尾双落地——总线广播 + 当前会话流落账（注入闭包承载，无注入则静默）
-    const events = declaredEventsFor(id, target.status);
-    const affectedSessions = await affectedCountsFor(events);
     opts.emitUninstalled?.({
       id,
       source: target.source,
@@ -486,54 +544,64 @@ export function createPluginsService(opts: {
       outcome: 'uninstalled',
       dataAction,
       installRemoved,
-      sharedRows: sharedRows.rows.map((row) => row.id),
+      mountedRows: target.mountedRows.map((row) => row.id),
       dataRemoved,
       ...(affectedSessions !== undefined ? { affectedSessions } : {}),
-      // 卸载后官方默认层同 id 行重新露出 = 恢复出厂态（替换行卸载的显式可见面）
-      ...(target.source !== 'builtin' && target.defaultRowExists ? { restoresDefault: true as const } : {}),
+      // 卸替换行使官方默认层同 id 行重新露出 = 恢复出厂态（替换行卸载的显式可见面）
+      ...(restoresDefault ? { restoresDefault: true as const } : {}),
     };
   }
 
   /**
-   * 残迹收尾（SF-8：execute 相行不在的收敛路径）：按 id 可推导的残迹 = npm 装机物
-   * （install 时行 id = 包名 → node_modules/<id>）+ git 源记录（sources.json 值 URL
-   * 重 parse 的 repo 名 == id → relDir 目录与记录）+ 数据域（purge 才构成收尾对象
-   * ——keep 留数据域是合法终态）。全无残迹 = no-op 速报。source 按残迹推导
-   * （npm/git 装机物在推其源；纯数据域残迹推 local——无装机物无源的最弱假设）。
+   * 残迹收尾（SF-8：execute 相账本无记录的收敛路径）——pre-D2 遗产装机 + 段间
+   * 失败重入两类。D2 后可推导残迹收敛为三样：npm 装机物（install id = 包名 →
+   * node_modules/<id>；pre-D2 装机无 provenance 记录，账本反查结构性 miss）+
+   * 引用它的 overlay 行（pre-D2 install 落的行——归一路径反查同删，悬空行只会
+   * 造触发②启动失败）+ 数据域（purge 才构成收尾对象——keep 留数据域是合法
+   * 终态）。git 源记录已随全源账本迁移折叠（loadProvenance 一次性收编旧
+   * sources.json），账本 miss 即无 git 记录可找——matchGitResidualRelDirs 旧
+   * 反查面退役。全无残迹 = no-op 速报；source 按残迹推导（npm 装机物在推
+   * npm；纯数据域残迹推 local——无装机物无源的最弱假设）。词表与受影响会话
+   * 沿用调用方段① 前取数（本路径行不在活档不可达——与检视报告同源）。
    */
-  const residualCleanup = async (id: string, dataAction: 'keep' | 'purge'): Promise<UninstallExecReport> => {
+  const residualCleanup = async (
+    id: string,
+    dataAction: 'keep' | 'purge',
+    affectedSessions: Record<string, number> | undefined,
+  ): Promise<UninstallExecReport> => {
     const npmPath = installArtifactPath(dataDir, 'npm', id);
-    const gitRelDirs = matchGitResidualRelDirs(dataDir, id);
     const dataRoot = pluginDataDirOf(dataDir, id);
     const dataRootExists = existsSync(dataRoot);
     const npmResidual = npmPath !== undefined && existsSync(npmPath);
-    if (!npmResidual && gitRelDirs.length === 0 && !(dataAction === 'purge' && dataRootExists)) {
+    // pre-D2 遗产行（含禁用行——禁用 ≠ 卸载）：归一路径反查引用同一 npm 装机物
+    // 的 overlay 行，路径比对不问存在性（装机物已手删行悬空 = 同一收敛对象）
+    const mountedRows = npmPath !== undefined ? mountedRowsFor(dataDir, npmPath) : [];
+    if (!npmResidual && mountedRows.length === 0 && !(dataAction === 'purge' && dataRootExists)) {
       return {
         id,
         source: 'local',
         outcome: 'no-op',
         dataAction,
         installRemoved: 'none',
-        sharedRows: [],
+        mountedRows: [],
         dataRemoved: false,
       };
     }
-    // 段②（残迹版）：推导路径逐个清——防线与正常路径同款（归一子树校验硬拒越界）
+    // 段①（残迹版）：删引用行——替换官方默认行的行删除后默认行重新露出
+    let restoresDefault = false;
+    for (const row of mountedRows) {
+      if (findRowLocation(dataDir, row.id).defaultRow !== undefined) restoresDefault = true;
+      removeOverlayRow(dataDir, row.id);
+    }
+    // 段②（残迹版）：清 npm 装机物——防线与正常路径同款（归一子树校验硬拒越界）
     let installRemoved: 'removed' | 'none' = 'none';
     if (npmResidual) {
       assertInsideInstallSubtree(dataDir, 'npm', npmPath!);
       rmSync(npmPath!, { recursive: true, force: true });
       installRemoved = 'removed';
     }
-    const gitRoot = join(dataDir, 'plugins', 'git');
-    for (const relDir of gitRelDirs) {
-      const absDir = join(gitRoot, relDir);
-      assertInsideInstallSubtree(dataDir, 'git', absDir);
-      if (existsSync(absDir)) rmSync(absDir, { recursive: true, force: true });
-      removeGitSource(dataDir, relDir); // 源记录与目录同批清（N-10 同律）
-      installRemoved = 'removed';
-    }
-    // 段③（残迹版）：数据域 purge 裁决同正常路径（防线同款双闸）
+    // 段③（残迹版）：数据域 purge 裁决同正常路径（防线同款双闸；自定义行 id 数据根
+    // 行已删不可反查 = 与正常路径崩溃窗口同界，检视报告已先行承载可删面）
     let dataRemoved = false;
     if (dataAction === 'purge' && dataRootExists) {
       // 保留名闸已在 pluginDataDirOf 取址时收口；子树防线维持（防线同款双闸）
@@ -541,11 +609,8 @@ export function createPluginsService(opts: {
       rmSync(dataRoot, { recursive: true, force: true });
       dataRemoved = true;
     }
-    // 段④（残迹版）：词表走账本档（行不在 → live 档不可达；账本即数据域 data.json，
-    // purge 已删则 unknown——与正常路径「先删后读」行为一致，检视报告已先行承载）
-    const events = declaredEventsFor(id, 'planned');
-    const affectedSessions = await affectedCountsFor(events);
-    const source: PluginRowSource = npmResidual ? 'npm' : gitRelDirs.length > 0 ? 'git' : 'local';
+    // 段④（残迹版）：词表走调用方段① 前取数（账本档与检视同源，不在此重读）
+    const source: PluginRowSource = npmResidual ? 'npm' : 'local';
     opts.emitUninstalled?.({
       id,
       source,
@@ -560,9 +625,10 @@ export function createPluginsService(opts: {
       outcome: 'residual',
       dataAction,
       installRemoved,
-      sharedRows: [],
+      mountedRows: mountedRows.map((row) => row.id),
       dataRemoved,
       ...(affectedSessions !== undefined ? { affectedSessions } : {}),
+      ...(restoresDefault ? { restoresDefault: true as const } : {}),
     };
   };
 
@@ -581,19 +647,40 @@ export function createPluginsService(opts: {
       for (const item of load.activated) nextLive.set(item.id, item.events ?? []);
       liveEventsById = nextLive;
       plan = composition.plan;
+      compositionRows = composition.rows;
     },
 
     list() {
       // source 在 list 时从组合树 plan 行现推导（契约篇 §3.4 第一刀，2026-08-27）：
       // 计划行的位置事实非装载态——applyLoad 不必存、planned/failed 行同带。
       // planned 兜底行与已装载行统一走 enrichment，面收敛一个形态
-      return plan.map((row) => {
+      const rows = plan.map((row) => {
         const loaded = byId.get(row.id);
         const source = derivePluginRowSource(row, dataDir);
         return loaded === undefined
           ? { id: row.id, status: 'planned' as const, ...(source !== undefined ? { source } : {}) }
           : { ...loaded, ...(source !== undefined ? { source } : {}) };
       });
+      // D2 仓库态差集（契约篇 §6.1 可见性）：装机未挂件呈现 installed-unmounted
+      // 态——差集按**同包归一键**算非行 id（行 id 可显式命名，包身份是装机物
+      // 归一路径）；「装了没挂」不可静默不可见（装机面断头路 = 不可用面）。
+      // 归一键源 = 合成行全集（compositionRows）：禁用行 plan 里无 plugin 引用，
+      // 按 plan 算会把「挂了但禁用」误报成「装了没挂」（禁用 ≠ 卸载）
+      const mountedKeys = new Set<string>();
+      for (const row of compositionRows) {
+        if (row.plugin === undefined) continue;
+        const source = classifyRefSource(row.plugin, dataDir);
+        const artifact = installArtifactPath(dataDir, source, row.plugin);
+        if (artifact !== undefined) mountedKeys.add(resolve(artifact));
+        else if (source === 'local') mountedKeys.add(resolve(row.plugin)); // local 无装机物——归一键 = 直引路径本身
+      }
+      const ledger = loadProvenance(dataDir);
+      for (const [key, record] of ledger) {
+        const artifact = artifactPathOfKey(dataDir, key, record.source);
+        if (mountedKeys.has(resolve(artifact))) continue;
+        rows.push({ id: record.id, status: 'installed-unmounted', source: record.source });
+      }
+      return rows;
     },
 
     markFailed(id, code, message) {
@@ -604,6 +691,10 @@ export function createPluginsService(opts: {
     },
 
     async install(ref, installOpts) {
+      // D2 仓库态（契约篇 §6.1 两态块）：install = 代码进装机子树 + provenance
+      // 落账，**不写组合行 = 零生效**——写行生效是独立动词 mount；install→reload
+      // 链随两态废止。词表账本收割（refreshLedger）仍随 install 走：账本是装机
+      // 事实（uninstall 检视的词表档数据源）不是装载态，不依赖行在场。
       const source = classifyRef(ref);
       if (source === 'npm') {
         const name = npmPackageName(ref);
@@ -615,10 +706,24 @@ export function createPluginsService(opts: {
           '--omit=peer',
           ref,
         ]);
-        upsertOverlayPluginRef(dataDir, name, name);
-        // 词表账本收割（刀 2）：三源通尾——jiti 一次性装载读 name/events 落 data.json
+        // provenance 落账：精确版本 best-effort 读装机产物（package.json version +
+        // .package-lock.json integrity 哈希——dist-tag 不算凭证，解析落盘的才算）
+        const pinned = readNpmPin(dataDir, name);
+        upsertProvenanceRecord(dataDir, `node_modules/${name}`, {
+          source: 'npm',
+          ref,
+          id: name,
+          ...(pinned !== undefined ? pinned : {}),
+          installedAt: new Date().toISOString(),
+        });
+        // 词表账本收割（刀 2）：jiti 一次性装载读 name/events 落 data.json
         await refreshLedger(opts, name, name);
-        return { id: name, source, pluginRef: name, message: `npm 源已装入 plugins/node_modules 子树：${name}` };
+        return {
+          id: name,
+          source,
+          pluginRef: name,
+          message: `npm 源已入仓库态（零生效）：${name}——挂载生效走 /plugin-mount ${name} --app <应用id>`,
+        };
       }
       if (source === 'git') {
         const parsed = parseGitUrl(ref);
@@ -636,20 +741,26 @@ export function createPluginsService(opts: {
           ref,
           absDir,
         ]);
-        saveGitSource(dataDir, parsed.relDir, {
-          url: ref,
-          ...(installOpts?.gitRef !== undefined ? { ref: installOpts.gitRef } : {}),
+        // provenance 落账：精确版本 = rev-parse HEAD（commit 哈希；缺省真 spawn
+        // 捕获，失败容忍记缺省——ref 锁定 + commit 双落，update 重克隆按 ref 走）
+        const commit = await gitCommitOf(absDir);
+        upsertProvenanceRecord(dataDir, `git/${parsed.relDir}`, {
+          source: 'git',
+          ref,
+          ...(installOpts?.gitRef !== undefined ? { gitRef: installOpts.gitRef } : {}),
+          id: parsed.repo,
+          ...(commit !== undefined ? { commit } : {}),
+          installedAt: new Date().toISOString(),
         });
-        upsertOverlayPluginRef(dataDir, parsed.repo, absDir);
         await refreshLedger(opts, parsed.repo, absDir);
         return {
           id: parsed.repo,
           source,
           pluginRef: absDir,
-          message: `git 源已 clone：${ref} → ${absDir}`,
+          message: `git 源已 clone 入仓库态（零生效）：${ref} → ${absDir}——挂载生效走 /plugin-mount ${parsed.repo} --app <应用id>`,
         };
       }
-      // local：路径直引不拷贝；绝对化后写 overlay（cwd 无关——跨目录启动解析仍成立）
+      // local：路径直引不拷贝；绝对化后落 provenance（cwd 无关——跨目录启动解析仍成立）
       const absRef = resolve(process.cwd(), ref);
       if (!existsSync(absRef)) {
         throw new AppError(
@@ -658,9 +769,19 @@ export function createPluginsService(opts: {
         );
       }
       const id = basename(parse(absRef).name); // 目录名 / 文件名去扩展名
-      upsertOverlayPluginRef(dataDir, id, absRef);
+      upsertProvenanceRecord(dataDir, absRef, {
+        source: 'local',
+        ref: absRef,
+        id,
+        installedAt: new Date().toISOString(),
+      });
       await refreshLedger(opts, id, absRef);
-      return { id, source, pluginRef: absRef, message: `local 源直引登记：${absRef}（改动 + /reload 即见）` };
+      return {
+        id,
+        source,
+        pluginRef: absRef,
+        message: `local 源已入仓库态（零生效）：${absRef}——挂载生效走 /plugin-mount ${id} --app <应用id>（改动 + /reload 即见）`,
+      };
     },
 
     toggle(id) {
@@ -668,56 +789,210 @@ export function createPluginsService(opts: {
     },
 
     async update(id) {
-      const ref = overlayPluginRef(dataDir, id);
-      if (ref === undefined) {
+      // D2 键域迁移（契约篇 §6.1 动词族全景）：update 改吃装机推导 id——两态后
+      // overlay 无行的仓库态件也可更新；记录缺失/歧义皆响亮（账本是唯一事实源）
+      const hits = provenanceById(dataDir, id);
+      if (hits.length === 0) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `update：未知行 id「${id}」（overlay 与官方默认层皆无此行——清单以组合树为准）`,
+          `update：未知装机 id「${id}」（provenance 账本无此记录——未装或已卸；清单以 /plugins 或 plugins_list 为准）`,
         );
       }
-      const gitRoot = join(dataDir, 'plugins', 'git');
-      if (ref.startsWith(`${gitRoot}/`)) {
-        // 纵深防线（P33 第二道）：overlay 手改/污染的 plugin 引用同受越界校验——
-        // `gitRoot/../escape` 形态字面 startsWith 命中但归一后已在子树外
-        assertInsideGitRoot(dataDir, ref);
-        // git 源：删目录按原 ref 重克隆（sources.json 是 ref 的唯一存放处）
-        const relDir = ref.slice(gitRoot.length + 1);
-        const record = loadGitSources(dataDir)[relDir];
-        if (!record) {
-          throw new AppError(
-            PLUGIN_INSTALL_FAILED,
-            `update：${relDir} 无源记录（sources.json 缺项——手放目录请删除后重新 install）`,
-          );
-        }
-        rmSync(ref, { recursive: true, force: true });
+      if (hits.length > 1) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `update：装机 id「${id}」歧义（账本 ${hits.length} 条同 id 记录：${hits
+            .map(([key]) => key)
+            .join('、')}——请按 /plugins 清单核对后用卸载重装收敛）`,
+        );
+      }
+      const [key, record] = hits[0]!;
+      const installPath = artifactPathOfKey(dataDir, key, record.source);
+      if (record.source === 'git') {
+        // 纵深防线（P33 第二道）：账本手改污染的定位串同受越界校验——归一后
+        // 必须仍在 git 子树内，字面前缀命中不算数
+        assertInsideGitRoot(dataDir, installPath);
+        // git 源：删目录按账本原 ref 重克隆（provenance 是 ref 的唯一存放处）
+        rmSync(installPath, { recursive: true, force: true });
         await runInstallStep(runner, dataDir, 'git', [
           'clone',
-          ...(record.ref !== undefined ? ['--branch', record.ref] : []),
+          ...(record.gitRef !== undefined ? ['--branch', record.gitRef] : []),
           '--',
-          record.url,
-          ref,
+          record.ref,
+          installPath,
         ]);
+        const commit = await gitCommitOf(installPath);
+        upsertProvenanceRecord(dataDir, key, {
+          ...record,
+          ...(commit !== undefined ? { commit } : {}),
+          installedAt: new Date().toISOString(),
+        });
         // 重装重收割（刀 2）：声明词汇可能随版本漂移，账本以新装载为准覆写
-        await refreshLedger(opts, id, ref);
-        return { id, source: 'git', message: `git 源已按原 ref 重克隆：${record.url}` };
+        await refreshLedger(opts, id, installPath);
+        return { id, source: 'git', message: `git 源已按原 ref 重克隆：${record.ref}` };
       }
-      if (isPathReference(ref)) {
+      if (record.source === 'local') {
         // local 源：直引不拷贝——改动即见，update 天生 no-op；但账本仍刷新
         // （词表随磁盘代码漂移，与 /reload 的活跃词表对齐——no-op ≠ 不对账）
-        await refreshLedger(opts, id, ref);
+        await refreshLedger(opts, id, installPath);
         return { id, source: 'local', message: 'local 源无需 update——改动 + /reload 即见（词表账本已重收割）' };
       }
-      // npm 源：重装同名（重新解析版本）
+      // npm 源：按账本原 ref 重装（重新解析版本），provenance 精确版本随之刷新
       await runInstallStep(runner, dataDir, 'npm', [
         'install',
         '--prefix',
         join(dataDir, 'plugins'),
         '--legacy-peer-deps',
         '--omit=peer',
-        ref,
+        record.ref,
       ]);
-      await refreshLedger(opts, id, ref);
-      return { id, source: 'npm', message: `npm 源已重装：${ref}` };
+      const pinned = readNpmPin(dataDir, record.id);
+      upsertProvenanceRecord(dataDir, key, {
+        ...record,
+        ...(pinned !== undefined ? pinned : {}),
+        installedAt: new Date().toISOString(),
+      });
+      await refreshLedger(opts, id, record.id);
+      return { id, source: 'npm', message: `npm 源已重装：${record.ref}` };
+    },
+
+    /**
+     * 挂载（D2 装机两态的生效动词，契约篇 §6.1）：吃装机推导 id，写组合行 =
+     * 生效。行 id 缺省 = 装机推导 id（npm 包名 / git repo 名 / local 文件名），
+     * 可显式命名（rowId）——同包第二应用挂载必显式（全树行 id 唯一）。撞名
+     * （overlay ∨ 官方默认层，findRowLocation 双层查）= `COMPOSITION_ROW_INVALID`
+     * 拒绝；系统层官方专属 v1——第三方挂系统走 overlay 手编（专家路径）。config
+     * best-effort 校验（行带 config 且插件声明 schema 可得时复用装载期校验面）。
+     */
+    async mount(id, mountOpts) {
+      // 装机解析：账本唯一事实源——缺失/歧义皆响亮（与 update 同档拒绝式）
+      const hits = provenanceById(dataDir, id);
+      if (hits.length === 0) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `mount：未知装机 id「${id}」（provenance 账本无此记录——先 /plugin-install 入仓库态）`,
+        );
+      }
+      if (hits.length > 1) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `mount：装机 id「${id}」歧义（账本 ${hits.length} 条同 id 记录：${hits
+            .map(([key]) => key)
+            .join('、')}——请按 /plugins 清单核对）`,
+        );
+      }
+      const [key, record] = hits[0]!;
+      // 挂载目标必填 v1（挂载目标两档：缺省系统组合 = 官方专属、`app` 键应用组合
+      // = 第三方正路——无 app 即挂系统，v1 拒绝；显式挂系统的 seam 随准入制放开）
+      const app = mountOpts?.app;
+      if (app === undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `mount：挂载目标必填（--app <应用id>）——系统组合 v1 官方专属，第三方挂载走应用组合；` +
+            `overlay 手编是系统层的专家路径`,
+        );
+      }
+      // 行 id 缺省 = 装机推导 id；显式命名走 rowId（行 id 是行键不是包键——全树唯一）
+      const rowId = mountOpts?.rowId ?? id;
+      // 撞名判域 = overlay ∨ 官方默认层（replace-via-mount 双层皆拒——系统层官方
+      // 专属，替换官方行走 overlay 手编的 replace 语义〔专家路径〕）
+      const location = findRowLocation(dataDir, rowId);
+      if (location.overlay !== undefined || location.defaultRow !== undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `mount：行 id「${rowId}」已被占用（${location.defaultRow !== undefined ? '官方默认层' : 'overlay'}同 id 行在场）` +
+            `——同包多应用挂载请用 rowId 显式命名（行 id 是行键不是包键）`,
+        );
+      }
+      // pluginRef 按源沿用装机推导：npm 裸包名 / git·local 绝对路径（与 install
+      // 推导同键——装载期 resolvePluginEntry 按同一形态解析入口）
+      const installPath = artifactPathOfKey(dataDir, key, record.source);
+      const pluginRef = record.source === 'npm' ? record.id : installPath;
+      // config best-effort 校验（与 configure 同纪律）：行带 config 且插件声明
+      // schema 可得时复用装载期校验面（typebox Check 同路）——错配置不落盘防
+      // boot 拒启陷阱；校验面不可得（入口不可解析/宿主未注入 loadEntry/未声明
+      // config）时拒绝带非空 config 的写（宁拒不误读——空对象视同未携带）
+      if (mountOpts?.config !== undefined && Object.keys(mountOpts.config).length > 0) {
+        let schema: TSchema | undefined;
+        const entry = resolvePluginEntry(pluginRef, dataDir);
+        if (entry === undefined || opts.loadEntry === undefined) {
+          throw new AppError(
+            PLUGIN_CONFIG_INVALID,
+            `mount：行「${rowId}」携带 config 但入口不可解析（resolvePluginEntry 无命中——装机物形态异常）——` +
+              `先核对 /plugins 清单，或去除 config 后挂载再 /plugin-configure`,
+          );
+        }
+        try {
+          const ns = await opts.loadEntry(entry);
+          if (Object.hasOwn(ns, 'config')) schema = ns.config as TSchema;
+        } catch {
+          schema = undefined; // 装载失败 = 校验面不可得，走下方同款拒绝
+        }
+        let ok = false;
+        try {
+          ok = schema !== undefined && typeboxValue.Check(schema, mountOpts.config);
+        } catch {
+          ok = false; // schema 自身非法与校验不过同路（与 loader 装载期口径一致）
+        }
+        if (!ok) {
+          throw new AppError(
+            PLUGIN_CONFIG_INVALID,
+            schema === undefined
+              ? `mount：行「${rowId}」携带 config 但插件未声明 config schema（装载面不可校验）——去除 config 后挂载`
+              : `mount：行「${rowId}」config 未通过插件声明 schema——本次未写入，配置面不变`,
+          );
+        }
+      }
+      insertOverlayRow(dataDir, {
+        id: rowId,
+        plugin: pluginRef,
+        ...(app !== undefined ? { app } : {}),
+        ...(mountOpts?.config !== undefined ? { config: mountOpts.config } : {}),
+      });
+      // 自定义行 id 的词表账本对齐：数据根随行 id 走（pluginDataDirOf(rowId)），
+      // 缺省收割只落了装机 id 根——补一份到行数据根，uninstall 检视词表档不缺角
+      if (rowId !== id) await refreshLedger(opts, rowId, pluginRef);
+      return {
+        id: rowId,
+        app,
+        source: record.source,
+        pluginRef,
+        message: `已挂载生效（app ${app}）——热应用走 /reload（per-app reload 前的过渡形态）`,
+      };
+    },
+
+    /**
+     * 卸挂载（mount 对偶，契约篇 §6.1）：删行保码——`removeOverlayRow` 既有写面
+     * 复用，吃行 id。行删 config 随行删，重挂回装机推导 config 缺省（mount 的
+     * config 位承载显式重配）。受影响会话警示走 uninstall inspect 同款词表。
+     */
+    async unmount(rowId) {
+      const location = findRowLocation(dataDir, rowId);
+      if (location.overlay === undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `unmount：未知行 id「${rowId}」（${location.defaultRow !== undefined ? '官方默认层行不可卸挂载' : 'overlay 无此行'}——` +
+            `清单以 /plugins 为准；临时停用保配置走 /plugin-toggle）`,
+        );
+      }
+      const row = location.overlay;
+      const source = row.plugin !== undefined ? derivePluginRowSource(row, dataDir) : undefined;
+      // 受影响会话警示：uninstall inspect 同款词表推导（活档可达走活档，否则账本档）
+      const events = declaredEventsFor(rowId, byId.get(rowId)?.status ?? 'planned');
+      const affectedSessions = await affectedCountsFor(events);
+      const warnings = buildWarnings({
+        id: rowId,
+        source: source ?? 'local',
+        events,
+        affectedSessions,
+        sharedRowIds: [],
+      });
+      removeOverlayRow(dataDir, rowId);
+      return {
+        id: rowId,
+        warnings,
+        message: `已卸挂载（装机物保留在仓库态——重挂走 /plugin-mount；数据域随 dataAction 语义由 uninstall 处置）`,
+      };
     },
 
     /** 双相卸载（实现在上方 uninstallImpl 函数声明——overload 返回联合的形态约束） */
@@ -952,76 +1227,175 @@ function assertInsideGitRoot(dataDir: string, dir: string): void {
   assertInsideSubtree(join(dataDir, 'plugins', 'git'), dir, 'install/update：clone 目录');
 }
 
-/* ---------------- git 源登记（sources.json——update 重克隆的 ref 依据） ---------------- */
+/* ------- provenance 全源账本（<数据目录>/plugins/sources.json——D2 两态） ------- */
 
-/** 一条 git 源记录：URL + 装机时锁定的 ref（可缺省 = 默认分支） */
-interface GitSourceRecord {
-  url: string;
-  ref?: string;
+/**
+ * 一条装机出处记录（契约篇 §6.1 装机出处落账 + 两态块）：行说「要什么」，账本
+ * 说「装了什么、从哪来」——组合树 = 装配枚举、账本 = 装机枚举的双源物理面。
+ * 精确版本 = npm version+integrity 哈希 / git commit——dist-tag 不算凭证，
+ * 解析落盘的才算（供应链事件取证面 + 「这个行为是哪个版本的哪个包带来的」）。
+ */
+export interface ProvenanceRecord {
+  /** 源形态（npm/git/local——与行 source 同词汇；无 builtin：官方件随包无装机面） */
+  readonly source: PluginSource;
+  /** 原始装机 spec（npm spec / git URL / local 绝对路径——update 按它重装） */
+  readonly ref: string;
+  /** 装机推导 id（npm 包名 / git repo 名 / local 文件名——mount/update/uninstall 键域） */
+  readonly id: string;
+  /** git 装机锁定的分支或 tag（可缺省 = 默认分支；update 重克隆按它走） */
+  readonly gitRef?: string;
+  /** npm 解析出的精确版本（装机产物 package.json 的 version） */
+  readonly version?: string;
+  /** npm 装机 integrity 哈希（.package-lock.json——精确版本的凭证面） */
+  readonly integrity?: string;
+  /** git 装机 commit 哈希（rev-parse HEAD；捕获失败容忍记缺省） */
+  readonly commit?: string;
+  /** 装机时间（ISO 串） */
+  readonly installedAt?: string;
 }
 
-/** sources.json 路径（<数据目录>/plugins/git/sources.json；relDir → 源记录） */
+/** 全源账本路径（<数据目录>/plugins/sources.json；键 = 装机物定位串 → 记录） */
+function provenancePath(dataDir: string): string {
+  return join(dataDir, 'plugins', 'sources.json');
+}
+
+/** 旧 git 源登记路径（D2 前形态——只读迁移面，写面已废） */
 function gitSourcesPath(dataDir: string): string {
   return join(dataDir, 'plugins', 'git', 'sources.json');
 }
 
-/** 读 git 源登记表（文件缺 = 空表；解析失败响亮抛——对账依据损坏不静默当空表） */
-function loadGitSources(dataDir: string): Record<string, GitSourceRecord> {
-  const path = gitSourcesPath(dataDir);
-  if (!existsSync(path)) return {};
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, GitSourceRecord>;
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
-  } catch (err) {
-    throw new AppError(
-      PLUGIN_INSTALL_FAILED,
-      `git 源登记表损坏：${path}（${err instanceof Error ? err.message : String(err)}）——手工修复或删除后重装`,
-    );
-  }
-}
-
-/** 写一条 git 源登记（键排序稳定序列化——人对 diff 友好） */
-function saveGitSource(dataDir: string, relDir: string, record: GitSourceRecord): void {
-  const all = loadGitSources(dataDir);
-  all[relDir] = record;
-  const sorted = Object.fromEntries(Object.entries(all).sort(([a], [b]) => (a < b ? -1 : 1)));
-  mkdirSync(dirname(gitSourcesPath(dataDir)), { recursive: true });
-  writeAtomicFile(gitSourcesPath(dataDir), `${JSON.stringify(sorted, null, 2)}\n`);
-}
-
 /**
- * 删一条 git 源登记（uninstall 段② 同批清账——N-10：装机物删了记录留着 =
- * 账实漂移，update 重克隆按记录找 ref 会让幽灵行复活）。键不存在 = no-op
- * （残迹收尾幂等——目录在记录无 = 手放目录，只清目录不造账）。
+ * 读全源账本（文件缺 = 空表；解析失败响亮抛——对账依据损坏不静默当空表）。
+ * **懒迁移**：旧 git 子树 sources.json 一次性折叠进全源账本（键 `git/<relDir>`、
+ * id 按 URL 重 parse 推导——与 install 同一推导函数往返一致；解析不动的记录
+ * 跳过不放宽防线）+ 写回 + 删旧文件，无双源期。崩溃窗口收敛：写回后未及删
+ * 旧文件 → 下次读重折（幂等 upsert 不覆写新记录）再删；双开竞态 → 原子写 +
+ * unlink 容忍 ENOENT。
  */
-function removeGitSource(dataDir: string, relDir: string): void {
-  const all = loadGitSources(dataDir);
-  if (!(relDir in all)) return;
-  delete all[relDir];
-  const sorted = Object.fromEntries(Object.entries(all).sort(([a], [b]) => (a < b ? -1 : 1)));
-  mkdirSync(dirname(gitSourcesPath(dataDir)), { recursive: true });
-  writeAtomicFile(gitSourcesPath(dataDir), `${JSON.stringify(sorted, null, 2)}\n`);
-}
-
-/**
- * 残迹反查（SF-8 残迹收尾的 git 半边）：行不在时按 id 匹配 sources.json 记录
- * ——值 URL 重 parse 的 repo 名 == id（install 时行 id = parsed.repo，同一推导
- * 函数往返一致）。同 repo 多次装不同 ref 会分多个 relDir（防撞名分层），全部
- * 返回交调用方逐个清。账本损坏响亮抛（loadGitSources 语义——对账依据不静默）。
- */
-function matchGitResidualRelDirs(dataDir: string, id: string): string[] {
-  const records = loadGitSources(dataDir);
-  const hits: string[] = [];
-  for (const [relDir, record] of Object.entries(records)) {
-    let repo: string | undefined;
+function loadProvenance(dataDir: string): Map<string, ProvenanceRecord> {
+  const path = provenancePath(dataDir);
+  let ledger = new Map<string, ProvenanceRecord>();
+  if (existsSync(path)) {
     try {
-      repo = parseGitUrl(record.url).repo;
-    } catch {
-      continue; // 记录里的 URL 已解析不动（手改/污染）——残迹匹配面跳过，正常防线不放宽
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, ProvenanceRecord>;
+      if (typeof parsed === 'object' && parsed !== null) {
+        for (const [key, record] of Object.entries(parsed)) ledger.set(key, record);
+      }
+    } catch (err) {
+      throw new AppError(
+        PLUGIN_INSTALL_FAILED,
+        `装机 provenance 账本损坏：${path}（${err instanceof Error ? err.message : String(err)}）——手工修复或删除后重装`,
+      );
     }
-    if (repo === id) hits.push(relDir);
+  }
+  // 旧 git 源登记懒折叠（只补缺——D2 新记录不回退覆写）
+  const legacyPath = gitSourcesPath(dataDir);
+  if (existsSync(legacyPath)) {
+    let legacy: Record<string, { url?: unknown; ref?: unknown }> = {};
+    try {
+      const parsed = JSON.parse(readFileSync(legacyPath, 'utf8')) as typeof legacy;
+      if (typeof parsed === 'object' && parsed !== null) legacy = parsed;
+    } catch {
+      legacy = {}; // 旧账损坏——折叠面跳过（新账不受污染），防线不放宽
+    }
+    let folded = false;
+    for (const [relDir, raw] of Object.entries(legacy)) {
+      const key = `git/${relDir}`;
+      if (ledger.has(key) || typeof raw?.url !== 'string') continue;
+      let id: string;
+      try {
+        id = parseGitUrl(raw.url).repo;
+      } catch {
+        continue; // URL 已解析不动（手改/污染）——跳过，正常防线不放宽
+      }
+      ledger.set(key, {
+        source: 'git',
+        ref: raw.url,
+        ...(typeof raw.ref === 'string' ? { gitRef: raw.ref } : {}),
+        id,
+      });
+      folded = true;
+    }
+    if (folded) saveProvenanceEntries(dataDir, ledger);
+    try {
+      rmSync(legacyPath, { force: true }); // 旧账退役（ENOTEMPTY/ENOENT 皆容忍——重读重折收敛）
+    } catch {
+      /* 双开竞态他者已删——收敛 */
+    }
+  }
+  return ledger;
+}
+
+/** 全量落盘（键排序稳定序列化——人对 diff 友好；原子写） */
+function saveProvenanceEntries(dataDir: string, ledger: Map<string, ProvenanceRecord>): void {
+  const sorted = Object.fromEntries([...ledger.entries()].sort(([a], [b]) => (a < b ? -1 : 1)));
+  mkdirSync(dirname(provenancePath(dataDir)), { recursive: true });
+  writeAtomicFile(provenancePath(dataDir), `${JSON.stringify(sorted, null, 2)}\n`);
+}
+
+/** 写一条装机记录（同键覆写 = 重装/更新的自然语义） */
+function upsertProvenanceRecord(dataDir: string, key: string, record: ProvenanceRecord): void {
+  const ledger = loadProvenance(dataDir);
+  ledger.set(key, record);
+  saveProvenanceEntries(dataDir, ledger);
+}
+
+/**
+ * 删一条装机记录（uninstall 段② 同批清账——N-10 账实同批律）。键不存在 =
+ * no-op（残迹收尾幂等——装机物在记录无 = pre-D2 遗产，残迹路径自理）。
+ */
+function removeProvenanceRecord(dataDir: string, key: string): void {
+  const ledger = loadProvenance(dataDir);
+  if (!ledger.delete(key)) return;
+  saveProvenanceEntries(dataDir, ledger);
+}
+
+/** 按装机推导 id 反查账本（0 条 = 未装/已卸；多条 = 同名异物歧义，调用方响亮） */
+function provenanceById(dataDir: string, id: string): [string, ProvenanceRecord][] {
+  const hits: [string, ProvenanceRecord][] = [];
+  for (const [key, record] of loadProvenance(dataDir)) {
+    if (record.id === id) hits.push([key, record]);
   }
   return hits;
+}
+
+/**
+ * 账本键 → 装机物绝对路径（与 install 三源推导往返一致）：npm/git 键是
+ * `plugins/` 下相对定位串（node_modules/<pkg>、git/<relDir>）直接拼；local
+ * 键就是绝对路径本身。
+ */
+function artifactPathOfKey(dataDir: string, key: string, source: PluginRowSource): string {
+  if (source === 'local') return key;
+  return join(dataDir, 'plugins', key);
+}
+
+/**
+ * npm 精确版本 best-effort 读取：装机产物 package.json 的 version +
+ * .package-lock.json 的 integrity 哈希（dist-tag 不算凭证——落盘的才算）。
+ * 任一缺失只记可得字段；全缺 = undefined（记缺省——装机产物形态异常不阻断）。
+ */
+function readNpmPin(dataDir: string, name: string): { version?: string; integrity?: string } | undefined {
+  const pkgDir = installArtifactPath(dataDir, 'npm', name)!;
+  let version: string | undefined;
+  let integrity: string | undefined;
+  try {
+    const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof pkg.version === 'string') version = pkg.version;
+  } catch {
+    /* 产物无 package.json——记缺省 */
+  }
+  try {
+    const lock = JSON.parse(readFileSync(join(dataDir, 'plugins', '.package-lock.json'), 'utf8')) as {
+      packages?: Record<string, { integrity?: unknown }>;
+    };
+    const entry = lock.packages?.[`node_modules/${name}`];
+    if (entry !== undefined && typeof entry.integrity === 'string') integrity = entry.integrity;
+  } catch {
+    /* lock 不可读——integrity 记缺省 */
+  }
+  return version !== undefined || integrity !== undefined
+    ? { ...(version !== undefined ? { version } : {}), ...(integrity !== undefined ? { integrity } : {}) }
+    : undefined;
 }
 
 /* ---------------- 装机子进程执行 ---------------- */
@@ -1112,10 +1486,34 @@ async function runInstallStep(
   }
 }
 
-/** 读 overlay 行的 plugin 引用（update 分派用；行不在 overlay 返回 undefined） */
-function overlayPluginRef(dataDir: string, id: string): string | undefined {
-  // 经装载面同一拒绝式校验读回——只取该行引用字段
-  return loadOverlayRows(dataDir).find((row) => row.id === id)?.plugin;
+/**
+ * git 装机物 commit 采集缺省真身（provenance 精确版本——rev-parse HEAD，spawn
+ * 捕获 stdout 首行；与 spawnRunner 的区别：本面要**读输出**非只等退出码）。
+ * 失败容忍（spawn 错/非零/空输出）返回 undefined——ref 锁定仍是凭证面，commit
+ * 缺席只降精度不阻断装机（8s 短顶：本地 git 查询亚秒级，卡死即弃）。
+ */
+async function defaultGitCommitOf(dir: string): Promise<string | undefined> {
+  return await new Promise((resolvePromise) => {
+    const child = spawn('git', ['-C', dir, 'rev-parse', 'HEAD'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), 8000); // 卡死护栏：到点强杀走 error/close 收尾
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (stdout.length > 200) child.stdout.destroy(); // commit 哈希 ≤64 字符——超量即异常流，弃
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolvePromise(undefined);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const head = stdout.trim().split('\n')[0];
+      resolvePromise(code === 0 && head !== undefined && /^[0-9a-f]{7,64}$/.test(head) ? head : undefined);
+    });
+  });
 }
 
 /* ---------------- uninstall 辅助（契约篇 §3.4 第二刀，2026-08-27 刀 2） ---------------- */
@@ -1149,20 +1547,34 @@ function installArtifactPath(dataDir: string, source: PluginRowSource, ref: stri
 }
 
 /**
- * 同包引用计数（段② 裁决依据）：扫 overlay 剩余行（减目标行自身），凡行引用
- * 解析出的装机物与目标**归一路径相同**即共享（resolve 后比对——`dir` 与
- * `dir/../dir` 同物，字面相等不可靠）。禁用行也计入：禁用 ≠ 卸载，代码仍在
- * 盘上仍可能再启用，删了就悬空。
+ * 挂载行反查（D2 uninstall 段① 的删行全集 + 残迹收尾的遗产行发现）：扫
+ * overlay 全部行，凡行引用解析出的装机物与给定装机物**归一路径相同**即同一
+ * 包的挂载行（resolve 后比对——`dir` 与 `dir/../dir` 同物，字面相等不可靠）。
+ * 禁用行也计入：禁用 ≠ 卸载，代码仍在盘上仍可能再启用；app 键行同计——
+ * 多应用挂载同批清（uninstall 语义 = 删码 + 删**全部**挂载行）。
  */
-function sharedPackageRows(dataDir: string, targetId: string, targetPath: string): { rows: CompositionRow[] } {
-  const want = resolve(targetPath);
-  const rows = loadOverlayRows(dataDir).filter((row) => {
-    if (row.id === targetId || row.plugin === undefined) return false;
+function mountedRowsFor(dataDir: string, installPath: string): CompositionRow[] {
+  const want = resolve(installPath);
+  return loadOverlayRows(dataDir).filter((row) => {
+    if (row.plugin === undefined) return false;
     const source = classifyRefSource(row.plugin, dataDir);
     const path = installArtifactPath(dataDir, source, row.plugin);
-    return path !== undefined && resolve(path) === want;
+    // local 直引无装机物路径（installArtifactPath 恒 undefined）——归一键 = 直引
+    // 路径本身（与 list() 差集同款口径，两处同一归一模型）
+    const key = path !== undefined ? resolve(path) : source === 'local' ? resolve(row.plugin) : undefined;
+    return key !== undefined && key === want;
   });
-  return { rows };
+}
+
+/**
+ * 数据根全集（uninstall 段③ 的处置对象）：装机 id 数据根（install 收割账本
+ * 所在）∪ 各挂载行数据根（自定义行 id 的运行期数据根）。Set 去重（缺省挂载
+ * 行 id === 装机 id 同径）。保留名闸住 pluginDataDirOf 单点（撞名行取址即抛）。
+ */
+function dataRootsOf(dataDir: string, installId: string, mountedRows: readonly CompositionRow[]): string[] {
+  const roots = new Set<string>([pluginDataDirOf(dataDir, installId)]);
+  for (const row of mountedRows) roots.add(pluginDataDirOf(dataDir, row.id));
+  return [...roots];
 }
 
 /** 件数据根描述符（data.json——双键一桥宿主写面首建，第十八批）：声明名 + 收割词表 */

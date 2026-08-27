@@ -35,8 +35,10 @@ import { Type } from '../contracts/typebox.js';
 import {
   createPluginsConfigureTool,
   createPluginsInstallTool,
+  createPluginsMountTool,
   createPluginsReloadTool,
   createPluginsToggleTool,
+  createPluginsUnmountTool,
   createPluginsUninstallInspectTool,
   createPluginsUpdateTool,
   type ApprovalAskFace,
@@ -252,20 +254,23 @@ export function createAdminPlugin(): BuiltinPluginModule {
       // 刀 1 只读面：清单 + 事件查询（结构子集类型收窄见各 face 定义）
       const pluginsRead = ctx.get<PluginsListFace>('plugins');
       const sessions = ctx.get<SessionsQueryFace>('sessions');
-      // 刀 3 写面：管理动词五写词 + 卸载检视（审批对面 = 根审批服务——fork
-      // 级联可见；asked/decided 双腿落 durable 由审批服务承载）
+      // 刀 3 写面：管理动词写词 + 卸载检视（审批对面 = 根审批服务——fork
+      // 级联可见；asked/decided 双腿落 durable 由审批服务承载）；D2 两态批
+      // （2026-08-27 第三十批）扩 mount/unmount 两写词——写行类模型可用
       const pluginsManage = ctx.get<PluginsManageFace>('plugins');
       const approval = ctx.get<ApprovalAskFace>('approval');
-      // 注册即 effect：八工具挂行作用域，/reload 锚回卷或行失败连带回卷撤件
+      // 注册即 effect：十工具挂行作用域，/reload 锚回卷或行失败连带回卷撤件
       ctx.effect(() => tools.register(createPluginsListTool(pluginsRead)));
       ctx.effect(() => tools.register(createEventsQueryTool(sessions)));
       ctx.effect(() => tools.register(createPluginsInstallTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsMountTool(pluginsManage, approval)));
+      ctx.effect(() => tools.register(createPluginsUnmountTool(pluginsManage, approval)));
       ctx.effect(() => tools.register(createPluginsUpdateTool(pluginsManage, approval)));
       ctx.effect(() => tools.register(createPluginsToggleTool(pluginsManage, approval)));
       ctx.effect(() => tools.register(createPluginsConfigureTool(pluginsManage, approval)));
       ctx.effect(() => tools.register(createPluginsReloadTool(pluginsManage, approval)));
       ctx.effect(() => tools.register(createPluginsUninstallInspectTool(pluginsManage)));
-      ctx.logger.debug('admin 件八工具已注册（只读两件 + 写类五件 + 卸载检视一件）');
+      ctx.logger.debug('admin 件十工具已注册（只读两件 + 写类七件〔含 mount/unmount〕 + 卸载检视一件）');
     },
   };
 }

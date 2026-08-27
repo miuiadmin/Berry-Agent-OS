@@ -13,7 +13,8 @@
  *   转发器，tell('evt') 回投 worker 分派；
  * - emit [rowId, event, args]   → 行作用域 emit（per-scope 限流在宿主侧单一实现）；
  * - tools-register [rowId,meta] → tools.register（声明面本地、execute 过桥，
- *   timeoutMs 预算随行；onUpdate 函数不可过界——v1 收窄）；
+ *   timeoutMs 预算随行；onUpdate 函数不可过界——v1 收窄；注册罩
+ *   runInCallerChain(行 id) 帧——D1 路由按行 app 键，domain 自报仅诊断）；
  * - svc-invoke [name,method,…]  → 锚作用域 get(name) 后方法分派（CONTEXT_SERVICE_
  *   NOT_FOUND 保码回 worker——Kahn 已保证 inject 在场，此码即装配缺陷探针）；
  * - tool-run [name,args]        → tools.get + execute（worker 侧便捷面 run 的
@@ -28,6 +29,7 @@ import { AppError, BRIDGE_METHOD_NOT_FOUND, PLUGIN_LOAD_FAILED } from '../contra
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { PluginPlanRow } from '../contracts/plugin.js';
 import type { ContextScope } from '../context/types.js';
+import { runInCallerChain } from '../context/chain.js';
 import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
 import { BridgeEndpoint } from './session.js';
 
@@ -303,7 +305,16 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
             ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
           }),
       };
-      const unregister = tools.register(def, domainArg !== undefined ? { domain: String(domainArg) } : undefined);
+      // D1 注册面路由（契约篇 §5.1 挂载目标两档，SF9）：路由权威 = host 侧按行
+      // app 键——注册罩 runInCallerChain(行 id) 帧，registry 经 chainCaller 归因
+      // 行挂载目标（行带 app 键 → 应用域层）。worker 自报 domainArg 不采信为
+      // 路由权威，仅 debug 注记（插件自报面降级诊断——冷读 SF9）。
+      const unregister = runInCallerChain(rowId, () => tools.register(def));
+      if (domainArg !== undefined) {
+        binding.scope.logger.debug(
+          `worker 行 ${rowId} 注册工具 ${meta.name} 自报 domain=${String(domainArg)}（诊断注记——路由按行 app 键，不采信自报）`,
+        );
+      }
       // 行级清理：register 返回的注销器挂行作用域 effect——行回卷（apply 失败/
       // /reload/域死 exit 回卷）同步摘除注册（真注册表 remove + tools_change 广播）
       binding.scope.effect(() => () => unregister());

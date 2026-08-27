@@ -96,6 +96,18 @@ function renderMountGrouping(composition: CompositionReport, appIds: readonly st
 }
 
 /**
+ * 仓库态件渲染（D2 装机两态批，契约篇 §6.1）：装机仓库里已装未挂的件——
+ * provenance 账本 ∖ 组合树行（list() 差集条目）。「装了没挂」是装机面的
+ * 断头路警示位，诊断面必须可见（不可静默）。
+ * @param statuses 装载状态清单（list() 产物——installed-unmounted 条目在此）
+ */
+function renderInstalledUnmounted(statuses: readonly PluginStatusRow[]): string {
+  const rows = statuses.filter((row) => row.status === 'installed-unmounted');
+  const items = rows.map((row) => `${row.id}（${row.source}）`);
+  return `仓库态件（已装未挂 ${rows.length}）：${items.join('、') || '（无）'}`;
+}
+
+/**
  * 组合树打印主流程。
  * @param options 组合根选项透传（与生产同参——诊断的就是实际生效组合）
  * @returns 进程退出码（0 = 全激活/显式跳过；1 = 装载失败清单）
@@ -122,6 +134,8 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         renderCompositionTree(runtime.composition, runtime.plugins.list()),
         // 挂载分组（D1 清单投影批 F13）：系统合成 + 各在册应用合成分两类打印
         renderMountGrouping(runtime.composition, [...runtime.apps.keys()]),
+        // 仓库态件（D2 装机两态批）：已装未挂的装机仓库差集——断头路警示位
+        renderInstalledUnmounted(runtime.plugins.list()),
         // 应用面（契约篇 §5.4 第二纵切——官方清单装载 + 组件在场断言产物）：
         // 缺场应用带缺失组件清单（应用级隔离不拒启，诊断走此面）
         `应用（${runtime.apps.size}）：${

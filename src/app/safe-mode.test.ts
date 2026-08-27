@@ -72,7 +72,11 @@ describe('--no-plugins 安全模式（boot 空装 + 救援环 + dump-config 同�
     const pluginDir = join(compositionDir, 'plugins', 'extra');
     mkdirSync(pluginDir, { recursive: true });
     writeFileSync(join(pluginDir, 'index.ts'), 'export const name = "extra";\nexport default async function () {};\n');
-    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: extra\n    plugin: ${pluginDir}\n`);
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）
+      `rows:\n  - id: extra\n    plugin: ${pluginDir}\n    app: chat\n`,
+    );
     const runtime = await createBerryRuntime({
       dbPath: ':memory:',
       compositionDir,

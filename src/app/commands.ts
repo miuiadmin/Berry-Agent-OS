@@ -4,10 +4,12 @@
  * M1 内置五件：/help（命令清单）、/quit（优雅退出）、/new（开新会话——TUI 启动
  * 续接策略的另一面，技术栈篇 §5）、/skills（技能清单）、/skill:<名>（显式激活
  * ——§4.5(b) 包装格式作为普通 user 消息提交，loop 开跑）。
- * M2 插件管理五件（2026-08-23 /reload 纵切，技术栈篇 §5 插件管理命令面）：
- * /plugins（清单）、/plugin-install、/plugin-toggle、/plugin-update、/reload——
- * 全部是 ctx.plugins 服务与组合根 reload 的薄壳（对账逻辑不进壳面，§1.5），
- * install/update 后自动链 /reload（对账与组合正交——壳负责把两步串起来）。
+ * 插件管理命令族（2026-08-23 /reload 纵切；**D2 装机两态扩族 2026-08-27**）：
+ * /plugins（清单 + 仓库态差集）、/plugin-install（仓库态）、/plugin-mount、
+ * /plugin-unmount（挂载动词对偶）、/plugin-toggle、/plugin-update、
+ * /plugin-uninstall、/reload——全部是 ctx.plugins 服务与组合根 reload 的薄壳
+ * （对账逻辑不进壳面，§1.5）；热应用链：写行动词（mount/unmount/toggle）与
+ * update 链 /reload，install 仓库态零行不链（契约篇 §6.1 两态）。
  * 技能命令按装配期快照逐个注册（skill refresh 仅在装配期跑一次，M1 无动态面）。
  */
 
@@ -42,6 +44,10 @@ function formatPluginRow(row: PluginStatusRow): string {
       return `  ✖ ${row.id}${source}：${row.code} ${row.message ?? ''}`;
     case 'skipped':
       return `  · ${row.id}${source}（跳过：${row.reason}）`;
+    case 'installed-unmounted':
+      // D2 仓库态差集行（契约篇 §6.1 可见性）：装了没挂必须可见——装机面断头路
+      // = 不可用面，呈现挂载指引（词与 mount 动词对齐）
+      return `  ◇ ${row.id}${source}（已装未挂——/plugin-mount ${row.id} --app <应用id> 生效）`;
     default:
       // planned = 装载前视角（boot 前 / 服务刚建）——正常 TUI 里看不到，防御呈现
       return `  ○ ${row.id}${source}（planned——尚未装载）`;
@@ -77,19 +83,46 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+/**
+ * 位置参数 + `--key value` 旗标解析（/plugin-mount 面的轻量 argv 面）：空白切
+ * 词，`--key` 后随 token 即值（无值旗标收 true 占位——本面未用，防御呈现），
+ * 其余按序进 positionals。值含空白走引号由 shell/通道层处理，壳面拿到即已分词。
+ */
+function parseFlagArgs(args: string): { positionals: string[]; flags: Record<string, string> } {
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  const positionals: string[] = [];
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+    if (token.startsWith('--') && token.length > 2) {
+      const value = tokens[i + 1];
+      if (value !== undefined && !value.startsWith('--')) {
+        flags[token.slice(2)] = value;
+        i += 1;
+      } else {
+        flags[token.slice(2)] = 'true'; // 无值旗标——本面未用，防御占位
+      }
+    } else {
+      positionals.push(token);
+    }
+  }
+  return { positionals, flags };
+}
+
 /** inspect 报告 → 人读文本（契约篇 §3.4 第二刀：execute 前的级联警示承载面——
- * 词表三档 / 受影响会话逐词点名 / 共享行说明全量呈现，人看过才裁决） */
+ * 词表三档 / 受影响会话逐词点名 / 挂载行全集全量呈现，人看过才裁决；D2 键域
+ * = 装机 id） */
 function formatUninstallReport(report: UninstallReport): string {
   const lines: string[] = [
-    `卸载检视 ${report.id}（${report.source} 源 · ${report.status}）：`,
+    `卸载检视 ${report.id}（${report.source} 源）：`,
     `  引用：${report.pluginRef}`,
+    `  装机物：${report.installPath}`,
   ];
-  if (report.installPath !== undefined) lines.push(`  装机物：${report.installPath}`);
-  if (report.sharedRows.length > 0) {
-    lines.push(`  ⚠ 装机物共享行：${report.sharedRows.join('、')}（execute 将跳删装机物）`);
+  if (report.mountedRows.length > 0) {
+    lines.push(`  挂载行（execute 将同批删）：${report.mountedRows.join('、')}`);
   }
   lines.push(
-    `  数据域：${report.dataDir}${report.dataBytes !== undefined ? `（约 ${formatBytes(report.dataBytes)}）` : '（无）'}`,
+    `  数据域：${report.dataRoots.join('、')}${report.dataBytes !== undefined ? `（约 ${formatBytes(report.dataBytes)}）` : '（无）'}`,
   );
   if (report.events.origin === 'live' || report.events.origin === 'ledger') {
     lines.push(
@@ -109,27 +142,23 @@ function formatUninstallReport(report: UninstallReport): string {
     );
   }
   for (const warning of report.warnings) lines.push(`  ⚠ ${warning}`);
-  lines.push('确认执行：/plugin-uninstall <id> --confirm [--purge-data]（默认保留数据域）');
+  lines.push('确认执行：/plugin-uninstall <装机id> --confirm [--purge-data]（默认保留数据域）');
   return lines.join('\n');
 }
 
 /** execute 回执 → 人读文本（四段执行事实的壳面转述；outcome 三态如实呈现） */
 function formatUninstallExec(report: UninstallExecReport): string {
   if (report.outcome === 'no-op') {
-    return `无动作 ${report.id}：行不在且无可推导残迹（已卸载过或从未安装）`;
+    return `无动作 ${report.id}：账本无记录且无可推导残迹（已卸载过或从未安装）`;
   }
   const head =
     report.outcome === 'residual'
-      ? `残迹收尾 ${report.id}（行不在——上次卸载的段间残迹已清理）`
+      ? `残迹收尾 ${report.id}（账本无记录——pre-D2 遗产装机或上次卸载的段间残迹已清理）`
       : `已卸载 ${report.id}（${report.source} 源 · 数据域${report.dataAction === 'purge' ? '已清除' : '保留'}）`;
   const lines = [head];
-  const installFace =
-    report.installRemoved === 'removed'
-      ? '装机物已删'
-      : report.installRemoved === 'shared'
-        ? `装机物保留（共享：${report.sharedRows.join('、')}）`
-        : '无装机物';
+  const installFace = report.installRemoved === 'removed' ? '装机物已删' : '无装机物（local 源账本已清）';
   lines.push(`  ${installFace}`);
+  if (report.mountedRows.length > 0) lines.push(`  挂载行已删：${report.mountedRows.join('、')}`);
   if (report.dataRemoved) lines.push('  数据域已清除');
   if (report.restoresDefault === true) lines.push('  官方默认层同 id 行已回露出（恢复出厂态）');
   return lines.join('\n');
@@ -382,27 +411,31 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     }),
   );
 
-  /* ---- M2 插件管理五件（/reload 纵切）——全部是 ctx.plugins 与组合根 reload 的薄壳 ---- */
+  /* ---- 插件管理命令族（/reload 纵切 + D2 装机两态 2026-08-27）——全部是
+   * ctx.plugins 服务与组合根 reload 的薄壳（对账逻辑不进壳面，§1.5）。热应用
+   * 链（D2）：install 仓库态零行无物可热应用 = 不链 reload；mount/unmount 写行
+   * 后壳链 /reload（per-app reload 前的过渡形态）；update 换盘上代码，挂载行
+   * 活着即链 /reload；toggle 写行同链。 ---- */
 
   disposers.push(
     commands.register({
       name: 'plugins',
-      description: '插件清单（组合树行 + 装载状态）',
+      description: '插件清单（组合树行 + 装载状态 + 仓库态差集）',
       handler: () => {
         const rows = opts.plugins.list();
         if (rows.length === 0) {
-          ui.notify('组合树无插件行（默认层为空）——/plugin-install <ref> 装入第一件');
+          ui.notify('无插件（组合树空、仓库态空）——/plugin-install <ref> 装入第一件');
           return;
         }
         const lines = rows.map(formatPluginRow);
         ui.notify(
-          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装入 · /plugin-uninstall 卸载 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
+          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装机 · /plugin-mount 挂载 · /plugin-unmount 卸挂载 · /plugin-uninstall 卸载 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
         );
       },
     }),
     commands.register({
       name: 'plugin-install',
-      description: '装机 <npm 包名|git URL|本地路径> [git ref] 并重载',
+      description: '装机 <npm 包名|git URL|本地路径> [git ref]（仓库态——挂载才生效）',
       handler: async (args) => {
         const tokens = args.trim().split(/\s+/).filter(Boolean);
         const ref = tokens[0];
@@ -413,18 +446,82 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         const gitRef = tokens[1];
         // 服务失败（PLUGIN_INSTALL_FAILED 等）向上抛——通道壳兜底为通知，不崩界面
         const report = await opts.plugins.install(ref, gitRef !== undefined ? { gitRef } : undefined);
-        ui.notify(`${report.id} 已装入（${report.source} 源）：${report.message}`);
-        // 对账与组合正交——install 只写 overlay，壳链 /reload 才热应用（§1.5 表尾）
+        // D2 仓库态：零行无物可热应用——不链 /reload（install→reload 旧链废止）；
+        // 报告 message 已带 mount 指引（装机面不是断头路）
+        ui.notify(`${report.id} 已入仓库态（${report.source} 源）：${report.message}`);
+      },
+    }),
+    /* mount（D2 挂载动词，契约篇 §6.1 两态——「插件独立不生效」的生效面）：
+     * 吃装机推导 id（见 /plugins 的 ◇ 行），--app 必填（v1 系统组合官方专属）。
+     * --row-id = 行 id 显式命名位（同包第二应用挂载必经）；--config = 行初始
+     * 配置 JSON（经插件声明 schema 校验，错配置拒写）。写行后壳链 /reload。 */
+    commands.register({
+      name: 'plugin-mount',
+      description: '挂载 <装机id> --app <应用id> [--row-id <行id>] [--config <json>] 并重载',
+      handler: async (args) => {
+        const parsed = parseFlagArgs(args);
+        const installId = parsed.positionals[0];
+        if (installId === undefined) {
+          ui.notify(
+            "用法：/plugin-mount <装机id> --app <应用id> [--row-id <行id>] [--config '<json>']（装机id 见 /plugins ◇ 行）",
+          );
+          return;
+        }
+        const app = parsed.flags['app'];
+        if (app === undefined) {
+          ui.notify('挂载目标必填：--app <应用id>（系统组合 v1 官方专属，第三方件挂应用组合）');
+          return;
+        }
+        // config 位 = 可选 JSON 字面（行初始配置——服务面经插件声明 schema 校验）
+        let config: Record<string, unknown> | undefined;
+        const rawConfig = parsed.flags['config'];
+        if (rawConfig !== undefined) {
+          try {
+            const value = JSON.parse(rawConfig) as unknown;
+            if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+              throw new Error('非对象');
+            }
+            config = value as Record<string, unknown>;
+          } catch (err) {
+            ui.notify(`--config 不是合法 JSON 对象：${err instanceof Error ? err.message : String(err)}`);
+            return;
+          }
+        }
+        const rowId = parsed.flags['row-id'];
+        const report = await opts.plugins.mount(installId, {
+          app,
+          ...(config !== undefined ? { config } : {}),
+          ...(rowId !== undefined ? { rowId } : {}),
+        });
+        ui.notify(`已挂载 ${report.id} → app ${report.app}（${report.source} 源）：${report.message}`);
+        // 写行只改组合树文件——壳链 /reload 才热应用（D2 新链：mount→reload）
         notifyReloadResult(ui, await opts.reload());
+      },
+    }),
+    /* unmount（mount 对偶）：吃行 id，删行保码——装机物与数据域不动（处置 =
+     * uninstall 的事）；行 config 随行删，重挂回缺省。写行后壳链 /reload。 */
+    commands.register({
+      name: 'plugin-unmount',
+      description: '卸挂载 <行id>（删行保码）并重载',
+      handler: async (args) => {
+        const rowId = args.trim().split(/\s+/)[0];
+        if (!rowId) {
+          ui.notify('用法：/plugin-unmount <行id>（行id 见 /plugins；临时停用保配置走 /plugin-toggle）');
+          return;
+        }
+        const report = await opts.plugins.unmount(rowId);
+        const warnFace = report.warnings.length > 0 ? `\n${report.warnings.map((w) => `  ⚠ ${w}`).join('\n')}` : '';
+        ui.notify(`${report.message}${warnFace}`);
+        notifyReloadResult(ui, await opts.reload()); // D2 新链：unmount→reload
       },
     }),
     commands.register({
       name: 'plugin-toggle',
-      description: '翻转插件禁用状态 <id> 并重载',
+      description: '翻转插件禁用状态 <行id> 并重载',
       handler: async (args) => {
         const id = args.trim().split(/\s+/)[0];
         if (!id) {
-          ui.notify('用法：/plugin-toggle <id>（id 见 /plugins）');
+          ui.notify('用法：/plugin-toggle <行id>（行id 见 /plugins）');
           return;
         }
         const disabled = opts.plugins.toggle(id); // 未知 id / fixed 行 → 抛，壳兜底
@@ -434,16 +531,17 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     }),
     commands.register({
       name: 'plugin-update',
-      description: '按源更新插件 <id> 并重载',
+      description: '按源更新插件 <装机id> 并重载',
       handler: async (args) => {
         const id = args.trim().split(/\s+/)[0];
         if (!id) {
-          ui.notify('用法：/plugin-update <id>（id 见 /plugins）');
+          ui.notify('用法：/plugin-update <装机id>（装机id 见 /plugins；两态后仓库态件也可更新）');
           return;
         }
         const report = await opts.plugins.update(id); // npm 重装 / git 重克隆 / local no-op
         ui.notify(`${report.id} 更新完成（${report.source} 源）：${report.message}`);
-        // 磁上已是新码——与 install 同理链 /reload 才可见（local no-op 也无害：等价一次 /reload）
+        // 磁上已是新码——挂载行活着则链 /reload 才可见（local no-op / 未挂载件
+        // 无害：等价一次 /reload）
         notifyReloadResult(ui, await opts.reload());
       },
     }),
@@ -452,15 +550,15 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
      * 须是机制非断言）——裸调 = inspect 渲染报告 + 确认指引，不执行；人显式打出
      * 第二条命令（--confirm）才 execute——确认 = 人手打 --confirm 这一动作本身。
      * --purge-data 只裁决确认后的 dataAction（省缺 keep = Docker 卷律），不跳确认。
-     * 服务错误（Ring 1 拒卸/未知 id 等）上抛——通道壳兜底为通知，不崩界面。 */
+     * 服务错误（未知装机 id 等）上抛——通道壳兜底为通知，不崩界面。 */
     commands.register({
       name: 'plugin-uninstall',
-      description: '卸载插件 <id>：先检视，--confirm 执行（--purge-data 清数据域）并重载',
+      description: '卸载插件 <装机id>：先检视，--confirm 执行（--purge-data 清数据域）并重载',
       handler: async (args) => {
         const tokens = args.trim().split(/\s+/).filter(Boolean);
         const id = tokens[0];
         if (id === undefined) {
-          ui.notify('用法：/plugin-uninstall <id> [--confirm] [--purge-data]（id 见 /plugins；先检视后执行）');
+          ui.notify('用法：/plugin-uninstall <装机id> [--confirm] [--purge-data]（装机id 见 /plugins；先检视后执行）');
           return;
         }
         const purgeData = tokens.slice(1).includes('--purge-data');
@@ -470,7 +568,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           return;
         }
         // 第二段（--confirm）：execute + 回执 + 链 reload（删行只改组合树文件——
-        // 壳链 /reload 才热应用，与 install 同构两步）
+        // 壳链 /reload 才热应用，与 mount 同构两步）
         const exec = await opts.plugins.uninstall(id, {
           mode: 'execute',
           dataAction: purgeData ? 'purge' : 'keep',

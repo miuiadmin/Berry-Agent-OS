@@ -1,8 +1,9 @@
 /**
- * L4 admin 单元测试——写类动词六工具的工具层行为：
+ * L4 admin 单元测试——写类动词八工具的工具层行为（D2 两态批后：七写词 + read 一词）：
  * 审批对形态（schema 必填钉死成对 / 值 ∈ 目标档闭集）、统一闸三态（拒绝 →
- * isError 不调服务 / allowed-once → 调服务）、六工具各自渲染与导线（含
- * uninstall_inspect 的 read 档无审批 + 指引尾行）。
+ * isError 不调服务 / allowed-once → 调服务）、各工具渲染与导线（install 仓库态
+ * 断头路指引 / mount 必填 app / unmount 删行保码 / uninstall_inspect 的 read
+ * 档无审批 + 指引尾行）。
  *
  * 服务面与审批面均用本件消费面接口（PluginsManageFace/ApprovalAskFace）的
  * 测试替身——形状由宿主装配保证，本文件只锁工具层闸序与呈现语义。升权目标
@@ -20,8 +21,10 @@ import {
   type PluginsManageFace,
   createPluginsConfigureTool,
   createPluginsInstallTool,
+  createPluginsMountTool,
   createPluginsReloadTool,
   createPluginsToggleTool,
+  createPluginsUnmountTool,
   createPluginsUninstallInspectTool,
   createPluginsUpdateTool,
 } from './write-tools.js';
@@ -39,12 +42,13 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
   return result.content[0]!.text ?? '';
 }
 
-/** 服务面测试替身：六面全记录调用；返回值可逐面脚本覆盖 */
+/** 服务面测试替身：八面全记录调用；返回值可逐面脚本覆盖 */
 function fakeManage(scripted: {
   install?: InstallReportView;
   toggle?: boolean;
   configure?: { config: Record<string, unknown>; ring1RestartRequired?: boolean };
   reload?: 'queued' | 'done-clean' | 'done-failed' | 'error';
+  mountWarnings?: string[];
 }) {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const plugins: PluginsManageFace = {
@@ -58,7 +62,21 @@ function fakeManage(scripted: {
     },
     async update(id) {
       calls.push({ method: 'update', args: [id] });
-      return { id, source: 'npm', pluginRef: id, message: 'npm 源已重装（fake）' };
+      return { id, source: 'npm', message: 'npm 源已重装（fake）' }; // D2 键域：回执无 pluginRef
+    },
+    async mount(installId, opts) {
+      calls.push({ method: 'mount', args: [installId, opts] });
+      return {
+        id: opts?.rowId ?? installId,
+        app: opts?.app ?? 'chat',
+        source: 'npm',
+        pluginRef: installId,
+        message: '已挂载生效（fake）——热应用走 /reload',
+      };
+    },
+    async unmount(rowId) {
+      calls.push({ method: 'unmount', args: [rowId] });
+      return { id: rowId, warnings: scripted.mountWarnings ?? [], message: '已卸挂载（fake）——重挂走 /plugin-mount' };
     },
     async configure(id, patch) {
       calls.push({ method: 'configure', args: [id, patch] });
@@ -88,10 +106,11 @@ function fakeManage(scripted: {
       return {
         id,
         source: 'npm',
-        status: 'activated',
         pluginRef: id,
-        sharedRows: [],
-        dataDir: '/data/plugins/demo',
+        installPath: `/data/plugins/node_modules/${id}`,
+        mountedRows: ['demo'],
+        dataRoots: [`/data/plugins/${id}`],
+        dataBytes: 128,
         events: { origin: 'ledger' as const, names: [] },
         warnings: [],
       };
@@ -114,12 +133,14 @@ function fakeApproval(outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unav
 
 /* ---------------- 审批对：schema 必填钉死成对 ---------------- */
 
-describe('审批对 schema 形态（五写词共面）', () => {
-  it('五写词参数面：缺审批对任一键 / justification 空串 → 守门段即拒（必填钉死「成对」）', () => {
+describe('审批对 schema 形态（七写词共面）', () => {
+  it('七写词参数面：缺审批对任一键 / justification 空串 → 守门段即拒（必填钉死「成对」）', () => {
     const { plugins } = fakeManage({});
     const { approval } = fakeApproval('allowed-once');
     const tools = [
       createPluginsInstallTool(plugins, approval),
+      createPluginsMountTool(plugins, approval),
+      createPluginsUnmountTool(plugins, approval),
       createPluginsUpdateTool(plugins, approval),
       createPluginsToggleTool(plugins, approval),
       createPluginsConfigureTool(plugins, approval),
@@ -129,6 +150,8 @@ describe('审批对 schema 形态（五写词共面）', () => {
       // 完整实参面（各工具自己的业务键 + 审批对）全部过 schema
       const fullArgs: Record<string, unknown>[] = [
         { source: 'demo-pkg', ...PAIR },
+        { installId: 'demo', app: 'builtin:chat', ...PAIR },
+        { rowId: 'demo', ...PAIR },
         { id: 'demo', ...PAIR },
         { id: 'demo', ...PAIR },
         { id: 'demo', config: { a: 1 }, ...PAIR },
@@ -146,6 +169,16 @@ describe('审批对 schema 形态（五写词共面）', () => {
       const emptyJust = { ...fullArgs[idx]!, justification: '' };
       expect(Value.Check(tool.parameters!, emptyJust), `${tool.name} 空串 justification 应拒`).toBe(false);
     }
+  });
+
+  it('plugins_mount 的 app 必填：缺 app 的实参过不了 schema（两态批——第三方挂载必有目标）', () => {
+    const { plugins } = fakeManage({});
+    const { approval } = fakeApproval('allowed-once');
+    const tool = createPluginsMountTool(plugins, approval);
+    expect(Value.Check(tool.parameters!, { installId: 'demo', ...PAIR })).toBe(false); // 缺 app
+    expect(Value.Check(tool.parameters!, { installId: 'demo', app: 'builtin:chat', rowId: 'demo-2', ...PAIR })).toBe(
+      true,
+    );
   });
 });
 
@@ -197,7 +230,7 @@ describe('生命周期档统一闸', () => {
 /* ---------------- 六工具各面 ---------------- */
 
 describe('plugins_install', () => {
-  it('allowed-once：服务调用透传（source + gitRef 可选省略）+ 渲染带行 id 与 reload 链提示', async () => {
+  it('allowed-once：服务调用透传（source + gitRef 可选省略）+ 渲染带装机 id 与 mount→reload 链提示（仓库态断头路指引）', async () => {
     const { plugins, calls } = fakeManage({});
     const { approval } = fakeApproval('allowed-once');
     const text = textOf(
@@ -208,8 +241,55 @@ describe('plugins_install', () => {
     );
     expect(calls).toEqual([{ method: 'install', args: ['git+https://example.com/a/b.git', { gitRef: 'v2' }] }]);
     expect(text).toContain('npm 源已安装（fake）');
-    expect(text).toContain('行 id：demo');
-    expect(text).toContain('plugins_reload'); // 装好 ≠ 生效——链式提示
+    expect(text).toContain('装机 id：demo'); // D2 键域词汇：装机 id 非行 id
+    expect(text).toContain('仓库态零生效'); // 装好 ≠ 生效——两态断头路明示
+    expect(text).toContain('plugins_mount'); // 下一步动词点名（模型照抄即对）
+  });
+});
+
+describe('plugins_mount / plugins_unmount（D2 两态生效动词）', () => {
+  it('mount：空 config 先于审批响（TOOL_ARGUMENTS_INVALID 且审批未问——不浪费一次人批）', async () => {
+    const { plugins, calls } = fakeManage({});
+    const { approval, asks } = fakeApproval('allowed-once');
+    await expect(
+      createPluginsMountTool(plugins, approval).execute(
+        { installId: 'demo', app: 'builtin:chat', config: {}, ...PAIR },
+        CTX,
+      ),
+    ).rejects.toMatchObject({ code: TOOL_ARGUMENTS_INVALID });
+    expect(asks).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it('mount：allowed-once 后 mount(installId, {app, rowId, config}) 透传 + 渲染挂载目标与 reload 链', async () => {
+    const { plugins, calls } = fakeManage({});
+    const { approval } = fakeApproval('allowed-once');
+    const text = textOf(
+      await createPluginsMountTool(plugins, approval).execute(
+        { installId: 'demo', app: 'builtin:chat', rowId: 'demo-2', config: { limit: 5 }, ...PAIR },
+        CTX,
+      ),
+    );
+    // config/rowId 可选面：携带即透传（app 必填面在 schema 段已锁）
+    expect(calls).toEqual([
+      { method: 'mount', args: ['demo', { app: 'builtin:chat', rowId: 'demo-2', config: { limit: 5 } }] },
+    ]);
+    expect(text).toContain('已挂载生效（fake）'); // 服务回执 message 透传
+    expect(text).toContain('行 demo-2');
+    expect(text).toContain('builtin:chat');
+    expect(text).toContain('调 plugins_reload 生效'); // 写行 ≠ 装载——链式提示
+  });
+
+  it('unmount：allowed-once 后 unmount(rowId) 透传 + 删行保码渲染 + 警示逐条呈报', async () => {
+    const { plugins, calls } = fakeManage({ mountWarnings: ['demo/one：3 个会话订阅'] });
+    const { approval } = fakeApproval('allowed-once');
+    const text = textOf(await createPluginsUnmountTool(plugins, approval).execute({ rowId: 'demo', ...PAIR }, CTX));
+    expect(calls).toEqual([{ method: 'unmount', args: ['demo'] }]);
+    expect(text).toContain('已卸挂载（fake）');
+    expect(text).toContain('installed-unmounted'); // 删行后装机物呈现态点名（重挂路径明示）
+    expect(text).toContain('警示：demo/one：3 个会话订阅'); // 受影响会话警示透传
+    expect(text).toContain('plugins_mount'); // 重挂指引
+    expect(text).toContain('调 plugins_reload 生效');
   });
 });
 
@@ -298,13 +378,15 @@ describe('plugins_reload', () => {
 });
 
 describe('plugins_uninstall_inspect（read 档——无审批面）', () => {
-  it('无审批直接查：uninstall(id, {mode:"inspect"}) 实参 + 报告渲染 + 执行权在人指引尾行', async () => {
+  it('无审批直接查：uninstall(id, {mode:"inspect"}) 实参 + 报告渲染（装机物/挂载行全集/数据域）+ 执行权在人指引尾行', async () => {
     const { plugins, calls } = fakeManage({});
     const tool = createPluginsUninstallInspectTool(plugins);
     expect(tool.effect).toBe('read'); // 只读零副作用——审批不适用于本件
     const text = textOf(await tool.execute({ id: 'demo' }, CTX));
     expect(calls).toEqual([{ method: 'uninstall', args: ['demo', { mode: 'inspect' }] }]);
     expect(text).toContain('卸载预检');
+    expect(text).toContain('/data/plugins/node_modules/demo'); // 装机物（D2 全字段）
+    expect(text).toContain('全部挂载行：demo'); // 多应用挂载行同批删的呈现
     expect(text).toContain('数据域');
     expect(text).toContain('/plugin-uninstall demo --confirm'); // 指令可照抄
     expect(text).toContain('你不可执行卸载'); // 边界明示（模型知道 execute 不归它）
