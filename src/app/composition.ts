@@ -183,8 +183,8 @@ export function safeModeComposition(report: CompositionReport): CompositionRepor
   };
 }
 
-/** overlay 允许的行字段全集（未知字段拒绝式——§6.5 pre-release 纪律） */
-const ROW_KEYS = new Set(['id', 'plugin', 'config', 'disabled', 'fixed', 'runtime']);
+/** overlay 允许的行字段全集（未知字段拒绝式——§6.5 pre-release 纪律；app 键 D1 清单投影批收） */
+const ROW_KEYS = new Set(['id', 'plugin', 'config', 'disabled', 'fixed', 'runtime', 'app']);
 
 /**
  * 读并校验 overlay 行集（文件不存在 = 空 overlay——首启零配置即合法）。
@@ -217,7 +217,7 @@ export function loadOverlayRows(dataDir: string): CompositionRow[] {
   return rows.map((raw, index) => validateRow(raw, `overlay.yaml rows[${index}]`));
 }
 
-/** 单行拒绝式校验：id 必填非空串；plugin 串；config 纯对象；disabled 布尔/平台串；未知字段即拒 */
+/** 单行拒绝式校验：id 必填非空串；plugin 串；config 纯对象；disabled 布尔/平台串；app 非空串；未知字段即拒 */
 function validateRow(raw: unknown, where: string): CompositionRow {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new AppError(COMPOSITION_ROW_INVALID, `${where}：行必须是对象`);
@@ -266,12 +266,20 @@ function validateRow(raw: unknown, where: string): CompositionRow {
       `${where}：runtime 必须是 'main' 或 'worker'（当前值：${String(runtime)}；'external' 为案三预留词未开闸，契约篇 §1.7）`,
     );
   }
+  const app = record['app'];
+  if (app !== undefined && (typeof app !== 'string' || app.length === 0)) {
+    throw new AppError(
+      COMPOSITION_ROW_INVALID,
+      `${where}：app 必须是非空字符串（挂载目标应用清单 id——缺省 = 系统组合，契约篇 §5.1）`,
+    );
+  }
   return {
     id,
     ...(plugin !== undefined ? { plugin } : {}),
     ...(config !== undefined ? { config: config as Record<string, unknown> } : {}),
     ...(disabled !== undefined ? { disabled: disabled as boolean | string } : {}),
     ...(runtime !== undefined ? { runtime: runtime as 'main' | 'worker' } : {}),
+    ...(app !== undefined ? { app } : {}),
   };
 }
 
@@ -309,6 +317,7 @@ function mergeRows(defaultRows: readonly CompositionRow[], overlayRows: readonly
       ...(overlay.config !== undefined ? { config: overlay.config } : {}),
       ...(overlay.disabled !== undefined ? { disabled: overlay.disabled } : {}),
       ...(overlay.runtime !== undefined ? { runtime: overlay.runtime } : {}),
+      ...(overlay.app !== undefined ? { app: overlay.app } : {}),
     });
   }
   return order.map((id) => byId.get(id)!);
@@ -373,13 +382,64 @@ export function resolvePluginEntry(ref: string, dataDir: string): string | undef
 const BUILTIN_PREFIX = 'builtin:';
 
 /**
+ * 行挂载目标键执法（契约篇 §5.1 挂载目标两档，D1 清单投影批 2026-08-27）：
+ * 携带 app 键的行过三道触发，任一命中即 COMPOSITION_ROW_INVALID 拒绝式即响——
+ * - 触发①（未知应用 id）：app 值不在在册应用清单集（清单是应用身份唯一源——
+ *   app 键指向不存在应用的行是配置面错误，不是可降级缺件）；
+ * - 触发③（Ring 1 必备行带 app）：Ring 1 行是系统组合必备行（换实现可、换
+ *   母体不可——卸掉核心循环必破的行没有「挂到某应用」的语义）；
+ * - 触发④（官方引用行带 app）：官方件母体恒系统组合（判源 = 行引用形——合成
+ *   产物 plugin 带 `builtin:` 前缀即官方行；overlay 替换行省略 plugin 沿用官方
+ *   层引用，合成后同为 builtin 前缀，判源不需特判「省略」形态）。
+ * 触发②（第三方行缺省挂系统拒）不在此列——随 D2 装机两态同批落：现行 install
+ * 产物全是无 app 的第三方行，先行执法 = 既有用户 boot 即拒（装机两态〔装完零
+ * 生效〕才是触发②的前提，分批纪律见路线图两节奏风险）。
+ * 全行统一执法（disabled 行含）：潜伏配置预先即拒，不留「toggle 启用才炸」陷阱。
+ */
+function assertRowAppTargets(rows: readonly CompositionRow[], knownAppIds: ReadonlySet<string>): void {
+  for (const row of rows) {
+    if (row.app === undefined) continue;
+    if (!knownAppIds.has(row.app)) {
+      throw new AppError(
+        COMPOSITION_ROW_INVALID,
+        `组合树行 ${row.id}：未知应用 id「${row.app}」（app 取值域 = 在册应用清单 id——在册：${
+          [...knownAppIds].join('、') || '无'
+        }）`,
+      );
+    }
+    if (RING1_REQUIRED_ROW_IDS.includes(row.id)) {
+      throw new AppError(
+        COMPOSITION_ROW_INVALID,
+        `组合树行 ${row.id}：Ring 1 必备行不可携带 app 键（Ring 1 = 系统组合必备行，非挂载目标——契约篇 §5.1）`,
+      );
+    }
+    if (row.plugin !== undefined && row.plugin.startsWith(BUILTIN_PREFIX)) {
+      throw new AppError(
+        COMPOSITION_ROW_INVALID,
+        `组合树行 ${row.id}：官方件行（${row.plugin}）不可携带 app 键——官方件母体恒系统组合（契约篇 §5.1）`,
+      );
+    }
+  }
+}
+
+/**
  * 装载组合树（合成 + 禁用解析 + 入口解析 → 装载计划）。
  * @param dataDir 数据目录（overlay 与装机子树的根）
  * @param builtins 官方件注册表（组合根装配期构造；缺省空表——`builtin:` 行一律
  * unresolved。dump-config 纯合成面也传同构注册表，树形不因诊断态失真）
+ * @param knownAppIds 在册应用清单 id 集（app 键取值域——组合根传
+ * loadOfficialApps 产物键集〔装载序上官方清单先行〕；缺省空集 = 拒绝式缺省，
+ * 任何 app 行都过不了触发①，测试面直接裸调即测「未知应用」路径）
  */
-export function loadComposition(dataDir: string, builtins: BuiltinPluginRegistry = {}): CompositionReport {
+export function loadComposition(
+  dataDir: string,
+  builtins: BuiltinPluginRegistry = {},
+  knownAppIds: ReadonlySet<string> = new Set(),
+): CompositionReport {
   const rows = mergeRows(DEFAULT_LAYER_ROWS, loadOverlayRows(dataDir));
+  // 挂载目标键执法先于装载计划构建：触发在合成期即响（契约篇 §5.1 四触发③①④，
+  // ②随 D2——见 assertRowAppTargets 注记），坏行不带装载副作用进断言面
+  assertRowAppTargets(rows, knownAppIds);
   const plan: PluginPlanRow[] = [];
   for (const row of rows) {
     const skip = resolveSkip(row.disabled);
@@ -561,7 +621,7 @@ export function pluginInstallRootExists(dataDir: string): boolean {
 /* ---------------------------------------------------------------------------------- */
 /* overlay 写回（ctx.plugins install/toggle 的持久化半边，2026-08-23 M2 /reload 纵切）。 */
 /* 原子写走 persist 公共件（§1.5.1(b)）；往返纪律（§6.3）：写面只序列化 overlay 合法    */
-/* 字段（id/plugin/config/disabled/runtime——fixed 属官方层永不出现在写面），装载面      */
+/* 字段（id/plugin/config/disabled/runtime/app——fixed 属官方层永不出现在写面），装载面  */
 /* validateRow 拒绝式同构——parse→stringify→parse 零字段损失（往返测试锁）。             */
 /* ---------------------------------------------------------------------------------- */
 
@@ -576,6 +636,7 @@ export function saveOverlayRows(dataDir: string, rows: readonly CompositionRow[]
       ...(row.config !== undefined ? { config: row.config } : {}),
       ...(row.disabled !== undefined ? { disabled: row.disabled } : {}),
       ...(row.runtime !== undefined ? { runtime: row.runtime } : {}),
+      ...(row.app !== undefined ? { app: row.app } : {}),
     })),
   };
   writeAtomicFile(join(dataDir, OVERLAY_FILENAME), stringifyYaml(doc));
@@ -619,6 +680,9 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
       }
       const rest = { ...row };
       delete rest.disabled;
+      // 仅剩 id 的纯禁用行整行移除。app 刻意不进保留判据：无 plugin 的 {id, app}
+      // 残留行不可能是合法行（insert 须带 plugin、官方层替换带 app 触发④）——
+      // 三键皆空即删，app 不救行（残留即下次装载地雷）
       if (rest.plugin === undefined && rest.config === undefined && rest.runtime === undefined) continue;
       next.push(rest);
     }
@@ -681,7 +745,8 @@ export function writeOverlayRowConfig(dataDir: string, id: string, config: Recor
     const rest = { ...row };
     delete rest.config;
     if (hasKeys) rest.config = config;
-    // 仅剩 id 的纯替换行无意义（删键即回退官方层默认 config）——整行移除
+    // 仅剩 id 的纯替换行无意义（删键即回退官方层默认 config）——整行移除。app
+    // 刻意不进保留判据（同 toggle 谓词）：无 plugin 的 {id, app} 残留恒非法，删
     if (rest.plugin === undefined && rest.disabled === undefined && rest.runtime === undefined) continue;
     next.push(rest);
   }

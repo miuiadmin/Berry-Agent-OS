@@ -87,7 +87,8 @@ import {
 } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
-import { chainCaller } from '../context/chain.js';
+import { chainCaller, runInCallerChain } from '../context/chain.js';
+import type { RowAppProbe } from '../contracts/plugin.js';
 import {
   EVENT_HANDLER_TIMEOUT,
   PERSIST_BATCH_WRITE_FAILED,
@@ -410,12 +411,30 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 即时返回空对零开销 ---- */
   await resolveLocalCodepageLabels();
 
+  /* ---- ①d 行挂载目标投影（D1 清单投影批，契约篇 §5.1 注册面路由）----
+   * rowId → appId 的活视图：boot 合成后与 /reload 重合成后各重建一次
+   * （syncRowAppMap），闭包读活 Map——三个注册面消费方（tools 隐式路由 /
+   * skills·channels 拒载）构造时点与组合树合成先后无关。探针注入经构造
+   * 参数透传（registerChannelServices / createSkillsService / toolsDeps），
+   * 全部指回同一闭包实例。 */
+  let rowAppMap = new Map<string, string>();
+  const rowApp: RowAppProbe = {
+    get: (rowId) => rowAppMap.get(rowId),
+    size: () => rowAppMap.size,
+  };
+  /** 组合树换装时重建投影：带 app 键的行进投影（含禁用行——树形事实非装载事实） */
+  const syncRowAppMap = (report: CompositionReport): void => {
+    rowAppMap = new Map(report.rows.filter((row) => row.app !== undefined).map((row) => [row.id, row.app!] as const));
+  };
+
   /* ---- ② 通道与 UI 服务 ---- */
   const { channels, ui } = registerChannelServices(ctx, {
     // UI 广播异常诊断（隔离案一第一刀 #3）：坏后端异常经根 logger 留痕——
     // 广播循环逐后端隔离，单后端抛错不毒调用方、不截断后续通道
     onUiError: (err, op) =>
       ctx.logger.error(`UI 广播异常已隔离（${op}）`, { error: err instanceof Error ? err.stack : String(err) }),
+    // D1 app 行命令拒载探针（TUI 命令单表无域层——app 行注册即跨应用漏命令）
+    rowApp,
   });
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
@@ -482,6 +501,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 第三方清单 glob 发现面挂账随 ctx.plugins install。预算表随清单构建
    * （canAfford app 维数据源——④b llm 服务闭包读它，装载序上先行）。 */
   const officialApps = loadOfficialApps();
+  /** 在册应用 id 集（D1 清单投影批）：组合树行 app 键取值域——loadComposition
+   * 触发①执法面（boot :1213 与 /reload fresh :1688 两消费点共用；装载序上官方
+   * 清单先行于组合树合成，键集就绪时点成立） */
+  const knownAppIds = new Set(officialApps.keys());
   /* -- CLI --app 进入面解析（第三纵切）：boot 即进入的非缺省应用。查无 =
    * APP_NOT_FOUND（在册清单在 message 披露）——官方清单装载后、一切装配前
    * 先解析（进入错 id 不该走到起驱动那步才失败）。 */
@@ -1175,10 +1198,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     },
     // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
     //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
-    // deps（rootsProvider——见 chatBundle 接线处）
+    // deps（rootsProvider——见 chatBundle 接线处）。rowApp 探针 = D1 注册面
+    // 隐式路由（挂应用的行注册落应用域层——探针活闭包，装载期恒现行树）
     toolsDeps: {
       gateSink: durableForward.gate,
       workspace: () => workspace,
+      rowApp,
     },
     // web 件测试注入缝（生产零参——真 fetch/真 DNS；组合根全栈测试注入
     // fetchImpl/lookup 假实现，mock 停在外部边界非中间层）
@@ -1210,12 +1235,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     sqlite: createPluginSqliteFace(resolvedDbPath),
   };
   // 组合树合成（overlay 后写胜出）。composition 是活绑定（/reload 重装载换树）
-  let composition: CompositionReport = loadComposition(compositionDir, builtins);
+  let composition: CompositionReport = loadComposition(compositionDir, builtins, knownAppIds);
   // 安全模式（--no-plugins，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
   // ——Ring 2/3 全跳过（官方默认层与 overlay 一视同仁）。只作用 boot：/reload
   // 的 fresh 读盘不过滤（救援环——boot 安全模式 → 修 overlay → /reload 恢复
   // 全树，进程内闭环，见 reload 内注记）
   if (opts.noPlugins) composition = safeModeComposition(composition);
+  // 行挂载目标投影重建（D1）：boot 合成产物（安全模式过滤后）即投影源——
+  // 早于一切装载（Ring 1 ③/插件 ⑨ 的注册面路由与拒载执法即刻生效）
+  syncRowAppMap(composition);
   // Ring 1 必备行断言·第一面（契约篇 §5.1 行树化批「第二断言类」）：合成产物
   // 里的 Ring 1 行被 overlay 禁用/平台门控/解析失败即拒启（列举全部缺失行）
   const ring1Violations = assertRing1Required(composition);
@@ -1360,6 +1388,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 组合根经 onProvidersChange 桥接总线——广播与 provide 收在同一时点，无窗口期
   const skills = createSkillsService({
     onProvidersChange: (providerIds) => ctx.emit(SKILLS_CHANGE_EVENT, { providers: providerIds }),
+    // D1 app 行技能拒载探针（provider 全局注入 systemPrompt 无域层——app 行
+    // 注册即跨应用漏注入；探针活闭包见 ①d 段注记）
+    rowApp,
   });
   registerSkillsService(ctx, skills);
   const locations = opts.skillLocations ?? defaultSkillLocations(workspace, { homeDir: opts.homeDir, trusted: true });
@@ -1455,7 +1486,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 技能重扫先行（/new 重建时点的技能面半边——原 rebuildSystemPrompt 内含的
     // refresh 保留；提示词半边随 open 即新纪元物化，不再全局 rebuild）
     skills.refresh();
-    const opened = registry.open();
+    /* 聚焦条目 app 透传（D1-d，契约篇 §5.4 B 案——「同应用新开」收口）：/new
+     * 前聚焦在哪个应用域，新会话即开在该域（恒 chat 域过渡态退役）。查表而非
+     * 透传 id：open({app}) 吃清单（装配默认位/审批预设/预算打标全在清单上）；
+     * appId 值域 = 在册 ∪ chat（enter/boot 两入口均经 officialApps 解析），查无
+     * 仅剩 apps 目录缺失的退化形态——回落裸 open（chat 缺省域与 CHAT_APP_ID
+     * 同值，行为不变不炸命令面）。/app new 是另一动词（开新+驻留），恒 chat 域
+     * 不在此径（两动词 app 归属不同是字面事实非矛盾）。 */
+    const app = previous === undefined ? undefined : officialApps.get(previous.appId);
+    const opened = registry.open(app === undefined ? {} : { app });
     if (opened === undefined) return undefined;
     if (previous !== undefined && previous !== opened) registry.retire(previous.session.header.sessionId);
     return opened.session;
@@ -1482,7 +1521,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 即优先序——local-fs 装配序 ⑦ 已先注册，包内技能恒居最低层，用户本地永远压过
   // 包内）+ 挂行作用域 effect（行失败 / /reload 锚回卷即注销——技能是行资产）。
   // registerProvider → skills_change → 重建管线自然刷新，此处不另发 refresh
-  //（双发 = 每插件双份全量重扫）。回调契约不抛错：factory/registerProvider 均纯装配
+  //（双发 = 每插件双份全量重扫）。回调契约不抛错已退役（D1 注册面路由，
+  // 2026-08-27）：app 行的技能注册会被服务面拒（COMPOSITION_ROW_INVALID）→
+  // 加载器收为行失败——故意执法非契约违背。装载器回调刻意不置 caller 链
+  //（桥接是宿主行为），故此处 runInCallerChain 显式还帧：服务面单一执法点
+  // 同时覆盖两路径（apply 内 ctx 注册走装载器帧；包声明技能走本 seam 帧）
   const registerPluginSkills = (info: PluginSkillsInfo): void => {
     if (info.packageRoot === undefined) {
       // builtin 行（宿主函数件）默认无磁盘锚点——未自述 packageRoot 的 builtin
@@ -1496,7 +1539,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       packageRoot: info.packageRoot,
       dirs: info.dirs,
     });
-    info.scope.effect(() => skills.registerProvider(provider));
+    // runInCallerChain 还帧（见上注）：行 id 进 caller 链——服务面拒载执法
+    // 按行挂载目标判；effect 返回的注销器随行作用域回卷（技能是行资产）
+    info.scope.effect(() => runInCallerChain(info.id, () => skills.registerProvider(provider)));
   };
   // 锚是活绑定（/reload dispose 后重 fork）；Ring 2 装载计划 = 全树剔除 Ring 1
   // 必备行（④e 已装载——双装载即 TOOL_DUPLICATE 事态，结构上排除）
@@ -1685,10 +1730,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     try {
       // 安全模式旗标刻意不进本路径（技术栈篇 §5 救援环）：boot --no-plugins 起的
       // 最小内核在此读回全量树——修好 overlay 后 /reload 即恢复，无需重启进程
-      fresh = loadComposition(compositionDir, builtins);
+      fresh = loadComposition(compositionDir, builtins, knownAppIds);
     } catch (err) {
       return { error: describeError(err) };
     }
+    // 行挂载目标投影重建（D1）：fresh 即目标树——早于旧锚回卷与新装载，
+    // 整个换窗（dispose + load）内注册面读到的恒为「正过渡到」的树投影
+    syncRowAppMap(fresh);
     // Ring 1 行变更检测（契约篇 §5.1 /reload 语义）：Ring 1 行不回卷不重装载
     //（仅 boot 生效），合成结果变化只能报告——重启后生效，不静默吞
     const ring1RestartRequired = diffRing1Rows(composition, fresh);
@@ -1800,8 +1848,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         },
         /* -- 第三纵切进入面：/app <id> 应用进入。available = 在册且组件齐备的
          * 应用（缺场应用不披露——应用级隔离的清单面镜像，诊断走 dump-config）；
-         * enter = 解析 + 缺场拒 + open({app})（会话打标/装配默认位/审批预设随
-         * open 一条龙）。返回面带 ok 判别——命令壳只格式化不判错。 */
+         * registered = 在册全量（缺场也在——/app <id> 应用寻址门用：在册即路由
+         * enter，缺场应用得到精确的「组件缺场」报错而非误落会话寻址的「无此
+         * 会话」，D1-d 死防御支）；enter = 解析 + 缺场拒 + open({app})（会话打
+         * 标/装配默认位/审批预设随 open 一条龙）。返回面带 ok 判别——命令壳只
+         * 格式化不判错。 */
+        registered: () => [...officialApps.values()].map((manifest) => ({ id: manifest.id, label: manifest.label })),
         available: () =>
           [...officialApps.values()]
             .filter((manifest) => !appGaps.has(manifest.id))

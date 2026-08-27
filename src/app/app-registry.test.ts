@@ -164,9 +164,9 @@ describe('loadOfficialApps：官方目录装载', () => {
 });
 
 describe('assertAppComponents：组件在场断言（按装载身份串）', () => {
-  /** 合成最小组合树：rows 带 plugin 身份串，plan 三态（激活 / skip / unresolved） */
+  /** 合成最小组合树：rows 带 plugin 身份串与挂载目标，plan 三态（激活 / skip / unresolved） */
   const composition = (
-    rows: Array<{ id: string; plugin?: string }>,
+    rows: Array<{ id: string; plugin?: string; app?: string }>,
     plan: Array<{ id: string; skip?: string; unresolved?: string }>,
   ): CompositionReport => ({ rows, plan }) as unknown as CompositionReport;
 
@@ -214,6 +214,33 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
         { id: 'a', plugin: 'builtin:chat' },
         { id: 'b', plugin: 'vendor/tool' },
         { id: 'c', plugin: 'vendor/gone' },
+      ],
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    );
+    expect(assertAppComponents(apps, comp).size).toBe(0);
+  });
+
+  it('D1 值域升级：在场 = 挂系统 ∪ 挂本应用；挂他应用 ≠ 在场（契约篇 §5.1 冷读 F7/SF3）', () => {
+    // vendor/gone 挂在**别应用**组合——注册落他应用域层、进不了本应用组成面：
+    // 断言与投影同域，对本应用即缺场照报
+    const comp = composition(
+      [
+        { id: 'a', plugin: 'builtin:chat' },
+        { id: 'b', plugin: 'vendor/tool' },
+        { id: 'c', plugin: 'vendor/gone', app: '别应用' },
+      ],
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    );
+    const gaps = assertAppComponents(apps, comp);
+    expect(gaps.get('vendor/one')).toEqual(['vendor/gone']);
+  });
+
+  it('D1 挂本应用即在场（overlay 复挂同件进本应用组合——与挂系统行并集判定）', () => {
+    const comp = composition(
+      [
+        { id: 'a', plugin: 'builtin:chat' },
+        { id: 'b', plugin: 'vendor/tool', app: 'vendor/one' }, // 挂本应用
+        { id: 'c', plugin: 'vendor/gone', app: 'vendor/one' },
       ],
       [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
     );

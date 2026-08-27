@@ -355,7 +355,9 @@ export interface ChatPluginDeps {
   /**
    * CLI --app 解析产物（第三纵切进入面）：本进程启动即进入的非缺省应用清单。
    * boot 首驱动以此开域（会话打标/严格域续接/agent 装配默认位/审批预设）；
-   * 运行期 /app <id> 进入走 open({app}) per-open 路径（互不混用——/app new 恒 chat 域）
+   * 运行期 /app <id> 进入与 /new 透传（D1-d：聚焦条目 app 同应用新开——组合根
+   * startNewSession 查表传入）走 open({app}) per-open 路径（互不混用——/app new
+   * 恒 chat 域：开新+驻留是另一动词，两动词 app 归属不同是字面事实非矛盾）
    */
   readonly app?: AppManifest;
   /** 持久层（缺省 = persist:false 诊断面——件降级空转，不起驱动不供 agent） */

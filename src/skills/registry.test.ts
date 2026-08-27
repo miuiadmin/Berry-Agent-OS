@@ -387,3 +387,51 @@ describe('createSkillsService（变更广播——契约篇 §2.2 增补 6，#17
     expect(() => service.registerProvider(providerOf('prov-silent'))).not.toThrow();
   });
 });
+
+describe('createSkillsService — D1 app 行拒载（契约篇 §5.1 注册面路由）', () => {
+  /** 两行探针 fixture：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
+  const rowApp = {
+    get: (rowId: string) => (rowId === 'row-app' ? 'chat' : undefined),
+    size: () => 1,
+  };
+  /** 本组最小 provider fixture（空技能——注册/拒载语义与内容无关） */
+  const providerOf = (id: string): SkillsProvider => ({
+    id,
+    list: () => ({ skills: [], diagnostics: [] as SkillDiagnostic[] }),
+  });
+
+  it('app 行注册拒绝：COMPOSITION_ROW_INVALID——provider 全局注入 systemPrompt 无域层', async () => {
+    const { runInCallerChain } = await import('../context/chain.js');
+    const { AppError, COMPOSITION_ROW_INVALID } = await import('../contracts/errors.js');
+    const service = createSkillsService({ rowApp });
+    // 装载器 apply 帧 / 组合根 seam 还帧形态：行 id 进 caller 链 → 服务面单一
+    // 执法点拒绝（装载期拒绝——加载器收为行失败）
+    try {
+      runInCallerChain('row-app', () => service.registerProvider(providerOf('prov-app')));
+      expect.unreachable('应抛 COMPOSITION_ROW_INVALID');
+    } catch (e) {
+      expect(e).toBeInstanceOf(AppError);
+      expect((e as InstanceType<typeof AppError>).code).toBe(COMPOSITION_ROW_INVALID);
+      expect((e as InstanceType<typeof AppError>).message).toContain('app: chat');
+    }
+  });
+
+  it('系统行与无帧注册不受影响（宿主装配段/合法语境照常注册）', async () => {
+    const { runInCallerChain } = await import('../context/chain.js');
+    const seen: string[][] = [];
+    const service = createSkillsService({
+      rowApp,
+      onProvidersChange: (ids) => seen.push([...ids]),
+    });
+    // 挂系统的行：探针查无 → 照常
+    runInCallerChain('row-sys', () => service.registerProvider(providerOf('prov-sys')));
+    // 无帧（宿主装配段直注册——local-fs provider 即此形态）：照常
+    service.registerProvider(providerOf('prov-host'));
+    expect(seen.at(-1)).toEqual(['prov-sys', 'prov-host']);
+  });
+
+  it('缺省不接探针 = 不执法（纯测试/诊断面）', () => {
+    const service = createSkillsService();
+    expect(() => service.registerProvider(providerOf('prov-plain'))).not.toThrow();
+  });
+});

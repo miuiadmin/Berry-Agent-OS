@@ -75,6 +75,7 @@ function rig(reports: { inspect: UninstallReport; exec: UninstallExecReport }) {
       list: () => ({ active: [], retiredCount: 0 }),
       switchTo: () => false,
       open: () => undefined,
+      registered: () => [],
       available: () => [],
       enter: () => ({ ok: false as const, error: '不可用' }),
     },

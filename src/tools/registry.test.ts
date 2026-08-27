@@ -16,7 +16,8 @@ import {
   TOOL_REGISTRY_RATE,
 } from '../contracts/errors.js';
 import type { ToolDefinition } from '../contracts/tools.js';
-import { createContext } from '../context/index.js';
+import type { RowAppProbe } from '../contracts/plugin.js';
+import { createContext, runInCallerChain } from '../context/index.js';
 import { createToolPipeline } from './pipeline.js';
 import { defineTool, registerToolsService, scanToolDescription } from './registry.js';
 
@@ -378,6 +379,69 @@ describe('registerToolsService — 应用域层（域键升级批：domain 键 =
     dispose(); // 应用域条目注销 → 域空 → 拆层
     expect(() => tools.register(makeTool('grep'))).not.toThrow();
     expect(tools.listFor('app-a').map((t) => t.name)).toEqual(['grep']); // 现在来自全局层
+  });
+});
+
+describe('registerToolsService — D1 隐式路由（契约篇 §5.1 注册面路由：行挂载目标探针）', () => {
+  /** 两行探针 fixture：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
+  const rowApp: RowAppProbe = {
+    get: (rowId) => (rowId === 'row-app' ? 'chat' : undefined),
+    size: () => 1,
+  };
+
+  it('app 行无显式键注册 → 隐式路由落该应用域层（listFor 可见、全局口径不可见、tools_change 带 domain）', () => {
+    const ctx = createContext({ name: 'test' });
+    const events: Array<{ kind: string; name: string; domain?: string }> = [];
+    ctx.on('tools_change', (e) => events.push(e));
+    const tools = registerToolsService(ctx, { rowApp });
+    // 装载器 apply 段形态：runInCallerChain(row.id) 罩注册——「挂到哪层」由
+    // 组合树行声明（app 键）非注册时自选
+    runInCallerChain('row-app', () => tools.register(makeTool('lint')));
+    // 落应用域层 chat：组合域视角可见、全局层口径（dump-config/诊断面）不可见
+    expect(tools.list().map((t) => t.name)).toEqual([]);
+    expect(tools.listFor('chat').map((t) => t.name)).toEqual(['lint']);
+    expect(tools.listFor('hermes').map((t) => t.name)).toEqual([]);
+    // 载荷 = 应用域层变更（domain 键——与显式 domain 注册同一路由面零分叉）
+    expect(events).toEqual([{ kind: 'add', name: 'lint', domain: 'chat' }]);
+  });
+
+  it('系统行（探针查无）与显式键注册不受隐式路由影响', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx, { rowApp });
+    // 挂系统的行：探针 get 无值 → 落全局层（缺省注册面语义不变）
+    runInCallerChain('row-sys', () => tools.register(makeTool('find')));
+    expect(tools.list().map((t) => t.name)).toEqual(['find']);
+    // 显式 domain 键优先：即便行挂应用，显式键照走——隐式路由只补缺省面
+    runInCallerChain('row-app', () => tools.register(makeTool('lint'), { domain: 'hermes' }));
+    expect(tools.listFor('hermes').map((t) => t.name)).toEqual(['find', 'lint']);
+    expect(tools.listFor('chat').map((t) => t.name)).toEqual(['find']);
+  });
+
+  it('异步注册窗口：无帧注册落全局层 + warn（组合树存在应用行时才警——隔离泄漏面提示）', () => {
+    const ctx = createContext({ name: 'test' });
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+    const tools = registerToolsService(ctx, { rowApp });
+    tools.register(makeTool('async-late')); // 无 caller 帧（apply 返还后裸调形态）
+    expect(tools.list().map((t) => t.name)).toEqual(['async-late']); // 全局层兜底
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('异步窗口');
+  });
+
+  it('零应用行不警：size()=0 = 无隔离语义可破坏（mcp 异步注册合法时序零噪声）', () => {
+    const ctx = createContext({ name: 'test' });
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+    const tools = registerToolsService(ctx, { rowApp: { get: () => undefined, size: () => 0 } });
+    tools.register(makeTool('mcp-tool')); // 无帧 + 零应用行
+    expect(tools.list().map((t) => t.name)).toEqual(['mcp-tool']);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('无探针（子装配/诊断面/测试）零路由：行帧在场也落全局层', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    runInCallerChain('row-app', () => tools.register(makeTool('find')));
+    expect(tools.list().map((t) => t.name)).toEqual(['find']);
+    expect(tools.listFor('chat').map((t) => t.name)).toEqual(['find']); // 全局层进一切面
   });
 });
 

@@ -9,6 +9,9 @@
 
 import { realpathSync } from 'node:fs';
 import type { Context, Disposer } from '../context/types.js';
+import { chainCaller } from '../context/chain.js';
+import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
+import type { RowAppProbe } from '../contracts/plugin.js';
 import { SKILLS_CHANGE_EVENT } from './types.js';
 import type { Skill, SkillDiagnostic, SkillsProvider, SkillsService } from './types.js';
 
@@ -70,9 +73,14 @@ export function renderAvailableSkills(skills: readonly Skill[]): string {
  * 可见性依赖 /reload //new 或无关插件注册 prompt 段捎带 rebuild 的偶然耦合）。
  *
  * @param opts.onProvidersChange 提供方链变更回调（缺省不广播——纯测试场景）
+ * @param opts.rowApp 行挂载目标投影（D1 注册面路由裁死，契约篇 §5.1）：挂应用
+ *   组合的行注册技能来源 = 装载期拒绝——skills 无域层（provider 全局注入
+ *   systemPrompt），app 行注册即全局漏注入破坏应用隔离。缺省不接 = 不执法
+ *   （纯测试/诊断面）。
  */
 export function createSkillsService(opts?: {
   onProvidersChange?: (providerIds: readonly string[]) => void;
+  rowApp?: RowAppProbe;
 }): SkillsService {
   /** 提供方链（注册序即优先序） */
   const providers: SkillsProvider[] = [];
@@ -135,6 +143,19 @@ export function createSkillsService(opts?: {
 
   const service: SkillsService = {
     registerProvider(provider) {
+      // D1 app 行拒载（契约篇 §5.1 注册面路由裁死，2026-08-27）：caller 链带行
+      // id（装载器 apply 帧 / 组合根 seam 显式帧）且该行挂应用组合 → 拒绝——
+      // 技能 provider 全局注入 systemPrompt、无域层，app 行注册 = 全局漏注入
+      // 破坏应用隔离。抛错即行失败（装载期拒绝）；域层随首个真实第三方需求
+      const rowId = chainCaller();
+      const appId = rowId !== undefined ? opts?.rowApp?.get(rowId) : undefined;
+      if (appId !== undefined) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `技能来源注册被拒：行 ${rowId} 挂应用组合（app: ${appId}）——应用行的技能注册 v1 裁死拒载` +
+            `（provider 全局注入系统提示词、无域层，防全局漏注入破坏应用隔离；契约篇 §5.1 D1 注册面路由）`,
+        );
+      }
       providers.push(provider);
       notifyChange(); // 链变更即广播（skills_change——装配层订阅重建提示词）
       let done = false;

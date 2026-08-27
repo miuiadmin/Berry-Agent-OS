@@ -22,7 +22,7 @@
  * 域层 fs 条目挂 chat 件 DriverEntry 不受影响（活驱动工具面跨 /reload 存续）。
  */
 
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinPluginModule, PluginContext, RowAppProbe } from '../contracts/plugin.js';
 import type { GateDecisionSink } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
 import { createToolPipeline } from './pipeline.js';
@@ -35,6 +35,12 @@ export interface ToolsPluginDeps {
   readonly gateSink: GateDecisionSink;
   /** 工作区根活取值（检索族 find/grep 路径锚） */
   readonly workspace: () => string;
+  /**
+   * 行挂载目标投影（D1 注册面路由，契约篇 §5.1）：透传注册表选项——无显式键
+   * 注册经 caller 链归因行挂载目标，挂应用的行落该应用域层。缺省不传 = 不路由
+   * （诊断面/测试——全部落全局层，与既有行为同构）
+   */
+  readonly rowApp?: RowAppProbe;
 }
 
 /**
@@ -56,8 +62,12 @@ export function createToolsPlugin(deps: ToolsPluginDeps): BuiltinPluginModule {
       // ctx prepend 占守门段首位——与本处互不相扰
       const pipeline = createToolPipeline(scope, { onGateDecision: deps.gateSink });
       // ctx.tools 服务（executor 携带管道——服务注册表同根共享，ring1 锚
-      // provide 对后续装载行与宿主装配段全局可见）
-      const tools = registerToolsService(scope, { pipeline });
+      // provide 对后续装载行与宿主装配段全局可见）。rowApp 探针随行携带
+      //（D1 注册面路由：caller 链归因 → 挂应用的行注册落应用域层）
+      const tools = registerToolsService(scope, {
+        pipeline,
+        ...(deps.rowApp !== undefined ? { rowApp: deps.rowApp } : {}),
+      });
       // 检索族 find/grep（只读无 fence 需求——读任意位置允许，与 read 工具同
       // 口径；无会话状态，全局层注册共享）
       const searchTools = createSearchTools({ workspace: deps.workspace });

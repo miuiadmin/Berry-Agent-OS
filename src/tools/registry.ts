@@ -41,6 +41,7 @@ import {
 } from '../contracts/errors.js';
 import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
+import type { RowAppProbe } from '../contracts/plugin.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import { chainCaller } from '../context/chain.js';
 import type { Disposer } from '../context/types.js';
@@ -71,6 +72,13 @@ export function toolOwnerOf(def: ToolDefinition): string | undefined {
 export interface ToolRegistryOptions {
   /** 工具执行管道（缺省不接——注册出的 AgentTool 执行会响亮失败，装配层必须接） */
   pipeline?: ToolPipelineExecutor;
+  /**
+   * 行挂载目标投影（契约篇 §5.1 D1 注册面路由，2026-08-27）：无显式键注册经
+   * caller 链归因行挂载目标——挂应用的行落该应用域层（「挂到哪层」由组合树行
+   * 声明，非注册时自选）。缺省不接 = 无隐式路由（子装配/诊断面/测试——全部
+   * 落全局层，与既有行为同构）。
+   */
+  rowApp?: RowAppProbe;
 }
 
 /**
@@ -168,8 +176,32 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         effect: def.effect ?? 'write',
         ...(def.timeoutMs !== undefined ? { timeoutMs: Math.max(def.timeoutMs, TOOL_TIMEOUT_FLOOR_MS) } : {}),
       };
-      const domainKey = registerOpts?.domain;
       const driverKey = registerOpts?.driver;
+      // domainKey 经显式键或 D1 隐式路由确定（let——隐式路由可补值）
+      let domainKey = registerOpts?.domain;
+      /* ---- D1 隐式路由（契约篇 §5.1 挂载目标两档，2026-08-27）----
+       * 无显式键注册经 caller 链归因行挂载目标：装载器 apply 段注册天然带行 id
+       * 帧（runInCallerChain(row.id)），行带 app 键 → 注册落该应用域层（「挂到
+       * 哪层」由组合树行声明，非注册时自选）。显式键（驱动层双键 / 测试注入
+       * domain）优先——隐式路由只补缺省注册面。无探针（子装配/诊断面）零路由。 */
+      if (driverKey === undefined && domainKey === undefined && opts.rowApp !== undefined) {
+        const rowId = chainCaller();
+        if (rowId !== undefined) {
+          const appId = opts.rowApp.get(rowId);
+          if (appId !== undefined) domainKey = appId;
+        } else if (opts.rowApp.size() > 0) {
+          /* 异步注册窗口（第三十四批拍板 42 / 契约篇 §5.1 注记）：apply 返还后
+           * 裸调 register——ALS 帧已失、无行籍可查，拒绝不可执法。v1 = 落全局层
+           * + warn：warn 只在组合树存在应用行时发（零应用行 = 无隔离语义可破坏，
+           * mcp 异步注册〔合法时序〕零噪声；warn 语义 = 「可能有隔离泄漏」）。
+           * 行为兜底不靠 warn：本注册的 tools_change 总线事件（domain 键缺席 =
+           * 全局层变更的运行时事实）+ 后续任何调用经三段管道落 durable 账。 */
+          ctx.logger.warn(
+            `无行籍注册落全局层（异步窗口）：${def.name}——apply 返还后的注册无法归因行挂载目标；` +
+              `若本工具来自挂应用的行，其能力将进一切组成面（隔离泄漏面），契约篇 §5.1 异步注册窗口注记`,
+          );
+        }
+      }
       let layer: Map<string, ToolDefinition>;
       if (driverKey !== undefined) {
         // 驱动层注册（fs 四名 + bash 的归宿）：须双键同携——driver（sessionId）+

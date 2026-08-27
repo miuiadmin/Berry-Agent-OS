@@ -169,6 +169,12 @@ export interface BuiltinCommandsOptions {
     /** 开新驱动不退役旧的（registry.open 直调；无持久层 undefined） */
     open(): { readonly sessionId: string } | undefined;
     /**
+     * 在册应用全量清单（D1-d 死防御支）：缺场应用也在册——/app <id> 的应用
+     * 寻址门（在册即路由 enter，缺场由 enter 精确报「组件缺场」；与 available
+     * 分工：裸清单尾部披露只列可进入的可用面）
+     */
+    registered(): ReadonlyArray<{ readonly id: string; readonly label: string }>;
+    /**
      * 在册可用应用（第三纵切进入面）：组件齐备的在册清单（缺场应用不披露——
      * 应用级隔离的清单面镜像），/app 裸清单尾部披露用
      */
@@ -246,12 +252,14 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         }
         /* ---- 动词〇（第三纵切）：清单 id 精确命中 = 应用进入——优先于会话寻址 ----
          * 应用 id 词汇域与会话 id 前缀不相交（应用 id 无会话 id 字符），先后即
-         * 无歧义；命中即 enter（开新域+聚焦），尾部 args 作为首条用户消息直接
-         * 提交（与用户手打同路径——进入与开跑不打两段） */
+         * 无歧义；寻址门 = **在册**全量（D1-d 死防御支：缺场应用也路由 enter——
+         * 精确报「组件缺场」而非误落会话寻址的「无此会话」）。命中即 enter（开
+         * 新域+聚焦），尾部 args 作为首条用户消息直接提交（与用户手打同路径——
+         * 进入与开跑不打两段） */
         const firstSpace = arg.indexOf(' ');
         const appArg = firstSpace === -1 ? arg : arg.slice(0, firstSpace);
         const firstMessage = firstSpace === -1 ? '' : arg.slice(firstSpace + 1).trim();
-        const appHit = opts.apps.available().find((a) => a.id === appArg);
+        const appHit = opts.apps.registered().find((a) => a.id === appArg);
         if (appHit !== undefined) {
           const entered = opts.apps.enter(appHit.id);
           if (!entered.ok) {

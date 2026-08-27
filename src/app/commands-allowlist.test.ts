@@ -47,11 +47,12 @@ function rig() {
     submit: () => {},
     newSession: () => undefined,
     // /app 面最小桩（S3——本测试不触及多会话命令，空清单形；第三纵切新增
-    // available/enter 两面同样给空桩——壳面测试在本文件只测 allowlist）
+    // registered/available/enter 三面同样给空桩——壳面测试在本文件只测 allowlist）
     apps: {
       list: () => ({ active: [], retiredCount: 0 }),
       switchTo: () => false,
       open: () => undefined,
+      registered: () => [],
       available: () => [],
       enter: () => ({ ok: false as const, error: '不可用' }),
     },

@@ -1109,6 +1109,42 @@ describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / deleg
     expect(JSON.stringify(runtime.drivers.entries.get(bootId)!.session.events)).not.toContain('首条消息');
   });
 
+  it('/new 透传聚焦条目 app（B 案，D1-d）：同应用新开——chat 域恒 chat、hermes 域开在 hermes', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    // chat 域聚焦（boot 缺省）：/new 后新会话仍 chat 域（透传不改变缺省行为半边）
+    runtime.channels.commands.lookup('new')!.handler('');
+    let current = runtime.front.focus.sessionId!;
+    expect(runtime.drivers.entries.get(current)!.appId).toBe('chat');
+    // 进入 hermes → 聚焦切应用域 → /new 开在 hermes 域（恒 chat 域过渡态收口）
+    runtime.channels.commands.lookup('app')!.handler('hermes');
+    current = runtime.front.focus.sessionId!;
+    expect(runtime.drivers.entries.get(current)!.appId).toBe('hermes');
+    runtime.channels.commands.lookup('new')!.handler('');
+    const renewed = runtime.front.focus.sessionId!;
+    expect(renewed).not.toBe(current);
+    expect(runtime.drivers.entries.get(renewed)!.appId).toBe('hermes'); // 同应用新开
+    expect(runtime.drivers.entries.get(current)!.retired).toBe(true); // /new 旧条目退役（语义不变半边）
+  });
+
+  it('缺场应用 /app <id> 死防御支（D1-d）：在册即路由 enter——精确报组件缺场，不误落「无此会话」', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-enter-')));
+    // 禁 goal 行 → chat/hermes 清单组件双双缺场（在场断言 → 应用级隔离不拒启）
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: goal\n    disabled: true\n');
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    const focusBefore = runtime.front.focus.sessionId;
+    runtime.channels.commands.lookup('app')!.handler('hermes');
+    // 缺场报错精确到缺失身份串 + 隔离语义（此前误落会话寻址的「无此会话」）
+    const lines = notifies.join('\n');
+    expect(lines).toContain('进入失败');
+    expect(lines).toContain('应用 hermes 组件缺场（builtin:goal）');
+    expect(notifies.some((n) => n.includes('无此会话'))).toBe(false);
+    expect(runtime.front.focus.sessionId).toBe(focusBefore); // 进入失败 focus 不动
+  });
+
   it('裸调清单披露可用应用行；delegable 应用双注册（provider 表 + agent_<id> 静态工具）', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });
@@ -1441,6 +1477,74 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
   });
 
+  it('D1 app 行插件全栈：工具隐式路由落应用域层——chat 组合域独见、全局口径与别应用不可见', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "app-tool-plugin";',
+        'export default async function apply(ctx) {',
+        '  const tools = ctx.get("tools");',
+        '  // 无显式键注册：装载器 apply 帧带行 id → 探针归因行 app 键 → 落应用域层',
+        '  ctx.effect(() =>',
+        '    tools.register({',
+        '      name: "app-echo",',
+        '      description: "应用行注册的回声工具（D1 清单投影回归锁）",',
+        '      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },',
+        '      execute: async (args) => ({ content: [{ type: "text", text: `app:${args.text}` }] }),',
+        '    }),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: app-tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+    );
+    const runtime = await assemble({ compositionDir });
+    try {
+      // 行装载成功（app: chat = 在册应用 id——四触发拒绝式不触发）
+      expect(runtime.plugins.list().at(-1)).toMatchObject({ id: 'app-tool-plugin', status: 'activated' });
+      // 隐式路由落 chat 应用域层：该应用组合域视角独见
+      expect(runtime.tools.listFor('chat').map((t) => t.name)).toContain('app-echo');
+      // 全局口径（诊断面/裸 list）不可见；别应用组合域不可见（跨应用零泄漏）
+      expect(runtime.tools.list().map((t) => t.name)).not.toContain('app-echo');
+      expect(runtime.tools.listFor('hermes').map((t) => t.name)).not.toContain('app-echo');
+      // 正半边（断言 6 注册面码半边）：挂 chat 应用的行能力进 chat 应用组成面
+      //——默认驱动即 chat 应用（域键 = CHAT_APP_ID），组成面 = 全局 ∪ chat 域 ∪ 驱动层
+      const composition = runtime.tools.compositionFor(runtime.session!.header.sessionId);
+      expect(composition.map((t) => t.name)).toContain('app-echo');
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('D1 app 行技能拒载全栈：包声明 skills + 行 app 键 → 行失败拒启（seam 还帧 → 服务面执法）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "app-skill-plugin";',
+        'export const skills = ["./skills"];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    // 包内技能目录物化（纯技能包最小形态——技能目录在插件包根下）
+    const skillDir = join(pluginDir, 'skills');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: app-row-skill\ndescription: 应用行技能（D1 拒载回归锁）。\n---\n\n正文。\n',
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: app-skill-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+    );
+    // 技能 provider 全局注入 systemPrompt 无域层：app 行注册 = 装载期拒绝 →
+    // 加载器收为行失败（PLUGIN_APPLY_FAILED 包原码）→ 启动断言拒启
+    await expect(assemble({ compositionDir })).rejects.toThrowError(/技能来源注册被拒/);
+  });
+
   it('插件提示词段全栈：ctx.effect 注册 registerSection → systemPrompt 含段内容（分节序固定）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const pluginDir = writePluginDir(
@@ -1695,6 +1799,40 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
 
     const emptyDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     expect(await dumpConfigMain({ compositionDir: emptyDir })).toBe(0);
+  });
+
+  it('dump-config 挂载分组（D1 清单投影 F13）：应用行进「应用合成 chat」组、树行带 → 归属标记', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    const pluginDir = writePluginDir(
+      compositionDir,
+      'export const name = "app-tool-plugin";\nexport default async function apply() {}\n',
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: app-tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+    );
+    // 捕获 stdout（dumpConfigMain 全输出经 process.stdout.write——诊断面无别名流）
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as typeof process.stdout.write);
+    try {
+      expect(await dumpConfigMain({ compositionDir })).toBe(0);
+      const out = chunks.join('');
+      // 树行标记：装载序视角下挂应用行显式标注归属（系统行缺省零标记零噪声）
+      expect(out).toContain('app-tool-plugin：activated');
+      expect(out).toContain('→ chat');
+      // 分组分两类（F13）：官方默认层十行全挂系统 + 应用合成按在册应用逐组打印
+      expect(out).toContain('挂载分组（系统合成 + 各在册应用合成，契约篇 §5.1 两档）：');
+      expect(out).toContain(
+        '系统合成（10 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin',
+      );
+      expect(out).toContain('应用合成 chat（1 行）：app-tool-plugin');
+      expect(out).toContain('应用合成 hermes（0 行）：（空——纯系统合成）');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('dump-config 主库零落盘（P0-3 回归锁）：:memory: 全装配后数据目录无任何 SQLite 库文件', async () => {

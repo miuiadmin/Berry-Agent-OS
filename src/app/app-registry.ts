@@ -86,6 +86,11 @@ export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, A
  * （jiti 命名空间穿透实证不可信——加载器形状校验同教训）。「激活」= 计划行
  * 无 skip 且无 unresolved（装载失败行已由 boot 断言拦截，到不了这里）。
  *
+ * 在场值域（D1 清单投影批升级，契约篇 §5.1）：**挂系统 ∪ 挂本应用**——行
+ * `app` 键缺省（挂系统组合）对该组件的一切声明应用都算在场；行 `app: <别应用>`
+ * 只对目标应用算在场（挂他应用 ≠ 在场——能力进了别应用组合域，本应用不可用，
+ * 缺场照报）。同一身份串多行并存（overlay 复挂）按挂载域并集判定。
+ *
  * @param apps 官方清单表
  * @param composition 组合树装载产物
  * @returns id → 缺失组件清单（空清单 = 完整；调用方落 debug 日志与 dump-config）
@@ -94,18 +99,28 @@ export function assertAppComponents(
   apps: ReadonlyMap<string, AppManifest>,
   composition: CompositionReport,
 ): Map<string, readonly string[]> {
-  // 激活行的装载身份串集合：合成行携带 plugin 字段，计划行携带 skip/unresolved
-  const activeRefs = new Set<string>();
+  // 激活行的装载身份串 → 挂载域集合（undefined 元素 = 挂系统行；字符串元素 =
+  // 挂该应用的行——D1 前单集合不分域，挂任何位置都算在场）
+  const refDomains = new Map<string, Set<string | undefined>>();
   const planById = new Map(composition.plan.map((row) => [row.id, row]));
   for (const row of composition.rows) {
     if (row.plugin === undefined) continue;
     const plan = planById.get(row.id);
     if (plan === undefined || plan.skip !== undefined || plan.unresolved !== undefined) continue;
-    activeRefs.add(row.plugin);
+    let domains = refDomains.get(row.plugin);
+    if (domains === undefined) {
+      domains = new Set<string | undefined>();
+      refDomains.set(row.plugin, domains);
+    }
+    domains.add(row.app);
   }
   const gaps = new Map<string, readonly string[]>();
   for (const [id, manifest] of apps) {
-    const missing = manifest.components.filter((ref) => !activeRefs.has(ref));
+    // 缺场 = 该身份串无任何激活行，或激活行全挂别应用（挂系统/挂本应用即在场）
+    const missing = manifest.components.filter((ref) => {
+      const domains = refDomains.get(ref);
+      return domains === undefined || !(domains.has(undefined) || domains.has(id));
+    });
     if (missing.length > 0) gaps.set(id, missing);
   }
   return gaps;
