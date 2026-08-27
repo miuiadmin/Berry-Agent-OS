@@ -137,8 +137,6 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
               rootCtx: createContext({ name: 'dump-diag' }),
             }),
             getSession: () => undefined,
-            // 诊断面无会话——boot 降级永不触发（惰性取值恒 false 占位）
-            wasResumed: () => false,
             // chat 占位件：纯树合成只查注册表键（形状/装载均不发生）——
             // apply 为空实现占位，构造期零副作用
             chat: {

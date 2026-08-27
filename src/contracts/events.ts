@@ -86,12 +86,12 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'session_start',
     mode: 'emit',
-    note: '会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话（契约篇 §2.2 session 层；载荷 { sessionId, origin? }——插件初始化会话级状态；骨架篇 §6.4 落码注记）',
+    note: '会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话 / 装载收口补播（契约篇 §2.2 session 层；载荷 { sessionId, origin?, replay? }——origin 建会维度 initial/resume/delegation、replay 投递维度补播标记，二十九批增补 8①；插件初始化会话级状态；骨架篇 §6.4 落码注记）',
   },
   {
     name: 'session_shutdown',
-    mode: 'emit',
-    note: '优雅关闭广播（契约篇 §2.2 application 层；载荷 { reason }）',
+    mode: 'parallel',
+    note: '优雅关闭广播，宿主 bounded 等待全部清理器（单条目 2s 上限、超时 warn 后继续——契约篇 §2.2 session 层二十九批增补 8②；载荷 { sessionId }）',
   },
   {
     name: 'tools_pre_execute',

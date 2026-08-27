@@ -175,13 +175,16 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
         ),
       );
 
-    /* ---- ⑧ dispose 序列（纵切三 helper）：flush 屏障 → shutdown（根总线 keyed）→ 回卷 ---- */
+    /* ---- ⑧ dispose 序列（纵切三 helper）：flush 屏障 → shutdown（根总线 keyed，parallel bounded）→ 回卷 ---- */
     const disposer = createChildSessionDisposer({
       persistence: deps.persistence ?? NOOP_BARRIER,
       sessionId: session.header.sessionId,
-      // 转发体：session_shutdown 发根总线（插件在根——与 ⑥ 对称），dispose 落子本尊
+      // 转发体：session_shutdown 派发/日志转发根总线（插件在根——与 ⑥ 对称；目录
+      // mode=parallel，bounded 等待住 child disposer 内公共件——二十九批增补 8②），
+      // dispose 落子本尊
       childCtx: {
-        emit: (event: 'session_shutdown', data: { sessionId: string }) => deps.rootCtx.emit(event, data),
+        parallel: (event, data) => deps.rootCtx.parallel(event, data),
+        logger: deps.rootCtx.logger,
         dispose: () => childCtx.dispose(),
       },
     });

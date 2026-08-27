@@ -116,6 +116,7 @@ import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
 import { createMcpSpawner } from './mcp-spawn.js';
 import { killTree } from '../exec/index.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
+import { emitSessionShutdownBounded } from './subagent-child.js';
 import { createTickRunner } from './scheduler-runner.js';
 import { createTickOsRegistrar } from './tick-register.js';
 import { createJobsService, createSubagentsService, createInProcessProvider } from '../subagent/index.js';
@@ -1180,11 +1181,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 每子独立装配 dsh-10，委派目标形态差异只在 mergeRequest 静态半边）
     subagentFactory: subagentChildFactory,
     // goal 工具三件//goal 命令的会话归属（同 routed 路由：run 期链内=归属会话，
-    // TUI 命令面=聚焦会话）
+    // TUI 命令面=聚焦会话）。boot 续接降级已改走装载收口 session_start 补播
+    // 事件面（二十九批增补 8①）——wasResumed 装配旁路退役
     getSession: () => registry.routed()?.session,
-    // boot 降级触发器活取值（goal apply 期读——chat 件（首行）先装载，读必居值；
-    // S1：聚焦条目的 resumed 投影——运行期 resume 走 goal 的 session_start 订阅）
-    wasResumed: () => registry.focused()?.resumed ?? false,
     // chat 件 bundle（S1 工厂化）：注册表/前台宿主由件构造、组合根在此分配持有
     //（早期闭包 ③b/④b/④f 惰性引用 registry——TDZ 安全：全部运行期才调用）
     chat: chatBundle.module,
@@ -1581,6 +1580,24 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // header change 快照——装载期中间态已被首请求的 initial 快照整体收编
   loadWindow = false;
 
+  // session_start 装载收口补播（二十九批 P1-6 案 A，契约篇 §2.2 增补 8①）：
+  // chat 件是默认层首行（inject:['tools']），apply 即 registry.open()——open() 内
+  // 发射 session_start（活体），后续行插件（goal 等）on() attach 迟到结构性
+  // 收不到。宿主在装载收口对**非退役**条目按建会事实（resumed ? 'resume' :
+  // 'initial'）补发带 replay:true 标记的同型载荷——origin 建会维度不变、replay
+  // 是投递维度标记，既有按 origin 过滤的监听器零迁移。boot 与 /reload 两路
+  // 各自收口处同型补播（设计指令）。root 发射零频率护栏约束（免计费）。
+  const replaySessionStarts = (): void => {
+    for (const entry of registry.entries.values()) {
+      if (entry.retired) continue; // 退役条目不补——会话停摆，初始化面向在场者
+      ctx.emit('session_start', {
+        sessionId: entry.session.header.sessionId,
+        origin: entry.resumed ? 'resume' : 'initial',
+        replay: true,
+      });
+    }
+  };
+
   // composition/reloaded boot 路（契约篇 §2.2 增补 1/7④，2026-08-27 P1-2 补齐）：
   // 词汇注释「boot 与 /reload 两时点」自始为承诺面——boot 装载收口后同款载荷
   // 派发。时点依据：装载器激活序 = apply 先于 loadPlugins 返回，插件 apply 期
@@ -1593,6 +1610,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     failed: [...ring1Load.failed, ...ring2Load.failed].map((item) => item.id),
     skipped: [...ring1Load.skipped, ...ring2Load.skipped].map((item) => item.id),
   };
+  // 补播先于 composition/reloaded：晚装载插件先补齐会话级初始化态、再收
+  // 「组合树就绪」信号（次序 = 生命周期序，replay 是 start 的重放非新词）
+  replaySessionStarts();
   ctx.emit('composition/reloaded', bootPayload);
 
   /* ---- /reload 排队机制（契约篇 §3.4 第二刀，2026-08-27 刀 2）：busy 改单槽 coalesce ----
@@ -1698,6 +1718,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         skipped: load.skipped.map((item) => item.id),
         ...(ring1RestartRequired.length > 0 ? { ring1RestartRequired } : {}),
       };
+      // 补播先于 composition/reloaded（与 boot 收口同型同序，增补 8①）：锚回卷
+      // 把晚装载插件的监听面拆了重挂——补播让重挂的监听器重建会话级初始化态
+      replaySessionStarts();
       ctx.emit('composition/reloaded', payload);
       return { payload };
     } catch (err) {
@@ -1904,9 +1927,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         await persistence?.flush();
         // session_shutdown 钩子（骨架篇 §1.3 序⑤ / 契约篇钩子表，S1 全条目化）：
         // 全部条目（含退役保留者——迟到结算已收口）各发一次，统一在 flush 之后
-        //（插件清理器不再产生待落盘事件）；emit 异常隔离，单个清理器失败不拖垮关停
+        //（插件清理器不再产生待落盘事件）。二十九批增补 8②：目录 mode 切
+        // parallel（全等待 + 单失败隔离）+ 装配层单条目 2s bounded 等待（与子代理
+        // dispose 位同享 emitSessionShutdownBounded 公共件）——超时 warn 后继续
+        // 不阻塞退出；「全部清理器」不含 worker 域插件（terminate 先于本序、
+        // 监听器已回卷）。逐条目 await：会话清理器间无并发收益、且单条目超时
+        // 不放大为整段超时
         for (const entry of registry.entries.values()) {
-          ctx.emit('session_shutdown', { sessionId: entry.session.header.sessionId });
+          await emitSessionShutdownBounded(ctx, entry.session.header.sessionId);
         }
         await persistence?.close();
       } finally {

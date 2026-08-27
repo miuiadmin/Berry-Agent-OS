@@ -19,10 +19,15 @@
  *    + 同步注入收尾提示（忙时 steer——当轮收尾交代下一步，非硬断）。
  *
  * 激活态不持久化（§6.7 拍板）：boot 续接（origin=resume）即把 active 行降级
- * needs-resume。wasResumed 为惰性取值（应用面第一纵切）：chat 对话应用件（默认
- * 层首行）装载时绑定会话并回写旗标，goal 轮次激活必晚于它——apply 期首读必得
- * 居值；一次性旗标（bootDemotionArmed）保证 /reload 重激活不误降级（/reload
- * 复用同一官方件实例，闭包旗标跨重载存活）。
+ * needs-resume。触发面 = 装载收口 session_start 补播（二十九批 P1-6，契约篇
+ * §2.2 增补 8①——chat 件 ring2 首行 apply 即发射、晚装载的 goal 监听器结构性
+ * 收不到，宿主在装载收口对非退役条目补发 `{origin, replay:true}`）：降级条件
+ * 三合一 replay===true && armed && origin==='resume'；armed = 模块实例闭包
+ * 旗标「本件尚未见过补播」，首见任何 replay:true 即解除（无论 origin、不以
+ * 降级为前提——防「boot 新会话 → 运行期续接旧会话 → 人工 /goal resume →
+ * /reload」误降级人工授权序列）；/reload 复用同一官方件实例，闭包旗标跨重载
+ * 存活、补播照发但不误降级。进程内运行期再开续接会话（活体 origin='resume'、
+ * 无 replay 标记）照常降级。
  *
  * 'agent' 走 optionalInject（应用面第一纵切）：chat 件未装载/诊断装配
  * （persist:false）时无 ctx.agent——③续跑触发降级停用（warn），④预算刹车保留
@@ -95,38 +100,34 @@ export interface GoalPluginDeps {
   readonly connection?: DatabaseConnection;
   /** 当前会话 id 活取值（/new 热切换后自动跟新会话走） */
   readonly getSessionId: () => string | undefined;
-  /**
-   * boot 是否续接既有会话（session_start origin=resume 语义）——active 行降级
-   * 触发器。惰性取值：chat 件（默认层首行）装载绑定会话后才回写真值，goal
-   * 轮次激活必晚于绑定，apply 期首读必得居值
-   */
-  readonly wasResumed: () => boolean;
 }
 
 /**
  * 构造 goal 官方件（builtins 注册表 `builtin:goal` 行）。
  */
 export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
-  // boot 降级一次性旗标：armed 恒 true 起步，首次 apply 读 wasResumed() 惰性值
-  // 并解除——/reload 复用同一模块实例重跑 apply，旗标已 false 不误降级
-  //（§6.7「/reload 不误降级」）
-  let bootDemotionArmed = true;
+  // 「本件尚未见过补播」一次性旗标（二十九批增补 8①）：模块实例级闭包，/reload
+  // 复用本实例重跑 apply 不重置——首见任何 replay:true 补播即解除，此后 /reload
+  // 补播照发但不参与降级（§6.7「/reload 不误降级」）
+  let replayUnseen = true;
+  // 首见即解除：返回「本件此前是否未见过补播」并原子标记已见（true 只在第一枚
+  // replay:true 补播到达时出现——此后 /reload 补播照发但不参与降级）
+  const consumeReplayUnseen = (): boolean => {
+    const wasUnseen = replayUnseen;
+    replayUnseen = false;
+    return wasUnseen;
+  };
   return {
     name: 'goal',
     // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）
     inject: ['tools', 'channels', 'ui'],
     optionalInject: ['agent'],
-    apply: (ctx: PluginContext) =>
-      applyGoalPlugin(ctx, deps, () => {
-        const armed = bootDemotionArmed && deps.wasResumed();
-        bootDemotionArmed = false;
-        return armed;
-      }),
+    apply: (ctx: PluginContext) => applyGoalPlugin(ctx, deps, consumeReplayUnseen),
   };
 }
 
 /**
- * 官方件 apply 本体（接线序：boot 降级 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
+ * 官方件 apply 本体（接线序：续接降级事件面 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
  * 异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
  */
 
@@ -148,7 +149,8 @@ function wakeToolFilter(defs: readonly ToolDefinition[]): string[] {
 async function applyGoalPlugin(
   ctx: PluginContext,
   deps: GoalPluginDeps,
-  consumeBootDemotion: () => boolean,
+  /** 补播首见消费器（模块实例级闭包旗标——见 createGoalPlugin 注记） */
+  consumeReplayUnseen: () => boolean,
 ): Promise<void> {
   // persist:false 降级：无物理层即无 goal（状态/记账/续跑全依赖 goals 表）——warn 空转
   if (!deps.connection) {
@@ -157,24 +159,32 @@ async function applyGoalPlugin(
   }
   const store = new GoalStore(deps.connection);
 
-  /* ---- ⓪ boot 降级（激活权不跨进程）：origin=resume 续接即 active ⇒ needs-resume ---- */
-  if (consumeBootDemotion()) {
-    const sessionId = deps.getSessionId();
-    if (sessionId !== undefined) store.demoteToNeedsResume(sessionId, Date.now());
-  }
-
-  /* ---- ⓪b 续接降级事件面（S1 结构化）：session_start origin=resume 订阅 ----
-   * boot ⓪ 依赖装载行序（chat 首行先开驱动、goal 后装载），只能覆盖进程启动
-   * 一次；进程内再开续接会话（未来 /resume 或多应用打开）走事件面——chat 件
-   * open() 恒发 session_start（含 origin），此处按载荷会话直查直降。两者幂等
-   * 互补：boot 时 goal 尚未订阅（错过该次事件，⓪ 兜住）；此后事件必达。
+  /* ---- ⓪ 续接降级事件面（S1 结构化 + 二十九批增补 8① 补播收敛为唯一路径）----
+   * 两路载荷同面：活体（chat 件 open() 恒发 origin——进程内运行期续接/再开）与
+   * 补播（宿主装载收口对非退役条目重发 {origin, replay:true}——boot 时 goal
+   * 装载晚于 chat 首行 open、活体事件结构性错过，补播兜住；/reload 支线同型）。
+   * 降级条件：活体 = origin==='resume' 照常；补播 = 三合一
+   * replay===true && armed && origin==='resume'——armed =「本件尚未见过补播」
+   * 首见任何 replay:true 即解除（无论 origin、不以降级为前提——防「boot 新会话
+   * → 运行期续接旧会话 → 人工 /goal resume → /reload」误降级人工授权序列）。
    * demoteToNeedsResume 自身幂等（仅 active 行生效），双路同发不重复降级 */
   ctx.effect(() =>
     ctx.on('session_start', (payload: unknown) => {
       try {
-        const envelope = payload as { sessionId?: unknown; origin?: unknown };
-        if (envelope?.origin !== 'resume' || typeof envelope?.sessionId !== 'string') return;
-        store.demoteToNeedsResume(envelope.sessionId, Date.now());
+        const envelope = payload as { sessionId?: unknown; origin?: unknown; replay?: unknown };
+        if (typeof envelope?.sessionId !== 'string') return;
+        if (envelope.replay === true) {
+          // 补播路径：先消费旗标（首见解除不以降级为前提），armed 且 resume 才降级
+          const armed = consumeReplayUnseen();
+          if (armed && envelope.origin === 'resume') {
+            store.demoteToNeedsResume(envelope.sessionId, Date.now());
+          }
+          return;
+        }
+        // 活体路径：进程内运行期再开续接会话——origin=resume 照常降级
+        if (envelope.origin === 'resume') {
+          store.demoteToNeedsResume(envelope.sessionId, Date.now());
+        }
       } catch (err) {
         // fire-and-forget 纪律：降级异常止步日志，不上抛进事件派发面
         ctx.logger.error('goal 续接降级失败', { error: describeError(err) });

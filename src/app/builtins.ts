@@ -58,8 +58,6 @@ export interface BuiltinRegistryOptions {
   readonly agentLocations?: readonly AgentLocation[];
   /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键；goal 取当前会话 id） */
   readonly getSession: () => Session | undefined;
-  /** boot 是否续接既有会话（session_start origin=resume——goal active 行降级触发器）。惰性取值：chat 件（首行）装载绑定会话后回写，goal apply 期读必居值 */
-  readonly wasResumed: () => boolean;
   /**
    * chat 对话应用件模块（组合根 createChatPlugin 产物——默认层首行）：会话
    * 选择/驱动构造/ctx.agent provide 全在件内；无持久层时件自降级空转（装载
@@ -93,12 +91,12 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
         }
       : {}),
     // goal 官方件（官方默认层第四行，Ring 2 编排域）：连接随 persist 走（缺省
-    // 降级 warn 空转）；wasResumed 惰性取值触发 boot 降级（active ⇒ needs-resume），
-    // 'agent' 走 optionalInject（chat 件未装载时缺供降级，不阻激活）
+    // 降级 warn 空转）；boot 续接降级走 session_start 补播事件面（二十九批
+    // 增补 8①——wasResumed 装配旁路退役），'agent' 走 optionalInject（chat 件
+    // 未装载时缺供降级，不阻激活）
     'builtin:goal': createGoalPlugin({
       ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
       getSessionId: () => opts.getSession()?.header.sessionId,
-      wasResumed: opts.wasResumed,
     }),
     // scheduler 官方件（官方默认层第五行，tick 第一刀——内核边界篇 §4.1 席 13）：
     // 连接与 gate 判据/runner 全闭包注入（spawn 组装在 app/scheduler-runner.ts）；

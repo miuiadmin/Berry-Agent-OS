@@ -2286,6 +2286,106 @@ const abortEventOf = (message: AssistantMessage) => ({
   done: false as const,
 });
 
+/* ---------------- 生命周期两时点（二十九批 P1-6：装载收口补播 + shutdown bounded） ---------------- */
+
+describe('session_start 装载收口补播（二十九批增补 8①）', () => {
+  /** 补播探针插件：订阅 session_start 落袋 + plug-starts 工具读袋（测试资产） */
+  function writeStartProbe(compositionDir: string): void {
+    const pluginDir = writePluginDir(
+      compositionDir,
+      [
+        'export const name = "start-probe";',
+        'export const inject = ["tools"];',
+        'export default async function apply(ctx) {',
+        '  const starts = [];',
+        '  const tools = ctx.get("tools");',
+        '  ctx.effect(() => ctx.on("session_start", (payload) => starts.push(payload)));',
+        '  ctx.effect(() =>',
+        '    tools.register({',
+        '      name: "plug-starts",',
+        '      description: "session_start 探针读袋（测试资产——装载收口补播回归锁）",',
+        '      parameters: { type: "object", properties: {} },',
+        '      execute: async () => ({ content: [{ type: "text", text: JSON.stringify(starts) }] }),',
+        '    }),',
+        '  );',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: start-probe\n    plugin: ${pluginDir}\n`);
+  }
+
+  /** 读探针袋（经真工具面——插件侧记录的 session_start 载荷清单） */
+  async function readStarts(
+    runtime: BerryRuntime,
+  ): Promise<{ sessionId?: string; origin?: string; replay?: boolean }[]> {
+    const def = runtime.tools.get('plug-starts');
+    if (def === undefined) throw new Error('探针工具未注册：plug-starts');
+    const result = await runtime.tools.toAgentTool(def).execute('tc-replay', {});
+    return JSON.parse((result.content[0] as { type: 'text'; text: string }).text);
+  }
+
+  it('boot 收口补播：晚装载插件收到恰一枚 {sessionId, origin, replay:true}——活体（chat 首行 apply 期发射）它结构性收不到', async () => {
+    // 修复前必红：boot 无补播，晚装载插件 starts 袋恒空
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-replay-')));
+    writeStartProbe(compositionDir);
+    const runtime = await assemble({ compositionDir });
+    try {
+      const starts = await readStarts(runtime);
+      expect(starts).toHaveLength(1);
+      // 载荷两维分离：origin = 建会事实（新库新会话 = initial）、replay = 投递标记
+      expect(starts[0]!.sessionId).toBe(runtime.session!.header.sessionId);
+      expect(starts[0]!.origin).toBe('initial');
+      expect(starts[0]!.replay).toBe(true);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
+  it('/reload 收口同型补播：锚回卷后重挂的监听器再收一枚 replay:true（次序先于 composition/reloaded）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-replay-reload-')));
+    writeStartProbe(compositionDir);
+    const runtime = await assemble({ compositionDir });
+    try {
+      expect(await readStarts(runtime)).toHaveLength(1); // boot 补播一枚
+      // /reload：锚 dispose 回卷旧监听 → 重装载（jiti 逐次求值，starts 袋全新）
+      // → 收口补播再达。修复前必红：重挂监听器收不到任何 session_start
+      const reloaded = await runtime.reload();
+      expect(reloaded.payload?.activated).toContain('start-probe');
+      const starts = await readStarts(runtime);
+      expect(starts).toHaveLength(1);
+      expect(starts[0]!.sessionId).toBe(runtime.session!.header.sessionId);
+      expect(starts[0]!.origin).toBe('initial');
+      expect(starts[0]!.replay).toBe(true);
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+});
+
+describe('session_shutdown parallel bounded（二十九批增补 8②）', () => {
+  it('慢清理器（200ms）被等待完成且先于关停返回——emit 时代必红（fire-and-forget 吞清理 Promise）', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    let cleaned = false;
+    runtime.ctx.on('session_shutdown', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      cleaned = true;
+    });
+    const start = Date.now();
+    await runtime.shutdown();
+    // 真等待了清理器（elapsed ≥ 200ms）且完成先于返回（close 不再先行）
+    expect(Date.now() - start).toBeGreaterThanOrEqual(200);
+    expect(cleaned).toBe(true);
+  });
+
+  it('挂死清理器：单条目 2s 预算到点放弃等待继续关停——shutdown 不挂死（bounded 上限回归锁）', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    runtime.ctx.on('session_shutdown', () => new Promise<never>(() => {})); // 永不决议
+    const start = Date.now();
+    await runtime.shutdown(); // 无上限时代本行挂死 → 测试超时红
+    expect(Date.now() - start).toBeLessThan(5_000); // 2s 预算 + flush/close 余量
+  }, 10_000);
+});
+
 describe('S6 关停序（abort-all / quiesce 断言——骨架篇 §1.3 S6 形态⑤）', () => {
   it('直接 shutdown（不经 requestQuit 前置扇出）：abort-all 打断在飞 run 不挂死', async () => {
     const { streamFn } = pendingAbortStream();
