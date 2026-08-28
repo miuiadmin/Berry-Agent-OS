@@ -1,5 +1,5 @@
 /**
- * L5 app 测试 — /plugin-uninstall 命令面（契约篇 §3.4 第二刀，2026-08-27 刀 2）。
+ * L5 app 测试 — /apps-uninstall 命令面（契约篇 §3.4 第二刀，2026-08-27 刀 2）。
  * 真命令注册表形态（捕获 handler）+ 两段式确认步全链走真壳；plugins 服务与
  * reload 是最小桩（服务面行为已在 plugins.test.ts 全锁，此处只锁壳面：用法
  * 提示 / 裸调=只检视不执行〔SF-5 机制承载〕/ --confirm 才 execute + 链 reload /
@@ -11,10 +11,10 @@ import type { CommandDefinition } from '../channels/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
 import { registerBuiltinCommands } from './commands.js';
-import type { PluginsService, UninstallExecReport, UninstallReport } from './plugins.js';
+import type { AppsService, UninstallExecReport, UninstallReport } from './apps.js';
 import type { ReloadResult } from './assembly.js';
 
-/** 捕获型命令注册表（/plugin-uninstall handler 直取直调） */
+/** 捕获型命令注册表（/apps-uninstall handler 直取直调） */
 function fakeRegistry(): { registry: CommandRegistry; get: (name: string) => CommandDefinition } {
   const map = new Map<string, CommandDefinition>();
   const registry = {
@@ -47,7 +47,7 @@ function rig(reports: { inspect: UninstallReport; exec: UninstallExecReport }) {
   const { ui, notes } = fakeUi();
   const calls: UninstallCall[] = [];
   let reloadCount = 0;
-  const plugins = {
+  const appsService = {
     list: () => [],
     uninstall: async (_id: string, phase: { mode: 'inspect' } | { mode: 'execute'; dataAction: 'keep' | 'purge' }) => {
       if (phase.mode === 'inspect') {
@@ -57,7 +57,7 @@ function rig(reports: { inspect: UninstallReport; exec: UninstallExecReport }) {
       calls.push({ mode: 'execute', dataAction: phase.dataAction });
       return reports.exec;
     },
-  } as unknown as PluginsService;
+  } as unknown as AppsService;
   const reload = async (): Promise<ReloadResult> => {
     reloadCount++;
     return { payload: { activated: ['x'], failed: [], skipped: [] } };
@@ -79,7 +79,7 @@ function rig(reports: { inspect: UninstallReport; exec: UninstallExecReport }) {
       available: () => [],
       enter: () => ({ ok: false as const, error: '不可用' }),
     },
-    plugins,
+    appsService,
     reload,
     usage: () => '',
     allowlist: { list: () => [], remove: () => false } as unknown as Parameters<
@@ -95,7 +95,7 @@ function rig(reports: { inspect: UninstallReport; exec: UninstallExecReport }) {
 const INSPECT: UninstallReport = {
   id: 'demo',
   source: 'npm',
-  pluginRef: 'demo-pkg',
+  appRef: 'demo-pkg',
   installPath: '/tmp/x/plugins/node_modules/demo',
   mountedRows: ['demo'],
   dataRoots: ['/tmp/x/plugins/demo'],
@@ -116,18 +116,18 @@ const EXEC: UninstallExecReport = {
   dataRemoved: false,
 };
 
-describe('/plugin-uninstall 命令面（第二刀：human-only execute 唯一入口的壳）', () => {
+describe('/apps-uninstall 命令面（第二刀：human-only execute 唯一入口的壳）', () => {
   it('用法面：缺 id 只提示用法，不触服务不重载', async () => {
     const { get, notes, calls, reloadCount } = rig({ inspect: INSPECT, exec: EXEC });
-    await get('plugin-uninstall').handler('');
-    expect(notes[0]).toContain('用法：/plugin-uninstall');
+    await get('apps-uninstall').handler('');
+    expect(notes[0]).toContain('用法：/apps-uninstall');
     expect(calls).toEqual([]); // 服务零调用
     expect(reloadCount()).toBe(0);
   });
 
   it('裸调 = 只检视不执行（SF-5 机制承载）：报告渲染 + --confirm 指引，execute 零触', async () => {
     const { get, notes, calls, reloadCount } = rig({ inspect: INSPECT, exec: EXEC });
-    await get('plugin-uninstall').handler('demo');
+    await get('apps-uninstall').handler('demo');
     expect(calls).toEqual([{ mode: 'inspect' }]); // execute 零触——确认步是人手打第二条命令
     expect(reloadCount()).toBe(0);
     // 报告呈现：检视头 / 词表与受影响会话点名 / ⚠ 警示 / 确认指引（含 --confirm）
@@ -140,7 +140,7 @@ describe('/plugin-uninstall 命令面（第二刀：human-only execute 唯一入
 
   it('--confirm：execute + 回执 + 链 reload；默认 dataAction = keep（Docker 卷律）', async () => {
     const { get, notes, calls, reloadCount } = rig({ inspect: INSPECT, exec: EXEC });
-    await get('plugin-uninstall').handler('demo --confirm');
+    await get('apps-uninstall').handler('demo --confirm');
     expect(calls).toEqual([{ mode: 'execute', dataAction: 'keep' }]); // --confirm 直达 execute（报告上一条已看）
     expect(notes).toHaveLength(2); // 回执 + 重载结果（不再重渲染检视报告）
     expect(notes[0]).toContain('已卸载 demo');
@@ -151,7 +151,7 @@ describe('/plugin-uninstall 命令面（第二刀：human-only execute 唯一入
   it('--confirm --purge-data：dataAction 裁决为 purge，回执呈现已清除', async () => {
     const exec: UninstallExecReport = { ...EXEC, dataAction: 'purge', dataRemoved: true } as UninstallExecReport;
     const { get, notes, calls } = rig({ inspect: INSPECT, exec });
-    await get('plugin-uninstall').handler('demo --confirm --purge-data');
+    await get('apps-uninstall').handler('demo --confirm --purge-data');
     expect(calls).toEqual([{ mode: 'execute', dataAction: 'purge' }]);
     expect(notes[0]).toContain('已清除');
   });
@@ -159,13 +159,13 @@ describe('/plugin-uninstall 命令面（第二刀：human-only execute 唯一入
   it('outcome 三态如实呈现：no-op / residual 各自的回执文案', async () => {
     const noOp: UninstallExecReport = { ...EXEC, outcome: 'no-op' } as UninstallExecReport;
     const rigA = rig({ inspect: INSPECT, exec: noOp });
-    await rigA.get('plugin-uninstall').handler('gone --confirm');
+    await rigA.get('apps-uninstall').handler('gone --confirm');
     expect(rigA.notes[0]).toContain('无动作');
     expect(rigA.notes[0]).toContain('已卸载过或从未安装');
 
     const residual: UninstallExecReport = { ...EXEC, outcome: 'residual', source: 'git' } as UninstallExecReport;
     const rigB = rig({ inspect: INSPECT, exec: residual });
-    await rigB.get('plugin-uninstall').handler('demo --confirm');
+    await rigB.get('apps-uninstall').handler('demo --confirm');
     expect(rigB.notes[0]).toContain('残迹收尾');
   });
 });

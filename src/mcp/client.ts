@@ -14,7 +14,7 @@
 
 import { createInterface } from 'node:readline';
 import { AppError, MCP_CONNECT_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
-import type { PluginLogger } from '../contracts/plugin.js';
+import type { AppLogger } from '../contracts/app.js';
 import { JsonRpcConnection } from './jsonrpc.js';
 import type { McpCallResult, McpRemoteTool, McpServerConfig } from './types.js';
 
@@ -52,7 +52,7 @@ export interface McpConnectDeps {
   /** 树杀原语（exec killTree 经组合根注入） */
   readonly killTree: (pid: number, alive: () => boolean) => void;
   /** 诊断日志（stderr 行/通知杂音——debug 级） */
-  readonly logger: Pick<PluginLogger, 'debug' | 'warn'>;
+  readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
 }
 
 /** 连接后的稳定面（plugin 层消费：发现/调用/关停/退出订阅） */

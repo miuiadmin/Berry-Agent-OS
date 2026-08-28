@@ -86,7 +86,7 @@ describe('materialize（具名段物化——重建时点求值）', () => {
     service.registerSection({ id: 'mm/empty', render: () => '  ' });
     expect(service.materialize()).toBe('A 段\n\nZ 段');
   });
-  it('render 抛错 = 插件 bug：诊断占位进提示词、不杀重建', () => {
+  it('render 抛错 = 应用 bug：诊断占位进提示词、不杀重建', () => {
     const { service } = setup();
     service.registerSection({
       id: 'bad/boom',
@@ -116,29 +116,29 @@ describe('materialize（具名段物化——重建时点求值）', () => {
 });
 
 describe('服务注册面（ctx.get）', () => {
-  it("provide('prompts')——插件经 ctx.get 取同实例", () => {
+  it("provide('prompts')——应用经 ctx.get 取同实例", () => {
     const { ctx, service } = setup();
     expect(ctx.get('prompts')).toBe(service);
   });
 });
 
 describe('宿主半边通道（exec 纵切拆分——无 `/` 单段 id 是宿主自留地）', () => {
-  it('插件面注册无 / id = PROMPT_SECTION_INVALID（宿主词汇面对插件不可注册）', () => {
+  it('装载面注册无 / id = PROMPT_SECTION_INVALID（宿主词汇面对应用不可注册）', () => {
     const { service } = setup();
     expectCode(() => service.registerSection({ id: 'environment', render: () => 'x' }), PROMPT_SECTION_INVALID);
   });
-  it('宿主面注册无 / id 合法，与插件段同表同字典序物化', () => {
+  it('宿主面注册无 / id 合法，与应用段同表同字典序物化', () => {
     const { service, host } = setup();
     host.registerHostSection({ id: 'environment', render: () => '环境段' });
     service.registerSection({ id: 'memory/core', render: () => '记忆段' });
     expect(service.listSections()).toEqual(['environment', 'memory/core']);
     expect(service.materialize()).toBe('环境段\n\n记忆段');
   });
-  it('宿主面注册含 / id = PROMPT_SECTION_INVALID（域前缀形属插件词汇面）', () => {
+  it('宿主面注册含 / id = PROMPT_SECTION_INVALID（域前缀形属应用词汇面）', () => {
     const { host } = setup();
     expectCode(() => host.registerHostSection({ id: 'memory/core', render: () => 'x' }), PROMPT_SECTION_INVALID);
   });
-  it('宿主段注销走 disposer，广播同款；插件面不可达 host 通道', () => {
+  it('宿主段注销走 disposer，广播同款；装载面不可达 host 通道', () => {
     const { ctx, service, host } = setup();
     const seen: string[][] = [];
     ctx.on(PROMPTS_CHANGE_EVENT, (ids: string[]) => seen.push([...ids]));
@@ -146,7 +146,7 @@ describe('宿主半边通道（exec 纵切拆分——无 `/` 单段 id 是宿�
     expect(seen.at(-1)).toEqual(['environment']);
     dispose();
     expect(service.listSections()).toEqual([]);
-    // 宿主通道不在 ctx.prompts 服务对象上——插件经 ctx.get 拿不到（类型面即缺）
+    // 宿主通道不在 ctx.prompts 服务对象上——应用经 ctx.get 拿不到（类型面即缺）
     expect('registerHostSection' in (ctx.get('prompts') as object)).toBe(false);
   });
 });

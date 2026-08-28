@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "tsx src/app/main.ts",
-    "build": "tsc && node tools/copy-plugin-assets.mjs",
+    "build": "tsc && node tools/copy-app-assets.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -57,7 +57,7 @@ export interface UiChoice {
 /**
  * 通道 UI 后端能力面（TUI/Web/CLI 各自实现）。可选项缺省 = 通道不支持，
  * 聚合器按降级规则处理（select→input、setWidget→notify、confirm→input），
- * 插件不感知通道能力差异（技术栈篇 §4.3）。
+ * 应用不感知通道能力差异（技术栈篇 §4.3）。
  */
 export interface UiBackend {
   /** 通道标识（诊断溯源） */

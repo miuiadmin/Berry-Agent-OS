@@ -29,7 +29,7 @@ export {
   type RetryPolicy,
   type RetryCallbacks,
 } from './recovery.js';
-// pi-ai 注入面类型再出口（app 适配 persist 的两 Store / 插件注册 provider 用）
+// pi-ai 注入面类型再出口（app 适配 persist 的两 Store / 应用注册 provider 用）
 export type {
   AuthOperationOptions,
   Credential,
@@ -44,7 +44,7 @@ export type {
   Provider,
 } from '@earendil-works/pi-ai';
 /**
- * pi-ai faux provider（脚本模型工厂——组合根/插件层测试经本面取用；pi-ai 裸导入
+ * pi-ai faux provider（脚本模型工厂——组合根/应用层测试经本面取用；pi-ai 裸导入
  * 纪律仅本模块因此不破，llm 系测试同源）。pi-ai 主包一等同族导出，非 test-only
  * 附属包——再出口语义与上方类型族同律。
  */

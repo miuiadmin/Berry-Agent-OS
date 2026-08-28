@@ -1,7 +1,7 @@
 /**
  * L3 web — 官方件 `builtin:web` 类型面（契约篇 §1.5.2 定形，2026-08-26 web 刀）。
  *
- * 一批三件的共享词汇：fetch 工具（模型面）与 ctx.fetch 服务（插件面）同一
+ * 一批三件的共享词汇：fetch 工具（模型面）与 ctx.fetch 服务（装载面）同一
  * execute 同一卫生件——本文件是两消费面的唯一类型源（骨架篇 §9.3 签名）。
  */
 
@@ -30,7 +30,7 @@ export const WEB_FETCH_TIMEOUT_MS = 60_000;
 
 /** ctx.fetch 调用选项（骨架篇 §9.3 WebFetchOptions） */
 export interface WebFetchOptions {
-  /** 插件名归因标注（服务被调时调用方身份结构性不可知——显式声明是唯一诚实形态，进 durable details） */
+  /** 应用名归因标注（服务被调时调用方身份结构性不可知——显式声明是唯一诚实形态，进 durable details） */
   readonly caller?: string;
   /** 取消信号（排队中 abort = 立即出队取消，不消耗信号量） */
   readonly signal?: AbortSignal;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 事件目录双向校验器（契约篇 §6.3 第 4 条——必须在插件加载器上线前就位）。
+ * 事件目录双向校验器（契约篇 §6.3 第 4 条——必须在应用加载器上线前就位）。
  *
  * 三族断言，方向都是双向（目录 ↔ src 派发/写点）：
  *
@@ -86,7 +86,7 @@ for (const file of files) {
 /* ------------------------------------------------------------------ */
 
 /**
- * 事件词汇名格式：小写段 + 至少一个分隔符（斜线 = 域/动作插件域、下划线 = 宿主
+ * 事件词汇名格式：小写段 + 至少一个分隔符（斜线 = 域/动作应用域、下划线 = 宿主
  * 自留地）——单词名（data/error/close 等裸 EventEmitter 回调、SIGINT 等信号名）
  * 不在词汇域，天然排除（契约篇 §1.1 命名纪律的机械面）。
  */
@@ -157,7 +157,7 @@ for (const file of files) {
 const durableSites = [];
 for (const file of files) {
   // 族 3a：显式类型字面量 append / appendEvent（session.append = 宿主写面，
-  // ctx.sessions.appendEvent = 插件写面——同一注册表的两个入口都算写点证据）
+  // ctx.sessions.appendEvent = 应用写面——同一注册表的两个入口都算写点证据）
   for (const m of file.code.matchAll(/\.\s*append(?:Event)?\s*\(\s*'([a-z][a-z0-9/-]+)'/g)) {
     durableSites.push({ file: file.rel, name: m[1] });
   }
@@ -194,12 +194,12 @@ const eventUnion = new Set();
 const jiti = createJiti(import.meta.url);
 const events = await jiti.import(fileURLToPath(new URL('../src/contracts/events.ts', import.meta.url)));
 const sessionTypes = await jiti.import(fileURLToPath(new URL('../src/session/event-types.ts', import.meta.url)));
-// 插件注册的 SessionEvent 词汇随其宿主模块导入生效（v1 首例：memory/diff 在
+// 应用注册的 SessionEvent 词汇随其宿主模块导入生效（v1 首例：memory/diff 在
 // src/memory/diff.ts 顶层注册——该文件运行时依赖保持轻量，导入不连锁 SQLite）。
-// 新增插件侧注册模块时在此追加导入，否则族 3 会把其写点误报为注册表外类型。
+// 新增应用侧注册模块时在此追加导入，否则族 3 会把其写点误报为注册表外类型。
 // 双入口纪律（2026-08-25 #19 收口）：此机制只覆盖宿主面（模块级 registerSessionEventType
-// 直调）——插件面 ctx.registerSessionEventType 注册发生在 apply 运行时、CI 静态不可
-// 见。官方件词汇一律走宿主面模块注册（会话篇 §2.1 注记），改走插件面会在族 3 撞
+// 直调）——装载面 ctx.registerSessionEventType 注册发生在 apply 运行时、CI 静态不可
+// 见。官方件词汇一律走宿主面模块注册（会话篇 §2.1 注记），改走装载面会在族 3 撞
 // 误报且无模块可导入——那不是闸坏了，是纪律破了。
 await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url)));
 // compaction 四词同款（src/compaction/events.ts——宿主面顶层注册，轻依赖）
@@ -244,7 +244,7 @@ for (const entry of liveCatalog) {
   if (entry.reserved) continue;
   if (!dispatchesByName.has(entry.name)) {
     v(
-      `[总线] 目录事件「${entry.name}」全 src 无宿主派发点——声明无 trigger 即对插件作者撒谎（opencode permission.ask 型）；确属预留请加 reserved: true`,
+      `[总线] 目录事件「${entry.name}」全 src 无宿主派发点——声明无 trigger 即对应用作者撒谎（opencode permission.ask 型）；确属预留请加 reserved: true`,
     );
   }
 }

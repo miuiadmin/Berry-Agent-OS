@@ -8,7 +8,7 @@
  *   （条目 uuid v7 首段，稳定、无额外存储；短 id 由 id.ts shortIdOf 派生）；
  * - 解析 = 对 assistant 消息文本跑正则、尽力而为（非法/未知/歧义短 id 一律忽略
  *   ——解析失败不产生任何可观察副作用，回写语义见 store.markUsed）；
- * - 零内核改动：解析住在插件内（session/event 事件流消费侧），不回写事件日志。
+ * - 零内核改动：解析住在应用内（session/event 事件流消费侧），不回写事件日志。
  */
 
 import { shortIdOf } from './id.js';

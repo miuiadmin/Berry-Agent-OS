@@ -3,12 +3,12 @@
  *
  * 真 worker_threads 子进程（execArgv [--import=tsx] 直跑 TS 源——dev
  * 形态同构；等号单元素形态与两段参数语义等价，且避开拓扑门禁的裸导入
- * 词法扫描误触发）+ 真宿主作用域 + 真 loadPlugins 管线：不 mock bridge 任何内部。
+ * 词法扫描误触发）+ 真宿主作用域 + 真 loadApps 管线：不 mock bridge 任何内部。
  * 工具服务用最小记录桩（WorkerDomainOptions.tools 的结构面——桥接语义真跑，
  * 注册表本体非被测件）；模型面无涉（零 mock 原则的天然满足）。
  *
  * 用例编排纪律（词汇/服务名的跨用例串扰防护）：
- * - 自定义事件词汇由首个 loadPlugins 用例首登记（宿主半词汇入册是装载管线
+ * - 自定义事件词汇由首个 loadApps 用例首登记（宿主半词汇入册是装载管线
  *   职责——直连 applyRow 的用例排在它之后，词汇已在册）；
  * - worker fixture 的 provide 服务名按行 config.slot 参数化——各行互不撞名
  *   （真注册表 TOOL_DUPLICATE/CONTEXT_SERVICE_EXISTS 同纪律在桩外的真面）。
@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
-import { loadPlugins } from '../context/loader.js';
+import { loadApps } from '../context/loader.js';
 import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
 import { spawnWorkerDomain, makeRowLoader, workerEntryUrl, type WorkerDomain } from './bootstrap.js';
 
@@ -32,7 +32,7 @@ const WORKER_URL = new URL('./worker.ts', import.meta.url);
 /**
  * worker 域金样 fixture：provide 服务（名按 config.slot 参数化）+ effect 打点 +
  * 事件订阅 + 工具注册——宿主半各用例的公共载荷面。events 声明是宿主半词汇
- * 入册的数据源（loadPlugins 阶段① registerLiveEvent）。
+ * 入册的数据源（loadApps 阶段① registerLiveEvent）。
  */
 const FX_WORKER = `
 export const name = 'fx-worker';
@@ -155,15 +155,15 @@ afterAll(async () => {
   rmSync(fixtureDir, { recursive: true, force: true });
 });
 
-/* ---------------- 端到端用例（声明序即执行序：loadPlugins 用例先行做词汇首登记） ---------------- */
+/* ---------------- 端到端用例（声明序即执行序：loadApps 用例先行做词汇首登记） ---------------- */
 
 describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
-  it('makeRowLoader + loadPlugins：worker 行全管线激活 + Kahn 跨域混排（main 行 inject worker 服务）', async () => {
+  it('makeRowLoader + loadApps：worker 行全管线激活 + Kahn 跨域混排（main 行 inject worker 服务）', async () => {
     const loader = makeRowLoader(domain);
-    const result = await loadPlugins(
+    const result = await loadApps(
       root,
       [
-        { id: 'w2', entry: workerEntry, runtime: 'worker', config: { slot: 'k' } },
+        { id: 'w2', entry: workerEntry, sandbox: { carrier: 'worker' }, config: { slot: 'k' } },
         { id: 'c1', entry: join(fixtureDir, 'fx-consumer.ts') },
       ],
       { workerLoader: loader },
@@ -177,11 +177,11 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   });
 
   it('load → applyRow：宿主 provide 物化 + 代理方法过桥往返（直连面——词汇已由上例入册）', async () => {
-    const meta = await domain.load({ id: 'w1', entry: workerEntry, runtime: 'worker' });
+    const meta = await domain.load({ id: 'w1', entry: workerEntry, sandbox: { carrier: 'worker' } });
     expect(meta.name).toBe('fx-worker');
     const scope = root.fork({ name: 'w1', rowId: 'w1', builtinRow: false });
-    // 行 config 走 applyRow 的 row 参数（与 loadPlugins activateOne 同源——slot 决定服务名）
-    await domain.applyRow({ id: 'w1', runtime: 'worker', config: { slot: 'a' } }, scope);
+    // 行 config 走 applyRow 的 row 参数（与 loadApps activateOne 同源——slot 决定服务名）
+    await domain.applyRow({ id: 'w1', sandbox: { carrier: 'worker' }, config: { slot: 'a' } }, scope);
     // 宿主侧物化：锚作用域可见（main 域消费方 Kahn inject 的判据源）
     const taps = root.tryGet<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/taps-a');
     expect(taps).toBeDefined();
@@ -192,9 +192,9 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   });
 
   it('工具注册宿主物化：def 落桩注册表 + execute 过桥回 worker 执行体', async () => {
-    await domain.load({ id: 'w3', entry: workerEntry, runtime: 'worker' });
+    await domain.load({ id: 'w3', entry: workerEntry, sandbox: { carrier: 'worker' } });
     const scope = root.fork({ name: 'w3', rowId: 'w3', builtinRow: false });
-    await domain.applyRow({ id: 'w3', runtime: 'worker', config: { slot: 't' } }, scope);
+    await domain.applyRow({ id: 'w3', sandbox: { carrier: 'worker' }, config: { slot: 't' } }, scope);
     // 声明面物化：注册表拿到 def（execute 是宿主侧 thunk——非函数克隆而是桥接翻译）
     const def = tools.get('fx/wt');
     expect(def).toBeDefined();
@@ -208,9 +208,9 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   });
 
   it('行回卷联动：行作用域 dispose → 宿主绑定清 + svc.unload 到达（worker 行状态自清）', async () => {
-    await domain.load({ id: 'w4', entry: workerEntry, runtime: 'worker' });
+    await domain.load({ id: 'w4', entry: workerEntry, sandbox: { carrier: 'worker' } });
     const scope = root.fork({ name: 'w4', rowId: 'w4', builtinRow: false });
-    await domain.applyRow({ id: 'w4', runtime: 'worker', config: { slot: 'u' } }, scope);
+    await domain.applyRow({ id: 'w4', sandbox: { carrier: 'worker' }, config: { slot: 'u' } }, scope);
     await scope.dispose();
     // 卸载联动是 fire-and-forget——轮询等 worker 侧行状态清（服务不可达）
     await until(async () => {
@@ -224,9 +224,9 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   });
 
   it('工具注册随行回卷摘除：register 注销器挂行作用域 effect——scope.dispose 即摘', async () => {
-    await domain.load({ id: 'w6', entry: workerEntry, runtime: 'worker' });
+    await domain.load({ id: 'w6', entry: workerEntry, sandbox: { carrier: 'worker' } });
     const scope = root.fork({ name: 'w6', rowId: 'w6', builtinRow: false });
-    await domain.applyRow({ id: 'w6', runtime: 'worker', config: { slot: 'r' } }, scope);
+    await domain.applyRow({ id: 'w6', sandbox: { carrier: 'worker' }, config: { slot: 'r' } }, scope);
     expect(tools.get('fx/wt')).toBeDefined();
     await scope.dispose();
     await until(async () => tools.removed.includes('fx/wt'));
@@ -234,9 +234,9 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   });
 
   it('terminate 域死：在途调用以 BRIDGE_WORKER_EXITED 结算、后续调用即刻拒绝；主动收尾不叫 onExit（非事故）', async () => {
-    await domain.load({ id: 'w5', entry: workerEntry, runtime: 'worker' });
+    await domain.load({ id: 'w5', entry: workerEntry, sandbox: { carrier: 'worker' } });
     const scope = root.fork({ name: 'w5', rowId: 'w5', builtinRow: false });
-    await domain.applyRow({ id: 'w5', runtime: 'worker', config: { slot: 'd' } }, scope);
+    await domain.applyRow({ id: 'w5', sandbox: { carrier: 'worker' }, config: { slot: 'd' } }, scope);
     // 挂起在途调用（hang 永不结算）→ terminate → 域死结算
     const inflight = root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/taps-d')!['hang']!();
     domain.terminate('测试域死结算');
@@ -269,9 +269,9 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
         ),
       20_000,
     );
-    await domain2.load({ id: 'wx', entry: workerEntry, runtime: 'worker' });
+    await domain2.load({ id: 'wx', entry: workerEntry, sandbox: { carrier: 'worker' } });
     const scope = root.fork({ name: 'wx', rowId: 'wx', builtinRow: false });
-    await domain2.applyRow({ id: 'wx', runtime: 'worker', config: { slot: 'x' } }, scope);
+    await domain2.applyRow({ id: 'wx', sandbox: { carrier: 'worker' }, config: { slot: 'x' } }, scope);
     expect(root.tryGet('fx/taps-x')).toBeDefined();
     // 绕过 domain.terminate（不置主动标记）直杀底层 worker = 模拟意外死亡
     await domain2.worker.terminate();

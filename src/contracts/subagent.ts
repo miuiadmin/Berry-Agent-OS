@@ -90,7 +90,7 @@ export interface SubagentExecution {
   dispose(): void;
 }
 
-/** 子代理 provider 契约（§6.1 钉死；实现见 subagent/inprocess.ts 与外部收编插件） */
+/** 子代理 provider 契约（§6.1 钉死；实现见 subagent/inprocess.ts 与外部收编应用） */
 export interface SubagentProvider {
   /** provider 名（ctx.subagents.register 撞名即拒） */
   readonly name: string;

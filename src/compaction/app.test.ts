@@ -16,8 +16,8 @@ import type { ContextScope } from '../context/types.js';
 import { Session } from '../session/session.js';
 import type { SessionEvent } from '../contracts/events.js';
 import type { ProjectedMessage } from '../session/derive.js';
-import { createCompactionPlugin } from './plugin.js';
-import type { BuiltinPluginModule } from '../contracts/plugin.js';
+import { createCompactionApp } from './app.js';
+import type { BuiltinAppModule } from '../contracts/app.js';
 import { SUMMARY_PREFIX } from './policy.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -114,7 +114,7 @@ function setup(): Harness {
   // 模型窗口判据源：request/header 末条 + getModel 元数据
   session.append('request/header', { model: 'test-model', mode: 'default' });
 
-  const plugin: BuiltinPluginModule = createCompactionPlugin();
+  const plugin: BuiltinAppModule = createCompactionApp();
   void plugin.apply(ctx as never, ctx.config);
 
   return {
@@ -148,7 +148,7 @@ function setup(): Harness {
 describe('compaction 官方件 apply', () => {
   it('无 ctx.agent 服务：warn 降级停用不抛（诊断装配诚实）', async () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
-    const plugin = createCompactionPlugin();
+    const plugin = createCompactionApp();
     await expect(plugin.apply(ctx as never, ctx.config)).resolves.toBeUndefined();
   });
 
@@ -175,7 +175,7 @@ describe('compaction 官方件 apply', () => {
     expect(h.session.events[iSummary]!.data).toMatchObject({ text: '结构化摘要文本', model: 'test-model' });
     // 载体：user/message + surfaceOp + plugin: 归因 + 溯源含区间与依据外 seq
     const carrier = h.session.events.find((e) => e.type === 'user/message' && e.surfaceOp !== undefined)!;
-    expect(carrier.data).toMatchObject({ source: 'plugin:compaction' });
+    expect(carrier.data).toMatchObject({ source: 'app:compaction' });
     expect(String((carrier.data as { content: string }).content).startsWith(SUMMARY_PREFIX)).toBe(true);
     expect(carrier.surfaceOp).toMatchObject({ op: 'replace' });
     expect(carrier.sourceEventSeqs).toContain(iSummary); // 摘要依据事件在列（区间外）

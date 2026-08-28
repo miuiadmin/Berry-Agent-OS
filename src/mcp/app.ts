@@ -15,24 +15,19 @@
 
 import {
   AppError,
-  PLUGIN_CONFIG_INVALID,
+  APP_CONFIG_INVALID,
   TOOL_DESCRIPTION_REJECTED,
   TOOL_DUPLICATE,
   TOOL_TIMEOUT,
   describeError,
 } from '../contracts/errors.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
-import type { BuiltinPluginModule, PluginContext, PluginLogger } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext, AppLogger } from '../contracts/app.js';
 import { Type } from '../contracts/typebox.js';
 import type { Disposer } from '../context/types.js';
 import { ChildRegistry } from './children.js';
 import { connectMcpServer, DEFAULT_TOOL_TIMEOUT_MS, type McpServerConnection, type SpawnedChild } from './client.js';
-import {
-  MCP_PLUGIN_CONFIG_SCHEMA,
-  MCP_SERVER_NAME_PATTERN,
-  type McpRemoteTool,
-  type McpServerConfig,
-} from './types.js';
+import { MCP_APP_CONFIG_SCHEMA, MCP_SERVER_NAME_PATTERN, type McpRemoteTool, type McpServerConfig } from './types.js';
 
 /** 目录降级阈值（过滤 enabled/disabled 之后**全局合计**——契约篇 §6.6 冷读 #3） */
 export const CATALOG_THRESHOLD = 20;
@@ -43,7 +38,7 @@ interface UiNotifyFace {
 }
 
 /** 官方件构造依赖（装配期闭包注入——spawn/kill 组装上提组合根，冷读 #1） */
-export interface McpPluginDeps {
+export interface McpAppDeps {
   /** spawn 组装闭包（app/mcp-spawn.ts：buildChildEnv + env set 层 + detached + cwd=dataDir） */
   readonly spawnServer: (config: McpServerConfig) => Promise<SpawnedChild>;
   /** 树杀原语（exec killTree 经组合根注入） */
@@ -62,21 +57,21 @@ interface LiveServer {
 }
 
 /** 构造 mcp 官方件（builtins 注册表 `builtin:mcp` 行） */
-export function createMcpPlugin(deps: McpPluginDeps): BuiltinPluginModule {
+export function createMcpApp(deps: McpAppDeps): BuiltinAppModule {
   return {
     name: 'mcp',
-    // 硬依赖：tools 注册面 + ui 人读出口（channels 先于插件装载——装配序保证可解）
+    // 硬依赖：tools 注册面 + ui 人读出口（channels 先于应用装载——装配序保证可解）
     inject: ['tools', 'ui'],
-    config: MCP_PLUGIN_CONFIG_SCHEMA,
-    apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) => applyMcpPlugin(ctx, config, deps),
+    config: MCP_APP_CONFIG_SCHEMA,
+    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => applyMcpPlugin(ctx, config, deps),
   };
 }
 
-/** 件 apply 本体（异常上抛走加载器统一回卷 PLUGIN_APPLY_FAILED） */
+/** 件 apply 本体（异常上抛走加载器统一回卷 APP_APPLY_FAILED） */
 async function applyMcpPlugin(
-  ctx: PluginContext,
+  ctx: AppContext,
   config: Readonly<Record<string, unknown>> | undefined,
-  deps: McpPluginDeps,
+  deps: McpAppDeps,
 ): Promise<void> {
   // config 已经件 schema 校验（servers 缺省为空 = 行惰性无害零 spawn）
   const servers = (config?.servers ?? {}) as Readonly<Record<string, McpServerConfig>>;
@@ -84,7 +79,7 @@ async function applyMcpPlugin(
   // `mcp__<server>__<tool>` 解析的防线，schema 的 Record(string) 拦不住词法）
   const illegal = Object.keys(servers).filter((name) => !MCP_SERVER_NAME_PATTERN.test(name));
   if (illegal.length > 0) {
-    throw new AppError(PLUGIN_CONFIG_INVALID, `服务器键词法非法（须 [A-Za-z0-9-]+）：${illegal.join(', ')}`);
+    throw new AppError(APP_CONFIG_INVALID, `服务器键词法非法（须 [A-Za-z0-9-]+）：${illegal.join(', ')}`);
   }
   const names = Object.keys(servers);
   if (names.length === 0) {
@@ -136,9 +131,9 @@ async function applyMcpPlugin(
 
 /** 后台续段的共享依赖束（闭包直取，不经 ctx 重复 get） */
 interface DiscoverCtx {
-  readonly deps: McpPluginDeps;
+  readonly deps: McpAppDeps;
   /** 诊断日志（件 ctx 的 logger 结构子集——退出告警/stderr 都走这里） */
-  readonly logger: Pick<PluginLogger, 'debug' | 'warn'>;
+  readonly logger: Pick<AppLogger, 'debug' | 'warn'>;
   readonly registry: ChildRegistry;
   readonly live: Map<string, LiveServer>;
   /** 目录面（全局阈值判定后的检索/路由数据） */
@@ -151,7 +146,7 @@ interface DiscoverCtx {
 
 /** 后台发现全 row（并发连全部 → 全局阈值 → 注册形态二择） */
 async function discoverAll(
-  ctx: PluginContext,
+  ctx: AppContext,
   names: readonly string[],
   servers: Readonly<Record<string, McpServerConfig>>,
   bag: DiscoverCtx,

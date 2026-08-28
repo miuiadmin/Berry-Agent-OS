@@ -19,7 +19,7 @@
  */
 
 import { describeError } from '../contracts/errors.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { discoveryGates, WAKE_CHAIN_CAP, type DiscoveryGateDecision } from './gates.js';
@@ -61,7 +61,7 @@ export interface OsRegistrarFace {
 }
 
 /** 官方件构造依赖（装配期闭包注入——官方件 = 宿主装配特权） */
-export interface SchedulerPluginDeps {
+export interface SchedulerAppDeps {
   /** SQLite 连接（jobs 表物理载体）；缺省 = persist:false 降级 warn 空转 */
   readonly connection?: DatabaseConnection;
   /**
@@ -98,16 +98,16 @@ export interface SchedulerPluginDeps {
 }
 
 /** 构造 scheduler 官方件（builtins 注册表 `builtin:scheduler` 行） */
-export function createSchedulerPlugin(deps: SchedulerPluginDeps): BuiltinPluginModule {
+export function createSchedulerApp(deps: SchedulerAppDeps): BuiltinAppModule {
   return {
     name: 'scheduler',
     inject: ['channels', 'ui'],
-    apply: (ctx: PluginContext) => applySchedulerPlugin(ctx, deps),
+    apply: (ctx: AppContext) => applySchedulerPlugin(ctx, deps),
   };
 }
 
-/** 件 apply 本体（异常上抛走加载器统一回卷 PLUGIN_APPLY_FAILED） */
-async function applySchedulerPlugin(ctx: PluginContext, deps: SchedulerPluginDeps): Promise<void> {
+/** 件 apply 本体（异常上抛走加载器统一回卷 APP_APPLY_FAILED） */
+async function applySchedulerPlugin(ctx: AppContext, deps: SchedulerAppDeps): Promise<void> {
   // persist:false 降级：无物理层即无任务面——warn 空转（goal 件同款）
   if (!deps.connection) {
     ctx.logger.warn('无持久层（persist:false）——scheduler 官方件空转：/tick 命令不注册');
@@ -120,7 +120,7 @@ async function applySchedulerPlugin(ctx: PluginContext, deps: SchedulerPluginDep
       name: 'tick',
       description:
         'tick 任务面：/tick add <name> [schedule] <prompt...> 新增（schedule = once@<ISO>/every@<n>[mhd]/daily@HH:MM，可省）| /tick list 清单 | /tick rm <name> 删除 | /tick run <name> 手动触发（只读子进程单发）| /tick enable|disable <name> OS 定时注册/注销（launchd/crontab）',
-      source: 'plugin',
+      source: 'app',
       handler: (args) => handleTickCommand(args.trim(), { store, deps, ui }),
     }),
   );
@@ -129,7 +129,7 @@ async function applySchedulerPlugin(ctx: PluginContext, deps: SchedulerPluginDep
 /** 命令面依赖束（handler 闭包持有） */
 interface TickCommandOpts {
   readonly store: JobsStore;
-  readonly deps: SchedulerPluginDeps;
+  readonly deps: SchedulerAppDeps;
   readonly ui: UiNotifyFace;
 }
 

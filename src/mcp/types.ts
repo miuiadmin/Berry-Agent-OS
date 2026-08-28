@@ -6,7 +6,7 @@
  * 字段集对齐 codex McpServerConfig 经验清单。
  *
  * schema 构建走 contracts 再导出面（typebox 单实例纪律——mcp 不在
- * typebox 直连白名单，与插件同路取用）。
+ * typebox 直连白名单，与应用同路取用）。
  */
 
 import { Type } from '../contracts/typebox.js';
@@ -33,7 +33,7 @@ export const MCP_SERVER_CONFIG_SCHEMA = Type.Object({
 });
 
 /** 件级配置 schema（行 config——servers 缺省为空 = 行惰性无害零 spawn） */
-export const MCP_PLUGIN_CONFIG_SCHEMA = Type.Object({
+export const MCP_APP_CONFIG_SCHEMA = Type.Object({
   servers: Type.Optional(Type.Record(Type.String(), MCP_SERVER_CONFIG_SCHEMA)),
 });
 

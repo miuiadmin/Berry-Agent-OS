@@ -113,7 +113,7 @@ describe('synchronize 激活期对账', () => {
   it('有水位按会话补差：只重放 seq > 水位（增量不重复）', () => {
     const logs = { s1: [userEv(0, '第一段 foxtrot'), userEv(1, '第二段 golf')] };
     fts.synchronize(sourceOf(logs)); // 首次对账 → 全量
-    // 日志增长（插件禁用期间不存在的下一段——重激活只补差）
+    // 日志增长（应用禁用期间不存在的下一段——重激活只补差）
     const grown = { s1: [...logs.s1!, userEv(2, '第三段 hotel')] };
     fts.synchronize(sourceOf(grown));
 
@@ -121,7 +121,7 @@ describe('synchronize 激活期对账', () => {
     expect(fts.search('hotel')).toHaveLength(1); // 补差到位
   });
 
-  it('缺水位的会话整卷重放（插件禁用期间新建的会话不漏）', () => {
+  it('缺水位的会话整卷重放（应用禁用期间新建的会话不漏）', () => {
     // s1 已有水位；s2 从未进索引（禁用期间新建）
     fts.indexEvent('s1', userEv(0, '老会话 india'));
     const logs = {

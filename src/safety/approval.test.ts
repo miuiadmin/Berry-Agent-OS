@@ -20,7 +20,7 @@ function pairSink() {
   return { sink, asked, decided };
 }
 
-/** 注册一个固定答案的 answerer（通道插件形态：短路返回三值） */
+/** 注册一个固定答案的 answerer（通道应用形态：短路返回三值） */
 function answerer(ctx: ReturnType<typeof createContext>, answer: ApprovalAnswer) {
   return ctx.on(APPROVAL_ANSWER_EVENT, (req: unknown, next: () => unknown) => {
     // 只接本测试发的请求（防跨用例串扰）；其余交棒下游

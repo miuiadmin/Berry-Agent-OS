@@ -30,7 +30,7 @@
 
 import { Type } from '../contracts/typebox.js';
 import type { SessionEvent } from '../contracts/events.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { ProjectedMessage } from '../session/derive.js';
 // 词汇宿主面注册的模块副作用导入（官方件纪律，会话篇 §2.1：durable 词汇
 // 走宿主面模块级注册而非 ctx.registerSessionEventType——旧日志可读性不随
@@ -155,14 +155,14 @@ interface UsageData {
 /**
  * 构造 compaction 官方件（builtins 注册——deps 零依赖，服务全经 ctx 取）。
  */
-export function createCompactionPlugin(): BuiltinPluginModule {
-  const module: BuiltinPluginModule = {
+export function createCompactionApp(): BuiltinAppModule {
+  const module: BuiltinAppModule = {
     name: 'compaction',
     inject: ['sessions', 'llm'] as const,
     optionalInject: ['agent'] as const,
     config: compactionConfig,
 
-    apply: async (ctx: PluginContext) => {
+    apply: async (ctx: AppContext) => {
       const agent = ctx.tryGet<AgentCompactionFace>('agent');
       if (!agent) {
         // chat 件未装载（诊断装配 / persist:false）——无触发面无播种面，降级停用
@@ -321,7 +321,7 @@ export function createCompactionPlugin(): BuiltinPluginModule {
         if (summaryEvent !== undefined) seqs.push(summaryEvent.seq);
         await sessions.appendWithSurfaceOp({
           type: 'user/message',
-          data: { content: `${SUMMARY_PREFIX} ${summaryText}`, source: 'plugin:compaction' },
+          data: { content: `${SUMMARY_PREFIX} ${summaryText}`, source: 'app:compaction' },
           surfaceOp: { op: 'replace', start: plan.start, end: plan.end },
           sourceEventSeqs: seqs,
         });

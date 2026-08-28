@@ -1,7 +1,7 @@
 /**
  * L4 channels 单元测试 — D1 app 行命令拒载（契约篇 §5.1 注册面路由，2026-08-27）。
  *
- * 命令单表无域层（全局命令面）：挂应用组合的行注册 TUI 命令 = 跨应用漏命令，
+ * 命令单表无域层（全局命令面）：挂应用作用域的行注册 TUI 命令 = 跨应用漏命令，
  * 装载期拒绝。渲染器 registerRenderer 不在拒载面（v1 全局——规范未裁，同族
  * 域层挂账随首个真实第三方需求）。
  */
@@ -11,9 +11,9 @@ import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import { runInCallerChain } from '../context/index.js';
 import { createChannelsService } from './service.js';
 
-/** 两行探针 fixture：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
+/** 两行探针 fixture（第三十六批 apps 数组化）：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
 const rowApp = {
-  get: (rowId: string) => (rowId === 'row-app' ? 'chat' : undefined),
+  get: (rowId: string) => (rowId === 'row-app' ? ['chat'] : undefined),
   size: () => 1,
 };
 
@@ -29,7 +29,7 @@ describe('createChannelsService — D1 app 行命令拒载', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(AppError);
       expect((e as InstanceType<typeof AppError>).code).toBe(COMPOSITION_ROW_INVALID);
-      expect((e as InstanceType<typeof AppError>).message).toContain('app: chat');
+      expect((e as InstanceType<typeof AppError>).message).toContain('apps: chat');
     }
   });
 

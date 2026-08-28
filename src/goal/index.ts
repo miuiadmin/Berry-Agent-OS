@@ -23,5 +23,5 @@ export {
   GOAL_DISCIPLINE_CLAUSES,
 } from './prompts.js';
 export { createGoalTools } from './tools.js';
-export { createGoalPlugin } from './plugin.js';
-export type { GoalPluginDeps } from './plugin.js';
+export { createGoalApp } from './app.js';
+export type { GoalAppDeps } from './app.js';

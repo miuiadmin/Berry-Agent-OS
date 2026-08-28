@@ -15,14 +15,14 @@
  * 器/workspace 随迁 chat 件 deps。本行只剩无状态面。
  *
  * 装载结构（契约篇 §5.1 /reload 语义钉死）：本行挂宿主装配期专用锚
- * （ring1Anchor，与插件锚分离）——/reload 只 dispose 插件锚，Ring 1 行不回
+ * （ring1Anchor，与应用锚分离）——/reload 只 dispose 应用锚，Ring 1 行不回
  * 卷不重装载，仅 boot 生效；合成结果变化由组合根在 composition/reloaded
  * 载荷报告「需重启生效」。工具注册表两层本体（全局层 + 域层）随本服务构造
- * 存续：/reload 只回卷插件锚上的全局层条目（memory/exec/web 等行重注册），
+ * 存续：/reload 只回卷应用锚上的全局层条目（memory/exec/web 等行重注册），
  * 域层 fs 条目挂 chat 件 DriverEntry 不受影响（活驱动工具面跨 /reload 存续）。
  */
 
-import type { BuiltinPluginModule, PluginContext, RowAppProbe } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext, RowAppProbe } from '../contracts/app.js';
 import type { GateDecisionSink } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
 import { createToolPipeline } from './pipeline.js';
@@ -30,7 +30,7 @@ import { registerToolsService } from './registry.js';
 import { createSearchTools } from './search.js';
 
 /** 件构造依赖（装配期活闭包——官方件 = 宿主装配特权，不新开 ctx 服务名） */
-export interface ToolsPluginDeps {
+export interface ToolsAppDeps {
   /** gate/decision durable 落点（组合根转发壳 .gate——会话绑定随壳热切换，件绑定后落账生效） */
   readonly gateSink: GateDecisionSink;
   /** 工作区根活取值（检索族 find/grep 路径锚） */
@@ -48,11 +48,11 @@ export interface ToolsPluginDeps {
  * 必备行，overlay 禁用即启动断言拒启）。apply 在行作用域（ring1Anchor 派生）
  * 执行一次：构造管道 → 注册服务 → 注册检索族（fs 族已迁域，见件头注）。
  */
-export function createToolsPlugin(deps: ToolsPluginDeps): BuiltinPluginModule {
+export function createToolsApp(deps: ToolsAppDeps): BuiltinAppModule {
   return {
     name: 'tools',
-    apply: (ctx: PluginContext) => {
-      // PluginContext 是第三方零信任窄面；装载器实参是完整 fork 作用域（ContextScope
+    apply: (ctx: AppContext) => {
+      // AppContext 是第三方零信任窄面；装载器实参是完整 fork 作用域（ContextScope
       // ——Context 真子类型）。件内构造内核机制（管道/服务注册）按内核签名要完整
       // Context——宿主自家件拿到的是宿主自己的作用域，此处断言是「窄面 → 实参真身」
       // 的还原，非跨信任边界的外部输入断言

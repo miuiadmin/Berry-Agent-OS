@@ -35,10 +35,10 @@ function lastAssistantText(result: RunResult): string | undefined {
 export async function runOnceMain(message: string, options: RuntimeOptions = {}): Promise<number> {
   const runtime = await createBerryRuntime({ ...options, interactive: false });
   // 可卸语义（应用面第一纵切）：chat 件未装载即无对话循环——run 语义性失败
-  //（退出码 1 + stderr 示明；/plugins 面向用户提示查装配）
+  //（退出码 1 + stderr 示明；/apps 面向用户提示查装配）
   if (runtime.conversation === undefined) {
     process.stderr.write(
-      '对话应用未装载（builtin:chat 被禁用或 persist:false）——run 无对话循环可执行；/plugins 查看装配。\n',
+      '对话应用未装载（builtin:chat 被禁用或 persist:false）——run 无对话循环可执行；/apps 查看装配。\n',
     );
     await runtime.shutdown();
     return 1;

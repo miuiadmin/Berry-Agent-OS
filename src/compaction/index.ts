@@ -6,7 +6,7 @@
  * 零新表族：压缩状态全在会话事件日志，无迁移链。
  */
 
-export { createCompactionPlugin, compactionConfig } from './plugin.js';
+export { createCompactionApp, compactionConfig } from './app.js';
 export { COMPACTION_EVENT_TYPES } from './events.js';
 export {
   SUMMARY_PREFIX,

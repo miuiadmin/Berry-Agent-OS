@@ -1,10 +1,10 @@
 /**
- * L1 context — 插件运行时本体（内核五件之一；骨架篇 §9 签名的实现）。
+ * L1 context — 装载运行时本体（内核五件之一；骨架篇 §9 签名的实现）。
  *
  * 结构：ContextRuntime（根运行时：服务注册表 + 事件总线，全体作用域共享）
  *      ContextScope（作用域：effect LIFO 栈 + AbortController + config + logger 前缀）。
- * 组合根 createContext() 建根作用域；插件加载器用 scope.fork() 派生插件作用域——
- * 插件拿到的 ctx 与根共享 get/provide/on/emit，但生命周期独立（卸载即回卷自己的注册）。
+ * 组合根 createContext() 建根作用域；应用加载器用 scope.fork() 派生应用作用域——
+ * 应用拿到的 ctx 与根共享 get/provide/on/emit，但生命周期独立（卸载即回卷自己的注册）。
  */
 import {
   AppError,
@@ -17,13 +17,13 @@ import {
   EVENT_DUPLICATE,
   EVENT_MODE_MISMATCH,
   EVENT_UNKNOWN,
-  PLUGIN_EVENT_RATE,
+  APP_EVENT_RATE,
 } from '../contracts/errors.js';
 import { LIVE_EVENT_CATALOG } from '../contracts/events.js';
 import type { EventName, LiveEventDefinition } from '../contracts/events.js';
-import { registerPluginMessageRole } from '../contracts/messages.js';
+import { registerAppMessageRole } from '../contracts/messages.js';
 import type { MessageRoleDefinition } from '../contracts/messages.js';
-import { registerPluginSessionEventType } from '../contracts/session-events.js';
+import { registerAppSessionEventType } from '../contracts/session-events.js';
 import type { SessionEventTypeDefinition } from '../contracts/session-events.js';
 import { createLogger } from './logger.js';
 import type { Logger } from './logger.js';
@@ -59,10 +59,10 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof value === 'object' && value !== null && typeof (value as PromiseLike<unknown>).then === 'function';
 }
 
-/** 作用域 → 根运行时（宿主侧事件词汇登记的内部通道；插件面 ContextScope 无此入口——运行期词汇恒定的结构保证） */
+/** 作用域 → 根运行时（宿主侧事件词汇登记的内部通道；装载面 ContextScope 无此入口——运行期词汇恒定的结构保证） */
 const scopeRuntimes = new WeakMap<ContextScope, ContextRuntime>();
 
-/** 根运行时：跨作用域共享状态（服务注册表 + 事件总线 + 事件词汇注册表）。仅宿主侧可见，不进插件面。 */
+/** 根运行时：跨作用域共享状态（服务注册表 + 事件总线 + 事件词汇注册表）。仅宿主侧可见，不进装载面。 */
 class ContextRuntime {
   /** 服务表：name → 实现实例（ctx.provide 写入 / ctx.get 读取） */
   readonly services = new Map<string, unknown>();
@@ -71,7 +71,7 @@ class ContextRuntime {
   /**
    * 事件词汇注册表（契约篇 §1.1 词汇执法的数据源）：目录种子 ∪ 装载期 customs。
    * 运行期恒定不变式：只在 boot//reload 两时点由加载器经 registerLiveEvent 增删
-   * （结构上插件面 ContextScope 无此入口，无需封口机制）。
+   * （结构上装载面 ContextScope 无此入口，无需封口机制）。
    */
   readonly liveEvents = new Map<string, LiveEventDefinition>();
   /** 根 logger（子作用域 logger 由它派生前缀） */
@@ -80,8 +80,8 @@ class ContextRuntime {
    * 根作用域名（B-1 冷读裁决，契约篇 §1.6 刀〇b）：宿主根作用域派发**免计费**——
    * durable→总线的 session/event 镜像与 tools_change 变更广播都在 root 面派发，
    * root 桶实为全部会话全部流量的复用汇（合法子代理舰队即触顶），触顶时
-   * PLUGIN_EVENT_RATE 会在宿主写路径内爆炸（persistence sink → session.append）。
-   * 插件永不持有 root 作用域（fork 派生新名——带 `:` 不可能等于 rootName）。
+   * APP_EVENT_RATE 会在宿主写路径内爆炸（persistence sink → session.append）。
+   * 应用永不持有 root 作用域（fork 派生新名——带 `:` 不可能等于 rootName）。
    */
   readonly rootName: string;
   /** per-scope 派发频率桶（键 = 派发方作用域名；root 键免扣费） */
@@ -112,18 +112,18 @@ class ContextRuntime {
   }
 
   /**
-   * 派发方计费：扣令牌（桶空抛 PLUGIN_EVENT_RATE）+ 累计打点。
+   * 派发方计费：扣令牌（桶空抛 APP_EVENT_RATE）+ 累计打点。
    * 四派发模式（emit/parallel/serial/waterfall）入口统一走此——词汇执法
    * （requireEvent）先行，频率执法在后（拼错名的诊断优先于限流噪音）。
    * B-1 root 豁免（刀〇b）：宿主根作用域派发只计打点不扣桶——镜像/变更广播
-   * 等宿主基础设施流量不占插件频率配额（归因对象是插件作用域的派发行为）。
+   * 等宿主基础设施流量不占应用频率配额（归因对象是应用作用域的派发行为）。
    */
   chargeEvent(scopeName: string, event: EventName): void {
     this.eventStats.set(scopeName, (this.eventStats.get(scopeName) ?? 0) + 1);
     if (scopeName === this.rootName) return; // root 免计费（打点照计——负载数据完整）
     if (!this.limiter.tryCharge(scopeName)) {
       throw new AppError(
-        PLUGIN_EVENT_RATE,
+        APP_EVENT_RATE,
         `作用域 ${scopeName} 事件派发超频（事件 ${event}）——护栏 ${this.limiter.params.capacity} 次/分钟` +
           `（令牌桶：突发上限 ${this.limiter.params.capacity}、回填 ${this.limiter.params.perMinute}/min；fail-loud 非静默丢弃，契约篇 §1.6）`,
       );
@@ -146,14 +146,14 @@ class ContextScopeImpl implements ContextScope {
   private readonly controller = new AbortController();
   private readonly configView: Readonly<Record<string, unknown>>;
   readonly logger: Logger;
-  /** 本插件组合树行 id（loader fork 时注入；根/宿主作用域 undefined——契约篇 §1.5 核心行） */
+  /** 本应用组合树行 id（loader fork 时注入；根/宿主作用域 undefined——契约篇 §1.5 核心行） */
   readonly rowId: string | undefined;
   /**
    * 行籍旗标（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
    * true = 官方名位（宿主根作用域 + 行籍为官方的行——官方默认层行 / 承袭官方
    * 默认层 id 的替换行），provide 只收单段小写名；false = 第三方行，provide 必含
    * 恰一 `/` 域前缀。fork 级联继承（与 rowId 同律 `opts.builtinRow ?? this.builtinRow`），
-   * 插件内任意深度 fork 保持行归属。
+   * 应用内任意深度 fork 保持行归属。
    */
   readonly builtinRow: boolean;
   /** 是否已销毁——销毁后注册类 API 一律拒绝（stale ctx 护栏） */
@@ -169,7 +169,7 @@ class ContextScopeImpl implements ContextScope {
   ) {
     this.runtime = runtime;
     this.name = name;
-    // 配置只读快照：浅冻结防插件改写组合树产物（深结构由配置层保证不可变）
+    // 配置只读快照：浅冻结防应用改写组合树产物（深结构由配置层保证不可变）
     this.configView = Object.freeze({ ...(config ?? {}) });
     this.logger = logger;
     this.rowId = rowId;
@@ -224,10 +224,10 @@ class ContextScopeImpl implements ContextScope {
 
   effect(fn: () => Disposer): Disposer {
     this.assertActive();
-    const disposer = fn(); // 立即执行注册（抛错 = 插件启动失败，直接上抛）
+    const disposer = fn(); // 立即执行注册（抛错 = 应用启动失败，直接上抛）
     // Disposer 形状注册期执法（2026-08-25 Hermes 探针 #13）：非函数返回值若放行
-    // 入栈，要到作用域回卷期才以裸 TypeError 爆炸（栈指向此处不指调用方插件）。
-    // jiti 直载的插件代码无类型护栏——文档化契约（fn 返回值入栈）必须运行时校验
+    // 入栈，要到作用域回卷期才以裸 TypeError 爆炸（栈指向此处不指调用方应用）。
+    // jiti 直载的应用代码无类型护栏——文档化契约（fn 返回值入栈）必须运行时校验
     // 补位；常见病灶 = ctx.effect(() => d())（把已有 disposer 包进新箭头——注册
     // 即注销 + undefined 入栈），错误信息点名该习语。
     if (typeof disposer !== 'function') {
@@ -293,7 +293,7 @@ class ContextScopeImpl implements ContextScope {
   /**
    * 事件词汇执法（契约篇 §1.1 落码）：未注册名 EVENT_UNKNOWN（拼错名从「监听器
    * 永不触发的静默死亡」变响亮失败）；派发方法与目录/声明 mode 不一致
-   * EVENT_MODE_MISMATCH（mode 是事件公开契约——插件侧静态 CI 罩不住，运行时执法）。
+   * EVENT_MODE_MISMATCH（mode 是事件公开契约——应用侧静态 CI 罩不住，运行时执法）。
    * @param dispatch 派发方法名；on() 订阅不区分模式（传 undefined 只查词汇 membership）
    */
   private requireEvent(event: EventName, dispatch: 'emit' | 'waterfall' | 'parallel' | 'serial' | undefined): void {
@@ -301,7 +301,7 @@ class ContextScopeImpl implements ContextScope {
     if (def === undefined) {
       throw new AppError(
         EVENT_UNKNOWN,
-        `事件未注册：${event}——词汇 = 目录（LIVE_EVENT_CATALOG）∪ 插件 named export events 装载期登记；拼错名不再静默 no-op（契约篇 §1.1）`,
+        `事件未注册：${event}——词汇 = 目录（LIVE_EVENT_CATALOG）∪ 应用 named export events 装载期登记；拼错名不再静默 no-op（契约篇 §1.1）`,
       );
     }
     if (dispatch !== undefined && def.mode !== dispatch) {
@@ -315,8 +315,8 @@ class ContextScopeImpl implements ContextScope {
   on(event: EventName, handler: EventHandler, opts?: { prepend?: boolean }): Disposer {
     this.assertActive();
     this.requireEvent(event, undefined);
-    // 登记项携带注册方作用域名（归因纪律）：插件 A emit、插件 B 的监听器炸，
-    // 失败日志必须指向 B（契约篇 §1.6「插件名 + 事件名 + 错误 + 栈」的插件名 = 注册方）
+    // 登记项携带注册方作用域名（归因纪律）：应用 A emit、应用 B 的监听器炸，
+    // 失败日志必须指向 B（契约篇 §1.6「应用名 + 事件名 + 错误 + 栈」的应用名 = 注册方）
     const entry: HandlerEntry = { handler, owner: this.name };
     const list = this.runtime.handlers.get(event) ?? [];
     if (opts?.prepend) {
@@ -341,7 +341,7 @@ class ContextScopeImpl implements ContextScope {
   /**
    * 派发辅助：包装单个监听器，异常隔离 + 异步返回值吞掉（emit 语义）。
    * 归因纪律（契约篇 §1.6 + 2026-08-23 独立重读轮 #23 落码）：失败记录**注册方**
-   * 作用域名（entry.owner）——记 emit 方 scope 是归因错列，排查会追错插件；
+   * 作用域名（entry.owner）——记 emit 方 scope 是归因错列，排查会追错应用；
    * 载荷完整携带 event/owner/stack，只记 String(err) 等于吞没（pi 生态实证反例）。
    */
   private fireIsolated(event: EventName, entry: HandlerEntry, args: unknown[]): void {
@@ -440,29 +440,29 @@ class ContextScopeImpl implements ContextScope {
     const unregister: Disposer = () => {
       if (this.runtime.services.get(name) === impl) this.runtime.services.delete(name);
     };
-    // 挂 effect 栈：作用域卸载时随 LIFO 回卷；返回值供插件手动提前撤销
+    // 挂 effect 栈：作用域卸载时随 LIFO 回卷；返回值供应用手动提前撤销
     return this.pushEffect(unregister);
   }
 
   /**
-   * 注册自定义消息角色（骨架篇 §2.3 插件面）：桥接 contracts 注册表（域名
+   * 注册自定义消息角色（骨架篇 §2.3 装载面）：桥接 contracts 注册表（域名
    * 前缀校验/撞名拒绝在彼处），注销器挂本作用域 effect 栈——/reload 卸载即
-   * 角色随插件回卷，重装重注册（dispose-unregister 与消息角色渲染面同款安全）。
+   * 角色随应用回卷，重装重注册（dispose-unregister 与消息角色渲染面同款安全）。
    */
   registerMessageRole(name: string, definition: MessageRoleDefinition): Disposer {
     this.assertActive();
-    return this.pushEffect(registerPluginMessageRole(name, definition));
+    return this.pushEffect(registerAppMessageRole(name, definition));
   }
 
   /**
-   * 注册插件自有会话事件词汇（会话篇 §2.1 插件面，#19 收口）：桥接 contracts
+   * 注册应用自有会话事件词汇（会话篇 §2.1 装载面，#19 收口）：桥接 contracts
    * 注册表（核心词拒绝/格式校验在彼处），注销器挂本作用域 effect 栈——/reload
-   * 卸载即词汇随插件回卷、重装重注册（与 registerMessageRole 同款安全：
-   * jiti moduleCache:false 下裸模块级注册会撞重复注册，插件面必须作用域化）。
+   * 卸载即词汇随应用回卷、重装重注册（与 registerMessageRole 同款安全：
+   * jiti moduleCache:false 下裸模块级注册会撞重复注册，装载面必须作用域化）。
    */
   registerSessionEventType(def: SessionEventTypeDefinition): Disposer {
     this.assertActive();
-    return this.pushEffect(registerPluginSessionEventType(def));
+    return this.pushEffect(registerAppSessionEventType(def));
   }
 
   fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string; builtinRow?: boolean }): ContextScope {
@@ -471,9 +471,9 @@ class ContextScopeImpl implements ContextScope {
       `${this.name}:${opts.name}`,
       opts.config,
       this.runtime.rootLogger.child(`${this.name}:${opts.name}`),
-      // 行 id 缺省继承父作用域（显式注入优先）——插件内任意深度 fork 保持行归属
+      // 行 id 缺省继承父作用域（显式注入优先）——应用内任意深度 fork 保持行归属
       opts.rowId ?? this.rowId,
-      // 行籍旗标同律级联（loader 按行籍显式注入；插件内再 fork 继承行籍）
+      // 行籍旗标同律级联（loader 按行籍显式注入；应用内再 fork 继承行籍）
       opts.builtinRow ?? this.builtinRow,
     );
     // 登记内部通道（registerLiveEvent 经 WeakMap 找根运行时——fork 产物同样可作锚）
@@ -534,7 +534,7 @@ class ContextScopeImpl implements ContextScope {
 
 /**
  * 创建根作用域（组合根入口；app 模块调用一次）。
- * 插件作用域一律由根/父作用域 fork 派生，不直接调用本函数。
+ * 应用作用域一律由根/父作用域 fork 派生，不直接调用本函数。
  */
 export function createContext(opts: ContextOptions = {}): ContextScope {
   const name = opts.name ?? 'root';
@@ -548,8 +548,8 @@ export function createContext(opts: ContextOptions = {}): ContextScope {
 
 /**
  * 读事件派发打点（B2 P5 打点先行，2026-08-27 刀〇a）：per-scope 累计派发计数
- * （键 = 作用域名，含宿主根作用域）。诊断面（dump-config / /plugins）展示用——
- * 每插件「发了多少事件」的负载数据，为护栏族阈值调校供数；只读快照，不参与控制流。
+ * （键 = 作用域名，含宿主根作用域）。诊断面（dump-config / /apps）展示用——
+ * 每应用「发了多少事件」的负载数据，为护栏族阈值调校供数；只读快照，不参与控制流。
  */
 export function eventDispatchStats(scope: ContextScope): ReadonlyMap<string, number> {
   const runtime = scopeRuntimes.get(scope);
@@ -560,7 +560,7 @@ export function eventDispatchStats(scope: ContextScope): ReadonlyMap<string, num
  * 宿主侧监听器枚举出口（2026-08-27 第三十一批守门行传导——骨架篇 §6.1「守门行传导 +
  * context 腿」条）：取某作用域树在某事件上的监听器登记项快照（含 owner 归因）。
  *
- * **宿主专用**：插件面结构不可达（依赖图白名单三道——插件 import 不到 context 模块，
+ * **宿主专用**：装载面结构不可达（依赖图白名单三道——应用 import 不到 context 模块，
  * 虚拟面六键不含本函数），「context 无监听器枚举 API」缺口在宿主侧收口。返回数组是
  * 副本（与派发期 snapshot 同款——调用方迭代期间注册/退订不影响本次结果）。
  *
@@ -574,7 +574,7 @@ export function snapshotHandlers(scope: ContextScope, event: EventName): Handler
 
 /**
  * 宿主侧监听器写入出口（守门行传导的落链半边）：把带原 owner 的登记项**直写**目标
- * 作用域的 handlers Map——不走 `on()`（on() 会把 owner 记成目标作用域名，原插件名
+ * 作用域的 handlers Map——不走 `on()`（on() 会把 owner 记成目标作用域名，原应用名
  * 归因丢失；且会挂 effect 栈使子回卷误撤根行——传导是引用非归属）。
  *
  * 生命周期：目标作用域通常是 fresh 子 ctx（自身 runtime 的 root）——其 dispose 后
@@ -599,11 +599,11 @@ export function appendHandlers(scope: ContextScope, event: EventName, entries: r
 }
 
 /**
- * 登记一个自定义活体事件（契约篇 §1.1 逃生口——**宿主加载器专用**，插件面无此入口）。
+ * 登记一个自定义活体事件（契约篇 §1.1 逃生口——**宿主加载器专用**，装载面无此入口）。
  *
  * 词汇集运行期恒定不变式：本函数只应在加载器装载阶段（boot 与 /reload 两时点）被调，
  * 登记经 scope.effect 挂作用域栈（/reload 卸载锚作用域即 LIFO 注销词汇）。
- * def 的形状/格式校验（name/mode/note、小写含 `/`）归加载器（PLUGIN_SHAPE_INVALID）；
+ * def 的形状/格式校验（name/mode/note、小写含 `/`）归加载器（APP_SHAPE_INVALID）；
  * 此处只做撞名检查（EVENT_DUPLICATE——词汇表拒绝静默覆盖）。
  * @returns 注销器（从词汇表移除本 def——幂等，仅当仍是本 def 时移除）
  */
@@ -616,7 +616,7 @@ export function registerLiveEvent(scope: ContextScope, def: LiveEventDefinition)
   if (runtime.liveEvents.has(def.name)) {
     throw new AppError(
       EVENT_DUPLICATE,
-      `事件重复注册：${def.name}（词汇表已有同名项——目录或他插件已占用，拒绝静默覆盖）`,
+      `事件重复注册：${def.name}（词汇表已有同名项——目录或他应用已占用，拒绝静默覆盖）`,
     );
   }
   runtime.liveEvents.set(def.name, def);

@@ -7,7 +7,7 @@
  *   ② 取消传播——AbortSignal 不可克隆 → {kind:'cancel', callId} 消息化 +
  *      桩本地立即结算 + 宿主迟到 result 丢弃 + 宿主侧在途工作真被掐断。
  *
- * 宿主侧持有工具面（echo 快工具 / slow 协作式慢工具），worker 侧插件经桩过界调用。
+ * 宿主侧持有工具面（echo 快工具 / slow 协作式慢工具），worker 侧应用经桩过界调用。
  * 退出码：0 = PASS，1 = FAIL。
  */
 import { fileURLToPath } from 'node:url';
@@ -141,5 +141,5 @@ function finish() {
 
 worker.postMessage({
   cmd: 'run',
-  pluginPath: fileURLToPath(new URL('./4-hello.plugin.ts', import.meta.url)),
+  appPath: fileURLToPath(new URL('./4-hello.pkg.ts', import.meta.url)),
 });

@@ -7,7 +7,7 @@
  * 回归锁：迟到纪律、本地结算不等往返、取消消息化。
  */
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
-import { AppError, PLUGIN_CONFIG_INVALID } from '../contracts/errors.js';
+import { AppError, APP_CONFIG_INVALID } from '../contracts/errors.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeEndpoint, type BridgeEndpointOptions, type BridgePort } from './session.js';
 
@@ -70,11 +70,11 @@ describe('BridgeEndpoint：错误信封', () => {
   it('AppError 家族词保码过界（code 原样回卷为 AppError）', async () => {
     const { a, b } = makePair();
     b.handle('svc', 'boom', () => {
-      throw new AppError(PLUGIN_CONFIG_INVALID, '配置非法');
+      throw new AppError(APP_CONFIG_INVALID, '配置非法');
     });
     const err = await a.call('svc', 'boom', []).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
-    expect((err as AppError).code).toBe('PLUGIN_CONFIG_INVALID');
+    expect((err as AppError).code).toBe('APP_CONFIG_INVALID');
     expect((err as AppError).message).toContain('配置非法');
   });
 
@@ -90,7 +90,7 @@ describe('BridgeEndpoint：错误信封', () => {
   });
 
   it('处理器抛错时错误信封带对端归因前缀（哪个域出的错一眼可辨）', async () => {
-    const { a, b } = makePair({}, { origin: { workerId: 'w-域1', plugin: 'demo' } });
+    const { a, b } = makePair({}, { origin: { workerId: 'w-域1', app: 'demo' } });
     b.handle('svc', 'boom', () => {
       throw new Error('域内错');
     });
@@ -185,7 +185,7 @@ describe('BridgeEndpoint：域死结算（dispose）', () => {
     openPorts.push(port1, port2);
     const a = new BridgeEndpoint(toBridgePort(port1), { onDropped: (m) => dropped.push(m.kind) });
     a.dispose('先收尾');
-    port2.postMessage({ kind: 'tell', event: 'plugin/x', payload: null });
+    port2.postMessage({ kind: 'tell', event: 'app/x', payload: null });
     await vi.waitFor(() => expect(dropped).toContain('tell'));
   });
 
@@ -211,8 +211,8 @@ describe('BridgeEndpoint：单向通知 tell', () => {
   it('tell fire-and-forget 抵达对端 onTell（event 用宿主事件词汇）', async () => {
     const told: Array<{ event: string; payload: unknown }> = [];
     const { a } = makePair({}, { onTell: (event, payload) => told.push({ event, payload }) });
-    a.tell('plugin/demo/thing', { n: 1 });
-    await vi.waitFor(() => expect(told).toEqual([{ event: 'plugin/demo/thing', payload: { n: 1 } }]));
+    a.tell('app/demo/thing', { n: 1 });
+    await vi.waitFor(() => expect(told).toEqual([{ event: 'app/demo/thing', payload: { n: 1 } }]));
   });
 });
 

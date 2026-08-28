@@ -109,11 +109,11 @@ export function resolveEffectiveMode(
 /* 沙箱服务（ctx.sandbox；后端链 + confine fail-closed）                */
 /* ------------------------------------------------------------------ */
 
-/** ctx.sandbox 服务面（插件经 ctx.get<SandboxService>('sandbox') 取用） */
+/** ctx.sandbox 服务面（应用经 ctx.get<SandboxService>('sandbox') 取用） */
 export interface SandboxService {
   /** 纯包装：受限档策略下把消费方 argv 变为受限 argv（消费方自行 spawn） */
   confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv;
-  /** 注册沙箱后端（后端插件行；返回注销器，幂等） */
+  /** 注册沙箱后端（后端应用行；返回注销器，幂等） */
   registerBackend(backend: SandboxBackend): Disposer;
   /** 当前后端链快照（诊断/审计输出用） */
   listBackends(): readonly SandboxBackend[];

@@ -3,10 +3,10 @@
  *
  * 真 worker_threads 子进程（同 bootstrap.test.ts 模式：execArgv [--import=tsx]
  * 直跑 TS 源）+ 真 ctx 作用域——不 mock bridge/fleet 任何内部，只对 fleet 消费
- * 的 markFailed 注入物用记录桩（PluginsService 的结构面）。bootstrap.test.ts
+ * 的 markFailed 注入物用记录桩（AppsService 的结构面）。bootstrap.test.ts
  * 已覆盖机制面（桥协议/域死回卷/工具桥接）；本文件聚焦**装配编舞语义**：
  * 每行一域路由 / 装机计数 / reapUnapplied 防漏 / terminateAll 收编 /
- * 意外死亡结算（markFailed 回写 + plugin/failed 广播）/ 装载失败防漏。
+ * 意外死亡结算（markFailed 回写 + app/failed 广播）/ 装载失败防漏。
  */
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
-import type { PluginPlanRow } from '../contracts/plugin.js';
+import type { AppPlanRow } from '../contracts/app.js';
 import { BRIDGE_HANDLER_FAILED, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
 import { createBridgeFleet } from './bridge-fleet.js';
 
@@ -23,7 +23,7 @@ import { createBridgeFleet } from './bridge-fleet.js';
 /** 真 worker 子进程入口：bridge 模块的 worker.ts（vitest 下 import.meta.url 指源文件） */
 const WORKER_URL = new URL('../bridge/worker.ts', import.meta.url);
 
-/** fleet fixture 插件：provide 一个 ping 服务（名按 config.slot 参数化防串扰）；
+/** fleet fixture 应用：provide 一个 ping 服务（名按 config.slot 参数化防串扰）；
  * burn 真死循环（心跳 watchdog 用——事件循环冻结后结构性不可协作取消）；
  * config.crash 真 → apply 返还后异步抛 uncaught（worker 线程崩 = 自崩溃最真形态
  * ——fleet 不暴露域句柄，直杀不可达；uncaught 异步异常默认终结 worker 线程） */
@@ -83,7 +83,7 @@ async function until(predicate: () => boolean | Promise<boolean>, ms = 10_000): 
   expect.unreachable(`轮询超时（${ms}ms）——异步面未到达`);
 }
 
-/** 起一次 fixture 环境（临时目录 + 插件文件 + 真 ctx/锚） */
+/** 起一次 fixture 环境（临时目录 + 应用文件 + 真 ctx/锚） */
 function setupFixture(name: string): { root: ContextScope; anchor: ContextScope; fxEntry: string; dir: string } {
   const dir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'fleet-')));
   const fxEntry = join(dir, 'fx-fleet.ts');
@@ -115,11 +115,14 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       execArgv: ['--import=tsx'],
     });
     // 行 r1：完整 load+apply（宿主物化 provide 服务）
-    await fleet.loader.load({ id: 'r1', entry: fxEntry, runtime: 'worker' });
+    await fleet.loader.load({ id: 'r1', entry: fxEntry, sandbox: { carrier: 'worker' } });
     const scope1 = anchor.fork({ name: 'r1', rowId: 'r1', builtinRow: false });
-    await fleet.loader.apply({ id: 'r1', entry: fxEntry, runtime: 'worker', config: { slot: 'a' } }, scope1);
+    await fleet.loader.apply(
+      { id: 'r1', entry: fxEntry, sandbox: { carrier: 'worker' }, config: { slot: 'a' } },
+      scope1,
+    );
     // 行 r2：只 load 不 apply（模拟 Kahn 零进展残留——孤儿域待清割）
-    await fleet.loader.load({ id: 'r2', entry: fxEntry, runtime: 'worker' });
+    await fleet.loader.load({ id: 'r2', entry: fxEntry, sandbox: { carrier: 'worker' } });
 
     // 每行一域：两行两次 spawn、都在册
     expect(fleet.stats()).toMatchObject({ spawned: 2, live: 2 });
@@ -140,13 +143,13 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('死亡结算与装载失败防漏：意外死亡 → markFailed 回写 + plugin/failed 广播；坏 entry → 域即刻收尾', async () => {
+  it('死亡结算与装载失败防漏：意外死亡 → markFailed 回写 + app/failed 广播；坏 entry → 域即刻收尾', async () => {
     const { root, anchor, fxEntry, dir } = setupFixture('fleet-death');
-    /** markFailed 注入物记录桩（PluginsService 结构面——状态回写语义的被测出口） */
+    /** markFailed 注入物记录桩（AppsService 结构面——状态回写语义的被测出口） */
     const marked: Array<{ id: string; code: string; message: string }> = [];
-    /** plugin/failed 广播记录（anchor 上真 on 订阅——fleet 死亡结算的词汇面） */
+    /** app/failed 广播记录（anchor 上真 on 订阅——fleet 死亡结算的词汇面） */
     const broadcast: Array<{ id: string; code?: string; message?: string }> = [];
-    anchor.on('plugin/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
+    anchor.on('app/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
     const fleet = createBridgeFleet({
       root,
       anchor: () => anchor,
@@ -154,11 +157,11 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       execArgv: ['--import=tsx'],
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
-    // 行 w1 装载自崩插件（apply 返还后 uncaught 异步异常 → worker 线程自崩溃）
-    await fleet.loader.load({ id: 'w1', entry: fxEntry, runtime: 'worker' });
+    // 行 w1 装载自崩应用（apply 返还后 uncaught 异步异常 → worker 线程自崩溃）
+    await fleet.loader.load({ id: 'w1', entry: fxEntry, sandbox: { carrier: 'worker' } });
     const scope1 = anchor.fork({ name: 'w1', rowId: 'w1', builtinRow: false });
     await fleet.loader.apply(
-      { id: 'w1', entry: fxEntry, runtime: 'worker', config: { slot: 'd', crash: true } },
+      { id: 'w1', entry: fxEntry, sandbox: { carrier: 'worker' }, config: { slot: 'd', crash: true } },
       scope1,
     );
 
@@ -177,7 +180,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     expect(fleet.stats()).toMatchObject({ live: 0, crashed: 1, heartbeatFreezes: 0 });
 
     // 坏 entry 装载失败防漏：load reject + 域即刻刻意收尾（不留孤儿进程）
-    const badRow: PluginPlanRow = { id: 'bad', entry: join(dir, 'nope.ts'), runtime: 'worker' };
+    const badRow: AppPlanRow = { id: 'bad', entry: join(dir, 'nope.ts'), sandbox: { carrier: 'worker' } };
     await expect(fleet.loader.load(badRow)).rejects.toBeTruthy();
     expect(fleet.stats()).toMatchObject({ live: 0, terminated: 1 }); // 装载失败即收、不入册
     await root.dispose().catch(() => undefined);
@@ -194,12 +197,12 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       workerUrl: WORKER_URL,
       execArgv: ['--import=tsx'],
     });
-    await fleet.loader.load({ id: 'b1', entry: throwEntry, runtime: 'worker' });
+    await fleet.loader.load({ id: 'b1', entry: throwEntry, sandbox: { carrier: 'worker' } });
     const scope = anchor.fork({ name: 'b1', rowId: 'b1', builtinRow: false });
     // worker 侧非 AppError 抛错 → 信封归一 BRIDGE_HANDLER_FAILED 保码回宿主
-    expect(await rejectionCode(fleet.loader.apply({ id: 'b1', entry: throwEntry, runtime: 'worker' }, scope))).toBe(
-      BRIDGE_HANDLER_FAILED,
-    );
+    expect(
+      await rejectionCode(fleet.loader.apply({ id: 'b1', entry: throwEntry, sandbox: { carrier: 'worker' } }, scope)),
+    ).toBe(BRIDGE_HANDLER_FAILED);
     // 防漏：行已失败，域不留（apply 失败即收——非等 reap）
     expect(fleet.stats()).toMatchObject({ live: 0, terminated: 1 });
     await root.dispose().catch(() => undefined);
@@ -210,7 +213,7 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     const { root, anchor, fxEntry, dir } = setupFixture('fleet-heartbeat');
     const marked: Array<{ id: string; code: string; message: string }> = [];
     const broadcast: Array<{ id: string; code?: string; message?: string }> = [];
-    anchor.on('plugin/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
+    anchor.on('app/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
     // 50ms 节律 × 2 拍 ≈ 100ms 判冻——紧密同步循环结构性不可协作取消，watchdog 兜底
     const fleet = createBridgeFleet({
       root,
@@ -221,9 +224,12 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       heartbeatMissLimit: 2,
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
-    await fleet.loader.load({ id: 'hb', entry: fxEntry, runtime: 'worker' });
+    await fleet.loader.load({ id: 'hb', entry: fxEntry, sandbox: { carrier: 'worker' } });
     const scope = anchor.fork({ name: 'hb', rowId: 'hb', builtinRow: false });
-    await fleet.loader.apply({ id: 'hb', entry: fxEntry, runtime: 'worker', config: { slot: 'w' } }, scope);
+    await fleet.loader.apply(
+      { id: 'hb', entry: fxEntry, sandbox: { carrier: 'worker' }, config: { slot: 'w' } },
+      scope,
+    );
     const taps = root.get<Record<string, () => Promise<string>>>('fleet/taps-w');
     // 域活证明（先 ping 后烧——排除「域从未活过」的假冻结）
     await expect(taps.ping!()).resolves.toBe('pong');
@@ -262,9 +268,12 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     });
     // 慢装载成功返还（boot 期超时归 loadTimeoutMs 60s 司职——50/100/150ms 的
     // 丢拍不是冻结：事件循环尚未承诺应答）
-    await fleet.loader.load({ id: 'sb', entry: slowEntry, runtime: 'worker' });
+    await fleet.loader.load({ id: 'sb', entry: slowEntry, sandbox: { carrier: 'worker' } });
     const scope = anchor.fork({ name: 'sb', rowId: 'sb', builtinRow: false });
-    await fleet.loader.apply({ id: 'sb', entry: slowEntry, runtime: 'worker', config: { slot: 'sb' } }, scope);
+    await fleet.loader.apply(
+      { id: 'sb', entry: slowEntry, sandbox: { carrier: 'worker' }, config: { slot: 'sb' } },
+      scope,
+    );
     const taps = root.get<Record<string, () => Promise<string>>>('fleet/taps-sb');
     await expect(taps.ping!()).resolves.toBe('pong');
     // 武装后正常运行：零误杀、零死亡结算、域活
@@ -292,9 +301,12 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       resourceLimits: { maxOldGenerationSizeMb: 48 },
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
-    await fleet.loader.load({ id: 'oom', entry: oomEntry, runtime: 'worker' });
+    await fleet.loader.load({ id: 'oom', entry: oomEntry, sandbox: { carrier: 'worker' } });
     const scope = anchor.fork({ name: 'oom', rowId: 'oom', builtinRow: false });
-    await fleet.loader.apply({ id: 'oom', entry: oomEntry, runtime: 'worker', config: { slot: 'oom' } }, scope);
+    await fleet.loader.apply(
+      { id: 'oom', entry: oomEntry, sandbox: { carrier: 'worker' }, config: { slot: 'oom' } },
+      scope,
+    );
     const taps = root.get<Record<string, () => Promise<unknown>>>('fleet/taps-oom');
     // 点燃堆增长：V8 old-space 触顶 → worker 'error' 事件（内存超限签名）→ exit
     // code 1（与普通崩溃同码——签名是唯一判据）。catch 立即挂接（域死时在途
@@ -336,11 +348,11 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
       // 即证明钩子值到达 spawn（否则按全局 512MB 增长面跑不完）
       resourceLimits: { maxOldGenerationSizeMb: 512 },
       // 应用内存预算真实形态：清单 components 串（plugin 引用）→ 行限映射
-      rowResourceLimits: (row) => (row.plugin === 'acme/oomy' ? { maxOldGenerationSizeMb: 48 } : undefined),
+      rowResourceLimits: (row) => (row.pkg === 'acme/oomy' ? { maxOldGenerationSizeMb: 48 } : undefined),
       markFailed: (id, code, message) => marked.push({ id, code, message }),
     });
-    // 行携带 plugin 引用（PluginPlanRow.plugin 透传——join 键在场上）
-    const row: PluginPlanRow = { id: 'oomrow', plugin: 'acme/oomy', entry: oomEntry, runtime: 'worker' };
+    // 行携带 pkg 引用（AppPlanRow.pkg 透传——join 键在场上）
+    const row: AppPlanRow = { id: 'oomrow', pkg: 'acme/oomy', entry: oomEntry, sandbox: { carrier: 'worker' } };
     await fleet.loader.load(row);
     const scope = anchor.fork({ name: 'oomrow', rowId: 'oomrow', builtinRow: false });
     await fleet.loader.apply({ ...row, config: { slot: 'oomrow' } }, scope);

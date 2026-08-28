@@ -1,11 +1,11 @@
 /**
- * L2 tools — 工具注册表（ctx.tools 服务；插件契约篇 §3.2 动态注册）。
+ * L2 tools — 工具注册表（ctx.tools 服务；应用契约篇 §3.2 动态注册）。
  *
  * 职责：
  * - register(ToolDefinition, opts?) → Disposer：即时生效（刷新注册表 → 广播
  *   tools_change → 下次模型请求即见新工具；无需 reload）；
  * - 把 ToolDefinition 适配成 loop 面的 AgentTool（execute = 三段管道）；
- * - defineTool 类型 helper（插件侧获得参数/结果类型推断）。
+ * - defineTool 类型 helper（应用侧获得参数/结果类型推断）。
  *
  * 三层注册表（域键升级批，契约篇 §5.4「域键升级（appId 批）射面细化」，2026-08-27；
  * S2 两层模型的解缠升级——「域键升 appId」实为解缠非改名）：
@@ -41,7 +41,7 @@ import {
 } from '../contracts/errors.js';
 import type { AgentTool, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
-import type { RowAppProbe } from '../contracts/plugin.js';
+import type { RowAppProbe } from '../contracts/app.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import { chainCaller } from '../context/chain.js';
 import type { Disposer } from '../context/types.js';
@@ -52,9 +52,9 @@ import type { ToolPipelineExecutor } from './pipeline.js';
 export type { ToolsService } from '../contracts/tools.js';
 
 /**
- * 工具归属旁表（P1-1 导入者归因，会话篇 §5.1）：normalized 定义 → 注册者插件名。
+ * 工具归属旁表（P1-1 导入者归因，会话篇 §5.1）：normalized 定义 → 注册者应用名。
  * 注册时从 caller 链记（装载器 apply 段内注册 = runInCallerChain 罩着，身份天然
- * 已知；宿主/builtin 直注册无链不记 = 'host' 兜底）——归因由宿主推导，插件无
+ * 已知；宿主/builtin 直注册无链不记 = 'host' 兜底）——归因由宿主推导，应用无
  * 自报入参面、不可伪造。WeakMap 键 = normalized 副本（管道执行收到的即它），
  * 注销后无引用自然 GC，无需显式清理。模块级单表：键是对象身份，跨实例无冲突。
  */
@@ -90,7 +90,7 @@ export interface ToolRegistryOptions {
 const DESCRIPTION_INJECTION_PATTERNS: readonly RegExp[] = [/\b(curl|wget)\b[^\n|]*\|[^\n]*\b(ba|z|da)?sh\b/i];
 
 /**
- * 插件面注册 timeoutMs 下限（毫秒——契约篇 §1.6 注册预算下限，2026-08-27 刀〇a）：
+ * 装载面注册 timeoutMs 下限（毫秒——契约篇 §1.6 注册预算下限，2026-08-27 刀〇a）：
  * 正数过小钳至此值（存归一副本），<= 0 拒绝（TOOL_TIMEOUT_INVALID）。
  * 「0 = 自管取消」语义保留给宿主内部合成 def（exec 内部 def 不经注册面——
  * 事实豁免通道，冷读 CR-2-F9 裁决）。
@@ -126,7 +126,7 @@ export function scanToolDescription(description: string): string | undefined {
 
 /**
  * 组装工具注册表并挂进 ctx（provide('tools')，随作用域回卷）。
- * app 装配层调用一次；插件作用域经 ctx.get 共享同一注册表。
+ * app 装配层调用一次；应用作用域经 ctx.get 共享同一注册表。
  */
 export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {}): ToolsService {
   /** 全局层：name → 定义（Map 保注册序——全部会话可见的注册面） */
@@ -149,7 +149,7 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
     executor: opts.pipeline,
     register(def, registerOpts) {
       // 描述扫描（契约篇 §3.2，2026-08-26）：任何来源的工具同一防线——
-      // 第三方插件与 MCP 外部工具的风险同源，防线在树上不在枝上
+      // 第三方应用与 MCP 外部工具的风险同源，防线在树上不在枝上
       const injectionHit = scanToolDescription(def.description);
       if (injectionHit !== undefined) {
         throw new AppError(
@@ -158,12 +158,12 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         );
       }
       // 注册面预算下限执法（§1.6 时钟族之四，2026-08-27 刀〇a）：<= 0 拒绝——
-      // 拒绝式而非钳到 0：钳制会静默改变行为（插件以为 0 = 无预算，长任务被杀
+      // 拒绝式而非钳到 0：钳制会静默改变行为（应用以为 0 = 无预算，长任务被杀
       // 还以为自管取消有效）。0 的自管取消语义保留给宿主内部合成 def（不经本面）
       if (def.timeoutMs !== undefined && def.timeoutMs <= 0) {
         throw new AppError(
           TOOL_TIMEOUT_INVALID,
-          `工具 ${def.name} timeoutMs <= 0（${def.timeoutMs}）——插件面注册不许自管取消语义；` +
+          `工具 ${def.name} timeoutMs <= 0（${def.timeoutMs}）——装载面注册不许自管取消语义；` +
             `不设预算请省略该字段（走管道缺省 60s），正数过小将钳至 ${TOOL_TIMEOUT_FLOOR_MS}ms 下限`,
         );
       }
@@ -177,18 +177,22 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         ...(def.timeoutMs !== undefined ? { timeoutMs: Math.max(def.timeoutMs, TOOL_TIMEOUT_FLOOR_MS) } : {}),
       };
       const driverKey = registerOpts?.driver;
-      // domainKey 经显式键或 D1 隐式路由确定（let——隐式路由可补值）
-      let domainKey = registerOpts?.domain;
-      /* ---- D1 隐式路由（契约篇 §5.1 挂载目标两档，2026-08-27）----
+      // 域键集（第三十六批投多域改形，d36 方案 §3.2）：显式单域 → 单元素集；
+      // 隐式路由 → 行 apps 数组原样（多应用行 = 共享件，工具落每个应用域一层）；
+      // undefined = 全局层注册
+      let domainKeys: readonly string[] | undefined =
+        registerOpts?.domain !== undefined ? [registerOpts.domain] : undefined;
+      /* ---- D1 隐式路由（契约篇 §5.1 挂载目标两档，2026-08-27；第三十六批数组化）----
        * 无显式键注册经 caller 链归因行挂载目标：装载器 apply 段注册天然带行 id
-       * 帧（runInCallerChain(row.id)），行带 app 键 → 注册落该应用域层（「挂到
-       * 哪层」由组合树行声明，非注册时自选）。显式键（驱动层双键 / 测试注入
-       * domain）优先——隐式路由只补缺省注册面。无探针（子装配/诊断面）零路由。 */
-      if (driverKey === undefined && domainKey === undefined && opts.rowApp !== undefined) {
+       * 帧（runInCallerChain(row.id)），行带 apps 键 → 注册按数组投各应用域层
+       * （「挂到哪层」由组合树行声明，非注册时自选；一行投多 app = 共享件）。
+       * 显式键（驱动层双键 / 测试注入 domain）优先——隐式路由只补缺省注册面。
+       * 无探针（子装配/诊断面）零路由。 */
+      if (driverKey === undefined && domainKeys === undefined && opts.rowApp !== undefined) {
         const rowId = chainCaller();
         if (rowId !== undefined) {
-          const appId = opts.rowApp.get(rowId);
-          if (appId !== undefined) domainKey = appId;
+          const apps = opts.rowApp.get(rowId);
+          if (apps !== undefined && apps.length > 0) domainKeys = apps;
         } else if (opts.rowApp.size() > 0) {
           /* 异步注册窗口（第三十四批拍板 42 / 契约篇 §5.1 注记）：apply 返还后
            * 裸调 register——ALS 帧已失、无行籍可查，拒绝不可执法。v1 = 落全局层
@@ -202,20 +206,24 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
           );
         }
       }
-      let layer: Map<string, ToolDefinition>;
+      /** 域层落位集（driver 单元素 / 应用域 1..N 元素——投多域时每域一层）；空 + globalLayer 在场 = 全局层注册 */
+      const domainLayers: Array<{ domain: string; layer: Map<string, ToolDefinition> }> = [];
+      let globalLayer: Map<string, ToolDefinition> | undefined;
       if (driverKey !== undefined) {
         // 驱动层注册（fs 四名 + bash 的归宿）：须双键同携——driver（sessionId）+
-        // domain（本驱动 appId），碰撞域界定需要（查「全局 ∪ 应用域[本 app] ∪
-        // 驱动层[本 sessionId]」缺一不可算）；缺 domain = 调用方装配缺陷，响亮拒
-        if (domainKey === undefined) {
+        // domain（本驱动 appId，单域——驱动语境天然单应用），碰撞域界定需要（查
+        // 「全局 ∪ 应用域[本 app] ∪ 驱动层[本 sessionId]」缺一不可算）；缺 domain
+        // = 调用方装配缺陷，响亮拒
+        if (domainKeys === undefined || domainKeys.length !== 1) {
           throw new AppError(
             APP_INVALID,
             `驱动层注册须双键同携：${def.name}（driver: ${driverKey}）缺 domain（本驱动 appId）——` +
               `碰撞域界定需要，契约篇 §5.4 域键升级（appId 批）射面细化`,
           );
         }
+        const domainKey = domainKeys[0]!;
         const existing = driverLayers.get(driverKey);
-        layer = existing !== undefined ? existing : new Map();
+        const layer = existing !== undefined ? existing : new Map();
         if (existing === undefined) {
           driverLayers.set(driverKey, layer);
           driverApps.set(driverKey, domainKey);
@@ -227,26 +235,30 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
             `工具重复注册：${def.name}（驱动层 ${driverKey}〔app ${domainKey}〕；与全局层/应用域/本驱动层已有工具同名）`,
           );
         }
-      } else if (domainKey !== undefined) {
-        // 应用域层注册（组合域本义归宿）：碰撞域 = 全局层 ∪ 应用域[A] ∪ app=A 的
-        // 活驱动层（应用域工具进该应用全部驱动的组成面——与任一驱动层条目同名
-        // 即同面双名，照拒）
-        const existing = appDomains.get(domainKey);
-        layer = existing !== undefined ? existing : new Map();
-        if (existing === undefined) appDomains.set(domainKey, layer);
-        for (const [sid, driverLayer] of driverLayers) {
-          if (driverApps.get(sid) === domainKey && driverLayer.has(def.name)) {
+        domainLayers.push({ domain: domainKey, layer });
+      } else if (domainKeys !== undefined) {
+        // 应用域层注册（组合域本义归宿；投多域 = 逐域同法）：碰撞域 = 全局层 ∪
+        // 应用域[A] ∪ app=A 的活驱动层（应用域工具进该应用全部驱动的组成面——
+        // 与任一驱动层条目同名即同面双名，照拒）
+        for (const domainKey of domainKeys) {
+          const existing = appDomains.get(domainKey);
+          const layer = existing !== undefined ? existing : new Map();
+          if (existing === undefined) appDomains.set(domainKey, layer);
+          for (const [sid, driverLayer] of driverLayers) {
+            if (driverApps.get(sid) === domainKey && driverLayer.has(def.name)) {
+              throw new AppError(
+                TOOL_DUPLICATE,
+                `工具重复注册：${def.name}（应用域 ${domainKey}；与该应用活驱动 ${sid} 的驱动层工具同名）`,
+              );
+            }
+          }
+          if (tools.has(def.name) || layer.has(def.name)) {
             throw new AppError(
               TOOL_DUPLICATE,
-              `工具重复注册：${def.name}（应用域 ${domainKey}；与该应用活驱动 ${sid} 的驱动层工具同名）`,
+              `工具重复注册：${def.name}（应用域 ${domainKey}；与全局层或本应用域已有工具同名）`,
             );
           }
-        }
-        if (tools.has(def.name) || layer.has(def.name)) {
-          throw new AppError(
-            TOOL_DUPLICATE,
-            `工具重复注册：${def.name}（应用域 ${domainKey}；与全局层或本应用域已有工具同名）`,
-          );
+          domainLayers.push({ domain: domainKey, layer });
         }
       } else {
         // 全局层注册：碰撞域 = 全局层 ∪ 全部应用域 ∪ 全部活驱动层（全局进一切
@@ -270,7 +282,7 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
         if (tools.has(def.name)) {
           throw new AppError(TOOL_DUPLICATE, `工具重复注册：${def.name}`);
         }
-        layer = tools;
+        globalLayer = tools;
       }
       /* ---- 资源护栏族 #10 双帽（契约篇 §1.6，2026-08-27 刀〇b）----
        * 查重等既有拒绝先过（不消耗频率配额——拼错重试不被限流噪音掩盖），
@@ -293,26 +305,37 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
             `每次变更触 tools_change 快照广播，fail-loud 拒绝非静默丢弃——热迭代节奏不受影响，契约篇 §1.6 #10）`,
         );
       }
-      layer.set(def.name, normalized);
-      // 归属旁表记账（P1-1）：注册时链上有插件身份才记——装载器 apply 段注册
+      // 落位（投多域 = 同一 normalized 定义入各域层——各层持同一对象身份，
+      // 注销器按层各自核对身份后删除；全局层单落）
+      for (const { layer } of domainLayers) layer.set(def.name, normalized);
+      if (globalLayer !== undefined) globalLayer.set(def.name, normalized);
+      // 归属旁表记账（P1-1）：注册时链上有应用身份才记——装载器 apply 段注册
       // 自然带身份；宿主/builtin 直注册无链不记（toolOwnerOf 查 miss → 'host'）
       const owner = chainCaller();
       if (owner !== undefined) toolOwners.set(normalized, owner);
       totalAdds += 1;
       // 载荷键分流：driver（sessionId）= 驱动层变更（刷单条目）；domain（appId）=
       // 应用域层变更（刷该应用全部条目）；缺省 = 全局层变更（刷全部）。
-      // 驱动层注册只发 driver 键（不带 domain——防路由双判）
-      ctx.emit(TOOLS_CHANGE_EVENT, {
-        kind: 'add',
-        name: def.name,
-        ...(driverKey !== undefined ? { driver: driverKey } : domainKey !== undefined ? { domain: domainKey } : {}),
-      });
+      // 驱动层注册只发 driver 键（不带 domain——防路由双判）；投多域 = 每域一条
+      // 事件（消费方按 domain 刷新各自应用面——N 域 N 条，载荷形状不变）
+      for (const { domain } of domainLayers) {
+        ctx.emit(TOOLS_CHANGE_EVENT, {
+          kind: 'add',
+          name: def.name,
+          ...(driverKey !== undefined ? { driver: driverKey } : { domain }),
+        });
+      }
+      if (domainLayers.length === 0) {
+        ctx.emit(TOOLS_CHANGE_EVENT, { kind: 'add', name: def.name });
+      }
       let done = false;
       return () => {
         if (done) return;
         done = true;
-        // 仅当仍是本定义时删除（防误撤他者后来的同位注册——与 provide 同款护栏）
-        if (layer.get(def.name) === normalized) {
+        // 仅当仍是本定义时删除（防误撤他者后来的同位注册——与 provide 同款护栏；
+        // 投多域 = 逐层各自核对身份，任一层被后来者顶替则该层跳过、其余照删）
+        for (const { domain, layer } of domainLayers) {
+          if (layer.get(def.name) !== normalized) continue;
           layer.delete(def.name);
           totalRemoves += 1;
           // 分片层清空即拆层（活层集合收缩——全局层/应用域层查重的遍历面随之收窄）
@@ -320,25 +343,30 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
             if (driverKey !== undefined && driverLayers.get(driverKey) === layer) {
               driverLayers.delete(driverKey);
               driverApps.delete(driverKey); // 归属旁账随层同灭（防悬空 sessionId→appId）
-            } else if (domainKey !== undefined && appDomains.get(domainKey) === layer) {
-              appDomains.delete(domainKey);
+            } else if (appDomains.get(domain) === layer) {
+              appDomains.delete(domain);
             }
           }
           ctx.emit(TOOLS_CHANGE_EVENT, {
             kind: 'remove',
             name: def.name,
-            ...(driverKey !== undefined ? { driver: driverKey } : domainKey !== undefined ? { domain: domainKey } : {}),
+            ...(driverKey !== undefined ? { driver: driverKey } : { domain }),
           });
-          /* 变更频率帽 unregister 侧计费（#10②）：删除与广播先行、计费殿后——
-           * 注销器可能在作用域回卷路径跑（dispose 内同步循环），此处抛错会被
-           * 回卷异常隔离吞成日志，若计费在先则「删除没做成但配额已耗」留下
-           * 半套状态；殿后则不变式完整（集变更即快照），桶满仅记 error。 */
-          if (!changeRate.tryCharge('registry')) {
-            ctx.logger.error(
-              `工具注册/注销变更超频（unregister 侧：${def.name}）——桶容量 ${REGISTRY_RATE.capacity}/回填 ${REGISTRY_RATE.perMinute} 每 min，` +
-                `本次已照常删除广播（回卷路径计费只记不阻）；后续 register 将被 fail-loud 拒绝（契约篇 §1.6 #10）`,
-            );
-          }
+        }
+        if (globalLayer !== undefined && globalLayer.get(def.name) === normalized) {
+          globalLayer.delete(def.name);
+          totalRemoves += 1;
+          ctx.emit(TOOLS_CHANGE_EVENT, { kind: 'remove', name: def.name });
+        }
+        /* 变更频率帽 unregister 侧计费（#10②）：删除与广播先行、计费殿后——
+         * 注销器可能在作用域回卷路径跑（dispose 内同步循环），此处抛错会被
+         * 回卷异常隔离吞成日志，若计费在先则「删除没做成但配额已耗」留下
+         * 半套状态；殿后则不变式完整（集变更即快照），桶满仅记 error。 */
+        if (!changeRate.tryCharge('registry')) {
+          ctx.logger.error(
+            `工具注册/注销变更超频（unregister 侧：${def.name}）——桶容量 ${REGISTRY_RATE.capacity}/回填 ${REGISTRY_RATE.perMinute} 每 min，` +
+              `本次已照常删除广播（回卷路径计费只记不阻）；后续 register 将被 fail-loud 拒绝（契约篇 §1.6 #10）`,
+          );
         }
       };
     },
@@ -411,8 +439,8 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
 }
 
 /**
- * defineTool 类型 helper（插件契约篇 §3.1：ctx.tools.defineTool 定义工具）。
- * identity 函数——只为让插件侧书写时获得 parameters/execute 的完整类型检查。
+ * defineTool 类型 helper（应用契约篇 §3.1：ctx.tools.defineTool 定义工具）。
+ * identity 函数——只为让应用侧书写时获得 parameters/execute 的完整类型检查。
  */
 export function defineTool<T extends ToolDefinition>(def: T): T {
   return def;

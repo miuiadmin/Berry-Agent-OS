@@ -5,7 +5,7 @@
  * - 状态机 `running →（可选 stopping）→ 唯一终态 completed/killed/failed`，first-wis
  *   结算（首个落定的终态胜出，后续 settle 仅 debug 留痕）；
  * - done promise 永不 reject（executor 侧异常一律转 failed 终态——run 糖内建该适配）；
- * - kind 词汇显式注册（内置 'subagent'/'process' 种子；插件自定义经 registerKind）；
+ * - kind 词汇显式注册（内置 'subagent'/'process' 种子；应用自定义经 registerKind）；
  * - 进程内词汇不持久（会话篇 §5「fork 不继承」）——重启即消，跨会话可见性走结算副作用。
  *
  * 与 context 的关系：注册表经 ctx.provide('jobs') 挂具名服务；自身生命周期挂
@@ -91,8 +91,8 @@ const OWNER_CONCURRENCY_LIMIT = 16;
  * 创建 Job 注册表（组合根 provide('jobs') 的那一行所注对象）。
  *
  * @param scope 根作用域——生命周期挂点（dispose 兜底回卷）与 logger 来源
- * @param opts.kindDisposers kind 注销回调表（插件自定义 kind 的注销器；
- *   作用域回卷时逐个调——kind 随注册方插件卸载而消，键 = kind 名）
+ * @param opts.kindDisposers kind 注销回调表（应用自定义 kind 的注销器；
+ *   作用域回卷时逐个调——kind 随注册方应用卸载而消，键 = kind 名）
  */
 export function createJobsService(
   scope: ContextScope,
@@ -124,7 +124,7 @@ export function createJobsService(
     if (!kinds.has(kind)) {
       throw new AppError(
         JOB_KIND_UNKNOWN,
-        `Job kind 未注册：${kind}（内置 'subagent'/'process'；插件自定义须先 ctx.jobs.registerKind）`,
+        `Job kind 未注册：${kind}（内置 'subagent'/'process'；应用自定义须先 ctx.jobs.registerKind）`,
       );
     }
   };

@@ -48,7 +48,7 @@ export type BridgeHandler = (args: unknown[], signal: AbortSignal) => unknown | 
 /** 端点选项 */
 export interface BridgeEndpointOptions {
   /** 本端错误信封归因（诊断面：跨域栈不假装连续，归因字段替代） */
-  readonly origin?: { workerId?: string; plugin?: string };
+  readonly origin?: { workerId?: string; app?: string };
   /** 心跳节律（毫秒）。设置即启动探针——装配方（宿主监督面）的配置项 */
   readonly heartbeatMs?: number;
   /** 连续丢拍阈值（超过即 onFreeze 并停表；缺省 3） */
@@ -86,7 +86,7 @@ export class BridgeEndpoint {
   /** 入站处理器：service → method → fn（注册面，K3-b 由代理物化接线） */
   private readonly handlers = new Map<string, Map<string, BridgeHandler>>();
   /** 本端归因（错误信封附带） */
-  private readonly origin?: { workerId?: string; plugin?: string };
+  private readonly origin?: { workerId?: string; app?: string };
   /** 心跳定时器（heartbeatMs 设置才有） */
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   /** 连续丢拍计数（pong 归零；超 missLimit 即 freeze，一次性） */
@@ -382,7 +382,7 @@ export class BridgeEndpoint {
  * 异常 → 错误信封：AppError 家族词保码过界（code 原样）；非家族异常统一入桶
  * BRIDGE_HANDLER_FAILED（对端回卷为 AppError 后按码分派不受影响）。
  */
-function toEnvelope(err: unknown, origin?: { workerId?: string; plugin?: string }): BridgeErrorEnvelope {
+function toEnvelope(err: unknown, origin?: { workerId?: string; app?: string }): BridgeErrorEnvelope {
   if (err instanceof AppError) {
     return { code: err.code, message: err.message, origin };
   }
@@ -395,8 +395,8 @@ function toEnvelope(err: unknown, origin?: { workerId?: string; plugin?: string 
 
 /** 信封 → 人读 message（归因前缀拼进文本——诊断面一眼定位哪个域出的错） */
 function formatEnvelopeMessage(env: BridgeErrorEnvelope): string {
-  if (env.origin?.workerId || env.origin?.plugin) {
-    const parts = [env.origin.workerId, env.origin.plugin].filter(Boolean).join('/');
+  if (env.origin?.workerId || env.origin?.app) {
+    const parts = [env.origin.workerId, env.origin.app].filter(Boolean).join('/');
     return `[${parts}] ${env.message}`;
   }
   return env.message;

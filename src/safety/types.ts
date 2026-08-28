@@ -20,7 +20,7 @@ export type ApprovalPolicyMode = 'ask' | 'never';
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
 
 /**
- * answerer（审批应答者）的四值决策——通道插件在 approval/answer waterfall 上短路返回。
+ * answerer（审批应答者）的四值决策——通道应用在 approval/answer waterfall 上短路返回。
  * 'always'（2026-08-27「始终允许」批，骨架篇 §8.3）= 批准本次 + 授权写跨会话
  * allowlist 条目：载荷必须携带 suggestedEntry 草案才呈现该选项（无草案 =
  * answerer 面不出现「始终允许」）；safety 侧收到无草案的 always 视同 approve
@@ -72,7 +72,7 @@ export interface ApprovalRequest {
   readonly suggestedEntry?: AllowlistDraft;
 }
 
-/** 沙箱后端统一接口（后端是可替换插件行；seam 与强制点在内核） */
+/** 沙箱后端统一接口（后端是可替换应用行；seam 与强制点在内核） */
 export interface SandboxBackend {
   /** 后端标识（'seatbelt' / 'bwrap' / 自定义） */
   readonly id: string;

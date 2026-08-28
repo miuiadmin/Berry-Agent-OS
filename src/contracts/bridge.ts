@@ -14,13 +14,13 @@
 
 /**
  * 运行域归因（错误信封附带）：跨线程/跨进程栈不假装连续——归因字段替代
- * （哪个 worker 域、哪个插件出的错）。
+ * （哪个 worker 域、哪个应用出的错）。
  */
 export interface BridgeErrorOrigin {
   /** worker 域标识（宿主侧 spawn 时分配） */
   readonly workerId?: string;
-  /** 插件名（行归因） */
-  readonly plugin?: string;
+  /** 应用名（行归因——词汇随第三十六批 plugin→app） */
+  readonly app?: string;
 }
 
 /**
@@ -34,7 +34,7 @@ export interface BridgeErrorEnvelope {
 }
 
 /**
- * 方法调用请求：service/method 两级命名空间（如 service='plugin' method='invokeTool'，
+ * 方法调用请求：service/method 两级命名空间（如 service='apps' method='invokeTool'，
  * service='sessions' method='appendEvent'）+ args 数组（结构化克隆可过界）。
  */
 export interface BridgeAsk {

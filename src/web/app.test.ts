@@ -11,7 +11,7 @@ import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import { AppError, CONTEXT_SERVICE_NOT_FOUND, WEB_PRIVATE_TARGET } from '../contracts/errors.js';
 import type { AgentToolResult, ToolDefinition, ToolPipelineExecutor } from '../contracts/tools.js';
-import { createWebPlugin } from './plugin.js';
+import { createWebApp } from './app.js';
 import type { WebService } from './types.js';
 
 /* ---------------- 测试基建：宿主 tools 服务最小面 ---------------- */
@@ -65,7 +65,7 @@ describe('web 官方件 apply 双面接线', () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
     const tools = fakeTools();
     ctx.provide('tools', tools.service);
-    const plugin = createWebPlugin({ fetchImpl: okFetch, lookup: publicLookup });
+    const plugin = createWebApp({ fetchImpl: okFetch, lookup: publicLookup });
     plugin.apply(ctx as never, undefined);
 
     const def = tools.registered.get('fetch');
@@ -81,7 +81,7 @@ describe('web 官方件 apply 双面接线', () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
     const tools = fakeTools();
     ctx.provide('tools', tools.service);
-    createWebPlugin({ fetchImpl: okFetch, lookup: publicLookup }).apply(ctx as never, undefined);
+    createWebApp({ fetchImpl: okFetch, lookup: publicLookup }).apply(ctx as never, undefined);
 
     const service = ctx.get<WebService>('fetch');
     const result = await service.fetch('https://ok.example/doc', { caller: 'memory-plugin' });
@@ -101,7 +101,7 @@ describe('web 官方件 apply 双面接线', () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
     const tools = fakeTools();
     ctx.provide('tools', tools.service);
-    createWebPlugin({ fetchImpl: okFetch, lookup: async () => [{ address: '10.0.0.9', family: 4 }] }).apply(
+    createWebApp({ fetchImpl: okFetch, lookup: async () => [{ address: '10.0.0.9', family: 4 }] }).apply(
       ctx as never,
       undefined,
     );
@@ -121,7 +121,7 @@ describe('web 官方件 apply 双面接线', () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
     const tools = fakeTools();
     ctx.provide('tools', tools.service);
-    createWebPlugin({ fetchImpl: okFetch, lookup: publicLookup }).apply(ctx as never, { fetch: false });
+    createWebApp({ fetchImpl: okFetch, lookup: publicLookup }).apply(ctx as never, { fetch: false });
 
     expect(tools.registered.has('fetch')).toBe(false); // 模型面关
     const result = await ctx.get<WebService>('fetch').fetch('https://ok.example/');
@@ -131,7 +131,7 @@ describe('web 官方件 apply 双面接线', () => {
   it('executor undefined（无管道诊断形态）：响亮失败不静默——CONTEXT_SERVICE_NOT_FOUND', async () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
     ctx.provide('tools', fakeTools(false).service); // executor 缺位形态
-    createWebPlugin({ fetchImpl: okFetch, lookup: publicLookup }).apply(ctx as never, undefined);
+    createWebApp({ fetchImpl: okFetch, lookup: publicLookup }).apply(ctx as never, undefined);
 
     await expect(ctx.get<WebService>('fetch').fetch('https://ok.example/')).rejects.toMatchObject({
       code: CONTEXT_SERVICE_NOT_FOUND,

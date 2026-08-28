@@ -2,14 +2,14 @@
  * L3 memory — 常驻简报渲染（记忆篇 §6 注入通道 1 的渲染件，pi-4(a) 具名段内容侧）。
  *
  * 纯函数： briefing() 取数（store.ts）→ 本渲染 → ctx.prompts.registerSection
- * ({ id: 'memory/core', render }) 段内容（插件接线随纵切五官方件）。
+ * ({ id: 'memory/core', render }) 段内容（应用接线随纵切五官方件）。
  * 防注入框架（记忆篇 §6）：固定句式包裹——记忆内容是数据不是指令；截断可见。
  */
 
 import type { MemoryRecord } from './store.js';
 import { CITATION_INSTRUCTION, citationMarker } from './citation.js';
 
-/** 常驻简报段 id（具名段词汇面：插件域前缀 memory/） */
+/** 常驻简报段 id（具名段词汇面：应用域前缀 memory/） */
 export const BRIEFING_SECTION_ID = 'memory/core';
 
 /** 段首固定标记（可 grep 定位——诊断与审计面） */
@@ -37,7 +37,7 @@ const PROMOTION_BRIDGE_LINE =
 
 /**
  * 渲染常驻简报段内容（空库返回 ''——上层物化跳过空段不留空壳分节）。
- * 每行携带引用标记 `[m:短id]`（§6 引用回写——模型按标记标注引用，插件解析
+ * 每行携带引用标记 `[m:短id]`（§6 引用回写——模型按标记标注引用，应用解析
  * assistant 文本回写 usage）；引用指令句随框架句式一并注入。
  * @param records briefing() 入选条目（已按优先级排序；结构面只取 id/summary——
  *                差分基线纪元（§6 差分追注）以同构 FaceEntry 喂入，渲染与

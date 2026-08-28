@@ -40,8 +40,8 @@ import {
   APP_SHUTDOWN_QUIESCE_VIOLATED,
   COMPOSITION_ROW_INVALID,
   PERSIST_BATCH_WRITE_FAILED,
-  PLUGIN_EVENT_RATE,
-  PLUGIN_LOAD_FAILED,
+  APP_EVENT_RATE,
+  APP_LOAD_FAILED,
   SESSION_EVENT_DATA_INVALID,
   SESSION_EVENT_TOO_LARGE,
 } from '../contracts/errors.js';
@@ -117,7 +117,7 @@ afterEach(async () => {
   }
 });
 
-/** 装配 + 登记（全部用例经此入口——统一 options 缺省；插件装载使工厂 async） */
+/** 装配 + 登记（全部用例经此入口——统一 options 缺省；应用装载使工厂 async） */
 async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): Promise<BerryRuntime> {
   const runtime = await createBerryRuntime({
     dbPath: ':memory:',
@@ -168,16 +168,16 @@ describe('createBerryRuntime 装配面', () => {
       'goal_set',
       'goal_update',
       'fetch',
-      'plugins_list',
+      'apps_list',
       'events_query',
-      'plugins_install',
-      'plugins_mount',
-      'plugins_unmount',
-      'plugins_update',
-      'plugins_toggle',
-      'plugins_configure',
-      'plugins_reload',
-      'plugins_uninstall_inspect',
+      'apps_install',
+      'apps_mount',
+      'apps_unmount',
+      'apps_update',
+      'apps_toggle',
+      'apps_configure',
+      'apps_reload',
+      'apps_uninstall_inspect',
       'agent_hermes', // delegable 应用自动注册（第三纵切，boot 组合根——hermes 声明 entry.delegable）
       'read',
       'write',
@@ -193,20 +193,20 @@ describe('createBerryRuntime 装配面', () => {
     expect(runtime.systemPrompt).toContain('terminal-based coding assistant');
   });
 
-  it('llm 具名服务已 provide（ctx.llm：插件单发补全面，骨架篇 §9.3）', async () => {
+  it('llm 具名服务已 provide（ctx.llm：应用单发补全面，骨架篇 §9.3）', async () => {
     const runtime = await assemble();
     const service = runtime.ctx.tryGet<{ complete(req: { messages: unknown[] }): Promise<unknown> }>('llm');
     expect(service).toBeTruthy();
     expect(typeof service!.complete).toBe('function');
   });
 
-  it('sessions 具名服务（ctx.sessions：插件 durable 落点 + 内核词伪造防护，骨架篇 §9.2）', async () => {
+  it('sessions 具名服务（ctx.sessions：应用 durable 落点 + 内核词伪造防护，骨架篇 §9.2）', async () => {
     const runtime = await assemble();
     const sessions = runtime.ctx.tryGet<{ appendEvent(type: string, data: unknown): SessionEvent | undefined }>(
       'sessions',
     )!;
     expect(sessions).toBeTruthy();
-    // 已注册插件词汇可写：落当前活跃会话日志（memory/diff = surface 事件）
+    // 已注册应用词汇可写：落当前活跃会话日志（memory/diff = surface 事件）
     const ev = sessions.appendEvent('memory/diff', { baseline: 'deadbeefdeadbeef', entries: [] })!;
     expect(ev.type).toBe('memory/diff');
     expect(runtime.session!.events.at(-1)).toBe(ev);
@@ -217,10 +217,10 @@ describe('createBerryRuntime 装配面', () => {
     // 未注册词汇：session.append 二道闸（注册即写入许可）
     expect(() => sessions.appendEvent('nope/void', {})).toThrowError(/未知事件类型/);
 
-    // #19 收口回归锁（插件面钥匙——2026-08-25 Hermes 探针收口）：作用域经
+    // #19 收口回归锁（装载面钥匙——2026-08-25 Hermes 探针收口）：作用域经
     // ctx.registerSessionEventType 注册自有词汇 → appendEvent 即可写（此前第三方
     // 写任何自有词汇必撞「未知事件类型」——有门没钥匙）；核心词在注册侧先拦；
-    // 作用域 dispose → 词汇随插件卸载回卷（/reload 重装重注册语义），写侧恢复拒绝
+    // 作用域 dispose → 词汇随应用卸载回卷（/reload 重装重注册语义），写侧恢复拒绝
     const scope = runtime.ctx.fork({ name: 't-plugin' });
     expect(() => scope.registerSessionEventType({ type: 'user/message', category: 'surface' })).toThrowError(
       /核心事件类型/,
@@ -253,7 +253,7 @@ describe('createBerryRuntime 装配面', () => {
         sessions.appendEvent('memory/diff', { baseline: 'bb', entries: [] });
         expect.unreachable('应当抛错');
       } catch (e) {
-        expect((e as AppError).code).toBe(PLUGIN_EVENT_RATE);
+        expect((e as AppError).code).toBe(APP_EVENT_RATE);
         expect((e as AppError).message).toContain('appendEvent');
         expect((e as AppError).message).toContain(runtime.session!.header.sessionId);
       }
@@ -262,7 +262,7 @@ describe('createBerryRuntime 装配面', () => {
         sessions.appendEvent('nope/void', {});
         expect.unreachable('应当抛错');
       } catch (e) {
-        expect((e as AppError).code).not.toBe(PLUGIN_EVENT_RATE);
+        expect((e as AppError).code).not.toBe(APP_EVENT_RATE);
         expect((e as Error).message).toContain('未知事件类型');
       }
     } finally {
@@ -325,7 +325,7 @@ describe('createBerryRuntime 装配面', () => {
     await expect(
       sessions.appendWithSurfaceOp({
         type: 'assistant/message',
-        data: { content: 'x', source: 'plugin:t' },
+        data: { content: 'x', source: 'app:t' },
         surfaceOp: { op: 'replace', start: 1, end: 2 },
         sourceEventSeqs: [0, 1, 2],
       }),
@@ -335,13 +335,13 @@ describe('createBerryRuntime 装配面', () => {
     await expect(
       sessions.appendWithSurfaceOp({
         type: 'user/message',
-        data: { content: 'x', source: 'plugin:t' },
+        data: { content: 'x', source: 'app:t' },
         surfaceOp: undefined,
         sourceEventSeqs: [1],
       } as never),
     ).rejects.toThrowError(/必带 replace 型 surfaceOp/);
 
-    // 执法点 ③：归因强制 plugin: 前缀（宿主代写是插件行为，归因落在插件名上）
+    // 执法点 ③：归因强制 app: 前缀（宿主代写是应用行为，归因落在应用名上）
     await expect(
       sessions.appendWithSurfaceOp({
         type: 'user/message',
@@ -349,13 +349,13 @@ describe('createBerryRuntime 装配面', () => {
         surfaceOp: { op: 'replace', start: 1, end: 2 },
         sourceEventSeqs: [0, 1, 2],
       }),
-    ).rejects.toThrowError(/归因强制 plugin:/);
+    ).rejects.toThrowError(/归因强制 app:/);
 
     // 执法点 ④：依据在列——sourceEventSeqs 须含区间外至少一笔（依据≠被遮蔽节点）
     await expect(
       sessions.appendWithSurfaceOp({
         type: 'user/message',
-        data: { content: 'x', source: 'plugin:t' },
+        data: { content: 'x', source: 'app:t' },
         surfaceOp: { op: 'replace', start: 1, end: 2 },
         sourceEventSeqs: [1, 2], // 全在区间内
       }),
@@ -364,7 +364,7 @@ describe('createBerryRuntime 装配面', () => {
     // 合法路径：遮 [1,2] + 依据含区间外 seq0 → 落账 + 投影读面生效
     const carrier = await sessions.appendWithSurfaceOp({
       type: 'user/message',
-      data: { content: '压缩摘要', source: 'plugin:compaction' },
+      data: { content: '压缩摘要', source: 'app:compaction' },
       surfaceOp: { op: 'replace', start: 1, end: 2 },
       sourceEventSeqs: [0, 1, 2],
     });
@@ -385,7 +385,7 @@ describe('createBerryRuntime 装配面', () => {
     expect(
       await bareSessions.appendWithSurfaceOp({
         type: 'user/message',
-        data: { content: 'x', source: 'plugin:t' },
+        data: { content: 'x', source: 'app:t' },
         surfaceOp: { op: 'replace', start: 0, end: 0 },
         sourceEventSeqs: [0, 1], // 1 = 区间外依据（形状合法——执法四点全过后才到无落点降级）
       } as never),
@@ -437,16 +437,16 @@ describe('createBerryRuntime 装配面', () => {
       'grep',
       'agent',
       'fetch',
-      'plugins_list',
+      'apps_list',
       'events_query',
-      'plugins_install',
-      'plugins_mount',
-      'plugins_unmount',
-      'plugins_update',
-      'plugins_toggle',
-      'plugins_configure',
-      'plugins_reload',
-      'plugins_uninstall_inspect',
+      'apps_install',
+      'apps_mount',
+      'apps_unmount',
+      'apps_update',
+      'apps_toggle',
+      'apps_configure',
+      'apps_reload',
+      'apps_uninstall_inspect',
       'agent_hermes',
     ]);
   });
@@ -464,8 +464,8 @@ describe('createBerryRuntime 装配面', () => {
     // + admin 件随件技能（builtin 自述 packageRoot 桥——契约篇 §3.4，随第十行装载）
     expect(runtime.skills.list().map((s) => s.name)).toEqual([
       'demo',
+      'apps-quickstart',
       'commit-checklist',
-      'plugin-quickstart',
       'troubleshooting',
       'admin',
     ]);
@@ -512,16 +512,16 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_set',
       'goal_update',
       'fetch',
-      'plugins_list',
+      'apps_list',
       'events_query',
-      'plugins_install',
-      'plugins_mount',
-      'plugins_unmount',
-      'plugins_update',
-      'plugins_toggle',
-      'plugins_configure',
-      'plugins_reload',
-      'plugins_uninstall_inspect',
+      'apps_install',
+      'apps_mount',
+      'apps_unmount',
+      'apps_update',
+      'apps_toggle',
+      'apps_configure',
+      'apps_reload',
+      'apps_uninstall_inspect',
       'agent_hermes',
       'read',
       'write',
@@ -625,7 +625,7 @@ describe('ConversationDriver + durable 接线', () => {
     await runtime.conversation!.submitOnce('第一问');
     expect(runtime.session!.events.filter((e) => e.type === 'request/header')).toHaveLength(1); // 首轮 initial
 
-    // 装配后动态注册（M2 插件挂载工具的同款路径）：tools_change → 活数组原位刷新
+    // 装配后动态注册（M2 应用挂载工具的同款路径）：tools_change → 活数组原位刷新
     let executions = 0;
     runtime.tools.register({
       name: 'echo',
@@ -668,16 +668,16 @@ describe('ConversationDriver + durable 接线', () => {
       'goal_set',
       'goal_update',
       'fetch',
-      'plugins_list',
+      'apps_list',
       'events_query',
-      'plugins_install',
-      'plugins_mount',
-      'plugins_unmount',
-      'plugins_update',
-      'plugins_toggle',
-      'plugins_configure',
-      'plugins_reload',
-      'plugins_uninstall_inspect',
+      'apps_install',
+      'apps_mount',
+      'apps_unmount',
+      'apps_update',
+      'apps_toggle',
+      'apps_configure',
+      'apps_reload',
+      'apps_uninstall_inspect',
       'agent_hermes',
       'echo',
       'read',
@@ -1305,17 +1305,17 @@ describe('S2 多驱动工具面（三层注册表：双驱动隔离零泄漏 + r
   });
 });
 
-/* ---------------- ⑨b 插件装载（组合树 + 加载器全栈） ---------------- */
+/* ---------------- ⑨b 应用装载（组合树 + 加载器全栈） ---------------- */
 
-/** 写一个目录形态的 fixture 插件（约定入口 index.ts），返回插件目录路径 */
-function writePluginDir(compositionDir: string, source: string): string {
-  const pluginDir = join(compositionDir, 'my-plugin');
-  mkdirSync(pluginDir, { recursive: true });
-  writeFileSync(join(pluginDir, 'index.ts'), source);
-  return pluginDir;
+/** 写一个目录形态的 fixture 应用（约定入口 index.ts），返回应用目录路径 */
+function writeAppDir(compositionDir: string, source: string): string {
+  const appDir = join(compositionDir, 'my-plugin');
+  mkdirSync(appDir, { recursive: true });
+  writeFileSync(join(appDir, 'index.ts'), source);
+  return appDir;
 }
 
-describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
+describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
   it('第三方技能提供方 ②×D1 联锁拒载：行挂 app（触发② 必填）→ registerProvider 装载期拒——启动断言拒启', async () => {
     // D2 前形 = #17 回归锁（第三方 provider 装载即进渐进披露）；触发② 开闸后
     // 第三方行必挂 app，而 D1 裁死 app 行技能注册（provider 全局注入 systemPrompt
@@ -1328,9 +1328,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, 'SKILL.md'),
-      '---\nname: plug-probe-skill\ndescription: 插件提供方技能（联锁拒载回归锁）。\n---\n\n正文。\n',
+      '---\nname: plug-probe-skill\ndescription: 应用提供方技能（联锁拒载回归锁）。\n---\n\n正文。\n',
     );
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "skill-plugin";',
@@ -1343,7 +1343,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
         '      list: () => ({',
         '        skills: [{',
         '          name: "plug-probe-skill",',
-        '          description: "插件提供方技能（联锁拒载回归锁）。",',
+        '          description: "应用提供方技能（联锁拒载回归锁）。",',
         '          content: "正文。",',
         `          filePath: ${JSON.stringify(join(skillDir, 'SKILL.md'))},`,
         `          baseDir: ${JSON.stringify(skillDir)},`,
@@ -1359,16 +1359,16 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: skill-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: skill-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
-    // registerProvider 拒绝经加载器收为行失败（PLUGIN_APPLY_FAILED 包原码）→
+    // registerProvider 拒绝经加载器收为行失败（APP_APPLY_FAILED 包原码）→
     // 启动断言拒启——与 D1 包声明面拒载锁（app-skill-plugin 用例）同断言不同入口
     await expect(assemble({ compositionDir })).rejects.toThrowError(/技能来源注册被拒/);
   });
 
-  it('overlay 插件全栈：工具经 ctx.effect 注册 → 装配后可见可执行；paths/plugins 服务就位', async () => {
+  it('overlay 应用全栈：工具经 ctx.effect 注册 → 装配后可见可执行；paths/apps 服务就位', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "tool-plugin";',
@@ -1378,7 +1378,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
         '  ctx.effect(() =>',
         '    tools.register({',
         '      name: "plug-echo",',
-        '      description: "插件注册的回声工具（装载全栈测试）",',
+        '      description: "应用注册的回声工具（装载全栈测试）",',
         '      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },',
         '      execute: async (args) => ({ content: [{ type: "text", text: `${config.tag}:${args.text}` }] }),',
         '    }),',
@@ -1388,7 +1388,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n    config:\n      tag: 装载\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n    config:\n      tag: 装载\n`,
     );
 
     const { streamFn, contexts } = scriptedStream([
@@ -1397,12 +1397,12 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     ]);
     const runtime = await assemble({ streamFn, compositionDir });
 
-    // 装载状态面：ctx.plugins 与 runtime.plugins 同源（官方默认层 memory/subagent/
+    // 装载状态面：ctx.apps 与 runtime.appsService 同源（官方默认层 memory/subagent/
     // goal 三行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化——
     // boot 于 ring1Anchor 装载、状态同面可见〕 + overlay tool-plugin 行均
     // activated——list 状态行序 = 组合树序；applyMs 为装载计时（刀〇a 打点面）
     // 值不定，用 toMatchObject 不断言精确数）
-    expect(runtime.plugins.list()).toMatchObject([
+    expect(runtime.appsService.list()).toMatchObject([
       { id: 'chat', status: 'activated', name: 'chat' },
       { id: 'memory', status: 'activated', name: 'memory' },
       { id: 'subagent', status: 'activated', name: 'subagent' },
@@ -1415,7 +1415,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       { id: 'admin', status: 'activated', name: 'admin' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
-    expect(runtime.ctx.tryGet<{ list(): unknown[] }>('plugins')).toBeTruthy();
+    expect(runtime.ctx.tryGet<{ list(): unknown[] }>('apps')).toBeTruthy();
     // 组合树报告带行（官方默认层打底在前）
     expect(runtime.composition.rows.map((row) => row.id)).toEqual([
       'chat',
@@ -1430,7 +1430,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'admin',
       'tool-plugin',
     ]);
-    // 插件工具已进注册表（域键升级批：全局层在前 + fs 驱动层在后——本会话组成面）
+    // 应用工具已进注册表（域键升级批：全局层在前 + fs 驱动层在后——本会话组成面）
     expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
       'find',
       'grep',
@@ -1448,16 +1448,16 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'goal_set',
       'goal_update',
       'fetch',
-      'plugins_list',
+      'apps_list',
       'events_query',
-      'plugins_install',
-      'plugins_mount',
-      'plugins_unmount',
-      'plugins_update',
-      'plugins_toggle',
-      'plugins_configure',
-      'plugins_reload',
-      'plugins_uninstall_inspect',
+      'apps_install',
+      'apps_mount',
+      'apps_unmount',
+      'apps_update',
+      'apps_toggle',
+      'apps_configure',
+      'apps_reload',
+      'apps_uninstall_inspect',
       'agent_hermes', // delegable 注册在 ⑨ 装载后——全局层殿后一位
       'plug-echo', // D2 触发②：第三方行挂 app: chat → 隐式路由落 chat 应用域层（全局层之后、驱动层之前）
       'read',
@@ -1466,18 +1466,18 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       'ls',
       'bash',
     ]);
-    // 目录服务：ctx.paths 指向组合树目录、插件数据目录可取（首取即建）
-    const paths = runtime.ctx.tryGet<{ dataDir(): string; pluginDataDir(id: string): string }>('paths');
+    // 目录服务：ctx.paths 指向组合树目录、应用数据目录可取（首取即建）
+    const paths = runtime.ctx.tryGet<{ dataDir(): string; appDataDir(id: string): string }>('paths');
     expect(paths!.dataDir()).toBe(compositionDir);
-    expect(paths!.pluginDataDir('tool-plugin')).toBe(join(compositionDir, 'plugins', 'tool-plugin'));
+    expect(paths!.appDataDir('tool-plugin')).toBe(join(compositionDir, 'apps', 'tool-plugin'));
 
     // 首 run：工具对模型可见（⑨b 注册经 ⑧ 接线原位刷新了 loop 快照）+ 真走三段管道
-    await runtime.conversation!.submitOnce('用插件工具');
+    await runtime.conversation!.submitOnce('用应用工具');
     expect(contexts[0]?.tools?.map((t) => t.name)).toContain('plug-echo');
     expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
     const projected = deriveMessages(runtime.session!.events);
     expect(projected.map((m) => m.type)).toEqual(['user', 'assistant', 'toolResult', 'assistant']);
-    // 装配期注册的 header：一张 initial、toolSchemas 已含插件工具（快照内容正确）
+    // 装配期注册的 header：一张 initial、toolSchemas 已含应用工具（快照内容正确）
     const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
     expect(headers).toHaveLength(1);
     expect((headers[0]!.data as { reason: string }).reason).toBe('initial');
@@ -1486,9 +1486,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
   });
 
-  it('D1 app 行插件全栈：工具隐式路由落应用域层——chat 组合域独见、全局口径与别应用不可见', async () => {
+  it('D1 app 行应用全栈：工具隐式路由落应用域层——chat 组合域独见、全局口径与别应用不可见', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "app-tool-plugin";',
@@ -1508,15 +1508,15 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: app-tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: app-tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const runtime = await assemble({ compositionDir });
     try {
       // 行装载成功（app: chat = 在册应用 id——四触发拒绝式不触发）
-      expect(runtime.plugins.list().at(-1)).toMatchObject({ id: 'app-tool-plugin', status: 'activated' });
-      // 隐式路由落 chat 应用域层：该应用组合域视角独见
+      expect(runtime.appsService.list().at(-1)).toMatchObject({ id: 'app-tool-plugin', status: 'activated' });
+      // 隐式路由落 chat 应用域层：该应用作用域域视角独见
       expect(runtime.tools.listFor('chat').map((t) => t.name)).toContain('app-echo');
-      // 全局口径（诊断面/裸 list）不可见；别应用组合域不可见（跨应用零泄漏）
+      // 全局口径（诊断面/裸 list）不可见；别应用作用域域不可见（跨应用零泄漏）
       expect(runtime.tools.list().map((t) => t.name)).not.toContain('app-echo');
       expect(runtime.tools.listFor('hermes').map((t) => t.name)).not.toContain('app-echo');
       // 正半边（断言 6 注册面码半边）：挂 chat 应用的行能力进 chat 应用组成面
@@ -1530,7 +1530,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
 
   it('D1 app 行技能拒载全栈：包声明 skills + 行 app 键 → 行失败拒启（seam 还帧 → 服务面执法）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "app-skill-plugin";',
@@ -1538,8 +1538,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
         'export default async function apply() {}',
       ].join('\n'),
     );
-    // 包内技能目录物化（纯技能包最小形态——技能目录在插件包根下）
-    const skillDir = join(pluginDir, 'skills');
+    // 包内技能目录物化（纯技能包最小形态——技能目录在应用包根下）
+    const skillDir = join(appDir, 'skills');
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, 'SKILL.md'),
@@ -1547,16 +1547,16 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: app-skill-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: app-skill-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     // 技能 provider 全局注入 systemPrompt 无域层：app 行注册 = 装载期拒绝 →
-    // 加载器收为行失败（PLUGIN_APPLY_FAILED 包原码）→ 启动断言拒启
+    // 加载器收为行失败（APP_APPLY_FAILED 包原码）→ 启动断言拒启
     await expect(assemble({ compositionDir })).rejects.toThrowError(/技能来源注册被拒/);
   });
 
-  it('插件提示词段全栈：ctx.effect 注册 registerSection → systemPrompt 含段内容（分节序固定）', async () => {
+  it('应用提示词段全栈：ctx.effect 注册 registerSection → systemPrompt 含段内容（分节序固定）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "prompt-plugin";',
@@ -1564,28 +1564,28 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
         '  const prompts = ctx.get("prompts");',
         '  // pi-4(a)：注册即 effect——/reload 回卷锚即注销段（prompts_change 随之广播）',
         '  ctx.effect(() =>',
-        '    prompts.registerSection({ id: "demo/notice", render: () => "插件段内容：记住用中文注释" }),',
+        '    prompts.registerSection({ id: "demo/notice", render: () => "应用段内容：记住用中文注释" }),',
         '  );',
         '}',
       ].join('\n'),
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: prompt-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: prompt-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn } = scriptedStream([textMessage('收到')]);
     const runtime = await assemble({ streamFn, compositionDir });
 
     // 段已进 systemPrompt：分节序固定 = 基座 → 技能 → 具名段（段在基座文案之后）
-    expect(runtime.systemPrompt).toContain('插件段内容：记住用中文注释');
-    expect(runtime.systemPrompt.indexOf('插件段内容：记住用中文注释')).toBeGreaterThan(
+    expect(runtime.systemPrompt).toContain('应用段内容：记住用中文注释');
+    expect(runtime.systemPrompt.indexOf('应用段内容：记住用中文注释')).toBeGreaterThan(
       runtime.systemPrompt.indexOf('terminal-based coding assistant'),
     );
     // 段 id 清单面（字典序；memory/core 简报段 + subagent/list 清单段为官方件
     // 注册——memory 空库物化为空串、subagent 单 provider 物化一行清单）
     const prompts = runtime.ctx.get<{ listSections(): string[] }>('prompts');
-    // environment = 宿主自留地段（exec 纵切——无 / 单段 id 排插件域段之前，字典序）；
+    // environment = 宿主自留地段（exec 纵切——无 / 单段 id 排应用域段之前，字典序）；
     // instructions = 宿主自留地第二段（尾刀四层发现——工作区无指令文件时物化空串）
     expect(prompts.listSections()).toEqual([
       'demo/notice',
@@ -1598,30 +1598,30 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     // 首 run 落的 header initial 快照含段内容（模型可见即落日志）
     await runtime.conversation!.submitOnce('看提示词');
     const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
-    expect((headers[0]!.data as { systemPrompt: string }).systemPrompt).toContain('插件段内容：记住用中文注释');
+    expect((headers[0]!.data as { systemPrompt: string }).systemPrompt).toContain('应用段内容：记住用中文注释');
   });
 
   // B-1 回归锁（admin 刀，契约篇 §3.4 落码义务）：chat 件首会话 open() 的
-  // systemPrompt 首物化早于 ⑨ 装载收口——无收口补物化时首物化点 plugins.list()
-  // 恒空，environment 第五件计数在首请求快照里冻结为「插件 0 行」。锁：initial
+  // systemPrompt 首物化早于 ⑨ 装载收口——无收口补物化时首物化点 appsService.list()
+  // 恒空，environment 第五件计数在首请求快照里冻结为「应用 0 行」。锁：initial
   // header 的 systemPrompt 计数必须非零且 activated === total（默认层全激活）。
   // 修前必红验证法：注释掉 boot 收口的 rematerializeAll()（assembly ⑨ 尾）。
-  it('boot 装载收口重物化：首 header 的插件计数非零（无收口补物化时恒 0 必红）', async () => {
+  it('boot 装载收口重物化：首 header 的应用计数非零（无收口补物化时恒 0 必红）', async () => {
     const { streamFn } = scriptedStream([textMessage('好')]);
     const runtime = await assemble({ streamFn });
     await runtime.conversation!.submitOnce('问');
     const header = runtime.session!.events.find((e) => e.type === 'request/header');
     const sp = (header!.data as { systemPrompt: string }).systemPrompt;
-    const m = /插件 (\d+) 行：activated (\d+)/.exec(sp);
+    const m = /应用 (\d+) 行：activated (\d+)/.exec(sp);
     expect(m).not.toBeNull();
     // total > 0（默认装配 = 十行——修前此处取到 0 即红）；activated === total（默认全激活）
     expect(Number(m![1])).toBeGreaterThan(0);
     expect(Number(m![2])).toBe(Number(m![1]));
   });
 
-  it('context_transform 桥接：插件挂瀑布注入消息 → 模型请求含注入、日志不含（瞬态面）', async () => {
+  it('context_transform 桥接：应用挂瀑布注入消息 → 模型请求含注入、日志不含（瞬态面）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "inject-plugin";',
@@ -1636,7 +1636,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: inject-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: inject-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn, contexts } = scriptedStream([textMessage('好的')]);
@@ -1651,9 +1651,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(logText).not.toContain('【检索注入】');
   });
 
-  it('context_transform 桥钟：插件钩子挂起 → EVENT_HANDLER_TIMEOUT、run 按失败收尾（§1.6 时钟族，刀〇a）', async () => {
+  it('context_transform 桥钟：应用钩子挂起 → EVENT_HANDLER_TIMEOUT、run 按失败收尾（§1.6 时钟族，刀〇a）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "hang-transform";',
@@ -1666,7 +1666,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: hang-transform\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: hang-transform\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn } = scriptedStream([textMessage('到不了的回答')]);
@@ -1680,9 +1680,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(result?.errorMessage).toContain('[EVENT_HANDLER_TIMEOUT]');
   });
 
-  it('user_input 桥接（P1-2 增补 7②）：插件挂瀑布变换用户消息 → 模型请求含变换体、原文本不进请求', async () => {
+  it('user_input 桥接（P1-2 增补 7②）：应用挂瀑布变换用户消息 → 模型请求含变换体、原文本不进请求', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "input-transform";',
@@ -1697,7 +1697,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: input-transform\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: input-transform\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn, contexts } = scriptedStream([textMessage('好的')]);
@@ -1710,9 +1710,9 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(flat).not.toContain('"原始问题"'); // 替换语义非追加：原文本不进请求
   });
 
-  it('user_input 桥钟（§1.6 时钟族）：插件钩子挂起 → EVENT_HANDLER_TIMEOUT、run 按失败收尾', async () => {
+  it('user_input 桥钟（§1.6 时钟族）：应用钩子挂起 → EVENT_HANDLER_TIMEOUT、run 按失败收尾', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "hang-input";',
@@ -1725,7 +1725,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: hang-input\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: hang-input\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn } = scriptedStream([textMessage('到不了的回答')]);
@@ -1739,7 +1739,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
 
   it('turn_stopping 桥钟（增补 7① 失败语义）：serial 挂起 → 超时不拖死停机、run 结果不被改写', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "hang-stopping";',
@@ -1751,7 +1751,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: hang-stopping\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: hang-stopping\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn } = scriptedStream([textMessage('答')]);
@@ -1767,7 +1767,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
   it('composition/reloaded boot 路（增补 1/7④）：装载收口后派发——apply 期订阅可听到、无 ring1RestartRequired', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const markPath = join(compositionDir, 'boot-reloaded.json');
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'import { writeFileSync } from "node:fs";',
@@ -1782,7 +1782,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: boot-signal\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: boot-signal\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     const { streamFn } = scriptedStream([textMessage('好')]);
@@ -1796,7 +1796,7 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       skipped: string[];
       ring1RestartRequired?: string[];
     };
-    // 三清单合并自 Ring 1 + Ring 2/3 两批：默认层全行 + 本插件行在场
+    // 三清单合并自 Ring 1 + Ring 2/3 两批：默认层全行 + 本应用行在场
     expect(payload.activated).toContain('boot-signal');
     expect(payload.activated).toContain('memory');
     expect(payload.failed).toEqual([]);
@@ -1804,12 +1804,12 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
     expect(payload.ring1RestartRequired).toBeUndefined();
   });
 
-  it('插件启动断言：失败行非空 → 工厂抛 PLUGIN_LOAD_FAILED 聚合清单（不带病运行）', async () => {
+  it('应用启动断言：失败行非空 → 工厂抛 APP_LOAD_FAILED 聚合清单（不带病运行）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(compositionDir, 'export const name = "bad";\nexport default 42;\n');
+    const appDir = writeAppDir(compositionDir, 'export const name = "bad";\nexport default 42;\n');
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: bad\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: bad\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
     // 不经 assemble 登记（工厂抛出即无 runtime 可关停）
@@ -1818,14 +1818,17 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
       workspace: makeWorkspace(),
       compositionDir,
     });
-    await expect(attempt).rejects.toMatchObject({ code: PLUGIN_LOAD_FAILED });
+    await expect(attempt).rejects.toMatchObject({ code: APP_LOAD_FAILED });
     await expect(attempt).rejects.toThrowError(/bad/); // 行 id 进聚合清单（归因）
   });
 
   it('dump-config 失败路径：打印合成树 + 失败清单退出码 1；空树成功路径退出码 0', async () => {
     const badDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(badDir, 'export const name = "bad";\nexport default 42;\n');
-    writeFileSync(join(badDir, 'overlay.yaml'), `rows:\n  - id: bad\n    plugin: ${pluginDir}\n    app: chat\n`);
+    const appDir = writeAppDir(badDir, 'export const name = "bad";\nexport default 42;\n');
+    writeFileSync(
+      join(badDir, 'overlay.yaml'),
+      `rows:\n  - id: bad\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
+    );
     // 不传 persist——:memory: 全装配同构（P0-3）：显式 persist:false 会绕开持久层
     // 全真跑，正是诊断面要禁的侧门（P0-3 批主请求，2026-08-26）
     expect(await dumpConfigMain({ compositionDir: badDir })).toBe(1);
@@ -1836,13 +1839,13 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
 
   it('dump-config 挂载分组（D1 清单投影 F13）：应用行进「应用合成 chat」组、树行带 → 归属标记', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       'export const name = "app-tool-plugin";\nexport default async function apply() {}\n',
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: app-tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: app-tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     // 捕获 stdout（dumpConfigMain 全输出经 process.stdout.write——诊断面无别名流）
     const chunks: string[] = [];
@@ -1890,8 +1893,8 @@ describe('⑨b 插件装载（组合树 + 加载器全栈）', () => {
 
 /* ---------------- /reload 组合树重载（M2 纵切收口） ---------------- */
 
-/** 版本化插件源：工具执行回显 `<版本标记>:<入参>`——同路径改码后 reload 应换版本（jiti 驱逐） */
-function versionedPluginSource(mark: string): string {
+/** 版本化应用源：工具执行回显 `<版本标记>:<入参>`——同路径改码后 reload 应换版本（jiti 驱逐） */
+function versionedAppSource(mark: string): string {
   return [
     `export const name = "tool-plugin";`,
     `const MARK = ${JSON.stringify(mark)};`,
@@ -1921,10 +1924,10 @@ function lastEchoText(runtime: BerryRuntime): string {
 describe('/reload 组合树重载', () => {
   it('jiti 驱逐纪律全栈：同路径改码 → reload → 新代码生效（moduleCache:false 不吃旧模块）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     // 脚本两轮齐全：每轮 toolCall+text（scriptedStream 只前进不回绕——缺项会钳在末条）
     const { streamFn } = scriptedStream([
@@ -1934,7 +1937,7 @@ describe('/reload 组合树重载', () => {
       textMessage('完成'),
     ]);
     const runtime = await assemble({ streamFn, compositionDir });
-    // composition/reloaded 观察哨（root ctx 订阅——reload 只 dispose 插件锚，哨不动）
+    // composition/reloaded 观察哨（root ctx 订阅——reload 只 dispose 应用锚，哨不动）
     const reloadedPayloads: unknown[] = [];
     runtime.ctx.on('composition/reloaded', (payload: unknown) => {
       reloadedPayloads.push(payload);
@@ -1945,7 +1948,7 @@ describe('/reload 组合树重载', () => {
 
     // 同路径改码（版本标记换 v2）→ reload → 激活行照旧、代码是新求值的
     //（memory/subagent 为官方默认层两行，每次 reload 照常激活——恒在）
-    writeFileSync(join(pluginDir, 'index.ts'), versionedPluginSource('v2'));
+    writeFileSync(join(appDir, 'index.ts'), versionedAppSource('v2'));
     const result = await runtime.reload();
     expect(result.payload).toEqual({
       activated: [
@@ -1984,16 +1987,16 @@ describe('/reload 组合树重载', () => {
 
     await runtime.conversation!.submitOnce('第二问');
     expect(lastEchoText(runtime)).toContain('v2:回声'); // 新代码已生效
-    // plugins 服务同实例就地更新（§1.3 服务集恒定——reload 前后 ctx 拿到同一个）
-    expect(runtime.ctx.tryGet('plugins')).toBe(runtime.plugins);
+    // appsService 同实例就地更新（§1.3 服务集恒定——reload 前后 ctx 拿到同一个）
+    expect(runtime.ctx.tryGet('apps')).toBe(runtime.appsService);
   });
 
   it('禁用行 reload：工具摘除 + writeHeader 落 change 快照 + loop 快照同步刷新', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const { streamFn, contexts } = scriptedStream([textMessage('首答'), textMessage('纯文本应答')]);
     const runtime = await assemble({ streamFn, compositionDir });
@@ -2006,7 +2009,7 @@ describe('/reload 组合树重载', () => {
     // overlay 置 disabled → reload → 行变 skipped、工具摘除
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n    disabled: true\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n    disabled: true\n`,
     );
     const result = await runtime.reload();
     expect(result.payload).toEqual({
@@ -2014,9 +2017,9 @@ describe('/reload 组合树重载', () => {
       failed: [],
       skipped: ['tool-plugin'],
     });
-    // 插件工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）。
+    // 应用工具已摘除（memory 五件 + agent 为默认装配成员——不受 overlay 禁用影响）。
     // 域键升级批：fs 驱动层挂活驱动 DriverEntry——跨 /reload 存续（本会话组成面
-    // 照旧含 fs 四件）。agent_hermes 前移到 grep 后：/reload 重装载插件工具重新
+    // 照旧含 fs 四件）。agent_hermes 前移到 grep 后：/reload 重装载应用工具重新
     // 追加在其后（Map 注册序——幸存者在前），delegable 注册只在 boot、跨 /reload
     // 存续（应用注册表不动）
     expect(runtime.tools.compositionFor(runtime.session!.header.sessionId).map((t) => t.name)).toEqual([
@@ -2037,23 +2040,23 @@ describe('/reload 组合树重载', () => {
       'goal_set',
       'goal_update',
       'fetch',
-      'plugins_list',
+      'apps_list',
       'events_query',
-      'plugins_install',
-      'plugins_mount',
-      'plugins_unmount',
-      'plugins_update',
-      'plugins_toggle',
-      'plugins_configure',
-      'plugins_reload',
-      'plugins_uninstall_inspect',
+      'apps_install',
+      'apps_mount',
+      'apps_unmount',
+      'apps_update',
+      'apps_toggle',
+      'apps_configure',
+      'apps_reload',
+      'apps_uninstall_inspect',
       'read',
       'write',
       'edit',
       'ls',
       'bash',
     ]);
-    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+    expect(runtime.appsService.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],
       ['memory', 'activated'],
       ['subagent', 'activated'],
@@ -2067,11 +2070,11 @@ describe('/reload 组合树重载', () => {
       ['tool-plugin', 'skipped'],
     ]);
 
-    // tools_change 即时刷新：后续 run 的模型可见工具集已无插件工具
+    // tools_change 即时刷新：后续 run 的模型可见工具集已无应用工具
     await runtime.conversation!.submitOnce('再问');
     expect(contexts.at(-1)?.tools?.map((t) => t.name)).not.toContain('plug-echo');
 
-    // header 内建 diff：工具面变了 → 第二张快照 reason=change 且不含插件工具
+    // header 内建 diff：工具面变了 → 第二张快照 reason=change 且不含应用工具
     const headers = runtime.session!.events.filter((e) => e.type === 'request/header');
     expect(headers).toHaveLength(2);
     expect((headers[1]!.data as { reason: string }).reason).toBe('change');
@@ -2082,10 +2085,10 @@ describe('/reload 组合树重载', () => {
 
   it('失败行两面语义的 reload 半边：逐行报告、进程存活、成功行照常运行', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const { streamFn } = scriptedStream([textMessage('活着')]);
     const runtime = await assemble({ streamFn, compositionDir });
@@ -2096,7 +2099,7 @@ describe('/reload 组合树重载', () => {
     writeFileSync(join(badDir, 'index.ts'), 'export const name = "bad";\nexport default 42;\n');
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n  - id: bad\n    plugin: ${badDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n  - id: bad\n    pkg: ${badDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const result = await runtime.reload();
     expect(result.error).toBeUndefined();
@@ -2114,9 +2117,9 @@ describe('/reload 组合树重载', () => {
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
     // 状态面：失败行带着错误码可见（「没生效」不静默）
-    const badRow = runtime.plugins.list().find((r) => r.id === 'bad')!;
+    const badRow = runtime.appsService.list().find((r) => r.id === 'bad')!;
     expect(badRow.status).toBe('failed');
-    expect(badRow.code).toMatch(/^PLUGIN_/);
+    expect(badRow.code).toMatch(/^APP_/);
     expect(runtime.tools.listFor('chat').map((t) => t.name)).toContain('plug-echo'); // 成功行照常（应用域层口径）
     // 进程存活：会话还能继续跑
     const answer = await runtime.conversation!.submitOnce('还活着吗');
@@ -2125,10 +2128,10 @@ describe('/reload 组合树重载', () => {
 
   it('overlay 树坏：error 面、原装配纹丝不动（预检后拆——旧锚不可逆动作先验）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const runtime = await assemble({ compositionDir });
     const rowsBefore = runtime.composition.rows;
@@ -2136,7 +2139,7 @@ describe('/reload 组合树重载', () => {
     // 未知字段 → 拒绝式校验抛 COMPOSITION_ROW_INVALID；reload 返回 error 不动旧装配
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n    bogus: 未知字段\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n    bogus: 未知字段\n`,
     );
     const result = await runtime.reload();
     expect(result.error).toBeDefined();
@@ -2147,10 +2150,10 @@ describe('/reload 组合树重载', () => {
 
   it('run 进行中排队重载（刀 2：结算后自动排水；串行链防双装载竞态）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     // 闸门流：首事件等放行——submitOnce 发出后 run 稳定处于进行中
     let release!: () => void;
@@ -2202,30 +2205,30 @@ describe('/reload 组合树重载', () => {
     }); // run 结束后放行
   });
 
-  it('命令薄壳链全栈：/plugins 清单 + /plugin-toggle 链 reload + install 仓库态 → /plugin-mount 生效（D2 新链）', async () => {
+  it('命令薄壳链全栈：/apps 清单 + /apps-toggle 链 reload + install 仓库态 → /apps-mount 生效（D2 新链）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-reload-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const { streamFn } = scriptedStream([textMessage('好')]);
     const runtime = await assemble({ streamFn, compositionDir });
     const { backend, notifies } = recordingBackend();
     runtime.ui.attach(backend);
 
-    // /plugins：状态行可见
-    expect(await runtime.channels.commands.dispatch('/plugins')).toBe('ok');
+    // /apps：状态行可见
+    expect(await runtime.channels.commands.dispatch('/apps')).toBe('ok');
     expect(notifies.some((n) => n.includes('tool-plugin') && n.includes('✓'))).toBe(true);
 
-    // /plugin-toggle：翻转 + 自动链 reload（对账与组合正交——壳负责串两步）
-    expect(await runtime.channels.commands.dispatch('/plugin-toggle tool-plugin')).toBe('ok');
+    // /apps-toggle：翻转 + 自动链 reload（对账与组合正交——壳负责串两步）
+    expect(await runtime.channels.commands.dispatch('/apps-toggle tool-plugin')).toBe('ok');
     expect(notifies.some((n) => n.includes('已禁用'))).toBe(true);
     expect(notifies.some((n) => n.includes('组合已重载'))).toBe(true);
     expect(runtime.tools.listFor('chat').map((t) => t.name)).not.toContain('plug-echo');
 
-    // /plugin-install local 源（零子进程）：D2 仓库态——只入账本零行零生效，
-    // 不链 reload（install→reload 旧链废止）；/plugins ◇ 差集行可见挂载指引
+    // /apps-install local 源（零子进程）：D2 仓库态——只入账本零行零生效，
+    // 不链 reload（install→reload 旧链废止）；/apps ◇ 差集行可见挂载指引
     const twinDir = join(compositionDir, 'twin-plugin');
     mkdirSync(twinDir, { recursive: true });
     writeFileSync(
@@ -2237,7 +2240,7 @@ describe('/reload 组合树重载', () => {
         '  ctx.effect(() =>',
         '    tools.register({',
         '      name: "plug-twin",',
-        '      description: "第二件插件工具（install 仓库态→mount 生效链测试）",',
+        '      description: "第二件应用工具（install 仓库态→mount 生效链测试）",',
         '      parameters: { type: "object", properties: {} },',
         '      execute: async () => ({ content: [{ type: "text", text: "twin" }] }),',
         '    }),',
@@ -2245,19 +2248,19 @@ describe('/reload 组合树重载', () => {
         '}',
       ].join('\n'),
     );
-    expect(await runtime.channels.commands.dispatch(`/plugin-install ${twinDir}`)).toBe('ok');
+    expect(await runtime.channels.commands.dispatch(`/apps-install ${twinDir}`)).toBe('ok');
     expect(notifies.some((n) => n.includes('已入仓库态') && n.includes('local'))).toBe(true);
     expect(runtime.tools.listFor('chat').map((t) => t.name)).not.toContain('plug-twin'); // 装了没挂 = 零生效
-    // /plugins ◇ 差集行：装了没挂必须可见 + 挂载指引（装机面不是断头路）
-    expect(await runtime.channels.commands.dispatch('/plugins')).toBe('ok');
+    // /apps ◇ 差集行：装了没挂必须可见 + 挂载指引（装机面不是断头路）
+    expect(await runtime.channels.commands.dispatch('/apps')).toBe('ok');
     expect(notifies.some((n) => n.includes('◇ twin-plugin') && n.includes('已装未挂'))).toBe(true);
 
-    // /plugin-mount：写组合行 + 壳链 /reload → 新工具经 chat 应用域层可见（D2 生效链）
-    expect(await runtime.channels.commands.dispatch('/plugin-mount twin-plugin --app chat')).toBe('ok');
+    // /apps-mount：写组合行 + 壳链 /reload → 新工具经 chat 应用域层可见（D2 生效链）
+    expect(await runtime.channels.commands.dispatch('/apps-mount twin-plugin --apps chat --carrier main')).toBe('ok');
     expect(notifies.some((n) => n.includes('已挂载 twin-plugin') && n.includes('chat'))).toBe(true);
     expect(notifies.some((n) => n.includes('组合已重载'))).toBe(true);
     expect(runtime.tools.listFor('chat').map((t) => t.name)).toContain('plug-twin');
-    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toEqual([
+    expect(runtime.appsService.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],
       ['memory', 'activated'],
       ['subagent', 'activated'],
@@ -2325,20 +2328,20 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
       },
     ]);
     // 不回卷语义：ring1Anchor 不在 reload dispose 面——tools 服务同一实例、工具面原样。
-    // 序不敏感比对（sort 双侧）：/reload 重装载使插件工具重注册到 agent_hermes
+    // 序不敏感比对（sort 双侧）：/reload 重装载使应用工具重注册到 agent_hermes
     // 之后（Map 注册序漂移），工具面集合不变才是本断言的本体
     expect(runtime.ctx.get('tools')).toBe(toolsBefore);
     expect([...runtime.tools.list().map((t) => t.name)].sort()).toEqual([...namesBefore].sort());
     // 行状态面：tools 行仍 activated（沿用 boot 装载结果 = 运行时真值）
-    expect(runtime.plugins.list().find((r) => r.id === 'tools')).toMatchObject({ status: 'activated' });
+    expect(runtime.appsService.list().find((r) => r.id === 'tools')).toMatchObject({ status: 'activated' });
   });
 
   it('对照面：/reload 无 Ring 1 行变更 → 载荷不带 ring1RestartRequired 字段（不虚报）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-ring1-noop-')));
-    const pluginDir = writePluginDir(compositionDir, versionedPluginSource('v1'));
+    const appDir = writeAppDir(compositionDir, versionedAppSource('v1'));
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: tool-plugin\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: tool-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const { streamFn } = scriptedStream([textMessage('答'), textMessage('答')]);
     const runtime = await assemble({ streamFn, compositionDir });
@@ -2514,9 +2517,9 @@ const abortEventOf = (message: AssistantMessage) => ({
 /* ---------------- 生命周期两时点（二十九批 P1-6：装载收口补播 + shutdown bounded） ---------------- */
 
 describe('session_start 装载收口补播（二十九批增补 8①）', () => {
-  /** 补播探针插件：订阅 session_start 落袋 + plug-starts 工具读袋（测试资产） */
+  /** 补播探针应用：订阅 session_start 落袋 + plug-starts 工具读袋（测试资产） */
   function writeStartProbe(compositionDir: string): void {
-    const pluginDir = writePluginDir(
+    const appDir = writeAppDir(
       compositionDir,
       [
         'export const name = "start-probe";',
@@ -2538,11 +2541,11 @@ describe('session_start 装载收口补播（二十九批增补 8①）', () => 
     );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: start-probe\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: start-probe\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
   }
 
-  /** 读探针袋（经真工具面——插件侧记录的 session_start 载荷清单）。探针行挂
+  /** 读探针袋（经真工具面——应用侧记录的 session_start 载荷清单）。探针行挂
    * app: chat（触发② 必填）→ 工具落 chat 应用域层，get 全局面取不到——按
    * 应用域视角按名取（D1 域层路由口径） */
   async function readStarts(
@@ -2554,8 +2557,8 @@ describe('session_start 装载收口补播（二十九批增补 8①）', () => 
     return JSON.parse((result.content[0] as { type: 'text'; text: string }).text);
   }
 
-  it('boot 收口补播：晚装载插件收到恰一枚 {sessionId, origin, replay:true}——活体（chat 首行 apply 期发射）它结构性收不到', async () => {
-    // 修复前必红：boot 无补播，晚装载插件 starts 袋恒空
+  it('boot 收口补播：晚装载应用收到恰一枚 {sessionId, origin, replay:true}——活体（chat 首行 apply 期发射）它结构性收不到', async () => {
+    // 修复前必红：boot 无补播，晚装载应用 starts 袋恒空
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-replay-')));
     writeStartProbe(compositionDir);
     const runtime = await assemble({ compositionDir });
@@ -2879,7 +2882,7 @@ describe('fork 露头（事件前缀种子分叉 + durable 承诺同款）', () 
 });
 
 describe('会话增生桶（洪水上界：createSession 与 fork 同一进程级令牌桶）', () => {
-  it('小桶注入：容量耗尽后两面同桶 fail-loud（PLUGIN_EVENT_RATE 一码三面之三）', async () => {
+  it('小桶注入：容量耗尽后两面同桶 fail-loud（APP_EVENT_RATE 一码三面之三）', async () => {
     const spy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     try {
       const runtime = await assemble({ sessionSpawnRateLimit: { capacity: 1, perMinute: 1 } });
@@ -2888,7 +2891,7 @@ describe('会话增生桶（洪水上界：createSession 与 fork 同一进程�
       await sessions.createSession({ seed: closedSeed() });
       // 第二发 fork 撞桶：同桶不同面——message 带面名（fork）可分辨
       await expect(sessions.fork()).rejects.toMatchObject({
-        code: PLUGIN_EVENT_RATE,
+        code: APP_EVENT_RATE,
         message: expect.stringContaining('fork'),
       });
     } finally {

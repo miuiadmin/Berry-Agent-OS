@@ -19,9 +19,9 @@ import type { ContextScope } from '../context/index.js';
 import { createToolPipeline } from '../tools/pipeline.js';
 import { registerToolsService } from '../tools/registry.js';
 import type { AgentToolResult, ToolsService } from '../contracts/tools.js';
-import { PLUGIN_CONFIG_INVALID } from '../contracts/errors.js';
-import { createMcpPlugin, CATALOG_THRESHOLD } from '../mcp/index.js';
-import type { McpPluginDeps } from '../mcp/index.js';
+import { APP_CONFIG_INVALID } from '../contracts/errors.js';
+import { createMcpApp, CATALOG_THRESHOLD } from '../mcp/index.js';
+import type { McpAppDeps } from '../mcp/index.js';
 import type { SpawnedChild } from '../mcp/client.js';
 import type { McpServerConfig } from '../mcp/types.js';
 import { createMcpSpawner } from './mcp-spawn.js';
@@ -157,7 +157,7 @@ function makeEnv(): TestEnv {
 
 /** 件依赖束：假 spawn 按 command 路由 + killTree 录制 + 独立 tmp 数据目录 */
 interface FakeHarness {
-  deps: McpPluginDeps;
+  deps: McpAppDeps;
   /** command → 假服务器（断言 die 用） */
   servers: Map<string, FakeServer>;
   /** killTree 收到的 pid 序列（树杀腿断言面） */
@@ -170,7 +170,7 @@ function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error>): FakeHar
   const servers = new Map<string, FakeServer>();
   const kills: number[] = [];
   let pid = 7000;
-  const deps: McpPluginDeps = {
+  const deps: McpAppDeps = {
     spawnServer: async (config: McpServerConfig) => {
       const plan = spawnPlan[config.command];
       if (plan === undefined) throw new Error(`计划外 spawn：${config.command}`);
@@ -187,7 +187,7 @@ function makeHarness(spawnPlan: Record<string, FakeToolSpec[] | Error>): FakeHar
 
 /** apply + 让后台发现起步（收敛由各用例对可观察效应 vi.waitFor） */
 async function applyAndWait(env: TestEnv, harness: FakeHarness, servers: Record<string, unknown>): Promise<void> {
-  const mod = createMcpPlugin(harness.deps);
+  const mod = createMcpApp(harness.deps);
   await mod.apply(env.scope, { servers });
   await new Promise((resolve) => setImmediate(resolve));
 }
@@ -205,13 +205,13 @@ describe('mcp 件 — apply 语义', () => {
     expect(env.notifies).toEqual([]);
   });
 
-  it('非法键（__ 禁入）响亮拒绝：PLUGIN_CONFIG_INVALID', async () => {
+  it('非法键（__ 禁入）响亮拒绝：APP_CONFIG_INVALID', async () => {
     const env = makeEnv();
     roots.push(env.root);
     const harness = makeHarness({});
-    const mod = createMcpPlugin(harness.deps);
+    const mod = createMcpApp(harness.deps);
     await expect(mod.apply(env.scope, { servers: { bad__key: { command: '/bin/x' } } })).rejects.toMatchObject({
-      code: PLUGIN_CONFIG_INVALID,
+      code: APP_CONFIG_INVALID,
     });
   });
 
@@ -444,7 +444,7 @@ function isPidDead(pid: number): boolean {
 }
 
 /** e2e 件依赖：真 spawner + 真杀（SIGKILL；已死 ESRCH 内吞幂等） */
-function makeE2eDeps(dir: string): McpPluginDeps {
+function makeE2eDeps(dir: string): McpAppDeps {
   return {
     spawnServer: createMcpSpawner(dir),
     killTree: (pid) => {
@@ -465,7 +465,7 @@ describe('mcp 件 — e2e 真子进程（CI 轨，零网络）', () => {
     writeFileSync(scriptPath, ECHO_SERVER_SCRIPT, 'utf8');
     const env = makeEnv();
     roots.push(env.root);
-    const mod = createMcpPlugin(makeE2eDeps(dir));
+    const mod = createMcpApp(makeE2eDeps(dir));
     await mod.apply(env.scope, {
       servers: { 'echo-srv': { command: process.execPath, args: [scriptPath], startup_timeout_sec: 8 } },
     });
@@ -509,7 +509,7 @@ setInterval(() => undefined, 1000); // 挂住不退
     writeFileSync(scriptPath, script, 'utf8');
     const env = makeEnv();
     roots.push(env.root);
-    const mod = createMcpPlugin(makeE2eDeps(dir));
+    const mod = createMcpApp(makeE2eDeps(dir));
     await mod.apply(env.scope, {
       servers: { 'silent-srv': { command: process.execPath, args: [scriptPath], startup_timeout_sec: 0.5 } },
     });

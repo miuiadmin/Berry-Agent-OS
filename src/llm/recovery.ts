@@ -77,7 +77,7 @@ function errorText(message: AssistantMessage): string {
 }
 
 /**
- * 错误桶判定（全仓唯一一份，骨架篇 §3.4 S4 落码形态——插件侧禁写第二份分桶）：
+ * 错误桶判定（全仓唯一一份，骨架篇 §3.4 S4 落码形态——应用侧禁写第二份分桶）：
  * errorCode 在场码优先、文案正则兜底。判定序：
  * ① LLM_INFLIGHT_LIMIT（在飞帽拒绝）→ transient——并发压力自解，退避后槽已释放；
  * ② isContextOverflow → overflow（分类不消费）；

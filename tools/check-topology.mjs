@@ -8,7 +8,7 @@
  * 2. 裸导入（包名）按模块白名单放行；node:* 全模块放行。
  * 测试文件（*.test.ts）豁免跨模块检查（只许 import 本模块与 vitest），防止测试绕行。
  *
- * 边表对齐[内核与插件边界]篇 §4 模块表；模块落地时如与规范出入，以规范为准修本表。
+ * 边表对齐[内核与应用边界]篇 §4 模块表；模块落地时如与规范出入，以规范为准修本表。
  * 未落地的模块保留占位行——目录不存在即零检查，表先钉住方向。
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -57,7 +57,7 @@ const MODULE_EDGES = {
   // 类型面（memory→session 类型边同款）
   compaction: ['contracts', 'context', 'session'],
   // admin = 平台管理面官方件（2026-08-27 契约篇 §3.4 第一刀，默认层第十行）：
-  // plugins_list/events_query 两只读工具 + 管理 Skill 随件携带。工具/服务全经
+  // apps_list/events_query 两只读工具 + 管理 Skill 随件携带。工具/服务全经
   // ctx.get 运行时取（结构子集类型本地收窄）——零跨模块 import，contracts
   // 单边（mcp/web 最窄边再窄一档：连 context 类型都不引用）
   admin: ['contracts'],
@@ -95,7 +95,7 @@ const MODULE_EDGES = {
 
 /** 裸导入白名单：包名 → 允许引用它的模块（node:* 与测试专用包单独放行） */
 const BARE_IMPORTS = {
-  // context = 插件加载器（虚拟注入映射构造 + 行 config schema 校验 Value 面——契约篇 §1.2 落码注记③）
+  // context = 应用加载器（虚拟注入映射构造 + 行 config schema 校验 Value 面——契约篇 §1.2 落码注记③）
   typebox: ['contracts', 'context', 'tools', 'skills', 'safety', 'app', 'exec'],
   // berryagent = 加载器注入的虚拟模块名（非 npm 包；loader.test fixture 源码内的合法引用面）
   berryagent: ['context'],

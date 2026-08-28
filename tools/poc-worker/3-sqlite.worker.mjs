@@ -21,7 +21,7 @@ port.on('message', (m) => {
     db.prepare("INSERT INTO t (who) VALUES ('worker')").run();
     db.close();
 
-    // worker 内纯内存库：建表+读回（future 插件自带 :memory: 库的形态）
+    // worker 内纯内存库：建表+读回（future 应用自带 :memory: 库的形态）
     const mem = new Database(':memory:');
     mem.exec('CREATE TABLE m (v INTEGER)');
     mem.prepare('INSERT INTO m (v) VALUES (42)').run();

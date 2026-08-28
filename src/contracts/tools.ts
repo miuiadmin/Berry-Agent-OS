@@ -1,6 +1,6 @@
 /**
  * L0 contracts — 工具族契约（内核篇模块表 #7：管道接口在 contracts，
- * 实现可换但不得绕过 pre-execute；插件契约篇 §3.1 三段 waterfall）。
+ * 实现可换但不得绕过 pre-execute；应用契约篇 §3.1 三段 waterfall）。
  *
  * 本文件收两类词汇：
  * 1. AgentTool 族——loop 可执行的工具面（原定义于 agent 模块，因 tools 模块
@@ -79,7 +79,7 @@ export interface AgentTool {
 }
 
 /* ------------------------------------------------------------------ */
-/* 二、工具管道契约（插件契约篇 §3.1——工具执行唯一合法路径）            */
+/* 二、工具管道契约（应用契约篇 §3.1——工具执行唯一合法路径）            */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -201,8 +201,8 @@ export interface ToolCtx {
 }
 
 /**
- * ctx.tools.register 的注册面（插件契约篇 §3.1 defineTool 形状，钉死）。
- * 与 AgentTool 的差异：插件只写「做什么」，管道补「怎么执行」
+ * ctx.tools.register 的注册面（应用契约篇 §3.1 defineTool 形状，钉死）。
+ * 与 AgentTool 的差异：应用只写「做什么」，管道补「怎么执行」
  * （schema 校验 → 三段 waterfall → 超时预算）。
  */
 export interface ToolDefinition {

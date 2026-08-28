@@ -3,7 +3,7 @@
  *
  * 官方默认层第三行（chat 首行、memory 次行之后；Ring 2 真·可卸——卸掉即无
  * 委派能力，核心循环不破）。
- * 三注册全挂 ctx.effect（装载锚 dispose 即 LIFO 回卷，/plugin-toggle 同语义）：
+ * 三注册全挂 ctx.effect（装载锚 dispose 即 LIFO 回卷，/apps-toggle 同语义）：
  * ① in-process provider 进 ctx.subagents（真工厂闭包经 deps 注入）；
  * ② 委派工具 `agent` 进 ctx.tools（tools_change 原位刷新即模型可见）——provider 名
  *    静态绑定 'in-process'，模型不见动态选择器（§6.3 静态工具绑定）；
@@ -14,7 +14,7 @@
 
 import { Type } from '../contracts/typebox.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { PromptsService } from '../contracts/app.js';
 import type { Context } from '../context/types.js';
 import type { SubagentsServiceFace, SubagentRun } from '../contracts/subagent.js';
@@ -24,7 +24,7 @@ import { defaultAgentLocations, discoverAgentMds, mergeRequestForAgentMd, type A
 import type { Session } from '../session/session.js';
 
 /** 官方件构造依赖（装配期活闭包——真工厂零件 + 会话活引用） */
-export interface SubagentPluginDeps {
+export interface SubagentAppDeps {
   /** in-process 真工厂（app/subagent-factory.ts 组合根闭包产物） */
   readonly factory: InProcessChildFactory;
   /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键） */
@@ -54,20 +54,20 @@ const AGENT_TOOL_NAME = 'agent';
  * 构造 subagent 官方件模块引用（builtins 注册表 `builtin:subagent` 行）。
  *
  * @param deps 真工厂 + 活会话引用
- * @returns BuiltinPluginModule（与文件插件 named export 同形——装载管线完全同轨）
+ * @returns BuiltinAppModule（与文件应用 named export 同形——装载管线完全同轨）
  */
-export function createSubagentPlugin(deps: SubagentPluginDeps): BuiltinPluginModule {
+export function createSubagentApp(deps: SubagentAppDeps): BuiltinAppModule {
   return {
     name: 'subagent',
     inject: ['tools', 'prompts', 'subagents'],
     config: SUBAGENT_CONFIG_SCHEMA,
-    apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) =>
-      applySubagentPlugin(ctx, (config ?? {}) as SubagentConfig, deps),
+    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) =>
+      applySubagentApp(ctx, (config ?? {}) as SubagentConfig, deps),
   };
 }
 
 /** 官方件 apply 本体（三注册 + 声明式子代理批——全部挂 ctx.effect 随装载锚回卷） */
-async function applySubagentPlugin(ctx: PluginContext, cfg: SubagentConfig, deps: SubagentPluginDeps): Promise<void> {
+async function applySubagentApp(ctx: AppContext, cfg: SubagentConfig, deps: SubagentAppDeps): Promise<void> {
   const subagents = ctx.get<SubagentsServiceFace>('subagents');
   const tools = ctx.get<ToolsService>('tools');
   const prompts = ctx.get<PromptsService>('prompts');

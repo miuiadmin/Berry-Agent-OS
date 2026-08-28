@@ -2,13 +2,13 @@
  * L4 chat — 对话应用官方件（契约篇 §5.4 应用面第一纵切：`builtin:chat` 显式化；铭牌批件聚落 src/chat/）。
  *
  * 官方默认层**首行**（Ring 2 真·可卸——overlay 禁用即首启无对话循环，宿主照启：
- * 装/守/存职能与 /plugins、/reload 壳命令完好；命题 §3.5「对话是应用不是内核」
+ * 装/守/存职能与 /apps、/reload 壳命令完好；命题 §3.5「对话是应用不是内核」
  * 的运行时证明）。
  *
  * 2026-08-26 S1 durable 键控总根因刀（多应用并行第一纵切，骨架篇 §9.3 机制定案
  * / 契约篇 §5.4 第 6 条 S1 射面）：factory 级单驱动退役为**注册表**——
  * - `DriverRegistry`：`Map<sessionId, DriverEntry>` + 前台聚焦指针 focus。
- *   注册表由组合根分配（createChatPlugin 产物）、**本件负责填充与消费**（单真相：
+ *   注册表由组合根分配（createChatApp 产物）、**本件负责填充与消费**（单真相：
  *   会话选择→durable 直连→session_start→盖章→header 差分→驱动构造一条龙全在
  *   `open()` 内化）；`/new` = open 新条目 + 切 focus + 旧条目退役（entry 的
  *   session/durable 保留——迟到结算继续落原会话账，防 seq 撞号）。
@@ -18,7 +18,7 @@
  * - ctx.agent 路由 façade：sendUserMessage 三级解析序（显式键 → 调用链 → 前台
  *   聚焦）+ 两码执法（AGENT_SESSION_INACTIVE / AGENT_SESSION_KEY_REQUIRED）；
  *   dispatch/subscribers/face 工厂级（跨 /reload 存续），/reload 重装载只重
- *   provide 服务面（驱动与时间线存续——重装载是插件面变更，不是会话变更）。
+ *   provide 服务面（驱动与时间线存续——重装载是装载面变更，不是会话变更）。
  *
  * 2026-08-26 S3 TUI 多会话呈现刀（契约篇 §5.4 S3 射面，冷读 12 条回写后形态）：
  * - **展示信封**：front.addDisplay 收 `{sessionId, event}` 信封——转接层补本会话
@@ -46,7 +46,7 @@ import type { AssistantMessage, UserMessage, MessageSource, Message, StreamFn } 
 import type { AgentMessage } from '../contracts/messages.js';
 import type { AgentEvent, AgentEventSink } from '../agent/events.js';
 import type { AgentTool } from '../contracts/tools.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { AppManifest } from '../contracts/app.js';
 import type { ContextScope, Disposer } from '../context/types.js';
 import { chainSessionId } from '../context/chain.js';
@@ -130,7 +130,7 @@ export const CHAT_APP_ID = 'chat';
 
 /** sendUserMessage 可选项（骨架篇 §9.3 签名） */
 export interface SendUserMessageOptions {
-  /** 注入归因（会话篇 §3.1 dsh-8 词汇——如 'plugin:goal'）；缺省不落字段（读侧视为 'user'） */
+  /** 注入归因（会话篇 §3.1 dsh-8 词汇——如 'app:goal'）；缺省不落字段（读侧视为 'user'） */
   readonly source?: MessageSource;
   /** true = 自激唤醒（计入自激预算 maxConsecutiveWakes——闲时 followUp 前 check、超帽降级 inject）；缺省 false（用户手写语义恢复预算） */
   readonly backgroundWake?: boolean;
@@ -150,11 +150,11 @@ export interface SendUserMessageOptions {
   readonly deliverAs?: 'steer' | 'inject';
 }
 
-/** ctx.agent 服务面（provide('agent') 的形状——插件经 inject 'agent' 结构性取得） */
+/** ctx.agent 服务面（provide('agent') 的形状——应用经 inject 'agent' 结构性取得） */
 export interface AgentServiceFace {
   /** 三通道注入（构造 UserMessage 经三级解析序路由到目标驱动；返回 void——steer 入队语义下 run 边界模糊，§9.3 ask 是等待结果的另一面 ⏳） */
   sendUserMessage(content: string | UserMessage['content'], opts?: SendUserMessageOptions): void;
-  /** 订阅 run 结算（每个 run 终结派发一次；载荷含归属 sessionId——多驱动下订阅方按其路由；Disposer 注销——挂 ctx.effect 即随插件回卷） */
+  /** 订阅 run 结算（每个 run 终结派发一次；载荷含归属 sessionId——多驱动下订阅方按其路由；Disposer 注销——挂 ctx.effect 即随应用回卷） */
   onRunSettled(cb: (settled: RunSettled) => void): Disposer;
   /**
    * 闲时重播种（compaction 纵切装配缺口第 4 件——会话篇 §2 增补 3）：以当前
@@ -316,7 +316,7 @@ export interface FrontHost {
 /** chat 件构造产物（S1 bundle：件模块 + 注册表 + 前台宿主——三者同工厂同生命周期） */
 export interface ChatRuntime {
   /** 件模块（builtins 注册表 `builtin:chat` 行） */
-  readonly module: BuiltinPluginModule;
+  readonly module: BuiltinAppModule;
   /** 会话驱动注册表（组合根侧路由/遍历消费） */
   readonly registry: DriverRegistry;
   /** 前台宿主 façade（TUI 入口消费——恒在，无驱动时 no-op 形） */
@@ -349,7 +349,7 @@ export interface ChatControls {
 }
 
 /** 件构造依赖（装配期活闭包——官方件 = 宿主装配特权，不新开 ctx 服务名） */
-export interface ChatPluginDeps {
+export interface ChatAppDeps {
   /** 启动会话策略原样透传（true = 按 cwd 续接最新；string = 显式 id；缺省 = 新建） */
   readonly resumeSession?: boolean | string;
   /**
@@ -362,7 +362,7 @@ export interface ChatPluginDeps {
   readonly app?: AppManifest;
   /** 持久层（缺省 = persist:false 诊断面——件降级空转，不起驱动不供 agent） */
   readonly persistence?: Persistence;
-  /** 根作用域（S1：open 运行于 /new 等任意时点——插件 apply ctx 已随 /reload 回卷，Ring 1 服务/总线 emit/logger 恒走根） */
+  /** 根作用域（S1：open 运行于 /new 等任意时点——应用 apply ctx 已随 /reload 回卷，Ring 1 服务/总线 emit/logger 恒走根） */
   readonly rootCtx: ContextScope;
   /** 工作区根（latestSessionId 归属键 / 会话 cwd） */
   readonly workspace: string;
@@ -387,7 +387,7 @@ export interface ChatPluginDeps {
   /** convertToLlm（loop 配置——组合根 convert 产物） */
   readonly convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   /**
-   * context_transform 桥（经根总线 waterfall——插件监听随 /reload 更替，桥本体用
+   * context_transform 桥（经根总线 waterfall——应用监听随 /reload 更替，桥本体用
    * 根 ctx 恒存活）。双参（S1，契约篇 §2.2）：sessionId 随批穿透给 handler——
    * 差分/检索等 handler 可按归属会话路由落账
    */
@@ -465,10 +465,10 @@ export interface ChatPluginDeps {
  * 构造 chat 官方件 bundle（builtins 注册表 `builtin:chat` 行 + 注册表 + 前台宿主）。
  *
  * 注册表/订阅表/服务面全为 factory 级（跨 /reload 存续）：/reload 销锚只回卷
- * provide 注册（apply 重跑即重挂），驱动条目与结算接线不动——重装载是插件面
+ * provide 注册（apply 重跑即重挂），驱动条目与结算接线不动——重装载是装载面
  * 变更，不是会话变更。
  */
-export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
+export function createChatApp(deps: ChatAppDeps): ChatRuntime {
   /* ---- factory 级状态（进程生命周期） ---- */
   /** 驱动注册表本体（开启序保序——Map 插入序即遍历序） */
   const entries = new Map<string, DriverEntry>();
@@ -714,8 +714,8 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
         ...(deps.usagePriority !== undefined ? { usagePriority: deps.usagePriority } : {}),
       });
       // session_start（契约篇 §2.2 session 层 emit 行）：会话建立/恢复闭合后必发
-      // 一次——经根 ctx emit（总线 runtime 共享，插件锚 on 互通；装载序上 boot 路
-      // 本事件先于一切消费方插件的 plugin/activated，与组合根直发形态等价）。
+      // 一次——经根 ctx emit（总线 runtime 共享，应用锚 on 互通；装载序上 boot 路
+      // 本事件先于一切消费方应用的 app/activated，与组合根直发形态等价）。
       // origin 对齐首张 header 的 reason 语义（resume = 恢复闭合含崩溃修复，initial = 新建）
       deps.rootCtx.emit('session_start', {
         sessionId: session.header.sessionId,
@@ -956,19 +956,19 @@ export function createChatPlugin(deps: ChatPluginDeps): ChatRuntime {
   };
 
   /* ---- 件模块（boot 全量接线；/reload 重装载走复用支线） ---- */
-  const module: BuiltinPluginModule = {
+  const module: BuiltinAppModule = {
     name: 'chat',
     // Ring 1 行树化批（2026-08-26）：tools 服务 apply 期经根取（ring1Anchor 先装载
     // 必居值）——装载序由 inject 声明驱动，Kahn 轮次自然排后，不再按值闭包注入
     inject: ['tools'],
-    apply: async (ctx: PluginContext) => {
+    apply: async (ctx: AppContext) => {
       // persist:false 降级：无持久层即无会话可续、无驱动可起（dump-config 诊断面
       // 不起驱动——件空转 warn；goal 等消费方经 optionalInject 降级，启动断言不响）
       if (!deps.persistence) {
         ctx.logger.warn('无持久层（persist:false）——chat 官方件空转：不建会话、不起驱动、不供 agent 服务');
         return;
       }
-      // /reload 重装载支线：注册表非空（驱动条目跨重装载存续——重装载是插件面
+      // /reload 重装载支线：注册表非空（驱动条目跨重装载存续——重装载是装载面
       // 变更不是会话变更），只重挂服务面（旧 provide 已随锚回卷）
       if (entries.size > 0) {
         ctx.provide('agent', face);

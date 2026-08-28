@@ -22,7 +22,7 @@ import {
   BRIDGE_HANDLER_FAILED,
   BRIDGE_METHOD_NOT_FOUND,
   BRIDGE_SURFACE_NARROWED,
-  PLUGIN_SHAPE_INVALID,
+  APP_SHAPE_INVALID,
 } from '../contracts/errors.js';
 import { BridgeEndpoint } from './session.js';
 import { startWorkerRealm } from './worker.js';
@@ -34,8 +34,8 @@ function makeFixtureDir(): string {
   return realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'bridge-worker-')));
 }
 
-/** 写一个 fixture 插件源文件，返回入口绝对路径 */
-function writePlugin(dir: string, file: string, source: string): string {
+/** 写一个 fixture 应用源文件，返回入口绝对路径 */
+function writeApp(dir: string, file: string, source: string): string {
   const entry = join(dir, file);
   writeFileSync(entry, source);
   return entry;
@@ -228,7 +228,7 @@ async function rejection(promise: Promise<unknown>): Promise<AppError> {
 describe('startWorkerRealm — svc.load（装载校验与元数据过界）', () => {
   it('meta 五面过界：name/手写 config schema 原样克隆、未声明字段不占位', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     const meta = await ch.host.call<Record<string, unknown>>('svc', 'load', [{ id: 'fx', entry, runtime: 'worker' }]);
     expect(meta['name']).toBe('fx-worker');
     expect(JSON.stringify(meta['config'])).toContain('greet');
@@ -239,11 +239,11 @@ describe('startWorkerRealm — svc.load（装载校验与元数据过界）', ()
     expect(meta['skills']).toBeUndefined();
   });
 
-  it('形状非法保码过界：default 非函数 → PLUGIN_SHAPE_INVALID 信封', async () => {
+  it('形状非法保码过界：default 非函数 → APP_SHAPE_INVALID 信封', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-bad.ts', FX_BAD_SHAPE);
+    const entry = writeApp(dir, 'fx-bad.ts', FX_BAD_SHAPE);
     const err = await rejection(ch.host.call('svc', 'load', [{ id: 'fx', entry }]));
-    expect(err.code).toBe(PLUGIN_SHAPE_INVALID);
+    expect(err.code).toBe(APP_SHAPE_INVALID);
   });
 });
 
@@ -252,7 +252,7 @@ describe('startWorkerRealm — svc.load（装载校验与元数据过界）', ()
 describe('startWorkerRealm — svc.apply（桩 ctx 与注册结算）', () => {
   it('全景：apply 返回即宿主注册全落定（排水语义）+ logger 上行 + config 冻结 + tryGet 快照', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', { greet: 'hi' }, { 'maybe-svc': true }]);
     // 注册排水：apply 的 result 到达 = 全部过界注册已落定（时序确定性）
@@ -270,7 +270,7 @@ describe('startWorkerRealm — svc.apply（桩 ctx 与注册结算）', () => {
 
   it('收窄面：waterfall 调用 → apply 失败信封 BRIDGE_SURFACE_NARROWED（宁响亮不静默）', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-narrow.ts', FX_NARROW);
+    const entry = writeApp(dir, 'fx-narrow.ts', FX_NARROW);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     const err = await rejection(ch.host.call('svc', 'apply', ['fx', {}, {}]));
     expect(err.code).toBe(BRIDGE_SURFACE_NARROWED);
@@ -282,7 +282,7 @@ describe('startWorkerRealm — svc.apply（桩 ctx 与注册结算）', () => {
 describe('startWorkerRealm — svc.invoke（服务分派与错误信封）', () => {
   it('方法分派：参数原样过界、返回值原样回传', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', { greet: 'hi' }, {}]);
     await expect(ch.host.call('svc', 'invoke', ['fx', 'fx/taps', 'add', [1, 2]])).resolves.toBe(3);
@@ -290,7 +290,7 @@ describe('startWorkerRealm — svc.invoke（服务分派与错误信封）', () 
 
   it('非 AppError 异常入桶：BRIDGE_HANDLER_FAILED + 原始 message', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', {}, {}]);
     const err = await rejection(ch.host.call('svc', 'invoke', ['fx', 'fx/taps', 'boom', []]));
@@ -300,7 +300,7 @@ describe('startWorkerRealm — svc.invoke（服务分派与错误信封）', () 
 
   it('缺服务/缺方法：BRIDGE_METHOD_NOT_FOUND（宁响亮不静默）', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', {}, {}]);
     const missing = await rejection(ch.host.call('svc', 'invoke', ['fx', 'fx/taps', 'nope', []]));
@@ -311,7 +311,7 @@ describe('startWorkerRealm — svc.invoke（服务分派与错误信封）', () 
 
   it('宿主→worker 保码链：桩 ctx get(...) 的调用错误信封回 worker 保码（AppError 家族词）', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-env.ts', FX_ENVELOPE);
+    const entry = writeApp(dir, 'fx-env.ts', FX_ENVELOPE);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', {}, {}]);
     // 宿主 svc-invoke 桩抛 METHOD_NOT_FOUND → worker 桩 catch 后码写进可读面
@@ -325,7 +325,7 @@ describe('startWorkerRealm — svc.invoke（服务分派与错误信封）', () 
 describe('startWorkerRealm — evt 回投与 tool-invoke', () => {
   it('宿主 tell(evt) → worker 行处理器收到参数', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', {}, {}]);
     ch.host.tell('evt', { rowId: 'fx', event: 'fx/tick', args: [7] });
@@ -337,7 +337,7 @@ describe('startWorkerRealm — evt 回投与 tool-invoke', () => {
 
   it('tool-invoke：执行体留在 worker 域、宿主侧只发载荷；缺执行体 METHOD_NOT_FOUND', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', {}, {}]);
     const result = (await ch.host.call('svc', 'tool-invoke', ['fx', 'fx/wt', { x: 1 }, { toolCallId: 'tc-1' }])) as {
@@ -354,7 +354,7 @@ describe('startWorkerRealm — evt 回投与 tool-invoke', () => {
 describe('startWorkerRealm — unload 与 apply 失败回卷', () => {
   it('unload：effect 栈 LIFO 逆序回卷（d2 → d1）+ 行状态清（后续 invoke 拒绝）', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-main.ts', FX_MAIN);
+    const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     await ch.host.call('svc', 'apply', ['fx', {}, {}]);
     const logsBefore = ch.logs.filter((l) => l.message === 'd1' || l.message === 'd2').length;
@@ -371,12 +371,12 @@ describe('startWorkerRealm — unload 与 apply 失败回卷', () => {
 
   it('apply 失败同路回卷：reject 保码 + worker 行状态自清（宿主侧回卷归装载器）', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-fail.ts', FX_FAIL);
+    const entry = writeApp(dir, 'fx-fail.ts', FX_FAIL);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     const err = await rejection(ch.host.call('svc', 'apply', ['fx', {}, {}]));
     expect(err.code).toBe(BRIDGE_HANDLER_FAILED);
     expect(err.message).toContain('apply 半途爆炸');
-    // worker 侧行状态已清：服务不可再达（宿主侧 provide 回卷由 loadPlugins 收尾）
+    // worker 侧行状态已清：服务不可再达（宿主侧 provide 回卷由 loadApps 收尾）
     const gone = await rejection(ch.host.call('svc', 'invoke', ['fx', 'fx/fail-taps', 'ok', []]));
     expect(gone.code).toBe(BRIDGE_METHOD_NOT_FOUND);
   });
@@ -387,7 +387,7 @@ describe('startWorkerRealm — unload 与 apply 失败回卷', () => {
 describe('startWorkerRealm — 取消传播（apply 的入站 signal）', () => {
   it('宿主 abort → 本地立即结算 BRIDGE_CANCELLED；worker 观测 ctx.signal 后返还的迟到 result 被丢弃观测吸收', async () => {
     const { ch, dir } = setup();
-    const entry = writePlugin(dir, 'fx-hang.ts', FX_HANG);
+    const entry = writeApp(dir, 'fx-hang.ts', FX_HANG);
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     const ctl = new AbortController();
     const applied = ch.host.call('svc', 'apply', ['fx', {}, {}], { signal: ctl.signal });

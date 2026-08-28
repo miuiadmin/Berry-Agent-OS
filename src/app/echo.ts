@@ -11,12 +11,12 @@
  * 恒拒绝，本件经测试装配面以普通第三方形态注入组合树）；「官方件永 main」
  * 拍板管的是产品官方件不为隔离陪迁——Echo 恰要付税跑 worker 验证协议。
  *
- * 类型面：从 `berryagent` 虚拟面取 PluginContext/ToolsService（与第三方作者
+ * 类型面：从 `berryagent` 虚拟面取 AppContext/ToolsService（与第三方作者
  * 同一导入面——宿主自养 gated 件不搞特权后门；`import type` 编译期擦除，
  * worker 域 jiti 转译后零运行时 import，双域装载管线同一份源码）。tsconfig
  * paths 把 berryagent 指向 contracts——类型面唯一源；运行时由加载器虚拟注入。
  */
-import type { PluginContext, ToolsService } from 'berryagent';
+import type { AppContext, ToolsService } from 'berryagent';
 
 // 事件词汇 echo/tick 唯一声明在 LIVE_EVENT_CATALOG（宿主目录，contracts/events.ts）：
 // 本件**不**以 named export events 再声明——双拓扑 parity 同源两行（echo-main /
@@ -33,7 +33,7 @@ export const name = 'echo';
  * @param ctx 装载器注入的作用域（main = 真 fork 作用域 / worker = 桥接代理桩）
  * @param config 组合树行 config（slot = 服务/工具命名参数，缺省 'x'）
  */
-export default async function apply(ctx: PluginContext, config?: Readonly<Record<string, unknown>>): Promise<void> {
+export default async function apply(ctx: AppContext, config?: Readonly<Record<string, unknown>>): Promise<void> {
   /** 行内轨迹（effect 上下/事件往返的观测面——trace() 过界取快照） */
   const trace: string[] = [];
   const rawSlot = config?.['slot'];

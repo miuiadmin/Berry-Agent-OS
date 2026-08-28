@@ -1,7 +1,7 @@
 /**
  * L0 contracts — 通道命令公共类型（骨架篇 §9.3；2026-08-27 第三十三批 P2-1
  * M4 + 类型同律下沉：CommandDefinition/CommandCompletionItem 自 channels 模块
- * 迁入——插件面（ctx.channels.registerCommand 的参数类型）引用的类型住
+ * 迁入——装载面（ctx.channels.registerCommand 的参数类型）引用的类型住
  * contracts，与 SkillsProvider 五符号下沉同病同修；channels/types.ts 改再
  * 导出，旧消费面零改动）。
  */
@@ -39,7 +39,7 @@ export interface CommandDefinition {
   getArgumentCompletions?(
     argumentPrefix: string,
   ): readonly CommandCompletionItem[] | null | Promise<readonly CommandCompletionItem[] | null>;
-  /** 来源标记（'builtin' | 'skill' | 'plugin'；缺省 'builtin'） */
+  /** 来源标记（'builtin' | 'skill' | 'app'；缺省 'builtin'） */
   readonly source?: string;
   /** 命令体（args 为命令名后的剩余文本；抛错由通道壳兜底为通知） */
   handler(args: string): void | Promise<void>;

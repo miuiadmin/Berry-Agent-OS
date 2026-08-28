@@ -1,19 +1,19 @@
 ---
 name: admin
-description: 平台管理面工具的操作知识：只读两件（plugins_list 看插件装载态、events_query 跨会话查 durable 事件日志）+ 写类动词六件（安装/更新/启停/配置/重载五写词——审批对形态与 install→reload 链式用法；卸载检视——报告后指引人工执行）。回答「装了什么插件」「怎么装/禁用/改配置某插件」「最近发生了什么」类管理运维问题时的用法与边界。
+description: 平台管理面工具的操作知识：只读两件（apps_list 看应用装载态、events_query 跨会话查 durable 事件日志）+ 写类动词六件（安装/更新/启停/配置/重载五写词——审批对形态与 install→reload 链式用法；卸载检视——报告后指引人工执行）。回答「装了什么应用」「怎么装/禁用/改配置某应用」「最近发生了什么」类管理运维问题时的用法与边界。
 ---
 
 # 管理面工具（只读两件 + 写类六件）
 
-你手上有八个管理工具：两件只读（无副作用、无需审批）、五件写类（改变插件组合——**恒需审批**）、一件卸载检视（只读但服务于卸载流程）。本技能教用法、审批形态与流程编排。
+你手上有八个管理工具：两件只读（无副作用、无需审批）、五件写类（改变应用组合——**恒需审批**）、一件卸载检视（只读但服务于卸载流程）。本技能教用法、审批形态与流程编排。
 
 ## 只读两件
 
-### plugins_list：插件装载态一览
+### apps_list：应用装载态一览
 
 - 无参数。返回组合树全部行：状态（`activated` / `failed` / `skipped` / `planned`）、来源（`builtin` / `npm` / `git` / `local`）、失败原因、apply 耗时。
-- 适用问题：「装了哪些插件」「某插件加载失败的原因」「装载耗时谁最慢」。
-- `planned` 行 = 尚未装载或入口解析失败（unresolved）——overlay 引用了不存在/未安装的插件时行停在此态。
+- 适用问题：「装了哪些应用」「某应用加载失败的原因」「装载耗时谁最慢」。
+- `planned` 行 = 尚未装载或入口解析失败（unresolved）——overlay 引用了不存在/未安装的应用时行停在此态。
 - 状态清单的唯一事实源是组合树；本工具只是它的文本化呈现，不会出现「工具说装了但实际没装」的分裂。
 - **写类动词动手前先看它**——行 id 以清单为准，勿凭记忆拼 id。
 
@@ -26,7 +26,7 @@ description: 平台管理面工具的操作知识：只读两件（plugins_list 
 | 参数              | 形态            | 说明                                                                                                            |
 | ----------------- | --------------- | --------------------------------------------------------------------------------------------------------------- |
 | `since` / `until` | ISO 8601 字符串 | 时间窗，**含端点闭区间**；缺省无界。写毫秒数易错，一律用 ISO（如 `2026-08-27T00:00:00Z`）                       |
-| `types`           | 字符串数组      | 事件类型过滤（如 `["user/message","llm/usage"]`）。**数据条件非断言**：查已卸载插件留下的旧词汇返回空集，不报错 |
+| `types`           | 字符串数组      | 事件类型过滤（如 `["user/message","llm/usage"]`）。**数据条件非断言**：查已卸载应用留下的旧词汇返回空集，不报错 |
 | `app`             | 字符串          | 应用域过滤（如 `"chat"`）——按会话归属应用过滤                                                                   |
 | `sessionId`       | 字符串          | 单会话细查（退化用法）                                                                                          |
 | `limit`           | 整数            | 页大小，缺省 200、硬帽 1000（超帽自动钳制并标注）                                                               |
@@ -36,11 +36,11 @@ description: 平台管理面工具的操作知识：只读两件（plugins_list 
 
 - 行序 = 最新在前；每行 `ISO 时间 · 会话短 id · 类型 · data 摘要`（摘要截断到约 300 字符，截断会标注全文长度）。
 - 末尾若给出 `nextCursor` = 还有更旧的事件，回传它继续翻；翻完为止。
-- `types` 过滤结果为空时先核对拼写；已卸载插件的事件类型查空是正常语义（词没了、事件还在库里，但你的过滤词必须与库中存的 type 字面一致）。
+- `types` 过滤结果为空时先核对拼写；已卸载应用的事件类型查空是正常语义（词没了、事件还在库里，但你的过滤词必须与库中存的 type 字面一致）。
 
 ## 写类五件：审批对形态（所有写词通用）
 
-`plugins_install` / `plugins_update` / `plugins_toggle` / `plugins_configure` / `plugins_reload` 改变插件组合，**每次调用恒经人手审批**——参数面必带审批对：
+`apps_install` / `apps_update` / `apps_toggle` / `apps_configure` / `apps_reload` 改变应用组合，**每次调用恒经人手审批**——参数面必带审批对：
 
 - `sandbox_permissions`：授权目标档，`workspace-write` 或 `danger-full-access`（别值会被参数校验拒绝）。
 - `justification`：一句话理由——弹窗里给人看的，说明**做什么与为什么**（空串非法）。
@@ -48,7 +48,7 @@ description: 平台管理面工具的操作知识：只读两件（plugins_list 
 行为语义：
 
 - 人批（allowed-once）→ 动作执行；拒绝/取消/无人应答 → 返回 isError 结果，**动作未发生**。
-- 拒绝是最终的：不要就同一请求重试；向用户说明被拒情况，用户可自己走命令面（`/plugin-install`、`/plugin-toggle`、`/reload` 等始终可用）。
+- 拒绝是最终的：不要就同一请求重试；向用户说明被拒情况，用户可自己走命令面（`/apps-install`、`/apps-toggle`、`/reload` 等始终可用）。
 - 无头/无人值守环境无人应答 → unavailable，同样未执行。
 
 ## 流程编排：install→reload 链式用法（核心心智模型）
@@ -56,36 +56,36 @@ description: 平台管理面工具的操作知识：只读两件（plugins_list 
 五个写词**每个只做一段**，落盘与生效分离——动词单职责，链式可见：
 
 ```
-plugins_list            （看现状，拿准确行 id）
+apps_list            （看现状，拿准确行 id）
    ↓
-plugins_install / plugins_update / plugins_toggle / plugins_configure
+apps_install / apps_update / apps_toggle / apps_configure
    ↓（只写 overlay，未生效——回执里会说明）
-plugins_reload          （重载组合树，一切落盘变更在此生效）
+apps_reload          （重载组合树，一切落盘变更在此生效）
    ↓
-plugins_list            （验证：状态是否如期）
+apps_list            （验证：状态是否如期）
 ```
 
-- **装好 ≠ 生效**：install/update/toggle/configure 的回执都提示「重载后生效」——改完组合树，调 `plugins_reload` 收尾。
-- `plugins_reload` 在 run 进行中不拒绝而是**排队**（回执说明已排队）：run 结算后自动执行，结果经通知送达——收到 queued 不要再发。
-- 重载有失败行时进程存活、旧注册已回卷：`plugins_list` 看逐行原因（多为 overlay 配置错或插件装坏），修复后再 reload。
-- **Ring 1 行例外**（当前 = tools）：其 plugin/config 变更不随 /reload 热装载，回执会注明须重启进程——如实转告用户，不要反复 reload 空转。
+- **装好 ≠ 生效**：install/update/toggle/configure 的回执都提示「重载后生效」——改完组合树，调 `apps_reload` 收尾。
+- `apps_reload` 在 run 进行中不拒绝而是**排队**（回执说明已排队）：run 结算后自动执行，结果经通知送达——收到 queued 不要再发。
+- 重载有失败行时进程存活、旧注册已回卷：`apps_list` 看逐行原因（多为 overlay 配置错或应用装坏），修复后再 reload。
+- **Ring 1 行例外**（当前 = tools）：其 app/config 变更不随 /reload 热装载，回执会注明须重启进程——如实转告用户，不要反复 reload 空转。
 
 各词要点：
 
 | 工具 | 关键参数 | 语义 |
 |------|----------|------|
-| `plugins_install` | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + overlay 写回；行 id 由源推导（npm=包名 / git=repo 名 / local=目录名） |
-| `plugins_update` | `id` | npm 重装 / git 按原 ref 重克隆 / local 改动即见 |
-| `plugins_toggle` | `id` | 启停翻转；Ring 1 必备行与 fixed 行禁用即拒（设计行为） |
-| `plugins_configure` | `id` + `config`（patch 对象） | **顶层键整值替换**：要改哪些键就带哪些键，未列出的键保持现值，不做深合并；经插件声明 schema 校验，不过即拒且不落盘；禁用/未装/未激活行拒写 |
-| `plugins_reload` | 无（仅审批对） | 全树卸载重装；排队语义见上 |
+| `apps_install` | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + overlay 写回；行 id 由源推导（npm=包名 / git=repo 名 / local=目录名） |
+| `apps_update` | `id` | npm 重装 / git 按原 ref 重克隆 / local 改动即见 |
+| `apps_toggle` | `id` | 启停翻转；Ring 1 必备行与 fixed 行禁用即拒（设计行为） |
+| `apps_configure` | `id` + `config`（patch 对象） | **顶层键整值替换**：要改哪些键就带哪些键，未列出的键保持现值，不做深合并；经应用声明 schema 校验，不过即拒且不落盘；禁用/未装/未激活行拒写 |
+| `apps_reload` | 无（仅审批对） | 全树卸载重装；排队语义见上 |
 
-## plugins_uninstall_inspect：卸载检视（执行权在人）
+## apps_uninstall_inspect：卸载检视（执行权在人）
 
 卸载是两段式，**你只做前半**：
 
-1. `plugins_uninstall_inspect(id)` → 只读预检报告：行现状、装机物与共享行、数据域体积、自定义事件词与受影响会话数、级联警示（非 ignorable 词已落历史会话时会有「会话变砖」强警示——呈报时原样转达，不要淡化）。
-2. 把报告呈给用户，**由用户执行** `/plugin-uninstall <id> --confirm`（加 `--purge-data` 连数据域清除，默认保留）。你没有卸载执行动词——这不是能力缺口，是三档分级的设计：卸载执行权恒在人。
+1. `apps_uninstall_inspect(id)` → 只读预检报告：行现状、装机物与共享行、数据域体积、自定义事件词与受影响会话数、级联警示（非 ignorable 词已落历史会话时会有「会话变砖」强警示——呈报时原样转达，不要淡化）。
+2. 把报告呈给用户，**由用户执行** `/apps-uninstall <id> --confirm`（加 `--purge-data` 连数据域清除，默认保留）。你没有卸载执行动词——这不是能力缺口，是三档分级的设计：卸载执行权恒在人。
 
 Ring 1 底座行拒卸是设计行为（换实现走 install 同 id 覆盖引用）。
 

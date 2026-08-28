@@ -8,7 +8,7 @@
  * 父注册表应用域视角 listFor(父 app)——驱动层内容结构上不在面，排除集随三层
  * 解缠退役；自建 fs 族，toolFilter include 过滤）→ 审批 never + 守门行（父
  * 档**快照**——§6.5 委托时点常量闭包）+ **守门行传导**（第三十一批 P1-4：
- * 根总线插件行 pre+post 两段委托时点快照 append 进子链——owner 前缀 + main
+ * 根总线应用行 pre+post 两段委托时点快照 append 进子链——owner 前缀 + main
  * 行集判据、固定行/worker 行排除）→ forkSession(origin:'delegation')（无父/
  * 无持久层降级内存 Session）→ 根总线发 session_start → startRun 一次性驱动
  * （context 腿：请求携带 context 时父闭合边界投影尾 N 轮作消息种子）→
@@ -56,13 +56,13 @@ export interface SubagentFactoryDeps {
   readonly workspace: string;
   /** 父沙箱档位（§6.5 快照语义：委托时点的父档，子装配内常量） */
   readonly sandboxMode: SandboxMode;
-  /** 根总线（session_start/session_shutdown 的 keyed 通知面——插件在根作用域；
+  /** 根总线（session_start/session_shutdown 的 keyed 通知面——应用在根作用域；
    *  亦为守门行传导的快照源） */
   readonly rootCtx: ContextScope;
   /**
    * 守门行传导判据（2026-08-27 第三十一批 P1-4——骨架篇 §6.1「守门行传导 +
-   * context 腿」条）：`anchors` = 插件装载锚的 owner **完整前缀集**（`'app:plugins:'`
-   * 形——装配层从 fork 起名处构造，静态两锚）；`mainRows` = main 插件行 id 集
+   * context 腿」条）：`anchors` = 应用装载锚的 owner **完整前缀集**（`'app:apps:'`
+   * 形——装配层从 fork 起名处构造，静态两锚）；`mainRows` = main 应用行 id 集
    * **活取**（每次委派取一次 = 委托时点快照；worker 行排除——桥转发器是 emit
    * 签名形态，进 waterfall 不调 next 即吞链）。固定行（owner = 根名）无锚前缀
    * 结构性排除——子代理审批 never 无人值守语义不被根面交互审批冒破。
@@ -185,7 +185,7 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
 
     /* ---- ⑤b 守门行传导（第三十一批 P1-4：委托时点快照传导——骨架篇 §6.1
      * 「守门行传导 + context 腿」条）----
-     * 根总线插件行 pre+post 两段 append 进子链（子固定行之后、按根链注册序）——
+     * 根总线应用行 pre+post 两段 append 进子链（子固定行之后、按根链注册序）——
      * 挖矿 B10「固定行进得了子管道、开放行进不去」的不对称收口。判据 = owner
      * 完整前缀 ∈ 锚集 + 行 id ∈ main 集（worker 行排除；固定行 owner = 根名
      * 结构性排除——子审批 never 不被根面交互审批冒破）。传导的是 handler 引用
@@ -204,7 +204,7 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
       }
     }
 
-    /* ---- ⑥ delegation fork 上总线：session_start（插件 keyed 初始化子会话态——
+    /* ---- ⑥ delegation fork 上总线：session_start（应用 keyed 初始化子会话态——
      * 与 durable session/event 镜像同总线，载荷 sessionId 即归属键）---- */
     deps.rootCtx.emit('session_start', { sessionId: session.header.sessionId, origin: 'delegation' });
 
@@ -258,7 +258,7 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
     const disposer = createChildSessionDisposer({
       persistence: deps.persistence ?? NOOP_BARRIER,
       sessionId: session.header.sessionId,
-      // 转发体：session_shutdown 派发/日志转发根总线（插件在根——与 ⑥ 对称；目录
+      // 转发体：session_shutdown 派发/日志转发根总线（应用在根——与 ⑥ 对称；目录
       // mode=parallel，bounded 等待住 child disposer 内公共件——二十九批增补 8②），
       // dispose 落子本尊
       childCtx: {

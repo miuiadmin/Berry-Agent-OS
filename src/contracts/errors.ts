@@ -89,7 +89,7 @@ export const CONTEXT_SERVICE_NAME_INVALID = registerErrorCode('CONTEXT_SERVICE_N
 export const CONTEXT_DISPOSED = registerErrorCode('CONTEXT_DISPOSED');
 /**
  * context：ctx.effect 回调返回值不是函数（Disposer 契约违规）。
- * 注册期即拒而非回卷期爆炸——jiti 直载的插件代码无类型护栏，文档化的
+ * 注册期即拒而非回卷期爆炸——jiti 直载的应用代码无类型护栏，文档化的
  * 「fn 返回值入栈」契约必须配运行时校验补位（2026-08-25 Hermes 探针 #13）。
  */
 export const CONTEXT_EFFECT_INVALID = registerErrorCode('CONTEXT_EFFECT_INVALID');
@@ -114,9 +114,9 @@ export const TOOL_DUPLICATE = registerErrorCode('TOOL_DUPLICATE');
 /** tools：工具描述命中注入模式拒绝注册（注册面描述扫描，契约篇 §3.2/§6.6——描述是进模型上下文的文本，管道进 shell 形态 = 描述面执行漏洞） */
 export const TOOL_DESCRIPTION_REJECTED = registerErrorCode('TOOL_DESCRIPTION_REJECTED');
 /**
- * tools：注册面 timeoutMs 非法（<= 0——契约篇 §1.6 注册预算下限：插件面注册
+ * tools：注册面 timeoutMs 非法（<= 0——契约篇 §1.6 注册预算下限：装载面注册
  * 不许自管取消语义；「0 = 不设预算」保留给宿主内部合成 def（不经注册面）。
- * 拒绝式而非钳到 0：钳制会静默改变行为（插件以为无预算，长任务被杀还以为自管
+ * 拒绝式而非钳到 0：钳制会静默改变行为（应用以为无预算，长任务被杀还以为自管
  * 取消有效）——fail-loud。正数过小（< 1000ms）另钳至下限（存归一副本，不拒）。
  * 2026-08-27 刀〇a。
  */
@@ -125,7 +125,7 @@ export const TOOL_TIMEOUT_INVALID = registerErrorCode('TOOL_TIMEOUT_INVALID');
 /** mcp：connect 期一码收口（spawn 失败/握手失败/startup 超时/相对路径 command——契约篇 §6.6；运行期服务器错误是数据不升 AppError） */
 export const MCP_CONNECT_FAILED = registerErrorCode('MCP_CONNECT_FAILED');
 
-/** prompts：具名提示词段 id 非法（须小写含 `/` 插件域前缀，如 `memory/core`——防撞宿主自留地；pi-4(a) 拍板，契约篇 §1.3 落码形态①） */
+/** prompts：具名提示词段 id 非法（须小写含 `/` 应用域前缀，如 `memory/core`——防撞宿主自留地；pi-4(a) 拍板，契约篇 §1.3 落码形态①） */
 export const PROMPT_SECTION_INVALID = registerErrorCode('PROMPT_SECTION_INVALID');
 /** prompts：具名提示词段撞名（段 id 已注册——与 TOOL_DUPLICATE 同纪律，拒绝静默覆盖） */
 export const PROMPT_SECTION_DUPLICATE = registerErrorCode('PROMPT_SECTION_DUPLICATE');
@@ -176,13 +176,13 @@ export const SESSION_EVENT_TOO_LARGE = registerErrorCode('SESSION_EVENT_TOO_LARG
 export const SESSION_SURFACE_OP_INVALID = registerErrorCode('SESSION_SURFACE_OP_INVALID');
 /** session：fork 边界非法（落在 open turn 内——必须落在 turn 闭合之后，会话篇 §5） */
 export const SESSION_FORK_BOUNDARY_INVALID = registerErrorCode('SESSION_FORK_BOUNDARY_INVALID');
-/** session：插件经 ctx.sessions.appendEvent 伪造核心事件词汇（user/message 等内核词的写入权属宿主——归因/审批/结算语义绑在宿主写点，插件面只许自注册词汇） */
+/** session：应用经 ctx.sessions.appendEvent 伪造核心事件词汇（user/message 等内核词的写入权属宿主——归因/审批/结算语义绑在宿主写点，装载面只许自注册词汇） */
 export const SESSION_CORE_TYPE_FORBIDDEN = registerErrorCode('SESSION_CORE_TYPE_FORBIDDEN');
 /** persist：write-behind 批量落盘失败（批次保留、自动重试暂停，显式 flush 重试——会话篇 §6 链第 2 步） */
 export const PERSIST_BATCH_WRITE_FAILED = registerErrorCode('PERSIST_BATCH_WRITE_FAILED');
 /** agent：自定义消息角色重复注册或与标准角色（user/assistant/toolResult）冲突（骨架篇 §2.3 显式注册纪律） */
 export const AGENT_ROLE_EXISTS = registerErrorCode('AGENT_ROLE_EXISTS');
-/** agent：自定义消息角色名格式非法——插件面必含 / 域前缀、宿主面无 / 单段（骨架篇 §2.3 落码注记双入口纪律） */
+/** agent：自定义消息角色名格式非法——装载面必含 / 域前缀、宿主面无 / 单段（骨架篇 §2.3 落码注记双入口纪律） */
 export const AGENT_ROLE_INVALID = registerErrorCode('AGENT_ROLE_INVALID');
 /** agent：continueRun 续入点非法——末消息经 convertToLlm 后必须是 user 或 toolResult（骨架篇 §2.1） */
 export const AGENT_CONTINUE_INVALID = registerErrorCode('AGENT_CONTINUE_INVALID');
@@ -208,56 +208,56 @@ export const SANDBOX_ESCALATION_INVALID = registerErrorCode('SANDBOX_ESCALATION_
 export const SANDBOX_MODE_INVALID = registerErrorCode('SANDBOX_MODE_INVALID');
 
 /* ------------------------------------------------------------------ */
-/* 插件加载器码族（契约篇 §6.2 落码 2026-08-23 M2 加载器本体纵切）——     */
+/* 应用加载器码族（契约篇 §6.2 落码 2026-08-23 M2 加载器本体纵切）——     */
 /* 逐行失败进启动断言清单（§1.6 apply 抛错即响，不静默跳过不带病运行）。 */
 /* ------------------------------------------------------------------ */
 
 /** plugin：模块 import 失败（jiti 转译/执行入口文件抛错——语法错、依赖缺等） */
-export const PLUGIN_LOAD_FAILED = registerErrorCode('PLUGIN_LOAD_FAILED');
+export const APP_LOAD_FAILED = registerErrorCode('APP_LOAD_FAILED');
 /** plugin：模块形状非法（default 非函数 / name 缺失或非字符串 / inject/optionalInject 非 string[] / config schema 非法——契约篇 §1.1/§1.2 单形状纪律） */
-export const PLUGIN_SHAPE_INVALID = registerErrorCode('PLUGIN_SHAPE_INVALID');
-/** plugin：组合树行 config 未通过插件声明的 schema（启动一次性校验失败即响，契约篇 §1.2） */
-export const PLUGIN_CONFIG_INVALID = registerErrorCode('PLUGIN_CONFIG_INVALID');
+export const APP_SHAPE_INVALID = registerErrorCode('APP_SHAPE_INVALID');
+/** plugin：组合树行 config 未通过应用声明的 schema（启动一次性校验失败即响，契约篇 §1.2） */
+export const APP_CONFIG_INVALID = registerErrorCode('APP_CONFIG_INVALID');
 /** plugin：inject 依赖无法满足（缺提供方或依赖环——轮次激活零进展即判，即刻响亮并列 pending 清单，不做墙上钟超时） */
-export const PLUGIN_INJECT_UNRESOLVED = registerErrorCode('PLUGIN_INJECT_UNRESOLVED');
+export const APP_INJECT_UNRESOLVED = registerErrorCode('APP_INJECT_UNRESOLVED');
 /** plugin：apply 执行抛错（message 载原始错误；作用域 LIFO 回卷半途注册，失败行不留残骸） */
-export const PLUGIN_APPLY_FAILED = registerErrorCode('PLUGIN_APPLY_FAILED');
+export const APP_APPLY_FAILED = registerErrorCode('APP_APPLY_FAILED');
 /**
  * plugin：apply 挂起超时（缺省 10s——契约篇 §1.6 挂起转化条款时钟族之一：异步
  * 挂起与抛错同族，永不 resolve 且已返还控制按故障收尾；超时先回卷本作用域再进
  * 失败清单，迟到 reject 由装载器吞掉不进 unhandledRejection）。
  * 2026-08-27 刀〇a（隔离案一第二刀上半）。
  */
-export const PLUGIN_APPLY_TIMEOUT = registerErrorCode('PLUGIN_APPLY_TIMEOUT');
+export const APP_APPLY_TIMEOUT = registerErrorCode('APP_APPLY_TIMEOUT');
 /**
  * plugin：per-scope 事件派发频率超限（缺省 1000 次/分钟令牌桶——契约篇 §1.6
- * 事件频率护栏：失控插件高频派发会撑爆监听器面与 durable 落点，超限 fail-loud
+ * 事件频率护栏：失控应用高频派发会撑爆监听器面与 durable 落点，超限 fail-loud
  * 抛错而非静默丢弃；按**派发方**作用域分桶；宿主根作用域免计费——B-1 冷读
  * 裁决：root 桶实为全部会话流量的复用汇〔session/event 镜像 + tools_change
- * 广播〕，计费会在宿主写路径内自杀，插件永不持有 root 作用域〔fork 派生新名〕。
+ * 广播〕，计费会在宿主写路径内自杀，应用永不持有 root 作用域〔fork 派生新名〕。
  * 刀〇a 落码 / 刀〇b 修正注记）。
  */
-export const PLUGIN_EVENT_RATE = registerErrorCode('PLUGIN_EVENT_RATE');
-/** plugin：组合树行引用的插件入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
-export const PLUGIN_ENTRY_UNRESOLVED = registerErrorCode('PLUGIN_ENTRY_UNRESOLVED');
-/** plugin：import 来源门禁越界（依赖图说明符不在白名单三道——虚拟面六键 / node: 内建 / 插件目录树内；jiti transform 全图静态扫描执法，契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） */
-export const PLUGIN_IMPORT_FORBIDDEN = registerErrorCode('PLUGIN_IMPORT_FORBIDDEN');
+export const APP_EVENT_RATE = registerErrorCode('APP_EVENT_RATE');
+/** plugin：组合树行引用的应用入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
+export const APP_ENTRY_UNRESOLVED = registerErrorCode('APP_ENTRY_UNRESOLVED');
+/** plugin：import 来源门禁越界（依赖图说明符不在白名单三道——虚拟面六键 / node: 内建 / 应用目录树内；jiti transform 全图静态扫描执法，契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） */
+export const APP_IMPORT_FORBIDDEN = registerErrorCode('APP_IMPORT_FORBIDDEN');
 /** plugin：第六键 berryagent/sqlite 包装拒开主库（自管库路径命中解析后主库绝对路径即抛——与 IMPORT_FORBIDDEN 分立：一管 import 门禁、一管库句柄门禁，契约篇 §1.2 注记①） */
-export const PLUGIN_MAIN_DB_FORBIDDEN = registerErrorCode('PLUGIN_MAIN_DB_FORBIDDEN');
+export const APP_MAIN_DB_FORBIDDEN = registerErrorCode('APP_MAIN_DB_FORBIDDEN');
 /**
  * plugin：uninstall 拒卸 Ring 1 必备行 / fixed 安全栈强制点行（契约篇 §3.4 第二刀：
  * 卸掉该行首启核心循环「问→做→存」必破——内核边界篇 §5.1 一句话判据在卸载面的
  * 投影；缺省层替换语义 = overlay 可换实现引用不可移除行。Ring 1 行要换实现走
  * install 同 id 覆盖引用，不是卸载）。2026-08-27 刀 2。
  */
-export const PLUGIN_FIXED_ROW = registerErrorCode('PLUGIN_FIXED_ROW');
+export const APP_FIXED_ROW = registerErrorCode('APP_FIXED_ROW');
 /** composition：组合树行 schema 违规（overlay 缺 id / 字段类型错 / 未知字段 / fixed 行被禁用——pre-release 拒绝式，契约篇 §6.5） */
 export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');
 /**
  * skills：registerProvider 注册时点首调形状断言不过（骨架篇 §9.2，2026-08-27
  * 第三十三批 P2-1 B12）。防注册时点两路静默：① provider.list() 返回退化形
  * （缺 skills/diagnostics 键/元素非对象）——此前要到首次 refresh 才以裸
- * TypeError 炸（栈指向 merge 不指插件）；② list() 本身抛错——此前 refresh 期
+ * TypeError 炸（栈指向 merge 不指应用）；② list() 本身抛错——此前 refresh 期
  * 降 provider-failed 警告，「装上了但永远空」注册时点无感。断言只在注册入口
  * 一次（不随 refresh 重复）；运行期退化形由 refresh 的数组守卫降 warning。
  */
@@ -291,7 +291,7 @@ export const BRIDGE_SURFACE_NARROWED = registerErrorCode('BRIDGE_SURFACE_NARROWE
 export const EVENT_UNKNOWN = registerErrorCode('EVENT_UNKNOWN');
 /** events：自定义事件登记撞名（与目录或已登记 custom 重名——词汇表拒绝静默覆盖，契约篇 §1.2 events 第四件） */
 export const EVENT_DUPLICATE = registerErrorCode('EVENT_DUPLICATE');
-/** events：派发方法与事件声明的 mode 不一致（mode 是事件公开契约的一部分——插件侧静态 CI 罩不住，运行时执法） */
+/** events：派发方法与事件声明的 mode 不一致（mode 是事件公开契约的一部分——应用侧静态 CI 罩不住，运行时执法） */
 export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
 /**
  * events：waterfall 钩子消费点挂起超时（缺省 5s——契约篇 §1.6 时钟族：loop
@@ -302,14 +302,14 @@ export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
  */
 export const EVENT_HANDLER_TIMEOUT = registerErrorCode('EVENT_HANDLER_TIMEOUT');
 /** plugin：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
-export const PLUGIN_INSTALL_FAILED = registerErrorCode('PLUGIN_INSTALL_FAILED');
+export const APP_INSTALL_FAILED = registerErrorCode('APP_INSTALL_FAILED');
 
 /* ------------------------------------------------------------------ */
 /* Job 注册表码族（运行时骨架篇 §6.2 落码注记，2026-08-24 subagent 纵切一） */
 /* ——kind 词汇与事件词汇同纪律：显式注册、未注册即响亮拒绝。            */
 /* ------------------------------------------------------------------ */
 
-/** jobs：创建 Job 用了未注册的 kind（内置 'subagent'/'process'；插件自定义须先 registerKind——反模式 #4「宁拒绝不静默丢」对偶面） */
+/** jobs：创建 Job 用了未注册的 kind（内置 'subagent'/'process'；应用自定义须先 registerKind——反模式 #4「宁拒绝不静默丢」对偶面） */
 export const JOB_KIND_UNKNOWN = registerErrorCode('JOB_KIND_UNKNOWN');
 /** jobs：JobKind 登记撞名（与内置或已登记 kind 重名——词汇表拒绝静默覆盖） */
 export const JOB_KIND_DUPLICATE = registerErrorCode('JOB_KIND_DUPLICATE');
@@ -335,7 +335,7 @@ export const SUBAGENT_DEPTH_EXCEEDED = registerErrorCode('SUBAGENT_DEPTH_EXCEEDE
 /* ------------------------------------------------------------------ */
 /* agent 服务码族（运行时骨架篇 §9.3 ctx.agent，2026-08-24 goal 纵切一；  */
 /* 2026-08-24 应用面第一纵切起服务与驱动同件同生命周期——无游离态，      */
-/* DETACHED 码退役）——sendUserMessage 是插件注入正门：预留位一律响亮拒绝。 */
+/* DETACHED 码退役）——sendUserMessage 是应用注入正门：预留位一律响亮拒绝。 */
 /* ------------------------------------------------------------------ */
 
 /** agent：sendUserMessage 显式携带 deliverAs（'steer'/'inject' 定向投递为 M2+ 预留位——缺省三通道自适应即全部现行业务所需，显式指定即拒不做半实现） */

@@ -14,39 +14,39 @@
  * assembly 零改动）。
  */
 
-import { createMemoryPlugin, type MemoryPluginStoreFace, migrations as memoryMigrations } from '../memory/index.js';
-import { createGoalPlugin, migrations as goalMigrations } from '../goal/index.js';
-import { createSchedulerPlugin, migrations as schedulerMigrations } from '../scheduler/index.js';
-import type { SchedulerPluginDeps } from '../scheduler/index.js';
-import { createMcpPlugin } from '../mcp/index.js';
-import type { McpPluginDeps } from '../mcp/index.js';
-import { createWebPlugin } from '../web/index.js';
-import type { WebPluginOverrides } from '../web/index.js';
-import { createCompactionPlugin } from '../compaction/index.js';
-import { createAdminPlugin } from '../admin/index.js';
-import { createToolsPlugin, type ToolsPluginDeps } from '../tools/index.js';
-import { createSubagentPlugin } from './subagent-plugin.js';
+import { createMemoryApp, type MemoryAppStoreFace, migrations as memoryMigrations } from '../memory/index.js';
+import { createGoalApp, migrations as goalMigrations } from '../goal/index.js';
+import { createSchedulerApp, migrations as schedulerMigrations } from '../scheduler/index.js';
+import type { SchedulerAppDeps } from '../scheduler/index.js';
+import { createMcpApp } from '../mcp/index.js';
+import type { McpAppDeps } from '../mcp/index.js';
+import { createWebApp } from '../web/index.js';
+import type { WebAppOverrides } from '../web/index.js';
+import { createCompactionApp } from '../compaction/index.js';
+import { createAdminApp } from '../admin/index.js';
+import { createToolsApp, type ToolsAppDeps } from '../tools/index.js';
+import { createSubagentApp } from './subagent-app.js';
 import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import type { DatabaseConnection, MigrationSpec } from '../persist/index.js';
 import type { Session } from '../session/session.js';
-import type { BuiltinPluginModule } from '../contracts/plugin.js';
-import type { BuiltinPluginRegistry } from './composition.js';
+import type { BuiltinAppModule } from '../contracts/app.js';
+import type { BuiltinAppRegistry } from './composition.js';
 
 /** 官方件构造参数（装配期可得的宿主资源；store 缺省 = persist:false 降级空转） */
 export interface BuiltinRegistryOptions {
   /** Store 公共读脸（memory 官方件闭包注入）；无持久层时不传 */
-  readonly store?: MemoryPluginStoreFace;
+  readonly store?: MemoryAppStoreFace;
   /** SQLite 连接（goal/scheduler 官方件闭包注入——goals/jobs 表物理载体）；无持久层时不传 */
   readonly goalConnection?: DatabaseConnection;
   /** scheduler 件闭包依赖束（gate 判据 + runner——组合根活资源，席 13 第一刀；connection 由 goalConnection 同源注入不在此列） */
-  readonly schedulerDeps?: Omit<SchedulerPluginDeps, 'connection'>;
+  readonly schedulerDeps?: Omit<SchedulerAppDeps, 'connection'>;
   /** mcp 件闭包依赖束（spawnServer 组装 = app/mcp-spawn.ts 产物 + exec killTree + 数据目录——契约篇 §6.6 冷读 #1 上提组合根） */
-  readonly mcpDeps: McpPluginDeps;
+  readonly mcpDeps: McpAppDeps;
   /** web 件依赖覆盖缝（可选——生产零依赖不传；组合根全栈测试注入 fetchImpl/lookup，mock 停在外部边界） */
-  readonly webOverrides?: WebPluginOverrides;
+  readonly webOverrides?: WebAppOverrides;
   /** tools 件闭包依赖束（Ring 1 行树化批——管道 gate 落点/可写根推导器〔safety 同源产物，宿主构造〕/工作区活取值） */
-  readonly toolsDeps: ToolsPluginDeps;
+  readonly toolsDeps: ToolsAppDeps;
   /**
    * 可写根活取值（memory 官方件文件命令面——/memory-export|import 落盘判定源；
    * assembly rootsProvider 同源产物，第三十二批）。缺省不传 = 文件命令面不注册
@@ -64,11 +64,11 @@ export interface BuiltinRegistryOptions {
   /** 父会话活引用（委派工具 start 时取 ownerSessionId——结算通知路由键；goal 取当前会话 id） */
   readonly getSession: () => Session | undefined;
   /**
-   * chat 对话应用件模块（组合根 createChatPlugin 产物——默认层首行）：会话
+   * chat 对话应用件模块（组合根 createChatApp 产物——默认层首行）：会话
    * 选择/驱动构造/ctx.agent provide 全在件内；无持久层时件自降级空转（装载
    * 面完好——诊断树不断链）。恒传入（件可卸靠 overlay 禁用行，不靠缺注）
    */
-  readonly chat: BuiltinPluginModule;
+  readonly chat: BuiltinAppModule;
 }
 
 /**
@@ -76,11 +76,11 @@ export interface BuiltinRegistryOptions {
  * 时序上后于 Persistence.open（store 是其产物）；迁移链另出（本文件
  * collectBuiltinMigrations——assembly 聚合）。
  */
-export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPluginRegistry {
+export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppRegistry {
   return {
     // chat 对话应用件（官方默认层首行——应用面第一纵切）
     'builtin:chat': opts.chat,
-    'builtin:memory': createMemoryPlugin({
+    'builtin:memory': createMemoryApp({
       ...(opts.store ? { store: opts.store } : {}),
       workspace: opts.workspace,
       // 文件命令面（§3 持有面）：可写根闭包注入——缺省不传即命令面降级不注册
@@ -90,7 +90,7 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // 默认装配恒传——组合根 createSubagentChildFactory 闭包活资源
     ...(opts.subagentFactory
       ? {
-          'builtin:subagent': createSubagentPlugin({
+          'builtin:subagent': createSubagentApp({
             factory: opts.subagentFactory,
             getSession: opts.getSession,
             ...(opts.agentLocations ? { agentLocations: opts.agentLocations } : {}),
@@ -101,7 +101,7 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // 降级 warn 空转）；boot 续接降级走 session_start 补播事件面（二十九批
     // 增补 8①——wasResumed 装配旁路退役），'agent' 走 optionalInject（chat 件
     // 未装载时缺供降级，不阻激活）
-    'builtin:goal': createGoalPlugin({
+    'builtin:goal': createGoalApp({
       ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
       getSessionId: () => opts.getSession()?.header.sessionId,
     }),
@@ -110,7 +110,7 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // 无持久层时空转，无 runner（诊断装配）时 /tick run 报不可用、表面照常
     ...(opts.schedulerDeps
       ? {
-          'builtin:scheduler': createSchedulerPlugin({
+          'builtin:scheduler': createSchedulerApp({
             ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
             ...opts.schedulerDeps,
           }),
@@ -119,26 +119,26 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinPlug
     // mcp 官方件（官方默认层第六行，stdio-only 客户端桥第一刀——契约篇 §6.6）：
     // spawn/kill 经闭包注入（组合根 app/mcp-spawn.ts——mcp 结构上不见 exec）；
     // servers 空时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）
-    'builtin:mcp': createMcpPlugin(opts.mcpDeps),
+    'builtin:mcp': createMcpApp(opts.mcpDeps),
     // web 官方件（第八行，契约篇 §1.5.2 web 刀）：fetch 工具 + ctx.fetch 服务 +
     // SSRF 五卫生件一批三件——零宿主资源闭包（最简官方件形态）；恒注册
     //（config.fetch:false 只关模型面工具，服务面恒在——「有但省」变体二）
-    'builtin:web': createWebPlugin(opts.webOverrides),
+    'builtin:web': createWebApp(opts.webOverrides),
     // compaction 官方件（第九行，内核边界篇席 20——会话篇 §2 增补七条）：长会话
     // 压缩 durable 五步 + 两段式触发（onRunSettled 判阈 / reseedTimeline 重播种）。
     // 零宿主资源闭包（服务全经 ctx 取——web 同款最简形态）；恒注册（卸行靠
     // overlay 禁用——件停用后旧压缩日志仍可读，词汇宿主面注册不随行漂移）
-    'builtin:compaction': createCompactionPlugin(),
+    'builtin:compaction': createCompactionApp(),
     // admin 官方件（第十行，契约篇 §3.4 平台管理面第一刀，2026-08-27）：只读面
-    // 两工具（plugins_list/events_query）+ 管理 Skill 同件携带（packageRoot 自述
-    // 锚）。零宿主资源闭包（tools/sessions/plugins 三键全经 ctx 取）；恒注册
+    // 两工具（apps_list/events_query）+ 管理 Skill 同件携带（packageRoot 自述
+    // 锚）。零宿主资源闭包（tools/sessions/apps 三键全经 ctx 取）；恒注册
     //（卸行靠 overlay 禁用——写类动词随第二刀导线）
-    'builtin:admin': createAdminPlugin(),
+    'builtin:admin': createAdminApp(),
     // tools 官方件（第七行 = Ring 1 行树化起算行，契约篇 §5.1 节奏表——**必备行**
     // 非 Ring 2 可卸：overlay 禁用即启动断言拒启；可换实现引用不可禁用）：
     // 三段管道 + ctx.tools 服务 + fs/检索工具族。恒注册（缺注即 unresolved——
     // Ring 1 必备行断言拒启，诊断树也须见到此行）
-    'builtin:tools': createToolsPlugin(opts.toolsDeps),
+    'builtin:tools': createToolsApp(opts.toolsDeps),
   };
 }
 

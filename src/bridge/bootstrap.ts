@@ -3,7 +3,7 @@
  *
  * 「装载管线两半拆分」的宿主半：spawn worker 子进程 → 在宿主端点上注册六处理方
  * （svc-register / sub / emit / tools-register / svc-invoke / tool-run）→
- * 物化 WorkerRowLoader（loadPlugins 的 worker 分支 seam，context 模块只认
+ * 物化 WorkerRowLoader（loadApps 的 worker 分支 seam，context 模块只认
  * 接口不认本模块——拓扑边 bridge→context 单向）。
  *
  * 翻译纪律（与 worker.ts 桩一一对应）：
@@ -25,9 +25,9 @@
  */
 import { Worker } from 'node:worker_threads';
 import { randomUUID } from 'node:crypto';
-import { AppError, BRIDGE_METHOD_NOT_FOUND, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
+import { AppError, BRIDGE_METHOD_NOT_FOUND, APP_LOAD_FAILED } from '../contracts/errors.js';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
-import type { PluginPlanRow } from '../contracts/plugin.js';
+import type { AppPlanRow } from '../contracts/app.js';
 import type { ContextScope } from '../context/types.js';
 import { runInCallerChain } from '../context/chain.js';
 import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
@@ -51,7 +51,7 @@ export interface WorkerDomainOptions {
   readonly resourceLimits?: Readonly<Record<string, number>>;
   /** 子进程环境变量差异面（缺省继承宿主 env——env 拷贝不回漏，K3-c 白名单口径） */
   readonly env?: Readonly<Record<string, string>>;
-  /** 插件锚作用域（宿主侧 get/emit 的落点——svc-invoke 的服务解析源） */
+  /** 应用锚作用域（宿主侧 get/emit 的落点——svc-invoke 的服务解析源） */
   readonly root: ContextScope;
   /** 工具服务（缺省懒解析 root 的 'tools' 服务——Ring 1 装载序里工具行可能晚于 worker 行激活，捕获期解析会拿到 undefined） */
   readonly tools?: ToolsService;
@@ -90,10 +90,10 @@ export interface WorkerDomain {
   readonly endpoint: BridgeEndpoint;
   /** 底层 worker（诊断面；生命周期归本句柄 terminate） */
   readonly worker: Worker;
-  /** worker 半装载（loadPlugins 阶段① 消费） */
-  load(row: PluginPlanRow): Promise<WorkerModuleMeta>;
-  /** 宿主半激活（loadPlugins activateOne 消费——经 makeRowLoader 包装） */
-  applyRow(row: PluginPlanRow, scope: ContextScope, opts?: { signal?: AbortSignal }): Promise<void>;
+  /** worker 半装载（loadApps 阶段① 消费） */
+  load(row: AppPlanRow): Promise<WorkerModuleMeta>;
+  /** 宿主半激活（loadApps activateOne 消费——经 makeRowLoader 包装） */
+  applyRow(row: AppPlanRow, scope: ContextScope, opts?: { signal?: AbortSignal }): Promise<void>;
   /**
    * 域收尾（**刻意收尾**——编舞既知终点非事故）：端点 dispose（在途全结算
    * WORKER_EXITED）→ worker terminate。不触发 onExit、不做域死回卷（行作用域
@@ -246,7 +246,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const requireBinding = (rowId: string, surface: string): RowBinding => {
     const binding = bindings.get(rowId);
     if (binding === undefined) {
-      throw new AppError(PLUGIN_LOAD_FAILED, `${surface}：行 ${rowId} 无宿主绑定（apply 未先行或已回卷）`);
+      throw new AppError(APP_LOAD_FAILED, `${surface}：行 ${rowId} 无宿主绑定（apply 未先行或已回卷）`);
     }
     return binding;
   };
@@ -308,7 +308,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
       // D1 注册面路由（契约篇 §5.1 挂载目标两档，SF9）：路由权威 = host 侧按行
       // app 键——注册罩 runInCallerChain(行 id) 帧，registry 经 chainCaller 归因
       // 行挂载目标（行带 app 键 → 应用域层）。worker 自报 domainArg 不采信为
-      // 路由权威，仅 debug 注记（插件自报面降级诊断——冷读 SF9）。
+      // 路由权威，仅 debug 注记（应用自报面降级诊断——冷读 SF9）。
       const unregister = runInCallerChain(rowId, () => tools.register(def));
       if (domainArg !== undefined) {
         binding.scope.logger.debug(
@@ -354,7 +354,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
         .call<WorkerModuleMeta>(
           'svc',
           'load',
-          [{ id: row.id, entry: row.entry, config: row.config, runtime: row.runtime }],
+          [{ id: row.id, entry: row.entry, config: row.config, sandbox: row.sandbox }],
           { timeoutMs: opts.loadTimeoutMs ?? 60_000 },
         )
         .then((meta) => {
@@ -372,7 +372,7 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     applyRow(row, scope, callOpts) {
       const meta = metaCache.get(row.id);
       if (meta === undefined) {
-        return Promise.reject(new AppError(PLUGIN_LOAD_FAILED, `applyRow：行 ${row.id} 未先行 load（装载管线不变量）`));
+        return Promise.reject(new AppError(APP_LOAD_FAILED, `applyRow：行 ${row.id} 未先行 load（装载管线不变量）`));
       }
       bindings.set(row.id, { scope });
       // 行级卸载联动：行作用域回卷（apply 失败 //reload）→ 通知 worker 清该行
@@ -426,7 +426,7 @@ function makeWorkerServiceProxy(
 }
 
 /**
- * 物化 WorkerRowLoader（loadPlugins opts.workerLoader 注入物——组合根装配序
+ * 物化 WorkerRowLoader（loadApps opts.workerLoader 注入物——组合根装配序
  * 把 bridge 域接到 context 装载管线的唯一缝）。
  */
 export function makeRowLoader(domain: WorkerDomain): WorkerRowLoader {

@@ -4,7 +4,7 @@
  * 聚合在线通道的 UI 后端：非交互原语（notify/setStatus）广播全部通道；
  * 阻塞式原语（confirm/select/input）挑首个支持的后端应答，通道不支持时
  * 按降级规则回落（select→input、setWidget→notify、confirm→input 降级为
- * 同一规则的自然延伸），无任何交互通道时 fail-soft 返回保守值——插件
+ * 同一规则的自然延伸），无任何交互通道时 fail-soft 返回保守值——应用
  * 不感知通道能力差异。
  *
  * 语义纪律（§4.3）：阻塞式交互若用于授权场景，须走 approval seam 同一条

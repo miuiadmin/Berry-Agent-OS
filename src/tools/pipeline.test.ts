@@ -469,8 +469,8 @@ describe('工具体按注册归属进 caller 链（toolOwnerOf 旁表 + 执行�
         return { content: [{ type: 'text', text: `${syncRead}|${chainCaller()}` }] };
       },
     });
-    // 插件注册（装载器 apply 段形态：runInCallerChain 罩注册——旁表记账）
-    const disposeOwned = runInCallerChain('plugin-owned', () => service.register(probeTool('owned-probe')));
+    // 应用注册（装载器 apply 段形态：runInCallerChain 罩注册——旁表记账）
+    const disposeOwned = runInCallerChain('apps-owned', () => service.register(probeTool('owned-probe')));
     // 宿主注册（无链——旁表不记，执行段保持无身份）
     service.register(probeTool('host-probe'));
 
@@ -485,7 +485,7 @@ describe('工具体按注册归属进 caller 链（toolOwnerOf 旁表 + 执行�
       {},
     );
     const textOf = (r: AgentToolResult) => (r.content[0] as TextContent).text;
-    expect(textOf(owned)).toBe('plugin-owned|plugin-owned'); // 同步段与 await 后都在注册者链上
+    expect(textOf(owned)).toBe('apps-owned|apps-owned'); // 同步段与 await 后都在注册者链上
     expect(textOf(host)).toBe('undefined|undefined'); // 宿主工具不造假身份链——读点 'host' 兜底
     disposeOwned();
   });

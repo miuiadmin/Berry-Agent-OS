@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/index.js';
 import type { ContextScope } from '../context/types.js';
-import { createToolsPlugin } from './plugin.js';
+import { createToolsApp } from './app.js';
 import type { ToolsService } from './registry.js';
 
 /** 临时工作区（realpath 归一——macOS /var→/private/var 符号链接归一） */
@@ -26,9 +26,9 @@ describe('tools 官方件（Ring 1 行树化件本体，契约篇 §5.1 节奏�
   it('apply：fork 作用域上 provide tools 服务（带 executor）+ 注册检索两件', async () => {
     const workspace = makeWorkspace();
     const root = createContext({ name: 'test' });
-    // ring1Anchor 同构装载（宿主装配期专用锚——与插件锚分离的 /reload 语义起点）
+    // ring1Anchor 同构装载（宿主装配期专用锚——与应用锚分离的 /reload 语义起点）
     const anchor: ContextScope = root.fork({ name: 'ring1' });
-    const plugin = createToolsPlugin({
+    const plugin = createToolsApp({
       gateSink: () => undefined, // 诊断占位（本测试不落 durable 账）
       workspace: () => workspace,
     });
@@ -51,7 +51,7 @@ describe('tools 官方件（Ring 1 行树化件本体，契约篇 §5.1 节奏�
     writeFileSync(readme, 'hello tools-plugin');
     const root = createContext({ name: 'test' });
     const anchor: ContextScope = root.fork({ name: 'ring1' });
-    const plugin = createToolsPlugin({
+    const plugin = createToolsApp({
       gateSink: () => undefined,
       workspace: () => workspace,
     });

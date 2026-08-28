@@ -1,5 +1,5 @@
 /**
- * L2 tools — 三段 waterfall 管道（插件契约篇 §3.1，工具执行唯一合法路径）。
+ * L2 tools — 三段 waterfall 管道（应用契约篇 §3.1，工具执行唯一合法路径）。
  *
  * 结构（每段都是 ctx.waterfall，监听者可追加；守门段由安全栈 prepend 占首位）：
  *
@@ -74,7 +74,7 @@ let spillSeq = 0;
  * 单工具调用进度流硬帽（契约篇 §1.6 资源护栏族 #11，2026-08-27 刀〇b）：
  * onUpdate 累计 10^4 条为帽，超帽丢弃后续进度 + 首条丢弃单条 warn（计数进
  * 文案不逐条刷屏）。执法点在管道 onUpdate 包装层（管道有 logger；loop 的
- * accepting/结算后 ignoring 语义零改动）。数据面丢弃非插件错误面——工具本体
+ * accepting/结算后 ignoring 语义零改动）。数据面丢弃非应用错误面——工具本体
  * 照常结算，结果不受影响。合法触帽预期：流式工具（exec 逐 chunk onUpdate）
  * 长命令单次调用即可超帽——渐进冻结（TUI 实时输出停滞）是预期行为非 bug，
  * 10^4 ≈ 60ms/块 × 100 分钟级 chunk 流，超出者接受冻结。
@@ -218,8 +218,8 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
       ...(origin !== undefined ? { callOrigin: origin } : {}),
     };
     // caller 链写点之二（会话篇 §5.1 导入者归因，P1-1）：工具体按注册归属包裹——
-    // 插件工具体内的一切共享服务面调用（如 createSession 的 importer 落账）归注册
-    // 插件。宿主/builtin 工具无归属不包（链保持无身份，读点 'host' 兜底——不造
+    // 应用工具体内的一切共享服务面调用（如 createSession 的 importer 落账）归注册
+    // 应用。宿主/builtin 工具无归属不包（链保持无身份，读点 'host' 兜底——不造
     // 假身份链）。两处调用点共用同一 execOwned，包裹点唯一不分裂
     const owner = toolOwnerOf(def);
     const timedExecute = async (): Promise<AgentToolResult> => {

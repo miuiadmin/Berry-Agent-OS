@@ -32,7 +32,7 @@ export interface SessionHeader {
   readonly seedLength: number;
   /**
    * 会话来源：用户新建 / fork / 委派 / 恢复 / 导入。
-   * 闭集管理（会话篇 §5.1）：插件不可自定义——服务面 createSession 无 origin 参数
+   * 闭集管理（会话篇 §5.1）：应用不可自定义——服务面 createSession 无 origin 参数
    * （钉死 'import'）、fork 面钉死 'fork'，四值各自宿主写点，结构上无入参面。
    */
   readonly origin: 'user' | 'fork' | 'delegation' | 'resume' | 'import';

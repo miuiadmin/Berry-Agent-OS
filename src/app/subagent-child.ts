@@ -10,7 +10,7 @@
  * 2026-08-23 生态读码补钉）。
  *
  * 归属：组合根侧零件（需要 persistence/childCtx 闭包），工厂（纵切四真工厂）
- * 把它接进 InProcessChild.dispose 半边。bounded 等待的 session_shutdown 让插件
+ * 把它接进 InProcessChild.dispose 半边。bounded 等待的 session_shutdown 让应用
  * 钩子在 flush 之后、回卷之前观察终态并完成清理（清理器 Promise 不再被吞）。
  */
 
@@ -52,8 +52,8 @@ export async function emitSessionShutdownBounded(
 
 /**
  * dispose 序列依赖的作用域结构面（shutdown 派发 + 日志 + dispose 回卷三件）。
- * 真工厂传转发体：parallel/logger 转发**根总线**（插件 keyed by payload——子 ctx
- * 上无插件，观察面在根，与 delegation fork 的 session_start 对称）；dispose 落
+ * 真工厂传转发体：parallel/logger 转发**根总线**（应用 keyed by payload——子 ctx
+ * 上无应用，观察面在根，与 delegation fork 的 session_start 对称）；dispose 落
  * 子作用域本尊。Context 结构兼容，测试直接传真 ctx。
  */
 export type ChildScopeFace = Pick<ContextScope, 'parallel' | 'logger' | 'dispose'>;
@@ -80,7 +80,7 @@ export function createChildSessionDisposer(opts: ChildSessionDisposerOptions): (
     disposed = true;
     // ① session_flush 屏障：子会话事件全部落盘（结算通知先于本序列——顺序规则）
     await opts.persistence?.flush(opts.sessionId);
-    // ② session_shutdown 钩子：插件最终清理锚点（契约篇 §2.2 session 层；parallel
+    // ② session_shutdown 钩子：应用最终清理锚点（契约篇 §2.2 session 层；parallel
     //    bounded 等待——该位经 jobs.drain 先于主序 ⑤ 执行，不设上限则挂死清理器
     //    把 drain 连同优雅退出整链挂死在保护罩外，二十九批增补 8②）
     await emitSessionShutdownBounded(opts.childCtx, opts.sessionId);

@@ -42,7 +42,7 @@ function toRecord(row: GoalRow): GoalRecord {
   };
 }
 
-/** goals 表语义层（goal 插件闭包持有；全部同步——better-sqlite3 同步面） */
+/** goals 表语义层（goal 应用闭包持有；全部同步——better-sqlite3 同步面） */
 export class GoalStore {
   private readonly connection: DatabaseConnection;
 

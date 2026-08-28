@@ -1,7 +1,7 @@
 /**
- * 补票金样插件（hello 过界——桥接协议 v0 子集的完整往返）。
+ * 补票金样应用（hello 过界——桥接协议 v0 子集的完整往返）。
  *
- * 在 worker 域内经 jiti 装载（TS 源码形态，与真实插件同）；apply 接收**桥接 ctx 桩**，
+ * 在 worker 域内经 jiti 装载（TS 源码形态，与真实应用同）；apply 接收**桥接 ctx 桩**，
  * 过界调用宿主侧工具。覆盖规范钉死的两隐性假设（契约篇 §1.7 冷读裁决）：
  *   ① 同步面调用——await 形态、底层 ask/result 两跳往返（同步阻抗的实证面）；
  *   ② signal→cancel——AbortSignal 本体不过界（不可克隆），过界的是取消消息。
@@ -15,7 +15,7 @@ export interface CtxStub {
   };
 }
 
-/** 插件名（装载器形状校验的 named export 面） */
+/** 应用名（装载器形状校验的 named export 面） */
 export const name = 'hello';
 
 /** 毫秒延迟（场景编排用，非产品码） */

@@ -2,9 +2,9 @@
 /**
  * 真模型端到端冒烟（dev 工具，不入产品码——拓扑门禁只扫 src/，与测试文件同豁免口径）。
  *
- * 用途：M1/M2 验收形态「真模型端到端」的可重复冒烟。走 **真插件注册面**——
+ * 用途：M1/M2 验收形态「真模型端到端」的可重复冒烟。走 **真应用注册面**——
  * runtime.llm.registerProvider 注册一个 Anthropic 兼容代理 provider（Claude Code
- * 同款环境约定 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN），与 M2 provider 插件
+ * 同款环境约定 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN），与 M2 provider 应用
  * 将来走的 seam 完全一致（顺带实证注册面 + 模型解析 + streamFn 每调用解析）。
  *
  * pi-ai 内置 anthropic provider 不认 ANTHROPIC_BASE_URL（baseUrl 烧死在目录里），
@@ -178,7 +178,7 @@ const runtime = await createBerryRuntime({
   compositionDir: join(smokeData, 'composition'),
 });
 
-// 真插件面注册（M2 provider 插件同 seam）；resolveModel 每调用解析——注册后即生效。
+// 真装载面注册（M2 provider 应用同 seam）；resolveModel 每调用解析——注册后即生效。
 // 录制模式下 host 侧也照注册：ctx.llm.complete（周期 review 路不走 streamFn）仍可真调。
 runtime.llm.registerProvider(provider);
 

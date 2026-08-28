@@ -11,24 +11,24 @@ import {
   isStandardRole,
   listMessageRoles,
   registerHostMessageRole,
-  registerPluginMessageRole,
+  registerAppMessageRole,
 } from './messages.js';
 
 describe('消息角色注册表（双入口）', () => {
-  it('插件面：注册 / 枚举 / 注销后可复用名称（二次注销无害）', () => {
-    const unregister = registerPluginMessageRole('t-role/x-note', { render: { intent: 'status', label: '注' } });
+  it('装载面：注册 / 枚举 / 注销后可复用名称（二次注销无害）', () => {
+    const unregister = registerAppMessageRole('t-role/x-note', { render: { intent: 'status', label: '注' } });
     expect(listMessageRoles()).toContain('t-role/x-note');
     unregister();
     expect(listMessageRoles()).not.toContain('t-role/x-note');
     unregister(); // 二次注销无害（防误注销后来者）
-    const unregisterAgain = registerPluginMessageRole('t-role/x-note', {});
+    const unregisterAgain = registerAppMessageRole('t-role/x-note', {});
     unregisterAgain();
   });
 
-  it('插件面：无 / 单段名拒绝（AGENT_ROLE_INVALID——宿主自留地不可占）', () => {
+  it('装载面：无 / 单段名拒绝（AGENT_ROLE_INVALID——宿主自留地不可占）', () => {
     let error: unknown;
     try {
-      registerPluginMessageRole('plain-name', {});
+      registerAppMessageRole('plain-name', {});
     } catch (reason) {
       error = reason;
     }
@@ -36,14 +36,14 @@ describe('消息角色注册表（双入口）', () => {
     expect((error as AppError).code).toBe('AGENT_ROLE_INVALID');
   });
 
-  it('宿主面：无 / 单段名可注册；含 / 域名拒绝（AGENT_ROLE_INVALID——域名走插件面）', () => {
+  it('宿主面：无 / 单段名可注册；含 / 域名拒绝（AGENT_ROLE_INVALID——域名走装载面）', () => {
     const unregister = registerHostMessageRole('t-host-note', {});
     expect(listMessageRoles()).toContain('t-host-note');
     expect(() => registerHostMessageRole('domain/name', {})).toThrowError(AppError);
     unregister();
   });
 
-  it('宿主面与标准角色同名：拒绝（AGENT_ROLE_EXISTS）；插件面结构上不可精确撞（必含 /）', () => {
+  it('宿主面与标准角色同名：拒绝（AGENT_ROLE_EXISTS）；装载面结构上不可精确撞（必含 /）', () => {
     let error: unknown;
     try {
       registerHostMessageRole('user', {});
@@ -51,8 +51,8 @@ describe('消息角色注册表（双入口）', () => {
       error = reason;
     }
     expect((error as AppError).code).toBe('AGENT_ROLE_EXISTS');
-    // 插件面 'user/x' 域前缀恰为标准角色名：全名键控不互蔽——合法注册且不遮蔽 user
-    const unregister = registerPluginMessageRole('user/x', {});
+    // 装载面 'user/x' 域前缀恰为标准角色名：全名键控不互蔽——合法注册且不遮蔽 user
+    const unregister = registerAppMessageRole('user/x', {});
     expect(isStandardRole('user/x')).toBe(false);
     expect(isStandardRole('user')).toBe(true); // 标准角色未被遮蔽
     unregister();
@@ -60,13 +60,13 @@ describe('消息角色注册表（双入口）', () => {
 
   it('重复注册同名自定义角色：拒绝（跨入口撞名同样拒绝——注册表唯一）', () => {
     const unregister = registerHostMessageRole('t-dup-name', {});
-    // 插件面用同名（带 / 不可能撞——换宿主面撞同一注册表）
+    // 装载面用同名（带 / 不可能撞——换宿主面撞同一注册表）
     expect(() => registerHostMessageRole('t-dup-name', {})).toThrowError(AppError);
     unregister();
   });
 
-  it('插件面与宿主面同一注册表：定义互通（convert/renderer 消费不分入口）', () => {
-    const unregister = registerPluginMessageRole('t-shared/role', { render: { intent: 'hidden' } });
+  it('装载面与宿主面同一注册表：定义互通（convert/renderer 消费不分入口）', () => {
+    const unregister = registerAppMessageRole('t-shared/role', { render: { intent: 'hidden' } });
     expect(getMessageRoleDefinition('t-shared/role')?.render?.intent).toBe('hidden');
     unregister();
     expect(getMessageRoleDefinition('t-shared/role')).toBeUndefined();

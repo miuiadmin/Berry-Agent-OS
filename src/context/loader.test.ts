@@ -1,5 +1,5 @@
 /**
- * L1 context — 插件加载器本体测试（真实 jiti 直载 .ts fixture + 虚拟注入端到端）。
+ * L1 context — 应用加载器本体测试（真实 jiti 直载 .ts fixture + 虚拟注入端到端）。
  *
  * 纪律对照：不 mock 加载器任何内部——fixture 是磁盘上的真 .ts 文件，经与生产
  * 完全相同的 jiti 路径（虚拟模块 berryagent/typebox）装载；断言面 = 返回清单 +
@@ -12,26 +12,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createContext } from './context.js';
-import { loadPlugins } from './loader.js';
+import { loadApps } from './loader.js';
 import { chainCaller } from './chain.js';
-import type { PluginSkillsInfo } from './loader.js';
+import type { AppSkillsInfo } from './loader.js';
 import type { ContextScope } from './types.js';
 import {
   EVENT_DUPLICATE,
-  PLUGIN_APPLY_FAILED,
-  PLUGIN_APPLY_TIMEOUT,
-  PLUGIN_CONFIG_INVALID,
-  PLUGIN_IMPORT_FORBIDDEN,
-  PLUGIN_INJECT_UNRESOLVED,
-  PLUGIN_LOAD_FAILED,
-  PLUGIN_SHAPE_INVALID,
+  APP_APPLY_FAILED,
+  APP_APPLY_TIMEOUT,
+  APP_CONFIG_INVALID,
+  APP_IMPORT_FORBIDDEN,
+  APP_INJECT_UNRESOLVED,
+  APP_LOAD_FAILED,
+  APP_SHAPE_INVALID,
 } from '../contracts/errors.js';
-import type {
-  PluginActivatedPayload,
-  PluginFailedPayload,
-  PluginPlanRow,
-  PluginSkippedPayload,
-} from '../contracts/plugin.js';
+import type { AppActivatedPayload, AppFailedPayload, AppPlanRow, AppSkippedPayload } from '../contracts/app.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -40,8 +35,8 @@ function makeFixtureDir(): string {
   return realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'ctx-loader-')));
 }
 
-/** 写一个 fixture 插件源文件，返回入口绝对路径 */
-function writePlugin(dir: string, file: string, source: string): string {
+/** 写一个 fixture 应用源文件，返回入口绝对路径 */
+function writeApp(dir: string, file: string, source: string): string {
   const entry = join(dir, file);
   writeFileSync(entry, source);
   return entry;
@@ -56,7 +51,7 @@ afterEach(async () => {
   }
 });
 
-/** 建根作用域 + 登记（loadPlugins 的 fork 锚） */
+/** 建根作用域 + 登记（loadApps 的 fork 锚） */
 function makeRoot(): ContextScope {
   const root = createContext({ name: 'loader-test' });
   roots.push(root);
@@ -66,18 +61,18 @@ function makeRoot(): ContextScope {
 /** 生命周期事件录音（三事件全录——序列断言用） */
 function recordLifecycle(root: ContextScope) {
   const events: Array<{ kind: string; payload: unknown }> = [];
-  root.on('plugin/activated', (payload: PluginActivatedPayload) => events.push({ kind: 'activated', payload }));
-  root.on('plugin/failed', (payload: PluginFailedPayload) => events.push({ kind: 'failed', payload }));
-  root.on('plugin/skipped', (payload: PluginSkippedPayload) => events.push({ kind: 'skipped', payload }));
+  root.on('app/activated', (payload: AppActivatedPayload) => events.push({ kind: 'activated', payload }));
+  root.on('app/failed', (payload: AppFailedPayload) => events.push({ kind: 'failed', payload }));
+  root.on('app/skipped', (payload: AppSkippedPayload) => events.push({ kind: 'skipped', payload }));
   return events;
 }
 
 /* ---------------- 虚拟注入 + 激活主路径 ---------------- */
 
-describe('loadPlugins 虚拟注入与激活', () => {
+describe('loadApps 虚拟注入与激活', () => {
   it('虚拟模块端到端：fixture 经 berryagent 取 AppError、经 typebox 建 schema，宿主 Value 同实例校验通过', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'happy.ts',
       [
@@ -97,7 +92,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'happy', entry, config: { greeting: '你好' } }]);
+    const result = await loadApps(root, [{ id: 'happy', entry, config: { greeting: '你好' } }]);
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toMatchObject([{ id: 'happy', name: 'happy' }]);
@@ -113,13 +108,13 @@ describe('loadPlugins 虚拟注入与激活', () => {
 
   it('ctx.rowId：装载器手持注入组合树行 id（件数据目录键正规获取口，P0-1）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'rowid.ts',
       [
         "export const name = 'fx/rowid-probe';",
         'export default async function apply(ctx) {',
-        '  // 行 id 直读 + 插件内再 fork 的子作用域继承（行身份随 fork 深度保持）',
+        '  // 行 id 直读 + 应用内再 fork 的子作用域继承（行身份随 fork 深度保持）',
         '  const child = ctx.fork({ name: "inner" });',
         '  ctx.provide("fx/rowid-probe", { own: ctx.rowId, childSees: child.rowId });',
         '}',
@@ -128,18 +123,18 @@ describe('loadPlugins 虚拟注入与激活', () => {
     const root = makeRoot();
     // 根/宿主作用域 rowId = undefined（无行归属）
     expect(root.rowId).toBeUndefined();
-    const result = await loadPlugins(root, [{ id: 'the-row-id', entry }]);
+    const result = await loadApps(root, [{ id: 'the-row-id', entry }]);
 
     expect(result.failed).toEqual([]);
     const probe = root.tryGet<{ own: string | undefined; childSees: string | undefined }>('fx/rowid-probe');
-    // loader fork 注入行 id（可与插件声明 name 不同物——行 id 是组合树身份）
+    // loader fork 注入行 id（可与应用声明 name 不同物——行 id 是组合树身份）
     expect(probe!.own).toBe('the-row-id');
     expect(probe!.childSees).toBe('the-row-id');
   });
 
-  it('行 config 未过插件 schema：PLUGIN_CONFIG_INVALID，apply 不执行（无服务泄漏）', async () => {
+  it('行 config 未过应用 schema：APP_CONFIG_INVALID，apply 不执行（无服务泄漏）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'schema.ts',
       [
@@ -152,18 +147,18 @@ describe('loadPlugins 虚拟注入与激活', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'schema', entry, config: { port: '不是数字' } }]);
+    const result = await loadApps(root, [{ id: 'schema', entry, config: { port: '不是数字' } }]);
 
     expect(result.activated).toEqual([]);
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_CONFIG_INVALID);
+    expect(result.failed[0]!.code).toBe(APP_CONFIG_INVALID);
     expect(result.failed[0]!.message).toContain('port'); // 首个错误路径进诊断
     expect(root.tryGet('fx/schema-leak')).toBeUndefined(); // apply 未执行——无残骸
   });
 
   it('optionalInject 缺席不阻塞：tryGet 探测得 undefined，照常激活', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'soft.ts',
       [
@@ -175,7 +170,7 @@ describe('loadPlugins 虚拟注入与激活', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'soft', entry }]);
+    const result = await loadApps(root, [{ id: 'soft', entry }]);
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toHaveLength(1);
@@ -185,10 +180,10 @@ describe('loadPlugins 虚拟注入与激活', () => {
 
 /* ---------------- inject 轮次激活（Kahn 式） ---------------- */
 
-describe('loadPlugins inject 依赖驱动轮次激活', () => {
+describe('loadApps inject 依赖驱动轮次激活', () => {
   it('依赖倒序装载：消费者在前、提供者在后，轮次激活补齐后双双成功', async () => {
     const dir = makeFixtureDir();
-    const consumer = writePlugin(
+    const consumer = writeApp(
       dir,
       'consumer.ts',
       [
@@ -200,7 +195,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
         '}',
       ].join('\n'),
     );
-    const provider = writePlugin(
+    const provider = writeApp(
       dir,
       'provider.ts',
       [
@@ -213,7 +208,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
     const root = makeRoot();
     const events = recordLifecycle(root);
     // 行序故意把消费者放前（首轮不可激活；提供者激活后第二轮补齐）
-    const result = await loadPlugins(root, [
+    const result = await loadApps(root, [
       { id: 'consumer', entry: consumer },
       { id: 'provider', entry: provider },
     ]);
@@ -222,15 +217,15 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
     expect(root.tryGet<{ value: number }>('fx/consumer-saw')!.value).toBe(42);
     // 激活顺序：提供者先于消费者（轮次激活语义），事件序与清单序一致
     expect(result.activated.map((item) => item.id)).toEqual(['provider', 'consumer']);
-    expect(events.filter((e) => e.kind === 'activated').map((e) => (e.payload as PluginActivatedPayload).id)).toEqual([
+    expect(events.filter((e) => e.kind === 'activated').map((e) => (e.payload as AppActivatedPayload).id)).toEqual([
       'provider',
       'consumer',
     ]);
   });
 
-  it('缺提供方：PLUGIN_INJECT_UNRESOLVED 响亮失败，列出缺失服务名', async () => {
+  it('缺提供方：APP_INJECT_UNRESOLVED 响亮失败，列出缺失服务名', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'waiter.ts',
       [
@@ -242,18 +237,18 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'waiter', entry }]);
+    const result = await loadApps(root, [{ id: 'waiter', entry }]);
 
     expect(result.activated).toEqual([]);
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_INJECT_UNRESOLVED);
+    expect(result.failed[0]!.code).toBe(APP_INJECT_UNRESOLVED);
     expect(result.failed[0]!.message).toContain('no-such-service');
     expect(root.tryGet('fx/waiter-ran')).toBeUndefined(); // 未激活——无残骸
   });
 
-  it('依赖环：双方 PLUGIN_INJECT_UNRESOLVED，诊断指明疑似依赖环', async () => {
+  it('依赖环：双方 APP_INJECT_UNRESOLVED，诊断指明疑似依赖环', async () => {
     const dir = makeFixtureDir();
-    const a = writePlugin(
+    const a = writeApp(
       dir,
       'cyc-a.ts',
       [
@@ -262,7 +257,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
         'export default async function apply(ctx) { ctx.provide("fx/cyc-a-svc", true); }',
       ].join('\n'),
     );
-    const b = writePlugin(
+    const b = writeApp(
       dir,
       'cyc-b.ts',
       [
@@ -272,7 +267,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [
+    const result = await loadApps(root, [
       { id: 'cyc-a', entry: a },
       { id: 'cyc-b', entry: b },
     ]);
@@ -280,7 +275,7 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
     expect(result.activated).toEqual([]);
     expect(result.failed.map((item) => item.id).sort()).toEqual(['cyc-a', 'cyc-b']);
     for (const item of result.failed) {
-      expect(item.code).toBe(PLUGIN_INJECT_UNRESOLVED);
+      expect(item.code).toBe(APP_INJECT_UNRESOLVED);
       // 两成因并列诊断：缺失名 + 全体 pending 行（缺失名都在对方 inject 里 = 环）
       expect(item.message).toContain('cyc-a、cyc-b');
       expect(item.message).toContain('缺提供方或依赖环');
@@ -290,16 +285,16 @@ describe('loadPlugins inject 依赖驱动轮次激活', () => {
 
 /* ---------------- 形状与装载失败 ---------------- */
 
-describe('loadPlugins 形状校验与 import 失败', () => {
-  it('default 非函数 / name 缺失 / inject 非 string[]：三例皆 PLUGIN_SHAPE_INVALID', async () => {
+describe('loadApps 形状校验与 import 失败', () => {
+  it('default 非函数 / name 缺失 / inject 非 string[]：三例皆 APP_SHAPE_INVALID', async () => {
     const dir = makeFixtureDir();
-    const notFn = writePlugin(dir, 'not-fn.ts', ['export const name = "not-fn";', 'export default 42;'].join('\n'));
-    const noName = writePlugin(
+    const notFn = writeApp(dir, 'not-fn.ts', ['export const name = "not-fn";', 'export default 42;'].join('\n'));
+    const noName = writeApp(
       dir,
       'no-name.ts',
       ['export default async function apply(ctx) { ctx.provide("fx/no-name-leak", true); }'].join('\n'),
     );
-    const badInject = writePlugin(
+    const badInject = writeApp(
       dir,
       'bad-inject.ts',
       [
@@ -309,7 +304,7 @@ describe('loadPlugins 形状校验与 import 失败', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [
+    const result = await loadApps(root, [
       { id: 'not-fn', entry: notFn },
       { id: 'no-name', entry: noName },
       { id: 'bad-inject', entry: badInject },
@@ -319,21 +314,21 @@ describe('loadPlugins 形状校验与 import 失败', () => {
     expect(result.failed).toHaveLength(3);
     // 单行失败不阻断其余行——三行全量诊断
     expect(result.failed.map((item) => [item.id, item.code])).toEqual([
-      ['not-fn', PLUGIN_SHAPE_INVALID],
-      ['no-name', PLUGIN_SHAPE_INVALID],
-      ['bad-inject', PLUGIN_SHAPE_INVALID],
+      ['not-fn', APP_SHAPE_INVALID],
+      ['no-name', APP_SHAPE_INVALID],
+      ['bad-inject', APP_SHAPE_INVALID],
     ]);
     expect(root.tryGet('fx/no-name-leak')).toBeUndefined(); // 形状不过——apply 从未执行
   });
 
-  it('入口语法错误：PLUGIN_LOAD_FAILED（非 AppError 的 import 异常也归一入清单）', async () => {
+  it('入口语法错误：APP_LOAD_FAILED（非 AppError 的 import 异常也归一入清单）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(dir, 'broken.ts', 'export const name = "broken";\nthis is ((( not valid\n');
+    const entry = writeApp(dir, 'broken.ts', 'export const name = "broken";\nthis is ((( not valid\n');
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'broken', entry }]);
+    const result = await loadApps(root, [{ id: 'broken', entry }]);
 
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_LOAD_FAILED);
+    expect(result.failed[0]!.code).toBe(APP_LOAD_FAILED);
     expect(result.failed[0]!.message).toContain('broken'); // 行 id 进诊断（归因）
   });
 
@@ -341,8 +336,8 @@ describe('loadPlugins 形状校验与 import 失败', () => {
     const dir = makeFixtureDir();
     // npm 子路径直觉写法——虚拟面只有精确键，子路径既不在白名单也不可解析。
     // P0-2 起 transform 门禁先于 jiti 解析拦下（原 Cannot find → 现更早更准的
-    // PLUGIN_IMPORT_FORBIDDEN，消息自带合法路——探针 #12 诉求在新形态下满足）
-    const entry = writePlugin(
+    // APP_IMPORT_FORBIDDEN，消息自带合法路——探针 #12 诉求在新形态下满足）
+    const entry = writeApp(
       dir,
       'subpath.ts',
       [
@@ -353,10 +348,10 @@ describe('loadPlugins 形状校验与 import 失败', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'subpath', entry }]);
+    const result = await loadApps(root, [{ id: 'subpath', entry }]);
 
     expect(result.activated).toEqual([]);
-    expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+    expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
     // 错误自带合法路：六键白名单清单（含扩键后的 berryagent/llm、berryagent/sqlite）
     expect(result.failed[0]!.message).toContain(`'berryagent'`);
     expect(result.failed[0]!.message).toContain(`'typebox/value'`);
@@ -367,7 +362,7 @@ describe('loadPlugins 形状校验与 import 失败', () => {
 
 /* ---------------- import 来源门禁执法（P0-2，契约篇 §1.2 执法面②） ---------------- */
 
-describe('loadPlugins import 来源门禁', () => {
+describe('loadApps import 来源门禁', () => {
   /** 在宿主 node_modules 内造 fixture 目录（用后必删）——构造「解析祖先链上逃到宿主侧」的真实威胁形态 */
   function makeFixtureInsideHostTree(): string {
     return mkdtempSync(join(realpathSync(process.cwd()), 'node_modules', '.gate-fixture-'));
@@ -382,7 +377,7 @@ describe('loadPlugins import 来源门禁', () => {
     const dir = makeFixtureInsideHostTree();
     try {
       // 顶层副作用标记：门禁在 transform 期抛错（先于 eval）——拒载时标记必不触达
-      const entry = writePlugin(
+      const entry = writeApp(
         dir,
         'steal-host.ts',
         [
@@ -393,12 +388,12 @@ describe('loadPlugins import 来源门禁', () => {
         ].join('\n'),
       );
       const root = makeRoot();
-      const result = await loadPlugins(root, [{ id: 'steal-host', entry }]);
+      const result = await loadApps(root, [{ id: 'steal-host', entry }]);
 
       expect(result.activated).toEqual([]);
-      expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+      expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
       expect(result.failed[0]!.message).toContain('jiti');
-      expect(result.failed[0]!.message).toContain('包解析逃逸出插件目录树');
+      expect(result.failed[0]!.message).toContain('包解析逃逸出应用目录树');
       // 求值前拦截：副作用标记零触达（spike ② 的进程内复证）
       expect((globalThis as Record<string, unknown>).__stealHostEvaluated).toBeUndefined();
       delete (globalThis as Record<string, unknown>).__stealHostEvaluated;
@@ -409,7 +404,7 @@ describe('loadPlugins import 来源门禁', () => {
 
   it('不可解析裸名拒载：消息指路自捆分发（拼写错与未安装同路）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'ghost-dep.ts',
       [
@@ -420,10 +415,10 @@ describe('loadPlugins import 来源门禁', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'ghost-dep', entry }]);
+    const result = await loadApps(root, [{ id: 'ghost-dep', entry }]);
 
     expect(result.activated).toEqual([]);
-    expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+    expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
     expect(result.failed[0]!.message).toContain('不可解析');
     expect(result.failed[0]!.message).toContain('自捆');
   });
@@ -433,7 +428,7 @@ describe('loadPlugins import 来源门禁', () => {
     try {
       // jiti 转译会丢弃未使用 import（对照实验实证）——门禁在转译前扫源码，
       // 声明即拦（type-only import 同纪律：源码面统一，不留「未使用即豁免」旁门）
-      const entry = writePlugin(
+      const entry = writeApp(
         dir,
         'unused-bind.ts',
         [
@@ -443,16 +438,16 @@ describe('loadPlugins import 来源门禁', () => {
         ].join('\n'),
       );
       const root = makeRoot();
-      const result = await loadPlugins(root, [{ id: 'unused-bind', entry }]);
+      const result = await loadApps(root, [{ id: 'unused-bind', entry }]);
 
       expect(result.activated).toEqual([]);
-      expect(result.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
+      expect(result.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
     } finally {
       cleanupFixture(dir);
     }
   });
 
-  it('自捆依赖放行：插件目录树内 node_modules 的包正常 import（正门用例）', async () => {
+  it('自捆依赖放行：应用目录树内 node_modules 的包正常 import（正门用例）', async () => {
     const dir = makeFixtureDir();
     // 造自捆包：fixture/node_modules/self-dep（树内解析——第三道白名单的正路形态）
     mkdirSync(join(dir, 'node_modules', 'self-dep'), { recursive: true });
@@ -461,7 +456,7 @@ describe('loadPlugins import 来源门禁', () => {
       JSON.stringify({ name: 'self-dep', version: '1.0.0', type: 'module' }),
     );
     writeFileSync(join(dir, 'node_modules', 'self-dep', 'index.js'), 'export const marker = "self-dep-ok";\n');
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'bundled.ts',
       [
@@ -471,7 +466,7 @@ describe('loadPlugins import 来源门禁', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'bundled', entry }]);
+    const result = await loadApps(root, [{ id: 'bundled', entry }]);
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toMatchObject([{ id: 'bundled', name: 'bundled' }]);
@@ -481,12 +476,12 @@ describe('loadPlugins import 来源门禁', () => {
   it('相对路径树内放行 + 子文件逃逸拒载：全图扫描不只看入口（moduleCache:false 对账兜底）', async () => {
     // 树内 helper 正常引用（helper 再引裸内建——嵌套文件同过门禁）
     const okDir = makeFixtureDir();
-    writePlugin(
+    writeApp(
       okDir,
       'helper.ts',
       ["import { join } from 'node:path';\nexport const combined = join('a', 'b');\n"].join(''),
     );
-    const okEntry = writePlugin(
+    const okEntry = writeApp(
       okDir,
       'uses-helper.ts',
       [
@@ -496,19 +491,19 @@ describe('loadPlugins import 来源门禁', () => {
       ].join('\n'),
     );
     const okRoot = makeRoot();
-    const okResult = await loadPlugins(okRoot, [{ id: 'uses-helper', entry: okEntry }]);
+    const okResult = await loadApps(okRoot, [{ id: 'uses-helper', entry: okEntry }]);
     expect(okResult.failed).toEqual([]);
     expect(okRoot.tryGet<{ combined: string }>('fx/helper-marker')!.combined).toBe(join('a', 'b'));
 
     // 子文件相对路径跳出树根（../../ 指向 tmpdir 层的诱饵文件）——入口干净、依赖脏，同样拒
     const badDir = makeFixtureDir();
     // 子文件源码同样拆段防误扫（逃逸说明符 ../../../outside-dep.js 是执法测试的道具）
-    writePlugin(
+    writeApp(
       badDir,
       'evil-helper.ts',
       ['im' + "port { x } from '../../../outside-dep.js';\nexport const x2 = x;\n"].join(''),
     );
-    const badEntry = writePlugin(
+    const badEntry = writeApp(
       badDir,
       'uses-evil.ts',
       [
@@ -518,30 +513,30 @@ describe('loadPlugins import 来源门禁', () => {
       ].join('\n'),
     );
     const badRoot = makeRoot();
-    const badResult = await loadPlugins(badRoot, [{ id: 'uses-evil', entry: badEntry }]);
+    const badResult = await loadApps(badRoot, [{ id: 'uses-evil', entry: badEntry }]);
     expect(badResult.activated).toEqual([]);
-    expect(badResult.failed[0]!.code).toBe(PLUGIN_IMPORT_FORBIDDEN);
-    expect(badResult.failed[0]!.message).toContain('相对路径解析逃逸出插件目录树');
+    expect(badResult.failed[0]!.code).toBe(APP_IMPORT_FORBIDDEN);
+    expect(badResult.failed[0]!.message).toContain('相对路径解析逃逸出应用目录树');
     expect(badResult.failed[0]!.message).toContain('evil-helper');
   });
 
   it('node: 显式与裸内建放行：fs/path/crypto 等宿主运行时直用合法', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'natives.ts',
       [
         'export const name = "natives";',
         "import { join } from 'node:path';",
         "import { isBuiltin } from 'node:module';",
-        'im' + "port { basename } from 'path';", // 裸内建（无 node: 前缀）——插件允许的形态
+        'im' + "port { basename } from 'path';", // 裸内建（无 node: 前缀）——应用允许的形态
         'export default async function apply(ctx) {',
         '  ctx.provide("fx/natives-marker", { joined: join("x", "y"), builtin: isBuiltin("path"), base: basename("/a/b.ts") });',
         '}',
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'natives', entry }]);
+    const result = await loadApps(root, [{ id: 'natives', entry }]);
 
     expect(result.failed).toEqual([]);
     const marker = root.tryGet<Record<string, unknown>>('fx/natives-marker')!;
@@ -552,7 +547,7 @@ describe('loadPlugins import 来源门禁', () => {
 
   it('第五/六键注入物端到端：virtualFaces 传入即经 berryagent/llm、berryagent/sqlite 取得', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'faces.ts',
       [
@@ -569,7 +564,7 @@ describe('loadPlugins import 来源门禁', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'faces', entry }], {
+    const result = await loadApps(root, [{ id: 'faces', entry }], {
       virtualFaces: {
         llm: {
           createProvider: (options: { id: string }) => ({ kind: 'provider', ...options }),
@@ -586,9 +581,9 @@ describe('loadPlugins import 来源门禁', () => {
     expect(marker['db']).toEqual({ kind: 'db', path: ':memory:' });
   });
 
-  it('virtualFaces 缺省：两键恒在虚拟面（import 不炸），面为空由插件自查', async () => {
+  it('virtualFaces 缺省：两键恒在虚拟面（import 不炸），面为空由应用自查', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'empty-faces.ts',
       [
@@ -604,7 +599,7 @@ describe('loadPlugins import 来源门禁', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'empty-faces', entry }]);
+    const result = await loadApps(root, [{ id: 'empty-faces', entry }]);
 
     expect(result.failed).toEqual([]);
     const marker = root.tryGet<Record<string, unknown>>('fx/empty-faces-marker')!;
@@ -615,10 +610,10 @@ describe('loadPlugins import 来源门禁', () => {
 
 /* ---------------- apply 抛错回卷与生命周期事件 ---------------- */
 
-describe('loadPlugins apply 失败回卷与生命周期事件', () => {
-  it('apply 抛错：先回卷本作用域（服务下架 + effect 清理执行）再 PLUGIN_APPLY_FAILED', async () => {
+describe('loadApps apply 失败回卷与生命周期事件', () => {
+  it('apply 抛错：先回卷本作用域（服务下架 + effect 清理执行）再 APP_APPLY_FAILED', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'boom.ts',
       [
@@ -631,11 +626,11 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'boom', entry }]);
+    const result = await loadApps(root, [{ id: 'boom', entry }]);
 
     expect(result.activated).toEqual([]);
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_FAILED);
+    expect(result.failed[0]!.code).toBe(APP_APPLY_FAILED);
     expect(result.failed[0]!.message).toContain('apply 炸了');
     // 失败行不留残骸（§1.6）：半途 provide 已回卷、effect 清理已执行
     expect(root.tryGet('fx/boom-svc')).toBeUndefined();
@@ -644,7 +639,7 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
 
   it('三态混合装载：生命周期事件逐行必发且与清单一致（§2.2 增补 1）', async () => {
     const dir = makeFixtureDir();
-    const ok = writePlugin(
+    const ok = writeApp(
       dir,
       'ok.ts',
       [
@@ -652,24 +647,20 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
         'export default async function apply(ctx) { ctx.provide("fx/ok-svc", true); }',
       ].join('\n'),
     );
-    const offEntry = writePlugin(
-      dir,
-      'off.ts',
-      'export const name = "off";\nexport default async function apply() {}\n',
-    );
+    const offEntry = writeApp(dir, 'off.ts', 'export const name = "off";\nexport default async function apply() {}\n');
     const root = makeRoot();
     const events = recordLifecycle(root);
-    const rows: PluginPlanRow[] = [
+    const rows: AppPlanRow[] = [
       { id: 'ok', entry: ok },
       { id: 'off', skip: 'disabled' }, // 跳过行不 import——off.ts 存在与否无关
-      { id: 'ghost', unresolved: '插件「ghost」入口无法解析' }, // 解析失败行不 import
+      { id: 'ghost', unresolved: '应用「ghost」入口无法解析' }, // 解析失败行不 import
     ];
-    const result = await loadPlugins(root, rows);
+    const result = await loadApps(root, rows);
 
     // 清单三态
     expect(result.activated.map((item) => item.id)).toEqual(['ok']);
     expect(result.skipped).toEqual([{ id: 'off', reason: 'disabled' }]);
-    expect(result.failed.map((item) => [item.id, item.code])).toEqual([['ghost', 'PLUGIN_ENTRY_UNRESOLVED']]);
+    expect(result.failed.map((item) => [item.id, item.code])).toEqual([['ghost', 'APP_ENTRY_UNRESOLVED']]);
     // 事件逐行必发（push 诊断面）：序 = 装载序（跳过/失败在 import 阶段，激活在轮次阶段）
     expect(events.map((e) => `${e.kind}:${(e.payload as { id: string }).id}`)).toEqual([
       'skipped:off',
@@ -682,10 +673,10 @@ describe('loadPlugins apply 失败回卷与生命周期事件', () => {
 
 /* ---------------- apply 挂起时钟（§1.6 时钟族，2026-08-27 刀〇a） ---------------- */
 
-describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
+describe('loadApps apply 挂起超时（APP_APPLY_TIMEOUT）', () => {
   it('apply 永不 resolve：竞速小钟触发——回卷半途注册后按挂起超时进失败清单，迟到 reject 不进 unhandledRejection', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'hang.ts',
       [
@@ -699,11 +690,11 @@ describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
     );
     const root = makeRoot();
     // 小钟 30ms（生产缺省 10s——挂起语义不随时钟值变）
-    const result = await loadPlugins(root, [{ id: 'hang', entry }], { applyTimeoutMs: 30 });
+    const result = await loadApps(root, [{ id: 'hang', entry }], { applyTimeoutMs: 30 });
 
     expect(result.activated).toEqual([]);
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_TIMEOUT);
+    expect(result.failed[0]!.code).toBe(APP_APPLY_TIMEOUT);
     expect(result.failed[0]!.message).toContain('30ms');
     // 失败行不留残骸：半途 provide 已回卷、effect 清理已执行
     expect(root.tryGet('fx/hang-svc')).toBeUndefined();
@@ -712,9 +703,9 @@ describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
 
   it('applyMs 打点随 activated 载荷上行（B2 P5——非负计时，诊断面展示启动开销）', async () => {
     const dir = makeFixtureDir();
-    const ok = writePlugin(dir, 'fast.ts', 'export const name = "fast";\nexport default async function apply() {}\n');
+    const ok = writeApp(dir, 'fast.ts', 'export const name = "fast";\nexport default async function apply() {}\n');
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'fast', entry: ok }]);
+    const result = await loadApps(root, [{ id: 'fast', entry: ok }]);
 
     expect(result.activated).toHaveLength(1);
     expect(result.activated[0]!.applyMs).toBeGreaterThanOrEqual(0);
@@ -723,10 +714,10 @@ describe('loadPlugins apply 挂起超时（PLUGIN_APPLY_TIMEOUT）', () => {
 
 /* ---------------- 自定义事件词汇（events 第四件，§1.1 逃生口） ---------------- */
 
-describe('loadPlugins 自定义事件词汇登记', () => {
-  it('跨插件订阅无顺序洞：订阅行在前、声明行在后——词汇装载期入册，on 不炸、派发端到端送达', async () => {
+describe('loadApps 自定义事件词汇登记', () => {
+  it('跨应用订阅无顺序洞：订阅行在前、声明行在后——词汇装载期入册，on 不炸、派发端到端送达', async () => {
     const dir = makeFixtureDir();
-    const listener = writePlugin(
+    const listener = writeApp(
       dir,
       'listener.ts',
       [
@@ -738,7 +729,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
         '}',
       ].join('\n'),
     );
-    const emitter = writePlugin(
+    const emitter = writeApp(
       dir,
       'emitter.ts',
       [
@@ -751,8 +742,8 @@ describe('loadPlugins 自定义事件词汇登记', () => {
     );
     const root = makeRoot();
     // 行序故意把订阅者放前、声明行放后——词汇在装载阶段①（一切 apply 之前）统一入册，
-    // 订阅者的 on 不因声明行更晚激活而炸 EVENT_UNKNOWN（跨插件订阅无顺序洞回归锁）
-    const result = await loadPlugins(root, [
+    // 订阅者的 on 不因声明行更晚激活而炸 EVENT_UNKNOWN（跨应用订阅无顺序洞回归锁）
+    const result = await loadApps(root, [
       { id: 'listener', entry: listener },
       { id: 'emitter', entry: emitter },
     ]);
@@ -762,9 +753,9 @@ describe('loadPlugins 自定义事件词汇登记', () => {
     expect(root.tryGet('fx/listener-saw')).toBe(7); // on 在册通过 + emit 送达
   });
 
-  it('events 声明非法（name 无 /、mode 非四值、缺 note）三例皆 PLUGIN_SHAPE_INVALID，apply 从未执行', async () => {
+  it('events 声明非法（name 无 /、mode 非四值、缺 note）三例皆 APP_SHAPE_INVALID，apply 从未执行', async () => {
     const dir = makeFixtureDir();
-    const noSlash = writePlugin(
+    const noSlash = writeApp(
       dir,
       'no-slash.ts',
       [
@@ -773,7 +764,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
         'export default async function apply(ctx) { ctx.provide("fx/no-slash-leak", true); }',
       ].join('\n'),
     );
-    const badMode = writePlugin(
+    const badMode = writeApp(
       dir,
       'bad-mode.ts',
       [
@@ -782,7 +773,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
         'export default async function apply() {}',
       ].join('\n'),
     );
-    const noNote = writePlugin(
+    const noNote = writeApp(
       dir,
       'no-note.ts',
       [
@@ -792,7 +783,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [
+    const result = await loadApps(root, [
       { id: 'no-slash', entry: noSlash },
       { id: 'bad-mode', entry: badMode },
       { id: 'no-note', entry: noNote },
@@ -800,9 +791,9 @@ describe('loadPlugins 自定义事件词汇登记', () => {
 
     expect(result.activated).toEqual([]);
     expect(result.failed.map((item) => [item.id, item.code])).toEqual([
-      ['no-slash', PLUGIN_SHAPE_INVALID],
-      ['bad-mode', PLUGIN_SHAPE_INVALID],
-      ['no-note', PLUGIN_SHAPE_INVALID],
+      ['no-slash', APP_SHAPE_INVALID],
+      ['bad-mode', APP_SHAPE_INVALID],
+      ['no-note', APP_SHAPE_INVALID],
     ]);
     // 归因单源：行 id 只在失败信封（item.id）与清单格式出现，消息体内不再重复
     // 前缀（探针 #14 回归锁——曾出现「hermes-core：hermes-core：」双前缀）
@@ -815,7 +806,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
   it('effect 回调返回非函数：装载期即失败并带正确习语指引（探针 #13——jiti 无类型护栏的运行时补位）', async () => {
     const dir = makeFixtureDir();
     // 病灶习语：const d = …; ctx.effect(() => d())——注册即注销 + undefined 入栈
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'bad-effect.ts',
       [
@@ -827,11 +818,11 @@ describe('loadPlugins 自定义事件词汇登记', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'bad-effect', entry }]);
+    const result = await loadApps(root, [{ id: 'bad-effect', entry }]);
 
     expect(result.activated).toEqual([]);
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_FAILED);
+    expect(result.failed[0]!.code).toBe(APP_APPLY_FAILED);
     // 指引链路：apply 失败消息内含 CONTEXT_EFFECT_INVALID 码与正确习语
     expect(result.failed[0]!.message).toContain('CONTEXT_EFFECT_INVALID');
     expect(result.failed[0]!.message).toContain('ctx.effect(d)');
@@ -839,7 +830,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
 
   it('撞名：两行声明同名 / 撞宿主目录名皆 EVENT_DUPLICATE——词汇表拒绝静默覆盖，先到者照常激活', async () => {
     const dir = makeFixtureDir();
-    const first = writePlugin(
+    const first = writeApp(
       dir,
       'twice-a.ts',
       [
@@ -848,7 +839,7 @@ describe('loadPlugins 自定义事件词汇登记', () => {
         'export default async function apply() {}',
       ].join('\n'),
     );
-    const second = writePlugin(
+    const second = writeApp(
       dir,
       'twice-b.ts',
       [
@@ -857,19 +848,19 @@ describe('loadPlugins 自定义事件词汇登记', () => {
         'export default async function apply() {}',
       ].join('\n'),
     );
-    // 撞宿主目录名须选「格式合法且在目录」的名字（plugin/activated 含斜线小写合法）；
+    // 撞宿主目录名须选「格式合法且在目录」的名字（app/activated 含斜线小写合法）；
     // tools_change 类无斜线名先被格式检查拦下——宿主自留地由格式纪律防住，到不了撞名检查
-    const catalogClash = writePlugin(
+    const catalogClash = writeApp(
       dir,
       'catalog-clash.ts',
       [
         'export const name = "catalog-clash";',
-        'export const events = [{ name: "plugin/activated", mode: "emit", note: "撞宿主目录名" }];',
+        'export const events = [{ name: "app/activated", mode: "emit", note: "撞宿主目录名" }];',
         'export default async function apply() {}',
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [
+    const result = await loadApps(root, [
       { id: 'twice-a', entry: first },
       { id: 'twice-b', entry: second },
       { id: 'catalog-clash', entry: catalogClash },
@@ -883,12 +874,12 @@ describe('loadPlugins 自定义事件词汇登记', () => {
   });
 });
 
-/* ---------------- 技能目录注册回调（§1.2 第六件，2026-08-26 技能包插件纵切） ---------------- */
+/* ---------------- 技能目录注册回调（§1.2 第六件，2026-08-26 技能包应用纵切） ---------------- */
 
-describe('loadPlugins 技能目录注册回调', () => {
+describe('loadApps 技能目录注册回调', () => {
   it('回调时序：行作用域 fork 后、apply 之前——回调先于 apply 收到完整行信息', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'skillpack.ts',
       [
@@ -900,8 +891,8 @@ describe('loadPlugins 技能目录注册回调', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const seen: PluginSkillsInfo[] = [];
-    const result = await loadPlugins(root, [{ id: 'skillpack', entry }], {
+    const seen: AppSkillsInfo[] = [];
+    const result = await loadApps(root, [{ id: 'skillpack', entry }], {
       registerSkills: (info) => {
         // 时序锚点：回调时 apply 尚未执行（fork 后 apply 前的登记位——冷读裁决）
         seen.push(info);
@@ -921,7 +912,7 @@ describe('loadPlugins 技能目录注册回调', () => {
 
   it('apply 抛错回卷：回调挂行作用域的 effect 随 dispose 回卷（技能是行资产，失败不留残骸）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'boom.ts',
       [
@@ -935,7 +926,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     const root = makeRoot();
     let registered = false;
     let cleaned = false;
-    const result = await loadPlugins(root, [{ id: 'boom', entry }], {
+    const result = await loadApps(root, [{ id: 'boom', entry }], {
       registerSkills: (info) => {
         registered = true;
         // 模拟组合根桥接：包层 provider 注册挂行作用域 effect（注销器即回卷证据）
@@ -947,13 +938,13 @@ describe('loadPlugins 技能目录注册回调', () => {
 
     expect(registered).toBe(true); // 回调确实发生（fork 后 apply 前）
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_APPLY_FAILED);
+    expect(result.failed[0]!.code).toBe(APP_APPLY_FAILED);
     expect(cleaned).toBe(true); // apply 抛错 → scope.dispose() → 注册 effect LIFO 回卷
   });
 
   it('未注入回调：skills 声明行照常激活（老调用方兼容面——回调是可选参数）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'nohook.ts',
       [
@@ -965,16 +956,16 @@ describe('loadPlugins 技能目录注册回调', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'nohook', entry }]);
+    const result = await loadApps(root, [{ id: 'nohook', entry }]);
 
     expect(result.failed).toEqual([]);
     expect(result.activated).toMatchObject([{ id: 'nohook', name: 'nohook' }]);
     expect(root.tryGet('fx/nohook-ran')).toBe(true);
   });
 
-  it('纯技能包最小形态：name + skills + default 空实现三件零逻辑即合法插件', async () => {
+  it('纯技能包最小形态：name + skills + default 空实现三件零逻辑即合法应用', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'pure.ts',
       [
@@ -985,7 +976,7 @@ describe('loadPlugins 技能目录注册回调', () => {
     );
     const root = makeRoot();
     let called = false;
-    const result = await loadPlugins(root, [{ id: 'pure', entry }], {
+    const result = await loadApps(root, [{ id: 'pure', entry }], {
       registerSkills: () => {
         called = true;
       },
@@ -996,9 +987,9 @@ describe('loadPlugins 技能目录注册回调', () => {
     expect(called).toBe(true); // 空实现也走技能注册（纯技能包的唯一起作用面）
   });
 
-  it('skills 非 string[]：PLUGIN_SHAPE_INVALID，apply 不执行', async () => {
+  it('skills 非 string[]：APP_SHAPE_INVALID，apply 不执行', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'badskills.ts',
       [
@@ -1010,19 +1001,19 @@ describe('loadPlugins 技能目录注册回调', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const result = await loadPlugins(root, [{ id: 'badskills', entry }]);
+    const result = await loadApps(root, [{ id: 'badskills', entry }]);
 
     expect(result.activated).toEqual([]);
     expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]!.code).toBe(PLUGIN_SHAPE_INVALID);
+    expect(result.failed[0]!.code).toBe(APP_SHAPE_INVALID);
     expect(result.failed[0]!.message).toContain('skills');
     expect(root.tryGet('fx/badskills-leak')).toBeUndefined(); // 声明面不过——apply 从未执行
   });
 
   it('builtin 行声明 skills：回调收到 packageRoot undefined（宿主函数件无磁盘锚点）', async () => {
     const root = makeRoot();
-    const seen: PluginSkillsInfo[] = [];
-    const result = await loadPlugins(
+    const seen: AppSkillsInfo[] = [];
+    const result = await loadApps(
       root,
       [
         {
@@ -1051,12 +1042,12 @@ describe('loadPlugins 技能目录注册回调', () => {
   });
 
   // packageRoot 桥两来源钉死（契约篇 §3.4 两处钉死，2026-08-27 admin 刀）：
-  // builtin 件自述 packageRoot 生效（admin 件先例）；文件插件模块带 packageRoot
+  // builtin 件自述 packageRoot 生效（admin 件先例）；文件应用模块带 packageRoot
   // 键被忽略（包根恒走入口路径推导——暗道不存在）
   it('builtin 自述 packageRoot：回调收到自述锚点（admin 件形态）', async () => {
     const root = makeRoot();
-    const seen: PluginSkillsInfo[] = [];
-    const result = await loadPlugins(
+    const seen: AppSkillsInfo[] = [];
+    const result = await loadApps(
       root,
       [
         {
@@ -1082,9 +1073,9 @@ describe('loadPlugins 技能目录注册回调', () => {
     expect(seen[0]!.dirs).toEqual(['./skills/admin']);
   });
 
-  it('文件插件模块带 packageRoot 键：被忽略（包根恒走 entry 推导——暗道不存在）', async () => {
+  it('文件应用模块带 packageRoot 键：被忽略（包根恒走 entry 推导——暗道不存在）', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'fakeroot.ts',
       [
@@ -1095,8 +1086,8 @@ describe('loadPlugins 技能目录注册回调', () => {
       ].join('\n'),
     );
     const root = makeRoot();
-    const seen: PluginSkillsInfo[] = [];
-    const result = await loadPlugins(root, [{ id: 'fakeroot', entry }], {
+    const seen: AppSkillsInfo[] = [];
+    const result = await loadApps(root, [{ id: 'fakeroot', entry }], {
       registerSkills: (info) => {
         seen.push(info);
       },
@@ -1109,10 +1100,10 @@ describe('loadPlugins 技能目录注册回调', () => {
 
 /* ---------------- caller 链装载器写点（会话篇 §5.1 导入者归因，P1-1） ---------------- */
 
-describe('装载器 apply 边界的 caller 链（插件身份已知的第一写点）', () => {
-  it('apply 段内经宿主服务读链 = 本行插件 id；装载器自身代码不在链上', async () => {
+describe('装载器 apply 边界的 caller 链（应用身份已知的第一写点）', () => {
+  it('apply 段内经宿主服务读链 = 本行应用 id；装载器自身代码不在链上', async () => {
     const dir = makeFixtureDir();
-    const entry = writePlugin(
+    const entry = writeApp(
       dir,
       'caller-probe.ts',
       [
@@ -1134,12 +1125,12 @@ describe('装载器 apply 边界的 caller 链（插件身份已知的第一写�
       reads.push({ label, caller });
       return caller;
     });
-    const result = await loadPlugins(root, [{ id: 'row-caller-id', entry }]);
+    const result = await loadApps(root, [{ id: 'row-caller-id', entry }]);
 
     expect(result.failed).toEqual([]);
     // apply 段（含跨 tick）：本行 id
     expect(reads.find((r) => r.label === 'apply')).toEqual({ label: 'apply', caller: 'row-caller-id' });
-    // 装载器自身（激活完成后宿主侧读）：不在链上——注册回调/生命周期 emit 不落插件账
+    // 装载器自身（激活完成后宿主侧读）：不在链上——注册回调/生命周期 emit 不落应用账
     expect(chainCaller()).toBeUndefined();
     expect(root.tryGet('fx/probe-result')).toEqual({ applyTime: 'row-caller-id' });
   });

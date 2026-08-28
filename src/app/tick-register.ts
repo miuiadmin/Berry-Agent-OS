@@ -3,7 +3,7 @@
  * crontab 注册——spawn 与系统文件操作上提组合根，scheduler 件经闭包收
  * 面不见 exec，同 scheduler-runner 先例）。
  *
- * 平台形态（拍板：OS 调度器持时、插件不持进程——注册的是一条 OS 调度
+ * 平台形态（拍板：OS 调度器持时、应用不持进程——注册的是一条 OS 调度
  * 唤起，不是看护进程）：
  * - darwin：~/Library/LaunchAgents/tick.<名>.plist（launchd）——三形状
  *   schedule 全支持（StartCalendarInterval 日历字段 / StartInterval 秒数）；

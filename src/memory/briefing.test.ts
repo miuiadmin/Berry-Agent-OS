@@ -1,6 +1,6 @@
 /**
  * L3 memory 单元测试（常驻简报渲染）——标记/防注入框架句式/截断可见/空库空段。
- * 纯函数渲染件；插件段接线（registerSection）随纵切五官方件落。
+ * 纯函数渲染件；应用段接线（registerSection）随纵切五官方件落。
  */
 
 import { describe, expect, it } from 'vitest';

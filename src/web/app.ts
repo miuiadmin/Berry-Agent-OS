@@ -5,7 +5,7 @@
  * apply 两件事（模型面可关、服务面恒在）：
  * 1. **fetch 工具**（config.fetch !== false 时注册）：模型面动词——单参数
  *    url、effect:'read'（网络守门 = SSRF fence 非审批域）；
- * 2. **ctx.fetch 服务**（恒 provide）：插件面原语——同一 execute 同一卫生件，
+ * 2. **ctx.fetch 服务**（恒 provide）：装载面原语——同一 execute 同一卫生件，
  *    内部合成 def（不注册不进模型词汇表）经 ToolsService.executor 走同一条
  *    三段管道（守门/落账不旁路，ctx.exec 先例同构）。
  */
@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { Type } from '../contracts/typebox.js';
 import { AppError, CONTEXT_SERVICE_NOT_FOUND } from '../contracts/errors.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import { performFetch, runWebFetch, type WebFetchDeps } from './fetch-core.js';
 import { InflightGates } from './hygiene.js';
 import {
@@ -34,27 +34,27 @@ const FETCH_TOOL_PARAMETERS = Type.Object({
 const INTERNAL_FETCH_PARAMETERS = FETCH_TOOL_PARAMETERS;
 
 /** 件构造依赖覆盖缝（生产零参——builtins.ts 直调；测试注入 fetchImpl/lookup） */
-export type WebPluginOverrides = Partial<WebFetchDeps>;
+export type WebAppOverrides = Partial<WebFetchDeps>;
 
 /**
  * 构造 web 官方件（builtins 注册表 `builtin:web` 行）。
  * 零宿主资源闭包（fetch 是全局函数、无限流配置面）——web 是最简官方件形态。
  */
-export function createWebPlugin(overrides: WebPluginOverrides = {}): BuiltinPluginModule {
+export function createWebApp(overrides: WebAppOverrides = {}): BuiltinAppModule {
   return {
     name: 'web',
     // 硬依赖：tools 服务面（工具注册 + executor 管道取用——装载轮次保证在场）
     inject: ['tools'],
     config: WEB_PLUGIN_CONFIG_SCHEMA,
-    apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) => applyWebPlugin(ctx, config, overrides),
+    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => applyWebPlugin(ctx, config, overrides),
   };
 }
 
-/** 件 apply 本体（异常上抛走加载器统一回卷 PLUGIN_APPLY_FAILED） */
+/** 件 apply 本体（异常上抛走加载器统一回卷 APP_APPLY_FAILED） */
 function applyWebPlugin(
-  ctx: PluginContext,
+  ctx: AppContext,
   config: Readonly<Record<string, unknown>> | undefined,
-  overrides: WebPluginOverrides,
+  overrides: WebAppOverrides,
 ): void {
   const tools = ctx.get<ToolsService>('tools');
   // 件级共享依赖束：限流信号量单例 + 测试注入缝（两消费面同一限流同一实现）

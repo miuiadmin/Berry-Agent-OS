@@ -394,7 +394,7 @@ describe('queryEvents（跨会话有界查询：序/游标/时间窗/types/app/l
 
   it('types 是数据条件非断言：查未注册/不存在的词返回空集不抛', () => {
     const store = seed();
-    const result = store.queryEvents({ types: ['no/such-vocab', 'gone/plugin/word'] });
+    const result = store.queryEvents({ types: ['no/such-vocab', 'gone/app/word'] });
     expect(result.rows).toEqual([]);
     expect(result.truncated).toBe(false);
     // 正常过滤维：llm/usage 只在 s-b 有一行（seq 0）
@@ -458,7 +458,7 @@ describe('queryEvents（跨会话有界查询：序/游标/时间窗/types/app/l
 });
 
 describe('affectedSessionCounts（按词聚合受影响会话数：uninstall 级联警示取数面，契约篇 §3.4 第二刀）', () => {
-  /** 构造三会话素材：同一插件词在两会话出现（DISTINCT 计 2 非 3），另一词仅一会话 */
+  /** 构造三会话素材：同一应用词在两会话出现（DISTINCT 计 2 非 3），另一词仅一会话 */
   function seed(): Store {
     const store = openStore({ path: nextPath() });
     // s-a 与 s-b 各含 2 行 demo/thing（同会话重复行 DISTINCT 只计 1）；s-c 只有无关注的词

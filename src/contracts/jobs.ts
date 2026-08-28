@@ -5,7 +5,7 @@
  * - **进程内词汇不持久**（会话篇 §5「fork 不继承」）——重启即消，跨会话可见性走结算副作用；
  * - 状态机 `running →（可选 stopping）→ 唯一终态 completed/killed/failed`，first-wins 结算；
  * - `done` promise **永不 reject**（executor 侧 reject 一律转 failed 终态）；
- * - kind 词汇显式注册（'subagent'/'process' 为内置 kind，插件自定义走 registerKind）。
+ * - kind 词汇显式注册（'subagent'/'process' 为内置 kind，应用自定义走 registerKind）。
  */
 
 /** Job 唯一终态（状态机终点；first-wins——第一个落定的终态胜出） */
@@ -16,7 +16,7 @@ export type JobStatus = 'running' | 'stopping' | JobTerminal;
 
 /** 建 Job 选项（ownerSessionId 缺省 = 无主——operator 直控面（TUI 等宿主侧） */
 export interface JobCreateOptions {
-  /** 任务类别（须已注册；内置 'subagent'/'process'，插件自定义经 registerKind） */
+  /** 任务类别（须已注册；内置 'subagent'/'process'，应用自定义经 registerKind） */
   readonly kind: string;
   /** 归属会话 id（围栏鉴权：带主 Job 的 cancel/查询须同会话；缺省 = 无主） */
   readonly ownerSessionId?: string;

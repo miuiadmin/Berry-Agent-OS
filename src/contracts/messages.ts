@@ -8,7 +8,7 @@
  * AgentMessage；仅在 LLM 调用边界经 convertToLlm 转换。
  *
  * 双入口纪律（与 prompt 段两入口同构，骨架篇 §2.3 落码注记）：
- * - 插件面 `ctx.registerMessageRole` → registerPluginMessageRole：角色名必含
+ * - 装载面 `ctx.registerMessageRole` → registerAppMessageRole：角色名必含
  *   `/` 域前缀（`memory/recall` 式）——第三方与官方件同走此面，官方非特权；
  * - 宿主面 registerHostMessageRole：无 `/` 单段名（`bash-execution` 式），
  *   宿主自留地（装配层注册内置角色）。
@@ -17,7 +17,7 @@
 import { AGENT_ROLE_EXISTS, AGENT_ROLE_INVALID, AppError } from './errors.js';
 import type { Message } from './llm.js';
 
-/** 自定义角色消息（role 必须已经注册——插件面或宿主面之一） */
+/** 自定义角色消息（role 必须已经注册——装载面或宿主面之一） */
 export interface CustomMessage {
   /** 已注册的自定义角色名（非标准三角色） */
   role: string;
@@ -49,8 +49,8 @@ export interface MessageRoleDefinition {
 /** 标准三角色名（注册表外置的内置词汇，自定义角色不得占用） */
 const STANDARD_ROLES = new Set(['user', 'assistant', 'toolResult']);
 
-/** 插件面角色名格式：必含 `/` 域前缀（与 prompt 段 SECTION_ID_FORMAT 同一纪律） */
-const PLUGIN_ROLE_FORMAT = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*$/;
+/** 装载面角色名格式：必含 `/` 域前缀（与 prompt 段 SECTION_ID_FORMAT 同一纪律） */
+const APP_ROLE_FORMAT = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*$/;
 
 /** 宿主面角色名格式：无 `/` 单段名（宿主自留地——与 prompt 段宿主段同构） */
 const HOST_ROLE_FORMAT = /^[a-z][a-z0-9-]*$/;
@@ -73,15 +73,15 @@ function addRole(name: string, definition: MessageRoleDefinition): () => void {
 }
 
 /**
- * 插件面注册一个自定义消息角色（`ctx.registerMessageRole` 的落点）：角色名必含
- * `/` 域前缀（`memory/recall` 式）——插件域归属从名字可判，与 prompt 段同纪律。
+ * 装载面注册一个自定义消息角色（`ctx.registerMessageRole` 的落点）：角色名必含
+ * `/` 域前缀（`memory/recall` 式）——应用域归属从名字可判，与 prompt 段同纪律。
  * @returns 注销函数（ctx 面已自动挂作用域 effect 栈；此处直调则由调用方自理）
  */
-export function registerPluginMessageRole(name: string, definition: MessageRoleDefinition): () => void {
-  if (!PLUGIN_ROLE_FORMAT.test(name)) {
+export function registerAppMessageRole(name: string, definition: MessageRoleDefinition): () => void {
+  if (!APP_ROLE_FORMAT.test(name)) {
     throw new AppError(
       AGENT_ROLE_INVALID,
-      `插件面消息角色名必含 / 域前缀（memory/recall 式小写两段）：${name}——无 / 单段名是宿主自留地`,
+      `装载面消息角色名必含 / 域前缀（memory/recall 式小写两段）：${name}——无 / 单段名是宿主自留地`,
     );
   }
   return addRole(name, definition);
@@ -96,7 +96,7 @@ export function registerHostMessageRole(name: string, definition: MessageRoleDef
   if (!HOST_ROLE_FORMAT.test(name)) {
     throw new AppError(
       AGENT_ROLE_INVALID,
-      `宿主面消息角色名为无 / 单段小写（bash-execution 式）：${name}——含 / 的域名走插件面`,
+      `宿主面消息角色名为无 / 单段小写（bash-execution 式）：${name}——含 / 的域名走装载面`,
     );
   }
   return addRole(name, definition);

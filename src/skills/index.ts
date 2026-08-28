@@ -23,7 +23,7 @@ export {
   formatSkillInvocation,
 } from './skill-md.js';
 
-/* 本地 FS 发现（契约篇 §4.4）+ 包层 provider（技能包插件，§1.2 第六件） */
+/* 本地 FS 发现（契约篇 §4.4）+ 包层 provider（技能包应用，§1.2 第六件） */
 export type {
   LocalSkillsProviderOptions,
   DefaultSkillLocationsOptions,

@@ -5,7 +5,7 @@
  * - **官方清单** = 宿主包内静态已知（仓库根 `apps/*.app.yaml`），装载期直接
  *   解析——本文件职责；解析/校验失败 = 启动断言拒启（官方件随包，坏 = 发版事故，
  *   宁拒绝不误读）；
- * - **第三方清单** = `harness.apps` glob 装机期发现面——挂账随 ctx.plugins
+ * - **第三方清单** = `harness.apps` glob 装机期发现面——挂账随 ctx.apps
  *   install 落地（冷读钉死：不引用组合树 §6.2 机制，skills 装机期先例同构）。
  *
  * 组件在场断言（components 在场断言）：按**装载身份串**（`builtin:<name>` /
@@ -15,7 +15,7 @@
  * 打印 + debug 日志（app/* 自有事件词汇 2026-08-27 再议裁决：v1 不落——进入
  * 事实已由三面承载〔sessions 表 app 列 durable / request·header 载荷 app 腿
  * durable / /app notify 交互面——契约篇 §5.4 同名裁决〕，重开触发 = 首个需
- * 实时感知应用装载态的插件消费者）。
+ * 实时感知应用装载态的应用消费者）。
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -87,8 +87,8 @@ export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, A
  * 无 skip 且无 unresolved（装载失败行已由 boot 断言拦截，到不了这里）。
  *
  * 在场值域（D1 清单投影批升级，契约篇 §5.1）：**挂系统 ∪ 挂本应用**——行
- * `app` 键缺省（挂系统组合）对该组件的一切声明应用都算在场；行 `app: <别应用>`
- * 只对目标应用算在场（挂他应用 ≠ 在场——能力进了别应用组合域，本应用不可用，
+ * `app` 键缺省（挂全局作用域）对该组件的一切声明应用都算在场；行 `app: <别应用>`
+ * 只对目标应用算在场（挂他应用 ≠ 在场——能力进了别应用作用域域，本应用不可用，
  * 缺场照报）。同一身份串多行并存（overlay 复挂）按挂载域并集判定。
  *
  * @param apps 官方清单表
@@ -104,15 +104,18 @@ export function assertAppComponents(
   const refDomains = new Map<string, Set<string | undefined>>();
   const planById = new Map(composition.plan.map((row) => [row.id, row]));
   for (const row of composition.rows) {
-    if (row.plugin === undefined) continue;
+    if (row.pkg === undefined) continue;
     const plan = planById.get(row.id);
     if (plan === undefined || plan.skip !== undefined || plan.unresolved !== undefined) continue;
-    let domains = refDomains.get(row.plugin);
+    let domains = refDomains.get(row.pkg);
     if (domains === undefined) {
       domains = new Set<string | undefined>();
-      refDomains.set(row.plugin, domains);
+      refDomains.set(row.pkg, domains);
     }
-    domains.add(row.app);
+    // 在场域集（第三十六批 apps 数组化）：行挂多应用 = 组件在该多应用域皆在场
+    //（一行投多 app）；apps 键缺席 = 全局作用域（undefined 域——一切应用皆在场）
+    if (row.apps === undefined) domains.add(undefined);
+    else for (const appId of row.apps) domains.add(appId);
   }
   const gaps = new Map<string, readonly string[]>();
   for (const [id, manifest] of apps) {

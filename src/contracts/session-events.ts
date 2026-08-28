@@ -1,17 +1,17 @@
 /**
  * L0 contracts — durable 会话事件类型注册表（会话篇 §1.1 核心词汇 / §2.1
- * 插件扩展词汇；2026-08-25 Hermes 探针 #19 收口后自 session 模块迁入——
+ * 应用扩展词汇；2026-08-25 Hermes 探针 #19 收口后自 session 模块迁入——
  * 单一来源住 contracts，session/event-types 再导出、旧消费面零改动；
  * berryagent 虚拟面随之可取，与 messages.ts #16 收口同款）。
  *
  * 与错误码同纪律（内核篇 §5.3）：词汇显式注册、运行时可枚举、CI 可校验。
- * 核心清单之外，插件可经 registerSessionEventType 显式注册扩展类型——
+ * 核心清单之外，应用可经 registerSessionEventType 显式注册扩展类型——
  * 未知类型且非 ignorable，读侧整体拒绝（SESSION_FORMAT_UNSUPPORTED）。
  *
  * 双入口纪律（与消息角色 contracts/messages.ts 同构，会话篇 §2.1 落码注记）：
- * - 插件面 registerPluginSessionEventType（ctx.registerSessionEventType 落点）：
- *   作用域化——注销器挂 ctx effect 栈，/reload 销锚即词汇随插件回卷、重装重注册
- *   （jiti moduleCache:false 下裸模块级注册会撞重复注册，插件面必须作用域化）；
+ * - 装载面 registerAppSessionEventType（ctx.registerSessionEventType 落点）：
+ *   作用域化——注销器挂 ctx effect 栈，/reload 销锚即词汇随应用回卷、重装重注册
+ *   （jiti moduleCache:false 下裸模块级注册会撞重复注册，装载面必须作用域化）；
  *   核心词拒注册 SESSION_CORE_TYPE_FORBIDDEN（与 appendEvent 写侧同码——
  *   注册侧先拦，伪造词汇与伪造写入同罪）。
  * - 宿主面 registerSessionEventType：模块级直调（官方件随包代码存在、组合
@@ -80,14 +80,14 @@ export function registerSessionEventType(def: SessionEventTypeDefinition): () =>
 }
 
 /**
- * 注册一个事件类型（插件面入口——`ctx.registerSessionEventType` 的落点）。
+ * 注册一个事件类型（装载面入口——`ctx.registerSessionEventType` 的落点）。
  * 核心词拒绝：与 appendEvent 写侧 SESSION_CORE_TYPE_FORBIDDEN 同码，注册侧
- * 先拦——插件不得伪造内核词（sendUserMessage 归因/守门结算语义绑宿主写点）。
+ * 先拦——应用不得伪造内核词（sendUserMessage 归因/守门结算语义绑宿主写点）。
  * @returns 注销函数（ctx 面已自动挂作用域 effect 栈；此处直调则由调用方自理）
  */
-export function registerPluginSessionEventType(def: SessionEventTypeDefinition): () => void {
+export function registerAppSessionEventType(def: SessionEventTypeDefinition): () => void {
   if (coreTypes.has(def.type)) {
-    throw new AppError(SESSION_CORE_TYPE_FORBIDDEN, `核心事件类型禁止插件注册：${def.type}（内核词写入权属宿主）`);
+    throw new AppError(SESSION_CORE_TYPE_FORBIDDEN, `核心事件类型禁止应用注册：${def.type}（内核词写入权属宿主）`);
   }
   return addToRegistry(def);
 }
@@ -128,17 +128,17 @@ export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'llm/retry', category: 'log-only' },
   // 卸载落账（契约篇 §3.4 第二刀，2026-08-27 刀 2）：宿主写点（组合根
   // emitUninstalled——uninstall 真身住 Ring 0「装」职能），核心词身份自动拒
-  // 插件面注册/伪造（SESSION_CORE_TYPE_FORBIDDEN 双闸同判据）；复数域 = 管理面
-  // 词汇，与活体目录 plugin/uninstalled 同词双落地（总线 + 会话流）
-  { type: 'plugin/uninstalled', category: 'log-only' },
+  // 装载面注册/伪造（SESSION_CORE_TYPE_FORBIDDEN 双闸同判据）；复数域 = 管理面
+  // 词汇，与活体目录 app/uninstalled 同词双落地（总线 + 会话流）
+  { type: 'app/uninstalled', category: 'log-only' },
 ];
 
-/** 核心词集合（插件面拒注册的判据——含 reserved 预留词，核心族一体保护） */
+/** 核心词集合（装载面拒注册的判据——含 reserved 预留词，核心族一体保护） */
 const coreTypes = new Set(CORE_EVENT_TYPES.map((def) => def.type));
 
 /**
  * 是否核心事件词（内核词——写入权与注册权均属宿主）：appendEvent 写侧与
- * registerPluginSessionEventType 注册侧同判据单一来源（两道闸一道尺）。
+ * registerAppSessionEventType 注册侧同判据单一来源（两道闸一道尺）。
  */
 export function isCoreSessionEventType(type: string): boolean {
   return coreTypes.has(type);

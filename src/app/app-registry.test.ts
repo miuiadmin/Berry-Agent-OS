@@ -164,9 +164,9 @@ describe('loadOfficialApps：官方目录装载', () => {
 });
 
 describe('assertAppComponents：组件在场断言（按装载身份串）', () => {
-  /** 合成最小组合树：rows 带 plugin 身份串与挂载目标，plan 三态（激活 / skip / unresolved） */
+  /** 合成最小组合树：rows 带 pkg 身份串与挂载目标，plan 三态（激活 / skip / unresolved） */
   const composition = (
-    rows: Array<{ id: string; plugin?: string; app?: string }>,
+    rows: Array<{ id: string; pkg?: string; apps?: string[] }>,
     plan: Array<{ id: string; skip?: string; unresolved?: string }>,
   ): CompositionReport => ({ rows, plan }) as unknown as CompositionReport;
 
@@ -175,11 +175,11 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
     ['vendor/one', { id: 'vendor/one', label: '一号', components: ['builtin:chat', 'vendor/tool', 'vendor/gone'] }],
   ]) as Parameters<typeof assertAppComponents>[0];
 
-  it('激活行在场；行 id 与身份串不挂钩（匹配只认 plugin 字段）', () => {
+  it('激活行在场；行 id 与身份串不挂钩（匹配只认 pkg 字段）', () => {
     const comp = composition(
       [
-        { id: 'main', plugin: 'builtin:chat' }, // 行 id 随意命名
-        { id: 'tools', plugin: 'vendor/tool' },
+        { id: 'main', pkg: 'builtin:chat' }, // 行 id 随意命名
+        { id: 'tools', pkg: 'vendor/tool' },
       ],
       [{ id: 'main' }, { id: 'tools' }],
     );
@@ -190,8 +190,8 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
   it('skip 行 = 用户裁量不算在场（缺场进 gaps，应用级隔离不拒启）', () => {
     const comp = composition(
       [
-        { id: 'main', plugin: 'builtin:chat' },
-        { id: 'tools', plugin: 'vendor/tool' },
+        { id: 'main', pkg: 'builtin:chat' },
+        { id: 'tools', pkg: 'vendor/tool' },
       ],
       [{ id: 'main' }, { id: 'tools', skip: 'disabled' }],
     );
@@ -201,7 +201,7 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
 
   it('unresolved 行（入口解析失败）同样不算在场', () => {
     const comp = composition(
-      [{ id: 'main', plugin: 'builtin:chat' }],
+      [{ id: 'main', pkg: 'builtin:chat' }],
       [{ id: 'main' }, { id: 'tools', unresolved: '未安装' }],
     );
     const gaps = assertAppComponents(apps, comp);
@@ -211,9 +211,9 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
   it('全部组件在场 = 无缺口（应用不出现在 gaps）', () => {
     const comp = composition(
       [
-        { id: 'a', plugin: 'builtin:chat' },
-        { id: 'b', plugin: 'vendor/tool' },
-        { id: 'c', plugin: 'vendor/gone' },
+        { id: 'a', pkg: 'builtin:chat' },
+        { id: 'b', pkg: 'vendor/tool' },
+        { id: 'c', pkg: 'vendor/gone' },
       ],
       [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
     );
@@ -225,9 +225,9 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
     // 断言与投影同域，对本应用即缺场照报
     const comp = composition(
       [
-        { id: 'a', plugin: 'builtin:chat' },
-        { id: 'b', plugin: 'vendor/tool' },
-        { id: 'c', plugin: 'vendor/gone', app: '别应用' },
+        { id: 'a', pkg: 'builtin:chat' },
+        { id: 'b', pkg: 'vendor/tool' },
+        { id: 'c', pkg: 'vendor/gone', apps: ['别应用'] },
       ],
       [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
     );
@@ -235,12 +235,12 @@ describe('assertAppComponents：组件在场断言（按装载身份串）', () 
     expect(gaps.get('vendor/one')).toEqual(['vendor/gone']);
   });
 
-  it('D1 挂本应用即在场（overlay 复挂同件进本应用组合——与挂系统行并集判定）', () => {
+  it('D1 挂本应用即在场（overlay 复挂同件进本应用作用域——与挂系统行并集判定）', () => {
     const comp = composition(
       [
-        { id: 'a', plugin: 'builtin:chat' },
-        { id: 'b', plugin: 'vendor/tool', app: 'vendor/one' }, // 挂本应用
-        { id: 'c', plugin: 'vendor/gone', app: 'vendor/one' },
+        { id: 'a', pkg: 'builtin:chat' },
+        { id: 'b', pkg: 'vendor/tool', apps: ['vendor/one'] }, // 挂本应用
+        { id: 'c', pkg: 'vendor/gone', apps: ['vendor/one'] },
       ],
       [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
     );

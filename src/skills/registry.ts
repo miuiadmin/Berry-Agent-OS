@@ -11,7 +11,7 @@ import { realpathSync } from 'node:fs';
 import type { Context, Disposer } from '../context/types.js';
 import { chainCaller } from '../context/chain.js';
 import { AppError, COMPOSITION_ROW_INVALID, SKILLS_PROVIDER_INVALID } from '../contracts/errors.js';
-import type { RowAppProbe } from '../contracts/plugin.js';
+import type { RowAppProbe } from '../contracts/app.js';
 import { SKILLS_CHANGE_EVENT } from './types.js';
 import type { Skill, SkillDiagnostic, SkillsProvider, SkillsService } from './types.js';
 
@@ -29,7 +29,7 @@ function realPath(p: string): string {
  * 做一次性形状校验——返回值两键在场（skills/diagnostics 均为数组）+ 元素粗验
  * （技能 name/description/filePath 三串键、诊断 type/code/message 三键）。
  * 防注册时点两路静默：① 返回退化形（缺键）此前要到首次 refresh 才以裸
- * TypeError 炸（栈指向 merge 不指插件，行已 failed 清单难归因）；② list()
+ * TypeError 炸（栈指向 merge 不指应用，行已 failed 清单难归因）；② list()
  * 自身抛错此前 refresh 期才降 provider-failed 警告——「装上了但永远空」在
  * 注册时点无感。只在注册入口调一次，不随 refresh 重复——运行期退化形由
  * merge 的数组守卫降 warning。注册入口抛错即行 failed（装载器 apply 帧）。
@@ -122,8 +122,8 @@ export function renderAvailableSkills(skills: readonly Skill[]): string {
  * 提供方链变更广播（契约篇 §2.2 增补 6，2026-08-25 #17 收口）：onProvidersChange
  * 回调在 registerProvider 与注销时触发，载荷 = 现行 provider id 清单（注册序）。
  * 服务保持纯（不持 ctx）——装配层经此回调桥接 ctx.emit(SKILLS_CHANGE_EVENT)，
- * 装配层订阅重建系统提示词，插件热注册技能来源即时可见（此前装机即隐身：
- * 可见性依赖 /reload //new 或无关插件注册 prompt 段捎带 rebuild 的偶然耦合）。
+ * 装配层订阅重建系统提示词，应用热注册技能来源即时可见（此前装机即隐身：
+ * 可见性依赖 /reload //new 或无关应用注册 prompt 段捎带 rebuild 的偶然耦合）。
  *
  * @param opts.onProvidersChange 提供方链变更回调（缺省不广播——纯测试场景）
  * @param opts.rowApp 行挂载目标投影（D1 注册面路由裁死，契约篇 §5.1）：挂应用
@@ -208,16 +208,17 @@ export function createSkillsService(opts?: {
 
   const service: SkillsService = {
     registerProvider(provider) {
-      // D1 app 行拒载（契约篇 §5.1 注册面路由裁死，2026-08-27）：caller 链带行
-      // id（装载器 apply 帧 / 组合根 seam 显式帧）且该行挂应用组合 → 拒绝——
-      // 技能 provider 全局注入 systemPrompt、无域层，app 行注册 = 全局漏注入
-      // 破坏应用隔离。抛错即行失败（装载期拒绝）；域层随首个真实第三方需求
+      // D1 app 行拒载（契约篇 §5.1 注册面路由裁死，2026-08-27；第三十六批 apps
+      // 数组化——探针返回数组）：caller 链带行 id（装载器 apply 帧 / 组合根 seam
+      // 显式帧）且该行挂应用作用域（apps 数组非空）→ 拒绝——技能 provider 全局
+      // 注入 systemPrompt、无域层，app 行注册 = 全局漏注入破坏应用隔离。抛错即
+      // 行失败（装载期拒绝）；域层随首个真实第三方需求
       const rowId = chainCaller();
-      const appId = rowId !== undefined ? opts?.rowApp?.get(rowId) : undefined;
-      if (appId !== undefined) {
+      const apps = rowId !== undefined ? opts?.rowApp?.get(rowId) : undefined;
+      if (apps !== undefined && apps.length > 0) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `技能来源注册被拒：行 ${rowId} 挂应用组合（app: ${appId}）——应用行的技能注册 v1 裁死拒载` +
+          `技能来源注册被拒：行 ${rowId} 挂应用作用域（apps: ${apps.join('、')}）——应用行的技能注册 v1 裁死拒载` +
             `（provider 全局注入系统提示词、无域层，防全局漏注入破坏应用隔离；契约篇 §5.1 D1 注册面路由）`,
         );
       }

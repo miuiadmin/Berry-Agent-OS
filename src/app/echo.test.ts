@@ -60,21 +60,21 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
   it('同一份 authored 码在 main/worker 两域行为收敛', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'echo-')));
     // overlay 两行：同一入口、slot 参数化防撞名（服务/工具名按 slot 分岔——
-    // 真注册表查重执法面与跨用例隔离，两行互不知晓互不碰撞）。app: chat——
+    // 真注册表查重执法面与跨用例隔离，两行互不知晓互不碰撞）。apps: [chat]——
     // 触发② 执法下第三方行必挂应用（chat 为在册官方应用；worker 行同语义）
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
       [
         'rows:',
         '  - id: echo-main',
-        `    plugin: ${ECHO_ENTRY}`,
-        '    runtime: main',
-        '    app: chat',
+        `    pkg: ${ECHO_ENTRY}`,
+        '    sandbox: { carrier: main }',
+        '    apps: [chat]',
         '    config: { slot: main }',
         '  - id: echo-worker',
-        `    plugin: ${ECHO_ENTRY}`,
-        '    runtime: worker',
-        '    app: chat',
+        `    pkg: ${ECHO_ENTRY}`,
+        '    sandbox: { carrier: worker }',
+        '    apps: [chat]',
         '    config: { slot: worker }',
         '',
       ].join('\n'),
@@ -86,7 +86,7 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
     });
     try {
       // ① 两行 activated（装载身份：普通第三方形态注入，行 id 非 builtin:）
-      const statuses = runtime.plugins.list();
+      const statuses = runtime.appsService.list();
       expect(statuses.find((r) => r.id === 'echo-main')).toMatchObject({ status: 'activated' });
       expect(statuses.find((r) => r.id === 'echo-worker')).toMatchObject({ status: 'activated' });
 

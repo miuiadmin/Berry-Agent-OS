@@ -1,8 +1,8 @@
 /**
  * L4 exec — environment 披露段（运行时骨架篇 §7.3 S 量级，exec 纵切同批落码）。
  *
- * 段 id `environment`（**无 `/` = 宿主自留地首例**——插件面注册无 `/` id 即
- * PROMPT_SECTION_INVALID，宿主半边经内部注册通道不走 ctx.prompts 插件面）。
+ * 段 id `environment`（**无 `/` = 宿主自留地首例**——装载面注册无 `/` id 即
+ * PROMPT_SECTION_INVALID，宿主半边经内部注册通道不走 ctx.prompts 装载面）。
  * 注册方 = 组合根 boot 装配期；**快照语义**：渲染时取值（render at boot /
  * /reload / /new——档位切换后新回合即见新档，旧回合提示词不追溯改写）。
  *
@@ -17,11 +17,11 @@ import { deriveWritableRoots } from '../safety/roots.js';
 import type { SandboxMode } from '../safety/index.js';
 
 /**
- * 插件装载计数（第五件的事实形态——组合根从 plugins 服务计数注入）。
+ * 应用装载计数（第五件的事实形态——组合根从 appsService 服务计数注入）。
  * 口径（契约篇 §3.4 第一刀细化段）：total = 组合树总行数（含 disabled/
  * unresolved——诊断装配态 total > 三态和属常态非矛盾）；三态只计已装载行。
  */
-export interface PluginLoadCounts {
+export interface AppLoadCounts {
   /** 组合树总行数 */
   readonly total: number;
   /** activated 行数 */
@@ -39,11 +39,10 @@ export interface EnvironmentFacts {
   /** 会话工作区根（canonical 绝对路径） */
   readonly workspaceRoot: () => string;
   /**
-   * 插件装载计数（第五件，2026-08-27 刀 1——可选：组合根注入、读 plugins
-   * 服务；访问器须幂等无副作用——render 多次求值）。缺省不注入 = 略去该行
-   * （诊断装配等无 plugins 语境的调用方向后兼容）
+   * 应用装载计数（第五件，2026-08-27 刀 1——可选：组合根注入、读 appsService    * 服务；访问器须幂等无副作用——render 多次求值）。缺省不注入 = 略去该行
+   * （诊断装配等无 appsService 语境的调用方向后兼容）
    */
-  readonly pluginCounts?: () => PluginLoadCounts;
+  readonly appCounts?: () => AppLoadCounts;
 }
 
 /** 星期几的中文短名（日期披露件——「今天周几」是模型高频盲区） */
@@ -68,12 +67,12 @@ export function renderEnvironmentSection(facts: EnvironmentFacts): string {
     `- 工作区根：${workspaceRoot}（相对路径以此为锚）`,
     `- 沙箱档位：${mode}（可写根：${roots}）`,
   ];
-  // 第五件装载态摘要（§7.3——O(1) 计数行不逐行，逐行面归 plugins_list 工具
+  // 第五件装载态摘要（§7.3——O(1) 计数行不逐行，逐行面归 apps_list 工具
   // 渐进披露；快照语义同段通用纪律：boot 收口重物化后计数已实）
-  const counts = facts.pluginCounts?.();
+  const counts = facts.appCounts?.();
   if (counts !== undefined) {
     lines.push(
-      `- 插件 ${counts.total} 行：activated ${counts.activated} · failed ${counts.failed} · skipped ${counts.skipped}——细览用 plugins_list 工具`,
+      `- 应用 ${counts.total} 行：activated ${counts.activated} · failed ${counts.failed} · skipped ${counts.skipped}——细览用 apps_list 工具`,
     );
   }
   return lines.join('\n');

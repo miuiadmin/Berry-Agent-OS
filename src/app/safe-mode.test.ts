@@ -1,5 +1,5 @@
 /**
- * app — `--no-plugins` 安全模式回归锁（技术栈篇 §5，第二十六批拍板 ③，2026-08-27 落码）。
+ * app — `--no-apps` 安全模式回归锁（技术栈篇 §5，第二十六批拍板 ③，2026-08-27 落码）。
  *
  * boot 组合树空装语义：默认层与 overlay 全跳过、只保 Ring 1 硬装配行
  * （RING1_REQUIRED_ROW_IDS = ['tools']）；无驱动形态是一等态（TUI 壳照启可退 /
@@ -29,20 +29,20 @@ async function teardown(runtime: { shutdown(): Promise<void> }, dir: string): Pr
 
 /* ---------------- 用例 ---------------- */
 
-describe('--no-plugins 安全模式（boot 空装 + 救援环 + dump-config 同径）', () => {
+describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径）', () => {
   it('boot 空装：组合树只剩 tools 行激活、无驱动一等态（conversation undefined）、Ring 1 照常执法', async () => {
     const compositionDir = freshDir('safe-boot');
     const runtime = await createBerryRuntime({
       dbPath: ':memory:',
       compositionDir,
       interactive: false,
-      noPlugins: true,
+      noApps: true,
     });
     try {
       // 组合树只剩 Ring 1 硬装配行（默认层其余行 = 没进树，不是 skipped/failed）
       expect(runtime.composition.plan.map((row) => row.id)).toEqual(['tools']);
-      // 状态面同源：ctx.plugins.list 唯一事实源 = 组合树全行（一行 activated）
-      const list = runtime.plugins.list();
+      // 状态面同源：ctx.apps.list 唯一事实源 = 组合树全行（一行 activated）
+      const list = runtime.appsService.list();
       expect(list).toHaveLength(1);
       expect(list[0]).toMatchObject({ id: 'tools', status: 'activated' });
       // 无驱动一等态：chat 件未装载 → 前台投影 undefined（TUI 壳照启可退）
@@ -67,21 +67,21 @@ describe('--no-plugins 安全模式（boot 空装 + 救援环 + dump-config 同�
 
   it('overlay 全跳过：overlay 新增可装载 local 行在安全模式下不进树（默认层与 overlay 一视同仁）', async () => {
     const compositionDir = freshDir('safe-overlay');
-    // overlay 加一个真实可装载的 local 插件行（正常 boot 会进树激活——被跳过
+    // overlay 加一个真实可装载的 local 应用行（正常 boot 会进树激活——被跳过
     // 才是旗标行为，不是「行本来就装不上」的假阳性）
-    const pluginDir = join(compositionDir, 'plugins', 'extra');
-    mkdirSync(pluginDir, { recursive: true });
-    writeFileSync(join(pluginDir, 'index.ts'), 'export const name = "extra";\nexport default async function () {};\n');
+    const appDir = join(compositionDir, 'apps', 'extra');
+    mkdirSync(appDir, { recursive: true });
+    writeFileSync(join(appDir, 'index.ts'), 'export const name = "extra";\nexport default async function () {};\n');
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
       // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）
-      `rows:\n  - id: extra\n    plugin: ${pluginDir}\n    app: chat\n`,
+      `rows:\n  - id: extra\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     const runtime = await createBerryRuntime({
       dbPath: ':memory:',
       compositionDir,
       interactive: false,
-      noPlugins: true,
+      noApps: true,
     });
     try {
       expect(runtime.composition.plan.map((row) => row.id)).toEqual(['tools']); // extra 不在
@@ -96,7 +96,7 @@ describe('--no-plugins 安全模式（boot 空装 + 救援环 + dump-config 同�
       dbPath: ':memory:',
       compositionDir,
       interactive: false,
-      noPlugins: true,
+      noApps: true,
     });
     try {
       expect(runtime.conversation).toBeUndefined(); // 前置：安全模式 boot 无驱动
@@ -106,7 +106,7 @@ describe('--no-plugins 安全模式（boot 空装 + 救援环 + dump-config 同�
       // 驱动面：chat apply 走 boot 全量支线（注册表空即开首个驱动）→ 前台投影就位
       expect(runtime.conversation).toBeDefined();
       // 状态面：chat 行 activated（无驱动不再是「装了没起」的暗坑）
-      expect(runtime.plugins.list().some((row) => row.id === 'chat' && row.status === 'activated')).toBe(true);
+      expect(runtime.appsService.list().some((row) => row.id === 'chat' && row.status === 'activated')).toBe(true);
     } finally {
       await teardown(runtime, compositionDir);
     }
@@ -117,10 +117,10 @@ describe('--no-plugins 安全模式（boot 空装 + 救援环 + dump-config 同�
     // stdout 记录桩（诊断面唯一出口——mock 停在进程边界，装配全真跑）
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
-      expect(await dumpConfigMain({ compositionDir, noPlugins: true })).toBe(0);
+      expect(await dumpConfigMain({ compositionDir, noApps: true })).toBe(0);
       const out = write.mock.calls.map((call) => String(call[0])).join('');
       // 安全模式标记行：operator 一眼可辨「Ring 2/3 跳过是旗标使然不是树坏」
-      expect(out).toContain('安全模式（--no-plugins）');
+      expect(out).toContain('安全模式（--no-apps）');
       // 树只剩 Ring 1 行：tools 在场、chat 不打印（同径 = 打印的就是实际生效装配）
       expect(out).toContain('- tools：');
       expect(out).not.toContain('- chat：');

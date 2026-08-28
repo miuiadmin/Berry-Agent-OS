@@ -29,7 +29,7 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
   console.log(`[smoke] ctx.llm 服务 ${service ? '✓' : '✗（缺 provide）'}`);
 
   const hasMemoryRow = runtime.composition.rows.some((row) => row.id === 'memory');
-  const memoryStatus = runtime.plugins.list().find((row) => row.id === 'memory')?.status;
+  const memoryStatus = runtime.appsService.list().find((row) => row.id === 'memory')?.status;
   const toolNames = runtime.tools.list().map((def) => def.name);
   const memoryTools = ['memory_write', 'memory_forget', 'memory_restore', 'memory_read', 'memory_search'];
   const toolsOk = memoryTools.every((name) => toolNames.includes(name));
@@ -42,7 +42,7 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
   );
 
   const hasSubagentRow = runtime.composition.rows.some((row) => row.id === 'subagent');
-  const subagentStatus = runtime.plugins.list().find((row) => row.id === 'subagent')?.status;
+  const subagentStatus = runtime.appsService.list().find((row) => row.id === 'subagent')?.status;
   const agentToolOk = toolNames.includes('agent');
   const listSectionOk = runtime.systemPrompt.includes('可用子代理类型');
   const bootSubagentOk = hasSubagentRow && subagentStatus === 'activated' && agentToolOk && listSectionOk;
@@ -51,7 +51,7 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
   );
 
   const hasGoalRow = runtime.composition.rows.some((row) => row.id === 'goal');
-  const goalStatus = runtime.plugins.list().find((row) => row.id === 'goal')?.status;
+  const goalStatus = runtime.appsService.list().find((row) => row.id === 'goal')?.status;
   const goalTools = ['goal_get', 'goal_set', 'goal_update'];
   const goalToolsOk = goalTools.every((name) => toolNames.includes(name));
   const bootGoalOk = hasGoalRow && goalStatus === 'activated' && goalToolsOk;
@@ -160,9 +160,7 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
       const sessionEvents = runtime.session?.events ?? [];
-      const injections = sessionEvents.filter(
-        (e) => e.type === 'user/message' && e.data?.source === 'plugin:goal',
-      ).length;
+      const injections = sessionEvents.filter((e) => e.type === 'user/message' && e.data?.source === 'app:goal').length;
       const goalUpdateCalled = sessionEvents.some((e) => e.type === 'tool/call' && e.data?.name === 'goal_update');
       goalRoundOk = (goalTerminal.includes('completed') && goalUpdateCalled) || injections > 0;
       console.log(

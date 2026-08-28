@@ -2,10 +2,10 @@
  * L1 context — 令牌桶频率护栏（契约篇 §1.6 时钟族/资源护栏族共用机制）。
  *
  * 两消费面同一机制（2026-08-27 刀〇b 抽出共用件）：
- * - emit 侧：per-**作用域**桶（ContextRuntime——插件作用域派发频率，root 免计费）；
- * - sessions 侧：per-**会话**桶（app 装配层 ctx.sessions 写面——插件落 durable
+ * - emit 侧：per-**作用域**桶（ContextRuntime——应用作用域派发频率，root 免计费）；
+ * - sessions 侧：per-**会话**桶（app 装配层 ctx.sessions 写面——应用落 durable
  *   事件按目标会话归因）。
- * 两面同抛 PLUGIN_EVENT_RATE 但文案与键不同（面名 + 键 + 两阈值可分辨——码族
+ * 两面同抛 APP_EVENT_RATE 但文案与键不同（面名 + 键 + 两阈值可分辨——码族
  * 随语义族走，不因消费面分裂）。
  */
 

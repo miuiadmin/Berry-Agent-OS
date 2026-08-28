@@ -1,7 +1,7 @@
 /**
- * L3 skills 测试 — 包层 provider（技能包插件，契约篇 §1.2 第六件）：
+ * L3 skills 测试 — 包层 provider（技能包应用，契约篇 §1.2 第六件）：
  * 目录扫描（source=package）/ package-missing 拒绝式诊断（warning 不杀行）/
- * 优先级回归锁（provider 注册序 = 合并优先序——local-fs 装配序 ⑦ 先于插件 ⑨
+ * 优先级回归锁（provider 注册序 = 合并优先序——local-fs 装配序 ⑦ 先于应用 ⑨
  * 的机制本体，用户本地恒压过包内技能）。真文件系统 fixtures。
  */
 
@@ -36,16 +36,16 @@ function writeSkill(rootDir: string, name: string): string {
 }
 
 describe('createPackageSkillsProvider（包层 provider）', () => {
-  it('目录存在：以 source=package 扫描发现技能，provider id = package:<插件名>', () => {
+  it('目录存在：以 source=package 扫描发现技能，provider id = package:<应用名>', () => {
     const dir = makeRoot();
     writeSkill(join(dir, 'pkg-root', 'skills'), 'commit-style');
 
     const provider = createPackageSkillsProvider({
-      pluginName: 'superpowers',
+      appName: 'superpowers',
       packageRoot: join(dir, 'pkg-root'),
       dirs: ['./skills'],
     });
-    // 诊断溯源：provider id 携带插件声明名
+    // 诊断溯源：provider id 携带应用声明名
     expect(provider.id).toBe('package:superpowers');
 
     const { skills, diagnostics } = provider.list();
@@ -58,7 +58,7 @@ describe('createPackageSkillsProvider（包层 provider）', () => {
   it('目录缺失：package-missing warning 诊断、零技能不断流（声明了却缺失是真异常，不杀行）', () => {
     const dir = makeRoot();
     const provider = createPackageSkillsProvider({
-      pluginName: 'ghost',
+      appName: 'ghost',
       packageRoot: join(dir, 'pkg-root'), // skills/ 子目录从未创建
       dirs: ['./skills'],
     });
@@ -68,7 +68,7 @@ describe('createPackageSkillsProvider（包层 provider）', () => {
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]!.code).toBe('package-missing');
     expect(diagnostics[0]!.type).toBe('warning');
-    // 消息带插件名（归因）、path 是解析后的绝对路径（诊断出口可定位）
+    // 消息带应用名（归因）、path 是解析后的绝对路径（诊断出口可定位）
     expect(diagnostics[0]!.message).toContain('ghost');
     expect(diagnostics[0]!.path).toBe(join(dir, 'pkg-root', 'skills'));
   });
@@ -79,7 +79,7 @@ describe('createPackageSkillsProvider（包层 provider）', () => {
     // b/ 缺失
 
     const provider = createPackageSkillsProvider({
-      pluginName: 'mixed',
+      appName: 'mixed',
       packageRoot: join(dir, 'pkg-root'),
       dirs: ['./a', './b'],
     });
@@ -89,12 +89,12 @@ describe('createPackageSkillsProvider（包层 provider）', () => {
   });
 
   it('空清单：零技能零诊断', () => {
-    const provider = createPackageSkillsProvider({ pluginName: 'x', packageRoot: '/tmp', dirs: [] });
+    const provider = createPackageSkillsProvider({ appName: 'x', packageRoot: '/tmp', dirs: [] });
     expect(provider.list()).toEqual({ skills: [], diagnostics: [] });
   });
 
   it('优先级回归锁：local-fs（先注册）压过包层同名技能——provider 注册序即合并优先序', () => {
-    // 机制本体锁：装配序 ⑦（local-fs）先于 ⑨（插件技能回调），故用户本地恒压过
+    // 机制本体锁：装配序 ⑦（local-fs）先于 ⑨（应用技能回调），故用户本地恒压过
     // 包内技能。merge 不读 source 字段——优先级纯靠注册序，此测试钉死该序语义
     const dir = makeRoot();
     writeSkill(join(dir, 'user-home', 'skills'), 'commit-style');
@@ -106,7 +106,7 @@ describe('createPackageSkillsProvider（包层 provider）', () => {
     );
     service.registerProvider(
       createPackageSkillsProvider({
-        pluginName: 'superpowers',
+        appName: 'superpowers',
         packageRoot: join(dir, 'pkg-root'),
         dirs: ['./skills'],
       }),

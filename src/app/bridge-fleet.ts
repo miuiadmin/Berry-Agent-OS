@@ -2,27 +2,27 @@
  * app — worker 域舰队（契约篇 §1.7 K3-c 编舞件，2026-08-26 第二十七批刀二）。
  *
  * 「每 worker 行一域」的装配形态落码：把 spawnWorkerDomain 的机制面收编成
- * loadPlugins 可注入的 WorkerRowLoader——worker 行 load 时即 spawn 专属域
+ * loadApps 可注入的 WorkerRowLoader——worker 行 load 时即 spawn 专属域
  * （boot 解析即 spawn），并给组合根三件编舞出口：
  *
  * - reapUnapplied：清割「装载成功但从未 apply」的域（Kahn 零进展残留行——行
- *   已按 PLUGIN_INJECT_UNRESOLVED 进失败清单，域是孤儿，即刻刻意收尾防漏）；
- * - terminateAll：域级刻意收尾（/reload 随插件锚重装载、进程关停两时点）；
+ *   已按 APP_INJECT_UNRESOLVED 进失败清单，域是孤儿，即刻刻意收尾防漏）；
+ * - terminateAll：域级刻意收尾（/reload 随应用锚重装载、进程关停两时点）；
  * - stats：观测打点（观测锚⑨心跳超时/⑩装机计数——打点先行，事件面随预算
  *   内存维度〔刀三〕另批；先例：tools stats() counters）。
  *
  * 死亡结算（契约篇 §1.7）：域意外死亡（自崩溃/watchdog kill/resourceLimits
  * 超限）→ bootstrap exit 监听已完成域死回卷（行作用域 LIFO）→ 本舰队逐行
- * 广播 plugin/failed（复用装载失败同一观测词汇，code = BRIDGE_WORKER_EXITED）
+ * 广播 app/failed（复用装载失败同一观测词汇，code = BRIDGE_WORKER_EXITED）
  * ——不自动重启，「宁可死得响亮」，operator 裁量重开。
  *
  * env 白名单（K3-c 决定）：v1 不过滤——缺省继承宿主 env 全量。理由：main 域
- * 插件本可直读 process.env，给 worker 过滤无安全增益（worker 分域是故障域
+ * 应用本可直读 process.env，给 worker 过滤无安全增益（worker 分域是故障域
  * 分域非安全边界）；拷贝不回漏底线由 Node worker 语义天然保证。机会面
  * （最小化披露）随案三进程墙再裁。
  */
-import { AppError, BRIDGE_WORKER_EXITED, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
-import type { PluginPlanRow } from '../contracts/plugin.js';
+import { AppError, BRIDGE_WORKER_EXITED, APP_LOAD_FAILED } from '../contracts/errors.js';
+import type { AppPlanRow } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
@@ -32,7 +32,7 @@ import { spawnWorkerDomain, bridgeWorkerUrl, type WorkerDomain } from '../bridge
 export interface BridgeFleetOptions {
   /** 服务解析根（spawnWorkerDomain 的 root——ctx 真根，服务表根共享全树可见） */
   readonly root: ContextScope;
-  /** 装载锚 accessor（plugin/failed 死亡结算的落点；/reload 会重 fork，恒取活锚） */
+  /** 装载锚 accessor（app/failed 死亡结算的落点；/reload 会重 fork，恒取活锚） */
   readonly anchor: () => ContextScope;
   /** worker 同伴入口（缺省 bridge 模块自描述位置） */
   readonly workerUrl?: URL;
@@ -50,21 +50,21 @@ export interface BridgeFleetOptions {
   readonly resourceLimits?: Readonly<Record<string, number>>;
   /**
    * 按行资源限覆盖（第三纵切 budget.memoryMb 落码形态，契约篇 §5.4 第 5 条）：
-   * worker 行装载时先问此钩子——键 = 行 plugin 装载身份串（与组件在场断言同键），
+   * worker 行装载时先问此钩子——键 = 行 pkg 装载身份串（与组件在场断言同键），
    * 返回值优先于全局缺省；undefined = 回落 opts.resourceLimits。应用内存预算的
    * per-row 映射位（多应用共享组件由装配层先行取严 min，本件不重复裁决）。
    */
   readonly rowResourceLimits?: (row: {
     readonly id: string;
-    readonly plugin?: string;
+    readonly pkg?: string;
   }) => Readonly<Record<string, number>> | undefined;
   /**
-   * 运行时行失败回写面（ctx.plugins.markFailed 注入物——契约篇 §1.7 死亡
-   * 结算：plugin/failed 事件广播 + list 状态源同步转 failed，两件同一时点）。
-   * 事件归本舰队、状态归插件管理服务——分工不重不漏。
+   * 运行时行失败回写面（ctx.apps.markFailed 注入物——契约篇 §1.7 死亡
+   * 结算：app/failed 事件广播 + list 状态源同步转 failed，两件同一时点）。
+   * 事件归本舰队、状态归应用管理服务——分工不重不漏。
    */
   readonly markFailed?: (id: string, code: string, message: string) => void;
-  /** 域死追加上报钩子（死亡结算内建 plugin/failed 广播之后；装配层观测面） */
+  /** 域死追加上报钩子（死亡结算内建 app/failed 广播之后；装配层观测面） */
   readonly onDomainExit?: (info: {
     readonly workerId: string;
     readonly code: number;
@@ -83,9 +83,9 @@ interface FleetEntry {
 
 /** 舰队操作面（组合根三件编舞出口 + 装载器注入物） */
 export interface BridgeFleet {
-  /** loadPlugins opts.workerLoader 注入物（worker 行装载管线入口） */
+  /** loadApps opts.workerLoader 注入物（worker 行装载管线入口） */
   readonly loader: WorkerRowLoader;
-  /** 清割未应用域（loadPlugins 返回后调用——Kahn 残留行防漏）；返回清割数 */
+  /** 清割未应用域（loadApps 返回后调用——Kahn 残留行防漏）；返回清割数 */
   reapUnapplied(reason: string): number;
   /** 全域刻意收尾（/reload/关停编舞——不走死亡结算）；返回收编数 */
   terminateAll(reason: string): number;
@@ -103,7 +103,7 @@ export interface BridgeFleet {
 /**
  * 建 worker 域舰队。装载失败/apply 失败的域即刻刻意收尾（行已进失败清单，
  * 域不留孤儿——防漏是本件的存在理由之一）；意外死亡走 bootstrap 域死回卷 +
- * 本件 plugin/failed 死亡结算。
+ * 本件 app/failed 死亡结算。
  */
 export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
   /** 行 id → 域登记项（一行一域） */
@@ -134,7 +134,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         ...(resourceLimits !== undefined ? { resourceLimits } : {}),
         ...(opts.loadTimeoutMs !== undefined ? { loadTimeoutMs: opts.loadTimeoutMs } : {}),
         // 心跳监督编舞（契约篇 §1.7）：冻结 → watchdog 杀域（kill 走意外死亡
-        // 全流程——域死回卷 + plugin/failed 结算；terminate 是编舞终点不适用）
+        // 全流程——域死回卷 + app/failed 结算；terminate 是编舞终点不适用）
         ...(opts.heartbeatMs !== undefined
           ? {
               heartbeatMs: opts.heartbeatMs,
@@ -148,7 +148,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
             }
           : {}),
         // 域死结算钩子：bootstrap 已完成域死回卷（回卷先行完成后才通知）——
-        // 此处摘登记 + 计数 + 逐行 plugin/failed（复用装载失败同一观测词汇）
+        // 此处摘登记 + 计数 + 逐行 app/failed（复用装载失败同一观测词汇）
         onExit: (info) => {
           entries.delete(row.id);
           if (info.reason === undefined) crashed += 1; // 无执法归因 = 自崩溃（kill 路径已计 heartbeatFreezes）
@@ -161,12 +161,12 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           for (const id of info.rows) {
             const detail = info.reason !== undefined ? `，归因：${info.reason}` : '';
             // 诊断面终点（契约篇 §1.7 结算消息携带 diagnostic）：第一手错误缀入
-            // 结算消息——plugin/failed 广播与 markFailed 回写同一字符串，operator
-            // 看 plugins.list() 行状态即见原始异常/内存超限签名，不只知 code 1
+            // 结算消息——app/failed 广播与 markFailed 回写同一字符串，operator
+            // 看 appsService.list() 行状态即见原始异常/内存超限签名，不只知 code 1
             const diag = info.diagnostic !== undefined ? `，diagnostic：${info.diagnostic}` : '';
             const message = `worker 域意外退出（code ${info.code}${detail}${diag}）——域死回卷已完成，不自动重启（宁可死得响亮，契约篇 §1.7）`;
             // 事件广播（观测面）+ 状态回写（list 状态源不漂移）同一时点落定
-            opts.anchor().emit('plugin/failed', { id, code: BRIDGE_WORKER_EXITED, message });
+            opts.anchor().emit('app/failed', { id, code: BRIDGE_WORKER_EXITED, message });
             opts.markFailed?.(id, BRIDGE_WORKER_EXITED, message);
           }
           opts.onDomainExit?.(info);
@@ -185,13 +185,13 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         throw err;
       }) as Promise<WorkerModuleMeta>;
     },
-    /* 宿主半激活 = 委托 domain.applyRow（行作用域由 loadPlugins fork 后传入） */
+    /* 宿主半激活 = 委托 domain.applyRow（行作用域由 loadApps fork 后传入） */
     apply(row, scope, callOpts) {
       const entry = entries.get(row.id);
       if (entry === undefined) {
         // 装载后域已死（意外死亡已结算）/已收编——行按失败收尾，响亮不静默
         return Promise.reject(
-          new AppError(PLUGIN_LOAD_FAILED, `worker 行 ${row.id} 的域不在舰队（装载后死亡或已收编——装载管线不变量）`),
+          new AppError(APP_LOAD_FAILED, `worker 行 ${row.id} 的域不在舰队（装载后死亡或已收编——装载管线不变量）`),
         );
       }
       return entry.domain.applyRow(row, scope, callOpts).then(
@@ -199,7 +199,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           entry.applied = true;
         },
         (err: unknown) => {
-          // apply 失败防漏：loadPlugins 已回卷行作用域 + 行进失败清单，域即刻收尾
+          // apply 失败防漏：loadApps 已回卷行作用域 + 行进失败清单，域即刻收尾
           entries.delete(row.id);
           entry.domain.terminate(`行 ${row.id} apply 失败防漏收尾`);
           terminated += 1;
@@ -211,7 +211,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
 
   return {
     loader,
-    /** 清割未应用域：Kahn 零进展残留行（loadPlugins 已判 PLUGIN_INJECT_UNRESOLVED）的孤儿域 */
+    /** 清割未应用域：Kahn 零进展残留行（loadApps 已判 APP_INJECT_UNRESOLVED）的孤儿域 */
     reapUnapplied(reason) {
       let reaped = 0;
       for (const [rowId, entry] of [...entries]) {
@@ -223,7 +223,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       }
       return reaped;
     },
-    /** 全域刻意收尾（/reload 随插件锚重装载、进程关停——jobs drain 后 persistence.close 前） */
+    /** 全域刻意收尾（/reload 随应用锚重装载、进程关停——jobs drain 后 persistence.close 前） */
     terminateAll(reason) {
       let count = 0;
       for (const [rowId, entry] of [...entries]) {

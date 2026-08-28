@@ -9,9 +9,9 @@
  * - 写路径唯一：memory_write 与 §4 提取共用 guardedAddMemory（§8.1 写前扫描）
  *   + store.addMemory（§5 合并管线）——没有绕过合并/扫描的直通道；
  * - 读出面统一过 sanitizeForModel（§8.2 读出扫描——secret 拦截 + 指令样引述化）；
- * - 工具形态 = ToolDefinition（插件契约篇 §3.1）：插件经 ctx.get('tools').register
+ * - 工具形态 = ToolDefinition（应用契约篇 §3.1）：应用经 ctx.get('tools').register
  *   注册，执行全走三段管道（守门照走——本文件零旁门）；
- * - parameters 用宿主 typebox 再导出面构建（contracts/typebox.ts——与插件经
+ * - parameters 用宿主 typebox 再导出面构建（contracts/typebox.ts——与应用经
  *   berryagent 虚拟面取 typebox 同路，防双实例）；
  * - 检索/引用的访问流水（§3 memory_access）在工具面落账：search 命中记
  *   op='search'（聚合不随——usage_count ≡ cite 行数）。
@@ -25,7 +25,7 @@ import { citationMarker } from './citation.js';
 import type { MemoryKind, MemoryStore } from './store.js';
 import type { SessionFtsHit } from './session-fts.js';
 
-/** 工具五件选项（插件装配注入；owner 解析留在装配层——global + 当前项目） */
+/** 工具五件选项（应用装配注入；owner 解析留在装配层——global + 当前项目） */
 export interface MemoryToolsOptions {
   /** 记忆库 DAO */
   readonly store: MemoryStore;

@@ -4,7 +4,7 @@
  * createBerryRuntime 把 M1 已落模块接线成真实可跑：
  * context 根作用域 → channels/ui → persist（session）→ llm（凭证适配注入）→
  * tools（fs 族 + 三段管道 + gate/decision durable）→ safety（审批 + 守门行 +
- * 可写根）→ skills（本地 provider + refresh）→ 插件装载 → 内置命令。
+ * 可写根）→ skills（本地 provider + refresh）→ 应用装载 → 内置命令。
  *
  * 2026-08-24 应用面第一纵切（契约篇 §5.4 规范先行）：**对话应用装配本体迁
  * `builtin:chat` 官方件**（默认层首行）——会话选择/续接、durable 绑定、
@@ -15,7 +15,7 @@
  * 2026-08-26 S1 durable 键控总根因刀（多应用并行第一纵切，骨架篇 §9.3）：
  * 组合根四单槽（session/resumedFlag/durableRef + driverRef/chatRef）整体退役
  * 为 **DriverRegistry**（Map<sessionId, DriverEntry> + 前台聚焦指针——chat 件
- * 工厂 createChatPlugin 产物，组合根分配、件填充与消费）；全局绑定面（onUsage
+ * 工厂 createChatApp 产物，组合根分配、件填充与消费）；全局绑定面（onUsage
  * 计量/ctx.sessions 缺省路由/管道守门与审批落账/子代理 fork 源/goal 工具命令面）
  * 全部改键控路由（调用链 → 注册表 → 前台聚焦）；/new = open 新条目 + 退役旧
  * 条目；TUI 持 FrontHost façade 跨 /new 稳定。
@@ -27,7 +27,7 @@ import {
   APP_SHUTDOWN_QUIESCE_VIOLATED,
   AppError,
   COMPOSITION_ROW_INVALID,
-  PLUGIN_LOAD_FAILED,
+  APP_LOAD_FAILED,
   describeError,
 } from '../contracts/errors.js';
 import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
@@ -35,12 +35,12 @@ import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { ToolsService } from '../tools/registry.js';
 import type { ContextScope } from '../context/types.js';
 import { createContext } from '../context/context.js';
-import { createPluginJiti, importPluginEntry, loadPlugins, type PluginSkillsInfo } from '../context/loader.js';
+import { createAppJiti, importAppEntry, loadApps, type AppSkillsInfo } from '../context/loader.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import { resolveLocalCodepageLabels } from '../context/index.js';
 import {
   Persistence,
-  createPluginSqliteFace,
+  createAppSqliteFace,
   localDayStartMs,
   openTurnDepth,
   spentBackgroundTokensSince,
@@ -88,11 +88,12 @@ import {
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { chainCaller, runInCallerChain } from '../context/chain.js';
-import type { RowAppProbe } from '../contracts/plugin.js';
+import type { RowAppProbe } from '../contracts/app.js';
+import { resolveRowCarrier } from '../contracts/app.js';
 import {
   EVENT_HANDLER_TIMEOUT,
   PERSIST_BATCH_WRITE_FAILED,
-  PLUGIN_EVENT_RATE,
+  APP_EVENT_RATE,
   SESSION_CORE_TYPE_FORBIDDEN,
   SESSION_EVENT_DATA_INVALID,
   SESSION_EVENT_TOO_LARGE,
@@ -101,7 +102,7 @@ import {
 } from '../contracts/errors.js';
 import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
-import { createChatPlugin } from '../chat/index.js';
+import { createChatApp } from '../chat/index.js';
 import {
   createPathsService,
   loadComposition,
@@ -121,11 +122,11 @@ import { emitSessionShutdownBounded } from './subagent-child.js';
 import { createTickRunner } from './scheduler-runner.js';
 import { createTickOsRegistrar } from './tick-register.js';
 import { createJobsService, createSubagentsService, createInProcessProvider } from '../subagent/index.js';
-import { createAgentTool } from './subagent-plugin.js';
+import { createAgentTool } from './subagent-app.js';
 import type { SubagentSettlement } from '../contracts/subagent.js';
 import { createSubagentNotifier } from './notify.js';
-import { createPluginsService, sweepPluginTmpDirs } from './plugins.js';
-import type { PluginsService } from './plugins.js';
+import { createAppsService, sweepAppTmpDirs } from './apps.js';
+import type { AppsService } from './apps.js';
 import { createCredentialStore } from './persist-bridge.js';
 import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
@@ -227,18 +228,18 @@ export interface RuntimeOptions {
    */
   readonly app?: string;
   /**
-   * 组合树目录（overlay.yaml 与插件装机子树的根；缺省 dataDir()——
+   * 组合树目录（overlay.yaml 与应用装机子树的根；缺省 dataDir()——
    * 测试注入临时目录，与生产路径完全同构）
    */
   readonly compositionDir?: string;
   /**
-   * 安全模式（技术栈篇 §5 `--no-plugins`，2026-08-27 落码）：boot 组合树空装
+   * 安全模式（技术栈篇 §5 `--no-apps`，2026-08-27 落码）：boot 组合树空装
    * ——默认层与 overlay 全跳过，只保 Ring 1 硬装配行（RING1_REQUIRED_ROW_IDS，
-   * 否则 assertRing1Required 拒启）。boot 拒启自救位：坏插件锁死启动时经此旗标
+   * 否则 assertRing1Required 拒启）。boot 拒启自救位：坏应用锁死启动时经此旗标
    * 起最小内核（无驱动一等态：TUI 壳照启可退 / run 语义性失败）→ 修 overlay →
    * /reload 不受本旗标影响（fresh 读盘不过滤——救援环一进程内闭环）
    */
-  readonly noPlugins?: boolean;
+  readonly noApps?: boolean;
   /**
    * 本进程主 loop 花销记账道（缺省 'foreground'）。tick 唤起入口声明
    * 'background'（CLI `run --background` → 此处 → chat 件 durable 落账——
@@ -260,7 +261,7 @@ export interface RuntimeOptions {
    * web 件依赖覆盖（生产零参——真 fetch/真 DNS/件级限流单例；组合根全栈
    * 测试注入 fetchImpl/lookup——服务与工具同一卫生件的回归锁在此层验）
    */
-  readonly webOverrides?: import('../web/index.js').WebPluginOverrides;
+  readonly webOverrides?: import('../web/index.js').WebAppOverrides;
   /**
    * context_transform 消费点挂起时钟（毫秒，缺省 5000——契约篇 §1.6 时钟族，
    * 2026-08-27 刀〇a）：桥上钩子挂起视为故障，超时抛 EVENT_HANDLER_TIMEOUT
@@ -282,7 +283,7 @@ export interface RuntimeOptions {
   readonly stoppingTimeoutMs?: number;
   /**
    * ctx.sessions 写面频率护栏（缺省容量 2000 / 1000 每分钟——契约篇 §1.6
-   * 资源护栏族 #14，2026-08-27 刀〇b）：按**目标会话**令牌桶（归因 = 插件写
+   * 资源护栏族 #14，2026-08-27 刀〇b）：按**目标会话**令牌桶（归因 = 应用写
    * 落在归属会话），appendEvent / appendWithSurfaceOp 两口统一计费；计费在
    * session.append 成功之后（只对成功写扣费）。测试面注小桶验证执法路径。
    */
@@ -290,8 +291,8 @@ export interface RuntimeOptions {
   /**
    * 会话增生令牌桶（缺省容量 10 / 5 每分钟——会话篇 §5.1 洪水上界，2026-08-27
    * P1-1）：**进程级全局桶**，createSession 与 fork 同桶计费——每会话帽（100k 事件
-   * × 64KiB）不约束会话数，失控插件无界开新会话即无界写盘，上界必须进程级。
-   * PLUGIN_EVENT_RATE 一码三面之三（emit scope 键 / sessions 会话键 / 增生进程键，
+   * × 64KiB）不约束会话数，失控应用无界开新会话即无界写盘，上界必须进程级。
+   * APP_EVENT_RATE 一码三面之三（emit scope 键 / sessions 会话键 / 增生进程键，
    * message 带面名可分辨）。正常迁移/回退一次一调用，10/min 缺省帽碰不到。
    */
   readonly sessionSpawnRateLimit?: { capacity: number; perMinute: number };
@@ -299,7 +300,7 @@ export interface RuntimeOptions {
 
 /** 组合根产物（三个命令入口持有的运行时面） */
 export interface BerryRuntime {
-  /** 根作用域（插件 fork 的锚） */
+  /** 根作用域（应用 fork 的锚） */
   readonly ctx: ContextScope;
   /** 持久层（persist:false 时为 undefined） */
   readonly persistence: Persistence | undefined;
@@ -315,11 +316,11 @@ export interface BerryRuntime {
   readonly approval: ApprovalService;
   /** 组合树装载产物（合成行集 + 装载计划——dump-config / 诊断面；/reload 后活取值） */
   readonly composition: CompositionReport;
-  /** 插件管理服务（ctx.plugins 同一实例——list/install/toggle/update 有状态面） */
-  readonly plugins: PluginsService;
+  /** 应用管理服务（ctx.apps 同一实例——list/install/toggle/update 有状态面） */
+  readonly appsService: AppsService;
   /**
    * 官方应用清单（装载期解析——id → 清单；契约篇 §5.4 第二纵切。第三方面随
-   * ctx.plugins install 装机期发现面挂账，出现即并入此表口径）
+   * ctx.apps install 装机期发现面挂账，出现即并入此表口径）
    */
   readonly apps: ReadonlyMap<string, AppManifest>;
   /**
@@ -337,7 +338,7 @@ export interface BerryRuntime {
   /**
    * 会话驱动（通道宿主面：submit / requestQuit）——**前台聚焦条目投影**（活取值）：
    * 件装载即就绪；persist:false 诊断装配或 overlay 禁用 chat 件时为 undefined
-   * （宿主照启——命令面/插件管理完好，无对话循环）。跨 /new 稳定的完整面见
+   * （宿主照启——命令面/应用管理完好，无对话循环）。跨 /new 稳定的完整面见
    * drivers / front 两字段
    */
   readonly conversation: ConversationDriver | undefined;
@@ -384,10 +385,10 @@ export interface ReloadResult {
 /**
  * 组装 Berry 运行时（组合根唯一入口；三个命令入口共用）。
  * 装配顺序即依赖序：ctx → channels → persist → llm → tools → safety → skills
- * → 插件装载（⑨，组合树 Ring 2/3 行；**首行 chat 件装载即会话选择/驱动构造/
- * ctx.agent provide 全就绪**）→ 命令（⑨b，闭包引用 plugins/reload——须后于装载
+ * → 应用装载（⑨，组合树 Ring 2/3 行；**首行 chat 件装载即会话选择/驱动构造/
+ * ctx.agent provide 全就绪**）→ 命令（⑨b，闭包引用 appsService/reload——须后于装载
  * 声明）。全部注册走 ctx.provide/on/effect——作用域 dispose 即整体回卷。
- * async：插件装载（jiti import + apply）是异步序列（契约篇 §1）。
+ * async：应用装载（jiti import + apply）是异步序列（契约篇 §1）。
  */
 export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<BerryRuntime> {
   const workspace = opts.workspace ?? process.cwd();
@@ -395,7 +396,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const sandboxMode = opts.sandboxMode ?? 'workspace-write';
   const persistEnabled = opts.persist !== false;
 
-  /* ---- ① 根作用域（模块加载器/插件 fork 的锚） ---- */
+  /* ---- ① 根作用域（模块加载器/应用 fork 的锚） ---- */
   const ctx = createContext({ name: 'app' });
 
   /* ---- ①b project-aliases 表装载（canonical 根重定向——context 宿主原语，
@@ -411,20 +412,21 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 即时返回空对零开销 ---- */
   await resolveLocalCodepageLabels();
 
-  /* ---- ①d 行挂载目标投影（D1 清单投影批，契约篇 §5.1 注册面路由）----
-   * rowId → appId 的活视图：boot 合成后与 /reload 重合成后各重建一次
-   * （syncRowAppMap），闭包读活 Map——三个注册面消费方（tools 隐式路由 /
-   * skills·channels 拒载）构造时点与组合树合成先后无关。探针注入经构造
-   * 参数透传（registerChannelServices / createSkillsService / toolsDeps），
-   * 全部指回同一闭包实例。 */
-  let rowAppMap = new Map<string, string>();
+  /* ---- ①d 行挂载目标投影（D1 清单投影批，契约篇 §5.1 注册面路由；第三十六批
+   * 数组化改形）----
+   * rowId → appId 数组的活视图：boot 合成后与 /reload 重合成后各重建一次
+   * （syncRowAppMap），闭包读活 Map——三个注册面消费方（tools 隐式路由〔多应用
+   * 行按数组投多域〕/ skills·channels 拒载）构造时点与组合树合成先后无关。探
+   * 针注入经构造参数透传（registerChannelServices / createSkillsService /
+   * toolsDeps），全部指回同一闭包实例。 */
+  let rowAppMap = new Map<string, readonly string[]>();
   const rowApp: RowAppProbe = {
     get: (rowId) => rowAppMap.get(rowId),
     size: () => rowAppMap.size,
   };
-  /** 组合树换装时重建投影：带 app 键的行进投影（含禁用行——树形事实非装载事实） */
+  /** 组合树换装时重建投影：带 apps 键的行进投影（含禁用行——树形事实非装载事实） */
   const syncRowAppMap = (report: CompositionReport): void => {
-    rowAppMap = new Map(report.rows.filter((row) => row.app !== undefined).map((row) => [row.id, row.app!] as const));
+    rowAppMap = new Map(report.rows.filter((row) => row.apps !== undefined).map((row) => [row.id, row.apps!] as const));
   };
 
   /* ---- ② 通道与 UI 服务 ---- */
@@ -449,7 +451,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 件临时空间扫龄（契约篇 §1.5 tmp 钉位细则④）：boot 装载前同步一次、
     // 与 ensureDbDir 同一零副作用闸（:memory: 诊断路不扫——删也是落盘）；
     // best-effort（函数内单件失败 warn 不抛），不阻装配。
-    sweepPluginTmpDirs(dataDir(), ctx.logger);
+    sweepAppTmpDirs(dataDir(), ctx.logger);
   }
   const persistence = persistEnabled
     ? Persistence.open({
@@ -498,7 +500,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   /* ---- ③c 官方应用清单装载（契约篇 §5.4 应用面第二纵切）----
    * 官方清单 = 宿主包内静态已知（仓库根 apps/*.app.yaml），装载期直接解析——
    * 解析/校验失败 = 启动断言拒启（官方件随包，坏 = 发版事故，宁拒绝不误读）；
-   * 第三方清单 glob 发现面挂账随 ctx.plugins install。预算表随清单构建
+   * 第三方清单 glob 发现面挂账随 ctx.apps install。预算表随清单构建
    * （canAfford app 维数据源——④b llm 服务闭包读它，装载序上先行）。 */
   const officialApps = loadOfficialApps();
   /** 在册应用 id 集（D1 清单投影批）：组合树行 app 键取值域——loadComposition
@@ -528,7 +530,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }
   }
   /** context_transform 桥（契约篇 §2.2 增补 5② + S1 双参）：loop 私有回调桥为根
-   * 总线瀑布——根 ctx 恒存活（插件监听集随 /reload 更替），驱动绑此桥跨重装载
+   * 总线瀑布——根 ctx 恒存活（应用监听集随 /reload 更替），驱动绑此桥跨重装载
    * 稳定；sessionId 作第二种子穿透给 handler（差分/检索按归属会话路由）。
    * 挂起时钟（§1.6 时钟族，2026-08-27 刀〇a）：钩子永不 resolve 且已返还控制 =
    * 故障语义，整链竞速 transformTimeoutMs（缺省 5s）——超时抛
@@ -619,7 +621,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const inflight = maxInFlight > 0 ? new InFlightTracker(maxInFlight) : undefined;
   const streamFn: StreamFn = opts.streamFn ?? createStreamFn(llm, opts.defaults, inflight);
 
-  /* ---- ④b llm 具名服务（ctx.llm：插件单发补全唯一合法路径 + canAfford 预算闸门，骨架篇 §9.3） ---- */
+  /* ---- ④b llm 具名服务（ctx.llm：应用单发补全唯一合法路径 + canAfford 预算闸门，骨架篇 §9.3） ---- */
   const llmService = createLlmService({
     runtime: llm,
     // S4 前置债③：与 streamFn 同一份计数器（两出口同源——达帽 complete 路同拒）
@@ -673,16 +675,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * running→stopping→唯一终态，first-wins 结算，done 永不 reject。生命周期挂根
    * 作用域 effect（dispose 兜底 fire-and-forget 排空）；关停主路径在 shutdown 里
    * persistence.close 前显式 await drain()——executor 结算路可能仍写子会话事件。
-   * 提供时点在插件装载 ⑨ 前：插件（subagent/process 委派件）inject 即得。 */
+   * 提供时点在应用装载 ⑨ 前：应用（subagent/process 委派件）inject 即得。 */
   const jobs = createJobsService(ctx);
   ctx.provide('jobs', jobs);
 
   /* ---- ④d 子代理服务（ctx.subagents，骨架篇 §6.1 落码注记）----
    * provider 注册表 + 能力协商布尔检查 + background Job 接线（stopReason→终态
    * 映射唯一持有处）+ onSettle 结算回调（§6.4：结算折叠 + 三通道通知）。
-   * in-process provider 的每子装配工厂在纵切四随默认插件行落地（工厂闭包持
+   * in-process provider 的每子装配工厂在纵切四随默认应用行落地（工厂闭包持
    * streamFn/父会话/persistence——组合根侧零件，此处不装配）。
-   * 提供时点与 jobs 同理：插件装载 ⑨ 前，委派件 inject 即得。onSettle 经晚绑定
+   * 提供时点与 jobs 同理：应用装载 ⑨ 前，委派件 inject 即得。onSettle 经晚绑定
    * 挂点接线——通知器需要驱动与活会话引用（应用面第一纵切起两者皆活句柄，
    * ⑨ 装载后收口，见下）。 */
   let onSubagentSettle: ((settlement: SubagentSettlement) => void) | undefined;
@@ -695,12 +697,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   /* ---- ④e ctx.agent 具名服务（骨架篇 §9.3）——已随驱动迁 `builtin:chat` 件 ----
    * 服务与驱动同件同生命周期（件 apply 即 provide；/reload 销锚随件回卷、重装
    * 重建）。chat 行居默认层首行 → 轮次激活先于一切消费方（goal 等 inject
-   * 'agent' 结构性取得，晚绑定 attach 挂点退役——件聚落 src/chat/plugin.ts）。 */
+   * 'agent' 结构性取得，晚绑定 attach 挂点退役——件聚落 src/chat/app.ts）。 */
 
   /* ---- ④f 会话事件服务（ctx.sessions，骨架篇 §9.2 落码）----
-   * 写面：插件落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走
+   * 写面：应用落 durable 事件的唯一正门（会话篇 §8 拍板落点）：appendEvent 走
    * 缺省路由闭包（S1：调用链 → 注册表 → 前台聚焦——registry.routed()；run 期
-   * 插件工具落在归属会话，命令面落在聚焦会话）；无路由落点（诊断装配或 chat
+   * 应用工具落在归属会话，命令面落在聚焦会话）；无路由落点（诊断装配或 chat
    * 件未装载）返回 undefined，调用方各自降级。
    * 读面（2026-08-26 挖矿批 P0-1，会话篇 §3.2「当前会话只读投影」定形）：两读法
    * 锚定**当前会话**（与 sessionId 信封同源）——currentSessionId() 无落点返回
@@ -709,13 +711,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 写读同规（B1 收口）：撞未注册词与写侧**同抛 SESSION_FORMAT_UNSUPPORTED**——
    * 读侧静默空数组 = 拼错事件名的无声死，禁止。
    * 核心词汇伪造防护：内核词（user/message 等核心 14 类）的写入权属宿主——归因
-   *（sendUserMessage source）/审批/结算语义全绑在宿主写点，插件经服务面伪造即
+   *（sendUserMessage source）/审批/结算语义全绑在宿主写点，应用经服务面伪造即
    * SESSION_CORE_TYPE_FORBIDDEN 响亮拒绝（内核边界，契约篇）；读面核心词不禁
    *（已注册即返回——读不伪造任何宿主语义）。服务必须无条件 provide（即便
    * persist:false）——inject 是 Kahn 硬依赖，缺供即启动断言拒启。
    * 写面频率护栏（#14，2026-08-27 刀〇b）：按目标会话令牌桶（容量 2000 /
    * 1000 每分钟，RuntimeOptions.sessionRateLimit 可调）——归因裁决：服务面无
-   * scope 键，目标会话（registry.routed）即天然键（插件写落在归属会话，失控
+   * scope 键，目标会话（registry.routed）即天然键（应用写落在归属会话，失控
    * 洪水淹没的就是该会话）。计费在 session.append 成功之后（只对成功写扣费
    * ——未注册词/核心词执法先抛，不扣令牌）；宿主自身 durable 写点不经此面。 */
   const sessionRate = new RateLimiter(opts.sessionRateLimit ?? { capacity: 2000, perMinute: 1000 });
@@ -723,7 +725,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const chargeSessionWrite = (sessionId: string, face: string): void => {
     if (!sessionRate.tryCharge(sessionId)) {
       throw new AppError(
-        PLUGIN_EVENT_RATE,
+        APP_EVENT_RATE,
         `ctx.sessions.${face} 写入超频（会话 ${sessionId}——按目标会话计费）` +
           `：护栏 ${sessionRate.params.perMinute} 次/分钟（令牌桶：突发上限 ${sessionRate.params.capacity}、` +
           `回填 ${sessionRate.params.perMinute}/min；fail-loud 非静默丢弃，契约篇 §1.6 #14）`,
@@ -732,7 +734,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   /* ---- 会话增生桶（会话篇 §5.1 洪水上界，2026-08-27 P1-1）----
    * 进程级全局令牌桶：createSession 与 fork 同桶——每会话帽（100k × 64KiB）不
-   * 约束会话数，失控插件无界开新会话即无界写盘，上界必须进程级。PLUGIN_EVENT_RATE
+   * 约束会话数，失控应用无界开新会话即无界写盘，上界必须进程级。APP_EVENT_RATE
    * 一码三面之三（emit scope 键 / sessions 会话键 / 增生进程键），message 带面名。 */
   const sessionSpawnRate = new RateLimiter(opts.sessionSpawnRateLimit ?? { capacity: 10, perMinute: 5 });
   /** 增生桶键：进程单桶常量键（区别于 emit 的 scope 键与写面的会话键） */
@@ -746,7 +748,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const chargeSpawn = (face: string): void => {
     if (!sessionSpawnRate.tryCharge(SPAWN_BUCKET_KEY)) {
       throw new AppError(
-        PLUGIN_EVENT_RATE,
+        APP_EVENT_RATE,
         `ctx.sessions.${face} 会话增生超频（进程级——createSession 与 fork 同桶计费）` +
           `：护栏 ${sessionSpawnRate.params.perMinute} 次/分钟（令牌桶：突发上限 ${sessionSpawnRate.params.capacity}、` +
           `回填 ${sessionSpawnRate.params.perMinute}/min；fail-loud 非静默丢弃，会话篇 §5.1 洪水上界）`,
@@ -818,7 +820,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       chargeSpawn('createSession'); // 增生计费：先于物理动作（洪水面 = 写盘）
       // cwd/app 继承调用链会话（无路由落点回落 workspace——导入件在工具/apply 段
       // 调用时天然锚定归属会话）；importer 归因 = 调用链 caller 推导（宿主推导非
-      // 插件自报——装载器/工具管道两边界已归一，无链 = 宿主自身 'host'）
+      // 应用自报——装载器/工具管道两边界已归一，无链 = 宿主自身 'host'）
       const anchor = registry.routed();
       const inherited = anchor !== undefined ? persistence.metaOf(anchor.session.header.sessionId) : undefined;
       const session = persistence.createSession({
@@ -867,7 +869,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       if (isCoreSessionEventType(type)) {
         throw new AppError(
           SESSION_CORE_TYPE_FORBIDDEN,
-          `核心事件词汇不允许插件经 ctx.sessions.appendEvent 写入：${type}（内核词写入权属宿主，插件请注册自有词汇）`,
+          `核心事件词汇不允许应用经 ctx.sessions.appendEvent 写入：${type}（内核词写入权属宿主，应用请注册自有词汇）`,
         );
       }
       const entry = registry.routed();
@@ -891,11 +893,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     },
     /**
      * 遮蔽载体宿主代写（会话篇 §2 增补 6，compaction 纵切装配缺口第 1 件）：
-     * 插件携 surfaceOp 的 user/message 载体经宿主写权落账——核心词 user/message
-     * 插件不可伪造（appendEvent 拒），遮蔽注入是唯一例外通道且四执法点在此收口：
+     * 应用携 surfaceOp 的 user/message 载体经宿主写权落账——核心词 user/message
+     * 应用不可伪造（appendEvent 拒），遮蔽注入是唯一例外通道且四执法点在此收口：
      * ①载体型单边（仅 user/message——assistant/tool 词写权属 loop，非载体）；
      * ②必带遮蔽（无 surfaceOp 的注入一律走 sendUserMessage 归因正门）；
-     * ③归因强制 plugin: 前缀（宿主代写 = 插件行为，归因必须落在插件名上）；
+     * ③归因强制 app: 前缀（宿主代写 = 应用行为，归因必须落在应用名上）；
      * ④依据在列补验（冷读 M-5：sourceEventSeqs 须含区间外至少一笔——遮蔽依据
      *   本身被遮 = 遮后不可考；区间覆盖半边由 Session.validateSurfaceOp 执法）。
      * 写入即 flush（边缘纪律 3 宿主级落法）：遮蔽载体是模型可见性变更，flush
@@ -910,7 +912,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       if (carrier.type !== 'user/message') {
         throw new AppError(
           SESSION_CORE_TYPE_FORBIDDEN,
-          `appendWithSurfaceOp 载体型单边：仅受理 user/message（收到 ${carrier.type}——assistant/tool 词写权属 loop，插件遮蔽载体只有 user/message 一型）`,
+          `appendWithSurfaceOp 载体型单边：仅受理 user/message（收到 ${carrier.type}——assistant/tool 词写权属 loop，应用遮蔽载体只有 user/message 一型）`,
         );
       }
       const { surfaceOp } = carrier;
@@ -920,10 +922,10 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
           'appendWithSurfaceOp 必带 replace 型 surfaceOp（无遮蔽的注入请走 sendUserMessage 归因正门）',
         );
       }
-      if (typeof carrier.data.source !== 'string' || !carrier.data.source.startsWith('plugin:')) {
+      if (typeof carrier.data.source !== 'string' || !carrier.data.source.startsWith('app:')) {
         throw new AppError(
           SESSION_SURFACE_OP_INVALID,
-          `appendWithSurfaceOp 归因强制 plugin: 前缀（收到 ${String(carrier.data.source)}——宿主代写是插件行为，归因必须落在插件名上）`,
+          `appendWithSurfaceOp 归因强制 app: 前缀（收到 ${String(carrier.data.source)}——宿主代写是应用行为，归因必须落在应用名上）`,
         );
       }
       const hasOutsideBasis = carrier.sourceEventSeqs.some((seq) => seq < surfaceOp.start || seq > surfaceOp.end);
@@ -943,13 +945,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       await persistence?.flush();
       return event;
     },
-    /** 模型历史投影只读（增补 7 装配缺口第 2 件——插件读当前会话投影走此面，禁自扫原始流绕投影） */
+    /** 模型历史投影只读（增补 7 装配缺口第 2 件——应用读当前会话投影走此面，禁自扫原始流绕投影） */
     deriveMessages: (): ProjectedMessage[] => registry.routed()?.session.deriveMessages() ?? [],
     /**
      * 跨会话有界时间窗查询（会话篇 §3.4 单原语，2026-08-27 刀 1）——sanctioned
      * 直读事实表（不派生状态不攒第二份账）：管理面 events_query 工具与 uninstall
      * 受影响会话数反查的公共取数面。读物理库（write-behind 未 flush 尾部不可见
-     * ——迟滞披露条），需精确可传 flushFirst: true（屏障内嵌参数不新开插件面
+     * ——迟滞披露条），需精确可传 flushFirst: true（屏障内嵌参数不新开装载面
      * flush API）。persist:false 诊断装配 = 返空降级（deriveMessages 空数组同款）。
      */
     queryEvents: async (query: EventQueryOptions): Promise<EventQueryResult> => {
@@ -960,15 +962,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   });
 
   /* ---- ④e 组合树装载前置 + Ring 1 行树化（契约篇 §5.1 节奏表第一刀：tools 行起算） ----
-   * Ring 1 必备行挂**独立装载锚**（ring1Anchor——宿主装配期专用锚，与插件锚
-   * 分离：/reload 只 dispose 插件锚，Ring 1 行不被动不回卷，仅 boot 生效）。
+   * Ring 1 必备行挂**独立装载锚**（ring1Anchor——宿主装配期专用锚，与应用锚
+   * 分离：/reload 只 dispose 应用锚，Ring 1 行不被动不回卷，仅 boot 生效）。
    * tools 行产物（ctx.tools 服务 + 三段管道 + 检索族；fs 族 S2 已迁 chat 件域
    * 注册）是 ⑥b exec、⑧ 工具快照接线、⑨ chat 件的先行依赖——组合树装载与
    * 官方件注册表因之整体前置到宿主装配期；chat 件对 tools 的依赖改经 ctx.get
    * （件 inject 声明驱动 Kahn 轮次，apply 期取必居值）。 */
   const compositionDir = opts.compositionDir ?? dataDir();
   ctx.provide('paths', createPathsService(compositionDir, workspace));
-  /* 插件管理服务注入边（契约篇 §3.4 第二刀，2026-08-27 刀 2）：三个闭包引用的
+  /* 应用管理服务注入边（契约篇 §3.4 第二刀，2026-08-27 刀 2）：三个闭包引用的
    * persistence/virtualFaces/registry 均在本行之后才声明——TDZ 安全（闭包只在
    * install/update/uninstall 运行期被调，彼时装配已完成全部初始化）。
    * - loadEntry：词表账本收割面——与装载管线同一 jiti 工厂同一 import 门禁
@@ -976,14 +978,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * - affectedSessionCounts：受影响会话计数取数面——flush 屏障内嵌（write-behind
    *   尾部对查询不可见）+ Store 全库精确聚合（latestSessionId 同族宿主侧直查）；
    * - emitUninstalled：卸载成功尾双落地——总线广播 + 当前会话流落账
-   *   （plugin/uninstalled 核心词，无路由会话时总线面单落地）；
+   *   （app/uninstalled 核心词，无路由会话时总线面单落地）；
    * - requestReload：重载请求投递面（刀 3 导线——契约篇 §3.4 刀 2 工具族条：
    *   reload 真身住组合根，服务面只投递）。reload 闭包在本行之后声明——箭头
    *   懒求值 TDZ 安全（与上方三闭包同律：只在运行期被调，彼时装配已收口）；
    *   ReloadResult → ReloadOutcome 映射在此（三态投影：queued/done/error）。 */
-  const plugins = createPluginsService({
+  const appsService = createAppsService({
     dataDir: compositionDir,
-    loadEntry: (entry) => importPluginEntry(createPluginJiti(virtualFaces), entry),
+    loadEntry: (entry) => importAppEntry(createAppJiti(virtualFaces), entry),
     // persist:false 诊断装配不注入——服务面按缺省省略受影响会话计数（queryEvents 空降级同款）
     ...(persistEnabled
       ? {
@@ -996,8 +998,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         }
       : {}),
     emitUninstalled: (data) => {
-      ctx.emit('plugin/uninstalled', data);
-      registry.routed()?.session.append('plugin/uninstalled', data);
+      ctx.emit('app/uninstalled', data);
+      registry.routed()?.session.append('app/uninstalled', data);
     },
     requestReload: async () => {
       const result = await reload();
@@ -1006,22 +1008,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       return { status: 'done' as const, failed: result.payload?.failed ?? [] };
     },
   });
-  ctx.provide('plugins', plugins);
+  ctx.provide('apps', appsService);
   /* worker 域舰队登记簿（契约篇 §1.7 K3-c）：各锚舰队建好后登记，拒启/关停
    * 收编遍历此簿——refuseBoot 定义先于舰队建立（装载期拒启路径），登记簿
    * 声明提前、引用延后，TDZ 安全（早期拒启时点簿为空 = 无域可收） */
   const fleets: BridgeFleet[] = [];
   /**
    * convertToLm 丢弃诊断上报（#16 拍板 (c) + 隔离案一第一刀 #2）：
-   * ①未注册角色（无 reason）——蒸发陷阱留痕（可能是插件未装，debug 级）；
-   * ②toLlm 抛错（带 reason）——插件 bug 已发生，按丢弃收尾不穿透杀 run。
+   * ①未注册角色（无 reason）——蒸发陷阱留痕（可能是应用未装，debug 级）；
+   * ②toLlm 抛错（带 reason）——应用 bug 已发生，按丢弃收尾不穿透杀 run。
    * 注册角色的 toLlm:null 是设计内过滤，不上报（免刷日志）。
    */
   const reportDroppedRole = (role: string, reason?: string): void => {
     ctx.logger.debug(
       reason !== undefined
         ? `convertToLm 丢弃消息：${role}（${reason}）`
-        : `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——插件面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
+        : `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——装载面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
     );
   };
   /** 拒启收尾（Ring 1 与 Ring 2 启动断言同形）：先收 worker 域舰队再收尾持久层再回卷 ctx，抛聚合清单 */
@@ -1040,7 +1042,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 宿主活资源（官方件 = 宿主装配特权——不新开 ctx 服务名）。persist:false 时
   // 无 store，memory 官方件降级空转（warn 进日志）；subagent 真工厂闭包 streamFn/
   // model/活会话引用/父沙箱档/根总线（app/subagent-factory.ts——每子独立装配序）；
-  // chat 件收会话选择/驱动/ctx.agent 四件（件聚落 src/chat/plugin.ts）——无条件注入，
+  // chat 件收会话选择/驱动/ctx.agent 四件（件聚落 src/chat/app.ts）——无条件注入，
   // 无持久层时件自降级空转（装载面完好——dump-config 诊断树不断链）；
   // scheduler 件收 gate 判据两闭包 + runner（spawn 组装在 app/scheduler-runner.ts
   // ——argv 公式 + env set 注入 + 10 分钟超时，席 13 第一刀）+ OS 定时注册器
@@ -1076,7 +1078,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     return latest;
   };
   /* ---- chat 件 bundle（S1 工厂化，契约篇 §5.4 第 6 条 S1 射面）----
-   * createChatPlugin 产物 = {module, registry, front}：注册表由组合根此处分配、
+   * createChatApp 产物 = {module, registry, front}：注册表由组合根此处分配、
    * chat 件负责填充与消费（单真相）。早期闭包（③b 转发壳 / ④b onUsage /
    * ④f sessions / 调度判据）对 registry 的引用全部运行期才调用——TDZ 安全。 */
   /**
@@ -1116,20 +1118,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     sandboxMode,
     rootCtx: ctx,
     // 守门行传导判据（第三十一批 P1-4）：anchors = 根名 + 锚 fork 名拼成的 owner
-    // 完整前缀（根名 'app' = :398、锚 fork 'ring1'/'plugins' = :1219/:1491 三处
-    // 字面量的镜像——/reload 重建锚同名，前缀恒定）；mainRows 活取组合树非 worker
-    // 行 id（let composition 捕获——/reload 重赋后活取自动见新树；disabled 行
-    // 不在装载序、快照天然不含，无需再滤）
+    // 完整前缀（根名 'app' = :398、锚 fork 'ring1'/'apps' = :1219/:1491 三处
+    // 字面量的镜像——/reload 重建锚同名，前缀恒定）；mainRows 活取组合树 main
+    // 载体行 id（resolveRowCarrier 闩一分派——worker 行走分域装载不进 main 快照；
+    // external 行 fail-closed 拒载不进装载序，快照天然不含；disabled 行不在装
+    // 载序、快照天然不含，无需再滤；let composition 捕获——/reload 重赋后活取
+    // 自动见新树）
     gateRowFilter: {
-      anchors: ['app:plugins:', 'app:ring1:'],
-      mainRows: () => new Set(composition.rows.filter((row) => row.runtime !== 'worker').map((row) => row.id)),
+      anchors: ['app:apps:', 'app:ring1:'],
+      mainRows: () => new Set(composition.rows.filter((row) => resolveRowCarrier(row) === 'main').map((row) => row.id)),
     },
   });
   /** 沙箱 confine 服务（S5 bash 迁域上提至此：chat deps 需要 sandbox 实例作
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
    * 挂 ⑥b 原位不动） */
   const sandbox = createSandboxService();
-  const chatBundle = createChatPlugin({
+  const chatBundle = createChatApp({
     ...(persistence ? { persistence } : {}),
     resumeSession: opts.resumeSession,
     // CLI --app 进入面（第三纵切）：boot 首驱动即该应用域；显式档标记供审批
@@ -1232,17 +1236,17 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   //（两工厂产物均无状态——llm 面是纯 re-export，sqlite 面只闭包主库路径）
   const virtualFaces = {
     llm: providerApiFace,
-    sqlite: createPluginSqliteFace(resolvedDbPath),
+    sqlite: createAppSqliteFace(resolvedDbPath),
   };
   // 组合树合成（overlay 后写胜出）。composition 是活绑定（/reload 重装载换树）
   let composition: CompositionReport = loadComposition(compositionDir, builtins, knownAppIds);
-  // 安全模式（--no-plugins，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
+  // 安全模式（--no-apps，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
   // ——Ring 2/3 全跳过（官方默认层与 overlay 一视同仁）。只作用 boot：/reload
   // 的 fresh 读盘不过滤（救援环——boot 安全模式 → 修 overlay → /reload 恢复
   // 全树，进程内闭环，见 reload 内注记）
-  if (opts.noPlugins) composition = safeModeComposition(composition);
+  if (opts.noApps) composition = safeModeComposition(composition);
   // 行挂载目标投影重建（D1）：boot 合成产物（安全模式过滤后）即投影源——
-  // 早于一切装载（Ring 1 ③/插件 ⑨ 的注册面路由与拒载执法即刻生效）
+  // 早于一切装载（Ring 1 ③/应用 ⑨ 的注册面路由与拒载执法即刻生效）
   syncRowAppMap(composition);
   // Ring 1 必备行断言·第一面（契约篇 §5.1 行树化批「第二断言类」）：合成产物
   // 里的 Ring 1 行被 overlay 禁用/平台门控/解析失败即拒启（列举全部缺失行）
@@ -1262,19 +1266,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // CPU 燃烧如实收窄不可判——打点照登）；JS 堆 512MB = 预算内存维度宿主缺省
   //（只限引擎堆非安全墙；分应用细配 = rowResourceLimits——应用清单 budget.memoryMb
   // 已于第三纵切收键消费〔2026-08-27〕，见下方钩子注记）
-  // worker 监督编舞 + 死亡结算状态回写（markFailed——域死行在 ctx.plugins.list
-  // 状态源同步转 failed，与 plugin/failed 事件广播同一时点）
+  // worker 监督编舞 + 死亡结算状态回写（markFailed——域死行在 ctx.apps.list
+  // 状态源同步转 failed，与 app/failed 事件广播同一时点）
   const workerChoreography = {
     heartbeatMs: 15_000,
     resourceLimits: { maxOldGenerationSizeMb: 512 },
     // 按行覆盖（第三纵切 budget.memoryMb 落码形态）：应用组件命中的 worker 行
-    // 按清单限值执行（键 = 行 plugin 装载身份串，与组件在场断言同键）；未命中
+    // 按清单限值执行（键 = 行 pkg 装载身份串，与组件在场断言同键）；未命中
     // 回落全局 512MB。多应用共享组件已在 appMemoryMb 构建时取严（min）
-    rowResourceLimits: (row: { readonly plugin?: string }): { maxOldGenerationSizeMb: number } | undefined => {
-      const mb = row.plugin !== undefined ? appMemoryMb.get(row.plugin) : undefined;
+    rowResourceLimits: (row: { readonly pkg?: string }): { maxOldGenerationSizeMb: number } | undefined => {
+      const mb = row.pkg !== undefined ? appMemoryMb.get(row.pkg) : undefined;
       return mb !== undefined ? { maxOldGenerationSizeMb: mb } : undefined;
     },
-    markFailed: plugins.markFailed,
+    markFailed: appsService.markFailed,
   };
   // worker 域舰队·Ring 1 面（每 worker 行一域）：Ring 1 缺省全 builtin 行（恒
   // main 域），workerLoader 在此只为替换行保留同管线资格；锚永不重 fork——
@@ -1282,14 +1286,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const ring1Fleet = createBridgeFleet({ root: ctx, anchor: () => ring1Anchor, ...workerChoreography });
   fleets.push(ring1Fleet); // 登记簿收录（refuseBoot/关停收编遍历面）
   const ring1Plan = composition.plan.filter((row) => RING1_REQUIRED_ROW_IDS.includes(row.id));
-  const ring1Load = await loadPlugins(ring1Anchor, ring1Plan, { virtualFaces, workerLoader: ring1Fleet.loader });
+  const ring1Load = await loadApps(ring1Anchor, ring1Plan, { virtualFaces, workerLoader: ring1Fleet.loader });
   // Kahn 零进展残留行的孤儿域清割（行已进失败清单——防漏是舰队的存在理由）
   ring1Fleet.reapUnapplied('Ring 1 装载收口（Kahn 残留行清割）');
   if (ring1Load.failed.length > 0) {
     const lines = ring1Load.failed.map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
     await refuseBoot(
-      PLUGIN_LOAD_FAILED,
-      `Ring 1 行装载失败（${lines.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
+      APP_LOAD_FAILED,
+      `Ring 1 行装载失败（${lines.length} 行，app/failed 事件已逐行广播）：\n${lines.join('\n')}`,
     );
   }
   // Ring 1 产物就位断言·第二面：tools 服务在场且带管道（替换件若未提供带管道
@@ -1308,7 +1312,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   /* ---- ⑤ 工具面（Ring 1 行树化批起 = builtin:tools 件在 ④e 装载，本段仅存指针） ----
    * 三段管道 + ctx.tools 服务 + 检索族的原硬装配已整体入列组合树第七行
-   * （src/tools/plugin.ts——apply 于 ring1Anchor；fs 族 S2 迁 chat 件域注册）；
+   * （src/tools/app.ts——apply 于 ring1Anchor；fs 族 S2 迁 chat 件域注册）；
    * 守门行仍在 ⑥ 经 tools_pre_execute 事件 prepend 占首位（管道无关接线，见 gate.ts）。 */
 
   /* ---- ⑥ 审批 + 守门行（审批对绑转发壳，件绑定后落 durable） ---- */
@@ -1346,16 +1350,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 段内容随快照冻结（禁整串替换与 per-run 重写两毒品形态——契约篇 §1.3 五件） */
   const { service: prompts, host: promptsHost } = registerPromptsService(ctx);
   // environment 披露段（骨架篇 §7.3——exec 刀配套披露）：宿主自留地首例，
-  // 走宿主半边通道（无 `/` 单段 id；插件面注册此类 id 即拒）。快照语义：
+  // 走宿主半边通道（无 `/` 单段 id；装载面注册此类 id 即拒）。快照语义：
   // render 时现取档位/工作区——boot / /reload / /new 重建时点物化新值
   promptsHost.registerHostSection({
     id: 'environment',
     render: () => {
-      // 插件装载计数（environment 第五件，契约篇 §3.4）：缺省不注入即无此行——
+      // 应用装载计数（environment 第五件，契约篇 §3.4）：缺省不注入即无此行——
       // environment 段先于装载物化，boot ⑨ 收口的重物化才让计数非零（B-1 落码
       // 义务）。render 时现取 = 快照语义（重建时点冻结）
-      const pluginCounts = () => {
-        const rows = plugins.list();
+      const appCounts = () => {
+        const rows = appsService.list();
         return {
           total: rows.length,
           activated: rows.filter((r) => r.status === 'activated').length,
@@ -1366,7 +1370,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       return renderEnvironmentSection({
         mode: () => sandboxMode,
         workspaceRoot: () => workspace,
-        pluginCounts,
+        appCounts,
       });
     },
   });
@@ -1457,17 +1461,17 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     writeHeadersAll();
   });
   // skills_change → 全条目重物化 + 即时落 header 快照（契约篇 §2.2 增补 6，
-  // 变更事件族第 3 件，与 prompts_change 同构）：provider 链变更（插件热注册/
+  // 变更事件族第 3 件，与 prompts_change 同构）：provider 链变更（应用热注册/
   // 卸载技能来源）即时重物化——渐进披露随 rematerializeAll 内的 skills.refresh()
   // 重扫。单一机制收口（树干原则）：boot ⑨ 装载窗口内事件照发、重物化即时幂等
-  // （窗口收口由 header 落账闸统一），不加收口补丁——此前插件技能提供方
-  // 装机即隐身，可见性靠 /reload //new 或无关插件注册段捎带 rebuild 的偶然耦合
+  // （窗口收口由 header 落账闸统一），不加收口补丁——此前应用技能提供方
+  // 装机即隐身，可见性靠 /reload //new 或无关应用注册段捎带 rebuild 的偶然耦合
   const unwatchSkillsChange = ctx.on(SKILLS_CHANGE_EVENT, () => {
     rematerializeAll();
     if (loadWindow) return; // 装载窗口内不逐条落账——窗口收口统一落
     writeHeadersAll();
   });
-  /** 退订三个变更监听（关停序在 flush/close 前调用）：ctx 回卷会逐件注销插件工具/ 段/技能提供方（tools_change/prompts_change/skills_change 随之广播），若库已关监听仍在，会向死连接 append header、重物化简报段——关停期变更非模型可见时点且永不落盘，纯噪声 */
+  /** 退订三个变更监听（关停序在 flush/close 前调用）：ctx 回卷会逐件注销应用工具/ 段/技能提供方（tools_change/prompts_change/skills_change 随之广播），若库已关监听仍在，会向死连接 append header、重物化简报段——关停期变更非模型可见时点且永不落盘，纯噪声 */
   const unwatchChangeEvents = (): void => {
     unwatchToolsChange();
     unwatchPromptsChange();
@@ -1501,41 +1505,41 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
 
   /* ---- ⑨ 组合树装载（Ring 2/3 行走树；Ring 1 行已在 ④e 独立锚装载——树化批） ----
-   * 服务全部就位后再装插件（inject 依赖驱动轮次激活——宿主服务首轮即全就绪）；
+   * 服务全部就位后再装应用（inject 依赖驱动轮次激活——宿主服务首轮即全就绪）；
    * **首行 chat 件装载即会话选择/驱动构造/ctx.agent provide 全就绪**（其后行的
    * 工具注册经 ⑧ 已接线的 tools_change 原位刷新 loop 工具快照，含 run 中途）。
    *
-   * 卸载基底 = 插件锚作用域（§1.3 落码形态①）：全体插件 scope 自锚 fork、自定义
-   * 事件词汇挂锚 effect——锚 dispose 即 LIFO 级联回卷一切插件注册（工具/监听/服务/
+   * 卸载基底 = 应用锚作用域（§1.3 落码形态①）：全体应用 scope 自锚 fork、自定义
+   * 事件词汇挂锚 effect——锚 dispose 即 LIFO 级联回卷一切应用注册（工具/监听/服务/
    * 词汇），/reload 的卸载半边由此成立；重锚 = ctx.fork 再派生（注册表同根共享）。
    * ring1Anchor 不在回卷面（Ring 1 行不回卷，契约篇 §5.1 /reload 语义）。chat 件
    * 的驱动注册表为工厂级（S1）——重装载 apply 复用全部条目（时间线存续），只
    * 重接 provide 服务面。jiti moduleCache:false 是两条缓存纪律的 v1 基底（重装即全依赖图
-   * 重求值）。plugins 服务 provide 在 ④e 一次（§1.3 服务集恒定）：boot 与
+   * 重求值）。appsService 服务 provide 在 ④e 一次（§1.3 服务集恒定）：boot 与
    * /reload 经 applyLoad 就地更新状态，热应用期间服务引用永不断链。
    * 失败行两面语义（§1.6）：boot = 启动断言拒绝启动（先收尾持久层再回卷 ctx，抛全量
    * 清单）；/reload = 逐行响亮报告、进程存活（local 源「改动 + /reload 即见」环）。 */
-  // 插件技能注册回调（契约篇 §1.2 第六件；拓扑 seam 落码形态——context 不引
-  // skills，组合根在此桥接）：loadPlugins 在行作用域 fork 后、apply 之前逐声明行
+  // 应用技能注册回调（契约篇 §1.2 第六件；拓扑 seam 落码形态——context 不引
+  // skills，组合根在此桥接）：loadApps 在行作用域 fork 后、apply 之前逐声明行
   // 回调。桥接三件：包层 provider 工厂（skills 模块产）+ registerProvider（追加序
   // 即优先序——local-fs 装配序 ⑦ 已先注册，包内技能恒居最低层，用户本地永远压过
   // 包内）+ 挂行作用域 effect（行失败 / /reload 锚回卷即注销——技能是行资产）。
   // registerProvider → skills_change → 重建管线自然刷新，此处不另发 refresh
-  //（双发 = 每插件双份全量重扫）。回调契约不抛错已退役（D1 注册面路由，
+  //（双发 = 每应用双份全量重扫）。回调契约不抛错已退役（D1 注册面路由，
   // 2026-08-27）：app 行的技能注册会被服务面拒（COMPOSITION_ROW_INVALID）→
   // 加载器收为行失败——故意执法非契约违背。装载器回调刻意不置 caller 链
   //（桥接是宿主行为），故此处 runInCallerChain 显式还帧：服务面单一执法点
   // 同时覆盖两路径（apply 内 ctx 注册走装载器帧；包声明技能走本 seam 帧）
-  const registerPluginSkills = (info: PluginSkillsInfo): void => {
+  const registerAppSkills = (info: AppSkillsInfo): void => {
     if (info.packageRoot === undefined) {
       // builtin 行（宿主函数件）默认无磁盘锚点——未自述 packageRoot 的 builtin
       // 件仍不可注册技能（契约篇 §3.4 两来源：builtin 自述〔admin 件先例〕/
-      // 文件插件 entry 推导；两来源皆无才落此分支）
+      // 文件应用 entry 推导；两来源皆无才落此分支）
       ctx.logger.warn('builtin 件声明 skills 但未自述 packageRoot，暂不支持注册', { plugin: info.name, row: info.id });
       return;
     }
     const provider = createPackageSkillsProvider({
-      pluginName: info.name,
+      appName: info.name,
       packageRoot: info.packageRoot,
       dirs: info.dirs,
     });
@@ -1545,34 +1549,34 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   // 锚是活绑定（/reload dispose 后重 fork）；Ring 2 装载计划 = 全树剔除 Ring 1
   // 必备行（④e 已装载——双装载即 TOOL_DUPLICATE 事态，结构上排除）
-  let pluginAnchor: ContextScope = ctx.fork({ name: 'plugins' });
-  // worker 域舰队·Ring 2/3 面（与插件锚同寿命）：/reload 先 terminateAll 再随
+  let appAnchor: ContextScope = ctx.fork({ name: 'apps' });
+  // worker 域舰队·Ring 2/3 面（与应用锚同寿命）：/reload 先 terminateAll 再随
   // 新锚重装载（舰队对象复用——登记簿已空、计数器累积 = 装机计数观测锚⑩）
-  const pluginFleet = createBridgeFleet({ root: ctx, anchor: () => pluginAnchor, ...workerChoreography });
-  fleets.push(pluginFleet); // 登记簿收录（refuseBoot/关停收编遍历面——/reload 单收本舰队不动 Ring 1）
+  const appFleet = createBridgeFleet({ root: ctx, anchor: () => appAnchor, ...workerChoreography });
+  fleets.push(appFleet); // 登记簿收录（refuseBoot/关停收编遍历面——/reload 单收本舰队不动 Ring 1）
   const ring2Plan = composition.plan.filter((row) => !RING1_REQUIRED_ROW_IDS.includes(row.id));
-  const ring2Load = await loadPlugins(pluginAnchor, ring2Plan, {
-    registerSkills: registerPluginSkills,
+  const ring2Load = await loadApps(appAnchor, ring2Plan, {
+    registerSkills: registerAppSkills,
     virtualFaces,
-    workerLoader: pluginFleet.loader,
+    workerLoader: appFleet.loader,
   });
   // Kahn 残留行孤儿域清割（同 Ring 1 面防漏语义）
-  pluginFleet.reapUnapplied('Ring 2/3 装载收口（Kahn 残留行清割）');
-  // 装载结果合并回灌（ctx.plugins.list 唯一事实源 = 组合树全行——Ring 1 行状态
+  appFleet.reapUnapplied('Ring 2/3 装载收口（Kahn 残留行清割）');
+  // 装载结果合并回灌（ctx.apps.list 唯一事实源 = 组合树全行——Ring 1 行状态
   // 同面可见；/reload 后 Ring 1 行沿用 boot 装载结果 = 运行时真值：行仍激活中）
-  plugins.applyLoad(composition, {
+  appsService.applyLoad(composition, {
     activated: [...ring1Load.activated, ...ring2Load.activated],
     failed: [...ring1Load.failed, ...ring2Load.failed],
     skipped: [...ring1Load.skipped, ...ring2Load.skipped],
   });
-  if (plugins.list().some((row) => row.status === 'failed')) {
-    const lines = plugins
+  if (appsService.list().some((row) => row.status === 'failed')) {
+    const lines = appsService
       .list()
       .filter((row) => row.status === 'failed')
       .map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
     await refuseBoot(
-      PLUGIN_LOAD_FAILED,
-      `插件启动断言失败（${lines.length} 行，plugin/failed 事件已逐行广播）：\n${lines.join('\n')}`,
+      APP_LOAD_FAILED,
+      `应用启动断言失败（${lines.length} 行，app/failed 事件已逐行广播）：\n${lines.join('\n')}`,
     );
   }
   // ④d onSettle 晚绑定收口（§6.4）：通知器按注册表解析归属条目——S1 键控
@@ -1594,7 +1598,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
      委派）；与声明式 agent 文件撞名 = warn 跳过不炸装配（用户文件取到官方
      应用 id 是可预见的用户行为，同 subagent 件 reservedNames 纪律）。注册锚 =
      boot 组合根：清单静态已知不随 /reload 重算，provider 表工厂级跨 /reload
-     存续（④d 服务面同款）——/reload 只换插件面，应用注册表不动。 */
+     存续（④d 服务面同款）——/reload 只换装载面，应用注册表不动。 */
   for (const [id, manifest] of officialApps) {
     if (manifest.entry?.delegable !== true || appGaps.has(id)) continue;
     if (subagents.list().some((info) => info.name === id)) {
@@ -1629,8 +1633,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     }
   }
   // boot 装载收口重物化（B-1，与 /reload 收口对称——契约篇 §3.4 落码义务）：
-  // chat 件首会话 open() 早于装载收口，其 systemPrompt 首物化时点 plugins.list()
-  // 尚空（applyLoad 合并回灌在后）——environment 插件计数行恒缺席。收口处补
+  // chat 件首会话 open() 早于装载收口，其 systemPrompt 首物化时点 appsService.list()
+  // 尚空（applyLoad 合并回灌在后）——environment 应用计数行恒缺席。收口处补
   // 一次全段重物化，装载结果（含 environment 第五件计数）即时入首请求快照
   rematerializeAll();
   // boot 装载窗口收口：此后运行时注册（tools_change/prompts_change）即时落
@@ -1639,7 +1643,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   // session_start 装载收口补播（二十九批 P1-6 案 A，契约篇 §2.2 增补 8①）：
   // chat 件是默认层首行（inject:['tools']），apply 即 registry.open()——open() 内
-  // 发射 session_start（活体），后续行插件（goal 等）on() attach 迟到结构性
+  // 发射 session_start（活体），后续行应用（goal 等）on() attach 迟到结构性
   // 收不到。宿主在装载收口对**非退役**条目按建会事实（resumed ? 'resume' :
   // 'initial'）补发带 replay:true 标记的同型载荷——origin 建会维度不变、replay
   // 是投递维度标记，既有按 origin 过滤的监听器零迁移。boot 与 /reload 两路
@@ -1657,17 +1661,17 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
 
   // composition/reloaded boot 路（契约篇 §2.2 增补 1/7④，2026-08-27 P1-2 补齐）：
   // 词汇注释「boot 与 /reload 两时点」自始为承诺面——boot 装载收口后同款载荷
-  // 派发。时点依据：装载器激活序 = apply 先于 loadPlugins 返回，插件 apply 期
+  // 派发。时点依据：装载器激活序 = apply 先于 loadApps 返回，应用 apply 期
   // 已订阅故能听到本事件（无「订阅晚于事件」空窗）。payload = Ring 1 + Ring 2/3
   // 两批装载结果合并三清单（id 面）；boot 即 Ring 1 生效时点，无
-  // ring1RestartRequired 键（与 /reload 路的差异仅此一项）。git-worktree 插件
+  // ring1RestartRequired 键（与 /reload 路的差异仅此一项）。git-worktree 应用
   // 墙 #3 可以此作「组合树就绪」信号（ready 级）。
   const bootPayload: CompositionReloadedPayload = {
     activated: [...ring1Load.activated, ...ring2Load.activated].map((item) => item.id),
     failed: [...ring1Load.failed, ...ring2Load.failed].map((item) => item.id),
     skipped: [...ring1Load.skipped, ...ring2Load.skipped].map((item) => item.id),
   };
-  // 补播先于 composition/reloaded：晚装载插件先补齐会话级初始化态、再收
+  // 补播先于 composition/reloaded：晚装载应用先补齐会话级初始化态、再收
   // 「组合树就绪」信号（次序 = 生命周期序，replay 是 start 的重放非新词）
   replaySessionStarts();
   ctx.emit('composition/reloaded', bootPayload);
@@ -1728,7 +1732,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
     let fresh: CompositionReport;
     try {
-      // 安全模式旗标刻意不进本路径（技术栈篇 §5 救援环）：boot --no-plugins 起的
+      // 安全模式旗标刻意不进本路径（技术栈篇 §5 救援环）：boot --no-apps 起的
       // 最小内核在此读回全量树——修好 overlay 后 /reload 即恢复，无需重启进程
       fresh = loadComposition(compositionDir, builtins, knownAppIds);
     } catch (err) {
@@ -1746,22 +1750,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       // worker 域先于锚收编（契约篇 §1.7 /reload 编舞：terminate → 锚回卷 →
       // 重装载——行作用域随锚 LIFO 回卷，unload 联动因端点已 dispose 静默吸收
       // 是预期态；Ring 1 面不动——/reload 只换 Ring 2/3）
-      pluginFleet.terminateAll('/reload 域收编');
-      await pluginAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
-      pluginAnchor = ctx.fork({ name: 'plugins' });
+      appFleet.terminateAll('/reload 域收编');
+      await appAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
+      appAnchor = ctx.fork({ name: 'apps' });
       // Ring 2/3 计划 = 新树剔除 Ring 1 必备行（ring1Anchor 永不重装载——双装
       // 即 TOOL_DUPLICATE 事态，结构上排除）
       const ring2Fresh = fresh.plan.filter((row) => !RING1_REQUIRED_ROW_IDS.includes(row.id));
-      const load = await loadPlugins(pluginAnchor, ring2Fresh, {
-        registerSkills: registerPluginSkills,
+      const load = await loadApps(appAnchor, ring2Fresh, {
+        registerSkills: registerAppSkills,
         virtualFaces,
         // worker 行重装载同缝（boot ⑨ 同款）：舰队对象复用（terminateAll 已清
         // 登记），漏传此缝 = worker 行在 /reload 静默落 failed「装载器未注入」
-        workerLoader: pluginFleet.loader,
+        workerLoader: appFleet.loader,
       });
       composition = fresh;
       // 合并回灌（Ring 1 行沿用 boot 装载结果 = 运行时真值：行仍激活中）
-      plugins.applyLoad(fresh, {
+      appsService.applyLoad(fresh, {
         activated: [...ring1Load.activated, ...load.activated],
         failed: [...ring1Load.failed, ...load.failed],
         skipped: [...ring1Load.skipped, ...load.skipped],
@@ -1779,12 +1783,12 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         ...(ring1RestartRequired.length > 0 ? { ring1RestartRequired } : {}),
       };
       // 补播先于 composition/reloaded（与 boot 收口同型同序，增补 8①）：锚回卷
-      // 把晚装载插件的监听面拆了重挂——补播让重挂的监听器重建会话级初始化态
+      // 把晚装载应用的监听面拆了重挂——补播让重挂的监听器重建会话级初始化态
       replaySessionStarts();
       ctx.emit('composition/reloaded', payload);
       return { payload };
     } catch (err) {
-      // 兜底：loadPlugins 逐行收集不抛，此处只剩 dispose/emit 级异常——进程存活报告
+      // 兜底：loadApps 逐行收集不抛，此处只剩 dispose/emit 级异常——进程存活报告
       return { error: describeError(err) };
     } finally {
       // 窗口必然收口（成败两路）：此后运行时注册恢复即时落账
@@ -1806,8 +1810,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // boot ⑨ 收口武装结算钩子（chat 件已装载则一次成功；装载失败留待 busy 分支再试）
   armRunSettledHook();
 
-  /* ---- ⑨b 内置命令（help/quit/new/skills/skill:<名> + 插件管理五件/reload） ----
-   * 依赖 ⑨ 的 plugins 服务与 reload 闭包——必须在其后注册（引用先声明）。
+  /* ---- ⑨b 内置命令（help/quit/new/skills/skill:<名> + 应用管理五件/reload） ----
+   * 依赖 ⑨ 的 appsService 服务与 reload 闭包——必须在其后注册（引用先声明）。
    * quit/submit 经驱动活句柄（chat 件未装载时 no-op——命令面仍在，对话循环不在）。 */
   ctx.effect(() =>
     registerBuiltinCommands({
@@ -1881,7 +1885,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
           return { ok: true, sessionId: entry.session.header.sessionId };
         },
       },
-      plugins, // ctx.plugins 服务（⑨ provide——命令壳与宿主同源）
+      appsService, // ctx.apps 服务（⑨ provide——命令壳与宿主同源）
       reload, // 组合根 reload 闭包（⑨ 定义——busy/error/payload 三面）
       // /usage 取数闭包：绑持久层活连接（诊断面无库时给说明行——面板零写入，
       // 库连接在关停序列中先于命令面注销而 close，通道壳兜底为通知）
@@ -1926,7 +1930,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     get composition(): CompositionReport {
       return composition;
     },
-    plugins,
+    appsService,
     /** 官方应用清单（③c 装载期解析——静态数据，不随 /reload 变） */
     apps: officialApps,
     // 活取值（/reload 重装载后按新组合树重算）——接口上仍是 readonly，实现为 getter
@@ -1977,7 +1981,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
               .join('、')}）`,
           );
         }
-        // 变更监听先退订：后续 ctx 回卷逐件注销插件工具/段时的广播不再触发
+        // 变更监听先退订：后续 ctx 回卷逐件注销应用工具/段时的广播不再触发
         // writeHeader/提示词重建（库未关也不落关停期快照——非模型可见时点）
         unwatchChangeEvents();
         // Job 排空主路径（骨架篇 §6.2）：全量 cancel + await 全部结算——子代理等
@@ -1987,14 +1991,14 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         // worker 域收编（契约篇 §1.7 关停编舞：jobs drain 之后、persistence.close
         // 之前——域死回卷/在途结算不再产生待落盘面；两舰队同批，与 ctx LIFO 同段）
         ring1Fleet.terminateAll('进程关停域收编');
-        pluginFleet.terminateAll('进程关停域收编');
+        appFleet.terminateAll('进程关停域收编');
         await persistence?.flush();
         // session_shutdown 钩子（骨架篇 §1.3 序⑤ / 契约篇钩子表，S1 全条目化）：
         // 全部条目（含退役保留者——迟到结算已收口）各发一次，统一在 flush 之后
-        //（插件清理器不再产生待落盘事件）。二十九批增补 8②：目录 mode 切
+        //（应用清理器不再产生待落盘事件）。二十九批增补 8②：目录 mode 切
         // parallel（全等待 + 单失败隔离）+ 装配层单条目 2s bounded 等待（与子代理
         // dispose 位同享 emitSessionShutdownBounded 公共件）——超时 warn 后继续
-        // 不阻塞退出；「全部清理器」不含 worker 域插件（terminate 先于本序、
+        // 不阻塞退出；「全部清理器」不含 worker 域应用（terminate 先于本序、
         // 监听器已回卷）。逐条目 await：会话清理器间无并发收益、且单条目超时
         // 不放大为整段超时
         for (const entry of registry.entries.values()) {

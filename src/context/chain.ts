@@ -22,8 +22,8 @@
  * 不走环境（chat 件工厂化后每驱动直接持自己的 durable sinks）。
  *
  * caller 链（会话篇 §5.1 导入者归因，2026-08-27 P1-1）：共享服务面（ctx.sessions 等）
- * 看不见调用方——插件身份不能靠入参自报（冻结签名 + 自报可伪造）。第二 ALS 在**插件
- * 身份天然已知的边界**进入链：装载器 apply 边界（插件激活期的一切注册/启动落该插件账）
+ * 看不见调用方——应用身份不能靠入参自报（冻结签名 + 自报可伪造）。第二 ALS 在**应用
+ * 身份天然已知的边界**进入链：装载器 apply 边界（应用激活期的一切注册/启动落该应用账）
  * 与工具执行段（管道链尾按注册归属包裹——工具体内的一切服务调用落注册者账）。读点 =
  * createSession importer 归因（chainCaller() ?? 'host'）。宿主自身/无链 = 'host' 兜底。
  *
@@ -48,7 +48,7 @@ const sessionChain = new AsyncLocalStorage<SessionChainScope>();
 /**
  * 调用方身份链（P1-1 导入者归因）：与 sessionChain 独立的第二 ALS——身份与路由
  * 是两个正交维度（宿主代码也跑在会话链上但不该落宿主以外的账），故不共载体。
- * 值 = 插件 row.id（装载器/工具管道两写点已归一）或 undefined（宿主自身）。
+ * 值 = 应用 row.id（装载器/工具管道两写点已归一）或 undefined（宿主自身）。
  */
 const callerChain = new AsyncLocalStorage<string>();
 
@@ -66,9 +66,9 @@ export function runInSessionChain<T>(
 }
 
 /**
- * 在指定调用方身份的链语境内执行 fn——插件身份已知边界的包裹原语。
- * 嵌套规则：内层覆盖外层（插件工具体内再起子代理等场景，最近身份即行为者）。
- * @param caller 调用方身份（装载器写点 = 插件 row.id；工具段写点 = 注册归属插件名）
+ * 在指定调用方身份的链语境内执行 fn——应用身份已知边界的包裹原语。
+ * 嵌套规则：内层覆盖外层（应用工具体内再起子代理等场景，最近身份即行为者）。
+ * @param caller 调用方身份（装载器写点 = 应用 row.id；工具段写点 = 注册归属应用名）
  */
 export function runInCallerChain<T>(caller: string, fn: () => T): T {
   return callerChain.run(caller, fn);
@@ -92,7 +92,7 @@ export function chainBackground(): boolean {
 }
 
 /**
- * 读取调用链当前调用方身份（P1-1 归因取数口）：插件账归属者。
+ * 读取调用链当前调用方身份（P1-1 归因取数口）：应用账归属者。
  * 无链 = 宿主自身在调用（装配期/命令面/timer 面/内置工具 host 语义）——
  * 调用方约定俗成兜底 'host'（与 sessions.importer 列的宿主语义对齐）。
  */

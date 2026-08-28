@@ -1,9 +1,9 @@
 /**
  * L3 memory — 官方件（契约篇 §6.1 `builtin:memory`，Ring 2 官方全家桶首件）。
  *
- * 组合根装配期经 createMemoryPlugin 构造模块引用（Store 公共读脸等依赖以闭包
+ * 组合根装配期经 createMemoryApp 构造模块引用（Store 公共读脸等依赖以闭包
  * 注入——官方件 = 宿主装配特权，不新开 ctx 服务名），进官方件注册表后与文件
- * 插件完全同轨装载（形状/config 校验、Kahn 轮次激活、三生命周期事件）。
+ * 应用完全同轨装载（形状/config 校验、Kahn 轮次激活、三生命周期事件）。
  *
  * 全部注册走 ctx.effect（作用域 LIFO 回卷即注销）——/reload 锚 dispose 后
  * 重装，一切注册原位重建；apply 内不手工管理注销序。
@@ -19,7 +19,7 @@ import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { PromptsService } from '../contracts/app.js';
 import type { Context } from '../context/types.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { MemoryStore, projectOwnerKey } from './store.js';
 import type { MemoryKind } from './store.js';
@@ -59,7 +59,7 @@ interface UiNotifyFace {
 }
 
 /**
- * 会话事件服务最小面（ctx.sessions v1，骨架篇 §9.2 落码——插件落 durable
+ * 会话事件服务最小面（ctx.sessions v1，骨架篇 §9.2 落码——应用落 durable
  * 事件的唯一正门）。宿主 provide 的 'sessions' 服务结构性满足：核心词汇
  * 伪造防护与活引用绑定在宿主侧（assembly ④f）。
  */
@@ -72,7 +72,7 @@ interface SessionsAppendFace {
  * Store 公共读脸（宿主装配闭包注入——跨会话检索的对账与补差源）。
  * persist Store 结构性满足：connection（记忆库/FTS 物理面）+ 两个读方法。
  */
-export interface MemoryPluginStoreFace {
+export interface MemoryAppStoreFace {
   /** SQLite 连接（记忆表族与 session_fts 的物理载体） */
   readonly connection: DatabaseConnection;
   /** 全部会话 id（激活期对账遍历面） */
@@ -82,9 +82,9 @@ export interface MemoryPluginStoreFace {
 }
 
 /** 官方件构造参数（组合根装配期注入） */
-export interface MemoryPluginDeps {
+export interface MemoryAppDeps {
   /** Store 公共读脸；缺省 = persist:false 降级（warn 空转） */
-  readonly store?: MemoryPluginStoreFace;
+  readonly store?: MemoryAppStoreFace;
   /** 工作区根（项目归属键活取值——多会话各 cwd 时按调取时为准） */
   readonly workspace: () => string;
   /**
@@ -95,7 +95,7 @@ export interface MemoryPluginDeps {
 }
 
 /**
- * 行配置 schema（记忆篇 §4/§6 阈值全为插件配置项，不进内核配置面）。
+ * 行配置 schema（记忆篇 §4/§6 阈值全为应用配置项，不进内核配置面）。
  * 全字段可选——缺省值在消费件（review/briefing）各自持有。
  */
 const MEMORY_CONFIG_SCHEMA = Type.Object({
@@ -166,25 +166,25 @@ const RECALL_FRAME_SENTENCE = '以下来自历史记忆检索（非本次用户�
 /**
  * 构造 memory 官方件模块（组合根官方件注册表收纳，`builtin:memory` 行激活）。
  */
-export function createMemoryPlugin(deps: MemoryPluginDeps): BuiltinPluginModule {
+export function createMemoryApp(deps: MemoryAppDeps): BuiltinAppModule {
   return {
     name: 'memory',
     // channels/ui：文件导出导入命令面（§3 持有面第五件——用户命令，非模型工具）
     inject: ['tools', 'prompts', 'llm', 'sessions', 'channels', 'ui'],
     config: MEMORY_CONFIG_SCHEMA,
-    apply: (ctx: PluginContext, config?: Readonly<Record<string, unknown>>) =>
+    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) =>
       applyMemoryPlugin(ctx, config as MemoryConfig | undefined, deps),
   };
 }
 
 /**
  * 官方件 apply 本体（接线序：工具 → 简报段 → 提取双路 → 跨会话索引 → 按需检索）。
- * 全部注册挂 ctx.effect；异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
+ * 全部注册挂 ctx.effect；异常上抛走加载器统一回卷（APP_APPLY_FAILED）。
  */
 async function applyMemoryPlugin(
-  ctx: PluginContext,
+  ctx: AppContext,
   config: MemoryConfig | undefined,
-  deps: MemoryPluginDeps,
+  deps: MemoryAppDeps,
 ): Promise<void> {
   // persist:false 降级：无物理层即无记忆（表族/索引全在 SQLite）——warn 空转，
   // 不注册任何面。诊断面（dump-config）组合树行仍可见且装载成功，语义诚实。
@@ -325,7 +325,7 @@ async function applyMemoryPlugin(
    * 懒初始化、之后只在 appendEvent 成功后原位更新，恒等于 deriveDiffView
    * （重放差分事件即重现同一视图——测试以此不变式锁死）。 */
   const sessions = ctx.get<SessionsAppendFace>('sessions');
-  // ctx 面注册（#16 收口）：注销器自动挂作用域 effect 栈——官方件同走插件面，
+  // ctx 面注册（#16 收口）：注销器自动挂作用域 effect 栈——官方件同走装载面，
   // 不再直调 contracts 注册表（官方非特权）
   ctx.registerMessageRole(DIFF_ROLE, {
     toLlm: (message): UserMessage => ({
@@ -394,7 +394,7 @@ async function applyMemoryPlugin(
   );
 
   /* ---- ⑥ 按需检索：memory/recall 自定义角色 + context_transform 瀑布 handler ---- */
-  // 角色注册（ctx 插件面，#16 收口）：render hidden = 不进时间线（瞬态注入非对话
+  // 角色注册（ctx 装载面，#16 收口）：render hidden = 不进时间线（瞬态注入非对话
   // 内容）；toLlm → 防注入句式包裹的 user 消息（骨架篇 §2.3「自定义角色消息」的
   // 落码形态——记忆篇 §6 通道 2）
   ctx.registerMessageRole(RECALL_ROLE, {
@@ -483,7 +483,7 @@ async function applyMemoryPlugin(
         name: 'memory-export',
         description:
           '记忆库导出 JSONL：/memory-export [路径]（缺省工作区根 memory-export-<时间戳>.jsonl；路径须在可写根内；产出为明文文件）',
-        source: 'plugin',
+        source: 'app',
         handler: async (args) => {
           try {
             // 路径解析：空 = 工作区根默认名（时间戳防误覆盖）；相对 = 工作区根相对；绝对原样
@@ -514,7 +514,7 @@ async function applyMemoryPlugin(
         name: 'memory-import',
         description:
           '记忆库导入 JSONL（memory-export 产出）：/memory-import <文件路径>——按 id 恢复式幂等（已存在跳过，零合并）',
-        source: 'plugin',
+        source: 'app',
         handler: async (args) => {
           try {
             const explicit = args.trim();

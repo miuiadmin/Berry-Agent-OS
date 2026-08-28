@@ -148,7 +148,7 @@ function userTexts(context: LlmContext): string[] {
 describe('goal 官方件全栈：工具三件 + schema 执法', () => {
   it('默认层第三行激活 + 工具三件进面（goal_get/goal_set/goal_update）', async () => {
     const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
-    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toContainEqual(['goal', 'activated']);
+    expect(runtime.appsService.list().map((r) => [r.id, r.status])).toContainEqual(['goal', 'activated']);
     expect(runtime.tools.list().map((t) => t.name)).toEqual(
       expect.arrayContaining(['goal_get', 'goal_set', 'goal_update']),
     );
@@ -364,7 +364,7 @@ describe('boot 降级 + /goal 命令族 + /reload 不双降（跨进程真库文
 describe('persist:false 降级：goal 空转', () => {
   it('无持久层 → 工具/命令不注册、行仍 activated（语义诚实）', async () => {
     const runtime = await assemble({ persist: false, streamFn: scriptedStream([textMessage('答')]).streamFn });
-    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toContainEqual(['goal', 'activated']);
+    expect(runtime.appsService.list().map((r) => [r.id, r.status])).toContainEqual(['goal', 'activated']);
     expect(runtime.tools.get('goal_get')).toBeUndefined();
     expect(runtime.tools.get('goal_set')).toBeUndefined();
     expect(runtime.tools.get('goal_update')).toBeUndefined();
@@ -391,7 +391,7 @@ describe('S1 键控：goal 结算/降级按归属会话路由', () => {
     await spinUntil(() => contexts.length >= 2, 'A 续跑注入开轮');
     await first.driver.settle();
     const aInjected = first.session.events.filter(
-      (e) => e.type === 'user/message' && (e.data as { source?: string }).source === 'plugin:goal',
+      (e) => e.type === 'user/message' && (e.data as { source?: string }).source === 'app:goal',
     );
     expect(aInjected.length).toBeGreaterThanOrEqual(1);
     expect(JSON.stringify(aInjected)).toContain('甲目标');

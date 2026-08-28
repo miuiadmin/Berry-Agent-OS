@@ -10,9 +10,9 @@
 
 export { ConversationDriver } from './conversation.js';
 export type { DeliverOptions, DeliverChannel, ConversationDriverDeps, RunSettled } from './conversation.js';
-export { createChatPlugin, CHAT_APP_ID } from './plugin.js';
+export { createChatApp, CHAT_APP_ID } from './app.js';
 export type {
-  ChatPluginDeps,
+  ChatAppDeps,
   ChatControls,
   AgentServiceFace,
   SendUserMessageOptions,
@@ -20,6 +20,6 @@ export type {
   DriverRegistry,
   FrontHost,
   ChatRuntime,
-} from './plugin.js';
+} from './app.js';
 export { createDurableSinks, projectedToAgentMessages } from './durable.js';
 export type { DurableSinks } from './durable.js';

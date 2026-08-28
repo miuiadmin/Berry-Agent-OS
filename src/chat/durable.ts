@@ -179,8 +179,8 @@ export function createDurableSinks(
       }
       case 'message_end': {
         const message = event.message;
-        // 自定义角色 M1 无内置注册者（角色注册是插件面），无处产生即无需落点；
-        // 插件期若引入自定义角色，须先扩事件词汇再在此接线（未覆盖≠驳回）
+        // 自定义角色 M1 无内置注册者（角色注册是装载面），无处产生即无需落点；
+        // 应用期若引入自定义角色，须先扩事件词汇再在此接线（未覆盖≠驳回）
         if (!isStandardMessage(message)) return;
         if (message.role === 'user') {
           // source 归因落账（会话篇 §3.1——谁把这条消息放进历史；缺省不落字段）

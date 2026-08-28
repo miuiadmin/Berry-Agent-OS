@@ -4,10 +4,10 @@
  * M1 内置五件：/help（命令清单）、/quit（优雅退出）、/new（开新会话——TUI 启动
  * 续接策略的另一面，技术栈篇 §5）、/skills（技能清单）、/skill:<名>（显式激活
  * ——§4.5(b) 包装格式作为普通 user 消息提交，loop 开跑）。
- * 插件管理命令族（2026-08-23 /reload 纵切；**D2 装机两态扩族 2026-08-27**）：
- * /plugins（清单 + 仓库态差集）、/plugin-install（仓库态）、/plugin-mount、
- * /plugin-unmount（挂载动词对偶）、/plugin-toggle、/plugin-update、
- * /plugin-uninstall、/reload——全部是 ctx.plugins 服务与组合根 reload 的薄壳
+ * 应用管理命令族（2026-08-23 /reload 纵切；**D2 装机两态扩族 2026-08-27**）：
+ * /apps（清单 + 仓库态差集）、/apps-install（仓库态）、/apps-mount、
+ * /apps-unmount（挂载动词对偶）、/apps-toggle、/apps-update、
+ * /apps-uninstall、/reload——全部是 ctx.apps 服务与组合根 reload 的薄壳
  * （对账逻辑不进壳面，§1.5）；热应用链：写行动词（mount/unmount/toggle）与
  * update 链 /reload，install 仓库态零行不链（契约篇 §6.1 两态）。
  * 技能命令按装配期快照逐个注册（skill refresh 仅在装配期跑一次，M1 无动态面）。
@@ -19,10 +19,10 @@ import type { UiService } from '../channels/types.js';
 import { describeError } from '../contracts/errors.js';
 import { formatSkillInvocation } from '../skills/index.js';
 import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
-import type { PluginsService, UninstallExecReport, UninstallReport } from './plugins.js';
+import type { AppsService, UninstallExecReport, UninstallReport } from './apps.js';
 import type { AllowlistStore } from './allowlist-store.js';
 import type { ReloadResult } from './assembly.js';
-import type { PluginStatusRow } from './composition.js';
+import type { AppStatusRow } from './composition.js';
 
 /** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
 function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
@@ -31,9 +31,9 @@ function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
     .join('\n');
 }
 
-/** 插件状态行 → 人读文本（failed/skipped 附原因——「没生效」必须可见，同 ref-3；
+/** 应用状态行 → 人读文本（failed/skipped 附原因——「没生效」必须可见，同 ref-3；
  * source = 行来源（builtin/npm/git/local，契约篇 §3.4 list 现场推导）一并呈现 */
-function formatPluginRow(row: PluginStatusRow): string {
+function formatAppRow(row: AppStatusRow): string {
   // 来源段缺省省略（推导不出 = 来源未知，不占行宽）
   const source = row.source !== undefined ? ` · ${row.source}` : '';
   switch (row.status) {
@@ -47,7 +47,7 @@ function formatPluginRow(row: PluginStatusRow): string {
     case 'installed-unmounted':
       // D2 仓库态差集行（契约篇 §6.1 可见性）：装了没挂必须可见——装机面断头路
       // = 不可用面，呈现挂载指引（词与 mount 动词对齐）
-      return `  ◇ ${row.id}${source}（已装未挂——/plugin-mount ${row.id} --app <应用id> 生效）`;
+      return `  ◇ ${row.id}${source}（已装未挂——/apps-mount ${row.id} --app <应用id> 生效）`;
     default:
       // planned = 装载前视角（boot 前 / 服务刚建）——正常 TUI 里看不到，防御呈现
       return `  ○ ${row.id}${source}（planned——尚未装载）`;
@@ -84,29 +84,39 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * 位置参数 + `--key value` 旗标解析（/plugin-mount 面的轻量 argv 面）：空白切
+ * 位置参数 + `--key value` 旗标解析（/apps-mount 面的轻量 argv 面）：空白切
  * 词，`--key` 后随 token 即值（无值旗标收 true 占位——本面未用，防御呈现），
  * 其余按序进 positionals。值含空白走引号由 shell/通道层处理，壳面拿到即已分词。
  */
-function parseFlagArgs(args: string): { positionals: string[]; flags: Record<string, string> } {
+function parseFlagArgs(args: string): {
+  positionals: string[];
+  flags: Record<string, string>;
+  /** 重复旗标收集面（第三十六批 --apps 多值）：旗标名 → 历次值清单（重复出现才入册；单次旗标仍在 flags） */
+  multiFlags: Record<string, string[]>;
+} {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
   const positionals: string[] = [];
   const flags: Record<string, string> = {};
+  const multiFlags: Record<string, string[]> = {};
+  const seen: Record<string, number> = {};
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i]!;
     if (token.startsWith('--') && token.length > 2) {
+      const key = token.slice(2);
       const value = tokens[i + 1];
       if (value !== undefined && !value.startsWith('--')) {
-        flags[token.slice(2)] = value;
+        seen[key] = (seen[key] ?? 0) + 1;
+        if (seen[key] === 1) flags[key] = value;
+        else (multiFlags[key] ??= []).push(value);
         i += 1;
       } else {
-        flags[token.slice(2)] = 'true'; // 无值旗标——本面未用，防御占位
+        flags[key] = 'true'; // 无值旗标——本面未用，防御占位
       }
     } else {
       positionals.push(token);
     }
   }
-  return { positionals, flags };
+  return { positionals, flags, multiFlags };
 }
 
 /** inspect 报告 → 人读文本（契约篇 §3.4 第二刀：execute 前的级联警示承载面——
@@ -115,7 +125,7 @@ function parseFlagArgs(args: string): { positionals: string[]; flags: Record<str
 function formatUninstallReport(report: UninstallReport): string {
   const lines: string[] = [
     `卸载检视 ${report.id}（${report.source} 源）：`,
-    `  引用：${report.pluginRef}`,
+    `  引用：${report.appRef}`,
     `  装机物：${report.installPath}`,
   ];
   if (report.mountedRows.length > 0) {
@@ -142,7 +152,7 @@ function formatUninstallReport(report: UninstallReport): string {
     );
   }
   for (const warning of report.warnings) lines.push(`  ⚠ ${warning}`);
-  lines.push('确认执行：/plugin-uninstall <装机id> --confirm [--purge-data]（默认保留数据域）');
+  lines.push('确认执行：/apps-uninstall <装机id> --confirm [--purge-data]（默认保留数据域）');
   return lines.join('\n');
 }
 
@@ -219,8 +229,8 @@ export interface BuiltinCommandsOptions {
   };
   /** 跨会话 allowlist 存储（/allowlist 枚举与撤销面——接线批 Commit B） */
   readonly allowlist: AllowlistStore;
-  /** 插件管理服务（/plugins 清单与 install/toggle/update——对账逻辑全在服务，壳只转述） */
-  readonly plugins: PluginsService;
+  /** 应用管理服务（/apps 清单与 install/toggle/update——对账逻辑全在服务，壳只转述） */
+  readonly appsService: AppsService;
   /** 组合树重载（/reload 主体——组合根闭包；装配动作不进壳面） */
   readonly reload: () => Promise<ReloadResult>;
   /** 用量面板取数（/usage——投影本体在 usage.ts，组合根闭包绑库连接；壳只转述） */
@@ -411,68 +421,86 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     }),
   );
 
-  /* ---- 插件管理命令族（/reload 纵切 + D2 装机两态 2026-08-27）——全部是
-   * ctx.plugins 服务与组合根 reload 的薄壳（对账逻辑不进壳面，§1.5）。热应用
+  /* ---- 应用管理命令族（/reload 纵切 + D2 装机两态 2026-08-27）——全部是
+   * ctx.apps 服务与组合根 reload 的薄壳（对账逻辑不进壳面，§1.5）。热应用
    * 链（D2）：install 仓库态零行无物可热应用 = 不链 reload；mount/unmount 写行
    * 后壳链 /reload（per-app reload 前的过渡形态）；update 换盘上代码，挂载行
    * 活着即链 /reload；toggle 写行同链。 ---- */
 
   disposers.push(
     commands.register({
-      name: 'plugins',
-      description: '插件清单（组合树行 + 装载状态 + 仓库态差集）',
+      name: 'apps',
+      description: '应用一览（组合树行 + 装载状态 + 仓库态差集）',
       handler: () => {
-        const rows = opts.plugins.list();
+        const rows = opts.appsService.list();
         if (rows.length === 0) {
-          ui.notify('无插件（组合树空、仓库态空）——/plugin-install <ref> 装入第一件');
+          ui.notify('无应用（组合树空、仓库态空）——/apps-install <ref> 装入第一件');
           return;
         }
-        const lines = rows.map(formatPluginRow);
+        const lines = rows.map(formatAppRow);
         ui.notify(
-          `插件清单：\n${lines.join('\n')}\n（/plugin-install 装机 · /plugin-mount 挂载 · /plugin-unmount 卸挂载 · /plugin-uninstall 卸载 · /plugin-toggle 翻转 · /plugin-update 更新 · /reload 重载）`,
+          `应用一览：\n${lines.join('\n')}\n（/apps-install 装机 · /apps-mount 挂载 · /apps-unmount 卸挂载 · /apps-uninstall 卸载 · /apps-toggle 翻转 · /apps-update 更新 · /reload 重载）`,
         );
       },
     }),
     commands.register({
-      name: 'plugin-install',
+      name: 'apps-install',
       description: '装机 <npm 包名|git URL|本地路径> [git ref]（仓库态——挂载才生效）',
       handler: async (args) => {
         const tokens = args.trim().split(/\s+/).filter(Boolean);
         const ref = tokens[0];
         if (ref === undefined) {
-          ui.notify('用法：/plugin-install <npm 包名 | git URL | 本地路径> [git ref]');
+          ui.notify('用法：/apps-install <npm 包名 | git URL | 本地路径> [git ref]');
           return;
         }
         const gitRef = tokens[1];
-        // 服务失败（PLUGIN_INSTALL_FAILED 等）向上抛——通道壳兜底为通知，不崩界面
-        const report = await opts.plugins.install(ref, gitRef !== undefined ? { gitRef } : undefined);
+        // 服务失败（APP_INSTALL_FAILED 等）向上抛——通道壳兜底为通知，不崩界面
+        const report = await opts.appsService.install(ref, gitRef !== undefined ? { gitRef } : undefined);
         // D2 仓库态：零行无物可热应用——不链 /reload（install→reload 旧链废止）；
         // 报告 message 已带 mount 指引（装机面不是断头路）
         ui.notify(`${report.id} 已入仓库态（${report.source} 源）：${report.message}`);
       },
     }),
-    /* mount（D2 挂载动词，契约篇 §6.1 两态——「插件独立不生效」的生效面）：
-     * 吃装机推导 id（见 /plugins 的 ◇ 行），--app 必填（v1 系统组合官方专属）。
-     * --row-id = 行 id 显式命名位（同包第二应用挂载必经）；--config = 行初始
-     * 配置 JSON（经插件声明 schema 校验，错配置拒写）。写行后壳链 /reload。 */
+    /* mount（D2 挂载动词，契约篇 §6.1 两态——「应用独立不生效」的生效面；
+     * 第三十六批 apps 数组化 + 第三十七批 sandbox 载体冻结逃生门）：
+     * 吃装机推导 id（见 /apps 的 ◇ 行），--apps 必填（可多个 = 共享件——
+     * 逗号分隔或重复旗标）；--carrier 显式降格位（第三方行过渡冻结的逃生门：
+     * main/worker 二值，缺省冻结拒挂）。--row-id = 行 id 显式命名位（同包第
+     * 二应用挂载必经）；--config = 行初始配置 JSON（经应用声明 schema 校验，
+     * 错配置拒写）。写行后壳链 /reload。 */
     commands.register({
-      name: 'plugin-mount',
-      description: '挂载 <装机id> --app <应用id> [--row-id <行id>] [--config <json>] 并重载',
+      name: 'apps-mount',
+      description:
+        '挂载 <装机id> --apps <应用id>[,…] [--carrier main|worker] [--row-id <行id>] [--config <json>] 并重载',
       handler: async (args) => {
         const parsed = parseFlagArgs(args);
         const installId = parsed.positionals[0];
         if (installId === undefined) {
           ui.notify(
-            "用法：/plugin-mount <装机id> --app <应用id> [--row-id <行id>] [--config '<json>']（装机id 见 /plugins ◇ 行）",
+            "用法：/apps-mount <装机id> --apps <应用id>[,<应用id>…] [--carrier main|worker] [--row-id <行id>] [--config '<json>']（装机id 见 /apps ◇ 行）",
           );
           return;
         }
-        const app = parsed.flags['app'];
-        if (app === undefined) {
-          ui.notify('挂载目标必填：--app <应用id>（系统组合 v1 官方专属，第三方件挂应用组合）');
+        // apps 多值（d36 §3）：逗号分隔 + 重复旗标并存——去空并集（去重/值域执法在服务面）
+        const apps: string[] = [];
+        for (const value of [parsed.flags['apps'], ...(parsed.multiFlags['apps'] ?? [])]) {
+          if (value === undefined || value === 'true') continue;
+          for (const part of value.split(',')) {
+            const id = part.trim();
+            if (id !== '') apps.push(id);
+          }
+        }
+        if (apps.length === 0) {
+          ui.notify('挂载目标必填：--apps <应用id>[,<应用id>…]（多值 = 共享件；全局作用域 v1 官方专属）');
           return;
         }
-        // config 位 = 可选 JSON 字面（行初始配置——服务面经插件声明 schema 校验）
+        // carrier 二值校验（服务面冻结核值，壳面先给可读报错）
+        const carrier = parsed.flags['carrier'];
+        if (carrier !== undefined && carrier !== 'main' && carrier !== 'worker') {
+          ui.notify('--carrier 只认 main | worker（第三方行过渡冻结的显式降格位，契约篇 §1.7 增补 2b）');
+          return;
+        }
+        // config 位 = 可选 JSON 字面（行初始配置——服务面经应用声明 schema 校验）
         let config: Record<string, unknown> | undefined;
         const rawConfig = parsed.flags['config'];
         if (rawConfig !== undefined) {
@@ -488,12 +516,13 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           }
         }
         const rowId = parsed.flags['row-id'];
-        const report = await opts.plugins.mount(installId, {
-          app,
+        const report = await opts.appsService.mount(installId, {
+          apps,
+          ...(carrier !== undefined ? { carrier } : {}),
           ...(config !== undefined ? { config } : {}),
           ...(rowId !== undefined ? { rowId } : {}),
         });
-        ui.notify(`已挂载 ${report.id} → app ${report.app}（${report.source} 源）：${report.message}`);
+        ui.notify(`已挂载 ${report.id} → apps ${report.apps.join('、')}（${report.source} 源）：${report.message}`);
         // 写行只改组合树文件——壳链 /reload 才热应用（D2 新链：mount→reload）
         notifyReloadResult(ui, await opts.reload());
       },
@@ -501,44 +530,44 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     /* unmount（mount 对偶）：吃行 id，删行保码——装机物与数据域不动（处置 =
      * uninstall 的事）；行 config 随行删，重挂回缺省。写行后壳链 /reload。 */
     commands.register({
-      name: 'plugin-unmount',
+      name: 'apps-unmount',
       description: '卸挂载 <行id>（删行保码）并重载',
       handler: async (args) => {
         const rowId = args.trim().split(/\s+/)[0];
         if (!rowId) {
-          ui.notify('用法：/plugin-unmount <行id>（行id 见 /plugins；临时停用保配置走 /plugin-toggle）');
+          ui.notify('用法：/apps-unmount <行id>（行id 见 /apps；临时停用保配置走 /apps-toggle）');
           return;
         }
-        const report = await opts.plugins.unmount(rowId);
+        const report = await opts.appsService.unmount(rowId);
         const warnFace = report.warnings.length > 0 ? `\n${report.warnings.map((w) => `  ⚠ ${w}`).join('\n')}` : '';
         ui.notify(`${report.message}${warnFace}`);
         notifyReloadResult(ui, await opts.reload()); // D2 新链：unmount→reload
       },
     }),
     commands.register({
-      name: 'plugin-toggle',
-      description: '翻转插件禁用状态 <行id> 并重载',
+      name: 'apps-toggle',
+      description: '翻转应用禁用状态 <行id> 并重载',
       handler: async (args) => {
         const id = args.trim().split(/\s+/)[0];
         if (!id) {
-          ui.notify('用法：/plugin-toggle <行id>（行id 见 /plugins）');
+          ui.notify('用法：/apps-toggle <行id>（行id 见 /apps）');
           return;
         }
-        const disabled = opts.plugins.toggle(id); // 未知 id / fixed 行 → 抛，壳兜底
+        const disabled = opts.appsService.toggle(id); // 未知 id / fixed 行 → 抛，壳兜底
         ui.notify(`${id} 已${disabled ? '禁用' : '启用'}——重载生效中`);
         notifyReloadResult(ui, await opts.reload()); // 禁用翻转同样要对账→热应用两步
       },
     }),
     commands.register({
-      name: 'plugin-update',
-      description: '按源更新插件 <装机id> 并重载',
+      name: 'apps-update',
+      description: '按源更新应用 <装机id> 并重载',
       handler: async (args) => {
         const id = args.trim().split(/\s+/)[0];
         if (!id) {
-          ui.notify('用法：/plugin-update <装机id>（装机id 见 /plugins；两态后仓库态件也可更新）');
+          ui.notify('用法：/apps-update <装机id>（装机id 见 /apps；两态后仓库态件也可更新）');
           return;
         }
-        const report = await opts.plugins.update(id); // npm 重装 / git 重克隆 / local no-op
+        const report = await opts.appsService.update(id); // npm 重装 / git 重克隆 / local no-op
         ui.notify(`${report.id} 更新完成（${report.source} 源）：${report.message}`);
         // 磁上已是新码——挂载行活着则链 /reload 才可见（local no-op / 未挂载件
         // 无害：等价一次 /reload）
@@ -546,30 +575,30 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
       },
     }),
     /* 卸载 execute 相唯一入口（human-only，契约篇 §3.4 第二刀；连字符族形对齐
-     * /plugin-install 系——SF-6）：**两段式确认步**（SF-5：「人 execute 前已看」
+     * /apps-install 系——SF-6）：**两段式确认步**（SF-5：「人 execute 前已看」
      * 须是机制非断言）——裸调 = inspect 渲染报告 + 确认指引，不执行；人显式打出
      * 第二条命令（--confirm）才 execute——确认 = 人手打 --confirm 这一动作本身。
      * --purge-data 只裁决确认后的 dataAction（省缺 keep = Docker 卷律），不跳确认。
      * 服务错误（未知装机 id 等）上抛——通道壳兜底为通知，不崩界面。 */
     commands.register({
-      name: 'plugin-uninstall',
-      description: '卸载插件 <装机id>：先检视，--confirm 执行（--purge-data 清数据域）并重载',
+      name: 'apps-uninstall',
+      description: '卸载应用 <装机id>：先检视，--confirm 执行（--purge-data 清数据域）并重载',
       handler: async (args) => {
         const tokens = args.trim().split(/\s+/).filter(Boolean);
         const id = tokens[0];
         if (id === undefined) {
-          ui.notify('用法：/plugin-uninstall <装机id> [--confirm] [--purge-data]（装机id 见 /plugins；先检视后执行）');
+          ui.notify('用法：/apps-uninstall <装机id> [--confirm] [--purge-data]（装机id 见 /apps；先检视后执行）');
           return;
         }
         const purgeData = tokens.slice(1).includes('--purge-data');
         // 第一段（裸调）：只检视渲染——报告即裁决依据，确认指引在报告尾行
         if (!tokens.slice(1).includes('--confirm')) {
-          ui.notify(formatUninstallReport(await opts.plugins.uninstall(id, { mode: 'inspect' })));
+          ui.notify(formatUninstallReport(await opts.appsService.uninstall(id, { mode: 'inspect' })));
           return;
         }
         // 第二段（--confirm）：execute + 回执 + 链 reload（删行只改组合树文件——
         // 壳链 /reload 才热应用，与 mount 同构两步）
-        const exec = await opts.plugins.uninstall(id, {
+        const exec = await opts.appsService.uninstall(id, {
           mode: 'execute',
           dataAction: purgeData ? 'purge' : 'keep',
         });
@@ -579,7 +608,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     }),
     commands.register({
       name: 'reload',
-      description: '重载组合树（overlay / 插件代码改动后生效）',
+      description: '重载组合树（overlay / 应用代码改动后生效）',
       handler: async () => {
         notifyReloadResult(ui, await opts.reload());
       },

@@ -8,7 +8,7 @@
  * S1 前台宿主 façade：TUI 恒接 runtime.front（chat 件构造产物，无驱动时
  * no-op 形）——submit/requestQuit/addDisplay/settle 四路全经它路由，本文件
  * 不再持有驱动引用。可卸语义（应用面第一纵切）：chat 对话应用件被 overlay
- * 禁用时注册表空——**壳照启**：命令面/插件管理/审批完好，输入静默 + 提示行
+ * 禁用时注册表空——**壳照启**：命令面/应用管理/审批完好，输入静默 + 提示行
  * 示明无对话循环（对话是应用不是内核，命题 §3.5）。
  */
 
@@ -87,10 +87,10 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   // S3 focus 变化重画（三写点通知：open 新开 / open 幂等命中 / switchTo——同值
   // 零通知）：清屏 + 目标会话历史重画 + 在飞占位槽按 entryStatus 续流
   const disposeFocusSubscription = runtime.drivers.onFocusChange((sessionId) => tui.repaint(sessionId));
-  // 可卸提示：无对话循环时示明现状（命令面仍可用——/plugins 可查、/reload 可试）
+  // 可卸提示：无对话循环时示明现状（命令面仍可用——/apps 可查、/reload 可试）
   if (runtime.conversation === undefined) {
     runtime.ui.notify(
-      '对话应用未装载（builtin:chat 被禁用或 persist:false）——输入不会得到应答；/plugins 查看装配，/quit 退出。',
+      '对话应用未装载（builtin:chat 被禁用或 persist:false）——输入不会得到应答；/apps 查看装配，/quit 退出。',
     );
   }
 
@@ -128,7 +128,7 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     await front.settle();
   } finally {
     signals.dispose();
-    disposeFocusSubscription(); // S3 focus 订阅注销（壳生命周期，非插件锚）
+    disposeFocusSubscription(); // S3 focus 订阅注销（壳生命周期，非应用锚）
     tui.stop();
     await runtime.shutdown();
   }

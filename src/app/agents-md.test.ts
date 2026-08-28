@@ -4,7 +4,7 @@
  * 纯逻辑层：parseAgentMd 收形与诊断语义、defaultAgentLocations 四处镜像、
  * discoverAgentMds 扫描序/first-wins、mergeRequestForAgentMd 收窄三腿
  * （persona 固定 / toolFilter 交集 / model 覆盖）。装配级证据在
- * subagent-plugin.test.ts（静态工具 + 全栈委派）。
+ * subagent-app.test.ts（静态工具 + 全栈委派）。
  */
 
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';

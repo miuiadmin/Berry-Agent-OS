@@ -1,14 +1,14 @@
 /**
- * L1 llm — ctx.llm 具名服务（骨架篇 §9.3 动作层：插件发起单次受托管补全的唯一合法路径）。
+ * L1 llm — ctx.llm 具名服务（骨架篇 §9.3 动作层：应用发起单次受托管补全的唯一合法路径）。
  *
  * 2026-08-23 生态读码 same-flaw 1 的兑现：pi-6（宿主无「以当前会话身份跑一次补全」原语）
- * + dsh-9（出口）——没有它，M2 记忆插件只能特权接线（违反契约篇 §6.2）或自拼凭证。
+ * + dsh-9（出口）——没有它，M2 记忆应用只能特权接线（违反契约篇 §6.2）或自拼凭证。
  *
  * 三条硬要求（dsh-9 反推，规范 §9.3 原文）：
  * 1. 参数面禁 apiKey——凭证一律走 CredentialStore 缺省解析，providerNative 透传槽内携带同理；
  * 2. 轻量单发就是单发——不起 subagent loop（loop 装配是任务委派的成本，不是摘要/分类的成本）；
  * 3. 复用 resolveModel + retryAssistantCall + StreamFnDefaults——与主对话同一模型解析、
- *    重试语义与请求参数面，插件不另立炉灶。
+ *    重试语义与请求参数面，应用不另立炉灶。
  *
  * 预算闸门底账 durable 化（2026-08-24 第十一批拍板 #1，loopx 读码启发 #1——会话篇 §1.1）：
  * 花销 = llm/usage durable 事件（onUsage 写侧经组合根落日志），余额 = 注入的聚合查询
@@ -36,7 +36,7 @@ import type { InFlightTracker } from './inflight.js';
 import { classifyAssistantError, type ErrorBucket, retryAssistantCall, type RetryPolicy } from './recovery.js';
 import type { Message as PiMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
 
-/** 单发补全请求（插件侧唯一参数面——apiKey 禁入是运行时护栏不是类型约定） */
+/** 单发补全请求（应用侧唯一参数面——apiKey 禁入是运行时护栏不是类型约定） */
 export interface CompleteRequest {
   /** 系统提示词（缺省无） */
   systemPrompt?: string;
@@ -87,13 +87,13 @@ export interface CompleteResult {
 
 /** ctx.llm 服务面（骨架篇 §9.3：complete + provider 注册/注销 + 模型目录只读投影 + canAfford 预算闸门） */
 export interface LlmService {
-  /** 注册/替换 provider（按 id upsert）；返回注销函数（插件卸载路径） */
+  /** 注册/替换 provider（按 id upsert）；返回注销函数（应用卸载路径） */
   registerProvider(provider: Parameters<LlmRuntime['registerProvider']>[0]): () => void;
   /** 按 id 移除 provider */
   unregisterProvider(id: string): void;
   /**
    * 模型目录只读投影（2026-08-26 挖矿批 P0-1，骨架篇 §9.3——四包实证的 provider
-   * 插件枚举需求）：pi-ai Models 接口包装（与主对话同一 Models 实例——registerProvider
+   * 应用枚举需求）：pi-ai Models 接口包装（与主对话同一 Models 实例——registerProvider
    * 增补即刻可见），不新开特权口（pi-11：宿主数据不开放读面 = 生态直读私有格式的起点）。
    * 投影形 ModelInfo：传输/配置面（baseUrl/headers 等）不披露。
    */
@@ -120,7 +120,7 @@ export interface LlmService {
   /**
    * 错误桶判定（S4 前置债批——全仓唯一一份桶表 recovery.ts classifyAssistantError
    * 的服务面公开位）：chat 件等宿主内消费方经 ctx 取用（chat 拓扑边不含 llm，
-   * 判定器经服务面注入驱动——「插件侧禁写第二份分桶」的执法前提是宿主面可得）。
+   * 判定器经服务面注入驱动——「应用侧禁写第二份分桶」的执法前提是宿主面可得）。
    */
   classifyError(message: AssistantMessage): ErrorBucket;
 }
@@ -281,7 +281,7 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
         }
       }
 
-      // 模型解析 fail-loud（AppError LLM_MODEL_*——分类不归插件自理）；在重试环外：解析错误是确定性的，重试无意义
+      // 模型解析 fail-loud（AppError LLM_MODEL_*——分类不归应用自理）；在重试环外：解析错误是确定性的，重试无意义
       const modelSpec = req.model ?? defaultModel();
       const model = runtime.resolveModel(modelSpec);
 
@@ -326,7 +326,7 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
         req.signal,
       );
 
-      // 错误终态 → AppError（错误是异常不是数据：complete 面向 await 的插件调用方，不消费事件流）
+      // 错误终态 → AppError（错误是异常不是数据：complete 面向 await 的应用调用方，不消费事件流）
       if (message.stopReason === 'error') {
         throw new AppError(LLM_COMPLETE_FAILED, message.errorMessage ?? '单发补全失败（pi-ai 错误终态）');
       }
@@ -343,7 +343,7 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
       try {
         options.onUsage?.(result, modelSpec);
       } catch {
-        // onUsage 是宿主接线面的责任——异常静默（组合根侧应自兜底），此处不归插件感知
+        // onUsage 是宿主接线面的责任——异常静默（组合根侧应自兜底），此处不归应用感知
       }
       return result;
     },

@@ -1,5 +1,5 @@
 /**
- * 补票 worker 侧：jiti 装载 TS 金样插件 + 桥接 ctx 桩（协议 v0 子集 ask/result/cancel）。
+ * 补票 worker 侧：jiti 装载 TS 金样应用 + 桥接 ctx 桩（协议 v0 子集 ask/result/cancel）。
  *
  * 桩是本炮的主角——真实刀二代之以 bridge 模块的通用代理桩，此处手写最小版验证语义：
  *   - ask 发起：callId 递增、entry 入 pending 表；
@@ -41,7 +41,7 @@ port.on('message', (m) => {
     );
 });
 
-/** 桥接 ctx 桩：插件眼里的 ctx.tools 过界镜像 */
+/** 桥接 ctx 桩：应用眼里的 ctx.tools 过界镜像 */
 const ctxStub = {
   tools: {
     /**
@@ -80,8 +80,8 @@ const ctxStub = {
 
 port.on('message', async (m) => {
   if (m.cmd !== 'run') return;
-  // 装载金样插件并喂桩——apply 跑两场景（同步面调用 + signal→cancel）
-  const mod = await jiti.import(m.pluginPath);
+  // 装载金样应用并喂桩——apply 跑两场景（同步面调用 + signal→cancel）
+  const mod = await jiti.import(m.appPath);
   const report = await mod.default(ctxStub);
   port.postMessage({ stage: 'done', report, stubStats: { ...stats } });
 });

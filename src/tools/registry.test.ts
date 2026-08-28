@@ -16,7 +16,7 @@ import {
   TOOL_REGISTRY_RATE,
 } from '../contracts/errors.js';
 import type { ToolDefinition } from '../contracts/tools.js';
-import type { RowAppProbe } from '../contracts/plugin.js';
+import type { RowAppProbe } from '../contracts/app.js';
 import { createContext, runInCallerChain } from '../context/index.js';
 import { createToolPipeline } from './pipeline.js';
 import { defineTool, registerToolsService, scanToolDescription } from './registry.js';
@@ -289,12 +289,12 @@ describe('registerToolsService — 服务生命周期', () => {
     }
   });
 
-  it('fork 出的插件作用域共享同一注册表', () => {
+  it('fork 出的应用作用域共享同一注册表', () => {
     const ctx = createContext({ name: 'test' });
     const tools = registerToolsService(ctx);
     tools.register(makeTool('shared'));
-    const pluginScope = ctx.fork({ name: 'plugin-a' });
-    const shared = pluginScope.get<ReturnType<typeof registerToolsService>>('tools');
+    const appScope = ctx.fork({ name: 'apps-a' });
+    const shared = appScope.get<ReturnType<typeof registerToolsService>>('tools');
     expect(shared.get('shared')?.name).toBe('shared');
   });
 });
@@ -383,9 +383,9 @@ describe('registerToolsService — 应用域层（域键升级批：domain 键 =
 });
 
 describe('registerToolsService — D1 隐式路由（契约篇 §5.1 注册面路由：行挂载目标探针）', () => {
-  /** 两行探针 fixture：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
+  /** 两行探针 fixture（第三十六批 apps 数组化）：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
   const rowApp: RowAppProbe = {
-    get: (rowId) => (rowId === 'row-app' ? 'chat' : undefined),
+    get: (rowId) => (rowId === 'row-app' ? ['chat'] : undefined),
     size: () => 1,
   };
 
@@ -562,7 +562,7 @@ describe('registerToolsService — 驱动层与组成面（driver+domain 双键�
 });
 
 describe('defineTool — 类型 helper', () => {
-  it('identity：原样返回定义（供插件侧书写时获得类型检查）', () => {
+  it('identity：原样返回定义（供应用侧书写时获得类型检查）', () => {
     const def = defineTool({
       name: 'calc',
       description: '计算',

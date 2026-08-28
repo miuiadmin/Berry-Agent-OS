@@ -17,5 +17,5 @@ export type { SearchToolsOptions, SearchTools } from './search.js';
 export { createSearchTools, globToRegExp } from './search.js';
 export type { PatchOperation, PatchLine } from './apply-patch.js';
 export { parseApplyPatch, applyUpdateLines, addLinesToContent } from './apply-patch.js';
-export type { ToolsPluginDeps } from './plugin.js';
-export { createToolsPlugin } from './plugin.js';
+export type { ToolsAppDeps } from './app.js';
+export { createToolsApp } from './app.js';

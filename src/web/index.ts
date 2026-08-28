@@ -6,6 +6,6 @@
  * builtin:web 行装配的工具面/服务面。
  */
 
-export { createWebPlugin, type WebPluginOverrides } from './plugin.js';
+export { createWebApp, type WebAppOverrides } from './app.js';
 export type { WebFetchOptions, WebFetchResult, WebService } from './types.js';
 export { WEB_PLUGIN_CONFIG_SCHEMA } from './types.js';

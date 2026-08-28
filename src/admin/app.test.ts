@@ -1,17 +1,17 @@
 /**
  * L4 admin 单元测试——两只读工具的工具层行为：
- * plugins_list 文本化呈现（四态行 + 计数行 + source）与 events_query 参数翻译
+ * apps_list 文本化呈现（四态行 + 计数行 + source）与 events_query 参数翻译
  * （ISO 8601 转毫秒 / cursor 形状校验 / flushFirst 恒置 true / data 摘要截断）。
  *
- * 服务面用本件消费面接口（PluginsListFace/SessionsQueryFace）的测试替身——
+ * 服务面用本件消费面接口（AppsListFace/SessionsQueryFace）的测试替身——
  * 服务面形状由宿主装配保证，本文件只锁工具层翻译与呈现语义。
  */
 
 import { describe, expect, it } from 'vitest';
 import { AppError, TOOL_ARGUMENTS_INVALID } from '../contracts/errors.js';
 import type { EventQueryOptions, EventQueryResult } from '../contracts/events.js';
-import { createEventsQueryTool, createPluginsListTool } from './plugin.js';
-import type { PluginRowView, PluginsListFace, SessionsQueryFace } from './plugin.js';
+import { createEventsQueryTool, createAppsListTool } from './app.js';
+import type { AppRowView, AppsListFace, SessionsQueryFace } from './app.js';
 import type { ToolCtx } from '../contracts/tools.js';
 
 /** 最小工具执行上下文（execute(args, ctx) 第二参——本件两工具不消费 ctx 内容） */
@@ -36,25 +36,25 @@ function recordingSessions(responds: EventQueryResult) {
   return { sessions, calls };
 }
 
-describe('plugins_list（装载态一览的文本化呈现——不造第二数据源）', () => {
-  const plugins: PluginsListFace = {
+describe('apps_list（装载态一览的文本化呈现——不造第二数据源）', () => {
+  const apps: AppsListFace = {
     list: () =>
       [
         { id: 'chat', status: 'activated', name: 'chat', applyMs: 3, source: 'builtin' },
-        { id: 'bad', status: 'failed', code: 'PLUGIN_APPLY_FAILED', message: '炸了', source: 'local' },
+        { id: 'bad', status: 'failed', code: 'APP_APPLY_FAILED', message: '炸了', source: 'local' },
         { id: 'off', status: 'skipped', reason: 'disabled', source: 'npm' },
         { id: 'ghost', status: 'planned', source: 'git' },
-      ] satisfies PluginRowView[],
+      ] satisfies AppRowView[],
   };
 
   it('四态行 + 计数行 + source 呈现；空树有专属提示', async () => {
-    const tool = createPluginsListTool(plugins);
+    const tool = createAppsListTool(apps);
     const text = textOf(await tool.execute({}, CTX));
     // 计数行（与 environment 第五件同款口径）
     expect(text).toContain('共 4 行：activated 1 · failed 1 · skipped 1');
     // 四态行各带 id 与 source
     expect(text).toContain('✓ chat（builtin · chat · apply 3ms）');
-    expect(text).toContain('✖ bad（local）：PLUGIN_APPLY_FAILED 炸了');
+    expect(text).toContain('✖ bad（local）：APP_APPLY_FAILED 炸了');
     expect(text).toContain('· off（npm）跳过：disabled');
     expect(text).toContain('○ ghost（git）planned');
     // 无参数工具：schema 是空对象
@@ -62,10 +62,10 @@ describe('plugins_list（装载态一览的文本化呈现——不造第二数�
     expect(tool.effect).toBe('read');
   });
 
-  it('组合树无行（--no-plugins 安全模式）：清单为空提示', async () => {
-    const empty: PluginsListFace = { list: () => [] };
-    const text = textOf(await createPluginsListTool(empty).execute({}, CTX));
-    expect(text).toContain('组合树无插件行');
+  it('组合树无行（--no-apps 安全模式）：清单为空提示', async () => {
+    const empty: AppsListFace = { list: () => [] };
+    const text = textOf(await createAppsListTool(empty).execute({}, CTX));
+    expect(text).toContain('组合树无应用行');
   });
 });
 

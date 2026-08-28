@@ -50,7 +50,7 @@ const ENV_ALLOWLIST_EXACT: ReadonlySet<string> = new Set([
 /** 前缀型白名单（locale 族——LC_ALL/LC_CTYPE/… 逐一枚举不如前缀） */
 const ENV_ALLOWLIST_PREFIXES: readonly string[] = ['LC_'];
 
-/** 凭证族后缀（大小写不敏感匹配——插件经 exec 走私 env 的主通道） */
+/** 凭证族后缀（大小写不敏感匹配——应用经 exec 走私 env 的主通道） */
 const ENV_FORBIDDEN_SUFFIXES: readonly string[] = [
   '_AUTH_TOKEN',
   '_API_KEY',

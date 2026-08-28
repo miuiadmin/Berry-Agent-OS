@@ -1,5 +1,5 @@
 /**
- * PoC ① worker 侧：worker_threads 内自建 jiti 实例装载 TS 插件。
+ * PoC ① worker 侧：worker_threads 内自建 jiti 实例装载 TS 应用。
  * moduleCache:false 与宿主装载器（src/context/loader.ts）同款——/reload 重载语义的基底。
  */
 import { createJiti } from 'jiti';
@@ -11,10 +11,10 @@ const jiti = createJiti(import.meta.url, { moduleCache: false });
 
 port.on('message', async (m) => {
   if (m.cmd === 'load') {
-    const mod = await jiti.import(m.pluginPath);
+    const mod = await jiti.import(m.appPath);
     port.postMessage({ stage: 'load1', name: mod.name, applied: mod.default() });
   } else if (m.cmd === 'reimport') {
-    const mod = await jiti.import(m.pluginPath);
+    const mod = await jiti.import(m.appPath);
     port.postMessage({ stage: 'load2', applied: mod.default() });
   }
 });

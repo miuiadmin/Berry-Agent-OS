@@ -61,7 +61,7 @@ describe('createChildSessionDisposer（§6.2 三步定序）', () => {
     expect(flushes).toEqual(['child-1']);
   });
 
-  it('session_shutdown 载荷携带子会话 id（插件最终清理锚点的对账键）', async () => {
+  it('session_shutdown 载荷携带子会话 id（应用最终清理锚点的对账键）', async () => {
     const { barrier } = recordingBarrier();
     const { ctx } = childScope();
     const payloads: { sessionId?: string }[] = [];

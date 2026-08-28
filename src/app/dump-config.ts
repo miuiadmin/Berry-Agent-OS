@@ -3,12 +3,12 @@
  *
  * :memory: 同构（技术栈篇 §5 同构纪律，2026-08-26 挖矿批 P0-3）：诊断面禁 fork
  * 侧门——复用 createBerryRuntime 同一入口、改传 `dbPath=':memory:'` 走**全量
- * 装配**（装载器执法/config 校验/Kahn 激活/插件 apply 全跑）后打印。「不落库」=
+ * 装配**（装载器执法/config 校验/Kahn 激活/应用 apply 全跑）后打印。「不落库」=
  * 会话主库零写入磁盘（内存库写入即弃）；数据目录侧副作用在场（目录创建类动作
  * 被容忍）。诊断的价值 = 报告真实装载会走到的路——侧门诊断 = 组合树漂移的开端。
  * 凭证配置状态不在此列（需要读真库，走 run 面的后续诊断命令——M1 不做）。输出
  * 人读文本：组合树逐行带装载状态（activated/failed/skipped/unresolved）——
- * 「我到底跑的是什么」的一屏答案（契约篇 §5.1）。插件装载失败 = 启动断言在
+ * 「我到底跑的是什么」的一屏答案（契约篇 §5.1）。应用装载失败 = 启动断言在
  * 组合根抛出，此处捕获后尽力先打印纯合成的树（零副作用解析——仅打印形态合成，
  * 失败兜底语义维持）再列失败清单，退出码 1。
  */
@@ -21,8 +21,9 @@ import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createMcpSpawner } from './mcp-spawn.js';
 import { killTree } from '../exec/index.js';
-import type { PluginStatusRow } from './composition.js';
-import { AppError, COMPOSITION_ROW_INVALID, PLUGIN_LOAD_FAILED, describeError } from '../contracts/errors.js';
+import type { AppStatusRow } from './composition.js';
+import { resolveRowCarrier } from '../contracts/app.js';
+import { AppError, COMPOSITION_ROW_INVALID, APP_LOAD_FAILED, describeError } from '../contracts/errors.js';
 import { dataDir } from './paths.js';
 import { VERSION } from './version.js';
 import { createContext } from '../context/context.js';
@@ -35,10 +36,10 @@ import { DEFAULT_MODEL } from './assembly.js';
  * @param composition 组合树装载产物
  * @param statuses 装载状态（缺省 = 纯计划形态——合成期/失败兜底路径用）
  */
-function renderCompositionTree(composition: CompositionReport, statuses?: readonly PluginStatusRow[]): string {
+function renderCompositionTree(composition: CompositionReport, statuses?: readonly AppStatusRow[]): string {
   const statusById = new Map((statuses ?? []).map((row) => [row.id, row]));
-  // 行挂载目标查表（D1 清单投影批）：plan 行不携带 app 键——合成行按 id 联查
-  const appById = new Map(composition.rows.map((row) => [row.id, row.app]));
+  // 行挂载目标查表（D1 清单投影批）：plan 行不携带 apps 键——合成行按 id 联查
+  const appsById = new Map(composition.rows.map((row) => [row.id, row.apps]));
   const lines = composition.plan.map((row) => {
     const status = statusById.get(row.id);
     if (row.skip) return `  - ${row.id}：${status ? `${status.status}（${row.skip}）` : `skipped（${row.skip}）`}`;
@@ -51,17 +52,17 @@ function renderCompositionTree(composition: CompositionReport, statuses?: readon
         : status
           ? `${status.status}`
           : 'planned';
-    // runtime 标记（第二十七批刀二/三）：worker 域行显式标注——「这行跑在哪个
-    // 故障域」是组合树诊断的一等信息公开（main 缺省不带标记）
-    const runtimeTag = row.runtime === 'worker' ? '@worker ' : '';
+    // 载体标记（第二十七批刀二/三；第三十七批 sandbox 块改读 carrier）：非 main
+    // 域行显式标注——「这行跑在哪个故障域」是组合树诊断的一等信息公开（main 缺省不带标记）
+    const carrierTag = resolveRowCarrier(row) === 'main' ? '' : `@${resolveRowCarrier(row)} `;
     // 挂载目标标记（D1 清单投影批）：挂应用的行显式标注归属——装载序视角下
-    // 「哪些行是应用件」一眼可辨（系统行缺省不带标记零噪声）
-    const appId = appById.get(row.id);
-    const appTag = appId !== undefined ? `→ ${appId} ` : '';
-    return `  - ${row.id}：${runtimeTag}${tag} ${appTag} ${row.entry ?? ''}`;
+    // 「哪些行是应用件」一眼可辨（系统行缺省不带标记零噪声；多应用行 = 共享件全列）
+    const apps = appsById.get(row.id);
+    const appTag = apps !== undefined ? `→ ${apps.join('、')} ` : '';
+    return `  - ${row.id}：${carrierTag}${tag} ${appTag} ${row.entry ?? ''}`;
   });
   const head = `组合树（${composition.rows.length} 行；官方默认层 + ${OVERLAY_FILENAME} 后写胜出）：`;
-  return lines.length > 0 ? [head, ...lines].join('\n') : `${head}\n  （空树——无插件行）`;
+  return lines.length > 0 ? [head, ...lines].join('\n') : `${head}\n  （空树——无应用行）`;
 }
 
 /**
@@ -80,11 +81,12 @@ function renderMountGrouping(composition: CompositionReport, appIds: readonly st
     const plan = planById.get(row.id);
     const note = plan?.skip !== undefined ? `（${plan.skip}）` : plan?.unresolved !== undefined ? '（unresolved）' : '';
     const entry = `${row.id}${note}`;
-    if (row.app === undefined) {
+    if (row.apps === undefined) {
       systemRows.push(entry);
     } else {
-      // 合成期①执法保证 app ∈ 在册——防御查无即忽略（不静默挂进系统面）
-      byApp.get(row.app)?.push(entry);
+      // 合成期①执法保证 apps ∈ 在册——防御查无即忽略（不静默挂进系统面）；
+      // 多应用行（共享件）进每个目标应用组
+      for (const appId of row.apps) byApp.get(appId)?.push(entry);
     }
   }
   const lines = [`  系统合成（${systemRows.length} 行）：${systemRows.join('、') || '（空）'}`];
@@ -101,7 +103,7 @@ function renderMountGrouping(composition: CompositionReport, appIds: readonly st
  * 断头路警示位，诊断面必须可见（不可静默）。
  * @param statuses 装载状态清单（list() 产物——installed-unmounted 条目在此）
  */
-function renderInstalledUnmounted(statuses: readonly PluginStatusRow[]): string {
+function renderInstalledUnmounted(statuses: readonly AppStatusRow[]): string {
   const rows = statuses.filter((row) => row.status === 'installed-unmounted');
   const items = rows.map((row) => `${row.id}（${row.source}）`);
   return `仓库态件（已装未挂 ${rows.length}）：${items.join('、') || '（无）'}`;
@@ -126,16 +128,16 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         `模型：${runtime.model}`,
         `沙箱档：${runtime.sandboxMode}`,
         `审批档：${runtime.approval.policyMode}`,
-        // 安全模式可见面（--no-plugins 同径）：一行声明本树是安全模式产物——
+        // 安全模式可见面（--no-apps 同径）：一行声明本树是安全模式产物——
         // Ring 2/3 跳过不是树坏是旗标使然，operator 一眼可辨
-        ...(options.noPlugins
-          ? ['安全模式（--no-plugins）：Ring 2/3 全跳过——boot 拒启自救位（/reload 读盘不受旗标影响）']
+        ...(options.noApps
+          ? ['安全模式（--no-apps）：Ring 2/3 全跳过——boot 拒启自救位（/reload 读盘不受旗标影响）']
           : []),
-        renderCompositionTree(runtime.composition, runtime.plugins.list()),
+        renderCompositionTree(runtime.composition, runtime.appsService.list()),
         // 挂载分组（D1 清单投影批 F13）：系统合成 + 各在册应用合成分两类打印
         renderMountGrouping(runtime.composition, [...runtime.apps.keys()]),
         // 仓库态件（D2 装机两态批）：已装未挂的装机仓库差集——断头路警示位
-        renderInstalledUnmounted(runtime.plugins.list()),
+        renderInstalledUnmounted(runtime.appsService.list()),
         // 应用面（契约篇 §5.4 第二纵切——官方清单装载 + 组件在场断言产物）：
         // 缺场应用带缺失组件清单（应用级隔离不拒启，诊断走此面）
         `应用（${runtime.apps.size}）：${
@@ -169,10 +171,10 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
       await runtime.shutdown();
     }
   } catch (err) {
-    // 启动断言失败（插件装载/组合树校验）——诊断面捕获后打印树与清单，不裸抛
-    if (err instanceof AppError && (err.code === PLUGIN_LOAD_FAILED || err.code === COMPOSITION_ROW_INVALID)) {
+    // 启动断言失败（应用装载/组合树校验）——诊断面捕获后打印树与清单，不裸抛
+    if (err instanceof AppError && (err.code === APP_LOAD_FAILED || err.code === COMPOSITION_ROW_INVALID)) {
       process.stdout.write(`Berry ${VERSION}\n数据目录：${dataDir()}\n`);
-      // 树尽力打印：纯合成解析零副作用（插件 import 失败也能看到树本身）；
+      // 树尽力打印：纯合成解析零副作用（应用 import 失败也能看到树本身）；
       // 官方件注册表同构传入（无 store 诊断态）——builtin: 行解析不失真
       //（subagent 真工厂构造全惰性——委派永不发生，占位依赖零副作用；chat 为
       // 纯树合成的占位件——apply 永不跑，只需注册表键在）
@@ -220,9 +222,9 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
           }),
           new Set(officialApps.keys()),
         );
-        // 安全模式同径（--no-plugins）：失败兜底树同样只保 Ring 1 行——诊断面
+        // 安全模式同径（--no-apps）：失败兜底树同样只保 Ring 1 行——诊断面
         // 报告「实际生效装配」，全量树在此形态下根本不会生效
-        const fallbackTree = options.noPlugins ? safeModeComposition(synthetic) : synthetic;
+        const fallbackTree = options.noApps ? safeModeComposition(synthetic) : synthetic;
         process.stdout.write(renderCompositionTree(fallbackTree) + '\n');
         // 挂载分组同构（D1）：兜底树与实装树同一分组口径（官方清单现读）
         process.stdout.write(renderMountGrouping(fallbackTree, [...officialApps.keys()]) + '\n');

@@ -1,14 +1,14 @@
 /**
  * L0 contracts — 技能公共类型（契约篇 §4 技能双层；2026-08-27 第三十三批
  * P2-1 题五符号下沉：Skill/SkillSourceLevel/SkillDiagnostic/SkillDiagnosticCode/
- * SkillsProvider 自 skills 模块迁入——插件 SDK 面（插件清单/skills named export
+ * SkillsProvider 自 skills 模块迁入——应用 SDK 面（应用清单/skills named export
  * 声明）引用的类型住在 contracts，宿主实现（注册表/渐进披露）留 skills 模块，
  * 类型与实现同层混住是同病同修〔CommandDefinition/CommandCompletionItem
  * 下沉 channels 同批〕；skills/types.ts 改再导出，旧消费面零改动）。
  *
  * 提示词文档层：SKILL.md 零代码执行，模型 read 后照做；宿主侧只做
  * 发现 → frontmatter 校验 → 优先级合并 → 渐进披露清单（§4.3/§4.4）。
- * 代码插件层不在此文件（插件契约第 1 节）；两层不混装是硬规则（§4.1）。
+ * 代码应用层不在此文件（应用契约第 1 节）；两层不混装是硬规则（§4.1）。
  */
 
 /** 技能来源层级（§4.4 优先级 project > user > package；同名 first-wins） */
@@ -47,7 +47,7 @@ export type SkillDiagnosticCode =
   | 'invalid-metadata' // name/description 校验不过（技能仍加载，随 pi 宽容度）
   | 'list-failed' // 目录列举失败
   | 'provider-failed' // provider.list() 抛异常（整提供方跳过，不断流）
-  | 'package-missing' // 插件声明的技能目录缺失（package 层专用，2026-08-26 技能包插件纵切：
+  | 'package-missing' // 应用声明的技能目录缺失（package 层专用，2026-08-26 技能包应用纵切：
   //   声明了却缺失是真异常——与 project/user 层「缺目录是常态刻意静默」相反，故发声；
   //   warning 不杀行，行主体可用就不因技能目录缺失回卷）
   | 'collision'; // 同名冲突落选（§4.4 first-wins 诊断）

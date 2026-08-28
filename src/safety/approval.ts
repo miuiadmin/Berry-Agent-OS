@@ -2,7 +2,7 @@
  * L3 safety — ApprovalService（骨架篇 §8.3 钉死）。
  *
  * outcome 闭集 allowed-once / rejected / cancelled / unavailable：
- * - ask（默认）：以 waterfall 派发给已注册的 answerer（通道插件在
+ * - ask（默认）：以 waterfall 派发给已注册的 answerer（通道应用在
  *   approval/answer 上短路返回三值决策）；无人应答 fail-closed → unavailable；
  * - never：确定性拒绝（CI / 无人值守姿态）。
  * 升权审批（§7.4）与守门审批（safety gate）共用本服务，reason 区分。
@@ -36,7 +36,7 @@ export interface ApprovalDecisionSink {
  */
 export type ApprovalDecisionValue = 'approve' | 'reject' | 'cancel' | 'unavailable' | 'always';
 
-/** ctx.approval 服务面（插件经 ctx.get<ApprovalService>('approval') 取用） */
+/** ctx.approval 服务面（应用经 ctx.get<ApprovalService>('approval') 取用） */
 export interface ApprovalService {
   /** 动作级审批：一次请求 → 一个 outcome（闭集，绝不悬空） */
   ask(req: ApprovalRequest): Promise<ApprovalOutcome>;

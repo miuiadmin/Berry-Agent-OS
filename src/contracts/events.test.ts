@@ -3,7 +3,7 @@
  *
  * 目录与 src 派发点的三族双向断言在 tools/check-events.mjs（CI 面，挂
  * lint:topology）；此处只锁目录自身的完整性——名字唯一、格式闭集、mode 闭集、
- * 查询面可用。目录是插件作者的公开契约（契约篇 §6.3 第 4 条），先自洽才谈对外。
+ * 查询面可用。目录是应用作者的公开契约（契约篇 §6.3 第 4 条），先自洽才谈对外。
  */
 
 import { describe, expect, it } from 'vitest';

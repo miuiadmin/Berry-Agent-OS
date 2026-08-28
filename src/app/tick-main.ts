@@ -155,7 +155,7 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   const entry = runtime.drivers.focused();
   if (entry === undefined) {
     // 可卸语义：chat 件未装载即无对话循环（overlay 禁用 builtin:chat 等）
-    process.stderr.write('对话应用未装载（builtin:chat 被禁用）——tick 无对话循环可执行；/plugins 查看装配。\n');
+    process.stderr.write('对话应用未装载（builtin:chat 被禁用）——tick 无对话循环可执行；/apps 查看装配。\n');
     await runtime.shutdown();
     return 1;
   }

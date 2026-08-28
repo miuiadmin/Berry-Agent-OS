@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { answerApproval } from './plugin.js';
+import { answerApproval } from './app.js';
 import type { ApprovalRequest } from '../safety/types.js';
 
 /** 可编程原语桩：记录 select 收到的选项面（文案纪律断言用） */

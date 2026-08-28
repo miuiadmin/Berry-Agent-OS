@@ -56,7 +56,7 @@ function rig() {
       available: () => [],
       enter: () => ({ ok: false as const, error: '不可用' }),
     },
-    plugins: {} as unknown as Parameters<typeof registerBuiltinCommands>[0]['plugins'],
+    appsService: {} as unknown as Parameters<typeof registerBuiltinCommands>[0]['appsService'],
     reload: (() => undefined) as unknown as Parameters<typeof registerBuiltinCommands>[0]['reload'],
     usage: () => '',
     allowlist,

@@ -7,7 +7,7 @@
  *   的 SQLite 实现归 persist 模块，app 组合根适配后注入；llm 不 import persist）；
  * - 内置 provider 全家桶默认注册（Anthropic-first 体现在默认模型约定与文档，不在
  *   provider 注册面做裁剪——未配置凭证的 provider 天然不可用）；
- * - `registerProvider` 即插件钩 `ctx.llm.registerProvider` 的实现底座（地基篇插件清单）。
+ * - `registerProvider` 即应用钩 `ctx.llm.registerProvider` 的实现底座（地基篇应用清单）。
  */
 
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all';
@@ -33,7 +33,7 @@ export interface LlmRuntimeOptions {
   modelsStore?: ModelsStore;
   /**
    * 初始 provider 集合。缺省 = pi-ai 内置全家桶（anthropic/openai/google/…静态目录）。
-   * 测试传 faux provider；插件后期经 registerProvider 增补。
+   * 测试传 faux provider；应用后期经 registerProvider 增补。
    */
   providers?: readonly Provider[];
 }
@@ -52,7 +52,7 @@ export interface LlmRuntime {
   checkAuth(providerId: string, options?: AuthOperationOptions): Promise<unknown>;
   /**
    * 注册/替换一个 provider（按 id upsert）。
-   * @returns 注销函数——调用即从集合移除该 provider（插件卸载路径）
+   * @returns 注销函数——调用即从集合移除该 provider（应用卸载路径）
    */
   registerProvider(provider: Provider): () => void;
   /** 按 id 移除 provider（ctx.llm.unregisterProvider 的底座；缺省 upsert 的对面） */
@@ -81,7 +81,7 @@ export function createLlmRuntime(options: LlmRuntimeOptions = {}): LlmRuntime {
     registerProvider(provider) {
       models.setProvider(provider);
       return () => {
-        // 简单移除语义：不比对是否仍是本 provider（卸载期竞态由插件系统自身串行化）
+        // 简单移除语义：不比对是否仍是本 provider（卸载期竞态由应用系统自身串行化）
         models.deleteProvider(provider.id);
       };
     },

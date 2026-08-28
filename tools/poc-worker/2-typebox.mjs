@@ -8,7 +8,7 @@
  *
  * 判定：两方向的「合法值」都必须校验通过（克隆保真），「非法值」都必须被拒（校验力
  * 保留）——任一不成立 = 可证伪项②证伪 → 契约篇 §1.7 的「schema 对象过界」路径不成立，
- * worker 侧插件须退到「JSON 直传 schema 描述」形态。symbol 键存活数只记录不判死
+ * worker 侧应用须退到「JSON 直传 schema 描述」形态。symbol 键存活数只记录不判死
  * （typebox 1.x 若纯 JSON 形则 symbol 本为零）。
  * 退出码：0 = PASS，1 = FAIL。
  */

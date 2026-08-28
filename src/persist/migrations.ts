@@ -1,5 +1,5 @@
 /**
- * L1 persist — 统一迁移框架（会话篇 §6 落码形态，2026-08-24 M2 记忆插件纵切）。
+ * L1 persist — 统一迁移框架（会话篇 §6 落码形态，2026-08-24 M2 记忆应用纵切）。
  *
  * pre-release 期间 user_version 递进的唯一通道：迁移项 `{version, name, sql}` 数据化注册
  * ——DDL 文本归业务模块自带（首例 memory 表族 v2），persist 提供框架不认识业务表。

@@ -9,7 +9,7 @@
 import type { Context, Disposer } from '../context/types.js';
 import { chainCaller } from '../context/chain.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
-import type { RowAppProbe } from '../contracts/plugin.js';
+import type { RowAppProbe } from '../contracts/app.js';
 import { createCommandRegistry, type CommandRegistry } from './commands.js';
 import { createUiService } from './ui.js';
 import type { ChannelsService, RendererDefinition, UiService } from './types.js';
@@ -32,15 +32,16 @@ export function createChannelsService(opts?: { rowApp?: RowAppProbe }): Channels
   const service: ChannelsServiceEntity = {
     commands,
     registerCommand(cmd) {
-      // D1 app 行拒载（契约篇 §5.1 注册面路由裁死，2026-08-27）：caller 链带行
-      // id（装载器 apply 帧）且该行挂应用组合 → 拒绝——命令单表无域层，app 行
-      // 注册 = 跨应用漏命令破坏隔离。抛错即行失败（装载期拒绝）
+      // D1 app 行拒载（契约篇 §5.1 注册面路由裁死，2026-08-27；第三十六批 apps
+      // 数组化——探针返回数组）：caller 链带行 id（装载器 apply 帧）且该行挂应用
+      // 作用域（apps 数组非空）→ 拒绝——命令单表无域层，app 行注册 = 跨应用漏
+      // 命令破坏隔离。抛错即行失败（装载期拒绝）
       const rowId = chainCaller();
-      const appId = rowId !== undefined ? opts?.rowApp?.get(rowId) : undefined;
-      if (appId !== undefined) {
+      const apps = rowId !== undefined ? opts?.rowApp?.get(rowId) : undefined;
+      if (apps !== undefined && apps.length > 0) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `TUI 命令注册被拒：行 ${rowId} 挂应用组合（app: ${appId}）——应用行的命令注册 v1 裁死拒载` +
+          `TUI 命令注册被拒：行 ${rowId} 挂应用作用域（apps: ${apps.join('、')}）——应用行的命令注册 v1 裁死拒载` +
             `（命令单表无域层，防跨应用漏命令破坏隔离；契约篇 §5.1 D1 注册面路由）`,
         );
       }

@@ -391,7 +391,7 @@ describe('出厂技能层（§4.4 ⑤——样例技能随包分发，拍板 17�
 
   it('repo 根出厂样例三件解析通过（出厂内容回归锁——格式坏在 CI 抓出）', () => {
     const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-    const names = ['commit-checklist', 'plugin-quickstart', 'troubleshooting'];
+    const names = ['commit-checklist', 'apps-quickstart', 'troubleshooting'];
     for (const name of names) {
       const filePath = join(repoRoot, 'skills', name, 'SKILL.md');
       const content = readFileSync(filePath, 'utf8');
@@ -435,9 +435,9 @@ describe('createSkillsService（变更广播——契约篇 §2.2 增补 6，#17
 });
 
 describe('createSkillsService — D1 app 行拒载（契约篇 §5.1 注册面路由）', () => {
-  /** 两行探针 fixture：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
+  /** 两行探针 fixture（第三十六批 apps 数组化）：row-app 挂应用 chat（在投影）、其余行挂系统（不在投影） */
   const rowApp = {
-    get: (rowId: string) => (rowId === 'row-app' ? 'chat' : undefined),
+    get: (rowId: string) => (rowId === 'row-app' ? ['chat'] : undefined),
     size: () => 1,
   };
   /** 本组最小 provider fixture（空技能——注册/拒载语义与内容无关） */
@@ -458,7 +458,7 @@ describe('createSkillsService — D1 app 行拒载（契约篇 §5.1 注册面�
     } catch (e) {
       expect(e).toBeInstanceOf(AppError);
       expect((e as InstanceType<typeof AppError>).code).toBe(COMPOSITION_ROW_INVALID);
-      expect((e as InstanceType<typeof AppError>).message).toContain('app: chat');
+      expect((e as InstanceType<typeof AppError>).message).toContain('apps: chat');
     }
   });
 

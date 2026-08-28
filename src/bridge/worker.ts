@@ -3,8 +3,8 @@
  *
  * 「装载管线两半拆分」的 worker 半：本文件活在 worker_threads 子进程里，
  * 经 BridgeEndpoint 暴露三个固定 service 方法（svc.load / svc.apply /
- * svc.unload），并物化**代理桩 ctx**——插件 apply 拿到的 ctx 表面同
- * PluginContext，底下一切跨域动作翻译为桥接消息：
+ * svc.unload），并物化**代理桩 ctx**——应用 apply 拿到的 ctx 表面同
+ * AppContext，底下一切跨域动作翻译为桥接消息：
  *
  * - ctx.get(name)          → 服务代理（方法调用 → ask('host','svc-invoke')）
  *   （'tools' 特例：本地桩——register 翻译为 tools-register、run 走宿主管道）
@@ -19,19 +19,19 @@
  * - ctx.logger             → tell('log') 单向上行（worker 直打 stdout 会砸穿
  *   TUI 渲染——日志纪律单点：宿主 logger 统一格式与级别过滤）
  * - ctx.signal             → 行控制器（apply 取消（桥接入站 signal）/unload
- *   双源 abort——插件长任务对齐响应）
+ *   双源 abort——应用长任务对齐响应）
  *
  * v1 同步收窄面（BRIDGE_SURFACE_NARROWED 响亮 throw，契约篇 §1.7 清单）：
  * parallel/serial/waterfall / registerMessageRole / registerSessionEventType /
  * tools 桩的 get/list/listFor/stats/toAgentTool。
  */
 import { parentPort, workerData } from 'node:worker_threads';
-import { AppError, BRIDGE_METHOD_NOT_FOUND, BRIDGE_SURFACE_NARROWED, PLUGIN_LOAD_FAILED } from '../contracts/errors.js';
-import type { PluginEventHandler } from '../contracts/plugin.js';
+import { AppError, BRIDGE_METHOD_NOT_FOUND, BRIDGE_SURFACE_NARROWED, APP_LOAD_FAILED } from '../contracts/errors.js';
+import type { AppEventHandler } from '../contracts/app.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import {
-  createPluginJiti,
-  importPluginEntry,
+  createAppJiti,
+  importAppEntry,
   validateEventDefs,
   validateModuleShape,
   type ValidatedModule,
@@ -52,7 +52,7 @@ interface RowState {
   /** 本行注册的工具执行体（tool-invoke 分派目标——execute 不过界，留在本域） */
   readonly toolHandlers: Map<string, ToolDefinition['execute']>;
   /** 本行事件处理器（event → 处理器组；宿主 tell('evt') 回投到此） */
-  readonly eventHandlers: Map<string, PluginEventHandler[]>;
+  readonly eventHandlers: Map<string, AppEventHandler[]>;
   /** 行控制器：apply 取消与 unload 双源 abort（ctx.signal 的真身） */
   readonly ctl: AbortController;
   /** unload 后为 true——注册面关闭，后续桩调用响亮拒绝（失败行不留残骸） */
@@ -66,10 +66,10 @@ const rows = new Map<string, RowState>();
 const modules = new Map<string, ValidatedModule>();
 
 /**
- * 本 realm 的 jiti 实例（懒建）：虚拟面第五/六键为空对象面（与 loadPlugins
+ * 本 realm 的 jiti 实例（懒建）：虚拟面第五/六键为空对象面（与 loadApps
  * 缺省同构——注入物是宿主 realm 函数不可过界，worker 域按需开面另批）。
  */
-let realmJiti: ReturnType<typeof createPluginJiti> | undefined;
+let realmJiti: ReturnType<typeof createAppJiti> | undefined;
 
 /** 日志单向上行（fire-and-forget——tell 无回应面；宿主 onTell 分派到行 logger） */
 function logUp(
@@ -184,7 +184,7 @@ function makeHostServiceProxy(
 }
 
 /**
- * 代理桩 ctx（结构对齐 contracts PluginContext——apply 的 ctx 实参）。
+ * 代理桩 ctx（结构对齐 contracts AppContext——apply 的 ctx 实参）。
  * registrations：apply 期间发起的一切过界注册（svc-register/sub/tools-register）
  * 的 promise 集合——svc.apply 在 default 返还后 await 全体，保证 activated 事件
  * 时宿主侧注册已全部落定（时序确定性；单个注册失败 = apply 失败同路回卷）。
@@ -207,7 +207,7 @@ function makeStubCtx(
     effect(fn: () => unknown) {
       assertAlive(state, 'effect');
       const disposer = fn();
-      // typeof 收窄只得 Function——显式断言到清理函数形（PluginContext.effect 契约：返回清理函数或 undefined）
+      // typeof 收窄只得 Function——显式断言到清理函数形（AppContext.effect 契约：返回清理函数或 undefined）
       if (typeof disposer === 'function') state.disposers.push(disposer as () => void);
       // 手动注销：从栈摘除后执行（幂等性由调用方自律——与宿主 effect 同形）
       let done = false;
@@ -219,7 +219,7 @@ function makeStubCtx(
         if (typeof disposer === 'function') disposer();
       };
     },
-    on(event: string, handler: PluginEventHandler, opts?: { prepend?: boolean }) {
+    on(event: string, handler: AppEventHandler, opts?: { prepend?: boolean }) {
       assertAlive(state, `on(${event})`);
       // 本地登记先行（宿主侧 sub 落定前事件回投不可能——tell 晚于注册往返）
       const list = state.eventHandlers.get(event) ?? [];
@@ -316,10 +316,10 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
     .handle('svc', 'load', async ([row]) => {
       const lite = row as { id: string; entry?: string };
       if (typeof lite.id !== 'string' || typeof lite.entry !== 'string') {
-        throw new AppError(PLUGIN_LOAD_FAILED, 'svc.load 载荷缺 id/entry（装载管线不变量被破坏）');
+        throw new AppError(APP_LOAD_FAILED, 'svc.load 载荷缺 id/entry（装载管线不变量被破坏）');
       }
-      realmJiti ??= createPluginJiti();
-      const mod = await importPluginEntry(realmJiti, lite.entry);
+      realmJiti ??= createAppJiti();
+      const mod = await importAppEntry(realmJiti, lite.entry);
       const module = validateModuleShape(mod, lite.id);
       validateEventDefs(module.events, lite.id);
       modules.set(lite.id, module);
@@ -342,7 +342,7 @@ export function startWorkerRealm(port: BridgePort, workerId: string): BridgeEndp
       const presence = (presenceArg ?? {}) as Readonly<Record<string, boolean>>;
       const module = modules.get(rowId);
       if (module === undefined) {
-        throw new AppError(PLUGIN_LOAD_FAILED, `svc.apply 先行装载缺失（行 ${rowId}——load 必先于 apply）`);
+        throw new AppError(APP_LOAD_FAILED, `svc.apply 先行装载缺失（行 ${rowId}——load 必先于 apply）`);
       }
       // 重装先行清旧（/reload 全新装载语义——旧行状态若在即回卷，幂等）
       disposeRow(endpoint, rowId);

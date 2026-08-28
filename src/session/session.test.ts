@@ -283,7 +283,7 @@ describe('surfaceOp 遮蔽校验', () => {
     // [3,4] = tool/call + tool/result 整对遮蔽：合法（起点非 tool/result、终点非 tool/call）
     s.append(
       'user/message',
-      { content: '压缩摘要', source: 'plugin:compaction' },
+      { content: '压缩摘要', source: 'app:compaction' },
       { surfaceOp: { op: 'replace', start: 3, end: 4 }, sourceEventSeqs: [3, 4, 5] },
     );
     expect(s.deriveMessages().map((m) => m.type)).not.toContain('toolResult');

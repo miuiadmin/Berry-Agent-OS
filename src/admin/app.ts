@@ -4,24 +4,24 @@
  *
  * 刀 1 = 只读面两工具（「禁注册无身动词」——既有服务面的文本化呈现，不造第二
  * 数据源）：
- * - `plugins_list`：装载态一览（ctx.plugins.list + 组合树行 source 推导）；
+ * - `apps_list`：装载态一览（ctx.apps.list + 组合树行 source 推导）；
  * - `events_query`：跨会话 durable 事件有界查询（ctx.sessions.queryEvents——
  *   会话篇 §3.4 单原语的工具层壳：ISO 8601 转毫秒、data 摘要截断、flushFirst
  *   恒置 true）。
  *
  * 刀 3 = 写类动词六词导线（契约篇 §3.4 刀 2 工具族与 Skill 兑现条）：五写词
  * （install/update/toggle/configure/reload——生命周期档审批对恒经人手，机制
- * 形态见 ./write-tools.ts 模块头）+ `plugins_uninstall_inspect`（read——双相
+ * 形态见 ./write-tools.ts 模块头）+ `apps_uninstall_inspect`（read——双相
  * 卸载的模型面，执行权在人）。服务面导线同批：configure/requestReload 落
- * src/app/plugins.ts（本件只消费不实现）。
+ * src/app/apps.ts（本件只消费不实现）。
  *
  * 管理操作知识 = 同件携带 Skill `./skills/admin`（§4.1 纯知识注入——它教
  * 方法，动词住工具）。builtin 件无入口文件路径，包根以 packageRoot 自述
  * （import.meta.url 位置事实——契约篇 §3.4 两处钉死，仅 builtin 行生效）。
  *
  * 拓扑最小边（mcp/web 同款窄边）：全部依赖经 ctx.get 运行时服务面取
- * （tools/sessions/plugins/approval 四键都是宿主装配序无条件 provide 的服务，
- * approval 在 ⑥ 审批段早于 ⑨ 插件装载——fork 级联可见），零跨模块 import
+ * （tools/sessions/apps/approval 四键都是宿主装配序无条件 provide 的服务，
+ * approval 在 ⑥ 审批段早于 ⑨ 应用装载——fork 级联可见），零跨模块 import
  * ——服务面的结构子集类型在本文件与 write-tools.ts 本地收窄。
  */
 
@@ -30,27 +30,27 @@ import { fileURLToPath } from 'node:url';
 import { AppError, TOOL_ARGUMENTS_INVALID } from '../contracts/errors.js';
 import type { EventQueryCursor, EventQueryOptions, EventQueryResult } from '../contracts/events.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import { Type } from '../contracts/typebox.js';
 import {
-  createPluginsConfigureTool,
-  createPluginsInstallTool,
-  createPluginsMountTool,
-  createPluginsReloadTool,
-  createPluginsToggleTool,
-  createPluginsUnmountTool,
-  createPluginsUninstallInspectTool,
-  createPluginsUpdateTool,
+  createAppsConfigureTool,
+  createAppsInstallTool,
+  createAppsMountTool,
+  createAppsReloadTool,
+  createAppsToggleTool,
+  createAppsUnmountTool,
+  createAppsUninstallInspectTool,
+  createAppsUpdateTool,
   type ApprovalAskFace,
-  type PluginsManageFace,
+  type AppsManageFace,
 } from './write-tools.js';
 
 /**
- * ctx.plugins.list() 单行的结构子集（admin 件消费面收窄——宿主实现类型在 app
- * 模块，插件结构上不可 import；服务经 ctx.get 运行时取，形状由宿主装配保证）。
+ * ctx.apps.list() 单行的结构子集（admin 件消费面收窄——宿主实现类型在 app
+ * 模块，应用结构上不可 import；服务经 ctx.get 运行时取，形状由宿主装配保证）。
  * source 字段 = list 时从组合树 plan 行现推导的行来源（本批新增）。
  */
-export interface PluginRowView {
+export interface AppRowView {
   readonly id: string;
   readonly status: string;
   readonly name?: string;
@@ -61,10 +61,10 @@ export interface PluginRowView {
   readonly source?: string;
 }
 
-/** ctx.plugins 服务面的结构子集（清单只读面） */
-export interface PluginsListFace {
+/** ctx.apps 服务面的结构子集（清单只读面） */
+export interface AppsListFace {
   /** 装载状态清单（组合树行序；装载前视角的行 = planned 兜底） */
-  list(): ReadonlyArray<PluginRowView>;
+  list(): ReadonlyArray<AppRowView>;
 }
 
 /** ctx.sessions 服务面的结构子集（queryEvents——会话篇 §3.4 单原语） */
@@ -89,8 +89,8 @@ function textResult(text: string): AgentToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-/** 单行装载态的模型面呈现（/plugins 命令人读版同源数据、各自格式化） */
-function formatStatusRow(row: PluginRowView): string {
+/** 单行装载态的模型面呈现（/apps 命令人读版同源数据、各自格式化） */
+function formatStatusRow(row: AppRowView): string {
   const source = row.source ?? '来源未知';
   switch (row.status) {
     case 'activated':
@@ -108,21 +108,21 @@ function formatStatusRow(row: PluginRowView): string {
 }
 
 /**
- * 构造 `plugins_list` 工具定义（无参只读——装载态一览）。
- * 「禁注册无身动词」执法样例：本工具是对 ctx.plugins.list() 的文本化呈现，
+ * 构造 `apps_list` 工具定义（无参只读——装载态一览）。
+ * 「禁注册无身动词」执法样例：本工具是对 ctx.apps.list() 的文本化呈现，
  * 不造第二数据源（清单唯一事实源 = 组合树，§1.5）。
  */
-export function createPluginsListTool(plugins: PluginsListFace): ToolDefinition {
+export function createAppsListTool(apps: AppsListFace): ToolDefinition {
   return {
-    name: 'plugins_list',
+    name: 'apps_list',
     description:
-      '列出插件装载态清单：组合树每行的状态（activated/failed/skipped/planned）、来源（builtin/npm/git/local）、失败原因与 apply 耗时。无参数。',
+      '列出应用装载态清单：组合树每行的状态（activated/failed/skipped/planned）、来源（builtin/npm/git/local）、失败原因与 apply 耗时。无参数。',
     parameters: Type.Object({}),
     effect: 'read',
     async execute(): Promise<AgentToolResult> {
-      const rows = plugins.list();
+      const rows = apps.list();
       if (rows.length === 0) {
-        return textResult('组合树无插件行（默认层为空）——装载态清单为空。');
+        return textResult('组合树无应用行（默认层为空）——装载态清单为空。');
       }
       const activated = rows.filter((r) => r.status === 'activated').length;
       const failed = rows.filter((r) => r.status === 'failed').length;
@@ -130,7 +130,7 @@ export function createPluginsListTool(plugins: PluginsListFace): ToolDefinition 
       const lines = rows.map(formatStatusRow);
       return textResult(
         [
-          `插件装载态（共 ${rows.length} 行：activated ${activated} · failed ${failed} · skipped ${skipped}）：`,
+          `应用装载态（共 ${rows.length} 行：activated ${activated} · failed ${failed} · skipped ${skipped}）：`,
           ...lines,
         ].join('\n'),
       );
@@ -173,7 +173,7 @@ export function createEventsQueryTool(sessions: SessionsQueryFace): ToolDefiniti
   return {
     name: 'events_query',
     description:
-      '跨会话查询 durable 事件日志（唯一事实源的直接读，非投影）：按时间窗（ISO 8601，含端点）/事件类型/应用域/单会话过滤，最新在前、组合游标分页。types 是数据条件——查已卸载插件留下的旧词汇返回空不报错。',
+      '跨会话查询 durable 事件日志（唯一事实源的直接读，非投影）：按时间窗（ISO 8601，含端点）/事件类型/应用域/单会话过滤，最新在前、组合游标分页。types 是数据条件——查已卸载应用留下的旧词汇返回空不报错。',
     parameters: Type.Object({
       since: Type.Optional(Type.String({ description: '时间窗下界（ISO 8601，含端点；缺省无下界）' })),
       until: Type.Optional(Type.String({ description: '时间窗上界（ISO 8601，含端点；缺省无上界）' })),
@@ -240,36 +240,36 @@ export function createEventsQueryTool(sessions: SessionsQueryFace): ToolDefiniti
  * packageRoot 自述 = 本文件所在目录（import.meta.url 运行时求值的位置事实，
  * 结构上不可能漂——契约篇 §3.4 第一刀细化段两处钉死之二）。
  */
-export function createAdminPlugin(): BuiltinPluginModule {
+export function createAdminApp(): BuiltinAppModule {
   return {
     name: 'admin',
     // 硬依赖四键全为宿主装配序无条件 provide 的服务（tools 由 Ring 1 行独立锚
     // 先行装载；approval 在 ⑥ 审批段——写类动词的审批对面）——缺供即装配断言，
     // 诊断树也须见到此行
-    inject: ['tools', 'sessions', 'plugins', 'approval'],
+    inject: ['tools', 'sessions', 'apps', 'approval'],
     skills: ['./skills/admin'],
     packageRoot: dirname(fileURLToPath(import.meta.url)),
-    apply: (ctx: PluginContext): void => {
+    apply: (ctx: AppContext): void => {
       const tools = ctx.get<ToolsService>('tools');
       // 刀 1 只读面：清单 + 事件查询（结构子集类型收窄见各 face 定义）
-      const pluginsRead = ctx.get<PluginsListFace>('plugins');
+      const appsRead = ctx.get<AppsListFace>('apps');
       const sessions = ctx.get<SessionsQueryFace>('sessions');
       // 刀 3 写面：管理动词写词 + 卸载检视（审批对面 = 根审批服务——fork
       // 级联可见；asked/decided 双腿落 durable 由审批服务承载）；D2 两态批
       // （2026-08-27 第三十批）扩 mount/unmount 两写词——写行类模型可用
-      const pluginsManage = ctx.get<PluginsManageFace>('plugins');
+      const appsManage = ctx.get<AppsManageFace>('apps');
       const approval = ctx.get<ApprovalAskFace>('approval');
       // 注册即 effect：十工具挂行作用域，/reload 锚回卷或行失败连带回卷撤件
-      ctx.effect(() => tools.register(createPluginsListTool(pluginsRead)));
+      ctx.effect(() => tools.register(createAppsListTool(appsRead)));
       ctx.effect(() => tools.register(createEventsQueryTool(sessions)));
-      ctx.effect(() => tools.register(createPluginsInstallTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsMountTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsUnmountTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsUpdateTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsToggleTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsConfigureTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsReloadTool(pluginsManage, approval)));
-      ctx.effect(() => tools.register(createPluginsUninstallInspectTool(pluginsManage)));
+      ctx.effect(() => tools.register(createAppsInstallTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsMountTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsUnmountTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsUpdateTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsToggleTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsConfigureTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsReloadTool(appsManage, approval)));
+      ctx.effect(() => tools.register(createAppsUninstallInspectTool(appsManage)));
       ctx.logger.debug('admin 件十工具已注册（只读两件 + 写类七件〔含 mount/unmount〕 + 卸载检视一件）');
     },
   };

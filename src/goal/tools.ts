@@ -15,7 +15,7 @@ import type { GoalRecord } from './machine.js';
 import { renderDisciplineClauses } from './prompts.js';
 import type { GoalStore } from './store.js';
 
-/** 工具构造依赖（goal 插件 apply 期装配） */
+/** 工具构造依赖（goal 应用 apply 期装配） */
 export interface GoalToolsDeps {
   /** goals 表 DAO */
   readonly store: GoalStore;
@@ -42,7 +42,7 @@ function textResult(text: string, isError = false): AgentToolResult {
   return { content: [{ type: 'text', text }], ...(isError ? { isError: true } : {}) };
 }
 
-/** 构造工具三件（goal 插件注册进 ctx.tools——tools_change 原位刷新即模型可见） */
+/** 构造工具三件（goal 应用注册进 ctx.tools——tools_change 原位刷新即模型可见） */
 export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] {
   /* ---------------- goal_get：当前 goal 全字段投影 ---------------- */
   const goalGet: ToolDefinition = {

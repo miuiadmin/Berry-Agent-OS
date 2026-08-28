@@ -3,9 +3,9 @@
  *
  * 五符号（Skill/SkillSourceLevel/SkillDiagnostic/SkillDiagnosticCode/
  * SkillsProvider）已下沉 contracts/skills.ts（2026-08-27 第三十三批 P2-1 题五：
- * 插件 SDK 面类型住 contracts、实现住本模块），此处再导出保持旧消费面零改动
+ * 应用 SDK 面类型住 contracts、实现住本模块），此处再导出保持旧消费面零改动
  * （session-events.ts 下沉先例同构）；本文件保留实现侧类型（SkillsService/
- * SkillLocation/SKILLS_CHANGE_EVENT——服务面与事件名非插件清单引用面）。
+ * SkillLocation/SKILLS_CHANGE_EVENT——服务面与事件名非应用清单引用面）。
  */
 
 import type { Disposer } from '../context/types.js';
@@ -31,7 +31,7 @@ export interface SkillLocation {
   readonly source: SkillSourceLevel;
 }
 
-/** ctx.skills 服务面（骨架篇 §9.2；插件经 ctx.get<SkillsService>('skills') 取用） */
+/** ctx.skills 服务面（骨架篇 §9.2；应用经 ctx.get<SkillsService>('skills') 取用） */
 export interface SkillsService {
   /** 注册技能提供方（追加序即优先序；返回注销器，幂等） */
   registerProvider(provider: SkillsProvider): Disposer;

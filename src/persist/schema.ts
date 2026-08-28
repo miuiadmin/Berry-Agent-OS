@@ -120,8 +120,8 @@ export const SESSION_APP_COLUMN_MIGRATION: MigrationSpec = {
  * user_version 链全局唯一，本列顺移 v10（迁移框架只认严格递增，缺号补位无意义）。
  *
  * 语义：核心词伪造窗口（种子可含核心词=红线例外）必须配可审计的溯源账——
- * origin='import' 行 importer 非空（服务面强制落调用方插件名；宿主内部导入器
- * 落 'host'）。与 appendWithSurfaceOp「归因强制 plugin: 前缀」同纪律。
+ * origin='import' 行 importer 非空（服务面强制落调用方应用名；宿主内部导入器
+ * 落 'host'）。与 appendWithSurfaceOp「归因强制 app: 前缀」同纪律。
  * 存量行 NULL（非导入会话无此维度，不回填）。sessions 是内核表——v6 先例
  * 同款：迁移 DDL 直归 persist 迁移链。
  */

@@ -26,11 +26,11 @@ import type { MemoryKind } from './store.js';
 import { shortIdOf } from './id.js';
 import { quoteAsCitation, sanitizeForModel } from './scan.js';
 
-/** 差分事件类型词汇（插件显式注册——surface 类别：事实事件 + 派生注入形态） */
+/** 差分事件类型词汇（应用显式注册——surface 类别：事实事件 + 派生注入形态） */
 export const MEMORY_DIFF_TYPE = 'memory/diff';
 
 // 模块加载时注册词汇（官方件每进程只经宿主注册表 import 一次，无重复注册路径；
-// 文件插件 + /reload 的重注册 seam 见记忆篇 §6 落码定稿注记）
+// 文件应用 + /reload 的重注册 seam 见记忆篇 §6 落码定稿注记）
 registerSessionEventType({ type: MEMORY_DIFF_TYPE, category: 'surface' });
 
 /** 三态操作词汇：'+', '~', and '-' (新增 / 修正 / 撤回——ASCII 编码，规范篇的 '−' 是排版形态) */
@@ -72,7 +72,7 @@ export interface FaceEntry {
  * 「恒驻但被消毒拦截」不静默。注记数不进指纹面（渲染文案不换基线纪元）。
  * @param store 记忆库 DAO
  * @param ownerKeys 生效归属键（global + 当前项目）
- * @param opts.unusedDays 未用排除阈值天（透传 briefing——插件配置项）
+ * @param opts.unusedDays 未用排除阈值天（透传 briefing——应用配置项）
  */
 export function briefingFace(
   store: Pick<MemoryStore, 'briefing'>,

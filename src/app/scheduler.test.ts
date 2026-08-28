@@ -15,9 +15,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage } from '../contracts/llm.js';
 import type { UiBackend } from '../channels/types.js';
-import type { PluginContext } from '../contracts/plugin.js';
+import type { AppContext } from '../contracts/app.js';
 import { JobsStore } from '../scheduler/store.js';
-import { createSchedulerPlugin } from '../scheduler/plugin.js';
+import { createSchedulerApp } from '../scheduler/app.js';
 import { openStore } from '../persist/index.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { createBerryRuntime } from './assembly.js';
@@ -157,7 +157,7 @@ async function spinUntil(predicate: () => boolean, what: string): Promise<void> 
 describe('scheduler 官方件全栈：装载与命令面', () => {
   it('默认层第五行激活 + /tick 命令进面（/help 可见）', async () => {
     const runtime = await assemble();
-    expect(runtime.plugins.list().map((r) => [r.id, r.status])).toContainEqual(['scheduler', 'activated']);
+    expect(runtime.appsService.list().map((r) => [r.id, r.status])).toContainEqual(['scheduler', 'activated']);
     expect(await runtime.channels.commands.dispatch('/tick')).toBe('ok');
   });
 
@@ -401,8 +401,8 @@ describe('scheduler 件级：osRegistrar 缺席防御面（诊断形态）', () 
                 },
               }
             : { notify: (text: string) => notifies.push(text) },
-      } as unknown as PluginContext;
-      const plugin = createSchedulerPlugin({
+      } as unknown as AppContext;
+      const plugin = createSchedulerApp({
         connection: store.connection,
         turnDepth: () => 0,
         lastUserMessageAt: () => null,

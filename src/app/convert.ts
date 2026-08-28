@@ -10,7 +10,7 @@
  * #16 收口（2026-08-25）：**未注册角色**的丢弃不再是全静默——onDrop 回调
  * 携角色名上报（装配层接 debug 日志）。注意分界：注册角色的 toLlm:null 是
  * 设计内过滤（bash 执行记录类每请求都丢，不叫回调免刷日志）；onDrop 只咬
- * 「本该注册却没注册」的可疑丢弃——插件作者注入自造角色名被无声蒸发的陷阱
+ * 「本该注册却没注册」的可疑丢弃——应用作者注入自造角色名被无声蒸发的陷阱
  * 从此有痕迹。
  */
 
@@ -50,7 +50,7 @@ export function defaultConvertToLlm(
     try {
       converted = definition.toLlm?.(message) ?? null;
     } catch (err) {
-      // toLlm 抛错 = 插件 bug：按「未注册角色」同路丢弃 + 原因留痕——
+      // toLlm 抛错 = 应用 bug：按「未注册角色」同路丢弃 + 原因留痕——
       // 一个坏转换器只蒸发自己的消息，不穿透杀掉整个 run（§1.6 纪律）
       onDrop?.(message.role, `toLlm 抛错（已丢弃该条）：${err instanceof Error ? err.message : String(err)}`);
       continue;

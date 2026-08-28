@@ -21,7 +21,7 @@ import { dumpConfigMain } from './dump-config.js';
 import { relaunchUnderHostSandbox } from './host-sandbox.js';
 
 /** 帮助文案（命令面 = 产品契约，输出保持稳定） */
-const HELP = `Berry ${VERSION} — 插件式智能体运行时
+const HELP = `Berry ${VERSION} — 应用式智能体运行时
 
 用法：
   berry                  进入 TUI 对话（默认命令）
@@ -38,10 +38,10 @@ const HELP = `Berry ${VERSION} — 插件式智能体运行时
   --tick <名>  run 子命令限定：到点编排形态（prompt 取自任务行；与位置参数互斥）
   --app <id>   run 子命令限定：以应用身份单发（会话域/装配默认位/审批预设随清单
                生效；与 --tick 互斥——tick 是任务行身份，应用身份另属清单）
-  --no-plugins 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
-               ——坏插件锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
+  --no-apps 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
+               ——坏应用锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
   --sandbox-host run 子命令限定：宿主进程套 OS 沙箱 wrapper（macOS seatbelt / Linux bwrap）
-               ——检出后 CLI 重 exec 自身，本进程连同全部插件跑在沙箱内。
+               ——检出后 CLI 重 exec 自身，本进程连同全部应用跑在沙箱内。
                可写面 = 档位根 ∪ 数据目录（~/.berry：库与凭证必须可写）。
                诚实边界：①策略并集粒度——数据目录内部互害关不住；②非网络沙箱
                ——出网默认放行（LLM API 刚需）；③seatbelt profile 非稳定公开接口，
@@ -60,8 +60,8 @@ interface ParsedArgs {
   tick: string | undefined;
   /** run 子命令应用身份（第三纵切，取值旗标——值为应用 id；undefined = 对话应用域） */
   app: string | undefined;
-  /** 安全模式（--no-plugins，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
-  noPlugins: boolean;
+  /** 安全模式（--no-apps，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
+  noApps: boolean;
   /** e1 宿主沙箱包裹（--sandbox-host，技术栈篇 §5 第二十八批题 3A）：run 限定，wrapper 重 exec */
   sandboxHost: boolean;
 }
@@ -76,7 +76,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let debug = false;
   let readOnly = false;
   let background = false;
-  let noPlugins = false;
+  let noApps = false;
   let tick: string | undefined;
   let app: string | undefined;
   let sandboxHost = false;
@@ -99,10 +99,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 取值旗标同款：下一参数即应用 id；缺席为用法错（空串占位让 run case 执法）
       app = argv[i + 1] ?? '';
       i += 1;
-    } else if (arg === '--no-plugins') {
+    } else if (arg === '--no-apps') {
       // 安全模式对 TUI/run/dump-config 语义化（boot 形态面）；tick 唤起不透传
       //（自动化入口无「救援」语义——安全模式救的是交互面，tick 子进程恒全树）
-      noPlugins = true;
+      noApps = true;
     } else if (arg === '--sandbox-host') {
       // e1 宿主沙箱（技术栈篇 §5 第二十八批题 3A）：只对 run 语义化——wrapper
       // 重 exec 在 run case 执法；TUI/dump-config 收到时无害忽略（同 --read-only 律）
@@ -112,20 +112,20 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly, background, tick, app, noPlugins, sandboxHost };
+  return { command, args: rest, debug, readOnly, background, tick, app, noApps, sandboxHost };
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, app, noPlugins, sandboxHost } = parseArgs(argv);
+  const { command, args, readOnly, background, tick, app, noApps, sandboxHost } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
       case '':
-        // 安全模式主场景就是 TUI：坏插件锁死启动时起最小内核壳（无驱动形态
-        // 壳照启可退）——命令面/插件管理完好，修 overlay 后 /reload 恢复全树；
+        // 安全模式主场景就是 TUI：坏应用锁死启动时起最小内核壳（无驱动形态
+        // 壳照启可退）——命令面/应用管理完好，修 overlay 后 /reload 恢复全树；
         // --app 对 TUI 不透传（TUI 的应用面是 /app <id> 命令——交互进入非进程身份）
-        return tuiMain({ ...(noPlugins ? { noPlugins: true } : {}) });
+        return tuiMain({ ...(noApps ? { noApps: true } : {}) });
       case '--help':
       case '-h':
         process.stdout.write(HELP + '\n');
@@ -184,19 +184,19 @@ function main(argv: string[]): number {
         // headless 无应答者，审批天然 fail-closed，无需另设审批旗标）
         // --background → llm/usage 记账入 background 道（tick 唤起入口声明——
         // 席 13 第二刀：否则 tick 花 foreground 道、闸读 background 道，空转）
-        // --no-plugins → 无驱动一等态：run 无对话循环可执行，语义性失败退出码 1
+        // --no-apps → 无驱动一等态：run 无对话循环可执行，语义性失败退出码 1
         // --app → 以应用身份单发（第三纵切：assembly 组合根 resolveApp 解析清单
         //——查无 = APP_NOT_FOUND，message 披露在册可用清单）
         return runOnceMain(message, {
           ...(readOnly ? { sandboxMode: 'read-only' as const } : {}),
           ...(background ? { usagePriority: 'background' as const } : {}),
           ...(app !== undefined ? { app } : {}),
-          ...(noPlugins ? { noPlugins: true } : {}),
+          ...(noApps ? { noApps: true } : {}),
         });
       }
       case 'dump-config':
         // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）
-        return dumpConfigMain({ ...(noPlugins ? { noPlugins: true } : {}) });
+        return dumpConfigMain({ ...(noApps ? { noApps: true } : {}) });
       default:
         process.stderr.write(`未知命令：${command}\n\n${HELP}\n`);
         return 2;

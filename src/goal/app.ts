@@ -40,7 +40,7 @@
 
 import { AppError, AGENT_SESSION_INACTIVE, describeError } from '../contracts/errors.js';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
-import type { BuiltinPluginModule, PluginContext } from '../contracts/plugin.js';
+import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
 import { GoalStore } from './store.js';
@@ -65,7 +65,7 @@ interface ChannelsCommandFace {
   }): Disposer;
 }
 
-/** ctx.agent 服务最小面（chat/plugin.ts AgentServiceFace 的结构子集） */
+/** ctx.agent 服务最小面（chat/app.ts AgentServiceFace 的结构子集） */
 interface AgentServiceFace {
   sendUserMessage(
     content: string,
@@ -95,7 +95,7 @@ interface SessionEventEnvelope {
 }
 
 /** 官方件构造依赖（装配期闭包注入——官方件 = 宿主装配特权） */
-export interface GoalPluginDeps {
+export interface GoalAppDeps {
   /** SQLite 连接（goals 表物理载体）；缺省 = persist:false 降级 warn 空转 */
   readonly connection?: DatabaseConnection;
   /** 当前会话 id 活取值（/new 热切换后自动跟新会话走） */
@@ -105,7 +105,7 @@ export interface GoalPluginDeps {
 /**
  * 构造 goal 官方件（builtins 注册表 `builtin:goal` 行）。
  */
-export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
+export function createGoalApp(deps: GoalAppDeps): BuiltinAppModule {
   // 「本件尚未见过补播」一次性旗标（二十九批增补 8①）：模块实例级闭包，/reload
   // 复用本实例重跑 apply 不重置——首见任何 replay:true 补播即解除，此后 /reload
   // 补播照发但不参与降级（§6.7「/reload 不误降级」）
@@ -122,13 +122,13 @@ export function createGoalPlugin(deps: GoalPluginDeps): BuiltinPluginModule {
     // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）
     inject: ['tools', 'channels', 'ui'],
     optionalInject: ['agent'],
-    apply: (ctx: PluginContext) => applyGoalPlugin(ctx, deps, consumeReplayUnseen),
+    apply: (ctx: AppContext) => applyGoalPlugin(ctx, deps, consumeReplayUnseen),
   };
 }
 
 /**
  * 官方件 apply 本体（接线序：续接降级事件面 → 工具三件 → /goal 命令 → 续跑触发 → 预算刹车）。
- * 异常上抛走加载器统一回卷（PLUGIN_APPLY_FAILED）。
+ * 异常上抛走加载器统一回卷（APP_APPLY_FAILED）。
  */
 
 /**
@@ -147,9 +147,9 @@ function wakeToolFilter(defs: readonly ToolDefinition[]): string[] {
 }
 
 async function applyGoalPlugin(
-  ctx: PluginContext,
-  deps: GoalPluginDeps,
-  /** 补播首见消费器（模块实例级闭包旗标——见 createGoalPlugin 注记） */
+  ctx: AppContext,
+  deps: GoalAppDeps,
+  /** 补播首见消费器（模块实例级闭包旗标——见 createGoalApp 注记） */
   consumeReplayUnseen: () => boolean,
 ): Promise<void> {
   // persist:false 降级：无物理层即无 goal（状态/记账/续跑全依赖 goals 表）——warn 空转
@@ -205,7 +205,7 @@ async function applyGoalPlugin(
       name: 'goal',
       description:
         '长目标管理：/goal 查看状态；/goal resume 重新激活（重启后降级 needs-resume 时）；/goal stop 人工停止',
-      source: 'plugin',
+      source: 'app',
       handler: (args) => handleGoalCommand(args.trim(), { store, getSessionId: deps.getSessionId, ui }),
     }),
   );
@@ -239,7 +239,7 @@ async function applyGoalPlugin(
           const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.compositionFor(settled.sessionId));
           try {
             agent.sendUserMessage(renderContinuationPrompt(goal), {
-              source: 'plugin:goal',
+              source: 'app:goal',
               backgroundWake: true,
               session: settled.sessionId,
               ...(toolFilter !== undefined ? { toolFilter } : {}),
@@ -255,7 +255,7 @@ async function applyGoalPlugin(
             }
           }
         } catch (err) {
-          // 续跑触发异常止步日志（结算通知链不受插件违约影响——服务层另有隔离壳）
+          // 续跑触发异常止步日志（结算通知链不受应用违约影响——服务层另有隔离壳）
           ctx.logger.error('goal 续跑触发失败', { error: describeError(err) });
         }
       }),
@@ -289,7 +289,7 @@ async function applyGoalPlugin(
         const stopped = store.get(sessionId);
         if (stopped !== undefined) {
           try {
-            agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'plugin:goal', session: sessionId });
+            agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'app:goal', session: sessionId });
           } catch (err) {
             // S1 退役容错：目标会话已退役——收尾注入无处可投仅记 debug（与 ③ 同口径）
             if (err instanceof AppError && err.code === AGENT_SESSION_INACTIVE) {

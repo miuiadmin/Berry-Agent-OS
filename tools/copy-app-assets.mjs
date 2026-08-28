@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 构建资产拷贝（tsc 后置步骤）：把 src 内插件技能资产（SKILL.md 等 .md 文件）
+ * 构建资产拷贝（tsc 后置步骤）：把 src 内应用技能资产（SKILL.md 等 .md 文件）
  * 递归拷到 dist 镜像路径——tsc 只编译 .ts，非代码资产默认不落 dist。
  *
  * 为什么需要：官方 builtin 件随包携带技能（admin 件先例——packageRoot 自述

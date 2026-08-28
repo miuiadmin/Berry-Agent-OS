@@ -19,7 +19,7 @@
 
 import { Type, Value } from '../contracts/typebox.js';
 import type { AssistantMessage, Message, UserMessage } from '../contracts/llm.js';
-import type { PluginContext } from '../contracts/plugin.js';
+import type { AppContext } from '../contracts/app.js';
 import { utilityScore } from './store.js';
 import type { MemoryStore } from './store.js';
 import { guardedAddMemory, isPollutedTranscript } from './scan.js';
@@ -36,7 +36,7 @@ export interface ReviewLlmFace {
   canAfford(priority: 'background' | 'foreground'): boolean;
 }
 
-/** 周期路阈值与窗口（全部插件配置项起草值——不进内核配置面，记忆篇 §4） */
+/** 周期路阈值与窗口（全部应用配置项起草值——不进内核配置面，记忆篇 §4） */
 export interface PeriodicReviewOptions {
   /** 记忆库 DAO */
   readonly store: MemoryStore;
@@ -213,7 +213,7 @@ function tryParse(text: string): unknown {
  * 不订阅不计数——计数/触发归 attachPeriodicReview（本函数纯编排，测试面友好）。
  */
 export async function runReviewOnce(
-  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: PluginContext['logger'] },
+  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: AppContext['logger'] },
   transcript: readonly Message[],
 ): Promise<ReviewReport> {
   // 计数器内部可变、出口一次性冻结成报告（readonly 报告面不允许逐字段 +=）
@@ -297,7 +297,7 @@ export function collectConsolidationCandidates(
  * 只处理模型返回且 schema 通过的建议；建议里不存在的 id 忽略（尽力而为）。
  */
 export async function runConsolidationOnce(
-  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: PluginContext['logger'] },
+  deps: { store: MemoryStore; llm: ReviewLlmFace; ownerKey?: string; logger: AppContext['logger'] },
   opts: { staleDays?: number; maxActivePerOwner?: number; now?: () => number } = {},
 ): Promise<ConsolidationReport> {
   const ownerKey = deps.ownerKey ?? 'global';
@@ -429,7 +429,7 @@ export interface ReviewHandle {
  * 「review → consolidation 检查」后台任务。fire-and-forget：异常止步日志。
  * 同时至多一轮在飞（inFlight 防抖——高频会话不堆后台任务）。
  */
-export function attachPeriodicReview(ctx: PluginContext, opts: PeriodicReviewOptions): ReviewHandle {
+export function attachPeriodicReview(ctx: AppContext, opts: PeriodicReviewOptions): ReviewHandle {
   const turnThreshold = opts.turnThreshold ?? 10;
   const toolCallThreshold = opts.toolCallThreshold ?? 15;
   const windowMessages = opts.windowMessages ?? 40;
@@ -438,7 +438,7 @@ export function attachPeriodicReview(ctx: PluginContext, opts: PeriodicReviewOpt
   const anchorMs = opts.consolidationAnchorMs ?? 5 * 60 * 1000;
   const now = opts.now ?? Date.now;
 
-  /** 滚动转录缓冲（最近 windowMessages 条 surface 消息——per-process 插件态） */
+  /** 滚动转录缓冲（最近 windowMessages 条 surface 消息——per-process 应用态） */
   const buffer: Message[] = [];
   let turns = 0;
   let toolCalls = 0;

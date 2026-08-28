@@ -18,7 +18,7 @@ const LEVEL_WEIGHT: Record<LogLevel, number> = { silent: -1, error: 0, warn: 1, 
 /** 上下文附加字段（任意 JSON 可序列化键值） */
 export type LogFields = Record<string, unknown>;
 
-/** logger 接口（ctx.logger 的类型；插件拿到的是带自身前缀的 child） */
+/** logger 接口（ctx.logger 的类型；应用拿到的是带自身前缀的 child） */
 export interface Logger {
   error(message: string, fields?: LogFields): void;
   warn(message: string, fields?: LogFields): void;
@@ -73,8 +73,8 @@ export function createLogger(opts: { module?: string; level?: LogLevel; sink?: L
     },
     setLevel: (level) => {
       threshold = level;
-      // 沿子树级联：运行时调级必须达全部派生 logger——不级联则调级后插件日志
-      // 仍按创建时的旧阈值过滤（技术栈篇拍板的运维调级面，插件 logger 必须随调）
+      // 沿子树级联：运行时调级必须达全部派生 logger——不级联则调级后应用日志
+      // 仍按创建时的旧阈值过滤（技术栈篇拍板的运维调级面，应用 logger 必须随调）
       for (const child of children) child.setLevel(level);
     },
   };

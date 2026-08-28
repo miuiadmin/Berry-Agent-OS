@@ -5,19 +5,19 @@
  */
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { AppError } from '../contracts/errors.js';
-import type { PluginContext } from '../contracts/plugin.js';
+import type { AppContext } from '../contracts/app.js';
 import { createContext, eventDispatchStats, registerLiveEvent } from './context.js';
 import { createLogger } from './logger.js';
 import type { Context, ContextScope } from './types.js';
 
 /**
  * 类型面锁（探针 #11，契约篇 §1.2 注记④）：宿主 Context 必须结构性覆盖
- * contracts 声明的 PluginContext——插件作者经虚拟面拿到的类型承诺即本面。
+ * contracts 声明的 AppContext——应用作者经虚拟面拿到的类型承诺即本面。
  * 漂移（宿主改签名忘同步 contracts，或反向）在此编译期即红，不待第三方撞墙。
- * 双向锁：PluginContext 的 logger 面收窄自宿主 Logger——收得过窄同样红。
+ * 双向锁：AppContext 的 logger 面收窄自宿主 Logger——收得过窄同样红。
  */
-expectTypeOf<Context>().toExtend<PluginContext>();
-expectTypeOf<Context['logger']>().toExtend<PluginContext['logger']>();
+expectTypeOf<Context>().toExtend<AppContext>();
+expectTypeOf<Context['logger']>().toExtend<AppContext['logger']>();
 
 /** 静默 logger：测试不向 stderr 喷日志（异常隔离用例会走 error 通道） */
 function silentRoot() {
@@ -27,7 +27,7 @@ function silentRoot() {
 /**
  * 带自定义词汇的测试根作用域（2026-08-23 词汇执法落码后）：createContext 产物
  * 只含目录词汇，用例里的自定义事件名须先经 registerLiveEvent 登记（装载器在
- * 真实路径对插件 events 声明做同样的事）。
+ * 真实路径对应用 events 声明做同样的事）。
  */
 function scopedRoot(
   events: ReadonlyArray<{ name: string; mode: 'emit' | 'waterfall' | 'parallel' | 'serial' }>,
@@ -275,7 +275,7 @@ describe('服务注册表 provide/get', () => {
 
   it('作用域 dispose 自动注销其注册的服务', async () => {
     const root = silentRoot();
-    const plugin = root.fork({ name: 'plugin-a' });
+    const plugin = root.fork({ name: 'apps-a' });
     plugin.provide('plugin-a-svc', 'value');
     expect(root.get('plugin-a-svc')).toBe('value');
     await plugin.dispose();
@@ -325,12 +325,12 @@ describe('provide 服务名两段式分级（契约篇 §1.5，2026-08-27 第三
 
   it('行籍旗标 fork 级联：官方行内再 fork 保持官方名位；报文带行 id 归因', () => {
     const root = silentRoot();
-    // 官方行 fork 后插件内再 fork——行籍级联继承（与 rowId 同律）
-    const officialDeep = root.fork({ name: 'plugin-c', rowId: 'chat', builtinRow: true }).fork({ name: 'inner' });
+    // 官方行 fork 后应用内再 fork——行籍级联继承（与 rowId 同律）
+    const officialDeep = root.fork({ name: 'apps-c', rowId: 'chat', builtinRow: true }).fork({ name: 'inner' });
     expect(officialDeep.builtinRow).toBe(true);
     officialDeep.provide('agent', 1); // 深层官方名位仍收单段名
     // 第三方行内再 fork 同理保持第三方
-    const thirdDeep = root.fork({ name: 'plugin-d', rowId: 'plug-x', builtinRow: false }).fork({ name: 'inner' });
+    const thirdDeep = root.fork({ name: 'apps-d', rowId: 'plug-x', builtinRow: false }).fork({ name: 'inner' });
     expect(thirdDeep.builtinRow).toBe(false);
     try {
       thirdDeep.provide('agent', 1);
@@ -412,25 +412,25 @@ describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', (
 
   it('on 归因：监听器失败日志记注册方作用域名（owner），不记 emit 方', () => {
     const { lines, sink } = captureSink();
-    // 归因错列场景：root emit、插件 B 的监听器炸——日志必须指向 B
+    // 归因错列场景：root emit、应用 B 的监听器炸——日志必须指向 B
     const root = createContext({ logger: createLogger({ module: 'test', level: 'debug', sink }) });
     registerLiveEvent(root, { name: 'evt/boom', mode: 'emit', note: '测试词汇' });
-    const pluginB = root.fork({ name: 'plugin-b' });
-    pluginB.on('evt/boom', () => {
+    const appB = root.fork({ name: 'apps-b' });
+    appB.on('evt/boom', () => {
       throw new Error('handler boom');
     });
     root.emit('evt/boom');
     expect(lines).toHaveLength(1);
     const record = JSON.parse(lines[0]!) as { event: string; owner: string; error: string };
     expect(record.event).toBe('evt/boom');
-    expect(record.owner).toBe('root:plugin-b'); // 注册方（修复前错记 emit 方 'root'）
+    expect(record.owner).toBe('root:apps-b'); // 注册方（修复前错记 emit 方 'root'）
     expect(record.error).toContain('handler boom');
     expect(record.error).toContain('at '); // 完整 stack 而非 String(err)
   });
 
   it('fork 级联回卷：根 dispose 自动回卷子作用域（宿主忘显式 dispose 也兜底）', async () => {
     const root = silentRoot();
-    const child = root.fork({ name: 'plugin-a' });
+    const child = root.fork({ name: 'apps-a' });
     child.provide('plugin-a-svc', 'v');
     await root.dispose();
     // 子作用域已随根回卷：服务注销 + 子作用域进入 stale 态
@@ -446,7 +446,7 @@ describe('context 运行时三补（2026-08-23 独立重读轮 #23 落码）', (
     child.debug('调级前不可见'); // error 阈值下被过滤
     expect(lines).toHaveLength(0);
     parent.setLevel('debug');
-    child.debug('调级后可见'); // 级联生效——不级联则插件日志永远按创建时旧阈值过滤
+    child.debug('调级后可见'); // 级联生效——不级联则应用日志永远按创建时旧阈值过滤
     expect(lines).toHaveLength(1);
     const record = JSON.parse(lines[0]!) as { module: string; msg: string };
     expect(record.module).toBe('test:mod');
@@ -510,9 +510,9 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
 
   it('锚作用域 dispose 级联注销装载期词汇（/reload 卸载基底回归锁）', async () => {
     const anchor = silentRoot();
-    const pluginScope = anchor.fork({ name: 'p' });
+    const appScope = anchor.fork({ name: 'p' });
     // 加载器形态：词汇登记经 effect 挂派生作用域栈（装载阶段①的真实接线方式）
-    pluginScope.effect(() => registerLiveEvent(anchor, { name: 'p/done', mode: 'emit', note: '测试词汇' }));
+    appScope.effect(() => registerLiveEvent(anchor, { name: 'p/done', mode: 'emit', note: '测试词汇' }));
     anchor.emit('p/done'); // 词汇在册——派发不抛即通过（无监听器为合法 no-op）
     await anchor.dispose(); // 锚回卷 → 级联回卷子作用域 → 词汇随 effect LIFO 注销
     // 派发面无 stale 护栏（emit 不查 disposed）——词汇已摘即应响 EVENT_UNKNOWN
@@ -603,7 +603,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
 
   /**
    * 计费锚点重铸（刀〇b B-1 root 豁免）：宿主根作用域派发免计费后，计费断言
-   * 一律锚在 fork 作用域上（插件永不持有 root——fork 派生新名是结构性保证）。
+   * 一律锚在 fork 作用域上（应用永不持有 root——fork 派生新名是结构性保证）。
    * 词汇注册锚在宿主根上（runtime 全体作用域共享——fork 与 root 同词汇表）。
    */
   function tinyBucketHostAndFork(): {
@@ -614,7 +614,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     return { host, scope: host.fork({ name: 'charger' }) };
   }
 
-  it('桶满 fail-loud：PLUGIN_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', async () => {
+  it('桶满 fail-loud：APP_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', async () => {
     const { host, scope } = tinyBucketHostAndFork();
     registerLiveEvent(host, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
     const seen: number[] = [];
@@ -627,7 +627,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     try {
       scope.emit('test/evt', 5);
     } catch (err) {
-      expect((err as AppError).code).toBe('PLUGIN_EVENT_RATE');
+      expect((err as AppError).code).toBe('APP_EVENT_RATE');
     }
     // 超限那次未送达（fail-loud ≠ 静默丢弃——抛错即拒发）
     expect(seen).toEqual([1, 2, 3]);
@@ -646,15 +646,15 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     await scope.waterfall('test/chain', () => 'ok');
     // 第 4 次 waterfall 派发撞桶
     await expect(scope.waterfall('test/chain', () => 'ok')).rejects.toMatchObject({
-      code: 'PLUGIN_EVENT_RATE',
+      code: 'APP_EVENT_RATE',
     });
   });
 
-  it('per-scope 分桶：插件作用域打满不影响宿主根作用域（失控隔离半径 = 单作用域）', () => {
+  it('per-scope 分桶：应用作用域打满不影响宿主根作用域（失控隔离半径 = 单作用域）', () => {
     const scope = tinyBucketRoot();
     registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
     const plugin = scope.fork({ name: 'naughty' });
-    // 插件作用域 3 连发打满自己的桶
+    // 应用作用域 3 连发打满自己的桶
     plugin.emit('test/evt', 1);
     plugin.emit('test/evt', 2);
     plugin.emit('test/evt', 3);
@@ -666,7 +666,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
   it('B-1 root 豁免（刀〇b 冷读裁决）：宿主根作用域派发免计费、打点照计——镜像/tools_change 大流量不触顶', () => {
     // 回归锁：durable→总线的 session/event 镜像与 tools_change 变更广播都在
     // root 面派发（assembly onLiveEvent / registry 两写点）——豁免前 root 桶是
-    // 全部会话流量的复用汇，合法子代理舰队即触顶且 PLUGIN_EVENT_RATE 在宿主
+    // 全部会话流量的复用汇，合法子代理舰队即触顶且 APP_EVENT_RATE 在宿主
     // 写路径内爆炸（persistence sink → session.append）
     const scope = tinyBucketRoot(); // 容量仅 3
     registerLiveEvent(scope, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
@@ -677,7 +677,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     expect(seen.length).toBe(50);
     // 打点照计：root 免扣桶不免计量（负载数据完整）
     expect(eventDispatchStats(scope).get('root')).toBe(50);
-    // 同根下插件作用域照常计费（豁免半径 = root 名，不含 fork 派生名）
+    // 同根下应用作用域照常计费（豁免半径 = root 名，不含 fork 派生名）
     const plugin = scope.fork({ name: 'still-charged' });
     plugin.emit('test/evt', 1);
     plugin.emit('test/evt', 2);

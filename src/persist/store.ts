@@ -63,7 +63,7 @@ export interface SessionRegistration {
   profile?: string;
   /** 应用域标记（血缘显式打标——缺省 NULL；fork 经 Persistence 继承父域） */
   app?: string;
-  /** 导入者归因（v10 列，会话篇 §5.1 冷读闸补）：origin='import' 行服务面强制非空（调用方插件名或 'host'） */
+  /** 导入者归因（v10 列，会话篇 §5.1 冷读闸补）：origin='import' 行服务面强制非空（调用方应用名或 'host'） */
   importer?: string;
 }
 
@@ -498,7 +498,7 @@ export class Store {
    * 按事件词聚合「含该词事件的会话数」（uninstall 级联警示的取数面，契约篇
    * §3.4 第二刀，2026-08-27 刀 2）：`COUNT(DISTINCT session_id) … WHERE type IN`
    * 按词分组——全库精确聚合无行式帽（latestSessionId 内核表读脸同族：宿主侧
-   * Store 直查合法；插件面 queryEvents 保持行式有帽不动——模型面工具与宿主
+   * Store 直查合法；装载面 queryEvents 保持行式有帽不动——模型面工具与宿主
    * 服务各用各的原语面，面不通）。
    *
    * types 是数据条件非词汇断言（判据同 queryEvents）：未注册/已消失的词返回

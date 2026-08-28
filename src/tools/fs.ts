@@ -51,7 +51,7 @@ export interface FsToolsOptions {
   writableRoots?: () => string[];
   /** 工作区锚点（相对路径 resolve 基准；缺省 process.cwd()） */
   workspace?: () => string;
-  /** read 截断上限字节（缺省 256 KiB；超大文件截断提示，全文走 spill 策略插件） */
+  /** read 截断上限字节（缺省 256 KiB；超大文件截断提示，全文走 spill 策略应用） */
   maxReadBytes?: number;
   /** read 图片分支文件上限字节（缺省 5 MiB；超限 isError 结果面拒绝不截断——
    * base64 截断 = 损坏图片无意义，fail-loud 指路压缩/裁剪后重读） */

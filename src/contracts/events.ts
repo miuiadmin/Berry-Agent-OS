@@ -11,7 +11,7 @@
  * approval/decided）。
  *
  * 收口形态（契约篇 §1.1，2026-08-23 M2 /reload 纵切）：目录字面量联合 +
- * `(string & {})` 自定义事件逃生口——目录字面量给插件作者 IDE 自动补全与
+ * `(string & {})` 自定义事件逃生口——目录字面量给应用作者 IDE 自动补全与
  * 拼写校验，`(string & {})` 保住「自定义事件须显式注册」的字符串面；
  * 运行时裁判是 context 的事件注册表（目录 ∪ 装载期 customs），未注册名
  * 在 on/emit/waterfall/parallel/serial 五面抛 EVENT_UNKNOWN。
@@ -27,10 +27,10 @@ export type EventName =
   | 'tools_post_execute'
   | 'tools_change'
   | 'approval/answer'
-  | 'plugin/activated'
-  | 'plugin/failed'
-  | 'plugin/skipped'
-  | 'plugin/uninstalled'
+  | 'app/activated'
+  | 'app/failed'
+  | 'app/skipped'
+  | 'app/uninstalled'
   | 'composition/reloaded'
   | 'worker/spawned'
   | 'worker/froze'
@@ -49,18 +49,18 @@ export type EventName =
 
 /**
  * 活体事件目录项（契约篇 §6.3 第 4 条——CI 双向断言的数据源）。
- * 目录即契约：`mode` 是事件的公开契约组成部分（插件订阅方式依赖它），
+ * 目录即契约：`mode` 是事件的公开契约组成部分（应用订阅方式依赖它），
  * 派发点调用的方法必须与目录声明一致（check-events 机械校验）。
  */
 export interface LiveEventDefinition {
   /**
-   * 事件名（斜线 = 插件自定义域、无斜线 = 宿主自留地——命名空间分域规则，
+   * 事件名（斜线 = 应用自定义域、无斜线 = 宿主自留地——命名空间分域规则，
    * 与 §1.5 prompt 段同款；与派发点字面量/常量值双向比对）。
    */
   readonly name: string;
   /** 分派模式——事件的公开契约部分（契约篇 §1「@mode」纪律：dsh 衍生） */
   readonly mode: 'emit' | 'waterfall' | 'parallel' | 'serial';
-  /** 载荷与语义一句话（含出处标注，供目录生成与插件作者查阅） */
+  /** 载荷与语义一句话（含出处标注，供目录生成与应用作者查阅） */
   readonly note: string;
   /**
    * 预留词汇：当前无宿主派发点、但属已拍板词汇表的预留项。
@@ -86,7 +86,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'session_start',
     mode: 'emit',
-    note: '会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话 / 装载收口补播（契约篇 §2.2 session 层；载荷 { sessionId, origin?, replay? }——origin 建会维度 initial/resume/delegation、replay 投递维度补播标记，二十九批增补 8①；插件初始化会话级状态；骨架篇 §6.4 落码注记）',
+    note: '会话建立或恢复完成（含崩溃修复结果）/ delegation fork 建子会话 / 装载收口补播（契约篇 §2.2 session 层；载荷 { sessionId, origin?, replay? }——origin 建会维度 initial/resume/delegation、replay 投递维度补播标记，二十九批增补 8①；应用初始化会话级状态；骨架篇 §6.4 落码注记）',
   },
   {
     name: 'session_shutdown',
@@ -101,7 +101,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'tools_execute',
     mode: 'waterfall',
-    note: '工具执行瀑布（契约篇 §2.2 tool 层；可整体替换执行体——M2 随插件加载器开放）',
+    note: '工具执行瀑布（契约篇 §2.2 tool 层；可整体替换执行体——M2 随应用加载器开放）',
   },
   {
     name: 'tools_post_execute',
@@ -119,29 +119,29 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     note: '审批应答瀑布（骨架篇 §8.3 ApprovalService 决议面；无应答者 fail-closed）',
   },
   {
-    name: 'plugin/activated',
+    name: 'app/activated',
     mode: 'emit',
-    note: '插件行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name }——组合树行 id + 插件声明名；加载器 boot 逐行必发）',
+    note: '应用行激活成功（契约篇 §2.2 增补 1 生命周期组；载荷 { id, name }——组合树行 id + 应用声明名；加载器 boot 逐行必发）',
   },
   {
-    name: 'plugin/failed',
+    name: 'app/failed',
     mode: 'emit',
-    note: '插件行失败（载荷 { id, code, message }——PLUGIN_ 码族；启动断言据此响亮列出，不静默跳过）',
+    note: '应用行失败（载荷 { id, code, message }——APP_ 码族；启动断言据此响亮列出，不静默跳过）',
   },
   {
-    name: 'plugin/skipped',
+    name: 'app/skipped',
     mode: 'emit',
-    note: '插件行跳过（载荷 { id, reason }——reason: disabled 静态禁用 / platform 平台门控；目录信任略过随信任门落地补）',
+    note: '应用行跳过（载荷 { id, reason }——reason: disabled 静态禁用 / platform 平台门控；目录信任略过随信任门落地补）',
   },
   {
-    name: 'plugin/uninstalled',
+    name: 'app/uninstalled',
     mode: 'emit',
-    note: '插件行卸载完成（契约篇 §3.4 第二刀，2026-08-27 刀 2；载荷 { id, source, dataAction, affected? }——四段执行成功尾的总线广播与 durable 落账双落地；复数域 = 管理面词汇〔与 plugins_* 工具族同源命名〕，单数 plugin/ 族是装载管线结果词——两族刻意分域）',
+    note: '应用行卸载完成（契约篇 §3.4 第二刀，2026-08-27 刀 2；载荷 { id, source, dataAction, affected? }——四段执行成功尾的总线广播与 durable 落账双落地；复数域 = 管理面词汇〔与 plugins_* 工具族同源命名〕，单数 app/ 族是装载管线结果词——两族刻意分域）',
   },
   {
     name: 'composition/reloaded',
     mode: 'emit',
-    note: '组合树重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕。2026-08-27 P1-2：boot 与 /reload 两时点同发——boot 路在装载收口重物化后派发，boot 时点插件 apply 期已订阅故能听到；观测/工作树类插件可作「组合树就绪」信号）',
+    note: '组合树重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕。2026-08-27 P1-2：boot 与 /reload 两时点同发——boot 路在装载收口重物化后派发，boot 时点应用 apply 期已订阅故能听到；观测/工作树类应用可作「组合树就绪」信号）',
   },
   {
     name: 'worker/spawned',
@@ -182,12 +182,12 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'prompts_change',
     mode: 'emit',
-    note: 'systemPrompt 段集合变更通知（契约篇 §2.2 增补 5 pi-4(a)；载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 插件订阅刷新）',
+    note: 'systemPrompt 段集合变更通知（契约篇 §2.2 增补 5 pi-4(a)；载荷 = 现行段 id 清单 id 字典序；与 tools_change 同族——装配层订阅重建提示词 + header reason=change，观测/UI 应用订阅刷新）',
   },
   {
     name: 'skills_change',
     mode: 'emit',
-    note: '技能提供方链变更通知（契约篇 §2.2 增补 6，2026-08-25 探矿轮六 #17；载荷 = 现行 provider id 清单注册序；registerProvider/注销即广播——与 tools_change/prompts_change 同族第 3 件：装配层订阅重建系统提示词，插件技能热可见）',
+    note: '技能提供方链变更通知（契约篇 §2.2 增补 6，2026-08-25 探矿轮六 #17；载荷 = 现行 provider id 清单注册序；registerProvider/注销即广播——与 tools_change/prompts_change 同族第 3 件：装配层订阅重建系统提示词，应用技能热可见）',
   },
   {
     name: 'context_transform',
@@ -244,7 +244,7 @@ export interface SurfaceOp {
  * 写入时经单遍 JSON 校验 + deepFreeze，任何持有者改不动。
  */
 export interface SessionEvent<T = unknown> {
-  /** 事件类型词汇（核心清单 + 插件显式注册扩展；未知且非 ignorable 读侧整体拒绝） */
+  /** 事件类型词汇（核心清单 + 应用显式注册扩展；未知且非 ignorable 读侧整体拒绝） */
   readonly type: string;
   /** 会话内连续序号，0 起、+1 递增（= 写入时 log.length，强制连续） */
   readonly seq: number;
@@ -277,7 +277,7 @@ export interface EventQueryCursor {
 }
 
 /**
- * queryEvents 过滤与分页参数（挂 ctx.sessions 插件面，单原语）。
+ * queryEvents 过滤与分页参数（挂 ctx.sessions 装载面，单原语）。
  * 判定句（与 eventsOfType 刻意相反）：types 在本面是**数据条件**——查未注册
  * 或已消失的词返回空不抛（uninstall 受影响会话数反查的恰是「已不在注册表
  * 里的词」）；词作**类型**（eventsOfType 读法）撞未注册才是断言错必抛。
@@ -300,7 +300,7 @@ export interface EventQueryOptions {
   /**
    * true = 服务内先 flush 屏障再查询（缺省 false）。读的是物理库——write-behind
    * 批落未 flush 的尾部不可见；需要含最新尾部的精确查询置 true（迟滞披露条，
-   * 会话篇 §3.4——屏障以参数内嵌，不新开插件面 flush API）。
+   * 会话篇 §3.4——屏障以参数内嵌，不新开装载面 flush API）。
    */
   readonly flushFirst?: boolean;
 }

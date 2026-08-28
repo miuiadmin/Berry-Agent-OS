@@ -3,9 +3,9 @@
  * 2026-08-25 Hermes 探针 #19 收口：注册表自 session 模块迁入，本文件为
  * 注册语义单一测试面——与 messages.test.ts 同构镜像）。
  *
- * 墙的形状（回归锁）：ctx.sessions.appendEvent 是插件落 durable 事件的唯一
- * 正门，但彼时词汇注册不在插件面——第三方写任何自有词汇必撞
- * SESSION_FORMAT_UNSUPPORTED（有门没钥匙）。本面闭合后：插件面注册 →
+ * 墙的形状（回归锁）：ctx.sessions.appendEvent 是应用落 durable 事件的唯一
+ * 正门，但彼时词汇注册不在装载面——第三方写任何自有词汇必撞
+ * SESSION_FORMAT_UNSUPPORTED（有门没钥匙）。本面闭合后：装载面注册 →
  * appendEvent 应可写（assembly 全栈腿在 app 层另有锁）。
  */
 
@@ -15,28 +15,28 @@ import {
   CORE_EVENT_TYPES,
   getSessionEventType,
   listSessionEventTypes,
-  registerPluginSessionEventType,
+  registerAppSessionEventType,
   registerSessionEventType,
 } from './session-events.js';
 
 describe('会话事件词汇注册表（双入口）', () => {
-  it('插件面：注册 / 查询 / 注销（二次注销无害、注销后名称可复用）', () => {
-    const unregister = registerPluginSessionEventType({ type: 't-evt/note', category: 'surface' });
+  it('装载面：注册 / 查询 / 注销（二次注销无害、注销后名称可复用）', () => {
+    const unregister = registerAppSessionEventType({ type: 't-evt/note', category: 'surface' });
     expect(getSessionEventType('t-evt/note')?.category).toBe('surface');
     expect(listSessionEventTypes().map((d) => d.type)).toContain('t-evt/note');
     unregister();
     expect(getSessionEventType('t-evt/note')).toBeUndefined();
     unregister(); // 二次注销无害（防误注销后来者）
-    const again = registerPluginSessionEventType({ type: 't-evt/note', category: 'log-only' });
+    const again = registerAppSessionEventType({ type: 't-evt/note', category: 'log-only' });
     expect(getSessionEventType('t-evt/note')?.category).toBe('log-only');
     again();
   });
 
-  it('插件面：核心词拒注册（SESSION_CORE_TYPE_FORBIDDEN——注册侧先拦，与 appendEvent 写侧同罪）', () => {
+  it('装载面：核心词拒注册（SESSION_CORE_TYPE_FORBIDDEN——注册侧先拦，与 appendEvent 写侧同罪）', () => {
     for (const type of ['user/message', 'llm/usage', 'turn/end', 'gate/decision']) {
       let error: unknown;
       try {
-        registerPluginSessionEventType({ type, category: 'surface' });
+        registerAppSessionEventType({ type, category: 'surface' });
       } catch (reason) {
         error = reason;
       }
@@ -56,7 +56,7 @@ describe('会话事件词汇注册表（双入口）', () => {
   it('格式非法拒绝：非小写斜线式词汇（两个入口同闸）', () => {
     for (const bad of ['Plain/Name', 'noslash', 'a//b', '/lead']) {
       expect(() => registerSessionEventType({ type: bad, category: 'log-only' })).toThrowError(AppError);
-      expect(() => registerPluginSessionEventType({ type: bad, category: 'log-only' })).toThrowError(AppError);
+      expect(() => registerAppSessionEventType({ type: bad, category: 'log-only' })).toThrowError(AppError);
     }
   });
 
@@ -64,10 +64,10 @@ describe('会话事件词汇注册表（双入口）', () => {
     for (const def of CORE_EVENT_TYPES) {
       expect(getSessionEventType(def.type)).toBeDefined();
     }
-    // todo/write 是 reserved 词——在场但不许插件面重注册（核心族一体保护）
+    // todo/write 是 reserved 词——在场但不许装载面重注册（核心族一体保护）
     let error: unknown;
     try {
-      registerPluginSessionEventType({ type: 'todo/write', category: 'surface' });
+      registerAppSessionEventType({ type: 'todo/write', category: 'surface' });
     } catch (reason) {
       error = reason;
     }
@@ -75,7 +75,7 @@ describe('会话事件词汇注册表（双入口）', () => {
   });
 
   it('双入口同一注册表：定义互通（session 模块写侧/读侧消费不分入口）', () => {
-    const unregister = registerPluginSessionEventType({ type: 't-shared/evt', category: 'surface', ignorable: true });
+    const unregister = registerAppSessionEventType({ type: 't-shared/evt', category: 'surface', ignorable: true });
     expect(getSessionEventType('t-shared/evt')?.ignorable).toBe(true);
     unregister();
     expect(getSessionEventType('t-shared/evt')).toBeUndefined();

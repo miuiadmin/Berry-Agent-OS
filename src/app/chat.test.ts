@@ -29,7 +29,7 @@ import type { BerryRuntime } from './assembly.js';
 import type { AgentServiceFace, RunSettled, DriverEntry } from '../chat/index.js';
 import type { AppManifest } from '../contracts/app.js';
 
-/* ---------------- 测试基建（与 subagent-plugin.test 同款） ---------------- */
+/* ---------------- 测试基建（与 subagent-app.test 同款） ---------------- */
 
 /** 零用量 */
 const NO_USAGE: Usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 };
@@ -114,13 +114,13 @@ describe('ctx.agent 具名服务（件内构造，attach 退役）', () => {
   it('闲时注入：followUp 开轮 + source 归因落 durable user/message', async () => {
     const { streamFn, contexts } = scriptedStream([textMessage('收到')]);
     const { runtime, agent } = await assemble({ streamFn });
-    agent.sendUserMessage('插件注入的一句话', { source: 'plugin:goal' });
+    agent.sendUserMessage('应用注入的一句话', { source: 'app:goal' });
     await spinUntil(() => contexts.length >= 1, 'followUp 开轮');
     await runtime.conversation!.settle();
     // 归因落账：user/message data 带 source（缺省不落字段——plugin:goal 必须显式在）
     const userEvents = runtime.session!.events.filter((e) => e.type === 'user/message');
     expect(userEvents).toHaveLength(1);
-    expect((userEvents[0]!.data as { source?: string }).source).toBe('plugin:goal');
+    expect((userEvents[0]!.data as { source?: string }).source).toBe('app:goal');
   });
 
   it('忙时注入（启动窗口）：插话折入首轮请求（loop 启动即查 steering——pi 蓝本等待期语义）', async () => {
@@ -129,7 +129,7 @@ describe('ctx.agent 具名服务（件内构造，attach 退役）', () => {
     // submitOnce 同步链的首悬点在 loop 启动查询处（§2.2「启动即查 steering」）——
     // 此刻注入必走 steer 入队，随即被启动查询捞出与开场同批折入
     const pending = runtime.conversation!.submitOnce('开场');
-    agent.sendUserMessage('中途插话', { source: 'plugin:test' });
+    agent.sendUserMessage('中途插话', { source: 'app:test' });
     await pending;
     await runtime.conversation!.settle();
     // 不开第二个模型调用：插话与开场同请求可见（等待期插话不打断当前生成）
@@ -174,7 +174,7 @@ describe('ctx.agent 具名服务（件内构造，attach 退役）', () => {
     // 首轮后的 turn 边界查询（loop §2.2 内层循环尾）
     for (let i = 0; i < 200 && contexts.length < 1; i += 1) await Promise.resolve();
     expect(contexts.length).toBe(1);
-    agent.sendUserMessage('中途插话', { source: 'plugin:test' });
+    agent.sendUserMessage('中途插话', { source: 'app:test' });
     release();
     await pending;
     await runtime.conversation!.settle();
@@ -208,14 +208,14 @@ describe('ctx.agent 具名服务（件内构造，attach 退役）', () => {
     const { runtime, agent } = await assemble({ streamFn });
     // S1 执法：backgroundWake 不依赖调用链语境——缺显式键即拒（三级解析序不适用于无人值守路）
     try {
-      agent.sendUserMessage('无键唤醒', { source: 'plugin:goal', backgroundWake: true });
+      agent.sendUserMessage('无键唤醒', { source: 'app:goal', backgroundWake: true });
       expect.unreachable('应当抛错');
     } catch (err) {
       expect((err as AppError).code).toBe(AGENT_SESSION_KEY_REQUIRED);
     }
     const sessionId = runtime.session!.header.sessionId;
     for (let i = 1; i <= 4; i += 1) {
-      agent.sendUserMessage(`自激 ${i} 号`, { source: 'plugin:goal', backgroundWake: true, session: sessionId });
+      agent.sendUserMessage(`自激 ${i} 号`, { source: 'app:goal', backgroundWake: true, session: sessionId });
       await runtime.conversation!.settle();
     }
     // 前 3 次各开一 run（3 次模型调用），第 4 次超帽 inject 只落日志
@@ -248,7 +248,7 @@ describe('应用面第一纵切（可卸语义 + 行序 + 空转）', () => {
     // goal 件经 optionalInject 'agent' 结构性取得同一面（chat 首行先装 → 后行可见）
     expect(runtime.ctx.get<AgentServiceFace>('agent')).toBe(agent);
     // 件行状态：默认层首行 activated
-    const chatRow = runtime.plugins.list().find((row) => row.id === 'chat');
+    const chatRow = runtime.appsService.list().find((row) => row.id === 'chat');
     expect(chatRow?.status).toBe('activated');
   });
 
@@ -267,15 +267,15 @@ describe('应用面第一纵切（可卸语义 + 行序 + 空转）', () => {
     expect(runtime.conversation).toBeUndefined();
     expect(runtime.session).toBeUndefined();
     // 宿主照启：装载零失败行（启动断言不响）
-    expect(runtime.plugins.list().filter((row) => row.status === 'failed')).toHaveLength(0);
-    const chatRow = runtime.plugins.list().find((row) => row.id === 'chat');
+    expect(runtime.appsService.list().filter((row) => row.status === 'failed')).toHaveLength(0);
+    const chatRow = runtime.appsService.list().find((row) => row.id === 'chat');
     expect(chatRow?.status).toBe('skipped');
     // goal 行经 optionalInject 降级激活（agent 缺供不阻 Kahn——warn 止步日志）
-    const goalRow = runtime.plugins.list().find((row) => row.id === 'goal');
+    const goalRow = runtime.appsService.list().find((row) => row.id === 'goal');
     expect(goalRow?.status).toBe('activated');
     expect(runtime.ctx.tryGet('agent')).toBeUndefined();
     // 命令面在（/plugins /reload 等宿主壳命令已注册）
-    expect(runtime.channels.commands.lookup('plugins')).toBeDefined();
+    expect(runtime.channels.commands.lookup('apps')).toBeDefined();
   });
 
   it('persist:false 诊断装配：件空转不炸启动断言（dump-config 面）', async () => {
@@ -291,9 +291,9 @@ describe('应用面第一纵切（可卸语义 + 行序 + 空转）', () => {
     expect(runtime.session).toBeUndefined();
     expect(runtime.ctx.tryGet('agent')).toBeUndefined();
     // 装载面完好：chat 行 activated（空转也是成功装载——诊断树不断链）
-    const chatRow = runtime.plugins.list().find((row) => row.id === 'chat');
+    const chatRow = runtime.appsService.list().find((row) => row.id === 'chat');
     expect(chatRow?.status).toBe('activated');
-    expect(runtime.plugins.list().filter((row) => row.status === 'failed')).toHaveLength(0);
+    expect(runtime.appsService.list().filter((row) => row.status === 'failed')).toHaveLength(0);
   });
 });
 

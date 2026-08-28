@@ -9,7 +9,7 @@
  */
 
 import type { Disposer } from '../context/types.js';
-import type { PluginContext } from '../contracts/plugin.js';
+import type { AppContext } from '../contracts/app.js';
 import { guardedAddMemory, isPollutedTranscript } from './scan.js';
 import type { MemoryStore } from './store.js';
 
@@ -72,7 +72,7 @@ export function userTextFromContent(content: unknown): string {
   return '';
 }
 
-/** 即时路接线依赖（组合根/插件装配注入） */
+/** 即时路接线依赖（组合根/应用装配注入） */
 export interface CorrectionExtractorOptions {
   /** 记忆库 DAO（写入经 guardedAddMemory → 合并管线） */
   readonly store: MemoryStore;
@@ -84,12 +84,12 @@ export interface CorrectionExtractorOptions {
 
 /**
  * 接线即时路纠正提取：订阅 session/event，命中纠正的用户消息立即入库。
- * 返回退订器（插件侧经 ctx.effect 挂作用域栈，随 LIFO 回卷）。
+ * 返回退订器（应用侧经 ctx.effect 挂作用域栈，随 LIFO 回卷）。
  *
  * 事件载荷 = { sessionId, event }（dsh-11 信封规则）——多会话并存时以信封
  * sessionId 溯源，不以事件体自证。
  */
-export function attachCorrectionExtractor(ctx: PluginContext, opts: CorrectionExtractorOptions): Disposer {
+export function attachCorrectionExtractor(ctx: AppContext, opts: CorrectionExtractorOptions): Disposer {
   const ownerKey = opts.ownerKey ?? 'global';
   const confidence = opts.confidence ?? DEFAULT_CONFIDENCE;
 

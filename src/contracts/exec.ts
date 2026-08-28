@@ -5,7 +5,7 @@
  * 三类词汇：
  * 1. ExecOptions/ExecResult/ExecEnvTable——ctx.exec 原语侧载荷（bash 工具侧
  *    参数面是它的窄化：无 stdin/env——刻意不对称，骨架篇 §7.6）；
- * 2. ExecService——ctx.exec 服务面（插件经 ctx.get<ExecService>('exec') 取用；
+ * 2. ExecService——ctx.exec 服务面（应用经 ctx.get<ExecService>('exec') 取用；
  *    与 bash 工具同一条三段管道，不旁路——地基篇 Q3）；
  * 3. 沙箱元数据 SandboxMeta——bash 工具与 ctx.exec 结果共携（denied 按
  *    后端 denialSignatures 分类 stderr 的命中清单）。

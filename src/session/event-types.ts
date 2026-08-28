@@ -13,7 +13,7 @@
 
 export {
   registerSessionEventType,
-  registerPluginSessionEventType,
+  registerAppSessionEventType,
   getSessionEventType,
   listSessionEventTypes,
   isCoreSessionEventType,

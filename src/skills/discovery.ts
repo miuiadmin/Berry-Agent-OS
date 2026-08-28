@@ -229,34 +229,34 @@ export function createLocalSkillsProvider(opts: LocalSkillsProviderOptions): Ski
   };
 }
 
-/** 包层技能 provider 选项（技能包插件——契约篇 §1.2 named export 第六件） */
+/** 包层技能 provider 选项（技能包应用——契约篇 §1.2 named export 第六件） */
 export interface PackageSkillsProviderOptions {
-  /** 插件声明 name（provider id = `package:<name>`，诊断溯源） */
-  readonly pluginName: string;
-  /** 插件包根（skills 声明相对路径的解析锚点 = 入口文件所在目录） */
+  /** 应用声明 name（provider id = `package:<name>`，诊断溯源） */
+  readonly appName: string;
+  /** 应用包根（skills 声明相对路径的解析锚点 = 入口文件所在目录） */
   readonly packageRoot: string;
   /** skills named export 声明的技能目录清单（相对 packageRoot；空数组 = 零技能零诊断） */
   readonly dirs: readonly string[];
 }
 
 /**
- * 包层技能 provider（技能包插件工厂，2026-08-26 技能包插件纵切）。
+ * 包层技能 provider（技能包应用工厂，2026-08-26 技能包应用纵切）。
  *
- * 每个声明了 `skills` 的插件行一个实例（组合根经 loadPlugins 注册回调桥接——
+ * 每个声明了 `skills` 的应用行一个实例（组合根经 loadApps 注册回调桥接——
  * 拓扑 seam：context 不引 skills 模块）。list() 每次现扫：
  * - 目录存在 → 复用 scanSkillLocation 以 `source: 'package'` 扫描（gitignore
  *   语义、SKILL.md 技能根判定等与 project/user 层同规）；
  * - 目录缺失 → `package-missing` warning 诊断（声明了却缺失是真异常，与
  *   project/user 层「缺目录是常态刻意静默」相反）——不杀行：行主体可用就
- *   不因技能目录缺失回卷，禁用 plugin/skipped（会破「激活行集合 === 非禁用行
+ *   不因技能目录缺失回卷，禁用 app/skipped（会破「激活行集合 === 非禁用行
  *   − 已发 skipped」运行时不变式）。
  *
  * 优先级：provider 注册序即合并优先序（first-wins 不读 source 字段）——
- * local-fs（装配序 ⑦）先注册、插件行（装配序 ⑨）后注册，包内技能恒居最低层。
+ * local-fs（装配序 ⑦）先注册、应用行（装配序 ⑨）后注册，包内技能恒居最低层。
  */
 export function createPackageSkillsProvider(opts: PackageSkillsProviderOptions): SkillsProvider {
   return {
-    id: `package:${opts.pluginName}`,
+    id: `package:${opts.appName}`,
     list() {
       const skills: Skill[] = [];
       const diagnostics: SkillDiagnostic[] = [];
@@ -266,7 +266,7 @@ export function createPackageSkillsProvider(opts: PackageSkillsProviderOptions):
           diagnostics.push({
             type: 'warning',
             code: 'package-missing',
-            message: `插件「${opts.pluginName}」声明的技能目录不存在：${dir}`,
+            message: `应用「${opts.appName}」声明的技能目录不存在：${dir}`,
             path: abs,
           });
           continue;
@@ -303,7 +303,7 @@ const factorySkillRoot: string = join(dirname(fileURLToPath(import.meta.url)), '
  * ① workspace/.agents/skills（project 层，需目录信任）；
  * ② ~/.berry/skills（用户全局，无需信任）；
  * ③ ~/.agents/skills 与 ~/.claude/skills（跨库生态复用，user 层）；
- * ④ 插件自带技能（package 层经 provider 桥，不在本清单——装配序 ⑨ 注册）；
+ * ④ 应用自带技能（package 层经 provider 桥，不在本清单——装配序 ⑨ 注册）；
  * ⑤ `<包根>/skills/`（宿主出厂技能，package 层目录扫描——样例技能 2-3 个
  *   进 v1 拍板 17；与官方件注册表同源分发 = 宿主信任，无需目录信任判定，
  *   恒扫描；置末位 = local-fs 内最低优先，用户同名技能恒压过出厂件）。

@@ -73,10 +73,10 @@ export type StopReason = 'pending' | 'stop' | 'length' | 'toolUse' | 'error' | '
 
 /**
  * user 消息归因词汇（会话篇 §3.1 dsh-8 定稿，五值 + v2 预留）：
- * 谁把这条消息放进历史——真人输入 / 通道转发 / 插件注入 / 定时投递 / 子代理结算回投。
+ * 谁把这条消息放进历史——真人输入 / 通道转发 / 应用注入 / 定时投递 / 子代理结算回投。
  * 前缀型模板串承载 id/name（如 `channel:telegram`、`plugin:memory`）。
  */
-export type MessageSource = 'user' | 'schedule' | 'subagent-settled' | `channel:${string}` | `plugin:${string}`;
+export type MessageSource = 'user' | 'schedule' | 'subagent-settled' | `channel:${string}` | `app:${string}`;
 
 /** 用户消息（content 允许纯文本或图文块数组） */
 export interface UserMessage {
@@ -86,7 +86,7 @@ export interface UserMessage {
   timestamp: number;
   /**
    * 归因（可选，缺省视为 'user'——pi-ai 值不带此字段即真人/常规输入面）：
-   * 注入方（通道/插件/调度/子代理结算）显式声明，durable 原样落账、投影带出。
+   * 注入方（通道/应用/调度/子代理结算）显式声明，durable 原样落账、投影带出。
    */
   source?: MessageSource;
 }
@@ -157,9 +157,9 @@ export interface LlmContext {
 
 /**
  * 模型目录只读投影（ctx.llm.listModels()/getModel() 返回形——2026-08-26 挖矿批
- * P0-1，骨架篇 §9.3）：pi-ai Model 的插件友好子集——枚举/展示/能力判别所需字段
+ * P0-1，骨架篇 §9.3）：pi-ai Model 的应用友好子集——枚举/展示/能力判别所需字段
  * 直通，传输与 provider 配置面（baseUrl/headers/samplingParams/compat）不披露
- * （宿主数据只经 ctx 服务面，契约篇 §1.5——provider 插件要的是「有哪些模型」
+ * （宿主数据只经 ctx 服务面，契约篇 §1.5——provider 应用要的是「有哪些模型」
  * 而非「怎么连到它们」）。
  */
 export interface ModelInfo {
