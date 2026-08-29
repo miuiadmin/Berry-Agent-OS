@@ -222,7 +222,10 @@ try {
       const last = result?.messages.at(-1);
       const text =
         last && last.role === 'assistant'
-          ? (last.content ?? []).filter((b) => b.type === 'text').map((b) => b.text).join('')
+          ? (last.content ?? [])
+              .filter((b) => b.type === 'text')
+              .map((b) => b.text)
+              .join('')
           : '';
       console.log(
         `[smoke] 环4b 真模型: status=${result?.status}  调用=[${calledNames.join(', ') || '无'}]  ext${modelExtOk ? '✓' : '✗'} wk${modelWkOk ? '✓' : '✗'}  回答: ${text.slice(0, 200)}`,

@@ -25,6 +25,7 @@ import type { McpAppDeps } from '../mcp/index.js';
 import type { SpawnedChild } from '../mcp/client.js';
 import type { McpServerConfig } from '../mcp/types.js';
 import { createMcpSpawner } from './mcp-spawn.js';
+import { createSandboxService } from '../safety/index.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -443,10 +444,11 @@ function isPidDead(pid: number): boolean {
   }
 }
 
-/** e2e 件依赖：真 spawner + 真杀（SIGKILL；已死 ESRCH 内吞幂等） */
+/** e2e 件依赖：真 spawner（OS 沙箱升格三参形——seatbelt 真链真跑，e2e 顺带
+ * 升格为「沙箱内 MCP 握手全链」锁）+ 真杀（SIGKILL；已死 ESRCH 内吞幂等） */
 function makeE2eDeps(dir: string): McpAppDeps {
   return {
-    spawnServer: createMcpSpawner(dir),
+    spawnServer: createMcpSpawner(dir, createSandboxService(), dir),
     killTree: (pid) => {
       try {
         process.kill(pid, 'SIGKILL');

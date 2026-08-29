@@ -1290,9 +1290,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     },
     // mcp 件闭包（契约篇 §6.6 冷读 #1：spawn/kill 组装上提组合根——
     // spawnServer 在 app/mcp-spawn.ts，killTree 自 exec 公开面；登记簿根
-    // 钉数据目录，与 overlay 同根不随会话漂移）
+    // 钉数据目录，与 overlay 同根不随会话漂移。spawnServer 三参 = OS 沙箱
+    // 层升格（2026-08-29 内核篇句式④兑现）：confine 复用 ⑥b 同源 sandbox
+    // 实例、workspace 锚同 rootsProvider——mcp 刀零新装配概念）
     mcpDeps: {
-      spawnServer: createMcpSpawner(dataDir()),
+      spawnServer: createMcpSpawner(dataDir(), sandbox, workspace),
       killTree,
       dataDir: dataDir(),
     },

@@ -20,6 +20,7 @@ import { loadOfficialApps } from './app-registry.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createMcpSpawner } from './mcp-spawn.js';
+import { createSandboxService } from '../safety/index.js';
 import { killTree } from '../exec/index.js';
 import type { AppStatusRow } from './composition.js';
 import { resolveRowCarrier } from '../contracts/app.js';
@@ -207,9 +208,11 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
               apply: async () => undefined,
             },
             // mcp 件闭包同构（构造零副作用——spawner 只返回闭包不 spawn；
-            // 诊断面 apply 永不跑，登记簿/子进程均不触）
+            // 诊断面 apply 永不跑，登记簿/子进程均不触。OS 沙箱层升格三参
+            // 形：sandbox 传真服务实例（构造零副作用——后端链惰性 probe 不
+            // 发生）、workspace 对齐本占位族 process.cwd() 口径）
             mcpDeps: {
-              spawnServer: createMcpSpawner(dataDir()),
+              spawnServer: createMcpSpawner(dataDir(), createSandboxService(), process.cwd()),
               killTree,
               dataDir: dataDir(),
             },
