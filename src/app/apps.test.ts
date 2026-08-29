@@ -955,6 +955,19 @@ describe('uninstall 双相四段', () => {
     expect(corruptView.events.origin).toBe('unknown');
     expect(corruptView.events.note).toContain('损坏');
 
+    // 旧词汇域账本（认领键 plugin→app 改名前写入，critic #2）→ unknown 档但注记
+    // 可区分：说「旧词汇域 + 重装再生」的真话，不误报损坏（修复前此断言红——
+    // 旧键文件被归入损坏档）
+    writeFileSync(
+      join(dataDir, 'apps', 'my-plugin', 'data.json'),
+      JSON.stringify({ plugin: 'my-plugin', declaredEvents: ['demo/one'] }),
+    );
+    const oldKeyService = createAppsService({ dataDir, runner });
+    const oldKeyView = await oldKeyService.uninstall('my-plugin', { mode: 'inspect' });
+    expect(oldKeyView.events.origin).toBe('unknown');
+    expect(oldKeyView.events.note).toContain('旧词汇域');
+    expect(oldKeyView.events.note).toContain('重装');
+
     // 账本前存量装机（手写 provenance 记录无 data.json——pre-D2/手账形态）→
     // unknown 档（早于账本注记）
     const legacyData = makeDataDir();

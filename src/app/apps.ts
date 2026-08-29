@@ -447,8 +447,17 @@ export function createAppsService(opts: {
         note: '该行早于词表账本（install 时未收割或 builtin 官方行未落账本）——无法枚举自定义事件词',
       };
     }
-    if (descriptor === null) {
-      return { origin: 'unknown', names: [], note: '词表账本损坏（data.json 非法 JSON）——无法枚举' };
+    if (descriptor === 'legacy') {
+      // 旧词汇域账本（认领键改名前写入）——非损坏：误报「损坏」会让 operator
+      // 去查根本不存在的文件腐坏；真话 = 旧键域 + 重装再生的出路
+      return {
+        origin: 'unknown',
+        names: [],
+        note: '旧词汇域账本（认领键 plugin→app 改名前写入）——非损坏，/apps-install 重装收割再生新键域账本',
+      };
+    }
+    if (descriptor === 'corrupt') {
+      return { origin: 'unknown', names: [], note: '词表账本损坏（data.json 非法 JSON 或形状非法）——无法枚举' };
     }
     if (descriptor.declaredEvents === null) {
       return { origin: 'unknown', names: [], note: '装机时收割失败（装载失败/入口解析失败）——无法枚举' };
@@ -1679,17 +1688,22 @@ function dataJsonPath(dataDir: string, id: string): string {
 }
 
 /**
- * 读词表账本（三态判读）：文件不存在 = undefined（账本前存量行——unknown 档
- * 「早于账本」note）；JSON 解析失败或形状非法 = null（账本损坏——unknown 档
- * 「损坏」note）；正常 = descriptor（ledger 档）。只判 presence 与 app 字段（认领键
- * plugin→app 随第三十六批词汇笔；旧键文件重装收割再生——pre-release 无外部用户），
+ * 读词表账本（四态判读）：文件不存在 = undefined（账本前存量行——unknown 档
+ * 「早于账本」note）；旧词汇域文件 = 'legacy'（第三十六批认领键 plugin→app 改名前
+ * 写入——**非损坏**，重装收割再生即可，critic #2 可诊断处置：读侧不做旧键兼容
+ * 〔D36 裁定键随代码笔〕，但误报「损坏」是说谎——区分出来说真话）；坏 JSON /
+ * 形状非法 = 'corrupt'（损坏档）；正常 = descriptor（ledger 档）。
  * declaredEvents 的 null/数组由调用侧分档。
  */
-function readDataDescriptor(dataDir: string, id: string): AppDataDescriptor | null | undefined {
+function readDataDescriptor(dataDir: string, id: string): AppDataDescriptor | 'legacy' | 'corrupt' | undefined {
   const path = dataJsonPath(dataDir, id);
   if (!existsSync(path)) return undefined;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as AppDataDescriptor;
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as AppDataDescriptor & { plugin?: unknown };
+    // 旧认领键在场而新键不在 = 改名前文件（两者同在属手改杂交——落 corrupt 诚实）
+    if (typeof parsed === 'object' && parsed !== null && typeof parsed.plugin === 'string' && !('app' in parsed)) {
+      return 'legacy';
+    }
     if (
       typeof parsed !== 'object' ||
       parsed === null ||
@@ -1697,11 +1711,11 @@ function readDataDescriptor(dataDir: string, id: string): AppDataDescriptor | nu
       !('declaredEvents' in parsed) ||
       (parsed.declaredEvents !== null && !Array.isArray(parsed.declaredEvents))
     ) {
-      return null; // 形状非法与坏 JSON 同罪——损坏档
+      return 'corrupt'; // 形状非法与坏 JSON 同罪——损坏档
     }
     return parsed;
   } catch {
-    return null;
+    return 'corrupt';
   }
 }
 
