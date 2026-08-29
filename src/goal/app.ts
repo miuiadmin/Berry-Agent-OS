@@ -122,7 +122,7 @@ export function createGoalApp(deps: GoalAppDeps): BuiltinAppModule {
     // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）
     inject: ['tools', 'channels', 'ui'],
     optionalInject: ['agent'],
-    apply: (ctx: AppContext) => applyGoalPlugin(ctx, deps, consumeReplayUnseen),
+    apply: (ctx: AppContext) => applyGoalApp(ctx, deps, consumeReplayUnseen),
   };
 }
 
@@ -146,7 +146,7 @@ function wakeToolFilter(defs: readonly ToolDefinition[]): string[] {
   return [...names];
 }
 
-async function applyGoalPlugin(
+async function applyGoalApp(
   ctx: AppContext,
   deps: GoalAppDeps,
   /** 补播首见消费器（模块实例级闭包旗标——见 createGoalApp 注记） */

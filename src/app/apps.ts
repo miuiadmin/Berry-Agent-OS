@@ -28,7 +28,7 @@
  * 词表三档 + 受影响会话数）；execute = ①删**全部**挂载行（含各 app 键行——归一
  * 路径反查，天然兼容多应用挂载）②装机物必删 + 账本记录同批清（local 不删〔用户
  * 自有目录〕）③数据域 keep|purge（Docker 卷律默认留）④成功尾 app/uninstalled
- * 双落地（总线 + 会话流，经注入回调）。execute 唯一入口 = TUI /plugin uninstall
+ * 双落地（总线 + 会话流，经注入回调）。execute 唯一入口 = TUI /apps-uninstall
  * （human-only——服务面不注册模型工具）。
  *
  * 词表账本（同刀）：install/update 时经注入的 loadEntry 一次性 jiti 装载收割
@@ -145,8 +145,8 @@ export interface AppsService {
   uninstall(id: string, opts: { readonly mode: 'inspect' }): Promise<UninstallReport>;
   /**
    * 双相卸载——execute 相：四段执行（删全部挂载行 → 装机物+账本记录 → 数据域
-   * 处置 → 成功尾事件双落地）。human-only 落法：execute 唯一入口 = TUI /plugin
-   * uninstall 命令薄壳（服务面不注册模型工具）；dataAction 省缺不可——keep|purge
+   * 处置 → 成功尾事件双落地）。human-only 落法：execute 唯一入口 = TUI
+   * /apps-uninstall 命令薄壳（服务面不注册模型工具）；dataAction 省缺不可——keep|purge
    * 由命令面旗标裁决（省缺 = keep 是命令面语义，服务面必须显式）。
    * @param id 装机推导 id（非行 id——D2 键域迁移）
    */
@@ -376,7 +376,7 @@ export function createAppsService(opts: {
   let plan: readonly AppPlanRow[] = [];
   /**
    * 合成行全集（applyLoad 回灌；boot 前空表）：仓库态差集的归一键源。plan 行
-   * 不代劳——禁用行在 plan 里只有 {id, skip} 不带 plugin 引用（挂载休眠不解析
+   * 不代劳——禁用行在 plan 里只有 {id, skip} 不带 pkg 引用（挂载休眠不解析
    * 入口），差集若按 plan 算会把「挂了但禁用」误报成「装了没挂」。
    */
   let compositionRows: readonly CompositionRow[] = [];
@@ -687,7 +687,7 @@ export function createAppsService(opts: {
       // D2 仓库态差集（契约篇 §6.1 可见性）：装机未挂件呈现 installed-unmounted
       // 态——差集按**同包归一键**算非行 id（行 id 可显式命名，包身份是装机物
       // 归一路径）；「装了没挂」不可静默不可见（装机面断头路 = 不可用面）。
-      // 归一键源 = 合成行全集（compositionRows）：禁用行 plan 里无 plugin 引用，
+      // 归一键源 = 合成行全集（compositionRows）：禁用行 plan 里无 pkg 引用，
       // 按 plan 算会把「挂了但禁用」误报成「装了没挂」（禁用 ≠ 卸载）
       const mountedKeys = new Set<string>();
       for (const row of compositionRows) {
@@ -745,7 +745,7 @@ export function createAppsService(opts: {
           id: name,
           source,
           appRef: name,
-          message: `npm 源已入仓库态（零生效）：${name}——挂载生效走 /apps-mount ${name} --app <应用id>`,
+          message: `npm 源已入仓库态（零生效）：${name}——挂载生效走 /apps-mount ${name} --apps <应用id>`,
         };
       }
       if (source === 'git') {
@@ -780,7 +780,7 @@ export function createAppsService(opts: {
           id: parsed.repo,
           source,
           appRef: absDir,
-          message: `git 源已 clone 入仓库态（零生效）：${ref} → ${absDir}——挂载生效走 /apps-mount ${parsed.repo} --app <应用id>`,
+          message: `git 源已 clone 入仓库态（零生效）：${ref} → ${absDir}——挂载生效走 /apps-mount ${parsed.repo} --apps <应用id>`,
         };
       }
       // local：路径直引不拷贝；绝对化后落 provenance（cwd 无关——跨目录启动解析仍成立）
@@ -803,7 +803,7 @@ export function createAppsService(opts: {
         id,
         source,
         appRef: absRef,
-        message: `local 源已入仓库态（零生效）：${absRef}——挂载生效走 /apps-mount ${id} --app <应用id>（改动 + /reload 即见）`,
+        message: `local 源已入仓库态（零生效）：${absRef}——挂载生效走 /apps-mount ${id} --apps <应用id>（改动 + /reload 即见）`,
       };
     },
 

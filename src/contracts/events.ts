@@ -136,7 +136,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'app/uninstalled',
     mode: 'emit',
-    note: '应用行卸载完成（契约篇 §3.4 第二刀，2026-08-27 刀 2；载荷 { id, source, dataAction, affected? }——四段执行成功尾的总线广播与 durable 落账双落地；复数域 = 管理面词汇〔与 plugins_* 工具族同源命名〕，单数 app/ 族是装载管线结果词——两族刻意分域）',
+    note: '应用行卸载完成（契约篇 §3.4 第二刀，2026-08-27 刀 2；载荷 { id, source, dataAction, affected? }——四段执行成功尾的总线广播与 durable 落账双落地；复数域 = 管理面词汇〔与 apps_* 工具族同源命名〕，单数 app/ 族是装载管线结果词——两族刻意分域）',
   },
   {
     name: 'composition/reloaded',

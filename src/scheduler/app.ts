@@ -102,12 +102,12 @@ export function createSchedulerApp(deps: SchedulerAppDeps): BuiltinAppModule {
   return {
     name: 'scheduler',
     inject: ['channels', 'ui'],
-    apply: (ctx: AppContext) => applySchedulerPlugin(ctx, deps),
+    apply: (ctx: AppContext) => applySchedulerApp(ctx, deps),
   };
 }
 
 /** 件 apply 本体（异常上抛走加载器统一回卷 APP_APPLY_FAILED） */
-async function applySchedulerPlugin(ctx: AppContext, deps: SchedulerAppDeps): Promise<void> {
+async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promise<void> {
   // persist:false 降级：无物理层即无任务面——warn 空转（goal 件同款）
   if (!deps.connection) {
     ctx.logger.warn('无持久层（persist:false）——scheduler 官方件空转：/tick 命令不注册');

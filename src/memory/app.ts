@@ -173,7 +173,7 @@ export function createMemoryApp(deps: MemoryAppDeps): BuiltinAppModule {
     inject: ['tools', 'prompts', 'llm', 'sessions', 'channels', 'ui'],
     config: MEMORY_CONFIG_SCHEMA,
     apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) =>
-      applyMemoryPlugin(ctx, config as MemoryConfig | undefined, deps),
+      applyMemoryApp(ctx, config as MemoryConfig | undefined, deps),
   };
 }
 
@@ -181,11 +181,7 @@ export function createMemoryApp(deps: MemoryAppDeps): BuiltinAppModule {
  * 官方件 apply 本体（接线序：工具 → 简报段 → 提取双路 → 跨会话索引 → 按需检索）。
  * 全部注册挂 ctx.effect；异常上抛走加载器统一回卷（APP_APPLY_FAILED）。
  */
-async function applyMemoryPlugin(
-  ctx: AppContext,
-  config: MemoryConfig | undefined,
-  deps: MemoryAppDeps,
-): Promise<void> {
+async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined, deps: MemoryAppDeps): Promise<void> {
   // persist:false 降级：无物理层即无记忆（表族/索引全在 SQLite）——warn 空转，
   // 不注册任何面。诊断面（dump-config）组合树行仍可见且装载成功，语义诚实。
   if (!deps.store) {

@@ -63,12 +63,12 @@ export function createMcpApp(deps: McpAppDeps): BuiltinAppModule {
     // 硬依赖：tools 注册面 + ui 人读出口（channels 先于应用装载——装配序保证可解）
     inject: ['tools', 'ui'],
     config: MCP_APP_CONFIG_SCHEMA,
-    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => applyMcpPlugin(ctx, config, deps),
+    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => applyMcpApp(ctx, config, deps),
   };
 }
 
 /** 件 apply 本体（异常上抛走加载器统一回卷 APP_APPLY_FAILED） */
-async function applyMcpPlugin(
+async function applyMcpApp(
   ctx: AppContext,
   config: Readonly<Record<string, unknown>> | undefined,
   deps: McpAppDeps,

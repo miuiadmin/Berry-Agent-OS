@@ -212,25 +212,25 @@ export const SANDBOX_MODE_INVALID = registerErrorCode('SANDBOX_MODE_INVALID');
 /* 逐行失败进启动断言清单（§1.6 apply 抛错即响，不静默跳过不带病运行）。 */
 /* ------------------------------------------------------------------ */
 
-/** plugin：模块 import 失败（jiti 转译/执行入口文件抛错——语法错、依赖缺等） */
+/** 应用：模块 import 失败（jiti 转译/执行入口文件抛错——语法错、依赖缺等） */
 export const APP_LOAD_FAILED = registerErrorCode('APP_LOAD_FAILED');
-/** plugin：模块形状非法（default 非函数 / name 缺失或非字符串 / inject/optionalInject 非 string[] / config schema 非法——契约篇 §1.1/§1.2 单形状纪律） */
+/** 应用：模块形状非法（default 非函数 / name 缺失或非字符串 / inject/optionalInject 非 string[] / config schema 非法——契约篇 §1.1/§1.2 单形状纪律） */
 export const APP_SHAPE_INVALID = registerErrorCode('APP_SHAPE_INVALID');
-/** plugin：组合树行 config 未通过应用声明的 schema（启动一次性校验失败即响，契约篇 §1.2） */
+/** 应用：组合树行 config 未通过应用声明的 schema（启动一次性校验失败即响，契约篇 §1.2） */
 export const APP_CONFIG_INVALID = registerErrorCode('APP_CONFIG_INVALID');
-/** plugin：inject 依赖无法满足（缺提供方或依赖环——轮次激活零进展即判，即刻响亮并列 pending 清单，不做墙上钟超时） */
+/** 应用：inject 依赖无法满足（缺提供方或依赖环——轮次激活零进展即判，即刻响亮并列 pending 清单，不做墙上钟超时） */
 export const APP_INJECT_UNRESOLVED = registerErrorCode('APP_INJECT_UNRESOLVED');
-/** plugin：apply 执行抛错（message 载原始错误；作用域 LIFO 回卷半途注册，失败行不留残骸） */
+/** 应用：apply 执行抛错（message 载原始错误；作用域 LIFO 回卷半途注册，失败行不留残骸） */
 export const APP_APPLY_FAILED = registerErrorCode('APP_APPLY_FAILED');
 /**
- * plugin：apply 挂起超时（缺省 10s——契约篇 §1.6 挂起转化条款时钟族之一：异步
+ * 应用：apply 挂起超时（缺省 10s——契约篇 §1.6 挂起转化条款时钟族之一：异步
  * 挂起与抛错同族，永不 resolve 且已返还控制按故障收尾；超时先回卷本作用域再进
  * 失败清单，迟到 reject 由装载器吞掉不进 unhandledRejection）。
  * 2026-08-27 刀〇a（隔离案一第二刀上半）。
  */
 export const APP_APPLY_TIMEOUT = registerErrorCode('APP_APPLY_TIMEOUT');
 /**
- * plugin：per-scope 事件派发频率超限（缺省 1000 次/分钟令牌桶——契约篇 §1.6
+ * 应用：per-scope 事件派发频率超限（缺省 1000 次/分钟令牌桶——契约篇 §1.6
  * 事件频率护栏：失控应用高频派发会撑爆监听器面与 durable 落点，超限 fail-loud
  * 抛错而非静默丢弃；按**派发方**作用域分桶；宿主根作用域免计费——B-1 冷读
  * 裁决：root 桶实为全部会话流量的复用汇〔session/event 镜像 + tools_change
@@ -238,14 +238,14 @@ export const APP_APPLY_TIMEOUT = registerErrorCode('APP_APPLY_TIMEOUT');
  * 刀〇a 落码 / 刀〇b 修正注记）。
  */
 export const APP_EVENT_RATE = registerErrorCode('APP_EVENT_RATE');
-/** plugin：组合树行引用的应用入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
+/** 应用：组合树行引用的应用入口解析失败（加载器永不自动安装——启动断言指引安装，契约篇 §6.1 硬规则） */
 export const APP_ENTRY_UNRESOLVED = registerErrorCode('APP_ENTRY_UNRESOLVED');
-/** plugin：import 来源门禁越界（依赖图说明符不在白名单三道——虚拟面六键 / node: 内建 / 应用目录树内；jiti transform 全图静态扫描执法，契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） */
+/** 应用：import 来源门禁越界（依赖图说明符不在白名单三道——虚拟面六键 / node: 内建 / 应用目录树内；jiti transform 全图静态扫描执法，契约篇 §1.2 执法面②，2026-08-26 挖矿批 P0-2） */
 export const APP_IMPORT_FORBIDDEN = registerErrorCode('APP_IMPORT_FORBIDDEN');
-/** plugin：第六键 berryagent/sqlite 包装拒开主库（自管库路径命中解析后主库绝对路径即抛——与 IMPORT_FORBIDDEN 分立：一管 import 门禁、一管库句柄门禁，契约篇 §1.2 注记①） */
+/** 应用：第六键 berryagent/sqlite 包装拒开主库（自管库路径命中解析后主库绝对路径即抛——与 IMPORT_FORBIDDEN 分立：一管 import 门禁、一管库句柄门禁，契约篇 §1.2 注记①） */
 export const APP_MAIN_DB_FORBIDDEN = registerErrorCode('APP_MAIN_DB_FORBIDDEN');
 /**
- * plugin：uninstall 拒卸 Ring 1 必备行 / fixed 安全栈强制点行（契约篇 §3.4 第二刀：
+ * 应用：uninstall 拒卸 Ring 1 必备行 / fixed 安全栈强制点行（契约篇 §3.4 第二刀：
  * 卸掉该行首启核心循环「问→做→存」必破——内核边界篇 §5.1 一句话判据在卸载面的
  * 投影；缺省层替换语义 = overlay 可换实现引用不可移除行。Ring 1 行要换实现走
  * install 同 id 覆盖引用，不是卸载）。2026-08-27 刀 2。
@@ -301,7 +301,7 @@ export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
  * 码族随结果面走）。2026-08-27 刀〇a。
  */
 export const EVENT_HANDLER_TIMEOUT = registerErrorCode('EVENT_HANDLER_TIMEOUT');
-/** plugin：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
+/** 应用：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
 export const APP_INSTALL_FAILED = registerErrorCode('APP_INSTALL_FAILED');
 
 /* ------------------------------------------------------------------ */

@@ -47,7 +47,7 @@ function formatAppRow(row: AppStatusRow): string {
     case 'installed-unmounted':
       // D2 仓库态差集行（契约篇 §6.1 可见性）：装了没挂必须可见——装机面断头路
       // = 不可用面，呈现挂载指引（词与 mount 动词对齐）
-      return `  ◇ ${row.id}${source}（已装未挂——/apps-mount ${row.id} --app <应用id> 生效）`;
+      return `  ◇ ${row.id}${source}（已装未挂——/apps-mount ${row.id} --apps <应用id> 生效）`;
     default:
       // planned = 装载前视角（boot 前 / 服务刚建）——正常 TUI 里看不到，防御呈现
       return `  ○ ${row.id}${source}（planned——尚未装载）`;

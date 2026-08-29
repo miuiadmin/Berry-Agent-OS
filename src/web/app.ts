@@ -19,7 +19,7 @@ import { performFetch, runWebFetch, type WebFetchDeps } from './fetch-core.js';
 import { InflightGates } from './hygiene.js';
 import {
   WEB_FETCH_TIMEOUT_MS,
-  WEB_PLUGIN_CONFIG_SCHEMA,
+  WEB_APP_CONFIG_SCHEMA,
   type WebFetchOptions,
   type WebFetchResult,
   type WebService,
@@ -45,13 +45,13 @@ export function createWebApp(overrides: WebAppOverrides = {}): BuiltinAppModule 
     name: 'web',
     // 硬依赖：tools 服务面（工具注册 + executor 管道取用——装载轮次保证在场）
     inject: ['tools'],
-    config: WEB_PLUGIN_CONFIG_SCHEMA,
-    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => applyWebPlugin(ctx, config, overrides),
+    config: WEB_APP_CONFIG_SCHEMA,
+    apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => applyWebApp(ctx, config, overrides),
   };
 }
 
 /** 件 apply 本体（异常上抛走加载器统一回卷 APP_APPLY_FAILED） */
-function applyWebPlugin(
+function applyWebApp(
   ctx: AppContext,
   config: Readonly<Record<string, unknown>> | undefined,
   overrides: WebAppOverrides,

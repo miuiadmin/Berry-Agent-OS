@@ -37,7 +37,7 @@ export const AppManifestSchema = Type.Object(
     label: Type.String({ minLength: 1 }),
     /**
      * 组件清单（按装载身份串解析：`builtin:<name>` / npm 包名——匹配键 = 组合树
-     * 行 plugin 字段的值域，不按行 id、不按 module.name）。在场断言装载期执行：
+     * 行 pkg 字段的值域，不按行 id、不按 module.name）。在场断言装载期执行：
      * 缺场 = 应用级隔离（不拒启），诊断走 dump-config + debug 日志。
      */
     components: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
@@ -71,7 +71,7 @@ export const AppManifestSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
-    /** 授权申请（装载期与守门行 grants 交集；approval 预设槽位已收键〔第二十四批案 C〕——§5.4 第 4 条；writableRoots 交集导线 v1 挂账，随 D2 或首个真实第三方应用清单接线） */
+    /** 授权申请（装载期与守门行 grants 交集；approval 预设槽位已收键〔第二十四批案 C〕——§5.4 第 4 条；writableRoots 交集导线 v1 挂账，随首个真实第三方应用清单接线） */
     grants: Type.Optional(
       Type.Object(
         {

@@ -8,4 +8,4 @@
 
 export { createWebApp, type WebAppOverrides } from './app.js';
 export type { WebFetchOptions, WebFetchResult, WebService } from './types.js';
-export { WEB_PLUGIN_CONFIG_SCHEMA } from './types.js';
+export { WEB_APP_CONFIG_SCHEMA } from './types.js';

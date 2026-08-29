@@ -928,7 +928,7 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
     );
   }
   if (overlayRow !== undefined && overlayRow.disabled !== undefined) {
-    // 现禁用 → 启用：删键；纯禁用行（无 app/config 可言）整行移除
+    // 现禁用 → 启用：删键；纯禁用行（无 apps/config 可言）整行移除
     const next: CompositionRow[] = [];
     for (const row of rows) {
       if (row.id !== id) {
@@ -937,16 +937,16 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
       }
       const rest = { ...row };
       delete rest.disabled;
-      // 仅剩 id 的纯禁用行整行移除。app 刻意不进保留判据：无 plugin 的 {id, app}
-      // 残留行不可能是合法行（insert 须带 plugin、官方层替换带 app 触发④）——
-      // 三键皆空即删，app 不救行（残留即下次装载地雷）
+      // 仅剩 id 的纯禁用行整行移除。apps 刻意不进保留判据：无 pkg 的 {id, apps}
+      // 残留行不可能是合法行（insert 须带 pkg、官方层替换带 apps 触发④）——
+      // 三键皆空即删，apps 不救行（残留即下次装载地雷）
       if (rest.pkg === undefined && rest.config === undefined && rest.sandbox === undefined) continue;
       next.push(rest);
     }
     saveOverlayRows(dataDir, next);
     return false;
   }
-  // 现启用 → 禁用：overlay 行保留 app/config 只置 disabled；官方层行插替换行
+  // 现启用 → 禁用：overlay 行保留 apps/config 只置 disabled；官方层行插替换行
   if (overlayRow !== undefined) {
     saveOverlayRows(
       dataDir,
@@ -960,11 +960,11 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
 
 /**
  * mount 写行面（ctx.apps.mount 持久化半边，契约篇 §6.1 装机/挂载两态批
- * 2026-08-27）：追加挂载行 `{id, plugin, app?, config?}`——纯 insert 语义（无
+ * 2026-08-27）：追加挂载行 `{id, pkg, apps?, config?}`——纯 insert 语义（无
  * 替换分支：撞名在服务面先裁 COMPOSITION_ROW_INVALID，本面不悄悄改既有行——
  * 与旧 install 写面 upsertOverlayAppRef 的「同 id 换引用」语义刻意分流，
- * 挂载是用户显式组合面动作）。行字段完整性由服务面负责（plugin 引用按源推导、
- * app 必填执法〔第三方挂系统 v1 拒〕、config 已过 schema 校验）。
+ * 挂载是用户显式组合面动作）。行字段完整性由服务面负责（pkg 引用按源推导、
+ * apps 必填执法〔第三方挂全局 v1 拒〕、config 已过 schema 校验）。
  */
 export function insertOverlayRow(dataDir: string, row: CompositionRow): void {
   const rows = loadOverlayRows(dataDir);
@@ -975,8 +975,8 @@ export function insertOverlayRow(dataDir: string, row: CompositionRow): void {
  * configure 写回半边（ctx.apps.configure 持久化，契约篇 §3.4 刀 2 工具族
  * 条）：行 config 整体写入 overlay（patch 顶层键整值替换已在服务面合并成完整
  * config——本面只落整值）。与 toggleOverlayRow 同构的行集操作：
- * - 行在 overlay → config 键整替（保留 app/disabled/runtime）；
- * - 行只在官方默认层 → 插替换行 `{ id, config }`（省略 plugin = 沿用官方层引用）；
+ * - 行在 overlay → config 键整替（保留 apps/disabled/sandbox）；
+ * - 行只在官方默认层 → 插替换行 `{ id, config }`（省略 pkg = 沿用官方层引用）；
  * - 空对象入参 = 删 config 键（与「启用删 disabled 键」同律：空值不留键）；
  *   删键后仅剩 `{ id }` 的纯替换行整行移除。
  * 调用方保证 id 存在于 overlay 或官方层、且 config 已过应用声明 schema 校验
@@ -1000,8 +1000,8 @@ export function writeOverlayRowConfig(dataDir: string, id: string, config: Recor
     const rest = { ...row };
     delete rest.config;
     if (hasKeys) rest.config = config;
-    // 仅剩 id 的纯替换行无意义（删键即回退官方层默认 config）——整行移除。app
-    // 刻意不进保留判据（同 toggle 谓词）：无 plugin 的 {id, app} 残留恒非法，删
+    // 仅剩 id 的纯替换行无意义（删键即回退官方层默认 config）——整行移除。apps
+    // 刻意不进保留判据（同 toggle 谓词）：无 pkg 的 {id, apps} 残留恒非法，删
     if (rest.pkg === undefined && rest.disabled === undefined && rest.sandbox === undefined) continue;
     next.push(rest);
   }

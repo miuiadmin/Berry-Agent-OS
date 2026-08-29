@@ -204,7 +204,7 @@ function guardTransform(opts: TransformOptions): TransformResult {
   return { code: plainJiti.transform(opts) };
 }
 
-export function createAppJiti(faces?: LoadPluginsOptions['virtualFaces']) {
+export function createAppJiti(faces?: LoadAppsOptions['virtualFaces']) {
   return createJiti(import.meta.url, {
     moduleCache: false,
     // 应用代码统一走 jiti 转译一条路径（native import 无法解析虚拟模块——防行为分叉）
@@ -429,7 +429,7 @@ type PendingItem =
   | { row: AppPlanRow; kind: 'external'; meta: WorkerModuleMeta };
 
 /** loadApps 可选参数（技能注册回调 + 虚拟面注入物——后续跨模块桥接需求同形扩展） */
-export interface LoadPluginsOptions {
+export interface LoadAppsOptions {
   /**
    * 行级技能注册回调：加载器在**行作用域 fork 后、apply 之前**逐声明行调用
    * （登记位冷读裁决——与 events 的装载阶段①早登记不同位：skills 无跨应用
@@ -485,7 +485,7 @@ export interface LoadPluginsOptions {
 export async function loadApps(
   root: ContextScope,
   rows: readonly AppPlanRow[],
-  opts?: LoadPluginsOptions,
+  opts?: LoadAppsOptions,
 ): Promise<AppLoadResult> {
   const activated: AppActivatedPayload[] = [];
   const failed: AppFailedPayload[] = [];
@@ -665,7 +665,7 @@ async function activateOne(
   item: PendingItem,
   activated: AppActivatedPayload[],
   failed: AppFailedPayload[],
-  opts?: LoadPluginsOptions,
+  opts?: LoadAppsOptions,
   /** 官方名位行 id 集（loadApps 从行清单自含构造——行籍判据第二支） */
   officialRowIds?: ReadonlySet<string>,
 ): Promise<void> {

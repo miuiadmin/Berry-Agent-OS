@@ -72,6 +72,6 @@ export interface WebService {
  * 件行 config schema（契约篇 §1.5.2 ①）：
  * `fetch: false` = 「有但省」变体二——模型面关（fetch 工具不注册）、服务面在。
  */
-export const WEB_PLUGIN_CONFIG_SCHEMA = Type.Object({
+export const WEB_APP_CONFIG_SCHEMA = Type.Object({
   fetch: Type.Optional(Type.Boolean({ description: 'false = 不注册模型面 fetch 工具（ctx.fetch 服务不受影响）' })),
 });
