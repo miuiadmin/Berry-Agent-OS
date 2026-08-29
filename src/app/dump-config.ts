@@ -2,7 +2,7 @@
  * L5 app — `berry dump-config` 组合树诊断（打印实际生效装配，不跑对话）。
  *
  * :memory: 同构（技术栈篇 §5 同构纪律，2026-08-26 挖矿批 P0-3）：诊断面禁 fork
- * 侧门——复用 createBerryRuntime 同一入口、改传 `dbPath=':memory:'` 走**全量
+ * 侧门——复用 createRuntime 同一入口、改传 `dbPath=':memory:'` 走**全量
  * 装配**（装载器执法/config 校验/Kahn 激活/应用 apply 全跑）后打印。「不落库」=
  * 会话主库零写入磁盘（内存库写入即弃）；数据目录侧副作用在场（目录创建类动作
  * 被容忍）。诊断的价值 = 报告真实装载会走到的路——侧门诊断 = 组合树漂移的开端。
@@ -13,7 +13,7 @@
  * 失败兜底语义维持）再列失败清单，退出码 1。
  */
 
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { loadComposition, OVERLAY_FILENAME, safeModeComposition, type CompositionReport } from './composition.js';
 import { loadOfficialApps } from './app-registry.js';
@@ -120,7 +120,7 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
     // :memory: 同构（P0-3）：persist 不传（缺省 true——持久层在场，凭证/预算投影
     // /memory 件全真跑），库路径锁 ':memory:'（内存库写入即弃 = 主库零落盘；
     // ensureDbDir 对 ':memory:' 既有跳过判定同源——不建数据库目录）
-    const runtime = await createBerryRuntime({ ...options, interactive: false, dbPath: ':memory:' });
+    const runtime = await createRuntime({ ...options, interactive: false, dbPath: ':memory:' });
     try {
       const lines = [
         `Berry ${VERSION}`,

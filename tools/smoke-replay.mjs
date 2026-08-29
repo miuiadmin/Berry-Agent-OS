@@ -28,7 +28,7 @@ import { mkdtempSync, realpathSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createBerryRuntime } from '../src/app/assembly.js';
+import { createRuntime } from '../src/app/assembly.js';
 import { runSmokeFlow } from './smoke-flow.mjs';
 
 /* ---------------- 金样装载 ---------------- */
@@ -98,7 +98,7 @@ const streamFn = (context, _options) => {
 const smokeData = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-data-'));
 const smokeWorkspace = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-ws-'));
 
-const runtime = await createBerryRuntime({
+const runtime = await createRuntime({
   model: meta.model,
   streamFn,
   dbPath: join(smokeData, 'sessions.db'),

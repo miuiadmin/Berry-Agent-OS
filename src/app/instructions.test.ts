@@ -10,8 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defaultInstructionLocations, discoverInstructions, renderInstructions } from './instructions.js';
-import { createBerryRuntime } from './assembly.js';
-import type { BerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
+import type { AppRuntime } from './assembly.js';
 
 /** 临时目录（realpath 归一） */
 function makeTempDir(prefix: string): string {
@@ -97,7 +97,7 @@ describe('instructions 四层发现（骨架篇 §7.3）', () => {
 /* ---------------- 组合根全栈 ---------------- */
 
 describe('instructions 段全栈（组合根装配 → 系统提示词）', () => {
-  const runtimes: BerryRuntime[] = [];
+  const runtimes: AppRuntime[] = [];
   afterEach(async () => {
     while (runtimes.length > 0) {
       const runtime = runtimes.pop()!;
@@ -111,7 +111,7 @@ describe('instructions 段全栈（组合根装配 → 系统提示词）', () =
     mkdirSync(join(userDir, '.berry'), { recursive: true });
     writeFileSync(join(userDir, '.berry', 'AGENTS.md'), '全局纪律：提交前跑四门禁');
     writeFileSync(join(ws, 'CLAUDE.md'), '本项目纪律：注释用中文');
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: ':memory:',
       workspace: ws,
       instructionLocations: defaultInstructionLocations(ws, { homeDir: userDir }),

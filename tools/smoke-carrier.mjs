@@ -30,7 +30,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBerryRuntime } from '../src/app/assembly.js';
+import { createRuntime } from '../src/app/assembly.js';
 import { Persistence } from '../src/persist/index.js';
 import { collectBuiltinMigrations } from '../src/app/builtins.js';
 import { createProvider } from '@earendil-works/pi-ai';
@@ -133,7 +133,7 @@ const rings = { installMount: false, reload: false, materialize: false, bridge: 
 
 try {
   /* ---- 装配（隔离面与 smoke-real 同款：dataDir/workspace/homeDir/compositionDir 全 mktemp） ---- */
-  const runtime = await createBerryRuntime({
+  const runtime = await createRuntime({
     model: `${providerId}/${modelId}`,
     dbPath: join(smokeData, 'sessions.db'),
     workspace: smokeWorkspace,

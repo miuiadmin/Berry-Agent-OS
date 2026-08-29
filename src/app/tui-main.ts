@@ -14,7 +14,7 @@
 
 import { createTuiChannel } from '../channels/tui.js';
 import { projectedToAgentMessages } from '../chat/index.js';
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
@@ -26,8 +26,8 @@ import { VERSION } from './version.js';
  * @returns 进程退出码（正常退出恒 0——用户离开不是错误）
  */
 export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
-  // 数据目录建档已收编 createBerryRuntime ③（三入口共用单点）——此处不再早调
-  const runtime = await createBerryRuntime({
+  // 数据目录建档已收编 createRuntime ③（三入口共用单点）——此处不再早调
+  const runtime = await createRuntime({
     ...options,
     interactive: true,
     // TUI 启动策略（技术栈篇 §5 拍板）：缺省续接本工作区最新会话

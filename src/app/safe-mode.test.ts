@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import { dumpConfigMain } from './dump-config.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -32,7 +32,7 @@ async function teardown(runtime: { shutdown(): Promise<void> }, dir: string): Pr
 describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径）', () => {
   it('boot 空装：组合树只剩 tools 行激活、无驱动一等态（conversation undefined）、Ring 1 照常执法', async () => {
     const compositionDir = freshDir('safe-boot');
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: ':memory:',
       compositionDir,
       interactive: false,
@@ -56,7 +56,7 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
 
   it('对照：同目录不带旗标 = 官方默认层全树（chat 在场 → conversation 有值——夹具目录本身有效）', async () => {
     const compositionDir = freshDir('safe-ctrl');
-    const runtime = await createBerryRuntime({ dbPath: ':memory:', compositionDir, interactive: false });
+    const runtime = await createRuntime({ dbPath: ':memory:', compositionDir, interactive: false });
     try {
       expect(runtime.composition.plan.map((row) => row.id)).toContain('chat');
       expect(runtime.conversation).toBeDefined();
@@ -77,7 +77,7 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
       // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）
       `rows:\n  - id: extra\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: ':memory:',
       compositionDir,
       interactive: false,
@@ -92,7 +92,7 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
 
   it('救援环：boot 安全模式 → /reload 读盘不受旗标影响 → 全树恢复 + 驱动就位（一进程内闭环）', async () => {
     const compositionDir = freshDir('safe-rescue');
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: ':memory:',
       compositionDir,
       interactive: false,

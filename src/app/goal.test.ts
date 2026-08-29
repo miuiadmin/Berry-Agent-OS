@@ -22,8 +22,8 @@ import {
   TOOL_ARGUMENTS_INVALID,
 } from '../contracts/errors.js';
 import type { UiBackend } from '../channels/types.js';
-import { createBerryRuntime } from './assembly.js';
-import type { BerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
+import type { AppRuntime } from './assembly.js';
 
 /* ---------------- 测试基建（与 agent-service.test 同款） ---------------- */
 
@@ -99,7 +99,7 @@ function recordingBackend() {
 }
 
 /** 本用例运行时登记（afterEach 统一关停防句柄泄漏） */
-const runtimes: BerryRuntime[] = [];
+const runtimes: AppRuntime[] = [];
 afterEach(async () => {
   while (runtimes.length > 0) {
     const runtime = runtimes.pop()!;
@@ -108,21 +108,21 @@ afterEach(async () => {
 });
 
 /** 装配 + 登记 */
-async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): Promise<BerryRuntime> {
-  const runtime = await createBerryRuntime({ dbPath: ':memory:', workspace: makeTempDir('app-goal-'), ...overrides });
+async function assemble(overrides: Parameters<typeof createRuntime>[0] = {}): Promise<AppRuntime> {
+  const runtime = await createRuntime({ dbPath: ':memory:', workspace: makeTempDir('app-goal-'), ...overrides });
   runtimes.push(runtime);
   return runtime;
 }
 
 /** 经真工具管道调用（三段全走——schema 执法位在此面） */
-function callTool(runtime: BerryRuntime, name: string, args: Record<string, unknown>) {
+function callTool(runtime: AppRuntime, name: string, args: Record<string, unknown>) {
   const def = runtime.tools.get(name);
   if (def === undefined) throw new Error(`工具未注册：${name}`);
   return runtime.tools.toAgentTool(def).execute('tc-goal', args);
 }
 
 /** goal_get 投影文本（状态断言用——全字段如实示态） */
-async function goalText(runtime: BerryRuntime): Promise<string> {
+async function goalText(runtime: AppRuntime): Promise<string> {
   const result = await callTool(runtime, 'goal_get', {});
   return (result.content[0] as { type: 'text'; text: string }).text;
 }
@@ -316,7 +316,7 @@ describe('boot 降级 + /goal 命令族 + /reload 不双降（跨进程真库文
     const workspace = makeTempDir('app-goal-boot-');
 
     // 首程：设定 active 目标后关停（自管生命周期——让位给续接程）
-    const first = await createBerryRuntime({
+    const first = await createRuntime({
       dbPath: dbFile,
       workspace,
       streamFn: scriptedStream([textMessage('答')]).streamFn,
@@ -327,7 +327,7 @@ describe('boot 降级 + /goal 命令族 + /reload 不双降（跨进程真库文
     // 二程：同库同 cwd 续接（resumeSession:true = TUI 默认续接最新策略）——
     // 装载收口 session_start 补播（origin=resume + replay:true + 首见 armed）
     // 触发降级：active ⇒ needs-resume（激活权不跨进程；二十九批增补 8①）
-    const second = await createBerryRuntime({
+    const second = await createRuntime({
       dbPath: dbFile,
       workspace,
       resumeSession: true,

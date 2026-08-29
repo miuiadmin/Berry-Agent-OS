@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import { BRIDGE_SURFACE_NARROWED, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
 import { appZoneId, tryResolveService } from '../context/index.js';
 
@@ -80,7 +80,7 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
         '',
       ].join('\n'),
     );
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: ':memory:',
       workspace: compositionDir,
       compositionDir,

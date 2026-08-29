@@ -22,8 +22,8 @@ import { deriveMessages } from '../session/derive.js';
 import { registerToolsService } from '../tools/registry.js';
 import { defaultConvertToLlm } from './convert.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
-import { createBerryRuntime } from './assembly.js';
-import type { BerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
+import type { AppRuntime } from './assembly.js';
 
 /* ---------------- 测试基建（与 assembly.test 同款） ---------------- */
 
@@ -99,7 +99,7 @@ async function spinUntil(predicate: () => boolean, what: string): Promise<void> 
 const makeTempDir = (prefix: string): string => realpathSync(mkdtempSync(join(realpathSync(tmpdir()), prefix)));
 
 /** 本用例运行时登记（afterEach 统一关停防句柄泄漏） */
-const runtimes: BerryRuntime[] = [];
+const runtimes: AppRuntime[] = [];
 afterEach(async () => {
   while (runtimes.length > 0) {
     const runtime = runtimes.pop()!;
@@ -108,8 +108,8 @@ afterEach(async () => {
 });
 
 /** 装配 + 登记 */
-async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): Promise<BerryRuntime> {
-  const runtime = await createBerryRuntime({
+async function assemble(overrides: Parameters<typeof createRuntime>[0] = {}): Promise<AppRuntime> {
+  const runtime = await createRuntime({
     dbPath: ':memory:',
     workspace: makeTempDir('app-subplug-'),
     ...overrides,

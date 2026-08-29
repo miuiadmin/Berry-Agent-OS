@@ -25,7 +25,7 @@ import { JobsStore, parseSchedule, evaluateDue, discoveryGates } from '../schedu
 import type { JobRecord } from '../scheduler/index.js';
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage } from '../contracts/llm.js';
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { dbPath } from './paths.js';
@@ -109,7 +109,7 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   /* ---- ③ 整机装配（headless；tick 任务面固定档——CLI 旗标显式值优先） ---- */
   // 会话投递路：目标 session_id 注入 boot——chat 件 apply 期 registry.open
   // 直达目标会话（缺省 undefined = 新建，即子进程单发路的目标）
-  const runtime = await createBerryRuntime({
+  const runtime = await createRuntime({
     ...options,
     interactive: false,
     // 只读档缺省：tick 任务面拍板（席 13 第一刀公式同款——无人值守不持写权）

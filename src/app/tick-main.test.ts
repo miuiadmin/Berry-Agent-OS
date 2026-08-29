@@ -4,7 +4,7 @@
  * mock 只停在模型层（scripted streamFn）与 stdout/stderr 捕获，其余全真：
  * 真文件库（临时目录 + collectBuiltinMigrations 迁移——:memory: 每连接各一
  * 库，跨 withJobsStore/整机装配两连接不共享，必须落文件）、真装配（tick-main
- * 内部 createBerryRuntime + boot resumeSession 注入）、真 jobs 表读写、真
+ * 内部 createRuntime + boot resumeSession 注入）、真 jobs 表读写、真
  * 事件账（turn/start 孤儿行造 busy 判据、llm/usage 优先道断言）。
  *
  * 覆盖：退出码全谱（missing 2 / wait·done·missed·让路 0 / 失败 1 / 正常 0）+
@@ -19,8 +19,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage } from '../contracts/llm.js';
 import { openStore } from '../persist/index.js';
 import { JobsStore } from '../scheduler/store.js';
-import { createBerryRuntime } from './assembly.js';
-import type { BerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
+import type { AppRuntime } from './assembly.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { tickMain } from './tick-main.js';
 
@@ -128,7 +128,7 @@ function captureStdout(): { texts: string[]; restore: () => void } {
 }
 
 /** 本用例运行时登记（afterEach 统一关停防句柄泄漏——种子用的整机装配） */
-const runtimes: BerryRuntime[] = [];
+const runtimes: AppRuntime[] = [];
 afterEach(async () => {
   while (runtimes.length > 0) {
     const runtime = runtimes.pop()!;
@@ -300,7 +300,7 @@ describe('run --tick 编排：会话投递路（session_id 非空）', () => {
   it('到点 → resume 目标会话开轮 + 不造空会话 + 归属双列一致', async () => {
     const dbFile = makeDbFile();
     // 先整机装配造一个真会话（boot 新建）作为投递目标
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: dbFile,
       workspace: makeTempDir('app-tickmain-ws-'),
       streamFn: scriptedStream(REPLY),

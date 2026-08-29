@@ -1,7 +1,7 @@
 /**
  * L5 app — 组合根本体（骨架篇 §9：一切装配发生在这里，模块间零横向 import）。
  *
- * createBerryRuntime 把 M1 已落模块接线成真实可跑：
+ * createRuntime 把 M1 已落模块接线成真实可跑：
  * context 根作用域 → channels/ui → persist（session）→ llm（凭证适配注入）→
  * tools（fs 族 + 三段管道 + gate/decision durable）→ safety（审批 + 守门行 +
  * 可写根）→ skills（本地 provider + refresh）→ 应用装载 → 内置命令。
@@ -316,7 +316,7 @@ export interface RuntimeOptions {
 }
 
 /** 组合根产物（三个命令入口持有的运行时面） */
-export interface BerryRuntime {
+export interface AppRuntime {
   /** 根作用域（应用 fork 的锚） */
   readonly ctx: ContextScope;
   /** 持久层（persist:false 时为 undefined） */
@@ -411,7 +411,7 @@ export interface ReloadResult {
  * 声明）。全部注册走 ctx.provide/on/effect——作用域 dispose 即整体回卷。
  * async：应用装载（jiti import + apply）是异步序列（契约篇 §1）。
  */
-export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<BerryRuntime> {
+export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRuntime> {
   const workspace = opts.workspace ?? process.cwd();
   const model = opts.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL;
   const sandboxMode = opts.sandboxMode ?? 'workspace-write';

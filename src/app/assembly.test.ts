@@ -38,10 +38,10 @@ import { Persistence } from '../persist/index.js';
 // 重开库须带与组合根同链迁移（collectBuiltinMigrations 机械聚合——与装配
 // 同源，此后加带表件零改动跟随；宿主裸开只识 v1，少一段即拒开）
 import { collectBuiltinMigrations } from './builtins.js';
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import { ConversationDriver } from '../chat/index.js';
 import type { AgentServiceFace } from '../chat/index.js';
-import type { BerryRuntime } from './assembly.js';
+import type { AppRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
 import { dumpConfigMain } from './dump-config.js';
@@ -122,7 +122,7 @@ function makeWorkspace(): string {
 }
 
 /** 本用例运行时登记（afterEach 统一关停防句柄泄漏） */
-const runtimes: BerryRuntime[] = [];
+const runtimes: AppRuntime[] = [];
 afterEach(async () => {
   while (runtimes.length > 0) {
     const runtime = runtimes.pop()!;
@@ -131,8 +131,8 @@ afterEach(async () => {
 });
 
 /** 装配 + 登记（全部用例经此入口——统一 options 缺省；应用装载使工厂 async） */
-async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): Promise<BerryRuntime> {
-  const runtime = await createBerryRuntime({
+async function assemble(overrides: Parameters<typeof createRuntime>[0] = {}): Promise<AppRuntime> {
+  const runtime = await createRuntime({
     dbPath: ':memory:',
     workspace: makeWorkspace(),
     ...overrides,
@@ -142,7 +142,7 @@ async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}
 }
 
 /** 事件类型序列 */
-const types = (runtime: BerryRuntime) => (runtime.session?.events ?? []).map((e) => e.type);
+const types = (runtime: AppRuntime) => (runtime.session?.events ?? []).map((e) => e.type);
 
 /** 恒真 stub UI 后端（interactive 审批用） */
 function approveAllBackend(): UiBackend {
@@ -156,7 +156,7 @@ function approveAllBackend(): UiBackend {
 
 /* ---------------- 装配面 ---------------- */
 
-describe('createBerryRuntime 装配面', () => {
+describe('createRuntime 装配面', () => {
   it('fs 四件 + 内置命令注册；sandbox/mode 落库；系统提示词含基座', async () => {
     const runtime = await assemble();
     // 官方默认层三行（契约篇 §5.1）：memory 首行五件 + subagent 次行委派工具
@@ -849,7 +849,7 @@ describe('持久化 round-trip 与命令入口', () => {
     const workspace = makeWorkspace();
     const { streamFn } = scriptedStream([textMessage('存下来的回答')]);
     // 手动管理生命周期（不经 assemble 登记——本用例自管关停顺序）
-    const runtime = await createBerryRuntime({ dbPath: dbFile, workspace, streamFn });
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn });
     await runtime.conversation!.submitOnce('要持久化的问题');
     await runtime.shutdown();
 
@@ -875,7 +875,7 @@ describe('持久化 round-trip 与命令入口', () => {
     const base = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-mkdir-')));
     const dbFile = join(base, 'deep', 'nested', 'sessions.db');
     const { streamFn } = scriptedStream([textMessage('首启回答')]);
-    const runtime = await createBerryRuntime({ dbPath: dbFile, workspace: makeWorkspace(), streamFn });
+    const runtime = await createRuntime({ dbPath: dbFile, workspace: makeWorkspace(), streamFn });
     try {
       expect(existsSync(dbFile)).toBe(true); // 父目录被组合根 ③ 建档，SQLite 落库成功
       await runtime.conversation!.submitOnce('首启问题');
@@ -911,7 +911,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
     const workspace = makeWorkspace();
     const script1 = scriptedStream([textMessage('第一答')]);
     // 首程自管生命周期（不经 assemble 登记——shutdown 后让位给续接程）
-    const first = await createBerryRuntime({ dbPath: dbFile, workspace, streamFn: script1.streamFn });
+    const first = await createRuntime({ dbPath: dbFile, workspace, streamFn: script1.streamFn });
     const firstId = first.session!.header.sessionId;
     await first.conversation!.submitOnce('第一问');
     // 模拟中断残形：敞开 turn（最后一个 turn/start 后无 turn/end）
@@ -920,7 +920,7 @@ describe('启动续接策略（技术栈篇 §5：默认续接最新会话）', 
 
     // 二次启动：同库同 cwd，按最新续接（恢复协议自动补齐闭合）
     const script2 = scriptedStream([textMessage('续答'), textMessage('再答')]);
-    const second = await createBerryRuntime({
+    const second = await createRuntime({
       dbPath: dbFile,
       workspace,
       resumeSession: true,
@@ -1114,7 +1114,7 @@ describe('/app 多会话前台（S3：new 驻留聚焦 / 清单徽标 / 双寻�
 
 describe('应用前台入口（第三纵切：boot 打标 / 应用进入 / delegable 自动注册）', () => {
   /** header 快照载荷（request/header 事件 data——组装参数 + app 腿） */
-  const headerPayload = (runtime: BerryRuntime): { app?: string } =>
+  const headerPayload = (runtime: AppRuntime): { app?: string } =>
     runtime.session!.events.find((e) => e.type === 'request/header')!.data as never;
 
   it('boot --app hermes：默认会话即 hermes 域——header app 腿打标（CLI run --app 形态）', async () => {
@@ -1840,7 +1840,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     );
 
     // 不经 assemble 登记（工厂抛出即无 runtime 可关停）
-    const attempt = createBerryRuntime({
+    const attempt = createRuntime({
       dbPath: ':memory:',
       workspace: makeWorkspace(),
       compositionDir,
@@ -2200,7 +2200,7 @@ function versionedAppSource(mark: string): string {
 }
 
 /** 取最近一次工具调用的投影回显文本（plug-echo 回声） */
-function lastEchoText(runtime: BerryRuntime): string {
+function lastEchoText(runtime: AppRuntime): string {
   const toolResults = deriveMessages(runtime.session!.events).filter((m) => m.type === 'toolResult');
   const last = toolResults.at(-1)!;
   // 投影条目载荷经 convert 合成——content 文本在 message 字段族里，直接断整段 JSON 太脆，
@@ -2544,7 +2544,7 @@ describe('/reload 组合树重载', () => {
   /** 双区 fixture：chat/hermes 各一行独占件 + 跨区行一件（busy 态/排水/跨区行
    * 单区不动三观测面共用——跨区行 apps 枚举两应用，provide 扇出两区表、效果
    * 链挂系统锚〔装载律①〕，单区 reload 的行→区谓词对它是 undefined 不卷入） */
-  const slotFixture = async (streamFn: StreamFn): Promise<BerryRuntime> => {
+  const slotFixture = async (streamFn: StreamFn): Promise<AppRuntime> => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-slot-')));
     const chatDir = writeRowDir(compositionDir, 'chat-widget', zoneWidgetSource('chat', 'acme/evt-v1'));
     const hermesDir = writeRowDir(compositionDir, 'hermes-widget', zoneWidgetSource('hermes', 'acme/h-evt'));
@@ -2739,7 +2739,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
     writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: tools\n    disabled: true\n');
     const { streamFn } = scriptedStream([textMessage('不会到这')]);
     // 拒启面手动 try/catch（assemble 助手只登记成功面——失败面无 runtimes 可收）
-    const err = await createBerryRuntime({
+    const err = await createRuntime({
       dbPath: ':memory:',
       workspace: makeWorkspace(),
       compositionDir,
@@ -3002,9 +3002,7 @@ describe('session_start 装载收口补播（二十九批增补 8①）', () => 
   /** 读探针袋（经真工具面——应用侧记录的 session_start 载荷清单）。探针行挂
    * app: chat（触发② 必填）→ 工具落 chat 应用域层，get 全局面取不到——按
    * 应用域视角按名取（D1 域层路由口径） */
-  async function readStarts(
-    runtime: BerryRuntime,
-  ): Promise<{ sessionId?: string; origin?: string; replay?: boolean }[]> {
+  async function readStarts(runtime: AppRuntime): Promise<{ sessionId?: string; origin?: string; replay?: boolean }[]> {
     const def = runtime.tools.listFor('chat').find((t) => t.name === 'plug-starts');
     if (def === undefined) throw new Error('探针工具未注册：plug-starts');
     const result = await runtime.tools.toAgentTool(def).execute('tc-replay', {});
@@ -3144,7 +3142,7 @@ function closedSeed(): SessionEvent[] {
 
 /** 物理库 sessions 行直读（origin/importer/cwd/app 归因断言） */
 function sessionRowOf(
-  runtime: BerryRuntime,
+  runtime: AppRuntime,
   sessionId: string,
 ): { origin: string; importer: string | null; cwd: string | null; app: string | null } {
   return runtime
@@ -3382,7 +3380,7 @@ describe('exec 命令进程孤儿清扫（契约篇 §6.6 exec 腿，2026-08-29 
     const dataRoot = mkdtempSync(join(realpathSync(tmpdir()), 'app-exec-sweep-'));
     const prev = process.env['APP_DATA_DIR'];
     process.env['APP_DATA_DIR'] = dataRoot;
-    let runtime: BerryRuntime | undefined;
+    let runtime: AppRuntime | undefined;
     try {
       // 伪造「上一宿主猝死」形态：hostPid 已死 + 活命令进程（长命 sleep）在簿。
       // zombie 必须同 runArgv 形态建组（POSIX detached = 自成组长——killTree
@@ -3402,7 +3400,7 @@ describe('exec 命令进程孤儿清扫（契约篇 §6.6 exec 腿，2026-08-29 
       );
       // 真库 boot（:memory: 诊断路零副作用不动手——本用例必须走真库触发清扫）
       const { streamFn } = scriptedStream([textMessage('回执')]);
-      runtime = await createBerryRuntime({
+      runtime = await createRuntime({
         dbPath: join(dataRoot, 'sessions.db'),
         workspace: makeWorkspace(),
         streamFn,

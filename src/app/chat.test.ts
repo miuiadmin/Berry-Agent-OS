@@ -24,8 +24,8 @@ import {
   AGENT_SESSION_INACTIVE,
   AGENT_SESSION_KEY_REQUIRED,
 } from '../contracts/errors.js';
-import { createBerryRuntime } from './assembly.js';
-import type { BerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
+import type { AppRuntime } from './assembly.js';
 import type { AgentServiceFace, RunSettled, DriverEntry } from '../chat/index.js';
 import type { AppManifest } from '../contracts/app.js';
 
@@ -77,7 +77,7 @@ function scriptedStream(responses: AssistantMessage[]) {
 const makeTempDir = (prefix: string): string => realpathSync(mkdtempSync(join(realpathSync(tmpdir()), prefix)));
 
 /** 本用例运行时登记（afterEach 统一关停防句柄泄漏） */
-const runtimes: BerryRuntime[] = [];
+const runtimes: AppRuntime[] = [];
 afterEach(async () => {
   while (runtimes.length > 0) {
     const runtime = runtimes.pop()!;
@@ -86,11 +86,11 @@ afterEach(async () => {
 });
 
 /** 装配 + 登记 + 取 agent 服务（件内 provide——默认层首行装载即就绪） */
-async function assemble(overrides: Parameters<typeof createBerryRuntime>[0] = {}): Promise<{
-  runtime: BerryRuntime;
+async function assemble(overrides: Parameters<typeof createRuntime>[0] = {}): Promise<{
+  runtime: AppRuntime;
   agent: AgentServiceFace;
 }> {
-  const runtime = await createBerryRuntime({
+  const runtime = await createRuntime({
     dbPath: ':memory:',
     workspace: makeTempDir('app-chat-'),
     ...overrides,
@@ -256,7 +256,7 @@ describe('应用面第一纵切（可卸语义 + 行序 + 空转）', () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const compositionDir = makeTempDir('app-chat-off-');
     writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: chat\n    disabled: true\n');
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       dbPath: ':memory:',
       workspace: makeTempDir('app-chat-off-ws-'),
       compositionDir,
@@ -280,7 +280,7 @@ describe('应用面第一纵切（可卸语义 + 行序 + 空转）', () => {
 
   it('persist:false 诊断装配：件空转不炸启动断言（dump-config 面）', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
-    const runtime = await createBerryRuntime({
+    const runtime = await createRuntime({
       persist: false,
       workspace: makeTempDir('app-chat-nodb-'),
       streamFn,
@@ -786,7 +786,7 @@ describe('第三纵切：open({app}) 应用进入面（装配默认位 + 审批�
     // 首程自管生命周期（不经 assemble 登记——shutdown 后让位给续接程，与启动
     // 续接策略测试同款纪律：防 afterEach 二次 shutdown）
     const s1 = scriptedStream([textMessage('答')]);
-    const rt1 = await createBerryRuntime({
+    const rt1 = await createRuntime({
       dbPath: dbFile,
       workspace: ws,
       streamFn: s1.streamFn,

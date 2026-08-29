@@ -7,7 +7,7 @@
 
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage } from '../contracts/llm.js';
-import { createBerryRuntime } from './assembly.js';
+import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { installExitSignals } from './signals.js';
 
@@ -33,7 +33,7 @@ function lastAssistantText(result: RunResult): string | undefined {
  * @returns 进程退出码
  */
 export async function runOnceMain(message: string, options: RuntimeOptions = {}): Promise<number> {
-  const runtime = await createBerryRuntime({ ...options, interactive: false });
+  const runtime = await createRuntime({ ...options, interactive: false });
   // 可卸语义（应用面第一纵切）：chat 件未装载即无对话循环——run 语义性失败
   //（退出码 1 + stderr 示明；/apps 面向用户提示查装配）
   if (runtime.conversation === undefined) {

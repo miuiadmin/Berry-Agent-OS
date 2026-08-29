@@ -38,7 +38,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
-import { createBerryRuntime } from '../src/app/assembly.js';
+import { createRuntime } from '../src/app/assembly.js';
 import { createLlmRuntime, createStreamFn } from '../src/llm/index.js';
 import { runSmokeFlow } from './smoke-flow.mjs';
 import { createProvider } from '@earendil-works/pi-ai';
@@ -166,7 +166,7 @@ function finalizeGolden() {
 // 覆盖——组装根自建，行为与历史冒烟完全一致。
 const streamFn = goldenPath ? recordWrap(createStreamFn(createLlmRuntime({ providers: [provider] }))) : undefined;
 
-const runtime = await createBerryRuntime({
+const runtime = await createRuntime({
   model: `${providerId}/${modelId}`,
   ...(streamFn ? { streamFn } : {}),
   dbPath: join(smokeData, 'sessions.db'),
