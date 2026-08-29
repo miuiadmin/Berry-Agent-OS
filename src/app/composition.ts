@@ -303,8 +303,9 @@ function isValidDisabled(value: unknown): boolean {
 
 /**
  * sandbox 块校验（契约篇 §1.7 第三十七批，闩三写面完备性 + 闩一执法扩面）：
- * - carrier 必填、三值枚举（main/worker/external——external 为预留词，装载期
- *   fail-closed 拒载但行 schema 可声明，过渡冻结见第三十七批增补 2b）；
+ * - carrier 必填、三值枚举（main/worker/external——external 载体已落码〔fork
+ *   进程域，第三十七批 external carrier 落码批〕，原「预留词过渡冻结」已随
+ *   增补 2b 解冻废止）；
  * - net 子键声明即拒（v1 无 net 执法基线——收了不执行的声明 = 宣示与现实脱节，
  *   闩二推论拒绝式）；
  * - fs 子键 external carrier 落码批定形 `{writableRoots?: string[]}`（形状在此

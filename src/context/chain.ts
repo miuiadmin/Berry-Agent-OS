@@ -50,7 +50,7 @@ const sessionChain = new AsyncLocalStorage<SessionChainScope>();
  * 是两个正交维度（宿主代码也跑在会话链上但不该落宿主以外的账），故不共载体。
  * 值 = 应用 row.id（装载器/工具管道两写点已归一）或 undefined（宿主自身）。
  */
-const callerChain = new AsyncLocalStorage<string>();
+const callerChain = new AsyncLocalStorage<readonly string[]>();
 
 /**
  * 在指定会话的调用链语境内执行 fn——驱动边界的包裹原语。
@@ -71,7 +71,10 @@ export function runInSessionChain<T>(
  * @param caller 调用方身份（装载器写点 = 应用 row.id；工具段写点 = 注册归属应用名）
  */
 export function runInCallerChain<T>(caller: string, fn: () => T): T {
-  return callerChain.run(caller, fn);
+  // 叠加语义（R1 复盘批二栈化）：嵌套包帧 = 外层帧保留、新帧入栈顶——归因
+  // 读数 chainCaller() 仍取最近身份（行为兼容），全栈追祖走 chainCallers()
+  const outer = callerChain.getStore();
+  return callerChain.run(outer === undefined ? [caller] : [...outer, caller], fn);
 }
 
 /**
@@ -97,5 +100,18 @@ export function chainBackground(): boolean {
  * 调用方约定俗成兜底 'host'（与 sessions.importer 列的宿主语义对齐）。
  */
 export function chainCaller(): string | undefined {
-  return callerChain.getStore();
+  // 最近身份（栈顶）——与栈化前单值读数行为一致（全兼容）
+  const stack = callerChain.getStore();
+  return stack === undefined || stack.length === 0 ? undefined : stack[stack.length - 1];
+}
+
+/**
+ * 读取调用方身份链全栈（R1 复盘批二新增——栈追祖取数口）：从外到内排列，
+ * 无链 = 空数组。消费面 = 「宿主内代执行写面」统一行收窄闸（exec 服务 /
+ * 子代理工厂自建 fs——契约篇 §1.7 第 11b 条）：栈上全部有行声明的帧取
+ * 交集（窄者胜），防「工具执行段按注册归属重包」后外层分域行帧丢失
+ * （external 行经委派工具借子代理 fs 打穿行声明收窄的洞即此形态）。
+ */
+export function chainCallers(): readonly string[] {
+  return callerChain.getStore() ?? [];
 }

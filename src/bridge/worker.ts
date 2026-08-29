@@ -255,6 +255,12 @@ function makeStubCtx(
       return makeHostServiceProxy(endpoint, rowId, name);
     },
     tryGet(name: string) {
+      // 'tools' 特例拦截（R1 复盘批二侧门双封）：与 get 同款返回本地桩——原
+      // tryGet 无特判，第三方声明 optionalInject:['tools'] 即过在场探测拿到
+      // 宿主服务代理，svc-invoke 可直派 ToolsService.executor 绕三段管道
+      // （toolCallId/origin/def 全自报——审计身份面污染）。工具面唯一入口 =
+      // 本地桩 register/run 两面 + 桩 run 走宿主真管道，无第三条路
+      if (name === 'tools') return makeToolsStub(endpoint, state, rowId, registrations);
       // optionalInject 在场快照（宿主激活时探测随 apply 载荷过界）——名单外
       // 词汇（未声明 optionalInject 的名字）一律 undefined（同步探测不可过界，
       // 收窄语义：要探测就先声明 optionalInject——声明面零变化下唯一合理口径）

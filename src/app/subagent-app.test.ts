@@ -8,14 +8,14 @@
  * 守门行传导 + context 腿回归锁（第三十一批 P1-4）在本文件尾段。
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } from '../contracts/llm.js';
 import { TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import { createContext } from '../context/context.js';
-import { chainSessionId } from '../context/chain.js';
+import { chainSessionId, runInCallerChain } from '../context/chain.js';
 import type { ContextScope } from '../context/types.js';
 import { createInProcessProvider } from '../subagent/inprocess.js';
 import { deriveMessages } from '../session/derive.js';
@@ -751,5 +751,63 @@ describe('守门行传导 + context 腿（第三十一批 P1-4 回归锁）', ()
     expect(resultC.stopReason).toBe('completed');
     expect(JSON.stringify(contexts[5]!.messages)).toContain('探针原始结果');
     await execC.dispose();
+  });
+});
+
+/* ---------------- external 行委派借道收窄（R1 复盘批二 major 4 回归锁） ---------------- */
+
+describe('external 行委派借道收窄（R1 复盘批二，契约篇 §1.7 第 11b 条）', () => {
+  it('external 行帧 tool-run 委派子代理：子 fs 写面 = 会话档 ∩ 行声明交集——行外根被拒、行内根可写（修复前必红）', async () => {
+    const workspace = makeTempDir('app-subplug-ext-');
+    // 行声明收窄目标：workspace 下 sub/ 子目录（其余 workspace 区域 = 行外）
+    mkdirSync(join(workspace, 'sub'), { recursive: true });
+    const compositionDir = makeTempDir('app-subplug-extc-');
+    // 组合树 external 行（**禁用态**——单元测试不起真 fork 域；行收窄查询单点
+    // 闭包装配面按行 id + carrier 取数不问激活态，行随树合成即对查找可见）。
+    // tool-run 行帧由 runInCallerChain 直接模拟（bootstrap.ts tool-run 处理器
+    // 同款罩法——生产面该帧来自 external 域 worker 的桥调用）
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      [
+        'rows:',
+        '  - id: ext-deleg',
+        '    pkg: /nonexistent-ext-app',
+        '    apps: [chat]',
+        '    disabled: true',
+        `    sandbox: { carrier: external, fs: { writableRoots: ['${join(workspace, 'sub')}'] } }`,
+        '',
+      ].join('\n'),
+    );
+    // 消费序（不走 submitOnce——直调工具面无父 turn）：[0] 子 turn1 写行内
+    // （成功）→ [1] 子 turn2 写行外（fence 拒）→ [2] 子收尾（拒因进上下文）
+    const { streamFn, contexts } = scriptedStream([
+      toolCallMessage('write', { path: join(workspace, 'sub', 'ok.txt'), content: '行内写' }),
+      toolCallMessage('write', { path: join(workspace, 'outside.txt'), content: '行外写' }),
+      textMessage('子收工'),
+    ]);
+    const runtime = await assemble({ streamFn, compositionDir, workspace });
+    // tool-run 形态：全局层 agent def + 宿主管道执行器 + 行帧罩（同
+    // bootstrap 'tool-run' 的 executor 调用——管道内部再按注册 owner 重包，
+    // 栈 = [ext-deleg, subagent 行帧]，栈化语义保证外层行帧不丢）
+    const def = runtime.tools.get('agent');
+    expect(def).toBeDefined();
+    const executor = runtime.tools.executor;
+    expect(executor).toBeDefined();
+    const result = await runInCallerChain('ext-deleg', () =>
+      executor!(def!, 'test:toolrun:1', { prompt: '写文件', toolFilter: ['write'] }, undefined, undefined, 'service'),
+    );
+    // 委派正常结算（子收尾文本 = 工具结果——拒写只影响文件不炸委派）
+    expect(result.isError).not.toBe(true);
+    expect((result.content[0] as { type: 'text'; text: string }).text).toBe('子收工');
+    // 正边：行内根可写（收窄 = 交集不是全拒——空交集与正确交集的区分证据）
+    expect(existsSync(join(workspace, 'sub', 'ok.txt'))).toBe(true);
+    // 负边：行外根被拒（修复前：子 fs 写面 = 会话档宽面 workspace∪/tmp∪
+    // os.tmpdir() → 写成功落盘 → 本断言必红——chainCaller 单帧拿不到 external
+    // 行帧的洞即此形态）
+    expect(existsSync(join(workspace, 'outside.txt'))).toBe(false);
+    // fence 拒因进子上下文，且可写根列表 = 收窄后的行有效白名单（非会话档宽面）
+    const turn3 = JSON.stringify(contexts[2]!.messages);
+    expect(turn3).toContain('FS_OUTSIDE_WRITABLE_ROOTS');
+    expect(turn3).toContain(join(workspace, 'sub'));
   });
 });

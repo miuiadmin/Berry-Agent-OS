@@ -18,8 +18,9 @@ import { Type } from 'typebox';
 import type { ExecEnvTable, ExecOptions, ExecResult, ExecService } from '../contracts/exec.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
-import { chainCaller } from '../context/chain.js';
+import { chainCallers } from '../context/chain.js';
 import type { ToolPipelineExecutor } from '../tools/pipeline.js';
+import { intersectRoots } from '../safety/roots.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
 import { classifyDenials, runArgv, type RunResult } from './spawn.js';
 import { buildChildEnv } from './env.js';
@@ -57,6 +58,25 @@ const INTERNAL_EXEC_PARAMETERS = Type.Object({
   timeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
   stdin: Type.Optional(Type.String()),
 });
+
+/**
+ * caller 链全栈行收窄推导（R1 复盘批二栈化——契约篇 §1.7 第 11b 条）：
+ * 栈上每个有行声明的帧各自查注入面取有效白名单，多帧命中取交集（窄者胜
+ * ——链上任一行的声明都约束本执行）。全栈无命中 = undefined（不收窄，
+ * 会话档现行为）。注入面签名保持单帧（组合根闭包零改动），栈扫描归本
+ * 消费面——「宿主内代执行写面」统一闸的两消费面（exec 服务 / 子代理
+ * 工厂自建 fs）共用本语义。
+ */
+function rowConfinement(
+  confinementFor: ((caller: string | undefined) => readonly string[] | undefined) | undefined,
+): readonly string[] | undefined {
+  if (confinementFor === undefined) return undefined;
+  const rowLists = chainCallers()
+    .map((caller) => confinementFor(caller))
+    .filter((roots): roots is readonly string[] => roots !== undefined);
+  if (rowLists.length === 0) return undefined;
+  return intersectRoots(rowLists);
+}
 
 /** RunResult（裸进程结果）+ 沙箱元数据 → ExecResult（服务面结果） */
 function toExecResult(run: RunResult, sandbox: ExecResult['sandbox']): ExecResult {
@@ -112,13 +132,18 @@ export function registerExecService(ctx: Context, opts: ExecServiceOptions): Exe
             argv = [...baseArgv];
             enforcement = 'none';
           } else {
-            // 行收窄查询（R1 P0-4）：经 svc-invoke 进宿主的分域行调用按
-            // caller-chain 行 id 查行有效白名单——间接子进程不吃会话档宽面
-            // （workspace ∪ /tmp 族；/tmp 族本就不在 external 基线）。非行帧
-            // （模型面/宿主直调）或注入面缺席 = undefined = 会话档现行为。
-            // danger 档透传不 confine（会话级豁免优先——行收窄只发生在受限档，
-            // 与 confine 策略面同构，不另造路径）。
-            const rowRoots = opts.confinementFor?.(chainCaller());
+            // 行收窄查询（R1 P0-4 → R1 复盘批二栈化）：经 svc-invoke/tool-run
+            // 进宿主的分域行调用按 caller 链**全栈**查行有效白名单、多帧命中
+            // 取交集（窄者胜——借道不丢约束；委派链上工具执行段按注册归属
+            // 重包后外层分域行帧经 chainCallers() 仍可追祖）。非行帧（模型面/
+            // 宿主直调）或注入面缺席 = undefined = 会话档现行为。danger 档
+            // 透传不 confine（会话级豁免优先——行收窄只发生在受限档，不另造
+            // 路径）。**read-only 会话档注记（契约篇 §1.7 第 11b 条裁定）**：
+            // 行帧执法面 = 行基线非会话档投影——会话 read-only 下行帧间接
+            // 子进程仍按行基线可写（与域本体 PM 旗同权：域后台不受宿主会话
+            // 档约束——会话档管「会话上下文里的写」，行帧管「行代执行的写」，
+            // 两轴正交）。
+            const rowRoots = rowConfinement(opts.confinementFor);
             const confined = opts.sandbox.confine(baseArgv, {
               mode,
               workspaceRoot: opts.workspaceRoot,

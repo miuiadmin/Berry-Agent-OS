@@ -18,6 +18,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -435,6 +436,46 @@ describe('mount / unmount（两态生效动词）', () => {
     ]);
     // 自定义行 id 词表账本对齐：uninstall 检视词表档不缺角（行数据根也有 data.json）
     expect(existsSync(join(dataDir, 'apps', 'my-plugin-2', 'data.json'))).toBe(true);
+  });
+
+  it('mount 收割按载体分派（R1 复盘批二 11c）：分域行补档零宿主 loadEntry——复制装机档到行数据根；main 行照旧宿主收割（修复前必红）', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalApp(dataDir, { events: [{ name: 'demo/one' }] });
+    // 宿主执行计数器（分域行入口禁宿主求值——打穿宪章七的路径必须零调用）
+    let hostLoads = 0;
+    const countingLoader: EntryLoader = async (entry) => {
+      hostLoads += 1;
+      return loadEntry(entry);
+    };
+    const apps = createAppsService({ dataDir, runner: fakeRunner().runner, loadEntry: countingLoader });
+    await apps.install(localDir); // 装机通尾收割（1 次宿主装载——装机显式信任前提）
+    const afterInstall = hostLoads;
+    expect(afterInstall).toBe(1);
+
+    // 分域行（缺省闩一 external）显式 rowId：补档 = 复制装机档，零宿主装载
+    //（修复前：refreshLedger 对行入口走宿主 loadEntry → +1 必红）
+    await apps.mount('my-plugin', { apps: ['chat'], rowId: 'my-plugin-ext' });
+    expect(hostLoads).toBe(afterInstall);
+    // 行数据根补档内容 = 装机档原样复制（词表是包属性非行属性——同包多行同词表）
+    expect(readFileSync(join(dataDir, 'apps', 'my-plugin-ext', 'data.json'), 'utf8')).toBe(
+      readFileSync(join(dataDir, 'apps', 'my-plugin', 'data.json'), 'utf8'),
+    );
+    expect(
+      JSON.parse(readFileSync(join(dataDir, 'apps', 'my-plugin-ext', 'data.json'), 'utf8')).declaredEvents,
+    ).toEqual(['demo/one']);
+
+    // 对照：main 行显式 rowId 照旧宿主收割（main 域本就宿主进程执行——信任面内）
+    await apps.mount('my-plugin', { apps: ['hermes'], carrier: 'main', rowId: 'my-plugin-main' });
+    expect(hostLoads).toBe(afterInstall + 1);
+
+    // 装机档缺席兜底（异常形态——install 通尾必落档，手删模拟损坏）：行根落
+    // null 档，检视面按 unknown 档最坏假设警示
+    rmSync(join(dataDir, 'apps', 'my-plugin', 'data.json'));
+    await apps.mount('my-plugin', { apps: ['goal'], rowId: 'my-plugin-orphan' });
+    expect(JSON.parse(readFileSync(join(dataDir, 'apps', 'my-plugin-orphan', 'data.json'), 'utf8'))).toEqual({
+      app: 'my-plugin-orphan',
+      declaredEvents: null,
+    });
   });
 
   it('mount 撞名双层拒：overlay 同 id 行 / 官方默认层同 id 行（replace-via-mount 皆拒）', async () => {

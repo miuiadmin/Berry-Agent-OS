@@ -21,6 +21,7 @@ export {
   deriveWritableRoots,
   externalWritableRoots,
   externalEffectiveRoots,
+  intersectRoots,
   isInsideRoot,
   expandCarveOutEntry,
   buildCarveOutTable,

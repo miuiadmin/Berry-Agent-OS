@@ -592,6 +592,31 @@ describe('ConversationDriver + durable 接线', () => {
     expect((decided!.data as { decision: string }).decision).toBe('approve');
   });
 
+  it('桥帧 durable 落账不进前台聚焦会话（R1 复盘批二 11d——宁缺勿错位；修复前必红）', async () => {
+    const runtime = await assemble();
+    // 前台聚焦会话在位（boot 新建——durable 转发壳 routed() 的回退落点）
+    const session = runtime.session!;
+    const gateCount = () => session.events.filter((e) => e.type === 'gate/decision').length;
+    const before = gateCount();
+    // 最小管道探针 def（不注册——注册与否不改变 gate 落账接线，管道三段全真）
+    const probe: ToolDefinition = {
+      name: 'gate-ledger-probe',
+      description: 'durable 落账路由探针',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    };
+    // 桥帧形态（svc-invoke/tool-run 还帧同款）：caller 有帧、session 链无帧——
+    // 修复前 routed() 回退前台聚焦 → gate/decision 落进不相干前台会话账本
+    //（归因错位比零落账更糟——污染他人清算面，宪章八）
+    await runInCallerChain('row-bridge-ledger', () =>
+      runtime.tools.executor!(probe, 'bridge:ledger:1', {}, undefined, undefined, 'service'),
+    );
+    expect(gateCount()).toBe(before); // 桥帧 no-op——宁缺勿错位
+    // 对照（宿主帧：无 caller 帧）：回退前台聚焦照旧生效——守卫只拦桥形态
+    await runtime.tools.executor!(probe, 'host:ledger:2', {}, undefined, undefined, 'service');
+    expect(gateCount()).toBe(before + 1);
+  });
+
   it('session/event 活体镜像（契约篇 §2.2）：append 后同步上总线，载荷 { sessionId, event } 信封', async () => {
     const { streamFn } = scriptedStream([textMessage('答')]);
     const runtime = await assemble({ streamFn });

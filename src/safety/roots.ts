@@ -97,6 +97,30 @@ export function isInsideRoot(child: string, root: string): boolean {
 }
 
 /**
+ * 多份根列表取交集（R1 复盘批二——「宿主内代执行写面」统一闸的栈交集语义，
+ * 契约篇 §1.7 第 11b 条）：caller 链栈上每个有行声明的帧各自给出有效白名单，
+ * 全栈取交（**窄者胜**——链上任一行的声明都约束本执行，借道不丢约束）。
+ * 路径集语义下 r ∈ 交集 ⟺ r 同时落在两列表某根内——实现为双向包含扫描
+ * （A 的根被 B 包含者保留 ∪ B 的根被 A 包含者保留，去重），目录前缀包含
+ * 关系下自然取到更深者。任一列表为空 = 交集为空（只读）；空输入 = 空集。
+ * 与 externalEffectiveRoots 的「基线 ∩ 声明」是同族但不同面：那是装载期
+ * 单行推导（声明滤基线），这是运行期多帧叠约束（会话档/多行帧取交）。
+ */
+export function intersectRoots(lists: readonly (readonly string[])[]): string[] {
+  if (lists.length === 0) return [];
+  // 双向包含扫描取单对交集，多列表逐对 reduce（结合律成立——路径集交）
+  const [first, ...rest] = lists;
+  return rest.reduce<string[]>(
+    (acc, next) => {
+      const keepAcc = acc.filter((x) => next.some((y) => isInsideRoot(x, y)));
+      const keepNext = next.filter((y) => acc.some((x) => isInsideRoot(y, x)));
+      return [...new Set([...keepAcc, ...keepNext])];
+    },
+    [...first!],
+  );
+}
+
+/**
  * carve-out 条目展开：pattern → canonical 绝对路径集合。
  * 字面 pattern 直接转绝对；含 `*` 的 pattern 扫描其所在目录层（单层，不
  * 递归）把实际存在的匹配项展开——「glob 先展开再遮罩」。展开结果同时用于

@@ -263,7 +263,8 @@ export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskF
       ),
       config: Type.Optional(
         Type.Record(Type.String(), Type.Unknown(), {
-          description: '行配置（可选，经应用声明 schema 校验——校验不过即拒、不落盘）',
+          description:
+            '行配置（可选；仅 carrier=main 可携带——分域行〔worker/external/缺省闩一〕config 校验面在域侧，宿主代校验打穿进程墙即拒；main 行经应用声明 schema 校验，不过即拒、不落盘）',
         }),
       ),
       ...pairParameters(),

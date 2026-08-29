@@ -115,6 +115,32 @@ export default async function apply(ctx) {
 }
 `;
 
+/** 侧门双封 fixture（R1 复盘批二）：声明 optionalInject:['tools'] 后 tryGet——
+ * 修复前拿到宿主服务代理（register 走 svc-invoke('tools',...) → 测试桩抛
+ * METHOD_NOT_FOUND）；修复后拿到本地桩（register 走 tools-register 帧成功） */
+const FX_TOOLS_SIDEDOOR = `
+export const name = 'fx-sidedoor';
+export default async function apply(ctx) {
+  const seen = [];
+  ctx.provide('fx/sidedoor-taps', { seen: () => seen });
+  const t = ctx.tryGet('tools');
+  seen.push('defined=' + (t !== undefined));
+  if (t !== undefined) {
+    try {
+      await t.register({
+        name: 'fx/sd',
+        description: '侧门探针',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => ({ content: [{ type: 'text', text: 'sd' }] }),
+      });
+      seen.push('register:ok');
+    } catch (err) {
+      seen.push('register:err:' + err.code);
+    }
+  }
+}
+`;
+
 /** 直连域：MessageChannel 两端各挂一个端点（worker 端 = 被测件；宿主端 = 记录型桩） */
 interface TestChannel {
   /** 宿主端点（测试驱动面） */
@@ -274,6 +300,22 @@ describe('startWorkerRealm — svc.apply（桩 ctx 与注册结算）', () => {
     await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
     const err = await rejection(ch.host.call('svc', 'apply', ['fx', {}, {}]));
     expect(err.code).toBe(BRIDGE_SURFACE_NARROWED);
+  });
+
+  it('tryGet("tools") 特判拦截（R1 复盘批二侧门双封）：optionalInject 声明后拿到本地桩非宿主代理', async () => {
+    const { ch, dir } = setup();
+    const entry = writeApp(dir, 'fx-sidedoor.ts', FX_TOOLS_SIDEDOOR);
+    await ch.host.call('svc', 'load', [{ id: 'fx', entry }]);
+    // presence['tools']=true（宿主激活探测命中——本测试的宿主桩直接给真值）
+    await ch.host.call('svc', 'apply', ['fx', {}, { tools: true }]);
+    const seen = (await ch.host.call('svc', 'invoke', ['fx', 'fx/sidedoor-taps', 'seen', []])) as string[];
+    // 修复前：tryGet 无特判 → makeHostServiceProxy → register 走
+    // svc-invoke('tools','register') → 测试桩保码抛 → seen 落
+    // 'register:err:BRIDGE_METHOD_NOT_FOUND'（本例必红）
+    expect(seen).toContain('defined=true');
+    expect(seen).toContain('register:ok');
+    // 工具注册走 tools-register 帧（本地桩行为面）——svc-invoke 通道零 'tools' 帧
+    expect(ch.toolRegs.some((r) => JSON.stringify(r).includes('fx/sd'))).toBe(true);
   });
 });
 

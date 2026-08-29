@@ -54,8 +54,8 @@ import { spawnWorkerDomain, bridgeWorkerUrl, type WorkerDomain } from '../bridge
 import { spawnExternalDomain, type ExternalDomain } from '../bridge/external-domain.js';
 import {
   canonicalPath,
+  externalEffectiveRoots,
   externalWritableRoots,
-  isInsideRoot,
   derivePmFlags,
   type SandboxService,
 } from '../safety/index.js';
@@ -215,15 +215,30 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
    * COMPOSITION_ROW_INVALID 拒（拒绝式——宁响亮不静默钳）；有效白名单 =
    * 基线 ∩ 行声明（声明缺席 = 全基线；交集可空 = 只读域）。
    * 两道验：词法归一验（声明形）+ 实化后复验（R1 P0-5 立法，见内注）。
+   * 单源统一（R1 复盘批二 11e）：交集滤除与缺省全基线**全走
+   * externalEffectiveRoots 同函数**（与 assembly rowConfinementLookup 运行期
+   * 消费面同一 containment 语义——本件只做「差集命名 + 拒绝式抛错 + 实化」，
+   * 不复刻包含判定）；缺省档（声明缺席）基线同样实化返回（mkdir+realpath
+   * 归一——与声明档同形，PM 旗/OS bind/TMPDIR 均绑实形无 symlink 漂移窗）。
    */
   const resolveEffectiveRoots = (ext: NonNullable<BridgeFleetOptions['external']>, row: AppPlanRow): string[] => {
-    const baseline = externalWritableRoots(ext.workspace, appDataDirOf(ext.dataDir, row.id));
+    const appDataDir = appDataDirOf(ext.dataDir, row.id);
+    const baseline = externalWritableRoots(ext.workspace, appDataDir);
     const declared = row.sandbox?.fs?.writableRoots;
-    if (declared === undefined) return baseline;
-    // 第一道·词法归一验：声明根归一后逐一验在基线内（相等或隔分隔符前缀——
-    // 子目录收窄合法，/ws-evil 撞 /ws 前缀不合法〔isInsideRoot 分隔符特判〕）
-    const normalized = declared.map(canonicalPath);
-    const outside = normalized.filter((d) => !baseline.some((b) => isInsideRoot(d, b)));
+    /** 实化（mkdir 预建 + realpath 归一）——两档同形（坑三序：先预建再归一） */
+    const realize = (roots: readonly string[]): string[] =>
+      roots.map((root) => {
+        mkdirSync(root, { recursive: true });
+        return canonicalPath(root);
+      });
+    if (declared === undefined) {
+      // 缺省档 = 全基线实化返回（R1 复盘批二 11e——与声明档同形）
+      return realize(baseline);
+    }
+    // 第一道·词法归一验（单源：externalEffectiveRoots 同函数滤，差集即越界
+    // 命名——/ws-evil 撞 /ws 前缀不合法〔isInsideRoot 分隔符特判〕）
+    const lexical = externalEffectiveRoots(ext.workspace, appDataDir, declared);
+    const outside = declared.map(canonicalPath).filter((d) => !lexical.includes(d));
     if (outside.length > 0) {
       throw new AppError(
         COMPOSITION_ROW_INVALID,
@@ -240,11 +255,9 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
     // 不到基线外）+ 复验与预建间换 symlink 的竞态窗（堵死需 openat 级原语，
     // 非本批）——拒绝式执法拦的是域起 spawn 与 PM/OS 两层旗授权，装载拒绝
     // 后行不生效、旗不会落地。
-    const realized = normalized.map((root) => {
-      mkdirSync(root, { recursive: true });
-      return canonicalPath(root);
-    });
-    const realizedOutside = realized.filter((r) => !baseline.some((b) => isInsideRoot(r, b)));
+    const realized = realize(declared.map(canonicalPath));
+    const realizedLexical = externalEffectiveRoots(ext.workspace, appDataDir, realized);
+    const realizedOutside = realized.filter((r) => !realizedLexical.includes(r));
     if (realizedOutside.length > 0) {
       throw new AppError(
         COMPOSITION_ROW_INVALID,
@@ -379,6 +392,16 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           ...(ext.externalUrl !== undefined ? { externalUrl: ext.externalUrl } : {}),
           ...spawnOpts,
         });
+      } else if (carrier === 'external') {
+        // external 行 + external 装配参数缺席 = 响亮拒载（R1 复盘批二 11e——契约篇
+        // §1.7）。修复前此处静默落 worker 线程域：「external 声明被降格执行」比拒绝
+        // 更糟——进程墙承诺（宪章七）在线程域不存在，操作者从行状态看不出降格。
+        // 裁剪装配面（测试/诊断形态）同拒——与加载器「分域装载器未注入」分支同
+        // 语义，不因场景放水
+        throw new AppError(
+          APP_LOAD_FAILED,
+          `external 行 ${row.id} 装载失败：舰队未注入 external 装配参数（本装配面未启用 external 载体能力——契约篇 §1.7 第 11e 条，fail-closed 拒载不降格 worker 线程域）`,
+        );
       } else {
         // worker 腿（worker 线程域——resourceLimits 预算执法）
         const rowLimits = opts.rowResourceLimits !== undefined ? opts.rowResourceLimits(row) : undefined;

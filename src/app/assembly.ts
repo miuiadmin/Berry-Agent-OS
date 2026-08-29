@@ -88,7 +88,7 @@ import {
 } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
-import { chainCaller, runInCallerChain } from '../context/chain.js';
+import { chainCaller, chainSessionId, runInCallerChain } from '../context/chain.js';
 import type { RowAppProbe } from '../contracts/app.js';
 import { resolveRowCarrier } from '../contracts/app.js';
 import type { AppLoadResult } from '../contracts/app.js';
@@ -506,12 +506,20 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   // durable 转发壳（S1 收窄）：管道守门与审批对构造期绑壳，落账路由走 registry
   //（惰性引用——⑨ 创建；gate/approval 只在 run 运行期触发，届时 registry 必已就位）。
-  // 件未装载/无持久层时 routed() 恒 undefined——三路皆 no-op，与 persist:false 同款降级
+  // 件未装载/无持久层时 routed() 恒 undefined——三路皆 no-op，与 persist:false 同款降级。
+  // 桥帧守卫（R1 复盘批二 11d——契约篇 §1.7）：session 链无帧 + caller 链有帧 =
+  // 分域行经桥的宿主内代执行（svc-invoke/tool-run 还帧的行 id），本无宿主会话
+  // 语境——routed() 回退前台聚焦会把归因落进不相干前台会话账本（比零落账更糟：
+  // 污染他人清算面，宪章八）。此形态不落账（no-op 宁缺勿错位）；宿主级 durable
+  // 落点（桥调用独立审计账——不挂任何会话）挂账，判据 = 首个需要桥调用审计
+  // 回放的真实场景
+  const routedForDurable = () =>
+    chainSessionId() === undefined && chainCaller() !== undefined ? undefined : registry.routed();
   const durableForward: Omit<DurableSinks, 'handle'> = {
-    gate: (payload) => registry.routed()?.durable.gate(payload),
+    gate: (payload) => routedForDurable()?.durable.gate(payload),
     approval: {
-      asked: (payload) => registry.routed()?.durable.approval.asked(payload),
-      decided: (payload) => registry.routed()?.durable.approval.decided(payload),
+      asked: (payload) => routedForDurable()?.durable.approval.asked(payload),
+      decided: (payload) => routedForDurable()?.durable.approval.decided(payload),
     },
   };
 
@@ -1128,6 +1136,22 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * fork 源读点④（骨架篇 §9.3）：链 → 注册表 → 前台聚焦——子工厂在父 tool
    * call 链内调 getSession（链在场=父会话），命令面/程序面调用落聚焦。
    */
+  // 行收窄查询单点闭包（R1 P0-4 → R1 复盘批二双消费面，契约篇 §1.7 增补
+  // 2c + 第 11b 条）：定义前置（下方子代理工厂与 ⑦ 区 exec 服务两处消费——
+  // 本处先于两者）。按 caller 链帧读出的行 id 查该 external 行有效白名单
+  // （基线 ∩ 行声明——单源 externalEffectiveRoots；composition 是 let，闭包
+  // 活取——/reload 重赋后自动见新树，调用时恒已初始化）。「OS 沙箱罩后代」
+  // 与「委派借道不拿会话档宽面」两执法通道同源：分域行经 svc-invoke 调宿主
+  // exec 的间接子进程按 confine writableRoots 显式覆盖收窄；external 行经
+  // tool-run 调全局层委派工具 → 子代理 fs 写面按栈交集收窄。非行帧 / 行不
+  // 在表 / 非 external 载体 = undefined = 会话档现行为。组合根注入闭包
+  // （exec 与 factory 拓扑上不能 import app 的 composition 现实）。
+  const rowConfinementLookup = (caller: string | undefined): readonly string[] | undefined => {
+    if (caller === undefined) return undefined;
+    const row = composition.rows.find((r) => r.id === caller);
+    if (row === undefined || resolveRowCarrier(row) !== 'external') return undefined;
+    return externalEffectiveRoots(workspace, appDataDirOf(dataDir(), row.id), row.sandbox?.fs?.writableRoots);
+  };
   const subagentChildFactory = createSubagentChildFactory({
     ...(persistence ? { persistence } : {}),
     // 父驱动活取值（域键升级批：session 与 appId 单次 routed() 原子取——派生腿
@@ -1143,6 +1167,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     workspace,
     sandboxMode,
     rootCtx: ctx,
+    // 行收窄注入（R1 复盘批二）：子代理自建 fs 写面 = 会话档 ∩ caller 链栈行
+    // 声明交集——external 行委派借道不再拿会话档宽面（契约篇 §1.7 第 11b 条）
+    confinementFor: rowConfinementLookup,
     // 守门行传导判据（第三十一批 P1-4）：anchors = 根名 + 锚 fork 名拼成的 owner
     // 完整前缀（根名 'app' = :398、锚 fork 'ring1'/'apps' = :1219/:1491 三处
     // 字面量的镜像——/reload 重建锚同名，前缀恒定）；mainRows 活取组合树 main
@@ -1384,25 +1411,15 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 走全局管道（无驱动语境面——与 ctx.fetch 同形，服务调用不旁路守门与落账，
    * 内部名 exec 不进模型词汇表）。 */
   ctx.provide('sandbox', sandbox);
-  // 行收窄注入面（R1 P0-4，契约篇 §1.7 增补 2c R1 注记）：exec 服务按
-  // caller-chain 行 id 查该 external 行有效白名单（基线 ∩ 行声明——单源
-  // externalEffectiveRoots），作为 confine 的 writableRoots 显式覆盖面。
-  // 「OS 沙箱罩后代」的执法通道：分域行经 svc-invoke 调宿主 exec 产生的
-  // 间接子进程按行收窄软禁，不吃会话档宽面（workspace ∪ /tmp 族——/tmp 族
-  // 按第三十七批裁定本就不在 external 基线）。非行帧 / 行不在表 / 非
-  // external 载体 = undefined = 会话档现行为。组合根注入闭包（exec 拓扑上
-  // 不能 import app）。
+  // 行收窄注入面（R1 P0-4 → R1 复盘批二双消费面）：exec 服务与子代理工厂
+  // 共用前置定义的 rowConfinementLookup（见上方子代理工厂装配处注释——
+  // 契约篇 §1.7 增补 2c + 第 11b 条）
   registerExecService(ctx, {
     pipeline,
     sandbox,
     mode: () => sandboxMode,
     workspaceRoot: workspace,
-    confinementFor: (caller) => {
-      if (caller === undefined) return undefined;
-      const row = composition.rows.find((r) => r.id === caller);
-      if (row === undefined || resolveRowCarrier(row) !== 'external') return undefined;
-      return externalEffectiveRoots(workspace, appDataDirOf(dataDir(), row.id), row.sandbox?.fs?.writableRoots);
-    },
+    confinementFor: rowConfinementLookup,
   });
 
   /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词）----

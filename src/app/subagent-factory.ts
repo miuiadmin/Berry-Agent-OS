@@ -16,7 +16,7 @@
  */
 
 import { createContext, snapshotHandlers, appendHandlers } from '../context/context.js';
-import { runInSessionChain } from '../context/chain.js';
+import { runInSessionChain, chainCallers } from '../context/chain.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { TOOL_POST_EXECUTE_EVENT, TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import { startRun } from '../agent/loop.js';
@@ -31,7 +31,7 @@ import type { Persistence } from '../persist/index.js';
 import type { SandboxMode } from '../safety/index.js';
 import { createApprovalService } from '../safety/approval.js';
 import { installSafetyGate } from '../safety/gate.js';
-import { createRootsProvider } from '../safety/index.js';
+import { createRootsProvider, intersectRoots } from '../safety/index.js';
 import { createToolPipeline } from '../tools/index.js';
 import type { ToolPipelineExecutor } from '../tools/index.js';
 import { registerToolsService } from '../tools/registry.js';
@@ -73,6 +73,16 @@ export interface SubagentFactoryDeps {
     readonly anchors: readonly string[];
     readonly mainRows: () => ReadonlySet<string>;
   };
+  /**
+   * 行收窄查询注入面（R1 复盘批二——契约篇 §1.7 第 11b 条，与 exec 服务
+   * confinementFor 同一组合根闭包）：入参 = caller 链帧读出的行 id，返回
+   * 该行有效白名单（undefined = 非 external 行/行不在表 = 不收窄）。子代理
+   * 自建 fs 的写面 = 会话档推导根 ∩ caller 链全栈行声明交集（窄者胜）——
+   * external 行经 tool-run 调全局层委派工具借子代理 fs 的绕道不再拿到会话
+   * 档宽面（打穿行声明收窄与 /tmp 排除两裁定的洞即此形态）。缺省缺席 =
+   * 父档快照现行为（诊断面/裁剪装配）。
+   */
+  readonly confinementFor?: (caller: string | undefined) => readonly string[] | undefined;
 }
 
 /** context 腿尾轮装配帽（骨架篇 §6.1：N = min(请求值, 装配缺省帽 20 轮)） */
@@ -163,8 +173,27 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
      * toolFilter include 名单对全集过滤（§6.3 声明即执法，不装再拦）。 */
     const pipeline: ToolPipelineExecutor = createToolPipeline(childCtx, { onGateDecision: sinks.gate });
     const tools: ToolsService = registerToolsService(childCtx, { pipeline });
-    // 可写根走 safety 档位推导（与主装配同源；父档闭包快照见 ⑤ 注记）
-    const writableRoots = createRootsProvider({ workspace: deps.workspace, mode: () => deps.sandboxMode });
+    // 可写根走 safety 档位推导（与主装配同源；父档闭包快照见 ⑤ 注记）。
+    // R1 复盘批二栈收窄（契约篇 §1.7 第 11b 条）：注入面在场时，子 fs 写面 =
+    // 会话档推导根 ∩ caller 链全栈行声明交集（provider 活取链——fs 工具在
+    // 子代理工具执行段跑，栈 = [外层分域行帧?, builtin:subagent 帧, …]，任一
+    // 时点全栈追祖都能命中 external 行帧——叠加语义保证帧不丢）。danger 档
+    // 会话级豁免优先（与 exec 服务同款——不因行声明收窄 operator 显式全权）。
+    // 注入面缺席 = 父档快照现行为（裁剪装配/诊断面）。
+    const baseWritableRoots = createRootsProvider({ workspace: deps.workspace, mode: () => deps.sandboxMode });
+    const writableRoots =
+      deps.confinementFor === undefined
+        ? baseWritableRoots
+        : () => {
+            const base = baseWritableRoots();
+            if (deps.sandboxMode === 'danger-full-access') return base;
+            const lookup = deps.confinementFor!;
+            const rowLists = chainCallers()
+              .map((caller) => lookup(caller))
+              .filter((roots): roots is readonly string[] => roots !== undefined);
+            if (rowLists.length === 0) return base;
+            return intersectRoots([base, ...rowLists]);
+          };
     const fsTools = createFsTools({ writableRoots, workspace: () => deps.workspace });
     // 父注册表经根 ctx 取（delegate 工具执行时 Ring 1 tools 行必在场——boot 必备行）
     const parentTools = deps.rootCtx.get<ToolsService>('tools');

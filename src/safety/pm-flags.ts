@@ -55,7 +55,8 @@ export function derivePmFlags(writeRoots: readonly string[], opts?: { tsTransfor
   return [
     // PM 总开关必须领衔：allow-fs-* 是其子旗，缺总开关直接 ERR_MISSING_OPTION
     '--permission',
-    // 读面全域（见头注裁定——OS 层管读 profile）
+    // 读面全域（见头注裁定——R1 复盘批二注记勘正：现行两后端 profile 对
+    // external 域实际防写不防读不防网，读面全域是诚实边界非「OS 层管读」）
     '--allow-fs-read=*',
     // 写面：坑三预建（幂等）+ 坑一归一 + 坑二每根一旗
     ...writeRoots.map((root) => `--allow-fs-write=${prepareRoot(root)}`),

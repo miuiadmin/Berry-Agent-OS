@@ -485,8 +485,9 @@ export interface AppPlanRow {
   /**
    * 行沙箱块透传（CompositionRow.sandbox 原样——加载器经 resolveRowCarrier
    * 解析载体分派：worker 行走分域装载管线（装载校验过界 + apply 于 worker 域
-   * 执行，契约篇 §1.7）、external 行 fail-closed 拒载〔第三十七批增补 2b
-   * 过渡冻结〕、builtin 行携块防御性拒载〔第二执法点〕）。
+   * 执行，契约篇 §1.7）、external 行同走分域装载管线（fork per-行域——
+   * 2026-08-29 carrier 落码批落码，原第三十七批增补 2b 过渡冻结已随该批
+   * 解除）、builtin 行携块防御性拒载〔第二执法点〕）。
    */
   sandbox?: RowSandbox;
 }

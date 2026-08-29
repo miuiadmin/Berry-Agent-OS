@@ -226,8 +226,11 @@ export interface UpdateReport {
 /* ---------------- uninstall 双相四段（契约篇 §3.4 第二刀，2026-08-27 刀 2） ---------------- */
 
 /**
- * 入口一次性装载面（词表收割用，注入边——assembly 注入 jiti 面与 /reload 装载
- * 同一信任前提同一门禁；测试注入替身。缺省不收割：账本 declaredEvents 记 null）。
+ * 入口一次性装载面（词表收割/config 校验用，注入边——assembly 注入 jiti 面；
+ **只在装机类动词（install/update）与 main 行 mount/configure 合法**——装机
+ * 动作的显式信任前提（R1 复盘批二 11c 勘正：分域行入口求值在域侧，宿主
+ * loadEntry 求值分域行 = 打穿宪章七）；测试注入替身。缺省不收割：账本
+ * declaredEvents 记 null）。
  */
 export type EntryLoader = (entry: string) => Promise<Record<string, unknown>>;
 
@@ -989,9 +992,16 @@ export function createAppsService(opts: {
         ...(carrier !== undefined ? { sandbox: { carrier } } : {}),
         ...(mountOpts?.config !== undefined ? { config: mountOpts.config } : {}),
       });
-      // 自定义行 id 的词表账本对齐：数据根随行 id 走（appDataDirOf(rowId)），
-      // 缺省收割只落了装机 id 根——补一份到行数据根，uninstall 检视词表档不缺角
-      if (rowId !== id) await refreshLedger(opts, rowId, appRef);
+      // 自定义行 id 的词表账本对齐（R1 复盘批二 11c——按载体分派）：数据根随行
+      // id 走（appDataDirOf(rowId)），缺省收割只落了装机 id 根——补档到行数据根
+      // 防 uninstall 检视词表档缺角。main 行宿主收割照旧（main 域本就宿主进程
+      // 执行，loadEntry 在信任面内）；分域行（worker/external/缺省闩一推
+      // external）**复制装机档**——宿主 loadEntry 求值分域行入口 = 主进程 jiti
+      // 执行第三方码打穿宪章七进程墙，禁（与上行 config 校验面同一禁令）
+      if (rowId !== id) {
+        if (carrier === 'main') await refreshLedger(opts, rowId, appRef);
+        else await copyLedgerForRow(opts, rowId, id);
+      }
       return {
         id: rowId,
         apps,
@@ -1041,11 +1051,14 @@ export function createAppsService(opts: {
     /**
      * 行配置写入（契约篇 §3.4 刀 2 工具族条——configure 服务面导线）。
      * 执行序：行定位（装载计划 = 唯一事实源）→ 状态门（schema 不可得行拒写：
-     * disabled 挂载休眠 / unresolved 未装 / worker 域结构不可得 / 非 activated）
-     * → 声明 schema 读取（builtin 行 = 官方注册表模块引用零装载；文件行 =
-     * loadEntry 一次性 jiti 装载读 named export config——与词表收割同信任前提
-     * 同门禁）→ 合并（顶层键整值替换）→ 校验（复用装载期同 schema，错配置
-     * 不落盘防 boot 拒启陷阱）→ overlay 整值写回。
+     * disabled 挂载休眠 / unresolved 未装 / 非 main 载体行结构不可得〔R1 P0-3
+     * 扩面：worker/external 同拒——分域行生效 schema 在域内过界不可得，宿主
+     * loadEntry 求值分域行入口打穿宪章七〕 / 非 activated）
+     * → 声明 schema 读取（builtin 行 = 官方注册表模块引用零装载；main 文件行 =
+     * loadEntry 一次性 jiti 装载读 named export config——main 域本就宿主进程
+     * 执行，operator 显式写配置动作与装机同族信任前提）→ 合并（顶层键整值
+     * 替换）→ 校验（复用装载期同 schema，错配置不落盘防 boot 拒启陷阱）→
+     * overlay 整值写回。
      */
     async configure(id, patch) {
       // 空 patch 无语义（整值替换语义下空集不是合法变更）——响亮拒绝防误调造空替换行
@@ -1759,11 +1772,13 @@ export function sweepAppTmpDirs(dataDir: string, logger?: { warn: (msg: string) 
 
 /**
  * 词表账本收割写入（install/update 通尾，刀 2）：resolveAppEntry 解析入口 →
- * 注入的 loadEntry 一次性 jiti 装载（与 /reload 同一信任前提同一 import 门禁）→
- * Object.hasOwn 读 name / events 词名（jiti default-only 命名空间穿透防线——与
- * loader 形状校验同款：命名空间对象上拿到的函数名不冒充 named export）。
- * 任何一步失败**不抛不阻断装机主流程**——declaredEvents 记 null（检视面按
- * unknown 档最坏假设警示）。写入原子（writeAtomicFile）。
+ * 注入的 loadEntry 一次性 jiti 装载（**装机动作的显式信任前提**——与 npm install
+ * scripts 同族语义；「与 /reload 同一信任前提」的原宣称自 R1 复盘批二起勘正：
+ * /reload 装载分域行入口在域侧执行，宿主 loadEntry 只在装机/更新/install 类
+ * 显式装机动词时合法）→ Object.hasOwn 读 name / events 词名（jiti default-only
+ * 命名空间穿透防线——与 loader 形状校验同款：命名空间对象上拿到的函数名不
+ * 冒充 named export）。任何一步失败**不抛不阻断装机主流程**——declaredEvents
+ * 记 null（检视面按 unknown 档最坏假设警示）。写入原子（writeAtomicFile）。
  */
 async function refreshLedger(
   opts: { dataDir: string; loadEntry?: EntryLoader },
@@ -1794,6 +1809,24 @@ async function refreshLedger(
   // 保留名闸已收口于 appDataDirOf（下行取址即闸——撞名行在 mkdir 前抛）
   mkdirSync(appDataDirOf(opts.dataDir, id), { recursive: true });
   writeAtomicFile(dataJsonPath(opts.dataDir, id), `${JSON.stringify({ app: name ?? id, declaredEvents }, null, 2)}\n`);
+}
+
+/**
+ * 词表账本按载体分派补档（mount 显式行 id 时的分域行腿，R1 复盘批二 11c——
+ * 契约篇 §1.7）：词表是**包属性非行属性**（同包多行同词表）——非 main 行不走
+ * 宿主 loadEntry 求值（分域行入口求值 = 主进程 jiti 执行第三方码，打穿宪章七
+ * 进程墙，与 mount config 校验面同一禁令），**复制装机 id 根的既有收割档**到
+ * 行数据根（install 收割建立在装机显式信任前提上，行补档复用其产物不新增
+ * 宿主执行信任面）；装机档缺席（异常形态——install 通尾必落档，缺席即收割
+ * 失败/null 档残留）落 null 档，检视面按 unknown 档警示兜底。
+ */
+function copyLedgerForRow(opts: { dataDir: string }, rowId: string, installId: string): void {
+  const source = dataJsonPath(opts.dataDir, installId);
+  const payload = existsSync(source)
+    ? readFileSync(source, 'utf8')
+    : `${JSON.stringify({ app: rowId, declaredEvents: null }, null, 2)}\n`;
+  mkdirSync(appDataDirOf(opts.dataDir, rowId), { recursive: true });
+  writeAtomicFile(dataJsonPath(opts.dataDir, rowId), payload);
 }
 
 /** 目录体积（字节，递归累加文件 size；目录/符号链接/其他形态跳过——防环且估算够用）；不存在 = undefined */

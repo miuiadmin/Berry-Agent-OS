@@ -6,11 +6,13 @@
  * - 包裹内可见、包裹外不可见（无链 = undefined，读点约定 'host' 兜底）；
  * - 异步下游继承（await 链上的共享服务面调用能读到注册时身份）；
  * - 嵌套内层覆盖外层（最近身份即行为者）；
- * - 与会话链正交（caller 包裹不改会话链取数，反之亦然——两 ALS 独立）。
+ * - 与会话链正交（caller 包裹不改会话链取数，反之亦然——两 ALS 独立）；
+ * - 栈化（R1 复盘批二）：嵌套叠加、chainCaller() 取栈顶（兼容）、
+ *   chainCallers() 全栈追祖（行收窄闸的消费面）。
  */
 
 import { describe, expect, it } from 'vitest';
-import { runInSessionChain, runInCallerChain, chainCaller, chainSessionId } from './chain.js';
+import { runInSessionChain, runInCallerChain, chainCaller, chainCallers, chainSessionId } from './chain.js';
 
 describe('caller 链（导入者归因取数口）', () => {
   it('包裹内可读、包裹外 undefined（host 兜底约定由读点承担）', () => {
@@ -31,6 +33,19 @@ describe('caller 链（导入者归因取数口）', () => {
   it('嵌套内层覆盖外层（最近身份即行为者）', () => {
     const result = runInCallerChain('outer', () => runInCallerChain('inner', () => chainCaller()));
     expect(result).toBe('inner');
+  });
+
+  it('栈化（R1 复盘批二）：嵌套叠加不丢外层帧——chainCallers() 全栈追祖，chainCaller() 取栈顶兼容', () => {
+    // 修复前（单值 ALS）：嵌套即覆盖——外层帧 'ext-row' 在内层包帧后丢失，
+    // 行收窄闸追祖拿不到原行 id（external 行经委派工具借子代理 fs 打穿
+    // 行声明收窄的洞即此形态）。栈化后全栈保留。
+    expect(chainCallers()).toEqual([]);
+    const inner = runInCallerChain('ext-row', () =>
+      runInCallerChain('builtin:subagent', () => ({ stack: [...chainCallers()], top: chainCaller() })),
+    );
+    expect(inner.stack).toEqual(['ext-row', 'builtin:subagent']); // 外层帧保留（从外到内）
+    expect(inner.top).toBe('builtin:subagent'); // 最近身份（栈化前行为兼容）
+    expect(chainCallers()).toEqual([]); // 包裹结束即出栈
   });
 
   it('与会话链正交：caller 包裹不染会话链，会话包裹不染 caller 链', () => {

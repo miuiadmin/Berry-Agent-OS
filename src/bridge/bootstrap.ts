@@ -21,9 +21,11 @@
  *   此码即装配缺陷探针）；
  * - tool-run [rowId,name,args]    → 行绑定验 + tools.get 后**经宿主管道执行器**
  *   执行（工具管道三段在宿主侧唯一实现——schema 校验/守门瀑布/审批
- *   carve-out/timeout/64KiB 出量护栏/durable 审计全生效，origin='service'
+ *   carve-out/timeout/64KiB 出量护栏生效，origin='service'
  *   宿主服务面复入；worker 侧便捷面 run 的宿主终端。R1 复盘批 2026-08-29
  *   管道化——原直调 def.execute 绕三段管道违 registry 自钉纪律）。
+ *   诚实边界（R1 复盘批二 11d）：durable 落账**不生效**——桥帧（caller 有帧
+ *   session 无帧）经转发壳桥帧守卫 no-op（宁缺勿错位），宿主级桥审计账挂账。
  *
  * 生命周期（K3-c 装配接线）：心跳监督 terminate / 域死回卷 / env 与 resourceLimits
  * 由组合根配置——本文件只提供 spawnWorkerDomain 机制面与 terminate 出口。
@@ -166,6 +168,18 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
     .handle('host', 'svc-invoke', ([rowIdArg, nameArg, methodArg, argsArg]) => {
       const rowId = String(rowIdArg);
       requireBinding(rowId, 'svc-invoke');
+      // 'tools' 名响亮拒（R1 复盘批二侧门双封——契约篇 §1.7 第 11a 条）：
+      // ToolsService 是宿主内部件非桥面服务——svc-invoke 直派其方法（尤其
+      // executor）= 绕三段管道的第三条路（toolCallId/origin/def 全自报）。
+      // 域内工具面唯一入口 = worker 半 get/tryGet 特判返回的本地桩 + 桩 run
+      // 走 tool-run 真管道；本闸与 worker 半特判互为冗余防线（防任何代理
+      // 构造路径——假端点/协议复放不含 worker 半拦截）
+      if (String(nameArg) === 'tools') {
+        throw new AppError(
+          BRIDGE_METHOD_NOT_FOUND,
+          "svc-invoke：'tools' 非桥面服务（工具面唯一入口 = 域内桩 run → tool-run 真管道——契约篇 §1.7 第 11a 条侧门双封）",
+        );
+      }
       const svc = t.root.get<Record<string, unknown>>(String(nameArg));
       const fn = svc?.[String(methodArg)];
       if (typeof fn !== 'function') {
@@ -198,8 +212,9 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
       const toolCallId = `bridge:${t.workerId}:${(t.toolRunSeq += 1)}`;
       // origin='service'（宿主服务面复入判别词——同 exec 服务先例）；调用面
       // 区分的审计归因由 toolCallId 前缀 bridge:<域>:<序> 承载（比 origin 更
-      // 精确的身份面）。整个 executor 调用罩行帧——管道三段的 gate/decision
-      // durable 落账同拿行归因
+      // 精确的身份面）。整个 executor 调用罩行帧——行收窄/委派链传导拿行归因；
+      // durable 落账例外（R1 复盘批二 11d）：桥帧无宿主会话语境，转发壳
+      // 桥帧守卫 no-op（宁缺勿错位——不落进不相干前台会话账本）
       return runInCallerChain(rowId, () =>
         executor(def, toolCallId, argsArg as Record<string, unknown>, signal, undefined, 'service'),
       );

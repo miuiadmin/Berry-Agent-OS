@@ -357,6 +357,20 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     expect(forgedTool.message).toContain('无宿主绑定');
   });
 
+  it("svc-invoke 拒 'tools' 直派（R1 复盘批二侧门双封）：ToolsService 非桥面服务——防代理构造路径直调 executor 绕管道", async () => {
+    const { handlers, root, bindings } = setupHandlers();
+    const svcInvoke = handlers.get('host.svc-invoke')!;
+    // 合法绑定行（过绑定验后仍拒——本闸在 name 分派层，与绑定验正交）
+    const scope = root.fork({ name: 'w-sd', rowId: 'w-sd', builtinRow: false });
+    bindings.set('w-sd', { scope });
+    // 修复前：nameArg='tools' 直落 root.get('tools') 拿真 ToolsService →
+    // executor 可被直调（toolCallId/origin/def 全自报绕三段管道）
+    const refused = await rejection(Promise.resolve().then(() => svcInvoke(['w-sd', 'tools', 'executor', [{}]])));
+    expect(refused.code).toBe(BRIDGE_METHOD_NOT_FOUND);
+    expect(refused.message).toContain('非桥面服务');
+    await scope.dispose();
+  });
+
   it('tool-run 经宿主管道执行器（R1 P0-1）：origin=service + bridge: 前缀 toolCallId + 帧 rowId 罩调用链；无执行器响亮拒绝不回退直调', async () => {
     const { handlers, root, tools, bindings } = setupHandlers();
     const toolRun = handlers.get('host.tool-run')!;

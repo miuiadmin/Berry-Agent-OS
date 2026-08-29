@@ -154,6 +154,66 @@ describe('行收窄注入面（R1 P0-4——confinementFor 按 caller-chain 行 
     expect(policies.at(-1)).not.toHaveProperty('writableRoots');
   });
 
+  it('多帧命中取交集（R1 复盘批二栈化）：嵌套帧窄者胜——借道不丢约束', async () => {
+    // 栈形：external 行帧（svc-invoke/tool-run 还帧）内再起委派工具（执行段
+    // 按注册归属重包）→ 栈 = [row-a, row-b]。两行各有声明时交集收窄：
+    // row-a → [/ws/a]，row-b → [/ws/a/sub, /ws/c] → 交集 = [/ws/a/sub]。
+    // 修复前（chainCaller 单帧读最近）：只取 row-b → [/ws/a/sub, /ws/c]，
+    // /ws/c 混入（外层行 a 的约束丢失）——本例必红
+    const policies: Array<{ writableRoots?: readonly string[] }> = [];
+    const recording: SandboxService = {
+      confine: (argv, policy) => {
+        policies.push({ ...policy });
+        return { argv: [...argv], enforcement: 'partial', denialSignatures: [], runnerFailureRules: [] };
+      },
+      registerBackend: () => () => undefined,
+      listBackends: () => [],
+    };
+    const ctx = createContext({ name: 'test-exec-row-intersect' });
+    const pipeline = createToolPipeline(ctx);
+    const service = registerExecService(ctx, {
+      pipeline,
+      sandbox: recording,
+      mode: () => 'workspace-write',
+      workspaceRoot: workspace,
+      confinementFor: (caller) =>
+        caller === 'row-a' ? ['/ws/a'] : caller === 'row-b' ? ['/ws/a/sub', '/ws/c'] : undefined,
+    });
+    await runInCallerChain('row-a', () => runInCallerChain('row-b', () => service.exec('bash', ['-c', 'true'])));
+    expect(policies.at(-1)?.writableRoots).toEqual(['/ws/a/sub']);
+  });
+
+  it('read-only 会话档 + 行帧：执法面 = 行基线非会话档投影（契约篇 §1.7 第 11b 条裁定——行为锁）', async () => {
+    // 两轴正交裁定：会话档管「会话上下文里的写」，行帧管「行代执行的写」——
+    // read-only 会话下行帧 svc-invoke 调 exec 的间接子进程仍按行基线可写
+    // （与域本体 PM 旗同权：域后台不受宿主会话档约束）。本例锁现行行为，
+    // 防未来「交集化」误改静默翻转语义
+    const policies: Array<{ mode: SandboxMode; writableRoots?: readonly string[] }> = [];
+    const recording: SandboxService = {
+      confine: (argv, policy) => {
+        policies.push({ ...policy });
+        return { argv: [...argv], enforcement: 'partial', denialSignatures: [], runnerFailureRules: [] };
+      },
+      registerBackend: () => () => undefined,
+      listBackends: () => [],
+    };
+    const ctx = createContext({ name: 'test-exec-row-readonly' });
+    const pipeline = createToolPipeline(ctx);
+    const service = registerExecService(ctx, {
+      pipeline,
+      sandbox: recording,
+      mode: () => 'read-only',
+      workspaceRoot: workspace,
+      confinementFor: (caller) => (caller === 'row-x' ? ['/ws/row-x-data'] : undefined),
+    });
+    await runInCallerChain('row-x', () => service.exec('bash', ['-c', 'true']));
+    // 行帧覆盖在场（writableRoots = 行基线）——read-only 会话档不放大也不清空它
+    expect(policies.at(-1)).toMatchObject({ mode: 'read-only', writableRoots: ['/ws/row-x-data'] });
+    // 对照：非行帧 read-only = 会话档现行为（无 writableRoots 覆盖）
+    await service.exec('bash', ['-c', 'true']);
+    expect(policies.at(-1)).not.toHaveProperty('writableRoots');
+  });
+
   it('danger-full-access 档透传不 confine（行收窄只发生在受限档——会话级豁免优先）', async () => {
     const policies: unknown[] = [];
     const recording: SandboxService = {

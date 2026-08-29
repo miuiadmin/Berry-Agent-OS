@@ -15,7 +15,12 @@ import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import type { AppPlanRow } from '../contracts/app.js';
-import { BRIDGE_HANDLER_FAILED, BRIDGE_WORKER_EXITED, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
+import {
+  APP_LOAD_FAILED,
+  BRIDGE_HANDLER_FAILED,
+  BRIDGE_WORKER_EXITED,
+  COMPOSITION_ROW_INVALID,
+} from '../contracts/errors.js';
 import type { SandboxService } from '../safety/index.js';
 import { appDataDirOf } from './composition.js';
 import { createBridgeFleet } from './bridge-fleet.js';
@@ -478,6 +483,31 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
     });
     // spawn 前执法：零域产出（装机计数 0——拒载不留孤儿域）
     expect(fleet.stats()).toMatchObject({ spawned: 0, live: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('fail-closed 补漏（R1 复盘批二 11e）：external 行 + external 装配参数缺席 = 响亮拒载，不静默降 worker 线程域（修复前必红）', async () => {
+    const { root, anchor, probeEntry, dir } = setupExternal('fleet-ext-failclosed');
+    // 裁剪装配面形态：不注入 external 参数（worker 腿参数给全——修复前 external
+    // 行会静默吃 worker 腿参数落线程域，进程墙承诺无声消失）
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+    });
+    const row: AppPlanRow = {
+      id: 'ext-nocap',
+      entry: probeEntry,
+      sandbox: { carrier: 'external' },
+    };
+    await expect(async () => fleet.loader.load(row)).rejects.toMatchObject({
+      code: APP_LOAD_FAILED,
+      message: expect.stringContaining('fail-closed 拒载不降格'),
+    });
+    // 零域产出：无静默 spawn（修复前 spawned=1——external 行落 worker 线程域）
+    expect(fleet.stats()).toMatchObject({ spawned: 0 });
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });
