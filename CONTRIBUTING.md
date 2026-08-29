@@ -42,7 +42,7 @@ berry/
 │   ├── compaction/    # Ring 2 官方件：长会话压缩
 │   ├── admin/         # Ring 2 官方件：平台管理面工具
 │   ├── app/           # 组合根（装配序/CLI/组合树/官方件注册表——纯「装」）
-│   └── bridge/        # 官方件：worker 域舰队（进程隔离）
+│   └── bridge/        # 内核固定机制件：分域舰队（worker/external 双载体进程隔离）
 ├── docs/              # 公开文档（架构/使用/应用开发/开发指南/运维）
 └── tools/             # check-topology / check-events / smoke-real / golden
 ```
