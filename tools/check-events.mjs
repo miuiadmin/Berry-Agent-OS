@@ -22,7 +22,9 @@
  * 已知豁免（显式，不静默）：
  * - 动态 append（recoverFromInterruption 的 closer.type——静态不可解析）：
  *   turn/end、tool/result 均另有直接写点兜底，类型本身仍在目录断言内；
- * - reserved 词汇（todo/write 等）：已拍板但当前无宿主写点，目录项显式标记豁免。
+ * - reserved 词汇（已拍板但当前无宿主写点）目录项显式标记豁免——2026-08-30
+ *   todo 纵切落码后 todo/write 写点已现、reserved 翻转，核心 16 类暂无
+ *   reserved 项（机制保留给未来拍板词）。
  *
  * 目录数据源用 jiti 直接导入模块运行时面（不解析 JSDoc——「运行时可枚举」
  * 优于「解析注释」，JSDoc 生成目录留作文档站未来形态，契约篇 §6.3 落码注记）。

@@ -818,3 +818,58 @@ describe('第三纵切：open({app}) 应用进入面（装配默认位 + 审批�
     expect(fresh.session.header.sessionId).not.toBe(s2Id);
   });
 });
+
+describe('todo 纵切全栈（chat 件 todo 机器——工具件 + 跨请求注入 + 新输入段边界）', () => {
+  /** todo 工具调用 assistant 终值（stopReason=toolUse 同款惯例） */
+  const todoCallMessage = (items: Array<{ content: string; status: string }>): AssistantMessage => ({
+    role: 'assistant',
+    content: [
+      { type: 'text', text: '先拆任务再动手' },
+      { type: 'toolCall', id: 'call-todo', name: 'todo', arguments: { items } },
+    ],
+    usage: NO_USAGE,
+    stopReason: 'toolUse',
+    timestamp: 1,
+  });
+
+  /** 请求里 role=user 的文本消息（注入块经 toLlm 映射即此形态） */
+  const userTexts = (context: LlmContext): string[] =>
+    context.messages.filter((m) => m.role === 'user' && typeof m.content === 'string').map((m) => m.content as string);
+
+  it('全链四环：工具域注册 → 模型调 todo 落账 → 同段后续请求回显 → 新用户输入后归零', async () => {
+    // 脚本三响应：①text+todo toolCall ②纯文本（应见注入）③纯文本（新输入后应无注入）
+    const { streamFn, contexts } = scriptedStream([
+      todoCallMessage([{ content: '第一步', status: 'in_progress' }]),
+      textMessage('第一步进行中'),
+      textMessage('新任务收到'),
+    ]);
+    const { runtime } = await assemble({ streamFn });
+    const front = runtime.conversation!;
+
+    // 环 0：首请求无注入（段内尚无表）+ todo 工具在本会话域可见（header 快照）
+    await front.submitOnce('开工');
+    await front.settle();
+    const header = runtime.session!.events.find((e) => e.type === 'request/header')!.data as {
+      toolSchemas: Array<{ name: string }>;
+    };
+    expect(header.toolSchemas.map((t) => t.name)).toContain('todo');
+    expect(userTexts(contexts[0]!).some((t) => t.includes('非本次用户指令'))).toBe(false);
+
+    // 环 1：durable 落账（证据腿）——工具执行即追加 todo/write 核心事件
+    const todoEvents = runtime.session!.events.filter((e) => e.type === 'todo/write');
+    expect(todoEvents).toHaveLength(1);
+    expect((todoEvents[0]!.data as { items: unknown[] }).items).toEqual([{ content: '第一步', status: 'in_progress' }]);
+
+    // 环 2：同段后续请求（工具结果后的续 turn）尾追注入——框架句 + 全表回显
+    expect(contexts.length).toBe(2);
+    const injected = userTexts(contexts[1]!).filter((t) => t.includes('非本次用户指令'));
+    expect(injected).toHaveLength(1);
+    expect(injected[0]).toContain('- [~] 第一步');
+
+    // 环 3：新用户输入即段边界（裁决②/⑥）——旧表不越界，注入归零
+    await front.submitOnce('继续别的');
+    await front.settle();
+    expect(contexts.length).toBe(3);
+    expect(userTexts(contexts[2]!).some((t) => t.includes('非本次用户指令'))).toBe(false);
+  });
+});

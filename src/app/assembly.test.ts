@@ -197,6 +197,7 @@ describe('createRuntime 装配面', () => {
       'edit',
       'ls',
       'bash',
+      'todo',
     ]);
     const commands = runtime.channels.commands.list().map((c) => c.name);
     for (const expected of ['help', 'quit', 'skills']) {
@@ -541,6 +542,7 @@ describe('ConversationDriver + durable 接线', () => {
       'edit',
       'ls',
       'bash',
+      'todo',
     ]);
     // request/header 载荷带应用域腿（血缘显式打标的证据面——契约篇 §5.4；
     // 组装批：无参 open 走默认应用解析（coder 带标在场）→ 首会话打标 coder 域）
@@ -724,6 +726,7 @@ describe('ConversationDriver + durable 接线', () => {
       'edit',
       'ls',
       'bash',
+      'todo',
     ]);
     expect(executions).toBe(1); // 真走了三段管道执行（非仅 schema 可见）
     expect(runtime.session!.events.some((e) => e.type === 'tool/result')).toBe(true);
@@ -1656,6 +1659,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       'edit',
       'ls',
       'bash',
+      'todo',
     ]);
     // 目录服务：ctx.paths 指向组合树目录、应用数据目录可取（首取即建）
     const paths = runtime.ctx.tryGet<{ dataDir(): string; appDataDir(id: string): string }>('paths');
@@ -2501,6 +2505,7 @@ describe('/reload 组合树重载', () => {
       'edit',
       'ls',
       'bash',
+      'todo',
     ]);
     expect(runtime.appsService.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],

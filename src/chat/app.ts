@@ -61,6 +61,7 @@ import { APPROVAL_ANSWER_EVENT, createApprovalService } from '../safety/approval
 import { installSafetyGate } from '../safety/gate.js';
 import type { AllowlistEntry } from '../safety/allowlist.js';
 import { createBashTool, type CommandProcessLog } from '../exec/tool.js';
+import { createTodoTool, registerTodoInjection } from './todo.js';
 import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import { createFsTools } from '../tools/fs.js';
@@ -849,7 +850,7 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         // 命令进程登记簿透传（宿主猝死孤儿治理——见 ChatAppDeps.commandLog 注）
         ...(deps.commandLog !== undefined ? { commandLog: deps.commandLog } : {}),
       });
-      const domainDisposers = [...fsTools.tools, bashDef].map((def) =>
+      const domainDisposers = [...fsTools.tools, bashDef, createTodoTool(session)].map((def) =>
         tools.register(def, { driver: sessionId, domain: appId }),
       );
       const disposeDomainTools = (): void => {
@@ -1023,6 +1024,11 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         ctx.logger.warn('无持久层（persist:false）——chat 官方件空转：不建会话、不起驱动、不供 agent 服务');
         return;
       }
+      // todo 注入件（骨架篇 §6.7 落码形态定稿④）：角色 + context_transform 瀑布
+      // handler 装载面注册——必须挂在本早退**之前**：/reload 支线（下方）只重挂
+      // 服务面不重跑 boot 段，而 ctx.on 注册随锚回卷——重装载后 apply 重入经此
+      // 路重挂注入件（注册幂等：作用域 effect 栈各归各次装载）
+      registerTodoInjection(ctx, registry);
       // /reload 重装载支线：注册表非空（驱动条目跨重装载存续——重装载是装载面
       // 变更不是会话变更），只重挂服务面（旧 provide 已随锚回卷）
       if (entries.size > 0) {

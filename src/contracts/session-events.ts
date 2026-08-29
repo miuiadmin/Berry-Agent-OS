@@ -117,7 +117,9 @@ export const CORE_EVENT_TYPES: readonly SessionEventTypeDefinition[] = [
   { type: 'assistant/message', category: 'surface' },
   { type: 'tool/call', category: 'surface' },
   { type: 'tool/result', category: 'surface' },
-  { type: 'todo/write', category: 'surface', reserved: true },
+  // todo/write 宿主写点已落（chat 件 todo 工具，骨架篇 §6.7 落码形态定稿
+  // 2026-08-30）——reserved 豁免同笔翻转，写点受族 3 门禁约束
+  { type: 'todo/write', category: 'surface' },
   { type: 'request/header', category: 'snapshot' },
   { type: 'session/end-seed', category: 'log-only' },
   { type: 'approval/asked', category: 'log-only' },
