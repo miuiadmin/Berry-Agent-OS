@@ -97,10 +97,11 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   // S3 focus 变化重画（三写点通知：open 新开 / open 幂等命中 / switchTo——同值
   // 零通知）：清屏 + 目标会话历史重画 + 在飞占位槽按 entryStatus 续流
   const disposeFocusSubscription = runtime.drivers.onFocusChange((sessionId) => tui.repaint(sessionId));
-  // 可卸提示：无对话循环时示明现状（命令面仍可用——/apps 可查、/reload 可试）
+  // 可卸提示：无对话循环时示明现状（命令面仍可用——/apps 可查、/reload 可试）；
+  // 两因：chat 件被禁 / 默认应用解析无果（组装批兜底态——open 防御降级）
   if (runtime.conversation === undefined) {
     runtime.ui.notify(
-      '对话应用未装载（builtin:chat 被禁用或 persist:false）——输入不会得到应答；/apps 查看装配，/quit 退出。',
+      '对话应用未装载或默认应用不可用（builtin:chat 被禁用 / 默认应用组件缺场 / persist:false）——输入不会得到应答；dump-config 查看装配，/quit 退出。',
     );
   }
 

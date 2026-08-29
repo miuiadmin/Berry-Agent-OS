@@ -16,7 +16,7 @@
 import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { loadComposition, OVERLAY_FILENAME, safeModeComposition, type CompositionReport } from './composition.js';
-import { loadOfficialApps } from './app-registry.js';
+import { loadOfficialApps, assertAppComponents, resolveDefaultApp } from './app-registry.js';
 import { createBuiltinRegistry } from './builtins.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { createMcpSpawner } from './mcp-spawn.js';
@@ -111,6 +111,31 @@ function renderInstalledUnmounted(statuses: readonly AppStatusRow[]): string {
 }
 
 /**
+ * 默认应用披露行（组装批默认应用键，契约篇 §5.4 冷读 M7/m13）：解析出的默认
+ * id + 缺场回落原因——回落发生了用户须能知道为何（禁一件默认应用换人是
+ * components 诚实声明的自然后果，诊断面如实呈现链路）。
+ * @param apps 官方清单表
+ * @param gaps 组件缺场表（与解析同源——per-open 活取同一投影的快照）
+ */
+function renderDefaultApp(
+  apps: ReadonlyMap<string, { id: string; default?: boolean }>,
+  gaps: ReadonlyMap<string, readonly string[]>,
+): string {
+  const marked = [...apps.values()].find((m) => m.default === true);
+  // 第一跳：带标在场（无缺场记录）
+  if (marked !== undefined && !gaps.has(marked.id)) return `默认应用：${marked.id}`;
+  // 回落链/兜底态：拼原因（带标缺场 → 缺哪些件；chat 可达性另判）
+  const markedNote =
+    marked === undefined
+      ? '无 default: true 声明清单'
+      : `${marked.id} 缺场（缺组件：${gaps.get(marked.id)?.join('、') ?? '?'}）`;
+  const chat = apps.get('chat');
+  if (chat !== undefined && !gaps.has('chat')) return `默认应用：chat（回落——${markedNote}）`;
+  const chatNote = chat === undefined ? 'chat 清单缺席' : `chat 缺场（缺组件：${gaps.get('chat')?.join('、') ?? '?'}）`;
+  return `默认应用：（无——默认解析无果：${markedNote}；${chatNote}——open 防御降级，查组件缺场行）`;
+}
+
+/**
  * 组合树打印主流程。
  * @param options 组合根选项透传（与生产同参——诊断的就是实际生效组合）
  * @returns 进程退出码（0 = 全激活/显式跳过；1 = 装载失败清单）
@@ -137,6 +162,8 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         renderCompositionTree(runtime.composition, runtime.appsService.list()),
         // 挂载分组（D1 清单投影批 F13）：系统合成 + 各在册应用合成分两类打印
         renderMountGrouping(runtime.composition, [...runtime.apps.keys()]),
+        // 默认应用披露（组装批 M7/m13）：解析出的默认 id + 缺场回落原因
+        renderDefaultApp(runtime.apps, runtime.appGaps),
         // 仓库态件（D2 装机两态批）：已装未挂的装机仓库差集——断头路警示位
         renderInstalledUnmounted(runtime.appsService.list()),
         // 应用面（契约篇 §5.4 第二纵切——官方清单装载 + 组件在场断言产物）：
@@ -231,6 +258,9 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         process.stdout.write(renderCompositionTree(fallbackTree) + '\n');
         // 挂载分组同构（D1）：兜底树与实装树同一分组口径（官方清单现读）
         process.stdout.write(renderMountGrouping(fallbackTree, [...officialApps.keys()]) + '\n');
+        // 默认应用披露同构（组装批 M7）：与成功路同口径——官方清单现读 + 兜底树
+        // 算缺场（assertAppComponents 纯读合成产物，诊断态零装载即可调用）
+        process.stdout.write(renderDefaultApp(officialApps, assertAppComponents(officialApps, fallbackTree)) + '\n');
       } catch {
         // 合成本身失败——跳过树，错误信息即诊断
       }

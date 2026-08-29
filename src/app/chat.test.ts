@@ -683,8 +683,9 @@ describe('S5 审批守门归属（fresh 作用域三件 + answerer 标签 + bash
     await a.driver.submitOnce('跑 A');
     expect(prompts).toHaveLength(1); // answerer 真接线（修复前 fresh 作用域无 answerer →
     // ask = unavailable，confirm 零调用，工具结果为 unavailable 文案——本断言必红）
-    // 弹窗标签：[chat·A 短id] + #approvalId 短形 + summary + 理由 + 批准问句
-    expect(prompts[0]).toContain(`[chat·${aId.slice(0, 8)}]`);
+    // 弹窗标签：[coder·A 短id]（组装批：boot 缺省驱动 = 默认应用 coder 域）+
+    // #approvalId 短形 + summary + 理由 + 批准问句
+    expect(prompts[0]).toContain(`[coder·${aId.slice(0, 8)}]`);
     expect(prompts[0]).toMatch(/#[0-9a-f]{4}/);
     expect(prompts[0]).toContain('沙箱升权 read-only → workspace-write');
     expect(prompts[0]).toContain('A 的升权理由');
@@ -704,9 +705,9 @@ describe('S5 审批守门归属（fresh 作用域三件 + answerer 标签 + bash
     const bId = b.session.header.sessionId;
     await b.driver.submitOnce('跑 B');
     expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain(`[chat·${bId.slice(0, 8)}]`);
+    expect(prompts[1]).toContain(`[coder·${bId.slice(0, 8)}]`); // B 同走默认位（coder 域）
     expect(prompts[1]).toContain('B 的升权理由');
-    expect(prompts[1]).not.toContain(`[chat·${aId.slice(0, 8)}]`);
+    expect(prompts[1]).not.toContain(`[coder·${aId.slice(0, 8)}]`);
     const bTypes = b.session.events.map((e) => e.type);
     expect(bTypes).toContain('approval/asked');
     expect(bTypes).toContain('approval/decided');

@@ -117,7 +117,13 @@ import {
   type CompositionReport,
   type PlanPartition,
 } from './composition.js';
-import { loadOfficialApps, assertAppComponents, resolveApp, mergeRequestForApp } from './app-registry.js';
+import {
+  loadOfficialApps,
+  assertAppComponents,
+  resolveApp,
+  mergeRequestForApp,
+  resolveDefaultApp,
+} from './app-registry.js';
 import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
 import { createMcpSpawner } from './mcp-spawn.js';
@@ -1227,7 +1233,22 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
    * 挂 ⑥b 原位不动） */
   const sandbox = createSandboxService();
+  /* 应用组件缺场表（组装批默认应用键——声明提前 + 合成后赋值）：appGaps 是
+   * resolveApps 闭包的活读源（per-open 活取），必须在 chatBundle 构造前声明、
+   * 在组合树合成后（装载 ⑨ 之前）赋真值——boot 首驱动 open 发生于 chat 件
+   * 装载期，届时缺场投影必须已就位（assertAppComponents 纯读合成产物：rows
+   * 的 pkg/apps 键与 plan 的 skip/unresolved 合成期已定，装载前后同值——
+   * 前移无行为差，装载失败行走 boot 拒启不走此表）。/reload 全量 :2072 重赋、
+   * 单区 :1965 合并更新照旧。诊断出口 = debug 日志 + runtime.appGaps。 */
+  let appGaps = new Map<string, readonly string[]>();
   const chatBundle = createChatApp({
+    // 应用面解析器（组装批默认应用键）：resolveDefaultApp 纯函数 + officialApps/
+    // appGaps 活闭包——per-open 活取（缺场随当下组合树投影）；resolveById 供
+    // string resume 取目标会话归属域（契约篇 m4）
+    resolveApps: {
+      resolveDefault: () => resolveDefaultApp(officialApps, appGaps),
+      resolveById: (id) => (appGaps.has(id) ? undefined : officialApps.get(id)),
+    },
     ...(persistence ? { persistence } : {}),
     resumeSession: opts.resumeSession,
     // CLI --app 进入面（第三纵切）：boot 首驱动即该应用域；显式档标记供审批
@@ -1343,6 +1364,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   // 的 fresh 读盘不过滤（救援环——boot 安全模式 → 修 overlay → /reload 恢复
   // 全树，进程内闭环，见 reload 内注记）
   if (opts.noApps) composition = safeModeComposition(composition);
+  /* 应用组件在场断言（契约篇 §5.4）：合成后即刻赋 appGaps 真值——boot 首驱动
+   * open（装载 ⑨ chat 件装载期）读缺场投影时已就位。缺场 = 应用级隔离不拒启
+   * （声明了没装 = 用户裁量非发行事故）；安全模式下 Ring 2 全缺场 → 默认应用
+   * 缺场 → 默认位解析走回落链/兜底态（--no-apps 的 run 语义性失败即此族）。 */
+  appGaps = assertAppComponents(officialApps, composition);
+  for (const [id, missing] of appGaps) {
+    ctx.logger.debug('应用组件缺场（应用级隔离）', { app: id, missing });
+  }
   // 行挂载目标投影重建（D1）：boot 合成产物（安全模式过滤后）即投影源——
   // 早于一切装载（Ring 1 ③/应用 ⑨ 的注册面路由与拒载执法即刻生效）
   syncRowAppMap(composition);
@@ -1621,12 +1650,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // refresh 保留；提示词半边随 open 即新纪元物化，不再全局 rebuild）
     skills.refresh();
     /* 聚焦条目 app 透传（D1-d，契约篇 §5.4 B 案——「同应用新开」收口）：/new
-     * 前聚焦在哪个应用域，新会话即开在该域（恒 chat 域过渡态退役）。查表而非
-     * 透传 id：open({app}) 吃清单（装配默认位/审批预设/预算打标全在清单上）；
-     * appId 值域 = 在册 ∪ chat（enter/boot 两入口均经 officialApps 解析），查无
-     * 仅剩 apps 目录缺失的退化形态——回落裸 open（chat 缺省域与 CHAT_APP_ID
-     * 同值，行为不变不炸命令面）。/app new 是另一动词（开新+驻留），恒 chat 域
-     * 不在此径（两动词 app 归属不同是字面事实非矛盾）。 */
+     * 前聚焦在哪个应用域，新会话即开在该域。查表而非透传 id：open({app}) 吃清单
+     * （装配默认位/审批预设/预算打标全在清单上）；appId 值域 = 在册 ∪ 默认
+     * （enter/boot 两入口均经 officialApps 或默认位解析），查无仅剩 apps 目录
+     * 缺失的退化形态——回落裸 open（默认位解析，行为随默认应用键走）。/app new
+     * 是另一动词（开新+驻留），恒默认应用域不在此径（两动词 app 归属不同是
+     * 字面事实非矛盾——组装批冷读 M5 同步）。 */
     const app = previous === undefined ? undefined : officialApps.get(previous.appId);
     const opened = registry.open(app === undefined ? {} : { app });
     if (opened === undefined) return undefined;
@@ -1762,13 +1791,8 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     resolveEntry: (sessionId) => registry.entries.get(sessionId),
     model,
   });
-  // 应用组件在场断言（契约篇 §5.4——装载期 post-apply 时点，组合树已合成）：
-  // 缺场 = 应用级隔离不拒启（清单是声明面，声明了没装 = 用户裁量非发行事故），
-  // 诊断出口 = debug 日志 + runtime.appGaps（dump-config 打印）；/reload 后重算
-  let appGaps = assertAppComponents(officialApps, composition);
-  for (const [id, missing] of appGaps) {
-    ctx.logger.debug('应用组件缺场（应用级隔离）', { app: id, missing });
-  }
+  // appGaps 真值已在组合树合成后赋（组装批前移——chatBundle 的 resolveApps 活
+  // 闭包 per-open 活取读它；此处原 post-apply 计算点随批前移，装载前后同值）
   /* -- delegable 应用自动注册（第三纵切，契约篇 §5.4 第 2 条委派形态）--
      镜像声明式子代理桥：in-process 机器 + mergeRequest 清单填充 + agent_<id>
      静态工具。缺场应用不注册（应用级隔离一致性——前台不可进入的应用同样不可
@@ -1940,6 +1964,17 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       // fork 同形——兄弟非父子，zone 随锚级联落表）
       if (zoneRows.length === 0) zoneAnchors.delete(zone);
       else zoneAnchors.set(zone, ctx.fork({ name: `apps:app:${app}`, zone }));
+      // 收口面④前移：appGaps 只重跑该应用（换件后 components 在场重验——他
+      // 应用槽不动；单区路径的变更域承诺 = 该区）。前移到装载前与全量路同时序：
+      // 装载期 chat 件 apply 的 boot-open 支线走默认解析，须读 fresh 投影
+      const freshGaps = assertAppComponents(officialApps, fresh);
+      if (appGaps.has(app) || freshGaps.has(app)) {
+        const nextGaps = new Map(appGaps);
+        nextGaps.delete(app);
+        const missing = freshGaps.get(app);
+        if (missing !== undefined) nextGaps.set(app, missing);
+        appGaps = nextGaps;
+      }
       // ⑤ 该区行重装载（空集 = 纯回卷即卸载；jiti 缓存纪律同全量——每次装载
       // 新建 jiti 实例即全图重求值，毒化缓存不跨装载存活）
       const load: AppLoadResult =
@@ -1960,16 +1995,6 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         failed: [...ring1Load.failed, ...others.flatMap(([, other]) => other.failed), ...load.failed],
         skipped: [...ring1Load.skipped, ...others.flatMap(([, other]) => other.skipped), ...load.skipped],
       }); // 同实例就地更新（失败行进 list 状态面——进程存活）
-      // 收口面④：appGaps 只重跑该应用（换件后 components 在场重验——他应用槽
-      // 不动；单区路径的变更域承诺 = 该区）
-      const freshGaps = assertAppComponents(officialApps, fresh);
-      if (appGaps.has(app) || freshGaps.has(app)) {
-        const nextGaps = new Map(appGaps);
-        nextGaps.delete(app);
-        const missing = freshGaps.get(app);
-        if (missing !== undefined) nextGaps.set(app, missing);
-        appGaps = nextGaps;
-      }
       // systemPrompt 重建 v1 恒无（app 区零技能〔D1 拒载〕零 prompt 段〔本批
       // 拒载〕——区装内容不进 systemPrompt）：不调 rematerializeAll；toolView
       // 走 tools_change 域腿即时刷新；writeHeader 全体调靠既有差分化自然收窄
@@ -2040,6 +2065,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     syncRowAppMap(fresh);
     // 单区路分流（五步对偶 + 收口面六项都在 reloadAppZone 单体）
     if (app !== undefined) return reloadAppZone(app, fresh);
+    // 应用组件缺场投影先于装载重算（组装批默认应用键）：装载期 chat 件 apply 的
+    // boot-open 支线（注册表空即开首驱动）走默认应用解析——届时必须读到 fresh
+    // 树投影，否则安全模式救援环等场景以陈旧安全树 gaps 拒开驱动（boot 路 ③
+    // 合成点前移同款时序，纯读合成产物前移无行为差）
+    appGaps = assertAppComponents(officialApps, fresh);
     try {
       // 装载窗口开启：dispose+装载只刷活视图，收口由下方单张 change 统一落账
       loadWindow = true;
@@ -2068,10 +2098,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         skipped: [...ring1Load.skipped, ...load.skipped],
       }); // 同实例就地更新（失败行进 list 状态面——进程存活）
       rematerializeAll();
-      // 应用组件在场断言随重装载重算（组合树换装后缺场集可变——活取值面）
-      appGaps = assertAppComponents(officialApps, fresh);
-      // 组装参数变化经 writeHeader 内建 diff 落 reason=change 快照（仅变化才落——
-      // 提示词/工具面变了才写，没变不污染日志；件未装载或无持久层为 no-op）
+      // appGaps 已于装载前重算（见 reloadOnce 分流后注记——boot-open 支线读
+      // fresh 投影的时序要求），此处 gaps 即活值；组装参数变化经 writeHeader
+      // 内建 diff 落 reason=change 快照（仅变化才落——提示词/工具面变了才写，
+      // 没变不污染日志；件未装载或无持久层为 no-op）
       writeHeadersAll();
       const payload: CompositionReloadedPayload = {
         activated: load.activated.map((item) => item.id),
@@ -2156,10 +2186,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
          * 标/装配默认位/审批预设随 open 一条龙）。返回面带 ok 判别——命令壳只
          * 格式化不判错。 */
         registered: () => [...officialApps.values()].map((manifest) => ({ id: manifest.id, label: manifest.label })),
-        available: () =>
-          [...officialApps.values()]
+        // available = 在场应用披露（缺场隔离的不披露——应用级隔离的清单面镜像）；
+        // isDefault = 当前默认解析位标记（组装批 m12：/app 裸清单标「(默认)」——
+        // per-open 活取同源 resolveDefault，用户在清单面即见默认位落谁家）
+        available: () => {
+          const defaultId = resolveDefaultApp(officialApps, appGaps)?.id;
+          return [...officialApps.values()]
             .filter((manifest) => !appGaps.has(manifest.id))
-            .map((manifest) => ({ id: manifest.id, label: manifest.label })),
+            .map((manifest) => ({ id: manifest.id, label: manifest.label, isDefault: manifest.id === defaultId }));
+        },
         enter: (appId: string): { ok: true; sessionId: string } | { ok: false; error: string } => {
           const manifest = officialApps.get(appId);
           if (manifest === undefined) {

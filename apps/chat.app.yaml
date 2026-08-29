@@ -4,8 +4,9 @@
 # 组件——components 按装载身份串解析（builtin:<name>，匹配键 = 组合树行 plugin
 # 字段的值域），在场断言装载期执行、缺场 = 应用级隔离不拒启。
 #
-# 默认入口期（第十七批拍板）：chat 兼任默认启动应用——会话打标 app='chat'、
-# resume 域查询含 NULL 存量回退；代码智能体应用落地后默认应用切换。
+# 默认入口期已结束（2026-08-30 组装批）：默认应用 = coder（清单 default 键）；
+# 本清单不声明 default——保持回落链第二跳锚点（卸默认应用后系统仍有可对话
+# 入口；apps/coder.app.yaml 缺场时默认位回落到本应用）。
 id: chat
 label: 对话
 components:

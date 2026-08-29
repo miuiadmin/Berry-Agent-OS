@@ -118,8 +118,9 @@ export async function answerApproval(
 }
 
 /**
- * 对话应用 id（apps/chat.app.yaml 清单的 id——会话域打标、resume 域查询、
- * request/header 载荷腿共用同一字面量；默认入口期 chat 兼任默认应用，第十七批）。
+ * 对话应用 id（apps/chat.app.yaml 清单的 id——回落链锚点 + 字面量共用源）。
+ * 组装批（2026-08-30）起默认应用 = coder（清单 default 键解析，契约篇 §5.4
+ * 默认应用键条款）；chat 保持回落链第二跳锚点——卸默认应用后系统仍有可对话入口。
  */
 export const CHAT_APP_ID = 'chat';
 
@@ -350,6 +351,24 @@ export interface ChatControls {
 
 /** 件构造依赖（装配期活闭包——官方件 = 宿主装配特权，不新开 ctx 服务名） */
 export interface ChatAppDeps {
+  /**
+   * 应用面解析器（组装批默认应用键，契约篇 §5.4 默认应用键条款）：open 缺省位
+   * 的默认应用解析 + string resume 的归属域查表。组合根注入（resolveDefaultApp
+   * 纯函数 + officialApps/appGaps 活闭包——per-open 活取：缺场随当下组合树
+   * 投影，/reload 换件后即时反映于下一次 open）。
+   */
+  readonly resolveApps: {
+    /**
+     * 默认应用解析：在场带标清单 > 回落 chat；undefined = 默认解析无果
+     * （兜底态——两跳皆断，open 防御降级不认领任意在册应用）。
+     */
+    readonly resolveDefault: () => AppManifest | undefined;
+    /**
+     * 按 id 查在场清单（缺场隔离的应用返回 undefined——string resume 取目标
+     * 会话归属域用，契约篇 m4：查无 = 目标应用缺场，装配面维持解析域清单）。
+     */
+    readonly resolveById: (id: string) => AppManifest | undefined;
+  };
   /** 启动会话策略原样透传（true = 按 cwd 续接最新；string = 显式 id；缺省 = 新建） */
   readonly resumeSession?: boolean | string;
   /**
@@ -357,7 +376,7 @@ export interface ChatAppDeps {
    * boot 首驱动以此开域（会话打标/严格域续接/agent 装配默认位/审批预设）；
    * 运行期 /app <id> 进入与 /new 透传（D1-d：聚焦条目 app 同应用新开——组合根
    * startNewSession 查表传入）走 open({app}) per-open 路径（互不混用——/app new
-   * 恒 chat 域：开新+驻留是另一动词，两动词 app 归属不同是字面事实非矛盾）
+   * 恒默认应用域：开新+驻留是另一动词，两动词 app 归属不同是字面事实非矛盾）
    */
   readonly app?: AppManifest;
   /** 持久层（缺省 = persist:false 诊断面——件降级空转，不起驱动不供 agent） */
@@ -663,22 +682,35 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       // Ring 1 工具服务经根取（open 可能运行于 /new 等运行期时点——apply ctx 早随
       // /reload 回卷；ring1Anchor 永存，根 get 恒居值）
       const tools = deps.rootCtx.get<ToolsService>('tools');
-      /* -- 应用域钉定（第三纵切进入面）：per-open 清单优先（/app <id> 进入），
-           缺省 chat 域。appId 是会话打标 / 严格域续接 / header app 腿的同一数据源 -- */
-      const app = options.app;
-      const appId = app?.id ?? CHAT_APP_ID;
+      /* -- 应用域钉定（第三纵切进入面 + 组装批默认应用键）：per-open 显式清单
+           优先（/app <id> 进入 / CLI --app / /new 透传聚焦条目）；显式缺席 =
+           默认应用解析（per-open 活取——deps.resolveApps 闭包读组合根活值）。
+           解析无果（兜底态）= 防御降级：warn + 返回 undefined（与无持久层同族
+           ——TUI 无驱动起屏、run 退 1），不认领任意在册应用不静默换域。 -- */
+      let app = options.app ?? deps.resolveApps.resolveDefault();
+      if (app === undefined) {
+        deps.rootCtx.logger.warn(
+          '默认应用解析无果（带标应用与 chat 均缺场或缺席）——open 防御降级：不认领任意在册应用（dump-config 查诊断）',
+        );
+        return undefined;
+      }
+      let appId = app.id;
+      /** 本次打开是否经默认位（显式 app 缺席）——域查询 NULL 认领判据（契约篇
+       * §5.4：默认入口的域含历史全量；显式进入别家域不认领——判据随默认应用
+       * 换人自动正确，非 chat 常量比对） */
+      const fromDefault = options.app === undefined;
 
       /* -- 会话选择（技术栈篇 §5：显式 id / 按 cwd 最新 → 续接；回落新建） -- */
       const targetId =
         typeof options.resume === 'string'
           ? options.resume
           : options.resume === true
-            ? // 域查询：chat 域含 NULL 存量回退（契约篇 §5.4 冷读裁决——NULL =
-              // builtin:chat 落地前的存量会话，默认入口的域含历史全量）；第三方
-              // 应用严格域无回退（别家的会话不认领——血缘显式打标的读侧镜像）
+            ? // 域查询：默认域含 NULL 存量回退（契约篇 §5.4 默认应用键条款——NULL =
+              // 打标机制落地前的存量会话，默认入口的域含历史全量；显式进入的
+              // 应用严格域无回退——别家的会话不认领，血缘显式打标的读侧镜像）
               persistence.latestSessionId(deps.workspace, {
                 app: appId,
-                includeNullApp: appId === CHAT_APP_ID,
+                includeNullApp: fromDefault,
               })
             : undefined;
       // 幂等防御：目标 id 已是注册表条目（活/退役）即不重开——返回既有 + 切 focus。
@@ -698,6 +730,21 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
           loaded.recoverFromInterruption();
           session = loaded;
           resumed = true;
+          /* -- 显式 string resume 的域取目标会话自身归属（组装批冷读 m4，契约篇
+               §5.4 默认应用键条款）：entry 打标与 header app 腿按目标会话
+               sessions.app 标签（tick 会话投递注入 resumeSession 即此路），而非
+               解析域——错标面〔解析域 ≠ 会话标签〕今日同值无实害，语义先钉死。
+               标签在场且应用在场 → 改钉（装配面同换：persona 等随目标应用）；
+               标签在场但应用缺场 → 打标记血缘（诚实）、装配面维持解析域清单
+               （缺场应用给不出装配面，续接是会话层行为）；NULL 标签 → 保持默认
+               投影不变。 -- */
+          if (typeof options.resume === 'string') {
+            const label = persistence.metaOf(targetId)?.app;
+            if (label !== undefined) {
+              appId = label;
+              app = deps.resolveApps.resolveById(label) ?? app;
+            }
+          }
         }
         // 目标不存在回落新建：启动策略是「续接优先」不是「必须续接」
       }

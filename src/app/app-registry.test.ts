@@ -16,6 +16,7 @@ import {
   mergeRequestForApp,
   OFFICIAL_APPS_DIR,
   resolveApp,
+  resolveDefaultApp,
 } from './app-registry.js';
 import type { CompositionReport } from './composition.js';
 
@@ -136,6 +137,43 @@ describe('loadOfficialApps：官方目录装载', () => {
     expect(apps.get('hermes')?.budget?.dailyTokens).toBeGreaterThan(0);
   });
 
+  it('组装批：coder 默认应用在册带标（全仓唯一 default: true）+ persona 人格段 + 六组件', () => {
+    const apps = loadOfficialApps();
+    // 恰一执法的正半边：带标清单恰一份（chat/hermes 不带标——chat 是回落锚点非带标者）
+    expect(apps.get('coder')?.default).toBe(true);
+    expect(apps.get('chat')?.default).toBeUndefined();
+    expect(apps.get('hermes')?.default).toBeUndefined();
+    // 纯清单应用零自有行为件（组装批收敛判定）：能力面全走 components 声明
+    expect(apps.get('coder')?.components).toEqual([
+      'builtin:chat',
+      'builtin:tools',
+      'builtin:web',
+      'builtin:memory',
+      'builtin:subagent',
+      'builtin:goal',
+    ]);
+    // persona 人格段（m10：人格非任务指令段——open 装配消费于代理默认位）
+    expect(apps.get('coder')?.agent?.persona).toContain('软件工程');
+  });
+
+  it('恰一执法：>1 份 default: true = APP_INVALID 拒启（全局唯一属性，发版事故级）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'app-reg-test-'));
+    try {
+      const marked = (id: string) => `id: ${id}\nlabel: ${id}\ndefault: true\ncomponents:\n  - builtin:chat\n`;
+      writeFileSync(join(dir, 'a.app.yaml'), marked('vendor/a'));
+      writeFileSync(join(dir, 'b.app.yaml'), marked('vendor/b'));
+      const err = expectCode(() => loadOfficialApps(dir), APP_INVALID);
+      expect(err.message).toContain('默认应用声明冲突');
+      expect(err.message).toContain('vendor/a');
+      expect(err.message).toContain('vendor/b');
+      // 恰一带标不受影响（对照半边——执法只拒二不拒一）
+      rmSync(join(dir, 'b.app.yaml'));
+      expect(loadOfficialApps(dir).get('vendor/a')?.default).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('临时目录装载：合法清单入册，非 .app.yaml 文件忽略', () => {
     const dir = mkdtempSync(join(tmpdir(), 'app-reg-test-'));
     try {
@@ -177,6 +215,55 @@ describe('loadOfficialApps：官方目录装载', () => {
 
   it('官方目录常量锚定仓库根 apps/（src 与 dist 同为上溯两级）', () => {
     expect(OFFICIAL_APPS_DIR.endsWith('apps')).toBe(true);
+  });
+});
+
+describe('resolveDefaultApp：默认应用解析（组装批默认应用键——两跳回落 + 兜底态）', () => {
+  /** 单应用清单（def 带标——typebox 校验后的 AppManifest 形状） */
+  const manifest = (id: string, def?: boolean) => ({
+    id,
+    label: id,
+    ...(def === true ? { default: true } : {}),
+    components: ['builtin:chat'],
+  });
+  /** 注册表构造（键 = id） */
+  const table = (...ms: ReturnType<typeof manifest>[]) =>
+    new Map(ms.map((m) => [m.id, m])) as Parameters<typeof resolveDefaultApp>[0];
+
+  it('第一跳：带标在场（不在缺场表）→ 带标应用', () => {
+    const apps = table(manifest('coder', true), manifest('chat'));
+    expect(resolveDefaultApp(apps, new Map())?.id).toBe('coder');
+  });
+
+  it('带标缺场 → 第二跳 chat 在场 → chat（回落锚点：卸默认应用仍有可对话入口）', () => {
+    const apps = table(manifest('coder', true), manifest('chat'));
+    const gaps = new Map([['coder', ['builtin:web']]]);
+    expect(resolveDefaultApp(apps, gaps)?.id).toBe('chat');
+  });
+
+  it('无带标清单（零标记）→ chat 在场 → chat（回落链第二跳直取）', () => {
+    const apps = table(manifest('chat'), manifest('hermes'));
+    expect(resolveDefaultApp(apps, new Map())?.id).toBe('chat');
+  });
+
+  it('chat 也缺场 / 缺席 → undefined（兜底态——调用方防御降级，不认领任意在册应用）', () => {
+    const apps = table(manifest('coder', true), manifest('chat'), manifest('hermes'));
+    // 带标缺场 + chat 缺场：hermes 在场也不认领（认领任意在册 = 静默换域，裁死）
+    const gaps = new Map([
+      ['coder', ['builtin:web']],
+      ['chat', ['builtin:memory']],
+    ]);
+    expect(resolveDefaultApp(apps, gaps)).toBeUndefined();
+    // chat 清单缺席 + 无带标：同样兜底
+    expect(resolveDefaultApp(table(manifest('hermes')), new Map())).toBeUndefined();
+    // 空表：无默认可解析
+    expect(resolveDefaultApp(new Map(), new Map())).toBeUndefined();
+  });
+
+  it('缺场判定按 gaps 键在场性（gaps 只收有缺口的应用——空缺场表 = 全在场）', () => {
+    const apps = table(manifest('coder', true));
+    // 他应用缺场不影响带标者（per-open 投影互不牵连）
+    expect(resolveDefaultApp(apps, new Map([['chat', ['builtin:memory']]]))?.id).toBe('coder');
   });
 });
 

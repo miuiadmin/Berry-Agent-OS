@@ -34,11 +34,12 @@ function lastAssistantText(result: RunResult): string | undefined {
  */
 export async function runOnceMain(message: string, options: RuntimeOptions = {}): Promise<number> {
   const runtime = await createRuntime({ ...options, interactive: false });
-  // 可卸语义（应用面第一纵切）：chat 件未装载即无对话循环——run 语义性失败
-  //（退出码 1 + stderr 示明；/apps 面向用户提示查装配）
+  // 可卸语义（应用面第一纵切 + 组装批默认应用键兜底态）：无对话循环即语义性失败
+  // ——两因：chat 件被禁（循环本体缺位）/ 默认应用解析无果（带标应用与 chat 均
+  // 缺场——open 防御降级，契约篇 §5.4）；退出码 1 + stderr 示明；dump-config 查诊断
   if (runtime.conversation === undefined) {
     process.stderr.write(
-      '对话应用未装载（builtin:chat 被禁用或 persist:false）——run 无对话循环可执行；/apps 查看装配。\n',
+      '对话应用未装载或默认应用不可用（builtin:chat 被禁用 / 默认应用组件缺场 / persist:false）——run 无对话循环可执行；dump-config 查看装配。\n',
     );
     await runtime.shutdown();
     return 1;

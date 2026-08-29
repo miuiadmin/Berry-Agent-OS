@@ -469,11 +469,12 @@ function makeConductionComposition(rowId = 'conduction-gate'): { compositionDir:
       '}',
     ].join('\n'),
   );
-  // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）。行 id
-  // 字面参数化（含冒号形合法——行 id 无字符集执法，正是不设闸的攻击面本体）
+  // app: coder——触发②执法下第三方行必须挂应用（coder 为默认应用——组装批后
+  // boot 委派驱动即 coder 域，传导判据按该域收行）。行 id 字面参数化（含冒号
+  // 形合法——行 id 无字符集执法，正是不设闸的攻击面本体）
   writeFileSync(
     join(compositionDir, 'overlay.yaml'),
-    `rows:\n  - id: ${rowId}\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
+    `rows:\n  - id: ${rowId}\n    pkg: ${appDir}\n    apps: [coder]\n    sandbox: { carrier: main }\n`,
   );
   return { compositionDir };
 }

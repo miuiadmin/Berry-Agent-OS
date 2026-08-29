@@ -221,9 +221,10 @@ export interface BuiltinCommandsOptions {
     registered(): ReadonlyArray<{ readonly id: string; readonly label: string }>;
     /**
      * 在册可用应用（第三纵切进入面）：组件齐备的在册清单（缺场应用不披露——
-     * 应用级隔离的清单面镜像），/app 裸清单尾部披露用
+     * 应用级隔离的清单面镜像），/app 裸清单尾部披露用。isDefault = 当前默认
+     * 解析位标记（组装批 m12——清单面标「(默认)」；per-open 活取同源解析）
      */
-    available(): ReadonlyArray<{ readonly id: string; readonly label: string }>;
+    available(): ReadonlyArray<{ readonly id: string; readonly label: string; readonly isDefault: boolean }>;
     /**
      * 应用进入（第三纵切）：开新会话域 + 聚焦（open({app}) 一条龙——会话打标/
      * agent 装配默认位/审批预设随 open 生效）。ok:false + error = 未知 id /
@@ -291,7 +292,9 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           if (opened) {
             ui.notify(`已开会话 ${opened.sessionId.slice(0, 8)}…（旧会话驻留后台，/app 随时切回）`);
           } else {
-            ui.notify('现在不能开新会话（无持久层），稍后再试');
+            // open undefined 两因：无持久层（诊断装配）/ 默认应用解析无果（兜底态
+            // ——冷读 M1；dump-config 查回落原因）——文案并示两因
+            ui.notify('现在不能开新会话（无持久层或默认应用不可用——dump-config 查诊断），稍后再试');
           }
           return;
         }
@@ -327,11 +330,12 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
             return `  ${i + 1}. ${entry.sessionId.slice(0, 8)} ${badge}`;
           });
           const retiredLine = retiredCount > 0 ? `\n（另有 ${retiredCount} 个已停摆会话——账本可查，清单不列）` : '';
-          // 可用应用披露（第三纵切）：缺场应用不披露（应用级隔离的清单面镜像）
+          // 可用应用披露（第三纵切）：缺场应用不披露（应用级隔离的清单面镜像）；
+          // 默认位标「(默认)」（组装批 m12——无显式 app 的会话打开目标域）
           const available = opts.apps.available();
           const appLine =
             available.length > 0
-              ? `\n可用应用：${available.map((a) => a.id).join('、')} —— 进入 /app <id> [首条消息]`
+              ? `\n可用应用：${available.map((a) => (a.isDefault ? `${a.id}(默认)` : a.id)).join('、')} —— 进入 /app <id> [首条消息]`
               : '';
           ui.notify(
             `活动会话（${active.length}）：\n${lines.join('\n')}${retiredLine}\n切换 /app <序号|id前缀> · 开新 /app new${appLine}`,

@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { AppError, APP_DUPLICATE, APP_INVALID, APP_NOT_FOUND } from '../contracts/errors.js';
 import { validateAppManifest, type AppManifest } from '../contracts/app.js';
+import { CHAT_APP_ID } from '../chat/app.js';
 import type { SubagentStart } from '../contracts/subagent.js';
 import type { CompositionReport } from './composition.js';
 
@@ -75,7 +76,44 @@ export function loadOfficialApps(dir: string = OFFICIAL_APPS_DIR): Map<string, A
     }
     apps.set(manifest.id, manifest);
   }
+  /* 默认应用键唯一性执法（组装批，契约篇 §5.4 默认应用键条款）：在册全量
+   * （注册期先于缺场隔离——缺场只影响解析结果不影响执法）多于一份带标清单 =
+   * APP_INVALID 拒。官方清单注册期拒 = boot 拒启（官方件随包，>1 = 发版事故，
+   * 宁拒绝不误读——与本函数其余执法同律）。 */
+  const marked = [...apps.values()].filter((m) => m.default === true);
+  if (marked.length > 1) {
+    throw new AppError(
+      APP_INVALID,
+      `默认应用声明冲突：${marked.map((m) => m.id).join('、')} 均带 default: true（全局唯一属性，恰一带标——修改其余清单的 default 键）`,
+    );
+  }
   return apps;
+}
+
+/**
+ * 默认应用解析（组装批，契约篇 §5.4 默认应用键条款——per-open 活取的纯函数半边）。
+ *
+ * 解析序两跳 + 兜底态：① 在场（不在缺场表）且带标清单 → 默认；② 回落 `chat`
+ * （对话应用语义上是默认入口的常任兜底——卸默认应用后系统仍有可对话入口；
+ * 回落要求 chat 本身在场）；③ 两跳皆断 → undefined = **默认解析无果**（兜底态：
+ * 调用方防御降级——TUI 无驱动起屏 + warn / run 退 1，不认领任意在册应用、
+ * 不静默换域）。缺场判定输入 = assertAppComponents 产物（缺场随当下组合树
+ * 投影——/reload 换件后即时反映于下一次 open）。
+ *
+ * @param apps 官方清单表（loadOfficialApps 产物——恰一执法已在装载期完成）
+ * @param gaps 组件缺场表（assertAppComponents 产物；调用方闭包读活值即 per-open 活取）
+ */
+export function resolveDefaultApp(
+  apps: ReadonlyMap<string, AppManifest>,
+  gaps: ReadonlyMap<string, readonly string[]>,
+): AppManifest | undefined {
+  // 第一跳：带标且在场（零标记清单不走此跳——回落链第二跳）
+  for (const m of apps.values()) {
+    if (m.default === true && !gaps.has(m.id)) return m;
+  }
+  // 第二跳：回落 chat（在场即可；CHAT_APP_ID 住 chat 件——app→chat 拓扑边既有）
+  const chat = apps.get(CHAT_APP_ID);
+  return chat !== undefined && !gaps.has(chat.id) ? chat : undefined;
 }
 
 /**

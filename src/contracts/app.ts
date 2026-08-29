@@ -48,6 +48,15 @@ export const AppManifestSchema = Type.Object(
     /** 人读标签（UI 文案位——/app 清单、dump-config 打印） */
     label: Type.String({ minLength: 1 }),
     /**
+     * 默认应用声明（组装批 2026-08-30，契约篇 §5.4「默认应用键」条款）：
+     * true = 本应用是无显式 app 的会话打开目标域（open 缺省位）。**官方清单
+     * 专属词汇**——第三方清单携带 = APP_INVALID 拒登记（全局属性不可由第三方
+     * 包声明；装机期与装载期同判，glob 发现面接通日执法生效，v1 schema 两形
+     * 皆收、执法住发现面）。唯一性由装载期执法：在册 >1 带标清单 = APP_INVALID
+     * 拒（官方件随包，>1 = 发版事故）。缺省（键缺席/false）= 非默认。
+     */
+    default: Type.Optional(Type.Boolean()),
+    /**
      * 前台渲染主题（D4 渲染轻件，契约篇 §5.4 theme 条款——2026-08-30 规范先行）：
      * 单语义键 accent（强调色）。消费面钉死四处、着色唯一发生点 = 通道壳
      * （render 展示行恒纯文本零 ANSI）。缺省（键缺席 / accent 缺席）= 零色恒等。
