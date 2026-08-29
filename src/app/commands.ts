@@ -488,7 +488,9 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           );
           return;
         }
-        // apps 多值（d36 §3）：逗号分隔 + 重复旗标并存——去空并集（去重/值域执法在服务面）
+        // apps 多值（d36 §3）：逗号分隔 + 重复旗标并存——去空不去重（拒绝式语义：
+        // 重复元素原样透传，由组合树执法——composition「重复元素」= 配置面笔误
+        // 响亮拒启；服务面只做 knownAppIds 值域预校验，同样不去重）
         const apps: string[] = [];
         for (const value of [parsed.flags['apps'], ...(parsed.multiFlags['apps'] ?? [])]) {
           if (value === undefined || value === 'true') continue;

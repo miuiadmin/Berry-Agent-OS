@@ -725,8 +725,10 @@ export function createAppsService(opts: {
     },
 
     markFailed(id, code, message) {
-      // 仅更新已入清单的行（planned/activated/skipped 均可转——域死不挑前态）；
-      // 整行替换为 failed 形态（与 applyLoad 失败分支同形——面收敛一个形态）
+      // 仅更新已入清单的行（activated/skipped/failed 均可转——域死不挑前态）；
+      // planned 兜底行不在 byId 清单（applyLoad 只收 activated/failed/skipped），
+      // 对其 no-op——planned 行从未激活即无域可死，此为语义而非漏网。整行替换
+      // 为 failed 形态（与 applyLoad 失败分支同形——面收敛一个形态）
       if (!byId.has(id)) return;
       byId.set(id, { id, status: 'failed', code, message });
     },

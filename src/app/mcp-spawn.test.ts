@@ -178,6 +178,19 @@ describe('createMcpSpawner — OS 沙箱升格接线', () => {
     expect(probes).toBe(2); // 失败态每台各重探一次（探测全过后才缓存）
   });
 
+  it('启动窗口 error 事件：confine 产物 runner 不存在 → ENOENT reject（窗口内判「未启动」）', async () => {
+    const sandbox = fakeSandbox({
+      // probe 过但产物 argv[0] 指向不存在 runner——spawn 本身不抛（child 已建），
+      // ENOENT 经 nextTick 队列派发 error 事件，先于 setImmediate 窗口关闭到达
+      argv: ['/nonexistent/sandbox-runner-xyz'],
+      backends: [{ id: 'fake', probe: () => true }],
+    });
+    const err = await rejection(createMcpSpawner(dataDir, sandbox, workspace)({ command: '/nonexistent/x' }));
+    // 「未启动」腿直传 error 载荷（cause 零包装）——code 面 = ENOENT 非
+    // MCP_CONNECT_FAILED 二次包装（窗口外失败才交 client 握手期收口）
+    expect(err.code).toBe('ENOENT');
+  });
+
   it('probe-once：连续两 spawn 只探测一次（bridge-fleet ensureOsLayer 同形态）', { timeout: 30_000 }, async () => {
     let probes = 0;
     const marker = join(dataDir, 'probe-once.json');

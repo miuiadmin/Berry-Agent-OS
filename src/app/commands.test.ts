@@ -173,15 +173,21 @@ describe('/apps-uninstall 命令面（第二刀：human-only execute 唯一入�
 describe('/apps-mount 与 /apps-unmount 壳链：单目标链单区 reload（R4 行为小刀——修复前必红）', () => {
   /**
    * 最小装配台：appsService 只桩 mount/unmount 两面（服务面行为已在
-   * apps.test.ts 全锁，此处只锁壳面 reload 实参——单区/全量判据）；reload
-   * 桩记录 app 实参序列。unmount 桩按行 id 分派预设报告。
+   * apps.test.ts 全锁，此处只锁壳面 reload 实参——单区/全量判据与 mount
+   * 透传面）；mount 桩记录 {installId, options} 实参序列（D4 拒绝式语义的
+   * 透传锚——重复元素是否被壳面吞掉在此可断言）；reload 桩记录 app 实参
+   * 序列。unmount 桩按行 id 分派预设报告。
    */
   function rigRig(mountReport: MountReport, unmountReports: Record<string, UnmountReport>) {
     const { registry, get } = fakeRegistry();
     const { ui, notes } = fakeUi();
     const reloadArgs: Array<string | undefined> = [];
+    const mountCalls: Array<{ installId: string; options: unknown }> = [];
     const appsService = {
-      mount: async () => mountReport,
+      mount: async (installId: string, options: unknown) => {
+        mountCalls.push({ installId, options });
+        return mountReport;
+      },
       unmount: async (rowId: string) => unmountReports[rowId]!,
     } as unknown as AppsService;
     const dispose = registerBuiltinCommands({
@@ -212,7 +218,7 @@ describe('/apps-mount 与 /apps-unmount 壳链：单目标链单区 reload（R4 
         typeof registerBuiltinCommands
       >[0]['allowlist'],
     });
-    return { get, notes, reloadArgs, dispose };
+    return { get, notes, reloadArgs, mountCalls, dispose };
   }
 
   /** 标准 mount 回执（单目标形态） */
@@ -241,5 +247,37 @@ describe('/apps-mount 与 /apps-unmount 壳链：单目标链单区 reload（R4 
     await get('apps-unmount').handler('row-b');
     await get('apps-unmount').handler('row-c');
     expect(reloadArgs).toEqual(['chat', undefined, undefined]);
+  });
+
+  it('apps 多值透传面（D4 维持拒绝式）：逗号分隔 + 重复旗标并存——去空不去重，重复元素原样透传给服务面', async () => {
+    const { get, mountCalls } = rigRig(MOUNT, {});
+    await get('apps-mount').handler('my-plugin --apps a --apps b --apps a,b');
+    // 壳面只去空不去重：'a','b' + 'a,b' 逗号拆分 = ['a','b','a','b'] 原样透传——
+    // 重复元素的拒绝式执法在组合树（composition「重复元素」= 配置面笔误响亮
+    // 拒启），壳面吞掉重复反而会掩盖笔误
+    expect(mountCalls).toEqual([{ installId: 'my-plugin', options: { apps: ['a', 'b', 'a', 'b'] } }]);
+  });
+
+  it('carrier 非三值 → 壳面可读报错 + 零服务调用（不透传坏值）', async () => {
+    const { get, notes, mountCalls, reloadArgs } = rigRig(MOUNT, {});
+    await get('apps-mount').handler('my-plugin --apps chat --carrier vmware');
+    expect(notes[0]).toContain('--carrier 只认 main | worker | external');
+    expect(mountCalls).toEqual([]);
+    expect(reloadArgs).toEqual([]);
+  });
+
+  it('config 非法 JSON / 非对象 → 壳面可读报错 + 零服务调用', async () => {
+    const { get, notes, mountCalls } = rigRig(MOUNT, {});
+    await get('apps-mount').handler("my-plugin --apps chat --carrier main --config '{bad'");
+    expect(notes[0]).toContain('--config 不是合法 JSON 对象');
+    expect(mountCalls).toEqual([]);
+  });
+
+  it('缺装机 id → 用法提示 + 零服务调用', async () => {
+    const { get, notes, mountCalls, reloadArgs } = rigRig(MOUNT, {});
+    await get('apps-mount').handler('--apps chat');
+    expect(notes[0]).toContain('用法：/apps-mount');
+    expect(mountCalls).toEqual([]);
+    expect(reloadArgs).toEqual([]);
   });
 });

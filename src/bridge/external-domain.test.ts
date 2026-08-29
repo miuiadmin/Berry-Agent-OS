@@ -145,6 +145,15 @@ export default async function apply(ctx) {
 }
 `;
 
+/** 冻结 fixture：burn() 同步死循环占死域事件循环（CPU 燃烧形态——ping 无应答，
+ *  SIGTERM 也收不到），宿主心跳丢拍计满即 onFreeze（冻结检测判据面） */
+const FX_FREEZE = `
+export const name = 'fx-freeze';
+export default async function apply(ctx) {
+  ctx.provide('fx/burn', { burn: () => { while (true) {} } });
+}
+`;
+
 /** 测试环境根（fixture 全落这里；afterAll 统一清） */
 let fixtureDir: string;
 let root: ContextScope;
@@ -193,6 +202,7 @@ beforeAll(async () => {
   writeFileSync(join(fixtureDir, 'fx-grandchild.ts'), FX_GRANDCHILD);
   writeFileSync(join(fixtureDir, 'fx-pm-probe.ts'), FX_PM_PROBE);
   writeFileSync(join(fixtureDir, 'fx-term-trap.ts'), FX_TERM_TRAP);
+  writeFileSync(join(fixtureDir, 'fx-freeze.ts'), FX_FREEZE);
   root = createContext({ name: 'bridge-ext-test' });
   tools = new FakeTools();
   domain = spawnExternalDomain({
@@ -481,5 +491,59 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
     expect(externalEntryUrl('file:///repo/src/bridge/external-domain.ts').href).toBe(
       'file:///repo/src/bridge/external-entry.ts',
     );
+  });
+
+  it(
+    '心跳冻结检测：burn 同步死循环占死域事件循环 → 丢拍计满 onFreeze（一次性）+ kill 意外死亡归因',
+    { timeout: 40_000 },
+    async () => {
+      const freezes: Array<{ missed: number }> = [];
+      const exits: Array<{ workerId: string; code: number; rows: readonly string[]; reason?: string }> = [];
+      const frozen = spawnTestDomain({
+        // 60ms 节律 + missLimit=1：第 2 拍丢满（missed > limit 才 freeze）——
+        // 生产缺省 15s×3 等不起测试钟，形态与判据同构
+        heartbeatMs: 60,
+        heartbeatMissLimit: 1,
+        onFreeze: (info) => freezes.push(info),
+        onExit: (info) => exits.push(info),
+      });
+      const freezeEntry = join(fixtureDir, 'fx-freeze.ts');
+      await untilReady(frozen, freezeEntry);
+      // 心跳起表点 = 首次 domain.load 成功（boot 窗 ping 不计拍——两窗分工），
+      // untilReady 的 svc.load 探活不经 domain.load 包装，不消耗起表
+      await frozen.load({ id: 'fz', entry: freezeEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'fz', rowId: 'fz', builtinRow: false });
+      await frozen.applyRow({ id: 'fz', sandbox: { carrier: 'external' } }, scope);
+      // 燃烧域事件循环：RPC 永不归还（pending 由 kill 结算 WORKER_EXITED——
+      // catch 吞 unhandled 形态）
+      root
+        .get<{ burn: () => Promise<void> }>('fx/burn')
+        .burn()
+        .catch(() => {});
+      await until(() => freezes.length > 0);
+      // 一次性上报：missed=2（丢满即停表，不再累计——frozen 旗标闸）
+      expect(freezes[0]!.missed).toBe(2);
+      // 冻结域收不到 SIGTERM（事件循环死）——kill 直杀 SIGKILL 组走意外死亡，
+      // onExit 携 kill 归因（fleet onFreeze→kill 接线在组合根，此处单测域半）
+      frozen.kill('心跳丢拍执法（测试）');
+      await until(() => exits.length > 0);
+      expect(exits[0]!.reason).toBe('心跳丢拍执法（测试）');
+      expect(exits[0]!.rows).toEqual(['fz']);
+      await until(() => !pidAlive(frozen.child.pid));
+    },
+  );
+
+  it('execArgv tsx 守卫：显式旗组已含 tsx 不重补 / 不含则自补（spawnargs 直证）', () => {
+    // 腿一：显式 ['--import=tsx']（vitest 形态）→ 守卫跳过追加——恰好一份
+    //（若误重补，双重 --import 同载两份 tsx 实例——态漂移面）
+    const dedup = spawnTestDomain({ execArgv: ['--import=tsx'] });
+    expect(dedup.child.spawnargs.filter((a) => a.includes('tsx'))).toHaveLength(1);
+    dedup.terminate('守卫用例收尾');
+    // 腿二：显式 PM 旗组（无 tsx）+ .ts 入口 → 守卫自补 '--import=tsx'——恰好
+    // 一份（追加位在旗组与入口之间；不补则 TS 入口无法装载——PM 用例已隐证
+    // 装载可达，本断言把守卫本身钉成字面锁）
+    const appended = spawnTestDomain({ execArgv: ['--permission'] });
+    expect(appended.child.spawnargs.filter((a) => a.includes('tsx'))).toHaveLength(1);
+    appended.terminate('守卫用例收尾');
   });
 });

@@ -866,6 +866,57 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
     ]);
   });
 
+  it('markFailed：清单在册行整行替换为 failed 形态（不合并旧字段）；ghost 行 no-op 不增行', async () => {
+    const dataDir = makeDataDir();
+    const { runner } = fakeRunner();
+    const apps = createAppsService({ dataDir, runner, gitCommitOf: fakeCommit });
+    await apps.install('ok-pkg');
+    await apps.mount('ok-pkg', { apps: ['chat'], carrier: 'main' });
+    await apps.install('dormant-pkg');
+    await apps.mount('dormant-pkg', { apps: ['chat'], carrier: 'main' });
+    apps.toggle('dormant-pkg'); // → 禁用（skipped 态行——混合前态的另一腿）
+    const composition = loadCompositionFor(dataDir);
+    const userComposition = {
+      ...composition,
+      plan: composition.plan.filter(
+        (row) =>
+          row.id !== 'chat' &&
+          row.id !== 'memory' &&
+          row.id !== 'subagent' &&
+          row.id !== 'goal' &&
+          row.id !== 'scheduler' &&
+          row.id !== 'mcp' &&
+          row.id !== 'tools' &&
+          row.id !== 'web' &&
+          row.id !== 'compaction' &&
+          row.id !== 'admin',
+      ),
+    };
+    // 混合前态：一 activated + 一 skipped——域死不挑前态，任一在册行可转
+    apps.applyLoad(userComposition, {
+      activated: [{ id: 'ok-pkg', name: 'stub', applyMs: 1 }],
+      failed: [],
+      skipped: [{ id: 'dormant-pkg', reason: 'disabled' }],
+    });
+
+    // 域死结算（BRIDGE_WORKER_EXITED 形态）→ failed 整行替换：activated 前态的
+    // name/applyMs 不残留（非合并——与 applyLoad 失败分支同形，面收敛一个形态）
+    apps.markFailed('ok-pkg', 'BRIDGE_WORKER_EXITED', '域死');
+    const rows = apps.list();
+    expect(rows).toMatchObject([
+      { id: 'ok-pkg', status: 'failed', code: 'BRIDGE_WORKER_EXITED', message: '域死' },
+      { id: 'dormant-pkg', status: 'skipped', reason: 'disabled' },
+    ]);
+    const failedRow = rows[0]!;
+    expect('name' in failedRow).toBe(false); // 整行替换非合并——旧字段零残留
+    expect('applyMs' in failedRow).toBe(false);
+
+    // ghost 行（不在清单）→ no-op：不增行、不抛错、清单原样
+    apps.markFailed('ghost-row', 'BRIDGE_WORKER_EXITED', '幽灵');
+    expect(apps.list().length).toBe(2);
+    expect(apps.list().map((row) => row.id)).toEqual(['ok-pkg', 'dormant-pkg']);
+  });
+
   it('list 仓库态差集（installed-unmounted）：装了没挂不可静默——挂载后差集收敛、卸挂后回露', async () => {
     const dataDir = makeDataDir();
     const { runner } = fakeRunner();
@@ -979,6 +1030,15 @@ describe('uninstall 双相四段', () => {
     const hybridView = await hybridService.uninstall('my-plugin', { mode: 'inspect' });
     expect(hybridView.events.origin).toBe('unknown');
     expect(hybridView.events.note).toContain('损坏');
+
+    // 形状非法档（合法 JSON 但新认领键非字符串——如 {app: 123}）→ 损坏档：
+    // readDataDescriptor 的 corrupt 分支不止吃坏 JSON，形状不符同归（四态判读
+    // 的第三态完整面——此前仅坏 JSON 被测到）
+    writeFileSync(join(dataDir, 'apps', 'my-plugin', 'data.json'), JSON.stringify({ app: 123 }));
+    const badShapeService = createAppsService({ dataDir, runner });
+    const badShapeView = await badShapeService.uninstall('my-plugin', { mode: 'inspect' });
+    expect(badShapeView.events.origin).toBe('unknown');
+    expect(badShapeView.events.note).toContain('损坏');
 
     // 账本前存量装机（手写 provenance 记录无 data.json——pre-D2/手账形态）→
     // unknown 档（早于账本注记）
