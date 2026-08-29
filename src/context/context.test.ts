@@ -3,7 +3,7 @@
  * effect LIFO 回卷 / 事件四模式（含异常隔离与 prepend）/ provide-get /
  * stale ctx 护栏 / signal / config 只读 / fork 作用域隔离与共享。
  */
-import { describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { AppError } from '../contracts/errors.js';
 import type { AppContext } from '../contracts/app.js';
 import { createContext, eventDispatchStats, registerLiveEvent, tryResolveService } from './context.js';
@@ -593,7 +593,22 @@ describe('dispose 语义升级（CR-2-F8 + §1.6 时钟族，2026-08-27 刀〇a�
 });
 
 describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', () => {
-  /** 小桶根作用域：容量 3、每分钟回填 6 万（≈ 即时回满——回落语义可测） */
+  /**
+   * 时钟确定性化（2026-08-29 修）：令牌桶按真墙钟 Date.now() 回填，而本组小桶
+   * perMinute=60_000（= 1 令牌/ms）——全量测试并发下事件循环任意 ≥1ms 停顿即
+   * 回填一枚令牌，「第 4 发必抛」类耗尽断言直接漏掉（2026-08-29 两连 commit 钩子
+   * 实测红，B-1 与桶满两只用例各中一次）。假钟只冻结 Date：回填完全由测试显式
+   * 推进（vi.setSystemTime），耗尽腿恒零回填、回填腿显式拨针——两腿皆确定性。
+   * （sessions 侧同族测试 perMinute=60/1，回填速率远低于毫秒停顿量级，无需此治。）
+   */
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** 小桶根作用域：容量 3、每分钟回填 6 万（回填腿显式拨针 10ms → 回满 10 夹 3） */
   function tinyBucketRoot() {
     return createContext({
       logger: createLogger({ module: 'test', level: 'silent' }),
@@ -614,7 +629,7 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     return { host, scope: host.fork({ name: 'charger' }) };
   }
 
-  it('桶满 fail-loud：APP_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', async () => {
+  it('桶满 fail-loud：APP_EVENT_RATE 抛错（非静默丢弃），回填后恢复可发', () => {
     const { host, scope } = tinyBucketHostAndFork();
     registerLiveEvent(host, { name: 'test/evt', mode: 'emit', note: '测试词汇' });
     const seen: number[] = [];
@@ -631,8 +646,9 @@ describe('事件派发频率护栏（§1.6 时钟族，2026-08-27 刀〇a）', (
     }
     // 超限那次未送达（fail-loud ≠ 静默丢弃——抛错即拒发）
     expect(seen).toEqual([1, 2, 3]);
-    // 回填：perMinute 6 万 → 1ms 回满 1 令牌以上，稍候即恢复
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    // 回填：perMinute 6 万 → 拨针 10ms 即回填 10 令牌（夹容量 3）——恢复可发。
+    // 不再真等墙钟（假钟冻结下等待永不回填），显式推进即确定性
+    vi.setSystemTime(Date.now() + 10);
     scope.emit('test/evt', 6);
     expect(seen).toEqual([1, 2, 3, 6]);
   });
