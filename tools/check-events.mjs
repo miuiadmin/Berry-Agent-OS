@@ -206,6 +206,8 @@ const sessionTypes = await jiti.import(fileURLToPath(new URL('../src/session/eve
 await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url)));
 // compaction 四词同款（src/compaction/events.ts——宿主面顶层注册，轻依赖）
 await jiti.import(fileURLToPath(new URL('../src/compaction/events.ts', import.meta.url)));
+// checkpoint 两词同款（src/checkpoint/events.ts——快照/回退审计词，轻依赖）
+await jiti.import(fileURLToPath(new URL('../src/checkpoint/events.ts', import.meta.url)));
 
 /** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
 const liveCatalog = events.LIVE_EVENT_CATALOG;

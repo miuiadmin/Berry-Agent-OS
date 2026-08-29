@@ -313,6 +313,14 @@ export interface AppContext {
   registerSessionEventType(def: SessionEventTypeDefinition): () => void;
   /** 本作用域配置视图（只读快照；组合树行 config 经应用 schema 校验后冻结） */
   readonly config: Readonly<Record<string, unknown>>;
+  /**
+   * 本应用组合树行 id（契约篇 §1.5 核心行 P0-1 正规获取口）：件数据目录键经
+   * `ctx.paths.appDataDir(ctx.rowId)` 取——禁从应用名/目录名自推（行 id 可改名）。
+   * 根/宿主作用域 undefined；应用作用域内再 fork 的子作用域继承父行 id。
+   * 宿主 context 模块 Context 早已持有本字段（loader 手持注入）——此处补声明
+   * 使类型面对齐文档承诺（2026-08-30 checkpoint 件首个文件域 builtin 消费）。
+   */
+  readonly rowId?: string;
   /** 带作用域前缀的子 logger */
   readonly logger: AppLogger;
   /** 生命周期信号：作用域销毁时 abort——长任务/定时器的取消依据 */

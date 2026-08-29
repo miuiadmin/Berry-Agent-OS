@@ -10,7 +10,11 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { openStore } from './index.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
-import { SESSION_APP_COLUMN_MIGRATION, SESSION_IMPORTER_COLUMN_MIGRATION } from './schema.js';
+import {
+  SESSION_APP_COLUMN_MIGRATION,
+  SESSION_IMPORTER_COLUMN_MIGRATION,
+  DROP_PROJECTION_CHECKPOINTS_MIGRATION,
+} from './schema.js';
 
 /** 临时库目录（全文件共享，结束后整体清除） */
 let dir: string;
@@ -27,8 +31,9 @@ afterAll(() => {
 
 /**
  * 最小可用迁移项素材（不动业务表——框架测试只关心框架行为；表名随版本变防链内冲突）。
- * 版本一律取内核链尾之上（内核恒自注入 v6〔sessions +app〕与 v10〔sessions
- * +importer〕——见下方内核迁移组用例），业务缺口模拟才可能与内核共存于同一条链。
+ * 版本一律取内核链尾之上（内核恒自注入 v6〔sessions +app〕、v10〔sessions
+ * +importer〕与 v12〔DROP projection_checkpoints〕——见下方内核迁移组用例），
+ * 业务缺口模拟才可能与内核共存于同一条链。
  */
 const spec = (version: number, name = `m${version}`): MigrationSpec => ({
   version,
@@ -38,8 +43,8 @@ const spec = (version: number, name = `m${version}`): MigrationSpec => ({
 
 /** 内核链首版本（sessions +app 列，v6） */
 const KERNEL_FIRST = SESSION_APP_COLUMN_MIGRATION.version;
-/** 内核链尾版本（sessions +importer 列，v10——业务链版本的起算锚点） */
-const KERNEL_TAIL = SESSION_IMPORTER_COLUMN_MIGRATION.version;
+/** 内核链尾版本（DROP projection_checkpoints，v12——业务链版本的起算锚点） */
+const KERNEL_TAIL = DROP_PROJECTION_CHECKPOINTS_MIGRATION.version;
 
 describe('normalizeMigrations 链校验（装配期即抛，不动库）', () => {
   it('version 必须大于基线且为整数', () => {
@@ -79,7 +84,7 @@ describe('全新库：基线 + 迁移链一次到位', () => {
     expect(hasMig.n).toBe(1);
   });
 
-  it('多级链一次到位（11 → 12）', () => {
+  it('多级链一次到位（链尾-1 → 链尾两连跳）', () => {
     const path = nextPath();
     openStore({ path, migrations: [spec(KERNEL_TAIL + 1), spec(KERNEL_TAIL + 2)] }).close();
     const raw = new Database(path);
@@ -108,7 +113,7 @@ describe('内核迁移自注入（sessions 是内核表——DDL 演进不归业
         migrations: [{ version: KERNEL_FIRST, name: 'claim-kernel-slot', sql: 'CREATE TABLE k (a INTEGER) STRICT;' }],
       }),
     ).toThrowError(/重复/);
-    // 链尾同律：撞 v10（importer）同样拒绝——版本空间共享对整条内核链生效
+    // 链尾同律：撞 v12（drop-projection-checkpoints）同样拒绝——版本空间共享对整条内核链生效
     expect(() =>
       openStore({
         path,
@@ -134,6 +139,51 @@ describe('内核迁移自注入（sessions 是内核表——DDL 演进不归业
     raw.close();
     expect(cols).toContain('app');
     expect(cols).toContain('importer');
+  });
+});
+
+describe('v12 内核迁移：DROP projection_checkpoints（挂账⑤销账，会话篇 §5.3 checkpoint 纵切）', () => {
+  it('新库基线无此表（CANONICAL_DDL 已摘除；v12 前滚 no-op 不炸）', () => {
+    const path = nextPath();
+    expect(() => openStore({ path }).close()).not.toThrow();
+    const raw = new Database(path);
+    const has = raw.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'projection_checkpoints'`).get() as {
+      n: number;
+    };
+    raw.close();
+    expect(has.n).toBe(0);
+  });
+
+  it('旧形态库（基线含此表、uv=1）重开 = 表被 DROP、基线数据完好', () => {
+    const path = nextPath();
+    // 起一个基线库并写一条数据（迁移不碰业务数据的锚点复用）
+    const base = openStore({ path });
+    base.appendCore(
+      { sessionId: 'sess-v12', origin: 'user', seedLength: 0, delegationDepth: 0 },
+      [{ type: 'user/message', seq: 0, time: 1755900000000, data: { content: 'v12 销账' } }],
+      'inc-1',
+    );
+    base.close();
+    // 原生造旧形态：撤内核列 + 手建旧基线表 + uv 回拨 1（模拟 v12 落地前的库）
+    const rewind = new Database(path);
+    rewind.exec('ALTER TABLE sessions DROP COLUMN importer');
+    rewind.exec('ALTER TABLE sessions DROP COLUMN app');
+    rewind.exec(`CREATE TABLE projection_checkpoints (
+      session_id TEXT NOT NULL, key TEXT NOT NULL, state_version INTEGER NOT NULL,
+      seq INTEGER NOT NULL, value TEXT NOT NULL, PRIMARY KEY (session_id, key)) STRICT;`);
+    rewind.pragma('user_version = 1');
+    rewind.close();
+    // 重开：v6/v10 补列 + v12 真删表
+    const reopened = openStore({ path });
+    reopened.close();
+    const raw = new Database(path);
+    const has = raw.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE name = 'projection_checkpoints'`).get() as {
+      n: number;
+    };
+    const events = raw.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number };
+    raw.close();
+    expect(has.n).toBe(0); // 旧表已清
+    expect(events.n).toBe(1); // 基线数据完好
   });
 });
 

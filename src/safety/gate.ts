@@ -13,9 +13,10 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
+import { TOOL_POST_EXECUTE_EVENT, TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import type { GateAction, GateInput } from '../contracts/tools.js';
-import type { Context, Disposer } from '../context/types.js';
+import type { Context, ContextScope, Disposer } from '../context/types.js';
+import { appendHandlers, snapshotHandlers } from '../context/index.js';
 import { parseApplyPatch } from '../tools/apply-patch.js';
 import type { ApprovalService } from './approval.js';
 import type { SandboxMode } from './types.js';
@@ -169,4 +170,51 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
 
   // prepend: true —— 安全栈固定占守门段首位（骨架篇 §8.5 fixed 行）
   return ctx.on(TOOL_PRE_EXECUTE_EVENT, handler, { prepend: true });
+}
+
+/**
+ * 守门行传导判据（宿主组合根构造注入——subagent 子代理装配与 chat 驱动
+ * fresh 作用域两消费面同源单件）。
+ */
+export interface GateRowFilter {
+  /**
+   * 锚作用域 owner 完整前缀集（根名 + 锚 fork 名拼成——/reload 重建锚同名，
+   * 前缀恒定）。传导判据之一：entry.owner 须以某锚前缀开头。
+   */
+  readonly anchors: readonly string[];
+  /**
+   * main 载体行 id 活取值器（组合树活读——worker 行走分域装载不进 main 快照、
+   * external 行 fail-closed 拒载不进装载序、disabled 行不在装载序，快照天然
+   * 不含，无需再滤）。传导判据之二：entry.rowId ∈ main 行集。
+   */
+  readonly mainRows: () => ReadonlySet<string>;
+}
+
+/**
+ * 守门行传导（骨架篇 §6.1「守门行传导 + context 腿」条）：把根总线**应用行**
+ * 的 pre+post 两段 handler 传导进隔离作用域的 runtime——fresh/子代理作用域
+ * 不 fork 根（隔离即过滤的极限形态），开放行不传导就结构性进不了该管道
+ * （挖矿 B10「固定行进得了子管道、开放行进不去」的不对称收口）。
+ *
+ * 判据 = entry 自身 rowId（on() 登记时携注册方作用域行归属——loader 恒 fork
+ * rowId = 行 id，结构性正确；前两代 owner 字符串切片载体在行 id 含 `:` 时
+ * 取段错位，R2 测试补课批根治）：固定行 rowId 缺席结构性排除（子审批 never
+ * 不被根面交互审批冒破）+ 锚前缀 + main 行集三滤。
+ *
+ * 传导的是 handler 引用非重注册：闭包仍捕根作用域（读根服务行为正确）、
+ * owner 保真（appendHandlers 直写不走 on()——on() 会把 owner 记成目标作用域
+ * 名）、目标作用域 dispose 不回卷根行。调用时点冻结：此后根链变化（/reload
+ * 等）不影响已传导作用域，新开作用域取新链。execute 段不传导（拍板题 2
+ * ——替换执行体风险大）。
+ */
+export function conductGateLines(from: ContextScope, to: ContextScope, filter: GateRowFilter): void {
+  for (const event of [TOOL_PRE_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT] as const) {
+    const entries = snapshotHandlers(from, event).filter((entry) => {
+      const rowId = entry.rowId;
+      if (rowId === undefined) return false; // 固定行（根/宿主面注册）结构性排除
+      if (!filter.anchors.some((prefix) => entry.owner.startsWith(prefix))) return false;
+      return filter.mainRows().has(rowId);
+    });
+    if (entries.length > 0) appendHandlers(to, event, entries);
+  }
 }

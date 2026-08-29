@@ -1,8 +1,8 @@
 /**
  * L1 persist — SQLite 物理层规范 schema（会话篇 §9 表族草案的固化）。
  *
- * 单库文件承载全部持久数据。6 张具体表 + 2 处占位（FTS5 / 记忆库表族）。
- * 唯一不可替代的表是 events——其余全部可丢弃可重建（检查点可重算、目录可再拉）。
+ * 单库文件承载全部持久数据。5 张具体表 + 2 处占位（FTS5 / 记忆库表族）。
+ * 唯一不可替代的表是 events——其余全部可丢弃可重建（目录可再拉、凭证可重录）。
  * STRICT + 复合主键 (session_id, seq) 强制唯一；seq 连续性由 appendCore 校验，
  * 永不被物理布局破坏（物理/逻辑分离原则：语义在 session 模块，编码在此）。
  */
@@ -55,18 +55,7 @@ CREATE TABLE store_state (
   schema_version INTEGER NOT NULL
 ) STRICT;
 
--- ── 4. 投影检查点表：读加速，丢了可全量重算 ───────────────────
--- M1 检查点纯内存（拍板 #5），表留 schema 不写
-CREATE TABLE projection_checkpoints (
-  session_id    TEXT NOT NULL,
-  key           TEXT NOT NULL,
-  state_version INTEGER NOT NULL,
-  seq           INTEGER NOT NULL,
-  value         TEXT NOT NULL,
-  PRIMARY KEY (session_id, key)
-) STRICT;
-
--- ── 5. 凭证表：明文 + 0600 文件权限 + 留加密 seam（拍板 #4）─────
+-- ── 4. 凭证表：明文 + 0600 文件权限 + 留加密 seam（拍板 #4）─────
 -- modify 是唯一写路径且串行化（read-modify-write 防并发双刷新）
 CREATE TABLE credentials (
   provider   TEXT PRIMARY KEY,
@@ -75,7 +64,7 @@ CREATE TABLE credentials (
   updated_at INTEGER NOT NULL
 ) STRICT;
 
--- ── 6. 模型目录表：pi-ai ModelsStore + 用户覆盖 ───────────────
+-- ── 5. 模型目录表：pi-ai ModelsStore + 用户覆盖 ───────────────
 CREATE TABLE model_catalog (
   provider    TEXT NOT NULL,
   model_id    TEXT NOT NULL,
@@ -85,11 +74,11 @@ CREATE TABLE model_catalog (
   PRIMARY KEY (provider, model_id)
 ) STRICT;
 
--- ── 7. 检索投影：FTS5 虚表（占位）────────────────────────────
+-- ── 6. 检索投影：FTS5 虚表（占位）────────────────────────────
 -- 具体列与更新策略随检索需求定；由 persist 在事件落盘后异步维护
 -- CREATE VIRTUAL TABLE session_fts USING fts5(...);
 
--- ── 8. 记忆库表族：已定稿于[记忆与自进化]篇 §3 ────────────────
+-- ── 7. 记忆库表族：已定稿于[记忆与自进化]篇 §3 ────────────────
 --    （memories + memory_fts；经统一迁移框架进 user_version=2，DDL 归 memory 模块自带）
 `;
 
@@ -129,4 +118,22 @@ export const SESSION_IMPORTER_COLUMN_MIGRATION: MigrationSpec = {
   version: 10,
   name: 'sessions-importer-column',
   sql: 'ALTER TABLE sessions ADD COLUMN importer TEXT',
+};
+
+/**
+ * v12 迁移：DROP 投影检查点表（2026-08-25 挂账⑤销账——2026-08-30 checkpoint
+ * 纵切，会话篇 §5.3）。
+ *
+ * 原委：基线 DDL 里 projection_checkpoints 是 M1 期「读加速留位」（拍板 #5
+ * 纯内存不写，表留 schema 不写）——两年来零读写。checkpoint 纵切定稿后该名
+ * 已让位给工作区快照件（文件域 blob 仓，非 SQLite 表族）；留位表名实义分离
+ * 反成读账噪音，基线摘除 + 存量库 DROP 一次清干净。
+ *
+ * IF EXISTS：新库从摘除后基线建（无此表），v12 前滚 no-op；旧库（基线含此表）
+ * 真删。丢的只是从未写过的空表——零数据迁移语义。
+ */
+export const DROP_PROJECTION_CHECKPOINTS_MIGRATION: MigrationSpec = {
+  version: 12,
+  name: 'drop-projection-checkpoints',
+  sql: 'DROP TABLE IF EXISTS projection_checkpoints',
 };

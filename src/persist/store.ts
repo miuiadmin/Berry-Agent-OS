@@ -17,6 +17,7 @@ import { normalizeMigrations, type MigrationSpec } from './migrations.js';
 import {
   APPLICATION_ID,
   CANONICAL_DDL,
+  DROP_PROJECTION_CHECKPOINTS_MIGRATION,
   SCHEMA_VERSION,
   SESSION_APP_COLUMN_MIGRATION,
   SESSION_IMPORTER_COLUMN_MIGRATION,
@@ -85,10 +86,16 @@ export function openStore(options: StoreOptions): Store {
   // 内核表迁移（sessions 是内核表——DDL 演进直归 persist，业务调用方不感知）：
   // persist 自注入，与业务迁移项合并排序。版本空间共享——内核占用 v6（sessions
   // +app 列）与 v10（sessions +importer 列，会话篇 §5.1 导入者归因；v8/v9 已被
-  // goal-needs-write / scheduler-jobs-v9 业务件占用），业务模块声明面不得撞号
-  // （normalizeMigrations 严格递增校验即执法面）
+  // goal-needs-write / scheduler-jobs-v9 业务件占用）与 v12（DROP
+  // projection_checkpoints 挂账⑤销账——会话篇 §5.3 checkpoint 纵切），业务模块
+  // 声明面不得撞号（normalizeMigrations 严格递增校验即执法面）
   const chain = normalizeMigrations(
-    [...(options.migrations ?? []), SESSION_APP_COLUMN_MIGRATION, SESSION_IMPORTER_COLUMN_MIGRATION],
+    [
+      ...(options.migrations ?? []),
+      SESSION_APP_COLUMN_MIGRATION,
+      SESSION_IMPORTER_COLUMN_MIGRATION,
+      DROP_PROJECTION_CHECKPOINTS_MIGRATION,
+    ],
     SCHEMA_VERSION,
   );
   const latestVersion = chain.length > 0 ? chain[chain.length - 1]!.version : SCHEMA_VERSION;

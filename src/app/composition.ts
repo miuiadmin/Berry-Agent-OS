@@ -76,6 +76,12 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // （install/uninstall/configure/reload）随第二刀导线；卸掉即无管理面
   // 工具，核心循环不破
   { id: 'admin', pkg: 'builtin:admin' },
+  // 第十一行 = checkpoint 行（内核边界篇席 23，会话篇 §5.3 工作台三件第二刀
+  // 2026-08-30——Ring 2 真·可卸安全网件）：工作区快照 + /rewind 两段回退
+  //（快照触发 = tools_pre_execute 末位监听，回退 = files first → fork+adopt）。
+  // 卸掉即无回退安全网，核心循环不破（曾回退过的旧日志可读性不随行装载漂移
+  // ——词汇宿主面注册）
+  { id: 'checkpoint', pkg: 'builtin:checkpoint' },
 ];
 
 /**

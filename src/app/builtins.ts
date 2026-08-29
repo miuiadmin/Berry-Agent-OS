@@ -24,6 +24,7 @@ import { createWebApp } from '../web/index.js';
 import type { WebAppOverrides } from '../web/index.js';
 import { createCompactionApp } from '../compaction/index.js';
 import { createAdminApp } from '../admin/index.js';
+import { createCheckpointApp, type CheckpointAppDeps } from '../checkpoint/index.js';
 import { createToolsApp, type ToolsAppDeps } from '../tools/index.js';
 import { createSubagentApp } from './subagent-app.js';
 import type { AgentLocation } from './agents-md.js';
@@ -69,6 +70,12 @@ export interface BuiltinRegistryOptions {
    * 面完好——诊断树不断链）。恒传入（件可卸靠 overlay 禁用行，不靠缺注）
    */
   readonly chat: BuiltinAppModule;
+  /**
+   * checkpoint 件闭包依赖束（默认层第十一行，会话篇 §5.3）：activeSessions =
+   * 驱动注册表在册会话活集合（prune 下界判据——组合根闭包晚绑）。缺省不传 =
+   * 诊断档退化空集（真装配恒传；dump-config 合成树 apply 永不跑，空集不触达）
+   */
+  readonly checkpointDeps?: CheckpointAppDeps;
 }
 
 /**
@@ -134,6 +141,12 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // 锚）。零宿主资源闭包（tools/sessions/apps 三键全经 ctx 取）；恒注册
     //（卸行靠 overlay 禁用——写类动词随第二刀导线）
     'builtin:admin': createAdminApp(),
+    // checkpoint 官方件（第十一行，内核边界篇席 23——会话篇 §5.3 工作台三件
+    // 第二刀）：工作区快照（sha256 blob 仓 + per-run manifest）+ /rewind 两段
+    // 回退。唯一闭包 = activeSessions（prune 下界判据——诊断档退化空集）；
+    // 恒注册（卸行靠 overlay 禁用——曾回退过的旧日志可读性不随行装载漂移，
+    // 词汇宿主面注册）
+    'builtin:checkpoint': createCheckpointApp(opts.checkpointDeps ?? { activeSessions: () => new Set<string>() }),
     // tools 官方件（第七行 = Ring 1 行树化起算行，契约篇 §5.1 节奏表——**必备行**
     // 非 Ring 2 可卸：overlay 禁用即启动断言拒启；可换实现引用不可禁用）：
     // 三段管道 + ctx.tools 服务 + fs/检索工具族。恒注册（缺注即 unresolved——

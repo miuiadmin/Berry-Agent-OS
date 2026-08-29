@@ -56,6 +56,13 @@ const MODULE_EDGES = {
   // agent——运行时零跨模块 import）；session 边是 ProjectedMessage/SessionEvent
   // 类型面（memory→session 类型边同款）
   compaction: ['contracts', 'context', 'session'],
+  // checkpoint = 工作区快照·回退官方件（2026-08-30 纵切，会话篇 §5.3，默认层
+  // 第十一行）：件本体 + blob 仓/捕获引擎纯函数 + /rewind 命令。服务全经 ctx
+  // 取（sessions/paths/agent/channels/ui——运行时零跨模块 import）；fork 边界
+  // 探针走 sessions.lastClosedBoundary() 宿主面单源（件不触 session 内部——
+  // 修前件内自算曾以词级过滤数组喂 lastClosedTurnBoundary 恒错位，收敛宿主
+  // 后 session 边退役）
+  checkpoint: ['contracts', 'context'],
   // admin = 平台管理面官方件（2026-08-27 契约篇 §3.4 第一刀，默认层第十行）：
   // apps_list/events_query 两只读工具 + 管理 Skill 随件携带。工具/服务全经
   // ctx.get 运行时取（结构子集类型本地收窄）——零跨模块 import，contracts
@@ -85,6 +92,10 @@ const MODULE_EDGES = {
     // 全走 ctx.get 运行时服务面（tools/sessions/plugins），零跨模块 import——
     // contracts 单边即足（比 mcp/web 窄边更窄：无 context 依赖）
     'admin',
+    // checkpoint = 快照·回退官方件（会话篇 §5.3 第十一行）：builtins 注册 +
+    // checkpointDeps 闭包（registry 在册会话集）+ sessions provide 两针
+    //（adopt/isBusy）接线
+    'checkpoint',
     // bridge = worker 域舰队（K3-c 组合根接线——app/bridge-fleet.ts 收编
     // spawnWorkerDomain 为 WorkerRowLoader + 监督/关停编舞，契约篇 §1.7）
     'bridge',
@@ -103,7 +114,7 @@ const BARE_IMPORTS = {
   '@earendil-works/pi-tui': ['channels', 'app'],
   'better-sqlite3': ['persist'],
   yaml: ['app', 'skills'],
-  ignore: ['skills', 'tools'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切；与 skills 同语义各自实现，第三消费者出现再议共享）
+  ignore: ['skills', 'tools', 'checkpoint'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切）；checkpoint = 工作区快照 DFS 遍历（2026-08-30 会话篇 §5.3——CR-10 语义同源不共享，第四消费者仍再议）
   jiti: ['context', 'app'],
 };
 const TEST_ONLY_BARE = new Set(['vitest']);

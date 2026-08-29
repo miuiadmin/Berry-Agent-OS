@@ -55,10 +55,11 @@ import type { Session } from '../session/session.js';
 import type { Persistence } from '../persist/index.js';
 import type { ToolsService } from '../tools/registry.js';
 import { createToolPipeline } from '../tools/pipeline.js';
+import type { ToolPipelineExecutor } from '../contracts/tools.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
 import type { AllowlistDraft, ApprovalPolicyMode, ApprovalRequest } from '../safety/types.js';
 import { APPROVAL_ANSWER_EVENT, createApprovalService } from '../safety/approval.js';
-import { installSafetyGate } from '../safety/gate.js';
+import { conductGateLines, installSafetyGate, type GateRowFilter } from '../safety/gate.js';
 import type { AllowlistEntry } from '../safety/allowlist.js';
 import { createBashTool, type CommandProcessLog } from '../exec/tool.js';
 import { createTodoTool, registerTodoInjection } from './todo.js';
@@ -384,6 +385,13 @@ export interface ChatAppDeps {
   readonly persistence?: Persistence;
   /** 根作用域（S1：open 运行于 /new 等任意时点——应用 apply ctx 已随 /reload 回卷，Ring 1 服务/总线 emit/logger 恒走根） */
   readonly rootCtx: ContextScope;
+  /**
+   * 守门行传导判据（与 subagent 子代理装配共用组合根单件——safety/gate.ts
+   * GateRowFilter）：S5 fresh 驱动作用域不 fork 根，根总线应用行（如 checkpoint
+   * 快照监听）不传导就结构性进不了本驱动管道——open 内 fresh 装配时传导
+   * pre+post 两段（会话开启时点冻结，详见接线处注释）。
+   */
+  readonly gateRowFilter: GateRowFilter;
   /** 工作区根（latestSessionId 归属键 / 会话 cwd） */
   readonly workspace: string;
   /** 模型标识（loop 配置 + request/header 快照腿） */
@@ -816,7 +824,25 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       );
       // 管道实例：onGateDecision 直连本会话 durable（gate 落账随驱动归属——
       // 不经组合根转发壳，两服务面〔exec/fetch〕继续走全局管道）
-      const driverPipeline = createToolPipeline(driverScope, { onGateDecision: durable.gate });
+      const basePipeline = createToolPipeline(driverScope, { onGateDecision: durable.gate });
+      // 守门行传导（与 subagent-factory ⑤b 同机制单源 safety/gate.ts——挖矿
+      // B10「固定行进得了隔离管道、开放行进不去」不对称的**驱动面**收口）：
+      // 根总线应用行 pre+post 传导进 fresh 驱动作用域。**首工具调用时点惰性
+      // 传导**（非 open 时点）：boot 首驱动 open 发生于 chat 件装载期——早于
+      // 后续行（memory/exec/checkpoint…）装载，open 时点快照恒空链；首工具
+      // 调用必在 boot 完成后，届时链已全。传导 handler 引用非重注册（闭包仍
+      // 捕根作用域、owner/rowId 保真；驱动 dispose 不回卷根行）；首次工具调用
+      // 时点冻结：此后根链变化（/reload 等）不回灌本驱动，新会话取新链。
+      // execute 段不传导（替换执行体风险大）。once 旗防重——重复传导即链上
+      // 重复行（同监听器两拍）。
+      let gateLinesConducted = false;
+      const driverPipeline: ToolPipelineExecutor = (def, callId, args, signal, onUpdate, origin) => {
+        if (!gateLinesConducted) {
+          gateLinesConducted = true;
+          conductGateLines(deps.rootCtx, driverScope, deps.gateRowFilter);
+        }
+        return basePipeline(def, callId, args, signal, onUpdate, origin);
+      };
       // answerer（S5 冷读闸 F1 修死）：ask 的 waterfall 派发在传入 ctx 的 runtime
       // 上——fresh 作用域必须同作用域注册 answerer，否则本驱动 ask 全线
       // unavailable。ui.confirm 经 deps 注入；弹窗标签/approvalId 短形/优先级

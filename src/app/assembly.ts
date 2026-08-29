@@ -55,7 +55,13 @@ import {
   externalEffectiveRoots,
   installSafetyGate,
 } from '../safety/index.js';
-import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode } from '../safety/index.js';
+import type {
+  ApprovalPolicyMode,
+  ApprovalService,
+  ApprovalRequest,
+  GateRowFilter,
+  SandboxMode,
+} from '../safety/index.js';
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
 import { registerExecService, renderEnvironmentSection, type CommandProcessLog } from '../exec/index.js';
@@ -85,6 +91,7 @@ import {
   jsonBytes,
   usageLedgerBuckets,
   ledgerModel,
+  lastClosedTurnBoundary,
 } from '../session/index.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
@@ -944,6 +951,22 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       return event;
     },
     currentSessionId: (): string | undefined => registry.routed()?.session.header.sessionId,
+    /**
+     * 会话收养（会话篇 §5.3 服务面两针之一，2026-08-30 checkpoint 纵切）：
+     * S3 open 收养路（registry.open({resume})）的件可达导线——fork 产物或任意
+     * 持久会话经此切前台（此后 routed() 锚新会话，appendEvent/deriveMessages
+     * 等全部服务面自然锚新——续写路径 = 切换后写，§5.2 落码注记条款）。
+     * 无注册面（诊断装配无 chat 件）false 降级；open 对持久在案 id 幂等收养
+     * （同 id 活条目幂等返回）、未知 id 同 false。
+     */
+    adopt: (sessionId: string): boolean => registry.open({ resume: sessionId }) !== undefined,
+    /**
+     * run 在跑探针（会话篇 §5.3 服务面两针之二）：缺省 = 当前路由会话；显式
+     * sessionId = 任意在册会话（/rewind 前置拒的判据面——文件恢复不得在跑动
+     * 的 agent 脚下进行）。不在册会话恒 false（无驱动即无在跑 run）。
+     */
+    isBusy: (sessionId?: string): boolean =>
+      (sessionId === undefined ? registry.routed() : registry.entries.get(sessionId))?.driver.isRunning === true,
     eventsOfType: (type: string): SessionEvent[] => {
       // 写读同规：未注册词读侧同抛（读侧静默空数组 = 拼错事件名的无声死）
       if (getSessionEventType(type) === undefined) {
@@ -955,6 +978,18 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       // 读源钉死 = 内存活日志（与 appendEvent 同账零迟滞）；无落点 = 空枚举
       const current = registry.routed();
       return current === undefined ? [] : current.session.events.filter((e) => e.type === type);
+    },
+    /**
+     * 路由会话的「最后闭合 turn 边界」（会话篇 §5.3 回退正路的读面针——checkpoint
+     * 件 forkSeq 的唯一取值口，2026-08-30 落码）：宿主经 session 单源函数算——
+     * 其返回值是 **物理全日志** 的闭合前缀长度（seq 即下标的连续性契约），应用侧
+     * 自行从 eventsOfType 过滤数组拼位置 = 词级下标冒充全日志位置，恒错位（修前
+     * checkpoint 件即犯此错：/rewind fork 恒抛边界落在敞开 turn 内）。无路由落点
+     * = undefined（与 eventsOfType 的空数组同款降级——调用方判）。
+     */
+    lastClosedBoundary: (): number | undefined => {
+      const current = registry.routed();
+      return current === undefined ? undefined : lastClosedTurnBoundary(current.session.events);
     },
     /**
      * 遮蔽载体宿主代写（会话篇 §2 增补 6，compaction 纵切装配缺口第 1 件）：
@@ -1199,6 +1234,21 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     if (row === undefined || resolveRowCarrier(row) !== 'external') return undefined;
     return externalEffectiveRoots(workspace, appDataDirOf(dataDir(), row.id), row.sandbox?.fs?.writableRoots);
   };
+  /**
+   * 守门行传导判据**组合根单件**（第三十一批 P1-4 立判据；checkpoint 纵切批
+   * 2026-08-30 扩为两消费面共用——subagent 子代理装配与 chat 驱动 fresh 作用域
+   * 同源传导，机制单源 safety/gate.ts conductGateLines）：anchors = 根名 + 锚
+   * fork 名拼成的 owner 完整前缀（根名 'app' = :398、锚 fork 'ring1'/'apps'
+   * 两处字面量的镜像——/reload 重建锚同名，前缀恒定）；mainRows 活取组合树
+   * main 载体行 id（resolveRowCarrier 闩一分派——worker 行走分域装载不进 main
+   * 快照；external 行 fail-closed 拒载不进装载序，快照天然不含；disabled 行
+   * 不在装载序、快照天然不含，无需再滤；let composition 捕获——/reload 重赋
+   * 后活取自动见新树）。
+   */
+  const gateRowFilter: GateRowFilter = {
+    anchors: ['app:apps:', 'app:ring1:'],
+    mainRows: () => new Set(composition.rows.filter((row) => resolveRowCarrier(row) === 'main').map((row) => row.id)),
+  };
   const subagentChildFactory = createSubagentChildFactory({
     ...(persistence ? { persistence } : {}),
     // 父驱动活取值（域键升级批：session 与 appId 单次 routed() 原子取——派生腿
@@ -1217,17 +1267,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 行收窄注入（R1 复盘批二）：子代理自建 fs 写面 = 会话档 ∩ caller 链栈行
     // 声明交集——external 行委派借道不再拿会话档宽面（契约篇 §1.7 第 11b 条）
     confinementFor: rowConfinementLookup,
-    // 守门行传导判据（第三十一批 P1-4）：anchors = 根名 + 锚 fork 名拼成的 owner
-    // 完整前缀（根名 'app' = :398、锚 fork 'ring1'/'apps' = :1219/:1491 三处
-    // 字面量的镜像——/reload 重建锚同名，前缀恒定）；mainRows 活取组合树 main
-    // 载体行 id（resolveRowCarrier 闩一分派——worker 行走分域装载不进 main 快照；
-    // external 行 fail-closed 拒载不进装载序，快照天然不含；disabled 行不在装
-    // 载序、快照天然不含，无需再滤；let composition 捕获——/reload 重赋后活取
-    // 自动见新树）
-    gateRowFilter: {
-      anchors: ['app:apps:', 'app:ring1:'],
-      mainRows: () => new Set(composition.rows.filter((row) => resolveRowCarrier(row) === 'main').map((row) => row.id)),
-    },
+    // 守门行传导判据（组合根单件——chat 驱动 fresh 作用域同源共用，判据语义
+    // 见上方 gateRowFilter 注释）
+    gateRowFilter,
   });
   /** 沙箱 confine 服务（S5 bash 迁域上提至此：chat deps 需要 sandbox 实例作
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
@@ -1256,6 +1298,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     ...(bootApp === undefined ? {} : { app: bootApp }),
     ...(opts.sandboxMode === undefined ? {} : { sandboxModeExplicit: true }),
     rootCtx: ctx,
+    // 守门行传导判据（组合根单件——fresh 驱动作用域应用行可达性的判据源，
+    // 判据语义见上方 gateRowFilter 注释；chat 件 open 内传导 pre+post 两段）
+    gateRowFilter,
     workspace,
     model,
     sandboxMode,
@@ -1347,6 +1392,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // chat 件 bundle（S1 工厂化）：注册表/前台宿主由件构造、组合根在此分配持有
     //（早期闭包 ③b/④b/④f 惰性引用 registry——TDZ 安全：全部运行期才调用）
     chat: chatBundle.module,
+    // checkpoint 件闭包（默认层第十一行，会话篇 §5.3）：activeSessions = 驱动
+    // 注册表在册（未退役）会话活集合——prune 下界判据（大仓小帽不得自剪成
+    // 「无快照」；子代理等不可达会话不享下界）。晚绑同 getSession 形态
+    //（registry 装配序在前，运行期才调用）
+    checkpointDeps: {
+      activeSessions: () =>
+        new Set([...registry.entries.values()].filter((e) => !e.retired).map((e) => e.session.header.sessionId)),
+    },
   });
   // 虚拟面第五/六键注入物（P0-2，契约篇 §1.2 注记①）：参数注入加载器——
   // context 不 import llm/persist（拓扑护栏）。第六键拒开基准 = resolvedDbPath

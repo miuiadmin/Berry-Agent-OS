@@ -15,10 +15,9 @@
  * dispose = 纵切三序列（shutdown 转发根总线）。
  */
 
-import { createContext, snapshotHandlers, appendHandlers } from '../context/context.js';
+import { createContext } from '../context/context.js';
 import { runInSessionChain, chainCallers } from '../context/chain.js';
 import type { AgentMessage } from '../contracts/messages.js';
-import { TOOL_POST_EXECUTE_EVENT, TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import { startRun } from '../agent/loop.js';
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage, Message, StreamFn } from '../contracts/llm.js';
@@ -30,7 +29,7 @@ import type { ProjectedMessage } from '../session/index.js';
 import type { Persistence } from '../persist/index.js';
 import type { SandboxMode } from '../safety/index.js';
 import { createApprovalService } from '../safety/approval.js';
-import { installSafetyGate } from '../safety/gate.js';
+import { conductGateLines, installSafetyGate, type GateRowFilter } from '../safety/gate.js';
 import { createRootsProvider, intersectRoots } from '../safety/index.js';
 import { createToolPipeline } from '../tools/index.js';
 import type { ToolPipelineExecutor } from '../tools/index.js';
@@ -61,18 +60,17 @@ export interface SubagentFactoryDeps {
   readonly rootCtx: ContextScope;
   /**
    * 守门行传导判据（2026-08-27 第三十一批 P1-4——骨架篇 §6.1「守门行传导 +
-   * context 腿」条；2026-08-29 D3 分区后判据改末段）：`anchors` = 应用装载锚的
-   * owner **前缀粗滤集**（`'app:apps:'`/`'app:ring1:'` 形——区化锚名带区段，
-   * 前缀只判挂载面归属）；`mainRows` = main 应用行 id 集**活取**（每次委派取
-   * 一次 = 委托时点快照；worker 行排除——桥转发器是 emit 签名形态，进
-   * waterfall 不调 next 即吞链）。行 id = owner 末段（行作用域 fork name =
-   * 行 id）。固定行（owner = 根名）无锚前缀结构性排除——子代理审批 never
-   * 无人值守语义不被根面交互审批冒破。
+   * context 腿」条；2026-08-29 D3 分区后判据改末段）：类型与语义单源在
+   * safety/gate.ts GateRowFilter——`anchors` = 应用装载锚的 owner **前缀粗滤集**
+   * （`'app:apps:'`/`'app:ring1:'` 形——区化锚名带区段，前缀只判挂载面归属）；
+   * `mainRows` = main 应用行 id 集**活取**（每次委派取一次 = 委托时点快照；
+   * worker 行排除——桥转发器是 emit 签名形态，进 waterfall 不调 next 即吞链）。
+   * 固定行（owner = 根名）无锚前缀结构性排除——子代理审批 never 无人值守
+   * 语义不被根面交互审批冒破。判据载体 = entry.rowId（行作用域 fork 注入，
+   * R2 测试补课批根治）。**组合根单件**：与 chat 驱动 fresh 作用域传导共用
+   * 同一实例。
    */
-  readonly gateRowFilter: {
-    readonly anchors: readonly string[];
-    readonly mainRows: () => ReadonlySet<string>;
-  };
+  readonly gateRowFilter: GateRowFilter;
   /**
    * 行收窄查询注入面（R1 复盘批二——契约篇 §1.7 第 11b 条，与 exec 服务
    * confinementFor 同一组合根闭包）：入参 = caller 链帧读出的行 id，返回
@@ -216,31 +214,11 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
 
     /* ---- ⑤b 守门行传导（第三十一批 P1-4：委托时点快照传导——骨架篇 §6.1
      * 「守门行传导 + context 腿」条）----
-     * 根总线应用行 pre+post 两段 append 进子链（子固定行之后、按根链注册序）——
-     * 挖矿 B10「固定行进得了子管道、开放行进不去」的不对称收口。判据 = owner
-     * 完整前缀 ∈ 锚集 + 行 id ∈ main 集（worker 行排除；固定行 owner = 根名
-     * 结构性排除——子审批 never 不被根面交互审批冒破）。传导的是 handler 引用
-     * 非重注册：闭包仍捕根作用域（读根服务行为正确）、owner 保真
-     * （appendHandlers 直写不走 on()——on() 会把 owner 记成子作用域名）、
-     * 子 dispose 不回卷根行。委托时点冻结：此后根链变化（/reload 等）不影响
-     * 本子，新委派取新链。execute 段不传导（拍板题 2——替换执行体风险大）。 */
-    {
-      const { anchors, mainRows } = deps.gateRowFilter;
-      for (const event of [TOOL_PRE_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT] as const) {
-        const entries = snapshotHandlers(deps.rootCtx, event).filter((entry) => {
-          // 行 id 判据载体 = entry 自身 rowId（R2 测试补课批根治，骨架篇 §6.1
-          // 判据载体根治）：on() 登记时携注册方作用域行归属——loader 恒 fork
-          // rowId = 行 id，结构性正确。前两代载体（前缀 slice → owner 末段切片）
-          // 在行 id 含 `:` 时均取段错位（行 id 无字符集执法）——含冒号行 id 的
-          // 守门行静默漏传导；本判据彻底摆脱字符串切片，owner 仅存锚前缀匹配
-          const rowId = entry.rowId;
-          if (rowId === undefined) return false; // 固定行（根/宿主面注册）结构性排除
-          if (!anchors.some((prefix) => entry.owner.startsWith(prefix))) return false;
-          return mainRows().has(rowId);
-        });
-        if (entries.length > 0) appendHandlers(childCtx, event, entries);
-      }
-    }
+     * 根总线应用行 pre+post 两段 append 进子链（子固定行之后、按根链注册序）
+     * ——机制与判据单源在 safety/gate.ts conductGateLines（chat 驱动 fresh
+     * 作用域同款消费——传导 handler 引用非重注册、委托时点冻结、execute 段
+     * 不传导等语义详见彼处注释）。 */
+    conductGateLines(deps.rootCtx, childCtx, deps.gateRowFilter);
 
     /* ---- ⑥ delegation fork 上总线：session_start（应用 keyed 初始化子会话态——
      * 与 durable session/event 镜像同总线，载荷 sessionId 即归属键）---- */
