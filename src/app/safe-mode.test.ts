@@ -2,7 +2,7 @@
  * app — `--no-apps` 安全模式回归锁（技术栈篇 §5，第二十六批拍板 ③，2026-08-27 落码）。
  *
  * boot 组合树空装语义：默认层与 overlay 全跳过、只保 Ring 1 硬装配行
- * （RING1_REQUIRED_ROW_IDS = ['tools']）；无驱动形态是一等态（TUI 壳照启可退 /
+ * （RING1_REQUIRED_ROW_IDS = ['tools', 'channels']）；无驱动形态是一等态（TUI 壳照启可退 /
  * run 语义性失败——本文件锁 boot 面）；救援环 = /reload 读盘不受旗标影响
  * （boot 安全模式 → 修 overlay → /reload 恢复全树 + 驱动就位，一进程内闭环）；
  * dump-config 同径可见（安全模式标记行 + 树只剩 Ring 1 行）。
@@ -30,7 +30,7 @@ async function teardown(runtime: { shutdown(): Promise<void> }, dir: string): Pr
 /* ---------------- 用例 ---------------- */
 
 describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径）', () => {
-  it('boot 空装：组合树只剩 tools 行激活、无驱动一等态（conversation undefined）、Ring 1 照常执法', async () => {
+  it('boot 空装：组合树只剩 tools/channels 行激活、无驱动一等态（conversation undefined）、Ring 1 照常执法', async () => {
     const compositionDir = freshDir('safe-boot');
     const runtime = await createRuntime({
       dbPath: ':memory:',
@@ -40,11 +40,12 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
     });
     try {
       // 组合树只剩 Ring 1 硬装配行（默认层其余行 = 没进树，不是 skipped/failed）
-      expect(runtime.composition.plan.map((row) => row.id)).toEqual(['tools']);
-      // 状态面同源：ctx.apps.list 唯一事实源 = 组合树全行（一行 activated）
+      expect(runtime.composition.plan.map((row) => row.id)).toEqual(['tools', 'channels']);
+      // 状态面同源：ctx.apps.list 唯一事实源 = 组合树全行（两行 activated）
       const list = runtime.appsService.list();
-      expect(list).toHaveLength(1);
+      expect(list).toHaveLength(2);
       expect(list[0]).toMatchObject({ id: 'tools', status: 'activated' });
+      expect(list[1]).toMatchObject({ id: 'channels', status: 'activated' });
       // 无驱动一等态：chat 件未装载 → 前台投影 undefined（TUI 壳照启可退）
       expect(runtime.conversation).toBeUndefined();
       // Ring 1 产物就位断言不受旗标软化：工具服务带管道（安全模式 ≠ 裸进程）
@@ -84,7 +85,7 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
       noApps: true,
     });
     try {
-      expect(runtime.composition.plan.map((row) => row.id)).toEqual(['tools']); // extra 不在
+      expect(runtime.composition.plan.map((row) => row.id)).toEqual(['tools', 'channels']); // extra 不在
     } finally {
       await teardown(runtime, compositionDir);
     }
@@ -121,8 +122,9 @@ describe('--no-apps 安全模式（boot 空装 + 救援环 + dump-config 同径�
       const out = write.mock.calls.map((call) => String(call[0])).join('');
       // 安全模式标记行：operator 一眼可辨「Ring 2/3 跳过是旗标使然不是树坏」
       expect(out).toContain('安全模式（--no-apps）');
-      // 树只剩 Ring 1 行：tools 在场、chat 不打印（同径 = 打印的就是实际生效装配）
+      // 树只剩 Ring 1 行：tools/channels 在场、chat 不打印（同径 = 打印的就是实际生效装配）
       expect(out).toContain('- tools：');
+      expect(out).toContain('- channels：');
       expect(out).not.toContain('- chat：');
     } finally {
       write.mockRestore();

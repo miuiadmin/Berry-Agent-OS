@@ -9,6 +9,7 @@
  *   berry dump-config      打印实际生效组合树（诊断面）
  *   旗标：--version / --help / --debug（日志提级）/ --read-only（run 限定只读档）
  *         / --sandbox-host（run 限定宿主沙箱 wrapper——e1，技术栈篇 §5）
+ *         / --port <n>（Web 通道开面——TUI 与 run 收，契约篇 §6.8）
  *
  * 命令面即产品契约（输出保持稳定）；三命令分别接 tui-main / run-main /
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
@@ -38,6 +39,9 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   --tick <名>  run 子命令限定：到点编排形态（prompt 取自任务行；与位置参数互斥）
   --app <id>   run 子命令限定：以应用身份单发（会话域/装配默认位/审批预设随清单
                生效；与 --tick 互斥——tick 是任务行身份，应用身份另属清单）
+  --port <n>   Web 通道开面（契约篇 §6.8）：监听 127.0.0.1:<n>（1-65535 整数）；
+               TUI 与 run 收，dump-config/tick 不收。等价 overlay 给 webui 行开
+               enabled+port，只作用 boot 树（/reload 重读盘）
   --no-apps 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
                ——坏应用锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
   --sandbox-host run 子命令限定：宿主进程套 OS 沙箱 wrapper（macOS seatbelt / Linux bwrap）
@@ -60,6 +64,8 @@ interface ParsedArgs {
   tick: string | undefined;
   /** run 子命令应用身份（第三纵切，取值旗标——值为应用 id；undefined = 对话应用域） */
   app: string | undefined;
+  /** Web 通道端口（契约篇 §6.8 刀一，取值旗标——值为端口串，入口层转数执法）；TUI/run 收，dump-config 不收 */
+  port: string | undefined;
   /** 安全模式（--no-apps，技术栈篇 §5）：boot 组合树空装只保 Ring 1 硬装配行 */
   noApps: boolean;
   /** e1 宿主沙箱包裹（--sandbox-host，技术栈篇 §5 第二十八批题 3A）：run 限定，wrapper 重 exec */
@@ -79,6 +85,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let noApps = false;
   let tick: string | undefined;
   let app: string | undefined;
+  let port: string | undefined;
   let sandboxHost = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -99,6 +106,11 @@ function parseArgs(argv: string[]): ParsedArgs {
       // 取值旗标同款：下一参数即应用 id；缺席为用法错（空串占位让 run case 执法）
       app = argv[i + 1] ?? '';
       i += 1;
+    } else if (arg === '--port') {
+      // Web 通道端口（取值旗标同款）：值为端口串，TUI/run 入口层转数执法
+      //（1-65535 整数——非数/越界 = 用法错）；dump-config/tick 不透传
+      port = argv[i + 1] ?? '';
+      i += 1;
     } else if (arg === '--no-apps') {
       // 安全模式对 TUI/run/dump-config 语义化（boot 形态面）；tick 唤起不透传
       //（自动化入口无「救援」语义——安全模式救的是交互面，tick 子进程恒全树）
@@ -112,20 +124,35 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly, background, tick, app, noApps, sandboxHost };
+  return { command, args: rest, debug, readOnly, background, tick, app, port, noApps, sandboxHost };
+}
+
+/**
+ * `--port` 值转数（Web 通道刀一，契约篇 §6.8）：1-65535 整数合法，其余
+ * 返回 undefined 由入口层写用法错——与 --app「解析层只取值、执法在入口」同律
+ */
+function parsePortValue(value: string): number | undefined {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : undefined;
 }
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, app, noApps, sandboxHost } = parseArgs(argv);
+  const { command, args, readOnly, background, tick, app, port, noApps, sandboxHost } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
-      case '':
+      case '': {
         // 安全模式主场景就是 TUI：坏应用锁死启动时起最小内核壳（无驱动形态
         // 壳照启可退）——命令面/应用管理完好，修 overlay 后 /reload 恢复全树；
         // --app 对 TUI 不透传（TUI 的应用面是 /app <id> 命令——交互进入非进程身份）
-        return tuiMain({ ...(noApps ? { noApps: true } : {}) });
+        const webuiPort = port === undefined ? undefined : parsePortValue(port);
+        if (port !== undefined && webuiPort === undefined) {
+          process.stderr.write('用法：berry --port <1-65535>（端口须为整数）\n');
+          return 2;
+        }
+        return tuiMain({ ...(noApps ? { noApps: true } : {}), ...(webuiPort !== undefined ? { webuiPort } : {}) });
+      }
       case '--help':
       case '-h':
         process.stdout.write(HELP + '\n');
@@ -171,6 +198,12 @@ function main(argv: string[]): number {
           process.stderr.write('用法：berry run "<message>" [--read-only] [--background] [--app <id>]\n');
           return 2;
         }
+        // --port 值执法（Web 通道刀一）：与 TUI 入口同律——非整数/越界 = 用法错 2
+        const webuiPort = port === undefined ? undefined : parsePortValue(port);
+        if (port !== undefined && webuiPort === undefined) {
+          process.stderr.write('用法：berry run --port <1-65535>（端口须为整数）\n');
+          return 2;
+        }
         // e1 宿主沙箱包裹（同 tick 分支）：用法校验后、装配前重 exec——内层进程
         // 于 wrapper 下走完装配与单发，退出码透传
         if (sandboxHost) {
@@ -187,11 +220,14 @@ function main(argv: string[]): number {
         // --no-apps → 无驱动一等态：run 无对话循环可执行，语义性失败退出码 1
         // --app → 以应用身份单发（第三纵切：assembly 组合根 resolveApp 解析清单
         //——查无 = APP_NOT_FOUND，message 披露在册可用清单）
+        // --port → Web 通道开面（组合树 webui 行注入 enabled+port——与 overlay
+        // 开面等价，只作用 boot 树；run 单发形态下通道随进程关停）
         return runOnceMain(message, {
           ...(readOnly ? { sandboxMode: 'read-only' as const } : {}),
           ...(background ? { usagePriority: 'background' as const } : {}),
           ...(app !== undefined ? { app } : {}),
           ...(noApps ? { noApps: true } : {}),
+          ...(webuiPort !== undefined ? { webuiPort } : {}),
         });
       }
       case 'dump-config':

@@ -35,11 +35,11 @@ export type BuiltinAppRegistry = Readonly<Record<string, BuiltinAppModule>>;
 /**
  * 官方默认层行集现状（契约篇 §5.1 落码注记随铭牌批更新）：chat（首行，对话
  * 应用件）/ memory / subagent / goal / scheduler / mcp——均 Ring 2 真·可卸
- * （overlay 可禁用，卸掉仅失对应能力，核心循环不破）；tools（第七行）=
- * Ring 1 行树化起算行（2026-08-26 契约篇 §5.1 节奏表第一刀）——**Ring 1
- * 必备行**，overlay 禁用即启动断言拒启（缺它核心循环必破，非可卸）。Ring 0
- * 内核不进组合树；Ring 1 其余行（channels/skills/llm/persist/safety 策略行）
- * 仍为组合根硬装配，随各自纵切逐行入列。
+ * （overlay 可禁用，卸掉仅失对应能力，核心循环不破）；tools（第七行）与
+ * channels（第十三行）= Ring 1 行树化两行（tools 2026-08-26 / channels
+ * 2026-08-30 契约篇 §6.8）——**Ring 1 必备行**，overlay 禁用即启动断言
+ * 拒启（缺它核心循环必破，非可卸）。Ring 0 内核不进组合树；Ring 1 其余行
+ * （skills/llm/persist/safety 策略行）仍为组合根硬装配，随各自纵切逐行入列。
  */
 // 官方默认层（Ring 2 官方全家桶——契约篇 §5.1）：chat 首行 + memory/subagent/goal/
 // scheduler/mcp 顺移 + tools（Ring 1 行树化起算行——行序是展示/装载叙事，Ring
@@ -88,15 +88,25 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 后诊断注入 post 行。servers 缺省空 = 行惰性无害零 spawn；卸掉即无 LSP
   // 能力，核心循环不破
   { id: 'lsp', pkg: 'builtin:lsp' },
+  // 第十三行 = channels 行（Ring 1 第二行树化，契约篇 §6.8 Web 通道第一刀
+  // 2026-08-30——tools 先例同构）：通道服务面（ctx.ui / ctx.channels 两服务
+  // 构造）入列；TUI 后端本体不入行（宿主入口持终端，attach 形态零改动）。
+  // **Ring 1 必备行**非可卸——卸掉即无通道服务面，核心循环必破
+  { id: 'channels', pkg: 'builtin:channels' },
+  // 第十四行 = webui 行（契约篇 §6.8 Web 通道第一刀——Ring 2 真·可卸）：
+  // SSE + HTTP POST 微路由 + SPA 静态分发 + 回环三防线。config enabled 缺省
+  // false = 行惰性无害零监听（lsp 空 servers 同款先例；--port 旗标一次性开）
+  { id: 'webui', pkg: 'builtin:webui' },
 ];
 
 /**
- * Ring 1 必备行 id 清单（契约篇 §5.1 行树化批「第二断言类」——tools 行起算，
- * 后续行树化纵切逐行累加：channels/skills/llm/persist/safety 策略行）。
+ * Ring 1 必备行 id 清单（契约篇 §5.1 行树化批「第二断言类」——tools 行起算
+ * （2026-08-26）、channels 行随 Web 通道纵切入列（2026-08-30，契约篇 §6.8），
+ * 后续行树化纵切逐行累加：skills/llm/persist/safety 策略行）。
  * 判据：卸掉该行首启核心循环「问→做→守→存」必破 = Ring 1（内核边界篇 §5.1
  * 一句话判据在装载面的投影）；fixed 词条不动（其定义 = 安全栈强制点行）。
  */
-export const RING1_REQUIRED_ROW_IDS: readonly string[] = ['tools'];
+export const RING1_REQUIRED_ROW_IDS: readonly string[] = ['tools', 'channels'];
 
 /** Ring 1 必备行断言违规（启动拒绝的事实清单——missing/disabled/platform/unresolved） */
 export interface Ring1Violation {

@@ -28,6 +28,8 @@ import { createCompactionApp } from '../compaction/index.js';
 import { createAdminApp } from '../admin/index.js';
 import { createCheckpointApp, type CheckpointAppDeps } from '../checkpoint/index.js';
 import { createToolsApp, type ToolsAppDeps } from '../tools/index.js';
+import { createChannelsApp, type ChannelsAppDeps } from '../channels/index.js';
+import { createWebuiApp, type WebuiAppDeps } from '../webui/index.js';
 import { createSubagentApp } from './subagent-app.js';
 import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
@@ -85,6 +87,18 @@ export interface BuiltinRegistryOptions {
    * 诊断档退化空集（真装配恒传；dump-config 合成树 apply 永不跑，空集不触达）
    */
   readonly checkpointDeps?: CheckpointAppDeps;
+  /**
+   * channels 件闭包依赖束（Ring 1 第十三行树化，契约篇 §6.8）：onUiError =
+   * UI 广播异常诊断 + rowApp = D1 命令拒载探针。**缺省不传 = D1 执法静默
+   * 回归**（真装配恒传——冷读 M2 勘正；纯测试形态才可省）
+   */
+  readonly channelsDeps: ChannelsAppDeps;
+  /**
+   * webui 件闭包依赖束（默认层第十四行，契约篇 §6.8）：宿主面全闭包注入
+   * （addDisplay/submitTo/historyFor/sessionsFor/ui/themeFor/version）。
+   * 行缺省 enabled:false 惰性零监听——deps 恒传不随 enabled 变
+   */
+  readonly webuiDeps: WebuiAppDeps;
 }
 
 /**
@@ -165,6 +179,15 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // 三段管道 + ctx.tools 服务 + fs/检索工具族。恒注册（缺注即 unresolved——
     // Ring 1 必备行断言拒启，诊断树也须见到此行）
     'builtin:tools': createToolsApp(opts.toolsDeps),
+    // channels 官方件（第十三行 = Ring 1 第二行树化，契约篇 §6.8 Web 通道
+    // 第一刀——tools 先例同构）：ctx.ui / ctx.channels 两服务的构造入列行
+    // apply（TUI 后端本体不入行——宿主入口持终端与进程生命周期）。恒注册
+    //（Ring 1 必备行——overlay 禁用即启动断言拒启）
+    'builtin:channels': createChannelsApp(opts.channelsDeps),
+    // webui 官方件（第十四行，契约篇 §6.8——Ring 2 真·可卸）：单机回环
+    // Web 通道后端。行缺省 enabled:false 惰性零监听；恒注册（卸行/关面走
+    // overlay 禁用或 config.enabled:false，unresolved 不属于本件的形态）
+    'builtin:webui': createWebuiApp(opts.webuiDeps),
   };
 }
 

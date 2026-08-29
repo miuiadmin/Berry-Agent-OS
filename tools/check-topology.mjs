@@ -71,6 +71,12 @@ const MODULE_EDGES = {
   admin: ['contracts'],
   // 历史投影经注入回调拉取（不依赖 session）；活体事件类型来自 agent 公开事件面
   channels: ['contracts', 'context', 'agent'],
+  // webui = Web 通道官方件（2026-08-30 Web 通道刀一，契约篇 §6.8，默认层第十四
+  // 行 = Ring 2 真·可卸）：node:http 微路由 + SSE 活体流 + SPA 静态分发。display
+  // 信封结构子集（WebuiDisplayEnvelope）本地定义不 import agent；UiBackend/
+  // UiService 形状走 channels 类型面；typebox Type/Value 全走 contracts 再导出
+  //（无裸导入、无 context 依赖——ctx 窄面类型来自 contracts AppContext）
+  webui: ['contracts', 'channels'],
   app: [
     'contracts',
     'context',
@@ -105,6 +111,10 @@ const MODULE_EDGES = {
     // lsp = 语言服务器官方件（契约篇 §6.7 第十二行）：builtins 注册 + lspDeps
     // 闭包（confined spawner 的 lsp 实例/登记簿/桥核工厂——assembly 同构）
     'lsp',
+    // webui = Web 通道官方件（契约篇 §6.8 第十四行）：builtins 注册 + webuiDeps
+    // 闭包（addDisplay/submitTo/historyFor/sessionsFor/ui/themeFor/version——
+    // 组合根晚绑闭包；VERSION 亦组合根注入防 app 边回流）
+    'webui',
   ],
 };
 

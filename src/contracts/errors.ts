@@ -375,6 +375,16 @@ export const APP_NOT_FOUND = registerErrorCode('APP_NOT_FOUND');
 export const APP_SHUTDOWN_QUIESCE_VIOLATED = registerErrorCode('APP_SHUTDOWN_QUIESCE_VIOLATED');
 
 /* ------------------------------------------------------------------ */
+/* webui 码族（契约篇 §6.8 Web 通道第一刀，2026-08-30——回环三防线与     */
+/* 端口占用的装配期执法面：fail-at-startup 拒启非运行期警告）。          */
+/* ------------------------------------------------------------------ */
+
+/** webui：显式非回环绑定被拒（config host 非 127.0.0.1/localhost/::1——服务器形态双皮到位前不开非回环监听，技术栈篇 §4.4 分界；行 failed 拒启） */
+export const WEBUI_BIND_FORBIDDEN = registerErrorCode('WEBUI_BIND_FORBIDDEN');
+/** webui：端口被占用（EADDRINUSE——apply 内 await listen 失败即抛，行 failed → 官方件失败行非空 = 启动断言拒启） */
+export const WEBUI_PORT_IN_USE = registerErrorCode('WEBUI_PORT_IN_USE');
+
+/* ------------------------------------------------------------------ */
 /* 资源护栏族码族（契约篇 §1.6，2026-08-27 刀〇b——总量/频率失控面，与    */
 /* 时钟族〔挂起〕正交。执法统一 fail-loud；例外两条不立码：#11 进度流是  */
 /* 数据面丢弃 + 单条 warn、#13 切片是物理层多事务语义〔PERSIST_BATCH_    */

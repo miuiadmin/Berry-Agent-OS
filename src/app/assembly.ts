@@ -82,11 +82,13 @@ import type { AgentLocation } from './agents-md.js';
 // 项目指令文件四层发现（骨架篇 §7.3 instructions 段——尾刀落码）
 import { defaultInstructionLocations, discoverInstructions, renderInstructions } from './instructions.js';
 import type { InstructionLocation } from './instructions.js';
-import { registerChannelServices } from '../channels/service.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
+import type { WebuiSessionSummary } from '../webui/index.js';
+import { VERSION } from './version.js';
 import type { Session } from '../session/session.js';
 import {
+  deriveMessages,
   getSessionEventType,
   snapshotJsonValue,
   jsonBytes,
@@ -112,7 +114,7 @@ import {
 } from '../contracts/errors.js';
 import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
-import { createChatApp } from '../chat/index.js';
+import { createChatApp, CHAT_APP_ID } from '../chat/index.js';
 import {
   createPathsService,
   loadComposition,
@@ -195,6 +197,26 @@ function loadProjectAliases(dir: string, warn: (message: string) => void): Recor
     warn(`project-aliases.json 解析失败，整表忽略：${describeError(err)}`);
     return {};
   }
+}
+
+/**
+ * Web 通道开面注入（CLI `--port`，契约篇 §6.8 Web 通道刀一）：组合树两树
+ * 给 webui 行 merge `config {enabled:true, port}`——等价于 overlay 显式开面
+ * 但只作用 boot 树（/reload fresh 重读盘，入口旗标语义不属树本体）。
+ * disabled/平台门控行不越权复活：rows 树的 config 补丁惰性（行激活语义仍
+ * 由 disabled 管），plan 树只打激活行（skip 行无 config 字段——loader 形状）。
+ */
+function withWebuiPort(report: CompositionReport, port: number): CompositionReport {
+  return {
+    rows: report.rows.map((row) =>
+      row.id === 'webui' ? { ...row, config: { ...(row.config ?? {}), enabled: true, port } } : row,
+    ),
+    plan: report.plan.map((row) =>
+      row.id === 'webui' && row.skip === undefined
+        ? { ...row, config: { ...(row.config ?? {}), enabled: true, port } }
+        : row,
+    ),
+  };
 }
 
 /**
@@ -318,6 +340,13 @@ export interface RuntimeOptions {
    * /reload 不受本旗标影响（fresh 读盘不过滤——救援环一进程内闭环）
    */
   readonly noApps?: boolean;
+  /**
+   * Web 通道监听端口（CLI `--port`，契约篇 §6.8 Web 通道刀一）：给组合树
+   * webui 行注入 `config {enabled:true, port}`——等价于 overlay 显式开面，
+   * 但只作用 boot 树（/reload fresh 重读盘，旗标语义不属树本体）。TUI 与
+   * run 两入口收；dump-config 诊断面不收（合成树如实反映盘上配置）
+   */
+  readonly webuiPort?: number;
   /**
    * external 域 OS 沙箱层开关（external carrier 落码批，契约篇 §1.7 第三十七
    * 批增补 2a）：缺省 true——装载期 probe 醒 fail-closed（SANDBOX_UNAVAILABLE
@@ -520,15 +549,13 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     rowAppMap = new Map(report.rows.filter((row) => row.apps !== undefined).map((row) => [row.id, row.apps!] as const));
   };
 
-  /* ---- ② 通道与 UI 服务 ---- */
-  const { channels, ui } = registerChannelServices(ctx, {
-    // UI 广播异常诊断（隔离案一第一刀 #3）：坏后端异常经根 logger 留痕——
-    // 广播循环逐后端隔离，单后端抛错不毒调用方、不截断后续通道
-    onUiError: (err, op) =>
-      ctx.logger.error(`UI 广播异常已隔离（${op}）`, { error: err instanceof Error ? err.stack : String(err) }),
-    // D1 app 行命令拒载探针（TUI 命令单表无域层——app 行注册即跨应用漏命令）
-    rowApp,
-  });
+  /* ---- ② 通道与 UI 服务（Ring 1 第十三行树化，契约篇 §6.8——tools 先例同构）----
+   * 构造整体挪入 builtin:channels 行 apply（src/channels/app.ts）；本段只留
+   * 两实体槽位（let 声明——TDZ 安全先例 :596-597 同款：chatBundle 构造点
+   * :1343 早于 ring1 装载锚 :1549，confirm/select 装配闭包引用后赋值变量，
+   * 闭包体调用时点恒在装载后）。装载后回填见 ring1Load 段后。 */
+  let channels: ChannelsServiceEntity;
+  let ui: UiService;
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
   // 首启建档（paths.ts ensureDbDir）：库文件父目录须先在——三入口共用的唯一
@@ -1464,6 +1491,80 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       activeSessions: () =>
         new Set([...registry.entries.values()].filter((e) => !e.retired).map((e) => e.session.header.sessionId)),
     },
+    // channels 件闭包（Ring 1 第十三行树化，契约篇 §6.8）：本体 = ② 段原装配
+    // 参数平移（onUiError 广播异常诊断 + rowApp = D1 命令拒载探针）——构造
+    // 挪入行 apply，组合根只在此递依赖。恒传（缺省即 D1 执法静默回归）
+    channelsDeps: {
+      onUiError: (err, op) =>
+        ctx.logger.error(`UI 广播异常已隔离（${op}）`, { error: err instanceof Error ? err.stack : String(err) }),
+      rowApp,
+    },
+    // webui 件闭包（默认层第十四行，契约篇 §6.8）：宿主面全闭包晚绑——行
+    // enabled:false 时 apply 早退零触达，deps 恒传不随 enabled 变。五腿全
+    // 经 chatBundle/registry/officialApps 活引用（装配序在前，运行期才调用）
+    webuiDeps: {
+      // display 信封入列：chat 件前台宿主无注销器（Ring 1 不随 /reload 回卷）
+      // ——channel.closed 旗标自守（dispose 后 sink no-op）
+      addDisplay: (sink) => chatBundle.front.addDisplay(sink),
+      // 提交路由：仅未退役活条目收（retired/未知 id = false → 404）
+      submitTo: (sessionId, text) => {
+        const entry = registry.entries.get(sessionId);
+        if (entry === undefined || entry.retired) return false;
+        entry.driver.submit(text);
+        return true;
+      },
+      // 历史投影：事件日志 deriveMessages（无投影键的空会话 = 空数组）
+      historyFor: (sessionId) => {
+        const entry = registry.entries.get(sessionId);
+        return entry === undefined ? undefined : deriveMessages(entry.session.events);
+      },
+      // 会话清单两源合并：注册表活条目（内存真相，含 retired→active:false）∪
+      // store 近史 50（旧会话迟滞披露——sync 不 flush，已决裁决：迟滞无害，
+      // 活条目必在注册表）。条目 appId 权威；cwd/createdAt 取自 store 行
+      //（SessionHeader 无此二列，缺行即 undefined）；updatedAt = 末事件时间
+      sessionsFor: () => {
+        // 近史行一次取出复用（活条目腿也只查这一份——同源两腿同真相）
+        const recent = persistence ? persistence.store.recentSessions(50) : [];
+        const summaries: WebuiSessionSummary[] = [];
+        const seen = new Set<string>();
+        for (const entry of registry.entries.values()) {
+          seen.add(entry.session.header.sessionId);
+          const row = recent.find((r) => r.id === entry.session.header.sessionId);
+          summaries.push({
+            id: entry.session.header.sessionId,
+            appId: entry.appId,
+            ...(row !== undefined && row.cwd !== null ? { cwd: row.cwd } : {}),
+            ...(row !== undefined ? { createdAt: row.createdAt } : {}),
+            updatedAt: entry.session.events.at(-1)?.time,
+            active: !entry.retired,
+          });
+        }
+        for (const row of recent) {
+          if (seen.has(row.id)) continue;
+          summaries.push({
+            id: row.id,
+            // NULL app = 存量会话（app 列升级前的旧账）——归默认应用域（store 读脸
+            // 注记「归并归调用侧」在此兑现；两跳回落 + 兜底 chat 锚与 resolveDefault 同源）
+            appId: row.app ?? resolveDefaultApp(officialApps, appGaps)?.id ?? CHAT_APP_ID,
+            ...(row.cwd !== null ? { cwd: row.cwd } : {}),
+            createdAt: row.createdAt,
+            ...(row.lastEventAt !== null ? { updatedAt: row.lastEventAt } : {}),
+            active: false,
+          });
+        }
+        return summaries;
+      },
+      // UI 服务晚绑（② 段 let 槽位——ring1 装载回填后闭包才可达）
+      ui: () => ui,
+      // 主题取值：镜像 tui-main 闭包形态（officialApps :634 先于 builtins 构造）
+      themeFor: (sessionId) => {
+        const id = sessionId ?? registry.focus.sessionId;
+        const entry = id === undefined ? undefined : registry.entries.get(id);
+        return entry === undefined ? undefined : officialApps.get(entry.appId)?.theme?.accent;
+      },
+      // 版本串（webui 边不含 app 模块——组合根注入）
+      version: VERSION,
+    },
   });
   // 虚拟面第五/六键注入物（P0-2，契约篇 §1.2 注记①）：参数注入加载器——
   // context 不 import llm/persist（拓扑护栏）。第六键拒开基准 = resolvedDbPath
@@ -1481,6 +1582,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   // 的 fresh 读盘不过滤（救援环——boot 安全模式 → 修 overlay → /reload 恢复
   // 全树，进程内闭环，见 reload 内注记）
   if (opts.noApps) composition = safeModeComposition(composition);
+  // Web 通道开面注入（--port）：两树给 webui 行 merge config（enabled:true 起监听
+  // + 端口值）。disabled/skip 行不越权复活——config 补丁惰性，激活语义仍由行
+  // 自身的 disabled/平台门控管；skip 计划行不带 config（loader 形状），只打激活行
+  if (opts.webuiPort !== undefined) composition = withWebuiPort(composition, opts.webuiPort);
   /* 应用组件在场断言（契约篇 §5.4）：合成后即刻赋 appGaps 真值——boot 首驱动
    * open（装载 ⑨ chat 件装载期）读缺场投影时已就位。缺场 = 应用级隔离不拒启
    * （声明了没装 = 用户裁量非发行事故）；安全模式下 Ring 2 全缺场 → 默认应用
@@ -1569,6 +1674,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // never 识别为终态，显式 throw 收束控制流（运行期不可达）
     throw new AppError(COMPOSITION_ROW_INVALID, 'Ring 1 拒启（不可达兜底）');
   }
+  // channels/ui 两实体回填（② 段 let 槽位——tools ctx.get 同段先例）：服务由
+  // builtin:channels 行 apply 提供，get 查无即抛（Ring 1 必备行装载失败已在上
+  // 面拒启，此处查无属替换件未 provide——boot 期响亮）。此后 chatBundle 闭包
+  //（confirm/select）与 ⑨b 命令面引用恒可达
+  channels = ctx.get<ChannelsServiceEntity>('channels');
+  ui = ctx.get<UiService>('ui');
 
   /* ---- ⑤ 工具面（Ring 1 行树化批起 = builtin:tools 件在 ④e 装载，本段仅存指针） ----
    * 三段管道 + ctx.tools 服务 + 检索族的原硬装配已整体入列组合树第七行

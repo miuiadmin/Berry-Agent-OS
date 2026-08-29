@@ -53,6 +53,24 @@ export interface SessionRow {
   app: string | null;
 }
 
+/**
+ * 近史会话清单行（recentSessions 产物，契约篇 §6.8 webui 清单投影取数面）：
+ * sessions 行的投影子集 + events 聚合的最近时刻（sessions 表无 updated_at 列
+ * ——MAX(time) 聚合是唯一来源）。
+ */
+export interface RecentSessionRow {
+  /** 会话 id */
+  id: string;
+  /** 工作目录（可空列） */
+  cwd: string | null;
+  /** 创建时刻（毫秒时间戳） */
+  createdAt: number;
+  /** 应用域标记（NULL = 存量会话——按投影归默认应用域，归并归调用侧） */
+  app: string | null;
+  /** 最近事件时刻（毫秒时间戳；零事件会话 = null——仅建壳未写过账） */
+  lastEventAt: number | null;
+}
+
 /** appendCore 需要的会话登记信息（首次写入时落 sessions 行） */
 export interface SessionRegistration {
   sessionId: string;
@@ -518,6 +536,37 @@ export class Store {
     const sql = `SELECT type, COUNT(DISTINCT session_id) AS n FROM events WHERE type IN (${types.map(() => '?').join(', ')}) GROUP BY type`;
     const rows = this.stmt(sql).all(...(types as never[])) as Array<{ type: string; n: number }>;
     return Object.fromEntries(rows.map((row) => [row.type, row.n]));
+  }
+
+  /**
+   * 近史会话清单（契约篇 §6.8 webui 清单投影的取数面，latestSessionId 的
+   * 内核表读脸同族——宿主侧 Store 直查合法）。**updatedAt 无列可读**：sessions
+   * 表没有 updated_at（落码批对实字段勘正），最近时刻 = events 表 MAX(time)
+   * 聚合（LEFT JOIN——零事件会话〔仅建壳〕仍列出行、lastEventAt 为 null）。
+   *
+   * 序 = lastEventTime DESC、tie-break rowid DESC（近史语义：最活跃在前）。
+   * 迟滞披露同族：读物理库，write-behind 未 flush 尾部不可见——屏障归调用侧
+   *（assembly 注入闭包内先 flush，与 queryEvents 的 flushFirst 同纪律）。
+   */
+  recentSessions(limit: number): RecentSessionRow[] {
+    const rows = this.stmt(
+      `SELECT s.id AS id, s.cwd AS cwd, s.created_at AS created_at, s.app AS app, MAX(e.time) AS last_event_at
+       FROM sessions s LEFT JOIN events e ON e.session_id = s.id
+       GROUP BY s.id ORDER BY last_event_at DESC, s.rowid DESC LIMIT ?`,
+    ).all(limit) as Array<{
+      id: string;
+      cwd: string | null;
+      created_at: number;
+      app: string | null;
+      last_event_at: number | null;
+    }>;
+    return rows.map((r) => ({
+      id: r.id,
+      cwd: r.cwd,
+      createdAt: r.created_at,
+      app: r.app,
+      lastEventAt: r.last_event_at,
+    }));
   }
 
   /* ---------------- 跨会话有界查询（会话篇 §3.4，2026-08-27 刀 1） ---------------- */

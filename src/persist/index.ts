@@ -7,7 +7,7 @@
 export { Persistence } from './persistence.js';
 export type { PersistenceOptions } from './persistence.js';
 export { openStore, Store } from './store.js';
-export type { StoreOptions, SessionRow, SessionRegistration } from './store.js';
+export type { StoreOptions, SessionRow, SessionRegistration, RecentSessionRow } from './store.js';
 export { spentBackgroundTokensSince, localDayStartMs, openTurnDepth } from './usage-account.js';
 export { WriteBehind } from './write-behind.js';
 export type { WriteBehindOptions } from './write-behind.js';

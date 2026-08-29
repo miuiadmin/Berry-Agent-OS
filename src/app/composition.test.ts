@@ -49,7 +49,7 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7） */
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行 + channels 第十三行〔Ring 1 第二行树化〕 + webui 第十四行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7/§6.8） */
 const DEFAULT_LAYER_IDS = new Set([
   'chat',
   'memory',
@@ -63,6 +63,8 @@ const DEFAULT_LAYER_IDS = new Set([
   'admin',
   'checkpoint',
   'lsp',
+  'channels',
+  'webui',
 ]);
 
 /**
@@ -94,13 +96,15 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层十二行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // 官方默认层十四行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
     // subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行（客户端桥
     // 第一刀）+ tools 第七行（Ring 1 行树化起算行——契约篇 §5.1 节奏表）
     // + web 第八行（web 刀一批三件——契约篇 §1.5.2）+ compaction 第九行
     // + admin 第十行（平台管理面第一刀——契约篇 §3.4）
     // + checkpoint 第十一行（工作区快照·回退——会话篇 §5.3）
     // + lsp 第十二行（语言服务器件——契约篇 §6.7）
+    // + channels 第十三行（Ring 1 第二行树化——契约篇 §6.8）
+    // + webui 第十四行（Web 通道件——契约篇 §6.8）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -115,8 +119,10 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'admin', pkg: 'builtin:admin' },
       { id: 'checkpoint', pkg: 'builtin:checkpoint' },
       { id: 'lsp', pkg: 'builtin:lsp' },
+      { id: 'channels', pkg: 'builtin:channels' },
+      { id: 'webui', pkg: 'builtin:webui' },
     ]);
-    expect(report.plan).toHaveLength(12);
+    expect(report.plan).toHaveLength(14);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -571,7 +577,7 @@ describe('builtin: 保留前缀解析', () => {
   it('注册表命中：计划行带 builtin 模块引用与行 config（不经 jiti）', () => {
     const dataDir = makeDataDir();
     writeOverlay(dataDir, '  - id: memory\n    config: { recallTopK: 5 }\n');
-    // 默认层十一键全给（chat/subagent/goal/scheduler/mcp/tools/web/admin/checkpoint 行同解析——不带 config 的纯净形态对照）
+    // 默认层十四键全给（其余官方行同解析——不带 config 的纯净形态对照）
     const stubChat = { name: 'chat-stub', apply: async () => {} };
     const stubSubagent = { name: 'subagent-stub', apply: async () => {} };
     const stubGoal = { name: 'goal-stub', apply: async () => {} };
@@ -583,6 +589,8 @@ describe('builtin: 保留前缀解析', () => {
     const stubAdmin = { name: 'admin-stub', apply: async () => {} };
     const stubCheckpoint = { name: 'checkpoint-stub', apply: async () => {} };
     const stubLsp = { name: 'lsp-stub', apply: async () => {} };
+    const stubChannels = { name: 'channels-stub', apply: async () => {} };
+    const stubWebui = { name: 'webui-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -596,6 +604,8 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:admin': stubAdmin,
       'builtin:checkpoint': stubCheckpoint,
       'builtin:lsp': stubLsp,
+      'builtin:channels': stubChannels,
+      'builtin:webui': stubWebui,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -610,6 +620,8 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'admin', pkg: 'builtin:admin' },
       { id: 'checkpoint', pkg: 'builtin:checkpoint' },
       { id: 'lsp', pkg: 'builtin:lsp' },
+      { id: 'channels', pkg: 'builtin:channels' },
+      { id: 'webui', pkg: 'builtin:webui' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -624,6 +636,8 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'admin', pkg: 'builtin:admin', builtin: stubAdmin },
       { id: 'checkpoint', pkg: 'builtin:checkpoint', builtin: stubCheckpoint },
       { id: 'lsp', pkg: 'builtin:lsp', builtin: stubLsp },
+      { id: 'channels', pkg: 'builtin:channels', builtin: stubChannels },
+      { id: 'webui', pkg: 'builtin:webui', builtin: stubWebui },
     ]);
   });
 
@@ -657,7 +671,7 @@ describe('builtin: 保留前缀解析', () => {
 /* ---------------- Ring 1 必备行断言与差异（行树化批，契约篇 §5.1 节奏表） ---------------- */
 
 describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
-  /** 全八行 stub 注册表（健康形态——行行可解析） */
+  /** 全行 stub 注册表（健康形态——行行可解析） */
   const stubRegistry = () => ({
     'builtin:chat': { name: 'chat-stub', apply: async () => {} },
     'builtin:memory': { name: 'memory-stub', apply: async () => {} },
@@ -668,10 +682,15 @@ describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
     'builtin:tools': { name: 'tools-stub', apply: async () => {} },
     'builtin:web': { name: 'web-stub', apply: async () => {} },
     'builtin:compaction': { name: 'compaction-stub', apply: async () => {} },
+    'builtin:admin': { name: 'admin-stub', apply: async () => {} },
+    'builtin:checkpoint': { name: 'checkpoint-stub', apply: async () => {} },
+    'builtin:lsp': { name: 'lsp-stub', apply: async () => {} },
+    'builtin:channels': { name: 'channels-stub', apply: async () => {} },
+    'builtin:webui': { name: 'webui-stub', apply: async () => {} },
   });
 
-  it('起算清单：RING1_REQUIRED_ROW_IDS = [tools]（后续行树化纵切逐行累加）', () => {
-    expect(RING1_REQUIRED_ROW_IDS).toEqual(['tools']);
+  it('起算清单：RING1_REQUIRED_ROW_IDS = [tools, channels]（后续行树化纵切逐行累加）', () => {
+    expect(RING1_REQUIRED_ROW_IDS).toEqual(['tools', 'channels']);
   });
 
   it('健康树：全行可解析 → 零违规', () => {
@@ -914,8 +933,8 @@ describe('partitionPlan：装载计划分区', () => {
     // 空注册表：官方默认层行 unresolved 但照进 plan（行原貌分区——不按激活态）
     const report = loadComposition(dataDir, {}, KNOWN_APPS);
     const part = partitionPlan(report.plan);
-    // Ring 1 必备行先剔（tools → ring1 袋——独立装载锚维持现状）
-    expect(part.ring1.map((r) => r.id)).toEqual(['tools']);
+    // Ring 1 必备行先剔（tools/channels 两行 → ring1 袋——独立装载锚维持现状）
+    expect(part.ring1.map((r) => r.id)).toEqual(['tools', 'channels']);
     // 其余官方默认层行（apps 缺席）+ 无 apps 用户行全数归系统区
     expect(part.system.every((r) => r.apps === undefined)).toBe(true);
     expect(part.zoneRows.get('chat')!.map((r) => r.id)).toEqual(['mountable']);

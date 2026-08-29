@@ -39,4 +39,6 @@ export {
   registerUiService,
   type ChannelsServiceEntity,
 } from './service.js';
+// 官方件本体（Ring 1 行树化批，契约篇 §6.8——builtin:channels 行 apply 面）
+export { createChannelsApp, type ChannelsAppDeps } from './app.js';
 export { createTuiChannel, type TuiChannel, type TuiChannelOptions } from './tui.js';

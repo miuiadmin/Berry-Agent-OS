@@ -253,6 +253,23 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
               gateSink: () => undefined,
               workspace: () => process.cwd(),
             },
+            // channels 件闭包占位（Ring 1 第十三行树化——同 toolsDeps 律：诊断面
+            // apply 永不跑，注册表键在即树形不失真；onUiError 占位零副作用）
+            channelsDeps: {
+              onUiError: () => undefined,
+            },
+            // webui 件闭包占位（默认层第十四行——enabled:false 行缺省惰性零监听，
+            // 诊断面 apply 永不跑；五腿全占位，注册表键在即树形不失真）
+            webuiDeps: {
+              addDisplay: () => undefined,
+              submitTo: () => false,
+              historyFor: () => undefined,
+              sessionsFor: () => [],
+              ui: () => {
+                throw new Error('dump-config 占位：ui 服务在诊断面不可达');
+              },
+              version: VERSION,
+            },
           }),
           new Set(officialApps.keys()),
         );
