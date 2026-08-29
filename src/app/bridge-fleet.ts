@@ -10,6 +10,9 @@
  * - reapUnapplied：清割「装载成功但从未 apply」的域（Kahn 零进展残留行——行
  *   已按 APP_INJECT_UNRESOLVED 进失败清单，域是孤儿，即刻刻意收尾防漏）；
  * - terminateAll：域级刻意收尾（/reload 随应用锚重装载、进程关停两时点）；
+ * - terminateZone：单区 reload 的选择性收编（D3 per-app reload，契约篇 §5.1
+ *   ——「该区行」谓词 = 独占该区〔apps 恰为 [该 app]〕，跨区行/系统相位行
+ *   不动；行→区登记列在 load() 单点落，worker/external 两腿同舰队同谓词）；
  * - stats：观测打点（观测锚⑨心跳超时/⑩装机计数——打点先行，事件面随预算
  *   内存维度〔刀三〕另批；先例：tools stats() counters）。
  *
@@ -45,6 +48,7 @@ import {
 import { resolveRowCarrier, type AppPlanRow } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
+import { appZoneId } from '../context/context.js';
 import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
 import { spawnWorkerDomain, bridgeWorkerUrl, type WorkerDomain } from '../bridge/bootstrap.js';
 import { spawnExternalDomain, type ExternalDomain } from '../bridge/external-domain.js';
@@ -132,6 +136,12 @@ interface FleetEntry {
   readonly domain: WorkerDomain | ExternalDomain;
   /** apply 是否已成功返还（reapUnapplied 的判别面） */
   applied: boolean;
+  /**
+   * 行归属应用区（D3 per-app reload 行→区登记列，契约篇 §5.1）：apps 恰一
+   * 元素 = appZoneId(该 app)；缺席/多元素 = undefined（系统相位/跨区行——
+   * 单区 reload 不动）。load() 单点登记，两腿（worker/external）同列同谓词。
+   */
+  readonly zone?: string;
 }
 
 /** 舰队操作面（组合根三件编舞出口 + 装载器注入物） */
@@ -142,6 +152,13 @@ export interface BridgeFleet {
   reapUnapplied(reason: string): number;
   /** 全域刻意收尾（/reload/关停编舞——不走死亡结算）；返回收编数 */
   terminateAll(reason: string): number;
+  /**
+   * 单区选择性收编（D3 per-app reload，契约篇 §5.1「该区行」谓词 = 独占该区）：
+   * 只 terminate 行→区列恰等于该区的域——跨区行/系统相位行不动（他区运行时
+   * 不动是 per-app reload 的存在理由）。zone 形 = appZoneId(appId)（'app:<id>'）。
+   * 返回收编数（含 0 = 该区无分域行，空区路径合法）。
+   */
+  terminateZone(zone: string, reason: string): number;
   /** 观测打点：spawned/ooms/crashed/heartbeatFreezes/terminated 累计、live 现存（ooms = crashed 的内存超限归因子集） */
   stats(): {
     spawned: number;
@@ -351,7 +368,13 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         });
       }
       self = domain;
-      entries.set(row.id, { domain, applied: false });
+      // 行→区登记（D3 单区 reload 过滤列）：apps 恰一元素才归属该应用区——
+      // 跨区行（多元素）与系统相位行（缺席）zone 列 undefined，单区 terminate 不动
+      entries.set(row.id, {
+        domain,
+        applied: false,
+        ...(row.apps !== undefined && row.apps.length === 1 ? { zone: appZoneId(row.apps[0]!) } : {}),
+      });
       spawned += 1; // 观测锚⑩ 装机计数
       // 观测锚⑩ 事件面：spawn 即派发（订阅方计量装机——boot//reload 各分域行一发）
       opts.anchor().emit('worker/spawned', { rowId: row.id, workerId: domain.workerId });
@@ -405,6 +428,18 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
     terminateAll(reason) {
       let count = 0;
       for (const [rowId, entry] of [...entries]) {
+        entries.delete(rowId);
+        entry.domain.terminate(reason);
+        terminated += 1;
+        count += 1;
+      }
+      return count;
+    },
+    /** 单区选择性收编（interface 注记——谓词 = 行→区列恰等，跨区/系统相位行不动） */
+    terminateZone(zone, reason) {
+      let count = 0;
+      for (const [rowId, entry] of [...entries]) {
+        if (entry.zone !== zone) continue; // 独占该区才收编（跨区行/系统相位行 zone 列不等）
         entries.delete(rowId);
         entry.domain.terminate(reason);
         terminated += 1;

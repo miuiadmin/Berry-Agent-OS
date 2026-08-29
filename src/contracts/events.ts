@@ -141,7 +141,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'composition/reloaded',
     mode: 'emit',
-    note: '组合树重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕。2026-08-27 P1-2：boot 与 /reload 两时点同发——boot 路在装载收口重物化后派发，boot 时点应用 apply 期已订阅故能听到；观测/工作树类应用可作「组合树就绪」信号）',
+    note: '组合树重载完成（契约篇 §1.3/§2.2 增补 1；载荷 CompositionReloadedPayload = activated/failed/skipped 三份行 id 清单 + 可选 ring1RestartRequired〔Ring 1 行变更需重启生效——行树化批〕+ 可选 app〔D3 单区 reload 目标应用——缺席 = 全量，在场 = 单区且三清单只含该区行〕+ 可选 droppedEvents〔卸词集警示——该区旧词 ∖ 新词，基准 = 运行时真值〕。2026-08-27 P1-2：boot 与 /reload 两时点同发——boot 路在装载收口重物化后派发，boot 时点应用 apply 期已订阅故能听到；观测/工作树类应用可作「组合树就绪」信号）',
   },
   {
     name: 'worker/spawned',
@@ -225,6 +225,19 @@ export interface CompositionReloadedPayload {
    * 配置/禁用状态变了只能报告「需重启生效」，不静默吞。空/缺省 = 无 Ring 1 变化
    */
   readonly ring1RestartRequired?: readonly string[];
+  /**
+   * 单区 reload 目标应用 id（D3 per-app reload，契约篇 §1.3 落码形态）：
+   * 缺席 = 全量重载，在场 = 单区重载——消费者按腿路由（单区三清单只含该区行，
+   * 他区行零发）。官方件挂全局不走单区径，在场值恒为第三方挂载目标应用。
+   */
+  readonly app?: string;
+  /**
+   * 卸词集警示面（D3 per-app reload，契约篇 §5.1 块尾）：该区旧词 ∖ 新词——
+   * 基准 = 该区运行时装载结果真值（不取树投影，避免他区变更污染本区警示面）。
+   * reload 是换版本非删除、词随重装回来；改名即旧词永失——差集如实点名，
+   * 词表三档 unknown 档同族风险承载。空/缺省 = 无消失词。
+   */
+  readonly droppedEvents?: readonly string[];
 }
 
 /** 目录查询：按名取定义（含判断某事件是否已知总线活体事件） */

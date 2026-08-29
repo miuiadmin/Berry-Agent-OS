@@ -80,6 +80,16 @@ export interface Context {
    */
   readonly rowId: string | undefined;
   /**
+   * 装载分区区身份（契约篇 §5.1 装载分面分区，D3 第三十五批 2026-08-29 落码）：
+   * 'system'（系统区——官方默认层行/官方替换行/Ring 1 行/跨区行读链身份）或
+   * 'app:<appId>'（应用区——D2 挂载行读链身份）。缺省 undefined = 宿主根作用域
+   * （根表身份——装配序①-⑧宿主件）。区身份决定服务解析读链：宿主面 = 根表→
+   * 系统区表；系统区 = 系统区表→根表；应用区 = 本区表→系统区表→根表（跨应用
+   * 与反向可见性由同一解析序视同缺失承载——契约篇 §5.1 服务可见性分区表）。
+   * fork 级联继承（与 rowId/builtinRow 同律）——应用内任意深度 fork 保持区归属。
+   */
+  readonly zone: string | undefined;
+  /**
    * 行籍旗标（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
    * true = 官方名位（宿主根作用域 + 官方行/承袭官方默认层 id 的替换行）——
    * provide 只收单段小写名；false = 第三方行——provide 必含恰一 `/` 域前缀。
@@ -98,12 +108,24 @@ export interface Context {
  */
 export interface ContextScope extends Context {
   /**
-   * 派生子作用域：共享服务注册表与事件总线，独立 effect 栈 / signal / config /
-   * logger 前缀。rowId 缺省继承父作用域（行身份随 fork 深度保持）；装载器为
-   * 应用行 fork 时显式传入行 id。builtinRow（行籍旗标，契约篇 §1.5 provide
-   * 两段式分级）同律级联——官方行 true / 第三方行 false，决定 provide 名形。
+   * 派生子作用域：共享事件总线与服务分区表，独立 effect 栈 / signal / config /
+   * logger 前缀。rowId / builtinRow（行籍旗标，契约篇 §1.5 provide 两段式分级）/
+   * zone（装载分区区身份，契约篇 §5.1 装载分面分区）三者同律缺省级联继承——
+   * 应用内任意深度 fork 保持行归属与区归属；装载器为应用行 fork 时显式注入。
+   *
+   * provideZones（provide 扇出目标——跨区行专用）：缺省 = [zone]（zone 亦缺省
+   * = 宿主根表）；跨区行（apps 枚举多应用）由 loader 注入其 apps 枚举的各区
+   * （['app:a', 'app:b'] 式）——同一 provide 同键写进各区表（「同键多表」的
+   * 写入面，契约篇 §5.1 跨区行装载律①），各表独立撞名检查。
    */
-  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string; builtinRow?: boolean }): ContextScope;
+  fork(opts: {
+    name: string;
+    config?: Record<string, unknown>;
+    rowId?: string;
+    builtinRow?: boolean;
+    zone?: string;
+    provideZones?: readonly string[];
+  }): ContextScope;
   /** 销毁本作用域：LIFO 回卷全部 effect → abort signal。根作用域销毁 = 停机序列的一环 */
   dispose(): Promise<void>;
 }

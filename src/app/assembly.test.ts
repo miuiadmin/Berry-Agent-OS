@@ -46,6 +46,8 @@ import {
   SESSION_EVENT_TOO_LARGE,
 } from '../contracts/errors.js';
 import { runInCallerChain, runInSessionChain } from '../context/chain.js';
+// D3 装载分面分区测试出口：按区身份探服务 + 应用区 id 构造（context 模块词汇单源）
+import { appZoneId, tryResolveService } from '../context/index.js';
 import type { SubagentProvider, SubagentResult, SubagentsServiceFace } from '../contracts/subagent.js';
 import { fauxProvider, type LlmService } from '../llm/index.js';
 
@@ -1554,28 +1556,18 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     await expect(assemble({ compositionDir })).rejects.toThrowError(/技能来源注册被拒/);
   });
 
-  it('应用提示词段全栈：ctx.effect 注册 registerSection → systemPrompt 含段内容（分节序固定）', async () => {
+  it('提示词段全栈（宿主自留地）：registerSection → systemPrompt 含段内容（分节序固定）——应用行注册被 D3 裁死拒载（见 D3 单区 reload describe）、第三方行无 apps 被 D2 触发②拒，第三方 prompt 段 v1 无路即裁死语义；此处用 root 直注册（无行籍不拦）锁注册链与分节序', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const appDir = writeAppDir(
-      compositionDir,
-      [
-        'export const name = "prompt-plugin";',
-        'export default async function apply(ctx) {',
-        '  const prompts = ctx.get("prompts");',
-        '  // pi-4(a)：注册即 effect——/reload 回卷锚即注销段（prompts_change 随之广播）',
-        '  ctx.effect(() =>',
-        '    prompts.registerSection({ id: "demo/notice", render: () => "应用段内容：记住用中文注释" }),',
-        '  );',
-        '}',
-      ].join('\n'),
-    );
-    writeFileSync(
-      join(compositionDir, 'overlay.yaml'),
-      `rows:\n  - id: prompt-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
-    );
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows: []\n`);
 
     const { streamFn } = scriptedStream([textMessage('收到')]);
     const runtime = await assemble({ streamFn, compositionDir });
+    // 宿主自留地注册（chainCaller 无行籍帧 = 官方面，registerSection 不拦）
+    const prompts = runtime.ctx.get<{
+      registerSection(section: { id: string; render: () => string }): void;
+      listSections(): string[];
+    }>('prompts');
+    prompts.registerSection({ id: 'demo/notice', render: () => '应用段内容：记住用中文注释' });
 
     // 段已进 systemPrompt：分节序固定 = 基座 → 技能 → 具名段（段在基座文案之后）
     expect(runtime.systemPrompt).toContain('应用段内容：记住用中文注释');
@@ -1584,7 +1576,6 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     );
     // 段 id 清单面（字典序；memory/core 简报段 + subagent/list 清单段为官方件
     // 注册——memory 空库物化为空串、subagent 单 provider 物化一行清单）
-    const prompts = runtime.ctx.get<{ listSections(): string[] }>('prompts');
     // environment = 宿主自留地段（exec 纵切——无 / 单段 id 排应用域段之前，字典序）；
     // instructions = 宿主自留地第二段（尾刀四层发现——工作区无指令文件时物化空串）
     expect(prompts.listSections()).toEqual([
@@ -1888,6 +1879,266 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       if (prev === undefined) delete process.env['APP_DATA_DIR'];
       else process.env['APP_DATA_DIR'] = prev;
     }
+  });
+});
+
+/* ---------------- D3 装载分面分区全栈（契约篇 §5.1 装载律，2026-08-29） ---------------- */
+
+/** 写独立行目录（writeAppDir 固定子目录名——分区用例多行并存需各自目录） */
+function writeRowDir(compositionDir: string, rowId: string, source: string): string {
+  const dir = join(compositionDir, `row-${rowId}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'index.ts'), source);
+  return dir;
+}
+
+describe('D3 装载分面分区全栈（装载律①③ + 撞名域矩阵）', () => {
+  it('装载律①扇出 + 装载序：跨区行挂系统相位恰一次，provide 扇出两应用区表——两区消费者 inject 命中（overlay 序在消费者之后也照常：系统相位先行于应用区）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-')));
+    // 两区消费者（各 inject 跨区行扇出面——装载成功的本身即证明系统相位先行：
+    // 应用区装载在系统相位收口之后，扇出面若不在其读链内即 APP_INJECT_UNRESOLVED）
+    const chatDir = writeRowDir(
+      compositionDir,
+      'chat-consumer',
+      [
+        'export const name = "chat-consumer";',
+        'export const inject = ["acme/share"];',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("acme/chat-ok", ctx.get("acme/share"));',
+        '}',
+      ].join('\n'),
+    );
+    const hermesDir = writeRowDir(
+      compositionDir,
+      'hermes-consumer',
+      [
+        'export const name = "hermes-consumer";',
+        'export const inject = ["acme/share"];',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("acme/hermes-ok", ctx.get("acme/share"));',
+        '}',
+      ].join('\n'),
+    );
+    // 跨区行（apps 双元素 → 挂系统相位装载恰一次 + provide 扇出两应用区表）
+    // ——刻意排在 overlay 最后：分区装载序不随行序漂移
+    const shareDir = writeRowDir(
+      compositionDir,
+      'x-share',
+      [
+        'export const name = "x-share";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("acme/share", { v: 42 });',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n` +
+        `  - id: chat-consumer\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
+        `  - id: hermes-consumer\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n` +
+        `  - id: x-share\n    pkg: ${shareDir}\n    apps: [chat, hermes]\n    sandbox: { carrier: main }\n`,
+    );
+
+    const runtime = await assemble({ compositionDir });
+    const byId = new Map(runtime.appsService.list().map((row) => [row.id, row]));
+    // 恰一次：跨区行在状态面恰一行且激活；两消费者激活（boot 断言面已拒 failed）
+    expect(byId.get('x-share')).toMatchObject({ status: 'activated' });
+    expect(byId.get('chat-consumer')).toMatchObject({ status: 'activated' });
+    expect(byId.get('hermes-consumer')).toMatchObject({ status: 'activated' });
+    // 分区读链矩阵（tryResolveService 按区身份探测——宿主侧测试出口）
+    const chatZone = appZoneId('chat');
+    const hermesZone = appZoneId('hermes');
+    expect(tryResolveService(runtime.ctx, chatZone, 'acme/share')).toMatchObject({ v: 42 }); // 扇出落 app:chat
+    expect(tryResolveService(runtime.ctx, hermesZone, 'acme/share')).toMatchObject({ v: 42 }); // 扇出落 app:hermes
+    expect(tryResolveService(runtime.ctx, 'system', 'acme/share')).toBeUndefined(); // 扇出不回流系统区表
+    expect(tryResolveService(runtime.ctx, undefined, 'acme/share')).toBeUndefined(); // 宿主面亦不可见
+    expect(tryResolveService(runtime.ctx, chatZone, 'acme/chat-ok')).toMatchObject({ v: 42 }); // 消费者注入值正确
+    expect(tryResolveService(runtime.ctx, hermesZone, 'acme/chat-ok')).toBeUndefined(); // 跨应用视同缺失
+  });
+
+  it('装载律③负向：应用区行 inject 别应用独占服务 → APP_INJECT_UNRESOLVED 拒启（区际依赖同拒——读链收窄结构性执法）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-')));
+    const chatDir = writeRowDir(
+      compositionDir,
+      'chat-provider',
+      [
+        'export const name = "chat-provider";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("acme/chat-only", 1);',
+        '}',
+      ].join('\n'),
+    );
+    const hermesDir = writeRowDir(
+      compositionDir,
+      'hermes-cross',
+      [
+        'export const name = "hermes-cross";',
+        'export const inject = ["acme/chat-only"];',
+        'export default async function apply() {}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n` +
+        `  - id: chat-provider\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
+        `  - id: hermes-cross\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n`,
+    );
+    // 启动断言聚合清单带 APP_INJECT_UNRESOLVED（缺失名 = chat 独占词——hermes 读链
+    // 恒看不见，Kahn 零进展即无解；旧单表形此处会误激活〔tryGet 全表可见〕）
+    await expect(assemble({ compositionDir })).rejects.toThrowError(/APP_INJECT_UNRESOLVED/);
+    await expect(assemble({ compositionDir })).rejects.toThrowError(/acme\/chat-only/);
+  });
+
+  it('撞名域矩阵·异表并存：chat 行与 hermes 行 provide 同名词 → 两区各值并存合法（旧单表形此处必红——CONTEXT_SERVICE_EXISTS 回归锁）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-')));
+    const chatDir = writeRowDir(
+      compositionDir,
+      'dup-chat',
+      [
+        'export const name = "dup-chat";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("acme/dup", "chat值");',
+        '}',
+      ].join('\n'),
+    );
+    const hermesDir = writeRowDir(
+      compositionDir,
+      'dup-hermes',
+      [
+        'export const name = "dup-hermes";',
+        'export default async function apply(ctx) {',
+        '  ctx.provide("acme/dup", "hermes值");',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n` +
+        `  - id: dup-chat\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
+        `  - id: dup-hermes\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n`,
+    );
+    const runtime = await assemble({ compositionDir });
+    const byId = new Map(runtime.appsService.list().map((row) => [row.id, row]));
+    expect(byId.get('dup-chat')).toMatchObject({ status: 'activated' });
+    expect(byId.get('dup-hermes')).toMatchObject({ status: 'activated' });
+    expect(tryResolveService(runtime.ctx, appZoneId('chat'), 'acme/dup')).toBe('chat值');
+    expect(tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/dup')).toBe('hermes值');
+  });
+});
+
+/** 单区 reload fixture 源：provide 版本化服务 + 声明版本化事件词（卸词集差集的可观测面） */
+function zoneWidgetSource(mark: string, evt: string): string {
+  return [
+    `export const name = "zone-widget";`,
+    `export const events = [{ name: "${evt}", mode: "emit", note: "版本化事件词（D3 卸词集测试）" }];`,
+    `export default async function apply(ctx) {`,
+    `  ctx.provide("acme/${mark}-widget", { mark: ${JSON.stringify(mark)} });`,
+    `}`,
+  ].join('\n');
+}
+
+describe('D3 单区 reload（per-app reload 全栈——契约篇 §1.3 落码形态）', () => {
+  it('换 chat 行不动 hermes 运行时：载荷 app 腿 + 卸词集警示 + 他区服务同实例（运行时真值沿用）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-reload-')));
+    const chatDir = writeRowDir(compositionDir, 'chat-widget', zoneWidgetSource('chat', 'acme/evt-v1'));
+    const hermesDir = writeRowDir(compositionDir, 'hermes-widget', zoneWidgetSource('hermes', 'acme/h-evt'));
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n` +
+        `  - id: chat-widget\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
+        `  - id: hermes-widget\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n`,
+    );
+    const runtime = await assemble({ compositionDir });
+    // composition/reloaded 观察哨（root 订阅——单区 dispose 只动该区锚）
+    const reloadedPayloads: unknown[] = [];
+    runtime.ctx.on('composition/reloaded', (payload: unknown) => {
+      reloadedPayloads.push(payload);
+    });
+    const hermesBefore = tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/hermes-widget');
+
+    // 换件：chat 行同路径改码（mark 换值 + 事件词改名——旧词进卸词集）
+    writeFileSync(join(chatDir, 'index.ts'), zoneWidgetSource('chat', 'acme/evt-v2'));
+    const result = await runtime.reload('chat');
+    expect(result.payload).toEqual({
+      activated: ['chat-widget'],
+      failed: [],
+      skipped: [],
+      app: 'chat',
+      droppedEvents: ['acme/evt-v1'], // 卸词集 = 该区旧词 ∖ 新词（真值基准，改名即旧词消失）
+    });
+    // 该区新码生效：新词进表、旧词消亡
+    expect(tryResolveService(runtime.ctx, appZoneId('chat'), 'acme/chat-widget')).toMatchObject({ mark: 'chat' });
+    // 他区运行时不动：hermes 服务**同一实例**（未被 dispose 未被重装载）
+    expect(tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/hermes-widget')).toBe(hermesBefore);
+    // applyLoad 状态面：他区行沿用旧装载结果（activated）、该区行新结果
+    const byId = new Map(runtime.appsService.list().map((row) => [row.id, row]));
+    expect(byId.get('hermes-widget')).toMatchObject({ status: 'activated' });
+    expect(byId.get('chat-widget')).toMatchObject({ status: 'activated' });
+    // 事件载荷 app 腿路由面（消费者按腿分辨单区/全量）
+    expect(reloadedPayloads).toEqual([
+      { activated: ['chat-widget'], failed: [], skipped: [], app: 'chat', droppedEvents: ['acme/evt-v1'] },
+    ]);
+  });
+
+  it('空区卸载正路：overlay 删光该应用行 → 单区 reload = 纯回卷（载荷空清单 + 旧词全进卸词集）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-empty-')));
+    const chatDir = writeRowDir(compositionDir, 'chat-widget', zoneWidgetSource('chat', 'acme/evt-v1'));
+    const hermesDir = writeRowDir(compositionDir, 'hermes-widget', zoneWidgetSource('hermes', 'acme/h-evt'));
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n` +
+        `  - id: chat-widget\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
+        `  - id: hermes-widget\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n`,
+    );
+    const runtime = await assemble({ compositionDir });
+    expect(tryResolveService(runtime.ctx, appZoneId('chat'), 'acme/chat-widget')).toMatchObject({ mark: 'chat' });
+
+    // 删光 chat 区行 → 单区 reload：锚出袋 + 空装载（= 该应用第三方件的卸载路径）
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: hermes-widget\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n`,
+    );
+    const result = await runtime.reload('chat');
+    expect(result.payload).toEqual({
+      activated: [],
+      failed: [],
+      skipped: [],
+      app: 'chat',
+      droppedEvents: ['acme/evt-v1'], // 区内唯一词随回卷消失——全量如实点名
+    });
+    // 该区表已清（回卷即卸载）；他区不受牵连
+    expect(tryResolveService(runtime.ctx, appZoneId('chat'), 'acme/chat-widget')).toBeUndefined();
+    expect(tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/hermes-widget')).toMatchObject({ mark: 'hermes' });
+  });
+
+  it('未知/不在册 appId = error 面（COMPOSITION_ROW_INVALID 同族拒绝式——命令面报错退出）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-unknown-')));
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows: []\n`);
+    const runtime = await assemble({ compositionDir });
+    const bad = await runtime.reload('no-such-app');
+    expect(bad.error).toContain('不在册');
+    expect(bad.error).toContain('no-such-app');
+  });
+
+  it('registerSection app 行装载期拒载（注册面同族收口——prompt 段全局物化无域层）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-prompt-')));
+    const chatDir = writeRowDir(
+      compositionDir,
+      'prompt-row',
+      [
+        'export const name = "prompt-row";',
+        'export default async function apply(ctx) {',
+        '  ctx.get("prompts").registerSection({ id: "acme/sec", render: () => "x" });',
+        '}',
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n  - id: prompt-row\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
+    );
+    // 行 failed → boot 启动断言拒启（聚合清单带拒载词）
+    await expect(assemble({ compositionDir })).rejects.toThrowError(/COMPOSITION_ROW_INVALID/);
+    await expect(assemble({ compositionDir })).rejects.toThrowError(/提示词段注册被拒/);
   });
 });
 
@@ -2224,7 +2475,7 @@ describe('/reload 组合树重载', () => {
     // /apps-toggle：翻转 + 自动链 reload（对账与组合正交——壳负责串两步）
     expect(await runtime.channels.commands.dispatch('/apps-toggle tool-plugin')).toBe('ok');
     expect(notifies.some((n) => n.includes('已禁用'))).toBe(true);
-    expect(notifies.some((n) => n.includes('组合已重载'))).toBe(true);
+    expect(notifies.some((n) => n.includes('已重载：组合激活'))).toBe(true);
     expect(runtime.tools.listFor('chat').map((t) => t.name)).not.toContain('plug-echo');
 
     // /apps-install local 源（零子进程）：D2 仓库态——只入账本零行零生效，
@@ -2258,7 +2509,7 @@ describe('/reload 组合树重载', () => {
     // /apps-mount：写组合行 + 壳链 /reload → 新工具经 chat 应用域层可见（D2 生效链）
     expect(await runtime.channels.commands.dispatch('/apps-mount twin-plugin --apps chat --carrier main')).toBe('ok');
     expect(notifies.some((n) => n.includes('已挂载 twin-plugin') && n.includes('chat'))).toBe(true);
-    expect(notifies.some((n) => n.includes('组合已重载'))).toBe(true);
+    expect(notifies.some((n) => n.includes('已重载：组合激活'))).toBe(true);
     expect(runtime.tools.listFor('chat').map((t) => t.name)).toContain('plug-twin');
     expect(runtime.appsService.list().map((r) => [r.id, r.status])).toEqual([
       ['chat', 'activated'],

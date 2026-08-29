@@ -45,7 +45,7 @@ import {
   APP_SHAPE_INVALID,
   describeError,
 } from '../contracts/errors.js';
-import { registerLiveEvent } from './context.js';
+import { appZoneId, registerLiveEvent, tryResolveService } from './context.js';
 import { runInCallerChain } from './chain.js';
 import type {
   AppActivatedPayload,
@@ -490,6 +490,10 @@ export async function loadApps(
   const activated: AppActivatedPayload[] = [];
   const failed: AppFailedPayload[] = [];
   const skipped: AppSkippedPayload[] = [];
+  // 行读链区身份（D3 装载分面分区，契约篇 §5.1）：装载行自锚 fork 级联同值——
+  // Kahn 探测按行读链解析（app 区行 inject 只能命中 本区表→系统区表→根表；
+  // 跨区行 zone='system' 只命中 根表∪系统区表，装载律③——区际依赖同拒）
+  const zone = root.zone;
 
   /* ---- 行籍集（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
    * 官方名位判据 = 行引用为 builtin（row.builtin 在场）∪ 行 id 承袭官方默认层
@@ -612,7 +616,9 @@ export async function loadApps(
     for (let i = 0; i < pending.length;) {
       const item = pending[i]!;
       const inject = item.kind === 'main' ? item.module.inject : item.meta.inject;
-      const missing = (inject ?? []).filter((name) => root.tryGet(name) === undefined);
+      // 按行读链探测（D3）：root.tryGet 是宿主面读链（根表∪系统区表），会误放
+      // 行——app 区行经本区表→系统区表→根表解析，跨区依赖在此即视同缺失
+      const missing = (inject ?? []).filter((name) => tryResolveService(root, zone, name) === undefined);
       if (missing.length > 0) {
         i += 1; // 依赖未就绪——留待后续轮（由更晚激活的行 provide）
         continue;
@@ -628,7 +634,7 @@ export async function loadApps(
    * 人看两份清单即可分辨：缺失名全在 pending 的 inject 里 = 环；否则 = 缺提供方。 */
   for (const item of pending) {
     const inject = item.kind === 'main' ? item.module.inject : item.meta.inject;
-    const missing = (inject ?? []).filter((name) => root.tryGet(name) === undefined);
+    const missing = (inject ?? []).filter((name) => tryResolveService(root, zone, name) === undefined);
     const payload = {
       id: item.row.id,
       code: APP_INJECT_UNRESOLVED,
@@ -701,6 +707,11 @@ async function activateOne(
     rowId: row.id,
     builtinRow,
     ...(row.config !== undefined ? { config: row.config } : {}),
+    // 跨区行 provide 扇出（D3 装载分面分区，契约篇 §5.1 装载律①）：apps 枚举
+    // 多应用的行挂系统相位装载恰一次（zone 随锚级联 'system'——读链收窄由装载
+    // 律③承载），provide 同键写进枚举各区表（应用区表——不回流系统区表）；独占
+    // 行/系统行免显式（zone 级联即 [zone] 缺省扇出）
+    ...(row.apps !== undefined && row.apps.length > 1 ? { provideZones: row.apps.map(appZoneId) } : {}),
   });
   try {
     // 技能目录注册（契约篇 §1.2 第六件；登记位 = 冷读裁决的「行作用域 fork 后

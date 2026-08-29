@@ -108,6 +108,45 @@ async function rejectionCode(promise: Promise<unknown>): Promise<string> {
 /* ---------------- 用例 ---------------- */
 
 describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
+  it('terminateZone 谓词 = 独占该区：只收 apps 恰 [该 app] 的域——跨区行与系统相位行不动（D3 单区 reload 回归锁）', async () => {
+    const { root, anchor, fxEntry, dir } = setupFixture('fleet-zone');
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+    });
+    // 三行三态：独占（apps:[a]）/ 跨区（apps:[a,b]——共享件）/ 系统相位（无 apps）
+    const rows: AppPlanRow[] = [
+      { id: 'solo', entry: fxEntry, apps: ['a'], sandbox: { carrier: 'worker' }, config: { slot: 'solo' } },
+      { id: 'shared', entry: fxEntry, apps: ['a', 'b'], sandbox: { carrier: 'worker' }, config: { slot: 'shared' } },
+      { id: 'sysrow', entry: fxEntry, sandbox: { carrier: 'worker' }, config: { slot: 'sysrow' } },
+    ];
+    for (const row of rows) {
+      await fleet.loader.load(row);
+      const scope = anchor.fork({ name: row.id, rowId: row.id, builtinRow: false });
+      await fleet.loader.apply(row, scope);
+    }
+    expect(fleet.stats()).toMatchObject({ spawned: 3, live: 3 });
+    const solo = root.get<Record<string, () => Promise<string>>>('fleet/taps-solo');
+    const shared = root.get<Record<string, () => Promise<string>>>('fleet/taps-shared');
+    const sysrow = root.get<Record<string, () => Promise<string>>>('fleet/taps-sysrow');
+
+    // 单区收编 app:a：只收 solo（跨区 shared 与系统相位 sysrow 的 zone 列都不等）
+    expect(fleet.terminateZone('app:a', '测试单区收编')).toBe(1);
+    await until(() => root.tryGet('fleet/taps-solo') === undefined); // solo 域死回卷
+    await expect(shared.ping!()).resolves.toBe('pong'); // 跨区行域活（不动它影响别人）
+    await expect(sysrow.ping!()).resolves.toBe('pong'); // 系统相位行域活
+    expect(fleet.stats()).toMatchObject({ live: 2, terminated: 1 });
+
+    // 未知区收编 = 0（空区路径合法——该区无分域行）
+    expect(fleet.terminateZone('app:nobody', '测试空区')).toBe(0);
+
+    await fleet.terminateAll('测试收尾');
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('装载生命线：每行一域路由 + 装机计数 + reapUnapplied 只清未应用 + terminateAll 全收', async () => {
     const { root, anchor, fxEntry, dir } = setupFixture('fleet-life');
     const fleet = createBridgeFleet({

@@ -2,7 +2,18 @@
  * L1 context — 装载运行时模块出口（内核五件之一）。
  * 对外只暴露类型与工厂：实现类不导出（跨模块只能走 Context/ContextScope 契约面）。
  */
-export { createContext, eventDispatchStats, registerLiveEvent, snapshotHandlers, appendHandlers } from './context.js';
+// D3 装载分面分区词汇单源（契约篇 §5.1，2026-08-29）：系统区 id 常量 + 应用区
+// id 构造——assembly 锚 fork / loader 跨区行扇出 / fleet 单区 reload 过滤共取
+export {
+  SYSTEM_ZONE,
+  appZoneId,
+  createContext,
+  eventDispatchStats,
+  registerLiveEvent,
+  snapshotHandlers,
+  appendHandlers,
+  tryResolveService,
+} from './context.js';
 export type { HandlerEntry } from './context.js';
 export { loadApps } from './loader.js';
 export { createLogger } from './logger.js';

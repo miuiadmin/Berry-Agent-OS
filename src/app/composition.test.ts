@@ -11,10 +11,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
-import type { AppLoadResult } from '../contracts/app.js';
+import type { AppLoadResult, AppPlanRow } from '../contracts/app.js';
 import {
   assertRing1Required,
   diffRing1Rows,
+  partitionPlan,
   RING1_REQUIRED_ROW_IDS,
   createPathsService,
   loadComposition,
@@ -134,9 +135,9 @@ describe('overlay 装载与拒绝式校验', () => {
     writeOverlay(dataDir, `  - id: local\n    pkg: ${entry}\n    apps: [chat]\n`);
     const report = loadUserComposition(dataDir);
     expect(report.rows).toEqual([{ id: 'local', pkg: entry, apps: ['chat'] }]);
-    // plugin 引用透传（第三纵切 join 键：应用内存预算按行命中 worker 行）
-    // 计划行不携带 app 键（合成行按 id 联查——D1 注记）
-    expect(report.plan).toEqual([{ id: 'local', pkg: entry, entry }]);
+    // plugin 引用透传（第三纵切 join 键：应用内存预算按行命中 worker 行）+
+    // apps 透传（D3 装载分面分区判据——计划行携带分区归属，单区 reload 依赖）
+    expect(report.plan).toEqual([{ id: 'local', pkg: entry, entry, apps: ['chat'] }]);
   });
 
   it('未知字段 / 缺 id / 顶层形状错：COMPOSITION_ROW_INVALID 拒绝式（不误读）', () => {
@@ -188,7 +189,7 @@ describe('sandbox 载体块（契约篇 §1.7 第三十七批）', () => {
     writeOverlay(dataDir, `  - id: demo\n    pkg: ${entry}\n    sandbox: { carrier: worker }\n    apps: [chat]\n`);
     const report = loadUserComposition(dataDir);
     expect(report.rows).toEqual([{ id: 'demo', pkg: entry, sandbox: { carrier: 'worker' }, apps: ['chat'] }]);
-    expect(report.plan).toEqual([{ id: 'demo', pkg: entry, entry, sandbox: { carrier: 'worker' } }]);
+    expect(report.plan).toEqual([{ id: 'demo', pkg: entry, entry, sandbox: { carrier: 'worker' }, apps: ['chat'] }]);
   });
 
   it('sandbox 显式 main：与缺省同义（合法值域之一，不制造第二形态）', () => {
@@ -196,7 +197,7 @@ describe('sandbox 载体块（契约篇 §1.7 第三十七批）', () => {
     const entry = writeEntryFile(dataDir);
     writeOverlay(dataDir, `  - id: demo\n    pkg: ${entry}\n    sandbox: { carrier: main }\n    apps: [chat]\n`);
     const report = loadUserComposition(dataDir);
-    expect(report.plan).toEqual([{ id: 'demo', pkg: entry, entry, sandbox: { carrier: 'main' } }]);
+    expect(report.plan).toEqual([{ id: 'demo', pkg: entry, entry, sandbox: { carrier: 'main' }, apps: ['chat'] }]);
   });
 
   it('carrier external：行 schema 合法进树（装载期 fail-closed 拒载——冻结在加载器不在 schema）', () => {
@@ -206,7 +207,7 @@ describe('sandbox 载体块（契约篇 §1.7 第三十七批）', () => {
     const report = loadUserComposition(dataDir);
     // 第三十七批闩一缺省两分派：external 是三值枚举合法值（出生即进程墙的目标态），
     // 过渡冻结发生在装载面（loader 拒载），组合树声明面照常合成透传
-    expect(report.plan).toEqual([{ id: 'demo', pkg: entry, entry, sandbox: { carrier: 'external' } }]);
+    expect(report.plan).toEqual([{ id: 'demo', pkg: entry, entry, sandbox: { carrier: 'external' }, apps: ['chat'] }]);
   });
 
   it('块形状拒绝式：非对象/未知子键/半块缺 carrier/net 声明即拒——一律 COMPOSITION_ROW_INVALID', () => {
@@ -279,6 +280,7 @@ describe('sandbox 载体块（契约篇 §1.7 第三十七批）', () => {
         pkg: entry,
         entry,
         sandbox: { carrier: 'external', fs: { writableRoots: [wsRoot] }, caps: {} },
+        apps: ['chat'],
       },
     ]);
   });
@@ -342,7 +344,7 @@ describe('禁用解析（挂载休眠）', () => {
     // plugin 指向不存在的裸名——禁用行不要求已装；第三方行带 app（执法全行统一）
     writeOverlay(dataDir, '  - id: dormant\n    pkg: never-installed-pkg\n    disabled: true\n    apps: [chat]\n');
     const report = loadUserComposition(dataDir);
-    expect(report.plan).toEqual([{ id: 'dormant', skip: 'disabled' }]);
+    expect(report.plan).toEqual([{ id: 'dormant', skip: 'disabled', apps: ['chat'] }]);
   });
 
   it('平台门控：命中当前平台 → platform 跳过；他平台 → 照常激活', () => {
@@ -356,8 +358,8 @@ describe('禁用解析（挂载休眠）', () => {
     );
     const report = loadUserComposition(dataDir);
     expect(report.plan).toEqual([
-      { id: 'gated', skip: 'platform' }, // 命中当前平台——不解析入口（skip 行不带 plugin）
-      { id: 'ungated', pkg: entry, entry }, // 他平台门控不生效——照常激活
+      { id: 'gated', skip: 'platform', apps: ['chat'] }, // 命中当前平台——不解析入口（skip 行不带 plugin）
+      { id: 'ungated', pkg: entry, entry, apps: ['chat'] }, // 他平台门控不生效——照常激活
     ]);
   });
 });
@@ -379,6 +381,7 @@ describe('应用入口解析', () => {
       id: 'p1',
       pkg: 'fake-pkg',
       entry: join(pkgDir, 'custom-entry.ts'),
+      apps: ['chat'],
     });
   });
 
@@ -625,7 +628,8 @@ describe('builtin: 保留前缀解析', () => {
     writeOverlay(dataDir, `  - id: memory\n    pkg: ${entry}\n    apps: [chat]\n`);
     const report = loadComposition(dataDir, { 'builtin:memory': stubBuiltin }, KNOWN_APPS);
     // chat 行（首行）此注册表未给 → unresolved 占 plan[0]；memory 行在 plan[1]
-    expect(report.plan[1]).toEqual({ id: 'memory', pkg: entry, entry });
+    //（apps 透传：替换行按 app 键归区——分区判据在计划行上）
+    expect(report.plan[1]).toEqual({ id: 'memory', pkg: entry, entry, apps: ['chat'] });
   });
 
   it('overlay 禁用 memory 行：非 fixed 行真·可卸（skip，不要求注册表命中）', () => {
@@ -855,5 +859,51 @@ describe('行 app 键：挂载目标两档执法', () => {
     writeOverlayRowConfig(dataDir, 'cfg-app', {});
     writeOverlayRowConfig(dataDir, 'cfg-res', {});
     expect(loadOverlayRows(dataDir)).toEqual([{ id: 'cfg-app', pkg: 'p', apps: ['chat'] }]);
+  });
+});
+
+/* ---------------- 装载计划分区（D3 装载分面分区，契约篇 §5.1，2026-08-29） ---------------- */
+
+describe('partitionPlan：装载计划分区', () => {
+  /** 最小计划行构造（分区判据只看 id/apps 两键——纯函数直测免合成链） */
+  const row = (id: string, apps?: readonly string[]): AppPlanRow => ({ id, ...(apps ? { apps } : {}) });
+
+  it('判据两步：Ring 1 必备行先剔（独立维持现状），再按 apps 归区', () => {
+    const part = partitionPlan([
+      row('tools'), // Ring 1 必备行——进 ring1 袋不进分区账
+      row('sys-official'), // 官方默认层行（apps 缺席）→ 系统区
+      row('app-only', ['chat']), // 恰一元素 → app:chat 独占
+      row('shared', ['chat', 'code']), // 多元素 → 跨区行（挂系统相位）
+    ]);
+    expect(part.ring1.map((r) => r.id)).toEqual(['tools']);
+    expect(part.system.map((r) => r.id)).toEqual(['sys-official', 'shared']);
+    expect(part.zoneRows.get('chat')!.map((r) => r.id)).toEqual(['app-only']);
+    expect(part.appIds).toEqual(['chat']);
+  });
+
+  it('appIds 字典序（装载序契约面：系统相位先行后依此序串行——与行入序无关）', () => {
+    const part = partitionPlan([row('z', ['zeta']), row('a', ['alpha']), row('m', ['mid'])]);
+    expect(part.appIds).toEqual(['alpha', 'mid', 'zeta']);
+    expect([...part.zoneRows.keys()]).toEqual(['zeta', 'alpha', 'mid']); // 行表保入序（区内装载序）
+  });
+
+  it('skip 行同样按 apps 归区（单区 reload 重发 skipped 需要分区归属）', () => {
+    const part = partitionPlan([{ id: 'dormant', skip: 'disabled', apps: ['chat'] }]);
+    expect(part.zoneRows.get('chat')!.map((r) => r.id)).toEqual(['dormant']);
+    expect(part.system).toEqual([]);
+  });
+
+  it('与 loadComposition 透传衔接：合成计划行携带 apps 后分区即得（全链路）', () => {
+    const dataDir = makeDataDir();
+    const entry = writeEntryFile(dataDir);
+    writeOverlay(dataDir, `  - id: mountable\n    pkg: ${entry}\n    apps: [chat]\n`);
+    // 空注册表：官方默认层行 unresolved 但照进 plan（行原貌分区——不按激活态）
+    const report = loadComposition(dataDir, {}, KNOWN_APPS);
+    const part = partitionPlan(report.plan);
+    // Ring 1 必备行先剔（tools → ring1 袋——独立装载锚维持现状）
+    expect(part.ring1.map((r) => r.id)).toEqual(['tools']);
+    // 其余官方默认层行（apps 缺席）+ 无 apps 用户行全数归系统区
+    expect(part.system.every((r) => r.apps === undefined)).toBe(true);
+    expect(part.zoneRows.get('chat')!.map((r) => r.id)).toEqual(['mountable']);
   });
 });

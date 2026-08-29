@@ -46,6 +46,25 @@ const DEFAULT_RATE_PER_MINUTE = 1000;
  */
 const SERVICE_NAME_SEGMENT = /^[a-z][a-z0-9-]*$/;
 /**
+ * 系统区 id（D3 装载分面分区，契约篇 §5.1）：官方默认层行/官方替换行/Ring 1
+ * 行/跨区行读链身份——apps:system 锚的表键。导出 = 词汇单源（assembly 锚
+ * fork 注入区身份共取；定义在 L1 使 loader 可 import——拓扑上 L1 不依赖 app）。
+ */
+export const SYSTEM_ZONE = 'system';
+/**
+ * 应用区 id 构造（D3 词汇单源——契约篇 §5.1）：`app:` 前缀 + 应用 id。三面
+ * 共取：assembly 区锚名/装载序 / loader 跨区行 provideZones 扇出 / fleet 单区
+ * reload 区过滤列（D3-C）。
+ */
+export function appZoneId(appId: string): string {
+  return `app:${appId}`;
+}
+/**
+ * 根表伪区 id（撞名执法内部记号——writeZones 空数组语义的具名形）：宿主根
+ * 作用域 provide 目标。不进 zoneServices 键域（根表恒为 runtime.rootServices）。
+ */
+const ROOT_TABLE = '(root)';
+/**
  * per-scope 在册 effect 计数帽（契约篇 §1.6 资源护栏族 #9，2026-08-27 刀〇b）：
  * context 注册族（effect/on/provide 注销器/registerMessageRole/
  * registerSessionEventType/fork 级联）全走 pushEffect 单点，一条钟罩全族。
@@ -62,10 +81,22 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 /** 作用域 → 根运行时（宿主侧事件词汇登记的内部通道；装载面 ContextScope 无此入口——运行期词汇恒定的结构保证） */
 const scopeRuntimes = new WeakMap<ContextScope, ContextRuntime>();
 
-/** 根运行时：跨作用域共享状态（服务注册表 + 事件总线 + 事件词汇注册表）。仅宿主侧可见，不进装载面。 */
+/** 根运行时：跨作用域共享状态（服务分区表 + 事件总线 + 事件词汇注册表）。仅宿主侧可见，不进装载面。 */
 class ContextRuntime {
-  /** 服务表：name → 实现实例（ctx.provide 写入 / ctx.get 读取） */
-  readonly services = new Map<string, unknown>();
+  /**
+   * 根服务表：name → 实现实例（契约篇 §5.1 服务可见性分区表·D3，2026-08-29）。
+   * 宿主 provide 专属（ctx.llm/ctx.sessions/ctx.jobs 等装配序①-⑧宿主件）——
+   * 永不回卷（根作用域不死），全链可见（解析序恒末位）。
+   */
+  readonly rootServices = new Map<string, unknown>();
+  /**
+   * 区服务表（D3 装载分面分区）：区 id → (name → 实现)。键两形：'system'
+   * （系统区——官方默认层行/官方替换行/Ring 1 行 provide，随 apps:system 锚
+   * 回卷）| 'app:<appId>'（应用区——该应用行 provide，仅本区读链可见，随
+   * apps:app:<appId> 锚回卷）。分表为回卷单元与撞名域，非可见性边界——可见性
+   * 由各作用域读链承载（readTables）。
+   */
+  readonly zoneServices = new Map<string, Map<string, unknown>>();
   /** 事件总线：事件名 → 登记项列表（注册序即派发序，prepend 插队头部；owner 供失败归因） */
   readonly handlers = new Map<EventName, HandlerEntry[]>();
   /**
@@ -104,6 +135,58 @@ class ContextRuntime {
     );
     this.disposeTimeoutMs = disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS;
     for (const def of LIVE_EVENT_CATALOG) this.liveEvents.set(def.name, def);
+  }
+
+  /** 取（或惰性建）区服务表——provide 写入面用；读链走 peek 不建表 */
+  zoneTable(zone: string): Map<string, unknown> {
+    let table = this.zoneServices.get(zone);
+    if (table === undefined) {
+      table = new Map();
+      this.zoneServices.set(zone, table);
+    }
+    return table;
+  }
+
+  /** 只读取区服务表（缺席返回 undefined——读链不为探测建空表） */
+  peekTable(zone: string): Map<string, unknown> | undefined {
+    return this.zoneServices.get(zone);
+  }
+
+  /**
+   * 撞名域（CONTEXT_SERVICE_EXISTS 执法面，契约篇 §5.1 撞名域矩阵）：
+   * 目标表为根表/系统区表时，两表互为同碰撞域（宿主单段名结构性专属——官方
+   * 名位唯一空间，跨表同名即互斥）；目标表为应用区表时，仅本表自撞（异域
+   * 并存合法——同名遮蔽由读链本区优先天然承载，非撞名）。
+   * @returns 对目标表 write 前须查重的表列
+   */
+  collisionTables(zone: string): ReadonlyArray<Map<string, unknown>> {
+    if (zone === ROOT_TABLE) {
+      const system = this.peekTable(SYSTEM_ZONE);
+      return system === undefined ? [this.rootServices] : [this.rootServices, system];
+    }
+    if (zone === SYSTEM_ZONE) return [this.zoneTable(SYSTEM_ZONE), this.rootServices];
+    return [this.zoneTable(zone)];
+  }
+
+  /**
+   * 服务解析读链（契约篇 §5.1：tryGet 解析序 = 本区表 → 系统区表 → 根表）：
+   * - zone undefined（宿主根作用域/宿主基础设施 fork 面）：根表 → 系统区表
+   *   （宿主面消费系统区服务〔ctx.agent/ctx.exec 等〕的兼容腿——根×系统同
+   *   撞名域互斥，链序无歧义）；
+   * - 'system'：系统区表 → 根表；
+   * - 'app:<id>'：本区表 → 系统区表 → 根表（跨应用与反向可见性由缺席承载）。
+   * 缺席表跳过（零注册区不占链位）；根表恒在（宿主件装载序先于一切行）。
+   */
+  readTables(zone: string | undefined): ReadonlyArray<Map<string, unknown>> {
+    const system = this.zoneServices.get(SYSTEM_ZONE);
+    if (zone === undefined) return system === undefined ? [this.rootServices] : [this.rootServices, system];
+    if (zone === SYSTEM_ZONE) return system === undefined ? [this.rootServices] : [system, this.rootServices];
+    const chain: Map<string, unknown>[] = [];
+    const own = this.zoneServices.get(zone);
+    if (own !== undefined) chain.push(own);
+    if (system !== undefined) chain.push(system);
+    chain.push(this.rootServices);
+    return chain;
   }
 
   /** 取某事件监听器的快照副本（派发期间注册/退订不影响本轮） */
@@ -156,6 +239,20 @@ class ContextScopeImpl implements ContextScope {
    * 应用内任意深度 fork 保持行归属。
    */
   readonly builtinRow: boolean;
+  /**
+   * 装载分区区身份（D3，契约篇 §5.1 装载分面分区）：'system' | 'app:<appId>'
+   * | undefined（宿主根面）。决定服务读链（readTables）与 provide 缺省写入
+   * 目标；fork 级联继承（与 rowId/builtinRow 同律）——应用内任意深度 fork
+   * 保持区归属。跨区行 zone='system'（读链随系统相位——装载律③其 inject 值域
+   * = 根表 ∪ 系统区表）+ provideZones 扇出应用区表（装载律①）。
+   */
+  readonly zone: string | undefined;
+  /**
+   * provide 扇出目标区表（跨区行专用覆盖面）：缺省 = [zone]（zone 缺省 = 根表）；
+   * loader 为跨区行注入其 apps 枚举区（['app:a','app:b'] 式——同键写各区表）。
+   * 值域同 zone（'system'/'app:<id>'；根表由 zone 缺省承载，不显式枚举）。
+   */
+  readonly provideZones: readonly string[] | undefined;
   /** 是否已销毁——销毁后注册类 API 一律拒绝（stale ctx 护栏） */
   private disposed = false;
 
@@ -166,6 +263,8 @@ class ContextScopeImpl implements ContextScope {
     logger: Logger,
     rowId?: string,
     builtinRow?: boolean,
+    zone?: string,
+    provideZones?: readonly string[],
   ) {
     this.runtime = runtime;
     this.name = name;
@@ -175,6 +274,9 @@ class ContextScopeImpl implements ContextScope {
     this.rowId = rowId;
     // 行籍缺省 false（第三方）——根构造显式传 true，行 fork 由 loader 按行籍注入
     this.builtinRow = builtinRow ?? false;
+    // 区身份缺省 undefined（宿主根面）——loader 按行 apps 键推导注入（D3-B）
+    this.zone = zone;
+    this.provideZones = provideZones;
   }
 
   get config(): Readonly<Record<string, unknown>> {
@@ -416,29 +518,73 @@ class ContextScopeImpl implements ContextScope {
     return dispatch(0, initialArgs);
   }
 
-  get<T = unknown>(name: string): T {
-    if (!this.runtime.services.has(name)) {
-      throw new AppError(CONTEXT_SERVICE_NOT_FOUND, `服务未注册：${name}`);
+  /** 读链解析：本区表 → 系统区表 → 根表逐表查（D3 分区后 get/tryGet 单一出口） */
+  private lookupService(name: string): { found: boolean; impl: unknown } {
+    for (const table of this.runtime.readTables(this.zone)) {
+      if (table.has(name)) return { found: true, impl: table.get(name) };
     }
-    return this.runtime.services.get(name) as T;
+    return { found: false, impl: undefined };
+  }
+
+  get<T = unknown>(name: string): T {
+    const hit = this.lookupService(name);
+    if (!hit.found) {
+      throw new AppError(
+        CONTEXT_SERVICE_NOT_FOUND,
+        `服务未注册：${name}${this.zone !== undefined ? `（本区 ${this.zone} 读链：本区表→系统区表→根表）` : ''}`,
+      );
+    }
+    return hit.impl as T;
   }
 
   /** 软依赖探测（骨架篇 §9.1）：未注册返回 undefined 不抛错；语义与纪律见 types.ts 注释 */
   tryGet<T = unknown>(name: string): T | undefined {
-    return this.runtime.services.has(name) ? (this.runtime.services.get(name) as T) : undefined;
+    const hit = this.lookupService(name);
+    return hit.found ? (hit.impl as T) : undefined;
   }
 
+  /**
+   * provide 写入面（D3 分区改造）：写入目标 = provideZones ?? [zone] ?? 根表。
+   * 撞名执法按撞名域矩阵（runtime.collisionTables）：根×系统互为同碰撞域互斥
+   * （官方名位唯一空间），应用区表仅本表自查（异域并存合法——遮蔽由读链承载）；
+   * 多表扇出（跨区行）先全目标查重、任一命中即整笔拒绝（原子性——不写半套），
+   * 注销器逐表移除（仅当仍是本实现）。同键多表 = 跨区行「一值各归各区」语义，
+   * 回卷不随单区（跨区行 effect 链挂 apps:system 锚——装载律①）。
+   */
   provide<T>(name: string, impl: T): Disposer {
     this.assertActive();
     this.assertServiceName(name);
-    if (this.runtime.services.has(name)) {
-      // 同名重复注册 = 组合树装配错误（两行 provide 同一服务），响亮失败而非后写覆盖
-      throw new AppError(CONTEXT_SERVICE_EXISTS, `服务重复注册：${name}`);
+    // 写入目标表列：显式扇出 > 区身份单表 > 根表（宿主面）
+    const targetZones: readonly string[] = this.provideZones ?? (this.zone !== undefined ? [this.zone] : [ROOT_TABLE]);
+    // 撞名检查（全目标先查后写——原子）：任何目标碰撞域内已有同名即拒，
+    // 不写半套（多表扇出的跨区行不会出现「一区写成一区被拒」的半吊子态）
+    for (const zone of targetZones) {
+      for (const table of this.runtime.collisionTables(zone)) {
+        if (table.has(name)) {
+          throw new AppError(
+            CONTEXT_SERVICE_EXISTS,
+            `服务重复注册：${name}（写入目标区 ${zone === ROOT_TABLE ? '根表' : zone}——作用域 ${this.name}` +
+              `${this.rowId !== undefined ? `（行 ${this.rowId}）` : ''}；撞名域 = 根表×系统区互斥、应用区表内自查）`,
+          );
+        }
+      }
     }
-    this.runtime.services.set(name, impl);
-    // 注销器：仅当仍是本实现时删除（防误撤他者后来的同位注册）
+    // 写入：根表伪区落 rootServices，区表经 zoneTable 惰性建
+    const written: Array<{ zone: string; table: Map<string, unknown> }> = [];
+    for (const zone of targetZones) {
+      const table = zone === ROOT_TABLE ? this.runtime.rootServices : this.runtime.zoneTable(zone);
+      table.set(name, impl);
+      written.push({ zone, table });
+    }
+    // 注销器：逐表仅当仍是本实现时删除（防误撤他者后来的同位注册）；
+    // 区表清空即摘键（/reload 周期不累积空表项）
     const unregister: Disposer = () => {
-      if (this.runtime.services.get(name) === impl) this.runtime.services.delete(name);
+      for (const { zone, table } of written) {
+        if (table.get(name) === impl) {
+          table.delete(name);
+          if (zone !== ROOT_TABLE && table.size === 0) this.runtime.zoneServices.delete(zone);
+        }
+      }
     };
     // 挂 effect 栈：作用域卸载时随 LIFO 回卷；返回值供应用手动提前撤销
     return this.pushEffect(unregister);
@@ -465,7 +611,14 @@ class ContextScopeImpl implements ContextScope {
     return this.pushEffect(registerAppSessionEventType(def));
   }
 
-  fork(opts: { name: string; config?: Record<string, unknown>; rowId?: string; builtinRow?: boolean }): ContextScope {
+  fork(opts: {
+    name: string;
+    config?: Record<string, unknown>;
+    rowId?: string;
+    builtinRow?: boolean;
+    zone?: string;
+    provideZones?: readonly string[];
+  }): ContextScope {
     const child = new ContextScopeImpl(
       this.runtime,
       `${this.name}:${opts.name}`,
@@ -475,6 +628,11 @@ class ContextScopeImpl implements ContextScope {
       opts.rowId ?? this.rowId,
       // 行籍旗标同律级联（loader 按行籍显式注入；应用内再 fork 继承行籍）
       opts.builtinRow ?? this.builtinRow,
+      // 区身份同律级联（loader 按行 apps 键推导注入；应用内再 fork 继承区归属）
+      opts.zone ?? this.zone,
+      // provide 扇出仅 loader 为跨区行显式注入（应用内再 fork 继承——扇出面
+      // 随行身份走，行是跨区行则其内层作用域同扇出）
+      opts.provideZones ?? this.provideZones,
     );
     // 登记内部通道（registerLiveEvent 经 WeakMap 找根运行时——fork 产物同样可作锚）
     scopeRuntimes.set(child, this.runtime);
@@ -628,4 +786,26 @@ export function registerLiveEvent(scope: ContextScope, def: LiveEventDefinition)
 /** 异常 → 日志载荷（优先完整 stack；非 Error 值字符串化——与 describeError 文案口径互补） */
 function errorStack(err: unknown): string {
   return err instanceof Error ? (err.stack ?? String(err)) : String(err);
+}
+
+/**
+ * 宿主侧按区身份解析服务（D3，契约篇 §5.1——**宿主加载器专用**，装载面不可达）：
+ * 装载器 Kahn 轮次在行作用域 fork 之前需要按**该行**的读链探 inject 值域
+ * （app 行 inject 只能命中 本区表→系统区表→根表；跨区行 zone='system' 只能
+ * 命中 根表∪系统区表——装载律③），不探活作用域、零副作用。
+ *
+ * @param scope 任意作用域（取根运行时——fork 共享同一 runtime）
+ * @param zone 行读链区身份（'system' | 'app:<id>'；undefined = 宿主面）
+ * @param name 服务名
+ * @returns 命中实现；读链缺席 = undefined（APP_INJECT_UNRESOLVED 的判定源）
+ */
+export function tryResolveService(scope: ContextScope, zone: string | undefined, name: string): unknown {
+  const runtime = scopeRuntimes.get(scope);
+  if (runtime === undefined) {
+    throw new AppError(CONTEXT_DISPOSED, 'tryResolveService：未知作用域（须为 createContext/fork 产物）');
+  }
+  for (const table of runtime.readTables(zone)) {
+    if (table.has(name)) return table.get(name);
+  }
+  return undefined;
 }

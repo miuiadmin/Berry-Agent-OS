@@ -160,9 +160,11 @@ export interface AppsService {
   configure(id: string, patch: Readonly<Record<string, unknown>>): Promise<ConfigureReport>;
   /**
    * 重载请求投递（同条导线——reload 真身住组合根，服务面只投递）：排队语义宿主
-   * 侧承载（run 进行中排队、run 结算后自动排水），件不自带重建权。
+   * 侧承载（run 进行中排队、run 结算后自动排水），件不自带重建权。app 参数 =
+   * 单区 reload 目标（D3 per-app reload，契约篇 §1.3）——换该应用第三方挂载行
+   * 不动他区运行时；未知/不在册 id 由组合根单点校验（报错面 = error 态）。
    */
-  requestReload(): Promise<ReloadOutcome>;
+  requestReload(opts?: { readonly app?: string }): Promise<ReloadOutcome>;
   /** boot 与 /reload 后装配方回灌最新装载结果（同实例就地更新——服务集恒定） */
   applyLoad(composition: CompositionReport, load: AppLoadResult): void;
   /**
@@ -316,10 +318,19 @@ export interface ConfigureReport {
  * 重载请求回执三态（requestReload 服务面导线形态）：宿主侧 ReloadResult 的
  * 服务面投影——queued（run 进行中已排队，结算后自动执行）/ done（成功，failed
  * 为失败行 id 清单——进程存活逐行报告）/ error（overlay 校验失败等，旧装配未动）。
+ * done 腿两可选面（D3 单区 reload）：app = 单区目标（缺席 = 全量）；
+ * droppedEvents = 卸词集警示（该区旧词 ∖ 新词，基准 = 运行时真值）。
  */
 export type ReloadOutcome =
   | { readonly status: 'queued' }
-  | { readonly status: 'done'; readonly failed: readonly string[] }
+  | {
+      readonly status: 'done';
+      readonly failed: readonly string[];
+      /** 单区 reload 目标应用（D3——缺席 = 全量） */
+      readonly app?: string;
+      /** 卸词集警示（D3——该区旧词 ∖ 新词；空/缺省 = 无消失词） */
+      readonly droppedEvents?: readonly string[];
+    }
   | { readonly status: 'error'; readonly message: string };
 
 /**
@@ -342,7 +353,7 @@ export function createAppsService(opts: {
   loadEntry?: EntryLoader;
   affectedSessionCounts?: (types: readonly string[]) => Promise<Record<string, number>> | Record<string, number>;
   emitUninstalled?: (data: UninstalledEventData) => void;
-  requestReload?: () => Promise<ReloadOutcome>;
+  requestReload?: (opts?: { readonly app?: string }) => Promise<ReloadOutcome>;
   gitCommitOf?: (dir: string) => Promise<string | undefined>;
 }): AppsService {
   const dataDir = opts.dataDir;
@@ -1130,15 +1141,16 @@ export function createAppsService(opts: {
     /**
      * 重载请求投递（刀 3 导线——真身在组合根 reload 闭包）：服务面零自有状态，
      * 只经注入闭包转发。排队语义在宿主侧（run 进行中排队、结算后自动排水）。
+     * app 参数透传 = 单区 reload 目标（D3 per-app reload）。
      */
-    async requestReload() {
+    async requestReload(requestOpts) {
       if (opts.requestReload === undefined) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
           'requestReload：宿主未注入重载请求面（诊断装配无 /reload——本面不可用）',
         );
       }
-      return await opts.requestReload();
+      return await opts.requestReload(requestOpts);
     },
   };
 }

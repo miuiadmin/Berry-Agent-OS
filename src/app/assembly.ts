@@ -34,7 +34,7 @@ import { TOOLS_CHANGE_EVENT } from '../contracts/tools.js';
 import { PROMPTS_CHANGE_EVENT, registerPromptsService } from './prompts.js';
 import type { ToolsService } from '../tools/registry.js';
 import type { ContextScope } from '../context/types.js';
-import { createContext } from '../context/context.js';
+import { createContext, SYSTEM_ZONE, appZoneId } from '../context/context.js';
 import { createAppJiti, importAppEntry, loadApps, type AppSkillsInfo } from '../context/loader.js';
 import { RateLimiter } from '../context/rate-limit.js';
 import { resolveLocalCodepageLabels } from '../context/index.js';
@@ -90,6 +90,7 @@ import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { chainCaller, runInCallerChain } from '../context/chain.js';
 import type { RowAppProbe } from '../contracts/app.js';
 import { resolveRowCarrier } from '../contracts/app.js';
+import type { AppLoadResult } from '../contracts/app.js';
 import {
   EVENT_HANDLER_TIMEOUT,
   PERSIST_BATCH_WRITE_FAILED,
@@ -109,8 +110,10 @@ import {
   assertRing1Required,
   diffRing1Rows,
   safeModeComposition,
+  partitionPlan,
   RING1_REQUIRED_ROW_IDS,
   type CompositionReport,
+  type PlanPartition,
 } from './composition.js';
 import { loadOfficialApps, assertAppComponents, resolveApp, mergeRequestForApp } from './app-registry.js';
 import type { AppManifest } from '../contracts/app.js';
@@ -366,14 +369,18 @@ export interface BerryRuntime {
   /** 开新会话（/new）：registry.open 一条龙 + 旧聚焦条目退役；无持久层或聚焦驱动 run 进行中返回 undefined */
   newSession(): Session | undefined;
   /**
-   * 组合树全量重载（/reload，契约篇 §1.3 落码形态）：run 进行中**排队不拒绝**
-   *（2026-08-27 刀 2 改排队——单槽 coalesce：置 reloadPending 返 {queued:true}，
-   * run 结算回调见全闲即自动排水执行；排队的 reload 失败不重排，错误经 ui.notify
-   * 报请求方）；overlay 校验失败不动旧装配（error）；成功 = 锚 dispose → 重装 →
-   * 系统提示词重建 → composition/reloaded 派发（payload 三份行 id 清单）。失败行
-   * 逐行报告不杀进程（boot 与 /reload 两面失败语义之 /reload 半边）。
+   * 组合树重载（/reload，契约篇 §1.3 落码形态）：run 进行中**排队不拒绝**
+   *（2026-08-27 刀 2 改排队——分槽 coalesce：置 pending 返 {queued:true}，
+   * run 结算回调见各自域排水条件即自动排水执行；排队的 reload 失败不重排，
+   * 错误经 ui.notify 报请求方）；overlay 校验失败不动旧装配（error）；成功 =
+   * 锚 dispose → 重装 → 系统提示词重建 → composition/reloaded 派发（payload
+   * 三份行 id 清单）。失败行逐行报告不杀进程（boot 与 /reload 两面失败语义
+   * 之 /reload 半边）。app 参数 = 单区重载（D3 per-app reload）：只动该应用
+   * 第三方挂载行（该区 worker 行 terminate → 该区锚 dispose → 重锚 → 该区行
+   * 重装载），他区与根/系统运行时不动；未知/不在册 id = error 面；载荷带
+   * app 腿（缺席 = 全量）与卸词集警示 droppedEvents。
    */
-  reload(): Promise<ReloadResult>;
+  reload(app?: string): Promise<ReloadResult>;
   /** 优雅关停（run 结算 → flush 屏障 → 关库 → ctx 回卷——骨架篇 §1.3 的进程内编排） */
   shutdown(): Promise<void>;
 }
@@ -1010,11 +1017,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       ctx.emit('app/uninstalled', data);
       registry.routed()?.session.append('app/uninstalled', data);
     },
-    requestReload: async () => {
-      const result = await reload();
+    requestReload: async (requestOpts) => {
+      const result = await reload(requestOpts?.app);
       if (result.queued === true) return { status: 'queued' as const };
       if (result.error !== undefined) return { status: 'error' as const, message: result.error };
-      return { status: 'done' as const, failed: result.payload?.failed ?? [] };
+      return {
+        status: 'done' as const,
+        failed: result.payload?.failed ?? [],
+        // 单区两腿透传（D3 per-app reload）：目标应用 + 卸词集警示
+        ...(result.payload?.app !== undefined ? { app: result.payload.app } : {}),
+        ...(result.payload?.droppedEvents !== undefined && result.payload.droppedEvents.length > 0
+          ? { droppedEvents: result.payload.droppedEvents }
+          : {}),
+      };
     },
   });
   ctx.provide('apps', appsService);
@@ -1268,8 +1283,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     );
   }
   // Ring 1 行装载（独立锚：fork 自根 ctx、注册表同根共享——ring1 provide 对
-  // ⑥b/⑧/⑨ 与后续装载行全局可见；锚永不重 fork，/reload 不动它）
-  const ring1Anchor = ctx.fork({ name: 'ring1' });
+  // ⑥b/⑧/⑨ 与后续装载行全局可见；锚永不重 fork，/reload 不动它）。区身份 =
+  // 系统区（D3 装载分面分区，契约篇 §5.1「Ring 1 行 provide 归系统区表」）：
+  // 与系统区行同生命周期（boot + 全量 /reload），宿主面读链（根表→系统区表）
+  // 照见——对 ⑥b/⑧ 消费面零迁移
+  const ring1Anchor = ctx.fork({ name: 'ring1', zone: SYSTEM_ZONE });
   // worker 域监督编舞值（契约篇 §1.7 K3-c 宿主全局缺省，两舰队共用）：
   // 心跳 15s 节律 × 3 拍缺省 ≈ 45s 冻结判定（同步死循环/事件循环冻结可判可杀；
   // CPU 燃烧如实收窄不可判——打点照登）；JS 堆 512MB = 预算内存维度宿主缺省
@@ -1370,7 +1388,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 具名提示词段服务（ctx.prompts，pi-4(a) 拍板）：段注册表宿主拥有，分节序固定 =
    * 基座 → 技能渐进披露 → 具名段（id 字典序）；render() 仅在重建时点求值物化，
    * 段内容随快照冻结（禁整串替换与 per-run 重写两毒品形态——契约篇 §1.3 五件） */
-  const { service: prompts, host: promptsHost } = registerPromptsService(ctx);
+  const { service: prompts, host: promptsHost } = registerPromptsService(ctx, {
+    // D3 注册面同族收口（契约篇 §5.1）：app 行装载期调 registerSection 拒载
+    //（prompt 段全局物化无域层——与 D1 skills/命令拒载同律，caller 链行籍帧判行）
+    rowApp,
+  });
   // environment 披露段（骨架篇 §7.3——exec 刀配套披露）：宿主自留地首例，
   // 走宿主半边通道（无 `/` 单段 id；装载面注册此类 id 即拒）。快照语义：
   // render 时现取档位/工作区——boot / /reload / /new 重建时点物化新值
@@ -1569,20 +1591,67 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 按行挂载目标判；effect 返回的注销器随行作用域回卷（技能是行资产）
     info.scope.effect(() => runInCallerChain(info.id, () => skills.registerProvider(provider)));
   };
-  // 锚是活绑定（/reload dispose 后重 fork）；Ring 2 装载计划 = 全树剔除 Ring 1
-  // 必备行（④e 已装载——双装载即 TOOL_DUPLICATE 事态，结构上排除）
-  let appAnchor: ContextScope = ctx.fork({ name: 'apps' });
-  // worker 域舰队·Ring 2/3 面（与应用锚同寿命）：/reload 先 terminateAll 再随
-  // 新锚重装载（舰队对象复用——登记簿已空、计数器累积 = 装机计数观测锚⑩）
-  const appFleet = createBridgeFleet({ root: ctx, anchor: () => appAnchor, ...workerChoreography });
-  fleets.push(appFleet); // 登记簿收录（refuseBoot/关停收编遍历面——/reload 单收本舰队不动 Ring 1）
-  const ring2Plan = composition.plan.filter((row) => !RING1_REQUIRED_ROW_IDS.includes(row.id));
-  const ring2Load = await loadApps(appAnchor, ring2Plan, {
-    registerSkills: registerAppSkills,
-    virtualFaces,
-    workerLoader: appFleet.loader,
+  /* ---- D3 装载分面分区（契约篇 §5.1，2026-08-29）----
+     Ring 2/3 计划（Ring 1 必备行剔除——④e 已装载，双装载即 TOOL_DUPLICATE
+     事态，结构上排除）分区为系统区 + 各应用区。锚结构 = apps:system 锚 + 每
+     app 一锚（apps:app:<id>），皆自根 fork——兄弟非父子：fork 共享整树服务表，
+     层级化不构成可见性边界（分表是回卷单元与撞名域，可见性由读链承载）。 */
+  const partition = partitionPlan(composition.plan);
+  // 锚袋 = 区 id → 锚（活绑定——/reload dispose 整袋后按新分区重建）。fleet
+  // 锚 getter 取系统锚：舰队只把锚作事件发射面（行作用域由 loadApps fork 承载
+  // ——zone 随锚级联自动落表，bridge 零感知）
+  const buildZoneAnchors = (part: PlanPartition): Map<string, ContextScope> => {
+    const anchors = new Map<string, ContextScope>();
+    anchors.set(SYSTEM_ZONE, ctx.fork({ name: 'apps:system', zone: SYSTEM_ZONE }));
+    for (const appId of part.appIds) {
+      const zone = appZoneId(appId);
+      anchors.set(zone, ctx.fork({ name: `apps:app:${appId}`, zone }));
+    }
+    return anchors;
+  };
+  let zoneAnchors: Map<string, ContextScope> = buildZoneAnchors(partition);
+  // worker 域舰队·Ring 2/3 面（与锚袋同寿命）：/reload 先 terminateAll 再随新
+  // 锚袋重装载（舰队对象复用——登记簿已空、计数器累积 = 装机计数观测锚⑩）
+  const appFleet = createBridgeFleet({
+    root: ctx,
+    anchor: () => zoneAnchors.get(SYSTEM_ZONE)!,
+    ...workerChoreography,
   });
-  // Kahn 残留行孤儿域清割（同 Ring 1 面防漏语义）
+  fleets.push(appFleet); // 登记簿收录（refuseBoot/关停收编遍历面——/reload 单收本舰队不动 Ring 1）
+  // 分区装载单源（boot 与全量 /reload 同构）：系统相位先行收口（区内 Kahn 轮次
+  // + 失败行结算完毕——跨区行同挂此相位装载恰一次，装载律①）→ 各应用区依在册
+  // 清单 id 字典序串行（序仅定日志序——跨区 inject 同拒故区际零依赖）。
+  // byZone = 区 id → 该区装载结果（D3 单区 reload 收口面③的数据基座：他区行
+  // 沿用旧装载结果 = 运行时真值，全量路整替、单区路只换该区槽）。zoneLoadOpts
+  // 与单区路共用（三个注入物都是装配期稳定引用）
+  const zoneLoadOpts = { registerSkills: registerAppSkills, virtualFaces, workerLoader: appFleet.loader };
+  const loadPartitioned = async (
+    part: PlanPartition,
+  ): Promise<{ merged: AppLoadResult; byZone: ReadonlyMap<string, AppLoadResult> }> => {
+    const byZone = new Map<string, AppLoadResult>();
+    const loads: AppLoadResult[] = [];
+    const sysLoad = await loadApps(zoneAnchors.get(SYSTEM_ZONE)!, part.system, zoneLoadOpts);
+    byZone.set(SYSTEM_ZONE, sysLoad);
+    loads.push(sysLoad);
+    for (const appId of part.appIds) {
+      const zoneLoad = await loadApps(zoneAnchors.get(appZoneId(appId))!, part.zoneRows.get(appId)!, zoneLoadOpts);
+      byZone.set(appZoneId(appId), zoneLoad);
+      loads.push(zoneLoad);
+    }
+    return {
+      merged: {
+        activated: loads.flatMap((load) => load.activated),
+        failed: loads.flatMap((load) => load.failed),
+        skipped: loads.flatMap((load) => load.skipped),
+      },
+      byZone,
+    };
+  };
+  const bootPartitioned = await loadPartitioned(partition);
+  const ring2Load = bootPartitioned.merged;
+  // 各区装载结果活账（单区 reload 的他区真值源 + 卸词集旧词基准）：全量路整替
+  let zoneLoads: ReadonlyMap<string, AppLoadResult> = bootPartitioned.byZone;
+  // Kahn 残留行孤儿域清割（同 Ring 1 面防漏语义——全区分区装载完毕后统一收口）
   appFleet.reapUnapplied('Ring 2/3 装载收口（Kahn 残留行清割）');
   // 装载结果合并回灌（ctx.apps.list 唯一事实源 = 组合树全行——Ring 1 行状态
   // 同面可见；/reload 后 Ring 1 行沿用 boot 装载结果 = 运行时真值：行仍激活中）
@@ -1670,9 +1739,13 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 'initial'）补发带 replay:true 标记的同型载荷——origin 建会维度不变、replay
   // 是投递维度标记，既有按 origin 过滤的监听器零迁移。boot 与 /reload 两路
   // 各自收口处同型补播（设计指令）。root 发射零频率护栏约束（免计费）。
-  const replaySessionStarts = (): void => {
+  // appId 参数（D3 单区 reload 收口面⑤）：在场 = 只 replay 该应用域在册会话
+  //（事件总线无域层、监听全局——新装载实例对一切会话皆白纸，v1 取保守面：
+  // 该区行按挂载语义服务于该应用，他应用会话不补播）；缺席 = 全体非退役条目。
+  const replaySessionStarts = (appId?: string): void => {
     for (const entry of registry.entries.values()) {
       if (entry.retired) continue; // 退役条目不补——会话停摆，初始化面向在场者
+      if (appId !== undefined && entry.appId !== appId) continue; // 单区：他应用域会话不补播
       ctx.emit('session_start', {
         sessionId: entry.session.header.sessionId,
         origin: entry.resumed ? 'resume' : 'initial',
@@ -1698,18 +1771,27 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   replaySessionStarts();
   ctx.emit('composition/reloaded', bootPayload);
 
-  /* ---- /reload 排队机制（契约篇 §3.4 第二刀，2026-08-27 刀 2）：busy 改单槽 coalesce ----
-   * run 进行中的 reload 不再拒绝：置 reloadPending 返 {queued:true}（已排队再排
-   * no-op），run 结算回调见**全闲**（任一非退役驱动 isRunning 即留待下次结算）
-   * 自动排水执行。排水内竞速新 run（reload 又返 queued）= 静默重新置 pending；
-   * 排水失败不重排（错误经 ui.notify 报请求方——通知文案与 commands.ts
-   * notifyReloadResult 同口径，此处内联：commands 已 import 本模块 ReloadResult
-   * 类型，反向 import 成环）。
+  /* ---- /reload 排队机制（契约篇 §3.4 第二刀，2026-08-27 刀 2；D3 per-app 分槽——第三十五批拍板项③）----
+   * run 进行中的 reload 不再拒绝：置 pending 返 {queued:true}，run 结算回调见
+   * 排水条件自动执行。D3 分槽化：全量槽（'*'）+ 每应用一槽——每槽独立 pending
+   * 旗 + 各自域的排水条件（全量槽 = 全闲；应用槽 = 该 app 域闲），他应用在跑
+   * 不阻断本应用换件排队；同槽再排 = no-op（Set 天然 coalesce）。排水内竞速新
+   * run（reload 又返 queued）= 静默重新置槽；排水失败不重排（错误经 ui.notify
+   * 报请求方——通知文案与 commands.ts notifyReloadResult 同口径，此处内联：
+   * commands 已 import 本模块 ReloadResult 类型，反向 import 成环）。
    * 订阅面 = chat 件 ctx.agent.onRunSettled（工厂级订阅表跨 /reload 存续——订阅
    * 一次恒活）；chat 件可能 boot 装载失败/经 /reload 才上线：惰性武装
    *（once-guard，boot ⑨ 后与 busy 分支两处尝试；chat 未装载 = 无驱动 = 永不
    * busy = 排队面天然不需要，武装不成功静默无害）。 */
-  let reloadPending = false;
+  /** busy 判定（D3 收窄）：app 在场 = 只看该 app 域非退役驱动（判据键 = 条目 appId） */
+  const anyRunActive = (appId?: string): boolean =>
+    [...registry.entries.values()].some(
+      (entry) => !entry.retired && entry.driver.isRunning && (appId === undefined || entry.appId === appId),
+    );
+  /** 全量排水槽哨兵（与应用 id 分子集——app id 形 `[a-z][a-z0-9-]*` 恒不撞 '*'） */
+  const FULL_RELOAD_SLOT = '*';
+  /** 排水槽集（D3 分槽）：槽 = '*' 全量 | app id 单区；成员在集 = pending 中 */
+  const reloadPendingSlots = new Set<string>();
   let reloadHookArmed = false;
   const armRunSettledHook = (): void => {
     if (reloadHookArmed) return;
@@ -1717,55 +1799,161 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     if (agent === undefined) return; // chat 件未上线——boot 收口与 busy 分支两处再试
     reloadHookArmed = true;
     agent.onRunSettled(() => {
-      if (!reloadPending) return;
-      // 排水条件 = 全闲：本驱动已结算，其余非退役驱动也须不在跑（多会话并存）
-      if ([...registry.entries.values()].some((entry) => !entry.retired && entry.driver.isRunning)) return;
-      reloadPending = false; // 先清再执行：失败不重排，竞速 queued 在结果面重置
-      void reload().then((result) => {
-        if (result.queued === true) {
-          reloadPending = true; // 排水瞬间又有 run 起跑——留待该 run 结算再排（静默）
-          return;
-        }
-        if (result.error !== undefined) {
-          ui.notify(`排队的重载失败：${result.error}\n（原组合仍在运行——修正 overlay 后再试）`);
-          return;
-        }
-        const payload = result.payload;
-        if (payload !== undefined) {
-          const parts = [`激活 ${payload.activated.length}`];
-          if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
-          parts.push(`跳过 ${payload.skipped.length}`);
-          ui.notify(`排队的重载已执行：${parts.join('，')}`);
-        }
-      });
+      if (reloadPendingSlots.size === 0) return;
+      // 逐槽判排水条件（每次结算全槽重评——幂等；槽间互不阻断）
+      for (const slot of [...reloadPendingSlots]) {
+        const slotApp = slot === FULL_RELOAD_SLOT ? undefined : slot;
+        if (anyRunActive(slotApp)) continue; // 本槽域仍有 run 在跑——留待下次结算
+        reloadPendingSlots.delete(slot); // 先清再执行：失败不重排，竞速 queued 在结果面重置
+        void reload(slotApp).then((result) => {
+          if (result.queued === true) {
+            reloadPendingSlots.add(slot); // 排水瞬间又有 run 起跑——留待该 run 结算再排（静默）
+            return;
+          }
+          if (result.error !== undefined) {
+            ui.notify(`排队的重载失败：${result.error}\n（原组合仍在运行——修正 overlay 后再试）`);
+            return;
+          }
+          const payload = result.payload;
+          if (payload !== undefined) {
+            // 与 notifyReloadResult 同口径（内联因反向 import 成环）+ 卸词集警示
+            const scope = payload.app !== undefined ? `应用 ${payload.app} 单区` : '组合';
+            const parts = [`${scope}激活 ${payload.activated.length}`];
+            if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
+            parts.push(`跳过 ${payload.skipped.length}`);
+            if (payload.droppedEvents !== undefined && payload.droppedEvents.length > 0) {
+              parts.push(`警示：事件词消失 ${payload.droppedEvents.join('、')}（重装即回；改名即旧词永失）`);
+            }
+            ui.notify(`排队的重载已执行：${parts.join('，')}`);
+          }
+        });
+      }
     });
   };
 
-  /** 组合树全量重载单次执行体（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面） */
-  const reloadOnce = async (): Promise<ReloadResult> => {
+  /** 单区重载执行体（D3 per-app reload 拆装五步对偶全量——契约篇 §1.3；入参 app
+   * 必在册、Ring 1 已验无变化、fresh 树已过全局先验。五步 = 该区 worker 行
+   * terminate → 该区锚 dispose → 分区随新树走 → 该区行重装载 → 收口面六项） */
+  const reloadAppZone = async (app: string, fresh: CompositionReport): Promise<ReloadResult> => {
+    const zone = appZoneId(app);
+    const freshPartition = partitionPlan(fresh.plan);
+    const zoneRows = freshPartition.zoneRows.get(app) ?? [];
+    // 卸词集基准先取（收口面⑥）：该区旧词 = 旧装载结果真值（activated 载荷
+    // events 收割面），不取树投影——树可能含他区变更，与本区无关
+    const oldWords = new Set((zoneLoads.get(zone)?.activated ?? []).flatMap((item) => item.events ?? []));
+    try {
+      // 装载窗口开启：dispose+装载只刷活视图，收口单张 change 统一落账（同全量路）
+      loadWindow = true;
+      // ② 该区 worker 行选择性终止（fleet 行→区过滤——「该区行」谓词 = 独占该区，
+      // 跨区行与系统相位行 zone 列不等不动；worker/external 两腿同舰队同谓词）
+      appFleet.terminateZone(zone, `单区 reload 域收编（${zone}）`);
+      // ③ 该区锚 dispose（LIFO——仅回卷该区注册：工具/监听/服务/词汇；跨区行
+      // effect 链挂 apps:system 锚、他区锚均不动。?. 兜「旧树该区本无锚」态）
+      await zoneAnchors.get(zone)?.dispose();
+      // ④ 分区随新树走：行全删 = 空区卸载正路（锚出袋）；有行 = 重锚（自根
+      // fork 同形——兄弟非父子，zone 随锚级联落表）
+      if (zoneRows.length === 0) zoneAnchors.delete(zone);
+      else zoneAnchors.set(zone, ctx.fork({ name: `apps:app:${app}`, zone }));
+      // ⑤ 该区行重装载（空集 = 纯回卷即卸载；jiti 缓存纪律同全量——每次装载
+      // 新建 jiti 实例即全图重求值，毒化缓存不跨装载存活）
+      const load: AppLoadResult =
+        zoneRows.length > 0
+          ? await loadApps(zoneAnchors.get(zone)!, zoneRows, zoneLoadOpts)
+          : { activated: [], failed: [], skipped: [] };
+      appFleet.reapUnapplied(`单区 reload 装载收口（${zone} Kahn 残留行清割）`);
+      // 收口面③：applyLoad 合并回灌——他区行沿用旧装载结果（运行时真值）、该区
+      // 行新结果；Ring 1 恒 boot 真值（行仍激活中不回卷）。空区路径清槽
+      const nextZoneLoads = new Map(zoneLoads);
+      if (zoneRows.length > 0) nextZoneLoads.set(zone, load);
+      else nextZoneLoads.delete(zone);
+      zoneLoads = nextZoneLoads;
+      const others = [...nextZoneLoads.entries()].filter(([z]) => z !== zone);
+      composition = fresh;
+      appsService.applyLoad(fresh, {
+        activated: [...ring1Load.activated, ...others.flatMap(([, other]) => other.activated), ...load.activated],
+        failed: [...ring1Load.failed, ...others.flatMap(([, other]) => other.failed), ...load.failed],
+        skipped: [...ring1Load.skipped, ...others.flatMap(([, other]) => other.skipped), ...load.skipped],
+      }); // 同实例就地更新（失败行进 list 状态面——进程存活）
+      // 收口面④：appGaps 只重跑该应用（换件后 components 在场重验——他应用槽
+      // 不动；单区路径的变更域承诺 = 该区）
+      const freshGaps = assertAppComponents(officialApps, fresh);
+      if (appGaps.has(app) || freshGaps.has(app)) {
+        const nextGaps = new Map(appGaps);
+        nextGaps.delete(app);
+        const missing = freshGaps.get(app);
+        if (missing !== undefined) nextGaps.set(app, missing);
+        appGaps = nextGaps;
+      }
+      // systemPrompt 重建 v1 恒无（app 区零技能〔D1 拒载〕零 prompt 段〔本批
+      // 拒载〕——区装内容不进 systemPrompt）：不调 rematerializeAll；toolView
+      // 走 tools_change 域腿即时刷新；writeHeader 全体调靠既有差分化自然收窄
+      writeHeadersAll();
+      // 卸词集 = 该区旧词 ∖ 新词（警示面：reload 是换版本非删除、词随重装
+      // 回来；改名即旧词永失——差集如实点名，消费方按词表三档 unknown 档处理）
+      const newWords = new Set(load.activated.flatMap((item) => item.events ?? []));
+      const droppedEvents = [...oldWords].filter((word) => !newWords.has(word));
+      // 收口面⑤：只 replay 该应用域在册会话（事件总线无域层、监听全局——v1
+      // 取保守面：该区行按挂载语义服务于该应用，他应用会话不补播）
+      replaySessionStarts(app);
+      const payload: CompositionReloadedPayload = {
+        activated: load.activated.map((item) => item.id),
+        failed: load.failed.map((item) => item.id),
+        skipped: load.skipped.map((item) => item.id),
+        app,
+        ...(droppedEvents.length > 0 ? { droppedEvents } : {}),
+      };
+      ctx.emit('composition/reloaded', payload);
+      return { payload };
+    } catch (err) {
+      // 兜底：loadApps 逐行收集不抛，此处只剩 dispose/emit 级异常——进程存活报告
+      return { error: describeError(err) };
+    } finally {
+      loadWindow = false;
+    }
+  };
+
+  /** 组合树重载单次执行体（/reload 主体；TUI 薄壳直调——对账逻辑不进壳面。
+   * app 在场 = 单区路〔D3 per-app reload〕：换该应用第三方挂载行不动他区运行时） */
+  const reloadOnce = async (app?: string): Promise<ReloadResult> => {
     // run 进行中排队（刀 2 改排队不拒绝；loop 正引用工具快照与提示词，装配不换；
-    // S1：任一非退役驱动在跑即排队——多会话并存时全树装配不换。单槽 coalesce：
-    // 已排队再排 no-op；chat 件若此刻才上线顺手武装结算钩子）
-    if ([...registry.entries.values()].some((entry) => !entry.retired && entry.driver.isRunning)) {
-      reloadPending = true;
+    // D3 收窄：单区只看该 app 域——他应用在跑不阻断本应用换件；全量看全闲。
+    // 同槽已排队再排 no-op；chat 件若此刻才上线顺手武装结算钩子）
+    if (anyRunActive(app)) {
+      reloadPendingSlots.add(app ?? FULL_RELOAD_SLOT);
       armRunSettledHook();
       return { queued: true };
     }
-    // overlay 校验先行：树坏不动旧装配（旧锚回卷是不可逆动作——先验后拆）
+    // overlay 校验先行（全局——坏树全局拒载不分区放行，分区不改「不带病运行」：
+    // 树校验失败即拒，无「绕过坏区只重好区」路径；旧锚回卷不可逆——先验后拆）。
+    // 安全模式旗标刻意不进本路径（技术栈篇 §5 救援环）：boot --no-apps 起的
+    // 最小内核在此读回全量树——修好 overlay 后 /reload 即恢复，无需重启进程
     let fresh: CompositionReport;
     try {
-      // 安全模式旗标刻意不进本路径（技术栈篇 §5 救援环）：boot --no-apps 起的
-      // 最小内核在此读回全量树——修好 overlay 后 /reload 即恢复，无需重启进程
       fresh = loadComposition(compositionDir, builtins, knownAppIds);
     } catch (err) {
       return { error: describeError(err) };
     }
-    // 行挂载目标投影重建（D1）：fresh 即目标树——早于旧锚回卷与新装载，
-    // 整个换窗（dispose + load）内注册面读到的恒为「正过渡到」的树投影
-    syncRowAppMap(fresh);
+    // 单区校验（契约篇 §1.3 动词面）：未知/不在册 appId = 报错退出
+    //（COMPOSITION_ROW_INVALID 同族拒绝式——与 overlay 行 apps 键校验同律）
+    if (app !== undefined && !knownAppIds.has(app)) {
+      return {
+        error: `应用 ${app} 不在册（在册清单：${[...knownAppIds].sort().join('、')}）——/reload --app 须用在册应用 id`,
+      };
+    }
     // Ring 1 行变更检测（契约篇 §5.1 /reload 语义）：Ring 1 行不回卷不重装载
-    //（仅 boot 生效），合成结果变化只能报告——重启后生效，不静默吞
+    //（仅 boot 生效）。全量路 = 报告需重启；单区路 = 收口面②拒绝前置（单区
+    // 目标恒应用区行，Ring 1 变化不吞不静默——报错指路全量）
     const ring1RestartRequired = diffRing1Rows(composition, fresh);
+    if (app !== undefined && ring1RestartRequired.length > 0) {
+      return {
+        error: `Ring 1 行合成结果变化（${ring1RestartRequired.join('、')}）——单区 reload 不动 Ring 1，请走全量 /reload`,
+      };
+    }
+    // 行挂载目标投影重建（收口面①——全量重建）：fresh 即目标树——早于旧锚回卷
+    // 与新装载，整个换窗（dispose + load）内注册面读到的恒为「正过渡到」的树投影
+    syncRowAppMap(fresh);
+    // 单区路分流（五步对偶 + 收口面六项都在 reloadAppZone 单体）
+    if (app !== undefined) return reloadAppZone(app, fresh);
     try {
       // 装载窗口开启：dispose+装载只刷活视图，收口由下方单张 change 统一落账
       loadWindow = true;
@@ -1773,18 +1961,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       // 重装载——行作用域随锚 LIFO 回卷，unload 联动因端点已 dispose 静默吸收
       // 是预期态；Ring 1 面不动——/reload 只换 Ring 2/3）
       appFleet.terminateAll('/reload 域收编');
-      await appAnchor.dispose(); // LIFO 级联回卷：工具卸载（tools_change 即时刷新）+ 监听/服务/词汇注销
-      appAnchor = ctx.fork({ name: 'apps' });
-      // Ring 2/3 计划 = 新树剔除 Ring 1 必备行（ring1Anchor 永不重装载——双装
-      // 即 TOOL_DUPLICATE 事态，结构上排除）
-      const ring2Fresh = fresh.plan.filter((row) => !RING1_REQUIRED_ROW_IDS.includes(row.id));
-      const load = await loadApps(appAnchor, ring2Fresh, {
-        registerSkills: registerAppSkills,
-        virtualFaces,
-        // worker 行重装载同缝（boot ⑨ 同款）：舰队对象复用（terminateAll 已清
-        // 登记），漏传此缝 = worker 行在 /reload 静默落 failed「装载器未注入」
-        workerLoader: appFleet.loader,
-      });
+      // 整袋回卷（D3）：系统锚 + 各应用锚逐个 LIFO 级联回卷（工具卸载
+      // tools_change 即时刷新 + 监听/服务/词汇注销）；兄弟锚独立 effect 栈，
+      // dispose 序无语义差——按袋内序（系统先行、应用字典序）收口即可
+      for (const anchor of zoneAnchors.values()) {
+        await anchor.dispose();
+      }
+      // 新分区整袋重建（分区随新树走——应用区增删即锚增删）+ 分区装载与 boot
+      // 同单源（loadPartitioned；worker 行重装载同缝：舰队对象复用 terminateAll
+      // 已清登记，漏传此缝 = worker 行在 /reload 静默落 failed「装载器未注入」）
+      const freshPartition = partitionPlan(fresh.plan);
+      zoneAnchors = buildZoneAnchors(freshPartition);
+      const { merged: load, byZone } = await loadPartitioned(freshPartition);
+      zoneLoads = byZone; // 各区活账整替（单区 reload 的他区真值源）
       composition = fresh;
       // 合并回灌（Ring 1 行沿用 boot 装载结果 = 运行时真值：行仍激活中）
       appsService.applyLoad(fresh, {
@@ -1819,10 +2008,11 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   };
   /* /reload 串行链（刀 2）：并发调用（TUI 手动 + 排队排水自动）按序执行、各拿
    * 各的结果——排水竞速手动 reload 不再产生双 dispose/双装载竞态；排队在链上的
-   * 调用真正轮到时才做 busy 判定（run 仍在跑则照常置 pending 返 queued）。 */
+   * 调用真正轮到时才做 busy 判定（run 仍在跑则照常置槽返 queued）。全量与单区
+   * 共链（换装窗互斥——单区 dispose 期间全量整袋回卷会撕裂活账）。 */
   let reloadChain: Promise<unknown> = Promise.resolve();
-  const reload = (): Promise<ReloadResult> => {
-    const run = reloadChain.then(reloadOnce);
+  const reload = (app?: string): Promise<ReloadResult> => {
+    const run = reloadChain.then(() => reloadOnce(app));
     reloadChain = run.then(
       () => undefined,
       () => undefined, // 失败吸收进链（错误已由各调用方的结果面承载——链永不断流）

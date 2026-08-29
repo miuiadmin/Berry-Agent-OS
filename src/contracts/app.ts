@@ -470,6 +470,14 @@ export interface AppPlanRow {
   builtin?: BuiltinAppModule;
   /** 行配置（激活行可有；经应用 schema 校验后注入） */
   config?: Record<string, unknown>;
+  /**
+   * 行挂载目标透传（CompositionRow.apps 原样——D3 装载分面分区判据，契约篇
+   * §5.1 装载分面分区，2026-08-29）：缺席 = 系统区行；恰一元素 = 该应用区独占
+   * 行；多元素 = 跨区行（挂系统相位装载 + provide 扇出 apps 枚举各区表）。
+   * 激活/跳过/未解析三态都带（skip 行重发与单区 reload 的分区归属均需要）。
+   * Ring 1 行/官方件行携此键在合成期四触发③④已拒——装载器不再重复执法。
+   */
+  apps?: readonly string[];
   /** 跳过原因（有值即不激活） */
   skip?: AppSkipReason;
   /** 入口解析失败原因（加载器永不自动安装——进启动断言指引安装） */

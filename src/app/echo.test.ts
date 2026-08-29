@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createBerryRuntime } from './assembly.js';
 import { BRIDGE_SURFACE_NARROWED, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
+import { appZoneId, tryResolveService } from '../context/index.js';
 
 /** 金样 authored 码真身（overlay 两行直指同一入口——双拓扑同一份源码） */
 const ECHO_ENTRY = realpathSync(fileURLToPath(new URL('./echo.ts', import.meta.url)));
@@ -104,9 +105,11 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
 
       // ③ 服务双通 + 异步收窄分叉（§1.7 同步面投影策略——文档化断言）：
       // main 域 get 返回真服务（echo 同步等值）；worker 域 get 返回 RPC stub
-      // （echo 调用即 Promise——方法调用过界，Promise 面唯一形态）
-      const mainTaps = runtime.ctx.get<MainTaps>('echo/taps-main');
-      const workerTaps = runtime.ctx.get<WorkerTaps>('echo/taps-worker');
+      // （echo 调用即 Promise——方法调用过界，Promise 面唯一形态）。
+      // 取法 = 按区读链（D3 装载分面分区：行挂 apps: [chat] → 服务落 chat
+      // 区表，root get 读链只查系统区表查不到——tryResolveService 带 zone）
+      const mainTaps = tryResolveService(runtime.ctx, appZoneId('chat'), 'echo/taps-main') as MainTaps;
+      const workerTaps = tryResolveService(runtime.ctx, appZoneId('chat'), 'echo/taps-worker') as WorkerTaps;
       expect(mainTaps.echo('v')).toBe('v');
       expect(workerTaps.echo('v')).toBeInstanceOf(Promise);
       await expect(workerTaps.echo('v')).resolves.toBe('v');
@@ -143,8 +146,9 @@ describe('Echo 金样双拓扑 parity（契约篇 §1.7）', () => {
       // 真作用域回卷的执行证据，非注册表遮蔽）
       const trace = mainTaps.trace();
       expect(trace[trace.length - 1]).toBe('down');
-      // 服务换新：重装载后 provide 物是全新对象（identity 分叉）
-      expect(runtime.ctx.get<MainTaps>('echo/taps-main')).not.toBe(mainTaps);
+      // 服务换新：重装载后 provide 物是全新对象（identity 分叉）。按区读链取
+      //（同 ③——D3 分区后 root get 不查应用区表）
+      expect(tryResolveService(runtime.ctx, appZoneId('chat'), 'echo/taps-main')).not.toBe(mainTaps);
       // worker 旧 RPC 代理随域收编不可达（端点 dispose 后调用即刻拒绝）
       await expect(workerTaps.echo('x')).rejects.toMatchObject({ code: BRIDGE_WORKER_EXITED });
       // 重装后双行工具仍可执行（双拓扑重装载收敛——含 main 行注册摘除/重注册）。

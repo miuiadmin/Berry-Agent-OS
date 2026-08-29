@@ -17,9 +17,15 @@
  * 应用经 ctx.get 不可达。
  */
 
-import { AppError, PROMPT_SECTION_DUPLICATE, PROMPT_SECTION_INVALID } from '../contracts/errors.js';
+import {
+  AppError,
+  COMPOSITION_ROW_INVALID,
+  PROMPT_SECTION_DUPLICATE,
+  PROMPT_SECTION_INVALID,
+} from '../contracts/errors.js';
 import type { Context, Disposer } from '../context/types.js';
-import type { PromptSection, PromptsService } from '../contracts/app.js';
+import { chainCaller } from '../context/chain.js';
+import type { PromptSection, PromptsService, RowAppProbe } from '../contracts/app.js';
 
 /** 具名段/服务面类型单一来源在 contracts（§1.2 注记④）——本文件实现之，再出口保持既有消费面 */
 export type { PromptSection, PromptsService } from '../contracts/app.js';
@@ -54,9 +60,18 @@ export interface HostPromptsRegistry {
  * 建段注册表并挂进 ctx（provide('prompts')）。组合根装配期调用一次；
  * 应用经 ctx.get('prompts') 取用（fork 共享注册表）。
  *
+ * @param opts.rowApp 行挂载目标探针（D3 注册面同族收口，契约篇 §5.1）：
+ *        app 行（apps 键在场）装载期调 registerSection 拒载——prompt 段全局
+ *        物化无域层，app 行注册即跨应用污染 systemPrompt；与 D1 skills/命令
+ *        拒载同律（caller 链行籍帧判行，COMPOSITION_ROW_INVALID）。缺省 =
+ *        无探针（单测面不拒——行投影是装配层事实）。
+ *
  * 返回值含宿主半边通道（host）——装配层注册宿主自留地段用；装载面只见 service。
  */
-export function registerPromptsService(ctx: Context): { service: PromptsService; host: HostPromptsRegistry } {
+export function registerPromptsService(
+  ctx: Context,
+  opts?: { readonly rowApp?: RowAppProbe },
+): { service: PromptsService; host: HostPromptsRegistry } {
   /** 段表：id → 定义（Map；物化时按 id 字典序取，与注册序无关） */
   const sections = new Map<string, PromptSection>();
 
@@ -102,6 +117,19 @@ export function registerPromptsService(ctx: Context): { service: PromptsService;
 
   const service: PromptsService = {
     registerSection(section) {
+      // app 行装载期拒载（D3 注册面同族收口，契约篇 §5.1）：caller 链行籍帧判行
+      // ——行挂应用（apps 键在场）即拒。prompt 段全局物化无域层（一切会话
+      // systemPrompt 同物化），app 行注册即跨应用污染；域层挂账 = 首个真实
+      // 第三方应用件需求。装载器 apply 期 ctx 注册走装载器帧，执法单点覆盖
+      const rowId = chainCaller();
+      const apps = rowId !== undefined ? opts?.rowApp?.get(rowId) : undefined;
+      if (apps !== undefined && apps.length > 0) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `提示词段注册被拒：行 ${rowId} 挂应用作用域（apps: ${apps.join('、')}）——应用行的 prompt 段注册 v1 裁死拒载` +
+            `（段全局物化进一切会话 systemPrompt、无域层，防跨应用污染；契约篇 §5.1 注册面同族收口）`,
+        );
+      }
       return addSection(section, 'app');
     },
 

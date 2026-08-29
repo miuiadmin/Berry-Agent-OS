@@ -57,6 +57,7 @@ function formatAppRow(row: AppStatusRow): string {
 /**
  * /reload 三面结果统一通知（queued / error / payload——组合根 reload 语义直译，
  * 壳只转述不解释；error 面附「原组合仍在运行」——预检后装的设计保证，见 §1.3 落码形态）。
+ * payload.app 在场 = 单区重载（D3 per-app reload）——文案带目标应用与卸词集警示。
  */
 function notifyReloadResult(ui: UiService, result: ReloadResult): void {
   if (result.queued === true) {
@@ -70,11 +71,16 @@ function notifyReloadResult(ui: UiService, result: ReloadResult): void {
   }
   const payload = result.payload;
   if (payload === undefined) return; // 三面互斥完备，此处不可达——类型收窄守卫
-  const parts = [`激活 ${payload.activated.length}`];
+  const scope = payload.app !== undefined ? `应用 ${payload.app} 单区` : '组合';
+  const parts = [`${scope}激活 ${payload.activated.length}`];
   // 失败行点名（id 级）——与 boot 期拒启清单同信息量；跳过行通常多（禁用面）不点名
   if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
   parts.push(`跳过 ${payload.skipped.length}`);
-  ui.notify(`组合已重载：${parts.join('，')}`);
+  // 卸词集警示（D3 契约篇 §5.1 块尾）：重装即回、改名即旧词永失——差集如实点名
+  if (payload.droppedEvents !== undefined && payload.droppedEvents.length > 0) {
+    parts.push(`警示：事件词消失 ${payload.droppedEvents.join('、')}（重装即回；改名即旧词永失）`);
+  }
+  ui.notify(`已重载：${parts.join('，')}`);
 }
 
 /** 字节数 → 人读体积（KiB/MiB 两档——inspect 报告的数据域体积行） */
@@ -232,7 +238,7 @@ export interface BuiltinCommandsOptions {
   /** 应用管理服务（/apps 清单与 install/toggle/update——对账逻辑全在服务，壳只转述） */
   readonly appsService: AppsService;
   /** 组合树重载（/reload 主体——组合根闭包；装配动作不进壳面） */
-  readonly reload: () => Promise<ReloadResult>;
+  readonly reload: (app?: string) => Promise<ReloadResult>;
   /** 用量面板取数（/usage——投影本体在 usage.ts，组合根闭包绑库连接；壳只转述） */
   readonly usage: () => string;
 }
@@ -608,9 +614,13 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
     }),
     commands.register({
       name: 'reload',
-      description: '重载组合树（overlay / 应用代码改动后生效）',
-      handler: async () => {
-        notifyReloadResult(ui, await opts.reload());
+      description: '重载组合树（overlay / 应用代码改动后生效；--app <id> 只重载该应用的挂载行）',
+      handler: async (args) => {
+        // --app 旗标（D3 per-app reload，契约篇 §1.3 动词面）：单区重载目标应用
+        // ——换 A 应用第三方挂载行不动 B 运行时。未知/不在册校验在组合根单点
+        //（在册清单真源在那里），壳只透传 + 报错转述
+        const { flags } = parseFlagArgs(args ?? '');
+        notifyReloadResult(ui, await opts.reload(flags['app']));
       },
     }),
   );

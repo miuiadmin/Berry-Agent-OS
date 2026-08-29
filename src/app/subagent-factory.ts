@@ -61,11 +61,13 @@ export interface SubagentFactoryDeps {
   readonly rootCtx: ContextScope;
   /**
    * 守门行传导判据（2026-08-27 第三十一批 P1-4——骨架篇 §6.1「守门行传导 +
-   * context 腿」条）：`anchors` = 应用装载锚的 owner **完整前缀集**（`'app:apps:'`
-   * 形——装配层从 fork 起名处构造，静态两锚）；`mainRows` = main 应用行 id 集
-   * **活取**（每次委派取一次 = 委托时点快照；worker 行排除——桥转发器是 emit
-   * 签名形态，进 waterfall 不调 next 即吞链）。固定行（owner = 根名）无锚前缀
-   * 结构性排除——子代理审批 never 无人值守语义不被根面交互审批冒破。
+   * context 腿」条；2026-08-29 D3 分区后判据改末段）：`anchors` = 应用装载锚的
+   * owner **前缀粗滤集**（`'app:apps:'`/`'app:ring1:'` 形——区化锚名带区段，
+   * 前缀只判挂载面归属）；`mainRows` = main 应用行 id 集**活取**（每次委派取
+   * 一次 = 委托时点快照；worker 行排除——桥转发器是 emit 签名形态，进
+   * waterfall 不调 next 即吞链）。行 id = owner 末段（行作用域 fork name =
+   * 行 id）。固定行（owner = 根名）无锚前缀结构性排除——子代理审批 never
+   * 无人值守语义不被根面交互审批冒破。
    */
   readonly gateRowFilter: {
     readonly anchors: readonly string[];
@@ -197,8 +199,11 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
       const { anchors, mainRows } = deps.gateRowFilter;
       for (const event of [TOOL_PRE_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT] as const) {
         const entries = snapshotHandlers(deps.rootCtx, event).filter((entry) => {
-          const anchor = anchors.find((prefix) => entry.owner.startsWith(prefix));
-          return anchor !== undefined && mainRows().has(entry.owner.slice(anchor.length));
+          // 行 id 取 owner **末段**（行作用域 fork name = 行 id，loader 恒态）：D3
+          // 装载分面分区后锚名带区段（'app:apps:app:chat:<行id>' 形），前缀 slice
+          // 会错位；末段判据对 ring1/系统区/应用区三形锚统一成立
+          if (!anchors.some((prefix) => entry.owner.startsWith(prefix))) return false;
+          return mainRows().has(entry.owner.slice(entry.owner.lastIndexOf(':') + 1));
         });
         if (entries.length > 0) appendHandlers(childCtx, event, entries);
       }

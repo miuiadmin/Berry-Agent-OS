@@ -68,10 +68,17 @@ export interface ConfigureReportView {
   readonly message: string;
 }
 
-/** 重载回执三态的结构子集（ReloadOutcome 本地收窄——tagged union 保形） */
+/** 重载回执三态的结构子集（ReloadOutcome 本地收窄——tagged union 保形；done 腿含 D3 单区两可选面） */
 export type ReloadOutcomeView =
   | { readonly status: 'queued' }
-  | { readonly status: 'done'; readonly failed: readonly string[] }
+  | {
+      readonly status: 'done';
+      readonly failed: readonly string[];
+      /** 单区 reload 目标应用（D3——缺席 = 全量） */
+      readonly app?: string;
+      /** 卸词集警示（D3——该区旧词 ∖ 新词） */
+      readonly droppedEvents?: readonly string[];
+    }
   | { readonly status: 'error'; readonly message: string };
 
 /** uninstall inspect 报告的结构子集（UninstallReport 本地收窄——D2 键域 = 装机 id） */
@@ -124,7 +131,7 @@ export interface AppsManageFace {
   ): Promise<MountReportView>;
   unmount(rowId: string): Promise<UnmountReportView>;
   configure(id: string, patch: Readonly<Record<string, unknown>>): Promise<ConfigureReportView>;
-  requestReload(): Promise<ReloadOutcomeView>;
+  requestReload(opts?: { readonly app?: string }): Promise<ReloadOutcomeView>;
   uninstall(id: string, opts: { readonly mode: 'inspect' }): Promise<UninstallReportView>;
 }
 
@@ -447,32 +454,48 @@ export function createAppsReloadTool(apps: AppsManageFace, approval: ApprovalAsk
   return {
     name: 'apps_reload',
     description:
-      '请求热重载组合树（卸载半边回卷 → 重读 overlay → 重装）。run 进行中不拒——排队，本次 run 结算后自动执行。install/update/toggle/configure 的生效尾步。需审批（sandbox_permissions + justification 必填）。',
-    parameters: Type.Object({ ...pairParameters() }),
+      '请求热重载组合树（卸载半边回卷 → 重读 overlay → 重装）。app 参数 = 单区重载（只动该应用第三方挂载行，他应用运行时不换；缺席 = 全量）。run 进行中不拒——排队，本次 run 结算后自动执行。install/update/toggle/configure 的生效尾步。需审批（sandbox_permissions + justification 必填）。',
+    parameters: Type.Object({
+      ...pairParameters(),
+      /** 单区 reload 目标应用（D3 per-app reload——缺席 = 全量） */
+      app: Type.Optional(
+        Type.String({ description: '单区重载目标应用 id（只动该应用的第三方挂载行；省略 = 全量重载）' }),
+      ),
+    }),
     effect: 'write',
     async execute(args, tctx): Promise<AgentToolResult> {
-      const req = args as { sandbox_permissions: string; justification: string };
+      const req = args as { sandbox_permissions: string; justification: string; app?: string };
       const denied = await requestLifecycleApproval(approval, {
         toolName: 'apps_reload',
         action: 'apps_reload',
-        detail: '热重载应用组合树（全部应用卸载重装）',
+        detail:
+          req.app !== undefined
+            ? `热重载应用 ${req.app} 的挂载行（单区——他应用运行时不换）`
+            : '热重载应用组合树（全部应用卸载重装）',
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
       });
       if (denied !== undefined) return denied;
-      const outcome = await apps.requestReload();
+      const outcome = await apps.requestReload(req.app !== undefined ? { app: req.app } : undefined);
       switch (outcome.status) {
         case 'queued':
           return textResult(
             '已排队：当前有 run 在跑，本次 run 结算后自动执行重载（连发合并为一次），结果经通知送达——无需再次请求。',
           );
-        case 'done':
+        case 'done': {
+          // 单区两腿进回执（D3）：目标应用 + 卸词集警示（词消失按词表三档 unknown 档处理）
+          const scope = outcome.app !== undefined ? `应用 ${outcome.app} 单区` : '全量';
+          const dropped =
+            outcome.droppedEvents !== undefined && outcome.droppedEvents.length > 0
+              ? `\n警示：${scope}重载后事件词消失——${outcome.droppedEvents.join('、')}（重装即回；改名即旧词永失，消费方按 unknown 档处理）。`
+              : '';
           return textResult(
             outcome.failed.length > 0
-              ? `重载完成，但有失败行：${outcome.failed.join('、')}（进程存活、旧注册已回卷——用 apps_list 看逐行原因，修 overlay 后再 apps_reload）`
-              : '重载完成：组合树已按最新 overlay 装载（结果详见 composition/reloaded 事件）。',
+              ? `${scope}重载完成，但有失败行：${outcome.failed.join('、')}（进程存活、旧注册已回卷——用 apps_list 看逐行原因，修 overlay 后再 apps_reload）${dropped}`
+              : `${scope}重载完成：组合树已按最新 overlay 装载（结果详见 composition/reloaded 事件）。${dropped}`,
           );
+        }
         case 'error':
           return {
             content: [{ type: 'text', text: `重载失败：${outcome.message}\n旧装配未动仍在运行——修 overlay 后重试。` }],

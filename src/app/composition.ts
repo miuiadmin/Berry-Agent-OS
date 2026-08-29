@@ -628,7 +628,9 @@ export function loadComposition(
   for (const row of rows) {
     const skip = resolveSkip(row.disabled);
     if (skip) {
-      plan.push({ id: row.id, skip }); // 禁用行不解析入口——不要求应用已装（挂载休眠精神）
+      // 禁用行不解析入口——不要求应用已装（挂载休眠精神）；apps 照透传（单区
+      // reload 重发 skipped 行需要分区归属——分区判据按行原貌不按激活态）
+      plan.push({ id: row.id, skip, ...(row.apps !== undefined ? { apps: row.apps } : {}) });
       continue;
     }
     const ref = row.pkg;
@@ -664,6 +666,7 @@ export function loadComposition(
           pkg: ref,
           builtin: module,
           ...(row.config !== undefined ? { config: row.config } : {}),
+          ...(row.apps !== undefined ? { apps: row.apps } : {}),
         });
       }
       continue;
@@ -681,9 +684,64 @@ export function loadComposition(
           }),
       ...(row.config !== undefined ? { config: row.config } : {}),
       ...(row.sandbox !== undefined ? { sandbox: row.sandbox } : {}),
+      ...(row.apps !== undefined ? { apps: row.apps } : {}),
     });
   }
   return { rows, plan };
+}
+
+/* ---------------- 装载计划分区（D3 装载分面分区，契约篇 §5.1，2026-08-29） ---------------- */
+
+/**
+ * 装载计划分区产物（纯函数产物——boot 与全量 /reload 两时点同构调用）：
+ * 分区对象 = 合成后装载计划行（mergeRows 产物投影），判据两步——先剔 Ring 1
+ * 必备行（独立维持现状：boot 装载于 ring1Anchor 生效不回卷），再按 apps 键归区。
+ */
+export interface PlanPartition {
+  /** Ring 1 必备行（装载于 ring1Anchor——/reload 不动，维持现状非本结构属地） */
+  ring1: AppPlanRow[];
+  /**
+   * 系统区行：apps 缺席（官方默认层行/官方替换行）∪ apps 多元素（跨区行——
+   * effect 链挂 apps:system 锚随系统相位装载恰一次，provide 扇出各区表，
+   * 契约篇 §5.1 跨区行装载律①）
+   */
+  system: AppPlanRow[];
+  /**
+   * 应用 id 清单（**字典序**——装载序契约面：系统区先行收口后，各应用区依
+   * 在册清单 id 字典序串行装载；序仅定日志序，区际零依赖故无正确性约束）
+   */
+  appIds: string[];
+  /** 应用区行表（键 = 应用 id；行 = apps 恰 [该 app] 的独占行——「该区行」谓词） */
+  zoneRows: ReadonlyMap<string, AppPlanRow[]>;
+}
+
+/**
+ * 装载计划分区（D3 纯函数——组合树合成产物 → 装载分区，无副作用可重复调用）。
+ * apps 空数组在合成期 validateApps 已拒（零语义键值不落盘），此处不重复执法。
+ */
+export function partitionPlan(plan: readonly AppPlanRow[]): PlanPartition {
+  const ring1: AppPlanRow[] = [];
+  const system: AppPlanRow[] = [];
+  const zoneRows = new Map<string, AppPlanRow[]>();
+  for (const row of plan) {
+    if (RING1_REQUIRED_ROW_IDS.includes(row.id)) {
+      // 第一步：剔 Ring 1 必备行——独立装载锚独立生命周期，不进分区账
+      ring1.push(row);
+      continue;
+    }
+    const apps = row.apps;
+    if (apps === undefined || apps.length > 1) {
+      // 缺席 = 系统区行；多元素 = 跨区行（挂系统相位——装载律①）
+      system.push(row);
+      continue;
+    }
+    // 恰一元素 = 该应用区独占行（「该区行」谓词——单区 reload 四集合的判定源）
+    const appId = apps[0]!;
+    const bucket = zoneRows.get(appId);
+    if (bucket === undefined) zoneRows.set(appId, [row]);
+    else bucket.push(row);
+  }
+  return { ring1, system, appIds: [...zoneRows.keys()].sort(), zoneRows };
 }
 
 /** 目录服务（ctx.paths，契约篇 §1.5 表）——pi-11：应用不猜宿主路径 */

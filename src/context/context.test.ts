@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { AppError } from '../contracts/errors.js';
 import type { AppContext } from '../contracts/app.js';
-import { createContext, eventDispatchStats, registerLiveEvent } from './context.js';
+import { createContext, eventDispatchStats, registerLiveEvent, tryResolveService } from './context.js';
 import { createLogger } from './logger.js';
 import type { Context, ContextScope } from './types.js';
 
@@ -746,5 +746,212 @@ describe('注册计数帽（§1.6 资源护栏族 #9，2026-08-27 刀〇b）', (
     } catch (err) {
       expect((err as AppError).code).toBe('CONTEXT_EFFECT_LIMIT');
     }
+  });
+});
+
+/* ================================================================== */
+/* D3 装载分面分区——服务三分表（契约篇 §5.1 装载分面分区块，2026-08-29）：
+ * 根表/系统区表/应用区表 + 读链（本区→系统→根）+ 撞名域矩阵
+ * （根×系统互斥、应用区异域并存）+ 跨区行 provideZones 扇出。           */
+/* ================================================================== */
+describe('服务分区表：读链三形（契约篇 §5.1 tryGet 解析序）', () => {
+  it('应用区作用域：本区表 → 系统区表 → 根表逐级命中；三表同名本区优先（遮蔽由读链承载）', () => {
+    const root = silentRoot();
+    // 宿主根面 provide（官方名位单段名）：根表
+    root.provide('llm', 'root-llm');
+    root.provide('sessions', 'root-sessions');
+    // 系统区行（官方名位）：fork zone='system'——根×系统同碰撞域，只提供自有词
+    const systemRow = root.fork({ name: 'sysrow', builtinRow: true, zone: 'system' });
+    systemRow.provide('exec', 'system-exec');
+    systemRow.provide('sysrun', 'system-own');
+    // 应用区行（官方名位替换形——单段名遮蔽测试）：fork zone='app:acme'
+    const appRow = root.fork({ name: 'approw', builtinRow: true, zone: 'app:acme' });
+    appRow.provide('sessions', 'app-sessions-遮蔽两级');
+    appRow.provide('exec', 'app-exec-遮蔽系统区');
+
+    // 应用区读链：本区 > 系统区 > 根
+    expect(appRow.tryGet('sessions')).toBe('app-sessions-遮蔽两级');
+    expect(appRow.tryGet('exec')).toBe('app-exec-遮蔽系统区');
+    expect(appRow.tryGet('llm')).toBe('root-llm'); // 两级缺席 → 根表
+    // 系统区读链：系统区 > 根（根词不遭系统区遮蔽——同碰撞域互斥；不见任何应用区表）
+    expect(systemRow.tryGet('exec')).toBe('system-exec');
+    expect(systemRow.tryGet('sysrun')).toBe('system-own');
+    expect(systemRow.tryGet('sessions')).toBe('root-sessions');
+    expect(systemRow.tryGet('llm')).toBe('root-llm');
+    // 宿主根面读链：根 > 系统区（宿主基础设施消费系统区服务的兼容腿）
+    expect(root.tryGet('sessions')).toBe('root-sessions');
+    expect(root.tryGet('exec')).toBe('system-exec');
+    expect(root.tryGet('sysrun')).toBe('system-own');
+    // 宿主根面不见应用区表（应用区服务对根面不可见）
+    expect(root.tryGet('sessions')).not.toBe('app-sessions-遮蔽两级');
+  });
+
+  it('跨应用可见性：A 区查 B 区表由同一解析序视同缺失（undefined）；系统区行 inject 应用区服务同承载', () => {
+    const root = silentRoot();
+    const rowA = root.fork({ name: 'rowa', rowId: 'row-a', builtinRow: false, zone: 'app:acme' });
+    rowA.provide('acme/store', 'A 值');
+    const rowB = root.fork({ name: 'rowb', rowId: 'row-b', builtinRow: false, zone: 'app:beta' });
+    rowB.provide('beta/store', 'B 值');
+
+    expect(rowA.tryGet('beta/store')).toBeUndefined(); // 跨应用视同缺失
+    expect(rowB.tryGet('acme/store')).toBeUndefined();
+    expect(rowA.tryGet('acme/store')).toBe('A 值'); // 本区照常
+    // 系统区行查应用区服务 = 反向视同缺失
+    const systemRow = root.fork({ name: 'sysrow', builtinRow: true, zone: 'system' });
+    expect(systemRow.tryGet('acme/store')).toBeUndefined();
+  });
+
+  it('区身份 fork 级联：应用行内再 fork 保持区归属（读链不变）；扇出面同继承', () => {
+    const root = silentRoot();
+    root.provide('llm', 'root-llm');
+    const appRow = root.fork({ name: 'approw', rowId: 'row-a', builtinRow: false, zone: 'app:acme' });
+    const inner = appRow.fork({ name: 'inner' }); // 应用代码内 fork：不传 zone
+    inner.provide('acme/inner', '内层值');
+    expect(inner.tryGet('llm')).toBe('root-llm'); // 读链级联：本区→系统→根
+    expect(appRow.tryGet('acme/inner')).toBe('内层值'); // 写入落本区表（同区父作用域可见）
+  });
+});
+
+describe('服务分区表：撞名域矩阵（CONTEXT_SERVICE_EXISTS 执法）', () => {
+  it('根表 × 系统区表 = 同碰撞域互斥：系统区行撞宿主词拒；反向（先系统后根）同拒', () => {
+    const root = silentRoot();
+    root.provide('llm', '宿主先注册');
+    const systemRow = root.fork({ name: 'sysrow', builtinRow: true, zone: 'system' });
+    expect(() => systemRow.provide('llm', '系统区后撞')).toThrowError(AppError);
+    try {
+      systemRow.provide('llm', 'x');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_SERVICE_EXISTS');
+    }
+    // 反向：系统区先 provide，宿主根面后 provide 同名 → 同域互斥照拒
+    const root2 = silentRoot();
+    const sys2 = root2.fork({ name: 'sys2', builtinRow: true, zone: 'system' });
+    sys2.provide('exec', '系统区先注册');
+    try {
+      root2.provide('exec', '宿主后撞');
+      expect.unreachable('根×系统同碰撞域应双向互斥');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_SERVICE_EXISTS');
+    }
+  });
+
+  it('系统区 × 应用区 = 异域并存合法：应用区同名单段词遮蔽系统区词（本区读链优先），不拒', () => {
+    const root = silentRoot();
+    const systemRow = root.fork({ name: 'sysrow', builtinRow: true, zone: 'system' });
+    systemRow.provide('exec', '系统区实现');
+    // 官方名位替换行挂应用区（单段名合法——行籍官方）：同名异域并存
+    const appRow = root.fork({ name: 'approw', builtinRow: true, zone: 'app:acme' });
+    expect(() => appRow.provide('exec', '应用区替换实现')).not.toThrow();
+    expect(appRow.tryGet('exec')).toBe('应用区替换实现'); // 本区优先
+    expect(systemRow.tryGet('exec')).toBe('系统区实现'); // 系统区不受遮蔽影响
+    expect(root.tryGet('exec')).toBe('系统区实现'); // 宿主面走根→系统链
+  });
+
+  it('应用区 × 应用区（异表）= 异域并存合法；同表内两行同名 = 拒', () => {
+    const root = silentRoot();
+    const rowA1 = root.fork({ name: 'a1', rowId: 'row-a1', builtinRow: false, zone: 'app:acme' });
+    rowA1.provide('acme/store', 'A1 值');
+    const rowB = root.fork({ name: 'b', rowId: 'row-b', builtinRow: false, zone: 'app:beta' });
+    expect(() => rowB.provide('acme/store', 'B 区同名')).not.toThrow(); // 异表并存
+    // 同表（app:acme）另一行同名 → 同碰撞域拒绝
+    const rowA2 = root.fork({ name: 'a2', rowId: 'row-a2', builtinRow: false, zone: 'app:acme' });
+    expect(() => rowA2.provide('acme/store', 'A2 撞 A1')).toThrowError(AppError);
+    try {
+      rowA2.provide('acme/store', 'x');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_SERVICE_EXISTS');
+    }
+  });
+});
+
+describe('服务分区表：跨区行 provideZones 扇出（装载律①——同键多表写入面）', () => {
+  it('跨区行（zone=system 读链 + provideZones 两应用区）：一值各归各区表；两区各自本区可见', () => {
+    const root = silentRoot();
+    // 跨区行：apps=['acme','beta'] → 读链 zone='system'（装载律③：inject 值域=根∪系统）、
+    // 扇出 provideZones=['app:acme','app:beta']（装载律①：同键写各区表）
+    const sharedRow = root.fork({
+      name: 'shared',
+      rowId: 'row-shared',
+      builtinRow: false,
+      zone: 'system',
+      provideZones: ['app:acme', 'app:beta'],
+    });
+    sharedRow.provide('shared/kit', '共享件值');
+
+    const rowA = root.fork({ name: 'a', rowId: 'row-a', builtinRow: false, zone: 'app:acme' });
+    const rowB = root.fork({ name: 'b', rowId: 'row-b', builtinRow: false, zone: 'app:beta' });
+    expect(rowA.tryGet('shared/kit')).toBe('共享件值'); // 写进 A 区表
+    expect(rowB.tryGet('shared/kit')).toBe('共享件值'); // 写进 B 区表
+    // 跨区行自身读链（system→根）：扇出面不回流系统区表——自己看不见自己的扇出
+    expect(sharedRow.tryGet('shared/kit')).toBeUndefined();
+    // 宿主面/系统区行同样不可见（服务只归各区）
+    expect(root.tryGet('shared/kit')).toBeUndefined();
+  });
+
+  it('扇出撞名：任一目标表已有同名 → 整笔拒绝（原子性——不写半套）', () => {
+    const root = silentRoot();
+    const rowA = root.fork({ name: 'a', rowId: 'row-a', builtinRow: false, zone: 'app:acme' });
+    rowA.provide('shared/kit', 'A 区已有');
+    const sharedRow = root.fork({
+      name: 'shared',
+      rowId: 'row-shared',
+      builtinRow: false,
+      zone: 'system',
+      provideZones: ['app:acme', 'app:beta'],
+    });
+    expect(() => sharedRow.provide('shared/kit', '扇出撞 A')).toThrowError(AppError);
+    // B 区未被写入半套（拒绝时 B 表保持缺席）
+    const rowB = root.fork({ name: 'b', rowId: 'row-b', builtinRow: false, zone: 'app:beta' });
+    expect(rowB.tryGet('shared/kit')).toBeUndefined();
+    expect(rowA.tryGet('shared/kit')).toBe('A 区已有'); // A 区原值未被覆盖
+  });
+
+  it('扇出注销：disposer/作用域回卷两表齐清，空区表摘键', async () => {
+    const root = silentRoot();
+    const sharedRow = root.fork({
+      name: 'shared',
+      rowId: 'row-shared',
+      builtinRow: false,
+      zone: 'system',
+      provideZones: ['app:acme', 'app:beta'],
+    });
+    const disposer = sharedRow.provide('shared/kit', '共享件值');
+    const rowA = root.fork({ name: 'a', rowId: 'row-a', builtinRow: false, zone: 'app:acme' });
+    const rowB = root.fork({ name: 'b', rowId: 'row-b', builtinRow: false, zone: 'app:beta' });
+    expect(rowA.tryGet('shared/kit')).toBe('共享件值');
+    disposer(); // 手动注销
+    expect(rowA.tryGet('shared/kit')).toBeUndefined();
+    expect(rowB.tryGet('shared/kit')).toBeUndefined();
+    // 作用域回卷路径：重注册后 dispose 锚
+    sharedRow.provide('shared/kit', '再注册');
+    expect(rowB.tryGet('shared/kit')).toBe('再注册');
+    await sharedRow.dispose();
+    expect(rowA.tryGet('shared/kit')).toBeUndefined();
+    expect(rowB.tryGet('shared/kit')).toBeUndefined();
+  });
+});
+
+describe('服务分区表：宿主侧 tryResolveService 出口（装载器 Kahn 轮次探值域）', () => {
+  it('按行区身份解析——app 行 inject 只能命中本区→系统→根；跨区行（zone=system）不命中应用区表', () => {
+    const root = silentRoot();
+    root.provide('llm', 'root-llm');
+    const systemRow = root.fork({ name: 'sysrow', builtinRow: true, zone: 'system' });
+    systemRow.provide('exec', 'system-exec');
+    const rowA = root.fork({ name: 'a', rowId: 'row-a', builtinRow: false, zone: 'app:acme' });
+    rowA.provide('acme/store', 'A 值');
+
+    // app:acme 行视角：本区命中
+    expect(tryResolveService(root, 'app:acme', 'acme/store')).toBe('A 值');
+    // 系统区/根表照常可达
+    expect(tryResolveService(root, 'app:acme', 'exec')).toBe('system-exec');
+    expect(tryResolveService(root, 'app:acme', 'llm')).toBe('root-llm');
+    // B 区词对 A 行视同缺失（跨应用）
+    expect(tryResolveService(root, 'app:acme', 'beta/store')).toBeUndefined();
+    // 跨区行视角（zone='system'）：应用区表不可达——装载律③值域收窄
+    expect(tryResolveService(root, 'system', 'acme/store')).toBeUndefined();
+    expect(tryResolveService(root, 'system', 'llm')).toBe('root-llm');
+    // 宿主面视角（undefined）：根→系统
+    expect(tryResolveService(root, undefined, 'exec')).toBe('system-exec');
+    expect(tryResolveService(root, undefined, 'acme/store')).toBeUndefined();
   });
 });
