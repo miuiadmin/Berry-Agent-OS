@@ -56,6 +56,21 @@ export function deriveWritableRoots(workspace: string, mode: SandboxMode): strin
   return [...new Set([workspace, '/tmp', tmpdir()].map(canonicalPath))];
 }
 
+/**
+ * external 域（fork 进程载体）的 PM 写白名单**执法基线**变体（契约篇 §1.7
+ * 第三十七批增补 4——与 deriveWritableRoots 同族新变体）：workspace ∪ 该行
+ * 件数据根（`<dataDir>/apps/<行id>`）。与 workspace-write 档的两点刻意差异：
+ * - **不含 /tmp 族**（本批裁定）：全域 tmp 是跨域共享写面——external 分域
+ *   语义下给全域 tmp = 域间互见互毁。tmp 需求经子进程 TMPDIR 指向件数据根
+ *   内的 per-域子目录（装配面预建——落基线内零新增根，痕迹随行清算）；
+ * - 件数据根进基线：external 域的件自有数据（应用清单数据域双键三桶）是
+ *   装载承诺的写面——宿主推导恒为执法基线（「单 fence 在能力出口」+
+ *   「grants 只收窄不放大」两律同源），应用声明只能在此之上收窄。
+ */
+export function externalWritableRoots(workspace: string, appDataDir: string): string[] {
+  return [...new Set([workspace, appDataDir].map(canonicalPath))];
+}
+
 /** child 是否位于 root 内（相等或隔分隔符的前缀，防 /root 与 /root-evil 误判；
  * 根为文件系统根 sep（danger-full-access 的全盘根）时任意绝对路径皆命中） */
 export function isInsideRoot(child: string, root: string): boolean {

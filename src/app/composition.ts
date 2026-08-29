@@ -307,7 +307,9 @@ function isValidDisabled(value: unknown): boolean {
  *   fail-closed 拒载但行 schema 可声明，过渡冻结见第三十七批增补 2b）；
  * - net 子键声明即拒（v1 无 net 执法基线——收了不执行的声明 = 宣示与现实脱节，
  *   闩二推论拒绝式）；
- * - fs/caps v1 只校验纯对象形状（深层形态随 carrier 落码批定）；
+ * - fs 子键 external carrier 落码批定形 `{writableRoots?: string[]}`（形状在此
+ *   校验；与宿主基线交集的闩二执法在装载消费面——spawn 期推导基线后拒绝式）；
+ * - caps v1 只校验纯对象形状（执法面挂账随首个真实消费者）；
  * - 未知子键/半块（缺 carrier）= 机器拒；
  * - builtin 行（pkg 带 `builtin:` 前缀）声明块（任何 carrier）= 拒——官方随包件
  *   恒 main 域，第一执法点（加载器第二执法点防御性同语义）。
@@ -340,11 +342,32 @@ function validateSandbox(raw: unknown, pkg: string | undefined, where: string): 
     );
   }
   const fs = record['fs'];
-  if (fs !== undefined && (typeof fs !== 'object' || fs === null || Array.isArray(fs))) {
-    throw new AppError(
-      COMPOSITION_ROW_INVALID,
-      `${where}：sandbox.fs 必须是对象（深层形态随 carrier 落码批定，v1 只校验形状）`,
-    );
+  if (fs !== undefined) {
+    if (typeof fs !== 'object' || fs === null || Array.isArray(fs)) {
+      throw new AppError(COMPOSITION_ROW_INVALID, `${where}：sandbox.fs 必须是对象`);
+    }
+    const fsKeys = Object.keys(fs as Record<string, unknown>);
+    // 子键白名单（external carrier 落码批定形）：只收 writableRoots——
+    // 未知子键拒绝式与块级同纪律
+    for (const key of fsKeys) {
+      if (key !== 'writableRoots') {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `${where}：sandbox.fs 未知子键「${key}」（允许子键：writableRoots——external carrier 落码批定形）`,
+        );
+      }
+    }
+    const roots = (fs as Record<string, unknown>)['writableRoots'];
+    if (roots !== undefined) {
+      // 每元素非空字符串（绝对路径与基线交集在装载消费面执法——闩二拒绝式；
+      // 此处只管形状：数组 + 元素非空字符串）
+      if (!Array.isArray(roots) || roots.some((r) => typeof r !== 'string' || r === '')) {
+        throw new AppError(
+          COMPOSITION_ROW_INVALID,
+          `${where}：sandbox.fs.writableRoots 必须是非空字符串数组（绝对路径声明，装载期与宿主基线交集）`,
+        );
+      }
+    }
   }
   const caps = record['caps'];
   if (caps !== undefined && (typeof caps !== 'object' || caps === null || Array.isArray(caps))) {

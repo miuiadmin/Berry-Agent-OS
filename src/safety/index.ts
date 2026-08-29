@@ -19,6 +19,8 @@ export type { CarveOutEntry, CarveOutNode, WritabilityVerdict } from './roots.js
 export {
   canonicalPath,
   deriveWritableRoots,
+  externalWritableRoots,
+  isInsideRoot,
   expandCarveOutEntry,
   buildCarveOutTable,
   resolveWritability,
@@ -56,6 +58,9 @@ export {
 /* 平台后端（骨架篇 §7.2：Seatbelt 首发 / bwrap 其次） */
 export { seatbeltReadOnlyProfile, seatbeltProfile, createSeatbeltBackend } from './seatbelt.js';
 export { bwrapArgs, createBwrapBackend } from './bwrap.js';
+
+/* Node PM 中层旗推导器（契约篇 §1.7 external 载体——external carrier 落码批） */
+export { derivePmFlags } from './pm-flags.js';
 
 /* 审批服务（骨架篇 §8.3） */
 export type {

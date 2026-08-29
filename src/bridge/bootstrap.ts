@@ -34,9 +34,153 @@ import type { WorkerModuleMeta, WorkerRowLoader } from '../context/loader.js';
 import { BridgeEndpoint } from './session.js';
 
 /** 宿主侧行绑定（worker 行激活期间的宿主侧锚点——onTell/emit 后期消费） */
-interface RowBinding {
+export interface RowBinding {
   /** 行作用域（fork 产物——provide/on/emit 落点，随作用域回卷自动收） */
   readonly scope: ContextScope;
+}
+
+/**
+ * 六宿主处理方的共享装配目标（external carrier 落码批抽取——「不换协议
+ * 只换 carrier」的宿主半：worker 线程域与 fork 进程域两 spawn **同一套**
+ * 处理方与行绑定簿记，spawn 形态差异（Worker vs child_process、IPC vs
+ * NDJSON）不外溢到翻译层）。bindings/metaCache 是 per-domain 状态——由
+ * 各 spawn 构造后传入，本函数只接线。
+ */
+export interface HostHandlersTarget {
+  /** 宿主端点（处理方挂载面） */
+  readonly endpoint: BridgeEndpoint;
+  /** 域标识（toolCallId 前缀 / 诊断归因） */
+  readonly workerId: string;
+  /** 行绑定簿（applyRow 登记、行作用域回卷时清——onTell/emit 的行锚点） */
+  readonly bindings: Map<string, RowBinding>;
+  /** load 缓存（applyRow 取 optionalInject 快照用；load→apply 之间必持） */
+  readonly metaCache: Map<string, WorkerModuleMeta>;
+  /** tool-run 的调用序号（toolCallId 生成——桥接调用也要可归因可审计） */
+  toolRunSeq: number;
+  /** 应用锚作用域（svc-invoke 的服务解析源） */
+  readonly root: ContextScope;
+  /** 工具服务（缺省懒解析 root 的 'tools'——装载序晚期行友好） */
+  readonly tools?: ToolsService;
+}
+
+/**
+ * 注册六宿主处理方（svc-register / sub / emit / tools-register / svc-invoke /
+ * tool-run——两载体共用，翻译纪律见本文件头注，与 worker.ts 桩一一对应）。
+ */
+export function registerHostHandlers(t: HostHandlersTarget): void {
+  /**
+   * 工具服务解析：显式注入优先，缺省懒解析 root 的 'tools' 服务（调用时点解析
+   * 而非捕获时点——Ring 1 装载序里工具行可能晚于 worker 行激活，boot 期捕获会
+   * 拿到 undefined 假裁剪形态；服务集两时点恒定不变式下运行期解析恒定）。
+   */
+  const resolveTools = (): ToolsService | undefined => t.tools ?? t.root.tryGet<ToolsService>('tools');
+
+  const requireBinding = (rowId: string, surface: string): RowBinding => {
+    const binding = t.bindings.get(rowId);
+    if (binding === undefined) {
+      throw new AppError(APP_LOAD_FAILED, `${surface}：行 ${rowId} 无宿主绑定（apply 未先行或已回卷）`);
+    }
+    return binding;
+  };
+
+  t.endpoint
+    /* 域行 provide：宿主侧挂行作用域（main 域消费方拿方法转发代理——
+     * thenable 陷阱防护见 makeWorkerServiceProxy；服务值面/同步 getter 不
+     * 过界，v1 收窄：分域行提供的服务是异步方法面） */
+    .handle('host', 'svc-register', ([rowIdArg, nameArg]) => {
+      const rowId = String(rowIdArg);
+      const binding = requireBinding(rowId, 'svc-register');
+      binding.scope.provide(String(nameArg), makeWorkerServiceProxy(t.endpoint, rowId, String(nameArg)));
+    })
+    /* 域行订阅：行作用域 on + 转发器（args 过界 tell 回投域分派） */
+    .handle('host', 'sub', ([rowIdArg, eventArg]) => {
+      const binding = requireBinding(String(rowIdArg), 'sub');
+      binding.scope.on(String(eventArg), (...args: unknown[]) => {
+        t.endpoint.tell('evt', { rowId: String(rowIdArg), event: String(eventArg), args });
+      });
+    })
+    /* 域行 emit：走宿主行作用域 emit（per-scope 限流单点） */
+    .handle('host', 'emit', ([rowIdArg, eventArg, argsArg]) => {
+      const binding = requireBinding(String(rowIdArg), 'emit');
+      binding.scope.emit(String(eventArg), ...((argsArg ?? []) as unknown[]));
+    })
+    /* 域行工具注册：声明面本地落注册表，execute 翻译为 tool-invoke 桥接
+     * 调用（signal 透传 + timeoutMs 预算随行——超时本地结算发 cancel 让域停工） */
+    .handle('host', 'tools-register', ([rowIdArg, metaArg, domainArg]) => {
+      const tools = resolveTools();
+      if (tools === undefined) {
+        throw new AppError(
+          BRIDGE_METHOD_NOT_FOUND,
+          'tools-register：本装配面未提供工具服务（裁剪形态——分域行不可注册工具）',
+        );
+      }
+      const rowId = String(rowIdArg);
+      const meta = metaArg as {
+        name: string;
+        description: string;
+        parameters: object;
+        effect?: 'read' | 'write';
+        timeoutMs?: number;
+        label?: string;
+      };
+      const binding = requireBinding(rowId, 'tools-register');
+      const def: ToolDefinition = {
+        name: meta.name,
+        description: meta.description,
+        parameters: meta.parameters,
+        ...(meta.effect !== undefined ? { effect: meta.effect } : {}),
+        ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
+        ...(meta.label !== undefined ? { label: meta.label } : {}),
+        execute: (args, ctx) =>
+          t.endpoint.call('svc', 'tool-invoke', [rowId, meta.name, args, { toolCallId: ctx.toolCallId }], {
+            signal: ctx.signal,
+            ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
+          }),
+      };
+      // D1 注册面路由（契约篇 §5.1 挂载目标两档，SF9）：路由权威 = host 侧按行
+      // app 键——注册罩 runInCallerChain(行 id) 帧，registry 经 chainCaller 归因
+      // 行挂载目标（行带 app 键 → 应用域层）。域自报 domainArg 不采信为
+      // 路由权威，仅 debug 注记（应用自报面降级诊断——冷读 SF9）。
+      const unregister = runInCallerChain(rowId, () => tools.register(def));
+      if (domainArg !== undefined) {
+        binding.scope.logger.debug(
+          `分域行 ${rowId} 注册工具 ${meta.name} 自报 domain=${String(domainArg)}（诊断注记——路由按行 app 键，不采信自报）`,
+        );
+      }
+      // 行级清理：register 返回的注销器挂行作用域 effect——行回卷（apply 失败/
+      // /reload/域死 exit 回卷）同步摘除注册（真注册表 remove + tools_change 广播）
+      binding.scope.effect(() => () => unregister());
+    })
+    /* 域应用调宿主服务（会话与存储篇 §1.5 导入者归因——RPC 帧携带调用方列，
+     * external carrier 落码批销账）：帧 [rowId, name, method, args]，宿主分派
+     * 罩 runInCallerChain(rowId)——域应用经 ctx.get(...).method(...) 调宿主
+     * 服务时，宿主侧服务面（createSession 读 chainCaller 等）拿到行归因 */
+    .handle('host', 'svc-invoke', ([rowIdArg, nameArg, methodArg, argsArg]) => {
+      const rowId = String(rowIdArg);
+      const svc = t.root.get<Record<string, unknown>>(String(nameArg));
+      const fn = svc?.[String(methodArg)];
+      if (typeof fn !== 'function') {
+        throw new AppError(BRIDGE_METHOD_NOT_FOUND, `宿主服务无此方法：${String(nameArg)}.${String(methodArg)}`);
+      }
+      return runInCallerChain(rowId, () => (fn as (...a: unknown[]) => unknown).apply(svc, argsArg as unknown[]));
+    })
+    /* 域便捷面 run 的宿主终端：宿主工具走真管道（schema→守门→执行唯一实现）；
+     * 帧同样携带 rowId 罩 runInCallerChain（同 svc-invoke——宿主执行段的
+     * 归因面，exec/会话路由按链取数） */
+    .handle('host', 'tool-run', ([rowIdArg, nameArg, argsArg], signal) => {
+      const tools = resolveTools();
+      if (tools === undefined) {
+        throw new AppError(BRIDGE_METHOD_NOT_FOUND, 'tool-run：本装配面未提供工具服务（裁剪形态）');
+      }
+      const def = tools.get(String(nameArg));
+      if (def === undefined) {
+        throw new AppError(BRIDGE_METHOD_NOT_FOUND, `宿主无此工具：${String(nameArg)}`);
+      }
+      const toolCallId = `bridge:${t.workerId}:${(t.toolRunSeq += 1)}`;
+      return runInCallerChain(String(rowIdArg), () =>
+        def.execute(argsArg as Record<string, unknown>, { toolCallId, signal }),
+      );
+    });
 }
 
 /** spawnWorkerDomain 参数 */
@@ -156,8 +300,6 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
   const bindings = new Map<string, RowBinding>();
   /** load 缓存（applyRow 取 optionalInject 快照用；load→apply 之间必持） */
   const metaCache = new Map<string, WorkerModuleMeta>();
-  /** tool-run 的调用序号（toolCallId 生成——桥接调用也要可归因可审计） */
-  let toolRunSeq = 0;
 
   let endpoint!: BridgeEndpoint;
   endpoint = new BridgeEndpoint(worker, {
@@ -236,113 +378,16 @@ export function spawnWorkerDomain(opts: WorkerDomainOptions): WorkerDomain {
     });
   });
 
-  /**
-   * 工具服务解析：显式注入优先，缺省懒解析 root 的 'tools' 服务（调用时点解析
-   * 而非捕获时点——Ring 1 装载序里工具行可能晚于 worker 行激活，boot 期捕获会
-   * 拿到 undefined 假裁剪形态；服务集两时点恒定不变式下运行期解析恒定）。
-   */
-  const resolveTools = (): ToolsService | undefined => opts.tools ?? opts.root.tryGet<ToolsService>('tools');
-
-  const requireBinding = (rowId: string, surface: string): RowBinding => {
-    const binding = bindings.get(rowId);
-    if (binding === undefined) {
-      throw new AppError(APP_LOAD_FAILED, `${surface}：行 ${rowId} 无宿主绑定（apply 未先行或已回卷）`);
-    }
-    return binding;
-  };
-
-  endpoint
-    /* worker 行 provide：宿主侧挂行作用域（main 域消费方拿方法转发代理——
-     * thenable 陷阱防护见 makeWorkerServiceProxy；服务值面/同步 getter 不
-     * 过界，v1 收窄：worker 提供的服务是异步方法面） */
-    .handle('host', 'svc-register', ([rowIdArg, nameArg]) => {
-      const rowId = String(rowIdArg);
-      const binding = requireBinding(rowId, 'svc-register');
-      binding.scope.provide(String(nameArg), makeWorkerServiceProxy(endpoint, rowId, String(nameArg)));
-    })
-    /* worker 行订阅：行作用域 on + 转发器（args 过界 tell 回投 worker 分派） */
-    .handle('host', 'sub', ([rowIdArg, eventArg]) => {
-      const binding = requireBinding(String(rowIdArg), 'sub');
-      binding.scope.on(String(eventArg), (...args: unknown[]) => {
-        endpoint.tell('evt', { rowId: String(rowIdArg), event: String(eventArg), args });
-      });
-    })
-    /* worker 行 emit：走宿主行作用域 emit（per-scope 限流单点） */
-    .handle('host', 'emit', ([rowIdArg, eventArg, argsArg]) => {
-      const binding = requireBinding(String(rowIdArg), 'emit');
-      binding.scope.emit(String(eventArg), ...((argsArg ?? []) as unknown[]));
-    })
-    /* worker 行工具注册：声明面本地落注册表，execute 翻译为 tool-invoke 桥接
-     * 调用（signal 透传 + timeoutMs 预算随行——超时本地结算发 cancel 让 worker 停工） */
-    .handle('host', 'tools-register', ([rowIdArg, metaArg, domainArg]) => {
-      const tools = resolveTools();
-      if (tools === undefined) {
-        throw new AppError(
-          BRIDGE_METHOD_NOT_FOUND,
-          'tools-register：本装配面未提供工具服务（裁剪形态——worker 行不可注册工具）',
-        );
-      }
-      const rowId = String(rowIdArg);
-      const meta = metaArg as {
-        name: string;
-        description: string;
-        parameters: object;
-        effect?: 'read' | 'write';
-        timeoutMs?: number;
-        label?: string;
-      };
-      const binding = requireBinding(rowId, 'tools-register');
-      const def: ToolDefinition = {
-        name: meta.name,
-        description: meta.description,
-        parameters: meta.parameters,
-        ...(meta.effect !== undefined ? { effect: meta.effect } : {}),
-        ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
-        ...(meta.label !== undefined ? { label: meta.label } : {}),
-        execute: (args, ctx) =>
-          endpoint.call('svc', 'tool-invoke', [rowId, meta.name, args, { toolCallId: ctx.toolCallId }], {
-            signal: ctx.signal,
-            ...(meta.timeoutMs !== undefined ? { timeoutMs: meta.timeoutMs } : {}),
-          }),
-      };
-      // D1 注册面路由（契约篇 §5.1 挂载目标两档，SF9）：路由权威 = host 侧按行
-      // app 键——注册罩 runInCallerChain(行 id) 帧，registry 经 chainCaller 归因
-      // 行挂载目标（行带 app 键 → 应用域层）。worker 自报 domainArg 不采信为
-      // 路由权威，仅 debug 注记（应用自报面降级诊断——冷读 SF9）。
-      const unregister = runInCallerChain(rowId, () => tools.register(def));
-      if (domainArg !== undefined) {
-        binding.scope.logger.debug(
-          `worker 行 ${rowId} 注册工具 ${meta.name} 自报 domain=${String(domainArg)}（诊断注记——路由按行 app 键，不采信自报）`,
-        );
-      }
-      // 行级清理：register 返回的注销器挂行作用域 effect——行回卷（apply 失败/
-      // /reload/域死 exit 回卷）同步摘除注册（真注册表 remove + tools_change 广播）
-      binding.scope.effect(() => () => unregister());
-    })
-    /* worker 调宿主服务：锚作用域 get 后方法分派（AppError 家族保码回 worker） */
-    .handle('host', 'svc-invoke', ([nameArg, methodArg, argsArg]) => {
-      const svc = opts.root.get<Record<string, unknown>>(String(nameArg));
-      const fn = svc?.[String(methodArg)];
-      if (typeof fn !== 'function') {
-        throw new AppError(BRIDGE_METHOD_NOT_FOUND, `宿主服务无此方法：${String(nameArg)}.${String(methodArg)}`);
-      }
-      return (fn as (...a: unknown[]) => unknown).apply(svc, argsArg as unknown[]);
-    })
-    /* worker 便捷面 run 的宿主终端：宿主工具走真管道（schema→守门→执行唯一实现） */
-    .handle('host', 'tool-run', ([nameArg, argsArg], signal) => {
-      const tools = resolveTools();
-      if (tools === undefined) {
-        throw new AppError(BRIDGE_METHOD_NOT_FOUND, 'tool-run：本装配面未提供工具服务（裁剪形态）');
-      }
-      const def = tools.get(String(nameArg));
-      if (def === undefined) {
-        throw new AppError(BRIDGE_METHOD_NOT_FOUND, `宿主无此工具：${String(nameArg)}`);
-      }
-      return def.execute(argsArg as Record<string, unknown>, {
-        toolCallId: `bridge:${workerId}:${(toolRunSeq += 1)}`,
-        signal,
-      });
-    });
+  // 六宿主处理方注册（两载体共享面——external carrier 落码批抽取）
+  registerHostHandlers({
+    endpoint,
+    workerId,
+    bindings,
+    metaCache,
+    toolRunSeq: 0,
+    root: opts.root,
+    ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
+  });
 
   const domain: WorkerDomain = {
     workerId,

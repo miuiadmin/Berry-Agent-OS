@@ -8,14 +8,16 @@
  * 每行一域路由 / 装机计数 / reapUnapplied 防漏 / terminateAll 收编 /
  * 意外死亡结算（markFailed 回写 + app/failed 广播）/ 装载失败防漏。
  */
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import type { AppPlanRow } from '../contracts/app.js';
-import { BRIDGE_HANDLER_FAILED, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
+import { BRIDGE_HANDLER_FAILED, BRIDGE_WORKER_EXITED, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
+import type { SandboxService } from '../safety/index.js';
+import { appDataDirOf } from './composition.js';
 import { createBridgeFleet } from './bridge-fleet.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -368,4 +370,157 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });
+});
+
+/* ---------------- external 腿（fork 进程域——external carrier 落码批） ---------------- */
+
+/** external 写探测 fixture：config.inside/outside 各写一发报结果 + 回报 TMPDIR
+ * （fleet 组装的 per-域 tmp 注入面——env 白名单 + TMPDIR 的行为断言源） */
+const FX_EXT_PROBE = `
+import { writeFileSync } from 'node:fs';
+export const name = 'fleet-ext-probe';
+export default async function apply(ctx, config) {
+  ctx.provide('fleet/ext-probe-' + config.slot, {
+    probe: () => {
+      const report = { tmpdir: process.env.TMPDIR };
+      for (const [k, p] of [['inside', config.inside], ['outside', config.outside]]) {
+        try { writeFileSync(p + '/probe.txt', 'x'); report[k] = { pass: true, code: null }; }
+        catch (err) { report[k] = { pass: false, code: err.code ?? 'NO_CODE' }; }
+      }
+      return report;
+    },
+  });
+}
+`;
+
+describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env 面）', () => {
+  /** 起 external 测试台：workspace + dataDir + osLayer:false 的最小沙箱桩
+   * （OS 层单元测试在 safety/sandbox.test.ts——本面聚焦闩二与 PM 旗组装） */
+  function setupExternal(name: string): {
+    root: ContextScope;
+    anchor: ContextScope;
+    workspace: string;
+    dataDir: string;
+    probeEntry: string;
+    dir: string;
+  } {
+    const { root, anchor, dir } = setupFixture(name);
+    const workspace = join(dir, 'ws');
+    const dataDir = join(dir, 'data');
+    mkdirSync(workspace);
+    mkdirSync(dataDir, { recursive: true });
+    const probeEntry = join(dir, 'fx-ext-probe.ts');
+    writeFileSync(probeEntry, FX_EXT_PROBE);
+    return { root, anchor, workspace, dataDir, probeEntry, dir };
+  }
+
+  /** 最小沙箱桩：osLayer:false 时 confine/probe 均不可达——结构面占位即可 */
+  const sandboxStub = { listBackends: () => [] } as unknown as SandboxService;
+
+  it('闩二拒绝式：声明根越宿主基线 → COMPOSITION_ROW_INVALID 拒载（spawn 前执法——零域产出）', async () => {
+    const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-latch2');
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      external: { workspace, dataDir, sandbox: sandboxStub, osLayer: false },
+    });
+    // 越界声明：workspace 的兄弟目录（前缀撞不上——isInsideRoot 分隔符特判；
+    // 不存在的路径即越界判据本身——canonicalPath 容缺形）。闩二在 spawn 参数
+    // 组装段同步抛——async 包裹让 expect().rejects 可接
+    const evil = join(dir, 'ws-evil');
+    const row: AppPlanRow = {
+      id: 'lx',
+      entry: probeEntry,
+      sandbox: { carrier: 'external', fs: { writableRoots: [evil] } },
+    };
+    await expect(async () => fleet.loader.load(row)).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('越界'),
+    });
+    // spawn 前执法：零域产出（装机计数 0——拒载不留孤儿域）
+    expect(fleet.stats()).toMatchObject({ spawned: 0, live: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it(
+    '声明收窄真跑：writableRoots=ws/sub → 基线内子目录过、workspace 本体拒（PM 真执法 = 基线 ∩ 声明）',
+    { timeout: 60_000 },
+    async () => {
+      const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-narrow');
+      const fleet = createBridgeFleet({
+        root,
+        anchor: () => anchor,
+        external: { workspace, dataDir, sandbox: sandboxStub, osLayer: false },
+      });
+      const sub = join(workspace, 'sub');
+      mkdirSync(sub);
+      const row: AppPlanRow = {
+        id: 'nx',
+        entry: probeEntry,
+        sandbox: { carrier: 'external', fs: { writableRoots: [sub] } },
+        config: { slot: 'nx', inside: sub, outside: workspace },
+      };
+      await fleet.loader.load(row);
+      const scope = anchor.fork({ name: 'nx', rowId: 'nx', builtinRow: false });
+      await fleet.loader.apply(row, scope);
+      const report = await root
+        .get<{
+          probe: () => Promise<{
+            tmpdir?: string;
+            inside: { pass: boolean; code: string | null };
+            outside: { pass: boolean; code: string | null };
+          }>;
+        }>('fleet/ext-probe-nx')
+        .probe();
+      // 收窄语义：声明 sub → 有效白名单只有 sub——workspace 本体虽在宿主基线内，
+      // 但基线 ∩ 声明后不在白名单 → PM 拒（ERR_ACCESS_DENIED 签名）
+      expect(report.inside).toEqual({ pass: true, code: null });
+      expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
+      // per-域 TMPDIR 注入面：件数据根内 tmp/（契约篇 §1.5 钉位——痕迹随行清算）
+      expect(report.tmpdir).toBe(join(appDataDirOf(dataDir, 'nx'), 'tmp'));
+      await fleet.terminateAll('用例收尾');
+      await root.dispose().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  );
+
+  it(
+    '声明缺席 = 全基线：无 sandbox.fs 行写 workspace 本体过（基线全额放行 + PM 旗仍在）',
+    { timeout: 60_000 },
+    async () => {
+      const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-full');
+      const outside = join(dir, 'outside');
+      mkdirSync(outside);
+      const fleet = createBridgeFleet({
+        root,
+        anchor: () => anchor,
+        external: { workspace, dataDir, sandbox: sandboxStub, osLayer: false },
+      });
+      const row: AppPlanRow = {
+        id: 'fx',
+        entry: probeEntry,
+        sandbox: { carrier: 'external' },
+        config: { slot: 'fx', inside: workspace, outside },
+      };
+      await fleet.loader.load(row);
+      const scope = anchor.fork({ name: 'fx', rowId: 'fx', builtinRow: false });
+      await fleet.loader.apply(row, scope);
+      const report = await root
+        .get<{
+          probe: () => Promise<{
+            inside: { pass: boolean; code: string | null };
+            outside: { pass: boolean; code: string | null };
+          }>;
+        }>('fleet/ext-probe-fx')
+        .probe();
+      // 未声明 → 全基线（workspace 本体可写）；基线外仍拒——PM 旗从未缺席
+      expect(report.inside).toEqual({ pass: true, code: null });
+      expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
+      expect(fleet.stats()).toMatchObject({ spawned: 1, live: 1 });
+      await fleet.terminateAll('用例收尾');
+      await root.dispose().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  );
 });

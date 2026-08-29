@@ -156,20 +156,24 @@ function makeToolsStub(
       registrations.push(endpoint.call('host', 'tools-register', [rowId, meta, opts?.domain]));
     },
     run(name, args) {
-      // 便捷面：宿主工具走真管道（schema→守门→执行三段在宿主侧唯一实现）
-      return endpoint.call('host', 'tool-run', [name, args], { signal: state.ctl.signal });
+      // 便捷面：宿主工具走真管道（schema→守门→执行三段在宿主侧唯一实现）；
+      // 帧携带 rowId（RPC 帧调用方列——宿主执行段按链归因，与 svc-invoke 同批）
+      return endpoint.call('host', 'tool-run', [rowId, name, args], { signal: state.ctl.signal });
     },
   };
 }
 
 /**
  * 宿主服务代理（ctx.get(name) 的缺省返回）：任意方法调用 → ask('host',
- * 'svc-invoke', [name, method, args])——同步阻抗下 Promise 面是唯一形态。
+ * 'svc-invoke', [rowId, name, method, args])——同步阻抗下 Promise 面是唯一
+ * 形态。帧携带 rowId（RPC 帧调用方列——external carrier 落码批销账：宿主
+ * 服务面按 chainCaller 拿到行归因，与 sessionId 链同族）。
  * then/catch/finally 与 symbol 属性返回 undefined：防 Promise.resolve(proxy)
  * 把代理误判 thenable（await 假结算的结构性陷阱）。
  */
 function makeHostServiceProxy(
   endpoint: BridgeEndpoint,
+  rowId: string,
   name: string,
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return new Proxy(
@@ -177,7 +181,7 @@ function makeHostServiceProxy(
     {
       get(_target, prop) {
         if (typeof prop !== 'string' || prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
-        return (...args: unknown[]) => endpoint.call('host', 'svc-invoke', [name, prop, args]);
+        return (...args: unknown[]) => endpoint.call('host', 'svc-invoke', [rowId, name, prop, args]);
       },
     },
   );
@@ -248,13 +252,13 @@ function makeStubCtx(
     get(name: string) {
       // 'tools' 特例拦截：本地桩（register/run 两面）；其余服务走宿主代理
       if (name === 'tools') return makeToolsStub(endpoint, state, rowId, registrations);
-      return makeHostServiceProxy(endpoint, name);
+      return makeHostServiceProxy(endpoint, rowId, name);
     },
     tryGet(name: string) {
       // optionalInject 在场快照（宿主激活时探测随 apply 载荷过界）——名单外
       // 词汇（未声明 optionalInject 的名字）一律 undefined（同步探测不可过界，
       // 收窄语义：要探测就先声明 optionalInject——声明面零变化下唯一合理口径）
-      return presence[name] === true ? makeHostServiceProxy(endpoint, name) : undefined;
+      return presence[name] === true ? makeHostServiceProxy(endpoint, rowId, name) : undefined;
     },
     provide(name: string, impl: unknown) {
       assertAlive(state, `provide(${name})`);

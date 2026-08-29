@@ -241,6 +241,15 @@ export interface RuntimeOptions {
    */
   readonly noApps?: boolean;
   /**
+   * external 域 OS 沙箱层开关（external carrier 落码批，契约篇 §1.7 第三十七
+   * 批增补 2a）：缺省 true——装载期 probe 醒 fail-closed（SANDBOX_UNAVAILABLE
+   * 拒装）+ spawn 经 sandbox.confine 包裹（seatbelt/bwrap 尽力层）。显式
+   * false = **PM-only 逃生门**：operator 显式降格档（跳过 OS 层与 probe；
+   * 进程墙 + PM 中层两层执法仍全）——安全降格必须显式传参，不设环境变量
+   * 静默通道（宪章九「安全可控」）。CLI 旗标面随真实运营需求另接。
+   */
+  readonly externalOsLayer?: boolean;
+  /**
    * 本进程主 loop 花销记账道（缺省 'foreground'）。tick 唤起入口声明
    * 'background'（CLI `run --background` → 此处 → chat 件 durable 落账——
    * 席 13 第二刀：tick 烧的钱进 background 道，canAfford 才读得到）
@@ -1279,6 +1288,19 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       return mb !== undefined ? { maxOldGenerationSizeMb: mb } : undefined;
     },
     markFailed: appsService.markFailed,
+    // external 腿装配（external carrier 落码批——契约篇 §1.7 第三十七批）：
+    // 三层执法参数面（闩二校验 + PM 旗 + OS confine + probe 醒 + 白名单 env
+    // + per-域 TMPDIR 在舰队内单点组装）。sandbox 实例复用 ⑥b 前上提的同源
+    // 服务（后端链/probe 同一探索面）；Ring 1 舰队同携带——替换行两腿同管线
+    // 资格（官方行恒 main，参数闲置无副作用）
+    external: {
+      workspace,
+      dataDir: dataDir(),
+      sandbox,
+      // OS 层开关（RuntimeOptions.externalOsLayer——显式装配参数，缺省开：
+      // probe 醒 fail-closed + confine 包裹；false = PM-only 逃生门）
+      ...(opts.externalOsLayer === false ? { osLayer: false } : {}),
+    },
   };
   // worker 域舰队·Ring 1 面（每 worker 行一域）：Ring 1 缺省全 builtin 行（恒
   // main 域），workerLoader 在此只为替换行保留同管线资格；锚永不重 fork——

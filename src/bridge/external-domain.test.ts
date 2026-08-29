@@ -1,0 +1,415 @@
+/**
+ * bridge — external（fork 进程）域端到端测试（契约篇 §1.7 external 载体，
+ * external carrier 落码批）。
+ *
+ * 真 child_process.spawn 子进程（external-entry.ts 真入口 + NDJSON stdio 载体
+ * + tsx 直跑 TS 源）+ 真宿主作用域——不 mock bridge 任何内部。与
+ * bootstrap.test.ts（worker 腿）同金样同断言面 = **Echo 双行 parity 测试**
+ * （契约篇 §1.7 external carrier 落码批注记）：过桥往返/工具物化/行回卷/
+ * 域死结算在两载体上行为同一。external 腿独有面另测：PM 三层旗真执法 /
+ * 组杀（树杀）/ 孤儿防线 / crash diagnostic / kill 归因。
+ */
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
+import { createContext } from '../context/context.js';
+import type { ContextScope } from '../context/types.js';
+import { loadApps } from '../context/loader.js';
+import type { WorkerRowLoader } from '../context/loader.js';
+import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
+import { spawnExternalDomain, externalEntryUrl, type ExternalDomain } from './external-domain.js';
+
+/* ---------------- 测试基建（同 bootstrap.test.ts 形态——parity 的基建也对齐） ---------------- */
+
+/** 域 id 判死探测：process.kill(pid, 0) 抛 ESRCH = 已死 */
+function pidAlive(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 轮询直到谓词为真（异步到达面的确定性等待；谓词可同步可异步） */
+async function until(predicate: () => boolean | Promise<boolean>, ms = 20_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect.unreachable(`轮询超时（${ms}ms）——异步面未到达`);
+}
+
+/** 取 reject 的错误（非 AppError 抛出时让用例失败并显示原值） */
+async function rejection(promise: Promise<unknown>): Promise<{ code: string; message: string }> {
+  const err = await promise.then(
+    () => {
+      throw new Error('预期 reject，实际 resolve');
+    },
+    (e: unknown) => e,
+  );
+  if (!(err instanceof Error)) throw err;
+  const coded = err as { code?: string; message: string };
+  if (typeof coded.code !== 'string') throw err;
+  return coded as { code: string; message: string };
+}
+
+/** 最小工具服务桩（bootstrap.test.ts 同款——桥接工具注册的宿主物化断言面） */
+class FakeTools {
+  readonly defs = new Map<string, ToolDefinition>();
+  register(def: ToolDefinition): () => void {
+    this.defs.set(def.name, def);
+    return () => {
+      this.defs.delete(def.name);
+    };
+  }
+  get(name: string): ToolDefinition | undefined {
+    return this.defs.get(name);
+  }
+}
+
+/**
+ * Echo 金样 fixture（worker 腿 FX_WORKER 同款同断言面——parity 判据）：provide
+ * 服务（名按 config.slot 参数化）+ effect 打点 + 事件订阅 + 工具注册。
+ */
+const FX_ECHO = `
+export const name = 'fx-external';
+export const events = [{ name: 'fx/etick', mode: 'emit', note: 'external e2e 测试事件' }];
+export default async function apply(ctx, config) {
+  const seen = [];
+  ctx.provide('fx/etaps-' + config.slot, {
+    list: () => seen,
+    add: (a, b) => a + b,
+    hang: () => new Promise(() => {}),
+  });
+  ctx.effect(() => { seen.push('e1'); return () => {}; });
+  ctx.on('fx/etick', (v) => { seen.push('tick:' + String(v)); });
+  ctx.get('tools').register({
+    name: 'fx/et',
+    description: 'fixture 工具（external 腿）',
+    parameters: { type: 'object', properties: {} },
+    execute: async (args) => ({ content: [{ type: 'text', text: 'et:' + JSON.stringify(args) }] }),
+  });
+}
+`;
+
+/** crash fixture：apply 返还后异步 uncaught（fork 进程崩 = 自崩溃最真形态——stderr 栈 + exit 1） */
+const FX_CRASH = `
+export const name = 'fx-crash';
+export default async function apply(ctx) {
+  ctx.provide('fx/crash-ready', { ok: () => true });
+  setTimeout(() => { throw new Error('模拟 external 自崩溃'); }, 20);
+}
+`;
+
+/** 孙进程 fixture：域内 spawn 长命孙进程（同组继承 pgid——树杀收割面）+ pid 回报服务 */
+const FX_GRANDCHILD = `
+import { spawn } from 'node:child_process';
+export const name = 'fx-grandchild';
+export default async function apply(ctx) {
+  const grand = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+  ctx.provide('fx/grandpid', { pid: () => grand.pid });
+  ctx.effect(() => () => grand.kill('SIGKILL')); // 行回卷兜底（树杀用例不走此路）
+}
+`;
+
+/** PM 写探测 fixture：config.inside/outside 两路径各写一发，结果经服务回传 */
+const FX_PM_PROBE = `
+import { writeFileSync } from 'node:fs';
+export const name = 'fx-pm-probe';
+export default async function apply(ctx, config) {
+  ctx.provide('fx/pm-probe', {
+    probe: () => {
+      const report = {};
+      for (const [k, p] of [['inside', config.inside], ['outside', config.outside]]) {
+        try { writeFileSync(p + '/probe.txt', 'x'); report[k] = { pass: true, code: null }; }
+        catch (err) { report[k] = { pass: false, code: err.code ?? 'NO_CODE' }; }
+      }
+      return report;
+    },
+  });
+}
+`;
+
+/** 测试环境根（fixture 全落这里；afterAll 统一清） */
+let fixtureDir: string;
+let root: ContextScope;
+let tools: FakeTools;
+/** 共享域（Echo parity 用例组——fork 冷启 ~1.5s，beforeAll 一次起域复用） */
+let domain: ExternalDomain;
+let echoEntry: string;
+/** 共享域意外死亡记录（terminate 用例断言主动收尾不落此——事故面观测） */
+const unexpectedExits: Array<{ workerId: string; code: number; rows: readonly string[]; diagnostic?: string }> = [];
+
+/** 起一个测试域（各独立用例专用域的公共形态——PM/树杀/孤儿等独有面） */
+function spawnTestDomain(
+  opts: Partial<Parameters<typeof spawnExternalDomain>[0]> & {
+    onExit?: (info: {
+      workerId: string;
+      code: number;
+      rows: readonly string[];
+      reason?: string;
+      diagnostic?: string;
+    }) => void;
+  },
+): ExternalDomain {
+  return spawnExternalDomain({
+    root,
+    tools: tools as unknown as ToolsService,
+    workerId: opts.workerId ?? `e-test-${Math.random().toString(36).slice(2, 8)}`,
+    ...opts,
+  });
+}
+
+/** 等域就绪：svc.load 探活（handler 挂好前 ask 被丢弃——探到即全就绪） */
+async function untilReady(d: ExternalDomain, entry: string): Promise<void> {
+  await until(() =>
+    d.endpoint.call('svc', 'load', [{ id: '__probe__', entry }]).then(
+      () => true,
+      () => false,
+    ),
+  );
+}
+
+beforeAll(async () => {
+  fixtureDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'bridge-ext-')));
+  echoEntry = join(fixtureDir, 'fx-echo.ts');
+  writeFileSync(echoEntry, FX_ECHO);
+  writeFileSync(join(fixtureDir, 'fx-crash.ts'), FX_CRASH);
+  writeFileSync(join(fixtureDir, 'fx-grandchild.ts'), FX_GRANDCHILD);
+  writeFileSync(join(fixtureDir, 'fx-pm-probe.ts'), FX_PM_PROBE);
+  root = createContext({ name: 'bridge-ext-test' });
+  tools = new FakeTools();
+  domain = spawnExternalDomain({
+    root,
+    tools: tools as unknown as ToolsService,
+    externalUrl: externalEntryUrl(import.meta.url),
+    workerId: 'e2e-external',
+    onExit: (info) => unexpectedExits.push(info),
+  });
+  await untilReady(domain, echoEntry);
+}, 30_000);
+
+afterAll(async () => {
+  domain?.terminate('测试收尾');
+  await root?.dispose().catch(() => undefined);
+  rmSync(fixtureDir, { recursive: true, force: true });
+});
+
+/* ---------------- Echo 双行 parity（worker 腿 bootstrap.test.ts 同断言面） ---------------- */
+
+describe('spawnExternalDomain — Echo parity（真 fork 子进程，worker 腿同款断言）', () => {
+  it('loadApps 全管线激活：external 行走 workerLoader 注入口 + 词汇入册 + 宿主物化', async () => {
+    // 首用例经 loadApps（与 bootstrap.test.ts 同纪律）：meta.events 词汇在此
+    // 入册——后续直连用例的 ctx.on 才有宿主词汇表可依
+    const loader: WorkerRowLoader = {
+      load: (row) => domain.load(row),
+      apply: (row, scope, callOpts) => domain.applyRow(row, scope, callOpts),
+    };
+    const result = await loadApps(
+      root,
+      [{ id: 'x0', entry: echoEntry, sandbox: { carrier: 'external' }, config: { slot: 'p' } }],
+      { workerLoader: loader },
+    );
+    expect(result.failed).toEqual([]);
+    expect(result.activated.map((a) => a.id)).toEqual(['x0']);
+    // 全管线物化可见：代理方法真往返
+    const taps = root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/etaps-p');
+    await expect(taps['add']!(2, 3)).resolves.toBe(5);
+  });
+
+  it('load → applyRow：宿主 provide 物化 + 代理方法过桥往返 + 工具注册物化执行', async () => {
+    const meta = await domain.load({ id: 'x1', entry: echoEntry, sandbox: { carrier: 'external' } });
+    expect(meta.name).toBe('fx-external');
+    const scope = root.fork({ name: 'x1', rowId: 'x1', builtinRow: false });
+    await domain.applyRow({ id: 'x1', sandbox: { carrier: 'external' }, config: { slot: 'a' } }, scope);
+    // 宿主侧物化：锚作用域可见（JSON 通道代理——方法过界往返）
+    const taps = root.tryGet<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/etaps-a');
+    expect(taps).toBeDefined();
+    await expect(taps!['add']!(2, 3)).resolves.toBe(5);
+    // effect 打点过界生效（apply 排水语义——list 已见 e1）
+    await expect(taps!['list']!()).resolves.toEqual(['e1']);
+    // 工具注册宿主物化 + execute 过桥回 fork 域执行体
+    const def = tools.get('fx/et');
+    expect(def).toBeDefined();
+    const result = (await def!.execute({ x: 7 }, { toolCallId: 'tc-ext', signal: new AbortController().signal })) as {
+      content: Array<{ type: string; text: string }>;
+    };
+    expect(result.content[0]).toMatchObject({ type: 'text', text: 'et:{"x":7}' });
+    await scope.dispose();
+  });
+
+  it('行回卷联动：行作用域 dispose → 宿主绑定清 + svc.unload 到达（域侧行状态自清）', async () => {
+    await domain.load({ id: 'x2', entry: echoEntry, sandbox: { carrier: 'external' } });
+    const scope = root.fork({ name: 'x2', rowId: 'x2', builtinRow: false });
+    await domain.applyRow({ id: 'x2', sandbox: { carrier: 'external' }, config: { slot: 'u' } }, scope);
+    await scope.dispose();
+    // 卸载联动 fire-and-forget——轮询等域侧行状态清（服务不可达）
+    await until(async () => {
+      try {
+        await domain.endpoint.call('svc', 'invoke', ['x2', 'fx/etaps-u', 'add', []]);
+        return false;
+      } catch (err) {
+        return (err as { code?: string }).code === BRIDGE_METHOD_NOT_FOUND;
+      }
+    });
+  });
+
+  it('terminate 域死：在途调用以 BRIDGE_WORKER_EXITED 结算、后续调用即刻拒绝；主动收尾不叫 onExit（非事故）', async () => {
+    await domain.load({ id: 'x5', entry: echoEntry, sandbox: { carrier: 'external' } });
+    const scope = root.fork({ name: 'x5', rowId: 'x5', builtinRow: false });
+    await domain.applyRow({ id: 'x5', sandbox: { carrier: 'external' }, config: { slot: 'd' } }, scope);
+    // 挂起在途调用（hang 永不结算）→ terminate → SIGTERM 组杀 → 域死结算
+    const inflight = root.get<Record<string, (...args: unknown[]) => Promise<unknown>>>('fx/etaps-d')!['hang']!();
+    domain.terminate('测试域死结算');
+    const err = await rejection(inflight);
+    expect(err.code).toBe(BRIDGE_WORKER_EXITED);
+    // 端点已 dispose：新调用即刻拒绝
+    const refused = await rejection(domain.endpoint.call('svc', 'invoke', ['x5', 'fx/etaps-d', 'add', []]));
+    expect(refused.code).toBe(BRIDGE_WORKER_EXITED);
+    // 子进程真死（exit 事件已到——terminate 编舞完成）
+    await until(() => !pidAlive(domain.child.pid));
+    expect(unexpectedExits).toEqual([]); // 主动收尾不触发意外死亡通知
+  });
+});
+
+/* ---------------- external 腿独有面 ---------------- */
+
+describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/crash/kill）', () => {
+  it(
+    'PM 三层旗真执法：derivePmFlags 产物 spawn 域——写根内过 / 写根外 ERR_ACCESS_DENIED',
+    { timeout: 60_000 },
+    async () => {
+      const stage = realpathSync(mkdtempSync(join(fixtureDir, 'pm-')));
+      const inside = join(stage, 'allowed');
+      const outside = join(stage, 'outside');
+      // 手写 PM 旗组（derivePmFlags 产物同形——推导器自身的真跑回归锁在
+      // safety/pm-flags.test.ts 单点；本面断言对象是 spawnExternalDomain 把
+      // execArgv 透传到真执法，跨模块 import 推导器违拓扑纪律）。写根旗值
+      // 自带推导器同款两坑执法：预建（坑三——不存在则白名单静默失效）+
+      // realpath 归一（坑一——与子进程运行时路径同形）
+      mkdirSync(inside, { recursive: true });
+      const execArgv = [
+        '--permission',
+        '--allow-fs-read=*',
+        `--allow-fs-write=${realpathSync(inside)}`,
+        '--allow-worker',
+      ];
+      const pm = spawnTestDomain({
+        execArgv,
+        env: { ...process.env, TSX_DISABLE_CACHE: '1' } as Record<string, string>,
+      });
+      const probeEntry = join(fixtureDir, 'fx-pm-probe.ts');
+      try {
+        await untilReady(pm, probeEntry);
+        await pm.load({
+          id: 'pmx',
+          entry: probeEntry,
+          sandbox: { carrier: 'external' },
+          config: { inside, outside },
+        });
+        const scope = root.fork({ name: 'pmx', rowId: 'pmx', builtinRow: false });
+        await pm.applyRow({ id: 'pmx', sandbox: { carrier: 'external' }, config: { inside, outside } }, scope);
+        const probe = root.get<{ probe: () => Promise<Record<string, { pass: boolean; code: string | null }>> }>(
+          'fx/pm-probe',
+        );
+        const report = await probe.probe();
+        // PM 中层真执法：根内写放行、根外写拒且签名是 PM 拦截码
+        expect(report.inside).toEqual({ pass: true, code: null });
+        expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
+        await scope.dispose();
+      } finally {
+        pm.terminate('PM 用例收尾');
+      }
+    },
+  );
+
+  it(
+    'crash 意外死亡：uncaught → onExit rows 带行 id + diagnostic 携 stderr 栈尾 + 域死回卷（宿主物化消失）',
+    { timeout: 40_000 },
+    async () => {
+      const exits: Array<{ workerId: string; code: number; rows: readonly string[]; diagnostic?: string }> = [];
+      const crash = spawnTestDomain({
+        onExit: (info) => exits.push(info),
+      });
+      const crashEntry = join(fixtureDir, 'fx-crash.ts');
+      await untilReady(crash, crashEntry);
+      await crash.load({ id: 'cx', entry: crashEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'cx', rowId: 'cx', builtinRow: false });
+      await crash.applyRow({ id: 'cx', sandbox: { carrier: 'external' } }, scope);
+      expect(root.tryGet('fx/crash-ready')).toBeDefined();
+      // fixture 20ms 后异步 uncaught → fork 进程崩（stderr 栈 + exit 1）
+      await until(() => exits.length > 0);
+      expect(exits[0]!.rows).toEqual(['cx']);
+      expect(exits[0]!.code).toBe(1);
+      // diagnostic = stderr 尾缓存——自崩溃第一手栈（fixture 消息可辨）
+      expect(exits[0]!.diagnostic).toContain('模拟 external 自崩溃');
+      // 域死回卷：宿主物化随行作用域消失
+      await until(() => root.tryGet('fx/crash-ready') === undefined);
+    },
+  );
+
+  it(
+    'kill 执法：watchdog 直杀 → onExit 携 reason 归因（意外死亡全流程，非编舞终点）',
+    { timeout: 40_000 },
+    async () => {
+      const exits: Array<{ workerId: string; code: number; rows: readonly string[]; reason?: string }> = [];
+      const victim = spawnTestDomain({
+        onExit: (info) => exits.push(info),
+      });
+      await untilReady(victim, echoEntry);
+      await victim.load({ id: 'kx', entry: echoEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'kx', rowId: 'kx', builtinRow: false });
+      await victim.applyRow({ id: 'kx', sandbox: { carrier: 'external' }, config: { slot: 'k' } }, scope);
+      victim.kill('心跳缺失执法（测试）');
+      await until(() => exits.length > 0);
+      expect(exits[0]!.reason).toBe('心跳缺失执法（测试）');
+      expect(exits[0]!.rows).toEqual(['kx']);
+      await until(() => root.tryGet('fx/etaps-k') === undefined);
+    },
+  );
+
+  it('组杀树杀：域内孙进程随组收割——terminate SIGTERM 组孙同死（PoC ⑨ 判据）', { timeout: 40_000 }, async () => {
+    const gc = spawnTestDomain({ killGraceMs: 1_500 });
+    const gcEntry = join(fixtureDir, 'fx-grandchild.ts');
+    await untilReady(gc, gcEntry);
+    await gc.load({ id: 'gx', entry: gcEntry, sandbox: { carrier: 'external' } });
+    const scope = root.fork({ name: 'gx', rowId: 'gx', builtinRow: false });
+    await gc.applyRow({ id: 'gx', sandbox: { carrier: 'external' } }, scope);
+    const grandPid = await root.get<{ pid: () => Promise<number> }>('fx/grandpid').pid();
+    expect(pidAlive(grandPid)).toBe(true); // 孙进程活着（域内 spawn 的长命进程）
+    // terminate = SIGTERM 组：负 pid 投组，孙进程（同组继承 pgid）一并收割
+    gc.terminate('树杀用例');
+    await until(() => !pidAlive(grandPid));
+    await until(() => !pidAlive(gc.child.pid));
+  });
+
+  it('孤儿防线：宿主 stdin 管道断（模拟宿主被 SIGKILL）→ 域自退 exit(0)', { timeout: 40_000 }, async () => {
+    const exits: Array<{ workerId: string; code: number; rows: readonly string[] }> = [];
+    const orphan = spawnTestDomain({
+      onExit: (info) => exits.push(info),
+    });
+    await untilReady(orphan, echoEntry);
+    await orphan.load({ id: 'ox', entry: echoEntry, sandbox: { carrier: 'external' } });
+    const scope = root.fork({ name: 'ox', rowId: 'ox', builtinRow: false });
+    await orphan.applyRow({ id: 'ox', sandbox: { carrier: 'external' }, config: { slot: 'o' } }, scope);
+    // 关宿主侧 stdin 写端 = 模拟宿主死（管道断 → 域入口 'end' → process.exit(0)）
+    orphan.child.stdin?.end();
+    await until(() => exits.length > 0);
+    expect(exits[0]!.code).toBe(0); // 域自尽形态（孤儿防线语义）——非信号杀
+    await until(() => !pidAlive(orphan.child.pid));
+  });
+
+  it('externalEntryUrl：按宿主半自身形态判别 fork 入口（.ts 源 → external-entry.ts / 编译产物 → .js）', () => {
+    expect(externalEntryUrl('file:///repo/dist/bridge/bootstrap.js').href).toBe(
+      'file:///repo/dist/bridge/external-entry.js',
+    );
+    expect(externalEntryUrl('file:///repo/src/bridge/external-domain.ts').href).toBe(
+      'file:///repo/src/bridge/external-entry.ts',
+    );
+  });
+});

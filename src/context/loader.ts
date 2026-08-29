@@ -419,10 +419,14 @@ export interface WorkerRowLoader {
 /**
  * 装载管线 pending 项（第二十七批刀二）：main 行持校验后模块（同进程 apply）、
  * worker 行持过界元数据（apply 委托 worker 域）——判别联合，轮次/激活按 kind 分派。
+ * external carrier 落码批加 external kind：与 worker 同构的过界元数据（apply
+ * 委托 externalLoader 进 fork 进程域执行——两分域行同管线混排，执行域差异
+ * 对轮次/服务消费方零暴露）。
  */
 type PendingItem =
   | { row: AppPlanRow; kind: 'main'; module: ValidatedModule }
-  | { row: AppPlanRow; kind: 'worker'; meta: WorkerModuleMeta };
+  | { row: AppPlanRow; kind: 'worker'; meta: WorkerModuleMeta }
+  | { row: AppPlanRow; kind: 'external'; meta: WorkerModuleMeta };
 
 /** loadApps 可选参数（技能注册回调 + 虚拟面注入物——后续跨模块桥接需求同形扩展） */
 export interface LoadPluginsOptions {
@@ -458,6 +462,11 @@ export interface LoadPluginsOptions {
    * 未注入时 runtime:'worker' 行按 APP_LOAD_FAILED 进失败清单（worker 域能力
    * 未装配——如未来某裁剪面）；注入后 worker 行与 main 行同管线混排（Kahn 轮次
    * 不分域——服务消费方对执行域无感知）。
+   *
+   * external carrier 落码批：external 行同走本注入口（WorkerRowLoader 是
+   * 「分域行装载器」接口——名字词汇中性化挂步⑤ docs 批；注入物 = 舰队，舰队
+   * 内部按行 carrier 分派 worker 线程域 / external 进程域两种 spawn 形态，
+   * 装载管线对载体差异零感知）。缺注入时 external 行 fail-closed 拒载同语义。
    */
   workerLoader?: WorkerRowLoader;
 }
@@ -507,11 +516,13 @@ export async function loadApps(
     }
     // 载体分派（契约篇 §1.7 第三十七批）：resolveRowCarrier 闩一缺省两分派——
     // sandbox 块在场以块 carrier 为准；缺块 builtin 行 = main（官方豁免）、缺块
-    // 第三方行 = external（出生即进程墙）。worker 行：装载校验在 worker 半完成、
+    // 第三方行 = external（出生即进程墙）。worker/external 行（external carrier
+    // 落码批解冻——原第三十七批增补 2b 过渡冻结已解除）：装载校验在域半完成、
     // 元数据过界，宿主侧照走同一管线——事件词汇登记（防跨域 EVENT_UNKNOWN）+
-    // pending 混排。builtin 行携块（任何 carrier）组合树已机器执法，此处第二
-    // 执法点防御性兜底同语义拒载。external 行 = fail-closed 拒载（载体未落码，
-    // 过渡冻结——第三十七批增补 2b）
+    // pending 混排；两者同走注入的 workerLoader（分域行装载器——舰队内部按
+    // carrier 分派 spawn 形态，本管线零感知）。builtin 行携块（任何 carrier）
+    // 组合树已机器执法，此处第二执法点防御性兜底同语义拒载。缺注入 = 该载体
+    // 能力未装配（裁剪/测试面）fail-closed 拒载
     const carrier = resolveRowCarrier(row);
     if (row.builtin !== undefined && row.sandbox !== undefined) {
       const payload = {
@@ -524,50 +535,37 @@ export async function loadApps(
       root.emit('app/failed', payload);
       continue;
     }
-    if (carrier === 'worker') {
-      if (opts?.workerLoader === undefined) {
+    if (carrier === 'worker' || carrier === 'external') {
+      const carrierLoader = opts?.workerLoader;
+      if (carrierLoader === undefined) {
         const payload = {
           id: row.id,
           code: APP_LOAD_FAILED,
           message:
-            'sandbox.carrier worker 行装载失败：worker 装载器未注入（本装配面未启用 worker 域能力，契约篇 §1.7）',
+            carrier === 'worker'
+              ? 'sandbox.carrier worker 行装载失败：worker 装载器未注入（本装配面未启用 worker 域能力，契约篇 §1.7）'
+              : 'sandbox.carrier external 行装载失败：分域装载器未注入（本装配面未启用 external 载体能力，契约篇 §1.7 第三十七批——fail-closed 拒载）',
         };
         failed.push(payload);
         root.emit('app/failed', payload);
         continue;
       }
       try {
-        const meta = await opts.workerLoader.load(row);
+        const meta = await carrierLoader.load(row);
         validateEventDefs(meta.events, row.id);
         for (const def of meta.events ?? []) {
           root.effect(() => registerLiveEvent(root, def));
         }
-        pending.push({ row, kind: 'worker', meta });
+        pending.push({ row, kind: carrier, meta });
       } catch (err) {
         const payload = {
           id: row.id,
           code: err instanceof AppError ? err.code : APP_LOAD_FAILED,
-          message: err instanceof AppError ? err.message : `worker 域装载失败：${describeError(err)}`,
+          message: err instanceof AppError ? err.message : `${carrier} 域装载失败：${describeError(err)}`,
         };
         failed.push(payload);
         root.emit('app/failed', payload);
       }
-      continue;
-    }
-    // external 行（契约篇 §1.7 第三十七批增补 2b 过渡冻结）：外部进程域载体
-    // 未落码——fail-closed 拒载（进失败清单 → boot 启动断言拒启 / reload 响亮
-    // 报告），不做「宣示 external 实跑 main」的静默降格。解冻 = external carrier
-    // 落码批；显式降格逃生门 = 行声明 sandbox: {carrier: 'main'|'worker'}
-    if (carrier === 'external') {
-      const payload = {
-        id: row.id,
-        code: APP_LOAD_FAILED,
-        message:
-          `sandbox 载体 external（外部进程域）未落码，行 fail-closed 拒载（契约篇 §1.7 第三十七批增补 2b 过渡冻结）——` +
-          `过渡期第三方行如需装载请显式声明 sandbox: {carrier: 'main'} 或 {carrier: 'worker'}（operator 显式降格）`,
-      };
-      failed.push(payload);
-      root.emit('app/failed', payload);
       continue;
     }
     // import + 形状校验 + 自定义事件词汇登记（失败进清单不阻断——其余行仍要出全量诊断）
@@ -750,12 +748,13 @@ async function activateOne(
     if (item.kind === 'main') {
       applyPromise = runInCallerChain(row.id, () => Promise.resolve(item.module.default(scope, scope.config)));
     } else {
-      // 阶段①保证 worker 行必配 workerLoader——此兜底不可达，防御式响亮不静默
-      const loader = opts?.workerLoader;
-      if (loader === undefined) {
-        throw new AppError(APP_LOAD_FAILED, 'worker 行激活时装载器缺席（装载管线不变量被破坏——不可达防御路径）');
+      // 阶段①保证分域行必配装载器（worker/external 同一注入口）——此兜底
+      // 不可达，防御式响亮不静默
+      const carrierLoader = opts?.workerLoader;
+      if (carrierLoader === undefined) {
+        throw new AppError(APP_LOAD_FAILED, `${item.kind} 行激活时装载器缺席（装载管线不变量被破坏——不可达防御路径）`);
       }
-      applyPromise = runInCallerChain(row.id, () => loader.apply(row, scope, { signal: cancelCtl.signal }));
+      applyPromise = runInCallerChain(row.id, () => carrierLoader.apply(row, scope, { signal: cancelCtl.signal }));
     }
     applyPromise.catch(() => {}); // 竞速败方迟到 reject 兜底（多订阅不影响 race 正常传播）
     try {

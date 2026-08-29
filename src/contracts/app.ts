@@ -340,25 +340,36 @@ export interface BuiltinAppModule extends Omit<AppModule, 'default'> {
  * 载体三值 + 收窄三子键（fs/net/caps）。词汇随第三十七批题 1 案乙独立成块
  * （不塞 config、不造第二机制）；**缺块 ≠ 裸 main**（闩一缺省两分派，见
  * resolveRowCarrier）。
- * - carrier v1 全值可声明（main/worker 落码、external 预留——external 行装载期
- *   fail-closed 拒载，过渡冻结见契约篇 §1.7 第三十七批增补 2b）；
+ * - carrier v1 全值可声明且全值可装载（main/worker/external 三腿——external
+ *   腿 2026-08-29 carrier 落码批落码：fork per-行域三层执法，过渡冻结已随
+ *   该批解除〔契约篇 §1.7 增补 2b 解冻注记〕；loader 载体分派两执法点不变）；
  * - net 子键 v1 **声明即拒**（COMPOSITION_ROW_INVALID——无执法基线的声明 =
  *   宣示与现实脱节，闩二推论）；
- * - fs/caps v1 只校验 plain-object 形状（深层形态随 carrier 落码批定）。
+ * - fs 子键形态已定形（external carrier 落码批）：`{writableRoots?: string[]}`
+ *   （绝对路径声明——装载期与宿主基线交集，声明越界即拒：闩二拒绝式
+ *   COMPOSITION_ROW_INVALID；声明缺席 = 全基线）；
+ *   main/worker 载体行声明 fs 无执法消费面，同样收窄为该形（形状统一，
+ *   消费面随载体分派）。
  */
 export interface RowSandbox {
   /**
    * 运行载体：'main' 同进程 / 'worker' worker 线程域（apply 过界执行）/
-   * 'external' 外部进程域（per-行域——OS 层进程墙，v1 预留词 fail-closed）。
+   * 'external' 外部进程域（per-行域——fork 进程墙 + PM 中层 + OS 层尽力，
+   * 契约篇 §1.7 第三十七批）。
    * builtin 官方件行声明本块（任何 carrier）= 拒（官方随包件恒 main 域——
    * 双执法点：validateRow 第一 + 加载器第二，契约篇 §1.7 第三十七批增补 9）。
    */
   carrier: 'main' | 'worker' | 'external';
-  /** fs 收窄（v1 只校验对象形状——执法面随 carrier 落码批） */
-  fs?: Record<string, unknown>;
+  /**
+   * fs 收窄（external carrier 落码批定形）：writableRoots = 申请的可写根
+   * （绝对路径）——装载期与宿主基线（workspace ∪ 件数据根）交集，声明根
+   * 不在基线内即 COMPOSITION_ROW_INVALID 拒载（闩二「只收窄不放大」拒绝式
+   * ——宁响亮不静默钳）。
+   */
+  fs?: { writableRoots?: string[] };
   /** net 收窄——v1 声明即 COMPOSITION_ROW_INVALID 拒绝（无执法基线不收声明） */
   net?: Record<string, unknown>;
-  /** 能力收窄（v1 只校验对象形状——执法面随 carrier 落码批） */
+  /** 能力收窄（v1 只校验对象形状——执法面挂账随首个真实消费者） */
   caps?: Record<string, unknown>;
 }
 

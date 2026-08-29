@@ -241,25 +241,45 @@ describe('sandbox 载体块（契约篇 §1.7 第三十七批）', () => {
     expect(() => loadComposition(badCarrier)).toThrowError(/sandbox\.carrier 必填/);
   });
 
-  it('fs/caps 纯对象形状执法（v1 只校验形状，深层形态随 carrier 落码批定）', () => {
+  it('fs/caps 形状执法（fs 子键 external carrier 落码批定形；caps 只校验纯对象）', () => {
     const fsBad = makeDataDir();
     writeOverlay(fsBad, `  - id: demo\n    pkg: ${writeEntryFile(fsBad)}\n    sandbox: { carrier: main, fs: [] }\n`);
     expect(() => loadComposition(fsBad)).toThrowError(/sandbox\.fs 必须是对象/);
+    // fs 未知子键拒绝式（本批定形：只收 writableRoots——与块级同纪律）
+    const fsKeyBad = makeDataDir();
+    writeOverlay(
+      fsKeyBad,
+      `  - id: demo\n    pkg: ${writeEntryFile(fsKeyBad)}\n    sandbox: { carrier: worker, fs: { roots: [] } }\n`,
+    );
+    expect(() => loadComposition(fsKeyBad)).toThrowError(/sandbox\.fs 未知子键「roots」/);
+    // writableRoots 坏元素拒（形状层：数组 + 非空字符串；基线交集闩二在装载消费面另测）
+    const rootsBad = makeDataDir();
+    writeOverlay(
+      rootsBad,
+      `  - id: demo\n    pkg: ${writeEntryFile(rootsBad)}\n    sandbox: { carrier: worker, fs: { writableRoots: ['/tmp', ''] } }\n`,
+    );
+    expect(() => loadComposition(rootsBad)).toThrowError(/writableRoots 必须是非空字符串数组/);
     const capsBad = makeDataDir();
     writeOverlay(
       capsBad,
       `  - id: demo\n    pkg: ${writeEntryFile(capsBad)}\n    sandbox: { carrier: main, caps: 'rw' }\n`,
     );
     expect(() => loadComposition(capsBad)).toThrowError(/sandbox\.caps 必须是对象/);
-    // 合法形状：fs/caps 空对象过、块值原样保留（apps 同行——触发② 执法另测）
+    // 合法形状：writableRoots 数组过、块值原样保留（apps 同行——触发② 执法另测）
     const ok = makeDataDir();
     const entry = writeEntryFile(ok);
+    const wsRoot = join(ok, 'ws');
     writeOverlay(
       ok,
-      `  - id: demo\n    pkg: ${entry}\n    apps: [chat]\n    sandbox: { carrier: worker, fs: { roots: [] }, caps: {} }\n`,
+      `  - id: demo\n    pkg: ${entry}\n    apps: [chat]\n    sandbox: { carrier: external, fs: { writableRoots: ['${wsRoot}'] }, caps: {} }\n`,
     );
     expect(loadUserComposition(ok).plan).toEqual([
-      { id: 'demo', pkg: entry, entry, sandbox: { carrier: 'worker', fs: { roots: [] }, caps: {} } },
+      {
+        id: 'demo',
+        pkg: entry,
+        entry,
+        sandbox: { carrier: 'external', fs: { writableRoots: [wsRoot] }, caps: {} },
+      },
     ]);
   });
 
