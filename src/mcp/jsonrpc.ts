@@ -14,15 +14,16 @@
  *   调用期 TOOL_TIMEOUT——同桥两码，调用方定身份）。
  */
 
-import { AppError, MCP_CONNECT_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
+import { AppError, LSP_CONNECT_FAILED, MCP_CONNECT_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 
-/** JSON-RPC 请求超时缺省拒绝码 */
-export type JsonRpcTimeoutCode = typeof MCP_CONNECT_FAILED | typeof TOOL_TIMEOUT;
+/** JSON-RPC 请求超时缺省拒绝码（mcp/lsp 两桥共用本类——lsp 注入 LSP_CONNECT_FAILED） */
+export type JsonRpcTimeoutCode = typeof MCP_CONNECT_FAILED | typeof TOOL_TIMEOUT | typeof LSP_CONNECT_FAILED;
 
 /** 单条 JSON-RPC 消息的宽松形态（分发按字段在场性判别，不做全量校验） */
 interface JsonRpcMessage {
   readonly id?: number | string;
   readonly method?: string;
+  readonly params?: unknown;
   readonly result?: unknown;
   readonly error?: { readonly code?: number; readonly message?: string };
 }
@@ -44,6 +45,12 @@ export interface JsonRpcConnectionOptions {
   defaultTimeoutCode?: JsonRpcTimeoutCode;
   /** 协议杂音出口（服务器通知等——debug 级，诊断可见不进上下文） */
   onNoise?: (message: string) => void;
+  /**
+   * 通知消费钩子（LSP 复用桥时声明——2026-08-30 LSP 刀加法面）：在场则全部
+   * 服务器通知改派本口（method+params 原样），消费方自过滤关心的方法名；
+   * 不在场行为零变化（通知仍走 onNoise 杂音口——mcp 现状语义）
+   */
+  onNotification?: (method: string, params: unknown) => void;
 }
 
 /**
@@ -65,12 +72,13 @@ export class JsonRpcConnection {
     this.opts = opts;
   }
 
-  /** 结清全部 pending 并封桥（子进程退出/主动关停时调用——参数即拒绝理由） */
+  /** 结清全部 pending 并封桥（子进程退出/主动关停时调用——参数即拒绝理由；拒绝码随注入的 defaultTimeoutCode——lsp 桥即 LSP_CONNECT_FAILED） */
   close(reason: string): void {
     this.closed = true;
+    const code = this.opts.defaultTimeoutCode ?? MCP_CONNECT_FAILED;
     for (const [, entry] of this.pending) {
       clearTimeout(entry.timer);
-      entry.reject(new AppError(MCP_CONNECT_FAILED, reason));
+      entry.reject(new AppError(code, reason));
     }
     this.pending.clear();
   }
@@ -92,7 +100,8 @@ export class JsonRpcConnection {
     opts?: { timeoutMs?: number; timeoutCode?: JsonRpcTimeoutCode },
   ): Promise<unknown> {
     if (this.closed) {
-      return Promise.reject(new AppError(MCP_CONNECT_FAILED, `连接已关闭，请求被拒：${method}`));
+      const code = this.opts.defaultTimeoutCode ?? MCP_CONNECT_FAILED;
+      return Promise.reject(new AppError(code, `连接已关闭，请求被拒：${method}`));
     }
     const id = this.nextId++;
     const timeoutMs = opts?.timeoutMs ?? this.opts.defaultTimeoutMs ?? 60_000;
@@ -179,9 +188,14 @@ export class JsonRpcConnection {
       this.opts.writeLine(JSON.stringify(frame));
       return;
     }
-    // 通知腿：忽略（tools/list_changed 不热刷——改配置走 /reload）
+    // 通知腿：onNotification 在场改派消费口（LSP publishDiagnostics——本类
+    // 2026-08-30 LSP 刀加法面）；不在场维持 mcp 现状（杂音口忽略）
     if (msg.method !== undefined) {
-      this.opts.onNoise?.(`服务器通知（忽略）：${msg.method}`);
+      if (this.opts.onNotification !== undefined) {
+        this.opts.onNotification(msg.method, msg.params);
+      } else {
+        this.opts.onNoise?.(`服务器通知（忽略）：${msg.method}`);
+      }
     }
   }
 }

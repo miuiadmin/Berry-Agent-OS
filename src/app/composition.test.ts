@@ -49,7 +49,7 @@ function writeEntryFile(dir: string, file = 'entry.ts'): string {
 
 /* ---------------- 官方默认层隔离 ---------------- */
 
-/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3） */
+/** 官方默认层行 id 集（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕 + web 第八行 + compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行——契约篇 §5.1/§5.4/§6.6/§1.5.2/内核边界篇席 20/§3.4/会话篇 §5.3/契约篇 §6.7） */
 const DEFAULT_LAYER_IDS = new Set([
   'chat',
   'memory',
@@ -62,6 +62,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'compaction',
   'admin',
   'checkpoint',
+  'lsp',
 ]);
 
 /**
@@ -93,12 +94,13 @@ describe('overlay 装载与拒绝式校验', () => {
   it('overlay 不存在 = 空 overlay：零配置首启合法（用户层空树；官方默认层照常打底）', () => {
     const dataDir = makeDataDir();
     const report = loadComposition(dataDir);
-    // 官方默认层十行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
+    // 官方默认层十二行：chat 首行（应用面第一纵切——对话是应用）+ memory 次行 +
     // subagent 第三行 + goal 第四行 + scheduler 第五行 + mcp 第六行（客户端桥
     // 第一刀）+ tools 第七行（Ring 1 行树化起算行——契约篇 §5.1 节奏表）
     // + web 第八行（web 刀一批三件——契约篇 §1.5.2）+ compaction 第九行
     // + admin 第十行（平台管理面第一刀——契约篇 §3.4）
     // + checkpoint 第十一行（工作区快照·回退——会话篇 §5.3）
+    // + lsp 第十二行（语言服务器件——契约篇 §6.7）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -112,8 +114,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'compaction', pkg: 'builtin:compaction' },
       { id: 'admin', pkg: 'builtin:admin' },
       { id: 'checkpoint', pkg: 'builtin:checkpoint' },
+      { id: 'lsp', pkg: 'builtin:lsp' },
     ]);
-    expect(report.plan).toHaveLength(11);
+    expect(report.plan).toHaveLength(12);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -579,6 +582,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubCompaction = { name: 'compaction-stub', apply: async () => {} };
     const stubAdmin = { name: 'admin-stub', apply: async () => {} };
     const stubCheckpoint = { name: 'checkpoint-stub', apply: async () => {} };
+    const stubLsp = { name: 'lsp-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -591,6 +595,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:compaction': stubCompaction,
       'builtin:admin': stubAdmin,
       'builtin:checkpoint': stubCheckpoint,
+      'builtin:lsp': stubLsp,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -604,6 +609,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'compaction', pkg: 'builtin:compaction' },
       { id: 'admin', pkg: 'builtin:admin' },
       { id: 'checkpoint', pkg: 'builtin:checkpoint' },
+      { id: 'lsp', pkg: 'builtin:lsp' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -617,6 +623,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'compaction', pkg: 'builtin:compaction', builtin: stubCompaction },
       { id: 'admin', pkg: 'builtin:admin', builtin: stubAdmin },
       { id: 'checkpoint', pkg: 'builtin:checkpoint', builtin: stubCheckpoint },
+      { id: 'lsp', pkg: 'builtin:lsp', builtin: stubLsp },
     ]);
   });
 

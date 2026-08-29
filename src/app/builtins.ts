@@ -20,6 +20,8 @@ import { createSchedulerApp, migrations as schedulerMigrations } from '../schedu
 import type { SchedulerAppDeps } from '../scheduler/index.js';
 import { createMcpApp } from '../mcp/index.js';
 import type { McpAppDeps } from '../mcp/index.js';
+import { createLspApp } from '../lsp/index.js';
+import type { LspAppDeps } from '../lsp/index.js';
 import { createWebApp } from '../web/index.js';
 import type { WebAppOverrides } from '../web/index.js';
 import { createCompactionApp } from '../compaction/index.js';
@@ -44,6 +46,13 @@ export interface BuiltinRegistryOptions {
   readonly schedulerDeps?: Omit<SchedulerAppDeps, 'connection'>;
   /** mcp 件闭包依赖束（spawnServer 组装 = app/mcp-spawn.ts 产物 + exec killTree + 数据目录——契约篇 §6.6 冷读 #1 上提组合根） */
   readonly mcpDeps: McpAppDeps;
+  /**
+   * lsp 件闭包依赖束（默认层第十二行，契约篇 §6.7 冷读同款上提）：spawnServer
+   * = 复用 mcp-spawner 工厂另建实例（workspace 腿传 rootUri 物理根）+ killTree
+   * + 登记簿（<dataDir>/lsp/children.json）+ rootPhysicalRoot/resolvePath 锚 +
+   * 桥核工厂——lsp 结构上不见 mcp/exec（组合根装配）
+   */
+  readonly lspDeps: LspAppDeps;
   /** web 件依赖覆盖缝（可选——生产零依赖不传；组合根全栈测试注入 fetchImpl/lookup，mock 停在外部边界） */
   readonly webOverrides?: WebAppOverrides;
   /** tools 件闭包依赖束（Ring 1 行树化批——管道 gate 落点/可写根推导器〔safety 同源产物，宿主构造〕/工作区活取值） */
@@ -127,6 +136,10 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // spawn/kill 经闭包注入（组合根 app/mcp-spawn.ts——mcp 结构上不见 exec）；
     // servers 空时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）
     'builtin:mcp': createMcpApp(opts.mcpDeps),
+    // lsp 官方件（官方默认层第十二行，LSP 服务器桥第一刀——契约篇 §6.7）：惰性
+    // spawn + 3 连败熔断 + 四工具 + write/edit 后诊断注入 post 行。servers 空
+    // 时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）
+    'builtin:lsp': createLspApp(opts.lspDeps),
     // web 官方件（第八行，契约篇 §1.5.2 web 刀）：fetch 工具 + ctx.fetch 服务 +
     // SSRF 五卫生件一批三件——零宿主资源闭包（最简官方件形态）；恒注册
     //（config.fetch:false 只关模型面工具，服务面恒在——「有但省」变体二）

@@ -426,19 +426,24 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
         /* 阶段二：顺序应用（无回滚——语义错误已在阶段一全部暴露，此处只剩物理写失败；
            写目标/观察回填同 write 工具口径：物理走 canonical，观察键走用户拼写） */
         const summary: string[] = [];
+        /** 结构化操作账（post 行消费面——lsp 诊断注入按 op 分 delete/didClose 与写组；
+           path 为 canonical 绝对路径与 write 工具 details.path 同口径） */
+        const operations: Array<{ op: string; path: string }> = [];
         for (const item of planned) {
           if (item.op.kind === 'delete') {
             await rm(item.canonical);
             summary.push(`deleted ${item.op.path}`);
+            operations.push({ op: 'delete', path: item.canonical });
             continue;
           }
           await writeFile(item.canonical, item.content!, 'utf8');
           const after = await currentVersion(item.canonical);
           if (after !== undefined) observed.observePresent(item.abs, after);
           summary.push(`${item.op.kind === 'add' ? 'added' : 'updated'} ${item.op.path}`);
+          operations.push({ op: item.op.kind, path: item.canonical });
         }
         return textResult(`补丁已应用（${summary.length} 个操作）：\n${summary.join('\n')}`, {
-          operations: summary,
+          operations,
         });
       });
     },

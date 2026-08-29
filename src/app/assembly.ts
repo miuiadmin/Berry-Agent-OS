@@ -61,6 +61,7 @@ import type {
   ApprovalRequest,
   GateRowFilter,
   SandboxMode,
+  SandboxService,
 } from '../safety/index.js';
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
@@ -150,13 +151,15 @@ import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, realpathSync, mkdirSync } from 'node:fs';
+import { join, isAbsolute, resolve } from 'node:path';
 // ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
-import { ChildRegistry } from '../mcp/index.js';
+import { ChildRegistry, JsonRpcConnection } from '../mcp/index.js';
+// lsp 件闭包类型（组合根缝——lsp 结构上不见 mcp/exec/safety，全经本缝注入）
+import type { LspAppDeps, LspServerConfig, SpawnedProcess } from '../lsp/index.js';
 import { dataDir, dbPath, ensureDbDir } from './paths.js';
-import { setProjectAliases } from '../context/workspace.js';
+import { setProjectAliases, canonicalWorkspaceRoot } from '../context/workspace.js';
 import type { CompositionReloadedPayload } from '../contracts/events.js';
 
 /**
@@ -192,6 +195,60 @@ function loadProjectAliases(dir: string, warn: (message: string) => void): Recor
     warn(`project-aliases.json 解析失败，整表忽略：${describeError(err)}`);
     return {};
   }
+}
+
+/**
+ * lsp 件闭包组装（契约篇 §6.7 落码形态——组合根缝，mcp-spawn 同款纪律）：
+ * - rootUri 物理根 = canonical 工作区根 realpath（M6 裁决——别名层排除；
+ *   realpath 失败原样保留交 confine 后续层如实报错，realizeRoot 同款容错）；
+ * - spawner 复用 createMcpSpawner 另建实例，workspace 腿传物理根——confine
+ *   的 workspaceRoot/writableRoots 与 rootUri 同源（M7 裁决）；wrapper 在
+ *   config.env 之上钉 TMPDIR=<dataDir>/lsp/tmp（external carrier 先例——
+ *   防服务器临时文件写 /tmp 逃出可写根）；
+ * - 登记簿/桥核/树杀全经注入：lsp 结构上不见 mcp/exec/safety。
+ */
+export function createLspAssemblyDeps(dataDirPath: string, sandbox: SandboxService, workspace: string): LspAppDeps {
+  /** rootUri 物理根（惰性求值——装载期不求值，首连接才落地） */
+  const rootPhysicalRoot = (): string => {
+    const canonical = canonicalWorkspaceRoot(workspace);
+    try {
+      return realpathSync(canonical);
+    } catch {
+      return canonical;
+    }
+  };
+  // 复用 mcp spawner 工厂另建实例（probe-once 旗独立于 mcp 实例——互不消耗）
+  const rawSpawn = createMcpSpawner(dataDirPath, sandbox, rootPhysicalRoot());
+  // per-域 TMPDIR 路径（external carrier 先例——防服务器临时文件写 /tmp 逃出
+  // 可写根）；建目录惰性到首 spawn（行惰性无害 = 零落盘：dump-config 等诊断
+  // 面构造 deps 不触盘）
+  const lspTmp = join(dataDirPath, 'lsp', 'tmp');
+  let tmpEnsured = false;
+  return {
+    spawnServer: async (config: LspServerConfig): Promise<SpawnedProcess> => {
+      if (!tmpEnsured) {
+        try {
+          mkdirSync(lspTmp, { recursive: true });
+        } catch {
+          // 容错：read-only 数据域等极端形态——服务器写临时文件时如实报错
+        }
+        tmpEnsured = true;
+      }
+      const child = await rawSpawn({
+        command: config.command,
+        ...(config.args !== undefined ? { args: config.args } : {}),
+        // TMPDIR 叠在用户 env 之上（钉数据域——服务器临时文件不逃可写根）
+        env: { ...config.env, TMPDIR: lspTmp },
+      });
+      return child; // SpawnedChild 与 SpawnedProcess 结构同形（帧无关桥投影）
+    },
+    killTree,
+    registry: new ChildRegistry(join(dataDirPath, 'lsp', 'children.json')),
+    rootPhysicalRoot,
+    // 与 fs 工具族同 workspace 锚（resolveTarget 同式——相对路径解析一致性）
+    resolvePath: (p: string): string => (isAbsolute(p) ? resolve(p) : resolve(workspace, p)),
+    newConnection: (opts) => new JsonRpcConnection(opts),
+  };
 }
 
 /** 缺省模型（Anthropic-first 拍板；APP_MODEL env 或 RuntimeOptions.model 覆盖） */
@@ -1364,6 +1421,13 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       killTree,
       dataDir: dataDir(),
     },
+    // lsp 件闭包（默认层第十二行，契约篇 §6.7 冷读同款上提）：spawner 复用
+    // createMcpSpawner 另建实例（workspace 腿传 rootUri 物理根——canonical 根
+    // realpath，别名层排除；confine writableRoots 与 rootUri 同源）+ wrapper
+    // 覆盖 TMPDIR 钉 <dataDir>/lsp/tmp（external carrier 同款先例）+ 登记簿
+    // <dataDir>/lsp/children.json + 桥核工厂注入 JsonRpcConnection（lsp 结构
+    // 上不见 mcp——帧无关桥组合根装配）。resolvePath 与 fs 工具族同 workspace 锚
+    lspDeps: createLspAssemblyDeps(dataDir(), sandbox, workspace),
     // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
     //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
     // deps（rootsProvider——见 chatBundle 接线处）。rowApp 探针 = D1 注册面

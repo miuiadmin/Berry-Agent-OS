@@ -41,6 +41,7 @@ const MODULE_EDGES = {
   // mcp = stdio-only 客户端桥（2026-08-26 第一刀，契约篇 §6.6）：spawn/kill 经
   // 组合根闭包注入（app/mcp-spawn.ts）——结构上不见 exec/tools（冷读 #1）
   mcp: ['contracts', 'context'],
+  lsp: ['contracts', 'context'],
   // web = 官方 web 件聚落（2026-08-26 web 刀，契约篇 §1.5.2）：fetch 工具 +
   // ctx.fetch 原语 + SSRF 五卫生件——工具注册经 ctx.get('tools') 服务面、管道
   // 经 ToolsService.executor（类型住 contracts）、schema 经 contracts typebox
@@ -101,6 +102,9 @@ const MODULE_EDGES = {
     'bridge',
     'channels',
     'chat',
+    // lsp = 语言服务器官方件（契约篇 §6.7 第十二行）：builtins 注册 + lspDeps
+    // 闭包（confined spawner 的 lsp 实例/登记簿/桥核工厂——assembly 同构）
+    'lsp',
   ],
 };
 

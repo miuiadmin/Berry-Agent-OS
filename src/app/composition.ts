@@ -82,6 +82,12 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // 卸掉即无回退安全网，核心循环不破（曾回退过的旧日志可读性不随行装载漂移
   // ——词汇宿主面注册）
   { id: 'checkpoint', pkg: 'builtin:checkpoint' },
+  // 第十二行 = lsp 行（内核边界篇席 24，契约篇 §6.7 工作台三件第三刀
+  // 2026-08-30——Ring 2 真·可卸库角色行）：LSP 服务器桥（惰性 spawn + 3 连败
+  // 熔断）+ 四工具（diagnostics/symbols/definitions/references）+ write/edit
+  // 后诊断注入 post 行。servers 缺省空 = 行惰性无害零 spawn；卸掉即无 LSP
+  // 能力，核心循环不破
+  { id: 'lsp', pkg: 'builtin:lsp' },
 ];
 
 /**
