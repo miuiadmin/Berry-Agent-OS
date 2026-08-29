@@ -43,9 +43,17 @@ function stubContext(): {
 /** 依赖桩：全部腿记调用次数（apply 触达面由此断言）+ ui 桩可注入 */
 function stubDeps(): {
   deps: WebuiAppDeps;
-  calls: { addDisplay: number; ui: number; submitTo: number; historyFor: number; sessionsFor: number };
+  calls: {
+    addDisplay: number;
+    ui: number;
+    submitTo: number;
+    historyFor: number;
+    sessionsFor: number;
+    openSession: number;
+    todoFor: number;
+  };
 } {
-  const calls = { addDisplay: 0, ui: 0, submitTo: 0, historyFor: 0, sessionsFor: 0 };
+  const calls = { addDisplay: 0, ui: 0, submitTo: 0, historyFor: 0, sessionsFor: 0, openSession: 0, todoFor: 0 };
   const deps: WebuiAppDeps = {
     addDisplay: () => {
       calls.addDisplay += 1;
@@ -61,6 +69,14 @@ function stubDeps(): {
     sessionsFor: () => {
       calls.sessionsFor += 1;
       return [];
+    },
+    openSession: async () => {
+      calls.openSession += 1;
+      return undefined;
+    },
+    todoFor: () => {
+      calls.todoFor += 1;
+      return undefined;
     },
     ui: () => {
       calls.ui += 1;

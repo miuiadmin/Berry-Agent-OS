@@ -95,7 +95,7 @@ export interface BuiltinRegistryOptions {
   readonly channelsDeps: ChannelsAppDeps;
   /**
    * webui 件闭包依赖束（默认层第十四行，契约篇 §6.8）：宿主面全闭包注入
-   * （addDisplay/submitTo/historyFor/sessionsFor/ui/themeFor/version）。
+   * （addDisplay/submitTo/historyFor/sessionsFor/openSession/todoFor/ui/version）。
    * 行缺省 enabled:false 惰性零监听——deps 恒传不随 enabled 变
    */
   readonly webuiDeps: WebuiAppDeps;

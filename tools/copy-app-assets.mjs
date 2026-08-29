@@ -24,13 +24,15 @@ if (!existsSync(distRoot)) {
   process.exit(1);
 }
 
-/** 递归收集目录下全部 .md 文件（技能资产——子树不含 .md 即返回空） */
+/** 递归收集目录下全部 .md 文件（技能资产——子树不含 .md 即返回空；webui/client 排除：SPA 源树非技能资产域） */
 function collectMarkdown(dir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...collectMarkdown(full));
-    else if (entry.endsWith('.md')) out.push(full);
+    if (statSync(full).isDirectory()) {
+      if (full === join(srcRoot, 'webui', 'client')) continue;
+      out.push(...collectMarkdown(full));
+    } else if (entry.endsWith('.md')) out.push(full);
   }
   return out;
 }

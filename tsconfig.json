@@ -19,5 +19,6 @@
       "berryagent": ["./src/contracts/index.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/webui/client"]
 }

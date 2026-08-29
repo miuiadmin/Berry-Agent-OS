@@ -18,17 +18,25 @@ import { createWebuiServer } from './server.js';
 import { WebuiChannel } from './channel.js';
 import type { WebuiAppDeps } from './types.js';
 
-/** 占位依赖束（各取数腿返回测试常量——路由面只管转发） */
-function stubDeps(): WebuiAppDeps {
+/** 占位依赖束（各取数腿返回测试常量——路由面只管转发；override 供单用例改写单腿） */
+function stubDeps(override?: Partial<WebuiAppDeps>): WebuiAppDeps {
   return {
     addDisplay: () => undefined,
     submitTo: (id) => id === 'live',
     historyFor: (id) => (id === 'live' ? [{ role: 'user', text: 'hi' }] : undefined),
     sessionsFor: () => [{ id: 'live', appId: 'chat', active: true }],
+    openSession: async () => ({ id: 'opened', appId: 'coder', active: true }),
+    todoFor: (id) =>
+      id === 'live'
+        ? [{ content: '做一件事', status: 'in_progress', activeForm: '正在做' }]
+        : id === 'closed'
+          ? null
+          : undefined,
     ui: () => {
       throw new Error('服务面测试不触 ui 腿');
     },
     version: 'test-1.0.0',
+    ...override,
   };
 }
 
@@ -116,6 +124,59 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     expect(hit.status).toBe(200);
     expect(JSON.parse(hit.text)).toEqual({ messages: [{ role: 'user', text: 'hi' }] });
     const miss = await send(port, { method: 'GET', path: '/api/sessions/ghost/messages' });
+    expect(miss.status).toBe(404);
+  });
+
+  it('POST /api/sessions：201 清单条目原样转发 / 空 body 合法 / 坏 JSON 400', async () => {
+    const created = await send(port, {
+      method: 'POST',
+      path: '/api/sessions',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(created.status).toBe(201);
+    expect(JSON.parse(created.text)).toEqual({ id: 'opened', appId: 'coder', active: true });
+    // 空 body（无 Content-Length 的裸 POST）——readBody 归一 '{}' 同 submit 管线
+    const bare = await send(port, { method: 'POST', path: '/api/sessions' });
+    expect(bare.status).toBe(201);
+    const bad = await send(port, {
+      method: 'POST',
+      path: '/api/sessions',
+      headers: { 'content-type': 'application/json' },
+      body: 'not-json',
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('POST /api/sessions：openSession 开不出 → 503（服务降级非 404）', async () => {
+    const port2 = await grabPort();
+    const chan2 = new WebuiChannel();
+    const deps = stubDeps({ openSession: async () => undefined }); // 两因严合：无持久层/默认应用兜底态
+    const { server: s2, close: c2 } = createWebuiServer({
+      port: port2,
+      host: '127.0.0.1',
+      deps,
+      channel: chan2,
+      staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
+      version: 't',
+    });
+    await new Promise<void>((resolve) => s2.listen(port2, '127.0.0.1', () => resolve()));
+    const r = await send(port2, { method: 'POST', path: '/api/sessions', body: '{}' });
+    expect(r.status).toBe(503);
+    chan2.dispose();
+    await c2();
+  });
+
+  it('/api/sessions/:id/todo：条目 200 / 无表 null 200 / 未知 404', async () => {
+    const withItems = await send(port, { method: 'GET', path: '/api/sessions/live/todo' });
+    expect(withItems.status).toBe(200);
+    expect(JSON.parse(withItems.text)).toEqual({
+      todo: [{ content: '做一件事', status: 'in_progress', activeForm: '正在做' }],
+    });
+    const empty = await send(port, { method: 'GET', path: '/api/sessions/closed/todo' });
+    expect(empty.status).toBe(200);
+    expect(JSON.parse(empty.text)).toEqual({ todo: null });
+    const miss = await send(port, { method: 'GET', path: '/api/sessions/ghost/todo' });
     expect(miss.status).toBe(404);
   });
 

@@ -189,6 +189,42 @@ function postSubmit(port: number, sessionId: string, text: string): Promise<{ st
   });
 }
 
+/** POST JSON 助手（通用面——submit 之外的 POST 端点；显式 Content-Length + req.end 纪律） */
+function postJson(port: number, path: string, body: string): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        host: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) },
+      },
+      (res: IncomingMessage) => {
+        res.setEncoding('utf8');
+        let text = '';
+        res.on('data', (chunk: string) => (text += chunk));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) }));
+      },
+    );
+    req.on('error', reject);
+    req.end(body); // 不 end 不发（本纵切测试实证教训）
+  });
+}
+
+/** 轮询拉投影腿直到消息型序等于期望（submit 后轮次异步结算——轮询等真值） */
+async function waitMessages(base: string, sessionId: string, expected: string[], timeoutMs = 8000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const res = await getJson(`${base}/api/sessions/${encodeURIComponent(sessionId)}/messages`);
+    const kinds = ((res.body as { messages?: { type: string }[] }).messages ?? []).map((m) => m.type);
+    if (JSON.stringify(kinds) === JSON.stringify(expected)) return;
+    if (Date.now() > deadline)
+      throw new Error(`messages 轮询超时（当前型序 ${JSON.stringify(kinds)}，期望 ${JSON.stringify(expected)}）`);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 /* ---------------- 用例 ---------------- */
 
 describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', () => {
@@ -253,6 +289,85 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
     } finally {
       sse.close();
       rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('刀二全栈：开新驻留切前 / todo 端点两腿 / 已闭会话 store 兜底只读', async () => {
+    // 双 boot 同库不同 cwd（双开护栏立法形态）：boot A 落库关停后，boot B 的
+    // 注册表只含 B 自己——A 成「已闭会话」（store-only），刀二三端点兜底腿全真走
+    const dir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-webui-db-')));
+    const dbPath = join(dir, 'two-boot.db');
+    const wsA = makeWorkspace();
+    const wsB = makeWorkspace();
+    let rtA: AppRuntime | undefined;
+    try {
+      // boot A：submit 一轮（事件落库）后显式关停（write-behind 随 shutdown flush）
+      const portA = await grabPort();
+      rtA = await createRuntime({
+        dbPath,
+        workspace: wsA,
+        interactive: false,
+        webuiPort: portA,
+        streamFn: scriptedStream([textMessage('boot A 答')]),
+      });
+      const baseA = `http://127.0.0.1:${portA}`;
+      const listA = (await getJson(`${baseA}/api/sessions`)).body as { id: string; active: boolean }[];
+      const sessionA = listA.find((s) => s.active)!.id;
+      expect((await postSubmit(portA, sessionA, 'A 轮')).status).toBe(202);
+      await waitMessages(baseA, sessionA, ['user', 'assistant']);
+      await rtA.shutdown();
+      rtA = undefined;
+
+      // boot B：另一 cwd（无续接对象——boot 开自己的新会话）
+      const portB = await grabPort();
+      const rtB = await createRuntime({
+        dbPath,
+        workspace: wsB,
+        interactive: false,
+        webuiPort: portB,
+        streamFn: scriptedStream([textMessage('boot B 答')]),
+      });
+      runtimes.push(rtB);
+      const baseB = `http://127.0.0.1:${portB}`;
+
+      // ① 清单：A 以近史行披露 active:false（披露即兑现——点开不再 404）
+      const listB = (await getJson(`${baseB}/api/sessions`)).body as { id: string; active: boolean }[];
+      expect(listB.find((s) => s.id === sessionA)?.active).toBe(false);
+      const sessionB = listB.find((s) => s.active)!.id;
+
+      // ② 已闭 messages：store 装载只读派生（loadSession + deriveMessages 一次即弃）
+      const history = await getJson(`${baseB}/api/sessions/${sessionA}/messages`);
+      expect(history.status).toBe(200);
+      const kindsA = ((history.body as { messages: { type: string }[] }).messages ?? []).map((m) => m.type);
+      expect(kindsA).toEqual(['user', 'assistant']);
+
+      // ③ 已闭 todo：store 兜底 fold（无 todo/write → {todo:null} 档）
+      expect(await getJson(`${baseB}/api/sessions/${sessionA}/todo`)).toEqual({ status: 200, body: { todo: null } });
+
+      // ④ 已闭 submit：404（只读——复活面挂刀三）
+      expect((await postSubmit(portB, sessionA, 'x')).status).toBe(404);
+
+      // ⑤ 开新：201 + 默认应用 coder + 驻留（B 的 boot 条目仍 active）
+      const opened = await postJson(portB, '/api/sessions', '{}');
+      expect(opened.status).toBe(201);
+      const summary = opened.body as { id: string; appId: string; active: boolean };
+      expect(summary.active).toBe(true);
+      expect(summary.appId).toBe('coder');
+      const activeIds = ((await getJson(`${baseB}/api/sessions`)).body as { id: string; active: boolean }[])
+        .filter((s) => s.active)
+        .map((s) => s.id);
+      expect(activeIds).toContain(summary.id);
+      expect(activeIds).toContain(sessionB); // 开新不退役既有（/app new 同款驻留语义）
+
+      // ⑥ 新会话 todo {todo:null} 档 + submit 全链（openSession 开的会话真可跑）
+      expect(await getJson(`${baseB}/api/sessions/${summary.id}/todo`)).toEqual({ status: 200, body: { todo: null } });
+      expect((await postSubmit(portB, summary.id, '新会话首轮')).status).toBe(202);
+      await waitMessages(baseB, summary.id, ['user', 'assistant']);
+    } finally {
+      if (rtA !== undefined) await rtA.shutdown().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(wsA, { recursive: true, force: true });
+      rmSync(wsB, { recursive: true, force: true });
     }
   });
 

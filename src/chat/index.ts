@@ -23,3 +23,6 @@ export type {
 } from './app.js';
 export { createDurableSinks, projectedToAgentMessages } from './durable.js';
 export type { DurableSinks } from './durable.js';
+// todo 折叠纯函数（刀二 web 面消费：GET /api/sessions/:id/todo 组合根闭包取用）
+export { foldCurrentTodo } from './todo.js';
+export type { TodoItem, TodoStatus } from './todo.js';

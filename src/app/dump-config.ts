@@ -259,12 +259,14 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
               onUiError: () => undefined,
             },
             // webui 件闭包占位（默认层第十四行——enabled:false 行缺省惰性零监听，
-            // 诊断面 apply 永不跑；五腿全占位，注册表键在即树形不失真）
+            // 诊断面 apply 永不跑；七腿全占位，注册表键在即树形不失真）
             webuiDeps: {
               addDisplay: () => undefined,
               submitTo: () => false,
               historyFor: () => undefined,
               sessionsFor: () => [],
+              openSession: async () => undefined,
+              todoFor: () => undefined,
               ui: () => {
                 throw new Error('dump-config 占位：ui 服务在诊断面不可达');
               },

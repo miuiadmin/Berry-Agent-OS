@@ -114,7 +114,7 @@ import {
 } from '../contracts/errors.js';
 import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
-import { createChatApp, CHAT_APP_ID } from '../chat/index.js';
+import { createChatApp, CHAT_APP_ID, foldCurrentTodo } from '../chat/index.js';
 import {
   createPathsService,
   loadComposition,
@@ -1513,10 +1513,44 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         entry.driver.submit(text);
         return true;
       },
-      // 历史投影：事件日志 deriveMessages（无投影键的空会话 = 空数组）
+      // 历史投影：事件日志 deriveMessages。registry miss（已闭会话）走 store
+      // 装载只读派生（刀二规范细化）：loadSession 纯读不 append（无 write-behind
+      // 悬挂写）、不 recover 不注册——derive 一次即弃，孤儿 tool/call 容错在
+      // deriveMessages 内建。两腿同形应答（undefined = 会话不存在）
       historyFor: (sessionId) => {
         const entry = registry.entries.get(sessionId);
-        return entry === undefined ? undefined : deriveMessages(entry.session.events);
+        if (entry !== undefined) return deriveMessages(entry.session.events);
+        const loaded = persistence ? persistence.loadSession(sessionId) : undefined;
+        return loaded === undefined ? undefined : deriveMessages(loaded.events);
+      },
+      // todo 折叠（foldCurrentTodo 归一产物）：与 historyFor 同款两腿——活条目
+      // 内存真相 ∪ 已闭 store 兜底（null = 无表合法档）
+      todoFor: (sessionId) => {
+        const entry = registry.entries.get(sessionId);
+        if (entry !== undefined) return foldCurrentTodo(entry.session.events);
+        const loaded = persistence ? persistence.loadSession(sessionId) : undefined;
+        return loaded === undefined ? undefined : foldCurrentTodo(loaded.events);
+      },
+      // 开新会话（刀二 = POST /api/sessions 腿）：registry.open() 一条龙——默认
+      // 应用解析 per-open 活取、既有条目驻留不退役、切宿主前台 focus（/app new
+      // 同款语义）。undefined 两因（无持久层/默认应用兜底态）由 open 内化，此
+      // 处只透传。cwd/createdAt 取 store 行（write-behind 迟滞时缺省——可选键，
+      // 清单下次刷新自然补齐）
+      openSession: async () => {
+        const entry = await registry.open();
+        if (entry === undefined) return undefined;
+        const id = entry.session.header.sessionId;
+        const row = persistence ? persistence.store.recentSessions(50).find((r) => r.id === id) : undefined;
+        const accent = officialApps.get(entry.appId)?.theme?.accent;
+        return {
+          id,
+          appId: entry.appId,
+          ...(row !== undefined && row.cwd !== null ? { cwd: row.cwd } : {}),
+          ...(row !== undefined ? { createdAt: row.createdAt } : {}),
+          updatedAt: entry.session.events.at(-1)?.time,
+          active: true,
+          ...(accent !== undefined ? { accent } : {}),
+        };
       },
       // 会话清单两源合并：注册表活条目（内存真相，含 retired→active:false）∪
       // store 近史 50（旧会话迟滞披露——sync 不 flush，已决裁决：迟滞无害，
@@ -1530,6 +1564,8 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         for (const entry of registry.entries.values()) {
           seen.add(entry.session.header.sessionId);
           const row = recent.find((r) => r.id === entry.session.header.sessionId);
+          // accent 单源 = 清单条目内嵌（D4 theme web 兑现——themeFor 键已退役）
+          const accent = officialApps.get(entry.appId)?.theme?.accent;
           summaries.push({
             id: entry.session.header.sessionId,
             appId: entry.appId,
@@ -1537,31 +1573,30 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
             ...(row !== undefined ? { createdAt: row.createdAt } : {}),
             updatedAt: entry.session.events.at(-1)?.time,
             active: !entry.retired,
+            ...(accent !== undefined ? { accent } : {}),
           });
         }
         for (const row of recent) {
           if (seen.has(row.id)) continue;
+          // NULL app = 存量会话（app 列升级前的旧账）——归默认应用域（store 读脸
+          // 注记「归并归调用侧」在此兑现；两跳回落 + 兜底 chat 锚与 resolveDefault 同源）
+          const appId = row.app ?? resolveDefaultApp(officialApps, appGaps)?.id ?? CHAT_APP_ID;
+          // 近史行经归并 appId 同样命中清单 accent（兜底腿与活条目腿同构）
+          const accent = officialApps.get(appId)?.theme?.accent;
           summaries.push({
             id: row.id,
-            // NULL app = 存量会话（app 列升级前的旧账）——归默认应用域（store 读脸
-            // 注记「归并归调用侧」在此兑现；两跳回落 + 兜底 chat 锚与 resolveDefault 同源）
-            appId: row.app ?? resolveDefaultApp(officialApps, appGaps)?.id ?? CHAT_APP_ID,
+            appId,
             ...(row.cwd !== null ? { cwd: row.cwd } : {}),
             createdAt: row.createdAt,
             ...(row.lastEventAt !== null ? { updatedAt: row.lastEventAt } : {}),
             active: false,
+            ...(accent !== undefined ? { accent } : {}),
           });
         }
         return summaries;
       },
       // UI 服务晚绑（② 段 let 槽位——ring1 装载回填后闭包才可达）
       ui: () => ui,
-      // 主题取值：镜像 tui-main 闭包形态（officialApps :634 先于 builtins 构造）
-      themeFor: (sessionId) => {
-        const id = sessionId ?? registry.focus.sessionId;
-        const entry = id === undefined ? undefined : registry.entries.get(id);
-        return entry === undefined ? undefined : officialApps.get(entry.appId)?.theme?.accent;
-      },
       // 版本串（webui 边不含 app 模块——组合根注入）
       version: VERSION,
     },

@@ -133,13 +133,15 @@ const BARE_IMPORTS = {
 };
 const TEST_ONLY_BARE = new Set(['vitest']);
 
-/** 递归收集 src 下全部 ts 文件 */
+/** 递归收集 src 下全部 ts 文件（webui/client 排除——vite 打包域：bundler 解析 + JSX，不进 Node 模块 DAG，刀二冷读 CR-7/9 同族排除） */
 function collect(dir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) out.push(...collect(full));
-    else if (full.endsWith('.ts')) out.push(full);
+    if (statSync(full).isDirectory()) {
+      if (full === join(srcRoot, 'webui', 'client')) continue;
+      out.push(...collect(full));
+    } else if (full.endsWith('.ts')) out.push(full);
   }
   return out;
 }

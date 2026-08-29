@@ -12,13 +12,14 @@
   },
   "scripts": {
     "dev": "tsx src/app/main.ts",
-    "build": "tsc && node tools/copy-app-assets.mjs",
-    "typecheck": "tsc --noEmit",
+    "dev:webui": "vite dev -c src/webui/client/vite.config.ts",
+    "build": "tsc && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/webui/client",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:topology": "node tools/check-topology.mjs && node tools/check-events.mjs && node tools/check-tense.mjs",
-    "format": "prettier --write \"src/**/*.ts\" \"tools/**/*.mjs\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tools/**/*.mjs\""
+    "format": "prettier --write \"src/**/*.ts\" \"src/webui/client/**/*.tsx\" \"tools/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"src/webui/client/**/*.tsx\" \"tools/**/*.mjs\""
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.84.2",
@@ -30,11 +31,20 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
     "prettier": "^3.5.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
+    "vite": "^8.2.2",
     "vitest": "^4.1.7"
   }
 }

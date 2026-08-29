@@ -55,7 +55,7 @@ export interface WebuiDisplayEnvelope {
 /** display 族订阅者（经组合根 addDisplay 接入点转投——旁听非独占，TUI 并行消费） */
 export type WebuiDisplaySink = (envelope: WebuiDisplayEnvelope) => void;
 
-/** GET /api/sessions 清单条目（线格式 v1——契约篇 §6.8 端点面；标题挂刀二） */
+/** GET /api/sessions 清单条目（线格式 v1——契约篇 §6.8 端点面） */
 export interface WebuiSessionSummary {
   /** 会话 id */
   readonly id: string;
@@ -63,17 +63,30 @@ export interface WebuiSessionSummary {
   readonly appId: string;
   /** 工作目录（sessions 行直出；可缺省） */
   readonly cwd?: string;
-  /** 创建时刻（ISO 8601 字符串） */
+  /** 创建时刻（epoch 毫秒——sessions 行 createdAt 列直出；store 行迟到时可缺省） */
   readonly createdAt?: number;
-  /** 最近事件时刻（ISO 8601 字符串——events 表 MAX(time) 聚合，sessions 表无此列） */
+  /** 最近事件时刻（epoch 毫秒——events 表 MAX(time) 聚合，sessions 表无此列） */
   readonly updatedAt?: number;
-  /** 是否活会话（驱动注册表在场且未退役 = 可 submit；false = v1 只读） */
+  /** 是否活会话（驱动注册表在场且未退役 = 可 submit；false = 只读〔已闭 store 兜底〕） */
   readonly active: boolean;
+  /** 应用强调色（D4 theme 条款 web 兑现——sessionsFor 组装时按条目 appId 取清单 theme.accent；缺席 = 前端缺省色） */
+  readonly accent?: string;
+}
+
+/** todo 条目窄类型（chat 件 TodoItem 结构子集——status 收 string 判别面留给前端；同款先例 WebuiDisplayEnvelope） */
+export interface WebuiTodoItem {
+  /** 条目内容（祈使句短语） */
+  readonly content: string;
+  /** 状态三值：pending / in_progress / completed（chat 件 TodoStatus 的结构兼容面） */
+  readonly status: string;
+  /** 进行中条目的现在进行时描述（渲染时优先于 content） */
+  readonly activeForm?: string;
 }
 
 /**
  * webui 件构造依赖（组合根闭包注入——构造点早于 ring1 装载，全部为活取值/
- * 纯函数形态，调用时点恒在装载后）。刀三扩 `approvals` 键。
+ * 纯函数形态，调用时点恒在装载后）。刀二已扩 openSession/todoFor；刀三扩
+ * `approvals` 键。
  */
 export interface WebuiAppDeps {
   /** display 信封流接入点（与 tui-main front.addDisplay 同源点分流——旁听非独占） */
@@ -85,20 +98,29 @@ export interface WebuiAppDeps {
   readonly submitTo: (sessionId: string, text: string) => boolean;
   /**
    * 会话消息投影（拉投影腿——deriveMessages 产物）。@returns 会话不在册 =
-   * undefined（HTTP 404 判据；webui 不解释投影内容，序列化透传）
+   * undefined（HTTP 404 判据；webui 不解释投影内容，序列化透传）。已闭会话
+   * 由组合根走 store 装载只读派生（刀二规范细化——本键对服务面只表现为
+   * 「在册」）
    */
   readonly historyFor: (sessionId: string) => readonly unknown[] | undefined;
   /** 会话清单投影（驱动注册表活会话 ∪ sessions 表近史——组合根合并两源） */
   readonly sessionsFor: () => readonly WebuiSessionSummary[];
+  /**
+   * 开新会话（刀二 = `POST /api/sessions` 腿）：registry.open() 一条龙——默认
+   * 应用解析 per-open 活取、驻留（既有条目不退役）+ 切宿主前台 focus，与
+   * TUI `/app new` 同款语义（不为 web 特设「不切前台」参数）。
+   * @returns undefined = 开不出（无持久层或默认应用兜底态——HTTP 503 两因）；成功 = 清单条目（201 载荷）
+   */
+  readonly openSession: () => Promise<WebuiSessionSummary | undefined>;
+  /**
+   * todo 折叠（刀二 = `GET /api/sessions/:id/todo` 腿——foldCurrentTodo 归一
+   * 产物）。@returns null = 无表（合法档）；undefined = 会话不在册（HTTP 404）
+   */
+  readonly todoFor: (sessionId: string) => readonly WebuiTodoItem[] | null | undefined;
   /** ctx.ui 聚合面活取值（attach webui 广播后端用——builtins 构造点早于 ring1 装载） */
   readonly ui: () => UiService;
   /** 宿主版本号（GET /api/health 报告面——app/version.ts 同源经组合根注入，webui 边不含 app 模块） */
   readonly version: string;
-  /**
-   * 应用强调色查询（D4 theme 条款同签名——`sessionId` 可选，undefined = 当前
-   * 聚焦）。刀一仅声明面：消费点（SPA 注入）随刀二落
-   */
-  readonly themeFor?: (sessionId?: string) => string | undefined;
 }
 
 /* ------------------------------------------------------------------ */

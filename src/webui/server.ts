@@ -142,6 +142,43 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL, opts: 
     sendJson(res, 200, opts.deps.sessionsFor());
     return;
   }
+  // 开新会话（刀二 = SPA 新开按钮消费面）：body v1 恒空 `{}`——解析成功即可，
+  // 内容不校验不消费（未来扩展字段时再升 schema）。openSession() 一条龙
+  // （默认应用解析/驻留/切前台）全在组合根闭包内，服务面只译状态码
+  if (pathname === '/api/sessions' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (body === undefined) {
+      sendJson(res, 413, { error: 'body too large' });
+      return;
+    }
+    try {
+      JSON.parse(body === '' ? '{}' : body);
+    } catch {
+      sendJson(res, 400, { error: 'invalid json' });
+      return;
+    }
+    const summary = await opts.deps.openSession();
+    if (summary === undefined) {
+      // 两因严合 503：无持久层 / 默认应用兜底态（开不出新会话——服务降级非 404）
+      sendJson(res, 503, { error: 'session open unavailable' });
+      return;
+    }
+    sendJson(res, 201, summary);
+    return;
+  }
+  // todo 常驻面板数据源（刀二）：foldCurrentTodo 归一产物——null = 无表（合法
+  // 档，前端收起面板）；undefined = 会话不在册（404）。已闭会话由组合根闭包
+  // 走 store 装载只读派生，服务面对两腿同形
+  const todo = /^\/api\/sessions\/([^/]+)\/todo$/.exec(pathname);
+  if (todo !== null && req.method === 'GET') {
+    const items = opts.deps.todoFor(decodeSegment(todo[1]!));
+    if (items === undefined) {
+      sendJson(res, 404, { error: 'session not found' });
+      return;
+    }
+    sendJson(res, 200, { todo: items });
+    return;
+  }
   const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(pathname);
   if (messages !== null && req.method === 'GET') {
     // 拉投影腿（通道契约——SPA focus 换装全量重拉同 TUI 清屏重画语义）

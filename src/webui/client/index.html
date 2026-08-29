@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- SPA 入口页（vite root 即本目录——构建产物 index.html 落 dist/webui/，由宿主
+     webui 件静态分发；dev 形态本文件缺席时宿主静态面 404 = 诊断态不拒启） -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Berry — Web 通道</title>
+  </head>
+  <body>
+    <!-- SPA 挂载点（main.tsx 持 #root 引用渲染） -->
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

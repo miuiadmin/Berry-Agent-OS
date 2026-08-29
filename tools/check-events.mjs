@@ -43,7 +43,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /* 源码收集（src 下全部 .ts，排除测试与产物）                           */
 /* ------------------------------------------------------------------ */
 
-/** 递归收集 src 下全部 .ts 源文件（排除 .test.ts / dist / node_modules） */
+/** 递归收集 src 下全部 .ts 源文件（排除 .test.ts / dist / node_modules；webui/client 是 vite 打包域——bundler 解析与 JSX 不走本门禁，CR-9 同族排除） */
 function collectSources(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -51,6 +51,7 @@ function collectSources(dir) {
     const st = statSync(full);
     if (st.isDirectory()) {
       if (name === 'node_modules' || name === 'dist') continue;
+      if (full === join(ROOT, 'src', 'webui', 'client')) continue;
       out.push(...collectSources(full));
     } else if (name.endsWith('.ts') && !name.endsWith('.test.ts') && !name.endsWith('.d.ts')) {
       out.push(full);
