@@ -214,13 +214,14 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
    * 增补 2/4）：基线 = workspace ∪ 件数据根；行声明根越基线即
    * COMPOSITION_ROW_INVALID 拒（拒绝式——宁响亮不静默钳）；有效白名单 =
    * 基线 ∩ 行声明（声明缺席 = 全基线；交集可空 = 只读域）。
+   * 两道验：词法归一验（声明形）+ 实化后复验（R1 P0-5 立法，见内注）。
    */
   const resolveEffectiveRoots = (ext: NonNullable<BridgeFleetOptions['external']>, row: AppPlanRow): string[] => {
     const baseline = externalWritableRoots(ext.workspace, appDataDirOf(ext.dataDir, row.id));
     const declared = row.sandbox?.fs?.writableRoots;
     if (declared === undefined) return baseline;
-    // 声明根归一后逐一验在基线内（相等或隔分隔符前缀——子目录收窄合法，
-    // /ws-evil 撞 /ws 前缀不合法〔isInsideRoot 分隔符特判〕）
+    // 第一道·词法归一验：声明根归一后逐一验在基线内（相等或隔分隔符前缀——
+    // 子目录收窄合法，/ws-evil 撞 /ws 前缀不合法〔isInsideRoot 分隔符特判〕）
     const normalized = declared.map(canonicalPath);
     const outside = normalized.filter((d) => !baseline.some((b) => isInsideRoot(d, b)));
     if (outside.length > 0) {
@@ -230,7 +231,30 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           `闩二「只收窄不放大」拒绝式拒载（契约篇 §1.7 第三十七批；宁响亮不静默钳）`,
       );
     }
-    return normalized;
+    // 第二道·实化后复验（R1 P0-5，契约篇 §1.7 增补 2 R1 复盘批立法 2026-08-29）：
+    // 词法归一只挡词法层越界声明——末段组件不存在时 realpath 整体 ENOENT
+    // 原样返回、**中间 symlink 组件不被解析**，mkdirSync 预建会跟随 symlink
+    // 实化出越基线真身。预建（幂等——derivePmFlags 推导内还会再建，recursive
+    // 无害）后全链存在、realpath 解析真身，逐一复验在基线内、越界同码拒。
+    // 诚实边界：预建本身可能已落越基线空目录（痕迹残留，域死随行清扫覆盖
+    // 不到基线外）+ 复验与预建间换 symlink 的竞态窗（堵死需 openat 级原语，
+    // 非本批）——拒绝式执法拦的是域起 spawn 与 PM/OS 两层旗授权，装载拒绝
+    // 后行不生效、旗不会落地。
+    const realized = normalized.map((root) => {
+      mkdirSync(root, { recursive: true });
+      return canonicalPath(root);
+    });
+    const realizedOutside = realized.filter((r) => !baseline.some((b) => isInsideRoot(r, b)));
+    if (realizedOutside.length > 0) {
+      throw new AppError(
+        COMPOSITION_ROW_INVALID,
+        `行 ${row.id} 的 sandbox.fs.writableRoots 实化越界（${realizedOutside.join('、')}——预建跟随 symlink 解析出的真身不在执法基线 ${baseline.join('、')} 内）——` +
+          `闩二实化后复验拒绝式拒载（契约篇 §1.7 增补 2 R1 复盘批立法）`,
+      );
+    }
+    // 返回实化形根：PM 旗与 OS 层 confine 绑真身路径（rw bind 即真身，无
+    // symlink 漂移窗）
+    return realized;
   };
 
   /**

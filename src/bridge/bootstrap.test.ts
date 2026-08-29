@@ -20,9 +20,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
+import { chainCaller } from '../context/chain.js';
 import { loadApps } from '../context/loader.js';
-import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED } from '../contracts/errors.js';
-import { spawnWorkerDomain, makeRowLoader, workerEntryUrl, type WorkerDomain } from './bootstrap.js';
+import { BRIDGE_METHOD_NOT_FOUND, BRIDGE_WORKER_EXITED, APP_LOAD_FAILED } from '../contracts/errors.js';
+import {
+  spawnWorkerDomain,
+  makeRowLoader,
+  workerEntryUrl,
+  registerHostHandlers,
+  type WorkerDomain,
+} from './bootstrap.js';
+import { BridgeEndpoint } from './session.js';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -74,6 +82,18 @@ class FakeTools {
   readonly defs = new Map<string, ToolDefinition>();
   /** 已摘除的工具名序列（行回卷联动的观测面） */
   readonly removed: string[] = [];
+  /**
+   * 管道执行器桩（R1 P0-1 tool-run 管道化的断言面）：缺省 undefined = 装配
+   * 缺陷形态；按用例动态挂记录桩——记录 (def, toolCallId, origin) 传导帧
+   */
+  executor?: (
+    def: ToolDefinition,
+    toolCallId: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    onUpdate?: unknown,
+    origin?: 'model' | 'service',
+  ) => Promise<{ content: Array<{ type: string; text: string }> }>;
   register(def: ToolDefinition): () => void {
     this.defs.set(def.name, def);
     return () => {
@@ -285,5 +305,94 @@ describe('spawnWorkerDomain — 端到端（真 worker 子进程）', () => {
   it('workerEntryUrl：按宿主半自身形态判别 worker 同伴入口（.ts 源 → worker.ts / 编译产物 → worker.js）', () => {
     expect(workerEntryUrl('file:///repo/dist/bridge/bootstrap.js').href).toBe('file:///repo/dist/bridge/worker.js');
     expect(workerEntryUrl('file:///repo/src/bridge/bootstrap.ts').href).toBe('file:///repo/src/bridge/worker.ts');
+  });
+});
+
+/* ---------------- R1 安全收口：宿主处理器单测（2026-08-29 复盘批 P0-1 + 绑定验） ---------------- */
+
+describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收口回归锁）', () => {
+  /**
+   * 纯宿主单测台：假端点只记录 handle 注册的处理方，用例直接驱动 handler
+   * 函数——不经 worker 往返（R1 改动全在宿主处理器内：绑定验 + 管道化；
+   * 协议面 worker.ts 桩已由上方端到端用例覆盖）。
+   */
+  function setupHandlers() {
+    const handlers = new Map<string, (frame: unknown[], signal?: AbortSignal) => unknown>();
+    // 假端点：handle 记入表后链式返回（BridgeEndpoint 结构面的测试替身）
+    const fakeEndpoint = {
+      handle(service: string, method: string, fn: (frame: unknown[], signal?: AbortSignal) => unknown) {
+        handlers.set(`${service}.${method}`, fn);
+        return fakeEndpoint;
+      },
+    };
+    const root = createContext({ name: 'bridge-host-handlers-test' });
+    const tools = new FakeTools();
+    const bindings = new Map<string, { scope: ContextScope }>();
+    registerHostHandlers({
+      endpoint: fakeEndpoint as unknown as BridgeEndpoint,
+      workerId: 'unit-host',
+      bindings,
+      metaCache: new Map(),
+      toolRunSeq: 0,
+      root,
+      tools: tools as unknown as ToolsService,
+    });
+    return { handlers, root, tools, bindings };
+  }
+
+  it('svc-invoke / tool-run 伪造行 id 拒绝（R1 绑定验）：跨墙 rowId 是自报值——无宿主绑定即拒（防归因身份伪造，宪章八）', async () => {
+    const { handlers } = setupHandlers();
+    // svc-invoke：伪造从未装载的行 id → requireBinding 拒（修复前：直落
+    // root.get 分派——伪造归因身份污染清算面）
+    const svcInvoke = handlers.get('host.svc-invoke')!;
+    const forgedSvc = await rejection(
+      Promise.resolve().then(() => svcInvoke(['forged-row', 'fx/taps', 'add', [1, 2]])),
+    );
+    expect(forgedSvc.code).toBe(APP_LOAD_FAILED);
+    expect(forgedSvc.message).toContain('无宿主绑定');
+    // tool-run 同形（绑定验在工具解析与执行器取用之前——伪不行 id 进不了管道）
+    const toolRun = handlers.get('host.tool-run')!;
+    const forgedTool = await rejection(Promise.resolve().then(() => toolRun(['forged-row', 'host/echo', {}])));
+    expect(forgedTool.code).toBe(APP_LOAD_FAILED);
+    expect(forgedTool.message).toContain('无宿主绑定');
+  });
+
+  it('tool-run 经宿主管道执行器（R1 P0-1）：origin=service + bridge: 前缀 toolCallId + 帧 rowId 罩调用链；无执行器响亮拒绝不回退直调', async () => {
+    const { handlers, root, tools, bindings } = setupHandlers();
+    const toolRun = handlers.get('host.tool-run')!;
+    // 行绑定先行（applyRow 语义的最小形——scope fork 即行锚，绑定簿登记）
+    const scope = root.fork({ name: 'w9', rowId: 'w9', builtinRow: false });
+    bindings.set('w9', { scope });
+    // 宿主侧注册目标工具（tool-run 的 def 解析源；execute 直调哨兵——修复前
+    // 直调 def.execute 会拿到它）
+    tools.register({
+      name: 'host/echo',
+      description: '宿主工具桩',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text', text: 'must-not-direct-call' }] }),
+    });
+    // ① 无执行器（装配缺陷形态）：响亮拒绝——修复前直调 def.execute 绕三段
+    // 管道（守门/落账全旁路）
+    const refused = await rejection(Promise.resolve().then(() => toolRun(['w9', 'host/echo', {}])));
+    expect(refused.code).toBe(BRIDGE_METHOD_NOT_FOUND);
+    expect(refused.message).toContain('管道执行器');
+    // ② 挂执行器桩：调用经管道——记录帧传导断言（def 解析对 + bridge: 前缀
+    // toolCallId + origin='service' + runInCallerChain 帧 rowId 可读）
+    const frames: Array<{ name: string; toolCallId: string; origin?: string; caller?: string }> = [];
+    tools.executor = async (def, toolCallId, args, _signal, _onUpdate, origin) => {
+      frames.push({ name: def.name, toolCallId, origin, caller: chainCaller() });
+      return { content: [{ type: 'text', text: `via-pipeline:${JSON.stringify(args)}` }] };
+    };
+    const result = (await toolRun(['w9', 'host/echo', { k: 1 }])) as { content: Array<{ type: 'text'; text: string }> };
+    expect(result.content[0]!.text).toBe('via-pipeline:{"k":1}');
+    expect(frames).toEqual([
+      {
+        name: 'host/echo',
+        toolCallId: expect.stringMatching(/^bridge:unit-host:\d+$/) as string,
+        origin: 'service',
+        caller: 'w9',
+      },
+    ]);
+    await scope.dispose();
   });
 });

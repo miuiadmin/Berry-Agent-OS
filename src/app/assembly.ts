@@ -52,6 +52,7 @@ import {
   createApprovalService,
   createRootsProvider,
   createSandboxService,
+  externalEffectiveRoots,
   installSafetyGate,
 } from '../safety/index.js';
 import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode } from '../safety/index.js';
@@ -112,6 +113,7 @@ import {
   safeModeComposition,
   partitionPlan,
   RING1_REQUIRED_ROW_IDS,
+  appDataDirOf,
   type CompositionReport,
   type PlanPartition,
 } from './composition.js';
@@ -1382,7 +1384,26 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    * 走全局管道（无驱动语境面——与 ctx.fetch 同形，服务调用不旁路守门与落账，
    * 内部名 exec 不进模型词汇表）。 */
   ctx.provide('sandbox', sandbox);
-  registerExecService(ctx, { pipeline, sandbox, mode: () => sandboxMode, workspaceRoot: workspace });
+  // 行收窄注入面（R1 P0-4，契约篇 §1.7 增补 2c R1 注记）：exec 服务按
+  // caller-chain 行 id 查该 external 行有效白名单（基线 ∩ 行声明——单源
+  // externalEffectiveRoots），作为 confine 的 writableRoots 显式覆盖面。
+  // 「OS 沙箱罩后代」的执法通道：分域行经 svc-invoke 调宿主 exec 产生的
+  // 间接子进程按行收窄软禁，不吃会话档宽面（workspace ∪ /tmp 族——/tmp 族
+  // 按第三十七批裁定本就不在 external 基线）。非行帧 / 行不在表 / 非
+  // external 载体 = undefined = 会话档现行为。组合根注入闭包（exec 拓扑上
+  // 不能 import app）。
+  registerExecService(ctx, {
+    pipeline,
+    sandbox,
+    mode: () => sandboxMode,
+    workspaceRoot: workspace,
+    confinementFor: (caller) => {
+      if (caller === undefined) return undefined;
+      const row = composition.rows.find((r) => r.id === caller);
+      if (row === undefined || resolveRowCarrier(row) !== 'external') return undefined;
+      return externalEffectiveRoots(workspace, appDataDirOf(dataDir(), row.id), row.sandbox?.fs?.writableRoots);
+    },
+  });
 
   /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词）----
    * 具名提示词段服务（ctx.prompts，pi-4(a) 拍板）：段注册表宿主拥有，分节序固定 =

@@ -468,22 +468,23 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
       },
     }),
     /* mount（D2 挂载动词，契约篇 §6.1 两态——「应用独立不生效」的生效面；
-     * 第三十六批 apps 数组化 + 第三十七批 sandbox 载体冻结逃生门）：
+     * 第三十六批 apps 数组化 + R1 复盘批 carrier 解冻收口三值）：
      * 吃装机推导 id（见 /apps 的 ◇ 行），--apps 必填（可多个 = 共享件——
-     * 逗号分隔或重复旗标）；--carrier 显式降格位（第三方行过渡冻结的逃生门：
-     * main/worker 二值，缺省冻结拒挂）。--row-id = 行 id 显式命名位（同包第
-     * 二应用挂载必经）；--config = 行初始配置 JSON（经应用声明 schema 校验，
-     * 错配置拒写）。写行后壳链 /reload。 */
+     * 逗号分隔或重复旗标）；--carrier 显式降格位（三值：缺省不落 sandbox
+     * 块 = 闩一装载期推 external 进程墙；main/worker = operator 显式降格；
+     * external = 与缺省等价的显式声明）。--row-id = 行 id 显式命名位（同包第
+     * 二应用挂载必经）；--config = 行初始配置 JSON（唯显式 main 行可携——
+     * 分域行校验面在域侧拒写）。写行后壳链 /reload。 */
     commands.register({
       name: 'apps-mount',
       description:
-        '挂载 <装机id> --apps <应用id>[,…] [--carrier main|worker] [--row-id <行id>] [--config <json>] 并重载',
+        '挂载 <装机id> --apps <应用id>[,…] [--carrier main|worker|external] [--row-id <行id>] [--config <json>] 并重载',
       handler: async (args) => {
         const parsed = parseFlagArgs(args);
         const installId = parsed.positionals[0];
         if (installId === undefined) {
           ui.notify(
-            "用法：/apps-mount <装机id> --apps <应用id>[,<应用id>…] [--carrier main|worker] [--row-id <行id>] [--config '<json>']（装机id 见 /apps ◇ 行）",
+            "用法：/apps-mount <装机id> --apps <应用id>[,<应用id>…] [--carrier main|worker|external] [--row-id <行id>] [--config '<json>']（装机id 见 /apps ◇ 行；缺省载体 = external 进程墙）",
           );
           return;
         }
@@ -500,10 +501,12 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           ui.notify('挂载目标必填：--apps <应用id>[,<应用id>…]（多值 = 共享件；全局作用域 v1 官方专属）');
           return;
         }
-        // carrier 二值校验（服务面冻结核值，壳面先给可读报错）
+        // carrier 三值校验（服务面值域同款，壳面先给可读报错）
         const carrier = parsed.flags['carrier'];
-        if (carrier !== undefined && carrier !== 'main' && carrier !== 'worker') {
-          ui.notify('--carrier 只认 main | worker（第三方行过渡冻结的显式降格位，契约篇 §1.7 增补 2b）');
+        if (carrier !== undefined && carrier !== 'main' && carrier !== 'worker' && carrier !== 'external') {
+          ui.notify(
+            '--carrier 只认 main | worker | external（缺省不落 sandbox 块 = external 进程墙——闩一；main/worker = operator 显式降格）',
+          );
           return;
         }
         // config 位 = 可选 JSON 字面（行初始配置——服务面经应用声明 schema 校验）

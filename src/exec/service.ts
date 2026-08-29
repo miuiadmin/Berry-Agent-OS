@@ -18,6 +18,7 @@ import { Type } from 'typebox';
 import type { ExecEnvTable, ExecOptions, ExecResult, ExecService } from '../contracts/exec.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
 import type { Context } from '../context/types.js';
+import { chainCaller } from '../context/chain.js';
 import type { ToolPipelineExecutor } from '../tools/pipeline.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
 import { classifyDenials, runArgv, type RunResult } from './spawn.js';
@@ -33,6 +34,16 @@ export interface ExecServiceOptions {
   readonly mode: () => SandboxMode;
   /** 会话工作区根（canonical 绝对路径） */
   readonly workspaceRoot: string;
+  /**
+   * 按 caller-chain 调用方推导行收窄白名单（R1 P0-4，契约篇 §1.7 增补 2c
+   * R1 注记 2026-08-29）：入参 = caller-chain 读出的行 id（非行帧 = undefined）；
+   * 返回 undefined = 不收窄（模型面/宿主直调/非 external 行——维持会话档
+   * 现行为）；返回根列表 = 该行有效白名单（基线 ∩ 行声明，单源住
+   * safety/roots 的 externalEffectiveRoots），作为 confine 的
+   * writableRoots 显式覆盖面——「OS 沙箱罩后代」对间接子进程的执法通道。
+   * 组合根注入（exec 不能 import app——拓扑白名单），注入面为闭包。
+   */
+  readonly confinementFor?: (caller: string | undefined) => readonly string[] | undefined;
 }
 
 /**
@@ -101,7 +112,18 @@ export function registerExecService(ctx: Context, opts: ExecServiceOptions): Exe
             argv = [...baseArgv];
             enforcement = 'none';
           } else {
-            const confined = opts.sandbox.confine(baseArgv, { mode, workspaceRoot: opts.workspaceRoot });
+            // 行收窄查询（R1 P0-4）：经 svc-invoke 进宿主的分域行调用按
+            // caller-chain 行 id 查行有效白名单——间接子进程不吃会话档宽面
+            // （workspace ∪ /tmp 族；/tmp 族本就不在 external 基线）。非行帧
+            // （模型面/宿主直调）或注入面缺席 = undefined = 会话档现行为。
+            // danger 档透传不 confine（会话级豁免优先——行收窄只发生在受限档，
+            // 与 confine 策略面同构，不另造路径）。
+            const rowRoots = opts.confinementFor?.(chainCaller());
+            const confined = opts.sandbox.confine(baseArgv, {
+              mode,
+              workspaceRoot: opts.workspaceRoot,
+              ...(rowRoots !== undefined ? { writableRoots: rowRoots } : {}),
+            });
             argv = confined.argv;
             enforcement = confined.enforcement;
             denialSignatures = confined.denialSignatures;

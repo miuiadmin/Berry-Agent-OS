@@ -124,7 +124,7 @@ export interface AppsManageFace {
     installId: string,
     opts?: {
       apps?: readonly string[];
-      carrier?: 'main' | 'worker';
+      carrier?: 'main' | 'worker' | 'external';
       config?: Record<string, unknown>;
       rowId?: string;
     },
@@ -234,27 +234,28 @@ export function createAppsInstallTool(apps: AppsManageFace, approval: ApprovalAs
 
 /**
  * 构造 `apps_mount` 工具（写组合行 = 挂载生效动词——D2 两态批新增；第三十六批
- * apps 数组化 + 第三十七批 carrier 逃生门）。吃装机 id（provenance 账本键）；
+ * apps 数组化 + R1 复盘批 carrier 解冻三值收口）。吃装机 id（provenance 账本键）；
  * 挂载目标 = 应用 id 数组（多值 = 共享件；v1 第三方件必须挂应用，系统层官方
- * 专属）；carrier = 显式降格位（第三方行过渡冻结的逃生门：main/worker 二值）；
+ * 专属）；carrier = 显式降格位（三值：缺省不落 sandbox 块 = 闩一装载期推
+ * external 进程墙；main/worker = operator 显式降格；external = 与缺省等价）；
  * 行 id 缺省 = 装机推导 id。写行后热应用链 = apps_reload。
  */
 export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskFace): ToolDefinition {
   return {
     name: 'apps_mount',
     description:
-      '挂载已装机应用到应用（写组合树行 = 生效动词）：install 只入仓库，本动词写行挂载。挂载目标应用必填（数组，多值 = 多应用共享件；v1 第三方件必须挂应用，不可挂系统层）；第三方行过渡冻结期须显式 carrier（main|worker——operator 降格裁量）；行 id 缺省 = 装机 id。写行后须 apps_reload 生效。需审批（sandbox_permissions + justification 必填）。',
+      '挂载已装机应用到应用（写组合树行 = 生效动词）：install 只入仓库，本动词写行挂载。挂载目标应用必填（数组，多值 = 多应用共享件；v1 第三方件必须挂应用，不可挂系统层）；载体缺省 = external 进进程墙（闩一，无需声明），carrier 可显式降格 main|worker（operator 裁量）；行 id 缺省 = 装机 id。写行后须 apps_reload 生效。需审批（sandbox_permissions + justification 必填）。',
     parameters: Type.Object({
       installId: Type.String({
         description: '装机 id（apps_install 回执或 apps_list 的 installed-unmounted 行——以账本为准）',
       }),
       apps: Type.Array(Type.String(), {
-        description: '挂载目标应用 id 数组（如 ["builtin:chat"]；多元素 = 共享件一行投多应用——v1 第三方件必须挂应用）',
+        description: '挂载目标应用 id 数组（如 ["chat"]；多元素 = 共享件一行投多应用——v1 第三方件必须挂应用）',
       }),
       carrier: Type.Optional(
-        Type.Union([Type.Literal('main'), Type.Literal('worker')], {
+        Type.Union([Type.Literal('main'), Type.Literal('worker'), Type.Literal('external')], {
           description:
-            '沙箱载体显式降格位（第三方行过渡冻结的逃生门：main = 宿主进程域 / worker = 工作进程域；官方件缺省 main 无需声明）',
+            '沙箱载体显式位（缺省不落 sandbox 块 = external 进程墙〔闩一，推荐〕；main = 宿主进程域裸信任 / worker = 工作进程域故障分域——均为 operator 显式降格；external = 与缺省等价的显式声明）',
         }),
       ),
       rowId: Type.Optional(
@@ -272,7 +273,7 @@ export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskF
       const req = args as {
         installId: string;
         apps: string[];
-        carrier?: 'main' | 'worker';
+        carrier?: 'main' | 'worker' | 'external';
         rowId?: string;
         config?: Record<string, unknown>;
         sandbox_permissions: string;

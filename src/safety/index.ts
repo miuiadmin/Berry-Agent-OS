@@ -20,6 +20,7 @@ export {
   canonicalPath,
   deriveWritableRoots,
   externalWritableRoots,
+  externalEffectiveRoots,
   isInsideRoot,
   expandCarveOutEntry,
   buildCarveOutTable,

@@ -16,12 +16,21 @@
  *   写被 ERR_ACCESS_DENIED 拒（白名单**静默失效**形态）——推导期显式
  *   mkdirSync 预建（幂等；装载期一次性成本）。
  *
- * 读面裁定 = `--allow-fs-read=*`（全域可读）：三层分工下读 profile 归 OS
- * 层（seatbelt/bwrap 管），PM 中层定位 = 防写 + 防 addon（`--allow-addons`
- * 刻意不开——拒载即拒装，PoC ⑦ 实证）+ 防 child（`--allow-child-process`
- * 刻意不开——域内 spawn 强制经 ctx.exec，增补 2c）。全域读在 PM 层放行
- * 不是漏：OS 层罩着，且 tsx 预载链要读全 node_modules 树（逐根枚举读面
- * 是维护陷阱）。
+ * 读面裁定 = `--allow-fs-read=*`（全域可读）：PM 中层定位 = 防写 + 防
+ * addon（`--allow-addons` 刻意不开——拒载即拒装，PoC ⑦ 实证）+ 防 child
+ * （`--allow-child-process` 刻意不开——域内 spawn 强制经 ctx.exec，增补
+ * 2c）。全域读在 PM 层放行不是漏：tsx 预载链要读全 node_modules 树（逐根
+ * 枚举读面是维护陷阱）。
+ *
+ * **OS 层读/网面诚实边界（R1 P0-6 勘正，契约篇 §1.7 增补 10 R1 注记
+ * 2026-08-29）**：现行两后端 profile 对 external 域的实际覆盖 = **防写不防
+ * 读不防网**——seatbelt `(allow default)+(deny file-write*)` / bwrap
+ * `--ro-bind / /` 无 net-ns。即 external 域 v1 可整读宿主 HOME（含
+ * `~/.berry` 凭证库——env 白名单罩不住文件面直读）。读/网收窄需要
+ * external 专属 profile 变体（deny file-read* 基线外 + net 拒绝式），与
+ * 第 1② 条 `net` 同族推论——**无既定执法基线即不预造**：收窄面挂账随
+ * net 执法基线批（首个真实消费者）一体定形。勿以「OS 层罩着读面」作
+ * 依据——那是边界幻觉。
  *
  * 旗面经显式 execArgv 携带（生产首选——PoC 核对 B 裁定：cwd 无关、旗面
  * 全量可控、无实验性前缀依赖；node.config.json 备位不入产线）。

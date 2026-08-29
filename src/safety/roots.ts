@@ -71,6 +71,24 @@ export function externalWritableRoots(workspace: string, appDataDir: string): st
   return [...new Set([workspace, appDataDir].map(canonicalPath))];
 }
 
+/**
+ * external 域行有效白名单**单源推导**（契约篇 §1.7 增补 2c R1 复盘批注记
+ * 2026-08-29）：有效白名单 = 执法基线 ∩ 行声明（声明缺席 = 全基线；交集可空
+ * = 只读域）。两消费面共取本函数——装载面（舰队 spawn 参数：PM 旗 + OS 层
+ * confine writableRoots）与 exec 侧运行期（分域行经 svc-invoke 调宿主 exec 的
+ * 间接子进程按行收窄软禁，不吃会话档宽面）。
+ * 越基线**拒绝式执法只在装载面**（spawn 前、行进失败清单）；本函数只做交集
+ * 不判拒绝——运行期消费面的行必已过装载期闩二，运行期交集不可能越基线
+ * （装载面如需拒绝式判据，自行对 `externalWritableRoots` 基线预检，勿在此
+ * 混入第二语义）。
+ */
+export function externalEffectiveRoots(workspace: string, appDataDir: string, declared?: readonly string[]): string[] {
+  const baseline = externalWritableRoots(workspace, appDataDir);
+  if (declared === undefined) return baseline;
+  const normalized = declared.map(canonicalPath);
+  return normalized.filter((d) => baseline.some((b) => isInsideRoot(d, b)));
+}
+
 /** child 是否位于 root 内（相等或隔分隔符的前缀，防 /root 与 /root-evil 误判；
  * 根为文件系统根 sep（danger-full-access 的全盘根）时任意绝对路径皆命中） */
 export function isInsideRoot(child: string, root: string): boolean {

@@ -341,17 +341,52 @@ describe('mount / unmount（两态生效动词）', () => {
     });
   });
 
-  it('mount 冻结逃生门：缺 carrier 即拒（第三方行出生即 external，过渡期 fail-closed）', async () => {
+  it('mount 解冻（R1 复盘批 2026-08-29）：缺 carrier = 闩一缺省 external——成功落行且零 sandbox 块', async () => {
     const dataDir = makeDataDir();
     const { localDir, loadEntry } = setupLocalApp(dataDir);
     const apps = createAppsService({ dataDir, runner: fakeRunner().runner, loadEntry });
     await apps.install(localDir);
-    // 缺 carrier：缺省两分派推 external → 过渡冻结拒绝（逃生门 = 显式降格声明）
-    await expect(apps.mount('my-plugin', { apps: ['chat'] })).rejects.toMatchObject({
-      code: COMPOSITION_ROW_INVALID,
-      message: expect.stringContaining('--carrier'),
+    // 缺 carrier 不再拒（原「过渡冻结」分支已删）：闩一装载期推 external——
+    // 出生即进程墙是缺省态，operator 无需声明
+    const report = await apps.mount('my-plugin', { apps: ['chat'] });
+    expect(report.message).toContain('external'); // 回执点名缺省载体
+    // 落盘零 sandbox 块：缺省不落块是合法形态（闩一按 pkg 引用形分派）
+    expect(userRows(dataDir)).toEqual([{ id: 'my-plugin', pkg: localDir, apps: ['chat'] }]);
+  });
+
+  it('mount config 对分域行拒写（R1 P0-3）：显式 external / 显式 worker / 缺省 external（闩一）皆拒——宿主不代校验域侧 schema', async () => {
+    const dataDir = makeDataDir();
+    const schema = Type.Object({ limit: Type.Number() });
+    const { localDir, loadEntry } = setupLocalApp(dataDir, { config: schema });
+    const apps = createAppsService({ dataDir, runner: fakeRunner().runner, loadEntry });
+    await apps.install(localDir);
+    // 显式 external + config → 拒（修复前：宿主 loadEntry 求值第三方入口 = 主进程
+    // jiti 执行第三方码，打穿宪章七进程墙）
+    await expect(
+      apps.mount('my-plugin', { apps: ['chat'], carrier: 'external', config: { limit: 5 } }),
+    ).rejects.toMatchObject({
+      code: APP_CONFIG_INVALID,
+      message: expect.stringContaining('分域行'),
     });
-    expect(userRows(dataDir)).toEqual([]); // 拒且不写行
+    // 缺省（闩一即 external）+ config → 同拒
+    await expect(apps.mount('my-plugin', { apps: ['chat'], config: { limit: 5 } })).rejects.toMatchObject({
+      code: APP_CONFIG_INVALID,
+      message: expect.stringContaining('分域行'),
+    });
+    // 显式 worker + config → 同拒（worker 拒面 R1 前已有，此处三值同锁）
+    await expect(
+      apps.mount('my-plugin', { apps: ['chat'], carrier: 'worker', config: { limit: 5 } }),
+    ).rejects.toMatchObject({
+      code: APP_CONFIG_INVALID,
+      message: expect.stringContaining('分域行'),
+    });
+    // 皆拒且不写行
+    expect(userRows(dataDir)).toEqual([]);
+    // 对照：显式 main + 合法 config 仍走宿主校验落盘（main 路不受影响）
+    await apps.mount('my-plugin', { apps: ['chat'], carrier: 'main', config: { limit: 5 } });
+    expect(userRows(dataDir)).toEqual([
+      { id: 'my-plugin', pkg: localDir, apps: ['chat'], sandbox: { carrier: 'main' }, config: { limit: 5 } },
+    ]);
   });
 
   it('mount apps 数组：多值 = 共享件一行投多应用（行写回数组原样、报告全列）', async () => {
@@ -1288,6 +1323,34 @@ describe('configure 行配置写入', () => {
     expect(userRows(dataDir)).toEqual([
       { id: 'my-plugin', pkg: localDir, apps: ['chat'], sandbox: { carrier: 'main' } },
     ]);
+  });
+
+  it('分域行拒写（R1 P0-3 扩面）：worker / external（含缺省闩一）行 COMPOSITION_ROW_INVALID——校验面在域侧', async () => {
+    const dataDir = makeDataDir();
+    const schema = Type.Object({ limit: Type.Optional(Type.Number()) });
+    const { localDir, apps } = setupConfigurable(dataDir, schema);
+    await apps.install(localDir);
+    // 缺省 carrier：闩一装载期推 external——原门只拒 worker，external 行落穿到
+    // loadEntry = 宿主主进程 jiti 求值第三方码（R1 修复面）
+    await apps.mount('my-plugin', { apps: ['chat'] });
+    activate(apps, dataDir, 'my-plugin');
+    await expect(apps.configure('my-plugin', { limit: 5 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('分域行'),
+    });
+    // 显式 worker 同拒（原门已有面——三值同锁）
+    const dataDir2 = makeDataDir();
+    const setup2 = setupConfigurable(dataDir2, schema);
+    await setup2.apps.install(setup2.localDir);
+    await setup2.apps.mount('my-plugin', { apps: ['chat'], carrier: 'worker' });
+    activate(setup2.apps, dataDir2, 'my-plugin');
+    await expect(setup2.apps.configure('my-plugin', { limit: 5 })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('分域行'),
+    });
+    // 两行 config 均未落（拒写不留半态）
+    expect(loadOverlayRows(dataDir).find((r) => r.id === 'my-plugin')?.config).toBeUndefined();
+    expect(loadOverlayRows(dataDir2).find((r) => r.id === 'my-plugin')?.config).toBeUndefined();
   });
 
   it('四道状态门全拒写（COMPOSITION_ROW_INVALID）：空 patch / 未知行 / 已禁用 / 未激活', async () => {

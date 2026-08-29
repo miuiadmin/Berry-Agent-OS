@@ -15,10 +15,15 @@
  * - tools-register [rowId,meta] → tools.register（声明面本地、execute 过桥，
  *   timeoutMs 预算随行；onUpdate 函数不可过界——v1 收窄；注册罩
  *   runInCallerChain(行 id) 帧——D1 路由按行 app 键，domain 自报仅诊断）；
- * - svc-invoke [name,method,…]  → 锚作用域 get(name) 后方法分派（CONTEXT_SERVICE_
- *   NOT_FOUND 保码回 worker——Kahn 已保证 inject 在场，此码即装配缺陷探针）；
- * - tool-run [name,args]        → tools.get + execute（worker 侧便捷面 run 的
- *   宿主终端——工具管道三段在宿主侧唯一实现）。
+ * - svc-invoke [rowId,name,method,…] → 行绑定验（跨墙 rowId 纯自报不可信为
+ *   归因——requireBinding 同四处执法）+ 锚作用域 get(name) 后方法分派
+ *   （CONTEXT_SERVICE_NOT_FOUND 保码回 worker——Kahn 已保证 inject 在场，
+ *   此码即装配缺陷探针）；
+ * - tool-run [rowId,name,args]    → 行绑定验 + tools.get 后**经宿主管道执行器**
+ *   执行（工具管道三段在宿主侧唯一实现——schema 校验/守门瀑布/审批
+ *   carve-out/timeout/64KiB 出量护栏/durable 审计全生效，origin='service'
+ *   宿主服务面复入；worker 侧便捷面 run 的宿主终端。R1 复盘批 2026-08-29
+ *   管道化——原直调 def.execute 绕三段管道违 registry 自钉纪律）。
  *
  * 生命周期（K3-c 装配接线）：心跳监督 terminate / 域死回卷 / env 与 resourceLimits
  * 由组合根配置——本文件只提供 spawnWorkerDomain 机制面与 terminate 出口。
@@ -154,9 +159,13 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
     /* 域应用调宿主服务（会话与存储篇 §1.5 导入者归因——RPC 帧携带调用方列，
      * external carrier 落码批销账）：帧 [rowId, name, method, args]，宿主分派
      * 罩 runInCallerChain(rowId)——域应用经 ctx.get(...).method(...) 调宿主
-     * 服务时，宿主侧服务面（createSession 读 chainCaller 等）拿到行归因 */
+     * 服务时，宿主侧服务面（createSession 读 chainCaller 等）拿到行归因。
+     * 行绑定验（R1 复盘批 2026-08-29 补）：跨进程墙的 rowId 是不可信方自报
+     * 值——不验绑定即容伪造归因身份污染清算面（宪章八），与同文件四处执法
+     * （svc-register/sub/emit/tools-register）同形收口 */
     .handle('host', 'svc-invoke', ([rowIdArg, nameArg, methodArg, argsArg]) => {
       const rowId = String(rowIdArg);
+      requireBinding(rowId, 'svc-invoke');
       const svc = t.root.get<Record<string, unknown>>(String(nameArg));
       const fn = svc?.[String(methodArg)];
       if (typeof fn !== 'function') {
@@ -164,21 +173,35 @@ export function registerHostHandlers(t: HostHandlersTarget): void {
       }
       return runInCallerChain(rowId, () => (fn as (...a: unknown[]) => unknown).apply(svc, argsArg as unknown[]));
     })
-    /* 域便捷面 run 的宿主终端：宿主工具走真管道（schema→守门→执行唯一实现）；
-     * 帧同样携带 rowId 罩 runInCallerChain（同 svc-invoke——宿主执行段的
-     * 归因面，exec/会话路由按链取数） */
+    /* 域便捷面 run 的宿主终端：宿主工具走真管道（schema→守门→执行唯一实现——
+     * R1 复盘批 2026-08-29 管道化，原直调 def.execute 绕三段管道属违规面）；
+     * 帧行绑定验（同 svc-invoke——归因不可伪造）+ 帧 rowId 罩
+     * runInCallerChain（宿主执行段的归因面，exec/会话路由按链取数——
+     * exec 服务按 chainCaller 行 id 收窄 confinement 即消费此帧） */
     .handle('host', 'tool-run', ([rowIdArg, nameArg, argsArg], signal) => {
       const tools = resolveTools();
       if (tools === undefined) {
         throw new AppError(BRIDGE_METHOD_NOT_FOUND, 'tool-run：本装配面未提供工具服务（裁剪形态）');
       }
+      const rowId = String(rowIdArg);
+      requireBinding(rowId, 'tool-run');
       const def = tools.get(String(nameArg));
       if (def === undefined) {
         throw new AppError(BRIDGE_METHOD_NOT_FOUND, `宿主无此工具：${String(nameArg)}`);
       }
+      // 管道执行器（ToolsService 携带面）：无执行器 = 装配缺陷形态——响亮拒绝，
+      // 不回退直调 execute（回退即重开绕管道漏洞）
+      const executor = tools.executor;
+      if (executor === undefined) {
+        throw new AppError(BRIDGE_METHOD_NOT_FOUND, 'tool-run：工具服务无管道执行器（装配缺陷——禁直调 execute）');
+      }
       const toolCallId = `bridge:${t.workerId}:${(t.toolRunSeq += 1)}`;
-      return runInCallerChain(String(rowIdArg), () =>
-        def.execute(argsArg as Record<string, unknown>, { toolCallId, signal }),
+      // origin='service'（宿主服务面复入判别词——同 exec 服务先例）；调用面
+      // 区分的审计归因由 toolCallId 前缀 bridge:<域>:<序> 承载（比 origin 更
+      // 精确的身份面）。整个 executor 调用罩行帧——管道三段的 gate/decision
+      // durable 落账同拿行归因
+      return runInCallerChain(rowId, () =>
+        executor(def, toolCallId, argsArg as Record<string, unknown>, signal, undefined, 'service'),
       );
     });
 }

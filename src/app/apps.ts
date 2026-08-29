@@ -52,7 +52,7 @@ import { basename, dirname, join, parse, relative, resolve, sep } from 'node:pat
 import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID, APP_CONFIG_INVALID, APP_INSTALL_FAILED } from '../contracts/errors.js';
 import { Value as typeboxValue, type TSchema } from '../contracts/typebox.js';
-import type { CompositionRow, AppLoadResult, AppPlanRow } from '../contracts/app.js';
+import { resolveRowCarrier, type CompositionRow, type AppLoadResult, type AppPlanRow } from '../contracts/app.js';
 import {
   deriveAppRowSource,
   findRowLocation,
@@ -109,11 +109,16 @@ export interface AppsService {
    * 层已有同 id 行）拒绝式 `COMPOSITION_ROW_INVALID`。`apps` v1 必填非空（全局
    * 作用域 v1 官方专属——显式挂系统 = 准入制放开后的预留 seam，v1 不可达；多
    * 应用行 = 共享件，一行投多 app，d36 §3.2）。appRef 按源沿用装机推导（npm
-   * 裸包名 / git·local 绝对路径）。`carrier` 过渡冻结逃生门（第三十七批增补
-   * 2b）：第三方行缺省载体 = external（闩一出生即进程墙）未落码——mount 冻结，
-   * 显式 `carrier: 'main' | 'worker'`（operator 显式降格）可挂。config 位承载
-   * 显式行配置（带 config 时经应用声明 schema 校验——校验面不可得拒写，与
-   * configure 同纪律）。**不自动链 reload**（动词单职责——命令面 mount→reload）。
+   * 裸包名 / git·local 绝对路径）。`carrier` 三值显式降格位（R1 复盘批
+   * 2026-08-29 随解冻收口——契约篇 §6.1 动词族全景）：**缺省不落 sandbox
+   * 块** = 闩一装载期缺省推 external（第三方行出生即进程墙，无需也不应显式
+   * 声明）；显式 `'main'`/`'worker'` = operator 显式降格（确认面披露降格
+   * 语义）；显式 `'external'` = 与缺省等价的显式声明。config 位承载显式
+   * 行配置——**对分域行（worker/external/缺省 external）宿主侧校验面拒绝**
+   * （分域行 config 校验面在域侧，宿主侧 loadEntry = 主进程执行第三方码
+   * 打穿进程墙，禁——R1 P0-3；唯显式 `carrier: 'main'` 走宿主侧应用声明
+   * schema 校验，校验面不可得拒写，与 configure 同纪律）。
+   * **不自动链 reload**（动词单职责——命令面 mount→reload）。
    */
   mount(
     installId: string,
@@ -121,7 +126,7 @@ export interface AppsService {
       apps?: readonly string[];
       config?: Record<string, unknown>;
       rowId?: string;
-      carrier?: 'main' | 'worker';
+      carrier?: 'main' | 'worker' | 'external';
     },
   ): Promise<MountReport>;
   /**
@@ -153,7 +158,8 @@ export interface AppsService {
    * 行配置写入（契约篇 §3.4 刀 2 工具族条——configure 服务面导线）：patch 顶层键
    * 整值替换（与 overlay 字段级后写胜出同族语义，不引入深合并），合并后完整 config
    * 经应用声明 schema 校验（复用装载期同 schema）才落 overlay。schema 不可得行
-   * （failed/disabled/unresolved/worker 域）拒写并提示先装载——跳过校验降级与
+   * （failed/disabled/unresolved/分域行〔worker/external——校验面在域侧，R1
+   * 复盘批扩面〕/非 activated）拒写并提示先装载——跳过校验降级与
    * 「错配置防 boot 拒启」目标相反。**不自动链 reload**（动词单职责——链式用法
    * 由调用方显式走 requestReload）。
    */
@@ -906,17 +912,11 @@ export function createAppsService(opts: {
             `overlay 手编是系统层的专家路径`,
         );
       }
-      // 载体裁决（第三十七批增补 2b 过渡冻结）：第三方行缺省载体 = external
-      //（闩一出生即进程墙）未落码——mount 冻结拒写；显式 carrier main/worker =
-      // operator 显式降格可挂（落盘为 sandbox 块，装载期照块分派）
+      // 载体裁决（R1 复盘批 2026-08-29 解冻收口——原「过渡冻结」分支随
+      // external carrier 落码批达成解冻前提而删）：三值显式降格位；缺省
+      // undefined = 不落 sandbox 块（闩一装载期按行引用形分派——第三方行
+      // 缺省推 external 进程墙，装载面 resolveRowCarrier 执法）
       const carrier = mountOpts?.carrier;
-      if (carrier === undefined) {
-        throw new AppError(
-          COMPOSITION_ROW_INVALID,
-          `mount：第三方行挂载冻结（缺省载体 external 未落码——契约篇 §1.7 第三十七批增补 2b）——` +
-            `过渡期请显式降格：--carrier main 同进程 / --carrier worker 分域装载；external carrier 落码批解冻`,
-        );
-      }
       // 行 id 缺省 = 装机推导 id；显式命名走 rowId（行 id 是行键不是包键——全树唯一）
       const rowId = mountOpts?.rowId ?? id;
       // 撞名判域 = overlay ∨ 官方默认层（replace-via-mount 双层皆拒——系统层官方
@@ -933,11 +933,23 @@ export function createAppsService(opts: {
       // 推导同键——装载期 resolveAppEntry 按同一形态解析入口）
       const installPath = artifactPathOfKey(dataDir, key, record.source);
       const appRef = record.source === 'npm' ? record.id : installPath;
-      // config best-effort 校验（与 configure 同纪律）：行带 config 且应用声明
-      // schema 可得时复用装载期校验面（typebox Check 同路）——错配置不落盘防
-      // boot 拒启陷阱；校验面不可得（入口不可解析/宿主未注入 loadEntry/未声明
-      // config）时拒绝带非空 config 的写（宁拒不误读——空对象视同未携带）
+      // config 校验（与 configure 同纪律，R1 P0-3 收口）：**唯显式 `carrier:'main'`
+      // 走宿主侧校验面**——行带 config 且应用声明 schema 可得时复用装载期校验
+      // （typebox Check 同路）——错配置不落盘防 boot 拒启陷阱；**分域行（显式
+      // worker/external 或缺省——缺省第三方行经闩一即 external）config 校验面
+      // 在域侧**（装载管线权威 schema 过界读，宿主结构不可得）：宿主侧
+      // loadEntry 求值分域行入口 = 主进程 jiti 执行第三方码、打穿宪章七进程墙，
+      // 禁——带非空 config 即诚实拒写（宁拒不误读；空对象视同未携带）。
+      // 行 config 本身可经 overlay 手编携带，装载期域侧校验执法
       if (mountOpts?.config !== undefined && Object.keys(mountOpts.config).length > 0) {
+        if (carrier !== 'main') {
+          const domain = carrier ?? 'external（缺省——闩一）';
+          throw new AppError(
+            APP_CONFIG_INVALID,
+            `mount：行「${rowId}」是分域行（载体 ${domain}）——config 校验面在域侧，宿主不可代校验（R1 安全收口：拒在宿主主进程装载分域行入口求值 schema）——` +
+              `如需行配置请手编 overlay.yaml 后 /reload，或显式降格 --carrier main 后携带 config`,
+          );
+        }
         let schema: TSchema | undefined;
         const entry = resolveAppEntry(appRef, dataDir);
         if (entry === undefined || opts.loadEntry === undefined) {
@@ -972,8 +984,9 @@ export function createAppsService(opts: {
         id: rowId,
         pkg: appRef,
         apps,
-        // 显式降格落盘为 sandbox 块（carrier 执法两值——external 在上方冻结已拒）
-        sandbox: { carrier },
+        // 显式载体落盘为 sandbox 块（三值）；缺省不落块——闩一装载期按行引用形
+        // 分派（第三方行缺省推 external；块缺席是合法形态非缺授权）
+        ...(carrier !== undefined ? { sandbox: { carrier } } : {}),
         ...(mountOpts?.config !== undefined ? { config: mountOpts.config } : {}),
       });
       // 自定义行 id 的词表账本对齐：数据根随行 id 走（appDataDirOf(rowId)），
@@ -984,7 +997,7 @@ export function createAppsService(opts: {
         apps,
         source: record.source,
         appRef,
-        message: `已挂载生效（apps ${apps.join('、')}；carrier ${carrier}）——热应用走 /reload（per-app reload 前的过渡形态）`,
+        message: `已挂载生效（apps ${apps.join('、')}；载体 ${carrier ?? 'external（缺省——闩一出生即进程墙）'}）——热应用走 /reload（per-app reload 前的过渡形态）`,
       };
     },
 
@@ -1065,12 +1078,15 @@ export function createAppsService(opts: {
           `configure：行「${id}」入口未解析（${row.unresolved}）——先安装（/apps-install 或 apps_install）再配置`,
         );
       }
-      if (row.sandbox?.carrier === 'worker') {
-        // worker 行的生效 schema 在 worker 域（过界元数据）——宿主侧重装载读到
-        // 的是另一实例，配置校验的权威面结构不可得：诚实拒写优于跨域猜测
+      if (resolveRowCarrier(row) !== 'main') {
+        // 分域行（worker/external——R1 P0-3 扩面：原门只拒 worker，external 行
+        // 落穿到下方 loadEntry = 宿主主进程 jiti 求值第三方码，打穿宪章七进程墙，
+        // 且与 worker 拒写自相矛盾）：生效 schema 在域内（过界元数据）——宿主
+        // 侧结构不可得：诚实拒写优于跨域猜测。行 config 可经 overlay 手编携带，
+        // 装载期域侧校验执法
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `configure：行「${id}」是 worker 域行（sandbox.carrier: worker）——其生效 config schema 在 worker 侧结构不可得，请直接编辑 overlay.yaml 后 /reload`,
+          `configure：行「${id}」是分域行（载体 ${resolveRowCarrier(row)}）——其生效 config schema 在域侧结构不可得，请直接编辑 overlay.yaml 后 /reload`,
         );
       }
       const status = byId.get(id)?.status;

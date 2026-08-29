@@ -14,6 +14,7 @@ import {
   createRootsProvider,
   deriveWritableRoots,
   expandCarveOutEntry,
+  externalEffectiveRoots,
   resolveWritability,
   type CarveOutEntry,
   type CarveOutNode,
@@ -162,6 +163,34 @@ describe('buildCarveOutTable + resolveWritability 层叠判定', () => {
     });
     expect(resolveWritability('/definitely/ws/ok', ['/definitely/ws'], [])).toEqual({ allowed: true });
     expect(resolveWritability('/definitely/ws', ['/definitely/ws'], [])).toEqual({ allowed: true }); // 根本身可写
+  });
+});
+
+describe('externalEffectiveRoots（行有效白名单单源——R1 P0-4，契约篇 §1.7 增补 2c）', () => {
+  it('声明缺席 = 全基线（workspace ∪ 件数据根，与 externalWritableRoots 同值）', () => {
+    const ws = makeWorkspace();
+    const appData = join(ws, 'app-data');
+    mkdirSync(appData);
+    expect(externalEffectiveRoots(ws, appData)).toEqual([ws, appData]);
+  });
+  it('行声明交集：基线内子目录保留、基线外声明滤除（滤除非拒绝——拒绝式执法在装载面）', () => {
+    const ws = makeWorkspace();
+    const appData = join(ws, 'app-data');
+    const sub = join(ws, 'sub');
+    mkdirSync(appData);
+    mkdirSync(sub);
+    // 基线外声明：workspace 兄弟目录（不创建——canonicalPath 容缺形原样返回）
+    const evil = join(ws, '..', 'safety-evil-escape');
+    const effective = externalEffectiveRoots(ws, appData, [sub, evil]);
+    // 基线内子目录进有效白名单；越基线声明被滤掉（交集语义——运行期行已过
+    // 装载期闩二，此形态正常不该出现；滤除是防御性兜底非执法）
+    expect(effective).toEqual([sub]);
+  });
+  it('交集可空 = 只读域（合法形态——声明全在基线外）', () => {
+    const ws = makeWorkspace();
+    const appData = join(ws, 'app-data');
+    mkdirSync(appData);
+    expect(externalEffectiveRoots(ws, appData, [join(ws, '..', 'elsewhere')])).toEqual([]);
   });
 });
 

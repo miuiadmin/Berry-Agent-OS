@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppError, EXEC_ENV_FORBIDDEN, EXEC_SPAWN_FAILED, TOOL_BLOCKED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import { TOOL_PRE_EXECUTE_EVENT } from '../contracts/tools.js';
 import { createContext } from '../context/index.js';
+import { runInCallerChain } from '../context/chain.js';
 import { createToolPipeline } from '../tools/index.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
 import { registerExecService } from './service.js';
@@ -115,5 +116,64 @@ describe('同一条三段管道（服务调用不旁路守门）', () => {
       expect((err as AppError).code).toBe(TOOL_BLOCKED);
       expect((err as AppError).message).toContain('exec 测试拦截');
     }
+  });
+});
+
+describe('行收窄注入面（R1 P0-4——confinementFor 按 caller-chain 行 id 收窄，契约篇 §1.7 增补 2c）', () => {
+  it('caller-chain 行帧命中 → confine 收行有效白名单（writableRoots 显式覆盖面）；非行帧维持会话档现行为', async () => {
+    // confine 记录桩：捕获收到的完整 policy（writableRoots 有无即收窄有无）
+    const policies: Array<{ mode: SandboxMode; workspaceRoot: string; writableRoots?: readonly string[] }> = [];
+    const recording: SandboxService = {
+      confine: (argv, policy) => {
+        policies.push({ ...policy });
+        return { argv: [...argv], enforcement: 'partial', denialSignatures: [], runnerFailureRules: [] };
+      },
+      registerBackend: () => () => undefined,
+      listBackends: () => [],
+    };
+    const ctx = createContext({ name: 'test-exec-row-confinement' });
+    const pipeline = createToolPipeline(ctx);
+    const service = registerExecService(ctx, {
+      pipeline,
+      sandbox: recording,
+      mode: () => 'workspace-write',
+      workspaceRoot: workspace,
+      // 行收窄注入面：'row-x' → 行有效白名单；其余 caller = undefined = 不收窄
+      confinementFor: (caller) => (caller === 'row-x' ? ['/ws/row-x-data'] : undefined),
+    });
+    // 行帧调用（svc-invoke/tool-run 罩 runInCallerChain 的同族形态）→ 收窄传导
+    await runInCallerChain('row-x', () => service.exec('bash', ['-c', 'true']));
+    expect(policies.at(-1)).toMatchObject({ writableRoots: ['/ws/row-x-data'] });
+    // 非行帧（宿主直调——无 chain）→ confinementFor 收 undefined → confine
+    // 不带 writableRoots（会话档现行为；修复前：恒 {mode, workspaceRoot} 两键，
+    // 行声明收窄不进间接写面）
+    await service.exec('bash', ['-c', 'true']);
+    expect(policies.at(-1)).not.toHaveProperty('writableRoots');
+    // 不相干的行 id（注入面回 undefined）→ 同样不收窄
+    await runInCallerChain('row-other', () => service.exec('bash', ['-c', 'true']));
+    expect(policies.at(-1)).not.toHaveProperty('writableRoots');
+  });
+
+  it('danger-full-access 档透传不 confine（行收窄只发生在受限档——会话级豁免优先）', async () => {
+    const policies: unknown[] = [];
+    const recording: SandboxService = {
+      confine: (argv, policy) => {
+        policies.push(policy);
+        return { argv: [...argv], enforcement: 'partial', denialSignatures: [], runnerFailureRules: [] };
+      },
+      registerBackend: () => () => undefined,
+      listBackends: () => [],
+    };
+    const ctx = createContext({ name: 'test-exec-row-danger' });
+    const pipeline = createToolPipeline(ctx);
+    const service = registerExecService(ctx, {
+      pipeline,
+      sandbox: recording,
+      mode: () => 'danger-full-access',
+      workspaceRoot: workspace,
+      confinementFor: () => ['/ws/never-reaches'],
+    });
+    await runInCallerChain('row-x', () => service.exec('bash', ['-c', 'true']));
+    expect(policies).toEqual([]); // danger 透传：confine 全程不被调
   });
 });
