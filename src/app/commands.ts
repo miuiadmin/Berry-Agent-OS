@@ -35,11 +35,11 @@ function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
  * source = 行来源（builtin/npm/git/local，契约篇 §3.4 list 现场推导）一并呈现 */
 function formatAppRow(row: AppStatusRow): string {
   // 来源段缺省省略（推导不出 = 来源未知，不占行宽）
-  const source = row.source !== undefined ? ` · ${row.source}` : '';
+  const source = row.source === undefined ? '' : ` · ${row.source}`;
   switch (row.status) {
     case 'activated':
       // applyMs 打点（B2 P5，刀〇a）：启动开销随清单可见——慢件一眼定位，阈值调校供数
-      return `  ✓ ${row.id}（${row.name ?? '未具名'}${source}${row.applyMs !== undefined ? ` · apply ${row.applyMs}ms` : ''}）`;
+      return `  ✓ ${row.id}（${row.name ?? '未具名'}${source}${row.applyMs === undefined ? '' : ` · apply ${row.applyMs}ms`}）`;
     case 'failed':
       return `  ✖ ${row.id}${source}：${row.code} ${row.message ?? ''}`;
     case 'skipped':
@@ -71,7 +71,7 @@ function notifyReloadResult(ui: UiService, result: ReloadResult): void {
   }
   const payload = result.payload;
   if (payload === undefined) return; // 三面互斥完备，此处不可达——类型收窄守卫
-  const scope = payload.app !== undefined ? `应用 ${payload.app} 单区` : '组合';
+  const scope = payload.app === undefined ? '组合' : `应用 ${payload.app} 单区`;
   const parts = [`${scope}激活 ${payload.activated.length}`];
   // 失败行点名（id 级）——与 boot 期拒启清单同信息量；跳过行通常多（禁用面）不点名
   if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
@@ -138,7 +138,7 @@ function formatUninstallReport(report: UninstallReport): string {
     lines.push(`  挂载行（execute 将同批删）：${report.mountedRows.join('、')}`);
   }
   lines.push(
-    `  数据域：${report.dataRoots.join('、')}${report.dataBytes !== undefined ? `（约 ${formatBytes(report.dataBytes)}）` : '（无）'}`,
+    `  数据域：${report.dataRoots.join('、')}${report.dataBytes === undefined ? '（无）' : `（约 ${formatBytes(report.dataBytes)}）`}`,
   );
   if (report.events.origin === 'live' || report.events.origin === 'ledger') {
     lines.push(
@@ -461,7 +461,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         }
         const gitRef = tokens[1];
         // 服务失败（APP_INSTALL_FAILED 等）向上抛——通道壳兜底为通知，不崩界面
-        const report = await opts.appsService.install(ref, gitRef !== undefined ? { gitRef } : undefined);
+        const report = await opts.appsService.install(ref, gitRef === undefined ? undefined : { gitRef });
         // D2 仓库态：零行无物可热应用——不链 /reload（install→reload 旧链废止）；
         // 报告 message 已带 mount 指引（装机面不是断头路）
         ui.notify(`${report.id} 已入仓库态（${report.source} 源）：${report.message}`);
@@ -527,9 +527,9 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         const rowId = parsed.flags['row-id'];
         const report = await opts.appsService.mount(installId, {
           apps,
-          ...(carrier !== undefined ? { carrier } : {}),
-          ...(config !== undefined ? { config } : {}),
-          ...(rowId !== undefined ? { rowId } : {}),
+          ...(carrier === undefined ? {} : { carrier }),
+          ...(config === undefined ? {} : { config }),
+          ...(rowId === undefined ? {} : { rowId }),
         });
         ui.notify(`已挂载 ${report.id} → apps ${report.apps.join('、')}（${report.source} 源）：${report.message}`);
         // 写行只改组合树文件——壳链 /reload 才热应用（D2 新链：mount→reload）。

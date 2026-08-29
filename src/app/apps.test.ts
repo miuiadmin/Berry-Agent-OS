@@ -26,7 +26,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AppError, COMPOSITION_ROW_INVALID, APP_CONFIG_INVALID, APP_INSTALL_FAILED } from '../contracts/errors.js';
+import { type AppError, COMPOSITION_ROW_INVALID, APP_CONFIG_INVALID, APP_INSTALL_FAILED } from '../contracts/errors.js';
 import type { AppLoadResult } from '../contracts/app.js';
 import { Type } from '../contracts/typebox.js';
 import {
@@ -301,8 +301,8 @@ describe('mount / unmount（两态生效动词）', () => {
     writeFileSync(join(localDir, 'index.ts'), 'export const name = "my-plugin";\nexport default () => {};\n');
     const loadEntry: EntryLoader = async () => ({
       name: 'my-plugin',
-      ...(opts.events !== undefined ? { events: opts.events } : {}),
-      ...(opts.config !== undefined ? { config: opts.config } : {}),
+      ...(opts.events === undefined ? {} : { events: opts.events }),
+      ...(opts.config === undefined ? {} : { config: opts.config }),
     });
     const emitted: UninstalledEventData[] = [];
     return { localDir, loadEntry, emitted };
@@ -1268,7 +1268,7 @@ describe('configure 行配置写入', () => {
     writeFileSync(join(localDir, 'index.ts'), 'export const name = "my-plugin";\nexport default () => {};\n');
     const loadEntry: EntryLoader = async () => ({
       name: 'my-plugin',
-      ...(configSchema !== undefined ? { config: configSchema } : {}),
+      ...(configSchema === undefined ? {} : { config: configSchema }),
     });
     const apps = createAppsService({ dataDir, runner: fakeRunner().runner, loadEntry });
     return { localDir, loadEntry, apps };

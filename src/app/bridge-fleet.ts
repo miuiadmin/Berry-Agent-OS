@@ -318,11 +318,11 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
     const effective = resolveEffectiveRoots(ext, row);
     const isTs = (ext.externalUrl?.pathname ?? import.meta.url).endsWith('.ts');
     // 预算旗（增补 8 旗形）：fork 无 resourceLimits，memoryMb → V8 堆上限旗
-    const rowLimits = opts.rowResourceLimits !== undefined ? opts.rowResourceLimits(row) : undefined;
+    const rowLimits = opts.rowResourceLimits === undefined ? undefined : opts.rowResourceLimits(row);
     const memoryMb = (rowLimits ?? opts.resourceLimits ?? {}).maxOldGenerationSizeMb;
     const execArgv = [
       ...derivePmFlags(effective, { tsTransform: isTs }), // PM 中层（写根预建在推导内——坑三执法）
-      ...(memoryMb !== undefined ? [`--max-old-space-size=${memoryMb}`] : []),
+      ...(memoryMb === undefined ? [] : [`--max-old-space-size=${memoryMb}`]),
     ];
     const osLayer = ext.osLayer ?? true;
     if (osLayer) ensureOsLayer(ext.sandbox);
@@ -348,7 +348,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       // TS 源形态：tsx 磁盘缓存 mkdir 在 PM 下必挂——钉禁缓存（域短命本无缓存收益）
       ...(isTs ? { TSX_DISABLE_CACHE: '1' } : {}),
     };
-    return { execArgv, ...(argvWrapper !== undefined ? { argvWrapper } : {}), env };
+    return { execArgv, ...(argvWrapper === undefined ? {} : { argvWrapper }), env };
   };
 
   const loader: WorkerRowLoader = {
@@ -375,11 +375,11 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           opts.anchor().emit('worker/oom', { rowId: row.id, workerId: info.workerId, diagnostic: info.diagnostic });
         }
         for (const id of info.rows) {
-          const detail = info.reason !== undefined ? `，归因：${info.reason}` : '';
+          const detail = info.reason === undefined ? '' : `，归因：${info.reason}`;
           // 诊断面终点（契约篇 §1.7 结算消息携带 diagnostic）：第一手错误缀入
           // 结算消息——app/failed 广播与 markFailed 回写同一字符串，operator
           // 看 appsService.list() 行状态即见原始异常/内存超限签名，不只知 code 1
-          const diag = info.diagnostic !== undefined ? `，diagnostic：${info.diagnostic}` : '';
+          const diag = info.diagnostic === undefined ? '' : `，diagnostic：${info.diagnostic}`;
           const message = `worker 域意外退出（code ${info.code}${detail}${diag}）——域死回卷已完成，不自动重启（宁可死得响亮，契约篇 §1.7）`;
           // 事件广播（观测面）+ 状态回写（list 状态源不漂移）同一时点落定
           opts.anchor().emit('app/failed', { id, code: BRIDGE_WORKER_EXITED, message });
@@ -389,10 +389,11 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       };
       // 心跳监督编舞共用体：冻结 → watchdog 杀域（kill 走意外死亡全流程）
       const freezeOpts =
-        opts.heartbeatMs !== undefined
-          ? {
+        opts.heartbeatMs === undefined
+          ? {}
+          : {
               heartbeatMs: opts.heartbeatMs,
-              ...(opts.heartbeatMissLimit !== undefined ? { heartbeatMissLimit: opts.heartbeatMissLimit } : {}),
+              ...(opts.heartbeatMissLimit === undefined ? {} : { heartbeatMissLimit: opts.heartbeatMissLimit }),
               onFreeze: (info: { missed: number }) => {
                 heartbeatFreezes += 1; // 观测锚⑨ 打点（kill 后 exit 通知带 reason 不再计 crashed——防双计）
                 // 观测锚⑨ 事件面：kill 前派发（订阅方先见冻结归因再见死亡结算）；
@@ -400,12 +401,11 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
                 opts.anchor().emit('worker/froze', { rowId: row.id, workerId: self.workerId, missed: info.missed });
                 self.kill(`心跳缺失（连续 ${info.missed} 拍无应答）——同步死循环或事件循环冻结，watchdog 杀域`);
               },
-            }
-          : {};
+            };
       const common = {
         root: opts.root,
-        ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
-        ...(opts.loadTimeoutMs !== undefined ? { loadTimeoutMs: opts.loadTimeoutMs } : {}),
+        ...(opts.tools === undefined ? {} : { tools: opts.tools }),
+        ...(opts.loadTimeoutMs === undefined ? {} : { loadTimeoutMs: opts.loadTimeoutMs }),
         ...freezeOpts,
         onExit,
       };
@@ -421,7 +421,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         domain = spawnExternalDomain({
           ...common,
           workerId: `e:${row.id}`, // 域 id 用行 id 归因（w:/e: 前缀分腿——诊断面直查组合树行）
-          ...(ext.externalUrl !== undefined ? { externalUrl: ext.externalUrl } : {}),
+          ...(ext.externalUrl === undefined ? {} : { externalUrl: ext.externalUrl }),
           ...spawnOpts,
         });
       } else if (carrier === 'external') {
@@ -436,14 +436,14 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         );
       } else {
         // worker 腿（worker 线程域——resourceLimits 预算执法）
-        const rowLimits = opts.rowResourceLimits !== undefined ? opts.rowResourceLimits(row) : undefined;
+        const rowLimits = opts.rowResourceLimits === undefined ? undefined : opts.rowResourceLimits(row);
         const resourceLimits = rowLimits ?? opts.resourceLimits;
         domain = spawnWorkerDomain({
           ...common,
           workerUrl: opts.workerUrl ?? bridgeWorkerUrl(),
           workerId: `w:${row.id}`,
-          ...(opts.execArgv !== undefined ? { execArgv: opts.execArgv } : {}),
-          ...(resourceLimits !== undefined ? { resourceLimits } : {}),
+          ...(opts.execArgv === undefined ? {} : { execArgv: opts.execArgv }),
+          ...(resourceLimits === undefined ? {} : { resourceLimits }),
         });
       }
       self = domain;
@@ -454,7 +454,7 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       entries.set(row.id, {
         domain,
         applied: false,
-        ...(zoneApp !== undefined ? { zone: appZoneId(zoneApp) } : {}),
+        ...(zoneApp === undefined ? {} : { zone: appZoneId(zoneApp) }),
       });
       spawned += 1; // 观测锚⑩ 装机计数
       // 观测锚⑩ 事件面：spawn 即派发（订阅方计量装机——boot//reload 各分域行一发）

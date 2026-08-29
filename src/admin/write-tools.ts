@@ -179,7 +179,7 @@ async function requestLifecycleApproval(
     summary: `${input.action}：${input.detail}`,
     reason: `目标档 ${input.sandboxPermissions}；${input.justification}`,
     toolName: input.toolName,
-    ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+    ...(input.toolCallId === undefined ? {} : { toolCallId: input.toolCallId }),
   });
   if (outcome === 'allowed-once') return undefined;
   return {
@@ -222,7 +222,7 @@ export function createAppsInstallTool(apps: AppsManageFace, approval: ApprovalAs
         toolCallId: tctx?.toolCallId,
       });
       if (denied !== undefined) return denied;
-      const report = await apps.install(req.source, req.gitRef !== undefined ? { gitRef: req.gitRef } : undefined);
+      const report = await apps.install(req.source, req.gitRef === undefined ? undefined : { gitRef: req.gitRef });
       return textResult(
         [
           `${report.message}`,
@@ -289,7 +289,7 @@ export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskF
       const denied = await requestLifecycleApproval(approval, {
         toolName: 'apps_mount',
         action: 'apps_mount',
-        detail: `挂载应用 ${req.installId} 到应用 ${req.apps.join('、')}${req.rowId !== undefined ? `（行 id ${req.rowId}）` : ''}`,
+        detail: `挂载应用 ${req.installId} 到应用 ${req.apps.join('、')}${req.rowId === undefined ? '' : `（行 id ${req.rowId}）`}`,
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
@@ -297,9 +297,9 @@ export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskF
       if (denied !== undefined) return denied;
       const report = await apps.mount(req.installId, {
         apps: req.apps,
-        ...(req.carrier !== undefined ? { carrier: req.carrier } : {}),
-        ...(req.rowId !== undefined ? { rowId: req.rowId } : {}),
-        ...(req.config !== undefined ? { config: req.config } : {}),
+        ...(req.carrier === undefined ? {} : { carrier: req.carrier }),
+        ...(req.rowId === undefined ? {} : { rowId: req.rowId }),
+        ...(req.config === undefined ? {} : { config: req.config }),
       });
       return textResult(
         [
@@ -477,15 +477,15 @@ export function createAppsReloadTool(apps: AppsManageFace, approval: ApprovalAsk
         toolName: 'apps_reload',
         action: 'apps_reload',
         detail:
-          req.app !== undefined
-            ? `热重载应用 ${req.app} 的挂载行（单区——他应用运行时不换）`
-            : '热重载应用组合树（全部应用卸载重装）',
+          req.app === undefined
+            ? '热重载应用组合树（全部应用卸载重装）'
+            : `热重载应用 ${req.app} 的挂载行（单区——他应用运行时不换）`,
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
       });
       if (denied !== undefined) return denied;
-      const outcome = await apps.requestReload(req.app !== undefined ? { app: req.app } : undefined);
+      const outcome = await apps.requestReload(req.app === undefined ? undefined : { app: req.app });
       switch (outcome.status) {
         case 'queued':
           return textResult(
@@ -493,7 +493,7 @@ export function createAppsReloadTool(apps: AppsManageFace, approval: ApprovalAsk
           );
         case 'done': {
           // 单区两腿进回执（D3）：目标应用 + 卸词集警示（词消失按词表三档 unknown 档处理）
-          const scope = outcome.app !== undefined ? `应用 ${outcome.app} 单区` : '全量';
+          const scope = outcome.app === undefined ? '全量' : `应用 ${outcome.app} 单区`;
           const dropped =
             outcome.droppedEvents !== undefined && outcome.droppedEvents.length > 0
               ? `\n警示：${scope}重载后事件词消失——${outcome.droppedEvents.join('、')}（重装即回；改名即旧词永失，消费方按 unknown 档处理）。`
@@ -533,7 +533,7 @@ export function createAppsUninstallInspectTool(apps: AppsManageFace): ToolDefini
           ? `- 全部挂载行：${report.mountedRows.join('、')}（执行时同批删——卸载是装机级动作）`
           : '- 挂载行：无（仓库态件——纯卸码零组合树变更）',
         report.dataRoots.length > 0
-          ? `- 数据域：${report.dataRoots.join('、')}${report.dataBytes !== undefined ? `（合计 ${report.dataBytes} 字节，默认保留；--purge-data 才删）` : ''}`
+          ? `- 数据域：${report.dataRoots.join('、')}${report.dataBytes === undefined ? '' : `（合计 ${report.dataBytes} 字节，默认保留；--purge-data 才删）`}`
           : '- 数据域：无',
         `- 自定义事件词（${report.events.origin} 档）：${report.events.names.length > 0 ? report.events.names.join('、') : '（无）'}`,
       ];

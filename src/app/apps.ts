@@ -499,7 +499,7 @@ export function createAppsService(opts: {
       // 数据域全集 = 装机 id 数据根（install 收割账本所在）∪ 各挂载行数据根
       //（自定义行 id 的运行期数据根）；Set 去重（缺省挂载行 id === 装机 id 同径）
       const dataRoots = dataRootsOf(dataDir, id, target.mountedRows);
-      let dataBytes: number | undefined = undefined;
+      let dataBytes: number | undefined;
       for (const root of dataRoots) {
         const bytes = dirSizeBytes(root);
         if (bytes !== undefined) dataBytes = (dataBytes ?? 0) + bytes;
@@ -511,9 +511,9 @@ export function createAppsService(opts: {
         installPath: target.installPath,
         mountedRows: target.mountedRows.map((row) => row.id),
         dataRoots,
-        ...(dataBytes !== undefined ? { dataBytes } : {}),
+        ...(dataBytes === undefined ? {} : { dataBytes }),
         events,
-        ...(affectedSessions !== undefined ? { affectedSessions } : {}),
+        ...(affectedSessions === undefined ? {} : { affectedSessions }),
         warnings: buildWarnings({
           id,
           source: target.source,
@@ -578,7 +578,7 @@ export function createAppsService(opts: {
       installRemoved,
       mountedRows: target.mountedRows.map((row) => row.id),
       dataRemoved,
-      ...(affectedSessions !== undefined ? { affectedSessions } : {}),
+      ...(affectedSessions === undefined ? {} : { affectedSessions }),
       // 卸替换行使官方默认层同 id 行重新露出 = 恢复出厂态（替换行卸载的显式可见面）
       ...(restoresDefault ? { restoresDefault: true as const } : {}),
     };
@@ -607,7 +607,7 @@ export function createAppsService(opts: {
     const npmResidual = npmPath !== undefined && existsSync(npmPath);
     // pre-D2 遗产行（含禁用行——禁用 ≠ 卸载）：归一路径反查引用同一 npm 装机物
     // 的 overlay 行，路径比对不问存在性（装机物已手删行悬空 = 同一收敛对象）
-    const mountedRows = npmPath !== undefined ? mountedRowsFor(dataDir, npmPath) : [];
+    const mountedRows = npmPath === undefined ? [] : mountedRowsFor(dataDir, npmPath);
     if (!npmResidual && mountedRows.length === 0 && !(dataAction === 'purge' && dataRootExists)) {
       return {
         id,
@@ -659,7 +659,7 @@ export function createAppsService(opts: {
       installRemoved,
       mountedRows: mountedRows.map((row) => row.id),
       dataRemoved,
-      ...(affectedSessions !== undefined ? { affectedSessions } : {}),
+      ...(affectedSessions === undefined ? {} : { affectedSessions }),
       ...(restoresDefault ? { restoresDefault: true as const } : {}),
     };
   };
@@ -690,8 +690,8 @@ export function createAppsService(opts: {
         const loaded = byId.get(row.id);
         const source = deriveAppRowSource(row, dataDir);
         return loaded === undefined
-          ? { id: row.id, status: 'planned' as const, ...(source !== undefined ? { source } : {}) }
-          : { ...loaded, ...(source !== undefined ? { source } : {}) };
+          ? { id: row.id, status: 'planned' as const, ...(source === undefined ? {} : { source }) }
+          : { ...loaded, ...(source === undefined ? {} : { source }) };
       });
       // D2 仓库态差集（契约篇 §6.1 可见性）：装机未挂件呈现 installed-unmounted
       // 态——差集按**同包归一键**算非行 id（行 id 可显式命名，包身份是装机物
@@ -745,7 +745,7 @@ export function createAppsService(opts: {
           source: 'npm',
           ref,
           id: name,
-          ...(pinned !== undefined ? pinned : {}),
+          ...(pinned === undefined ? {} : pinned),
           installedAt: new Date().toISOString(),
         });
         // 词表账本收割（刀 2）：jiti 一次性装载读 name/events 落 data.json
@@ -768,7 +768,7 @@ export function createAppsService(opts: {
         mkdirSync(dirname(absDir), { recursive: true });
         await runInstallStep(runner, dataDir, 'git', [
           'clone',
-          ...(installOpts?.gitRef !== undefined ? ['--branch', installOpts.gitRef] : []),
+          ...(installOpts?.gitRef === undefined ? [] : ['--branch', installOpts.gitRef]),
           '--',
           ref,
           absDir,
@@ -779,9 +779,9 @@ export function createAppsService(opts: {
         upsertProvenanceRecord(dataDir, `git/${parsed.relDir}`, {
           source: 'git',
           ref,
-          ...(installOpts?.gitRef !== undefined ? { gitRef: installOpts.gitRef } : {}),
+          ...(installOpts?.gitRef === undefined ? {} : { gitRef: installOpts.gitRef }),
           id: parsed.repo,
-          ...(commit !== undefined ? { commit } : {}),
+          ...(commit === undefined ? {} : { commit }),
           installedAt: new Date().toISOString(),
         });
         await refreshLedger(opts, parsed.repo, absDir);
@@ -848,7 +848,7 @@ export function createAppsService(opts: {
         rmSync(installPath, { recursive: true, force: true });
         await runInstallStep(runner, dataDir, 'git', [
           'clone',
-          ...(record.gitRef !== undefined ? ['--branch', record.gitRef] : []),
+          ...(record.gitRef === undefined ? [] : ['--branch', record.gitRef]),
           '--',
           record.ref,
           installPath,
@@ -856,7 +856,7 @@ export function createAppsService(opts: {
         const commit = await gitCommitOf(installPath);
         upsertProvenanceRecord(dataDir, key, {
           ...record,
-          ...(commit !== undefined ? { commit } : {}),
+          ...(commit === undefined ? {} : { commit }),
           installedAt: new Date().toISOString(),
         });
         // 重装重收割（刀 2）：声明词汇可能随版本漂移，账本以新装载为准覆写
@@ -881,7 +881,7 @@ export function createAppsService(opts: {
       const pinned = readNpmPin(dataDir, record.id);
       upsertProvenanceRecord(dataDir, key, {
         ...record,
-        ...(pinned !== undefined ? pinned : {}),
+        ...(pinned === undefined ? {} : pinned),
         installedAt: new Date().toISOString(),
       });
       await refreshLedger(opts, id, record.id);
@@ -952,7 +952,7 @@ export function createAppsService(opts: {
       if (location.overlay !== undefined || location.defaultRow !== undefined) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `mount：行 id「${rowId}」已被占用（${location.defaultRow !== undefined ? '官方默认层' : 'overlay'}同 id 行在场）` +
+          `mount：行 id「${rowId}」已被占用（${location.defaultRow === undefined ? 'overlay' : '官方默认层'}同 id 行在场）` +
             `——同包多应用挂载请用 rowId 显式命名（行 id 是行键不是包键）`,
         );
       }
@@ -1013,8 +1013,8 @@ export function createAppsService(opts: {
         apps,
         // 显式载体落盘为 sandbox 块（三值）；缺省不落块——闩一装载期按行引用形
         // 分派（第三方行缺省推 external；块缺席是合法形态非缺授权）
-        ...(carrier !== undefined ? { sandbox: { carrier } } : {}),
-        ...(mountOpts?.config !== undefined ? { config: mountOpts.config } : {}),
+        ...(carrier === undefined ? {} : { sandbox: { carrier } }),
+        ...(mountOpts?.config === undefined ? {} : { config: mountOpts.config }),
       });
       // 自定义行 id 的词表账本对齐（R1 复盘批二 11c——按载体分派）：数据根随行
       // id 走（appDataDirOf(rowId)），缺省收割只落了装机 id 根——补档到行数据根
@@ -1049,12 +1049,12 @@ export function createAppsService(opts: {
       if (location.overlay === undefined) {
         throw new AppError(
           COMPOSITION_ROW_INVALID,
-          `unmount：未知行 id「${rowId}」（${location.defaultRow !== undefined ? '官方默认层行不可卸挂载' : 'overlay 无此行'}——` +
+          `unmount：未知行 id「${rowId}」（${location.defaultRow === undefined ? 'overlay 无此行' : '官方默认层行不可卸挂载'}——` +
             `清单以 /apps 为准；临时停用保配置走 /apps-toggle）`,
         );
       }
       const row = location.overlay;
-      const source = row.pkg !== undefined ? deriveAppRowSource(row, dataDir) : undefined;
+      const source = row.pkg === undefined ? undefined : deriveAppRowSource(row, dataDir);
       // 受影响会话警示：uninstall inspect 同款词表推导（活档可达走活档，否则账本档）
       const events = declaredEventsFor(rowId, byId.get(rowId)?.status ?? 'planned');
       const affectedSessions = await affectedCountsFor(events);
@@ -1143,9 +1143,7 @@ export function createAppsService(opts: {
       // 声明 schema 读取：builtin 行 = 官方注册表模块引用（plan 行直挂，零装载）；
       // 文件行 = 注入的 loadEntry 一次性装载（词表收割同款面）
       let schema: TSchema | undefined;
-      if (row.builtin !== undefined) {
-        schema = row.builtin.config;
-      } else {
+      if (row.builtin === undefined) {
         if (opts.loadEntry === undefined || row.entry === undefined) {
           throw new AppError(
             COMPOSITION_ROW_INVALID,
@@ -1154,6 +1152,8 @@ export function createAppsService(opts: {
         }
         const ns = await opts.loadEntry(row.entry);
         if (Object.hasOwn(ns, 'config')) schema = ns.config as TSchema;
+      } else {
+        schema = row.builtin.config;
       }
       // 合并（顶层键整值替换）+ 校验（装载期同 schema：typebox Check，抛错与不过同路）。
       // 合并基线 = overlay 行 config 的新鲜读（findRowLocation 每次 loadOverlayRows）：
@@ -1360,7 +1360,7 @@ function gitSourcesPath(dataDir: string): string {
  */
 function loadProvenance(dataDir: string): Map<string, ProvenanceRecord> {
   const path = provenancePath(dataDir);
-  let ledger = new Map<string, ProvenanceRecord>();
+  const ledger = new Map<string, ProvenanceRecord>();
   if (existsSync(path)) {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, ProvenanceRecord>;
@@ -1480,7 +1480,7 @@ function readNpmPin(dataDir: string, name: string): { version?: string; integrit
     /* lock 不可读——integrity 记缺省 */
   }
   return version !== undefined || integrity !== undefined
-    ? { ...(version !== undefined ? { version } : {}), ...(integrity !== undefined ? { integrity } : {}) }
+    ? { ...(version === undefined ? {} : { version }), ...(integrity === undefined ? {} : { integrity }) }
     : undefined;
 }
 
@@ -1647,7 +1647,7 @@ function mountedRowsFor(dataDir: string, installPath: string): CompositionRow[] 
     const path = installArtifactPath(dataDir, source, row.pkg);
     // local 直引无装机物路径（installArtifactPath 恒 undefined）——归一键 = 直引
     // 路径本身（与 list() 差集同款口径，两处同一归一模型）
-    const key = path !== undefined ? resolve(path) : source === 'local' ? resolve(row.pkg) : undefined;
+    const key = path === undefined ? (source === 'local' ? resolve(row.pkg) : undefined) : resolve(path);
     return key !== undefined && key === want;
   });
 }

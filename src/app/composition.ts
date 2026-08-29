@@ -277,11 +277,11 @@ function validateRow(raw: unknown, where: string): CompositionRow {
   const apps = validateApps(record['apps'], where);
   return {
     id,
-    ...(pkg !== undefined ? { pkg } : {}),
-    ...(config !== undefined ? { config: config as Record<string, unknown> } : {}),
-    ...(disabled !== undefined ? { disabled: disabled as boolean | string | readonly string[] } : {}),
-    ...(sandbox !== undefined ? { sandbox } : {}),
-    ...(apps !== undefined ? { apps } : {}),
+    ...(pkg === undefined ? {} : { pkg }),
+    ...(config === undefined ? {} : { config: config as Record<string, unknown> }),
+    ...(disabled === undefined ? {} : { disabled: disabled as boolean | string | readonly string[] }),
+    ...(sandbox === undefined ? {} : { sandbox }),
+    ...(apps === undefined ? {} : { apps }),
   };
 }
 
@@ -386,8 +386,8 @@ function validateSandbox(raw: unknown, pkg: string | undefined, where: string): 
   }
   return {
     carrier,
-    ...(fs !== undefined ? { fs: fs as Record<string, unknown> } : {}),
-    ...(caps !== undefined ? { caps: caps as Record<string, unknown> } : {}),
+    ...(fs === undefined ? {} : { fs: fs as Record<string, unknown> }),
+    ...(caps === undefined ? {} : { caps: caps as Record<string, unknown> }),
   };
 }
 
@@ -462,11 +462,11 @@ function mergeRows(defaultRows: readonly CompositionRow[], overlayRows: readonly
     }
     byId.set(overlay.id, {
       ...existing,
-      ...(overlay.pkg !== undefined ? { pkg: overlay.pkg } : {}),
-      ...(overlay.config !== undefined ? { config: overlay.config } : {}),
-      ...(overlay.disabled !== undefined ? { disabled: overlay.disabled } : {}),
-      ...(overlay.sandbox !== undefined ? { sandbox: overlay.sandbox } : {}),
-      ...(overlay.apps !== undefined ? { apps: overlay.apps } : {}),
+      ...(overlay.pkg === undefined ? {} : { pkg: overlay.pkg }),
+      ...(overlay.config === undefined ? {} : { config: overlay.config }),
+      ...(overlay.disabled === undefined ? {} : { disabled: overlay.disabled }),
+      ...(overlay.sandbox === undefined ? {} : { sandbox: overlay.sandbox }),
+      ...(overlay.apps === undefined ? {} : { apps: overlay.apps }),
     });
   }
   const merged = order.map((id) => byId.get(id)!);
@@ -631,7 +631,7 @@ export function loadComposition(
     if (skip) {
       // 禁用行不解析入口——不要求应用已装（挂载休眠精神）；apps 照透传（单区
       // reload 重发 skipped 行需要分区归属——分区判据按行原貌不按激活态）
-      plan.push({ id: row.id, skip, ...(row.apps !== undefined ? { apps: row.apps } : {}) });
+      plan.push({ id: row.id, skip, ...(row.apps === undefined ? {} : { apps: row.apps }) });
       continue;
     }
     const ref = row.pkg;
@@ -666,8 +666,8 @@ export function loadComposition(
           // 引用透传（装载身份串）：应用内存预算 join 键——与清单 components 字面同域
           pkg: ref,
           builtin: module,
-          ...(row.config !== undefined ? { config: row.config } : {}),
-          ...(row.apps !== undefined ? { apps: row.apps } : {}),
+          ...(row.config === undefined ? {} : { config: row.config }),
+          ...(row.apps === undefined ? {} : { apps: row.apps }),
         });
       }
       continue;
@@ -678,14 +678,14 @@ export function loadComposition(
       // 引用透传（装载身份串）：应用内存预算 join 键——激活/未解析两态都带
       //（未解析行不装载无消费面，带上无妨且归因完整）
       pkg: ref,
-      ...(entry !== undefined
-        ? { entry }
-        : {
+      ...(entry === undefined
+        ? {
             unresolved: `应用「${ref}」入口无法解析（<数据目录>/apps/node_modules/ 下未安装或无入口文件）——加载器永不自动安装，请先安装`,
-          }),
-      ...(row.config !== undefined ? { config: row.config } : {}),
-      ...(row.sandbox !== undefined ? { sandbox: row.sandbox } : {}),
-      ...(row.apps !== undefined ? { apps: row.apps } : {}),
+          }
+        : { entry }),
+      ...(row.config === undefined ? {} : { config: row.config }),
+      ...(row.sandbox === undefined ? {} : { sandbox: row.sandbox }),
+      ...(row.apps === undefined ? {} : { apps: row.apps }),
     });
   }
   return { rows, plan };
@@ -889,11 +889,11 @@ export function saveOverlayRows(dataDir: string, rows: readonly CompositionRow[]
   const doc = {
     rows: rows.map((row) => ({
       id: row.id,
-      ...(row.pkg !== undefined ? { pkg: row.pkg } : {}),
-      ...(row.config !== undefined ? { config: row.config } : {}),
-      ...(row.disabled !== undefined ? { disabled: row.disabled } : {}),
-      ...(row.sandbox !== undefined ? { sandbox: row.sandbox } : {}),
-      ...(row.apps !== undefined ? { apps: row.apps } : {}),
+      ...(row.pkg === undefined ? {} : { pkg: row.pkg }),
+      ...(row.config === undefined ? {} : { config: row.config }),
+      ...(row.disabled === undefined ? {} : { disabled: row.disabled }),
+      ...(row.sandbox === undefined ? {} : { sandbox: row.sandbox }),
+      ...(row.apps === undefined ? {} : { apps: row.apps }),
     })),
   };
   writeAtomicFile(join(dataDir, OVERLAY_FILENAME), stringifyYaml(doc));
@@ -947,13 +947,13 @@ export function toggleOverlayRow(dataDir: string, id: string): boolean {
     return false;
   }
   // 现启用 → 禁用：overlay 行保留 apps/config 只置 disabled；官方层行插替换行
-  if (overlayRow !== undefined) {
+  if (overlayRow === undefined) {
+    saveOverlayRows(dataDir, [...rows, { id, disabled: true }]);
+  } else {
     saveOverlayRows(
       dataDir,
       rows.map((row) => (row.id === id ? { ...row, disabled: true } : row)),
     );
-  } else {
-    saveOverlayRows(dataDir, [...rows, { id, disabled: true }]);
   }
   return true;
 }
