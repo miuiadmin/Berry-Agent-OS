@@ -73,6 +73,16 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
       const entry = runtime.drivers.entries.get(sessionId);
       return entry === undefined ? undefined : entry.driver.isRunning ? 'running' : 'idle';
     },
+    // D4 theme 渲染轻件（契约篇 §5.4 theme 条款）：会话键 → 该应用 accent 字面量。
+    // 读源权威 = 条目 appId 活视图（与 sessions app 列构造同源——存量 NULL 会话
+    // 按投影入 chat 域，两源分歧以条目为准）→ 清单注册表（boot 静态，/reload 不
+    // 重算）；无清单命中 / 无 accent → undefined = 零色合法缺省。undefined 入参 =
+    // 当前聚焦（起屏路——与 history 同款可选参形态）
+    themeFor: (sessionId) => {
+      const id = sessionId ?? front.focus.sessionId;
+      const entry = id === undefined ? undefined : runtime.drivers.entries.get(id);
+      return entry === undefined ? undefined : runtime.apps.get(entry.appId)?.theme?.accent;
+    },
   });
   runtime.ui.attach(tui.ui());
   // S3 信封分流（宿主壳 = 信封拆开点，channels 不见信封概念）：聚焦者走全渲染、

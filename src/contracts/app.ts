@@ -28,6 +28,18 @@ const APP_ID_PATTERN = '^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)?$';
  */
 export const AppIdPattern = APP_ID_PATTERN;
 
+/**
+ * accent 白名单色名（八字，契约篇 §5.4 theme 渲染轻件——2026-08-30 D4 规范先行定稿）：
+ * schema literals 的单一事实源；名→RGB 映射住通道壳（channels/theme.ts——contracts
+ * 无渲染语义，只裁名字合法性）。CSS 开放色名集合不收（拒绝式：白名单外即 APP_INVALID）。
+ */
+export const ACCENT_COLOR_NAMES = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'magenta', 'gray'] as const;
+
+/**
+ * accent hex 单形（`#rrggbb` 六位——3 位展开与 8 位 alpha 皆不收，单形免歧义）
+ */
+const ACCENT_HEX_PATTERN = '^#[0-9a-fA-F]{6}$';
+
 /** 应用清单 schema（契约篇 §5.4——拒绝式，additionalProperties: false 全层贯穿） */
 export const AppManifestSchema = Type.Object(
   {
@@ -35,6 +47,30 @@ export const AppManifestSchema = Type.Object(
     id: Type.String({ minLength: 1, pattern: APP_ID_PATTERN }),
     /** 人读标签（UI 文案位——/app 清单、dump-config 打印） */
     label: Type.String({ minLength: 1 }),
+    /**
+     * 前台渲染主题（D4 渲染轻件，契约篇 §5.4 theme 条款——2026-08-30 规范先行）：
+     * 单语义键 accent（强调色）。消费面钉死四处、着色唯一发生点 = 通道壳
+     * （render 展示行恒纯文本零 ANSI）。缺省（键缺席 / accent 缺席）= 零色恒等。
+     */
+    theme: Type.Optional(
+      Type.Object(
+        {
+          /**
+           * 强调色字面量：白名单色名八字（ACCENT_COLOR_NAMES 单一源）∪ `#rrggbb`
+           * hex 单形；非法字面量 = APP_INVALID 拒（拒绝式与未知字段同纪律）。
+           * 类型面收 string（union 含 pattern String——literal 被吸收），运行时
+           * 校验即执法面。
+           */
+          accent: Type.Optional(
+            Type.Union([
+              ...ACCENT_COLOR_NAMES.map((name) => Type.Literal(name)),
+              Type.String({ pattern: ACCENT_HEX_PATTERN }),
+            ]),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     /**
      * 组件清单（按装载身份串解析：`builtin:<name>` / npm 包名——匹配键 = 组合树
      * 行 pkg 字段的值域，不按行 id、不按 module.name）。在场断言装载期执行：

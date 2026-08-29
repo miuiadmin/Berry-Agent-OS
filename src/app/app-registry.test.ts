@@ -69,6 +69,23 @@ describe('validateAppManifest：schema 拒绝式校验', () => {
     }
   });
 
+  it('theme 收键（D4 渲染轻件）：白名单色名 / #rrggbb hex 通过，值域外与未知子键拒', () => {
+    // 合法两形：白名单色名（cyan = hermes 出厂样例）与六位 hex（大小写不敏感）
+    const m1 = validateAppManifest({ ...base, theme: { accent: 'cyan' } }, '测试');
+    expect(m1.theme?.accent).toBe('cyan');
+    const m2 = validateAppManifest({ ...base, theme: { accent: '#EF4444' } }, '测试');
+    expect(m2.theme?.accent).toBe('#EF4444');
+    // theme 空对象 = 合法（accent 可选——键在场不强制着色）
+    const m3 = validateAppManifest({ ...base, theme: {} }, '测试');
+    expect(m3.theme).toEqual({});
+    // 拒收面：表外色名（CSS 开放集合不收）/ 3 位 hex / 8 位 hex / 无井号 / 未知子键
+    for (const bad of ['crimson', 'notacolor', '#abc', '#06b6d4ff', '06b6d4', '']) {
+      expectCode(() => validateAppManifest({ ...base, theme: { accent: bad } }, '测试'), APP_INVALID);
+    }
+    expectCode(() => validateAppManifest({ ...base, theme: { accent: 'cyan', extra: 1 } }, '测试'), APP_INVALID);
+    expectCode(() => validateAppManifest({ ...base, theme: { background: '#000000' } }, '测试'), APP_INVALID);
+  });
+
   it('grants.approval 收键（第三纵切）：两 knob 合法词汇通过、词汇外值拒', () => {
     // 合法：档位与审批策略各取一值（词汇镜像 safety 面 SandboxMode/ApprovalPolicyMode）
     const m = validateAppManifest(

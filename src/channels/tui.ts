@@ -33,6 +33,7 @@ import type { AgentMessage } from '../contracts/messages.js';
 import { isStandardMessage } from '../contracts/messages.js';
 import { chainBackground } from '../context/chain.js';
 import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, renderAgentMessage } from './render.js';
+import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
 import type { CommandRegistry } from './commands.js';
 import type { ChannelHost, InputOptions, NotifyLevel, RendererDefinition, UiBackend } from './types.js';
@@ -55,6 +56,15 @@ export interface TuiChannelOptions {
   readonly history?: (sessionId?: string) => readonly AgentMessage[];
   /** 条目运行态查询（S3 切入在飞会话判据——状态行/流式占位槽；退役条目宿主侧按 idle 呈现；通道不持注册表） */
   readonly entryStatus?: (sessionId: string) => 'running' | 'idle' | undefined;
+  /**
+   * 应用强调色查询（D4 theme 渲染轻件，契约篇 §5.4 theme 条款）：会话键 → 该
+   * 应用清单的 accent 字面量（白名单色名八字 / #rrggbb——合法性由清单 schema
+   * 执法，通道侧非法值按缺省恒等处理）。undefined = 当前聚焦（起屏路——与
+   * history 同款可选参形态）；无 app 域 / 注册表无清单命中 / 无 accent →
+   * undefined（零色合法缺省态）。通道不读注册表——宿主注入闭包路由
+   * （条目 appId 活视图 → 清单表）。
+   */
+  readonly themeFor?: (sessionId?: string) => string | undefined;
   /** 退出键提示文案（S6 形态⑦：宿主按起屏时点驱动数分档——多驱动「Ctrl+C 打断 / Ctrl+D·/quit 退出」、单驱动缺省「Ctrl+D·Ctrl+C 退出」） */
   readonly quitHint?: string;
   /**
@@ -91,7 +101,11 @@ export interface TuiChannel {
   stop(): void;
 }
 
-/** 无着色主题（恒等函数；着色后续随主题篇定稿） */
+/**
+ * 无着色基线主题（恒等函数——多通道实例共享的构造缺省，勿改引用：D4 换装走
+ * Editor 实例 borderColor 赋值〔applyTheme〕，不改本常量；selectList 补全面
+ * v1 不着色——契约篇 §5.4 theme 条款消费面钉死四处，不含补全面板）
+ */
 const identity = (text: string): string => text;
 const EDITOR_THEME: EditorTheme = {
   borderColor: identity,
@@ -155,14 +169,39 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   }
   const editorContainer = new Container();
   editorContainer.addChild(editor);
-  /** 底部提示行（快捷键说明，装配期固定）。S6 形态⑦：quitHint 由构造方按
+  /* ---- 底部提示行（D4 theme 轻件：拆 title 段与尾段——footer 由装配期静态变主题期动态重算，title 文案随聚焦 accent 着色）。S6 形态⑦：quitHint 由构造方按
    * 起屏时点驱动数分档传入（多驱动「Ctrl+C 打断」/ 单驱动「Ctrl+D·Ctrl+C
    * 退出」）——通道不知驱动数，文案判据在宿主侧 */
-  const footerText = new Text(
-    opts.title
-      ? ` ${opts.title} — Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`
-      : ` Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`,
-  );
+  /** title 段（缺 title = 空串——着色锚点；着色克制律：只着本段，尾段恒素） */
+  const footerTitlePart = opts.title ? ` ${opts.title}` : '';
+  /** 尾段（发送/命令/退出提示——恒不着色） */
+  const footerRest = opts.title
+    ? ` — Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`
+    : ` Enter 发送 / / 命令 / ${opts.quitHint ?? 'Ctrl+D·Ctrl+C 退出'}`;
+  const footerText = new Text(footerTitlePart + footerRest);
+
+  /* ---- 主题换装（D4 theme 渲染轻件，契约篇 §5.4 theme 条款） ---- */
+  /**
+   * 聚焦会话当前着色器（跟随聚焦换装三消费点的共享着色面）：repaint / start
+   * 起屏两时点重算（起屏路不走 repaint——冷读 B1 裁决补的第四时点）；
+   * 缺省恒等零 ANSI。handle(agent_start) 等即时写点读本闭包变量。
+   */
+  let focusColorize: (text: string) => string = identity;
+  /**
+   * 重算聚焦着色器并换装三消费点：编辑器边框（Editor 实例 borderColor 公开
+   * 可变、render 期求值——赋值即换装，不动模块级共享 EDITOR_THEME 基线）+
+   * 页脚 title 段。状态行 ● 由各写点即时用 focusColorize（本函数不触——
+   * 它随 run 态翻转，不随主题时点）。
+   */
+  const applyTheme = (sessionId: string | undefined): void => {
+    focusColorize = accentColorizer(opts.themeFor?.(sessionId));
+    editor.borderColor = focusColorize;
+    footerText.setText(focusColorize(footerTitlePart) + footerRest);
+    footerText.invalidate();
+    // 保底请求重绘：起屏空历史路（renderHistoryInto 零追加行）无其他渲染触发，
+    // footer 换装需自带一次 requestRender（幂等调度，repaint 路多一次无害）
+    tui.requestRender();
+  };
 
   const layoutRoot = new VStack([
     { component: scrollView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
@@ -271,7 +310,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
       case 'agent_start':
-        statusText.setText(' ● 工作中');
+        // D4 theme：● 指示符着聚焦 accent（focusColorize——repaint/起屏时点已重算）；
+        // 「工作中」长文本不着（着色克制律）
+        statusText.setText(`${focusColorize(' ●')} 工作中`);
         statusText.invalidate();
         tui.requestRender();
         break;
@@ -353,12 +394,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   /* ---- 非聚焦活动摘要（S3 信封分流后台腿） ---- */
   const handleActivity = (sessionId: string, event: AgentEvent): void => {
     const short = sessionId.slice(0, 8);
+    // D4 theme：各归各色——按事件归属会话的 accent 着「符号 + 会话 N」段
+    // （⧗/✓ 同函数同族同律）；「后台工作中/完成」长文本不着（着色克制律）
+    const colorize = accentColorizer(opts.themeFor?.(sessionId));
     switch (event.type) {
       case 'agent_start':
-        appendLines([`⧗ 会话 ${short} 后台工作中`]);
+        appendLines([`${colorize(`⧗ 会话 ${short}`)} 后台工作中`]);
         break;
       case 'agent_end':
-        appendLines([`✓ 会话 ${short} 后台完成`]);
+        appendLines([`${colorize(`✓ 会话 ${short}`)} 后台完成`]);
         break;
       default:
         break; // message/tool 事件不进正文（正文只属聚焦者——互不绞屏执法）
@@ -372,6 +416,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     for (const message of history) appendLines(renderAgentMessage(message, opts.rendererFor, opts.onRendererError));
   };
   const repaint = (sessionId: string | undefined): void => {
+    // D4 theme：换装先行（清屏重画时点按目标会话重算聚焦着色器——边框/页脚
+    // 随之换装；后续 statusText 写点读新 focusColorize）
+    applyTheme(sessionId);
     // 复位顺序先于清空：streaming 槽引用的容器随 messages.clear() 一并摘除，
     // 先置 null 防孤儿引用继续 setText 到已弃容器
     streaming = null;
@@ -384,7 +431,8 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     // 全量快照、直推整块替换即自然续流（无需 message_start）
     const running = sessionId !== undefined && opts.entryStatus?.(sessionId) === 'running';
     if (running) openStreaming();
-    statusText.setText(running ? ' ● 工作中' : '');
+    // D4 theme：● 指示符随本会话 accent（applyTheme 已在 repaint 开头重算）
+    statusText.setText(running ? `${focusColorize(' ●')} 工作中` : '');
     statusText.invalidate();
     tui.requestRender();
   };
@@ -402,6 +450,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     start() {
       // 起屏历史：undefined = 当前聚焦（壳闭包解析——boot 路 focus 通知早于订阅，
       // 初始渲染不走 repaint 而走本路；此后 focus 变化全走 repaint 显式键）
+      // D4 theme：起屏换装同路（B1 冷读裁决——起屏聚焦会话的主题不经 repaint，
+      // 在此显式应用；undefined = 当前聚焦，与 history 同款语义）
+      applyTheme(undefined);
       renderHistoryInto(undefined);
       tui.setFocus(editor);
       tui.start();

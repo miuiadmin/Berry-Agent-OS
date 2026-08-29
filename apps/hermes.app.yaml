@@ -14,6 +14,11 @@
 # /app hermes 同一份清单委派 Hermes 执行一次性任务）。
 id: hermes
 label: Hermes
+# D4 theme 渲染轻件：accent 强调色（白名单色名八字之一）——多应用并行时
+# 非聚焦摘要行 ⧗/✓ 与聚焦换装面（●/边框/页脚 title）以色区分会话归属；
+# chat 不配（默认应用素净缺省），hermes 配 = 出厂即一个可观测换装样例。
+theme:
+  accent: cyan
 components:
   - builtin:chat
   - builtin:memory

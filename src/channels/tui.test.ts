@@ -178,3 +178,90 @@ describe('notify 级别前缀（NotifyLevel 四值，success 档 2026-08-27 P2-1
     expect(all).toContain('✖ 错误消息');
   });
 });
+
+describe('D4 theme 渲染轻件（focus 换装 + 各归各色 + 起屏一次 + 缺省恒等）', () => {
+  /** cyan = #06b6d4 的 truecolor SGR 前缀（换装断言锚——映射值漂移即红） */
+  const CYAN = '\x1b[38;2;6;182;212m';
+  /** magenta = #d946ef 的 truecolor SGR 前缀 */
+  const MAGENTA = '\x1b[38;2;217;70;239m';
+
+  it('聚焦换装：repaint 按目标会话重算 ● 着色；摘要行各归各色（⧗/✓ 同族同律）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      // 读源权威 = 条目 appId 活视图（宿主闭包路由的通道侧消费形态）
+      themeFor: (sessionId) => (sessionId === 'session-a' ? 'cyan' : 'magenta'),
+      entryStatus: () => 'idle',
+    });
+    // 聚焦 session-a：repaint 换装 → 在飞 ● 指示符随 cyan
+    tui.repaint('session-a');
+    tui.handle({ type: 'agent_start' });
+    await flush();
+    const focused = terminal.frames.join('');
+    expect(focused).toContain(`${CYAN} ●`); // ● 指示符着聚焦 accent
+    expect(focused).not.toContain(`${CYAN} 工作中`); // 长文本不着（着色克制律）
+    // 非聚焦 session-b：摘要行按归属会话 accent（magenta）各归各色
+    tui.handleActivity('session-b', { type: 'agent_start' });
+    await flush();
+    const activity = terminal.frames.join('');
+    expect(activity).toContain(`${MAGENTA}⧗ 会话 session-`);
+    expect(activity).toContain(' 后台工作中'); // 尾段素文本
+    tui.handleActivity('session-b', { type: 'agent_end', status: 'completed', messages: [] });
+    await flush();
+    expect(terminal.frames.join('')).toContain(`${MAGENTA}✓ 会话 session-`); // ✓ 同族同律
+  });
+
+  it('起屏一次（B1 冷读裁决）：start 初始渲染不走 repaint，主题仍随当前聚焦应用', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      title: 'Berry 1.0',
+      // undefined = 当前聚焦（起屏路——与 history 同款可选参形态）
+      themeFor: (sessionId) => (sessionId === undefined ? 'cyan' : 'cyan'),
+    });
+    tui.start();
+    await flush();
+    // 起屏即换装：footer title 段随 cyan（尾段「Enter 发送…」恒素）
+    const all = terminal.frames.join('');
+    expect(all).toContain(`${CYAN} Berry 1.0`);
+    expect(all).toContain('Enter 发送'); // 尾段在场（恒不着色）
+  });
+
+  it('缺省恒等：themeFor 缺席 / 返回 undefined = 全程零 truecolor SGR（零色合法缺省态）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      themeFor: () => undefined, // 无 app 域 / 无清单命中 → undefined
+    });
+    tui.repaint('session-a');
+    tui.handle({ type: 'agent_start' });
+    tui.handleActivity('session-b', { type: 'agent_start' });
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain(' ● 工作中'); // 素文本照常
+    expect(all).toContain('⧗ 会话 session- 后台工作中');
+    expect(all).not.toContain('\x1b[38;2;'); // 全程零 truecolor（现状回归锁）
+  });
+
+  it('setStatus 外部文本恒不着色（状态行着色仅 ● 指示符）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({
+      host: strictHost,
+      commands: emptyCommands,
+      terminal,
+      themeFor: () => 'cyan',
+    });
+    tui.repaint('session-a');
+    tui.ui().setStatus('外部状态文本');
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain(' 外部状态文本');
+    expect(all).not.toContain(`${CYAN} 外部状态文本`); // setStatus 不吃 accent
+  });
+});
