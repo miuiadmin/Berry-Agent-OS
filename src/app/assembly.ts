@@ -1027,6 +1027,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       ctx.emit('app/uninstalled', data);
       registry.routed()?.session.append('app/uninstalled', data);
     },
+    // 在册应用清单 id 集活取面（R4 行为小刀）：mount 写行前 apps 值域预校验——
+    // 与 loadComposition 触发①同源（officialApps 键集，装载序上先行于组合树）
+    knownAppIds: () => knownAppIds,
     requestReload: async (requestOpts) => {
       const result = await reload(requestOpts?.app);
       if (result.queued === true) return { status: 'queued' as const };

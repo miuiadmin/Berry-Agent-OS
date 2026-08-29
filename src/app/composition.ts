@@ -20,7 +20,7 @@ import { writeAtomicFile } from '../persist/index.js';
 import { AppError, COMPOSITION_ROW_INVALID } from '../contracts/errors.js';
 import { canonicalWorkspaceRoot } from '../context/workspace.js';
 import type { BuiltinAppModule, CompositionRow, AppPlanRow, AppSkipReason, RowSandbox } from '../contracts/app.js';
-import { AppIdPattern } from '../contracts/app.js';
+import { AppIdPattern, exclusiveAppOf } from '../contracts/app.js';
 
 /** overlay 文件名（<数据目录>/overlay.yaml，契约篇 §5.2） */
 export const OVERLAY_FILENAME = 'overlay.yaml';
@@ -730,14 +730,14 @@ export function partitionPlan(plan: readonly AppPlanRow[]): PlanPartition {
       ring1.push(row);
       continue;
     }
-    const apps = row.apps;
-    if (apps === undefined || apps.length > 1) {
-      // 缺席 = 系统区行；多元素 = 跨区行（挂系统相位——装载律①）
+    // 「该区行」谓词单源（contracts exclusiveAppOf）：缺席 = 系统区行；多元素 =
+    // 跨区行（挂系统相位——装载律①）；恰一元素 = 该应用区独占行（单区 reload
+    // 四集合的判定源）
+    const appId = exclusiveAppOf(row);
+    if (appId === undefined) {
       system.push(row);
       continue;
     }
-    // 恰一元素 = 该应用区独占行（「该区行」谓词——单区 reload 四集合的判定源）
-    const appId = apps[0]!;
     const bucket = zoneRows.get(appId);
     if (bucket === undefined) zoneRows.set(appId, [row]);
     else bucket.push(row);

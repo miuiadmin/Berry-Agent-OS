@@ -45,7 +45,7 @@ import {
   COMPOSITION_ROW_INVALID,
   SANDBOX_UNAVAILABLE,
 } from '../contracts/errors.js';
-import { resolveRowCarrier, type AppPlanRow } from '../contracts/app.js';
+import { resolveRowCarrier, exclusiveAppOf, type AppPlanRow } from '../contracts/app.js';
 import type { ToolsService } from '../contracts/tools.js';
 import type { ContextScope } from '../context/types.js';
 import { appZoneId } from '../context/context.js';
@@ -220,7 +220,17 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
   const ensureOsLayer = (sandbox: SandboxService): void => {
     if (osLayerProbed) return;
     osLayerProbed = true;
-    for (const backend of sandbox.listBackends()) {
+    const backends = sandbox.listBackends();
+    // 空后端链 fail-closed（R4 行为小刀）：本平台零 OS 沙箱后端——「OS 层尽力」
+    // 宣示无层可验，原形态零迭代静默放行 = PM-only 悄悄降格（三层执法缺一层
+    // 而无人知）。与 probe 失败同档拒装；降 PM-only 必须显式 osLayer:false 逃生门
+    if (backends.length === 0) {
+      throw new AppError(
+        SANDBOX_UNAVAILABLE,
+        'external 域 OS 沙箱层不可用（本平台零 OS 沙箱后端）——fail-closed 拒装（契约篇 §1.7 增补 2a；可显式降 PM-only 逃生门）',
+      );
+    }
+    for (const backend of backends) {
       if (backend.probe !== undefined && !backend.probe(5_000)) {
         throw new AppError(
           SANDBOX_UNAVAILABLE,
@@ -439,10 +449,12 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
       self = domain;
       // 行→区登记（D3 单区 reload 过滤列）：apps 恰一元素才归属该应用区——
       // 跨区行（多元素）与系统相位行（缺席）zone 列 undefined，单区 terminate 不动
+      // （谓词单源 = contracts exclusiveAppOf，与 partitionPlan 同源防两处漂移）
+      const zoneApp = exclusiveAppOf(row);
       entries.set(row.id, {
         domain,
         applied: false,
-        ...(row.apps !== undefined && row.apps.length === 1 ? { zone: appZoneId(row.apps[0]!) } : {}),
+        ...(zoneApp !== undefined ? { zone: appZoneId(zoneApp) } : {}),
       });
       spawned += 1; // 观测锚⑩ 装机计数
       // 观测锚⑩ 事件面：spawn 即派发（订阅方计量装机——boot//reload 各分域行一发）

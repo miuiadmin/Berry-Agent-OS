@@ -111,6 +111,8 @@ export interface MountReportView {
 /** unmount 回执的结构子集（UnmountReport 本地收窄） */
 export interface UnmountReportView {
   readonly id: string;
+  /** 被删行挂载目标集（R4 行为小刀）——恰一元素 = 单区 reload 提示的判据 */
+  readonly apps: readonly string[];
   readonly warnings: readonly string[];
   readonly message: string;
 }
@@ -303,7 +305,10 @@ export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskF
         [
           `${report.message}`,
           `行 ${report.id}：挂应用 ${report.apps.join('、')}（${report.source} 源 · 引用 ${report.appRef}）。`,
-          '行已写但尚未装载：调 apps_reload 生效。',
+          // 单区提示（R4 行为小刀同刀）：恰一应用 = 该区行，apps_reload 带 app 单区即可
+          `行已写但尚未装载：调 apps_reload${
+            report.apps.length === 1 ? `（app="${report.apps[0]}" 单区即可）` : ''
+          } 生效。`,
         ].join('\n'),
       );
     },
@@ -343,7 +348,8 @@ export function createAppsUnmountTool(apps: AppsManageFace, approval: ApprovalAs
       ];
       // 受影响会话警示逐条呈报（词表 unknown 档 = 最坏假设的既定文案，直接透传）
       for (const warning of report.warnings) lines.push(`警示：${warning}`);
-      lines.push('调 apps_reload 生效。');
+      // 单区提示同 mount 工具（R4 行为小刀同刀）：恰一目标应用 = 该区行
+      lines.push(`调 apps_reload${report.apps.length === 1 ? `（app="${report.apps[0]}" 单区即可）` : ''} 生效。`);
       return textResult(lines.join('\n'));
     },
   };

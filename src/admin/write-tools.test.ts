@@ -76,7 +76,12 @@ function fakeManage(scripted: {
     },
     async unmount(rowId) {
       calls.push({ method: 'unmount', args: [rowId] });
-      return { id: rowId, warnings: scripted.mountWarnings ?? [], message: '已卸挂载（fake）——重挂走 /apps-mount' };
+      return {
+        id: rowId,
+        apps: ['chat'],
+        warnings: scripted.mountWarnings ?? [],
+        message: '已卸挂载（fake）——重挂走 /apps-mount',
+      };
     },
     async configure(id, patch) {
       calls.push({ method: 'configure', args: [id, patch] });
@@ -277,7 +282,7 @@ describe('apps_mount / apps_unmount（D2 两态生效动词）', () => {
     expect(text).toContain('已挂载生效（fake）'); // 服务回执 message 透传
     expect(text).toContain('行 demo-2');
     expect(text).toContain('builtin:chat');
-    expect(text).toContain('调 apps_reload 生效'); // 写行 ≠ 装载——链式提示
+    expect(text).toContain('调 apps_reload'); // 写行 ≠ 装载——链式提示（恰一应用带单区提示，R4 行为小刀）
   });
 
   it('unmount：allowed-once 后 unmount(rowId) 透传 + 删行保码渲染 + 警示逐条呈报', async () => {
@@ -289,7 +294,7 @@ describe('apps_mount / apps_unmount（D2 两态生效动词）', () => {
     expect(text).toContain('installed-unmounted'); // 删行后装机物呈现态点名（重挂路径明示）
     expect(text).toContain('警示：demo/one：3 个会话订阅'); // 受影响会话警示透传
     expect(text).toContain('apps_mount'); // 重挂指引
-    expect(text).toContain('调 apps_reload 生效');
+    expect(text).toContain('调 apps_reload');
   });
 });
 

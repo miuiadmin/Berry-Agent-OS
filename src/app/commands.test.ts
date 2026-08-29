@@ -11,7 +11,7 @@ import type { CommandDefinition } from '../channels/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
 import { registerBuiltinCommands } from './commands.js';
-import type { AppsService, UninstallExecReport, UninstallReport } from './apps.js';
+import type { AppsService, UninstallExecReport, UninstallReport, MountReport, UnmountReport } from './apps.js';
 import type { ReloadResult } from './assembly.js';
 
 /** 捕获型命令注册表（/apps-uninstall handler 直取直调） */
@@ -167,5 +167,79 @@ describe('/apps-uninstall 命令面（第二刀：human-only execute 唯一入�
     const rigB = rig({ inspect: INSPECT, exec: residual });
     await rigB.get('apps-uninstall').handler('demo --confirm');
     expect(rigB.notes[0]).toContain('残迹收尾');
+  });
+});
+
+describe('/apps-mount 与 /apps-unmount 壳链：单目标链单区 reload（R4 行为小刀——修复前必红）', () => {
+  /**
+   * 最小装配台：appsService 只桩 mount/unmount 两面（服务面行为已在
+   * apps.test.ts 全锁，此处只锁壳面 reload 实参——单区/全量判据）；reload
+   * 桩记录 app 实参序列。unmount 桩按行 id 分派预设报告。
+   */
+  function rigRig(mountReport: MountReport, unmountReports: Record<string, UnmountReport>) {
+    const { registry, get } = fakeRegistry();
+    const { ui, notes } = fakeUi();
+    const reloadArgs: Array<string | undefined> = [];
+    const appsService = {
+      mount: async () => mountReport,
+      unmount: async (rowId: string) => unmountReports[rowId]!,
+    } as unknown as AppsService;
+    const dispose = registerBuiltinCommands({
+      commands: registry,
+      ui,
+      skills: { list: () => [], diagnostics: () => [] } as unknown as Parameters<
+        typeof registerBuiltinCommands
+      >[0]['skills'],
+      quit: () => {},
+      submit: () => {},
+      newSession: () => undefined,
+      apps: {
+        list: () => ({ active: [], retiredCount: 0 }),
+        switchTo: () => false,
+        open: () => undefined,
+        registered: () => [],
+        available: () => [],
+        enter: () => ({ ok: false as const, error: '不可用' }),
+      },
+      appsService,
+      // reload 桩记录 app 实参（undefined = 全量）——单区收窄的唯一判据面
+      reload: async (app?: string) => {
+        reloadArgs.push(app);
+        return { payload: { activated: [], failed: [], skipped: [] } };
+      },
+      usage: () => '',
+      allowlist: { list: () => [], remove: () => false } as unknown as Parameters<
+        typeof registerBuiltinCommands
+      >[0]['allowlist'],
+    });
+    return { get, notes, reloadArgs, dispose };
+  }
+
+  /** 标准 mount 回执（单目标形态） */
+  const MOUNT: MountReport = {
+    id: 'my-plugin',
+    apps: ['chat'],
+    source: 'local',
+    appRef: '/tmp/x/my-plugin',
+    message: '已挂载生效',
+  };
+
+  it('mount 恰一应用 → reload(chat) 单区；跨区共享行（多元素）→ reload() 全量', async () => {
+    const { get, reloadArgs } = rigRig(MOUNT, {});
+    await get('apps-mount').handler('my-plugin --apps chat --carrier main');
+    await get('apps-mount').handler('my-plugin --apps chat,code --carrier main');
+    // 第一发单目标 = 该区行 → 单区 reload（app 实参）；第二发共享行 → 全量（undefined）
+    expect(reloadArgs).toEqual(['chat', undefined]);
+  });
+
+  it('unmount 被删行恰一目标应用 → reload(app)；无 apps 键行/跨区行 → 全量', async () => {
+    const single: UnmountReport = { id: 'row-a', apps: ['chat'], warnings: [], message: '已卸挂载' };
+    const crossZone: UnmountReport = { id: 'row-b', apps: ['chat', 'code'], warnings: [], message: '已卸挂载' };
+    const noApps: UnmountReport = { id: 'row-c', apps: [], warnings: [], message: '已卸挂载' };
+    const { get, reloadArgs } = rigRig(MOUNT, { 'row-a': single, 'row-b': crossZone, 'row-c': noApps });
+    await get('apps-unmount').handler('row-a');
+    await get('apps-unmount').handler('row-b');
+    await get('apps-unmount').handler('row-c');
+    expect(reloadArgs).toEqual(['chat', undefined, undefined]);
   });
 });

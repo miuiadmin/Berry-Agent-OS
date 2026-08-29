@@ -385,6 +385,17 @@ export function resolveRowCarrier(row: { pkg?: string; sandbox?: RowSandbox }): 
   return row.pkg !== undefined && !row.pkg.startsWith('builtin:') ? 'external' : 'main';
 }
 
+/**
+ * 「该区行」谓词（D3 装载分区，契约篇 §5.1 装载律①）：行 apps 键**恰一元素**
+ * = 该应用区独占行——返回该应用 id；缺席（系统相位）或多元素（跨区共享行）
+ * = undefined。分区（partitionPlan）与舰队区登记（fleet 行→区过滤列）两消费
+ * 面共取，防两处字面谓词漂移（同 resolveRowCarrier 先例——纯函数住 contracts，
+ * 三消费面共同可达的最低层；区 id 命名仍住 context〔appZoneId〕，谓词不掺命名）。
+ */
+export function exclusiveAppOf(row: { apps?: readonly string[] }): string | undefined {
+  return row.apps !== undefined && row.apps.length === 1 ? row.apps[0] : undefined;
+}
+
 /** 组合树行（§5.1，第三十六批作用域数组化）：每行 = 一个应用实例，字段级后写胜出合成 */
 export interface CompositionRow {
   /** 行 id：组合树中该应用实例的稳定标识（overlay 按 id 替换/insert/disable 的键） */

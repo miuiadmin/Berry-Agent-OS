@@ -532,8 +532,10 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
           ...(rowId !== undefined ? { rowId } : {}),
         });
         ui.notify(`已挂载 ${report.id} → apps ${report.apps.join('、')}（${report.source} 源）：${report.message}`);
-        // 写行只改组合树文件——壳链 /reload 才热应用（D2 新链：mount→reload）
-        notifyReloadResult(ui, await opts.reload());
+        // 写行只改组合树文件——壳链 /reload 才热应用（D2 新链：mount→reload）。
+        // 单目标收窄（R4 行为小刀）：恰一应用 = 该区行，链单区 reload（分区装载
+        // 律同判据）；跨区共享行（多元素）回退全量
+        notifyReloadResult(ui, await opts.reload(apps.length === 1 ? apps[0] : undefined));
       },
     }),
     /* unmount（mount 对偶）：吃行 id，删行保码——装机物与数据域不动（处置 =
@@ -550,7 +552,9 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         const report = await opts.appsService.unmount(rowId);
         const warnFace = report.warnings.length > 0 ? `\n${report.warnings.map((w) => `  ⚠ ${w}`).join('\n')}` : '';
         ui.notify(`${report.message}${warnFace}`);
-        notifyReloadResult(ui, await opts.reload()); // D2 新链：unmount→reload
+        // 单目标收窄同 mount（R4 行为小刀）：被删行恰一目标应用 = 单区 reload；
+        // 跨区行/无 apps 键行（纯禁用/替换）回退全量——判据走报告 apps 载荷
+        notifyReloadResult(ui, await opts.reload(report.apps.length === 1 ? report.apps[0] : undefined)); // D2 新链：unmount→reload
       },
     }),
     commands.register({

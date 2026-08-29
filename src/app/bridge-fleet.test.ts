@@ -567,6 +567,30 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('OS 层空后端链 fail-closed（R4 行为小刀）：零 OS 沙箱后端平台 → SANDBOX_UNAVAILABLE 拒装——不再静默放行悄悄降 PM-only（修复前必红）', async () => {
+    const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-emptychain');
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      // osLayer 缺省 true = 生产缺省路径；sandboxStub 后端链为空（零 OS 沙箱后端
+      // 平台形态）。原形态 = 空链零迭代静默放行——「三层执法」缺 OS 层而无人知
+      external: { workspace, dataDir, sandbox: sandboxStub },
+    });
+    const row: AppPlanRow = {
+      id: 'empty-chain',
+      entry: probeEntry,
+      sandbox: { carrier: 'external' },
+    };
+    await expect(async () => fleet.loader.load(row)).rejects.toMatchObject({
+      code: SANDBOX_UNAVAILABLE,
+      message: expect.stringContaining('零 OS 沙箱后端'),
+    });
+    // 拒装零域产出：与 probe 失败同档——降 PM-only 必须显式 osLayer:false 逃生门
+    expect(fleet.stats()).toMatchObject({ spawned: 0, live: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it(
     'OS 层 argvWrapper 接线（R2 测试补课 P1-3 盲区②）：probe 通过 → confine 产物逐字真达 spawn——子进程自证 argv（协议位随行存活）',
     { timeout: 60_000 },

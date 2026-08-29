@@ -342,6 +342,33 @@ describe('mount / unmount（两态生效动词）', () => {
     });
   });
 
+  it('mount apps 值域预校验（R4 行为小刀）：未知应用 id 写行前即拒——坏行不落盘（boot 拒启陷阱前移，修复前必红）', async () => {
+    const dataDir = makeDataDir();
+    const { localDir, loadEntry } = setupLocalApp(dataDir);
+    const apps = createAppsService({
+      dataDir,
+      runner: fakeRunner().runner,
+      loadEntry,
+      // 在册清单面注入（assembly 正路同源：loadOfficialApps 键集闭包）
+      knownAppIds: () => new Set(['chat', 'code']),
+    });
+    await apps.install(localDir);
+
+    // 混入未知 id：写行前即拒（原形态 = 落盘成功，下次 boot 才被
+    // assertRowAppTargets 拒——「错行落盘后 boot 拒启」与 config 面「错配置
+    // 不落盘」目标相反，正是本刀前移的陷阱）
+    await expect(apps.mount('my-plugin', { apps: ['chat', 'ghost'], carrier: 'main' })).rejects.toMatchObject({
+      code: COMPOSITION_ROW_INVALID,
+      message: expect.stringContaining('ghost'),
+    });
+    // 坏行不落盘：overlay 零行
+    expect(userRows(dataDir)).toEqual([]);
+    // 在册 id 照常放行（预校验只挡值域，不是新门）
+    await expect(apps.mount('my-plugin', { apps: ['chat'], carrier: 'main' })).resolves.toMatchObject({
+      apps: ['chat'],
+    });
+  });
+
   it('mount 解冻（R1 复盘批 2026-08-29）：缺 carrier = 闩一缺省 external——成功落行且零 sandbox 块', async () => {
     const dataDir = makeDataDir();
     const { localDir, loadEntry } = setupLocalApp(dataDir);

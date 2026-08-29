@@ -210,6 +210,8 @@ export interface MountReport {
 export interface UnmountReport {
   /** 已删的 overlay 行 id */
   readonly id: string;
+  /** 被删行的挂载目标应用 id 集（apps 键值——纯禁用/替换行无键 = 空数组；恰一元素 = 命令面链单区 reload 的判据） */
+  readonly apps: readonly string[];
   /** 受影响会话警示（uninstall inspect 同款——词表 unknown 档最坏假设 + 逐词点名） */
   readonly warnings: readonly string[];
   /** 一句话结果（人读；装机物与账本保留——重挂走 mount） */
@@ -355,6 +357,12 @@ export type ReloadOutcome =
  *        reload 闭包的适配器——排队语义宿主侧承载；缺省 = 诊断面拒投递）
  * @param opts.gitCommitOf git 装机物 commit 取数面（provenance 精确版本——
  *        rev-parse HEAD；缺省真 spawn 捕获，测试注入替身；失败容忍记缺省）
+ * @param opts.knownAppIds 在册应用清单 id 集活取面（assembly 注入
+ *        loadOfficialApps 键集闭包，与 loadComposition 触发①同源）：mount
+ *        写行前 apps 值域预校验——坏 id 不落盘（原形态 = 落盘成功后下次
+ *        boot/reload 才被 assertRowAppTargets 拒 = boot 拒启陷阱，与 config
+ *        「错配置不落盘」目标相反）。缺省不预校验（诊断/测试面——boot 执法
+ *        仍兜底）
  */
 export function createAppsService(opts: {
   dataDir: string;
@@ -364,6 +372,7 @@ export function createAppsService(opts: {
   emitUninstalled?: (data: UninstalledEventData) => void;
   requestReload?: (opts?: { readonly app?: string }) => Promise<ReloadOutcome>;
   gitCommitOf?: (dir: string) => Promise<string | undefined>;
+  knownAppIds?: () => ReadonlySet<string>;
 }): AppsService {
   const dataDir = opts.dataDir;
   const runner = opts.runner ?? spawnRunner;
@@ -915,6 +924,21 @@ export function createAppsService(opts: {
             `overlay 手编是系统层的专家路径`,
         );
       }
+      // apps 值域预校验（R4 行为小刀）：坏应用 id 原形态要落盘后才在下次
+      // boot/reload 被 assertRowAppTargets 拒（boot 拒启陷阱）。写行前对在册
+      // 清单集执法——与装载期触发①同词同码拒绝；缺省不预校验（诊断/测试面）
+      if (opts.knownAppIds !== undefined) {
+        const registered = opts.knownAppIds();
+        const unknown = apps.filter((appId) => !registered.has(appId));
+        if (unknown.length > 0) {
+          throw new AppError(
+            COMPOSITION_ROW_INVALID,
+            `mount：未知应用 id「${unknown.join('、')}」（apps 取值域 = 在册应用清单 id——在册：${
+              [...registered].join('、') || '无'
+            }；清单以 /app 为准，勿凭记忆拼 id）`,
+          );
+        }
+      }
       // 载体裁决（R1 复盘批 2026-08-29 解冻收口——原「过渡冻结」分支随
       // external carrier 落码批达成解冻前提而删）：三值显式降格位；缺省
       // undefined = 不落 sandbox 块（闩一装载期按行引用形分派——第三方行
@@ -1007,7 +1031,11 @@ export function createAppsService(opts: {
         apps,
         source: record.source,
         appRef,
-        message: `已挂载生效（apps ${apps.join('、')}；载体 ${carrier ?? 'external（缺省——闩一出生即进程墙）'}）——热应用走 /reload（per-app reload 前的过渡形态）`,
+        message: `已挂载生效（apps ${apps.join('、')}；载体 ${carrier ?? 'external（缺省——闩一出生即进程墙）'}）——热应用走 ${
+          apps.length === 1
+            ? `/reload --app ${apps[0]}（单区——命令面已自动链）`
+            : '/reload 全量（跨区共享行——命令面已自动链）'
+        }`,
       };
     },
 
@@ -1040,6 +1068,9 @@ export function createAppsService(opts: {
       removeOverlayRow(dataDir, rowId);
       return {
         id: rowId,
+        // 被删行挂载目标集（R4 行为小刀）：恰一元素 = 命令面链单区 reload 的判据；
+        // 纯禁用/替换行无 apps 键 = 空数组（命令面回退全量）
+        apps: row.apps ?? [],
         warnings,
         message: `已卸挂载（装机物保留在仓库态——重挂走 /apps-mount；数据域随 dataAction 语义由 uninstall 处置）`,
       };
