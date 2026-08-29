@@ -30,6 +30,7 @@ import { Persistence } from '../persist/index.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { createBerryRuntime } from './assembly.js';
 import { ConversationDriver } from '../chat/index.js';
+import type { AgentServiceFace } from '../chat/index.js';
 import type { BerryRuntime } from './assembly.js';
 import { defaultConvertToLlm } from './convert.js';
 import { runOnceMain } from './run-main.js';
@@ -2479,6 +2480,173 @@ describe('/reload 组合树重载', () => {
       failed: [],
       skipped: [],
     }); // run 结束后放行
+  });
+
+  /* ---- D3 分槽排队四分支（R2 测试补课批 2026-08-29，复盘 P1-3 #3）----
+   * FULL_RELOAD_SLOT 分槽语义的零覆盖面：单区 busy 判定只看本 app 域（他应用
+   * 在跑不阻断——D3 存在理由）、全量槽跨应用扣住（任意域 run 在跑即排队）、
+   * 排水竞速静默重排（排水瞬间新 run 起跑 → reloadOnce 落回 queued 留待下次
+   * 结算）。双应用域 busy 态经 drivers.open({ app: hermes 清单 }) 造第二驱动
+   * 条目——anyRunActive 判据键 = 条目 appId（boot 缺省 chat 域 + hermes 域两分）。 */
+
+  /** 多闸门脚本流：第 i 次模型调用等第 i 道闸（逐 run 独立放行——时序编排用） */
+  const gatedStream = (count: number): { streamFn: StreamFn; release: (index: number) => void } => {
+    const gates = Array.from({ length: count }, () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    });
+    let calls = 0;
+    const streamFn: StreamFn = () => {
+      const index = Math.min(calls, count - 1);
+      calls += 1;
+      const answer = textMessage(`闸${index}答`);
+      const gate = gates[index]!.promise;
+      return {
+        [Symbol.asyncIterator]() {
+          let delivered = false;
+          return {
+            next: async () => {
+              if (delivered) return Promise.resolve({ value: undefined, done: true as const });
+              await gate;
+              delivered = true;
+              return Promise.resolve({
+                value: { type: 'done', reason: 'stop', message: answer } as AssistantStreamEvent,
+                done: false as const,
+              });
+            },
+          };
+        },
+        result: async () => answer,
+      };
+    };
+    return { streamFn, release: (index: number) => gates[index]!.resolve() };
+  };
+
+  /** 轮询等待谓词成真（排水链含真实装载 IO——宏任务轮询，5s 上限防挂死） */
+  const until = async (check: () => boolean): Promise<void> => {
+    for (let i = 0; i < 250 && !check(); i += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(check()).toBe(true);
+  };
+
+  /** 双区 fixture：chat/hermes 各一行独占件 + 跨区行一件（busy 态/排水/跨区行
+   * 单区不动三观测面共用——跨区行 apps 枚举两应用，provide 扇出两区表、效果
+   * 链挂系统锚〔装载律①〕，单区 reload 的行→区谓词对它是 undefined 不卷入） */
+  const slotFixture = async (streamFn: StreamFn): Promise<BerryRuntime> => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-slot-')));
+    const chatDir = writeRowDir(compositionDir, 'chat-widget', zoneWidgetSource('chat', 'acme/evt-v1'));
+    const hermesDir = writeRowDir(compositionDir, 'hermes-widget', zoneWidgetSource('hermes', 'acme/h-evt'));
+    const crossDir = writeRowDir(compositionDir, 'cross-widget', zoneWidgetSource('cross', 'acme/x-evt'));
+    writeFileSync(
+      join(compositionDir, 'overlay.yaml'),
+      `rows:\n` +
+        `  - id: chat-widget\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
+        `  - id: hermes-widget\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n` +
+        `  - id: cross-widget\n    pkg: ${crossDir}\n    apps: [chat, hermes]\n    sandbox: { carrier: main }\n`,
+    );
+    return assemble({ streamFn, compositionDir });
+  };
+
+  it('分槽分支①②：他应用 run 在跑不阻断本应用单区 reload——busy 判定只看本 app 域（D3 存在理由）', async () => {
+    const { streamFn, release } = gatedStream(1);
+    const runtime = await slotFixture(streamFn);
+    const hermesBefore = tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/hermes-widget');
+
+    // hermes 域第二驱动起 gated run（busy 态落他应用域——条目 appId = hermes）
+    const hermesEntry = runtime.drivers.open({ app: runtime.apps.get('hermes')! })!;
+    expect(hermesEntry.appId).toBe('hermes');
+    const slow = hermesEntry.driver.submitOnce('慢问');
+    expect(hermesEntry.driver.isRunning).toBe(true);
+
+    // 单区 reload('chat')：chat 域闲 → 即时执行（不进槽、不返 queued）——D3 之前的
+    // 全局 busy 闸此刻会排队，分槽后他应用在跑与本应用换件互不相干
+    const result = await runtime.reload('chat');
+    expect(result.queued).toBeUndefined();
+    expect(result.payload).toEqual({ activated: ['chat-widget'], failed: [], skipped: [], app: 'chat' });
+    expect(result.payload?.droppedEvents).toBeUndefined(); // 同词重载零卸词
+    expect(tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/hermes-widget')).toBe(hermesBefore); // 他区实例不动
+
+    release(0);
+    await slow;
+  });
+
+  it('分槽分支③：全量槽跨应用扣住——他应用 run 在跑全量 reload 排队，其结算自动排水恰一次（载荷无 app 腿）', async () => {
+    const { streamFn, release } = gatedStream(1);
+    const runtime = await slotFixture(streamFn);
+    const reloaded: unknown[] = [];
+    runtime.ctx.on('composition/reloaded', (payload: unknown) => {
+      reloaded.push(payload);
+    });
+
+    const hermesEntry = runtime.drivers.open({ app: runtime.apps.get('hermes')! })!;
+    const slow = hermesEntry.driver.submitOnce('慢问');
+    // 全量 busy 判定全域——跨应用扣住 '*' 槽（busy 态在 hermes 域仍扣住全量）
+    expect(await runtime.reload()).toEqual({ queued: true });
+
+    release(0);
+    await slow;
+    // run 结算回调自动排水：排队的全量 reload 落地（真实装载 + composition/reloaded）
+    await until(() => reloaded.length === 1);
+    const payload = reloaded[0] as { activated: string[]; app?: string };
+    expect(payload.activated).toEqual(expect.arrayContaining(['chat-widget', 'hermes-widget']));
+    expect(payload.app).toBeUndefined(); // 无 app 腿 = 全量
+    expect(reloaded).toHaveLength(1); // 槽先清再执行——恰一次
+  });
+
+  it('分槽分支④：排水竞速静默重排——排水瞬间新 run 起跑，reloadOnce 落回 queued 留待下次结算（零丢弃零双跑）', async () => {
+    const { streamFn, release } = gatedStream(2);
+    const runtime = await slotFixture(streamFn);
+    const reloaded: unknown[] = [];
+    runtime.ctx.on('composition/reloaded', (payload: unknown) => {
+      reloaded.push(payload);
+    });
+    const run1 = runtime.conversation!.submitOnce('第一问');
+    expect(await runtime.reload()).toEqual({ queued: true });
+
+    // 竞速装填：本订阅注册序晚于 boot 武装的排水钩子——run1 结算 dispatch 时钩子
+    // 先行清槽并经串行链（微任务）排 reloadOnce，本订阅随即同步起 run2（launch 在
+    // 首个 await 前同步置 isRunning）；微任务轮到 reloadOnce 时 busy 命中 → 静默
+    // 重排 '*' 槽（无通知无丢弃），留待 run2 结算再排
+    let relayRun: Promise<unknown> | undefined;
+    let relayStarted = false;
+    runtime.ctx.get<AgentServiceFace>('agent').onRunSettled(() => {
+      if (relayStarted) return;
+      relayStarted = true;
+      relayRun = runtime.conversation!.submitOnce('第二问');
+    });
+
+    release(0);
+    await run1;
+    await new Promise((resolve) => setTimeout(resolve, 50)); // 排水尝试 + 竞速重排落定
+    expect(relayStarted).toBe(true);
+    expect(reloaded).toEqual([]); // 排水被竞速扣回——重载零执行零丢弃
+
+    release(1);
+    await relayRun;
+    await until(() => reloaded.length === 1); // run2 结算二次排水恰一次执行
+    expect((reloaded[0] as { app?: string }).app).toBeUndefined();
+    expect(reloaded).toHaveLength(1);
+  });
+
+  it('跨区行单区 reload 不动（R2 测试小项④）：apps:[chat,hermes] 系统相位行——reload(chat) 后两区扇出绑定同实例仍可解析（行→区谓词的全栈兑现）', async () => {
+    const { streamFn } = scriptedStream([textMessage('好')]);
+    const runtime = await slotFixture(streamFn);
+    const crossChat = tryResolveService(runtime.ctx, appZoneId('chat'), 'acme/cross-widget');
+    const crossHermes = tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/cross-widget');
+    expect(crossChat).toMatchObject({ mark: 'cross' }); // 前置：跨区行 provide 扇出两区表
+    expect(crossHermes).toBe(crossChat); // 同键同实例——「一值各归各区」语义
+
+    const result = await runtime.reload('chat');
+    // 载荷不含跨区行：单区谓词只收独占行（apps 恰一元素）——跨区行若被误卷入
+    // activated 即 ['chat-widget','cross-widget'] 双元素，toEqual 即红。fleet 层
+    // 谓词单测已锁（bridge-fleet.test.ts terminateZone 用例），本面补全栈合成锁
+    expect(result.payload).toEqual({ activated: ['chat-widget'], failed: [], skipped: [], app: 'chat' });
+    // 扇出绑定不动：两区表内同键仍同实例（效果链挂 apps:system 锚——chat 区
+    // 锚 dispose 只回卷本区注册链，跨区行的区表写入按作用域归属存活）
+    expect(tryResolveService(runtime.ctx, appZoneId('chat'), 'acme/cross-widget')).toBe(crossChat);
+    expect(tryResolveService(runtime.ctx, appZoneId('hermes'), 'acme/cross-widget')).toBe(crossChat);
   });
 
   it('命令薄壳链全栈：/apps 清单 + /apps-toggle 链 reload + install 仓库态 → /apps-mount 生效（D2 新链）', async () => {

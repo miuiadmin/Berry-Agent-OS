@@ -171,6 +171,27 @@ export interface BridgeFleet {
 }
 
 /**
+ * 观测锚⑤ 内存超限归因判据（两腿签名并集，契约篇 §1.7 预算旗形定形——R2 测试
+ * 补课批 2026-08-29 立法）：域死 diagnostic 携带内存超限签名即归因 ooms（exit
+ * code 两腿都与普通崩溃同码——签名是唯一判据，probe-oom 实证）。两腿不同形：
+ * - worker 线程腿：resourceLimits 超限 → 'error' 事件签名
+ *   `Worker terminated due to reaching memory limit`（tools/poc-worker/probe-oom.mjs 实证）；
+ * - external fork 腿：`--max-old-space-size` 超限 → V8 堆 OOM abort，stderr
+ *   结论行在头部 `FATAL ERROR: Reached heap limit Allocation failed - JavaScript
+ *   heap out of memory`（Node 24 实证）——域内真栈 ~10KiB 会把头部结论行挤出
+ *   8KiB 尾缓存（R2 实测），故 stderr 缓存改两头制（external-domain 头 2KiB
+ *   判据 + 尾 8KiB 最深帧）。`heap out of memory` 是跨 V8 变体的稳定子串
+ *   （CALL_AND_RETRY_LAST 老形亦含）、`Reached heap limit` 兜 Invalid-marked-
+ *   size 变体——修复前单串 'reaching memory limit' 匹配漏判 fork 腿：
+ *   external OOM 记 crashed 不记 ooms。
+ */
+const isOomDiagnostic = (diagnostic: string | undefined): boolean =>
+  diagnostic !== undefined &&
+  (diagnostic.includes('reaching memory limit') ||
+    diagnostic.includes('heap out of memory') ||
+    diagnostic.includes('Reached heap limit'));
+
+/**
  * 建 worker 域舰队。装载失败/apply 失败的域即刻刻意收尾（行已进失败清单，
  * 域不留孤儿——防漏是本件的存在理由之一）；意外死亡走域 spawn 件域死回卷 +
  * 本件 app/failed 死亡结算。两腿（worker 线程 / external fork 进程）同编舞
@@ -337,8 +358,9 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
         entries.delete(row.id);
         if (info.reason === undefined) crashed += 1; // 无执法归因 = 自崩溃（kill 路径已计 heartbeatFreezes）
         // 观测锚⑤ 内存超限归因：error 事件/stderr 签名命中（probe-oom 实证——
-        // exit code 与普通崩溃同码，签名是唯一判据）→ ooms 计数 + worker/oom 事件
-        if (info.diagnostic !== undefined && info.diagnostic.includes('reaching memory limit')) {
+        // exit code 与普通崩溃同码，签名是唯一判据）→ ooms 计数 + worker/oom 事件。
+        // 两腿签名并集（isOomDiagnostic——fork 腿 V8 堆 OOM 签名不同形）
+        if (isOomDiagnostic(info.diagnostic)) {
           ooms += 1; // crashed 的归因子集（维度正交——既计 crashed 又计 ooms）
           opts.anchor().emit('worker/oom', { rowId: row.id, workerId: info.workerId, diagnostic: info.diagnostic });
         }

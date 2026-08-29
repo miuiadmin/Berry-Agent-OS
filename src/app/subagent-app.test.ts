@@ -423,8 +423,10 @@ interface PreGateInput {
  * 应用行为：pre 守门行 block `conduction-block` / 就地改参 `conduction-probe`
  * （x 追加标记——mutate 契约 = 就地改属性，rebind input.args 不达执行段）+
  * 注册两探针工具（effect 'read'——子安全门读类放行，拦截归因唯一来自应用行）。
+ * rowId 参数（R2 测试补课批）：行 id 字面可参数化——含 `:` 形即传导判据载体
+ * 回归锁的攻击面（行 id 无字符集执法，owner 切片载体在此形取段错位）。
  */
-function makeConductionComposition(): { compositionDir: string } {
+function makeConductionComposition(rowId = 'conduction-gate'): { compositionDir: string } {
   const compositionDir = makeTempDir('app-cond-');
   const appDir = join(compositionDir, 'conduction-plugin');
   mkdirSync(appDir, { recursive: true });
@@ -467,10 +469,11 @@ function makeConductionComposition(): { compositionDir: string } {
       '}',
     ].join('\n'),
   );
-  // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）
+  // app: chat——触发②执法下第三方行必须挂应用（chat 为在册官方应用）。行 id
+  // 字面参数化（含冒号形合法——行 id 无字符集执法，正是不设闸的攻击面本体）
   writeFileSync(
     join(compositionDir, 'overlay.yaml'),
-    `rows:\n  - id: conduction-gate\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
+    `rows:\n  - id: ${rowId}\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
   );
   return { compositionDir };
 }
@@ -541,6 +544,38 @@ describe('守门行传导 + context 腿（第三十一批 P1-4 回归锁）', ()
     // 改参到达执行段：探针回显的 x 已带应用行标记（就地改写——执行段同引用所见）
     const childToolResults = deriveMessages(child.events).filter((m) => m.type === 'toolResult');
     expect(JSON.stringify(childToolResults)).toContain('探针=原始·经应用行改写');
+  });
+
+  it('含冒号行 id 传导判据载体（R2 测试补课 P1-2 根治）：entry.rowId 判据下守门行照常传导——owner 末段切片载体在此形静默漏传导（修复前必红）', async () => {
+    // 行 id 含 `:`（如 'acme:gate:row'）：fork name 原样拼接使 owner 形如
+    // 'app:apps:app:chat:acme:gate:row'——旧「owner 末段」切片取到 'row' 查
+    // mainRows 不中 → 守门行静默漏传导（block 失效、探针真体被执行）。
+    // 修复后判据读 entry.rowId（on() 登记时携出的行归属），切片彻底退场
+    const { compositionDir } = makeConductionComposition('acme:gate:row');
+    const { streamFn } = scriptedStream([
+      toolCallMessage('agent', { prompt: '子任务C', toolFilter: ['conduction-block'] }),
+      toolCallMessage('conduction-block', {}),
+      textMessage('子已见拦截'),
+      textMessage('父收尾'),
+    ]);
+    const runtime = await assemble({ streamFn, compositionDir });
+    const delegationStarts: string[] = [];
+    runtime.ctx.on('session_start', (payload: unknown) => {
+      const data = payload as { sessionId: string; origin?: string };
+      if (data.origin === 'delegation') delegationStarts.push(data.sessionId);
+    });
+
+    const answer = await runtime.conversation!.submitOnce('委派探测C');
+    expect(answer?.status).toBe('completed');
+    const child = runtime.persistence!.loadSession(delegationStarts[0]!)!;
+    // block 决策照常落子会话账（应用行策略文案 = 传导发生的唯一信号）
+    const decisions = child.events
+      .filter((e) => e.type === 'gate/decision')
+      .map((e) => e.data as { decision: string; reason: string });
+    expect(decisions.some((d) => d.decision === 'block' && d.reason.includes('应用行策略'))).toBe(true);
+    // 拦截真体执行（修复前：漏传导 → 探针真体跑通，'不该执行到这里' 出现在账面）
+    const childToolResults = deriveMessages(child.events).filter((m) => m.type === 'toolResult');
+    expect(JSON.stringify(childToolResults)).not.toContain('不该执行到这里');
   });
 
   it('context 腿：父闭合边界投影作子首请求种子——尾轮进、敞开段不进、轮数不足全量', async () => {
@@ -652,9 +687,12 @@ describe('守门行传导 + context 腿（第三十一批 P1-4 回归锁）', ()
       execute: async () => ({ content: [{ type: 'text', text: '探针原始结果' }] }),
     });
     const anchor = rootCtx.fork({ name: 'apps' });
-    const mainRow = anchor.fork({ name: 'gate-row' });
-    // 有锚前缀但不在 main 集（worker 行形态——桥转发器吞链，判据排除）
-    const workerLike = anchor.fork({ name: 'bridge-worker-row' });
+    // 行作用域按 loader 恒态 fork（name = 行 id + rowId = 行 id——R2 判据载体
+    // 改 entry.rowId 后 fixture 同产线形态；只给 name 不给 rowId 的手搭形已被
+    // 判据按「固定行」结构性排除）
+    const mainRow = anchor.fork({ name: 'gate-row', rowId: 'gate-row' });
+    // 有锚前缀 + rowId 但不在 main 集（worker 行形态——桥转发器吞链，判据排除）
+    const workerLike = anchor.fork({ name: 'bridge-worker-row', rowId: 'bridge-worker-row' });
     const rootSeen: string[] = [];
     const workerSeen: string[] = [];
     // 固定行形态：owner = 根名 'app'（无锚前缀——结构性排除）
@@ -709,7 +747,8 @@ describe('守门行传导 + context 腿（第三十一批 P1-4 回归锁）', ()
       effect: 'read',
       execute: async () => ({ content: [{ type: 'text', text: '探针原始结果' }] }),
     });
-    const mainRow = rootCtx.fork({ name: 'apps' }).fork({ name: 'gate-row' });
+    // 行作用域按 loader 恒态 fork（name + rowId 双携——R2 判据载体同产线形态）
+    const mainRow = rootCtx.fork({ name: 'apps' }).fork({ name: 'gate-row', rowId: 'gate-row' });
     const factory = createSubagentChildFactory({
       getParent: () => undefined,
       streamFn,

@@ -228,11 +228,15 @@ export function createSubagentChildFactory(deps: SubagentFactoryDeps): InProcess
       const { anchors, mainRows } = deps.gateRowFilter;
       for (const event of [TOOL_PRE_EXECUTE_EVENT, TOOL_POST_EXECUTE_EVENT] as const) {
         const entries = snapshotHandlers(deps.rootCtx, event).filter((entry) => {
-          // 行 id 取 owner **末段**（行作用域 fork name = 行 id，loader 恒态）：D3
-          // 装载分面分区后锚名带区段（'app:apps:app:chat:<行id>' 形），前缀 slice
-          // 会错位；末段判据对 ring1/系统区/应用区三形锚统一成立
+          // 行 id 判据载体 = entry 自身 rowId（R2 测试补课批根治，骨架篇 §6.1
+          // 判据载体根治）：on() 登记时携注册方作用域行归属——loader 恒 fork
+          // rowId = 行 id，结构性正确。前两代载体（前缀 slice → owner 末段切片）
+          // 在行 id 含 `:` 时均取段错位（行 id 无字符集执法）——含冒号行 id 的
+          // 守门行静默漏传导；本判据彻底摆脱字符串切片，owner 仅存锚前缀匹配
+          const rowId = entry.rowId;
+          if (rowId === undefined) return false; // 固定行（根/宿主面注册）结构性排除
           if (!anchors.some((prefix) => entry.owner.startsWith(prefix))) return false;
-          return mainRows().has(entry.owner.slice(entry.owner.lastIndexOf(':') + 1));
+          return mainRows().has(rowId);
         });
         if (entries.length > 0) appendHandlers(childCtx, event, entries);
       }

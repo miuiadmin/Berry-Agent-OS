@@ -31,10 +31,17 @@ import { RateLimiter } from './rate-limit.js';
 import type { Context, ContextOptions, ContextScope, Disposer, EventHandler } from './types.js';
 
 /** 监听器登记项：handler + 注册方作用域名（失败归因——记「谁注册的」而非「谁触发的」）。
- * 第三十一批随守门行传导导出（宿主侧专用：snapshotHandlers/appendHandlers 两出口的载荷型）。 */
+ * 第三十一批随守门行传导导出（宿主侧专用：snapshotHandlers/appendHandlers 两出口的载荷型）。
+ * rowId（R2 测试补课批 2026-08-29 增键）：注册方作用域的行归属——on() 登记时
+ * 携出。守门行传导的行 id 判据载体（骨架篇 §6.1 判据载体根治）：行 id 无字符
+ * 集执法、fork name 原样拼接，含 `:` 行 id 使 owner 字符串切片错位——判据改
+ * 读本字段（loader 恒 fork rowId = 行 id，结构性正确）；固定行 rowId 缺席即
+ * 结构性排除。 */
 export interface HandlerEntry {
   readonly handler: EventHandler;
   readonly owner: string;
+  /** 注册方作用域的行 id（行作用域注册 = 行 id；根/宿主面注册 = undefined） */
+  readonly rowId: string | undefined;
 }
 
 /** 频率护栏缺省参数：1000 次/分钟 + 1000 突发余量（研究 §2.2 #14 建议值） */
@@ -419,7 +426,8 @@ class ContextScopeImpl implements ContextScope {
     this.requireEvent(event, undefined);
     // 登记项携带注册方作用域名（归因纪律）：应用 A emit、应用 B 的监听器炸，
     // 失败日志必须指向 B（契约篇 §1.6「应用名 + 事件名 + 错误 + 栈」的应用名 = 注册方）
-    const entry: HandlerEntry = { handler, owner: this.name };
+    // rowId 同律携出（HandlerEntry 注记——守门行传导判据载体，非 owner 切片）
+    const entry: HandlerEntry = { handler, owner: this.name, rowId: this.rowId };
     const list = this.runtime.handlers.get(event) ?? [];
     if (opts?.prepend) {
       list.unshift(entry);

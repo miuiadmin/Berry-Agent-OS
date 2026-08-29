@@ -8,9 +8,19 @@
  * 每行一域路由 / 装机计数 / reapUnapplied 防漏 / terminateAll 收编 /
  * 意外死亡结算（markFailed 回写 + app/failed 广播）/ 装载失败防漏。
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
@@ -20,6 +30,7 @@ import {
   BRIDGE_HANDLER_FAILED,
   BRIDGE_WORKER_EXITED,
   COMPOSITION_ROW_INVALID,
+  SANDBOX_UNAVAILABLE,
 } from '../contracts/errors.js';
 import type { SandboxService } from '../safety/index.js';
 import { appDataDirOf } from './composition.js';
@@ -419,14 +430,16 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
 /* ---------------- external 腿（fork 进程域——external carrier 落码批） ---------------- */
 
 /** external 写探测 fixture：config.inside/outside 各写一发报结果 + 回报 TMPDIR
- * （fleet 组装的 per-域 tmp 注入面——env 白名单 + TMPDIR 的行为断言源） */
+ * （fleet 组装的 per-域 tmp 注入面——env 白名单 + TMPDIR 的行为断言源）+
+ * 回报 TSX_DISABLE_CACHE（R2 测试小项③：assembleExternalSpawn 对 ts 源域的
+ * 环境注入断言源——tsx 磁盘缓存在 PM 下必挂，注入缺席即环境面接线断裂） */
 const FX_EXT_PROBE = `
 import { writeFileSync } from 'node:fs';
 export const name = 'fleet-ext-probe';
 export default async function apply(ctx, config) {
   ctx.provide('fleet/ext-probe-' + config.slot, {
     probe: () => {
-      const report = { tmpdir: process.env.TMPDIR };
+      const report = { tmpdir: process.env.TMPDIR, tsxCache: process.env.TSX_DISABLE_CACHE };
       for (const [k, p] of [['inside', config.inside], ['outside', config.outside]]) {
         try { writeFileSync(p + '/probe.txt', 'x'); report[k] = { pass: true, code: null }; }
         catch (err) { report[k] = { pass: false, code: err.code ?? 'NO_CODE' }; }
@@ -460,6 +473,23 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
 
   /** 最小沙箱桩：osLayer:false 时 confine/probe 均不可达——结构面占位即可 */
   const sandboxStub = { listBackends: () => [] } as unknown as SandboxService;
+
+  /**
+   * 带后端链的沙箱桩（R2 测试补课 P1-3 盲区①②——生产缺省路径 osLayer:true 用）：
+   * listBackends 非空触发装载期 probe 醒；confine 恒产「尾缀 marker」包裹形
+   * （真实 seatbelt/bwrap 是 runner 前缀形——尾缀同证「confine 产物逐字真达
+   * spawn」，且不与 node 旗位冲突）。enforcement/denial 签名面本测试不消费。
+   */
+  const backendsStub = (backends: ReadonlyArray<{ id: string; probe?: () => boolean }>) =>
+    ({
+      listBackends: () => backends,
+      confine: (argv: readonly string[]) => ({
+        argv: [...argv, '--confine-wrap-marker'],
+        enforcement: 'partial',
+        denialSignatures: [],
+        runnerFailureRules: [],
+      }),
+    }) as unknown as SandboxService;
 
   it('闩二拒绝式：声明根越宿主基线 → COMPOSITION_ROW_INVALID 拒载（spawn 前执法——零域产出）', async () => {
     const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-latch2');
@@ -511,6 +541,72 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('OS 层 probe fail-closed（R2 测试补课 P1-3 盲区①）：后端 probe 失败 → SANDBOX_UNAVAILABLE 拒装 + 零 spawn——生产缺省路径（osLayer:true）首次被自动化走到', async () => {
+    const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-probe');
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      // osLayer 缺省 true = 生产缺省路径；后端桩 probe 恒 false（探测失败形态）
+      external: { workspace, dataDir, sandbox: backendsStub([{ id: 'seatbelt-stub', probe: () => false }]) },
+    });
+    const row: AppPlanRow = {
+      id: 'probe-fail',
+      entry: probeEntry,
+      sandbox: { carrier: 'external' },
+    };
+    // 装载期 probe 醒（fleet 生命周期一次）→ fail-closed 拒装：行进失败清单的
+    // 形态是装载拒绝不是运行事故（契约篇 §1.7 增补 2a）
+    await expect(async () => fleet.loader.load(row)).rejects.toMatchObject({
+      code: SANDBOX_UNAVAILABLE,
+      message: expect.stringContaining('fail-closed 拒装'),
+    });
+    // 拒装零域产出：probe 失败不静默降 PM-only（逃生门须显式 osLayer:false）
+    expect(fleet.stats()).toMatchObject({ spawned: 0, live: 0 });
+    await root.dispose().catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it(
+    'OS 层 argvWrapper 接线（R2 测试补课 P1-3 盲区②）：probe 通过 → confine 产物逐字真达 spawn——子进程自证 argv（协议位随行存活）',
+    { timeout: 60_000 },
+    async () => {
+      const { root, anchor, workspace, dataDir, dir } = setupExternal('fleet-ext-argvwrap');
+      // 观察哨入口：子进程把自身 process.argv 写盘即退（不进协议面——spawn 接线
+      // 已自证；svc.load 必拒是预期形态，catch 罩掉）。workspace 在 PM 写根内
+      const sentinelEntry = join(dir, 'fx-argv-sentinel.ts');
+      const argvSeen = join(workspace, 'argv-seen.json');
+      writeFileSync(
+        sentinelEntry,
+        [
+          "import { writeFileSync } from 'node:fs';",
+          `writeFileSync(${JSON.stringify(argvSeen)}, JSON.stringify(process.argv));`,
+          'process.exit(0);',
+        ].join('\n'),
+      );
+      const fleet = createBridgeFleet({
+        root,
+        anchor: () => anchor,
+        external: {
+          workspace,
+          dataDir,
+          sandbox: backendsStub([{ id: 'seatbelt-stub', probe: () => true }]), // probe 醒通过
+          externalUrl: pathToFileURL(sentinelEntry),
+        },
+      });
+      const row: AppPlanRow = { id: 'argvwrap', sandbox: { carrier: 'external' } };
+      await fleet.loader.load(row).catch(() => undefined); // 哨兵即退——load 必拒，spawn 已发生
+      await until(() => existsSync(argvSeen));
+      const seen = JSON.parse(readFileSync(argvSeen, 'utf8')) as string[];
+      // confine 桩尾缀 marker 出现在子进程 argv 末端 = wrapper 产物逐字真达
+      // spawn（接线断裂的假绿形态：marker 缺席 = argvWrapper 从未接上）
+      expect(seen.at(-1)).toBe('--confine-wrap-marker');
+      // 协议位随行存活：argv[2] = 域 id（wrapper 只包裹不吞噬协议位）
+      expect(seen[2]).toBe('e:argvwrap');
+      await root.dispose().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  );
 
   it('闩二实化后复验（R1 P0-5 回归锁）：workspace 内 symlink 指基线外 + 末段不存在声明——词法验过、预建实化越基线真身即拒载', async () => {
     const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-symlink');
@@ -568,6 +664,7 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
         .get<{
           probe: () => Promise<{
             tmpdir?: string;
+            tsxCache?: string;
             inside: { pass: boolean; code: string | null };
             outside: { pass: boolean; code: string | null };
           }>;
@@ -579,6 +676,10 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
       expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
       // per-域 TMPDIR 注入面：件数据根内 tmp/（契约篇 §1.5 钉位——痕迹随行清算）
       expect(report.tmpdir).toBe(join(appDataDirOf(dataDir, 'nx'), 'tmp'));
+      // tsx 环境注入面（R2 测试小项③）：.ts 源域必带 TSX_DISABLE_CACHE='1'——
+      // tsx 磁盘缓存的 mkdir 在 PM 下必挂，注入缺席 = assembleExternalSpawn 的
+      // isTs 分支接线断裂（假绿形态：域可起但首写必炸，且时点在装载远端）
+      expect(report.tsxCache).toBe('1');
       await fleet.terminateAll('用例收尾');
       await root.dispose().catch(() => undefined);
       rmSync(dir, { recursive: true, force: true });
@@ -619,6 +720,101 @@ describe('createBridgeFleet — external 腿（闩二执法 + 收窄真跑 + env
       expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
       expect(fleet.stats()).toMatchObject({ spawned: 1, live: 1 });
       await fleet.terminateAll('用例收尾');
+      await root.dispose().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  );
+
+  it(
+    '闩二空交集档（R2 测试小项①）：fs.writableRoots: [] 显式空集 = 只读域——基线内写也拒（空数组被 falsy 误判回落全基线即静默放宽）',
+    { timeout: 60_000 },
+    async () => {
+      const { root, anchor, workspace, dataDir, probeEntry, dir } = setupExternal('fleet-ext-emptyset');
+      const fleet = createBridgeFleet({
+        root,
+        anchor: () => anchor,
+        external: { workspace, dataDir, sandbox: sandboxStub, osLayer: false },
+      });
+      // 显式空数组 ≠ 缺席：缺席 = 全基线（上行已锁），空集 = 只读域。陷阱形态 =
+      // 下游若以 length/容空检查把 [] 误当「未声明」回落 baseline——基线内写
+      // 静默放宽，行声明的收紧意图（只读）无声蒸发。两探测点都指 workspace
+      // 本体：宿主基线内最宽点，空集语义下写也必拒
+      const row: AppPlanRow = {
+        id: 'ex',
+        entry: probeEntry,
+        sandbox: { carrier: 'external', fs: { writableRoots: [] } },
+        config: { slot: 'ex', inside: workspace, outside: workspace },
+      };
+      await fleet.loader.load(row);
+      const scope = anchor.fork({ name: 'ex', rowId: 'ex', builtinRow: false });
+      await fleet.loader.apply(row, scope);
+      const report = await root
+        .get<{
+          probe: () => Promise<{
+            inside: { pass: boolean; code: string | null };
+            outside: { pass: boolean; code: string | null };
+          }>;
+        }>('fleet/ext-probe-ex')
+        .probe();
+      // 空交集 → PM 白名单空集（无任何 --allow-fs-write）→ 域内一切写全拒
+      // ——ERR_ACCESS_DENIED 签名 = PM 真执法在拦（非装载期拒载）
+      expect(report.inside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
+      expect(report.outside).toEqual({ pass: false, code: 'ERR_ACCESS_DENIED' });
+      await fleet.terminateAll('用例收尾');
+      await root.dispose().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  );
+
+  it(
+    'external OOM 归因两腿同形（R2 测试补课）：--max-old-space-size 触顶 → V8 堆 OOM stderr 签名命中 ooms + worker/oom（修复前必红——fork 腿签名与 worker 线程不同形，单串匹配漏判）',
+    { timeout: 60_000 },
+    async () => {
+      const { root, anchor, workspace, dataDir, dir } = setupExternal('fleet-ext-oom');
+      const oomEntry = join(dir, 'fx-oom.ts');
+      writeFileSync(oomEntry, FX_OOM);
+      /** 死亡结算记录（markFailed 注入物——OOM 域死走意外死亡全流程） */
+      const marked: Array<{ id: string; code: string; message: string }> = [];
+      /** worker/oom 事件记录（观测锚⑤ 事件面——词汇两腿复用） */
+      const oomEvents: Array<{ rowId: string; workerId: string; diagnostic: string }> = [];
+      anchor.on('worker/oom', (p: { rowId: string; workerId: string; diagnostic: string }) => oomEvents.push(p));
+      const fleet = createBridgeFleet({
+        root,
+        anchor: () => anchor,
+        external: { workspace, dataDir, sandbox: sandboxStub, osLayer: false },
+        // 48MB 堆上限（与 worker 腿 OOM 用例同档位）——fork 腿映射 --max-old-space-size 旗
+        rowResourceLimits: () => ({ maxOldGenerationSizeMb: 48 }),
+        markFailed: (id, code, message) => marked.push({ id, code, message }),
+      });
+      const row: AppPlanRow = {
+        id: 'xoom',
+        entry: oomEntry,
+        sandbox: { carrier: 'external' },
+        config: { slot: 'xoom' },
+      };
+      await fleet.loader.load(row);
+      const scope = anchor.fork({ name: 'xoom', rowId: 'xoom', builtinRow: false });
+      await fleet.loader.apply(row, scope);
+      const taps = root.get<Record<string, () => Promise<unknown>>>('fleet/taps-xoom');
+      // 点燃堆增长：V8 old-space 触顶 → abort（SIGABRT——fork 腿 exit 形态），
+      // stderr 尾缓存携带 FATAL ERROR: Reached heap limit … JavaScript heap out
+      // of memory 签名（Node 24 实证）。catch 立即挂接（域死时在途调用按
+      // WORKER_EXITED 结算，早于断言面）
+      const inflight = taps.grow!().catch((e: unknown) => e);
+      await until(() => marked.length > 0);
+      // 意外死亡结算保码（宁可死得响亮）+ 诊断面终点：V8 堆 OOM 签名缀入
+      // 结算消息——operator 看 apps.list() 行状态即见内存超限第一手签名
+      expect(marked[0]).toMatchObject({ id: 'xoom', code: BRIDGE_WORKER_EXITED });
+      expect(marked[0]!.message).toContain('heap out of memory');
+      // 观测锚⑤（本用例红判据）：fork 腿签名同样命中归因——修复前单串
+      // 'reaching memory limit' 漏判（oomEvents 空、ooms=0：记 crashed 不记 ooms）
+      expect(oomEvents).toHaveLength(1);
+      expect(oomEvents[0]).toMatchObject({ rowId: 'xoom', workerId: 'e:xoom' });
+      expect(oomEvents[0]!.diagnostic).toContain('heap out of memory');
+      // 在途 grow 按域死结算（WORKER_EXITED——非超时非取消）
+      expect(((await inflight) as { code?: string }).code).toBe(BRIDGE_WORKER_EXITED);
+      // 归因计数：crashed=1 且 ooms=1（crashed 的内存超限归因子集，维度正交）
+      expect(fleet.stats()).toMatchObject({ spawned: 1, live: 0, crashed: 1, ooms: 1 });
       await root.dispose().catch(() => undefined);
       rmSync(dir, { recursive: true, force: true });
     },

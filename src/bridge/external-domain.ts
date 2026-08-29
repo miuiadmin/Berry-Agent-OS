@@ -16,7 +16,7 @@
  *   bridge 纯机制：spawn/协议/树杀/结算）。
  * - **死亡结算**：exit → 端点 dispose（在途全结算 WORKER_EXITED）+ 组杀兜底
  *   （孙进程随组收割——域死 = 组死语义）+ 域死回卷 + onExit（worker 同款；
- *   diagnostic = stderr 尾部缓存，自崩溃第一手栈）。
+ *   diagnostic = stderr 两头缓存——头保 V8 OOM 判据行、尾保最深栈帧）。
  * - **关停编舞**（PoC ⑪ 三段）：terminate（编舞终点）= SIGTERM 组 → 宽限
  *   → SIGKILL 组——给域内告别窗；kill（watchdog 执法，域已冻结收不到信号）
  *   = 直接 SIGKILL 组，按意外死亡全流程结算。
@@ -37,7 +37,16 @@ import { BridgeEndpoint } from './session.js';
 import { StdioBridgePort } from './port-stdio.js';
 import { registerHostHandlers, type RowBinding } from './bootstrap.js';
 
-/** stderr 诊断缓存上界（尾部保尾——崩溃栈的最后几行是判据面） */
+/**
+ * stderr 诊断缓存上界（两头缓存，R2 测试补课批定形）：
+ * - 头 2KiB：**判据面**——V8 堆 OOM 的结论行（FATAL ERROR: Reached heap
+ *   limit … JavaScript heap out of memory）恒在头部（前置「Last few GCs」
+ *   段实测 ~1KiB 内），只保尾会在长栈形态把结论行挤掉（实测域内真栈
+ *   ~10KiB——修复前 OOM 判据被截丢）；
+ * - 尾 8KiB：自崩溃第一手栈的**末段**（deepest frames 是归因面）。
+ * diagnostic 组装 = 头 + 省略号 + 尾（任一侧空即单侧直出）。
+ */
+const STDERR_HEAD_LIMIT = 2 * 1024;
 const STDERR_TAIL_LIMIT = 8 * 1024;
 
 /** spawnExternalDomain 参数（安全参数全注入——见头注） */
@@ -75,7 +84,7 @@ export interface ExternalDomainOptions {
   /**
    * 域退出通知（死亡结算挂钩——与 spawnWorkerDomain.onExit 同契约：意外
    * 死亡才回调、域死回卷已先行完成、rows = 死亡时点绑定行、reason 仅 kill
-   * 执法路径携带、diagnostic = stderr 尾部缓存）。
+   * 执法路径携带、diagnostic = stderr 两头缓存——头判据行 + 尾最深帧）。
    */
   readonly onExit?: (info: {
     readonly workerId: string;
@@ -142,10 +151,17 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
     env: opts.env !== undefined ? { ...opts.env } : process.env,
   });
 
-  /** stderr 尾部缓存（崩溃栈第一手——worker 腿 'error' 事件对应物；保尾丢头） */
+  /**
+   * stderr 两头缓存：头保判据（V8 OOM 结论行在头部）、尾保最深栈帧。
+   * 组装面 diagnostic 在 exit 处单点拼装（省略号衔接——两头之间丢的是中段
+   * 帧，判据与末段皆不丢）。
+   */
+  let stderrHead = '';
   let stderrTail = '';
   child.stderr?.on('data', (chunk: Buffer) => {
-    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_LIMIT);
+    const text = chunk.toString('utf8');
+    if (stderrHead.length < STDERR_HEAD_LIMIT) stderrHead = (stderrHead + text).slice(0, STDERR_HEAD_LIMIT);
+    stderrTail = (stderrTail + text).slice(-STDERR_TAIL_LIMIT);
   });
   // 子进程 stdin 写失败（子已死/管道断）不冒泡 unhandled——端点 dispose 已结算
   child.stdin?.on('error', () => {});
@@ -234,12 +250,21 @@ export function spawnExternalDomain(opts: ExternalDomainOptions): ExternalDomain
     metaCache.clear();
     void Promise.allSettled(rollbacks).then(() => {
       if (!terminated) {
+        // 两头缓存单点拼装（头判据 + 尾最深帧；中段丢省略号衔接——全量 <10KiB）
+        const diagnostic =
+          stderrHead !== '' && stderrTail !== ''
+            ? stderrHead === stderrTail
+              ? stderrTail
+              : `${stderrHead}\n…\n${stderrTail}`
+            : stderrHead !== ''
+              ? stderrHead
+              : stderrTail;
         opts.onExit?.({
           workerId,
           code: code ?? -1,
           rows: rowIds,
           ...(killReason !== undefined ? { reason: killReason } : {}),
-          ...(stderrTail !== '' ? { diagnostic: stderrTail } : {}),
+          ...(diagnostic !== '' ? { diagnostic } : {}),
         });
       }
     });

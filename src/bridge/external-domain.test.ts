@@ -135,6 +135,16 @@ export default async function apply(ctx, config) {
 }
 `;
 
+/** 赖子 fixture：装载即吞 SIGTERM（空监听防默认退——terminate 升级段的回归锁面：
+ *  组杀 SIGTERM 被吞后，宽限到点 SIGKILL 升级是唯一收割手段，此前零覆盖） */
+const FX_TERM_TRAP = `
+export const name = 'fx-term-trap';
+process.on('SIGTERM', () => {}); // 吞组杀信号——宽限内不退，制造赖子形态
+export default async function apply(ctx) {
+  ctx.provide('fx/trap-ready', { ok: () => true });
+}
+`;
+
 /** 测试环境根（fixture 全落这里；afterAll 统一清） */
 let fixtureDir: string;
 let root: ContextScope;
@@ -182,6 +192,7 @@ beforeAll(async () => {
   writeFileSync(join(fixtureDir, 'fx-crash.ts'), FX_CRASH);
   writeFileSync(join(fixtureDir, 'fx-grandchild.ts'), FX_GRANDCHILD);
   writeFileSync(join(fixtureDir, 'fx-pm-probe.ts'), FX_PM_PROBE);
+  writeFileSync(join(fixtureDir, 'fx-term-trap.ts'), FX_TERM_TRAP);
   root = createContext({ name: 'bridge-ext-test' });
   tools = new FakeTools();
   domain = spawnExternalDomain({
@@ -387,6 +398,37 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
     await until(() => !pidAlive(grandPid));
     await until(() => !pidAlive(gc.child.pid));
   });
+
+  it(
+    'terminate 升级段（R2 测试小项②）：SIGTERM 被吞不退 → 宽限到点 SIGKILL 组收割——signalCode 直证升级（吞信号的赖子无升级段即永久泄漏）',
+    { timeout: 40_000 },
+    async () => {
+      // 赖子形态：域装载即挂 SIGTERM 空监听（吞默认退）。terminate 三段编舞的
+      // 第三段（宽限后 childAlive 复查 → SIGKILL）此前零自动化覆盖。killGraceMs
+      // 直传 1s 直测域句柄——该参数不经 fleet 线程是本批 charter 裁定（测试-only
+      // 批不改产线参数面），fleet 层的 terminate* 只同步清 entries 不证进程死
+      const trap = spawnTestDomain({ killGraceMs: 1_000 });
+      const trapEntry = join(fixtureDir, 'fx-term-trap.ts');
+      await untilReady(trap, trapEntry);
+      await trap.load({ id: 'tx', entry: trapEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'tx', rowId: 'tx', builtinRow: false });
+      await trap.applyRow({ id: 'tx', sandbox: { carrier: 'external' } }, scope);
+      expect(pidAlive(trap.child.pid)).toBe(true); // 前置：域活着
+      trap.terminate('升级段用例');
+      // 宽限中段（1s 内的 400ms 处）：SIGTERM 已投组且被吞——进程仍活。
+      // exitCode/signalCode 双空 = childAlive() 判据命中的形态（升级段的触发条件）
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(pidAlive(trap.child.pid)).toBe(true);
+      expect(trap.child.exitCode).toBeNull();
+      expect(trap.child.signalCode).toBeNull();
+      // 宽限到点 → SIGKILL 组收割（uncatchable——空监听也拦不住）。signalCode
+      // 直证升级段执行：若域是自愿退出（吞 TERM 后 process.exit）则 exitCode 非
+      // null 而非信号死——两形态在本断言上互斥可辨
+      await until(() => !pidAlive(trap.child.pid));
+      expect(trap.child.signalCode).toBe('SIGKILL');
+      expect(trap.child.exitCode).toBeNull();
+    },
+  );
 
   it('孤儿防线：宿主 stdin 管道断（模拟宿主被 SIGKILL）→ 域自退 exit(0)', { timeout: 40_000 }, async () => {
     const exits: Array<{ workerId: string; code: number; rows: readonly string[] }> = [];
