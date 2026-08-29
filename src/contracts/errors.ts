@@ -382,7 +382,7 @@ export const APP_SHUTDOWN_QUIESCE_VIOLATED = registerErrorCode('APP_SHUTDOWN_QUI
 export const CONTEXT_EFFECT_LIMIT = registerErrorCode('CONTEXT_EFFECT_LIMIT');
 /** tools：两层注册表（全局层+域层）合计件数达上限（10^3——良性行为距阈值两个数量级，超限 = 失控或泄漏） */
 export const TOOL_REGISTRY_LIMIT = registerErrorCode('TOOL_REGISTRY_LIMIT');
-/** tools：register/unregister 变更频率超限（容量 120 / 回填 600 每分钟全局令牌桶——每次变更触 tools_change ≤64KiB 快照，高频注册武器化 header 快照〔R4〕；容量吃下单次 /reload 全量重注册突发，回填 10 op/s 撑热迭代不触顶） */
+/** tools：register/unregister 变更频率超限（容量 240 / 回填 600 每分钟全局令牌桶——每次变更触 tools_change ≤64KiB 快照，高频注册武器化 header 快照〔R4〕；容量吃下单次 /reload 全量重注册突发，回填 10 op/s 撑热迭代不触顶） */
 export const TOOL_REGISTRY_RATE = registerErrorCode('TOOL_REGISTRY_RATE');
 /** jobs：per-owner running 态并发达上限（16——帽在 createEntry 单点执法罩住一切 kind：subagent 委派/exec 后台/第三方 kind 同受；undefined owner = operator 直控面同规共桶） */
 export const JOB_CONCURRENCY_LIMIT = registerErrorCode('JOB_CONCURRENCY_LIMIT');

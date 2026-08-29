@@ -7,8 +7,8 @@
  */
 
 /**
- * 活体事件名。统一小写斜线式 `'<域>/<动作>'`（如 session/event、tool/finished、
- * approval/decided）。
+ * 活体事件名。两种形态：宿主词（无斜线，或宿主域斜线式如 session/event、
+ * approval/answer、app/activated）与应用自定义词（必含 `/` 域前缀）。
  *
  * 收口形态（契约篇 §1.1，2026-08-23 M2 /reload 纵切）：目录字面量联合 +
  * `(string & {})` 自定义事件逃生口——目录字面量给应用作者 IDE 自动补全与
@@ -54,8 +54,8 @@ export type EventName =
  */
 export interface LiveEventDefinition {
   /**
-   * 事件名（斜线 = 应用自定义域、无斜线 = 宿主自留地——命名空间分域规则，
-   * 与 §1.5 prompt 段同款；与派发点字面量/常量值双向比对）。
+   * 事件名（应用自定义事件名必含 `/` 防撞宿主词汇域——命名空间分域规则，
+   * 与契约篇 §1.1 同款；与派发点字面量/常量值双向比对）。
    */
   readonly name: string;
   /** 分派模式——事件的公开契约部分（契约篇 §1「@mode」纪律：dsh 衍生） */

@@ -22,8 +22,8 @@ CREATE TABLE memories (
   content         TEXT NOT NULL,         -- 全文（注入用）
   confidence      REAL NOT NULL,         -- 0..1，合并取 max（保强证据不被均值稀释）
   evidence_count  INTEGER NOT NULL DEFAULT 1,  -- 独立证据次数
-  status          TEXT NOT NULL DEFAULT 'active',  -- active|dismissed|superseded
-  superseded_by   TEXT,                  -- 终态来源：'auto_resolved'|'user'|'llm:<id>'
+  status          TEXT NOT NULL DEFAULT 'active',  -- active|dismissed|superseded|expired（TTL 清扫物化置 expired）
+  superseded_by   TEXT,                  -- 终态来源：'auto_resolved'|'user'|'llm:<id>'|'ttl'（TTL 清扫物化）
   source_refs     TEXT NOT NULL DEFAULT '[]',  -- JSON [{sessionId,seq}]——溯源到事件
   created_at      INTEGER NOT NULL,      -- Unix 毫秒
   updated_at      INTEGER NOT NULL       -- Unix 毫秒（老化判定的基准）
