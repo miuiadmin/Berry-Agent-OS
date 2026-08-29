@@ -21,8 +21,8 @@ npm run format:check      # Prettier
 ```
 berry/
 ├── src/               # 22 模块单向 DAG（lint:topology 门禁钉死；内核=最小装载器托纯机制代理）
-│   ├── contracts/     # L0 公共契约（错误码/事件/工具/插件契约/typebox 再导出）
-│   ├── context/       # L1 运行时基座（作用域/事件总线/服务注册表/logger）+ 插件加载器
+│   ├── contracts/     # L0 公共契约（错误码/事件/工具/应用契约/typebox 再导出）
+│   ├── context/       # L1 运行时基座（作用域/事件总线/服务注册表/logger）+ 应用加载器
 │   ├── session/       # 会话事件日志（append-only + 投影）
 │   ├── persist/       # SQLite 物理层（迁移框架/write-behind/凭证）
 │   ├── agent/         # loop 骨架（AgentEvent/steering/消息角色）
@@ -43,7 +43,7 @@ berry/
 │   ├── admin/         # Ring 2 官方件：平台管理面工具
 │   ├── app/           # 组合根（装配序/CLI/组合树/官方件注册表——纯「装」）
 │   └── bridge/        # 官方件：worker 域舰队（进程隔离）
-├── docs/              # 公开文档（架构/使用/插件开发/开发指南/运维）
+├── docs/              # 公开文档（架构/使用/应用开发/开发指南/运维）
 └── tools/             # check-topology / check-events / smoke-real / golden
 ```
 
@@ -55,7 +55,7 @@ berry/
 
 细节与理由见 [docs/开发指南.md](docs/开发指南.md)：
 
-- **模块边界**：18 模块单向 DAG（17 有码 + mcp 一席占位），跨模块只 import 公共面（contract/types/index）；新模块 contract-first。
+- **模块边界**：22 模块单向 DAG（全部有码），跨模块只 import 公共面（contract/types/index）；新模块 contract-first。
 - **测试**：分层（单元 → 组合根全栈）；mock 只停在模型层；禁断言 AI 生成文本；修 bug 带回归锁（修复前必红）。
 - **注释**：新写代码必须充分中文注释（JSDoc + 关键分支行内）。
 - **命名去品牌化**：代码标识符禁用品牌词；仅 package.json name / bin 命令 / UI 文案允许。
@@ -77,6 +77,6 @@ berry/
 
 ## 扩展点
 
-- **加工具**：模块内实现 `ToolDefinition`，经注册表/插件 `ctx.get('tools').register(def)` 注册（三段管道自动生效）。
+- **加工具**：模块内实现 `ToolDefinition`，经注册表或应用 ctx 面 `ctx.get('tools').register(def)` 注册（三段管道自动生效）。
 - **加技能**：任一发现目录放 `<名字>/SKILL.md`（YAML 前置 + Markdown 指令体）——项目 `.agents/skills/` 或 `~/.berry/skills/` 等，放好即生效。
-- **加插件**：见 [docs/插件开发指南.md](docs/插件开发指南.md)——entry.ts 单形状 + inject 服务面 + 组合树行。
+- **加应用**：见 [docs/应用开发指南.md](docs/应用开发指南.md)——entry.ts 单形状 + inject 服务面 + 组合树行。
