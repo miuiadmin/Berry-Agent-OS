@@ -15,7 +15,7 @@
  * - **超时**：缺省 10 分钟（模型流挂死护栏——bash 件 600s 钳制同数级）。
  */
 
-import { runArgv, buildChildEnv } from '../exec/index.js';
+import { runArgv, buildChildEnv, type CommandProcessLog } from '../exec/index.js';
 import type { RunResult } from '../exec/index.js';
 
 /** tick 单发缺省超时（毫秒）——一轮对话的宽松预算，到点树杀 */
@@ -46,6 +46,8 @@ export interface TickRunnerOptions {
   readonly env?: NodeJS.ProcessEnv;
   /** 超时毫秒（缺省 TICK_TIMEOUT_MS） */
   readonly timeoutMs?: number;
+  /** 命令进程登记簿（契约篇 §6.6 exec 腿——tick 子进程 = 长命模型循环，宿主猝死后最重孤儿形态） */
+  readonly commandLog?: CommandProcessLog;
 }
 
 /**
@@ -68,5 +70,11 @@ export function createTickRunner(opts: TickRunnerOptions): (prompt: string) => P
   const timeoutMs = opts.timeoutMs ?? TICK_TIMEOUT_MS;
   // --background：tick 子进程的轮记账入后台道（席 13 第二刀 blocker 修——
   // canAfford 读 background 道，tick 烧的钱必须进同一本账才被闸见）
-  return (prompt: string) => runArgv([...baseArgv, 'run', '--read-only', '--background', prompt], { env, timeoutMs });
+  return (prompt: string) =>
+    runArgv([...baseArgv, 'run', '--read-only', '--background', prompt], {
+      env,
+      timeoutMs,
+      // 命令进程登记簿透传（宿主猝死孤儿治理——见 TickRunnerOptions.commandLog 注）
+      ...(opts.commandLog !== undefined ? { commandLog: opts.commandLog } : {}),
+    });
 }

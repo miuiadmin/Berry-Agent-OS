@@ -60,7 +60,7 @@ import type { AllowlistDraft, ApprovalPolicyMode, ApprovalRequest } from '../saf
 import { APPROVAL_ANSWER_EVENT, createApprovalService } from '../safety/approval.js';
 import { installSafetyGate } from '../safety/gate.js';
 import type { AllowlistEntry } from '../safety/allowlist.js';
-import { createBashTool } from '../exec/tool.js';
+import { createBashTool, type CommandProcessLog } from '../exec/tool.js';
 import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import { createFsTools } from '../tools/fs.js';
@@ -459,6 +459,12 @@ export interface ChatAppDeps {
    * 同一数据源 = 「每份 gate 语义等价全局」的 v1 前提）。
    */
   readonly allowlist: () => readonly AllowlistEntry[];
+  /**
+   * 命令进程登记簿（契约篇 §6.6 子进程治理条 exec 腿，2026-08-29 critic #1）：
+   * 透传给 bash 工具件——spawn 即登记、净退即删，宿主猝死后由启动期孤儿清扫
+   * 认领树杀。组合根注 mcp ChildRegistry 适配器。
+   */
+  readonly commandLog?: CommandProcessLog;
 }
 
 /**
@@ -793,6 +799,8 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         // 同一活数组同源（与守门行 deps.allowlist() 同取值器——「始终允许」bash
         // 词干条目在升权裁决免问面消费，§8.4 增补 2 落码形态③）
         allowlist: deps.allowlist(),
+        // 命令进程登记簿透传（宿主猝死孤儿治理——见 ChatAppDeps.commandLog 注）
+        ...(deps.commandLog !== undefined ? { commandLog: deps.commandLog } : {}),
       });
       const domainDisposers = [...fsTools.tools, bashDef].map((def) =>
         tools.register(def, { driver: sessionId, domain: appId }),

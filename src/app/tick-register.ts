@@ -27,7 +27,7 @@ import { mkdirSync, existsSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { writeAtomicFile } from '../persist/index.js';
-import { runArgv, buildChildEnv } from '../exec/index.js';
+import { runArgv, buildChildEnv, type CommandProcessLog } from '../exec/index.js';
 import type { RunResult } from '../exec/index.js';
 import { parseSchedule, evaluateDue } from '../scheduler/index.js';
 import type { JobRecord } from '../scheduler/index.js';
@@ -67,6 +67,8 @@ export interface TickOsOptions {
   readonly launchctlBin?: string;
   /** crontab 可执行（缺省 'crontab'——测试注入假脚本） */
   readonly crontabBin?: string;
+  /** 命令进程登记簿（契约篇 §6.6 exec 腿——launchctl/crontab 系统命令同律登记清扫） */
+  readonly commandLog?: CommandProcessLog;
 }
 
 /** launchd 调度形状（三形状翻译的结构化产物——渲染在注册器内部） */
@@ -167,7 +169,13 @@ export function createTickOsRegistrar(opts: TickOsOptions): TickOsRegistrar {
   const tickArgv = (name: string): string[] => [...baseArgv, 'run', '--tick', name, '--read-only', '--background'];
 
   /** 跑一个系统命令（launchctl/crontab——超时 15s 防系统命令挂死命令面） */
-  const runSys = (argv: readonly string[]): Promise<RunResult> => runArgv(argv, { env, timeoutMs: 15_000 });
+  const runSys = (argv: readonly string[]): Promise<RunResult> =>
+    runArgv(argv, {
+      env,
+      timeoutMs: 15_000,
+      // 命令进程登记簿透传（宿主猝死孤儿治理——见 TickOsOptions.commandLog 注）
+      ...(opts.commandLog !== undefined ? { commandLog: opts.commandLog } : {}),
+    });
 
   /** 平台不支持的人读回执（win32 等——诚实披露非错误崩溃） */
   const unsupported = (): TickOsResult => ({

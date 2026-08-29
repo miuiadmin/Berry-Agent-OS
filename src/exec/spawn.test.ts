@@ -69,6 +69,56 @@ describe('超时自治（execute 内自计时 + 树杀）', () => {
   });
 });
 
+describe('命令进程登记簿（契约篇 §6.6 exec 腿——spawn 即登记/净退即删）', () => {
+  it('长命命令执行中已登记（含命令行标签），净退后撤销同 pid', { timeout: 15_000 }, async () => {
+    const added: Array<{ pid: number; label: string }> = [];
+    const removed: number[] = [];
+    const commandLog = {
+      add: (pid: number, label: string): void => {
+        added.push({ pid, label });
+      },
+      remove: (pid: number): void => {
+        removed.push(pid);
+      },
+    };
+    const pending = runArgv(['bash', '-c', 'sleep 0.5 && echo done'], { commandLog });
+    // 执行中轮询到登记（'spawn' 事件先于 close——登记必须发生在进程活着的窗口内，
+    // 这是「宿主猝死后清扫簿上有账」的前提）
+    const deadline = Date.now() + 10_000;
+    while (added.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(added.length).toBe(1);
+    expect(added[0]!.pid).toBeGreaterThan(0);
+    expect(added[0]!.label).toContain('bash'); // 标签 = PID 复用防护的命令行比对基线
+    expect(removed).toEqual([]); // 尚未净退——不许提前删
+    const run = await pending;
+    expect(run.exitCode).toBe(0);
+    expect(removed).toEqual([added[0]!.pid]); // 净退即删（close 配对）
+  });
+  it('超时树杀路同样撤销登记（close 收全四路结算）', { timeout: 15_000 }, async () => {
+    const added: number[] = [];
+    const removed: number[] = [];
+    await expectRejectCode(
+      () =>
+        runArgv(['bash', '-c', 'sleep 30'], {
+          timeoutMs: 300,
+          commandLog: {
+            add: (pid) => {
+              added.push(pid);
+            },
+            remove: (pid) => {
+              removed.push(pid);
+            },
+          },
+        }),
+      TOOL_TIMEOUT,
+    );
+    expect(added.length).toBe(1);
+    expect(removed).toEqual(added); // 树杀 → close → 撤销，账面归零
+  });
+});
+
 describe('abort 取消（正常结算，signal 字段识别）', () => {
   it('abort 后树杀并以带 signal 的结果结算（不抛错）', async () => {
     const controller = new AbortController();

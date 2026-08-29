@@ -6,7 +6,17 @@
  * 多轮续跑、命令面注册。
  */
 
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -3340,6 +3350,75 @@ describe('会话增生桶（洪水上界：createSession 与 fork 同一进程�
       });
     } finally {
       spy.mockRestore();
+    }
+  });
+});
+
+describe('exec 命令进程孤儿清扫（契约篇 §6.6 exec 腿，2026-08-29 critic #1）', () => {
+  /** pid 判活（signal 0 探测——EPERM 也算活） */
+  function pidAlive(pid: number | undefined): boolean {
+    if (pid === undefined) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === 'EPERM';
+    }
+  }
+
+  /** 轮询直到谓词真（进程死是异步到达面） */
+  async function until(predicate: () => boolean, ms = 10_000): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect.unreachable(`轮询超时（${ms}ms）`);
+  }
+
+  it('boot 扫登记簿：宿主猝死遗留命令进程被树杀、簿面归零（修前无清扫——遗留永活）', { timeout: 30_000 }, async () => {
+    // 隔离数据目录（路径面统一走 APP_DATA_DIR——dumpConfig 用例同款钉法；
+    // 自管生命周期：关停须在 env 复原前完成）
+    const dataRoot = mkdtempSync(join(realpathSync(tmpdir()), 'app-exec-sweep-'));
+    const prev = process.env['APP_DATA_DIR'];
+    process.env['APP_DATA_DIR'] = dataRoot;
+    let runtime: BerryRuntime | undefined;
+    try {
+      // 伪造「上一宿主猝死」形态：hostPid 已死 + 活命令进程（长命 sleep）在簿。
+      // zombie 必须同 runArgv 形态建组（POSIX detached = 自成组长——killTree
+      // 负 pid 组杀的射程前提；非建组 spawn 组杀 ESRCH 静默空手）
+      const zombie = spawn('sleep', ['25'], {
+        stdio: 'ignore',
+        ...(process.platform !== 'win32' ? { detached: true } : {}),
+      });
+      const deadHost = spawn('true');
+      await new Promise<void>((resolve) => deadHost.on('exit', () => resolve()));
+      expect(pidAlive(zombie.pid)).toBe(true); // 前置：遗留命令进程活着
+      mkdirSync(join(dataRoot, 'exec'), { recursive: true });
+      writeFileSync(
+        join(dataRoot, 'exec', 'children.json'),
+        `${JSON.stringify([{ hostPid: deadHost.pid, childPid: zombie.pid, server: 'exec', command: 'sleep 25' }])}\n`,
+        'utf8',
+      );
+      // 真库 boot（:memory: 诊断路零副作用不动手——本用例必须走真库触发清扫）
+      const { streamFn } = scriptedStream([textMessage('回执')]);
+      runtime = await createBerryRuntime({
+        dbPath: join(dataRoot, 'sessions.db'),
+        workspace: makeWorkspace(),
+        streamFn,
+      });
+      // 装配期清扫：hostPid 不活 = 猝死遗留 → ps 验命令行含 'sleep 25'（PID
+      // 复用防护）→ killTree 树杀；条目随杀随删（簿面归零）
+      await until(() => !pidAlive(zombie.pid));
+      const ledger = JSON.parse(readFileSync(join(dataRoot, 'exec', 'children.json'), 'utf8')) as unknown[];
+      expect(ledger).toEqual([]);
+      await runtime.shutdown();
+      runtime = undefined;
+    } finally {
+      if (runtime !== undefined) await runtime.shutdown().catch(() => undefined);
+      if (prev === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prev;
+      rmSync(dataRoot, { recursive: true, force: true });
     }
   });
 });

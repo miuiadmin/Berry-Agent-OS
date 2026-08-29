@@ -16,6 +16,7 @@ export type { RunArgvOptions, RunResult } from './spawn.js';
 
 /* 子进程环境白名单（契约篇 §1.2 E 组执法面②） */
 export { buildChildEnv, isEnvNameAllowlisted, isEnvNameForbidden } from './env.js';
+export type { CommandProcessLog } from './spawn.js';
 
 /* bash 工具件（模型工具面） */
 export { createBashTool } from './tool.js';

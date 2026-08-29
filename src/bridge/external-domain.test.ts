@@ -430,21 +430,49 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
     },
   );
 
-  it('孤儿防线：宿主 stdin 管道断（模拟宿主被 SIGKILL）→ 域自退 exit(0)', { timeout: 40_000 }, async () => {
-    const exits: Array<{ workerId: string; code: number; rows: readonly string[] }> = [];
-    const orphan = spawnTestDomain({
-      onExit: (info) => exits.push(info),
-    });
-    await untilReady(orphan, echoEntry);
-    await orphan.load({ id: 'ox', entry: echoEntry, sandbox: { carrier: 'external' } });
-    const scope = root.fork({ name: 'ox', rowId: 'ox', builtinRow: false });
-    await orphan.applyRow({ id: 'ox', sandbox: { carrier: 'external' }, config: { slot: 'o' } }, scope);
-    // 关宿主侧 stdin 写端 = 模拟宿主死（管道断 → 域入口 'end' → process.exit(0)）
-    orphan.child.stdin?.end();
-    await until(() => exits.length > 0);
-    expect(exits[0]!.code).toBe(0); // 域自尽形态（孤儿防线语义）——非信号杀
-    await until(() => !pidAlive(orphan.child.pid));
-  });
+  it(
+    '孤儿防线：宿主 stdin 管道断（模拟宿主被 SIGKILL）→ 组杀本域进程组自尽（critic #1 后形态）',
+    { timeout: 40_000 },
+    async () => {
+      const exits: Array<{ workerId: string; code: number; rows: readonly string[] }> = [];
+      const orphan = spawnTestDomain({
+        onExit: (info) => exits.push(info),
+      });
+      await untilReady(orphan, echoEntry);
+      await orphan.load({ id: 'ox', entry: echoEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'ox', rowId: 'ox', builtinRow: false });
+      await orphan.applyRow({ id: 'ox', sandbox: { carrier: 'external' }, config: { slot: 'o' } }, scope);
+      // 关宿主侧 stdin 写端 = 模拟宿主死（管道断 → 域入口 'end' → 组杀本域
+      // 进程组再自尽——负 pid 投组，域自身亦在组内 = 信号死形态）
+      orphan.child.stdin?.end();
+      await until(() => exits.length > 0);
+      expect(exits[0]!.code).toBe(-1); // 信号死（exitCode null → -1）——组杀含自的孤儿防线语义
+      expect(orphan.child.signalCode).toBe('SIGKILL');
+      await until(() => !pidAlive(orphan.child.pid));
+    },
+  );
+
+  it(
+    '孤儿防线收割（critic #1 修复锁）：stdin 断 → 组杀罩域内同组孙进程——孙进程随域死（修前域退孙活永存）',
+    { timeout: 40_000 },
+    async () => {
+      const orphan = spawnTestDomain({});
+      const gcEntry = join(fixtureDir, 'fx-grandchild.ts');
+      await untilReady(orphan, gcEntry);
+      await orphan.load({ id: 'gx3', entry: gcEntry, sandbox: { carrier: 'external' } });
+      const scope = root.fork({ name: 'gx3', rowId: 'gx3', builtinRow: false });
+      await orphan.applyRow({ id: 'gx3', sandbox: { carrier: 'external' } }, scope);
+      const grandPid = await root.get<{ pid: () => Promise<number> }>('fx/grandpid').pid();
+      expect(pidAlive(grandPid)).toBe(true); // 前置：域内 spawn 的长命孙进程活着
+      // 关宿主侧 stdin 写端 = 模拟宿主死。孙进程非 detached spawn 继承域 pgid——
+      // 组杀（负 pid）收割射程内（修前 exit(0) 只退域进程本身，孙进程永活 =
+      // 宪章七进程墙的生命周期残角；宿主侧 in-flight exec 命令另一腿由 §6.6
+      // 登记簿清扫承接，不在此测）
+      orphan.child.stdin?.end();
+      await until(() => !pidAlive(grandPid)); // 修前红锚：孙进程不在旧防线收割射程
+      await until(() => !pidAlive(orphan.child.pid));
+    },
+  );
 
   it('externalEntryUrl：按宿主半自身形态判别 fork 入口（.ts 源 → external-entry.ts / 编译产物 → .js）', () => {
     expect(externalEntryUrl('file:///repo/dist/bridge/bootstrap.js').href).toBe(

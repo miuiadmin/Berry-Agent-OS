@@ -58,7 +58,7 @@ import {
 import type { ApprovalPolicyMode, ApprovalService, ApprovalRequest, SandboxMode } from '../safety/index.js';
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
-import { registerExecService, renderEnvironmentSection } from '../exec/index.js';
+import { registerExecService, renderEnvironmentSection, type CommandProcessLog } from '../exec/index.js';
 import { createBridgeFleet, type BridgeFleet } from './bridge-fleet.js';
 import {
   createLocalSkillsProvider,
@@ -139,6 +139,9 @@ import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
+// 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
+import { ChildRegistry } from '../mcp/index.js';
 import { dataDir, dbPath, ensureDbDir } from './paths.js';
 import { setProjectAliases } from '../context/workspace.js';
 import type { CompositionReloadedPayload } from '../contracts/events.js';
@@ -464,12 +467,42 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   // 2026-08-25 修：原先仅 TUI 入口建档，全新机器 berry run 在 Persistence.open
   // 即 ENOENT——深读 workflow 实证缺口）。persist:false 诊断面保持零副作用不建。
   const resolvedDbPath = opts.dbPath ?? dbPath();
+  // 命令进程登记簿（契约篇 §6.6 子进程治理条 exec 腿，2026-08-29 critic #1）：
+  // 复用 mcp ChildRegistry 类（exec 结构上不见 mcp——组合根注入，killTree 闭包
+  // 同款先例），分置 `<dataDir>/exec/children.json`（与 mcp/children.json 各自持）。
+  // 登记失败静默吞——fs 边角只损清扫完备性，不阻命令执行（mcp 同律）。
+  const commandRegistry = new ChildRegistry(join(dataDir(), 'exec', 'children.json'));
+  const commandLog: CommandProcessLog = {
+    add: (pid, label) => {
+      try {
+        commandRegistry.add({ hostPid: process.pid, childPid: pid, server: 'exec', command: label });
+      } catch {
+        // 登记 fs 失败——清扫完备性损失面，命令本体不受影响
+      }
+    },
+    remove: (pid) => {
+      try {
+        commandRegistry.remove(pid);
+      } catch {
+        // 同上
+      }
+    },
+  };
   if (persistEnabled && resolvedDbPath !== ':memory:') {
     ensureDbDir(resolvedDbPath);
     // 件临时空间扫龄（契约篇 §1.5 tmp 钉位细则④）：boot 装载前同步一次、
     // 与 ensureDbDir 同一零副作用闸（:memory: 诊断路不扫——删也是落盘）；
     // best-effort（函数内单件失败 warn 不抛），不阻装配。
     sweepAppTmpDirs(dataDir(), ctx.logger);
+    // exec 命令进程启动期孤儿清扫（契约篇 §6.6 子进程治理条 exec 腿，
+    // 2026-08-29 critic #1）：与扫龄同一零副作用闸——诊断 boot（:memory:）
+    // 不动手。宿主猝死遗留的 detached 命令组在此认领树杀（域同组孙进程由
+    // §1.7 孤儿防线域侧组杀收，两腿合成宪章七进程墙完整生命周期）。
+    // hostPid 活性检查天然双开安全（兄弟宿主条目不碰，mcp 同律）。
+    const sweepReport = await commandRegistry.sweep({ kill: (pid) => killTree(pid, () => true) });
+    if (sweepReport.killed.length > 0) {
+      ctx.logger.warn(`exec 孤儿清扫：树杀 ${sweepReport.killed.join(',')}（宿主猝死遗留命令进程）`);
+    }
   }
   const persistence = persistEnabled
     ? Persistence.open({
@@ -651,8 +684,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
   const llmService = createLlmService({
     runtime: llm,
     // S4 前置债③：与 streamFn 同一份计数器（两出口同源——达帽 complete 路同拒）
-    ...(inflight !== undefined ? { tracker: inflight } : {}),
-    ...(opts.defaults !== undefined ? { defaults: opts.defaults } : {}),
+    ...(inflight === undefined ? {} : { tracker: inflight }),
+    ...(opts.defaults === undefined ? {} : { defaults: opts.defaults }),
     defaultModel: () => model,
     // 底账写侧（2026-08-24 第十一批拍板 #1，会话篇 §1.1）：complete 成功即落
     // llm/usage durable 事件（log-only 计量事实；callId = settlement 幂等身份，
@@ -676,7 +709,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       ctx.logger.debug('llm.complete 用量入账', {
         model: modelSpec,
         totalTokens: result.usage.totalTokens,
-        ...(entry !== undefined ? { session: entry.session.header.sessionId } : { session: '(无链不落账)' }),
+        ...(entry === undefined ? { session: '(无链不落账)' } : { session: entry.session.header.sessionId }),
       });
     },
     // 底账读侧：当日后台累计 = llm/usage 事件当日时间窗聚合投影（persist 实现，
@@ -848,7 +881,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       // 调用时天然锚定归属会话）；importer 归因 = 调用链 caller 推导（宿主推导非
       // 应用自报——装载器/工具管道两边界已归一，无链 = 宿主自身 'host'）
       const anchor = registry.routed();
-      const inherited = anchor !== undefined ? persistence.metaOf(anchor.session.header.sessionId) : undefined;
+      const inherited = anchor === undefined ? undefined : persistence.metaOf(anchor.session.header.sessionId);
       const session = persistence.createSession({
         seed: cleaned,
         origin: 'import',
@@ -885,7 +918,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       chargeSpawn('fork'); // 同桶：fork 每次物理复制父前缀，洪水面与导入同源
       // cwd/profile/app 继承父会话由 forkSession 内部处理；boundary 落在敞开
       // turn 内由 Session.fork 抛 SESSION_FORK_BOUNDARY_INVALID
-      const child = persistence.forkSession(entry.session, boundary !== undefined ? { boundary } : {});
+      const child = persistence.forkSession(entry.session, boundary === undefined ? {} : { boundary });
       await persistence.ensureSeeded(child);
       await persistence.flush(child.header.sessionId);
       return child.header.sessionId;
@@ -1038,7 +1071,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
         status: 'done' as const,
         failed: result.payload?.failed ?? [],
         // 单区两腿透传（D3 per-app reload）：目标应用 + 卸词集警示
-        ...(result.payload?.app !== undefined ? { app: result.payload.app } : {}),
+        ...(result.payload?.app === undefined ? {} : { app: result.payload.app }),
         ...(result.payload?.droppedEvents !== undefined && result.payload.droppedEvents.length > 0
           ? { droppedEvents: result.payload.droppedEvents }
           : {}),
@@ -1058,9 +1091,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
    */
   const reportDroppedRole = (role: string, reason?: string): void => {
     ctx.logger.debug(
-      reason !== undefined
-        ? `convertToLm 丢弃消息：${role}（${reason}）`
-        : `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——装载面 ctx.registerMessageRole，角色名必含 / 域前缀）`,
+      reason === undefined
+        ? `convertToLm 丢弃未注册角色消息：${role}（自定义角色须先注册——装载面 ctx.registerMessageRole，角色名必含 / 域前缀）`
+        : `convertToLm 丢弃消息：${role}（${reason}）`,
     );
   };
   /** 拒启收尾（Ring 1 与 Ring 2 启动断言同形）：先收 worker 域舰队再收尾持久层再回卷 ctx，抛聚合清单 */
@@ -1089,12 +1122,17 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     createTickRunner({
       dataDir: dataDir(),
       dbPath: resolvedDbPath,
+      // 命令进程登记簿（§6.6 exec 腿）：tick 子进程 = 长命模型循环，宿主猝死
+      // 后最重的孤儿形态——同律登记清扫
+      commandLog,
     });
   const osTickRegistrar =
     opts.osTickRegistrar ??
     createTickOsRegistrar({
       dataDir: dataDir(),
       dbPath: resolvedDbPath,
+      // 同上：launchctl/crontab 系统命令同律登记清扫
+      commandLog,
     });
   /** gate 判据②：全注册表最近 user/message 时刻（S1 升格——多驱动并存时取全部
    * 会话最大值，含退役保留者〔其活日志仍在内存〕；会话活对象内存直读——append
@@ -1194,8 +1232,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     resumeSession: opts.resumeSession,
     // CLI --app 进入面（第三纵切）：boot 首驱动即该应用域；显式档标记供审批
     // 预设优先序（显式旗标 > 应用预设 > 全局缺省——opts.sandboxMode 在场性即显式性）
-    ...(bootApp !== undefined ? { app: bootApp } : {}),
-    ...(opts.sandboxMode !== undefined ? { sandboxModeExplicit: true } : {}),
+    ...(bootApp === undefined ? {} : { app: bootApp }),
+    ...(opts.sandboxMode === undefined ? {} : { sandboxModeExplicit: true }),
     rootCtx: ctx,
     workspace,
     model,
@@ -1213,14 +1251,16 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     onTurnStopping,
     materializeSystemPrompt,
     writableRoots: rootsProvider,
+    // 命令进程登记簿（§6.6 exec 腿）：透传 chat 件 → bash 工具件 spawn 登记
+    commandLog,
     stampSandboxFacts,
     // tick 入口记账道声明（--background argv → run 入口 → 此处；缺省前台道）
-    ...(opts.usagePriority !== undefined ? { usagePriority: opts.usagePriority } : {}),
+    ...(opts.usagePriority === undefined ? {} : { usagePriority: opts.usagePriority }),
     // S5 审批守门归属批：驱动 fresh 作用域三件的原料随 deps 注入——
     // approvalPolicy（CLI 旗标唯一来源，v1 全驱动同档）/ confirm（interactive
     // 时 ui.confirm——fresh 作用域 answerer 绑它；headless 不传 = fail-closed）/
     // sandbox + allowlist（bash def 构造原料 + 守门行同源活数组）
-    ...(opts.approvalPolicy !== undefined ? { approvalPolicy: opts.approvalPolicy } : {}),
+    ...(opts.approvalPolicy === undefined ? {} : { approvalPolicy: opts.approvalPolicy }),
     ...(opts.interactive ? { confirm: (text: string) => ui.confirm(text) } : {}),
     // 「始终允许」三态化两件（§8.4 增补 2 落码形态③⑥）：select = ui.select
     // 三选原语（interactive 时注入；缺省降级 confirm 两态不呈现 always）；
@@ -1334,8 +1374,8 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     // 按清单限值执行（键 = 行 pkg 装载身份串，与组件在场断言同键）；未命中
     // 回落全局 512MB。多应用共享组件已在 appMemoryMb 构建时取严（min）
     rowResourceLimits: (row: { readonly pkg?: string }): { maxOldGenerationSizeMb: number } | undefined => {
-      const mb = row.pkg !== undefined ? appMemoryMb.get(row.pkg) : undefined;
-      return mb !== undefined ? { maxOldGenerationSizeMb: mb } : undefined;
+      const mb = row.pkg === undefined ? undefined : appMemoryMb.get(row.pkg);
+      return mb === undefined ? undefined : { maxOldGenerationSizeMb: mb };
     },
     markFailed: appsService.markFailed,
     // external 腿装配（external carrier 落码批——契约篇 §1.7 第三十七批）：
@@ -1423,6 +1463,9 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
     mode: () => sandboxMode,
     workspaceRoot: workspace,
     confinementFor: rowConfinementLookup,
+    // 命令进程登记簿（§6.6 exec 腿）：服务面（域 RPC 宿主半 spawn 在此腿）
+    // spawn 登记——宿主猝死后启动期清扫认领
+    commandLog,
   });
 
   /* ---- ⑦ 技能（本地 provider 发现 + 渐进披露清单进系统提示词）----
@@ -1858,7 +1901,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
           const payload = result.payload;
           if (payload !== undefined) {
             // 与 notifyReloadResult 同口径（内联因反向 import 成环）+ 卸词集警示
-            const scope = payload.app !== undefined ? `应用 ${payload.app} 单区` : '组合';
+            const scope = payload.app === undefined ? '组合' : `应用 ${payload.app} 单区`;
             const parts = [`${scope}激活 ${payload.activated.length}`];
             if (payload.failed.length > 0) parts.push(`失败 ${payload.failed.length}（${payload.failed.join('、')}）`);
             parts.push(`跳过 ${payload.skipped.length}`);

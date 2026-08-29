@@ -31,7 +31,9 @@ import {
   sandboxDenialMarker,
   validateEscalationArgs,
 } from '../safety/index.js';
-import { classifyDenials, runArgv } from './spawn.js';
+import { classifyDenials, runArgv, type CommandProcessLog } from './spawn.js';
+
+export type { CommandProcessLog };
 import { resolveBash } from './bash-path.js';
 
 /** 超时缺省（毫秒）——骨架篇 §7.6 */
@@ -55,6 +57,12 @@ export interface BashToolOptions {
    * danger 目标恒问）。装配注入活数组引用，TTL 过期由引擎逐调用判定。
    */
   readonly allowlist?: readonly AllowlistEntry[];
+  /**
+   * 命令进程登记簿（契约篇 §6.6 子进程治理条 exec 腿，2026-08-29 critic #1）：
+   * spawn 即登记、净退即删——宿主猝死后由启动期孤儿清扫认领树杀。组合根经
+   * chat 件 deps 注入（exec 结构上不见 mcp，killTree 闭包同款先例）。
+   */
+  readonly commandLog?: CommandProcessLog;
 }
 
 /**
@@ -194,6 +202,8 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
         cwd,
         timeoutMs: clamped,
         signal: tctx.signal,
+        // 命令进程登记簿透传（宿主猝死孤儿治理——见 BashToolOptions.commandLog 注）
+        ...(opts.commandLog !== undefined ? { commandLog: opts.commandLog } : {}),
         onOutput:
           tctx.onUpdate !== undefined
             ? (chunk) => {

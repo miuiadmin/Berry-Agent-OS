@@ -22,7 +22,7 @@ import { chainCallers } from '../context/chain.js';
 import type { ToolPipelineExecutor } from '../tools/pipeline.js';
 import { intersectRoots } from '../safety/roots.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
-import { classifyDenials, runArgv, type RunResult } from './spawn.js';
+import { classifyDenials, runArgv, type CommandProcessLog, type RunResult } from './spawn.js';
 import { buildChildEnv } from './env.js';
 
 /** 服务装配选项（app 组合根注入） */
@@ -45,6 +45,12 @@ export interface ExecServiceOptions {
    * 组合根注入（exec 不能 import app——拓扑白名单），注入面为闭包。
    */
   readonly confinementFor?: (caller: string | undefined) => readonly string[] | undefined;
+  /**
+   * 命令进程登记簿（契约篇 §6.6 子进程治理条 exec 腿，2026-08-29 critic #1）：
+   * spawn 即登记、净退即删——宿主猝死后由启动期孤儿清扫认领树杀。组合根注
+   * mcp ChildRegistry 适配器（exec 结构上不见 mcp，killTree 闭包同款先例）。
+   */
+  readonly commandLog?: CommandProcessLog;
 }
 
 /**
@@ -161,6 +167,8 @@ export function registerExecService(ctx: Context, opts: ExecServiceOptions): Exe
             signal: tctx.signal,
             stdin: req.stdin,
             env,
+            // 命令进程登记簿透传（宿主猝死孤儿治理——见 ExecServiceOptions.commandLog 注）
+            ...(opts.commandLog !== undefined ? { commandLog: opts.commandLog } : {}),
             ...(callOpts.onOutput !== undefined ? { onOutput: callOpts.onOutput } : {}),
           });
           const denied = classifyDenials(run.stderr, denialSignatures);

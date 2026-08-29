@@ -42,6 +42,20 @@ export const OUTPUT_BUDGET_BYTES = 60 * 1024;
 const STREAM_HARD_CAP_BYTES = 2 * 1024 * 1024;
 
 /** 原语运行选项（bash 工具件与 ctx.exec 服务共用——env 表由各自选项面翻译过来） */
+/**
+ * 命令进程登记簿注入面（宿主猝死孤儿治理——契约篇 §6.6 子进程治理条 exec 腿，
+ * 2026-08-29 critic #1）：spawn 即 add（pid + 命令行标签——标签 = PID 复用
+ * 防护的比对基线）、净退即 remove（close 一路收全：正常退出/超时树杀/取消
+ * 树杀/信号死）。组合根注 mcp ChildRegistry 适配器——exec 结构上不见 mcp
+ * （killTree 闭包注入同款先例，拓扑边零新增）。
+ */
+export interface CommandProcessLog {
+  /** spawn 即登记（进程真启动才来——'spawn' 事件配对） */
+  add(pid: number, label: string): void;
+  /** 净退即删（幂等——重复删无害） */
+  remove(pid: number): void;
+}
+
 export interface RunArgvOptions {
   /** 工作目录（缺省宿主 cwd） */
   readonly cwd?: string;
@@ -55,6 +69,8 @@ export interface RunArgvOptions {
   readonly env?: Record<string, string>;
   /** 流式增量回调（执行中即推——run-to-completion 单品是 pi-7 反面） */
   readonly onOutput?: (chunk: { readonly stream: 'stdout' | 'stderr'; readonly text: string }) => void;
+  /** 命令进程登记簿（宿主猝死后由启动期孤儿清扫认领树杀；缺省不登记） */
+  readonly commandLog?: CommandProcessLog;
 }
 
 /** 单流编码终判标注：'utf-8' | '<本地标签>'（③命中） | '<标签>-lossy'（④终段有损） */
@@ -340,6 +356,16 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...(process.platform !== 'win32' ? { detached: true } : {}),
+    });
+
+    // 命令进程登记：真启动才登记（'spawn' 事件——ENOENT 等未启动形态无 pid
+    // 无条目），撤销与 'close' 配对（Node 保证已启动进程 error 后 close 仍来）。
+    // 标签 = 命令行前缀（PID 复用防护的 includes 比对基线；长命令截前缀不失配）
+    child.on('spawn', () => {
+      if (child.pid !== undefined) opts.commandLog?.add(child.pid, argv.join(' ').slice(0, 256));
+    });
+    child.on('close', () => {
+      if (child.pid !== undefined) opts.commandLog?.remove(child.pid);
     });
 
     let settled = false; // close 与 error 竞速的单次结算闸
