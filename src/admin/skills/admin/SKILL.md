@@ -72,13 +72,13 @@ apps_list            （验证：状态是否如期）
 
 各词要点：
 
-| 工具 | 关键参数 | 语义 |
-|------|----------|------|
-| `apps_install` | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + overlay 写回；行 id 由源推导（npm=包名 / git=repo 名 / local=目录名） |
-| `apps_update` | `id` | npm 重装 / git 按原 ref 重克隆 / local 改动即见 |
-| `apps_toggle` | `id` | 启停翻转；Ring 1 必备行与 fixed 行禁用即拒（设计行为） |
-| `apps_configure` | `id` + `config`（patch 对象） | **顶层键整值替换**：要改哪些键就带哪些键，未列出的键保持现值，不做深合并；经应用声明 schema 校验，不过即拒且不落盘；禁用/未装/未激活行拒写 |
-| `apps_reload` | 无（仅审批对） | 全树卸载重装；排队语义见上 |
+| 工具             | 关键参数                                                 | 语义                                                                                                                                       |
+| ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps_install`   | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + overlay 写回；行 id 由源推导（npm=包名 / git=repo 名 / local=目录名）                                                           |
+| `apps_update`    | `id`                                                     | npm 重装 / git 按原 ref 重克隆 / local 改动即见                                                                                            |
+| `apps_toggle`    | `id`                                                     | 启停翻转；Ring 1 必备行与 fixed 行禁用即拒（设计行为）                                                                                     |
+| `apps_configure` | `id` + `config`（patch 对象）                            | **顶层键整值替换**：要改哪些键就带哪些键，未列出的键保持现值，不做深合并；经应用声明 schema 校验，不过即拒且不落盘；禁用/未装/未激活行拒写 |
+| `apps_reload`    | 无（仅审批对）                                           | 全树卸载重装；排队语义见上                                                                                                                 |
 
 ## apps_uninstall_inspect：卸载检视（执行权在人）
 

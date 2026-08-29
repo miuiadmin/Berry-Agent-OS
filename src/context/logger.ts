@@ -42,7 +42,7 @@ export type LogSink = (line: string) => void;
 
 /**
  * 创建一个 logger。
- * @param opts.module 模块前缀（如 'session' / 'context:plugin:memory'）
+ * @param opts.module 模块前缀（如 'session' / 'context:app:memory'）
  * @param opts.level  初始阈值，缺省走 defaultLevel()
  * @param opts.sink   输出行目标，缺省 process.stderr
  */

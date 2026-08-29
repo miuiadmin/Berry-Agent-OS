@@ -1,6 +1,6 @@
 /**
  * L3 compaction 单元测试（策略纯函数——判阈/区间规划/防抖/冷却/预算/提示词）。
- * 件本体编排（plugin.ts）的集成测见 plugin.test.ts；本文件只锁纯逻辑半边。
+ * 件本体编排（app.ts）的集成测见 app.test.ts；本文件只锁纯逻辑半边。
  */
 
 import { describe, expect, it } from 'vitest';

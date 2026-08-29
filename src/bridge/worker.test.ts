@@ -255,7 +255,9 @@ describe('startWorkerRealm — svc.load（装载校验与元数据过界）', ()
   it('meta 五面过界：name/手写 config schema 原样克隆、未声明字段不占位', async () => {
     const { ch, dir } = setup();
     const entry = writeApp(dir, 'fx-main.ts', FX_MAIN);
-    const meta = await ch.host.call<Record<string, unknown>>('svc', 'load', [{ id: 'fx', entry, runtime: 'worker' }]);
+    const meta = await ch.host.call<Record<string, unknown>>('svc', 'load', [
+      { id: 'fx', entry, sandbox: { carrier: 'worker' } },
+    ]);
     expect(meta['name']).toBe('fx-worker');
     expect(JSON.stringify(meta['config'])).toContain('greet');
     // 未声明的 inject/optionalInject/events/skills 不占位（宿主侧按 undefined 判缺省）

@@ -149,19 +149,15 @@ function setup(logs: Record<string, SessionEvent[]> = {}): Harness {
  * apply 直调桥：契约面 AppApply 的 ctx 形参是 never 占位（L0 contracts 不能
  * 引用 L1 的 Context 类型——加载器内部同款重定型），测试经此恢复真实签名。
  */
-function applyPlugin(
-  plugin: BuiltinAppModule,
-  ctx: ContextScope,
-  config?: Readonly<Record<string, unknown>>,
-): Promise<void> {
-  return plugin.apply(ctx as never, config) as Promise<void>;
+function applyApp(app: BuiltinAppModule, ctx: ContextScope, config?: Readonly<Record<string, unknown>>): Promise<void> {
+  return app.apply(ctx as never, config) as Promise<void>;
 }
 
 describe('memory 官方件 apply（persist:false 降级）', () => {
   it('无 store：warn 空转——零注册零抛（dump-config 诊断面诚实）', async () => {
     const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
-    const plugin = createMemoryApp({ workspace: () => '/w' });
-    await expect(applyPlugin(plugin, ctx)).resolves.toBeUndefined(); // 不抛
+    const app = createMemoryApp({ workspace: () => '/w' });
+    await expect(applyApp(app, ctx)).resolves.toBeUndefined(); // 不抛
     expect(ctx.tryGet('tools')).toBeUndefined(); // 未触任何 get（服务可缺位）
   });
 });
@@ -171,8 +167,8 @@ describe('memory 官方件 apply（persist:false 降级）', () => {
 describe('memory 官方件 apply（全栈接线序）', () => {
   it('工具九件 + 简报段真注册；dispose 回卷整体注销（effect LIFO）', async () => {
     const h = setup();
-    const plugin = createMemoryApp({ store: h.source, workspace: () => '/w' });
-    await applyPlugin(plugin, h.ctx);
+    const app = createMemoryApp({ store: h.source, workspace: () => '/w' });
+    await applyApp(app, h.ctx);
 
     expect(h.toolNames()).toEqual([
       'memory_write',
@@ -204,8 +200,8 @@ describe('memory 官方件 apply（全栈接线序）', () => {
       ],
     };
     const h = setup(logs);
-    const plugin = createMemoryApp({ store: h.source, workspace: () => '/w' });
-    await applyPlugin(plugin, h.ctx);
+    const app = createMemoryApp({ store: h.source, workspace: () => '/w' });
+    await applyApp(app, h.ctx);
 
     // 激活期对账已建索引（历史会话检索面就位）
     const fts = new SessionFtsIndex(h.store.connection);
@@ -223,8 +219,8 @@ describe('memory 官方件 apply（全栈接线序）', () => {
 
   it('按需检索：命中注入 memory/recall（防注入句式 + 引用标记 + kind 优先），空手放行', async () => {
     const h = setup();
-    const plugin = createMemoryApp({ store: h.source, workspace: () => '/w' });
-    await applyPlugin(plugin, h.ctx, { recallTopK: 1 });
+    const app = createMemoryApp({ store: h.source, workspace: () => '/w' });
+    await applyApp(app, h.ctx, { recallTopK: 1 });
 
     // 预置记忆：两条不同 kind 共享关键词「生产环境」（preference 与 failure——
     // failure 优先级 0 应胜过 preference 的 5，topK=1 只注入 failure）
@@ -285,8 +281,8 @@ describe('memory 官方件 apply（全栈接线序）', () => {
 
   it('引用回写：assistant 消息携带 [m:短id] → usage_count 累加（session/event 消费侧）', async () => {
     const h = setup();
-    const plugin = createMemoryApp({ store: h.source, workspace: () => '/w' });
-    await applyPlugin(plugin, h.ctx);
+    const app = createMemoryApp({ store: h.source, workspace: () => '/w' });
+    await applyApp(app, h.ctx);
 
     const memory = new MemoryStore(h.store.connection);
     const inserted = memory.addMemory({
@@ -350,8 +346,8 @@ describe('memory 官方件 apply（全栈接线序）', () => {
 
 /** 差分测试共件：apply + 真会话绑定 + 基线物化 + 闩就位（首 user 事件） */
 async function setupDiffBaseline(h: Harness, preseed?: (memory: MemoryStore) => void) {
-  const plugin = createMemoryApp({ store: h.source, workspace: () => '/w' });
-  await applyPlugin(plugin, h.ctx);
+  const app = createMemoryApp({ store: h.source, workspace: () => '/w' });
+  await applyApp(app, h.ctx);
   const memory = new MemoryStore(h.store.connection);
   preseed?.(memory);
   const session = new Session();
@@ -496,8 +492,8 @@ describe('memory 官方件 apply（简报差分追注）', () => {
 
   it('S2 双会话差分各归各：后开会话的重物化不覆写先开会话基线（全局单值互染的回归锁）', async () => {
     const h = setup();
-    const plugin = createMemoryApp({ store: h.source, workspace: () => '/w' });
-    await applyPlugin(plugin, h.ctx);
+    const app = createMemoryApp({ store: h.source, workspace: () => '/w' });
+    await applyApp(app, h.ctx);
     const memory = new MemoryStore(h.store.connection);
     // 甲在库 → A open 冻结基线 {甲} → B open 前甲被 forget → B 基线 = {}
     // （HEAD 全局单值下 B 的 render 会覆写 A 的基线——A 的差分随之错账；本测试锁死 per-session 语义）
@@ -542,8 +538,8 @@ afterAll(() => {
 describe('memory 官方件 apply（命令面 /memory-export、/memory-import）', () => {
   it('writableRoots 注入 → 两命令注册；dispose 回卷注销；未注入 = 不注册', async () => {
     const h = setup();
-    const plugin = createMemoryApp({ store: h.source, workspace: () => '/w', writableRoots: () => ['/w'] });
-    await applyPlugin(plugin, h.ctx);
+    const app = createMemoryApp({ store: h.source, workspace: () => '/w', writableRoots: () => ['/w'] });
+    await applyApp(app, h.ctx);
     expect(h.commandNames()).toEqual(['memory-export', 'memory-import']);
     await h.ctx.dispose();
     expect(h.commandNames()).toEqual([]);
@@ -551,7 +547,7 @@ describe('memory 官方件 apply（命令面 /memory-export、/memory-import）'
     // 未注入：命令面本未注册（其余面不受影响——诊断装配降级一致）
     const h2 = setup();
     const plain = createMemoryApp({ store: h2.source, workspace: () => '/w' });
-    await applyPlugin(plain, h2.ctx);
+    await applyApp(plain, h2.ctx);
     expect(h2.commandNames()).toEqual([]);
     expect(h2.toolNames()).toHaveLength(9); // 工具面照常
     await h2.ctx.dispose();
@@ -560,12 +556,12 @@ describe('memory 官方件 apply（命令面 /memory-export、/memory-import）'
   it('导出写 fence：目标不在可写根内 → 拒写回执、零落盘', async () => {
     const h = setup();
     cmdTmpDir ??= mkdtempSync(join(tmpdir(), 'memory-cmd-test-'));
-    const plugin = createMemoryApp({
+    const app = createMemoryApp({
       store: h.source,
       workspace: () => cmdTmpDir!,
       writableRoots: () => [cmdTmpDir!],
     });
-    await applyPlugin(plugin, h.ctx);
+    await applyApp(app, h.ctx);
     new MemoryStore(h.store.connection).addMemory({
       ownerKey: 'global',
       kind: 'fact',
@@ -583,12 +579,12 @@ describe('memory 官方件 apply（命令面 /memory-export、/memory-import）'
   it('导出落盘（缺省名在工作区根）+ 导入幂等回执 + 明文警示在场', async () => {
     const h = setup();
     cmdTmpDir ??= mkdtempSync(join(tmpdir(), 'memory-cmd-test-'));
-    const plugin = createMemoryApp({
+    const app = createMemoryApp({
       store: h.source,
       workspace: () => cmdTmpDir!,
       writableRoots: () => [cmdTmpDir!],
     });
-    await applyPlugin(plugin, h.ctx);
+    await applyApp(app, h.ctx);
     const memory = new MemoryStore(h.store.connection);
     memory.addMemory({ ownerKey: 'global', kind: 'fact', summary: '导出样例条', content: '内容' });
 
@@ -621,12 +617,12 @@ describe('memory 官方件 apply（命令面 /memory-export、/memory-import）'
   it('跨库导入真恢复：导出文件进另一空库 → 新入回执 + 条目可检索（迁移面语义）', async () => {
     const h = setup();
     cmdTmpDir ??= mkdtempSync(join(tmpdir(), 'memory-cmd-test-'));
-    const plugin = createMemoryApp({
+    const app = createMemoryApp({
       store: h.source,
       workspace: () => cmdTmpDir!,
       writableRoots: () => [cmdTmpDir!],
     });
-    await applyPlugin(plugin, h.ctx);
+    await applyApp(app, h.ctx);
     const memory = new MemoryStore(h.store.connection);
     memory.addMemory({ ownerKey: 'global', kind: 'preference', summary: '跨库迁移条', content: '内容' });
     const target = join(cmdTmpDir!, 'migrate.jsonl');

@@ -1665,7 +1665,7 @@ export async function createBerryRuntime(opts: RuntimeOptions = {}): Promise<Ber
       // builtin 行（宿主函数件）默认无磁盘锚点——未自述 packageRoot 的 builtin
       // 件仍不可注册技能（契约篇 §3.4 两来源：builtin 自述〔admin 件先例〕/
       // 文件应用 entry 推导；两来源皆无才落此分支）
-      ctx.logger.warn('builtin 件声明 skills 但未自述 packageRoot，暂不支持注册', { plugin: info.name, row: info.id });
+      ctx.logger.warn('builtin 件声明 skills 但未自述 packageRoot，暂不支持注册', { app: info.name, row: info.id });
       return;
     }
     const provider = createPackageSkillsProvider({

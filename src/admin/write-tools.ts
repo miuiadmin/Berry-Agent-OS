@@ -16,7 +16,7 @@
  * 卸载执行权在人（/apps-uninstall --confirm）——模型只草拟报告不执行，
  * 报告尾部固定指引用（模型知道 execute 不归它）。
  *
- * 拓扑最小边（与 plugin.ts 同律）：全部依赖经 ctx.get 运行时服务面取，零跨
+ * 拓扑最小边（与 app.ts 同律）：全部依赖经 ctx.get 运行时服务面取，零跨
  * 模块 import 宿主实现；服务面的结构子集类型本地收窄。升权目标词汇 inline
  * 常量（admin→safety 不开边）+ 测试对 safety ESCALATION_TARGETS 断言锁等值。
  */
@@ -117,7 +117,7 @@ export interface UnmountReportView {
   readonly message: string;
 }
 
-/** ctx.apps 服务面的写动词结构子集（与 plugin.ts 只读面同收窄纪律） */
+/** ctx.apps 服务面的写动词结构子集（与 app.ts 只读面同收窄纪律） */
 export interface AppsManageFace {
   install(ref: string, opts?: { gitRef?: string }): Promise<InstallReportView>;
   toggle(id: string): boolean;

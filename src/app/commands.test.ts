@@ -1,7 +1,7 @@
 /**
  * L5 app 测试 — /apps-uninstall 命令面（契约篇 §3.4 第二刀，2026-08-27 刀 2）。
- * 真命令注册表形态（捕获 handler）+ 两段式确认步全链走真壳；plugins 服务与
- * reload 是最小桩（服务面行为已在 plugins.test.ts 全锁，此处只锁壳面：用法
+ * 真命令注册表形态（捕获 handler）+ 两段式确认步全链走真壳；apps 服务与
+ * reload 是最小桩（服务面行为已在 apps.test.ts 全锁，此处只锁壳面：用法
  * 提示 / 裸调=只检视不执行〔SF-5 机制承载〕/ --confirm 才 execute + 链 reload /
  * --purge-data 裁决 / outcome 三态呈现）。
  */
@@ -96,9 +96,9 @@ const INSPECT: UninstallReport = {
   id: 'demo',
   source: 'npm',
   appRef: 'demo-pkg',
-  installPath: '/tmp/x/plugins/node_modules/demo',
+  installPath: '/tmp/x/apps/node_modules/demo',
   mountedRows: ['demo'],
-  dataRoots: ['/tmp/x/plugins/demo'],
+  dataRoots: ['/tmp/x/apps/demo'],
   dataBytes: 2048,
   events: { origin: 'live', names: ['demo/thing'] },
   affectedSessions: { 'demo/thing': 3 },

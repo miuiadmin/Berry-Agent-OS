@@ -1,7 +1,7 @@
 node_modules/
 dist/
 out/
-data/
+/data/
 *.db
 *.db-wal
 *.db-shm
@@ -16,3 +16,7 @@ tmp-*.jpeg
 真实测试题库/
 # 工具运行残留（pi 任务输出目录，2026-08-29 清扫批）
 .pi/
+# 会话工具目录残留 + macOS 元数据（2026-08-29 遗漏大扫批）
+.claude/workflows/
+.omo/
+.DS_Store

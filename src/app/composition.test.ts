@@ -367,7 +367,7 @@ describe('禁用解析（挂载休眠）', () => {
 /* ---------------- 入口解析（裸名装机子树 + harness 字段） ---------------- */
 
 describe('应用入口解析', () => {
-  it('裸名 → <数据目录>/plugins/node_modules/<包名> + package.json harness.extensions 首选', () => {
+  it('裸名 → <数据目录>/apps/node_modules/<包名> + package.json harness.extensions 首选', () => {
     const dataDir = makeDataDir();
     const pkgDir = join(dataDir, 'apps', 'node_modules', 'fake-pkg');
     mkdirSync(pkgDir, { recursive: true });
@@ -544,7 +544,7 @@ describe('overlay 写回：saveOverlayRows / toggleOverlayRow / insertOverlayRow
 
   it('insertOverlayRow：纯追加挂载行（mount 持久化半边——撞名在服务面先裁，本面不悄悄改既有行）', () => {
     const dataDir = makeDataDir();
-    // 首挂：空 overlay 追加 {id, plugin, app, config}（mount 全字段形态）
+    // 首挂：空 overlay 追加 {id, pkg, apps, config}（mount 全字段形态）
     insertOverlayRow(dataDir, { id: 'fresh', pkg: 'some-package', apps: ['chat'], config: { k: 1 } });
     expect(loadOverlayRows(dataDir)).toEqual([{ id: 'fresh', pkg: 'some-package', apps: ['chat'], config: { k: 1 } }]);
     // 追加不触碰既有行（第二应用挂载 = 第二行，同包两行共存——D2 多应用挂载形态）

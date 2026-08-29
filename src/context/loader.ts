@@ -459,7 +459,7 @@ export interface LoadAppsOptions {
   };
   /**
    * worker 行装载器（第二十七批刀二 K3-b2，拓扑 seam）：bridge 模块注入。缺省
-   * 未注入时 runtime:'worker' 行按 APP_LOAD_FAILED 进失败清单（worker 域能力
+   * 未注入时 sandbox.carrier 'worker' 行按 APP_LOAD_FAILED 进失败清单（worker 域能力
    * 未装配——如未来某裁剪面）；注入后 worker 行与 main 行同管线混排（Kahn 轮次
    * 不分域——服务消费方对执行域无感知）。
    *

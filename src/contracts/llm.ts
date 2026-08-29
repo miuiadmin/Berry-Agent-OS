@@ -74,7 +74,7 @@ export type StopReason = 'pending' | 'stop' | 'length' | 'toolUse' | 'error' | '
 /**
  * user 消息归因词汇（会话篇 §3.1 dsh-8 定稿，五值 + v2 预留）：
  * 谁把这条消息放进历史——真人输入 / 通道转发 / 应用注入 / 定时投递 / 子代理结算回投。
- * 前缀型模板串承载 id/name（如 `channel:telegram`、`plugin:memory`）。
+ * 前缀型模板串承载 id/name（如 `channel:telegram`、`app:memory`）。
  */
 export type MessageSource = 'user' | 'schedule' | 'subagent-settled' | `channel:${string}` | `app:${string}`;
 
