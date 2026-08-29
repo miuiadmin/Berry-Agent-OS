@@ -208,8 +208,11 @@ describe('升权 × allowlist 免问（§8.4 增补 2——bash 族唯一消费�
       justification: '测试草案',
     });
     expect(asked[0]!.suggestedEntry).toEqual({ tool: 'bash', pattern: 'echo clean' });
+    // 管道命令剥不出单一词干。注意命令会被真实执行（审批桩放行）——必须选
+    // 零写盘形态：曾用 `echo dirty | tee x` 在仓库根落 x 残留文件（2026-08-29
+    // 清扫批根治），grep 纯消费无副作用
     await run(tool, {
-      command: 'echo dirty | tee x',
+      command: 'echo dirty | grep dirty',
       sandbox_permissions: 'workspace-write',
       justification: '测试无草案',
     });
