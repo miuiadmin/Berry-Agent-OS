@@ -1700,9 +1700,11 @@ function readDataDescriptor(dataDir: string, id: string): AppDataDescriptor | 'l
   if (!existsSync(path)) return undefined;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as AppDataDescriptor & { plugin?: unknown };
-    // 旧认领键在场而新键不在 = 改名前文件（两者同在属手改杂交——落 corrupt 诚实）
-    if (typeof parsed === 'object' && parsed !== null && typeof parsed.plugin === 'string' && !('app' in parsed)) {
-      return 'legacy';
+    // 旧认领键为合法字符串：新键不在 = 改名前文件（legacy 档）；两键同在 =
+    // 手改杂交——落 corrupt 诚实（规范 :544 四分支实文：拒绝静默忽略任一键
+    // 的读法，宁拒读勿猜测）
+    if (typeof parsed === 'object' && parsed !== null && typeof parsed.plugin === 'string') {
+      return 'app' in parsed ? 'corrupt' : 'legacy';
     }
     if (
       typeof parsed !== 'object' ||

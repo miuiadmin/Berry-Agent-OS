@@ -968,6 +968,18 @@ describe('uninstall 双相四段', () => {
     expect(oldKeyView.events.note).toContain('旧词汇域');
     expect(oldKeyView.events.note).toContain('重装');
 
+    // 杂交档（旧认领键与新认领键同在 = 手改杂交）→ 损坏档：规范 :544 四分支
+    // 实文——拒绝静默忽略任一键的读法（修前红锚：同在且新键形状合法时被当
+    // ledger 档读走、旧键静默忽略——注释与规范都说 corrupt 而实码放行）
+    writeFileSync(
+      join(dataDir, 'apps', 'my-plugin', 'data.json'),
+      JSON.stringify({ plugin: 'my-plugin', app: 'my-plugin', declaredEvents: ['demo/one'] }),
+    );
+    const hybridService = createAppsService({ dataDir, runner });
+    const hybridView = await hybridService.uninstall('my-plugin', { mode: 'inspect' });
+    expect(hybridView.events.origin).toBe('unknown');
+    expect(hybridView.events.note).toContain('损坏');
+
     // 账本前存量装机（手写 provenance 记录无 data.json——pre-D2/手账形态）→
     // unknown 档（早于账本注记）
     const legacyData = makeDataDir();

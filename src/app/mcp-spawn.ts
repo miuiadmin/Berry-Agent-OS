@@ -69,7 +69,7 @@ export function createMcpSpawner(
 ): (config: McpServerConfig) => Promise<SpawnedChild> {
   // 归一后的可写根（闭包级一次——两根装配期已定，逐 spawn 重算无意义）
   const writableRoots = [realizeRoot(dataDir), realizeRoot(workspace)];
-  /** OS 层 probe 是否已过（spawner 生命周期一次——首 spawn 前验真后端链） */
+  /** OS 层 probe 是否已过（探测全过后才置位——失败不消耗旗，后续 spawn 重探保形态统一） */
   let osLayerProbed = false;
 
   /**
@@ -82,7 +82,6 @@ export function createMcpSpawner(
    */
   const ensureOsLayer = (): void => {
     if (osLayerProbed) return;
-    osLayerProbed = true;
     const backends = sandbox.listBackends();
     // 空后端链 fail-closed：本平台零 OS 沙箱后端（win32 现状）——有服务器
     // 配置即起不来，与 exec confine 同律；无逃生门（v1 不开降格旋钮）
@@ -100,6 +99,12 @@ export function createMcpSpawner(
         );
       }
     }
+    // 旗后置：探测全过后才缓存「已验真」。若在探测前置位，首台 probe 失败
+    // 即消耗旗，后续 spawn 跳过探测、confine 单候选链又不预 probe——失败形
+    // 态漂移成 spawn ENOENT，违背本函数 JSDoc「统一 SANDBOX_UNAVAILABLE」
+    // 不变量（遗漏大扫 2026-08-29 修复项）。失败态下每台服务器各重探一次，
+    // 代价可忽略（probe 毫秒级，服务器数量个位数）。
+    osLayerProbed = true;
   };
 
   return (config: McpServerConfig): Promise<SpawnedChild> =>

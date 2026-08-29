@@ -158,6 +158,26 @@ describe('createMcpSpawner — OS 沙箱升格接线', () => {
     expect(err.message).toContain('broken');
   });
 
+  it('probe 失败不消耗旗：后续 spawn 重探、失败形态恒 SANDBOX_UNAVAILABLE 不漂移', async () => {
+    let probes = 0;
+    const sandbox = fakeSandbox({
+      // confine 产物故意不可跑（argv[0] 缺席 → spawn 同步抛 TypeError）——若第
+      // 二台跳过探测走到 confine/spawn，错误形态即漂移成非 SANDBOX_UNAVAILABLE
+      argv: [],
+      backends: [{ id: 'broken', probe: () => (probes++, false) }],
+    });
+    const spawnServer = createMcpSpawner(dataDir, sandbox, workspace);
+    const err1 = await rejection(spawnServer({ command: '/nonexistent/a' }));
+    expect(err1.code).toBe(SANDBOX_UNAVAILABLE);
+    // 修前红锚：旗在探测前置位——首台失败已消耗旗，第二台跳过探测、confine
+    // 单候选链不预 probe，直接走到 spawn(undefined) 同步抛——rejection 助手
+    // 对无 code 错误直接 throw，本用例即红；修后旗后置，两台形态同源
+    const err2 = await rejection(spawnServer({ command: '/nonexistent/b' }));
+    expect(err2.code).toBe(SANDBOX_UNAVAILABLE);
+    expect(err2.message).toContain('broken');
+    expect(probes).toBe(2); // 失败态每台各重探一次（探测全过后才缓存）
+  });
+
   it('probe-once：连续两 spawn 只探测一次（bridge-fleet ensureOsLayer 同形态）', { timeout: 30_000 }, async () => {
     let probes = 0;
     const marker = join(dataDir, 'probe-once.json');
