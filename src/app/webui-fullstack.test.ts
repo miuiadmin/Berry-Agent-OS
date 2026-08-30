@@ -656,21 +656,23 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       const id1 = askedIds()[0] ?? '';
       // 三态路上屏：suggestedEntry（pwd 词干）在场 → answerApproval 走 select
       await waitFor(() => askLog.includes('select-ask'));
-      // web 应答 → race 收 web 值 → finally abort → select 桩 '' → 降级 confirm
-      //（同 signal 已 aborted → 同步 false）→ tuiLeg 'reject' 无人消费——decided 单写 web 值
+      // web 应答 → race 收 web 值 → finally abort → select 桩 ''（保守收场）+
+      // controller.signal.aborted → tuiLeg 直收 'cancel'（interrupt 小刀统一规则：
+      // 不再降级发第二条 confirm——'cancel' 不被预置 aborted 的同步 false 换皮成
+      // 'reject'）——败腿值被 race 丢弃，decided 单写 web 值
       expect(
         (await postJson(port, `/api/approvals/${id1}/decide`, JSON.stringify({ decision: 'approve' }))).status,
       ).toBe(200);
       await waitFor(() => countFrames('turn/end') >= 1);
-      // 败腿收场序：select 撤销 → 降级 confirm 预置 aborted 同步收场——全程无
-      // 第二提问悬置上屏（'confirm-ask' 缺席 = 不再残留占输入框的桩面证据）
-      await waitFor(() => askLog.includes('confirm-instant-false'));
-      expect(askLog).toEqual(['select-ask', 'select-abort', 'confirm-instant-false']);
-      // decided 单写：approve（web 腿值；tuiLeg 降级链终值 reject 被 race 丢弃）
+      // 败腿收场序：select 撤销即终——全程无第二提问（confirm 全缺席 = 降级面
+      // 不复活、无残留占输入框的桩面证据）
+      await waitFor(() => askLog.includes('select-abort'));
+      expect(askLog).toEqual(['select-ask', 'select-abort']);
+      // decided 单写：approve（web 腿值；tuiLeg 直收的 cancel 被 race 丢弃）
       const decided1 = session.events.filter((e) => e.type === 'approval/decided');
       expect(decided1).toHaveLength(1);
       expect((decided1[0]!.data as { decision: string }).decision).toBe('approve');
-      expect(gates).toHaveLength(1); // select 闸门挂过、confirm 未挂闸（短路）——无悬置腿残留
+      expect(gates).toHaveLength(1); // select 闸门挂过、confirm 未挂闸（不再降级）——无悬置腿残留
 
       /* ---- Leg 2：TUI 腿胜（select 立即应答 → race 收 → abort 无副作用） ---- */
       expect((await postSubmit(port, bootId, '刀A第二轮')).status).toBe(202);
@@ -687,7 +689,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       await waitFor(() => countFrames('turn/end') >= 3);
       // race 收束的 finally abort 落在已应答 select 上 = no-op：桩 settled 守卫
       // 不记 'select-abort'（摘监听不变式的桩面镜像）、不触发降级 confirm
-      expect(askLog).toEqual(['select-ask', 'select-abort', 'confirm-instant-false', 'select-ask', 'select-answer']);
+      expect(askLog).toEqual(['select-ask', 'select-abort', 'select-ask', 'select-answer']);
       // decided 单写：第二条值 approve（TUI 腿值）；web 迟到应答 superseded 不二写
       const decided2 = session.events.filter((e) => e.type === 'approval/decided');
       expect(decided2).toHaveLength(2);

@@ -126,7 +126,13 @@ function fakeManage(scripted: {
 
 /** 审批面测试替身：记录 ask 实参，outcome 可脚本 */
 function fakeApproval(outcome: 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable') {
-  const asks: Array<{ summary: string; reason?: string; toolName?: string; toolCallId?: string }> = [];
+  const asks: Array<{
+    summary: string;
+    reason?: string;
+    toolName?: string;
+    toolCallId?: string;
+    signal?: AbortSignal;
+  }> = [];
   const approval: ApprovalAskFace = {
     async ask(req) {
       asks.push(req);
@@ -217,8 +223,8 @@ describe('生命周期档统一闸', () => {
     expect(asks[0]!.toolCallId).toBe('tc-1');
   });
 
-  it('审批三拒态（rejected/cancelled/unavailable）：isError 结果 + 不重试指引——服务面零调用', async () => {
-    for (const outcome of ['rejected', 'cancelled', 'unavailable'] as const) {
+  it('审批两拒态（rejected/unavailable）：isError 结果 + 不重试指引——服务面零调用', async () => {
+    for (const outcome of ['rejected', 'unavailable'] as const) {
       const { apps, calls } = fakeManage({});
       const { approval } = fakeApproval(outcome);
       const result = await createAppsInstallTool(apps, approval).execute({ source: 'demo-pkg', ...PAIR }, CTX);
@@ -229,6 +235,31 @@ describe('生命周期档统一闸', () => {
       expect(text).toContain('不要重试');
       expect(calls).toEqual([]); // 拒绝 = 动作未发生
     }
+  });
+
+  it('cancelled 档（interrupt 小刀 F6）：去「被拒」前缀与重试话术——run 已打断语境的诚实收口', async () => {
+    const { apps, calls } = fakeManage({});
+    const { approval } = fakeApproval('cancelled');
+    const result = await createAppsInstallTool(apps, approval).execute({ source: 'demo-pkg', ...PAIR }, CTX);
+    expect(result.isError).toBe(true);
+    const text = textOf(result);
+    expect(text).toContain('审批已取消');
+    expect(text).toContain('run 已打断');
+    expect(text).toContain('未执行'); // 动作未发生的审计事实保留
+    expect(text).not.toContain('不要重试'); // 重试话术仅 reject 档（run 已 abort 模型看不见）
+    expect(calls).toEqual([]); // 取消 = 动作未发生
+  });
+
+  it('run 信号透传（interrupt 小刀——admin 闸第三填点）：tctx.signal 原对象进 ask 载荷', async () => {
+    const { apps } = fakeManage({});
+    const { approval, asks } = fakeApproval('allowed-once');
+    const ac = new AbortController();
+    await createAppsToggleTool(apps, approval).execute(
+      { id: 'builtin:memory', ...PAIR },
+      { toolCallId: 'tc-sig', signal: ac.signal },
+    );
+    expect(asks[0]!.signal).toBe(ac.signal); // 原对象同一性——answerer 桥接消费的原料
+    expect(asks[0]!.toolCallId).toBe('tc-sig');
   });
 });
 

@@ -31,8 +31,10 @@ export interface PromptAskOptions {
   /**
    * per-ask 撤销信号（channels 批刀 A）：abort 即本提问以 undefined 收场
    * （与 cancelAll 同一取消语义）。传入时已 aborted = 同步立即结算——不
-   * enqueue 不占屏（三态审批降级链：select 撤销收场回 '' → 降级再发
-   * confirm，是本形态的真实命中面——预置 aborted 若只挂监听则永不再触发）。
+   * enqueue 不占屏（已 aborted 的信号永不再发事件，只挂监听 = 本提问永不
+   * 收场的死路。真实命中面 = 两态 confirm 腿在 abort 之后才发出——如 run
+   * 已打断时新 ask 进 answerer；三态路保守收场自 interrupt 小刀起直收
+   * 'cancel' 不再降级发第二条 confirm，见 answerApproval 判据注释）。
    */
   readonly signal?: AbortSignal;
 }

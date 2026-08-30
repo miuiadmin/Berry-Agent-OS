@@ -172,13 +172,15 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
 
     /* ---- 第一段：守门（fail-closed；block 短路不进执行段） ---- */
     // 可变入参：mutate 决策就地改写 args + 置 mutated；链尾 next 返回 undefined = 全链放行
-    // callOrigin 随执行器第 6 参透传（P1-2 增补 7③——面别判别词，undefined = 未知面不置键）
+    // callOrigin 随执行器第 6 参、signal 随第 4 参透传（P1-2 增补 7③ 面 别判别词 +
+    // interrupt 小刀 run 取消信号——守门路填点，gate 建 ask 载荷时携带）
     const gateInput: GateInput = {
       tool: def,
       args,
       callId: toolCallId,
       mutated: false,
       ...(origin !== undefined ? { callOrigin: origin } : {}),
+      ...(signal !== undefined ? { signal } : {}),
     };
     let gateOutcome: GateAction | undefined;
     try {

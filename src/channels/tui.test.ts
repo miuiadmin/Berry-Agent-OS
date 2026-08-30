@@ -265,3 +265,28 @@ describe('D4 theme 渲染轻件（focus 换装 + 各归各色 + 起屏一次 + �
     expect(all).not.toContain(`${CYAN} 外部状态文本`); // setStatus 不吃 accent
   });
 });
+
+describe('interrupt 小刀——cancelAsks 退出兜底（包装面直测）', () => {
+  it('在身/排队提问全收场（confirm false fail-closed）、无 signal 服务路 ask 不搁浅队首', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    const ui = tui.ui();
+    // 服务路 ask 形态（ctx.exec/ctx.fetch 消费面）：无 signal、用户不在场——cancelAsks 的兜底对象
+    //（confirm 是 UiBackend 可选方法——通道实现恒在场，非空断言即合法调用面）
+    const first = ui.confirm!('服务路确认？');
+    const second = ui.confirm!('排队的第二问');
+    tui.cancelAsks();
+    expect(await first).toBe(false); // 取消收场保守值（fail-closed：不批准 = 安全缺省）
+    expect(await second).toBe(false); // 排队者同收（静默出队——cancelAll 不走 dismiss 行）
+    await flush();
+    const all = terminal.frames.join('');
+    expect(all).toContain('? 服务路确认？'); // 队首曾上屏
+    expect(all).not.toContain('排队的第二问'); // 排队者从未占屏（单输入框语义）
+    expect(all).not.toContain('− '); // cancelAll 静默收场（dismiss 行仅 signal abort 路渲染）
+    // 队列清空：兜底后新 ask 正常入队，且可再次被兜底收场（无僵尸队首）
+    const third = ui.confirm!('兜底后的新问');
+    tui.cancelAsks();
+    expect(await third).toBe(false);
+    tui.cancelAsks(); // 幂等——无提问在身为 no-op
+  });
+});

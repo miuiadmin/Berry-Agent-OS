@@ -252,6 +252,13 @@ export interface GateInput {
    * 分叉是面别差异（合法），按 caller/session 分叉是主体差异（§3.1 禁令）。
    */
   callOrigin?: ToolCallOrigin;
+  /**
+   * 发起 run 的取消信号（interrupt 小刀：管道从执行器第 4 参透传）——调用方
+   * 语境字段，与 callId 同性质：safety gate 建 ask 载荷时携带进
+   * ApprovalRequest.signal，由 answerer 桥接消费（run abort 即撤销在身审批
+   * 提问）；守门者不按它分支（dsh-10 同界）。
+   */
+  signal?: AbortSignal;
 }
 
 /** 守门决策（守门监听器的返回值） */

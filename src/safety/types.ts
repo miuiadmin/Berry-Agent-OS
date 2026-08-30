@@ -70,6 +70,14 @@ export interface ApprovalRequest {
    * persistAllowlist 回调落地）。高位动作不携带（选项不出现）。
    */
   readonly suggestedEntry?: AllowlistDraft;
+  /**
+   * 发起 run 的取消信号（interrupt 小刀：契约篇 §6.8）：调用方语境字段，与
+   * toolCallId 同性质非织入字段——守门/升权/admin 生命周期闸三路填点透传；
+   * answerer 桥接消费（run abort 即撤销在身提问，保守收场落 'cancel'——打断
+   * 非拒绝的诚实落账），守门/执行机制不按它分支（dsh-10 同界）。服务路 ask
+   * （ctx.exec/ctx.fetch 消费面——不发生在任何 run 内）不携带，退出兜底覆盖。
+   */
+  readonly signal?: AbortSignal;
 }
 
 /** 沙箱后端统一接口（后端是可替换应用行；seam 与强制点在内核） */

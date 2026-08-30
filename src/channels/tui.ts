@@ -108,6 +108,12 @@ export interface TuiChannel {
   start(): void;
   /** 停屏（恢复终端；不 resolve 在身提问——退出序列由宿主编排） */
   stop(): void;
+  /**
+   * 退出兜底（interrupt 小刀）：收场全部在身/排队提问（prompts.cancelAll）
+   * ——quit 后 settle 前调用，覆盖无 run 属主的 ask（服务路）与任何漏网，
+   * 队首永不搁浅的最后一道闸。
+   */
+  cancelAsks(): void;
 }
 
 /**
@@ -480,6 +486,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     },
     stop() {
       tui.stop();
+    },
+    /**
+     * 退出兜底（interrupt 小刀：cancelAll 生产调用者从无到有）：收场无 run
+     * 属主的在身提问（服务路 ask——ctx.exec/ctx.fetch 消费面）与任何漏网——
+     * run 属主 ask 已由 per-ask signal 撤销，本面是队首永不搁浅的最后一道闸。
+     * 调用时点 = tui-main 退出序列 front.quit 之后、front.settle 之前。
+     */
+    cancelAsks() {
+      prompts.cancelAll();
     },
   };
 }

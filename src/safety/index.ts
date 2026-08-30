@@ -71,7 +71,7 @@ export type {
   ApprovalService,
   ApprovalServiceOptions,
 } from './approval.js';
-export { APPROVAL_ANSWER_EVENT, createApprovalService } from './approval.js';
+export { APPROVAL_ANSWER_EVENT, createApprovalService, bridgeApprovalSignal } from './approval.js';
 
 /* 守门固定行（骨架篇 §8.1/§8.5）+ 守门行传导（§6.1——subagent 子代理装配与
    chat 驱动 fresh 作用域两消费面同源单件） */

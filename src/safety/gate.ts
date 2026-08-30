@@ -152,12 +152,24 @@ export function installSafetyGate(ctx: Context, opts: SafetyGateOptions): Dispos
         reason: `carve-out：${node.entry.pattern}${node.entry.note ? `（${node.entry.note}）` : ''}；${mode} 档下此路径默认只读`,
         toolName: input.tool.name,
         toolCallId: input.callId,
+        // interrupt 小刀守门路填点：run 取消信号随 ask 载荷透传（answerer 桥接
+        // 撤销；undefined = 服务面调用等无 run 语境，不携带）
+        ...(input.signal !== undefined ? { signal: input.signal } : {}),
         // 推荐规则候选（§8.4 增补 2 落码形态①）：fs 草案 = 该次写目标的精确
         // canonical 路径（不取 commondir——「批这一次」不升格「常驻写全仓」）
         suggestedEntry: { tool: input.tool.name, pattern: absPath },
       });
       if (outcome !== 'allowed-once') {
-        // 拒绝/取消/无人应答：block（denial marker + 升权 hint 是 §7.4 统一文案）
+        // cancelled 档是打断非拒绝（interrupt 小刀冷读 F6）：去「被拒」语义与
+        // 升权重试引导——run 已 abort 时模型看不见（loop break 在先），收的是
+        // durable 审计面与 resume 回放语境的诚实
+        if (outcome === 'cancelled') {
+          return {
+            decision: 'block',
+            reason: `${sandboxDenialMarker(mode)} ${rawPath} 被 carve-out 条目 ${node.entry.pattern} 遮罩（审批已取消——run 已打断）。`,
+          };
+        }
+        // 拒绝/无人应答：block（denial marker + 升权 hint 是 §7.4 统一文案）
         return {
           decision: 'block',
           reason: `${sandboxDenialMarker(mode)} ${rawPath} 被 carve-out 条目 ${node.entry.pattern} 遮罩（审批结果：${outcome}）。${escalationHintMarker()}`,

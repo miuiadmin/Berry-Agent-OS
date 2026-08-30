@@ -301,6 +301,12 @@ export interface EscalationApprovalInput extends ValidEscalation {
    * safetyLevel 高位 v1 刻度，恒不带草案（落码形态② danger 恒问边界）。
    */
   readonly suggestedEntry?: AllowlistDraft;
+  /**
+   * 发起 run 的取消信号（interrupt 小刀升权路填点：调用方语境字段——bash
+   * 工具件传 tctx.signal；answerer 桥接消费撤销在身提问，守门/执行机制不
+   * 按它分支）
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -317,6 +323,8 @@ export function requestEscalation(
     reason: `目标档 ${input.target}；理由：${input.justification}`,
     toolName: input.toolName,
     toolCallId: input.toolCallId,
+    // interrupt 小刀升权路填点：run 取消信号随 ask 载荷透传（undefined 不携带）
+    ...(input.signal !== undefined ? { signal: input.signal } : {}),
     ...(input.suggestedEntry !== undefined ? { suggestedEntry: input.suggestedEntry } : {}),
   });
 }

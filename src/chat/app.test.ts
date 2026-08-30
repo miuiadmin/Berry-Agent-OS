@@ -84,3 +84,31 @@ describe('answerApproval — 降级两态（select 不在场或无草案：呈�
     expect(p.confirmCalls).toHaveLength(1);
   });
 });
+
+describe("answerApproval — interrupt 小刀 'cancel' 落账映射（保守收场 + signal.aborted 判据）", () => {
+  it("select 保守收场 '' + 已 abort → 'cancel' 且不再降级发 confirm（时序洞锁）", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    // confirm 若被误发即返回 true → approve 假阳性——本断言必红防换皮
+    const p = primitives({ selectAnswer: '', confirmAnswer: true });
+    expect(await answerApproval(draftReq, p.primitives, { signal: ac.signal })).toBe('cancel');
+    expect(p.confirmCalls).toHaveLength(0); // 降级面不复活（预置 aborted 的 confirm 同步收场 false，只会把 cancel 换皮成 reject）
+  });
+
+  it('confirm 保守收场 false + 已 abort → cancel（打断非拒绝）', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const p = primitives({ confirmAnswer: false, withSelect: false });
+    expect(await answerApproval(draftReq, p.primitives, { signal: ac.signal })).toBe('cancel');
+  });
+
+  it('signal 在场未 abort：正向答案先胜——与无 signal 行为逐位相同（回归）', async () => {
+    const ac = new AbortController(); // 在场但未 abort
+    const p = primitives({ selectAnswer: '', confirmAnswer: true });
+    expect(await answerApproval(draftReq, p.primitives, { signal: ac.signal })).toBe('approve');
+    expect(p.confirmCalls).toHaveLength(1); // 降级链照常
+    // 未打断语境的保守值仍诚实记 reject（判据只认 signal.aborted）
+    const d = primitives({ confirmAnswer: false, withSelect: false });
+    expect(await answerApproval(draftReq, d.primitives, { signal: ac.signal })).toBe('reject');
+  });
+});

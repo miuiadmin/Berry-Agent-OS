@@ -28,6 +28,7 @@ import { createRuntime } from './assembly.js';
 import type { AppRuntime } from './assembly.js';
 import type { AgentServiceFace, RunSettled, DriverEntry } from '../chat/index.js';
 import type { AppManifest } from '../contracts/app.js';
+import type { UiBackend } from '../channels/types.js';
 
 /* ---------------- 测试基建（与 subagent-app.test 同款） ---------------- */
 
@@ -871,5 +872,187 @@ describe('todo 纵切全栈（chat 件 todo 机器——工具件 + 跨请求注
     await front.settle();
     expect(contexts.length).toBe(3);
     expect(userTexts(contexts[2]!).some((t) => t.includes('非本次用户指令'))).toBe(false);
+  });
+});
+
+/* ---------------- interrupt 小刀（run 信号透传 ask 链——2026-08-30） ---------------- */
+
+/**
+ * 挂起 confirm 后端桩（interrupt 小刀用例组）：弹窗记录 + 唯一收场路 = run 信号
+ * abort（保守 false——TUI prompts.ask 撤销语义同形）；无信号路恒挂起（该兜底
+ * 面由 tui.test.ts 的 cancelAsks 直测覆盖，本组用例不走）。
+ */
+function hangingConfirmBackend(): { backend: UiBackend; asks: { message: string; reason?: string }[] } {
+  const asks: { message: string; reason?: string }[] = [];
+  const backend: UiBackend = {
+    id: 'test-hanging-confirm',
+    notify: () => {},
+    setStatus: () => {},
+    confirm: (message, opts) =>
+      new Promise<boolean>((resolve) => {
+        // reason 后置写入（abort 时点）——声明带可选键防窄化丢字段
+        const record: { message: string; reason?: string } = { message };
+        asks.push(record);
+        const signal = opts?.signal;
+        if (signal === undefined) return; // 无信号：挂起（用户永不作答——打断才是出口）
+        const settle = (): void => {
+          record.reason = String(signal.reason); // 撤销说明文案源（abort reason 原样透传）
+          resolve(false); // 保守收场值（fail-closed）
+        };
+        if (signal.aborted) return settle();
+        signal.addEventListener('abort', settle, { once: true });
+      }),
+  };
+  return { backend, asks };
+}
+
+describe('interrupt 小刀（run 信号透传 ask 链——审批在身时打断/退出不挂死）', () => {
+  /**
+   * 守约脚本流（本组专用）：文件头 scriptedStream 忽略取消信号——但 StreamFn
+   * 契约是「signal 已 abort 时本轮流以 stopReason 'aborted' 收场」（真 provider
+   * 打断同形，loop :268 终态短路由此把 run 收成 aborted）。本组三用例的打断都
+   * 落在工具段（审批 ask 在身），打断后的下一轮流由本桩如实编码 aborted。
+   */
+  function abortAwareScriptedStream(responses: AssistantMessage[]) {
+    const contexts: LlmContext[] = [];
+    const streamFn: StreamFn = (context: LlmContext, _options: StreamFnOptions, signal?: AbortSignal) => {
+      contexts.push(context);
+      if (signal?.aborted) {
+        const aborted: AssistantMessage = {
+          role: 'assistant',
+          content: [],
+          usage: NO_USAGE,
+          stopReason: 'aborted',
+          timestamp: 1,
+        };
+        // done.reason 闭集不含 'aborted'（pi-ai 只有 stop/length/toolUse/deferred
+        // /error）——打断编码位 = message.stopReason（loop :268 终态短路查此处）
+        const events = [
+          { type: 'start' as const, partial: { ...aborted, content: [] } },
+          { type: 'done' as const, reason: 'stop' as const, message: aborted },
+        ];
+        return {
+          [Symbol.asyncIterator]() {
+            let index = 0;
+            return {
+              next: () =>
+                index < events.length
+                  ? Promise.resolve({ value: events[index++]!, done: false as const })
+                  : Promise.resolve({ value: undefined, done: true as const }),
+            };
+          },
+          result: async () => aborted,
+        };
+      }
+      const message = responses[Math.min(contexts.length - 1, responses.length - 1)]!;
+      return syntheticStream(message);
+    };
+    return { streamFn, contexts };
+  }
+
+  /**
+   * 宏任务级自旋（本组专用）：submitOnce → 流 → 工具 → 审批 ask 的链路含
+   * 宏任务跳变（流迭代与管道执行段），文件头 spinUntil 的纯微任务 200 轮不够。
+   */
+  const spinUntilReal = async (predicate: () => boolean, what: string): Promise<void> => {
+    for (let i = 0; i < 200; i++) {
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect.unreachable(`等待超时：${what}`);
+  };
+
+  /** 带 workspace-write 升权参数的 bash toolCall（read-only 档触发升权 ask） */
+  const bashEsc = (justification: string): AssistantMessage => ({
+    role: 'assistant',
+    content: [
+      {
+        type: 'toolCall',
+        id: `call-bash-${justification}`,
+        name: 'bash',
+        arguments: { command: 'pwd', sandbox_permissions: 'workspace-write', justification },
+      },
+    ],
+    usage: NO_USAGE,
+    stopReason: 'toolUse',
+    timestamp: 1,
+  });
+
+  it('(i)(iii) bash 升权 ask 在身时 driver.interrupt()：ask 经 run 信号撤销收场、runPromise 结算 aborted、落账 cancel（修复前必红——run 永挂超时）', async () => {
+    const { streamFn } = abortAwareScriptedStream([bashEsc('打断收场的理由'), textMessage('不可达')]);
+    const { runtime } = await assemble({
+      streamFn,
+      approvalPolicy: 'ask',
+      sandboxMode: 'read-only',
+      interactive: true,
+    });
+    const { backend, asks } = hangingConfirmBackend();
+    runtime.ui.attach(backend);
+    const only = runtime.drivers.focused()!;
+    const result = only.driver.submitOnce('跑');
+    await spinUntilReal(() => asks.length === 1, '升权 ask 在身');
+    // 打断：runAbort.abort('该运行已被打断') 经 ask 载荷 signal → answerer 桥接收场
+    await only.driver.interrupt();
+    const final = await result; // 修复前永挂（超时红）——桥接后 run 照常结算
+    expect(final?.status).toBe('aborted'); // S6 形态③：主动取消终值统一 aborted
+    // 撤销说明文案透传：interrupt 的 abort reason 原样抵达提问收场面（两路文案分流的打断腿）
+    expect(asks[0]!.reason).toContain('该运行已被打断');
+    // 落账词汇分流（冷读 F2）：打断非拒绝——decided = cancel
+    const decided = only.session.events.find((e) => e.type === 'approval/decided')!;
+    expect((decided.data as { decision: string }).decision).toBe('cancel');
+  });
+
+  it('(ii) prompt 期 requestQuit：run 结算、front.settle 必达不挂死（退出序列 flush 可达的前提）', async () => {
+    const { streamFn } = abortAwareScriptedStream([bashEsc('退出收场的理由'), textMessage('不可达')]);
+    const { runtime } = await assemble({
+      streamFn,
+      approvalPolicy: 'ask',
+      sandboxMode: 'read-only',
+      interactive: true,
+    });
+    const { backend, asks } = hangingConfirmBackend();
+    runtime.ui.attach(backend);
+    const only = runtime.drivers.focused()!;
+    runtime.front.submit('慢批');
+    await spinUntilReal(() => asks.length === 1, '升权 ask 在身');
+    runtime.front.requestQuit();
+    await runtime.front.quit;
+    await runtime.front.settle(); // 修复前挂死（超时红）——ask 吊死 runPromise 即吊死 settle，flush 不可达
+    expect(only.driver.isRunning).toBe(false);
+    // quit/retire 路 run 属主 ask 同映 cancel（runAbort 无参 abort——reason 走缺省撤销文案）
+    const decided = only.session.events.find((e) => e.type === 'approval/decided')!;
+    expect((decided.data as { decision: string }).decision).toBe('cancel');
+  });
+
+  it('(vii) admin 生命周期闸 ask 在身时 interrupt：根 answerer 桥接收场（冷读 F1 第三填点）、run 结算、工具结果带取消文案', async () => {
+    const adminCall: AssistantMessage = {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'call-admin-1',
+          name: 'apps_toggle',
+          arguments: { id: 'builtin:memory', sandbox_permissions: 'workspace-write', justification: '测试打断收场' },
+        },
+      ],
+      usage: NO_USAGE,
+      stopReason: 'toolUse',
+      timestamp: 1,
+    };
+    const { streamFn } = abortAwareScriptedStream([adminCall, textMessage('不可达')]);
+    const { runtime } = await assemble({ streamFn, approvalPolicy: 'ask', interactive: true });
+    const { backend, asks } = hangingConfirmBackend();
+    runtime.ui.attach(backend);
+    const only = runtime.drivers.focused()!;
+    const result = only.driver.submitOnce('管');
+    await spinUntilReal(() => asks.length === 1, 'admin 闸 ask 在身（根 answerer 应答）');
+    await only.driver.interrupt();
+    const final = await result;
+    expect(final?.status).toBe('aborted');
+    expect(asks[0]!.reason).toContain('该运行已被打断'); // 根 answerer 桥接非空转（F1：admin 闸路走根）
+    // 工具结果（durable 审计面）：取消文案——去「被拒」语义与重试话术（F6）
+    const events = JSON.stringify(only.session.events);
+    expect(events).toContain('审批已取消');
+    expect(events).not.toContain('不要重试');
   });
 });

@@ -21,7 +21,7 @@ import type { SandboxMode } from './types.js';
  * pre 回调在守门行安装前跑（carve-out glob「装配期展开」语义要求文件先在）。 */
 function rig(opts: {
   mode: SandboxMode;
-  answer?: 'approve' | 'reject' | 'always';
+  answer?: 'approve' | 'reject' | 'always' | 'cancel';
   pre?: (ws: string) => void;
   allowlist?: readonly AllowlistEntry[];
   /** always 应答的条目写入回调（活数组联动测试——装配 persistAllowlist） */
@@ -44,7 +44,8 @@ function rig(opts: {
     ...(opts.persist !== undefined ? { persistAllowlist: opts.persist } : {}),
   });
   // answerer 收到的 ask 载荷（草案透传断言用——无条件捕获零选项面）
-  const answerReqs: { summary?: string; suggestedEntry?: { tool: string; pattern: string } }[] = [];
+  const answerReqs: { summary?: string; suggestedEntry?: { tool: string; pattern: string }; signal?: AbortSignal }[] =
+    [];
   if (opts.answer) {
     ctx.on('approval/answer', (req: unknown, next: () => unknown) => {
       const r = req as { summary?: string; suggestedEntry?: { tool: string; pattern: string } };
@@ -70,10 +71,10 @@ function rig(opts: {
   });
   for (const def of fsTools.tools) service.register(def);
 
-  /** 经三段管道执行一个工具（唯一合法路径） */
-  const run = (name: string, args: Record<string, unknown>) => {
+  /** 经三段管道执行一个工具（唯一合法路径）；signal = 当轮 run 取消信号透传位 */
+  const run = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => {
     const def = service.get(name)!;
-    return service.toAgentTool(def).execute('call-1', args);
+    return service.toAgentTool(def).execute('call-1', args, signal);
   };
   return { ws, run, service, asked, decided, gateDecisions, answerReqs, setMode: (m: SandboxMode) => (mode = m) };
 }
@@ -319,5 +320,38 @@ describe('「始终允许」写入面（§8.4 增补 2——草案/复查/收窄
     await run('bash', { command: 'git status' });
     // 收窄前此处是 allowlist:0（纯标注无行为效果——误导性冗余）；收窄后回落 ok
     expect(gateDecisions).toEqual([{ toolCallId: 'call-1', decision: 'allow', reason: 'ok' }]);
+  });
+});
+
+describe('run 信号透传（interrupt 小刀——守门路填点）', () => {
+  it('GateInput.signal 原对象随 ask 载荷透传；cancelled 档文案去升权提示、落账 cancel（打断非拒绝）', async () => {
+    const ac = new AbortController();
+    const { ws, run, answerReqs, decided } = rig({
+      mode: 'workspace-write',
+      answer: 'cancel',
+      pre: (w) => mkdirSync(join(w, '.git')), // 父目录预置（write 不建目录）
+    });
+    const err = await expectToolError(
+      () => run('write', { path: '.git/config', content: '[core]' }, ac.signal),
+      TOOL_BLOCKED,
+    );
+    // 载荷面（第一填点锁）：run 取消信号原对象抵达 answerer——answerer 桥接消费的原料
+    expect(answerReqs[0]!.signal).toBe(ac.signal);
+    // 文案面（F6）：取消非拒绝——denial marker 在（审计归因）但无「升权重试」引导
+    expect(err.message).toContain('审批已取消——run 已打断');
+    expect(err.message).not.toContain('sandbox_permissions'); // escalationHintMarker 不携带
+    // 落账词汇分流：waterfall 'cancel' → outcome 'cancelled' → decided 'cancel'
+    expect(decided).toEqual([{ approvalId: expect.any(String) as string, decision: 'cancel' }]);
+    expect(existsSync(join(ws, '.git', 'config'))).toBe(false); // 动作未发生（目录为 pre 预建）
+  });
+
+  it('signal 缺省（服务面调用等无 run 语境）：载荷不携带 signal 字段（行为不变回归）', async () => {
+    const { run, answerReqs } = rig({
+      mode: 'workspace-write',
+      answer: 'reject',
+      pre: (w) => mkdirSync(join(w, '.git')),
+    });
+    await expectToolError(() => run('write', { path: '.git/config', content: '[core]' }), TOOL_BLOCKED);
+    expect('signal' in answerReqs[0]!).toBe(false); // undefined 不落键——不携带即不在
   });
 });

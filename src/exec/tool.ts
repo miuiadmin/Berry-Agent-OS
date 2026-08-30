@@ -159,18 +159,22 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
             current: effective,
             toolName: 'bash',
             toolCallId: tctx.toolCallId,
+            // interrupt 小刀升权路填点：当轮 run 取消信号随升权载荷透传——
+            // interrupt/quit 即撤销在身升权提问（ask 不再永挂 run）
+            ...(tctx.signal !== undefined ? { signal: tctx.signal } : {}),
             ...(stem !== undefined ? { suggestedEntry: { tool: 'bash', pattern: stem } } : {}),
           });
           if (outcome !== 'allowed-once') {
-            // 拒绝/取消/无人应答：统一标记 + 同回合升权提示（§7.4 统一文案）
+            // cancelled 档是打断非拒绝（interrupt 小刀冷读 F6）：去「被拒」与
+            // 升权重试引导——run 已 abort 时模型看不见（loop break 在先），收
+            // durable 审计面与 resume 回放语境的诚实
             const sandbox: SandboxMeta = { mode: effective, denied: [], enforcement: 'none' };
+            const text =
+              outcome === 'cancelled'
+                ? `${sandboxDenialMarker(effective)} 升权审批已取消（run 已打断）。`
+                : `${sandboxDenialMarker(effective)} 升权审批被拒（${outcome}）。${escalationHintMarker()}`;
             return {
-              content: [
-                {
-                  type: 'text',
-                  text: `${sandboxDenialMarker(effective)} 升权审批被拒（${outcome}）。${escalationHintMarker()}`,
-                },
-              ],
+              content: [{ type: 'text', text }],
               isError: true,
               details: { sandbox },
             };

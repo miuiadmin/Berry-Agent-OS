@@ -141,6 +141,10 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     // 等待退出请求（Ctrl+D / Ctrl+C / /quit / 信号——多路同汇 front.requestQuit；
     // S3 退出扇出：requestQuit 已 abort 全部活驱动，settle 等各 run 收尾即回）
     await front.quit;
+    // interrupt 小刀退出兜底：quit 后 settle 前——收场无 run 属主的 ask（服务
+    // 路）与任何漏网（run 属主 ask 已经 per-ask signal 撤销收场），防 settle
+    // 等 runPromise 挂死致 flush 不达（write-behind 缓冲丢失）
+    tui.cancelAsks();
     await front.settle();
   } finally {
     signals.dispose();

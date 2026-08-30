@@ -167,6 +167,8 @@ async function requestLifecycleApproval(
     readonly sandboxPermissions: string;
     readonly justification: string;
     readonly toolCallId: string | undefined;
+    /** 发起 run 的取消信号（interrupt 小刀第三填点：answerer 桥接撤销在身提问） */
+    readonly signal?: AbortSignal;
   },
 ): Promise<AgentToolResult | undefined> {
   if (!PRIVILEGE_REQUEST_TARGETS.includes(input.sandboxPermissions)) {
@@ -180,8 +182,19 @@ async function requestLifecycleApproval(
     reason: `目标档 ${input.sandboxPermissions}；${input.justification}`,
     toolName: input.toolName,
     ...(input.toolCallId === undefined ? {} : { toolCallId: input.toolCallId }),
+    // interrupt 小刀：run 取消信号随 ask 载荷透传（undefined 不携带）——该闸
+    // 绑根审批服务（fork 级联可见）、ask 走根 answerer，桥接由此成为必需
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (outcome === 'allowed-once') return undefined;
+  // cancelled 档是打断非拒绝（interrupt 小刀冷读 F6）：去「被拒」与重试话术
+  //——run 已 abort 时模型看不见（loop break 在先），收 durable 审计面的诚实
+  if (outcome === 'cancelled') {
+    return {
+      content: [{ type: 'text', text: `[审批已取消（run 已打断）] ${input.action} 未执行——${input.detail}。` }],
+      isError: true,
+    };
+  }
   return {
     content: [
       {
@@ -220,6 +233,8 @@ export function createAppsInstallTool(apps: AppsManageFace, approval: ApprovalAs
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const report = await apps.install(req.source, req.gitRef === undefined ? undefined : { gitRef: req.gitRef });
@@ -293,6 +308,8 @@ export function createAppsMountTool(apps: AppsManageFace, approval: ApprovalAskF
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const report = await apps.mount(req.installId, {
@@ -339,6 +356,8 @@ export function createAppsUnmountTool(apps: AppsManageFace, approval: ApprovalAs
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const report = await apps.unmount(req.rowId);
@@ -375,6 +394,8 @@ export function createAppsUpdateTool(apps: AppsManageFace, approval: ApprovalAsk
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const report = await apps.update(req.id);
@@ -403,6 +424,8 @@ export function createAppsToggleTool(apps: AppsManageFace, approval: ApprovalAsk
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const nowDisabled = apps.toggle(req.id);
@@ -447,6 +470,8 @@ export function createAppsConfigureTool(apps: AppsManageFace, approval: Approval
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const report = await apps.configure(req.id, req.config);
@@ -483,6 +508,8 @@ export function createAppsReloadTool(apps: AppsManageFace, approval: ApprovalAsk
         sandboxPermissions: req.sandbox_permissions,
         justification: req.justification,
         toolCallId: tctx?.toolCallId,
+        // interrupt 小刀：当轮 run 取消信号随闸载荷透传（interrupt 即收场不永挂）
+        ...(tctx?.signal === undefined ? {} : { signal: tctx.signal }),
       });
       if (denied !== undefined) return denied;
       const outcome = await apps.requestReload(req.app === undefined ? undefined : { app: req.app });

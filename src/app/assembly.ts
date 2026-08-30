@@ -49,6 +49,7 @@ import type { LlmRuntime, Provider, StreamFnDefaults } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn, InFlightTracker, providerApiFace } from '../llm/index.js';
 import {
   APPROVAL_ANSWER_EVENT,
+  bridgeApprovalSignal,
   createApprovalService,
   createRootsProvider,
   createSandboxService,
@@ -2587,12 +2588,24 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       const webLeg = webClaimOf(req);
       // 刀 A：per-request controller——撤销信号经 ui.confirm opts 透传
       const controller = new AbortController();
-      // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
-      const tuiLeg = ui
-        .confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`, { signal: controller.signal })
-        .then((answer) => (answer ? 'approve' : 'reject') as 'approve' | 'reject');
-      if (webLeg === undefined) return tuiLeg;
-      return Promise.race([tuiLeg, webLeg]).finally(() => controller.abort('该审批已在网页端应答'));
+      // interrupt 小刀（冷读 F1）：admin 生命周期闸路（写类七工具）的 ask 也
+      // 走本根 answerer——req.signal 桥接由此成为必需（非空转）；监听随结算摘除
+      const detachRunSignal = bridgeApprovalSignal(req, controller);
+      try {
+        // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
+        // 保守收场（false）+ controller.signal.aborted → 'cancel'（打断非拒绝
+        // 的诚实落账）；竞速败腿同判但值被 race 丢弃，无污染
+        const tuiLeg = ui
+          .confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`, { signal: controller.signal })
+          .then(
+            (answer) =>
+              (answer ? 'approve' : controller.signal.aborted ? 'cancel' : 'reject') as 'approve' | 'reject' | 'cancel',
+          );
+        if (webLeg === undefined) return await tuiLeg;
+        return await Promise.race([tuiLeg, webLeg]).finally(() => controller.abort('该审批已在网页端应答'));
+      } finally {
+        detachRunSignal();
+      }
     });
   }
 

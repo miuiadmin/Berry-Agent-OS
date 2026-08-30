@@ -20,6 +20,23 @@ import type { ApprovalOutcome, ApprovalPolicyMode, ApprovalRequest, AllowlistDra
 /** answerer 监听的活体事件名（waterfall 语义：短路返回 ApprovalAnswer 四值，调 next() = 本行不接） */
 export const APPROVAL_ANSWER_EVENT = 'approval/answer';
 
+/**
+ * run 信号桥接（interrupt 小刀：契约篇 §6.8——两 answerer 共用单源）：把
+ * ApprovalRequest.signal（发起 run 的取消信号）桥进 answerer 的 per-request
+ * controller——abort 同 reason，run abort 与竞速败腿收束汇入同一撤销面。
+ * 已 abort 的 signal 同步触发（abort 事件只发一次，只挂监听则死路）。
+ * @returns 监听摘除函数（ask 结算时调用——迟到 abort 落在已结算提问上 no-op
+ * 无害，摘除是刀 A「任何结算路径摘监听」同款不变式纪律非正确性依赖）
+ */
+export function bridgeApprovalSignal(req: ApprovalRequest, controller: AbortController): () => void {
+  const runSignal = req.signal;
+  if (runSignal === undefined) return () => {};
+  const relay = (): void => controller.abort(runSignal.reason);
+  if (runSignal.aborted) relay();
+  else runSignal.addEventListener('abort', relay, { once: true });
+  return () => runSignal.removeEventListener('abort', relay);
+}
+
 /** 审批对落 durable 的形态（与 session 事件 approval/asked + approval/decided 一一对应） */
 export interface ApprovalDecisionSink {
   /** approval/asked 载荷（落日志时机 = 请求发出时） */

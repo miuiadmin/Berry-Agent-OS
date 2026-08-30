@@ -320,7 +320,10 @@ export class ConversationDriver {
    * @returns 被打断 run 的结算 promise（idle 即回——外部 SIGINT 路旗标了结判据，形态⑥）
    */
   interrupt(): Promise<void> {
-    this.runAbort.abort();
+    // 带撤销说明文案（interrupt 小刀）：reason 沿 run 信号透传到在身审批 ask
+    // 的撤销说明行——与 dismantle 无参 abort 的缺省文案「该提问已被撤销」两路
+    // 分流（interrupt = 打断 run；dismantle = quit/retire 撤销提问）
+    this.runAbort.abort('该运行已被打断');
     // 打断前余量落审计（consumeMeta 清元数据 + inject 落投影与展示）
     for (const message of this.consumeMeta(this.queue.drain())) this.inject(message);
     return this.runPromise;

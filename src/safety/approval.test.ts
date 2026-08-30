@@ -6,7 +6,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { createContext } from '../context/index.js';
-import { APPROVAL_ANSWER_EVENT, createApprovalService, type ApprovalDecisionSink } from './approval.js';
+import {
+  APPROVAL_ANSWER_EVENT,
+  bridgeApprovalSignal,
+  createApprovalService,
+  type ApprovalDecisionSink,
+} from './approval.js';
 import type { ApprovalAnswer } from './types.js';
 
 /** 审批对收集器（模拟 app 装配层接 session.append 的 durable 落点） */
@@ -168,5 +173,40 @@ describe('审批对与审批 id', () => {
     const ctx = createContext({ name: 'test' });
     const approval = createApprovalService(ctx);
     expect(ctx.get('approval')).toBe(approval);
+  });
+});
+
+describe('bridgeApprovalSignal — run 信号桥进 answerer（interrupt 小刀单源 helper）', () => {
+  it('无 signal（服务路 ask）：no-op——控制器不被触碰，detach 安全', () => {
+    const controller = new AbortController();
+    const detach = bridgeApprovalSignal({ summary: '服务路无 run 语境' }, controller);
+    expect(controller.signal.aborted).toBe(false);
+    expect(typeof detach).toBe('function');
+    detach(); // 幂等安全（无监听可摘）
+  });
+
+  it('活 signal abort → 控制器同 reason abort；detach 后迟到 abort 不传导', () => {
+    const run = new AbortController();
+    const controller = new AbortController();
+    const detach = bridgeApprovalSignal({ summary: '桥接', signal: run.signal }, controller);
+    run.abort('该运行已被打断');
+    expect(controller.signal.aborted).toBe(true); // 传导
+    expect(String(controller.signal.reason)).toContain('该运行已被打断'); // 同 reason（撤销说明文案源）
+    // 第二组：detach（ask 已结算）后的迟到 abort 落空——监听已摘
+    const run2 = new AbortController();
+    const controller2 = new AbortController();
+    const detach2 = bridgeApprovalSignal({ summary: '桥接', signal: run2.signal }, controller2);
+    detach2();
+    run2.abort('迟到');
+    expect(controller2.signal.aborted).toBe(false);
+  });
+
+  it('预置 aborted（interrupt 先于 ask 上屏的竞速形态）：同步立即 abort——不待事件', () => {
+    const run = new AbortController();
+    run.abort('早退');
+    const controller = new AbortController();
+    bridgeApprovalSignal({ summary: '桥接', signal: run.signal }, controller); // detach 不取也成立
+    expect(controller.signal.aborted).toBe(true); // 已 aborted 的信号永不再发事件，只挂监听 = 死路
+    expect(String(controller.signal.reason)).toContain('早退');
   });
 });
