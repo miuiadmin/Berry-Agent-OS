@@ -103,6 +103,12 @@ export interface GoalToolsDeps {
   readonly todoSnapshot?: (goalId: string) => TodoPlanSnapshot | undefined;
   /** 当前轮身份 hook（刀三接线：wakeId——轮结算账本归因） */
   readonly currentWakeId?: () => string | undefined;
+  /**
+   * 终态同笔回调（刀四 CR-6：goal_update 终态形执行段——settleDeclared 后
+   * 由 apply 侧翻转挂钟行 enabled 位）。缺省不传 = 无挂钟面（诊断装配）。
+   * 只在终态形（completed/blocked 落档）触发——active 轮结算不触发
+   */
+  readonly onTerminal?: (goalId: string) => void;
 }
 
 /** goal 行 → 人读投影文本（工具结果用——全字段如实示态，预算尽≠完成） */
@@ -368,6 +374,9 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
       }
       const evidence = req.status === 'completed' ? String(req.evidence) : String(req.note);
       deps.store.settleDeclared(current.goalId, req.status, evidence, now);
+      // 终态同笔停摆挂钟（刀四 CR-6）：行落终态即钟行翻转 enabled=0——apply
+      // 侧闭包接线（面缺席/无钟静默 no-op）
+      deps.onTerminal?.(current.goalId);
       const goal = deps.store.getByGoalId(current.goalId)!;
       return textResult(`终态已落档（${req.status}）。\n${renderGoal(goal)}`);
     },

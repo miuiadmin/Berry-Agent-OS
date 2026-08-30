@@ -28,6 +28,12 @@ export interface JobRecord {
   readonly sessionId: string | null;
   /** 最近触发实际跑出的会话 id（v9 列——任务↔会话精确归属标记，K2-c 回写） */
   readonly lastSessionId: string | null;
+  /** 归属行（NULL = /tick 用户任务——存量语义；goal 挂钟行恒 'builtin:goal'，v14 列） */
+  readonly owner: string | null;
+  /** 归属行内键（goal 挂钟行 = goalId——(owner, owner_key) 联合寻径，v14 列） */
+  readonly ownerKey: string | null;
+  /** 生命周期位（缺省 true；false = 行留史但 tick 编排让路——终态/降级同笔置 0，v14 列） */
+  readonly enabled: boolean;
 }
 
 /** 触发记因词汇（last_run_reason 列的合法值——手动 / 到点 / once 迟到记因不跑） */

@@ -24,6 +24,9 @@ import {
   TOOL_ARGUMENTS_INVALID,
 } from '../contracts/errors.js';
 import type { UiBackend } from '../channels/types.js';
+import { JobsStore } from '../scheduler/store.js';
+import { GoalStore } from '../goal/index.js';
+import type { TickOsRegistrar } from './tick-register.js';
 import { createRuntime } from './assembly.js';
 import type { AppRuntime } from './assembly.js';
 
@@ -790,5 +793,134 @@ describe('goal 刀三全栈：自激链至帽 + 归因落账 + 停滞硬停 + �
     });
     runtimes.push(daemon);
     expect(await goalText(daemon)).toContain('状态：needs-resume');
+  });
+});
+
+/* ---------------- 用例：刀四挂钟命令族（/goal wake + CR-6 同笔停摆） ---------------- */
+
+/** 假 OS 注册器（记录调用面——真 GoalJobsFace 走真 JobsStore，OS 侧停站） */
+function fakeOsRegistrar() {
+  const registered: string[] = [];
+  const unregistered: string[] = [];
+  const registrar: TickOsRegistrar = {
+    register: async (job) => {
+      registered.push(job.name);
+      return { ok: true, message: 'fake-launchd-registered' };
+    },
+    unregister: async (name) => {
+      unregistered.push(name);
+      return { ok: true, message: 'fake-launchd-removed' };
+    },
+    isRegistered: async () => false,
+  };
+  return { registrar, registered, unregistered };
+}
+
+/** 挂钟行查询帮手（真 JobsStore 直读——owner/enabled/session_id 断言面） */
+function goalJobRow(runtime: AppRuntime, goalId: string) {
+  return new JobsStore(runtime.persistence!.store.connection).get(`goal-${goalId}`);
+}
+
+describe('goal 刀四全栈：/goal wake 挂钟命令族（真 GoalJobsFace + 假 OS 注册器）', () => {
+  it('挂/摘全链：wake → 行 + wake_schedule 列 + OS 联动；off → 删行 + 注销 + 列空', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+      osTickRegistrar: os.registrar,
+    });
+    await callTool(runtime, 'goal_set', { objective: '挂钟护航的长目标', tokenBudget: 50000 });
+    const goalId = (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+    const sessionId = runtime.drivers.focused()!.session.header.sessionId;
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+
+    // 挂：schedule 词法过 + 行落库 + OS 注册联动 + goals 行声明列
+    expect(await runtime.channels.commands.dispatch('/goal wake daily@09:00')).toBe('ok');
+    expect(notifies.some((n) => n.includes('挂钟已登记'))).toBe(true);
+    const job = goalJobRow(runtime, goalId)!;
+    expect(job).toBeDefined();
+    expect(job.owner).toBe('builtin:goal');
+    expect(job.ownerKey).toBe(goalId);
+    expect(job.enabled).toBe(true);
+    expect(job.sessionId).toBe(sessionId);
+    expect(job.schedule).toBe('daily@09:00');
+    expect(new GoalStore(runtime.persistence!.store.connection).getByGoalId(goalId)!.wakeSchedule).toBe('daily@09:00');
+    expect(os.registered).toEqual([`goal-${goalId}`]);
+
+    // 摘：删行（防幽灵行）+ OS 注销 + 声明列回空
+    expect(await runtime.channels.commands.dispatch('/goal wake off')).toBe('ok');
+    expect(goalJobRow(runtime, goalId)).toBeUndefined();
+    expect(new GoalStore(runtime.persistence!.store.connection).getByGoalId(goalId)!.wakeSchedule).toBeNull();
+    expect(os.unregistered).toEqual([`goal-${goalId}`]);
+  });
+
+  it('词法执法在面：坏串响亮拒绝（行不写、OS 不动）；无 goal 拒', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+      osTickRegistrar: os.registrar,
+    });
+    // 无 active 行：先拒
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    expect(await runtime.channels.commands.dispatch('/goal wake daily@09:00')).toBe('ok');
+    expect(notifies.some((n) => n.includes('当前会话没有目标——挂钟挂在目标行上'))).toBe(true);
+    // 有行 + 坏串：parseSchedule 面上拒
+    await callTool(runtime, 'goal_set', { objective: '词法目标', tokenBudget: 50000 });
+    const goalId = (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+    expect(await runtime.channels.commands.dispatch('/goal wake nonsense')).toBe('ok');
+    expect(notifies.some((n) => n.includes('schedule 不合法'))).toBe(true);
+    expect(goalJobRow(runtime, goalId)).toBeUndefined();
+    expect(os.registered).toHaveLength(0);
+  });
+
+  it('CR-6 终态同笔停摆：goal_update completed → enabled=0 行留史（OS 注册保留不注销）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+      osTickRegistrar: os.registrar,
+    });
+    await callTool(runtime, 'goal_set', { objective: '终态停摆目标', tokenBudget: 50000 });
+    const goalId = (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+    expect(await runtime.channels.commands.dispatch('/goal wake every@1h')).toBe('ok');
+    expect(goalJobRow(runtime, goalId)!.enabled).toBe(true);
+
+    // 终态形：settleDeclared 后 onTerminal → suspendWake → face.disable（fire-and-forget 微任务）
+    await callTool(runtime, 'goal_update', { status: 'completed', evidence: '三件测试全绿收尾' });
+    await new Promise((r) => setTimeout(r, 20));
+    const job = goalJobRow(runtime, goalId)!;
+    expect(job).toBeDefined(); // 行留史
+    expect(job.enabled).toBe(false); // 生命周期位翻转
+    expect(os.unregistered).toHaveLength(0); // OS 注册保留（廉价 no-op 非反复注销）
+  });
+
+  it('resume 重挂治愈陈旧指针：降级停摆 → 跨会话领养 resume → upsert 行复活且 session_id 换新', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+      osTickRegistrar: os.registrar,
+    });
+    const registry = runtime.drivers;
+    const first = registry.focused()!;
+    await callTool(runtime, 'goal_set', { objective: '领养重挂目标', tokenBudget: 100000 });
+    const goalId = (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+    expect(await runtime.channels.commands.dispatch('/goal wake daily@09:00')).toBe('ok');
+
+    // 降级（boot 等价物——活体 session_start resume 路）→ 同笔停摆挂钟
+    runtime.ctx.emit('session_start', { sessionId: first.session.header.sessionId, origin: 'resume' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(goalJobRow(runtime, goalId)!.enabled).toBe(false);
+
+    // 开新会话 B + 跨会话领养：reactivate 重绑 B + register upsert（enabled 复活 +
+    // session_id 换新——治愈领养重绑后钟行陈旧指针，tick 投递前查行不再让路）
+    const second = registry.open()!;
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    expect(await runtime.channels.commands.dispatch(`/goal resume ${goalId}`)).toBe('ok');
+    expect(notifies.some((n) => n.includes('重新激活'))).toBe(true);
+    const job = goalJobRow(runtime, goalId)!;
+    expect(job.enabled).toBe(true);
+    expect(job.sessionId).toBe(second.session.header.sessionId);
+    expect(os.registered.filter((n) => n === `goal-${goalId}`).length).toBe(2); // 重挂再注册
   });
 });

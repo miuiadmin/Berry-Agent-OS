@@ -21,8 +21,10 @@
 
 import { openStore, openTurnDepth } from '../persist/index.js';
 import type { LlmService } from '../llm/index.js';
-import { JobsStore, parseSchedule, evaluateDue, discoveryGates } from '../scheduler/index.js';
+import { JobsStore, parseSchedule, evaluateDue, discoveryGates, GOAL_JOB_OWNER } from '../scheduler/index.js';
 import type { JobRecord } from '../scheduler/index.js';
+import { GoalStore, newWakeId, wakeGate, renderContinuationPrompt, wakeToolFilter } from '../goal/index.js';
+import type { ToolsService } from '../contracts/tools.js';
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage } from '../contracts/llm.js';
 import { createRuntime } from './assembly.js';
@@ -45,6 +47,17 @@ function lastAssistantText(result: RunResult): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * sessions 服务最小面（goal 挂钟分支消费——结构子集，宿主服务天然满足）：
+ * appendEvent 记因（goal/evidence）+ eventsOfType 读投影（user/message——
+ * 唤醒帽 durable 扫描源）。tickMain 顶层无调用链 → routed() 回退聚焦条目
+ * = boot resume 的目标会话——读写天然锚定归属会话。
+ */
+interface TickSessionsFace {
+  appendEvent(type: string, data: unknown): unknown;
+  eventsOfType(type: string): readonly { readonly time: number; readonly data: unknown }[];
 }
 
 /**
@@ -81,6 +94,14 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   if (job === undefined) {
     process.stderr.write(`任务不存在：${jobName}（/tick list 查看）\n`);
     return 2;
+  }
+  // goal 挂钟停摆快径（刀四 v14 enabled 位的真价值——CR-6 生命周期位）：
+  // 终态/降级同笔停摆后行留史、OS 注册保留（廉价 no-op 非反复注销重注册）
+  //——OS 钟照跳，本进程预读即退，不整机装配。速序先于 due：停摆的钟
+  // 无论到不到点都不投递
+  if (job.owner === GOAL_JOB_OWNER && !job.enabled) {
+    process.stderr.write(`goal ${job.ownerKey} 的挂钟已停摆（enabled=0）——让路不跑\n`);
+    return 0;
   }
 
   /* ---- ② due 判定（schedule 声明在场才判；无声明 = 手动触发语义，到门口即授权） ---- */
@@ -190,6 +211,57 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
     return 1;
   }
 
+  /* ---- ⑤b goal 挂钟投递前执法（刀四 K2-c goal 分支：查行兜底 + 唤醒帽 + 动态渲染） ----
+   * 都在抢占前（token 不可逆——坏目标不烧抢占）。goal 分支三闸全 durable/表判据，
+   * 跨进程有效；让路退出码 0（OS 钟下一跳自然再来）。记因经 ctx.sessions 落
+   * goal/evidence（appendEvent 顶层无调用链 → routed 回退聚焦条目 = 目标会话） */
+  let prompt = job.prompt; // 非 goal 路恒用行内静态 prompt
+  let goalAttribution: Readonly<Record<string, string>> | undefined;
+  let goalToolFilter: readonly string[] | undefined;
+  if (job.owner === GOAL_JOB_OWNER) {
+    const sessions = runtime.ctx.get<TickSessionsFace>('sessions');
+    // 查行兜底：goal 行缺席/非 active/已重绑他乡（时钟行 session_id 指针
+    // 陈旧——重挂本应在 resume 时治愈，此处兜竞窗）→ 让路记因 inactive
+    //（willRetry=false：状态不回 active 就不再来；resume 重挂即复活）
+    const row = new GoalStore(runtime.persistence.store.connection).getByGoalId(job.ownerKey ?? '');
+    if (row === undefined || row.status !== 'active' || row.sessionId !== job.sessionId) {
+      sessions.appendEvent('goal/evidence', { goalId: job.ownerKey, reason: 'inactive', willRetry: false });
+      process.stderr.write(`goal ${job.ownerKey} 非 active（${row?.status ?? '行缺席'}）——让路不投递\n`);
+      await runtime.shutdown();
+      return 0;
+    }
+    // 唤醒帽（与自激路同一 wakeGate 单源——durable 投影扫 user/message 归因，
+    // 跨进程链帽；进程内 maxConsecutiveWakes 管不了也看不见 tick 链）。超帽
+    // = 暂停投递非终态停：willRetry=true，用户手写或到窗后自然恢复
+    const wakeVerdict = wakeGate({
+      goalId: row.goalId,
+      now: Date.now(),
+      events: sessions.eventsOfType('user/message'),
+    });
+    if (!wakeVerdict.allow) {
+      sessions.appendEvent('goal/evidence', { goalId: row.goalId, reason: 'capped', willRetry: true });
+      process.stderr.write(`goal ${row.goalId} 唤醒帽拒（${wakeVerdict.reason}）——本轮让路\n`);
+      await runtime.shutdown();
+      return 0;
+    }
+    // 动态渲染（与自激路同一渲染函数单源：objective + 沉淀摘要 + 预算余额 +
+    // 纪律六件——不预设立场，完成审计条款在场）。渲染异常落 objective 静态
+    // 快照兜底（job.prompt）——投递不因渲染面故障而丢轮
+    try {
+      prompt = renderContinuationPrompt(row);
+    } catch {
+      prompt = job.prompt;
+    }
+    goalAttribution = { goalId: row.goalId, wakeId: newWakeId(), wakePath: 'tick' };
+    // v1 tick 恒只读边界（CR-10）：needsWrite 未申报即与自激路同一收窄单源
+    // wakeToolFilter（read 类 + goal_get/goal_update）；申报开洞 = 全量工具面
+    if (!row.needsWrite) {
+      goalToolFilter = wakeToolFilter(
+        runtime.ctx.get<ToolsService>('tools').compositionFor(entry.session.header.sessionId),
+      );
+    }
+  }
+
   /* ---- ⑥ 执行前抢占（token 花费不可逆，抢占必须发生在花钱之前） ---- */
   const store = new JobsStore(runtime.persistence.store.connection);
   const reserved = store.reserveRun(jobName, Date.now(), 'scheduled');
@@ -223,7 +295,18 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
 
   let code: number;
   try {
-    const result = await entry.driver.submitOnce(job.prompt);
+    // goal 挂钟路：backgroundWake 计道 + 归因（goalId/wakeId/wakePath='tick'
+    //——durable 落账，帽投影与结算归因扫的就是这面）+ 工具收窄（⑤b 算好）；
+    // 其余任务路维持原样（静态 prompt、无收窄——用户手写在场语义）
+    const result =
+      goalAttribution !== undefined
+        ? await entry.driver.submitOnce(prompt, {
+            source: 'app:goal',
+            attribution: goalAttribution,
+            backgroundWake: true,
+            ...(goalToolFilter !== undefined ? { toolFilter: goalToolFilter } : {}),
+          })
+        : await entry.driver.submitOnce(prompt);
     if (!result) {
       // 防御：quit 已触发时 submitOnce 转队列返回 undefined——按中断处理
       process.stderr.write('已中断\n');

@@ -60,6 +60,44 @@ export interface OsRegistrarFace {
   isRegistered(name: string): Promise<boolean>;
 }
 
+/**
+ * goal 挂钟任务面（刀四 T7-B CR-7：goal→scheduler 操作面——组合根闭包注入
+ * 窄面，**不立 ctx.schedule 新服务词汇**）。四法 + OS 注册联动：
+ * - register：schedule 词法当场执法（parseSchedule 在本件——词法管辖权随
+ *   面）+ putOwned upsert（名约定 goal-<goalId> 确定性——重挂即同行覆盖）+
+ *   OS 注册器联动（在场时；缺席 = 注册面降级但行照写——回执如实示态）；
+ * - disable/enable：enabled 位置 0/1（行留史 + OS 注册保留——CR-6 生命周期
+ *   位；廉价 no-op 非反复注销重注册）；
+ * - remove：删行 + OS 注销联动（防幽灵行——行没了 OS 还在到点白触发）。
+ *
+ * 结构类型窄化：goal 件（GoalChannel 槽）持自己的结构同形接口，零 import
+ * 接线点在组合根 builtins.ts（lsp mountDiagnostics 先例同构——迟到注入：
+ * goal 行第四行先装载、scheduler 行第五行装载完成时回填）。
+ */
+export interface GoalJobsFace {
+  /** 挂钟/重挂（schedule 坏串 → {ok:false, message} 响亮拒绝） */
+  register(input: {
+    readonly goalId: string;
+    readonly sessionId: string;
+    readonly schedule: string;
+    readonly promptSnapshot: string;
+  }): Promise<{ readonly ok: boolean; readonly message: string }>;
+  /** 终态/降级同笔停摆（行留史 OS 保留；无行 = 静默 no-op） */
+  disable(goalId: string): Promise<void>;
+  /** resume/重挂复活（无行 = 静默 no-op） */
+  enable(goalId: string): Promise<void>;
+  /** 摘钟（删行 + OS 注销；无行 = 静默 no-op） */
+  remove(goalId: string): Promise<void>;
+}
+
+/** goal 挂钟行的确定性名约定（goal-<goalId>——合 JOB_NAME_PATTERN；名即寻径） */
+export function goalJobName(goalId: string): string {
+  return `goal-${goalId}`;
+}
+
+/** goal 挂钟归属行 id（owner 列恒值——组合根行 id，非运行时字符串约定耦合） */
+export const GOAL_JOB_OWNER = 'builtin:goal';
+
 /** 官方件构造依赖（装配期闭包注入——官方件 = 宿主装配特权） */
 export interface SchedulerAppDeps {
   /** SQLite 连接（jobs 表物理载体）；缺省 = persist:false 降级 warn 空转 */
@@ -93,6 +131,13 @@ export interface SchedulerAppDeps {
    * 不受影响，runJob 先例同构）
    */
   readonly osRegistrar?: OsRegistrarFace;
+  /**
+   * goal 挂钟面回填（刀四迟到注入）：scheduler 行装载完成（store 就绪）时
+   * 回调——组合根接线 `(face) => goalChannel.mountSchedulerFace(face)`，
+   * 返回摘除器（行回卷摘面：通道槽 miss → goal 侧响亮拒绝，两向诚实降级；
+   * lsp mountDiagnostics 同构）。缺省（诊断装配无 goal 通道）= 不挂面。
+   */
+  readonly mountGoalJobs?: (face: GoalJobsFace) => Disposer;
   /** 判定时钟（缺省 Date.now——测试注入冻结） */
   readonly now?: () => number;
 }
@@ -115,6 +160,64 @@ async function applySchedulerApp(ctx: AppContext, deps: SchedulerAppDeps): Promi
   }
   const store = new JobsStore(deps.connection);
   const ui = ctx.get<UiNotifyFace>('ui');
+
+  /* ---- goal 挂钟面构造 + 迟到注入回填（刀四 CR-7：store 就绪即可挂面）----
+   * 面本体闭包持有 store/deps.osRegistrar/now；行回卷摘面（通道槽 miss →
+   * goal 侧响亮拒绝「scheduler 未装载」）。回填失败止步 debug——goal 侧
+   * 槽 miss 的响亮拒绝是完整 UX，本侧无需再报 */
+  const goalFace: GoalJobsFace = {
+    register: async (input) => {
+      // schedule 词法执法（三形状 parse——管辖权在 scheduler 件，goal 侧只传原样串）
+      const parsed = parseSchedule(input.schedule, (deps.now ?? Date.now)());
+      if (!parsed.ok) {
+        return { ok: false, message: `schedule 不合法：${parsed.error}` };
+      }
+      const now = (deps.now ?? Date.now)();
+      // upsert：名确定性 goal-<goalId>（重挂 = 同行覆盖，last_run_at 触发史保留）
+      store.putOwned({
+        name: goalJobName(input.goalId),
+        prompt: input.promptSnapshot,
+        schedule: input.schedule,
+        sessionId: input.sessionId,
+        owner: GOAL_JOB_OWNER,
+        ownerKey: input.goalId,
+        now,
+      });
+      // OS 注册联动（K2-d 注册器；缺席 = 行已写、OS 面降级——回执如实示态）
+      if (deps.osRegistrar !== undefined) {
+        const osResult = await deps.osRegistrar.register(store.get(goalJobName(input.goalId))!);
+        if (!osResult.ok) {
+          return { ok: true, message: `挂钟已登记（OS 定时注册失败：${osResult.message}——重挂时再试）` };
+        }
+        return { ok: true, message: `挂钟已登记：${input.schedule}（OS 定时：${osResult.message}）` };
+      }
+      return { ok: true, message: `挂钟已登记：${input.schedule}（OS 注册面未装配——到点需在场自激或手跑）` };
+    },
+    disable: async (goalId) => {
+      store.setOwnedEnabled(GOAL_JOB_OWNER, goalId, false, (deps.now ?? Date.now)());
+    },
+    enable: async (goalId) => {
+      store.setOwnedEnabled(GOAL_JOB_OWNER, goalId, true, (deps.now ?? Date.now)());
+    },
+    remove: async (goalId) => {
+      // 删行 + OS 注销联动（防幽灵行）；未删到 = 无钟可摘静默 no-op
+      const name = store.removeOwned(GOAL_JOB_OWNER, goalId);
+      if (name !== null && deps.osRegistrar !== undefined) {
+        await deps.osRegistrar.unregister(name);
+      }
+    },
+  };
+  if (deps.mountGoalJobs !== undefined) {
+    try {
+      const disposeFace = deps.mountGoalJobs(goalFace);
+      ctx.effect(() => disposeFace); // 行回卷摘面——此后通道槽 miss，goal 侧响亮拒绝
+    } catch (err) {
+      ctx.logger.debug('goal 挂钟面回填失败（组合根未接线——goal 侧将响亮拒绝）', {
+        error: describeError(err),
+      });
+    }
+  }
+
   ctx.effect(() =>
     ctx.get<ChannelsCommandFace>('channels').registerCommand({
       name: 'tick',

@@ -370,18 +370,33 @@ export class ConversationDriver {
   /** headless 单次执行：开一个 run 等终值（命令入口用；与 submit 互斥使用） */
   async submitOnce(
     text: string,
-    opts?: { readonly source?: MessageSource; readonly attribution?: Readonly<Record<string, string>> },
+    opts?: {
+      readonly source?: MessageSource;
+      readonly attribution?: Readonly<Record<string, string>>;
+      readonly backgroundWake?: boolean;
+      readonly toolFilter?: readonly string[];
+    },
   ): Promise<RunResult | undefined> {
-    this.wakeCount = 0; // 用户手写输入开跑——自激预算恢复（§6.4）
-    return this.launch([
-      {
-        role: 'user',
-        content: text,
-        timestamp: Date.now(),
-        ...(opts?.source !== undefined ? { source: opts.source } : {}),
-        ...(opts?.attribution !== undefined ? { attribution: opts.attribution } : {}),
-      },
-    ]);
+    // 自激预算记账（刀四挂钟投递路）：后台唤醒 = 链上一环（计数 +1，进程内
+    // 后续自激续跑共用此账）；用户手写（berry run CLI）= 在场信号，计数恢复。
+    // 链帽执法不在此口（tick 进程自有 gates 判据——跨进程链帽在 durable 投影 wakeGate）
+    if (opts?.backgroundWake === true) this.wakeCount += 1;
+    else this.wakeCount = 0;
+    const message: AgentMessage = {
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+      ...(opts?.source !== undefined ? { source: opts.source } : {}),
+      ...(opts?.attribution !== undefined ? { attribution: opts.attribution } : {}),
+    };
+    // 投递元数据（与 deliver 同形）：backgroundWake 计道 + 纯 wake 批工具收窄
+    //——tick 挂钟投递经此携带 wakeToolFilter 产物，contextForBatch 同一消费面
+    const backgroundWake = opts?.backgroundWake === true;
+    this.deliverMeta.set(message, {
+      backgroundWake,
+      toolFilter: backgroundWake ? opts?.toolFilter : undefined,
+    });
+    return this.launch([message]);
   }
 
   /** 等待在跑的 run 结算（退出序列在 abort 后先等它收尾再 flush） */

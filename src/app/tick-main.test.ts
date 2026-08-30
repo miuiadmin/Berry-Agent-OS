@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AssistantMessage } from '../contracts/llm.js';
 import { openStore } from '../persist/index.js';
 import { JobsStore } from '../scheduler/store.js';
+import { GoalStore } from '../goal/index.js';
 import { createRuntime } from './assembly.js';
 import type { AppRuntime } from './assembly.js';
 import { collectBuiltinMigrations } from './builtins.js';
@@ -403,5 +404,220 @@ describe('run --tick 编排：会话投递路（session_id 非空）', () => {
     }
     // 拒投不烧抢占（held 校验在 reserve 前——OS 钟下一跳重撞同墙是预期态）
     expect(jobRow(dbFile, 'held')['last_run_at']).toBeNull();
+  });
+});
+
+/* ---------------- 用例：goal 挂钟分支（刀四 K2-c ⑤b 投递前执法） ---------------- */
+
+/** goal 行种子帮手（与 jobs 种子同库同迁移链——GoalStore 直操作） */
+function seedGoal(dbFile: string, fn: (goal: GoalStore) => void): void {
+  const store = openStore({ path: dbFile, migrations: collectBuiltinMigrations() });
+  try {
+    fn(new GoalStore(store.connection));
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * goal 挂钟三件套种子（目标行 + 挂钟行）——go钟行走真生产路径 putOwned。
+ * @returns goalId（挂钟行名 = goal-<goalId>）
+ */
+function seedGoalClock(
+  dbFile: string,
+  sessionId: string,
+  over: Partial<{ enabled: boolean; needsWrite: boolean; objective: string }> = {},
+): string {
+  let goalId = '';
+  seedGoal(dbFile, (goal) => {
+    const row = goal.setActive(
+      sessionId,
+      over.objective ?? '挂钟到点续跑的长目标',
+      50_000,
+      over.needsWrite ?? false,
+      1,
+    );
+    goalId = row.goalId;
+  });
+  seed(dbFile, (jobs) => {
+    jobs.putOwned({
+      name: `goal-${goalId}`,
+      prompt: over.objective ?? '挂钟到点续跑的长目标',
+      schedule: 'every@1m',
+      sessionId,
+      owner: 'builtin:goal',
+      ownerKey: goalId,
+      now: Date.now() - 2 * 60_000,
+    });
+    if (over.enabled === false) jobs.setOwnedEnabled('builtin:goal', goalId, false, Date.now());
+  });
+  return goalId;
+}
+
+describe('run --tick goal 挂钟分支：pre-boot 让路 + 投递前执法 + 到点投递', () => {
+  it('挂钟停摆（enabled=0）→ pre-boot 廉价让路 0：不判 due 不整机装配', async () => {
+    const dbFile = makeDbFile();
+    const goalId = seedGoalClock(dbFile, 's-never-boots', { enabled: false });
+    const err = captureStderr();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, streamFn: scriptedStream(REPLY) })).toBe(0);
+      expect(err.texts.join('')).toContain('停摆');
+    } finally {
+      err.restore();
+    }
+    // 零动作自证：无 boot（sessions 零行）+ 无抢占（last_run_at 零值）
+    expect(scalar(dbFile, 'SELECT COUNT(*) AS value FROM sessions')).toBe(0);
+    expect(jobRow(dbFile, `goal-${goalId}`)['last_run_at']).toBeNull();
+  });
+
+  it('goal 行缺席（inactive 兜底）→ 让路 0 + goal/evidence reason=inactive 落目标会话', async () => {
+    const dbFile = makeDbFile();
+    const workspace = makeTempDir('app-tickmain-ws-');
+    // 造真目标会话（boot 新建后关停——tick resume 的落点）
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    await runtime.shutdown();
+    runtimes.pop();
+    // 只种挂钟行、不种 goal 行（行缺席 = inactive 兜底路的命中形态）
+    let goalId = '';
+    seed(dbFile, (jobs) => {
+      goalId = '01JDGOALGHOSTGOALGHOSTGOALG0';
+      jobs.putOwned({
+        name: `goal-${goalId}`,
+        prompt: '目标',
+        schedule: 'every@1m',
+        sessionId: target,
+        owner: 'builtin:goal',
+        ownerKey: goalId,
+        now: Date.now() - 2 * 60_000,
+      });
+    });
+    const err = captureStderr();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(0);
+      expect(err.texts.join('')).toContain('非 active');
+    } finally {
+      err.restore();
+    }
+    // 记因落目标会话 + 让路不烧抢占
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'goal/evidence' AND data LIKE '%"reason":"inactive"%'`,
+        target,
+      ),
+    ).toBe(1);
+    expect(jobRow(dbFile, `goal-${goalId}`)['last_run_at']).toBeNull();
+  });
+
+  it('唤醒帽拒（连续 3 self）→ 让路 0 + reason=capped（willRetry）+ 零投递', async () => {
+    const dbFile = makeDbFile();
+    const workspace = makeTempDir('app-tickmain-ws-');
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    // 3 条 self 归因投递落目标会话日志（goal 行此时尚未种——③ 续跑对无行
+    // 归因诚实让位，不链发；事件面只留下帽投影要数的 user/message）
+    const goalId = '01JDCAPPEDGHOSTGHOSTGHOSTG0';
+    for (let i = 0; i < 3; i++) {
+      await runtime.conversation!.submitOnce(`自激 ${i}`, {
+        source: 'app:goal',
+        attribution: { goalId, wakePath: 'self' },
+        backgroundWake: true,
+      });
+      await runtime.conversation!.settle();
+    }
+    await runtime.shutdown();
+    runtimes.pop();
+    // goal 行 raw SQL 直插固定 id（与上方归因同 id——setActive 自造随机 id 对不上；
+    // 列形对齐 GoalStore.setActive 的 INSERT，status=active）
+    {
+      const store = openStore({ path: dbFile, migrations: collectBuiltinMigrations() });
+      try {
+        store.connection
+          .prepare(
+            `INSERT INTO goals (goal_id, session_id, objective, token_budget, tokens_used, status, stop_reason,
+                                evidence, needs_write, wake_schedule, activated_seq, summary, summary_seq,
+                                created_at, updated_at, settled_at)
+             VALUES (?, ?, '挂钟到点续跑的长目标', 50000, 0, 'active', NULL, NULL, 0, NULL, NULL, NULL, NULL, 1, 1, NULL)`,
+          )
+          .run(goalId, target);
+      } finally {
+        store.close();
+      }
+    }
+    seed(dbFile, (jobs) => {
+      jobs.putOwned({
+        name: `goal-${goalId}`,
+        prompt: '挂钟到点续跑的长目标',
+        schedule: 'every@1m',
+        sessionId: target,
+        owner: 'builtin:goal',
+        ownerKey: goalId,
+        now: Date.now() - 2 * 60_000,
+      });
+    });
+    const err = captureStderr();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(0);
+      expect(err.texts.join('')).toContain('唤醒帽');
+    } finally {
+      err.restore();
+    }
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'goal/evidence' AND data LIKE '%"reason":"capped"%'`,
+        target,
+      ),
+    ).toBe(1);
+    // 零投递：目标会话无 tick 归因的 user/message + 不烧抢占
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'user/message' AND data LIKE '%"wakePath":"tick"%'`,
+        target,
+      ),
+    ).toBe(0);
+    expect(jobRow(dbFile, `goal-${goalId}`)['last_run_at']).toBeNull();
+  });
+
+  it('active 到点 → 动态渲染投递：objective 在场 + tick 归因落账 + 抢占回写', async () => {
+    const dbFile = makeDbFile();
+    const workspace = makeTempDir('app-tickmain-ws-');
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    await runtime.shutdown();
+    runtimes.pop();
+    const goalId = seedGoalClock(dbFile, target, { objective: '把挂钟到点续跑链路验完' });
+    const out = captureStdout();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(0);
+      expect(out.texts.join('')).toContain('tick 答复');
+    } finally {
+      out.restore();
+    }
+    // tick 归因的投递落目标会话（wakePath=tick——durable 帽投影与结算归因扫的面）
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'user/message' AND data LIKE '%"wakePath":"tick"%'`,
+        target,
+      ),
+    ).toBeGreaterThanOrEqual(1);
+    // 动态渲染（非行内静态 prompt 快照）：objective 原文 + 续跑纪律在场
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'user/message' AND data LIKE '%把挂钟到点续跑链路验完%'`,
+        target,
+      ),
+    ).toBeGreaterThanOrEqual(1);
+    // 抢占已烧 + 归属回写
+    const row = jobRow(dbFile, `goal-${goalId}`);
+    expect(row['last_run_at']).not.toBeNull();
+    expect(row['last_session_id']).toBe(target);
   });
 });

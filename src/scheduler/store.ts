@@ -23,11 +23,20 @@ export type ReserveOutcome = 'reserved' | 'missing' | 'lost-race';
 /** 任务名词法（用户面词汇——禁空白/斜杠/前导连字符，防命令面解析歧义） */
 export const JOB_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-/** 行查询 SQL（列 AS 别名映射 camelCase——goal 表族同款；v9 三列随行读出） */
+/** 行查询 SQL（列 AS 别名映射 camelCase——goal 表族同款；v9/v14 列随行读出） */
 const SELECT_COLUMNS = `name, prompt, cwd, schedule, last_run_at AS lastRunAt,
                         created_at AS createdAt, updated_at AS updatedAt,
                         last_run_reason AS lastRunReason, session_id AS sessionId,
-                        last_session_id AS lastSessionId`;
+                        last_session_id AS lastSessionId, owner, owner_key AS ownerKey,
+                        enabled`;
+
+/**
+ * 原始行 → JobRecord（enabled 0/1 整数 → boolean——SQLite 无布耳型，读出统一
+ * 在此收口；其余列经 SQL AS 别名已对齐 camelCase）。
+ */
+function mapRow(row: unknown): JobRecord {
+  return { ...(row as Omit<JobRecord, 'enabled'>), enabled: (row as { enabled: number }).enabled !== 0 };
+}
 
 /** jobs 表 DAO（连接注入——goal 件 GoalStore 同构） */
 export class JobsStore {
@@ -58,13 +67,77 @@ export class JobsStore {
 
   /** 全量任务清单（name 字典序——list 面稳定排序） */
   list(): JobRecord[] {
-    return this.connection.prepare(`SELECT ${SELECT_COLUMNS} FROM jobs ORDER BY name`).all() as JobRecord[];
+    return this.connection.prepare(`SELECT ${SELECT_COLUMNS} FROM jobs ORDER BY name`).all().map(mapRow);
   }
 
   /** 单行查询（命令面回执与抢占前读） */
   get(name: string): JobRecord | undefined {
-    return this.connection.prepare(`SELECT ${SELECT_COLUMNS} FROM jobs WHERE name = ?`).get(name) as
-      JobRecord | undefined;
+    const row = this.connection.prepare(`SELECT ${SELECT_COLUMNS} FROM jobs WHERE name = ?`).get(name);
+    return row === undefined ? undefined : mapRow(row);
+  }
+
+  /* ---- v14 归属族（goal 挂钟承载——owner/owner_key/enabled 三列的写读面） ---- */
+
+  /**
+   * 归属行查询（(owner, owner_key) 联合寻径——goal 挂钟行的唯一寻径；miss =
+   * 该归属无任务行）。同 owner 多行（历史遗留）取 updated_at 最新——归属
+   * 唯一性由 putOwned 的确定性名约定保证，此兜底仅防御手编库。
+   */
+  getOwned(owner: string, ownerKey: string): JobRecord | undefined {
+    const row = this.connection
+      .prepare(`SELECT ${SELECT_COLUMNS} FROM jobs WHERE owner = ? AND owner_key = ? ORDER BY updated_at DESC LIMIT 1`)
+      .get(owner, ownerKey);
+    return row === undefined ? undefined : mapRow(row);
+  }
+
+  /**
+   * 归属行 upsert（重挂 = 同名覆盖）：新行 INSERT；同名已存 UPDATE 覆盖
+   * prompt/schedule/session_id/owner/owner_key 并复活 enabled=1——
+   * last_run_at（抢占比对键）与 created_at 保留（重挂不是重置触发史）。
+   * 名确定性由调用方约定（face 侧 goal-<goalId>），同名即同行。
+   */
+  putOwned(job: {
+    readonly name: string;
+    readonly prompt: string;
+    readonly schedule: string;
+    readonly sessionId: string;
+    readonly owner: string;
+    readonly ownerKey: string;
+    readonly now: number;
+  }): void {
+    this.connection
+      .prepare(
+        `INSERT INTO jobs (name, prompt, cwd, schedule, last_run_at, created_at, updated_at,
+                           last_run_reason, session_id, last_session_id, owner, owner_key, enabled)
+         VALUES (?, ?, NULL, ?, NULL, ?, ?, NULL, ?, NULL, ?, ?, 1)
+         ON CONFLICT(name) DO UPDATE SET
+           prompt = excluded.prompt, schedule = excluded.schedule,
+           session_id = excluded.session_id, owner = excluded.owner,
+           owner_key = excluded.owner_key, enabled = 1, updated_at = excluded.updated_at`,
+      )
+      .run(job.name, job.prompt, job.schedule, job.now, job.now, job.sessionId, job.owner, job.ownerKey);
+  }
+
+  /**
+   * 生命周期位翻转（终态/降级置 0 · resume/重挂置 1）：行留史 + OS 注册
+   * 保留——tick 编排预读发现让路（免整机装配的廉价 no-op）。0 行命中 =
+   * 无挂钟行（未挂过钟的 goal），静默 no-op 非错误。
+   */
+  setOwnedEnabled(owner: string, ownerKey: string, enabled: boolean, now: number): void {
+    this.connection
+      .prepare(`UPDATE jobs SET enabled = ?, updated_at = ? WHERE owner = ? AND owner_key = ?`)
+      .run(enabled ? 1 : 0, now, owner, ownerKey);
+  }
+
+  /**
+   * 归属行删除（/goal wake off 联动——防幽灵行）：返回被删行名（OS 注销
+   * 需要；未删到 = null，调用方跳过注销）。
+   */
+  removeOwned(owner: string, ownerKey: string): string | null {
+    const row = this.getOwned(owner, ownerKey);
+    if (row === undefined) return null;
+    this.connection.prepare(`DELETE FROM jobs WHERE name = ?`).run(row.name);
+    return row.name;
   }
 
   /** 删除任务（返回是否删到——rm 回执） */

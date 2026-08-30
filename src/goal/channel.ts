@@ -1,20 +1,22 @@
 /**
- * L3 goal — goal↔chat↔lsp 组合根闭包注入通道（骨架篇 §6.8 计划态跨轮条 /
- * gates 条，冷读 CR-11 / CR-12 裁定的落码面）。
+ * L3 goal — goal↔chat↔lsp↔scheduler 组合根闭包注入通道（骨架篇 §6.8 计划态
+ * 跨轮条 / gates 条 / 刀四挂钟条，冷读 CR-11 / CR-12 / CR-7 裁定的落码面）。
  *
  * 为什么需要它：goal-scoped fold 住 chat 件（§6.7 落码面）、激活锚与
  * needsWrite 住 goals 表（goal 件私有）、LSP 诊断查询住 lsp 件 apply 闭包
- * （实例簿私有）——三件两两之间**零拓扑边零服务面**，唯一通道 = 组合根创建
- * 本对象、闭包注入各件 deps（DiscoveryGates 数据面闭包注入同构先例）。
+ * （实例簿私有）、挂钟任务面住 scheduler 件 apply 闭包（JobsStore 私有）
+ * ——四件两两之间**零拓扑边零服务面**，唯一通道 = 组合根创建本对象、闭包
+ * 注入各件 deps（DiscoveryGates 数据面闭包注入同构先例）。
  *
  * 生命周期：goal 件 apply 期注册 goalScopeFor（随 ctx.effect 锚回卷摘除）；
- * chat 件 apply 期注册 todoFold 查询；lsp 件 apply 期注册诊断查询（迟到注入
- * ——lsp 行装载后回填，同 goal→scheduler 形态）。/reload 重装载 = 锚回卷后
- * re-apply 重注册，通道对象本体由组合根持有跨重装载存续。任一侧缺席 = 查询
- * 恒 miss（undefined），消费方各自诚实降级：
+ * chat 件 apply 期注册 todoFold 查询；lsp 件 apply 期注册诊断查询、scheduler
+ * 件 apply 期挂 goal 挂钟面（两者皆迟到注入——行装载后回填）。/reload 重
+ * 装载 = 锚回卷后 re-apply 重注册，通道对象本体由组合根持有跨重装载存续。
+ * 任一侧缺席 = 查询恒 miss（undefined），消费方各自诚实降级：
  *   - goalScopeFor miss → fold 退化 run-scoped 现行为、gates 判 goal 段缺席；
  *   - todoFoldFor miss → goal 计划态投影 / open 项否决降级跳过；
- *   - diagnosticsFor miss → gate kind='diagnostics' 申报即拒（fail-closed）。
+ *   - diagnosticsFor miss → gate kind='diagnostics' 申报即拒（fail-closed）；
+ *   - schedulerFaceFor miss → /goal wake 响亮拒绝「scheduler 未装载」。
  */
 
 import type { Disposer } from '../context/types.js';
@@ -68,7 +70,28 @@ export interface GateDiagnosticsFile {
 }
 
 /**
- * goal↔chat↔lsp 三方通道（组合根创建、闭包注入——见文件头注记）。
+ * goal 挂钟任务面（scheduler 件 → goal 件的消费面，刀四 CR-7 结构同形窄化
+ * ——真身在 scheduler/app.ts GoalJobsFace，此处词面独立、零 import，接线点
+ * 在组合根 builtins.ts 编译期即验结构兼容）。
+ */
+export interface GoalSchedulerFace {
+  /** 挂钟/重挂（schedule 坏串 → {ok:false, message} 响亮拒绝） */
+  register(input: {
+    readonly goalId: string;
+    readonly sessionId: string;
+    readonly schedule: string;
+    readonly promptSnapshot: string;
+  }): Promise<{ readonly ok: boolean; readonly message: string }>;
+  /** 终态/降级同笔停摆（行留史 OS 保留；无行 = 静默 no-op） */
+  disable(goalId: string): Promise<void>;
+  /** resume/重挂复活（无行 = 静默 no-op） */
+  enable(goalId: string): Promise<void>;
+  /** 摘钟（删行 + OS 注销；无行 = 静默 no-op） */
+  remove(goalId: string): Promise<void>;
+}
+
+/**
+ * goal↔chat↔lsp↔scheduler 四方通道（组合根创建、闭包注入——见文件头注记）。
  * 全部方法同步注册异步查询；注册返回摘除器（幂等——同函数重复摘除 no-op）。
  */
 export class GoalChannel {
@@ -80,6 +103,8 @@ export class GoalChannel {
   private wakeLookupQuery?: (sessionId: string) => Readonly<Record<string, string>> | undefined;
   /** lsp 件注册的诊断查询（apply 挂 / 锚回卷摘——迟到注入） */
   private diagnosticsQuery?: (paths: readonly string[]) => Promise<readonly GateDiagnosticsFile[]>;
+  /** scheduler 件挂的 goal 挂钟面（apply 挂 / 行回卷摘——刀四迟到注入） */
+  private schedulerFace?: GoalSchedulerFace;
 
   /** goal 件 apply 期注册 goal 段查询（返回摘除器——挂 ctx.effect） */
   registerGoalScope(query: (sessionId: string) => GoalScopeInfo | undefined): Disposer {
@@ -113,6 +138,17 @@ export class GoalChannel {
     };
   }
 
+  /**
+   * scheduler 件 apply 期挂 goal 挂钟面（返回摘除器——行回卷摘；刀四迟到
+   * 注入：goal 行第四行先装载、scheduler 行第五行装载完成时回填）。
+   */
+  mountSchedulerFace(face: GoalSchedulerFace): Disposer {
+    this.schedulerFace = face;
+    return () => {
+      if (this.schedulerFace === face) this.schedulerFace = undefined;
+    };
+  }
+
   /** goal 段查询（消费方：chat fold 边界 / gates 判段；miss = 非 goal 段） */
   goalScopeFor(sessionId: string): GoalScopeInfo | undefined {
     return this.goalScopeQuery?.(sessionId);
@@ -138,5 +174,15 @@ export class GoalChannel {
   /** 诊断查询（消费方：chat gates diagnostics 验证器；miss = 申报即拒） */
   diagnosticsFor(paths: readonly string[]): Promise<readonly GateDiagnosticsFile[] | undefined> {
     return this.diagnosticsQuery === undefined ? Promise.resolve(undefined) : this.diagnosticsQuery(paths);
+  }
+
+  /**
+   * goal 挂钟面查询（消费方：goal 件 /goal wake 命令 + 终态/降级停摆接线；
+   * 刀四）：miss = scheduler 件未装载（或已卸）——命令面响亮拒绝，停摆接线
+   * 静默跳过（行状态已是终态，钟行不翻转不构成正确性缺口——至多 OS 空跳
+   * 一拍，投递前查行兜底让路）。
+   */
+  schedulerFaceFor(): GoalSchedulerFace | undefined {
+    return this.schedulerFace;
   }
 }

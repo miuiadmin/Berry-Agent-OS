@@ -133,3 +133,88 @@ describe('v9 三列写路：missed 记因 + 会话归属', () => {
     expect(db.get('a')!.sessionId).toBeNull();
   });
 });
+
+describe('v14 归属族：owner/owner_key/enabled 三列（goal 挂钟承载）', () => {
+  /** 造一行 goal 挂钟 upsert 输入（字段可覆写——名确定性约定 goal-<goalId>） */
+  const ownedJob = (goalId: string, over: Partial<Parameters<JobsStore['putOwned']>[0]> = {}) => ({
+    name: `goal-${goalId}`,
+    prompt: `目标：${goalId}`,
+    schedule: 'daily@09:00',
+    sessionId: 'sess-1',
+    owner: 'builtin:goal',
+    ownerKey: goalId,
+    now: 1000,
+    ...over,
+  });
+
+  it('putOwned 新插：归属三列落库 + enabled 缺省 1（挂钟生而走钟）', () => {
+    db.putOwned(ownedJob('g1'));
+    const job = db.getOwned('builtin:goal', 'g1')!;
+    expect(job).toBeDefined();
+    expect(job.owner).toBe('builtin:goal');
+    expect(job.ownerKey).toBe('g1');
+    expect(job.enabled).toBe(true);
+    expect(job.schedule).toBe('daily@09:00');
+    expect(job.sessionId).toBe('sess-1');
+  });
+
+  it('putOwned 重挂 = 同名覆盖：prompt/schedule/session_id 刷新 + enabled 复活 + 触发史保留', () => {
+    db.putOwned(ownedJob('g1'));
+    // 触发史：模拟一次抢占推进 last_run_at（重挂不应重置）
+    db.reserveRun('goal-g1', 2000, 'scheduled');
+    // 停摆（enabled=0）后重挂——resume 路的真实序
+    db.setOwnedEnabled('builtin:goal', 'g1', false, 2500);
+    expect(db.getOwned('builtin:goal', 'g1')!.enabled).toBe(false);
+
+    db.putOwned(
+      ownedJob('g1', { prompt: '目标：g1（重挂）', schedule: 'daily@21:00', sessionId: 'sess-2', now: 3000 }),
+    );
+    const job = db.getOwned('builtin:goal', 'g1')!;
+    expect(job.prompt).toBe('目标：g1（重挂）');
+    expect(job.schedule).toBe('daily@21:00');
+    expect(job.sessionId).toBe('sess-2');
+    expect(job.enabled).toBe(true); // 复活
+    expect(job.lastRunAt).toBe(2000); // 触发史保留（重挂不是重置）
+    expect(job.createdAt).toBe(1000); // 同行延续
+    expect(job.updatedAt).toBe(3000);
+  });
+
+  it('setOwnedEnabled：生命周期位翻转（终态/降级 0 · resume 1）——行留史不删', () => {
+    db.putOwned(ownedJob('g1'));
+    db.setOwnedEnabled('builtin:goal', 'g1', false, 2000);
+    const stopped = db.getOwned('builtin:goal', 'g1')!;
+    expect(stopped.enabled).toBe(false);
+    expect(stopped.updatedAt).toBe(2000);
+    db.setOwnedEnabled('builtin:goal', 'g1', true, 3000);
+    expect(db.getOwned('builtin:goal', 'g1')!.enabled).toBe(true);
+  });
+
+  it('setOwnedEnabled 无行命中 = 静默 no-op（未挂过钟的 goal 非错误）', () => {
+    expect(() => db.setOwnedEnabled('builtin:goal', 'ghost', false, 1000)).not.toThrow();
+  });
+
+  it('removeOwned：删行返回行名（OS 注销联动消费）/ 无行 null', () => {
+    expect(db.removeOwned('builtin:goal', 'g1')).toBeNull();
+    db.putOwned(ownedJob('g1'));
+    expect(db.removeOwned('builtin:goal', 'g1')).toBe('goal-g1');
+    expect(db.getOwned('builtin:goal', 'g1')).toBeUndefined();
+    expect(db.get('goal-g1')).toBeUndefined();
+  });
+
+  it('getOwned：同归属多行（手编库防御）取 updated_at 最新', () => {
+    db.putOwned(ownedJob('g1', { now: 1000 }));
+    // 手编库才可能出现的同 owner+key 异名行——绕 putOwned 直接 add + 不可达？
+    // add 不写归属列；用第二行 putOwned 同 key 异名模拟（名约定破坏场景）
+    db.putOwned(ownedJob('g1', { name: 'goal-g1-legacy', now: 2000 }));
+    const latest = db.getOwned('builtin:goal', 'g1')!;
+    expect(latest.name).toBe('goal-g1-legacy'); // updated_at 新者胜
+  });
+
+  it('存量行（v7/v9 老路 add）读出：owner/ownerKey NULL + enabled 缺省 true（不伤老任务）', () => {
+    db.add('legacy-job', '老任务', 100);
+    const job = db.get('legacy-job')!;
+    expect(job.owner).toBeNull();
+    expect(job.ownerKey).toBeNull();
+    expect(job.enabled).toBe(true);
+  });
+});

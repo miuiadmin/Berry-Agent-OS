@@ -12,7 +12,8 @@
  *
  * 装配接线（全部挂 ctx.effect，装载锚 dispose 即 LIFO 回卷）：
  * ① 工具三件（goal_get/goal_set/goal_update）进 ctx.tools；
- * ② 命令 /goal（查状态）/goal resume/goal stop 进 ctx.channels——激活权在人类；
+ * ② 命令 /goal（查状态 / resume / stop / wake 挂钟——刀四）进 ctx.channels
+ *    ——激活权与挂钟授权都在人类；
  * ③ 续跑触发（刀三轮身份扩形）：onRunSettled 归因定行（goal 归因直查
  *    goalId、缺席兜底归属会话）→ 停滞判定（stallsDecision——硬停 stopped/
  *    stalls 或停滞指令段）→ 唤醒帽执法（wakeGate 双帽——超帽暂停投递非终态
@@ -23,7 +24,17 @@
  *    + 停因事件 reason='budget'）+ 同步注入收尾提示（忙时 steer——当轮收尾
  *    交代下一步，非硬断）；
  * ⑤ 复验面（刀三 T7-A）：agent_pre_step 瀑布监听——goal 唤醒轮每次进模型步
- *    前查归因行活状态（预算尽/已停/已重绑 → stop:true 就地收场）。
+ *    前查归因行活状态（预算尽/已停/已重绑 → stop:true 就地收场）；
+ * ⑥ 轮间沉淀（刀四 T6-A）：onRunSettled 同点触发（goal active 且投影过阈且
+ *    水位有新增）→ ctx.llm.complete 单发摘要（objective 锚定）→ goal/summary
+ *    durable 事件（事实源）→ surfaceOp 遮蔽已沉淀段 → goals 表缓存列回写 +
+ *    usage delta 自报入预算——与 ③ 续跑判定独立（capped 拒发不影响沉淀）。
+ *
+ * 挂钟（刀四 T7-B）：goals.wake_schedule 列存声明原样串；jobs 表承载（owner
+ * = builtin:goal / owner_key = goalId / enabled 生命周期位）；操作面经组合根
+ * 通道迟到注入的 scheduler 窄面（register/disable/enable/remove——CR-7 不立
+ * ctx.schedule 新服务词汇）；终态三处 + 降级 + resume 的同笔翻转见 suspendWake
+ * /resumeWake 两闭包（面缺席静默跳过——投递前查行兜底让路）。
  *
  * 激活态不持久化（§6.7 拍板）：boot 续接（origin=resume）即把 active 行降级
  * needs-resume。触发面 = 装载收口 session_start 补播（二十九批 P1-6，契约篇
@@ -39,7 +50,7 @@
  * 'agent' 走 optionalInject（应用面第一纵切）：chat 件未装载/诊断装配
  * （persist:false）时无 ctx.agent——③续跑触发降级停用（warn），④预算刹车保留
  * 记账与刹停、仅跳过收尾注入；①工具②/goal 命令不受影响（inject 硬依赖只剩
- * tools/channels/ui——内核恒供）。
+ * tools/channels/ui/sessions/llm——内核恒供）。
  *
  * persist:false 降级：无连接即 warn 空转（同 memory 官方件——诊断面行可见、
  * 装载成功，语义诚实）。
@@ -50,6 +61,7 @@ import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
+import type { SessionEvent } from '../contracts/events.js';
 import { GoalStore, newWakeId } from './store.js';
 import {
   canResumeGoal,
@@ -60,10 +72,19 @@ import {
   dueDeferredItems,
 } from './machine.js';
 import type { GoalRecord } from './machine.js';
-import type { GoalChannel } from './channel.js';
-import { renderBudgetExhaustedPrompt, renderContinuationPrompt } from './prompts.js';
+import type { GoalChannel, GoalSchedulerFace } from './channel.js';
+import { renderBudgetExhaustedPrompt, renderContinuationPrompt, escapeXml } from './prompts.js';
 import { createGoalTools, snapshotOfItems } from './tools.js';
 import type { GoalSessionsFace } from './tools.js';
+import {
+  shouldSummarize,
+  planSummarySegment,
+  summaryBudgetFor,
+  buildGoalSummaryPrompt,
+  GOAL_SUMMARY_PREFIX,
+  type GoalSummaryEventPayload,
+  type SummaryMessageView,
+} from './summary.js';
 
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——goal 模块不 import app/channels 实现，拓扑边不越界）。       */
@@ -104,6 +125,33 @@ interface AgentServiceFace {
 /** ui 通知面（命令回执的唯一出口——/goal 系列人读结果） */
 interface UiNotifyFace {
   notify(message: string): void;
+}
+
+/**
+ * ctx.sessions 沉淀宽面（⑥ 轮间沉淀消费：GoalSessionsFace 之上加投影读 +
+ * 遮蔽写——结构子集，宿主 sessions 服务天然满足；compaction 同构）。
+ */
+interface SummarySessionsFace extends GoalSessionsFace {
+  // appendEvent 收窄回传（compaction 同款）：宿主面真身 SessionEvent | undefined
+  appendEvent(type: string, data: unknown): SessionEvent | undefined;
+  /** 会话投影读（判阈/区间规划的数据源——遮蔽段天然排除，投影自描述；窄视 SummaryMessageView——宿主投影天然满足） */
+  deriveMessages(): readonly SummaryMessageView[];
+  /** 宿主代写遮蔽载体（四执法点在宿主——件只组装 carrier） */
+  appendWithSurfaceOp(carrier: {
+    readonly type: 'user/message';
+    readonly data: { readonly content: unknown; readonly source: string };
+    readonly surfaceOp: { readonly op: 'replace'; readonly start: number; readonly end: number };
+    readonly sourceEventSeqs: readonly number[];
+  }): Promise<SessionEvent | undefined>;
+}
+
+/** ctx.llm 窄面（⑥ 沉淀消费：受托管单发摘要 + 窗口元数据——compaction 同构） */
+interface GoalLlmFace {
+  complete(req: {
+    messages: Array<{ role: 'user'; content: string }>;
+    readonly priority?: 'foreground' | 'background';
+  }): Promise<{ message: { content: unknown }; usage: { input: number; output: number; totalTokens?: number } }>;
+  getModel(id: string): { contextWindow: number } | undefined;
 }
 
 /** session/event 镜像信封（契约篇 §2.2——载荷 { sessionId, event } 结构子集） */
@@ -150,8 +198,8 @@ export function createGoalApp(deps: GoalAppDeps): BuiltinAppModule {
   return {
     name: 'goal',
     // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）；
-    // 'sessions' 恒供（装配层无条件 provide——账本事件读写面，第三十九批 T4-A）
-    inject: ['tools', 'channels', 'ui', 'sessions'],
+    // 'sessions'/'llm' 恒供（装配层无条件 provide——账本事件读写面 + ⑥ 沉淀单发面）
+    inject: ['tools', 'channels', 'ui', 'sessions', 'llm'],
     optionalInject: ['agent'],
     apply: (ctx: AppContext) => applyGoalApp(ctx, deps, consumeReplayUnseen),
   };
@@ -163,13 +211,14 @@ export function createGoalApp(deps: GoalAppDeps): BuiltinAppModule {
  */
 
 /**
- * 续跑轮工具面投影（第二十四批题3a，骨架篇 §6.8 拍板落码）：
+ * 续跑轮工具面投影（第二十四批题3a，骨架篇 §6.8 拍板落码；刀四导出——
+ * tick 挂钟投递路同一函数单源消费）：
  * read 类工具全保（检索/阅读照常）+ goal_get/goal_update 显式保留（结算件——
  * 续跑轮必须能查态与申报终态，否则 goal 永远无法自然收束；两件自身 effect
  * 均为 write，靠名单显式保留而非 effect 过滤自然命中）；write/exec 类与
  * goal_set（轮中重设无意义）全部收走。模型感知面 = 白名单（不可见即不可调）。
  */
-function wakeToolFilter(defs: readonly ToolDefinition[]): string[] {
+export function wakeToolFilter(defs: readonly ToolDefinition[]): string[] {
   const names = new Set<string>(['goal_get', 'goal_update']);
   for (const def of defs) {
     if (def.effect === 'read') names.add(def.name);
@@ -189,6 +238,26 @@ async function applyGoalApp(
     return;
   }
   const store = new GoalStore(deps.connection);
+
+  /* ---- 挂钟生命周期闭包（刀四 CR-6：终态/降级同笔翻转 enabled 位）----
+   * 迟到面惰性取（scheduler 行第五行晚于本行装载——命令时点/事件时点取都
+   * 已就绪；/reload 重装载 re-apply 重挂）。面缺席（scheduler 未装载）=
+   * 静默跳过：行状态已是终态/降级，钟行不翻转不构成正确性缺口——至多 OS
+   * 空跳一拍，tick 投递前查行兜底让路。fire-and-forget：翻转失败止步 debug */
+  const suspendWake = (goalId: string): void => {
+    const face = deps.channel?.schedulerFaceFor();
+    if (face === undefined) return;
+    void face.disable(goalId).catch((err: unknown) => {
+      ctx.logger.debug('goal 挂钟停摆失败（非致命——投递前查行兜底）', { error: describeError(err) });
+    });
+  };
+  const resumeWake = (goalId: string): void => {
+    const face = deps.channel?.schedulerFaceFor();
+    if (face === undefined) return;
+    void face.enable(goalId).catch((err: unknown) => {
+      ctx.logger.debug('goal 挂钟复活失败（非致命）', { error: describeError(err) });
+    });
+  };
 
   /* ---- ⓪ 续接降级事件面（S1 结构化 + 二十九批增补 8① 补播收敛为唯一路径）----
    * 两路载荷同面：活体（chat 件 open() 恒发 origin——进程内运行期续接/再开）与
@@ -211,12 +280,18 @@ async function applyGoalApp(
           const armed = consumeReplayUnseen();
           if (armed && envelope.origin === 'resume' && deps.processKind !== 'tick') {
             store.demoteToNeedsResume(envelope.sessionId, Date.now());
+            // 降级同笔停摆挂钟（CR-6「降级时 disable、resume 恢复」——行留史
+            // OS 保留，resume 恢复）
+            const demoted = store.getBySession(envelope.sessionId);
+            if (demoted !== undefined) suspendWake(demoted.goalId);
           }
           return;
         }
         // 活体路径：进程内运行期再开续接会话——origin=resume 照常降级
         if (envelope.origin === 'resume') {
           store.demoteToNeedsResume(envelope.sessionId, Date.now());
+          const demoted = store.getBySession(envelope.sessionId);
+          if (demoted !== undefined) suspendWake(demoted.goalId);
         }
       } catch (err) {
         // fire-and-forget 纪律：降级异常止步日志，不上抛进事件派发面
@@ -245,7 +320,8 @@ async function applyGoalApp(
    * todoSnapshot（计划态投影 + open 项否决）经组合根通道从 chat 件 fold 回流；
    * currentWakeId（轮身份归因）刀三接线——本刀 undefined = 面缺席诚实降级 */
   const tools = ctx.get<ToolsService>('tools');
-  const sessions = ctx.get<GoalSessionsFace>('sessions');
+  // 沉淀宽面单取（GoalSessionsFace 的超集——工具面/账本面/沉淀面同一宿主服务）
+  const sessions = ctx.get<SummarySessionsFace>('sessions');
   for (const def of createGoalTools({
     store,
     getSessionId: deps.getSessionId,
@@ -270,18 +346,21 @@ async function applyGoalApp(
       if (sessionId === undefined) return undefined;
       return deps.channel?.wakeAttributionFor(sessionId)?.wakeId;
     },
+    // 终态同笔停摆挂钟（刀四 CR-6：goal_update 终态形执行段——settleDeclared
+    // 后翻转钟行 enabled 位；面缺席/无钟 = 静默 no-op）
+    onTerminal: (goalId) => suspendWake(goalId),
   })) {
     ctx.effect(() => tools.register(def));
   }
 
   /* ---- ② /goal 命令族（激活权在人类：resume 重新授权〔可带 goalId 跨会话领养〕
-   * / stop 人工停）---- */
+   * / stop 人工停 / wake 挂钟授权——刀四 T7-B：挂 ↔ off 摘）---- */
   const ui = ctx.get<UiNotifyFace>('ui');
   ctx.effect(() =>
     ctx.get<ChannelsCommandFace>('channels').registerCommand({
       name: 'goal',
       description:
-        '长目标管理：/goal 查看状态；/goal resume [goalId] 重新激活（重启降级 needs-resume 时；带 goalId 跨会话领养）；/goal stop 人工停止',
+        '长目标管理：/goal 查看状态；/goal resume [goalId] 重新激活（重启降级 needs-resume 时；带 goalId 跨会话领养）；/goal stop 人工停止；/goal wake <schedule>|off 挂钟（once@<ISO>/every@<n>[mhd]/daily@HH:MM——到点后台续跑）',
       source: 'app',
       handler: (args) =>
         handleGoalCommand(args.trim(), {
@@ -289,17 +368,42 @@ async function applyGoalApp(
           getSessionId: deps.getSessionId,
           ui,
           logLength: () => sessions.logLength(),
+          // 挂钟面惰性取（刀四迟到注入）：命令时点 scheduler 行已装载；缺席 =
+          // wake 子命令响亮拒绝（schedulerFaceFor miss 判在命令体内）
+          schedulerFace: () => deps.channel?.schedulerFaceFor(),
+          // 终态/复活同笔翻转闭包（stop/resume 子命令接线）
+          suspendWake,
+          resumeWake,
         }),
     }),
   );
 
   /* ---- ③ 续跑触发：run 结算边界（completed 且 active 且预算未尽才续）----
    * ctx.agent 走 optionalInject：chat 件未装载/诊断装配时缺供——续跑触发降级
-   * 停用（warn），预算刹车 ④ 独立保留 */
+   * 停用（warn），预算刹车 ④ 独立保留。⑥ 沉淀与 ③ 同点同权——都挂在
+   * onRunSettled 订阅内（agent 缺供 = 无 run 结算 = 两触发面同停，语义自洽） */
   const agent = ctx.tryGet<AgentServiceFace>('agent');
   if (agent === undefined) {
-    ctx.logger.warn('ctx.agent 未提供（chat 件未装载或诊断装配）——goal 续跑触发降级停用（工具/命令/预算刹车不受影响）');
+    // agent 缺供 = 无对话循环 = 无 run 结算——③ 续跑与 ⑥ 沉淀两触发面同停
+    ctx.logger.warn(
+      'ctx.agent 未提供（chat 件未装载或诊断装配）——goal 续跑触发/轮间沉淀降级停用（工具/命令/预算刹车不受影响）',
+    );
   } else {
+    /** ⑥ 沉淀机器（刀四 T6-A）——fire-and-forget，异常止步 debug（水位不进 =
+     * 下次结算自然重试；llm 预算拒发 LLM_BUDGET_EXCEEDED 同路让位） */
+    const llm = ctx.get<GoalLlmFace>('llm');
+    const attemptSummary = (goal: GoalRecord): void => {
+      void runGoalSummary(goal, {
+        store,
+        sessions,
+        llm,
+        logger: ctx.logger,
+        // 自报越限的挂钟腿（stopByBudget/evidence 在机器内——闭包在此接线）
+        onBudgetStop: (goalId) => suspendWake(goalId),
+      }).catch((err: unknown) => {
+        ctx.logger.debug('goal 轮间沉淀失败（下次结算重试）', { goalId: goal.goalId, error: describeError(err) });
+      });
+    };
     ctx.effect(() =>
       agent.onRunSettled((settled) => {
         try {
@@ -329,8 +433,16 @@ async function applyGoalApp(
           if (stalls.hardStop) {
             store.stopByStalls(goal.goalId, Date.now());
             sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'stalls', willRetry: false });
+            // 终态同笔停摆挂钟（刀四 CR-6 三处之一）
+            suspendWake(goal.goalId);
             return;
           }
+          // ⑥ 沉淀触发（刀四 T6-A）：与续跑判定独立——capped 拒发不影响沉淀
+          //（上下文管理不随唤醒拒发而停）。fire-and-forget：与下方投递并发，
+          // 渲染面读行时点的缓存列——竞窗只影响「本轮续跑提示是否携带新摘要」
+          //（下轮起必携带），正确性无涉。ALS 路由：结算回调链内 sessions 面
+          // 天然路由到结算会话 = goal 绑定会话（重绑护栏已让位）
+          attemptSummary(goal);
           // 唤醒帽执法（刀三 T5-A「执法点 = wakeGate 单源」）：超帽动作 = 暂停
           // 投递非终态停——goal 仍 active，自激路拒发本轮唤醒，停因事件落 durable
           //（willRetry=true——下一 run 结算或到窗后再试）
@@ -434,6 +546,8 @@ async function applyGoalApp(
         // 停因事件（刀三）：预算尽落 durable 证据——停滞判定断 streak（预算帽拒发
         // 轮不折算成模型停滞）+ 审计面回读；willRetry=false（预算尽不自动重试）
         sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'budget', willRetry: false });
+        // 终态同笔停摆挂钟（刀四 CR-6 三处之二）
+        suspendWake(goal.goalId);
         // 刹停后行已非 active——getBySession 取当前行（updated_at 最新 = 刚停行）
         const stopped = store.getBySession(sessionId);
         if (stopped !== undefined) {
@@ -497,8 +611,123 @@ async function applyGoalApp(
   );
 }
 
-/** /goal 命令体（args 形态：空 = 查状态 / resume [goalId] / stop） */
-function handleGoalCommand(
+/* ---------------------------------------------------------------------------------- */
+/* ⑥ 轮间沉淀机器（刀四 T6-A——模块级机器函数，attemptSummary fire-and-forget 调用）       */
+/* ---------------------------------------------------------------------------------- */
+
+/**
+ * 摘要预算三参（compaction config summaryRatio/Min/Max 缺省同值——同源复刻
+ * 对齐注记，goal→compaction 无拓扑边各自本地）。
+ */
+const GOAL_SUMMARY_BUDGET = { ratio: 0.2, min: 2000, max: 12_000 } as const;
+
+/** 沉淀机器依赖束（attemptSummary 闭包组包——全部结构面，宿主服务天然满足） */
+interface SummaryMachineOpts {
+  readonly store: GoalStore;
+  readonly sessions: SummarySessionsFace;
+  readonly llm: GoalLlmFace;
+  /** 日志面（debug/info 两级——ctx.logger 结构子集） */
+  readonly logger: { debug(message: string, meta?: unknown): void; info(message: string, meta?: unknown): void };
+  /**
+   * 预算越限同笔停摆挂钟（④ 同款编排的挂钟腿——stopByBudget/evidence 在机器
+   * 内，suspendWake 闭包在 apply 侧，经此回调接线）
+   */
+  readonly onBudgetStop: (goalId: string) => void;
+}
+
+/** 从模型响应 content 提取纯文本（compaction extractText 同构——text 块拼接） */
+function extractSummaryText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) =>
+        block && typeof block === 'object' && 'text' in block ? String((block as { text: unknown }).text) : '',
+      )
+      .join('');
+  }
+  return '';
+}
+
+/**
+ * 一次沉淀尝试（⑥ 机器本体——全程在结算会话调用链语境内，ALS 随 async
+ * 续体存活，appendEvent/appendWithSurfaceOp 天然路由到 goal 绑定会话）。
+ * 落账序：① goal/summary durable 事件（事实源）→ ② surfaceOp 载体遮蔽
+ * （宿主四执法点）→ ③ goals 表缓存列回写。crash 窗口皆良性：① 后 crash =
+ * 载体未遮但事实源在（下轮回填后判水位 no-op）；② 后 crash = 遮蔽已生效、
+ * 缓存列 stale（渲染面读列得旧摘要——正确性无涉，下次沉淀覆盖）。
+ * 逐条 no-op 判据见各 return 注记。
+ */
+async function runGoalSummary(goal: GoalRecord, opts: SummaryMachineOpts): Promise<void> {
+  const { store, sessions, llm } = opts;
+  // 预算尽不沉淀（spec：花销侧不追——预算帽拒的是继续烧钱，沉淀白嫖模型同理）
+  if (goal.tokensUsed >= goal.tokenBudget) return;
+  // 投影 + 判阈（字符粗估源——goal 路无 compaction 的主 loop usage 笔可消费）
+  const projected = sessions.deriveMessages();
+  const headers = sessions.eventsOfType('request/header');
+  const lastHeader = headers.at(-1);
+  const model = lastHeader !== undefined ? (lastHeader.data as { model?: string }).model : undefined;
+  const contextWindow = model !== undefined ? llm.getModel(model)?.contextWindow : undefined;
+  if (!shouldSummarize({ contextWindow, projectedChars: JSON.stringify(projected).length })) return;
+  // 区间规划（激活锚 floor——锚前旧会话史归 compaction 管辖不越界遮蔽）
+  const plan = planSummarySegment(projected, goal.activatedSeq);
+  if (plan === null) return;
+  // 水位 no-op：上次沉淀已覆盖到本区间末端（重复结算/无新增推进）——不重跑 LLM
+  if (goal.summarySeq !== null && plan.end <= goal.summarySeq) return;
+  // 摘要单发（background 道——canAfford 内闸；LLM_BUDGET_EXCEEDED 抛出走
+  // attemptSummary 的 catch 让位，下次结算自然重试）
+  const occluded = projected.filter((m) => m.seq >= plan.start && m.seq <= plan.end);
+  const prompt = buildGoalSummaryPrompt({
+    objective: goal.objective,
+    previousSummary: goal.summary,
+    occludedMessages: occluded,
+    budgetTokens: summaryBudgetFor(plan.occludedChars, GOAL_SUMMARY_BUDGET),
+    escape: escapeXml,
+  });
+  const result = await llm.complete({ messages: [{ role: 'user', content: prompt }], priority: 'background' });
+  const text = extractSummaryText(result.message.content);
+  if (text === '') return; // 模型未产出文本——诚实缺席不落空摘要
+  // ① 事实源事件（goal/summary：载荷 goalId/text/summarySeq——缓存列可回填面）
+  const summaryEvent = sessions.appendEvent('goal/summary', {
+    goalId: goal.goalId,
+    text,
+    summarySeq: plan.end,
+  } satisfies GoalSummaryEventPayload);
+  // ② 遮蔽载体（user/message 单边 + replace + app: 归因 + 溯源区间全 seq 外加
+  // 摘要依据事件——宿主四执法点统一验）
+  const seqs: number[] = [];
+  for (let seq = plan.start; seq <= plan.end; seq++) seqs.push(seq);
+  if (summaryEvent !== undefined) seqs.push(summaryEvent.seq);
+  await sessions.appendWithSurfaceOp({
+    type: 'user/message',
+    data: { content: `${GOAL_SUMMARY_PREFIX} ${text}`, source: 'app:goal' },
+    surfaceOp: { op: 'replace', start: plan.start, end: plan.end },
+    sourceEventSeqs: seqs,
+  });
+  // ③ 缓存列回填（列只是缓存——事实源在 ①；渲染面 renderContinuationPrompt 读列）
+  store.recordSummary(goal.goalId, text, plan.end, Date.now());
+  // usage 自报（CR-3：旁路 LLM 计量调用点不进 ④ 的事件镜像路——complete 的
+  // llm/usage 底账由装配层自动落，此处补 goal 侧账本 delta；行非 active =
+  // 中途被停，让位不记账返回 undefined）
+  if (goal.sessionId !== null) {
+    const delta = result.usage.totalTokens ?? result.usage.input + result.usage.output;
+    const updated = store.addUsage(goal.sessionId, delta, Date.now());
+    if (updated !== undefined && updated.tokensUsed >= updated.tokenBudget) {
+      // 自报越限：同笔刹停 + 停因落账 + 摘钟（与 ④ 同一 stopByBudget 幂等护栏，
+      // 先到者赢）；**不注入收尾提示**——沉淀点无 run 在飞，注入即烧新轮
+      store.stopByBudget(goal.sessionId, updated.tokensUsed, Date.now());
+      sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'budget', willRetry: false });
+      opts.onBudgetStop(goal.goalId);
+    }
+  }
+  opts.logger.info('goal 轮间沉淀完成', {
+    goalId: goal.goalId,
+    occludedMessages: plan.occludedMessages,
+    summarySeq: plan.end,
+  });
+}
+
+/** /goal 命令体（args 形态：空 = 查状态 / resume [goalId] / stop / wake <schedule>|off） */
+async function handleGoalCommand(
   args: string,
   opts: {
     store: GoalStore;
@@ -506,8 +735,13 @@ function handleGoalCommand(
     ui: UiNotifyFace;
     /** 宿主日志长度面（resume 重绑的激活锚取值——sessions.logLength 单源） */
     logLength: () => number | undefined;
+    /** 挂钟面惰性取（刀四迟到注入——命令时点 scheduler 行已装载；miss = wake 响亮拒绝） */
+    schedulerFace: () => GoalSchedulerFace | undefined;
+    /** 终态/复活同笔翻转闭包（stop/resume 子命令接线——面缺席静默跳过） */
+    suspendWake: (goalId: string) => void;
+    resumeWake: (goalId: string) => void;
   },
-): void {
+): Promise<void> {
   const sessionId = opts.getSessionId();
   const goal = sessionId === undefined ? undefined : opts.store.getBySession(sessionId);
   if (args === '') {
@@ -546,7 +780,29 @@ function handleGoalCommand(
     // 领养重绑：行 sessionId 换当前会话（原会话不再持有），状态回 active；
     // 激活锚同步刷新（拍板形态：重绑到新会话即新锚——重新授权点重新折叠）
     opts.store.reactivate(target.goalId, sessionId, Date.now(), opts.logLength() ?? null);
-    opts.ui.notify(`目标已重新激活（active，goalId ${target.goalId}）——下一轮结算起恢复续跑。`);
+    // 挂钟复活（CR-6 resume 路）：有声明即重挂而非裸 enable——putOwned upsert
+    // 顺带把钟行 session_id 治愈到新会话（领养重绑后钟跟行走，tick 投递
+    // 目标不陈旧）；无声明 = 无钟可活，enable 空转走对称闭包
+    if (target.wakeSchedule !== null) {
+      const face = opts.schedulerFace();
+      if (face !== undefined) {
+        const reregistered = await face.register({
+          goalId: target.goalId,
+          sessionId,
+          schedule: target.wakeSchedule,
+          promptSnapshot: target.objective,
+        });
+        if (!reregistered.ok) {
+          opts.ui.notify(`挂钟重挂失败：${reregistered.message}（目标本身已重新激活——/goal wake 重试挂钟）`);
+          return;
+        }
+      }
+    } else {
+      opts.resumeWake(target.goalId);
+    }
+    opts.ui.notify(
+      `目标已重新激活（active，goalId ${target.goalId}）——下一轮结算起恢复续跑${target.wakeSchedule !== null ? '（挂钟随之恢复并跟到本会话）' : ''}。`,
+    );
     return;
   }
   if (sub === 'stop') {
@@ -559,10 +815,61 @@ function handleGoalCommand(
       return;
     }
     opts.store.stopByUser(goal.goalId, Date.now());
+    // 人工停同笔停摆挂钟（CR-6：stopped 即不再被唤醒——行留史可查，摘钟另走 off）
+    opts.suspendWake(goal.goalId);
     opts.ui.notify('目标已人工停止（stopped/user）——不再续跑。');
     return;
   }
-  opts.ui.notify('用法：/goal（查状态）| /goal resume [goalId] | /goal stop');
+  if (sub === 'wake') {
+    // 挂钟授权在人类（T7-B）：/goal wake <schedule> 挂 ↔ /goal wake off 摘。
+    // 允许任意在场行挂钟（needs-resume/终态行也可——到点投递前查行让路，
+    // resume 后生效；这比「只许 active」少一道状态耦合，语义自说明）
+    if (goal === undefined) {
+      opts.ui.notify('当前会话没有目标——挂钟挂在目标行上（模型 goal_set 先设定）。');
+      return;
+    }
+    const face = opts.schedulerFace();
+    if (face === undefined) {
+      opts.ui.notify('scheduler 官方件未装载——/goal wake 不可用（挂钟任务面缺席）。');
+      return;
+    }
+    if (rest === 'off') {
+      await face.remove(goal.goalId);
+      opts.store.updateWakeSchedule(goal.goalId, null, Date.now());
+      opts.ui.notify(`已摘除目标 ${goal.goalId} 的挂钟（OS 定时注销 + 行删除）。`);
+      return;
+    }
+    if (rest === '') {
+      opts.ui.notify('用法：/goal wake <schedule>|off（schedule = once@<ISO>/every@<n>[mhd]/daily@HH:MM）');
+      return;
+    }
+    // schedule 词法执法在 scheduler 侧（parseSchedule 管辖权随面）；prompt 快照
+    // = objective 静态兜底（到点投递首选动态渲染 renderContinuationPrompt——
+    // 行缺席/渲染失败才落到此串）
+    const registered = await face.register({
+      goalId: goal.goalId,
+      sessionId: sessionId ?? '',
+      schedule: rest,
+      promptSnapshot: goal.objective,
+    });
+    if (!registered.ok) {
+      opts.ui.notify(registered.message);
+      return;
+    }
+    opts.store.updateWakeSchedule(goal.goalId, rest, Date.now());
+    // 注记两行：非 active 行到点让路（resume 恢复）；needsWrite 未申报 =
+    // 挂钟轮工具面只读（与自激续跑轮同一收窄单源 wakeToolFilter）
+    const lines = [registered.message];
+    if (goal.status !== 'active') {
+      lines.push(`注记：目标当前为 ${goal.status}——到点投递前查行让路，/goal resume 后挂钟生效。`);
+    }
+    if (!goal.needsWrite) {
+      lines.push('注记：目标未申报 needsWrite——挂钟轮工具面只读（模型 goal_set 申报 needsWrite 开洞）。');
+    }
+    opts.ui.notify(lines.join('\n'));
+    return;
+  }
+  opts.ui.notify('用法：/goal（查状态）| /goal resume [goalId] | /goal stop | /goal wake <schedule>|off');
 }
 
 /** goal 行 → 人读投影（命令面——与工具面 renderGoal 同口径，独立于人读排版） */
@@ -573,6 +880,10 @@ function renderGoalForUser(goal: GoalRecord): string {
     `状态：${goal.status}${goal.stopReason !== null ? `（原因：${goal.stopReason}）` : ''}`,
     `预算：已用 ${goal.tokensUsed} / ${goal.tokenBudget} tokens`,
   ];
+  // 挂钟披露（刀四 v1 只读面）：声明原样串 + needsWrite 工具面档位——挂/摘走 /goal wake
+  if (goal.wakeSchedule !== null) lines.push(`挂钟：${goal.wakeSchedule}`);
+  lines.push(goal.needsWrite ? '写面：已申报 needsWrite（续跑/挂钟轮全量工具面）' : '写面：未申报（续跑/挂钟轮只读）');
+  if (goal.summary !== null) lines.push(`沉淀：已摘要至 seq ${goal.summarySeq ?? '？'}`);
   if (goal.evidence !== null) lines.push(`证据/原因：${goal.evidence}`);
   return lines.join('\n');
 }

@@ -200,6 +200,50 @@ describe('ConversationDriver 刀三轮身份与 durability 屏障', () => {
   });
 });
 
+/* ---------------- 刀四：submitOnce 投递面（tick 挂钟投递口） ---------------- */
+
+describe('ConversationDriver 刀四 submitOnce 投递面（挂钟投递口）', () => {
+  it('backgroundWake + toolFilter → run 工具面收窄（deliverMeta 与 deliver 同一消费面）', async () => {
+    const { driver, contexts, baseTools } = makeDriver();
+    await driver.submitOnce('goal 挂钟轮', {
+      source: 'app:goal',
+      attribution: { goalId: 'G9', wakeId: 'w9', wakePath: 'tick' },
+      backgroundWake: true,
+      toolFilter: ['goal_get', 'read_file'],
+    });
+    expect(contexts).toHaveLength(1);
+    expect((contexts[0]!.tools ?? []).map((t) => t.name).sort()).toEqual(['goal_get', 'read_file']);
+    expect(baseTools).toHaveLength(5); // 基础数组不动（收窄只在开起的 run）
+    expect(driver.currentAttribution).toEqual({ goalId: 'G9', wakeId: 'w9', wakePath: 'tick' });
+  });
+
+  it('非后台 submitOnce 携 toolFilter → 不收窄（在场信号优先——用户手写语义）', async () => {
+    const { driver, contexts } = makeDriver();
+    await driver.submitOnce('berry run CLI 用户在场', { toolFilter: ['goal_get'] });
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0]!.tools ?? []).toHaveLength(5); // 全量——toolFilter 被忽略
+  });
+
+  it('wakeCount 记账：后台 submitOnce 各 +1 → 第 4 次后台投递降级 inject；用户消息恢复预算', async () => {
+    const { driver, contexts } = makeDriver();
+    // 3 次后台 submitOnce（挂钟轮 + 进程内自激链的账——各 +1）
+    for (let i = 0; i < 3; i++) {
+      await driver.submitOnce(`挂钟轮 ${i}`, { backgroundWake: true });
+    }
+    expect(contexts).toHaveLength(3);
+    // 第 4 次后台投递（idle deliver 路）：连击帽满 → inject 降级只留记录
+    const channel = driver.deliver({ role: 'user', content: '第 4 次唤醒', timestamp: 4 }, { backgroundWake: true });
+    expect(channel).toBe('inject');
+    expect(contexts).toHaveLength(3); // 未开新 run
+    // 用户手写（非后台 submitOnce）：在场信号——计数恢复
+    await driver.submitOnce('用户回来了', {});
+    // 预算已复：后台投递重新可开 run
+    const revived = driver.deliver({ role: 'user', content: '预算恢复后唤醒', timestamp: 5 }, { backgroundWake: true });
+    expect(revived).toBe('followUp');
+    await driver.settle();
+  });
+});
+
 describe('ConversationDriver 回调异常隔离（隔离案一第一刀 #4 回归锁）', () => {
   it('onRunSettled 订阅方抛错 → 后续订阅照常收 + run 正常结算 + onCallbackError 携来源上报', async () => {
     const seen: { err: unknown; source: string }[] = [];

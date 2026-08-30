@@ -51,3 +51,27 @@ ALTER TABLE jobs ADD COLUMN session_id TEXT;
 ALTER TABLE jobs ADD COLUMN last_session_id TEXT;
 `,
 };
+
+/**
+ * v14 迁移：goal 挂钟归属三列（骨架篇 §6.8 刀四 T7-B——jobs 表承载 goal 挂钟）。
+ *
+ * 版本序说明：v10-v13 已被 goal 件占用（v13 = goal 表整表重构）——顺移 v14。
+ *
+ * - `owner`：归属行（NULL = /tick 用户任务——存量行语义不变）。goal 挂钟行
+ *   恒 'builtin:goal'（行 id 即身份——禁字符串约定之外的耦合）；
+ * - `owner_key`：归属行内键（goal 行 = goalId）——关联经查表零字符串约定，
+ *   (owner, owner_key) 联合即「这个 goal 的挂钟行在哪」的唯一寻径；
+ * - `enabled`：生命周期位（INTEGER 0/1，缺省 1——/tick 存量行恒 1 不受影响）。
+ *   终态/降级同笔置 0（行留史 + OS 注册保留——tick 编排预读发现让路，
+ *   免整机装配的真·廉价 no-op）；resume/重挂置 1。/tick enable|disable
+ *   动词维持 OS 注册语义不变（那两词管 launchd/crontab，不管本列）。
+ */
+export const SCHEDULER_V14_MIGRATION: MigrationSpec = {
+  version: 14,
+  name: 'scheduler-jobs-v14',
+  sql: `
+ALTER TABLE jobs ADD COLUMN owner TEXT;
+ALTER TABLE jobs ADD COLUMN owner_key TEXT;
+ALTER TABLE jobs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+`,
+};

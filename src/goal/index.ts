@@ -41,7 +41,7 @@ export type {
 } from './machine.js';
 export { GOAL_EVENT_TYPES } from './events.js';
 export { GoalChannel } from './channel.js';
-export type { GoalScopeInfo, TodoFoldItem, GateDiagnosticsFile } from './channel.js';
+export type { GoalScopeInfo, TodoFoldItem, GateDiagnosticsFile, GoalSchedulerFace } from './channel.js';
 export { createGoalTools, snapshotOfItems } from './tools.js';
 export type { GoalToolsDeps, GoalSessionsFace, TodoPlanSnapshot } from './tools.js';
 export {
@@ -51,5 +51,17 @@ export {
   GOAL_DISCIPLINE_CLAUSES,
 } from './prompts.js';
 export type { ContinuationExtras } from './prompts.js';
-export { createGoalApp } from './app.js';
+export {
+  shouldSummarize,
+  planSummarySegment,
+  summaryBudgetFor,
+  buildGoalSummaryPrompt,
+  latestSummaryFromEvents,
+  SUMMARY_THRESHOLD_RATIO,
+  SUMMARY_FALLBACK_WINDOW_TOKENS,
+  SUMMARY_TAIL_KEEP,
+  GOAL_SUMMARY_PREFIX,
+} from './summary.js';
+export type { SummaryThresholdInput, SummarySegmentPlan, SummaryBudget, GoalSummaryEventPayload } from './summary.js';
+export { createGoalApp, wakeToolFilter } from './app.js';
 export type { GoalAppDeps } from './app.js';

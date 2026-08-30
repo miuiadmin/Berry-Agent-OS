@@ -155,12 +155,16 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     }),
     // scheduler 官方件（官方默认层第五行，tick 第一刀——内核边界篇 §4.1 席 13）：
     // 连接与 gate 判据/runner 全闭包注入（spawn 组装在 app/scheduler-runner.ts）；
-    // 无持久层时空转，无 runner（诊断装配）时 /tick run 报不可用、表面照常
+    // 无持久层时空转，无 runner（诊断装配）时 /tick run 报不可用、表面照常。
+    // goal 挂钟面接线（goal 循环批刀四 CR-7 迟到注入）：scheduler 行装载完成
+    // 时经 goal 通道回填挂钟面——goal 行（第四行）先装载持通道等回填，
+    // /goal wake 在命令时点惰性取面
     ...(opts.schedulerDeps
       ? {
           'builtin:scheduler': createSchedulerApp({
             ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
             ...opts.schedulerDeps,
+            ...(opts.goalChannel ? { mountGoalJobs: (face) => opts.goalChannel!.mountSchedulerFace(face) } : {}),
           }),
         }
       : {}),
