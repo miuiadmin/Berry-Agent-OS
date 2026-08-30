@@ -394,6 +394,19 @@ export const WEBUI_BIND_FORBIDDEN = registerErrorCode('WEBUI_BIND_FORBIDDEN');
 export const WEBUI_PORT_IN_USE = registerErrorCode('WEBUI_PORT_IN_USE');
 
 /* ------------------------------------------------------------------ */
+/* daemon 码族（契约篇 §6.8 常驻执行体条·刀一，2026-08-30 第三十八批——  */
+/* 生命周期命令面（start/stop）的响亮失败面：daemon.json O_EXCL 单实例   */
+/* 仲裁 + ready-gate 真握手超时 + stop 信号序预算尽）。                  */
+/* ------------------------------------------------------------------ */
+
+/** daemon：单实例仲裁失败（daemon.json O_EXCL 撞既有文件且判活为真——M6 三钉后陈旧态已先行清扫，仍撞 = 真有活 daemon；「不猜 pid、活判据 = processStartId 匹配」） */
+export const DAEMON_ALREADY_RUNNING = registerErrorCode('DAEMON_ALREADY_RUNNING');
+/** daemon：start ready-gate 超时（spawn 后须 token 端点真握手〔GET /api/sessions 返 200〕未在预算内达成——health 公开探活不构成活证，M4 两语义分立；超时即杀子进程响亮非零） */
+export const DAEMON_START_TIMEOUT = registerErrorCode('DAEMON_START_TIMEOUT');
+/** daemon：stop 信号序预算尽（SIGTERM 后 30s 内进程未消失且 SIGKILL 后 5s 仍在——罕见形态〔D 状态进程/僵尸被收养〕，人工介入出口） */
+export const DAEMON_STOP_TIMEOUT = registerErrorCode('DAEMON_STOP_TIMEOUT');
+
+/* ------------------------------------------------------------------ */
 /* 资源护栏族码族（契约篇 §1.6，2026-08-27 刀〇b——总量/频率失控面，与    */
 /* 时钟族〔挂起〕正交。执法统一 fail-loud；例外两条不立码：#11 进度流是  */
 /* 数据面丢弃 + 单条 warn、#13 切片是物理层多事务语义〔PERSIST_BATCH_    */

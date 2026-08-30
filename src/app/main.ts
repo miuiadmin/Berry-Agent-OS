@@ -6,10 +6,14 @@
  *   berry run "<message>"  单次执行：一轮对话 → stdout 输出结果
  *   berry run --tick <名>  tick 到点编排（OS 调度器唤起形态——读行→due→
  *                          闸→抢占→跑→归属回写；tick-main 主流程）
+ *   berry daemon start     常驻执行体起跑（ready-gate 真握手才报就绪；客户端
+ *                          三命令族 start/stop/status——契约篇 §6.8 刀一）
  *   berry dump-config      打印实际生效组合树（诊断面）
  *   旗标：--version / --help / --debug（日志提级）/ --read-only（run 限定只读档）
  *         / --sandbox-host（run 限定宿主沙箱 wrapper——e1，技术栈篇 §5）
- *         / --port <n>（Web 通道开面——TUI 与 run 收，契约篇 §6.8）
+ *         / --port <n>（Web 通道开面——TUI 与 run 收，契约篇 §6.8；daemon 形态
+ *           下 = webui 常开端口，缺省 7860）
+ *         / --foreground（daemon 限定：前台常驻——start spawn 的目标形态）
  *
  * 命令面即产品契约（输出保持稳定）；三命令分别接 tui-main / run-main /
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
@@ -20,6 +24,8 @@ import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
 import { dumpConfigMain } from './dump-config.js';
 import { relaunchUnderHostSandbox } from './host-sandbox.js';
+import { daemonCommandMain, daemonForegroundMain } from './daemon.js';
+import { DEFAULT_WEBUI_PORT } from '../webui/index.js';
 
 /** 帮助文案（命令面 = 产品契约，输出保持稳定） */
 const HELP = `Berry ${VERSION} — 应用式智能体运行时
@@ -28,6 +34,10 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   berry                  进入 TUI 对话（默认命令）
   berry run "<message>"  单次执行：一轮对话 → stdout
   berry run --tick <名>  tick 到点编排（OS 调度唤起：读任务行→due 判定→闸→跑）
+  berry daemon <start|stop|status>
+                         常驻执行体客户端三命令（契约篇 §6.8 刀一）：start 就绪
+                         门槛（须 token 端点真握手才 exit 0）；stop 信号序；status
+                         真握手披露。daemon 形态 webui 常开回环，缺省 7860
   berry dump-config      打印实际生效的组合树
 
 旗标：
@@ -41,7 +51,10 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                生效；与 --tick 互斥——tick 是任务行身份，应用身份另属清单）
   --port <n>   Web 通道开面（契约篇 §6.8）：监听 127.0.0.1:<n>（1-65535 整数）；
                TUI 与 run 收，dump-config/tick 不收。等价 overlay 给 webui 行开
-               enabled+port，只作用 boot 树（/reload 重读盘）
+               enabled+port，只作用 boot 树（/reload 重读盘）；daemon 形态下 =
+               webui 常开端口（缺省 7860）
+  --foreground daemon 限定：前台常驻形态（start spawn 的目标——launchd/systemd
+               监视直接子进程的唯一正确形态，自 fork 会双实例循环）
   --no-apps 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
                ——坏应用锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
   --sandbox-host run 子命令限定：宿主进程套 OS 沙箱 wrapper（macOS seatbelt / Linux bwrap）
@@ -70,6 +83,8 @@ interface ParsedArgs {
   noApps: boolean;
   /** e1 宿主沙箱包裹（--sandbox-host，技术栈篇 §5 第二十八批题 3A）：run 限定，wrapper 重 exec */
   sandboxHost: boolean;
+  /** daemon 前台常驻（--foreground，契约篇 §6.8 刀一）：daemon 限定——start spawn 的目标形态 */
+  foreground: boolean;
 }
 
 /**
@@ -87,6 +102,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let app: string | undefined;
   let port: string | undefined;
   let sandboxHost = false;
+  let foreground = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--debug') {
@@ -119,12 +135,16 @@ function parseArgs(argv: string[]): ParsedArgs {
       // e1 宿主沙箱（技术栈篇 §5 第二十八批题 3A）：只对 run 语义化——wrapper
       // 重 exec 在 run case 执法；TUI/dump-config 收到时无害忽略（同 --read-only 律）
       sandboxHost = true;
+    } else if (arg === '--foreground') {
+      // daemon 前台常驻（契约篇 §6.8 刀一）：daemon 限定——其余入口收到时无害
+      // 忽略（同 --read-only 律：语义只在 daemon case 执法）
+      foreground = true;
     } else {
       positional.push(arg);
     }
   }
   const [command = '', ...rest] = positional;
-  return { command, args: rest, debug, readOnly, background, tick, app, port, noApps, sandboxHost };
+  return { command, args: rest, debug, readOnly, background, tick, app, port, noApps, sandboxHost, foreground };
 }
 
 /**
@@ -138,7 +158,7 @@ function parsePortValue(value: string): number | undefined {
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, app, port, noApps, sandboxHost } = parseArgs(argv);
+  const { command, args, readOnly, background, tick, app, port, noApps, sandboxHost, foreground } = parseArgs(argv);
 
   const run = async (): Promise<number> => {
     switch (command) {
@@ -229,6 +249,39 @@ function main(argv: string[]): number {
           ...(noApps ? { noApps: true } : {}),
           ...(webuiPort !== undefined ? { webuiPort } : {}),
         });
+      }
+      case 'daemon': {
+        // daemon 命令族（契约篇 §6.8 常驻执行体条·刀一）：客户端三命令
+        // start/stop/status + --foreground 前台常驻（start spawn 的目标——
+        // launchd/systemd 监视直接子进程形态，操作者通常不经手）。旗标面只收
+        // --port（webui 常开端口，缺省 7860）与 --debug（env 传染子进程）；
+        // run 族旗标混入即用法错（形态面互斥——单发/调度语义不属常驻体）
+        const webuiPort = port === undefined ? undefined : parsePortValue(port);
+        if (port !== undefined && webuiPort === undefined) {
+          process.stderr.write('用法：berry daemon <start|stop|status|--foreground> [--port <1-65535>]\n');
+          return 2;
+        }
+        if (readOnly || background || tick !== undefined || app !== undefined || sandboxHost || noApps) {
+          process.stderr.write(
+            '用法：berry daemon <start|stop|status|--foreground> [--port <n>]（run 族旗标不适用）\n',
+          );
+          return 2;
+        }
+        if (foreground) {
+          if (args.length > 0) {
+            process.stderr.write('用法：berry daemon --foreground [--port <n>]（--foreground 不与子命令并存）\n');
+            return 2;
+          }
+          return daemonForegroundMain(webuiPort ?? DEFAULT_WEBUI_PORT);
+        }
+        const sub = args[0];
+        if ((sub !== 'start' && sub !== 'stop' && sub !== 'status') || args.length > 1) {
+          process.stderr.write('用法：berry daemon <start|stop|status> [--port <n>]\n');
+          return 2;
+        }
+        // stop/status 不消费端口（daemon.json 态文件即真相）；start/foreground
+        // 缺省 7860（webui 常开回环）
+        return daemonCommandMain(sub, webuiPort ?? DEFAULT_WEBUI_PORT);
       }
       case 'dump-config':
         // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）

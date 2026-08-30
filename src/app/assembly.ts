@@ -86,8 +86,12 @@ import { defaultInstructionLocations, discoverInstructions, renderInstructions }
 import type { InstructionLocation } from './instructions.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
-import type { WebuiApprovalClaim, WebuiSessionSummary } from '../webui/index.js';
+import { WEBUI_APPROVAL_CAP_PER_OWNER } from '../webui/index.js';
+import type { WebuiApprovalMount, WebuiSessionSummary } from '../webui/index.js';
 import { VERSION } from './version.js';
+// daemon 刀一：heldSessions 租约闭包读 daemon.json 判活（assembly↔daemon 零环
+// ——命令半边 daemon.ts 引 createRuntime，状态半边 daemon-state.ts 不引）
+import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 import type { Session } from '../session/session.js';
 import {
   deriveMessages,
@@ -114,9 +118,9 @@ import {
   SESSION_FORMAT_UNSUPPORTED,
   SESSION_SURFACE_OP_INVALID,
 } from '../contracts/errors.js';
-import type { EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
+import type { EventQueryCursor, EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
-import { createChatApp, CHAT_APP_ID, foldCurrentTodo } from '../chat/index.js';
+import { createChatApp, CHAT_APP_ID, DEFAULT_APPROVAL_TIMEOUT_MS, foldCurrentTodo } from '../chat/index.js';
 import {
   createPathsService,
   loadComposition,
@@ -296,6 +300,12 @@ export interface RuntimeOptions {
   readonly model?: string;
   /** 审批策略档（缺省 'ask'） */
   readonly approvalPolicy?: ApprovalPolicyMode;
+  /**
+   * 审批超时腿时长（毫秒，缺省 DEFAULT_APPROVAL_TIMEOUT_MS = 30min——契约篇
+   * §6.8 P2 A2 案 fail-closed）：无 TUI 腿形态（daemon）armed，到点即时收场
+   * unavailable。测试面注小值验证超时路径；生产面用缺省（transformTimeoutMs 同款）。
+   */
+  readonly approvalTimeoutMs?: number;
   /** 沙箱档（缺省 'workspace-write'） */
   readonly sandboxMode?: SandboxMode;
   /** provider 集合（缺省 pi-ai 内置全家桶；测试传 faux provider） */
@@ -349,6 +359,16 @@ export interface RuntimeOptions {
    * run 两入口收；dump-config 诊断面不收（合成树如实反映盘上配置）
    */
   readonly webuiPort?: number;
+  /**
+   * daemon 形态装配（契约篇 §6.8 常驻执行体条·刀一，骨架篇 §1.2 daemon
+   * 装配序）：token 鉴权物 + webui 常开端口。形态是**装配的选择非代码分叉**
+   * ——同一 createRuntime 入口，daemon 形态 = interactive false + 会话惰性
+   * resume（启动不续接旧会话——首触 open({resume}) 才恢复；boot-open 支线
+   * 照常开新首驱动，首启即进默认应用的既有行为不动）+ webui 行强制
+   * enabled+port（withWebuiPort 同形）+ 租约守卫 + boot 审批回放重挂。
+   * TUI 进程内形态合法存续（短会话场景），与 daemon 是显式选择关系。
+   */
+  readonly daemon?: { readonly token: string; readonly port: number };
   /**
    * external 域 OS 沙箱层开关（external carrier 落码批，契约篇 §1.7 第三十七
    * 批增补 2a）：缺省 true——装载期 probe 醒 fail-closed（SANDBOX_UNAVAILABLE
@@ -526,6 +546,11 @@ export interface ReloadResult {
  * async：应用装载（jiti import + apply）是异步序列（契约篇 §1）。
  */
 export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRuntime> {
+  // boot 装载分区计时（daemon 刀一·件⑦）：三分区里程碑 debug 落账——③ 持久
+  // 层完 / ⑨ 装载完 / 返回前总耗。performance.now 单调钟（墙钟回拨不污染）；
+  // 行为同时是 durable 事实的反面——纯诊断面，只在 debug 层出现合法（无行为
+  // 分支读它）
+  const bootStart = performance.now();
   const workspace = opts.workspace ?? process.cwd();
   const model = opts.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL;
   const sandboxMode = opts.sandboxMode ?? 'workspace-write';
@@ -573,6 +598,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   let ui: UiService;
 
   /* ---- ③ 持久层（persist:false 跳过——诊断面不落库） ---- */
+  // D6 cordon 旗（daemon 刀一·M7，契约篇 §6.8 不变式⑤）：write-behind 落盘
+  // 失败置位——**进程内态**，daemon 重启即解（环境故障非进程内可自愈，人工
+  // 介入 = 清磁盘 + 重启）。拒面 = submit + 开新会话（webui 两端点 503）；
+  // decide / interrupt / SSE / 读面可达不拒（恰是在飞 run 收场与审批结算的
+  // 依赖面——误拒则收场挂死）；health 披露 degraded（降级行为同时是 health
+  // 事实，不靠进程日志独扛）。一次性闩：置位后不清（数据完整性怀疑一旦成立，
+  // operator 处置是唯一复位路）
+  let cordoned = false;
   // 首启建档（paths.ts ensureDbDir）：库文件父目录须先在——三入口共用的唯一
   // 建档点（幂等 mkdir recursive；TUI 入口原早调已收编至此单点。建档对象是
   // 实际库路径的父目录：缺省 = 数据目录，显式注入/APP_DB_PATH 同样覆盖。
@@ -630,8 +663,22 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         // 规则——多会话并存时订阅方必须能从载荷分辨归属）。createSession /
         // loadSession / forkSession 三路接线统一经此镜像，/new 新会话自动同接线
         onLiveEvent: (sessionId, event) => ctx.emit('session/event', { sessionId, event }),
+        // D6 cordon 触发器（M7）：write-behind 批落失败（自动重试暂停后仍失败）
+        // 置降级旗——「服务看着在、账必丢」面拒新写意图。err 是 AppError（code
+        // = PERSIST_BATCH_WRITE_FAILED，message 带已写/剩余条数——write-behind
+        // 上报口径原样落账）
+        onError: (err) => {
+          cordoned = true;
+          ctx.logger.error('write-behind 落盘失败——cordon 降级面生效（submit/开新会话将 503，重启或人工处置后解除）', {
+            code: err.code,
+            error: err.message,
+          });
+        },
       })
     : undefined;
+
+  // boot 分区计时·里程碑③：持久层就绪（③ 段完——含首启建档/扫龄/孤儿清扫）
+  ctx.logger.debug('boot 装载分区计时：③ 持久层完', { ms: Math.round(performance.now() - bootStart) });
 
   /* ---- ③b 会话路由基建（S1 durable 键控总根因刀，骨架篇 §9.3）----
    * 四单槽（session/resumedFlag/durableRef + driverRef/chatRef）整体退役为
@@ -1379,13 +1426,13 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 真身由对应行 apply 期挂入、行回卷摘除——未开面/已卸载 = undefined = 各消费
    * 面原语义（纯 TUI 腿 / 补全 404）。防线注记：本桥只走 answerer 竞速注入，
    * 不在任何 Ring 2 行内注册 approval/answer handler（链序抢答禁行——spec 钉死） */
-  let approvalClaim: WebuiApprovalClaim | undefined;
+  let approvalFace: WebuiApprovalMount | undefined;
   let symbolsFace: LspSymbolsFace | undefined;
   /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用） */
   const webClaimOf = (req: ApprovalRequest): Promise<'approve' | 'reject' | 'always'> | undefined =>
     req.approvalId === undefined
       ? undefined // 无 id 载荷（防御位——ask 恒织入 randomUUID）
-      : approvalClaim?.(req.approvalId, {
+      : approvalFace?.claim(req.approvalId, {
           summary: req.summary,
           ...(req.reason !== undefined ? { reason: req.reason } : {}),
           ...(req.suggestedEntry !== undefined
@@ -1453,6 +1500,8 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 时 ui.confirm——fresh 作用域 answerer 绑它；headless 不传 = fail-closed）/
     // sandbox + allowlist（bash def 构造原料 + 守门行同源活数组）
     ...(opts.approvalPolicy === undefined ? {} : { approvalPolicy: opts.approvalPolicy }),
+    // daemon 刀一·P2 超时腿时长透传（测试面注小值；缺省 chat 件内 30min 常量）
+    ...(opts.approvalTimeoutMs === undefined ? {} : { approvalTimeoutMs: opts.approvalTimeoutMs }),
     // 刀 A：闭包真转发 opts（signal 透传到 ui.confirm——竞速败腿撤销链），
     // 非仅 arity 兼容（吞 opts = 撤销面静默断链，类型面≠运行面教训）
     ...(opts.interactive
@@ -1469,8 +1518,37 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       : {}),
     // 刀三 web 应答腿（claim 竞速注入）：answerer 竞速的 web 腿——闭包读晚绑
     // holder（webui 行未开面/已卸载 = undefined = 纯 TUI 腿原语义）。恒传：
-    // answerer 仅 confirm 在场注册，headless 形态本键闲置零触达
+    // answerer 注册闸另有判据（webAnswerActive），本键仅竞速腿本体
     webAnswer: webClaimOf,
+    // daemon 刀一·M2 answerer 注册闸判据 = 「daemon 形态 ∪ 晚绑 holder 在场」。
+    // 形态腿（恒真）的必要性是 boot 时序：首驱动 open 发生于 chat 件装载期（⑨
+    // 装载序首行内），早于 webui 行（第十四行）apply 挂 claim 桥——首驱动创建
+    // 时点 holder 尚不可见，按纯 holder 判据 boot 驱动 answerer 全线漏注册、其
+    // ask 瞬时 unavailable（conduct-gate 惰性传导同病族，骨架篇 §1.2 时序注）。
+    // daemon 形态 webui 强制开面是形态定义的一部分，「web 腿将在场」属形态级
+    // 知识、创建时点即合法。根路闸不动：headless run（interactive 无 confirm、
+    // 非 daemon、无 webui）两判据皆假 → 不注册 → 瞬时 unavailable 纪律保持；
+    // 勿用 webAnswer 键存在性判（恒传恒真，真 headless 形态 confirm 缺席即
+    // TypeError 击穿 fail-closed）
+    webAnswerActive: () => opts.daemon !== undefined || approvalFace !== undefined,
+    // daemon 刀一·per-ownership 未决审批帽（~10/owner）：帽满即该 owner 新 ask
+    // 即时收场 'unavailable'——防烂应用卡海淹没合法审批。ownerAppId undefined =
+    // 宿主桶（与登记簿 pendingCountBy 同判据；webui 行未开面 = face 缺席不闸）
+    webApprovalCapExceeded: (ownerAppId) =>
+      approvalFace !== undefined && approvalFace.pendingCountBy(ownerAppId) >= WEBUI_APPROVAL_CAP_PER_OWNER,
+    // daemon 刀一·heldSessions 租约守卫（P3 执法数据源）：daemon.json 判活且
+    // 持有目标会话 ⇒ 本进程拒开防双写者。daemon 自身形态不查（自己就是持有
+    // 者——省一次 fs 读且语义自洽）；登记面非锁，窄竞窗由库 cursor/incarnation
+    // 护栏第二防线兜住
+    ...(opts.daemon === undefined
+      ? {
+          heldElsewhere: (sessionId: string): boolean => {
+            const state = readDaemonState();
+            if (state === undefined || state.pid === process.pid) return false;
+            return isDaemonAlive(state) && state.heldSessions.includes(sessionId);
+          },
+        }
+      : {}),
     persistAllowlist: (draft) => allowlist.add(draft),
     sandbox,
     allowlist: () => allowlist.entries,
@@ -1660,13 +1738,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       },
       // UI 服务晚绑（② 段 let 槽位——ring1 装载回填后闭包才可达）
       ui: () => ui,
-      // claim 桥挂载点（刀三行面晚绑桥第一用例）：webui 行 apply 建 registry
-      // 后挂真身、ctx.effect 回卷摘除——holder 置空后 answerer 竞速退回纯 TUI 腿
+      // claim 桥挂载点（刀三行面晚绑桥第一用例；daemon 刀一拓宽为挂载对象）：
+      // webui 行 apply 建 registry 后挂真身（claim + pendingCountBy）、ctx.effect
+      // 回卷摘除——holder 置空后 answerer 竞速退回纯 TUI 腿、帽判据归零
       approvals: {
-        mountClaim: (claim) => {
-          approvalClaim = claim;
+        mountClaim: (mount) => {
+          approvalFace = mount;
           return () => {
-            if (approvalClaim === claim) approvalClaim = undefined;
+            if (approvalFace === mount) approvalFace = undefined;
           };
         },
       },
@@ -1676,6 +1755,22 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       // documentSymbol 查询晚绑桥（刀三行面晚绑桥第二用例——lsp 行挂真身；
       // 缺席 = 补全 404）
       symbolsFor: (path) => symbolsFace?.(path) ?? Promise.resolve(undefined),
+      // 打断腿（daemon 刀一·协议正确性层 = POST /api/sessions/:id/interrupt）：
+      // 非退役条目且 run 在飞 → driver.interrupt()（abort 当轮 run——捎跑续批
+      // 不传染，与 TUI Ctrl+C 同源面）；其余 false（404）。fire-and-forget：
+      // interrupt 只发信号不等结算，端点语义即「已请求」
+      interruptFor: (sessionId) => {
+        const entry = registry.entries.get(sessionId);
+        if (entry === undefined || entry.retired || !entry.driver.isRunning) return false;
+        void entry.driver.interrupt();
+        return true;
+      },
+      // cordon 旗活取值（D6）：降级面拒新写意图——submit/开新会话两端点 503，
+      // decide/interrupt/SSE/读面不拒（收场依赖面保全），health 披露 degraded
+      cordoned: () => cordoned,
+      // daemon token 鉴权物（P1）：daemon 形态注入（/api 族全量执法 + cookie
+      // 桥）；--port 手开形态缺省不传 = 回环三防线即闭环、免鉴权
+      ...(opts.daemon !== undefined ? { auth: { token: opts.daemon.token } } : {}),
       // 版本串（webui 边不含 app 模块——组合根注入）
       version: VERSION,
     },
@@ -1698,8 +1793,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   if (opts.noApps) composition = safeModeComposition(composition);
   // Web 通道开面注入（--port）：两树给 webui 行 merge config（enabled:true 起监听
   // + 端口值）。disabled/skip 行不越权复活——config 补丁惰性，激活语义仍由行
-  // 自身的 disabled/平台门控管；skip 计划行不带 config（loader 形状），只打激活行
-  if (opts.webuiPort !== undefined) composition = withWebuiPort(composition, opts.webuiPort);
+  // 自身的 disabled/平台门控管；skip 计划行不带 config（loader 形状），只打激活行。
+  // daemon 形态（M9 措辞统一）：webui 常开回环缺省 7860——daemon 携 port 走同一
+  // merge 面（形态是装配的选择非代码分叉）；与 --port 并存时 daemon 语义胜出
+  //（CLI 不该同时给，防御位取 daemon 值）
+  if (opts.daemon !== undefined) composition = withWebuiPort(composition, opts.daemon.port);
+  else if (opts.webuiPort !== undefined) composition = withWebuiPort(composition, opts.webuiPort);
   /* 应用组件在场断言（契约篇 §5.4）：合成后即刻赋 appGaps 真值——boot 首驱动
    * open（装载 ⑨ chat 件装载期）读缺场投影时已就位。缺场 = 应用级隔离不拒启
    * （声明了没装 = 用户裁量非发行事故）；安全模式下 Ring 2 全缺场 → 默认应用
@@ -2106,6 +2205,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   };
   const bootPartitioned = await loadPartitioned(partition);
   const ring2Load = bootPartitioned.merged;
+  // boot 分区计时·里程碑⑨：分区装载完（Ring 2/3 系统区 + 各应用区——jiti
+  // import + apply 全序列；Ring 1 行装载在 :1777 段已计入本窗）
+  ctx.logger.debug('boot 装载分区计时：⑨ 装载完', { ms: Math.round(performance.now() - bootStart) });
   // 各区装载结果活账（单区 reload 的他区真值源 + 卸词集旧词基准）：全量路整替
   let zoneLoads: ReadonlyMap<string, AppLoadResult> = bootPartitioned.byZone;
   // Kahn 残留行孤儿域清割（同 Ring 1 面防漏语义——全区分区装载完毕后统一收口）
@@ -2654,6 +2756,124 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       }
     });
   }
+
+  /* ---- ⑪ daemon boot 审批回放重挂（M8，契约篇 §6.8 P2 条末段）----
+   * daemon 形态扫 durable approval/asked 未决者（无配对 decided），闭合「有
+   * asked 无 decided」审计洞：已过期（asked 时间戳 + 30min ≤ 现在时）即时落账
+   * 'unavailable'/via timeout；未到期经**合成汇流点**重挂——webui 登记簿 claim
+   * 腿（face 已在 ⑨ 装载期挂真身）与超时腿（setTimeout 单调钟）竞速，先胜者
+   * 经汇流点落 decided（含 via 归因）。与「decide handler 只 resolve 绝不写
+   * durable」铁律（刀三端点面条）的兼容式 = 汇流点在此、非 webui claim handler
+   * ——handler 仍只 resolve，落账在重挂汇流点，单写漏斗形状保持。进程内形态
+   * 整段跳过（boot registry 空、悬案不复活——既有边界）。根路审批在 daemon
+   * 下由 headless fail-closed 即时 unavailable（⑩ 未注册 = 零腿收场），不经此。 */
+  if (opts.daemon !== undefined && persistence !== undefined) {
+    /** 未决 asked 条目（durable 行投影——time 即计时基准） */
+    const askedRows = new Map<
+      string,
+      { readonly sessionId: string; readonly askedAt: number; readonly summary: string }
+    >();
+    const decidedIds = new Set<string>();
+    // 翻页扫描（time DESC 向更旧走）：审批词对只来自 run 边界，密度低；硬页
+    // 上限 10 页（万行）远超 30min 窗内的合理存量——超限的更旧悬案留给下次
+    // boot（诚实边界：扫描窗有界，落账不丢只延后）
+    let replayCursor: EventQueryCursor | undefined;
+    for (let page = 0; page < 10; page += 1) {
+      const res = persistence.queryEvents({
+        types: ['approval/asked', 'approval/decided'],
+        limit: 1000,
+        ...(replayCursor === undefined ? {} : { cursor: replayCursor }),
+      });
+      for (const row of res.rows) {
+        const data = row.data as { approvalId?: unknown; summary?: unknown };
+        if (typeof data.approvalId !== 'string') continue; // 载荷形状外（防御位）
+        if (row.type === 'approval/asked') {
+          // 后写胜出：同 id 多次 asked（理论上无）取最新行
+          askedRows.set(data.approvalId, {
+            sessionId: row.sessionId,
+            askedAt: row.time,
+            summary: typeof data.summary === 'string' ? data.summary : '',
+          });
+        } else {
+          decidedIds.add(data.approvalId);
+        }
+      }
+      if (res.nextCursor === undefined) break;
+      replayCursor = res.nextCursor;
+    }
+    const pendingAsks = [...askedRows.entries()]
+      .filter(([id]) => !decidedIds.has(id))
+      .map(([id, info]) => ({ approvalId: id, ...info }));
+    // 落账目标解析：registry 活条目优先（真身 Session——客户端动作可能已重开
+    // 该会话），否则 loadSession 续接线副本（纯为 append decided + flush）
+    const sessionForReplay = (sessionId: string): Session | undefined => {
+      const entry = registry.entries.get(sessionId);
+      if (entry !== undefined && !entry.retired) return entry.session;
+      return persistence === undefined ? undefined : persistence.loadSession(sessionId);
+    };
+    /** 合成汇流点：append decided（loadSession 副本 append 后 flush 屏障落盘） */
+    const appendReplayDecided = (
+      ask: { readonly approvalId: string; readonly sessionId: string },
+      decision: 'approve' | 'reject' | 'always' | 'unavailable',
+      via: 'web' | 'timeout',
+    ): void => {
+      const session = sessionForReplay(ask.sessionId);
+      if (session === undefined) return; // 会话已物理不在（防御位）——无落点不抛
+      session.append('approval/decided', { approvalId: ask.approvalId, decision, via });
+    };
+    const now = Date.now();
+    // 超时基准与 answerer 腿同源（opts.approvalTimeoutMs 测试注小值；缺省 30min）
+    const replayTimeoutMs = opts.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+    const expired = pendingAsks.filter((ask) => ask.askedAt + replayTimeoutMs <= now);
+    const unexpired = pendingAsks.filter((ask) => ask.askedAt + replayTimeoutMs > now);
+    for (const ask of expired) {
+      appendReplayDecided(ask, 'unavailable', 'timeout');
+    }
+    if (expired.length > 0) {
+      await persistence.flush().catch(() => undefined); // 屏障落盘（失败由 cordon/下轮 boot 兜）
+      ctx.logger.debug(`boot 审批回放：${expired.length} 条已过期即时落账 unavailable`);
+    }
+    // 未到期者重挂（fire-and-forget——竞速腿最长 30min，不阻 boot 返回）
+    for (const ask of unexpired) {
+      void (async () => {
+        const webLeg = approvalFace?.claim(ask.approvalId, {
+          summary: ask.summary,
+          ownership: { sessionId: ask.sessionId },
+        });
+        let timeoutTimer: NodeJS.Timeout | undefined;
+        const timeoutLeg = new Promise<'timeout'>((resolve) => {
+          timeoutTimer = setTimeout(() => resolve('timeout'), Math.max(0, ask.askedAt + replayTimeoutMs - Date.now()));
+        });
+        try {
+          // 汇流点竞速：decide handler 只 resolve（claim promise），落账在此
+          const winner = await Promise.race(
+            webLeg === undefined
+              ? [timeoutLeg.then(() => ({ via: 'timeout' as const, value: undefined }))]
+              : [
+                  webLeg.then((value) => ({ via: 'web' as const, value })),
+                  timeoutLeg.then(() => ({ via: 'timeout' as const, value: undefined })),
+                ],
+          );
+          if (winner.via === 'web' && winner.value !== undefined) {
+            appendReplayDecided(ask, winner.value, 'web');
+          } else {
+            appendReplayDecided(ask, 'unavailable', 'timeout');
+          }
+          await persistence?.flush(ask.sessionId).catch(() => undefined);
+        } catch {
+          // 回放腿异常不传染 boot（已过会话的悬案——下次 boot 重扫重挂）
+        } finally {
+          clearTimeout(timeoutTimer);
+        }
+      })();
+    }
+    if (unexpired.length > 0) {
+      ctx.logger.debug(`boot 审批回放：${unexpired.length} 条未决重挂（claim/超时竞速）`);
+    }
+  }
+
+  // boot 分区计时·总耗（返回前——attach/start 等客户端动作不计入）
+  ctx.logger.debug('boot 装载分区计时：总耗', { ms: Math.round(performance.now() - bootStart) });
 
   return {
     ctx,

@@ -155,6 +155,16 @@ export function createPendingApprovals(): PendingApprovals {
       return out;
     },
 
+    /** 未决数按 ownership 域分桶（daemon 刀一帽面数据源——undefined 键 = 宿主桶） */
+    pendingCountBy(ownerAppId: string | undefined): number {
+      let count = 0;
+      for (const entry of entries.values()) {
+        if (entry.decided !== undefined) continue;
+        if (entry.ownership?.appId === ownerAppId) count += 1;
+      }
+      return count;
+    },
+
     /** POST decide（值域已由端点闭集校验）：undefined = 槽从未存在（404）；superseded = 已决旗先置 */
     decide(
       approvalId: string,
@@ -191,6 +201,13 @@ export interface PendingApprovals {
   readonly pending: (approvalId: string) => WebuiPendingApproval | undefined;
   /** 未决清单（GET /api/approvals） */
   readonly list: () => readonly WebuiPendingApproval[];
+  /**
+   * 未决数按 ownership 域分桶计数（daemon 刀一·per-ownership 帽数据源：
+   * ~10/owner 帽满即时收场——answerer ask 时点消费）。ownerAppId undefined =
+   * 宿主桶（根路/无域审批的归宿）；与 list() 同判据（未决条目），豁免
+   * MAX_ENTRIES 逐出帽外的已决残留
+   */
+  readonly pendingCountBy: (ownerAppId: string | undefined) => number;
   /** decide（三态回执判别——404 由调用方译） */
   readonly decide: (
     approvalId: string,

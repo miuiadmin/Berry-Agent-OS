@@ -16,6 +16,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
@@ -25,6 +26,8 @@ import type { PendingApprovals } from './approvals.js';
 import { listWorkspaceFiles } from './files.js';
 import {
   WEBUI_BODY_LIMIT_BYTES,
+  WEBUI_REQUEST_ID_CACHE,
+  WEBUI_SESSION_COOKIE,
   type WebuiAppDeps,
   type WebuiApprovalDecision,
   type WebuiSseEnvelope,
@@ -33,6 +36,9 @@ import {
 /** submit 请求体 schema（typebox schema-first 校验——端点面 POST 载荷两件之一） */
 const SUBMIT_BODY_SCHEMA = Type.Object({
   text: Type.String({ minLength: 1, description: '用户消息文本（空串拒绝——与 TUI 输入面同语义）' }),
+  // requestId（daemon 刀一·协议正确性层）：客户端重试幂等键——可选，携带且
+  // 服务端近见即 200 去重回执不双投（客户端 onopen 恒重拉 + 网络重试窗）
+  requestId: Type.Optional(Type.String({ maxLength: 64, description: '重试幂等键（同键重试不双投）' })),
 });
 
 /** decide 请求体 schema（刀三：decision 闭集值域校验在路由层——400 同码同因） */
@@ -58,6 +64,39 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * token 常时比对（长度先核——timingSafeEqual 等长契约；长度差即 false 不入
+ * 比对，长度本身非机密）
+ */
+function tokenEquals(a: string, b: string): boolean {
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  return ba.length === bb.length && timingSafeEqual(ba, bb);
+}
+
+/**
+ * 请求鉴权（daemon 刀一·P1：Bearer ∪ cookie 两源同值）。Bearer = curl/TUI
+ * attach 面；cookie = SPA 桥面（POST /api/auth 签发的 HttpOnly cookie，值 =
+ * token 本身）。auth 缺席（非 daemon `--port` 形态）不判——回环三防线即闭环。
+ */
+function authorize(req: IncomingMessage, auth: { readonly token: string }): boolean {
+  const header = req.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ') && tokenEquals(header.slice(7), auth.token)) {
+    return true;
+  }
+  const cookie = req.headers.cookie;
+  if (typeof cookie === 'string') {
+    for (const part of cookie.split(';')) {
+      const eq = part.indexOf('=');
+      if (eq === -1) continue;
+      if (part.slice(0, eq).trim() === WEBUI_SESSION_COOKIE && tokenEquals(part.slice(eq + 1).trim(), auth.token)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * 绑定防线① 的值域判定（app.ts 装配期执法面——三值与 Host/Origin 白名单
  * 对称：127.0.0.1 / localhost / ::1；IPv6 方括号形态剥壳后比对）。
  * @returns true = 合法回环绑定值
@@ -73,6 +112,12 @@ export interface WebuiServerOptions {
   readonly port: number;
   /** 监听地址（已过绑定防线①的回环值） */
   readonly host: string;
+  /**
+   * daemon token 鉴权物（daemon 刀一·P1；缺省不传 = 非 daemon `--port` 形态
+   * 免鉴权——回环三防线即闭环）。在场时 /api 族全量执法（豁免 /api/health
+   * 公开探活与 /api/auth 签发端点自身）
+   */
+  readonly auth?: { readonly token: string };
   /** 宿主面闭包（清单/投影/提交三取数腿） */
   readonly deps: WebuiAppDeps;
   /** SSE 连接扇出面（GET /api/events 升级产物归它管理） */
@@ -98,8 +143,12 @@ export function createWebuiServer(opts: WebuiServerOptions): { server: Server; c
     `http://[::1]:${opts.port}`,
   ]);
 
+  // submit requestId 去重缓存（daemon 刀一：Map 插入序 LRU——超帽逐出最旧；
+  // 服务级单份，跨会话共享〔requestId 客户端生成全局唯一约定〕）
+  const requestIds = new Map<string, true>();
+
   const server = createServer((req, res) => {
-    void handle(req, res, opts, hostWhitelist, originWhitelist);
+    void handle(req, res, opts, hostWhitelist, originWhitelist, requestIds);
   });
 
   return {
@@ -112,13 +161,14 @@ export function createWebuiServer(opts: WebuiServerOptions): { server: Server; c
   };
 }
 
-/** 单请求处理主管线：三防线 → 微路由（异常全收口 500，不裸抛进 http 层） */
+/** 单请求处理主管线：三防线 → 鉴权门 → 微路由（异常全收口 500，不裸抛进 http 层） */
 async function handle(
   req: IncomingMessage,
   res: ServerResponse,
   opts: WebuiServerOptions,
   hostWhitelist: ReadonlySet<string>,
   originWhitelist: ReadonlySet<string>,
+  requestIds: Map<string, true>,
 ): Promise<void> {
   try {
     // 防线② Host 头白名单（HTTP/1.1 必带；缺失/白名单外一律 403）
@@ -136,7 +186,7 @@ async function handle(
       return;
     }
     const url = new URL(req.url ?? '/', 'http://localhost');
-    await route(req, res, url, opts);
+    await route(req, res, url, opts, requestIds);
   } catch (err) {
     // 兜底收口（路由内已各自收 JSON 错——此处是未预期异常的最后一道）
     if (!res.headersSent) {
@@ -147,12 +197,58 @@ async function handle(
   }
 }
 
-/** 微路由（方法 + 路径分发；/api 族 JSON 应答、其余走静态分发） */
-async function route(req: IncomingMessage, res: ServerResponse, url: URL, opts: WebuiServerOptions): Promise<void> {
+/** 微路由（鉴权门 → 方法 + 路径分发；/api 族 JSON 应答、其余走静态分发） */
+async function route(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+  opts: WebuiServerOptions,
+  requestIds: Map<string, true>,
+): Promise<void> {
   const { pathname } = url;
 
+  // 鉴权门（daemon 刀一·P1）：auth 在场（daemon 形态）时 /api 族全量 401——
+  // 前置于 SSE 升级（鉴权失败不占 channel 连接帽，防 16 帽被无 token 请求
+  // 占满的 DoS 面）。豁免两端点：/api/health（公开探活——M4 两语义分立：它
+  // 不构成活证）/ /api/auth（签发端点自身验 token）。静态资产不鉴权：SPA 壳
+  // 先上屏、首屏引导贴 token 换 cookie（M1 ① 签发过鉴权）；GET / 与静态
+  // 不附 Set-Cookie（cookie 只在 /api/auth 应答头出现）
+  if (
+    opts.auth !== undefined &&
+    pathname.startsWith('/api/') &&
+    pathname !== '/api/health' &&
+    pathname !== '/api/auth' &&
+    !authorize(req, opts.auth)
+  ) {
+    sendJson(res, 401, { error: 'unauthorized' });
+    return;
+  }
+  // cookie 签发端点（daemon 刀一·M1 ① 签发过鉴权）：Bearer（或既有合法
+  // cookie）验证通过 → 签发 HttpOnly cookie。cookie 值 = token 本身（两源
+  // 同值判据）；HttpOnly 断脚本读、SameSite=Strict 断跨源携带、Path=/ 全径、
+  // 无 Domain（回环无域可授权）无 Secure（回环明文 http）——红线：token 不
+  // 进 URL/查询参数/CLI 参数（history/Referer/ps 泄露链）
+  if (pathname === '/api/auth' && req.method === 'POST') {
+    if (opts.auth === undefined || !authorize(req, opts.auth)) {
+      sendJson(res, 401, { error: 'unauthorized' });
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Set-Cookie': `${WEBUI_SESSION_COOKIE}=${opts.auth.token}; HttpOnly; SameSite=Strict; Path=/`,
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   if (pathname === '/api/health' && req.method === 'GET') {
-    sendJson(res, 200, { ok: true, version: opts.version });
+    // 公开探活（M4 ①：无 token 可达——「活证」须 token 端点真握手，两语义
+    // 分立）；cordon 降级披露（D6：ok 仍 true〔进程活〕+ degraded 字段——
+    // durable 落盘失败降级态对 operator 可见）
+    sendJson(res, 200, {
+      ok: true,
+      version: opts.version,
+      ...(opts.deps.cordoned?.() === true ? { degraded: 'persistence' } : {}),
+    });
     return;
   }
   if (pathname === '/api/sessions' && req.method === 'GET') {
@@ -172,6 +268,12 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL, opts: 
       JSON.parse(body === '' ? '{}' : body);
     } catch {
       sendJson(res, 400, { error: 'invalid json' });
+      return;
+    }
+    // cordon 拒面（daemon 刀一·D6）：降级期拒新写意图——「服务看着在、账必
+    // 丢」不如响亮拒。decide/interrupt/SSE/读面可达不拒（operator 收场面保全）
+    if (opts.deps.cordoned?.() === true) {
+      sendJson(res, 503, { error: 'cordoned' });
       return;
     }
     const summary = await opts.deps.openSession();
@@ -225,13 +327,47 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL, opts: 
       sendJson(res, 400, { error: 'invalid body' });
       return;
     }
+    // cordon 拒面（daemon 刀一·D6）：同开新会话端点——新写意图拒 503
+    if (opts.deps.cordoned?.() === true) {
+      sendJson(res, 503, { error: 'cordoned' });
+      return;
+    }
+    // requestId 命中早退（daemon 刀一·协议正确性层）：同键重试（网络重发/
+    // 断线重连窗）回 200 去重回执不双投——客户端按 accepted 语义幂等收场
+    const requestId = (parsed as { requestId?: string }).requestId;
+    if (requestId !== undefined && requestIds.has(requestId)) {
+      sendJson(res, 200, { ok: true, deduplicated: true });
+      return;
+    }
     // 目标不存在或已闭（retired）= 404（冷读 m3：已闭会话 v1 只读，复活面挂刀三）
     const ok = opts.deps.submitTo(decodeSegment(submit[1]!), (parsed as { text: string }).text);
     if (!ok) {
       sendJson(res, 404, { error: 'session not found' });
       return;
     }
+    // requestId 记账：成功投递后才记——404 路不记账（会话晚活可重投）。超帽
+    // 按 Map 插入序逐出最旧（粗粒度 LRU——重试窗短够用）
+    if (requestId !== undefined) {
+      requestIds.set(requestId, true);
+      if (requestIds.size > WEBUI_REQUEST_ID_CACHE) {
+        const oldest = requestIds.keys().next().value;
+        if (oldest !== undefined) requestIds.delete(oldest);
+      }
+    }
     sendJson(res, 202, { ok: true });
+    return;
+  }
+  // 打断在飞 run（daemon 刀一·协议正确性层 = POST /api/sessions/:id/interrupt）：
+  // driver.interrupt——abort 当轮 run（捎跑续批不传染，与 TUI Ctrl+C 打断同源
+  // 面）；目标不在册/已闭/无在飞 run = 404
+  const interrupt = /^\/api\/sessions\/([^/]+)\/interrupt$/.exec(pathname);
+  if (interrupt !== null && req.method === 'POST') {
+    if (opts.deps.interruptFor === undefined) {
+      sendJson(res, 404, { error: 'not found' });
+      return;
+    }
+    const interrupted = opts.deps.interruptFor(decodeSegment(interrupt[1]!));
+    sendJson(res, interrupted ? 200 : 404, interrupted ? { interrupted: true } : { error: 'session not found' });
     return;
   }
   // 未决审批清单（刀三 = GET /api/approvals）：registry 已决过滤产物——刷新/

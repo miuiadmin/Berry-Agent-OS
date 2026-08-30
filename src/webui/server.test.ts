@@ -546,3 +546,203 @@ function httpRequestRawNoHost(port: number, path: string): Promise<{ status: num
     socket.on('error', reject);
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* daemon 刀一（契约篇 §6.8）：token 鉴权门 / cookie 桥 / SSE 401 前置   */
+/* / cordon 拒面 / requestId 去重 / interrupt 端点——独立 auth 服务器     */
+/* ------------------------------------------------------------------ */
+
+describe('webui 服务面：daemon 形态鉴权与协议正确性层', () => {
+  /** 鉴权 token（任意串——服务面只做常时比对不问格式） */
+  const TOKEN = 'unit-daemon-token-0123456789abcdef';
+  const AUTH = { authorization: `Bearer ${TOKEN}` };
+
+  let port: number;
+  let chan: WebuiChannel;
+  let close: () => Promise<void>;
+  /** cordon 闩（闭包翻转——D6 拒面在活服务器上开合） */
+  let cordoned = false;
+  /** submit 投递账（requestId 去重断言面：真投递次数 vs 应答次数） */
+  const delivered: string[] = [];
+
+  beforeAll(async () => {
+    port = await grabPort();
+    chan = new WebuiChannel();
+    const staticRoot = mkdtempSync(join(tmpdir(), 'webui-auth-'));
+    writeFileSync(join(staticRoot, 'index.html'), '<html>shell</html>');
+    const { server, close: closeFn } = createWebuiServer({
+      port,
+      host: '127.0.0.1',
+      auth: { token: TOKEN },
+      deps: stubDeps({
+        submitTo: (id, text) => {
+          delivered.push(`${id}:${text}`);
+          return id === 'live';
+        },
+        cordoned: () => cordoned,
+        interruptFor: (id) => id === 'live',
+      }),
+      channel: chan,
+      approvals: createPendingApprovals(),
+      staticRoot,
+      version: 'test-1.0.0',
+    });
+    close = closeFn;
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));
+  });
+
+  afterAll(async () => {
+    chan.dispose();
+    await close();
+  });
+
+  it('鉴权门：无 token 401 / 错 token 401 / Bearer 200；health 公开探活豁免', async () => {
+    // health 两语义分立（M4）：无证可达的最小载荷——不构成活证
+    const health = await send(port, { method: 'GET', path: '/api/health' });
+    expect(health.status).toBe(200);
+    expect(health.text).toContain('"ok":true');
+    // /api 族无证 401
+    expect((await send(port, { method: 'GET', path: '/api/sessions' })).status).toBe(401);
+    // 错 token 同 401（不披露判据差异）
+    expect(
+      (await send(port, { method: 'GET', path: '/api/sessions', headers: { authorization: 'Bearer wrong' } })).status,
+    ).toBe(401);
+    // 对 token 200
+    expect((await send(port, { method: 'GET', path: '/api/sessions', headers: AUTH })).status).toBe(200);
+    // SPA 壳静态不鉴权（M1 ①：先上屏、贴 token 换 cookie 的一次性引导面）
+    const shell = await send(port, { method: 'GET', path: '/' });
+    expect(shell.status).toBe(200);
+    expect(shell.text).toContain('shell');
+  });
+
+  it('cookie 桥：POST /api/auth 过鉴权签发 HttpOnly cookie，cookie 单源可达 /api 面', async () => {
+    // 错 token 不签发
+    const bad = await send(port, {
+      method: 'POST',
+      path: '/api/auth',
+      headers: { authorization: 'Bearer wrong', 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(bad.status).toBe(401);
+    expect(bad.headers['set-cookie']).toBeUndefined();
+    // 对 token 签发：值 = token 本身 + HttpOnly/SameSite=Strict/Path=/ 全家
+    const ok = await send(port, {
+      method: 'POST',
+      path: '/api/auth',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(ok.status).toBe(200);
+    const cookie = (ok.headers['set-cookie'] ?? []).join(';');
+    expect(cookie).toContain(`daemon_session=${TOKEN}`);
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+    // cookie 单源（无 Bearer）达 /api 面——SPA 桥成立的物证
+    const viaCookie = await send(port, {
+      method: 'GET',
+      path: '/api/sessions',
+      headers: { cookie: `daemon_session=${TOKEN}` },
+    });
+    expect(viaCookie.status).toBe(200);
+    // 坏 cookie 值 401
+    const badCookie = await send(port, {
+      method: 'GET',
+      path: '/api/sessions',
+      headers: { cookie: 'daemon_session=nope' },
+    });
+    expect(badCookie.status).toBe(401);
+  });
+
+  it('SSE 鉴权前置：无 token 的 /api/events 401 JSON（不占连接帽不升级流）', async () => {
+    const res = await send(port, { method: 'GET', path: '/api/events' });
+    expect(res.status).toBe(401);
+    // 应答是 JSON 面非 event-stream（升级未发生）
+    expect(res.headers['content-type']).toContain('application/json');
+    expect(res.text).toContain('unauthorized');
+  });
+
+  it('requestId 去重：同键重试 200 去重回执不双投；404 路不记账；LRU 超帽逐出最旧', async () => {
+    const post = (body: string) =>
+      send(port, {
+        method: 'POST',
+        path: '/api/sessions/live/submit',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body,
+      });
+    // 首投 202（真投递）
+    expect((await post(JSON.stringify({ text: '第一投', requestId: 'r-1' }))).status).toBe(202);
+    // 同键重试：200 去重回执 + 不双投
+    const retry = await post(JSON.stringify({ text: '第一投', requestId: 'r-1' }));
+    expect(retry.status).toBe(200);
+    expect(JSON.parse(retry.text)).toEqual({ ok: true, deduplicated: true });
+    expect(delivered.filter((d) => d.endsWith('第一投')).length).toBe(1);
+    // 404 路不记账：未知会话同键投递 404 后，活会话重投同键 = 新投递（202 非去重）
+    expect(
+      (
+        await send(port, {
+          method: 'POST',
+          path: '/api/sessions/ghost/submit',
+          headers: { ...AUTH, 'content-type': 'application/json' },
+          body: JSON.stringify({ text: 'x', requestId: 'r-2' }),
+        })
+      ).status,
+    ).toBe(404);
+    const second = await post(JSON.stringify({ text: '二投', requestId: 'r-2' }));
+    expect(second.status).toBe(202);
+    expect(JSON.parse(second.text)).toEqual({ ok: true });
+    // LRU：r-1/r-2 在册 → 再投 127 个新键即 129 超 128 帽，逐出最旧 r-1
+    for (let i = 0; i < 127; i += 1) {
+      await post(JSON.stringify({ text: `fill-${i}`, requestId: `f-${i}` }));
+    }
+    // r-1 已被逐出：重投同键 = 新投递（202 非去重回执）
+    const rePost = await post(JSON.stringify({ text: '第一投', requestId: 'r-1' }));
+    expect(rePost.status).toBe(202);
+    expect(delivered.filter((d) => d.endsWith('第一投')).length).toBe(2);
+  });
+
+  it('cordon 拒面（D6）：写意图 503 / 读面不拒 / health 披露 degraded', async () => {
+    cordoned = true;
+    try {
+      // 开新会话与 submit 两写意图拒 503（「服务看着在、账必丢」不如响亮拒）
+      const open = await send(port, {
+        method: 'POST',
+        path: '/api/sessions',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(open.status).toBe(503);
+      expect(open.text).toContain('cordoned');
+      const submit = await send(port, {
+        method: 'POST',
+        path: '/api/sessions/live/submit',
+        headers: { ...AUTH, 'content-type': 'application/json' },
+        body: JSON.stringify({ text: '降级期投递' }),
+      });
+      expect(submit.status).toBe(503);
+      // 读面（清单）不拒——operator 收场面保全
+      expect((await send(port, { method: 'GET', path: '/api/sessions', headers: AUTH })).status).toBe(200);
+      // health：ok 仍 true（进程活）+ degraded 披露降级因
+      const health = await send(port, { method: 'GET', path: '/api/health' });
+      expect(health.status).toBe(200);
+      expect(JSON.parse(health.text)).toEqual({ ok: true, version: 'test-1.0.0', degraded: 'persistence' });
+    } finally {
+      cordoned = false;
+    }
+    // 闩复位即恢复收写
+    const recovered = await send(port, {
+      method: 'POST',
+      path: '/api/sessions/live/submit',
+      headers: { ...AUTH, 'content-type': 'application/json' },
+      body: JSON.stringify({ text: '恢复后投递', requestId: 'after-cordon' }),
+    });
+    expect(recovered.status).toBe(202);
+  });
+
+  it('interrupt 端点：命中 200 {interrupted:true} / 不在册 404', async () => {
+    const hit = await send(port, { method: 'POST', path: '/api/sessions/live/interrupt', headers: AUTH });
+    expect(hit.status).toBe(200);
+    expect(JSON.parse(hit.text)).toEqual({ interrupted: true });
+    const miss = await send(port, { method: 'POST', path: '/api/sessions/ghost/interrupt', headers: AUTH });
+    expect(miss.status).toBe(404);
+  });
+});

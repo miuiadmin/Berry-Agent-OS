@@ -10,7 +10,7 @@
 
 export { ConversationDriver } from './conversation.js';
 export type { DeliverOptions, DeliverChannel, ConversationDriverDeps, RunSettled } from './conversation.js';
-export { createChatApp, CHAT_APP_ID } from './app.js';
+export { createChatApp, CHAT_APP_ID, DEFAULT_APPROVAL_TIMEOUT_MS } from './app.js';
 export type {
   ChatAppDeps,
   ChatControls,

@@ -69,6 +69,9 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
     deps,
     channel,
     approvals,
+    // daemon token 鉴权物（daemon 刀一·P1）：daemon 形态组合根注入——/api 族
+    // 全量执法 + cookie 桥；--port 手开形态缺省免鉴权（回环三防线即闭环）
+    ...(deps.auth !== undefined ? { auth: deps.auth } : {}),
     // 静态根 = 本件目录（位置事实而非声明：tsc 直出形态下 dist/webui 即模块
     // 目录，vite 产物同目录共存；dev 形态缺 index.html = 静态 404 诊断态）
     staticRoot: import.meta.dirname,
@@ -85,9 +88,13 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
   }); // 行作用域自动退订（/reload 回卷）
   deps.addDisplay(channel.displaySink); // 无注销器——closed 旗标自守（channel.dispose 后 no-op）
   const detach = deps.ui().attach(channel.backend); // UiService 广播面接入（notify/status 推全部连接）
-  // claim 桥挂真身（刀三行面晚绑桥第一用例）：answerer 竞速的 web 腿自此可达；
+  // claim 桥挂真身（刀三行面晚绑桥第一用例；daemon 刀一拓宽：claim + 帽面
+  // 数据源 pendingCountBy 两键同挂——answerer 帽判据与竞速腿同一登记簿单源）；
   // 摘除器在 effect 回卷先调——holder 置空后竞速退回纯 TUI 腿
-  const unmountClaim = deps.approvals.mountClaim(approvals.claim);
+  const unmountClaim = deps.approvals.mountClaim({
+    claim: approvals.claim,
+    pendingCountBy: approvals.pendingCountBy,
+  });
 
   // 回卷编舞（LIFO：本 effect 最先回卷）：先摘 claim 桥 → 登记簿卫生（未决
   // 不结算——见 approvals.ts 模块头）→ 摘广播后端 → 废弃通道（毁全部 SSE

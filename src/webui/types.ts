@@ -119,6 +119,19 @@ export type WebuiApprovalClaim = (
   detail: WebuiApprovalDetail,
 ) => Promise<WebuiApprovalDecision> | undefined;
 
+/**
+ * claim 桥挂载物（daemon 刀一·per-ownership 帽拓宽）：原桥只挂 claim 函数，
+ * 帽面数据源（pendingCountBy）在 webui 行 apply 内部不可达——拓宽为挂载对象，
+ * answerer 的帽判据与竞速腿同一登记簿单源。行回卷整体摘除（两键同生死——
+ * 它们本就是同一簿的两面）。
+ */
+export interface WebuiApprovalMount {
+  /** claim 面（answerer 竞速的 web 腿） */
+  readonly claim: WebuiApprovalClaim;
+  /** 未决数按 ownership 域分桶（帽面数据源——undefined 键 = 宿主桶） */
+  readonly pendingCountBy: (ownerAppId: string | undefined) => number;
+}
+
 /** GET /api/approvals 清单条目（未决审批——卡片恢复/侧栏角标面数据源） */
 export interface WebuiPendingApproval {
   /** 审批 id（ask 内 randomUUID——卡片键） */
@@ -192,10 +205,11 @@ export interface WebuiAppDeps {
   /** ctx.ui 聚合面活取值（attach webui 广播后端用——builtins 构造点早于 ring1 装载） */
   readonly ui: () => UiService;
   /**
-   * claim 桥挂载点（刀三行面晚绑桥第一用例）：apply 建 registry 后挂真身，
-   * 返回摘除器（ctx.effect 回卷调——holder 置空，answerer 竞速退回纯 TUI 腿）。
+   * claim 桥挂载点（刀三行面晚绑桥第一用例；daemon 刀一拓宽为挂载对象）：
+   * apply 建 registry 后挂真身（claim + pendingCountBy 两键同挂），返回摘除器
+   * （ctx.effect 回卷调——holder 置空，answerer 竞速退回纯 TUI 腿）。
    */
-  readonly approvals: { readonly mountClaim: (claim: WebuiApprovalClaim) => () => void };
+  readonly approvals: { readonly mountClaim: (mount: WebuiApprovalMount) => () => void };
   /**
    * 工作区根活取值（刀三 @-mention 文件补全行走锚）：返回**原始 workspace**
    * （与 fs 工具族/LSP resolvePath 同锚——canonical 差集 v1 不入补全面，spec 钉死）。
@@ -207,9 +221,45 @@ export interface WebuiAppDeps {
    * 未活实例 fire-and-forget 预热中。didOpen 副作用（文档同步盘真相）注记披露。
    */
   readonly symbolsFor: (path: string) => Promise<WebuiSymbolQuery | undefined>;
+  /**
+   * 打断目标会话在飞 run（daemon 刀一·协议正确性层 = `POST /api/sessions/:id/interrupt`
+   * 腿）：registry 条目 driver.interrupt——abort 当轮 run（捎跑续批不传染，与
+   * TUI Ctrl+C 打断同源面）。@returns 目标不在册/已闭/无在飞 run = false（404）
+   */
+  readonly interruptFor?: (sessionId: string) => boolean;
+  /**
+   * cordon 旗活取值（daemon 刀一·D6：write-behind 落盘失败置位——降级面拒绝
+   * 新写意图防「服务看着在、账必丢」）。true = 拒面生效：submit 与开新会话
+   * 两端点 503；decide/interrupt/SSE/读面可达不拒（operator 收场面保全）；
+   * health 披露 degraded。缺省不传 = 无降级面（非 daemon 形态）。
+   */
+  readonly cordoned?: () => boolean;
+  /**
+   * daemon token 鉴权物（daemon 刀一·P1：组合根 daemon 形态注入；缺省不传 =
+   * `--port` 手开形态免鉴权——回环三防线即闭环）。在场时 /api 族全量执法
+   *（豁免 /api/health 探活与 /api/auth 签发自身）+ POST /api/auth cookie 桥。
+   */
+  readonly auth?: { readonly token: string };
   /** 宿主版本号（GET /api/health 报告面——app/version.ts 同源经组合根注入，webui 边不含 app 模块） */
   readonly version: string;
 }
+
+/** daemon 鉴权 cookie 名（P1 M1 cookie 桥——非品牌词面；值 = token 本身） */
+export const WEBUI_SESSION_COOKIE = 'daemon_session';
+
+/**
+ * submit requestId 去重缓存帽（daemon 刀一·协议正确性层：客户端重试同
+ * requestId 不双投——服务端 LRU 按 UUID 插入序逐出最旧；128 覆盖正常重试窗）
+ */
+export const WEBUI_REQUEST_ID_CACHE = 128;
+
+/**
+ * per-ownership 未决审批帽（daemon 刀一·随刀件，~10/owner）：帽满即该 owner
+ * 新 ask 即时收场 'unavailable'（fail-closed 同族）——防烂应用卡海塞满
+ * registry MAX_ENTRIES=100 淹没合法审批。ownerAppId undefined = 宿主桶同帽
+ * （根 ask 只来自 exec/fetch 服务路与 admin 闸路，多服务路并发合法审批同帽互济）
+ */
+export const WEBUI_APPROVAL_CAP_PER_OWNER = 10;
 
 /* ------------------------------------------------------------------ */
 /* SSE 线格式（帧合成钉死：每帧 data 载荷恒整体单次 JSON.stringify 单行） */

@@ -152,6 +152,13 @@ export async function answerApproval(
  */
 export const CHAT_APP_ID = 'chat';
 
+/**
+ * 审批超时预算（daemon 刀一·P2 A2 案缺省值）：无 TUI 应答腿形态（daemon）ask
+ * 30min fail-closed 落 'unavailable'——「明早接着批」止于首个夜间审批的诚实
+ * 语义（run 吊死更糟）；测试经 ChatAppDeps.approvalTimeoutMs 收短注入。
+ */
+export const DEFAULT_APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
+
 /* ------------------------------------------------------------------ */
 /* ctx.agent 服务面（自 agent-service.ts 迁入——attach 退役后服务与     */
 /* 驱动同件构造，无游离态；类型面公开导出不变，消费方局部结构面免改动） */
@@ -299,6 +306,15 @@ export interface DriverRegistry {
    * **同值写零通知**（切到已聚焦会话 = 无变化，防无谓清屏重画）。Disposer 注销。
    */
   onFocusChange(cb: (sessionId: string) => void): Disposer;
+  /**
+   * 订阅条目集变化（daemon 刀一·契约篇 §6.8：daemon.json heldSessions 租约
+   * 登记的驱动面）。两写点各通知恰一次：open 新条目入表 / retire 条目退役；
+   * 幂等命中（open 同 id）/ 查无不通知。订阅者收到信号后自行从 entries 派生
+   * 持有集（非退役条目 ∪ 退役在飞条目——retire 拒绝 run 中条目，故该派生式
+   * 的变化点恰为 open/retire 两处，isRunning 迁移不改持有集）。违约隔离同
+   * onFocusChange。Disposer 注销。
+   */
+  onEntriesChange(cb: () => void): Disposer;
 }
 
 /**
@@ -514,6 +530,35 @@ export interface ChatAppDeps {
    */
   readonly webAnswer?: (req: ApprovalRequest) => Promise<'approve' | 'reject' | 'always'> | undefined;
   /**
+   * web 应答腿在场判据（daemon 刀一·M2：answerer 注册闸第二支——晚绑 holder
+   * 在场即注册。闭包读组合根晚绑 approvalClaim holder（webui 行未开面/已卸载 =
+   * false），**勿用 webAnswer 键存在性**（组合根恒传闭包，键恒在恒真）。闸扩
+   * 的效果：daemon 形态（无 TUI confirm）也注册 answerer——审批不再全线
+   * unavailable，web 卡可应答；根路（interactive）闸不动。
+   */
+  readonly webAnswerActive?: () => boolean;
+  /**
+   * per-ownership 未决审批帽判据（daemon 刀一：~10/owner 帽满即时收场
+   * 'unavailable'——防无附着应答腿的形态被批量 ask 堆积未决卡）。组合根闭包
+   * webui approvals 簿 pendingCountBy（缺席 = 无帽面恒 false）；ownerAppId
+   * undefined = 宿主桶（根路/无域审批的归宿）。
+   */
+  readonly webApprovalCapExceeded?: (ownerAppId: string | undefined) => boolean;
+  /**
+   * 会话租约守卫（daemon 刀一·会话篇 §6.5 条：撞他进程持有会话拒开 + submit
+   * 指引）。true = 该会话被**他进程**（活 daemon）持有 → open 拒（warn + 返回
+   * undefined）；登记面非锁，第二防线 = 库 cursor/incarnation 护栏。组合根闭包
+   * daemon.json heldSessions + 排自身 pid；非 daemon 形态不传 = 无守卫。
+   */
+  readonly heldElsewhere?: (sessionId: string) => boolean;
+  /**
+   * 审批超时预算毫秒（daemon 刀一·P2 A2 案：无 TUI 应答腿形态 ask 30min
+   * fail-closed 落 'unavailable'——run 吊死更糟，这是设计语义）。缺省 30min；
+   * 测试收短注入。仅 `confirm === undefined`（无 TUI 腿）时 armed——TUI 在场
+   * 即人在场，不设钟。
+   */
+  readonly approvalTimeoutMs?: number;
+  /**
    * 「始终允许」条目写入面（§8.4 增补 2 落码形态③织入位）：answerer 返回
    * always 且载荷带草案时经 approval 服务回调——组合根接 AllowlistStore.add
    * （幂等）。缺省不传 = 本驱动 always 面关闭（视同 approve，零副作用）。
@@ -553,6 +598,29 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
    * 隐藏耦合——open 写点在 registry 内，订阅集也归 registry；工厂级跨 /reload 存续）
    */
   const focusListeners = new Set<(sessionId: string) => void>();
+  /**
+   * 条目集变化订阅表（daemon 刀一：heldSessions 租约登记的通知源——open/retire
+   * 两写点通知；订阅者违约隔离与 focusListeners 同款）
+   */
+  const entriesListeners = new Set<() => void>();
+  /** 条目集写点统一路（open 入表后 / retire 退役后各调恰一次） */
+  const notifyEntriesChange = (): void => {
+    for (const cb of [...entriesListeners]) {
+      try {
+        cb();
+      } catch (err) {
+        deps.rootCtx.logger.error('registry.onEntriesChange 订阅者违约（已隔离）', { error: describeError(err) });
+      }
+    }
+  };
+  /**
+   * 审批归因台账（daemon 刀一·P2）：approvalId → asked 时点 + 胜出腿。
+   * asked 时点 = 超时基准（A2 案：无 TUI 腿形态 30min fail-closed 从 ask 起算
+   * ——durable 事件 time 同源）；胜出腿 = decided 载荷 via 注入源（'tui' |
+   * 'web' | 'timeout'）。decided 读出即删——台账不随长命 daemon 累积。件级
+   * 单份（approvalId 全局唯一，跨驱动共享无碰撞）。
+   */
+  const approvalLedger = new Map<string, { askedAt: number; via?: 'tui' | 'web' | 'timeout' }>();
   /**
    * focus 写点统一路（S3 三写点共用：open 新开 / open 幂等命中 / switchTo）——
    * **同值写零通知**（切到已聚焦会话 = 无变化，防 TUI 无谓清屏重画）；订阅者
@@ -769,6 +837,17 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         setFocus(existing.session.header.sessionId); // S3 写点之二：幂等命中也是 focus 写点（同值零通知）
         return existing;
       }
+      // 会话租约守卫（daemon 刀一·会话篇 §6.5 条）：目标被他进程（活 daemon）
+      // 持有 → 拒开 + submit 指引（warn 面；完整 UX 指引随刀二）。本表未持有才
+      // 判——注册表已持有的走上面幂等防御；登记面非锁，窄竞窗（登记滞后）由
+      // 库 cursor/incarnation 护栏第二防线兜住。
+      if (targetId !== undefined && deps.heldElsewhere?.(targetId) === true) {
+        deps.rootCtx.logger.warn(
+          `会话 ${targetId} 被 daemon 持有（heldSessions 租约）——本进程拒开防双写者；` +
+            '改用该 daemon 的 submit 面（POST /api/sessions/:id/messages）投递',
+        );
+        return undefined;
+      }
       // 恢复协议语义半边（会话篇 §4）：孤儿配对补 closer——append 即进 write-behind
       //（关停屏障保证落盘），日志闭合后投影才可安全续跑
       let session: Session | undefined;
@@ -846,8 +925,20 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       // 组合根接 AllowlistStore.add——幂等；缺省不传 = always 面关闭）
       const approval = createApprovalService(driverScope, {
         // 审批档 = 本驱动效值（应用预设 > 全局——显式旗标已在效值计算时胜出）
+        // daemon 刀一 sink 包裹：asked 记台账（超时基准）；decided 注 via 归因
+        //（answerer 胜出腿先写台账；帽满/双腿皆缺等无腿收场无 via 省字段）
         policy: effectiveApprovalPolicy,
-        sink: durable.approval,
+        sink: {
+          asked: (payload) => {
+            approvalLedger.set(payload.approvalId, { askedAt: Date.now() });
+            durable.approval.asked(payload);
+          },
+          decided: (payload) => {
+            const meta = approvalLedger.get(payload.approvalId);
+            approvalLedger.delete(payload.approvalId);
+            durable.approval.decided(meta?.via === undefined ? payload : { ...payload, via: meta.via });
+          },
+        },
         ownership: { sessionId, appId },
         ...(deps.persistAllowlist !== undefined ? { persistAllowlist: deps.persistAllowlist } : {}),
       });
@@ -887,11 +978,22 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       // 上——fresh 作用域必须同作用域注册 answerer，否则本驱动 ask 全线
       // unavailable。ui.confirm 经 deps 注入；弹窗标签/approvalId 短形/优先级
       // 标记在 formatApprovalPrompt 内消费 ownership 载荷
-      if (deps.confirm !== undefined) {
+      // 注册闸（daemon 刀一·M2 扩闸）：TUI 腿在场 ∪ web 腿晚绑 holder 在场
+      //（webAnswerActive 闭包读组合根晚绑 approvalClaim——**勿用 webAnswer 键
+      // 存在性**，组合根恒传闭包恒真）。根路闸（opts.interactive 注 confirm）
+      // 不动——headless run 维持全线 unavailable 纪律；daemon 形态（无 TUI
+      // confirm）因 web 腿在场获闸，审批不再无人应答。
+      if (deps.confirm !== undefined || deps.webAnswerActive?.() === true) {
         const confirm = deps.confirm;
         const select = deps.select;
         const webAnswer = deps.webAnswer;
         driverScope.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
+          // per-ownership 未决审批帽（daemon 刀一）：~10/owner 帽满即时收场——
+          // return undefined 走 ask 的 unavailable 路（fail-closed），不排队堆积
+          //（防无附着形态被批量 ask 堆成未决山）。无腿收场无 via 归因。
+          if (deps.webApprovalCapExceeded?.(req.ownership?.appId) === true) {
+            return undefined;
+          }
           // 三态归一（草案在场 + select 在场 → 三选；降级 confirm 两态）在
           // answerApproval 纯函数内——回归锁见 plugin.test.ts
           // 刀 A 竞速收束即撤销败腿：per-request controller——race 先胜后
@@ -904,20 +1006,60 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
           //（abort 同 reason）——run abort 与竞速败腿收束汇入同一撤销面，ask
           // 不再吊死 runPromise；监听随结算摘除（迟到 abort no-op）
           const detachRunSignal = bridgeApprovalSignal(req, controller);
+          // 超时腿（daemon 刀一·P2 A2 案）：无 TUI 腿（daemon 形态）armed——
+          // 30min fail-closed，到点 resolve undefined 走 ask 的 unavailable 路
+          //（零新词汇）；基准 = asked durable 事件时点（台账侧记，同源）；TUI
+          // 腿在场即人在场，不设钟。setTimeout 单调钟；到点前他腿胜出即 clear。
+          const armed = confirm === undefined;
+          const timeoutMs = deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+          // approvalId 服务 ask 织入恒在场（asked 载荷类型已非可选）——台账键
+          const approvalId = req.approvalId as string;
+          const askedAt = approvalLedger.get(approvalId)?.askedAt ?? Date.now();
+          let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
           try {
-            const tuiLeg = answerApproval(
-              req,
-              { confirm, ...(select !== undefined ? { select } : {}) },
-              { signal: controller.signal },
-            );
-            // 刀三 claim 竞速注入：web 腿在场（webui 开面且未决条目活）时两腿
-            // 竞速——先胜者即裁决，败腿结算丢弃；缺席 = 纯 TUI 腿原语义
-            //（controller 不 abort——无败腿可撤销）
+            const tuiLeg =
+              confirm !== undefined
+                ? answerApproval(
+                    req,
+                    { confirm, ...(select !== undefined ? { select } : {}) },
+                    { signal: controller.signal },
+                  )
+                : undefined;
+            // web 腿（刀三 claim 竞速注入）：晚绑闭包——webui 行未开面/已卸载
+            // 返回 undefined = 无此腿（/reload 卸 webui 后 confirm 缺席的注册
+            // answerer 走双腿皆缺路）
             const webLeg = webAnswer?.(req);
-            if (webLeg === undefined) return await tuiLeg;
-            return await Promise.race([tuiLeg, webLeg]).finally(() => controller.abort('该审批已在网页端应答'));
+            // 超时腿 Promise：胜出即记 via 'timeout'
+            const timeoutLeg = armed
+              ? new Promise<undefined>((resolve) => {
+                  // Math.max 防御：asked 距今已超预算（回放/挂钟跳变）即刻到点
+                  timeoutTimer = setTimeout(() => resolve(undefined), Math.max(0, askedAt + timeoutMs - Date.now()));
+                })
+              : undefined;
+            // 腿装配空集（/reload 卸 webui 且无 TUI 腿）：无人可应——undefined
+            // 走 unavailable（fail-closed 纪律不变）
+            if (tuiLeg === undefined && webLeg === undefined && timeoutLeg === undefined) return undefined;
+            // 竞速：各腿标注 via 后赛跑——先胜者的值即裁决、腿名即归因（记台账
+            // 供 decided sink 注入）；败腿经 controller.abort 撤销（TUI 腿撤销
+            // 说明行）或 durable decided 的丢弃性 resolve 收场（web 腿）
+            const tagged: Promise<{
+              via: 'tui' | 'web' | 'timeout';
+              value: 'approve' | 'reject' | 'always' | 'cancel' | undefined;
+            }>[] = [];
+            if (tuiLeg !== undefined) tagged.push(tuiLeg.then((value) => ({ via: 'tui' as const, value })));
+            if (webLeg !== undefined) tagged.push(webLeg.then((value) => ({ via: 'web' as const, value })));
+            if (timeoutLeg !== undefined) tagged.push(timeoutLeg.then((value) => ({ via: 'timeout' as const, value })));
+            const winner = await Promise.race(tagged);
+            // 胜出腿记台账（保留原 askedAt——decided sink 读出注入 via 后即删）
+            const prev = approvalLedger.get(approvalId);
+            approvalLedger.set(approvalId, { askedAt: prev?.askedAt ?? askedAt, via: winner.via });
+            return winner.value;
           } finally {
+            if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
             detachRunSignal();
+            // 败腿撤销：竞速已决，controller.abort 收 TUI 腿提问（no-op 场 = TUI
+            // 腿先胜/无 TUI 腿）；文案取唯一可观察场景（web 腿先胜撤销 TUI 提问）
+            controller.abort('该审批已在网页端应答');
           }
         });
       }
@@ -1055,6 +1197,8 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         retired: false,
       };
       entries.set(session.header.sessionId, entry);
+      // 条目集写点之一（daemon 刀一）：heldSessions 租约登记随之刷新
+      notifyEntriesChange();
       // 结算派发接线（永久订阅——dispatch 工厂级恒活；退役条目的迟到结算照发，
       // 载荷带归属 sessionId，goal 等消费方按码容错跳过）
       driver.onRunSettled(dispatch);
@@ -1075,6 +1219,9 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       // run 中退役=正被 loop 引用的时间线强行 abort，留给编排层显式抉择）
       if (entry.driver.isRunning) return false;
       entry.retired = true;
+      // 条目集写点之二（daemon 刀一）：持有集失去本条目（retire 拒绝 run 中
+      // 条目——此后 isRunning 恒 false，持有集变化点即本处）
+      notifyEntriesChange();
       // 域层工具回卷（S2 fs + S5 bash：五名从 tools 注册表域层撤出——退役即停摆
       // 的工具面半边；session/durable 保留的原语义不变，迟到结算照落原会话账）
       entry.disposeDomainTools();
@@ -1098,6 +1245,12 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       focusListeners.add(cb);
       return () => {
         focusListeners.delete(cb);
+      };
+    },
+    onEntriesChange(cb) {
+      entriesListeners.add(cb);
+      return () => {
+        entriesListeners.delete(cb);
       };
     },
   };

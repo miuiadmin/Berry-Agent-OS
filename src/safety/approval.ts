@@ -41,8 +41,17 @@ export function bridgeApprovalSignal(req: ApprovalRequest, controller: AbortCont
 export interface ApprovalDecisionSink {
   /** approval/asked 载荷（落日志时机 = 请求发出时） */
   asked(payload: { readonly approvalId: string; readonly summary: string }): void;
-  /** approval/decided 载荷（落日志时机 = 决议产生时；与 asked 同 turn 内） */
-  decided(payload: { readonly approvalId: string; readonly decision: ApprovalDecisionValue }): void;
+  /**
+   * approval/decided 载荷（落日志时机 = 决议产生时；与 asked 同 turn 内）。
+   * via = 应答归因（daemon 刀一·P2：'tui' | 'web' | 'timeout'——哪条腿给出的
+   * 裁决；超时腿 = 无附着应答 30min fail-closed 收场。可选字段：无腿收场
+   * （帽满/双腿皆缺）与既有调用方省略）
+   */
+  decided(payload: {
+    readonly approvalId: string;
+    readonly decision: ApprovalDecisionValue;
+    readonly via?: 'tui' | 'web' | 'timeout';
+  }): void;
 }
 
 /**
