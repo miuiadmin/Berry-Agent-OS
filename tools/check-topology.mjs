@@ -236,6 +236,27 @@ function relative(file) {
   return file.slice(srcRoot.length + 1);
 }
 
+/* ---------------- 组合根零改动纪律（内核与应用边界篇 §2.1，2026-08-31 技术债批） ----------------
+ * 官方件 deps 装配下沉 builtin-deps.ts 的机器执法两道：
+ * ① assembly.ts 内 createBuiltinRegistry( 的实参必须是 assembleBuiltinDeps( 产物——
+ *    组合根只构造 BuiltinHostResources 资源束，不内联拼 BuiltinRegistryOptions；
+ * ② assembly.ts 不得出现「XxxDeps:」字面键（官方件闭包依赖字段一律 *Deps 后缀——
+ *    命名规约使间接构造〔先拼对象再传入〕同样被字面键扫描拦下）。
+ * 新官方件落码全链住 builtin-deps.ts + builtins.ts，assembly 零行增长由此可机检。 */
+{
+  const assemblySource = readFileSync(join(srcRoot, 'app', 'assembly.ts'), 'utf8');
+  if (/createBuiltinRegistry\s*\(\s*(?!\s*assembleBuiltinDeps)/.test(assemblySource)) {
+    violations.push(
+      'app/assembly.ts：createBuiltinRegistry 实参非 assembleBuiltinDeps 产物（组合根零改动纪律——官方件 deps 派生住 builtin-deps.ts，内核与应用边界篇 §2.1）',
+    );
+  }
+  for (const match of assemblySource.matchAll(/\b\w+Deps\s*:/g)) {
+    violations.push(
+      `app/assembly.ts：出现官方件 deps 字面键「${match[0]}」（派生住 builtin-deps.ts——组合根零改动纪律，内核与应用边界篇 §2.1）`,
+    );
+  }
+}
+
 if (violations.length > 0) {
   console.error(`拓扑检查未通过（${violations.length} 处违规）：`);
   for (const violation of violations) console.error(`  - ${violation}`);
