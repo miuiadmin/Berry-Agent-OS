@@ -16,6 +16,7 @@
 
 import { createMemoryApp, type MemoryAppStoreFace, migrations as memoryMigrations } from '../memory/index.js';
 import { createGoalApp, migrations as goalMigrations } from '../goal/index.js';
+import type { GoalChannel } from '../goal/index.js';
 import { createSchedulerApp, migrations as schedulerMigrations } from '../scheduler/index.js';
 import type { SchedulerAppDeps } from '../scheduler/index.js';
 import { createMcpApp } from '../mcp/index.js';
@@ -44,6 +45,12 @@ export interface BuiltinRegistryOptions {
   readonly store?: MemoryAppStoreFace;
   /** SQLite 连接（goal/scheduler 官方件闭包注入——goals/jobs 表物理载体）；无持久层时不传 */
   readonly goalConnection?: DatabaseConnection;
+  /**
+   * goal↔chat↔lsp 组合根通道（第三十九批 goal 循环批刀二，冷读 CR-11）：
+   * 组合根创建单件、闭包注入三件（goal 段查询注册侧 + todo fold/诊断查询
+   * 消费侧）。缺省不传（纯测试形态）= 通道面缺席，各消费方诚实降级
+   */
+  readonly goalChannel?: GoalChannel;
   /** scheduler 件闭包依赖束（gate 判据 + runner——组合根活资源，席 13 第一刀；connection 由 goalConnection 同源注入不在此列） */
   readonly schedulerDeps?: Omit<SchedulerAppDeps, 'connection'>;
   /** mcp 件闭包依赖束（spawnServer 组装 = app/mcp-spawn.ts 产物 + exec killTree + 数据目录——契约篇 §6.6 冷读 #1 上提组合根） */
@@ -134,6 +141,8 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     'builtin:goal': createGoalApp({
       ...(opts.goalConnection ? { connection: opts.goalConnection } : {}),
       getSessionId: () => opts.getSession()?.header.sessionId,
+      // 通道注入（刀二计划态跨轮）：goal 段查询注册侧 + todo fold 消费侧
+      ...(opts.goalChannel ? { channel: opts.goalChannel } : {}),
     }),
     // scheduler 官方件（官方默认层第五行，tick 第一刀——内核边界篇 §4.1 席 13）：
     // 连接与 gate 判据/runner 全闭包注入（spawn 组装在 app/scheduler-runner.ts）；
@@ -152,8 +161,13 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     'builtin:mcp': createMcpApp(opts.mcpDeps),
     // lsp 官方件（官方默认层第十二行，LSP 服务器桥第一刀——契约篇 §6.7）：惰性
     // spawn + 3 连败熔断 + 四工具 + write/edit 后诊断注入 post 行。servers 空
-    // 时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）
-    'builtin:lsp': createLspApp(opts.lspDeps),
+    // 时件惰性无害零 spawn——恒注册（卸行靠 overlay 禁用）。诊断查询面挂通道
+    //（goal 循环批刀二 gates 条，冷读 CR-12 迟到注入）：lsp 行装载即回填、
+    // 行卸载随锚回卷摘面——chat 侧 diagnostics gate fail-closed
+    'builtin:lsp': createLspApp({
+      ...opts.lspDeps,
+      ...(opts.goalChannel ? { mountDiagnostics: (face) => opts.goalChannel!.registerDiagnostics(face) } : {}),
+    }),
     // web 官方件（第八行，契约篇 §1.5.2 web 刀）：fetch 工具 + ctx.fetch 服务 +
     // SSRF 五卫生件一批三件——零宿主资源闭包（最简官方件形态）；恒注册
     //（config.fetch:false 只关模型面工具，服务面恒在——「有但省」变体二）

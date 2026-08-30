@@ -121,6 +121,7 @@ import {
 import type { EventQueryCursor, EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
 import { createChatApp, CHAT_APP_ID, DEFAULT_APPROVAL_TIMEOUT_MS, foldCurrentTodo } from '../chat/index.js';
+import { GoalChannel } from '../goal/index.js';
 import {
   createPathsService,
   loadComposition,
@@ -1138,6 +1139,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       return current === undefined ? undefined : lastClosedTurnBoundary(current.session.events);
     },
     /**
+     * 当前路由会话日志长度（goal 循环批刀二——goal 激活锚的唯一取值口）：
+     * seq 即下标的连续性契约下，长度即位置（与 lastClosedBoundary 同纪律——
+     * 锚必须取自宿主单源长度面；应用侧从 eventsOfType 过滤数组拼位置 = 词级
+     * 下标冒充全日志位置，恒错位）。无路由落点 = undefined（goal_set 落 NULL
+     * 锚 = 诚实降级 run-scoped）。
+     */
+    logLength: (): number | undefined => registry.routed()?.session.events.length,
+    /**
      * 遮蔽载体宿主代写（会话篇 §2 增补 6，compaction 纵切装配缺口第 1 件）：
      * 应用携 surfaceOp 的 user/message 载体经宿主写权落账——核心词 user/message
      * 应用不可伪造（appendEvent 拒），遮蔽注入是唯一例外通道且四执法点在此收口：
@@ -1456,6 +1465,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 前移无行为差，装载失败行走 boot 拒启不走此表）。/reload 全量 :2072 重赋、
    * 单区 :1965 合并更新照旧。诊断出口 = debug 日志 + runtime.appGaps。 */
   let appGaps = new Map<string, readonly string[]>();
+  /** goal↔chat↔lsp 组合根通道（goal 循环批刀二，冷读 CR-11）：组合根持单件、
+   * 闭包注入三件 deps——goal 件注册 goal 段查询、chat 件注册 todo fold 查询、
+   * lsp 件注册诊断查询（迟到注入）。通道本体跨 /reload 存续（各注册随件
+   * effect 锚回卷重挂）——三件两两零拓扑边零服务面，本对象是唯一桥 */
+  const goalChannel = new GoalChannel();
   const chatBundle = createChatApp({
     // 应用面解析器（组装批默认应用键）：resolveDefaultApp 纯函数 + officialApps/
     // appGaps 活闭包——per-open 活取（缺场随当下组合树投影）；resolveById 供
@@ -1492,6 +1506,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     writableRoots: rootsProvider,
     // 命令进程登记簿（§6.6 exec 腿）：透传 chat 件 → bash 工具件 spawn 登记
     commandLog,
+    // goal↔chat↔lsp 通道（刀二计划态跨轮/gates）：chat 侧 = goal 段查询消费 +
+    // todo fold 查询注册 + 诊断查询消费（gates diagnostics 判据源）
+    goalChannel,
     stampSandboxFacts,
     // tick 入口记账道声明（--background argv → run 入口 → 此处；缺省前台道）
     ...(opts.usagePriority === undefined ? {} : { usagePriority: opts.usagePriority }),
@@ -1562,6 +1579,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   const builtins = createBuiltinRegistry({
     ...(persistence ? { store: persistence.store } : {}),
     ...(persistence ? { goalConnection: persistence.store.connection } : {}),
+    // goal↔chat↔lsp 通道（刀二）：goal 侧 = 段查询注册 + fold 消费；lsp 侧 =
+    // 诊断查询迟到注入（chatBundle 同一实例——三件经同一桥）
+    goalChannel,
     schedulerDeps: {
       runJob: tickRunner,
       osRegistrar: osTickRegistrar,
@@ -1669,12 +1689,16 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         return loaded === undefined ? undefined : deriveMessages(loaded.events);
       },
       // todo 折叠（foldCurrentTodo 归一产物）：与 historyFor 同款两腿——活条目
-      // 内存真相 ∪ 已闭 store 兜底（null = 无表合法档）
+      // 内存真相 ∪ 已闭 store 兜底（null = 无表合法档）。goal 段边界（刀二计划态
+      // 跨轮）：goal active 期从激活锚折叠（user/message 不再是边界——SPA 呈现
+      // 与 TUI 注入同一计划态）；通道 miss / 无 active 行 = run-scoped 现行为
       todoFor: (sessionId) => {
+        /** goal 段锚活取（每次查询时点重查——goal 激活/停掉后呈现即时切段） */
+        const boundary = goalChannel.goalScopeFor(sessionId)?.activatedSeq;
         const entry = registry.entries.get(sessionId);
-        if (entry !== undefined) return foldCurrentTodo(entry.session.events);
+        if (entry !== undefined) return foldCurrentTodo(entry.session.events, boundary);
         const loaded = persistence ? persistence.loadSession(sessionId) : undefined;
-        return loaded === undefined ? undefined : foldCurrentTodo(loaded.events);
+        return loaded === undefined ? undefined : foldCurrentTodo(loaded.events, boundary);
       },
       // 开新会话（刀二 = POST /api/sessions 腿）：registry.open() 一条龙——默认
       // 应用解析 per-open 活取、既有条目驻留不退役、切宿主前台 focus（/app new

@@ -138,7 +138,8 @@ export class GoalStore {
    * goal_set 落库（v13 重设 = 纯 INSERT 新行）：调用侧已保证当前无 active 行
    * （machine.canSetGoal）；既有终态/降级行留史不动，新行拿新 goalId、
    * tokens_used 归零、状态 active。activatedSeq = goal-scoped fold 激活锚
-   * （宿主日志长度；本刀调用侧传 null，第二刀接线填值——列形状先行）。
+   * （宿主日志长度——sessions 服务 logLength 单源，防数组下标冒充全日志位置；
+   * 无路由落点时 null = 锚缺席，fold 诚实降级 run-scoped）。
    */
   setActive(
     sessionId: string,
@@ -163,12 +164,16 @@ export class GoalStore {
   /**
    * /goal resume [goalId]：needs-resume ⇒ active，并把行重绑到发起会话
    * （跨会话领养——旧行 sessionId 换新，历史会话不再持有该行）。
-   * 调用侧已保证 needs-resume 态（machine.canResumeGoal）。
+   * 调用侧已保证 needs-resume 态（machine.canResumeGoal）。activatedSeq =
+   * 激活锚同步刷新（刀二：重绑到新会话即新锚——新会话日志长度，计划态从
+   * 重新授权点重新折叠；调用侧传宿主单源长度面取值）。
    */
-  reactivate(goalId: string, sessionId: string, now: number): void {
+  reactivate(goalId: string, sessionId: string, now: number, activatedSeq: number | null = null): void {
     this.connection
-      .prepare(`UPDATE goals SET status = 'active', session_id = ?, updated_at = ? WHERE goal_id = ?`)
-      .run(sessionId, now, goalId);
+      .prepare(
+        `UPDATE goals SET status = 'active', session_id = ?, activated_seq = ?, updated_at = ? WHERE goal_id = ?`,
+      )
+      .run(sessionId, activatedSeq, now, goalId);
   }
 
   /** boot 降级：active ⇒ needs-resume（激活权不跨进程——§6.7 拍板落码形态；按会话扫激活行） */

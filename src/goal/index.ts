@@ -25,12 +25,15 @@ export {
 } from './machine.js';
 export type { GoalRecord, GoalStatus, DeliveryOutcome } from './machine.js';
 export { GOAL_EVENT_TYPES } from './events.js';
+export { GoalChannel } from './channel.js';
+export type { GoalScopeInfo, TodoFoldItem, GateDiagnosticsFile } from './channel.js';
+export { createGoalTools, snapshotOfItems } from './tools.js';
+export type { GoalToolsDeps, GoalSessionsFace, TodoPlanSnapshot } from './tools.js';
 export {
   escapeXml,
   renderContinuationPrompt,
   renderBudgetExhaustedPrompt,
   GOAL_DISCIPLINE_CLAUSES,
 } from './prompts.js';
-export { createGoalTools } from './tools.js';
 export { createGoalApp } from './app.js';
 export type { GoalAppDeps } from './app.js';

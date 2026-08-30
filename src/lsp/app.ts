@@ -95,7 +95,36 @@ export interface LspAppDeps {
    * 回卷摘除。缺省不传（诊断装配/旧装配形态）= 无补全面（webui 404）。
    */
   readonly mountSymbols?: (face: LspSymbolsFace) => Disposer;
+  /**
+   * 诊断查询挂载键（第三十九批 goal 循环批刀二 gates 条，冷读 CR-12 迟到注入）：
+   * goal↔chat↔lsp 组合根通道 diagnosticsFor 的真身挂点——组合根持通道，本件
+   * apply 挂真身/回卷摘除。缺省不传 = 无查询面（chat 侧 diagnostics gate 申报
+   * 即拒 fail-closed）。
+   */
+  readonly mountDiagnostics?: (face: LspDiagnosticsFace) => Disposer;
 }
+
+/**
+ * 诊断查询单文件结果（goal 件 GateDiagnosticsFile 的结构子集——两件各持词面，
+ * 组合根接线点编译期即验；LspSymbolCompletion 同款先例）。lsp 结构上不见 goal。
+ */
+export interface LspDiagnosticsFileResult {
+  /** 工作区相对路径（原样回显） */
+  readonly path: string;
+  /** ok = 诊断已回流 / missing = 文件不在盘 / malformed = 路由外·根外·服务器不可用·未回流 */
+  readonly outcome: 'ok' | 'missing' | 'malformed';
+  /** 失败说明（outcome ≠ 'ok' 时的人读细节） */
+  readonly note?: string;
+  /** error 级诊断条目（severity 1——1-based 行号；空 = 绿） */
+  readonly errors: readonly { readonly line?: number; readonly message: string }[];
+}
+
+/**
+ * 诊断查询面（chat 件 todo gates 的 diagnostics 判据源）：与 lsp_diagnostics
+ * 工具同源管线（ensureOpen + waitForDiagnostics 全额等待——判据面不读空缓存，
+ * 空缓存会误判「绿」），产出机器可分类的结构化结果。
+ */
+export type LspDiagnosticsFace = (paths: readonly string[]) => Promise<readonly LspDiagnosticsFileResult[]>;
 
 /**
  * 符号补全条目（webui WebuiSymbolItem 结构子集——两件各持词面，组合根接线点
@@ -577,6 +606,49 @@ async function applyLspApp(
   if (deps.mountSymbols !== undefined) {
     const disposeFace = deps.mountSymbols(symbolsFace);
     ctx.effect(() => disposeFace); // 行回卷摘桥——此后 webui 补全面 404（桥 holder 置空）
+  }
+
+  /* ---------------- 诊断查询面（goal 循环批刀二——gates diagnostics 判据源） ---------------- */
+
+  /**
+   * 诊断查询面（chat 件 todo gates 消费，经组合根通道迟到注入）：与
+   * lsp_diagnostics 工具同源 ensureOpen + waitForDiagnostics 管线，两档差异——
+   * 产出**机器可分类的结构化结果**（ok/missing/malformed + error 级条目）而非
+   * 人读文本；分类判断在 gates 验证器（件零表知识纪律——lsp 只出原始数据面）。
+   * 全额等待（工具面档）：判据面不读空缓存——空缓存会把「未回流」误判成「绿」。
+   */
+  const diagnosticsFace: LspDiagnosticsFace = async (paths) => {
+    return Promise.all(
+      paths.map(async (path) => {
+        const abs = deps.resolvePath(path);
+        const opened = await ensureOpen(abs);
+        if (opened === undefined) return { path, outcome: 'missing', errors: [] }; // 文件不在盘上
+        if (!('conn' in opened)) {
+          // 路由外 / 根外 / 服务器不可用（含熔断）——判据面不可用族
+          return { path, outcome: 'malformed', note: opened.text, errors: [] };
+        }
+        const timeoutMs = diagnosticsTimeoutOf(opened.config);
+        const diags = await opened.conn.waitForDiagnostics(abs, opened.version, timeoutMs);
+        if (diags === undefined) {
+          // 未及回流：陈旧/版本不齐族——判据面畸形（非「绿」），诚实不默认通过
+          return { path, outcome: 'malformed', note: `诊断未及回流（等待 ${timeoutMs}ms）——服务器索引中`, errors: [] };
+        }
+        // error 级（severity 1）条目 = gates 的判据信号（Warning 以下不算不绿）
+        const errors = diags
+          .filter((diag) => diag.severity === 1)
+          .map((diag) => ({
+            ...(diag.range?.start.line !== undefined ? { line: diag.range.start.line + 1 } : {}), // 0-based → 1-based
+            message: diag.message,
+          }));
+        return { path, outcome: 'ok', errors };
+      }),
+    );
+  };
+
+  // deps.mountDiagnostics 缺席 = 不挂面（chat 侧 diagnostics gate 申报即拒 fail-closed）
+  if (deps.mountDiagnostics !== undefined) {
+    const disposeFace = deps.mountDiagnostics(diagnosticsFace);
+    ctx.effect(() => disposeFace); // 行回卷摘面——此后通道查询 miss，gates fail-closed
   }
 
   /* ---------------- 诊断注入（post 行就地改写 + 守门行传导；contained 铁律） ---------------- */

@@ -1,11 +1,13 @@
 /**
  * L3 goal — 工具三件（骨架篇 §6.8：模型面——目标内容在模型；第三十九批
- * T4-A 扩形：goalId 参数 + 轮结算形 + 证据账本）。
+ * T4-A 扩形：goalId 参数 + 轮结算形 + 证据账本；刀二：计划态投影摘要 +
+ * open 项否决接线）。
  *
- * goal_get（状态投影 + 账本近尾摘录）/ goal_set（设定目标+预算）/ goal_update
- * （union 三形：completed 必附证据 + blocked 附原因是 schema 执法位——union
- * 分支逐字面绑定必填字段，参数校验段即拦截不靠提示词自觉；**轮结算形**
- * 非终态可多次调用，每次落一条 goal/evidence durable 事件进证据账本）。
+ * goal_get（状态投影 + 计划态摘要 + gates 状态 + 账本近尾摘录）/ goal_set
+ * （设定目标+预算，激活锚 = 宿主日志长度）/ goal_update（union 三形：
+ * completed 必附证据 + blocked 附原因是 schema 执法位——union 分支逐字面绑定
+ * 必填字段，参数校验段即拦截不靠提示词自觉；**轮结算形**非终态可多次调用，
+ * 每次落一条 goal/evidence durable 事件进证据账本）。
  * 转移合法性经 machine 判定，非法即响亮拒绝（GOAL_* 码）——宁拒绝不静默。
  */
 
@@ -14,17 +16,22 @@ import { AppError, GOAL_ACTIVE_EXISTS, GOAL_TRANSITION_INVALID, GOAL_NOT_FOUND }
 import type { ToolDefinition, AgentToolResult } from '../contracts/tools.js';
 import { canSetGoal, canUpdateGoal, DELIVERY_OUTCOMES } from './machine.js';
 import type { GoalRecord } from './machine.js';
+import type { TodoFoldItem } from './channel.js';
 import { renderDisciplineClauses } from './prompts.js';
 import type { GoalStore } from './store.js';
 
 /**
- * sessions 服务最小面（本件消费：账本事件读写——ctx.sessions 的结构子集，
- * 拓扑边不越界）。appendEvent 落**当前路由会话**（工具执行段内即归属会话）；
- * eventsOfType 读内存活日志（与写同账零迟滞）。
+ * sessions 服务最小面（本件消费：账本事件读写 + 日志长度——ctx.sessions 的
+ * 结构子集，拓扑边不越界）。appendEvent 落**当前路由会话**（工具执行段内即
+ * 归属会话）；eventsOfType 读内存活日志（与写同账零迟滞）；logLength = 激活
+ * 锚取值口（宿主单源长度面——seq 连续性契约下长度即位置，checkpoint forkSeq
+ * 同教训：词级过滤数组下标不得冒充全日志位置）。
  */
 export interface GoalSessionsFace {
   appendEvent(type: string, data: unknown): unknown;
   eventsOfType(type: string): Array<{ readonly data?: unknown }>;
+  /** 当前路由会话日志长度（无路由落点 undefined——锚缺席诚实降级） */
+  logLength(): number | undefined;
 }
 
 /** goal/evidence 轮结算账本载荷（T4-A——轮结算形写点） */
@@ -36,20 +43,59 @@ export interface GoalEvidencePayload {
   readonly wakeId?: string;
 }
 
+/**
+ * 计划态快照（刀二——chat 件 todo fold 经组合根通道回流的计数面）：open =
+ * 一切非 completed 状态项（deferred 含内——到窗复评是续跑提示义务非机器
+ * 放行面）；gatedPassed = completed 且带 gate（完成即验过——执法在 todo
+ * 执行段，此处只计数）。
+ */
+export interface TodoPlanSnapshot {
+  /** 条目总数 */
+  readonly total: number;
+  /** 已完项 */
+  readonly completed: number;
+  /** 未完项（一切非 completed 状态——completed 申报机器否决的判据） */
+  readonly open: number;
+  /** 缓办项（open 子集——deferred） */
+  readonly deferred: number;
+  /** 声明 gate 的项数 */
+  readonly gated: number;
+  /** 已过 gate（completed 且带 gate） */
+  readonly gatedPassed: number;
+}
+
+/** fold 条目 → 计数快照（纯函数——open = 非 completed） */
+export function snapshotOfItems(items: readonly TodoFoldItem[]): TodoPlanSnapshot {
+  let completed = 0;
+  let deferred = 0;
+  let gated = 0;
+  let gatedPassed = 0;
+  for (const item of items) {
+    const isCompleted = item.status === 'completed';
+    if (isCompleted) completed += 1;
+    if (item.status === 'deferred') deferred += 1;
+    if (item.gate !== undefined) {
+      gated += 1;
+      if (isCompleted) gatedPassed += 1;
+    }
+  }
+  return { total: items.length, completed, open: items.length - completed, deferred, gated, gatedPassed };
+}
+
 /** 工具构造依赖（goal 应用 apply 期装配） */
 export interface GoalToolsDeps {
   /** goals 表 DAO */
   readonly store: GoalStore;
   /** 当前会话 id 活取值（/new 热切换后自动跟新会话走） */
   readonly getSessionId: () => string | undefined;
-  /** durable 事件面（账本读写——ctx.sessions 窄面） */
+  /** durable 事件面（账本读写 + 激活锚长度——ctx.sessions 窄面） */
   readonly sessions: GoalSessionsFace;
   /**
-   * open 项计数 hook（刀二接线：goal-scoped 计划态的未完项——open = 一切
-   * 非 completed 状态项）。undefined = 计划态面未接（批内刀序诚实过渡），
-   * completed 申报机器否决降级跳过。
+   * 计划态快照 hook（刀二接线：goalId → chat 件 goal-scoped fold 的计数面；
+   * 经组合根通道回流）。undefined = 计划态面未接（chat 件未装载/无驱动条目），
+   * open 项否决与 goal_get 计划态投影均诚实降级跳过。
    */
-  readonly countOpenItems?: (goalId: string) => number | undefined;
+  readonly todoSnapshot?: (goalId: string) => TodoPlanSnapshot | undefined;
   /** 当前轮身份 hook（刀三接线：wakeId——轮结算账本归因） */
   readonly currentWakeId?: () => string | undefined;
 }
@@ -66,6 +112,23 @@ function renderGoal(goal: GoalRecord): string {
   ];
   if (goal.evidence !== null) lines.push(`证据/原因：${goal.evidence}`);
   lines.push(`创建：${new Date(goal.createdAt).toISOString()}；更新：${new Date(goal.updatedAt).toISOString()}`);
+  return lines.join('\n');
+}
+
+/**
+ * 计划态投影段（刀二 §6.8 工具三件扩面：goal_get 含计划态投影摘要 + gates
+ * 状态）：hook 缺席 = 面未接（chat 件未装载/无驱动条目）不渲染——诚实降级
+ * 非编造空表。
+ */
+function renderPlanSnapshot(snapshot: TodoPlanSnapshot): string {
+  const lines = [
+    `计划态：共 ${snapshot.total} 项（未完 ${snapshot.open}${snapshot.deferred > 0 ? `，含缓办 ${snapshot.deferred}` : ''} · 已完 ${snapshot.completed}）`,
+  ];
+  if (snapshot.gated > 0) {
+    lines.push(
+      `判据门：${snapshot.gated} 项声明 gate（已过 ${snapshot.gatedPassed} / 待验 ${snapshot.gated - snapshot.gatedPassed}）`,
+    );
+  }
   return lines.join('\n');
 }
 
@@ -141,7 +204,12 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
         );
       }
       const ledger = renderLedgerTail(deps, goal.goalId);
-      return textResult(ledger === '' ? renderGoal(goal) : `${renderGoal(goal)}\n${ledger}`);
+      // 计划态投影摘要（刀二）：active 行才查（终态行无进行中计划态）；
+      // hook 缺席 = 面未接不渲染
+      const plan =
+        goal.status === 'active' && deps.todoSnapshot !== undefined ? deps.todoSnapshot(goal.goalId) : undefined;
+      const planLine = plan === undefined ? '' : renderPlanSnapshot(plan);
+      return textResult([renderGoal(goal), planLine, ledger].filter((section) => section !== '').join('\n'));
     },
   };
 
@@ -189,8 +257,11 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
         );
       }
       const now = Date.now();
-      // v13 重设 = 新 goalId 新行（终态行留史不覆盖）；activatedSeq 第二刀接线填宿主日志长度
-      const goal = deps.store.setActive(sessionId, objective, tokenBudget, needsWrite, now);
+      // v13 重设 = 新 goalId 新行（终态行留史不覆盖）；激活锚 = 宿主日志长度
+      // （刀二接线：sessions.logLength 单源——goal-scoped fold 从激活点折叠，
+      // 无路由落点 null = 锚缺席诚实降级）
+      const anchor = deps.sessions.logLength();
+      const goal = deps.store.setActive(sessionId, objective, tokenBudget, needsWrite, now, anchor ?? null);
       // 有旧行（终态/降级）即注明留史——重设从「覆盖」改「新行留史」的如实示态
       const replaced = current !== undefined ? `（新 goalId ${goal.goalId}——旧 ${current.status} 行留史）` : '';
       return textResult(`目标已设定并激活${replaced}。\n${renderGoal(goal)}`);
@@ -274,13 +345,14 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
       /* ---- 终态形：completed 机器否决（open 项）→ 结算 ---- */
       const req = args as { status: 'completed' | 'blocked'; evidence?: string; note?: string };
       if (req.status === 'completed') {
-        // open 项否决（T2-A「完成由 todo 前沿涌现」执法位）：hook 未接（刀二前）
-        // = 计划态面缺席，降级跳过——批内刀序诚实过渡，接线后即机器执法
-        const openItems = deps.countOpenItems?.(current.goalId);
-        if (openItems !== undefined && openItems > 0) {
+        // open 项否决（T2-A「完成由 todo 前沿涌现」执法位）：hook 未接
+        //（chat 件未装载/无驱动条目）= 计划态面缺席，降级跳过——诚实降级
+        // 非编造空表；接线后即机器执法
+        const snapshot = deps.todoSnapshot?.(current.goalId);
+        if (snapshot !== undefined && snapshot.open > 0) {
           throw new AppError(
             GOAL_TRANSITION_INVALID,
-            `计划态存在 ${openItems} 个未完项（open = 一切非 completed 状态项，deferred 含内）——完成由 todo 前沿涌现：先收尾未完项或逐项申报理由`,
+            `计划态存在 ${snapshot.open} 个未完项（open = 一切非 completed 状态项，deferred 含内）——完成由 todo 前沿涌现：先收尾未完项或逐项申报理由`,
           );
         }
       }

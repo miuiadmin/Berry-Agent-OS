@@ -9,7 +9,7 @@
  * 段，那是本纵切要锁的执法面。
  */
 
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,7 +17,9 @@ import type { AssistantMessage, LlmContext, StreamFn, StreamFnOptions, Usage } f
 import {
   AppError,
   GOAL_ACTIVE_EXISTS,
+  GOAL_GATE_FAILED,
   GOAL_NOT_FOUND,
+  GOAL_TODO_SCOPE,
   GOAL_TRANSITION_INVALID,
   TOOL_ARGUMENTS_INVALID,
 } from '../contracts/errors.js';
@@ -473,5 +475,104 @@ describe('S1 键控：goal 结算/降级按归属会话路由', () => {
     // 非 resume 起源不触发降级路径（新开不是续接——状态保持，不抛不炸）
     runtime.ctx.emit('session_start', { sessionId: runtime.session!.header.sessionId, origin: 'new' });
     expect(await goalText(runtime)).toContain('状态：needs-resume');
+  });
+});
+
+/* ---------------- 用例：goal 循环批刀二（计划态跨轮 + gates + open 否决） ---------------- */
+
+describe('goal 刀二全栈：计划态跨轮 + gates 执法 + open 项否决', () => {
+  /** 直调驱动域工具（todo 等——经 compositionFor 投影取 def，三段管道照走） */
+  function callDriverTool(runtime: AppRuntime, name: string, args: Record<string, unknown>) {
+    const sessionId = runtime.session!.header.sessionId;
+    const def = runtime.tools.compositionFor(sessionId).find((d) => d.name === name);
+    if (def === undefined) throw new Error(`工具未注册：${name}`);
+    return runtime.tools.toAgentTool(def).execute('tc-goal2', args);
+  }
+
+  it(
+    '全链：goal_set 锚 → todo goal 段词汇落账（files gate 过）→ 新用户输入后注入仍在（跨轮）' +
+      '→ open 项否决 → 全完放行 + goal_get 计划态投影',
+    async () => {
+      // files gate 判据物：真工作区内文件（非空）
+      const workspace = makeTempDir('app-goal-plan-');
+      writeFileSync(join(workspace, 'artifact.txt'), '落码产物\n');
+      const { streamFn, contexts } = scriptedStream([textMessage('答'), textMessage('答二')]);
+      const runtime = await assemble({ streamFn, workspace });
+      const sessionId = runtime.session!.header.sessionId;
+
+      /* ---- ① goal_set：激活锚 = 设定时点日志长度（其后 todo 表属 goal 段） ---- */
+      await callTool(runtime, 'goal_set', { objective: '完成重构目标', tokenBudget: 100000 });
+
+      /* ---- ② todo 直调（真管道）：goal 段词汇全字段 + files gate completed ---- */
+      await callDriverTool(runtime, 'todo', {
+        items: [
+          { content: '落码', status: 'completed', noFollowUp: true, gate: { kind: 'files', spec: ['artifact.txt'] } },
+          { content: '等外部依赖', status: 'deferred', role: 'user', resumeWhen: 'after@+2h' },
+          { content: '收尾', status: 'pending' },
+        ],
+      });
+      expect(runtime.session!.events.filter((e) => e.type === 'todo/write')).toHaveLength(1); // durable 落账
+
+      /* ---- ③ open 项否决：2 项未完（deferred 含内）→ goal_update completed 被拒 ---- */
+      const vetoed = await callTool(runtime, 'goal_update', { status: 'completed', evidence: '提前申报' }).catch(
+        (e) => e,
+      );
+      expect(vetoed).toBeInstanceOf(AppError);
+      expect((vetoed as AppError).code).toBe(GOAL_TRANSITION_INVALID);
+      expect((vetoed as AppError).message).toContain('未完项');
+      expect(await goalText(runtime)).toContain('状态：active'); // 否决不落库
+
+      /* ---- ④ 计划态跨轮：新用户输入后（run-scoped 会归零）请求仍见全表回显 ---- */
+      await runtime.conversation!.submitOnce('新指令');
+      await spinUntil(() => contexts.length >= 1, '首请求');
+      await runtime.conversation!.settle();
+      const injected = userTexts(contexts[0]!).filter((t) => t.includes('非本次用户指令'));
+      expect(injected).toHaveLength(1); // goal 段：user/message 非边界——run-scoped 下此处应为空
+      expect(injected[0]).toContain('- [x] 落码');
+      expect(injected[0]).toContain('- [-] 用户·等外部依赖 ⇢ after@+2h');
+      expect(injected[0]).toContain('- [ ] 收尾');
+
+      /* ---- ⑤ goal_get 计划态投影：计数 + 判据门（active 行才查） ---- */
+      const midText = await goalText(runtime);
+      expect(midText).toContain('计划态：共 3 项（未完 2，含缓办 1 · 已完 1）');
+      expect(midText).toContain('判据门：1 项声明 gate（已过 1 / 待验 0）');
+
+      /* ---- ⑥ 全完放行：deferred→completed 归位后 goal_update completed 结算 ---- */
+      await callDriverTool(runtime, 'todo', {
+        items: [
+          { content: '落码', status: 'completed', noFollowUp: true },
+          { content: '等外部依赖', status: 'completed', followUp: '依赖到位后复查' },
+          { content: '收尾', status: 'completed', noFollowUp: true },
+        ],
+      });
+      await callTool(runtime, 'goal_update', { status: 'completed', evidence: '逐需求证据齐备（测试脚本申报）' });
+      expect(await goalText(runtime)).toContain('状态：completed');
+    },
+  );
+
+  it('gates fail-closed 全栈 + 非 goal 段词汇守门：缺判据物整笔被拒（零落账）；goal 外 deferred 即拒', async () => {
+    const { streamFn } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+
+    /* ---- 非 goal 段对照（goal_set 之前）：goal 段词汇申报即拒 GOAL_TODO_SCOPE ---- */
+    const scopeReject = await callDriverTool(runtime, 'todo', {
+      items: [{ content: '缓办', status: 'deferred', resumeWhen: 'after@+2h' }],
+    }).catch((e) => e);
+    expect(scopeReject).toBeInstanceOf(AppError);
+    expect((scopeReject as AppError).code).toBe(GOAL_TODO_SCOPE);
+    expect(runtime.session!.events.filter((e) => e.type === 'todo/write')).toHaveLength(0);
+
+    /* ---- gates fail-closed：goal 内 files gate 缺判据物 → 整笔被拒 ---- */
+    await callTool(runtime, 'goal_set', { objective: '判据目标', tokenBudget: 100000 });
+    const rejected = await callDriverTool(runtime, 'todo', {
+      items: [
+        { content: '落码', status: 'completed', noFollowUp: true, gate: { kind: 'files', spec: ['absent.txt'] } },
+      ],
+    }).catch((e) => e);
+    expect(rejected).toBeInstanceOf(AppError);
+    const err = rejected as AppError;
+    expect(err.code).toBe(GOAL_GATE_FAILED);
+    expect(err.message).toContain('kind=files reason=missing');
+    expect(runtime.session!.events.filter((e) => e.type === 'todo/write')).toHaveLength(0); // fail-closed 零落账
   });
 });

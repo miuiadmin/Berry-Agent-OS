@@ -46,8 +46,9 @@ import type { DatabaseConnection } from '../persist/index.js';
 import { GoalStore } from './store.js';
 import { canResumeGoal, canStopGoal, shouldContinueGoal } from './machine.js';
 import type { GoalRecord } from './machine.js';
+import type { GoalChannel } from './channel.js';
 import { renderBudgetExhaustedPrompt, renderContinuationPrompt } from './prompts.js';
-import { createGoalTools } from './tools.js';
+import { createGoalTools, snapshotOfItems } from './tools.js';
 import type { GoalSessionsFace } from './tools.js';
 
 /* ---------------------------------------------------------------------------------- */
@@ -101,6 +102,12 @@ export interface GoalAppDeps {
   readonly connection?: DatabaseConnection;
   /** 当前会话 id 活取值（/new 热切换后自动跟新会话走） */
   readonly getSessionId: () => string | undefined;
+  /**
+   * goal↔chat↔lsp 组合根通道（刀二计划态跨轮条）：goal 段查询注册侧 +
+   * todo fold 查询消费侧。缺省不传（诊断装配）= 通道面缺席——chat fold
+   * 退化 run-scoped、goal 计划态投影/open 项否决降级跳过（各消费方诚实降级）
+   */
+  readonly channel?: GoalChannel;
 }
 
 /**
@@ -194,12 +201,44 @@ async function applyGoalApp(
     }),
   );
 
-  /* ---- ① 工具三件（目标内容在模型；sessions 窄面 = 账本事件读写）----
-   * countOpenItems（计划态 open 项否决）/ currentWakeId（轮身份归因）两 hook
-   * 刀二/刀三接线——本刀 undefined = 面缺席诚实降级（工具内已注释同一口径） */
+  /* ---- ⓪½ 组合根通道注册（刀二计划态跨轮：goal 段查询——chat fold 边界与
+   * gates 判段的数据面）：仅 active 行在场时返回（needs-resume/终态行 =
+   * 非 goal 段——fold 回落 run-scoped）；随 ctx.effect 锚回卷摘除，/reload
+   * 重装载 re-apply 重注册。缺 channel（诊断装配）= 不注册，消费方 miss 即降级 */
+  if (deps.channel !== undefined) {
+    const channel = deps.channel;
+    ctx.effect(() =>
+      channel.registerGoalScope((sessionId) => {
+        const row = store.getActiveBySession(sessionId);
+        return row === undefined
+          ? undefined
+          : { active: true, activatedSeq: row.activatedSeq, needsWrite: row.needsWrite };
+      }),
+    );
+  }
+
+  /* ---- ① 工具三件（目标内容在模型；sessions 窄面 = 账本事件读写 + 激活锚长度）----
+   * todoSnapshot（计划态投影 + open 项否决）经组合根通道从 chat 件 fold 回流；
+   * currentWakeId（轮身份归因）刀三接线——本刀 undefined = 面缺席诚实降级 */
   const tools = ctx.get<ToolsService>('tools');
   const sessions = ctx.get<GoalSessionsFace>('sessions');
-  for (const def of createGoalTools({ store, getSessionId: deps.getSessionId, sessions })) {
+  for (const def of createGoalTools({
+    store,
+    getSessionId: deps.getSessionId,
+    sessions,
+    // 计划态快照 hook：goalId → 行 → 归属会话 → chat fold 查询 → 计数。
+    // undefined（面缺席/无驱动条目）原样透传——工具侧判缺降级
+    ...(deps.channel !== undefined
+      ? {
+          todoSnapshot: (goalId: string) => {
+            const row = store.getByGoalId(goalId);
+            if (row === undefined || row.sessionId === null) return undefined;
+            const items = deps.channel!.todoFoldFor(row.sessionId);
+            return items === undefined || items === null ? undefined : snapshotOfItems(items);
+          },
+        }
+      : {}),
+  })) {
     ctx.effect(() => tools.register(def));
   }
 
@@ -212,7 +251,13 @@ async function applyGoalApp(
       description:
         '长目标管理：/goal 查看状态；/goal resume [goalId] 重新激活（重启降级 needs-resume 时；带 goalId 跨会话领养）；/goal stop 人工停止',
       source: 'app',
-      handler: (args) => handleGoalCommand(args.trim(), { store, getSessionId: deps.getSessionId, ui }),
+      handler: (args) =>
+        handleGoalCommand(args.trim(), {
+          store,
+          getSessionId: deps.getSessionId,
+          ui,
+          logLength: () => sessions.logLength(),
+        }),
     }),
   );
 
@@ -319,7 +364,13 @@ async function applyGoalApp(
 /** /goal 命令体（args 形态：空 = 查状态 / resume [goalId] / stop） */
 function handleGoalCommand(
   args: string,
-  opts: { store: GoalStore; getSessionId: () => string | undefined; ui: UiNotifyFace },
+  opts: {
+    store: GoalStore;
+    getSessionId: () => string | undefined;
+    ui: UiNotifyFace;
+    /** 宿主日志长度面（resume 重绑的激活锚取值——sessions.logLength 单源） */
+    logLength: () => number | undefined;
+  },
 ): void {
   const sessionId = opts.getSessionId();
   const goal = sessionId === undefined ? undefined : opts.store.getBySession(sessionId);
@@ -356,8 +407,9 @@ function handleGoalCommand(
       );
       return;
     }
-    // 领养重绑：行 sessionId 换当前会话（原会话不再持有），状态回 active
-    opts.store.reactivate(target.goalId, sessionId, Date.now());
+    // 领养重绑：行 sessionId 换当前会话（原会话不再持有），状态回 active；
+    // 激活锚同步刷新（拍板形态：重绑到新会话即新锚——重新授权点重新折叠）
+    opts.store.reactivate(target.goalId, sessionId, Date.now(), opts.logLength() ?? null);
     opts.ui.notify(`目标已重新激活（active，goalId ${target.goalId}）——下一轮结算起恢复续跑。`);
     return;
   }

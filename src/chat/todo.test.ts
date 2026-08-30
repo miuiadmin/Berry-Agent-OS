@@ -1,19 +1,31 @@
 /**
- * L4 chat — todo 机器单元测试（骨架篇 §6.7「todo 落码形态定稿」2026-08-30 纵切）。
+ * L4 chat — todo 机器单元测试（骨架篇 §6.7「todo 落码形态定稿」2026-08-30 纵切；
+ * 第三十九批刀二扩面：goal 段词汇 + 计划态跨轮 fold + gates 双执法位）。
  *
  * 回归面：
  * - fold 纯函数全语义：run-scoped 边界（steer 同边界）/ last-write-wins /
  *   空表 / 遮蔽同判据 / 坏条目归一；
+ * - 刀二 fold：goal-scoped 锚两律（user/message 非边界——计划表跨轮存活；
+ *   seq < 锚不越界）+ 锚 null 诚实降级 run-scoped + goal 段遮蔽同守 +
+ *   扩字段读侧守形；
+ * - 渲染与回执：四态 marker（deferred [-] + ⇢ 复活条件 / 用户·前缀）+ 缓办计数；
  * - 工具件：append 落账 + 一行回执 + schema 上限护栏（裁决⑨）+ effect 'read'；
+ * - 刀二执法段：非 goal 段词汇申报即拒 / goal 段约束（deferred 必携复活条件、
+ *   completed 二择一）/ gates 申报期准入 + 验证期 fail-closed（不过零落账）；
  * - 注入件：瀑布 handler 三放行（miss / 空表 / 异常）与非空尾追注入 + 角色
- *   hidden 双面（toLlm → user / render 不进时间线）。
+ *   hidden 双面（toLlm → user / render 不进时间线）+ goal 锚注入段切换即时。
  *
  * 全栈链（驱动注册 → 模型调工具 → 次轮请求见注入 → 新用户输入后清空）归
- * src/app/chat.test.ts（mock 只停在模型层）。
+ * src/app/chat.test.ts（mock 只停在模型层）；gates 验证器分类矩阵归
+ * todo-gates.test.ts。
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
 import { Value } from '../contracts/typebox.js'; // 再导出面（memory/tools.test 同款，防双实例）
+import { AppError, GOAL_GATE_FAILED, GOAL_TODO_SCOPE } from '../contracts/errors.js';
 import { createContext } from '../context/context.js';
 import { createLogger } from '../context/logger.js';
 import { getMessageRoleDefinition } from '../contracts/messages.js';
@@ -25,6 +37,7 @@ import {
   foldCurrentTodo,
   registerTodoInjection,
   renderTodoTable,
+  type TodoEnforcement,
   type TodoItem,
   type TodoRegistryFace,
 } from './todo.js';
@@ -116,6 +129,75 @@ describe('foldCurrentTodo（run-scoped 倒扫纯函数）', () => {
   });
 });
 
+/* ---------------- fold：goal-scoped 计划态跨轮（刀二 T2-A） ---------------- */
+
+describe('foldCurrentTodo·goal 段（激活锚两律）', () => {
+  it('user/message 不再是边界——计划表跨轮存活；锚 null = 诚实降级 run-scoped', () => {
+    // seq: 0=user, 1=todo(表), 2=user(新一轮输入), 3=assistant
+    const session = sessionWith(
+      userSays,
+      writeTodo([{ content: '计划表', status: 'in_progress' }]),
+      userSays,
+      assistantSays,
+    );
+    // run-scoped（无锚 / null）：新 user/message 切段 → 表不可见
+    expect(foldCurrentTodo(session.events)).toBeNull();
+    expect(foldCurrentTodo(session.events, null)).toBeNull();
+    // goal-scoped（锚 ≤ 表 seq）：user/message 非边界 → 同一张计划表跨轮回显
+    expect(foldCurrentTodo(session.events, 1)).toEqual([{ content: '计划表', status: 'in_progress' }]);
+  });
+
+  it('锚下界：seq < 锚的事件不越界（goal 激活前的表不参与）', () => {
+    const session = sessionWith(
+      userSays,
+      writeTodo([{ content: '激活前的旧表', status: 'pending' }]),
+      userSays,
+      assistantSays,
+    );
+    // 锚 2（> 表 seq 1）：倒扫首触 seq<锚即收——激活点之后无表 → null
+    expect(foldCurrentTodo(session.events, 2)).toBeNull();
+    // 锚 1（= 表 seq）：表恰在激活点之后 → 可见（跨轮存活对照）
+    expect(foldCurrentTodo(session.events, 1)).toEqual([{ content: '激活前的旧表', status: 'pending' }]);
+  });
+
+  it('goal 段遮蔽跳过同守（CR-15——compaction 遮蔽段是「已消化」语义）', () => {
+    // seq: 0=user, 1=todo(现行表), 2=todo(被遮蔽), 3=遮蔽指令载体
+    const session = sessionWith(userSays, writeTodo([{ content: '现行表', status: 'pending' }]));
+    const occluded = session.append('todo/write', { items: [{ content: '被遮蔽表', status: 'completed' }] });
+    session.append(
+      'assistant/message',
+      { content: [] },
+      {
+        surfaceOp: { op: 'replace', start: occluded.seq, end: occluded.seq },
+        sourceEventSeqs: [occluded.seq],
+      },
+    );
+    expect(foldCurrentTodo(session.events, 0)).toEqual([{ content: '现行表', status: 'pending' }]);
+  });
+
+  it('goal 段扩字段读侧守形：合法字段保留 / 坏形字段丢弃（条目不弃）', () => {
+    const session = sessionWith(
+      userSays,
+      writeTodo([
+        { content: '全字段', status: 'deferred', role: 'user', taskClass: '重构', resumeWhen: 'after@+2h' },
+        { content: '有后继', status: 'completed', followUp: '收尾文档', gate: { kind: 'files', spec: ['a.ts'] } },
+        { content: '无后继', status: 'completed', noFollowUp: true },
+        { content: '坏角色', status: 'pending', role: 'boss' }, // role 二值外 → 字段丢弃
+        { content: '坏门', status: 'pending', gate: { kind: 'files', spec: [] } }, // spec 空清单 → gate 丢弃
+        { content: '坏复活', status: 'deferred', resumeWhen: '' }, // 空串 → 字段丢弃
+      ]),
+    );
+    expect(foldCurrentTodo(session.events)).toEqual([
+      { content: '全字段', status: 'deferred', role: 'user', taskClass: '重构', resumeWhen: 'after@+2h' },
+      { content: '有后继', status: 'completed', followUp: '收尾文档', gate: { kind: 'files', spec: ['a.ts'] } },
+      { content: '无后继', status: 'completed', noFollowUp: true },
+      { content: '坏角色', status: 'pending' },
+      { content: '坏门', status: 'pending' },
+      { content: '坏复活', status: 'deferred' },
+    ]);
+  });
+});
+
 /* ---------------- 渲染：注入正文与回执 ---------------- */
 
 describe('renderTodoTable / buildTodoReceipt', () => {
@@ -128,7 +210,15 @@ describe('renderTodoTable / buildTodoReceipt', () => {
     expect(table).toBe('- [x] 写规范\n- [~] 正在落码 todo 机器\n- [ ] 测试');
   });
 
-  it('回执 = 一行计数；空表 = 清空文案', () => {
+  it('刀二渲染扩面：deferred [-] 标记 + ⇢ 复活条件后缀 + 用户令办「用户·」前缀', () => {
+    const table = renderTodoTable([
+      { content: '重构持久层', status: 'deferred', role: 'user', resumeWhen: 'after@+2h' },
+      { content: '模型自设', status: 'deferred', resumeWhen: 'after@2026-09-01T09:00:00Z' },
+    ]);
+    expect(table).toBe('- [-] 用户·重构持久层 ⇢ after@+2h\n- [-] 模型自设 ⇢ after@2026-09-01T09:00:00Z');
+  });
+
+  it('回执 = 一行计数；空表 = 清空文案；缓办计数仅在场时追加', () => {
     expect(
       buildTodoReceipt([
         { content: 'a', status: 'pending' },
@@ -138,6 +228,13 @@ describe('renderTodoTable / buildTodoReceipt', () => {
       ]),
     ).toBe('已更新任务清单：4 项（待办 1 · 进行中 1 · 完成 2）');
     expect(buildTodoReceipt([])).toBe('已清空任务清单');
+    expect(
+      buildTodoReceipt([
+        { content: 'a', status: 'pending' },
+        { content: 'b', status: 'deferred' },
+        { content: 'c', status: 'deferred' },
+      ]),
+    ).toBe('已更新任务清单：3 项（待办 1 · 进行中 0 · 完成 0 · 缓办 2）');
   });
 });
 
@@ -174,17 +271,150 @@ describe('createTodoTool', () => {
     expect(check([{ content: 'x', status: 'done' }])).toBe(false);
     expect(check([])).toBe(true); // 空表 = 合法清空（裁决⑧）
   });
+
+  it('刀二 schema 扩面：四值 status + goal 段字段形状与上限', () => {
+    const { parameters } = createTodoTool({ append: (() => ({})) as never });
+    const check = (items: unknown[]): boolean => Value.Check(parameters as never, { items });
+    // 四值 status 与 goal 段字段全放行（形状面——段语义归 execute 执法）
+    expect(
+      check([{ content: 'x', status: 'deferred', resumeWhen: 'after@+1h', role: 'user', taskClass: '重构' }]),
+    ).toBe(true);
+    expect(check([{ content: 'x', status: 'completed', followUp: '收尾', noFollowUp: true }])).toBe(true); // schema 不裁二择一
+    expect(check([{ content: 'x', status: 'pending', gate: { kind: 'command', spec: 'npm test' } }])).toBe(true);
+    expect(check([{ content: 'x', status: 'pending', gate: { kind: 'files', spec: ['a.ts'] } }])).toBe(true);
+    // 上限与形状护栏：role 二值外 / taskClass 超 40 / gate spec 空清单 / 坏 kind
+    expect(check([{ content: 'x', status: 'pending', role: 'boss' }])).toBe(false);
+    expect(check([{ content: 'x', status: 'pending', taskClass: 'x'.repeat(41) }])).toBe(false);
+    expect(check([{ content: 'x', status: 'pending', gate: { kind: 'files', spec: [] } }])).toBe(false);
+    expect(check([{ content: 'x', status: 'pending', gate: { kind: 'shell', spec: 'x' } }])).toBe(false);
+  });
+});
+
+/* ---------------- 工具件：刀二执法段（goal 段约束 + gates） ---------------- */
+
+/** 造临时工作区根（files gate 端到端——真 stat 非 mock） */
+const gateRoot = mkdtempSync(join(tmpdir(), 'todo-tool-'));
+afterAll(() => {
+  rmSync(gateRoot, { recursive: true, force: true });
+});
+
+describe('createTodoTool·执法段（goal 段词汇 + gates 双执法位）', () => {
+  /** goal 段执法桩（锚/needsWrite 可调；runCommand 成功形缺省） */
+  const goalScope = (needsWrite: boolean) => ({ active: true as const, activatedSeq: 1, needsWrite });
+  /** 执行辅助：跑 def.execute 并捕获 AppError（分类断言用） */
+  const run = async (def: ReturnType<typeof createTodoTool>, items: readonly unknown[]) => {
+    try {
+      return { ok: true as const, result: await def.execute({ items }, { toolCallId: 'tc' } as never) };
+    } catch (err) {
+      return { ok: false as const, err: err as AppError };
+    }
+  };
+
+  it('非 goal 段（enforcement 缺席）：goal 段词汇申报即拒 GOAL_TODO_SCOPE——零落账', async () => {
+    const session = new Session({ sessionId: 's-ng' });
+    const def = createTodoTool(session); // 诊断装配形态——执法面缺席 = 非 goal 段执法
+    const rejected = await run(def, [{ content: 'a', status: 'deferred', resumeWhen: 'after@+1h' }]);
+    expect(rejected.ok).toBe(false);
+    expect((rejected as { err: AppError }).err.code).toBe(GOAL_TODO_SCOPE);
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(0); // fail-closed 零落账
+  });
+
+  it('goal 段约束：deferred 缺复活条件 / completed 缺二择一 → 拒；合法扩字段落账保留', async () => {
+    const session = new Session({ sessionId: 's-g1' });
+    const def = createTodoTool(session, { scope: () => goalScope(true), workspaceRoot: gateRoot });
+    const noResume = await run(def, [{ content: '缓办无窗', status: 'deferred' }]);
+    expect(noResume.ok).toBe(false);
+    expect((noResume as { err: AppError }).err.code).toBe(GOAL_TODO_SCOPE);
+    const noFollow = await run(def, [{ content: '完成无后继', status: 'completed' }]);
+    expect(noFollow.ok).toBe(false);
+    expect((noFollow as { err: AppError }).err.code).toBe(GOAL_TODO_SCOPE);
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(0);
+    // 合法全字段：落账 = 事件载荷保留扩字段（durable 事实源）
+    const ok = await run(def, [
+      { content: '缓办', status: 'deferred', role: 'user', resumeWhen: 'after@+2h' },
+      { content: '完成', status: 'completed', noFollowUp: true },
+    ]);
+    expect(ok.ok).toBe(true);
+    const written = session.events.filter((e) => e.type === 'todo/write');
+    expect(written).toHaveLength(1);
+    expect(written[0]!.data).toEqual({
+      items: [
+        { content: '缓办', status: 'deferred', role: 'user', resumeWhen: 'after@+2h' },
+        { content: '完成', status: 'completed', noFollowUp: true },
+      ],
+    });
+  });
+
+  it('gates 申报期准入：command gate 无 needsWrite = denied（GOAL_GATE_FAILED 当场拒）', async () => {
+    const session = new Session({ sessionId: 's-g2' });
+    const def = createTodoTool(session, {
+      scope: () => goalScope(false), // 只读档 goal
+      workspaceRoot: gateRoot,
+      runCommand: async () => ({ exitCode: 0, isError: false, text: 'ok' }),
+    });
+    const rejected = await run(def, [
+      { content: '验命令', status: 'pending', gate: { kind: 'command', spec: 'npm test' } },
+    ]);
+    expect(rejected.ok).toBe(false);
+    const err = (rejected as { err: AppError }).err;
+    expect(err.code).toBe(GOAL_GATE_FAILED);
+    expect(err.message).toContain('kind=command reason=denied');
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(0);
+  });
+
+  it('gates 验证期 fail-closed：置 completed 且验证不过 = 整笔不落账（结构化回执）', async () => {
+    const session = new Session({ sessionId: 's-g3' });
+    const def = createTodoTool(session, {
+      scope: () => goalScope(true),
+      workspaceRoot: gateRoot,
+      runCommand: async () => ({ exitCode: 1, isError: true, text: 'exit code: 1\nFAIL 测试红' }),
+    });
+    const rejected = await run(def, [
+      { content: '测试全绿', status: 'completed', noFollowUp: true, gate: { kind: 'command', spec: 'npm test' } },
+    ]);
+    expect(rejected.ok).toBe(false);
+    const err = (rejected as { err: AppError }).err;
+    expect(err.code).toBe(GOAL_GATE_FAILED);
+    expect(err.message).toContain('kind=command reason=nonzero');
+    expect(err.message).toContain('「测试全绿」');
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(0);
+    // 同场 pending 项带 gate 不触发验证（未到验收点）——置 completed 才验
+    const pending = await run(def, [
+      { content: '未验', status: 'pending', gate: { kind: 'command', spec: 'npm test' } },
+    ]);
+    expect(pending.ok).toBe(true);
+    expect(session.events.filter((e) => e.type === 'todo/write')).toHaveLength(1);
+  });
+
+  it('files gate 端到端（真 stat）：缺文件拒 / 在场非空过', async () => {
+    writeFileSync(join(gateRoot, 'present.ts'), 'export {};\n');
+    const session = new Session({ sessionId: 's-g4' });
+    const def = createTodoTool(session, { scope: () => goalScope(false), workspaceRoot: gateRoot });
+    const rejected = await run(def, [
+      { content: '落码在场', status: 'completed', noFollowUp: true, gate: { kind: 'files', spec: ['absent.ts'] } },
+    ]);
+    expect(rejected.ok).toBe(false);
+    expect((rejected as { err: AppError }).err.message).toContain('kind=files reason=missing');
+    const ok = await run(def, [
+      { content: '落码在场', status: 'completed', noFollowUp: true, gate: { kind: 'files', spec: ['present.ts'] } },
+    ]);
+    expect(ok.ok).toBe(true);
+  });
 });
 
 /* ---------------- 注入件：context_transform 瀑布 ---------------- */
 
-/** 建 ctx + 注册注入件 + 挂一个会话进伪注册表 */
-function setupInjection(session: Session | undefined, sessionId = 's-inject') {
+/** 建 ctx + 注册注入件 + 挂一个会话挂进伪注册表（goalBoundaryFor = 刀二锚查询注入） */
+function setupInjection(
+  session: Session | undefined,
+  sessionId = 's-inject',
+  goalBoundaryFor?: (sessionId: string) => number | null | undefined,
+) {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const entries = new Map<string, { session: Session }>();
   if (session !== undefined) entries.set(sessionId, { session });
   const registry: TodoRegistryFace = { entries };
-  registerTodoInjection(ctx, registry);
+  registerTodoInjection(ctx, registry, goalBoundaryFor);
   const run = async (messages: unknown[], key: unknown = sessionId) =>
     (await ctx.waterfall('context_transform', messages, key, (final: unknown) => final)) as Array<{
       role: string;
@@ -261,5 +491,28 @@ describe('registerTodoInjection（瀑布 handler + 角色）', () => {
     // 同 ctx 二次注册 = 撞名（真实路径是回卷后新作用域重挂——app.ts apply 幂等注释）
     expect(() => registerTodoInjection(ctx, { entries: new Map() })).toThrowError(/chat\/todo/);
     await ctx.dispose();
+  });
+
+  it('goal 锚注入（刀二）：锚缺席 run-scoped 无表 / 锚在场同日志注入——段切换即时生效', async () => {
+    // seq: 0=user, 1=todo(计划表), 2=user(新一轮), 3=assistant
+    const session = sessionWith(
+      userSays,
+      writeTodo([{ content: '计划项', status: 'in_progress' }]),
+      userSays,
+      assistantSays,
+    );
+    // 锚活取（闭包变量——模拟 goal 激活/停掉，注入时点重查切段）
+    let anchor: number | null | undefined = undefined;
+    const h = setupInjection(session, 's-inject', () => anchor);
+    const before = await h.run([{ role: 'user', content: 'x', timestamp: 1 }]);
+    anchor = 1; // goal 激活：锚 1 ≤ 表 seq → 计划表跨轮回显
+    const after = await h.run([{ role: 'user', content: 'x', timestamp: 2 }]);
+    anchor = null; // 停掉 goal：诚实降级 run-scoped
+    const stopped = await h.run([{ role: 'user', content: 'x', timestamp: 3 }]);
+    await h.ctx.dispose(); // 先回卷后断言（角色注册挂 effect 栈）
+    expect(before).toHaveLength(1); // run-scoped：新 user/message 已切段 → 无表不注入
+    expect(after).toHaveLength(2);
+    expect(String(after.at(-1)!.content)).toContain('- [~] 计划项');
+    expect(stopped).toHaveLength(1); // 停掉后即时回切（无缓存陈旧性）
   });
 });

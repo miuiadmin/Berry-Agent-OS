@@ -181,6 +181,19 @@ describe('转移方法：状态机落库半边', () => {
     expect(db.getBySession('s1')).toBeUndefined();
   });
 
+  it('激活锚随 setActive 落库 / reactivate 重绑刷新（刀二计划态跨轮）', () => {
+    // setActive 带 activatedSeq（goal_set 时点宿主日志长度）；缺省 NULL = 锚缺席
+    const a = db.setActive('s1', '目标', 1000, false, 100, 42);
+    expect(db.getByGoalId(a.goalId)!.activatedSeq).toBe(42);
+    const b = db.setActive('s2', '无锚', 1000, false, 100);
+    expect(db.getByGoalId(b.goalId)!.activatedSeq).toBeNull(); // 存量行/无路由落点 = 诚实降级
+    // resume 重绑到新会话即新锚（重新授权点重新折叠）
+    db.demoteToNeedsResume('s1', 200);
+    db.reactivate(a.goalId, 's3', 300, 77);
+    expect(db.getByGoalId(a.goalId)!.activatedSeq).toBe(77);
+    expect(db.getByGoalId(a.goalId)!.sessionId).toBe('s3');
+  });
+
   it('settleDeclared(goalId)：completed/blocked 落 evidence 与终态时间戳；他行不受累', () => {
     const a = db.setActive('s1', '目标', 1000, false, 100);
     db.settleDeclared(a.goalId, 'completed', '逐需求证据齐备', 200);

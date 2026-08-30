@@ -62,7 +62,10 @@ import { APPROVAL_ANSWER_EVENT, bridgeApprovalSignal, createApprovalService } fr
 import { conductGateLines, installSafetyGate, type GateRowFilter } from '../safety/gate.js';
 import type { AllowlistEntry } from '../safety/allowlist.js';
 import { createBashTool, type CommandProcessLog } from '../exec/tool.js';
-import { createTodoTool, registerTodoInjection } from './todo.js';
+import { createTodoTool, foldCurrentTodo, registerTodoInjection } from './todo.js';
+import type { TodoEnforcement, TodoItem } from './todo.js';
+import { GATE_COMMAND_TIMEOUT_MS } from './todo-gates.js';
+import type { DiagnosticsGateQuery, TodoGoalScope } from './todo-gates.js';
 import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import { createFsTools } from '../tools/fs.js';
@@ -586,6 +589,22 @@ export interface ChatAppDeps {
    * 认领树杀。组合根注 mcp ChildRegistry 适配器。
    */
   readonly commandLog?: CommandProcessLog;
+  /**
+   * goal↔chat↔lsp 组合根通道窄面（第三十九批刀二计划态跨轮/gates 条，冷读
+   * CR-11）：goal 段查询（fold 边界 + gates 判段）+ todo fold 查询注册（goal
+   * 件计划态投影消费）+ LSP 诊断查询（diagnostics gate 迟到注入）。chat 不
+   * import goal——结构函数键（GoalChannel 的结构子集），组合根接线点编译期
+   * 即验。缺省不传（诊断装配）= 通道面缺席：fold 恒 run-scoped、gates 判非
+   * goal 段（扩字段申报即拒）、diagnostics gate 申报即拒——各消费方诚实降级。
+   */
+  readonly goalChannel?: {
+    /** goal 段查询（miss = 非 goal 段——三态同面：件未装载/已卸/无 active 行） */
+    readonly goalScopeFor: (sessionId: string) => TodoGoalScope | undefined;
+    /** todo fold 查询注册（chat 件 → goal 件计划态投影/open 项否决的数据面） */
+    readonly registerTodoFold: (query: (sessionId: string) => readonly TodoItem[] | null | undefined) => Disposer;
+    /** LSP 诊断查询（diagnostics gate 判据面——lsp 件 apply 期迟到注入） */
+    readonly diagnosticsFor: DiagnosticsGateQuery;
+  };
 }
 
 /**
@@ -1095,7 +1114,42 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         // 命令进程登记簿透传（宿主猝死孤儿治理——见 ChatAppDeps.commandLog 注）
         ...(deps.commandLog !== undefined ? { commandLog: deps.commandLog } : {}),
       });
-      const domainDisposers = [...fsTools.tools, bashDef, createTodoTool(session)].map((def) =>
+      /* -- 刀二执法依赖束（goal 段词汇/gates 的 todo 执行段执法面，骨架篇
+         §6.8）：goal 段查询（组合根通道）+ files gate fence 锚（本条目工作区
+         根）+ command gate 执行面（本驱动三段管道 + bash def——守门/审批/
+         沙箱/durable 全执法）+ diagnostics 查询面（lsp 件迟到注入）。通道
+         缺席（诊断装配）= undefined → 按「无 goal 段」执法（扩字段申报即拒
+         ——一致性不因装配形态破缺） -- */
+      const todoEnforcement: TodoEnforcement | undefined =
+        deps.goalChannel === undefined
+          ? undefined
+          : {
+              scope: () => deps.goalChannel!.goalScopeFor(sessionId),
+              workspaceRoot: deps.workspace,
+              runCommand: async (command, signal) => {
+                // bash 三段管道全执法：origin 'model' 保持模型工具面完整审批/
+                // 守门语义（spec「三段管道全执法」——service 面会绕开审批行）；
+                // 30s 帽经 bash timeoutMs 参数携带（超上限自动钳制，帽内直通）；
+                // 结果适配出 exitCode / isError / text 三信号（gates 分类面）
+                const result = await driverPipeline(
+                  bashDef,
+                  'todo-gate',
+                  { command, timeoutMs: GATE_COMMAND_TIMEOUT_MS },
+                  signal,
+                  undefined,
+                  'model',
+                );
+                const details = result.details as { exitCode?: number } | undefined;
+                const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('\n');
+                return {
+                  exitCode: typeof details?.exitCode === 'number' ? details.exitCode : undefined,
+                  isError: result.isError === true,
+                  text,
+                };
+              },
+              diagnostics: deps.goalChannel.diagnosticsFor,
+            };
+      const domainDisposers = [...fsTools.tools, bashDef, createTodoTool(session, todoEnforcement)].map((def) =>
         tools.register(def, { driver: sessionId, domain: appId }),
       );
       const disposeDomainTools = (): void => {
@@ -1283,8 +1337,31 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       // todo 注入件（骨架篇 §6.7 落码形态定稿④）：角色 + context_transform 瀑布
       // handler 装载面注册——必须挂在本早退**之前**：/reload 支线（下方）只重挂
       // 服务面不重跑 boot 段，而 ctx.on 注册随锚回卷——重装载后 apply 重入经此
-      // 路重挂注入件（注册幂等：作用域 effect 栈各归各次装载）
-      registerTodoInjection(ctx, registry);
+      // 路重挂注入件（注册幂等：作用域 effect 栈各归各次装载）。
+      // 刀二计划态跨轮：goal 段锚查询注入——goal active 期 fold 从激活锚折叠
+      //（user/message 不再是边界）；通道 miss / 无 active 行 = run-scoped 现行为
+      const goalChannel = deps.goalChannel;
+      registerTodoInjection(
+        ctx,
+        registry,
+        goalChannel === undefined
+          ? undefined
+          : // 每次注入时点活取（goal 激活/停掉后注入即时切段，无缓存陈旧性）
+            (sessionId) => goalChannel.goalScopeFor(sessionId)?.activatedSeq,
+      );
+      // 刀二 todo fold 查询注册（通道反向腿——goal 件计划态投影 / open 项否决
+      // 消费）：sessionId → 本件驱动 fold（goal 段锚查询期重查非注册期冻结）。
+      // 挂 ctx.effect 随锚回卷，与注入件同位置同理（/reload 重入重挂）
+      if (goalChannel !== undefined) {
+        ctx.effect(() =>
+          goalChannel.registerTodoFold((sessionId) => {
+            const entry = registry.entries.get(sessionId);
+            if (entry === undefined) return undefined; // 非本件会话（子代理等）——面缺席诚实降级
+            const scope = goalChannel.goalScopeFor(sessionId);
+            return foldCurrentTodo(entry.session.events, scope === undefined ? undefined : scope.activatedSeq);
+          }),
+        );
+      }
       // /reload 重装载支线：注册表非空（驱动条目跨重装载存续——重装载是装载面
       // 变更不是会话变更），只重挂服务面（旧 provide 已随锚回卷）
       if (entries.size > 0) {
