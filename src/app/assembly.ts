@@ -44,6 +44,7 @@ import {
   localDayStartMs,
   openTurnDepth,
   spentBackgroundTokensSince,
+  writeAtomicFile,
 } from '../persist/index.js';
 import type { LlmRuntime, Provider, StreamFnDefaults } from '../llm/index.js';
 import { createLlmRuntime, createLlmService, createStreamFn, InFlightTracker, providerApiFace } from '../llm/index.js';
@@ -2116,14 +2117,59 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     failed: [...ring1Load.failed, ...ring2Load.failed],
     skipped: [...ring1Load.skipped, ...ring2Load.skipped],
   });
-  if (appsService.list().some((row) => row.status === 'failed')) {
-    const lines = appsService
-      .list()
-      .filter((row) => row.status === 'failed')
-      .map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
+  // 失败处置分桶（G1，契约篇「失败应用处置」段，2026-08-30——daemon 批前置）：
+  // 官方形引用行失败仍拒启（官方件 = 平台职能面，缺位即残缺运行，不带病跑——
+  // 第十四批条款维持）；第三方行失败 = 隔离降级（跳过该行继续启动 + 诊断文件
+  // + 启动横幅——隔离 ≠ 静默；/reload 早已进程存活收 failed 行，boot 对称收口）
+  const officialRef = (rowId: string): boolean => {
+    // 判据 = 行引用形（与 §5.1「籍随行引用形不随包身世」同一法条）：pkg 缺省
+    // （官方层合成行）∪ builtin: 前缀。typo 官方引用的 unresolved 行同桶——
+    // 官方引用形缺位即残缺运行。合成行清单查无此 id = 不可达防御，按官方桶
+    // fail-closed（宁可拒启不静默降级）
+    const source = composition.rows.find((r) => r.id === rowId);
+    return source === undefined || source.pkg === undefined || source.pkg.startsWith('builtin:');
+  };
+  const allFailed = [...ring1Load.failed, ...ring2Load.failed];
+  const officialFailed = allFailed.filter((row) => officialRef(row.id));
+  if (officialFailed.length > 0) {
+    const lines = officialFailed.map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
     await refuseBoot(
       APP_LOAD_FAILED,
-      `应用启动断言失败（${lines.length} 行，app/failed 事件已逐行广播）：\n${lines.join('\n')}`,
+      `应用启动断言失败（官方行 ${lines.length} 行，app/failed 事件已逐行广播）：\n${lines.join('\n')}`,
+    );
+  }
+  const degraded = allFailed.filter((row) => !officialRef(row.id));
+  if (degraded.length > 0) {
+    // 诊断文件（隔离 ≠ 静默的落盘半边）：<数据目录>/boot-failures.json boot 批
+    // 整替写——每次 boot 只对本批失败负责，历史失败随旧文件消亡（/reload 失败
+    // 走 reload 报告面不落此文件）；栈/pkg/apps 影响面归因取自合成行与载荷
+    const bootFailurePath = join(dataDir(), 'boot-failures.json');
+    mkdirSync(dataDir(), { recursive: true });
+    writeAtomicFile(
+      bootFailurePath,
+      `${JSON.stringify(
+        {
+          bootTime: new Date().toISOString(),
+          failures: degraded.map((row) => {
+            const source = composition.rows.find((r) => r.id === row.id);
+            return {
+              id: row.id,
+              code: row.code,
+              message: row.message,
+              ...(row.stack !== undefined ? { stack: row.stack } : {}),
+              ...(source?.pkg !== undefined ? { pkg: source.pkg } : {}),
+              ...(source?.apps !== undefined ? { apps: source.apps } : {}),
+            };
+          }),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    // 启动横幅（v1 = 宿主日志 banner——TUI 呈现形态随 daemon 刀一 boot 序定形）
+    const lines = degraded.map((row) => `  - [${row.code}] ${row.id}：${row.message}`);
+    ctx.logger.warn(
+      `启动横幅：${degraded.length} 行第三方应用失败已隔离跳过（平台照常启动，app/failed 已逐行广播）：\n${lines.join('\n')}\n  诊断文件：${bootFailurePath}`,
     );
   }
   // ④d onSettle 晚绑定收口（§6.4）：通知器按注册表解析归属条目——S1 键控

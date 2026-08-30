@@ -495,12 +495,6 @@ export async function loadApps(
   // 跨区行 zone='system' 只命中 根表∪系统区表，装载律③——区际依赖同拒）
   const zone = root.zone;
 
-  /* ---- 行籍集（契约篇 §1.5 provide 两段式分级，2026-08-27 第三十三批 P2-1）：
-   * 官方名位判据 = 行引用为 builtin（row.builtin 在场）∪ 行 id 承袭官方默认层
-   * （替换官方行的第三方行——换实现不换名位，与工具行「替换唯一合法路径」同
-   * 精神）。从同一合成行清单自含构造；fork 时作 builtinRow 旗标注入行作用域。 */
-  const officialRowIds = new Set(rows.filter((row) => row.builtin !== undefined).map((row) => row.id));
-
   /* ---- ① 跳过行 / 解析失败行：不 import（禁用行不要求已装——挂载休眠精神） ---- */
   // 两域混排的 pending（第二十七批刀二）：main 行持校验后模块（同进程 apply）；
   // worker 行持过界元数据（apply 委托 workerLoader 进 worker 域执行）。Kahn 轮次
@@ -624,7 +618,7 @@ export async function loadApps(
         continue;
       }
       pending.splice(i, 1);
-      await activateOne(root, item, activated, failed, opts, officialRowIds);
+      await activateOne(root, item, activated, failed, opts);
       progress = true;
     }
   }
@@ -666,8 +660,6 @@ async function activateOne(
   activated: AppActivatedPayload[],
   failed: AppFailedPayload[],
   opts?: LoadAppsOptions,
-  /** 官方名位行 id 集（loadApps 从行清单自含构造——行籍判据第二支） */
-  officialRowIds?: ReadonlySet<string>,
 ): Promise<void> {
   const row = item.row;
   // 声明面来源按域分派（结构同源——worker 侧元数据是同一 named export 的转抄）
@@ -675,9 +667,12 @@ async function activateOne(
   const skills = item.kind === 'main' ? item.module.skills : item.meta.skills;
   const declaredName = item.kind === 'main' ? item.module.name : item.meta.name;
   const applyTimeoutMs = opts?.applyTimeoutMs ?? 10_000;
-  const fail = (code: string, message: string): void => {
-    failed.push({ id: row.id, code, message });
-    root.emit('app/failed', { id: row.id, code, message });
+  const fail = (code: string, message: string, stack?: string): void => {
+    // 栈键仅在场时携带（G1 诊断文件取材面——undefined 不进载荷，JSON 面零噪音）
+    const payload: AppFailedPayload =
+      stack !== undefined ? { id: row.id, code, message, stack } : { id: row.id, code, message };
+    failed.push(payload);
+    root.emit('app/failed', payload);
   };
 
   // 行 config 启动一次性校验（§1.2：schema 声明 + 校验 + 注入唯一样本）
@@ -699,9 +694,13 @@ async function activateOne(
     }
   }
 
-  // 行籍旗标（契约篇 §1.5 provide 两段式分级）：行引用为 builtin ∪ 行 id 承袭
-  // 官方默认层（替换官方行的第三方行）= 官方名位（provide 单段名自留地）
-  const builtinRow = row.builtin !== undefined || (officialRowIds?.has(row.id) ?? false);
+  // 行籍旗标（契约篇 §1.5 provide 两段式分级 + §2.2 增补 9 保留词执法）：
+  // 行引用形为官方形（row.builtin 在场——合并 pkg 保持 builtin: 形）= 官方名位
+  // （provide 单段名自留地 + 宿主保留词可用面）。籍随行引用形不随行 id 承袭
+  // （§5.1 执法形态全集同一法条）——自带第三方引用的替换官方 id 行不承袭名位
+  //（原「id 承袭官方默认层」第二支 2026-08-30 G1 小刀勘正摘除：同一行清单内
+  // 与 row.builtin 在场判定恒等值 = 死条款，且措辞与 D2 引用形法条相抵）
+  const builtinRow = row.builtin !== undefined;
   const scope = root.fork({
     name: row.id,
     rowId: row.id,
@@ -800,6 +799,9 @@ async function activateOne(
     fail(
       isTimeout ? APP_APPLY_TIMEOUT : APP_APPLY_FAILED,
       `${isTimeout ? 'apply 挂起超时' : 'apply 执行抛错'}（本作用域注册已回卷）：${describeError(err)}`,
+      // 栈仅 apply 抛错族随载荷上行（G1 诊断文件取材面）——超时族无原始 Error
+      // 栈可带（AppError 自造），缺席即诚实现状
+      isTimeout ? undefined : err instanceof Error ? err.stack : undefined,
     );
   }
 }

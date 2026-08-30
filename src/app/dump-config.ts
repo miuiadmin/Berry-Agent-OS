@@ -195,6 +195,19 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
         `系统提示词：${runtime.systemPrompt.length} 字符`,
       ];
       process.stdout.write(lines.join('\n') + '\n');
+      // G1 失败自查（2026-08-30）：boot 对第三方行失败已隔离降级不再抛——诊断面
+      // 自立「失败行在场 → 退出码 1」规则接续旧拒启语义（nonzero = 有行失败须
+      // 人眼，尽管平台照启）；官方行失败仍拒启走上方 catch 原路。树打印
+      // （renderCompositionTree）已含逐行状态，此处补清单 + 退出码
+      const failedRows = runtime.appsService.list().filter((row) => row.status === 'failed');
+      if (failedRows.length > 0) {
+        process.stdout.write(
+          `失败行（${failedRows.length}——已隔离跳过，平台照启；官方行失败则拒启）：\n${failedRows
+            .map((row) => `  - [${row.code}] ${row.id}：${row.message}`)
+            .join('\n')}\n`,
+        );
+        return 1;
+      }
       return 0;
     } finally {
       await runtime.shutdown();

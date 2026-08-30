@@ -576,11 +576,18 @@ export interface AppActivatedPayload {
   readonly events?: readonly string[];
 }
 
-/** app/failed 载荷：{ 组合树行 id, 错误码（APP_ 族）, 错误信息 } */
+/** app/failed 载荷：{ 组合树行 id, 错误码（APP_ 族）, 错误信息, 栈（可选） } */
 export interface AppFailedPayload {
   readonly id: string;
   readonly code: string;
   readonly message: string;
+  /**
+   * 原始错误栈（G1 失败应用处置，2026-08-30）：仅 apply 抛错族在场
+   * （APP_APPLY_FAILED——执行期真实 Error 的 stack，describeError 不含栈故
+   * 另辟此键）；配置/形状/解析类失败与挂起超时族缺席。boot 诊断文件
+   * boot-failures.json 的栈半边由此取材。
+   */
+  readonly stack?: string;
 }
 
 /** app/skipped 载荷：{ 组合树行 id, 跳过原因 } */

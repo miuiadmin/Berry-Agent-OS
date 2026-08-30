@@ -20,7 +20,7 @@ import {
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
   AssistantMessage,
   AssistantStream,
@@ -54,6 +54,8 @@ import {
   PERSIST_BATCH_WRITE_FAILED,
   APP_EVENT_RATE,
   APP_LOAD_FAILED,
+  APP_APPLY_FAILED,
+  APP_INJECT_UNRESOLVED,
   SESSION_EVENT_DATA_INVALID,
   SESSION_EVENT_TOO_LARGE,
 } from '../contracts/errors.js';
@@ -129,6 +131,18 @@ afterEach(async () => {
     const runtime = runtimes.pop()!;
     await runtime.shutdown().catch(() => undefined);
   }
+});
+
+/* G1 降级后（2026-08-30）：boot 第三方行失败落 boot-failures.json 进数据目录——
+   全文件钉独立数据目录，防测试诊断文件污染真实 ~/.berry；自钉用例后写胜出照常 */
+let globalDataDirPrev: string | undefined;
+beforeAll(() => {
+  globalDataDirPrev = process.env['APP_DATA_DIR'];
+  process.env['APP_DATA_DIR'] = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-asm-data-')));
+});
+afterAll(() => {
+  if (globalDataDirPrev === undefined) delete process.env['APP_DATA_DIR'];
+  else process.env['APP_DATA_DIR'] = globalDataDirPrev;
 });
 
 /** 装配 + 登记（全部用例经此入口——统一 options 缺省；应用装载使工厂 async） */
@@ -1514,7 +1528,7 @@ function writeAppDir(compositionDir: string, source: string): string {
 }
 
 describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
-  it('第三方技能提供方 ②×D1 联锁拒载：行挂 app（触发② 必填）→ registerProvider 装载期拒——启动断言拒启', async () => {
+  it('第三方技能提供方 ②×D1 联锁拒载：行挂 app（触发② 必填）→ registerProvider 装载期拒——行失败隔离降级', async () => {
     // D2 前形 = #17 回归锁（第三方 provider 装载即进渐进披露）；触发② 开闸后
     // 第三方行必挂 app，而 D1 裁死 app 行技能注册（provider 全局注入 systemPrompt
     // 无域层——契约篇 §5.1 注册面路由）→ 旧前提整体不可达，锁位换形为本联锁：
@@ -1559,9 +1573,13 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       join(compositionDir, 'overlay.yaml'),
       `rows:\n  - id: skill-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
-    // registerProvider 拒绝经加载器收为行失败（APP_APPLY_FAILED 包原码）→
-    // 启动断言拒启——与 D1 包声明面拒载锁（app-skill-plugin 用例）同断言不同入口
-    await expect(assemble({ compositionDir })).rejects.toThrowError(/技能来源注册被拒/);
+    // registerProvider 拒绝经加载器收为行失败（APP_APPLY_FAILED 包原码）——
+    // G1 后第三方行失败 = 隔离降级不拒启：执法面不变（行失败 + 原码文案进留账），
+    // 进程级收场换为平台照启（与 D1 包声明面拒载锁同断言不同入口）
+    const runtime = await assemble({ compositionDir });
+    const failedRow = runtime.appsService.list().find((row) => row.id === 'skill-plugin');
+    expect(failedRow?.status).toBe('failed');
+    expect(failedRow?.message).toMatch(/技能来源注册被拒/);
   });
 
   it('overlay 应用全栈：工具经 ctx.effect 注册 → 装配后可见可执行；paths/apps 服务就位', async () => {
@@ -1741,7 +1759,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     }
   });
 
-  it('D1 app 行技能拒载全栈：包声明 skills + 行 app 键 → 行失败拒启（seam 还帧 → 服务面执法）', async () => {
+  it('D1 app 行技能拒载全栈：包声明 skills + 行 app 键 → 行失败隔离降级（seam 还帧 → 服务面执法）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     const appDir = writeAppDir(
       compositionDir,
@@ -1763,8 +1781,12 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       `rows:\n  - id: app-skill-plugin\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
     // 技能 provider 全局注入 systemPrompt 无域层：app 行注册 = 装载期拒绝 →
-    // 加载器收为行失败（APP_APPLY_FAILED 包原码）→ 启动断言拒启
-    await expect(assemble({ compositionDir })).rejects.toThrowError(/技能来源注册被拒/);
+    // 加载器收为行失败（APP_APPLY_FAILED 包原码）——G1 后隔离降级不拒启，
+    // 拒载执法经失败行留账锁死（seam 还帧 → 服务面执法链路不变）
+    const runtime = await assemble({ compositionDir });
+    const failedRow = runtime.appsService.list().find((row) => row.id === 'app-skill-plugin');
+    expect(failedRow?.status).toBe('failed');
+    expect(failedRow?.message).toMatch(/技能来源注册被拒/);
   });
 
   it('提示词段全栈（宿主自留地）：registerSection → systemPrompt 含段内容（分节序固定）——应用行注册被 D3 裁死拒载（见 D3 单区 reload describe）、第三方行无 apps 被 D2 触发②拒，第三方 prompt 段 v1 无路即裁死语义；此处用 root 直注册（无行籍不拦）锁注册链与分节序', async () => {
@@ -2006,14 +2028,50 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
     expect(payload.ring1RestartRequired).toBeUndefined();
   });
 
-  it('应用启动断言：失败行非空 → 工厂抛 APP_LOAD_FAILED 聚合清单（不带病运行）', async () => {
+  it('G1 失败降级（修复前必红——旧语义全量拒启）：第三方行 apply 抛错 → 平台照启 + 诊断文件落盘 + 失败行留账', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
-    const appDir = writeAppDir(compositionDir, 'export const name = "bad";\nexport default 42;\n');
+    const appDir = writeAppDir(
+      compositionDir,
+      'export const name = "bad";\nexport default async function apply() {\n  throw new Error("第三方 apply 炸了");\n}\n',
+    );
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
       `rows:\n  - id: bad\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
 
+    // 钉独立数据目录（boot-failures.json 落盘点——不污染真实数据目录）
+    const dataRoot = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-data-')));
+    const prev = process.env['APP_DATA_DIR'];
+    process.env['APP_DATA_DIR'] = dataRoot;
+    try {
+      const { streamFn } = scriptedStream([textMessage('好')]);
+      // 修复前此处必红：第三方行失败 = 启动断言拒启抛 APP_LOAD_FAILED
+      const runtime = await assemble({ streamFn, compositionDir });
+      // 平台照启：默认层官方行照常激活（隔离不拖死宿主启动）
+      expect(runtime.appsService.list().find((row) => row.id === 'memory')?.status).toBe('activated');
+      // 失败行留账（ctx.apps.list 唯一事实源）
+      const bad = runtime.appsService.list().find((row) => row.id === 'bad');
+      expect(bad?.status).toBe('failed');
+      expect(bad?.code).toBe(APP_APPLY_FAILED);
+      // 诊断文件：boot 批整替写聚合 JSON——栈（apply 抛错族在场）+ pkg/apps
+      // 影响面归因 + boot 时点（隔离 ≠ 静默的落盘半边）
+      const diag = JSON.parse(readFileSync(join(dataRoot, 'boot-failures.json'), 'utf8')) as {
+        bootTime: string;
+        failures: Array<{ id: string; code: string; message: string; stack?: string; pkg?: string; apps?: string[] }>;
+      };
+      expect(typeof diag.bootTime).toBe('string');
+      expect(diag.failures).toHaveLength(1);
+      expect(diag.failures[0]).toMatchObject({ id: 'bad', code: APP_APPLY_FAILED, pkg: appDir, apps: ['chat'] });
+      expect(typeof diag.failures[0]!.stack).toBe('string');
+    } finally {
+      if (prev === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prev;
+    }
+  });
+
+  it('G1 官方行拒启维持：builtin: 引用形失败（typo 官方件）→ 工厂抛 APP_LOAD_FAILED 聚合清单（不带病运行）', async () => {
+    const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
+    writeFileSync(join(compositionDir, 'overlay.yaml'), `rows:\n  - id: memory\n    pkg: builtin:nonexistent\n`);
     // 不经 assemble 登记（工厂抛出即无 runtime 可关停）
     const attempt = createRuntime({
       dbPath: ':memory:',
@@ -2021,7 +2079,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       compositionDir,
     });
     await expect(attempt).rejects.toMatchObject({ code: APP_LOAD_FAILED });
-    await expect(attempt).rejects.toThrowError(/bad/); // 行 id 进聚合清单（归因）
+    await expect(attempt).rejects.toThrowError(/memory/); // 行 id 进聚合清单（归因）
   });
 
   it('dump-config 失败路径：打印合成树 + 失败清单退出码 1；空树成功路径退出码 0', async () => {
@@ -2031,9 +2089,22 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       join(badDir, 'overlay.yaml'),
       `rows:\n  - id: bad\n    pkg: ${appDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
+    // 钉独立数据目录（G1 降级后 boot 照启成功 → boot-failures.json 会落数据目录，
+    // 不钉会写进真实数据目录）
+    const dataRoot = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-data-')));
+    const prev = process.env['APP_DATA_DIR'];
+    process.env['APP_DATA_DIR'] = dataRoot;
     // 不传 persist——:memory: 全装配同构（P0-3）：显式 persist:false 会绕开持久层
     // 全真跑，正是诊断面要禁的侧门（P0-3 批主请求，2026-08-26）
-    expect(await dumpConfigMain({ compositionDir: badDir })).toBe(1);
+    try {
+      // G1 语义接续：boot 照启（第三方行隔离降级），诊断面自立「失败行在场 →
+      // 退 1」规则——退出码语义与旧拒启态连续，触发面改为自查
+      expect(await dumpConfigMain({ compositionDir: badDir })).toBe(1);
+      expect(existsSync(join(dataRoot, 'boot-failures.json'))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prev;
+    }
 
     const emptyDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-plug-')));
     expect(await dumpConfigMain({ compositionDir: emptyDir })).toBe(0);
@@ -2167,7 +2238,7 @@ describe('D3 装载分面分区全栈（装载律①③ + 撞名域矩阵）', (
     expect(tryResolveService(runtime.ctx, hermesZone, 'acme/chat-ok')).toBeUndefined(); // 跨应用视同缺失
   });
 
-  it('装载律③负向：应用区行 inject 别应用独占服务 → APP_INJECT_UNRESOLVED 拒启（区际依赖同拒——读链收窄结构性执法）', async () => {
+  it('装载律③负向：应用区行 inject 别应用独占服务 → APP_INJECT_UNRESOLVED 行失败隔离降级（区际依赖同拒——读链收窄结构性执法）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-')));
     const chatDir = writeRowDir(
       compositionDir,
@@ -2194,10 +2265,14 @@ describe('D3 装载分面分区全栈（装载律①③ + 撞名域矩阵）', (
         `  - id: chat-provider\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n` +
         `  - id: hermes-cross\n    pkg: ${hermesDir}\n    apps: [hermes]\n    sandbox: { carrier: main }\n`,
     );
-    // 启动断言聚合清单带 APP_INJECT_UNRESOLVED（缺失名 = chat 独占词——hermes 读链
-    // 恒看不见，Kahn 零进展即无解；旧单表形此处会误激活〔tryGet 全表可见〕）
-    await expect(assemble({ compositionDir })).rejects.toThrowError(/APP_INJECT_UNRESOLVED/);
-    await expect(assemble({ compositionDir })).rejects.toThrowError(/acme\/chat-only/);
+    // 行失败留账带 APP_INJECT_UNRESOLVED（缺失名 = chat 独占词——hermes 读链
+    // 恒看不见，Kahn 零进展即无解；旧单表形此处会误激活〔tryGet 全表可见〕）——
+    // G1 后第三方行失败 = 隔离降级不拒启，读链收窄执法经留账面锁死
+    const runtime = await assemble({ compositionDir });
+    const failedRow = runtime.appsService.list().find((row) => row.id === 'hermes-cross');
+    expect(failedRow?.status).toBe('failed');
+    expect(failedRow?.code).toBe(APP_INJECT_UNRESOLVED);
+    expect(failedRow?.message).toMatch(/acme\/chat-only/);
   });
 
   it('撞名域矩阵·异表并存：chat 行与 hermes 行 provide 同名词 → 两区各值并存合法（旧单表形此处必红——CONTEXT_SERVICE_EXISTS 回归锁）', async () => {
@@ -2331,7 +2406,7 @@ describe('D3 单区 reload（per-app reload 全栈——契约篇 §1.3 落码�
     expect(bad.error).toContain('no-such-app');
   });
 
-  it('registerSection app 行装载期拒载（注册面同族收口——prompt 段全局物化无域层）', async () => {
+  it('registerSection app 行装载期拒载→隔离降级留账（注册面同族收口——prompt 段全局物化无域层）', async () => {
     const compositionDir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'app-zone-prompt-')));
     const chatDir = writeRowDir(
       compositionDir,
@@ -2347,9 +2422,12 @@ describe('D3 单区 reload（per-app reload 全栈——契约篇 §1.3 落码�
       join(compositionDir, 'overlay.yaml'),
       `rows:\n  - id: prompt-row\n    pkg: ${chatDir}\n    apps: [chat]\n    sandbox: { carrier: main }\n`,
     );
-    // 行 failed → boot 启动断言拒启（聚合清单带拒载词）
-    await expect(assemble({ compositionDir })).rejects.toThrowError(/COMPOSITION_ROW_INVALID/);
-    await expect(assemble({ compositionDir })).rejects.toThrowError(/提示词段注册被拒/);
+    // 行 failed → G1 后隔离降级不拒启，拒载执法经失败行留账锁死（聚合清单带拒载词）
+    const runtime = await assemble({ compositionDir });
+    const failedRow = runtime.appsService.list().find((row) => row.id === 'prompt-row');
+    expect(failedRow?.status).toBe('failed');
+    expect(failedRow?.message).toMatch(/COMPOSITION_ROW_INVALID/);
+    expect(failedRow?.message).toMatch(/提示词段注册被拒/);
   });
 });
 
