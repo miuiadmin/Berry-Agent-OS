@@ -74,6 +74,15 @@ export interface BeforeToolCallResult {
   terminate?: boolean;
 }
 
+/**
+ * 进模型步前拦截结果（骨架篇 §6.8 刀三 T7-A ④——agent_pre_step 落码）：
+ * 返回 { stop: true } = 不发起本次模型调用、run 正常收场（completed——
+ * 「正在跑的轮跑完为止」仲裁纪律不破，状态面处置归回调方自身——停因分立）。
+ */
+export interface PreStepDecision {
+  readonly stop: true;
+}
+
 /** afterToolCall 改写结果（字段级整体替换，无深合并；缺省字段保持原值） */
 export interface AfterToolCallResult {
   content?: (TextContent | ImageContent)[];
@@ -126,6 +135,15 @@ export interface AgentLoopConfig {
   /** 下一轮前替换 context/model/thinkingLevel（返回 undefined 保持现状） */
   prepareNextTurn?: (info: TurnDoneInfo) => AgentTurnUpdate | undefined | Promise<AgentTurnUpdate | undefined>;
 
+  /**
+   * 进模型步前拦截（骨架篇 §6.8 刀三——agent_pre_step 的 loop 落点位）：每个
+   * 模型调用前（内层循环顶、turn_start 之后）调用一次，含 run 首步。返回
+   * { stop: true } = 不发起本次调用、run 正常收场（completed）；undefined =
+   * 放行。回调方自带状态处置（停因分立——loop 不写任何状态面）。抛错按回调
+   * 违约传播（run failed 现径——loop 零 try/catch 纪律不变）。
+   */
+  beforeModelStep?: () => Promise<PreStepDecision | undefined>;
+
   /** steering 队列取数口（turn 结束边界注入；装配层接 PendingMessageQueue.drain） */
   getSteeringMessages?: () => Promise<AgentMessage[]>;
   /** followUp 队列取数口（run 将停时捞起续跑） */
@@ -160,6 +178,9 @@ export interface RunResult {
 
 /** 静默事件出口（headless） */
 const sink: AgentEventSink = () => undefined;
+
+/** 零用量（进模型步前拦截的合成 turn_end 锚用——无模型调用即无计量） */
+const NO_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
 
 /* ---------------- run 入口两函数（骨架篇 §2.1） ---------------- */
 
@@ -258,6 +279,26 @@ async function runLoop(
         newMessages.push(message);
       }
       pending = [];
+
+      // 进模型步前复验/屏障（骨架篇 §6.8 刀三）：每个模型调用前一次——回调短路
+      // { stop: true } = run 正常收场（completed，非 mid-run 硬断——「正在跑的轮
+      // 跑完为止」不破，状态面处置归回调方即停因分立）。此刻 turn_start 已发
+      // （startRun 预发或本迭代顶）——补合成 turn_end 锚防日志留敞开 turn：锚是
+      // 空 content 的 assistant（不进 context/newMessages 时间线，纯事件面闭对；
+      // durable turn/end 只读 stopReason——'stop' 映射 completed）。回调抛错照常
+      // 上抛走 run failed 现径（loop 零 try/catch 不破——挂起钟在装配层桥上）。
+      const pre = await config.beforeModelStep?.();
+      if (pre?.stop === true) {
+        const anchor: AssistantMessage = {
+          role: 'assistant',
+          content: [],
+          usage: NO_USAGE,
+          stopReason: 'stop',
+          timestamp: Date.now(),
+        };
+        await emit({ type: 'turn_end', message: anchor, toolResults: [] });
+        return endRun(emit, newMessages, 'stop', undefined);
+      }
 
       // 流式取 assistant（transformContext → convertToLlm → StreamFn）
       const message = await streamAssistantResponse(context, config, signal, emit);

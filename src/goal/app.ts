@@ -13,10 +13,17 @@
  * 装配接线（全部挂 ctx.effect，装载锚 dispose 即 LIFO 回卷）：
  * ① 工具三件（goal_get/goal_set/goal_update）进 ctx.tools；
  * ② 命令 /goal（查状态）/goal resume/goal stop 进 ctx.channels——激活权在人类；
- * ③ 续跑触发：onRunSettled(completed 且 active 且预算未尽) → 续跑提示注入
- *    （backgroundWake——计入自激预算 maxConsecutiveWakes=3，防失控续跑）；
- * ④ 预算刹车：assistant/message usage 累计 ≥ tokenBudget → 刹停（stopped/budget）
- *    + 同步注入收尾提示（忙时 steer——当轮收尾交代下一步，非硬断）。
+ * ③ 续跑触发（刀三轮身份扩形）：onRunSettled 归因定行（goal 归因直查
+ *    goalId、缺席兜底归属会话）→ 停滞判定（stallsDecision——硬停 stopped/
+ *    stalls 或停滞指令段）→ 唤醒帽执法（wakeGate 双帽——超帽暂停投递非终态
+ *    停）→ 续跑提示注入（attribution {goalId, wakeId, wakePath:'self'} 随
+ *    user/message 落 durable——帽投影扫的就是这面归因；backgroundWake 计入
+ *    驱动帽 maxConsecutiveWakes=3）；
+ * ④ 预算刹车：assistant/message usage 累计 ≥ tokenBudget → 刹停（stopped/budget
+ *    + 停因事件 reason='budget'）+ 同步注入收尾提示（忙时 steer——当轮收尾
+ *    交代下一步，非硬断）；
+ * ⑤ 复验面（刀三 T7-A）：agent_pre_step 瀑布监听——goal 唤醒轮每次进模型步
+ *    前查归因行活状态（预算尽/已停/已重绑 → stop:true 就地收场）。
  *
  * 激活态不持久化（§6.7 拍板）：boot 续接（origin=resume）即把 active 行降级
  * needs-resume。触发面 = 装载收口 session_start 补播（二十九批 P1-6，契约篇
@@ -43,8 +50,15 @@ import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
-import { GoalStore } from './store.js';
-import { canResumeGoal, canStopGoal, shouldContinueGoal } from './machine.js';
+import { GoalStore, newWakeId } from './store.js';
+import {
+  canResumeGoal,
+  canStopGoal,
+  shouldContinueGoal,
+  wakeGate,
+  stallsDecision,
+  dueDeferredItems,
+} from './machine.js';
 import type { GoalRecord } from './machine.js';
 import type { GoalChannel } from './channel.js';
 import { renderBudgetExhaustedPrompt, renderContinuationPrompt } from './prompts.js';
@@ -77,6 +91,8 @@ interface AgentServiceFace {
       /** 显式会话键（S1 三级解析序之首——多驱动路由的目标会话 id） */
       readonly session?: string;
       readonly toolFilter?: readonly string[];
+      /** 归因键值对（刀三轮身份——goalId/wakeId/wakePath；durable 原样落账） */
+      readonly attribution?: Readonly<Record<string, string>>;
     },
   ): void;
   /** 结算载荷含归属 sessionId（S1 增维——订阅全局单份、run 多驱动各自） */
@@ -108,6 +124,12 @@ export interface GoalAppDeps {
    * 退化 run-scoped、goal 计划态投影/open 项否决降级跳过（各消费方诚实降级）
    */
   readonly channel?: GoalChannel;
+  /**
+   * 进程形态（刀三 boot 降级四合一的第四条件，骨架篇 §6.8）：tick 子进程为
+   * 挂钟轮到点而 resume 会话——不是「人类重启后的续接」，不降级 active 行
+   * （挂钟语义跨 tick 存活）。缺省 undefined ≠ 'tick'（保守降级维持现行为）。
+   */
+  readonly processKind?: 'tui' | 'run' | 'tick' | 'daemon';
 }
 
 /**
@@ -183,9 +205,11 @@ async function applyGoalApp(
         const envelope = payload as { sessionId?: unknown; origin?: unknown; replay?: unknown };
         if (typeof envelope?.sessionId !== 'string') return;
         if (envelope.replay === true) {
-          // 补播路径：先消费旗标（首见解除不以降级为前提），armed 且 resume 才降级
+          // 补播路径：先消费旗标（首见解除不以降级为前提），armed 且 resume 且
+          // 非 tick 形态才降级（刀三四合一第四条件——tick 子进程 resume 会话是
+          // 挂钟轮到点，不是「人类重启后的续接」，active 行不降级）
           const armed = consumeReplayUnseen();
-          if (armed && envelope.origin === 'resume') {
+          if (armed && envelope.origin === 'resume' && deps.processKind !== 'tick') {
             store.demoteToNeedsResume(envelope.sessionId, Date.now());
           }
           return;
@@ -238,6 +262,14 @@ async function applyGoalApp(
           },
         }
       : {}),
+    // 当前轮身份（刀三接线）：工具执行段经 runInSessionChain 路由到 run 会话
+    //——wake 归因查询取该会话刚结算/在跑 run 的 wakeId（goal 唤醒轮在场，
+    // 其余轮/通道缺席 = undefined，账本如实缺席不编造）
+    currentWakeId: () => {
+      const sessionId = deps.getSessionId();
+      if (sessionId === undefined) return undefined;
+      return deps.channel?.wakeAttributionFor(sessionId)?.wakeId;
+    },
   })) {
     ctx.effect(() => tools.register(def));
   }
@@ -271,13 +303,66 @@ async function applyGoalApp(
     ctx.effect(() =>
       agent.onRunSettled((settled) => {
         try {
-          // S1 键控：按结算载荷归属会话直查（不再依赖装配闭包单值——多驱动
-          // 各归各续跑，/new 换新不误伤旧会话目标，旧会话结算迟到照常触发其续跑）
-          // v13 后直查激活行（goalId 一等——历史终态行留史不参与续跑）
-          const goal = store.getActiveBySession(settled.sessionId);
-          if (goal === undefined || !shouldContinueGoal(goal, settled.status)) return;
+          // S1 键控 + 刀三轮身份两路定行：刚结算 run 有 goal 归因（chat 通道
+          // wake 查询——sendUserMessage attribution 经驱动 launch 定型回读）→
+          // goalId 直查（跨会话行也命中）；无归因（用户手写首跑/非 goal 轮）→
+          // 归属会话激活行兜底。归因行已重绑他乡（sessionId ≠ 结算会话）= 该
+          // 链路已换主——旧会话迟到结算不再续跑，诚实让位
+          const attribution = deps.channel?.wakeAttributionFor(settled.sessionId);
+          const goal =
+            attribution?.goalId !== undefined
+              ? store.getByGoalId(attribution.goalId)
+              : store.getActiveBySession(settled.sessionId);
+          if (goal === undefined) return;
+          // 重绑护栏（归因路专属）：归因命中但行已换绑他乡（或脱钩 NULL）= 该链路
+          // 已换主——旧会话迟到结算不再续跑，诚实让位（兜底路无此判——按会话
+          // 查出的行天然绑在本会话）
+          if (attribution !== undefined && goal.sessionId !== settled.sessionId) return;
+          if (!shouldContinueGoal(goal, settled.status)) return;
+          // 投递目标：行绑定会话优先（重绑后 goal 归新会话——续跑跟行走）
+          const targetSession = goal.sessionId ?? settled.sessionId;
+          // 停滞硬停（刀三 T5-A 反空转燃尽）：goal/evidence 事件流按 goalId 投影
+          //——连续 3 轮 surface_only 或 gap 幕 ≥ 2 → stopped(stalls) 不再续跑。
+          // 扫描读路由会话（结算派发经 runInSessionChain 包裹 = 结算会话日志；
+          // 重绑边缘诚实注记：重绑前历史在旧会话——投影按「链路实际跑过的账」）
+          const stalls = stallsDecision(goal.goalId, sessions.eventsOfType('goal/evidence'));
+          if (stalls.hardStop) {
+            store.stopByStalls(goal.goalId, Date.now());
+            sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'stalls', willRetry: false });
+            return;
+          }
+          // 唤醒帽执法（刀三 T5-A「执法点 = wakeGate 单源」）：超帽动作 = 暂停
+          // 投递非终态停——goal 仍 active，自激路拒发本轮唤醒，停因事件落 durable
+          //（willRetry=true——下一 run 结算或到窗后再试）
+          const gate = wakeGate({
+            goalId: goal.goalId,
+            now: Date.now(),
+            events: sessions.eventsOfType('user/message'),
+          });
+          if (!gate.allow) {
+            sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'capped', willRetry: true });
+            return;
+          }
+          // 停滞指令段（needsReplan / needsFloorRecovery——机器判据点名的行为义务）
+          const duties: string[] = [];
+          if (stalls.needsReplan) {
+            duties.push(
+              '连续两轮「改了没生效」（outcome_gap）——先 replan：重读目标与现状、换一条打法再动手，不许原路再试。',
+            );
+          }
+          if (stalls.needsFloorRecovery) {
+            duties.push(
+              '连续两轮只完成表面动作（surface_only）——重估写面需求：实际需要写/执行就调 goal_set 申报 needsWrite 开洞，否则下一轮必须产出对结果可见的推进。',
+            );
+          }
+          // 到窗复评段（刀三）：deferred 项的复活条件到窗——prompt 点名复评
+          const fold = deps.channel?.todoFoldFor(targetSession);
+          const deferredDue = fold === undefined || fold === null ? undefined : dueDeferredItems(fold, Date.now());
           // backgroundWake：计入自激预算 maxConsecutiveWakes=3——连续自动续跑
           // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录。
+          // 刀三轮身份：每次唤醒新 wakeId + wakePath 标路（self = 自激续跑路）——
+          // wakeGate 帽投影扫的就是这面归因
+          const wakeId = newWakeId();
           // 第二十四批题3a：无人值守续跑轮工具面收窄（needsWrite 未申报时）——
           // 机制级投影非提示词劝阻（letta token 扫描被绕过删除的反面教训）：
           // read 类工具 + goal_get/goal_update（结算件必须在场，否则续跑轮永远
@@ -288,14 +373,21 @@ async function applyGoalApp(
           // 投影（全局层 ∪ 本驱动应用域层 ∪ 本驱动层——fs 四名等 per-driver 工具
           // 照常进白名单筛选，别家驱动层不掺入；退役/未知 sessionId = 全局层同口径
           // 回落，与 chat 件 open 同一投影）
-          const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.compositionFor(settled.sessionId));
+          const toolFilter = goal.needsWrite ? undefined : wakeToolFilter(tools.compositionFor(targetSession));
           try {
-            agent.sendUserMessage(renderContinuationPrompt(goal), {
-              source: 'app:goal',
-              backgroundWake: true,
-              session: settled.sessionId,
-              ...(toolFilter !== undefined ? { toolFilter } : {}),
-            });
+            agent.sendUserMessage(
+              renderContinuationPrompt(goal, {
+                duties: duties.length > 0 ? duties : undefined,
+                deferredDue: deferredDue !== undefined && deferredDue.length > 0 ? deferredDue : undefined,
+              }),
+              {
+                source: 'app:goal',
+                backgroundWake: true,
+                session: targetSession,
+                attribution: { goalId: goal.goalId, wakeId, wakePath: 'self' },
+                ...(toolFilter !== undefined ? { toolFilter } : {}),
+              },
+            );
           } catch (err) {
             // S1 退役容错：目标会话已退役（/new 换新后旧会话结算迟到）→
             // AGENT_SESSION_INACTIVE 仅此码降 debug——旧会话停摆是 /new 的
@@ -339,6 +431,9 @@ async function applyGoalApp(
         // 模型当轮收尾交代下一步；预算尽≠完成，提示词如实示态）。agent 缺供
         //（chat 件未装载）只跳过注入——记账与刹停是数据面，不依赖对话循环
         store.stopByBudget(sessionId, goal.tokensUsed, Date.now());
+        // 停因事件（刀三）：预算尽落 durable 证据——停滞判定断 streak（预算帽拒发
+        // 轮不折算成模型停滞）+ 审计面回读；willRetry=false（预算尽不自动重试）
+        sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'budget', willRetry: false });
         // 刹停后行已非 active——getBySession 取当前行（updated_at 最新 = 刚停行）
         const stopped = store.getBySession(sessionId);
         if (stopped !== undefined) {
@@ -356,6 +451,47 @@ async function applyGoalApp(
       } catch (err) {
         // fire-and-forget 纪律：刹车异常止步日志，绝不上抛进事件派发面
         ctx.logger.error('goal 预算刹车失败', { error: describeError(err) });
+      }
+    }),
+  );
+
+  /* ---- ⑤ 复验面（刀三 T7-A：agent_pre_step 瀑布监听——进模型步前再执法）----
+   * 与 ④ 预算刹车的分工：④ 是事后记账（assistant/message 累计，漏检窗口 =
+   * 记账事件迟到）；⑤ 是事前拦（每次进模型步查归因行的活状态，durability
+   * 屏障已在此回调前成立——驱动 beforeModelStep 包装对后台轮先 flush 会话，
+   * 已投递消息 durable 先于其后模型花销）。三停因：预算尽（主动刹停+落账）/
+   * 行非 active（他路先停——用户 stop、停滞硬停：幂等让位不覆写状态面）/
+   * 行已重绑他乡（同 ③ 重绑护栏——旧链路让位）。
+   * 关键闸门：无 goal 归因的 run 一律 next() 放行——普通对话/工具轮与本件
+   * 无关（缺此闸门 = 每个会话每次 run 都被停）。异常 fail-open（复验面故障
+   * 不杀 run——next() 放行 + error 日志，下次结算照常补执法） */
+  ctx.effect(() =>
+    ctx.on('agent_pre_step', (payload: unknown, next: () => unknown) => {
+      try {
+        const envelope = payload as { sessionId?: unknown };
+        if (typeof envelope?.sessionId !== 'string') return next();
+        // 归因闸门：chat 通道 wake 查询取「该会话在跑 run」的归因——非 goal
+        // 唤醒轮（用户手写/其他件注入）归因缺席 = 不归本件管，直接放行
+        const attribution = deps.channel?.wakeAttributionFor(envelope.sessionId);
+        if (attribution?.goalId === undefined) return next();
+        const row = store.getByGoalId(attribution.goalId);
+        // 行缺席/非 active/已重绑他乡：停发但不写状态面（幂等让位——状态面
+        // 归属先到者；重绑后旧链路的在飞轮就地收场，新会话链路由新投递驱动）
+        if (row === undefined || row.status !== 'active' || row.sessionId !== envelope.sessionId) {
+          return { stop: true };
+        }
+        // 预算尽：主动刹停 + 停因落账（与 ④ 同一 stopByBudget——幂等护栏
+        // WHERE status='active' 两路不冲突，先到者赢）
+        if (row.tokensUsed >= row.tokenBudget) {
+          store.stopByBudget(envelope.sessionId, row.tokensUsed, Date.now());
+          sessions.appendEvent('goal/evidence', { goalId: row.goalId, reason: 'budget', willRetry: false });
+          return { stop: true };
+        }
+        return next();
+      } catch (err) {
+        // fail-open：复验面自身故障不杀 run（错误止步日志，模型步照常走）
+        ctx.logger.error('goal 复验面失败（fail-open 放行）', { error: describeError(err) });
+        return next();
       }
     }),
   );

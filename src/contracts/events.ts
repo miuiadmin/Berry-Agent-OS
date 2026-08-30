@@ -44,6 +44,7 @@ export type EventName =
   | 'user_input'
   | 'turn_stopping'
   | 'context_transform'
+  | 'agent_pre_step'
   | 'job_settled'
   | (string & {});
 
@@ -218,6 +219,11 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'turn_stopping',
     mode: 'serial',
     note: '模型 run 结算后逐个征询是否续跑（契约篇 §2.2 turn 层增补 7①，2026-08-27 P1-2 兑现：载荷 { sessionId, stopReason }；每次 runWithRetry 结算后、followUp 循环复查前派发，全部 stopReason 都发、dismantled 跳过；续跑 = handler 内经会话面 deliver 投递（running 走 steer 由循环消费——零新返回值）；消费点竞速挂起钟 5s）',
+  },
+  {
+    name: 'agent_pre_step',
+    mode: 'waterfall',
+    note: '进模型步前复验瀑布（契约篇 §2.2 message 层既有位，骨架篇 §6.8 刀三 T7-A 落码：每个模型调用前派发一次，载荷 { sessionId }——首步含开批消息落账之后。handler 短路返回 { stop: true } = run 正常收场（非 mid-run 硬断，「正在跑的轮跑完为止」不破）；未短路须 next() 透传。宿主消费点 = goal 件预算/行态复验（token 爆 → stopped budget + 停；行已非 active → 幂等让位 no-op 收场不覆写）；消费点竞速挂起钟 5s（preStepTimeoutMs）——超时/抛错走 run failed 现径）',
   },
   {
     name: 'job_settled',

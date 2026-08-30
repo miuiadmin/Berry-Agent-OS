@@ -51,6 +51,12 @@ export interface BuiltinRegistryOptions {
    * 消费侧）。缺省不传（纯测试形态）= 通道面缺席，各消费方诚实降级
    */
   readonly goalChannel?: GoalChannel;
+  /**
+   * 进程形态（骨架篇 §6.8 刀三——goal 件 boot 降级判据第四条件）：tick 子进程
+   * resume 会话不降级 active 行（挂钟语义跨 tick 存活）。缺省不传 = undefined
+   * ≠ 'tick'（保守降级维持现行为——诊断装配/纯测试形态）
+   */
+  readonly processKind?: 'tui' | 'run' | 'tick' | 'daemon';
   /** scheduler 件闭包依赖束（gate 判据 + runner——组合根活资源，席 13 第一刀；connection 由 goalConnection 同源注入不在此列） */
   readonly schedulerDeps?: Omit<SchedulerAppDeps, 'connection'>;
   /** mcp 件闭包依赖束（spawnServer 组装 = app/mcp-spawn.ts 产物 + exec killTree + 数据目录——契约篇 §6.6 冷读 #1 上提组合根） */
@@ -143,6 +149,9 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
       getSessionId: () => opts.getSession()?.header.sessionId,
       // 通道注入（刀二计划态跨轮）：goal 段查询注册侧 + todo fold 消费侧
       ...(opts.goalChannel ? { channel: opts.goalChannel } : {}),
+      // 进程形态（刀三 boot 降级判据第四条件）：tick 子进程 resume 不降级
+      // active 行；缺省不传 = 保守降级维持现行为
+      ...(opts.processKind !== undefined ? { processKind: opts.processKind } : {}),
     }),
     // scheduler 官方件（官方默认层第五行，tick 第一刀——内核边界篇 §4.1 席 13）：
     // 连接与 gate 判据/runner 全闭包注入（spawn 组装在 app/scheduler-runner.ts）；

@@ -13,7 +13,7 @@ import { GOAL_MIGRATION, GOAL_NEEDS_WRITE_MIGRATION, GOAL_V13_MIGRATION } from '
 export const migrations: MigrationSpec[] = [GOAL_MIGRATION, GOAL_NEEDS_WRITE_MIGRATION, GOAL_V13_MIGRATION];
 
 export { GOAL_MIGRATION, GOAL_NEEDS_WRITE_MIGRATION, GOAL_V13_MIGRATION } from './schema.js';
-export { GoalStore, newGoalId } from './store.js';
+export { GoalStore, newGoalId, newWakeId } from './store.js';
 export {
   canSetGoal,
   canResumeGoal,
@@ -22,8 +22,23 @@ export {
   shouldContinueGoal,
   isDeliveryOutcome,
   DELIVERY_OUTCOMES,
+  wakeGate,
+  stallsDecision,
+  parseResumeWhen,
+  dueDeferredItems,
+  MAX_CONSECUTIVE_SELF_WAKES,
+  WAKE_WINDOW_MS,
+  MAX_WINDOW_WAKES,
 } from './machine.js';
-export type { GoalRecord, GoalStatus, DeliveryOutcome } from './machine.js';
+export type {
+  GoalRecord,
+  GoalStatus,
+  DeliveryOutcome,
+  WakeGateDecision,
+  WakeScanEvent,
+  StallsDecision,
+  EvidenceScanEvent,
+} from './machine.js';
 export { GOAL_EVENT_TYPES } from './events.js';
 export { GoalChannel } from './channel.js';
 export type { GoalScopeInfo, TodoFoldItem, GateDiagnosticsFile } from './channel.js';
@@ -35,5 +50,6 @@ export {
   renderBudgetExhaustedPrompt,
   GOAL_DISCIPLINE_CLAUSES,
 } from './prompts.js';
+export type { ContinuationExtras } from './prompts.js';
 export { createGoalApp } from './app.js';
 export type { GoalAppDeps } from './app.js';

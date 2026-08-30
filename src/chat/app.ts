@@ -45,6 +45,7 @@ import {
 import type { AssistantMessage, UserMessage, MessageSource, Message, StreamFn } from '../contracts/llm.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import type { AgentEvent, AgentEventSink } from '../agent/events.js';
+import type { PreStepDecision } from '../agent/loop.js';
 import type { AgentTool } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { AppManifest } from '../contracts/app.js';
@@ -171,6 +172,13 @@ export const DEFAULT_APPROVAL_TIMEOUT_MS = 30 * 60 * 1000;
 export interface SendUserMessageOptions {
   /** 注入归因（会话篇 §3.1 dsh-8 词汇——如 'app:goal'）；缺省不落字段（读侧视为 'user'） */
   readonly source?: MessageSource;
+  /**
+   * 归因键值对（骨架篇 §6.8 刀三轮身份）：source 之外的机器可读归因
+   * （goal 续跑轮的 goalId/wakeId/wakePath）。durable 原样落账、驱动 launch
+   * 定型为 run 归因（chat 通道 wake 查询面据此路由）——帽投影（wakeGate）
+   * 扫描的就是这面。缺省不落字段。
+   */
+  readonly attribution?: Readonly<Record<string, string>>;
   /** true = 自激唤醒（计入自激预算 maxConsecutiveWakes——闲时 followUp 前 check、超帽降级 inject）；缺省 false（用户手写语义恢复预算） */
   readonly backgroundWake?: boolean;
   /**
@@ -478,6 +486,12 @@ export interface ChatAppDeps {
    */
   readonly onTurnStopping: (payload: { sessionId: string; stopReason: string }) => Promise<void>;
   /**
+   * 进模型步前复验桥（骨架篇 §6.8 刀三 T7-A）：装配层把根总线 agent_pre_step
+   * waterfall + 挂起钟包装注入（组合根按 sessionId 桥接）。**可选**——缺省
+   * 不复验直通（诊断装配/测试 fixture 零改动）；生产装配恒传。
+   */
+  readonly onPreModelStep?: (sessionId: string) => Promise<PreStepDecision | undefined>;
+  /**
    * 系统提示词物化器（S2 per-entry 替换 getSystemPrompt 全局活视图——契约篇
    * §1.3 落码形态①）：`[基座, 技能渐进披露, 具名段]` 在**本条目时点**求值拼接。
    * 每条目 open 各自物化（新纪元）；prompts/skills 变更与 /reload 重物化全部
@@ -602,6 +616,13 @@ export interface ChatAppDeps {
     readonly goalScopeFor: (sessionId: string) => TodoGoalScope | undefined;
     /** todo fold 查询注册（chat 件 → goal 件计划态投影/open 项否决的数据面） */
     readonly registerTodoFold: (query: (sessionId: string) => readonly TodoItem[] | null | undefined) => Disposer;
+    /**
+     * wake 归因查询注册（刀三轮身份反向腿——goal 件工具 currentWakeId / 续跑
+     * 判定 attribution 直查消费）：sessionId → 本件驱动刚结算/在跑 run 的归因。
+     */
+    readonly registerWakeLookup: (
+      query: (sessionId: string) => Readonly<Record<string, string>> | undefined,
+    ) => Disposer;
     /** LSP 诊断查询（diagnostics gate 判据面——lsp 件 apply 期迟到注入） */
     readonly diagnosticsFor: DiagnosticsGateQuery;
   };
@@ -692,6 +713,7 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         content,
         timestamp: Date.now(),
         ...(opts.source !== undefined ? { source: opts.source } : {}),
+        ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}),
       };
       const deliverOpts = { backgroundWake: opts.backgroundWake === true, toolFilter: opts.toolFilter };
       // 三级解析序之首——显式键：查无活驱动即 INACTIVE（退役即停摆；调用方按码容错跳过）
@@ -1236,6 +1258,13 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         // 由件闭包绑定（与 transformContext 同款形态）——驱动的批消费位只管调
         transformInput: (message) => deps.transformInput(message, session.header.sessionId),
         onTurnStopping: (payload) => deps.onTurnStopping(payload),
+        // 进模型步前复验桥（刀三 T7-A）：可选 deps（诊断装配缺省不复验——恒
+        // Promise 形态，缺席 = resolve(undefined) 放行）；组合根注入的是根总线
+        // agent_pre_step waterfall + 挂起钟包装
+        onPreModelStep: async () => deps.onPreModelStep?.(session.header.sessionId),
+        // durability 屏障面（刀三⑤）：后台 run 每模型步前 flush 本会话——无持久
+        // 层形态不传（驱动侧缺省零屏障）
+        ...(deps.persistence !== undefined ? { flushSession: (sid: string) => deps.persistence!.flush(sid) } : {}),
         durable, // 直连本会话（S1——转发壳只剩组合根侧 gate/approval 两路）
         // S4 会话层 auto-retry 三注入：session（倒扫/重播种/落账三消费位——
         // 无持久层件面 session 缺席时重试自动关闭）、transient 判定器（桶表
@@ -1359,6 +1388,15 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
             if (entry === undefined) return undefined; // 非本件会话（子代理等）——面缺席诚实降级
             const scope = goalChannel.goalScopeFor(sessionId);
             return foldCurrentTodo(entry.session.events, scope === undefined ? undefined : scope.activatedSeq);
+          }),
+        );
+        // 刀三 wake 归因查询注册（通道反向腿——goal 件工具 currentWakeId / 续跑
+        // 判定 attribution 直查消费）：sessionId → 本件驱动刚结算/在跑 run 的归因；
+        // 退役/未知条目 = undefined（面缺席诚实降级）。挂 ctx.effect 随锚回卷
+        ctx.effect(() =>
+          goalChannel.registerWakeLookup((sessionId) => {
+            const entry = registry.entries.get(sessionId);
+            return entry === undefined ? undefined : entry.driver.currentAttribution;
           }),
         );
       }

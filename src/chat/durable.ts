@@ -183,10 +183,12 @@ export function createDurableSinks(
         // 应用期若引入自定义角色，须先扩事件词汇再在此接线（未覆盖≠驳回）
         if (!isStandardMessage(message)) return;
         if (message.role === 'user') {
-          // source 归因落账（会话篇 §3.1——谁把这条消息放进历史；缺省不落字段）
+          // source / attribution 归因落账（会话篇 §3.1 + 骨架篇 §6.8 刀三——谁把
+          // 这条消息放进历史 + 轮身份键值对；缺省不落字段）
           session.append('user/message', {
             content: truncateForDurable(message.content),
             ...(message.source !== undefined ? { source: message.source } : {}),
+            ...(message.attribution !== undefined ? { attribution: message.attribution } : {}),
           });
           return;
         }
@@ -295,8 +297,10 @@ export function projectedToAgentMessages(projected: readonly ProjectedMessage[])
           role: 'user',
           content: message.content as UserMessage['content'],
           timestamp: 0,
-          // source 归因还原（会话篇 §3.1 全链最后一腿——回读后注入方身份不丢）
+          // source / attribution 归因还原（会话篇 §3.1 全链最后一腿 + 骨架篇 §6.8
+          // 刀三——回读后注入方身份与轮身份不丢）
           ...(message.source !== undefined ? { source: message.source } : {}),
+          ...(message.attribution !== undefined ? { attribution: message.attribution } : {}),
         });
         break;
       case 'assistant': {

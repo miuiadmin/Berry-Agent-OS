@@ -51,6 +51,8 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   const runtime = await createRuntime({
     ...options,
     interactive: true,
+    // 进程形态（刀三）：goal 件 boot 降级判据——TUI 是交互入口照常降级
+    processKind: 'tui',
     // TUI 启动策略（技术栈篇 §5 拍板）：缺省续接本工作区最新会话
     resumeSession: options.resumeSession ?? true,
   });

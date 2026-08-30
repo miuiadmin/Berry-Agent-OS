@@ -94,6 +94,11 @@ export interface BuiltinHostResources {
   readonly agentLocations: readonly AgentLocation[] | undefined;
   /** homeDir 测试缝（defaultAgentLocations 第二参） */
   readonly homeDir: string | undefined;
+  /**
+   * 进程形态（骨架篇 §6.8 刀三——goal 件 boot 降级判据第四条件）：tui/run/
+   * tick/daemon 四值；dump-config 等诊断装配 undefined（保守降级维持现行为）
+   */
+  readonly processKind: 'tui' | 'run' | 'tick' | 'daemon' | undefined;
 }
 
 /**
@@ -166,6 +171,9 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
     // goal↔chat↔lsp 通道（刀二）：goal 侧 = 段查询注册 + fold 消费；lsp 侧 =
     // 诊断查询迟到注入（同一实例——三件经同一桥）
     goalChannel: host.goalChannel,
+    // 进程形态（刀三）：goal 件 boot 降级判据第四条件透传（undefined = 诊断
+    // 装配保守降级——缺键不传维持 GoalAppDeps 可选语义）
+    ...(host.processKind !== undefined ? { processKind: host.processKind } : {}),
     schedulerDeps: {
       runJob: host.tickRunner,
       osRegistrar: host.osTickRegistrar,

@@ -114,6 +114,7 @@ import {
   SESSION_SURFACE_OP_INVALID,
 } from '../contracts/errors.js';
 import type { EventQueryCursor, EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
+import type { PreStepDecision } from '../agent/index.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
 import { createChatApp, DEFAULT_APPROVAL_TIMEOUT_MS } from '../chat/index.js';
 import { GoalChannel } from '../goal/index.js';
@@ -361,6 +362,20 @@ export interface RuntimeOptions {
    * 征询器故障不改写历史结果、不拖死停机路径）。
    */
   readonly stoppingTimeoutMs?: number;
+  /**
+   * agent_pre_step 消费点挂起时钟（毫秒，缺省 5000——骨架篇 §6.8 刀三 T7-A，
+   * 契约篇 §1.6 时钟族同族）：进模型步前复验瀑布竞速，超时 reject 上抛走 run
+   * failed 现径（loop 零 try/catch 纪律——复验面挂起 = 故障语义，非放行）。
+   * 测试面注小值验证超时路径。
+   */
+  readonly preStepTimeoutMs?: number;
+  /**
+   * 进程形态（骨架篇 §6.8 刀三——goal 件 boot 降级判据的第四条件）：tui =
+   * 交互入口 / run = 单次执行 / tick = 挂钟子进程 / daemon = 常驻服务。tick
+   * 子进程 resume 会话是挂钟轮到点而非「人类重启后的续接」——goal active 行
+   * 不降级。缺省 undefined（dump-config 等诊断装配——保守降级维持现行为）。
+   */
+  readonly processKind?: 'tui' | 'run' | 'tick' | 'daemon';
   /**
    * ctx.sessions 写面频率护栏（缺省容量 2000 / 1000 每分钟——契约篇 §1.6
    * 资源护栏族 #14，2026-08-27 刀〇b）：按**目标会话**令牌桶（归因 = 应用写
@@ -769,6 +784,34 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     const serialPromise = ctx.serial('turn_stopping', payload);
     serialPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
     return Promise.race([serialPromise, clock]).finally(() => clearTimeout(timer));
+  };
+  const preStepTimeoutMs = opts.preStepTimeoutMs ?? 5_000;
+  /**
+   * agent_pre_step（刀三 T7-A）：进模型步前复验瀑布（超时 reject——上抛走 run
+   * failed 现径；waterfall 链尾缺省 undefined = 放行）。sessionId 参数化由 chat
+   * 件闭包绑定到各驱动（onTurnStopping 同款）。goal 件 ⑤ 复验面挂在本总线。
+   */
+  const onPreModelStep = (sessionId: string): Promise<PreStepDecision | undefined> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const clock = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new AppError(
+              EVENT_HANDLER_TIMEOUT,
+              `agent_pre_step 钩子挂起超 ${preStepTimeoutMs}ms（复验面挂起 = 故障语义，run 按失败收尾）`,
+            ),
+          ),
+        preStepTimeoutMs,
+      );
+    });
+    const waterfallPromise = ctx.waterfall<PreStepDecision | undefined>(
+      'agent_pre_step',
+      { sessionId },
+      (final: PreStepDecision | undefined) => final,
+    );
+    waterfallPromise.catch(() => {}); // 竞速败方迟到 reject 兜底
+    return Promise.race([waterfallPromise, clock]).finally(() => clearTimeout(timer));
   };
 
   /* ---- ④ llm 运行时（凭证经 persist 适配注入；测试可整体换 streamFn） ---- */
@@ -1429,6 +1472,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 由 chat 件闭包绑定到各驱动
     transformInput,
     onTurnStopping,
+    // agent_pre_step 复验桥（刀三 T7-A）：根总线 + 挂起钟，sessionId 参数化由
+    // chat 件闭包绑定到各驱动（transformInput/onTurnStopping 同款三桥同族）
+    onPreModelStep,
     materializeSystemPrompt,
     writableRoots: rootsProvider,
     // 命令进程登记簿（§6.6 exec 腿）：透传 chat 件 → bash 工具件 spawn 登记
@@ -1522,6 +1568,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       chatModule: chatBundle.module,
       chatFront: chatBundle.front,
       goalChannel,
+      // 进程形态（刀三）：goal 件 boot 降级判据第四条件（opts 缺省 undefined =
+      // 保守降级维持现行为——诊断装配零参路径）
+      processKind: opts.processKind,
       tickRunner,
       osTickRegistrar,
       subagentFactory: subagentChildFactory,

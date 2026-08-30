@@ -145,6 +145,14 @@ function userTexts(context: LlmContext): string[] {
     .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)));
 }
 
+/** 直调驱动域工具（todo 等——经 compositionFor 投影取 def，三段管道照走） */
+function callDriverTool(runtime: AppRuntime, name: string, args: Record<string, unknown>) {
+  const sessionId = runtime.session!.header.sessionId;
+  const def = runtime.tools.compositionFor(sessionId).find((d) => d.name === name);
+  if (def === undefined) throw new Error(`工具未注册：${name}`);
+  return runtime.tools.toAgentTool(def).execute('tc-goal3', args);
+}
+
 /* ---------------- 用例 ---------------- */
 
 describe('goal 官方件全栈：工具三件 + schema 执法', () => {
@@ -262,13 +270,14 @@ describe('goal 官方件全栈：工具三件 + schema 执法', () => {
 });
 
 describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链自然停', () => {
-  it('completed 结算 + active + 预算未尽 → 注入续跑提示（含纪律四件）；申报完成后不再续', async () => {
-    // 脚本消费序：contexts[0]=用户首轮 → 续跑注入 contexts[1]（模型调 goal_update）
-    // → 工具结果 contexts[2]（收口答）→ 结算时已 completed，链停
+  it('completed 结算 + active + 预算未尽 → 注入续跑提示（含纪律六件）；申报完成后 ⑤ 复验就地收场', async () => {
+    // 脚本消费序：contexts[0]=用户首轮 → 续跑注入 contexts[1]（模型调 goal_update
+    // completed）→ 下一模型步 ⑤ 复验面见非 active 行 stop:true 就地收场（刀三
+    // T7-A——终态后的收口模型步不花预算；合成 turn_end 锚闭合）
     const { streamFn, contexts } = scriptedStream([
       textMessage('首轮答'),
       toolCallMessage('goal_update', { status: 'completed', evidence: '逐需求证据齐备（测试脚本申报）' }),
-      textMessage('收口答'),
+      textMessage('收口答'), // 不再消费——⑤ 收场后无第三模型步
     ]);
     const runtime = await assemble({ streamFn });
     await callTool(runtime, 'goal_set', { objective: '写完 goal 全栈测试', tokenBudget: 100000 });
@@ -278,7 +287,8 @@ describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链�
     await spinUntil(() => contexts.length >= 2, '续跑注入开轮');
     await runtime.conversation!.settle();
 
-    // 注入内容：续跑提示词携带目标原文 + 纪律四件（反缩水/完成审计/阻塞三轮/预算尽≠完成）
+    // 注入内容：续跑提示词携带目标原文 + 纪律六件（反缩水/完成审计/阻塞三轮/
+    // 预算尽≠完成/轮结算诚实/后继义务）
     const injected = userTexts(contexts[1]!).join('\n');
     expect(injected).toContain('goal 续跑');
     expect(injected).toContain('写完 goal 全栈测试');
@@ -293,18 +303,18 @@ describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链�
     expect(wakeNames).not.toContain('goal_set');
     if (fullNames.includes('bash')) expect(wakeNames).not.toContain('bash');
     for (const name of wakeNames) expect(fullNames).toContain(name);
-    // 申报已落库：completed + 证据；链停在 3 个请求（不再续跑）
+    // 申报已落库：completed + 证据；链停在 2 个请求（⑤ 复验收场后结算见终态不再续）
     const text = await goalText(runtime);
     expect(text).toContain('状态：completed');
     expect(text).toContain('逐需求证据齐备');
-    expect(contexts).toHaveLength(3);
+    expect(contexts).toHaveLength(2);
   });
 
   it('needsWrite 开洞：goal_set 申报后续跑轮不收窄（全量工具面含 goal_set）', async () => {
     const { streamFn, contexts } = scriptedStream([
       textMessage('首轮答'),
       toolCallMessage('goal_update', { status: 'completed', evidence: '写面目标收口（测试脚本申报）' }),
-      textMessage('收口答'),
+      textMessage('收口答'), // 不再消费——⑤ 复验收场（同上用例）
     ]);
     const runtime = await assemble({ streamFn });
     await callTool(runtime, 'goal_set', {
@@ -324,7 +334,8 @@ describe('goal 续跑全栈：结算边界注入 → 模型申报完成 → 链�
     const text = await goalText(runtime);
     expect(text).toContain('已申报写面开洞');
     expect(text).toContain('状态：completed');
-    expect(contexts).toHaveLength(3);
+    // ⑤ 复验收场：终态申报后无收口模型步（2 个请求定格）
+    expect(contexts).toHaveLength(2);
   });
 
   it('needs-resume / stopped / 预算尽：结算后均不注入（续跑三条件缺一即停）', async () => {
@@ -481,14 +492,6 @@ describe('S1 键控：goal 结算/降级按归属会话路由', () => {
 /* ---------------- 用例：goal 循环批刀二（计划态跨轮 + gates + open 否决） ---------------- */
 
 describe('goal 刀二全栈：计划态跨轮 + gates 执法 + open 项否决', () => {
-  /** 直调驱动域工具（todo 等——经 compositionFor 投影取 def，三段管道照走） */
-  function callDriverTool(runtime: AppRuntime, name: string, args: Record<string, unknown>) {
-    const sessionId = runtime.session!.header.sessionId;
-    const def = runtime.tools.compositionFor(sessionId).find((d) => d.name === name);
-    if (def === undefined) throw new Error(`工具未注册：${name}`);
-    return runtime.tools.toAgentTool(def).execute('tc-goal2', args);
-  }
-
   it(
     '全链：goal_set 锚 → todo goal 段词汇落账（files gate 过）→ 新用户输入后注入仍在（跨轮）' +
       '→ open 项否决 → 全完放行 + goal_get 计划态投影',
@@ -574,5 +577,218 @@ describe('goal 刀二全栈：计划态跨轮 + gates 执法 + open 项否决', 
     expect(err.code).toBe(GOAL_GATE_FAILED);
     expect(err.message).toContain('kind=files reason=missing');
     expect(runtime.session!.events.filter((e) => e.type === 'todo/write')).toHaveLength(0); // fail-closed 零落账
+  });
+});
+
+/* ---------------- 用例：goal 循环批刀三（预算双轨与轮身份） ---------------- */
+
+describe('goal 刀三全栈：自激链至帽 + 归因落账 + 停滞硬停 + 重绑护栏 + ⑤ 复验', () => {
+  /** 会话日志最小读面（注入/停因事件断言用） */
+  interface SessionLogFace {
+    readonly events: ReadonlyArray<{ readonly type: string; readonly data?: unknown }>;
+  }
+
+  /** 会话日志里的 goal 唤醒注入事件（data.attribution 断言面） */
+  function wakeInjections(session: SessionLogFace): Array<Record<string, string | undefined>> {
+    return session.events
+      .filter((e) => e.type === 'user/message' && (e.data as { source?: string }).source === 'app:goal')
+      .map((e) => (e.data as { attribution?: Record<string, string> }).attribution ?? {});
+  }
+
+  /** goal/evidence 停因形事件（reason 在场——capped/stalls/budget） */
+  function stopReasons(session: SessionLogFace): string[] {
+    return session.events
+      .filter((e) => e.type === 'goal/evidence')
+      .map((e) => (e.data as { reason?: string }).reason)
+      .filter((reason): reason is string => reason !== undefined);
+  }
+
+  /** 从 goal_get 投影解析 goalId（身份：行——重绑/归因用例的行键） */
+  async function goalIdOf(runtime: AppRuntime): Promise<string> {
+    return (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+  }
+
+  it(
+    '自激链至连续帽：3 轮自激后第 4 次拒发（reason capped·willRetry·非终态停）——' +
+      '每轮注入携带归因 {goalId, wakeId（每轮新鲜）, wakePath:self} durable 落账',
+    async () => {
+      // 脚本末条兜底：全部 4 个 run 都吃同一文本应答（模型永不申报终态——链只能靠帽收口）
+      const { streamFn, contexts } = scriptedStream([textMessage('答')]);
+      const runtime = await assemble({ streamFn });
+      await callTool(runtime, 'goal_set', { objective: '链帽目标', tokenBudget: 100000 });
+      const goalId = await goalIdOf(runtime);
+
+      await runtime.conversation!.submitOnce('开始');
+      // 链推进：首跑 → 自激 1 → 自激 2 → 自激 3 → 第 4 次投递前连续帽拒发 = 4 个请求定格
+      await spinUntil(() => contexts.length >= 4, '自激链推进至连续帽');
+      await runtime.conversation!.settle();
+      await spinUntil(() => stopReasons(runtime.session!).includes('capped'), 'capped 停因事件落 durable');
+
+      // 归因落账：3 条唤醒注入各携带 goalId + 新鲜 wakeId + self 路标（wakeGate 帽扫描的就是这面）
+      const attributions = wakeInjections(runtime.session!);
+      expect(attributions).toHaveLength(3);
+      for (const attribution of attributions) {
+        expect(attribution.goalId).toBe(goalId);
+        expect(attribution.wakePath).toBe('self');
+        expect(typeof attribution.wakeId).toBe('string');
+      }
+      expect(new Set(attributions.map((a) => a.wakeId)).size).toBe(3); // 每轮 wakeId 新鲜
+      // capped = 暂停投递非终态停：行仍 active（willRetry——下一 run 结算或到窗后再试）
+      expect(await goalText(runtime)).toContain('状态：active');
+      expect(contexts).toHaveLength(4); // 拒发后无第 5 请求
+    },
+  );
+
+  it('停滞硬停：同 era 连续 3 轮 surface_only → stopped/stalls + 停因落账；账本摘录不混停因形', async () => {
+    const { streamFn, contexts } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    await callTool(runtime, 'goal_set', { objective: '停滞目标', tokenBudget: 100000 });
+    // 3 轮 surface_only 直接经工具面入账（机器信号面——不经模型即攒齐停滞证据）
+    for (let i = 0; i < 3; i++) {
+      await callTool(runtime, 'goal_update', { outcome: 'surface_only', evidence: `表面动作 ${i + 1}` });
+    }
+    await runtime.conversation!.submitOnce('推进');
+    await runtime.conversation!.settle();
+
+    const text = await goalText(runtime);
+    expect(text).toContain('状态：stopped（原因：stalls）');
+    expect(stopReasons(runtime.session!)).toContain('stalls');
+    expect(contexts).toHaveLength(1); // 硬停先于投递——无续跑注入
+    // 账本摘录只收轮结算形（renderLedgerTail 过滤）：3 条 [surface_only] 在册，
+    // 停因形（stalls）走状态行示态——混进序号摘录会渲染出 [undefined] 行
+    expect(text).toContain('证据账本（近 3/3 条）');
+    expect(text).toContain('[surface_only]');
+    expect(text).not.toContain('undefined');
+  });
+
+  it('重绑护栏：/goal resume 领养重绑他乡后，旧会话迟到归因结算不再续跑（诚实让位不写状态）', async () => {
+    const { streamFn, contexts } = scriptedStream([textMessage('答'), textMessage('答B')]);
+    const runtime = await assemble({ streamFn });
+    const registry = runtime.drivers;
+    const first = registry.focused()!;
+    await callTool(runtime, 'goal_set', { objective: '领养目标', tokenBudget: 100000 });
+    const goalId = (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+    // 降级（boot 等价物）→ 开新会话 B → /goal resume <goalId> 跨会话领养重绑到 B
+    runtime.ctx.emit('session_start', { sessionId: first.session.header.sessionId, origin: 'resume' });
+    const second = registry.open()!;
+    const { backend, notifies } = recordingBackend();
+    runtime.ui.attach(backend);
+    expect(await runtime.channels.commands.dispatch(`/goal resume ${goalId}`)).toBe('ok');
+    expect(notifies.some((n) => n.includes('重新激活'))).toBe(true);
+
+    // 旧会话 A 的迟到 run：携带本 goal 归因（在飞轮的典型残留）→ ⑤ 复验面在
+    // 首个模型步前就地收场（行已换绑 B ≠ 本会话——在飞轮停发，零模型花销）；
+    // 其后 ③ 结算路的同判再让位（双护栏同序触发）
+    await first.driver.submitOnce('旧会话迟到结算', {
+      source: 'app:goal',
+      attribution: { goalId, wakeId: 'w-stale', wakePath: 'self' },
+    });
+    await first.driver.settle();
+    expect(contexts).toHaveLength(0); // ⑤ 就地收场——run 从未进模型
+    // ③ 注入标志（续跑提示词开场句）在 A/B 两时间线均未出现——注：A 的迟到
+    // 消息自身带 source app:goal（测试造的归因面），不能按 source 计数
+    for (const log of [first.session, second.session]) {
+      const wakes = log.events.filter((e) => e.type === 'user/message' && JSON.stringify(e.data).includes('goal 续跑'));
+      expect(wakes).toHaveLength(0);
+    }
+    // 行未被动过手脚：仍 active 且绑在 B（领养结果不被旧链路结算覆写）
+    expect(await goalText(runtime)).toContain('状态：active');
+  });
+
+  it('停滞指令段 + 到窗复评段：两轮 surface_only 触发重估义务、绝对形过期 deferred 点名复评（extras 织入注入）', async () => {
+    const { streamFn, contexts } = scriptedStream([textMessage('答')]);
+    const runtime = await assemble({ streamFn });
+    await callTool(runtime, 'goal_set', { objective: '复评目标', tokenBudget: 100000 });
+    // 绝对形过期 = 固有点恒到窗（锚无关——确定性断言面）；2 轮 surface_only 攒 needsFloorRecovery
+    await callDriverTool(runtime, 'todo', {
+      items: [{ content: '等外部依赖', status: 'deferred', role: 'user', resumeWhen: 'after@2020-01-01T00:00:00Z' }],
+    });
+    for (let i = 0; i < 2; i++) {
+      await callTool(runtime, 'goal_update', { outcome: 'surface_only', evidence: `表面 ${i + 1}` });
+    }
+    await runtime.conversation!.submitOnce('推进');
+    await spinUntil(() => contexts.length >= 2, '续跑注入开轮');
+    await runtime.conversation!.settle();
+
+    const injected = userTexts(contexts[1]!).join('\n');
+    expect(injected).toContain('停滞信号：以下为机器判定点名的行为义务，非建议');
+    expect(injected).toContain('重估写面需求'); // needsFloorRecovery 义务（2 轮 surface_only）
+    expect(injected).toContain('到窗复评：以下 deferred 项的复活条件已到窗');
+    expect(injected).toContain('- after@2020-01-01T00:00:00Z'); // resumeWhen 原文点名
+  });
+
+  it('⑤ 复验让位：终态后 stale 归因在飞 → agent_pre_step 停发但状态面不被覆写（幂等让位）', async () => {
+    // 归因闸门的反面（无归因 run 一律放行）由本套件全部普通对话用例隐式锁死——
+    // ⑤ 已注册若缺闸门，每个会话每次 run 都会被停，全套件即红。预算尽分支由
+    // ④ 记账（assistant/message 落账即同步刹停）结构性先达——active 行带
+    // used≥budget 不可存活，⑤ 预算分支 = 记账迟到写竞窗防御位，本测锁可达分支。
+    const { streamFn, contexts } = scriptedStream([
+      textMessage('首轮答'),
+      toolCallMessage('goal_update', { status: 'completed', evidence: '逐需求证据齐备（测试脚本申报）' }),
+    ]);
+    const runtime = await assemble({ streamFn });
+    await callTool(runtime, 'goal_set', { objective: '复验目标', tokenBudget: 100000 });
+    const sessionId = runtime.session!.header.sessionId;
+    // 带归因的 run（归因在驱动上钉住——settle 后保留至下次 launch，复验面可读）
+    await runtime.conversation!.submitOnce('开始', {
+      source: 'app:goal',
+      attribution: { goalId: await goalIdOf(runtime), wakeId: 'w-1', wakePath: 'self' },
+    });
+    await spinUntil(() => contexts.length >= 2, '续跑注入开轮（注入轮申报终态）');
+    await runtime.conversation!.settle();
+    expect(await goalText(runtime)).toContain('状态：completed');
+
+    // 终态后的 stale 归因 pre-step：走根总线 waterfall 直派（装配桥同款入口）——
+    // 停发（{stop:true}）但不写状态面，先到者（终态申报）赢
+    const decision = await runtime.ctx.waterfall<{ readonly stop?: boolean }>(
+      'agent_pre_step',
+      { sessionId },
+      () => undefined,
+    );
+    expect(decision).toEqual({ stop: true });
+    const text = await goalText(runtime);
+    expect(text).toContain('状态：completed'); // 不被覆写成 budget/stalls
+    expect(stopReasons(runtime.session!)).not.toContain('budget');
+    expect(contexts).toHaveLength(2); // 停发即无新模型步
+  });
+
+  it('boot 降级 tick 豁免：挂钟轮到点 resume 不降级（active 保持）；daemon 形态仍降级（豁免面只有 tick）', async () => {
+    const dbFile = join(
+      realpathSync(tmpdir()),
+      `app-goal-tick-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+    );
+    const workspace = makeTempDir('app-goal-tick-');
+
+    // 首程：设定 active 目标后关停
+    const first = await createRuntime({
+      dbPath: dbFile,
+      workspace,
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+    });
+    await callTool(first, 'goal_set', { objective: '挂钟豁免目标', tokenBudget: 50000 });
+    await first.shutdown();
+
+    // tick 程：同库同 cwd 续接——挂钟轮到点的 resume 非人类重启，激活权保留
+    const tick = await createRuntime({
+      dbPath: dbFile,
+      workspace,
+      resumeSession: true,
+      processKind: 'tick',
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+    });
+    runtimes.push(tick);
+    expect(await goalText(tick)).toContain('状态：active');
+    await tick.shutdown();
+
+    // daemon 程：常驻形态开面也是新进程接管——降级照发（豁免面只有 tick）
+    const daemon = await createRuntime({
+      dbPath: dbFile,
+      workspace,
+      resumeSession: true,
+      processKind: 'daemon',
+      streamFn: scriptedStream([textMessage('答')]).streamFn,
+    });
+    runtimes.push(daemon);
+    expect(await goalText(daemon)).toContain('状态：needs-resume');
   });
 });

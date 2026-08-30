@@ -113,6 +113,9 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   const runtime = await createRuntime({
     ...options,
     interactive: false,
+    // 进程形态（刀三）：tick 子进程 resume 会话 = 挂钟轮到点——goal active
+    // 行不降级（挂钟语义跨 tick 存活，骨架篇 §6.8）
+    processKind: 'tick',
     // 只读档缺省：tick 任务面拍板（席 13 第一刀公式同款——无人值守不持写权）
     sandboxMode: options.sandboxMode ?? 'read-only',
     // 后台道缺省：正确性要求非偏好——canAfford 读的账在 background 道，

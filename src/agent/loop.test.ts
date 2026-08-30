@@ -661,6 +661,94 @@ describe('turn 边界回调', () => {
 
 /* ---------------- continueRun 续入校验 ---------------- */
 
+describe('beforeModelStep 进模型步护栏（刀三 §6.8）', () => {
+  it('首迭代短路：零 LLM 调用，合成 turn_end 锚闭对 + completed 收场', async () => {
+    const { streamFn, calls } = scriptedStream([assistantText('不应被调用')]);
+    const { events, emit } = collector();
+    const result = await startRun(
+      [userMsg('跑')],
+      makeContext(),
+      baseConfig(streamFn, { beforeModelStep: async () => ({ stop: true }) }),
+      { emit },
+    );
+    expect(calls).toHaveLength(0); // 模型调用一次都没发
+    expect(result.status).toBe('completed');
+    expect(result.stopReason).toBe('stop');
+    expect(result.messages).toHaveLength(1); // 只有 prompt——合成锚不进时间线
+    expect(types(events)).toEqual([
+      'agent_start',
+      'turn_start',
+      'message_start',
+      'message_end',
+      'turn_end',
+      'agent_end',
+    ]);
+    // 合成锚形状：空 content assistant、stopReason 'stop'（durable turn/end 只读 stopReason）
+    const anchor = events.at(-2) as { type: 'turn_end'; message: AssistantMessage };
+    expect(anchor.message.content).toEqual([]);
+    expect(anchor.message.stopReason).toBe('stop');
+  });
+
+  it('后续迭代短路：首迭代工具照常执行，第二轮模型步前收场（「跑完为止」不破）', async () => {
+    const { streamFn, calls } = scriptedStream([assistantToolCalls('echo'), assistantText('不应被调用')]);
+    const { events, emit } = collector();
+    const result = await startRun(
+      [userMsg('跑')],
+      makeContext([makeTool('echo')]),
+      baseConfig(streamFn, {
+        // 首轮放行（0 次调用时）；首轮真发后第二轮拦（calls 已 1）
+        beforeModelStep: async () => (calls.length >= 1 ? { stop: true } : undefined),
+      }),
+      { emit },
+    );
+    expect(calls).toHaveLength(1); // 只有首轮模型调用真发了
+    expect(result.status).toBe('completed');
+    // 首轮产物在时间线：prompt + assistant(toolCall) + toolResult；合成锚不在
+    expect(result.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'toolResult']);
+    const sequence = types(events);
+    // 两次 turn_start（startRun 预发 + 第二迭代顶）——拦停前 turn_start 已发，
+    // 锚 turn_end 闭对；段尾三事件即收场序
+    expect(sequence.filter((t) => t === 'turn_start')).toHaveLength(2);
+    expect(sequence.slice(-3)).toEqual(['turn_start', 'turn_end', 'agent_end']);
+  });
+
+  it('回调返回 undefined：放行如常（每模型调用前恰一次）', async () => {
+    const { streamFn, calls } = scriptedStream([assistantText('好')]);
+    let invoked = 0;
+    const result = await startRun(
+      [userMsg('跑')],
+      makeContext(),
+      baseConfig(streamFn, {
+        beforeModelStep: async () => {
+          invoked++;
+          return undefined;
+        },
+      }),
+    );
+    expect(invoked).toBe(1);
+    expect(calls).toHaveLength(1);
+    expect(result.status).toBe('completed');
+  });
+
+  it('回调抛错照常上抛（loop 零 try/catch——挂起钟在装配层桥上）', async () => {
+    const { streamFn } = scriptedStream([assistantText('不应被调用')]);
+    const boom = new AppError(AGENT_CONTINUE_INVALID, '回调违约');
+    const thrown = await startRun(
+      [userMsg('跑')],
+      makeContext(),
+      baseConfig(streamFn, {
+        beforeModelStep: async () => {
+          throw boom;
+        },
+      }),
+    ).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(thrown).toBe(boom); // 非 failed 收场——异常路径原样传播
+  });
+});
+
 describe('continueRun 续跑', () => {
   it('末消息为 toolResult：合法续跑', async () => {
     const { streamFn, calls } = scriptedStream([assistantText('续')]);

@@ -27,7 +27,14 @@ export interface ProjectedToolCall {
  * 不带它则写者只能自扫原始流 = 绕投影的第二份账（会话篇 §3.1 单一转换源）。
  */
 export type ProjectedMessage =
-  | { readonly type: 'user'; readonly seq: number; readonly content: unknown; readonly source?: MessageSource }
+  | {
+      readonly type: 'user';
+      readonly seq: number;
+      readonly content: unknown;
+      readonly source?: MessageSource;
+      /** 归因键值对（骨架篇 §6.8 刀三——source 之外的机器可读归因原样带出） */
+      readonly attribution?: Readonly<Record<string, string>>;
+    }
   | {
       readonly type: 'assistant';
       readonly seq: number;
@@ -75,12 +82,14 @@ function stepFold(state: FoldState, event: SessionEvent): void {
     case 'user/message': {
       flushAssistant(state);
       const data = event.data as UserMessageData;
-      // source 归因原样带出（会话篇 §3.1——缺省不落字段即不进投影，读侧视为 'user'）
+      // source / attribution 归因原样带出（会话篇 §3.1——缺省不落字段即不进投影，
+      // 读侧视为 'user'；attribution = 轮身份键值对，骨架篇 §6.8 刀三）
       state.messages.push({
         type: 'user',
         seq: event.seq,
         content: data.content,
         ...(data.source !== undefined ? { source: data.source } : {}),
+        ...(data.attribution !== undefined ? { attribution: data.attribution } : {}),
       });
       return;
     }

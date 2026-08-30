@@ -74,8 +74,8 @@ describe('foldCurrentTodo（run-scoped 倒扫纯函数）', () => {
       ]),
     );
     expect(foldCurrentTodo(session.events)).toEqual([
-      { content: '落码', status: 'in_progress' },
-      { content: '测试', status: 'pending' },
+      { content: '落码', status: 'in_progress', writtenAt: expect.any(Number) },
+      { content: '测试', status: 'pending', writtenAt: expect.any(Number) },
     ]);
   });
 
@@ -108,7 +108,9 @@ describe('foldCurrentTodo（run-scoped 倒扫纯函数）', () => {
         sourceEventSeqs: [occludedUser.seq],
       },
     );
-    expect(foldCurrentTodo(session.events)).toEqual([{ content: '现行表', status: 'pending' }]);
+    expect(foldCurrentTodo(session.events)).toEqual([
+      { content: '现行表', status: 'pending', writtenAt: expect.any(Number) },
+    ]);
   });
 
   it('坏条目防御归一：非对象 / 缺 content / 坏 status 丢弃，activeForm 保留', () => {
@@ -124,7 +126,17 @@ describe('foldCurrentTodo（run-scoped 倒扫纯函数）', () => {
       ]),
     );
     expect(foldCurrentTodo(session.events)).toEqual([
-      { content: '好条目', status: 'in_progress', activeForm: '正在落码' },
+      { content: '好条目', status: 'in_progress', activeForm: '正在落码', writtenAt: expect.any(Number) },
+    ]);
+  });
+
+  it('判窗锚盖章（刀三）：每项 writtenAt = 命中 todo/write 事件信封 time（相对形 resumeWhen 起算点）', () => {
+    const session = sessionWith(userSays);
+    const written = session.append('todo/write', {
+      items: [{ content: '缓办项', status: 'deferred', resumeWhen: 'after@+2h' }],
+    });
+    expect(foldCurrentTodo(session.events)).toEqual([
+      { content: '缓办项', status: 'deferred', resumeWhen: 'after@+2h', writtenAt: written.time },
     ]);
   });
 });
@@ -144,7 +156,9 @@ describe('foldCurrentTodo·goal 段（激活锚两律）', () => {
     expect(foldCurrentTodo(session.events)).toBeNull();
     expect(foldCurrentTodo(session.events, null)).toBeNull();
     // goal-scoped（锚 ≤ 表 seq）：user/message 非边界 → 同一张计划表跨轮回显
-    expect(foldCurrentTodo(session.events, 1)).toEqual([{ content: '计划表', status: 'in_progress' }]);
+    expect(foldCurrentTodo(session.events, 1)).toEqual([
+      { content: '计划表', status: 'in_progress', writtenAt: expect.any(Number) },
+    ]);
   });
 
   it('锚下界：seq < 锚的事件不越界（goal 激活前的表不参与）', () => {
@@ -157,7 +171,9 @@ describe('foldCurrentTodo·goal 段（激活锚两律）', () => {
     // 锚 2（> 表 seq 1）：倒扫首触 seq<锚即收——激活点之后无表 → null
     expect(foldCurrentTodo(session.events, 2)).toBeNull();
     // 锚 1（= 表 seq）：表恰在激活点之后 → 可见（跨轮存活对照）
-    expect(foldCurrentTodo(session.events, 1)).toEqual([{ content: '激活前的旧表', status: 'pending' }]);
+    expect(foldCurrentTodo(session.events, 1)).toEqual([
+      { content: '激活前的旧表', status: 'pending', writtenAt: expect.any(Number) },
+    ]);
   });
 
   it('goal 段遮蔽跳过同守（CR-15——compaction 遮蔽段是「已消化」语义）', () => {
@@ -172,7 +188,9 @@ describe('foldCurrentTodo·goal 段（激活锚两律）', () => {
         sourceEventSeqs: [occluded.seq],
       },
     );
-    expect(foldCurrentTodo(session.events, 0)).toEqual([{ content: '现行表', status: 'pending' }]);
+    expect(foldCurrentTodo(session.events, 0)).toEqual([
+      { content: '现行表', status: 'pending', writtenAt: expect.any(Number) },
+    ]);
   });
 
   it('goal 段扩字段读侧守形：合法字段保留 / 坏形字段丢弃（条目不弃）', () => {
@@ -188,12 +206,25 @@ describe('foldCurrentTodo·goal 段（激活锚两律）', () => {
       ]),
     );
     expect(foldCurrentTodo(session.events)).toEqual([
-      { content: '全字段', status: 'deferred', role: 'user', taskClass: '重构', resumeWhen: 'after@+2h' },
-      { content: '有后继', status: 'completed', followUp: '收尾文档', gate: { kind: 'files', spec: ['a.ts'] } },
-      { content: '无后继', status: 'completed', noFollowUp: true },
-      { content: '坏角色', status: 'pending' },
-      { content: '坏门', status: 'pending' },
-      { content: '坏复活', status: 'deferred' },
+      {
+        content: '全字段',
+        status: 'deferred',
+        role: 'user',
+        taskClass: '重构',
+        resumeWhen: 'after@+2h',
+        writtenAt: expect.any(Number),
+      },
+      {
+        content: '有后继',
+        status: 'completed',
+        followUp: '收尾文档',
+        gate: { kind: 'files', spec: ['a.ts'] },
+        writtenAt: expect.any(Number),
+      },
+      { content: '无后继', status: 'completed', noFollowUp: true, writtenAt: expect.any(Number) },
+      { content: '坏角色', status: 'pending', writtenAt: expect.any(Number) },
+      { content: '坏门', status: 'pending', writtenAt: expect.any(Number) },
+      { content: '坏复活', status: 'deferred', writtenAt: expect.any(Number) },
     ]);
   });
 });

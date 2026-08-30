@@ -89,6 +89,13 @@ export interface UserMessage {
    * 注入方（通道/应用/调度/子代理结算）显式声明，durable 原样落账、投影带出。
    */
   source?: MessageSource;
+  /**
+   * 归因键值对（可选，骨架篇 §6.8 刀三 T7-A 轮身份）：source 之外的机器可读
+   * 归因（如 goal 续跑轮的 goalId/wakeId/wakePath）——通用键值面非 goal 专属
+   * 词面（「source + app 键值对」）。durable 原样落账、投影/回读还原——帽投影
+   * （wakeGate）扫描的就是这面，非消息正文。
+   */
+  attribution?: Readonly<Record<string, string>>;
 }
 
 /** 助手消息（流式组装终值；stopReason=error/aborted 时错误即数据，见 AssistantStream） */

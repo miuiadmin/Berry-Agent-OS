@@ -44,14 +44,15 @@ interface GoalRow {
 const CROCKFORD32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 /**
- * 生成新 goal 身份（ULID 形 26 字符：10 字符时间序 + 16 字符随机）。
+ * 生成 ULID 形短标识（26 字符：10 字符时间序 + 16 字符随机）——goalId 与
+ * wakeId 共用的同一生成器（刀三：轮身份与 goal 身份同形同源）。
  *
  * 为什么件内自带而不 import memory/id.ts：拓扑白名单 goal 不可依赖 memory
  * （goal → contracts/context/persist），20 行生成器不值得为它开一条边。
  * 时间序段给「按 id 排序 ≈ 按创建排序」的弱保证（同毫秒内随机段无序——
- * goalId 的硬要求只有唯一性，80 位随机已把碰撞概率压到工程零）。
+ * 这些 id 的硬要求只有唯一性，80 位随机已把碰撞概率压到工程零）。
  */
-export function newGoalId(): string {
+function newCrockfordId(): string {
   // 时间序段：48 位 Unix 毫秒 → 10 字符（每位 5 bit，50 bit 容量 ≥ 48）
   let ms = Date.now();
   let timePart = '';
@@ -73,6 +74,19 @@ export function newGoalId(): string {
     }
   }
   return timePart + randPart;
+}
+
+/** 生成新 goal 身份（ULID 形 26 字符——v13 起一等身份） */
+export function newGoalId(): string {
+  return newCrockfordId();
+}
+
+/**
+ * 生成新唤醒身份（刀三轮身份：每次 goal 唤醒投递的新 wakeId——工具面
+ * currentWakeId 与 goal/evidence 事件的轮锚；与 goalId 同生成器同形）。
+ */
+export function newWakeId(): string {
+  return newCrockfordId();
 }
 
 /** 行 → 语义记录（status 列由写入方保证五值词汇，读侧不再校验） */
@@ -210,6 +224,20 @@ export class GoalStore {
          WHERE session_id = ? AND status = 'active'`,
       )
       .run(tokensUsed, now, now, sessionId);
+  }
+
+  /**
+   * 反空转燃尽（刀三：stallsDecision.hardStop 判据的落库腿）：⇒ stopped
+   * （reason stalls）。按 goalId 定点（agent_pre_step 复验路有归因直查）+
+   * status='active' 幂等护栏——他路先落终态（用户 stop / 预算尽）不覆写。
+   */
+  stopByStalls(goalId: string, now: number): void {
+    this.connection
+      .prepare(
+        `UPDATE goals SET status = 'stopped', stop_reason = 'stalls', updated_at = ?, settled_at = ?
+         WHERE goal_id = ? AND status = 'active'`,
+      )
+      .run(now, now, goalId);
   }
 
   /**

@@ -23,6 +23,7 @@
 
 import type { AppContext } from '../contracts/app.js';
 import type { SessionEvent } from '../contracts/events.js';
+import type { AgentMessage } from '../contracts/messages.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { AgentToolResult, ToolCtx, ToolDefinition } from '../contracts/tools.js';
 import type { Session } from '../session/session.js';
@@ -76,6 +77,13 @@ export interface TodoItem {
   noFollowUp?: boolean;
   /** 完成判据门（goal 段词汇：置 completed 时同步验证——todo-gates 执法） */
   gate?: TodoGate;
+  /**
+   * 条目写入时刻（**fold 产物投影专用字段**，刀三判窗锚）：foldCurrentTodo
+   * 命中 `todo/write` 时取该事件信封 time 盖上——durable 载荷结构性不含
+   * （normalizeItems 白名单构造，写侧进不来）；到窗复评的相对形锚
+   * （`after@+<n>` 自写入时刻起算——按复评时刻起算则永不触窗，骨架篇 §6.8）。
+   */
+  writtenAt?: number;
 }
 
 /* ---------------- fold：段边界两档（纯函数） ---------------- */
@@ -114,7 +122,9 @@ export function foldCurrentTodo(
     if (anchor !== null && event.seq < anchor) return null;
     if (event.type === 'todo/write') {
       const data = event.data as { items?: readonly unknown[] };
-      return normalizeItems(data.items);
+      // 判窗锚盖上（刀三）：命中事件信封 time → 每项 writtenAt（相对形
+      // resumeWhen 的起算点——durable 载荷不含此字段，纯 fold 投影）
+      return normalizeItems(data.items).map((item) => ({ ...item, writtenAt: event.time }));
     }
     // run-scoped 段边界：用户输入段——段前之表不越界（goal 段无此边界）
     if (anchor === null && event.type === 'user/message') return null;
@@ -392,11 +402,11 @@ export function registerTodoInjection(
       'context_transform',
       async (messages: unknown, sessionId: unknown, next: (...args: unknown[]) => unknown) => {
         const list = Array.isArray(messages) ? messages : [];
-        /** 原样放行（sessionId 逐参透传——S1 双参纪律） */
-        const passthrough = (): unknown => next(messages, sessionId);
+        /** 原样放行（sessionId 逐参透传——S1 双参纪律）；瀑布链尾产物 = AgentMessage[]（context_transform 契约——next 的 unknown 在此边界收窄） */
+        const passthrough = (): AgentMessage[] => next(messages, sessionId) as AgentMessage[];
         try {
           const key = typeof sessionId === 'string' ? sessionId : undefined;
-          const entry = key !== undefined ? registry.entries.get(key) : undefined;
+          const entry = key === undefined ? undefined : registry.entries.get(key);
           if (entry === undefined) return passthrough(); // 非本件会话（子代理/无驱动）——无 todo
           // goal 段锚活取（每次注入时点重查——goal 激活/停掉后注入即时切段，
           // 无缓存陈旧性问题；通道 miss/无 active 行 = run-scoped）

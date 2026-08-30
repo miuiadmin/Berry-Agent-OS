@@ -46,6 +46,8 @@ export interface TodoFoldItem {
   readonly resumeWhen?: string;
   /** 完成判据声明在场性（kind 词面仅计数用——验证执法在 chat 执行段） */
   readonly gate?: { readonly kind: string };
+  /** 条目写入时刻（fold 投影字段——相对形 resumeWhen 的判窗锚；缺席 = 相对形不可判） */
+  readonly writtenAt?: number;
 }
 
 /**
@@ -74,6 +76,8 @@ export class GoalChannel {
   private goalScopeQuery?: (sessionId: string) => GoalScopeInfo | undefined;
   /** chat 件注册的 todo fold 查询（apply 挂 / 锚回卷摘） */
   private todoFoldQuery?: (sessionId: string) => readonly TodoFoldItem[] | null | undefined;
+  /** chat 件注册的 wake 归因查询（apply 挂 / 锚回卷摘——刀三轮身份反向腿） */
+  private wakeLookupQuery?: (sessionId: string) => Readonly<Record<string, string>> | undefined;
   /** lsp 件注册的诊断查询（apply 挂 / 锚回卷摘——迟到注入） */
   private diagnosticsQuery?: (paths: readonly string[]) => Promise<readonly GateDiagnosticsFile[]>;
 
@@ -90,6 +94,14 @@ export class GoalChannel {
     this.todoFoldQuery = query;
     return () => {
       if (this.todoFoldQuery === query) this.todoFoldQuery = undefined;
+    };
+  }
+
+  /** chat 件 apply 期注册 wake 归因查询（返回摘除器——挂 ctx.effect；刀三） */
+  registerWakeLookup(query: (sessionId: string) => Readonly<Record<string, string>> | undefined): Disposer {
+    this.wakeLookupQuery = query;
+    return () => {
+      if (this.wakeLookupQuery === query) this.wakeLookupQuery = undefined;
     };
   }
 
@@ -112,6 +124,15 @@ export class GoalChannel {
    */
   todoFoldFor(sessionId: string): readonly TodoFoldItem[] | null | undefined {
     return this.todoFoldQuery?.(sessionId);
+  }
+
+  /**
+   * wake 归因查询（消费方：goal 件工具 currentWakeId / 续跑判定 attribution
+   * 直查；刀三轮身份）：sessionId → 刚结算/在跑 run 的归因键值对。undefined =
+   * chat 件未注册 / 会话无本件驱动 / 该 run 无归因（非 goal 唤醒轮）。
+   */
+  wakeAttributionFor(sessionId: string): Readonly<Record<string, string>> | undefined {
+    return this.wakeLookupQuery?.(sessionId);
   }
 
   /** 诊断查询（消费方：chat gates diagnostics 验证器；miss = 申报即拒） */

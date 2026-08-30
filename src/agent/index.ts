@@ -18,6 +18,7 @@ export {
   type AfterToolCallInfo,
   type AfterToolCallResult,
   type AgentLoopConfig,
+  type PreStepDecision,
   type RunHooks,
   type RunResult,
 } from './loop.js';

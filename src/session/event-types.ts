@@ -31,6 +31,8 @@ export interface UserMessageData {
   readonly content: unknown;
   /** 归因（会话篇 §3.1 五值词汇；缺省不落字段——读侧视为 'user'） */
   readonly source?: MessageSource;
+  /** 归因键值对（骨架篇 §6.8 刀三轮身份——source 之外的机器可读归因，原样落账） */
+  readonly attribution?: Readonly<Record<string, string>>;
 }
 
 /** assistant/message 载荷：模型响应最终态（usage 为 turn 汇总额，token delta 不落日志） */

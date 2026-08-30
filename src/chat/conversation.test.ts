@@ -148,6 +148,58 @@ describe('ConversationDriver 收窄投影（第二十四批题3a）', () => {
   });
 });
 
+/* ---------------- 刀三：轮身份归因定型 + durability 屏障 + 复验桥 ---------------- */
+
+describe('ConversationDriver 刀三轮身份与 durability 屏障', () => {
+  it('归因定型：批内 user 消息 attribution 进 currentAttribution；结算后闲时保留（onRunSettled 消费窗）；无归因批复位 undefined（跨 run 不泄漏）', async () => {
+    const { driver, contexts } = makeDriver();
+    const attribution = { goalId: 'G1', wakeId: 'w1', wakePath: 'self' };
+    // 后台唤醒批携归因——launch 定型（倒扫批内最近 user 归因）
+    driver.deliver({ role: 'user', content: 'goal 续跑', timestamp: 1, attribution }, { backgroundWake: true });
+    await driver.settle();
+    expect(contexts).toHaveLength(1);
+    expect(driver.currentAttribution).toEqual(attribution);
+    // 下一 run 用户手写（无归因）→ 显式复位 undefined（防上一 run 值泄漏）
+    driver.submit('用户手写');
+    await driver.settle();
+    expect(driver.currentAttribution).toBeUndefined();
+  });
+
+  it('durability 屏障只对后台 run：前台模型步前零 flush；后台恰一次（单步 run）；复验桥前后台都过', async () => {
+    const flushed: string[] = [];
+    let preSteps = 0;
+    const { driver, contexts } = makeDriver({
+      flushSession: async (sessionId) => {
+        flushed.push(sessionId);
+      },
+      onPreModelStep: async () => {
+        preSteps += 1;
+        return undefined;
+      },
+    });
+    driver.submit('用户手写');
+    await driver.settle();
+    expect(contexts).toHaveLength(1);
+    expect(flushed).toEqual([]); // 前台不 flush——不给用户手写对话加每轮落盘等待
+    driver.deliver({ role: 'user', content: 'goal 续跑', timestamp: 2 }, { backgroundWake: true });
+    await driver.settle();
+    expect(flushed).toEqual(['test-session']); // 后台 run 每模型步前恰一次（崩溃恢复账实对齐）
+    expect(preSteps).toBe(2); // 复验桥与投递来源无关（每模型步一次）
+  });
+
+  it('onPreModelStep 复验短路：{stop:true} → run completed 收场零模型调用（「正在跑的轮跑完为止」不破）', async () => {
+    const { driver, contexts } = makeDriver({ onPreModelStep: async () => ({ stop: true }) });
+    const result = await driver.submitOnce('跑', {
+      source: 'app:goal',
+      attribution: { goalId: 'G1', wakeId: 'w1', wakePath: 'self' },
+    });
+    expect(contexts).toHaveLength(0); // 模型调用一次没发
+    expect(result?.status).toBe('completed');
+    // 归因照常定型（停因处置归回调方——驱动只收场）
+    expect(driver.currentAttribution).toEqual({ goalId: 'G1', wakeId: 'w1', wakePath: 'self' });
+  });
+});
+
 describe('ConversationDriver 回调异常隔离（隔离案一第一刀 #4 回归锁）', () => {
   it('onRunSettled 订阅方抛错 → 后续订阅照常收 + run 正常结算 + onCallbackError 携来源上报', async () => {
     const seen: { err: unknown; source: string }[] = [];

@@ -397,6 +397,9 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
     interactive: false,
     resumeSession: false,
     daemon: { token, port },
+    // 进程形态（刀三）：daemon boot 回放 resume 走 goal 降级照常（激活权不跨
+    // 进程——重启后待人类 /goal resume；豁免面只有 tick，骨架篇 §6.8）
+    processKind: 'daemon',
   });
 
   // heldSessions 同步：open/retire 通知驱动（通知面随刀一加进 DriverRegistry）；

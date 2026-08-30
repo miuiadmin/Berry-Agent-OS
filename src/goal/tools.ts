@@ -29,7 +29,12 @@ import type { GoalStore } from './store.js';
  */
 export interface GoalSessionsFace {
   appendEvent(type: string, data: unknown): unknown;
-  eventsOfType(type: string): Array<{ readonly data?: unknown }>;
+  /**
+   * 读当前路由会话日志内指定类型事件（内存活日志——与写同账零迟滞）。
+   * time = 事件信封毫秒时间戳（刀三唤醒窗口帽的时间维；goal/evidence 族
+   * 事件无此消费可选）。
+   */
+  eventsOfType(type: string): Array<{ readonly data?: unknown; readonly time?: number }>;
   /** 当前路由会话日志长度（无路由落点 undefined——锚缺席诚实降级） */
   logLength(): number | undefined;
 }
@@ -148,7 +153,9 @@ function renderLedgerTail(deps: GoalToolsDeps, goalId: string): string {
   try {
     entries = deps.sessions.eventsOfType('goal/evidence').flatMap((e) => {
       const data = e.data as GoalEvidencePayload | undefined;
-      return data !== undefined && data.goalId === goalId ? [data] : [];
+      // 只收轮结算形（outcome 在场）——停因形（capped/stalls/budget，刀三）走
+      // 状态行示态，混进序号摘录会渲染出 [undefined] 行
+      return data !== undefined && data.goalId === goalId && data.outcome !== undefined ? [data] : [];
     });
   } catch {
     return ''; // eventsOfType 对未知词抛错——本件注册在先，理论不可达；静默降级保投影主面
@@ -331,11 +338,14 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
       /* ---- 轮结算形：落 goal/evidence 账本事件，不动状态行 ---- */
       if (args.status === undefined) {
         const req = args as { outcome: string; evidence?: string };
+        // wakeId 刀三接线：hook 缺席或返回 undefined（非 goal 唤醒轮——无归因）
+        // 都如实缺席——条件展开按**值**不按 hook 在场性（undefined 字段进 durable
+        // 载荷会被事件校验段拒绝：展开对象携带未定义字段）
+        const wakeId = deps.currentWakeId?.();
         const payload: GoalEvidencePayload = {
           goalId: current.goalId,
           outcome: req.outcome,
-          // wakeId 刀三接线（currentWakeId hook 缺席时如实缺席）
-          ...(deps.currentWakeId !== undefined ? { wakeId: deps.currentWakeId() } : {}),
+          ...(wakeId !== undefined ? { wakeId } : {}),
           ...(req.evidence !== undefined ? { evidence: req.evidence } : {}),
         };
         deps.sessions.appendEvent('goal/evidence', payload);

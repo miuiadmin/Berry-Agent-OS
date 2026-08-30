@@ -13,10 +13,11 @@
 
 import { PendingMessageQueue } from '../agent/queue.js';
 import type { AgentEvent, AgentEventSink, RunStatus } from '../agent/events.js';
-import type { AgentContext, AgentLoopConfig, RunResult } from '../agent/loop.js';
+import type { AgentContext, AgentLoopConfig, PreStepDecision, RunResult } from '../agent/loop.js';
 import { startRun } from '../agent/loop.js';
 import type { AgentMessage } from '../contracts/messages.js';
-import type { AssistantMessage, Usage } from '../contracts/llm.js';
+import { isStandardMessage } from '../contracts/messages.js';
+import type { AssistantMessage, MessageSource, Usage, UserMessage } from '../contracts/llm.js';
 import { describeError } from '../contracts/errors.js';
 import { runInSessionChain } from '../context/chain.js';
 import type { Session } from '../session/session.js';
@@ -180,6 +181,19 @@ export interface ConversationDriverDeps {
    * 上报）——run 已结算，征询器故障不改写历史结果、不拖死停机路径。
    */
   readonly onTurnStopping?: (payload: { sessionId: string; stopReason: string }) => Promise<void>;
+  /**
+   * durable flush 面（骨架篇 §6.8 刀三 durability 屏障）：后台 run 每个模型步
+   * 前调用——write-behind 批落先行，保证「任何已投递消息 durable 先于其后的
+   * 模型花销」（崩溃恢复后账实对齐）。缺省无 flush（无持久层形态零屏障）。
+   */
+  readonly flushSession?: (sessionId: string) => Promise<void>;
+  /**
+   * 进模型步前复验桥（骨架篇 §6.8 刀三 T7-A）：装配层把根总线 agent_pre_step
+   * waterfall + 挂起钟包装注入（sessionId 由 chat 件闭包绑定）。返回
+   * { stop: true } = run 正常收场；抛错/挂起超时上抛 → runTurns catch 合成
+   * error 收尾（与 transformInput 同款错误面——复验器故障不静默）。
+   */
+  readonly onPreModelStep?: () => Promise<PreStepDecision | undefined>;
 }
 
 /**
@@ -235,6 +249,19 @@ export class ConversationDriver {
   private readonly transformInput: ((message: AgentMessage) => Promise<AgentMessage>) | undefined;
   /** turn_stopping 派发（增补 7①——装配桥注入，缺省不派发） */
   private readonly onTurnStopping: ((payload: { sessionId: string; stopReason: string }) => Promise<void>) | undefined;
+  /** durable flush 面（刀三 durability 屏障——后台 run 每模型步前调用） */
+  private readonly flushFace: ((sessionId: string) => Promise<void>) | undefined;
+  /** 进模型步前复验（刀三 T7-A——装配桥注入，缺省不复验直通） */
+  private readonly onPreModelStep: (() => Promise<PreStepDecision | undefined>) | undefined;
+  /** 当前 run 是否后台批（launch 定型——durability 屏障只对后台 run 生效） */
+  private currentRunBackground = false;
+  /**
+   * 当前 run 的轮归因（刀三轮身份，launch 定型）：开起批中最近的 user 消息
+   * attribution（倒扫——多消息批以最后一条用户消息为准）；无归因批显式置
+   * undefined（跨 run 不泄漏）。run 结算后保留至下一次 launch——onRunSettled
+   * 订阅方（goal 件续跑判定）读的正是刚结算 run 的归因。
+   */
+  private wakeAttribution: Readonly<Record<string, string>> | undefined;
   /** 会话层重试策略（S4——缺省 enabled/3 次/1s 起） */
   private readonly retryPolicy: DriverRetryPolicy;
   /** 最近一次 launch 的完成信号（settle 等待用） */
@@ -255,6 +282,8 @@ export class ConversationDriver {
     this.isTransientError = deps.isTransientError ?? (() => false);
     this.transformInput = deps.transformInput;
     this.onTurnStopping = deps.onTurnStopping;
+    this.flushFace = deps.flushSession;
+    this.onPreModelStep = deps.onPreModelStep;
     this.retryPolicy = deps.retryPolicy ?? DEFAULT_RETRY_POLICY;
     // steering 取数口驱动自持：仅 running 期供给（run 间隙的余量走 launch 的
     // followUp 循环，不经此口——两路取数同一条队列，分流点在时机不在通道）。
@@ -268,6 +297,15 @@ export class ConversationDriver {
         return this.transformBatch(this.consumeMeta(this.queue.drain()));
       },
       getFollowUpMessages: async () => [],
+      // 进模型步前屏障 + 复验（刀三）：durability 屏障只对后台 run 生效——前台
+      // 每模型步 flush 会给用户手写对话加每轮落盘等待，不值；后台 run 无人类
+      // 等待，write-behind flush 便宜且保「已投递消息 durable 先于其后模型花销」
+      // （崩溃恢复账实对齐）。复验桥随后（前后台都过——预算/行态执法与投递
+      // 来源无关）。
+      beforeModelStep: async () => {
+        if (this.currentRunBackground) await this.flushFace?.(this.sessionId);
+        return this.onPreModelStep?.();
+      },
     };
   }
 
@@ -330,9 +368,20 @@ export class ConversationDriver {
   }
 
   /** headless 单次执行：开一个 run 等终值（命令入口用；与 submit 互斥使用） */
-  async submitOnce(text: string): Promise<RunResult | undefined> {
+  async submitOnce(
+    text: string,
+    opts?: { readonly source?: MessageSource; readonly attribution?: Readonly<Record<string, string>> },
+  ): Promise<RunResult | undefined> {
     this.wakeCount = 0; // 用户手写输入开跑——自激预算恢复（§6.4）
-    return this.launch([{ role: 'user', content: text, timestamp: Date.now() }]);
+    return this.launch([
+      {
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        ...(opts?.source !== undefined ? { source: opts.source } : {}),
+        ...(opts?.attribution !== undefined ? { attribution: opts.attribution } : {}),
+      },
+    ]);
   }
 
   /** 等待在跑的 run 结算（退出序列在 abort 后先等它收尾再 flush） */
@@ -343,6 +392,14 @@ export class ConversationDriver {
   /** 是否有 run 在跑（/new 会话热切换的准入判据——run 中不换时间线） */
   get isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * 当前（或刚结算）run 的轮归因（刀三——chat 通道 wake 查询面的驱动侧真身；
+   * 闲时保留上一 run 值直到下次 launch，goal 件 onRunSettled 读的就是它）。
+   */
+  get currentAttribution(): Readonly<Record<string, string>> | undefined {
+    return this.wakeAttribution;
   }
 
   /** 自激预算帽（§6.4 maxConsecutiveWakes 默认 3——被后台完成连续唤醒的次数封顶） */
@@ -509,6 +566,16 @@ export class ConversationDriver {
     // 元数据消费删除留给 contextForBatch；run 中途 steering 不翻级，下一 run 定型
     const background =
       prompts.length > 0 && prompts.every((message) => this.deliverMeta.get(message)?.backgroundWake === true);
+    // run 身份定型（刀三轮身份）：后台批旗（durability 屏障开关）+ 批内最近
+    // user 归因（倒扫——多消息批以最后一条用户消息为准；无归因显式置
+    // undefined 防上一 run 值泄漏到下一 run）
+    this.currentRunBackground = background;
+    this.wakeAttribution = [...prompts]
+      .reverse()
+      .find(
+        (message): message is UserMessage =>
+          isStandardMessage(message) && message.role === 'user' && message.attribution !== undefined,
+      )?.attribution;
     const attempt = runInSessionChain({ sessionId: this.sessionId, background }, () => this.runTurns(prompts));
     // 结算通知序（骨架篇 §9.3 onRunSettled）：finally 先注册先执行——running
     // 复位先于订阅者派发，订阅回调内 deliver 见到的必是闲时（followUp 开轮
