@@ -46,6 +46,20 @@ export interface NotifyOptions {
 export interface InputOptions {
   /** 占位提示（通道不识别则忽略） */
   readonly placeholder?: string;
+  /**
+   * per-ask 撤销信号（channels 批刀 A）：abort 时本输入以 '' 收场（保守值）。
+   * 通道不支持撤销面时忽略（消费方不得假定撤销必然生效——败腿结算丢弃即可）。
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * confirm/select 可选参（channels 批刀 A——阻塞原语撤销面）：signal abort
+ * 时 confirm 以 false、select 以 '' 收场（保守值——与取消收场同语义）。
+ */
+export interface UiAskOptions {
+  /** per-ask 撤销信号（TUI 通道实现 = 提问队列 per-ask signal） */
+  readonly signal?: AbortSignal;
 }
 
 /** 单选项（select 用；value 是程序值、label 是展示文案） */
@@ -66,12 +80,12 @@ export interface UiBackend {
   notify(message: string, opts?: NotifyOptions): void;
   /** 状态行/标题栏更新（所有通道必选支持；空串 = 清空） */
   setStatus(status: string): void;
-  /** 是/否确认（可选；不支持则聚合器经 input 降级） */
-  confirm?(message: string): Promise<boolean>;
-  /** 自由文本输入（可选；交互面基座——select 降级也落到这里） */
+  /** 是/否确认（可选；不支持则聚合器经 input 降级；abort 收场 false） */
+  confirm?(message: string, opts?: UiAskOptions): Promise<boolean>;
+  /** 自由文本输入（可选；交互面基座——select 降级也落到这里；abort 收场 ''） */
   input?(message: string, opts?: InputOptions): Promise<string>;
-  /** 单选（可选；不支持则聚合器经 input 降级） */
-  select?(message: string, choices: readonly UiChoice[]): Promise<string>;
+  /** 单选（可选；不支持则聚合器经 input 降级；abort 收场 ''） */
+  select?(message: string, choices: readonly UiChoice[], opts?: UiAskOptions): Promise<string>;
   /** 自定义渲染槽（可选；不支持则聚合器降级为 notify） */
   setWidget?(node: unknown): void;
 }
@@ -80,10 +94,10 @@ export interface UiBackend {
 export interface UiService {
   /** 一次性通知：广播到全部在线通道 */
   notify(message: string, opts?: NotifyOptions): void;
-  /** 是/否确认（无交互通道时 fail-closed 返回 false） */
-  confirm(message: string): Promise<boolean>;
-  /** 单选（通道不支持 select 时降级为 input；无交互通道返回 ''） */
-  select(message: string, choices: readonly UiChoice[]): Promise<string>;
+  /** 是/否确认（无交互通道时 fail-closed 返回 false；abort 同 false） */
+  confirm(message: string, opts?: UiAskOptions): Promise<boolean>;
+  /** 单选（通道不支持 select 时降级为 input；无交互通道返回 ''；abort 同 ''） */
+  select(message: string, choices: readonly UiChoice[], opts?: UiAskOptions): Promise<string>;
   /** 自由文本输入（无交互通道返回 ''） */
   input(message: string, opts?: InputOptions): Promise<string>;
   /** 状态行更新：广播到全部在线通道 */

@@ -55,6 +55,11 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     // 名/参数/@ 文件三合一补全）；canonical 根自 ctx.paths 取（通道不读 env 猜
     // cwd）。persist:false 等无 paths 服务面 = 不武装（补全是辅助面非硬依赖）
     workspace: runtime.ctx.tryGet<PathsService>('paths')?.workspaceRoot(),
+    // 刀 B @-mention 符号段（channels 批）：documentSymbol face 活取值闭包恒
+    // 接入——lsp 行 apply 期挂真身、回卷摘除（runtime.symbolsFor 读晚绑
+    // holder，缺席 = undefined → 补全退化为委托腿，保 /reload 活语义——
+    // 不按 lsp 装载时点分支接线）
+    symbolsFor: (path) => runtime.symbolsFor(path),
     // S6 形态⑦提示行两态：起屏时点已有多会话条目（resume 多开）= 多驱动文案
     // （运行中 /app new 后不重绘——提示行是辅助面，分档语义恒由 front.interrupt 承载）
     quitHint:

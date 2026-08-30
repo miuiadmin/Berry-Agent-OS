@@ -197,3 +197,64 @@ describe('UiService 无交互通道 fail-soft', () => {
     await expect(ui.input('输入')).resolves.toBe('');
   });
 });
+
+describe('UiService 撤销信号透传（channels 批刀 A——降级路径同链透传）', () => {
+  /** 记录 opts 的桩后端：直连路（confirm/select 原生支持）与降级路（仅 input）各一 */
+  function optsRecorder(caps: { confirm?: boolean; input?: boolean; select?: boolean }) {
+    const seen: { op: string; signal: AbortSignal | undefined }[] = [];
+    const backend: UiBackend = {
+      id: 'rec',
+      notify: () => {},
+      setStatus: () => {},
+      ...(caps.confirm
+        ? {
+            confirm: async (_m: string, opts?: { signal?: AbortSignal }) => (
+              seen.push({ op: 'confirm', signal: opts?.signal }),
+              true
+            ),
+          }
+        : {}),
+      ...(caps.input
+        ? {
+            input: async (_m: string, opts?: { signal?: AbortSignal }) => (
+              seen.push({ op: 'input', signal: opts?.signal }),
+              'y'
+            ),
+          }
+        : {}),
+      ...(caps.select
+        ? {
+            select: async (_m: string, _c: readonly UiChoice[], opts?: { signal?: AbortSignal }) => (
+              seen.push({ op: 'select', signal: opts?.signal }),
+              '选值'
+            ),
+          }
+        : {}),
+    };
+    return { backend, seen };
+  }
+
+  it('直连路：confirm/select 的 signal 经 UiService 原样到达后端', async () => {
+    const ui = createUiService();
+    const { backend, seen } = optsRecorder({ confirm: true, select: true });
+    ui.attach(backend);
+    const controller = new AbortController();
+    await ui.confirm('确认？', { signal: controller.signal });
+    await ui.select('挑一个', [{ value: 'a', label: 'A' }], { signal: controller.signal });
+    expect(seen.map((s) => s.op)).toEqual(['confirm', 'select']);
+    // 原样到达（同一信号对象——非重建）
+    expect(seen.every((s) => s.signal === controller.signal)).toBe(true);
+  });
+
+  it('降级路：仅 input 后端时，select→input / confirm→input 两降级都透传 signal（撤销语义不因降级丢失）', async () => {
+    const ui = createUiService();
+    const { backend, seen } = optsRecorder({ input: true });
+    ui.attach(backend);
+    const controller = new AbortController();
+    // confirm 降级 y/n（桩 input 答 'y' → true）；select 降级编号清单（'y' 不命中选项 → ''）
+    await ui.confirm('继续？', { signal: controller.signal });
+    await ui.select('选', [{ value: 'red', label: '红色' }], { signal: controller.signal });
+    expect(seen.map((s) => s.op)).toEqual(['input', 'input']);
+    expect(seen.every((s) => s.signal === controller.signal)).toBe(true);
+  });
+});

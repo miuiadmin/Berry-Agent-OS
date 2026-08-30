@@ -35,8 +35,9 @@ import { chainBackground } from '../context/chain.js';
 import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, renderAgentMessage } from './render.js';
 import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
+import { createMentionProvider, type SymbolsFace } from './mention.js';
 import type { CommandRegistry } from './commands.js';
-import type { ChannelHost, InputOptions, NotifyLevel, RendererDefinition, UiBackend } from './types.js';
+import type { ChannelHost, InputOptions, NotifyLevel, RendererDefinition, UiBackend, UiAskOptions } from './types.js';
 
 /** TUI 通道选项 */
 export interface TuiChannelOptions {
@@ -73,6 +74,14 @@ export interface TuiChannelOptions {
    * CombinedAutocompleteProvider——basePath 用）；缺省不武装（测试/无终端面）。
    */
   readonly workspace?: string;
+  /**
+   * documentSymbol 查询面（channels 批刀 B——@-mention 符号段补全）：传入即
+   * 在 autocomplete 武装时包一层组合委托 provider（`@path#sym` token 拦截调
+   * 此 face；不匹配与 face 404 档原样委托内层三面）。结构类型注入——通道
+   * 不 import lsp/webui（拓扑边零新增）；face 源 = 宿主活取值闭包（lsp 行
+   * apply 挂真身、回卷摘除——TUI 面随行回卷自然退化为委托腿）。
+   */
+  readonly symbolsFor?: SymbolsFace;
 }
 
 /** TUI 通道面（app 组合根持有） */
@@ -160,9 +169,14 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
             }
           : {}),
       }));
-    /** 重装 provider（构造时一次 + 每次 onChange；setAutocompleteProvider 为可选 API 防御调用） */
+    /** 重装 provider（构造时一次 + 每次 onChange；setAutocompleteProvider 为可选 API 防御调用）。
+     *  刀 B：symbolsFor 在场时外包组合委托 provider（@-mention 符号段拦截；
+     *  非两段 token 与 face 404 档原样委托内层三面） */
     const installAutocomplete = (): void => {
-      editor.setAutocompleteProvider?.(new CombinedAutocompleteProvider(projectCommands(), opts.workspace!));
+      const inner = new CombinedAutocompleteProvider(projectCommands(), opts.workspace!);
+      editor.setAutocompleteProvider?.(
+        opts.symbolsFor !== undefined ? createMentionProvider(inner, opts.symbolsFor) : inner,
+      );
     };
     installAutocomplete();
     opts.commands.onChange(installAutocomplete);
@@ -265,6 +279,11 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     },
     echo(answer) {
       appendLines([`› ${answer}`]);
+    },
+    // 撤销说明行（刀 A：在身提问被 signal abort 时的收屏行——文案 = abort
+    // reason，如「该审批已在网页端应答」；question 参数不显——提问行已在屏）
+    dismiss(_question, reason) {
+      appendLines([`− ${reason}`]);
     },
   });
 
@@ -370,21 +389,23 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       statusText.invalidate();
       tui.requestRender();
     },
-    async confirm(message) {
+    async confirm(message, opts?: UiAskOptions) {
       // priority 随链取数（S5 后台 run 的确认降级排队——契约篇 §5.4）；取消收场
-      // 的 undefined 按 false（fail-closed：不批准 = 安全缺省）
+      // 或 signal abort 的 undefined 按 false（fail-closed：不批准 = 安全缺省）
       const answer = await prompts.ask(`${message} [y/n]`, {
         priority: chainBackground() ? 'background' : 'interactive',
+        signal: opts?.signal,
       });
       if (answer === undefined) return false;
       const parsed = /^(y|yes|是)$/i.test(answer.trim());
       return parsed; // 未识别按 false（fail-closed，与技术栈篇 §4.3 精神一致）
     },
     async input(message, ioOpts?: InputOptions) {
-      // priority 同 confirm；取消收场的 undefined 归一为 ''（UiService.input 的
-      // 「无输入」既有语义——消费方零新分支）
+      // priority 同 confirm；取消收场或 signal abort 的 undefined 归一为 ''
+      //（UiService.input 的「无输入」既有语义——消费方零新分支）
       const answer = await prompts.ask(ioOpts?.placeholder ? `${message}（${ioOpts.placeholder}）` : message, {
         priority: chainBackground() ? 'background' : 'interactive',
+        signal: ioOpts?.signal,
       });
       return answer ?? '';
     },

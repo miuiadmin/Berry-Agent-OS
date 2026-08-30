@@ -473,6 +473,19 @@ export interface AppRuntime {
   /** 开新会话（/new）：registry.open 一条龙 + 旧聚焦条目退役；无持久层或聚焦驱动 run 进行中返回 undefined */
   newSession(): Session | undefined;
   /**
+   * documentSymbol 查询面活取值（channels 批刀 B——TUI @-mention 符号段）：
+   * 刀三行面晚绑桥第二消费点。恒可调——lsp 行 apply 期挂真身、回卷摘除，
+   * 缺席时解析 undefined（TUI 补全自然退化为委托腿，保 /reload 活语义——
+   * tui-main 恒接此闭包，非 lsp 装载时点分支）。
+   */
+  symbolsFor(path: string): Promise<
+    | {
+        readonly symbols: readonly { readonly name: string; readonly line?: number; readonly kind?: number }[];
+        readonly warming?: boolean;
+      }
+    | undefined
+  >;
+  /**
    * 组合树重载（/reload，契约篇 §1.3 落码形态）：run 进行中**排队不拒绝**
    *（2026-08-27 刀 2 改排队——分槽 coalesce：置 pending 返 {queued:true}，
    * run 结算回调见各自域排水条件即自动排水执行；排队的 reload 失败不重排，
@@ -1438,12 +1451,19 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 时 ui.confirm——fresh 作用域 answerer 绑它；headless 不传 = fail-closed）/
     // sandbox + allowlist（bash def 构造原料 + 守门行同源活数组）
     ...(opts.approvalPolicy === undefined ? {} : { approvalPolicy: opts.approvalPolicy }),
-    ...(opts.interactive ? { confirm: (text: string) => ui.confirm(text) } : {}),
+    // 刀 A：闭包真转发 opts（signal 透传到 ui.confirm——竞速败腿撤销链），
+    // 非仅 arity 兼容（吞 opts = 撤销面静默断链，类型面≠运行面教训）
+    ...(opts.interactive
+      ? { confirm: (text: string, askOpts?: { signal?: AbortSignal }) => ui.confirm(text, askOpts) }
+      : {}),
     // 「始终允许」三态化两件（§8.4 增补 2 落码形态③⑥）：select = ui.select
     // 三选原语（interactive 时注入；缺省降级 confirm 两态不呈现 always）；
-    // persistAllowlist = AllowlistStore.add 面（幂等去重）
+    // persistAllowlist = AllowlistStore.add 面（幂等去重）；刀 A 同款转发
     ...(opts.interactive
-      ? { select: (m: string, c: readonly { value: string; label: string }[]) => ui.select(m, c) }
+      ? {
+          select: (m: string, c: readonly { value: string; label: string }[], askOpts?: { signal?: AbortSignal }) =>
+            ui.select(m, c, askOpts),
+        }
       : {}),
     // 刀三 web 应答腿（claim 竞速注入）：answerer 竞速的 web 腿——闭包读晚绑
     // holder（webui 行未开面/已卸载 = undefined = 纯 TUI 腿原语义）。恒传：
@@ -2561,14 +2581,18 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   if (opts.interactive) {
     ctx.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
       // 刀三 claim 竞速注入（与驱动 answerer 同款）：web 腿在场时两腿竞速——
-      // 先胜者即裁决；缺席（webui 未开面/条目已决）= 纯 TUI 腿原语义
+      // 先胜者即裁决；缺席（webui 未开面/条目已决）= 纯 TUI 腿原语义。
+      // 刀 A 竞速收束即撤销败腿：race 收束 finally abort TUI 腿（TUI 腿先胜
+      // 时 abort 落在已结算提问 = no-op）；根路无三态分支，confirm 腿直透
       const webLeg = webClaimOf(req);
+      // 刀 A：per-request controller——撤销信号经 ui.confirm opts 透传
+      const controller = new AbortController();
       // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
       const tuiLeg = ui
-        .confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`)
+        .confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`, { signal: controller.signal })
         .then((answer) => (answer ? 'approve' : 'reject') as 'approve' | 'reject');
       if (webLeg === undefined) return tuiLeg;
-      return Promise.race([tuiLeg, webLeg]);
+      return Promise.race([tuiLeg, webLeg]).finally(() => controller.abort('该审批已在网页端应答'));
     });
   }
 
@@ -2613,6 +2637,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     drivers: registry,
     front: chatBundle.front,
     newSession: startNewSession,
+    // 刀 B：documentSymbol 面活取值（读 holder——与 webui deps symbolsFor 同源
+    // 第二消费点；lsp 行缺席 = undefined，TUI 补全退化委托腿）
+    symbolsFor: (path: string) => symbolsFace?.(path) ?? Promise.resolve(undefined),
     reload,
     /** 优雅关停：abort-all → 等全部驱动结算（quiesce 断言）→ flush 屏障 → 全部条目 session_shutdown → 关库 → ctx 回卷（§1.3 多驱动版编排 + S6 形态⑤，S1 全条目化） */
     async shutdown() {

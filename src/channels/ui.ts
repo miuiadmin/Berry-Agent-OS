@@ -12,7 +12,7 @@
  */
 
 import type { Disposer } from '../context/types.js';
-import type { InputOptions, NotifyOptions, UiBackend, UiChoice, UiService } from './types.js';
+import type { InputOptions, NotifyOptions, UiAskOptions, UiBackend, UiChoice, UiService } from './types.js';
 
 /** 解析 confirm 的 y/n 文本答案（未识别 → undefined，调用方决定重问或保守值） */
 export function parseBooleanAnswer(text: string): boolean | undefined {
@@ -47,12 +47,17 @@ export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' |
     return undefined;
   };
 
-  /** select 降级到 input：把选项展开成编号清单让用户输 value/序号/label */
-  const selectViaInput = async (message: string, choices: readonly UiChoice[]): Promise<string> => {
+  /** select 降级到 input：把选项展开成编号清单让用户输 value/序号/label。
+   *  signal 透传进 input（channels 批刀 A）——降级路径与原生路径同一撤销面 */
+  const selectViaInput = async (
+    message: string,
+    choices: readonly UiChoice[],
+    opts?: UiAskOptions,
+  ): Promise<string> => {
     const backend = firstCapable('input');
     if (!backend) return ''; // 无任何交互通道：fail-soft 空值
     const menu = choices.map((c, i) => `${i + 1}) ${c.label} (${c.value})`).join('  ');
-    const answer = await backend.input(`${message}\n${menu}`);
+    const answer = await backend.input(`${message}\n${menu}`, opts);
     const trimmed = answer.trim();
     // 命中序号 / value / label 任一即采纳；不匹配 → 空值（调用方按无效处理）
     const byIndex = choices[Number(trimmed) - 1];
@@ -60,11 +65,11 @@ export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' |
     return choices.find((c) => c.value === trimmed || c.label === trimmed)?.value ?? '';
   };
 
-  /** confirm 降级到 input：y/n 文本解析；未识别 → 保守 false */
-  const confirmViaInput = async (message: string): Promise<boolean> => {
+  /** confirm 降级到 input：y/n 文本解析；未识别 → 保守 false。signal 同透传 */
+  const confirmViaInput = async (message: string, opts?: UiAskOptions): Promise<boolean> => {
     const backend = firstCapable('input');
     if (!backend) return false; // fail-closed：无人可答即不确认
-    const answer = await backend.input(`${message} [y/n]`);
+    const answer = await backend.input(`${message} [y/n]`, opts);
     return parseBooleanAnswer(answer) ?? false;
   };
 
@@ -73,16 +78,16 @@ export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' |
       for (const backend of backends) callIsolated('notify', () => backend.notify(message, notifyOpts));
     },
 
-    async confirm(message: string) {
+    async confirm(message: string, opts?: UiAskOptions) {
       const backend = firstCapable('confirm');
-      if (backend) return backend.confirm(message);
-      return confirmViaInput(message);
+      if (backend) return backend.confirm(message, opts);
+      return confirmViaInput(message, opts);
     },
 
-    async select(message: string, choices: readonly UiChoice[]) {
+    async select(message: string, choices: readonly UiChoice[], opts?: UiAskOptions) {
       const backend = firstCapable('select');
-      if (backend) return backend.select(message, choices);
-      return selectViaInput(message, choices);
+      if (backend) return backend.select(message, choices, opts);
+      return selectViaInput(message, choices, opts);
     },
 
     async input(message: string, opts?: InputOptions) {

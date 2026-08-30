@@ -568,6 +568,139 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
     }
   });
 
+  it('刀 A 全栈 (d)：竞速收束撤销败腿——web 胜三态 select 降级链自动收场 + TUI 胜 abort 无副作用', async () => {
+    const port = await grabPort();
+    const workspace = makeWorkspace();
+    // 脚本序：[0] bash 升权·带词干草案（pwd → suggestedEntry 在场 → 三态 select 路）
+    // ——web 腿胜 → [1] 收尾；[2] 同款轮——TUI 腿胜 → [3] 收尾
+    const runtime = await createRuntime({
+      dbPath: ':memory:',
+      workspace,
+      interactive: true,
+      approvalPolicy: 'ask',
+      sandboxMode: 'read-only',
+      webuiPort: port,
+      streamFn: scriptedStream([
+        bashEscalation('刀A web 腿胜', 'pwd'),
+        textMessage('web 胜收尾'),
+        bashEscalation('刀A tui 腿胜', 'pwd'),
+        textMessage('tui 胜收尾'),
+      ]),
+    });
+    runtimes.push(runtime);
+    const base = `http://127.0.0.1:${port}`;
+
+    /**
+     * 三态可撤销桩：select/confirm 都响应 opts.signal——abort 时结算保守值
+     * （''/false，模拟 UiService 层 undefined 收口）；confirm 预置 aborted =
+     * 同步 false（§6.8 (a2) 桩面——降级链第二问不上屏）。askLog 只记真实
+     * 生效的结算（settled 守卫——abort 落在已应答者上 no-op 不记，镜像
+     * prompts.ask 的摘监听不变式）。
+     */
+    const askLog: string[] = [];
+    const gates: Array<() => void> = [];
+    runtime.ui.attach({
+      id: 'test-three-state',
+      notify: () => {},
+      setStatus: () => {},
+      select: (_message: string, _choices: readonly unknown[], opts?: { signal?: AbortSignal }) =>
+        new Promise<string>((resolve) => {
+          askLog.push('select-ask');
+          let settled = false;
+          const settle = (value: string, tag: string) => {
+            if (settled) return; // 迟到 abort（已应答）= no-op——与真队列摘监听同律
+            settled = true;
+            askLog.push(tag);
+            resolve(value);
+          };
+          opts?.signal?.addEventListener('abort', () => settle('', 'select-abort'), { once: true });
+          gates.push(() => settle('approve', 'select-answer'));
+        }),
+      confirm: (_message: string, opts?: { signal?: AbortSignal }) => {
+        if (opts?.signal?.aborted) {
+          askLog.push('confirm-instant-false'); // 预置 aborted：同步收场不悬置（降级链命中面）
+          return Promise.resolve(false);
+        }
+        return new Promise<boolean>((resolve) => {
+          askLog.push('confirm-ask');
+          let settled = false;
+          const settle = (value: boolean, tag: string) => {
+            if (settled) return;
+            settled = true;
+            askLog.push(tag);
+            resolve(value);
+          };
+          opts?.signal?.addEventListener('abort', () => settle(false, 'confirm-abort'), { once: true });
+          gates.push(() => settle(true, 'confirm-answer'));
+        });
+      },
+    });
+
+    const frames: WebuiSseEnvelope[] = [];
+    const sse = openSse(port, frames);
+    try {
+      const list = (await getJson(`${base}/api/sessions`)).body as { id: string; active: boolean }[];
+      const bootId = list.find((s) => s.active)!.id;
+      const session = runtime.session!;
+      const countFrames = (type: string): number =>
+        frames.filter((f) => f.kind === 'session' && (f.payload as { type?: string })?.type === type).length;
+      const askedIds = () =>
+        frames
+          .map((f) => f.payload as { type?: string; data?: { approvalId?: string } })
+          .filter((p) => p.type === 'approval/asked')
+          .map((p) => p.data?.approvalId);
+
+      /* ---- Leg 1：web 腿胜（三态 select 悬置 → decide 裁决 → 败腿自动收场） ---- */
+      expect((await postSubmit(port, bootId, '刀A第一轮')).status).toBe(202);
+      await waitFor(() => countFrames('approval/asked') >= 1);
+      const id1 = askedIds()[0] ?? '';
+      // 三态路上屏：suggestedEntry（pwd 词干）在场 → answerApproval 走 select
+      await waitFor(() => askLog.includes('select-ask'));
+      // web 应答 → race 收 web 值 → finally abort → select 桩 '' → 降级 confirm
+      //（同 signal 已 aborted → 同步 false）→ tuiLeg 'reject' 无人消费——decided 单写 web 值
+      expect(
+        (await postJson(port, `/api/approvals/${id1}/decide`, JSON.stringify({ decision: 'approve' }))).status,
+      ).toBe(200);
+      await waitFor(() => countFrames('turn/end') >= 1);
+      // 败腿收场序：select 撤销 → 降级 confirm 预置 aborted 同步收场——全程无
+      // 第二提问悬置上屏（'confirm-ask' 缺席 = 不再残留占输入框的桩面证据）
+      await waitFor(() => askLog.includes('confirm-instant-false'));
+      expect(askLog).toEqual(['select-ask', 'select-abort', 'confirm-instant-false']);
+      // decided 单写：approve（web 腿值；tuiLeg 降级链终值 reject 被 race 丢弃）
+      const decided1 = session.events.filter((e) => e.type === 'approval/decided');
+      expect(decided1).toHaveLength(1);
+      expect((decided1[0]!.data as { decision: string }).decision).toBe('approve');
+      expect(gates).toHaveLength(1); // select 闸门挂过、confirm 未挂闸（短路）——无悬置腿残留
+
+      /* ---- Leg 2：TUI 腿胜（select 立即应答 → race 收 → abort 无副作用） ---- */
+      expect((await postSubmit(port, bootId, '刀A第二轮')).status).toBe(202);
+      await waitFor(() => countFrames('approval/asked') >= 2);
+      const id2 = askedIds().find((aid) => aid !== id1) ?? '';
+      await waitFor(() => askLog.filter((l) => l === 'select-ask').length >= 2);
+      gates[1]!(); // TUI 立即允许（select → 'approve'）
+      // 等 decided 第二条真值（turn/end 计数会被轮1收尾轮提前满足——decided
+      // 是审批结算的真信号；随后 turn/end 帧到位收全链）
+      await waitFor(
+        () =>
+          session.events.filter((e) => e.type === 'approval/decided').length >= 2 && askLog.includes('select-answer'),
+      );
+      await waitFor(() => countFrames('turn/end') >= 3);
+      // race 收束的 finally abort 落在已应答 select 上 = no-op：桩 settled 守卫
+      // 不记 'select-abort'（摘监听不变式的桩面镜像）、不触发降级 confirm
+      expect(askLog).toEqual(['select-ask', 'select-abort', 'confirm-instant-false', 'select-ask', 'select-answer']);
+      // decided 单写：第二条值 approve（TUI 腿值）；web 迟到应答 superseded 不二写
+      const decided2 = session.events.filter((e) => e.type === 'approval/decided');
+      expect(decided2).toHaveLength(2);
+      expect((decided2[1]!.data as { decision: string }).decision).toBe('approve');
+      const late = await postJson(port, `/api/approvals/${id2}/decide`, JSON.stringify({ decision: 'reject' }));
+      expect(late).toEqual({ status: 200, body: { accepted: false, reason: 'superseded' } });
+      expect(session.events.filter((e) => e.type === 'approval/decided')).toHaveLength(2); // 仍两条
+    } finally {
+      sse.close();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('端口被占 → 应用启动断言拒启（fail-at-startup 组合根层：webui 失败行非空即拒）', async () => {
     const heldPort = await grabPort();
     const held = await holdPort(heldPort);

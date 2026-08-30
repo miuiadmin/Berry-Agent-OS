@@ -92,31 +92,45 @@ function formatApprovalPrompt(req: ApprovalRequest): string {
  * 规则草案 → 三选（F10 文案纪律：明示条目内容与永久性）；否则降级 confirm
  * 两态（降级通道无法表达三选时「始终允许」不呈现——呈现纪律）。'' 无效答案
  * 保守 reject：授权面宁可重问不可放行（fail-closed 同判）。导出供回归锁直测。
+ *
+ * channels 批刀 A：primitives 面扩可选 signal（与 UiService 同型——chat 件
+ * 不 import channels 类型面，结构同型即可）——转发给 confirm/select 的撤销
+ * 信号；abort 收场值（confirm→false / select→''）走既有保守分支（false→
+ * reject、''→降级 confirm 两态），零新词汇。
  */
 export async function answerApproval(
   req: ApprovalRequest,
   primitives: {
-    readonly confirm: (text: string) => Promise<boolean>;
-    readonly select?: (message: string, choices: readonly { value: string; label: string }[]) => Promise<string>;
+    readonly confirm: (text: string, opts?: { readonly signal?: AbortSignal }) => Promise<boolean>;
+    readonly select?: (
+      message: string,
+      choices: readonly { value: string; label: string }[],
+      opts?: { readonly signal?: AbortSignal },
+    ) => Promise<string>;
   },
+  opts?: { readonly signal?: AbortSignal },
 ): Promise<'approve' | 'reject' | 'always'> {
   const { select } = primitives;
   if (req.suggestedEntry !== undefined && select !== undefined) {
     const entry = req.suggestedEntry;
-    const answer = await select(formatApprovalPrompt(req), [
-      { value: 'approve', label: '仅批准本次' },
-      {
-        value: 'always',
-        label: `始终允许（条目 ${entry.tool} ${entry.pattern}——跨会话永久生效，可经 /allowlist 移除）`,
-      },
-      { value: 'reject', label: '拒绝' },
-    ]);
+    const answer = await select(
+      formatApprovalPrompt(req),
+      [
+        { value: 'approve', label: '仅批准本次' },
+        {
+          value: 'always',
+          label: `始终允许（条目 ${entry.tool} ${entry.pattern}——跨会话永久生效，可经 /allowlist 移除）`,
+        },
+        { value: 'reject', label: '拒绝' },
+      ],
+      opts,
+    );
     if (answer === 'approve' || answer === 'always') return answer;
     if (answer === 'reject') return 'reject';
     // ''（通道无法表达三选或输入无效）：**降级 confirm 两态**——「始终允许」
     // 不呈现（呈现纪律），但 approve/reject 决不因降级丢失（宁可重问不可静默拒）
   }
-  return (await primitives.confirm(formatApprovalPrompt(req))) ? 'approve' : 'reject';
+  return (await primitives.confirm(formatApprovalPrompt(req), opts)) ? 'approve' : 'reject';
 }
 
 /**
@@ -463,16 +477,23 @@ export interface ChatAppDeps {
   /**
    * 审批应答面（S5 冷读闸 F1：fresh 作用域 answerer 绑的 confirm——组合根
    * `opts.interactive` 时注入 ui.confirm；缺省不传 = 本驱动 ask 全线
-   * unavailable〔fail-closed〕，与 headless 无 answerer 纪律同构）。
+   * unavailable〔fail-closed〕，与 headless 无 answerer 纪律同构）。刀 A：
+   * 签名与 UiService.confirm 同型（含可选 signal——竞速败腿撤销透传；组合根
+   * 注入闭包必须真转发 opts，非仅 arity 兼容）。
    */
-  readonly confirm?: (text: string) => Promise<boolean>;
+  readonly confirm?: (text: string, opts?: { readonly signal?: AbortSignal }) => Promise<boolean>;
   /**
    * 三选原语（§8.4 增补 2 落码形态⑥——TUI 审批三态化的 select 面）：组合根
    * `opts.interactive` 时注入 ui.select（结构同 UiChoice——chat 件不依赖
    * channels 类型面，与 confirm 同注入风格）。缺省不传 = 载荷带草案也降级
    * confirm 两态（降级通道无法表达三选时「始终允许」不呈现——呈现纪律）。
+   * 刀 A：同型扩可选 signal（同 confirm）。
    */
-  readonly select?: (message: string, choices: readonly { value: string; label: string }[]) => Promise<string>;
+  readonly select?: (
+    message: string,
+    choices: readonly { value: string; label: string }[],
+    opts?: { readonly signal?: AbortSignal },
+  ) => Promise<string>;
   /**
    * web 应答腿（刀三 claim 竞速注入，契约篇 §6.8 刀三条）：answerer 在 TUI
    * 原语之外与 web 审批卡竞速——先胜者即裁决，败腿结算丢弃。组合根注入
@@ -861,12 +882,23 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         driverScope.on(APPROVAL_ANSWER_EVENT, (req: ApprovalRequest, _next: () => unknown) => {
           // 三态归一（草案在场 + select 在场 → 三选；降级 confirm 两态）在
           // answerApproval 纯函数内——回归锁见 plugin.test.ts
-          const tuiLeg = answerApproval(req, { confirm, ...(select !== undefined ? { select } : {}) });
+          // 刀 A 竞速收束即撤销败腿：per-request controller——race 先胜后
+          // finally abort TUI 腿（reason 承载撤销说明文案，经提问队列上撤销
+          // 说明行收屏）；TUI 腿先胜时 abort 落在已结算提问 = no-op（任何
+          // 结算路径摘监听）；三态降级链（select abort 回 '' → 降级再发
+          // confirm）经预置 aborted 同步结算——无第二提问上屏
+          const controller = new AbortController();
+          const tuiLeg = answerApproval(
+            req,
+            { confirm, ...(select !== undefined ? { select } : {}) },
+            { signal: controller.signal },
+          );
           // 刀三 claim 竞速注入：web 腿在场（webui 开面且未决条目活）时两腿
           // 竞速——先胜者即裁决，败腿结算丢弃；缺席 = 纯 TUI 腿原语义
+          //（controller 不 abort——无败腿可撤销）
           const webLeg = webAnswer?.(req);
           if (webLeg === undefined) return tuiLeg;
-          return Promise.race([tuiLeg, webLeg]);
+          return Promise.race([tuiLeg, webLeg]).finally(() => controller.abort('该审批已在网页端应答'));
         });
       }
 
