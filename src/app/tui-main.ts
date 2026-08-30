@@ -18,11 +18,32 @@ import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
+import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 import { VERSION } from './version.js';
 
 /**
+ * 判活 daemon 是否持有**本工作区**近史会话（daemon 刀二·P3 触达面②判据）。
+ *
+ * tui 起屏横幅分流用：boot 续接撞 heldElsewhere 拒开落到无聚焦态时，先判
+ * 本函数再报「未装载」——两因指引完全不同（held 给 attach/submit 改道指引，
+ * 未装载才是装配问题）。判据 = daemon.json 判活 + recentSessions 近史行 cwd
+ * 匹配本工作区且 id ∈ heldSessions（域过滤差异不追——横幅是 UX 指引非会话
+ * 仲裁；近史 50 覆盖持有面：daemon 持有的必是活账，活账必在近史头部）。
+ * 导出仅为单测（进程内判据纯函数——读盘与判活在内）。
+ */
+export function daemonHoldsWorkspaceSession(
+  workspaceRoot: string | undefined,
+  recentRows: readonly { readonly cwd: string | null; readonly id: string }[],
+): boolean {
+  if (workspaceRoot === undefined) return false;
+  const state = readDaemonState();
+  if (state === undefined || !isDaemonAlive(state)) return false;
+  return recentRows.some((row) => row.cwd === workspaceRoot && state.heldSessions.includes(row.id));
+}
+
+/**
  * TUI 主流程（阻塞至用户退出）。
- * @param options 组合根选项透传（测试注入 streamFn/dbPath/terminal 用）
+ * @param options 组合根选项透传（测试注入 streamFn/dbPath 用）
  * @returns 进程退出码（正常退出恒 0——用户离开不是错误）
  */
 export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
@@ -103,11 +124,33 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   // 零通知）：清屏 + 目标会话历史重画 + 在飞占位槽按 entryStatus 续流
   const disposeFocusSubscription = runtime.drivers.onFocusChange((sessionId) => tui.repaint(sessionId));
   // 可卸提示：无对话循环时示明现状（命令面仍可用——/apps 可查、/reload 可试）；
-  // 两因：chat 件被禁 / 默认应用解析无果（组装批兜底态——open 防御降级）
+  // 三因分流（daemon 刀二·P3 触达面②新增第一因）：resume 撞 daemon 持有 /
+  // chat 件被禁 / 默认应用解析无果（组装批兜底态——open 防御降级）
   if (runtime.conversation === undefined) {
-    runtime.ui.notify(
-      '对话应用未装载或默认应用不可用（builtin:chat 被禁用 / 默认应用组件缺场 / persist:false）——输入不会得到应答；dump-config 查看装配，/quit 退出。',
-    );
+    // 先判 held：活 daemon 持有本工作区会话 → boot 续接被 heldElsewhere 拒开
+    // 落到无聚焦态（判据函数见 daemonHoldsWorkspaceSession 注释）
+    const workspaceRoot = runtime.ctx.tryGet<PathsService>('paths')?.workspaceRoot();
+    const heldHere = daemonHoldsWorkspaceSession(workspaceRoot, runtime.persistence?.store.recentSessions(50) ?? []);
+    if (heldHere) {
+      // P3 触达面②（契约篇 §6.8）：横幅 + 指引 + 落新会话继续（不拒启——进程
+      // 内 TUI 仍可用，只是原会话改道）；指引与触达面①（run --tick）同款
+      runtime.ui.notify(
+        '最新会话正被 daemon 持有（heldSessions 租约）——本进程拒开防双写者，已另开新会话继续。' +
+          '接上原会话：`berry attach`，或经 `POST /api/sessions/:id/submit` 投递。',
+        { level: 'warn' },
+      );
+      const opened = runtime.newSession();
+      if (opened === undefined) {
+        // 落新会话也失败（chat 件未装载/persist:false）——退回可卸提示真相
+        runtime.ui.notify(
+          '对话应用未装载或默认应用不可用（builtin:chat 被禁用 / 默认应用组件缺场 / persist:false）——输入不会得到应答；dump-config 查看装配，/quit 退出。',
+        );
+      }
+    } else {
+      runtime.ui.notify(
+        '对话应用未装载或默认应用不可用（builtin:chat 被禁用 / 默认应用组件缺场 / persist:false）——输入不会得到应答；dump-config 查看装配，/quit 退出。',
+      );
+    }
   }
 
   // 信号编舞（骨架篇 §1.3 全表 + S6 形态④信号分种类）：SIGINT 首次经

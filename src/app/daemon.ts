@@ -14,19 +14,28 @@
  * - `stop`：SIGTERM → 轮询确认消失（缺省 30s 预算）→ SIGKILL 兜底 → 清
  *   daemon.json（API shutdown 端点明确否决——stop 权 > submit 权）。
  * - `status`：读 daemon.json + 真握手披露（pid/port/持有会话/清单条数）。
+ * - `doctor`（刀二）：七项体检——①pid 判活 ②health+真握手（顺手连一次
+ *   /api/events 即关——503 = 连接帽满）③token 在场且 0600（**判活时只读
+ *   禁 ensure 写**——防诊断面自造不符态）④库 readonly 可开 ⑤log 大小
+ *   ⑥运行 vs 磁上版本 ⑦判死时端口占用探测；僵尸态（pid 活+HTTP 面无响应）
+ *   入查。全绿 0 / 任一项红 1。
  * - `--foreground`：前台常驻（launchd/systemd 监视直接子进程的唯一正确
  *   形态——自 fork 会双实例循环）。
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync } from 'node:fs';
-import { get as httpGet, type RequestOptions } from 'node:http';
+import { closeSync, mkdirSync, openSync, statSync } from 'node:fs';
+import { get as httpGet, request as httpRequest, type RequestOptions } from 'node:http';
+import { connect as netConnect } from 'node:net';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { AppError, DAEMON_START_TIMEOUT, DAEMON_STOP_TIMEOUT } from '../contracts/errors.js';
-import { dataDir } from './paths.js';
+import { dataDir, dbPath } from './paths.js';
 import { createRuntime } from './assembly.js';
 import { installExitSignals } from './signals.js';
+import { readAttachToken } from './attach-client.js';
+import { VERSION } from './version.js';
 import {
   acquireDaemonState,
   daemonDirOf,
@@ -102,8 +111,68 @@ export function httpProbe(
   });
 }
 
+/**
+ * 应答头即回探针（状态码单值）：SSE 等长流端点不会自然 end——httpProbe 会
+ * 挂到超时，本探针取到状态码即断流收场（doctor ②「顺手连一次 /api/events
+ * 即关」与裸 berry 检测共用）。
+ */
+export function probeStatus(
+  urlStr: string,
+  headers: Readonly<Record<string, string>>,
+  timeoutMs: number,
+): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const url = new URL(urlStr);
+    const opts: RequestOptions = {
+      host: url.hostname,
+      port: url.port,
+      path: url.pathname + url.search,
+      headers: { ...headers },
+      timeout: timeoutMs,
+    };
+    const req = httpGet(opts, (res) => {
+      const status = res.statusCode ?? 0;
+      res.resume(); // 排干已到应答体（若有）
+      res.destroy(); // 长流即断——本探针只取状态码
+      resolve(status);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(undefined);
+    });
+    req.on('error', () => resolve(undefined)); // destroy 后的迟到 error 幂等吸收
+  });
+}
+
 /* ------------------------------------------------------------------ */
-/* 命令族（start / stop / status）——main.ts 分派消费                    */
+/* 裸 berry 检测（刀二——daemon 在跑时裸 berry 提示 attach，契约篇 §6.8） */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 检测本机是否有活 daemon（裸 `berry` 起屏前置）：daemon.json 在场时对其
+ * port 发**真握手**（GET /api/sessions 带**只读** token，200 = 唯一正判）。
+ * 文件不在 / 探败（stale、僵尸、token 缺失 401）= undefined——照常起进程内
+ * 形态零副作用（不清 stale 文件、不 ensure token）。
+ * @returns 正判时的 daemon 端口（提示面用）；undefined = 无活 daemon
+ */
+export async function detectDaemonHandshake(
+  deps: { dataRoot?: string; probeStatus?: typeof probeStatus } = {},
+): Promise<{ port: number } | undefined> {
+  const dataRoot = deps.dataRoot ?? dataDir();
+  const state = readDaemonState(dataRoot);
+  if (state === undefined) return undefined;
+  const token = readAttachToken(dataRoot);
+  if (token === undefined) return undefined; // token 缺失——401 面，非活证
+  const status = await (deps.probeStatus ?? probeStatus)(
+    `http://127.0.0.1:${state.port}/api/sessions`,
+    { authorization: `Bearer ${token}` },
+    HANDSHAKE_TIMEOUT_MS,
+  );
+  return status === 200 ? { port: state.port } : undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* 命令族（start / stop / status / doctor）——main.ts 分派消费           */
 /* ------------------------------------------------------------------ */
 
 /** 命令面依赖注入（测试假面：探针/spawn/取数闭包全可换） */
@@ -378,4 +447,209 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
     releaseDaemonState(dataRoot, identity);
   }
   return signals.exitCode;
+}
+
+/* ------------------------------------------------------------------ */
+/* doctor 七项体检（刀二——`berry daemon doctor`，契约篇 §6.8）           */
+/* ------------------------------------------------------------------ */
+
+/** doctor 依赖注入（测试假面——探针/库文件/端口探测全可换） */
+export interface DoctorDeps {
+  /** 进程身份探针（缺省平台探针） */
+  readonly probe?: ProcessProbe;
+  /** HTTP 体探针（health 用——须读 JSON 体） */
+  readonly probeHttp?: typeof httpProbe;
+  /** HTTP 状态码探针（握手/SSE 用——应答头即回） */
+  readonly probeStatus?: typeof probeStatus;
+  /** 数据目录根（缺省 dataDir()——测试钉扎） */
+  readonly dataRoot?: string;
+  /** 会话库文件路径（缺省 dbPath()——env 覆盖链同主力路径） */
+  readonly dbFile?: string;
+  /** 端口监听探测（⑦ 判死路用——true = 有监听者） */
+  readonly portProbe?: (port: number) => Promise<boolean>;
+}
+
+/** 单项体检结论（ok=false 计入非零退；detail 为人话披露行） */
+interface DoctorFinding {
+  readonly ok: boolean;
+  readonly text: string;
+}
+
+/** 缺省端口监听探测：TCP connect 成功 = 有监听者（连上即断） */
+const defaultPortProbe = (port: number): Promise<boolean> =>
+  new Promise((resolve) => {
+    const socket = netConnect({ host: '127.0.0.1', port });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
+
+/**
+ * daemon 七项体检主流程。序与语义（规范 :1020）：
+ * ① daemon.json 在场 + pid 判活（processStartId 匹配——防 pid 复用假阳）
+ * ② 服务面：health 公开探活 + 活证真握手（**须 token 端点** 200；401 =
+ *    盘上 token 与运行 daemon 持有不符——处置 = stop 后 start 重签发）
+ *    + 顺手连一次 /api/events 即关（503 = 16 连接帽满）
+ * ③ token 文件在场且 0600（**判活时只读禁 ensure 写**——status 的复活/
+ *    换发行为是诊断面自己制造不符态，doctor 钉死不做）
+ * ④ 会话库 readonly 可开 + user_version 披露（零锁竞争——readonly 不触
+ *    WAL 写路）
+ * ⑤ daemon.log 大小披露（信息项恒 ok）
+ * ⑥ 版本对齐：health.version vs 磁上 CLI（升级未重启的辨识面）
+ * ⑦ 端口占用态：**仅判死路**探测（pid 死而端口有监听者 → 报占用 + lsof
+ *    建议——另一进程顶号/双开竞窗）；僵尸态（pid 活 + HTTP 面无响应）入查
+ * @returns 进程退出码（全绿 0 / 任一项红 1 / 无 daemon.json 1）
+ */
+export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
+  const probe = deps.probe ?? defaultProcessProbe;
+  const dataRoot = deps.dataRoot ?? dataDir();
+  const probeHttp = deps.probeHttp ?? httpProbe;
+  const statusProbe = deps.probeStatus ?? probeStatus;
+  const portProbe = deps.portProbe ?? defaultPortProbe;
+  const findings: DoctorFinding[] = [];
+
+  /* ---- ① daemon.json + pid 判活 ---- */
+  const state = readDaemonState(dataRoot);
+  if (state === undefined) {
+    process.stdout.write('daemon 未运行（无 daemon.json）——`berry daemon start` 拉起后再体检。\n');
+    return 1;
+  }
+  const pidAlive = isDaemonAlive(state, probe);
+  findings.push({
+    ok: pidAlive,
+    text: pidAlive
+      ? `① 进程：daemon.json 在场、pid ${state.pid} 存活（processStartId 匹配）`
+      : `① 进程：daemon.json 残留但 pid ${state.pid} 已死（processStartId 不匹配或进程消失）——start 将先行清扫`,
+  });
+
+  /* ---- ② 服务面三探（health 公开 / 真握手 / events 即连即关） ---- */
+  const token = readAttachToken(dataRoot); // 只读——诊断面禁 ensure 写（规范钉死）
+  const bearer: Readonly<Record<string, string>> = token === undefined ? {} : { authorization: `Bearer ${token}` };
+  const healthRes = await probeHttp(`http://127.0.0.1:${state.port}/api/health`, {}, HANDSHAKE_TIMEOUT_MS);
+  const handshakeStatus = await statusProbe(
+    `http://127.0.0.1:${state.port}/api/sessions`,
+    bearer,
+    HANDSHAKE_TIMEOUT_MS,
+  );
+  // events 即连即关：200 = 流面正常；503 = 16 连接帽满（SPA/attach/监控尾堆积）
+  const eventsStatus = await statusProbe(`http://127.0.0.1:${state.port}/api/events`, bearer, HANDSHAKE_TIMEOUT_MS);
+  let health: { version?: unknown; degraded?: unknown } | undefined;
+  if (healthRes !== undefined && healthRes.status === 200) {
+    try {
+      health = JSON.parse(healthRes.body) as { version?: unknown; degraded?: unknown };
+    } catch {
+      health = undefined;
+    }
+  }
+  findings.push({
+    ok: healthRes !== undefined && healthRes.status === 200 && handshakeStatus === 200,
+    text: (() => {
+      const healthText = healthRes === undefined ? 'health 无响应' : `health HTTP ${healthRes.status}`;
+      const handshakeText =
+        handshakeStatus === 200
+          ? '真握手 200（token 符）'
+          : handshakeStatus === 401
+            ? '真握手 401——盘上 token 与运行中 daemon 持有不符（处置：`berry daemon stop` 后 start 重签发）'
+            : handshakeStatus === undefined
+              ? '真握手连接失败'
+              : `真握手 HTTP ${handshakeStatus}`;
+      const eventsText =
+        eventsStatus === 200
+          ? '事件流 200'
+          : eventsStatus === 503
+            ? '事件流 503——16 连接帽满（SPA/attach/监控尾堆积，关几个再试）'
+            : '事件流未达（服务面不健康）';
+      return `② 服务面：${healthText}、${handshakeText}、${eventsText}`;
+    })(),
+  });
+  // 僵尸态辨识（规范入查项）：pid 活 + HTTP 面无响应
+  if (pidAlive && healthRes === undefined && handshakeStatus === undefined) {
+    findings.push({
+      ok: false,
+      text:
+        `②′ 僵尸态嫌疑：pid ${state.pid} 活但 HTTP 面全无响应（卡死/D 状态/端口被抢）——` +
+        `\`berry daemon stop\` 后 start；仍复现查 lsof -i :${state.port}`,
+    });
+  }
+
+  /* ---- ③ token 文件面（在场 + 0600） ---- */
+  const tokenPath = daemonTokenPath(dataRoot);
+  try {
+    const mode = statSync(tokenPath).mode & 0o777;
+    findings.push({
+      ok: mode === 0o600,
+      text:
+        mode === 0o600
+          ? `③ token：在场且 0600（${tokenPath}）`
+          : `③ token：在场但权限 ${mode.toString(8)}（应 0600——chmod 600 ${tokenPath}）`,
+    });
+  } catch {
+    findings.push({
+      ok: false,
+      text: `③ token：缺失（${tokenPath}）——daemon 活而 token 被删（处置：stop 后 start 重签发）`,
+    });
+  }
+
+  /* ---- ④ 会话库（readonly 可开 + user_version） ---- */
+  const dbFile = deps.dbFile ?? dbPath();
+  try {
+    const db = new Database(dbFile, { readonly: true });
+    const userVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+    db.close();
+    findings.push({
+      ok: true,
+      text: `④ 会话库：readonly 可开（${dbFile}，user_version ${userVersion}）`,
+    });
+  } catch (err) {
+    findings.push({
+      ok: false,
+      text: `④ 会话库：readonly 开启失败（${dbFile}——${err instanceof Error ? err.message : String(err)}）`,
+    });
+  }
+
+  /* ---- ⑤ daemon.log 大小（信息项） ---- */
+  try {
+    const size = statSync(daemonLogPath(dataRoot)).size;
+    const human = size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MiB` : `${Math.round(size / 1024)} KiB`;
+    findings.push({ ok: true, text: `⑤ 日志：daemon.log ${human}（${daemonLogPath(dataRoot)}）` });
+  } catch {
+    findings.push({ ok: true, text: '⑤ 日志：daemon.log 缺席（未 boot 过——信息项不计红）' });
+  }
+
+  /* ---- ⑥ 版本对齐（health.version vs 磁上 CLI） ---- */
+  const runningVersion = typeof health?.version === 'string' ? health.version : undefined;
+  findings.push({
+    ok: runningVersion === undefined ? false : runningVersion === VERSION,
+    text:
+      runningVersion === undefined
+        ? '⑥ 版本：health 无应答不可比'
+        : runningVersion === VERSION
+          ? `⑥ 版本：对齐（运行 ${runningVersion} = 磁上 ${VERSION}）`
+          : `⑥ 版本：漂移（运行 ${runningVersion} ≠ 磁上 ${VERSION}——升级后未重启，stop 后 start 换新）`,
+  });
+
+  /* ---- ⑦ 端口占用态（仅判死路） ---- */
+  if (!pidAlive) {
+    const occupied = await portProbe(state.port);
+    if (occupied) {
+      findings.push({
+        ok: false,
+        text:
+          `⑦ 端口：daemon 判死但 ${state.port} 仍有监听者（另一进程顶号/双开竞窗）——` +
+          `lsof -i :${state.port} 认主后处置`,
+      });
+    } else {
+      findings.push({ ok: true, text: `⑦ 端口：${state.port} 无监听者（判死一致，无占用）` });
+    }
+  }
+
+  /* ---- 汇总披露 ---- */
+  for (const finding of findings) {
+    process.stdout.write(`${finding.ok ? '✓' : '✗'} ${finding.text}\n`);
+  }
+  const failed = findings.filter((finding) => !finding.ok).length;
+  process.stdout.write(failed === 0 ? 'doctor：七项全绿。\n' : `doctor：${failed} 项红（见 ✗ 行）。\n`);
+  return failed === 0 ? 0 : 1;
 }

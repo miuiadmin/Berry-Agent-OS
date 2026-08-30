@@ -30,6 +30,7 @@ import type { RuntimeOptions } from './assembly.js';
 import { collectBuiltinMigrations } from './builtins.js';
 import { dbPath } from './paths.js';
 import { installExitSignals } from './signals.js';
+import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 
 /** 取 run 内最后一条 assistant 消息的文本（text 块拼接；无则 undefined——run-main 同款） */
 function lastAssistantText(result: RunResult): string | undefined {
@@ -154,6 +155,23 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   /* ---- ⑤ boot 条目校验（跑前两道诚实错——都在抢占前，坏目标不烧抢占） ---- */
   const entry = runtime.drivers.focused();
   if (entry === undefined) {
+    // P3 拒绝完整 UX·触达面①（daemon 刀二，契约篇 §6.8）：会话投递路撞
+    // daemon 持有 = 最可能因（heldElsewhere 拒开 → 无聚焦条目落到这里）。
+    // 先判 held 再报未装载——两因指引完全不同：held 给 attach/submit 指引
+    //（非零退，OS 钟下一跳再撞同墙）；未装载才是装配问题。daemon.json 判活
+    // + 持有目标即成立（与 assembly heldElsewhere 同判据同源——tick 子进程
+    // 非 daemon，无 self-held 豁免题）
+    if (job.sessionId !== null) {
+      const heldState = readDaemonState();
+      if (heldState !== undefined && isDaemonAlive(heldState) && heldState.heldSessions.includes(job.sessionId)) {
+        process.stderr.write(
+          `该会话由 daemon 持有：${job.sessionId}（heldSessions 租约）——` +
+            '`berry attach` 接上应答，或经 `POST /api/sessions/:id/submit` 投递\n',
+        );
+        await runtime.shutdown();
+        return 1;
+      }
+    }
     // 可卸语义：chat 件未装载即无对话循环（overlay 禁用 builtin:chat 等）
     process.stderr.write('对话应用未装载（builtin:chat 被禁用）——tick 无对话循环可执行；/apps 查看装配。\n');
     await runtime.shutdown();

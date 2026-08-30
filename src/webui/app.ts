@@ -89,11 +89,13 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
   deps.addDisplay(channel.displaySink); // 无注销器——closed 旗标自守（channel.dispose 后 no-op）
   const detach = deps.ui().attach(channel.backend); // UiService 广播面接入（notify/status 推全部连接）
   // claim 桥挂真身（刀三行面晚绑桥第一用例；daemon 刀一拓宽：claim + 帽面
-  // 数据源 pendingCountBy 两键同挂——answerer 帽判据与竞速腿同一登记簿单源）；
+  // 数据源 pendingCountBy；刀二拓宽：attachedCount 在场 SSE 计数——answerer
+  // 武装判据数据源〔ask 时点活取 channel.size〕——三键同簿/同通道单源）；
   // 摘除器在 effect 回卷先调——holder 置空后竞速退回纯 TUI 腿
   const unmountClaim = deps.approvals.mountClaim({
     claim: approvals.claim,
     pendingCountBy: approvals.pendingCountBy,
+    attachedCount: () => channel.size,
   });
 
   // 回卷编舞（LIFO：本 effect 最先回卷）：先摘 claim 桥 → 登记簿卫生（未决

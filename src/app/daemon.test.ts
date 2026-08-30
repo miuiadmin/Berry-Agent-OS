@@ -41,7 +41,10 @@ import {
   type DaemonState,
   type ProcessProbe,
 } from './daemon-state.js';
-import { daemonCommandMain } from './daemon.js';
+import { daemonCommandMain, daemonDoctorMain, detectDaemonHandshake, probeStatus } from './daemon.js';
+import { VERSION } from './version.js';
+import Database from 'better-sqlite3';
+import { createServer } from 'node:http';
 
 /** 文件级数据目录钉扎（防任何缺省路径腿渗漏到真实 ~/.berry） */
 const dataRoot = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-unit-data-'));
@@ -408,6 +411,272 @@ describe('daemon 命令族：stop / status（真子进程 + 平台真探针）',
       }),
     ).toBe(0);
     expect(out.join('')).toContain('未达成');
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 裸 berry 检测（刀二——真握手为唯一正判；token 只读禁 ensure）          */
+/* ------------------------------------------------------------------ */
+
+describe('detectDaemonHandshake：daemon.json 在场才探 + 真握手正判', () => {
+  it('无 daemon.json / token 缺失 → undefined，且**不造 token 文件**（只读律）', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-detect-'));
+    const probeStatusCalls: string[] = [];
+    const spyProbe = async (url: string) => {
+      probeStatusCalls.push(url);
+      return 200;
+    };
+    // 无 daemon.json：零探测零副作用
+    expect(await detectDaemonHandshake({ dataRoot: root, probeStatus: spyProbe })).toBeUndefined();
+    expect(probeStatusCalls).toEqual([]);
+    // 有 state 无 token：401 面非活证——仍 undefined，且不 ensure 造文件
+    acquireDaemonState(root, makeState(111, 'det-a'), { startId: () => undefined });
+    expect(await detectDaemonHandshake({ dataRoot: root, probeStatus: spyProbe })).toBeUndefined();
+    expect(existsSync(daemonTokenPath(root))).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('真握手 200 = 唯一正判（带只读 token）；401 / 探败 = undefined（照常起进程内形态）', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-detect-'));
+    // 注意 makeState 第三参是 heldSessions 非 port——port 覆盖须整对象直造
+    acquireDaemonState(
+      root,
+      { pid: 222, processStartId: 'det-b', bootId: 'boot-b', port: 7777, heldSessions: [] },
+      { startId: () => undefined },
+    );
+    writeFileSync(daemonTokenPath(root), 'det-token');
+    let answer: number | undefined = 200;
+    const seen: { url: string; headers: Readonly<Record<string, string>> }[] = [];
+    const spyProbe = async (url: string, headers: Readonly<Record<string, string>>) => {
+      seen.push({ url, headers });
+      return answer;
+    };
+    expect(await detectDaemonHandshake({ dataRoot: root, probeStatus: spyProbe })).toEqual({ port: 7777 });
+    // Bearer 只读 token 真随行（正判判据 = 真握手非裸探活）
+    expect(seen[0]!.url).toBe('http://127.0.0.1:7777/api/sessions');
+    expect(seen[0]!.headers['authorization']).toBe('Bearer det-token');
+    answer = 401; // token 不符（轮换竞窗）——非活证
+    expect(await detectDaemonHandshake({ dataRoot: root, probeStatus: spyProbe })).toBeUndefined();
+    answer = undefined; // 连不上（stale/僵尸）——非活证
+    expect(await detectDaemonHandshake({ dataRoot: root, probeStatus: spyProbe })).toBeUndefined();
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* probeStatus 实测：应答头即回（SSE 等长流不挂到超时）                  */
+/* ------------------------------------------------------------------ */
+
+describe('probeStatus：headers-arrive-immediate 探针（daemon.ts 实码）', () => {
+  it('SSE 等长流端点（永不 end）→ 状态码即收、不断挂——远快于超时上帽', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(': ping\n\n'); // 写一帧即悬住——永不 end（等长流形态）
+      // 故意不 end 不 close：本探针必须靠自己收场
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const startedAt = Date.now();
+    const status = await probeStatus(`http://127.0.0.1:${port}/api/events`, {}, 2_000);
+    const elapsed = Date.now() - startedAt;
+    expect(status).toBe(200);
+    expect(elapsed).toBeLessThan(1_500); // 应答头即回——不是等 2s 超时兜底
+    // 连接已由探针自断（server 可干净关停）
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
+
+  it('端口无监听 → undefined（连接失败与探败同面）', async () => {
+    // 先占后放一个端口，保证关闭后瞬时无人监听
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    expect(await probeStatus(`http://127.0.0.1:${port}/api/events`, {}, 500)).toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* doctor 七项体检（刀二——依赖注入假面；盘上事实真造真断）              */
+/* ------------------------------------------------------------------ */
+
+describe('daemon doctor：七项体检', () => {
+  /** 体检前置盘面：活态 daemon.json + 0600 token + 真库文件（user_version 7） */
+  function healthyRoot(): {
+    root: string;
+    dbFile: string;
+    probe: ProcessProbe;
+  } {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-doc-'));
+    const dbFile = join(root, 'sessions.db');
+    const db = new Database(dbFile);
+    db.pragma('user_version = 7'); // 迁移链终点之外任意值——披露面断言锚
+    db.close();
+    ensureDaemonToken(root); // 0600 落盘（生产写方——doctor 只读）
+    acquireDaemonState(root, makeState(777, 'doc-alive'), { startId: () => undefined });
+    const probe: ProcessProbe = { startId: (pid) => (pid === 777 ? 'doc-alive' : undefined) };
+    return { root, dbFile, probe };
+  }
+
+  /** 体检常用假探针：health 200 带 version、握手与 events 可脚本化 */
+  function httpFaces(over: { healthBody?: string; handshake?: number; events?: number } = {}) {
+    const healthBody = over.healthBody ?? JSON.stringify({ version: VERSION });
+    return {
+      probeHttp: async () => ({ status: 200, body: healthBody }),
+      probeStatus: async (url: string) =>
+        url.includes('/api/sessions') ? (over.handshake ?? 200) : (over.events ?? 200),
+    };
+  }
+
+  it('无 daemon.json → 提示 + 1（不进七项）', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-doc-'));
+    const out = captureStdout();
+    expect(await daemonDoctorMain({ dataRoot: root })).toBe(1);
+    expect(out.join('')).toContain('daemon 未运行');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('全绿：①-⑥ 全过 + 判活路不探端口 → 0；token 文件零触碰（doctor 只读）', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    let portProbed = 0;
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces(),
+      portProbe: async () => {
+        portProbed += 1;
+        return false;
+      },
+    });
+    const text = out.join('');
+    expect(code).toBe(0);
+    expect(text).toContain('七项全绿');
+    expect(text).toContain('pid 777 存活');
+    expect(text).toContain('真握手 200');
+    expect(text).toContain('user_version 7'); // ④ 披露迁移位
+    expect(text).toContain(`对齐（运行 ${VERSION} = 磁上 ${VERSION}`); // ⑥ 对齐
+    expect(portProbed).toBe(0); // 判活路不探端口（⑦ 仅判死路）
+    expect(existsSync(daemonTokenPath(root))).toBe(true); // 零 ensure 重写
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('② 真握手 401 = token 不符专文案 + 处置指引（stop 后 start 重签发）', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({ handshake: 401 }),
+    });
+    expect(code).toBe(1);
+    const text = out.join('');
+    expect(text).toContain('401——盘上 token 与运行中 daemon 持有不符');
+    expect(text).toContain('重签发');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('②′ 僵尸态：pid 活但 HTTP 面全无响应 → 专项红行', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      probeHttp: async () => undefined, // health 无响应
+      probeStatus: async () => undefined, // 握手/事件流全连不上
+    });
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('僵尸态嫌疑');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('③ token 缺失 = 红且**不造文件**（判活时只读禁 ensure）；权限漂移 0644 = chmod 指引', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    rmSync(daemonTokenPath(root));
+    let out = captureStdout();
+    let code = await daemonDoctorMain({ dataRoot: root, dbFile, probe, ...httpFaces({ handshake: 401 }) });
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('③ token：缺失');
+    expect(existsSync(daemonTokenPath(root))).toBe(false); // doctor 不 ensure
+    // 权限漂移面
+    ensureDaemonToken(root);
+    chmodSync(daemonTokenPath(root), 0o644);
+    out = captureStdout();
+    code = await daemonDoctorMain({ dataRoot: root, dbFile, probe, ...httpFaces() });
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('chmod 600');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('④ 会话库开不出来（路径不存在 readonly 拒造）= 红行', async () => {
+    const { root, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile: join(root, 'no-such-dir', 'no-such.db'),
+      probe,
+      ...httpFaces(),
+    });
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('④ 会话库：readonly 开启失败');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('⑥ 版本漂移（升级未重启）：health.version ≠ 磁上 CLI = 红行带换新指引', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({ healthBody: JSON.stringify({ version: '0.0.0-old' }) }),
+    });
+    expect(code).toBe(1);
+    const text = out.join('');
+    expect(text).toContain('漂移（运行 0.0.0-old');
+    expect(text).toContain('stop 后 start 换新');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('⑦ 判死路：pid 死 + 端口有监听者 = 顶号红行；端口空闲 = 绿行一致收场', async () => {
+    const { root, dbFile } = healthyRoot();
+    const deadProbe: ProcessProbe = { startId: () => undefined }; // 持有者判死
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe: deadProbe,
+      ...httpFaces({ handshake: undefined }),
+      portProbe: async (port) => port === 7860,
+    });
+    expect(code).toBe(1);
+    const text = out.join('');
+    expect(text).toContain('pid 777 已死');
+    expect(text).toContain('7860 仍有监听者');
+    expect(text).toContain('lsof -i :7860');
+    // 端口空闲：⑦ 绿（① 仍红——两项红计数不影响本断言面）
+    out.length = 0;
+    await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe: deadProbe,
+      ...httpFaces({ handshake: undefined }),
+      portProbe: async () => false,
+    });
+    expect(out.join('')).toContain('⑦ 端口：7860 无监听者');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('⑤ 日志信息项：daemon.log 缺席恒绿不计红', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({ dataRoot: root, dbFile, probe, ...httpFaces() });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('⑤ 日志：daemon.log 缺席（未 boot 过——信息项不计红）');
     rmSync(root, { recursive: true, force: true });
   });
 });

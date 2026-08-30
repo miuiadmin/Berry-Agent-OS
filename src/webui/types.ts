@@ -120,16 +120,24 @@ export type WebuiApprovalClaim = (
 ) => Promise<WebuiApprovalDecision> | undefined;
 
 /**
- * claim 桥挂载物（daemon 刀一·per-ownership 帽拓宽）：原桥只挂 claim 函数，
- * 帽面数据源（pendingCountBy）在 webui 行 apply 内部不可达——拓宽为挂载对象，
- * answerer 的帽判据与竞速腿同一登记簿单源。行回卷整体摘除（两键同生死——
- * 它们本就是同一簿的两面）。
+ * claim 桥挂载物（daemon 刀一·per-ownership 帽拓宽；刀二·armed 计数键拓
+ * 宽）：原桥只挂 claim 函数，帽面数据源（pendingCountBy）与在场 SSE 连接
+ * 计数（attachedCount）在 webui 行 apply 内部不可达——拓宽为挂载对象，
+ * answerer 的帽判据/武装判据与竞速腿同一登记簿/通道单源。行回卷整体摘除
+ * （三键同生死——它们本就是同一簿与同一通道的两面）。
  */
 export interface WebuiApprovalMount {
   /** claim 面（answerer 竞速的 web 腿） */
   readonly claim: WebuiApprovalClaim;
   /** 未决数按 ownership 域分桶（帽面数据源——undefined 键 = 宿主桶） */
   readonly pendingCountBy: (ownerAppId: string | undefined) => number;
+  /**
+   * 在场 SSE 连接计数（daemon 刀二 armed 判据数据源，契约篇 §6.8 P2）：
+   * ask 时点活取——>0 = 有持 token 的活连接在场（attach 客户端/SPA/监控
+   * 尾），answerer 不武装（超时降发改由在场腿应答）；=0 = 无人在场才武装。
+   * 诚实边界：任何持 token 连接皆计入（含 curl 监控尾——armed 判据宁保守）。
+   */
+  readonly attachedCount: () => number;
 }
 
 /** GET /api/approvals 清单条目（未决审批——卡片恢复/侧栏角标面数据源） */

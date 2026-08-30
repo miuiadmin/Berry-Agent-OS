@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { request, type IncomingMessage } from 'node:http';
+import { get, request, type IncomingMessage } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import type {
   AssistantMessage,
@@ -660,4 +660,71 @@ describe('daemon 租约与 boot 回放重挂', () => {
     expect((await post(portA, `/api/approvals/${approvalId}/decide`, { decision: 'approve' }, authA)).status).toBe(200);
     await waitFor(() => allSettled(rtA), 8000, 'A run 结算');
   }, 60_000);
+});
+
+/* ---------------- 刀二裁决行为锁：F4 reload 禁面 + P2 armed（ask 时点判据） ---------------- */
+
+describe('daemon 刀二行为锁：F4 全量 reload 禁面 + armed SSE 在场不武装', () => {
+  it('F4：daemon 形态全量 /reload 拒（error 面两触达面同文案）；单区 --app 过闸放行', async () => {
+    const port = await grabPort();
+    const token = 'fs-token-f4';
+    const rt = await createRuntime({
+      ...daemonOpts({
+        dbPath: ':memory:',
+        streamFn: scriptedStream([textMessage('好')]),
+        approvalTimeoutMs: 300_000,
+      }),
+      daemon: { token, port },
+    });
+    runtimes.push(rt);
+    // 全量：daemon 形态拒绝（在飞会话活账撕裂防线；return 非抛——ReloadResult.error 面）
+    const full = await rt.reload();
+    expect(full.error).toContain('daemon 形态禁用全量 reload');
+    expect(full.error).toContain('--app');
+    // 单区：过 F4 闸（闸后报「不在册」而非禁面文案——放行物证；换装链照常可进）
+    const zone = await rt.reload('ghost-app');
+    expect(zone.error).toContain('不在册');
+    expect(zone.error).not.toContain('daemon 形态禁用');
+  }, 30_000);
+
+  it('armed：在场持 token SSE 连接 >0 → 超时腿不武装（过帽未决）；web decide 照常收场', async () => {
+    const port = await grabPort();
+    const token = 'fs-token-armed';
+    const rt = await createRuntime({
+      ...daemonOpts({
+        dbPath: ':memory:',
+        streamFn: scriptedStream([bashEscalation('armed'), textMessage('完')]),
+        approvalTimeoutMs: 400, // 测试注小值——3 帽等待窗内未决即「未武装」物证
+      }),
+      daemon: { token, port },
+    });
+    runtimes.push(rt);
+    const auth = { authorization: `Bearer ${token}` };
+
+    // 在场腿：一条持 token 的 SSE 连接（attach/SPA/监控尾同判——attachedCount 计入）
+    const sseReq = get({ host: '127.0.0.1', port, path: '/api/events', headers: auth }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', () => undefined); // 帧内容不断言（本测锁 armed 判据非帧面）——消费防背压
+    });
+    sseReq.on('error', () => undefined);
+
+    const sessions = (await getJson(port, '/api/sessions', auth)).body as { id: string; active: boolean }[];
+    const sid = sessions.find((s) => s.active)!.id;
+    expect((await post(port, `/api/sessions/${sid}/submit`, { text: '跑 pwd' }, auth)).status).toBe(202);
+    await waitFor(async () => (await approvalsOf(port, token)).length === 1, 8000, 'ask claim');
+    const approvalId = (await approvalsOf(port, token))[0]!.approvalId;
+
+    // 超时腿未武装：400ms 帽 + 3 帽等待仍无 decided（对照 P2 用例无在场腿到点即收）
+    await new Promise((r) => setTimeout(r, 1_200));
+    expect(decidedOf(rt, approvalId)).toBeUndefined();
+
+    // 在场腿应答收场：armed 只是「不设钟」不是「拒绝应答」——web decide 照常
+    expect((await post(port, `/api/approvals/${approvalId}/decide`, { decision: 'approve' }, auth)).status).toBe(200);
+    await waitFor(async () => decidedOf(rt, approvalId) !== undefined, 8000, 'decided 落账');
+    const row = decidedOf(rt, approvalId)!.data;
+    expect(row.decision).toBe('approve');
+    expect(row.via).toBe('web');
+    await waitFor(() => allSettled(rt), 8000, 'run 结算');
+    sseReq.destroy();
+  }, 30_000);
 });

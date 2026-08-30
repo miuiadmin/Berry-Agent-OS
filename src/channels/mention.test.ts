@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createMentionProvider, type SymbolsFace } from './mention.js';
+import { createFileSegmentProvider, createMentionProvider, type FilesFace, type SymbolsFace } from './mention.js';
 import type { AutocompleteProvider } from '@earendil-works/pi-tui/dist/autocomplete.js';
 
 /** 记录型内层桩：三面调用全记录；返回可脚本化的哨兵结果（区分「真转发了」与「碰巧同值」） */
@@ -175,5 +175,105 @@ describe('createMentionProvider 判据 (g)+(h)：face 档位与委托腿回归',
     const second = await provider.getSuggestions(['@a.ts#f'], 0, 7, OPTS);
     expect(second).toEqual({ items: [{ value: '/cmd', label: 'cmd' }], prefix: '/cm' }); // 阶段二：委托回归
     expect(calls.map((c) => c.face)).toEqual(['getSuggestions']);
+  });
+});
+
+/* ---------------- 文件段注入 provider（daemon 刀二：attach 通道契约） ---------------- */
+
+describe('createFileSegmentProvider：单段 @ token 拦截 + undefined 无弹层不回委托', () => {
+  /** 可脚本化 filesFor 桩：记录被查询前缀；返回值由用例切换 */
+  function scriptedFiles() {
+    const prefixes: string[] = [];
+    const state: { result: { readonly files: readonly string[] } | undefined } = {
+      result: { files: ['src/app.ts', 'src/api.ts'] },
+    };
+    const face: FilesFace = async (prefix) => {
+      prefixes.push(prefix);
+      return state.result;
+    };
+    return { face, prefixes, state };
+  }
+
+  it('判据命中：光标前 `@src/ap` 收尾 → filesFor(路径前缀) + 防御过滤 + 条目 value=`@文件`、prefix=全 token', async () => {
+    const { inner, calls } = recordingInner();
+    const { face, prefixes } = scriptedFiles();
+    const provider = createFileSegmentProvider(inner, face);
+    // line = '改 @src/ap'（光标 10 = 行尾）
+    const suggestions = await provider.getSuggestions(['改 @src/ap'], 0, 10, OPTS);
+    expect(prefixes).toEqual(['src/ap']); // '@' 剥离后进 face
+    expect(calls).toEqual([]); // inner 未被触（拦截成功）
+    expect(suggestions).toEqual({
+      items: [
+        { value: '@src/app.ts', label: 'src/app.ts' },
+        { value: '@src/api.ts', label: 'src/api.ts' },
+      ],
+      prefix: '@src/ap', // 整 token（代换从 '@' 起）
+    });
+  });
+
+  it('防御性前缀过滤：face 给全量也保正确（服务端已滤是常态，客户端滤是防御）', async () => {
+    const { inner } = recordingInner();
+    const face: FilesFace = async () => ({ files: ['src/app.ts', 'docs/x.md', 'xsrc.ts'] });
+    const provider = createFileSegmentProvider(inner, face);
+    const suggestions = await provider.getSuggestions(['@src'], 0, 4, OPTS);
+    expect(suggestions?.items).toEqual([{ value: '@src/app.ts', label: 'src/app.ts' }]); // 仅前缀真命中
+  });
+
+  it('face undefined = 无弹层**不回委托**（真源在远端——回委托是错工作区）', async () => {
+    const { inner, calls } = recordingInner();
+    const { face, state } = scriptedFiles();
+    state.result = undefined; // 404/连接失败
+    const provider = createFileSegmentProvider(inner, face);
+    const suggestions = await provider.getSuggestions(['@src'], 0, 4, OPTS);
+    expect(suggestions).toBeNull(); // null = 无弹层（非 undefined 委托哨兵）
+    expect(calls).toEqual([]); // 关键：inner 未被触——诚实收窄
+  });
+
+  it('空命中 = null；非文件段语境（含 # / 命令 / 无 @ / 两段 token）→ 委托 inner', async () => {
+    const { inner, calls } = recordingInner();
+    const face: FilesFace = async () => ({ files: [] }); // 空命中
+    const provider = createFileSegmentProvider(inner, face);
+    expect(await provider.getSuggestions(['@nope'], 0, 5, OPTS)).toBeNull();
+    // '#' 在场 = 符号段语境（两段式）→ 委托
+    expect(await provider.getSuggestions(['@a.ts#f'], 0, 7, OPTS)).toEqual({
+      items: [{ value: '/cmd', label: 'cmd' }],
+      prefix: '/cm',
+    });
+    // 行中 '@x@y'（'@' 紧跟非空白）不命中 → 委托；命令语境 → 委托
+    expect(await provider.getSuggestions(['/he'], 0, 3, OPTS)).toEqual({
+      items: [{ value: '/cmd', label: 'cmd' }],
+      prefix: '/cm',
+    });
+    expect(calls.map((c) => c.face)).toEqual(['getSuggestions', 'getSuggestions']); // 空命中的那次是拦截
+  });
+
+  it('applyCompletion：整 token 代换（@ 起点到光标）+ 尾空格 + 光标推进；非文件段语境 → 委托', () => {
+    const { inner, calls } = recordingInner();
+    const face: FilesFace = async () => ({ files: ['src/app.ts'] });
+    const provider = createFileSegmentProvider(inner, face);
+    // line = '改 @src/ap看看'（光标 9 = 紧随 'p'）：代换 '@src/ap' → '@src/app.ts '
+    const applied = provider.applyCompletion(
+      ['改 @src/ap看看'],
+      0,
+      9,
+      { value: '@src/app.ts', label: 'src/app.ts' },
+      '@src/ap',
+    );
+    expect(applied).toEqual({ lines: ['改 @src/app.ts 看看'], cursorLine: 0, cursorCol: 14 });
+    // 非文件段语境：apply 委托 inner（内层条目接受路）
+    const delegated = provider.applyCompletion(['/he'], 0, 3, { value: '/cmd', label: 'cmd' }, '/cm');
+    expect(delegated).toEqual({ lines: ['<inner-代换>'], cursorLine: 0, cursorCol: 0 });
+    expect(calls.map((c) => c.face)).toEqual(['applyCompletion']);
+  });
+
+  it('第三面 shouldTriggerFileCompletion 委托（内层缺面时透传缺席）', async () => {
+    const withFace = recordingInner();
+    const providerA = createFileSegmentProvider(withFace.inner, scriptedFiles().face);
+    expect(providerA.shouldTriggerFileCompletion?.(['x'], 0, 1)).toBe(true);
+    expect(withFace.calls.map((c) => c.face)).toEqual(['shouldTriggerFileCompletion']);
+    // 内层无此面 → 包装后仍无（不造面）
+    const bare = recordingInner({ shouldTriggerFileCompletion: undefined });
+    const providerB = createFileSegmentProvider(bare.inner, scriptedFiles().face);
+    expect(providerB.shouldTriggerFileCompletion).toBeUndefined();
   });
 });

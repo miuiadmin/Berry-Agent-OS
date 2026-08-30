@@ -1531,6 +1531,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 勿用 webAnswer 键存在性判（恒传恒真，真 headless 形态 confirm 缺席即
     // TypeError 击穿 fail-closed）
     webAnswerActive: () => opts.daemon !== undefined || approvalFace !== undefined,
+    // daemon 刀二·P2 armed 计数键（ask 时点活取）：在场 SSE 连接 >0 = 有持
+    // token 的活腿在场 → 超时降发不武装（人在场）；holder 空（webui 行未
+    // 开面/已回卷）= 0 计。与 webAnswerActive 同源同活取——无运行期状态机
+    webAttachedCount: () => (approvalFace !== undefined ? approvalFace.attachedCount() : 0),
     // daemon 刀一·per-ownership 未决审批帽（~10/owner）：帽满即该 owner 新 ask
     // 即时收场 'unavailable'——防烂应用卡海淹没合法审批。ownerAppId undefined =
     // 宿主桶（与登记簿 pendingCountBy 同判据；webui 行未开面 = face 缺席不闸）
@@ -2617,6 +2621,16 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 共链（换装窗互斥——单区 dispose 期间全量整袋回卷会撕裂活账）。 */
   let reloadChain: Promise<unknown> = Promise.resolve();
   const reload = (app?: string): Promise<ReloadResult> => {
+    // F4 执法（daemon 刀二，契约篇 §6.8）：daemon 形态**全量 /reload 禁用**——
+    // daemon 常驻 = heldSessions 在飞，全量整袋回卷撕裂活账（SSE 活尾/审批
+    // 竞速/在飞 run 全部悬空）；单区 /reload --app <id> 放行（分区装载序本就
+    // 支持单区换装不触他行）。执法点在闭包单点——TUI 命令与 admin apps_reload
+    // 两路汇流于此，return 非抛（ReloadResult.error 面——两触达面同文案）
+    if (opts.daemon !== undefined && app === undefined) {
+      return Promise.resolve({
+        error: 'daemon 形态禁用全量 reload（在飞会话活账会被整袋回卷撕裂）——用单区 /reload --app <应用id>',
+      });
+    }
     const run = reloadChain.then(() => reloadOnce(app));
     reloadChain = run.then(
       () => undefined,

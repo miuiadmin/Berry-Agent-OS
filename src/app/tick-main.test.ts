@@ -12,7 +12,8 @@
  * last_session_id + 后台道记账（K2-a 链尾回归锁）+ 不造空会话回归锁。
  */
 
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -22,6 +23,7 @@ import { JobsStore } from '../scheduler/store.js';
 import { createRuntime } from './assembly.js';
 import type { AppRuntime } from './assembly.js';
 import { collectBuiltinMigrations } from './builtins.js';
+import { daemonDirOf, daemonStatePath, defaultProcessProbe } from './daemon-state.js';
 import { tickMain } from './tick-main.js';
 
 /* ---------------- 测试基建（scheduler-plugin.test 同款） ---------------- */
@@ -351,5 +353,55 @@ describe('run --tick 编排：会话投递路（session_id 非空）', () => {
     }
     // 拒投不烧抢占（校验在 reserve 前）
     expect(jobRow(dbFile, 'dead')['last_run_at']).toBeNull();
+  });
+
+  it('P3 触达面①：目标会话被活 daemon 持有 → 1 + attach/submit 改道指引（拒投不烧抢占）', async () => {
+    const dbFile = makeDbFile();
+    const workspace = makeTempDir('app-tickmain-ws-');
+    // 先整机装配造真会话 S（同 cwd 最新 = boot 续接候选）
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    await runtime.shutdown();
+    runtimes.pop();
+    // 真活持有者子进程 + 其真实 processStartId（判活判据源——不猜 pid）
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+    // daemon.json 落默认数据根（readDaemonState/isDaemonAlive 与 assembly
+    // heldElsewhere 同走 dataDir()——APP_DATA_DIR 钉临时目录，测后还原）
+    const prevDataDir = process.env['APP_DATA_DIR'];
+    const dataRoot = makeTempDir('app-tickmain-data-');
+    mkdirSync(daemonDirOf(dataRoot), { recursive: true });
+    writeFileSync(
+      daemonStatePath(dataRoot),
+      JSON.stringify({
+        pid: holder.pid,
+        processStartId: defaultProcessProbe.startId(holder.pid!),
+        bootId: 'tick-held-boot',
+        port: 7860,
+        heldSessions: [target],
+      }),
+    );
+    process.env['APP_DATA_DIR'] = dataRoot;
+    seed(dbFile, (jobs) => {
+      jobs.add('held', '指令', Date.now() - 2 * 60_000, 'every@1m');
+      jobs.setSessionTarget('held', target, Date.now());
+    });
+    const err = captureStderr();
+    try {
+      // boot resume 撞 heldElsewhere 拒开（无聚焦条目）→ 先判 held 报改道指引
+      expect(await tickMain('held', { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(1);
+      expect(err.texts.join('')).toContain('berry attach');
+      expect(err.texts.join('')).toContain('submit');
+    } finally {
+      err.restore();
+      // 收尾三步：还原 env → 杀持有者 → 等尸收（防 pid 复用窗影响后续用例）
+      if (prevDataDir === undefined) delete process.env['APP_DATA_DIR'];
+      else process.env['APP_DATA_DIR'] = prevDataDir;
+      holder.kill('SIGKILL');
+      await new Promise<void>((resolve) => holder.once('exit', () => resolve()));
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+    // 拒投不烧抢占（held 校验在 reserve 前——OS 钟下一跳重撞同墙是预期态）
+    expect(jobRow(dbFile, 'held')['last_run_at']).toBeNull();
   });
 });

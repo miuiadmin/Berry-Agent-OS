@@ -21,6 +21,7 @@ import {
   TuiMainScreen,
   VStack,
   parseKey,
+  type AutocompleteProvider,
   type Component,
   type EditorTheme,
   type SlashCommand,
@@ -35,7 +36,7 @@ import { chainBackground } from '../context/chain.js';
 import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, renderAgentMessage } from './render.js';
 import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
-import { createMentionProvider, type SymbolsFace } from './mention.js';
+import { createFileSegmentProvider, createMentionProvider, type FilesFace, type SymbolsFace } from './mention.js';
 import { fdPathFor } from './fd-path.js';
 import type { CommandRegistry } from './commands.js';
 import type { ChannelHost, InputOptions, NotifyLevel, RendererDefinition, UiBackend, UiAskOptions } from './types.js';
@@ -91,6 +92,15 @@ export interface TuiChannelOptions {
    * apply 挂真身、回卷摘除——TUI 面随行回卷自然退化为委托腿）。
    */
   readonly symbolsFor?: SymbolsFace;
+  /**
+   * 工作区文件查询面（daemon 刀二 filesFor 注入键，契约篇 §6.8 通道契约前
+   * 置小改）：传入即在 autocomplete 武装时对单段 token（`@路径片段`——无
+   * '#'）外包文件段拦截 provider，@ 文件段补全真源切到注入 face（attach
+   * 客户端远程路由）；缺省走本地 fd 发现序不变（fdPath 键另有三态）。结构
+   * 类型注入——通道不 import webui/app（拓扑边零新增）；face undefined 结果
+   * = 无弹层不回委托（真源在远端，本地行走是错工作区）。
+   */
+  readonly filesFor?: FilesFace;
 }
 
 /** TUI 通道面（app 组合根持有） */
@@ -189,13 +199,16 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
     /** 重装 provider（构造时一次 + 每次 onChange；setAutocompleteProvider 为可选 API 防御调用）。
      *  刀 B：symbolsFor 在场时外包组合委托 provider（@-mention 符号段拦截；
      *  非两段 token 与 face 404 档原样委托内层三面）。
+     *  刀二：filesFor 在场时再外包文件段 provider（单段 `@路径` 拦截远程路由；
+     *  两段判据互斥——文件段排除 '#'、符号段必含 '#'——叠加次序无关）。
      *  fd 接线小刀：第三参 fdPath 每次重建重探（fdPathFor 三态决策——undefined
      *  走真发现序；失败不缓存给中途安装的可发现性，见 fd-path.ts 头注释） */
     const installAutocomplete = (): void => {
       const inner = new CombinedAutocompleteProvider(projectCommands(), opts.workspace!, fdPathFor(opts.fdPath));
-      editor.setAutocompleteProvider?.(
-        opts.symbolsFor !== undefined ? createMentionProvider(inner, opts.symbolsFor) : inner,
-      );
+      let provider: AutocompleteProvider = inner;
+      if (opts.filesFor !== undefined) provider = createFileSegmentProvider(provider, opts.filesFor);
+      if (opts.symbolsFor !== undefined) provider = createMentionProvider(provider, opts.symbolsFor);
+      editor.setAutocompleteProvider?.(provider);
     };
     installAutocomplete();
     opts.commands.onChange(installAutocomplete);

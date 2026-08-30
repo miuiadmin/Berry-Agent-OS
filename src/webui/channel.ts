@@ -178,7 +178,7 @@ export class WebuiChannel {
     this.connections.clear();
   }
 
-  /** 在线连接数（诊断/测试面） */
+  /** 在线连接数（daemon 刀二升格：armed 判据数据源——answerer ask 时点活取，>0 = 有在场腿不武装） */
   get size(): number {
     return this.connections.size;
   }

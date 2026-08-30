@@ -1,16 +1,23 @@
 /**
- * L4 channels — @-mention 符号段补全 provider（channels 批刀 B，契约篇 §6.8）。
+ * L4 channels — @-mention 组合委托 provider 双件（符号段 + 文件段注入键）。
  *
- * 组合委托 provider：输入 token 匹配两段式判据（`@path#sym`——与 webui
- * MentionInput 判据字面一致；宿主/前端互禁 import〔刀二 CR-9〕，物理上是
- * 双份字面量，**改动两处同笔**）时拦截，调注入的 symbolsFor face 拿该文件
- * documentSymbol 补全；不匹配时原样委托内层 provider（命令补全等既有行为
- * 零漂移）。
+ * 符号段（channels 批刀 B，契约篇 §6.8）：输入 token 匹配两段式判据
+ * （`@path#sym`——与 webui MentionInput 判据字面一致；宿主/前端互禁
+ * import〔刀二 CR-9〕，物理上是双份字面量，**改动两处同笔**）时拦截，
+ * 调注入的 symbolsFor face 拿该文件 documentSymbol 补全；不匹配时原样
+ * 委托内层 provider（命令补全等既有行为零漂移）。
  *
- * 诚实边界：face undefined（lsp 行未装/无路由/根外/熔断）= **委托腿回归**
- * （inner 重获全权——lsp 行回卷后 TUI 补全面回到未包装状态）；warming 档
- * （语言服务器预热中）→ 无弹层不提示（pi-tui 弹层无提示行机制，不为 TUI
- * 造新机制——SPA 有提示行、TUI 诚实收窄）。
+ * 文件段（daemon 刀二前置小改，契约篇 §6.8）：`filesFor` 注入键在场时拦截
+ * 单段 token（`@路径片段`——无 '#'），补全真源切到注入 face（attach 客户端
+ * 远程路由 GET /api/workspace/files）；缺省不包装，本地 fd 发现序不变。
+ * 两段 token 空间判据互斥（文件段排除 '#'、符号段必含 '#'），双包装叠加
+ * 次序无关。
+ *
+ * 诚实边界：符号段 face undefined（lsp 行未装/无路由/根外/熔断）= **委托腿
+ * 回归**（inner 重获全权）；warming 档（语言服务器预热中）→ 无弹层不提示。
+ * 文件段 face undefined = **无弹层不回委托**——face 在场即宣告「真源在
+ * 远端」，回委托等于拿 attach 本地 cwd 冒充 daemon 工作区（漂移风险），
+ * 404/连接失败一律诚实收窄。
  */
 
 import type {
@@ -120,6 +127,90 @@ export function createMentionProvider(inner: AutocompleteProvider, symbolsFor: S
     },
 
     // 第三面委托（内层未实现时省略——保持 undefined 语义由编辑器自理）
+    ...(inner.shouldTriggerFileCompletion !== undefined
+      ? {
+          shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
+            return inner.shouldTriggerFileCompletion!(lines, cursorLine, cursorCol);
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * 工作区文件查询面（daemon 刀二 filesFor 注入键）：prefix = 用户 `@` 后已
+ * 输入的路径片段（空串 = 全部），返回 root 相对路径候选（前缀序）；undefined
+ * = 无话可说（404/连接失败——无弹层，不回委托腿）。结构类型：channels 不
+ * import webui/app（拓扑边零新增），真身由 attach 客户端远程路由。
+ */
+export type FilesFace = (prefix: string) => Promise<{ readonly files: readonly string[] } | undefined>;
+
+/**
+ * 单段式 token 判据（文件段注入键）：光标前文本以 `@路径片段` 收尾（无 '#'——
+ * 有 '#' 即符号段语境，归符号段 provider）；'@' 须紧跟行首/空白。与两段式
+ * 判据互斥：FILE_TOKEN 排除 '#'、MENTION_TOKEN 必含 '#'。
+ */
+const FILE_SEGMENT_TOKEN = /(^|\s)@([^@\s#]*)$/;
+
+/** 从光标左侧文本解析单段 token（不匹配 = null——非文件段语境，走委托腿） */
+function fileTokenAt(
+  lines: readonly string[],
+  cursorLine: number,
+  cursorCol: number,
+): { readonly start: number; readonly pathPrefix: string; readonly token: string } | null {
+  const line = lines[cursorLine];
+  if (line === undefined) return null;
+  const m = FILE_SEGMENT_TOKEN.exec(line.slice(0, cursorCol));
+  if (m === null) return null;
+  const pathPrefix = m[2]!;
+  return { start: m.index + m[1]!.length, pathPrefix, token: `@${pathPrefix}` };
+}
+
+/**
+ * 组装 @-mention 文件段注入 provider（filesFor 在场时的外层包装）。
+ *
+ * @param inner 内层 provider（CombinedAutocompleteProvider 或符号段包装——
+ *   非单段 token 全部原样委托三面）
+ * @param filesFor 工作区文件查询面（undefined 结果 = 无弹层，不回委托——
+ *   face 在场即宣告真源在远端，本地 fd 发现序对 attach 是错工作区）
+ */
+export function createFileSegmentProvider(inner: AutocompleteProvider, filesFor: FilesFace): AutocompleteProvider {
+  return {
+    ...(inner.triggerCharacters !== undefined ? { triggerCharacters: inner.triggerCharacters } : {}),
+
+    async getSuggestions(lines, cursorLine, cursorCol, options): Promise<AutocompleteSuggestions | null> {
+      const token = fileTokenAt(lines, cursorLine, cursorCol);
+      if (token === null) {
+        // 非文件段语境（命令补全/两段符号 token）：原样委托
+        return inner.getSuggestions(lines, cursorLine, cursorCol, options);
+      }
+      const result = await filesFor(token.pathPrefix);
+      // face 无话可说（404/连接失败）：无弹层不提示——诚实收窄，不回委托腿
+      if (result === undefined) return null;
+      // 防御性前缀过滤（服务端已过滤；face 若给全量也保正确——空前缀 = 全量）
+      const items: AutocompleteItem[] = result.files
+        .filter((file) => file.startsWith(token.pathPrefix))
+        .map((file) => ({ value: `@${file}`, label: file }));
+      if (items.length === 0) return null; // 无命中 = 无弹层（与本地空走同形）
+      return { items, prefix: token.token };
+    },
+
+    applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+      const token = fileTokenAt(lines, cursorLine, cursorCol);
+      if (token === null) {
+        // 非文件段语境（内层条目的接受路）：原样委托
+        return inner.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+      }
+      // 整 token 代换（从 '@' 起点到光标）+ 尾空格——与符号段代换同形
+      const line = lines[cursorLine]!;
+      const replacement = `${item.value} `;
+      const next = line.slice(0, token.start) + replacement + line.slice(cursorCol);
+      const out = lines.slice();
+      out[cursorLine] = next;
+      return { lines: out, cursorLine, cursorCol: token.start + replacement.length };
+    },
+
+    // 第三面委托（斜杠命令语境 Tab 行为——漏转则漂移，与符号段同款）
     ...(inner.shouldTriggerFileCompletion !== undefined
       ? {
           shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {

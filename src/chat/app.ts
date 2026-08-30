@@ -538,6 +538,14 @@ export interface ChatAppDeps {
    */
   readonly webAnswerActive?: () => boolean;
   /**
+   * 在场 SSE 连接计数（daemon 刀二·P2 armed 判据数据源，契约篇 §6.8）：
+   * ask 时点活取——>0 = 有持 token 的活连接在场（attach/SPA/监控尾），超时
+   * 降发腿不武装（人在场）；=0 = 无人在场才武装 30min fail-closed。组合根
+   * 闭包 webui attachedCount（缺席 = 0 计）。chat 不 import webui——结构
+   * 函数键，与 webAnswerActive 同族。
+   */
+  readonly webAttachedCount?: () => number;
+  /**
    * per-ownership 未决审批帽判据（daemon 刀一：~10/owner 帽满即时收场
    * 'unavailable'——防无附着应答腿的形态被批量 ask 堆积未决卡）。组合根闭包
    * webui approvals 簿 pendingCountBy（缺席 = 无帽面恒 false）；ownerAppId
@@ -844,7 +852,7 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       if (targetId !== undefined && deps.heldElsewhere?.(targetId) === true) {
         deps.rootCtx.logger.warn(
           `会话 ${targetId} 被 daemon 持有（heldSessions 租约）——本进程拒开防双写者；` +
-            '改用该 daemon 的 submit 面（POST /api/sessions/:id/messages）投递',
+            '改用该 daemon 的 submit 面（POST /api/sessions/:id/submit）投递',
         );
         return undefined;
       }
@@ -1009,8 +1017,12 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
           // 超时腿（daemon 刀一·P2 A2 案）：无 TUI 腿（daemon 形态）armed——
           // 30min fail-closed，到点 resolve undefined 走 ask 的 unavailable 路
           //（零新词汇）；基准 = asked durable 事件时点（台账侧记，同源）；TUI
-          // 腿在场即人在场，不设钟。setTimeout 单调钟；到点前他腿胜出即 clear。
-          const armed = confirm === undefined;
+          // 腿在场即人在场，不设钟。刀二精化（P2 armed ask 时点判据）：
+          // **在场 SSE 连接 >0 也不武装**——有持 token 的活连接（attach/SPA/
+          // 监控尾）即人在场，超时降发对在场腿是干扰；=0 才武装（无人应答时
+          // 兜底收场）。判据 ask 时点活取（无运行期 arm/disarm 状态机）。
+          // setTimeout 单调钟；到点前他腿胜出即 clear。
+          const armed = confirm === undefined && (deps.webAttachedCount?.() ?? 0) === 0;
           const timeoutMs = deps.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
           // approvalId 服务 ask 织入恒在场（asked 载荷类型已非可选）——台账键
           const approvalId = req.approvalId as string;
