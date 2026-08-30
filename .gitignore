@@ -20,3 +20,5 @@ tmp-*.jpeg
 .claude/workflows/
 .omo/
 .DS_Store
+# 并发 session 研究产出（维度报告等——留盘不进库，2026-08-30）
+.research/
