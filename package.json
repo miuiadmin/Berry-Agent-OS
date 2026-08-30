@@ -3,21 +3,25 @@
   "version": "1.0.0-alpha.0",
   "description": "Berry Agent OS — 跑 AI 应用的个人操作系统（TypeScript + SQLite + pi-ai；文档见 docs/）",
   "type": "module",
-  "private": true,
   "bin": {
     "berry": "./dist/app/main.js"
   },
   "engines": {
     "node": ">=22.19"
   },
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsx src/app/main.ts",
     "dev:webui": "vite dev -c src/webui/client/vite.config.ts",
-    "build": "tsc && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs",
+    "build": "tsc -p tsconfig.build.json && vite build -c src/webui/client/vite.config.ts && node tools/copy-app-assets.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/webui/client",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:topology": "node tools/check-topology.mjs && node tools/check-events.mjs && node tools/check-tense.mjs",
+    "release": "node tools/release.mjs",
     "format": "prettier --write \"src/**/*.ts\" \"src/webui/client/**/*.tsx\" \"tools/**/*.mjs\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"src/webui/client/**/*.tsx\" \"tools/**/*.mjs\""
   },

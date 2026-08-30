@@ -1,0 +1,15 @@
+{
+  // 发布构建配置（技术栈篇 §8.3 契约 3，第四十批）：extends 主 tsconfig——
+  // typecheck（tsc --noEmit）仍走主配置，测试文件类型覆盖不丢；仅 build 链
+  // （npm run build）改用本配置，产出零测试/声明/映射产物的干净 dist/：
+  //   - exclude 覆盖父值（extends 数组不合并），故重列 src/webui/client
+  //     （SPA 源树走 vite 管线）并新增 src/**/*.test.ts（测试不入发布物）；
+  //   - declaration/sourceMap 关：包只作 CLI 装机物（bin 单入口、无 exports
+  //     面），668 个 .d.ts/.js.map 是死重。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "sourceMap": false
+  },
+  "exclude": ["src/webui/client", "src/**/*.test.ts"]
+}

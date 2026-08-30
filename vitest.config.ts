@@ -6,12 +6,13 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    // 金样回放轨（tools/golden/*.test.mjs）窄面收进常规测试：spawn 子进程跑
-    // smoke-replay（.mjs 在 tsc 视野外——tsconfig include 只有 src/，typecheck
-    // 不覆盖此处，回放双闸出口 process.exit 的语义靠子进程隔离完整保留）。
+    // 金样回放轨（tools/golden/*.test.mjs）与发布机器（tools/release.test.mjs）
+    // 窄面收进常规测试：.mjs 在 tsc 视野外——tsconfig include 只有 src/，typecheck
+    // 不覆盖此处；回放双闸出口 process.exit 的语义靠子进程隔离完整保留，发布
+    // 机器则以 io 注入缝全脚本化驱动（无真实 npm/git 调用）。
     // client 子树显式排除（CR-7）：SPA 测试若引入需 jsdom 环境，node 环境的
     // 常规轨不收（域不同不静默跑红）
-    include: ['src/**/*.test.ts', '!src/webui/client/**', 'tools/golden/*.test.mjs'],
+    include: ['src/**/*.test.ts', '!src/webui/client/**', 'tools/golden/*.test.mjs', 'tools/release.test.mjs'],
     environment: 'node',
   },
 });

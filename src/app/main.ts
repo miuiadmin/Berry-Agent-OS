@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * L5 app — CLI 入口（技术栈篇 §5：极简三命令，手写 argv——第九批拍板 #15
  * 不引 commander；解析本体见 parseArgs，本文件含帮助文案与入口分派）。
