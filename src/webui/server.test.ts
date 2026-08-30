@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createWebuiServer } from './server.js';
 import { WebuiChannel } from './channel.js';
+import { createPendingApprovals, type PendingApprovals } from './approvals.js';
 import type { WebuiAppDeps } from './types.js';
 
 /** 占位依赖束（各取数腿返回测试常量——路由面只管转发；override 供单用例改写单腿） */
@@ -32,6 +33,12 @@ function stubDeps(override?: Partial<WebuiAppDeps>): WebuiAppDeps {
         : id === 'closed'
           ? null
           : undefined,
+    approvals: {
+      // claim 挂载桩：apply 面测试占位（服务面只消费 registry 本体）
+      mountClaim: () => () => undefined,
+    },
+    workspaceRoot: () => '',
+    symbolsFor: () => Promise.resolve(undefined),
     ui: () => {
       throw new Error('服务面测试不触 ui 腿');
     },
@@ -79,10 +86,15 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
   let close: () => Promise<void>;
   let channel: WebuiChannel;
   let staticRoot: string;
+  /** 刀三 registry 真身（审批两端点消费——非 mock，全分支走真簿） */
+  let approvals: PendingApprovals;
+  /** 刀三文件补全行走锚（真文件树——前缀过滤面真 IO） */
+  let filesRoot: string;
 
   beforeAll(async () => {
     port = await grabPort();
     channel = new WebuiChannel();
+    approvals = createPendingApprovals();
     staticRoot = mkdtempSync(join(tmpdir(), 'webui-static-'));
     writeFileSync(join(staticRoot, 'index.html'), '<html>index</html>');
     writeFileSync(join(staticRoot, 'app.js'), 'console.log(1)');
@@ -90,11 +102,30 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     writeFileSync(join(staticRoot, 'sub', 'page.html'), '<html>sub</html>');
     // 穿越靶：根外邻文件（reachable 只应 404 永不触达）
     writeFileSync(join(staticRoot, '..', 'secret-outside.txt'), 'SECRET');
+    // 文件补全真树：前缀命中 / 不命中 / gitignore 剪枝三分面
+    filesRoot = mkdtempSync(join(tmpdir(), 'webui-files-'));
+    writeFileSync(join(filesRoot, 'alpha.ts'), 'export const a = 1;');
+    writeFileSync(join(filesRoot, 'beta.md'), '# b');
+    mkdirSync(join(filesRoot, 'src'));
+    writeFileSync(join(filesRoot, 'src', 'gamma.ts'), 'export {}');
+    writeFileSync(join(filesRoot, '.gitignore'), 'skip-dir/\n');
+    mkdirSync(join(filesRoot, 'skip-dir'));
+    writeFileSync(join(filesRoot, 'skip-dir', 'hidden.ts'), 'export {}');
     ({ server, close } = createWebuiServer({
       port,
       host: '127.0.0.1',
-      deps: stubDeps(),
+      deps: stubDeps({
+        workspaceRoot: () => filesRoot,
+        // 符号补全三档桩：real.ts 有符号 / warm.ts 预热中 / 其余 404 降级
+        symbolsFor: (path) =>
+          path === 'real.ts'
+            ? Promise.resolve({ symbols: [{ name: 'answer', kind: 12, line: 42 }] })
+            : path === 'warm.ts'
+              ? Promise.resolve({ symbols: [], warming: true })
+              : Promise.resolve(undefined),
+      }),
       channel,
+      approvals,
       staticRoot,
       version: 'test-1.0.0',
     }));
@@ -105,6 +136,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     channel.dispose();
     await close();
     rmSync(staticRoot, { recursive: true, force: true });
+    rmSync(filesRoot, { recursive: true, force: true });
   });
 
   it('/api/health → 200 {ok, version}', async () => {
@@ -157,6 +189,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       host: '127.0.0.1',
       deps,
       channel: chan2,
+      approvals: createPendingApprovals(),
       staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
       version: 't',
     });
@@ -177,6 +210,150 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     expect(empty.status).toBe(200);
     expect(JSON.parse(empty.text)).toEqual({ todo: null });
     const miss = await send(port, { method: 'GET', path: '/api/sessions/ghost/todo' });
+    expect(miss.status).toBe(404);
+  });
+
+  /* ---------------- 刀三：审批两端点 + 工作区补全两端点 ---------------- */
+
+  it('GET /api/approvals：镜像注册后吐未决；decide 后即过滤（恢复面数据源）', async () => {
+    // 真 registry 镜像注册（asked 信封形状与总线载荷同构）
+    approvals.onMirror({
+      sessionId: 'sess-x',
+      event: { type: 'approval/asked', data: { approvalId: 'srv-l1', summary: '写文件' } },
+    });
+    const r = await send(port, { method: 'GET', path: '/api/approvals' });
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toEqual({
+      approvals: [{ approvalId: 'srv-l1', sessionId: 'sess-x', summary: '写文件' }],
+    });
+    // 标决（镜像路）后 GET 不再吐（已决过滤——刷新/晚连接恢复面只见未决）
+    approvals.onMirror({
+      sessionId: 'sess-x',
+      event: { type: 'approval/decided', data: { approvalId: 'srv-l1', decision: 'approve' } },
+    });
+    const after = await send(port, { method: 'GET', path: '/api/approvals' });
+    expect(JSON.parse(after.text)).toEqual({ approvals: [] });
+  });
+
+  it('POST /api/approvals/:id/decide：claim 后应答 200 accepted；二次 superseded；unknown 404', async () => {
+    // claim 挂 web 腿（answerer 竞速时点——enriched 载荷）
+    const promise = approvals.claim('srv-d1', {
+      summary: 'bash 升权',
+      reason: 'workspace-write',
+      ownership: { appId: 'coder', sessionId: 'sess-x' },
+    });
+    expect(promise).toBeInstanceOf(Promise);
+    const ok = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-d1/decide',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approve' }),
+    });
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(ok.text)).toEqual({ accepted: true });
+    await expect(promise).resolves.toBe('approve'); // web 腿真消费值
+    // 二次 decide（幂等回执——不二写）
+    const again = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-d1/decide',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'reject' }),
+    });
+    expect(again.status).toBe(200);
+    expect(JSON.parse(again.text)).toEqual({ accepted: false, reason: 'superseded' });
+    // 槽从未存在
+    const ghost = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/nope/decide',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'approve' }),
+    });
+    expect(ghost.status).toBe(404);
+  });
+
+  it('POST decide 请求体校验：坏 JSON 400 / 缺 decision 400 / 闭集外 400（含 cancel）', async () => {
+    approvals.onMirror({
+      sessionId: 's',
+      event: { type: 'approval/asked', data: { approvalId: 'srv-v1', summary: '校验靶' } },
+    });
+    const badJson = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-v1/decide',
+      headers: { 'content-type': 'application/json' },
+      body: 'not-json',
+    });
+    expect(badJson.status).toBe(400);
+    const missing = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-v1/decide',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(missing.status).toBe(400);
+    // 闭集外：cancel 无 web 产出面（spec 钉死）——与任意串同 400
+    for (const decision of ['cancel', 'yes', '']) {
+      const out = await send(port, {
+        method: 'POST',
+        path: '/api/approvals/srv-v1/decide',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      });
+      expect(out.status).toBe(400);
+    }
+    // 校验失败不落决（条目仍可后续应答）
+    const ok = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-v1/decide',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'reject' }),
+    });
+    expect(JSON.parse(ok.text)).toEqual({ accepted: true });
+  });
+
+  it('POST decide always：无 suggestedEntry 恒 400；草案在场 200', async () => {
+    // 无草案条目（bash 升权形态——safety 不携带 suggestedEntry）
+    approvals.claim('srv-al1', { summary: '无草案' });
+    const no = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-al1/decide',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'always' }),
+    });
+    expect(no.status).toBe(400);
+    // 有草案条目（carve-out 写审批形态）
+    approvals.claim('srv-al2', {
+      summary: '有草案',
+      suggestedEntry: { tool: 'write_file', pattern: '/tmp/a.txt' },
+    });
+    const yes = await send(port, {
+      method: 'POST',
+      path: '/api/approvals/srv-al2/decide',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'always' }),
+    });
+    expect(yes.status).toBe(200);
+    expect(JSON.parse(yes.text)).toEqual({ accepted: true });
+  });
+
+  it('GET /api/workspace/files?prefix=：真树前缀过滤 + gitignore 剪枝 + 空前缀全量', async () => {
+    const all = await send(port, { method: 'GET', path: '/api/workspace/files' });
+    expect(all.status).toBe(200);
+    // .gitignore 自身不被自身样式命中（真 git 语义同款）——在列
+    expect(JSON.parse(all.text)).toEqual({ files: ['.gitignore', 'alpha.ts', 'beta.md', 'src', 'src/gamma.ts'] });
+    const scoped = await send(port, { method: 'GET', path: '/api/workspace/files?prefix=al' });
+    expect(JSON.parse(scoped.text)).toEqual({ files: ['alpha.ts'] });
+    const dir = await send(port, { method: 'GET', path: '/api/workspace/files?prefix=src' });
+    expect(JSON.parse(dir.text)).toEqual({ files: ['src', 'src/gamma.ts'] });
+  });
+
+  it('GET /api/workspace/symbols?path=：三档（有符号 200 / warming 200 / 无路由 404）', async () => {
+    const real = await send(port, { method: 'GET', path: '/api/workspace/symbols?path=real.ts' });
+    expect(real.status).toBe(200);
+    expect(JSON.parse(real.text)).toEqual({ symbols: [{ name: 'answer', kind: 12, line: 42 }] });
+    const warm = await send(port, { method: 'GET', path: '/api/workspace/symbols?path=warm.ts' });
+    expect(warm.status).toBe(200);
+    expect(JSON.parse(warm.text)).toEqual({ symbols: [], warming: true });
+    const miss = await send(port, { method: 'GET', path: '/api/workspace/symbols?path=ghost.ts' });
     expect(miss.status).toBe(404);
   });
 
@@ -342,6 +519,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       host: '127.0.0.1',
       deps: stubDeps(),
       channel: chan2,
+      approvals: createPendingApprovals(),
       staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
       version: 't',
     });

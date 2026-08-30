@@ -21,12 +21,27 @@ import { stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { Type, Value } from '../contracts/typebox.js';
 import type { WebuiChannel } from './channel.js';
-import { WEBUI_BODY_LIMIT_BYTES, type WebuiAppDeps, type WebuiSseEnvelope } from './types.js';
+import type { PendingApprovals } from './approvals.js';
+import { listWorkspaceFiles } from './files.js';
+import {
+  WEBUI_BODY_LIMIT_BYTES,
+  type WebuiAppDeps,
+  type WebuiApprovalDecision,
+  type WebuiSseEnvelope,
+} from './types.js';
 
-/** submit 请求体 schema（typebox schema-first 校验——端点面唯一 POST 载荷） */
+/** submit 请求体 schema（typebox schema-first 校验——端点面 POST 载荷两件之一） */
 const SUBMIT_BODY_SCHEMA = Type.Object({
   text: Type.String({ minLength: 1, description: '用户消息文本（空串拒绝——与 TUI 输入面同语义）' }),
 });
+
+/** decide 请求体 schema（刀三：decision 闭集值域校验在路由层——400 同码同因） */
+const DECIDE_BODY_SCHEMA = Type.Object({
+  decision: Type.String({ minLength: 1, description: "应答闭集 'approve' | 'reject' | 'always'" }),
+});
+
+/** decide 闭集（web 应答面——TUI 四值减 cancel：cancel 无 web 产出面，spec 钉死） */
+const DECIDE_CLOSED_SET: readonly WebuiApprovalDecision[] = ['approve', 'reject', 'always'];
 
 /** 静态文件扩展名 → Content-Type 小表（SPA 资产面；未命中走八进制流兜底） */
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
@@ -62,6 +77,8 @@ export interface WebuiServerOptions {
   readonly deps: WebuiAppDeps;
   /** SSE 连接扇出面（GET /api/events 升级产物归它管理） */
   readonly channel: WebuiChannel;
+  /** pending 审批登记簿（刀三两端点消费面——app.ts apply 期构造传入） */
+  readonly approvals: PendingApprovals;
   /** SPA 静态资产根（dist/webui 目录本体——tsc 宿主侧产物与 vite 产物同目录共存） */
   readonly staticRoot: string;
   /** /api/health 报告的宿主版本号（app/version.ts 同源） */
@@ -215,6 +232,80 @@ async function route(req: IncomingMessage, res: ServerResponse, url: URL, opts: 
       return;
     }
     sendJson(res, 202, { ok: true });
+    return;
+  }
+  // 未决审批清单（刀三 = GET /api/approvals）：registry 已决过滤产物——刷新/
+  // 晚连接的卡片恢复面与侧栏角标面数据源
+  if (pathname === '/api/approvals' && req.method === 'GET') {
+    sendJson(res, 200, { approvals: opts.approvals.list() });
+    return;
+  }
+  // 审批应答（刀三 = POST /api/approvals/:id/decide）：值域校验 400 / always
+  // 无草案 400 / 已决 superseded / 槽不存在 404（已决保留使竞窗不存在——
+  // 竞窗闭合论证见 approvals.ts 模块头）
+  const decide = /^\/api\/approvals\/([^/]+)\/decide$/.exec(pathname);
+  if (decide !== null && req.method === 'POST') {
+    const body = await readBody(req);
+    if (body === undefined) {
+      sendJson(res, 413, { error: 'body too large' });
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body === '' ? '{}' : body);
+    } catch {
+      sendJson(res, 400, { error: 'invalid json' });
+      return;
+    }
+    if (!Value.Check(DECIDE_BODY_SCHEMA, parsed)) {
+      sendJson(res, 400, { error: 'invalid body' });
+      return;
+    }
+    const decision = (parsed as { decision: string }).decision;
+    if (!DECIDE_CLOSED_SET.includes(decision as WebuiApprovalDecision)) {
+      sendJson(res, 400, { error: 'invalid decision' }); // 闭集外（含 cancel——无 web 产出面）
+      return;
+    }
+    const approvalId = decodeSegment(decide[1]!);
+    const entry = opts.approvals.pending(approvalId);
+    if (entry === undefined) {
+      // 未决条目不在：槽从未存在或已决——decide 内部再判一次（TOCTOU 无害：
+      // pending→decide 间条目只可能由未决转已决，decide 自回 superseded）
+      const judged = opts.approvals.decide(approvalId, decision as WebuiApprovalDecision);
+      if (judged === undefined) sendJson(res, 404, { error: 'approval not found' });
+      else sendJson(res, 200, { accepted: false, reason: 'superseded' });
+      return;
+    }
+    if (decision === 'always' && entry.suggestedEntry === undefined) {
+      sendJson(res, 400, { error: 'always requires suggested entry' }); // 三态面只在草案在场时呈现——无草案恒 400
+      return;
+    }
+    const judged = opts.approvals.decide(approvalId, decision as WebuiApprovalDecision);
+    if (judged === undefined) {
+      sendJson(res, 404, { error: 'approval not found' }); // pending→decide 竞速转已决外的不存在（防御位）
+      return;
+    }
+    sendJson(res, 200, judged.accepted ? { accepted: true } : { accepted: false, reason: judged.reason });
+    return;
+  }
+  // 工作区文件补全（刀三 @-mention 第一段 = GET /api/workspace/files?prefix=）：
+  // 行走锚 = deps.workspaceRoot 原始 workspace（canonical 差集 v1 不入补全面）
+  if (pathname === '/api/workspace/files' && req.method === 'GET') {
+    const prefix = url.searchParams.get('prefix') ?? '';
+    const files = await listWorkspaceFiles(opts.deps.workspaceRoot(), prefix);
+    sendJson(res, 200, { files });
+    return;
+  }
+  // 工作区符号补全（刀三 @-mention 第二段 = GET /api/workspace/symbols?path=）：
+  // 晚绑桥缺席腿（无路由/熔断/文件不在盘）= 404；warming 档如实透传（前端提示）
+  if (pathname === '/api/workspace/symbols' && req.method === 'GET') {
+    const rawPath = url.searchParams.get('path') ?? '';
+    const query = await opts.deps.symbolsFor(rawPath);
+    if (query === undefined) {
+      sendJson(res, 404, { error: 'no symbols' });
+      return;
+    }
+    sendJson(res, 200, query);
     return;
   }
   if (pathname === '/api/events' && req.method === 'GET') {

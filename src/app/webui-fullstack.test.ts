@@ -12,7 +12,7 @@
 
 import { createServer, get, request, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -42,6 +42,23 @@ const textMessage = (text: string): AssistantMessage => ({
   content: [{ type: 'text', text }],
   usage: NO_USAGE,
   stopReason: 'stop',
+  timestamp: 1,
+});
+
+/** 带升权参数的 bash toolCall（read-only 档下触发审批 ask——chat.test S5 同款；
+ * 管道命令剥不出词干 = 无草案，干净命令 = 携带 {tool:'bash',pattern:词干} 草案） */
+const bashEscalation = (justification: string, command = 'pwd'): AssistantMessage => ({
+  role: 'assistant',
+  content: [
+    {
+      type: 'toolCall',
+      id: `call-bash-${justification}`,
+      name: 'bash',
+      arguments: { command, sandbox_permissions: 'workspace-write', justification },
+    },
+  ],
+  usage: NO_USAGE,
+  stopReason: 'toolUse',
   timestamp: 1,
 });
 
@@ -157,6 +174,16 @@ async function waitForFrame(
     await new Promise((r) => setTimeout(r, 25));
   }
   throw new Error(`SSE 帧等待超时（已收 ${frames.length} 帧）：${JSON.stringify(frames.slice(0, 10))}`);
+}
+
+/** 等待谓词成立（25ms 轮询；谓词可异步——SSE 帧计数与 GET 轮询共用底座） */
+async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 5000, what = '条件'): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await pred()) return;
+    if (Date.now() > deadline) throw new Error(`等待超时：${what}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
 }
 
 /** JSON GET 助手（fetch 全自动收尾——非 SSE 面用 fetch 即可） */
@@ -368,6 +395,176 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       rmSync(dir, { recursive: true, force: true });
       rmSync(wsA, { recursive: true, force: true });
       rmSync(wsB, { recursive: true, force: true });
+    }
+  });
+
+  it('刀三全栈：审批 web 应答竞速（web 胜单写 / TUI 胜 superseded）+ completions + rewind 帧', async () => {
+    const port = await grabPort();
+    const workspace = makeWorkspace();
+    // 补全第一段靶文件（workspace 真树——files 端点行走锚）
+    writeFileSync(join(workspace, 'hello.ts'), 'export const hi = 1;\n');
+    // 脚本序：[0] bash 升权·无草案轮（管道命令剥不出词干——web 胜）→ [1] 收尾
+    // → [2] bash 升权·带草案轮（pwd 干净词干——TUI 胜）→ [3] 收尾
+    const runtime = await createRuntime({
+      dbPath: ':memory:',
+      workspace,
+      interactive: true, // confirm 注入开关（驱动 answerer 接线前提——chat.test 同款）
+      approvalPolicy: 'ask',
+      sandboxMode: 'read-only', // bash 升权必触发 ask
+      webuiPort: port,
+      streamFn: scriptedStream([
+        bashEscalation('web 腿升权理由', 'echo hi | wc'), // 管道 → 无词干草案（always 400 靶）
+        textMessage('web 胜收尾'),
+        bashEscalation('tui 腿升权理由'), // 缺省 pwd → 草案 {tool:'bash',pattern:'pwd'}
+        textMessage('tui 胜收尾'),
+      ]),
+    });
+    runtimes.push(runtime);
+    const base = `http://127.0.0.1:${port}`;
+
+    // 可控 confirm（TUI 腿闸门）：悬置 deferred = TUI 腿悬置——web 腿独走竞速
+    const confirmGates: Array<(answer: boolean) => void> = [];
+    runtime.ui.attach({
+      id: 'test-confirm',
+      notify: () => {},
+      setStatus: () => {},
+      confirm: (message: string) =>
+        new Promise<boolean>((resolve) => {
+          void message;
+          confirmGates.push(resolve);
+        }),
+    });
+
+    /** session 族某型帧计数（两轮 turn/end 逐轮递增——waitForFrame 的 some 语义分不开轮次） */
+    const countFrames = (type: string): number =>
+      frames.filter((f) => f.kind === 'session' && (f.payload as { type?: string })?.type === type).length;
+
+    /** GET 未决清单（轮询体——claim 与 SSE 帧到序存在竞窗，轮询等真值） */
+    const pendingList = () =>
+      getJson(`${base}/api/approvals`).then(
+        (r) =>
+          (
+            r.body as {
+              approvals: {
+                approvalId: string;
+                summary: string;
+                ownership?: { sessionId?: string; appId?: string };
+                suggestedEntry?: { tool: string; pattern: string };
+              }[];
+            }
+          ).approvals,
+      );
+
+    const frames: WebuiSseEnvelope[] = [];
+    const sse = openSse(port, frames);
+    try {
+      const list = (await getJson(`${base}/api/sessions`)).body as { id: string; active: boolean }[];
+      const bootId = list.find((s) => s.active)!.id;
+      const session = runtime.session!; // boot 会话活引用（durable 断言锚——本用例无 /new）
+      expect(session.header.sessionId).toBe(bootId);
+
+      /* ---- Leg 1：web 腿胜（TUI confirm 悬置 → 竞速由 decide 裁决） ---- */
+      expect((await postSubmit(port, bootId, '跑升权一')).status).toBe(202);
+      await waitFor(() => countFrames('approval/asked') >= 1);
+      // asked 帧载荷（SPA 卡面数据源）：approvalId + 升权 summary（reason 不入
+      // durable 载荷——弹窗全文在 answerer 面，账面只记摘要）
+      const asked1 = frames
+        .map((f) => f.payload as { type?: string; data?: { approvalId?: string; summary?: string } })
+        .find((p) => p.type === 'approval/asked');
+      expect(asked1?.data?.summary).toContain('沙箱升权');
+      const id1 = asked1?.data?.approvalId ?? '';
+      expect(id1).toMatch(/.+/);
+      // GET 补见：条目在册 + claim 富化键（answerer 时点已 claim——ownership 落
+      // boot 会话；claim 与帧到序有竞窗 → 轮询等富化真值）
+      await waitFor(async () => {
+        const entries = await pendingList();
+        return entries.length === 1 && entries[0]?.approvalId === id1 && entries[0]?.ownership?.sessionId === bootId;
+      });
+      const pending1 = await pendingList();
+      expect(pending1[0]?.ownership?.appId).toBe('coder'); // 驱动归属闭包（S5 织入面全栈透传）
+      expect(pending1[0]?.suggestedEntry).toBeUndefined(); // 管道命令剥不出词干 → 无草案
+      // 值域执法三连：闭集外（cancel）400 / always 无草案 400 / unknown id 404
+      expect(
+        (await postJson(port, `/api/approvals/${id1}/decide`, JSON.stringify({ decision: 'cancel' }))).status,
+      ).toBe(400);
+      expect(
+        (await postJson(port, `/api/approvals/${id1}/decide`, JSON.stringify({ decision: 'always' }))).status,
+      ).toBe(400);
+      expect(
+        (await postJson(port, '/api/approvals/ghost-id/decide', JSON.stringify({ decision: 'approve' }))).status,
+      ).toBe(404);
+      // web 应答 = 竞速裁决：200 accepted → bash 真跑（echo|wc）→ 收尾轮 → turn/end
+      const approved = await postJson(port, `/api/approvals/${id1}/decide`, JSON.stringify({ decision: 'approve' }));
+      expect(approved).toEqual({ status: 200, body: { accepted: true } });
+      await waitFor(() => countFrames('turn/end') >= 1);
+      // durable：decided 恰一条且值 approve（单写漏斗——decided 由审批服务在竞速
+      // 胜者产出时落一次，TUI 腿晚归值被 race 丢弃不二写）
+      const decided1 = session.events.filter((e) => e.type === 'approval/decided');
+      expect(decided1).toHaveLength(1);
+      expect((decided1[0]!.data as { decision: string }).decision).toBe('approve');
+      // GET 已决过滤：清单回空
+      expect(await pendingList()).toEqual([]);
+      confirmGates[0]?.(false); // 败腿卫生结算（race 已收——值无人消费不落账）
+
+      /* ---- Leg 2：TUI 腿胜（confirm 立即允许 → web 迟到应答回 superseded） ---- */
+      expect((await postSubmit(port, bootId, '跑升权二')).status).toBe(202);
+      await waitFor(() => countFrames('approval/asked') >= 2);
+      const id2 =
+        frames
+          .map((f) => f.payload as { type?: string; data?: { approvalId?: string } })
+          .filter((p) => p.type === 'approval/asked')
+          .map((p) => p.data?.approvalId)
+          .find((aid) => aid !== id1) ?? '';
+      expect(id2).toMatch(/.+/);
+      // 草案透传：pwd 干净词干 → GET 条目带 {tool:'bash',pattern:'pwd'}（「始终
+      // 允许」选项数据源——claim 富化在 ask 派发时点已完成）
+      await waitFor(async () => {
+        const hit = (await pendingList()).find((e) => e.approvalId === id2);
+        return (
+          hit?.suggestedEntry !== undefined &&
+          hit.suggestedEntry.tool === 'bash' &&
+          hit.suggestedEntry.pattern === 'pwd'
+        );
+      });
+      // TUI 立即允许：第二扇 confirm 闸门开（answerer 弹窗在桩）→ true
+      await waitFor(() => confirmGates.length >= 2);
+      confirmGates[1]!(true);
+      await waitFor(() => countFrames('turn/end') >= 2);
+      // web 迟到应答 = superseded 幂等回执（不二写）
+      const late = await postJson(port, `/api/approvals/${id2}/decide`, JSON.stringify({ decision: 'reject' }));
+      expect(late).toEqual({ status: 200, body: { accepted: false, reason: 'superseded' } });
+      // durable：两审批对（asked×2 / decided×2），第二条值 approve（TUI 腿值）
+      const decided2 = session.events.filter((e) => e.type === 'approval/decided');
+      expect(decided2).toHaveLength(2);
+      expect((decided2[1]!.data as { decision: string }).decision).toBe('approve');
+
+      /* ---- completions 两端点 ---- */
+      // files：workspace 真树前缀过滤（@-mention 第一段全栈）
+      const files = await getJson(`${base}/api/workspace/files?prefix=hel`);
+      expect(files).toEqual({ status: 200, body: { files: ['hello.ts'] } });
+      // symbols：无路由档（无扩展名路径 = routeFor undefined）→ 404 降级
+      //（有路由档会 fire-and-forget 起真语言服务器——测试不触，warming 档单测已锁）
+      expect(await getJson(`${base}/api/workspace/symbols?path=README`)).toEqual({
+        status: 404,
+        body: { error: 'no symbols' },
+      });
+
+      /* ---- checkpoint 转录行帧（SSE 镜像透传 + 不进投影） ---- */
+      session.append('checkpoint/rewind', { id: 'rewind-aaaa-bbbb', newSessionId: 'new-sess-cccc-dddd', files: 2 });
+      await waitFor(() => countFrames('checkpoint/rewind') >= 1);
+      // 投影不含 rewind（surface 词不进 deriveMessages——SPA 拉腿只见消息族）
+      const projected = (
+        (await getJson(`${base}/api/sessions/${bootId}/messages`)).body as { messages: { type: string }[] }
+      ).messages;
+      expect(projected.some((m) => m.type === 'checkpoint/rewind')).toBe(false);
+      // 帧载荷三键透传（SPA 转录行数据源）
+      const rewindFrame = frames
+        .map((f) => f.payload as { type?: string; data?: { id?: string; newSessionId?: string; files?: number } })
+        .find((p) => p.type === 'checkpoint/rewind');
+      expect(rewindFrame?.data).toEqual({ id: 'rewind-aaaa-bbbb', newSessionId: 'new-sess-cccc-dddd', files: 2 });
+    } finally {
+      sse.close();
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 

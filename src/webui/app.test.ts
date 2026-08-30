@@ -51,9 +51,22 @@ function stubDeps(): {
     sessionsFor: number;
     openSession: number;
     todoFor: number;
+    mountClaim: number;
+    /** claim 桥摘除器执行次数（刀三回卷序断言——LIFO 首位） */
+    unmountClaim: number;
   };
 } {
-  const calls = { addDisplay: 0, ui: 0, submitTo: 0, historyFor: 0, sessionsFor: 0, openSession: 0, todoFor: 0 };
+  const calls = {
+    addDisplay: 0,
+    ui: 0,
+    submitTo: 0,
+    historyFor: 0,
+    sessionsFor: 0,
+    openSession: 0,
+    todoFor: 0,
+    mountClaim: 0,
+    unmountClaim: 0,
+  };
   const deps: WebuiAppDeps = {
     addDisplay: () => {
       calls.addDisplay += 1;
@@ -78,6 +91,17 @@ function stubDeps(): {
       calls.todoFor += 1;
       return undefined;
     },
+    approvals: {
+      // claim 桥挂载桩：挂载/摘除各记一次（刀三晚绑桥回卷证据面）
+      mountClaim: () => {
+        calls.mountClaim += 1;
+        return () => {
+          calls.unmountClaim += 1;
+        };
+      },
+    },
+    workspaceRoot: () => '',
+    symbolsFor: () => Promise.resolve(undefined),
     ui: () => {
       calls.ui += 1;
       // UiService 桩面：只 attach 一键（成功路径断言目标）——unknown 中转免全键
@@ -154,10 +178,13 @@ describe('webui 官方件 apply', () => {
     const { deps, calls } = stubDeps();
     const app = createWebuiApp(deps);
     await app.apply(ctx, { enabled: true, port });
-    // 接线三面：session/event 订阅 + display 入列 + ui attach
+    // 接线四面（刀三 +1）：session/event 订阅 + display 入列 + ui attach +
+    // claim 桥挂真身（answerer 竞速的 web 腿自此可达）
     expect(subscriptionCount()).toBe(1);
     expect(calls.addDisplay).toBe(1);
     expect(calls.ui).toBe(1);
+    expect(calls.mountClaim).toBe(1);
+    expect(calls.unmountClaim).toBe(0);
     // 真监听应答（Host 头按白名单三值拼装——客户端自动带 127.0.0.1:port）
     const health = await new Promise<{ status: number; text: string }>((resolve, reject) => {
       const req = httpRequest({ host: '127.0.0.1', port, method: 'GET', path: '/api/health' }, (res) => {
@@ -170,8 +197,10 @@ describe('webui 官方件 apply', () => {
     });
     expect(health.status).toBe(200);
     expect(JSON.parse(health.text)).toEqual({ ok: true, version: 'test' });
-    // 回卷编舞（detach → channel.dispose → server.close）：端口随即不可达
+    // 回卷编舞（LIFO 首位摘 claim 桥 → settleAll → detach → channel.dispose →
+    // server.close）：端口随即不可达
     runDisposers();
+    expect(calls.unmountClaim).toBe(1); // 晚绑桥回卷证据面：摘除器恰执行一次
     await new Promise((r) => setTimeout(r, 100));
     const closed = await new Promise<boolean>((resolve) => {
       const req = httpRequest({ host: '127.0.0.1', port, method: 'GET', path: '/api/health' }, () => resolve(false));

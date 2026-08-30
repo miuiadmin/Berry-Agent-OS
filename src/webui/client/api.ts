@@ -6,7 +6,14 @@
  * 形态经 vite dev server 的 /api 代理转发到宿主端口。
  */
 
-import type { ProjectedMessage, SessionSummary, TodoItem } from './types';
+import type {
+  ApprovalDecision,
+  PendingApproval,
+  ProjectedMessage,
+  SessionSummary,
+  SymbolQuery,
+  TodoItem,
+} from './types';
 
 /** 服务面非 2xx 应答（status 原样透出——404/503 等在 UI 有区分文案） */
 export class ApiError extends Error {
@@ -67,4 +74,43 @@ export async function openSession(): Promise<SessionSummary> {
   });
   if (!res.ok) throw new ApiError(res.status, `open session → ${res.status}`);
   return (await res.json()) as SessionSummary;
+}
+
+/** 未决审批清单（刀三——刷新/晚连接的卡片与角标恢复面） */
+export function fetchApprovals(): Promise<PendingApproval[]> {
+  return getJson<{ approvals: PendingApproval[] }>('/api/approvals').then((body) => body.approvals);
+}
+
+/**
+ * 审批应答（刀三——只 resolve registry resolver，durable 写在服务端单写漏斗）。
+ * @returns accepted:false = 已被 TUI 先决（superseded 幂等回执，不二次落账）
+ */
+export async function decideApproval(id: string, decision: ApprovalDecision): Promise<{ accepted: boolean }> {
+  const res = await fetch(`/api/approvals/${encodeURIComponent(id)}/decide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision }),
+  });
+  if (!res.ok) throw new ApiError(res.status, `decide → ${res.status}`);
+  return (await res.json()) as { accepted: boolean };
+}
+
+/** 工作区文件补全（刀三 @-mention 第一段——前缀匹配 ≤50 条，目录也可补全） */
+export function fetchFiles(prefix: string): Promise<string[]> {
+  return getJson<{ files: string[] }>(`/api/workspace/files?prefix=${encodeURIComponent(prefix)}`).then(
+    (body) => body.files,
+  );
+}
+
+/**
+ * 工作区符号补全（刀三 @-mention 第二段——LSP documentSymbol 投影）。
+ * @returns null = 404 降级档（无路由/根外/熔断/文件不在盘——SPA 只留文件段）
+ */
+export async function fetchSymbols(path: string): Promise<SymbolQuery | null> {
+  try {
+    return await getJson<SymbolQuery>(`/api/workspace/symbols?path=${encodeURIComponent(path)}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }

@@ -18,6 +18,7 @@
 import { AppError, WEBUI_BIND_FORBIDDEN, WEBUI_PORT_IN_USE } from '../contracts/errors.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import { WebuiChannel } from './channel.js';
+import { createPendingApprovals } from './approvals.js';
 import { createWebuiServer, isLoopbackBindValue } from './server.js';
 import {
   DEFAULT_WEBUI_HOST,
@@ -58,27 +59,42 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
     );
   }
 
-  // 通道半边（连接扇出 + 广播后端）+ 服务半边（微路由——只造不启）
+  // 通道半边（连接扇出 + 广播后端）+ pending 审批登记簿（刀三：镜像注册/claim
+  // 桥/两端点消费面——随行生命周期）+ 服务半边（微路由——只造不启）
   const channel = new WebuiChannel();
+  const approvals = createPendingApprovals();
   const { server, close } = createWebuiServer({
     port,
     host,
     deps,
     channel,
+    approvals,
     // 静态根 = 本件目录（位置事实而非声明：tsc 直出形态下 dist/webui 即模块
     // 目录，vite 产物同目录共存；dev 形态缺 index.html = 静态 404 诊断态）
     staticRoot: import.meta.dirname,
     version: deps.version,
   });
 
-  // 三族信封源接线（先接线后监听——boot 完成时三族源已全部就位）
-  ctx.on('session/event', channel.onSessionEvent); // 行作用域自动退订（/reload 回卷）
+  // 三族信封源接线（先接线后监听——boot 完成时三族源已全部就位）。session 总
+  // 线镜像两消费同 handler：广播进 SSE 扇出 + pending 登记簿镜像入列（刀三：
+  // asked 注册 / decided 标决——ask 落账先于 waterfall 派发的同步序保证 claim
+  // 时条目恒在场）
+  ctx.on('session/event', (payload: unknown) => {
+    channel.onSessionEvent(payload);
+    approvals.onMirror(payload);
+  }); // 行作用域自动退订（/reload 回卷）
   deps.addDisplay(channel.displaySink); // 无注销器——closed 旗标自守（channel.dispose 后 no-op）
   const detach = deps.ui().attach(channel.backend); // UiService 广播面接入（notify/status 推全部连接）
+  // claim 桥挂真身（刀三行面晚绑桥第一用例）：answerer 竞速的 web 腿自此可达；
+  // 摘除器在 effect 回卷先调——holder 置空后竞速退回纯 TUI 腿
+  const unmountClaim = deps.approvals.mountClaim(approvals.claim);
 
-  // 回卷编舞（LIFO：本 effect 最先回卷）：先摘广播后端 → 废弃通道（毁全部
-  // SSE 连接 + closed 旗标）→ server.close 收尾（连接已毁，close 即回）
+  // 回卷编舞（LIFO：本 effect 最先回卷）：先摘 claim 桥 → 登记簿卫生（未决
+  // 不结算——见 approvals.ts 模块头）→ 摘广播后端 → 废弃通道（毁全部 SSE
+  // 连接 + closed 旗标）→ server.close 收尾（连接已毁，close 即回）
   ctx.effect(() => () => {
+    unmountClaim();
+    approvals.settleAll();
     detach();
     channel.dispose();
     void close();

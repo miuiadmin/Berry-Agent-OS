@@ -40,4 +40,4 @@ export type {
 
 /* 官方件 builtin:lsp */
 export { createLspApp, CIRCUIT_BREAK_THRESHOLD, POST_WAIT_CAP_MS } from './app.js';
-export type { LspAppDeps, ChildRegistryLike } from './app.js';
+export type { LspAppDeps, ChildRegistryLike, LspSymbolsFace, LspSymbolCompletion } from './app.js';

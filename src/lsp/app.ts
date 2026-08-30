@@ -89,7 +89,35 @@ export interface LspAppDeps {
   readonly resolvePath: (path: string) => string;
   /** JSON-RPC 桥核工厂（mcp JsonRpcConnection 经组合根注入——帧无关复用） */
   readonly newConnection: JsonRpcConnectionFactory;
+  /**
+   * 符号补全挂载键（刀三 @-mention 第二段，契约篇 §6.8 行面晚绑桥第二用例）：
+   * webui 件 symbolsFor 的真身挂点——组合根持晚绑 holder，本件 apply 挂真身/
+   * 回卷摘除。缺省不传（诊断装配/旧装配形态）= 无补全面（webui 404）。
+   */
+  readonly mountSymbols?: (face: LspSymbolsFace) => Disposer;
 }
+
+/**
+ * 符号补全条目（webui WebuiSymbolItem 结构子集——两件各持词面，组合根接线点
+ * 编译期即验；WebuiTodoItem 同款先例）。lsp 结构上不见 webui。
+ */
+export interface LspSymbolCompletion {
+  /** 符号名（插入锚） */
+  readonly name: string;
+  /** 定义行号（1-based；协议缺失时省） */
+  readonly line?: number;
+  /** LSP SymbolKind 数值（协议直传） */
+  readonly kind?: number;
+}
+
+/**
+ * 符号查询面（工作区相对路径 → 补全条目）：undefined = 无路由/熔断/文件不在
+ * 盘（HTTP 404 档）；warming 档 = 未活实例 fire-and-forget 预热中。didOpen
+ * 副作用注记（文档同步盘真相——首查即 open，与 lsp_symbols 工具同款前置）。
+ */
+export type LspSymbolsFace = (
+  path: string,
+) => Promise<{ readonly symbols: readonly LspSymbolCompletion[]; readonly warming?: boolean } | undefined>;
 
 /** 同 server 3 连败熔断阈值（connect 失败或活过即死都计败；连上归零） */
 export const CIRCUIT_BREAK_THRESHOLD = 3;
@@ -496,6 +524,60 @@ async function applyLspApp(
       for (const dispose of disposers) dispose();
     };
   });
+
+  /* ---------------- 符号补全面（刀三 @-mention 第二段——webui 晚绑桥真身） ---------------- */
+
+  /**
+   * 符号查询面（webui 补全端点消费——与 lsp_symbols 工具同源管线但两档差异：
+   * 未活实例**不等待拉起**：fire-and-forget 预热 + warming 档〔补全弹窗等不了
+   * 握手秒级；工具面有耐心两档的分工——契约篇 §6.7 两档等待〕）。didOpen
+   * 副作用与工具面同款（syncDocument 盘真相——首查即 open）。
+   */
+  const symbolsFace: LspSymbolsFace = async (path) => {
+    const abs = deps.resolvePath(path);
+    const route = routeFor(abs);
+    if (route === undefined || !inRoot(abs)) return undefined; // 无路由/根外 = 404 档
+    const state = instances.get(route.name);
+    if (state?.dead !== undefined) return undefined; // 熔断 = 404 档（复位走 /reload）
+    const conn = liveOf(route.name);
+    if (conn === undefined) {
+      preheat(route.name); // 起中/未活——后台拉起，本次 warming
+      return { symbols: [], warming: true };
+    }
+    try {
+      const version = await conn.syncDocument(abs);
+      if (version === undefined) return undefined; // 文件不在盘 = 404 档
+      const raw = (await conn.request(
+        'textDocument/documentSymbol',
+        { textDocument: { uri: uriOf(abs) } },
+        requestTimeoutOf(route.config),
+      )) as
+        | readonly (
+            LspDocumentSymbol | { name: string; kind?: number; location?: { range: { start: { line: number } } } }
+          )[]
+        | null;
+      if (raw === null) return { symbols: [] };
+      // 两种协议形态统一展开（与 lsp_symbols 工具同式——DocumentSymbol 有 range/
+      // SymbolInformation 有 location）；children v1 不递归
+      const symbols = raw.map((sym) => {
+        const startLine = (sym as LspDocumentSymbol).range?.start.line ?? sym.location?.range.start.line;
+        return {
+          name: sym.name,
+          ...(startLine !== undefined ? { line: startLine + 1 } : {}), // 0-based → 1-based
+          ...(typeof sym.kind === 'number' ? { kind: sym.kind } : {}),
+        };
+      });
+      return { symbols };
+    } catch {
+      return { symbols: [] }; // 请求超时等 IO 面——空集降级（补全面非工具面，不升错误）
+    }
+  };
+
+  // deps.mountSymbols 缺席（诊断装配/旧装配形态）= 不挂面，webui 侧 404 兜底
+  if (deps.mountSymbols !== undefined) {
+    const disposeFace = deps.mountSymbols(symbolsFace);
+    ctx.effect(() => disposeFace); // 行回卷摘桥——此后 webui 补全面 404（桥 holder 置空）
+  }
 
   /* ---------------- 诊断注入（post 行就地改写 + 守门行传导；contained 铁律） ---------------- */
 

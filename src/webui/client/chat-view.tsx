@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { LiveState, LiveTool } from './app';
 import { previewOf } from './app';
-import type { ProjectedMessage, ProjectedToolCall } from './types';
+import type { ApprovalDecision, PendingApproval, ProjectedMessage, ProjectedToolCall, RewindRow } from './types';
 import { textOf } from './text';
 
 /** 工具结果投影行（derive toolResult 型的窄用面） */
@@ -31,10 +31,16 @@ type RenderItem =
 interface ChatViewProps {
   readonly messages: readonly ProjectedMessage[];
   readonly live: LiveState | null;
+  /** inline 审批卡（SSE asked 帧驱动——当前查看会话的未决审批） */
+  readonly approvals: readonly PendingApproval[];
+  /** checkpoint 转录行（SSE rewind 帧驱动——surface 词不进投影，活体 only） */
+  readonly rewinds: readonly RewindRow[];
+  /** 审批应答上抛（App 决定 POST + 终结呈现） */
+  readonly onDecide: (approvalId: string, decision: ApprovalDecision) => void;
 }
 
 /** 对话主视图（自动滚底——投影或活体变化即贴底） */
-export function ChatView({ messages, live }: ChatViewProps) {
+export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   /** 投影 → 渲染项：user 行 / assistant 文本 / 工具卡（toolResult 回并配对卡） */
@@ -136,9 +142,89 @@ export function ChatView({ messages, live }: ChatViewProps) {
             />
           );
         })}
-        {items.length === 0 && <div className="py-10 text-center text-sm text-neutral-600">空会话——发送第一条消息</div>}
+        {/* checkpoint 转录行（SSE rewind 帧活体 only——surface 词不进投影，刷新消失是 parity 诚实） */}
+        {rewinds.map((r) => (
+          <div
+            key={`rw-${r.id}`}
+            className="self-center rounded-full border border-neutral-800 bg-neutral-900/60 px-3 py-1 text-xs text-neutral-400"
+          >
+            ⏪ 已回退至 {r.id.slice(0, 8)}… —— 新会话 {r.newSessionId.slice(0, 8)}…（{r.files} 个文件已恢复）
+          </div>
+        ))}
+        {/* inline 审批卡（帧序堆叠——approvalId 为卡键，待决置底最醒目） */}
+        {approvals.map((a) => (
+          <ApprovalCard key={a.approvalId} approval={a} onDecide={onDecide} />
+        ))}
+        {items.length === 0 && approvals.length === 0 && (
+          <div className="py-10 text-center text-sm text-neutral-600">空会话——发送第一条消息</div>
+        )}
       </div>
     </main>
+  );
+}
+
+/** 审批卡属性 */
+interface ApprovalCardProps {
+  readonly approval: PendingApproval;
+  readonly onDecide: (approvalId: string, decision: ApprovalDecision) => void;
+}
+
+/**
+ * inline 审批卡（刀三 web 应答面）：归属会话着色（var(--accent) 左条——随查看
+ * 会话清单 accent 单源）+ 三态按钮（always 仅 suggestedEntry 草案在场呈现）。
+ * 点击 = POST decide；卡终结真值走 approval/decided SSE 帧（App 侧摘卡）。
+ */
+function ApprovalCard({ approval, onDecide }: ApprovalCardProps) {
+  const draft = approval.suggestedEntry;
+  return (
+    <div
+      className="self-start w-full rounded-lg border border-amber-700/50 bg-amber-950/20 p-3 text-sm"
+      style={{ boxShadow: 'inset 2px 0 0 var(--accent)' }}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="font-medium text-amber-400">待审批</span>
+        {approval.ownership?.appId !== undefined && (
+          <span className="text-xs text-neutral-400" title="发起应用">
+            {approval.ownership.appId}
+          </span>
+        )}
+        {approval.priority === 'background' && <span className="text-xs text-neutral-500">后台优先级</span>}
+      </div>
+      <div className="mt-1 text-neutral-100">{approval.summary}</div>
+      {approval.reason !== undefined && approval.reason !== '' && (
+        <div className="mt-1 text-xs text-neutral-400">{approval.reason}</div>
+      )}
+      {draft !== undefined && (
+        <div className="mt-1 font-mono text-xs text-neutral-500" title="「始终允许」将写入的 allowlist 草案">
+          {draft.tool} · {draft.pattern}
+        </div>
+      )}
+      <div className="mt-2 flex gap-2">
+        <button
+          className="rounded-md px-3 py-1 text-xs font-medium text-neutral-950"
+          style={{ background: 'var(--accent)' }}
+          onClick={() => onDecide(approval.approvalId, 'approve')}
+        >
+          允许
+        </button>
+        <button
+          className="rounded-md border border-neutral-600 px-3 py-1 text-xs text-neutral-200 hover:border-red-500 hover:text-red-400"
+          onClick={() => onDecide(approval.approvalId, 'reject')}
+        >
+          拒绝
+        </button>
+        {/* 三态按钮：草案在场才呈现（服务端无草案 always 恒 400——前端同律收钮） */}
+        {draft !== undefined && (
+          <button
+            className="rounded-md border border-neutral-600 px-3 py-1 text-xs text-neutral-400 hover:border-amber-500 hover:text-amber-400"
+            title="始终允许（写入 allowlist 草案）"
+            onClick={() => onDecide(approval.approvalId, 'always')}
+          >
+            始终允许
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

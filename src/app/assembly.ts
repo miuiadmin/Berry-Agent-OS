@@ -84,7 +84,7 @@ import { defaultInstructionLocations, discoverInstructions, renderInstructions }
 import type { InstructionLocation } from './instructions.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
-import type { WebuiSessionSummary } from '../webui/index.js';
+import type { WebuiApprovalClaim, WebuiSessionSummary } from '../webui/index.js';
 import { VERSION } from './version.js';
 import type { Session } from '../session/session.js';
 import {
@@ -159,7 +159,7 @@ import { join, isAbsolute, resolve } from 'node:path';
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
 import { ChildRegistry, JsonRpcConnection } from '../mcp/index.js';
 // lsp 件闭包类型（组合根缝——lsp 结构上不见 mcp/exec/safety，全经本缝注入）
-import type { LspAppDeps, LspServerConfig, SpawnedProcess } from '../lsp/index.js';
+import type { LspAppDeps, LspServerConfig, LspSymbolsFace, SpawnedProcess } from '../lsp/index.js';
 import { dataDir, dbPath, ensureDbDir } from './paths.js';
 import { setProjectAliases, canonicalWorkspaceRoot } from '../context/workspace.js';
 import type { CompositionReloadedPayload } from '../contracts/events.js';
@@ -1359,6 +1359,33 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
    * 挂 ⑥b 原位不动） */
   const sandbox = createSandboxService();
+  /* ---- 刀三行面晚绑桥两枚（契约篇 §6.8 刀三条——answerer 竞速 web 腿 + @-mention
+   * 符号面）：holder 在此声明（answerer/lspDeps/webuiDeps 三消费点闭包读它），
+   * 真身由对应行 apply 期挂入、行回卷摘除——未开面/已卸载 = undefined = 各消费
+   * 面原语义（纯 TUI 腿 / 补全 404）。防线注记：本桥只走 answerer 竞速注入，
+   * 不在任何 Ring 2 行内注册 approval/answer handler（链序抢答禁行——spec 钉死） */
+  let approvalClaim: WebuiApprovalClaim | undefined;
+  let symbolsFace: LspSymbolsFace | undefined;
+  /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用） */
+  const webClaimOf = (req: ApprovalRequest): Promise<'approve' | 'reject' | 'always'> | undefined =>
+    req.approvalId === undefined
+      ? undefined // 无 id 载荷（防御位——ask 恒织入 randomUUID）
+      : approvalClaim?.(req.approvalId, {
+          summary: req.summary,
+          ...(req.reason !== undefined ? { reason: req.reason } : {}),
+          ...(req.suggestedEntry !== undefined
+            ? { suggestedEntry: { tool: req.suggestedEntry.tool, pattern: req.suggestedEntry.pattern } }
+            : {}),
+          ...(req.ownership !== undefined
+            ? {
+                ownership: {
+                  sessionId: req.ownership.sessionId,
+                  ...(req.ownership.appId !== undefined ? { appId: req.ownership.appId } : {}),
+                },
+              }
+            : {}),
+          ...(req.priority !== undefined ? { priority: req.priority } : {}),
+        });
   /* 应用组件缺场表（组装批默认应用键——声明提前 + 合成后赋值）：appGaps 是
    * resolveApps 闭包的活读源（per-open 活取），必须在 chatBundle 构造前声明、
    * 在组合树合成后（装载 ⑨ 之前）赋真值——boot 首驱动 open 发生于 chat 件
@@ -1418,6 +1445,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     ...(opts.interactive
       ? { select: (m: string, c: readonly { value: string; label: string }[]) => ui.select(m, c) }
       : {}),
+    // 刀三 web 应答腿（claim 竞速注入）：answerer 竞速的 web 腿——闭包读晚绑
+    // holder（webui 行未开面/已卸载 = undefined = 纯 TUI 腿原语义）。恒传：
+    // answerer 仅 confirm 在场注册，headless 形态本键闲置零触达
+    webAnswer: webClaimOf,
     persistAllowlist: (draft) => allowlist.add(draft),
     sandbox,
     allowlist: () => allowlist.entries,
@@ -1454,7 +1485,17 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 覆盖 TMPDIR 钉 <dataDir>/lsp/tmp（external carrier 同款先例）+ 登记簿
     // <dataDir>/lsp/children.json + 桥核工厂注入 JsonRpcConnection（lsp 结构
     // 上不见 mcp——帧无关桥组合根装配）。resolvePath 与 fs 工具族同 workspace 锚
-    lspDeps: createLspAssemblyDeps(dataDir(), sandbox, workspace),
+    lspDeps: {
+      ...createLspAssemblyDeps(dataDir(), sandbox, workspace),
+      // 刀三符号补全面挂桥（行面晚绑桥第二用例）：lsp 行 apply 挂真身、行回卷
+      // 摘除——webui 侧 symbolsFor 经 holder 晚绑（缺席 = 补全 404）
+      mountSymbols: (face) => {
+        symbolsFace = face;
+        return () => {
+          if (symbolsFace === face) symbolsFace = undefined;
+        };
+      },
+    },
     // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
     //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
     // deps（rootsProvider——见 chatBundle 接线处）。rowApp 探针 = D1 注册面
@@ -1597,6 +1638,22 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       },
       // UI 服务晚绑（② 段 let 槽位——ring1 装载回填后闭包才可达）
       ui: () => ui,
+      // claim 桥挂载点（刀三行面晚绑桥第一用例）：webui 行 apply 建 registry
+      // 后挂真身、ctx.effect 回卷摘除——holder 置空后 answerer 竞速退回纯 TUI 腿
+      approvals: {
+        mountClaim: (claim) => {
+          approvalClaim = claim;
+          return () => {
+            if (approvalClaim === claim) approvalClaim = undefined;
+          };
+        },
+      },
+      // 工作区根活取值（刀三 @-mention 文件补全行走锚）：原始 workspace——与
+      // fs 工具族/LSP resolvePath 同锚（canonical 差集 v1 不入补全面，spec 钉死）
+      workspaceRoot: () => workspace,
+      // documentSymbol 查询晚绑桥（刀三行面晚绑桥第二用例——lsp 行挂真身；
+      // 缺席 = 补全 404）
+      symbolsFor: (path) => symbolsFace?.(path) ?? Promise.resolve(undefined),
       // 版本串（webui 边不含 app 模块——组合根注入）
       version: VERSION,
     },
@@ -2503,9 +2560,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * 死码（「无消费者的匹配器不预造」判据，与 gate 层判定收窄 fs 族同源裁决）。 */
   if (opts.interactive) {
     ctx.on(APPROVAL_ANSWER_EVENT, async (req: ApprovalRequest, _next: () => unknown) => {
-      const answer = await ui.confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`);
+      // 刀三 claim 竞速注入（与驱动 answerer 同款）：web 腿在场时两腿竞速——
+      // 先胜者即裁决；缺席（webui 未开面/条目已决）= 纯 TUI 腿原语义
+      const webLeg = webClaimOf(req);
       // 应答即短路（waterfall 语义：返回值即最终值，不调 next）
-      return answer ? 'approve' : 'reject';
+      const tuiLeg = ui
+        .confirm(`${req.summary}\n${req.reason ?? ''}\n批准？`)
+        .then((answer) => (answer ? 'approve' : 'reject') as 'approve' | 'reject');
+      if (webLeg === undefined) return tuiLeg;
+      return Promise.race([tuiLeg, webLeg]);
     });
   }
 

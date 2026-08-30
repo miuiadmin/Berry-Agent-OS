@@ -474,6 +474,13 @@ export interface ChatAppDeps {
    */
   readonly select?: (message: string, choices: readonly { value: string; label: string }[]) => Promise<string>;
   /**
+   * web 应答腿（刀三 claim 竞速注入，契约篇 §6.8 刀三条）：answerer 在 TUI
+   * 原语之外与 web 审批卡竞速——先胜者即裁决，败腿结算丢弃。组合根注入
+   * （闭包读晚绑 holder：webui 行未开面/已卸载 = 返回 undefined = 纯 TUI 腿
+   * 原语义）。chat 不 import webui——结构函数键（WebuiApprovalClaim 词面）。
+   */
+  readonly webAnswer?: (req: ApprovalRequest) => Promise<'approve' | 'reject' | 'always'> | undefined;
+  /**
    * 「始终允许」条目写入面（§8.4 增补 2 落码形态③织入位）：answerer 返回
    * always 且载荷带草案时经 approval 服务回调——组合根接 AllowlistStore.add
    * （幂等）。缺省不传 = 本驱动 always 面关闭（视同 approve，零副作用）。
@@ -850,11 +857,17 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
       if (deps.confirm !== undefined) {
         const confirm = deps.confirm;
         const select = deps.select;
-        driverScope.on(APPROVAL_ANSWER_EVENT, (req: ApprovalRequest, _next: () => unknown) =>
+        const webAnswer = deps.webAnswer;
+        driverScope.on(APPROVAL_ANSWER_EVENT, (req: ApprovalRequest, _next: () => unknown) => {
           // 三态归一（草案在场 + select 在场 → 三选；降级 confirm 两态）在
           // answerApproval 纯函数内——回归锁见 plugin.test.ts
-          answerApproval(req, { confirm, ...(select !== undefined ? { select } : {}) }),
-        );
+          const tuiLeg = answerApproval(req, { confirm, ...(select !== undefined ? { select } : {}) });
+          // 刀三 claim 竞速注入：web 腿在场（webui 开面且未决条目活）时两腿
+          // 竞速——先胜者即裁决，败腿结算丢弃；缺席 = 纯 TUI 腿原语义
+          const webLeg = webAnswer?.(req);
+          if (webLeg === undefined) return tuiLeg;
+          return Promise.race([tuiLeg, webLeg]);
+        });
       }
 
       /* -- fs + bash 工具族驱动层注册（S2 fs 四件 / S5 bash 迁域 + 域键升级批：

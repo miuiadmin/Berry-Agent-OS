@@ -14,17 +14,25 @@ export {
   WEBUI_MAX_CONNECTIONS,
   WEBUI_PING_INTERVAL_MS,
   WEBUI_WRITE_TIMEOUT_MS,
+  type WebuiApprovalClaim,
+  type WebuiApprovalDecision,
+  type WebuiApprovalDetail,
   type WebuiAppConfig,
   type WebuiAppDeps,
   type WebuiDisplayEnvelope,
   type WebuiDisplaySink,
   type WebuiNotifyPayload,
+  type WebuiPendingApproval,
   type WebuiSessionBusPayload,
   type WebuiSessionSummary,
   type WebuiSseEnvelope,
   type WebuiSseKind,
   type WebuiStatusPayload,
+  type WebuiSymbolItem,
+  type WebuiSymbolQuery,
 } from './types.js';
 export { WebuiChannel } from './channel.js';
 export { createWebuiApp } from './app.js';
+export { createPendingApprovals, type PendingApprovals } from './approvals.js';
+export { listWorkspaceFiles } from './files.js';
 export { createWebuiServer, isLoopbackBindValue, type WebuiServerOptions } from './server.js';

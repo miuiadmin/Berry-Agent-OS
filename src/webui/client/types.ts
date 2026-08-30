@@ -103,3 +103,59 @@ export interface SseEnvelope {
   readonly sessionId?: string;
   readonly payload: unknown;
 }
+
+/* ------------------------------------------------------------------ */
+/* 刀三：审批应答面 + @-mention 补全 + checkpoint 转录行（窄类型拷贝） */
+/* ------------------------------------------------------------------ */
+
+/** web 应答闭集（锚 WebuiApprovalDecision——cancel 无 web 产出面） */
+export type ApprovalDecision = 'approve' | 'reject' | 'always';
+
+/**
+ * 未决审批条目（锚 WebuiPendingApproval）。两消费面：GET /api/approvals
+ * 恢复面 + SSE approval/asked 帧驱动（角标 + inline 卡数据源）。
+ */
+export interface PendingApproval {
+  /** 审批 id（卡片键） */
+  readonly approvalId: string;
+  /** 归属会话（asked 镜像信封 sessionId；根路审批缺省 undefined 档） */
+  readonly sessionId?: string;
+  /** 目标动作摘要 */
+  readonly summary: string;
+  /** 请求方/理由 */
+  readonly reason?: string;
+  /** 「始终允许」草案（在场 = 三态按钮） */
+  readonly suggestedEntry?: { readonly tool: string; readonly pattern: string };
+  /** 归属标签（appId 在场时卡面披露） */
+  readonly ownership?: { readonly appId?: string; readonly sessionId: string };
+  /** 出队优先级（'background' 时卡面注记） */
+  readonly priority?: string;
+}
+
+/** 工作区符号补全条目（锚 WebuiSymbolItem——LSP documentSymbol 投影） */
+export interface SymbolItem {
+  /** 符号名（插入锚） */
+  readonly name: string;
+  /** 定义行号（1-based；协议缺失时省） */
+  readonly line?: number;
+  /** LSP SymbolKind 数值（前端不做词表翻译，仅展示） */
+  readonly kind?: number;
+}
+
+/** 符号查询应答（锚 WebuiSymbolQuery——warming = 服务器预热中） */
+export interface SymbolQuery {
+  readonly symbols: readonly SymbolItem[];
+  readonly warming?: boolean;
+}
+
+/** checkpoint/rewind 转录行（SSE session 镜像帧载荷——surface 词不进投影，仅活体呈现） */
+export interface RewindRow {
+  /** 归属（旧）会话 */
+  readonly sessionId: string;
+  /** 回退到的快照 id */
+  readonly id: string;
+  /** fork 出的新会话 id */
+  readonly newSessionId: string;
+  /** 恢复文件数 */
+  readonly files: number;
+}

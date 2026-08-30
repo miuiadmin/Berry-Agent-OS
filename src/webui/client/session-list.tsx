@@ -19,12 +19,14 @@ function tail(path: string | undefined): string {
 interface SessionListProps {
   readonly sessions: readonly SessionSummary[];
   readonly viewedId: string | undefined;
+  /** 各会话未决审批数（GET 恢复 + asked 帧单源——角标面数据） */
+  readonly approvalCounts: ReadonlyMap<string, number>;
   readonly onSelect: (id: string) => void;
   readonly onOpen: () => void;
 }
 
 /** 会话清单侧栏（列表面板 + 头部开新按钮） */
-export function SessionList({ sessions, viewedId, onSelect, onOpen }: SessionListProps) {
+export function SessionList({ sessions, viewedId, approvalCounts, onSelect, onOpen }: SessionListProps) {
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800">
       <div className="flex items-center justify-between px-3 py-2">
@@ -38,38 +40,51 @@ export function SessionList({ sessions, viewedId, onSelect, onOpen }: SessionLis
         </button>
       </div>
       <ul className="min-h-0 flex-1 overflow-y-auto">
-        {sessions.map((s) => (
-          <li key={s.id}>
-            <button
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-neutral-900 ${
-                s.id === viewedId ? 'bg-neutral-900' : ''
-              }`}
-              style={s.id === viewedId ? { boxShadow: 'inset 2px 0 0 var(--accent)' } : undefined}
-              onClick={() => onSelect(s.id)}
-              title={s.cwd ?? s.id}
-            >
-              <span
-                className="inline-block size-2 shrink-0 rounded-full"
-                style={{ background: s.accent ?? '#525252' }}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{s.appId}</span>
-                <span className="block truncate text-xs text-neutral-500">
-                  {tail(s.cwd)}
-                  {s.updatedAt !== undefined ? ` · ${relTime(s.updatedAt)}` : ''}
+        {sessions.map((s) => {
+          /** 未决审批角标（操作面提醒——后台会话审批也全程可见，冷读 #5） */
+          const pending = approvalCounts.get(s.id) ?? 0;
+          return (
+            <li key={s.id}>
+              <button
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-neutral-900 ${
+                  s.id === viewedId ? 'bg-neutral-900' : ''
+                }`}
+                style={s.id === viewedId ? { boxShadow: 'inset 2px 0 0 var(--accent)' } : undefined}
+                onClick={() => onSelect(s.id)}
+                title={s.cwd ?? s.id}
+              >
+                <span
+                  className="inline-block size-2 shrink-0 rounded-full"
+                  style={{ background: s.accent ?? '#525252' }}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{s.appId}</span>
+                  <span className="block truncate text-xs text-neutral-500">
+                    {tail(s.cwd)}
+                    {s.updatedAt !== undefined ? ` · ${relTime(s.updatedAt)}` : ''}
+                  </span>
                 </span>
-              </span>
-              {/* 活·闭态：闭 = 只读（灰）；活 = 绿点（可提交） */}
-              {s.active ? (
-                <span className="inline-block size-1.5 shrink-0 rounded-full bg-emerald-500" title="活会话" />
-              ) : (
-                <span className="shrink-0 text-xs text-neutral-600" title="已闭（只读）">
-                  闭
-                </span>
-              )}
-            </button>
-          </li>
-        ))}
+                {/* 审批角标：琥珀数点（点击切会话应答） */}
+                {pending > 0 && (
+                  <span
+                    className="shrink-0 rounded-full bg-amber-600/90 px-1.5 text-xs font-medium text-neutral-950"
+                    title={`${pending} 项待审批`}
+                  >
+                    {pending}
+                  </span>
+                )}
+                {/* 活·闭态：闭 = 只读（灰）；活 = 绿点（可提交） */}
+                {s.active ? (
+                  <span className="inline-block size-1.5 shrink-0 rounded-full bg-emerald-500" title="活会话" />
+                ) : (
+                  <span className="shrink-0 text-xs text-neutral-600" title="已闭（只读）">
+                    闭
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
         {sessions.length === 0 && <li className="px-3 py-4 text-xs text-neutral-600">暂无会话</li>}
       </ul>
     </aside>

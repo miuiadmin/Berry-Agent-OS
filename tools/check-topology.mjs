@@ -128,7 +128,7 @@ const BARE_IMPORTS = {
   '@earendil-works/pi-tui': ['channels', 'app'],
   'better-sqlite3': ['persist'],
   yaml: ['app', 'skills'],
-  ignore: ['skills', 'tools', 'checkpoint'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切）；checkpoint = 工作区快照 DFS 遍历（2026-08-30 会话篇 §5.3——CR-10 语义同源不共享，第四消费者仍再议）
+  ignore: ['skills', 'tools', 'checkpoint', 'webui'], // tools = 检索族 gitignore 遍历（2026-08-25 检索族纵切）；checkpoint = 工作区快照 DFS 遍历（2026-08-30 会话篇 §5.3——CR-10 语义同源不共享，第四消费者仍再议）；webui = @-mention 文件补全行走（2026-08-30 契约篇 §6.8 刀三）
   jiti: ['context', 'app'],
 };
 const TEST_ONLY_BARE = new Set(['vitest']);

@@ -15,12 +15,30 @@
  *   （详见 chat-view.tsx）。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ProjectedMessage, SessionSummary, SseEnvelope, TodoItem } from './types';
-import { ApiError, fetchMessages, fetchSessions, fetchTodo, openSession, submitMessage } from './api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  ApprovalDecision,
+  PendingApproval,
+  ProjectedMessage,
+  RewindRow,
+  SessionSummary,
+  SseEnvelope,
+  TodoItem,
+} from './types';
+import {
+  ApiError,
+  decideApproval,
+  fetchApprovals,
+  fetchMessages,
+  fetchSessions,
+  fetchTodo,
+  openSession,
+  submitMessage,
+} from './api';
 import { SessionList } from './session-list';
 import { ChatView } from './chat-view';
 import { TodoPanel } from './todo-panel';
+import { MentionInput } from './mention-input';
 import { textOf } from './text';
 
 /** 工具卡活态（display 族 tool_execution_* 帧累积——同 toolCallId 覆盖） */
@@ -107,6 +125,18 @@ export function App() {
   const [connected, setConnected] = useState(false);
   /** 状态条文案（notify 族广播 / API 错误——一次性信息不打断布局） */
   const [notice, setNotice] = useState('');
+  /**
+   * 未决审批·角标面（刀三）：GET /api/approvals 恢复 + asked 帧注册、decided
+   * 帧摘除——侧栏角标数据源（刷新/晚连接重挂；已决不恢复是 parity 诚实）。
+   */
+  const [approvals, setApprovals] = useState<PendingApproval[]>([]);
+  /**
+   * 未决审批·inline 卡面（刀三）：asked 帧驱动 only（恢复面不挂 inline——
+   * 非当前会话卡无处挂，冷读 #5/#13）；decided 帧摘除。
+   */
+  const [liveCards, setLiveCards] = useState<PendingApproval[]>([]);
+  /** checkpoint 转录行（刀三）：rewind 帧活体 only——surface 词不进投影 */
+  const [rewinds, setRewinds] = useState<RewindRow[]>([]);
 
   /** 错误入状态条（ApiError 带状态码；其余按名字） */
   const noteError = useCallback((err: unknown) => {
@@ -145,7 +175,7 @@ export function App() {
     [loadView],
   );
 
-  /* 首载：清单 → 自动选第一条活会话（无活条目回落首行只读面） */
+  /* 首载：清单 → 自动选第一条活会话（无活条目回落首行只读面）+ 审批角标恢复 */
   useEffect(() => {
     (async () => {
       try {
@@ -157,6 +187,10 @@ export function App() {
         noteError(err);
       }
     })();
+    // 审批恢复面静默失败（非致命——角标缺席只是少一层提醒，不打扰状态条）
+    fetchApprovals()
+      .then(setApprovals)
+      .catch(() => undefined);
   }, [select, noteError]);
 
   /* SSE 活体流（mount 一次——信封四族分派，全部判据只对查看中会话起作用） */
@@ -192,6 +226,46 @@ export function App() {
           case 'todo/write':
             if (isViewed) setTodo(normalizeTodo((ev.data as { items?: unknown } | undefined)?.items));
             return;
+          case 'approval/asked': {
+            // 审批帧是操作面不是渲染面——他会话帧不忽略（冷读 #5：后台会话
+            // 审批全程可见是 web 应答面核心价值）。载荷 {approvalId, summary}。
+            const data = ev.data as { approvalId?: unknown; summary?: unknown } | undefined;
+            if (typeof data?.approvalId !== 'string') return;
+            const entry: PendingApproval = {
+              approvalId: data.approvalId,
+              sessionId: env.sessionId,
+              summary: typeof data.summary === 'string' ? data.summary : '',
+            };
+            const upsert = (list: readonly PendingApproval[]) => [
+              ...list.filter((a) => a.approvalId !== entry.approvalId),
+              entry,
+            ];
+            setApprovals(upsert);
+            setLiveCards(upsert);
+            return;
+          }
+          case 'approval/decided': {
+            // 卡终结 + 角标退场（两源同判——不分谁先胜，decided 是单写真值）
+            const data = ev.data as { approvalId?: unknown } | undefined;
+            if (typeof data?.approvalId !== 'string') return;
+            const drop = (list: readonly PendingApproval[]) => list.filter((a) => a.approvalId !== data.approvalId);
+            setApprovals(drop);
+            setLiveCards(drop);
+            return;
+          }
+          case 'checkpoint/rewind': {
+            // 转录行（活体 only——surface 词不进投影，刷新消失是 parity 诚实）
+            const data = ev.data as { id?: unknown; newSessionId?: unknown; files?: unknown } | undefined;
+            const rid = data?.id;
+            const rnew = data?.newSessionId;
+            const sid = env.sessionId;
+            if (typeof rid !== 'string' || typeof rnew !== 'string' || typeof sid !== 'string') return;
+            setRewinds((prev) => [
+              ...prev,
+              { sessionId: sid, id: rid, newSessionId: rnew, files: Number(data?.files) || 0 },
+            ]);
+            return;
+          }
           default:
             return;
         }
@@ -268,6 +342,26 @@ export function App() {
     }
   }, [select, noteError]);
 
+  /**
+   * 审批应答（刀三）：POST decide 只 resolve 服务端 resolver——durable 写在
+   * 服务端单写漏斗；superseded（TUI 先决）如实示警。终结呈现双保险：decided
+   * SSE 帧是真值，乐观摘除兜底 SSE 断线窗（帧迟到时幂等）。
+   */
+  const onDecide = useCallback(
+    async (approvalId: string, decision: ApprovalDecision) => {
+      try {
+        const res = await decideApproval(approvalId, decision);
+        if (!res.accepted) setNotice('该审批已在 TUI 侧应答（web 端操作未生效）');
+        const drop = (list: readonly PendingApproval[]) => list.filter((a) => a.approvalId !== approvalId);
+        setApprovals(drop);
+        setLiveCards(drop);
+      } catch (err) {
+        noteError(err);
+      }
+    },
+    [noteError],
+  );
+
   /** 提交（乐观 user 行先行——durable 镜像重拉后由真值替换；失败回滚重拉） */
   const onSubmit = useCallback(async () => {
     const text = input.trim();
@@ -290,6 +384,20 @@ export function App() {
 
   const viewed = sessions.find((s) => s.id === viewedId);
 
+  /** 角标计数（按归属会话聚合——根路审批 sessionId 落信封，天然有主） */
+  const approvalCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of approvals) {
+      if (a.sessionId === undefined) continue;
+      counts.set(a.sessionId, (counts.get(a.sessionId) ?? 0) + 1);
+    }
+    return counts;
+  }, [approvals]);
+
+  /** inline 卡按查看会话过滤（非当前会话只走角标——冷读 #5 分层） */
+  const viewedCards = useMemo(() => liveCards.filter((a) => a.sessionId === viewedId), [liveCards, viewedId]);
+  const viewedRewinds = useMemo(() => rewinds.filter((r) => r.sessionId === viewedId), [rewinds, viewedId]);
+
   return (
     <div
       className="flex h-full flex-col"
@@ -307,22 +415,33 @@ export function App() {
         <span className="truncate text-neutral-500">{notice}</span>
       </header>
       <div className="flex min-h-0 flex-1">
-        <SessionList sessions={sessions} viewedId={viewedId} onSelect={select} onOpen={() => void onOpen()} />
-        <ChatView messages={messages} live={live} />
+        <SessionList
+          sessions={sessions}
+          viewedId={viewedId}
+          approvalCounts={approvalCounts}
+          onSelect={select}
+          onOpen={() => void onOpen()}
+        />
+        <ChatView
+          messages={messages}
+          live={live}
+          approvals={viewedCards}
+          rewinds={viewedRewinds}
+          onDecide={(id, d) => void onDecide(id, d)}
+        />
         <TodoPanel todo={todo} />
       </div>
-      {/* 输入面：已闭会话禁用（只读） */}
+      {/* 输入面：已闭会话禁用（只读）；@-mention 两段补全（刀三） */}
       <footer className="border-t border-neutral-800 p-3">
         <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-            placeholder={viewed?.active === false ? '已闭会话只读' : '输入消息，Enter 提交'}
+          <MentionInput
             value={input}
+            onChange={setInput}
+            onSubmit={() => void onSubmit()}
             disabled={viewed === undefined || !viewed.active}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.nativeEvent.isComposing) void onSubmit();
-            }}
+            placeholder={
+              viewed?.active === false ? '已闭会话只读' : '输入消息，Enter 提交；@ 补全文件，@路径# 补全符号'
+            }
           />
           <button
             className="rounded-lg px-4 py-2 text-sm font-medium text-neutral-950"
