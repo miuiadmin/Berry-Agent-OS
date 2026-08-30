@@ -368,6 +368,10 @@ export const GOAL_ACTIVE_EXISTS = registerErrorCode('GOAL_ACTIVE_EXISTS');
 export const GOAL_NOT_FOUND = registerErrorCode('GOAL_NOT_FOUND');
 /** goal：状态机转移非法（如 needs-resume 态申报终态 / completed 行再 stop——machine.ts 转移表执法） */
 export const GOAL_TRANSITION_INVALID = registerErrorCode('GOAL_TRANSITION_INVALID');
+/** goal：机器可验完成判据（gates）fail-closed 回执——验证不过 / 超时 / 畸形 / 审批拒时置 completed 被拒（第三十九批 T3-A 预注册，结构化载荷含 kind + 失败原因类型） */
+export const GOAL_GATE_FAILED = registerErrorCode('GOAL_GATE_FAILED');
+/** goal：todo 载荷段约束违规——非 goal 段申报 goal 段词汇（role/task_class/resume_when/deferred/follow_up），或 goal 段内 deferred 缺 resume_when、completed 缺二择一（第三十九批 T2-A 预注册，执法位 = todo 工具执行段） */
+export const GOAL_TODO_SCOPE = registerErrorCode('GOAL_TODO_SCOPE');
 
 /* ------------------------------------------------------------------ */
 /* 应用面码族（契约篇 §5.4 应用面第二纵切，2026-08-25——清单文件唯一源   */

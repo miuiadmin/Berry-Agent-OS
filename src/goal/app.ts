@@ -48,6 +48,7 @@ import { canResumeGoal, canStopGoal, shouldContinueGoal } from './machine.js';
 import type { GoalRecord } from './machine.js';
 import { renderBudgetExhaustedPrompt, renderContinuationPrompt } from './prompts.js';
 import { createGoalTools } from './tools.js';
+import type { GoalSessionsFace } from './tools.js';
 
 /* ---------------------------------------------------------------------------------- */
 /* 服务最小面（结构类型窄化——goal 模块不 import app/channels 实现，拓扑边不越界）。       */
@@ -119,8 +120,9 @@ export function createGoalApp(deps: GoalAppDeps): BuiltinAppModule {
   };
   return {
     name: 'goal',
-    // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）
-    inject: ['tools', 'channels', 'ui'],
+    // 'agent' 为 optionalInject：chat 件未装载/诊断装配时缺供不阻激活（降级见上）；
+    // 'sessions' 恒供（装配层无条件 provide——账本事件读写面，第三十九批 T4-A）
+    inject: ['tools', 'channels', 'ui', 'sessions'],
     optionalInject: ['agent'],
     apply: (ctx: AppContext) => applyGoalApp(ctx, deps, consumeReplayUnseen),
   };
@@ -192,19 +194,23 @@ async function applyGoalApp(
     }),
   );
 
-  /* ---- ① 工具三件（目标内容在模型）---- */
+  /* ---- ① 工具三件（目标内容在模型；sessions 窄面 = 账本事件读写）----
+   * countOpenItems（计划态 open 项否决）/ currentWakeId（轮身份归因）两 hook
+   * 刀二/刀三接线——本刀 undefined = 面缺席诚实降级（工具内已注释同一口径） */
   const tools = ctx.get<ToolsService>('tools');
-  for (const def of createGoalTools({ store, getSessionId: deps.getSessionId })) {
+  const sessions = ctx.get<GoalSessionsFace>('sessions');
+  for (const def of createGoalTools({ store, getSessionId: deps.getSessionId, sessions })) {
     ctx.effect(() => tools.register(def));
   }
 
-  /* ---- ② /goal 命令族（激活权在人类：resume 重新授权 / stop 人工停）---- */
+  /* ---- ② /goal 命令族（激活权在人类：resume 重新授权〔可带 goalId 跨会话领养〕
+   * / stop 人工停）---- */
   const ui = ctx.get<UiNotifyFace>('ui');
   ctx.effect(() =>
     ctx.get<ChannelsCommandFace>('channels').registerCommand({
       name: 'goal',
       description:
-        '长目标管理：/goal 查看状态；/goal resume 重新激活（重启后降级 needs-resume 时）；/goal stop 人工停止',
+        '长目标管理：/goal 查看状态；/goal resume [goalId] 重新激活（重启降级 needs-resume 时；带 goalId 跨会话领养）；/goal stop 人工停止',
       source: 'app',
       handler: (args) => handleGoalCommand(args.trim(), { store, getSessionId: deps.getSessionId, ui }),
     }),
@@ -222,7 +228,8 @@ async function applyGoalApp(
         try {
           // S1 键控：按结算载荷归属会话直查（不再依赖装配闭包单值——多驱动
           // 各归各续跑，/new 换新不误伤旧会话目标，旧会话结算迟到照常触发其续跑）
-          const goal = store.get(settled.sessionId);
+          // v13 后直查激活行（goalId 一等——历史终态行留史不参与续跑）
+          const goal = store.getActiveBySession(settled.sessionId);
           if (goal === undefined || !shouldContinueGoal(goal, settled.status)) return;
           // backgroundWake：计入自激预算 maxConsecutiveWakes=3——连续自动续跑
           // 封顶 3 轮（用户手写消息恢复预算）；超帽 deliver 自动降级 inject 只留记录。
@@ -273,8 +280,9 @@ async function applyGoalApp(
         const sessionId = envelope.sessionId;
         // 只对 active 行记账（needs-resume/stopped/终态不再累计——刹停后的收尾
         // 轮花销不属于本目标预算；先判状态再累加，读改写间无并发窗口）
-        const current = store.get(sessionId);
-        if (current === undefined || current.status !== 'active') return;
+        // v13 后 getActiveBySession 直取（历史终态行不再命中）
+        const current = store.getActiveBySession(sessionId);
+        if (current === undefined) return;
         // usage 为 turn 汇总额（durable 载荷）；totalTokens 缺失时回退 input+output
         const usage = envelope.event.data as
           { usage?: { totalTokens?: number; input?: number; output?: number } } | undefined;
@@ -286,7 +294,8 @@ async function applyGoalApp(
         // 模型当轮收尾交代下一步；预算尽≠完成，提示词如实示态）。agent 缺供
         //（chat 件未装载）只跳过注入——记账与刹停是数据面，不依赖对话循环
         store.stopByBudget(sessionId, goal.tokensUsed, Date.now());
-        const stopped = store.get(sessionId);
+        // 刹停后行已非 active——getBySession 取当前行（updated_at 最新 = 刚停行）
+        const stopped = store.getBySession(sessionId);
         if (stopped !== undefined) {
           try {
             agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'app:goal', session: sessionId });
@@ -307,31 +316,52 @@ async function applyGoalApp(
   );
 }
 
-/** /goal 命令体（args 三形态：空 = 查状态 / resume / stop） */
+/** /goal 命令体（args 形态：空 = 查状态 / resume [goalId] / stop） */
 function handleGoalCommand(
   args: string,
   opts: { store: GoalStore; getSessionId: () => string | undefined; ui: UiNotifyFace },
 ): void {
   const sessionId = opts.getSessionId();
-  const goal = sessionId === undefined ? undefined : opts.store.get(sessionId);
+  const goal = sessionId === undefined ? undefined : opts.store.getBySession(sessionId);
   if (args === '') {
     opts.ui.notify(goal === undefined ? '当前会话没有设定目标（模型可 goal_set 设定）。' : renderGoalForUser(goal));
     return;
   }
-  if (args === 'resume') {
-    if (goal === undefined) {
-      opts.ui.notify('当前会话没有目标可恢复（goal_set 先设定）。');
+  // 子命令与余参拆分（resume 可带 goalId——跨会话领养形）
+  const spaceAt = args.indexOf(' ');
+  const sub = spaceAt === -1 ? args : args.slice(0, spaceAt);
+  const rest = spaceAt === -1 ? '' : args.slice(spaceAt + 1).trim();
+
+  if (sub === 'resume') {
+    if (sessionId === undefined) {
+      opts.ui.notify('无会话上下文——/goal resume 不可用。');
       return;
     }
-    if (!canResumeGoal(goal)) {
-      opts.ui.notify(`目标当前为 ${goal.status}——只有 needs-resume 态需要重新激活。`);
+    // 目标行解析：带 goalId = 跨会话领养形（getByGoalId 直取）；缺省 = 当前行
+    const target = rest !== '' ? opts.store.getByGoalId(rest) : goal;
+    if (target === undefined) {
+      opts.ui.notify(rest !== '' ? `没有 goalId 为 ${rest} 的目标行。` : '当前会话没有目标可恢复（goal_set 先设定）。');
       return;
     }
-    opts.store.reactivate(sessionId!, Date.now());
-    opts.ui.notify('目标已重新激活（active）——下一轮结算起恢复续跑。');
+    if (!canResumeGoal(target)) {
+      opts.ui.notify(`目标 ${target.goalId} 当前为 ${target.status}——只有 needs-resume 态需要重新激活。`);
+      return;
+    }
+    // 撞 active 行复用工具码同款回执（冷读复审 minor②——两执法位一词汇）：
+    // 领养进已有 active 行的会话 = 占位冲突，响亮拒绝不静默换行
+    const activeHere = opts.store.getActiveBySession(sessionId);
+    if (activeHere !== undefined && activeHere.goalId !== target.goalId) {
+      opts.ui.notify(
+        `当前会话已有进行中的目标（active，goalId ${activeHere.goalId}）——先停止或完成再领养 ${target.goalId}`,
+      );
+      return;
+    }
+    // 领养重绑：行 sessionId 换当前会话（原会话不再持有），状态回 active
+    opts.store.reactivate(target.goalId, sessionId, Date.now());
+    opts.ui.notify(`目标已重新激活（active，goalId ${target.goalId}）——下一轮结算起恢复续跑。`);
     return;
   }
-  if (args === 'stop') {
+  if (sub === 'stop') {
     if (goal === undefined) {
       opts.ui.notify('当前会话没有目标可停。');
       return;
@@ -340,17 +370,18 @@ function handleGoalCommand(
       opts.ui.notify(`目标当前为 ${goal.status}——已是终态，无需停止。`);
       return;
     }
-    opts.store.stopByUser(sessionId!, Date.now());
+    opts.store.stopByUser(goal.goalId, Date.now());
     opts.ui.notify('目标已人工停止（stopped/user）——不再续跑。');
     return;
   }
-  opts.ui.notify('用法：/goal（查状态）| /goal resume | /goal stop');
+  opts.ui.notify('用法：/goal（查状态）| /goal resume [goalId] | /goal stop');
 }
 
 /** goal 行 → 人读投影（命令面——与工具面 renderGoal 同口径，独立于人读排版） */
 function renderGoalForUser(goal: GoalRecord): string {
   const lines = [
     `目标：${goal.objective}`,
+    `身份：${goal.goalId}`,
     `状态：${goal.status}${goal.stopReason !== null ? `（原因：${goal.stopReason}）` : ''}`,
     `预算：已用 ${goal.tokensUsed} / ${goal.tokenBudget} tokens`,
   ];

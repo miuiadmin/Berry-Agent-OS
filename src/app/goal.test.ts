@@ -193,16 +193,69 @@ describe('goal 官方件全栈：工具三件 + schema 执法', () => {
     expect((notActive as AppError).code).toBe(GOAL_TRANSITION_INVALID);
   });
 
-  it('goal_set 覆盖终态行重设：新目标新账本（旧证据不残留）', async () => {
+  it('goal_set 终态行后重设：新 goalId 新行新账本（旧行留史、旧证据不残留）', async () => {
     const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
     await callTool(runtime, 'goal_set', { objective: '旧目标', tokenBudget: 50000 });
     await callTool(runtime, 'goal_update', { status: 'completed', evidence: '旧目标完成证据' });
     const set = await callTool(runtime, 'goal_set', { objective: '新目标', tokenBudget: 80000 });
-    expect((set.content[0] as { text: string }).text).toContain('已覆盖旧目标');
+    expect((set.content[0] as { text: string }).text).toContain('行留史'); // v13 重设 = 新行留史非覆盖
     const text = await goalText(runtime);
     expect(text).toContain('状态：active');
     expect(text).toContain('新目标');
-    expect(text).not.toContain('旧目标完成证据'); // 旧证据不残留
+    expect(text).not.toContain('旧目标完成证据'); // 旧证据不残留（在新行投影上）
+  });
+
+  it('goal_update 轮结算形：outcome 落 goal/evidence 账本事件、行保持 active、可多次调用', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    await callTool(runtime, 'goal_set', { objective: '长目标', tokenBudget: 50000 });
+    // 两次轮结算（union 第三形：无 status 字段、outcome 判别）
+    const first = await callTool(runtime, 'goal_update', { outcome: 'outcome_progress', evidence: '测试转绿一项' });
+    expect((first.content[0] as { text: string }).text).toContain('轮结算已入账（outcome_progress）');
+    const second = await callTool(runtime, 'goal_update', { outcome: 'surface_only' });
+    expect((second.content[0] as { text: string }).text).toContain('轮结算已入账（surface_only）');
+    // 行保持 active（轮结算非终态）
+    expect(await goalText(runtime)).toContain('状态：active');
+    // 账本投影：goal_get 近尾摘录带序号与 outcome（两Entries 全示）
+    const text = await goalText(runtime);
+    expect(text).toContain('证据账本（近 2/2 条）');
+    expect(text).toContain('[outcome_progress]：测试转绿一项');
+    expect(text).toContain('[surface_only]');
+    // durable 事件真落两条（eventsOfType 面回读——appendEvent 正门写点）
+    const events = runtime.ctx
+      .get<{ eventsOfType(t: string): Array<{ data?: unknown }> }>('sessions')!
+      .eventsOfType('goal/evidence');
+    expect(events).toHaveLength(2);
+    expect((events[0]!.data as { outcome: string }).outcome).toBe('outcome_progress');
+    expect((events[1]!.data as { outcome: string }).outcome).toBe('surface_only');
+    // goalId 归因键在场（账本按 goalId 过滤的锚）
+    expect((events[0]!.data as { goalId: string }).goalId).toMatch(/^[0-9A-Z]{26}$/);
+  });
+
+  it('goal_update 轮结算形 schema 执法：非法 outcome 词过不了参数校验段', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    await callTool(runtime, 'goal_set', { objective: '目标', tokenBudget: 50000 });
+    const bad = await callTool(runtime, 'goal_update', { outcome: 'progress' }).catch((e) => e);
+    expect((bad as AppError).code).toBe(TOOL_ARGUMENTS_INVALID);
+    expect(await goalText(runtime)).toContain('状态：active'); // 非法申报不落账
+  });
+
+  it('goal_get 带 goalId 查历史行：跨行史可寻（领养/审计面的读通道）', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    await callTool(runtime, 'goal_set', { objective: '旧目标', tokenBudget: 50000 });
+    // 先取旧行 goalId（设定后投影即含身份行）
+    const oldGoalId = /身份：([0-9A-Z]{26})/.exec(await goalText(runtime))![1]!;
+    await callTool(runtime, 'goal_update', { status: 'completed', evidence: '旧完成' });
+    await callTool(runtime, 'goal_set', { objective: '新目标', tokenBudget: 50000 });
+    // 缺省投影 = 当前行（active 优先）——新目标在场、旧证据不串面
+    const current = await goalText(runtime);
+    expect(current).toContain('新目标');
+    expect(current).not.toContain('旧完成');
+    // goalId 直取历史行：completed 旧行可寻（跨行史读通道）
+    const history = await callTool(runtime, 'goal_get', { goalId: oldGoalId });
+    const hist = (history.content[0] as { text: string }).text;
+    expect(hist).toContain('旧目标');
+    expect(hist).toContain('状态：completed');
+    expect(hist).toContain('旧完成');
   });
 });
 

@@ -8,11 +8,20 @@
 
 import { describe, expect, it } from 'vitest';
 import type { GoalRecord, GoalStatus } from './machine.js';
-import { canResumeGoal, canSetGoal, canStopGoal, canUpdateGoal, shouldContinueGoal } from './machine.js';
+import {
+  canResumeGoal,
+  canSetGoal,
+  canStopGoal,
+  canUpdateGoal,
+  shouldContinueGoal,
+  isDeliveryOutcome,
+  DELIVERY_OUTCOMES,
+} from './machine.js';
 
-/** 造一行 goal（status 可覆写——其余字段任意合法值） */
+/** 造一行 goal（status 可覆写——其余字段任意合法值；v13 起新字段全覆盖缺省态） */
 function row(status: GoalStatus): GoalRecord {
   return {
+    goalId: '01JD5ZZZZZZZZZZZZZZZZZZZZZ',
     sessionId: 's1',
     objective: '把 goal 纵切落完',
     tokenBudget: 5000,
@@ -21,11 +30,33 @@ function row(status: GoalStatus): GoalRecord {
     stopReason: status === 'stopped' ? 'budget' : null,
     evidence: status === 'completed' || status === 'blocked' ? '证据' : null,
     needsWrite: false,
+    wakeSchedule: null,
+    activatedSeq: null,
+    summary: null,
+    summarySeq: null,
     createdAt: 1,
     updatedAt: 2,
     settledAt: status === 'completed' || status === 'blocked' || status === 'stopped' ? 3 : null,
   };
 }
+
+describe('isDeliveryOutcome / DELIVERY_OUTCOMES（轮结算四值词面——T4-A）', () => {
+  it('四值全收；近形词与非字符串全拒（守卫不放宽）', () => {
+    for (const v of DELIVERY_OUTCOMES) {
+      expect(isDeliveryOutcome(v)).toBe(true);
+    }
+    expect(isDeliveryOutcome('surface')).toBe(false); // 截词近形
+    expect(isDeliveryOutcome('OUTCOME_PROGRESS')).toBe(false); // 大写近形
+    expect(isDeliveryOutcome('')).toBe(false);
+    expect(isDeliveryOutcome(undefined)).toBe(false);
+    expect(isDeliveryOutcome(42)).toBe(false);
+    expect(isDeliveryOutcome({ outcome: 'surface_only' })).toBe(false);
+  });
+
+  it('词面恰四值（顺序即申报语义梯度——表面→缺口→推进→交付）', () => {
+    expect(DELIVERY_OUTCOMES).toEqual(['surface_only', 'outcome_gap', 'outcome_progress', 'primary_goal_outcome']);
+  });
+});
 
 describe('canSetGoal（goal_set 准入：active 占位即拒）', () => {
   it('无行 / 终态三值 / needs-resume 均可设', () => {

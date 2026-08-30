@@ -209,6 +209,9 @@ await jiti.import(fileURLToPath(new URL('../src/memory/diff.ts', import.meta.url
 await jiti.import(fileURLToPath(new URL('../src/compaction/events.ts', import.meta.url)));
 // checkpoint 两词同款（src/checkpoint/events.ts——快照/回退审计词，轻依赖）
 await jiti.import(fileURLToPath(new URL('../src/checkpoint/events.ts', import.meta.url)));
+// goal 轮结算账本词同款（src/goal/events.ts——goal/evidence 轮结算写点在
+// goal/tools.ts，第三十九批 T4-A；goal/summary 随第四刀沉淀④步同笔注册）
+await jiti.import(fileURLToPath(new URL('../src/goal/events.ts', import.meta.url)));
 
 /** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
 const liveCatalog = events.LIVE_EVENT_CATALOG;
