@@ -36,6 +36,7 @@ import { assistantText, assistantToolLines, formatToolEnd, formatToolStart, rend
 import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
 import { createMentionProvider, type SymbolsFace } from './mention.js';
+import { fdPathFor } from './fd-path.js';
 import type { CommandRegistry } from './commands.js';
 import type { ChannelHost, InputOptions, NotifyLevel, RendererDefinition, UiBackend, UiAskOptions } from './types.js';
 
@@ -74,6 +75,14 @@ export interface TuiChannelOptions {
    * CombinedAutocompleteProvider——basePath 用）；缺省不武装（测试/无终端面）。
    */
   readonly workspace?: string;
+  /**
+   * fd 可执行路径（fd 接线小刀，契约篇 §6.8）：@ 文件段（第一段）补全的
+   * 行走后端注入键。三态：undefined = 未注入走真发现序（APP_FD_PATH 覆盖
+   * → PATH 查找 fd/fdfind/fd.exe——resolveFdPath）/ null 或空串 = 显式
+   * 禁用（@ 文件段无建议）/ 字符串 = 显式指定。仅在 workspace 武装分支
+   * 内被消费（workspace 缺省不武装时是哑键）。
+   */
+  readonly fdPath?: string | null;
   /**
    * documentSymbol 查询面（channels 批刀 B——@-mention 符号段补全）：传入即
    * 在 autocomplete 武装时包一层组合委托 provider（`@path#sym` token 拦截调
@@ -150,7 +159,9 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
   const editor = new Editor(tui, EDITOR_THEME);
   // M4 补全接线（2026-08-27 第三十三批）：workspace 传入即武装 autocomplete——
   // 命令名补全 + 参数补全 + `@` 文件补全三合一（pi-tui CombinedAutocompleteProvider，
-  // basePath = 工作区根）。命令清单是 provider 构造参数静态快照，注册面任何变动
+  // basePath = 工作区根）。@ 文件段（第一段）依赖 fd 子进程行走——fd 发现序
+  // 见 fd-path.ts（fd 接线小刀：APP_FD_PATH 覆盖 → PATH 查找 fd/fdfind/fd.exe，
+  // 诚实缺席不 fail-loud）。命令清单是 provider 构造参数静态快照，注册面任何变动
   // （boot 命令注册 / /reload 重注册 / 技能命令重扫）须重投影——订阅
   // commands.onChange 自动重建（与 skills_change 同构：注册表自持通知，宿主不编
   // 排时点）；参数补全回调闭包内实时 lookup（重装后的命令体即取即用）。
@@ -177,9 +188,11 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
       }));
     /** 重装 provider（构造时一次 + 每次 onChange；setAutocompleteProvider 为可选 API 防御调用）。
      *  刀 B：symbolsFor 在场时外包组合委托 provider（@-mention 符号段拦截；
-     *  非两段 token 与 face 404 档原样委托内层三面） */
+     *  非两段 token 与 face 404 档原样委托内层三面）。
+     *  fd 接线小刀：第三参 fdPath 每次重建重探（fdPathFor 三态决策——undefined
+     *  走真发现序；失败不缓存给中途安装的可发现性，见 fd-path.ts 头注释） */
     const installAutocomplete = (): void => {
-      const inner = new CombinedAutocompleteProvider(projectCommands(), opts.workspace!);
+      const inner = new CombinedAutocompleteProvider(projectCommands(), opts.workspace!, fdPathFor(opts.fdPath));
       editor.setAutocompleteProvider?.(
         opts.symbolsFor !== undefined ? createMentionProvider(inner, opts.symbolsFor) : inner,
       );
