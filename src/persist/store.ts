@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { chmodSync, existsSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import type { Database as DatabaseConnection } from 'better-sqlite3';
 import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '../contracts/errors.js';
@@ -187,6 +188,20 @@ export function openStore(options: StoreOptions): Store {
     // 门禁拒绝（AppError）或真锁冲突：关连接再上抛——调用方拿到干净错误面
     db.close();
     throw err;
+  }
+
+  // 权限三件追打（会话与存储篇 §6 文件权限三件，2026-08-30「0600 补执行」小刀）：
+  // 每次打开幂等 chmod 0600——新建即收紧 + 存量 0644 漂移自愈双语义。放初始化
+  // 事务之后（BEGIN IMMEDIATE 已物化 -wal/-shm）；wal/shm 干净关闭即删除，按
+  // 存在性条件执行；:memory: 诊断路无文件面跳过。chmod 是绝对位设定不受 umask
+  // 影响——SQLite 内建 open(0644) 吃 umask 且 better-sqlite3 不暴露 fd（fchmod
+  // 不可行），路径追打是唯一可靠姿势。
+  if (options.path !== ':memory:') {
+    chmodSync(options.path, 0o600);
+    for (const suffix of ['-wal', '-shm']) {
+      const side = `${options.path}${suffix}`;
+      if (existsSync(side)) chmodSync(side, 0o600);
+    }
   }
 
   const storeId = (db.prepare('SELECT store_id FROM store_state WHERE id = 1').get() as { store_id: string }).store_id;

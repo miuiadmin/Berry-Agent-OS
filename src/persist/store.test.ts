@@ -5,7 +5,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -487,5 +487,38 @@ describe('affectedSessionCounts（按词聚合受影响会话数：uninstall 级
     const store = seed();
     expect(store.affectedSessionCounts([])).toEqual({});
     store.close();
+  });
+});
+
+describe('文件权限三件（0600 追打——会话与存储篇 §6，2026-08-30 0600 补执行）', () => {
+  /** 断言文件权限位等于期望值（chmod 绝对位设定，断言天然不受 umask 影响） */
+  const modeOf = (p: string): number => statSync(p).mode & 0o777;
+
+  it('open 后主库/-wal/-shm 三件 0600（初始化事务已物化 wal/shm）', () => {
+    const path = nextPath();
+    const store = openStore({ path });
+    try {
+      expect(modeOf(path)).toBe(0o600);
+      // BEGIN IMMEDIATE 初始化事务已落 WAL——两附文件应在场且同 0600；
+      // wal/shm 干净关闭即删除，在场是实况、0600 是不变量
+      expect(modeOf(`${path}-wal`)).toBe(0o600);
+      expect(modeOf(`${path}-shm`)).toBe(0o600);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('存量 0644 漂移自愈：再 open 即修复（幂等追打双语义之漂移腿）', () => {
+    const path = nextPath();
+    const first = openStore({ path });
+    first.close(); // 干净关闭：wal/shm 随之删除，只留主库
+    chmodSync(path, 0o644); // 预置历史漂移（0600 补执行前装机面的实况）
+    expect(modeOf(path)).toBe(0o644); // 修复前必红锚
+    const second = openStore({ path }); // 双开第二进程同径：再 chmod 无害幂等
+    try {
+      expect(modeOf(path)).toBe(0o600); // 追打修复
+    } finally {
+      second.close();
+    }
   });
 });

@@ -14,11 +14,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AssistantMessage,
@@ -882,6 +883,9 @@ describe('持久化 round-trip 与命令入口', () => {
     const runtime = await createRuntime({ dbPath: dbFile, workspace: makeWorkspace(), streamFn });
     try {
       expect(existsSync(dbFile)).toBe(true); // 父目录被组合根 ③ 建档，SQLite 落库成功
+      // 建档即 0700（会话与存储篇 §6 文件权限三件——mkdir mode 是上界、chmod 追打
+      // 绝对位设定，断言不受 umask 影响）
+      expect(statSync(dirname(dbFile)).mode & 0o777).toBe(0o700);
       await runtime.conversation!.submitOnce('首启问题');
     } finally {
       await runtime.shutdown();
