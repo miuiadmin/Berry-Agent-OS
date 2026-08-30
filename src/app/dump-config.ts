@@ -15,7 +15,7 @@
 
 import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
-import { createLspAssemblyDeps } from './assembly.js';
+import { createLspAssemblyDeps } from './builtin-deps.js';
 import { loadComposition, OVERLAY_FILENAME, safeModeComposition, type CompositionReport } from './composition.js';
 import { loadOfficialApps, assertAppComponents, resolveDefaultApp } from './app-registry.js';
 import { createBuiltinRegistry } from './builtins.js';
@@ -60,7 +60,7 @@ function renderCompositionTree(composition: CompositionReport, statuses?: readon
     // 挂载目标标记（D1 清单投影批）：挂应用的行显式标注归属——装载序视角下
     // 「哪些行是应用件」一眼可辨（系统行缺省不带标记零噪声；多应用行 = 共享件全列）
     const apps = appsById.get(row.id);
-    const appTag = apps !== undefined ? `→ ${apps.join('、')} ` : '';
+    const appTag = apps === undefined ? '' : `→ ${apps.join('、')} `;
     return `  - ${row.id}：${carrierTag}${tag} ${appTag} ${row.entry ?? ''}`;
   });
   const head = `组合树（${composition.rows.length} 行；官方默认层 + ${OVERLAY_FILENAME} 后写胜出）：`;
@@ -81,7 +81,8 @@ function renderMountGrouping(composition: CompositionReport, appIds: readonly st
   const systemRows: string[] = [];
   for (const row of composition.rows) {
     const plan = planById.get(row.id);
-    const note = plan?.skip !== undefined ? `（${plan.skip}）` : plan?.unresolved !== undefined ? '（unresolved）' : '';
+    const note =
+      plan?.skip === undefined ? (plan?.unresolved === undefined ? '' : '（unresolved）') : `（${plan.skip}）`;
     const entry = `${row.id}${note}`;
     if (row.apps === undefined) {
       systemRows.push(entry);
@@ -173,9 +174,9 @@ export async function dumpConfigMain(options: RuntimeOptions = {}): Promise<numb
           [...runtime.apps.values()]
             .map((m) => {
               const missing = runtime.appGaps.get(m.id);
-              return missing !== undefined
-                ? `${m.id}[${m.label}]（缺组件：${missing.join('、')}）`
-                : `${m.id}[${m.label}]`;
+              return missing === undefined
+                ? `${m.id}[${m.label}]`
+                : `${m.id}[${m.label}]（缺组件：${missing.join('、')}）`;
             })
             .join('、') || '（无）'
         }`,

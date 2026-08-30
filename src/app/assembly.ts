@@ -42,7 +42,6 @@ import {
   Persistence,
   createAppSqliteFace,
   localDayStartMs,
-  openTurnDepth,
   spentBackgroundTokensSince,
   writeAtomicFile,
 } from '../persist/index.js';
@@ -63,7 +62,6 @@ import type {
   ApprovalRequest,
   GateRowFilter,
   SandboxMode,
-  SandboxService,
 } from '../safety/index.js';
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
@@ -79,7 +77,6 @@ import {
 import type { SkillLocation, SkillsService } from '../skills/index.js';
 import { SKILLS_CHANGE_EVENT } from '../skills/index.js';
 // 声明式子代理发现位置（agents/*.md——尾刀落码，subagent 官方件消费）
-import { defaultAgentLocations } from './agents-md.js';
 import type { AgentLocation } from './agents-md.js';
 // 项目指令文件四层发现（骨架篇 §7.3 instructions 段——尾刀落码）
 import { defaultInstructionLocations, discoverInstructions, renderInstructions } from './instructions.js';
@@ -87,14 +84,12 @@ import type { InstructionLocation } from './instructions.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import { WEBUI_APPROVAL_CAP_PER_OWNER } from '../webui/index.js';
-import type { WebuiApprovalMount, WebuiSessionSummary } from '../webui/index.js';
-import { VERSION } from './version.js';
+import type { WebuiApprovalMount } from '../webui/index.js';
 // daemon 刀一：heldSessions 租约闭包读 daemon.json 判活（assembly↔daemon 零环
 // ——命令半边 daemon.ts 引 createRuntime，状态半边 daemon-state.ts 不引）
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 import type { Session } from '../session/session.js';
 import {
-  deriveMessages,
   getSessionEventType,
   snapshotJsonValue,
   jsonBytes,
@@ -120,7 +115,7 @@ import {
 } from '../contracts/errors.js';
 import type { EventQueryCursor, EventQueryOptions, EventQueryResult, SessionEvent } from '../contracts/events.js';
 import type { AgentServiceFace, DurableSinks, ConversationDriver, DriverRegistry, FrontHost } from '../chat/index.js';
-import { createChatApp, CHAT_APP_ID, DEFAULT_APPROVAL_TIMEOUT_MS, foldCurrentTodo } from '../chat/index.js';
+import { createChatApp, DEFAULT_APPROVAL_TIMEOUT_MS } from '../chat/index.js';
 import { GoalChannel } from '../goal/index.js';
 import {
   createPathsService,
@@ -143,7 +138,7 @@ import {
 } from './app-registry.js';
 import type { AppManifest } from '../contracts/app.js';
 import { createBuiltinRegistry, collectBuiltinMigrations } from './builtins.js';
-import { createMcpSpawner } from './mcp-spawn.js';
+import { assembleBuiltinDeps } from './builtin-deps.js';
 import { killTree } from '../exec/index.js';
 import { createSubagentChildFactory } from './subagent-factory.js';
 import { emitSessionShutdownBounded } from './subagent-child.js';
@@ -160,15 +155,15 @@ import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
-import { readFileSync, realpathSync, mkdirSync } from 'node:fs';
-import { join, isAbsolute, resolve } from 'node:path';
+import { readFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 // ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
-import { ChildRegistry, JsonRpcConnection } from '../mcp/index.js';
+import { ChildRegistry } from '../mcp/index.js';
 // lsp 件闭包类型（组合根缝——lsp 结构上不见 mcp/exec/safety，全经本缝注入）
-import type { LspAppDeps, LspServerConfig, LspSymbolsFace, SpawnedProcess } from '../lsp/index.js';
+import type { LspSymbolsFace } from '../lsp/index.js';
 import { dataDir, dbPath, ensureDbDir } from './paths.js';
-import { setProjectAliases, canonicalWorkspaceRoot } from '../context/workspace.js';
+import { setProjectAliases } from '../context/workspace.js';
 import type { CompositionReloadedPayload } from '../contracts/events.js';
 
 /**
@@ -223,60 +218,6 @@ function withWebuiPort(report: CompositionReport, port: number): CompositionRepo
         ? { ...row, config: { ...(row.config ?? {}), enabled: true, port } }
         : row,
     ),
-  };
-}
-
-/**
- * lsp 件闭包组装（契约篇 §6.7 落码形态——组合根缝，mcp-spawn 同款纪律）：
- * - rootUri 物理根 = canonical 工作区根 realpath（M6 裁决——别名层排除；
- *   realpath 失败原样保留交 confine 后续层如实报错，realizeRoot 同款容错）；
- * - spawner 复用 createMcpSpawner 另建实例，workspace 腿传物理根——confine
- *   的 workspaceRoot/writableRoots 与 rootUri 同源（M7 裁决）；wrapper 在
- *   config.env 之上钉 TMPDIR=<dataDir>/lsp/tmp（external carrier 先例——
- *   防服务器临时文件写 /tmp 逃出可写根）；
- * - 登记簿/桥核/树杀全经注入：lsp 结构上不见 mcp/exec/safety。
- */
-export function createLspAssemblyDeps(dataDirPath: string, sandbox: SandboxService, workspace: string): LspAppDeps {
-  /** rootUri 物理根（惰性求值——装载期不求值，首连接才落地） */
-  const rootPhysicalRoot = (): string => {
-    const canonical = canonicalWorkspaceRoot(workspace);
-    try {
-      return realpathSync(canonical);
-    } catch {
-      return canonical;
-    }
-  };
-  // 复用 mcp spawner 工厂另建实例（probe-once 旗独立于 mcp 实例——互不消耗）
-  const rawSpawn = createMcpSpawner(dataDirPath, sandbox, rootPhysicalRoot());
-  // per-域 TMPDIR 路径（external carrier 先例——防服务器临时文件写 /tmp 逃出
-  // 可写根）；建目录惰性到首 spawn（行惰性无害 = 零落盘：dump-config 等诊断
-  // 面构造 deps 不触盘）
-  const lspTmp = join(dataDirPath, 'lsp', 'tmp');
-  let tmpEnsured = false;
-  return {
-    spawnServer: async (config: LspServerConfig): Promise<SpawnedProcess> => {
-      if (!tmpEnsured) {
-        try {
-          mkdirSync(lspTmp, { recursive: true });
-        } catch {
-          // 容错：read-only 数据域等极端形态——服务器写临时文件时如实报错
-        }
-        tmpEnsured = true;
-      }
-      const child = await rawSpawn({
-        command: config.command,
-        ...(config.args !== undefined ? { args: config.args } : {}),
-        // TMPDIR 叠在用户 env 之上（钉数据域——服务器临时文件不逃可写根）
-        env: { ...config.env, TMPDIR: lspTmp },
-      });
-      return child; // SpawnedChild 与 SpawnedProcess 结构同形（帧无关桥投影）
-    },
-    killTree,
-    registry: new ChildRegistry(join(dataDirPath, 'lsp', 'children.json')),
-    rootPhysicalRoot,
-    // 与 fs 工具族同 workspace 锚（resolveTarget 同式——相对路径解析一致性）
-    resolvePath: (p: string): string => (isAbsolute(p) ? resolve(p) : resolve(workspace, p)),
-    newConnection: (opts) => new JsonRpcConnection(opts),
   };
 }
 
@@ -623,14 +564,16 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       try {
         commandRegistry.add({ hostPid: process.pid, childPid: pid, server: 'exec', command: label });
       } catch {
-        // 登记 fs 失败——清扫完备性损失面，命令本体不受影响
+        // 登记 fs 失败——清扫完备性损失面，命令本体不受影响；debug 留痕（意图性吞非静默吞）
+        ctx.logger.debug('exec 命令进程登记失败（fs 边角——清扫完备性损失面）', { pid, label });
       }
     },
     remove: (pid) => {
       try {
         commandRegistry.remove(pid);
       } catch {
-        // 同上
+        // 同 add 腿：登记 fs 失败不阻命令执行，debug 留痕
+        ctx.logger.debug('exec 命令进程登记移除失败（fs 边角——清扫完备性损失面）', { pid });
       }
     },
   };
@@ -1330,24 +1273,6 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       // 同上：launchctl/crontab 系统命令同律登记清扫
       commandLog,
     });
-  /** gate 判据②：全注册表最近 user/message 时刻（S1 升格——多驱动并存时取全部
-   * 会话最大值，含退役保留者〔其活日志仍在内存〕；会话活对象内存直读——append
-   * 即在，write-behind 零滞后；跨进程的「别打架」不归 gate 管，那是 reserve
-   * 抢占的职责，两护栏分工） */
-  const lastUserMessageAt = (): number | null => {
-    let latest: number | null = null;
-    for (const entry of registry.entries.values()) {
-      const events = entry.session.events;
-      for (let i = events.length - 1; i >= 0; i--) {
-        const event = events[i]!;
-        if (event.type === 'user/message') {
-          if (latest === null || event.time > latest) latest = event.time;
-          break;
-        }
-      }
-    }
-    return latest;
-  };
   /* ---- chat 件 bundle（S1 工厂化，契约篇 §5.4 第 6 条 S1 射面）----
    * createChatApp 产物 = {module, registry, front}：注册表由组合根此处分配、
    * chat 件负责填充与消费（单真相）。早期闭包（③b 转发壳 / ④b onUsage /
@@ -1430,11 +1355,13 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * bash def 构造原料，而 chatBundle 构造点在本行——实例无依赖可先行；provide
    * 挂 ⑥b 原位不动） */
   const sandbox = createSandboxService();
-  /* ---- 刀三行面晚绑桥两枚（契约篇 §6.8 刀三条——answerer 竞速 web 腿 + @-mention
-   * 符号面）：holder 在此声明（answerer/lspDeps/webuiDeps 三消费点闭包读它），
-   * 真身由对应行 apply 期挂入、行回卷摘除——未开面/已卸载 = undefined = 各消费
-   * 面原语义（纯 TUI 腿 / 补全 404）。防线注记：本桥只走 answerer 竞速注入，
-   * 不在任何 Ring 2 行内注册 approval/answer handler（链序抢答禁行——spec 钉死） */
+  /* ---- 刀三行面晚绑桥（契约篇 §6.8 刀三条——answerer 竞速 web 腿）：approvalFace
+   * holder 在此声明（webClaimOf 安全接线与 builtin-deps 的 mountApprovalClaim
+   * 两消费点闭包读它——后者经函数面过界），真身由 webui 行 apply 期挂入、行回卷
+   * 摘除——未开面/已卸载 = undefined = 纯 TUI 腿原语义。防线注记：本桥只走
+   * answerer 竞速注入，不在任何 Ring 2 行内注册 approval/answer handler（链序
+   * 抢答禁行——spec 钉死）。symbolsFace 持有器已随 deps 装配下沉 builtin-deps.ts
+   * （mountSymbols/symbolsFor 两消费点全在彼——2026-08-31 技术债批平移） */
   let approvalFace: WebuiApprovalMount | undefined;
   let symbolsFace: LspSymbolsFace | undefined;
   /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用） */
@@ -1443,19 +1370,19 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       ? undefined // 无 id 载荷（防御位——ask 恒织入 randomUUID）
       : approvalFace?.claim(req.approvalId, {
           summary: req.summary,
-          ...(req.reason !== undefined ? { reason: req.reason } : {}),
-          ...(req.suggestedEntry !== undefined
-            ? { suggestedEntry: { tool: req.suggestedEntry.tool, pattern: req.suggestedEntry.pattern } }
-            : {}),
-          ...(req.ownership !== undefined
-            ? {
+          ...(req.reason === undefined ? {} : { reason: req.reason }),
+          ...(req.suggestedEntry === undefined
+            ? {}
+            : { suggestedEntry: { tool: req.suggestedEntry.tool, pattern: req.suggestedEntry.pattern } }),
+          ...(req.ownership === undefined
+            ? {}
+            : {
                 ownership: {
                   sessionId: req.ownership.sessionId,
-                  ...(req.ownership.appId !== undefined ? { appId: req.ownership.appId } : {}),
+                  ...(req.ownership.appId === undefined ? {} : { appId: req.ownership.appId }),
                 },
-              }
-            : {}),
-          ...(req.priority !== undefined ? { priority: req.priority } : {}),
+              }),
+          ...(req.priority === undefined ? {} : { priority: req.priority }),
         });
   /* 应用组件缺场表（组装批默认应用键——声明提前 + 合成后赋值）：appGaps 是
    * resolveApps 闭包的活读源（per-open 活取），必须在 chatBundle 构造前声明、
@@ -1551,7 +1478,7 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // daemon 刀二·P2 armed 计数键（ask 时点活取）：在场 SSE 连接 >0 = 有持
     // token 的活腿在场 → 超时降发不武装（人在场）；holder 空（webui 行未
     // 开面/已回卷）= 0 计。与 webAnswerActive 同源同活取——无运行期状态机
-    webAttachedCount: () => (approvalFace !== undefined ? approvalFace.attachedCount() : 0),
+    webAttachedCount: () => (approvalFace === undefined ? 0 : approvalFace.attachedCount()),
     // daemon 刀一·per-ownership 未决审批帽（~10/owner）：帽满即该 owner 新 ask
     // 即时收场 'unavailable'——防烂应用卡海淹没合法审批。ownerAppId undefined =
     // 宿主桶（与登记簿 pendingCountBy 同判据；webui 行未开面 = face 缺席不闸）
@@ -1576,233 +1503,51 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   });
   /** 会话驱动注册表（S1 单真相——Map<sessionId, DriverEntry> + 前台聚焦指针） */
   const registry = chatBundle.registry;
-  const builtins = createBuiltinRegistry({
-    ...(persistence ? { store: persistence.store } : {}),
-    ...(persistence ? { goalConnection: persistence.store.connection } : {}),
-    // goal↔chat↔lsp 通道（刀二）：goal 侧 = 段查询注册 + fold 消费；lsp 侧 =
-    // 诊断查询迟到注入（chatBundle 同一实例——三件经同一桥）
-    goalChannel,
-    schedulerDeps: {
-      runJob: tickRunner,
-      osRegistrar: osTickRegistrar,
-      // busy 判据（第二刀④）：turn/start·turn/end 配对深度投影——跨进程有效
-      //（driverRef 进程内布尔退役）；persist:false 无账可读 = 0（诊断面不拦）
-      turnDepth: persistence ? () => openTurnDepth(persistence.store) : () => 0,
-      lastUserMessageAt,
-      // canAfford 判据（第二刀④ never-unbounded 执法）：同一底账同一闸——
-      // 复用 ④b 服务闭包（spend ledger = 日志投影，不建第二套账）
-      backgroundAffordable: persistence ? () => llmService.canAfford('background') : () => true,
-    },
-    // mcp 件闭包（契约篇 §6.6 冷读 #1：spawn/kill 组装上提组合根——
-    // spawnServer 在 app/mcp-spawn.ts，killTree 自 exec 公开面；登记簿根
-    // 钉数据目录，与 overlay 同根不随会话漂移。spawnServer 三参 = OS 沙箱
-    // 层升格（2026-08-29 内核篇句式④兑现）：confine 复用 ⑥b 同源 sandbox
-    // 实例、workspace 锚同 rootsProvider——mcp 刀零新装配概念）
-    mcpDeps: {
-      spawnServer: createMcpSpawner(dataDir(), sandbox, workspace),
-      killTree,
-      dataDir: dataDir(),
-    },
-    // lsp 件闭包（默认层第十二行，契约篇 §6.7 冷读同款上提）：spawner 复用
-    // createMcpSpawner 另建实例（workspace 腿传 rootUri 物理根——canonical 根
-    // realpath，别名层排除；confine writableRoots 与 rootUri 同源）+ wrapper
-    // 覆盖 TMPDIR 钉 <dataDir>/lsp/tmp（external carrier 同款先例）+ 登记簿
-    // <dataDir>/lsp/children.json + 桥核工厂注入 JsonRpcConnection（lsp 结构
-    // 上不见 mcp——帧无关桥组合根装配）。resolvePath 与 fs 工具族同 workspace 锚
-    lspDeps: {
-      ...createLspAssemblyDeps(dataDir(), sandbox, workspace),
-      // 刀三符号补全面挂桥（行面晚绑桥第二用例）：lsp 行 apply 挂真身、行回卷
-      // 摘除——webui 侧 symbolsFor 经 holder 晚绑（缺席 = 补全 404）
+  // 官方件 deps 装配下沉（内核与应用边界篇 §2.1 零改动纪律，2026-08-31 技术债批）：
+  // 宿主活资源单束过界（let 槽位一律 getter——ui/cordoned/appGaps 装载期回填/重赋，
+  // approvalFace 经函数面），各件 deps 派生全收敛于 builtin-deps.ts——新官方件不触本文件
+  const builtins = createBuiltinRegistry(
+    assembleBuiltinDeps({
+      persistence,
+      workspace,
+      dataDir,
+      sandbox,
+      llmService,
+      durableGate: durableForward.gate,
+      rowApp,
+      rootsProvider,
+      officialApps,
+      appGaps: () => appGaps,
+      registry,
+      chatModule: chatBundle.module,
+      chatFront: chatBundle.front,
+      goalChannel,
+      tickRunner,
+      osTickRegistrar,
+      subagentFactory: subagentChildFactory,
+      ui: () => ui,
+      cordoned: () => cordoned,
+      mountApprovalClaim: (mount) => {
+        approvalFace = mount;
+        return () => {
+          if (approvalFace === mount) approvalFace = undefined;
+        };
+      },
       mountSymbols: (face) => {
         symbolsFace = face;
         return () => {
           if (symbolsFace === face) symbolsFace = undefined;
         };
       },
-    },
-    // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
-    //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
-    // deps（rootsProvider——见 chatBundle 接线处）。rowApp 探针 = D1 注册面
-    // 隐式路由（挂应用的行注册落应用域层——探针活闭包，装载期恒现行树）
-    toolsDeps: {
-      gateSink: durableForward.gate,
-      workspace: () => workspace,
-      rowApp,
-    },
-    // web 件测试注入缝（生产零参——真 fetch/真 DNS；组合根全栈测试注入
-    // fetchImpl/lookup 假实现，mock 停在外部边界非中间层）
-    webOverrides: opts.webOverrides,
-    // 可写根活取值（memory 件文件命令面落盘判定——第三十二批；chatBundle 的
-    // fs 可写根同源：同一 rootsProvider，文件命令与 fs 工具族同一物理边界）
-    writableRoots: rootsProvider,
-    workspace: () => workspace,
-    // 声明式子代理发现位置（镜像 skills ⑥⑦ 形态：workspace 同源 + homeDir 测试缝）
-    agentLocations: opts.agentLocations ?? defaultAgentLocations(workspace, { homeDir: opts.homeDir, trusted: true }),
-    // in-process 子装配工厂（subagent 件与 delegable 应用注册共用同一实例——
-    // 每子独立装配 dsh-10，委派目标形态差异只在 mergeRequest 静态半边）
-    subagentFactory: subagentChildFactory,
-    // goal 工具三件//goal 命令的会话归属（同 routed 路由：run 期链内=归属会话，
-    // TUI 命令面=聚焦会话）。boot 续接降级已改走装载收口 session_start 补播
-    // 事件面（二十九批增补 8①）——wasResumed 装配旁路退役
-    getSession: () => registry.routed()?.session,
-    // chat 件 bundle（S1 工厂化）：注册表/前台宿主由件构造、组合根在此分配持有
-    //（早期闭包 ③b/④b/④f 惰性引用 registry——TDZ 安全：全部运行期才调用）
-    chat: chatBundle.module,
-    // checkpoint 件闭包（默认层第十一行，会话篇 §5.3）：activeSessions = 驱动
-    // 注册表在册（未退役）会话活集合——prune 下界判据（大仓小帽不得自剪成
-    // 「无快照」；子代理等不可达会话不享下界）。晚绑同 getSession 形态
-    //（registry 装配序在前，运行期才调用）
-    checkpointDeps: {
-      activeSessions: () =>
-        new Set([...registry.entries.values()].filter((e) => !e.retired).map((e) => e.session.header.sessionId)),
-    },
-    // channels 件闭包（Ring 1 第十三行树化，契约篇 §6.8）：本体 = ② 段原装配
-    // 参数平移（onUiError 广播异常诊断 + rowApp = D1 命令拒载探针）——构造
-    // 挪入行 apply，组合根只在此递依赖。恒传（缺省即 D1 执法静默回归）
-    channelsDeps: {
-      onUiError: (err, op) =>
-        ctx.logger.error(`UI 广播异常已隔离（${op}）`, { error: err instanceof Error ? err.stack : String(err) }),
-      rowApp,
-    },
-    // webui 件闭包（默认层第十四行，契约篇 §6.8）：宿主面全闭包晚绑——行
-    // enabled:false 时 apply 早退零触达，deps 恒传不随 enabled 变。五腿全
-    // 经 chatBundle/registry/officialApps 活引用（装配序在前，运行期才调用）
-    webuiDeps: {
-      // display 信封入列：chat 件前台宿主无注销器（Ring 1 不随 /reload 回卷）
-      // ——channel.closed 旗标自守（dispose 后 sink no-op）
-      addDisplay: (sink) => chatBundle.front.addDisplay(sink),
-      // 提交路由：仅未退役活条目收（retired/未知 id = false → 404）
-      submitTo: (sessionId, text) => {
-        const entry = registry.entries.get(sessionId);
-        if (entry === undefined || entry.retired) return false;
-        entry.driver.submit(text);
-        return true;
-      },
-      // 历史投影：事件日志 deriveMessages。registry miss（已闭会话）走 store
-      // 装载只读派生（刀二规范细化）：loadSession 纯读不 append（无 write-behind
-      // 悬挂写）、不 recover 不注册——derive 一次即弃，孤儿 tool/call 容错在
-      // deriveMessages 内建。两腿同形应答（undefined = 会话不存在）
-      historyFor: (sessionId) => {
-        const entry = registry.entries.get(sessionId);
-        if (entry !== undefined) return deriveMessages(entry.session.events);
-        const loaded = persistence ? persistence.loadSession(sessionId) : undefined;
-        return loaded === undefined ? undefined : deriveMessages(loaded.events);
-      },
-      // todo 折叠（foldCurrentTodo 归一产物）：与 historyFor 同款两腿——活条目
-      // 内存真相 ∪ 已闭 store 兜底（null = 无表合法档）。goal 段边界（刀二计划态
-      // 跨轮）：goal active 期从激活锚折叠（user/message 不再是边界——SPA 呈现
-      // 与 TUI 注入同一计划态）；通道 miss / 无 active 行 = run-scoped 现行为
-      todoFor: (sessionId) => {
-        /** goal 段锚活取（每次查询时点重查——goal 激活/停掉后呈现即时切段） */
-        const boundary = goalChannel.goalScopeFor(sessionId)?.activatedSeq;
-        const entry = registry.entries.get(sessionId);
-        if (entry !== undefined) return foldCurrentTodo(entry.session.events, boundary);
-        const loaded = persistence ? persistence.loadSession(sessionId) : undefined;
-        return loaded === undefined ? undefined : foldCurrentTodo(loaded.events, boundary);
-      },
-      // 开新会话（刀二 = POST /api/sessions 腿）：registry.open() 一条龙——默认
-      // 应用解析 per-open 活取、既有条目驻留不退役、切宿主前台 focus（/app new
-      // 同款语义）。undefined 两因（无持久层/默认应用兜底态）由 open 内化，此
-      // 处只透传。cwd/createdAt 取 store 行（write-behind 迟滞时缺省——可选键，
-      // 清单下次刷新自然补齐）
-      openSession: async () => {
-        const entry = await registry.open();
-        if (entry === undefined) return undefined;
-        const id = entry.session.header.sessionId;
-        const row = persistence ? persistence.store.recentSessions(50).find((r) => r.id === id) : undefined;
-        const accent = officialApps.get(entry.appId)?.theme?.accent;
-        return {
-          id,
-          appId: entry.appId,
-          ...(row !== undefined && row.cwd !== null ? { cwd: row.cwd } : {}),
-          ...(row !== undefined ? { createdAt: row.createdAt } : {}),
-          updatedAt: entry.session.events.at(-1)?.time,
-          active: true,
-          ...(accent !== undefined ? { accent } : {}),
-        };
-      },
-      // 会话清单两源合并：注册表活条目（内存真相，含 retired→active:false）∪
-      // store 近史 50（旧会话迟滞披露——sync 不 flush，已决裁决：迟滞无害，
-      // 活条目必在注册表）。条目 appId 权威；cwd/createdAt 取自 store 行
-      //（SessionHeader 无此二列，缺行即 undefined）；updatedAt = 末事件时间
-      sessionsFor: () => {
-        // 近史行一次取出复用（活条目腿也只查这一份——同源两腿同真相）
-        const recent = persistence ? persistence.store.recentSessions(50) : [];
-        const summaries: WebuiSessionSummary[] = [];
-        const seen = new Set<string>();
-        for (const entry of registry.entries.values()) {
-          seen.add(entry.session.header.sessionId);
-          const row = recent.find((r) => r.id === entry.session.header.sessionId);
-          // accent 单源 = 清单条目内嵌（D4 theme web 兑现——themeFor 键已退役）
-          const accent = officialApps.get(entry.appId)?.theme?.accent;
-          summaries.push({
-            id: entry.session.header.sessionId,
-            appId: entry.appId,
-            ...(row !== undefined && row.cwd !== null ? { cwd: row.cwd } : {}),
-            ...(row !== undefined ? { createdAt: row.createdAt } : {}),
-            updatedAt: entry.session.events.at(-1)?.time,
-            active: !entry.retired,
-            ...(accent !== undefined ? { accent } : {}),
-          });
-        }
-        for (const row of recent) {
-          if (seen.has(row.id)) continue;
-          // NULL app = 存量会话（app 列升级前的旧账）——归默认应用域（store 读脸
-          // 注记「归并归调用侧」在此兑现；两跳回落 + 兜底 chat 锚与 resolveDefault 同源）
-          const appId = row.app ?? resolveDefaultApp(officialApps, appGaps)?.id ?? CHAT_APP_ID;
-          // 近史行经归并 appId 同样命中清单 accent（兜底腿与活条目腿同构）
-          const accent = officialApps.get(appId)?.theme?.accent;
-          summaries.push({
-            id: row.id,
-            appId,
-            ...(row.cwd !== null ? { cwd: row.cwd } : {}),
-            createdAt: row.createdAt,
-            ...(row.lastEventAt !== null ? { updatedAt: row.lastEventAt } : {}),
-            active: false,
-            ...(accent !== undefined ? { accent } : {}),
-          });
-        }
-        return summaries;
-      },
-      // UI 服务晚绑（② 段 let 槽位——ring1 装载回填后闭包才可达）
-      ui: () => ui,
-      // claim 桥挂载点（刀三行面晚绑桥第一用例；daemon 刀一拓宽为挂载对象）：
-      // webui 行 apply 建 registry 后挂真身（claim + pendingCountBy）、ctx.effect
-      // 回卷摘除——holder 置空后 answerer 竞速退回纯 TUI 腿、帽判据归零
-      approvals: {
-        mountClaim: (mount) => {
-          approvalFace = mount;
-          return () => {
-            if (approvalFace === mount) approvalFace = undefined;
-          };
-        },
-      },
-      // 工作区根活取值（刀三 @-mention 文件补全行走锚）：原始 workspace——与
-      // fs 工具族/LSP resolvePath 同锚（canonical 差集 v1 不入补全面，spec 钉死）
-      workspaceRoot: () => workspace,
-      // documentSymbol 查询晚绑桥（刀三行面晚绑桥第二用例——lsp 行挂真身；
-      // 缺席 = 补全 404）
       symbolsFor: (path) => symbolsFace?.(path) ?? Promise.resolve(undefined),
-      // 打断腿（daemon 刀一·协议正确性层 = POST /api/sessions/:id/interrupt）：
-      // 非退役条目且 run 在飞 → driver.interrupt()（abort 当轮 run——捎跑续批
-      // 不传染，与 TUI Ctrl+C 同源面）；其余 false（404）。fire-and-forget：
-      // interrupt 只发信号不等结算，端点语义即「已请求」
-      interruptFor: (sessionId) => {
-        const entry = registry.entries.get(sessionId);
-        if (entry === undefined || entry.retired || !entry.driver.isRunning) return false;
-        void entry.driver.interrupt();
-        return true;
-      },
-      // cordon 旗活取值（D6）：降级面拒新写意图——submit/开新会话两端点 503，
-      // decide/interrupt/SSE/读面不拒（收场依赖面保全），health 披露 degraded
-      cordoned: () => cordoned,
-      // daemon token 鉴权物（P1）：daemon 形态注入（/api 族全量执法 + cookie
-      // 桥）；--port 手开形态缺省不传 = 回环三防线即闭环、免鉴权
-      ...(opts.daemon !== undefined ? { auth: { token: opts.daemon.token } } : {}),
-      // 版本串（webui 边不含 app 模块——组合根注入）
-      version: VERSION,
-    },
-  });
+      logUiError: (err, op) =>
+        ctx.logger.error(`UI 广播异常已隔离（${op}）`, { error: err instanceof Error ? err.stack : String(err) }),
+      daemonAuth: opts.daemon === undefined ? undefined : { token: opts.daemon.token },
+      webOverrides: opts.webOverrides,
+      agentLocations: opts.agentLocations,
+      homeDir: opts.homeDir,
+    }),
+  );
   // 虚拟面第五/六键注入物（P0-2，契约篇 §1.2 注记①）：参数注入加载器——
   // context 不 import llm/persist（拓扑护栏）。第六键拒开基准 = resolvedDbPath
   //（APP_DB_PATH 覆盖已计入，与 Persistence 开库同源）；persist:false 形态下路径
@@ -2286,9 +2031,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
               id: row.id,
               code: row.code,
               message: row.message,
-              ...(row.stack !== undefined ? { stack: row.stack } : {}),
-              ...(source?.pkg !== undefined ? { pkg: source.pkg } : {}),
-              ...(source?.apps !== undefined ? { apps: source.apps } : {}),
+              ...(row.stack === undefined ? {} : { stack: row.stack }),
+              ...(source?.pkg === undefined ? {} : { pkg: source.pkg }),
+              ...(source?.apps === undefined ? {} : { apps: source.apps }),
             };
           }),
         },
