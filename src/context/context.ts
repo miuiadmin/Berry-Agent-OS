@@ -15,6 +15,7 @@ import {
   CONTEXT_SERVICE_NAME_INVALID,
   CONTEXT_SERVICE_NOT_FOUND,
   EVENT_DUPLICATE,
+  EVENT_HOST_RESERVED,
   EVENT_MODE_MISMATCH,
   EVENT_UNKNOWN,
   APP_EVENT_RATE,
@@ -403,6 +404,12 @@ class ContextScopeImpl implements ContextScope {
    * 事件词汇执法（契约篇 §1.1 落码）：未注册名 EVENT_UNKNOWN（拼错名从「监听器
    * 永不触发的静默死亡」变响亮失败）；派发方法与目录/声明 mode 不一致
    * EVENT_MODE_MISMATCH（mode 是事件公开契约——应用侧静态 CI 罩不住，运行时执法）。
+   * 目录保留词身份执法（2026-08-30 U1 小刀，契约篇 §2.2 增补 9）：hostReserved
+   * 标注的宿主机制词（session/event、approval/answer、tools_execute 三词 v1）
+   * 再过 **行籍判据**——仅官方名位（builtinRow：宿主根 ∪ 官方行 ∪ 承袭官方 id 的
+   * 替换行；fork 级联继承）可用，行籍 false 即抛 EVENT_HOST_RESERVED。判据定死
+   * 行籍非区籍：第三方全局行/跨区行虽挂系统锚装载（zone='system'），装载相位
+   * ≠ 信任位。on() 与 emit/parallel/serial/waterfall 五面同过此单点。
    * @param dispatch 派发方法名；on() 订阅不区分模式（传 undefined 只查词汇 membership）
    */
   private requireEvent(event: EventName, dispatch: 'emit' | 'waterfall' | 'parallel' | 'serial' | undefined): void {
@@ -417,6 +424,16 @@ class ContextScopeImpl implements ContextScope {
       throw new AppError(
         EVENT_MODE_MISMATCH,
         `事件「${event}」声明 mode=${def.mode}，不得以 ${dispatch} 派发（mode 是事件公开契约的一部分）`,
+      );
+    }
+    // 宿主保留词身份判据（U1）：守门/执行/审批决议/会话镜像位对第三方行关死——
+    // 第三方 on() 抢答审批/外带全部工具结果/伪造 session/event 毒化官方消费者
+    // 的三条攻击链在此单点截断（daemon 常驻把暴露窗口放大到天级，批前置）
+    if (def.hostReserved === true && !this.builtinRow) {
+      throw new AppError(
+        EVENT_HOST_RESERVED,
+        `事件「${event}」是宿主保留词（目录 hostReserved 标注，契约篇 §2.2 增补 9）——仅官方名位作用域可订阅/派发；作用域 ${this.name}` +
+          `${this.rowId !== undefined ? `（行 ${this.rowId}）` : ''} 行籍为第三方，五面皆拒（EVENT_HOST_RESERVED）`,
       );
     }
   }

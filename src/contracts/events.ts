@@ -68,6 +68,18 @@ export interface LiveEventDefinition {
    * （对应 session 侧 SessionEventTypeDefinition.reserved 同款语义）。
    */
   readonly reserved?: boolean;
+  /**
+   * 宿主保留词（契约篇 §1.1 身份执法 + §2.2 增补 9，2026-08-30 U1 小刀）：
+   * 宿主机制词（审批决议/会话镜像/执行体替换/直接决策类）——on/emit/
+   * waterfall/parallel/serial 五面在词汇/mode 校验后再过行籍判据
+   * （builtinRow），非官方名位作用域即抛 EVENT_HOST_RESERVED。
+   * 标注原则：机制位标、旁听位不标，且**须无已落码第三方消费语义**——
+   * v1 词集三词：session/event、approval/answer、tools_execute（执行体
+   * 替换位，M2 开放时另批重裁）。tools_pre/post_execute 两词住着已落码
+   * 应用守门/审计扩展面（守门行传导特性），不收——其旁听/外带风险随
+   * 治理第二梯队⑦ zone 谓词成对落地（契约篇 §2.2 增补 9 拍板裁决记录）。
+   */
+  readonly hostReserved?: true;
 }
 
 /**
@@ -81,7 +93,8 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'session/event',
     mode: 'emit',
-    note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）',
+    hostReserved: true,
+    note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）。hostReserved：旁听全会话 durable 载荷 + 伪造发射毒化官方消费者两半都在（U1 小刀，契约篇 §2.2 增补 9）——消费者 = 宿主总线桥与官方行（memory/goal/compaction/webui）',
   },
   {
     name: 'session_start',
@@ -96,17 +109,18 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'tools_pre_execute',
     mode: 'waterfall',
-    note: '工具执行前守门瀑布（契约篇 §2.2 tool 层；入参 GateInput → 出参 GateAction）',
+    note: '工具执行前守门瀑布（契约篇 §2.2 tool 层；入参 GateInput → 出参 GateAction）。应用扩展面不收 hostReserved（2026-08-30 U1 拍板裁决——第三方守门行/守门行传导〔第三十一批〕是已落码能力；旁听风险随第二梯队⑦ zone 谓词成对落地）',
   },
   {
     name: 'tools_execute',
     mode: 'waterfall',
-    note: '工具执行瀑布（契约篇 §2.2 tool 层；可整体替换执行体——M2 随应用加载器开放）',
+    hostReserved: true,
+    note: '工具执行瀑布（契约篇 §2.2 tool 层；可整体替换执行体——M2 随应用加载器开放）。hostReserved：执行体替换位——今日零第三方消费者收之零损失，开放面随 M2 拍板另批重裁（U1 小刀，契约篇 §2.2 增补 9）',
   },
   {
     name: 'tools_post_execute',
     mode: 'waterfall',
-    note: '工具执行后审计瀑布（契约篇 §2.2 tool 层；只观察不影响结果）',
+    note: '工具执行后审计瀑布（契约篇 §2.2 tool 层；只观察不影响结果）。应用扩展面不收 hostReserved（2026-08-30 U1 拍板裁决——改写对称性范本 + 守门行传导 post 腿是已落码能力；外带面风险随第二梯队⑦ zone 谓词成对落地）',
   },
   {
     name: 'tools_change',
@@ -116,7 +130,8 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
   {
     name: 'approval/answer',
     mode: 'waterfall',
-    note: '审批应答瀑布（骨架篇 §8.3 ApprovalService 决议面；无应答者 fail-closed）',
+    hostReserved: true,
+    note: '审批应答瀑布（骨架篇 §8.3 ApprovalService 决议面；无应答者 fail-closed）。hostReserved：审批决议位——第三方 on() 一条链抢答全部根路审批（治理攻击者评审最重一条，U1 小刀；宿主专属化+时点前置挂账第二梯队⑥）',
   },
   {
     name: 'app/activated',

@@ -409,4 +409,27 @@ describe('registerHostHandlers — svc-invoke/tool-run 执法面（R1 安全收�
     ]);
     await scope.dispose();
   });
+
+  it('sub/emit 帧保留词差分（U1 目录保留词身份执法，契约篇 §2.2 增补 9）：第三方行订阅/伪造必红，官方行绑定照过', async () => {
+    const { handlers, root, bindings } = setupHandlers();
+    const sub = handlers.get('host.sub')!;
+    const emit = handlers.get('host.emit')!;
+    // 第三方行绑定（跨墙 rowId 是自报值——sub/emit 落点 = binding.scope 行作用域，
+    // 行籍由 loader 注入；此处按第三方行真实形态 builtinRow: false 构造）
+    const third = root.fork({ name: 'w-u1', rowId: 'w-u1', builtinRow: false });
+    bindings.set('w-u1', { scope: third });
+    // sub 保留词：on() 在行作用域抛（修复前：第三方 worker 行经桥订阅审批决议位/
+    // 工具瀑布——跨进程面零身份判据）
+    const refusedSub = await rejection(Promise.resolve().then(() => sub(['w-u1', 'approval/answer'])));
+    expect(refusedSub.code).toBe('EVENT_HOST_RESERVED');
+    // emit 保留词：伪造 session/event 同拒（毒化官方消费者攻击链的桥腿）
+    const refusedEmit = await rejection(Promise.resolve().then(() => emit(['w-u1', 'session/event', []])));
+    expect(refusedEmit.code).toBe('EVENT_HOST_RESERVED');
+    // 差分锚：官方名位行（builtinRow: true——承袭官方 id 的替换行形态）同帧照过
+    const official = root.fork({ name: 'w-off', rowId: 'w-off', builtinRow: true });
+    bindings.set('w-off', { scope: official });
+    sub(['w-off', 'approval/answer']);
+    await official.dispose();
+    await third.dispose();
+  });
 });

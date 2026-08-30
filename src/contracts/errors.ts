@@ -304,6 +304,15 @@ export const EVENT_MODE_MISMATCH = registerErrorCode('EVENT_MODE_MISMATCH');
  * 码族随结果面走）。2026-08-27 刀〇a。
  */
 export const EVENT_HANDLER_TIMEOUT = registerErrorCode('EVENT_HANDLER_TIMEOUT');
+/**
+ * events：非官方名位作用域 on/emit/waterfall/parallel/serial 宿主保留词
+ * （目录 hostReserved 标注——session/event、approval/answer、tools_execute
+ * 三词 v1，契约篇 §2.2 增补 9）。判据 = 行籍旗标 builtinRow（宿主根 ∪ 官方
+ * 行 ∪ 承袭官方 id 的替换行；fork 级联）——第三方全局行/跨区行虽挂系统相位
+ * 装载（zone='system'）行籍 false 照拒：装载相位 ≠ 信任位。2026-08-30 U1 小刀
+ * （daemon 批前置——常驻形态把第三方行暴露窗口从会话时长放大到天级）。
+ */
+export const EVENT_HOST_RESERVED = registerErrorCode('EVENT_HOST_RESERVED');
 /** 应用：装机子进程失败（npm install / git clone 等退出非零——message 载命令与输出尾行；三源分发见契约篇 §6.1） */
 export const APP_INSTALL_FAILED = registerErrorCode('APP_INSTALL_FAILED');
 

@@ -534,6 +534,105 @@ describe('事件词汇执法（契约篇 §1.1 落码，2026-08-23 /reload 纵�
   });
 });
 
+describe('目录保留词身份执法（契约篇 §1.1/§2.2 增补 9，2026-08-30 U1 小刀——daemon 批前置）', () => {
+  // 词集 v1 三词（2026-08-30 拍板「零损失全收」案）：session/event、
+  // approval/answer、tools_execute。tools_pre/post_execute 不收——第三方
+  // 守门/审计是已落码扩展面（守门行传导特性），旁听风险随第二梯队⑦成对落地。
+  // 判据 = 行籍旗标 builtinRow（宿主根 ∪ 官方行 ∪ 承袭官方 id 的替换行），
+  // 非装载 zone——第三方全局行/跨区行虽挂系统锚（zone='system'）行籍照 false。
+
+  it('宿主根三词全绿——官方名位是保留词的合法消费者（on/emit/waterfall 三面抽测）', async () => {
+    const root = silentRoot(); // createContext 根 = builtinRow true
+    // on 面：三词全过（waterfall 词订阅不区分模式）
+    const offs = ['session/event', 'approval/answer', 'tools_execute'].map((word) => root.on(word, () => {}));
+    // 派发面：emit 词 + waterfall 词各抽一（mode 与目录一致）
+    root.emit('session/event', { sessionId: 's', event: {} });
+    await root.waterfall('tools_execute', (state: unknown) => state, {});
+    offs.forEach((off) => off());
+  });
+
+  it('fork 级联继承行籍——宿主根的子作用域（chat 驱动域 driverScope 同构：createContext 全新根亦然）照用保留词', async () => {
+    const root = silentRoot();
+    const child = root.fork({ name: 'official-consumer' }); // 未显式注入 → 级联 true
+    const off = child.on('session/event', () => {});
+    child.emit('session/event', { sessionId: 's', event: {} });
+    off();
+    // chat 件驱动域的真实构造形态：createContext 全新根（builtinRow 缺省 true）
+    const driverScope = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
+    driverScope.on('approval/answer', () => {});
+    await driverScope.dispose();
+  });
+
+  it('第三方作用域 on() 审批决议位必红 EVENT_HOST_RESERVED（U1 攻击链①：on() 抢答审批）', () => {
+    const root = silentRoot();
+    // 第三方行的真实形态：loader fork 时显式注入 builtinRow: false
+    // （第三方行不论全局/跨区/单区，行籍一概 false——zone 判据的坑正在于此）
+    const third = root.fork({ name: 'third-party', rowId: 'evil:row', builtinRow: false });
+    try {
+      third.on('approval/answer', () => {});
+      expect.unreachable('第三方 on 保留词应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_HOST_RESERVED');
+    }
+  });
+
+  it('第三方作用域伪造 session/event 必红（U1 攻击链②：毒化 memory/goal/compaction/webui 官方消费者）', async () => {
+    const root = silentRoot();
+    const third = root.fork({ name: 'third-party', rowId: 'evil:row', builtinRow: false });
+    await expect(async () => third.emit('session/event', { sessionId: 's', event: {} })).rejects.toMatchObject({
+      code: 'EVENT_HOST_RESERVED',
+    });
+  });
+
+  it('tools_execute 执行体替换位第三方必红 + pre/post 两词第三方照用（2026-08-30 拍板裁决：守门/审计扩展面保留）', async () => {
+    const root = silentRoot();
+    const third = root.fork({ name: 'third-party', rowId: 'evil:row', builtinRow: false });
+    // 执行体替换位：订阅 + 派发皆拒（今日零第三方消费者，收之零损失；
+    // M2 开放面另批重裁）
+    try {
+      third.on('tools_execute', () => {});
+      expect.unreachable('第三方 on tools_execute 应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_HOST_RESERVED');
+    }
+    await expect(async () => third.waterfall('tools_execute', (state: unknown) => state, {})).rejects.toMatchObject({
+      code: 'EVENT_HOST_RESERVED',
+    });
+    // 差分锚：pre/post 两词不收——第三方守门/审计行（守门行传导特性，
+    // 第三十一批 P1-4 回归锁）照常订阅，身份判据不拦应用扩展面
+    const offPre = third.on('tools_pre_execute', () => {});
+    const offPost = third.on('tools_post_execute', () => {});
+    offPre();
+    offPost();
+  });
+
+  it('第三方作用域内再 fork 行籍级联为 false——深套作用域不走后门（loader 注入一次全树生效）', () => {
+    const root = silentRoot();
+    const third = root.fork({ name: 'third-party', builtinRow: false });
+    const inner = third.fork({ name: 'inner' }); // 应用内任意深度 fork 继承行籍
+    try {
+      inner.on('approval/answer', () => {});
+      expect.unreachable('第三方内层作用域 on 保留词应抛');
+    } catch (err) {
+      expect((err as AppError).code).toBe('EVENT_HOST_RESERVED');
+    }
+  });
+
+  it('开放词与自定义词不受身份判据影响——旁听位（session_start/tools_change）与登记过的 custom 词第三方照用', async () => {
+    const root = silentRoot();
+    const third = root.fork({ name: 'third-party', builtinRow: false });
+    // 旁听位开放词：订阅 + 派发全绿（应用参与观测/生命周期是设计语义）
+    const off = third.on('session_start', () => {});
+    root.emit('session_start', { sessionId: 's' });
+    off();
+    third.on('tools_change', () => {});
+    // 自定义登记词：第三方自有词汇照常（词汇门禁照走 EVENT_UNKNOWN 族，身份不拦）
+    registerLiveEvent(root, { name: 'third/own', mode: 'emit', note: '测试词汇' });
+    third.on('third/own', () => {});
+    third.emit('third/own', {});
+  });
+});
+
 describe('dispose 语义升级（CR-2-F8 + §1.6 时钟族，2026-08-27 刀〇a）', () => {
   it('异步 disposer 被 dispose 等待：Disposer 契约型不变，返回 thenable 即等其结算', async () => {
     const scope = silentRoot();
