@@ -419,6 +419,8 @@ export const DAEMON_STOP_TIMEOUT = registerErrorCode('DAEMON_STOP_TIMEOUT');
 
 /** context：作用域在册 effect 合计达上限（10^4——context 注册族 effect/on/provide 注销器/registerMessageRole/registerSessionEventType/fork 级联全走 pushEffect 单点一条钟罩全族；计数基准 = 活注册，手动注销/回卷即减非历史累计） */
 export const CONTEXT_EFFECT_LIMIT = registerErrorCode('CONTEXT_EFFECT_LIMIT');
+/** context：fork 直系子作用域计数达上限（128/作用域——fork 轰炸护栏，与 effect 帽同族；子 dispose 即释放名额非历史累计。契约篇 §1.5 fork 行，2026-08-31 技术债批） */
+export const CONTEXT_FORK_LIMIT = registerErrorCode('CONTEXT_FORK_LIMIT');
 /** tools：两层注册表（全局层+域层）合计件数达上限（10^3——良性行为距阈值两个数量级，超限 = 失控或泄漏） */
 export const TOOL_REGISTRY_LIMIT = registerErrorCode('TOOL_REGISTRY_LIMIT');
 /** tools：register/unregister 变更频率超限（容量 240 / 回填 600 每分钟全局令牌桶——每次变更触 tools_change ≤64KiB 快照，高频注册武器化 header 快照〔R4〕；容量吃下单次 /reload 全量重注册突发，回填 10 op/s 撑热迭代不触顶） */

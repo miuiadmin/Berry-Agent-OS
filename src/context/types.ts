@@ -69,6 +69,16 @@ export interface Context {
    * 直调（官方件随包代码，组合无关），不经本面。
    */
   registerSessionEventType(def: SessionEventTypeDefinition): Disposer;
+  /**
+   * 派生子作用域（应用内部组织原语，契约篇 §1.5——2026-08-31 技术债批）：
+   * 复杂应用的长生命周期子结构不再靠 effect 模拟——子作用域持完整 ctx 面。
+   * 继承律（只继承不可自选）：rowId/行籍/区身份/provide 扇出全随父级联——宿主
+   * 宽 opts（行籍/区身份等）不在本窄签名上（ContextScope 宿主面持有宽形，装载器
+   * 为行 fork 时显式注入）。回卷律：子 dispose 或父卸载级联回卷子树全部 effect。
+   * 护栏：单作用域直系子代计数帽 128（CONTEXT_FORK_LIMIT——fork 轰炸防线，
+   * 与 effect 帽/事件限流同族）；子 dispose 即释放名额。
+   */
+  fork(opts: { name: string; config?: Record<string, unknown> }): Context;
   /** 本作用域配置视图（只读快照；组合树解析产物） */
   readonly config: Readonly<Record<string, unknown>>;
   /**

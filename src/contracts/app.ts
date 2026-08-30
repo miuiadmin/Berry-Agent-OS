@@ -325,6 +325,19 @@ export interface AppContext {
   readonly logger: AppLogger;
   /** 生命周期信号：作用域销毁时 abort——长任务/定时器的取消依据 */
   readonly signal: AbortSignal;
+  /**
+   * 派生子作用域（应用内部组织原语，契约篇 §1.5——2026-08-31 技术债批）：复杂
+   * 应用的长生命周期子结构（per-会话态/per-任务态）不再靠 effect 模拟——子作用域
+   * 持完整 ctx 面（effect/on/provide/两注册面全可用），撞名域/事件词汇执法与父同规。
+   *
+   * 继承律（只继承不可自选）：rowId/行籍/区身份/provide 扇出全随父级联——宿主 fork
+   * 的宽 opts 不进应用契约面，第三方无法借 fork 造官方名位作用域。回卷律：子
+   * dispose 或父卸载（/reload）级联回卷子树全部 effect（LIFO，宿主兜底接线）。
+   *
+   * 护栏：单作用域直系子代计数帽 128，超帽抛 CONTEXT_FORK_LIMIT（fork 轰炸防线，
+   * 与 effect 帽/事件限流同族）；子 dispose 即释放名额（显式销毁后可再 fork）。
+   */
+  fork(opts: { name: string; config?: Record<string, unknown> }): AppContext;
 }
 
 /**

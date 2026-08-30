@@ -341,6 +341,27 @@ describe('provide 服务名两段式分级（契约篇 §1.5，2026-08-27 第三
       expect(appErr.message).toContain('plug-x'); // 报文带行 id——装载期可归因到行
     }
   });
+
+  it('fork 直系子代计数帽：第 129 个抛 CONTEXT_FORK_LIMIT；子 dispose 释放名额；级联回卷同步减', async () => {
+    const root = silentRoot();
+    const app = root.fork({ name: 'apps-x', rowId: 'row-x', builtinRow: false });
+    // 帽下最后一个名额可用（1..128 全通过）——持引用供后续释放名额
+    const kids: ContextScope[] = [];
+    for (let i = 1; i <= 128; i++) kids.push(app.fork({ name: `c${i}` }));
+    // 第 129 个 = fork 轰炸形态，响亮拒绝
+    try {
+      app.fork({ name: 'boom' });
+      expect.unreachable('超帽 fork 应抛 CONTEXT_FORK_LIMIT');
+    } catch (err) {
+      expect((err as AppError).code).toBe('CONTEXT_FORK_LIMIT');
+    }
+    // 显式 dispose 一个既有子作用域即释放名额——循环 fork+dispose 不误伤
+    await kids[0]!.dispose();
+    const renewed = app.fork({ name: 'renewed' });
+    expect(renewed.rowId).toBe('row-x'); // 释放后再 fork 继承律不变
+    // 父卸载级联回卷整树（兜底接线）——不抛不挂
+    await root.dispose();
+  });
 });
 
 describe('fork 作用域', () => {

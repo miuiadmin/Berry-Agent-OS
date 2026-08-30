@@ -261,7 +261,7 @@ export async function importAppEntry(
  * 导出（K3-b2）：worker 半在 worker realm 复用同一校验（形状纪律单实现，
  * 两 realm 各跑一份——声明面校验过界即此）。
  */
-export function validateModuleShape(mod: Record<string, unknown>, id: string): ValidatedModule {
+export function validateModuleShape(mod: Record<string, unknown>, _id: string): ValidatedModule {
   if (typeof mod['default'] !== 'function') {
     throw new AppError(
       APP_SHAPE_INVALID,
@@ -305,7 +305,9 @@ export function validateModuleShape(mod: Record<string, unknown>, id: string): V
       `named export skills 必须是 string[]（自带技能目录清单，相对应用包根，契约篇 §1.2 第六件）`,
     );
   }
-  // 形状已验：default 收窄为真实签名（Record<string,unknown> → 契约形，单点转换）
+  // SAFETY: 上方形状校验已逐成员确认运行时形状（default 函数/name/inject/optionalInject/
+  // config/events/skills），Record<string, unknown> → ValidatedModule 的成员级收窄 TS 无法
+  // 静态验证——校验与转换同居同一函数单点兑现，违例在上方已抛 APP_SHAPE_INVALID
   return mod as unknown as ValidatedModule;
 }
 
@@ -320,7 +322,7 @@ const CUSTOM_EVENT_NAME_FORMAT = /^[a-z][a-z0-9-]*(\/[a-z][a-z0-9-]*)+$/;
  *
  * 导出（K3-b2）：worker 半在 worker realm 复用同一校验——声明面纪律单实现。
  */
-export function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, id: string): void {
+export function validateEventDefs(defs: readonly LiveEventDefinition[] | undefined, _id: string): void {
   if (!defs) return;
   for (const def of defs) {
     if (typeof def.name !== 'string' || !CUSTOM_EVENT_NAME_FORMAT.test(def.name)) {
@@ -455,7 +457,7 @@ export interface LoadAppsOptions {
     /** 第五键注入物（llm 模块 providerApiFace——pi-ai provider 工厂族背书导出） */
     readonly llm?: object;
     /** 第六键注入物（persist 模块 createAppSqliteFace 产物——同实例 + 主库拒开包装） */
-    readonly sqlite?: { openDatabase(path: string, options?: { readonly?: boolean }): unknown };
+    readonly sqlite?: { openDatabase(path: string, options?: { readonly?: boolean }): object };
   };
   /**
    * worker 行装载器（第二十七批刀二 K3-b2，拓扑 seam）：bridge 模块注入。缺省
@@ -569,7 +571,11 @@ export async function loadApps(
     // import + 形状校验 + 自定义事件词汇登记（失败进清单不阻断——其余行仍要出全量诊断）
     try {
       let mod: Record<string, unknown>;
-      if (row.builtin !== undefined) {
+      if (row.builtin === undefined) {
+        // import 门禁树根 = 入口所在目录（realpath 归一）——设置/求值/清空三步
+        // 收口在 importAppEntry（第二十七批刀二：worker 半同用此件）
+        mod = await importAppEntry(jiti, row.entry!);
+      } else {
         // 官方件（契约篇 §6.1 `builtin:` 前缀）：宿主随包函数引用，不经 jiti、
         // 不受应用零 import 约束——包成模块记录后与文件应用走**完全同轨**的形状
         // 校验/事件登记/轮次激活/生命周期事件管线（apply 替位 default，字段同名转抄）
@@ -577,10 +583,6 @@ export async function loadApps(
         for (const key of ['name', 'inject', 'optionalInject', 'config', 'events', 'skills'] as const) {
           if (row.builtin[key] !== undefined) mod[key] = row.builtin[key];
         }
-      } else {
-        // import 门禁树根 = 入口所在目录（realpath 归一）——设置/求值/清空三步
-        // 收口在 importAppEntry（第二十七批刀二：worker 半同用此件）
-        mod = await importAppEntry(jiti, row.entry!);
       }
       const module = validateModuleShape(mod, row.id);
       // 自定义事件词汇登记（§1.1 逃生口）：装载阶段①（一切 apply 之前）统一入册——
@@ -670,7 +672,7 @@ async function activateOne(
   const fail = (code: string, message: string, stack?: string): void => {
     // 栈键仅在场时携带（G1 诊断文件取材面——undefined 不进载荷，JSON 面零噪音）
     const payload: AppFailedPayload =
-      stack !== undefined ? { id: row.id, code, message, stack } : { id: row.id, code, message };
+      stack === undefined ? { id: row.id, code, message } : { id: row.id, code, message, stack };
     failed.push(payload);
     root.emit('app/failed', payload);
   };
@@ -705,7 +707,7 @@ async function activateOne(
     name: row.id,
     rowId: row.id,
     builtinRow,
-    ...(row.config !== undefined ? { config: row.config } : {}),
+    ...(row.config === undefined ? {} : { config: row.config }),
     // 跨区行 provide 扇出（D3 装载分面分区，契约篇 §5.1 装载律①）：apps 枚举
     // 多应用的行挂系统相位装载恰一次（zone 随锚级联 'system'——读链收窄由装载
     // 律③承载），provide 同键写进枚举各区表（应用区表——不回流系统区表）；独占
@@ -723,7 +725,11 @@ async function activateOne(
       // 推导——jiti 模块对象上即使带 packageRoot 键也在此被忽略（暗道不存在，
       // 自述键只挂 BuiltinAppModule 类型面、不入 validateModuleShape）
       const packageRoot =
-        row.builtin !== undefined ? row.builtin.packageRoot : row.entry !== undefined ? dirname(row.entry) : undefined;
+        row.builtin === undefined
+          ? row.entry === undefined
+            ? undefined
+            : dirname(row.entry)
+          : row.builtin.packageRoot;
       opts.registerSkills({
         id: row.id,
         name: declaredName,

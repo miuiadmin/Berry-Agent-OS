@@ -11,6 +11,7 @@ import {
   CONTEXT_DISPOSED,
   CONTEXT_EFFECT_INVALID,
   CONTEXT_EFFECT_LIMIT,
+  CONTEXT_FORK_LIMIT,
   CONTEXT_SERVICE_EXISTS,
   CONTEXT_SERVICE_NAME_INVALID,
   CONTEXT_SERVICE_NOT_FOUND,
@@ -78,6 +79,8 @@ const ROOT_TABLE = '(root)';
  * registerSessionEventType/fork 级联）全走 pushEffect 单点，一条钟罩全族。
  */
 const EFFECT_LIMIT = 10_000;
+/** fork 直系子作用域计数帽（契约篇 §1.5 fork 护栏，2026-08-31 技术债批）：fork 轰炸防线，与 effect 帽同族；装载行序 + 应用内部组织远低于此。计数基准 = 活子代（子 dispose 即减，非历史累计） */
+const FORK_CHILD_LIMIT = 128;
 /** 单条 effect 回卷竞速时钟缺省（毫秒）——挂起 disposer 超此即放弃等待 */
 const DEFAULT_DISPOSE_TIMEOUT_MS = 1000;
 
@@ -263,6 +266,12 @@ class ContextScopeImpl implements ContextScope {
   readonly provideZones: readonly string[] | undefined;
   /** 是否已销毁——销毁后注册类 API 一律拒绝（stale ctx 护栏） */
   private disposed = false;
+  /**
+   * 在册直系子作用域计数（fork 帽执法面）：fork 前置检查 + 子 dispose 减一——
+   * 挂子作用域自身 effect 栈首（dispose 幂等保证恰好减一次，父级联回卷同样经
+   * child.dispose 触发）。超 FORK_CHILD_LIMIT 抛 CONTEXT_FORK_LIMIT。
+   */
+  private liveChildren = 0;
 
   constructor(
     runtime: ContextRuntime,
@@ -313,7 +322,7 @@ class ContextScopeImpl implements ContextScope {
    */
   private assertServiceName(name: string): void {
     /** 定位后缀（作用域名 + 行 id——报错可归因到行） */
-    const where = `——作用域 ${this.name}${this.rowId !== undefined ? `（行 ${this.rowId}）` : ''}`;
+    const where = `——作用域 ${this.name}${this.rowId === undefined ? '' : `（行 ${this.rowId}）`}`;
     if (this.builtinRow) {
       if (!SERVICE_NAME_SEGMENT.test(name)) {
         throw new AppError(
@@ -433,7 +442,7 @@ class ContextScopeImpl implements ContextScope {
       throw new AppError(
         EVENT_HOST_RESERVED,
         `事件「${event}」是宿主保留词（目录 hostReserved 标注，契约篇 §2.2 增补 9）——仅官方名位作用域可订阅/派发；作用域 ${this.name}` +
-          `${this.rowId !== undefined ? `（行 ${this.rowId}）` : ''} 行籍为第三方，五面皆拒（EVENT_HOST_RESERVED）`,
+          `${this.rowId === undefined ? '' : `（行 ${this.rowId}）`} 行籍为第三方，五面皆拒（EVENT_HOST_RESERVED）`,
       );
     }
   }
@@ -556,7 +565,7 @@ class ContextScopeImpl implements ContextScope {
     if (!hit.found) {
       throw new AppError(
         CONTEXT_SERVICE_NOT_FOUND,
-        `服务未注册：${name}${this.zone !== undefined ? `（本区 ${this.zone} 读链：本区表→系统区表→根表）` : ''}`,
+        `服务未注册：${name}${this.zone === undefined ? '' : `（本区 ${this.zone} 读链：本区表→系统区表→根表）`}`,
       );
     }
     return hit.impl as T;
@@ -580,7 +589,7 @@ class ContextScopeImpl implements ContextScope {
     this.assertActive();
     this.assertServiceName(name);
     // 写入目标表列：显式扇出 > 区身份单表 > 根表（宿主面）
-    const targetZones: readonly string[] = this.provideZones ?? (this.zone !== undefined ? [this.zone] : [ROOT_TABLE]);
+    const targetZones: readonly string[] = this.provideZones ?? (this.zone === undefined ? [ROOT_TABLE] : [this.zone]);
     // 撞名检查（全目标先查后写——原子）：任何目标碰撞域内已有同名即拒，
     // 不写半套（多表扇出的跨区行不会出现「一区写成一区被拒」的半吊子态）
     for (const zone of targetZones) {
@@ -589,7 +598,7 @@ class ContextScopeImpl implements ContextScope {
           throw new AppError(
             CONTEXT_SERVICE_EXISTS,
             `服务重复注册：${name}（写入目标区 ${zone === ROOT_TABLE ? '根表' : zone}——作用域 ${this.name}` +
-              `${this.rowId !== undefined ? `（行 ${this.rowId}）` : ''}；撞名域 = 根表×系统区互斥、应用区表内自查）`,
+              `${this.rowId === undefined ? '' : `（行 ${this.rowId}）`}；撞名域 = 根表×系统区互斥、应用区表内自查）`,
           );
         }
       }
@@ -644,6 +653,15 @@ class ContextScopeImpl implements ContextScope {
     zone?: string;
     provideZones?: readonly string[];
   }): ContextScope {
+    // fork 帽前置执法（契约篇 §1.5 fork 护栏）：直系活子代达上限即拒——fork 轰炸
+    // 与 effect 帽/事件限流同族防线；名额随子 dispose 释放（见下方接线），循环
+    // fork+dispose 不误伤
+    if (this.liveChildren >= FORK_CHILD_LIMIT) {
+      throw new AppError(
+        CONTEXT_FORK_LIMIT,
+        `作用域 ${this.name} 在册直系子作用域达上限 ${FORK_CHILD_LIMIT}（fork 轰炸护栏——子作用域 dispose 即释放名额）`,
+      );
+    }
     const child = new ContextScopeImpl(
       this.runtime,
       `${this.name}:${opts.name}`,
@@ -661,6 +679,13 @@ class ContextScopeImpl implements ContextScope {
     );
     // 登记内部通道（registerLiveEvent 经 WeakMap 找根运行时——fork 产物同样可作锚）
     scopeRuntimes.set(child, this.runtime);
+    // fork 名额释放接线（与「子作用域销毁接线进父 effect 栈」成对）：减一挂子作用域
+    // 自身 effect 栈——child.dispose() 无论显式调用还是父级联回卷触发，都回卷子
+    // 栈释放名额；dispose 幂等（disposed 标记）保证恰好减一次
+    child.effect(() => () => {
+      this.liveChildren--;
+    });
+    this.liveChildren++;
     // 子作用域销毁接线进父 effect 栈（2026-08-23 独立重读轮 #23 落码）：父/根
     // dispose 时 LIFO 级联回卷全部子作用域——宿主忘显式 dispose 也兜底；dispose
     // 幂等（disposed 标记），显式销毁后父侧再调是空操作，双保险无害。
@@ -822,15 +847,20 @@ function errorStack(err: unknown): string {
  * @param scope 任意作用域（取根运行时——fork 共享同一 runtime）
  * @param zone 行读链区身份（'system' | 'app:<id>'；undefined = 宿主面）
  * @param name 服务名
- * @returns 命中实现；读链缺席 = undefined（APP_INJECT_UNRESOLVED 的判定源）
+ * @returns 命中实现（泛型收窄同 tryGet——装载器调用面只判存在性，值消费方在
+ *         自身边界声明窄类型）；读链缺席 = undefined（APP_INJECT_UNRESOLVED 的判定源）
  */
-export function tryResolveService(scope: ContextScope, zone: string | undefined, name: string): unknown {
+export function tryResolveService<T = unknown>(
+  scope: ContextScope,
+  zone: string | undefined,
+  name: string,
+): T | undefined {
   const runtime = scopeRuntimes.get(scope);
   if (runtime === undefined) {
     throw new AppError(CONTEXT_DISPOSED, 'tryResolveService：未知作用域（须为 createContext/fork 产物）');
   }
   for (const table of runtime.readTables(zone)) {
-    if (table.has(name)) return table.get(name);
+    if (table.has(name)) return table.get(name) as T;
   }
   return undefined;
 }
