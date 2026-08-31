@@ -14,8 +14,14 @@
 export { runArgv, classifyDenials, OUTPUT_BUDGET_BYTES, killTree } from './spawn.js';
 export type { RunArgvOptions, RunResult } from './spawn.js';
 
-/* 子进程环境白名单（契约篇 §1.2 E 组执法面②） */
-export { buildChildEnv, isEnvNameAllowlisted, isEnvNameForbidden } from './env.js';
+/* 子进程环境白名单（契约篇 §1.2 E 组执法面②）+ 宿主主动注入通道（同条，第四十四批） */
+export {
+  buildChildEnv,
+  isEnvNameAllowlisted,
+  isEnvNameForbidden,
+  hostInjectRecord,
+  HOST_INJECT_AI_AGENT_VALUE,
+} from './env.js';
 export type { CommandProcessLog } from './spawn.js';
 
 /* bash 工具件（模型工具面） */

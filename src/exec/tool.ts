@@ -32,6 +32,7 @@ import {
   validateEscalationArgs,
 } from '../safety/index.js';
 import { classifyDenials, runArgv, type CommandProcessLog } from './spawn.js';
+import { buildChildEnv } from './env.js';
 
 export type { CommandProcessLog };
 import { resolveBash } from './bash-path.js';
@@ -57,6 +58,12 @@ export interface BashToolOptions {
    * danger 目标恒问）。装配注入活数组引用，TTL 过期由引擎逐调用判定。
    */
   readonly allowlist?: readonly AllowlistEntry[];
+  /**
+   * 宿主主动注入值取值器（契约篇 §1.2 宿主主动注入通道，2026-08-31 第四十四批）：
+   * bash 按会话装配（chat 件 open() 闭包传本会话 sessionId 的 hostInjectRecord）；
+   * 逐调用取最新；undefined = 该装配形态不注入（测试缺省）。
+   */
+  readonly hostEnv?: () => Record<string, string>;
   /**
    * 命令进程登记簿（契约篇 §6.6 子进程治理条 exec 腿，2026-08-29 critic #1）：
    * spawn 即登记、净退即删——宿主猝死后由启动期孤儿清扫认领树杀。组合根经
@@ -202,10 +209,14 @@ export function createBashTool(opts: BashToolOptions): ToolDefinition {
       }
 
       /* ---- 自治执行（超时树杀抛 TOOL_TIMEOUT；流式增量 onUpdate 推 TUI） ---- */
+      // 宿主主动注入在场 = 显式合成 env（白名单→注入→（无表）同层序单源
+      // buildChildEnv；undefined 注入装配 = 不传 env 走 spawn 缺省，行为不变）
+      const hostInject = opts.hostEnv?.();
       const run = await runArgv(argv, {
         cwd,
         timeoutMs: clamped,
         signal: tctx.signal,
+        ...(hostInject !== undefined ? { env: buildChildEnv(process.env, undefined, hostInject) } : {}),
         // 命令进程登记簿透传（宿主猝死孤儿治理——见 BashToolOptions.commandLog 注）
         ...(opts.commandLog !== undefined ? { commandLog: opts.commandLog } : {}),
         onOutput:

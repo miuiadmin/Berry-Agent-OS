@@ -72,7 +72,9 @@ export function isEnvNameAllowlisted(name: string): boolean {
   return false;
 }
 
-/** 变量名是否命中禁运两类（凭证族后缀 / 宿主保留前缀——大小写不敏感） */
+/**
+ * 变量名是否命中禁运两类（凭证族后缀 / 宿主保留前缀——大小写不敏感）
+ */
 export function isEnvNameForbidden(name: string): boolean {
   const upper = name.toUpperCase();
   for (const suffix of ENV_FORBIDDEN_SUFFIXES) {
@@ -84,22 +86,69 @@ export function isEnvNameForbidden(name: string): boolean {
   return false;
 }
 
+/* ---------------- 宿主主动注入通道（契约篇 §1.2 E 组执法面②，2026-08-31
+ * 第四十四批灵感 8）----------------
+ *
+ * 白名单之外，**宿主自身**可向子进程注入身份标识变量（区别于 env 透传：
+ * 注入值是宿主创作的值，不是把宿主 process.env 搬进子进程）。词表封闭——
+ * v1 恰两件，新词随实证增补 = 规范先行修契约篇，非码面自由扩展：
+ * - `APP_SESSION_ID`：发起执行的当前会话 id（无会话语境 = 诚实缺席不注入）；
+ * - `AI_AGENT`：运行时标识（生态互认位——子进程可探测「跑在 AI agent 会话里」；
+ *   值 = 'berry' 是与 bin.berry 同族的对外呈现值位，非代码标识符——
+ *   去品牌化红线不适用，上位允许位清单已同批扩项）。
+ *
+ * inherit 名单命中注入词名照旧按禁运拒（APP_SESSION_ID 撞 APP_* 保留前缀即
+ * EXEC_ENV_FORBIDDEN——inherit 走宿主 env 面本就禁运，注入值不经此路）。
+ */
+
+/** 注入值位：运行时标识（用户可见对外呈现值——与 bin.berry 同位，非标识符） */
+export const HOST_INJECT_AI_AGENT_VALUE = 'berry';
+
 /**
- * 构造子进程环境：白名单隐式透传 + 变更表叠加。
+ * 宿主注入值合成器（两消费面单源：bash 工具按会话装配直传 sessionId，
+ * ctx.exec 服务按桥帧守卫三态解析后传入）。
+ * @param sessionId 发起执行的当前会话 id；undefined = 无会话语境
+ * （调度 tick 等）——APP_SESSION_ID 诚实缺席，AI_AGENT 恒在
+ */
+export function hostInjectRecord(sessionId: string | undefined): Record<string, string> {
+  return {
+    AI_AGENT: HOST_INJECT_AI_AGENT_VALUE,
+    ...(sessionId !== undefined ? { APP_SESSION_ID: sessionId } : {}),
+  };
+}
+
+/**
+ * 构造子进程环境：白名单隐式透传 + 宿主主动注入 + 变更表叠加。
+ *
+ * 层序（契约篇 §1.2）：白名单 → 宿主注入 → inherit → set → unset——
+ * 注入层在变更表之前，故行显式 set 同名可覆盖注入值、unset 可摘除
+ * （身份披露是语境不是安全边界，应用显式改写合法）。
  *
  * @param processEnv 宿主进程环境（注入式——测试可换脚本身）
  * @param table 声明式变更表（缺省 = 纯白名单透传）
+ * @param hostInject 宿主主动注入值（hostInjectRecord 产物；缺省 = 无注入）
  * @returns 子进程 env 对象（spawn env 参数直接可用）
  * @throws AppError(EXEC_ENV_FORBIDDEN) inherit 名单命中禁运名——响亮拒，
  *         机器堵的是名单走私；set 显式值任意名合法不在此列
  */
-export function buildChildEnv(processEnv: NodeJS.ProcessEnv, table?: ExecEnvTable): Record<string, string> {
+export function buildChildEnv(
+  processEnv: NodeJS.ProcessEnv,
+  table?: ExecEnvTable,
+  hostInject?: Readonly<Record<string, string>>,
+): Record<string, string> {
   // 第一层：白名单隐式透传（deny-by-default——不在名单内的宿主变量不出现在子进程）
   const child: Record<string, string> = {};
   for (const name of Object.keys(processEnv)) {
     if (!isEnvNameAllowlisted(name)) continue;
     const value = processEnv[name];
     if (value !== undefined) child[name] = value;
+  }
+
+  // 第 1.5 层：宿主主动注入（白名单之后、变更表之前——见函数头注层序）
+  if (hostInject !== undefined) {
+    for (const [name, value] of Object.entries(hostInject)) {
+      child[name] = value;
+    }
   }
 
   if (!table) return child;

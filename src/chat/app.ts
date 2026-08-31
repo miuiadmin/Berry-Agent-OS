@@ -63,6 +63,7 @@ import { APPROVAL_ANSWER_EVENT, bridgeApprovalSignal, createApprovalService } fr
 import { conductGateLines, installSafetyGate, type GateRowFilter } from '../safety/gate.js';
 import type { AllowlistEntry } from '../safety/allowlist.js';
 import { createBashTool, type CommandProcessLog } from '../exec/tool.js';
+import { hostInjectRecord } from '../exec/env.js';
 import { createTodoTool, foldCurrentTodo, registerTodoInjection } from './todo.js';
 import type { TodoEnforcement, TodoItem } from './todo.js';
 import { GATE_COMMAND_TIMEOUT_MS } from './todo-gates.js';
@@ -1133,6 +1134,9 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         // 同一活数组同源（与守门行 deps.allowlist() 同取值器——「始终允许」bash
         // 词干条目在升权裁决免问面消费，§8.4 增补 2 落码形态③）
         allowlist: deps.allowlist(),
+        // 宿主主动注入（契约篇 §1.2 第四十四批）：bash 按会话装配即注入本会话
+        // id——子进程 APP_SESSION_ID/AI_AGENT 身份披露，词表单源 hostInjectRecord
+        hostEnv: () => hostInjectRecord(sessionId),
         // 命令进程登记簿透传（宿主猝死孤儿治理——见 ChatAppDeps.commandLog 注）
         ...(deps.commandLog !== undefined ? { commandLog: deps.commandLog } : {}),
       });

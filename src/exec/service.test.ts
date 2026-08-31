@@ -17,6 +17,7 @@ import { runInCallerChain } from '../context/chain.js';
 import { createToolPipeline } from '../tools/index.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
 import { registerExecService } from './service.js';
+import { hostInjectRecord } from './env.js';
 
 /** 测试工作区 */
 let workspace = '';
@@ -235,5 +236,40 @@ describe('行收窄注入面（R1 P0-4——confinementFor 按 caller-chain 行 
     });
     await runInCallerChain('row-x', () => service.exec('bash', ['-c', 'true']));
     expect(policies).toEqual([]); // danger 透传：confine 全程不被调
+  });
+});
+
+describe('宿主主动注入通道接线（契约篇 §1.2，2026-08-31 第四十四批）', () => {
+  /** 组装带 hostEnv 的被测服务（真子进程 echo 探测——行为级物证） */
+  function makeInjectedService(sessionId: string | undefined) {
+    const ctx = createContext({ name: 'test-exec-hostenv' });
+    const pipeline = createToolPipeline(ctx);
+    const service = registerExecService(ctx, {
+      pipeline,
+      sandbox: fakeSandbox,
+      mode: () => 'workspace-write',
+      workspaceRoot: workspace,
+      hostEnv: () => hostInjectRecord(sessionId),
+    });
+    return service;
+  }
+
+  it('hostEnv 在场无 env 表：注入层恒生效（合成 env 不缺席）', async () => {
+    const service = makeInjectedService('sess-svc-1');
+    // 无 callOpts.env 也无注入时 env=undefined 走 spawn 缺省；注入在场则必合成
+    const result = await service.exec('bash', ['-c', 'echo "$AI_AGENT|$APP_SESSION_ID"']);
+    expect(result.stdout).toContain('berry|sess-svc-1');
+  });
+  it('注入层与变更表同层序单源：set 覆盖注入值、白名单照透', async () => {
+    const service = makeInjectedService('sess-svc-2');
+    const result = await service.exec('bash', ['-c', 'echo "$AI_AGENT|$APP_SESSION_ID|$FOO"'], {
+      env: { set: { FOO: 'table-wins' } },
+    });
+    expect(result.stdout).toContain('berry|sess-svc-2|table-wins');
+  });
+  it('无会话语境：APP_SESSION_ID 诚实缺席、AI_AGENT 恒在', async () => {
+    const service = makeInjectedService(undefined);
+    const result = await service.exec('bash', ['-c', 'echo "[$AI_AGENT][$APP_SESSION_ID]"']);
+    expect(result.stdout).toContain('[berry][]');
   });
 });

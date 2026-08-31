@@ -46,6 +46,12 @@ export interface ExecServiceOptions {
    */
   readonly confinementFor?: (caller: string | undefined) => readonly string[] | undefined;
   /**
+   * 宿主主动注入值取值器（契约篇 §1.2 宿主主动注入通道，2026-08-31 第四十四批）：
+   * 逐调用取最新（会话语境可变——前台聚焦/链帧随调用方变）。组合根注入，
+   * 返回 hostInjectRecord 产物；undefined = 该装配形态不注入（测试缺省）。
+   */
+  readonly hostEnv?: () => Record<string, string>;
+  /**
    * 命令进程登记簿（契约篇 §6.6 子进程治理条 exec 腿，2026-08-29 critic #1）：
    * spawn 即登记、净退即删——宿主猝死后由启动期孤儿清扫认领树杀。组合根注
    * mcp ChildRegistry 适配器（exec 结构上不见 mcp，killTree 闭包同款先例）。
@@ -105,8 +111,14 @@ function toExecResult(run: RunResult, sandbox: ExecResult['sandbox']): ExecResul
 export function registerExecService(ctx: Context, opts: ExecServiceOptions): ExecService {
   const service: ExecService = {
     async exec(cmd, args, callOpts = {}): Promise<ExecResult> {
-      // env 表先合成（EXEC_ENV_FORBIDDEN 在此响亮拒——机器执法先于守门段）
-      const env = callOpts.env !== undefined ? buildChildEnv(process.env, callOpts.env) : undefined;
+      // env 先合成（EXEC_ENV_FORBIDDEN 在此响亮拒——机器执法先于守门段）；
+      // 宿主注入在场时无表也合成（注入层恒生效——白名单→注入→变更表同层序，
+      // 两消费面单源 buildChildEnv；无注入无表 = env undefined 走 spawn 缺省）
+      const hostInject = opts.hostEnv?.();
+      const env =
+        callOpts.env !== undefined || hostInject !== undefined
+          ? buildChildEnv(process.env, callOpts.env, hostInject)
+          : undefined;
       // 真值捕获口：execute 内写入——管道后处理段可改写 result 对象，但
       // 服务面返回值以本闭包捕获为准（details 面不依赖 post 段不重写）
       let captured: ExecResult | undefined;

@@ -65,7 +65,12 @@ import type {
 } from '../safety/index.js';
 // exec 件聚落（第 18 模块，2026-08-25 exec 纵切）：bash 工具件 + ctx.exec 服务 +
 // environment 披露段——组合根双装配点注册（检索族先例）
-import { registerExecService, renderEnvironmentSection, type CommandProcessLog } from '../exec/index.js';
+import {
+  registerExecService,
+  renderEnvironmentSection,
+  hostInjectRecord,
+  type CommandProcessLog,
+} from '../exec/index.js';
 import { createBridgeFleet, type BridgeFleet } from './bridge-fleet.js';
 import {
   createLocalSkillsProvider,
@@ -1757,6 +1762,21 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     mode: () => sandboxMode,
     workspaceRoot: workspace,
     confinementFor: rowConfinementLookup,
+    // 宿主主动注入（契约篇 §1.2 第四十四批）：会话解析 = 桥帧守卫三态
+    //（与 routedForDurable 同款裁决——chainSessionId 优先；行代执行〔有
+    // caller 帧无 session 帧〕诚实缺席防污染他人归因；无帧才落前台聚焦
+    // routed()）——AI_AGENT 恒在，APP_SESSION_ID 按语境
+    hostEnv: () => {
+      // 三态解析（见上注）：链会话帧 → 行代执行缺席 → 前台聚焦
+      const chained = chainSessionId();
+      const sessionId =
+        chained !== undefined
+          ? chained
+          : chainCaller() !== undefined
+            ? undefined
+            : (registry.routed()?.session.header.sessionId ?? undefined);
+      return hostInjectRecord(sessionId);
+    },
     // 命令进程登记簿（§6.6 exec 腿）：服务面（域 RPC 宿主半 spawn 在此腿）
     // spawn 登记——宿主猝死后启动期清扫认领
     commandLog,

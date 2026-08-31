@@ -16,6 +16,7 @@ import type { ToolCtx } from '../contracts/tools.js';
 import type { SandboxMode, SandboxService } from '../safety/index.js';
 import type { ApprovalService } from '../safety/approval.js';
 import { createBashTool } from './tool.js';
+import { hostInjectRecord } from './env.js';
 
 /** 测试工作区（beforeAll 建 / afterAll 拆） */
 let workspace = '';
@@ -285,5 +286,41 @@ describe('结果面基础', () => {
     expect(text).toContain('有损解码');
     // details.outputEncoding 双流终判随 ...run 展开自动携带
     expect(result.details.outputEncoding).toMatchObject({ stdout: 'utf-8-lossy', stderr: 'utf-8' });
+  });
+});
+
+describe('宿主主动注入通道接线（契约篇 §1.2，2026-08-31 第四十四批）', () => {
+  /** 组装带 hostEnv 的被测工具（真子进程 echo 探测——行为级物证非 mock 断言） */
+  function makeInjectedTool(sessionId: string | undefined) {
+    const sb = fakeSandbox();
+    const ap = fakeApproval();
+    const tool = createBashTool({
+      sandbox: sb.sandbox,
+      approval: ap.approval,
+      mode: () => 'danger-full-access', // 透传 argv——聚焦 env 面不被 confine 包装干扰
+      workspaceRoot: workspace,
+      hostEnv: () => hostInjectRecord(sessionId),
+    });
+    return tool;
+  }
+
+  it('hostEnv 在场：子进程可见 AI_AGENT + APP_SESSION_ID（逐调用取最新）', async () => {
+    const tool = makeInjectedTool('sess-tool-1');
+    const result = await run(tool, { command: 'echo "$AI_AGENT|$APP_SESSION_ID"' });
+    expect(result.content[0]!.text).toContain('berry|sess-tool-1');
+    // 取值器逐调用取最新：第二次调用换会话 id，注入值跟随
+    const toolAgain = makeInjectedTool('sess-tool-2');
+    const result2 = await run(toolAgain, { command: 'echo "$APP_SESSION_ID"' });
+    expect(result2.content[0]!.text).toContain('sess-tool-2');
+  });
+  it('hostEnv 缺席：装配形态不注入（spawn 缺省 env 面无注入词）', async () => {
+    const { tool } = makeTool(); // makeTool 不带 hostEnv——缺省装配形态
+    const result = await run(tool, { command: 'echo "[$AI_AGENT][$APP_SESSION_ID]"' });
+    expect(result.content[0]!.text).toContain('[][]');
+  });
+  it('无会话语境：APP_SESSION_ID 诚实缺席、AI_AGENT 恒在', async () => {
+    const tool = makeInjectedTool(undefined);
+    const result = await run(tool, { command: 'echo "[$AI_AGENT][$APP_SESSION_ID]"' });
+    expect(result.content[0]!.text).toContain('[berry][]');
   });
 });
