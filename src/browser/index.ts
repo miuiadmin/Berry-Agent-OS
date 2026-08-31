@@ -24,6 +24,18 @@ export {
   type CdpVersionInfo,
 } from './cdp.js';
 export { discoverEngine } from './discover.js';
+// 刀二新增面：a11y 渲染 / 捕获态 / 截图落盘 / 工具面注册
+export {
+  renderAccessibilitySnapshot,
+  INTERACTIVE_ROLES,
+  SNAPSHOT_MAX_BYTES,
+  type A11yRef,
+  type A11ySnapshot,
+  type FlatDocNode,
+} from './a11y.js';
+export { ConsoleRing, SessionCapture, applyCaptureEvent, type ConsoleEntry, type SnapshotRefEntry } from './capture.js';
+export { saveScreenshot, SCREENSHOTS_KEEP, type SavedScreenshot } from './screenshots.js';
+export { registerBrowserTools, type BrowserToolsDeps } from './tools.js';
 export {
   BROWSER_APP_CONFIG_SCHEMA,
   type BrowserAppConfig,

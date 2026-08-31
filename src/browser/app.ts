@@ -11,8 +11,10 @@
  */
 
 import type { AppContext, BuiltinAppModule } from '../contracts/app.js';
+import type { ToolsService } from '../contracts/tools.js';
 import type { CdpConnectionFactory } from './cdp.js';
 import { BrowserEngine, type EngineChild, type EngineRegistryLike, type SessionHandle } from './engine.js';
+import { registerBrowserTools } from './tools.js';
 import { BROWSER_APP_CONFIG_SCHEMA, type BrowserAppConfig, type EngineStatus } from './types.js';
 
 /** ui 通知面（引擎生命周期人读出口——channels 服务结构子集，lsp 同款） */
@@ -56,6 +58,7 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
   return {
     name: 'browser',
     config: BROWSER_APP_CONFIG_SCHEMA,
+    inject: ['ui', 'tools'], // ui = 引擎生命周期通知；tools = 刀二工具面注册（行序 browser 最末亦稳）
     apply: (ctx: AppContext, config?: Readonly<Record<string, unknown>>) => {
       const ui = ctx.get<UiNotifyFace>('ui');
       // 行 config（装载面已按 schema 校验——此处窄读消费键）
@@ -89,6 +92,19 @@ export function createBrowserApp(deps: BrowserAppDeps): BuiltinAppModule {
         dispose: () => engine.dispose(),
       };
       ctx.provide('browser', service);
+
+      // 工具面十件注册（刀二——模型面 ctx.effect：行回卷同批注销）
+      ctx.effect(() => {
+        const tools = ctx.get<ToolsService>('tools');
+        const disposers = registerBrowserTools({
+          service,
+          dataDir: deps.dataDir,
+          register: (def) => tools.register(def),
+        });
+        return () => {
+          for (const dispose of disposers) dispose();
+        };
+      });
 
       // 行回卷：引擎永久关停（Browser.close 优雅 → 树杀兜底 → 登记簿净退）
       ctx.effect(() => {

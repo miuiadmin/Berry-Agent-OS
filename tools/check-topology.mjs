@@ -86,12 +86,11 @@ const MODULE_EDGES = {
   // obs = 观测面官方件（契约篇 §6.9，2026-08-31 观测复盘批）：web/admin 单边
   // 形态 + persist 自管库边（createAppSqliteFace 直连开库——零跨模块 import）
   obs: ['contracts', 'persist'],
-  // browser = 浏览器自动化官方件（契约篇 §6.10，2026-08-31 第四十九批刀一）：
-  // contracts 单边（admin 最窄边同档）——AppContext/BuiltinAppModule/AppLogger 全
-  // 类型面住 contracts；spawn/kill/桥核/登记簿全经组合根闭包注入
-  //（app/browser-spawn.ts）——结构上不见 exec/mcp/context。web 卫生件边
-  //（assertPublicHost 三件再导出）刀三 SSRF 接线真用时再入册（边随真用执法）
-  browser: ['contracts'],
+  // browser = 浏览器自动化官方件（契约篇 §6.10，2026-08-31 第四十九批）：
+  // contracts 类型边 + web 卫生件边（刀二 navigate SSRF 前置真用入册——
+  // assertPublicHost/requireHttpUrl 复用同码第三消费面）。spawn/kill/桥核/
+  // 登记簿全经组合根闭包注入（app/browser-spawn.ts）——结构上不见 exec/mcp/context
+  browser: ['contracts', 'web'],
   app: [
     'contracts',
     'context',

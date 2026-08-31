@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppLogger } from '../contracts/app.js';
+import { applyCaptureEvent, SessionCapture } from './capture.js';
 import {
   CdpConnection,
   disposeSessionContext,
@@ -78,10 +79,12 @@ export interface BrowserEngineDeps {
   readonly onNoise?: (message: string) => void;
 }
 
-/** 会话取用产物：桥 + 隔离态（工具面消费——rpc 走 session 路由发 page 级命令） */
+/** 会话取用产物：桥 + 隔离态 + 捕获态（工具面消费——rpc 走 session 路由发 page 级命令） */
 export interface SessionHandle {
   readonly rpc: CdpRpc;
   readonly session: SessionBrowserState;
+  /** per-session 捕获态（console 环形缓冲 + a11y ref 表——刀二） */
+  readonly capture: SessionCapture;
   /** 引擎来源自述（fallbackWarning 在场 = 发现序回退过——工具结果披露面消费） */
   readonly engineNote?: string;
 }
@@ -104,6 +107,10 @@ export class BrowserEngine {
   private discovered: DiscoveredEngine | undefined;
   /** per-session 隔离态表（路由键 = sessionId；匿名兜底 '_default'） */
   private readonly contexts = new Map<string, SessionBrowserState>();
+  /** per-session 捕获态表（与 contexts 同键同生命周期——刀二捕获条款） */
+  private readonly captures = new Map<string, SessionCapture>();
+  /** CDP sessionId → 路由键反查表（事件分流后定位所属捕获态） */
+  private readonly keyByCdpSession = new Map<string, string>();
   /** per-session 闲置计时器表（与 contexts 同键同生命周期） */
   private readonly contextTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 引擎级闲置计时器（零活 context 期武装；任一取用即撤） */
@@ -149,12 +156,45 @@ export class BrowserEngine {
       if (conn === undefined) throw new Error('引擎未运行（内部状态不一致）');
       session = await openSessionContext(conn.rpc);
       this.contexts.set(key, session);
+      // 捕获态挂载 + 事件分流索引（刀二：console/异常/dialog 事件源随 context 建立）
+      this.captures.set(key, new SessionCapture());
+      this.keyByCdpSession.set(session.sessionId, key);
+      // page 级域启用：Runtime = console/异常事件源；Page = dialog 事件源
+      // （fail-loud：域启用失败 = context 建立失败——不留静默半捕获态）
+      await conn.rpc.request('Runtime.enable', undefined, { sessionId: session.sessionId });
+      await conn.rpc.request('Page.enable', undefined, { sessionId: session.sessionId });
       this.deps.logger.debug(`browser context 建立（session=${key}，target=${session.targetId}）`);
     }
     this.touchContext(key);
     const engineNote = this.discovered?.fallbackWarning;
-    return { rpc: this.connection!.rpc, session, ...(engineNote !== undefined ? { engineNote } : {}) };
+    const capture = this.captures.get(key)!;
+    return { rpc: this.connection!.rpc, session, capture, ...(engineNote === undefined ? {} : { engineNote }) };
   }
+
+  /**
+   * target 级事件路由（连接级单口——bringUp 两形态统一接线）：
+   * ① CDP sessionId 反查路由键 → 所属捕获态消费（console/异常进环形缓冲；
+   *    dialog 出 dismiss 判定 → 本层持 rpc 回发——capture 件零协议发送）；
+   * ② 尾部透传 deps.onEvent（外部观察面/刀三接线）。
+   */
+  private readonly routeEvent = (method: string, params: unknown, sessionId?: string): void => {
+    if (sessionId !== undefined) {
+      const key = this.keyByCdpSession.get(sessionId);
+      const capture = key === undefined ? undefined : this.captures.get(key);
+      if (capture !== undefined) {
+        const outcome = applyCaptureEvent(capture, method, params);
+        if (outcome?.dialog !== undefined) {
+          // JS dialog 自动 dismiss（v1 缺省裁决——不弹审批不开 allow 旋钮）；
+          // 吞竞态错误：dialog 可能已被页面导航收走（回执失败不影响缓冲已记账）
+          const rpc = this.connection?.rpc;
+          if (rpc !== undefined && !rpc.isClosed) {
+            void rpc.request('Page.handleJavaScriptDialog', { accept: false }, { sessionId }).catch(() => undefined);
+          }
+        }
+      }
+    }
+    this.deps.onEvent?.(method, params, sessionId);
+  };
 
   /** 本 session 闲置钟续命（清旧钟 + 新钟到点 dispose 该 context） */
   private touchContext(key: string): void {
@@ -175,6 +215,9 @@ export class BrowserEngine {
     const session = this.contexts.get(key);
     if (session === undefined) return;
     this.contexts.delete(key);
+    // 捕获态同键回收（console 缓冲/ref 表随 context 丢弃——重新建立即空态）
+    this.captures.delete(key);
+    this.keyByCdpSession.delete(session.sessionId);
     const conn = this.connection;
     if (conn !== undefined) {
       await disposeSessionContext(conn.rpc, session.browserContextId);
@@ -255,7 +298,7 @@ export class BrowserEngine {
     // ---- DevToolsActivePort 轮询（spawn → 可握手之间的就绪信号） ----
     const wsUrl = await this.waitForDevToolsPort(profileDir, child);
     const connection = await CdpConnection.connect(wsUrl, this.deps.newConnection, {
-      onEvent: this.deps.onEvent,
+      onEvent: this.routeEvent, // 统一走事件路由（捕获态消费 + 外部透传）
       onNoise: this.deps.onNoise,
     });
     this.adoptConnection(connection, { enginePath: discovered.path, attach: false });
@@ -267,7 +310,7 @@ export class BrowserEngine {
     this.status = { state: 'starting' };
     const info = await fetchVersionInfo(endpoint);
     const connection = await CdpConnection.connect(info.webSocketDebuggerUrl, this.deps.newConnection, {
-      onEvent: this.deps.onEvent,
+      onEvent: this.routeEvent, // 统一走事件路由（捕获态消费 + 外部透传）
       onNoise: this.deps.onNoise,
     });
     this.adoptConnection(connection, { enginePath: `(attach ${endpoint})`, attach: true });
@@ -298,6 +341,8 @@ export class BrowserEngine {
     for (const [, timer] of this.contextTimers) clearTimeout(timer);
     this.contextTimers.clear();
     this.contexts.clear();
+    this.captures.clear();
+    this.keyByCdpSession.clear();
     this.connection = undefined;
     const child = this.child;
     this.child = undefined;

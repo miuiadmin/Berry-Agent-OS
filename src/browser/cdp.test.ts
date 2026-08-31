@@ -15,8 +15,18 @@
  */
 
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
+import { isIP } from 'node:net';
 import { createServer, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { dirname, join } from 'node:path';
@@ -24,9 +34,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JsonRpcConnection } from '../mcp/index.js';
 import type { AppLogger } from '../contracts/app.js';
 import { AppError, BROWSER_ENGINE_NOT_FOUND, describeError } from '../contracts/errors.js';
+import type { ToolDefinition } from '../contracts/tools.js';
 import { CdpConnection, disposeSessionContext, fetchVersionInfo, openSessionContext } from './cdp.js';
 import { discoverEngine } from './discover.js';
 import { BrowserEngine } from './engine.js';
+import { applyCaptureEvent, ConsoleRing, SessionCapture } from './capture.js';
+import { renderAccessibilitySnapshot, type FlatDocNode } from './a11y.js';
+import { saveScreenshot, SCREENSHOTS_KEEP } from './screenshots.js';
+import { registerBrowserTools } from './tools.js';
 
 /* ---------------- 手写 WS 帧编解码（服务器侧最小面） ---------------- */
 
@@ -572,5 +587,394 @@ describe('browser 引擎生命周期', () => {
     await engine.dispose();
     expect(killTree).not.toHaveBeenCalled();
     expect(registry.add).not.toHaveBeenCalled();
+  });
+});
+
+/* ---------------- 刀二：捕获态 / a11y / 截图 / 工具面 ---------------- */
+
+describe('browser 捕获态（capture 纯函数）', () => {
+  it('ConsoleRing：帽 200 滚动挤出 + 最新在前读取', () => {
+    const ring = new ConsoleRing();
+    for (let i = 1; i <= 205; i++) {
+      ring.push({ kind: 'console', level: 'log', text: `行${i}`, at: i });
+    }
+    const entries = ring.entries();
+    expect(entries).toHaveLength(200);
+    expect(entries[0]).toMatchObject({ seq: 205, text: '行205' }); // 最新在前
+    expect(entries[199]).toMatchObject({ seq: 6 }); // 头部 5 条被挤出
+  });
+
+  it('applyCaptureEvent：console/异常三类入账 + level 归档（闭集外归 log）', () => {
+    const capture = new SessionCapture();
+    applyCaptureEvent(capture, 'Runtime.consoleAPICalled', {
+      type: 'error',
+      args: [
+        { type: 'string', value: '炸了' },
+        { type: 'number', value: 42 },
+      ],
+      timestamp: 1,
+    });
+    applyCaptureEvent(capture, 'Runtime.consoleAPICalled', { type: 'table', args: [], timestamp: 2 }); // 闭集外 → log
+    applyCaptureEvent(capture, 'Runtime.exceptionThrown', {
+      exceptionDetails: { text: 'Uncaught', exception: { description: 'TypeError: x is not a function' } },
+    });
+    const entries = capture.console.entries();
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toMatchObject({ kind: 'exception', level: 'error', text: 'TypeError: x is not a function' });
+    expect(entries[1]).toMatchObject({ kind: 'console', level: 'log', text: '(空)' });
+    expect(entries[2]).toMatchObject({ kind: 'console', level: 'error', text: '炸了 42' });
+  });
+
+  it('applyCaptureEvent：dialog 入账 + dismiss 判定（纯函数零协议发送）', () => {
+    const capture = new SessionCapture();
+    const outcome = applyCaptureEvent(capture, 'Page.javascriptDialogOpening', { message: '确认？', type: 'confirm' });
+    expect(outcome).toEqual({ dialog: { message: '确认？', type: 'confirm' } });
+    expect(capture.console.entries()[0]).toMatchObject({ kind: 'dialog', text: '[confirm] 确认？（已自动 dismiss）' });
+    // 未知事件静默（协议面宽进）
+    expect(applyCaptureEvent(capture, 'Network.requestWillBeSent', {})).toBeUndefined();
+    expect(capture.console.entries()).toHaveLength(1);
+  });
+});
+
+describe('browser a11y 快照渲染（纯函数）', () => {
+  /** 混合树 fixture：heading/button/匿名 div 套 paragraph/link/input（role/name/剪枝全覆盖） */
+  const TREE: FlatDocNode[] = [
+    { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
+    { nodeId: 2, backendNodeId: 101, nodeType: 1, nodeName: 'H1', parentId: 1 },
+    { nodeId: 3, backendNodeId: 102, nodeType: 3, nodeName: '#text', nodeValue: 'Hello', parentId: 2 },
+    { nodeId: 4, backendNodeId: 103, nodeType: 1, nodeName: 'BUTTON', parentId: 1, attributes: ['aria-label', '提交'] },
+    { nodeId: 5, backendNodeId: 104, nodeType: 1, nodeName: 'DIV', parentId: 1 },
+    { nodeId: 6, backendNodeId: 105, nodeType: 1, nodeName: 'P', parentId: 5 },
+    { nodeId: 7, backendNodeId: 106, nodeType: 3, nodeName: '#text', nodeValue: '内层段落', parentId: 6 },
+    { nodeId: 8, backendNodeId: 107, nodeType: 1, nodeName: 'A', parentId: 1, attributes: ['href', 'https://x/'] },
+    { nodeId: 9, backendNodeId: 108, nodeType: 3, nodeName: '#text', nodeValue: '链接文字', parentId: 8 },
+    {
+      nodeId: 10,
+      backendNodeId: 109,
+      nodeType: 1,
+      nodeName: 'INPUT',
+      parentId: 1,
+      attributes: ['type', 'text', 'placeholder', '搜索词'],
+    },
+  ];
+
+  it('role/name 推导 + ref 标注 + 匿名 generic 剪枝（子树照递归）', () => {
+    const snap = renderAccessibilitySnapshot(TREE);
+    expect(snap.text.split('\n')).toEqual([
+      'page',
+      '  heading "Hello"',
+      '  button "提交" @e0',
+      '    paragraph "内层段落"', // 匿名 DIV 不出行，子节点照递归（深一层缩进）
+      '  link "链接文字" @e1',
+      '  textbox "搜索词" @e2', // name 链落 placeholder 档
+    ]);
+    expect(snap.refs).toEqual([
+      { ref: '@e0', backendNodeId: 103, role: 'button', name: '提交' },
+      { ref: '@e1', backendNodeId: 107, role: 'link', name: '链接文字' },
+      { ref: '@e2', backendNodeId: 109, role: 'textbox', name: '搜索词' },
+    ]);
+    expect(snap.truncated).toBe(false);
+  });
+
+  it('aria role 属性优先于 tag 隐式映射；超帽截断置旗注记', () => {
+    const ariaTree: FlatDocNode[] = [
+      { nodeId: 1, backendNodeId: 200, nodeType: 9, nodeName: '#document' },
+      { nodeId: 2, backendNodeId: 201, nodeType: 1, nodeName: 'DIV', parentId: 1, attributes: ['role', 'button'] },
+    ];
+    const aria = renderAccessibilitySnapshot(ariaTree);
+    expect(aria.text).toContain('button @e0'); // 显式 role 胜过 div→generic
+    expect(aria.refs[0]).toMatchObject({ role: 'button' });
+
+    const tiny = renderAccessibilitySnapshot(TREE, 30); // 帽 30 字节——必然截断
+    expect(tiny.truncated).toBe(true);
+    expect(tiny.text).toContain('已截断');
+  });
+});
+
+describe('browser 截图落盘（滚动清理）', () => {
+  it('saveScreenshot：目录形态 + 保留帽滚动删旧', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-shots-'));
+    const key = 'sess-A';
+    // 写 22 张（超帽 2 张）——每张字节不同（mtime 同毫秒时 sort 稳定保插入序）
+    for (let i = 1; i <= SCREENSHOTS_KEEP + 2; i++) {
+      saveScreenshot(dataDir, key, i, Buffer.from(`png-${i}`));
+    }
+    const dir = join(dataDir, 'browser', 'screenshots', key);
+    const files = readdirSync(dir);
+    expect(files).toHaveLength(SCREENSHOTS_KEEP);
+    // 最旧两张被删（shot-1/shot-2 不在场），最新在场且内容正确
+    expect(files).not.toContain('shot-1.png');
+    expect(files).not.toContain('shot-2.png');
+    expect(readFileSync(join(dir, `shot-${SCREENSHOTS_KEEP + 2}.png`), 'utf8')).toBe(`png-${SCREENSHOTS_KEEP + 2}`);
+    // sessionKey 净化（非法字符兜底替换——路径穿越防御位）
+    saveScreenshot(dataDir, '../evil', 1, Buffer.from('x'));
+    expect(existsSync(join(dataDir, 'browser', 'screenshots', '.._evil'))).toBe(true);
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+});
+
+describe('browser 工具面（假引擎全链——mock 只停服务器边界）', () => {
+  let fake: FakeCdpServer;
+  let dataDir: string;
+  /** 工具表（注册面收容——execute 直调〔管道在组合根测试面覆盖，此处验工具体〕） */
+  let defs: Map<string, ToolDefinition>;
+  let engine: BrowserEngine;
+
+  beforeEach(async () => {
+    fake = new FakeCdpServer();
+    await fake.start();
+    dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-tools-'));
+    fake.responders = {
+      'Target.createBrowserContext': () => ({ browserContextId: 'CTX-1' }),
+      'Target.createTarget': () => ({ targetId: 'TGT-1' }),
+      'Target.attachToTarget': () => ({ sessionId: 'SESS-1' }),
+      // 页态读取（navigate/back/forward 结算腿）：完整态单发即结
+      'Runtime.evaluate': () => ({
+        result: { result: { value: JSON.stringify({ t: 'Example', u: 'https://example.com/page', r: 'complete' }) } },
+      }),
+    };
+    engine = new BrowserEngine({
+      dataDir,
+      config: { executablePath: process.execPath },
+      spawnEngine: ({ args }) => {
+        const dir = args.find((a) => a.startsWith('--user-data-dir='))!.slice('--user-data-dir='.length);
+        writeFileSync(join(dir, 'DevToolsActivePort'), `${fake.port}\n/devtools/browser/fake-uuid\n`);
+        return { pid: 424_242, alive: () => true };
+      },
+      killTree: vi.fn(),
+      registry: { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] })) },
+      newConnection: (o) => new JsonRpcConnection(o),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Pick<AppLogger, 'debug' | 'info' | 'warn'>,
+      notify: vi.fn(),
+      idleMs: 60_000,
+      startupTimeoutMs: 2_000,
+    });
+    defs = new Map();
+    registerBrowserTools({
+      service: {
+        status: () => engine.getStatus(),
+        acquireContext: (sessionId) => engine.acquireContext(sessionId),
+        dispose: () => engine.dispose(),
+      },
+      dataDir,
+      register: (def) => {
+        defs.set(def.name, def);
+        return () => defs.delete(def.name);
+      },
+      // DNS 注入缝（诚实假解析：IP 字面量原样过检〔私网判定走真路径〕，
+      // 域名恒解析公网地址——零真网络依赖）
+      dnsLookup: async (h) => [{ address: isIP(h) ? h : '93.184.216.34', family: 4 }],
+    });
+  });
+
+  afterEach(async () => {
+    await engine.dispose();
+    await fake.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  /** 工具体直调助手（session 恒 sess-A——per-session 隔离路由同键） */
+  const run = (name: string, args: Record<string, unknown> = {}) =>
+    defs.get(name)!.execute(args, { toolCallId: 't-1', sessionId: 'sess-A' });
+
+  /** 服务器收到的指定方法帧（params 面断言用） */
+  const framesOf = (method: string) => fake.receivedFrames.filter((f) => f.method === method);
+
+  it('注册面：十件齐 + 命名域 browser_ 前缀 + effect 分账（read/write）', () => {
+    expect([...defs.keys()].sort()).toEqual([
+      'browser_back',
+      'browser_click',
+      'browser_console',
+      'browser_forward',
+      'browser_navigate',
+      'browser_press',
+      'browser_screenshot',
+      'browser_scroll',
+      'browser_snapshot',
+      'browser_type',
+    ]);
+    expect(defs.get('browser_navigate')).toMatchObject({ effect: 'read' });
+    expect(defs.get('browser_snapshot')).toMatchObject({ effect: 'read' });
+    expect(defs.get('browser_console')).toMatchObject({ effect: 'read' });
+    expect(defs.get('browser_click')).toMatchObject({ effect: 'write' });
+    expect(defs.get('browser_type')).toMatchObject({ effect: 'write' });
+    // 缺省保守位：screenshot 未声明 effect 也应被注册面归一……本件显式声明 read（规范分账）
+    expect(defs.get('browser_screenshot')).toMatchObject({ effect: 'read' });
+  });
+
+  it('navigate：SSRF 前置两律 + 正例全链（Page.navigate + 页态结算）', async () => {
+    // 负例①：非 http(s) scheme → WEB_URL_INVALID（AppError 升——安全拦截身份）
+    await expect(run('browser_navigate', { url: 'ftp://example.com/x' })).rejects.toSatisfy((err: unknown) => {
+      return err instanceof AppError && err.code === 'WEB_URL_INVALID';
+    });
+    // 负例②：裸私网 IP → WEB_PRIVATE_TARGET（不经 DNS——IP 直判）
+    await expect(run('browser_navigate', { url: 'https://192.168.1.1/admin' })).rejects.toSatisfy(
+      (err: unknown) => err instanceof AppError && err.code === 'WEB_PRIVATE_TARGET',
+    );
+    // 卫生前置零协议帧（两负例不发任何 CDP 请求——拒绝先于引擎取用）
+    expect(fake.receivedFrames).toHaveLength(0);
+
+    const ok = await run('browser_navigate', { url: 'https://example.com/page' });
+    expect(ok.isError).toBeUndefined();
+    expect((ok.content[0] as { text: string }).text).toContain('已导航：https://example.com/page');
+    expect((ok.content[0] as { text: string }).text).toContain('Example');
+    const nav = framesOf('Page.navigate')[0]!;
+    expect(nav.params).toEqual({ url: 'https://example.com/page' });
+  });
+
+  it('navigate：errorText 数据面（isError 自纠）；back/forward 历史行走与端点', async () => {
+    fake.responders['Page.navigate'] = () => ({ frameId: 'F1', errorText: 'net::ERR_NAME_NOT_RESOLVED' });
+    const bad = await run('browser_navigate', { url: 'https://example.com/page' });
+    expect(bad.isError).toBe(true);
+    expect((bad.content[0] as { text: string }).text).toContain('net::ERR_NAME_NOT_RESOLVED');
+
+    fake.responders['Page.navigate'] = () => ({ frameId: 'F1' });
+    let currentIndex = 1; // 当前在 entries[1]（id 22）——后退可走、前进可走
+    fake.responders['Page.getNavigationHistory'] = () => ({
+      currentIndex,
+      entries: [
+        { id: 11, url: 'https://a/' },
+        { id: 22, url: 'https://b/' },
+        { id: 33, url: 'https://c/' },
+      ],
+    });
+    const back = await run('browser_back');
+    expect((back.content[0] as { text: string }).text).toContain('已后退');
+    expect(framesOf('Page.navigateToHistoryEntry')[0]!.params).toEqual({ entryId: 11 });
+    const fwd = await run('browser_forward');
+    expect((fwd.content[0] as { text: string }).text).toContain('已前进');
+    expect(framesOf('Page.navigateToHistoryEntry')[1]!.params).toEqual({ entryId: 33 });
+    currentIndex = 2; // 当前在最末 entry——前进即端点
+    const stuck = await run('browser_forward');
+    expect(stuck.isError).toBe(true);
+    expect((stuck.content[0] as { text: string }).text).toContain('历史最末端');
+  });
+
+  it('snapshot → click/type 全链：ref 表换代 + 盒中心坐标派', async () => {
+    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({
+      nodes: [
+        { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
+        {
+          nodeId: 4,
+          backendNodeId: 103,
+          nodeType: 1,
+          nodeName: 'BUTTON',
+          parentId: 1,
+          attributes: ['aria-label', '提交'],
+        },
+        { nodeId: 10, backendNodeId: 109, nodeType: 1, nodeName: 'INPUT', parentId: 1, attributes: ['type', 'text'] },
+      ],
+    });
+    const snap = await run('browser_snapshot');
+    expect((snap.content[0] as { text: string }).text).toContain('button "提交" @e0');
+    // ref 表已入捕获态（engine 事件路由同源消费面）
+    const handle = await engine.acquireContext('sess-A');
+    expect(handle.capture.refs.get('@e0')).toMatchObject({ backendNodeId: 103 });
+
+    fake.responders['DOM.getBoxModel'] = () => ({ model: { quad: [0, 0, 100, 0, 100, 40, 0, 40] } });
+    const click = await run('browser_click', { ref: '@e0' });
+    expect((click.content[0] as { text: string }).text).toContain('已点击 button "提交"');
+    const mice = framesOf('Input.dispatchMouseEvent');
+    expect(mice).toHaveLength(2);
+    expect(mice[0]!.params).toMatchObject({ type: 'mousePressed', x: 50, y: 20, button: 'left', clickCount: 1 });
+    expect(mice[1]!.params).toMatchObject({ type: 'mouseReleased', x: 50, y: 20 });
+
+    const type = await run('browser_type', { ref: '@e1', text: '你好 world' });
+    expect((type.content[0] as { text: string }).text).toContain('已向 textbox');
+    expect(framesOf('Input.insertText')[0]!.params).toEqual({ text: '你好 world' });
+
+    // ref miss = 语义失败数据面（快照未含 @e9）
+    const miss = await run('browser_click', { ref: '@e9' });
+    expect(miss.isError).toBe(true);
+    expect((miss.content[0] as { text: string }).text).toContain('不在最近快照');
+  });
+
+  it('press：白名单执法 + 组合键 modifiers 位 + 三事件合成', async () => {
+    const combo = await run('browser_press', { key: 'Control+A' });
+    expect(combo.isError).toBeUndefined();
+    const keys = framesOf('Input.dispatchKeyEvent');
+    expect(keys).toHaveLength(2);
+    expect(keys[0]!.params).toMatchObject({ type: 'keyDown', key: 'A', code: 'KeyA', modifiers: 2, text: 'A' });
+    expect(keys[1]!.params).toMatchObject({ type: 'keyUp', key: 'A', modifiers: 2 });
+    // Enter 走 keyDown + text '\r'（表单提交 keypress 合成）
+    fake.receivedFrames.length = 0;
+    await run('browser_press', { key: 'Enter' });
+    const enter = framesOf('Input.dispatchKeyEvent')[0]!;
+    expect(enter.params).toMatchObject({ type: 'keyDown', key: 'Enter', text: '\r' });
+    // 白名单外（F 键）= 语义失败数据面
+    const bad = await run('browser_press', { key: 'F5' });
+    expect(bad.isError).toBe(true);
+    expect((bad.content[0] as { text: string }).text).toContain('未知键名');
+  });
+
+  it('scroll：四向距离派（yDistance 正 = 向下）', async () => {
+    const ok = await run('browser_scroll', { direction: 'down' });
+    expect((ok.content[0] as { text: string }).text).toContain('向下滚动 600px');
+    expect(framesOf('Input.synthesizeScrollGesture')[0]!.params).toMatchObject({ xDistance: 0, yDistance: 600 });
+    await run('browser_scroll', { direction: 'left', amount: 300 });
+    expect(framesOf('Input.synthesizeScrollGesture')[1]!.params).toMatchObject({ xDistance: 300 });
+  });
+
+  it('screenshot：PNG 落盘（字节不进结果）+ 逐会话滚动保留', async () => {
+    fake.responders['Page.captureScreenshot'] = () => ({ data: Buffer.from('fakepng').toString('base64') });
+    const shot = await run('browser_screenshot');
+    const path = (shot.details as { path: string }).path;
+    expect(path).toContain(join(dataDir, 'browser', 'screenshots', 'sess-A'));
+    expect(readFileSync(path, 'utf8')).toBe('fakepng'); // 字节在盘
+    expect((shot.content[0] as { text: string }).text).not.toContain('fakepng'); // 不进对话文本
+    // 滚动清理（帽 20——连拍 22 张只余 20）
+    for (let i = 0; i < 21; i++) await run('browser_screenshot');
+    expect(readdirSync(join(dataDir, 'browser', 'screenshots', 'sess-A'))).toHaveLength(SCREENSHOTS_KEEP);
+  });
+
+  it('console：事件路由入账 + dialog 自动 dismiss 回发 + 读取面', async () => {
+    // 先起 context（Runtime/Page enable + 捕获态挂载）
+    await run('browser_console');
+    fake.pushEvent('Runtime.consoleAPICalled', { type: 'log', args: [{ type: 'string', value: '第一条' }] }, 'SESS-1');
+    fake.pushEvent(
+      'Runtime.exceptionThrown',
+      { exceptionDetails: { text: 'Uncaught', exception: { description: 'TypeError: boom' } } },
+      'SESS-1',
+    );
+    fake.pushEvent('Page.javascriptDialogOpening', { message: '确认？', type: 'confirm' }, 'SESS-1');
+    // dialog dismiss 回发（引擎路由层持 rpc——accept:false）
+    await vi.waitFor(() => expect(framesOf('Page.handleJavaScriptDialog').length).toBe(1));
+    expect(framesOf('Page.handleJavaScriptDialog')[0]!.params).toEqual({ accept: false });
+
+    const out = await run('browser_console', { level: 'error' });
+    const text = (out.content[0] as { text: string }).text;
+    expect(text).toContain('TypeError: boom');
+    expect(text).not.toContain('第一条'); // level 过滤
+    // 未过滤全量：dialog 记账行在场（最新在前——异常序次最高）
+    const all = await run('browser_console');
+    const allText = (all.content[0] as { text: string }).text;
+    expect(allText.indexOf('dialog')).toBeLessThan(allText.indexOf('exception'));
+    expect(allText.indexOf('exception')).toBeLessThan(allText.indexOf('console'));
+    // context 建立即 enable 两域（事件源前提）
+    expect(framesOf('Runtime.enable')).toHaveLength(1);
+    expect(framesOf('Page.enable')).toHaveLength(1);
+  });
+
+  it('refs 换代：第二次快照后旧 ref 失效（跨快照混用禁）', async () => {
+    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({
+      nodes: [
+        { nodeId: 1, backendNodeId: 100, nodeType: 9, nodeName: '#document' },
+        {
+          nodeId: 4,
+          backendNodeId: 103,
+          nodeType: 1,
+          nodeName: 'BUTTON',
+          parentId: 1,
+          attributes: ['aria-label', '提交'],
+        },
+      ],
+    });
+    await run('browser_snapshot');
+    fake.responders['DOM.getFlattenedDocumentTree'] = () => ({ nodes: [] }); // 空文档——ref 表清空换代
+    await run('browser_snapshot');
+    fake.responders['DOM.getBoxModel'] = () => ({ model: { quad: [0, 0, 1, 0, 1, 1, 0, 1] } });
+    const stale = await run('browser_click', { ref: '@e0' });
+    expect(stale.isError).toBe(true);
+    expect((stale.content[0] as { text: string }).text).toContain('不在最近快照');
   });
 });
