@@ -149,6 +149,8 @@ export const FS_VERSION_CONFLICT = registerErrorCode('FS_VERSION_CONFLICT');
 export const FS_NOT_FOUND = registerErrorCode('FS_NOT_FOUND');
 /** fs：目标路径不在可写根内（fence containment 检查失败，防误操作护栏） */
 export const FS_OUTSIDE_WRITABLE_ROOTS = registerErrorCode('FS_OUTSIDE_WRITABLE_ROOTS');
+/** fs：写串行段内写目标漂移（链外定键后父组件被共享写者 swap——物理写前重验 canonicalize 与定键值不符即拒，防宿主特权写被符号链交换重定向出 fence；复盘 20260901 S-2，骨架篇 §7.5② 竞速边界注记） */
+export const FS_WRITE_TARGET_DRIFTED = registerErrorCode('FS_WRITE_TARGET_DRIFTED');
 /** fs：apply_patch 补丁解析或应用失败（格式非法/hunk 不匹配/Add 目标已存在等，message 细说） */
 export const FS_PATCH_FAILED = registerErrorCode('FS_PATCH_FAILED');
 /** fs：edit 前置读遇非 UTF-8 终局拒改（决策树判为本地码页/BOM 非 UTF-8 族——防 mojibake 读入回写毁档；转档走 bash + iconv。骨架篇 §7.5，P1-3 挖矿 B11） */

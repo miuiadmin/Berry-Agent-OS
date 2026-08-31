@@ -32,6 +32,7 @@ import {
   FS_NOT_FOUND,
   FS_OUTSIDE_WRITABLE_ROOTS,
   FS_PATCH_FAILED,
+  FS_WRITE_TARGET_DRIFTED,
   TOOL_ARGUMENTS_INVALID,
 } from '../contracts/errors.js';
 import type { AgentToolResult, ToolDefinition } from '../contracts/tools.js';
@@ -226,6 +227,30 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
     );
   };
 
+  /**
+   * 互斥段内写目标漂移重验（复盘 20260901 S-2 规范先行，骨架篇 §7.5② 竞速
+   * 边界注记）：写串行链只互斥宿主写者——不可信共享写者（external 域应用对
+   * workspace 持直接 OS 写权）不受链约束，可在链外 canonicalize〔T0〕→ 段内
+   * 物理写〔T1〕窗口把任一父组件 swap 成符号链，writeFile/rm 跟随即宿主全权
+   * 写出 fence 外（fence 只在链外验过一次，对 T1 的真实落点不再过问）。
+   * 修法 = 物理写前重跑 canonicalize 与链外定键值比对，漂移即拒（fail-closed）。
+   * 调用形态约束：重验完成后与物理写之间零 await——重验是物理写前的最后一跳，
+   * 残窗收敛至 realpath 走查与 open 提交之间的指令级窗（治本 = 父目录 fd 锚定
+   * 或 temp+rename，挂账等真实攻击面拉动）。
+   *
+   * @param abs       用户拼写路径（重跑 canonicalize 的输入——与 T0 定键同源）
+   * @param canonical 链外推导定键（T0 值）——比对基准
+   */
+  const assertTargetStable = async (abs: string, canonical: string): Promise<void> => {
+    const nowCanonical = await canonicalize(abs);
+    if (nowCanonical !== canonical) {
+      throw new AppError(
+        FS_WRITE_TARGET_DRIFTED,
+        `[FS_WRITE_TARGET_DRIFTED] 写目标在互斥段内漂移：${abs} 现规范化 ${nowCanonical} ≠ 定键 ${canonical}（疑似父组件被符号链交换——拒绝落盘；请重新执行写操作）`,
+      );
+    }
+  };
+
   /* ---------------- read：观察登记的唯一天然入口 ---------------- */
   const readTool: ToolDefinition = {
     name: 'read',
@@ -345,6 +370,8 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
         const current = await currentVersion(canonical);
         // CAS 分派：未读→create-if-absent；absent 观察→create；present 观察→版本守卫
         const intent = resolveWriteIntent(observed.get(abs), current === undefined ? undefined : { version: current });
+        // 段内漂移重验（S-2）：重验完成与 writeFile 零 await 相接——swap 窗口收口
+        await assertTargetStable(abs, canonical);
         await writeFile(canonical, args.content as string, 'utf8');
         // 写后回填观察：刚写入的内容即最新事实版本（立即 stat 防 mtime 精度假冲突）
         const after = await currentVersion(canonical);
@@ -430,6 +457,9 @@ export function createFsTools(opts: FsToolsOptions = {}): FsTools {
            path 为 canonical 绝对路径与 write 工具 details.path 同口径） */
         const operations: Array<{ op: string; path: string }> = [];
         for (const item of planned) {
+          // 段内漂移重验（S-2）：每个物理写（rm/writeFile）前逐项重验——与物理写
+          // 零 await 相接，多文件补丁不因前项耗时给后项留窗（write 工具同款）
+          await assertTargetStable(item.abs, item.canonical);
           if (item.op.kind === 'delete') {
             await rm(item.canonical);
             summary.push(`deleted ${item.op.path}`);

@@ -3,7 +3,7 @@
  * 观察态 CAS 全链路 / fence containment（含 symlink 逃逸）/ apply_patch 编排 / 两阶段编辑。
  */
 
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -16,6 +16,7 @@ import {
   FS_OUTSIDE_WRITABLE_ROOTS,
   FS_PATCH_FAILED,
   FS_VERSION_CONFLICT,
+  FS_WRITE_TARGET_DRIFTED,
   TOOL_ARGUMENTS_INVALID,
 } from '../contracts/errors.js';
 import { createFsTools, serializeWrites } from './fs.js';
@@ -530,5 +531,81 @@ describe('写串行链 + 观察态 per-driver（S2 骨架篇 §7.5②/§7.5①�
     await t2.read.execute({ path: rel }, { toolCallId: 'tc' });
     await t2.write.execute({ path: rel, content: 'B 的合法写' }, { toolCallId: 'tc' });
     expect(await readFile(join(workspace, rel), 'utf8')).toBe('B 的合法写');
+  });
+});
+
+describe('写串行链 — 段内写目标漂移重验（复盘 20260901 S-2 回归锁）', () => {
+  /**
+   * 竞速复现编舞（确定性——不抢拍）：holder 先持住 canonical 链 → 工具调用在
+   * 链外完成 canonicalize/fence 后到链上等待（此窗口即 T0→T1）→ 攻击者（不受
+   * 链约束的共享写者——external 域应用形态）把真实父目录换成指向根外 outside
+   * 的符号链 → 释放 holder → 工具进入互斥段执行物理写。
+   * HEAD（无重验）：writeFile 沿换上的符号链把宿主特权写落到 fence 外且报成功；
+   * 修复：物理写前重验 canonicalize 与链外定键值，漂移即拒 FS_WRITE_TARGET_DRIFTED。
+   */
+  /** 持住指定链键直至返回的释放器被调用（攻击窗口的确定性构造） */
+  const holdChain = async (key: string): Promise<() => Promise<void>> => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = serializeWrites([key], () => gate);
+    return async () => {
+      release();
+      await held;
+    };
+  };
+  /** 让工具的链外段（一次 realpath 走查，微秒级）完成——50ms 三个数量级裕度 */
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 50));
+  /** 存在性探针 */
+  const exists = async (p: string): Promise<boolean> => {
+    try {
+      await stat(p);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /** 攻击动作：真实目录移走 + 同名符号链指向根外（共享写者不受链约束） */
+  const swapDirToOutside = async (dir: string): Promise<void> => {
+    await rename(dir, `${dir}-moved`);
+    await symlink(outside, dir);
+  };
+  /** 清场（workspace/outside 全文件件共享——符号链与移走的目录各自还原缺席） */
+  const cleanupSwap = async (dir: string): Promise<void> => {
+    await rm(dir, { force: true });
+    await rm(`${dir}-moved`, { recursive: true, force: true });
+  };
+
+  it('write：父目录被 swap 成根外符号链 → 拒 FS_WRITE_TARGET_DRIFTED，根外零落盘', async () => {
+    const t = freshTools();
+    const dir = join(workspace, 's2-swap');
+    await mkdir(dir);
+    // T0 canonical 复算（同 canonicalize 最近存在祖先回退：dir 真实 → realpath(dir)+basename）
+    const key = join(await realpath(dir), 'new.txt');
+    const open = await holdChain(key);
+    const pending = t.write.execute({ path: 's2-swap/new.txt', content: 'evil' }, { toolCallId: 'tc' });
+    await settle(); // 链外段完成：工具已按真实目录定键、在链上等待
+    await swapDirToOutside(dir);
+    await open(); // 释放持链——工具进入互斥段
+    await expect(pending).rejects.toMatchObject({ code: FS_WRITE_TARGET_DRIFTED });
+    expect(await exists(join(outside, 'new.txt'))).toBe(false); // 宿主特权写不出 fence
+    await cleanupSwap(dir);
+  });
+
+  it('edit（Add File 同向量）→ 拒 FS_WRITE_TARGET_DRIFTED，根外零落盘', async () => {
+    const t = freshTools();
+    const dir = join(workspace, 's2-swap-b');
+    await mkdir(dir);
+    const key = join(await realpath(dir), 'added.txt');
+    const open = await holdChain(key);
+    const patch = '*** Begin Patch\n*** Add File: s2-swap-b/added.txt\n+evil\n*** End Patch';
+    const pending = t.edit.execute({ patch }, { toolCallId: 'tc' });
+    await settle();
+    await swapDirToOutside(dir);
+    await open();
+    await expect(pending).rejects.toMatchObject({ code: FS_WRITE_TARGET_DRIFTED });
+    expect(await exists(join(outside, 'added.txt'))).toBe(false);
+    await cleanupSwap(dir);
   });
 });
