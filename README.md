@@ -61,3 +61,7 @@ npm run format:check      # Prettier
 ## 技术栈
 
 Node.js ≥ 22.19 · TypeScript（ES Modules，tsc 直出）· [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) · [@earendil-works/pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui) · better-sqlite3 · typebox · yaml · ignore · jiti · Vitest · Prettier
+
+## 许可证
+
+[MIT](LICENSE)——官方件随包分发，第三方应用与技能件各自持照。

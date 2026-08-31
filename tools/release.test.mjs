@@ -129,10 +129,11 @@ describe('契约 5 planTagOperations / assertDistTagTerminal：终态统一律',
 });
 
 describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
-  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + 教学例） */
+  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例） */
   const CLEAN = [
     'package.json',
     'README.md',
+    'LICENSE',
     'dist/app/main.js',
     'dist/webui/index.html',
     'dist/admin/skills/admin/SKILL.md',
@@ -142,12 +143,14 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
   it('合法清单 → 绿', () => {
     expect(inspectPackEntries(CLEAN).ok).toBe(true);
   });
-  it('缺 SPA / 缺技能资产 / 缺 README / 缺教学例 → 检视不过（missing 逐项点名）', () => {
+  it('缺 SPA / 缺技能资产 / 缺 README / 缺 LICENSE / 缺教学例 → 检视不过（missing 逐项点名）', () => {
     const v = inspectPackEntries(['package.json', 'dist/app/main.js']);
     expect(v.ok).toBe(false);
     expect(v.missing.join(' ')).toMatch(/webui/);
     expect(v.missing.join(' ')).toMatch(/SKILL/);
     expect(v.missing.join(' ')).toMatch(/README/);
+    // LICENSE 必在（第四十八批 license=MIT 拍板后升硬门——缺席即发布物残缺）
+    expect(v.missing.join(' ')).toMatch(/LICENSE/);
     expect(v.missing.join(' ')).toMatch(/examples/);
   });
   it('测试/声明/映射/源码/构建配置混入 → 违禁（violations 逐个点名）', () => {
@@ -229,6 +232,7 @@ function greenBase(version) {
           files: [
             'package.json',
             'README.md',
+            'LICENSE',
             'dist/app/main.js',
             'dist/webui/index.html',
             'dist/admin/skills/admin/SKILL.md',

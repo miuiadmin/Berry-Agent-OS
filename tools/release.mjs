@@ -154,7 +154,9 @@ export function assertDistTagTerminal(observed, { isPrerelease, version, nextBef
 /**
  * 契约 3：pack 内容面检视（files 白名单机器验收）。
  * 必在：bin 入口 dist/app/main.js / SPA dist/webui/ / 官方件技能资产
- * *SKILL.md / README.md / examples/ 教学例三件套（2026-08-31 第四十四批——
+ * *SKILL.md / README.md / LICENSE（2026-08-31 第四十八批——license=MIT 拍板后
+ * 缺席即发布物残缺；npm 对根 LICENSE 恒随包，files 白名单拦不住它，检视面
+ * 显式验收防误删）/ examples/ 教学例三件套（2026-08-31 第四十四批——
  * examples/*.ts 教学源码是「必在」例外：它们是随包发布物不是待编译源码）。
  * 必不在：测试产物 / 声明 / 映射 / src/ 前缀源码（examples/ 除外）/ 构建配置。
  * @param {(string|{path:string})[]} files npm pack --json 的 files 列表
@@ -171,6 +173,7 @@ export function inspectPackEntries(files) {
   mustHave('dist/webui/*（SPA 呈现面）', (p) => p.startsWith('dist/webui/'));
   mustHave('*SKILL.md（官方件技能资产）', (p) => /(^|\/)SKILL\.md$/.test(p));
   mustHave('README.md', (p) => p === 'README.md');
+  mustHave('LICENSE（MIT 全文）', (p) => p === 'LICENSE');
   mustHave('examples/*（教学例三件套）', (p) => p.startsWith('examples/') && p !== 'examples/');
   const violations = paths.filter(
     (p) =>
