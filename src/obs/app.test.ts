@@ -104,4 +104,71 @@ describe('obs 观测件：组合根全栈（默认层第十五行真装载）', 
     const session = runtime.session;
     expect(session).toBeDefined(); // 会话照常（观测缺席不反噬）
   });
+
+  it('刀二告警全栈：/obs-alerts add → 事件摄取 → 内联执法 → obs/alert 总线 + ui 通知（规范触发三件）', async () => {
+    const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-alert-e2e-')));
+    const compositionDir = join(root, 'composition');
+    mkdirSync(compositionDir, { recursive: true });
+    writeFileSync(join(compositionDir, 'overlay.yaml'), 'rows:\n  - id: obs\n    config: { flushMs: 60 }\n');
+
+    const runtime = await createRuntime({
+      dbPath: ':memory:',
+      workspace: root,
+      compositionDir,
+    });
+    runtimes.push(runtime);
+
+    // 观察哨两路：obs/alert 总线事件 + recording backend 通知
+    const busAlerts: unknown[] = [];
+    runtime.ctx.on('obs/alert', (payload: unknown) => busAlerts.push(payload));
+    const notifies: string[] = [];
+    runtime.ui.attach({
+      id: 'rec',
+      notify: (text: string) => notifies.push(text),
+      setStatus: () => {},
+      confirm: async () => true,
+    });
+
+    // 命令面：add（阈值 1 次调用即触发——窗 24h / 冷却 0）
+    expect(await runtime.channels.commands.dispatch('/obs-alerts add sum llm.calls >= 1 24 0')).toBe('ok');
+    expect(notifies.some((n) => n.includes('已添加告警规则'))).toBe(true);
+
+    // 触发链：会话事件 → 总线 → 摄取 → flush 内联执法
+    const session = runtime.session;
+    expect(session).toBeDefined();
+    session!.append('request/header', {
+      config: {},
+      systemPrompt: 'x',
+      toolSchemas: [],
+      reason: 'initial',
+      app: 'chat',
+    });
+    session!.append('llm/usage', {
+      callId: 'c-alert',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300); // flush 窗 60ms + 内联执法 + 回调
+
+    // 触发三件断言：①obs/alert 总线载荷（metric/agg/value/threshold/window）②ui.notify
+    // 人读文案 ③last_fired_at 回写（经 /obs-alerts list 可见触发时刻非「未触发」）
+    expect(busAlerts).toHaveLength(1);
+    expect(busAlerts[0]).toMatchObject({ metric: 'llm.calls', agg: 'sum', value: 1, threshold: 1, windowHours: 24 });
+    expect(notifies.some((n) => n.includes('观测告警') && n.includes('llm.calls'))).toBe(true);
+    expect(await runtime.channels.commands.dispatch('/obs-alerts list')).toBe('ok');
+    const listing = notifies.at(-1) ?? '';
+    expect(listing).toContain('只通知不执法');
+    expect(listing).not.toContain('未触发'); // last_fired_at 已回写
+
+    // 冷却 0 语义：再触发一发（第二次 llm/usage 累计 calls=2 仍过阈）
+    session!.append('llm/usage', {
+      callId: 'c-alert-2',
+      model: 'faux/m1',
+      priority: 'foreground',
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    });
+    await settle(300);
+    expect(busAlerts).toHaveLength(2); // 冷却 0 = 每 flush 可重触
+  });
 });
