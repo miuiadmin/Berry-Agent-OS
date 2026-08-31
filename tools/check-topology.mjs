@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：18 模块单向 DAG——第十六批 goal 入册、
- * 2026-08-24 铭牌批 chat 件聚落入册、2026-08-25 exec 纵切入册）。
+ * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：25 模块单向 DAG——各批随落码
+ * 入册，席清单与入册史见内核篇 §4.1 模块表；25 席全有码）。
  *
  * 两条规则：
  * 1. 相对导入只允许走显式白名单边（模块 → 可依赖模块集合）；同模块内部互引自由。
  * 2. 裸导入（包名）按模块白名单放行；node:* 全模块放行。
- * 测试文件（*.test.ts）豁免跨模块检查（只许 import 本模块与 vitest），防止测试绕行。
+ * 测试文件（*.test.ts）豁免模块 DAG——harness 全真组合（mock 只停模型层）跨模块
+ * 合法，产码白名单只描产码 DAG、两账分离（2026-08-31 复盘批 #38；原「只许本模块
+ * 白名单边内目标」让测试需求反向给白名单续命，烂出七条死边）。
  *
  * 边表对齐[内核与应用边界]篇 §4 模块表；模块落地时如与规范出入，以规范为准修本表。
  * 未落地的模块保留占位行——目录不存在即零检查，表先钉住方向。
@@ -17,22 +19,25 @@ import { fileURLToPath } from 'node:url';
 
 const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
-/** 模块 → 允许 import 的其他模块（单向 DAG 白名单；同层仅 context 作为运行时基座可被引用） */
+/** 模块 → 允许 import 的其他模块（单向 DAG 白名单；同层仅 context 作为运行时基座可被引用）
+ * 2026-08-31 复盘批 #38 边表复核：七条死边（声明未用）收册——session/persist/llm/web/
+ * compaction 的 context 边、safety/memory 的 session 边；收后白名单与实际 import 全对齐
+ * （未声明边 = 零），规范侧边表（内核与应用边界篇 §4.1）同批同步 */
 const MODULE_EDGES = {
   contracts: [],
   context: ['contracts'],
-  session: ['contracts', 'context'],
+  session: ['contracts'],
   agent: ['contracts'],
-  persist: ['contracts', 'context', 'session'],
-  llm: ['contracts', 'context'],
+  persist: ['contracts', 'session'],
+  llm: ['contracts'],
   tools: ['contracts', 'context'],
-  safety: ['contracts', 'context', 'session', 'tools'],
+  safety: ['contracts', 'context', 'tools'],
   skills: ['contracts', 'context'],
   subagent: ['contracts', 'context', 'agent', 'session'],
   // chat = 对话应用官方件聚落（铭牌批入册；不 import llm——StreamFn 经 contracts 注入；
   // exec 边 = S5 bash 迁域——createBashTool def 随 open() 会话域注册）
   chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety', 'exec'],
-  memory: ['contracts', 'context', 'session', 'persist'],
+  memory: ['contracts', 'context', 'persist'],
   goal: ['contracts', 'context', 'persist'],
   // exec = 工具族件聚落（第 18 模块，2026-08-25 exec 纵切；tools 不 import exec——
   // bash def 随 chat 件 open() 会话域注册（S5 迁域），检索族双装配点先例）
@@ -46,7 +51,7 @@ const MODULE_EDGES = {
   // ctx.fetch 原语 + SSRF 五卫生件——工具注册经 ctx.get('tools') 服务面、管道
   // 经 ToolsService.executor（类型住 contracts）、schema 经 contracts typebox
   // 再导出面——零 tools/exec import（mcp 最窄边同款）
-  web: ['contracts', 'context'],
+  web: ['contracts'],
   // bridge = 桥接协议 v0 + worker 分域装载两半（2026-08-26 第二十七批刀二
   // K3-a/K3-b2，契约篇 §1.7）：端点纯机制（BridgeEndpoint 两侧同构）+ worker
   // 半复用 context 装载器私有件（jiti/形状校验——WorkerRowLoader seam 反向：
@@ -55,8 +60,9 @@ const MODULE_EDGES = {
   // compaction = 长会话压缩官方件（2026-08-26 纵切，会话篇 §2 增补七条）：策略
   // 纯函数 + durable 四词宿主注册 + 件本体。服务全经 ctx 取（sessions/llm/
   // agent——运行时零跨模块 import）；session 边是 ProjectedMessage/SessionEvent
-  // 类型面（memory→session 类型边同款）
-  compaction: ['contracts', 'context', 'session'],
+  // 类型面（2026-08-31 复盘批 #38 边表复核：context 死边删——与「服务全经 ctx
+  // 取」注释一致；memory 的同名类型边同批已死删，此处勿再互引）
+  compaction: ['contracts', 'session'],
   // checkpoint = 工作区快照·回退官方件（2026-08-30 纵切，会话篇 §5.3，默认层
   // 第十一行）：件本体 + blob 仓/捕获引擎纯函数 + /rewind 命令。服务全经 ctx
   // 取（sessions/paths/agent/channels/ui——运行时零跨模块 import）；fork 边界
@@ -207,8 +213,10 @@ for (const file of collect(srcRoot)) {
       const targetModule = moduleOf(target);
       if (targetModule === module) continue; // 同模块自由
       if (isTest) {
-        if (module === '(root-files)' || MODULE_EDGES[module].includes(targetModule)) continue;
-        violations.push(`${relative(file)}：测试文件跨模块引用 ${targetModule}（测试只许覆盖本模块）`);
+        // 测试文件豁免模块 DAG：harness 全真组合（mock 只停模型层）跨模块合法。
+        // 2026-08-31 复盘批 #38：原「只许本模块白名单边内目标」让测试需求反向给
+        // 白名单续命——七条死边即此机制烂出来的；产码白名单只描产码 DAG，两账分离
+        // （规范 = 契约篇 §6.3#2）
         continue;
       }
       if (module !== '(root-files)' && !allowed.includes(targetModule)) {

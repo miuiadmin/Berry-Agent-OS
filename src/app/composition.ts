@@ -1036,7 +1036,9 @@ export function writeOverlayRowConfig(dataDir: string, id: string, config: Recor
  * 「重装对账即恢复」由此免费获得——overlay 行没了，install 的 upsert 会重写；
  * 移除替换行会让官方默认层同 id 行重新露出（后写胜出随行消失，回出厂态）。
  * 行不在 overlay = no-op（调用方已保证行存在于 overlay 或官方层；纯官方层
- * builtin 行走 disableOverlayRow 不走本面）。Ring 1 / fixed 拒卸在服务面先裁。
+ * builtin 行走 disableOverlayRow 不走本面）。Ring 1 / fixed 拒卸守卫已随 D2
+ * 行键迁移结构性同灭（uninstall 以装机 id 为锚，provenance 只记三源装机物、
+ * builtin 行不装机——官方行不可达；卸替换行 = 默认层同 id 行重新露出，合法路）。
  */
 export function removeOverlayRow(dataDir: string, id: string): void {
   const rows = loadOverlayRows(dataDir);

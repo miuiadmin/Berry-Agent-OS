@@ -249,13 +249,6 @@ export const APP_ENTRY_UNRESOLVED = registerErrorCode('APP_ENTRY_UNRESOLVED');
 export const APP_IMPORT_FORBIDDEN = registerErrorCode('APP_IMPORT_FORBIDDEN');
 /** 应用：第六键 berryagent/sqlite 包装拒开主库（自管库路径命中解析后主库绝对路径即抛——与 IMPORT_FORBIDDEN 分立：一管 import 门禁、一管库句柄门禁，契约篇 §1.2 注记①） */
 export const APP_MAIN_DB_FORBIDDEN = registerErrorCode('APP_MAIN_DB_FORBIDDEN');
-/**
- * 应用：uninstall 拒卸 Ring 1 必备行 / fixed 安全栈强制点行（契约篇 §3.4 第二刀：
- * 卸掉该行首启核心循环「问→做→存」必破——内核边界篇 §5.1 一句话判据在卸载面的
- * 投影；缺省层替换语义 = overlay 可换实现引用不可移除行。Ring 1 行要换实现走
- * install 同 id 覆盖引用，不是卸载）。2026-08-27 刀 2。
- */
-export const APP_FIXED_ROW = registerErrorCode('APP_FIXED_ROW');
 /** composition：组合树行 schema 违规（overlay 缺 id / 字段类型错 / 未知字段 / fixed 行被禁用——pre-release 拒绝式，契约篇 §6.5） */
 export const COMPOSITION_ROW_INVALID = registerErrorCode('COMPOSITION_ROW_INVALID');
 /**
