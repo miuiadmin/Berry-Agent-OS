@@ -19,7 +19,7 @@ import {
   JOB_OWNER_MISMATCH,
 } from '../contracts/errors.js';
 import type { JobsServiceFace } from '../contracts/jobs.js';
-import { createJobsService } from './jobs.js';
+import { createJobsService, TERMINAL_RETENTION_CAP } from './jobs.js';
 
 /** 建根作用域 + 注册表（silent logger——测试不产日志噪声） */
 function setup(): { ctx: ContextScope; jobs: JobsServiceFace } {
@@ -329,3 +329,56 @@ describe('Job 注册表 — 作用域回卷兜底', () => {
     await expectCode(CONTEXT_DISPOSED, () => jobs.registerKind('late'));
   });
 });
+
+describe('Job 注册表 — 终态条目保留帽（骨架篇 §6.2，复盘 20260901 L-4：daemon 常驻无界累积防线）', () => {
+  it('结算序 FIFO 逐出最旧：超帽后最旧终态条目 get→undefined、list 封顶在帽', () => {
+    const { jobs } = setup();
+    // 帽+3 个手工结算 Job（create+settle 同步对——按结算序编号）
+    const controllers = Array.from({ length: TERMINAL_RETENTION_CAP + 3 }, (_, i) => {
+      const c = jobs.create({ kind: 'process' });
+      c.settle('completed', { output: `第 ${i} 号结算文本（KB 级载荷以小样代——累积判据同构）` });
+      return c;
+    });
+    // HEAD：终态条目永不删除——list 全量 259 条无界滞留；修复后：封顶在帽
+    expect(jobs.list()).toHaveLength(TERMINAL_RETENTION_CAP);
+    // 最旧的 3 个被逐（结算序 FIFO）：get 不再可见 = NOT_FOUND 语义位
+    expect(jobs.get(controllers[0]!.handle.id)).toBeUndefined();
+    expect(jobs.get(controllers[2]!.handle.id)).toBeUndefined();
+    // 帽内最新照常可查（近期历史保持可回看）
+    expect(jobs.get(controllers[3]!.handle.id)?.status).toBe('completed');
+    expect(jobs.get(controllers.at(-1)!.handle.id)?.status).toBe('completed');
+    // 逐出后对已逐 id cancel = NOT_FOUND（口径同改：超帽逐出或未创建过）
+    expectCodeSync(JOB_NOT_FOUND, () => jobs.cancel(controllers[0]!.handle.id));
+  });
+
+  it('逐出只放弃查表面：持有句柄/视图闭包仍活（结算明细照读、done 已落定）', async () => {
+    const { jobs } = setup();
+    const first = jobs.create({ kind: 'subagent' });
+    first.settle('completed', { output: '被逐条目的结算文本' });
+    // 灌满至逐出 first
+    for (let i = 0; i < TERMINAL_RETENTION_CAP; i++) {
+      jobs.create({ kind: 'process' }).settle('completed');
+    }
+    expect(jobs.get(first.handle.id)).toBeUndefined(); // 查表面已放弃
+    // 句柄半边钉住条目对象——注册表只弃 get/list，不拆持有者的活引用
+    expect(first.handle.status).toBe('completed');
+    expect(first.handle.settled?.output).toBe('被逐条目的结算文本');
+    await expect(first.handle.done).resolves.toBe('completed');
+  });
+
+  it('running 条目结构性不可被逐：满帽逐出潮中在跑条目照常可查可杀', () => {
+    const { jobs } = setup();
+    const running = jobs.create({ kind: 'process' }); // 不结算——在跑
+    for (let i = 0; i < TERMINAL_RETENTION_CAP + 2; i++) {
+      jobs.create({ kind: 'process' }).settle('completed');
+    }
+    expect(jobs.get(running.handle.id)?.status).toBe('running'); // 逐出只及终态
+    jobs.cancel(running.handle.id); // 在跑条目可杀（围栏面完整）
+    running.settle('killed');
+  });
+});
+
+/** 断言同步调用抛出指定码的 AppError（cancel 面是同步 throw） */
+function expectCodeSync(code: string, fn: () => unknown): void {
+  expect(fn).toThrowError(expect.objectContaining({ code }));
+}

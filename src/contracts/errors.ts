@@ -326,7 +326,7 @@ export const APP_INSTALL_FAILED = registerErrorCode('APP_INSTALL_FAILED');
 export const JOB_KIND_UNKNOWN = registerErrorCode('JOB_KIND_UNKNOWN');
 /** jobs：JobKind 登记撞名（与内置或已登记 kind 重名——词汇表拒绝静默覆盖） */
 export const JOB_KIND_DUPLICATE = registerErrorCode('JOB_KIND_DUPLICATE');
-/** jobs：按 id 操纵的 Job 不存在（已结算条目不删除，仅终态后不可再变——NOT_FOUND 即 id 拼错或未创建过） */
+/** jobs：按 id 操纵的 Job 不存在（id 拼错或未创建过；终态条目超保留帽被逐出同判——结算序 FIFO 帽 256，骨架篇 §6.2 / 复盘 20260901 L-4） */
 export const JOB_NOT_FOUND = registerErrorCode('JOB_NOT_FOUND');
 /** jobs：围栏鉴权失败——带主 Job 被 非 owner 会话视角请求取消（owner 用 session id 围栏，骨架篇 §6.2） */
 export const JOB_OWNER_MISMATCH = registerErrorCode('JOB_OWNER_MISMATCH');

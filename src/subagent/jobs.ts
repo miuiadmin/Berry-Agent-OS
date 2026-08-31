@@ -88,6 +88,15 @@ const BUILTIN_KINDS: readonly string[] = ['subagent', 'process'];
 const OWNER_CONCURRENCY_LIMIT = 16;
 
 /**
+ * 终态条目保留帽（骨架篇 §6.2 落码注记，复盘 20260901 L-4）：「终态条目不
+ * 删除」的语境是短命进程（作用域回卷即整体 GC）；daemon 常驻（根作用域永不
+ * 回卷）下每条终态条目（含 KB 级结算文本）无界累积、list 面全遍历随 n 变慢。
+ * 结算序 FIFO 逐出最旧终态条目——注册表只放弃查表面（get/list），持有句柄/
+ * 视图的闭包仍钉着条目对象不受影响；running 条目结构性不可被逐。
+ */
+export const TERMINAL_RETENTION_CAP = 256;
+
+/**
  * 创建 Job 注册表（组合根 provide('jobs') 的那一行所注对象）。
  *
  * @param scope 根作用域——生命周期挂点（dispose 兜底回卷）与 logger 来源
@@ -99,8 +108,13 @@ export function createJobsService(
   opts: { kindDisposers?: Map<string, () => void> } = {},
 ): JobsServiceFace {
   const logger: Logger = scope.logger;
-  /** 全量条目表（含已结算——终态条目不删除，仅不可再变；NOT_FOUND 即 id 拼错/未建过） */
+  /** 全量条目表（含已结算——终态条目保留近期历史，超 TERMINAL_RETENTION_CAP 按结算序逐出最旧；被逐条目仅 get/list 不再可见） */
   const byId = new Map<string, JobEntry>();
+  /**
+   * 终态条目结算序 FIFO（复盘 20260901 L-4 保留帽的逐出面）：first-wins settle
+   * 时 push、超帽从队首逐出（队首即最旧终态）；running 条目不进队——结构性免逐。
+   */
+  const settledQueue: string[] = [];
   /**
    * per-owner running 态计数（#12 并发帽的 O(1) 计数面）：键 = ownerSessionId
    * ?? ''（undefined owner = operator 直控面同规共桶）；createEntry 加一、
@@ -164,6 +178,13 @@ export function createJobsService(
     const remaining = (runningByOwner.get(ownerKey) ?? 0) - 1;
     if (remaining > 0) runningByOwner.set(ownerKey, remaining);
     else runningByOwner.delete(ownerKey);
+    // 保留帽逐出（复盘 20260901 L-4）：结算序 FIFO——超帽从队首（最旧终态）
+    // 弃查表面（get/list 不再可见）；持有句柄/视图的闭包仍钉着条目对象
+    settledQueue.push(entry.id);
+    while (settledQueue.length > TERMINAL_RETENTION_CAP) {
+      const evicted = settledQueue.shift()!;
+      byId.delete(evicted);
+    }
     logger.debug('Job 结算', { id: entry.id, kind: entry.kind, terminal, ownerSessionId: entry.ownerSessionId });
     // 结算副作用广播（契约篇 §2.2 应用层）：载荷按契约钉死的五段形状，
     // 缺省字段不占位（undefined 键进 JSON 会丢，显式构造保形状干净）
@@ -323,7 +344,10 @@ export function createJobsService(
     cancel: (id: string, as?: { sessionId?: string }): void => {
       const entry = byId.get(id);
       if (entry === undefined) {
-        throw new AppError(JOB_NOT_FOUND, `Job 不存在：${id}（已结算条目不删除——id 拼错或未创建过）`);
+        throw new AppError(
+          JOB_NOT_FOUND,
+          `Job 不存在：${id}（id 拼错/未创建过，或已结算条目超保留帽被逐出——复盘 20260901 L-4）`,
+        );
       }
       fenceCheck(entry, as);
       requestCancel(entry);
