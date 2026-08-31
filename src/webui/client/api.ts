@@ -82,6 +82,28 @@ export function fetchApprovals(): Promise<PendingApproval[]> {
 }
 
 /**
+ * 一次性引导（daemon 刀一·M1 消费面，复盘 #45）：贴 token 走 Bearer 验证换
+ * HttpOnly cookie（应答 Set-Cookie 由浏览器自动种上——此后同源 fetch /
+ * EventSource 恒携 cookie）。401 = token 不符。
+ */
+export async function authBootstrap(token: string): Promise<void> {
+  const res = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiError(res.status, `auth → ${res.status}`);
+}
+
+/**
+ * 打断在飞 run（daemon 刀一·interrupt 端点的 SPA 消费面，复盘 #48）——与
+ * TUI Ctrl+C 同源 driver.interrupt 面。404 = 目标不在册 / 已闭 / 无在飞 run。
+ */
+export async function interruptSession(sessionId: string): Promise<void> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/interrupt`, { method: 'POST' });
+  if (!res.ok) throw new ApiError(res.status, `interrupt → ${res.status}`);
+}
+
+/**
  * 审批应答（刀三——只 resolve registry resolver，durable 写在服务端单写漏斗）。
  * @returns accepted:false = 已被 TUI 先决（superseded 幂等回执，不二次落账）
  */

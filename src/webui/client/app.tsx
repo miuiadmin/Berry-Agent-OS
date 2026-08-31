@@ -9,7 +9,11 @@
  * - durable 镜像（session 族）到达 = 投影已前进，**只重拉当前查看会话**
  *   （CR-14）：turn/end → 全量重拉；user/message → 重拉 + todo 面板归零
  *   （CR-1——『用户输入段』边界：新段旧表不越界）；todo/write → 面板全量
- *   替换；session_start → 只刷清单（别家新会话披露）；
+ *   替换（session_start 是 bus 活词从不入 durable 镜像——清单刷新由全局
+ *   turn/end 与 onopen 三发覆盖，复盘 #40）；
+ * - daemon 形态引导闸（复盘 #45）：任一 API 401 → 全屏 token 引导屏
+ *   （POST /api/auth 换 HttpOnly cookie）→ 纪元 +1 载入/SSE 整套重建；
+ *   --port 手动形态无鉴权永不 401，闸恒放行。
  * - 半程态合并（CR-2）：投影中无配对 toolResult 的 toolCall 按 pending 卡
  *   渲染，display 族 tool_execution_* 帧按 toolCallId 同键覆盖其状态/输出
  *   （详见 chat-view.tsx）。
@@ -27,11 +31,13 @@ import type {
 } from './types';
 import {
   ApiError,
+  authBootstrap,
   decideApproval,
   fetchApprovals,
   fetchMessages,
   fetchSessions,
   fetchTodo,
+  interruptSession,
   openSession,
   submitMessage,
 } from './api';
@@ -111,6 +117,66 @@ export function relTime(ms: number | undefined): string {
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
 
+/**
+ * 引导屏（复盘 #45——daemon 形态 401 检出时接管全屏）：贴 daemon token 走
+ * POST /api/auth 换 HttpOnly cookie，成功后回调放行。token 从环境读、
+ * 输入框 type=password 不回显明文复述。
+ */
+function BootstrapGate({ onOk }: { onOk: () => void }) {
+  const [token, setToken] = useState('');
+  const [error, setError] = useState('');
+  /** 提交中旗（防双发；成功路径不回落——闸随即放行整屏卸载） */
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const value = token.trim();
+    if (value === '' || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await authBootstrap(value);
+      onOk();
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 401 ? 'token 不符' : String(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex h-full items-center justify-center p-4 text-neutral-200">
+      <form
+        className="w-full max-w-sm space-y-3 rounded-xl border border-neutral-800 p-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <div className="text-sm font-medium">daemon 访问令牌</div>
+        <div className="text-xs text-neutral-500">
+          首次访问需一次性引导：贴 daemon token 换 HttpOnly cookie，此后免输。token 存于宿主数据目录
+          daemon/daemon-token。
+        </div>
+        <input
+          type="password"
+          className="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-600"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="daemon token"
+          autoFocus
+        />
+        {error !== '' && <div className="text-xs text-red-400">{error}</div>}
+        <button
+          type="submit"
+          className="w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+          disabled={busy || token.trim() === ''}
+        >
+          {busy ? '验证中…' : '进入'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 /** App 根：状态面全在此（清单/查看指针/消息投影/todo/活体增量/连接态/状态条） */
 export function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -137,14 +203,28 @@ export function App() {
   const [liveCards, setLiveCards] = useState<PendingApproval[]>([]);
   /** checkpoint 转录行（刀三）：rewind 帧活体 only——surface 词不进投影 */
   const [rewinds, setRewinds] = useState<RewindRow[]>([]);
+  /**
+   * 引导闸门态（复盘 #45）：'ok' = 无鉴权或 cookie 已在（--port 手动形态恒
+   * ok）；'needed' = 检出任一 401 → 引导屏接管。放行时配 authEpoch +1 重键
+   * 两 effect（cookie 已种，fetch/EventSource 同源默认携带）。
+   */
+  const [gate, setGate] = useState<'ok' | 'needed'>('ok');
+  /** 引导成功纪元（只增计数——effect 依赖之一，换 key 即整套重建） */
+  const [authEpoch, setAuthEpoch] = useState(0);
 
-  /** 错误入状态条（ApiError 带状态码；其余按名字） */
+  /** 错误入状态条（ApiError 带状态码；其余按名字）。401 特判 = 翻引导闸 */
   const noteError = useCallback((err: unknown) => {
+    // daemon 形态 cookie 缺席：所有 /api 均回 401（EventSource 亦永久失败）
+    // ——与其在状态条反复报错，不如整屏引导换 cookie（一次性动作）
+    if (err instanceof ApiError && err.status === 401) {
+      setGate('needed');
+      return;
+    }
     const text = err instanceof ApiError ? `${err.message}（HTTP ${err.status}）` : String(err);
     setNotice(text);
   }, []);
 
-  /** 刷会话清单（mount / session_start / turn/end 后——轻量 GET） */
+  /** 刷会话清单（mount / onopen 三发 / turn/end 后——轻量 GET） */
   const refreshSessions = useCallback(() => {
     fetchSessions().then(setSessions).catch(noteError);
   }, [noteError]);
@@ -175,8 +255,10 @@ export function App() {
     [loadView],
   );
 
-  /* 首载：清单 → 自动选第一条活会话（无活条目回落首行只读面）+ 审批角标恢复 */
+  /* 首载：清单 → 自动选第一条活会话（无活条目回落首行只读面）+ 审批角标恢复
+   * （gate/authEpoch 重键：引导放行后带 cookie 整套重跑；闸未开即不烧请求） */
   useEffect(() => {
+    if (gate !== 'ok') return;
     (async () => {
       try {
         const list = await fetchSessions();
@@ -191,12 +273,25 @@ export function App() {
     fetchApprovals()
       .then(setApprovals)
       .catch(() => undefined);
-  }, [select, noteError]);
+  }, [gate, authEpoch, select, noteError]);
 
-  /* SSE 活体流（mount 一次——信封四族分派，全部判据只对查看中会话起作用） */
+  /* SSE 活体流（gate/authEpoch 重键——闸未开不留旧连接，放行后重建即带 cookie；
+   * 信封四族分派，全部判据只对查看中会话起作用） */
   useEffect(() => {
+    if (gate !== 'ok') return;
     const es = new EventSource('/api/events');
-    es.onopen = () => setConnected(true);
+    es.onopen = () => {
+      setConnected(true);
+      // 复盘 #46（契约篇 §6.8「onopen 恒重拉三发」——与 attach 同律）：重连后
+      // 信封不回补断线窗，帧只从当下开始流——三发把投影前进/清单变化/审批
+      // 进出一次补齐，不依赖任何序号（首连同理：零帧前的状态全靠这三发）
+      refreshSessions();
+      const id = viewedRef.current;
+      if (id !== undefined) void loadView(id);
+      fetchApprovals()
+        .then(setApprovals)
+        .catch(() => undefined);
+    };
     es.onerror = () => setConnected(false); // 断线——浏览器自动重连，状态条示红
     es.onmessage = (me: MessageEvent<string>) => {
       let env: SseEnvelope;
@@ -210,9 +305,9 @@ export function App() {
         // durable 镜像族：payload = SessionEvent 本体（channel 组帧上提，省一字段）
         const ev = env.payload as { type?: string } & Record<string, unknown>;
         switch (ev.type) {
-          case 'session_start':
-            refreshSessions(); // 别家新会话披露（TUI /new、另一浏览器开新）
-            return;
+          // 复盘 #40：session_start 是 bus 活词（rootCtx.emit）从不入 durable
+          // 事件账——session 族恒镜像词，此 case 结构性不可达，已删。清单
+          // 刷新由全局 turn/end 与 onopen 三发覆盖。
           case 'turn/end':
             refreshSessions(); // updatedAt 前进
             if (isViewed) void loadView(viewedRef.current!); // 全量重拉 + 清活体
@@ -242,6 +337,23 @@ export function App() {
             ];
             setApprovals(upsert);
             setLiveCards(upsert);
+            // 复盘 #47：durable 载荷结构性只有两键——富字段（suggestedEntry/
+            // reason/ownership/priority）在服务端 claim 时点富化，帧载荷永远
+            // 不带；不补拉则三态按钮（gated on suggestedEntry）在线不可达。
+            // 按 attach 先例重拉 GET /api/approvals 以 approvalId 同键合并进
+            // liveCards（信封 sessionId 优先——簿面条目缺省档防御）。静默失败：
+            // 重拉败则薄卡留任（应答面仍可用）
+            void fetchApprovals()
+              .then((list) => {
+                setApprovals(list);
+                setLiveCards((prev) =>
+                  prev.map((c) => {
+                    const rich = list.find((x) => x.approvalId === c.approvalId);
+                    return rich === undefined ? c : { ...rich, sessionId: c.sessionId ?? rich.sessionId };
+                  }),
+                );
+              })
+              .catch(() => undefined);
             return;
           }
           case 'approval/decided': {
@@ -329,7 +441,7 @@ export function App() {
       }
     };
     return () => es.close();
-  }, [loadView, refreshSessions]);
+  }, [gate, authEpoch, loadView, refreshSessions]);
 
   /** 开新会话（POST /api/sessions——一条龙服务端内化，前端只收清单条目） */
   const onOpen = useCallback(async () => {
@@ -361,6 +473,30 @@ export function App() {
     },
     [noteError],
   );
+
+  /**
+   * 引导放行（复盘 #45）：闸回 ok + 纪元 +1——载入/SSE 两 effect 随之整套
+   * 重建（fetch/EventSource 同源默认携 cookie，此后免输）。
+   */
+  const onAuthed = useCallback(() => {
+    setGate('ok');
+    setAuthEpoch((n) => n + 1);
+  }, []);
+
+  /**
+   * 打断在飞 run（复盘 #48——TUI Ctrl+C 的 web 等价面）。404 = 无在飞 run
+   * （目标不在册/已闭/本就空闲）——诚实告知非报错。
+   */
+  const onInterrupt = useCallback(async () => {
+    const id = viewedRef.current;
+    if (id === undefined) return;
+    try {
+      await interruptSession(id);
+      setNotice('已请求打断当前 run');
+    } catch (err) {
+      setNotice(err instanceof ApiError && err.status === 404 ? '无在飞 run 可打断' : String(err));
+    }
+  }, []);
 
   /** 提交（乐观 user 行先行——durable 镜像重拉后由真值替换；失败回滚重拉） */
   const onSubmit = useCallback(async () => {
@@ -398,12 +534,15 @@ export function App() {
   const viewedCards = useMemo(() => liveCards.filter((a) => a.sessionId === viewedId), [liveCards, viewedId]);
   const viewedRewinds = useMemo(() => rewinds.filter((r) => r.sessionId === viewedId), [rewinds, viewedId]);
 
+  // 引导屏接管（所有 hook 已收束——早退不破 hook 序；放行后走正常渲染）
+  if (gate === 'needed') return <BootstrapGate onOk={onAuthed} />;
+
   return (
     <div
       className="flex h-full flex-col"
       style={viewed?.accent !== undefined ? { ['--accent' as string]: viewed.accent } : undefined}
     >
-      {/* 顶栏：连接态 + 应用域 + 状态条 */}
+      {/* 顶栏：连接态 + 应用域 + 打断 + 状态条 */}
       <header className="flex items-center gap-3 border-b border-neutral-800 px-4 py-2 text-sm">
         <span
           className={`inline-block size-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`}
@@ -412,6 +551,16 @@ export function App() {
         <span className="font-medium" style={{ color: 'var(--accent)' }}>
           {viewed?.appId ?? '—'}
         </span>
+        {/* 打断（复盘 #48）：只对 active 会话呈现——已闭只读面无在飞 run 可断 */}
+        {viewed?.active === true && (
+          <button
+            className="rounded-md border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:text-neutral-200"
+            onClick={() => void onInterrupt()}
+            title="打断当前会话在飞 run（与 TUI Ctrl+C 同源）"
+          >
+            打断
+          </button>
+        )}
         <span className="truncate text-neutral-500">{notice}</span>
       </header>
       <div className="flex min-h-0 flex-1">
