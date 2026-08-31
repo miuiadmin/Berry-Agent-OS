@@ -2,7 +2,7 @@
  * L3 obs — 自管库面测试（迁移幂等 / 增量往返 / 水印 MAX 合并 / 查询白名单；
  * :memory: 库——零落盘）。
  */
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { mkdtempSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,6 +19,8 @@ describe('obs 自管库面', () => {
     const path = tmpDb();
     const first = openRollupStore(path);
     first.close();
+    // 0600 追打断言（契约篇 §6.9 自管库段——app-sqlite face 内执行；umask 无关）
+    expect(statSync(path).mode & 0o777).toBe(0o600);
     const second = openRollupStore(path); // 重开 = user_version 已 1，零补跑
     const rows = second.query({ metric: 'turn', fromMs: T0 - 1, toMs: T0 + 1, groupBy: [] });
     expect(rows).toHaveLength(1); // 空表总计行（SQL 无 GROUP BY 的零值行——语义正确）

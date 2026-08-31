@@ -152,6 +152,10 @@ export function openRollupStore(dbPath: string): RollupStore {
   mkdirSync(dirname(dbPath), { recursive: true });
   // 官方件直连（无拒开基准）——obs 是宿主侧编译件，威胁模型不覆盖此边界
   const db: DatabaseConnection = createAppSqliteFace().openDatabase(dbPath);
+  // 多进程鲁棒性：daemon 常驻与 tick 子进程会同开本库（宿主双开是既定容忍态）——
+  // WAL 消读写互斥 + busy_timeout 把瞬时写锁竞争变为等待而非 SQLITE_BUSY 即停
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
   // 私有迁移链（件内自跑——不进主库聚合链，冷读 B1）
   const current = Number(
     (db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined)?.user_version ?? 0,

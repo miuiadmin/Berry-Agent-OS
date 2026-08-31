@@ -95,7 +95,7 @@ export const LIVE_EVENT_CATALOG: readonly LiveEventDefinition[] = [
     name: 'session/event',
     mode: 'emit',
     hostReserved: true,
-    note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）。hostReserved：旁听全会话 durable 载荷 + 伪造发射毒化官方消费者两半都在（U1 小刀，契约篇 §2.2 增补 9）——消费者 = 宿主总线桥与官方行（memory/goal/compaction/webui）',
+    note: 'SessionEvent 写入后的活体通知，载荷 { sessionId, event }（契约篇 §2.2；信封规则 dsh-11——多会话并存时订阅方可分辨归属）。hostReserved：旁听全会话 durable 载荷 + 伪造发射毒化官方消费者两半都在（U1 小刀，契约篇 §2.2 增补 9）——消费者 = 宿主总线桥与官方行（memory/goal/compaction/webui/obs）',
   },
   {
     name: 'session_start',

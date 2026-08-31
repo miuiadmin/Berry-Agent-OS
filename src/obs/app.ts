@@ -7,7 +7,7 @@
  *   名位是结构前提）→ 聚合器纯内存增量 → flushMs/flushBatch 批量落 rollup.db；
  * - **查询面两路**：模型工具 `obs_query`（四表聚合查询）+ TUI 命令 `/obs
  *   [tools|usage|turns|approvals]`（今日速览）；
- * - **停摄取纪律**（契约篇 §6.9）：自管库写失败 → 停摄取 + error 留痕
+ * - **停摄取纪律**（契约篇 §6.9）：自管库写失败 → 停摄取 + warn 留痕
  *   （/obs-rebuild 判据触发面）。
  *
  * 刀二占位：`obs/alert` 词汇声明（emit）+ alerts 空表（store 私有迁移链）——
@@ -204,9 +204,12 @@ export function createObsApp(): BuiltinAppModule {
           stopped = true;
           unsubscribe?.();
           clearInterval(timer);
-          ctx.logger.error('obs 自管库写失败——停摄取（/obs-rebuild 判据触发面，契约篇 §6.9 摄取纪律）', {
-            error: err instanceof Error ? err.stack : String(err),
-          });
+          ctx.logger.warn(
+            'obs 自管库写失败——停摄取（/obs-rebuild 判据触发面，契约篇 §6.9 摄取纪律——warn 级对齐规范）',
+            {
+              error: err instanceof Error ? err.stack : String(err),
+            },
+          );
         }
       };
       const timer = setInterval(flush, flushMs);
