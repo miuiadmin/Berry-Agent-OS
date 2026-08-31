@@ -8,7 +8,7 @@ Berry Agent OS 的固定内核只司**装、跑、守、存**四职能，其余�
 
 ## 特性一览
 
-- **极小内核（Ring 0）**：22 模块的单向依赖 DAG（全部有码），拓扑由 `npm run lint:topology` 门禁钉死——内核不可卸、职责不膨胀。
+- **极小内核（Ring 0）**：25 模块的单向依赖 DAG（全部有码），拓扑由 `npm run lint:topology` 门禁钉死——内核不可卸、职责不膨胀。
 - **事件溯源会话**：对话即 append-only 事件日志（SQLite WAL），模型历史是日志的投影；遮蔽、分叉、恢复全部由日志语义承载。
 - **可卸载增强（Ring 2）**：官方全家桶随包默认装配——`chat`（对话应用——首启对话体验的载体，默认层首行）、`memory`（记忆库：提取/合并/双路注入/跨会话检索/效用进化/持有面——TTL 留存、冻结恒驻、版本链、访问日志、JSONL 导入导出）、`subagent`（进程内子代理委派 + 声明式子代理）、`goal`（长目标状态机 + 预算刹车 + 续跑）、`scheduler`（定时任务 `/tick`——launchd/crontab 注册器，OS 调度器持时、不持常驻进程）、`mcp`（MCP 客户端桥——外部工具生态接入）、`web`（fetch 工具 + SSRF 卫生件）、`compaction`（长会话压缩）、`admin`（平台管理面工具）——每一件都可卸载，卸掉核心循环不断。
 - **安全栈内建**：工具三段管道（schema 校验 → 守门 → 执行）、沙箱三档（read-only / workspace-write / danger-full-access，macOS seatbelt / Linux bwrap）、可写根推导与 carve-out、审批对、allowlist 免问（命中免审批但落审计账——`/allowlist` 枚举与撤销）。

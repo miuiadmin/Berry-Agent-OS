@@ -1,11 +1,11 @@
 ---
 name: admin
-description: 平台管理面工具的操作知识：只读两件（apps_list 看应用装载态、events_query 跨会话查 durable 事件日志）+ 写类动词六件（安装/更新/启停/配置/重载五写词——审批对形态与 install→reload 链式用法；卸载检视——报告后指引人工执行）。回答「装了什么应用」「怎么装/禁用/改配置某应用」「最近发生了什么」类管理运维问题时的用法与边界。
+description: 平台管理面工具的操作知识：只读两件（apps_list 看应用装载态、events_query 跨会话查 durable 事件日志）+ 写类动词七件（安装/挂载/摘挂/更新/启停/配置/重载——审批对形态与 install→mount→reload 链式用法；卸载检视——报告后指引人工执行）。回答「装了什么应用」「怎么装/禁用/改配置某应用」「最近发生了什么」类管理运维问题时的用法与边界。
 ---
 
-# 管理面工具（只读两件 + 写类六件）
+# 管理面工具（只读两件 + 写类七件 + 卸载检视一件）
 
-你手上有八个管理工具：两件只读（无副作用、无需审批）、五件写类（改变应用组合——**恒需审批**）、一件卸载检视（只读但服务于卸载流程）。本技能教用法、审批形态与流程编排。
+你手上有十个管理工具：两件只读（无副作用、无需审批）、七件写类（改变应用组合——**恒需审批**）、一件卸载检视（只读但服务于卸载流程）。本技能教用法、审批形态与流程编排。
 
 ## 只读两件
 
@@ -38,9 +38,9 @@ description: 平台管理面工具的操作知识：只读两件（apps_list 看
 - 末尾若给出 `nextCursor` = 还有更旧的事件，回传它继续翻；翻完为止。
 - `types` 过滤结果为空时先核对拼写；已卸载应用的事件类型查空是正常语义（词没了、事件还在库里，但你的过滤词必须与库中存的 type 字面一致）。
 
-## 写类五件：审批对形态（所有写词通用）
+## 写类七件：审批对形态（所有写词通用）
 
-`apps_install` / `apps_update` / `apps_toggle` / `apps_configure` / `apps_reload` 改变应用组合，**每次调用恒经人手审批**——参数面必带审批对：
+`apps_install` / `apps_mount` / `apps_unmount` / `apps_update` / `apps_toggle` / `apps_configure` / `apps_reload` 改变应用组合，**每次调用恒经人手审批**——参数面必带审批对：
 
 - `sandbox_permissions`：授权目标档，`workspace-write` 或 `danger-full-access`（别值会被参数校验拒绝）。
 - `justification`：一句话理由——弹窗里给人看的，说明**做什么与为什么**（空串非法）。
@@ -51,31 +51,35 @@ description: 平台管理面工具的操作知识：只读两件（apps_list 看
 - 拒绝是最终的：不要就同一请求重试；向用户说明被拒情况，用户可自己走命令面（`/apps-install`、`/apps-toggle`、`/reload` 等始终可用）。
 - 无头/无人值守环境无人应答 → unavailable，同样未执行。
 
-## 流程编排：install→reload 链式用法（核心心智模型）
+## 流程编排：install→mount→reload 链式用法（核心心智模型）
 
-五个写词**每个只做一段**，落盘与生效分离——动词单职责，链式可见：
+七个写词**每个只做一段**，装机/挂载/生效三段分离——动词单职责，链式可见：
 
 ```
-apps_list            （看现状，拿准确行 id）
+apps_list            （看现状，拿准确行 id / 装机 id）
    ↓
-apps_install / apps_update / apps_toggle / apps_configure
-   ↓（只写 overlay，未生效——回执里会说明）
+apps_install         （入仓库——仓库态零生效）
+   ↓
+apps_mount           （写组合树行挂到应用——仍未生效）
+   ↓
 apps_reload          （重载组合树，一切落盘变更在此生效）
    ↓
 apps_list            （验证：状态是否如期）
 ```
 
-- **装好 ≠ 生效**：install/update/toggle/configure 的回执都提示「重载后生效」——改完组合树，调 `apps_reload` 收尾。
+- **装好 ≠ 生效**：install 只入仓库（回执注明装机 id），mount 才写组合树行，reload 才生效——install 与 update/toggle/configure 的回执都提示「重载后生效」，改完组合树调 `apps_reload` 收尾。
 - `apps_reload` 在 run 进行中不拒绝而是**排队**（回执说明已排队）：run 结算后自动执行，结果经通知送达——收到 queued 不要再发。
 - 重载有失败行时进程存活、旧注册已回卷：`apps_list` 看逐行原因（多为 overlay 配置错或应用装坏），修复后再 reload。
-- **Ring 1 行例外**（当前 = tools）：其 app/config 变更不随 /reload 热装载，回执会注明须重启进程——如实转告用户，不要反复 reload 空转。
+- **Ring 1 行例外**（当前 = tools 与 channels 两行）：其 app/config 变更不随 /reload 热装载，回执会注明须重启进程——如实转告用户，不要反复 reload 空转。
 
 各词要点：
 
 | 工具             | 关键参数                                                 | 语义                                                                                                                                       |
 | ---------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `apps_install`   | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + overlay 写回；行 id 由源推导（npm=包名 / git=repo 名 / local=目录名）                                                           |
-| `apps_update`    | `id`                                                     | npm 重装 / git 按原 ref 重克隆 / local 改动即见                                                                                            |
+| `apps_install`   | `source`（npm spec / git URL / 本地路径）、可选 `gitRef` | 三源装机 + 入仓库账本（**零生效**）；装机 id 由源推导（npm=包名 / git=repo 名 / local=目录名）                                              |
+| `apps_mount`     | `installId` + `apps`（应用 id 数组）、可选 `carrier`     | 写组合树行挂载到应用（多值 = 共享件；v1 第三方件必须挂应用）；载体缺省 = external 进程墙，可显式降格 main/worker；行 id 缺省 = 装机 id    |
+| `apps_unmount`   | `rowId`                                                  | 删组合树行**保装机物与账本**（重挂走 apps_mount）；受影响会话警示随回执呈报；临时停用保配置走 apps_toggle                                   |
+| `apps_update`    | `id`                                                     | npm 重装 / git 按原 ref 重克隆 / local 改动即见（键域 = 装机 id）                                                                           |
 | `apps_toggle`    | `id`                                                     | 启停翻转；Ring 1 必备行与 fixed 行禁用即拒（设计行为）                                                                                     |
 | `apps_configure` | `id` + `config`（patch 对象）                            | **顶层键整值替换**：要改哪些键就带哪些键，未列出的键保持现值，不做深合并；经应用声明 schema 校验，不过即拒且不落盘；禁用/未装/未激活行拒写 |
 | `apps_reload`    | 无（仅审批对）                                           | 全树卸载重装；排队语义见上                                                                                                                 |
