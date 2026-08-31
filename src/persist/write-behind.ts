@@ -166,16 +166,22 @@ export class WriteBehind {
       this.store.appendCore(reg, batch, this.incarnation);
     } catch (cause) {
       /* 部分写裁剪（契约篇 §1.6 资源护栏族 #13，2026-08-27 刀〇b——**强制不变式**）：
-       * appendCore 片化后已提交片保持 durable（部分写如实），库内 max(seq) 是
-       * 部分写事实源——只回队首未写部分。全批原样回放会撞片首 cursor 连续性
-       * 校验 SESSION_WRITE_CONFLICT，该会话队列永久卡死（m-5 冷读死锁陷阱）。 */
+       * appendCore 片化后已提交片保持 durable（部分写如实），重试面只回未写部分。
+       * 全批原样回放会撞片首 cursor 连续性校验 SESSION_WRITE_CONFLICT，该会话
+       * 队列永久卡死（m-5 冷读死锁陷阱）。
+       *
+       * 裁剪依据 = **自有提交边界**（2026-09-01 全面复盘 C-1 修法，会话篇 §6
+       * 写入链第 2 步）：只认本进程经 appendCore 提交到的 seq（Store 内记账）；
+       * 库内 max(seq) 是全库事实——超出自有边界的行必是外部写者所落，一概不裁
+       * （修前按库内 maxSeq 裁剪：跨进程双开时另一进程的行被误认「本批已写」，
+       * 本进程事件静默蒸发 + 文案谎报战果 + 重试片错位续写他人日志）。 */
       this.paused = true;
       if (this.timer) {
         clearTimeout(this.timer);
         this.timer = null;
       }
-      const writtenUpto = this.store.maxSeq(sessionId);
-      const remainder = writtenUpto === undefined ? batch : batch.filter((event) => event.seq > writtenUpto);
+      const ownUpto = this.store.ownCommittedSeq(sessionId);
+      const remainder = ownUpto === undefined ? batch : batch.filter((event) => event.seq > ownUpto);
       const written = batch.length - remainder.length;
       if (remainder.length > 0) {
         const queue = this.pending.get(sessionId);
@@ -185,9 +191,18 @@ export class WriteBehind {
           this.pending.set(sessionId, remainder);
         }
       }
+      // 两成因分报：库内尾超自有边界 = 外部写者已占用 seq 段（双开同一会话属
+      // 误用，会话篇 §6 多实例姿态③——报错即护栏；保留批重试恒撞 cursor 响亮
+      // 拒，绝不静默续写他人日志）
+      const dbMax = this.store.maxSeq(sessionId);
+      const external = dbMax !== undefined && (ownUpto === undefined ? dbMax >= batch[0]!.seq : dbMax > ownUpto);
       const err = new AppError(
         PERSIST_BATCH_WRITE_FAILED,
-        `批量落盘失败（会话 ${sessionId}，已写 ${written} 条、剩 ${remainder.length} 条保留待重试）`,
+        external
+          ? `批量落盘失败（会话 ${sessionId}：外部写者冲突——库内 max(seq)=${dbMax} 超本进程自有提交边界` +
+              `${ownUpto === undefined ? '（本批零提交）' : `=${ownUpto}`}，剩 ${remainder.length} 条保留待重试；` +
+              '双开同一会话属误用，重试将恒撞 cursor 护栏响亮拒绝）'
+          : `批量落盘失败（会话 ${sessionId}，已写 ${written} 条、剩 ${remainder.length} 条保留待重试）`,
         { cause },
       );
       this.onError?.(err);

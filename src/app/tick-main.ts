@@ -3,9 +3,10 @@
  * launchd/crontab 注册〕唤起的形态——本进程就是被调起的那个进程，跑在本地
  * 不再 spawn；/tick run 手动路走 scheduler 件 spawn 子进程，两路同闸同账）。
  *
- * 编排序（内核边界篇 §4.1 席 13 第二刀拍板①④）：
+ * 编排序（内核边界篇 §4.1 席 13 第二刀拍板①④ + 复盘 C-2 双开预闸）：
  *   boot 前预读任务行 → due 判定（未到/已终/迟到超窗——不烧钱即退）→
- *   DiscoveryGates 统一闸 → reserveRun 原子抢占 → in-process 跑一轮 →
+ *   双开预闸（busy/held——零写入不变式，让路不整机装配）→
+ *   DiscoveryGates 统一闸（复验）→ reserveRun 原子抢占 → in-process 跑一轮 →
  *   last_session_id 归属回写 → 落盘关停。
  *
  * 投递二值（拍板①）由 jobs.session_id 列分叉：
@@ -20,6 +21,7 @@
  */
 
 import { openStore, openTurnDepth } from '../persist/index.js';
+import type { Store } from '../persist/index.js';
 import type { LlmService } from '../llm/index.js';
 import { JobsStore, parseSchedule, evaluateDue, discoveryGates, GOAL_JOB_OWNER } from '../scheduler/index.js';
 import type { JobRecord } from '../scheduler/index.js';
@@ -56,26 +58,28 @@ function lastAssistantText(result: RunResult): string | undefined {
  * = boot resume 的目标会话——读写天然锚定归属会话。
  */
 interface TickSessionsFace {
-  appendEvent(type: string, data: unknown): unknown;
+  appendEvent(type: string, data: unknown): void; // 返回值消费面忽略——void 形（真服务任意返回可赋)
   eventsOfType(type: string): readonly { readonly time: number; readonly data: unknown }[];
 }
 
 /**
- * 同库短连接执行 JobsStore 操作（boot 前轻事务）。
+ * 同库短连接执行轻事务（boot 前情报面——库路径与 boot 同源）。
  *
- * 两个调用站点：① 预读任务行（missing 快败 + 会话投递路的 boot 前情报——
- * resumeSession 是 boot 选项，开完再改就晚了）；② missed 记因（写一列就
- * 走，不值得整机装配）。迁移链与装配同源（collectBuiltinMigrations）——
- * 短连接若带短链，开新库即撞「user_version 高于宿主已知」闸。
+ * 三个调用站点：① 预读任务行（missing 快败 + 会话投递路的 boot 前情报——
+ * resumeSession 是 boot 选项，开完再改就晚了）；② missed 记因（写一列就走，
+ * 不值得整机装配）；③ 双开预闸读 turnDepth（复盘 C-2——busy 判据前置到
+ * 整机装配之前，让路路径零装配零写入）。迁移链与装配同源
+ * （collectBuiltinMigrations）——短连接若带短链，开新库即撞
+ * 「user_version 高于宿主已知」闸。
  * @param options 组合根选项（取 dbPath——与真 boot 同库）
- * @param fn 在 JobsStore 上执行的操作（返回值原样透传）
+ * @param fn 在短连接 Store 上执行的操作（返回值原样透传）
  */
-function withJobsStore<T>(options: RuntimeOptions, fn: (store: JobsStore) => T): T {
+function withShortStore<T>(options: RuntimeOptions, fn: (store: Store) => T): T {
   // 库路径与 boot 同源（dbPath() 缺省；:memory: 时读到的是自己的空库——
   // 任务必不存在，与「无库无任务」同语义）
   const store = openStore({ path: options.dbPath ?? dbPath(), migrations: collectBuiltinMigrations() });
   try {
-    return fn(new JobsStore(store.connection));
+    return fn(store);
   } finally {
     store.close();
   }
@@ -90,7 +94,7 @@ function withJobsStore<T>(options: RuntimeOptions, fn: (store: JobsStore) => T):
  */
 export async function tickMain(jobName: string, options: RuntimeOptions = {}): Promise<number> {
   /* ---- ① 预读任务行（missing 快败 + 会话投递路的 boot 前情报） ---- */
-  const job = withJobsStore(options, (store) => store.get(jobName));
+  const job = withShortStore(options, (store) => new JobsStore(store.connection).get(jobName));
   if (job === undefined) {
     process.stderr.write(`任务不存在：${jobName}（/tick list 查看）\n`);
     return 2;
@@ -121,11 +125,40 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
     }
     if (due.action === 'missed') {
       // once 迟到超窗：记因不跑（last_run_reason='missed'，不推进触发时刻）
-      withJobsStore(options, (store) => store.markMissed(jobName, Date.now()));
+      withShortStore(options, (store) => new JobsStore(store.connection).markMissed(jobName, Date.now()));
       process.stderr.write(`任务 ${jobName} 迟到超窗（grace 已过），记 missed 不跑\n`);
       return 0;
     }
     // due.action === 'fire' → 继续往下
+  }
+
+  /* ---- ②b 双开预闸（2026-09-01 复盘 C-2：零写入不变式——busy/held 两拒不整机装配） ---- */
+  // 只限会话投递路（job.sessionId 非空）：子进程单发路 boot 开新会话，恢复
+  // 合成无可触碰的宿主会话，闸留在 ④ 原位即可
+  if (job.sessionId !== null) {
+    // held 预闸（daemon.json 判活——纯文件读零库开销）：被持有即改道退 1。
+    // ⑤ 的同判据兜底仍在（boot 窗口竞收口），此处前移保证 held 拒开路径
+    // 零装配零写入
+    const heldState = readDaemonState();
+    if (heldState !== undefined && isDaemonAlive(heldState) && heldState.heldSessions.includes(job.sessionId)) {
+      process.stderr.write(
+        `该会话由 daemon 持有：${job.sessionId}（heldSessions 租约）——` +
+          '`berry attach` 接上应答，或经 `POST /api/sessions/:id/submit` 投递\n',
+      );
+      return 1;
+    }
+    // busy 预闸：turn/start·turn/end 配对深度投影（events 表 SQL——跨进程
+    // 有效，宿主 TUI 在跑即让路退 0）。必须在整机装配**前**：boot 的
+    // registry.open 恢复合成会为敞开 turn 落 turn/end 假终态并经 write-behind
+    // 落库——闸若在 boot 后，让路路径已把假终态写进宿主在跑的会话（闸读数
+    // 被自身恢复清零 → 下一跳盲闸放行双跑；宿主下批落库撞 cursor 护栏）。
+    // ④ 的统一闸保留为复验（防预闸后竞窗新开轮；canAfford 判据面在装配内
+    // 只能复验不能前移）
+    const turnDepth = withShortStore(options, (store) => openTurnDepth(store));
+    if (turnDepth > 0) {
+      process.stderr.write(`让路（agent_busy：库内有轮在跑，openTurnDepth=${turnDepth}）——本轮不投递\n`);
+      return 0;
+    }
   }
 
   /* ---- ③ 整机装配（headless；tick 任务面固定档——CLI 旗标显式值优先） ---- */
@@ -142,7 +175,7 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
     // 后台道缺省：正确性要求非偏好——canAfford 读的账在 background 道，
     // tick 花 foreground 道即闸盲区（骨架篇 §8.7 never-unbounded 破律）
     usagePriority: options.usagePriority ?? 'background',
-    ...(job.sessionId !== null ? { resumeSession: job.sessionId } : {}),
+    ...(job.sessionId === null ? {} : { resumeSession: job.sessionId }),
   });
   // 无持久层 = 无任务面可写（reserve/回写全无落点）——语义性失败非崩溃
   if (runtime.persistence === undefined) {
@@ -151,7 +184,8 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
     return 1;
   }
 
-  /* ---- ④ 统一闸（DiscoveryGates 四判据——tick 定时路的取值形态） ---- */
+  /* ---- ④ 统一闸复验（DiscoveryGates 四判据——②b 预闸后的第二道：防预闸
+   至 boot 间竞窗新开轮；canAfford/wakeCount 判据面在装配内，本就是唯一判点） ---- */
   // llm 服务面经根 ctx 取（④b 装配期 provide 的同一实例——同一底账同一闸）
   const llm = runtime.ctx.get<LlmService>('llm');
   const gate = discoveryGates({
@@ -181,6 +215,7 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
   if (entry === undefined) {
     // P3 拒绝完整 UX·触达面①（daemon 刀二，契约篇 §6.8）：会话投递路撞
     // daemon 持有 = 最可能因（heldElsewhere 拒开 → 无聚焦条目落到这里）。
+    // ②b 预闸已前移同判据（held 拒开零装配）；此处为 boot 窗口竞兜底。
     // 先判 held 再报未装载——两因指引完全不同：held 给 attach/submit 指引
     //（非零退，OS 钟下一跳再撞同墙）；未装载才是装配问题。daemon.json 判活
     // + 持有目标即成立（与 assembly heldElsewhere 同判据同源——tick 子进程
@@ -320,14 +355,14 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
     //——durable 落账，帽投影与结算归因扫的就是这面）+ 工具收窄（⑤b 算好）；
     // 其余任务路维持原样（静态 prompt、无收窄——用户手写在场语义）
     const result =
-      goalAttribution !== undefined
-        ? await entry.driver.submitOnce(prompt, {
+      goalAttribution === undefined
+        ? await entry.driver.submitOnce(prompt)
+        : await entry.driver.submitOnce(prompt, {
             source: 'app:goal',
             attribution: goalAttribution,
             backgroundWake: true,
-            ...(goalToolFilter !== undefined ? { toolFilter: goalToolFilter } : {}),
-          })
-        : await entry.driver.submitOnce(prompt);
+            ...(goalToolFilter === undefined ? {} : { toolFilter: goalToolFilter }),
+          });
     if (!result) {
       // 防御：quit 已触发时 submitOnce 转队列返回 undefined——按中断处理
       process.stderr.write('已中断\n');

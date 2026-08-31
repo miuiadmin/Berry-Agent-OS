@@ -356,6 +356,54 @@ describe('run --tick 编排：会话投递路（session_id 非空）', () => {
     expect(jobRow(dbFile, 'dead')['last_run_at']).toBeNull();
   });
 
+  // 【回归锁·2026-09-01 全面复盘 C-2】busy 让路零写入不变式：宿主在跑（目标
+  // 会话 durable 敞开 turn）时到点——修前整机装配先于闸：boot 的 registry.open
+  // 恢复合成 turn/end 假终态已写进宿主在跑的会话（闸读数被自身恢复清零 →
+  // 下一跳盲闸放行双跑；宿主下批落库撞 cursor 护栏）。
+  it('busy 让路零写入：目标会话敞开 turn → 让路 0 且目标会话 durable 事件数不变', async () => {
+    const dbFile = makeDbFile();
+    // 真会话作投递目标（boot 造 + 优雅关停落盘）
+    const runtime = await createRuntime({
+      dbPath: dbFile,
+      workspace: makeTempDir('app-tickmain-ws-'),
+      streamFn: scriptedStream(REPLY),
+    });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    await runtime.shutdown();
+    runtimes.pop();
+    // 造宿主在跑判据：目标会话 durable 敞开 turn/start（续尾插一行——模拟
+    // 宿主 TUI 在轮中、turn/start 已过 flush 屏障）
+    const store = openStore({ path: dbFile, migrations: collectBuiltinMigrations() });
+    try {
+      const tail = store.connection
+        .prepare('SELECT COALESCE(MAX(seq), -1) AS m FROM events WHERE session_id = ?')
+        .get(target) as { m: number };
+      store.connection
+        .prepare(`INSERT INTO events (session_id, seq, type, time, data) VALUES (?, ?, 'turn/start', ?, '{}')`)
+        .run(target, tail.m + 1, Date.now());
+    } finally {
+      store.close();
+    }
+    const eventsBefore = scalar(dbFile, 'SELECT COUNT(*) AS value FROM events WHERE session_id = ?', target);
+    seed(dbFile, (jobs) => {
+      jobs.add('busy-target', '晚班总结', Date.now() - 2 * 60_000, 'every@1m');
+      jobs.setSessionTarget('busy-target', target, Date.now());
+    });
+    const err = captureStderr();
+    try {
+      expect(await tickMain('busy-target', { dbPath: dbFile, streamFn: scriptedStream(REPLY) })).toBe(0);
+      expect(err.texts.join('')).toContain('让路');
+    } finally {
+      err.restore();
+    }
+    // 零写入不变式：让路路径对目标会话 durable 日志零新增（修前恢复合成 +1
+    // 条 turn/end 假终态、且闸读数归零放行整轮双跑）
+    expect(scalar(dbFile, 'SELECT COUNT(*) AS value FROM events WHERE session_id = ?', target)).toBe(eventsBefore);
+    // 让路不抢占：last_run_at 原样 null
+    expect(jobRow(dbFile, 'busy-target')['last_run_at']).toBeNull();
+  });
+
   it('P3 触达面①：目标会话被活 daemon 持有 → 1 + attach/submit 改道指引（拒投不烧抢占）', async () => {
     const dbFile = makeDbFile();
     const workspace = makeTempDir('app-tickmain-ws-');

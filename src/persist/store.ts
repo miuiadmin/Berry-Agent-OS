@@ -291,6 +291,14 @@ export class Store {
   private readonly db: DatabaseConnection;
   /** 运行期准备语句缓存（同名只编一次） */
   private readonly statements = new Map<string, Database.Statement>();
+  /**
+   * 本进程自有提交边界（session → 本进程经 appendCore 已提交的最大 seq）。
+   * 2026-09-01 全面复盘 C-1 修法：write-behind 失败重试的裁剪只认它——
+   * 库内 max(seq) 是全库事实（含外部写者行），误当本批边界即本进程事件
+   * 静默蒸发 + 错误文案谎报 + 重试片错位续写他人日志（三方分叉）。
+   * 生命周期：随 Store 实例（= 进程内单连接），跨进程各自记账互不可见。
+   */
+  private readonly ownBoundaries = new Map<string, number>();
 
   constructor(db: DatabaseConnection, storeId: string) {
     this.db = db;
@@ -330,7 +338,9 @@ export class Store {
    * 逐片自洽——后片起点自然衔接前片落定的 max(seq)）；每片事务内做
    * insert → sessions 行登记 → revision 前进（incarnation 变更即复位为 1）。
    * 片失败 = 已提交片保持 durable（**部分写如实**）、错误穿透上抛——
-   * 调用方（write-behind）按库内 maxSeq 裁剪重试面，只重未写部分。
+   * 调用方（write-behind）按**自有提交边界**（ownCommittedSeq，本方法逐片
+   * 记账）裁剪重试面，只重未写部分；库内 maxSeq 是全库事实（含外部写者
+   * 行），不是本批边界（2026-09-01 复盘 C-1 勘正）。
    *
    * @param incarnation 本进程生命周期 UUID（revision 复位边界）
    * @returns 前进后的 revision（= 最后一片落定的值；切片使 revision 按事务数前进）
@@ -351,9 +361,21 @@ export class Store {
         end += 1;
       }
       revision = this.appendSlice(reg, batch.slice(start, end), jsons.slice(start, end), incarnation);
+      // 自有提交边界记账（复盘 C-1）：片提交成功即推进——失败重试的裁剪
+      // 依据，永不含外部写者的行
+      this.ownBoundaries.set(reg.sessionId, batch[end - 1]!.seq);
       start = end;
     }
     return revision;
+  }
+
+  /**
+   * 本进程对某会话已提交到的最大 seq（**自有提交边界**，2026-09-01 复盘 C-1）。
+   * 本进程未对该会话提交过任何事件时返回 undefined——与库内是否有行（可能全
+   * 是外部写者所落）无关。write-behind 失败裁剪的唯一依据。
+   */
+  ownCommittedSeq(sessionId: string): number | undefined {
+    return this.ownBoundaries.get(sessionId);
   }
 
   /**
@@ -432,9 +454,10 @@ export class Store {
   }
 
   /**
-   * 库内最大 seq（#13 部分写事实源）：appendCore 片失败后，已提交片的落定边界
-   * 从库本身读取——write-behind 以此裁剪重试面（只重未写部分），不靠错误携带
-   * 状态。无事件返回 undefined。
+   * 库内最大 seq（**全库事实源**，非本批边界——2026-09-01 复盘 C-1 勘正）：
+   * 含外部写者落的行。现职两用：① 外部写者冲突判证（write-behind 失败时
+   * 与 ownCommittedSeq 对照——库内尾超自有边界 = 他进程已写）；② 部分写
+   * 事实检视（诊断面）。无事件返回 undefined。
    */
   maxSeq(sessionId: string): number | undefined {
     const row = this.stmt('SELECT MAX(seq) AS m FROM events WHERE session_id = ?').get(sessionId) as
@@ -633,7 +656,7 @@ export class Store {
       params.push(opts.sessionId);
     }
     // app 维走 sessions 列（JOIN sessions）；仅声明 app 时才引入 JOIN
-    const join = opts.app !== undefined ? 'JOIN sessions s ON s.id = e.session_id' : '';
+    const join = opts.app === undefined ? '' : 'JOIN sessions s ON s.id = e.session_id';
     if (opts.app !== undefined) {
       where.push('s.app = ?');
       params.push(opts.app);
@@ -660,7 +683,7 @@ export class Store {
       seq: r.seq,
       type: r.type,
       time: r.time,
-      data: JSON.parse(r.data) as unknown, // 载荷原样反序列化——呈现截断归工具层
+      data: parseStoredJson<unknown>(r.data, `events(${r.sessionId}#${r.seq}) data`), // 载荷原样反序列化——呈现截断归工具层
     }));
     const last = page.at(-1);
     return {
@@ -693,7 +716,11 @@ export class Store {
     if (!row) {
       return undefined;
     }
-    return { kind: row.kind, data: JSON.parse(row.data), updatedAt: row.updated_at };
+    return {
+      kind: row.kind,
+      data: parseStoredJson(row.data, `credentials(${provider}) data`),
+      updatedAt: row.updated_at,
+    };
   }
 
   /**
@@ -711,7 +738,7 @@ export class Store {
       const row = this.stmt('SELECT kind, data FROM credentials WHERE provider = ?').get(p) as
         { kind: string; data: string } | undefined;
       const kind = opts?.kind ?? row?.kind ?? 'api-key';
-      const next = mutator(row ? JSON.parse(row.data) : undefined);
+      const next = mutator(row ? parseStoredJson(row.data, `credentials(${provider}) data`) : undefined);
       if (next === undefined) {
         this.stmt('DELETE FROM credentials WHERE provider = ?').run(p);
         return undefined;
@@ -743,7 +770,9 @@ export class Store {
       provider,
       modelId,
     ) as { data: string; source: string } | undefined;
-    return row ? { data: JSON.parse(row.data), source: row.source } : undefined;
+    return row
+      ? { data: parseStoredJson(row.data, `model_catalog(${provider}/${modelId}) data`), source: row.source }
+      : undefined;
   }
 
   listModels(provider?: string): Array<{ provider: string; modelId: string; data: unknown; source: string }> {
@@ -757,12 +786,34 @@ export class Store {
       data: string;
       source: string;
     }>;
-    return rows.map((r) => ({ provider: r.provider, modelId: r.model_id, data: JSON.parse(r.data), source: r.source }));
+    return rows.map((r) => ({
+      provider: r.provider,
+      modelId: r.model_id,
+      data: parseStoredJson(r.data, `model_catalog(${r.provider}/${r.model_id}) data`),
+      source: r.source,
+    }));
   }
 
   /** 删除一条模型目录（用户撤销覆盖） */
   deleteModel(provider: string, modelId: string): void {
     this.stmt('DELETE FROM model_catalog WHERE provider = ? AND model_id = ?').run(provider, modelId);
+  }
+}
+
+/**
+ * 库内 JSON 列解析（fail-loud 包装）：数据全为本库自写（JSON.stringify 产物），
+ * 损坏只可能来自外因（断电半写/手编库）——包装不吞错（「宁拒绝不误读」门禁
+ * 哲学），只把裸 SyntaxError 升格为带定位上下文的 AppError（诊断面：哪张表
+ * 哪一行坏了，而不是无名 SyntaxError）。
+ */
+function parseStoredJson<T>(raw: string, context: string): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    throw new AppError(
+      SESSION_FORMAT_UNSUPPORTED,
+      `库内 JSON 损坏（${context}）：${err instanceof Error ? err.message : String(err)}——外因损坏（断电半写/手编库），拒绝误读`,
+    );
   }
 }
 
@@ -796,10 +847,15 @@ function decodeEvent(row: {
     type: row.type,
     seq: row.seq,
     time: row.time,
-    data: deepFreeze(JSON.parse(row.data)),
+    data: deepFreeze(parseStoredJson<unknown>(row.data, `events(seq=${row.seq}) data`)),
     ...(row.ignorable ? { ignorable: true } : {}),
     ...(row.surface_op
-      ? { surfaceOp: JSON.parse(row.surface_op) as { op: 'replace'; start: number; end: number } }
+      ? {
+          surfaceOp: parseStoredJson<{ op: 'replace'; start: number; end: number }>(
+            row.surface_op,
+            `events(seq=${row.seq}) surface_op`,
+          ),
+        }
       : {}),
     ...(row.source_event_seqs ? { sourceEventSeqs: decodeSeqs(row.source_event_seqs) } : {}),
   };

@@ -220,6 +220,53 @@ describe('write-behind 失败语义（响亮失败，不静默丢批）', () => 
     await wb.close();
     store.close();
   });
+
+  // 【回归锁·2026-09-01 全面复盘 C-1】跨进程写者冲突：同库第二连接（模拟双开
+  // 他进程）先占同 seq 段 → 本批**全量保留不裁剪**、文案如实点名外部成因。
+  // 修前库内 maxSeq 被误认「本批已写」：本进程 5 条事件静默蒸发（remainder
+  // 滤空）、文案谎报「已写 5 条」、重试错位续写他人日志——三方分叉。
+  it('外部写者占用 seq 段：本批全量保留 + 文案分报外部冲突（不蒸发不谎报不错位）', async () => {
+    const path = nextPath();
+    const mine = Persistence.open({ path, windowMs: 60_000 }); // 本进程（A）——长窗不自动触发
+    // 外部写者（B）：同库第二连接，同会话 seq 0-4 先行提交（双开他进程常态形）
+    const other = Persistence.open({ path, windowMs: 60_000 });
+    const extSession = new Session({ sessionId: 's-dual' });
+    for (let i = 0; i < 5; i++) {
+      extSession.append('user/message', { content: `他进程 ${i}` });
+    }
+    other.store.appendCore(
+      { sessionId: 's-dual', origin: 'user', parentSession: undefined, seedLength: 0, delegationDepth: 0 },
+      extSession.events,
+      'inc-external',
+    );
+    expect(other.store.loadEvents('s-dual')).toHaveLength(5); // 外部行已在库
+
+    // 本进程 A：同会话同 seq 段（0-4）排队 → 首片即撞 cursor 护栏
+    const onError = vi.fn();
+    const wb = new WriteBehind(mine.store, 'inc-mine', { windowMs: 20, onError });
+    const session = new Session({ sessionId: 's-dual' });
+    for (let i = 0; i < 5; i++) {
+      wb.enqueue(session, session.append('user/message', { content: `本进程 ${i}` }));
+    }
+    await sleep(60); // 窗口触发 → SESSION_WRITE_CONFLICT（外部行占段）
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]![0].code).toBe(PERSIST_BATCH_WRITE_FAILED);
+    // 文案如实分报：点名外部写者成因，绝不把他人 5 行记成本批战果
+    expect(onError.mock.calls[0]![0].message).toContain('外部写者');
+    expect(onError.mock.calls[0]![0].message).not.toContain('已写 5 条');
+    expect(wb.isPaused).toBe(true);
+
+    // 本批全量保留（修前静默蒸发）：显式重试恒撞 cursor 再拒——队列里还有货
+    await expect(wb.flush()).rejects.toThrow(/外部写者冲突/);
+    expect(onError).toHaveBeenCalledTimes(2);
+    // 不错位续写：库内仍是外部 5 行原样（本进程零行落库）
+    expect(mine.store.loadEvents('s-dual')).toHaveLength(5);
+    expect(mine.store.loadEvents('s-dual').map((e) => (e.data as { content: string }).content)).toEqual(
+      extSession.events.map((e) => (e.data as { content: string }).content),
+    );
+    mine.store.close();
+    other.store.close();
+  });
 });
 
 describe('顺序保证', () => {
