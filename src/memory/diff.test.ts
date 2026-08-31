@@ -145,3 +145,34 @@ describe('briefingFace（基线与当前面的共同定义）', () => {
     expect(briefingFace(store, ['global']).face).toHaveLength(1);
   });
 });
+
+describe('briefingFace 晋升候选 face 档（§9.1 第 1 项，第四十二批——冷读 M1）', () => {
+  it('face = 正文行 ∪ 候选行（权威面）；body/candidates 分面渲染', () => {
+    const store = new MemoryStore(
+      openStore({
+        path: ':memory:',
+        migrations: [MEMORY_MIGRATION, MEMORY_UTILITY_MIGRATION, MEMORY_HOLDING_MIGRATION],
+      }).connection,
+    );
+    // 正文行（preference）+ 候选行（failure 攒双证据；超长 summary 挤出正文——
+    // briefingFace 不暴露 maxEntries，走 maxChars=2000 截断路制造候选出场位）
+    store.addMemory({ ownerKey: 'global', kind: 'preference', summary: '偏好 pnpm', content: 'c' });
+    const longSummary = `abi 教训 ${'x'.repeat(2100)}`;
+    store.addMemory({ ownerKey: 'global', kind: 'failure', summary: longSummary, content: 'c' });
+    store.addMemory({ ownerKey: 'global', kind: 'failure', summary: longSummary, content: 'c2' }); // 精确合并 → evidence 2
+    const { face, body, candidates } = briefingFace(store, ['global']);
+    expect(body).toHaveLength(1);
+    expect(body[0]!.summary).toBe('偏好 pnpm');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.summary).toBe(longSummary);
+    // 权威面 = 并集（候选数据行进面：指纹/差分/消毒自动跟随）
+    expect(face).toHaveLength(2);
+    expect(new Set(face.map((f) => f.id))).toEqual(new Set([...body, ...candidates].map((f) => f.id)));
+    // 候选退场（晋升搬家）→ 权威面即时缩水：差分 `-` 修正过期候选（M1 核心收益）
+    const before = faceFingerprint(face);
+    store.forget(candidates[0]!.id, 'skill:pdf-tools');
+    const after = briefingFace(store, ['global']);
+    expect(faceFingerprint(after.face)).not.toBe(before);
+    expect(diffFaces(face, after.face).map((d) => d.op)).toEqual(['-']);
+  });
+});

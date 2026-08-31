@@ -236,6 +236,13 @@ export function utilityScore(record: Pick<MemoryRecord, 'confidence' | 'evidence
   return record.confidence * Math.log(record.evidenceCount + 1) * (1 + Math.log(record.usageCount + 1));
 }
 
+/** 晋升候选 kind 闭集（§9.1 第 1 项，第四十二批——§9 原文口径：failure/insight/convention；correction 是对模型行为的纠正不进候选） */
+const PROMOTION_KINDS: ReadonlySet<MemoryKind> = new Set<MemoryKind>(['failure', 'insight', 'convention']);
+
+/** 晋升候选判据阈值：独立证据攒到第二次，或被引用过至少一次（usage ≡ cite 行数）——起草值随实测调 */
+const PROMOTION_MIN_EVIDENCE = 2;
+const PROMOTION_MIN_USAGE = 1;
+
 /** 合并两份溯源引用（sessionId+seq 去重，保最近 SOURCE_REFS_CAP 条） */
 function mergeRefs(a: readonly MemorySourceRef[], b: readonly MemorySourceRef[]): string {
   const seen = new Set<string>();
@@ -905,11 +912,19 @@ export class MemoryStore {
    */
   briefing(
     ownerKeys: readonly string[],
-    opts: { maxEntries?: number; maxChars?: number; unusedDays?: number; now?: () => number } = {},
-  ): { records: MemoryRecord[]; truncated: boolean; frozenCount: number } {
+    opts: {
+      maxEntries?: number;
+      maxChars?: number;
+      unusedDays?: number;
+      /** 晋升候选上限（§9.1 第 1 项，第四十二批——起草值 3 随实测调） */
+      maxCandidates?: number;
+      now?: () => number;
+    } = {},
+  ): { records: MemoryRecord[]; truncated: boolean; frozenCount: number; candidates: MemoryRecord[] } {
     const maxEntries = opts.maxEntries ?? 20;
     const maxChars = opts.maxChars ?? 2000;
     const unusedDays = opts.unusedDays ?? 30;
+    const maxCandidates = opts.maxCandidates ?? 3;
     const now = opts.now?.() ?? Date.now();
     const activeCutoff = now - unusedDays * 24 * 60 * 60 * 1000;
     const kindPriority: Record<MemoryKind, number> = {
@@ -939,22 +954,38 @@ export class MemoryStore {
     for (const record of scored) {
       const cost = record.summary.length + 1; // 简报行 = 一条 summary + 换行
       if (record.frozen) {
-        // 冻结常驻：不占双限额、不触发截断（免竞争义）
+        // 冻结常驻：不占双限额、不触发截断（免竞争义）；不受竞争面触顶影响——
+        // 扫满不 break（§3「直接常驻」语义：frozen 排在 scored 深位也不得被竞争
+        // 面的截断截掉；第四十二批晋升候选测试锁出的回归，随批修复）
         records.push(record);
         frozenCount += 1;
         continue;
       }
-      if (records.length - frozenCount >= maxEntries) {
+      if (records.length - frozenCount >= maxEntries || used + cost > maxChars) {
+        // 触顶后 continue 不 break：深位 frozen 条目仍要收（恒驻），竞争面就此止步
         truncated = true;
-        break;
-      }
-      if (used + cost > maxChars) {
-        truncated = true;
-        break;
+        continue;
       }
       records.push(record);
       used += cost;
     }
-    return { records, truncated, frozenCount };
+    // 晋升候选（§9.1 第 1 项，第四十二批）：同一 scored 流取数——未用排除之后
+    // （冷读 M2：晋升候选 ⊆ 简报资格集，「死 = 离开常驻面」纪律不被判据绕过——
+    // 未用死条目不因「被引用过一次」捞回常驻面）；kind 三类 + 反复命中判据
+    // （evidence ≥ 2 ∨ usage ≥ 1，usage ≡ cite 行数）+ frozen 排除（时间胶囊不搬家）；
+    // 正文已列条目去重（冷读 M1：face 内同 id 双行污染指纹与差分比较面）；排序 =
+    // 效用综合分降序（§5 同一把尺），截 top N。
+    const bodyIds = new Set(records.map((r) => r.id));
+    const candidates = scored
+      .filter(
+        (r) =>
+          PROMOTION_KINDS.has(r.kind) &&
+          !r.frozen &&
+          !bodyIds.has(r.id) &&
+          (r.evidenceCount >= PROMOTION_MIN_EVIDENCE || r.usageCount >= PROMOTION_MIN_USAGE),
+      )
+      .sort((a, b) => utilityScore(b) - utilityScore(a))
+      .slice(0, maxCandidates);
+    return { records, truncated, frozenCount, candidates };
   }
 }

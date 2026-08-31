@@ -14,6 +14,16 @@
 /** 技能来源层级（§4.4 优先级 project > user > package；同名 first-wins） */
 export type SkillSourceLevel = 'project' | 'user' | 'package';
 
+/** 晋升溯源（契约篇 §4.2 / 记忆篇 §9.1 第 2 项，2026-08-31 第四十二批）：技能由
+ * 记忆晋升而来时，作者（模型/用户）在 frontmatter 声明源记忆条目 id——审批面
+ * 与审计面据此把技能清算回记忆（记忆再经 source_refs 清算回事件，宪章「痕迹
+ * 可清算」三级全链）。手写技能无此字段；宿主只读解析不校验存在性（跨面校验属
+ * 审批/诊断面——技能装载零 memory 依赖，拓扑边不增）。 */
+export interface SkillProvenance {
+  /** 源记忆条目完整 id 列表（≤50——memory source_refs 50 上限同族） */
+  readonly memories: readonly string[];
+}
+
 /** 一个已加载技能（SKILL.md 解析产物；正文原文保留供 read 全文与显式激活） */
 export interface Skill {
   /** 技能名（frontmatter name，缺省回落父目录名；校验规则见 skill-md.ts） */
@@ -36,6 +46,9 @@ export interface Skill {
   readonly source: SkillSourceLevel;
   /** 隐藏于模型清单、仅显式 /skill:name 调用（CC 扩展字段，§4.2） */
   readonly disableModelInvocation: boolean;
+  /** 晋升溯源（可选——frontmatter provenance.memories；缺省 = 手写/无溯源，§4.2 第四十二批）。
+   *  形状非法时解析层警告 + 字段丢弃（宽容度同 name/description），技能仍加载 */
+  readonly provenance?: SkillProvenance;
 }
 
 /** 诊断码（稳定词汇；warning 不断流，collision 记录 first-wins 落选者） */

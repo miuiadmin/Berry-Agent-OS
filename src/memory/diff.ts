@@ -77,11 +77,36 @@ export interface FaceEntry {
 export function briefingFace(
   store: Pick<MemoryStore, 'briefing'>,
   ownerKeys: readonly string[],
-  opts: { unusedDays?: number } = {},
-): { face: FaceEntry[]; truncated: boolean; frozenBlocked: number } {
-  const brief = store.briefing(ownerKeys, opts.unusedDays !== undefined ? { unusedDays: opts.unusedDays } : {});
+  opts: { unusedDays?: number; maxCandidates?: number } = {},
+): {
+  /** 简报权威面 = 正文行 ∪ 晋升候选行（第四十二批 §9.1 face 档，冷读 M1——候选 [m:] 数据行进面：消毒/指纹/差分自动跟随；指引句是文案不进面） */
+  face: FaceEntry[];
+  /** 正文行（渲染面——renderBriefingSection 的 body 参数；face 的真子集） */
+  body: FaceEntry[];
+  /** 晋升候选行（渲染面——尾行点名的数据行） */
+  candidates: FaceEntry[];
+  truncated: boolean;
+  frozenBlocked: number;
+} {
+  const brief = store.briefing(
+    ownerKeys,
+    opts.unusedDays !== undefined || opts.maxCandidates !== undefined
+      ? {
+          ...(opts.unusedDays !== undefined ? { unusedDays: opts.unusedDays } : {}),
+          ...(opts.maxCandidates !== undefined ? { maxCandidates: opts.maxCandidates } : {}),
+        }
+      : {},
+  );
   const sanitized = sanitizeForModel(brief.records);
-  const face: FaceEntry[] = sanitized.entries.map((e) => ({
+  const body: FaceEntry[] = sanitized.entries.map((e) => ({
+    id: e.record.id,
+    kind: e.record.kind,
+    summary: e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary,
+  }));
+  // 晋升候选行同 face 构造（消毒引述化同律）；消毒剔除的候选静默出局——候选是
+  // advisory 指路非权威知识本身，有效行数归零时渲染面自然回落泛指路（§9.1 渲染边界）
+  const sanitizedCandidates = sanitizeForModel(brief.candidates);
+  const candidates: FaceEntry[] = sanitizedCandidates.entries.map((e) => ({
     id: e.record.id,
     kind: e.record.kind,
     summary: e.quoted ? quoteAsCitation(e.record.summary) : e.record.summary,
@@ -90,7 +115,7 @@ export function briefingFace(
   // 不用——非冻结行被剔除走既有拦截计数路径，与 frozen 注记分账）
   const frozenAlive = sanitized.entries.filter((e) => e.record.frozen).length;
   const frozenBlocked = Math.max(0, brief.frozenCount - frozenAlive);
-  return { face, truncated: brief.truncated, frozenBlocked };
+  return { face: [...body, ...candidates], body, candidates, truncated: brief.truncated, frozenBlocked };
 }
 
 /**

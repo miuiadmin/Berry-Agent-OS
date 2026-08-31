@@ -147,26 +147,45 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
     },
   };
 
-  /* ---------------- memory_forget：用户口信软删（frozen 拒） ---------------- */
+  /* ---------------- memory_forget：用户口信软删（frozen 拒）+ 晋升搬家退场 ---------------- */
   const memoryForget: ToolDefinition = {
     name: 'memory_forget',
     effect: 'write',
     description:
-      '软删一条记忆（用户说「忘掉这条」时使用；可经 memory_restore 恢复）。冻结条目拒删——需先 memory_unfreeze。条目 id 从 memory_read/memory_search 获取。',
+      '软删一条记忆（用户说「忘掉这条」时使用；可经 memory_restore 恢复）。冻结条目拒删——需先 memory_unfreeze。晋升搬家：记忆已整理成技能落位后，带 promotedToSkill（技能名）调用——源记忆以 superseded_by=skill:<名> 退场（知识搬进技能，仍可 restore）。条目 id 从 memory_read/memory_search 获取。',
     parameters: Type.Object({
       id: Type.String({ minLength: 1 }),
+      // 晋升搬家参数（§9.1 第 3 项，第四十二批）：技能名字面量档校验——首尾/连续
+      // 连字符禁与 ≤64 同 skills 侧 name 校验同源（纯字面量无拓扑需求；全量同名校验住 skills 模块）
+      promotedToSkill: Type.Optional(
+        Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }),
+      ),
     }),
     execute: async (args) => {
-      const result = store.forget(String(args.id), 'user');
+      // by 标签闭集（§3 第五值，第四十二批）：缺省 'user'（用户终审档）；
+      // promotedToSkill → 'skill:<名>'（晋升搬家——循 'llm:<id>' consolidation drops 先例）
+      const promoted = typeof args.promotedToSkill === 'string' ? args.promotedToSkill : undefined;
+      const by = promoted === undefined ? 'user' : `skill:${promoted}`;
+      const result = store.forget(String(args.id), by);
       if (result === 'frozen') {
-        return textResult(`该条目已冻结，拒删（frozen 免覆写义）——先 memory_unfreeze 再 forget。：${args.id}`, true, {
-          id: args.id,
-          forgotten: false,
-          reason: 'frozen',
-        });
+        return textResult(
+          `该条目已冻结，拒删（frozen 免覆写义——时间胶囊不搬家）——先 memory_unfreeze 再 forget。：${args.id}`,
+          true,
+          {
+            id: args.id,
+            forgotten: false,
+            reason: 'frozen',
+          },
+        );
       }
       return result === 'ok'
-        ? textResult(`已软删（status=dismissed，可恢复）：${args.id}`, false, { id: args.id, forgotten: true })
+        ? textResult(
+            promoted === undefined
+              ? `已软删（status=dismissed，可恢复）：${args.id}`
+              : `已退场（晋升搬家至技能 ${promoted}：status=dismissed，superseded_by='skill:${promoted}'，可 restore）：${args.id}`,
+            false,
+            { id: args.id, forgotten: true, ...(promoted === undefined ? {} : { promotedToSkill: promoted }) },
+          )
         : textResult(`未找到该条目：${args.id}（id 从 memory_read/memory_search 获取）`, true, {
             id: args.id,
             forgotten: false,
@@ -235,8 +254,8 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
         );
         const lines = [
           entry ? entryLine(entry) : `（条目内容含历史敏感串，不入展示面；id=${record.id}）`,
-          `状态：${record.status}${record.frozen ? '（frozen 冻结）' : ''}${record.ttlDays !== null ? `（TTL ${record.ttlDays} 天，${record.expiresAt !== null ? `过期于 ${new Date(record.expiresAt).toISOString()}` : '钟已清（过期物化或冻结）'}）` : '（永久）'}`,
-          `计量：证据 ${record.evidenceCount} / 引用 ${record.usageCount} / 被引 ${record.lastUsedAt !== null ? new Date(record.lastUsedAt).toISOString() : '从未'}`,
+          `状态：${record.status}${record.frozen ? '（frozen 冻结）' : ''}${record.ttlDays === null ? '（永久）' : `（TTL ${record.ttlDays} 天，${record.expiresAt === null ? '钟已清（过期物化或冻结）' : `过期于 ${new Date(record.expiresAt).toISOString()}`}）`}`,
+          `计量：证据 ${record.evidenceCount} / 引用 ${record.usageCount} / 被引 ${record.lastUsedAt === null ? '从未' : new Date(record.lastUsedAt).toISOString()}`,
           `— 版本链（${versions.length} 版）—`,
           ...(versionLines.length > 0 ? versionLines : ['  （无——v11 迁移前的存量条目，现行值即隐式基线）']),
         ];
@@ -382,9 +401,9 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
       const result = store.setTtl(String(args.id), days);
       return result.ok
         ? textResult(
-            days !== null
-              ? `已设置留存策略：${days} 天（过期钟已按当前时点起算）：${args.id}`
-              : `已清除留存策略（改永久）：${args.id}`,
+            days === null
+              ? `已清除留存策略（改永久）：${args.id}`
+              : `已设置留存策略：${days} 天（过期钟已按当前时点起算）：${args.id}`,
             false,
             { id: args.id, ttlDays: days },
           )
@@ -426,7 +445,7 @@ export function createMemoryTools(opts: MemoryToolsOptions): ToolDefinition[] {
       const topLines = top.map((r) => `- ${citationMarker(r.id)} [${r.kind}] ${r.summary}（引用 ${r.usageCount} 次）`);
       const logLines = rows.map(
         (r) =>
-          `- ${new Date(r.ts).toISOString()} ${r.op}${r.sessionId !== null ? `（session=${r.sessionId.slice(0, 8)}）` : ''} → ${r.memoryId}`,
+          `- ${new Date(r.ts).toISOString()} ${r.op}${r.sessionId === null ? '' : `（session=${r.sessionId.slice(0, 8)}）`} → ${r.memoryId}`,
       );
       const lines = [
         `— 被用 top（${top.length}）—`,

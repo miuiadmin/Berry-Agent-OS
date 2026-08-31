@@ -360,3 +360,27 @@ describe('memory_access_log（访问流水 + 被用聚合）', () => {
     expect(body).toContain('（窗口内无流水）'); // 过滤后空集走占位行
   });
 });
+
+describe('memory_forget promotedToSkill（晋升搬家退场，§9.1 第 3 项，第四十二批）', () => {
+  it('携带技能名 → dismissed + superseded_by=skill:<名>（闭集第五值），可 restore', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'failure', summary: 'abi 教训', content: 'x' });
+    const id = (details(written)['id'] as string) ?? '';
+
+    const moved = await run('memory_forget', { id, promotedToSkill: 'pdf-tools' });
+    expect(text(moved)).toContain('晋升搬家至技能 pdf-tools');
+    expect(store.get(id)?.status).toBe('dismissed');
+    expect(store.get(id)?.supersededBy).toBe('skill:pdf-tools');
+
+    // 中间态无害→用户后悔：restore 照常复活（终审单向）
+    await run('memory_restore', { id });
+    expect(store.get(id)?.status).toBe('active');
+  });
+  it('不带参数 → 既有行为零变（superseded_by=user）', async () => {
+    const { run, store } = setup();
+    const written = await run('memory_write', { kind: 'fact', summary: 'f', content: 'x' });
+    const id = (details(written)['id'] as string) ?? '';
+    await run('memory_forget', { id });
+    expect(store.get(id)?.supersededBy).toBe('user');
+  });
+});

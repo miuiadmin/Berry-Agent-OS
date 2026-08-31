@@ -383,10 +383,12 @@ describe('briefing 效用维度（30 天未用强排除 + 复活 + 排序抬升�
     const path = joinTmp();
     const s1 = openStore({ path, migrations: [MEMORY_MIGRATION] });
     const legacyTs = Date.now(); // 现行写入时点（简报 30 天未用排除不误伤）
-    s1.connection.exec(
-      `INSERT INTO memories (id, owner_key, kind, summary, content, confidence, evidence_count, status, source_refs, created_at, updated_at)
-       VALUES ('legacy-0001', 'global', 'fact', '升格前条目', 'c', 0.5, 1, 'active', '[]', ${legacyTs}, ${legacyTs})`,
-    );
+    s1.connection
+      .prepare(
+        `INSERT INTO memories (id, owner_key, kind, summary, content, confidence, evidence_count, status, source_refs, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('legacy-0001', 'global', 'fact', '升格前条目', 'c', 0.5, 1, 'active', '[]', legacyTs, legacyTs);
     s1.connection.exec('ALTER TABLE sessions DROP COLUMN importer');
     s1.connection.exec('ALTER TABLE sessions DROP COLUMN app');
     s1.connection.pragma('user_version = 2');
@@ -419,6 +421,86 @@ describe('重开库（迁移幂等 + 数据存活）', () => {
     expect(reloaded.list(['global'])).toHaveLength(1);
     expect(reloaded.search('文件库', ['global'])).toHaveLength(1); // FTS 触发器产物跨开存活
     s2.close();
+  });
+});
+
+/** 取落库后的条目 id（本组用例只走 inserted/merged 支——rejected 无 memory） */
+function writeId(over: Parameters<typeof write>[0] = {}): string {
+  const out = write(over);
+  return out.outcome === 'rejected' ? '' : out.memory.id;
+}
+
+describe('briefing 晋升候选（§9.1 第 1 项，第四十二批——候选出场位 = 被限额截断的 scored 尾部）', () => {
+  it('kind 闭集 + 反复命中判据：failure 攒双证据入候选；preference 不入；单证据不入', () => {
+    write({ kind: 'preference', summary: '偏好 pnpm', content: 'x' });
+    write({ kind: 'failure', summary: 'abi 不匹配', content: 'x' });
+    write({ kind: 'failure', summary: 'abi 不匹配', content: 'y' }); // 精确合并 → evidence 2
+    write({ kind: 'insight', summary: '单证据洞察', content: 'x' });
+    // maxEntries:1 → 正文只收 preference（kindPriority 0），failure/insight 截断出正文
+    const { records, candidates } = db.briefing(['global'], { maxEntries: 1 });
+    expect(records.map((r) => r.kind)).toEqual(['preference']);
+    expect(candidates.map((c) => c.kind)).toEqual(['failure']); // insight 单证据不入
+  });
+
+  it('usage ≥ 1（cite 判据）也入候选', () => {
+    write({ kind: 'preference', summary: '偏好 pnpm', content: 'x' });
+    const a = writeId({ kind: 'failure', summary: '被引用过的教训', content: 'x' });
+    db.markUsed([a], Date.now());
+    const { candidates } = db.briefing(['global'], { maxEntries: 1 });
+    expect(candidates.some((c) => c.id === a)).toBe(true);
+  });
+
+  it('frozen 排除候选但恒驻正文（时间胶囊不搬家——§9.1 第 3 项同律）', () => {
+    const a = writeId({ kind: 'failure', summary: '普通教训', content: 'x' });
+    write({ kind: 'failure', summary: '普通教训', content: 'x' });
+    const b = writeId({ kind: 'failure', summary: '冻结教训', content: 'x' });
+    write({ kind: 'failure', summary: '冻结教训', content: 'x' });
+    db.setFrozen(b, true);
+    // maxEntries:0 → 竞争面空：frozen 恒驻正文（免竞争义），非冻结全数截断
+    const { records, candidates } = db.briefing(['global'], { maxEntries: 0 });
+    expect(records.map((r) => r.id)).toEqual([b]); // frozen 恒驻正文
+    expect(candidates.map((c) => c.id)).toEqual([a]); // frozen 不入候选，普通教训入
+  });
+
+  it('正文已列条目去重（face 内同 id 双行 = 指纹与差分比较面污染，冷读 M1）', () => {
+    // convention kindPriority=2 先入正文；同判据下 failure 截断出正文 → 只点名 failure
+    write({ kind: 'convention', summary: '提交信息用中文', content: 'x' });
+    write({ kind: 'convention', summary: '提交信息用中文', content: 'x' });
+    write({ kind: 'failure', summary: '环依赖炸了', content: 'x' });
+    write({ kind: 'failure', summary: '环依赖炸了', content: 'x' });
+    const { records, candidates } = db.briefing(['global'], { maxEntries: 1 });
+    expect(records.map((r) => r.kind)).toEqual(['convention']);
+    expect(candidates.map((c) => c.kind)).toEqual(['failure']); // convention 在正文 → 不重复列
+  });
+
+  it('M2 回归锁：未用排除条目不因 usage ≥ 1 判据捞回候选（死 = 离开常驻面）', () => {
+    const a = writeId({ kind: 'failure', summary: '老的教训', content: 'x' });
+    write({ kind: 'failure', summary: '老的教训', content: 'x' });
+    db.markUsed([a], Date.now()); // 被引用过（cite 判据成立）——但 30 天未用照样出局
+    // 40 天后取简报：未用强排除先于候选判据（同一 scored 流——冷读 M2 拍板）
+    const future = Date.now() + 40 * 24 * 60 * 60 * 1000;
+    const { records, candidates } = db.briefing(['global'], { maxEntries: 0, now: () => future });
+    expect(records.some((r) => r.id === a)).toBe(false);
+    expect(candidates.some((r) => r.id === a)).toBe(false);
+  });
+
+  it('排序 = 效用综合分降序 + 上限截断', () => {
+    for (let i = 0; i < 4; i++) {
+      write({ kind: 'failure', summary: `失败模式 ${i}`, content: 'x', confidence: 0.9 - i * 0.2 });
+      write({ kind: 'failure', summary: `失败模式 ${i}`, content: 'x', confidence: 0.9 - i * 0.2 });
+    }
+    const { candidates } = db.briefing(['global'], { maxEntries: 0 });
+    expect(candidates).toHaveLength(3);
+    expect(candidates[0]!.summary).toBe('失败模式 0');
+    expect(candidates[2]!.summary).toBe('失败模式 2');
+  });
+
+  it('软删退场条目不入候选（activeByOwners 可见谓词前置）', () => {
+    writeId({ kind: 'failure', summary: '已晋升的教训', content: 'x' });
+    const b = writeId({ kind: 'failure', summary: '已晋升的教训', content: 'x' });
+    db.forget(b, 'skill:pdf-tools');
+    const { candidates } = db.briefing(['global'], { maxEntries: 0 });
+    expect(candidates).toHaveLength(0);
   });
 });
 

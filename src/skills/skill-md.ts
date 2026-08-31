@@ -12,7 +12,43 @@
 
 import { basename, dirname } from 'node:path';
 import { parse } from 'yaml';
-import type { Skill, SkillDiagnostic, SkillSourceLevel } from './types.js';
+import type { Skill, SkillDiagnostic, SkillProvenance, SkillSourceLevel } from './types.js';
+
+/** provenance.memories 条目上限（契约篇 §4.2 第四十二批——memory source_refs 50 同族） */
+const MAX_PROVENANCE_MEMORIES = 50;
+
+/**
+ * 解析可选 provenance 字段（契约篇 §4.2 第四十二批晋升桥）：形状 { memories: [id, …] }。
+ * 宽容度语义同 name/description——形状非法发 invalid-metadata 警告并丢弃字段，技能
+ * 仍加载；不校验 id 存在性（跨面校验属审批/诊断面——skills 装载零 memory 依赖）。
+ */
+function parseProvenance(raw: unknown): { provenance?: SkillProvenance; errors: string[] } {
+  if (raw === undefined) return { errors: [] };
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { errors: ['provenance 形状非法（须为对象 { memories: [id, …] }）——字段丢弃'] };
+  }
+  const memories = (raw as Record<string, unknown>).memories;
+  if (!Array.isArray(memories)) {
+    return { errors: ['provenance.memories 缺失或非数组——字段丢弃'] };
+  }
+  const errors: string[] = [];
+  if (memories.length > MAX_PROVENANCE_MEMORIES) {
+    errors.push(`provenance.memories 超上限（${memories.length} > ${MAX_PROVENANCE_MEMORIES}）——截断`);
+  }
+  // 非字符串/空串项剔除（计数披露不静默）；上限内截断后入库
+  const ids = memories
+    .filter((m): m is string => typeof m === 'string' && m.trim() !== '')
+    .slice(0, MAX_PROVENANCE_MEMORIES);
+  if (ids.length !== memories.length) {
+    const dropped = memories.length - ids.length;
+    errors.push(`provenance.memories 含非字符串/空串/超限项（剔除 ${dropped} 项）`);
+  }
+  if (ids.length === 0) {
+    errors.push('provenance.memories 为空——字段丢弃');
+    return { errors };
+  }
+  return { provenance: { memories: ids }, errors };
+}
 
 /** name 长度上限（agentskills.io 标准） */
 const MAX_NAME_LENGTH = 64;
@@ -111,6 +147,12 @@ export function parseSkillMd(
     diagnostics.push({ type: 'warning', code: 'invalid-metadata', message: error, path: filePath });
   }
 
+  // provenance（§4.2 第四十二批）：可选晋升溯源——形状非法警告 + 字段丢弃，技能仍加载
+  const provenanceResult = parseProvenance(split.frontmatter.provenance);
+  for (const error of provenanceResult.errors) {
+    diagnostics.push({ type: 'warning', code: 'invalid-metadata', message: error, path: filePath });
+  }
+
   if (!hasDescription) return { skill: null, diagnostics };
 
   return {
@@ -122,6 +164,7 @@ export function parseSkillMd(
       baseDir,
       source,
       disableModelInvocation: split.frontmatter['disable-model-invocation'] === true,
+      ...(provenanceResult.provenance !== undefined ? { provenance: provenanceResult.provenance } : {}),
     },
     diagnostics,
   };

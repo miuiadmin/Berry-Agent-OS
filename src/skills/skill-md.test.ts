@@ -164,3 +164,61 @@ describe('formatSkillInvocation（§4.5(b) 显式激活包装）', () => {
     expect(withArgs.endsWith('</skill>\n\n合并 a.pdf 与 b.pdf')).toBe(true);
   });
 });
+
+describe('parseSkillMd provenance（晋升溯源，契约篇 §4.2 第四十二批）', () => {
+  it('合法 provenance → 解析入 Skill，零诊断', () => {
+    const content = `---\nname: pdf-tools\ndescription: 生成与合并 PDF 文档\nprovenance:\n  memories:\n    - 0a1b2c3d-0000-7000-8000-000000000001\n    - 0a1b2c3e-0000-7000-8000-000000000002\n---\n\n正文`;
+    const { skill, diagnostics } = parseSkillMd(content, '/ws/skills/pdf-tools/SKILL.md', 'project');
+    expect(diagnostics).toEqual([]);
+    expect(skill?.provenance?.memories).toEqual([
+      '0a1b2c3d-0000-7000-8000-000000000001',
+      '0a1b2c3e-0000-7000-8000-000000000002',
+    ]);
+  });
+  it('无 provenance → 字段缺省（手写技能形态）', () => {
+    const { skill } = parseSkillMd(VALID, '/ws/skills/pdf-tools/SKILL.md', 'user');
+    expect(skill?.provenance).toBeUndefined();
+  });
+  it('形状非法（字符串/缺 memories）→ invalid-metadata 警告 + 字段丢弃，技能仍加载', () => {
+    const bad1 = parseSkillMd(
+      `---\nname: pdf-tools\ndescription: d\nprovenance: oops\n---\n\nx`,
+      '/ws/skills/pdf-tools/SKILL.md',
+      'user',
+    );
+    expect(bad1.skill?.provenance).toBeUndefined();
+    expect(bad1.diagnostics.some((d) => d.code === 'invalid-metadata' && d.message.includes('形状非法'))).toBe(true);
+    const bad2 = parseSkillMd(
+      `---\nname: pdf-tools\ndescription: d\nprovenance:\n  other: 1\n---\n\nx`,
+      '/ws/skills/pdf-tools/SKILL.md',
+      'user',
+    );
+    expect(bad2.skill?.provenance).toBeUndefined();
+    expect(bad2.diagnostics.some((d) => d.message.includes('memories 缺失'))).toBe(true);
+  });
+  it('memories 含非字符串项 → 剔除披露；空数组 → 字段丢弃', () => {
+    const mixed = parseSkillMd(
+      `---\nname: pdf-tools\ndescription: d\nprovenance:\n  memories:\n    - 0a1b2c3d-0000-7000-8000-000000000001\n    - 42\n---\n\nx`,
+      '/ws/skills/pdf-tools/SKILL.md',
+      'user',
+    );
+    expect(mixed.skill?.provenance?.memories).toEqual(['0a1b2c3d-0000-7000-8000-000000000001']);
+    expect(mixed.diagnostics.some((d) => d.message.includes('剔除 1 项'))).toBe(true);
+    const empty = parseSkillMd(
+      `---\nname: pdf-tools\ndescription: d\nprovenance:\n  memories: []\n---\n\nx`,
+      '/ws/skills/pdf-tools/SKILL.md',
+      'user',
+    );
+    expect(empty.skill?.provenance).toBeUndefined();
+    expect(empty.diagnostics.some((d) => d.message.includes('为空'))).toBe(true);
+  });
+  it('超上限（>50）→ 截断警告', () => {
+    const ids = Array.from({ length: 52 }, (_, i) => `m${i}`).join('\n    - ');
+    const over = parseSkillMd(
+      `---\nname: pdf-tools\ndescription: d\nprovenance:\n  memories:\n    - ${ids}\n---\n\nx`,
+      '/ws/skills/pdf-tools/SKILL.md',
+      'user',
+    );
+    expect(over.skill?.provenance?.memories).toHaveLength(50);
+    expect(over.diagnostics.some((d) => d.message.includes('超上限'))).toBe(true);
+  });
+});

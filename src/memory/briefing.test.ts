@@ -74,3 +74,32 @@ describe('renderBriefingSection（记忆篇 §6 通道 1 渲染件）', () => {
     expect(BRIEFING_SECTION_ID).toBe('memory/core');
   });
 });
+
+describe('renderBriefingSection 晋升候选点名（§9.1 第 1 项，第四十二批）', () => {
+  it('有效候选 > 0：点名档头句 + 候选行带短 id（引用回写面同构）', () => {
+    const out = renderBriefingSection([rec('用户偏好 pnpm', '0a1b2c3d-0000-7000-8000-000000000001')], false, 0, [
+      rec('abi 不匹配教训', '0a1b2c3f-0000-7000-8000-00000000000a'),
+    ]);
+    // 点名档头句三段指引：provenance 填写 / 通用化纪律 / 搬家退场
+    expect(out).toContain('可晋升候选');
+    expect(out).toContain('provenance');
+    expect(out).toContain('勿编码模型自身癖性');
+    expect(out).toContain('promotedToSkill');
+    // 候选行与正文行同款格式（[m:短id] summary）
+    expect(out).toContain('- [m:0a1b2c3f] abi 不匹配教训');
+    // 无候选回落句不出场
+    expect(out).not.toContain('反复命中的 failure/insight 教训可提议');
+  });
+  it('无候选：回落泛指路原句（§9 纵切五形态保留——回归锁）', () => {
+    const out = renderBriefingSection([rec('a')], false);
+    expect(out).toContain('反复命中的 failure/insight 教训可提议整理成 SKILL.md');
+  });
+  it('正文空但候选在：段不空（框架句 + 点名档照常渲染）', () => {
+    const out = renderBriefingSection([], false, 0, [rec('教训 x', '0a1b2c3f-0000-7000-8000-00000000000b')]);
+    expect(out.startsWith('<!-- memory:core -->')).toBe(true);
+    expect(out).toContain('可晋升候选');
+  });
+  it('全空（正文/注记/候选皆零）→ 空串', () => {
+    expect(renderBriefingSection([], false, 0, [])).toBe('');
+  });
+});

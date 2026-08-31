@@ -235,14 +235,16 @@ async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined,
         // 面 = briefing 取数 → 消毒引述化（与差分 handler 共用 briefingFace——
         // 基线与当前面同一定义，单一事实源）；frozenBlocked = 冻结常驻被消毒
         // 剔除数（§3 剔除可见——恒驻义被拦截的部分渲染注记行，不静默）
-        const { face, truncated, frozenBlocked } = briefingFace(store, ownerKeys(), {
+        const { face, body, candidates, truncated, frozenBlocked } = briefingFace(store, ownerKeys(), {
           ...(cfg.unusedDays !== undefined ? { unusedDays: cfg.unusedDays } : {}),
         });
-        // 会话语界在场才立纪元（诊断物化 undefined = 只渲染不冻结）
+        // 会话语界在场才立纪元（诊断物化 undefined = 只渲染不冻结）。face = 正文 ∪
+        // 晋升候选行（§9.1 face 档，第四十二批——候选数据行进权威面：指纹/差分/消毒
+        // 自动跟随，候选被晋升退场时差分 `-` 即时修正长会话内的过期候选）
         if (sessionId !== undefined) {
           epochs.set(sessionId, { face, fingerprint: faceFingerprint(face), mirror: undefined });
         }
-        return renderBriefingSection(face, truncated, frozenBlocked);
+        return renderBriefingSection(body, truncated, frozenBlocked, candidates);
       },
     }),
   );
