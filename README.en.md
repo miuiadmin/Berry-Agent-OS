@@ -76,6 +76,8 @@ Berry answers this the operating-system way. Your Agent's every day is an **appe
 | **Ecosystem**         | —                 | Closed              | **npm is the market (3 sources)**   |
 | **Floor**             | Depends on you    | Codex / Claude Code | **Factory defaults = daily-usable** |
 
+Alright, enough romance. **Now the steel and iron.**
+
 ## Architecture at a Glance
 
 ```text
@@ -112,14 +114,52 @@ berry dump-config # effective-composition diagnostics (model / composition tree 
 
 First launch creates the data directory at `~/.berry/`. The default model is `anthropic/claude-sonnet-5`, overridable via `APP_MODEL`; provider credentials go through the pi-ai credential chain (environment variables or the credential store).
 
-## Features at a Glance
+## Features
 
-- **Minimal kernel (Ring 0)**: 25 modules in a one-way DAG, all implemented, machine-enforced by `npm run lint:topology` — no central anything beyond install/run/guard/store.
-- **Event-sourced sessions**: append-only event log + derived projections; long-conversation compaction (`compaction`), workspace snapshot rollback (`checkpoint` /rewind), session forking and adoption — all carried by the log.
-- **Official bundle (Ring 2, every piece unloadable)**: `coder` (default coding-agent app), `chat` (conversation app), `memory` (memory store: extraction/merging/dual-path injection/cross-session retrieval/utility evolution/TTL/version chains), `subagent` (sub-agent delegation), `goal` (long-goal state machine + budget brake + clock wake), `scheduler` (`/tick` scheduled tasks — launchd/crontab registrar, no resident process), `mcp` (MCP client bridge), `lsp` (language-server bridge: diagnostics/symbols/definitions/references), `web` (fetch tool + SSRF hygiene), `obs` (observability: hourly rollups + `obs_query` + `/obs` overview + alerting), `admin` (platform administration tools), `webui` (loopback web UI, one-shot `--port`).
-- **Built-in security stack**: three-stage tool pipeline (schema validation → gate → execute), three sandbox tiers (read-only / workspace-write / danger-full-access, macOS seatbelt / Linux bwrap), writable-root derivation and carve-outs, approval pairs, allowlist (audit-logged auto-approve).
-- **Skills system**: SKILL.md two-layer structure + progressive disclosure — drop a directory in and it works; apps can carry skills in their packages.
-- **Composition-tree loading**: default layer + `overlay.yaml` field-level overrides; the app-center loading surface — two-state install/mount, two-tier scoping (global / per-app), `/reload --app` per-zone hot reload, and process-domain sandboxing by default for third-party rows.
+### Kernel
+
+- **25-module one-way DAG**: all implemented, machine-enforced by `npm run lint:topology` — no central anything beyond install/run/guard/store, not unloadable.
+- **Three-ring assembly**: Ring 0 (kernel, fixed) → Ring 1 (required rows, replaceable) → Ring 2 (official bundle, each unloadable) → Ring 3 (third-party ecosystem).
+
+### Sessions & Data
+
+- **Event sourcing**: append-only event log (SQLite WAL) + derived projections — **every day of your Agent is a durable fact**.
+- **Long-conversation compaction** (`compaction`): surfaceOp masking + five-step durable flow, zero new table families.
+- **Workspace snapshot rollback** (`checkpoint`): sha256 blob store + per-run manifest, `/rewind` two-phase transactional rollback.
+- **Session forking & adoption**: `fork` prefix freeze + `adopt` foreground switch.
+
+### Official Bundle (Ring 2, each unloadable)
+
+| Piece       | Role                                                                                                              |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| `coder`     | Default coding-agent app (pure manifest, `/app` to switch)                                                        |
+| `chat`      | Conversation app (fallback anchor)                                                                                |
+| `memory`    | Memory store: extraction/merging/dual-path injection/cross-session retrieval/utility evolution/TTL/version chains |
+| `subagent`  | Sub-agent delegation + declarative sub-agents                                                                     |
+| `goal`      | Long-goal state machine + budget brake + clock wake                                                               |
+| `scheduler` | `/tick` scheduled tasks — launchd/crontab registrar, no resident process                                          |
+| `mcp`       | MCP client bridge (stdio, zero new dependencies)                                                                  |
+| `lsp`       | Language-server bridge: diagnostics/symbols/definitions/references + post-write diagnostic injection              |
+| `web`       | Fetch tool + SSRF five-part hygiene                                                                               |
+| `obs`       | Observability: hourly rollups + `obs_query` + `/obs` overview + alerting                                          |
+| `admin`     | Platform admin: apps_list / events_query / install verbs                                                          |
+| `webui`     | Loopback web UI (`--port` one-shot, SSE + SPA)                                                                    |
+
+### Security Stack
+
+- **Three-stage tool pipeline**: schema validation → gate (approval/sandbox/allowlist) → execute — durably ledgered, no bypass.
+- **Three sandbox tiers**: `read-only` / `workspace-write` / `danger-full-access` (macOS seatbelt / Linux bwrap).
+- **Approval pairs**: `approval/asked` → `approval/decided` audit trail.
+- **Allowlist**: audit-logged auto-approve, enumerable and revocable.
+- **Vocabulary enforcement**: machine-checked event vocabulary — misspelled names fail loudly, kernel words can't be forged.
+
+### Loading & Ecosystem
+
+- **Composition tree**: default layer + `overlay.yaml` field-level overrides.
+- **Two-state install/mount**: `install` to warehouse (zero effect), `mount` writes the row that makes it live.
+- **Two-tier scoping**: global (official) / per-app (third-party — authorization and blast radius follow the host app).
+- **`/reload --app`**: per-zone hot reload — other apps' runtimes untouched.
+- **Skills**: SKILL.md two-layer + progressive disclosure — drop a directory in and it works.
 
 ## Everything Is an App
 

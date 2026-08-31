@@ -75,6 +75,8 @@ Berry répond à la manière d'un système d'exploitation. Chaque journée de vo
 | **Écosystème**          | —                    | Fermé                   | **npm est le marché (3 sources)**                     |
 | **Plancher**            | Dépend de vous       | Codex / Claude Code     | **Valeurs d'usine = usage quotidien**                 |
 
+Bien, assez de romantisme. **Maintenant l'acier et le fer.**
+
 ## L'architecture en un coup d'œil
 
 ```text
@@ -111,14 +113,52 @@ berry dump-config # diagnostic de la composition effective (modèle / arbre / é
 
 Le premier lancement crée le répertoire de données dans `~/.berry/`. Le modèle par défaut est `anthropic/claude-sonnet-5`, remplaçable via `APP_MODEL` ; les identifiants des fournisseurs passent par la chaîne d'identifiants pi-ai (variables d'environnement ou coffre d'identifiants).
 
-## Caractéristiques en un coup d'œil
+## Caractéristiques
 
-- **Noyau minimal (Ring 0)** : 25 modules dans un DAG unidirectionnel, tous implémentés, surveillés par `npm run lint:topology` — rien de central au-delà d'installer/exécuter/protéger/stocker.
-- **Sessions fondées sur les événements** : journal d'événements en ajout seul + projections dérivées ; compactage des longues conversations (`compaction`), restauration par instantanés de l'espace de travail (`checkpoint` /rewind), bifurcation et adoption de sessions — le tout porté par le journal.
-- **Ensemble officiel (Ring 2, chaque pièce déchargeable)** : `coder` (application d'agent de code par défaut), `chat` (application de conversation), `memory` (mémoire : extraction/fusion/injection double voie/recherche inter-sessions/évolution d'utilité/TTL/chaînes de versions), `subagent` (délégation de sous-agents), `goal` (machine à états d'objectifs longs + frein budgétaire + réveil par horloge), `scheduler` (tâches planifiées `/tick` — enregistreur launchd/crontab, sans processus résident), `mcp` (pont client MCP), `lsp` (pont de serveurs de langage : diagnostics/symboles/définitions/références), `web` (outil fetch + hygiène SSRF), `obs` (observabilité : agrégats horaires + `obs_query` + vue d'ensemble `/obs` + alertes), `admin` (outils d'administration de la plateforme), `webui` (interface web en loopback, ouverture ponctuelle par `--port`).
-- **Pile de sécurité intégrée** : pipeline d'outils en trois étapes (validation de schéma → porte → exécution), trois niveaux de bac à sable (read-only / workspace-write / danger-full-access, macOS seatbelt / Linux bwrap), dérivation des racines inscriptibles et carve-outs, paires d'approbation, allowlist (approbation automatique auditée).
-- **Système de compétences** : SKILL.md à deux couches + divulgation progressive — déposez un répertoire et cela fonctionne ; les applications peuvent embarquer des compétences dans leur paquet.
-- **Chargement par arbre de composition** : couche par défaut + `overlay.yaml` avec surcharge au niveau des champs ; surface de chargement type centre d'applications — installation/montage en deux états, deux portées (globale / par application), rechargement à chaud par zone via `/reload --app`, et bac à sable de processus par défaut pour les lignes tierces.
+### Noyau
+
+- **DAG unidirectionnel de 25 modules** : tous implémentés, surveillés par `npm run lint:topology` — rien de central au-delà d'installer/exécuter/protéger/stocker, non déchargeable.
+- **Modèle à trois anneaux** : Ring 0 (noyau, fixe) → Ring 1 (lignes requises, remplaçables) → Ring 2 (ensemble officiel, chaque pièce déchargeable) → Ring 3 (écosystème tiers).
+
+### Sessions et données
+
+- **Événements** : journal en ajout seul (SQLite WAL) + projections dérivées — **chaque journée de votre Agent est un fait durable**.
+- **Compactage** (`compaction`) : masquage surfaceOp + flux durable en cinq étapes, zéro nouvelle famille de tables.
+- **Restauration par instantanés** (`checkpoint`) : magasin de blobs sha256 + manifeste par exécution, `/rewind` restauration transactionnelle en deux phases.
+- **Bifurcation et adoption** : `fork` gel de préfixe + `adopt` passage au premier plan.
+
+### Ensemble officiel (Ring 2, chaque pièce déchargeable)
+
+| Pièce       | Rôle                                                                          |
+| ----------- | ----------------------------------------------------------------------------- |
+| `coder`     | App d'agent de code par défaut (manifeste pur, `/app` pour changer)           |
+| `chat`      | App de conversation (ancre de repli)                                          |
+| `memory`    | Mémoire : extraction/fusion/injection double/recherche/évolution/TTL/versions |
+| `subagent`  | Délégation de sous-agents + sous-agents déclaratifs                           |
+| `goal`      | Machine à états d'objectifs + frein budgétaire + horloge                      |
+| `scheduler` | Tâches `/tick` — enregistreur launchd/crontab, sans processus résident        |
+| `mcp`       | Pont client MCP (stdio, zéro dépendance)                                      |
+| `lsp`       | Pont LSP : diagnostics/symboles/définitions/références                        |
+| `web`       | Fetch + hygiène SSRF en cinq pièces                                           |
+| `obs`       | Observabilité : agrégats + `obs_query` + `/obs` + alertes                     |
+| `admin`     | Administration : apps_list / events_query / verbes d'installation             |
+| `webui`     | Web en loopback (`--port` ponctuel, SSE + SPA)                                |
+
+### Pile de sécurité
+
+- **Pipeline en trois étapes** : validation → porte (approbation/sandbox/allowlist) → exécution — registre durable sans contournement.
+- **Trois niveaux de sandbox** : `read-only` / `workspace-write` / `danger-full-access` (seatbelt/bwrap).
+- **Paires d'approbation** : `approval/asked` → `approval/decided` piste d'audit.
+- **Allowlist** : approbation automatique auditée, énumérable et révocable.
+- **Application du vocabulaire** : vérification par machine — échec bruyant sur faute d'orthographe.
+
+### Chargement et écosystème
+
+- **Arbre de composition** : couche par défaut + `overlay.yaml` surcharge au niveau des champs.
+- **Installation/montage en deux états** : `install` à l'entrepôt (zéro effet), `mount` écrit la ligne active.
+- **Deux portées** : globale (officiel) / par application (tiers).
+- **`/reload --app`** : rechargement à chaud par zone.
+- **Compétences** : SKILL.md à deux couches + divulgation progressive.
 
 ## Tout est une application
 

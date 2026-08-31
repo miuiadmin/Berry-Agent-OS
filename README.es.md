@@ -75,6 +75,8 @@ Berry responde al estilo de un sistema operativo. Cada día de tu Agent es un **
 | **Ecosistema**         | —                      | Cerrado               | **npm es el mercado (3 fuentes)**         |
 | **Suelo**              | Depende de ti          | Codex / Claude Code   | **Valores de fábrica = uso diario**       |
 
+Bien, basta de romance. **Ahora el acero y el hierro.**
+
 ## Un vistazo a la arquitectura
 
 ```text
@@ -111,14 +113,52 @@ berry dump-config # diagnóstico de la composición efectiva (modelo / árbol / 
 
 El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por defecto es `anthropic/claude-sonnet-5`, sustituible con `APP_MODEL`; las credenciales de proveedor siguen la cadena de credenciales de pi-ai (variables de entorno o almacén de credenciales).
 
-## Características de un vistazo
+## Características
 
-- **Kernel mínimo (Ring 0)**: 25 módulos en un DAG unidireccional, todos con código, vigilados por `npm run lint:topology` — nada central más allá de instalar/ejecutar/proteger/almacenar.
-- **Sesiones con origen en eventos**: registro de eventos de solo adición + proyecciones derivadas; compactación de conversaciones largas (`compaction`), reversión por instantáneas del espacio de trabajo (`checkpoint` /rewind), bifurcación y adopción de sesiones — todo sustentado por el registro.
-- **Paquete oficial (Ring 2, cada pieza desinstalable)**: `coder` (aplicación de agente de programación por defecto), `chat` (aplicación de conversación), `memory` (memoria: extracción/fusión/inyección de doble vía/búsqueda entre sesiones/evolución de utilidad/TTL/cadenas de versiones), `subagent` (delegación de subagentes), `goal` (máquina de estados de objetivos largos + freno presupuestario + despertar por reloj), `scheduler` (tareas programadas `/tick` — registrador launchd/crontab, sin proceso residente), `mcp` (puente cliente MCP), `lsp` (puente de servidores de lenguaje: diagnósticos/símbolos/definiciones/referencias), `web` (herramienta fetch + higiene SSRF), `obs` (observabilidad: agregados por hora + `obs_query` + resumen `/obs` + alertas), `admin` (herramientas de administración de plataforma), `webui` (interfaz web en loopback, apertura puntual con `--port`).
-- **Pila de seguridad integrada**: canalización de herramientas en tres etapas (validación de esquema → puerta → ejecución), tres niveles de sandbox (read-only / workspace-write / danger-full-access, macOS seatbelt / Linux bwrap), derivación de raíces escribibles y carve-outs, pares de aprobación, allowlist (autoaprobación con auditoría).
-- **Sistema de habilidades**: SKILL.md de dos capas + revelación progresiva — deja un directorio y funciona; las aplicaciones pueden llevar habilidades en su paquete.
-- **Carga por árbol de composición**: capa por defecto + `overlay.yaml` con sobrescritura a nivel de campo; superficie de carga tipo centro de aplicaciones — instalación/montaje en dos estados, dos ámbitos (global / por aplicación), recarga en caliente por zona con `/reload --app`, y sandbox de proceso por defecto para las filas de terceros.
+### Kernel
+
+- **DAG unidireccional de 25 módulos**: todos con código, vigilados por `npm run lint:topology` — nada central más allá de instalar/ejecutar/proteger/almacenar, no desinstalable.
+- **Modelo de tres anillos**: Ring 0 (kernel, fijo) → Ring 1 (filas requeridas, reemplazables) → Ring 2 (paquete oficial, cada pieza desinstalable) → Ring 3 (ecosistema de terceros).
+
+### Sesiones y datos
+
+- **Origen en eventos**: registro de eventos de solo adición (SQLite WAL) + proyecciones derivadas — **cada día de tu Agent es un hecho durable**.
+- **Compactación** (`compaction`): enmascaramiento surfaceOp + flujo durable de cinco pasos, cero familias de tablas nuevas.
+- **Reversión por instantáneas** (`checkpoint`): almacén de blobs sha256 + manifiesto por ejecución, `/rewind` reversión transaccional en dos fases.
+- **Bifurcación y adopción de sesiones**: `fork` congelación de prefijo + `adopt` cambio a primer plano.
+
+### Paquete oficial (Ring 2, cada pieza desinstalable)
+
+| Pieza       | Función                                                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
+| `coder`     | App de agente de código por defecto (manifiesto puro, `/app` para cambiar)                            |
+| `chat`      | App de conversación (ancla de repliegue)                                                              |
+| `memory`    | Memoria: extracción/fusión/inyección doble/búsqueda entre sesiones/evolución/TTL/cadenas de versiones |
+| `subagent`  | Delegación de subagentes + subagentes declarativos                                                    |
+| `goal`      | Máquina de estados de objetivos + freno presupuestario + reloj                                        |
+| `scheduler` | Tareas `/tick` — registrador launchd/crontab, sin proceso residente                                   |
+| `mcp`       | Puente cliente MCP (stdio, cero dependencias nuevas)                                                  |
+| `lsp`       | Puente LSP: diagnósticos/símbolos/definiciones/referencias                                            |
+| `web`       | Fetch + higiene SSRF de cinco piezas                                                                  |
+| `obs`       | Observabilidad: rollups + `obs_query` + `/obs` + alertas                                              |
+| `admin`     | Administración: apps_list / events_query / verbos de instalación                                      |
+| `webui`     | Web en loopback (`--port` puntual, SSE + SPA)                                                         |
+
+### Pila de seguridad
+
+- **Canalización de tres etapas**: validación → puerta (aprobación/sandbox/allowlist) → ejecución — registro durable sin rodeos.
+- **Tres niveles de sandbox**: `read-only` / `workspace-write` / `danger-full-access` (seatbelt/bwrap).
+- **Pares de aprobación**: `approval/asked` → `approval/decided` trazabilidad de auditoría.
+- **Allowlist**: autoaprobación auditada, enumerable y revocable.
+- **Aplicación de vocabulario**: verificación por máquina — los nombres mal escritos fallan ruidosamente.
+
+### Carga y ecosistema
+
+- **Árbol de composición**: capa por defecto + `overlay.yaml` sobrescritura a nivel de campo.
+- **Instalación/montaje en dos estados**: `install` al almacén (cero efecto), `mount` escribe la fila activa.
+- **Dos ámbitos**: global (oficial) / por aplicación (terceros).
+- **`/reload --app`**: recarga en caliente por zona.
+- **Habilidades**: SKILL.md de dos capas + revelación progresiva.
 
 ## Todo es una aplicación
 
