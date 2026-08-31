@@ -175,3 +175,72 @@ describe('search 检索面', () => {
     expect(limited[0]!.snippet).toContain('yarn'); // snippet 凸显命中词
   });
 });
+
+describe('复盘 20260901 D-1/D-2 回归锁（种子段核验修复 + 单事件原子性）', () => {
+  it('D-1 fork 种子段修复：活体水位越过未索引种子段——对账核验实有≠期望 → 清行整卷重放', () => {
+    // fork/委派子会话形状：种子 [0,1] 物理在库（write-behind 首队复制）但结构性
+    // 不上活体总线（历史不重播）；首条活体事件 seq=2 直接把水位推过种子段
+    const childLog = [userEv(0, '种子首段 sierra'), userEv(1, '种子次段 tango'), userEv(2, '活体内容 uniform')];
+    fts.indexEvent('child', childLog[2]!); // 活体镜像只见到 seq=2——水位即 2
+    // HEAD：补差按「seq <= 水位跳过」——种子段永不进索引（跨会话 union 命中父会话
+    // 副本，子会话身份的会话内检索结构性缺段）；修复后：行集核验 1≠3 → 整卷重建
+    fts.synchronize(sourceOf({ child: childLog }));
+    expect(fts.search('sierra', { sessionId: 'child' })).toHaveLength(1);
+    expect(fts.search('tango', { sessionId: 'child' })).toHaveLength(1);
+    expect(fts.search('uniform', { sessionId: 'child' })).toHaveLength(1); // 重放不双计
+  });
+
+  it('D-2 崩溃半态自愈：行在水位缺（三语句半态残留）——对账清行重建不双计', () => {
+    // 模拟 D-2 崩溃窗残留：正文行已提交、水位没跟上（裸 SQL 直插绕过 indexEvent——
+    // 三语句非原子时代的中间态）
+    store.connection.prepare(`INSERT INTO session_fts (session_id, seq, body) VALUES ('s1', 0, '孤儿行 voodoo')`).run();
+    const logs = { s1: [userEv(0, '孤儿行 voodoo')] };
+    // HEAD：缺水位路径整卷重放但不清行 → 双行；修复后：清行先行 → 恰一行
+    fts.synchronize(sourceOf(logs));
+    expect(fts.search('voodoo')).toHaveLength(1);
+  });
+
+  it('D-2 单事件原子性：三语句中途炸 → 全回滚（遮蔽删除不残留半态）', () => {
+    fts.indexEvent('s1', userEv(0, '旧内容 whiskey'));
+    fts.indexEvent('s1', userEv(1, '旧内容 xray'));
+    // 故障注入：连接面包一层——正文 INSERT 语句抛错（中间语句炸 = 崩溃窗的受控形态）
+    const real = store.connection;
+    const boomDb = {
+      prepare: (sql: string) =>
+        sql.startsWith('INSERT INTO session_fts (')
+          ? {
+              run: () => {
+                throw new Error('注入：正文插入炸');
+              },
+            }
+          : real.prepare(sql),
+      transaction: (fn: (...args: never[]) => unknown) => real.transaction(fn),
+    } as unknown as typeof real;
+    const ftsBoom = new SessionFtsIndex(boomDb);
+    // 遮蔽载体事件：先删被遮蔽区间 [0,1]，随后正文插入炸
+    expect(() =>
+      ftsBoom.indexEvent('s1', ev(2, 'user/message', { content: '摘要 yankee' }, { start: 0, end: 1 })),
+    ).toThrow(/注入/);
+    // HEAD：三语句各自自动提交——删除已落库成半态；修复后：单事务全回滚
+    expect(fts.search('whiskey')).toHaveLength(1);
+    expect(fts.search('xray')).toHaveLength(1);
+  });
+
+  it('核验判据不误伤：活体全程索引的会话（含遮蔽）对账零重建零复活（green 锁）', () => {
+    const log = [
+      userEv(0, '首段 zulu'),
+      assistantEv(1, '回应 alpha2'),
+      userEv(2, '中间 bravo2'),
+      // 遮蔽 [1,2]（compaction 重投形态——折算必须同构建模遮蔽，否则误判重建复活死行）
+      ev(3, 'user/message', { content: '摘要重投 charlie2' }, { start: 1, end: 2 }),
+      userEv(4, '尾段 delta2'),
+    ];
+    for (const e of log) fts.indexEvent('s1', e);
+    fts.synchronize(sourceOf({ s1: log })); // 重激活对账——折算期望 == 实有 → 纯补差零重建
+    expect(fts.search('zulu')).toHaveLength(1);
+    expect(fts.search('alpha2')).toHaveLength(0); // 遮蔽保持（核验误判会经重建复活死行）
+    expect(fts.search('bravo2')).toHaveLength(0);
+    expect(fts.search('charlie2')).toHaveLength(1);
+    expect(fts.search('delta2')).toHaveLength(1);
+  });
+});
