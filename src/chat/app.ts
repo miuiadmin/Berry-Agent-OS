@@ -1205,7 +1205,9 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
           : tools.compositionFor(sessionId).filter((def) => appToolFilter.includes(def.name));
       const toolView: AgentTool[] = [];
       const refreshTools = (): void => {
-        const fresh = visibleDefs().map((def) => tools.toAgentTool(def, { pipeline: driverPipeline }));
+        // sessionId 绑定（第四十九批，契约篇 §6.10）：per-entry 携带 → 管道第 7 参 →
+        // ToolCtx.sessionId——per-session 语境工具（browser 件 context 路由）的路由键
+        const fresh = visibleDefs().map((def) => tools.toAgentTool(def, { pipeline: driverPipeline, sessionId }));
         toolView.length = 0;
         toolView.push(...fresh);
       };

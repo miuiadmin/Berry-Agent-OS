@@ -99,6 +99,8 @@ export type ToolPipelineExecutor = (
   signal?: AbortSignal,
   onUpdate?: ToolUpdateCallback,
   origin?: ToolCallOrigin,
+  /** 发起会话 id（驱动 per-entry 绑定注入；落 ToolCtx.sessionId——契约篇 §6.10，第四十九批） */
+  sessionId?: string,
 ) => Promise<AgentToolResult>;
 
 /**
@@ -167,8 +169,14 @@ export interface ToolsService {
    * 执行绑定面（S5 契约篇 §5.4 第 6 条④冷读闸 F2 修死）：缺省绑服务构造时的
    * 全局管道；驱动侧传 `{pipeline}` 显式绑**本驱动管道**（fresh 作用域三段——
    * per-driver 守门/审批/落账的执行入口）。toAgentTool 仍是唯一包装位，执法点不裂。
+   *
+   * `{sessionId}`（2026-08-31 第四十九批，冷读 B2）：驱动侧 per-entry 绑定时携带——
+   * 传入管道第 7 参并落 ToolCtx.sessionId（per-session 语境工具的路由键，契约篇 §6.10）。
    */
-  toAgentTool(def: ToolDefinition, opts?: { readonly pipeline?: ToolPipelineExecutor }): AgentTool;
+  toAgentTool(
+    def: ToolDefinition,
+    opts?: { readonly pipeline?: ToolPipelineExecutor; readonly sessionId?: string },
+  ): AgentTool;
   /**
    * 注册面打点（B2 P5 打点先行，2026-08-27 刀〇a）：registered = 现存件数
    * （全局层 + 全部域层）；totalAdds/totalRemoves = 开机以来累计注册/注销次数
@@ -198,6 +206,13 @@ export interface ToolCtx {
   signal?: AbortSignal;
   /** partial 结果上报（promise 结算后的调用由管道侧忽略） */
   onUpdate?: ToolUpdateCallback;
+  /**
+   * 发起本次调用的会话 id（工具执行段创建处填值——执行恒发生在某驱动的 run 内）。
+   * 可选：per-session 语境工具（首个消费者 = browser 件 context 路由，契约篇 §6.10）；
+   * §3.1 禁令管守门按 caller/session 分叉，不管工具实现取会话语境——此字段不进守门面。
+   * 2026-08-31 第四十九批契约面加法（冷读 B2 裁决）。
+   */
+  sessionId?: string;
 }
 
 /**

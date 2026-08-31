@@ -86,6 +86,12 @@ const MODULE_EDGES = {
   // obs = 观测面官方件（契约篇 §6.9，2026-08-31 观测复盘批）：web/admin 单边
   // 形态 + persist 自管库边（createAppSqliteFace 直连开库——零跨模块 import）
   obs: ['contracts', 'persist'],
+  // browser = 浏览器自动化官方件（契约篇 §6.10，2026-08-31 第四十九批刀一）：
+  // contracts 单边（admin 最窄边同档）——AppContext/BuiltinAppModule/AppLogger 全
+  // 类型面住 contracts；spawn/kill/桥核/登记簿全经组合根闭包注入
+  //（app/browser-spawn.ts）——结构上不见 exec/mcp/context。web 卫生件边
+  //（assertPublicHost 三件再导出）刀三 SSRF 接线真用时再入册（边随真用执法）
+  browser: ['contracts'],
   app: [
     'contracts',
     'context',
@@ -127,6 +133,10 @@ const MODULE_EDGES = {
     // obs = 观测面官方件（契约篇 §6.9 第十五行）：builtins 注册（零 deps——
     // BuiltinRegistryOptions 零新字段，组合根零改动纪律首次兑现）
     'obs',
+    // browser = 浏览器自动化官方件（契约篇 §6.10 第十六行，2026-08-31 第四十
+    // 九批刀一）：builtins 注册 + browserDeps 闭包（browser-spawn/登记簿/桥核
+    // 工厂——assembly 同构）
+    'browser',
   ],
 };
 

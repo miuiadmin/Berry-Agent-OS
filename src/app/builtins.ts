@@ -23,6 +23,8 @@ import { createMcpApp } from '../mcp/index.js';
 import type { McpAppDeps } from '../mcp/index.js';
 import { createLspApp } from '../lsp/index.js';
 import type { LspAppDeps } from '../lsp/index.js';
+import { createBrowserApp } from '../browser/index.js';
+import type { BrowserAppDeps } from '../browser/index.js';
 import { createWebApp } from '../web/index.js';
 import type { WebAppOverrides } from '../web/index.js';
 import { createCompactionApp } from '../compaction/index.js';
@@ -69,6 +71,13 @@ export interface BuiltinRegistryOptions {
    * 桥核工厂——lsp 结构上不见 mcp/exec（组合根装配）
    */
   readonly lspDeps: LspAppDeps;
+  /**
+   * browser 件闭包依赖束（默认层第十六行，契约篇 §6.10——2026-08-31 第四十九
+   * 批刀一）：裸 spawn（app/browser-spawn.ts）+ killTree + 登记簿
+   * （<dataDir>/browser/children.json）+ 桥核工厂——browser 结构上不见
+   * mcp/exec（帧无关桥组合根装配）
+   */
+  readonly browserDeps: BrowserAppDeps;
   /** web 件依赖覆盖缝（可选——生产零依赖不传；组合根全栈测试注入 fetchImpl/lookup，mock 停在外部边界） */
   readonly webOverrides?: WebAppOverrides;
   /** tools 件闭包依赖束（Ring 1 行树化批——管道 gate 落点/可写根推导器〔safety 同源产物，宿主构造〕/工作区活取值） */
@@ -220,6 +229,11 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // ctx.paths 正规口、四服务全 ctx.get（BuiltinRegistryOptions 零新字段，
     // 组合根零改动纪律的首次兑现）
     'builtin:obs': createObsApp(),
+    // browser 官方件（默认层第十六行，契约篇 §6.10——2026-08-31 第四十九批
+    // 刀一）：浏览器自动化引擎生命周期（spawn/attach + 两级闲置回收）+
+    // ctx.browser 服务（工具面十件随刀二落——lsp 款惰性：注册不依赖引擎在线，
+    // 首用才起）。恒注册（卸行靠 overlay 禁用）
+    'builtin:browser': createBrowserApp(opts.browserDeps),
   };
 }
 

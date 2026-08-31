@@ -14,10 +14,17 @@
  *   调用期 TOOL_TIMEOUT——同桥两码，调用方定身份）。
  */
 
-import { AppError, LSP_CONNECT_FAILED, MCP_CONNECT_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
+import {
+  AppError,
+  BROWSER_CONNECT_FAILED,
+  LSP_CONNECT_FAILED,
+  MCP_CONNECT_FAILED,
+  TOOL_TIMEOUT,
+} from '../contracts/errors.js';
 
-/** JSON-RPC 请求超时缺省拒绝码（mcp/lsp 两桥共用本类——lsp 注入 LSP_CONNECT_FAILED） */
-export type JsonRpcTimeoutCode = typeof MCP_CONNECT_FAILED | typeof TOOL_TIMEOUT | typeof LSP_CONNECT_FAILED;
+/** JSON-RPC 请求超时缺省拒绝码（mcp/lsp 两桥共用本类——lsp 注入 LSP_CONNECT_FAILED；browser CDP 桥注入 BROWSER_CONNECT_FAILED，2026-08-31 第四十九批） */
+export type JsonRpcTimeoutCode =
+  typeof MCP_CONNECT_FAILED | typeof TOOL_TIMEOUT | typeof LSP_CONNECT_FAILED | typeof BROWSER_CONNECT_FAILED;
 
 /** 单条 JSON-RPC 消息的宽松形态（分发按字段在场性判别，不做全量校验） */
 interface JsonRpcMessage {
@@ -26,6 +33,8 @@ interface JsonRpcMessage {
   readonly params?: unknown;
   readonly result?: unknown;
   readonly error?: { readonly code?: number; readonly message?: string };
+  /** CDP 事件顶层会话路由键（第四十九批加法面——target 级事件按 sessionId 分流；mcp/lsp 消息无此字段不受影响） */
+  readonly sessionId?: string;
 }
 
 /** pending 请求簿记（id → 结算回调 + 超时计时器） */
@@ -48,9 +57,13 @@ export interface JsonRpcConnectionOptions {
   /**
    * 通知消费钩子（LSP 复用桥时声明——2026-08-30 LSP 刀加法面）：在场则全部
    * 服务器通知改派本口（method+params 原样），消费方自过滤关心的方法名；
-   * 不在场行为零变化（通知仍走 onNoise 杂音口——mcp 现状语义）
+   * 不在场行为零变化（通知仍走 onNoise 杂音口——mcp 现状语义）。
+   *
+   * 第三参 sessionId（2026-08-31 第四十九批 browser CDP 桥加法面）：CDP target
+   * 级事件顶层携带 sessionId（按会话分流的协议机制）——原样透传；mcp/lsp 消息
+   * 无此字段恒 undefined，既有消费面零改动。
    */
-  onNotification?: (method: string, params: unknown) => void;
+  onNotification?: (method: string, params: unknown, sessionId?: string) => void;
 }
 
 /**
@@ -90,14 +103,16 @@ export class JsonRpcConnection {
 
   /**
    * 发一条请求并等响应。
-   * @param method JSON-RPC 方法名（initialize / tools/list / tools/call / ping）
+   * @param method JSON-RPC 方法名（initialize / tools/list / tools/call / ping；CDP 桥为点分方法名如 Target.createTarget）
    * @param params 参数对象（无参传 undefined——不发 params 字段）
-   * @param opts 超时毫秒与超时码覆盖（connect 期 MCP_CONNECT_FAILED、调用期 TOOL_TIMEOUT）
+   * @param opts 超时毫秒与超时码覆盖（connect 期 MCP_CONNECT_FAILED、调用期 TOOL_TIMEOUT）；
+   *   `sessionId`（第四十九批 CDP 加法面）在场则请求帧顶层附加——CDP target 级命令的
+   *   会话路由键；mcp/lsp 调用面不传零影响
    */
   request(
     method: string,
     params?: object,
-    opts?: { timeoutMs?: number; timeoutCode?: JsonRpcTimeoutCode },
+    opts?: { timeoutMs?: number; timeoutCode?: JsonRpcTimeoutCode; sessionId?: string },
   ): Promise<unknown> {
     if (this.closed) {
       const code = this.opts.defaultTimeoutCode ?? MCP_CONNECT_FAILED;
@@ -130,9 +145,11 @@ export class JsonRpcConnection {
         }, timeoutMs),
       };
       this.pending.set(id, entry);
-      // 请求体：id 请求必有 jsonrpc 2.0 与 method；params 只在有值时发
+      // 请求体：id 请求必有 jsonrpc 2.0 与 method；params 只在有值时发；
+      // sessionId 在场附顶层（CDP 会话路由——Chrome 端按字段名解析容忍 jsonrpc 陌生字段）
       const frame: Record<string, unknown> = { jsonrpc: '2.0', id, method };
       if (params !== undefined) frame.params = params;
+      if (opts?.sessionId !== undefined) frame.sessionId = opts.sessionId;
       this.opts.writeLine(JSON.stringify(frame));
     });
   }
@@ -189,10 +206,11 @@ export class JsonRpcConnection {
       return;
     }
     // 通知腿：onNotification 在场改派消费口（LSP publishDiagnostics——本类
-    // 2026-08-30 LSP 刀加法面）；不在场维持 mcp 现状（杂音口忽略）
+    // 2026-08-30 LSP 刀加法面）；不在场维持 mcp 现状（杂音口忽略）。
+    // 第三参 sessionId 透传（2026-08-31 第四十九批 CDP 加法面——事件按会话分流）
     if (msg.method !== undefined) {
       if (this.opts.onNotification !== undefined) {
-        this.opts.onNotification(msg.method, msg.params);
+        this.opts.onNotification(msg.method, msg.params, msg.sessionId);
       } else {
         this.opts.onNoise?.(`服务器通知（忽略）：${msg.method}`);
       }

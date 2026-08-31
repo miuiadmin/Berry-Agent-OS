@@ -66,6 +66,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'channels',
   'webui',
   'obs',
+  'browser',
 ]);
 
 /**
@@ -106,6 +107,8 @@ describe('overlay 装载与拒绝式校验', () => {
     // + lsp 第十二行（语言服务器件——契约篇 §6.7）
     // + channels 第十三行（Ring 1 第二行树化——契约篇 §6.8）
     // + webui 第十四行（Web 通道件——契约篇 §6.8）
+    // + obs 第十五行（观测件——契约篇 §6.9）
+    // + browser 第十六行（浏览器自动化件——契约篇 §6.10）
     // ——无注册表解析 = unresolved（诊断诚实）
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -123,8 +126,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'channels', pkg: 'builtin:channels' },
       { id: 'webui', pkg: 'builtin:webui' },
       { id: 'obs', pkg: 'builtin:obs' },
+      { id: 'browser', pkg: 'builtin:browser' },
     ]);
-    expect(report.plan).toHaveLength(15);
+    expect(report.plan).toHaveLength(16);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -594,6 +598,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubChannels = { name: 'channels-stub', apply: async () => {} };
     const stubWebui = { name: 'webui-stub', apply: async () => {} };
     const stubObs = { name: 'obs-stub', apply: async () => {} };
+    const stubBrowser = { name: 'browser-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -610,6 +615,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:channels': stubChannels,
       'builtin:webui': stubWebui,
       'builtin:obs': stubObs,
+      'builtin:browser': stubBrowser,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -627,6 +633,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'channels', pkg: 'builtin:channels' },
       { id: 'webui', pkg: 'builtin:webui' },
       { id: 'obs', pkg: 'builtin:obs' },
+      { id: 'browser', pkg: 'builtin:browser' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -644,6 +651,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'channels', pkg: 'builtin:channels', builtin: stubChannels },
       { id: 'webui', pkg: 'builtin:webui', builtin: stubWebui },
       { id: 'obs', pkg: 'builtin:obs', builtin: stubObs },
+      { id: 'browser', pkg: 'builtin:browser', builtin: stubBrowser },
     ]);
   });
 

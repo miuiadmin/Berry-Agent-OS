@@ -1638,6 +1638,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       { id: 'channels', status: 'activated', name: 'channels' },
       { id: 'webui', status: 'activated', name: 'webui' },
       { id: 'obs', status: 'activated', name: 'obs' },
+      { id: 'browser', status: 'activated', name: 'browser' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('apps')).toBeTruthy();
@@ -1658,6 +1659,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       'channels',
       'webui',
       'obs',
+      'browser',
       'tool-plugin',
     ]);
     // 应用工具已进注册表（域键升级批：全局层在前 + fs 驱动层在后——本会话组成面）
@@ -2139,10 +2141,10 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       // 树行标记：装载序视角下挂应用行显式标注归属（系统行缺省零标记零噪声）
       expect(out).toContain('app-tool-plugin：activated');
       expect(out).toContain('→ chat');
-      // 分组分两类（F13）：官方默认层十四行全挂系统 + 应用合成按在册应用逐组打印
+      // 分组分两类（F13）：官方默认层十六行全挂系统 + 应用合成按在册应用逐组打印
       expect(out).toContain('挂载分组（系统合成 + 各在册应用合成，契约篇 §5.1 两档）：');
       expect(out).toContain(
-        '系统合成（15 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin、checkpoint、lsp、channels、webui、obs',
+        '系统合成（16 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin、checkpoint、lsp、channels、webui、obs、browser',
       );
       expect(out).toContain('应用合成 chat（1 行）：app-tool-plugin');
       expect(out).toContain('应用合成 hermes（0 行）：（空——纯系统合成）');
@@ -2512,6 +2514,7 @@ describe('/reload 组合树重载', () => {
         'lsp',
         'webui',
         'obs',
+        'browser',
         'tool-plugin',
       ],
       failed: [],
@@ -2533,6 +2536,7 @@ describe('/reload 组合树重载', () => {
           'lsp',
           'webui',
           'obs',
+          'browser',
           'tool-plugin',
         ],
         failed: [],
@@ -2582,6 +2586,7 @@ describe('/reload 组合树重载', () => {
         'lsp',
         'webui',
         'obs',
+        'browser',
       ],
       failed: [],
       skipped: ['tool-plugin'],
@@ -2643,6 +2648,7 @@ describe('/reload 组合树重载', () => {
       ['channels', 'activated'],
       ['webui', 'activated'],
       ['obs', 'activated'],
+      ['browser', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -2693,6 +2699,7 @@ describe('/reload 组合树重载', () => {
       'lsp',
       'webui',
       'obs',
+      'browser',
       'tool-plugin',
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
@@ -2782,6 +2789,7 @@ describe('/reload 组合树重载', () => {
         'lsp',
         'webui',
         'obs',
+        'browser',
         'tool-plugin',
       ],
       failed: [],
@@ -3027,6 +3035,7 @@ describe('/reload 组合树重载', () => {
       ['channels', 'activated'],
       ['webui', 'activated'],
       ['obs', 'activated'],
+      ['browser', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
@@ -3091,6 +3100,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
           'lsp',
           'webui',
           'obs',
+          'browser',
         ],
         failed: [],
         skipped: [],

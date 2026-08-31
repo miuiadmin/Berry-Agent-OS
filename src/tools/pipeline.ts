@@ -132,7 +132,7 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
   const postTimeoutMs = opts.postTimeoutMs ?? 5_000;
   const recordGate: GateDecisionSink = opts.onGateDecision ?? (() => {});
 
-  return async function runToolPipeline(def, toolCallId, args, signal, onUpdate, origin) {
+  return async function runToolPipeline(def, toolCallId, args, signal, onUpdate, origin, sessionId) {
     /* ---- 前置步：进度流护栏包装（#11——两消费面同源：executeInput 与 toolCtx） ---- */
     const guardedUpdate: ToolUpdateCallback | undefined =
       onUpdate === undefined
@@ -226,7 +226,14 @@ export function createToolPipeline(ctx: Context, opts: ToolPipelineOptions = {})
     const owner = toolOwnerOf(def);
     const timedExecute = async (): Promise<AgentToolResult> => {
       const timeoutMs = def.timeoutMs ?? defaultTimeoutMs;
-      const toolCtx: ToolCtx = { toolCallId, signal, onUpdate: guardedUpdate };
+      // sessionId（第四十九批）：驱动 per-entry 绑定面注入的会话语境键——只进
+      // 工具体（实现层取 per-session 语境），不进守门/审批面（§3.1 禁令不触）
+      const toolCtx: ToolCtx = {
+        toolCallId,
+        signal,
+        onUpdate: guardedUpdate,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+      };
       const execOwned = () =>
         owner === undefined ? def.execute(args, toolCtx) : runInCallerChain(owner, () => def.execute(args, toolCtx));
       if (!timeoutMs || timeoutMs <= 0) {

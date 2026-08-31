@@ -67,7 +67,7 @@ function loadCompositionFor(dataDir: string): ReturnType<typeof loadComposition>
  * 装载并滤除官方默认层行（chat 首行 + memory 次行 + subagent 第三行 + goal 第四行 +
  * scheduler 第五行 + mcp 第六行 + tools 第七行〔Ring 1 行树化起算〕+ web 第八行 +
  * compaction 第九行 + admin 第十行 + checkpoint 第十一行 + lsp 第十二行 + channels
- * 第十三行〔Ring 1 第二行树化〕+ webui 第十四行——契约篇
+ * 第十三行〔Ring 1 第二行树化〕+ webui 第十四行 + obs 第十五行 + browser 第十六行〔2026-08-31 第四十九批〕——契约篇
  * §5.1/§1.5.2/§6.6/§3.4/§6.7/§6.8）：本文件测 overlay 对账语义（用户层写什么/读回什么），
  * 官方行进 composition.test 专属测试——两关注点不混断言。
  */
@@ -88,7 +88,8 @@ function userRows(dataDir: string): unknown[] {
       row.id !== 'lsp' &&
       row.id !== 'channels' &&
       row.id !== 'webui' &&
-      row.id !== 'obs',
+      row.id !== 'obs' &&
+      row.id !== 'browser',
   );
 }
 
@@ -836,7 +837,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'lsp' &&
           row.id !== 'channels' &&
           row.id !== 'webui' &&
-          row.id !== 'obs',
+          row.id !== 'obs' &&
+          row.id !== 'browser',
       ),
     };
 
@@ -905,7 +907,8 @@ describe('list 与 applyLoad（boot 与 /reload 同一实例就地更新）', ()
           row.id !== 'lsp' &&
           row.id !== 'channels' &&
           row.id !== 'webui' &&
-          row.id !== 'obs',
+          row.id !== 'obs' &&
+          row.id !== 'browser',
       ),
     };
     // 混合前态：一 activated + 一 skipped——域死不挑前态，任一在册行可转

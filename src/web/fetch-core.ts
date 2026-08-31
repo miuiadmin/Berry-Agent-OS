@@ -45,8 +45,12 @@ const REQUEST_HEADERS: Readonly<Record<string, string>> = {
   accept: 'text/html,application/xhtml+xml,application/json;q=0.9,text/*;q=0.8',
 };
 
-/** URL 校验：畸形或非 http/https 协议 → WEB_URL_INVALID（file/ftp/ws 一律拒） */
-function requireHttpUrl(raw: string): URL {
+/**
+ * URL 校验：畸形或非 http/https 协议 → WEB_URL_INVALID（file/ftp/ws 一律拒）。
+ * 2026-08-31 第四十九批升导出（原私有函数）——browser 件导航入口同一份协议白名单
+ * （契约篇 §6.10「同一份卫生代码」裁决；经 web/index.ts 再导出单源）。
+ */
+export function requireHttpUrl(raw: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(raw);

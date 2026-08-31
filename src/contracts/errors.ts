@@ -130,6 +130,12 @@ export const MCP_CONNECT_FAILED = registerErrorCode('MCP_CONNECT_FAILED');
 /** lsp：connect 期一码收口（spawn 失败/initialize 握手失败/startup 超时/相对路径 command——契约篇 §6.7；调用期超时与服务器错误是数据不升 AppError，MCP 同律） */
 export const LSP_CONNECT_FAILED = registerErrorCode('LSP_CONNECT_FAILED');
 
+/** browser：引擎发现序全缺席（config executablePath / 系统 Chrome 知名位 / 数据目录专用引擎皆不在场）——工具结果附 /browser install 安装指引（契约篇 §6.10；诚实缺席不自动下载） */
+export const BROWSER_ENGINE_NOT_FOUND = registerErrorCode('BROWSER_ENGINE_NOT_FOUND');
+
+/** browser：引擎连接期一码收口（spawn 失败 / DevToolsActivePort 读取失败 / HTTP 握手失败 / WebSocket 建立失败——含双开 profile 锁与 Linux 缺系统库场景；契约篇 §6.10，MCP/LSP connect 一码同律） */
+export const BROWSER_CONNECT_FAILED = registerErrorCode('BROWSER_CONNECT_FAILED');
+
 /** prompts：具名提示词段 id 非法（须小写含 `/` 应用域前缀，如 `memory/core`——防撞宿主自留地；pi-4(a) 拍板，契约篇 §1.3 落码形态①） */
 export const PROMPT_SECTION_INVALID = registerErrorCode('PROMPT_SECTION_INVALID');
 /** prompts：具名提示词段撞名（段 id 已注册——与 TOOL_DUPLICATE 同纪律，拒绝静默覆盖） */

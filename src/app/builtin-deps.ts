@@ -19,6 +19,8 @@ import type { SandboxService } from '../safety/index.js';
 import { killTree } from '../exec/index.js';
 import { ChildRegistry, JsonRpcConnection } from '../mcp/index.js';
 import { createMcpSpawner } from './mcp-spawn.js';
+import { spawnEngineProcess } from './browser-spawn.js';
+import type { BrowserAppDeps } from '../browser/index.js';
 import type { LspAppDeps, LspServerConfig, LspSymbolsFace, SpawnedProcess } from '../lsp/index.js';
 import { canonicalWorkspaceRoot } from '../context/workspace.js';
 import { CHAT_APP_ID, foldCurrentTodo } from '../chat/index.js';
@@ -156,6 +158,23 @@ export function createLspAssemblyDeps(dataDirPath: string, sandbox: SandboxServi
 }
 
 /**
+ * browser 件闭包组装（契约篇 §6.10 引擎生命周期段 M1 裁决）：裸 spawn
+ * （app/browser-spawn.ts——exec runArgv 是 run-to-completion 语义对长命引擎
+ * 不适用，只复用 buildChildEnv/killTree 两原语）+ 登记簿
+ * <dataDir>/browser/children.json + 桥核工厂注入（browser 结构上不见
+ * mcp/exec——帧无关桥组合根装配，lsp 同款纪律）。
+ */
+export function createBrowserAssemblyDeps(dataDirPath: string): BrowserAppDeps {
+  return {
+    dataDir: dataDirPath,
+    spawnEngine: spawnEngineProcess,
+    killTree,
+    registry: new ChildRegistry(join(dataDirPath, 'browser', 'children.json')),
+    newConnection: (opts) => new JsonRpcConnection(opts),
+  };
+}
+
+/**
  * 组装官方件注册表入参（assembly 唯一调用——deps 派生全量收敛于此）。
  * 派生式与原 assembly 内联形态逐字段同构（2026-08-31 技术债批平移，零语义变更）。
  */
@@ -218,6 +237,11 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
       ...createLspAssemblyDeps(host.dataDir(), host.sandbox, host.workspace),
       mountSymbols: host.mountSymbols,
     },
+    // browser 件闭包（默认层第十六行，契约篇 §6.10——2026-08-31 第四十九批刀一）：
+    // 裸 spawn + 树杀 + 登记簿 <dataDir>/browser/children.json + 桥核工厂——
+    // browser 结构上不见 mcp/exec（OS 沙箱不 confine：本机引擎非第三方服务器
+    // 代码，M2 裁决——与 mcp/lsp spawner 判据差异显式记此）
+    browserDeps: createBrowserAssemblyDeps(host.dataDir()),
     // tools 件闭包（S2 fs 迁域后收窄）：gate/decision durable 落点绑转发壳
     //（件绑定后落账生效）+ 检索族路径锚。可写根推导器已随 fs 族迁 chat 件
     // deps（rootsProvider）。rowApp 探针 = D1 注册面隐式路由（挂应用的行注册

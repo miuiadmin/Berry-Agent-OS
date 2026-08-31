@@ -419,6 +419,9 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
       // 执行绑定面（S5 冷读闸 F2）：显式注入优先（驱动 fresh 作用域管道），
       // 缺省回落服务构造时的全局管道——既有调用点（子工厂/诊断面）零改动
       const pipeline = bindOpts?.pipeline ?? opts.pipeline;
+      // 会话绑定（第四十九批）：驱动 per-entry 绑定时携带，透传管道第 7 参 →
+      // ToolCtx.sessionId（per-session 语境工具的路由键；不传 = 会话无关工具不受影响）
+      const boundSessionId = bindOpts?.sessionId;
       return {
         name: def.name,
         description: def.description,
@@ -435,7 +438,7 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
           }
           // origin='model'（P1-2 增补 7③）：loop 模型工具路的显式判别词——
           // 守门行按面别分叉（模型面 vs 服务面）不靠名字嗅探
-          return pipeline(def, toolCallId, args, signal, onUpdate, 'model');
+          return pipeline(def, toolCallId, args, signal, onUpdate, 'model', boundSessionId);
         },
       };
     },
