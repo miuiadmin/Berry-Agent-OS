@@ -9,6 +9,7 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-0-brightgreen?style=flat-square">
+  <img alt="codename" src="https://img.shields.io/badge/codename-Peiligang-orange?style=flat-square">
 </p>
 
 <p align="center">

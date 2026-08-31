@@ -23,7 +23,7 @@
  * 命令面即产品契约（输出保持稳定）；三命令分别接 tui-main / run-main /
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
  */
-import { VERSION } from './version.js';
+import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 import { tuiMain } from './tui-main.js';
 import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
@@ -217,7 +217,7 @@ function main(argv: string[]): number {
             return 1;
           }
         }
-        return tuiMain({ ...(noApps ? { noApps: true } : {}), ...(webuiPort !== undefined ? { webuiPort } : {}) });
+        return tuiMain({ ...(noApps ? { noApps: true } : {}), ...(webuiPort === undefined ? {} : { webuiPort }) });
       }
       case '--help':
       case '-h':
@@ -291,9 +291,9 @@ function main(argv: string[]): number {
         return runOnceMain(message, {
           ...(readOnly ? { sandboxMode: 'read-only' as const } : {}),
           ...(background ? { usagePriority: 'background' as const } : {}),
-          ...(app !== undefined ? { app } : {}),
+          ...(app === undefined ? {} : { app }),
           ...(noApps ? { noApps: true } : {}),
-          ...(webuiPort !== undefined ? { webuiPort } : {}),
+          ...(webuiPort === undefined ? {} : { webuiPort }),
         });
       }
       case 'attach': {
@@ -317,7 +317,7 @@ function main(argv: string[]): number {
           process.stderr.write('用法：berry attach [--port <n>]（run/daemon 族旗标不适用）\n');
           return 2;
         }
-        return attachMain({ ...(webuiPort !== undefined ? { port: webuiPort } : {}) });
+        return attachMain({ ...(webuiPort === undefined ? {} : { port: webuiPort }) });
       }
       case 'daemon': {
         // daemon 命令族（契约篇 §6.8 常驻执行体条·刀一/二）：客户端命令

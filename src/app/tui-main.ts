@@ -19,7 +19,7 @@ import type { RuntimeOptions } from './assembly.js';
 import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
-import { VERSION } from './version.js';
+import { VERSION_WITH_CODENAME as VERSION } from './version.js';
 
 /**
  * 判活 daemon 是否持有**本工作区**近史会话（daemon 刀二·P3 触达面②判据）。

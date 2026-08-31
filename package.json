@@ -1,6 +1,7 @@
 {
   "name": "berryagent",
   "version": "1.0.0-alpha.0",
+  "codename": "Peiligang",
   "description": "Berry Agent OS — 跑 AI 应用的个人操作系统（TypeScript + SQLite + pi-ai；文档见 docs/）",
   "license": "MIT",
   "keywords": [
@@ -17,10 +18,11 @@
   "bin": {
     "berry": "./dist/app/main.js"
   },
-  "engines": {
-    "node": ">=22.19"
-  },
-  "files": ["dist", "examples", "README.md"],
+  "files": [
+    "dist",
+    "examples",
+    "README.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -61,5 +63,8 @@
     "typescript": "^6.0.3",
     "vite": "^8.2.2",
     "vitest": "^4.1.7"
+  },
+  "engines": {
+    "node": ">=22.19"
   }
 }
