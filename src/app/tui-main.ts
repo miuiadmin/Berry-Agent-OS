@@ -142,6 +142,17 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
         '· 模型配置：APP_MODEL 环境变量覆盖缺省模型；凭证与数据目录见 docs/使用指南',
     );
   }
+  // 一次性鉴权披露（复盘 S-1「监听 ⇒ 鉴权」）：--port 手开形态 webui 件自足
+  // token——attach 后 notify 横幅一次性（先于 attach 的 notify 会丢，欢迎横幅
+  // 同位先例）；token 只进屏幕回显不落任何盘面（文件面直读已闭死）
+  const ephemeralAuth = runtime.webuiEphemeralAuth();
+  if (ephemeralAuth !== undefined) {
+    runtime.ui.notify(
+      `Web 通道已开（${ephemeralAuth.host}:${ephemeralAuth.port}）——鉴权一次性 token（仅本次进程）：\n` +
+        `${ephemeralAuth.token}\n` +
+        '浏览器打开后经 /api/auth 换 cookie，或请求头 Authorization: Bearer <token>',
+    );
+  }
   // S3 信封分流（宿主壳 = 信封拆开点，channels 不见信封概念）：聚焦者走全渲染、
   // 非聚焦者（后台活条目 + 退役条目迟到事件）走摘要行——互不绞屏的执法接线
   front.addDisplay((envelope) => {

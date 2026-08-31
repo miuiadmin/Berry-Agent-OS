@@ -104,7 +104,25 @@ afterEach(async () => {
     const runtime = runtimes.pop()!;
     await runtime.shutdown().catch(() => undefined);
   }
+  bearer = undefined; // 鉴权物复位（防跨用例泄漏——401 断言面恒从无 token 起步）
 });
+
+/**
+ * 当前用例生效的一次性 token（复盘 S-1 勘正：--port 形态件自足鉴权后，非 401
+ * 断言的用例恒持 Bearer——armAuth 从 runtime 摘 face 武装；无 token 用例（401
+ * 断言面）不武装，helpers 按缺席裸发）
+ */
+let bearer: string | undefined;
+
+/** 从 runtime 摘一次性鉴权物并武装全部助手（--port 形态 = webui 件自足 token） */
+function armAuth(runtime: AppRuntime): void {
+  bearer = runtime.webuiEphemeralAuth()?.token;
+}
+
+/** 当前请求头鉴权段（bearer 缺席 = 裸发——401 断言面的对照组形态） */
+function authHeaders(): Record<string, string> {
+  return bearer === undefined ? {} : { authorization: `Bearer ${bearer}` };
+}
 
 /** 起一次性探针取一个空闲端口（listen(0) 读回端口号后即关——占而不用） */
 function grabPort(): Promise<number> {
@@ -138,7 +156,7 @@ function holdPort(port: number): Promise<{ release(): Promise<void> }> {
 function openSse(port: number, frames: WebuiSseEnvelope[]): { close(): void; raw(): string } {
   let buf = '';
   const chunks: string[] = [];
-  const req = get({ host: '127.0.0.1', port, path: '/api/events' }, (res) => {
+  const req = get({ host: '127.0.0.1', port, path: '/api/events', headers: authHeaders() }, (res) => {
     res.setEncoding('utf8');
     res.on('data', (chunk: string) => {
       chunks.push(chunk);
@@ -186,9 +204,9 @@ async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 15_00
   }
 }
 
-/** JSON GET 助手（fetch 全自动收尾——非 SSE 面用 fetch 即可） */
+/** JSON GET 助手（fetch 全自动收尾——非 SSE 面用 fetch 即可；鉴权随 authHeaders） */
 async function getJson(url: string): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: authHeaders() });
   return { status: res.status, body: await res.json() };
 }
 
@@ -202,7 +220,11 @@ function postSubmit(port: number, sessionId: string, text: string): Promise<{ st
         port,
         path: `/api/sessions/${encodeURIComponent(sessionId)}/submit`,
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(payload)) },
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(Buffer.byteLength(payload)),
+          ...authHeaders(),
+        },
       },
       (res: IncomingMessage) => {
         res.setEncoding('utf8');
@@ -225,7 +247,11 @@ function postJson(port: number, path: string, body: string): Promise<{ status: n
         port,
         path,
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) },
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(Buffer.byteLength(body)),
+          ...authHeaders(),
+        },
       },
       (res: IncomingMessage) => {
         res.setEncoding('utf8');
@@ -255,6 +281,52 @@ async function waitMessages(base: string, sessionId: string, expected: string[],
 /* ---------------- 用例 ---------------- */
 
 describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', () => {
+  it('复盘 S-1 回归锁：--port 形态件自足鉴权——裸发全 401、Bearer 过门、cookie 桥照常', async () => {
+    const port = await grabPort();
+    const workspace = makeWorkspace();
+    const runtime = await createRuntime({
+      dbPath: ':memory:',
+      workspace,
+      interactive: false,
+      webuiPort: port,
+      streamFn: scriptedStream([textMessage('S-1 锁答')]),
+    });
+    runtimes.push(runtime);
+    const base = `http://127.0.0.1:${port}`;
+
+    // ① face 在场：进程内一次性 token（32 字节 hex）+ 监听坐标（组合根披露面）
+    //   —— 修复前此处红：webuiEphemeralAuth 不存在（类型面即拒）
+    const face = runtime.webuiEphemeralAuth();
+    expect(face).toBeDefined();
+    expect(face!.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(face!.port).toBe(port);
+
+    // ② 裸发（bearer 未武装的对照组形态）：health 豁免面 200、/api 族其余全 401
+    //   —— 修复前此处红：--port 形态免鉴权、写端点裸发可达（S-1 本体）
+    const bootId = runtime.session!.header.sessionId;
+    expect((await getJson(`${base}/api/health`)).status).toBe(200);
+    expect((await getJson(`${base}/api/sessions`)).status).toBe(401);
+    expect((await getJson(`${base}/api/sessions/${bootId}/messages`)).status).toBe(401);
+    expect((await postSubmit(port, bootId, 'x')).status).toBe(401);
+    expect(
+      (await postJson(port, '/api/approvals/ghost-id/decide', JSON.stringify({ decision: 'approve' }))).status,
+    ).toBe(401);
+    expect((await postJson(port, `/api/sessions/${bootId}/interrupt`, JSON.stringify({}))).status).toBe(401);
+    // 错 token 同拒（timingSafeEqual 面——不因自足 token 变形）
+    const wrong = await fetch(`${base}/api/sessions`, { headers: { authorization: 'Bearer deadbeef' } });
+    expect(wrong.status).toBe(401);
+
+    // ③ 武装后过门：清单 200（写读面全解锁）
+    armAuth(runtime);
+    expect((await getJson(`${base}/api/sessions`)).status).toBe(200);
+
+    // ④ cookie 桥照常：Bearer POST /api/auth → 200 + HttpOnly cookie（SPA 免头
+    //   续访的既有机制不因自足 token 变形）
+    const authRes = await fetch(`${base}/api/auth`, { method: 'POST', headers: authHeaders() });
+    expect(authRes.status).toBe(200);
+    expect(authRes.headers.get('set-cookie') ?? '').toContain('daemon_session=');
+  });
+
   it('端到端：health 版本钉死 / sessions 含 boot 会话 / submit 202 落账 / SSE 三族帧', async () => {
     const port = await grabPort();
     const workspace = makeWorkspace();
@@ -266,6 +338,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       streamFn: scriptedStream([textMessage('web 通道答')]),
     });
     runtimes.push(runtime);
+    armAuth(runtime); // 监听形态武装（S-1 后 /api 族过鉴权——helpers 携 Bearer）
     const base = `http://127.0.0.1:${port}`;
 
     // 先开 SSE 再做动作（连接即当下——帧序从 connected 起可断言）
@@ -337,6 +410,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
         webuiPort: portA,
         streamFn: scriptedStream([textMessage('boot A 答')]),
       });
+      armAuth(rtA); // boot A 监听形态武装（关停后由 boot B 重武装覆盖）
       const baseA = `http://127.0.0.1:${portA}`;
       const listA = (await getJson(`${baseA}/api/sessions`)).body as { id: string; active: boolean }[];
       const sessionA = listA.find((s) => s.active)!.id;
@@ -355,6 +429,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
         streamFn: scriptedStream([textMessage('boot B 答')]),
       });
       runtimes.push(rtB);
+      armAuth(rtB);
       const baseB = `http://127.0.0.1:${portB}`;
 
       // ① 清单：A 以近史行披露 active:false（披露即兑现——点开不再 404）
@@ -420,6 +495,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       ]),
     });
     runtimes.push(runtime);
+    armAuth(runtime);
     const base = `http://127.0.0.1:${port}`;
 
     // 可控 confirm（TUI 腿闸门）：悬置 deferred = TUI 腿悬置——web 腿独走竞速
@@ -588,6 +664,7 @@ describe('Web 通道组合根全栈（--port 注入 → webui 行真监听）', 
       ]),
     });
     runtimes.push(runtime);
+    armAuth(runtime);
     const base = `http://127.0.0.1:${port}`;
 
     /**

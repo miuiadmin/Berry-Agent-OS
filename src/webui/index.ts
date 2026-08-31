@@ -25,6 +25,7 @@ export {
   type WebuiAppDeps,
   type WebuiDisplayEnvelope,
   type WebuiDisplaySink,
+  type WebuiEphemeralAuthFace,
   type WebuiNotifyPayload,
   type WebuiPendingApproval,
   type WebuiSessionBusPayload,

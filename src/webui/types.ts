@@ -243,17 +243,44 @@ export interface WebuiAppDeps {
    */
   readonly cordoned?: () => boolean;
   /**
-   * daemon token 鉴权物（daemon 刀一·P1：组合根 daemon 形态注入；缺省不传 =
-   * `--port` 手开形态免鉴权——回环三防线即闭环）。在场时 /api 族全量执法
-   *（豁免 /api/health 探活与 /api/auth 签发自身）+ POST /api/auth cookie 桥。
+   * 鉴权物（daemon 刀一·P1 起为 daemon 形态注入位；复盘 S-1 勘正——结构不变式
+   * 「监听 ⇒ 鉴权」升格为件本体保证）：组合根注入则用注入值（daemon 持久 token）；
+   * **缺席时件本体 apply 期自足生成进程内一次性 token**（32 字节随机 hex、只存
+   * 进程内存不落盘——0600 不防同 uid，落盘即被同 uid 沙箱应用可读等于没防），
+   * 经 `mountEphemeralAuth` 挂载点上交组合根披露。在场（两源恒在场）时 /api 族
+   * 全量执法（豁免 /api/health 探活与 /api/auth 签发自身）+ POST /api/auth cookie 桥。
    */
   readonly auth?: { readonly token: string };
+  /**
+   * 一次性鉴权面挂载点（复盘 S-1：件自足生成 token 后上交组合根的通道——
+   * mountSymbols/mountApprovalClaim 同款 holder-mount 形态）。件本体 apply 期
+   * 调用（仅 `auth` 注入缺席时），返回摘除器由件本体 ctx.effect 回卷收账。
+   * 组合根侧 holder 决定披露形态（TUI notify / run stderr；daemon 形态注入
+   * auth 故不自足、不双披）。缺省不传（单测直构 deps 面）= 面不上交、token
+   * 仍生效（执法不依赖披露接线正确性）。
+   */
+  readonly mountEphemeralAuth?: (face: WebuiEphemeralAuthFace) => () => void;
   /** 宿主版本号（GET /api/health 报告面——app/version.ts 同源经组合根注入，webui 边不含 app 模块） */
   readonly version: string;
 }
 
 /** daemon 鉴权 cookie 名（P1 M1 cookie 桥——非品牌词面；值 = token 本身） */
 export const WEBUI_SESSION_COOKIE = 'daemon_session';
+
+/**
+ * 一次性鉴权面（复盘 S-1——非 daemon 一切监听形态件自足生成）：token 只存
+ * 进程内存（不落盘）；port/host = 监听坐标（披露方拼回环 URL 用）。组合根经
+ * mountEphemeralAuth 收面后按入口形态披露（TUI attach 后 notify / run stderr；
+ * 测试面直接断言形状）。
+ */
+export interface WebuiEphemeralAuthFace {
+  /** 32 字节随机数 hex（64 字符）——进程内一次性，随行回卷销亡 */
+  readonly token: string;
+  /** 监听端口（--port 旗标值或 overlay 配置值） */
+  readonly port: number;
+  /** 监听主机（回环钉死面——披露方据此确认回环坐标） */
+  readonly host: string;
+}
 
 /**
  * submit requestId 去重缓存帽（daemon 刀一·协议正确性层：客户端重试同

@@ -29,7 +29,7 @@ import { deriveMessages } from '../session/index.js';
 import type { GoalChannel } from '../goal/index.js';
 import type { TickRunResult } from '../scheduler/index.js';
 import type { WebAppOverrides } from '../web/index.js';
-import type { WebuiApprovalMount, WebuiSessionSummary } from '../webui/index.js';
+import type { WebuiApprovalMount, WebuiEphemeralAuthFace, WebuiSessionSummary } from '../webui/index.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
 import { defaultAgentLocations } from './agents-md.js';
 import type { AgentLocation } from './agents-md.js';
@@ -84,11 +84,17 @@ export interface BuiltinHostResources {
   readonly mountApprovalClaim: (mount: WebuiApprovalMount) => () => void;
   /** documentSymbol 桥挂载点（symbolsFace holder 留 assembly——AppRuntime.symbolsFor 直读，函数面过界） */
   readonly mountSymbols: (face: LspSymbolsFace) => () => void;
+  /**
+   * 一次性鉴权面挂载点（复盘 S-1——webui 件自足 token 上交通道；
+   * ephemeralAuthFace holder 留 assembly——AppRuntime.webuiEphemeralAuth 直
+   * 读，函数面过界）。件本体仅 daemonAuth 注入缺席时调用（非 daemon 监听形态）
+   */
+  readonly mountEphemeralAuth: (face: WebuiEphemeralAuthFace) => () => void;
   /** documentSymbol 查询面（lsp 行缺席 = undefined——补全 404 语义） */
   readonly symbolsFor: LspSymbolsFace;
   /** UI 广播异常诊断面（channels 件 onUiError——ctx.logger 归因） */
   readonly logUiError: (err: unknown, op: string) => void;
-  /** daemon token 鉴权物（--port 手开形态缺省不传 = 回环三防线闭环） */
+  /** daemon token 鉴权物（daemon 形态注入；缺席 = 非 daemon 监听形态由 webui 件自足一次性 token——复盘 S-1「监听 ⇒ 鉴权」） */
   readonly daemonAuth: { readonly token: string } | undefined;
   /** web 件测试注入缝（生产零参——mock 停在外部边界） */
   readonly webOverrides: WebAppOverrides | undefined;
@@ -412,8 +418,12 @@ export function assembleBuiltinDeps(host: BuiltinHostResources): BuiltinRegistry
       // decide/interrupt/SSE/读面不拒（收场依赖面保全），health 披露 degraded
       cordoned: () => host.cordoned(),
       // daemon token 鉴权物（P1）：daemon 形态注入（/api 族全量执法 + cookie
-      // 桥）；--port 手开形态缺省不传 = 回环三防线即闭环、免鉴权
+      // 桥）；缺席 = 非 daemon 监听形态——webui 件 apply 期自足生成一次性
+      // token（复盘 S-1「监听 ⇒ 鉴权」——执法不再依赖组合形态的接线正确性）
       ...(host.daemonAuth === undefined ? {} : { auth: { token: host.daemonAuth.token } }),
+      // 一次性鉴权面上交通道（复盘 S-1）：件自足生成后经此挂 holder（assembly
+      // 侧 ephemeralAuthFace——AppRuntime.webuiEphemeralAuth + 入口披露消费）
+      mountEphemeralAuth: host.mountEphemeralAuth,
       // 版本串（webui 边不含 app 模块——组合根注入）
       version: VERSION,
     },

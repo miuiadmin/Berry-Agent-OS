@@ -89,7 +89,7 @@ import type { InstructionLocation } from './instructions.js';
 import type { ChannelsServiceEntity } from '../channels/service.js';
 import type { UiService } from '../channels/types.js';
 import { WEBUI_APPROVAL_CAP_PER_OWNER } from '../webui/index.js';
-import type { WebuiApprovalMount } from '../webui/index.js';
+import type { WebuiApprovalMount, WebuiEphemeralAuthFace } from '../webui/index.js';
 // daemon 刀一：heldSessions 租约闭包读 daemon.json 判活（assembly↔daemon 零环
 // ——命令半边 daemon.ts 引 createRuntime，状态半边 daemon-state.ts 不引）
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
@@ -469,6 +469,13 @@ export interface AppRuntime {
       }
     | undefined
   >;
+  /**
+   * 一次性鉴权面活取值（复盘 S-1「监听 ⇒ 鉴权」）：非 daemon 一切监听形态
+   *（`--port` 旗标 / overlay `enabled: true`）webui 件 apply 期自足生成进程内
+   * token 后挂入、行回卷摘除；daemon 形态（daemonAuth 注入）与零监听形态恒
+   * undefined。入口披露（TUI notify / run stderr）与测试断言两消费面。
+   */
+  webuiEphemeralAuth(): { readonly token: string; readonly port: number; readonly host: string } | undefined;
   /**
    * 组合树重载（/reload，契约篇 §1.3 落码形态）：run 进行中**排队不拒绝**
    *（2026-08-27 刀 2 改排队——分槽 coalesce：置 pending 返 {queued:true}，
@@ -1412,6 +1419,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
    * （mountSymbols/symbolsFor 两消费点全在彼——2026-08-31 技术债批平移） */
   let approvalFace: WebuiApprovalMount | undefined;
   let symbolsFace: LspSymbolsFace | undefined;
+  /** 一次性鉴权面持有器（复盘 S-1「监听 ⇒ 鉴权」）：webui 件 apply 期自足生成
+   * token 后经 mountEphemeralAuth 挂入、行回卷摘除——AppRuntime.webuiEphemeralAuth
+   * 与入口披露（tui-main notify / run-main stderr）两消费点读它；daemon 形态
+   * 注入 daemonAuth 故本 holder 恒 undefined（不自足不双披） */
+  let ephemeralAuthFace: WebuiEphemeralAuthFace | undefined;
   /** ApprovalRequest → claim 载荷适配（enriched 三字段词面拷贝——chat/根 answerer 共用） */
   const webClaimOf = (req: ApprovalRequest): Promise<'approve' | 'reject' | 'always'> | undefined =>
     req.approvalId === undefined
@@ -1595,6 +1607,14 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
         symbolsFace = face;
         return () => {
           if (symbolsFace === face) symbolsFace = undefined;
+        };
+      },
+      // 一次性鉴权面 holder setter（复盘 S-1）：mountSymbols 同款「挂入/身份核
+      // 对摘除」形——webui 行回卷调摘除器，holder 归 undefined
+      mountEphemeralAuth: (face) => {
+        ephemeralAuthFace = face;
+        return () => {
+          if (ephemeralAuthFace === face) ephemeralAuthFace = undefined;
         };
       },
       symbolsFor: (path) => symbolsFace?.(path) ?? Promise.resolve(undefined),
@@ -2775,6 +2795,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // 刀 B：documentSymbol 面活取值（读 holder——与 webui deps symbolsFor 同源
     // 第二消费点；lsp 行缺席 = undefined，TUI 补全退化委托腿）
     symbolsFor: (path: string) => symbolsFace?.(path) ?? Promise.resolve(undefined),
+    // 复盘 S-1：一次性鉴权面活取值（读 holder——daemon/零监听形态恒 undefined；
+    // 入口披露与测试断言的消费点）
+    webuiEphemeralAuth: () => ephemeralAuthFace,
     reload,
     /** 优雅关停：abort-all → 等全部驱动结算（quiesce 断言）→ flush 屏障 → 全部条目 session_shutdown → 关库 → ctx 回卷（§1.3 多驱动版编排 + S6 形态⑤，S1 全条目化） */
     async shutdown() {

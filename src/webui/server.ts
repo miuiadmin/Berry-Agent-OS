@@ -77,7 +77,8 @@ function tokenEquals(a: string, b: string): boolean {
 /**
  * 请求鉴权（daemon 刀一·P1：Bearer ∪ cookie 两源同值）。Bearer = curl/TUI
  * attach 面；cookie = SPA 桥面（POST /api/auth 签发的 HttpOnly cookie，值 =
- * token 本身）。auth 缺席（非 daemon `--port` 形态）不判——回环三防线即闭环。
+ * token 本身）。auth 由 app.ts 两源归一恒在场（daemon 注入 / 件自足一次性——
+ * 复盘 S-1「监听 ⇒ 鉴权」）；本函数保持通用机制面（缺席不判的旧缺省已废）。
  */
 function authorize(req: IncomingMessage, auth: { readonly token: string }): boolean {
   const header = req.headers.authorization;
@@ -114,9 +115,9 @@ export interface WebuiServerOptions {
   /** 监听地址（已过绑定防线①的回环值） */
   readonly host: string;
   /**
-   * daemon token 鉴权物（daemon 刀一·P1；缺省不传 = 非 daemon `--port` 形态
-   * 免鉴权——回环三防线即闭环）。在场时 /api 族全量执法（豁免 /api/health
-   * 公开探活与 /api/auth 签发端点自身）
+   * 鉴权物（app.ts 两源归一恒注入：daemon 形态 = 组合根持久 token；非 daemon
+   * 监听形态 = 件自足进程内一次性 token——复盘 S-1「监听 ⇒ 鉴权」）。在场时
+   * /api 族全量执法（豁免 /api/health 公开探活与 /api/auth 签发端点自身）
    */
   readonly auth?: { readonly token: string };
   /** 宿主面闭包（清单/投影/提交三取数腿） */
@@ -225,12 +226,13 @@ async function route(
 ): Promise<void> {
   const { pathname } = url;
 
-  // 鉴权门（daemon 刀一·P1）：auth 在场（daemon 形态）时 /api 族全量 401——
-  // 前置于 SSE 升级（鉴权失败不占 channel 连接帽，防 16 帽被无 token 请求
-  // 占满的 DoS 面）。豁免两端点：/api/health（公开探活——M4 两语义分立：它
-  // 不构成活证）/ /api/auth（签发端点自身验 token）。静态资产不鉴权：SPA 壳
-  // 先上屏、首屏引导贴 token 换 cookie（M1 ① 签发过鉴权）；GET / 与静态
-  // 不附 Set-Cookie（cookie 只在 /api/auth 应答头出现）
+  // 鉴权门（daemon 刀一·P1 起为一切监听形态执法面——复盘 S-1「监听 ⇒ 鉴权」
+  // 结构不变式；auth 由 app.ts 两源归一恒在场，条件式保留为机制面通用性）：
+  // /api 族全量 401——前置于 SSE 升级（鉴权失败不占 channel 连接帽，防 16 帽
+  // 被无 token 请求占满的 DoS 面）。豁免两端点：/api/health（公开探活——M4 两
+  // 语义分立：它不构成活证）/ /api/auth（签发端点自身验 token）。静态资产不
+  // 鉴权：SPA 壳先上屏、首屏引导贴 token 换 cookie（M1 ① 签发过鉴权）；GET /
+  // 与静态不附 Set-Cookie（cookie 只在 /api/auth 应答头出现）
   if (
     opts.auth !== undefined &&
     pathname.startsWith('/api/') &&

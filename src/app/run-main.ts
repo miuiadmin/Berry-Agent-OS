@@ -39,6 +39,16 @@ export async function runOnceMain(message: string, options: RuntimeOptions = {})
     // 进程形态（刀三）：单次执行入口——goal boot 降级照常（人类发起的进程）
     processKind: 'run',
   });
+  // 一次性鉴权披露（复盘 S-1「监听 ⇒ 鉴权」）：--port 手开形态 webui 件自足
+  // token——stderr 一次性打印（headless 形态无 UI 面；token 只进 stderr 回显
+  // 不落任何盘面；stdout 保持纯模型输出——脚本消费方不受扰）
+  const ephemeralAuth = runtime.webuiEphemeralAuth();
+  if (ephemeralAuth !== undefined) {
+    process.stderr.write(
+      `Web 通道已开（${ephemeralAuth.host}:${ephemeralAuth.port}）——鉴权一次性 token（仅本次进程）：` +
+        `${ephemeralAuth.token}（请求头 Authorization: Bearer <token>，或 POST /api/auth 换 cookie）\n`,
+    );
+  }
   // 可卸语义（应用面第一纵切 + 组装批默认应用键兜底态）：无对话循环即语义性失败
   // ——两因：chat 件被禁（循环本体缺位）/ 默认应用解析无果（带标应用与 chat 均
   // 缺场——open 防御降级，契约篇 §5.4）；退出码 1 + stderr 示明；dump-config 查诊断

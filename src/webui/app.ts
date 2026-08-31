@@ -15,6 +15,7 @@
  * channel.closed 旗标自守；ui().attach 的 Disposer 挂 ctx.effect。
  */
 
+import { randomBytes } from 'node:crypto';
 import { AppError, WEBUI_BIND_FORBIDDEN, WEBUI_PORT_IN_USE } from '../contracts/errors.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import { WebuiChannel } from './channel.js';
@@ -63,15 +64,25 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
   // 桥/两端点消费面——随行生命周期）+ 服务半边（微路由——只造不启）
   const channel = new WebuiChannel();
   const approvals = createPendingApprovals();
+  // 鉴权物恒在场（复盘 S-1 结构不变式「监听 ⇒ 鉴权」）：daemon 形态组合根注入
+  // 持久 token；缺席（非 daemon 一切监听形态——`--port` 旗标 / overlay
+  // `enabled: true`）则件本体自足生成进程内一次性 token（32 字节随机 hex、
+  // 只存内存**不落盘**——0600 不防同 uid，落盘即被同 uid 沙箱应用可读等于没
+  // 防），经 mountEphemeralAuth 上交组合根披露（TUI notify / run stderr；执法
+  // 不依赖披露接线正确性）
+  let auth: { readonly token: string } | undefined = deps.auth;
+  let unmountEphemeralAuth: (() => void) | undefined;
+  if (auth === undefined) {
+    auth = { token: randomBytes(32).toString('hex') };
+    unmountEphemeralAuth = deps.mountEphemeralAuth?.({ token: auth.token, port, host });
+  }
   const { server, close } = createWebuiServer({
     port,
     host,
     deps,
     channel,
     approvals,
-    // daemon token 鉴权物（daemon 刀一·P1）：daemon 形态组合根注入——/api 族
-    // 全量执法 + cookie 桥；--port 手开形态缺省免鉴权（回环三防线即闭环）
-    ...(deps.auth !== undefined ? { auth: deps.auth } : {}),
+    auth, // 恒在场（上方两源归一）——/api 族全量执法 + cookie 桥
     // 静态根 = 本件目录（位置事实而非声明：tsc 直出形态下 dist/webui 即模块
     // 目录，vite 产物同目录共存；dev 形态缺 index.html = 静态 404 诊断态）
     staticRoot: import.meta.dirname,
@@ -101,10 +112,12 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
     attachedCount: () => channel.size,
   });
 
-  // 回卷编舞（LIFO：本 effect 最先回卷）：先摘 claim 桥 → 登记簿卫生（未决
-  // 不结算——见 approvals.ts 模块头）→ 摘广播后端 → 废弃通道（毁全部 SSE
-  // 连接 + closed 旗标）→ server.close 收尾（连接已毁，close 即回）
+  // 回卷编舞（LIFO：本 effect 最先回卷）：先摘一次性鉴权面 holder（组合根披露
+  // 面先失效）→ 摘 claim 桥 → 登记簿卫生（未决不结算——见 approvals.ts 模块
+  // 头）→ 摘广播后端 → 废弃通道（毁全部 SSE 连接 + closed 旗标）→ server.close
+  // 收尾（连接已毁，close 即回）
   ctx.effect(() => () => {
+    unmountEphemeralAuth?.();
     unmountClaim();
     approvals.settleAll();
     detach();
