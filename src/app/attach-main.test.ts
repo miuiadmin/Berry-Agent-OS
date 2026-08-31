@@ -1,15 +1,20 @@
 /**
- * L5 app — attach 审批应答器单元测试（全面复盘 #51 回归锁 + 应答政策面）。
+ * L5 app — attach 测试面（应答器 + 会话选择 + 前置闸）。
  *
- * 应答器从 attach-main 提为命名导出（pickAttachSession 同款先例——入口文件
- * 的可测子件）：三消费点（ask/settle/sync）同闭包，应答政策（何时投 decide、
- * 何时不投）单点可锁。本文件只测应答器与 pickAttachSession 纯逻辑——attach
- * 主流程接线由 daemon/attach 测试面覆盖（复盘 #31）。
+ * 三层：① 审批应答器（全面复盘 #51 回归锁——应答政策单点）；②
+ * pickAttachSession 纯逻辑；③ attachMain 前置闸四道（复盘 #31——全部
+ * return 1 无 TTY 依赖，对真 mini HTTP server 可测）。闸后 TUI 段有 TTY
+ * 结构性依赖，不在本文件面。
  */
 
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
-import { createApprovalAnswerer, pickAttachSession } from './attach-main.js';
+import { attachMain, createApprovalAnswerer, pickAttachSession } from './attach-main.js';
 import type { WebuiPendingApproval, WebuiSessionSummary } from '../webui/index.js';
+import { daemonDirOf, daemonStatePath, daemonTokenPath } from './daemon-state.js';
 
 /** 最小审批卡（应答器只读 summary/reason/ownership/suggestedEntry 四面） */
 function makeApproval(overrides: Partial<WebuiPendingApproval> = {}): WebuiPendingApproval {
@@ -131,5 +136,115 @@ describe('pickAttachSession — 会话选择律（cwd 匹配 active 优先、无
   it('无匹配取最新 active；零 active = undefined', () => {
     expect(pickAttachSession([session({ id: 'c', cwd: '/other', updatedAt: 1 })], '/w/x')?.id).toBe('c');
     expect(pickAttachSession([session({ id: 'z', active: false, updatedAt: 50 })], '/w/x')).toBeUndefined();
+  });
+});
+
+describe('attachMain 前置闸四道（复盘 #31——return 1 面，无 TTY 依赖）', () => {
+  /** stderr 捕获（闸面错误行即断言面——TUI 段未到） */
+  function captureStderr(): { text: () => string; restore: () => void } {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    return { text: () => chunks.join(''), restore: () => spy.mockRestore() };
+  }
+
+  /** 落一份形状完整的 daemon.json（闸面只读形状——判活不在闸序）+ 可选 token */
+  function writeState(root: string, port: number, withToken: boolean): void {
+    mkdirSync(daemonDirOf(root), { recursive: true });
+    writeFileSync(
+      daemonStatePath(root),
+      JSON.stringify({ pid: 4321, processStartId: 'gate-x', bootId: 'gate-boot', port, heldSessions: [] }),
+    );
+    if (withToken) writeFileSync(daemonTokenPath(root), 'gate-token');
+  }
+
+  it('① 无 daemon.json → 1 + 未运行指引', async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'attach-gate-'));
+    const cap = captureStderr();
+    try {
+      await expect(attachMain({ dataRoot: root, cwd: '/w' })).resolves.toBe(1);
+      expect(cap.text()).toContain('daemon 未运行');
+    } finally {
+      cap.restore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('② 有 state 无 token → 1 + 重签发指引（禁 ensure 写）', async () => {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'attach-gate-'));
+    const cap = captureStderr();
+    try {
+      writeState(root, 47861, false);
+      await expect(attachMain({ dataRoot: root, cwd: '/w' })).resolves.toBe(1);
+      expect(cap.text()).toContain('token 文件缺失');
+      expect(cap.text()).toContain('daemon start');
+    } finally {
+      cap.restore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('③ 端口无监听 → 1 + 连接失败；401 → 1 + token 不符注记', async () => {
+    // 连接拒腿：先占后放一个端口（关闭即瞬时 ECONNREFUSED——不走 10s 超时）
+    const ghost = createServer();
+    await new Promise<void>((resolve) => ghost.listen(0, '127.0.0.1', resolve));
+    const port = (ghost.address() as { port: number }).port;
+    await new Promise<void>((resolve) => ghost.close(() => resolve()));
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'attach-gate-'));
+    const cap = captureStderr();
+    try {
+      writeState(root, port, true);
+      await expect(attachMain({ dataRoot: root, cwd: '/w' })).resolves.toBe(1);
+      expect(cap.text()).toContain('连接失败');
+    } finally {
+      cap.restore();
+      rmSync(root, { recursive: true, force: true });
+    }
+    // 401 腿：真 mini server 答非（token 不符面——轮换竞窗披露）
+    const server = createServer((_req, res) => {
+      res.writeHead(401, { 'content-type': 'application/json' }).end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port401 = (server.address() as { port: number }).port;
+    const root401 = mkdtempSync(join(realpathSync(tmpdir()), 'attach-gate-'));
+    const cap401 = captureStderr();
+    try {
+      writeState(root401, port401, true);
+      await expect(attachMain({ dataRoot: root401, cwd: '/w' })).resolves.toBe(1);
+      expect(cap401.text()).toContain('token 不符');
+    } finally {
+      cap401.restore();
+      rmSync(root401, { recursive: true, force: true });
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('④ 真握手 200 但零 active 会话 → 1 + 无活会话指引（真服务端形状：裸数组）', async () => {
+    // 服务端 GET /api/sessions 恒裸数组（server.ts sendJson(sessionsFor())）——
+    // 夹具必须复刻真形状（复盘 #31 连带真缺陷：listSessions 曾只认 {sessions} 壳）
+    const server = createServer((req, res) => {
+      if (req.url === '/api/sessions') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([]));
+        return;
+      }
+      res.writeHead(404).end('{}');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'attach-gate-'));
+    const cap = captureStderr();
+    try {
+      writeState(root, port, true);
+      await expect(attachMain({ dataRoot: root, cwd: '/w' })).resolves.toBe(1);
+      expect(cap.text()).toContain('无活会话可聚焦');
+    } finally {
+      cap.restore();
+      rmSync(root, { recursive: true, force: true });
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

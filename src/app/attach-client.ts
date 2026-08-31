@@ -143,18 +143,26 @@ export function fetchDaemonHealth(port: number): Promise<{ degraded?: string; ve
 }
 
 /** 会话清单（GET /api/sessions——兼作真握手：200 = token 符） */
+/**
+ * 会话清单（GET /api/sessions——attach 真握手判据 + 聚焦选择数据源）。
+ *
+ * 应答形状：**裸数组**（server.ts `sendJson(res, 200, sessionsFor())` 直出）。
+ * {sessions: [...]} 壳形作宽容位保留——夹具/未来信封升级不炸读（复盘 #31
+ * 连带真缺陷：曾只认壳形，裸数组解析为 undefined → 健康 daemon 被闸在
+ * 「真握手失败」——两回归锁见 attach-client/attach-main 测试面）。
+ */
 export function listSessions(
   port: number,
   token: string,
 ): Promise<{ status: number; sessions?: readonly WebuiSessionSummary[] } | undefined> {
-  return attachRequest({ port, token, method: 'GET', path: '/api/sessions' }).then((res) =>
-    res === undefined
-      ? undefined
-      : {
-          status: res.status,
-          sessions: (res.json as { sessions?: readonly WebuiSessionSummary[] } | undefined)?.sessions,
-        },
-  );
+  return attachRequest({ port, token, method: 'GET', path: '/api/sessions' }).then((res) => {
+    if (res === undefined) return undefined;
+    const json = res.json;
+    const sessions = Array.isArray(json)
+      ? (json as readonly WebuiSessionSummary[])
+      : (json as { sessions?: readonly WebuiSessionSummary[] } | undefined)?.sessions;
+    return { status: res.status, sessions };
+  });
 }
 
 /** 历史投影（GET /api/sessions/:id/messages——unknown[] 由消费面投影转换） */

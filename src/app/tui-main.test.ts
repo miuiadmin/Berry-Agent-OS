@@ -2,9 +2,11 @@
  * L5 app — tui-main 判据纯函数单测（daemon 刀二·P3 触达面②）。
  *
  * daemonHoldsWorkspaceSession 只测判据四分支（无工作区/无 daemon.json/判死/
- * 判活命中），不起 TUI 全栈（front.quit 无注入口——全栈面由 daemon-fullstack
- * 租约用例物证兜住）。判活判据源 = processStartId 双匹配，本进程 pid 即活体
- * （省真子进程——判据函数无 self-pid 豁免语义，谁活谁算）。
+ * 判活命中），不起 TUI 全栈（front.quit 无注入口——tuiMain P3 分支全栈面由
+ * daemon-fullstack「tuiMain P3 分支」用例子进程物证兜住：拒开 warn + 另开
+ * 新会话落库 + SIGTERM 143；横幅渲染是 pi-tui 内务不归断言面）。判活判据源
+ * = processStartId 双匹配，本进程 pid 即活体（省真子进程——判据函数无
+ * self-pid 豁免语义，谁活谁算）。
  *
  * 纪律：APP_DATA_DIR 钉临时目录（readDaemonState 走 dataDir() 缺省根），测后还原。
  */

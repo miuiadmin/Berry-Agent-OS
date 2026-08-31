@@ -46,6 +46,7 @@ import {
   daemonDoctorMain,
   daemonForegroundMain,
   detectDaemonHandshake,
+  httpProbe,
   probeStatus,
 } from './daemon.js';
 import { VERSION } from './version.js';
@@ -569,6 +570,42 @@ describe('probeStatus：headers-arrive-immediate 探针（daemon.ts 实码）', 
     const port = (server.address() as { port: number }).port;
     await new Promise<void>((resolve) => server.close(() => resolve()));
     expect(await probeStatus(`http://127.0.0.1:${port}/api/events`, {}, 500)).toBeUndefined();
+  });
+});
+
+describe('httpProbe：三腿探活（daemon.ts 实码——start/stop/doctor 三处生产缺省，复盘 #33）', () => {
+  it('正常腿：200 收体（status + body 双值——start gate 的正判形状）', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('[]'); // 真形状：GET /api/sessions 裸数组直出
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const out = await httpProbe(`http://127.0.0.1:${port}/api/sessions`, { authorization: 'Bearer t' }, 2_000);
+    expect(out).toEqual({ status: 200, body: '[]' });
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
+
+  it('超时腿：服务端悬住不应答 → 超时销毁收场 undefined（非即抛）', async () => {
+    const server = createServer(() => {
+      // 收下请求即悬住——不写头不应答（探针必须靠自身超时收场）
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const startedAt = Date.now();
+    expect(await httpProbe(`http://127.0.0.1:${port}/api/sessions`, {}, 150)).toBeUndefined();
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(140); // 等满超时窗（毫秒抖动容差）
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }, 10_000);
+
+  it('连接拒腿：端口无监听 → undefined（与超时同面——start 判死路）', async () => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    expect(await httpProbe(`http://127.0.0.1:${port}/api/sessions`, {}, 500)).toBeUndefined();
   });
 });
 

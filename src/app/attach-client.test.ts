@@ -124,7 +124,7 @@ describe('attach 微端点客户端：鉴权/直解/分诊', () => {
           res.writeHead(401).end();
           return;
         }
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ sessions: [{ id: 's1' }] }));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([{ id: 's1' }]));
         return;
       }
       if (req.path.startsWith('/api/sessions/s1/submit')) {

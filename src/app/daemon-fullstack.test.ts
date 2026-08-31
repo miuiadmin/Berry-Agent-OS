@@ -15,7 +15,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,8 @@ import type {
 } from '../contracts/llm.js';
 import { createRuntime } from './assembly.js';
 import type { AppRuntime } from './assembly.js';
-import { daemonDirOf, daemonStatePath, defaultProcessProbe } from './daemon-state.js';
+import { daemonDirOf, daemonStatePath, daemonTokenPath, defaultProcessProbe } from './daemon-state.js';
+import Database from 'better-sqlite3';
 
 /* ---------------- 测试基建 ---------------- */
 
@@ -136,6 +137,16 @@ afterEach(() => {
     if (child.exitCode === null) child.kill('SIGKILL');
   }
 });
+
+/** 崩溃快报竞速底座：子进程先死则带输出抛，不做空等（waitReady 同款形） */
+function raceChildExit<T>(wait: Promise<T>, exited: Promise<number | null>, output: () => string): Promise<T> {
+  return Promise.race([
+    wait,
+    exited.then((code) => {
+      throw new Error(`子进程提前退出（${code}）：${output()}`);
+    }),
+  ]);
+}
 
 /** 起空闲端口探针（listen 0 读回即关） */
 async function grabPort(): Promise<number> {
@@ -727,4 +738,258 @@ describe('daemon 刀二行为锁：F4 全量 reload 禁面 + armed SSE 在场不
     await waitFor(() => allSettled(rt), 8000, 'run 结算');
     sseReq.destroy();
   }, 30_000);
+});
+
+/* ---------------- 复盘 #30/#32/#35：前台环子进程 + cordon 装配线 + tuiMain P3 ---------------- */
+
+/** 前台环子进程脚本（复盘 #30）：真跑 daemonForegroundMain——acquire → 常驻 → 退出码落 exitFile */
+const FOREGROUND_CHILD_SCRIPT = `
+import { writeFileSync } from 'node:fs';
+const cfg = JSON.parse(process.argv[process.argv.length - 1]);
+const { daemonForegroundMain } = await import(cfg.daemonPath);
+daemonForegroundMain(cfg.port, { dataRoot: cfg.dataRoot }).then(
+  (code) => { writeFileSync(cfg.exitFile, String(code)); process.exit(code); },
+  (err) => { writeFileSync(cfg.exitFile, 'ERR ' + (err?.stack ?? String(err))); process.exit(1); },
+);
+`;
+
+/** tuiMain 子进程脚本（复盘 #35）：真跑生产 TUI 入口——P3 横幅渲染在 stdout、退出码落 exitFile。
+ * 模型层桩不进 cfg（函数不可序列化）：横幅在 boot 期、无 run 发生，streamFn 零调用——空流桩够形。 */
+const TUI_CHILD_SCRIPT = `
+import { writeFileSync } from 'node:fs';
+const cfg = JSON.parse(process.argv[process.argv.length - 1]);
+const { tuiMain } = await import(cfg.tuiMainPath);
+const streamFn = async () => ({ async *[Symbol.asyncIterator]() {} });
+tuiMain({ dbPath: cfg.dbPath, workspace: cfg.workspace, streamFn }).then(
+  (code) => { writeFileSync(cfg.exitFile, String(code)); process.exit(code); },
+  (err) => { writeFileSync(cfg.exitFile, 'ERR ' + (err?.stack ?? String(err))); process.exit(1); },
+);
+`;
+
+describe('daemon 前台环与 cordon 装配线（复盘 #30/#32/#35）', () => {
+  it('daemonForegroundMain 前台环：acquire 落账 → heldSessions 随 open 重写 → SIGTERM 优雅退 → release 清账', async () => {
+    const workspace = makeWorkspace();
+    const port = await grabPort();
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-fg-child-'));
+    const scriptPath = join(dir, 'fg.mts');
+    writeFileSync(scriptPath, FOREGROUND_CHILD_SCRIPT);
+    const exitFile = join(dir, 'exit');
+    // 子进程真跑生产前台主循环（berry daemon start spawn 的目标形态）——cwd 钉
+    // 临时工作区，APP_DATA_DIR 继承本文件钉扎的 dataRoot（G1 教训：不碰真 ~/.berry）
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
+        scriptPath,
+        JSON.stringify({
+          port,
+          dataRoot,
+          exitFile,
+          daemonPath: fileURLToPath(new URL('./daemon.ts', import.meta.url)),
+        }),
+      ],
+      { env: { ...process.env, APP_LOG_LEVEL: 'warn' }, stdio: ['ignore', 'pipe', 'pipe'], cwd: workspace },
+    );
+    children.push(child);
+    const out: string[] = [];
+    child.stdout.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => out.push(chunk));
+    const errOut: string[] = [];
+    child.stderr.setEncoding('utf-8');
+    child.stderr.on('data', (chunk: string) => errOut.push(chunk));
+    const exited = new Promise<number | null>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve(child.exitCode);
+      else child.once('exit', (code) => resolve(code));
+    });
+    const output = () => out.join('') + errOut.join('');
+
+    // ① acquire 落账 + webui 起面：daemon.json/token 在场 + health 200
+    await raceChildExit(
+      waitFor(
+        () => existsSync(daemonStatePath(dataRoot)) && existsSync(daemonTokenPath(dataRoot)),
+        20_000,
+        '前台 boot 落账',
+      ),
+      exited,
+      output,
+    );
+    const token = readFileSync(daemonTokenPath(dataRoot), 'utf8').trim();
+    await raceChildExit(
+      waitFor(
+        async () => {
+          try {
+            return (await fetch(`http://127.0.0.1:${port}/api/health`)).ok;
+          } catch {
+            return false; // 未监听即 ECONNREFUSED——轮询继续（不炸等待底座）
+          }
+        },
+        10_000,
+        'health 就绪',
+      ),
+      exited,
+      output,
+    );
+    // ② 真握手正判（生产判据同源）：GET /api/sessions 带 Bearer → 200 裸数组
+    const auth = { authorization: `Bearer ${token}` };
+    expect((await getJson(port, '/api/sessions', auth)).status).toBe(200);
+    // ③ heldSessions 随 open 重写（syncHeldSessions 闭包——onEntriesChange 驱动）：POST 开新 → daemon.json 持有集含新 id
+    const opened = (await post(port, '/api/sessions', {}, auth)).body as { id: string };
+    await raceChildExit(
+      waitFor(
+        () => {
+          const state = JSON.parse(readFileSync(daemonStatePath(dataRoot), 'utf8')) as { heldSessions: string[] };
+          return state.heldSessions.includes(opened.id);
+        },
+        8_000,
+        'heldSessions 同步',
+      ),
+      exited,
+      output,
+    );
+    // ④ SIGTERM 优雅退：退出码 143（信号记账）+ releaseDaemonState 清账（daemon.json 消失）
+    child.kill('SIGTERM');
+    expect(await exited).toBe(143);
+    await waitFor(() => !existsSync(daemonStatePath(dataRoot)), 5_000, 'release 清账');
+  }, 60_000);
+
+  it('cordon 装配线（D6 端到端）：write-behind 批落撞锁失败 → cordoned 闩 → health degraded + submit 503', async () => {
+    const dbPath = join(dbDir, 'cordon.db');
+    const port = await grabPort();
+    const token = 'fs-token-cordon';
+    const rt = await createRuntime({
+      ...daemonOpts({
+        dbPath,
+        streamFn: scriptedStream([textMessage('ok')]),
+        approvalTimeoutMs: 300_000,
+      }),
+      daemon: { token, port },
+    });
+    runtimes.push(rt);
+    const auth = { authorization: `Bearer ${token}` };
+    const sessions = (await getJson(port, '/api/sessions', auth)).body as { id: string; active: boolean }[];
+    const sid = sessions.find((s) => s.active)!.id;
+    await rt.persistence!.flush(); // 屏障：boot 批全落——锁库前库静（失败只归因 submit 批）
+    expect((await getJson(port, '/api/health', {})).body).not.toHaveProperty('degraded');
+
+    // 他连接持写锁（BEGIN IMMEDIATE 即占 WAL 写者位）——runtime 批落必然
+    // SQLITE_BUSY → PERSIST_BATCH_WRITE_FAILED → onError（assembly.ts:627）→
+    // cordoned 闩（:1578 webui deps 消费）。主连接 busy_timeout 先经公开
+    // connection 缝缩到 150ms：实测定档 5s 时单次写尝试在 WAL 多段锁下实堵
+    // ~10.5s、submit 后失败链串到 ~70s——缩档不改变 busy 语义（真锁竞争、
+    // 真失败路径全保），只把等待时长缩进测试量级（整链 ~1s 内落闩）
+    rt.persistence!.store.connection.pragma('busy_timeout = 150');
+    const lock = new Database(dbPath);
+    lock.pragma('busy_timeout = 100');
+    lock.exec('BEGIN IMMEDIATE');
+    try {
+      expect((await post(port, `/api/sessions/${sid}/submit`, { text: 'x' }, auth)).status).toBe(202);
+      // 失败链时长 ≈ 200ms 批窗 + 150ms busy 等待——10s 帽宽裕覆盖
+      await waitFor(
+        async () => 'degraded' in ((await getJson(port, '/api/health', {})).body as object),
+        10_000,
+        'cordon 闩落 → health degraded',
+      );
+      // 写意图面拒收（D6 拒面——server.ts 直翻 deps.cordoned() 的真消费）
+      expect((await post(port, `/api/sessions/${sid}/submit`, { text: 'y' }, auth)).status).toBe(503);
+    } finally {
+      lock.exec('ROLLBACK'); // better-sqlite3 无 .rollback() 方法——SQL 直发
+      lock.close();
+    }
+    // 关停（afterEach）走 close() 显式重试：锁已放，保留批补落——干净关停不挂
+  }, 30_000);
+
+  it('tuiMain P3 分支（复盘 #35）：daemon 持有本工作区会话 → 起屏横幅改道指引 + 另开新会话不拒启 + SIGTERM 143', async () => {
+    const dbPath = join(dbDir, 'p3-tui.db');
+    const workspace = makeWorkspace();
+    // 种子 boot A：落一个本工作区会话后关停（flush 后为该 cwd 最新——子进程续接目标）
+    const rtA = await createRuntime({
+      dbPath,
+      workspace,
+      interactive: false,
+      resumeSession: true,
+      streamFn: scriptedStream([textMessage('a')]),
+    });
+    const sid = [...rtA.drivers.entries.values()].find((e) => !e.retired)!.session.header.sessionId;
+    await rtA.shutdown();
+
+    // 活持有者 + daemon.json（判活判据源 = processStartId 双匹配——④ 租约用例同款）
+    const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+    children.push(holder);
+    const startId = defaultProcessProbe.startId(holder.pid!)!;
+    mkdirSync(daemonDirOf(dataRoot), { recursive: true });
+    writeFileSync(
+      daemonStatePath(dataRoot),
+      JSON.stringify({ pid: holder.pid!, processStartId: startId, bootId: 'p3-boot', port: 1, heldSessions: [sid] }),
+    );
+
+    // 子进程真跑 tuiMain（生产 TUI 入口）：stdin pipe 不关不 EOF（关了会提前
+    // 触发输入收场），横幅经 pi-tui headless 渲染到 stdout——输出即断言面
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), 'daemon-p3-tui-'));
+    writeFileSync(join(dir, 'tui.mts'), TUI_CHILD_SCRIPT);
+    const exitFile = join(dir, 'exit');
+    const child = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
+        join(dir, 'tui.mts'),
+        JSON.stringify({
+          dbPath,
+          workspace,
+          exitFile,
+          tuiMainPath: fileURLToPath(new URL('./tui-main.ts', import.meta.url)),
+        }),
+      ],
+      { env: { ...process.env, APP_LOG_LEVEL: 'warn' }, stdio: ['pipe', 'pipe', 'pipe'], cwd: workspace },
+    );
+    children.push(child);
+    const out: string[] = [];
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => out.push(chunk));
+    const errOut: string[] = [];
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => errOut.push(chunk));
+    const exited = new Promise<number | null>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve(child.exitCode);
+      else child.once('exit', (code) => resolve(code));
+    });
+    const output = () => out.join('') + errOut.join('');
+
+    // ① 拒开物证：boot warn 落 stderr（chat 件 open 撞 heldElsewhere 的响亮留痕）
+    await raceChildExit(
+      waitFor(() => errOut.join('').includes('被 daemon 持有'), 20_000, 'boot 拒开 warn'),
+      exited,
+      output,
+    );
+    // ② P3 分支体物证：另开新会话——同 cwd 会话行从 1 变 2（横幅文案走 notify
+    // 进 TUI 滚动区，渲染是 pi-tui 内务、管道伪环境不可断言；分支执行的落库
+    // 副作用是行为级真相——与起屏历史同容器同渲染路径，真终端可见性由历史
+    // 渲染日常使用背书）
+    await raceChildExit(
+      waitFor(
+        () => {
+          // 只读探针句柄即开即关——轮询多轮不堆积（better-sqlite3 句柄不归 GC 管）
+          const probe = new Database(dbPath);
+          try {
+            const rows = probe.prepare('SELECT COUNT(*) AS n FROM sessions WHERE cwd = ?').get(workspace) as {
+              n: number;
+            };
+            return rows.n >= 2;
+          } finally {
+            probe.close();
+          }
+        },
+        20_000,
+        'P3 另开新会话落库',
+      ),
+      exited,
+      output,
+    );
+    // ③ SIGTERM 优雅退：143（signals 编舞退出码——TUI 入口与前台环同表）。
+    // 此步不竞速 exited——退出是预期收场非崩溃（竞速会把 25ms 轮询窗里的
+    // exitFile 落盘误报成「提前退出」，全量并行跑时实测踩中）
+    child.kill('SIGTERM');
+    expect(await exited).toBe(143);
+    await waitFor(() => existsSync(exitFile), 5_000, '退出码落盘'); // 落盘先于 exit——快照窗口兜底
+    expect(readFileSync(exitFile, 'utf8')).toBe('143');
+  }, 45_000);
 });
