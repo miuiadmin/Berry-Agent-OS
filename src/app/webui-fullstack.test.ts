@@ -166,7 +166,7 @@ function openSse(port: number, frames: WebuiSseEnvelope[]): { close(): void; raw
 async function waitForFrame(
   frames: WebuiSseEnvelope[],
   pred: (envelope: WebuiSseEnvelope) => boolean,
-  timeoutMs = 5000,
+  timeoutMs = 15_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -176,8 +176,8 @@ async function waitForFrame(
   throw new Error(`SSE 帧等待超时（已收 ${frames.length} 帧）：${JSON.stringify(frames.slice(0, 10))}`);
 }
 
-/** 等待谓词成立（25ms 轮询；谓词可异步——SSE 帧计数与 GET 轮询共用底座） */
-async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 5000, what = '条件'): Promise<void> {
+/** 等待谓词成立（25ms 轮询；谓词可异步——SSE 帧计数与 GET 轮询共用底座；缺省帽与外层 testTimeout 同宽：并行负载下 5s 帽会先于条件达成本身触顶——2026-09-01 存量 flake 勘正） */
+async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 15_000, what = '条件'): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (await pred()) return;

@@ -22,5 +22,11 @@ export default defineConfig({
       'tools/check-events.test.mjs',
     ],
     environment: 'node',
+    // per-test 时限 5s → 15s（2026-09-01 存量负载 flake 勘正）：全量 16 worker
+    // 并行下重载全栈用例（webui-fullstack / chat 打断族）壁钟可超 5s——HEAD
+    // stash 对照实证存量（无改动同红 5007ms 级）；上限放大只影响真挂死的报红
+    // 时延，不动任何行为断言。内层等待（waitFor/spin）各自的窄帽先红，外层
+    // 15s 是兜底不是常态路径。
+    testTimeout: 15_000,
   },
 });

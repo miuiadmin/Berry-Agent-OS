@@ -960,9 +960,11 @@ describe('interrupt 小刀（run 信号透传 ask 链——审批在身时打断
    */
   // 真时序等待（ask 管道跨 durable 落账 + UI 派发，微任务够不着）：5ms 步进，
   // 上限 3s——原 200 步 ≈1s 帽在满负载套件下偶发超窗（2026-08-31 全量跑两例
-  // interrupt 时序 flake 实证）；真挂死仍会触顶红（3s 内不达即 unreachable）
+  // interrupt 时序 flake 实证）；真挂死仍会触顶红（3s 内不达即 unreachable）。
+  // 2026-09-01 再宽：3s → 6s（1200 步）——全量并行下 (ii) 3152ms 触顶实证
+  // （HEAD stash 对照存量）；外层 testTimeout 已同步 15s（vitest.config）。
   const spinUntilReal = async (predicate: () => boolean, what: string): Promise<void> => {
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < 1200; i++) {
       if (predicate()) return;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
