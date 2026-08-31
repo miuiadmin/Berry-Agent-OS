@@ -2,7 +2,7 @@
 /**
  * 事件目录双向校验器（契约篇 §6.3 第 4 条——必须在应用加载器上线前就位）。
  *
- * 三族断言，方向都是双向（目录 ↔ src 派发/写点）：
+ * 五族断言，方向都是双向（族 1-4 = 目录 ↔ src 派发/写点；族 5 = 目录 ↔ 公开文档镜像）：
  *
  * 1. 总线活体事件（LIVE_EVENT_CATALOG，contracts 运行时目录）：
  *    - 非 reserved 目录项 ≥1 个宿主派发点（emit/waterfall/parallel/serial 调用；
@@ -18,6 +18,12 @@
  *    - 联合字面量成员 ⊆ 目录名集（类型面不承认目录外词汇）；
  *    - 目录名集 ⊆ 联合字面量成员（目录新增名忘进联合 CI 即红）。
  *    （(string & {}) 逃生口不参与——它保住「自定义事件显式注册」的字符串面。）
+ * 5. 公开面镜像对照（契约篇 §6.3#4 第五族，2026-08-31 第四十三批）：
+ *    - docs/应用开发指南「活体总线词汇速览」表：词集 ≡ 总线目录名集 +
+ *      标题计数/层括号计数和对照（提取锚 = 以 | 起头的表格行内反引号词）；
+ *    - docs/架构总览「事件系统」表三行计数（项/型/类）≡ 三目录真值；
+ *    - 锚标题缺失或不唯一 = 违规（fail-loud，禁静默跳过——锚失效的假绿
+ *      比无门禁更危险；两张表是对应用作者的词汇承诺面，改版须同 commit 同步锚）。
  *
  * 已知豁免（显式，不静默）：
  * - 动态 append（recoverFromInterruption 的 closer.type——静态不可解析）：
@@ -300,6 +306,102 @@ for (const entry of liveCatalog) {
   }
 }
 
+// ---- 族 5：公开面镜像对照（契约篇 §6.3#4 第五族，2026-08-31 第四十三批） ----
+// 代码目录 ↔ 公开文档两张镜像表。提取锚 fail-loud：锚标题缺失/不唯一即违规——
+// 锚失效的假绿比无门禁更危险；两张表是对应用作者的词汇承诺面，改版须同
+// commit 同步锚。防漂路线 = 对照执法而非生成展示性工件（生成丢手写语义注）。
+{
+  /** 截取文档中锚标题到下一个同级标题的区域；锚缺失/不唯一 = 违规并返回 null */
+  const docSection = (source, relPath, heading) => {
+    const first = source.indexOf(heading);
+    if (first === -1) {
+      v(
+        `[镜像] ${relPath}：锚标题「${heading}」缺失——对照锚 fail-loud（文档改版须同 commit 同步门禁锚，契约篇 §6.3#4 第五族）`,
+      );
+      return null;
+    }
+    if (source.indexOf(heading, first + heading.length) !== -1) {
+      v(`[镜像] ${relPath}：锚标题「${heading}」不唯一——对照锚须全文档唯一命中`);
+      return null;
+    }
+    // 从锚标题之后找下一个行首标题（##/###），截到那里；文件尾则截到末尾
+    const rest = source.slice(first + heading.length);
+    const next = rest.search(/^#{2,3} /m);
+    return next === -1 ? source.slice(first) : source.slice(first, first + heading.length + next);
+  };
+
+  // ① 应用开发指南「活体总线词汇速览」表：词集双向 + 标题计数 + 层括号计数和
+  {
+    const relPath = join('docs', '应用开发指南.md');
+    const section = docSection(readFileSync(join(ROOT, relPath), 'utf8'), relPath, '### 活体总线词汇速览');
+    if (section) {
+      // 词集提取锚 = 以 | 起头的表格行内反引号词（过词汇格式正则滤掉 `next()`/
+      // `ctx.on` 型非词汇）——钉死表格行识别防注行 `on/emit` 型杂质混入（冷读 #6）
+      const docWords = new Set();
+      let layerSum = 0;
+      for (const line of section.split('\n')) {
+        if (!line.startsWith('|')) continue;
+        for (const m of line.matchAll(/`([^`]+)`/g)) {
+          if (EVENT_NAME_FORMAT.test(m[1])) docWords.add(m[1]);
+        }
+        // 层括号计数在首列（如「| 会话（3） |」全角括号）——层分组是编辑视角非
+        // 契约，和数断言只防「加词忘改层括号」主事故形态（冷读 #7）
+        const firstCell = line.split('|')[1] ?? '';
+        const layerCount = firstCell.match(/（(\d+)）/);
+        if (layerCount) layerSum += Number(layerCount[1]);
+      }
+      const catalogNames = new Set(liveCatalog.map((e) => e.name));
+      for (const word of docWords) {
+        if (!catalogNames.has(word)) {
+          v(`[镜像] ${relPath} 速览表收录目录外词汇「${word}」——幽灵词（R5 事故型），目录是真源`);
+        }
+      }
+      for (const entry of liveCatalog) {
+        if (!docWords.has(entry.name)) {
+          v(`[镜像] 总线目录事件「${entry.name}」未进 ${relPath} 速览表——漏项（全目录承诺，reserved 词同在集内）`);
+        }
+      }
+      // 标题计数「N 词全目录」≡ 名集大小；层括号计数和 ≡ 标题计数
+      const titleMatch = section.match(/(\d+)\s*词全目录/);
+      if (!titleMatch) {
+        v(`[镜像] ${relPath} 速览表标题计数「N 词全目录」锚缺失——fail-loud`);
+      } else {
+        const titleCount = Number(titleMatch[1]);
+        if (titleCount !== catalogNames.size) {
+          v(`[镜像] ${relPath} 速览表标题计数 ${titleCount} ≠ 总线目录 ${catalogNames.size} 词——计数漂移`);
+        }
+        if (layerSum !== titleCount) {
+          v(`[镜像] ${relPath} 速览表层括号计数和 ${layerSum} ≠ 标题计数 ${titleCount}——层间分组漂移`);
+        }
+      }
+    }
+  }
+
+  // ② 架构总览「事件系统」表：三行计数（项/型/类）≡ 三目录真值，各恰一次命中
+  {
+    const relPath = join('docs', '架构总览.md');
+    const section = docSection(readFileSync(join(ROOT, relPath), 'utf8'), relPath, '## 4. 事件系统');
+    if (section) {
+      const countChecks = [
+        ['总线词汇量（项）', /(\d+)\s*项/g, liveCatalog.length],
+        ['AgentEvent（型）', /(\d+)\s*型/g, agentUnion.size],
+        ['SessionEvent（类）', /(\d+)\s*类/g, sessionCatalog.length],
+      ];
+      for (const [label, pattern, truth] of countChecks) {
+        const hits = [...section.matchAll(pattern)];
+        if (hits.length !== 1) {
+          v(`[镜像] ${relPath} 事件表「${label}」计数锚命中 ${hits.length} 次（须恰一次）——表结构漂移 fail-loud`);
+          continue;
+        }
+        const stated = Number(hits[0][1]);
+        if (stated !== truth) {
+          v(`[镜像] ${relPath} 事件表「${label}」写 ${stated}，代码真值 ${truth}——计数漂移（R5 事故型）`);
+        }
+      }
+    }
+  }
+}
+
 // ---- 汇总 ----
 if (violations.length > 0) {
   console.error(`check-events：${violations.length} 处目录/派发点漂移`);
@@ -307,5 +409,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-events ✓ 总线 ${liveCatalog.length} 项 / AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量，四族双向一致`,
+  `check-events ✓ 总线 ${liveCatalog.length} 项 / AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量，五族双向一致（含公开面镜像）`,
 );
