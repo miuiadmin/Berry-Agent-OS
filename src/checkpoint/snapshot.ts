@@ -26,6 +26,7 @@ import {
   sweepOrphanBlobs,
   deleteManifest,
   type CheckpointManifest,
+  type ManifestInventory,
 } from './store.js';
 
 /** 硬剪枝表（与检索族 PRUNE_DIRS 同值——node_modules/.git 永不可入快照：装机物与 git 对象体量毁快照面；exclude 配置在此之上叠加） */
@@ -274,21 +275,29 @@ export function prunePlan(
 }
 
 /**
- * 执行裁剪：删 manifest + 全量引用计数清孤 blob（幸存 = all ∖ drop）。
+ * 执行裁剪：删 manifest + 全量引用计数清孤 blob（幸存 = 活集 ∖ drop）。
  * 捕获后单入口调用（不设第二触发点）。
+ *
+ * 清孤保护（复盘 E-1，会话篇 §5.3 裁剪条勘正）：清单视图存在损坏 manifest
+ * 时本轮清孤整体跳过——不可解析 manifest 的 blob 引用面不可知，「解析失败」
+ * 不得等价于「可删」（否则每次捕获必触发的裁剪把损坏从「一条快照不可见」
+ * 升格为「快照数据被永久销毁」）。保护代价如实承受：孤儿 blob 暂留、软帽
+ * 可超，直至损坏文件人工处置（读侧 warn 每次捕获重申）；manifest 删除照常
+ * 执行（活集内的正常裁剪与损坏保护正交）。
  */
 export async function executePrune(
   dataRoot: string,
-  all: readonly CheckpointManifest[],
+  inventory: ManifestInventory,
   drop: readonly CheckpointManifest[],
 ): Promise<void> {
   const dropped = new Set(drop.map((m) => m.id));
   for (const m of drop) {
     await deleteManifest(dataRoot, m.sessionId, m.id);
   }
+  if (inventory.corruptFiles.length > 0) return; // 清孤保护模式（解析失败 ≠ 可删）
   await sweepOrphanBlobs(
     dataRoot,
-    all.filter((m) => !dropped.has(m.id)),
+    inventory.manifests.filter((m) => !dropped.has(m.id)),
   );
 }
 

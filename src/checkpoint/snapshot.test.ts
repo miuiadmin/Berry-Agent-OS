@@ -11,7 +11,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureSnapshot, executePrune, prunePlan, type PruneOptions } from './snapshot.js';
-import { hashContent, listSessionManifests, readBlob, type CheckpointManifest } from './store.js';
+import {
+  hashContent,
+  listAllManifests,
+  listSessionManifests,
+  manifestPath,
+  readBlob,
+  type CheckpointManifest,
+} from './store.js';
 
 /** 临时根（工作区 + 数据根各一子目录；结束后整体清除） */
 let root: string;
@@ -229,7 +236,7 @@ describe('executePrune：删 manifest + 引用计数清孤 blob', () => {
       // 裁剪：每会话只保 1 条（最新 m3）
       const drop = prunePlan(all, opts(1, 1e9), new Set(['sess-prune']));
       expect(drop.map((m) => m.id).sort()).toEqual([m1.id, m2.id].sort());
-      await executePrune(store, all, drop);
+      await executePrune(store, await listAllManifests(store), drop);
       // manifest 面：只剩 m3
       const survivors = await listSessionManifests(store, 'sess-prune');
       expect(survivors.map((m) => m.id)).toEqual([m3.id]);
@@ -237,6 +244,43 @@ describe('executePrune：删 manifest + 引用计数清孤 blob', () => {
       const hashV3 = hashContent(Buffer.from('v3-longest', 'utf8'));
       await expect(readBlob(store, hashV3)).resolves.toBeTruthy();
       const hashV1 = hashContent(Buffer.from('v1', 'utf8'));
+      await expect(readBlob(store, hashV1)).rejects.toThrow();
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(store, { recursive: true, force: true });
+    }
+  });
+
+  it('清孤保护（复盘 E-1 回归锁）：损坏 manifest 在场 = 弃项独占 blob 不清扫；处置后恢复清孤', async () => {
+    const ws = join(root, 'ws-prot');
+    const store = join(root, 'store-prot');
+    mkdirSync(ws, { recursive: true });
+    try {
+      const snap = (sessionId: string) =>
+        captureSnapshot(
+          { dataRoot: store, workspaceRoot: ws, exclude: ['node_modules/', '.git/'] },
+          { sessionId, triggerTool: 'write', guard: false, forkSeq: null, triggerText: null },
+        );
+      // 两连拍：v1 → v2（v1 blob 只被旧 manifest 独占引用）
+      writeFileSync(join(ws, 'a.txt'), 'prot-v1', 'utf8');
+      const m1 = await snap('sess-prot');
+      await tick();
+      writeFileSync(join(ws, 'a.txt'), 'prot-v2-longer', 'utf8');
+      await snap('sess-prot');
+      const hashV1 = hashContent(Buffer.from('prot-v1', 'utf8'));
+      // 混入损坏 manifest 文件（截断 JSON——损坏账非空）
+      writeFileSync(manifestPath(store, 'sess-prot', 'cp-rot00001'), '{ 截断残留');
+      const inventory = await listAllManifests(store);
+      expect(inventory.corruptFiles).toHaveLength(1);
+      // 裁剪掉 m1：损坏在场 → manifest 照删但 v1 独占 blob 必须幸存（保护模式——
+      // 修复前此处红：清孤把损坏 manifest 引用面外的 blob 一律当孤儿销毁）
+      await executePrune(store, inventory, prunePlan(inventory.manifests, opts(1, 1e9), new Set(['sess-prot'])));
+      await expect(readBlob(store, hashV1)).resolves.toBeTruthy();
+      // 人工处置（删除损坏文件）后：保护解除，下轮清孤恢复正常（v1 blob 此刻成真孤儿）
+      rmSync(manifestPath(store, 'sess-prot', 'cp-rot00001'));
+      const clean = await listAllManifests(store);
+      expect(clean.corruptFiles).toHaveLength(0);
+      await executePrune(store, clean, []);
       await expect(readBlob(store, hashV1)).rejects.toThrow();
     } finally {
       rmSync(ws, { recursive: true, force: true });

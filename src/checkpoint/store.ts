@@ -19,6 +19,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, writeFile, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { AppLogger } from '../contracts/app.js';
 
 /** 单文件入快照上限（8 MiB——超限跳过并记入 manifest `skipped` 披露） */
 export const MAX_SNAPSHOT_FILE_BYTES = 8 * 1024 * 1024;
@@ -135,61 +136,92 @@ export async function deleteManifest(dataRoot: string, sessionId: string, id: st
   await rm(manifestPath(dataRoot, sessionId, id), { force: true });
 }
 
-/** 解析 manifest 文件（形状窄校验——损坏文件跳过不炸清单：返回 undefined） */
-function parseManifest(raw: string, file: string): CheckpointManifest | undefined {
+/**
+ * 解析 manifest 文件（形状窄校验——损坏文件跳过不炸清单：返回 undefined）。
+ * 损坏必 warn 点名落痕（复盘 E-1）：该快照从 /rewind 清单消失必须有痕——
+ * 静默消失 + 随后清孤销毁 blob = 数据面不可审计的永久丢失。
+ */
+function parseManifest(raw: string, file: string, logger?: Pick<AppLogger, 'warn'>): CheckpointManifest | undefined {
   try {
     const obj = JSON.parse(raw) as Partial<CheckpointManifest>;
-    if (
-      typeof obj.id !== 'string' ||
-      typeof obj.sessionId !== 'string' ||
-      typeof obj.time !== 'number' ||
-      typeof obj.triggerTool !== 'string' ||
-      typeof obj.guard !== 'boolean' ||
-      !Array.isArray(obj.files)
-    ) {
-      return undefined;
-    }
-    return obj as CheckpointManifest;
+    const shapeOk =
+      typeof obj.id === 'string' &&
+      typeof obj.sessionId === 'string' &&
+      typeof obj.time === 'number' &&
+      typeof obj.triggerTool === 'string' &&
+      typeof obj.guard === 'boolean' &&
+      Array.isArray(obj.files);
+    if (shapeOk) return obj as CheckpointManifest;
+    // 形状不符（缺必填字段）——落到统一损坏出口
   } catch {
-    // 单文件损坏（截断/半写历史遗留）不拖垮整个清单面——跳过并让上层日志可见
-    return undefined;
+    // JSON.parse 失败（截断/半写历史遗留）——落到统一损坏出口
   }
+  // 统一损坏出口：单文件损坏不拖垮清单面，但损坏本身必须可见（复盘 E-1——
+  // 该快照不可回退，且本轮清孤将进入保护模式）
+  logger?.warn(`checkpoint manifest 损坏（跳过，该快照不可回退）：${file}`);
+  return undefined;
 }
 
-/** 读单会话全部 manifest（时间降序——/rewind 清单与 latest 取用）；目录缺失 = 空数组 */
-export async function listSessionManifests(dataRoot: string, sessionId: string): Promise<CheckpointManifest[]> {
+/** 单会话目录读取共核：活集（时间降序）+ 损坏文件名账（复盘 E-1——损坏账驱动清孤保护） */
+async function readSessionDir(
+  dataRoot: string,
+  sessionId: string,
+  logger?: Pick<AppLogger, 'warn'>,
+): Promise<{ manifests: CheckpointManifest[]; corrupt: string[] }> {
   const dir = join(dataRoot, 'manifests', sessionId);
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
-    return []; // 会话从未拍过快照
+    return { manifests: [], corrupt: [] }; // 会话从未拍过快照
   }
   const manifests: CheckpointManifest[] = [];
+  const corrupt: string[] = [];
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
-    const parsed = parseManifest(await readFile(join(dir, name), 'utf8'), name);
+    const parsed = parseManifest(await readFile(join(dir, name), 'utf8'), name, logger);
     if (parsed !== undefined) manifests.push(parsed);
+    else corrupt.push(`${sessionId}/${name}`); // 会话前缀相对名（warn 与损坏账同源键）
   }
   // 时间降序；同 time（毫秒粒度并发）以 id 字典序稳定化
   manifests.sort((a, b) => b.time - a.time || (a.id < b.id ? -1 : 1));
-  return manifests;
+  return { manifests, corrupt };
 }
 
-/** 读全部会话全部 manifest（prune 面——跨会话 oldest-first 需要全局视图） */
-export async function listAllManifests(dataRoot: string): Promise<CheckpointManifest[]> {
+/** 读单会话全部 manifest（时间降序——/rewind 清单与 latest 取用）；目录缺失 = 空数组 */
+export async function listSessionManifests(
+  dataRoot: string,
+  sessionId: string,
+  logger?: Pick<AppLogger, 'warn'>,
+): Promise<CheckpointManifest[]> {
+  return (await readSessionDir(dataRoot, sessionId, logger)).manifests;
+}
+
+/** 全局清单视图（prune 消费面，复盘 E-1）：活集 + 损坏账——损坏非空即清孤保护模式 */
+export interface ManifestInventory {
+  /** 解析成功的活集（prunePlan 输入） */
+  readonly manifests: readonly CheckpointManifest[];
+  /** 损坏 manifest 文件（会话前缀相对名）——非空即本轮清孤整体跳过（解析失败 ≠ 可删） */
+  readonly corruptFiles: readonly string[];
+}
+
+/** 读全部会话全部 manifest（prune 面——跨会话 oldest-first 需要全局视图 + 损坏账） */
+export async function listAllManifests(dataRoot: string, logger?: Pick<AppLogger, 'warn'>): Promise<ManifestInventory> {
   const root = join(dataRoot, 'manifests');
   let sessionIds: string[];
   try {
     sessionIds = await readdir(root);
   } catch {
-    return [];
+    return { manifests: [], corruptFiles: [] };
   }
-  const all: CheckpointManifest[] = [];
+  const manifests: CheckpointManifest[] = [];
+  const corruptFiles: string[] = [];
   for (const sessionId of sessionIds) {
-    all.push(...(await listSessionManifests(dataRoot, sessionId)));
+    const view = await readSessionDir(dataRoot, sessionId, logger);
+    manifests.push(...view.manifests);
+    corruptFiles.push(...view.corrupt);
   }
-  return all;
+  return { manifests, corruptFiles };
 }
 
 /**

@@ -137,8 +137,29 @@ describe('损坏 manifest 跳过不炸', () => {
     expect(list[0]!.id).toBe(good.id); // 单文件损坏不拖垮清单面
     // 跨会话视图同律（listAllManifests 复用同一解析路径）
     const all = await listAllManifests(dataRoot);
-    expect(all.some((m) => m.id === 'cp-bad00001')).toBe(false);
-    expect(all.some((m) => m.id === good.id)).toBe(true);
+    expect(all.manifests.some((m) => m.id === 'cp-bad00001')).toBe(false);
+    expect(all.manifests.some((m) => m.id === good.id)).toBe(true);
+  });
+
+  it('损坏文件 warn 点名落痕（复盘 E-1 回归锁：静默消失 = 数据面不可审计）', async () => {
+    await writeManifest(dataRoot, makeManifest({ sessionId: 'sess-warn' }));
+    writeFileSync(manifestPath(dataRoot, 'sess-warn', 'cp-warn0001'), '{ 截断');
+    const warns: string[] = [];
+    await listSessionManifests(dataRoot, 'sess-warn', { warn: (msg) => warns.push(msg) });
+    // 损坏文件点名（文件名进消息——操作者据此人工处置）；合法项不产 warn
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('cp-warn0001');
+    expect(warns[0]).toContain('损坏');
+  });
+
+  it('全局清单视图携带损坏账（复盘 E-1 回归锁：损坏非空驱动清孤保护）', async () => {
+    await writeManifest(dataRoot, makeManifest({ sessionId: 'sess-invent' }));
+    writeFileSync(manifestPath(dataRoot, 'sess-invent', 'cp-inv00001'), 'garbage');
+    const inventory = await listAllManifests(dataRoot);
+    expect(inventory.corruptFiles).toContain('sess-invent/cp-inv00001.json');
+    // 合法活集不含损坏项（保护判据与活集正交）；损坏账键 = 会话前缀相对名
+    expect(inventory.manifests.some((m) => m.id.startsWith('cp-inv'))).toBe(false);
+    expect(inventory.corruptFiles.every((f) => f.includes('/'))).toBe(true);
   });
 });
 

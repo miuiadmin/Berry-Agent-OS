@@ -221,10 +221,12 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
             guard,
           });
         }
-        // 顺手裁剪（单入口不设第二触发点——捕获后即裁；失败 warn 下次重试）
+        // 顺手裁剪（单入口不设第二触发点——捕获后即裁；失败 warn 下次重试）。
+        // 清单视图携带损坏账（复盘 E-1）：损坏文件非空即本轮清孤保护跳过
+        //（解析失败 ≠ 可删）；损坏面在读侧 warn 点名（logger 传入）
         try {
-          const all = await listAllManifests(dataRoot);
-          await executePrune(dataRoot, all, prunePlan(all, cfg, deps.activeSessions()));
+          const inventory = await listAllManifests(dataRoot, ctx.logger);
+          await executePrune(dataRoot, inventory, prunePlan(inventory.manifests, cfg, deps.activeSessions()));
         } catch (err) {
           ctx.logger.warn('checkpoint 裁剪失败（下次捕获重试）', { error: String(err) });
         }
@@ -342,7 +344,9 @@ export function createCheckpointApp(deps: CheckpointAppDeps): BuiltinAppModule {
           notify('当前无前台会话——/rewind 需要会话上下文。');
           return;
         }
-        const list = await listSessionManifests(dataRoot, focusedId);
+        // /rewind 清单读取带 logger（复盘 E-1）：损坏 manifest 在此点名 warn——
+        // 快照从清单静默消失必须有痕（操作者据此人工处置）
+        const list = await listSessionManifests(dataRoot, focusedId, ctx.logger);
         if (args === '') {
           notify(renderList(list, focusedId));
           return;

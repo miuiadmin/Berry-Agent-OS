@@ -12,6 +12,7 @@ export {
   MAX_SNAPSHOT_FILE_BYTES,
   type CheckpointManifest,
   type ManifestFileEntry,
+  type ManifestInventory,
   listSessionManifests,
   listAllManifests,
   ensureLayout,
