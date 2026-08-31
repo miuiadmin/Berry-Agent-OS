@@ -76,6 +76,9 @@ async function applyWebuiApp(ctx: AppContext, config: WebuiAppConfig | undefined
     // 目录，vite 产物同目录共存；dev 形态缺 index.html = 静态 404 诊断态）
     staticRoot: import.meta.dirname,
     version: deps.version,
+    // 诊断面（复盘 E-2）：兜底 500 与静态回发流错误的留痕宿主——行作用域
+    // ctx.logger（/reload 回卷随行撤换，零新装配面）
+    logger: ctx.logger,
   });
 
   // 三族信封源接线（先接线后监听——boot 完成时三族源已全部就位）。session 总

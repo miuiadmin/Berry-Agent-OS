@@ -10,14 +10,25 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { connect } from 'node:net';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
+import type { AppLogger } from '../contracts/app.js';
 import { createWebuiServer } from './server.js';
 import { WebuiChannel } from './channel.js';
 import { createPendingApprovals, type PendingApprovals } from './approvals.js';
 import type { WebuiAppDeps } from './types.js';
+
+/** logger 桩（复盘 E-2：服务面兜底 500 留痕的断言锚——传入数组时 error/warn 全落账） */
+function stubLogger(collected?: string[]): AppLogger {
+  return {
+    debug: () => undefined,
+    info: () => undefined,
+    warn: (msg) => collected?.push(`warn:${msg}`),
+    error: (msg, fields) => collected?.push(`error:${msg}${fields === undefined ? '' : ` ${JSON.stringify(fields)}`}`),
+  };
+}
 
 /** 占位依赖束（各取数腿返回测试常量——路由面只管转发；override 供单用例改写单腿） */
 function stubDeps(override?: Partial<WebuiAppDeps>): WebuiAppDeps {
@@ -128,6 +139,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       approvals,
       staticRoot,
       version: 'test-1.0.0',
+      logger: stubLogger(),
     }));
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));
   });
@@ -192,6 +204,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       approvals: createPendingApprovals(),
       staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
       version: 't',
+      logger: stubLogger(),
     });
     await new Promise<void>((resolve) => s2.listen(port2, '127.0.0.1', () => resolve()));
     const r = await send(port2, { method: 'POST', path: '/api/sessions', body: '{}' });
@@ -522,6 +535,7 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
       approvals: createPendingApprovals(),
       staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
       version: 't',
+      logger: stubLogger(),
     });
     await new Promise<void>((resolve) => s2.listen(port2, '127.0.0.1', () => resolve()));
     const r = await send(port2, { method: 'GET', path: '/' });
@@ -529,6 +543,95 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     expect(r.text).toContain('webui assets not built');
     chan2.dispose();
     await c2();
+  });
+
+  /* ---------------- 复盘 20260901 回归锁（L-2 / E-2） ---------------- */
+
+  it('静态回发源流错误收口干净应答（复盘 L-2：读错不再以 uncaughtException 打死宿主）', async (context) => {
+    // root 下 chmod 000 仍可 open（测不到 open 拒）——跳过（零误报前提）
+    if (process.getuid?.() === 0) context.skip();
+    const port2 = await grabPort();
+    const chan2 = new WebuiChannel();
+    const root2 = mkdtempSync(join(tmpdir(), 'webui-eio-'));
+    writeFileSync(join(root2, 'locked.js'), 'console.log(1)');
+    chmodSync(join(root2, 'locked.js'), 0o000); // stat 过（isFile 真）、open 拒——读腿错误现场（TOCTOU 同面）
+    const logs: string[] = [];
+    const { server: s2, close: c2 } = createWebuiServer({
+      port: port2,
+      host: '127.0.0.1',
+      deps: stubDeps(),
+      channel: chan2,
+      approvals: createPendingApprovals(),
+      staticRoot: root2,
+      version: 't',
+      logger: stubLogger(logs),
+    });
+    await new Promise<void>((resolve) => s2.listen(port2, '127.0.0.1', () => resolve()));
+    const r = await send(port2, { method: 'GET', path: '/locked.js' });
+    expect(r.status).toBe(500); // 头未冲 = 干净 JSON 应答（修复前：uncaughtException + 请求悬死）
+    expect(JSON.parse(r.text)).toEqual({ error: 'static read failed' });
+    expect(logs.length).toBeGreaterThan(0); // warn 留痕（头已冲腿同留）
+    chan2.dispose();
+    await c2();
+    rmSync(root2, { recursive: true, force: true });
+  });
+
+  it('微路由兜底 500 留痕（复盘 E-2：未预期异常 error 级落 stack，不再零痕迹黑盒）', async () => {
+    const port2 = await grabPort();
+    const chan2 = new WebuiChannel();
+    const logs: string[] = [];
+    const { server: s2, close: c2 } = createWebuiServer({
+      port: port2,
+      host: '127.0.0.1',
+      deps: stubDeps({
+        sessionsFor: () => {
+          throw new Error('boom-500');
+        },
+      }),
+      channel: chan2,
+      approvals: createPendingApprovals(),
+      staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
+      version: 't',
+      logger: stubLogger(logs),
+    });
+    await new Promise<void>((resolve) => s2.listen(port2, '127.0.0.1', () => resolve()));
+    const r = await send(port2, { method: 'GET', path: '/api/sessions' });
+    expect(r.status).toBe(500);
+    expect(JSON.parse(r.text)).toEqual({ error: 'internal' });
+    expect(logs).toHaveLength(1); // 修复前：err 整只 void 丢弃——零留痕
+    expect(logs[0]).toContain('boom-500'); // stack 在场（error instanceof Error 腿）
+    chan2.dispose();
+    await c2();
+  });
+
+  it('close() 先杀空闲 keep-alive 连接（复盘 L-2 顺带：closeIdleConnections——关停不干等 keepAliveTimeout）', async () => {
+    const port2 = await grabPort();
+    const chan2 = new WebuiChannel();
+    const { server: s2, close: c2 } = createWebuiServer({
+      port: port2,
+      host: '127.0.0.1',
+      deps: stubDeps(),
+      channel: chan2,
+      approvals: createPendingApprovals(),
+      staticRoot: join(tmpdir(), 'webui-absent-root-xyz'),
+      version: 't',
+      logger: stubLogger(),
+    });
+    await new Promise<void>((resolve) => s2.listen(port2, '127.0.0.1', () => resolve()));
+    // 一条完整应答后的闲置 keep-alive 连接（不关 socket——close() 的干等源）
+    await new Promise<void>((resolve, reject) => {
+      const sock = connect(port2, '127.0.0.1', () => {
+        sock.write(`GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:${port2}\r\nConnection: keep-alive\r\n\r\n`);
+        // 收到完整应答即闲置（等一拍让应答写完）
+        sock.once('data', () => setTimeout(resolve, 50));
+      });
+      sock.on('error', reject);
+    });
+    const startedAt = Date.now();
+    await c2();
+    // 修复前：close() 干等 keepAliveTimeout（缺省 5s）才放行
+    expect(Date.now() - startedAt).toBeLessThan(1500);
+    chan2.dispose();
   });
 });
 
@@ -586,6 +689,7 @@ describe('webui 服务面：daemon 形态鉴权与协议正确性层', () => {
       approvals: createPendingApprovals(),
       staticRoot,
       version: 'test-1.0.0',
+      logger: stubLogger(),
     });
     close = closeFn;
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', () => resolve()));

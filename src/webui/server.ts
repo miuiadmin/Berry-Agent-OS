@@ -21,6 +21,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { Type, Value } from '../contracts/typebox.js';
+import type { AppLogger } from '../contracts/app.js';
 import type { WebuiChannel } from './channel.js';
 import type { PendingApprovals } from './approvals.js';
 import { listWorkspaceFiles } from './files.js';
@@ -128,6 +129,11 @@ export interface WebuiServerOptions {
   readonly staticRoot: string;
   /** /api/health 报告的宿主版本号（app/version.ts 同源） */
   readonly version: string;
+  /**
+   * 诊断面（复盘 E-2 接线）：兜底 500 与静态回发流错误的留痕宿主——app.ts
+   * 注入 ctx.logger（行作用域，随行回卷）。必填非可选：留痕是硬行为不是选配
+   */
+  readonly logger: AppLogger;
 }
 
 /**
@@ -153,9 +159,15 @@ export function createWebuiServer(opts: WebuiServerOptions): { server: Server; c
 
   return {
     server,
-    /** 关停：停止收新连接，等在途请求/连接终结（SSE 连接由 channel.dispose 先毁——此处只收尾） */
+    /**
+     * 关停：停止收新连接，等在途请求/连接终结（SSE 连接由 channel.dispose 先毁——
+     * 此处只收尾）。先杀空闲 keep-alive 连接（复盘 L-2 顺带）：close() 只停收
+     * 新连、干等全部连接自灭——空闲 keep-alive 要拖满 keepAliveTimeout（缺省
+     * 5s）才放行，关停面无谓迟滞
+     */
     close: () =>
       new Promise<void>((done) => {
+        server.closeIdleConnections();
         server.close(() => done());
       }),
   };
@@ -188,12 +200,18 @@ async function handle(
     const url = new URL(req.url ?? '/', 'http://localhost');
     await route(req, res, url, opts, requestIds);
   } catch (err) {
-    // 兜底收口（路由内已各自收 JSON 错——此处是未预期异常的最后一道）
+    // 兜底收口（路由内已各自收 JSON 错——此处是未预期异常的最后一道）。
+    // 留痕（复盘 E-2）：批量 500 若零痕迹 = 进程日志/durable/断言三者皆无
+    // （违技术栈篇 §6 红线）——error 级落 stack
+    opts.logger.error('webui 微路由兜底 500（未预期异常）', {
+      method: req.method,
+      url: req.url,
+      error: err instanceof Error ? err.stack : String(err),
+    });
     if (!res.headersSent) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     }
     res.end(JSON.stringify({ error: 'internal' }));
-    void err; // 诊断面由宿主 logger 承担（app.ts 侧 wired 日志），本面不重复
   }
 }
 
@@ -454,7 +472,7 @@ async function route(
     return;
   }
   if (req.method === 'GET' || req.method === 'HEAD') {
-    await serveStatic(res, pathname, opts.staticRoot, req.method === 'HEAD');
+    await serveStatic(res, pathname, opts.staticRoot, req.method === 'HEAD', opts.logger);
     return;
   }
   sendJson(res, 404, { error: 'not found' });
@@ -520,6 +538,7 @@ async function serveStatic(
   pathname: string,
   staticRoot: string,
   headOnly: boolean,
+  logger: AppLogger,
 ): Promise<void> {
   let decoded: string;
   try {
@@ -545,13 +564,30 @@ async function serveStatic(
   for (const candidate of candidates) {
     if (await isFile(candidate)) {
       const type = CONTENT_TYPES[extname(candidate)] ?? 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': type });
+      // setHeader 而非 writeHead：首块写出时才冲隐式 200 头——源流错误发生在
+      // 冲头前时仍可改道干净 JSON 应答（writeHead 会提前锁死状态行）
+      res.setHeader('Content-Type', type);
       if (headOnly) {
         res.end();
         return;
       }
-      // 流式回发（createReadStream 自动管背压——assets 大文件不整读进内存）
-      createReadStream(candidate).pipe(res);
+      // 流式回发（pipe 管背压——assets 大文件不整读进内存）。源流错误腿先挂
+      // （复盘 L-2）：pipe 不消费 source 的 error——stat→open 竞窗（升级覆盖
+      // dist/重装）或读中错误（EACCES/EIO/截断）无人收即 uncaughtException
+      // 打死宿主（signals 兜底 exit(1)，daemon 常驻形态全体陪葬）。两腿收口：
+      // 头未冲（首块未发）= 干净 JSON 应答（ENOENT 404 / 其余 500）；头已冲
+      // = 截断终结（socket 已写 200 无法收回，诚实截断）——两腿都 warn 留痕
+      const source = createReadStream(candidate);
+      source.on('error', (err: NodeJS.ErrnoException) => {
+        logger.warn(`webui 静态资产回发失败：${candidate}（${err.code ?? '?'} ${err.message}）`);
+        source.destroy();
+        if (!res.headersSent) {
+          sendJson(res, err.code === 'ENOENT' ? 404 : 500, { error: 'static read failed' });
+        } else {
+          res.end();
+        }
+      });
+      source.pipe(res);
       return;
     }
   }
