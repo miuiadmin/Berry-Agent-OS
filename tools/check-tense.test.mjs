@@ -1,0 +1,82 @@
+/**
+ * check-tense 机器闸回归锁（复盘 20260901 T-3）：spawn 真脚本双向断言——
+ * 本仓净树 exit 0（汇总锚在）+ 已知违规夹具 exit 1（三规则各一条：hash 幻引 /
+ * 完成时态幽灵路径 / 退役词）。
+ *
+ * 锁的失效形态：三规则的提取正则或扫描面枚举静默退化 → exit 0 假绿（本器占
+ * 四门禁链尾却零回归锁——正则漏形态两周内两起同族故障）。
+ *
+ * 夹具经 CHECK_ROOT env 根缝注入（见 check-tense.mjs 头注）：夹具是含 ≥1 笔
+ * commit 的 git 仓（规则 1 hash 对照 git log 锚 ROOT）；AGENTS.md 三行各踩一规。
+ *
+ * 落位注记：与 check-events.test.mjs 同为 vitest 窄面收编的 tools/*.mjs 测试
+ * （vitest.config include 显式列举）——tsc 视门外纯 node 语义直跑。
+ */
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+/** 仓库根（本文件在 tools/ 下） */
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+/** 被测脚本（cwd=ROOT 相对路径——与本仓门禁同一调用形态） */
+const SCRIPT = join('tools', 'check-tense.mjs');
+
+/** 夹具树根（beforeAll 建） */
+let fixtureRoot = '';
+
+beforeAll(() => {
+  fixtureRoot = mkdtempSync(join(tmpdir(), 'berry-check-tense-fix-'));
+  // 三行各踩一规：退役词（规则 3）/ 完成时态 × 幽灵路径（规则 2）/ hash 幻引（规则 1）。
+  // 幻引选 11 位 hex——与夹具仓真实 commit 前缀碰撞概率天文级为零
+  writeFileSync(
+    join(fixtureRoot, 'AGENTS.md'),
+    [
+      '# 夹具',
+      '',
+      '旧机制曾名插件（规则 3：退役词）。',
+      '',
+      '已落码 `src/ghost.ts`（规则 2：完成时态引用不存在路径）。',
+      '',
+      '另见幻引 c0ffee12345（规则 1：非本仓 hash 前缀）。',
+      '',
+    ].join('\n'),
+  );
+  // 规则 1 对照锚 ROOT 上的 git log——夹具需 ≥1 笔 commit（无 commit 时 git log
+  // 非零退出使 execFileSync 抛错，夹具即废）；-c 注入身份防全局配置缺省拦截
+  const git = (args) =>
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd: fixtureRoot });
+  git(['init', '-q']);
+  git(['add', 'AGENTS.md']);
+  git(['commit', '-qm', 'fixture']);
+});
+
+afterAll(() => {
+  rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+describe('check-tense 机器闸（复盘 20260901 T-3）', () => {
+  it('净树全绿：exit 0（execFileSync 非零即抛）+ 汇总行锚（三规则计数面在）', () => {
+    const stdout = execFileSync(process.execPath, [SCRIPT], { cwd: ROOT, encoding: 'utf8' });
+    // 汇总锚：三规则对照计数缺一即汇总行变样——扫描面被静默拆掉先在此红
+    expect(stdout).toMatch(/check-tense: hash \d+ 对照、时态路径 \d+ 对照、退役词 \d+ 行扫描/);
+    expect(stdout).toContain('—— 绿');
+  });
+
+  it('违规夹具 exit 1：三规则各一条被 stderr 点名（CHECK_ROOT 根缝）', () => {
+    const run = spawnSync(process.execPath, [SCRIPT], {
+      cwd: ROOT,
+      env: { ...process.env, CHECK_ROOT: fixtureRoot },
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    // 规则 1：hash 幻引
+    expect(run.stderr).toContain('非 hash 幻引「c0ffee12345」');
+    // 规则 2：完成时态 × 幽灵路径
+    expect(run.stderr).toContain('完成时态引用路径不存在「src/ghost.ts」');
+    // 规则 3：退役词
+    expect(run.stderr).toContain('退役词「插件」');
+  });
+});

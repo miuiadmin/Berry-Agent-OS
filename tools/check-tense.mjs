@@ -42,7 +42,11 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// 根缝（复盘 20260901 T-3 自测）：缺省扫本仓；CHECK_ROOT 指向夹具树时全扫描面
+// （根级单文件/docs/设计文档/git 对照 cwd/规则 2 路径存在性）随移——spawn 自测
+// 以已知违规夹具断言 exit 1。夹具需是含 ≥1 笔 commit 的 git 仓（规则 1 hash
+// 对照 git log 锚 ROOT；clone 环境无设计文档/ 的静默跳过语义两态同构）。
+const ROOT = process.env.CHECK_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /* ------------------------------------------------------------------ */
 /* 扫描面                                                              */

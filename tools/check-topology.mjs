@@ -20,7 +20,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const srcRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+// 根缝（复盘 20260901 T-3 自测）：缺省扫本仓 src；CHECK_ROOT 指向夹具树时 src 根
+// 随移——spawn 自测以已知违规夹具断言 exit 1（侦测能力回归锁，防扫描逻辑静默
+// 退化假绿）。规则 3 公开面计数锚恒读脚本同仓真文件（边表内嵌于脚本，计数对照
+// 两端同为真值——夹具模式不受影响）。
+const srcRoot = process.env.CHECK_ROOT
+  ? resolve(process.env.CHECK_ROOT, 'src')
+  : resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
 /** 模块 → 允许 import 的其他模块（单向 DAG 白名单；同层仅 context 作为运行时基座可被引用）
  * 2026-08-31 复盘批 #38 边表复核：七条死边（声明未用）收册——session/persist/llm/web/

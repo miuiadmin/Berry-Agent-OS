@@ -12,6 +12,9 @@ export default defineConfig({
     // 机器则以 io 注入缝全脚本化驱动（无真实 npm/git 调用）。
     // check-events 机器闸回归锁（第四十六批）同款收编：spawn 真脚本断言全绿
     // + 应用声明层计数锚——并集被静默拆掉先在此红。
+    // check-topology / check-tense 两闸自测（复盘 20260901 T-3）再同款收编：
+    // 净树 exit 0 + CHECK_ROOT 夹具 exit 1——侦测能力回归锁，扫描静默退化
+    // （假绿）先在测试面红。
     // client 子树显式排除（CR-7）：SPA 测试若引入需 jsdom 环境，node 环境的
     // 常规轨不收（域不同不静默跑红）
     include: [
@@ -20,6 +23,8 @@ export default defineConfig({
       'tools/golden/*.test.mjs',
       'tools/release.test.mjs',
       'tools/check-events.test.mjs',
+      'tools/check-topology.test.mjs',
+      'tools/check-tense.test.mjs',
     ],
     environment: 'node',
     // per-test 时限 5s → 15s（2026-09-01 存量负载 flake 勘正）：全量 16 worker
