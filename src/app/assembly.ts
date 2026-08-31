@@ -841,6 +841,13 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   /* ---- ④b llm 具名服务（ctx.llm：应用单发补全唯一合法路径 + canAfford 预算闸门，骨架篇 §9.3） ---- */
   const llmService = createLlmService({
     runtime: llm,
+    // E-3 观测面接线（复盘 20260901）：onUsage 落账抛错时经此落 warn——llm/usage
+    // 是 backgroundSpentToday 预算投影唯一底账，丢账不静默（不拖垮补全结果）
+    onUsageError: (err, info) =>
+      ctx.logger.warn('llm.complete 用量入账失败（底账丢账——llm/usage 未落）', {
+        ...info,
+        error: describeError(err),
+      }),
     // S4 前置债③：与 streamFn 同一份计数器（两出口同源——达帽 complete 路同拒）
     ...(inflight === undefined ? {} : { tracker: inflight }),
     ...(opts.defaults === undefined ? {} : { defaults: opts.defaults }),

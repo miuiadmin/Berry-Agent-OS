@@ -163,6 +163,13 @@ export interface LlmServiceOptions {
    * 回调异常被隔离：计量是观测面，不拖垮补全结果本身。
    */
   onUsage?: (result: CompleteResult, modelSpec: string) => void;
+  /**
+   * onUsage 回调异常的观测面（复盘 20260901 E-3）：回调抛错时携带
+   * { callId, model, error } 上抛给接线面落 warn 日志——llm/usage 是预算
+   * 投影唯一底账，丢账不静默。llm 边表仅 contracts（不引 context logger），
+   * 故走窄面回调；组合根接 ctx.logger.warn。缺省不接 = 零观测（lib 形态）。
+   */
+  onUsageError?: (err: unknown, info: { callId: string; model: string }) => void;
   /** 当日后台预算限额 tokens（in+out 合计；缺省 4,000,000——起草值随实测调，骨架篇 §9.3） */
   backgroundBudgetTokens?: number;
   /**
@@ -367,8 +374,10 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
       // 计量 seam：回调异常隔离（观测面不拖垮补全结果；底账由装配层在此落 durable）
       try {
         options.onUsage?.(result, modelSpec);
-      } catch {
-        // onUsage 是宿主接线面的责任——异常静默（组合根侧应自兜底），此处不归应用感知
+      } catch (usageErr) {
+        // onUsage 异常隔离不变，但不再零可观测（复盘 20260901 E-3）：llm/usage 是
+        // 预算闸门唯一底账，丢账必须可观测——经 onUsageError 交接线面落 warn
+        options.onUsageError?.(usageErr, { callId: result.callId, model: modelSpec });
       }
       return result;
     },

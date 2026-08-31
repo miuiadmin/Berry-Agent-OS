@@ -18,6 +18,7 @@ import {
   LLM_COMPLETE_SCHEMA_UNSUPPORTED,
   LLM_MODEL_NOT_FOUND,
   AppError,
+  describeError,
 } from '../contracts/errors.js';
 import type { AssistantMessage, Message } from '../contracts/llm.js';
 import { createLlmRuntime } from './runtime.js';
@@ -397,5 +398,32 @@ describe('ctx.llm.complete：在飞帽（S4 前置债③——complete 路达帽
     const { service } = makeCappedService();
     expect(service.classifyError(messageOf('error', { errorMessage: 'fetch failed' }) as never)).toBe('transient');
     expect(service.classifyError(messageOf('error', { errorMessage: 'insufficient_quota' }) as never)).toBe('quota');
+  });
+});
+
+describe('onUsage 异常隔离的观测面（复盘 20260901 E-3——丢账不静默）', () => {
+  it('回调抛错不拖垮补全，onUsageError 收 {callId, model, error} 供接线面落 warn', async () => {
+    // llm/usage 是 backgroundSpentToday 预算投影唯一底账——装配侧 append 抛错
+    // （受控形态：注入 throw 代演）即丢账；HEAD：catch 完全静默零可观测面
+    const faux = fauxProvider({ provider: 'faux-obs', models: [{ id: 'm1' }] });
+    const runtime = createLlmRuntime({ providers: [faux.provider] });
+    const observed: Array<{ callId: string; model: string; error: string }> = [];
+    const service = createLlmService({
+      runtime,
+      defaultModel: () => 'faux-obs/m1',
+      onUsage: () => {
+        throw new Error('入账炸（装配侧 append 失败受控形态）');
+      },
+      onUsageError: (err, info) => observed.push({ ...info, error: describeError(err) }),
+    });
+    faux.setResponses([() => messageOf('stop')]);
+    // 隔离不变式：计量是观测面，异常不拖垮补全结果本身
+    const result = await service.complete({ messages: [userMsg('x')] });
+    expect(result.message.stopReason).toBe('stop');
+    // 观测面到位：恰一笔、callId 与结果同源、model 携带、错误文本进载荷
+    expect(observed).toHaveLength(1);
+    expect(observed[0]!.callId).toBe(result.callId);
+    expect(observed[0]!.model).toBe('faux-obs/m1');
+    expect(observed[0]!.error).toContain('入账炸');
   });
 });
