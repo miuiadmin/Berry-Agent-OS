@@ -372,6 +372,12 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
     let closeInfo: { code: number | null; signal: string | null } | undefined;
     let spawnError: Error | undefined;
     let timedOut = false;
+    /**
+     * 摘除 abort 监听（结算时执行）。复盘 20260901 L-3：同一 run 的 N 次工具调用
+     * 共享 runAbort.signal——once 只保证触发后自摘，正常完成的调用监听器永不触发
+     * 即永不摘，各钉住已退 child + 双 60KiB 输出缓冲直到 run 结束。结算即摘。
+     */
+    let detachAbort: () => void = () => undefined;
 
     /** 正常结算路：终态文本走两段式（快路同步窥探；lossy 未定才等探测） */
     const resolveResult = (finalized: ReturnType<OutputCollector['finalize']>): void => {
@@ -391,6 +397,7 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
     const settle = (): void => {
       if (settled || closeInfo === undefined) return;
       settled = true;
+      detachAbort(); // 复盘 20260901 L-3：结算即摘监听（不跨调用累积钉住输出缓冲）
       if (spawnError !== undefined) {
         // 失败二分·未启动腿：绝不折算 exit 1（Node error.cause.code 是身份）
         const causeCode =
@@ -464,14 +471,19 @@ export async function runArgv(argv: readonly string[], opts: RunArgvOptions = {}
       child.on('close', () => clearTimeout(timer));
     }
     if (opts.signal !== undefined) {
+      const signal = opts.signal;
       // 取消信号：树杀 + 正常结算（close 记录 signal=SIGKILL——「已启动被外部取消」
-      // 不是失败二分的任何一腿，不抛错；调用方以 signal 字段识别取消）
+      // 不是失败二分的任何一腿，不抛错；调用方以 signal 字段识别取消）。
+      // 不复位 timedOut（复盘 20260901 L-3）：超时已武装时 abort 只是冗余树杀——
+      // 无条件覆写会让 close 前到达的 abort 吞掉 TOOL_TIMEOUT 结算腿（归因先到先得）
       const onAbort = (): void => {
-        timedOut = false;
         killTree(child.pid, () => child.exitCode === null);
       };
-      if (opts.signal.aborted) onAbort();
-      else opts.signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      else {
+        signal.addEventListener('abort', onAbort, { once: true });
+        detachAbort = () => signal.removeEventListener('abort', onAbort);
+      }
     }
   });
 }

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, getEventListeners } from 'node:events';
 import { AppError, EXEC_SPAWN_FAILED, TOOL_TIMEOUT } from '../contracts/errors.js';
 import { classifyDenials, runArgv, killTree, OUTPUT_BUDGET_BYTES } from './spawn.js';
 
@@ -127,6 +127,38 @@ describe('abort 取消（正常结算，signal 字段识别）', () => {
     const run = await runPromise;
     expect(run.exitCode).toBeNull();
     expect(run.signal).toBeDefined();
+  });
+});
+
+describe('复盘 20260901 L-3 回归锁（abort 监听器摘除 + 超时归因不被 abort 吞）', () => {
+  it('监听器不跨调用累积：结算即摘——共享 runAbort.signal 的 N 次调用后零残留', async () => {
+    // 同一 run 内 N 次 bash 调用共享同一 signal（conversation.ts 接线形态）——
+    // 监听器闭包钉住已退 child + 双 60KiB 输出缓冲，直到 run 结束才随 signal 释放
+    const controller = new AbortController();
+    await runArgv(['bash', '-c', 'echo one'], { signal: controller.signal });
+    await runArgv(['bash', '-c', 'echo two'], { signal: controller.signal });
+    // HEAD：once 只保证触发后自摘——正常完成的调用监听器永不触发即永不摘（2 残留）；
+    // 修复后：结算即 removeEventListener（零残留，signal 生命周期内不积攒）
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
+  it('超时归因先到先得：超时树杀后 close 前 abort 到达——TOOL_TIMEOUT 不被覆写吞掉', { timeout: 15_000 }, async () => {
+    const controller = new AbortController();
+    // 竞速窗制造：内层 node spawn detached:true 即 setsid 脱组（自成一组成新会话
+    // 首领）且 stdio inherit 持有主进程的 stdout/stderr 管道——组杀（超时腿）
+    // 不及其身；Node 'close' = exit + stdio 流关——被内层钉住到它退出（~1.5s），
+    // 制造「超时已武装（250ms）、close 未到（1.5s）」窗，窗内（400ms）abort 到达
+    const script =
+      "require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1500)'], " +
+      "{ detached: true, stdio: ['ignore', 'inherit', 'inherit'] }); setTimeout(() => {}, 30000);";
+    const runPromise = runArgv([process.execPath, '-e', script], {
+      timeoutMs: 250,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 400);
+    // HEAD：onAbort 首行 timedOut = false 无条件覆写 → settle 走正常结算腿
+    //（只见 SIGKILL，TOOL_TIMEOUT 归因丢失）；修复后：超时归因不被 abort 吞
+    await expectRejectCode(() => runPromise, TOOL_TIMEOUT);
   });
 });
 
