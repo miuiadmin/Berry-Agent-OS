@@ -32,6 +32,8 @@ interface FakeLspServer {
   send: (obj: unknown) => void;
   /** 应答 result（自动包帧） */
   sendResult: (id: unknown, result: unknown) => void;
+  /** 向客户端方向写原始字节（不包帧——坏帧注入用；类型面 SpawnedProcess.stdout 只读） */
+  writeRaw: (chunk: string) => void;
   /** 模拟子进程退出（可重复触发；stdout 只真关一次） */
   die: (code: number | null) => void;
 }
@@ -75,6 +77,7 @@ function makeFakeLspServer(pid = 5501): FakeLspServer {
     frames,
     send,
     sendResult: (id, result) => send({ jsonrpc: '2.0', id, result }),
+    writeRaw: (chunk) => stdout.write(chunk),
     die: (code) => {
       if (!stdoutEnded) {
         stdoutEnded = true;
@@ -430,6 +433,35 @@ describe('lsp client — 崩溃与关停', () => {
     expect(await waiting).toBeUndefined(); // 降级非失败
     expect(exits).toHaveLength(1);
     expect(String(await pendingCall)).toContain('退出'); // pending 以 close reason 拒绝
+  });
+
+  it('坏帧 crash 后随到的 close 事件不双计（复盘 L-1 回归锁：一次进程事故恰计一败）', async () => {
+    const harness = makeHarness();
+    const conn = await connect(harness);
+    const exits: string[] = [];
+    conn.onExit((reason) => exits.push(reason));
+    // 坏帧（帧头缺 Content-Length）：连接不可信，crash 先结算
+    harness.server.writeRaw('Garbage: 1\r\n\r\n');
+    await vi.waitFor(() => {
+      expect(exits).toHaveLength(1); // 坏帧腿先 fire
+    });
+    // 子进程随后才退（真实时序：解码器先于进程死）——close 事件不得再 fire 一败
+    harness.server.die(1);
+    expect(exits).toHaveLength(1);
+    expect(exits[0]).toContain('帧解码失败'); // 首因保留（后续 close 不改写归因）
+  });
+
+  it('坏帧路径子进程未退即同步树杀（复盘 L-1 回归锁：防永久孤儿）', async () => {
+    const harness = makeHarness();
+    const conn = await connect(harness);
+    const exits: string[] = [];
+    conn.onExit((reason) => exits.push(reason));
+    // 坏帧时子进程仍活（不 die——孤儿现场：件层 onExit 清实例与登记簿后无人再杀它）
+    harness.server.writeRaw('Garbage: 1\r\n\r\n');
+    await vi.waitFor(() => {
+      expect(exits).toHaveLength(1);
+    });
+    expect(harness.kills).toContain(5501); // crash 内同步树杀，不等宽限
   });
 
   it('dispose：shutdown 请求 → exit 通知 → 自退收尾（幂等；兜底树杀恒在）', async () => {

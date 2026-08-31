@@ -236,8 +236,16 @@ export async function connectLspServer(
     }
   });
 
-  /** 连接死（close 事件/坏帧）：结清桥 pending、唤醒全部 waiter（降级 undefined）、fire 退出监听 */
+  /**
+   * 连接死（close 事件/坏帧）：结清桥 pending、唤醒全部 waiter（降级 undefined）、fire 退出监听。
+   * 一次性闸（复盘 L-1）：一次进程事故恰计一败——坏帧 crash 与随后 close 事件不得
+   * 双计双 notify（熔断「连败 = 无成功间隔」按进程事故计数）；首因保留。
+   */
+  let crashFired = false; // crash 一次性闸（生命周期 = 连接首死时刻到实例回收）
+  let childClosed = false; // 子进程 close 事件已见（crash 时未见 = 坏帧路径，子进程可能仍活）
   function crash(reason: string): void {
+    if (crashFired) return;
+    crashFired = true;
     closeReason ??= reason;
     conn.close(closeReason);
     for (const [, set] of waiters) {
@@ -245,8 +253,15 @@ export async function connectLspServer(
     }
     waiters.clear();
     for (const cb of [...exitListeners]) cb(closeReason);
+    if (!childClosed) {
+      // 坏帧路径：连接已不可信而子进程可能仍活——同步树杀防永久孤儿（复盘 L-1 腿二：
+      // 件层 onExit 即清实例与登记簿条目，dispose 回卷与孤儿清扫两条兜底都够不着它）。
+      // 已退即 ESRCH 内吞（与 dispose 收尾同款幂等语义）。
+      deps.killTree(child.pid ?? -1, () => true);
+    }
   }
   child.on('close', (code, signal) => {
+    childClosed = true;
     crash(`LSP 服务器 ${server} 子进程退出（code=${code ?? '?'}${signal ? ` signal=${signal}` : ''}）`);
   });
   child.stdin.on('error', () => undefined); // 告别后服务器不读 stdin 的 EPIPE 不算失败
