@@ -281,3 +281,21 @@ describe('/apps-mount 与 /apps-unmount 壳链：单目标链单区 reload（R4 
     expect(reloadArgs).toEqual([]);
   });
 });
+
+describe('/guide 与 /upgrade 注册面（第五十一批 §8.5）', () => {
+  it('/guide：常驻快速上手参考——notify 带版本/命令/升级卸载骨架', async () => {
+    const r = rig({ inspect: INSPECT, exec: EXEC });
+    const guide = r.get('guide');
+    expect(guide).toBeDefined();
+    await guide.handler('');
+    expect(r.notes.some((n) => n.includes('快速上手'))).toBe(true);
+    expect(r.notes.some((n) => n.includes('/help'))).toBe(true);
+    expect(r.notes.some((n) => n.includes('berry upgrade'))).toBe(true);
+  });
+  it('/upgrade：薄壳注册在案（handler 走只读网络检查——进程外面，不在单测真跑）', () => {
+    const r = rig({ inspect: INSPECT, exec: EXEC });
+    const upgrade = r.get('upgrade');
+    expect(upgrade).toBeDefined();
+    expect(upgrade.description).toContain('berry upgrade');
+  });
+});

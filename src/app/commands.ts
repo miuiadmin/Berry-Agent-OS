@@ -17,6 +17,8 @@ import type { Disposer } from '../context/types.js';
 import type { CommandRegistry } from '../channels/commands.js';
 import type { UiService } from '../channels/types.js';
 import { describeError } from '../contracts/errors.js';
+import { runUpgradeCheck, entryRealPath } from './upgrade.js';
+import { VERSION, CODENAME } from './version.js';
 import { formatSkillInvocation } from '../skills/index.js';
 import type { SkillDiagnostic, SkillsService } from '../skills/index.js';
 import type { AppsService, UninstallExecReport, UninstallReport } from './apps.js';
@@ -25,6 +27,23 @@ import type { ReloadResult } from './assembly.js';
 import type { AppStatusRow } from './composition.js';
 
 /** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
+/**
+ * /guide 快速上手参考（技术栈篇 §8.5 第 2 件——「上手引导」的常驻形态；与首启
+ * 欢迎块同一份内容骨架：版本/默认应用/核心命令/文档地图/升级卸载一句）。
+ */
+const GUIDE_TEXT = [
+  `Berry ${VERSION}（${CODENAME}）— 快速上手`,
+  '',
+  '· 直接说需求即可——默认进入 coder 代码智能体应用（/app chat 换纯对话）',
+  '· 核心命令：/help 全命令 · /guide 本引导 · /usage 用量 · /skills 技能 ·',
+  '  /apps 应用管理 · /memory-export 记忆导出 · /rewind 工作区回退',
+  '· 模型与凭证：APP_MODEL 环境变量覆盖缺省模型；凭证走 pi-ai 授权链',
+  '· 文档：docs/使用指南（安装/命令/数据目录）· docs/应用开发指南（写应用）·',
+  '  docs/运维手册（daemon/发布）· docs/架构总览',
+  '· 升级：/upgrade 查更新（执行走 berry upgrade 命令）',
+  '· 卸载：npm rm -g berryagent + rm -rf ~/.berry（记忆可先 /memory-export 导出）',
+].join('\n');
+
 function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
   return diagnostics
     .map((d) => `  [${d.type}] ${d.code}：${d.message}${d.path && d.path !== d.code ? `（${d.path}）` : ''}`)
@@ -259,6 +278,44 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
       handler: () => {
         const lines = commands.list().map((cmd) => `  /${cmd.name} — ${cmd.description}`);
         ui.notify(`可用命令：\n${lines.join('\n')}`);
+      },
+    }),
+    commands.register({
+      name: 'guide',
+      description: '快速上手参考（版本/命令/文档地图/升级与卸载一句）',
+      handler: () => {
+        ui.notify(GUIDE_TEXT);
+      },
+    }),
+    commands.register({
+      name: 'upgrade',
+      description: '检查更新并展示结果（升级执行走 berry upgrade 命令）',
+      handler: async () => {
+        // TUI 薄壳（技术栈篇 §8.5 第 2 件）：只读检查 + 展示 + 指引退出执行——
+        // 升级自身运行包 + 重启是用户动作，TUI 内不自动执行
+        ui.notify('检查更新中（registry dist-tags）…');
+        try {
+          const check = await runUpgradeCheck(VERSION, entryRealPath());
+          if (check.verdict.kind === 'unpublished') {
+            ui.notify('berryagent 尚未发布到 npm——当前为源码/预发布形态；发布后可用 `berry upgrade` 自升级。');
+          } else if (check.verdict.kind === 'network') {
+            const netMessage = check.remote.status === 'network' ? check.remote.message : '未知';
+            ui.notify(`检查失败（${netMessage}）——不影响使用，稍后重试或走源码升级路。`);
+          } else if (check.verdict.kind === 'source') {
+            ui.notify(
+              `本地 ${check.localVersion}（源码形态）· 远端最新 ${check.verdict.target}\n源码形态不自动升级：git pull → npm install → npm run build → npm link`,
+            );
+          } else if (check.verdict.kind === 'up-to-date') {
+            ui.notify(`✓ 已是最新（${check.localVersion} ≥ ${check.verdict.target}）`);
+          } else {
+            ui.notify(
+              `有新版本：${check.localVersion} → ${check.verdict.target}\n退出 TUI 后执行「berry upgrade」完成升级并重启。`,
+            );
+          }
+        } catch {
+          // 铁律同款：维护面失败不崩界面，诚实告知
+          ui.notify('检查更新失败（异常）——稍后重试。');
+        }
       },
     }),
     commands.register({

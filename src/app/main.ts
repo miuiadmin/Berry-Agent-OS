@@ -24,6 +24,7 @@
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
  */
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
+import { upgradeMain } from './upgrade.js';
 import { tuiMain } from './tui-main.js';
 import { runOnceMain } from './run-main.js';
 import { tickMain } from './tick-main.js';
@@ -47,6 +48,9 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                          daemon 形态 webui 常开回环，缺省 7860
   berry attach           接上 daemon 的 TUI 纯客户端（零本地装配/零本地库——
                          HTTP/SSE 直连回环；审批卡/打断/投递全走 daemon 面）
+  berry upgrade           升级维护动词：查 registry 更新 → npm 形态自升级（npm i -g
+                         berryagent@<版本>）/ 源码形态给指引 / 未发布态诚实告知；
+                         用户显式维护动作——缺省零版本检查不变
   berry dump-config      打印实际生效的组合树
 
 旗标：
@@ -355,6 +359,26 @@ function main(argv: string[]): number {
         // stop/status 不消费端口（daemon.json 态文件即真相）；start/foreground
         // 缺省 7860（webui 常开回环）
         return daemonCommandMain(sub, webuiPort ?? DEFAULT_WEBUI_PORT);
+      }
+      case 'upgrade': {
+        // 第六命令（技术栈篇 §8.5，第五十一批）：纯 CLI 维护动词——零装配（不建
+        // runtime/不触库）；run 族旗标不适用即用法错（形态面互斥同 daemon 律）
+        if (
+          args.length > 0 ||
+          readOnly ||
+          background ||
+          tick !== undefined ||
+          app !== undefined ||
+          port !== undefined ||
+          noApps ||
+          sandboxHost ||
+          foreground ||
+          standalone
+        ) {
+          process.stderr.write('用法：berry upgrade（无旗标——升级维护动词不与运行形态旗标并用）\n');
+          return 2;
+        }
+        return upgradeMain();
       }
       case 'dump-config':
         // 安全模式同径可见：诊断面打印的就是实际生效装配（Ring 1 行 + 标记行）

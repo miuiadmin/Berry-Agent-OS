@@ -20,6 +20,8 @@ import type { PathsService } from './composition.js';
 import { installExitSignals } from './signals.js';
 import { isDaemonAlive, readDaemonState } from './daemon-state.js';
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
+import { existsSync } from 'node:fs';
+import { dbPath } from './paths.js';
 
 /**
  * 判活 daemon 是否持有**本工作区**近史会话（daemon 刀二·P3 触达面②判据）。
@@ -47,6 +49,11 @@ export function daemonHoldsWorkspaceSession(
  * @returns 进程退出码（正常退出恒 0——用户离开不是错误）
  */
 export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
+  // 首启判定（技术栈篇 §8.5 第 4 件，第五十一批）：boot 前库文件不存在
+  //（options.dbPath 注入 / APP_DB_PATH / APP_DATA_DIR 覆盖全感知；:memory:
+  // 恒非首启）——boot 后欢迎块用。不阻塞首启即用（第六批一句话判据不破）
+  const effectiveDbPath = options.dbPath ?? dbPath();
+  const firstBoot = effectiveDbPath !== ':memory:' && !existsSync(effectiveDbPath);
   // 数据目录建档已收编 createRuntime ③（三入口共用单点）——此处不再早调
   const runtime = await createRuntime({
     ...options,
@@ -113,6 +120,16 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     },
   });
   runtime.ui.attach(tui.ui());
+  // 首启欢迎（§8.5 第 4 件）：活体层 notify 不落库——只在第一次出现，非首启
+  // 零噪音；内容骨架与 /guide 同源（命令/文档/配置指路三件）
+  if (firstBoot) {
+    runtime.ui.notify(
+      `欢迎使用 Berry ${VERSION}——跑 AI 应用的操作系统。\n` +
+        '· 首启即用：直接说需求即可（默认进入 coder 代码智能体应用；/app chat 换纯对话）\n' +
+        '· /help 看全部命令 · /guide 快速上手参考\n' +
+        '· 模型配置：APP_MODEL 环境变量覆盖缺省模型；凭证与数据目录见 docs/使用指南',
+    );
+  }
   // S3 信封分流（宿主壳 = 信封拆开点，channels 不见信封概念）：聚焦者走全渲染、
   // 非聚焦者（后台活条目 + 退役条目迟到事件）走摘要行——互不绞屏的执法接线
   front.addDisplay((envelope) => {
