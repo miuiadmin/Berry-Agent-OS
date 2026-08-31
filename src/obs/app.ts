@@ -263,17 +263,28 @@ export function createObsApp(): BuiltinAppModule {
        */
       const fireAlert = (fire: { rule: AlertRule; value: number }): void => {
         const { rule, value } = fire;
-        ctx.emit('obs/alert', {
-          ruleId: rule.id,
-          metric: rule.metric,
-          agg: rule.agg,
-          value,
-          threshold: rule.threshold,
-          windowHours: rule.windowHours,
-        });
-        ui.notify(
-          `⚠ 观测告警 [${rule.id}] ${rule.metric}：${rule.agg} ${rule.windowHours}h = ${value}（${rule.op} ${rule.threshold}）`,
-        );
+        // 异常隔离（刀二复盘补）：回调在 store 事务内执行——通知面（通道实现）
+        // 抛错若冒泡会回滚事务（含 last_fired_at）并误触停摄取；观测摄取的可用性
+        // 高于单次通知送达，吞异常留痕（emit 自身 fireIsolated 已隔离，此层兜
+        // ui.notify 通道面）
+        try {
+          ctx.emit('obs/alert', {
+            ruleId: rule.id,
+            metric: rule.metric,
+            agg: rule.agg,
+            value,
+            threshold: rule.threshold,
+            windowHours: rule.windowHours,
+          });
+          ui.notify(
+            `⚠ 观测告警 [${rule.id}] ${rule.metric}：${rule.agg} ${rule.windowHours}h = ${value}（${rule.op} ${rule.threshold}）`,
+          );
+        } catch (err) {
+          ctx.logger.warn('obs 告警通知面异常（已隔离——不影响摄取与事务提交）', {
+            ruleId: rule.id,
+            error: err instanceof Error ? err.stack : String(err),
+          });
+        }
       };
 
       /** 落账一批（drain → 单事务 upsert + 内联告警执法）；失败 = 停摄取纪律（契约篇 §6.9） */
