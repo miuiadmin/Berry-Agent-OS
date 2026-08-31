@@ -33,7 +33,13 @@ import type { LlmRuntime } from './runtime.js';
 import { formatModelId } from './model-id.js';
 import type { StreamFnDefaults } from './stream-fn.js';
 import type { InFlightTracker } from './inflight.js';
-import { classifyAssistantError, type ErrorBucket, retryAssistantCall, type RetryPolicy } from './recovery.js';
+import {
+  classifyAssistantError,
+  isContextOverflow,
+  type ErrorBucket,
+  retryAssistantCall,
+  type RetryPolicy,
+} from './recovery.js';
 import type { Message as PiMessage, SimpleStreamOptions } from '@earendil-works/pi-ai';
 
 /** 单发补全请求（应用侧唯一参数面——apiKey 禁入是运行时护栏不是类型约定） */
@@ -123,6 +129,14 @@ export interface LlmService {
    * 判定器经服务面注入驱动——「应用侧禁写第二份分桶」的执法前提是宿主面可得）。
    */
   classifyError(message: AssistantMessage): ErrorBucket;
+  /**
+   * 溢出判定（第四十五批溢出兜底——窗口携带）：recovery.isContextOverflow 的
+   * 服务面公开位。静默溢出（input+cacheRead ≥ 窗口×0.99 且正常停）与 length
+   * 零输出两路依赖 contextWindow——窗口按模型目录活取（chat 件判定器注入携
+   * 当轮效值模型，非装配期定死）；目录缺模型 = undefined → 诚实退化仅错误
+   * 正则一路（注记不阻断——冷读 P1-3）。
+   */
+  isContextOverflowFor(message: AssistantMessage, model: string): boolean;
 }
 
 /** 服务构造选项 */
@@ -226,12 +240,23 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
     maxTokens: m.maxTokens,
   });
 
+  /** 目录点查窗口（第四十五批溢出兜底）：全形 id → contextWindow；缺模型 undefined（诚实退化） */
+  const contextWindowOf = (id: string): number | undefined => {
+    const found = runtime.listModels().find((m) => formatModelId(m.provider, m.id) === id);
+    return found === undefined ? undefined : found.contextWindow;
+  };
+
   return {
     registerProvider: (provider) => runtime.registerProvider(provider),
     unregisterProvider: (id) => runtime.unregisterProvider(id),
 
     // 错误桶判定（S4）：recovery 桶表直通——全仓唯一一份分桶的公开消费位
     classifyError: (message: AssistantMessage) => classifyAssistantError(message),
+
+    // 溢出判定（第四十五批溢出兜底）：窗口活取目录点查——缺模型 undefined 即
+    // 仅错误正则一路（静默溢出/length 零输出两路天然不触发，诚实退化不阻断）
+    isContextOverflowFor: (message: AssistantMessage, model: string) =>
+      isContextOverflow(message, contextWindowOf(model)),
 
     // 模型目录只读投影（P0-1）：pi-ai Model → ModelInfo 字段子集直通——id 组
     // "provider/model-id" 全形（resolveModel 同名可解析），传输/配置面不披露

@@ -519,6 +519,204 @@ describe('ConversationDriver turn 级 auto-retry（S4 前置债①）', () => {
   });
 });
 
+describe('ConversationDriver 溢出兜底（第四十五批 compact-and-retry-once）', () => {
+  /** 溢出错误终态工厂（isOverflowError 判据：文案含 overflow-mark——非 transient 桶互斥） */
+  const overflowError = (text = 'context window exceeded') => errorAssistant(`overflow-mark: ${text}`);
+
+  /** 压缩面 stub：按序弹结果 + 调用计数（可选 gate 手动放行——abort 窗制造） */
+  function compactionStub(results: Array<'compacted' | 'nothing' | 'failed'>) {
+    const calls: Array<'compacted' | 'nothing' | 'failed'> = [];
+    let index = 0;
+    let gate: Promise<void> | undefined;
+    const impl: {
+      resolveCompaction: () => { compactForOverflow(): Promise<'compacted' | 'nothing' | 'failed'> };
+      results: typeof calls;
+      release: () => void;
+      hold: () => void;
+    } = {
+      resolveCompaction: () => ({
+        compactForOverflow: async () => {
+          if (gate !== undefined) await gate; // 在飞窗口（互斥/取消检查点测试用）
+          const verdict = results[Math.min(index, results.length - 1)]!;
+          index += 1;
+          calls.push(verdict);
+          return verdict;
+        },
+      }),
+      results: calls,
+      release: () => {}, // hold() 后被替换为真实放行（缺省无门直接跑）
+      hold: () => {
+        let releaseFn!: () => void;
+        gate = new Promise<void>((r) => {
+          releaseFn = r;
+        });
+        impl.release = () => releaseFn();
+      },
+    };
+    return impl;
+  }
+
+  it('恢复成功：遮蔽 + compactForOverflow + 重播种 + 续入——scheduled reason=overflow 名额 1/1 退避零', async () => {
+    const comp = compactionStub(['compacted']);
+    const { driver, session, calls } = makeRetryDriver([overflowError(), okAssistant('恢复')], {
+      isOverflowError: (m) => (m.errorMessage ?? '').includes('overflow-mark'),
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(calls).toHaveLength(2); // 首跑溢出 + 续入一次成功
+    expect(settled).toEqual(['completed']);
+    expect(comp.results).toEqual(['compacted']); // 压缩面恰一次调用
+
+    // llm/retry scheduled 落账：溢出腿自有名额分账（attempt 1 / maxAttempts 1 / 退避零）+ reason 穿透
+    const retry = session.events.find((e) => e.type === 'llm/retry')!;
+    expect(retry.data).toMatchObject({
+      phase: 'scheduled',
+      attempt: 1,
+      maxAttempts: 1,
+      delayMs: 0,
+      reason: 'overflow',
+    });
+    expect(retry.surfaceOp).toBeDefined(); // 遮蔽随行（信封携带）
+    // 投影无错误 assistant（步 1 遮蔽 + 步 3 重播种——续入上下文干净）
+    const roles = projectedToAgentMessages(session.deriveMessages())
+      .map((m) => ('role' in m ? (m as { role: string }).role : '?'))
+      .filter((r) => r !== '?');
+    expect(roles).toEqual(['user', 'assistant']); // 唯一 assistant 是成功轮
+  });
+
+  it('二次溢出：名额已耗诚实收尾——exhausted reason=overflow + 末错误 assistant 保留呈现 + 压缩面不再调', async () => {
+    const comp = compactionStub(['compacted', 'compacted']);
+    const { driver, session, calls } = makeRetryDriver([overflowError(), overflowError('又溢出')], {
+      isOverflowError: (m) => (m.errorMessage ?? '').includes('overflow-mark'),
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(calls).toHaveLength(2); // 溢出→恢复→再溢出→名额尽（不再续入）
+    expect(settled).toEqual(['failed']);
+    expect(comp.results).toEqual(['compacted']); // 二次溢出不再压缩（retry-once）
+
+    // exhausted 落账（attempt 1/1 reason overflow——三失败混同读侧辨因：二次溢出有续入轮 usage）
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
+    expect(facts[1]).toMatchObject({ attempt: 1, maxAttempts: 1, reason: 'overflow' });
+    // 末错误 assistant 未遮蔽（保留呈现——诚实失败可见）
+    const roles = projectedToAgentMessages(session.deriveMessages())
+      .map((m) => ('role' in m ? (m as { role: string }).role : '?'))
+      .filter((r) => r !== '?');
+    expect(roles).toEqual(['user', 'assistant']);
+  });
+
+  it("'nothing'（压缩救不了）：诚实失败收尾——步 1 遮蔽与步 3 重播种照做（投影无悬空 toolUse）", async () => {
+    const comp = compactionStub(['nothing']);
+    const { driver, session } = makeRetryDriver([overflowError()], {
+      isOverflowError: (m) => (m.errorMessage ?? '').includes('overflow-mark'),
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(settled).toEqual(['failed']);
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
+    // 遮蔽已做（步 1 先行）+ 重播种无条件（步 3——P1-2 顺序约束的对价面）
+    expect(facts[0]!.phase === 'scheduled' && facts[0]!.reason).toBe('overflow');
+    const roles = projectedToAgentMessages(session.deriveMessages())
+      .map((m) => ('role' in m ? (m as { role: string }).role : '?'))
+      .filter((r) => r !== '?');
+    expect(roles).toEqual(['user']); // 错误 assistant 已遮蔽（已遮蔽路径无条件重播种）
+  });
+
+  it("'failed'（摘要抛错）：同 exhausted 收尾——读侧经 compaction/failed 事件辨因（件面另锁）", async () => {
+    const comp = compactionStub(['failed']);
+    const { driver, session } = makeRetryDriver([overflowError()], {
+      isOverflowError: (m) => (m.errorMessage ?? '').includes('overflow-mark'),
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(settled).toEqual(['failed']);
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'exhausted']);
+    expect(facts[1]!.reason).toBe('overflow');
+  });
+
+  it('双缺省直通：无判定器/无压缩面注入——单次调用直通失败零落账（诊断装配形态）', async () => {
+    const { driver, session, calls } = makeRetryDriver([overflowError()]); // 两注入均缺省
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    expect(calls).toHaveLength(1);
+    expect(settled).toEqual(['failed']);
+    expect(session.events.filter((e) => e.type === 'llm/retry')).toHaveLength(0); // 无遮蔽无落账
+    // 错误 assistant 保留呈现（直通）
+    const roles = projectedToAgentMessages(session.deriveMessages())
+      .map((m) => ('role' in m ? (m as { role: string }).role : '?'))
+      .filter((r) => r !== '?');
+    expect(roles).toEqual(['user', 'assistant']);
+  });
+
+  it('名额分账：溢出恢复后 transient 错误照常占 transient 配额（两腿名额互不侵占）', async () => {
+    const comp = compactionStub(['compacted']);
+    const { driver, session, calls } = makeRetryDriver(
+      [overflowError(), errorAssistant('retryable-mark: 抖动'), okAssistant('好了')],
+      {
+        isOverflowError: (m) => (m.errorMessage ?? '').includes('overflow-mark'),
+        resolveCompaction: comp.resolveCompaction,
+      },
+    );
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await driver.settle();
+
+    // 溢出腿一次（名额 1/1）+ transient 腿一次（attempt 1 / 帽 3——配额独立分账）
+    expect(calls).toHaveLength(3);
+    expect(settled).toEqual(['completed']);
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => `${d.phase}:${d.reason ?? 'transient'}`)).toEqual([
+      'scheduled:overflow',
+      'scheduled:transient',
+    ]);
+    expect(facts[1]).toMatchObject({ attempt: 1, maxAttempts: 3 }); // transient 名额帽 = 策略帽（非 1）
+  });
+
+  it('续入前取消：压缩结算后 signal 已 abort → aborted 落账 + 终值统一 aborted（S6 形态③）', async () => {
+    const comp = compactionStub(['compacted']);
+    comp.hold(); // 压缩在飞窗口（不可中断——取消检查点在结算后）
+    const { driver, session } = makeRetryDriver([overflowError(), okAssistant('到不了')], {
+      isOverflowError: (m) => (m.errorMessage ?? '').includes('overflow-mark'),
+      resolveCompaction: comp.resolveCompaction,
+    });
+    const settled: string[] = [];
+    driver.onRunSettled((s) => settled.push(s.status));
+    driver.submit('你好');
+    await new Promise((resolve) => setTimeout(resolve, 10)); // 首跑溢出已进压缩 await
+    driver.requestQuit(); // 压缩在飞时取消（等压缩结算——秒级窗口接受面）
+    comp.release();
+    await driver.settle();
+
+    expect(settled).toEqual(['aborted']);
+    const facts = session.events.filter((e) => e.type === 'llm/retry').map((e) => e.data as LlmRetryData);
+    expect(facts.map((d) => d.phase)).toEqual(['scheduled', 'aborted']);
+    expect(facts[1]!.reason).toBe('overflow');
+  });
+});
+
 describe('retryBackoffDelay（S4 前置债①——指数 + 等比半幅抖动）', () => {
   it('区间断言：attempt n ∈ [base·2^(n-1)·0.5, base·2^(n-1)]（下界 > 0 不零延迟）', () => {
     const base = 1000;

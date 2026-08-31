@@ -24,8 +24,12 @@
  * 驱动链内，ALS 随 async 延续穿透——complete await 后路由仍指本会话）。
  *
  * 'agent' 走 optionalInject（goal 件先例）：chat 件未装载 / 诊断装配时无
- * ctx.agent——无触发面无播种面，件降级停用（warn，行可见装载成功语义诚实）；
- * 'sessions'/'llm' 恒供（装配层无条件 provide）走硬 inject。
+ * ctx.agent——阈值触发路停用（warn；第四十五批配套②——「停用」语义收窄为
+ * 「阈值触发停用」，溢出压缩面照提供：其消费面是 sessions+llm 硬注入与
+ * agent face 无关）；'sessions'/'llm' 恒供（装配层无条件 provide）走硬
+ * inject。溢出压缩面 = 恒 provide('compaction') 单方法 compactForOverflow
+ * （第四十五批溢出兜底步 2——驱动 compact-and-retry-once 消费；与阈值路
+ * 共享 per-session 在飞互斥，配套⑤——两路五步串行化，规划基于锁内新投影）。
  */
 
 import { Type } from '../contracts/typebox.js';
@@ -44,6 +48,7 @@ import {
   inCooldown,
   planSegment,
   summaryBudgetFor,
+  type SegmentPlan,
 } from './policy.js';
 
 /* ---------------------------------------------------------------------------------- */
@@ -77,6 +82,8 @@ interface SessionsCompactionFace {
   appendWithSurfaceOp(carrier: SurfaceCarrier): Promise<SessionEvent | undefined>;
   eventsOfType(type: string): SessionEvent[];
   deriveMessages(): ProjectedMessage[];
+  /** 当前调用链会话 id（ALS 路由——溢出压缩互斥键与语境断言用；脱链 undefined） */
+  currentSessionId(): string | undefined;
 }
 
 /** ctx.llm 窄面（本件消费：受托管单发摘要 + 窗口元数据） */
@@ -163,14 +170,17 @@ export function createCompactionApp(): BuiltinAppModule {
     config: compactionConfig,
 
     apply: async (ctx: AppContext) => {
-      const agent = ctx.tryGet<AgentCompactionFace>('agent');
-      if (!agent) {
-        // chat 件未装载（诊断装配 / persist:false）——无触发面无播种面，降级停用
-        ctx.logger.warn('无 ctx.agent 服务（chat 件未装载）——compaction 官方件停用：无 run 结算触发面');
-        return;
-      }
+      // sessions/llm 恒供（装配层无条件 provide）走硬 inject——溢出压缩面
+      // （compactForOverflow）的消费面同是这两键，与 agent face 无关（第四十五
+      // 批配套②：agent 缺席只停阈值触发路，压缩面照提供）
       const sessions = ctx.get<SessionsCompactionFace>('sessions');
       const llm = ctx.get<LlmCompactionFace>('llm');
+      const agent = ctx.tryGet<AgentCompactionFace>('agent');
+      if (!agent) {
+        // chat 件未装载（诊断装配 / persist:false）——阈值触发路停用（配套②
+        // 「停用」语义收窄：溢出压缩面照提供——无 chat 件 = 无调用方，面闲置无害）
+        ctx.logger.warn('无 ctx.agent 服务（chat 件未装载）——compaction 阈值触发路停用（溢出压缩面照提供）');
+      }
 
       // 四词（compaction/start|summary|end|failed）已经 events.ts 宿主面模块级
       // 注册（导入副作用）——此处不再走 ctx.registerSessionEventType（官方件
@@ -231,6 +241,141 @@ export function createCompactionApp(): BuiltinAppModule {
         return failures.length > 0 ? failures.at(-1)!.time : null;
       };
 
+      /** 最近压缩终点 seq（配套⑤：判「互斥等待期间是否有新压缩落账」——无事件 = -1） */
+      const lastEndSeq = (): number => {
+        const ends = sessions.eventsOfType('compaction/end');
+        const last = ends.at(-1);
+        return last === undefined ? -1 : last.seq;
+      };
+
+      /**
+       * per-session 在飞压缩互斥（第四十五批配套⑤）：阈值路 attempt 与溢出
+       * compactForOverflow 全程共享——两路各基于当时投影快照规划可出重叠区间，
+       * 交织落账 = 同区间双遮蔽 + 双摘要载体（投影不减反增）或溯源校验拒写，
+       * 串行化后结构性不存在。前序成败不阻断后继（失败已各自落账）。
+       */
+      const inFlight = new Map<string, Promise<unknown>>();
+      const runSerialized = <T>(sessionId: string, body: () => Promise<T>): Promise<T> => {
+        const prev = inFlight.get(sessionId) ?? Promise.resolve();
+        // 注册位在本调用链内（ALS 随 promise 延续穿透——body 仍见信封会话语境）
+        const result = prev.then(body, body);
+        // 尾链吞异常只作 Map 存值（真异常已由 result 路各自落账，不重复处理）
+        const tail = result.catch(() => undefined);
+        inFlight.set(sessionId, tail);
+        void tail.then(() => {
+          if (inFlight.get(sessionId) === tail) inFlight.delete(sessionId); // 结算清位防 Map 无界
+        });
+        return result;
+      };
+
+      /**
+       * durable 五步核心（两触发路共享：start→complete 摘要→summary→载体遮蔽→end）。
+       * 阈值路与溢出路的差异全在壳：start 载荷（判据三件落不落）与前后记账。
+       * @param opts.reason 触发路归因（start 载荷穿透——配套①：日志读侧可辨路）
+       * @param opts.plan 遮蔽区间规划（planSegment 产物——必须基于锁内新投影）
+       * @param opts.projected 规划时的投影快照（区间过滤与提示词构建同一份账）
+       * @param opts.basis 判据三件（阈值路落 start 载荷；溢出不落——判据是溢出错误本身非估算）
+       */
+      const fiveStep = async (opts: {
+        reason: 'threshold' | 'overflow';
+        plan: SegmentPlan;
+        projected: readonly ProjectedMessage[];
+        basis?: { basis: string; estTokens: number; window: number };
+      }): Promise<void> => {
+        sessions.appendEvent('compaction/start', {
+          reason: opts.reason,
+          willRetry: true,
+          ...(opts.basis === undefined
+            ? {}
+            : { basis: opts.basis.basis, estTokens: opts.basis.estTokens, window: opts.basis.window }),
+        });
+        const occluded = opts.projected.filter((m) => m.seq >= opts.plan.start && m.seq <= opts.plan.end);
+        const prompt = buildSummaryPrompt(
+          occluded,
+          previousSummary(),
+          summaryBudgetFor(opts.plan.occludedChars, {
+            ratio: cfg.summaryRatio,
+            min: cfg.summaryMin,
+            max: cfg.summaryMax,
+          }),
+        );
+        const result = await llm.complete({ messages: [{ role: 'user', content: prompt }] });
+        const summaryText = extractText(result.message.content);
+        const summaryEvent = sessions.appendEvent('compaction/summary', {
+          text: summaryText,
+          model: result.message.model,
+          usage: { input: result.usage.input, output: result.usage.output },
+        });
+        // 溯源 = 被遮蔽区间全部 seq + 摘要依据事件 seq（宿主验「依据在列」：区间外至少一笔）
+        const seqs: number[] = [];
+        for (let seq = opts.plan.start; seq <= opts.plan.end; seq++) seqs.push(seq);
+        if (summaryEvent !== undefined) seqs.push(summaryEvent.seq);
+        await sessions.appendWithSurfaceOp({
+          type: 'user/message',
+          data: { content: `${SUMMARY_PREFIX} ${summaryText}`, source: 'app:compaction' },
+          surfaceOp: { op: 'replace', start: opts.plan.start, end: opts.plan.end },
+          sourceEventSeqs: seqs,
+        });
+        sessions.appendEvent('compaction/end', {
+          occludedMessages: opts.plan.occludedMessages,
+          occludedChars: opts.plan.occludedChars,
+        });
+      };
+
+      /**
+       * mid-run 溢出压缩（第四十五批溢出兜底步 2——驱动 compact-and-retry-once
+       * 消费的显式调用面）。与阈值触发路差异三件：去防抖/抑制/冷却（溢出是硬
+       * 信号非启发式判阈——有界性由调用方 retry-once 旗标承担）、不播种（mid-run
+       * 公共 reseedTimeline 必拒 running 守卫——播种归调用方私有重播种路径；防抖
+       * 账面不动——溢出压缩的节省偶入阈值路防抖判据属无害偏差）、start 不落判据
+       * 三件（判据是溢出错误本身非估算）。必须在信封会话调用链语境内调用
+       * （配套③——sessions 面 ALS 路由；脱链 = 防御位 'failed' 响亮日志）。
+       */
+      const compactForOverflow = (): Promise<'compacted' | 'nothing' | 'failed'> => {
+        const sessionId = sessions.currentSessionId();
+        if (sessionId === undefined) {
+          // 防御位：官方接线（驱动调用点）恒在信封会话链内——脱链只可能来自
+          // 未来的第三方直取服务面调用，响亮失败不猜会话
+          ctx.logger.error('compactForOverflow 脱链调用（无信封会话语境）——配套③ 禁做形态，防御位返回 failed');
+          return Promise.resolve('failed');
+        }
+        // 等待前快照：判「互斥等待期间是否有新压缩终点落账」（配套⑤——已有
+        // 缩量不重复压，缩量归因不问路：恢复目标是「缩了可续入」）
+        const endSeqAtEntry = lastEndSeq();
+        return runSerialized(sessionId, async () => {
+          if (lastEndSeq() !== endSeqAtEntry) return 'compacted' as const;
+          const projected = sessions.deriveMessages();
+          const plan = planSegment(projected, cfg.tailKeep);
+          if (plan === null) return 'nothing' as const; // 区间不足（tailKeep 保护）——诚实无操作
+          try {
+            await fiveStep({ reason: 'overflow', plan, projected });
+          } catch (err) {
+            // 摘要调用/载体写抛错：落 failed（reason 穿透——配套①）后转诚实失败面
+            try {
+              sessions.appendEvent('compaction/failed', { reason: 'overflow', error: String(err) });
+            } catch (inner) {
+              ctx.logger.error('compaction failed 事件落账失败', { error: String(inner) });
+            }
+            ctx.logger.error('溢出压缩失败（compactForOverflow）', { sessionId, error: String(err) });
+            return 'failed' as const;
+          }
+          ctx.logger.info('溢出压缩完成', {
+            sessionId,
+            occludedMessages: plan.occludedMessages,
+            occludedChars: plan.occludedChars,
+          });
+          return 'compacted' as const;
+        });
+      };
+
+      // 溢出压缩面（第四十五批配套②）：恒提供——agent 缺席同；消费方（chat
+      // 驱动）经根作用域调用点惰性 tryGet 解析（chat 首行先于本第九行装载，
+      // 装配期求值恒空——时序由调用点解决）
+      ctx.provide('compaction', { compactForOverflow });
+
+      // 阈值触发路：agent 缺席即无此路（面已照提供，下方只接 run 结算订阅）
+      if (!agent) return;
+
       /**
        * 一次压缩尝试（onRunSettled 触发——全程在信封会话调用链语境内）。
        * fire-and-forget：异常自catch 落 compaction/failed（失败降级面）。
@@ -285,62 +430,35 @@ export function createCompactionApp(): BuiltinAppModule {
           state.lowSavingsCount = 0;
         }
 
-        // ④ 冷却检查（durable derive）+ 区间规划（最小条数保护在 planSegment 内）
+        // ④ 冷却检查（durable derive——只读不落账，锁外先行即可）
         if (inCooldown(lastFailedAt(), Date.now(), cfg.cooldownMs)) return;
-        const plan = planSegment(projected, cfg.tailKeep);
-        if (plan === null) return;
 
-        // ⑤ durable 五步
-        sessions.appendEvent('compaction/start', {
-          reason: 'threshold',
-          willRetry: true,
-          basis: verdict.basis,
-          estTokens: verdict.estTokens,
-          window: verdict.effectiveWindow,
-        });
-        const occluded = projected.filter((m) => m.seq >= plan.start && m.seq <= plan.end);
-        const prompt = buildSummaryPrompt(
-          occluded,
-          previousSummary(),
-          summaryBudgetFor(plan.occludedChars, {
-            ratio: cfg.summaryRatio,
-            min: cfg.summaryMin,
-            max: cfg.summaryMax,
-          }),
-        );
-        const result = await llm.complete({ messages: [{ role: 'user', content: prompt }] });
-        const summaryText = extractText(result.message.content);
-        const summaryEvent = sessions.appendEvent('compaction/summary', {
-          text: summaryText,
-          model: result.message.model,
-          usage: { input: result.usage.input, output: result.usage.output },
-        });
-        // 溯源 = 被遮蔽区间全部 seq + 摘要依据事件 seq（宿主验「依据在列」：区间外至少一笔）
-        const seqs: number[] = [];
-        for (let seq = plan.start; seq <= plan.end; seq++) seqs.push(seq);
-        if (summaryEvent !== undefined) seqs.push(summaryEvent.seq);
-        await sessions.appendWithSurfaceOp({
-          type: 'user/message',
-          data: { content: `${SUMMARY_PREFIX} ${summaryText}`, source: 'app:compaction' },
-          surfaceOp: { op: 'replace', start: plan.start, end: plan.end },
-          sourceEventSeqs: seqs,
-        });
-        sessions.appendEvent('compaction/end', {
-          occludedMessages: plan.occludedMessages,
-          occludedChars: plan.occludedChars,
+        // ④'⑤ 区间规划 + durable 五步（per-session 互斥内——配套⑤：规划必须
+        // 基于锁内新投影——锁外快照在等待期间可能已被他路压缩改写，规划-落账
+        // 同账零迟滞窗；判据三件随阈值路落 start 载荷）
+        await runSerialized(sessionId, async () => {
+          const projected = sessions.deriveMessages();
+          const plan = planSegment(projected, cfg.tailKeep);
+          if (plan === null) return; // 最小条数保护（planSegment 内）
+          await fiveStep({
+            reason: 'threshold',
+            plan,
+            projected,
+            basis: { basis: verdict.basis, estTokens: verdict.estTokens, window: verdict.effectiveWindow },
+          });
+          ctx.logger.info('compaction 完成', {
+            sessionId,
+            occludedMessages: plan.occludedMessages,
+            occludedChars: plan.occludedChars,
+          });
         });
 
         // ⑥ 闲时重播种（running 被拒 → pendingReseed，下次结算先补——一轮迟滞接受面）
         state.lastBeforeTokens = verdict.estTokens;
         if (!agent.reseedTimeline(sessionId)) {
           state.pendingReseed = true;
+          ctx.logger.warn('compaction 播种推迟（run 进行中——下次结算补播）', { sessionId });
         }
-        ctx.logger.info('compaction 完成', {
-          sessionId,
-          occludedMessages: plan.occludedMessages,
-          occludedChars: plan.occludedChars,
-          reseeded: !state.pendingReseed,
-        });
       };
 
       // 触发接线：run 结算边界（每 run 终结派发一次，载荷带归属 sessionId——

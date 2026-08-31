@@ -130,6 +130,22 @@ export function resolveWakeToolAllowList(metas: readonly (DeliverMeta | undefine
   return allow;
 }
 
+/**
+ * 溢出压缩面结构类型（第四十五批溢出兜底）：compaction 件 provide('compaction')
+ * 的窄消费面——chat 边零 compaction 导入（拓扑边不越界，与 compaction 件侧
+ * AgentCompactionFace 同款结构窄化纪律，方向相反：本件是消费方）。
+ */
+export interface OverflowCompactionFace {
+  /**
+   * mid-run 溢出压缩（durable 五步，reason='overflow'）：'compacted' = 五步
+   * 全落投影已缩；'nothing' = 无可压（planSegment null——压缩救不了的诚实
+   * 失败面）；'failed' = 摘要调用抛错（已落 compaction/failed）。须在信封
+   * 会话调用链语境内调用（sessions 面 ALS 路由）；与阈值路共享 per-session
+   * 在飞互斥（等待结算后重判）。
+   */
+  compactForOverflow(): Promise<'compacted' | 'nothing' | 'failed'>;
+}
+
 /** 会话驱动依赖（chat 件装配产物注入） */
 export interface ConversationDriverDeps {
   /** 归属会话 id（S1 多驱动路由键——调用链作用域包裹与 RunSettled 载荷的取值源） */
@@ -152,6 +168,22 @@ export interface ConversationDriverDeps {
    * （不判定即不重试——保守直通，测试装配可显式关）。
    */
   readonly isTransientError?: (message: AssistantMessage) => boolean;
+  /**
+   * 溢出错误判定（第四十五批溢出兜底）：llm 层窗口携带 isContextOverflow 经
+   * 装配注入（chat 拓扑边不含 llm）。携模型参数——静默溢出与 length 零输出
+   * 两路检测依赖 contextWindow，窗口按当轮效值模型目录活取（非装配期定死；
+   * 目录缺模型 = undefined → 诚实退化仅错误正则一路，冷读 P1-3）。缺省 =
+   * 恒 false（不判定即不恢复——保守直通，与 isTransientError 同款语义）。
+   */
+  readonly isOverflowError?: (message: AssistantMessage, model: string) => boolean;
+  /**
+   * 溢出压缩面惰性解析（第四十五批冷读 P1-4）：调用点 tryGet('compaction')——
+   * 装载序 chat 首行先于 compaction 第九行，boot 首驱动构造期 provide 未落
+   * 系统区表，装配期/构造期求值恒 undefined 一律禁做；溢出发生时全装载序必已
+   * 完成（tryGet 读链含系统区表，与 scope 存活无关——结构安全）。件禁用/卸载
+   * 形态 undefined 即降级直通。件内接线（chat 件闭包），非 ChatAppDeps 装配面。
+   */
+  readonly resolveCompaction?: () => OverflowCompactionFace | undefined;
   /** 会话层重试策略（缺省 enabled/3 次/1s 起——装配处可覆写） */
   readonly retryPolicy?: DriverRetryPolicy;
   /** 会话首 run 前落 request/header 快照（chat 件闭包——驱动不知道快照内容） */
@@ -245,6 +277,10 @@ export class ConversationDriver {
   private readonly session: Session | undefined;
   /** 瞬态错误判定（S4——装配注入的桶表 transient 位；缺省恒 false 保守直通） */
   private readonly isTransientError: (message: AssistantMessage) => boolean;
+  /** 溢出错误判定（第四十五批——装配注入的窗口携带判定器；缺省恒 false 保守直通） */
+  private readonly isOverflowError: (message: AssistantMessage, model: string) => boolean;
+  /** 溢出压缩面惰性解析（第四十五批——调用点 tryGet；缺省无面不恢复降级直通） */
+  private readonly resolveCompaction: () => OverflowCompactionFace | undefined;
   /** 用户输入变换（增补 7②——装配桥注入，缺省无变换直通） */
   private readonly transformInput: ((message: AgentMessage) => Promise<AgentMessage>) | undefined;
   /** turn_stopping 派发（增补 7①——装配桥注入，缺省不派发） */
@@ -280,6 +316,8 @@ export class ConversationDriver {
     this.onCallbackError = deps.onCallbackError;
     this.session = deps.session;
     this.isTransientError = deps.isTransientError ?? (() => false);
+    this.isOverflowError = deps.isOverflowError ?? (() => false);
+    this.resolveCompaction = deps.resolveCompaction ?? (() => undefined);
     this.transformInput = deps.transformInput;
     this.onTurnStopping = deps.onTurnStopping;
     this.flushFace = deps.flushSession;
@@ -709,8 +747,10 @@ export class ConversationDriver {
   /**
    * 单次 run + 检查点重试（S4 前置债①——骨架篇 §3.2 会话层行落码主体）：
    * startRun 返回后查末轮 result——error 收尾 + 末消息 assistant error + 桶判定
-   * transient + attempt < 帽 → 遮蔽续入循环。attempt 生命周期 = 本方法调用
-   * （每次 startRun 新计数——成功复位/新 run 新名额，防跨 turn 累积吃名额）。
+   * transient + attempt < 帽 → 遮蔽续入循环（transient 腿）；桶判定 overflow
+   * → compact-and-retry-once 五步（溢出腿，第四十五批——与 transient 腿同一
+   * 控制流同一遮蔽机器，桶互斥即腿互斥、名额分账）。attempt 生命周期 = 本方法
+   * 调用（每次 startRun 新计数——成功复位/新 run 新名额，防跨 turn 累积吃名额）。
    *
    * 重试全程 run 未终结：isRunning 全程 true（TUI「工作中」自然覆盖，零新
    * AgentEvent 型）；重试与 followUp 合流——退避醒来 drain 队列，新消息与
@@ -725,39 +765,108 @@ export class ConversationDriver {
     const initial = await this.transformBatch(batch);
     let result = await startRun(initial, this.contextForBatch(initial), this.config, hooks);
     let attempt = 0;
-    while (this.shouldRetryRun(result)) {
-      const errorMessage = this.lastErrorText(result);
-      // 达帽放弃：末次错误随行落 exhausted（错误 assistant 保留呈现——中间失败
-      // 已被遮蔽，最终失败可见）
-      if (attempt >= this.retryPolicy.maxRetries) {
-        this.appendRetryFact(attempt, 0, 'exhausted', errorMessage);
-        break;
+    // 溢出恢复名额（第四十五批冷读 P1-1 钉死）：runWithRetry 局部变量与 attempt
+    // 同款——runTurns 的 followUp 循环每轮调用各新名额（followUp 轮是新输入新
+    // 上下文增长，恢复独立分账且入队有限，死循环结构性不存在；驱动字段/跨调用
+    // 持久旗标禁做——「跨 turn 不累积」由局部形态天然成立）
+    let overflowRecovered = false;
+    for (;;) {
+      if (this.shouldRetryRun(result)) {
+        const errorMessage = this.lastErrorText(result);
+        // 达帽放弃：末次错误随行落 exhausted（错误 assistant 保留呈现——中间失败
+        // 已被遮蔽，最终失败可见）
+        if (attempt >= this.retryPolicy.maxRetries) {
+          this.appendRetryFact(attempt, 0, 'exhausted', errorMessage);
+          break;
+        }
+        attempt += 1;
+        const delayMs = retryBackoffDelay(attempt, this.retryPolicy.baseDelayMs);
+        // 遮蔽 + scheduled 落账一次 append 完成（llm/retry 信封携带 surfaceOp——
+        // 会话篇 §2 第二消费者）。倒扫失败（形态异常）= 保守放弃：错误已保留直通
+        if (!this.occludeFailedAssistant(attempt, delayMs, errorMessage)) break;
+        // 投影重播种（私有路径：只重建活数组——错误 assistant 已不进投影，续入
+        // 上下文末消息回到 user/toolResult）
+        this.reseedTimelineFromProjection();
+        // 退避（挂本轮 run 控制器——interrupt/requestQuit/retire 即取消，零新增机制）
+        if (await sleepCancellable(delayMs, hooks.signal)) {
+          this.appendRetryFact(attempt, delayMs, 'aborted', errorMessage);
+          // 取消终值统一（S6 形态③）：退避窗被打断不再返回上次 error result 落
+          // failed——主动取消的 run 终值一律 aborted（durable 事实已落本行
+          // llm/retry{phase:'aborted'}，此处只统一终态面）
+          result = { ...result, status: 'aborted', stopReason: 'aborted' };
+          break;
+        }
+        // followUp 合流：退避期入队消息与续入同批（deliverMeta 保留——backgroundWake
+        // 的工具收窄在续入批继续生效）；重试 drain 批同样过 user_input 变换（第三路）
+        result = await this.resumeAfterRecovery(hooks);
+        continue;
       }
-      attempt += 1;
-      const delayMs = retryBackoffDelay(attempt, this.retryPolicy.baseDelayMs);
-      // 遮蔽 + scheduled 落账一次 append 完成（llm/retry 信封携带 surfaceOp——
-      // 会话篇 §2 第二消费者）。倒扫失败（形态异常）= 保守放弃：错误已保留直通
-      if (!this.occludeFailedAssistant(attempt, delayMs, errorMessage)) break;
-      // 投影重播种（私有路径：只重建活数组——错误 assistant 已不进投影，续入
-      // 上下文末消息回到 user/toolResult）
-      this.reseedTimelineFromProjection();
-      // 退避（挂本轮 run 控制器——interrupt/requestQuit/retire 即取消，零新增机制）
-      if (await sleepCancellable(delayMs, hooks.signal)) {
-        this.appendRetryFact(attempt, delayMs, 'aborted', errorMessage);
-        // 取消终值统一（S6 形态③）：退避窗被打断不再返回上次 error result 落
-        // failed——主动取消的 run 终值一律 aborted（durable 事实已落本行
-        // llm/retry{phase:'aborted'}，此处只统一终态面）
-        result = { ...result, status: 'aborted', stopReason: 'aborted' };
-        break;
+      if (this.shouldOverflowRecover(result)) {
+        // 门第四道：压缩面在场（调用点惰性解析，冷读 P1-4）——缺席 = 降级直通
+        // 诚实失败（无遮蔽无落账无恢复，错误 assistant 保留呈现；件禁用/卸载是
+        // 装载事实非错误，与 transient 腿判定器缺席同款语义）
+        const compaction = this.resolveCompaction();
+        if (compaction === undefined) break;
+        const errorMessage = this.lastErrorText(result);
+        // 二次溢出：名额已耗（恢复成败皆一次）——诚实收尾，末 assistant 错误
+        // 保留呈现（未遮蔽）+ exhausted 落账（第四十五批步 5）
+        if (overflowRecovered) {
+          this.appendRetryFact(1, 0, 'exhausted', errorMessage, 'overflow');
+          break;
+        }
+        // 名额即取（「压缩→请求→再溢出→再压缩」循环结构性不存在——请求侧防死循环）
+        overflowRecovered = true;
+        // 步 1：遮蔽错误 assistant（reason='overflow' 信封，自有名额 1/1、退避零）。
+        // 先遮蔽后压缩不可换序（冷读 P1-2 顺序约束）：压缩载体 user/message 是
+        // 内容事件，若先压缩后遮蔽，倒扫遮蔽遇 user/message 不在跳表即保守放弃
+        if (!this.occludeFailedAssistant(1, 0, errorMessage, 'overflow')) break;
+        // 步 2：压缩显式调用（秒级不可中断——取消检查点在结算后，冷读 P2-9）
+        const compacted = await compaction.compactForOverflow();
+        // 步 3：私有重播种——一切已遮蔽路径无条件执行（冷读 P1-2：步 1 已 durable
+        // 遮蔽，活数组必须跟随投影，失败收场同——否则残留悬空 toolUse 与投影分叉）
+        this.reseedTimelineFromProjection();
+        if (compacted !== 'compacted') {
+          // 'nothing'（planSegment null——压缩救不了）/ 'failed'（摘要抛错已落
+          // compaction/failed reason='overflow'）= 恢复失败诚实 error 收尾（不续入）
+          this.appendRetryFact(1, 0, 'exhausted', errorMessage, 'overflow');
+          break;
+        }
+        // 续入前查信号：恢复期被取消即 aborted 收场（S6 形态③ 统一终态面）
+        if (hooks.signal.aborted) {
+          this.appendRetryFact(1, 0, 'aborted', errorMessage, 'overflow');
+          result = { ...result, status: 'aborted', stopReason: 'aborted' };
+          break;
+        }
+        // 步 4：续入 startRun（followUp 合流——恢复期入队消息与续入同批）
+        result = await this.resumeAfterRecovery(hooks);
+        continue;
       }
-      // followUp 合流：退避期入队消息与续入同批（deliverMeta 保留——backgroundWake
-      // 的工具收窄在续入批继续生效）；重试 drain 批同样过 user_input 变换（第三路）
-      const drained: AgentMessage[] = [];
-      while (this.queue.hasItems()) drained.push(...this.queue.drain());
-      const next = await this.transformBatch(drained);
-      result = await startRun(next, this.contextForBatch(next), this.config, hooks);
+      break;
     }
     return result;
+  }
+
+  /** 恢后续入（两腿同款收尾步）：drain 队列 + user_input 变换 + startRun（同轮信号复用——interrupt 连续生效跨恢复边界） */
+  private async resumeAfterRecovery(hooks: { emit: AgentEventSink; signal: AbortSignal }): Promise<RunResult> {
+    const drained: AgentMessage[] = [];
+    while (this.queue.hasItems()) drained.push(...this.queue.drain());
+    const next = await this.transformBatch(drained);
+    return startRun(next, this.contextForBatch(next), this.config, hooks);
+  }
+
+  /**
+   * 溢出恢复门判（第四十五批——门三道 + 桶判定；压缩面在场由调用位第四道
+   * 惰性解析承担）：策略开（错误恢复总开关——关 = transient 重试与溢出恢复
+   * 一起直通）+ session 在场（遮蔽与落账是构成要件，同 transient 腿）+
+   * 判定器在场（缺省恒 false——诊断装配形态直通）+ 末消息 assistant error
+   * 归 overflow 桶（携当轮效值模型——窗口活取，桶互斥即腿互斥）。旗标名额
+   * （retry-once）不在此判——由调用部位的 runWithRetry 局部旗标承担。
+   */
+  private shouldOverflowRecover(result: RunResult): boolean {
+    if (!this.retryPolicy.enabled || this.session === undefined) return false;
+    if (result.stopReason !== 'error') return false;
+    const last = this.lastAssistantError(result);
+    return last !== undefined && this.isOverflowError(last, this.config.model);
   }
 
   /**
@@ -790,9 +899,19 @@ export class ConversationDriver {
    * 倒扫日志找最后一条 assistant/message 作区间起点，区间尾取当前日志高水位
    * （盖住流中断终值消息伴生续落的 tool/call——无配对 tool/result 的悬空 toolUse
    * 不进续入上下文；垫底的 turn/end、llm/usage 对投影是 no-op 一并入区间无害）。
+   * @param attempt 本轮第几次恢复（溢出腿自有名额恒 1）
+   * @param delayMs 抖动后实延迟（溢出腿退避零——压缩本身即秒级延迟）
+   * @param errorMessage 末条错误说明（载荷随行）
+   * @param reason 恢复类属（第四十五批：transient 退避腿 / overflow 兜底腿——缺省
+   *   transient；名额帽随由推导：transient = 策略帽、overflow = 1 自有名额分账）
    * @returns false = 形态异常保守放弃（无 session 由 shouldRetryRun 先拦，不到这）
    */
-  private occludeFailedAssistant(attempt: number, delayMs: number, errorMessage: string | undefined): boolean {
+  private occludeFailedAssistant(
+    attempt: number,
+    delayMs: number,
+    errorMessage: string | undefined,
+    reason: 'transient' | 'overflow' = 'transient',
+  ): boolean {
     const session = this.session!;
     const events = session.events;
     for (let i = events.length - 1; i >= 0; i--) {
@@ -805,9 +924,11 @@ export class ConversationDriver {
         for (let seq = start; seq <= end; seq++) sourceEventSeqs.push(seq);
         const data: LlmRetryData = {
           attempt,
-          maxAttempts: this.retryPolicy.maxRetries,
+          // 溢出腿自有名额 1/1（与 transient 配额分账——冷读 P2-8 审计面）
+          maxAttempts: reason === 'overflow' ? 1 : this.retryPolicy.maxRetries,
           delayMs,
           phase: 'scheduled',
+          reason,
           ...(errorMessage !== undefined ? { errorMessage } : {}),
         };
         // 信封携带 surfaceOp：log-only 词不进投影 fold（无内容载体、纯删除语义），
@@ -822,18 +943,26 @@ export class ConversationDriver {
     return false;
   }
 
-  /** llm/retry aborted/exhausted 落账（无遮蔽随行——scheduled 已遮蔽过） */
+  /**
+   * llm/retry aborted/exhausted 落账（无遮蔽随行——scheduled 已遮蔽过）。
+   * 溢出腿三失败（二次溢出/'nothing'/'failed'）同落 exhausted attempt 1/1
+   * reason='overflow'——载荷不细分失败因，读侧经 compaction/* 事件辨因
+   * （'failed' 伴 compaction/failed、'nothing' 无 compaction 事件、二次溢出
+   * 有续入轮 usage——冷读 P2-8）。
+   */
   private appendRetryFact(
     attempt: number,
     delayMs: number,
     phase: 'aborted' | 'exhausted',
     errorMessage: string | undefined,
+    reason: 'transient' | 'overflow' = 'transient',
   ): void {
     const data: LlmRetryData = {
       attempt,
-      maxAttempts: this.retryPolicy.maxRetries,
+      maxAttempts: reason === 'overflow' ? 1 : this.retryPolicy.maxRetries,
       delayMs,
       phase,
+      reason,
       ...(errorMessage !== undefined ? { errorMessage } : {}),
     };
     this.session?.append('llm/retry', data);

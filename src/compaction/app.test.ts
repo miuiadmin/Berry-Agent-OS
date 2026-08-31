@@ -49,6 +49,8 @@ interface Harness {
   setUsage: (input: number) => void;
   /** 造消息轮（user/assistant 各一，seq 由 Session 自排） */
   addTurn: () => void;
+  /** 溢出压缩面（第四十五批配套②：恒提供——agent 缺席同） */
+  overflow: () => { compactForOverflow(): Promise<'compacted' | 'nothing' | 'failed'> } | undefined;
 }
 
 /** complete 替身返回形（模型层停靠站契约） */
@@ -57,8 +59,8 @@ interface StubCompleteResult {
   readonly usage: { readonly input: number; readonly output: number };
 }
 
-/** 建 ctx + 三服务 + apply 件（缺省窗口 200_000 / ratio 0.5 → 阈 100_000） */
-function setup(): Harness {
+/** 建 ctx + 三服务 + apply 件（缺省窗口 200_000 / ratio 0.5 → 阈 100_000）；opts.agent=false 建 agent 缺席形态 */
+function setup(opts?: { agent?: boolean }): Harness {
   const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
   const session = new Session();
 
@@ -73,23 +75,27 @@ function setup(): Harness {
   });
   let completeImpl: () => Promise<StubCompleteResult> = defaultComplete;
 
-  ctx.provide('agent', {
-    onRunSettled(cb: (settled: { sessionId: string }) => void) {
-      settledCbs.add(cb);
-      return () => settledCbs.delete(cb);
-    },
-    reseedTimeline(sessionId: string) {
-      reseedCalls.push(sessionId);
-      return reseedOk;
-    },
-  });
+  if (opts?.agent !== false) {
+    ctx.provide('agent', {
+      onRunSettled(cb: (settled: { sessionId: string }) => void) {
+        settledCbs.add(cb);
+        return () => settledCbs.delete(cb);
+      },
+      reseedTimeline(sessionId: string) {
+        reseedCalls.push(sessionId);
+        return reseedOk;
+      },
+    });
+  }
 
   // sessions stub：宿主 ④f 测试侧形态（活引用绑定真 Session；appendWithSurfaceOp
-  // = 真 Session.append 直通带遮蔽——四执法点在 assembly 侧另有锁）
+  // = 真 Session.append 直通带遮蔽——四执法点在 assembly 侧另有锁）；
+  // currentSessionId 模拟宿主 ALS 路由（测试语境恒路由到本会话）
   ctx.provide('sessions', {
     appendEvent: (type: string, data: unknown): SessionEvent | undefined => session.append(type, data),
     eventsOfType: (type: string): SessionEvent[] => session.events.filter((e) => e.type === type),
     deriveMessages: (): ProjectedMessage[] => session.deriveMessages(),
+    currentSessionId: (): string | undefined => session.header.sessionId,
     appendWithSurfaceOp: async (carrier: {
       readonly type: 'user/message';
       readonly data: { readonly content: unknown; readonly source: string };
@@ -140,16 +146,19 @@ function setup(): Harness {
       session.append('assistant/message', { content: [{ type: 'text', text: '好的' }], stopReason: 'end_turn' });
       session.append('turn/end', { reason: 'completed' });
     },
+    overflow: () => ctx.tryGet('compaction'),
   };
 }
 
 /* ---------------- 触发链 ---------------- */
 
 describe('compaction 官方件 apply', () => {
-  it('无 ctx.agent 服务：warn 降级停用不抛（诊断装配诚实）', async () => {
-    const ctx = createContext({ logger: createLogger({ module: 'test', level: 'silent' }) });
-    const plugin = createCompactionApp();
-    await expect(plugin.apply(ctx as never, ctx.config)).resolves.toBeUndefined();
+  it('无 ctx.agent 服务：阈值触发路停用但溢出压缩面照提供（配套②——语义收窄）', async () => {
+    const h = setup({ agent: false });
+    // 面恒在场：compactForOverflow 可调（agent 缺席同）；阈值路无订阅（fire 空转）
+    expect(h.overflow()).toBeDefined();
+    expect(typeof h.overflow()!.compactForOverflow).toBe('function');
+    h.fire(); // settledCbs 空——无 agent 无订阅，不抛即过
   });
 
   it('过阈触发 durable 五步：start→complete→summary→载体遮蔽→end + 重播种', async () => {
@@ -268,5 +277,95 @@ describe('compaction 官方件 apply', () => {
     h.setUsage(220_000);
     h.fire();
     await until(() => h.session.events.filter((e) => e.type === 'compaction/start').length === 3);
+  });
+});
+
+/* ---------------- 溢出压缩面（第四十五批步 2） ---------------- */
+
+describe('compaction 溢出面 compactForOverflow', () => {
+  it('compacted：五步事件序 + start 归因 overflow 不落判据三件 + 不播种不占阈值路记账', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn(); // 10 条消息（可规划区间）
+    const verdict = await h.overflow()!.compactForOverflow();
+
+    expect(verdict).toBe('compacted');
+    const types = h.session.events.map((e) => e.type);
+    const iStart = types.indexOf('compaction/start');
+    const iSummary = types.indexOf('compaction/summary');
+    const iEnd = types.indexOf('compaction/end');
+    expect(iStart).toBeGreaterThanOrEqual(0);
+    expect(iSummary).toBeGreaterThan(iStart);
+    expect(iEnd).toBeGreaterThan(iSummary);
+    // start 载荷：reason 穿透（配套①）+ 无判据三件（溢出判据是错误本身非估算）
+    const start = h.session.events[iStart]!.data as Record<string, unknown>;
+    expect(start.reason).toBe('overflow');
+    expect(start.willRetry).toBe(true);
+    expect(start.basis).toBeUndefined();
+    expect(start.estTokens).toBeUndefined();
+    expect(start.window).toBeUndefined();
+    // 播种不被调（mid-run 播种必拒——归调用方私有重播种路径）+ 无阈值路结算
+    expect(h.reseedCalls()).toBe(0);
+    expect(h.fire).toBeDefined();
+  });
+
+  it('nothing：区间不足（tailKeep 保护）诚实无操作——无任何 compaction 事件', async () => {
+    const h = setup();
+    for (let i = 0; i < 2; i++) h.addTurn(); // 4 条消息 < tailKeep 6 → planSegment null
+    const verdict = await h.overflow()!.compactForOverflow();
+
+    expect(verdict).toBe('nothing');
+    expect(h.session.events.some((e) => e.type.startsWith('compaction/'))).toBe(false);
+    expect(h.prompts()).toHaveLength(0);
+  });
+
+  it('failed：摘要抛错落 compaction/failed reason=overflow（配套①穿透）', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setComplete(() => Promise.reject(new Error('provider 599')));
+    const verdict = await h.overflow()!.compactForOverflow();
+
+    expect(verdict).toBe('failed');
+    const failed = h.session.events.find((e) => e.type === 'compaction/failed')!;
+    expect(failed.data).toMatchObject({ reason: 'overflow' });
+    expect(String((failed.data as { error: string }).error)).toContain('599');
+    // 载体未落（失败在摘要步——无遮蔽半成品）
+    expect(h.session.events.some((e) => e.type === 'user/message' && e.surfaceOp)).toBe(false);
+  });
+
+  it('在飞互斥（配套⑤）：阈值路压缩在飞时等待 → 结算后见新压缩终点直返 compacted 不重复压', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    h.setUsage(150_000); // 过阈
+    // 阈值路 complete 挂起（手动放行——制造在飞窗口）
+    let releaseThreshold!: () => void;
+    const gate = new Promise<void>((r) => {
+      releaseThreshold = r;
+    });
+    h.setComplete(() =>
+      gate.then(() => ({ message: { content: '阈值路摘要', model: 'test-model' }, usage: { input: 100, output: 50 } })),
+    );
+
+    h.fire(); // 阈值路起跑（五步在飞、互斥位持有）
+    await until(() => h.session.events.some((e) => e.type === 'compaction/start'));
+    // 溢出调用进门：等互斥（此刻快照 end 序 = -1 无终点）
+    const overflowPromise = h.overflow()!.compactForOverflow();
+    releaseThreshold(); // 阈值路五步放行落账（end 落）
+
+    expect(await overflowPromise).toBe('compacted'); // 等待期间已有新压缩——不重复压
+    // 只有一轮五步（溢出等待方未再起 start）
+    expect(h.session.events.filter((e) => e.type === 'compaction/start')).toHaveLength(1);
+    expect(h.session.events.filter((e) => e.type === 'compaction/end')).toHaveLength(1);
+  });
+
+  it('溢出压缩后阈值路判据不受污染：pendingReseed/防抖账面不动（溢出节省偶入判据属无害偏差）', async () => {
+    const h = setup();
+    for (let i = 0; i < 5; i++) h.addTurn();
+    await h.overflow()!.compactForOverflow();
+
+    // 溢出压缩后首个结算：无 lastBeforeTokens 记账（防抖判据从零起）+ 播种不被调
+    h.setUsage(30_000); // 阈下
+    h.fire();
+    await until(() => h.reseedCalls() >= 0);
+    expect(h.session.events.filter((e) => e.type === 'compaction/start')).toHaveLength(1); // 仅溢出那一轮
   });
 });

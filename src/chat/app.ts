@@ -71,7 +71,7 @@ import type { DiagnosticsGateQuery, TodoGoalScope } from './todo-gates.js';
 import type { DurableSinks } from './durable.js';
 import { createDurableSinks, projectedToAgentMessages } from './durable.js';
 import { createFsTools } from '../tools/fs.js';
-import type { ConversationDriver, RunSettled } from './conversation.js';
+import type { ConversationDriver, OverflowCompactionFace, RunSettled } from './conversation.js';
 import { ConversationDriver as ConversationDriverClass } from './conversation.js';
 
 /**
@@ -466,6 +466,13 @@ export interface ChatAppDeps {
    * false（驱动 auto-retry 关闭——诊断装配/旧装配形态直通）。
    */
   readonly isTransientError?: (message: AssistantMessage) => boolean;
+  /**
+   * 溢出错误判定（第四十五批溢出兜底——llm 服务面 isContextOverflowFor 经装配
+   * 注入：chat 拓扑边不含 llm）。携模型参数——静默溢出/length 零输出两路依赖
+   * contextWindow，窗口按当轮效值模型目录活取。缺省恒 false（溢出恢复关闭——
+   * 诊断装配形态直通，与 isTransientError 同款语义）。
+   */
+  readonly isOverflowError?: (message: AssistantMessage, model: string) => boolean;
   /** convertToLlm（loop 配置——组合根 convert 产物） */
   readonly convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   /**
@@ -1275,6 +1282,12 @@ export function createChatApp(deps: ChatAppDeps): ChatRuntime {
         // transient 位——缺省恒 false 直通）、策略（缺省 enabled/3/1s）
         session,
         isTransientError: deps.isTransientError,
+        // 溢出兜底两注入（第四十五批）：窗口携带判定器（装配面——llm 服务面直通）
+        // + 压缩面调用点惰性解析（件面——根作用域 tryGet 读链含系统区表；装载序
+        // compaction 第九行晚于本件首行，boot 首驱动构造期 provide 未落，构造期
+        // 解析恒空禁做——冷读 P1-4；件禁用/卸载形态 undefined 即降级直通）
+        isOverflowError: deps.isOverflowError,
+        resolveCompaction: () => deps.rootCtx.tryGet<OverflowCompactionFace>('compaction'),
         writeHeader,
         // 驱动面回调异常诊断（隔离案一第一刀 #4）：onRunSettled 逐条隔离上报——
         // 坏订阅不毒后续订阅与驱动本体，异常经根 logger 留痕（含栈）

@@ -1470,6 +1470,10 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     // S4 会话层 turn 级 auto-retry 的 transient 判定器：llm 服务桶表直通
     // （classifyError === 'transient'——chat 拓扑边不含 llm，判定器经服务面注入）
     isTransientError: (message) => llmService.classifyError(message) === 'transient',
+    // 溢出兜底判定器（第四十五批）：llm 服务面窗口携带 isContextOverflowFor——
+    // 静默溢出/length 零输出两路依赖 contextWindow，窗口按驱动传来的当轮效值
+    // 模型活取（目录缺模型诚实退化仅错误正则一路——冷读 P1-3）
+    isOverflowError: (message, model) => llmService.isContextOverflowFor(message, model),
     convertToLlm: (messages) => defaultConvertToLlm(messages, reportDroppedRole),
     transformContext,
     // user_input / turn_stopping 两桥（契约篇 §2.2 增补 7①②，2026-08-27 P1-2

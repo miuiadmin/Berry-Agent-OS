@@ -194,4 +194,10 @@ export interface LlmRetryData {
   readonly phase: 'scheduled' | 'aborted' | 'exhausted';
   /** 触发重试的错误说明（exhausted 随行末次错误；scheduled 也携带供审计） */
   readonly errorMessage?: string;
+  /**
+   * 恢复类属（第四十五批溢出兜底）：transient = 退避重试腿（S4 既有）；
+   * overflow = 溢出兜底腿（compact-and-retry-once，自有名额 attempt=1/
+   * maxAttempts=1）。缺省 transient——旧日志无字段读侧视为 transient。
+   */
+  readonly reason?: 'transient' | 'overflow';
 }
