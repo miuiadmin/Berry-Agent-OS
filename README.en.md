@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Berry</strong><br>
-  The operating system for AI applications
+  <sub>Possibly the world's first Agent OS</sub>
 </p>
 
 <p align="center">
@@ -20,17 +20,23 @@
 
 ---
 
-The Berry kernel does exactly four things — **install, run, guard, store** — and everything else ships as an application on the composition tree. Models and tools change every month; your credentials, memory, trust history, budgets, and ledgers accumulate only once. Berry holds these five pieces of operator state, and every app you install grows on the same state — the next one just continues where the last left off.
+> **Models are rented. State is owned.**
 
-Apps come in three shapes along the type axis: **applications (launched) / extensions (invoked) / services (depended on)** — even the first-run experience is not in the kernel: the factory default is the **coder** coding-agent app (pure manifest assembly), with the official `chat` conversation app as the fallback anchor. Dual self-evolution (usage evolution + skill evolution) takes the emergent path: no central scheduler, the kernel only provides primitives.
+Today you chat with ChatGPT, tomorrow you code with Claude Code, the day after you install a data-cleaning tool. Each app carries its own credentials, memory, trust history, and budget — **switch an app, lose your state.**
 
-**Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
+What the agent era lacks is not brains — brains rotate monthly — **it lacks a base**. Just as mobile apps need iOS and desktop programs need Windows, AI applications need an operating system.
+
+Berry is that operating system. A minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your five pieces of operator state (credentials, memory, trust history, budgets, ledgers) accumulate only once, and every app grows on the same state.
 
 **26** modules (all implemented) · **35** lifecycle hooks · **16** durable event types · **12** official bundle pieces (each unloadable) · **2,400+** tests · **0** telemetry.
 
+**Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
+
 ## Table of Contents
 
-- [Why Berry](#why-berry)
+- [Berry in Three Minutes](#berry-in-three-minutes)
+- [Positioning at a Glance](#positioning-at-a-glance)
+- [Architecture at a Glance](#architecture-at-a-glance)
 - [Quick Start](#quick-start)
 - [Features at a Glance](#features-at-a-glance)
 - [Architecture at a Glance](#architecture-at-a-glance)
@@ -45,15 +51,30 @@ Apps come in three shapes along the type axis: **applications (launched) / exten
 
 ---
 
-## Why Berry
+## Berry in Three Minutes
 
-The real asset of an AI application is not the model — models change monthly — it is **operator state**: credentials, memory, trust history, budgets, ledgers. Today you use a conversation app, tomorrow a coding agent, the day after a data-cleaning app. They should all grow on the same state instead of starting from zero each time.
+### Act I: AI apps in silos
 
-Berry answers this the operating-system way:
+The real asset of an AI application is not the model — anyone can rent a model. What is scarce is **operator state**: credentials, memory, trust history, budgets, ledgers. These five belong to you, not to any model vendor. But today's AI apps live in silos: ChatGPT doesn't remember your Claude preferences, Claude Code doesn't know your Cursor trust history, every new app starts from zero. **Models get stronger with every switch; your state gets more scattered.**
 
-- **Minimal kernel**: the fixed kernel does four things — install (app & context loading), run (agent loop), guard (security & approval), store (sessions & credentials). 25 modules in a one-way dependency DAG, enforced by machine gates — the kernel cannot be unloaded and its responsibilities cannot bloat.
-- **Everything is an app**: conversation is an app, the coding agent is an app, the memory store is an app — even the MCP bridge and the web UI are apps. Apps can be installed, unloaded, and replaced; remove any one of them and the core loop keeps running.
-- **Event-sourced sessions**: a conversation is an append-only event log (SQLite WAL); model history is a projection of the log. Masking, forking, recovery, and replay are all carried by log semantics — your history is your data.
+### Act II: Brains are cheap now, the base is not
+
+In 2026, model capabilities converge and prices fall — brains are becoming a commodity. What is scarce is what keeps brains working: who remembers which repositories you trust? Who manages your token budget? Who holds the decision trail from that refactoring six months ago? **No model can answer these questions — because the answers don't live in models. They live in the base you don't have yet.**
+
+### Act III: Berry — the OS that runs apps
+
+Berry answers the operating-system way: **a fixed kernel doing install/run/guard/store** (25-module one-way DAG, machine-gated, not unloadable), **everything else is an app** (even the first-run coder coding agent doesn't live in the kernel — it's a pure-manifest default app, `/app` to switch). Your sessions are append-only event logs — **your history is your data**: masking, forking, recovery, and replay all carried by log semantics. Not locked in, but remembered.
+
+## Positioning at a Glance
+
+|                       | Agent Frameworks  | Coding Agents       | **Berry**                           |
+| --------------------- | ----------------- | ------------------- | ----------------------------------- |
+| **What you get**      | SDK + deps        | A product           | **An OS that runs apps**            |
+| **Capability form**   | Code in your repo | Hardwired           | **Data — installable & unloadable** |
+| **State across apps** | Siloed            | Locked in the app   | **5 pieces, accumulated once**      |
+| **Upgrading**         | Rewrite & deploy  | Wait for the vendor | **Install / uninstall / `/reload`** |
+| **Ecosystem**         | —                 | Closed              | **npm is the market (3 sources)**   |
+| **Floor**             | Depends on you    | Codex / Claude Code | **Factory defaults = daily-usable** |
 
 ## Architecture at a Glance
 
@@ -109,7 +130,7 @@ Writing a Berry app takes a single `index.ts`: a default-exported `apply(ctx, co
 ## Security Model
 
 - **Three-stage tool pipeline**: schema validation → gate (approval / sandbox / allowlist decisions) → execute — the only legal path for tool execution, durably ledgered with no bypasses.
-- **Three sandbox tiers**: `read-only` / `workspace-write` / `danger-full-access`; third-party apps default to the external process domain (per-row fork + PM middle layer + OS sandbox layer), with indirect subprocesses narrowed by row-level whitelists.
+- **Three sandbox tiers**: `read-only` / `workspace-write` / `danger-full-access`; third-party apps default to the external process domain (per-row fork + PM middle layer + OS sandbox layer), with indirect subprocesses narrowed by row-level whitelists. **Apps are born sandboxed — permissions are declared, never stolen.**
 - **Approval pairs**: every write-level action lands an `approval/asked` / `approval/decided` audit pair; "always allow" goes through the enumerable, revocable allowlist.
 - **Vocabulary enforcement**: the event-vocabulary registry is machine-checked — misspelled names fail loudly, and kernel words cannot be forged by third parties.
 

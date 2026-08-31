@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Berry</strong><br>
-  Le système d'exploitation des applications IA
+  <sub>Peut-être le premier Agent OS au monde</sub>
 </p>
 
 <p align="center">
@@ -20,17 +20,22 @@
 
 ---
 
-Le noyau de Berry fait exactement quatre choses — **installer, exécuter, protéger, stocker** — et tout le reste s'installe comme une application sur l'arbre de composition. Les modèles et les outils changent chaque mois ; vos identifiants, votre mémoire, votre historique de confiance, vos budgets et vos registres ne s'accumulent qu'une seule fois. Berry conserve ces cinq éléments d'état opérateur, et chaque application que vous installez grandit sur le même état — la suivante reprend simplement là où la précédente s'est arrêtée.
+> **Les modèles se louent. L'état s'appartient.**
 
-Les applications prennent trois formes selon l'axe des types : **applications (lancées) / extensions (invoquées) / services (consommés)** — même l'expérience du premier démarrage ne réside pas dans le noyau : le réglage usine par défaut est l'application d'agent de code **coder** (assemblée purement par manifeste), l'application de conversation officielle `chat` servant d'ancre de repli. La double auto-évolution (évolution d'usage + évolution de compétences) suit la voie émergente : pas de planificateur central, le noyau ne fournit que des primitives.
+Aujourd'hui vous discutez avec ChatGPT, demain vous codez avec Claude Code, après-demain vous installez un outil de nettoyage de données. Chaque application apporte ses propres identifiants, sa mémoire, son historique de confiance, son budget — **changez d'app, perdez votre état.**
 
-**Objectif plancher : la couche par défaut d'usine atteint le niveau d'usage quotidien de Codex / Claude Code.**
+Ce qui manque à l'ère des agents, ce n'est pas le cerveau — le cerveau tourne chaque mois — **c'est une base**. Comme les apps mobiles ont besoin d'iOS et les programmes de bureau de Windows, les applications IA ont besoin d'un système d'exploitation.
+
+Berry est ce système d'exploitation. Un noyau minimal fait exactement **installer, exécuter, protéger, stocker** ; tout le reste — conversation, agent de code, mémoire, objectifs longs, tâches planifiées, MCP, LSP, observabilité, interface web — se charge comme **application** sur l'arbre de composition. **Installable, déchargeable, remplaçable** — tandis que vos cinq éléments d'état opérateur (identifiants, mémoire, historique de confiance, budgets, registres) ne s'accumulent qu'une seule fois.
 
 **26** modules (tous implémentés) · **35** crochets de cycle de vie · **16** types d'événements durables · **12** pièces officielles (chacune déchargeable) · **2 400+** tests · **0** télémétrie.
 
+**Objectif plancher : la couche par défaut d'usine atteint le niveau d'usage quotidien de Codex / Claude Code.**
+
 ## Sommaire
 
-- [Pourquoi Berry](#pourquoi-berry)
+- [Berry en trois minutes](#berry-en-trois-minutes)
+- [Positionnement en un coup d'œil](#positionnement-en-un-coup-dœil)
 - [Démarrage rapide](#démarrage-rapide)
 - [Caractéristiques en un coup d'œil](#caractéristiques-en-un-coup-dœil)
 - [L'architecture en un coup d'œil](#larchitecture-en-un-coup-dœil)
@@ -45,15 +50,30 @@ Les applications prennent trois formes selon l'axe des types : **applications (l
 
 ---
 
-## Pourquoi Berry
+## Berry en trois minutes
 
-Le véritable actif d'une application IA n'est pas le modèle — les modèles changent chaque mois — c'est **l'état opérateur** : identifiants, mémoire, historique de confiance, budgets, registres. Aujourd'hui vous utilisez une application de conversation, demain un agent de code, après-demain une application de nettoyage de données. Elles devraient toutes grandir sur le même état au lieu de repartir de zéro à chaque fois.
+### Acte I : des applications IA en silos
 
-Berry répond à cette question à la manière d'un système d'exploitation :
+Le véritable actif d'une application IA n'est pas le modèle — n'importe qui peut louer un modèle. Ce qui est rare, c'est **l'état opérateur** : identifiants, mémoire, historique de confiance, budgets, registres. Ces cinq éléments vous appartiennent, pas à un fournisseur de modèles. Mais les applications IA d'aujourd'hui vivent en silos : ChatGPT ne connaît pas vos préférences Claude, Claude Code ignore votre historique de confiance dans Cursor, chaque nouvelle app repart de zéro. **Les modèles se renforcent à chaque changement ; votre état se disperse davantage.**
 
-- **Noyau minimal** : le noyau fixe fait quatre choses — installer (chargement des applications et du contexte), exécuter (boucle d'agent), protéger (sécurité et approbations), stocker (sessions et identifiants). 25 modules dans un DAG de dépendances unidirectionnel, verrouillé par des portes machine — le noyau ne peut pas être déchargé et ses responsabilités ne peuvent pas gonfler.
-- **Tout est une application** : la conversation est une application, l'agent de code est une application, la mémoire est une application — même le pont MCP et l'interface web sont des applications. Les applications s'installent, se déchargent et se remplacent ; retirez n'importe laquelle et la boucle centrale continue de tourner.
-- **Sessions fondées sur les événements** : une conversation est un journal d'événements en ajout seul (SQLite WAL) ; l'historique du modèle est une projection du journal. Masquage, bifurcation, récupération et relecture reposent tous sur la sémantique du journal — votre historique est votre donnée.
+### Acte II : le cerveau ne vaut plus rien, la base vaut cher
+
+En 2026, les capacités des modèles convergent et les prix chutent — le cerveau devient une commodité. Ce qui est rare, c'est ce qui fait travailler le cerveau : qui se souvient des dépôts auxquels vous faites confiance ? Qui gère votre budget de tokens ? Qui conserve la trace des décisions de ce refactoring d'il y a six mois ? **Aucun modèle ne peut répondre — parce que les réponses ne vivent pas dans les modèles. Elles vivent dans la base que vous n'avez pas encore.**
+
+### Acte III : Berry — le système d'exploitation qui fait tourner des applications
+
+Berry répond à la manière d'un système d'exploitation : **un noyau fixe qui installe/exécute/protège/stocke** (DAG unidirectionnel de 25 modules, verrouillé par machine, non déchargeable), **tout le reste est une application** (même le coder du premier démarrage ne vit pas dans le noyau — c'est une app par défaut à manifeste pur, `/app` pour changer). Vos sessions sont des journaux d'événements en ajout seul — **votre historique est votre donnée** : masquage, bifurcation, récupération et relecture par la sémantique du journal. Sans vous enfermer, mais en se souvenant.
+
+## Positionnement en un coup d'œil
+
+|                         | Frameworks d'Agents  | Coding Agents           | **Berry**                                 |
+| ----------------------- | -------------------- | ----------------------- | ----------------------------------------- |
+| **Ce que vous obtenez** | SDK + dépendances    | Un produit              | **Un OS qui fait tourner des apps**       |
+| **Forme de capacité**   | Code dans votre repo | Intégré d'usine         | **Données — installable et déchargeable** |
+| **État entre apps**     | En silos             | Enfermé dans l'app      | **5 éléments, accumulés une seule fois**  |
+| **Mise à niveau**       | Réécrire et déployer | Attendre le fournisseur | **Installer / décharger / `/reload`**     |
+| **Écosystème**          | —                    | Fermé                   | **npm est le marché (3 sources)**         |
+| **Plancher**            | Dépend de vous       | Codex / Claude Code     | **Valeurs d'usine = usage quotidien**     |
 
 ## L'architecture en un coup d'œil
 
@@ -109,7 +129,7 @@ Le chargement suit le **modèle de centre d'applications** : une application est
 ## Modèle de sécurité
 
 - **Pipeline en trois étapes** : validation de schéma → porte (décisions d'approbation / bac à sable / allowlist) → exécution — la seule voie légale d'exécution des outils, registre durable sans contournement.
-- **Trois niveaux de bac à sable** : `read-only` / `workspace-write` / `danger-full-access` ; les applications tierces vont par défaut dans le domaine de processus externe (fork par ligne + couche intermédiaire PM + couche de bac à sable de l'OS), les sous-processus indirects étant restreints par des listes blanches par ligne.
+- **Trois niveaux de bac à sable** : `read-only` / `workspace-write` / `danger-full-access` ; les applications tierces vont par défaut dans le domaine de processus externe (fork par ligne + couche intermédiaire PM + couche de bac à sable de l'OS), les sous-processus indirects étant restreints par des listes blanches par ligne. **Les applications naissent en bac à sable — les permissions se déclarent, elles ne se volent pas.**
 - **Paires d'approbation** : chaque action en écriture laisse une paire d'audit `approval/asked` / `approval/decided` ; le « toujours autoriser » passe par l'allowlist, énumérable et révocable.
 - **Application du vocabulaire** : le registre du vocabulaire d'événements est vérifié par machine — les noms mal orthographiés échouent bruyamment, et les mots du noyau ne peuvent pas être falsifiés par des tiers.
 

@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Berry</strong><br>
-  El sistema operativo para aplicaciones de IA
+  <sub>Posiblemente el primer Agent OS del mundo</sub>
 </p>
 
 <p align="center">
@@ -20,17 +20,22 @@
 
 ---
 
-El kernel de Berry hace exactamente cuatro cosas — **instalar, ejecutar, proteger, almacenar** — y todo lo demás se instala como una aplicación sobre el árbol de composición. Los modelos y las herramientas cambian cada mes; tus credenciales, memoria, historial de confianza, presupuestos y libros de cuenta se acumulan una sola vez. Berry custodia estas cinco piezas de estado del operador, y cada aplicación que instalas crece sobre el mismo estado — la siguiente simplemente continúa donde terminó la anterior.
+> **Los modelos se alquilan. El estado es tuyo.**
 
-Las aplicaciones tienen tres formas según el eje de tipos: **aplicaciones (se lanzan) / extensiones (se invocan) / servicios (se consumen)** — incluso la experiencia del primer arranque vive fuera del kernel: el valor por defecto de fábrica es la aplicación de agente de programación **coder** (ensamblado puramente por manifiesto), con la aplicación de conversación oficial `chat` como ancla de reserva. La doble autoevolución (evolución de uso + evolución de habilidades) sigue el camino emergente: sin planificador central, el kernel solo aporta primitivas.
+Hoy chateas con ChatGPT, mañana programas con Claude Code, pasado mañana instalas una herramienta de limpieza de datos. Cada aplicación trae sus propias credenciales, memoria, historial de confianza y presupuesto — **cambias de app, pierdes tu estado.**
 
-**Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
+Lo que falta en la era de los agentes no es cerebro — el cerebro rota cada mes — **falta una base**. Así como las apps móviles necesitan iOS y los programas de escritorio necesitan Windows, las aplicaciones de IA necesitan un sistema operativo.
+
+Berry es ese sistema operativo. Un kernel mínimo hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras tus cinco piezas de estado del operador (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez.
 
 **26** módulos (todos con código) · **35** ganchos de ciclo de vida · **16** tipos de eventos durables · **12** piezas oficiales (todas desinstalables) · **2.400+** pruebas · **0** telemetría.
 
+**Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
+
 ## Tabla de contenidos
 
-- [Por qué Berry](#por-qué-berry)
+- [Berry en tres minutos](#berry-en-tres-minutos)
+- [Posicionamiento de un vistazo](#posicionamiento-de-un-vistazo)
 - [Inicio rápido](#inicio-rápido)
 - [Características de un vistazo](#características-de-un-vistazo)
 - [Un vistazo a la arquitectura](#un-vistazo-a-la-arquitectura)
@@ -45,15 +50,30 @@ Las aplicaciones tienen tres formas según el eje de tipos: **aplicaciones (se l
 
 ---
 
-## Por qué Berry
+## Berry en tres minutos
 
-El verdadero activo de una aplicación de IA no es el modelo — los modelos cambian cada mes — es el **estado del operador**: credenciales, memoria, historial de confianza, presupuestos, libros de cuenta. Hoy usas una aplicación de conversación, mañana un agente de programación, pasado mañana una aplicación de limpieza de datos. Todas deberían crecer sobre el mismo estado en lugar de empezar de cero cada vez.
+### Acto I: aplicaciones de IA en silos
 
-Berry responde a esto al estilo de un sistema operativo:
+El verdadero activo de una aplicación de IA no es el modelo — cualquiera puede alquilar un modelo. Lo escaso es el **estado del operador**: credenciales, memoria, historial de confianza, presupuestos, libros de cuenta. Estas cinco cosas son tuyas, no de ningún proveedor de modelos. Pero las apps de IA de hoy viven en silos: ChatGPT no recuerda tus preferencias de Claude, Claude Code no conoce tu historial de confianza en Cursor, cada app nueva empieza de cero. **Los modelos se fortalecen con cada cambio; tu estado se dispersa más.**
 
-- **Kernel mínimo**: el kernel fijo hace cuatro cosas — instalar (carga de aplicaciones y contexto), ejecutar (bucle del agente), proteger (seguridad y aprobaciones), almacenar (sesiones y credenciales). 25 módulos en un DAG unidireccional, reforzado por puertas de máquina — el kernel no se puede desinstalar y sus responsabilidades no pueden hincharse.
-- **Todo es una aplicación**: la conversación es una aplicación, el agente de programación es una aplicación, la memoria es una aplicación — incluso el puente MCP y la interfaz web son aplicaciones. Las aplicaciones se instalan, desinstalan y sustituyen; quita cualquiera y el bucle central sigue funcionando.
-- **Sesiones con origen en eventos**: una conversación es un registro de eventos de solo adición (SQLite WAL); el historial del modelo es una proyección del registro. Enmascaramiento, bifurcación, recuperación y repetición se sustentan en la semántica del registro — tu historial es tu dato.
+### Acto II: el cerebro ya no vale, la base sí
+
+En 2026 las capacidades de los modelos convergen y los precios caen — el cerebro se vuelve un commodity. Lo escaso es lo que mantiene al cerebro funcionando: ¿quién recuerda en qué repositorios confías? ¿Quién gestiona tu presupuesto de tokens? ¿Quién conserva la trazabilidad de decisiones de aquel refactoring de hace seis meses? **Ningún modelo puede responder — porque las respuestas no viven en los modelos. Viven en la base que aún no tienes.**
+
+### Acto III: Berry — el sistema operativo que ejecuta aplicaciones
+
+Berry responde al estilo de un sistema operativo: **un kernel fijo que instala/ejecuta/protege/almacena** (DAG unidireccional de 25 módulos, vigilado por máquina, no desinstalable), **todo lo demás es una aplicación** (incluso el coder del primer arranque no vive en el kernel — es una app por defecto de manifiesto puro, `/app` para cambiar). Tus sesiones son registros de eventos de solo adición — **tu historial es tu dato**: enmascaramiento, bifurcación, recuperación y repetición, todo por la semántica del registro. Sin encerrarte, pero recordándote.
+
+## Posicionamiento de un vistazo
+
+|                        | Frameworks de Agentes  | Coding Agents         | **Berry**                              |
+| ---------------------- | ---------------------- | --------------------- | -------------------------------------- |
+| **Qué obtienes**       | SDK + dependencias     | Un producto           | **Un SO que ejecuta aplicaciones**     |
+| **Forma de capacidad** | Código en tu repo      | Integrado de fábrica  | **Datos — instalable y desinstalable** |
+| **Estado entre apps**  | En silos               | Encerrado en la app   | **5 piezas, acumuladas una sola vez**  |
+| **Actualización**      | Reescribir y desplegar | Esperar al fabricante | **Instalar / desinstalar / `/reload`** |
+| **Ecosistema**         | —                      | Cerrado               | **npm es el mercado (3 fuentes)**      |
+| **Suelo**              | Depende de ti          | Codex / Claude Code   | **Valores de fábrica = uso diario**    |
 
 ## Un vistazo a la arquitectura
 
@@ -109,7 +129,7 @@ Escribir una aplicación para Berry solo requiere un `index.ts`: un `apply(ctx, 
 ## Modelo de seguridad
 
 - **Canalización de tres etapas**: validación de esquema → puerta (decisiones de aprobación / sandbox / allowlist) → ejecución — la única vía legal para ejecutar herramientas, con libro de cuenta duradero y sin rodeos.
-- **Tres niveles de sandbox**: `read-only` / `workspace-write` / `danger-full-access`; las aplicaciones de terceros van por defecto al dominio de proceso externo (fork por fila + capa intermedia PM + capa de sandbox del SO), con subprocesses indirectos acotados por listas blancas por fila.
+- **Tres niveles de sandbox**: `read-only` / `workspace-write` / `danger-full-access`; las aplicaciones de terceros van por defecto al dominio de proceso externo (fork por fila + capa intermedia PM + capa de sandbox del SO), con subprocesses indirectos acotados por listas blancas por fila. **Las aplicaciones nacen en sandbox — los permisos se declaran, no se roban.**
 - **Pares de aprobación**: cada acción de escritura deja un par de auditoría `approval/asked` / `approval/decided`; el «permitir siempre» pasa por la allowlist, enumerable y revocable.
 - **Aplicación de vocabulario**: el registro de vocabulario de eventos se verifica por máquina — los nombres mal escritos fallan ruidosamente y las palabras del kernel no pueden falsificarse.
 
