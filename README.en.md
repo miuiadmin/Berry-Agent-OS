@@ -26,14 +26,18 @@ Apps come in three shapes along the type axis: **applications (launched) / exten
 
 **Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
 
+**26** modules (all implemented) · **35** lifecycle hooks · **16** durable event types · **12** official bundle pieces (each unloadable) · **2,400+** tests · **0** telemetry.
+
 ## Table of Contents
 
 - [Why Berry](#why-berry)
 - [Quick Start](#quick-start)
 - [Features at a Glance](#features-at-a-glance)
+- [Architecture at a Glance](#architecture-at-a-glance)
 - [Everything Is an App](#everything-is-an-app)
 - [Security Model](#security-model)
 - [Documentation](#documentation)
+- [What Berry Is Not](#what-berry-is-not)
 - [Project Status](#project-status)
 - [Telemetry](#telemetry)
 - [Contributing](#contributing)
@@ -50,6 +54,26 @@ Berry answers this the operating-system way:
 - **Minimal kernel**: the fixed kernel does four things — install (app & context loading), run (agent loop), guard (security & approval), store (sessions & credentials). 25 modules in a one-way dependency DAG, enforced by machine gates — the kernel cannot be unloaded and its responsibilities cannot bloat.
 - **Everything is an app**: conversation is an app, the coding agent is an app, the memory store is an app — even the MCP bridge and the web UI are apps. Apps can be installed, unloaded, and replaced; remove any one of them and the core loop keeps running.
 - **Event-sourced sessions**: a conversation is an append-only event log (SQLite WAL); model history is a projection of the log. Masking, forking, recovery, and replay are all carried by log semantics — your history is your data.
+
+## Architecture at a Glance
+
+```text
+            ┌─────────────────────────────────────────────┐
+            │  Fixed kernel (Ring 0): install · run ·     │
+            │  guard · store — 25-module one-way DAG,     │
+            │  machine-gated, not unloadable              │
+            └──────────────────┬──────────────────────────┘
+                               │ composition tree (default layer + overlay.yaml)
+        ┌──────────┬──────────┼──────────────┬───────────┐
+        ▼          ▼          ▼              ▼           ▼
+     coder       chat      memory         goal      …12 pieces
+   (default     (conver-  (operator     (long       (each
+     app)       sation)    state)       goals)    unloadable)
+        └──────────┴──────────┴──────────────┴───────────┘
+                               │ event sourcing (append-only log = source of truth)
+                               ▼
+                 SQLite WAL: sessions · credentials · memory · ledgers
+```
 
 ## Quick Start
 
@@ -100,6 +124,13 @@ Writing a Berry app takes a single `index.ts`: a default-exported `apply(ctx, co
 | [docs/运维手册.md](docs/运维手册.md)         | Data layout, backup, reset, dual-open guards, triage |
 
 > Documentation is currently authoritative in Chinese; English versions are planned alongside the 1.0 release.
+
+## What Berry Is Not
+
+- **Not another agent framework** — a framework gives you an SDK to write code; Berry gives you a loading surface to install apps. Capability pieces are data (installable, unloadable, replaceable), not dependencies in your project.
+- **Not a resident cloud service** — the single-machine form defaults to zero ports and zero listeners; the web UI is a loopback piece opened one-shot via `--port`, and the daemon form is an explicit choice.
+- **No autonomy promises** — approval pairs, budget brakes, an enumerable and revocable allowlist: write authority stays with humans and ledgers, and every bit of power the model gets has an audit surface.
+- **No second ecosystem format** — apps are npm packages (three-source distribution), skills are SKILL.md directories, configuration is overlay.yaml: no proprietary store, no proprietary container format.
 
 ## Project Status
 

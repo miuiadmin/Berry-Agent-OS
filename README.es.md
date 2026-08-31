@@ -26,14 +26,18 @@ Las aplicaciones tienen tres formas según el eje de tipos: **aplicaciones (se l
 
 **Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
 
+**26** módulos (todos con código) · **35** ganchos de ciclo de vida · **16** tipos de eventos durables · **12** piezas oficiales (todas desinstalables) · **2.400+** pruebas · **0** telemetría.
+
 ## Tabla de contenidos
 
 - [Por qué Berry](#por-qué-berry)
 - [Inicio rápido](#inicio-rápido)
 - [Características de un vistazo](#características-de-un-vistazo)
+- [Un vistazo a la arquitectura](#un-vistazo-a-la-arquitectura)
 - [Todo es una aplicación](#todo-es-una-aplicación)
 - [Modelo de seguridad](#modelo-de-seguridad)
 - [Documentación](#documentación)
+- [Lo que Berry no es](#lo-que-berry-no-es)
 - [Estado del proyecto](#estado-del-proyecto)
 - [Telemetría](#telemetría)
 - [Contribuir](#contribuir)
@@ -50,6 +54,26 @@ Berry responde a esto al estilo de un sistema operativo:
 - **Kernel mínimo**: el kernel fijo hace cuatro cosas — instalar (carga de aplicaciones y contexto), ejecutar (bucle del agente), proteger (seguridad y aprobaciones), almacenar (sesiones y credenciales). 25 módulos en un DAG unidireccional, reforzado por puertas de máquina — el kernel no se puede desinstalar y sus responsabilidades no pueden hincharse.
 - **Todo es una aplicación**: la conversación es una aplicación, el agente de programación es una aplicación, la memoria es una aplicación — incluso el puente MCP y la interfaz web son aplicaciones. Las aplicaciones se instalan, desinstalan y sustituyen; quita cualquiera y el bucle central sigue funcionando.
 - **Sesiones con origen en eventos**: una conversación es un registro de eventos de solo adición (SQLite WAL); el historial del modelo es una proyección del registro. Enmascaramiento, bifurcación, recuperación y repetición se sustentan en la semántica del registro — tu historial es tu dato.
+
+## Un vistazo a la arquitectura
+
+```text
+            ┌─────────────────────────────────────────────┐
+            │  Kernel fijo (Ring 0): instalar · ejecutar  │
+            │  · proteger · almacenar — DAG unidireccional│
+            │  de 25 módulos, vigilado por máquina        │
+            └──────────────────┬──────────────────────────┘
+                               │ árbol de composición (capa por defecto + overlay.yaml)
+        ┌──────────┬──────────┼──────────────┬───────────┐
+        ▼          ▼          ▼              ▼           ▼
+     coder       chat      memory         goal      …12 piezas
+   (app por     (conver-  (estado del    (objetivos  (cada una
+    defecto)    sación)    operador)     largos)   desinstalable)
+        └──────────┴──────────┴──────────────┴───────────┘
+                               │ origen en eventos (registro append-only = fuente de verdad)
+                               ▼
+                 SQLite WAL: sesiones · credenciales · memoria · libros de cuenta
+```
 
 ## Inicio rápido
 
@@ -100,6 +124,13 @@ Escribir una aplicación para Berry solo requiere un `index.ts`: un `apply(ctx, 
 | [docs/运维手册.md](docs/运维手册.md)         | Datos, copias, reinicio, protecciones, diagnóstico        |
 
 > La documentación es actualmente autoritativa en chino; las versiones en otros idiomas están planificadas junto al lanzamiento 1.0.
+
+## Lo que Berry no es
+
+- **No es otro framework de agentes** — un framework te da un SDK para escribir código; Berry te da una superficie de carga para instalar aplicaciones. Las piezas de capacidad son datos (instalables, desinstalables, reemplazables), no dependencias de tu proyecto.
+- **No es un servicio en la nube residente** — la forma monopuesto va por defecto sin puertos ni escuchas; la interfaz web es una pieza en loopback abierta puntualmente con `--port`, y la forma daemon es una elección explícita.
+- **Sin promesas de autonomía** — pares de aprobación, frenos presupuestarios, una allowlist enumerable y revocable: la autoridad de escritura queda en personas y libros de cuenta, y cada fragmento de poder que recibe el modelo tiene superficie de auditoría.
+- **Sin un segundo formato de ecosistema** — las aplicaciones son paquetes npm (distribución de tres fuentes), las habilidades son directorios SKILL.md, la configuración es overlay.yaml: sin tienda propia, sin formato de contenedor propio.
 
 ## Estado del proyecto
 
