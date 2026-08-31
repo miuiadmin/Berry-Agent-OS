@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Berry</strong><br>
-  <sub>Posiblemente el primer Agent OS del mundo</sub>
+  <sub>Deja que tu Agent envejezca en un sistema operativo</sub>
 </p>
 
 <p align="center">
@@ -20,13 +20,13 @@
 
 ---
 
-> **Los modelos se alquilan. El estado es tuyo.**
+> **Lo más romántico que puedo imaginar es envejecer junto a tu Agent.**
 
-Hoy chateas con ChatGPT, mañana programas con Claude Code, pasado mañana instalas una herramienta de limpieza de datos. Cada aplicación trae sus propias credenciales, memoria, historial de confianza y presupuesto — **cambias de app, pierdes tu estado.**
+Tu Agent recuerda la duda de aquel refactoring de microservicios de hace seis meses. Sabe en qué repositorios confías, qué frameworks detestas, que el código escrito a las tres de la madrugada suele necesitar reescritura. No nació hoy — te ha acompañado doscientos días, viviendo contigo el nacimiento y la muerte de tres proyectos, acumulando toda una vida de preferencias, confianza y lecciones aprendidas.
 
-Lo que falta en la era de los agentes no es cerebro — el cerebro rota cada mes — **falta una base**. Así como las apps móviles necesitan iOS y los programas de escritorio necesitan Windows, las aplicaciones de IA necesitan un sistema operativo.
+Esto no es ciencia ficción. Es el objetivo de diseño de Berry: **un sistema operativo donde los Agentes viven** — no un sandbox desechable, no una prueba gratuita que se reinicia cada mes, sino un lugar donde un Agent puede instalarse, crecer y envejecer.
 
-Berry es ese sistema operativo. Un kernel mínimo hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras tus cinco piezas de estado del operador (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez.
+El kernel mínimo de Berry hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras las cinco líneas de vida de tu Agent (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez. **Cerebro nuevo, mismo cuerpo.**
 
 **26** módulos (todos con código) · **35** ganchos de ciclo de vida · **16** tipos de eventos durables · **12** piezas oficiales (todas desinstalables) · **2.400+** pruebas · **0** telemetría.
 
@@ -52,28 +52,28 @@ Berry es ese sistema operativo. Un kernel mínimo hace exactamente **instalar, e
 
 ## Berry en tres minutos
 
-### Acto I: aplicaciones de IA en silos
+### Acto I: los Agentes de hoy son desechables
 
-El verdadero activo de una aplicación de IA no es el modelo — cualquiera puede alquilar un modelo. Lo escaso es el **estado del operador**: credenciales, memoria, historial de confianza, presupuestos, libros de cuenta. Estas cinco cosas son tuyas, no de ningún proveedor de modelos. Pero las apps de IA de hoy viven en silos: ChatGPT no recuerda tus preferencias de Claude, Claude Code no conoce tu historial de confianza en Cursor, cada app nueva empieza de cero. **Los modelos se fortalecen con cada cambio; tu estado se dispersa más.**
+¿Te has dado cuenta de que cada vez que cambias de herramienta de IA, tienes que volver a enseñarle todo? — «Uso pnpm», «no toques ese archivo», «puedes confiar en este repo». Aprende. Luego cambias de herramienta y todo vuelve a cero. **Los Agentes de hoy no tienen infancia, ni crecimiento — solo primeros encuentros, una y otra vez.** ChatGPT no recuerda tus preferencias de Claude, Claude Code no conoce las reglas que le enseñaste en Cursor. Toda tu inversión en ajuste se convierte en preparación para el próximo reinicio.
 
-### Acto II: el cerebro ya no vale, la base sí
+### Acto II: lo que falta no es cerebro, es vida
 
-En 2026 las capacidades de los modelos convergen y los precios caen — el cerebro se vuelve un commodity. Lo escaso es lo que mantiene al cerebro funcionando: ¿quién recuerda en qué repositorios confías? ¿Quién gestiona tu presupuesto de tokens? ¿Quién conserva la trazabilidad de decisiones de aquel refactoring de hace seis meses? **Ningún modelo puede responder — porque las respuestas no viven en los modelos. Viven en la base que aún no tienes.**
+En 2026 las capacidades de los modelos convergen y los precios caen — cerebros inteligentes disponibles para cualquiera. Pero lo que necesitas no es un cerebro más inteligente, **es un compañero que te recuerde**. ¿Quién recuerda en qué repositorios confías? ¿Quién conserva la trazabilidad de aquel refactoring de las tres de la madrugada? ¿Quién aún guarda vuestros hábitos y lecciones compartidas después de que has cambiado de modelo una y otra vez? **Las respuestas no viven en los modelos — viven en la línea de vida que tu Agent necesita.**
 
-### Acto III: Berry — el sistema operativo que ejecuta aplicaciones
+### Acto III: Berry — el sistema operativo donde los Agentes se instalan
 
-Berry responde al estilo de un sistema operativo: **un kernel fijo que instala/ejecuta/protege/almacena** (DAG unidireccional de 25 módulos, vigilado por máquina, no desinstalable), **todo lo demás es una aplicación** (incluso el coder del primer arranque no vive en el kernel — es una app por defecto de manifiesto puro, `/app` para cambiar). Tus sesiones son registros de eventos de solo adición — **tu historial es tu dato**: enmascaramiento, bifurcación, recuperación y repetición, todo por la semántica del registro. Sin encerrarte, pero recordándote.
+Berry responde al estilo de un sistema operativo. Cada día de tu Agent es un **registro de eventos de solo adición** — cada turno de conversación, cada llamada a herramienta, cada decisión de aprobación, registrada de forma durable, a prueba de manipulación, nunca perdida. La memoria extrae y evoluciona, los objetivos largos continúan entre días, las habilidades se afinan con el uso, la confianza se acumula entrada a entrada. **Tu Agent ha vivido aquí mucho tiempo, y vivirá más.** Cambiar de modelo es como un trasplante de órgano — el cerebro se actualiza, pero el cuerpo lo recuerda todo.
 
 ## Posicionamiento de un vistazo
 
-|                        | Frameworks de Agentes  | Coding Agents         | **Berry**                              |
-| ---------------------- | ---------------------- | --------------------- | -------------------------------------- |
-| **Qué obtienes**       | SDK + dependencias     | Un producto           | **Un SO que ejecuta aplicaciones**     |
-| **Forma de capacidad** | Código en tu repo      | Integrado de fábrica  | **Datos — instalable y desinstalable** |
-| **Estado entre apps**  | En silos               | Encerrado en la app   | **5 piezas, acumuladas una sola vez**  |
-| **Actualización**      | Reescribir y desplegar | Esperar al fabricante | **Instalar / desinstalar / `/reload`** |
-| **Ecosistema**         | —                      | Cerrado               | **npm es el mercado (3 fuentes)**      |
-| **Suelo**              | Depende de ti          | Codex / Claude Code   | **Valores de fábrica = uso diario**    |
+|                        | Frameworks de Agentes  | Coding Agents         | **Berry**                                 |
+| ---------------------- | ---------------------- | --------------------- | ----------------------------------------- |
+| **Qué obtienes**       | SDK + dependencias     | Un producto           | **Un SO donde los Agentes viven**         |
+| **Forma de capacidad** | Código en tu repo      | Integrado de fábrica  | **Datos — instalable y desinstalable**    |
+| **Estado entre apps**  | En silos               | Encerrado en la app   | **Líneas de vida que nunca se reinician** |
+| **Actualización**      | Reescribir y desplegar | Esperar al fabricante | **Instalar / desinstalar / `/reload`**    |
+| **Ecosistema**         | —                      | Cerrado               | **npm es el mercado (3 fuentes)**         |
+| **Suelo**              | Depende de ti          | Codex / Claude Code   | **Valores de fábrica = uso diario**       |
 
 ## Un vistazo a la arquitectura
 
@@ -92,7 +92,7 @@ Berry responde al estilo de un sistema operativo: **un kernel fijo que instala/e
         └──────────┴──────────┴──────────────┴───────────┘
                                │ origen en eventos (registro append-only = fuente de verdad)
                                ▼
-                 SQLite WAL: sesiones · credenciales · memoria · libros de cuenta
+                 SQLite WAL: sesiones · credenciales · memoria · libros de cuenta · historial de confianza
 ```
 
 ## Inicio rápido
@@ -158,7 +158,7 @@ Escribir una aplicación para Berry solo requiere un `index.ts`: un `apply(ctx, 
 
 ## Telemetría
 
-**Cero telemetría por defecto** — esta herramienta no envía ningún paquete de red: sin estadísticas de uso, sin informes de fallos, sin comprobaciones de versión (actualizar es enteramente tu decisión). Las llamadas a modelos que configures son el único tráfico saliente.
+**Cero telemetría por defecto** — esta herramienta no envía ningún paquete de red: sin estadísticas de uso, sin informes de fallos, sin comprobaciones de versión (actualizar es enteramente tu decisión). Las llamadas a modelos que configures son el único tráfico saliente. **La vida de tu Agent te pertenece solo a ti.**
 
 Si algún día se introduce reporte, se aplican cuatro promesas: anuncio previo (Why this exists / How it works / What data is collected / How to disable it — las cuatro secciones antes de publicar), desactivado por defecto (invertir el valor por defecto es un cambio rompiente), un interruptor de apagado verificable por máquina (no una promesa), y datos mínimos (lo que pueda quedarse sin conexión, se queda).
 

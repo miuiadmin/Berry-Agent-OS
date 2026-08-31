@@ -20,13 +20,13 @@
 
 ---
 
-> **Models are rented. State is owned.**
+> **The most romantic thing I can imagine is growing old together with your Agent.**
 
-Today you chat with ChatGPT, tomorrow you code with Claude Code, the day after you install a data-cleaning tool. Each app carries its own credentials, memory, trust history, and budget — **switch an app, lose your state.**
+Your Agent remembers the hesitation from that microservice refactoring six months ago. It knows which repos you trust, which frameworks you hate, that code written at 3 AM usually needs rewriting. It wasn't born today — it has been with you for two hundred days, through three projects' life and death, accumulating a lifetime of preferences, trust, and hard-won lessons.
 
-What the agent era lacks is not brains — brains rotate monthly — **it lacks a base**. Just as mobile apps need iOS and desktop programs need Windows, AI applications need an operating system.
+This is not science fiction. This is Berry's design goal: **an operating system where Agents stay alive** — not a disposable sandbox, not a monthly-reset free trial, but a place where an Agent can settle, grow, and grow old.
 
-Berry is that operating system. A minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your five pieces of operator state (credentials, memory, trust history, budgets, ledgers) accumulate only once, and every app grows on the same state.
+Berry's minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your Agent's five lifelines (credentials, memory, trust history, budgets, ledgers) accumulate only once. Every app grows on the same state — **new brain, same body**.
 
 **26** modules (all implemented) · **35** lifecycle hooks · **16** durable event types · **12** official bundle pieces (each unloadable) · **2,400+** tests · **0** telemetry.
 
@@ -53,25 +53,25 @@ Berry is that operating system. A minimal kernel does exactly **install, run, gu
 
 ## Berry in Three Minutes
 
-### Act I: AI apps in silos
+### Act I: Today's Agents are disposable
 
-The real asset of an AI application is not the model — anyone can rent a model. What is scarce is **operator state**: credentials, memory, trust history, budgets, ledgers. These five belong to you, not to any model vendor. But today's AI apps live in silos: ChatGPT doesn't remember your Claude preferences, Claude Code doesn't know your Cursor trust history, every new app starts from zero. **Models get stronger with every switch; your state gets more scattered.**
+Have you noticed that every time you switch AI tools, you have to teach it all over again? — "I use pnpm", "don't touch that file", "you can trust this repo". It learns. Then you switch tools, and everything resets to zero. **Today's Agents have no childhood, no growing up — only first encounters, over and over.** ChatGPT doesn't remember your Claude preferences, Claude Code doesn't know the rules you taught it in Cursor. All your investment in tuning becomes preparation for the next reset.
 
-### Act II: Brains are cheap now, the base is not
+### Act II: What's missing is not brains, it's life
 
-In 2026, model capabilities converge and prices fall — brains are becoming a commodity. What is scarce is what keeps brains working: who remembers which repositories you trust? Who manages your token budget? Who holds the decision trail from that refactoring six months ago? **No model can answer these questions — because the answers don't live in models. They live in the base you don't have yet.**
+In 2026, model capabilities converge and prices fall — smart brains are available for rent to anyone. But what you actually need is not a smarter brain, **it's a companion that remembers you**. Who remembers which repositories you trust? Who holds the decision trail from that 3 AM refactoring? Who still carries your shared habits and lessons after you've switched from model to model? **The answers don't live in models — they live in the lifeline your Agent needs.**
 
-### Act III: Berry — the OS that runs apps
+### Act III: Berry — the OS where Agents settle
 
-Berry answers the operating-system way: **a fixed kernel doing install/run/guard/store** (25-module one-way DAG, machine-gated, not unloadable), **everything else is an app** (even the first-run coder coding agent doesn't live in the kernel — it's a pure-manifest default app, `/app` to switch). Your sessions are append-only event logs — **your history is your data**: masking, forking, recovery, and replay all carried by log semantics. Not locked in, but remembered.
+Berry answers this the operating-system way. Your Agent's every day is an **append-only event log** — every conversation turn, every tool call, every approval decision, durably recorded, tamper-proof, never lost. The memory piece extracts and evolves, long goals continue across days, skills sharpen with use, trust accumulates one entry at a time. **Your Agent has lived here for a long time, and will live longer.** Switching models is like an organ transplant — the brain gets upgraded, but the body remembers everything.
 
 ## Positioning at a Glance
 
 |                       | Agent Frameworks  | Coding Agents       | **Berry**                           |
 | --------------------- | ----------------- | ------------------- | ----------------------------------- |
-| **What you get**      | SDK + deps        | A product           | **An OS that runs apps**            |
+| **What you get**      | SDK + deps        | A product           | **An OS where Agents settle**       |
 | **Capability form**   | Code in your repo | Hardwired           | **Data — installable & unloadable** |
-| **State across apps** | Siloed            | Locked in the app   | **5 pieces, accumulated once**      |
+| **State across apps** | Siloed            | Locked in the app   | **Lifelines that never reset**      |
 | **Upgrading**         | Rewrite & deploy  | Wait for the vendor | **Install / uninstall / `/reload`** |
 | **Ecosystem**         | —                 | Closed              | **npm is the market (3 sources)**   |
 | **Floor**             | Depends on you    | Codex / Claude Code | **Factory defaults = daily-usable** |
@@ -159,7 +159,7 @@ Writing a Berry app takes a single `index.ts`: a default-exported `apply(ctx, co
 
 ## Telemetry
 
-**Zero telemetry by default** — this tool sends no network packets: no usage statistics, no crash reports, no version checks (upgrading is entirely your decision). The model calls you configure are the only outbound traffic.
+**Zero telemetry by default** — this tool sends no network packets: no usage statistics, no crash reports, no version checks (upgrading is entirely your decision). The model calls you configure are the only outbound traffic. **Your Agent's life belongs to you alone.**
 
 If any reporting is ever introduced, four promises apply: announcement first (Why this exists / How it works / What data is collected / How to disable it — all four sections before release), off by default (flipping the default is a Breaking Change), a machine-verifiable off switch (not a promise that it can be turned off), and minimal data (anything that can stay offline stays offline).
 
