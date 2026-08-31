@@ -111,6 +111,13 @@ export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' |
       service.notify(`[widget] 自定义渲染不受支持，已降级通知（${typeof node}）`);
     },
 
+    hasAudience(): boolean {
+      // 广播面在场探针（复盘 20260901 R-2）：在场即真（保守口径——不探连通）；
+      // 无头 run/tick 进程 backends 空 → notify 静默 no-op，通知类消费方据此
+      // 跳过（如 obs 告警触发三件——无头不耗冷却，daemon 面下次重评重发）
+      return backends.length > 0;
+    },
+
     attach(backend: UiBackend): Disposer {
       backends.push(backend);
       let done = false;

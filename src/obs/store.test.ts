@@ -2,10 +2,12 @@
  * L3 obs — 自管库面测试（迁移幂等 / 增量往返 / 水印 MAX 合并 / 查询白名单；
  * :memory: 库——零落盘）。
  */
-import { mkdtempSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
+import { createAppSqliteFace } from '../persist/index.js';
 import { openRollupStore } from './store.js';
 import type { BucketDelta } from './rollup.js';
 
@@ -66,5 +68,70 @@ describe('obs 自管库面', () => {
     const rows = store.query({ metric: 'llm', fromMs: T0, toMs: T0, groupBy: [] });
     expect(rows[0]?.measures).toMatchObject({ calls: 0, tokens_in: 0 });
     store.close();
+  });
+});
+
+describe('obs 自管库面：复盘 20260901 T-2/R-3 开库编舞回归锁', () => {
+  it('R-3 半迁移残留自愈：表已建而 user_version 归零（崩溃残留）——重开不炸（IF NOT EXISTS 幂等）', () => {
+    const path = tmpDb();
+    const first = openRollupStore(path);
+    first.close();
+    // 模拟迁移事务外残留：表已在、user_version 被归零（首开 DDL 后、版本回写前崩溃）
+    // （raw 句柄经 persist 正路 face 取——better-sqlite3 裸导入仅 persist 允许）
+    const residue = createAppSqliteFace().openDatabase(path);
+    residue.pragma('user_version = 0');
+    residue.close();
+    // HEAD：版本 0 → 补跑裸 CREATE TABLE → table already exists 崩——修复后 IF NOT EXISTS 自愈
+    const healed = openRollupStore(path);
+    const rows = healed.query({ metric: 'turn', fromMs: T0 - 1, toMs: T0 + 1, groupBy: [] });
+    expect(rows).toHaveLength(1);
+    healed.close();
+  });
+
+  it('T-2 跨进程写锁下的开库：非 WAL 库 + 他进程持写锁——探测+退避后响亮抛（不瞬时崩）', async () => {
+    const path = tmpDb();
+    // 子进程：建库（DELETE 模式）+ 持写事务 2s——模拟 daemon 常驻写、tick 子进程冷开
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        [
+          "const Database = require('better-sqlite3');", // module.exports 即构造器（default 导出形态）
+          'const db = new Database(process.env.LOCK_DB);',
+          "db.pragma('busy_timeout = 500');",
+          "db.exec('CREATE TABLE _hold(x)');",
+          "db.exec('BEGIN IMMEDIATE');",
+          "db.prepare('INSERT INTO _hold VALUES (1)').run();",
+          'setTimeout(() => { db.close(); process.exit(0); }, 2000);',
+        ].join('\n'),
+      ],
+      { env: { ...process.env, LOCK_DB: path } },
+    );
+    // 等子进程建库并持锁（文件出现 + 短窗让 BEGIN IMMEDIATE 落地）
+    while (!existsSync(path)) await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const started = performance.now();
+    // HEAD：WAL 切换先行（锁通道不吃 busy_timeout）→ 持锁即抛（~0ms）；
+    // 修复后：busy_timeout 最先 + 幂等探测 + 5→15→45→135ms 退避（≥200ms 证据）后响亮抛
+    expect(() => openRollupStore(path)).toThrow(/locked/);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(150);
+    await new Promise((resolve) => child.on('exit', resolve));
+  });
+
+  it('T-2 幂等探测：已 WAL 库 + 他连接持写事务——重开零切换需求（读侧零锁）', () => {
+    const path = tmpDb();
+    openRollupStore(path).close(); // 首开：WAL 已立
+    // 同进程第二连接持写事务跨整个重开调用（单线程无释放窗）
+    const holder = createAppSqliteFace().openDatabase(path);
+    holder.pragma('busy_timeout = 100');
+    holder.exec('BEGIN IMMEDIATE');
+    holder.prepare('UPDATE alerts SET enabled = enabled').run();
+    // 探测读 journal_mode = wal → 跳过切换 → 开库成功（版本已 1 零迁移）
+    const second = openRollupStore(path);
+    const rows = second.query({ metric: 'turn', fromMs: T0 - 1, toMs: T0 + 1, groupBy: [] });
+    expect(rows).toHaveLength(1);
+    second.close();
+    holder.exec('COMMIT');
+    holder.close();
   });
 });

@@ -20,3 +20,8 @@ export type { MigrationSpec } from './migrations.js';
 export type { DatabaseConnection } from './connection-type.js';
 /** 第六键 berryagent/sqlite 注入物工厂（应用自管库——同实例 + 主库拒开，契约篇 §1.2 注记①） */
 export { createAppSqliteFace, type AppSqliteFace } from './app-sqlite.js';
+/**
+ * WAL 连接编舞共享件（主库 openStore 与官方件自管库开库同源——#25 铁律；
+ * 2026-09-01 复盘 T-2 抽取，obs rollup 开库消费）
+ */
+export { prepareWalConnection } from './app-sqlite.js';

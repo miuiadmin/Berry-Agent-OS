@@ -37,6 +37,35 @@ function realpathIfPossible(absolutePath: string): string {
 }
 
 /**
+ * WAL 连接编舞共享件（主库 openStore 与官方件自管库开库同源——探矿轮八
+ * #25 铁律；2026-09-01 复盘 T-2 抽取）。顺序三拍：
+ * ① busy_timeout 最先——后续一切写操作（含 BEGIN IMMEDIATE）的锁等待才有界；
+ * ② WAL 幂等探测——读 journal_mode 不加锁，已是 wal 跳过设置（幂等路径零锁需求）；
+ * ③ 真切换短退避重试（5→15→45→135ms 同步退避，≤5 次）：WAL 切换需独占访问
+ *   且其锁通道不吃 busy_timeout（SQLite 固有），双开冷启动后到者可能撞先到者
+ *   微秒级切换窗——退避覆盖之；对方长持锁（非切换窗）最终仍响亮抛 BUSY，
+ *   不做无限等待。
+ *
+ * @param db 待编舞的连接（调用方自 new；synchronous 等连接级强度设置归调用方）
+ * @param opts.busyTimeoutMs 锁等待上限（缺省 5000ms——与主库同拍）
+ */
+export function prepareWalConnection(db: Database.Database, opts?: { busyTimeoutMs?: number }): void {
+  db.pragma(`busy_timeout = ${opts?.busyTimeoutMs ?? 5000}`);
+  if ((db.pragma('journal_mode', { simple: true }) as string) !== 'wal') {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        db.pragma('journal_mode = WAL');
+        break;
+      } catch (err) {
+        if (attempt >= 4 || !String((err as Error).message).includes('database is locked')) throw err;
+        // 同步退避（openStore/开库面是同步 API——Atomics.wait 不让出事件循环）
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 * 3 ** attempt);
+      }
+    }
+  }
+}
+
+/**
  * 创建第六键注入物（或官方件直连开库面）。mainDbPath 在场时必须与宿主
  * Persistence 开库路径**同源解析**（组合根传装配序 ③ 的 resolvedDbPath——
  * APP_DB_PATH 覆盖已计入其中），realpath 归一后作为拒开比对基准：symlink

@@ -15,13 +15,16 @@
 
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createAppSqliteFace, type DatabaseConnection } from '../persist/index.js';
+import { createAppSqliteFace, prepareWalConnection, type DatabaseConnection } from '../persist/index.js';
 import { normalizeMigrations, type MigrationSpec } from '../persist/index.js';
 import type { BucketDelta, RollupTable } from './rollup.js';
 
 /**
  * 件私有迁移链（v1：四 rollup 表 + alerts 规则表占位 + 维度唯一索引）。
  * alerts 刀一建空表不执法（契约篇 §6.9 刀二拍板定形）。
+ * DDL 全带 IF NOT EXISTS 幂等（2026-09-01 复盘 R-3）：迁移事务外崩溃残留
+ * （表已建、user_version 归零）重开补跑无害——判定读 user_version 保持事务外
+ * 零锁读（WAL 读不阻塞），写侧幂等即安全。
  */
 const MIGRATIONS: readonly MigrationSpec[] = normalizeMigrations(
   [
@@ -29,34 +32,34 @@ const MIGRATIONS: readonly MigrationSpec[] = normalizeMigrations(
       version: 1,
       name: 'obs-rollup-v1',
       sql: `
-        CREATE TABLE llm_rollup_hour (
+        CREATE TABLE IF NOT EXISTS llm_rollup_hour (
           hour_ts INTEGER NOT NULL, app TEXT NOT NULL, model TEXT NOT NULL, priority TEXT NOT NULL,
           calls INTEGER NOT NULL DEFAULT 0, retries INTEGER NOT NULL DEFAULT 0,
           tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER NOT NULL DEFAULT 0,
           cache_read INTEGER NOT NULL DEFAULT 0, cache_write INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (hour_ts, app, model, priority)
         );
-        CREATE TABLE tool_rollup_hour (
+        CREATE TABLE IF NOT EXISTS tool_rollup_hour (
           hour_ts INTEGER NOT NULL, app TEXT NOT NULL, tool TEXT NOT NULL,
           calls INTEGER NOT NULL DEFAULT 0, blocked INTEGER NOT NULL DEFAULT 0,
           failures INTEGER NOT NULL DEFAULT 0, timeouts INTEGER NOT NULL DEFAULT 0,
           dur_ms_sum INTEGER NOT NULL DEFAULT 0, dur_ms_max INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (hour_ts, app, tool)
         );
-        CREATE TABLE turn_rollup_hour (
+        CREATE TABLE IF NOT EXISTS turn_rollup_hour (
           hour_ts INTEGER NOT NULL, app TEXT NOT NULL,
           turns INTEGER NOT NULL DEFAULT 0, user_msgs INTEGER NOT NULL DEFAULT 0,
           assistant_msgs INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (hour_ts, app)
         );
-        CREATE TABLE approval_rollup_hour (
+        CREATE TABLE IF NOT EXISTS approval_rollup_hour (
           hour_ts INTEGER NOT NULL, app TEXT NOT NULL,
           asked INTEGER NOT NULL DEFAULT 0, approved INTEGER NOT NULL DEFAULT 0,
           rejected INTEGER NOT NULL DEFAULT 0, always INTEGER NOT NULL DEFAULT 0,
           cancel INTEGER NOT NULL DEFAULT 0, unavailable INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (hour_ts, app)
         );
-        CREATE TABLE alerts (
+        CREATE TABLE IF NOT EXISTS alerts (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           metric TEXT NOT NULL, agg TEXT NOT NULL, op TEXT NOT NULL,
           threshold REAL NOT NULL, window_hours INTEGER NOT NULL,
@@ -220,9 +223,12 @@ export interface RollupStore {
    * 增量落账（单事务；dur_ms_max 走 MAX 合并，其余列 += 增量）。
    * onAlert 在场时**同事务内联执法**（契约篇 §6.9 刀二）：本批触达的表上有
    * 启用规则 → 算窗口聚合值 → 过阈且冷却窗外 → 回写 last_fired_at + 回调
-   * （回调内 emit/notify 由调用方负责——只通知不执法红线）
+   * （回调内 emit/notify 由调用方负责——只通知不执法红线）。
+   * canFire 在场时为**观众探针前置**（2026-09-01 复盘 R-2）：触发三件整笔
+   * 前先问——探针假（无头 run/tick 进程）→ 整笔跳过：不回写 last_fired_at、
+   * 不回调（冷却只被有观众的进程消耗，daemon 常驻面下次 flush 重评重发）。
    */
-  apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void): void;
+  apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void, canFire?: () => boolean): void;
   /** 规则清单（全量——含禁用行） */
   listAlerts(): readonly AlertRule[];
   /** 新增规则（校验闭集与值域——非法抛错）；返回含库生成 id 的完整行 */
@@ -245,10 +251,11 @@ export function openRollupStore(dbPath: string): RollupStore {
   mkdirSync(dirname(dbPath), { recursive: true });
   // 官方件直连（无拒开基准）——obs 是宿主侧编译件，威胁模型不覆盖此边界
   const db: DatabaseConnection = createAppSqliteFace().openDatabase(dbPath);
-  // 多进程鲁棒性：daemon 常驻与 tick 子进程会同开本库（宿主双开是既定容忍态）——
-  // WAL 消读写互斥 + busy_timeout 把瞬时写锁竞争变为等待而非 SQLITE_BUSY 即停
-  db.pragma('journal_mode = WAL');
-  db.pragma('busy_timeout = 5000');
+  // 多进程鲁棒性：daemon 常驻与 tick 子进程会同开本库（宿主双开是既定容忍态）。
+  // 编舞与主库 openStore 同源共享件（2026-09-01 复盘 T-2——#25 顺序铁律）：
+  // busy_timeout 最先 + WAL 幂等探测 + 短退避重试（WAL 切换锁通道不吃
+  // busy_timeout 是 SQLite 固有——他进程持写锁时不再 ~0ms 即崩）
+  prepareWalConnection(db);
   // 私有迁移链（件内自跑——不进主库聚合链，冷读 B1）
   const current = Number(
     (db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined)?.user_version ?? 0,
@@ -298,7 +305,7 @@ export function openRollupStore(dbPath: string): RollupStore {
   const listAlertRows = (): AlertRule[] => listAlertsStmt.all().map(alertRowOf);
 
   return {
-    apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void): void {
+    apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void, canFire?: () => boolean): void {
       // 本批触达的表（内联执法只查触达表上的规则——未触达的窗口值未变不重评）
       const touched = new Set(deltas.map((d) => d.table));
       db.transaction(() => {
@@ -328,6 +335,10 @@ export function openRollupStore(dbPath: string): RollupStore {
           const overThreshold = rule.op === '>' ? value > rule.threshold : value >= rule.threshold;
           const cooldownFree = rule.lastFiredAt === null || now - rule.lastFiredAt >= rule.cooldownMin * 60_000;
           if (!overThreshold || !cooldownFree) continue;
+          // 观众探针前置（复盘 R-2）：无头进程（无 ui 后端）整笔跳过——不回写
+          // last_fired_at、不回调。冷却只被有观众的进程消耗；daemon 常驻面
+          // 下次 flush 对同窗口重评重发（阈值还在，观众在场即触发）
+          if (canFire !== undefined && !canFire()) continue;
           db.prepare('UPDATE alerts SET last_fired_at = ? WHERE id = ?').run(now, rule.id);
           onAlert({ rule: { ...rule, lastFiredAt: now }, value });
         }

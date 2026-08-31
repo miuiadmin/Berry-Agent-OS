@@ -104,6 +104,12 @@ export interface UiService {
   setStatus(status: string): void;
   /** 自定义渲染槽（通道不识别则降级为 notify） */
   setWidget(node: unknown | null): void;
+  /**
+   * 广播面在场探针（在线后端数 > 0——保守探针=在场非连通；2026-09-01 复盘
+   * R-2）：通知类消费方（obs 告警）判「有无观众」——无头进程（backends 空、
+   * notify 静默 no-op）不消耗告警冷却，daemon 常驻面下次 flush 重评重发。
+   */
+  hasAudience(): boolean;
   /** 通道后端接入/摘除（通道 start/stop 时调用；返回摘除器） */
   attach(backend: UiBackend): Disposer;
 }

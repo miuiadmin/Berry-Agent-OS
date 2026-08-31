@@ -169,3 +169,78 @@ describe('obs 聚合核：口径锁（契约篇 §6.9 冷读回写全量）', ()
     expect(agg.drain()).toHaveLength(0);
   });
 });
+
+describe('obs 聚合核：复盘 20260901 R-4/D-3 回归锁（内存有界三律 + 回退落空计数）', () => {
+  it('R-4① 水印随 drain 清零——安全前提：同桶低值再发不落 DB（MAX 合并幂等契约）', () => {
+    // 水印清除本身无行为差（DB 侧 MAX 合并兜底）——本锁钉死的是「清除安全」的
+    // 前提契约：清除后再发的低值增量不得让 DB 侧 dur_ms_max 回落
+    const agg = createAggregator();
+    agg.ingest(env('r1', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(env('r1', 1, 'tool/call', { toolCallId: 'a', name: 'bash', arguments: '{}' }));
+    agg.ingest(env('r1', 2, 'tool/result', { toolCallId: 'a', content: 'ok' }, T0 + 9_000));
+    const first = agg.drain(); // dur_ms_max = 9000（此后水印已清——R-4①）
+    agg.ingest(env('r1', 3, 'tool/call', { toolCallId: 'b', name: 'bash', arguments: '{}' }));
+    agg.ingest(env('r1', 4, 'tool/result', { toolCallId: 'b', content: 'ok' }, T0 + 9_100));
+    const second = agg.drain();
+    // 两次增量各自携带当时水印（9000 / 9100）——单调升序天然安全；
+    // 反序才是险情：先 9100 后 9000，DB MAX 合并必须兜住
+    const reversed = createAggregator();
+    reversed.ingest(env('r1', 0, 'request/header', { app: 'chat' }));
+    reversed.ingest(env('r1', 1, 'tool/call', { toolCallId: 'a', name: 'bash', arguments: '{}' }));
+    reversed.ingest(env('r1', 2, 'tool/result', { toolCallId: 'a', content: 'ok' }, T0 + 9_100));
+    const hi = reversed.drain();
+    reversed.ingest(env('r1', 3, 'tool/call', { toolCallId: 'b', name: 'bash', arguments: '{}' }));
+    reversed.ingest(env('r1', 4, 'tool/result', { toolCallId: 'b', content: 'ok' }, T0 + 9_000));
+    const lo = reversed.drain(); // 清零后重发 9000——不得高于已落 9100
+    // 断言在 store 侧 MAX 合并（rollup 层只保证增量形状——ofTable 过滤出 tool 行，
+    // .at(0) 会抓到 header 产生的 turn 增量）
+    const toolRow = (all: ReturnType<typeof take>) => ofTable(all, 'tool').at(0);
+    expect(toolRow(first)?.cols['dur_ms_max']).toBe(9_000);
+    expect(toolRow(second)?.cols['dur_ms_max']).toBe(9_100);
+    expect(toolRow(hi)?.cols['dur_ms_max']).toBe(9_100);
+    expect(toolRow(lo)?.cols['dur_ms_max']).toBe(9_000); // 清零后低值重发——MAX 合并的输入
+  });
+
+  it('R-4③ 配对老化：调用时刻落后最新事件 > 1h 的晚到结果按孤儿容错——不产畸形时长', () => {
+    const agg = createAggregator();
+    agg.ingest(env('r2', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(env('r2', 1, 'tool/call', { toolCallId: 'late', name: 'bash', arguments: '{}' }));
+    // 结果晚到 2h（跨 drain 窗的陈旧在飞对）——HEAD 直配对出 7.2M ms 畸形时长
+    agg.ingest(env('r2', 2, 'tool/result', { toolCallId: 'late', content: 'ok' }, T0 + 2 * 3_600_000));
+    const all = take(agg);
+    expect(ofTable(all, 'tool')).toHaveLength(0); // 按配对丢失容错跳过
+    const [turn] = ofTable(all, 'turn');
+    expect(turn?.cols).toMatchObject({ tool_calls: 1 }); // call 侧计数不受累
+  });
+
+  it('R-4② 会话归因空窗修剪：7 日无事件会话的 app 归因回落 host 桶（归因近似窗）', () => {
+    const agg = createAggregator();
+    agg.ingest(env('ra', 0, 'request/header', { app: 'coder' }));
+    agg.ingest(env('ra', 1, 'user/message', { content: '活跃期' }));
+    expect(ofTable(take(agg), 'turn')[0]?.dims).toEqual(['coder']);
+    // 会话 B 8 日后活跃 → drain 时修剪 A（空窗 > 7 日）
+    agg.ingest(env('rb', 0, 'user/message', { content: '八日后' }, T0 + 8 * 24 * 3_600_000));
+    expect(ofTable(take(agg), 'turn')[0]?.dims).toEqual(['host']);
+    // A 复活：归因已修剪 → 回落 host 桶（设计取舍：长空窗归因近似，规范近族并列）
+    agg.ingest(env('ra', 2, 'user/message', { content: '复活' }, T0 + 8 * 24 * 3_600_000 + 1));
+    const rows = ofTable(take(agg), 'turn');
+    const revived = rows.find((r) => r.hourTs === Math.floor((T0 + 8 * 24 * 3_600_000) / 3_600_000) * 3_600_000);
+    expect(revived?.dims).toEqual(['host']);
+  });
+
+  it('D-3 回退落空计数：重启/全量 reload 窗（贡献登记空）——ingest 返回落空数供 warn 留痕', () => {
+    // 新聚合器 = 重启后形态：贡献登记表空，surfaceOp 到达全落空
+    const agg = createAggregator();
+    const misses = agg.ingest(
+      env('rd', 5, 'user/message', { content: '摘要' }, T0 + 60_000, { op: 'replace', start: 1, end: 3 }),
+    );
+    expect(misses).toBe(3); // seq 1-3 全无登记——落空计数即 /obs-rebuild 判据信号
+    // 对照：登记在场的回退零落空
+    const warm = createAggregator();
+    warm.ingest(env('rd', 1, 'user/message', { content: '旧' }));
+    const warmMisses = warm.ingest(
+      env('rd', 4, 'user/message', { content: '摘要' }, T0 + 60_000, { op: 'replace', start: 1, end: 1 }),
+    );
+    expect(warmMisses).toBe(0);
+  });
+});

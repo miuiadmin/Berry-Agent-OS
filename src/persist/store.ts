@@ -15,6 +15,7 @@ import { AppError, SESSION_FORMAT_UNSUPPORTED, SESSION_WRITE_CONFLICT } from '..
 import type { EventQueryOptions, EventQueryResult, EventQueryRow, SessionEvent } from '../contracts/events.js';
 import { deepFreeze } from '../session/snapshot.js';
 import { normalizeMigrations, type MigrationSpec } from './migrations.js';
+import { prepareWalConnection } from './app-sqlite.js';
 import {
   APPLICATION_ID,
   CANONICAL_DDL,
@@ -120,25 +121,9 @@ export function openStore(options: StoreOptions): Store {
   const latestVersion = chain.length > 0 ? chain[chain.length - 1]!.version : SCHEMA_VERSION;
 
   const db = new Database(options.path);
-  // 双开姿态四件之①②：WAL 读写不互斥 + 锁等待有界。
-  // 顺序铁律（#25）：busy_timeout 必须最先设置——后续一切写操作（含初始化
-  // 事务的 BEGIN IMMEDIATE）的锁等待才有界。
-  db.pragma(`busy_timeout = ${options.busyTimeoutMs ?? 5000}`);
-  // WAL 幂等探测：读当前模式不加锁；已是 wal 则跳过设置（幂等路径无锁需求）。
-  if ((db.pragma('journal_mode', { simple: true }) as string) !== 'wal') {
-    // 真切换需独占访问，且其锁通道不吃 busy_timeout——双开冷启动时后到者
-    // 可能撞上先到者微秒级的切换窗。短退避重试（5→15→45→135ms）覆盖之；
-    // 对方长持锁（非切换窗）最终仍响亮抛 BUSY，不做无限等待。
-    for (let attempt = 0; ; attempt++) {
-      try {
-        db.pragma('journal_mode = WAL');
-        break;
-      } catch (err) {
-        if (attempt >= 4 || !String((err as Error).message).includes('database is locked')) throw err;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 * 3 ** attempt); // 同步退避（openStore 是同步 API）
-      }
-    }
-  }
+  // 双开姿态四件之①②：WAL 读写不互斥 + 锁等待有界（#25 顺序铁律编舞经
+  // 共享件 prepareWalConnection——官方件自管库开库同源，2026-09-01 复盘 T-2 抽取）
+  prepareWalConnection(db, { busyTimeoutMs: options.busyTimeoutMs });
   // 拍板：synchronous=FULL（批量事务落盘强度优先；连接级设置，不涉库锁）
   db.pragma('synchronous = FULL');
 

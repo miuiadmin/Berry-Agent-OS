@@ -43,6 +43,11 @@ interface PathsFace {
 /** ctx.ui 服务面的结构子集（命令呈现——notify 广播面） */
 interface UiFace {
   notify(message: string): void;
+  /**
+   * 广播面在场探针（复盘 20260901 R-2，可选面——旧宿主缺省视为有观众）：
+   * 告警触发三件整笔前置——探针假（无头进程）整笔跳过不耗冷却。
+   */
+  hasAudience?(): boolean;
 }
 
 /** flush 缺省参数（5s / 256 条——契约篇 §6.9 刀一） */
@@ -290,7 +295,10 @@ export function createObsApp(): BuiltinAppModule {
         pendingCount = 0;
         const deltas = aggregator.drain();
         try {
-          store.apply(deltas, fireAlert);
+          // canFire = 观众探针前置（复盘 R-2）：无头进程（无 ui 后端）触发三件
+          // 整笔跳过——不回写 last_fired_at、不 emit、不 notify（探针缺省真
+          // ——旧宿主形态视为有观众，行为不回退）
+          store.apply(deltas, fireAlert, () => ui.hasAudience?.() ?? true);
         } catch (err) {
           stopped = true;
           unsubscribe?.();
@@ -311,7 +319,25 @@ export function createObsApp(): BuiltinAppModule {
         if (stopped || typeof payload !== 'object' || payload === null) return;
         const { sessionId, event } = payload as { sessionId?: unknown; event?: unknown };
         if (typeof sessionId !== 'string' || typeof event !== 'object' || event === null) return;
-        aggregator.ingest(payload as EventEnvelope);
+        // 畸形信封防御（复盘 20260901 批实测补）：time 非有限数值 = 发射方契约
+        // 违规（NaN 小时桶经 better-sqlite3 绑定即 NULL → NOT NULL 约束炸库，
+        // 会毒化整批 flush 并误触停摄取）——门口拦下：跳过 + warn，不毒批
+        const { time } = event as { time?: unknown };
+        if (typeof time !== 'number' || !Number.isFinite(time)) {
+          ctx.logger.warn('obs 跳过畸形信封（time 非有限数值——发射方契约违规）', {
+            sessionId,
+            type: (event as { type?: unknown }).type,
+          });
+          return;
+        }
+        // 返回值 = 遮蔽回退落空条数（复盘 D-3）：重启/全量 reload 窗与 drain
+        // 窗同族近似——非零即响亮留痕（「live=重建」不变式近似打破的信号）
+        const misses = aggregator.ingest(payload as EventEnvelope);
+        if (misses > 0) {
+          ctx.logger.warn(`obs 遮蔽回退落空 ${misses} 条（重启/reload/drain 近似窗——/obs-rebuild 判据）`, {
+            sessionId,
+          });
+        }
         pendingCount += 1;
         if (pendingCount >= flushBatch) flush();
       };
