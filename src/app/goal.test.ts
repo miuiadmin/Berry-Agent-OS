@@ -194,6 +194,34 @@ describe('goal 官方件全栈：工具三件 + schema 执法', () => {
     expect(await goalText(runtime)).toContain('状态：active');
   });
 
+  it('goal_update 声明面根 object + 空参数三形指引（全面复盘 #24 回归锁：顶层 union 被网关剥成空声明面）', async () => {
+    const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
+    // 声明面结构锁：根必须 type:'object'——顶层 union（anyOf 根）经宽容网关被
+    // 剥成空声明面，真模型只见不可用 schema 以空参数 {} 调用、宿主 root 级拒绝
+    // 9 连败（glm 经 anthropic-proxy 实证）——单测从不断言 schema 形状故此前漏网
+    const def = runtime.tools.get('goal_update');
+    expect(def, 'goal_update 已注册').toBeDefined();
+    expect((def!.parameters as { type?: string }).type).toBe('object');
+
+    await callTool(runtime, 'goal_set', { objective: '目标', tokenBudget: 50000 });
+    // 空参数（真跑失败形状）：判别执法位给三形指引文案，非裸 root 拒绝——
+    // 模型拿到可行动的回执才能自纠（空 schema 下模型只会重复 {}）
+    const empty = await callTool(runtime, 'goal_update', {}).catch((e) => e);
+    expect(empty).toBeInstanceOf(AppError);
+    expect((empty as AppError).code).toBe(TOOL_ARGUMENTS_INVALID);
+    expect((empty as AppError).message).toContain('三形');
+    expect((empty as AppError).message).toContain('completed');
+    // 两判别字段同携（ambiguous）同样拒：判别位执法互斥
+    const both = await callTool(runtime, 'goal_update', {
+      status: 'completed',
+      outcome: 'outcome_progress',
+      evidence: 'x',
+    }).catch((e) => e);
+    expect((both as AppError).code).toBe(TOOL_ARGUMENTS_INVALID);
+    // 状态保持 active（非法形不落库）
+    expect(await goalText(runtime)).toContain('状态：active');
+  });
+
   it('goal_update 状态机执法：无目标 GOAL_NOT_FOUND / 非 active GOAL_TRANSITION_INVALID', async () => {
     const runtime = await assemble({ streamFn: scriptedStream([textMessage('答')]).streamFn });
     const noGoal = await callTool(runtime, 'goal_update', { status: 'completed', evidence: '证据' }).catch((e) => e);

@@ -14,6 +14,7 @@ import {
   TOOL_DUPLICATE,
   TOOL_REGISTRY_LIMIT,
   TOOL_REGISTRY_RATE,
+  TOOL_SCHEMA_INVALID,
 } from '../contracts/errors.js';
 import type { ToolDefinition } from '../contracts/tools.js';
 import type { RowAppProbe } from '../contracts/app.js';
@@ -199,6 +200,47 @@ describe('registerToolsService — 描述扫描（契约篇 §3.2，2026-08-26 �
       tools.register({ ...makeTool(`ok-${i}`), description });
     }
     expect(tools.list()).toHaveLength(BENIGN_DESCRIPTIONS.length);
+  });
+});
+
+describe('registerToolsService — 声明面根 object 断言（契约篇 §3.1，2026-08-31 全面复盘 #24）', () => {
+  it('parameters 根非 object（顶层 union anyOf 无 type 字段）= TOOL_SCHEMA_INVALID 响亮拒载', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    // 顶层 union 形状（goal_update 修前实况）：anyOf 根无 type 字段——provider
+    // 网关（Anthropic input_schema 只认根 object）宽容放行后剥成空声明面，模型
+    // 以空参数 {} 调用、宿主校验段 root 级拒绝（真跑 9 连败实证——缺陷从「真跑
+    // 暴露」前移到「注册即炸」）
+    const unionDef: ToolDefinition = {
+      ...makeTool('union-tool'),
+      parameters: Type.Union([
+        Type.Object({ status: Type.Literal('completed'), evidence: Type.String({ minLength: 1 }) }),
+        Type.Object({ outcome: Type.Literal('outcome_progress') }),
+      ]),
+    };
+    try {
+      tools.register(unionDef);
+      expect.unreachable('顶层 union parameters 应被拒载');
+    } catch (e) {
+      expect(e).toBeInstanceOf(AppError);
+      expect((e as AppError).code).toBe(TOOL_SCHEMA_INVALID);
+    }
+    // 拒载后注册表干净；根 object 形状照常注册
+    expect(tools.list()).toEqual([]);
+    tools.register(makeTool('object-tool'));
+    expect(tools.get('object-tool')?.name).toBe('object-tool');
+  });
+
+  it('字段级 union（object 根内嵌 anyOf）不受限——互斥多形工具的合法写法', () => {
+    const ctx = createContext({ name: 'test' });
+    const tools = registerToolsService(ctx);
+    tools.register({
+      ...makeTool('nested-union'),
+      parameters: Type.Object({
+        status: Type.Optional(Type.Union([Type.Literal('completed'), Type.Literal('blocked')])),
+      }),
+    });
+    expect(tools.get('nested-union')?.name).toBe('nested-union');
   });
 });
 

@@ -35,6 +35,7 @@ import {
   CONTEXT_SERVICE_NOT_FOUND,
   TOOL_DESCRIPTION_REJECTED,
   TOOL_DUPLICATE,
+  TOOL_SCHEMA_INVALID,
   TOOL_REGISTRY_LIMIT,
   TOOL_REGISTRY_RATE,
   TOOL_TIMEOUT_INVALID,
@@ -165,6 +166,20 @@ export function registerToolsService(ctx: Context, opts: ToolRegistryOptions = {
           TOOL_TIMEOUT_INVALID,
           `工具 ${def.name} timeoutMs <= 0（${def.timeoutMs}）——装载面注册不许自管取消语义；` +
             `不设预算请省略该字段（走管道缺省 60s），正数过小将钳至 ${TOOL_TIMEOUT_FLOOR_MS}ms 下限`,
+        );
+      }
+      // 声明面根 object 断言（契约篇 §3.1，2026-08-31 全面复盘 #24）：各 provider
+      // 工具声明契约只认根 object——顶层 union（anyOf 无 type 字段）经宽容网关
+      // 不报错但被服务侧剥成空声明面，模型以空参数调用、宿主 root 级拒绝
+      // （goal_update 真跑 9 连败实证）。注册即炸，缺陷从「真模型才暴露」前移
+      // 到装配期；字段级 union（object 根内嵌）不受限——互斥多形工具的合法写法
+      const schemaRoot = def.parameters as { type?: string } | undefined;
+      if (schemaRoot !== undefined && schemaRoot.type !== 'object') {
+        throw new AppError(
+          TOOL_SCHEMA_INVALID,
+          `工具 ${def.name} parameters 根节点非 object（${schemaRoot.type ?? '（无 type 字段——顶层 union 形）'}）——` +
+            `provider 声明契约只认根 object，顶层 union 会被网关剥成空声明面（契约篇 §3.1）；` +
+            `互斥多形工具请用扁平 object（判别字段可选 + 字段级 enum）+ execute 首部判别执法`,
         );
       }
       // 读写性归一（契约篇 §3.1，2026-08-24 第十一批）：未声明 effect 按 'write'

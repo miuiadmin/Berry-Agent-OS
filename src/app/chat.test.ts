@@ -102,9 +102,13 @@ async function assemble(overrides: Parameters<typeof createRuntime>[0] = {}): Pr
 
 /** 自旋等待（微任务级——同步 scripted 流即触即达） */
 async function spinUntil(predicate: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 200; i++) {
+  // 微任务自旋 + 每 10 转一次宏任务让位：纯微任务旋转在满负载套件下会挨饿
+  //（应答桥的结算若跨定时器/IO 边界，微任务永远等不到——全量跑偶发
+  // 「等待超时：admin 闸 ask 在身」flake 实证，2026-08-31 根治）
+  for (let i = 0; i < 500; i++) {
     if (predicate()) return;
-    await Promise.resolve();
+    if (i % 10 === 9) await new Promise((resolve) => setImmediate(resolve));
+    else await Promise.resolve();
   }
   expect.unreachable(`等待超时：${what}`);
 }
@@ -954,8 +958,11 @@ describe('interrupt 小刀（run 信号透传 ask 链——审批在身时打断
    * 宏任务级自旋（本组专用）：submitOnce → 流 → 工具 → 审批 ask 的链路含
    * 宏任务跳变（流迭代与管道执行段），文件头 spinUntil 的纯微任务 200 轮不够。
    */
+  // 真时序等待（ask 管道跨 durable 落账 + UI 派发，微任务够不着）：5ms 步进，
+  // 上限 3s——原 200 步 ≈1s 帽在满负载套件下偶发超窗（2026-08-31 全量跑两例
+  // interrupt 时序 flake 实证）；真挂死仍会触顶红（3s 内不达即 unreachable）
   const spinUntilReal = async (predicate: () => boolean, what: string): Promise<void> => {
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 600; i++) {
       if (predicate()) return;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }

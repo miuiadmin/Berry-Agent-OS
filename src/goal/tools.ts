@@ -4,15 +4,22 @@
  * open 项否决接线）。
  *
  * goal_get（状态投影 + 计划态摘要 + gates 状态 + 账本近尾摘录）/ goal_set
- * （设定目标+预算，激活锚 = 宿主日志长度）/ goal_update（union 三形：
- * completed 必附证据 + blocked 附原因是 schema 执法位——union 分支逐字面绑定
- * 必填字段，参数校验段即拦截不靠提示词自觉；**轮结算形**非终态可多次调用，
- * 每次落一条 goal/evidence durable 事件进证据账本）。
+ * （设定目标+预算，激活锚 = 宿主日志长度）/ goal_update（判别三形：
+ * completed 必附证据 + blocked 附原因——字段级 schema 约束（enum/minLength）
+ * + execute 首部互斥判别双层执法（根 object 硬规则，顶层 union 会被 provider
+ * 网关剥成空声明面——契约篇 §3.1，2026-08-31 全面复盘 #24）；**轮结算形**非终
+ * 态可多次调用，每次落一条 goal/evidence durable 事件进证据账本）。
  * 转移合法性经 machine 判定，非法即响亮拒绝（GOAL_* 码）——宁拒绝不静默。
  */
 
 import { Type } from '../contracts/typebox.js';
-import { AppError, GOAL_ACTIVE_EXISTS, GOAL_TRANSITION_INVALID, GOAL_NOT_FOUND } from '../contracts/errors.js';
+import {
+  AppError,
+  GOAL_ACTIVE_EXISTS,
+  GOAL_TRANSITION_INVALID,
+  GOAL_NOT_FOUND,
+  TOOL_ARGUMENTS_INVALID,
+} from '../contracts/errors.js';
 import type { ToolDefinition, AgentToolResult } from '../contracts/tools.js';
 import { canSetGoal, canUpdateGoal, DELIVERY_OUTCOMES } from './machine.js';
 import type { GoalRecord } from './machine.js';
@@ -281,7 +288,7 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
     },
   };
 
-  /* ---------------- goal_update：union 三形（schema 执法位 + 账本写点） ---------------- */
+  /* ---------------- goal_update：判别三形（字段级 schema + execute 判别执法 + 账本写点） ---------------- */
   const goalUpdate: ToolDefinition = {
     name: 'goal_update',
     label: '申报目标',
@@ -291,40 +298,70 @@ export function createGoalTools(deps: GoalToolsDeps): readonly ToolDefinition[] 
       '轮结算形（非终态、每轮 run 结束应调用一次）：outcome 四值——surface_only（只完成表面动作，无实质推进）/ outcome_gap（尝试修改结果但没生效）/ outcome_progress（实质推进但目标未完成）/ primary_goal_outcome（目标本身的结果已交付）。outcome 是机器判定信号（喂反空转与预算有效性），虚报与反缩水条款同罪；evidence 可选附摘录。',
       '终态申报后目标定格（可用 goal_set 重设新目标）；轮结算不改变目标状态。',
     ].join('\n'),
-    // union 分支绑定必填字段：completed 无 evidence / blocked 无 note 过不了参数校验段；
-    // 轮结算形无 status 字段（outcome 字段即判别）——三形互斥自然分流
-    parameters: Type.Union([
-      Type.Object({
-        status: Type.Literal('completed'),
-        evidence: Type.String({
+    // 声明面 = 扁平 object（根 object 硬规则——契约篇 §3.1，2026-08-31 全面复盘
+    // #24 修死）：顶层 union（anyOf 根无 type 字段）会被 provider 网关剥成空声明
+    // 面（真跑 9 连败实证——模型只见不可用 schema、以空参数 {} 调用、宿主 root
+    // 级拒绝）。三形互斥执法位移到 execute 首部判别（见下）；字段级约束
+    // （enum 收口 / minLength）仍由 schema 段执管——执法强度不变
+    parameters: Type.Object({
+      status: Type.Optional(
+        Type.Union([Type.Literal('completed'), Type.Literal('blocked')], {
+          description: '终态判别字段（与 outcome 互斥）：completed = 目标达成 / blocked = 连续 3 轮同一阻塞',
+        }),
+      ),
+      evidence: Type.Optional(
+        Type.String({
           minLength: 1,
           maxLength: 8000,
-          description: '完成证据（逐需求列出并分级：可复现验证/工具输出摘录/口头断言）',
+          description: '完成证据（status=completed 必附；逐需求列出并分级：可复现验证/工具输出摘录/口头断言）',
         }),
-      }),
-      Type.Object({
-        status: Type.Literal('blocked'),
-        note: Type.String({
+      ),
+      note: Type.Optional(
+        Type.String({
           minLength: 1,
           maxLength: 4000,
-          description: '阻塞原因（含已尝试的办法——须连续 3 轮同一阻塞）',
+          description: '阻塞原因（status=blocked 必附；含已尝试的办法——须连续 3 轮同一阻塞）',
         }),
-      }),
-      Type.Object({
-        outcome: Type.Union(
+      ),
+      outcome: Type.Optional(
+        Type.Union(
           DELIVERY_OUTCOMES.map((v) => Type.Literal(v)),
-          { description: '本轮产出判定（四值——机器判定信号，如实申报）' },
+          {
+            description:
+              '轮结算判别字段（与 status 互斥；非终态、每轮 run 结束应调用一次）：surface_only / outcome_gap / outcome_progress / primary_goal_outcome——机器判定信号，如实申报',
+          },
         ),
-        evidence: Type.Optional(
-          Type.String({
-            minLength: 1,
-            maxLength: 8000,
-            description: '本轮证据摘录（可选——人读索引）',
-          }),
-        ),
-      }),
-    ]),
+      ),
+    }),
     execute: async (args) => {
+      // 判别执法位（三形互斥——schema 段管字段级类型，互斥在此）：参数问题优先
+      // 于目标状态问题（与三段管道分工同构）。指引文案带三形全貌——模型拿到可
+      // 行动回执才能自纠（空 schema 时代模型只会重复 {}）
+      const hasStatus = args.status !== undefined;
+      const hasOutcome = args.outcome !== undefined;
+      if (hasStatus === hasOutcome) {
+        // 同缺（空参数——真跑 9 连败形状）或同携（歧义）都拒
+        throw new AppError(
+          TOOL_ARGUMENTS_INVALID,
+          hasStatus
+            ? 'goal_update 参数非法：status（终态形）与 outcome（轮结算形）互斥——一次申报只择一形'
+            : 'goal_update 参数需三形择一：① 终态 status=completed 附 evidence（完成证据，逐需求分级）；' +
+                '② 终态 status=blocked 附 note（阻塞原因与已尝试的办法）；' +
+                `③ 轮结算 outcome 四值（${DELIVERY_OUTCOMES.join(' / ')}）可附 evidence 摘录——status 与 outcome 互斥`,
+        );
+      }
+      if (args.status === 'completed' && args.evidence === undefined) {
+        throw new AppError(
+          TOOL_ARGUMENTS_INVALID,
+          '终态形 status=completed 必附 evidence（完成证据：逐需求列出并分级——可复现验证 > 工具输出摘录 > 口头断言）',
+        );
+      }
+      if (args.status === 'blocked' && args.note === undefined) {
+        throw new AppError(
+          TOOL_ARGUMENTS_INVALID,
+          '终态形 status=blocked 必附 note（阻塞原因——含已尝试的办法，须连续 3 轮同一阻塞）',
+        );
+      }
       const sessionId = deps.getSessionId();
       if (sessionId === undefined) return textResult('无会话上下文——goal 不可用。', true);
       // 当前行读取（active 优先排序）：无行 NOT_FOUND / 有行非 active TRANSITION_INVALID

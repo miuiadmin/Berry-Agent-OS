@@ -111,6 +111,8 @@ export const TOOL_BLOCKED = registerErrorCode('TOOL_BLOCKED');
 export const TOOL_GATE_FAILED = registerErrorCode('TOOL_GATE_FAILED');
 /** tools：同名工具重复注册（注册表装配错误，响亮失败） */
 export const TOOL_DUPLICATE = registerErrorCode('TOOL_DUPLICATE');
+/** tools：工具参数 schema 根节点非 object（注册面结构断言——顶层 union 会被 provider 网关剥成空声明面，契约篇 §3.1 根 object 硬规则，2026-08-31 全面复盘 #24） */
+export const TOOL_SCHEMA_INVALID = registerErrorCode('TOOL_SCHEMA_INVALID');
 /** tools：工具描述命中注入模式拒绝注册（注册面描述扫描，契约篇 §3.2/§6.6——描述是进模型上下文的文本，管道进 shell 形态 = 描述面执行漏洞） */
 export const TOOL_DESCRIPTION_REJECTED = registerErrorCode('TOOL_DESCRIPTION_REJECTED');
 /**

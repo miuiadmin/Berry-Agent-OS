@@ -165,9 +165,14 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
       const sessionEvents = runtime.session?.events ?? [];
       const injections = sessionEvents.filter((e) => e.type === 'user/message' && e.data?.source === 'app:goal').length;
       const goalUpdateCalled = sessionEvents.some((e) => e.type === 'tool/call' && e.data?.name === 'goal_update');
-      goalRoundOk = (goalTerminal.includes('completed') && goalUpdateCalled) || injections > 0;
+      // 硬判据 = 终态 completed 且 goal_update 真被调用（2026-08-31 全面复盘 #24
+      // 收紧：原「|| injections > 0」兜底曾把 goal_update 断腿（顶层 union 被
+      // provider 网关剥成空声明面、9 连 TOOL_ARGUMENTS_INVALID）判定成假绿——
+      // 注射次数只证明续跑链活着，不证明结算动词可用。续跑注入数照打，但不再
+      // 参与判定；预算刹停 / 终态不达 = 红，正是水位监控想要的真信号）
+      goalRoundOk = goalTerminal.includes('completed') && goalUpdateCalled;
       console.log(
-        `[smoke] goal 终态: ${goalTerminal || '（12 轮内未终——续跑链或预算所致）'}  续跑注入 ${injections} 次  goal_update 调用 ${goalUpdateCalled ? '✓' : '✗'}  → ${goalRoundOk ? '✓' : '✗'}`,
+        `[smoke] goal 终态: ${goalTerminal || '（12 轮内未终——续跑链或预算所致）'}  goal_update 调用 ${goalUpdateCalled ? '✓' : '✗'}  续跑注入 ${injections} 次（仅报告不判定）  → ${goalRoundOk ? '✓' : '✗'}`,
       );
     } catch (error) {
       console.error(`[smoke] goal 轮异常: ${error instanceof Error ? error.message : String(error)}`);
