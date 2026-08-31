@@ -134,10 +134,103 @@ export interface RollupRow {
   readonly measures: Readonly<Record<string, number>>;
 }
 
+/** 告警规则行（alerts 表——契约篇 §6.9 刀二；只通知不执法红线见规范） */
+export interface AlertRule {
+  readonly id: number;
+  /** 度量闭集「表名.度量列」（llm.tokens_in 式——冷读 M1；白名单 = TABLE_META 派生） */
+  readonly metric: string;
+  /** 窗口聚合（sum=窗口合计 / avg=小时桶均值 / max=小时桶最大） */
+  readonly agg: 'sum' | 'avg' | 'max';
+  /** 比较算子（> / >=） */
+  readonly op: '>' | '>=';
+  readonly threshold: number;
+  /** 窗口小时数（滚动窗 = now − windowHours → now，UTC 小时桶对齐） */
+  readonly windowHours: number;
+  /** 冷却分钟（触发后该窗内不重触——防每 flush 重复通知） */
+  readonly cooldownMin: number;
+  readonly enabled: boolean;
+  /** 上次触发时刻（毫秒；null = 未触发过） */
+  readonly lastFiredAt: number | null;
+}
+
+/** 规则新增入参（id / lastFiredAt 由库生成） */
+export type AlertRuleInput = Omit<AlertRule, 'id' | 'lastFiredAt' | 'enabled'> & { readonly enabled?: boolean };
+
+/** 触发回执（apply 内联执法的回调载荷——app 侧三件触发：emit/notify/回写） */
+export interface AlertFire {
+  readonly rule: AlertRule;
+  /** 窗口聚合实测值（过阈即触发） */
+  readonly value: number;
+}
+
+/** 度量闭集校验：metric = 表名.度量列（白名单派生自 TABLE_META——含水印列） */
+export function parseAlertMetric(metric: string): { table: RollupTable; column: string } | undefined {
+  const dot = metric.indexOf('.');
+  if (dot <= 0 || dot === metric.length - 1) return undefined;
+  const table = metric.slice(0, dot) as RollupTable;
+  const column = metric.slice(dot + 1);
+  const meta = TABLE_META[table];
+  if (meta === undefined) return undefined;
+  const columns = [...meta.measures, ...(meta.watermark === undefined ? [] : [meta.watermark])];
+  return columns.includes(column) ? { table, column } : undefined;
+}
+
+/** 规则入参校验（非法抛错——命令壳兜底为通知，模型/人都可修笔重试） */
+export function validateAlertInput(input: AlertRuleInput): AlertRuleInput {
+  if (parseAlertMetric(input.metric) === undefined) {
+    throw new Error(
+      `告警 metric 非法「${input.metric}」——闭集 = 表名.度量列（四表：${(Object.keys(TABLE_META) as RollupTable[]).map((t) => `${t}.{${[...TABLE_META[t]!.measures, ...(TABLE_META[t]!.watermark === undefined ? [] : [TABLE_META[t]!.watermark])].join(',')}}`).join(' ')}）`,
+    );
+  }
+  if (input.agg !== 'sum' && input.agg !== 'avg' && input.agg !== 'max') {
+    throw new Error(`告警 agg 非法「${input.agg}」——sum | avg | max`);
+  }
+  if (input.op !== '>' && input.op !== '>=') {
+    throw new Error(`告警 op 非法「${input.op}」——> | >=`);
+  }
+  if (!Number.isFinite(input.threshold)) throw new Error('告警 threshold 须为有限数值');
+  if (!Number.isInteger(input.windowHours) || input.windowHours < 1 || input.windowHours > 24 * 366) {
+    throw new Error('告警 window_hours 须为 1..8784 的整数（小时）');
+  }
+  if (!Number.isInteger(input.cooldownMin) || input.cooldownMin < 0 || input.cooldownMin > 60 * 24 * 30) {
+    throw new Error('告警 cooldown_min 须为 0..43200 的整数（分钟；0 = 每 flush 可重触）');
+  }
+  return input;
+}
+
+/** alerts 表行的窄化读取（better-sqlite3 动态行 → AlertRule） */
+function alertRowOf(row: Record<string, unknown>): AlertRule {
+  return {
+    id: Number(row['id']),
+    metric: String(row['metric']),
+    agg: String(row['agg']) as AlertRule['agg'],
+    op: String(row['op']) as AlertRule['op'],
+    threshold: Number(row['threshold']),
+    windowHours: Number(row['window_hours']),
+    cooldownMin: Number(row['cooldown_min']),
+    enabled: Number(row['enabled']) === 1,
+    lastFiredAt:
+      row['last_fired_at'] === null || row['last_fired_at'] === undefined ? null : Number(row['last_fired_at']),
+  };
+}
+
 /** 自管库面（件 apply 期构造，随行作用域回卷 close） */
 export interface RollupStore {
-  /** 增量落账（单事务；dur_ms_max 走 MAX 合并，其余列 += 增量） */
-  apply(deltas: readonly BucketDelta[]): void;
+  /**
+   * 增量落账（单事务；dur_ms_max 走 MAX 合并，其余列 += 增量）。
+   * onAlert 在场时**同事务内联执法**（契约篇 §6.9 刀二）：本批触达的表上有
+   * 启用规则 → 算窗口聚合值 → 过阈且冷却窗外 → 回写 last_fired_at + 回调
+   * （回调内 emit/notify 由调用方负责——只通知不执法红线）
+   */
+  apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void): void;
+  /** 规则清单（全量——含禁用行） */
+  listAlerts(): readonly AlertRule[];
+  /** 新增规则（校验闭集与值域——非法抛错）；返回含库生成 id 的完整行 */
+  addAlert(input: AlertRuleInput): AlertRule;
+  /** 删除规则（不存在 = false） */
+  removeAlert(id: number): boolean;
+  /** 启停规则（不存在 = false） */
+  setAlertEnabled(id: number, enabled: boolean): boolean;
   /** 聚合查询（白名单校验——非法 groupBy 抛错由调用面呈现） */
   query(q: RollupQuery): readonly RollupRow[];
   /** 关库（行回卷路——未落账增量随弃，≤flushMs 丢窗为规范既定） */
@@ -196,8 +289,18 @@ export function openRollupStore(dbPath: string): RollupStore {
     );
   }
 
+  /** 读全量规则（含禁用——内联执法与命令清单共用取数面） */
+  // SAFETY: better-sqlite3 Statement 泛型重载不收动态列集——按行面收窄为
+  // Record<string, unknown>[]（alertRowOf 逐字段窄化）；与 UpsertStatement 同款信任边界
+  const listAlertsStmt = db.prepare('SELECT * FROM alerts ORDER BY id') as unknown as {
+    all(): Record<string, unknown>[];
+  };
+  const listAlertRows = (): AlertRule[] => listAlertsStmt.all().map(alertRowOf);
+
   return {
-    apply(deltas: readonly BucketDelta[]): void {
+    apply(deltas: readonly BucketDelta[], onAlert?: (fire: AlertFire) => void): void {
+      // 本批触达的表（内联执法只查触达表上的规则——未触达的窗口值未变不重评）
+      const touched = new Set(deltas.map((d) => d.table));
       db.transaction(() => {
         for (const delta of deltas) {
           const columns = TABLE_COLUMNS[delta.table];
@@ -209,7 +312,53 @@ export function openRollupStore(dbPath: string): RollupStore {
           });
           upserts.get(delta.table)!.run(...values); // 参数序 = TABLE_COLUMNS 全列归一
         }
+        // ---- 刀二内联执法（同事务——窗口读可见本批未提交增量）----
+        if (onAlert === undefined || touched.size === 0) return;
+        const now = Date.now();
+        for (const rule of listAlertRows()) {
+          if (!rule.enabled) continue;
+          const parsed = parseAlertMetric(rule.metric);
+          if (parsed === undefined || !touched.has(parsed.table)) continue;
+          const windowFrom = Math.floor((now - rule.windowHours * 3_600_000) / 3_600_000) * 3_600_000;
+          const fn = rule.agg === 'sum' ? 'SUM' : rule.agg === 'avg' ? 'AVG' : 'MAX';
+          const hit = db
+            .prepare(`SELECT ${fn}(${parsed.column}) AS v FROM ${parsed.table}_rollup_hour WHERE hour_ts >= ?`)
+            .get(windowFrom) as { v: number | null } | undefined;
+          const value = Number(hit?.v ?? 0);
+          const overThreshold = rule.op === '>' ? value > rule.threshold : value >= rule.threshold;
+          const cooldownFree = rule.lastFiredAt === null || now - rule.lastFiredAt >= rule.cooldownMin * 60_000;
+          if (!overThreshold || !cooldownFree) continue;
+          db.prepare('UPDATE alerts SET last_fired_at = ? WHERE id = ?').run(now, rule.id);
+          onAlert({ rule: { ...rule, lastFiredAt: now }, value });
+        }
       })();
+    },
+    listAlerts(): readonly AlertRule[] {
+      return listAlertRows();
+    },
+    addAlert(input: AlertRuleInput): AlertRule {
+      validateAlertInput(input);
+      const info = db
+        .prepare(
+          'INSERT INTO alerts (metric, agg, op, threshold, window_hours, cooldown_min, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(
+          input.metric,
+          input.agg,
+          input.op,
+          input.threshold,
+          input.windowHours,
+          input.cooldownMin,
+          input.enabled === false ? 0 : 1,
+        );
+      const id = Number(info.lastInsertRowid);
+      return listAlertRows().find((rule) => rule.id === id)!;
+    },
+    removeAlert(id: number): boolean {
+      return db.prepare('DELETE FROM alerts WHERE id = ?').run(id).changes > 0;
+    },
+    setAlertEnabled(id: number, enabled: boolean): boolean {
+      return db.prepare('UPDATE alerts SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id).changes > 0;
     },
     query(q: RollupQuery): readonly RollupRow[] {
       const meta = TABLE_META[q.metric];

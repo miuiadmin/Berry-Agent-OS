@@ -10,8 +10,9 @@
  * - **停摄取纪律**（契约篇 §6.9）：自管库写失败 → 停摄取 + warn 留痕
  *   （/obs-rebuild 判据触发面）。
  *
- * 刀二占位：`obs/alert` 词汇声明（emit）+ alerts 空表（store 私有迁移链）——
- * 执法落码随刀二。
+ * 刀二（已落码）：告警面全量——规则表 CRUD + `/obs-alerts` 命令族 + rollup
+ * 写入同事务内联执法（过阈 + 冷却窗外 → obs/alert emit + ui.notify +
+ * last_fired_at 回写）；红线：只通知不执法（规则面不读不写宿主护栏参数）。
  *
  * 拓扑窄边（web/admin 单边形态 + persist 自管库边）：tools/channels/paths/ui
  * 四服务全经 ctx.get（宿主装配序无条件 provide——fork 级联可见），零跨模块
@@ -25,7 +26,7 @@ import { AppError, TOOL_ARGUMENTS_INVALID } from '../contracts/errors.js';
 import { Type } from '../contracts/typebox.js';
 import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts/tools.js';
 import { createAggregator, type EventEnvelope } from './rollup.js';
-import { openRollupStore, renderRollupTable, type RollupStore } from './store.js';
+import { openRollupStore, renderRollupTable, type AlertRule, type RollupStore } from './store.js';
 import type { RollupTable } from './rollup.js';
 
 /** ctx.channels 服务面的结构子集（命令注册——宿主实现类型在 channels 模块） */
@@ -163,6 +164,61 @@ function renderObsView(store: RollupStore, view: string): string {
  * 创建 obs 官方件模块（builtins.ts 注册——零宿主资源闭包：数据库路径经
  * ctx.paths 正规口、四服务全 ctx.get，BuiltinRegistryOptions 零新字段）。
  */
+/**
+ * /obs-alerts 命令族处理（契约篇 §6.9 刀二动词面——/tick 同款风格）。
+ * 解析错与值域错统一抛错（命令壳兜底为通知——人与模型都可修笔重试）。
+ */
+function handleAlertsCommand(store: RollupStore, args: string): string {
+  const parts = args.split(/\s+/).filter((token) => token !== '');
+  const [verb, ...rest] = parts;
+  switch (verb) {
+    case undefined:
+    case 'list': {
+      const rules = store.listAlerts();
+      if (rules.length === 0) {
+        return '告警规则：（无）/obs-alerts add <sum|avg|max> <表.列> <op> <阈值> [窗h] [冷却min] 添加';
+      }
+      const header = 'id | metric | 聚合 阈值 | 窗h | 冷却min | 状态 | 上次触发';
+      const lines = rules.map(
+        (rule) =>
+          `${rule.id} | ${rule.metric} | ${rule.agg} ${rule.op} ${rule.threshold} | ${rule.windowHours} | ${rule.cooldownMin} | ` +
+          `${rule.enabled ? '启用' : '停用'} | ${rule.lastFiredAt === null ? '未触发' : new Date(rule.lastFiredAt).toISOString()}`,
+      );
+      return ['告警规则（只通知不执法——执法在宿主护栏）：', header, ...lines].join('\n');
+    }
+    case 'add': {
+      const [agg, metric, op, threshold, windowHours, cooldownMin] = rest;
+      if (agg === undefined || metric === undefined || op === undefined || threshold === undefined) {
+        throw new Error('用法：/obs-alerts add <sum|avg|max> <表.列> <op> <阈值> [窗h=24] [冷却min=60]');
+      }
+      const rule = store.addAlert({
+        metric,
+        agg: agg as AlertRule['agg'],
+        op: op as AlertRule['op'],
+        threshold: Number(threshold),
+        windowHours: windowHours === undefined ? 24 : Number(windowHours),
+        cooldownMin: cooldownMin === undefined ? 60 : Number(cooldownMin),
+      });
+      return `已添加告警规则 [${rule.id}]：${rule.metric} ${rule.agg} ${rule.op} ${rule.threshold}（窗 ${rule.windowHours}h / 冷却 ${rule.cooldownMin}min）`;
+    }
+    case 'rm': {
+      const id = Number(rest[0]);
+      if (!Number.isInteger(id)) throw new Error('用法：/obs-alerts rm <id>');
+      if (!store.removeAlert(id)) throw new Error(`规则 ${id} 不存在`);
+      return `已删除告警规则 [${id}]`;
+    }
+    case 'enable':
+    case 'disable': {
+      const id = Number(rest[0]);
+      if (!Number.isInteger(id)) throw new Error(`用法：/obs-alerts ${verb} <id>`);
+      if (!store.setAlertEnabled(id, verb === 'enable')) throw new Error(`规则 ${id} 不存在`);
+      return `规则 [${id}] 已${verb === 'enable' ? '启用' : '停用'}`;
+    }
+    default:
+      throw new Error(`未知动词「${verb}」——list / add / rm / enable / disable`);
+  }
+}
+
 export function createObsApp(): BuiltinAppModule {
   return {
     name: 'obs',
@@ -170,8 +226,14 @@ export function createObsApp(): BuiltinAppModule {
     // channels/paths/ui 由 Ring 1 channels 行装载期 provide——本行居其后的
     // 默认层装载序，fork 级联可见）。缺供即装配断言，诊断树也须见到此行
     inject: ['tools', 'channels', 'paths', 'ui'],
-    // 刀二占位：告警触发词汇（订阅方可先行接线；执法落码随刀二）
-    events: [{ name: 'obs/alert', mode: 'emit', note: '观测告警触发面（刀二执法落码；刀一词汇占位）' }],
+    // 刀二：告警触发词汇（执法已落码——rollup 写入内联检查过阈即发）
+    events: [
+      {
+        name: 'obs/alert',
+        mode: 'emit',
+        note: '观测告警触发面（rollup 写入内联执法：过阈 + 冷却窗外触发；载荷 { ruleId, metric, agg, value, threshold, windowHours }）',
+      },
+    ],
     // 行 config（flush 两参 = 测试缝 + 运营旋钮——schema 校验装载期执法）
     config: Type.Object({
       flushMs: Type.Optional(Type.Number({ minimum: 50, description: '落账批量窗口毫秒（缺省 5000）' })),
@@ -193,13 +255,34 @@ export function createObsApp(): BuiltinAppModule {
       let stopped = false;
       let unsubscribe: (() => void) | undefined;
 
-      /** 落账一批（drain → 单事务 upsert）；失败 = 停摄取纪律（契约篇 §6.9） */
+      /**
+       * 告警触发三件（契约篇 §6.9 刀二——store 内联执法的回调侧）：①obs/alert 总线
+       * 词汇（他应用可订阅联动）②ui.notify（到人性依赖 daemon 常驻——TUI 进程
+       * 内形态只到前台）③last_fired_at 回写在 store 事务内（回调前完成）。
+       * 红线：只通知不执法——本回调零宿主护栏读写。
+       */
+      const fireAlert = (fire: { rule: AlertRule; value: number }): void => {
+        const { rule, value } = fire;
+        ctx.emit('obs/alert', {
+          ruleId: rule.id,
+          metric: rule.metric,
+          agg: rule.agg,
+          value,
+          threshold: rule.threshold,
+          windowHours: rule.windowHours,
+        });
+        ui.notify(
+          `⚠ 观测告警 [${rule.id}] ${rule.metric}：${rule.agg} ${rule.windowHours}h = ${value}（${rule.op} ${rule.threshold}）`,
+        );
+      };
+
+      /** 落账一批（drain → 单事务 upsert + 内联告警执法）；失败 = 停摄取纪律（契约篇 §6.9） */
       const flush = (): void => {
         if (stopped || pendingCount === 0) return;
         pendingCount = 0;
         const deltas = aggregator.drain();
         try {
-          store.apply(deltas);
+          store.apply(deltas, fireAlert);
         } catch (err) {
           stopped = true;
           unsubscribe?.();
@@ -237,6 +320,18 @@ export function createObsApp(): BuiltinAppModule {
             source: 'app',
             handler: (args: string): void => {
               ui.notify(renderObsView(store, args.trim()));
+            },
+          }),
+        );
+        ctx.effect(() =>
+          channels.registerCommand({
+            name: 'obs-alerts',
+            description:
+              '观测告警规则面（list / add <sum|avg|max> <表.列> <op> <阈值> [窗h] [冷却min] / rm <id> / enable|disable <id>）',
+            argumentHint: 'list',
+            source: 'app',
+            handler: (args: string): void => {
+              ui.notify(handleAlertsCommand(store, args.trim()));
             },
           }),
         );
