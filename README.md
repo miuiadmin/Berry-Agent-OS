@@ -30,6 +30,12 @@ berry dump-config # 生效组合诊断（模型/组合树/应用装载状态，�
 
 首次启动会在 `~/.berry/` 建数据目录。模型缺省 `anthropic/claude-sonnet-5`，可用 `APP_MODEL` 覆盖；provider 凭证走 pi-ai 凭证链（环境变量或凭证表）。
 
+## 遥测
+
+**默认零遥测**——本工具不发任何网络包：无使用统计、无崩溃上报、无版本检查（升级与否完全由你决定）。你配置的模型调用是唯一的出网流量。
+
+若未来引入任何回传，承诺四件：公告先行（Why this exists / How it works / What data is collected / How to disable it 四段俱全才发版）、默认关闭（默认值反转视为 Breaking Change）、关闭通道机器可验证（不是一句「可以关」）、数据面最小化（能离线的绝不回传）。
+
 ## 文档
 
 | 文档                                         | 内容                                                   |
