@@ -19,7 +19,7 @@ import type { SubagentSettlement } from '../contracts/subagent.js';
 import type { UserMessage } from '../contracts/llm.js';
 import type { DriverEntry } from '../chat/index.js';
 import { chainSessionId } from '../context/chain.js';
-import { usageLedgerBuckets } from '../session/index.js';
+import { usageLedgerBuckets, delegationUsageCallId } from '../session/index.js';
 
 /** 通知正文 output/diagnostic 摘录上限（字符）——通知是唤醒线索非产物载体 */
 const EXCERPT_LIMIT = 4000;
@@ -70,7 +70,10 @@ export function createSubagentNotifier(opts: SubagentNotifierOptions): (settleme
     if (entry !== undefined && settlement.result.usage !== undefined) {
       const usage = settlement.result.usage;
       entry.session.append('llm/usage', {
-        callId: settlement.execution.id,
+        // 'delegation:' 判别前缀 + executionId 幂等身份（复盘 20260901 R-1）：
+        // goal ④ 预算腿按前缀消费本笔——预算闸门必须看得见子代理消耗（pi-5）；
+        // 构造与判别同源收口于 session/event-types 三函数
+        callId: delegationUsageCallId(settlement.execution.id),
         model: opts.model,
         priority: 'background',
         // 全桶入账（会话篇 §1.1 P1-5 修偏）：结算折叠腿与 complete/前台 loop

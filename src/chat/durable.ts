@@ -22,7 +22,7 @@ import type { GateDecisionPayload, GateDecisionSink } from '../contracts/tools.j
 import type { Session } from '../session/session.js';
 import type { ProjectedMessage } from '../session/derive.js';
 import type { TurnEndReason } from '../session/event-types.js';
-import { usageLedgerBuckets, ledgerModel } from '../session/event-types.js';
+import { usageLedgerBuckets, ledgerModel, turnUsageCallId } from '../session/event-types.js';
 import type { ApprovalDecisionSink } from '../safety/approval.js';
 
 /** 组合根持有的 durable 接线面（loop emit 的持久化半边 + 两个结构化 sink） */
@@ -209,10 +209,11 @@ export function createDurableSinks(
           // origin!=='delegation' 守卫防双重计数：delegation 子会话花销由结算折叠
           // （app/notify.ts——折进父会话 background 道）覆盖，子会话不再自折一笔。
           // callId = 轮身份（assistant/message 事件的 seq——write-behind 重试去重锚点，
-          // 同会话内天然唯一且幂等）
+          // 同会话内天然唯一且幂等）。'turn:' 前缀经 event-types 判别式三函数同源
+          // 构造（复盘 20260901 R-1——goal ④ 预算腿按前缀排除本腿笔防双计）
           if (message.usage !== undefined && session.header.origin !== 'delegation') {
             session.append('llm/usage', {
-              callId: `turn:${session.header.sessionId}:${appended.seq}`,
+              callId: turnUsageCallId(session.header.sessionId, appended.seq),
               // model 口径统一（P1-5）：实录优先——provider+model 拼全形，请求标识
               // 兜底（修偏前落裸 model id——与 complete 写点两种口径）
               model: ledgerModel(message, options.model),

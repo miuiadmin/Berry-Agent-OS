@@ -3252,7 +3252,8 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     expect(lastUser.source).toBe('subagent-settled');
     expect(lastUser.content).toContain('委派-审读');
 
-    // durable 双事件：llm/usage 折叠（background 道，callId = 子运行 id）+ user/message 带归因。
+    // durable 双事件：llm/usage 折叠（background 道，callId = 'delegation:' 前缀 +
+    // 子运行 id——复盘 R-1 判别式同源）+ user/message 带归因。
     // 底账统一（契约篇 §5.4）：主循环 turn 先自折 foreground 道，结算再折 background 道——
     // 两道并存不冲突，find 只认 background 的折叠才是结算产物
     const usageEvents = runtime.session!.events.filter((e) => e.type === 'llm/usage');
@@ -3265,7 +3266,7 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     });
     const background = usageEvents.find((e) => (e.data as { priority: string }).priority === 'background');
     expect(background?.data).toEqual({
-      callId: 'stub-sub-run',
+      callId: 'delegation:stub-sub-run',
       model: expect.any(String),
       priority: 'background',
       // 结算折叠腿同归一函数：四桶齐落 + totalTokens（夹具 150）滤除

@@ -132,6 +132,47 @@ export interface LlmUsageData {
   };
 }
 
+/* ---- llm/usage callId 判别式三函数（2026-09-01 复盘 R-1 同源收口） ----
+ * 三写点各携可判别的 callId 前缀：前台 loop 腿 'turn:'、委派结算折叠腿
+ * 'delegation:'、complete 单发腿无前缀（randomUUID 裸形）。构造与判别收口
+ * 于本模块（载荷类型旁）= 写点与读点单源：goal ④ 预算腿按前缀消费委派折叠
+ * 笔（运行时骨架篇 §6.8「预算刹车」例外二），前缀散落字符串比对即判别式漂移。
+ */
+
+/** 前台 loop 写点 callId 前缀（`${sessionId}:${seq}` 拼在前缀后） */
+const TURN_USAGE_CALLID_PREFIX = 'turn:';
+
+/** 委派结算折叠写点 callId 前缀（executionId 拼在前缀后） */
+const DELEGATION_USAGE_CALLID_PREFIX = 'delegation:';
+
+/**
+ * 前台 loop 写点 callId 构造（chat/durable.ts 前台腿）：`turn:<sessionId>:<seq>`。
+ * @param sessionId 会话 id
+ * @param seq 该笔 usage 锚定的 durable 事件序号
+ */
+export function turnUsageCallId(sessionId: string, seq: number): string {
+  return `${TURN_USAGE_CALLID_PREFIX}${sessionId}:${seq}`;
+}
+
+/**
+ * 委派结算折叠写点 callId 构造（app/notify.ts 折叠腿）：`delegation:<executionId>`。
+ * 前缀为常量——write-behind 去重锚语义不损（executionId 仍唯一）。
+ * @param executionId 子运行执行 id（in-process = 子会话 id）
+ */
+export function delegationUsageCallId(executionId: string): string {
+  return `${DELEGATION_USAGE_CALLID_PREFIX}${executionId}`;
+}
+
+/**
+ * 委派结算折叠笔判别式（goal/app.ts ④ 预算腿消费面）：只认前缀不认 priority
+ * ——complete 单发腿 randomUUID 裸形不命中（不与轮间沉淀自报双计）、前台
+ * 'turn:' 笔不命中（已随 assistant/message 主腿计过，再计即双计）。
+ * @param callId llm/usage 载荷的 callId
+ */
+export function isDelegationUsageCallId(callId: string): boolean {
+  return callId.startsWith(DELEGATION_USAGE_CALLID_PREFIX);
+}
+
 /**
  * llm/usage 底账桶归一（会话篇 §1.1 全桶入账）：从 llm 层 Usage 原始对象
  * 提取事件载荷形状——四必填桶直拷，两可选桶（cacheWrite1h/reasoning）上报才

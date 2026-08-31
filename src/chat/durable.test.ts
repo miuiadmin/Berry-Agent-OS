@@ -83,7 +83,8 @@ describe('createDurableSinks：事件 → session.append 映射', () => {
 
   it('底账统一不双计：delegation 会话不自折前台道（子会话花销只经结算折叠进父账）', () => {
     // delegation 子会话：assistant 用量不落 llm/usage——它的账由父会话的
-    // subagent 结算折叠（background 道，callId = 子运行 id）统一入账，
+    // subagent 结算折叠（background 道，callId = 'delegation:' 前缀 + 子运行
+    // id——复盘 R-1 判别式同源）统一入账，
     // 自折一道 + 结算一道 = 双计，守卫在 origin 上（契约篇 §5.4 底账统一）
     const delegation = new Session({ origin: 'delegation' });
     createDurableSinks(delegation).handle({ type: 'message_end', message: textAssistant('子跑完') });

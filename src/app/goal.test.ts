@@ -405,6 +405,67 @@ describe('goal 预算刹车全栈：usage 累计 ≥ 帽 → 刹停 + 当轮收�
     // 刹停后结算：不再续跑（stopped 非 active）
     expect(contexts).toHaveLength(2);
   });
+
+  it('【回归锁 R-1】④ 委派结算折叠腿：delegation 前缀 llm/usage 四桶和计账刹停；randomUUID/turn: 两形不计（防双计）', async () => {
+    // 委派工具归 'read' 不受 backgroundWake 工具面收窄——修复前 read-only 续跑
+    // 轮可经委派烧钱绕 tokenBudget 帽：子会话花销只经结算折叠（app/notify.ts）
+    // 折进父会话 llm/usage（background 道、callId 原为裸 execution.id），而 ④ 只
+    // 消费 assistant/message → 记账/复验/自报三面全盲（复盘 20260901 R-1）
+    const { streamFn, contexts } = scriptedStream([textMessage('收尾交代')]);
+    const runtime = await assemble({ streamFn });
+    await callTool(runtime, 'goal_set', { objective: '委派预算锁', tokenBudget: 1000 });
+    const sessionId = runtime.session!.header.sessionId;
+    // 对照两笔先落且不得计入：complete 单发腿形（randomUUID callId——轮间沉淀已
+    // 在调用点自报，再计即双计）与前台 loop 形（turn: 前缀——同一笔花销已随
+    // assistant/message 主腿计过，再计即双计）
+    runtime.ctx.emit('session/event', {
+      sessionId,
+      event: {
+        type: 'llm/usage',
+        data: {
+          callId: '0b6f2f6e-0000-4000-8000-000000000001',
+          model: 'test/m',
+          priority: 'background',
+          usage: { input: 5000, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    });
+    runtime.ctx.emit('session/event', {
+      sessionId,
+      event: {
+        type: 'llm/usage',
+        data: {
+          callId: `turn:${sessionId}:1`,
+          model: 'test/m',
+          priority: 'foreground',
+          usage: { input: 5000, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    });
+    let text = await goalText(runtime);
+    expect(text).toContain('状态：active');
+    expect(text).toContain('0 / 1000 tokens');
+    // 委派结算折叠笔：delegation: 前缀（executionId 幂等身份）——底账四桶和
+    //（700+400=1100 ≥ 帽 1000，llm/usage 无 totalTokens 派生值）即刹停
+    runtime.ctx.emit('session/event', {
+      sessionId,
+      event: {
+        type: 'llm/usage',
+        data: {
+          callId: 'delegation:exec-r1',
+          model: 'test/m',
+          priority: 'background',
+          usage: { input: 700, output: 400, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    });
+    // 刹停后收尾注入开轮（与首用例同款：忙闲皆注入，此处 agent 闲 → deliver 开轮）
+    await spinUntil(() => contexts.length >= 1, '刹停收尾开轮');
+    await runtime.conversation!.settle();
+    text = await goalText(runtime);
+    expect(text).toContain('状态：stopped（原因：budget）');
+    expect(text).toContain('1100 / 1000 tokens');
+  });
 });
 
 describe('boot 降级 + /goal 命令族 + /reload 不双降（跨进程真库文件）', () => {

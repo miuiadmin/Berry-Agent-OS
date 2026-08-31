@@ -83,7 +83,7 @@ function settlement(
 /* ---------------- 用例 ---------------- */
 
 describe('归属解析 + 结算折叠（llm/usage 计量事件）', () => {
-  it('显式键命中：并入该会话一条 background 道 llm/usage（callId = execution.id）', () => {
+  it('显式键命中：并入该会话一条 background 道 llm/usage（callId = delegation: 前缀 + execution.id——判别式同源，复盘 R-1）', () => {
     const { notifier, entries } = makeRegistry();
     const { entry } = registerEntry(entries);
     notifier(settlement({ ownerSessionId: entry.session.header.sessionId }));
@@ -92,7 +92,7 @@ describe('归属解析 + 结算折叠（llm/usage 计量事件）', () => {
     // 全桶入账（P1-5 修偏，挖矿 B3——notify 折叠腿是三审漏数的第四写点）：
     // cacheRead/cacheWrite 必落、上报拆分桶随行、totalTokens/cost 滤除
     expect(usageEvents[0]!.data).toEqual({
-      callId: 'child-session-1',
+      callId: 'delegation:child-session-1',
       model: 'test/model',
       priority: 'background',
       usage: { input: 100, output: 50, cacheRead: 700, cacheWrite: 40, cacheWrite1h: 10, reasoning: 5 },

@@ -61,6 +61,9 @@ import type { ToolDefinition, ToolsService } from '../contracts/tools.js';
 import type { BuiltinAppModule, AppContext } from '../contracts/app.js';
 import type { Context, Disposer } from '../context/types.js';
 import type { DatabaseConnection } from '../persist/index.js';
+// session 边（2026-09-01 复盘 R-1「先看见的边」纪律）：llm/usage callId 判别式
+// 同源收口——与 durable.ts 前台腿 / notify.ts 折叠腿两写点共用 event-types 三函数
+import { isDelegationUsageCallId } from '../session/event-types.js';
 import type { SessionEvent } from '../contracts/events.js';
 import { GoalStore, newWakeId } from './store.js';
 import {
@@ -518,18 +521,84 @@ async function applyGoalApp(
     );
   }
 
-  /* ---- ④ 预算刹车：assistant/message usage 累计，≥ 帽即刹停 + 收尾注入 ---- */
+  /* ---- ④ 预算刹车：两腿累计，≥ 帽即刹停 + 收尾注入 ----
+   * 腿一（原腿）：前台 assistant/message usage（turn 汇总额——主 loop 流式调用
+   * 的计量事实）。
+   * 腿二（2026-09-01 复盘 R-1）：委派结算折叠笔——callId 带 'delegation:' 前缀的
+   * llm/usage 镜像（app/notify.ts 折进父会话 background 道）。修复前子代理花销
+   * 对 ④ 记账/⑤ 复验/沉淀自报三面全盲：委派工具归 'read' 不受 backgroundWake
+   * 工具面收窄，read-only 续跑轮可经委派烧钱绕 tokenBudget 帽。只认前缀不认
+   * priority——complete 单发腿 randomUUID 裸形不命中（不与轮间沉淀调用点自报
+   * 双计）、前台 'turn:' 笔不命中（已随腿一计过，再计即双计）；判别式与两写点
+   * 同源收口于 session/event-types 三函数。delta 口径 = 底账四桶和（llm/usage
+   * 无 totalTokens 派生值——派生归投影律）。 */
+
+  /**
+   * ④ 预算记账 + 刹停收尾（两腿共尾——腿二并入后提取，防双份漂移）：
+   * 记账后判帽，超帽即停（幂等 WHERE status='active'）+ 落 budget 证据 +
+   * 停摆挂钟 + 收尾注入（agent 缺供只跳过注入——记账与刹停是数据面）。
+   * @param sessionId 归属会话
+   * @param delta 本笔增量（腿一 totalTokens 口径 / 腿二四桶和口径——各自算好传入）
+   */
+  const chargeAndBrake = (sessionId: string, delta: number): void => {
+    const goal = store.addUsage(sessionId, delta, Date.now());
+    if (goal === undefined || goal.tokensUsed < goal.tokenBudget) return;
+    // 刹停（幂等护栏：WHERE status='active'）+ 同步收尾注入（忙时 steer——
+    // 模型当轮收尾交代下一步；预算尽≠完成，提示词如实示态）
+    store.stopByBudget(sessionId, goal.tokensUsed, Date.now());
+    // 停因事件（刀三）：预算尽落 durable 证据——停滞判定断 streak（预算帽拒发
+    // 轮不折算成模型停滞）+ 审计面回读；willRetry=false（预算尽不自动重试）
+    sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'budget', willRetry: false });
+    // 终态同笔停摆挂钟（刀四 CR-6 三处之二）
+    suspendWake(goal.goalId);
+    // 刹停后行已非 active——getBySession 取当前行（updated_at 最新 = 刚停行）
+    const stopped = store.getBySession(sessionId);
+    if (stopped !== undefined) {
+      try {
+        agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'app:goal', session: sessionId });
+      } catch (err) {
+        // S1 退役容错：目标会话已退役——收尾注入无处可投仅记 debug（与 ③ 同口径）
+        if (err instanceof AppError && err.code === AGENT_SESSION_INACTIVE) {
+          ctx.logger.debug('goal 收尾注入跳过：归属会话已退役', { sessionId });
+        } else {
+          throw err;
+        }
+      }
+    }
+  };
+
   ctx.effect(() =>
     ctx.on('session/event', (payload: unknown) => {
       try {
         const envelope = payload as SessionEventEnvelope;
-        if (typeof envelope?.sessionId !== 'string' || envelope.event?.type !== 'assistant/message') return;
+        if (typeof envelope?.sessionId !== 'string') return;
         // S1 键控：信封会话直查（不再比对前台聚焦单值）——多会话并存时各会话
         // 目标各自记账，互不串账互不漏账
         const sessionId = envelope.sessionId;
         // 只对 active 行记账（needs-resume/stopped/终态不再累计——刹停后的收尾
         // 轮花销不属于本目标预算；先判状态再累加，读改写间无并发窗口）
         // v13 后 getActiveBySession 直取（历史终态行不再命中）
+        // 腿二（复盘 R-1）：委派结算折叠笔——'delegation:' 前缀判别
+        if (envelope.event?.type === 'llm/usage') {
+          const data = envelope.event.data as
+            | {
+                callId?: unknown;
+                usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+              }
+            | undefined;
+          if (typeof data?.callId !== 'string' || !isDelegationUsageCallId(data.callId)) return;
+          if (store.getActiveBySession(sessionId) === undefined) return;
+          // 四桶和口径：llm/usage 底账无 totalTokens（派生归投影律）；cacheWrite1h
+          // ⊂ cacheWrite、reasoning ⊂ output 不重复计
+          const buckets = data.usage;
+          const delta =
+            (buckets?.input ?? 0) + (buckets?.output ?? 0) + (buckets?.cacheRead ?? 0) + (buckets?.cacheWrite ?? 0);
+          if (delta <= 0) return;
+          chargeAndBrake(sessionId, delta);
+          return;
+        }
+        // 腿一（原腿）：前台 assistant/message
+        if (envelope.event?.type !== 'assistant/message') return;
         const current = store.getActiveBySession(sessionId);
         if (current === undefined) return;
         // usage 为 turn 汇总额（durable 载荷）；totalTokens 缺失时回退 input+output
@@ -537,31 +606,7 @@ async function applyGoalApp(
           { usage?: { totalTokens?: number; input?: number; output?: number } } | undefined;
         const delta = usage?.usage?.totalTokens ?? (usage?.usage?.input ?? 0) + (usage?.usage?.output ?? 0);
         if (delta <= 0) return;
-        const goal = store.addUsage(sessionId, delta, Date.now());
-        if (goal === undefined || goal.tokensUsed < goal.tokenBudget) return;
-        // 刹停（幂等护栏：WHERE status='active'）+ 同步收尾注入（忙时 steer——
-        // 模型当轮收尾交代下一步；预算尽≠完成，提示词如实示态）。agent 缺供
-        //（chat 件未装载）只跳过注入——记账与刹停是数据面，不依赖对话循环
-        store.stopByBudget(sessionId, goal.tokensUsed, Date.now());
-        // 停因事件（刀三）：预算尽落 durable 证据——停滞判定断 streak（预算帽拒发
-        // 轮不折算成模型停滞）+ 审计面回读；willRetry=false（预算尽不自动重试）
-        sessions.appendEvent('goal/evidence', { goalId: goal.goalId, reason: 'budget', willRetry: false });
-        // 终态同笔停摆挂钟（刀四 CR-6 三处之二）
-        suspendWake(goal.goalId);
-        // 刹停后行已非 active——getBySession 取当前行（updated_at 最新 = 刚停行）
-        const stopped = store.getBySession(sessionId);
-        if (stopped !== undefined) {
-          try {
-            agent?.sendUserMessage(renderBudgetExhaustedPrompt(stopped), { source: 'app:goal', session: sessionId });
-          } catch (err) {
-            // S1 退役容错：目标会话已退役——收尾注入无处可投仅记 debug（与 ③ 同口径）
-            if (err instanceof AppError && err.code === AGENT_SESSION_INACTIVE) {
-              ctx.logger.debug('goal 收尾注入跳过：归属会话已退役', { sessionId });
-            } else {
-              throw err;
-            }
-          }
-        }
+        chargeAndBrake(sessionId, delta);
       } catch (err) {
         // fire-and-forget 纪律：刹车异常止步日志，绝不上抛进事件派发面
         ctx.logger.error('goal 预算刹车失败', { error: describeError(err) });

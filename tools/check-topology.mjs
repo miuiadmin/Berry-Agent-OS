@@ -41,7 +41,7 @@ const MODULE_EDGES = {
   // exec 边 = S5 bash 迁域——createBashTool def 随 open() 会话域注册）
   chat: ['contracts', 'context', 'agent', 'session', 'persist', 'tools', 'safety', 'exec'],
   memory: ['contracts', 'context', 'persist'],
-  goal: ['contracts', 'context', 'persist'],
+  goal: ['contracts', 'context', 'persist', 'session'],
   // exec = 工具族件聚落（第 18 模块，2026-08-25 exec 纵切；tools 不 import exec——
   // bash def 随 chat 件 open() 会话域注册（S5 迁域），检索族双装配点先例）
   exec: ['contracts', 'context', 'safety', 'tools'],
