@@ -28,6 +28,7 @@ import type { AgentToolResult, ToolDefinition, ToolsService } from '../contracts
 import { createAggregator, type EventEnvelope } from './rollup.js';
 import { openRollupStore, renderRollupTable, type AlertRule, type RollupStore } from './store.js';
 import type { RollupTable } from './rollup.js';
+import { OBS_EVENTS } from './events.js';
 
 /** ctx.channels 服务面的结构子集（命令注册——宿主实现类型在 channels 模块） */
 interface ChannelsFace {
@@ -226,14 +227,10 @@ export function createObsApp(): BuiltinAppModule {
     // channels/paths/ui 由 Ring 1 channels 行装载期 provide——本行居其后的
     // 默认层装载序，fork 级联可见）。缺供即装配断言，诊断树也须见到此行
     inject: ['tools', 'channels', 'paths', 'ui'],
-    // 刀二：告警触发词汇（执法已落码——rollup 写入内联检查过阈即发）
-    events: [
-      {
-        name: 'obs/alert',
-        mode: 'emit',
-        note: '观测告警触发面（rollup 写入内联执法：过阈 + 冷却窗外触发；载荷 { ruleId, metric, agg, value, threshold, windowHours }）',
-      },
-    ],
+    // 刀二：告警触发词汇（执法已落码——rollup 写入内联检查过阈即发）。
+    // 声明抽出 events.ts 单源（第四十六批）：装载器读本字段登记、check-events
+    // 声明层对照读同一 const——两消费方零漂移。
+    events: OBS_EVENTS,
     // 行 config（flush 两参 = 测试缝 + 运营旋钮——schema 校验装载期执法）
     config: Type.Object({
       flushMs: Type.Optional(Type.Number({ minimum: 50, description: '落账批量窗口毫秒（缺省 5000）' })),

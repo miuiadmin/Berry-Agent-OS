@@ -4,12 +4,14 @@
  *
  * 五族断言，方向都是双向（族 1-4 = 目录 ↔ src 派发/写点；族 5 = 目录 ↔ 公开文档镜像）：
  *
- * 1. 总线活体事件（LIVE_EVENT_CATALOG，contracts 运行时目录）：
- *    - 非 reserved 目录项 ≥1 个宿主派发点（emit/waterfall/parallel/serial 调用；
+ * 1. 总线活体事件（词汇面 = LIVE_EVENT_CATALOG ∪ 应用声明层，契约篇 §6.3#4
+ *    第四十六批——官方件自有总线词经轻量 events.ts named export 声明，装载器
+ *    装载阶段① 同一 const 登记运行时注册表）：
+ *    - 非 reserved 词汇项 ≥1 个宿主派发点（emit/waterfall/parallel/serial 调用；
  *      on() 是订阅不是派发，不算证据）；
- *    - src 每个派发/订阅点事件名必在目录——opencode permission.ask 型
+ *    - src 每个派发/订阅点事件名必在词汇面——opencode permission.ask 型
  *      「声明无 trigger / 派发无声明」两个方向的谎都在此变红；
- *    - 派发方法与目录 mode 一致（mode 是事件公开契约的一部分）。
+ *    - 派发方法与词汇项 mode 一致（mode 是事件公开契约的一部分）。
  * 2. AgentEvent 流式族（loop 直推，非总线——故单独成族）：
  *    - 每个派发点 type 必在 union 词汇；union 每型 ≥1 派发点。
  * 3. SessionEvent durable 写点（session 模块运行时注册表）：
@@ -219,6 +221,16 @@ await jiti.import(fileURLToPath(new URL('../src/checkpoint/events.ts', import.me
 // goal/tools.ts，第三十九批 T4-A；goal/summary 随第四刀沉淀④步同笔注册）
 await jiti.import(fileURLToPath(new URL('../src/goal/events.ts', import.meta.url)));
 
+// 应用声明层总线词（契约篇 §6.3#4 族 1 词汇面 = 目录 ∪ 应用声明层，第四十六批）：
+// 官方件自有总线词的宿主面声明——轻量 events.ts named export（件 manifest 引同
+// 一 const 单源），零运行时依赖 jiti 可载（compaction 等 SessionEvent 宿主面同形；
+// 差异：它们加载即副作用注册，本层是惰性数据 const、生产注册在装载阶段①）。
+// 新增官方件总线词时：件内抽 events.ts + manifest 引用 + 此处追加导入。
+// 第三方装载面登记是运行时态、CI 静态不可见（与族 3 双入口边界注记同款）。
+const obsEventsMod = await jiti.import(fileURLToPath(new URL('../src/obs/events.ts', import.meta.url)));
+/** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
+const appDeclared = obsEventsMod.OBS_EVENTS ?? [];
+
 /** @type {Array<{ name: string; mode: string; reserved?: boolean }>} */
 const liveCatalog = events.LIVE_EVENT_CATALOG;
 /** @type {Array<{ type: string; reserved?: boolean }>} */
@@ -231,23 +243,46 @@ const sessionCatalog = sessionTypes.listSessionEventTypes();
 const violations = [];
 const v = (message) => violations.push(message);
 
-// ---- 族 1：总线目录 ↔ 站点 ----
+// ---- 族 1：总线词汇面（目录 ∪ 应用声明层）↔ 站点 ----
 const liveByName = new Map(liveCatalog.map((e) => [e.name, e]));
+// 声明层三向断言之③先行（构造期执法）：格式非法直接红（不套 EVENT_NAME_FORMAT
+// 预滤——预滤会静默滤出、让非法名绕过死词断言②把 fail-loud 后移到装载期）；
+// 撞名（目录或他件声明，双撞向）即红——EVENT_DUPLICATE 拒静默覆盖的语义整体
+// 前移到静态。并集 map 目录先入写死顺序（撞名已红，取哪个 def 无所谓）。
+const declaredByName = new Map();
+for (const def of appDeclared) {
+  if (!EVENT_NAME_FORMAT.test(def.name)) {
+    v(
+      `[总线-声明层] 声明词「${def.name}」名非法——须小写且含 /（防撞宿主词汇域；装载期 APP_SHAPE_INVALID 同款，此处前移）`,
+    );
+    continue;
+  }
+  if (liveByName.has(def.name) || declaredByName.has(def.name)) {
+    v(
+      `[总线-声明层] 声明词「${def.name}」撞名（目录或他件声明已占用）——运行时 EVENT_DUPLICATE 拒静默覆盖，此处前移到静态`,
+    );
+    continue;
+  }
+  declaredByName.set(def.name, def);
+}
+const busVocab = new Map([...liveByName, ...declaredByName]);
 const dispatchesByName = new Map();
 for (const site of busSites) {
   if (!site.resolvable) {
     v(`[总线] ${site.file}：事件常量无法解析为字面量（${site.name}）`);
     continue;
   }
-  if (!liveByName.has(site.name)) {
-    v(`[总线] ${site.file}：派发/订阅了目录外事件「${site.name}」——先在 LIVE_EVENT_CATALOG 登记（含 mode/note）`);
+  if (!busVocab.has(site.name)) {
+    v(
+      `[总线] ${site.file}：派发/订阅了词汇外事件「${site.name}」——词汇面 = LIVE_EVENT_CATALOG ∪ 应用 events 声明（官方件抽轻量 events.ts + manifest 引用）`,
+    );
     continue;
   }
   // mode 一致性只对派发点断言（on() 订阅不区分模式）
   if (site.kind === 'dispatch') {
-    if (site.method !== liveByName.get(site.name).mode) {
+    if (site.method !== busVocab.get(site.name).mode) {
       v(
-        `[总线] ${site.file}：「${site.name}」以 ${site.method} 派发，目录声明 mode=${liveByName.get(site.name).mode}——mode 是事件的公开契约`,
+        `[总线] ${site.file}：「${site.name}」以 ${site.method} 派发，词汇项声明 mode=${busVocab.get(site.name).mode}——mode 是事件的公开契约`,
       );
     }
     if (!dispatchesByName.has(site.name)) dispatchesByName.set(site.name, []);
@@ -260,6 +295,13 @@ for (const entry of liveCatalog) {
     v(
       `[总线] 目录事件「${entry.name}」全 src 无宿主派发点——声明无 trigger 即对应用作者撒谎（opencode permission.ask 型）；确属预留请加 reserved: true`,
     );
+  }
+}
+// 声明层死词断言（与目录词同罪；reserved 豁免同目录侧对称）
+for (const entry of declaredByName.values()) {
+  if (entry.reserved) continue;
+  if (!dispatchesByName.has(entry.name)) {
+    v(`[总线-声明层] 声明词「${entry.name}」全 src 无派发点——声明无 trigger 与目录词同罪；确属预留请加 reserved: true`);
   }
 }
 
@@ -409,5 +451,5 @@ if (violations.length > 0) {
   process.exit(1);
 }
 console.log(
-  `check-events ✓ 总线 ${liveCatalog.length} 项 / AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量，五族双向一致（含公开面镜像）`,
+  `check-events ✓ 总线 ${liveCatalog.length} 项（另应用声明 ${declaredByName.size} 词）/ AgentEvent ${agentUnion.size} 型 / SessionEvent ${sessionCatalog.length} 类 / EventName 联合 ${eventUnion.size} 字面量，五族双向一致（含公开面镜像）`,
 );

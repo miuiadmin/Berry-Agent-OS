@@ -10,9 +10,17 @@ export default defineConfig({
     // 窄面收进常规测试：.mjs 在 tsc 视野外——tsconfig include 只有 src/，typecheck
     // 不覆盖此处；回放双闸出口 process.exit 的语义靠子进程隔离完整保留，发布
     // 机器则以 io 注入缝全脚本化驱动（无真实 npm/git 调用）。
+    // check-events 机器闸回归锁（第四十六批）同款收编：spawn 真脚本断言全绿
+    // + 应用声明层计数锚——并集被静默拆掉先在此红。
     // client 子树显式排除（CR-7）：SPA 测试若引入需 jsdom 环境，node 环境的
     // 常规轨不收（域不同不静默跑红）
-    include: ['src/**/*.test.ts', '!src/webui/client/**', 'tools/golden/*.test.mjs', 'tools/release.test.mjs'],
+    include: [
+      'src/**/*.test.ts',
+      '!src/webui/client/**',
+      'tools/golden/*.test.mjs',
+      'tools/release.test.mjs',
+      'tools/check-events.test.mjs',
+    ],
     environment: 'node',
   },
 });
