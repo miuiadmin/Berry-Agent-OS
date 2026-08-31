@@ -9,7 +9,7 @@
   "engines": {
     "node": ">=22.19"
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "examples", "README.md"],
   "publishConfig": {
     "access": "public"
   },

@@ -129,23 +129,26 @@ describe('契约 5 planTagOperations / assertDistTagTerminal：终态统一律',
 });
 
 describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
-  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README） */
+  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + 教学例） */
   const CLEAN = [
     'package.json',
     'README.md',
     'dist/app/main.js',
     'dist/webui/index.html',
     'dist/admin/skills/admin/SKILL.md',
+    'examples/tool-echo/index.ts',
+    'examples/tool-echo/README.md',
   ];
   it('合法清单 → 绿', () => {
     expect(inspectPackEntries(CLEAN).ok).toBe(true);
   });
-  it('缺 SPA / 缺技能资产 / 缺 README → 检视不过（missing 逐项点名）', () => {
+  it('缺 SPA / 缺技能资产 / 缺 README / 缺教学例 → 检视不过（missing 逐项点名）', () => {
     const v = inspectPackEntries(['package.json', 'dist/app/main.js']);
     expect(v.ok).toBe(false);
     expect(v.missing.join(' ')).toMatch(/webui/);
     expect(v.missing.join(' ')).toMatch(/SKILL/);
     expect(v.missing.join(' ')).toMatch(/README/);
+    expect(v.missing.join(' ')).toMatch(/examples/);
   });
   it('测试/声明/映射/源码/构建配置混入 → 违禁（violations 逐个点名）', () => {
     const v = inspectPackEntries([
@@ -157,6 +160,12 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     ]);
     expect(v.ok).toBe(false);
     expect(v.violations).toHaveLength(4);
+  });
+  it('examples/*.ts 教学源码不违禁（必在例外——随包发布物非待编译源码）', () => {
+    // src/ 前缀拒是「产品源码不随包」口径；examples/ 是刻意随包的教学例——
+    // 同为 .ts 命运相反，检视器不因扩展名误伤
+    const v = inspectPackEntries(CLEAN);
+    expect(v.violations.filter((p) => p.startsWith('examples/'))).toHaveLength(0);
   });
 });
 
@@ -223,6 +232,8 @@ function greenBase(version) {
             'dist/app/main.js',
             'dist/webui/index.html',
             'dist/admin/skills/admin/SKILL.md',
+            'examples/tool-echo/index.ts',
+            'examples/tool-echo/README.md',
           ],
         },
       ]),
