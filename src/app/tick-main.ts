@@ -225,7 +225,28 @@ export async function tickMain(jobName: string, options: RuntimeOptions = {}): P
     //（willRetry=false：状态不回 active 就不再来；resume 重挂即复活）
     const row = new GoalStore(runtime.persistence.store.connection).getByGoalId(job.ownerKey ?? '');
     if (row === undefined || row.status !== 'active' || row.sessionId !== job.sessionId) {
-      sessions.appendEvent('goal/evidence', { goalId: job.ownerKey, reason: 'inactive', willRetry: false });
+      // 防无界残响两件（全面复盘 #53）：① 同 goalId 首跳去重——本会话末条
+      // goal/evidence 已是 inactive 则不重复落账（OS 钟每跳一记、every@1m 即
+      // 日增 1440 条的账本无界增长止血；复活后如常再落）；② 自愈停摆——行
+      // 缺席/非 active 两形 goal 已不在或已终局永不再投，同笔翻转钟行
+      // enabled=0（次跳即走 ① 预读停摆快径零整机装配；needs-resume 形
+      // resume 重挂自愈复活不损失）。重绑他乡形不翻转：goal 活着，resume
+      // upsert 下一跳自愈，至多让一跳
+      const lastEvidence = sessions
+        .eventsOfType('goal/evidence')
+        .filter((event) => (event.data as { goalId?: unknown } | undefined)?.goalId === job.ownerKey)
+        .at(-1);
+      if ((lastEvidence?.data as { reason?: unknown } | undefined)?.reason !== 'inactive') {
+        sessions.appendEvent('goal/evidence', { goalId: job.ownerKey, reason: 'inactive', willRetry: false });
+      }
+      if (row === undefined || row.status !== 'active') {
+        new JobsStore(runtime.persistence.store.connection).setOwnedEnabled(
+          GOAL_JOB_OWNER,
+          job.ownerKey ?? '',
+          false,
+          Date.now(),
+        );
+      }
       process.stderr.write(`goal ${job.ownerKey} 非 active（${row?.status ?? '行缺席'}）——让路不投递\n`);
       await runtime.shutdown();
       return 0;

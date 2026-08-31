@@ -52,6 +52,85 @@ export interface AttachMainOptions {
   readonly cwd?: string;
 }
 
+/** 审批应答器依赖面（应答政策单点可测——复盘 #51 提取；三消费点同闭包） */
+export interface ApprovalAnswererDeps {
+  /** 通道 confirm 面（attach 接 tui.ui().confirm；cancelAsks 收场 = false） */
+  confirm(message: string, opts?: { signal?: AbortSignal }): Promise<boolean | undefined>;
+  /** 通知行（attach 接 notifyUi——收尾期静音） */
+  notify(message: string, level?: 'info' | 'warn' | 'error'): void;
+  /** 应答投递（attach 接 decideApproval(port, token, …)） */
+  decide(
+    approvalId: string,
+    decision: 'approve' | 'reject' | 'always',
+  ): Promise<{ status: number; accepted?: boolean; reason?: string } | undefined>;
+  /** 退出收尾判读（attach 接 quitting 旗——Ctrl+D 后在身卡不投 decide） */
+  isQuitting(): boolean;
+}
+
+/**
+ * 审批卡应答器（pickAttachSession 同款先例：入口文件的可测子件）。
+ *
+ * 应答政策三条：① y/n → decide approve/reject（草案在场且 y 追问一次 always）；
+ * ② decided 镜像先到（他腿已决）→ abort 在身提问、confirm 收场后静默不投；
+ * ③ **Ctrl+D 收尾（quitting）→ 在身卡不投 decide**——cancelAsks 把 confirm 收场
+ * 为 false 是撤销语义非拒绝语义，投 reject 会让 daemon 侧账本落一条用户从未
+ * 做出的决定（复盘 #51 blocker：违背文件头「Ctrl+D = 仅退 attach 不动
+ * daemon」边界）；卡留 daemon 侧待决，重连/他腿应答/armed 超时自然收场。
+ */
+export function createApprovalAnswerer(deps: ApprovalAnswererDeps): {
+  /** 审批卡入身（已在身幂等跳过——清单重拉/镜像竞窗） */
+  ask(approval: WebuiPendingApproval): void;
+  /** decided 镜像收场：摘卡 + abort 在身提问 */
+  settle(approvalId: string): void;
+  /** approvals 清单 → 增量建卡（已决条目服务端过滤，此处只见未决） */
+  sync(approvals: readonly WebuiPendingApproval[]): void;
+} {
+  /** 在身卡：approvalId → abort 控制器（decided 镜像竞速收场用） */
+  const openAsks = new Map<string, AbortController>();
+
+  const ask = (approval: WebuiPendingApproval): void => {
+    if (openAsks.has(approval.approvalId)) return; // 已在身（清单重拉/镜像竞窗）
+    const controller = new AbortController();
+    openAsks.set(approval.approvalId, controller);
+    void (async () => {
+      const lines = [`审批请求：${approval.summary || '（无摘要）'}`];
+      if (approval.reason !== undefined) lines.push(`理由：${approval.reason}`);
+      if (approval.ownership?.appId !== undefined) lines.push(`来源应用：${approval.ownership.appId}`);
+      const allow = (await deps.confirm(lines.join('\n'), { signal: controller.signal })) ?? false;
+      if (controller.signal.aborted) return; // decided 镜像先到（竞速败腿）——静默收场
+      // Ctrl+D 收尾守卫（复盘 #51）：cancelAsks 的 confirm false 收场 = 撤销非
+      // 拒绝——quitting 后不投 decide，卡留 daemon 侧待决
+      if (deps.isQuitting()) return;
+      openAsks.delete(approval.approvalId);
+      let decision: 'approve' | 'reject' | 'always' = allow ? 'approve' : 'reject';
+      if (allow && approval.suggestedEntry !== undefined) {
+        // 草案在场且已 approve：追问一次是否始终允许（y = always 落 daemon 侧 allowlist）
+        const always = (await deps.confirm(`记住此决定（始终允许 ${approval.suggestedEntry.tool}）？`, {})) ?? false;
+        if (always) decision = 'always';
+      }
+      const res = await deps.decide(approval.approvalId, decision);
+      if (res !== undefined && res.status === 200 && res.accepted === false) {
+        deps.notify(`审批已被其他应答面抢先处理（${res.reason ?? '已决'}）`);
+      } else if (res === undefined || res.status !== 200) {
+        deps.notify('应答投递失败（连接失败）——重连后待办卡恢复可重答', 'warn');
+      }
+    })();
+  };
+
+  const settle = (approvalId: string): void => {
+    const controller = openAsks.get(approvalId);
+    if (controller === undefined) return;
+    openAsks.delete(approvalId);
+    controller.abort();
+  };
+
+  const sync = (approvals: readonly WebuiPendingApproval[]): void => {
+    for (const approval of approvals) ask(approval);
+  };
+
+  return { ask, settle, sync };
+}
+
 /**
  * 会话选择律（契约篇 §6.8 attach 形态）：active 会话中 cwd 匹配 attach 工作
  * 区者优先、无匹配取最新 active（recency = updatedAt ?? createdAt，清单行
@@ -192,45 +271,19 @@ export async function attachMain(options: AttachMainOptions = {}): Promise<numbe
     tui.ui().notify(message, level === undefined ? undefined : { level });
   };
 
-  /* ---- 审批卡（confirm 双段式；decided 镜像 → per-ask signal 收场） ---- */
-  /** 单卡应答流：y/n →（草案在场且 y）追问 always → POST decide（竞速败腿诚实通知） */
-  const askApproval = (approval: WebuiPendingApproval): void => {
-    if (openAsks.has(approval.approvalId)) return; // 已在身（清单重拉/镜像竞窗）
-    const controller = new AbortController();
-    openAsks.set(approval.approvalId, controller);
-    void (async () => {
-      const lines = [`审批请求：${approval.summary || '（无摘要）'}`];
-      if (approval.reason !== undefined) lines.push(`理由：${approval.reason}`);
-      if (approval.ownership?.appId !== undefined) lines.push(`来源应用：${approval.ownership.appId}`);
-      const allow = (await tui.ui().confirm?.(lines.join('\n'), { signal: controller.signal })) ?? false;
-      if (controller.signal.aborted) return; // decided 镜像先到（竞速败腿）——静默收场
-      openAsks.delete(approval.approvalId);
-      let decision: 'approve' | 'reject' | 'always' = allow ? 'approve' : 'reject';
-      if (allow && approval.suggestedEntry !== undefined) {
-        // 草案在场且已 approve：追问一次是否始终允许（y = always 落 daemon 侧 allowlist）
-        const always =
-          (await tui.ui().confirm?.(`记住此决定（始终允许 ${approval.suggestedEntry.tool}）？`, {})) ?? false;
-        if (always) decision = 'always';
-      }
-      const res = await decideApproval(port, token, approval.approvalId, decision);
-      if (res !== undefined && res.status === 200 && res.accepted === false) {
-        notifyUi(`审批已被其他应答面抢先处理（${res.reason ?? '已决'}）`);
-      } else if (res === undefined || res.status !== 200) {
-        notifyUi('应答投递失败（连接失败）——重连后待办卡恢复可重答', 'warn');
-      }
-    })();
-  };
-  /** decided 镜像收场：摘卡 + abort 在身提问（confirm 以 false 收，aborted 守卫拦截误 decide） */
-  const settleApproval = (approvalId: string): void => {
-    const controller = openAsks.get(approvalId);
-    if (controller === undefined) return;
-    openAsks.delete(approvalId);
-    controller.abort();
-  };
-  /** approvals 清单 → 增量建卡（已决条目服务端过滤，此处只见未决） */
-  const syncApprovals = (approvals: readonly WebuiPendingApproval[]): void => {
-    for (const approval of approvals) askApproval(approval);
-  };
+  /* ---- 审批卡（应答器政策单点——createApprovalAnswerer；decided 镜像 → per-ask signal 收场） ---- */
+  const answerer = createApprovalAnswerer({
+    confirm: (message, opts) => tui.ui().confirm?.(message, opts) ?? Promise.resolve(undefined),
+    notify: notifyUi,
+    decide: (approvalId, decision) => decideApproval(port, token, approvalId, decision),
+    isQuitting: () => quitting,
+  });
+  /** 审批卡入身（应答器转发——语义见 createApprovalAnswerer 注释） */
+  const askApproval = answerer.ask;
+  /** decided 镜像收场（应答器转发） */
+  const settleApproval = answerer.settle;
+  /** approvals 清单 → 增量建卡（应答器转发） */
+  const syncApprovals = answerer.sync;
 
   /* ---- 重拉三发（连接即拉 + 重连恒重拉：投影 + 会话清单 + approvals） ---- */
   const repull = async (): Promise<void> => {

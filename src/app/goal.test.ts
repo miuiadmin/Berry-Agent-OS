@@ -902,6 +902,43 @@ describe('goal 刀四全栈：/goal wake 挂钟命令族（真 GoalJobsFace + �
     expect(os.registered).toHaveLength(0);
   });
 
+  it('【回归锁 #52】⑤ 复验面预算刹停同笔停摆挂钟（与 ④/stalls/tools 终态路同一纪律）', async () => {
+    const os = fakeOsRegistrar();
+    const runtime = await assemble({
+      streamFn: scriptedStream([textMessage('首轮答'), textMessage('次轮答')]).streamFn,
+      osTickRegistrar: os.registrar,
+    });
+    await callTool(runtime, 'goal_set', { objective: '⑤ 复验预算目标', tokenBudget: 50000 });
+    const goalId = (await goalText(runtime)).match(/身份：(\S+)/)![1]!;
+    const sessionId = runtime.drivers.focused()!.session.header.sessionId;
+    expect(await runtime.channels.commands.dispatch('/goal wake every@1h')).toBe('ok');
+    expect(goalJobRow(runtime, goalId)!.enabled).toBe(true);
+
+    // 带归因的 run 钉归因（⑤ 复验面的归因闸门数据源）
+    await runtime.conversation!.submitOnce('开始', {
+      source: 'app:goal',
+      attribution: { goalId, wakeId: 'w-1', wakePath: 'self' },
+    });
+    await runtime.conversation!.settle();
+
+    // 直造行态：store.addUsage 抬水位但不发 durable 事件（④ 记账路不触发）——
+    // 行 active 且 used≥budget 只在 ⑤ 复验时点成立，正是「记账迟到写竞窗」的
+    // 防御位形状（goal 刀三教训：此分支不可自然达，直造可达）
+    new GoalStore(runtime.persistence!.store.connection).addUsage(sessionId, 60000, Date.now());
+
+    const decision = await runtime.ctx.waterfall<{ readonly stop?: boolean }>(
+      'agent_pre_step',
+      { sessionId },
+      () => undefined,
+    );
+    expect(decision).toEqual({ stop: true });
+    expect(await goalText(runtime)).toContain('状态：stopped'); // budget 刹停落终态
+    // 回归锁：挂钟同笔翻转 enabled=0（修复前此路漏 suspendWake——OS 钟照跳，
+    // 每跳 tick 整机装配后让路空转，复盘 #52）
+    await new Promise((r) => setTimeout(r, 20));
+    expect(goalJobRow(runtime, goalId)!.enabled).toBe(false);
+  });
+
   it('CR-6 终态同笔停摆：goal_update completed → enabled=0 行留史（OS 注册保留不注销）', async () => {
     const os = fakeOsRegistrar();
     const runtime = await assemble({

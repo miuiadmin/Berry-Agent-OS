@@ -91,7 +91,7 @@ function jobRow(dbFile: string, name: string): Record<string, unknown> {
   try {
     return store.connection
       .prepare(
-        `SELECT schedule, last_run_at, last_run_reason, session_id, last_session_id
+        `SELECT schedule, last_run_at, last_run_reason, session_id, last_session_id, enabled
          FROM jobs WHERE name = ?`,
       )
       .get(name) as Record<string, unknown>;
@@ -509,6 +509,54 @@ describe('run --tick goal 挂钟分支：pre-boot 让路 + 投递前执法 + 到
       ),
     ).toBe(1);
     expect(jobRow(dbFile, `goal-${goalId}`)['last_run_at']).toBeNull();
+  });
+
+  it('【回归锁 #53】行缺席兜底防无界残响：首跳记因 + 同笔自愈停摆（enabled=0），次跳 pre-boot 廉价让路零新事件', async () => {
+    const dbFile = makeDbFile();
+    const workspace = makeTempDir('app-tickmain-ws-');
+    // 造真目标会话（boot 新建后关停——tick resume 的落点）
+    const runtime = await createRuntime({ dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) });
+    runtimes.push(runtime);
+    const target = runtime.drivers.focused()!.session.header.sessionId;
+    await runtime.shutdown();
+    runtimes.pop();
+    // 只种挂钟行、不种 goal 行（行缺席 = 幽灵钟——修复前每跳整机装配 + 一条
+    // inactive durable 事件，every@1m 即日增 1440 条账本无界增长）
+    const goalId = '01JDGHOSTLOOPGHOSTLOOPGHOST0';
+    seed(dbFile, (jobs) => {
+      jobs.putOwned({
+        name: `goal-${goalId}`,
+        prompt: '目标',
+        schedule: 'every@1m',
+        sessionId: target,
+        owner: 'builtin:goal',
+        ownerKey: goalId,
+        now: Date.now() - 2 * 60_000,
+      });
+    });
+    // 首跳：记因一条 + 同笔自愈停摆（钟行 enabled 翻 0）
+    const err1 = captureStderr();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(0);
+    } finally {
+      err1.restore();
+    }
+    expect(jobRow(dbFile, `goal-${goalId}`)['enabled']).toBe(0);
+    // 次跳（OS 钟照跳）：pre-boot 廉价让路——零整机装配、零新 inactive 事件
+    const err2 = captureStderr();
+    try {
+      expect(await tickMain(`goal-${goalId}`, { dbPath: dbFile, workspace, streamFn: scriptedStream(REPLY) })).toBe(0);
+      expect(err2.texts.join('')).toContain('停摆');
+    } finally {
+      err2.restore();
+    }
+    expect(
+      scalar(
+        dbFile,
+        `SELECT COUNT(*) AS value FROM events WHERE session_id = ? AND type = 'goal/evidence' AND data LIKE '%"reason":"inactive"%'`,
+        target,
+      ),
+    ).toBe(1);
   });
 
   it('唤醒帽拒（连续 3 self）→ 让路 0 + reason=capped（willRetry）+ 零投递', async () => {

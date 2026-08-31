@@ -599,6 +599,9 @@ async function applyGoalApp(
         if (row.tokensUsed >= row.tokenBudget) {
           store.stopByBudget(envelope.sessionId, row.tokensUsed, Date.now());
           sessions.appendEvent('goal/evidence', { goalId: row.goalId, reason: 'budget', willRetry: false });
+          // 终态同笔停摆挂钟（刀四 CR-6 与 ④/stalls/tools 终态路同一单源纪律——
+          // 复盘 #52：此路漏翻则 OS 钟照跳，每跳 tick 整机装配后让路空转）
+          suspendWake(row.goalId);
           return { stop: true };
         }
         return next();

@@ -32,7 +32,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { AppError, DAEMON_START_TIMEOUT, DAEMON_STOP_TIMEOUT } from '../contracts/errors.js';
 import { dataDir, dbPath } from './paths.js';
-import { createRuntime } from './assembly.js';
+import { createRuntime, type AppRuntime } from './assembly.js';
 import { installExitSignals } from './signals.js';
 import { readAttachToken } from './attach-client.js';
 import { VERSION } from './version.js';
@@ -285,8 +285,19 @@ export async function daemonCommandMain(
       process.stdout.write('daemon 已死亡，清理残留 daemon.json\n');
       return 0;
     }
-    // 信号序：SIGTERM（优雅全序列）→ 轮询 → SIGKILL 兜底 → 清 daemon.json
-    process.kill(state.pid, 'SIGTERM');
+    // 信号序：SIGTERM（优雅全序列）→ 轮询 → SIGKILL 兜底 → 清 daemon.json。
+    // ESRCH 兜底（全面复盘 #54）：判活与 kill 之间的 TOCTOU 竞窗内 daemon 恰
+    // 自死时 process.kill 抛 ESRCH——按已死处理落后续轮询（探针即判死 →
+    // releaseDaemonState 清扫收场 0），不冒泡顶层以「✖ 退 1」误导停失败
+    //（进程实已停成功）；非 ESRCH（如 EPERM）照原样抛——那是真异常不是竞窗
+    const signalDaemon = (sig: 'SIGTERM' | 'SIGKILL'): void => {
+      try {
+        process.kill(state.pid, sig);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ESRCH') throw err;
+      }
+    };
+    signalDaemon('SIGTERM');
     const termDeadline = Date.now() + (deps.stopBudgetMs ?? DAEMON_STOP_BUDGET_MS);
     while (probe.startId(state.pid) === state.processStartId) {
       if (Date.now() >= termDeadline) break;
@@ -297,7 +308,7 @@ export async function daemonCommandMain(
       process.stdout.write(`daemon 已停止（pid ${state.pid}）\n`);
       return 0;
     }
-    process.kill(state.pid, 'SIGKILL');
+    signalDaemon('SIGKILL');
     const killDeadline = Date.now() + DAEMON_KILL_BUDGET_MS;
     while (probe.startId(state.pid) === state.processStartId) {
       if (Date.now() >= killDeadline) break;
@@ -392,15 +403,24 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
   acquireDaemonState(dataRoot, state, probe); // 已有活 daemon = 响亮抛 DAEMON_ALREADY_RUNNING
   const token = ensureDaemonToken(dataRoot);
 
-  // 同一装配入口（骨架篇 §1.2 daemon 装配序）：形态是装配的选择非代码分叉
-  const runtime = await createRuntime({
-    interactive: false,
-    resumeSession: false,
-    daemon: { token, port },
-    // 进程形态（刀三）：daemon boot 回放 resume 走 goal 降级照常（激活权不跨
-    // 进程——重启后待人类 /goal resume；豁免面只有 tick，骨架篇 §6.8）
-    processKind: 'daemon',
-  });
+  // 同一装配入口（骨架篇 §1.2 daemon 装配序）：形态是装配的选择非代码分叉。
+  // 装配期抛错（库开不了/官方行 refuseBoot 等）先释放态文件再抛——acquire
+  // 在下方常驻 try 域之外，不兜则 daemon.json 残留指向已死进程（全面复盘
+  // #55：窗口内 status/attach 误报在场，下次 start 才靠 sweep 判死清扫自愈）
+  let runtime: AppRuntime;
+  try {
+    runtime = await createRuntime({
+      interactive: false,
+      resumeSession: false,
+      daemon: { token, port },
+      // 进程形态（刀三）：daemon boot 回放 resume 走 goal 降级照常（激活权不跨
+      // 进程——重启后待人类 /goal resume；豁免面只有 tick，骨架篇 §6.8）
+      processKind: 'daemon',
+    });
+  } catch (err) {
+    releaseDaemonState(dataRoot, identity);
+    throw err;
+  }
 
   // heldSessions 同步：open/retire 通知驱动（通知面随刀一加进 DriverRegistry）；
   // 持有集 = 非退役条目 ∪ 退役但在飞条目（迟到结算仍可能落原会话账——写意图集）

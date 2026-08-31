@@ -41,7 +41,13 @@ import {
   type DaemonState,
   type ProcessProbe,
 } from './daemon-state.js';
-import { daemonCommandMain, daemonDoctorMain, detectDaemonHandshake, probeStatus } from './daemon.js';
+import {
+  daemonCommandMain,
+  daemonDoctorMain,
+  daemonForegroundMain,
+  detectDaemonHandshake,
+  probeStatus,
+} from './daemon.js';
 import { VERSION } from './version.js';
 import Database from 'better-sqlite3';
 import { createServer } from 'node:http';
@@ -376,6 +382,56 @@ describe('daemon 命令族：stop / status（真子进程 + 平台真探针）',
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('【回归锁 #54】stop 判活-kill 竞窗（daemon 恰自死）：SIGTERM 路 ESRCH 按已死收场 0', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    const out = captureStdout();
+    // 真死 pid：起即杀——process.kill 对它必抛 ESRCH（竞窗内 daemon 自死的实证形状）
+    const holder = spawnSleeper();
+    const deadPid = holder.pid!;
+    holder.kill('SIGKILL');
+    await waitExit(holder);
+    // 脚本探针复刻 TOCTOU 时序：首调（isDaemonAlive 判活）回匹配 startId =
+    // 判活过；此后（kill 后轮询）回 undefined = 已死——精确踩进竞窗
+    let calls = 0;
+    const probe: ProcessProbe = {
+      startId: (pid) => (pid === deadPid && calls++ === 0 ? 'window-id' : undefined),
+    };
+    acquireDaemonState(root, makeState(deadPid, 'window-id'), { startId: () => undefined });
+    // 修复前：process.kill 抛 ESRCH 冒泡顶层「✖ 退 1」（停成功却报失败且不清
+    // daemon.json）；修复后按已死落轮询 → 清扫收场
+    const code = await daemonCommandMain('stop', 7860, { dataRoot: root, probe });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('已停止');
+    expect(existsSync(daemonStatePath(root))).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('【回归锁 #54】stop 同竞窗 SIGKILL 升格路：ESRCH 同兜 → SIGKILL 强停收场', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    const out = captureStdout();
+    const holder = spawnSleeper();
+    const deadPid = holder.pid!;
+    holder.kill('SIGKILL');
+    await waitExit(holder);
+    // 前 5 调判活（isDaemonAlive + SIGTERM 轮询至期限 + 期限 if 判读）＝优雅
+    // 预算内「活」满 → 升格 SIGKILL 撞 ESRCH；此后 undefined → kill 轮询即判死
+    let calls = 0;
+    const probe: ProcessProbe = {
+      startId: (pid) => (pid === deadPid && calls++ < 5 ? 'window-id' : undefined),
+    };
+    acquireDaemonState(root, makeState(deadPid, 'window-id'), { startId: () => undefined });
+    const code = await daemonCommandMain('stop', 7860, {
+      dataRoot: root,
+      probe,
+      stopBudgetMs: 60, // 优雅预算收短 → 快速踩进升格路
+      pollIntervalMs: 50,
+    });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('SIGKILL 强停');
+    expect(existsSync(daemonStatePath(root))).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('status 三态：缺席 3 / 判死残留 3 / 活 + 真握手披露 0', async () => {
     const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
     // ① 缺席
@@ -412,6 +468,25 @@ describe('daemon 命令族：stop / status（真子进程 + 平台真探针）',
     ).toBe(0);
     expect(out.join('')).toContain('未达成');
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('daemonForegroundMain 装配失败路（复盘 #55 回归锁）', () => {
+  it('createRuntime 抛错：daemon.json 先释放再抛——不残留指向已死进程', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-fg-'));
+    const prevDb = process.env['APP_DB_PATH'];
+    // 库路径指到目录：SQLite 开库即炸——装配期抛错形状（官方行 refuseBoot 同类）
+    process.env['APP_DB_PATH'] = root;
+    try {
+      await expect(daemonForegroundMain(7861, { dataRoot: root })).rejects.toThrow();
+      // 修复前红：acquire 已写、常驻 try 域未进——态文件残留，窗口内 status/
+      // attach 误报在场（下次 start 才靠 sweep 判死清扫自愈）
+      expect(existsSync(daemonStatePath(root))).toBe(false);
+    } finally {
+      if (prevDb === undefined) delete process.env['APP_DB_PATH'];
+      else process.env['APP_DB_PATH'] = prevDb;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
