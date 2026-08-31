@@ -65,6 +65,7 @@ const DEFAULT_LAYER_IDS = new Set([
   'lsp',
   'channels',
   'webui',
+  'obs',
 ]);
 
 /**
@@ -121,8 +122,9 @@ describe('overlay 装载与拒绝式校验', () => {
       { id: 'lsp', pkg: 'builtin:lsp' },
       { id: 'channels', pkg: 'builtin:channels' },
       { id: 'webui', pkg: 'builtin:webui' },
+      { id: 'obs', pkg: 'builtin:obs' },
     ]);
-    expect(report.plan).toHaveLength(14);
+    expect(report.plan).toHaveLength(15);
     expect(report.plan[0]!.id).toBe('chat');
     expect(report.plan[0]!.unresolved).toContain('保留前缀');
     expect(report.plan[1]!.id).toBe('memory');
@@ -591,6 +593,7 @@ describe('builtin: 保留前缀解析', () => {
     const stubLsp = { name: 'lsp-stub', apply: async () => {} };
     const stubChannels = { name: 'channels-stub', apply: async () => {} };
     const stubWebui = { name: 'webui-stub', apply: async () => {} };
+    const stubObs = { name: 'obs-stub', apply: async () => {} };
     const report = loadComposition(dataDir, {
       'builtin:chat': stubChat,
       'builtin:memory': stubBuiltin,
@@ -606,6 +609,7 @@ describe('builtin: 保留前缀解析', () => {
       'builtin:lsp': stubLsp,
       'builtin:channels': stubChannels,
       'builtin:webui': stubWebui,
+      'builtin:obs': stubObs,
     });
     expect(report.rows).toEqual([
       { id: 'chat', pkg: 'builtin:chat' },
@@ -622,6 +626,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'lsp', pkg: 'builtin:lsp' },
       { id: 'channels', pkg: 'builtin:channels' },
       { id: 'webui', pkg: 'builtin:webui' },
+      { id: 'obs', pkg: 'builtin:obs' },
     ]);
     expect(report.plan).toEqual([
       { id: 'chat', pkg: 'builtin:chat', builtin: stubChat },
@@ -638,6 +643,7 @@ describe('builtin: 保留前缀解析', () => {
       { id: 'lsp', pkg: 'builtin:lsp', builtin: stubLsp },
       { id: 'channels', pkg: 'builtin:channels', builtin: stubChannels },
       { id: 'webui', pkg: 'builtin:webui', builtin: stubWebui },
+      { id: 'obs', pkg: 'builtin:obs', builtin: stubObs },
     ]);
   });
 
@@ -687,6 +693,7 @@ describe('Ring 1 必备行：assertRing1Required / diffRing1Rows', () => {
     'builtin:lsp': { name: 'lsp-stub', apply: async () => {} },
     'builtin:channels': { name: 'channels-stub', apply: async () => {} },
     'builtin:webui': { name: 'webui-stub', apply: async () => {} },
+    'builtin:obs': { name: 'obs-stub', apply: async () => {} },
   });
 
   it('起算清单：RING1_REQUIRED_ROW_IDS = [tools, channels]（后续行树化纵切逐行累加）', () => {

@@ -12,7 +12,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { realpathSync } from 'node:fs';
+import { chmodSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AppError, APP_MAIN_DB_FORBIDDEN } from '../contracts/errors.js';
 
@@ -37,28 +37,45 @@ function realpathIfPossible(absolutePath: string): string {
 }
 
 /**
- * 创建第六键注入物。mainDbPath 必须与宿主 Persistence 开库路径**同源解析**
- * （组合根传装配序 ③ 的 resolvedDbPath——APP_DB_PATH 覆盖已计入其中），
- * realpath 归一后作为拒开比对基准：symlink 别名指向主库同样命中。
+ * 创建第六键注入物（或官方件直连开库面）。mainDbPath 在场时必须与宿主
+ * Persistence 开库路径**同源解析**（组合根传装配序 ③ 的 resolvedDbPath——
+ * APP_DB_PATH 覆盖已计入其中），realpath 归一后作为拒开比对基准：symlink
+ * 别名指向主库同样命中；**缺省 = 官方件直连形态**（obs 等宿主侧编译件开
+ * 自管库——编译期信任边界内，拒开基准不适用；契约篇 §6.9 自管库段）。
+ * 文件库开库即追打 0600（宿主主库三件 0600 同律——自管库同是私有数据面）。
  */
-export function createAppSqliteFace(mainDbPath: string): AppSqliteFace {
+export function createAppSqliteFace(mainDbPath?: string): AppSqliteFace {
   // 内存主库（测试/:memory: 装配）无文件身份——基准为字面 ':memory:'，
-  // 只拦文件路径撞名；应用开 :memory: 在下方恒放行分支，逻辑自洽
-  const mainAbs = mainDbPath === ':memory:' ? mainDbPath : realpathIfPossible(resolve(mainDbPath));
+  // 只拦文件路径撞名；应用开 :memory: 在下方恒放行分支，逻辑自洽。
+  // 缺省形态（官方件直连）无拒开基准——guard 恒跳过
+  const mainAbs =
+    mainDbPath === undefined
+      ? undefined
+      : mainDbPath === ':memory:'
+        ? ':memory:'
+        : realpathIfPossible(resolve(mainDbPath));
   return {
     openDatabase(path: string, options?: Database.Options): Database.Database {
       // 内存库不落盘——与文件主库无碰撞可能，恒放行（含主库本身是 :memory: 的装配形态）
       if (path === ':memory:') return new Database(':memory:', options);
       // realpath 归一后比对：字面相等或 symlink 归一相等都算命中主库
       const target = realpathIfPossible(resolve(path));
-      if (target === mainAbs) {
+      if (mainAbs !== undefined && target === mainAbs) {
         throw new AppError(
           APP_MAIN_DB_FORBIDDEN,
           `拒开宿主主库（${mainAbs}）——会话/凭证/模型目录是宿主私有面；` +
             `应用自管库请用自身数据目录内的路径（ctx.paths.appDataDir），或 ':memory:'`,
         );
       }
-      return new Database(target, options);
+      const db = new Database(target, options);
+      // 0600 追打（best-effort：Windows/特殊文件系统语义差异不炸开库——
+      // 权限收紧是卫生件不是开工前提）
+      try {
+        chmodSync(target, 0o600);
+      } catch {
+        // 平台不支持 chmod——放行（与主库三件 0600 追打的容错口径一致）
+      }
+      return db;
     },
   };
 }

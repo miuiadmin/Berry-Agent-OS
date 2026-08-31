@@ -97,6 +97,7 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   // SSE + HTTP POST 微路由 + SPA 静态分发 + 回环三防线。config enabled 缺省
   // false = 行惰性无害零监听（lsp 空 servers 同款先例；--port 旗标一次性开）
   { id: 'webui', pkg: 'builtin:webui' },
+  { id: 'obs', pkg: 'builtin:obs' },
 ];
 
 /**

@@ -31,6 +31,7 @@ import { createCheckpointApp, type CheckpointAppDeps } from '../checkpoint/index
 import { createToolsApp, type ToolsAppDeps } from '../tools/index.js';
 import { createChannelsApp, type ChannelsAppDeps } from '../channels/index.js';
 import { createWebuiApp, type WebuiAppDeps } from '../webui/index.js';
+import { createObsApp } from '../obs/index.js';
 import { createSubagentApp } from './subagent-app.js';
 import type { AgentLocation } from './agents-md.js';
 import type { InProcessChildFactory } from '../subagent/inprocess.js';
@@ -151,7 +152,7 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
       ...(opts.goalChannel ? { channel: opts.goalChannel } : {}),
       // 进程形态（刀三 boot 降级判据第四条件）：tick 子进程 resume 不降级
       // active 行；缺省不传 = 保守降级维持现行为
-      ...(opts.processKind !== undefined ? { processKind: opts.processKind } : {}),
+      ...(opts.processKind === undefined ? {} : { processKind: opts.processKind }),
     }),
     // scheduler 官方件（官方默认层第五行，tick 第一刀——内核边界篇 §4.1 席 13）：
     // 连接与 gate 判据/runner 全闭包注入（spawn 组装在 app/scheduler-runner.ts）；
@@ -215,6 +216,10 @@ export function createBuiltinRegistry(opts: BuiltinRegistryOptions): BuiltinAppR
     // Web 通道后端。行缺省 enabled:false 惰性零监听；恒注册（卸行/关面走
     // overlay 禁用或 config.enabled:false，unresolved 不属于本件的形态）
     'builtin:webui': createWebuiApp(opts.webuiDeps),
+    // obs 观测件（默认层第十五行，契约篇 §6.9）：零宿主资源闭包——库路径经
+    // ctx.paths 正规口、四服务全 ctx.get（BuiltinRegistryOptions 零新字段，
+    // 组合根零改动纪律的首次兑现）
+    'builtin:obs': createObsApp(),
   };
 }
 

@@ -83,6 +83,9 @@ const MODULE_EDGES = {
   // UiService 形状走 channels 类型面；typebox Type/Value 全走 contracts 再导出
   //（无裸导入、无 context 依赖——ctx 窄面类型来自 contracts AppContext）
   webui: ['contracts', 'channels'],
+  // obs = 观测面官方件（契约篇 §6.9，2026-08-31 观测复盘批）：web/admin 单边
+  // 形态 + persist 自管库边（createAppSqliteFace 直连开库——零跨模块 import）
+  obs: ['contracts', 'persist'],
   app: [
     'contracts',
     'context',
@@ -121,6 +124,9 @@ const MODULE_EDGES = {
     // 闭包（addDisplay/submitTo/historyFor/sessionsFor/ui/themeFor/version——
     // 组合根晚绑闭包；VERSION 亦组合根注入防 app 边回流）
     'webui',
+    // obs = 观测面官方件（契约篇 §6.9 第十五行）：builtins 注册（零 deps——
+    // BuiltinRegistryOptions 零新字段，组合根零改动纪律首次兑现）
+    'obs',
   ],
 };
 

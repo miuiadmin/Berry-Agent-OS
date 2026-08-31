@@ -145,6 +145,7 @@ describe('subagent 官方件全栈（纵切四：默认行 + agent 工具 + 真�
       ['lsp', 'activated'],
       ['channels', 'activated'],
       ['webui', 'activated'],
+      ['obs', 'activated'],
     ]);
     // 委派工具已进工具面（fs 四件 + memory 五件之后）
     expect(runtime.tools.list().map((t) => t.name)).toContain('agent');

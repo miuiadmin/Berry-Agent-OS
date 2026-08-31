@@ -206,6 +206,7 @@ describe('createRuntime 装配面', () => {
       'apps_configure',
       'apps_reload',
       'apps_uninstall_inspect',
+      'obs_query',
       'agent_hermes', // delegable 应用自动注册（第三纵切，boot 组合根——hermes 声明 entry.delegable）
       'read',
       'write',
@@ -476,6 +477,7 @@ describe('createRuntime 装配面', () => {
       'apps_configure',
       'apps_reload',
       'apps_uninstall_inspect',
+      'obs_query',
       'agent_hermes',
     ]);
   });
@@ -551,6 +553,7 @@ describe('ConversationDriver + durable 接线', () => {
       'apps_configure',
       'apps_reload',
       'apps_uninstall_inspect',
+      'obs_query',
       'agent_hermes',
       'read',
       'write',
@@ -734,6 +737,7 @@ describe('ConversationDriver + durable 接线', () => {
       'apps_configure',
       'apps_reload',
       'apps_uninstall_inspect',
+      'obs_query',
       'agent_hermes',
       'echo',
       'read',
@@ -1633,6 +1637,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       { id: 'lsp', status: 'activated', name: 'lsp' },
       { id: 'channels', status: 'activated', name: 'channels' },
       { id: 'webui', status: 'activated', name: 'webui' },
+      { id: 'obs', status: 'activated', name: 'obs' },
       { id: 'tool-plugin', status: 'activated', name: 'tool-plugin' },
     ]);
     expect(runtime.ctx.tryGet<{ list(): unknown[] }>('apps')).toBeTruthy();
@@ -1652,6 +1657,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       'lsp',
       'channels',
       'webui',
+      'obs',
       'tool-plugin',
     ]);
     // 应用工具已进注册表（域键升级批：全局层在前 + fs 驱动层在后——本会话组成面）
@@ -1682,6 +1688,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       'apps_configure',
       'apps_reload',
       'apps_uninstall_inspect',
+      'obs_query',
       'agent_hermes', // delegable 注册在 ⑨ 装载后——全局层殿后一位
       'plug-echo', // D2 触发②：第三方行挂 app: coder（默认应用域——组装批后 boot 会话域）→ 隐式路由落 coder 应用域层（全局层之后、驱动层之前）
       'read',
@@ -2135,7 +2142,7 @@ describe('⑨b 应用装载（组合树 + 加载器全栈）', () => {
       // 分组分两类（F13）：官方默认层十四行全挂系统 + 应用合成按在册应用逐组打印
       expect(out).toContain('挂载分组（系统合成 + 各在册应用合成，契约篇 §5.1 两档）：');
       expect(out).toContain(
-        '系统合成（14 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin、checkpoint、lsp、channels、webui',
+        '系统合成（15 行）：chat、memory、subagent、goal、scheduler、mcp、tools、web、compaction、admin、checkpoint、lsp、channels、webui、obs',
       );
       expect(out).toContain('应用合成 chat（1 行）：app-tool-plugin');
       expect(out).toContain('应用合成 hermes（0 行）：（空——纯系统合成）');
@@ -2504,6 +2511,7 @@ describe('/reload 组合树重载', () => {
         'checkpoint',
         'lsp',
         'webui',
+        'obs',
         'tool-plugin',
       ],
       failed: [],
@@ -2524,6 +2532,7 @@ describe('/reload 组合树重载', () => {
           'checkpoint',
           'lsp',
           'webui',
+          'obs',
           'tool-plugin',
         ],
         failed: [],
@@ -2572,6 +2581,7 @@ describe('/reload 组合树重载', () => {
         'checkpoint',
         'lsp',
         'webui',
+        'obs',
       ],
       failed: [],
       skipped: ['tool-plugin'],
@@ -2609,6 +2619,7 @@ describe('/reload 组合树重载', () => {
       'apps_configure',
       'apps_reload',
       'apps_uninstall_inspect',
+      'obs_query',
       'read',
       'write',
       'edit',
@@ -2631,6 +2642,7 @@ describe('/reload 组合树重载', () => {
       ['lsp', 'activated'],
       ['channels', 'activated'],
       ['webui', 'activated'],
+      ['obs', 'activated'],
       ['tool-plugin', 'skipped'],
     ]);
 
@@ -2680,6 +2692,7 @@ describe('/reload 组合树重载', () => {
       'checkpoint',
       'lsp',
       'webui',
+      'obs',
       'tool-plugin',
     ]);
     expect(result.payload?.failed).toEqual(['bad']);
@@ -2768,6 +2781,7 @@ describe('/reload 组合树重载', () => {
         'checkpoint',
         'lsp',
         'webui',
+        'obs',
         'tool-plugin',
       ],
       failed: [],
@@ -3012,6 +3026,7 @@ describe('/reload 组合树重载', () => {
       ['lsp', 'activated'],
       ['channels', 'activated'],
       ['webui', 'activated'],
+      ['obs', 'activated'],
       ['tool-plugin', 'skipped'],
       ['twin-plugin', 'activated'],
     ]);
@@ -3075,6 +3090,7 @@ describe('Ring 1 行树化：启动断言第二断言类 + /reload 报告语义'
           'checkpoint',
           'lsp',
           'webui',
+          'obs',
         ],
         failed: [],
         skipped: [],
@@ -3123,7 +3139,7 @@ describe('subagent 结算通知全栈（④d 接线 → 折叠 + 通知 + 续跑
     const provider: SubagentProvider = {
       name,
       capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false, context: false },
-      start(request) {
+      start(_request) {
         return { id: `${name}-run`, result, dispose: () => undefined };
       },
     };
@@ -3687,7 +3703,7 @@ describe('exec 命令进程孤儿清扫（契约篇 §6.6 exec 腿，2026-08-29 
       // 负 pid 组杀的射程前提；非建组 spawn 组杀 ESRCH 静默空手）
       const zombie = spawn('sleep', ['25'], {
         stdio: 'ignore',
-        ...(process.platform !== 'win32' ? { detached: true } : {}),
+        ...(process.platform === 'win32' ? {} : { detached: true }),
       });
       const deadHost = spawn('true');
       await new Promise<void>((resolve) => deadHost.on('exit', () => resolve()));
