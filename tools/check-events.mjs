@@ -40,7 +40,7 @@
  * 用法：node tools/check-events.mjs（挂 npm run lint:topology 链尾）。
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, relative } from 'node:path';
 import { createJiti } from 'jiti';
@@ -438,6 +438,60 @@ for (const entry of liveCatalog) {
         const stated = Number(hits[0][1]);
         if (stated !== truth) {
           v(`[镜像] ${relPath} 事件表「${label}」写 ${stated}，代码真值 ${truth}——计数漂移（R5 事故型）`);
+        }
+      }
+    }
+  }
+
+  // ③ README 四语头部统计行：钩子数 ≡ 总线目录、durable 事件类数 ≡ SessionEvent 目录
+  //（2026-09-01 复盘 G-6 根治——正文「35 钩子」对目录 27 的漂移即此型；模块数锚在
+  // check-topology 规则 3，两器各管自家真相）。每锚须恰一次命中：0 次或多次都是
+  // 表结构漂移，fail-loud 同 ②。
+  {
+    /** 文件 → [(标签, 提取正则, 真值)]；真值 = 本器目录（事件真相住 check-events） */
+    const README_ANCHORS = [
+      [
+        'README.md',
+        [
+          ['生命周期钩子', /\*\*(\d+)\*\*\s*生命周期钩子/g, liveCatalog.length],
+          ['durable 事件类', /\*\*(\d+)\*\*\s*类 durable 事件/g, sessionCatalog.length],
+        ],
+      ],
+      [
+        'README.en.md',
+        [
+          ['lifecycle hooks', /\*\*(\d+)\*\*\s*lifecycle hooks/g, liveCatalog.length],
+          ['durable event types', /\*\*(\d+)\*\*\s*durable event types/g, sessionCatalog.length],
+        ],
+      ],
+      [
+        'README.es.md',
+        [
+          ['ganchos de ciclo de vida', /\*\*(\d+)\*\*\s*ganchos de ciclo de vida/g, liveCatalog.length],
+          ['tipos de eventos durables', /\*\*(\d+)\*\*\s*tipos de eventos durables/g, sessionCatalog.length],
+        ],
+      ],
+      [
+        'README.fr.md',
+        [
+          ['crochets de cycle de vie', /\*\*(\d+)\*\*\s*crochets de cycle de vie/g, liveCatalog.length],
+          ["types d'événements durables", /\*\*(\d+)\*\*\s*types d'événements durables/g, sessionCatalog.length],
+        ],
+      ],
+    ];
+    for (const [relPath, anchors] of README_ANCHORS) {
+      const full = join(ROOT, relPath);
+      if (!existsSync(full)) continue;
+      const source = readFileSync(full, 'utf8');
+      for (const [label, pattern, truth] of anchors) {
+        const hits = [...source.matchAll(pattern)];
+        if (hits.length !== 1) {
+          v(`[镜像] ${relPath} 头部统计「${label}」锚命中 ${hits.length} 次（须恰一次）——表结构漂移 fail-loud`);
+          continue;
+        }
+        const stated = Number(hits[0][1]);
+        if (stated !== truth) {
+          v(`[镜像] ${relPath} 头部统计「${label}」写 ${stated}，代码真值 ${truth}——计数漂移（复盘 G-6 根治锚）`);
         }
       }
     }

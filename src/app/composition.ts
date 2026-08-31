@@ -99,7 +99,7 @@ const DEFAULT_LAYER_ROWS: readonly CompositionRow[] = [
   { id: 'webui', pkg: 'builtin:webui' },
   { id: 'obs', pkg: 'builtin:obs' },
   // 第十六行 = browser 行（内核边界篇席 27，契约篇 §6.10 浏览器自动化官方件
-  // 2026-08-31 第四十九批刀一——Ring 3 真·可卸库角色行）：引擎生命周期（发现
+  // 2026-08-31 第四十九批刀一——Ring 2 真·可卸库角色行）：引擎生命周期（发现
   // 序 + spawn/attach + 两级闲置回收）+ ctx.browser 服务；工具面十件随刀二落。
   // 零 config = 行惰性无害零 spawn（lsp 空 servers 同款先例）；卸掉即无浏览器
   // 能力，核心循环不破

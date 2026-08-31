@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
- * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：25 模块单向 DAG——各批随落码
- * 入册，席清单与入册史见内核篇 §4.1 模块表；25 席全有码）。
+ * CI 拓扑门禁（技术栈篇 §2.3 四件之一；内核篇 §4：27 模块单向 DAG——各批随落码
+ * 入册，席清单与入册史见内核篇 §4.1 模块表；27 席全有码）。
  *
- * 两条规则：
+ * 两条规则 + 一条公开面数字锚（2026-09-01 复盘 G-3 根治——「模块增行不滚计数」
+ * 第五起漂移后，模块计数宣称面收进本器机器对照）：
  * 1. 相对导入只允许走显式白名单边（模块 → 可依赖模块集合）；同模块内部互引自由。
  * 2. 裸导入（包名）按模块白名单放行；node:* 全模块放行。
+ * 3. 公开文档的模块计数宣称（README 四语头部统计行 + 「N 模块/N 个模块单向」
+ *    句式）必须等于边表实数——数字漂移即红。
  * 测试文件（*.test.ts）豁免模块 DAG——harness 全真组合（mock 只停模型层）跨模块
  * 合法，产码白名单只描产码 DAG、两账分离（2026-08-31 复盘批 #38；原「只许本模块
  * 白名单边内目标」让测试需求反向给白名单续命，烂出七条死边）。
@@ -13,7 +16,7 @@
  * 边表对齐[内核与应用边界]篇 §4 模块表；模块落地时如与规范出入，以规范为准修本表。
  * 未落地的模块保留占位行——目录不存在即零检查，表先钉住方向。
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -320,6 +323,45 @@ function relative(file) {
   }
 }
 
+/* ---- 规则 3：公开面模块计数锚（2026-09-01 复盘 G-3 根治） ----
+ * 「模块增行不滚计数」五起漂移的机器面：公开文档的模块数宣称必须等于边表实数。
+ * 断言面（每文件逐处对照，非只头部）：
+ * - README 四语头部统计行「**N** 模块 / **N** modules / **N** módulos」；
+ * - 「N 模块单向 DAG」（含 README 正文/架构图与 AGENTS/CONTRIBUTING/开发指南）、
+ *   「N 个模块单向依赖」（架构总览）、README 三外语的「N-module one-way DAG /
+ *   de N módulos / de N modules」同义句式。
+ * 收词前提 = 零误报：只锚「模块总量」计数口径的既有句式；行数/件数/环数/Ring 0
+ * 子集数等他口径不收（各有语义，不属本器真相）。文件缺失静默跳过（本仓恒在）。 */
+{
+  const count = Object.keys(MODULE_EDGES).length;
+  /** 文件 → 提取正则（g 标志逐处对照；语言各自适配） */
+  const CLAIMS = [
+    ['README.md', /\*\*(\d+)\*\*\s*模块/g],
+    ['README.md', /(\d+)\s*模块单向 DAG/g],
+    ['README.en.md', /\*\*(\d+)\*\*\s*modules/g],
+    ['README.en.md', /(\d+)-module one-way DAG/g],
+    ['README.es.md', /\*\*(\d+)\*\*\s*módulos/g],
+    ['README.es.md', /de\s+(\d+)\s*módulos/g],
+    ['README.fr.md', /\*\*(\d+)\*\*\s*modules/g],
+    ['README.fr.md', /de\s+(\d+)\s*modules/g],
+    ['AGENTS.md', /(\d+)\s*模块单向 DAG/g],
+    ['CONTRIBUTING.md', /(\d+)\s*模块单向 DAG/g],
+    ['docs/开发指南.md', /(\d+)\s*模块单向 DAG/g],
+    ['docs/架构总览.md', /(\d+)\s*个模块单向依赖/g],
+  ];
+  for (const [file, re] of CLAIMS) {
+    const full = resolve(dirname(fileURLToPath(import.meta.url)), '..', file);
+    if (!existsSync(full)) continue;
+    for (const m of readFileSync(full, 'utf8').matchAll(re)) {
+      if (Number(m[1]) !== count) {
+        violations.push(
+          `${file}：模块计数宣称 ${m[1]} ≠ 边表实数 ${count}（模块增行须同笔滚计数——复盘 G-3 第五起漂移根治锚）`,
+        );
+      }
+    }
+  }
+}
+
 if (violations.length > 0) {
   console.error(`拓扑检查未通过（${violations.length} 处违规）：`);
   for (const violation of violations) console.error(`  - ${violation}`);
@@ -327,5 +369,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `拓扑检查通过：${seenModules.size} 个模块（${[...seenModules].sort().join(', ')}），边表 ${Object.keys(MODULE_EDGES).length} 行（死边零，双向执法）`,
+  `拓扑检查通过：${seenModules.size} 个模块（${[...seenModules].sort().join(', ')}），边表 ${Object.keys(MODULE_EDGES).length} 行（死边零，双向执法，公开面模块计数锚对照绿）`,
 );

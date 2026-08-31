@@ -48,8 +48,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /* 扫描面                                                              */
 /* ------------------------------------------------------------------ */
 
-/** 仓库根级单文件（现行公开面——规则 1/2/3 全查） */
-const ROOT_FILES = ['AGENTS.md', 'README.md', 'CONTRIBUTING.md'];
+/** 仓库根级单文件（现行公开面——规则 1/2/3 全查）。
+ * README 四语 glob 展开（README*.md——复盘 G-2：三外国语镜像与中文同查，
+ * 新增语种文件自动纳管，无需手登记） */
+const ROOT_FILES = [
+  'AGENTS.md',
+  ...readdirSync(ROOT)
+    .filter((f) => /^README.*\.md$/.test(f))
+    .sort(),
+  'CONTRIBUTING.md',
+];
 
 /** 公开文档目录（现行——规则 1/2/3 全查） */
 const DOCS_DIR = join(ROOT, 'docs');

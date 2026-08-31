@@ -29,7 +29,7 @@ This is not science fiction. This is Berry's design goal: **an operating system 
 
 Berry's minimal kernel does exactly **install, run, guard, store**; everything else — conversation, coding agent, memory, long goals, scheduled tasks, MCP, LSP, observability, web UI — loads as an **application** on the composition tree. **Installable, unloadable, replaceable** — while your Agent's five lifelines (credentials, memory, trust history, budgets, ledgers) accumulate only once. Every app grows on the same state — **new brain, same body**.
 
-**26** modules (all implemented) · **35** lifecycle hooks · **16** durable event types · **12** official bundle pieces (each unloadable) · **2,400+** tests · **0** telemetry.
+**27** modules (all implemented) · **27** lifecycle hooks · **25** durable event types · **14** official bundle pieces (each unloadable) · **2,400+** tests · **0** telemetry.
 
 **Floor goal: the factory default layer ships at the daily-usable level of Codex / Claude Code.**
 
@@ -90,7 +90,7 @@ Alright, enough romance. **Now the steel and iron.**
                                │ composition tree (default layer + overlay.yaml)
         ┌──────────┬──────────┼──────────────┬───────────┐
         ▼          ▼          ▼              ▼           ▼
-     coder       chat      memory         goal      …12 pieces
+     coder       chat      memory         goal      …11 pieces
    (default     (conver-  (operator     (long       (each
      app)       sation)    state)       goals)    unloadable)
         └──────────┴──────────┴──────────────┴───────────┘
@@ -142,9 +142,12 @@ First launch creates the data directory at `~/.berry/`. The default model is `an
 | `mcp`       | MCP client bridge (stdio, zero new dependencies)                                                                  |
 | `lsp`       | Language-server bridge: diagnostics/symbols/definitions/references + post-write diagnostic injection              |
 | `web`       | Fetch tool + SSRF five-part hygiene                                                                               |
+| `compaction`| Long-conversation compaction: surfaceOp masking + five-step durable flow                                           |
+| `checkpoint`| Workspace snapshot rollback: sha256 blob store + `/rewind` two-phase transactional rollback                         |
 | `obs`       | Observability: hourly rollups + `obs_query` + `/obs` overview + alerting                                          |
 | `admin`     | Platform admin: apps_list / events_query / install verbs                                                          |
 | `webui`     | Loopback web UI (`--port` one-shot, SSE + SPA)                                                                    |
+| `browser`   | Browser automation: hand-written minimal CDP bridge + navigate/snapshot/interaction tools                          |
 
 ### Security Stack
 
@@ -166,7 +169,7 @@ First launch creates the data directory at `~/.berry/`. The default model is `an
 
 Loading follows the **app-center model**: an app is an independent installable (npm's three sources are the marketplace — registry names / git / local directories; no proprietary store), and installing alone changes nothing — install puts it in the warehouse, mounting writes the composition row that makes it live. Official pieces mount globally to serve all apps (operator state such as memory grows on one shared base); third-party pieces mount per-app (authorization and blast radius follow the host app).
 
-Writing a Berry app takes a single `index.ts`: a default-exported `apply(ctx, config)`, declarative metadata (inject dependencies, config schema, event vocabulary), and every registration goes through `ctx.effect` — scope rollback un-registers automatically. 35 lifecycle hooks span six layers (session / agent / turn / message / tool pipeline / provider), with the full observation and governance surface open. See the [App Development Guide](docs/应用开发指南.md) (Chinese).
+Writing a Berry app takes a single `index.ts`: a default-exported `apply(ctx, config)`, declarative metadata (inject dependencies, config schema, event vocabulary), and every registration goes through `ctx.effect` — scope rollback un-registers automatically. 27 lifecycle hooks span six layers (session / agent / turn / message / tool pipeline / provider), with the full observation and governance surface open. See the [App Development Guide](docs/应用开发指南.md) (Chinese).
 
 ## Security Model
 

@@ -29,7 +29,7 @@ Esto no es ciencia ficción. Es el objetivo de diseño de Berry: **un sistema op
 
 El kernel mínimo de Berry hace exactamente **instalar, ejecutar, proteger, almacenar**; todo lo demás — conversación, agente de código, memoria, objetivos largos, tareas programadas, MCP, LSP, observabilidad, interfaz web — se carga como **aplicación** sobre el árbol de composición. **Instalable, desinstalable, reemplazable** — mientras las cinco líneas de vida de tu Agent (credenciales, memoria, historial de confianza, presupuestos, libros de cuenta) se acumulan una sola vez. **Cerebro nuevo, mismo cuerpo.**
 
-**26** módulos (todos con código) · **35** ganchos de ciclo de vida · **16** tipos de eventos durables · **12** piezas oficiales (todas desinstalables) · **2.400+** pruebas · **0** telemetría.
+**27** módulos (todos con código) · **27** ganchos de ciclo de vida · **25** tipos de eventos durables · **14** piezas oficiales (todas desinstalables) · **2.400+** pruebas · **0** telemetría.
 
 **Objetivo mínimo: la capa por defecto de fábrica alcanza el nivel de uso diario de Codex / Claude Code.**
 
@@ -89,7 +89,7 @@ Bien, basta de romance. **Ahora el acero y el hierro.**
                                │ árbol de composición (capa por defecto + overlay.yaml)
         ┌──────────┬──────────┼──────────────┬───────────┐
         ▼          ▼          ▼              ▼           ▼
-     coder       chat      memory         goal      …12 piezas
+     coder       chat      memory         goal      …11 piezas
    (app por     (conver-  (estado del    (objetivos  (cada una
     defecto)    sación)    operador)     largos)   desinstalable)
         └──────────┴──────────┴──────────────┴───────────┘
@@ -141,9 +141,12 @@ El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por def
 | `mcp`       | Puente cliente MCP (stdio, cero dependencias nuevas)                                                  |
 | `lsp`       | Puente LSP: diagnósticos/símbolos/definiciones/referencias                                            |
 | `web`       | Fetch + higiene SSRF de cinco piezas                                                                  |
+| `compaction`| Compactación de conversaciones largas: enmascaramiento surfaceOp + flujo durable de cinco pasos        |
+| `checkpoint`| Reversión por instantáneas: almacén de blobs sha256 + `/rewind` reversión transaccional en dos fases   |
 | `obs`       | Observabilidad: rollups + `obs_query` + `/obs` + alertas                                              |
 | `admin`     | Administración: apps_list / events_query / verbos de instalación                                      |
 | `webui`     | Web en loopback (`--port` puntual, SSE + SPA)                                                         |
+| `browser`   | Automatización de navegador: puente CDP mínimo manuscrito + herramientas de navegación/instantánea/interacción |
 
 ### Pila de seguridad
 
@@ -165,7 +168,7 @@ El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por def
 
 La carga sigue el **modelo de centro de aplicaciones**: una aplicación es un instalable independiente (las tres fuentes de npm son el mercado — nombres de registro / git / directorios locales; sin tienda propia), e instalar por sí solo no cambia nada — la instalación la deja en el almacén; el montaje escribe la fila de composición que la activa. Las piezas oficiales se montan en el ámbito global para servir a todas las aplicaciones (el estado del operador, como la memoria, crece sobre una base compartida); las piezas de terceros se montan por aplicación (la autorización y el radio de explosión siguen a la aplicación anfitriona).
 
-Escribir una aplicación para Berry solo requiere un `index.ts`: un `apply(ctx, config)` exportado por defecto, metadatos declarativos (dependencias inject, esquema de config, vocabulario de eventos), y todo registro pasa por `ctx.effect` — el retroceso del ámbito deshace el registro automáticamente. 35 ganchos de ciclo de vida abarcan seis capas (sesión / agente / turno / mensaje / canalización de herramientas / proveedor), con la superficie completa de observación y gobernanza abierta. Consulta la [Guía de desarrollo de aplicaciones](docs/应用开发指南.md) (en chino).
+Escribir una aplicación para Berry solo requiere un `index.ts`: un `apply(ctx, config)` exportado por defecto, metadatos declarativos (dependencias inject, esquema de config, vocabulario de eventos), y todo registro pasa por `ctx.effect` — el retroceso del ámbito deshace el registro automáticamente. 27 ganchos de ciclo de vida abarcan seis capas (sesión / agente / turno / mensaje / canalización de herramientas / proveedor), con la superficie completa de observación y gobernanza abierta. Consulta la [Guía de desarrollo de aplicaciones](docs/应用开发指南.md) (en chino).
 
 ## Modelo de seguridad
 
