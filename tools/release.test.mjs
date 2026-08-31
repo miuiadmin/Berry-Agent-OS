@@ -129,7 +129,7 @@ describe('契约 5 planTagOperations / assertDistTagTerminal：终态统一律',
 });
 
 describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
-  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例） */
+  /** 通过检视的最小合法清单（bin 入口 + SPA + 技能资产 + README + LICENSE + 教学例 + 官方应用清单 + 出厂技能） */
   const CLEAN = [
     'package.json',
     'README.md',
@@ -139,6 +139,8 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     'dist/admin/skills/admin/SKILL.md',
     'examples/tool-echo/index.ts',
     'examples/tool-echo/README.md',
+    'apps/coder.app.yaml',
+    'skills/commit-checklist/SKILL.md',
   ];
   it('合法清单 → 绿', () => {
     expect(inspectPackEntries(CLEAN).ok).toBe(true);
@@ -152,6 +154,14 @@ describe('契约 3 inspectPackEntries：files 白名单机器验收', () => {
     // LICENSE 必在（第四十八批 license=MIT 拍板后升硬门——缺席即发布物残缺）
     expect(v.missing.join(' ')).toMatch(/LICENSE/);
     expect(v.missing.join(' ')).toMatch(/examples/);
+  });
+  it('缺 apps/ 官方应用清单 / 缺 skills/ 出厂技能 → 检视不过（复盘 G-1：两消费点静默降级，检视面是唯一闸）', () => {
+    // apps/ 与 skills/ 缺席时 loadOfficialApps / factorySkillRoot 均走「目录
+    // 缺失=静默降级」——装机后默认应用承诺无声破裂，必在清单是收口位
+    const v = inspectPackEntries(CLEAN.filter((p) => !p.startsWith('apps/') && !p.startsWith('skills/')));
+    expect(v.ok).toBe(false);
+    expect(v.missing.join(' ')).toMatch(/apps\/\*\.app\.yaml/);
+    expect(v.missing.join(' ')).toMatch(/skills\/\*\/SKILL\.md/);
   });
   it('测试/声明/映射/源码/构建配置混入 → 违禁（violations 逐个点名）', () => {
     const v = inspectPackEntries([
@@ -238,6 +248,8 @@ function greenBase(version) {
             'dist/admin/skills/admin/SKILL.md',
             'examples/tool-echo/index.ts',
             'examples/tool-echo/README.md',
+            'apps/coder.app.yaml',
+            'skills/commit-checklist/SKILL.md',
           ],
         },
       ]),
@@ -249,6 +261,8 @@ function greenBase(version) {
     },
     'smoke:install': () => ({ code: 0, stdout: '', stderr: '' }),
     'smoke:run': () => ({ code: 0, stdout: version + '\n', stderr: '' }),
+    // 真握手（复盘 G-1）：dump-config 断言官方应用清单在场（默认应用 = coder）
+    'smoke:apps': () => ({ code: 0, stdout: '默认应用：coder\n', stderr: '' }),
     publish: () => ({ code: 0, stdout: '', stderr: '' }),
   };
 }

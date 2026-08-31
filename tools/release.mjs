@@ -157,7 +157,10 @@ export function assertDistTagTerminal(observed, { isPrerelease, version, nextBef
  * *SKILL.md / README.md / LICENSE（2026-08-31 第四十八批——license=MIT 拍板后
  * 缺席即发布物残缺；npm 对根 LICENSE 恒随包，files 白名单拦不住它，检视面
  * 显式验收防误删）/ examples/ 教学例三件套（2026-08-31 第四十四批——
- * examples/*.ts 教学源码是「必在」例外：它们是随包发布物不是待编译源码）。
+ * examples/*.ts 教学源码是「必在」例外：它们是随包发布物不是待编译源码）/
+ * apps/<id>.app.yaml + skills/<name>/SKILL.md（2026-09-01 全面复盘 G-1——官方应用
+ * 清单与出厂技能缺席时两消费点〔loadOfficialApps/factorySkillRoot〕均走
+ * 「目录缺失=静默降级」，装机后默认应用承诺无声破裂，检视面显式验收）。
  * 必不在：测试产物 / 声明 / 映射 / src/ 前缀源码（examples/ 除外）/ 构建配置。
  * @param {(string|{path:string})[]} files npm pack --json 的 files 列表
  *   （新旧 npm 形状兼容：字符串或 {path} 对象皆收）
@@ -175,6 +178,8 @@ export function inspectPackEntries(files) {
   mustHave('README.md', (p) => p === 'README.md');
   mustHave('LICENSE（MIT 全文）', (p) => p === 'LICENSE');
   mustHave('examples/*（教学例三件套）', (p) => p.startsWith('examples/') && p !== 'examples/');
+  mustHave('apps/*.app.yaml（官方应用清单）', (p) => /^apps\/[^/]+\.app\.yaml$/.test(p));
+  mustHave('skills/*/SKILL.md（出厂技能）', (p) => /^skills\/[^/]+\/SKILL\.md$/.test(p));
   const violations = paths.filter(
     (p) =>
       /\.test\.js$/.test(p) ||
@@ -244,9 +249,11 @@ export const INJECT_SCENARIOS = {
 // ───────────────────────── 编排骨舞（io 注入缝） ─────────────────────────
 
 /**
- * 默认 io：真实进程执行。exec(标签, 命令, 参数, {inherit, cwd}) —— inherit 时
+ * 默认 io：真实进程执行。exec(标签, 命令, 参数, {inherit, cwd, env}) —— inherit 时
  * stdio 直通操作者（门禁/build 活体输出），否则捕获返回 {code, stdout, stderr}；
- * cwd 透传 spawnSync（pack 落点锚定 workDir——测试临时目录同机制）。
+ * cwd 透传 spawnSync（pack 落点锚定 workDir——测试临时目录同机制）；env 为
+ * 增量覆盖（展开在 process.env 之上——安装冒烟真握手用它钉 APP_DATA_DIR
+ * 防污染操作者真实数据域，G1 同款纪律）。
  */
 export function defaultIo() {
   return {
@@ -254,6 +261,7 @@ export function defaultIo() {
       const r = spawnSync(command, args, {
         stdio: opts.inherit ? 'inherit' : 'pipe',
         cwd: opts.cwd,
+        env: opts.env ? { ...process.env, ...opts.env } : undefined,
         encoding: 'utf8',
       });
       return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
@@ -459,6 +467,10 @@ function throwUnknownScenario(name) {
  * 契约 3 尾步：安装冒烟——tarball 装入临时 prefix，跑 bin --version：
  * 退出码 0 且输出 = 版本号（发布物可用性 + 版本一致性双断言；transitively
  * 核 src/app/version.ts 与 package.json 同步——漂移即冒烟红）。
+ * 第二断言（2026-09-01 全面复盘 G-1）：bin dump-config 真握手——官方应用
+ * 清单（apps/）缺席时 loadOfficialApps 静默空表、resolveDefaultApp 两跳皆断，
+ * 装机产物「能起但首启无默认应用」的静默残缺在此截获（APP_DATA_DIR 钉入
+ * 冒烟临时目录防污染真实数据域）。
  */
 async function installSmoke(io, { tarballPath, binName, version }) {
   const prefix = mkdtempSync(join(tmpdir(), 'release-smoke-'));
@@ -480,7 +492,20 @@ async function installSmoke(io, { tarballPath, binName, version }) {
         `安装冒烟版本漂移：bin 输出 ${run.stdout.trim()} ≠ ${version}（src/app/version.ts 与 package.json 失同步）`,
       );
     }
-    console.log(`  安装冒烟绿：${binName} --version = ${version}`);
+    // 真握手（复盘 G-1）：dump-config 全装配零落盘（:memory:），断言官方应用清单
+    // 非空且默认应用解析为 coder——apps/ 目录缺席即此处红，静默降级面收进发布闸
+    const probe = await io.exec('smoke:apps', join(prefix, 'node_modules', '.bin', binName), ['dump-config'], {
+      env: { APP_DATA_DIR: join(prefix, 'smoke-data'), APP_LOG_LEVEL: 'error' },
+    });
+    if (probe.code !== 0) {
+      throw new Error(`安装冒烟失败：${binName} dump-config 退出码 ${probe.code}（发布物装机后不可装配）`);
+    }
+    if (!probe.stdout.includes('默认应用：coder')) {
+      throw new Error(
+        `安装冒烟失败：dump-config 未见「默认应用：coder」——官方应用清单（apps/）疑似缺席，首启默认应用承诺将静默破裂`,
+      );
+    }
+    console.log(`  安装冒烟绿：${binName} --version = ${version}；dump-config 默认应用 = coder`);
   } finally {
     rmSync(prefix, { recursive: true, force: true }); // 冒烟现场即用即清
   }
