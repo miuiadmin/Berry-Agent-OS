@@ -89,6 +89,27 @@ export function detectInstallForm(entryRealPath: string): InstallForm {
 }
 
 /**
+ * npm 形态的包管理器甄别（冷读 m1 余款）：pnpm/yarn 全局装路径同样含
+ * node_modules（会误入 npm 分支）——spawn `npm i -g` 会装出第二份、原装不
+ * 升级。检出 `.pnpm` / `pnpm-global` / `yarn` 路径段时给原管理器指引。
+ */
+export function detectPackageManager(entryRealPath: string): 'npm' | 'pnpm' | 'yarn' {
+  const segs = entryRealPath.split(/[\\/]/);
+  // `.pnpm`（虚拟仓）/ `.pnpm-*`（home 变体）/ `pnpm-global`（无点形）三形并收
+  if (segs.some((x) => x === '.pnpm' || x.startsWith('.pnpm-') || x.startsWith('pnpm-global'))) {
+    return 'pnpm';
+  }
+  if (segs.includes('yarn')) return 'yarn';
+  return 'npm';
+}
+
+/** 非 npm 包管理器的升级指引（原管理器一条命令——本命令不代执行） */
+export function foreignManagerGuidance(manager: 'pnpm' | 'yarn'): string {
+  const cmd = manager === 'pnpm' ? 'pnpm add -g berryagent' : 'yarn global add berryagent';
+  return `检测到 ${manager} 全局安装形态——请用原包管理器升级（\`${cmd}\`），本命令不代执行（npm i -g 会装出第二份）。`;
+}
+
+/**
  * 目标版本选择：preview 期 latest 跟 alpha（§8.1 律）——latest 缺席时回落
  * next（alpha/rc 演习 tag）；两者皆缺 = 无可升级目标。
  */
@@ -207,6 +228,12 @@ export async function upgradeMain(): Promise<number> {
     return 0;
   }
 
+  // 包管理器甄别（冷读 m1 余款）：pnpm/yarn 全局装 → 原管理器指引不代执行
+  const manager = detectPackageManager(entryRealPath());
+  if (manager !== 'npm') {
+    process.stdout.write('\n' + foreignManagerGuidance(manager) + '\n');
+    return 0;
+  }
   // npm 形态自升级：spawn npm i -g（stdio 继承——npm 自带进度即显示面）。
   // target 来自 registry 响应（不可信输入）——进 spawn 参数前过 semver 形状
   // 白名单（win32 shell:true 形态下插值即命令注入面，白名单钉死）

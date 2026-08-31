@@ -84,7 +84,7 @@ Bien, basta de romance. **Ahora el acero y el hierro.**
             ┌─────────────────────────────────────────────┐
             │  Kernel fijo (Ring 0): instalar · ejecutar  │
             │  · proteger · almacenar — DAG unidireccional│
-            │  de 25 módulos, vigilado por máquina        │
+            │  de 27 módulos, vigilado por máquina        │
             └──────────────────┬──────────────────────────┘
                                │ árbol de composición (capa por defecto + overlay.yaml)
         ┌──────────┬──────────┼──────────────┬───────────┐
@@ -118,7 +118,7 @@ El primer arranque crea el directorio de datos en `~/.berry/`. El modelo por def
 
 ### Kernel
 
-- **DAG unidireccional de 25 módulos**: todos con código, vigilados por `npm run lint:topology` — nada central más allá de instalar/ejecutar/proteger/almacenar, no desinstalable.
+- **DAG unidireccional de 27 módulos**: todos con código, vigilados por `npm run lint:topology` — nada central más allá de instalar/ejecutar/proteger/almacenar, no desinstalable.
 - **Modelo de tres anillos**: Ring 0 (kernel, fijo) → Ring 1 (filas requeridas, reemplazables) → Ring 2 (paquete oficial, cada pieza desinstalable) → Ring 3 (ecosistema de terceros).
 
 ### Sesiones y datos

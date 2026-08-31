@@ -13,10 +13,10 @@
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { daemonDirOf, daemonStatePath, defaultProcessProbe } from './daemon-state.js';
-import { daemonHoldsWorkspaceSession } from './tui-main.js';
+import { daemonHoldsWorkspaceSession, isFirstBoot } from './tui-main.js';
 
 /** 近史行速造（判据只吃 cwd + id 两字段——窄类型即窄断言面） */
 const row = (id: string, cwd: string): { cwd: string; id: string } => ({ id, cwd });
@@ -82,5 +82,19 @@ describe('daemonHoldsWorkspaceSession：P3 触达面②判据四分支', () => {
       else process.env['APP_DATA_DIR'] = prev;
       rmSync(dataRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('isFirstBoot（§8.5 第 4 件首启判定——纯函数）', () => {
+  it(':memory: 恒非首启（内存库不构成「第一次使用」语义）', () => {
+    expect(isFirstBoot(':memory:')).toBe(false);
+  });
+  it('不存在的库文件 = 首启；存在 = 非首启（注入覆盖感知）', () => {
+    const fresh = join(tmpdir(), `berry-fb-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+    expect(isFirstBoot(fresh)).toBe(true); // 不存在
+    mkdirSync(dirname(fresh), { recursive: true });
+    writeFileSync(fresh, 'x');
+    expect(isFirstBoot(fresh)).toBe(false); // 存在
+    rmSync(fresh);
   });
 });

@@ -84,7 +84,7 @@ Alright, enough romance. **Now the steel and iron.**
 ```text
             ┌─────────────────────────────────────────────┐
             │  Fixed kernel (Ring 0): install · run ·     │
-            │  guard · store — 25-module one-way DAG,     │
+            │  guard · store — 27-module one-way DAG,     │
             │  machine-gated, not unloadable              │
             └──────────────────┬──────────────────────────┘
                                │ composition tree (default layer + overlay.yaml)
@@ -119,7 +119,7 @@ First launch creates the data directory at `~/.berry/`. The default model is `an
 
 ### Kernel
 
-- **25-module one-way DAG**: all implemented, machine-enforced by `npm run lint:topology` — no central anything beyond install/run/guard/store, not unloadable.
+- **27-module one-way DAG**: all implemented, machine-enforced by `npm run lint:topology` — no central anything beyond install/run/guard/store, not unloadable.
 - **Three-ring assembly**: Ring 0 (kernel, fixed) → Ring 1 (required rows, replaceable) → Ring 2 (official bundle, each unloadable) → Ring 3 (third-party ecosystem).
 
 ### Sessions & Data

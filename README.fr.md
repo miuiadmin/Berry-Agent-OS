@@ -84,7 +84,7 @@ Bien, assez de romantisme. **Maintenant l'acier et le fer.**
             ┌─────────────────────────────────────────────┐
             │  Noyau fixe (Ring 0) : installer · exécuter │
             │  · protéger · stocker — DAG unidirectionnel │
-            │  de 25 modules, verrouillé par machine      │
+            │  de 27 modules, verrouillé par machine      │
             └──────────────────┬──────────────────────────┘
                                │ arbre de composition (couche par défaut + overlay.yaml)
         ┌──────────┬──────────┼──────────────┬───────────┐
@@ -118,7 +118,7 @@ Le premier lancement crée le répertoire de données dans `~/.berry/`. Le modè
 
 ### Noyau
 
-- **DAG unidirectionnel de 25 modules** : tous implémentés, surveillés par `npm run lint:topology` — rien de central au-delà d'installer/exécuter/protéger/stocker, non déchargeable.
+- **DAG unidirectionnel de 27 modules** : tous implémentés, surveillés par `npm run lint:topology` — rien de central au-delà d'installer/exécuter/protéger/stocker, non déchargeable.
 - **Modèle à trois anneaux** : Ring 0 (noyau, fixe) → Ring 1 (lignes requises, remplaçables) → Ring 2 (ensemble officiel, chaque pièce déchargeable) → Ring 3 (écosystème tiers).
 
 ### Sessions et données

@@ -29,7 +29,8 @@ import type { AppStatusRow } from './composition.js';
 /** 诊断 → 通知文本行（2026-08-23 生态读码补钉 ref-3：「没生效」必须有可见出口） */
 /**
  * /guide 快速上手参考（技术栈篇 §8.5 第 2 件——「上手引导」的常驻形态；与首启
- * 欢迎块同一份内容骨架：版本/默认应用/核心命令/文档地图/升级卸载一句）。
+ * 欢迎块〔tui-main.ts FIRST_BOOT 同族〕同一份内容骨架：版本/默认应用/核心命令/
+ * 文档地图/升级卸载一句——改词两处同步，抽共享常量挂 m4）。
  */
 const GUIDE_TEXT = [
   `Berry ${VERSION}（${CODENAME}）— 快速上手`,

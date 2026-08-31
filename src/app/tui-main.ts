@@ -44,6 +44,18 @@ export function daemonHoldsWorkspaceSession(
 }
 
 /**
+ * 首启判定（技术栈篇 §8.5 第 4 件，第五十一批）：boot 前库文件不存在。
+ * 覆盖感知三级：options.dbPath 注入（测试）→ APP_DB_PATH → APP_DATA_DIR →
+ * 缺省 ~/.berry/sessions.db（dbPath() 单源）；`:memory:` 恒非首启（内存库
+ * 每次都是新的但语义上不构成「第一次使用」）。纯函数可测——建档发生在
+ * createRuntime ③，判定必须在其之前（建档后 existsSync 恒真）。
+ */
+export function isFirstBoot(dbPathOverride?: string): boolean {
+  const effective = dbPathOverride ?? dbPath();
+  return effective !== ':memory:' && !existsSync(effective);
+}
+
+/**
  * TUI 主流程（阻塞至用户退出）。
  * @param options 组合根选项透传（测试注入 streamFn/dbPath 用）
  * @returns 进程退出码（正常退出恒 0——用户离开不是错误）
@@ -52,8 +64,7 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
   // 首启判定（技术栈篇 §8.5 第 4 件，第五十一批）：boot 前库文件不存在
   //（options.dbPath 注入 / APP_DB_PATH / APP_DATA_DIR 覆盖全感知；:memory:
   // 恒非首启）——boot 后欢迎块用。不阻塞首启即用（第六批一句话判据不破）
-  const effectiveDbPath = options.dbPath ?? dbPath();
-  const firstBoot = effectiveDbPath !== ':memory:' && !existsSync(effectiveDbPath);
+  const firstBoot = isFirstBoot(options.dbPath);
   // 数据目录建档已收编 createRuntime ③（三入口共用单点）——此处不再早调
   const runtime = await createRuntime({
     ...options,
@@ -120,7 +131,8 @@ export async function tuiMain(options: RuntimeOptions = {}): Promise<number> {
     },
   });
   runtime.ui.attach(tui.ui());
-  // 首启欢迎（§8.5 第 4 件）：活体层 notify 不落库——只在第一次出现，非首启
+  // 首启欢迎（§8.5 第 4 件；内容骨架与 commands.ts GUIDE_TEXT 同源——改词两处
+  // 同步，抽共享常量挂 m4）：活体层 notify 不落库——只在第一次出现，非首启
   // 零噪音；内容骨架与 /guide 同源（命令/文档/配置指路三件）
   if (firstBoot) {
     runtime.ui.notify(

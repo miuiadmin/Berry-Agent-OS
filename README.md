@@ -83,7 +83,7 @@ Berry 用操作系统的方式回答这个问题。你的 Agent 的每一天都�
 ```text
             ┌─────────────────────────────────────────────┐
             │  固定内核（Ring 0）：装 · 跑 · 守 · 存        │
-            │  25 模块单向 DAG · 机器门禁钉死 · 不可卸      │
+            │  27 模块单向 DAG · 机器门禁钉死 · 不可卸      │
             └──────────────────┬──────────────────────────┘
                                │ 组合树（默认层 + overlay.yaml）
         ┌──────────┬──────────┼──────────────┬───────────┐
@@ -98,16 +98,22 @@ Berry 用操作系统的方式回答这个问题。你的 Agent 的每一天都�
 
 ## 快速开始
 
-```bash
-# 要求 Node.js >= 22.19
-git clone <本仓库> && cd berry
-npm install
-npm run build
-npm link          # 装上 berry 命令
+要求 Node.js ≥ 22.19。三种安装方式（详路见 [docs/使用指南](docs/使用指南.md) §1）：
 
-berry             # TUI 交互（缺省进入 coder 应用，续接当前目录最新会话）
+```bash
+# 方式一：一键脚本（分步状态显示；<仓库 URL> 待发布定档后回填）
+curl -fsSL <仓库>/scripts/install.sh | sh
+# 方式二：npm 直装（发布后可用）
+npm i -g berryagent
+# 方式三：源码（开发者）
+git clone <本仓库> && cd berry && npm install && npm run build && npm link
+```
+
+```bash
+berry             # TUI 交互（缺省进入 coder 应用，续接当前目录最新会话；首启自动出现欢迎引导）
 berry run "hi"    # 单次执行（退出码即结果）
 berry dump-config # 生效组合诊断（模型/组合树/应用装载状态，不落库）
+berry upgrade     # 升级维护动词（查更新 → npm 形态自升级；/guide 随时看快速上手）
 ```
 
 首次启动会在 `~/.berry/` 建数据目录——你的 Agent 的家。模型缺省 `anthropic/claude-sonnet-5`，可用 `APP_MODEL` 覆盖（换脑子不换身体）；provider 凭证走 pi-ai 凭证链。
@@ -116,7 +122,7 @@ berry dump-config # 生效组合诊断（模型/组合树/应用装载状态，�
 
 ### 内核
 
-- **25 模块单向 DAG**：全部有码，`npm run lint:topology` 机器执法——装/跑/守/存四职能之外不设中枢，不可卸载。
+- **27 模块单向 DAG**：全部有码，`npm run lint:topology` 机器执法——装/跑/守/存四职能之外不设中枢，不可卸载。
 - **三环装配模型**：Ring 0（内核，不可卸）→ Ring 1（必备行，可换实现）→ Ring 2（官方全家桶，件件可卸）→ Ring 3（第三方生态）。
 
 ### 会话与数据

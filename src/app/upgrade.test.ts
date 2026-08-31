@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
   compareSemver,
   detectInstallForm,
+  detectPackageManager,
+  foreignManagerGuidance,
   pickTargetVersion,
   sourceUpgradeGuidance,
   unpublishedGuidance,
@@ -75,5 +77,27 @@ describe('指引文案', () => {
     expect(text).toContain('尚未发布');
     expect(text).toContain('1.0.0-alpha.0');
     expect(text).toContain('源码');
+  });
+});
+
+describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 余款）', () => {
+  it('npm 全局 = npm（缺省）', () => {
+    expect(detectPackageManager('/usr/local/lib/node_modules/berryagent/dist/app/main.js')).toBe('npm');
+  });
+  it('pnpm 全局（.pnpm / pnpm-global 段）→ pnpm', () => {
+    expect(
+      detectPackageManager(
+        '/home/x/.local/share/pnpm/global/5/.pnpm/berryagent@1.0.0/node_modules/berryagent/dist/app/main.js',
+      ),
+    ).toBe('pnpm');
+    expect(detectPackageManager('/home/x/.pnpm-global/node_modules/berryagent/dist/app/main.js')).toBe('pnpm');
+  });
+  it('yarn 全局（yarn 段）→ yarn', () => {
+    expect(detectPackageManager('/home/x/.config/yarn/global/node_modules/berryagent/dist/app/main.js')).toBe('yarn');
+  });
+  it('非 npm 管理器指引：原管理器一条命令 + 不代执行声明', () => {
+    expect(foreignManagerGuidance('pnpm')).toContain('pnpm add -g berryagent');
+    expect(foreignManagerGuidance('yarn')).toContain('yarn global add berryagent');
+    expect(foreignManagerGuidance('pnpm')).toContain('不代执行');
   });
 });
