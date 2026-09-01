@@ -70,6 +70,8 @@ berry/
 - **命名去品牌化**：代码标识符禁用品牌词；仅 package.json name / bin 命令 / UI 文案允许。
 - **事件词汇**：显式注册 + check-events 双向校验；读侧未知类型宁拒绝不静默丢。
 - **日志红线**：只在 debug 出现的分支必须同时是 durable 事件或运行时断言。
+- **文档 hash 引用**：docs / README 里的 commit hash 只许引用 origin 可见历史——本地私有分支（如 private-archive）的 hash 在 CI 克隆上会让 check-tense 的 hash 对照红（本地 git log --all 含私有分支，CI 没有）。
+- **跑 dist 前 build**：dist/ 是构建产物，随源码演进即过期——`node dist/...` 调试前必先 `npm run build`（发布机器全新 build 自带兜底，本地直跑无兜底）。
 - **架构纪律**：已有机制优先于新概念；补丁过多即重构。
 
 ## 提交规范
