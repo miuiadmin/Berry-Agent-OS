@@ -98,6 +98,14 @@ const streamFn = (context, _options) => {
 const smokeData = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-data-'));
 const smokeWorkspace = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-ws-'));
 
+// 数据目录钉扎（20260901-d #2）：assembly 一批 dataDir() 调用点（boot 期
+// sweepAppTmpDirs 扫龄删除 + ChildRegistry 孤儿树杀 / loadProjectAliases 别名
+// 装入 / allowlist 挂载 / external 行可写根推导）只认 APP_DATA_DIR env，不吃
+// createRuntime 的 homeDir/compositionDir 参数——不钉则每次回放（含 npm test
+// 里的金样回归测试）对真实 ~/.berry 执行维护动作、真实目录状态进入回放读面
+// （批 44 教训重演形态）。强制覆写钉在临时 data 根上：隔离意图优先于继承。
+process.env['APP_DATA_DIR'] = smokeData;
+
 const runtime = await createRuntime({
   model: meta.model,
   streamFn,

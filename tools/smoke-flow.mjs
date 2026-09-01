@@ -181,14 +181,20 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
     /* ---- memory 简报差分追注轮 ---- */
     try {
       let sawInjection = '';
-      runtime.ctx.on('context_transform', (messages, next) => {
+      // S1 三参形状（运行时骨架 §6.7④，20260901-d #1 修死）：waterfall 以
+      // (messages, sessionId, cont) 三参派发——两参声明的 next 形参实际绑到
+      // sessionId 字符串，`next(messages)` 必抛 TypeError「next is not a
+      // function」且直穿瀑布整链 reject（无异常隔离）→ 差分轮模型调用确定性
+      // 死亡。与 memory/app.ts 差分·检索两 handler 同款纪律：逐参透传
+      // next(messages, sessionId)。
+      runtime.ctx.on('context_transform', (messages, sessionId, next) => {
         const list = Array.isArray(messages) ? messages : [];
         for (const m of list) {
           if (m && typeof m === 'object' && m.role === 'memory/diff' && typeof m.content === 'string') {
             sawInjection = m.content;
           }
         }
-        return next(messages);
+        return next(messages, sessionId);
       });
       const callToolDiff = (name, args) => {
         const def = runtime.tools.get(name);
@@ -215,7 +221,12 @@ export async function runSmokeFlow({ runtime, prompt, smokeData }) {
         return entries.some((en) => en?.op === '+' && en.id === writtenShortId);
       });
       const injectionHit = sawInjection !== '' && sawInjection.includes(`[m:${writtenShortId}]`);
-      diffOk = writtenShortId !== '' && plusEntry && injectionHit;
+      // 差分轮收场必须真完成（20260901-d #1 回归锁）：三项旁证（工具回执短 id /
+      // durable '+' 条目 / handler 收到注入）全不依赖模型调用——差分轮若在
+      // transform 瀑布就炸死（如 handler 签形状错、next 绑到 sessionId），三项
+      // 仍可全绿而轮已失败。status==='completed' 把「轮死了但判定绿」的自弱化
+      // 形态从此处结构性挡死。
+      diffOk = writtenShortId !== '' && plusEntry && injectionHit && diffResult?.status === 'completed';
       const lastDiff = diffResult?.messages.at(-1);
       const diffText =
         lastDiff && lastDiff.role === 'assistant'

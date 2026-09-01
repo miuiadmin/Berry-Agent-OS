@@ -69,6 +69,12 @@ if (!baseUrl || !token || !prompt) {
 const smokeData = process.env['SMOKE_DATA_DIR'] ?? mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-data-'));
 const smokeWorkspace = process.env['SMOKE_WORKSPACE'] ?? mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-ws-'));
 
+// 数据目录钉扎（20260901-d #2，与 smoke-replay 同款）：assembly 的 dataDir()
+// 调用面（boot 扫龄/孤儿树杀/别名/allowlist/external 可写根）只认
+// APP_DATA_DIR env——不钉则真模型冒烟对真实 ~/.berry 动手、录制侧读面混入
+// 用户装机状态，录制/回放隔离形态也随之分叉。
+process.env['APP_DATA_DIR'] = smokeData;
+
 /* ---------------- provider 构造（与 pi-ai anthropicProvider 同形，仅 baseUrl/认证来源不同） ---------------- */
 
 const provider = createProvider({

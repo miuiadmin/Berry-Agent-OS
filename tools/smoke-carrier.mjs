@@ -57,6 +57,12 @@ if (!baseUrl || !token) {
 const smokeData = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-carrier-data-'));
 const smokeWorkspace = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-carrier-ws-'));
 
+// 数据目录钉扎（20260901-d #2，与 smoke-replay/real 同款）：external 载体行的
+// 可写根推导走 appDataDirOf(dataDir(), row.id)——不钉 APP_DATA_DIR 则 fixture
+// 的 jiti 缓存会写进真实 ~/.berry/apps/<行id>/tmp（磁盘实证：fx-ext 残骸即此
+// 形态），boot 期扫龄/孤儿清扫同样对真实 ~/.berry 动手。
+process.env['APP_DATA_DIR'] = smokeData;
+
 /* ---------------- 第三方应用 fixture × 2（真实目录形态：入口 index.ts + 词名导出） ---------------- */
 
 /**
