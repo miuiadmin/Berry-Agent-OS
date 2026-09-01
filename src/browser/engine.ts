@@ -13,8 +13,15 @@
  * 两级闲置回收（冷读 B2 裁决——无会话终结钩子，context 惰性回收）：
  * - 任一工具调用只续命**本 session** 的 context（闲置 idleMs 缺省 300s →
  *   dispose 该 context）；
- * - 引擎在零活 context 状态闲置 idleMs → Browser.close 优雅收场 + 树杀兜底
- *   （下一调用重新 ensure——spawn 形态换新 bootId 复活）。
+ * - 引擎在零活 context 状态闲置 idleMs → spawn 形态 Browser.close 优雅收场
+ *   + 树杀兜底（下一调用重新 ensure——spawn 形态换新 bootId 复活）；attach
+ *   形态只断连（只连不杀——契约篇 §6.10）。
+ *
+ * 生命周期收口六修（2026-09-01 遗漏大扫 20260901-b 第五十三批）：attach 收场
+ * 只断连 / 起链失败即清算本 child（树杀+净退+closed）/ context 建链半途失败
+ * 回滚三表 + 重武装闲置钟 / 连接期失败统一 BROWSER_CONNECT_FAILED / 收场
+ * 代际护栏（closeEngine await 窗内换代只结算本代——context 归属判据 = 开
+ * context 所用的连接）。
  *
  * 回卷面：ctx.effect('browser-engine') → dispose（行卸载/作用域终结 = 永久
  * 关停，复活走行重装载）。子进程登记簿自持 `<dataDir>/browser/children.json` +
@@ -25,6 +32,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AppLogger } from '../contracts/app.js';
+import { AppError, BROWSER_CONNECT_FAILED } from '../contracts/errors.js';
 import { applyCaptureEvent, SessionCapture } from './capture.js';
 import {
   CdpConnection,
@@ -109,6 +117,8 @@ export class BrowserEngine {
   private readonly contexts = new Map<string, SessionBrowserState>();
   /** per-session 捕获态表（与 contexts 同键同生命周期——刀二捕获条款） */
   private readonly captures = new Map<string, SessionCapture>();
+  /** context 归属表（路由键 → 开该 context 所用的连接——代际护栏的归属判据，#17） */
+  private readonly contextOwners = new Map<string, CdpConnection>();
   /** CDP sessionId → 路由键反查表（事件分流后定位所属捕获态） */
   private readonly keyByCdpSession = new Map<string, string>();
   /** per-session 闲置计时器表（与 contexts 同键同生命周期） */
@@ -117,6 +127,8 @@ export class BrowserEngine {
   private engineIdleTimer: ReturnType<typeof setTimeout> | undefined;
   /** ensure 并发去重（同时首用只 spawn 一次） */
   private starting: Promise<void> | undefined;
+  /** 已收场的代际簿（代收尾幂等——onDead 收场与显式收场同代只结算一次） */
+  private readonly tornDown = new WeakSet<CdpConnection>();
   /** 永久关停旗（effect 回卷后 true——dispose 后不再复活，行重装载才重建） */
   private disposed = false;
 
@@ -154,15 +166,31 @@ export class BrowserEngine {
       // rpc 必在（ensureRunning 刚保证 running）——防御位仅供类型收窄
       const conn = this.connection;
       if (conn === undefined) throw new Error('引擎未运行（内部状态不一致）');
-      session = await openSessionContext(conn.rpc);
-      this.contexts.set(key, session);
-      // 捕获态挂载 + 事件分流索引（刀二：console/异常/dialog 事件源随 context 建立）
-      this.captures.set(key, new SessionCapture());
-      this.keyByCdpSession.set(session.sessionId, key);
-      // page 级域启用：Runtime = console/异常事件源；Page = dialog 事件源
-      // （fail-loud：域启用失败 = context 建立失败——不留静默半捕获态）
-      await conn.rpc.request('Runtime.enable', undefined, { sessionId: session.sessionId });
-      await conn.rpc.request('Page.enable', undefined, { sessionId: session.sessionId });
+      try {
+        session = await openSessionContext(conn.rpc);
+        this.contexts.set(key, session);
+        // 捕获态挂载 + 事件分流索引（刀二：console/异常/dialog 事件源随 context 建立）
+        this.captures.set(key, new SessionCapture());
+        this.contextOwners.set(key, conn); // 归属记本代连接（代际护栏判据，#17）
+        this.keyByCdpSession.set(session.sessionId, key);
+        // page 级域启用：Runtime = console/异常事件源；Page = dialog 事件源
+        // （fail-loud：域启用失败 = context 建立失败——不留静默半捕获态）
+        await conn.rpc.request('Runtime.enable', undefined, { sessionId: session.sessionId });
+        await conn.rpc.request('Page.enable', undefined, { sessionId: session.sessionId });
+      } catch (err) {
+        // 建链半途失败即回滚（#3）：不留「session 在表但域永未启用」的半捕获态——
+        // 三表回滚 + 尽力 dispose（连接可能已坏，容错不拦上抛）+ 零活 context
+        // 重武装引擎闲置钟（否则起建失败后闲置钟永久失防 = 引擎悬死不回收）
+        this.contexts.delete(key);
+        this.captures.delete(key);
+        this.contextOwners.delete(key);
+        if (session !== undefined) {
+          this.keyByCdpSession.delete(session.sessionId);
+          await disposeSessionContext(conn.rpc, session.browserContextId).catch(() => undefined);
+        }
+        if (this.contexts.size === 0) this.armEngineIdle();
+        throw err;
+      }
       this.deps.logger.debug(`browser context 建立（session=${key}，target=${session.targetId}）`);
     }
     this.touchContext(key);
@@ -217,6 +245,7 @@ export class BrowserEngine {
     this.contexts.delete(key);
     // 捕获态同键回收（console 缓冲/ref 表随 context 丢弃——重新建立即空态）
     this.captures.delete(key);
+    this.contextOwners.delete(key);
     this.keyByCdpSession.delete(session.sessionId);
     const conn = this.connection;
     if (conn !== undefined) {
@@ -295,39 +324,57 @@ export class BrowserEngine {
     });
     this.deps.logger.info(`browser 引擎 spawn（pid=${child.pid}，profile=profile-${bootId.slice(0, 8)}）`);
 
-    // ---- DevToolsActivePort 轮询（spawn → 可握手之间的就绪信号） ----
-    const wsUrl = await this.waitForDevToolsPort(profileDir, child);
-    const connection = await CdpConnection.connect(wsUrl, this.deps.newConnection, {
-      onEvent: this.routeEvent, // 统一走事件路由（捕获态消费 + 外部透传）
-      onNoise: this.deps.onNoise,
-    });
-    this.adoptConnection(connection, { enginePath: discovered.path, attach: false });
+    try {
+      // ---- DevToolsActivePort 轮询（spawn → 可握手之间的就绪信号） ----
+      const wsUrl = await this.waitForDevToolsPort(profileDir, child);
+      const connection = await CdpConnection.connect(wsUrl, this.deps.newConnection, {
+        onEvent: this.routeEvent, // 统一走事件路由（捕获态消费 + 外部透传）
+        onNoise: this.deps.onNoise,
+      });
+      this.adoptConnection(connection, { enginePath: discovered.path, attach: false });
+    } catch (err) {
+      // 起链失败即清算本 child（#2/#9）：活 Chrome 不留野、登记簿不留尸、
+      // 状态不谎报 starting（收场后置 closed）——失败原样上抛，下一调用照常复活
+      this.teardownGeneration({ conn: this.connection, child });
+      throw err;
+    }
     this.deps.notify('浏览器引擎已启动（本地 CDP 回环）');
   }
 
   /** attach 形态起链（只连不杀——无 spawn/登记簿/树杀链） */
   private async bringUpAttach(endpoint: string): Promise<void> {
     this.status = { state: 'starting' };
-    const info = await fetchVersionInfo(endpoint);
-    const connection = await CdpConnection.connect(info.webSocketDebuggerUrl, this.deps.newConnection, {
-      onEvent: this.routeEvent, // 统一走事件路由（捕获态消费 + 外部透传）
-      onNoise: this.deps.onNoise,
-    });
-    this.adoptConnection(connection, { enginePath: `(attach ${endpoint})`, attach: true });
-    this.deps.notify(`浏览器引擎已 attach（${info.browser}）`);
+    // 端点发现与握手产物（通知面消费浏览器自报名——收进 try 保持单出口）
+    let browserName = '(unknown)';
+    try {
+      const info = await fetchVersionInfo(endpoint);
+      browserName = info.browser;
+      const connection = await CdpConnection.connect(info.webSocketDebuggerUrl, this.deps.newConnection, {
+        onEvent: this.routeEvent, // 统一走事件路由（捕获态消费 + 外部透传）
+        onNoise: this.deps.onNoise,
+      });
+      this.adoptConnection(connection, { enginePath: `(attach ${endpoint})`, attach: true });
+    } catch (err) {
+      // 连不上即收场复位（#9：状态不谎报 starting）——attach 无 child 零清算面
+      this.teardownGeneration({ conn: this.connection, child: undefined });
+      throw err;
+    }
+    this.deps.notify(`浏览器引擎已 attach（${browserName}）`);
   }
 
-  /** 连接收养公共尾：死亡感知挂线 + 状态置 running */
+  /** 连接收养公共尾：死亡感知挂线（携带本代 conn/child 快照——代际护栏，#17）+ 状态置 running */
   private adoptConnection(connection: CdpConnection, running: { enginePath: string; attach: boolean }): void {
     this.connection = connection;
-    connection.onDead((reason) => this.onEngineDead(reason));
+    // 本代快照随闭包固化：死亡回调只清算本代产物（窗内换代不误伤新代）
+    const childAtAdopt = this.child;
+    connection.onDead((reason) => this.onEngineDead(reason, connection, childAtAdopt));
     this.status = { state: 'running', enginePath: running.enginePath, attach: running.attach };
   }
 
-  /** 引擎死亡收场（意外死亡/闲置回收/主动 dispose 同口——按 status 辨因） */
-  private onEngineDead(reason: string): void {
+  /** 引擎死亡收场（意外死亡/闲置回收/主动 dispose 同口——按 status 辨因；代际快照由挂线闭包携带） */
+  private onEngineDead(reason: string, conn: CdpConnection, child: EngineChild | undefined): void {
     const wasRunning = this.status.state === 'running';
-    this.teardownConnection();
+    this.teardownGeneration({ conn, child });
     if (wasRunning) {
       // 意外死亡（引擎 crash）——人读出口 + 状态落 closed；下一调用复活
       this.deps.logger.warn(`browser 引擎意外死亡：${reason}`);
@@ -335,38 +382,73 @@ export class BrowserEngine {
     }
   }
 
-  /** 物理收尾：连接置空 + 钟全清 + 子进程树杀/净退（幂等） */
-  private teardownConnection(): void {
-    this.clearEngineIdle();
-    for (const [, timer] of this.contextTimers) clearTimeout(timer);
-    this.contextTimers.clear();
-    this.contexts.clear();
-    this.captures.clear();
-    this.keyByCdpSession.clear();
-    this.connection = undefined;
-    const child = this.child;
-    this.child = undefined;
-    this.enginePath = undefined;
-    if (child !== undefined) {
-      this.deps.killTree(child.pid, child.alive); // 树杀兜底（Browser.close 未达/竞态）
-      this.deps.registry.remove(child.pid);
+  /**
+   * 本代收尾（幂等——同代只结算一次）：本代 context 簿记清算（归属判据 =
+   * 开 context 所用的连接）+ 闲置钟撤防 + 共享引用代际护栏 + 本代 child
+   * 树杀/登记簿净退。
+   *
+   * 代际护栏（#17）：closeEngine 的 await 窗（Browser.close 在飞）内并发
+   * bringUp 换代时——新代的 connection/child/status 与新代 context 簿记
+   * 一律不动，本收场只结算本代产物。
+   */
+  private teardownGeneration(atClose: { conn: CdpConnection | undefined; child: EngineChild | undefined }): void {
+    if (atClose.conn !== undefined) {
+      // 同代幂等闸（onDead 收场与显式收场同代只跑一次——树杀/净退不重复）
+      if (this.tornDown.has(atClose.conn)) return;
+      this.tornDown.add(atClose.conn);
     }
-    this.status = { state: 'closed' };
+    this.clearEngineIdle();
+    for (const [key, owner] of [...this.contextOwners]) {
+      // 只清算归属本代的 context（换代期新代 context 簿记不动）
+      if (owner !== atClose.conn) continue;
+      const timer = this.contextTimers.get(key);
+      if (timer !== undefined) clearTimeout(timer);
+      this.contextTimers.delete(key);
+      this.contextOwners.delete(key);
+      const session = this.contexts.get(key);
+      if (session !== undefined) {
+        this.contexts.delete(key);
+        this.captures.delete(key);
+        this.keyByCdpSession.delete(session.sessionId);
+      }
+    }
+    // 共享引用护栏：仍指向本代产物才清（换代 = 新代引用原位不动）
+    if (this.connection === atClose.conn) {
+      this.connection = undefined;
+      if (this.child === atClose.child) {
+        this.child = undefined;
+        this.enginePath = undefined;
+      }
+      this.status = { state: 'closed' };
+    }
+    if (atClose.child !== undefined) {
+      this.deps.killTree(atClose.child.pid, atClose.child.alive); // 树杀兜底（Browser.close 未达/竞态）
+      this.deps.registry.remove(atClose.child.pid);
+    }
   }
 
-  /** 引擎收场（闲置回收）：Browser.close 优雅 → 树杀兜底 → 净退 */
+  /**
+   * 引擎收场（闲置回收/永久关停）：spawn 形态 Browser.close 优雅 → 树杀兜底；
+   * **attach 形态只断连**（契约篇 §6.10「只连不杀」——Browser.close 会杀掉
+   * 用户自起的浏览器，attach 形态不拥引擎生命周期，关停仅拆自己的连接）。
+   */
   private async closeEngine(reason: string): Promise<void> {
     const conn = this.connection;
     if (conn === undefined) return;
+    // 代际快照（#17）：await 窗内换代时本收场只结算本代
+    const atClose = { conn, child: this.child };
+    const attachAtClose = this.status.state === 'running' ? this.status.attach : false;
     this.status = { state: 'closed' }; // 先置 closed——onDead 收场辨因用
-    try {
-      await conn.rpc.request('Browser.close', undefined, { timeoutMs: 2_000 });
-    } catch {
-      // 优雅腿失败不拦收场——树杀兜底在后
+    if (!attachAtClose) {
+      try {
+        await conn.rpc.request('Browser.close', undefined, { timeoutMs: 2_000 });
+      } catch {
+        // 优雅腿失败不拦收场——树杀兜底在后
+      }
     }
     conn.close(reason);
-    this.teardownConnection();
-    this.deps.logger.info(`browser 引擎收场（${reason}）`);
+    this.teardownGeneration(atClose);
+    this.deps.logger.info(`browser 引擎收场（${reason}${attachAtClose ? '——attach 形态只断连' : ''}）`);
   }
 
   /** 永久关停（ctx.effect 回卷——行卸载/作用域终结） */
@@ -388,7 +470,8 @@ export class BrowserEngine {
         // 引擎先死 = 起链失败（Linux 缺库等形态——BROWSER_CONNECT_FAILED 附指引语义位）
         if (!child.alive()) {
           reject(
-            new Error(
+            new AppError(
+              BROWSER_CONNECT_FAILED,
               `浏览器引擎启动即退出（exitCode 非 null）——可执行存在但依赖缺失（Linux 缺共享库时装 --with-deps 或换渠道引擎）`,
             ),
           );
@@ -399,7 +482,9 @@ export class BrowserEngine {
           raw = readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8');
         } catch {
           if (Date.now() - startedAt > timeoutMs) {
-            reject(new Error(`引擎就绪等待超时（>${timeoutMs}ms，DevToolsActivePort 未出现）`));
+            reject(
+              new AppError(BROWSER_CONNECT_FAILED, `引擎就绪等待超时（>${timeoutMs}ms，DevToolsActivePort 未出现）`),
+            );
             return;
           }
           const timer = setTimeout(poll, pollMs);
@@ -409,7 +494,7 @@ export class BrowserEngine {
         const [portLine, pathLine] = raw.split('\n');
         if (portLine === undefined || pathLine === undefined || portLine.trim() === '') {
           if (Date.now() - startedAt > timeoutMs) {
-            reject(new Error('DevToolsActivePort 内容异常（缺 port/ws path 行）'));
+            reject(new AppError(BROWSER_CONNECT_FAILED, 'DevToolsActivePort 内容异常（缺 port/ws path 行）'));
             return;
           }
           const timer = setTimeout(poll, pollMs);

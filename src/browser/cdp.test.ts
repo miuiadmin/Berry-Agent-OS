@@ -122,6 +122,10 @@ class FakeCdpServer {
   responders: Record<string, (params: Record<string, unknown>) => unknown> = {};
   /** 错误应答表（method → CDP error 帧——优先于 responders；服务器错误腿测试） */
   errorResponders: Record<string, { code: number; message: string }> = {};
+  /** 应答扣押表（命中 method = 应答暂扣待 releaseHeld() 放行——收场竞速编排用） */
+  holdMethods = new Set<string>();
+  /** 扣押中的应答放行回调（releaseHeld 一次性全放） */
+  private heldReplies: Array<() => void> = [];
   port = 0;
 
   constructor() {
@@ -172,6 +176,13 @@ class FakeCdpServer {
     const msg = JSON.parse(frame.payload.toString('utf8')) as Record<string, unknown>;
     if (typeof msg.method === 'string' && msg.id !== undefined) {
       this.receivedFrames.push(msg);
+      // 扣押分支：命中扣押表 = 应答暂存（请求帧已录，回帧待 releaseHeld 统一放行）
+      if (this.holdMethods.has(msg.method)) {
+        this.heldReplies.push(() => {
+          socket.write(encodeTextFrame(JSON.stringify({ id: msg.id, result: {} })));
+        });
+        return;
+      }
       const errFor = this.errorResponders[msg.method];
       if (errFor !== undefined) {
         socket.write(encodeTextFrame(JSON.stringify({ id: msg.id, error: errFor })));
@@ -198,6 +209,13 @@ class FakeCdpServer {
     const frame = { method, params, ...(sessionId === undefined ? {} : { sessionId }) };
     const encoded = encodeTextFrame(JSON.stringify(frame));
     for (const socket of this.sockets) socket.write(encoded);
+  }
+
+  /** 放行全部扣押应答（收场竞速编排的「开闸」步） */
+  releaseHeld(): void {
+    const cbs = this.heldReplies;
+    this.heldReplies = [];
+    for (const cb of cbs) cb();
   }
 
   /** 起服（127.0.0.1 随机端口） */
@@ -442,6 +460,16 @@ describe('browser 引擎生命周期', () => {
     dataDir: string;
     idleMs: number;
     onSpawn?: (args: readonly string[]) => void;
+    /** DevToolsActivePort 端口覆写（死端口腿——指向无人监听端口 connect 必败） */
+    portOverride?: number;
+    /** 不写 DevToolsActivePort（超帽腿——文件永不出现） */
+    noPortFile?: boolean;
+    /** 假 child 活性探针（false = 启动即死腿） */
+    alive?: () => boolean;
+    /** 起链等待帽覆写（缺省 2000——超帽腿注入小值） */
+    startupTimeoutMs?: number;
+    /** spawn pid 序列（缺省恒 424242——代际竞速腿第二次 spawn 换新 pid） */
+    pids?: number[];
   }): {
     engine: BrowserEngine;
     killTree: ReturnType<typeof vi.fn>;
@@ -460,6 +488,8 @@ describe('browser 引擎生命周期', () => {
       AppLogger,
       'debug' | 'info' | 'warn'
     >;
+    // spawn 计数（pid 序列取值游标——代际竞速腿区分两代引擎）
+    let spawnCount = 0;
     const engine = new BrowserEngine({
       dataDir: opts.dataDir,
       config: { executablePath: process.execPath }, // 发现序①命中（真可执行——node 本体）
@@ -467,8 +497,14 @@ describe('browser 引擎生命周期', () => {
         opts.onSpawn?.(args);
         // 假引擎把调试端口文件写进 profile 目录（真 Chrome 的 DevToolsActivePort 语义位）
         const dir = args.find((a) => a.startsWith('--user-data-dir='))!.slice('--user-data-dir='.length);
-        writeFileSync(join(dir, 'DevToolsActivePort'), `${fake.port}\n/devtools/browser/fake-uuid\n`);
-        return { pid: 424_242, alive: () => true };
+        if (opts.noPortFile !== true) {
+          writeFileSync(
+            join(dir, 'DevToolsActivePort'),
+            `${opts.portOverride ?? fake.port}\n/devtools/browser/fake-uuid\n`,
+          );
+        }
+        spawnCount += 1;
+        return { pid: opts.pids?.[spawnCount - 1] ?? 424_242, alive: opts.alive ?? (() => true) };
       },
       killTree,
       registry,
@@ -476,7 +512,7 @@ describe('browser 引擎生命周期', () => {
       logger,
       notify,
       idleMs: opts.idleMs,
-      startupTimeoutMs: 2_000,
+      startupTimeoutMs: opts.startupTimeoutMs ?? 2_000,
     });
     return { engine, killTree, registry, notify };
   };
@@ -538,6 +574,8 @@ describe('browser 引擎生命周期', () => {
     // disposeBrowserContext 已发（context 回收腿物证）
     const disposes = fake.receivedFrames.filter((f) => f.method === 'Target.disposeBrowserContext');
     expect(disposes).toHaveLength(1);
+    // 对照面：spawn 形态收场必发 Browser.close（attach 只断连 ≠ 全形态都不发）
+    expect(fake.receivedFrames.filter((f) => f.method === 'Browser.close')).toHaveLength(1);
   });
 
   it('续命语义：反复取用只续命本 session——他 session 不被牵连闲置', async () => {
@@ -587,6 +625,140 @@ describe('browser 引擎生命周期', () => {
     await engine.dispose();
     expect(killTree).not.toHaveBeenCalled();
     expect(registry.add).not.toHaveBeenCalled();
+  });
+
+  it('#1 attach 收场只断连：闲置收场不发 Browser.close（只连不杀——契约篇 §6.10）', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const engine = new BrowserEngine({
+      dataDir,
+      config: { cdpEndpoint: `127.0.0.1:${fake.port}` }, // 走 HTTP /json/version 探测腿
+      spawnEngine: () => {
+        throw new Error('attach 形态不应 spawn');
+      },
+      killTree: vi.fn(),
+      registry: { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] as number[] })) },
+      newConnection: (o) => new JsonRpcConnection(o),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Pick<AppLogger, 'debug' | 'info' | 'warn'>,
+      notify: vi.fn(),
+      idleMs: 70,
+    });
+    await engine.acquireContext('sess-A');
+    // 闲置两跳（context ~70ms → 引擎 ~70ms）→ attach 形态收场 = 断链
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(engine.getStatus().state).toBe('closed');
+    // 只连不杀：context 级 disposeBrowserContext 可发，引擎级 Browser.close 禁发——
+    // 修复前红：收场无差别发 Browser.close = 杀用户自起的浏览器
+    const browserCloses = fake.receivedFrames.filter((f) => f.method === 'Browser.close');
+    expect(browserCloses).toHaveLength(0);
+  });
+
+  it('#2/#7/#9 起链失败即清算（引擎先死腿）：AppError 统一码 + 树杀 + 登记簿净退 + 状态 closed', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const { engine, killTree, registry } = makeEngine({
+      dataDir,
+      idleMs: 60_000,
+      alive: () => false, // 假引擎启动即死（alive 探针恒 false）
+      noPortFile: true,
+    });
+    let err: unknown;
+    try {
+      await engine.acquireContext('sess-A');
+    } catch (e) {
+      err = e;
+    }
+    // 连接期统一码：裸 Error 修死为 AppError（修复前红 = instanceof 不成立）
+    expect(err).toBeInstanceOf(AppError);
+    expect(describeError(err)).toContain('BROWSER_CONNECT_FAILED');
+    expect(describeError(err)).toContain('启动即退出');
+    // 清算三断言（修复前红：野 Chrome 不杀、登记簿留尸、状态谎报 starting）
+    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(registry.remove).toHaveBeenCalledWith(424_242);
+    expect(engine.getStatus().state).toBe('closed');
+  });
+
+  it('#2/#7/#9 起链失败即清算（超帽腿）：DevToolsActivePort 超帽 → AppError + 清算同腿', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const { engine, killTree, registry } = makeEngine({
+      dataDir,
+      idleMs: 60_000,
+      noPortFile: true, // 端口文件永不出现 → 轮询直到超帽
+      startupTimeoutMs: 120,
+    });
+    let err: unknown;
+    try {
+      await engine.acquireContext('sess-A');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(AppError); // 修复前红：裸 Error
+    expect(describeError(err)).toContain('BROWSER_CONNECT_FAILED');
+    expect(describeError(err)).toContain('就绪等待超时');
+    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function)); // 修复前红
+    expect(registry.remove).toHaveBeenCalledWith(424_242); // 修复前红
+    expect(engine.getStatus().state).toBe('closed'); // 修复前红：谎报 starting
+  });
+
+  it('#3 context 建链半途失败回滚：enable 失败不留半捕获——重试走全链重建', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const { engine } = makeEngine({ dataDir, idleMs: 60_000 });
+    // Runtime.enable 服务器错误腿 → context 建立中途炸（三表已挂、域未启）
+    fake.errorResponders['Runtime.enable'] = { code: -32_000, message: 'boom' };
+    await expect(engine.acquireContext('sess-A')).rejects.toThrow('boom');
+    delete fake.errorResponders['Runtime.enable'];
+    // 重试成功（半捕获态已回滚——不留「session 在表但 Runtime 永未启用」的残废 context）
+    const handle = await engine.acquireContext('sess-A');
+    expect(handle.session.sessionId).toBe('SESS-1');
+    const count = (m: string) => fake.receivedFrames.filter((f) => f.method === m).length;
+    expect(count('Target.createBrowserContext')).toBe(2); // 修复前红：残留表内 → 只建一次
+    expect(count('Runtime.enable')).toBe(2); // 修复前红：复用残留 session → 不再 enable
+    expect(count('Target.disposeBrowserContext')).toBeGreaterThanOrEqual(1); // 修复前红：失败 context 未 dispose
+    expect(engine.getStatus().state).toBe('running');
+    await engine.dispose();
+  });
+
+  it('#3 context 起建失败重武装引擎闲置钟：零活 context 不因失败永久失防', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const { engine, killTree } = makeEngine({ dataDir, idleMs: 70 });
+    // openSessionContext 首步即炸（三表未挂——闲置钟被 acquire 入场撤防后无人重武装的腿）
+    fake.errorResponders['Target.createBrowserContext'] = { code: -32_000, message: 'no-context' };
+    await expect(engine.acquireContext('sess-A')).rejects.toThrow('no-context');
+    delete fake.errorResponders['Target.createBrowserContext'];
+    // 引擎 running 但零活 context——闲置钟应照常武装（~70ms 后收场树杀）
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(engine.getStatus().state).toBe('closed'); // 修复前红：running 悬死（闲置钟永久失防）
+    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+  });
+
+  it('#17 收场代际护栏：closeEngine await 窗内换代——新引擎不被旧收场误杀', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const { engine, killTree } = makeEngine({ dataDir, idleMs: 250, pids: [424_242, 424_243] });
+    await engine.acquireContext('sess-A'); // 第一代引擎（pid 424242）
+    // 扣押 Browser.close 应答：闲置两跳（~500ms）后 closeEngine 进入 await 窗
+    fake.holdMethods.add('Browser.close');
+    const until = async (pred: () => boolean, ms = 2_000): Promise<void> => {
+      const start = Date.now();
+      while (!pred()) {
+        if (Date.now() - start > ms) throw new Error('until 轮询超时');
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+    await until(() => fake.receivedFrames.some((f) => f.method === 'Browser.close'));
+    expect(engine.getStatus().state).toBe('closed'); // closeEngine 入场已置 closed（await 窗内）
+    // await 窗内并发取用：换代新引擎（pid 424243）+ 新 context
+    const handle2 = await engine.acquireContext('sess-A');
+    expect(handle2.session.sessionId).toBe('SESS-1');
+    expect(engine.getStatus()).toMatchObject({ state: 'running', attach: false });
+    // 放行旧收场：只结算第一代（修复前红：teardown 读 this.child 现值 → killTree 打到 424243）
+    fake.releaseHeld();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(killTree).toHaveBeenCalledTimes(1);
+    expect(killTree).toHaveBeenCalledWith(424_242, expect.any(Function));
+    expect(engine.getStatus().state).toBe('running'); // 修复前红：新引擎被旧收场拆走
+    // 新引擎 context 簿记未被旧收场清走：同 session 复用不重建（新起 context 应答改值不命中）
+    fake.responders['Target.createBrowserContext'] = () => ({ browserContextId: 'CTX-9' });
+    const again = await engine.acquireContext('sess-A');
+    expect(again.session.browserContextId).not.toBe('CTX-9'); // 复用第二代的 CTX-1
+    await engine.dispose();
   });
 });
 
