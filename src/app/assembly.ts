@@ -24,6 +24,7 @@
 import type { AgentMessage } from '../contracts/messages.js';
 import type { StreamFn } from '../contracts/llm.js';
 import {
+  APP_ENTRY_UNRESOLVED,
   APP_SHUTDOWN_QUIESCE_VIOLATED,
   AppError,
   COMPOSITION_ROW_INVALID,
@@ -105,7 +106,7 @@ import {
 import type { ProjectedMessage } from '../session/derive.js';
 import { isCoreSessionEventType } from '../contracts/session-events.js';
 import { chainCaller, chainSessionId, runInCallerChain } from '../context/chain.js';
-import type { RowAppProbe } from '../contracts/app.js';
+import type { CompositionRow, RowAppProbe } from '../contracts/app.js';
 import { resolveRowCarrier } from '../contracts/app.js';
 import type { AppLoadResult } from '../contracts/app.js';
 import {
@@ -161,8 +162,8 @@ import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
-import { readFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, mkdirSync, existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 // ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
 import { ChildRegistry } from '../mcp/index.js';
@@ -332,6 +333,13 @@ export interface RuntimeOptions {
    * 席 13 第二刀：tick 烧的钱进 background 道，canAfford 才读得到）
    */
   readonly usagePriority?: 'background' | 'foreground';
+  /**
+   * 快速试件路径（--app-file <path>，开发指南 §8）：入口文件绝对路径——组合树
+   * 注入临时行（id=_quick_test，pkg=<path>，apps:['chat']，carrier:'main'），
+   * 零装机零挂载零落盘（不写 overlay）。退出后组合树恢复原状。berry / run 收。
+   */
+  readonly appFile?: string;
+
   /**
    * tick 单发 runner 覆盖（scheduler 件闭包注入——缺省 createTickRunner 真
    * spawn；测试注入假 runner 记 prompt 断言触发链，不真起子进程）
@@ -1644,6 +1652,28 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   };
   // 组合树合成（overlay 后写胜出）。composition 是活绑定（/reload 重装载换树）
   let composition: CompositionReport = loadComposition(compositionDir, builtins, knownAppIds);
+  // 快速试件注入（--app-file，开发指南 §8）：组合树装载后、安全模式前——临时行
+  // 直接 push 进 rows/plan（零装机零挂载零落盘——不写 overlay，退出后不残留）。
+  // 行 id 固定 _quick_test（overlay 可按此 id 覆写/禁用）；pkg = 入口文件绝对
+  // 路径（local 源语义——jiti 直载）；apps=['chat'] 挂默认应用域（工具落应用
+  // 域层对 chat 组成面可见）；carrier:'main'（快速试件不走进程墙——保持同步
+  // API 面 + console 直出）
+  if (opts.appFile !== undefined) {
+    const quickPath = resolve(opts.appFile);
+    if (!existsSync(quickPath)) {
+      await refuseBoot(APP_ENTRY_UNRESOLVED, `--app-file 路径不存在：${quickPath}`);
+    }
+    const quickRow: CompositionRow = {
+      id: '_quick_test',
+      pkg: quickPath,
+      apps: ['chat'],
+      sandbox: { carrier: 'main' },
+    };
+    composition = {
+      rows: [...composition.rows, quickRow],
+      plan: [...composition.plan, { ...quickRow }],
+    };
+  }
   // 安全模式（--no-apps，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
   // ——Ring 2/3 全跳过（官方默认层与 overlay 一视同仁）。只作用 boot：/reload
   // 的 fresh 读盘不过滤（救援环——boot 安全模式 → 修 overlay → /reload 恢复
@@ -1801,11 +1831,11 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       // 三态解析（见上注）：链会话帧 → 行代执行缺席 → 前台聚焦
       const chained = chainSessionId();
       const sessionId =
-        chained !== undefined
-          ? chained
-          : chainCaller() !== undefined
-            ? undefined
-            : (registry.routed()?.session.header.sessionId ?? undefined);
+        chained === undefined
+          ? chainCaller() === undefined
+            ? (registry.routed()?.session.header.sessionId ?? undefined)
+            : undefined
+          : chained;
       return hostInjectRecord(sessionId);
     },
     // 命令进程登记簿（§6.6 exec 腿）：服务面（域 RPC 宿主半 spawn 在此腿）

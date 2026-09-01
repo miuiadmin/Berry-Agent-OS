@@ -72,6 +72,9 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
                反义面——工作区会话归本进程，不与 daemon 抢写）
   --no-apps 安全模式：boot 组合树空装（默认层与 overlay 全跳过，只保 Ring 1 硬装配行
                ——坏应用锁死启动的自救位；/reload 读盘不受旗标影响，修好 overlay 即恢复全树）
+  --app-file <path> 快速试件（开发指南 §8）：入口文件路径直接跑一次——组合树注入
+               临时行（id=_quick_test，挂 chat 应用域），零装机零挂载零落盘。
+               退出后组合树恢复原状（不写 overlay）。berry / berry run 两入口收
   --sandbox-host run 子命令限定：宿主进程套 OS 沙箱 wrapper（macOS seatbelt / Linux bwrap）
                ——检出后 CLI 重 exec 自身，本进程连同全部应用跑在沙箱内。
                可写面 = 档位根 ∪ 数据目录（~/.berry：库与凭证必须可写）。
@@ -102,6 +105,8 @@ interface ParsedArgs {
   foreground: boolean;
   /** 裸 berry 显式单开（--standalone，契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口无害忽略 */
   standalone: boolean;
+  /** 快速试件路径（--app-file <path>，开发指南 §8）：berry/run 两入口收——组合树注入临时行，零装机零挂载零落盘 */
+  appFile: string | undefined;
 }
 
 /**
@@ -121,6 +126,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let sandboxHost = false;
   let foreground = false;
   let standalone = false;
+  let appFile: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--debug') {
@@ -157,6 +163,10 @@ function parseArgs(argv: string[]): ParsedArgs {
       // daemon 前台常驻（契约篇 §6.8 刀一）：daemon 限定——其余入口收到时无害
       // 忽略（同 --read-only 律：语义只在 daemon case 执法）
       foreground = true;
+    } else if (arg === '--app-file') {
+      // 快速试件（开发指南 §8）：取值旗标——下一参数即入口文件路径
+      appFile = argv[i + 1] ?? '';
+      i += 1;
     } else if (arg === '--standalone') {
       // 裸 berry 显式单开（契约篇 §6.8 刀二）：跳过 daemon 检测——其余入口收到
       // 时无害忽略（同律：语义只在裸 berry case 执法）
@@ -179,6 +189,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     sandboxHost,
     foreground,
     standalone,
+    appFile,
   };
 }
 
@@ -193,7 +204,7 @@ function parsePortValue(value: string): number | undefined {
 
 /** 入口分派：同步签名 + 顶层兜底（异步主流程的异常在此收口为退出码 1） */
 function main(argv: string[]): number {
-  const { command, args, readOnly, background, tick, app, port, noApps, sandboxHost, foreground, standalone } =
+  const { command, args, readOnly, background, tick, app, port, noApps, sandboxHost, foreground, standalone, appFile } =
     parseArgs(argv);
 
   const run = async (): Promise<number> => {
@@ -221,7 +232,11 @@ function main(argv: string[]): number {
             return 1;
           }
         }
-        return tuiMain({ ...(noApps ? { noApps: true } : {}), ...(webuiPort === undefined ? {} : { webuiPort }) });
+        return tuiMain({
+          ...(noApps ? { noApps: true } : {}),
+          ...(webuiPort === undefined ? {} : { webuiPort }),
+          ...(appFile === undefined ? {} : { appFile }),
+        });
       }
       case '--help':
       case '-h':
@@ -298,6 +313,7 @@ function main(argv: string[]): number {
           ...(app === undefined ? {} : { app }),
           ...(noApps ? { noApps: true } : {}),
           ...(webuiPort === undefined ? {} : { webuiPort }),
+          ...(appFile === undefined ? {} : { appFile }),
         });
       }
       case 'attach': {
