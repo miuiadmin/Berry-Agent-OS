@@ -216,10 +216,11 @@ describe('daemon-state：daemon.json 生命周期 + token 文件', () => {
 /* 命令族（start/stop/status）——stop 判活路真子进程实证                 */
 /* ------------------------------------------------------------------ */
 
-/** 假子进程（start 路不真 spawn——exitCode/kill 面可控） */
-function fakeChild(exitCode: number | null): { child: ChildProcess; killed: () => boolean } {
+/** 假子进程（start 路不真 spawn——exitCode/kill/pid 面可控；pid 缺省 424242） */
+function fakeChild(exitCode: number | null, pid = 424_242): { child: ChildProcess; killed: () => boolean } {
   let killed = false;
   const child = {
+    pid,
     exitCode,
     unref: () => undefined,
     kill: () => {
@@ -228,6 +229,23 @@ function fakeChild(exitCode: number | null): { child: ChildProcess; killed: () =
     },
   } as unknown as ChildProcess;
   return { child, killed: () => killed };
+}
+
+/**
+ * 「子进程完成 boot」的探针桩（O-5 身份核验后 start 成功路的真时序）：首次
+ * 探测时模拟 acquireDaemonState 写 daemon.json（假子 pid）→ 应答 200——真
+ * 子进程是先 acquire 落盘后 listen 才有握手，握手 200 时 daemon.json 必已
+ * 持本子进程 pid。
+ */
+function bootingProbe(root: string, pid: number) {
+  let booted = false;
+  return async (): Promise<{ status: number; body: string }> => {
+    if (!booted) {
+      booted = true;
+      acquireDaemonState(root, makeState(pid, 'fake'), { startId: () => undefined });
+    }
+    return { status: 200, body: '[]' };
+  };
 }
 
 /** stdout 捕获（命令面输出 = 产品契约，断言其词面） */
@@ -252,7 +270,7 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
         spawnArgs.push({ cmd, args, opts });
         return child;
       },
-      probeHttp: async () => ({ status: 200, body: '[]' }),
+      probeHttp: bootingProbe(root, 424_242), // 子 boot（acquire 落盘）→ 200
       probe: { startId: () => undefined },
     });
     expect(code).toBe(0);
@@ -264,7 +282,8 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
     expect(spawnArgs[0]!.opts.detached).toBe(true);
     // token 先于 spawn 已落盘（父 gate 与子鉴权同一份）
     expect(existsSync(daemonTokenPath(root))).toBe(true);
-    expect(out.join('')).toContain('daemon 就绪');
+    // 就绪词面披露的是本次子进程 pid（身份核验后 pidHint 即真身）
+    expect(out.join('')).toContain('daemon 就绪：pid 424242');
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -276,11 +295,12 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
     await daemonCommandMain('start', 7860, {
       dataRoot: root,
       spawnFn: () => child,
-      probeHttp: async () => ({ status: 200, body: '[]' }),
+      probeHttp: bootingProbe(root, 424_242), // 清扫后新子 acquire 落盘 → 200
       probe: { startId: () => undefined }, // 原持有者判死 → 清扫
     });
-    // 假子进程不写真身——清扫后无人在写 = 文件缺席
-    expect(existsSync(daemonStatePath(root))).toBe(false);
+    // 清扫实证（更强形）：旧文件不在（pid 999 已清）+ 新子 acquire 成功落盘
+    //（旧文件残留时 O_EXCL 会撞——能落盘即证清扫先行）
+    expect(readDaemonState(root)?.pid).toBe(424_242);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -312,6 +332,28 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
         probe: { startId: () => undefined },
       }),
     ).rejects.toThrowError(/启动即退/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('start 双开假绿修死（遗漏大扫 20260901 O-5）：端口应答者是旧 daemon（daemon.json pid ≠ 本次子进程）→ DAEMON_ALREADY_RUNNING 响亮失败 + 杀子', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    const out = captureStdout();
+    // 旧 daemon 存活：daemon.json 已持 pid 999 且判活——start 的清扫不动它
+    acquireDaemonState(root, makeState(999, 'old-live'), { startId: () => undefined });
+    const { child, killed } = fakeChild(null, 424_243);
+    // 竞窗形态：旧 daemon 毫秒级应答 200（新子进程尚未跑到 acquire 撞
+    // O_EXCL 退 1——stdio 全入 daemon.log，响亮失败被静默吞）
+    await expect(
+      daemonCommandMain('start', 7860, {
+        dataRoot: root,
+        spawnFn: () => child,
+        probeHttp: async () => ({ status: 200, body: '[]' }),
+        probe: { startId: () => 'old-live' }, // 旧持有者判活 → 清扫不动
+      }),
+    ).rejects.toMatchObject({ code: DAEMON_ALREADY_RUNNING });
+    // 修复前：resolve 0 + 打印「daemon 就绪：pid 999」——应答者身份未验的假绿
+    expect(out.join('')).not.toContain('daemon 就绪');
+    expect(killed()).toBe(true); // doomed 子进程即杀不留守（防真子进程迟到起双活）
     rmSync(root, { recursive: true, force: true });
   });
 });

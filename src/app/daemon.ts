@@ -30,7 +30,7 @@ import { get as httpGet, request as httpRequest, type RequestOptions } from 'nod
 import { connect as netConnect } from 'node:net';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { AppError, DAEMON_START_TIMEOUT, DAEMON_STOP_TIMEOUT } from '../contracts/errors.js';
+import { AppError, DAEMON_ALREADY_RUNNING, DAEMON_START_TIMEOUT, DAEMON_STOP_TIMEOUT } from '../contracts/errors.js';
 import { dataDir, dbPath } from './paths.js';
 import { createRuntime, type AppRuntime } from './assembly.js';
 import { installExitSignals } from './signals.js';
@@ -251,7 +251,28 @@ export async function daemonCommandMain(
         { authorization: `Bearer ${token}` },
         HANDSHAKE_TIMEOUT_MS,
       );
-      if (res !== undefined && res.status === 200) break; // 真握手成立——活证
+      if (res !== undefined && res.status === 200) {
+        // 应答者身份核验（遗漏大扫 20260901 O-5）：200 只证「端口上有活
+        // daemon」，不证「应答者是谁」——双开（升级忘 stop）时旧 daemon 毫秒
+        // 级应答，新子进程在 acquire 撞 O_EXCL 退 1 且 stdio 全入 daemon.log
+        // （响亮失败被静默吞）→ 此前误报就绪（pidHint 打的是旧 daemon 的
+        // pid）。真子进程先 acquire 落盘后 listen——握手 200 时 daemon.json
+        // 必已持本子进程 pid；不符 = 端口已被旧 daemon 占 → 响亮失败（提示
+        // 先 stop）+ 即杀 doomed 子进程不留守（防迟到起双活）
+        if (readDaemonState(dataRoot)?.pid !== child.pid) {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* 已退——无需杀 */
+          }
+          throw new AppError(
+            DAEMON_ALREADY_RUNNING,
+            `daemon 启动中止：端口 ${port} 上的应答者非本次 spawn 的子进程` +
+              `（疑似旧 daemon 存活——先 berry daemon stop 再 start），日志见 ${daemonLogPath(dataRoot)}`,
+          );
+        }
+        break; // 真握手成立——应答者即本子进程，活证
+      }
       if (Date.now() >= deadline) {
         try {
           child.kill('SIGKILL');
