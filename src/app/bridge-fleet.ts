@@ -385,6 +385,17 @@ export function createBridgeFleet(opts: BridgeFleetOptions): BridgeFleet {
           opts.anchor().emit('app/failed', { id, code: BRIDGE_WORKER_EXITED, message });
           opts.markFailed?.(id, BRIDGE_WORKER_EXITED, message);
         }
+        // 进程日志半边（基建大扫 #23，契约篇 §1.7 死亡结算「响亮的两半」）：
+        // 运行期域死 warn 落进程日志——daemon 常驻形态唯一跨重启痕迹（进程内
+        // 事件表/状态面重启即灭，daemon.log 是唯一持久位）；与 durable 事件/
+        // 状态回写双保险，单路失明不致断链。一次死亡一行（多行域同死因同结算，
+        // 不逐行刷屏）；code 织进文本（grep/日志检索面按码直达）
+        opts.root.logger.warn(
+          `worker 域意外退出（${BRIDGE_WORKER_EXITED}）：行 [${info.rows.join('、')}]（code ${info.code}` +
+            `${info.reason === undefined ? '' : `，归因：${info.reason}`}` +
+            `${info.diagnostic === undefined ? '' : `，diagnostic：${info.diagnostic}`}）——死亡结算已广播`,
+          { workerId: info.workerId },
+        );
         opts.onDomainExit?.(info);
       };
       // 心跳监督编舞共用体：冻结 → watchdog 杀域（kill 走意外死亡全流程）

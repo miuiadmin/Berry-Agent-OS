@@ -22,7 +22,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createContext } from '../context/context.js';
 import type { ContextScope } from '../context/types.js';
 import type { AppPlanRow } from '../contracts/app.js';
@@ -266,6 +266,10 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     /** app/failed 广播记录（anchor 上真 on 订阅——fleet 死亡结算的词汇面） */
     const broadcast: Array<{ id: string; code?: string; message?: string }> = [];
     anchor.on('app/failed', (payload: { id: string; code?: string; message?: string }) => broadcast.push(payload));
+    /** 进程日志记录桩（基建大扫 #23）：root logger warn 截获——运行期域死
+     * 进程日志半边的被测出口（daemon 常驻形态唯一跨重启痕迹） */
+    const warns: string[] = [];
+    const warnSpy = vi.spyOn(root.logger, 'warn').mockImplementation((m) => warns.push(m));
     const fleet = createBridgeFleet({
       root,
       anchor: () => anchor,
@@ -282,6 +286,14 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
 
     // worker 自崩溃（意外死亡：非 terminate 编舞终点、非 kill 执法）
     await until(() => marked.length > 0 && broadcast.length > 0);
+    // 进程日志半边（基建大扫 #23）：运行期域死 warn 落进程日志——daemon 常驻
+    // 形态唯一跨重启痕迹（事件表/状态面重启即灭）；与 durable 事件/状态回写
+    // 双保险。修前红 = onExit 零日志调用（warns 空）
+    try {
+      expect(warns.some((m) => m.includes('w1') && m.includes('BRIDGE_WORKER_EXITED'))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
     // 状态回写：行 w1 以 BRIDGE_WORKER_EXITED 转 failed（fleet 的 markFailed 注入物）
     expect(marked[0]).toMatchObject({ id: 'w1', code: BRIDGE_WORKER_EXITED });
     // 广播词汇：与装载失败同一观测词汇（宁可死得响亮）
