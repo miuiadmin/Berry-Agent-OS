@@ -49,10 +49,10 @@ describe('compareSemver（semver 简化比对）', () => {
 
 describe('detectInstallForm（装机形态判定）', () => {
   it('real path 含 node_modules 段 = npm（bin 链接解析到包内 dist）', () => {
-    expect(detectInstallForm('/usr/local/lib/node_modules/berryagent/dist/app/main.js')).toBe('npm');
-    expect(detectInstallForm('/Users/x/.nvm/versions/node/v22.19.0/lib/node_modules/berryagent/dist/app/main.js')).toBe(
-      'npm',
-    );
+    expect(detectInstallForm('/usr/local/lib/node_modules/berry-agent-os/dist/app/main.js')).toBe('npm');
+    expect(
+      detectInstallForm('/Users/x/.nvm/versions/node/v22.19.0/lib/node_modules/berry-agent-os/dist/app/main.js'),
+    ).toBe('npm');
   });
   it('源码 clone 与 npm link（realpath 解回仓库）= source', () => {
     expect(detectInstallForm('/Users/x/code/berry/dist/app/main.js')).toBe('source');
@@ -90,34 +90,38 @@ describe('指引文案', () => {
 
 describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 余款）', () => {
   it('npm 全局 = npm（缺省）', () => {
-    expect(detectPackageManager('/usr/local/lib/node_modules/berryagent/dist/app/main.js')).toBe('npm');
+    expect(detectPackageManager('/usr/local/lib/node_modules/berry-agent-os/dist/app/main.js')).toBe('npm');
   });
   it('pnpm 全局（.pnpm / pnpm-global 段）→ pnpm', () => {
     expect(
       detectPackageManager(
-        '/home/x/.local/share/pnpm/global/5/.pnpm/berryagent@1.0.0/node_modules/berryagent/dist/app/main.js',
+        '/home/x/.local/share/pnpm/global/5/.pnpm/berry-agent-os@1.0.0/node_modules/berry-agent-os/dist/app/main.js',
       ),
     ).toBe('pnpm');
-    expect(detectPackageManager('/home/x/.pnpm-global/node_modules/berryagent/dist/app/main.js')).toBe('pnpm');
+    expect(detectPackageManager('/home/x/.pnpm-global/node_modules/berry-agent-os/dist/app/main.js')).toBe('pnpm');
   });
   it('yarn 全局（yarn 段）→ yarn', () => {
-    expect(detectPackageManager('/home/x/.config/yarn/global/node_modules/berryagent/dist/app/main.js')).toBe('yarn');
+    expect(detectPackageManager('/home/x/.config/yarn/global/node_modules/berry-agent-os/dist/app/main.js')).toBe(
+      'yarn',
+    );
   });
   it('bun 全局（.bun→install→global 三段序）→ bun；裸 bun 段不误伤', () => {
-    expect(detectPackageManager('/home/x/.bun/install/global/node_modules/berryagent/dist/app/main.js')).toBe('bun');
+    expect(detectPackageManager('/home/x/.bun/install/global/node_modules/berry-agent-os/dist/app/main.js')).toBe(
+      'bun',
+    );
     // win32 形态同款（反斜杠分隔）
     expect(
-      detectPackageManager('C:\\Users\\x\\.bun\\install\\global\\node_modules\\berryagent\\dist\\app\\main.js'),
+      detectPackageManager('C:\\Users\\x\\.bun\\install\\global\\node_modules\\berry-agent-os\\dist\\app\\main.js'),
     ).toBe('bun');
     // 裸 `bun` 目录名（无三段序）= 普通 npm 路径，不构成 bun 判据
-    expect(detectPackageManager('/home/x/projects/bun/node_modules/berryagent/dist/app/main.js')).toBe('npm');
+    expect(detectPackageManager('/home/x/projects/bun/node_modules/berry-agent-os/dist/app/main.js')).toBe('npm');
   });
   it('yarn classic win32 全局（Yarn 大写段）→ yarn（遗漏大扫 20260901-c #10）', () => {
     // yarn classic (v1) Windows 全局装目录默认 %LOCALAPPDATA%\Yarn\config\global
     // ——段名首字母大写，小写判据漏检即误判 npm 装出第二份
     expect(
       detectPackageManager(
-        'C:\\Users\\x\\AppData\\Local\\Yarn\\config\\global\\node_modules\\berryagent\\dist\\app\\main.js',
+        'C:\\Users\\x\\AppData\\Local\\Yarn\\config\\global\\node_modules\\berry-agent-os\\dist\\app\\main.js',
       ),
     ).toBe('yarn');
   });
@@ -127,14 +131,16 @@ describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 
     try {
       // BUN_INSTALL 换根形态：根下 install/global 段序，.bun 字面段缺席
       process.env.BUN_INSTALL = '/opt/bun';
-      expect(detectPackageManager('/opt/bun/install/global/node_modules/berryagent/dist/app/main.js')).toBe('bun');
+      expect(detectPackageManager('/opt/bun/install/global/node_modules/berry-agent-os/dist/app/main.js')).toBe('bun');
       // BUN_INSTALL_GLOBAL_DIR 直改全局目录本体形态
       delete process.env.BUN_INSTALL;
       process.env.BUN_INSTALL_GLOBAL_DIR = '/srv/bun-global';
-      expect(detectPackageManager('/srv/bun-global/node_modules/berryagent/dist/app/main.js')).toBe('bun');
+      expect(detectPackageManager('/srv/bun-global/node_modules/berry-agent-os/dist/app/main.js')).toBe('bun');
       // 相似前缀兄弟目录（/opt/bunny ≠ /opt/bun/）不误伤
       process.env.BUN_INSTALL = '/opt/bun';
-      expect(detectPackageManager('/opt/bunny/install/global/node_modules/berryagent/dist/app/main.js')).toBe('npm');
+      expect(detectPackageManager('/opt/bunny/install/global/node_modules/berry-agent-os/dist/app/main.js')).toBe(
+        'npm',
+      );
     } finally {
       if (prevInstall === undefined) delete process.env.BUN_INSTALL;
       else process.env.BUN_INSTALL = prevInstall;
@@ -143,9 +149,9 @@ describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 
     }
   });
   it('非 npm 管理器指引：原管理器一条命令 + 不代执行声明', () => {
-    expect(foreignManagerGuidance('pnpm')).toContain('pnpm add -g berryagent');
-    expect(foreignManagerGuidance('yarn')).toContain('yarn global add berryagent');
-    expect(foreignManagerGuidance('bun')).toContain('bun add -g berryagent');
+    expect(foreignManagerGuidance('pnpm')).toContain('pnpm add -g berry-agent-os');
+    expect(foreignManagerGuidance('yarn')).toContain('yarn global add berry-agent-os');
+    expect(foreignManagerGuidance('bun')).toContain('bun add -g berry-agent-os');
     expect(foreignManagerGuidance('pnpm')).toContain('不代执行');
   });
 });
@@ -154,17 +160,17 @@ describe('detectPackageManager（npm 形态的包管理器甄别——冷读 m1 
 
 describe('distTagsUrlFor（#16 判定腿端点拼接与回退）', () => {
   it('镜像源拼接 + 尾斜杠归一', () => {
-    const url = 'https://registry.npmmirror.com/-/package/berryagent/dist-tags';
+    const url = 'https://registry.npmmirror.com/-/package/berry-agent-os/dist-tags';
     expect(distTagsUrlFor('https://registry.npmmirror.com')).toBe(url);
     expect(distTagsUrlFor('https://registry.npmmirror.com/')).toBe(url);
     expect(distTagsUrlFor('https://registry.npmmirror.com//')).toBe(url);
     expect(distTagsUrlFor('  https://registry.example.com  ')).toBe(
-      'https://registry.example.com/-/package/berryagent/dist-tags',
+      'https://registry.example.com/-/package/berry-agent-os/dist-tags',
     );
   });
   it('空串/空白回退官方源（npm config 解析失败的兜底位）', () => {
-    expect(distTagsUrlFor('')).toBe('https://registry.npmjs.org/-/package/berryagent/dist-tags');
-    expect(distTagsUrlFor('   ')).toBe('https://registry.npmjs.org/-/package/berryagent/dist-tags');
+    expect(distTagsUrlFor('')).toBe('https://registry.npmjs.org/-/package/berry-agent-os/dist-tags');
+    expect(distTagsUrlFor('   ')).toBe('https://registry.npmjs.org/-/package/berry-agent-os/dist-tags');
   });
 });
 
@@ -191,7 +197,7 @@ describe('resolveRegistry（#16 用户 npm 配置源解析——对象形 + fall
 });
 
 describe('runUpgradeCheck（#8 verdict 五态分派——注入面直锁检查层）', () => {
-  const NPM_PATH = '/usr/local/lib/node_modules/berryagent/dist/app/main.js';
+  const NPM_PATH = '/usr/local/lib/node_modules/berry-agent-os/dist/app/main.js';
   const SRC_PATH = '/repo/berry/dist/app/main.js';
   const okTags = (latest: string) => async () => ({ status: 'ok', tags: { latest } }) as const;
 
@@ -228,7 +234,7 @@ describe('runUpgradeCheck（#8 verdict 五态分派——注入面直锁检查�
 
 describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/五态/退出码/npm 半态）', () => {
   /** npm 全局装路径假面（含 node_modules 段 → npm 形态 + npm 管理器） */
-  const NPM_PATH = '/usr/local/lib/node_modules/berryagent/dist/app/main.js';
+  const NPM_PATH = '/usr/local/lib/node_modules/berry-agent-os/dist/app/main.js';
   /** io 底座：registry 解析恒成功（官方源、不回退）——各测试只覆写关心的键 */
   const ioBase = {
     registryBase: async (): Promise<RegistryResolution> => ({
@@ -253,7 +259,7 @@ describe('upgradeMain（#8 编排器行为面——注入假面锁：白名单/�
 
   it('安全线（白名单腿）：build 元数据形态过 semver 比对但拒 spawn——零调用 + 退 1 + stderr 形状非法', async () => {
     // '9.9.9+evil' 经 parseSemver 合法（+build 段被容忍）→ available → 进 spawn
-    // 前撞白名单（白名单正则不容 + 段——npm i -g berryagent@9.9.9+evil 是坏靶）
+    // 前撞白名单（白名单正则不容 + 段——npm i -g berry-agent-os@9.9.9+evil 是坏靶）
     let spawned = 0;
     const { errs, writeOut, writeErr } = recordOutput();
     const code = await upgradeMain({

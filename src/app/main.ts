@@ -49,7 +49,7 @@ const HELP = `Berry ${VERSION} — 应用式智能体运行时
   berry attach           接上 daemon 的 TUI 纯客户端（零本地装配/零本地库——
                          HTTP/SSE 直连回环；审批卡/打断/投递全走 daemon 面）
   berry upgrade           升级维护动词：查 registry 更新 → npm 形态自升级（npm i -g
-                         berryagent@<版本>）/ 源码形态给指引 / 未发布态诚实告知；
+                         berry-agent-os@<版本>）/ 源码形态给指引 / 未发布态诚实告知；
                          用户显式维护动作——缺省零版本检查不变
   berry dump-config      打印实际生效的组合树
 

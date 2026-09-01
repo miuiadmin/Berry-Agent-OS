@@ -126,10 +126,10 @@ export function detectPackageManager(entryRealPath: string): 'npm' | 'pnpm' | 'y
 export function foreignManagerGuidance(manager: 'pnpm' | 'yarn' | 'bun'): string {
   const cmd =
     manager === 'pnpm'
-      ? 'pnpm add -g berryagent'
+      ? 'pnpm add -g berry-agent-os'
       : manager === 'yarn'
-        ? 'yarn global add berryagent'
-        : 'bun add -g berryagent';
+        ? 'yarn global add berry-agent-os'
+        : 'bun add -g berry-agent-os';
   return `检测到 ${manager} 全局安装形态——请用原包管理器升级（\`${cmd}\`），本命令不代执行（npm i -g 会装出第二份）。`;
 }
 
@@ -156,7 +156,7 @@ export function sourceUpgradeGuidance(currentVersion: string): string {
 /** 未发布态指引（registry 404——发布前形态诚实告知） */
 export function unpublishedGuidance(currentVersion: string): string {
   return [
-    `berryagent 尚未发布到 npm（registry 404）——当前 ${currentVersion} 为源码/预发布形态。`,
+    `berry-agent-os 尚未发布到 npm（registry 404）——当前 ${currentVersion} 为源码/预发布形态。`,
     '发布后可用 `berry upgrade` 自升级；此前请走源码升级路（git pull → npm install → npm run build → npm link）。',
   ].join('\n');
 }
@@ -172,8 +172,8 @@ const OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
  */
 export function distTagsUrlFor(registryBase: string): string {
   const base = registryBase.trim();
-  if (base === '') return `${OFFICIAL_REGISTRY}/-/package/berryagent/dist-tags`;
-  return `${base.replace(/\/+$/, '')}/-/package/berryagent/dist-tags`;
+  if (base === '') return `${OFFICIAL_REGISTRY}/-/package/berry-agent-os/dist-tags`;
+  return `${base.replace(/\/+$/, '')}/-/package/berry-agent-os/dist-tags`;
 }
 
 /** npm 进程执行面（resolveRegistry 的注入位——测试假面换跑，真面 spawn） */
@@ -298,10 +298,14 @@ export interface UpgradeMainIo {
 /** npm 安装腿真面（stdio 继承——npm 自带进度即显示面；resolve 退出码） */
 const realSpawnNpm = (target: string): Promise<number> =>
   new Promise<number>((resolve) => {
-    const child = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['install', '-g', `berryagent@${target}`], {
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
+    const child = spawn(
+      process.platform === 'win32' ? 'npm.cmd' : 'npm',
+      ['install', '-g', `berry-agent-os@${target}`],
+      {
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      },
+    );
     child.on('error', (err) => {
       process.stderr.write(red(`npm 进程启动失败：${err.message}\n`));
       resolve(1);
@@ -339,7 +343,7 @@ export async function upgradeMain(io: UpgradeMainIo = {}): Promise<number> {
   const check = await runUpgradeCheck(localVersion, realPath(), { fetchDistTags: fetcher });
 
   if (check.verdict.kind === 'unpublished') {
-    out(red('· 未发布：') + 'berryagent 尚未发布到 npm\n\n' + unpublishedGuidance(localVersion) + '\n');
+    out(red('· 未发布：') + 'berry-agent-os 尚未发布到 npm\n\n' + unpublishedGuidance(localVersion) + '\n');
     return 0;
   }
   if (check.verdict.kind === 'network') {
@@ -373,7 +377,7 @@ export async function upgradeMain(io: UpgradeMainIo = {}): Promise<number> {
     err(red(`✗ 远端版本号形状非法（${target}）——拒绝执行，请人工核对 registry\n`));
     return 1;
   }
-  out(`${dim('· 升级到')} ${bold(target)} ${dim('（npm i -g berryagent@' + target + '）…')}\n`);
+  out(`${dim('· 升级到')} ${bold(target)} ${dim('（npm i -g berry-agent-os@' + target + '）…')}\n`);
   const code = await spawnNpm(target);
   if (code !== 0) {
     err(red(`✗ 升级失败（npm 退出码 ${code}）——包未变动，可重试\n`));

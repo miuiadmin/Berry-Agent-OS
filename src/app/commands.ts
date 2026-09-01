@@ -42,7 +42,7 @@ const GUIDE_TEXT = [
   '· 文档：docs/使用指南（安装/命令/数据目录）· docs/应用开发指南（写应用）·',
   '  docs/运维手册（daemon/发布）· docs/架构总览',
   '· 升级：/upgrade 查更新（执行走 berry upgrade 命令）',
-  '· 卸载：npm rm -g berryagent + rm -rf ~/.berry（记忆可先 /memory-export 导出）',
+  '· 卸载：npm rm -g berry-agent-os + rm -rf ~/.berry（记忆可先 /memory-export 导出）',
 ].join('\n');
 
 function formatDiagnostics(diagnostics: readonly SkillDiagnostic[]): string {
@@ -298,7 +298,7 @@ export function registerBuiltinCommands(opts: BuiltinCommandsOptions): Disposer 
         try {
           const check = await runUpgradeCheck(VERSION, entryRealPath());
           if (check.verdict.kind === 'unpublished') {
-            ui.notify('berryagent 尚未发布到 npm——当前为源码/预发布形态；发布后可用 `berry upgrade` 自升级。');
+            ui.notify('berry-agent-os 尚未发布到 npm——当前为源码/预发布形态；发布后可用 `berry upgrade` 自升级。');
           } else if (check.verdict.kind === 'network') {
             const netMessage = check.remote.status === 'network' ? check.remote.message : '未知';
             ui.notify(`检查失败（${netMessage}）——不影响使用，稍后重试或走源码升级路。`);

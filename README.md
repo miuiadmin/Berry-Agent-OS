@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/berryagent"><img alt="npm" src="https://img.shields.io/badge/version-1.0.0--alpha-blue?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/berry-agent-os"><img alt="npm" src="https://img.shields.io/badge/version-1.0.0--alpha-blue?style=flat-square"></a>
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D22.19-green?style=flat-square">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white">
   <img alt="license" src="https://img.shields.io/badge/license-MIT-green?style=flat-square">
@@ -104,7 +104,7 @@ Berry 用操作系统的方式回答这个问题。你的 Agent 的每一天都�
 # 方式一：一键脚本（分步状态显示；<仓库 URL> 待发布定档后回填）
 curl -fsSL <仓库>/scripts/install.sh | sh
 # 方式二：npm 直装（发布后可用）
-npm i -g berryagent
+npm i -g berry-agent-os
 # 方式三：源码（开发者）
 git clone <本仓库> && cd berry && npm install && npm run build && npm link
 ```

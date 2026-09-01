@@ -238,7 +238,7 @@ function greenBase(version) {
       code: 0,
       stdout: JSON.stringify([
         {
-          filename: 'berryagent-fake.tgz',
+          filename: 'berry-agent-os-fake.tgz',
           files: [
             'package.json',
             'README.md',
@@ -256,8 +256,8 @@ function greenBase(version) {
       stderr: '',
     }),
     'pack:real': () => {
-      writeFileSync(join(workDir, 'berryagent-fake.tgz'), FAKE_TARBALL_BYTES);
-      return { code: 0, stdout: JSON.stringify([{ filename: 'berryagent-fake.tgz' }]), stderr: '' };
+      writeFileSync(join(workDir, 'berry-agent-os-fake.tgz'), FAKE_TARBALL_BYTES);
+      return { code: 0, stdout: JSON.stringify([{ filename: 'berry-agent-os-fake.tgz' }]), stderr: '' };
     },
     'smoke:install': () => ({ code: 0, stdout: '', stderr: '' }),
     // 应答须取真 bin 输出形态（遗漏大扫 L-6）：--version 自第五十批起打印
@@ -289,7 +289,7 @@ describe('runRelease 编排骨舞：preview 期 prerelease 全绿路径', () => 
     base['git-tag:push'] = () => ({ code: 0, stdout: '', stderr: '' });
     const { io, calls } = scriptedIo(base);
 
-    const summary = await runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } });
+    const summary = await runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } });
 
     expect(summary.published).toBe(true);
     expect(summary.gitTag).toBe('create');
@@ -304,13 +304,13 @@ describe('runRelease 编排骨舞：preview 期 prerelease 全绿路径', () => 
     ]);
     // publish 单点：上传物 = tarball 本体 + prerelease 显式 next
     const pub = calls.find((c) => c.label === 'publish');
-    expect(pub.args).toEqual(['publish', join(workDir, 'berryagent-fake.tgz'), '--tag', 'next']);
+    expect(pub.args).toEqual(['publish', join(workDir, 'berry-agent-os-fake.tgz'), '--tag', 'next']);
     // dist-tag add 补 latest 腿（next 腿由 publish 立起）
     expect(labels(calls).filter((l) => l === 'dist-tag-add')).toEqual(['dist-tag-add']);
     expect(calls.find((c) => c.label === 'dist-tag-add').args).toEqual([
       'dist-tag',
       'add',
-      'berryagent@1.0.0-alpha.3',
+      'berry-agent-os@1.0.0-alpha.3',
       'latest',
     ]);
     // 步骤序：探测先于 pack（契约 2 先行），publish 先于终态断言
@@ -319,7 +319,7 @@ describe('runRelease 编排骨舞：preview 期 prerelease 全绿路径', () => 
     // preview 期不需要 pre 快照
     expect(labels(calls)).not.toContain('view-tags:pre');
     // tarball 即用即清：真发路径收口后工作目录无打包产物残留（防下一轮净空核验自锁）
-    expect(existsSync(join(workDir, 'berryagent-fake.tgz'))).toBe(false);
+    expect(existsSync(join(workDir, 'berry-agent-os-fake.tgz'))).toBe(false);
   });
 });
 
@@ -342,13 +342,13 @@ describe('runRelease 编排骨舞：正式版分叉路径', () => {
     base['git-rev:head'] = () => ({ code: 0, stdout: 'abc123\n', stderr: '' }); // 同 commit
     const { io, calls } = scriptedIo(base);
 
-    const summary = await runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } });
+    const summary = await runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } });
 
     expect(summary.published).toBe(true);
     expect(summary.gitTag).toBe('skip'); // 同 commit 幂等跳过
     expect(calls.find((c) => c.label === 'publish').args).toEqual([
       'publish',
-      join(workDir, 'berryagent-fake.tgz'),
+      join(workDir, 'berry-agent-os-fake.tgz'),
       '--tag',
       'latest',
     ]);
@@ -369,14 +369,14 @@ describe('runRelease 演习矩阵：--dry-run 行为（检视/冒烟真做，写
 
     const summary = await runRelease(['--dry-run'], io, {
       workDir,
-      pkg: { name: 'berryagent', version, binName: 'berry' },
+      pkg: { name: 'berry-agent-os', version, binName: 'berry' },
     });
 
     expect(summary.published).toBe(false);
     expect(summary.dryRun).toBe(true);
     expect(calls.find((c) => c.label === 'publish').args).toEqual([
       'publish',
-      join(workDir, 'berryagent-fake.tgz'),
+      join(workDir, 'berry-agent-os-fake.tgz'),
       '--tag',
       'next',
       '--dry-run',
@@ -391,7 +391,7 @@ describe('runRelease 演习矩阵：--dry-run 行为（检视/冒烟真做，写
     expect(ran).toContain('pack:inspect');
     expect(ran).toContain('smoke:run');
     // tarball 即用即清在 dry-run 路径同律（演习不留残留）
-    expect(existsSync(join(workDir, 'berryagent-fake.tgz'))).toBe(false);
+    expect(existsSync(join(workDir, 'berry-agent-os-fake.tgz'))).toBe(false);
   });
 
   it('正式版 dry-run → 投影断言不喂 nextBefore（期望终态自身即绿，遗漏大扫 20260901-c #8）', async () => {
@@ -410,14 +410,14 @@ describe('runRelease 演习矩阵：--dry-run 行为（检视/冒烟真做，写
 
     const summary = await runRelease(['--dry-run'], io, {
       workDir,
-      pkg: { name: 'berryagent', version, binName: 'berry' },
+      pkg: { name: 'berry-agent-os', version, binName: 'berry' },
     });
 
     expect(summary.published).toBe(false);
     expect(summary.expectedTags).toEqual({ latest: '1.0.0' });
     expect(calls.find((c) => c.label === 'publish').args).toEqual([
       'publish',
-      join(workDir, 'berryagent-fake.tgz'),
+      join(workDir, 'berry-agent-os-fake.tgz'),
       '--tag',
       'latest',
       '--dry-run',
@@ -436,7 +436,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     await expect(
       runRelease(['--inject', 'gate-red'], applyScenario(io, INJECT_SCENARIOS['gate-red']), {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
     ).rejects.toThrow(/门禁红拒/);
     const ran = labels(calls);
@@ -452,7 +452,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     await expect(
       runRelease(['--inject', 'smoke-exit-red'], applyScenario(io, INJECT_SCENARIOS['smoke-exit-red']), {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
     ).rejects.toThrow(/安装冒烟失败：.* dump-config 退出码 1/);
     const ran = labels(calls);
@@ -467,7 +467,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     await expect(
       runRelease(['--inject', 'smoke-apps-missing'], applyScenario(io, INJECT_SCENARIOS['smoke-apps-missing']), {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
     ).rejects.toThrow(/未见「默认应用：coder」/);
     const ran = labels(calls);
@@ -482,7 +482,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     await expect(
       runRelease(['--dry-run', '--inject', 'shasum-mismatch'], applyScenario(io, INJECT_SCENARIOS['shasum-mismatch']), {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
     ).rejects.toThrow(/同版本异质/);
     expect(labels(calls)).not.toContain('publish');
@@ -495,7 +495,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     await expect(
       runRelease(['--dry-run', '--inject', 'assert-fail'], applyScenario(io, INJECT_SCENARIOS['assert-fail']), {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
     ).rejects.toThrow(/dist-tag 断言失败/);
     const pub = calls.find((c) => c.label === 'publish');
@@ -511,7 +511,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     await expect(
       runRelease(['--inject', 'assert-fail'], applyScenario(io, INJECT_SCENARIOS['assert-fail']), {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       }),
     ).rejects.toThrow(/须配 --dry-run/);
     // 闸在契约 1 之前：零步骤触达（连门禁都没跑）——无闸形态会一路真上传到
@@ -528,7 +528,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     const summary = await runRelease(
       ['--dry-run', '--inject', 'interrupt-rerun'],
       applyScenario(io, INJECT_SCENARIOS['interrupt-rerun']),
-      { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } },
+      { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } },
     );
     expect(summary.skippedPublish).toBe(true);
     expect(summary.published).toBe(false);
@@ -555,7 +555,7 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
       applyScenario(io, INJECT_SCENARIOS['interrupt-rerun']),
       {
         workDir,
-        pkg: { name: 'berryagent', version, binName: 'berry' },
+        pkg: { name: 'berry-agent-os', version, binName: 'berry' },
       },
     );
     expect(summary.skippedPublish).toBe(true);
@@ -573,7 +573,7 @@ describe('runRelease 前置防线（净空核 / 不可达拒 / 检视不过）',
     base['git-clean'] = () => ({ code: 0, stdout: 'M src/app/main.ts\n', stderr: '' });
     const { io } = scriptedIo(base);
     await expect(
-      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/非净空/);
   });
 
@@ -583,7 +583,7 @@ describe('runRelease 前置防线（净空核 / 不可达拒 / 检视不过）',
     base.probe = () => ({ code: 1, stdout: '', stderr: 'npm error code ETIMEDOUT' });
     const { io, calls } = scriptedIo(base);
     await expect(
-      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/不可达/);
     expect(labels(calls)).not.toContain('publish');
   });
@@ -595,7 +595,7 @@ describe('runRelease 前置防线（净空核 / 不可达拒 / 检视不过）',
       code: 0,
       stdout: JSON.stringify([
         {
-          filename: 'berryagent-fake.tgz',
+          filename: 'berry-agent-os-fake.tgz',
           files: ['package.json', 'README.md', 'dist/app/main.js', 'dist/webui/index.html', 'dist/tools/fs.test.js'],
         },
       ]),
@@ -603,7 +603,7 @@ describe('runRelease 前置防线（净空核 / 不可达拒 / 检视不过）',
     });
     const { io, calls } = scriptedIo(base);
     await expect(
-      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/检视不过/);
     expect(labels(calls)).not.toContain('pack:real');
   });
@@ -616,7 +616,7 @@ describe('安装冒烟两断言负例（遗漏大扫 20260901 O-10 + L-6——�
     base['smoke:run'] = () => ({ code: 0, stdout: '0.9.9-evil "Old"\n', stderr: '' });
     const { io, calls } = scriptedIo(base);
     await expect(
-      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/版本漂移/);
     expect(labels(calls)).not.toContain('publish');
   });
@@ -629,7 +629,7 @@ describe('安装冒烟两断言负例（遗漏大扫 20260901 O-10 + L-6——�
     base['smoke:run'] = () => ({ code: 0, stdout: '1.0.0-alpha.9 "Peiligang"\n', stderr: '' });
     const { io } = scriptedIo(base);
     await expect(
-      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/版本漂移/);
   });
 
@@ -641,7 +641,7 @@ describe('安装冒烟两断言负例（遗漏大扫 20260901 O-10 + L-6——�
     base['smoke:apps'] = () => ({ code: 0, stdout: '（官方应用清单空）\n', stderr: '' });
     const { io, calls } = scriptedIo(base);
     await expect(
-      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+      runRelease([], io, { workDir, pkg: { name: 'berry-agent-os', version, binName: 'berry' } }),
     ).rejects.toThrow(/默认应用/);
     expect(labels(calls)).not.toContain('publish');
   });

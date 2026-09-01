@@ -3,7 +3,7 @@
 #
 # 用法：curl -fsSL <仓库>/scripts/install.sh | sh
 # 职责三件：Node ≥22.19 检查（只查不装——缺失指引发官方指引）→ npm 全局装
-# berryagent → berry --version 安装验证。失败路径全部带原因与出路口。
+# berry-agent-os → berry --version 安装验证。失败路径全部带原因与出路口。
 # 显示效果：分步状态行（→ 步骤 / ✓ 成功 / ✗ 失败）+ 尾部欢迎横幅与下一步指引。
 
 set -eu
@@ -52,16 +52,16 @@ step '检查 npm'
 command -v npm >/dev/null 2>&1 || fail '未找到 npm——Node.js 安装通常自带，请检查安装完整性。'
 ok "npm $(npm --version)"
 
-# ---------- ③ 全局安装 berryagent ----------
-step '安装 berryagent（npm i -g）'
+# ---------- ③ 全局安装 berry-agent-os ----------
+step '安装 berry-agent-os（npm i -g）'
 # npm 输出直通终端（自带进度即显示面）；-g 权限不足时 npm 会自行报错——常见出路口：
-#   · macOS/Linux 推荐 nvm（免 sudo）；系统 Node 用 sudo npm i -g berryagent
-if ! npm install -g berryagent; then
+#   · macOS/Linux 推荐 nvm（免 sudo）；系统 Node 用 sudo npm i -g berry-agent-os
+if ! npm install -g berry-agent-os; then
   fail "npm 安装失败。常见原因：
-  · 权限不足 → nvm 管理 Node（推荐，免 sudo）或 sudo npm i -g berryagent
+  · 权限不足 → nvm 管理 Node（推荐，免 sudo）或 sudo npm i -g berry-agent-os
   · 网络问题 → 检查代理/镜像源（npm config set registry https://registry.npmmirror.com 等按需）"
 fi
-ok 'berryagent 已安装'
+ok 'berry-agent-os 已安装'
 
 # ---------- ④ 安装验证 ----------
 step '验证安装（berry --version）'
@@ -78,5 +78,5 @@ printf '%s\n' "${DIM}下一步：${RESET}
   ${BOLD}berry${RESET}            进入 TUI 对话（首启即用——默认进入 coder 代码智能体应用）
   ${BOLD}berry --help${RESET}     全部命令（run 单发 / daemon 常驻 / attach 接上 / upgrade 升级）
   ${BOLD}/guide${RESET}           TUI 内快速上手参考（首启欢迎块也会自动出现）
-${DIM}上手：TUI 内 /guide · 升级：berry upgrade · 卸载：npm rm -g berryagent + rm -rf ~/.berry${RESET}
+${DIM}上手：TUI 内 /guide · 升级：berry upgrade · 卸载：npm rm -g berry-agent-os + rm -rf ~/.berry${RESET}
 "
