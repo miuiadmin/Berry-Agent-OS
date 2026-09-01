@@ -170,6 +170,116 @@ describe('obs 聚合核：口径锁（契约篇 §6.9 冷读回写全量）', ()
   });
 });
 
+describe('obs 聚合核：基建大扫 20260901 #13/#26/#50 扩列（失败信号 / llm 耗时 / turn 配对）', () => {
+  it('#13 turn_failures：turn/end reason≠completed 计 1（五值）、completed 不计', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s10', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(env('s10', 1, 'turn/end', { reason: 'completed' }));
+    // 五失败值各计 1（error/aborted/blocked/max-tokens/interrupted——TurnEndReason 闭集）
+    for (const [seq, reason] of [
+      [2, 'error'],
+      [3, 'aborted'],
+      [4, 'blocked'],
+      [5, 'max-tokens'],
+      [6, 'interrupted'],
+    ] as const) {
+      agg.ingest(env('s10', seq, 'turn/end', { reason }));
+    }
+    const [turn] = ofTable(take(agg), 'turn');
+    expect(turn?.cols).toMatchObject({ turns: 6, turn_failures: 5 });
+  });
+
+  it('#13 exhausted 独立成列：phase=exhausted 计 exhausted、retries 仍只计 scheduled、aborted 依旧零计', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s11', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(env('s11', 1, 'llm/retry', { phase: 'scheduled', attempt: 1 }));
+    agg.ingest(env('s11', 2, 'llm/retry', { phase: 'scheduled', attempt: 2 }));
+    agg.ingest(env('s11', 3, 'llm/retry', { phase: 'exhausted', attempt: 3 }));
+    agg.ingest(env('s11', 4, 'llm/retry', { phase: 'aborted', attempt: 3 }));
+    const [llm] = ofTable(take(agg), 'llm');
+    expect(llm?.cols).toMatchObject({ retries: 2, exhausted: 1 });
+  });
+
+  it('#26 llm/usage elapsedMs：dur_ms_sum/max 聚合；载荷缺席不计', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s12', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(
+      env('s12', 1, 'llm/usage', {
+        callId: 'c1',
+        model: 'm',
+        priority: 'foreground',
+        usage: { input: 1, output: 1 },
+        elapsedMs: 800,
+      }),
+    );
+    agg.ingest(
+      env('s12', 2, 'llm/usage', {
+        callId: 'c2',
+        model: 'm',
+        priority: 'foreground',
+        usage: { input: 1, output: 1 },
+        elapsedMs: 300,
+      }),
+    );
+    // 旧载荷形态（elapsedMs 缺席——写点缺席容错）：calls 照计、时长不计
+    agg.ingest(
+      env('s12', 3, 'llm/usage', { callId: 'c3', model: 'm', priority: 'foreground', usage: { input: 1, output: 1 } }),
+    );
+    const [llm] = ofTable(take(agg), 'llm');
+    expect(llm?.cols).toMatchObject({ calls: 3, dur_ms_sum: 1_100, dur_ms_max: 800 });
+  });
+
+  it('#50 turn 配对：时长落 start 时刻小时桶（延迟归因发起时点）、turns 落 end 桶；孤儿 start 天然不计', () => {
+    const agg = createAggregator();
+    const hour = Math.floor(T0 / 3_600_000) * 3_600_000;
+    agg.ingest(env('s13', 0, 'request/header', { app: 'chat' }));
+    // start 在整点后 10 分钟、end 在下一小时的 :30——跨小时轮且全程 < 1h 配对窗
+    // （> 1h 属老化弃配——由「老化 2h 晚到 end」一测锁死，两口径互不侵占）
+    agg.ingest(env('s13', 1, 'turn/start', {}, hour + 600_000));
+    agg.ingest(env('s13', 2, 'turn/end', { reason: 'completed' }, hour + 3_900_000));
+    // 孤儿 start（无 end——崩溃截断形态）：不产时长
+    agg.ingest(env('s13', 3, 'turn/start', {}, hour + 7_200_000));
+    const rows = ofTable(take(agg), 'turn');
+    const startBucket = rows.find((r) => r.hourTs === hour);
+    expect(startBucket?.cols).toMatchObject({ dur_ms_sum: 3_300_000, dur_ms_max: 3_300_000 });
+    const endBucket = rows.find((r) => r.hourTs === hour + 3_600_000);
+    expect(endBucket?.cols).toMatchObject({ turns: 1 }); // turns/turn_failures 维持落 end 时刻桶
+    // 只有 start 桶携带时长（孤儿 start 的空桶不产任何 dur 键）
+    expect(rows.filter((r) => r.cols['dur_ms_sum'] !== undefined)).toHaveLength(1);
+  });
+
+  it('#50 遮蔽回退联动：surfaceOp 盖住 turn/end → turns + turn_failures + 配对时长齐回退（同 seq 两笔 delta 合并 undo）', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s14', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(env('s14', 1, 'turn/start', {}));
+    agg.ingest(env('s14', 2, 'turn/end', { reason: 'error' }, T0 + 4_000));
+    // 遮蔽 seq 2（turn/end 自身）：同 seq 关联的两笔增量（end 桶计数 + start 桶时长）
+    // 必须一笔登记齐回退——只回退计数不回退时长 = 残账
+    agg.ingest(env('s14', 3, 'user/message', { content: '摘要' }, T0 + 60_000, { op: 'replace', start: 2, end: 2 }));
+    const hour = Math.floor(T0 / 3_600_000) * 3_600_000;
+    const rows = ofTable(take(agg), 'turn').filter((r) => r.hourTs === hour);
+    // 同桶合并后的总账：turns/turn_failures 归零、dur_ms_sum 归零（dur_ms_max 水印不回退——既定例外）
+    const merged = rows.reduce<Record<string, number>>((acc, r) => {
+      for (const [col, v] of Object.entries(r.cols)) acc[col] = (acc[col] ?? 0) + v;
+      return acc;
+    }, {});
+    expect(merged['turns']).toBe(0);
+    expect(merged['turn_failures']).toBe(0);
+    expect(merged['dur_ms_sum']).toBe(0);
+  });
+
+  it('#50 配对老化：start 落后最新事件 > 1h 的晚到 end 按孤儿容错——不计时长只计 turns（R-4③ 同律）', () => {
+    const agg = createAggregator();
+    agg.ingest(env('s15', 0, 'request/header', { app: 'chat' }));
+    agg.ingest(env('s15', 1, 'turn/start', {}));
+    agg.ingest(env('s15', 2, 'turn/end', { reason: 'completed' }, T0 + 2 * 3_600_000));
+    const rows = ofTable(take(agg), 'turn');
+    const endBucket = rows.find((r) => r.hourTs === Math.floor((T0 + 2 * 3_600_000) / 3_600_000) * 3_600_000);
+    expect(endBucket?.cols).toMatchObject({ turns: 1 });
+    expect(rows.every((r) => r.cols['dur_ms_sum'] === undefined)).toBe(true); // 老化弃配——零时长
+  });
+});
+
 describe('obs 聚合核：复盘 20260901 R-4/D-3 回归锁（内存有界三律 + 回退落空计数）', () => {
   it('R-4① 水印随 drain 清零——安全前提：同桶低值再发不落 DB（MAX 合并幂等契约）', () => {
     // 水印清除本身无行为差（DB 侧 MAX 合并兜底）——本锁钉死的是「清除安全」的

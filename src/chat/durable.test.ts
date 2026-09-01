@@ -229,6 +229,29 @@ describe('createDurableSinks：事件 → session.append 映射', () => {
     expect(session.events).toHaveLength(0);
   });
 
+  it('elapsedMs 前台段耗时（基建大扫 #26）：message_start(assistant)→message_end 差入 llm/usage；无 start 缺席不造值、用后即清', () => {
+    // 正路：先 message_start 再 message_end——elapsedMs = 本段 LLM 流耗时
+    // （performance.now 差，口径不含 tool 执行；非负有限即行为锁）
+    const withStart = new Session({ origin: 'user' });
+    const sinks = createDurableSinks(withStart);
+    sinks.handle({ type: 'message_start', message: textAssistant('流起点') });
+    sinks.handle({ type: 'message_end', message: textAssistant('流终点') });
+    const data = withStart.events.find((e) => e.type === 'llm/usage')!.data as { elapsedMs?: number };
+    expect(typeof data.elapsedMs).toBe('number');
+    expect(data.elapsedMs!).toBeGreaterThanOrEqual(0);
+    // 用后即清：同 sinks 第二段 assistant message_end 无先行 start——不携旧值
+    sinks.handle({ type: 'message_end', message: textAssistant('第二段无起点') });
+    const second = withStart.events.filter((e) => e.type === 'llm/usage')[1]!.data as { elapsedMs?: number };
+    expect(second.elapsedMs).toBeUndefined();
+    // 缺席容错：全新 sinks 直接 message_end（恢复/旧 harness 形态）——不造字段
+    const noStart = new Session({ origin: 'user' });
+    createDurableSinks(noStart).handle({ type: 'message_end', message: textAssistant('无起点') });
+    const ndata = noStart.events.find((e) => e.type === 'llm/usage')!.data as { elapsedMs?: number };
+    expect(ndata.elapsedMs).toBeUndefined();
+    // message_start 本身不落 durable（分层纪律不变——elapsedMs 只是闭包计时）
+    expect(withStart.events.some((e) => (e.type as string) === 'message_start')).toBe(false);
+  });
+
   it('gate 与审批 sink 分别落对应事件', () => {
     const session = new Session();
     const sinks = createDurableSinks(session);

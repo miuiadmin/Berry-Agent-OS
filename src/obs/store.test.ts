@@ -69,6 +69,52 @@ describe('obs 自管库面', () => {
     expect(rows[0]?.measures).toMatchObject({ calls: 0, tokens_in: 0 });
     store.close();
   });
+
+  it('v2 扩列迁移（基建大扫 #13/#26/#50）：llm +exhausted/dur_ms_sum/dur_ms_max、turn +turn_failures/dur_ms_sum/dur_ms_max；user_version=2', () => {
+    const path = tmpDb();
+    openRollupStore(path).close();
+    // raw 句柄经 persist 正路 face 取（better-sqlite3 裸导入仅 persist 允许）
+    const raw = createAppSqliteFace().openDatabase(path);
+    const cols = (table: string): string[] =>
+      (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols('llm_rollup_hour')).toEqual(expect.arrayContaining(['exhausted', 'dur_ms_sum', 'dur_ms_max']));
+    expect(cols('turn_rollup_hour')).toEqual(expect.arrayContaining(['turn_failures', 'dur_ms_sum', 'dur_ms_max']));
+    expect((raw.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(2);
+    raw.close();
+  });
+
+  it('llm/turn 新列往返 + dur_ms_max MAX 合并（与 tool 表同机制跨到两表）', () => {
+    const store = openRollupStore(':memory:');
+    store.apply([
+      {
+        table: 'llm',
+        hourTs: T0,
+        dims: ['chat', 'm', 'foreground'],
+        cols: { calls: 1, dur_ms_sum: 900, dur_ms_max: 900 },
+      },
+    ]);
+    store.apply([
+      {
+        table: 'llm',
+        hourTs: T0,
+        dims: ['chat', 'm', 'foreground'],
+        cols: { calls: 1, exhausted: 1, dur_ms_sum: 100, dur_ms_max: 100 },
+      },
+    ]);
+    const llm = store.query({ metric: 'llm', fromMs: T0, toMs: T0, groupBy: [] })[0]!.measures;
+    expect(llm).toMatchObject({ calls: 2, exhausted: 1, dur_ms_sum: 1_000, dur_ms_max: 900 });
+    store.apply([
+      {
+        table: 'turn',
+        hourTs: T0,
+        dims: ['chat'],
+        cols: { turns: 1, turn_failures: 1, dur_ms_sum: 500, dur_ms_max: 500 },
+      },
+    ]);
+    const turn = store.query({ metric: 'turn', fromMs: T0, toMs: T0, groupBy: [] })[0]!.measures;
+    expect(turn).toMatchObject({ turns: 1, turn_failures: 1, dur_ms_sum: 500, dur_ms_max: 500 });
+    store.close();
+  });
 });
 
 describe('obs 自管库面：复盘 20260901 T-2/R-3 开库编舞回归锁', () => {

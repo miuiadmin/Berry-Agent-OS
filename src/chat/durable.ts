@@ -167,8 +167,22 @@ export function createDurableSinks(
   session: Session,
   options: { model?: string; usagePriority?: 'background' | 'foreground' } = {},
 ): DurableSinks {
+  /**
+   * 当前 assistant 段的流耗时起点（基建大扫 #26）：message_start(assistant)
+   * 登记 → message_end 算差入 llm/usage.elapsedMs（口径 = 本段 LLM 流耗时，
+   * 不含 tool 执行）；用后即清（下一段无 start 即不造值——缺席容错）
+   */
+  let assistantStreamT0: number | undefined;
   const handle = (event: AgentEvent): void => {
     switch (event.type) {
+      case 'message_start': {
+        // assistant 段计时登记（#26）——不落 durable（分层纪律不变，只是闭包计时）
+        const startMessage = event.message;
+        if (isStandardMessage(startMessage) && startMessage.role === 'assistant') {
+          assistantStreamT0 = performance.now();
+        }
+        return;
+      }
       case 'turn_start':
         session.append('turn/start', {});
         return;
@@ -225,7 +239,13 @@ export function createDurableSinks(
               // 归一——此前手写 {input,output} 裁掉 cacheRead/cacheWrite，读侧
               // /usage 面板（四桶总和）与底账长期两张皮
               usage: usageLedgerBuckets(message.usage),
+              // 本段流耗时（基建大扫 #26）：message_start→message_end 差——
+              // 有 start 才造值（恢复/旧 harness 无 start 形态缺席容错）；取整毫秒
+              ...(assistantStreamT0 !== undefined
+                ? { elapsedMs: Math.round(performance.now() - assistantStreamT0) }
+                : {}),
             });
+            assistantStreamT0 = undefined; // 用后即清——下一段无 start 不携旧值
           }
           for (const block of message.content) {
             if (block.type === 'toolCall') {
@@ -250,8 +270,9 @@ export function createDurableSinks(
         return;
       }
       default:
-        // agent_start/agent_end/message_start/message_update/tool_execution_* 不落
-        // durable——token 级与生命周期边界走活体事件面（骨架篇 §2.5 分层纪律）
+        // agent_start/agent_end/message_update/tool_execution_* 不落
+        // durable——token 级与生命周期边界走活体事件面（骨架篇 §2.5 分层纪律；
+        // message_start 有显式 case 但只做闭包计时不落账——#26）
         return;
     }
   };

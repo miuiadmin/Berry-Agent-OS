@@ -68,6 +68,23 @@ const MIGRATIONS: readonly MigrationSpec[] = normalizeMigrations(
         );
       `,
     },
+    {
+      // v2（基建大扫 #13/#26/#50）：失败信号与耗时扩列——llm 表 + exhausted/
+      // dur_ms_sum/dur_ms_max（退避耗尽计数 + elapsedMs 聚合）、turn 表 +
+      // turn_failures/dur_ms_sum/dur_ms_max（轮失败计数 + start×end 配对时长）。
+      // ALTER ADD COLUMN 在迁移事务内原子（崩溃回滚列也回滚——与 DDL 幂等同
+      // 判定语义：版本未走即列未立，重开补跑无害）
+      version: 2,
+      name: 'obs-rollup-v2-failure-duration',
+      sql: `
+        ALTER TABLE llm_rollup_hour ADD COLUMN exhausted INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE llm_rollup_hour ADD COLUMN dur_ms_sum INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE llm_rollup_hour ADD COLUMN dur_ms_max INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE turn_rollup_hour ADD COLUMN turn_failures INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE turn_rollup_hour ADD COLUMN dur_ms_sum INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE turn_rollup_hour ADD COLUMN dur_ms_max INTEGER NOT NULL DEFAULT 0;
+      `,
+    },
   ],
   0,
 );
@@ -81,14 +98,21 @@ const TABLE_META: Readonly<
 > = {
   llm: {
     dims: ['app', 'model', 'priority'],
-    measures: ['calls', 'retries', 'tokens_in', 'tokens_out', 'cache_read', 'cache_write'],
+    // v2 扩列（基建大扫 #13/#26）：exhausted 失败信号 + elapsedMs 耗时聚合
+    measures: ['calls', 'retries', 'exhausted', 'tokens_in', 'tokens_out', 'cache_read', 'cache_write', 'dur_ms_sum'],
+    watermark: 'dur_ms_max',
   },
   tool: {
     dims: ['app', 'tool'],
     measures: ['calls', 'blocked', 'failures', 'timeouts', 'dur_ms_sum'],
     watermark: 'dur_ms_max',
   },
-  turn: { dims: ['app'], measures: ['turns', 'user_msgs', 'assistant_msgs', 'tool_calls'] },
+  // v2 扩列（基建大扫 #13/#50）：turn_failures 失败信号 + start×end 配对时长
+  turn: {
+    dims: ['app'],
+    measures: ['turns', 'turn_failures', 'user_msgs', 'assistant_msgs', 'tool_calls', 'dur_ms_sum'],
+    watermark: 'dur_ms_max',
+  },
   approval: { dims: ['app'], measures: ['asked', 'approved', 'rejected', 'always', 'cancel', 'unavailable'] },
 };
 
@@ -101,13 +125,26 @@ const TABLE_COLUMNS: Readonly<Record<RollupTable, readonly string[]>> = {
     'priority',
     'calls',
     'retries',
+    'exhausted',
     'tokens_in',
     'tokens_out',
     'cache_read',
     'cache_write',
+    'dur_ms_sum',
+    'dur_ms_max',
   ],
   tool: ['hour_ts', 'app', 'tool', 'calls', 'blocked', 'failures', 'timeouts', 'dur_ms_sum', 'dur_ms_max'],
-  turn: ['hour_ts', 'app', 'turns', 'user_msgs', 'assistant_msgs', 'tool_calls'],
+  turn: [
+    'hour_ts',
+    'app',
+    'turns',
+    'turn_failures',
+    'user_msgs',
+    'assistant_msgs',
+    'tool_calls',
+    'dur_ms_sum',
+    'dur_ms_max',
+  ],
   approval: ['hour_ts', 'app', 'asked', 'approved', 'rejected', 'always', 'cancel', 'unavailable'],
 };
 
@@ -244,6 +281,16 @@ export interface RollupStore {
 }
 
 /**
+ * v2 迁移已生效探测（R-3 自愈）：llm 表已携带 exhausted 列即视为 v2 全部落定
+ * （六列同迁移事务加——单列在场 = 全列在场）。SQLite 的 ALTER ADD COLUMN 无
+ * IF NOT EXISTS 形态，人工归零 user_version 的残留重开靠此探测自愈。
+ */
+function v2ColumnsLanded(db: DatabaseConnection): boolean {
+  const cols = db.prepare('PRAGMA table_info(llm_rollup_hour)').all() as { name?: unknown }[];
+  return cols.some((col) => col.name === 'exhausted');
+}
+
+/**
  * 打开 rollup 库（官方件直连形态——主库拒开基准不适用；文件库 0600 追打）。
  * 目录惰性建（首开建档）；user_version 私有链自跑（normalizeMigrations 校验）。
  */
@@ -262,6 +309,13 @@ export function openRollupStore(dbPath: string): RollupStore {
   );
   for (const migration of MIGRATIONS) {
     if (migration.version <= current) continue;
+    // R-3 自愈扩展（v2 起）：ALTER ADD COLUMN 无 IF NOT EXISTS 幂等形态——
+    // 「列已建而 user_version 未记」的人工残留（版本回零）重开补跑会炸；
+    // 跑前探测已生效即只补版本号（与 v1 的 IF NOT EXISTS 同自愈性质）
+    if (migration.version === 2 && v2ColumnsLanded(db)) {
+      db.pragma('user_version = 2');
+      continue;
+    }
     db.transaction(() => {
       db.exec(migration.sql);
       db.pragma(`user_version = ${migration.version}`);

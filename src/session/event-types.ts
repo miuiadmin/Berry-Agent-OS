@@ -133,6 +133,13 @@ export interface LlmUsageData {
     /** 推理 token 子集（已含于 output；供应商不报则缺省省略字段） */
     readonly reasoning?: number;
   };
+  /**
+   * 本次调用墙钟耗时（毫秒，2026-09-02 基建大扫 #26 拍板——观测面 dur_ms 聚合
+   * 的唯一源）：complete 单发路 = 全调用耗时（含重试）、前台段 = message_start
+   * →message_end 的 LLM 流耗时（不含 tool 执行）；写点两侧同律携带、缺席不计
+   * （旧事件/恢复合成形态无此字段不炸不造值）
+   */
+  readonly elapsedMs?: number;
 }
 
 /* ---- llm/usage callId 判别式三函数（2026-09-01 复盘 R-1 同源收口） ----

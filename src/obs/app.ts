@@ -66,8 +66,19 @@ const parseIso = (value: string, field: string): number => {
   return ms;
 };
 
+/**
+ * 停摄取披露条（基建大扫 #15——契约篇 §6.9）：flush 抛错停摄取后，三个消费面
+ * （obs_query 回执尾行 / /obs 总览头部 / /obs-alerts list）同步标注停态与数据
+ * 截至时刻——停态对消费面可见，不留「进程日志 warn 是唯一痕迹」的盲区。
+ * lastFlushAt = 最近一次成功 flush 时刻（件内内存值；未 flush 过 = '(未落账)'）。
+ */
+const stoppedNoteText = (stopped: boolean, lastFlushAt: number | undefined): string | undefined =>
+  stopped
+    ? `⚠ 摄取已停——数据截至 ${lastFlushAt === undefined ? '(未落账)' : new Date(lastFlushAt).toISOString()}`
+    : undefined;
+
 /** 组装 obs_query 工具 def（查询面模型路——admin 只读工具族同构） */
-function createObsQueryTool(store: RollupStore): ToolDefinition {
+function createObsQueryTool(store: RollupStore, stoppedNote: () => string | undefined): ToolDefinition {
   return {
     name: 'obs_query',
     description:
@@ -103,7 +114,11 @@ function createObsQueryTool(store: RollupStore): ToolDefinition {
         // groupBy 非法维度——语义错误按参数错误呈现（模型可修笔重试）
         throw new AppError(TOOL_ARGUMENTS_INVALID, err instanceof Error ? err.message : String(err));
       }
-      return { content: [{ type: 'text', text: renderRollupTable(metric, rows) }] };
+      // 停摄取披露（#15）：回执尾行标注——停态下查询结果只到 lastFlushAt
+      const note = stoppedNote();
+      return {
+        content: [{ type: 'text', text: renderRollupTable(metric, rows) + (note === undefined ? '' : `\n${note}`) }],
+      };
     },
   };
 }
@@ -115,8 +130,8 @@ function localDayStart(): number {
   return d.getTime();
 }
 
-/** /obs 命令族的视图渲染（args 子视图分发） */
-function renderObsView(store: RollupStore, view: string): string {
+/** /obs 命令族的视图渲染（args 子视图分发；stoppedNote = 停摄取披露条 #15） */
+function renderObsView(store: RollupStore, view: string, stoppedNote?: string): string {
   const from = localDayStart();
   const to = Date.now();
   const q = (metric: RollupTable, groupBy?: readonly string[]): string => {
@@ -147,6 +162,8 @@ function renderObsView(store: RollupStore, view: string): string {
       };
       return [
         '今日观测总览：',
+        // 停摄取披露（#15）：总览头部标注——头排即见停态，不藏表尾
+        ...(stoppedNote === undefined ? [] : [stoppedNote]),
         `  llm：${summary('llm')}`,
         `  工具：${summary('tool')}`,
         `  轮次：${summary('turn')}`,
@@ -167,14 +184,10 @@ function renderObsView(store: RollupStore, view: string): string {
 }
 
 /**
- * 创建 obs 官方件模块（builtins.ts 注册——零宿主资源闭包：数据库路径经
- * ctx.paths 正规口、四服务全 ctx.get，BuiltinRegistryOptions 零新字段）。
- */
-/**
  * /obs-alerts 命令族处理（契约篇 §6.9 刀二动词面——/tick 同款风格）。
  * 解析错与值域错统一抛错（命令壳兜底为通知——人与模型都可修笔重试）。
  */
-function handleAlertsCommand(store: RollupStore, args: string): string {
+function handleAlertsCommand(store: RollupStore, args: string, stoppedNote?: string): string {
   const parts = args.split(/\s+/).filter((token) => token !== '');
   const [verb, ...rest] = parts;
   switch (verb) {
@@ -182,7 +195,11 @@ function handleAlertsCommand(store: RollupStore, args: string): string {
     case 'list': {
       const rules = store.listAlerts();
       if (rules.length === 0) {
-        return '告警规则：（无）/obs-alerts add <sum|avg|max> <表.列> <op> <阈值> [窗h] [冷却min] 添加';
+        // 空表面同样带停摄取披露（#15）——停态先知，不留「有规则才见停态」的盲角
+        return [
+          '告警规则：（无）/obs-alerts add <sum|avg|max> <表.列> <op> <阈值> [窗h] [冷却min] 添加',
+          ...(stoppedNote === undefined ? [] : [stoppedNote]),
+        ].join('\n');
       }
       const header = 'id | metric | 聚合 阈值 | 窗h | 冷却min | 状态 | 上次触发';
       const lines = rules.map(
@@ -190,7 +207,13 @@ function handleAlertsCommand(store: RollupStore, args: string): string {
           `${rule.id} | ${rule.metric} | ${rule.agg} ${rule.op} ${rule.threshold} | ${rule.windowHours} | ${rule.cooldownMin} | ` +
           `${rule.enabled ? '启用' : '停用'} | ${rule.lastFiredAt === null ? '未触发' : new Date(rule.lastFiredAt).toISOString()}`,
       );
-      return ['告警规则（只通知不执法——执法在宿主护栏）：', header, ...lines].join('\n');
+      return [
+        '告警规则（只通知不执法——执法在宿主护栏）：',
+        // 停摄取披露（#15）：list 头部标注——规则触发的度量源已停须先知
+        ...(stoppedNote === undefined ? [] : [stoppedNote]),
+        header,
+        ...lines,
+      ].join('\n');
     }
     case 'add': {
       const [agg, metric, op, threshold, windowHours, cooldownMin] = rest;
@@ -225,6 +248,10 @@ function handleAlertsCommand(store: RollupStore, args: string): string {
   }
 }
 
+/**
+ * 创建 obs 官方件模块（builtins.ts 注册——零宿主资源闭包：数据库路径经
+ * ctx.paths 正规口、四服务全 ctx.get，BuiltinRegistryOptions 零新字段）。
+ */
 export function createObsApp(): BuiltinAppModule {
   return {
     name: 'obs',
@@ -255,6 +282,12 @@ export function createObsApp(): BuiltinAppModule {
       const aggregator = createAggregator();
       let pendingCount = 0;
       let stopped = false;
+      /**
+       * 最近一次成功 flush 时刻（基建大扫 #15）：停摄取披露条「数据截至」的锚
+       * （未 flush 过 = undefined → 披露 '(未落账)'）；内存值——重启归零即回
+       * 未落账形态，与停态本就随进程走的语义一致
+       */
+      let lastFlushAt: number | undefined;
       let unsubscribe: (() => void) | undefined;
 
       /**
@@ -299,6 +332,7 @@ export function createObsApp(): BuiltinAppModule {
           // 整笔跳过——不回写 last_fired_at、不 emit、不 notify（探针缺省真
           // ——旧宿主形态视为有观众，行为不回退）
           store.apply(deltas, fireAlert, () => ui.hasAudience?.() ?? true);
+          lastFlushAt = Date.now(); // #15：成功落账时刻——停摄取后「数据截至」的锚
         } catch (err) {
           stopped = true;
           unsubscribe?.();
@@ -311,6 +345,8 @@ export function createObsApp(): BuiltinAppModule {
           );
         }
       };
+      /** 停摄取披露条（#15）取值面：三消费面（工具回执 / /obs / /obs-alerts）共用 */
+      const stoppedNote = (): string | undefined => stoppedNoteText(stopped, lastFlushAt);
       const timer = setInterval(flush, flushMs);
       timer.unref?.(); // 不持事件循环（TUI/run 入口自由退出——观测不反噬宿主）
 
@@ -345,7 +381,7 @@ export function createObsApp(): BuiltinAppModule {
       // 注册即 effect：订阅 / 工具 / 命令随行作用域 LIFO 回卷（/reload 重装重开库）
       ctx.effect(() => {
         unsubscribe = ctx.on('session/event', ingestEnvelope);
-        ctx.effect(() => tools.register(createObsQueryTool(store)));
+        ctx.effect(() => tools.register(createObsQueryTool(store, stoppedNote)));
         ctx.effect(() =>
           channels.registerCommand({
             name: 'obs',
@@ -353,7 +389,7 @@ export function createObsApp(): BuiltinAppModule {
             argumentHint: '[tools|usage|turns|approvals]',
             source: 'app',
             handler: (args: string): void => {
-              ui.notify(renderObsView(store, args.trim()));
+              ui.notify(renderObsView(store, args.trim(), stoppedNote()));
             },
           }),
         );
@@ -365,7 +401,7 @@ export function createObsApp(): BuiltinAppModule {
             argumentHint: 'list',
             source: 'app',
             handler: (args: string): void => {
-              ui.notify(handleAlertsCommand(store, args.trim()));
+              ui.notify(handleAlertsCommand(store, args.trim(), stoppedNote()));
             },
           }),
         );

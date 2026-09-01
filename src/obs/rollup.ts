@@ -13,9 +13,12 @@
  *   不计时长（合成 time 复用最后真实事件 time，时长语义无效——冷读 M8）；
  * - **配对**：tool/call × tool/result 按 (sessionId, toolCallId)；丢失（崩溃
  *   孤儿）容错跳过，重建路补齐；时长分桶锚 = **调用时刻的小时桶**；
+ *   turn/start × turn/end 按 sessionId（基建大扫 #50——同构配对：孤儿/老化
+ *   弃配零时长、时长分桶锚 = start 时刻、turns/turn_failures 仍落 end 桶）；
  * - **retries 只计 phase='scheduled'**（每次真实退避排定一次；aborted/
- *   exhausted 是排定的结局不双计——冷读 M3）；模型维缺源（llm/retry 载荷无
- *   model）→ '(retry)' 哨兵桶；
+ *   exhausted 是排定的结局不双计——冷读 M3）；**exhausted 独立成列**（phase=
+ *   'exhausted' 计 1——退避排定后真耗尽的失败信号，基建大扫 #13）；模型维
+ *   缺源（llm/retry 载荷无 model）→ '(retry)' 哨兵桶；
  * - **approval 按 decision 五值全桶**（approve/reject/cancel/unavailable/
  *   always——durable 载荷无 via 字段，分桶只按 decision——冷读 M2）；
  * - hour_ts = **UTC 小时地板**（毫秒）。
@@ -86,6 +89,8 @@ const CONTRIBUTION_PRUNE = 10_000;
 const SESSION_APP_TTL_MS = 7 * 24 * HOUR_MS;
 /** tool 配对老化上限（复盘 R-4③：调用时刻落后最新事件 > 1h → 按孤儿容错） */
 const TOOL_PAIR_TTL_MS = HOUR_MS;
+/** turn 配对老化上限（基建大扫 #50——与 tool 配对同律 R-4③：start 时刻落后最新事件 > 1h 的晚到 end 弃配） */
+const TURN_PAIR_TTL_MS = HOUR_MS;
 
 /** 未知 app 的落桶哨兵（request/header 尚未到达/无 app 字段） */
 export const HOST_BUCKET = 'host';
@@ -124,6 +129,12 @@ export function createAggregator(): Aggregator {
   const sessionApp = new Map<string, { app: string; lastSeen: number }>();
   /** 配对在飞：`${sessionId}${toolCallId}`（\u001f 分隔）→ { 调用名, 调用时刻 } */
   const toolPending = new Map<string, { name: string; time: number }>();
+  /**
+   * turn 配对在飞（基建大扫 #50）：sessionId → { start 时刻 }（一 turn = 一段
+   * start→end 序列，会话内天然串行——键即 sessionId 无需配对 id）。drain 老化
+   * 清扫同 toolPending（R-4③ 同律）
+   */
+  const turnPending = new Map<string, { time: number }>();
   /** 事件钟：见过的最大 event.time（修剪/老化判据基准——非墙钟，回放确定性友好） */
   let lastEventTime = Number.NEGATIVE_INFINITY;
 
@@ -203,11 +214,33 @@ export function createAggregator(): Aggregator {
         record(seqKey, apply('turn', hour, [app], { assistant_msgs: 1 }));
         return;
       case 'turn/start':
-        // 在飞登记（turns 计数锚 = turn/end；孤儿 turn/start 天然不计）
+        // 在飞登记（基建大扫 #50）：start→end 配对的时长锚点；turns 计数锚仍 =
+        // turn/end（孤儿 turn/start 天然不计——时长与计数同口径）
+        turnPending.set(sessionId, { time: event.time });
         return;
-      case 'turn/end':
-        record(seqKey, apply('turn', hour, [app], { turns: 1 }));
+      case 'turn/end': {
+        // 计数面（turns + turn_failures——基建大扫 #13）：失败口径 = reason≠
+        // 'completed' 计 1（TurnEndReason 五失败值 error/aborted/blocked/
+        // max-tokens/interrupted——失败率告警的度量底座）
+        const countCols: Record<string, number> = { turns: 1 };
+        if (data['reason'] !== 'completed') countCols.turn_failures = 1;
+        const countUndo = apply('turn', hour, [app], countCols);
+        // 配对面（基建大扫 #50）：时长 = start→end 差，落 **start 时刻小时桶**
+        // （延迟归因到发起时点——与 tool 配对同律）；孤儿 end（无 start 登记）
+        // 与老化弃配（> 1h）只计零时长；dur_ms_max 单调水印同 tool 机制
+        const start = turnPending.get(sessionId);
+        turnPending.delete(sessionId);
+        if (start === undefined || event.time - start.time > TURN_PAIR_TTL_MS) {
+          record(seqKey, countUndo);
+          return;
+        }
+        const dur = event.time - start.time;
+        const durUndo = apply('turn', hourFloor(start.time), [app], { dur_ms_sum: dur }, dur);
+        // 同 seq 两笔 delta（end 桶计数 + start 桶时长）合并登记一笔 undo——
+        // surfaceOp 盖住 turn/end 时齐回退，只回退一侧即残账
+        record(seqKey, () => countUndo() && durUndo());
         return;
+      }
       case 'tool/call': {
         const call = data as { toolCallId?: unknown; name?: unknown };
         if (typeof call.toolCallId === 'string' && typeof call.name === 'string') {
@@ -251,21 +284,39 @@ export function createAggregator(): Aggregator {
       case 'llm/usage': {
         const usage = (data['usage'] ?? {}) as Record<string, unknown>;
         const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+        // 耗时聚合（基建大扫 #26）：载荷 elapsedMs 在场才计 dur_ms_sum/max
+        // （写点缺席容错——旧事件/恢复合成无此字段不炸不造值）；dur_ms_max
+        // 单调水印与 tool 表同机制（llm 表 v2 扩列）
+        const elapsed = data['elapsedMs'];
+        const hasDur = typeof elapsed === 'number' && Number.isFinite(elapsed);
         record(
           seqKey,
-          apply('llm', hour, [app, String(data['model'] ?? '(unknown)'), String(data['priority'] ?? 'foreground')], {
-            calls: 1,
-            tokens_in: num(usage['input']),
-            tokens_out: num(usage['output']),
-            cache_read: num(usage['cacheRead']),
-            cache_write: num(usage['cacheWrite']),
-          }),
+          apply(
+            'llm',
+            hour,
+            [app, String(data['model'] ?? '(unknown)'), String(data['priority'] ?? 'foreground')],
+            {
+              calls: 1,
+              tokens_in: num(usage['input']),
+              tokens_out: num(usage['output']),
+              cache_read: num(usage['cacheRead']),
+              cache_write: num(usage['cacheWrite']),
+              ...(hasDur ? { dur_ms_sum: elapsed as number } : {}),
+            },
+            hasDur ? (elapsed as number) : undefined,
+          ),
         );
         return;
       }
       case 'llm/retry': {
-        if (data['phase'] !== 'scheduled') return; // aborted/exhausted 是排定的结局不双计——冷读 M3
-        record(seqKey, apply('llm', hour, [app, '(retry)', '(retry)'], { retries: 1 }));
+        // scheduled = 每次真实退避排定（retries 口径）；exhausted = 排定后真
+        // 耗尽（失败信号独立成列——基建大扫 #13，与 retries 不双计）；aborted
+        // 仍零计（排定的结局两形态：耗尽是失败信号、取消不是——M3 口径延伸）
+        if (data['phase'] === 'scheduled') {
+          record(seqKey, apply('llm', hour, [app, '(retry)', '(retry)'], { retries: 1 }));
+        } else if (data['phase'] === 'exhausted') {
+          record(seqKey, apply('llm', hour, [app, '(retry)', '(retry)'], { exhausted: 1 }));
+        }
         return;
       }
       case 'approval/asked':
@@ -323,6 +374,10 @@ export function createAggregator(): Aggregator {
     // R-4③：配对老化清扫——调用时刻落后最新事件 > 1h 的在飞对按孤儿弃置
     for (const [pairKey, call] of toolPending) {
       if (lastEventTime - call.time > TOOL_PAIR_TTL_MS) toolPending.delete(pairKey);
+    }
+    // turn 配对同律清扫（基建大扫 #50——start 时刻落后最新事件 > 1h 弃置）
+    for (const [sid, start] of turnPending) {
+      if (lastEventTime - start.time > TURN_PAIR_TTL_MS) turnPending.delete(sid);
     }
     return out;
   };

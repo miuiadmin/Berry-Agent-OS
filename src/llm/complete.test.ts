@@ -323,6 +323,17 @@ describe('ctx.llm.complete：canAfford 预算闸门（记忆篇铁律 4 宿主�
     expect(b.priority).toBe('background'); // 显式声明透传
     expect(a.callId).not.toBe(b.callId); // 每次调用唯一——write-behind 重试去重锚点
   });
+
+  it('elapsedMs 全调用耗时（基建大扫 #26）：结果随携非负耗时——装配层落 llm/usage 的 elapsedMs 字段源', async () => {
+    const faux = fauxProvider({ provider: 'faux-test', models: [{ id: 'm1' }] });
+    const runtime = createLlmRuntime({ providers: [faux.provider] });
+    const service = createLlmService({ runtime, defaultModel: () => 'faux-test/m1' });
+    faux.setResponses([() => messageOf('stop')]);
+    const result = await service.complete({ messages: [userMsg('x')] });
+    // 口径 = 全调用耗时（含重试——墙钟 performance.now 差）；非负有限即行为锁
+    expect(typeof result.elapsedMs).toBe('number');
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
 });
 
 describe('ctx.llm.complete：计量 seam 与 provider 注册面', () => {

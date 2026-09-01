@@ -329,6 +329,14 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
 
     const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
     runtimes.push(runtime);
+    // 通知录音后端（#15 三面披露断言面——/obs 与 /obs-alerts list 的 notify 文案）
+    const notifies: string[] = [];
+    runtime.ui.attach({
+      id: 'rec',
+      notify: (text: string) => notifies.push(text),
+      setStatus: () => {},
+      confirm: async () => true,
+    });
     const session = runtime.session;
     expect(session).toBeDefined();
     session!.append('request/header', {
@@ -338,7 +346,8 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
       reason: 'initial',
       app: 'chat',
     });
-    // 第一笔：无锁正常提交（同步链：append → 总线 → flush → apply 落库）
+    // 第一笔：无锁正常提交（同步链：append → 总线 → flush → apply 落库——首笔成功
+    // 即 lastFlushAt 已立，#15 披露条的「数据截至」有时刻可标）
     session!.append('llm/usage', {
       callId: 'c-ok',
       model: 'faux/m1',
@@ -381,6 +390,17 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
     const result = await obsQuery.execute({ metric: 'llm', groupBy: [] }, { toolCallId: 'obs-stop' });
     // 恰 1 次：第一笔在；第二笔事务回滚不在；第三笔停摄取后不进
     expect(llmCallsCell(result)).toBe('1');
+
+    // #15 停摄取披露三面：①obs_query 回执尾行 ②/obs 总览头部 ③/obs-alerts list
+    // ——停态对消费面可见（首笔已成功落账 →「数据截至」标时刻而非「未落账」）
+    expect(JSON.stringify(result.content)).toContain('摄取已停');
+    expect(JSON.stringify(result.content)).toContain('数据截至');
+    expect(JSON.stringify(result.content)).not.toContain('未落账');
+    expect(await runtime.channels.commands.dispatch('/obs')).toBe('ok');
+    expect(notifies.at(-1) ?? '').toContain('摄取已停');
+    expect(notifies.at(-1) ?? '').toContain('数据截至');
+    expect(await runtime.channels.commands.dispatch('/obs-alerts list')).toBe('ok');
+    expect(notifies.at(-1) ?? '').toContain('摄取已停');
   }, 20_000);
 
   it('R-2 无头不耗冷却：无 ui 后端（headless）→ 整笔跳过（不回写/不 emit/不 notify）；观众到场后下次 flush 重发', async () => {

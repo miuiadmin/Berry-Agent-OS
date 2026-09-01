@@ -89,6 +89,12 @@ export interface CompleteResult {
   callId: string;
   /** 本次调用的预算道（装配层落 llm/usage 事件的 priority 字段源） */
   priority: 'background' | 'foreground';
+  /**
+   * 本次调用墙钟耗时（毫秒，基建大扫 #26——llm/usage 事件 elapsedMs 字段源）：
+   * performance.now 差、含 transient 重试（全调用口径）；观测面 dur_ms 聚合的
+   * 唯一源之一（另一路 = 前台段 message_start→message_end 流耗时，chat/durable）
+   */
+  elapsedMs: number;
 }
 
 /** ctx.llm 服务面（骨架篇 §9.3：complete + provider 注册/注销 + 模型目录只读投影 + canAfford 预算闸门） */
@@ -330,7 +336,9 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
         ...req.providerNative,
       };
 
-      // 硬要求 2：单发不 loop——一次 streamSimple + 有界 transient 重试（硬要求 3 的 retryAssistantCall）
+      // 硬要求 2：单发不 loop——一次 streamSimple + 有界 transient 重试（硬要求 3 的 retryAssistantCall）。
+      // 计时起点（基建大扫 #26）：全调用口径——含重试在内的墙钟耗时，终点在成功终态后
+      const startedAt = performance.now();
       const message = await retryAssistantCall(
         async () => {
           // 在飞帽（S4 前置债③）：与主循环路同源计数；达帽同拒——错误终态带
@@ -364,12 +372,14 @@ export function createLlmService(options: LlmServiceOptions): LlmService {
       }
 
       // 计量身份随结果携带：callId 供装配层落 llm/usage（settlement 幂等），
-      // priority 供事件分道（聚合只计 background）
+      // priority 供事件分道（聚合只计 background），elapsedMs 供事件耗时聚合（#26）
       const result: CompleteResult = {
         message,
         usage: message.usage,
         callId: randomUUID(),
         priority: req.priority ?? 'foreground',
+        // 全调用耗时（performance.now 差——亚毫秒精度足够观测聚合，不取整保精度）
+        elapsedMs: performance.now() - startedAt,
       };
       // 计量 seam：回调异常隔离（观测面不拖垮补全结果；底账由装配层在此落 durable）
       try {

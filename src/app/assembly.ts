@@ -885,6 +885,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
           // 全桶入账（会话篇 §1.1 P1-5 修偏）：usageLedgerBuckets 归一——cacheRead/
           // cacheWrite 必落，cacheWrite1h/reasoning 上报才落，totalTokens/cost 滤除
           usage: usageLedgerBuckets(result.usage),
+          // 调用耗时（基建大扫 #26）：complete 路 = 全调用墙钟耗时——观测面
+          // dur_ms 聚合的载荷源（LlmUsageData.elapsedMs）
+          elapsedMs: result.elapsedMs,
         });
       }
       ctx.logger.debug('llm.complete 用量入账', {
