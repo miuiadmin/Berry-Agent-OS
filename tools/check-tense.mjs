@@ -164,9 +164,12 @@ function checkPaths(files) {
     lines.forEach((line, i) => {
       if (!PERFECTIVE_RE.test(line) || GONE_RE.test(line)) return;
       for (const m of line.matchAll(/`([^`]+)`/g)) {
-        // 去掉 :669 式行号尾缀，再过白名单前缀 + 扩展名双闸
+        // 去掉 :669 式行号尾缀，再过白名单前缀 + 扩展名双闸。
+        // 路径段字符类须含 CJK 区间（遗漏大扫 20260901-c #16）：\w 只覆盖
+        // [A-Za-z0-9_]，docs/ 下五篇中文命名文档会被排除在时态门禁外——
+        // docs 白名单段此前从未真正生效（幽灵中文路径零对照）
         const p = m[1].replace(/:\d+.*$/, '');
-        const isRepoPath = /^(src|apps|tools|docs)\/[\w./-]+$/.test(p) && PATH_EXT_RE.test(p);
+        const isRepoPath = /^(src|apps|tools|docs)\/[\w一-鿿./-]+$/.test(p) && PATH_EXT_RE.test(p);
         if (!isRepoPath) continue;
         checked++;
         if (!existsSync(join(ROOT, p))) {

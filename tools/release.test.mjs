@@ -293,6 +293,15 @@ describe('runRelease 编排骨舞：preview 期 prerelease 全绿路径', () => 
 
     expect(summary.published).toBe(true);
     expect(summary.gitTag).toBe('create');
+    // tag push 恒带 HTTP/1.1（遗漏大扫 20260901-c #17）：与仓库推送纪律/归档机器
+    // 同律——release 机器不得是全仓唯一裸 push 的例外（本机 HTTP/2 推流必挂）
+    expect(calls.find((c) => c.label === 'git-tag:push').args).toEqual([
+      '-c',
+      'http.version=HTTP/1.1',
+      'push',
+      'origin',
+      'v1.0.0-alpha.3',
+    ]);
     // publish 单点：上传物 = tarball 本体 + prerelease 显式 next
     const pub = calls.find((c) => c.label === 'publish');
     expect(pub.args).toEqual(['publish', join(workDir, 'berryagent-fake.tgz'), '--tag', 'next']);
@@ -384,6 +393,39 @@ describe('runRelease 演习矩阵：--dry-run 行为（检视/冒烟真做，写
     // tarball 即用即清在 dry-run 路径同律（演习不留残留）
     expect(existsSync(join(workDir, 'berryagent-fake.tgz'))).toBe(false);
   });
+
+  it('正式版 dry-run → 投影断言不喂 nextBefore（期望终态自身即绿，遗漏大扫 20260901-c #8）', async () => {
+    const version = '1.0.0';
+    const base = greenBase(version);
+    // 正式版照取 pre 快照（「next 不动」基准）——投影断言路不吃它，实测路才吃；
+    // 修复前投影路误喂 nextBefore，期望终态无 next 键必炸「next 被动过」假象
+    base['view-tags:pre'] = () => ({
+      code: 0,
+      stdout: JSON.stringify({ latest: '0.9.0', next: '1.0.0-rc.9' }),
+      stderr: '',
+    });
+    base['git-tag:list'] = () => ({ code: 0, stdout: '', stderr: '' });
+    base['git-rev:head'] = () => ({ code: 0, stdout: 'abc123\n', stderr: '' });
+    const { io, calls } = scriptedIo(base);
+
+    const summary = await runRelease(['--dry-run'], io, {
+      workDir,
+      pkg: { name: 'berryagent', version, binName: 'berry' },
+    });
+
+    expect(summary.published).toBe(false);
+    expect(summary.expectedTags).toEqual({ latest: '1.0.0' });
+    expect(calls.find((c) => c.label === 'publish').args).toEqual([
+      'publish',
+      join(workDir, 'berryagent-fake.tgz'),
+      '--tag',
+      'latest',
+      '--dry-run',
+    ]);
+    expect(labels(calls)).not.toContain('dist-tag-add');
+    // pre 快照照取（正式版两态同律），只是投影断言不消费它
+    expect(labels(calls)).toContain('view-tags:pre');
+  });
 });
 
 describe('runRelease 失败注入谱（--inject 与测试同表——演习两轮留档即本组）', () => {
@@ -461,6 +503,20 @@ describe('runRelease 失败注入谱（--inject 与测试同表——演习两�
     // 注入拦截发生在 applyScenario 层（不进 calls 记录）——「注入终态走了实测
     // 断言路」的证据即上面那条 rejects：纯函数投影路在 prerelease 期望终态上
     // 恒绿，能炸的只有 canned 终态穿过 assertDistTagTerminal 这一条路
+  });
+
+  it('assert-fail 无 --dry-run → 组合闸拦在契约 1 之前（遗漏大扫 20260901-c #7）', async () => {
+    const version = '1.0.0-alpha.3';
+    const { io, calls } = scriptedIo(greenBase(version));
+    await expect(
+      runRelease(['--inject', 'assert-fail'], applyScenario(io, INJECT_SCENARIOS['assert-fail']), {
+        workDir,
+        pkg: { name: 'berryagent', version, binName: 'berry' },
+      }),
+    ).rejects.toThrow(/须配 --dry-run/);
+    // 闸在契约 1 之前：零步骤触达（连门禁都没跑）——无闸形态会一路真上传到
+    // 契约 5 才撞注入终态，留半成功态
+    expect(calls).toEqual([]);
   });
 
   it('interrupt-rerun（dry-run）：幂等跳过 publish——后续步骤照跑', async () => {

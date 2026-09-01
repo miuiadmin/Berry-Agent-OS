@@ -229,6 +229,10 @@ export const INJECT_SCENARIOS = {
   },
   'assert-fail': {
     description: '契约 5 dist-tag 断言失败——发布后半成功态必须被人看见（须配 --dry-run：publish 干跑、断言吃注入终态）',
+    // 组合闸（遗漏大扫 20260901-c #7）：canned 步骤 view-tags:post 位于 publish 之后——
+    // 不带 --dry-run 跑此谱 = 真上传后撞注入终态，留半成功态。此旗标由 CLI 解析层
+    // 与 runRelease 入口双层执法（见 parseReleaseCli / runRelease 头部闸）。
+    requiresDryRun: true,
     steps: {
       'view-tags:post': () => ({
         code: 0,
@@ -319,6 +323,12 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
   const activeIo = injectName
     ? applyScenario(io, INJECT_SCENARIOS[injectName] ?? throwUnknownScenario(injectName))
     : io;
+  // 注入谱组合闸（遗漏大扫 20260901-c #7）：canned 步骤位于 publish 之后的谱项必须
+  // 配 --dry-run——闸在契约 1 之前，任何步骤（连门禁都不）触达；此处守编程调用路
+  // （CLI 路由 parseReleaseCli 同判，输出为用法错退出 2）
+  if (injectName && !dryRun && INJECT_SCENARIOS[injectName].requiresDryRun) {
+    throw new Error(`注入谱 ${injectName} 的 canned 步骤位于 publish 之后——须配 --dry-run 演习（真跑形态会真上传）`);
+  }
 
   // ── 契约 1：门禁前置不可绕 + 工作树净空 ──
   for (const gate of GATES) {
@@ -417,11 +427,13 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
       });
       console.log(`  终态断言绿：${JSON.stringify(plan.expectedTags)}`);
     } else {
-      // dry-run：只调纯函数断言期望终态（不打 tag 不触网写）
+      // dry-run：只调纯函数断言期望终态（不打 tag 不触网写）。
+      // 投影断言不喂 nextBefore（遗漏大扫 20260901-c #8）：投影终态是 planTagOperations
+      // 的期望值——正式版期望态无 next 键，observed.next=undefined ≠ nextBefore 会必
+      // 触发「正式期 next 被动过」假象恒炸演习；「next 不动」比对语义只在实测路成立
       assertDistTagTerminal(plan.expectedTags, {
         isPrerelease: plan.isPrerelease,
         version: pkg.version,
-        nextBefore,
       });
       console.log(`  期望终态（dry-run 不执行 dist-tag add）：${JSON.stringify(plan.expectedTags)}`);
     }
@@ -447,7 +459,9 @@ export async function runRelease(argv = [], io = defaultIo(), opts = {}) {
     if (gitAction.action === 'create' && !dryRun) {
       const mk = await activeIo.exec('git-tag:create', 'git', ['tag', tag]);
       if (mk.code !== 0) throw new Error(`git tag ${tag} 创建失败`);
-      const push = await activeIo.exec('git-tag:push', 'git', ['push', 'origin', tag]);
+      // push 恒带 HTTP/1.1（遗漏大扫 20260901-c #17）：与仓库管理推送纪律/归档机器
+      // 同律——本机到 GitHub 的 HTTP/2 推流不稳，release 机器不得是全仓唯一裸 push 例外
+      const push = await activeIo.exec('git-tag:push', 'git', ['-c', 'http.version=HTTP/1.1', 'push', 'origin', tag]);
       if (push.code !== 0) throw new Error(`git push origin ${tag} 失败（本地已打——人工补推）`);
       console.log(`  git tag ${tag} 已打挂`);
     } else {
@@ -555,6 +569,11 @@ function parseReleaseCli(argv) {
   }
   if (!opts.error && opts.inject && !INJECT_SCENARIOS[opts.inject]) {
     opts.error = `未知注入谱项：${opts.inject}（可用：${Object.keys(INJECT_SCENARIOS).join(' / ')}）`;
+  }
+  // 组合闸（遗漏大扫 20260901-c #7）：requiresDryRun 谱项缺 --dry-run = 用法错退 2
+  // （CLI 层闸在跑任何步骤之前；runRelease 入口另有一道守编程调用路）
+  if (!opts.error && opts.inject && INJECT_SCENARIOS[opts.inject].requiresDryRun && !opts.dryRun) {
+    opts.error = `注入谱 ${opts.inject} 须配 --dry-run（canned 步骤位于 publish 之后——真跑形态会真上传）`;
   }
   return opts;
 }

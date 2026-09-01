@@ -40,6 +40,10 @@ beforeAll(() => {
       '',
       '已落码 `src/ghost.ts`（规则 2：完成时态引用不存在路径）。',
       '',
+      // #16 锚（遗漏大扫 20260901-c）：中文命名路径此前被 \w 字符类排除在
+      // docs/ 白名单段外——正则退化回 [\w./-] 时本行不再被点名，断言必红
+      '已落码 `docs/中文幽灵.md`（规则 2：中文命名路径同受门禁管辖）。',
+      '',
       '另见幻引 c0ffee12345（规则 1：非本仓 hash 前缀）。',
       '',
     ].join('\n'),
@@ -94,6 +98,8 @@ describe('check-tense 机器闸（复盘 20260901 T-3）', () => {
     expect(run.stderr).toContain('非 hash 幻引「c0ffee12345」');
     // 规则 2：完成时态 × 幽灵路径
     expect(run.stderr).toContain('完成时态引用路径不存在「src/ghost.ts」');
+    // 规则 2（#16）：中文命名路径进 docs/ 白名单段——字符类退化时本断言先红
+    expect(run.stderr).toContain('完成时态引用路径不存在「docs/中文幽灵.md」');
     // 规则 3：退役词
     expect(run.stderr).toContain('退役词「插件」');
     // O-4③：README glob 展开在岗——外国语镜像（README.en.md）与中文同查，
