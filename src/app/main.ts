@@ -250,7 +250,7 @@ function main(argv: string[]): number {
         // --tick 到点编排形态：prompt 取自任务行，位置参数不得混入（混入即
         // 用法错——静默忽略哪个都会失真）
         if (tick !== undefined) {
-          if (!tick || args.length > 0 || app !== undefined) {
+          if (!tick || args.length > 0 || app !== undefined || appFile !== undefined) {
             process.stderr.write('用法：berry run --tick <任务名> [--read-only] [--background]\n');
             return 2;
           }
@@ -273,7 +273,7 @@ function main(argv: string[]): number {
         // --app 与 --tick 互斥：tick 是任务行身份（prompt 归属任务面），应用身份
         // 另属清单——两者并给时静默择一会失真，用法错明示
         if (app !== undefined) {
-          if (!app) {
+          if (!app || appFile !== undefined) {
             process.stderr.write('用法：berry run --app <应用id> "<message>" [--read-only] [--background]\n');
             return 2;
           }
@@ -305,6 +305,7 @@ function main(argv: string[]): number {
         // --no-apps → 无驱动一等态：run 无对话循环可执行，语义性失败退出码 1
         // --app → 以应用身份单发（第三纵切：assembly 组合根 resolveApp 解析清单
         //——查无 = APP_NOT_FOUND，message 披露在册可用清单）
+        // --app-file → 快速试件（契约篇 §5.5）：组合树注入临时行，零装机零挂载零落盘
         // --port → Web 通道开面（组合树 webui 行注入 enabled+port——与 overlay
         // 开面等价，只作用 boot 树；run 单发形态下通道随进程关停）
         return runOnceMain(message, {
@@ -332,7 +333,8 @@ function main(argv: string[]): number {
           app !== undefined ||
           sandboxHost ||
           noApps ||
-          foreground
+          foreground ||
+          appFile !== undefined
         ) {
           process.stderr.write('用法：berry attach [--port <n>]（run/daemon 族旗标不适用）\n');
           return 2;
@@ -350,7 +352,7 @@ function main(argv: string[]): number {
           process.stderr.write('用法：berry daemon <start|stop|status|doctor|--foreground> [--port <1-65535>]\n');
           return 2;
         }
-        if (readOnly || background || tick !== undefined || app !== undefined || sandboxHost || noApps) {
+        if (readOnly || background || tick !== undefined || app !== undefined || sandboxHost || noApps || appFile !== undefined) {
           process.stderr.write(
             '用法：berry daemon <start|stop|status|doctor|--foreground> [--port <n>]（run 族旗标不适用）\n',
           );

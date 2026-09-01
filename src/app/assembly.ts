@@ -162,7 +162,7 @@ import { defaultConvertToLlm } from './convert.js';
 import { registerBuiltinCommands } from './commands.js';
 import { AllowlistStore } from './allowlist-store.js';
 import { formatUsagePanel } from './usage.js';
-import { readFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 // ChildRegistry = mcp 子进程登记簿机制（契约篇 §6.6 子进程治理条 exec 腿复用，
 // 2026-08-29 critic #1：exec 结构上不见 mcp——组合根注入，killTree 闭包同款先例）
@@ -1665,9 +1665,18 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
   // 域层对 chat 组成面可见）；carrier:'main'（快速试件不走进程墙——保持同步
   // API 面 + console 直出）
   if (opts.appFile !== undefined) {
+    // M1 冷读修：注入前查重——树中已有 _quick_test 行（用户手编 overlay 撞名
+    // 或 /apps-mount row-id 显式命名）即拒启（双行同 id 的装载事实与状态面
+    // last-wins 自相矛盾——COMPOSITION_ROW_INVALID 同族拒绝式）
+    if (composition.rows.some((row) => row.id === '_quick_test')) {
+      await refuseBoot(
+        COMPOSITION_ROW_INVALID,
+        'overlay 已有 id 为 _quick_test 的行（--app-file 保留 id 撞名——请改名后重试）',
+      );
+    }
     const quickPath = resolve(opts.appFile);
-    if (!existsSync(quickPath)) {
-      await refuseBoot(APP_ENTRY_UNRESOLVED, `--app-file 路径不存在：${quickPath}`);
+    if (!existsSync(quickPath) || !statSync(quickPath).isFile()) {
+      await refuseBoot(APP_ENTRY_UNRESOLVED, `--app-file 路径不存在或非文件：${quickPath}（须为入口文件路径）`);
     }
     const quickRow: CompositionRow = {
       id: '_quick_test',
@@ -1675,9 +1684,12 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       apps: ['chat'],
       sandbox: { carrier: 'main' },
     };
+    // B1 冷读修：plan 行必须带 entry（AppPlanRow 三态互斥——有 entry = 文件
+    // 应用激活行；缺 entry = dirname(undefined) 装载必炸）。rows 行是
+    // CompositionRow（无 entry 合法）；plan 行是 AppPlanRow（entry 必填）。
     composition = {
       rows: [...composition.rows, quickRow],
-      plan: [...composition.plan, { ...quickRow }],
+      plan: [...composition.plan, { ...quickRow, entry: quickPath }],
     };
   }
   // 安全模式（--no-apps，技术栈篇 §5）：boot 合成期过滤到 Ring 1 硬装配行
