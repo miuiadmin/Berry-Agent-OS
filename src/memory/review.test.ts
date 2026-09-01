@@ -499,6 +499,47 @@ describe('attachPeriodicReview（session/event 计数触发全栈）', () => {
     handle.dispose();
   });
 
+  it('失败分支升 warn（基建大扫 20260901 #1）：TTL 清扫失败与整轮失败不再 debug 独扛', async () => {
+    // 路 A——TTL 清扫失败：store.sweepExpired 抛错注入（Proxy 局部注入不污染共享 db）
+    const { ctx, lines } = captureRoot();
+    const failingStore = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'sweepExpired')
+          return () => {
+            throw new Error('清扫炸了');
+          };
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as MemoryStore;
+    const a = attachPeriodicReview(ctx, { store: failingStore, llm: scriptedLlm(['[]']).llm, turnThreshold: 1 });
+    ctx.emit('session/event', envelope('turn/end'));
+    await a.idle();
+    a.dispose();
+    const ttl = lines
+      .map((l) => JSON.parse(l) as { level: string; msg: string })
+      .find((o) => o.msg.includes('TTL 清扫'));
+    expect(ttl?.level).toBe('warn'); // 修前红：当前 debug——失败分支靠 debug 独扛违红线
+
+    // 路 B——整轮失败：模型调用抛错注入（runReviewOnce 内 complete 无 catch，上传到 fire 兜底）
+    const { ctx: ctx2, lines: lines2 } = captureRoot();
+    const boomLlm: ReviewLlmFace = {
+      async complete() {
+        throw new Error('模型炸了');
+      },
+      canAfford: () => true,
+    };
+    const b = attachPeriodicReview(ctx2, { store: db, llm: boomLlm, turnThreshold: 1 });
+    ctx2.emit('session/event', envelope('user/message', { content: '有内容的转录才会调模型' }));
+    ctx2.emit('session/event', envelope('turn/end'));
+    await b.idle();
+    b.dispose();
+    const round = lines2
+      .map((l) => JSON.parse(l) as { level: string; msg: string })
+      .find((o) => o.msg.includes('周期路'));
+    expect(round?.level).toBe('warn'); // 修前红：当前 debug——同为白跑，对齐 :226/:338 的 warn 分级
+  });
+
   it('consolidation 变更短路 + anchor（第十四批 A 组）：零摄入跳过、刚摄入等聚集窗、窗口过后跑', async () => {
     const { ctx } = captureRoot();
     // 可控时钟：seed 条目 T0 写入；起始时钟拨到 200 天后（老化候选成立）

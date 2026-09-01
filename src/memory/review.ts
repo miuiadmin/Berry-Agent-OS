@@ -469,15 +469,24 @@ export function attachPeriodicReview(ctx: AppContext, opts: PeriodicReviewOption
     // 持久在库（status='expired' 可经 memory_read/list 审计——durable 面在 DB 非仅日志）
     try {
       const swept = opts.store.sweepExpired(now());
+      // 成功分支维持 debug：物化的 durable 对应物在库（status='expired' 可经
+      // memory_read/list 审计）——进程日志只是观测窗不是承载（技术栈篇 §6 红线）
       if (swept > 0) ctx.logger.debug('TTL 清扫物化', { swept });
     } catch (err) {
-      // 尽力而为：清扫失败不阻塞 review/consolidation 两腿（下拍重扫自动补账）
-      ctx.logger.debug('TTL 清扫本轮跳过', { error: err instanceof Error ? err.message : String(err) });
+      // 尽力而为：清扫失败不阻塞 review/consolidation 两腿（下拍重扫自动补账）。
+      // 失败分支升 warn（基建大扫 20260901 #1）：与 :226/:338 同为「白跑一级」的
+      // 失败信号——若留 debug，缺省 info 档下失败不可见（红线：debug 分支须有
+      // durable 对应物，而清扫失败恰无任何 durable 痕迹）
+      ctx.logger.warn('TTL 清扫失败（本轮跳过，下拍重扫补账）', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     inFlight = (async () => {
       try {
         const transcript = buffer.slice(-windowMessages);
         const review = await runReviewOnce(deps, transcript);
+        // 成功收尾维持 debug：写动的 durable 对应物在库——候选入库/合并产出
+        // memories 行与 memory_versions 版本链（cause='merge'）、TTL 物化 status='expired'
         ctx.logger.debug('周期 review 收尾', { ...review });
         // consolidation 变更短路 + anchor（§5 触发与护栏，第十四批 A 组）：
         // 计数阈值是节拍器不是理由——每拍先比摄入水位，零新摄入即整腿跳过
@@ -488,17 +497,25 @@ export function attachPeriodicReview(ctx: AppContext, opts: PeriodicReviewOption
           const consolidation = await runConsolidationOnce(deps, consolidationOpts);
           // 新基线 = 跑完后的水位（consolidation 自身写动计入）
           lastMergedWatermark = opts.store.intakeWatermark(ownerKey) ?? 0;
+          // 成功分支维持 debug：写动的 durable 对应物在库（memory_versions cause='merge'
+          // 版本链 / forget 落账 / decayConfidence 落 confidence 列——均可审计）
           if (consolidation.candidates > 0 || consolidation.skipped) {
             ctx.logger.debug('consolidation 收尾', { ...consolidation });
           }
         } else {
+          // 跳过分支维持 debug：跳过不是失败——no-intake/anchor 是护栏正常工作，
+          // 其 durable 对应物是库状态本身（水位/时间可直查）
           ctx.logger.debug('consolidation 跳过', {
             reason: watermark === lastMergedWatermark ? 'no-intake' : 'anchor',
           });
         }
       } catch (err) {
-        // 尽力而为：LLM_BUDGET_EXCEEDED（检查与调用间竞态）与其他失败一并跳过本轮
-        ctx.logger.debug('周期路本轮跳过', { error: err instanceof Error ? err.message : String(err) });
+        // 尽力而为：LLM_BUDGET_EXCEEDED（检查与调用间竞态）与其他失败一并跳过本轮。
+        // 失败分支升 warn（基建大扫 20260901 #1）：整轮失败与 :226 污染拒收/:338 同级
+        // ——失败恰无 durable 痕迹（无候选无写动），进程日志是唯一观测面，不可 debug 独扛
+        ctx.logger.warn('周期路本轮失败（尽力而为跳过，下个周期再试）', {
+          error: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         inFlight = undefined;
       }
