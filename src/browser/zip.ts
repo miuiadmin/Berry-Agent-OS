@@ -18,14 +18,17 @@
  * 拒载面 fail-loud（BROWSER_INSTALL_FAILED）：加密 zip（flags bit 0）/
  * zip64（locator 在场、条目数/CD offset·size 溢出标记——判据按标记非按
  * 条目尺寸归因）/ 压缩法白名单外 / 路径逃逸（`..`/绝对名——zip slip
- * 经典攻击面）。unix 权限恢复（external_attr 高 16 位 mode 应用）。
+ * 经典攻击面 + **symlink 写穿变体两道闸**，第五十五批 C-1 修死：linkTarget
+ * 解析收容 + 落盘前祖先链 lstat）/ 解压未压缩总量帽 2GiB（zip 炸弹）。
+ * unix 权限恢复（external_attr 高 16 位 mode 应用）。
  *
  * 失败清理：半解包目录整体删除（fail-loud 不留半态——规范钉死）。
  */
 
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, open, readFile, rm, symlink } from 'node:fs/promises';
-import { isAbsolute, dirname, join, resolve } from 'node:path';
+import { chmod, lstat, mkdir, open, readFile, rm, symlink } from 'node:fs/promises';
+import { isAbsolute, dirname, join, relative, resolve } from 'node:path';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createInflateRaw } from 'node:zlib';
 import { AppError, BROWSER_INSTALL_FAILED } from '../contracts/errors.js';
@@ -43,6 +46,13 @@ const LOC_SIG = 0x04034b50;
 /** EOCD 尾部最大搜索窗（22 字节固定头 + 65535 注释帽） */
 const EOCD_SCAN_WINDOW = 22 + 65_535;
 
+/**
+ * 解包未压缩总量帽（字节）——zip 炸弹防线（第五十五批 m-3）：512MiB 下载预算
+ * × deflate ~千倍放大可达数百 GB 写盘。真实 CfT 档未压缩 ~400MiB，2GiB 留
+ * 5 倍裕度；CD 声明的 uncompressedSize 逐条累加超帽即整体拒载。
+ */
+const MAX_UNCOMPRESSED_TOTAL = 2 * 1024 * 1024 * 1024;
+
 /** central directory 条目（解析产物——逐条解包的元数据源） */
 interface CenEntry {
   /** 条目名（UTF-8——目录条目以 / 结尾） */
@@ -51,6 +61,8 @@ interface CenEntry {
   readonly method: number;
   /** 压缩后字节数（数据区长度——data descriptor 形态也以 CD 为准） */
   readonly compressedSize: number;
+  /** 解压后字节数（总量帽累加源 + 运行时计数兜底的预算基准） */
+  readonly uncompressedSize: number;
   /** general purpose bit flags（bit 0 = 加密拒载） */
   readonly flags: number;
   /** local file header 的文件内偏移 */
@@ -92,7 +104,9 @@ export async function extractZip(zipPath: string, destDir: string): Promise<Extr
       const mode = unixModeOf(entry.externalAttr);
 
       if (entry.name.endsWith('/')) {
-        // 目录条目（名以 / 结尾——mkdir 递归幂等）
+        // 目录条目（名以 / 结尾——mkdir 递归幂等；含本体前置检：预置 symlink
+        // 的目录位拒载，防 mkdir 解析穿透）
+        await assertNoSymlinkPrefix(rooted, target, true);
         await mkdir(target, { recursive: true });
         directories += 1;
         continue;
@@ -101,23 +115,37 @@ export async function extractZip(zipPath: string, destDir: string): Promise<Extr
       const dataStart = await locateDataStart(zipPath, entry.localOffset, entry.name);
       const dataEnd = dataStart + entry.compressedSize;
       if (dataEnd > fileSize) throw zipFail(`条目 ${entry.name} 数据区越界（${dataEnd} > ${fileSize}）`);
+      // 闸②（C-1）：全组件前置检在 mkdir 之前——symlink 条目本体将被 rm 重建
+      // （幂等重装不误伤），只检祖先；目录/普通档含本体（写 symlink 本体即写其目标）
+      const isSymlinkEntry = (mode & 0o170000) === 0o120000;
+      await assertNoSymlinkPrefix(rooted, target, !isSymlinkEntry);
       await mkdir(dirname(target), { recursive: true });
 
-      if ((mode & 0o170000) === 0o120000) {
+      if (isSymlinkEntry) {
         // symlink 条目：数据区内容 = 目标路径（小体量整读）
         const linkTarget = await readRange(zipPath, dataStart, dataEnd).then((b) => b.toString('utf8'));
+        // 闸①（C-1）：linkTarget 解析后必须仍收容在 destDir 内——绝对形指向
+        // destDir 外、`../` 逃逸相对形全拒（合法形态不是判据，越界才是）
+        const resolved = resolve(dirname(target), linkTarget);
+        if (resolved !== rooted && !resolved.startsWith(rooted + '/')) {
+          throw zipFail(`条目 ${entry.name} symlink 目标越界拒载：${linkTarget}`);
+        }
         await rm(target, { force: true }); // 幂等重装：旧链/旧档先清
         await symlink(linkTarget, target);
         symlinks += 1;
         continue;
       }
 
-      // 普通文件：两档压缩法流式落盘（createReadStream 区间起流——整档不进内存）
+      // 普通文件：两档压缩法流式落盘（createReadStream 区间起流——整档不进内存）。
+      // target 本体已由闸②含本体腿前置检（本体若是已落地 symlink，writeStream
+      // 会解析穿透写其目标）
       const source = createReadStream(zipPath, { start: dataStart, end: dataEnd - 1 });
       if (entry.method === 0) {
         await pipeline(source, createWriteStream(target));
       } else if (entry.method === 8) {
-        await pipeline(source, createInflateRaw(), createWriteStream(target));
+        // deflate：运行时字节计数兜底（m-3——CD 可谎报 uncompressedSize，
+        // 落盘流实数超声明即断流拒载；总量帽在解析期按声明值累加，两道互补）
+        await pipeline(source, createInflateRaw(), countingGuard(entry.name, entry.uncompressedSize), createWriteStream(target));
       } else {
         throw zipFail(`条目 ${entry.name} 压缩法 ${entry.method} 不在白名单（0 store / 8 deflate）`);
       }
@@ -174,6 +202,7 @@ async function parseCentralDirectory(zipPath: string): Promise<{ entries: CenEnt
 
     // 逐条目解析（46 字节固定头 + 变长名/extra/注释）
     const entries: CenEntry[] = [];
+    let totalUncompressed = 0;
     let pos = 0;
     for (let i = 0; i < totalEntries; i += 1) {
       if (pos + 46 > cdSize) throw zipFail(`central directory 第 ${i} 条头越界`);
@@ -182,14 +211,21 @@ async function parseCentralDirectory(zipPath: string): Promise<{ entries: CenEnt
       if ((flags & 0x1) !== 0) throw zipFail('加密 zip 拒载（general purpose bit 0）');
       const method = cd.readUInt16LE(pos + 10);
       const compressedSize = cd.readUInt32LE(pos + 20);
+      const uncompressedSize = cd.readUInt32LE(pos + 24);
       const nameLen = cd.readUInt16LE(pos + 28);
       const extraLen = cd.readUInt16LE(pos + 30);
       const commentLen = cd.readUInt16LE(pos + 32);
       const externalAttr = cd.readUInt32LE(pos + 38);
       const localOffset = cd.readUInt32LE(pos + 42);
       const name = cd.subarray(pos + 46, pos + 46 + nameLen).toString('utf8');
-      entries.push({ name, method, compressedSize, flags, localOffset, externalAttr });
+      entries.push({ name, method, compressedSize, uncompressedSize, flags, localOffset, externalAttr });
       pos += 46 + nameLen + extraLen + commentLen;
+      // zip 炸弹总量帽（m-3）：按 CD 声明值累加，超帽整体拒载——运行时逐条
+      // 计数兜底（countingGuard）防单条谎报，两道互补
+      totalUncompressed += uncompressedSize;
+      if (totalUncompressed > MAX_UNCOMPRESSED_TOTAL) {
+        throw zipFail(`解压总量超帽拒载（${totalUncompressed} > ${MAX_UNCOMPRESSED_TOTAL}）`);
+      }
     }
     return { entries, fileSize: size };
   } finally {
@@ -230,6 +266,46 @@ function safeJoin(rooted: string, name: string): string {
     throw zipFail(`条目名解析逃逸拒载：${name}`);
   }
   return target;
+}
+
+/**
+ * 落盘前祖先链 symlink 前置检（C-1 闸②）：path 的 rooted 之下逐级组件 lstat，
+ * 任一为 symlink 即拒载——防「前条目落 symlink、后条目 mkdir/writeStream 解析
+ * 穿透写出 destDir 外」的经典写穿变体（safeJoin 是纯词法判定，不感知已落地
+ * 的 symlink）。includeSelf = true 时对 path 本体同检（普通档写 symlink 本体
+ * 即写其目标；symlink/目录条目本体会被重建，只检祖先）。
+ */
+async function assertNoSymlinkPrefix(rooted: string, path: string, includeSelf: boolean): Promise<void> {
+  const segs = relative(rooted, path).split('/');
+  const upTo = includeSelf ? segs.length : segs.length - 1;
+  let cur = rooted;
+  for (let i = 0; i < upTo; i += 1) {
+    cur = join(cur, segs[i]!);
+    // 不存在的组件 lstat 抛 ENOENT——缺席即无 symlink 风险，跳过续走
+    const st = await lstat(cur).catch(() => null);
+    if (st?.isSymbolicLink()) {
+      throw zipFail(`祖先组件 ${relative(rooted, cur)} 是 symlink——写穿逃逸拒载`);
+    }
+  }
+}
+
+/**
+ * 字节计数 Transform（m-3 运行时兜底）：deflate 条目解压产出实数超 CD 声明的
+ * uncompressedSize 即断流拒载——CD 声明可谎报（解析期总量帽按声明累加，此为
+ * 落盘实数第二道）。store 条目天然受数据区区间读约束，无需此守。
+ */
+function countingGuard(entryName: string, declaredSize: number): Transform {
+  let written = 0;
+  return new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      written += chunk.length;
+      if (written > declaredSize) {
+        cb(zipFail(`条目 ${entryName} 解压越界（${written} > 声明 ${declaredSize}）——CD 谎报拒载`));
+      } else {
+        cb(null, chunk);
+      }
+    },
+  });
 }
 
 /** external_attr 高 16 位 unix mode 提取（低 16 位 DOS 属性不消费） */

@@ -205,6 +205,27 @@ describe('installEngine 装机编排', () => {
     await expectInstallFail(installEngine(deps, { platform: 'linux', arch: 'arm64' }));
   });
 
+  it('清单版本号形状非法（../../evil 路径逃逸形）→ 拒载（m-2 白名单——远端原文不进 join）', async () => {
+    // 修复前形态：version 串直接 join(engineRoot, version)——`../../evil` 把
+    // 解包目录与 zip 落盘锚移出 engine/。白名单在幂等检查与任何 fs 操作之前。
+    const evil = JSON.stringify({
+      channels: {
+        Stable: {
+          version: '../../evil',
+          downloads: { chrome: [{ platform: 'mac-arm64', url: 'https://storage.googleapis.com/cft/z.zip' }] },
+        },
+      },
+    });
+    const dlCalls: Array<{ url: string; destPath: string; allowedHosts: readonly string[] }> = [];
+    const deps: InstallDeps = {
+      manifestFetch: fakeManifest([], { status: 200, text: evil, truncated: false }),
+      download: fakeDownload(Buffer.alloc(0), dlCalls),
+      dataDir,
+    };
+    await expectInstallFail(installEngine(deps, { platform: 'darwin', arch: 'arm64' }));
+    expect(dlCalls).toHaveLength(0); // 零下载零落盘
+  });
+
   it('清单非 2xx → BROWSER_INSTALL_FAILED（不走抓取 isError 面）', async () => {
     const deps: InstallDeps = {
       manifestFetch: fakeManifest([], { status: 503, text: '', truncated: false }),

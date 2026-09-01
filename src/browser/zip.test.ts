@@ -6,7 +6,7 @@
  * zlib 仅出 deflate 数据与 crc32——读取器面对的是真二进制结构非 mock）。
  */
 
-import { access, constants, lstat, mkdtemp, readFile, readlink, rm, stat, writeFile } from 'node:fs/promises';
+import { access, constants, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -262,5 +262,92 @@ describe('extractZip 拒载面', () => {
     base.writeUInt32LE(0xdeadbeef, 0); // 打坏首条 local 签名
     const { zipPath, dest } = await writeZip('badloc', base);
     await expectZipFail(extractZip(zipPath, dest));
+  });
+});
+
+/* ---------------- symlink 逃逸两道闸（第五十五批 C-1——PoC 实证写穿变体） ---------------- */
+
+describe('extractZip symlink 逃逸拒载', () => {
+  it('闸①相对逃逸形：条目 esc（→ ../）+ esc/pwned.txt → 解析收容拒载，逃逸档不落地', async () => {
+    // 修复前实证形态：linkTarget `../` 放行 → 后续条目写穿 symlink 把
+    // pwned 档落到 dest 父目录（destDir 之外）——闸①在 symlink 创建前即拒
+    const bytes = buildZip([
+      { name: 'esc', data: Buffer.from('../', 'utf8'), externalAttr: attrOf(0o120777) },
+      { name: 'esc/pwned-c1.txt', data: Buffer.from('PWNED') },
+    ]);
+    const { zipPath, dest } = await writeZip('symesc', bytes);
+    await expectZipFail(extractZip(zipPath, dest));
+    expect(await exists(dest)).toBe(false); // 半解包清理
+    expect(await exists(join(dir, 'pwned-c1.txt'))).toBe(false); // 逃逸目标未落地
+  });
+
+  it('闸①绝对逃逸形：linkTarget /etc/passwd → 拒载（越界才是判据——destDir 内绝对形放行）', async () => {
+    const bytes = buildZip([{ name: 'link', data: Buffer.from('/etc/passwd', 'utf8'), externalAttr: attrOf(0o120777) }]);
+    const { zipPath, dest } = await writeZip('symabs', bytes);
+    await expectZipFail(extractZip(zipPath, dest));
+    expect(await exists(dest)).toBe(false);
+  });
+
+  it('闸②写穿前置检：destDir 内预置外指 symlink，普通档经其路径 → 祖先链拒载', async () => {
+    // safeJoin 词法层全过（条目名无 .. 无绝对形）——风险在已落地的 symlink：
+    // dest/pre 外指 dest 外目录，条目 pre/file.txt 的 mkdir/writeStream 会解析穿透
+    const bytes = buildZip([{ name: 'pre/file.txt', data: Buffer.from('x') }]);
+    const { zipPath, dest } = await writeZip('symwrite', bytes);
+    await mkdir(dest, { recursive: true });
+    await symlink(join(dir, 'symwrite-outside'), join(dest, 'pre'));
+    await expectZipFail(extractZip(zipPath, dest));
+    expect(await exists(join(dir, 'symwrite-outside', 'file.txt'))).toBe(false); // 写穿未发生
+  });
+
+  it('闸②本体腿：普通档条目名命中已落地 symlink（rm 不清普通档路径）→ 本体检拒载', async () => {
+    const bytes = buildZip([{ name: 'pre', data: Buffer.from('x') }]);
+    const { zipPath, dest } = await writeZip('symself', bytes);
+    await mkdir(dest, { recursive: true });
+    await symlink(join(dir, 'symself-outside'), join(dest, 'pre'));
+    await expectZipFail(extractZip(zipPath, dest));
+  });
+
+  it('正路径回归：linkTarget 指向 destDir 内（合法相对形/绝对形）→ 放行不误伤', async () => {
+    const destName = 'sympass-out';
+    const bytes = buildZip([
+      { name: 'target.txt', data: Buffer.from('t', 'utf8') },
+      { name: 'rel-link', data: Buffer.from('target.txt', 'utf8'), externalAttr: attrOf(0o120777) },
+    ]);
+    const { zipPath, dest } = await writeZip('sympass', bytes);
+    const result = await extractZip(zipPath, dest);
+    expect(result).toEqual({ files: 1, symlinks: 1, directories: 0 });
+    expect((await lstat(join(dest, 'rel-link'))).isSymbolicLink()).toBe(true);
+    // destDir 内绝对形同样放行（判据是越界非绝对）——目标路径须指向本测 dest
+    const absDest = join(dir, 'sympass2-out');
+    const absBytes = buildZip([
+      { name: 'target.txt', data: Buffer.from('t', 'utf8') },
+      { name: 'abs-link', data: Buffer.from(join(absDest, 'target.txt'), 'utf8'), externalAttr: attrOf(0o120777) },
+    ]);
+    const abs = await writeZip('sympass2', absBytes);
+    expect((await extractZip(abs.zipPath, abs.dest)).symlinks).toBe(1);
+  });
+});
+
+/* ---------------- zip 炸弹两道（第五十五批 m-3） ---------------- */
+
+describe('extractZip 解压预算', () => {
+  it('总量帽：CD 声明 uncompressedSize 累加超 2GiB → 解析期整体拒载', async () => {
+    const base = buildZip([{ name: 'bomb.txt', data: Buffer.from('x') }]);
+    // CD 第一条 uncompressedSize 位（头 +24）；0x90000000 = 2.25GiB > 2GiB 帽
+    const cdStart = base.length - 22 - (46 + 8); // 8 = 'bomb.txt' 名长
+    base.writeUInt32LE(0x9000_0000, cdStart + 24);
+    const { zipPath, dest } = await writeZip('bombcap', base);
+    await expectZipFail(extractZip(zipPath, dest));
+    expect(await exists(dest)).toBe(false);
+  });
+
+  it('运行时计数兜底：deflate 实际产出超 CD 声明（谎报）→ 落盘中断拒载', async () => {
+    const raw = Buffer.from('可压缩重复体。'.repeat(100), 'utf8'); // ~700B 实际产出
+    const base = buildZip([{ name: 'lie.txt', data: raw, method: 8 }]);
+    const cdStart = base.length - 22 - (46 + 7); // 7 = 'lie.txt' 名长
+    base.writeUInt32LE(10, cdStart + 24); // 声明仅 10 字节
+    const { zipPath, dest } = await writeZip('lielie', base);
+    await expectZipFail(extractZip(zipPath, dest));
+    expect(await exists(dest)).toBe(false); // 半解包清理
   });
 });

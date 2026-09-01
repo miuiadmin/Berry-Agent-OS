@@ -148,6 +148,12 @@ export async function installEngine(
   if (version === undefined || zipUrl === undefined) {
     throw installFail(`清单缺 Stable/${slot.key} 下载条目（版本 ${version ?? '缺席'}）`);
   }
+  // version 形状白名单（m-2，第五十五批）：远端清单原文（不可信输入）直接 join
+  // 进文件系统路径——`../../evil` 形即把解包目录/zip 落盘锚移出 engine/。
+  // upgrade.ts:356 对同源 registry 响应立有同款纪律（形状白名单钉死）
+  if (!/^\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z.]+)?$/.test(version)) {
+    throw installFail(`清单版本号形状非法拒载：${version}`);
+  }
 
   /* ---- 幂等检查：同版本锁档在场即回执不重下 ---- */
   const engineRoot = join(deps.dataDir, 'browser', 'engine');
