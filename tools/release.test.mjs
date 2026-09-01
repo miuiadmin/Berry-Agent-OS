@@ -260,7 +260,10 @@ function greenBase(version) {
       return { code: 0, stdout: JSON.stringify([{ filename: 'berryagent-fake.tgz' }]), stderr: '' };
     },
     'smoke:install': () => ({ code: 0, stdout: '', stderr: '' }),
-    'smoke:run': () => ({ code: 0, stdout: version + '\n', stderr: '' }),
+    // 应答须取真 bin 输出形态（遗漏大扫 L-6）：--version 自第五十批起打印
+    // `<semver> "<代号>"`（VERSION_WITH_CODENAME）——罐头面失真 = 断言形态回退
+    // 时测试照绿的假绿（O-10 即该形态实证：断言错成裸 semver 精确比较测试仍全绿）
+    'smoke:run': () => ({ code: 0, stdout: `${version} "Peiligang"\n`, stderr: '' }),
     // 真握手（复盘 G-1）：dump-config 断言官方应用清单在场（默认应用 = coder）
     'smoke:apps': () => ({ code: 0, stdout: '默认应用：coder\n', stderr: '' }),
     publish: () => ({ code: 0, stdout: '', stderr: '' }),
@@ -517,5 +520,43 @@ describe('runRelease 前置防线（净空核 / 不可达拒 / 检视不过）',
       runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
     ).rejects.toThrow(/检视不过/);
     expect(labels(calls)).not.toContain('pack:real');
+  });
+});
+
+describe('安装冒烟两断言负例（遗漏大扫 20260901 O-10 + L-6——探针执行锁）', () => {
+  it('smoke:run 版本漂移（异 semver 代号形态）→ 拒；publish 永不触达', async () => {
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    base['smoke:run'] = () => ({ code: 0, stdout: '0.9.9-evil "Old"\n', stderr: '' });
+    const { io, calls } = scriptedIo(base);
+    await expect(
+      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+    ).rejects.toThrow(/版本漂移/);
+    expect(labels(calls)).not.toContain('publish');
+  });
+
+  it('smoke:run 前缀吞 prerelease（bin=1.0.0-alpha.9 而 package.json=1.0.0）→ 拒（naive startsWith 假绿腿）', async () => {
+    // 断言形态锁的窄缝：裸 startsWith('1.0.0') 会放行 '1.0.0-alpha.9 "…"'——
+    // 正式版发版窗口 version.ts 残留 prerelease 即该形态，结构前缀断言必红
+    const version = '1.0.0';
+    const base = greenBase(version);
+    base['smoke:run'] = () => ({ code: 0, stdout: '1.0.0-alpha.9 "Peiligang"\n', stderr: '' });
+    const { io } = scriptedIo(base);
+    await expect(
+      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+    ).rejects.toThrow(/版本漂移/);
+  });
+
+  it('smoke:apps 未见「默认应用：coder」→ 拒（dump-config 真握手探针的执行锁——探针被删/断言放空必红）', async () => {
+    // L-6 锁体：greenBase 只供应答不锁探针在岗——本例罐头应答取「合法退出码但
+    // 无标记」形态，若探针步骤或其断言被整块拆除，本测必红（O-10 即该假绿实证）
+    const version = '1.0.0-alpha.3';
+    const base = greenBase(version);
+    base['smoke:apps'] = () => ({ code: 0, stdout: '（官方应用清单空）\n', stderr: '' });
+    const { io, calls } = scriptedIo(base);
+    await expect(
+      runRelease([], io, { workDir, pkg: { name: 'berryagent', version, binName: 'berry' } }),
+    ).rejects.toThrow(/默认应用/);
+    expect(labels(calls)).not.toContain('publish');
   });
 });

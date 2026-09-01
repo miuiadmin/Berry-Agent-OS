@@ -465,8 +465,8 @@ function throwUnknownScenario(name) {
 
 /**
  * 契约 3 尾步：安装冒烟——tarball 装入临时 prefix，跑 bin --version：
- * 退出码 0 且输出 = 版本号（发布物可用性 + 版本一致性双断言；transitively
- * 核 src/app/version.ts 与 package.json 同步——漂移即冒烟红）。
+ * 退出码 0 且输出以版本号起头（裸 semver 或 `<semver> "<代号>"` 形态，第五十批
+ * 起；transitively 核 src/app/version.ts 与 package.json 同步——漂移即冒烟红）。
  * 第二断言（2026-09-01 全面复盘 G-1）：bin dump-config 真握手——官方应用
  * 清单（apps/）缺席时 loadOfficialApps 静默空表、resolveDefaultApp 两跳皆断，
  * 装机产物「能起但首启无默认应用」的静默残缺在此截获（APP_DATA_DIR 钉入
@@ -487,9 +487,15 @@ async function installSmoke(io, { tarballPath, binName, version }) {
     if (install.code !== 0) throw new Error(`安装冒烟失败：npm install 退出码 ${install.code}`);
     const run = await io.exec('smoke:run', join(prefix, 'node_modules', '.bin', binName), ['--version']);
     if (run.code !== 0) throw new Error(`安装冒烟失败：${binName} --version 退出码 ${run.code}`);
-    if (run.stdout.trim() !== version) {
+    // 版本断言取结构前缀（遗漏大扫 20260901 O-10）：--version 自第五十批起打印
+    // `<semver> "<代号>"`（VERSION_WITH_CODENAME），此前为裸 semver。断言面 = 输出
+    // 以 package.json version 起头，且余段为空（裸形态同绿）或恰为代号后缀
+    // ` "<字符串>"`——真 semver 漂移必红，含 `1.0.0` 前缀误吞 `1.0.0-alpha.x` 的假绿腿
+    const smokeOut = run.stdout.trim();
+    const smokeRest = smokeOut.startsWith(version) ? smokeOut.slice(version.length) : null;
+    if (smokeRest === null || (smokeRest !== '' && !/^ "[^"]+"$/.test(smokeRest))) {
       throw new Error(
-        `安装冒烟版本漂移：bin 输出 ${run.stdout.trim()} ≠ ${version}（src/app/version.ts 与 package.json 失同步）`,
+        `安装冒烟版本漂移：bin 输出 ${smokeOut} ≠ ${version}（或代号后缀形态异常）（src/app/version.ts 与 package.json 失同步）`,
       );
     }
     // 真握手（复盘 G-1）：dump-config 全装配零落盘（:memory:），断言官方应用清单
@@ -505,7 +511,7 @@ async function installSmoke(io, { tarballPath, binName, version }) {
         `安装冒烟失败：dump-config 未见「默认应用：coder」——官方应用清单（apps/）疑似缺席，首启默认应用承诺将静默破裂`,
       );
     }
-    console.log(`  安装冒烟绿：${binName} --version = ${version}；dump-config 默认应用 = coder`);
+    console.log(`  安装冒烟绿：${binName} --version = ${smokeOut}；dump-config 默认应用 = coder`);
   } finally {
     rmSync(prefix, { recursive: true, force: true }); // 冒烟现场即用即清
   }
