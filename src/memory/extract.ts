@@ -98,7 +98,17 @@ export function attachCorrectionExtractor(ctx: AppContext, opts: CorrectionExtra
     try {
       const envelope = payload as { sessionId?: unknown; event?: { type?: unknown; seq?: unknown; data?: unknown } };
       if (envelope?.event?.type !== 'user/message') return;
-      const text = userTextFromContent((envelope.event.data as { content?: unknown } | undefined)?.content);
+      const data = (envelope.event.data as { content?: unknown; source?: unknown } | undefined) ?? {};
+      // 机器源滤除（20260901-d #8，记忆篇 §4）：仅真用户消息入检——source 归因
+      // 五值词汇（会话篇 §3.1）里 undefined（缺省读侧视为 'user'）/ 'user' /
+      // 'channel:*' 是用户亲口；'app:*'（压缩摘要载体、应用注入）、'schedule'、
+      // 'subagent-settled' 是机器载体——命中纠正触发词会被提取成「用户亲口
+      // 纠正」（置信度 0.7 = 强证据），污染记忆库语义，一律跳过
+      const source = typeof data.source === 'string' ? data.source : undefined;
+      if (!(source === undefined || source === 'user' || source.startsWith('channel:'))) {
+        return;
+      }
+      const text = userTextFromContent(data.content);
       if (text === '') return;
       // §4.1 资格检查（与周期路 runReviewOnce 同一函数，零特判）：污染文本整段
       // 拒收——不消毒不降权，污染会话不配产出可信记忆。v1 判据空集恒放行。

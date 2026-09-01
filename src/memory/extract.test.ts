@@ -32,6 +32,11 @@ function userEvent(sessionId: string, seq: number, content: unknown) {
   return { sessionId, event: { type: 'user/message', seq, time: 1, data: { content } } };
 }
 
+/** 带 source 归因的信封载荷（机器源滤除回归锁用——会话篇 §3.1 五值词汇） */
+function sourcedUserEvent(sessionId: string, seq: number, content: unknown, source: string) {
+  return { sessionId, event: { type: 'user/message', seq, time: 1, data: { content, source } } };
+}
+
 describe('detectCorrection（触发词表——保守取向）', () => {
   it('中文纠正式命中', () => {
     expect(detectCorrection('不对，应该用 pnpm')).toBeDefined();
@@ -94,6 +99,33 @@ describe('attachCorrectionExtractor（session/event 订阅全栈）', () => {
     ctx.emit('session/event', userEvent('sess-2', 0, '不对，这个仓库要用 pnpm'));
     expect(store.list(['global'])).toHaveLength(1);
     expect(store.list(['global'])[0]!.evidenceCount).toBe(2);
+  });
+
+  // 机器源滤除回归锁（20260901-d #8）：机器载体文本命中纠正触发词不得被提取成
+  // 「用户亲口纠正」（correction 置信度 0.7 = 强证据——压缩摘要/应用注入/tick
+  // 播种/子代理结算回注都是机器源，用户根本没说话）
+  it('机器源载体（app:*/schedule/subagent-settled）命中纠正触发词 → 零提取', () => {
+    const { ctx } = captureRoot();
+    const store = newStore();
+    attachCorrectionExtractor(ctx, { store });
+    // 复现形：压缩摘要载体以「不对…重新组织」类措辞开头（摘要常含改述语气）
+    ctx.emit(
+      'session/event',
+      sourcedUserEvent('s1', 1, '[会话摘要] 此前用户指出列表不对，重新组织如下…', 'app:compaction'),
+    );
+    ctx.emit('session/event', sourcedUserEvent('s2', 2, '不对，这个仓库要用 pnpm', 'app:goal'));
+    ctx.emit('session/event', sourcedUserEvent('s3', 3, '不对，这个仓库要用 pnpm', 'schedule'));
+    ctx.emit('session/event', sourcedUserEvent('s4', 4, '不对，这个仓库要用 pnpm', 'subagent-settled'));
+    expect(store.list(['global'])).toHaveLength(0);
+  });
+
+  it('真用户源（undefined/user/channel:*）照常提取——滤除不误杀', () => {
+    const { ctx } = captureRoot();
+    const store = newStore();
+    attachCorrectionExtractor(ctx, { store });
+    ctx.emit('session/event', sourcedUserEvent('s1', 1, '不对，这个仓库要用 pnpm', 'user'));
+    ctx.emit('session/event', sourcedUserEvent('s2', 2, '我说的是 src 目录', 'channel:webui'));
+    expect(store.list(['global'])).toHaveLength(2);
   });
 
   it('非 user/message 事件与非纠正消息零动作', () => {
