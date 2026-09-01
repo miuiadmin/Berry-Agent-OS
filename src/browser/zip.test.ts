@@ -6,7 +6,19 @@
  * zlib 仅出 deflate 数据与 crc32——读取器面对的是真二进制结构非 mock）。
  */
 
-import { access, constants, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  constants,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -282,7 +294,9 @@ describe('extractZip symlink 逃逸拒载', () => {
   });
 
   it('闸①绝对逃逸形：linkTarget /etc/passwd → 拒载（越界才是判据——destDir 内绝对形放行）', async () => {
-    const bytes = buildZip([{ name: 'link', data: Buffer.from('/etc/passwd', 'utf8'), externalAttr: attrOf(0o120777) }]);
+    const bytes = buildZip([
+      { name: 'link', data: Buffer.from('/etc/passwd', 'utf8'), externalAttr: attrOf(0o120777) },
+    ]);
     const { zipPath, dest } = await writeZip('symabs', bytes);
     await expectZipFail(extractZip(zipPath, dest));
     expect(await exists(dest)).toBe(false);

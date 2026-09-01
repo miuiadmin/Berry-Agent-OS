@@ -145,7 +145,12 @@ export async function extractZip(zipPath: string, destDir: string): Promise<Extr
       } else if (entry.method === 8) {
         // deflate：运行时字节计数兜底（m-3——CD 可谎报 uncompressedSize，
         // 落盘流实数超声明即断流拒载；总量帽在解析期按声明值累加，两道互补）
-        await pipeline(source, createInflateRaw(), countingGuard(entry.name, entry.uncompressedSize), createWriteStream(target));
+        await pipeline(
+          source,
+          createInflateRaw(),
+          countingGuard(entry.name, entry.uncompressedSize),
+          createWriteStream(target),
+        );
       } else {
         throw zipFail(`条目 ${entry.name} 压缩法 ${entry.method} 不在白名单（0 store / 8 deflate）`);
       }
