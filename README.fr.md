@@ -100,16 +100,22 @@ Bien, assez de romantisme. **Maintenant l'acier et le fer.**
 
 ## Démarrage rapide
 
-```bash
-# Nécessite Node.js >= 22.19
-git clone <ce dépôt> && cd berry
-npm install
-npm run build
-npm link          # installe la commande berry
+Nécessite Node.js ≥ 22.19. Trois façons d'installer (guide complet dans [docs/使用指南](docs/使用指南.md) §1) :
 
-berry             # TUI interactif (entre par défaut dans l'app coder, reprend la dernière session du répertoire courant)
+```bash
+# Option 1 : installateur en une ligne (affiche l'état étape par étape ; URL du dépôt à compléter à la publication)
+curl -fsSL <dépôt>/scripts/install.sh | sh
+# Option 2 : npm (disponible après publication)
+npm i -g berryagent
+# Option 3 : depuis les sources (développeurs)
+git clone <ce dépôt> && cd berry && npm install && npm run build && npm link
+```
+
+```bash
+berry             # TUI interactif (entre par défaut dans l'app coder, reprend la dernière session ; premier lancement affiche un guide de bienvenue)
 berry run "hi"    # exécution unique (le code de sortie est le résultat)
 berry dump-config # diagnostic de la composition effective (modèle / arbre / état de chargement, aucune écriture en base)
+berry upgrade     # verbe de mise à niveau (interroge le registry et s'auto-met à jour ; /guide affiche la référence rapide)
 ```
 
 Le premier lancement crée le répertoire de données dans `~/.berry/`. Le modèle par défaut est `anthropic/claude-sonnet-5`, remplaçable via `APP_MODEL` ; les identifiants des fournisseurs passent par la chaîne d'identifiants pi-ai (variables d'environnement ou coffre d'identifiants).

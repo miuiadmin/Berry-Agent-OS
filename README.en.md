@@ -101,16 +101,22 @@ Alright, enough romance. **Now the steel and iron.**
 
 ## Quick Start
 
-```bash
-# Requires Node.js >= 22.19
-git clone <this repo> && cd berry
-npm install
-npm run build
-npm link          # installs the berry command
+Requires Node.js ≥ 22.19. Three ways to install (full guide in [docs/使用指南](docs/使用指南.md) §1):
 
-berry             # interactive TUI (defaults to the coder app, resumes the latest session in the current directory)
+```bash
+# Option 1: one-line installer (step-by-step status display; repo URL to be filled at release)
+curl -fsSL <repo>/scripts/install.sh | sh
+# Option 2: npm (available once published)
+npm i -g berryagent
+# Option 3: from source (developers)
+git clone <this repo> && cd berry && npm install && npm run build && npm link
+```
+
+```bash
+berry             # interactive TUI (defaults to the coder app, resumes the latest session; first launch shows a welcome guide)
 berry run "hi"    # one-shot run (exit code is the result)
 berry dump-config # effective-composition diagnostics (model / composition tree / app load state, no database writes)
+berry upgrade     # upgrade verb (checks the registry, self-upgrades npm installs; /guide shows the quick reference anytime)
 ```
 
 First launch creates the data directory at `~/.berry/`. The default model is `anthropic/claude-sonnet-5`, overridable via `APP_MODEL`; provider credentials go through the pi-ai credential chain (environment variables or the credential store).
