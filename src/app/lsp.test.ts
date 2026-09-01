@@ -489,6 +489,53 @@ describe('lsp 件 — write/edit 后诊断注入', () => {
     expect(textOf(second)).toContain('LSP 诊断未及回流');
     expect(second.isError).toBeFalsy(); // 降级非失败
   });
+
+  // 混合态回归锁（20260901-d #9）：部分路径回流空集、部分路径超钟——超钟路径
+  // 须逐一点名，不得与已回流路径合并成「0 条无问题」的全清宣称（诚实降级按
+  // 路径粒度执法，契约篇 §6.7 勘正）。修前形态：gotAny=some(...) 判定下混合态
+  // 走「已检路径无问题」分支，超钟路径静默蒸发。
+  it('混合态（部分超钟+部分干净零诊断）：超钟路径逐一点名，不谎报全清', async () => {
+    const env = makeEnv();
+    // clean.ts 推空集（干净回流）；其余永不推送（超钟）
+    const harness = makeHarness({
+      diagnosticsFor: (uri) => (uri.endsWith('clean.ts') ? [] : undefined),
+    });
+    await applyLsp(env, harness, { servers: serversConfig({ diagnostics_timeout_ms: 50 }) });
+    // 先活（首触预热走 write 单路径 clean.ts——诊断回流即活）
+    registerFakeWrite(env, harness.workspace);
+    await runTool(env, 'write', { path: 'clean.ts' });
+    await vi.waitFor(() => {
+      expect(harness.registry.adds).toHaveLength(1);
+    });
+    // 假 edit 双写路径（一次 post 注入同时盖 clean + slow——混合态构造）
+    env.tools.register({
+      name: 'edit',
+      description: '假 edit（双写路径——混合态测试）',
+      parameters: Type.Object({ path: Type.String() }),
+      effect: 'write',
+      execute: async (args: Record<string, unknown>) => {
+        const clean = resolve(harness.workspace, 'clean.ts');
+        const slow = resolve(harness.workspace, 'slow.ts');
+        return {
+          content: [{ type: 'text', text: '已改' }],
+          details: {
+            operations: [
+              { op: 'edit', path: clean },
+              { op: 'edit', path: slow },
+            ],
+          },
+        };
+      },
+    });
+    const result = await runTool(env, 'edit', { path: 'x.ts' });
+    expect(result.isError).toBeFalsy(); // 降级仍非失败
+    const text = textOf(result);
+    // 超钟路径逐一点名（slow.ts 不得静默蒸发）
+    expect(text).toContain('未及回流');
+    expect(text).toContain('slow.ts');
+    // 已回流路径照实报 0 条——但全清宣称必须带超钟限定
+    expect(text).toContain('0 条');
+  });
 });
 
 /* ---------------- 熔断与回卷 ---------------- */

@@ -778,12 +778,18 @@ async function injectDiagnostics(input: PostInput, deps: InjectDeps): Promise<vo
       }
     }
     const gotAny = settled.some((it) => it.diags !== undefined);
+    // 混合态逐路径点名（20260901-d #9）：部分路径回流、部分超钟——超钟路径
+    // 不得并入「已检路径无问题」的全清宣称（诚实降级按路径粒度执法，契约篇
+    // §6.7 勘正——修前 gotAny 判定下混合态走全清分支，超钟路径静默蒸发）
+    const pendingPaths = settled.filter((it) => it.diags === undefined).map((it) => it.path);
+    const pendingNote =
+      pendingPaths.length > 0 ? `；另 ${pendingPaths.length} 个路径未及回流：${pendingPaths.join(', ')}` : '';
     if (!gotAny) {
       sections.push(`LSP 诊断未及回流（${name}，等待 ${cap}ms）——服务器索引中`);
     } else if (lines.length === 0) {
-      sections.push(`LSP 诊断：0 条（${name}，已检路径无问题）`);
+      sections.push(`LSP 诊断：0 条（${name}，已检路径无问题${pendingNote}）`);
     } else {
-      let text = `LSP 诊断（${name}，${lines.length} 条${truncated ? `，截断至 ${MAX_DIAG_ENTRIES}` : ''}）：\n${lines.join('\n')}`;
+      let text = `LSP 诊断（${name}，${lines.length} 条${truncated ? `，截断至 ${MAX_DIAG_ENTRIES}` : ''}${pendingNote}）：\n${lines.join('\n')}`;
       if (Buffer.byteLength(text, 'utf8') > MAX_DIAG_SECTION_BYTES) {
         text = `${text.slice(0, MAX_DIAG_SECTION_BYTES)}\n…（4KiB 截断）`;
       }
