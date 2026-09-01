@@ -7,6 +7,7 @@
 
 import type { RunResult } from '../agent/loop.js';
 import type { AssistantMessage } from '../contracts/llm.js';
+import { describeProviderFailure } from '../llm/index.js';
 import { createRuntime } from './assembly.js';
 import type { RuntimeOptions } from './assembly.js';
 import { installExitSignals } from './signals.js';
@@ -86,7 +87,10 @@ export async function runOnceMain(message: string, options: RuntimeOptions = {})
       process.stderr.write('已中断\n');
       code = 0;
     } else if (result.status === 'failed') {
-      process.stderr.write(`${result.errorMessage ?? '执行失败'}\n`);
+      // 首跑凭证失败产品级文案（成熟度扫描 20260901 P0-3，技术栈篇 §5）：provider
+      // 未配置/鉴权被拒两形态转可行动文案（点名环境变量+文档指路），其余失败原文直出
+      const raw = result.errorMessage ?? '执行失败';
+      process.stderr.write(`${describeProviderFailure(raw) ?? raw}\n`);
       code = 1;
     } else {
       const text = lastAssistantText(result);

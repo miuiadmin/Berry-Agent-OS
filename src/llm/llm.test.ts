@@ -12,6 +12,7 @@ import { LLM_INFLIGHT_LIMIT, LLM_MODEL_NOT_FOUND, LLM_MODEL_SPEC_INVALID, AppErr
 import type { AssistantMessage, AssistantStreamEvent, LlmContext, Message, UserMessage } from '../contracts/llm.js';
 import {
   classifyAssistantError,
+  describeProviderFailure,
   createLlmRuntime,
   createStreamFn,
   formatModelId,
@@ -322,6 +323,46 @@ describe('classifyAssistantError（S4 桶表——全仓唯一一份分桶）', 
     expect(classifyAssistantError(errorMessageOf('fetch failed'))).toBe('transient');
     expect(classifyAssistantError(errorMessageOf('request timeout after 60000ms'))).toBe('transient');
     expect(classifyAssistantError(errorMessageOf('invalid api key'))).toBe('non-retryable');
+  });
+});
+
+describe('describeProviderFailure（P0-3 首跑凭证失败产品级文案——CLI 呈现形态面）', () => {
+  it('形态一 provider 未配置：点名 provider + 环境变量名 + 文档指路', () => {
+    const copy = describeProviderFailure('Provider is not configured: anthropic')!;
+    expect(copy).toContain('anthropic'); // 点名 provider 本尊
+    expect(copy).toContain('ANTHROPIC_API_KEY'); // pi-ai 凭证链 <PROVIDER>_API_KEY 形态
+    expect(copy).toContain('使用指南'); // 凭证配置文档指路
+  });
+
+  it('形态一 provider id 归一：连字符/混合形态转环境变量名大写下划线', () => {
+    const copy = describeProviderFailure('Provider is not configured: openrouter')!;
+    expect(copy).toContain('OPENROUTER_API_KEY');
+  });
+
+  it('形态二 鉴权被拒：401/403 给行动指引 + 上游原文降附注截断', () => {
+    // 403 带整段响应体——正文是行动指引，原文收在附注段
+    const copy403 = describeProviderFailure('403 {"error":{"message":"invalid x-api-key"}}')!;
+    expect(copy403).toContain('403');
+    expect(copy403).toContain('ANTHROPIC_API_KEY'); // 环境变量命名形态示例
+    expect(copy403).toContain('附注');
+    expect(copy403).toContain('invalid x-api-key'); // 上游原文在场（可取证）
+    // 401 同形态覆盖
+    expect(describeProviderFailure('401 Unauthorized')).toBeDefined();
+    // 超长上游响应体截断到帽（300 字符帽含状态码前缀 + 省略号收尾）
+    const long = `403 ${'x'.repeat(500)}`;
+    const truncated = describeProviderFailure(long)!;
+    expect(truncated).toContain('…');
+    expect(truncated).toContain('x'.repeat(290)); // 帽内主体保留（300 帽减 '403 ' 前缀）
+    expect(truncated).not.toContain('x'.repeat(400)); // 超帽部分确已截去
+    expect(truncated.length).toBeLessThan(long.length);
+  });
+
+  it('其余失败原文直出：非凭证形态返回 undefined（不劫持）', () => {
+    expect(describeProviderFailure('400 your request is malformed')).toBeUndefined();
+    expect(describeProviderFailure('fetch failed')).toBeUndefined();
+    expect(describeProviderFailure('[LLM_INFLIGHT_LIMIT] 在飞请求达帽')).toBeUndefined();
+    // 近形不误伤：provider 名出现在句中而非 ModelsError 原文形态
+    expect(describeProviderFailure('provider anthropic said something odd')).toBeUndefined();
   });
 });
 

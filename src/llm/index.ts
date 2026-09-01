@@ -21,6 +21,7 @@ export { InFlightTracker, type InFlightSlot } from './inflight.js';
 export { providerApiFace } from './provider-face.js';
 export {
   classifyAssistantError,
+  describeProviderFailure,
   isContextOverflow,
   isRecoverableLength,
   isRetryableAssistantError,

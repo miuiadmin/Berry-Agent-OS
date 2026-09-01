@@ -1009,6 +1009,60 @@ describe('持久化 round-trip 与命令入口', () => {
     const code = await runOnceMain('单次问题', { dbPath: ':memory:', workspace: makeWorkspace(), streamFn });
     expect(code).toBe(0);
   });
+
+  it('runOnceMain：首跑凭证失败给产品级可行动文案（成熟度扫描 20260901 P0-3——修前 pi-ai 原文裸透传）', async () => {
+    // 错误终态消息工厂（scriptedStream 消费 result() 终值——stopReason='error' 即失败路）
+    const errorTerminal = (errorMessage: string): AssistantMessage =>
+      ({
+        role: 'assistant',
+        content: [],
+        usage: NO_USAGE,
+        stopReason: 'error',
+        errorMessage,
+        timestamp: 1,
+      }) as AssistantMessage;
+    // 静音 stderr 并捕获（run-main 失败路直写 process.stderr）
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      // 形态一：provider 未配置（pi-ai ModelsError 原文）——须点名环境变量 + 文档指路
+      const unconfigured = scriptedStream([errorTerminal('Provider is not configured: anthropic')]);
+      const code1 = await runOnceMain('你好', {
+        dbPath: ':memory:',
+        workspace: makeWorkspace(),
+        streamFn: unconfigured.streamFn,
+      });
+      expect(code1).toBe(1);
+      const stderr1 = errSpy.mock.calls.map((call) => String(call[0])).join('');
+      expect(stderr1).toContain('ANTHROPIC_API_KEY'); // 点名该 provider 的凭证环境变量
+      expect(stderr1).toContain('使用指南'); // 指凭证配置文档
+      expect(stderr1).toContain('anthropic'); // 点名 provider 本尊
+
+      // 形态二：鉴权被拒（401/403 上游原文）——正文给行动指引，上游原文降附注
+      errSpy.mockClear();
+      const rejected = scriptedStream([errorTerminal('403 {"error":{"message":"invalid x-api-key"}}')]);
+      const code2 = await runOnceMain('你好', {
+        dbPath: ':memory:',
+        workspace: makeWorkspace(),
+        streamFn: rejected.streamFn,
+      });
+      expect(code2).toBe(1);
+      const stderr2 = errSpy.mock.calls.map((call) => String(call[0])).join('');
+      expect(stderr2).toContain('HTTP 403'); // 鉴权失败语义面（点名实际状态码）
+      expect(stderr2).toContain('使用指南');
+      expect(stderr2).toContain('附注'); // 上游原文在场（截断附注非正文）
+
+      // 其余失败形态：原文直出（识别器不劫持非凭证失败；400 类不触发 turn 级重试）
+      errSpy.mockClear();
+      const other = scriptedStream([errorTerminal('400 your request is malformed')]);
+      await runOnceMain('你好', { dbPath: ':memory:', workspace: makeWorkspace(), streamFn: other.streamFn });
+      const stderr3 = errSpy.mock.calls.map((call) => String(call[0])).join('');
+      // 原文直出（logger 行同走 stderr 属正常噪声——只断业务文案不劫持）
+      expect(stderr3).toContain('400 your request is malformed');
+      expect(stderr3).not.toContain('使用指南'); // 非凭证失败不被识别器劫持
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
 });
 
 /* ---------------- 启动续接与会话热切换（技术栈篇 §5 拍板） ---------------- */

@@ -115,3 +115,49 @@ export async function retryAssistantCall(
   const final = await piRetryAssistantCall(async () => toPi(await produce()), policy, signal, callbacks);
   return final as unknown as AssistantMessage;
 }
+
+/** 附注截断帽（字符）：上游 401/403 响应体可能是整段 JSON，正文只留排障指引 */
+const UPSTREAM_NOTE_LIMIT = 300;
+
+/**
+ * 首跑凭证失败的产品级文案识别器（成熟度扫描 20260901 P0-3，技术栈篇 §5 run 行）。
+ *
+ * 与 classifyAssistantError 同源分立：桶表管分类（驱动重试决议），此管 CLI 呈现
+ * （字符串形态面）——`berry run` 失败 stderr 的消费点 run-main 在此取文案。
+ * 只认新用户首跑最常见的两类凭证形态，其余失败返回 undefined 由调用方原文直出：
+ * ① provider 未配置（pi-ai ModelsError 原文 `Provider is not configured: <id>`）；
+ * ② 鉴权被拒（上游 401/403，pi-ai 将状态码与响应体拼为文案开头）。
+ * @param message 失败 errorMessage 原文（pi-ai 透传，无宿主前缀）
+ * @returns 产品级可行动文案；非凭证形态返回 undefined
+ */
+export function describeProviderFailure(message: string): string | undefined {
+  // ① provider 未配置——点名 provider + 该 provider 的环境变量名 + 凭证表途径
+  const unconfigured = /^Provider is not configured: (\S+)\s*$/.exec(message);
+  if (unconfigured !== null) {
+    const provider = unconfigured[1]!;
+    // provider id → 环境变量名（pi-ai 凭证链约定 <PROVIDER>_API_KEY 形态，如 anthropic → ANTHROPIC_API_KEY）
+    const envName = `${provider.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}_API_KEY`;
+    return [
+      `模型 provider「${provider}」未配置凭证，无法发起模型调用。`,
+      '',
+      '配置途径二选一：',
+      `  1. provider 环境变量：export ${envName}=<你的密钥>`,
+      '  2. 凭证表（pi-ai 凭证链写入）——详见 docs/使用指南.md §2「模型与凭证」',
+    ].join('\n');
+  }
+  // ② 鉴权被拒（401/403）——正文给行动指引，上游原文降附注截断
+  const rejected = /^\s*(401|403)\b/.exec(message);
+  if (rejected !== null) {
+    // 截断附注：超帽以省略号收尾，保留上游可取证性不淹屏
+    const note = message.length > UPSTREAM_NOTE_LIMIT ? `${message.slice(0, UPSTREAM_NOTE_LIMIT)}…` : message;
+    return [
+      `模型凭证被上游拒绝（HTTP ${rejected[1]}）：密钥无效、过期或权限不足。`,
+      '',
+      '排障：核对 provider 环境变量取值（形态 <PROVIDER>_API_KEY，如 ANTHROPIC_API_KEY）或凭证表条目；',
+      '详见 docs/使用指南.md §2「模型与凭证」。',
+      '',
+      `附注·上游原文：${note}`,
+    ].join('\n');
+  }
+  return undefined;
+}
