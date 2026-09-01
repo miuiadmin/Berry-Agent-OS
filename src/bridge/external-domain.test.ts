@@ -453,8 +453,12 @@ describe('spawnExternalDomain — external 独有面（PM 执法/树杀/孤儿/c
       expect(trap.child.signalCode).toBeNull();
       // 宽限到点 → SIGKILL 组收割（uncatchable——空监听也拦不住）。signalCode
       // 直证升级段执行：若域是自愿退出（吞 TERM 后 process.exit）则 exitCode 非
-      // null 而非信号死——两形态在本断言上互斥可辨
-      await until(() => !pidAlive(trap.child.pid));
+      // null 而非信号死——两形态在本断言上互斥可辨。
+      // 等待条件取「宿主侧收割落定」而非「pid 消失」：SIGKILL 后子进程先成
+      // zombie（父未 reap），/proc 判活此刻已报死但 libuv 的 exit 事件尚未进
+      // 事件循环——signalCode 还没落定就断言必红（Linux CI 三跑竞速实证；
+      // macOS 无 /proc 走 kill0 须等 reap 才过，故本机恒绿掩住了这层）
+      await until(() => trap.child.exitCode !== null || trap.child.signalCode !== null);
       expect(trap.child.signalCode).toBe('SIGKILL');
       expect(trap.child.exitCode).toBeNull();
     },
