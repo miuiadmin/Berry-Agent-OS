@@ -30,11 +30,21 @@ export interface Logger {
   setLevel(level: LogLevel): void;
 }
 
-/** 默认级别解析：APP_LOG_LEVEL 环境变量 > 生产 info / 开发 debug（技术栈篇 §6 拍板） */
+/** 默认级别解析：APP_LOG_LEVEL 环境变量 > 缺省 info（技术栈篇 §6，2026-09-01 第五
+ * 十七批勘正：生产判定弃 NODE_ENV——全仓无设置路径的死概念；发布物即生产，缺省
+ * info，开发经 dev 脚本尾挂 --debug 提级。无效值不静默：bootstrapping 阶段
+ * logger 尚未定级（进程日志面自身不可用），警告直写 stderr 后落缺省——拼错/
+ * 大小写错误若静默吞，降噪意图会静默失效（设 WARN 反落更吵的档）。 */
 function defaultLevel(): LogLevel {
   const fromEnv = process.env['APP_LOG_LEVEL'];
-  if (fromEnv && fromEnv in LEVEL_WEIGHT) return fromEnv as LogLevel;
-  return process.env['NODE_ENV'] === 'production' ? 'info' : 'debug';
+  if (fromEnv !== undefined) {
+    if (fromEnv in LEVEL_WEIGHT) return fromEnv as LogLevel;
+    process.stderr.write(
+      `[logger] APP_LOG_LEVEL="${fromEnv}" 不是有效级别（error/warn/info/debug/silent），已回落缺省 info\n`,
+    );
+    return 'info';
+  }
+  return 'info';
 }
 
 /** 单行输出目标（默认 stderr；测试注入内存 sink 用） */

@@ -523,10 +523,11 @@ export interface ReloadResult {
  * async：应用装载（jiti import + apply）是异步序列（契约篇 §1）。
  */
 export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRuntime> {
-  // boot 装载分区计时（daemon 刀一·件⑦）：三分区里程碑 debug 落账——③ 持久
-  // 层完 / ⑨ 装载完 / 返回前总耗。performance.now 单调钟（墙钟回拨不污染）；
-  // 行为同时是 durable 事实的反面——纯诊断面，只在 debug 层出现合法（无行为
-  // 分支读它）
+  // boot 装载分区计时（daemon 刀一·件⑦；2026-09-01 第五十七批 #28 升档）：分区
+  // 里程碑 debug——③ 持久层完 / ⑨ 装载完；返回前总耗一行 info（低频启动面、生
+  // 产档可见——排障第一锚点，运行时骨架篇 §1.2 同批勘正）。performance.now 单调
+  // 钟（墙钟回拨不污染）；行为同时是 durable 事实的反面——纯诊断面（无行为分支
+  // 读它）
   const bootStart = performance.now();
   const workspace = opts.workspace ?? process.cwd();
   const model = opts.model ?? process.env['APP_MODEL'] ?? DEFAULT_MODEL;
@@ -2803,8 +2804,9 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
     }
   }
 
-  // boot 分区计时·总耗（返回前——attach/start 等客户端动作不计入）
-  ctx.logger.debug('boot 装载分区计时：总耗', { ms: Math.round(performance.now() - bootStart) });
+  // boot 分区计时·总耗（返回前——attach/start 等客户端动作不计入）：唯一 info 档
+  // 计时行（生产可见的启动排障锚点；分区细目仍 debug）
+  ctx.logger.info('boot 装载分区计时：总耗', { ms: Math.round(performance.now() - bootStart) });
 
   return {
     ctx,

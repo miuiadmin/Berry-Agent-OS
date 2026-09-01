@@ -9,7 +9,7 @@
 
 ```bash
 npm install
-npm run dev               # TUI 直跑（tsx，日志缺省 debug）
+npm run dev               # TUI 直跑（tsx + --debug；缺省档 info）
 npm test                  # 全量测试
 npm run typecheck         # tsc --noEmit
 npm run lint:topology     # 模块 DAG + 事件词汇门禁
