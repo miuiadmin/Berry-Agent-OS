@@ -289,7 +289,14 @@ export function App() {
       const id = viewedRef.current;
       if (id !== undefined) void loadView(id);
       fetchApprovals()
-        .then(setApprovals)
+        .then((list) => {
+          setApprovals(list);
+          // 卡面对账（20260901-d #11，契约篇 §6.8 审批卡条勘正）：重拉的全量
+          // 未决清单不止修角标面——清单不在册的卡 = 断线窗内他端（TUI/另一
+          // web 会话）已决（SSE 无回放，decided 帧错过后卡面别无收场路径），
+          // 摘除防滞留可点恒置底误导。与 asked 帧富化合并（挂卡路径）互补
+          setLiveCards((prev) => prev.filter((c) => list.some((x) => x.approvalId === c.approvalId)));
+        })
         .catch(() => undefined);
     };
     es.onerror = () => setConnected(false); // 断线——浏览器自动重连，状态条示红

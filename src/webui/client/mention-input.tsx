@@ -149,6 +149,11 @@ export function MentionInput({ value, onChange, onSubmit, disabled, placeholder 
         setActive((a) => (a - 1 + count) % count);
         return;
       }
+      // IME 组字判据（20260901-d #12，契约篇 §6.8 两段式条勘正）：组字确认的
+      // Enter（isComposing=true）本意是上屏组字文本——不截不 preventDefault、
+      // 放行给 IME（截获则 accept 的受控 value 覆写会中断组字会话，输入结果非
+      // 用户所打；与下方提交分支同款判据）。Tab/方向键无 IME 语义保留现行为
+      if (e.key === 'Enter' && e.nativeEvent.isComposing) return;
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         if (query.symbolPrefix === undefined) accept(`@${files[active] ?? ''}`);
