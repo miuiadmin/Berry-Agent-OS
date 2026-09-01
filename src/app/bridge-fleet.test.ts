@@ -34,6 +34,7 @@ import {
 } from '../contracts/errors.js';
 import type { SandboxService } from '../safety/index.js';
 import { appDataDirOf } from './composition.js';
+import { registerToolsService } from '../tools/registry.js';
 import { createBridgeFleet } from './bridge-fleet.js';
 
 /* ---------------- 测试基建 ---------------- */
@@ -60,6 +61,24 @@ export default async function apply(ctx, config) {
 const FX_APPLY_THROW = `
 export const name = 'fleet-fx-throw';
 export default async function apply() { throw new Error('boom-on-purpose'); }
+`;
+
+/** 工具注册 fixture（遗漏大扫 20260901-d #20 回归锁）：apply 段经域内 tools 桩
+ * 注册一件工具——host 半 tools-register 处理方罩 runInCallerChain(行 id) 后经
+ * 行挂载目标投影隐式路由（契约篇 §5.1 D1）——落哪层是本用例的断言对象 */
+const FX_TOOL = `
+export const name = 'fleet-fx-tool';
+export default async function apply(ctx) {
+  const tools = ctx.get("tools");
+  ctx.effect(() =>
+    tools.register({
+      name: "fleet/d1_echo",
+      description: "D1 路由回归锁 fixture 工具",
+      parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+      execute: async (args) => ({ content: [{ type: "text", text: "d1:" + String(args.text) }] }),
+    }),
+  );
+}
 `;
 
 /** 慢启 fixture：模块体同步占线 300ms（装载求值期占死 worker 事件循环——
@@ -161,6 +180,48 @@ describe('createBridgeFleet — 装配编舞（真 worker 子进程）', () => {
     await fleet.terminateAll('测试收尾');
     await root.dispose().catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  // 【遗漏大扫 20260901-d #20】桥注册的 D1 应用域路由回归锁：分域行 apps:[a]
+  // 的桥工具须落应用域层 appDomains[a]（listFor(a) 可见），不落全局层、不进
+  // 别家域；域死随行回卷摘除。背景：smoke-carrier 曾是此链路的唯一守护且静默
+  // 过期（boot-open 首会话默认应用 coder 化后组成面判据错位）——本锁把守护
+  // 收进门禁内（免 key、真 worker 桥全链）。
+  it('分域行工具 D1 应用域路由：apps:[a] 行桥注册落应用域层——listFor(a) 可见/全局层与别家域不在场/域死回卷随摘', async () => {
+    const dir = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'fleet-')));
+    const fxToolEntry = join(dir, 'fx-tool.ts');
+    writeFileSync(fxToolEntry, FX_TOOL);
+    const root = createContext({ name: 'fleet-d1-route' });
+    const anchor = root.fork({ name: 'fleet-d1-route:anchor' });
+    // 真工具注册表 + 行挂载目标投影探针（组合根 syncRowAppMap 闭包同形——
+    // D1 隐式路由的唯一数据源，本用例手工投影 r-d1 → ['a']）
+    const rowAppMap = new Map<string, readonly string[]>([['r-d1', ['a']]]);
+    const tools = registerToolsService(root, {
+      rowApp: { get: (rowId) => rowAppMap.get(rowId), size: () => rowAppMap.size },
+    });
+    const fleet = createBridgeFleet({
+      root,
+      anchor: () => anchor,
+      workerUrl: WORKER_URL,
+      execArgv: ['--import=tsx'],
+    });
+    try {
+      const row: AppPlanRow = { id: 'r-d1', entry: fxToolEntry, apps: ['a'], sandbox: { carrier: 'worker' } };
+      await fleet.loader.load(row);
+      const scope = anchor.fork({ name: 'r-d1', rowId: 'r-d1', builtinRow: false });
+      await fleet.loader.apply(row, scope);
+      // 桥注册异步到达（apply 返还 ≠ host 半注册已落）——轮询至应用域层可见
+      await until(() => tools.listFor('a').some((def) => def.name === 'fleet/d1_echo'));
+      // 隔离面（落错层即红——隐式路由失效会静默落全局层，本断言即机制级判据）
+      expect(tools.list().some((def) => def.name === 'fleet/d1_echo')).toBe(false);
+      expect(tools.listFor('b').some((def) => def.name === 'fleet/d1_echo')).toBe(false);
+      // 域死回卷摘除：行作用域 effect 随 terminateAll 收编回卷（注册即 effect）
+      await fleet.terminateAll('测试收编');
+      await until(() => !tools.listFor('a').some((def) => def.name === 'fleet/d1_echo'));
+    } finally {
+      await root.dispose().catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('装载生命线：每行一域路由 + 装机计数 + reapUnapplied 只清未应用 + terminateAll 全收', async () => {

@@ -14,6 +14,8 @@
  *   2. reload 三清单：runtime.reload() 全量重载 → activated 含双行；
  *   3. 装载物化：appsService.list() 双行 activated + 组成面（compositionFor）
  *      双工具可见——external 行经 fork 进程桥注册、worker 行经线程桥注册；
+ *      前台先显式进 chat 会话（挂载目标 apps:['chat'] 的组成面判据位——
+ *      默认应用位随策略走，#20：boot-open 首会话已随 b78ab40 默认 coder 化）；
  *   4. 桥真调两腿：宿主直调（确定性——工具 execute 过桥往返拿回 fixture 标记）
  *      + 真模型自主调用（submitOnce 提示词驱动模型真调双工具，tool/call 落账）；
  *   5. 重开库自检：shutdown → Persistence.open 重开 → durable 事件流含双 fx
@@ -182,7 +184,16 @@ try {
     const listRows = runtime.appsService.list();
     const extRow = listRows.find((row) => row.id === 'fx-ext');
     const wkRow = listRows.find((row) => row.id === 'fx-wk');
-    const sessionKey = runtime.session?.header?.sessionId;
+    // 前台应用确定性（遗漏大扫 20260901-d #20 诊断修正）：boot-open 首会话随
+    // 默认应用策略走（组装批 b78ab40 起默认 = coder），而本炮挂载目标恒 chat
+    // ——组成面与模型轮必须对齐 chat 应用域。显式进 chat 会话（/app chat 同源
+    // 程序面 drivers.open({app})：新建 + 切前台一条龙），此后 session/conversation
+    // 两投影恒为 chat 驱动，与默认位谁家彻底解耦。
+    const chatManifest = runtime.apps.get('chat');
+    if (chatManifest === undefined) throw new Error('官方应用清单未见 chat（官方全家桶缺场——装配形态异常）');
+    const chatEntry = runtime.drivers.open({ app: chatManifest });
+    if (chatEntry === undefined) throw new Error('chat 会话 open 无果（本炮恒真持久层——不该发生）');
+    const sessionKey = chatEntry.session.header.sessionId;
     const domainTools = sessionKey ? runtime.tools.compositionFor(sessionKey).map((def) => def.name) : [];
     const toolExtOk = domainTools.includes('fx/ext_echo');
     const toolWkOk = domainTools.includes('fx/wk_echo');
