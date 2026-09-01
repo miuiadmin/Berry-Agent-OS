@@ -34,7 +34,7 @@
  * 安全纪律：凭证只从环境读取、绝不回显；输出零脱敏需求。
  */
 
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -66,8 +66,13 @@ if (!baseUrl || !token || !prompt) {
 
 /* ---------------- 临时目录（realpath 归一——macOS /var 前缀差异教训） ---------------- */
 
+// 外供目录（SMOKE_DATA_DIR/WORKSPACE）不在清理面（基建大扫 #33）——操作者
+// 自管生命周期；owns* 记录哪些根是本脚本自建、流末随清
+const ownsData = process.env['SMOKE_DATA_DIR'] === undefined;
+const ownsWorkspace = process.env['SMOKE_WORKSPACE'] === undefined;
 const smokeData = process.env['SMOKE_DATA_DIR'] ?? mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-data-'));
 const smokeWorkspace = process.env['SMOKE_WORKSPACE'] ?? mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-ws-'));
+const smokeHome = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-home-'));
 
 // 数据目录钉扎（20260901-d #2，与 smoke-replay 同款）：assembly 的 dataDir()
 // 调用面（boot 扫龄/孤儿树杀/别名/allowlist/external 可写根）只认
@@ -178,7 +183,7 @@ const runtime = await createRuntime({
   dbPath: join(smokeData, 'sessions.db'),
   workspace: smokeWorkspace,
   // homeDir 指到空目录：技能扫描零噪音（隔离 old-v2 存量 ~/.berry/skills）
-  homeDir: mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-home-')),
+  homeDir: smokeHome,
   // 组合树目录显式隔离（与 smoke-replay 同款）：缺省回落真实 ~/.berry——用户
   // 装机历史（overlay 行）会污染录制装配，金样与回放从此两读两漂
   compositionDir: join(smokeData, 'composition'),
@@ -194,4 +199,17 @@ const flow = await runSmokeFlow({ runtime, prompt, smokeData });
 console.log(`[smoke] data=${smokeData}  workspace=${smokeWorkspace}`);
 
 if (goldenPath) finalizeGolden();
+
+// 流末即用即清（基建大扫 #33）：只清自建根（外供 SMOKE_DATA_DIR/WORKSPACE
+// 归操作者自管）；成功路收场即删，失败保留现场；SMOKE_KEEP=1 逃生门
+if (flow.ok && process.env['SMOKE_KEEP'] !== '1') {
+  for (const dir of [ownsData ? smokeData : null, ownsWorkspace ? smokeWorkspace : null, smokeHome]) {
+    if (dir === null) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // 清理失败不改变退出码（残留可容忍——退出码才是裁决）
+    }
+  }
+}
 process.exit(flow.ok ? 0 : 1);

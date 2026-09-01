@@ -321,10 +321,13 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
     const root = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'obs-stop-')));
     const compositionDir = join(root, 'composition');
     mkdirSync(compositionDir, { recursive: true });
-    // flushBatch=1：每信封同步 flush（定时器不介入）+ flushMs 长窗
+    // flushBatch=1：每信封同步 flush（定时器不介入）+ flushMs 长窗；
+    // busyTimeoutMs=50（基建大扫 #17）：撞锁等待从缺省 5s 降档毫秒级——场景
+    // 路径不变（等 busy_timeout 到点 BUSY → 停摄取），慢机 CI 不再被硬等拖向
+    // testTimeout 帽（修偏前实测单测 9.54s = 全量壁钟最大单项）
     writeFileSync(
       join(compositionDir, 'overlay.yaml'),
-      'rows:\n  - id: obs\n    config: { flushBatch: 1, flushMs: 600000 }\n',
+      'rows:\n  - id: obs\n    config: { flushBatch: 1, flushMs: 600000, busyTimeoutMs: 50 }\n',
     );
 
     const runtime = await createRuntime({ dbPath: ':memory:', workspace: root, compositionDir });
@@ -355,8 +358,9 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
       usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
     });
 
-    // 占写锁（同进程第二连接持写事务跨整个断言窗——apply 的 busy_timeout 5s 后 BUSY；
-    // raw 句柄经 persist 正路 face 取——better-sqlite3 裸导入仅 persist 允许）
+    // 占写锁（同进程第二连接持写事务跨整个断言窗——apply 撞锁等 busy_timeout
+    // 到点 BUSY〔已降档 50ms〕；raw 句柄经 persist 正路 face 取——
+    // better-sqlite3 裸导入仅 persist 允许）
     const dbPath = findRollupDb(root);
     expect(dbPath).not.toBe('');
     const holder = createAppSqliteFace().openDatabase(dbPath);
@@ -365,7 +369,7 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
     holder.prepare('UPDATE alerts SET enabled = enabled').run();
 
     const captured = captureStderr();
-    // 第二笔：flush → apply → 写锁等待 5s → BUSY → 停摄取 + warn（同步阻塞 ~5s）
+    // 第二笔：flush → apply → 写锁等待 50ms（#17 降档）→ BUSY → 停摄取 + warn
     session!.append('llm/usage', {
       callId: 'c-busy',
       model: 'faux/m1',

@@ -180,4 +180,25 @@ describe('obs 自管库面：复盘 20260901 T-2/R-3 开库编舞回归锁', () 
     holder.exec('COMMIT');
     holder.close();
   });
+
+  it('#17 busyTimeoutMs 注入位：50ms 档撞锁即抛——不真等缺省 5s（T-1 降档的库面半边）', () => {
+    const path = tmpDb();
+    const store = openRollupStore(path, { busyTimeoutMs: 50 });
+    store.apply([{ table: 'turn', hourTs: T0, dims: ['chat'], cols: { turns: 1 } }]);
+    // 同进程他连接持写事务（WAL 已立——开库零锁冲突，撞点在 apply 写事务）
+    const holder = createAppSqliteFace().openDatabase(path);
+    holder.pragma('busy_timeout = 100');
+    holder.exec('BEGIN IMMEDIATE');
+    holder.prepare('UPDATE alerts SET enabled = enabled').run();
+    const started = performance.now();
+    expect(() => store.apply([{ table: 'turn', hourTs: T0 + 3_600_000, dims: ['chat'], cols: { turns: 1 } }])).toThrow(
+      /locked/,
+    );
+    const elapsed = performance.now() - started;
+    holder.exec('COMMIT');
+    holder.close();
+    store.close();
+    // 50ms 档生效：远低于缺省 5000ms（2s 判线留慢机裕度——修偏前 ~5s 必红）
+    expect(elapsed).toBeLessThan(2_000);
+  });
 });

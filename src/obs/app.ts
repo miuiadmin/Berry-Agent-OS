@@ -267,18 +267,24 @@ export function createObsApp(): BuiltinAppModule {
     config: Type.Object({
       flushMs: Type.Optional(Type.Number({ minimum: 50, description: '落账批量窗口毫秒（缺省 5000）' })),
       flushBatch: Type.Optional(Type.Number({ minimum: 1, description: '落账批量条数（缺省 256）' })),
+      busyTimeoutMs: Type.Optional(
+        Type.Number({ minimum: 1, description: '自管库撞锁等待上限毫秒（缺省 5000——flushMs 同款旋钮，基建大扫 #17）' }),
+      ),
     }),
     apply: (ctx: AppContext): void => {
       const tools = ctx.get<ToolsService>('tools');
       const channels = ctx.get<ChannelsFace>('channels');
       const paths = ctx.get<PathsFace>('paths');
       const ui = ctx.get<UiFace>('ui');
-      const config = ctx.config as { flushMs?: unknown; flushBatch?: unknown };
+      const config = ctx.config as { flushMs?: unknown; flushBatch?: unknown; busyTimeoutMs?: unknown };
       const flushMs = typeof config.flushMs === 'number' ? config.flushMs : DEFAULT_FLUSH_MS;
       const flushBatch = typeof config.flushBatch === 'number' ? config.flushBatch : DEFAULT_FLUSH_BATCH;
+      // busyTimeoutMs（#17）：撞锁等待降档旋钮——透传开库注入位（缺省 5000）
 
       // 自管库（rollup.db——私有迁移链 + 0600；开库失败 = 行失败响亮）
-      const store = openRollupStore(join(paths.appDataDir(ctx.rowId ?? 'obs'), 'rollup.db'));
+      const store = openRollupStore(join(paths.appDataDir(ctx.rowId ?? 'obs'), 'rollup.db'), {
+        busyTimeoutMs: typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : undefined,
+      });
       const aggregator = createAggregator();
       let pendingCount = 0;
       let stopped = false;

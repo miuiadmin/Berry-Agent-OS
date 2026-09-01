@@ -30,12 +30,17 @@ export default defineConfig({
       'tools/check-topology.test.mjs',
       'tools/check-tense.test.mjs',
       'tools/gates-infra.test.mjs',
+      // vitest setup 密封面锁（基建大扫 #16/#47）：双身份探针——spawn 单文件
+      // vitest 执法（哨兵外层值须被 delete + 临时根随 afterAll 清）
+      'tools/vitest-setup.test.mjs',
     ],
     environment: 'node',
-    // 每 worker 数据目录钉扎（20260901-d #2 同类）：setupFiles 强制
+    // 每测试文件数据目录钉扎（20260901-d #2 同类；基建大扫 #16 勘正：setupFiles
+    // 每测试文件执行一次——isolate 缺省真，非每 worker）：setupFiles 强制
     // APP_DATA_DIR 到临时根——13 个未自钉的 createRuntime 测试文件不再对真实
     // ~/.berry 写（obs rollup.db / my-tool-app fixture 两写点磁盘实证）；显式
-    // 自钉的测试 set 晚于 setup 生效、restore 落回临时根，行为不变。
+    // 自钉的测试 set 晚于 setup 生效、restore 落回临时根，行为不变；
+    // #16/#47 密封面锁 = tools/vitest-setup.test.mjs（清理 + env delete）。
     setupFiles: ['tools/vitest-setup.mjs'],
     // per-test 时限 5s → 15s（2026-09-01 存量负载 flake 勘正）：全量 16 worker
     // 并行下重载全栈用例（webui-fullstack / chat 打断族）壁钟可超 5s——HEAD

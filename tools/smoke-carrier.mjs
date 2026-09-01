@@ -29,7 +29,7 @@
  * ~/.berry；compositionDir 显式隔离——与 smoke-real 同款防装机历史污染）。
  */
 
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '../src/app/assembly.js';
@@ -58,6 +58,7 @@ if (!baseUrl || !token) {
 
 const smokeData = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-carrier-data-'));
 const smokeWorkspace = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-carrier-ws-'));
+const smokeHome = mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-carrier-home-'));
 
 // 数据目录钉扎（20260901-d #2，与 smoke-replay/real 同款）：external 载体行的
 // 可写根推导走 appDataDirOf(dataDir(), row.id)——不钉 APP_DATA_DIR 则 fixture
@@ -145,7 +146,7 @@ try {
     model: `${providerId}/${modelId}`,
     dbPath: join(smokeData, 'sessions.db'),
     workspace: smokeWorkspace,
-    homeDir: mkdtempSync(join(realpathSync(tmpdir()), 'berry-smoke-carrier-home-')),
+    homeDir: smokeHome,
     compositionDir: join(smokeData, 'composition'),
   });
   runtime.llm.registerProvider(provider);
@@ -290,4 +291,16 @@ console.log(
   `[smoke] 判定汇总: 两态动词=${rings.installMount ? '✓' : '✗'} reload=${rings.reload ? '✓' : '✗'} 物化=${rings.materialize ? '✓' : '✗'} 桥双腿=${rings.bridge ? '✓' : '✗'} 重开库=${rings.reopen ? '✓' : '✗'}  →  ${ok ? '全绿' : '有红'}`,
 );
 console.log(`[smoke] data=${smokeData}  workspace=${smokeWorkspace}`);
+
+// 流末即用即清（基建大扫 #33）：成功路三临时根收场即删；失败保留现场供
+// postmortem；SMOKE_KEEP=1 逃生门无条件保留
+if (ok && process.env['SMOKE_KEEP'] !== '1') {
+  for (const dir of [smokeData, smokeWorkspace, smokeHome]) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // 清理失败不改变退出码（残留可容忍——退出码才是裁决）
+    }
+  }
+}
 process.exit(ok ? 0 : 1);

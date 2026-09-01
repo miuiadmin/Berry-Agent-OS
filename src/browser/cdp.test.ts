@@ -30,7 +30,7 @@ import { isIP } from 'node:net';
 import { createServer, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JsonRpcConnection } from '../mcp/index.js';
 import type { AppLogger } from '../contracts/app.js';
 import type { AppContext } from '../contracts/app.js';
@@ -42,6 +42,33 @@ import { BrowserEngine, nodeVersionProblem } from './engine.js';
 import { applyCaptureEvent, ConsoleRing, SessionCapture } from './capture.js';
 import { renderAccessibilitySnapshot, type FlatDocNode } from './a11y.js';
 import { saveScreenshot, SCREENSHOTS_KEEP } from './screenshots.js';
+
+/* ---------------- 临时目录登记簿（基建大扫 #16 同族顺手收口） ---------------- */
+
+/**
+ * 本测试文件建的临时目录登记簿（berry-browser-engine-* / berry-browser-test-*）：
+ * 此前每用例 mkdtemp 后仅少数用例自行 rmSync——全量跑一次漏 30+ 目录（本机实证
+ * 48 个在册）。统一模型：建目录一律走登记 helper，文件级 afterAll 全清（vitest
+ * 文件级钩子对所有 describe 生效；force 容忍用例内已自清的重复删）。
+ */
+const browserTmpDirs: string[] = [];
+
+/** 建一个引擎 dataDir 临时根并登记（用例内仍可自行提前 rmSync——重复删无害） */
+const makeEngineDir = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+  browserTmpDirs.push(dir);
+  return dir;
+};
+
+afterAll(() => {
+  for (const dir of browserTmpDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // 清理失败不红测试（残留可容忍——与 smoke 脚本流末清理同拍）
+    }
+  }
+});
 import { registerBrowserTools } from './tools.js';
 import { createBrowserApp } from './app.js';
 
@@ -372,8 +399,12 @@ describe('browser cdp 层（假 CDP 服务器 WS 帧层）', () => {
 /* ---------------- discover 层 ---------------- */
 
 describe('browser 引擎发现序', () => {
-  /** 临时目录（每用例新开——测试污染隔离纪律：绝不触真 ~/.berry） */
-  const makeTmp = (): string => mkdtempSync(join(tmpdir(), 'berry-browser-test-'));
+  /** 临时目录（每用例新开——测试污染隔离纪律：绝不触真 ~/.berry；登记入簿随 afterAll 清） */
+  const makeTmp = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'berry-browser-test-'));
+    browserTmpDirs.push(dir);
+    return dir;
+  };
 
   /** 造一个可执行文件（discover 判据 = X_OK；嵌套路径先建目录——CfT 布局多层深） */
   const makeExecutable = (dir: string, rel: string): string => {
@@ -526,7 +557,7 @@ describe('browser 引擎生命周期', () => {
   };
 
   it('全链起：发现→spawn→DevToolsActivePort→WS 连接→context 建立（登记簿入册）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const spawnArgs: string[][] = [];
     const { engine, registry, notify } = makeEngine({
       dataDir,
@@ -568,7 +599,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('两级闲置回收：context 闲置 dispose → 零活 context 引擎闲置收场（树杀+净退）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine, killTree, registry } = makeEngine({ dataDir, idleMs: 70 });
     await engine.acquireContext('sess-A');
     expect(engine.getStatus().state).toBe('running');
@@ -587,7 +618,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('续命语义：反复取用只续命本 session——他 session 不被牵连闲置', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine } = makeEngine({ dataDir, idleMs: 150 });
     await engine.acquireContext('sess-A');
     fake.responders['Target.createBrowserContext'] = () => ({ browserContextId: 'CTX-2' });
@@ -603,7 +634,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('dispose 永久关停：回卷后取用响亮拒绝（不静默复活）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine } = makeEngine({ dataDir, idleMs: 60_000 });
     await engine.acquireContext('sess-A');
     await engine.dispose();
@@ -612,7 +643,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('attach 形态：只连不杀（零 spawn/登记簿/树杀）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const killTree = vi.fn();
     const registry = { add: vi.fn(), remove: vi.fn(), sweep: vi.fn(async () => ({ killed: [] as number[] })) };
     const engine = new BrowserEngine({
@@ -636,7 +667,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('#1 attach 收场只断连：闲置收场不发 Browser.close（只连不杀——契约篇 §6.10）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const engine = new BrowserEngine({
       dataDir,
       config: { cdpEndpoint: `127.0.0.1:${fake.port}` }, // 走 HTTP /json/version 探测腿
@@ -661,7 +692,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('#2/#7/#9 起链失败即清算（引擎先死腿）：AppError 统一码 + 树杀 + 登记簿净退 + 状态 closed', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine, killTree, registry } = makeEngine({
       dataDir,
       idleMs: 60_000,
@@ -685,7 +716,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('#2/#7/#9 起链失败即清算（超帽腿）：DevToolsActivePort 超帽 → AppError + 清算同腿', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine, killTree, registry } = makeEngine({
       dataDir,
       idleMs: 60_000,
@@ -707,7 +738,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('#3 context 建链半途失败回滚：enable 失败不留半捕获——重试走全链重建', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine } = makeEngine({ dataDir, idleMs: 60_000 });
     // Runtime.enable 服务器错误腿 → context 建立中途炸（三表已挂、域未启）
     fake.errorResponders['Runtime.enable'] = { code: -32_000, message: 'boom' };
@@ -725,7 +756,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('#3 context 起建失败重武装引擎闲置钟：零活 context 不因失败永久失防', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine, killTree } = makeEngine({ dataDir, idleMs: 70 });
     // openSessionContext 首步即炸（三表未挂——闲置钟被 acquire 入场撤防后无人重武装的腿）
     fake.errorResponders['Target.createBrowserContext'] = { code: -32_000, message: 'no-context' };
@@ -738,7 +769,7 @@ describe('browser 引擎生命周期', () => {
   });
 
   it('#17 收场代际护栏：closeEngine await 窗内换代——新引擎不被旧收场误杀', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine, killTree } = makeEngine({ dataDir, idleMs: 250, pids: [424_242, 424_243] });
     await engine.acquireContext('sess-A'); // 第一代引擎（pid 424242）
     // 扣押 Browser.close 应答：闲置两跳（~500ms）后 closeEngine 进入 await 窗
@@ -776,7 +807,7 @@ describe('browser 引擎生命周期', () => {
   //（本代从未收养连接）+ 共享引用护栏三判据分立。修复前红：killTree 打不到
   // 424242（旧代漏杀）、remove(424242) 不发生——两代各清各的账。
   it('#23 起链失败腿不抢别代闸位：旧收场窗内新起链失败——两代 child 各自树杀净退', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     // 可变配置（makeEngine 的 noPortFile/alive 在 spawnEngine 回调内惰性求值——
     // 两代之间翻面即得「第二代启动即死」形态，第一代照常起）
     const cfg: Parameters<typeof makeEngine>[0] = {
@@ -834,7 +865,7 @@ describe('browser 引擎生命周期', () => {
   // 落位才自愈）。修复：失败腿 teardown 后按 bringUp 入口快照回放（窗内入口值
   // = 旧代先置的 closed）。
   it('#17 失败起链腿状态回放：旧收场 await 窗内新起链失败——窗内不谎报 starting', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const cfg: Parameters<typeof makeEngine>[0] = {
       dataDir,
       idleMs: 250,
@@ -876,7 +907,7 @@ describe('browser 引擎生命周期', () => {
   // 修复后升级 Node 再调即重试）。修复前红：无闸——spawn 照走，WebSocket
   // 全局缺席以裸 ReferenceError 形态晚爆，留下不可理解的半建现场。
   it('#15 运行时版本闸：Node < 22.19 起链前拒——BROWSER_NODE_UNSUPPORTED + 零 spawn', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     let spawns = 0;
     const { engine } = makeEngine({
       dataDir,
@@ -905,7 +936,7 @@ describe('browser 引擎生命周期', () => {
   // 共享——同时首用只 spawn 一次。修复前红面：去重若失效（如 starting 被同步
   // 清空），双 spawn 双引擎 = profile 双开 + 登记簿双条目。
   it('#23 并发去重：同时首用只 spawn 一次（starting promise 共享）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const spawnArgs: string[][] = [];
     const { engine } = makeEngine({
       dataDir,
@@ -930,7 +961,7 @@ describe('browser 引擎生命周期', () => {
   // 【遗漏大扫 20260901-b #23】起链失败重试腿：starting 在 finally 清空——失败
   // 后下一调用照常复活（不是永久失败态）。
   it('#23 起链失败重试：starting 清空——首次引擎先死后第二次照常起链', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     // 可变活性开关：第一次 spawn 即死（不写端口文件），第二次写端口文件成功
     let healthy = false;
     let spawnCount = 0;
@@ -966,7 +997,7 @@ describe('browser 引擎生命周期', () => {
   // sessionId——B 会话 console 不串入 A（keyByCdpSession 反查表多条目形态）。
   // 修复前不可测形态：responder 恒返单一 sessionId，反查表恒单条目（同键覆盖）。
   it('#23 多会话事件分流：B 会话 console 只进 B 捕获态（反查表多条目）', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     const { engine } = makeEngine({ dataDir, idleMs: 60_000 });
     // per-target 派发 sessionId（真 CDP 语义：flat sessionId per attach）
     let tgtSeq = 0;
@@ -995,7 +1026,7 @@ describe('browser 引擎生命周期', () => {
   // 配置错 fail-loud（规范条款执法位）。修复前红：静默走 attach 丢弃
   // executablePath——用户自配引擎路径被无声吞掉。
   it('#26 双配冲突闸：cdpEndpoint×executablePath 同给 → BROWSER_CONFIG_CONFLICT + 零 spawn 零连接', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'berry-browser-engine-'));
+    const dataDir = makeEngineDir();
     let spawns = 0;
     const engine = new BrowserEngine({
       dataDir,

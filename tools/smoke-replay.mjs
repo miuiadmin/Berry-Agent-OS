@@ -24,7 +24,7 @@
  *   npx tsx tools/smoke-replay.mjs [金样路径（缺省 tools/golden/smoke-glm53.jsonl）]
  */
 
-import { mkdtempSync, realpathSync, readFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -97,6 +97,7 @@ const streamFn = (context, _options) => {
 
 const smokeData = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-data-'));
 const smokeWorkspace = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-ws-'));
+const smokeHome = mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-home-'));
 
 // 数据目录钉扎（20260901-d #2）：assembly 一批 dataDir() 调用点（boot 期
 // sweepAppTmpDirs 扫龄删除 + ChildRegistry 孤儿树杀 / loadProjectAliases 别名
@@ -111,7 +112,7 @@ const runtime = await createRuntime({
   streamFn,
   dbPath: join(smokeData, 'sessions.db'),
   workspace: smokeWorkspace,
-  homeDir: mkdtempSync(join(realpathSync(tmpdir()), 'berry-replay-home-')),
+  homeDir: smokeHome,
   // 组合树目录显式隔离：缺省会回落真实 ~/.berry（dataDir() 不认 homeDir——
   // paths.ts 只读 APP_DATA_DIR env），用户装机历史（探矿 overlay 行）一旦存在
   // 即污染回放装配、破坏确定性。临时目录不存在 = 空 overlay，composition 侧
@@ -128,4 +129,18 @@ console.log(
   `[replay] 金样消费: ${Math.min(cursor, golden.length)}/${golden.length} 条${consumedExactly ? '（恰好用尽——录制/回放同构）' : cursor > golden.length ? '（耗尽——流程多出调用，发散）' : '（剩余——流程少跑调用，发散）'}`,
 );
 console.log(`[replay] data=${smokeData}  workspace=${smokeWorkspace}`);
-process.exit(flow.ok && consumedExactly ? 0 : 1);
+
+// 流末即用即清（基建大扫 #33——release.mjs installSmoke 同款形态）：三个临时根
+// 成功路收场即删；失败保留现场供 postmortem（诊断=sqlite 直读 events 表）；
+// SMOKE_KEEP=1 逃生门无条件保留（复现调试场景）
+const ok = flow.ok && consumedExactly;
+if (ok && process.env['SMOKE_KEEP'] !== '1') {
+  for (const dir of [smokeData, smokeWorkspace, smokeHome]) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // 清理失败不改变退出码（残留可容忍——退出码才是裁决）
+    }
+  }
+}
+process.exit(ok ? 0 : 1);

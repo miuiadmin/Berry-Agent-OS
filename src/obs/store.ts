@@ -293,8 +293,10 @@ function v2ColumnsLanded(db: DatabaseConnection): boolean {
 /**
  * 打开 rollup 库（官方件直连形态——主库拒开基准不适用；文件库 0600 追打）。
  * 目录惰性建（首开建档）；user_version 私有链自跑（normalizeMigrations 校验）。
+ * @param options.busyTimeoutMs 撞锁等待上限毫秒（缺省 5000——openStore 同款
+ *   注入位，基建大扫 #17：行 config 旋钮透传点，测试缝降档用）
  */
-export function openRollupStore(dbPath: string): RollupStore {
+export function openRollupStore(dbPath: string, options?: { busyTimeoutMs?: number }): RollupStore {
   mkdirSync(dirname(dbPath), { recursive: true });
   // 官方件直连（无拒开基准）——obs 是宿主侧编译件，威胁模型不覆盖此边界
   const db: DatabaseConnection = createAppSqliteFace().openDatabase(dbPath);
@@ -302,7 +304,7 @@ export function openRollupStore(dbPath: string): RollupStore {
   // 编舞与主库 openStore 同源共享件（2026-09-01 复盘 T-2——#25 顺序铁律）：
   // busy_timeout 最先 + WAL 幂等探测 + 短退避重试（WAL 切换锁通道不吃
   // busy_timeout 是 SQLite 固有——他进程持写锁时不再 ~0ms 即崩）
-  prepareWalConnection(db);
+  prepareWalConnection(db, { busyTimeoutMs: options?.busyTimeoutMs });
   // 私有迁移链（件内自跑——不进主库聚合链，冷读 B1）
   const current = Number(
     (db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined)?.user_version ?? 0,
