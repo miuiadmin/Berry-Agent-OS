@@ -17,6 +17,7 @@
  * - `doctor`（刀二）：七项体检——①pid 判活 ②health+真握手（顺手连一次
  *   /api/events 即关——503 = 连接帽满）③token 在场且 0600（**判活时只读
  *   禁 ensure 写**——防诊断面自造不符态）④库 readonly 可开 ⑤log 大小
+ *   （50 MiB 体检帽）
  *   ⑥运行 vs 磁上版本 ⑦判死时端口占用探测；僵尸态（pid 活+HTTP 面无响应）
  *   入查。全绿 0 / 任一项红 1。
  * - `--foreground`：前台常驻（launchd/systemd 监视直接子进程的唯一正确
@@ -25,7 +26,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, statSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, renameSync, rmSync, statSync } from 'node:fs';
 import { get as httpGet, request as httpRequest, type RequestOptions } from 'node:http';
 import { connect as netConnect } from 'node:net';
 import { join } from 'node:path';
@@ -54,6 +55,18 @@ import {
 /** daemon.log 文件名（后台形态 stdio 重定向目标） */
 const LOG_FILE = 'daemon.log';
 
+/**
+ * daemon.log 轮转帽（字节）——start 时点超过即代际归档 daemon.log → daemon.log.1
+ * （单代留存；基建大扫 20260901 第五十七批 #51，契约篇刀三清单「daemon.log 轮转」
+ * 挂账提前兑现）。
+ */
+export const DAEMON_LOG_ROTATE_BYTES = 10 * 1024 * 1024;
+/**
+ * daemon.log 体检帽（字节）——doctor ⑤ 超过转红。轮转只在 start 时点执法，
+ * 单次常驻窗内日志无界增长（长期不重启的 daemon）由体检面报警兜底。
+ */
+export const DAEMON_LOG_ALERT_BYTES = 50 * 1024 * 1024;
+
 /** start ready-gate 预算（毫秒）——spawn 到真握手成功的上限，超时杀子响亮非零 */
 export const DAEMON_START_GATE_BUDGET_MS = 30_000;
 /** stop SIGTERM 后轮询预算（毫秒）——预算内未消失升格 SIGKILL */
@@ -68,6 +81,36 @@ const HANDSHAKE_TIMEOUT_MS = 2_000;
 /** daemon.log 路径（后台形态 stdio 重定向目标） */
 function daemonLogPath(dataRoot: string): string {
   return join(daemonDirOf(dataRoot), LOG_FILE);
+}
+
+/**
+ * start 时点的代际轮转：daemon.log 超轮转帽（>10 MiB）→ rename 为 daemon.log.1
+ * （单代留存——旧 .1 先删再换，跨平台同语义：POSIX rename 原子覆盖、Windows 撞
+ * 存在目标报错故先清位）。只在 **start 客户端路径**、openSync 之前执法：若在子进程
+ * boot 路做，父进程已握旧 inode 的 stdio fd 会把新日志全写进已改名的 .1（基建大扫
+ * 20260901 第五十七批 #51）。轮转失败不阻 start——openSync 'a' 原地续尾即回到无轮
+ * 转语义，膨胀面交 doctor ⑤ 体检帽报警。
+ */
+function rotateDaemonLogIfNeeded(dataRoot: string): void {
+  const logPath = daemonLogPath(dataRoot);
+  let size: number;
+  try {
+    size = statSync(logPath).size;
+  } catch {
+    return; // 无日志文件（未 boot 过）——无轮转面
+  }
+  if (size <= DAEMON_LOG_ROTATE_BYTES) return;
+  const archived = `${logPath}.1`;
+  try {
+    rmSync(archived, { force: true }); // force：旧代缺席即 no-op
+  } catch {
+    /* 删不动（权限等）——留给 rename 覆盖位报错路 */
+  }
+  try {
+    renameSync(logPath, archived);
+  } catch {
+    /* 轮转失败不阻 start（见 JSDoc） */
+  }
 }
 
 /** 毫秒睡眠（循环节律——两命令面共用） */
@@ -220,7 +263,9 @@ export async function daemonCommandMain(
     sweepStaleDaemonState(dataRoot, probe);
     // token 先于 spawn：父进程 gate 握手与子进程鉴权同一份（两进程各读同文件）
     const token = ensureDaemonToken(dataRoot);
-    // stdio → daemon.log（append——多次 boot 的日志续尾不截断，排障面保全）
+    // stdio → daemon.log（append——多次 boot 的日志续尾不截断，排障面保全）；
+    // openSync 前先行代际轮转（>10 MiB → .1 单代归档，基建大扫 #51）
+    rotateDaemonLogIfNeeded(dataRoot);
     const logFd = openSync(daemonLogPath(dataRoot), 'a');
     // 子进程命令行 = [node, ...execArgv（tsx loader 随行）, 脚本, daemon, --foreground, --port, N]
     //（与 host-sandbox relaunchArgv 同款三形态统一：node 直跑 / bin shim / tsx dev）
@@ -555,7 +600,8 @@ const defaultPortProbe = (port: number): Promise<boolean> =>
  *    换发行为是诊断面自己制造不符态，doctor 钉死不做）
  * ④ 会话库 readonly 可开 + user_version 披露（零锁竞争——readonly 不触
  *    WAL 写路）
- * ⑤ daemon.log 大小披露（信息项恒 ok）
+ * ⑤ daemon.log 大小披露（50 MiB 体检帽——超帽转红带轮转指引；帽下绿披露、
+ *    缺席恒绿不计红。start 时另有 >10 MiB 代际轮转，本项兜单次常驻窗膨胀）
  * ⑥ 版本对齐：health.version vs 磁上 CLI（升级未重启的辨识面）
  * ⑦ 端口占用态：**仅判死路**探测（pid 死而端口有监听者 → 报占用 + lsof
  *    建议——另一进程顶号/双开竞窗）；僵尸态（pid 活 + HTTP 面无响应）入查
@@ -668,11 +714,20 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     });
   }
 
-  /* ---- ⑤ daemon.log 大小（信息项） ---- */
+  /* ---- ⑤ daemon.log 大小（体检帽 50 MiB——超帽转红带轮转指引） ---- */
   try {
     const size = statSync(daemonLogPath(dataRoot)).size;
     const human = size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MiB` : `${Math.round(size / 1024)} KiB`;
-    findings.push({ ok: true, text: `⑤ 日志：daemon.log ${human}（${daemonLogPath(dataRoot)}）` });
+    findings.push(
+      size > DAEMON_LOG_ALERT_BYTES
+        ? {
+            ok: false,
+            text:
+              `⑤ 日志：daemon.log ${human} 超 50 MiB 体检帽（${daemonLogPath(dataRoot)}——` +
+              '`berry daemon stop` 后 start 触发轮转：start 时 >10 MiB 即归档为 daemon.log.1）',
+          }
+        : { ok: true, text: `⑤ 日志：daemon.log ${human}（${daemonLogPath(dataRoot)}）` },
+    );
   } catch {
     findings.push({ ok: true, text: '⑤ 日志：daemon.log 缺席（未 boot 过——信息项不计红）' });
   }

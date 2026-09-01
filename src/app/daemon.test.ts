@@ -385,6 +385,44 @@ describe('daemon 命令族：start（gate/清扫/超时）', () => {
     expect(killed()).toBe(true); // doomed 子进程即杀不留守（防真子进程迟到起双活）
     rmSync(root, { recursive: true, force: true });
   });
+
+  it('start 代际轮转（基建大扫 #51）：daemon.log >10 MiB → 整替归档 daemon.log.1（单代）；帽下不轮转', async () => {
+    // 大日志 + 旧代残留：轮转须发生且整替旧代（单代留存，不做 .1/.2/.3 链）
+    const root = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    captureStdout();
+    mkdirSync(join(root, 'daemon'), { recursive: true });
+    writeFileSync(join(root, 'daemon', 'daemon.log.1'), 'old-generation'); // 上轮轮转残留
+    const big = Buffer.alloc(10 * 1024 * 1024 + 1, 0x61); // 超轮转帽 1 字节
+    writeFileSync(join(root, 'daemon', 'daemon.log'), big);
+    const { child } = fakeChild(null);
+    const code = await daemonCommandMain('start', 7860, {
+      dataRoot: root,
+      spawnFn: () => child,
+      probeHttp: bootingProbe(root, 424_242),
+      probe: { startId: () => undefined },
+    });
+    expect(code).toBe(0);
+    // 轮转已发生：.1 = 旧大日志（sentinel 旧代被整替）；daemon.log 重生为空（新 fd 从零续尾）
+    expect(statSync(join(root, 'daemon', 'daemon.log.1')).size).toBe(big.length);
+    expect(statSync(join(root, 'daemon', 'daemon.log')).size).toBe(0);
+    rmSync(root, { recursive: true, force: true });
+
+    // 帽下（1 KiB）：不轮转——原文件原地续尾，.1 不造
+    const root2 = mkdtempSync(join(tmpdir(), 'daemon-cmd-'));
+    captureStdout();
+    mkdirSync(join(root2, 'daemon'), { recursive: true });
+    writeFileSync(join(root2, 'daemon', 'daemon.log'), 'x'.repeat(1024));
+    const { child: child2 } = fakeChild(null);
+    await daemonCommandMain('start', 7860, {
+      dataRoot: root2,
+      spawnFn: () => child2,
+      probeHttp: bootingProbe(root2, 424_242),
+      probe: { startId: () => undefined },
+    });
+    expect(statSync(join(root2, 'daemon', 'daemon.log')).size).toBe(1024); // 原文件原地
+    expect(existsSync(join(root2, 'daemon', 'daemon.log.1'))).toBe(false); // 未造 .1
+    rmSync(root2, { recursive: true, force: true });
+  });
 });
 
 describe('daemon 命令族：stop / status（真子进程 + 平台真探针）', () => {
@@ -860,6 +898,25 @@ describe('daemon doctor：七项体检', () => {
     const code = await daemonDoctorMain({ dataRoot: root, dbFile, probe, ...httpFaces() });
     expect(code).toBe(0);
     expect(out.join('')).toContain('⑤ 日志：daemon.log 缺席（未 boot 过——信息项不计红）');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('⑤ 日志体检帽（基建大扫 #51）：>50 MiB 转红带轮转指引；帽下绿披露（含轮转帽 10 MiB 之上、体检帽之下的中间带）', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    mkdirSync(join(root, 'daemon'), { recursive: true });
+    // 超 50 MiB 体检帽 → 红行 + 处置指引（stop 后 start 触发轮转）
+    writeFileSync(join(root, 'daemon', 'daemon.log'), Buffer.alloc(50 * 1024 * 1024 + 1, 0x61));
+    let out = captureStdout();
+    let code = await daemonDoctorMain({ dataRoot: root, dbFile, probe, ...httpFaces() });
+    expect(code).toBe(1);
+    expect(out.join('')).toContain('超 50 MiB 体检帽');
+    expect(out.join('')).toContain('stop');
+    // 中间带（10 MiB 轮转帽之上、50 MiB 体检帽之下）→ 绿披露（轮转只在 start 时点执法，体检不越权代转）
+    writeFileSync(join(root, 'daemon', 'daemon.log'), Buffer.alloc(10 * 1024 * 1024, 0x61));
+    out = captureStdout();
+    code = await daemonDoctorMain({ dataRoot: root, dbFile, probe, ...httpFaces() });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('⑤ 日志：daemon.log 10.0 MiB');
     rmSync(root, { recursive: true, force: true });
   });
 });
