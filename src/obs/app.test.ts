@@ -390,6 +390,9 @@ describe('obs 观测件：复盘 20260901 批回归锁（畸形信封 / 通知�
     await settle(100);
 
     expect(captured.lines.some((l) => l.includes('停摄取'))).toBe(true);
+    // 快赢#3 处置可行动锁：停摄取 warn 必须指向真实库文件（既有处置 = 删库
+    // 重建——运维手册 §1 同源；文案回退到引用挂账未落码的 /obs-rebuild 即红）
+    expect(captured.lines.some((l) => l.includes(dbPath))).toBe(true);
     const obsQuery = runtime.tools.get('obs_query') as ToolDefinition;
     const result = await obsQuery.execute({ metric: 'llm', groupBy: [] }, { toolCallId: 'obs-stop' });
     // 恰 1 次：第一笔在；第二笔事务回滚不在；第三笔停摄取后不进

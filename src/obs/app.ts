@@ -281,8 +281,11 @@ export function createObsApp(): BuiltinAppModule {
       const flushBatch = typeof config.flushBatch === 'number' ? config.flushBatch : DEFAULT_FLUSH_BATCH;
       // busyTimeoutMs（#17）：撞锁等待降档旋钮——透传开库注入位（缺省 5000）
 
-      // 自管库（rollup.db——私有迁移链 + 0600；开库失败 = 行失败响亮）
-      const store = openRollupStore(join(paths.appDataDir(ctx.rowId ?? 'obs'), 'rollup.db'), {
+      // 自管库（rollup.db——私有迁移链 + 0600；开库失败 = 行失败响亮）；
+      // 路径提为具名常量：停摄取 warn 的处置文案指真实库文件（成熟度扫描快赢
+      // #3——warn 不再引用不存在的 /obs-rebuild 命令，改指现存路径）
+      const dbPath = join(paths.appDataDir(ctx.rowId ?? 'obs'), 'rollup.db');
+      const store = openRollupStore(dbPath, {
         busyTimeoutMs: typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : undefined,
       });
       const aggregator = createAggregator();
@@ -344,7 +347,9 @@ export function createObsApp(): BuiltinAppModule {
           unsubscribe?.();
           clearInterval(timer);
           ctx.logger.warn(
-            'obs 自管库写失败——停摄取（/obs-rebuild 判据触发面，契约篇 §6.9 摄取纪律——warn 级对齐规范）',
+            // 处置指现存路径（快赢#3）：rollup.db 纯派生可整库删除重建（运维手册
+            // §1 同源）——warn 直接给真实库路径，不再引用挂账未落码的 /obs-rebuild
+            `obs 自管库写失败——停摄取。处置：删除 ${dbPath} 后 /reload 或重启重建（纯派生库——契约篇 §6.9 摄取纪律）`,
             {
               error: err instanceof Error ? err.stack : String(err),
             },
@@ -376,9 +381,13 @@ export function createObsApp(): BuiltinAppModule {
         // 窗同族近似——非零即响亮留痕（「live=重建」不变式近似打破的信号）
         const misses = aggregator.ingest(payload as EventEnvelope);
         if (misses > 0) {
-          ctx.logger.warn(`obs 遮蔽回退落空 ${misses} 条（重启/reload/drain 近似窗——/obs-rebuild 判据）`, {
-            sessionId,
-          });
+          ctx.logger.warn(
+            // 同上快赢#3：不引用挂账命令，指现存重建路径（近似窗仅聚合漂移，删库重建即消）
+            `obs 遮蔽回退落空 ${misses} 条（重启/reload/drain 近似窗——聚合漂移；可删 rollup.db 重建，纯派生库）`,
+            {
+              sessionId,
+            },
+          );
         }
         pendingCount += 1;
         if (pendingCount >= flushBatch) flush();
