@@ -41,6 +41,9 @@ export interface AssistantMessageData {
   readonly usage?: unknown;
   readonly stopReason?: string;
   readonly interrupted?: boolean;
+  /** stopReason=error/aborted 时的错误说明（错误即数据——durable 持久错误面，
+   * 会话篇 §2.1 第五十七批 #43：超预算截断同 content 链，投影/回读还原） */
+  readonly errorMessage?: string;
 }
 
 /** tool/call 载荷：arguments 为原始未解析字符串（解析失败留给工具管道处理） */

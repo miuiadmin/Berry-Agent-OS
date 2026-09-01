@@ -57,6 +57,8 @@ export type ProjectedMessage =
       readonly toolCalls: readonly ProjectedToolCall[];
       readonly usage?: unknown;
       readonly stopReason?: string;
+      /** 失败说明（stopReason=error/aborted 时——渲染错误行，会话篇 §2.1 #43） */
+      readonly errorMessage?: string;
     }
   | {
       readonly type: 'toolResult';

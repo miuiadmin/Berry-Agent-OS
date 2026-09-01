@@ -21,11 +21,12 @@ import { textOf } from './text';
 /** 工具结果投影行（derive toolResult 型的窄用面） */
 type ToolResultMessage = Extract<ProjectedMessage, { type: 'toolResult' }>;
 
-/** 渲染项三族（投影展平 + 活体尾部——渲染序即消息序） */
+/** 渲染项四族（投影展平 + 活体尾部——渲染序即消息序） */
 type RenderItem =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string; streaming: boolean }
-  | { kind: 'tool'; call: ProjectedToolCall; result: ToolResultMessage | undefined; liveTool: LiveTool | undefined };
+  | { kind: 'tool'; call: ProjectedToolCall; result: ToolResultMessage | undefined; liveTool: LiveTool | undefined }
+  | { kind: 'error'; text: string };
 
 /** 视图属性 */
 interface ChatViewProps {
@@ -58,6 +59,9 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
       } else if (msg.type === 'assistant') {
         const text = textOf(msg.content);
         if (text !== '') out.push({ kind: 'assistant', text, streaming: false });
+        // 失败行（基建大扫 #42）：errorMessage 在场即独立红行——content 空的
+        // 失败 run（模型零产出只余错误）此前屏上什么都不显示
+        if (msg.errorMessage !== undefined) out.push({ kind: 'error', text: msg.errorMessage });
         for (const call of msg.toolCalls) {
           seenCalls.add(call.toolCallId);
           // pending 卡：result 未到 = undefined（活体帧可补状态）
@@ -130,6 +134,16 @@ export function ChatView({ messages, live, approvals, rewinds, onDecide }: ChatV
               <div key={i} className="md self-start max-w-full">
                 {/* streaming：尾部光标块（animate-pulse）——收束后隐 */}
                 <ReactMarkdown>{item.text + (item.streaming ? ' ◍' : '')}</ReactMarkdown>
+              </div>
+            );
+          }
+          if (item.kind === 'error') {
+            return (
+              <div
+                key={i}
+                className="self-start max-w-full rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 font-mono text-xs whitespace-pre-wrap text-red-300"
+              >
+                ✖ {item.text}
               </div>
             );
           }

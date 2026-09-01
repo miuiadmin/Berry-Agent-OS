@@ -434,4 +434,31 @@ describe('投影回读 round-trip（append → derive → projectedToAgentMessag
     expect(roundTrip[0]).toMatchObject({ role: 'user', source: 'subagent-settled' });
     expect(roundTrip[1]).not.toHaveProperty('source');
   });
+
+  it('错误 assistant 的 errorMessage 全链往返：落库带字段 → 投影带字段 → 回读还原（基建大扫 #43）', () => {
+    const session = new Session();
+    const sinks = createDurableSinks(session);
+    // stopReason=error 的终值（错误即数据——进程日志之外唯一持久错误面）
+    const failed: AssistantMessage = {
+      ...textAssistant(''),
+      stopReason: 'error',
+      errorMessage: 'Provider is not configured: anthropic',
+    };
+    sinks.handle({ type: 'turn_start' });
+    sinks.handle({ type: 'message_end', message: failed });
+
+    // 写侧：errorMessage 随 assistant/message 落 durable（修前：schema 无此字段，
+    // 错误文本进程结束即蒸发——重启后只见空 assistant，不知为何失败）
+    const evt = session.events.find((e) => e.type === 'assistant/message')!;
+    expect((evt.data as { errorMessage?: string }).errorMessage).toBe('Provider is not configured: anthropic');
+
+    // 投影透传（TUI 历史重画 / webui 投影渲染的消费面）
+    const projected = deriveMessages(session.events);
+    const assistant = projected.find((m) => m.type === 'assistant') as { errorMessage?: string };
+    expect(assistant.errorMessage).toBe('Provider is not configured: anthropic');
+
+    // 回读还原（恢复续跑后 convertToLlm 前的 AgentMessage 面不丢）
+    const back = projectedToAgentMessages(projected).find((m) => m.role === 'assistant') as AssistantMessage;
+    expect(back.errorMessage).toBe('Provider is not configured: anthropic');
+  });
 });

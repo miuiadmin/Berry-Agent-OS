@@ -113,6 +113,34 @@ describe('S3 TUI 分流呈现（互不绞屏执法面）', () => {
     expect(all).toContain('✓ 会话 session- 后台完成');
     expect(all).not.toContain('后台者的回答'); // 互不绞屏：后台正文不进聚焦屏
   });
+
+  it('后台收场分档：failed → ✖ 失败 / aborted → ⏹ 已中止（基建大扫 #42）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handleActivity('session-xxxx-background', { type: 'agent_start' });
+    tui.handleActivity('session-xxxx-background', { type: 'agent_end', status: 'failed', messages: [] });
+    tui.handleActivity('session-xxxx-bg2', { type: 'agent_start' });
+    tui.handleActivity('session-xxxx-bg2', { type: 'agent_end', status: 'aborted', messages: [] });
+    await flush();
+    const all = terminal.frames.join('');
+    // 修前恒显「✓ 后台完成」——失败 run 被伪装成成功，后台炸了用户毫不知情
+    expect(all).toContain('✖ 会话 session- 后台失败');
+    expect(all).toContain('⏹ 会话 session- 后台已中止');
+    expect(all).not.toContain('✓ 会话 session- 后台完成');
+  });
+
+  it('聚焦者错误 assistant（errorMessage）落 ✖ [错误] 行（基建大扫 #42）', async () => {
+    const terminal = fakeTerminal();
+    const tui = createTuiChannel({ host: strictHost, commands: emptyCommands, terminal });
+    tui.handle({ type: 'agent_start' });
+    tui.handle({
+      type: 'message_end',
+      message: { ...assistantMessage(''), stopReason: 'error', errorMessage: 'Provider is not configured: anthropic' },
+    });
+    await flush();
+    // 修前：content 空的失败 assistant 一行都不出——模型 401 后屏上像什么都没发生
+    expect(terminal.frames.join('')).toContain('✖ [错误] Provider is not configured: anthropic');
+  });
 });
 
 describe('S3 repaint 清屏重画（focus 变化驱动）', () => {

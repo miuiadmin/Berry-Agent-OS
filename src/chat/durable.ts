@@ -201,6 +201,9 @@ export function createDurableSinks(
             content: truncateForDurable(message.content.filter((block) => block.type !== 'toolCall')),
             usage: message.usage,
             stopReason: message.stopReason,
+            // 错误即数据（会话篇 §2.1 #43）：errorMessage 在场才落字段——错误文本
+            // 随事件持久，进程日志之外 TUI/webui 重画与恢复续跑均有失败真相可读
+            ...(message.errorMessage !== undefined ? { errorMessage: budgetString(message.errorMessage) } : {}),
           });
           // 底账统一真实请求（2026-08-25 应用面第二纵切拍板，契约篇 §5.4）：主 loop
           // 前台花销同落 llm/usage（缺省 foreground 道）——此前只 complete 单发进账，
@@ -326,6 +329,9 @@ export function projectedToAgentMessages(projected: readonly ProjectedMessage[])
           usage: (message.usage as Usage | undefined) ?? NO_USAGE,
           stopReason: (message.stopReason as StopReason | undefined) ?? 'stop',
           timestamp: 0,
+          // errorMessage 还原（会话篇 §2.1 #43）：convertToLlm 给 provider 时自然
+          // 丢弃（非 LLM 消息面字段），TUI/webui 渲染与桶表判定可读失败真相
+          ...(message.errorMessage !== undefined ? { errorMessage: message.errorMessage } : {}),
         });
         break;
       }

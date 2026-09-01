@@ -33,7 +33,7 @@ import type { AgentEvent } from '../agent/events.js';
 import type { AgentMessage } from '../contracts/messages.js';
 import { isStandardMessage } from '../contracts/messages.js';
 import { chainBackground } from '../context/chain.js';
-import { assistantText, assistantToolLines, renderAgentMessage } from './render.js';
+import { assistantErrorLine, assistantText, assistantToolLines, renderAgentMessage } from './render.js';
 import { accentColorizer } from './theme.js';
 import { createPromptQueue } from './prompt.js';
 import { createFileSegmentProvider, createMentionProvider, type FilesFace, type SymbolsFace } from './mention.js';
@@ -398,7 +398,11 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         break;
       case 'message_end':
         if (isStandardMessage(event.message) && event.message.role === 'assistant') {
-          closeStreaming(assistantText(event.message), assistantToolLines(event.message));
+          // 失败行随流式收尾一并落屏（#42）：content 空的失败 run 也有 ✖ [错误] 一行
+          closeStreaming(assistantText(event.message), [
+            ...assistantToolLines(event.message),
+            ...assistantErrorLine(event.message),
+          ]);
         }
         // user/toolResult/自定义角色在 message_start 已渲染，这里不重复
         break;
@@ -462,7 +466,15 @@ export function createTuiChannel(opts: TuiChannelOptions): TuiChannel {
         appendLines([`${colorize(`⧗ 会话 ${short}`)} 后台工作中`]);
         break;
       case 'agent_end':
-        appendLines([`${colorize(`✓ 会话 ${short}`)} 后台完成`]);
+        // 收场三档（#42）：修前恒显「✓ 后台完成」——失败/中止 run 被伪装成
+        // 成功，后台炸了用户毫不知情。三档与 RunStatus 一一对应（agent/events）
+        appendLines([
+          event.status === 'failed'
+            ? `${colorize(`✖ 会话 ${short}`)} 后台失败`
+            : event.status === 'aborted'
+              ? `${colorize(`⏹ 会话 ${short}`)} 后台已中止`
+              : `${colorize(`✓ 会话 ${short}`)} 后台完成`,
+        ]);
         break;
       default:
         break; // message/tool 事件不进正文（正文只属聚焦者——互不绞屏执法）

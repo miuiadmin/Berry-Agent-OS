@@ -118,6 +118,23 @@ describe('renderAgentMessage 内置三角色', () => {
     expect(renderAgentMessage(message)).toEqual(['答案', '⚙ fs.read {}']);
   });
 
+  it('assistant errorMessage 在场：✖ [错误] 行垫尾（基建大扫 #42）', () => {
+    // stopReason=error 且 content 空——失败 run 最常见形态：模型零产出只余错误
+    const failed: AssistantMessage = {
+      ...assistantMsg([]),
+      stopReason: 'error',
+      errorMessage: 'Provider is not configured: anthropic',
+    };
+    expect(renderAgentMessage(failed)).toEqual(['✖ [错误] Provider is not configured: anthropic']);
+    // 正文与错误并存（部分产出后失败）：错误行垫在正文/工具行之后
+    const partial: AssistantMessage = {
+      ...assistantMsg([{ type: 'text', text: '写到一半' }]),
+      stopReason: 'error',
+      errorMessage: '连接超时',
+    };
+    expect(renderAgentMessage(partial)).toEqual(['写到一半', '✖ [错误] 连接超时']);
+  });
+
   it('toolResult：↳/✖ 首行摘要（历史投影与活体事件同形）', () => {
     expect(renderAgentMessage(toolResultMsg('好的'))).toEqual(['↳ 好的']);
     expect(renderAgentMessage(toolResultMsg('坏了', true))).toEqual(['✖ 坏了']);

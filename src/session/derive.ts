@@ -44,6 +44,8 @@ export type ProjectedMessage =
       readonly toolCalls: readonly ProjectedToolCall[];
       readonly usage?: unknown;
       readonly stopReason?: string;
+      /** 失败说明（stopReason=error/aborted 时——会话篇 §2.1 #43 投影透传） */
+      readonly errorMessage?: string;
     }
   | {
       readonly type: 'toolResult';
@@ -65,6 +67,8 @@ export interface FoldState {
     content: unknown;
     usage?: unknown;
     stopReason?: string;
+    /** 失败说明（透传进投影消息——会话篇 §2.1 #43） */
+    errorMessage?: string;
     toolCalls: ProjectedToolCall[];
   } | null;
   /** toolCallId → 调用信息（tool/result 到达时取名字与参数，配对后删除） */
@@ -111,6 +115,7 @@ export function stepFold(state: FoldState, event: SessionEvent): void {
         content: data.content,
         usage: data.usage,
         stopReason: data.stopReason,
+        ...(data.errorMessage !== undefined ? { errorMessage: data.errorMessage } : {}),
         toolCalls: [],
       };
       return;
@@ -179,6 +184,7 @@ function assistantMessageOf(
     toolCalls: [...buf.toolCalls],
     usage: buf.usage,
     stopReason: buf.stopReason,
+    ...(buf.errorMessage !== undefined ? { errorMessage: buf.errorMessage } : {}),
   };
 }
 

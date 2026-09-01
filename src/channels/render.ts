@@ -43,6 +43,16 @@ export function assistantToolLines(message: AssistantMessage): string[] {
     .map((block) => (block.type === 'toolCall' ? `⚙ ${block.name} ${truncate(JSON.stringify(block.arguments))}` : ''));
 }
 
+/**
+ * assistant 消息失败行（基建大扫 #42）：errorMessage 在场（stopReason=
+ * error/aborted——错误即数据）时产出一条 ✖ [错误] 行，缺席返回空数组。
+ * content 空的失败 run（模型零产出只余错误）此前一行都不出——失败在
+ * 屏上不可见；此行是 TUI 正文与流式收尾共用的唯一失败呈现面。
+ */
+export function assistantErrorLine(message: AssistantMessage): string[] {
+  return message.errorMessage !== undefined ? [`✖ [错误] ${truncate(message.errorMessage)}`] : [];
+}
+
 /** 工具执行开始行 */
 export function formatToolStart(toolName: string, args: Record<string, unknown>): string {
   return `⚙ ${toolName} ${truncate(JSON.stringify(args))}`;
@@ -110,7 +120,8 @@ export function renderAgentMessage(
         const lines = assistantText(message)
           .split('\n')
           .filter((line) => line !== '');
-        return [...lines, ...assistantToolLines(message)];
+        // 失败行垫尾（#42）：部分产出后失败时正文/工具行在前，错误真相压轴
+        return [...lines, ...assistantToolLines(message), ...assistantErrorLine(message)];
       }
       case 'toolResult':
         return renderToolResult(message);
