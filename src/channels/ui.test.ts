@@ -258,3 +258,40 @@ describe('UiService 撤销信号透传（channels 批刀 A——降级路径同�
     expect(seen.every((s) => s.signal === controller.signal)).toBe(true);
   });
 });
+
+describe('UiService 观众探针 hasAudience（基建大扫 #44）', () => {
+  it('无后端 → false（无头 run/tick 通知静默 no-op，告警不耗冷却）', () => {
+    expect(createUiService().hasAudience()).toBe(false);
+  });
+
+  it('后端不实现 hasAudience（TUI 形）→ 在场即恒真（保守缺省——不因探针缺席静默）', () => {
+    const ui = createUiService();
+    ui.attach(stubBackend('tui').backend);
+    expect(ui.hasAudience()).toBe(true);
+  });
+
+  it('后端自报 false（webui 零连接形）→ 探针 false——「在场」≠「有观众」（修前=在场即真，daemon webui 常开零连接也耗冷却）', () => {
+    const ui = createUiService();
+    const noAudience: UiBackend = {
+      id: 'webui-empty',
+      notify: () => {},
+      setStatus: () => {},
+      hasAudience: () => false,
+    };
+    ui.attach(noAudience);
+    expect(ui.hasAudience()).toBe(false);
+  });
+
+  it('多后端任一自报真 → 真（some 语义——TUI 在线即有观众，webui 零连接不拖后腿）', () => {
+    const ui = createUiService();
+    const noAudience: UiBackend = {
+      id: 'webui-empty',
+      notify: () => {},
+      setStatus: () => {},
+      hasAudience: () => false,
+    };
+    ui.attach(noAudience);
+    ui.attach(stubBackend('tui').backend); // 不实现 hasAudience → 缺省真
+    expect(ui.hasAudience()).toBe(true);
+  });
+});

@@ -532,6 +532,11 @@ async function applyMemoryApp(ctx: AppContext, config: MemoryConfig | undefined,
             ui.notify(
               `导入完成：新入 ${report.imported} / 已存在跳过 ${report.skippedExisting} / 密钥拦截 ${report.skippedSecret} / 无效行 ${report.invalid}。`,
             );
+            // 行级失败明细（基建大扫 #11）：行号 + 原因短语——手改/截断文件的定位
+            // 线索（帽 10 条；全量计数已在上一行——被截断的长尾用户按行号抽查）
+            for (const d of report.invalidDetails ?? []) {
+              ui.notify(`  无效行 第 ${d.line} 行：${d.reason}`);
+            }
           } catch (err) {
             ui.notify(`导入失败：${describeError(err)}`);
           }

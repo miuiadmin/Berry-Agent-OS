@@ -388,8 +388,44 @@ describe('文件导入导出（JSONL 编排件）', () => {
     delete (missing as { ttl_days?: number | null }).ttl_days; // 手改缺列
     const secret = exportRow({ id: '0a1b2c3d-0000-7000-8000-0000000000cc', summary: 'token = ' + 'a'.repeat(24) });
     const text = [headerLine(), JSON.stringify(good), JSON.stringify(missing), JSON.stringify(secret)].join('\n');
-    expect(importMemoryText(db, text)).toEqual({ imported: 1, skippedExisting: 0, skippedSecret: 1, invalid: 1 });
+    // #11 后 invalid > 0 时明细在场——缺列行（文件第 3 行）入明细
+    expect(importMemoryText(db, text)).toEqual({
+      imported: 1,
+      skippedExisting: 0,
+      skippedSecret: 1,
+      invalid: 1,
+      invalidDetails: [{ line: 3, reason: 'missing column' }],
+    });
     expect(db.get(good.id)).toBeDefined(); // 好行照入
+  });
+
+  it('行级失败明细（基建大扫 #11）：invalid 行披露原始文件行号与原因短语，帽 10 条', () => {
+    // 手改/截断文件的运维定位线索：坏 JSON 行与缺列行各报一条明细——行号必须是
+    // 原始文件行号（空行被过滤后序号会漂移——用户按行号打开文件须能对上位置）
+    const badJson = '根本不是 JSON 的数据行';
+    const missing = exportRow({ id: '0a1b2c3d-0000-7000-8000-0000000000dd' });
+    // frozen 列在库导出面是 number（0/1）——按 unknown 转形删键模拟手改缺列
+    delete (missing as unknown as { frozen?: unknown }).frozen;
+    const text = [headerLine(), badJson, '', JSON.stringify(missing)].join('\n'); // 第 2 行坏、第 3 行空、第 4 行缺列
+    const report = importMemoryText(db, text);
+    expect(report.invalid).toBe(2);
+    // 修前红：现状只计数无明细——invalid 行不可定位（行号/原因零披露）
+    expect(report.invalidDetails).toEqual([
+      { line: 2, reason: expect.stringContaining('JSON') },
+      { line: 4, reason: expect.stringContaining('missing column') },
+    ]);
+    // 明细帽 10 条防刷屏（对齐 bash-path.ts:126 probed.slice(0,8) 先例）——计数不受帽影响
+    const rows = Array.from({ length: 12 }, (_, i) => `坏行 ${i}`);
+    const flood = [headerLine(), ...rows].join('\n');
+    const capped = importMemoryText(db, flood);
+    expect(capped.invalid).toBe(12);
+    expect(capped.invalidDetails).toHaveLength(10);
+  });
+
+  it('全好行零明细键：invalidDetails 不在场（报告形状最小——既有消费面零扰动）', () => {
+    const row = exportRow({ id: '0a1b2c3d-0000-7000-8000-0000000000ee' });
+    const text = [headerLine(), JSON.stringify(row)].join('\n');
+    expect(importMemoryText(db, text)).toEqual({ imported: 1, skippedExisting: 0, skippedSecret: 0, invalid: 0 });
   });
 
   it('writeExportFile 真落盘（明文 JSONL 可直读回放）', async () => {

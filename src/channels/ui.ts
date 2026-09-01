@@ -112,10 +112,11 @@ export function createUiService(opts?: { onError?: (err: unknown, op: 'notify' |
     },
 
     hasAudience(): boolean {
-      // 广播面在场探针（复盘 20260901 R-2）：在场即真（保守口径——不探连通）；
-      // 无头 run/tick 进程 backends 空 → notify 静默 no-op，通知类消费方据此
-      // 跳过（如 obs 告警触发三件——无头不耗冷却，daemon 面下次重评重发）
-      return backends.length > 0;
+      // 观众探针（基建大扫 #44 修订 R-2）：语义 =「有人可收」非「通道在场」——
+      // 后端可选自报 hasAudience()，不实现者缺省真（TUI 在场即有人）；webui 报
+      // 在线连接数（常开零连接 = 无观众）。无头进程 backends 空 → some 自然
+      // false，notify 静默 no-op，通知类消费方（obs 告警）不耗冷却
+      return backends.some((b) => (b.hasAudience ? b.hasAudience() : true));
     },
 
     attach(backend: UiBackend): Disposer {

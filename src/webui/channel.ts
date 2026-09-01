@@ -152,9 +152,11 @@ export class WebuiChannel {
   };
 
   /**
-   * webui 广播后端（UiBackend 能力面钉死：只实现 notify/setStatus 两广播面；
-   * 不实现 confirm/input/select——防 UiService 首个支持后端接序抢走 TUI 审批
-   * 应答；setWidget 缺席 = 聚合器按 §4.3 降级规则自动降 notify，非本面职责）。
+   * webui 广播后端（UiBackend 能力面钉死：只实现 notify/setStatus 两广播面 +
+   * hasAudience 观众探针面；不实现 confirm/input/select——防 UiService 首个
+   * 支持后端接序抢走 TUI 审批应答；setWidget 缺席 = 聚合器按 §4.3 降级规则
+   * 自动降 notify，非本面职责。hasAudience 非交互面不参与接序——只自报
+   * 「有没有人可收」：在线连接数 > 0，daemon 常开零连接 = 无观众，#44）。
    */
   readonly backend: UiBackend = {
     id: 'webui',
@@ -167,6 +169,7 @@ export class WebuiChannel {
     setStatus: (status) => {
       this.broadcast({ kind: 'status', payload: { status } });
     },
+    hasAudience: () => this.size > 0,
   };
 
   /** 废弃通道（行回卷）：停心跳、毁全部连接；此后一切入向调用 no-op */

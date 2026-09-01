@@ -16,7 +16,12 @@ import { describe, expect, it, vi } from 'vitest';
 /* ---------------- 六命令主流程 + wrapper/检测面全 mock（单元边界） ---------------- */
 
 vi.mock('./tui-main.js', () => ({ tuiMain: vi.fn(async () => 0) }));
-vi.mock('./run-main.js', () => ({ runOnceMain: vi.fn(async () => 0) }));
+// run-main 的 mock 体是 hoisted 单例 vi.fn（基建大扫 #8）：dispatch 内
+// vi.resetModules() 会让 vi.mock 工厂重跑——工厂返回同一 spy 实例，既有调用史
+// 断言（mock.calls）与测试注入的 mockRejectedValueOnce（once 队列）都跨
+// resetModules 存活（clearAllMocks 只清调用史不清 once 队列）
+const runMainMock = vi.hoisted(() => ({ spy: vi.fn(async (_argv: readonly string[]): Promise<number> => 0) }));
+vi.mock('./run-main.js', () => ({ runOnceMain: runMainMock.spy }));
 vi.mock('./tick-main.js', () => ({ tickMain: vi.fn(async () => 0) }));
 vi.mock('./dump-config.js', () => ({ dumpConfigMain: vi.fn(async () => 0) }));
 vi.mock('./host-sandbox.js', () => ({ relaunchUnderHostSandbox: vi.fn(async () => 0) }));
@@ -195,5 +200,34 @@ describe('CLI 入口：未知 APP_ 环境变量提示（基建大扫 #31）', ()
     } finally {
       delete process.env['APP_DAT_DIR'];
     }
+  });
+});
+
+/* ---------------- #8：CLI 顶层兜底织码 ---------------- */
+
+describe('CLI 顶层兜底：AppError 织码（基建大扫 #8）', () => {
+  it('逃到顶层的 AppError 走 describeError——stderr 含 [CODE] 前缀（修前=裸 message 丢码）', async () => {
+    // 主流程抛真注册码 AppError 逃顶层：旧实现只打 error.message，码词汇在 CLI
+    // 最后一环丢失（headless 脚本消费方无从追码）。once 形态注入（消费即复原）。
+    // AppError 必须在 impl 体内动态 import 构造：resetModules 换代后，测试文件
+    // 顶层 import 的 AppError 类与 main.ts 加载的不同代，instanceof 恒假——
+    // impl 被调时（main.js 已加载）动态 import 命中 main.ts 同代类
+    runMainMock.spy.mockImplementationOnce(async () => {
+      const { AppError: SameGenAppError } = await import('../contracts/errors.js');
+      throw new SameGenAppError('WEBUI_PORT_IN_USE', '装配炸了（测试注入）');
+    });
+    const { code, stderr } = await dispatch(['run', 'hi']);
+    expect(code).toBe(1); // 顶层兜底统一退 1
+    expect(stderr).toContain('✖');
+    expect(stderr).toContain('[WEBUI_PORT_IN_USE]'); // 修前红：裸文本无码前缀
+    expect(stderr).toContain('装配炸了（测试注入）');
+  });
+
+  it('非 AppError 异常照常取 message（describeError 全覆盖——无回归）', async () => {
+    runMainMock.spy.mockRejectedValueOnce(new Error('普通异常'));
+    const { code, stderr } = await dispatch(['run', 'hi']);
+    expect(code).toBe(1);
+    expect(stderr).toContain('普通异常');
+    expect(stderr).not.toContain('['); // 无码不织前缀
   });
 });

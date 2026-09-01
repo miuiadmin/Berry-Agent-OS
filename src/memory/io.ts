@@ -22,6 +22,7 @@ import { join, sep } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import type { MemoryStore, MemoryExportRow } from './store.js';
 import { detectSecret } from './scan.js';
+import { describeError } from '../contracts/errors.js';
 
 /** 文件格式标识（header.format——导入侧校验；品牌词只出现在载荷字符串，非标识符） */
 const EXPORT_FORMAT = 'berryagent-memory';
@@ -41,6 +42,14 @@ export interface ImportReport {
   readonly invalid: number;
   /** 整体拒导原因（header 校验失败时非空——此时行级计数全零） */
   readonly rejected?: 'format';
+  /**
+   * 行级失败明细（基建大扫 #11）：解析/校验失败行的定位线索——原始文件行号
+   * （1 起，header 即第 1 行；空行被过滤但行号不漂移——按行号打开文件可对上
+   * 位置）+ 原因短语（describeError 输出——JSON 解析错/缺列等）。帽 10 条防
+   * 刷屏（对齐 bash-path.ts:126 probed.slice(0,8) 先例），计数不受帽影响；
+   * 仅 invalid > 0 时在场（报告形状最小——全好行零扰动）。
+   */
+  readonly invalidDetails?: ReadonlyArray<{ line: number; reason: string }>;
 }
 
 /** 导出 header 形态（首行；ownerRoots = 导出时生效的项目根列表——恢复侧环境核对用） */
@@ -88,25 +97,33 @@ export async function writeExportFile(filePath: string, text: string): Promise<v
  * 全批（尽力而为 + 计数报告——运维面要的是「导了多少、跳了多少、为何跳」）。
  */
 export function importMemoryText(store: MemoryStore, text: string): ImportReport {
-  const lines = text.split('\n').filter((l) => l.trim() !== '');
-  if (lines.length === 0) return { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: 1, rejected: 'format' };
+  // 行拆分保留原始文件行号（1 起）：空行过滤照旧（不计 invalid），但行号取
+  // 过滤前的原位——明细报给用户的是「打开文件能对上」的行号（基建大扫 #11）
+  const entries = text
+    .split('\n')
+    .map((line, i) => ({ line, fileLine: i + 1 }))
+    .filter((e) => e.line.trim() !== '');
+  if (entries.length === 0)
+    return { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: 1, rejected: 'format' };
   // header 校验：首行必须是与导出面同源的 header，格式或版本不匹配整体拒导
   let header: ExportHeader;
   try {
-    const parsed = JSON.parse(lines[0]!) as Partial<ExportHeader>;
+    const parsed = JSON.parse(entries[0]!.line) as Partial<ExportHeader>;
     if (parsed.format !== EXPORT_FORMAT || parsed.formatVersion !== EXPORT_FORMAT_VERSION) {
-      return { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: lines.length, rejected: 'format' };
+      return { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: entries.length, rejected: 'format' };
     }
     header = parsed as ExportHeader;
   } catch {
-    return { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: lines.length, rejected: 'format' };
+    return { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: entries.length, rejected: 'format' };
   }
   void header; // header 的 ownerRoots 是人读面——导入按行内 owner_key 原样落，不自动归账
   const report = { imported: 0, skippedExisting: 0, skippedSecret: 0, invalid: 0 };
-  for (const line of lines.slice(1)) {
+  // 行级失败明细（#11）：帽 10 条——计数全量、明细截断（防刷屏非防账）
+  const details: Array<{ line: number; reason: string }> = [];
+  for (const entry of entries.slice(1)) {
     let row: MemoryExportRow;
     try {
-      const parsed = JSON.parse(line) as Partial<MemoryExportRow>;
+      const parsed = JSON.parse(entry.line) as Partial<MemoryExportRow>;
       // 结构校验：全 17 列在场（显式 null 合法——判 undefined 缺失；导出面
       // JSON.stringify 不会省略 null 列，缺失即手改/损坏文件）
       const required: Array<keyof MemoryExportRow> = [
@@ -130,8 +147,10 @@ export function importMemoryText(store: MemoryStore, text: string): ImportReport
       ];
       if (required.some((k) => parsed[k] === undefined)) throw new Error('missing column');
       row = parsed as MemoryExportRow;
-    } catch {
+    } catch (err) {
       report.invalid += 1;
+      // 行号 + 原因短语入明细——「为何跳」的行级兑现（describeError 单源）
+      if (details.length < 10) details.push({ line: entry.fileLine, reason: describeError(err) });
       continue;
     }
     // secret 扫描（§8.1 同律——导入行不豁免；双面扫，命中跳过计数不中断）
@@ -142,7 +161,8 @@ export function importMemoryText(store: MemoryStore, text: string): ImportReport
     if (store.importRow(row)) report.imported += 1;
     else report.skippedExisting += 1;
   }
-  return report;
+  // 仅失败行在场时附明细（报告形状最小——全好行消费面零扰动）
+  return details.length > 0 ? { ...report, invalidDetails: details } : report;
 }
 
 /** 导入读盘（命令 handler 调用——路径合法性归 handler 判定） */

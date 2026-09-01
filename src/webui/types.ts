@@ -243,6 +243,14 @@ export interface WebuiAppDeps {
    */
   readonly cordoned?: () => boolean;
   /**
+   * write-behind 运行态活取值（基建大扫 #27）：health 载荷 `writeBehind` 键的
+   * 数据源——`{paused, sessions, events}` 三值（闩态 + 积压两数）。闩态与
+   * cordoned 两独立信号：paused = 批落失败自动重试暂停（任一批成功即复位，
+   * 瞬态可自愈）；cordoned = 组合根一次性闩（置位后不清）。缺省不传 = 无
+   * 持久层（:memory: 诊断形态）——health 不携带该键。
+   */
+  readonly writeBehindStats?: () => { paused: boolean; sessions: number; events: number };
+  /**
    * 鉴权物（daemon 刀一·P1 起为 daemon 形态注入位；复盘 S-1 勘正——结构不变式
    * 「监听 ⇒ 鉴权」升格为件本体保证）：组合根注入则用注入值（daemon 持久 token）；
    * **缺席时件本体 apply 期自足生成进程内一次性 token**（32 字节随机 hex、只存

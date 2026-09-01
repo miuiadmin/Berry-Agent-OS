@@ -157,6 +157,45 @@ describe('webui 服务面：全端点 + 三防线 + 静态分发', () => {
     expect(JSON.parse(r.text)).toEqual({ ok: true, version: 'test-1.0.0' });
   });
 
+  it('health writeBehind 运行态键（基建大扫 #27）：注入三值活取 → 应答携带；未注入 → 键缺席', async () => {
+    // 独立小 server（文件级单例 deps 固定不带 writeBehindStats——键缺席正断言）
+    const wbPort = await grabPort();
+    const wbChannel = new WebuiChannel();
+    let statsCalls = 0;
+    const { server: wbServer, close: wbClose } = createWebuiServer({
+      port: wbPort,
+      host: '127.0.0.1',
+      deps: stubDeps({
+        // 活取语义：每次请求重读（闩态翻转后下一次 health 即新值）
+        writeBehindStats: () => {
+          statsCalls += 1;
+          return { paused: true, sessions: 2, events: 5 };
+        },
+      }),
+      channel: wbChannel,
+      approvals: createPendingApprovals(),
+      staticRoot: import.meta.dirname,
+      version: 'test-1.0.0',
+      logger: stubLogger(),
+    });
+    try {
+      await new Promise<void>((resolve) => wbServer.listen(wbPort, '127.0.0.1', () => resolve()));
+      const hit = await send(wbPort, { method: 'GET', path: '/api/health' });
+      expect(JSON.parse(hit.text)).toEqual({
+        ok: true,
+        version: 'test-1.0.0',
+        writeBehind: { paused: true, sessions: 2, events: 5 },
+      });
+      expect(statsCalls).toBe(1); // 应答时点活取一次
+    } finally {
+      wbChannel.dispose();
+      await wbClose();
+    }
+    // 缺席形态：文件级单例（stubDeps 不带该键）→ 应答无 writeBehind 键
+    const miss = await send(port, { method: 'GET', path: '/api/health' });
+    expect(JSON.parse(miss.text)).not.toHaveProperty('writeBehind');
+  });
+
   it('/api/sessions → 200 清单载荷原样转发', async () => {
     const r = await send(port, { method: 'GET', path: '/api/sessions' });
     expect(r.status).toBe(200);

@@ -24,6 +24,7 @@
  * dump-config 的真实主流程。顶层异常统一 stderr 一行 + 退出码 1。
  */
 import { VERSION_WITH_CODENAME as VERSION } from './version.js';
+import { describeError } from '../contracts/errors.js';
 import { upgradeMain } from './upgrade.js';
 import { tuiMain } from './tui-main.js';
 import { runOnceMain } from './run-main.js';
@@ -539,8 +540,10 @@ function main(argv: string[]): number {
       process.exitCode = code;
     },
     (error: unknown) => {
-      // 顶层兜底：AppError 携码、其余取 message（一行 stderr——细节在 debug 日志）
-      process.stderr.write(`✖ ${error instanceof Error ? error.message : String(error)}\n`);
+      // 顶层兜底走 describeError 单源（基建大扫 #8）：AppError 织 [CODE] 前缀
+      //（码词汇不在 CLI 最后一环丢失——headless 脚本消费方追码可依）、其余取
+      // message（一行 stderr——细节在 debug 日志）
+      process.stderr.write(`✖ ${describeError(error)}\n`);
       process.exitCode = 1;
     },
   );

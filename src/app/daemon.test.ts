@@ -719,10 +719,10 @@ describe('httpProbe：三腿探活（daemon.ts 实码——start/stop/doctor 三
 });
 
 /* ------------------------------------------------------------------ */
-/* doctor 七项体检（刀二——依赖注入假面；盘上事实真造真断）              */
+/* doctor 九项体检（刀二——依赖注入假面；盘上事实真造真断）              */
 /* ------------------------------------------------------------------ */
 
-describe('daemon doctor：七项体检', () => {
+describe('daemon doctor：九项体检', () => {
   /** 体检前置盘面：活态 daemon.json + 0600 token + 真库文件（user_version 7） */
   function healthyRoot(): {
     root: string;
@@ -750,7 +750,7 @@ describe('daemon doctor：七项体检', () => {
     };
   }
 
-  it('无 daemon.json → 提示 + 1（不进七项）', async () => {
+  it('无 daemon.json → 提示 + 1（不进体检）', async () => {
     const root = mkdtempSync(join(tmpdir(), 'daemon-doc-'));
     const out = captureStdout();
     expect(await daemonDoctorMain({ dataRoot: root })).toBe(1);
@@ -774,11 +774,13 @@ describe('daemon doctor：七项体检', () => {
     });
     const text = out.join('');
     expect(code).toBe(0);
-    expect(text).toContain('七项全绿');
+    expect(text).toContain('九项全绿');
     expect(text).toContain('pid 777 存活');
     expect(text).toContain('真握手 200');
     expect(text).toContain('user_version 7'); // ④ 披露迁移位
     expect(text).toContain(`对齐（运行 ${VERSION} = 磁上 ${VERSION}`); // ⑥ 对齐
+    // ⑧ 键缺席形态（httpFaces 缺省不带 writeBehind）：如实注记不转红
+    expect(text).toContain('⑧ 落盘闩态：health 未携带 writeBehind');
     expect(portProbed).toBe(0); // 判活路不探端口（⑦ 仅判死路）
     expect(existsSync(daemonTokenPath(root))).toBe(true); // 零 ensure 重写
     rmSync(root, { recursive: true, force: true });
@@ -800,6 +802,64 @@ describe('daemon doctor：七项体检', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('⑧ 落盘闩态：writeBehind.paused=true → ⑧ 红（瞬态文案）+ ⑨ 两数披露 + 退出 1（基建大扫 #27）', async () => {
+    const { root, dbFile, probe } = healthyRoot();
+    const out = captureStdout();
+    const code = await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({
+        healthBody: JSON.stringify({ version: VERSION, writeBehind: { paused: true, sessions: 2, events: 5 } }),
+      }),
+    });
+    expect(code).toBe(1);
+    const text = out.join('');
+    expect(text).toContain('✗ ⑧ 落盘闩态：瞬态暂停');
+    // ⑨ 积压两数绿披露（不转红）
+    expect(text).toContain('⑨ 积压：待写会话 2 / 事件 5');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('⑧×degraded 组合判读：两者并到 = 恒败中文案；仅 paused 无 degraded = 瞬态', async () => {
+    // degraded（cordon 组合根闩）+ paused 并到 → 恒败中
+    const { root, dbFile, probe } = healthyRoot();
+    const both = captureStdout();
+    await daemonDoctorMain({
+      dataRoot: root,
+      dbFile,
+      probe,
+      ...httpFaces({
+        healthBody: JSON.stringify({
+          version: VERSION,
+          degraded: 'persistence',
+          writeBehind: { paused: true, sessions: 1, events: 3 },
+        }),
+      }),
+    });
+    expect(both.join('')).toContain('恒败中（自动重试暂停且 cordon 已闩');
+    rmSync(root, { recursive: true, force: true });
+    // degraded 在场 + paused=false → 已复流但 cordon 仍闩（⑧ 绿——cordon 红在 ②）
+    const { root: r2, dbFile: db2, probe: p2 } = healthyRoot();
+    const recovered = captureStdout();
+    await daemonDoctorMain({
+      dataRoot: r2,
+      dbFile: db2,
+      probe: p2,
+      ...httpFaces({
+        healthBody: JSON.stringify({
+          version: VERSION,
+          degraded: 'persistence',
+          writeBehind: { paused: false, sessions: 0, events: 0 },
+        }),
+      }),
+    });
+    const recText = recovered.join('');
+    expect(recText).toContain('✓ ⑧ 落盘闩态：已复流但 cordon 仍闩');
+    expect(recText).toContain('✗ ②'); // degraded 使 ② 红（cordon 本红位）
+    rmSync(r2, { recursive: true, force: true });
+  });
+
   it('② events 503 计红（基建大扫 #9）：帽满 = 服务面真实降级，不再「注记而全绿」', async () => {
     const { root, dbFile, probe } = healthyRoot();
     const out = captureStdout();
@@ -812,7 +872,7 @@ describe('daemon doctor：七项体检', () => {
     expect(code).toBe(1); // 修前红：旧形 events 不参与 ok 判定 → code 0 假绿
     const text = out.join('');
     expect(text).toContain('16 连接帽满');
-    expect(text).not.toContain('七项全绿'); // 总结行与注记不再自相矛盾
+    expect(text).not.toContain('九项全绿'); // 总结行与注记不再自相矛盾
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -851,7 +911,7 @@ describe('daemon doctor：七项体检', () => {
     const code = await daemonDoctorMain({ dataRoot: rootA, probe, ...httpFaces() });
     expect(code).toBe(0); // 修前红：旧形按 env 面体检 → ③ token 缺失 + ④ 库开不出 = 1
     const text = out.join('');
-    expect(text).toContain('七项全绿');
+    expect(text).toContain('九项全绿');
     expect(text).toContain('按 daemon.json 记录值'); // 对账披露行（env 分叉如实报出）
     expect(text).toContain(rootB); // 记录值路径进披露
     rmSync(rootA, { recursive: true, force: true });

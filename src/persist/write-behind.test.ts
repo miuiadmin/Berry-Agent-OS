@@ -340,3 +340,42 @@ describe('顺序保证', () => {
     await p.close();
   });
 });
+
+describe('积压披露与批落打点（基建大扫 #27）', () => {
+  it('pendingSessionCount/pendingEventCount：enqueue 计入、flush 屏障归零（health 两数数据源）', async () => {
+    // 长窗（10s）不自动触发——enqueue 后 pending 计数稳定可断言
+    const p = Persistence.open({ path: nextPath(), windowMs: 10_000 });
+    const wb = p.writeBehind;
+    expect(wb.pendingSessionCount).toBe(0); // 空态
+    expect(wb.pendingEventCount).toBe(0);
+    const s1 = p.createSession({ cwd: '/t' });
+    s1.append('user/message', { content: 'a1' });
+    s1.append('user/message', { content: 'a2' });
+    const s2 = p.createSession({ cwd: '/t' });
+    s2.append('user/message', { content: 'b1' });
+    // 两会话三事件（会话经 onLiveEvent 接线自动 enqueue）
+    expect(wb.pendingSessionCount).toBe(2);
+    expect(wb.pendingEventCount).toBe(3);
+    await p.flush(); // 屏障排空全部
+    expect(wb.pendingSessionCount).toBe(0);
+    expect(wb.pendingEventCount).toBe(0);
+    // 事件确已落库（计数归零非丢弃）
+    expect(p.store.loadEvents(s1.header.sessionId)).toHaveLength(2);
+    expect(p.store.loadEvents(s2.header.sessionId)).toHaveLength(1);
+    await p.close();
+  });
+
+  it('onBatchLatency 打点：成功批回调一次带 sessionId/events；失败批零回调（纯测量成功路）', async () => {
+    const marks: Array<{ sessionId: string; events: number; ms: number }> = [];
+    const p = Persistence.open({ path: nextPath(), windowMs: 10_000, onBatchLatency: (info) => marks.push(info) });
+    const s = p.createSession({ cwd: '/t' });
+    s.append('user/message', { content: 'x' });
+    s.append('user/message', { content: 'y' });
+    await p.flush();
+    expect(marks).toHaveLength(1); // 单会话单批（per-session 串行链一次灌入）
+    expect(marks[0]!.sessionId).toBe(s.header.sessionId);
+    expect(marks[0]!.events).toBe(2);
+    expect(marks[0]!.ms).toBeGreaterThanOrEqual(0); // 纯测量——耗时非行为断言面
+    await p.close();
+  });
+});

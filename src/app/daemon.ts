@@ -14,12 +14,14 @@
  * - `stop`：SIGTERM → 轮询确认消失（缺省 30s 预算）→ SIGKILL 兜底 → 清
  *   daemon.json（API shutdown 端点明确否决——stop 权 > submit 权）。
  * - `status`：读 daemon.json + 真握手披露（pid/port/持有会话/清单条数）。
- * - `doctor`（刀二）：七项体检——①pid 判活 ②health+真握手（顺手连一次
+ * - `doctor`（刀二）：九项体检——①pid 判活 ②health+真握手（顺手连一次
  *   /api/events 即关——503 = 连接帽满）③token 在场且 0600（**判活时只读
  *   禁 ensure 写**——防诊断面自造不符态）④库 readonly 可开 ⑤log 大小
  *   （50 MiB 体检帽）
- *   ⑥运行 vs 磁上版本 ⑦判死时端口占用探测；僵尸态（pid 活+HTTP 面无响应）
- *   入查。全绿 0 / 任一项红 1。
+ *   ⑥运行 vs 磁上版本 ⑦判死时端口占用探测 ⑧write-behind 落盘闩态（基建
+ *   大扫 #27——health writeBehind.paused 即红；与 ② degraded 两独立信号
+ *   组合判读）⑨积压两数绿披露（阈值随保留策略判据制挂账）；僵尸态（pid
+ *   活+HTTP 面无响应）入查。全绿 0 / 任一项红 1。
  * - `--foreground`：前台常驻（launchd/systemd 监视直接子进程的唯一正确
  *   形态——自 fork 会双实例循环）。
  */
@@ -562,7 +564,7 @@ export async function daemonForegroundMain(port: number, deps: DaemonForegroundD
 }
 
 /* ------------------------------------------------------------------ */
-/* doctor 七项体检（刀二——`berry daemon doctor`，契约篇 §6.8）           */
+/* doctor 九项体检（刀二——`berry daemon doctor`，契约篇 §6.8）           */
 /* ------------------------------------------------------------------ */
 
 /** doctor 依赖注入（测试假面——探针/库文件/端口探测全可换） */
@@ -599,7 +601,7 @@ const defaultPortProbe = (port: number): Promise<boolean> =>
   });
 
 /**
- * daemon 七项体检主流程。序与语义（规范 :1020）：
+ * daemon 九项体检主流程。序与语义（规范 :1020）：
  * ① daemon.json 在场 + pid 判活（processStartId 匹配——防 pid 复用假阳）
  * ② 服务面：health 公开探活 + 活证真握手（**须 token 端点** 200；401 =
  *    盘上 token 与运行 daemon 持有不符——处置 = stop 后 start 重签发）
@@ -613,6 +615,12 @@ const defaultPortProbe = (port: number): Promise<boolean> =>
  * ⑥ 版本对齐：health.version vs 磁上 CLI（升级未重启的辨识面）
  * ⑦ 端口占用态：**仅判死路**探测（pid 死而端口有监听者 → 报占用 + lsof
  *    建议——另一进程顶号/双开竞窗）；僵尸态（pid 活 + HTTP 面无响应）入查
+ * ⑧ write-behind 落盘闩态（基建大扫 #27）：health 应答 writeBehind.paused
+ *    即红——与 ② degraded（cordon 组合根闩）两独立信号组合判读（degraded+
+ *    paused = 恒败中 / degraded+!paused = 已复流但 cordon 仍闩需重启解除
+ *    / !degraded+paused = 瞬态自愈中）；键缺席（旧版 daemon/无持久层）不红
+ * ⑨ 积压两数（writeBehind.sessions/events）：绿披露不转红——阈值与裁剪
+ *    策略随保留策略判据制挂账
  * @returns 进程退出码（全绿 0 / 任一项红 1 / 无 daemon.json 1）
  */
 export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
@@ -662,10 +670,10 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
   );
   // events 即连即关：200 = 流面正常；503 = 16 连接帽满（SPA/attach/监控尾堆积）
   const eventsStatus = await statusProbe(`http://127.0.0.1:${state.port}/api/events`, bearer, HANDSHAKE_TIMEOUT_MS);
-  let health: { version?: unknown; degraded?: unknown } | undefined;
+  let health: { version?: unknown; degraded?: unknown; writeBehind?: unknown } | undefined;
   if (healthRes !== undefined && healthRes.status === 200) {
     try {
-      health = JSON.parse(healthRes.body) as { version?: unknown; degraded?: unknown };
+      health = JSON.parse(healthRes.body) as { version?: unknown; degraded?: unknown; writeBehind?: unknown };
     } catch {
       health = undefined;
     }
@@ -796,11 +804,48 @@ export async function daemonDoctorMain(deps: DoctorDeps = {}): Promise<number> {
     }
   }
 
+  /* ---- ⑧ write-behind 落盘闩态 + ⑨ 积压披露（基建大扫 #27——② 的 health 应答消费） ---- */
+  // 数据源 = /api/health 的 writeBehind 键（本批新增）：键缺席 = 旧版 daemon
+  // 或无持久层形态——如实注记不转红（版本差异非故障）
+  const wbRaw = health?.writeBehind;
+  if (wbRaw === undefined || typeof wbRaw !== 'object' || wbRaw === null) {
+    findings.push({
+      ok: true,
+      text: '⑧ 落盘闩态：health 未携带 writeBehind（旧版 daemon 或无持久层形态——升级重启后可见）',
+    });
+  } else {
+    const wb = wbRaw as { paused?: unknown; sessions?: unknown; events?: unknown };
+    const paused = wb.paused === true;
+    // 闩态与 ② 的 degraded（cordon 组合根闩）两独立信号组合判读：
+    // - degraded + paused = 恒败中（批落仍失败且降级面已闩）
+    // - degraded + !paused = 已复流但 cordon 仍闩（闩死不自愈——重启处置，D6 语义）
+    // - !degraded + paused = 瞬态（成功即自愈复位；持续红查 daemon.log）
+    const pausedText =
+      degradedFlag !== undefined
+        ? paused
+          ? '恒败中（自动重试暂停且 cordon 已闩——查 daemon.log 的 write-behind error 行，处置：stop 后 start）'
+          : '已复流但 cordon 仍闩（数据完整性怀疑一次性闩不自动解除——处置：stop 后 start）'
+        : paused
+          ? '瞬态暂停（批落失败自动重试暂停中——任一批成功即自愈；持续红查 daemon.log 的 write-behind error 行）'
+          : '未闩（自动落盘正常）';
+    findings.push({
+      ok: !paused,
+      text: `⑧ 落盘闩态：${pausedText}`,
+    });
+    // 积压两数：绿披露不转红——阈值与裁剪策略随保留策略判据制挂账（技术栈篇）
+    const sessions = typeof wb.sessions === 'number' ? wb.sessions : 0;
+    const events = typeof wb.events === 'number' ? wb.events : 0;
+    findings.push({
+      ok: true,
+      text: `⑨ 积压：待写会话 ${sessions} / 事件 ${events}（瞬时窗口内为 0 属正常；paused 期间持续增长即积压事实）`,
+    });
+  }
+
   /* ---- 汇总披露 ---- */
   for (const finding of findings) {
     process.stdout.write(`${finding.ok ? '✓' : '✗'} ${finding.text}\n`);
   }
   const failed = findings.filter((finding) => !finding.ok).length;
-  process.stdout.write(failed === 0 ? 'doctor：七项全绿。\n' : `doctor：${failed} 项红（见 ✗ 行）。\n`);
+  process.stdout.write(failed === 0 ? 'doctor：九项全绿。\n' : `doctor：${failed} 项红（见 ✗ 行）。\n`);
   return failed === 0 ? 0 : 1;
 }

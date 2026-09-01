@@ -88,6 +88,13 @@ export interface UiBackend {
   select?(message: string, choices: readonly UiChoice[], opts?: UiAskOptions): Promise<string>;
   /** 自定义渲染槽（可选；不支持则聚合器降级为 notify） */
   setWidget?(node: unknown): void;
+  /**
+   * 观众自报（可选；基建大扫 #44）：后端比聚合器更清楚「有没有人可收」——
+   * TUI 不实现（缺省 = 在场即有观众）；webui 报在线连接数 > 0（常开零连接
+   * = 无观众）。非交互探针面——与 confirm/input 降级规则无关，不参与
+   * 「防抢审批」能力序（聚合器 hasAudience 按缺省真 some 聚合）。
+   */
+  hasAudience?(): boolean;
 }
 
 /** ctx.ui 聚合面（技术栈篇 §4.3 定稿清单；宿主聚合在线通道应答） */
@@ -105,9 +112,11 @@ export interface UiService {
   /** 自定义渲染槽（通道不识别则降级为 notify） */
   setWidget(node: unknown | null): void;
   /**
-   * 广播面在场探针（在线后端数 > 0——保守探针=在场非连通；2026-09-01 复盘
-   * R-2）：通知类消费方（obs 告警）判「有无观众」——无头进程（backends 空、
-   * notify 静默 no-op）不消耗告警冷却，daemon 常驻面下次 flush 重评重发。
+   * 观众探针（任一在线后端自报有观众——基建大扫 #44 修订 R-2 保守口径）：
+   * 探针语义 =「有人可收」非「通道在场」——后端可选自报 hasAudience()（TUI
+   * 缺省恒真、webui 报在线连接数 > 0、无后端即假）。通知类消费方（obs 告警）
+   * 据此判「有无观众」——无头进程（backends 空、notify 静默 no-op）与 daemon
+   * webui 常开零连接均不消耗告警冷却，下次重评重发。
    */
   hasAudience(): boolean;
   /** 通道后端接入/摘除（通道 start/stop 时调用；返回摘除器） */

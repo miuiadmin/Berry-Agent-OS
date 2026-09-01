@@ -18,6 +18,12 @@ export interface WriteBehindOptions {
   windowMs?: number;
   /** 失败后的错误上报通道（可选；响亮失败的可观测出口） */
   onError?: (error: AppError) => void;
+  /**
+   * 批落延迟打点（可选；基建大扫 #27——纯测量非执法，装载分区计时同款
+   * 先例）：每批成功落盘后回调一次（批大小与耗时毫秒）。消费方自行定级
+   * （组合根接 debug 档）；不传 = 零开销。
+   */
+  onBatchLatency?: (info: { sessionId: string; events: number; ms: number }) => void;
 }
 
 /**
@@ -31,6 +37,8 @@ export class WriteBehind {
   private readonly incarnation: string;
   private readonly windowMs: number;
   private readonly onError?: (error: AppError) => void;
+  /** 批落延迟打点（#27——每批成功后回调；测量面与执法面分离） */
+  private readonly onBatchLatency?: (info: { sessionId: string; events: number; ms: number }) => void;
   /** 待落盘批次（sessionId → 有序事件队列；失败后保留即「保留批次」） */
   private readonly pending = new Map<string, SessionEvent[]>();
   /** 会话登记素材表（首事件时填充；sessions 行以首次登记为准） */
@@ -47,6 +55,7 @@ export class WriteBehind {
     this.incarnation = incarnation;
     this.windowMs = options.windowMs ?? 200;
     this.onError = options.onError;
+    this.onBatchLatency = options.onBatchLatency;
   }
 
   /**
@@ -162,6 +171,7 @@ export class WriteBehind {
   /** 实际写批：失败 = 保留批次 + 暂停自动重试 + 响亮上报；成功 = 复位暂停并灌积压 */
   private async writeBatch(sessionId: string, batch: SessionEvent[]): Promise<void> {
     const reg = this.registrations.get(sessionId)!;
+    const beganAt = performance.now(); // 批落延迟打点起点（#27——成功路终点回读）
     try {
       this.store.appendCore(reg, batch, this.incarnation);
     } catch (cause) {
@@ -217,11 +227,33 @@ export class WriteBehind {
       this.paused = false;
       this.drainAll();
     }
+    // 批落延迟打点（#27）：成功路的纯测量——消费方自行定级，本类零解释
+    this.onBatchLatency?.({ sessionId, events: batch.length, ms: performance.now() - beganAt });
   }
 
   /** 是否暂停中（诊断用） */
   get isPaused(): boolean {
     return this.paused;
+  }
+
+  /**
+   * 待写积压会话数（诊断披露，基建大扫 #27）：pending Map 的键数 = 已确认待写
+   * （含失败保留批）的会话数。在飞批次（已灌 chain 未落盘）不计——200ms 窗口
+   * 内的瞬态，非医疗信号；paused 恒败时此数持续增长才是积压事实。
+   */
+  get pendingSessionCount(): number {
+    return this.pending.size;
+  }
+
+  /**
+   * 待写积压事件数（诊断披露，#27）：pending Map 全部队列长度之和。health 载荷
+   * 的 writeBehind.events 数据源——绿披露不转红（阈值与裁剪策略挂账保留策略
+   * 判据制）。
+   */
+  get pendingEventCount(): number {
+    let total = 0;
+    for (const queue of this.pending.values()) total += queue.length;
+    return total;
   }
 
   /** 关停屏障：即使 paused 也做最后一次落盘尝试（关停是最后机会；失败向上抛由关停序列定夺） */

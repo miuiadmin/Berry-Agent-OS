@@ -661,6 +661,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
             error: err.message,
           });
         },
+        // 批落延迟打点（基建大扫 #27——纯测量非执法，装载分区计时同款先例）：
+        // debug 档留痕批大小与耗时，吞吐回归排查面；不构成任何执法判据
+        onBatchLatency: (info) => {
+          ctx.logger.debug('write-behind 批落延迟', {
+            sessionId: info.sessionId,
+            events: info.events,
+            ms: Math.round(info.ms),
+          });
+        },
       })
     : undefined;
 
@@ -1629,6 +1638,15 @@ export async function createRuntime(opts: RuntimeOptions = {}): Promise<AppRunti
       subagentFactory: subagentChildFactory,
       ui: () => ui,
       cordoned: () => cordoned,
+      // write-behind 运行态活取值（基建大扫 #27）：health writeBehind 键数据源
+      // ——闩态 + 积压两数活取（闩红积绿；无持久层 = undefined 键缺席）
+      writeBehindStats: persistence
+        ? () => ({
+            paused: persistence.writeBehind.isPaused,
+            sessions: persistence.writeBehind.pendingSessionCount,
+            events: persistence.writeBehind.pendingEventCount,
+          })
+        : undefined,
       mountApprovalClaim: (mount) => {
         approvalFace = mount;
         return () => {

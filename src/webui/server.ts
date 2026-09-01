@@ -263,11 +263,14 @@ async function route(
   if (pathname === '/api/health' && req.method === 'GET') {
     // 公开探活（M4 ①：无 token 可达——「活证」须 token 端点真握手，两语义
     // 分立）；cordon 降级披露（D6：ok 仍 true〔进程活〕+ degraded 字段——
-    // durable 落盘失败降级态对 operator 可见）
+    // durable 落盘失败降级态对 operator 可见）；write-behind 运行态披露
+    // （基建大扫 #27：闩态 + 积压两数——闩红积绿两独立判读，消费方 doctor
+    // ⑧⑨；deps 未传 = 无持久层诊断形态，键缺席）
     sendJson(res, 200, {
       ok: true,
       version: opts.version,
       ...(opts.deps.cordoned?.() === true ? { degraded: 'persistence' } : {}),
+      ...(opts.deps.writeBehindStats ? { writeBehind: opts.deps.writeBehindStats() } : {}),
     });
     return;
   }

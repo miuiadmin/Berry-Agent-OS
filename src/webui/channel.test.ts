@@ -114,7 +114,7 @@ describe('WebuiChannel：广播与三族 sink', () => {
     channel.dispose();
   });
 
-  it('backend 能力面钉死：id/notify/setStatus 在场，confirm 等缺席', () => {
+  it('backend 能力面钉死：id/notify/setStatus 在场，confirm 等缺席；hasAudience 随连接数（#44）', () => {
     const channel = new WebuiChannel();
     expect(channel.backend.id).toBe('webui');
     expect(channel.backend.notify).toBeTypeOf('function');
@@ -122,6 +122,12 @@ describe('WebuiChannel：广播与三族 sink', () => {
     expect('confirm' in channel.backend).toBe(false);
     expect('input' in channel.backend).toBe(false);
     expect('select' in channel.backend).toBe(false);
+    // 观众探针（基建大扫 #44）：自报在线连接数——零连接 = 无观众（daemon webui
+    // 常开零连接时 obs 告警不耗冷却；连接在线即有观众）
+    expect(channel.backend.hasAudience).toBeTypeOf('function');
+    expect(channel.backend.hasAudience!()).toBe(false);
+    channel.register(fakeRes());
+    expect(channel.backend.hasAudience!()).toBe(true);
     // notify 带 level 时并入载荷
     const res = fakeRes();
     channel.register(res);
